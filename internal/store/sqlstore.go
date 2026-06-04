@@ -470,6 +470,16 @@ func (s *SQLStore) ListProviderConfigs(ctx context.Context) ([]ProviderConfig, e
 	return result, rows.Err()
 }
 
+// DeleteProvider deletes a provider by name. Returns true if a row was actually deleted.
+func (s *SQLStore) DeleteProvider(ctx context.Context, name string) (bool, error) {
+	res, err := s.db.ExecContext(ctx, s.bind(`DELETE FROM provider_configs WHERE name = ?`), name)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
+}
+
 func (s *SQLStore) InsertAdminAudit(ctx context.Context, log AdminAuditLog) error {
 	if log.CreatedAt.IsZero() {
 		log.CreatedAt = time.Now().UTC()

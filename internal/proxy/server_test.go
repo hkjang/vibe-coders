@@ -286,6 +286,41 @@ func TestProviderHeaderRoutesToConfiguredProvider(t *testing.T) {
 	if len(logs) == 0 || logs[0].Action != "provider.upsert" {
 		t.Fatalf("expected provider upsert audit log, got %#v", logs)
 	}
+
+	// DELETE /admin/providers/alt
+	reqDel, err := http.NewRequest(http.MethodDelete, proxy.URL+"/admin/providers/alt", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reqDel.Header.Set("Authorization", "Bearer default-secret")
+	respDel, err := http.DefaultClient.Do(reqDel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer respDel.Body.Close()
+	if respDel.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(respDel.Body)
+		t.Fatalf("expected delete provider status 200, got %d: %s", respDel.StatusCode, body)
+	}
+
+	// DELETE again should return 404
+	respDelAgain, err := http.DefaultClient.Do(reqDel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer respDelAgain.Body.Close()
+	if respDelAgain.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected delete provider status 404 after deletion, got %d", respDelAgain.StatusCode)
+	}
+
+	// Verify delete audit log
+	logsDel, err := db.ListAdminAudit(context.Background(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(logsDel) < 2 || logsDel[0].Action != "provider.delete" {
+		t.Fatalf("expected provider.delete audit log at top, got %#v", logsDel)
+	}
 }
 
 func openTestStore(t *testing.T) *store.SQLStore {

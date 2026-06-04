@@ -119,6 +119,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/admin/api-keys", s.handleAPIKeys)
 	mux.HandleFunc("/admin/api-keys/", s.handleAPIKeyByID)
 	mux.HandleFunc("/admin/providers", s.handleProviders)
+	mux.HandleFunc("/admin/providers/", s.handleProviderByName)
 	mux.HandleFunc("/admin/audit-logs", s.handleAuditLogs)
 	mux.HandleFunc("/admin/users", s.handleUsers)
 	mux.HandleFunc("/admin/users/", s.handleUserDetail)
@@ -420,6 +421,39 @@ func (s *Server) handleProviders(w http.ResponseWriter, r *http.Request) {
 				"model_patterns":     provider.ModelPatterns,
 			},
 		})
+	default:
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+	}
+}
+
+func (s *Server) handleProviderByName(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	name := strings.TrimPrefix(r.URL.Path, "/admin/providers/")
+	if name == "" || strings.Contains(name, "/") {
+		writeOpenAIError(w, http.StatusBadRequest, "invalid provider name", "invalid_request_error", "invalid_provider_name")
+		return
+	}
+	switch r.Method {
+	case http.MethodDelete:
+		before, found, _ := s.db.GetProvider(r.Context(), name)
+		if !found {
+			writeOpenAIError(w, http.StatusNotFound, "provider not found: "+name, "invalid_request_error", "provider_not_found")
+			return
+		}
+		deleted, err := s.db.DeleteProvider(r.Context(), name)
+		if err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "provider_delete_failed")
+			return
+		}
+		if !deleted {
+			writeOpenAIError(w, http.StatusNotFound, "provider not found: "+name, "invalid_request_error", "provider_not_found")
+			return
+		}
+		s.auditAdmin(r, "provider.delete", providerAuditJSON(before), "")
+		writeJSON(w, http.StatusOK, map[string]string{"deleted": name})
 	default:
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
 	}
