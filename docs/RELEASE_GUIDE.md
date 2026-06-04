@@ -185,25 +185,28 @@ gh auth status
 ### 6.2 릴리즈 생성 & 파일 업로드
 
 ```powershell
-pwsh -File scripts/gh_release.ps1
+# 스크립트를 사용하여 릴리즈 업로드
+pwsh -File scripts/gh_release.ps1 -Version v0.1.1
 ```
 
-또는 직접 명령어로 실행:
+또는 직접 명령어로 실행 (릴리즈 노트 파일을 사용하는 것이 Windows 환경 등에서 파싱 구문 오류를 방지하기에 좋습니다):
 
 ```bash
-gh release create v0.1.0 \
-  "release/ai-coding-proxy-gateway-v0.1.0.tar.gz" \
-  "release/ai-coding-proxy-gateway-v0.1.0.tar.gz.sha256" \
-  "release/README-offline-v0.1.0.md" \
+# 1. 릴리즈 노트 파일 작성 (release/release-notes.txt)
+# 2. 릴리즈 생성 명령어 실행
+gh release create v0.1.1 \
+  "release/ai-coding-proxy-gateway-v0.1.1.tar.gz" \
+  "release/ai-coding-proxy-gateway-v0.1.1.tar.gz.sha256" \
+  "release/README-offline-v0.1.1.md" \
   --repo hkjang/vibe-coders \
-  --title "v0.1.0 - AI Coding Proxy Gateway" \
-  --notes "릴리즈 노트 내용"
+  --title "v0.1.1 - AI Coding Proxy Gateway" \
+  --notes-file "release/release-notes.txt"
 ```
 
 ### 6.3 릴리즈 확인
 
 ```powershell
-gh release view v0.1.0 --repo hkjang/vibe-coders
+gh release view v0.1.1 --repo hkjang/vibe-coders
 ```
 
 또는 브라우저에서 직접 확인:
