@@ -1,0 +1,12 @@
+.env
+data/
+release/
+*.db
+*.sqlite
+*.sqlite3
+*.tar
+*.tar.gz
+gateway.exe
+coverage.out
+.playwright-mcp/
+.gocache/

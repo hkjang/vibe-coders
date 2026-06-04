@@ -1,0 +1,66 @@
+# Vibe Code ignore — 컨텍스트/임베딩에서 자동 제외
+# 워크스페이스 루트의 .vibeignore 가 자동 적용됩니다.
+
+# === 일반 비밀 ===
+.env
+.env.*
+*.pem
+*.key
+*.crt
+*.pfx
+*.p12
+id_rsa
+id_rsa.pub
+id_ed25519
+id_ed25519.pub
+*.keystore
+secrets.json
+credentials.json
+.netrc
+
+# === 클라우드 자격증명 ===
+.aws/credentials
+.gcp/credentials.json
+.azure/credentials
+firebase-adminsdk-*.json
+service-account-*.json
+
+# === IDE / 빌드 산출물 ===
+node_modules/
+dist/
+build/
+out/
+.next/
+.nuxt/
+target/
+__pycache__/
+*.pyc
+.gradle/
+.idea/
+.vscode/settings.json
+
+# === 한국 특화 민감 정보 ===
+# 주민등록번호/사업자등록번호/카드번호가 들어있을 가능성 높은 파일
+*.민감
+주민번호*.txt
+회원정보*.csv
+고객정보*.csv
+개인정보*.xlsx
+*-real-customers*.csv
+*-prod-users*.json
+
+# === 로그 / 캐시 ===
+*.log
+*.log.*
+logs/
+.cache/
+tmp/
+.tmp/
+
+# === DB / 데이터 ===
+*.sqlite
+*.sqlite3
+*.db
+dump.sql
+*-dump.sql
+backup-*.tar.gz

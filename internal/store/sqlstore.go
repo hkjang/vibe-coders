@@ -1,0 +1,1011 @@
+package store
+
+import (
+	"context"
+	"database/sql"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/jackc/pgx/v5/stdlib"
+	_ "modernc.org/sqlite"
+
+	"vibe-coders/internal/config"
+)
+
+type SQLStore struct {
+	db      *sql.DB
+	dialect string
+}
+
+func Open(ctx context.Context, cfg config.DatabaseConfig) (*SQLStore, error) {
+	driver := strings.ToLower(cfg.Driver)
+	dsn := cfg.DSN
+	if driver == "" {
+		driver = "sqlite"
+	}
+	if driver == "postgresql" {
+		driver = "postgres"
+	}
+	if driver == "sqlite" {
+		if dsn == "" {
+			dsn = filepath.Join("data", "gateway.db")
+		}
+		if err := os.MkdirAll(filepath.Dir(dsn), 0o755); err != nil {
+			return nil, err
+		}
+	} else if driver != "postgres" {
+		return nil, fmt.Errorf("unsupported database driver %q", cfg.Driver)
+	}
+
+	sqlDriver := driver
+	if driver == "postgres" {
+		sqlDriver = "pgx"
+		stdlib.GetDefaultDriver()
+	}
+
+	db, err := sql.Open(sqlDriver, dsn)
+	if err != nil {
+		return nil, err
+	}
+	db.SetMaxOpenConns(25)
+	db.SetMaxIdleConns(5)
+	db.SetConnMaxLifetime(30 * time.Minute)
+	if driver == "sqlite" {
+		db.SetMaxOpenConns(1)
+	}
+
+	if err := db.PingContext(ctx); err != nil {
+		db.Close()
+		return nil, err
+	}
+
+	return &SQLStore{db: db, dialect: driver}, nil
+}
+
+func (s *SQLStore) Close() error {
+	return s.db.Close()
+}
+
+func (s *SQLStore) Ping(ctx context.Context) error {
+	return s.db.PingContext(ctx)
+}
+
+func (s *SQLStore) Migrate(ctx context.Context) error {
+	statements := []string{
+		`CREATE TABLE IF NOT EXISTS api_keys (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			key_hash TEXT NOT NULL UNIQUE,
+			owner TEXT,
+			team TEXT,
+			status TEXT NOT NULL,
+			created_at TEXT NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS request_logs (
+			id TEXT PRIMARY KEY,
+			trace_id TEXT NOT NULL,
+			api_key_id TEXT,
+			client_ip TEXT,
+			forwarded_for TEXT,
+			user_agent TEXT,
+			hostname TEXT,
+			model TEXT,
+			endpoint TEXT NOT NULL,
+			stream INTEGER NOT NULL,
+			provider TEXT,
+			status_code INTEGER NOT NULL,
+			latency_ms INTEGER NOT NULL,
+			first_chunk_ms INTEGER NOT NULL DEFAULT 0,
+			session_id TEXT,
+			prompt_name TEXT,
+			prompt_version TEXT,
+			prompt_variables_hash TEXT,
+			tool_count INTEGER NOT NULL DEFAULT 0,
+			error TEXT,
+			request_hash TEXT,
+			body_raw TEXT,
+			replay_of TEXT,
+			created_at TEXT NOT NULL
+		)`,
+		// Idempotent ALTERs for legacy installations of request_logs
+		`ALTER TABLE request_logs ADD COLUMN body_raw TEXT`,
+		`ALTER TABLE request_logs ADD COLUMN replay_of TEXT`,
+		`ALTER TABLE request_logs ADD COLUMN first_chunk_ms INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE request_logs ADD COLUMN session_id TEXT`,
+		`ALTER TABLE request_logs ADD COLUMN prompt_name TEXT`,
+		`ALTER TABLE request_logs ADD COLUMN prompt_version TEXT`,
+		`ALTER TABLE request_logs ADD COLUMN prompt_variables_hash TEXT`,
+		`ALTER TABLE request_logs ADD COLUMN tool_count INTEGER NOT NULL DEFAULT 0`,
+		`CREATE INDEX IF NOT EXISTS idx_request_logs_created_at ON request_logs(created_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_request_logs_client_ip ON request_logs(client_ip)`,
+		`CREATE INDEX IF NOT EXISTS idx_request_logs_model ON request_logs(model)`,
+		`CREATE INDEX IF NOT EXISTS idx_request_logs_session_id ON request_logs(session_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_request_logs_prompt_name ON request_logs(prompt_name)`,
+		`CREATE TABLE IF NOT EXISTS prompt_logs (
+			id TEXT PRIMARY KEY,
+			request_id TEXT NOT NULL,
+			role TEXT NOT NULL,
+			content_hash TEXT NOT NULL,
+			content_text TEXT,
+			redacted_text TEXT,
+			language_hint TEXT,
+			created_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_prompt_logs_request_id ON prompt_logs(request_id)`,
+		`CREATE TABLE IF NOT EXISTS response_logs (
+			id TEXT PRIMARY KEY,
+			request_id TEXT NOT NULL,
+			status_code INTEGER NOT NULL,
+			finish_reason TEXT,
+			response_hash TEXT,
+			response_text_optional TEXT,
+			created_at TEXT NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS token_usage (
+			id TEXT PRIMARY KEY,
+			request_id TEXT NOT NULL,
+			prompt_tokens INTEGER NOT NULL,
+			completion_tokens INTEGER NOT NULL,
+			total_tokens INTEGER NOT NULL,
+			cached_tokens INTEGER NOT NULL DEFAULT 0,
+			reasoning_tokens INTEGER NOT NULL DEFAULT 0,
+			estimated_cost REAL NOT NULL,
+			currency TEXT NOT NULL,
+			source TEXT NOT NULL,
+			created_at TEXT NOT NULL
+		)`,
+		// Idempotent ALTERs for legacy installations of token_usage
+		`ALTER TABLE token_usage ADD COLUMN cached_tokens INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE token_usage ADD COLUMN reasoning_tokens INTEGER NOT NULL DEFAULT 0`,
+		`CREATE INDEX IF NOT EXISTS idx_token_usage_request_id ON token_usage(request_id)`,
+		`CREATE TABLE IF NOT EXISTS language_stats (
+			id TEXT PRIMARY KEY,
+			request_id TEXT NOT NULL,
+			language TEXT NOT NULL,
+			confidence REAL NOT NULL,
+			evidence TEXT,
+			created_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_language_stats_language ON language_stats(language)`,
+		`CREATE TABLE IF NOT EXISTS llm_evaluations (
+			id TEXT PRIMARY KEY,
+			request_id TEXT NOT NULL,
+			trace_id TEXT NOT NULL,
+			name TEXT NOT NULL,
+			category TEXT NOT NULL,
+			evaluator TEXT NOT NULL,
+			score REAL NOT NULL,
+			label TEXT NOT NULL,
+			passed INTEGER NOT NULL,
+			reason TEXT,
+			metadata TEXT,
+			created_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_llm_evaluations_request_id ON llm_evaluations(request_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_llm_evaluations_name ON llm_evaluations(name)`,
+		`CREATE INDEX IF NOT EXISTS idx_llm_evaluations_created_at ON llm_evaluations(created_at)`,
+		`CREATE TABLE IF NOT EXISTS provider_configs (
+			name TEXT PRIMARY KEY,
+			base_url TEXT NOT NULL,
+			encrypted_api_key TEXT,
+			timeout_ms INTEGER NOT NULL,
+			enabled INTEGER NOT NULL,
+			model_patterns TEXT,
+			created_at TEXT NOT NULL
+		)`,
+		// Idempotent ALTERs for legacy installations of provider_configs
+		`ALTER TABLE provider_configs ADD COLUMN model_patterns TEXT`,
+		`CREATE TABLE IF NOT EXISTS admin_audit_logs (
+			id TEXT PRIMARY KEY,
+			admin_id TEXT,
+			action TEXT NOT NULL,
+			before_value TEXT,
+			after_value TEXT,
+			created_at TEXT NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS quotas (
+			id TEXT PRIMARY KEY,
+			scope TEXT NOT NULL,
+			scope_value TEXT NOT NULL,
+			period TEXT NOT NULL,
+			token_limit INTEGER NOT NULL,
+			krw_limit REAL NOT NULL,
+			enabled INTEGER NOT NULL,
+			note TEXT,
+			created_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_quotas_scope ON quotas(scope, scope_value)`,
+		`CREATE INDEX IF NOT EXISTS idx_request_logs_api_key_id ON request_logs(api_key_id)`,
+		`CREATE TABLE IF NOT EXISTS runtime_flags (
+			key TEXT PRIMARY KEY,
+			value TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			updated_by TEXT,
+			note TEXT
+		)`,
+		`CREATE TABLE IF NOT EXISTS alert_rules (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			metric TEXT NOT NULL,
+			window_seconds INTEGER NOT NULL,
+			threshold REAL NOT NULL,
+			scope TEXT NOT NULL,
+			scope_value TEXT NOT NULL,
+			webhook_url TEXT,
+			enabled INTEGER NOT NULL,
+			note TEXT,
+			created_at TEXT NOT NULL,
+			last_fired_at TEXT,
+			last_value REAL
+		)`,
+		`CREATE TABLE IF NOT EXISTS alert_events (
+			id TEXT PRIMARY KEY,
+			rule_id TEXT NOT NULL,
+			rule_name TEXT NOT NULL,
+			metric TEXT NOT NULL,
+			value REAL NOT NULL,
+			threshold REAL NOT NULL,
+			delivered INTEGER NOT NULL,
+			delivery_error TEXT,
+			created_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_alert_events_created_at ON alert_events(created_at)`,
+		`CREATE TABLE IF NOT EXISTS embedding_cache (
+			cache_key TEXT PRIMARY KEY,
+			model TEXT NOT NULL,
+			content_type TEXT NOT NULL,
+			response_body BLOB NOT NULL,
+			hits INTEGER NOT NULL DEFAULT 0,
+			byte_size INTEGER NOT NULL,
+			created_at TEXT NOT NULL,
+			expires_at TEXT NOT NULL,
+			last_hit_at TEXT
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_embedding_cache_expires ON embedding_cache(expires_at)`,
+		`CREATE TABLE IF NOT EXISTS request_notes (
+			request_id TEXT PRIMARY KEY,
+			tags TEXT,
+			note TEXT,
+			created_by TEXT,
+			updated_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_request_notes_tags ON request_notes(tags)`,
+		`CREATE TABLE IF NOT EXISTS saved_filters (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			view TEXT NOT NULL,
+			params TEXT NOT NULL,
+			created_by TEXT,
+			created_at TEXT NOT NULL
+		)`,
+	}
+
+	for _, statement := range statements {
+		if _, err := s.db.ExecContext(ctx, statement); err != nil {
+			if isAlreadyExistsErr(err) {
+				continue
+			}
+			return err
+		}
+	}
+	return nil
+}
+
+// isAlreadyExistsErr swallows the "duplicate column name" / "column already exists"
+// errors that ALTER TABLE ADD COLUMN emits when the column was already created on a
+// previous run. Both SQLite (modernc.org/sqlite) and pgx surface it with these strings.
+func isAlreadyExistsErr(err error) bool {
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "duplicate column") ||
+		strings.Contains(msg, "already exists") ||
+		strings.Contains(msg, "duplicate_column")
+}
+
+func (s *SQLStore) ListAPIKeys(ctx context.Context) ([]APIKeyPublic, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id, name, COALESCE(owner, ''), COALESCE(team, ''), status, created_at
+		FROM api_keys
+		ORDER BY created_at DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []APIKeyPublic
+	for rows.Next() {
+		var key APIKeyPublic
+		if err := rows.Scan(&key.ID, &key.Name, &key.Owner, &key.Team, &key.Status, &key.CreatedAt); err != nil {
+			return nil, err
+		}
+		result = append(result, key)
+	}
+	if result == nil {
+		result = []APIKeyPublic{}
+	}
+	return result, rows.Err()
+}
+
+func (s *SQLStore) UpsertAPIKey(ctx context.Context, key APIKeyRecord) error {
+	if key.CreatedAt.IsZero() {
+		key.CreatedAt = time.Now().UTC()
+	}
+	if key.Status == "" {
+		key.Status = "active"
+	}
+	query := s.bind(`INSERT INTO api_keys (id, name, key_hash, owner, team, status, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+			name = excluded.name,
+			key_hash = excluded.key_hash,
+			owner = excluded.owner,
+			team = excluded.team,
+			status = excluded.status`)
+	_, err := s.db.ExecContext(ctx, query, key.ID, key.Name, key.KeyHash, key.Owner, key.Team, key.Status, formatTime(key.CreatedAt))
+	return err
+}
+
+func (s *SQLStore) FindActiveAPIKeyByHash(ctx context.Context, keyHash string) (APIKeyRecord, bool, error) {
+	var key APIKeyRecord
+	var createdAt string
+	err := s.db.QueryRowContext(ctx, s.bind(`SELECT id, name, key_hash, COALESCE(owner, ''), COALESCE(team, ''), status, created_at
+		FROM api_keys
+		WHERE key_hash = ? AND status = 'active'`), keyHash).Scan(&key.ID, &key.Name, &key.KeyHash, &key.Owner, &key.Team, &key.Status, &createdAt)
+	if err == sql.ErrNoRows {
+		return APIKeyRecord{}, false, nil
+	}
+	if err != nil {
+		return APIKeyRecord{}, false, err
+	}
+	if parsed, err := time.Parse(time.RFC3339Nano, createdAt); err == nil {
+		key.CreatedAt = parsed
+	}
+	return key, true, nil
+}
+
+func (s *SQLStore) HasActiveAPIKeys(ctx context.Context) (bool, error) {
+	var count int
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM api_keys WHERE status = 'active'`).Scan(&count); err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
+func (s *SQLStore) SetAPIKeyStatus(ctx context.Context, id string, status string) error {
+	_, err := s.db.ExecContext(ctx, s.bind(`UPDATE api_keys SET status = ? WHERE id = ?`), status, id)
+	return err
+}
+
+func (s *SQLStore) UpsertProvider(ctx context.Context, provider ProviderConfig) error {
+	if provider.CreatedAt.IsZero() {
+		provider.CreatedAt = time.Now().UTC()
+	}
+	query := s.bind(`INSERT INTO provider_configs (name, base_url, encrypted_api_key, timeout_ms, enabled, model_patterns, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(name) DO UPDATE SET
+			base_url = excluded.base_url,
+			encrypted_api_key = excluded.encrypted_api_key,
+			timeout_ms = excluded.timeout_ms,
+			enabled = excluded.enabled,
+			model_patterns = excluded.model_patterns`)
+	_, err := s.db.ExecContext(ctx, query, provider.Name, provider.BaseURL, provider.EncryptedAPIKey, provider.TimeoutMS, boolInt(provider.Enabled), provider.ModelPatterns, formatTime(provider.CreatedAt))
+	return err
+}
+
+func (s *SQLStore) GetProvider(ctx context.Context, name string) (ProviderConfig, bool, error) {
+	var provider ProviderConfig
+	var enabled int
+	var createdAt string
+	var modelPatterns sql.NullString
+	err := s.db.QueryRowContext(ctx, s.bind(`SELECT name, base_url, COALESCE(encrypted_api_key, ''), timeout_ms, enabled, model_patterns, created_at
+		FROM provider_configs
+		WHERE name = ?`), name).Scan(&provider.Name, &provider.BaseURL, &provider.EncryptedAPIKey, &provider.TimeoutMS, &enabled, &modelPatterns, &createdAt)
+	if err == sql.ErrNoRows {
+		return ProviderConfig{}, false, nil
+	}
+	if err != nil {
+		return ProviderConfig{}, false, err
+	}
+	provider.Enabled = enabled == 1
+	provider.ModelPatterns = modelPatterns.String
+	if parsed, err := time.Parse(time.RFC3339Nano, createdAt); err == nil {
+		provider.CreatedAt = parsed
+	}
+	return provider, true, nil
+}
+
+func (s *SQLStore) ListProviders(ctx context.Context) ([]ProviderPublic, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT name, base_url, COALESCE(encrypted_api_key, ''), timeout_ms, enabled, COALESCE(model_patterns, ''), created_at
+		FROM provider_configs
+		ORDER BY name ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []ProviderPublic
+	for rows.Next() {
+		var provider ProviderPublic
+		var encryptedAPIKey string
+		var enabled int
+		if err := rows.Scan(&provider.Name, &provider.BaseURL, &encryptedAPIKey, &provider.TimeoutMS, &enabled, &provider.ModelPatterns, &provider.CreatedAt); err != nil {
+			return nil, err
+		}
+		provider.APIKeyConfigured = encryptedAPIKey != ""
+		provider.Enabled = enabled == 1
+		result = append(result, provider)
+	}
+	if result == nil {
+		result = []ProviderPublic{}
+	}
+	return result, rows.Err()
+}
+
+// ListProviderConfigs returns the full provider rows (with model_patterns) used by the
+// routing layer. Caller is responsible for decrypting api keys via the secret cipher.
+func (s *SQLStore) ListProviderConfigs(ctx context.Context) ([]ProviderConfig, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT name, base_url, COALESCE(encrypted_api_key, ''), timeout_ms, enabled, COALESCE(model_patterns, ''), created_at
+		FROM provider_configs
+		WHERE enabled = 1
+		ORDER BY name ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result []ProviderConfig
+	for rows.Next() {
+		var p ProviderConfig
+		var enabled int
+		var createdAt string
+		if err := rows.Scan(&p.Name, &p.BaseURL, &p.EncryptedAPIKey, &p.TimeoutMS, &enabled, &p.ModelPatterns, &createdAt); err != nil {
+			return nil, err
+		}
+		p.Enabled = enabled == 1
+		if parsed, err := time.Parse(time.RFC3339Nano, createdAt); err == nil {
+			p.CreatedAt = parsed
+		}
+		result = append(result, p)
+	}
+	return result, rows.Err()
+}
+
+func (s *SQLStore) InsertAdminAudit(ctx context.Context, log AdminAuditLog) error {
+	if log.CreatedAt.IsZero() {
+		log.CreatedAt = time.Now().UTC()
+	}
+	_, err := s.db.ExecContext(ctx, s.bind(`INSERT INTO admin_audit_logs (id, admin_id, action, before_value, after_value, created_at)
+		VALUES (?, ?, ?, ?, ?, ?)`), log.ID, log.AdminID, log.Action, log.BeforeValue, log.AfterValue, formatTime(log.CreatedAt))
+	return err
+}
+
+func (s *SQLStore) ListAdminAudit(ctx context.Context, limit int) ([]AdminAuditPublic, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 200 {
+		limit = 200
+	}
+	rows, err := s.db.QueryContext(ctx, s.bind(`SELECT id, COALESCE(admin_id, ''), action, COALESCE(before_value, ''), COALESCE(after_value, ''), created_at
+		FROM admin_audit_logs
+		ORDER BY created_at DESC
+		LIMIT ?`), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []AdminAuditPublic
+	for rows.Next() {
+		var log AdminAuditPublic
+		if err := rows.Scan(&log.ID, &log.AdminID, &log.Action, &log.BeforeValue, &log.AfterValue, &log.CreatedAt); err != nil {
+			return nil, err
+		}
+		result = append(result, log)
+	}
+	if result == nil {
+		result = []AdminAuditPublic{}
+	}
+	return result, rows.Err()
+}
+
+func (s *SQLStore) InsertLogRecord(ctx context.Context, record LogRecord) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	req := record.Request
+	if req.CreatedAt.IsZero() {
+		req.CreatedAt = time.Now().UTC()
+	}
+	_, err = tx.ExecContext(ctx, s.bind(`INSERT INTO request_logs
+		(id, trace_id, api_key_id, client_ip, forwarded_for, user_agent, hostname, model, endpoint, stream, provider, status_code, latency_ms, first_chunk_ms, session_id, prompt_name, prompt_version, prompt_variables_hash, tool_count, error, request_hash, body_raw, replay_of, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+		req.ID, req.TraceID, req.APIKeyID, req.ClientIP, req.ForwardedFor, req.UserAgent, req.Hostname, req.Model, req.Endpoint, boolInt(req.Stream), req.Provider, req.StatusCode, req.LatencyMS, req.FirstChunkMS, req.SessionID, req.PromptName, req.PromptVersion, req.PromptVariablesHash, req.ToolCount, req.Error, req.RequestHash, req.BodyRaw, req.ReplayOf, formatTime(req.CreatedAt))
+	if err != nil {
+		return err
+	}
+
+	for _, prompt := range record.Prompts {
+		if prompt.CreatedAt.IsZero() {
+			prompt.CreatedAt = req.CreatedAt
+		}
+		_, err = tx.ExecContext(ctx, s.bind(`INSERT INTO prompt_logs
+			(id, request_id, role, content_hash, content_text, redacted_text, language_hint, created_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`),
+			prompt.ID, prompt.RequestID, prompt.Role, prompt.ContentHash, prompt.ContentText, prompt.RedactedText, prompt.LanguageHint, formatTime(prompt.CreatedAt))
+		if err != nil {
+			return err
+		}
+	}
+
+	if record.Response != nil {
+		resp := record.Response
+		if resp.CreatedAt.IsZero() {
+			resp.CreatedAt = req.CreatedAt
+		}
+		_, err = tx.ExecContext(ctx, s.bind(`INSERT INTO response_logs
+			(id, request_id, status_code, finish_reason, response_hash, response_text_optional, created_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?)`),
+			resp.ID, resp.RequestID, resp.StatusCode, resp.FinishReason, resp.ResponseHash, resp.ResponseTextOptional, formatTime(resp.CreatedAt))
+		if err != nil {
+			return err
+		}
+	}
+
+	if record.Usage != nil {
+		usage := record.Usage
+		if usage.CreatedAt.IsZero() {
+			usage.CreatedAt = req.CreatedAt
+		}
+		_, err = tx.ExecContext(ctx, s.bind(`INSERT INTO token_usage
+			(id, request_id, prompt_tokens, completion_tokens, total_tokens, cached_tokens, reasoning_tokens, estimated_cost, currency, source, created_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+			usage.ID, usage.RequestID, usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens, usage.CachedTokens, usage.ReasoningTokens, usage.EstimatedCost, usage.Currency, usage.Source, formatTime(usage.CreatedAt))
+		if err != nil {
+			return err
+		}
+	}
+
+	for _, language := range record.Languages {
+		if language.CreatedAt.IsZero() {
+			language.CreatedAt = req.CreatedAt
+		}
+		_, err = tx.ExecContext(ctx, s.bind(`INSERT INTO language_stats
+			(id, request_id, language, confidence, evidence, created_at)
+			VALUES (?, ?, ?, ?, ?, ?)`),
+			language.ID, language.RequestID, language.Language, language.Confidence, language.Evidence, formatTime(language.CreatedAt))
+		if err != nil {
+			return err
+		}
+	}
+
+	for _, evaluation := range record.Evaluations {
+		if evaluation.CreatedAt.IsZero() {
+			evaluation.CreatedAt = req.CreatedAt
+		}
+		_, err = tx.ExecContext(ctx, s.bind(`INSERT INTO llm_evaluations
+			(id, request_id, trace_id, name, category, evaluator, score, label, passed, reason, metadata, created_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+			evaluation.ID, evaluation.RequestID, evaluation.TraceID, evaluation.Name, evaluation.Category, evaluation.Evaluator, evaluation.Score,
+			evaluation.Label, boolInt(evaluation.Passed), evaluation.Reason, evaluation.Metadata, formatTime(evaluation.CreatedAt))
+		if err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
+}
+
+func (s *SQLStore) InsertLLMEvaluations(ctx context.Context, evaluations []LLMEvaluation) error {
+	if len(evaluations) == 0 {
+		return nil
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	now := time.Now().UTC()
+	for _, evaluation := range evaluations {
+		if evaluation.CreatedAt.IsZero() {
+			evaluation.CreatedAt = now
+		}
+		_, err = tx.ExecContext(ctx, s.bind(`INSERT INTO llm_evaluations
+			(id, request_id, trace_id, name, category, evaluator, score, label, passed, reason, metadata, created_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+			evaluation.ID, evaluation.RequestID, evaluation.TraceID, evaluation.Name, evaluation.Category, evaluation.Evaluator, evaluation.Score,
+			evaluation.Label, boolInt(evaluation.Passed), evaluation.Reason, evaluation.Metadata, formatTime(evaluation.CreatedAt))
+		if err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
+}
+
+func (s *SQLStore) Summary(ctx context.Context) (SummaryStats, error) {
+	var stats SummaryStats
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*), COALESCE(AVG(latency_ms), 0) FROM request_logs`).Scan(&stats.TotalRequests, &stats.AverageLatencyMS)
+	if err != nil {
+		return stats, err
+	}
+
+	err = s.db.QueryRowContext(ctx, `SELECT COALESCE(SUM(total_tokens), 0), COALESCE(SUM(estimated_cost), 0) FROM token_usage`).Scan(&stats.TotalTokens, &stats.TotalCostKRW)
+	if err != nil {
+		return stats, err
+	}
+
+	byIP, err := s.grouped(ctx, "client_ip")
+	if err != nil {
+		return stats, err
+	}
+	stats.ByIP = byIP
+
+	byModel, err := s.grouped(ctx, "model")
+	if err != nil {
+		return stats, err
+	}
+	stats.ByModel = byModel
+
+	byLanguage, err := s.languages(ctx)
+	if err != nil {
+		return stats, err
+	}
+	stats.ByLanguage = byLanguage
+	if stats.ByIP == nil {
+		stats.ByIP = []GroupedStat{}
+	}
+	if stats.ByModel == nil {
+		stats.ByModel = []GroupedStat{}
+	}
+	if stats.ByLanguage == nil {
+		stats.ByLanguage = []LanguageGrouped{}
+	}
+
+	byStatus, err := s.statusBreakdown(ctx)
+	if err != nil {
+		return stats, err
+	}
+	stats.ByStatus = byStatus
+
+	topUsers, err := s.topUsers(ctx, 5)
+	if err != nil {
+		return stats, err
+	}
+	stats.TopUsers = topUsers
+	return stats, nil
+}
+
+func (s *SQLStore) statusBreakdown(ctx context.Context) ([]StatusBucket, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT status_code, COUNT(*)
+		FROM request_logs
+		GROUP BY status_code
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	buckets := map[string]int64{}
+	for rows.Next() {
+		var code int
+		var count int64
+		if err := rows.Scan(&code, &count); err != nil {
+			return nil, err
+		}
+		buckets[statusClass(code)] += count
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	result := []StatusBucket{}
+	for _, class := range []string{"2xx", "3xx", "4xx", "quota", "5xx"} {
+		if v, ok := buckets[class]; ok && v > 0 {
+			result = append(result, StatusBucket{Class: class, Requests: v})
+		}
+	}
+	return result, nil
+}
+
+func statusClass(code int) string {
+	switch {
+	case code == 429:
+		return "quota"
+	case code >= 200 && code < 300:
+		return "2xx"
+	case code >= 300 && code < 400:
+		return "3xx"
+	case code >= 400 && code < 500:
+		return "4xx"
+	case code >= 500:
+		return "5xx"
+	default:
+		return "other"
+	}
+}
+
+func (s *SQLStore) topUsers(ctx context.Context, limit int) ([]UserSummary, error) {
+	rows, err := s.db.QueryContext(ctx, s.bind(`
+		SELECT k.id, k.name, COALESCE(k.owner, ''), COALESCE(k.team, ''), k.status,
+			COUNT(r.id) AS requests,
+			COALESCE(SUM(t.total_tokens), 0) AS tokens,
+			COALESCE(SUM(t.estimated_cost), 0) AS cost,
+			COALESCE(AVG(r.latency_ms), 0) AS avg_latency,
+			COALESCE(MAX(r.created_at), '') AS last_seen
+		FROM api_keys k
+		LEFT JOIN request_logs r ON r.api_key_id = k.id
+		LEFT JOIN token_usage t ON t.request_id = r.id
+		GROUP BY k.id, k.name, k.owner, k.team, k.status
+		ORDER BY requests DESC
+		LIMIT ?
+	`), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := []UserSummary{}
+	for rows.Next() {
+		var u UserSummary
+		if err := rows.Scan(&u.APIKeyID, &u.Name, &u.Owner, &u.Team, &u.Status, &u.Requests, &u.Tokens, &u.CostKRW, &u.AverageLatencyMS, &u.LastSeen); err != nil {
+			return nil, err
+		}
+		if u.Requests > 0 {
+			result = append(result, u)
+		}
+	}
+	return result, rows.Err()
+}
+
+func (s *SQLStore) RecentRequests(ctx context.Context, filter RequestFilter) ([]RecentRequest, error) {
+	limit := filter.Limit
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 200 {
+		limit = 200
+	}
+
+	where := []string{"1=1"}
+	args := []any{}
+	if filter.IP != "" {
+		where = append(where, "COALESCE(NULLIF(r.client_ip, ''), 'unknown') = ?")
+		args = append(args, filter.IP)
+	}
+	if filter.Model != "" {
+		where = append(where, "r.model = ?")
+		args = append(args, filter.Model)
+	}
+	if filter.Language != "" {
+		where = append(where, "EXISTS (SELECT 1 FROM language_stats ls WHERE ls.request_id = r.id AND ls.language = ?)")
+		args = append(args, filter.Language)
+	}
+	if filter.APIKeyID != "" {
+		where = append(where, "r.api_key_id = ?")
+		args = append(args, filter.APIKeyID)
+	}
+	if filter.SessionID != "" {
+		where = append(where, "COALESCE(NULLIF(r.session_id, ''), 'no-session') = ?")
+		args = append(args, filter.SessionID)
+	}
+	if filter.PromptName != "" {
+		where = append(where, "r.prompt_name = ?")
+		args = append(args, filter.PromptName)
+	}
+	args = append(args, limit)
+
+	query := s.bind(`SELECT r.id, r.trace_id, COALESCE(r.api_key_id, ''), COALESCE(r.client_ip, ''), COALESCE(r.forwarded_for, ''),
+			COALESCE(r.user_agent, ''), COALESCE(r.model, ''), r.endpoint, r.stream, COALESCE(r.provider, ''),
+			r.status_code, r.latency_ms, COALESCE(r.first_chunk_ms, 0),
+			COALESCE(r.session_id, ''), COALESCE(r.prompt_name, ''), COALESCE(r.prompt_version, ''),
+			COALESCE(r.prompt_variables_hash, ''), COALESCE(r.tool_count, 0), COALESCE(r.error, ''),
+			COALESCE(t.prompt_tokens, 0), COALESCE(t.completion_tokens, 0), COALESCE(t.total_tokens, 0),
+			COALESCE(t.cached_tokens, 0), COALESCE(t.reasoning_tokens, 0),
+			COALESCE(t.estimated_cost, 0), COALESCE(t.currency, ''), COALESCE(t.source, ''),
+			COALESCE(resp.finish_reason, ''), r.created_at
+		FROM request_logs r
+		LEFT JOIN token_usage t ON t.request_id = r.id
+		LEFT JOIN response_logs resp ON resp.request_id = r.id
+		WHERE ` + strings.Join(where, " AND ") + `
+		ORDER BY r.created_at DESC
+		LIMIT ?`)
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+
+	var result []RecentRequest
+	for rows.Next() {
+		var item RecentRequest
+		var streamInt int
+		if err := rows.Scan(&item.ID, &item.TraceID, &item.APIKeyID, &item.ClientIP, &item.ForwardedFor,
+			&item.UserAgent, &item.Model, &item.Endpoint, &streamInt, &item.Provider,
+			&item.StatusCode, &item.LatencyMS, &item.FirstChunkMS,
+			&item.SessionID, &item.PromptName, &item.PromptVersion, &item.PromptVariablesHash, &item.ToolCount, &item.Error,
+			&item.PromptTokens, &item.CompletionTokens, &item.TotalTokens,
+			&item.CachedTokens, &item.ReasoningTokens,
+			&item.EstimatedCost, &item.Currency, &item.TokenSource,
+			&item.FinishReason, &item.CreatedAt); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		item.Stream = streamInt == 1
+		result = append(result, item)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	rows.Close()
+
+	for i := range result {
+		result[i].Languages, err = s.languagesForRequest(ctx, result[i].ID)
+		if err != nil {
+			return nil, err
+		}
+		result[i].Prompts, err = s.promptsForRequest(ctx, result[i].ID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if result == nil {
+		result = []RecentRequest{}
+	}
+	if err := s.attachNotes(ctx, result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (s *SQLStore) attachNotes(ctx context.Context, rows []RecentRequest) error {
+	if len(rows) == 0 {
+		return nil
+	}
+	ids := make([]string, len(rows))
+	for i, r := range rows {
+		ids[i] = r.ID
+	}
+	notes, err := s.ListRequestNotes(ctx, ids)
+	if err != nil {
+		return err
+	}
+	for i := range rows {
+		if n, ok := notes[rows[i].ID]; ok {
+			rows[i].Tags = n.Tags
+			rows[i].Note = n.Note
+		}
+	}
+	return nil
+}
+
+func (s *SQLStore) grouped(ctx context.Context, column string) ([]GroupedStat, error) {
+	if column != "client_ip" && column != "model" {
+		return nil, fmt.Errorf("unsupported group column %q", column)
+	}
+	query := fmt.Sprintf(`SELECT COALESCE(NULLIF(r.%s, ''), 'unknown') AS key,
+			COUNT(r.id) AS requests,
+			COALESCE(SUM(t.total_tokens), 0) AS tokens,
+			COALESCE(SUM(t.estimated_cost), 0) AS cost,
+			COALESCE(AVG(r.latency_ms), 0) AS avg_latency
+		FROM request_logs r
+		LEFT JOIN token_usage t ON t.request_id = r.id
+		GROUP BY COALESCE(NULLIF(r.%s, ''), 'unknown')
+		ORDER BY requests DESC
+		LIMIT 50`, column, column)
+	rows, err := s.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []GroupedStat
+	for rows.Next() {
+		var stat GroupedStat
+		if err := rows.Scan(&stat.Key, &stat.Requests, &stat.Tokens, &stat.CostKRW, &stat.AverageLatencyMS); err != nil {
+			return nil, err
+		}
+		result = append(result, stat)
+	}
+	return result, rows.Err()
+}
+
+func (s *SQLStore) languages(ctx context.Context) ([]LanguageGrouped, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT language, COUNT(DISTINCT request_id), COALESCE(AVG(confidence), 0)
+		FROM language_stats
+		GROUP BY language
+		ORDER BY COUNT(DISTINCT request_id) DESC
+		LIMIT 50`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []LanguageGrouped
+	for rows.Next() {
+		var stat LanguageGrouped
+		if err := rows.Scan(&stat.Language, &stat.Requests, &stat.AverageConfidence); err != nil {
+			return nil, err
+		}
+		result = append(result, stat)
+	}
+	return result, rows.Err()
+}
+
+func (s *SQLStore) languagesForRequest(ctx context.Context, requestID string) ([]LanguageStat, error) {
+	rows, err := s.db.QueryContext(ctx, s.bind(`SELECT id, request_id, language, confidence, COALESCE(evidence, ''), created_at
+		FROM language_stats
+		WHERE request_id = ?
+		ORDER BY confidence DESC`), requestID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []LanguageStat
+	for rows.Next() {
+		var stat LanguageStat
+		var createdAt string
+		if err := rows.Scan(&stat.ID, &stat.RequestID, &stat.Language, &stat.Confidence, &stat.Evidence, &createdAt); err != nil {
+			return nil, err
+		}
+		if parsed, err := time.Parse(time.RFC3339Nano, createdAt); err == nil {
+			stat.CreatedAt = parsed
+		}
+		result = append(result, stat)
+	}
+	return result, rows.Err()
+}
+
+func (s *SQLStore) promptsForRequest(ctx context.Context, requestID string) ([]PromptPreview, error) {
+	rows, err := s.db.QueryContext(ctx, s.bind(`SELECT role, COALESCE(redacted_text, ''), COALESCE(language_hint, '')
+		FROM prompt_logs
+		WHERE request_id = ?
+		ORDER BY created_at ASC
+		LIMIT 10`), requestID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []PromptPreview
+	for rows.Next() {
+		var prompt PromptPreview
+		if err := rows.Scan(&prompt.Role, &prompt.RedactedText, &prompt.LanguageHint); err != nil {
+			return nil, err
+		}
+		result = append(result, prompt)
+	}
+	return result, rows.Err()
+}
+
+func (s *SQLStore) bind(query string) string {
+	if s.dialect != "postgres" {
+		return query
+	}
+	var builder strings.Builder
+	arg := 1
+	for _, r := range query {
+		if r == '?' {
+			builder.WriteString(fmt.Sprintf("$%d", arg))
+			arg++
+			continue
+		}
+		builder.WriteRune(r)
+	}
+	return builder.String()
+}
+
+func boolInt(value bool) int {
+	if value {
+		return 1
+	}
+	return 0
+}
+
+func formatTime(value time.Time) string {
+	return value.UTC().Format(time.RFC3339Nano)
+}

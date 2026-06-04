@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(go build *)",
+      "PowerShell($env:GOROOT = \\(go env GOROOT\\); echo \"GOROOT=$env:GOROOT\"; go version)"
+    ]
+  }
+}

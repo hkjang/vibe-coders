@@ -1,0 +1,15 @@
+.git
+.gitignore
+.claude
+.dockerignore
+data/
+release/
+*.exe
+*.db
+*.sqlite
+*.sqlite3
+coverage.out
+.playwright-mcp/
+*.tar
+*.tar.gz
+README.md

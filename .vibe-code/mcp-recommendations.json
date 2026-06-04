@@ -1,0 +1,85 @@
+{
+  "_comment_ko": "오프라인망 친화 MCP 서버 추천. npx 대신 미리 설치된 경로 사용을 권장합니다. 등록은 사이드바 → MCP 서버에서.",
+  "_setup_guide_ko": [
+    "방법 1: 인터넷 연결 가능한 PC에서 'npm install -g @modelcontextprotocol/server-XYZ' 로 설치 → 'where server-XYZ' 로 경로 확인 → 폐쇄망 PC에 복사.",
+    "방법 2: 사내 npm registry 가 있으면 '.npmrc' 에 registry=https://npm.company.local 설정 후 install.",
+    "방법 3: 'npm pack @modelcontextprotocol/server-XYZ' 로 tarball 받아 폐쇄망 PC 에서 'npm install ./server-XYZ-x.y.z.tgz -g'.",
+    "방법 4: 소스를 git clone → 'npm ci && npm run build' → 'node /path/to/dist/index.js' 로 직접 실행."
+  ],
+  "mcpServers": {
+    "filesystem": {
+      "_description": "추가 디렉토리 읽기. 오프라인 안전 (외부 통신 없음).",
+      "_install": "npm i -g @modelcontextprotocol/server-filesystem",
+      "command": "node",
+      "args": ["<설치 경로>/server-filesystem/dist/index.js", "/path/to/extra/dir"],
+      "_offline_safe": true
+    },
+    "memory": {
+      "_description": "장기 메모리. 로컬 JSON 파일만 사용. 오프라인 안전.",
+      "_install": "npm i -g @modelcontextprotocol/server-memory",
+      "command": "node",
+      "args": ["<설치 경로>/server-memory/dist/index.js"],
+      "_offline_safe": true
+    },
+    "sqlite": {
+      "_description": "로컬 SQLite DB. 오프라인 안전.",
+      "_install": "npm i -g @modelcontextprotocol/server-sqlite",
+      "command": "node",
+      "args": ["<설치 경로>/server-sqlite/dist/index.js", "/path/to/database.db"],
+      "_offline_safe": true
+    },
+    "time": {
+      "_description": "시간/시간대 처리. 오프라인 안전.",
+      "_install": "npm i -g @modelcontextprotocol/server-time",
+      "command": "node",
+      "args": ["<설치 경로>/server-time/dist/index.js", "--local-timezone=Asia/Seoul"],
+      "_offline_safe": true
+    },
+    "git": {
+      "_description": "로컬 git 저장소 조작. 외부 remote 통신 없으면 오프라인 안전.",
+      "_install": "npm i -g @modelcontextprotocol/server-git",
+      "command": "node",
+      "args": ["<설치 경로>/server-git/dist/index.js", "--repository", "/path/to/repo"],
+      "_offline_safe": true
+    },
+    "_internal-confluence": {
+      "_description": "사내 Confluence/Wiki 검색용 — 사내 endpoint 사용. 외부 인터넷 불필요.",
+      "_setup_ko": "회사에서 사내 MCP 서버를 운영 중이면 endpoint 와 토큰을 IT 부서에서 받아 등록.",
+      "command": "node",
+      "args": ["<사내 MCP 경로>/index.js"],
+      "env": {
+        "CONFLUENCE_BASE_URL": "${env:CONFLUENCE_BASE_URL}",
+        "CONFLUENCE_TOKEN": "${env:CONFLUENCE_TOKEN}"
+      },
+      "_offline_safe": "사내망 한정"
+    },
+    "_internal-jira": {
+      "_description": "사내 Jira/Linear 등 이슈 트래커. 사내망 한정 안전.",
+      "command": "node",
+      "args": ["<사내 MCP 경로>/index.js"],
+      "env": {
+        "JIRA_BASE_URL": "${env:JIRA_BASE_URL}",
+        "JIRA_TOKEN": "${env:JIRA_TOKEN}"
+      },
+      "_offline_safe": "사내망 한정"
+    },
+    "_internet-required-github": {
+      "_description": "GitHub.com 접근 필요. 폐쇄망에서는 사용 금지 또는 GitHub Enterprise 내부 endpoint 로 대체.",
+      "_install": "npm i -g @modelcontextprotocol/server-github",
+      "command": "node",
+      "args": ["<설치 경로>/server-github/dist/index.js"],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "${env:GITHUB_PERSONAL_ACCESS_TOKEN}",
+        "GITHUB_API_URL": "https://github.company.local/api/v3"
+      },
+      "_offline_safe": false
+    },
+    "_internet-required-fetch": {
+      "_description": "공개 웹 페이지 가져오기. 폐쇄망에서는 사내 미러로 제한해야 함.",
+      "_install": "npm i -g @modelcontextprotocol/server-fetch",
+      "command": "node",
+      "args": ["<설치 경로>/server-fetch/dist/index.js"],
+      "_offline_safe": false
+    }
+  }
+}
