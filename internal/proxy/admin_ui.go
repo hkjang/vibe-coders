@@ -1676,12 +1676,14 @@ const adminHTML = `<!doctype html>
         '<th data-sort="str">키</th>' +
         '<th data-sort="num">타임아웃</th>' +
         '<th>모델 패턴</th>' +
-        '<th data-sort="str">상태</th></tr></thead><tbody>' +
+        '<th data-sort="str">상태</th>' +
+        '<th>동작</th></tr></thead><tbody>' +
         rows.map(r => '<tr><td>' + escapeHTML(r.name) + '</td><td>' + escapeHTML(r.base_url) + '</td>' +
           '<td>' + (r.api_key_configured ? '설정됨' : '미설정') + '</td>' +
           '<td data-num="' + (r.timeout_ms || 0) + '">' + fmt(r.timeout_ms) + ' ms</td>' +
           '<td>' + (r.model_patterns ? '<span class="pill">' + escapeHTML(r.model_patterns) + '</span>' : '<span class="muted">자동 라우팅 없음</span>') + '</td>' +
-          '<td><span class="status ' + (r.enabled ? '' : 'error') + '">' + (r.enabled ? '사용' : '중지') + '</span></td></tr>').join('') +
+          '<td><span class="status ' + (r.enabled ? '' : 'error') + '">' + (r.enabled ? '사용' : '중지') + '</span></td>' +
+          '<td><button class="danger" type="button" onclick="deleteProvider(\'' + r.name + '\')">삭제</button></td></tr>').join('') +
         '</tbody></table>';
     }
     function retentionPanel(s) {
@@ -1749,6 +1751,15 @@ const adminHTML = `<!doctype html>
       await api('/admin/providers', { method: 'POST', body: JSON.stringify(body) });
       route();
     }
+    window.deleteProvider = async (name) => {
+      if (!confirm('프로바이더 "' + name + '"을(를) 삭제하시겠습니까?')) return;
+      try {
+        await api('/admin/providers/' + encodeURIComponent(name), { method: 'DELETE' });
+        route();
+      } catch (err) {
+        alert('삭제 실패: ' + err.message);
+      }
+    };
     async function runRetention() {
       await api('/admin/retention', { method: 'POST' });
       route();
