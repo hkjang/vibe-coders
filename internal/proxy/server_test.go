@@ -191,9 +191,16 @@ func TestAdminAPIKeyCreationEnforcesProxyAuth(t *testing.T) {
 		t.Fatalf("expected unauthenticated request to fail after key creation, got %d", noAuth.StatusCode)
 	}
 
-	wrongAuth := postJSON(t, proxy.URL+"/v1/chat/completions", "wrong-secret", chatBody("test-model", false))
+	wrongAuth := postJSON(t, proxy.URL+"/v1/chat/completions", "pcg_wrong-proxy-key", chatBody("test-model", false))
 	if wrongAuth.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("expected wrong proxy key to fail, got %d", wrongAuth.StatusCode)
+		t.Fatalf("expected wrong proxy key (pcg_ prefix) to fail, got %d", wrongAuth.StatusCode)
+	}
+
+	// 비-proxy 형태(pcg_ 접두사가 아닌)의 토큰은 upstream passthrough 로 허용
+	passthroughAuth := postJSON(t, proxy.URL+"/v1/chat/completions", "sk-upstream-key", chatBody("test-model", false))
+	if passthroughAuth.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(passthroughAuth.Body)
+		t.Fatalf("expected upstream key passthrough to pass, got %d: %s", passthroughAuth.StatusCode, body)
 	}
 
 	okAuth := postJSON(t, proxy.URL+"/v1/chat/completions", "proxy-secret", chatBody("test-model", false))

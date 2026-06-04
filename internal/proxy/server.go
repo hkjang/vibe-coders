@@ -461,11 +461,22 @@ func (s *Server) handleOpenAI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	apiKeyID, ok := s.authenticateProxy(r)
-	if !ok {
-		writeOpenAIError(w, http.StatusUnauthorized, "invalid proxy API key", "invalid_request_error", "invalid_api_key")
-		return
+	// /v1/models GET은 인증 없이 모델 목록만 반환하므로 바로 upstream으로 프록시
+	isModelsGet := r.Method == http.MethodGet && r.URL.Path == "/v1/models"
+
+	var apiKeyID string
+	if isModelsGet {
+		// /v1/models는 인증 불필요 — anonymous로 처리
+		apiKeyID = "anonymous"
+	} else {
+		var ok bool
+		apiKeyID, ok = s.authenticateProxy(r)
+		if !ok {
+			writeOpenAIError(w, http.StatusUnauthorized, "invalid proxy API key", "invalid_request_error", "invalid_api_key")
+			return
+		}
 	}
+
 
 	clientAddr := clientIP(r)
 	if decision, err := s.checkQuotas(r.Context(), apiKeyID, clientAddr); err != nil {
@@ -696,19 +707,25 @@ func (s *Server) authenticateProxy(r *http.Request) (string, bool) {
 		slog.Warn("lookup proxy api key failed", "error", err)
 		return "", false
 	}
-	if !found {
-		hasKeys, err := s.db.HasActiveAPIKeys(r.Context())
-		if err != nil {
-			slog.Warn("check active proxy keys failed", "error", err)
-			return "", false
-		}
-		if !hasKeys {
-			return "anonymous", true
-		}
+	if found {
+		return key.ID, true
+	}
+	// 토큰이 proxy key(pcg_ 접두사)가 아니면 upstream API key passthrough 로 허용
+	// 이를 통해 Roo Code / Cursor 등이 upstream key 를 직접 보내도 프록시가 작동함
+	if !strings.HasPrefix(token, "pcg_") {
+		return "passthrough", true
+	}
+	hasKeys, err := s.db.HasActiveAPIKeys(r.Context())
+	if err != nil {
+		slog.Warn("check active proxy keys failed", "error", err)
 		return "", false
 	}
-	return key.ID, true
+	if !hasKeys {
+		return "anonymous", true
+	}
+	return "", false
 }
+
 
 type resolvedProvider struct {
 	Name    string
