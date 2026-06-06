@@ -218,7 +218,10 @@ const adminHTML = `<!doctype html>
     <div class="modal">
       <header>
         <h3 id="modal-title">상세</h3>
-        <button class="secondary" type="button" id="modal-close">닫기 (esc)</button>
+        <div style="display: flex; gap: 8px;">
+          <button id="modal-analyze" type="button" class="secondary" style="display: none; background: var(--accent); color: #fff; border-color: var(--accent); height: 34px;">AI 분석</button>
+          <button class="secondary" type="button" id="modal-close">닫기 (esc)</button>
+        </div>
       </header>
       <div class="body" id="modal-body"></div>
     </div>
@@ -251,13 +254,53 @@ const adminHTML = `<!doctype html>
     document.getElementById('modal-backdrop').addEventListener('click', (e) => {
       if (e.target.id === 'modal-backdrop') closeModal();
     });
-    function openModal(title, html) {
+    function openModal(title, html, requestId) {
       document.getElementById('modal-title').textContent = title;
       document.getElementById('modal-body').innerHTML = html;
+      
+      const btn = document.getElementById('modal-analyze');
+      if (btn) {
+        if (requestId) {
+          btn.style.display = 'inline-block';
+          const newBtn = btn.cloneNode(true);
+          btn.parentNode.replaceChild(newBtn, btn);
+          newBtn.addEventListener('click', () => runAIAnalysis(requestId));
+        } else {
+          btn.style.display = 'none';
+        }
+      }
+      
       document.getElementById('modal-backdrop').classList.add('open');
     }
     function closeModal() {
       document.getElementById('modal-backdrop').classList.remove('open');
+    }
+    async function runAIAnalysis(id) {
+      const areaId = 'ai-analysis-result';
+      let area = document.getElementById(areaId);
+      if (!area) {
+        const body = document.getElementById('modal-body');
+        body.insertAdjacentHTML('beforeend', 
+          '<section id="' + areaId + '-section" style="margin-top:18px; border:1px solid var(--accent); border-radius:8px; overflow:hidden;">' +
+            '<h2 style="background:var(--accent); color:#fff; margin:0; padding:12px 14px; font-size:13px; font-weight:800;">AI 분석 요약</h2>' +
+            '<div class="body-pad" id="' + areaId + '" style="padding:14px; line-height:1.6; white-space:normal;">' +
+              '분석 중…' +
+            '</div>' +
+          '</section>'
+        );
+        area = document.getElementById(areaId);
+        document.getElementById(areaId + '-section').scrollIntoView({ behavior: 'smooth' });
+      } else {
+        area.innerHTML = '분석 중…';
+        document.getElementById(areaId + '-section').scrollIntoView({ behavior: 'smooth' });
+      }
+      
+      try {
+        const result = await api('/admin/requests/' + encodeURIComponent(id) + '/analyze', { method: 'POST' });
+        area.innerHTML = renderMarkdown(result.analysis);
+      } catch (err) {
+        area.innerHTML = '<div class="error-line">분석 실패: ' + escapeHTML(err.message) + '</div>';
+      }
     }
 
     // ---------- HTTP ----------
@@ -1093,7 +1136,7 @@ const adminHTML = `<!doctype html>
               api('/admin/requests/' + encodeURIComponent(id)),
               api('/admin/requests/' + encodeURIComponent(id) + '/note').catch(() => ({ tags: [], note: '' })),
             ]);
-            openModal('요청 상세 - ' + (detail.request.trace_id || id), requestDetailHTML(detail, note));
+            openModal('요청 상세 - ' + (detail.request.trace_id || id), requestDetailHTML(detail, note), id);
             wireNoteEditor(id);
             wireFeedbackEditor(id);
           } catch (err) {
