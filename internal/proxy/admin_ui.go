@@ -294,6 +294,52 @@ const adminHTML = `<!doctype html>
     function escapeHTML(value) {
       return String(value ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
     }
+    function formatTextIfJSON(text) {
+      if (!text) return '';
+      const trimmed = text.trim();
+      if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+        try {
+          const parsed = JSON.parse(trimmed);
+          return JSON.stringify(parsed, null, 2);
+        } catch (e) {
+          // ignore
+        }
+      }
+      return text;
+    }
+    function renderMarkdown(md) {
+      if (!md) return '';
+      let html = escapeHTML(md);
+      
+      const bt = String.fromCharCode(96);
+      const bt3 = bt + bt + bt;
+      
+      // Code blocks
+      const reBlock = new RegExp(bt3 + '([\\s\\S]*?)' + bt3, 'gm');
+      html = html.replace(reBlock, (match, p1) => {
+        return '<pre class="prompt-block" style="background:var(--panel-alt); border:1px solid var(--line); font-family:ui-monospace, SFMono-Regular, Consolas, monospace; padding:10px; margin:8px 0; overflow:auto; white-space:pre-wrap;">' + p1.trim() + '</pre>';
+      });
+      
+      // Inline code
+      const reInline = new RegExp(bt + '([^' + bt + ']+)' + bt, 'g');
+      html = html.replace(reInline, '<code style="background:var(--pill-bg); padding:2px 4px; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Consolas, monospace; font-size:90%;">$1</code>');
+      
+      // Headings
+      html = html.replace(/^### (.*?)$/gm, '<h5 style="margin:12px 0 6px; font-size:14px; font-weight:700">$1</h5>');
+      html = html.replace(/^## (.*?)$/gm, '<h4 style="margin:16px 0 8px; font-size:15px; font-weight:700">$1</h4>');
+      html = html.replace(/^# (.*?)$/gm, '<h3 style="margin:20px 0 10px; font-size:16px; font-weight:800; border-bottom:1px solid var(--line); padding-bottom:4px;">$1</h3>');
+      
+      // Bold
+      html = html.replace(/\*\*([^*]+)\*\*/g, '<strong style="font-weight:700">$1</strong>');
+      
+      // Bullet lists
+      html = html.replace(/^\s*[-*]\s+(.*?)$/gm, '<li style="margin-left:16px; margin-top:4px;">$1</li>');
+      
+      // Line breaks
+      html = html.replace(/\n/g, '<br>');
+      
+      return html;
+    }
     function statusBadge(code) {
       const cls = (code >= 200 && code < 300) ? '' : (code === 429 ? 'warn' : 'error');
       return '<span class="status ' + cls + '">' + code + '</span>';
@@ -645,14 +691,19 @@ const adminHTML = `<!doctype html>
     function card(title, inner)    { return '<section><h2>' + escapeHTML(title) + '</h2>' + inner + '</section>'; }
 
     // ---------- LLM observability ----------
+    const llmState = { window: sessionStorage.getItem('llmWindow') || '24h' };
     async function renderLLMObservability() {
-      const [traces, sessions, evals, prompts, patterns, insights] = await Promise.all([
+      const win = llmState.window;
+      const bucket = win === '24h' ? 'hour' : 'day';
+      const [traces, sessions, evals, prompts, patterns, insights, feedback, ts] = await Promise.all([
         api('/admin/llm/traces?limit=100'),
         api('/admin/llm/sessions?limit=100'),
         api('/admin/llm/evaluations?limit=100'),
         api('/admin/llm/prompts?limit=100'),
         api('/admin/llm/patterns?limit=50'),
-        api('/admin/llm/insights?window=24h&limit=50'),
+        api('/admin/llm/insights?window=' + win + '&limit=50'),
+        api('/admin/llm/feedback?limit=50'),
+        api('/admin/llm/timeseries?window=' + win + '&bucket=' + bucket),
       ]);
       const summary = evals.summary || [];
       const recentEvals = evals.evaluations || [];
@@ -660,6 +711,14 @@ const adminHTML = `<!doctype html>
       const promptRows = prompts.prompts || [];
       const patternRows = patterns.patterns || [];
       const insightRows = insights.insights || [];
+      const tsPoints = ts.points || [];
+      const feedbackRows = feedback.feedback || [];
+      const feedbackSummary = feedback.summary || {};
+      const feedbackLabels = feedback.labels || [];
+      const feedbackPrompts = feedback.prompts || [];
+      const alignment = feedback.alignment || {};
+      const alignmentPrompts = feedback.alignment_prompts || [];
+      const trend = llmTimeseriesSummary(tsPoints);
       const html =
         section('LLM Observability 요약',
           '<div class="kpis">' +
@@ -670,8 +729,21 @@ const adminHTML = `<!doctype html>
             kpi('Insight', fmt(insightRows.length)) +
             kpi('Evaluation', fmt(recentEvals.length)) +
             kpi('최근 실패 평가', fmt(failed)) +
+            kpi('긍정 피드백', fmt(feedbackSummary.positive || 0)) +
+            kpi('부정 피드백', fmt(feedbackSummary.negative || 0)) +
+            kpi('Alignment', pct(alignment.alignment_rate || 0)) +
           '</div>'
         ) +
+        '<div class="grid2">' +
+          card('Trend Volume — ' + windowLabel(win),
+            llmWindowToolbar() +
+            timeseriesChart(tsPoints, bucket)
+          ) +
+          card('Trend Quality — ' + windowLabel(win),
+            llmTrendSummaryBar(trend) +
+            llmQualityChart(tsPoints, bucket)
+          ) +
+        '</div>' +
         section('Insights', llmInsightTable(insightRows)) +
         '<div class="grid2">' +
           card('Trace Explorer', llmTraceTable(traces.traces || [])) +
@@ -684,10 +756,101 @@ const adminHTML = `<!doctype html>
         '<div class="grid2">' +
           card('Evaluation 요약', llmEvaluationSummaryTable(summary)) +
           card('최근 Evaluation', llmEvaluationTable(recentEvals)) +
+        '</div>' +
+        '<div class="grid2">' +
+          card('최근 Feedback', llmFeedbackTable(feedbackRows)) +
+          card('Feedback 요약', llmFeedbackSummaryCard(feedbackSummary)) +
+        '</div>' +
+        '<div class="grid2">' +
+          card('Feedback by Prompt', llmFeedbackPromptTable(feedbackPrompts)) +
+          card('Feedback Labels', llmFeedbackLabelTable(feedbackLabels)) +
+        '</div>' +
+        '<div class="grid2">' +
+          card('Alignment 요약', llmAlignmentSummaryCard(alignment)) +
+          card('Alignment by Prompt', llmAlignmentPromptTable(alignmentPrompts)) +
         '</div>';
       document.getElementById('view').innerHTML = html;
       attachRequestRowHandlers();
       makeSortable('#view', 'llm');
+      document.querySelectorAll('[data-llm-window]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          llmState.window = btn.dataset.llmWindow;
+          sessionStorage.setItem('llmWindow', llmState.window);
+          route();
+        });
+      });
+    }
+
+    function llmWindowToolbar() {
+      const cur = llmState.window;
+      const btn = (w, label) =>
+        '<button type="button" class="' + (cur === w ? '' : 'secondary') + '" data-llm-window="' + w + '">' + label + '</button>';
+      return '<div class="toolbar" style="border-bottom:0; padding-bottom:0">' +
+        btn('24h', '24시간') + btn('7d', '7일') + btn('30d', '30일') + '</div>';
+    }
+
+    function llmTimeseriesSummary(points) {
+      return points.reduce((acc, p) => {
+        acc.requests += Number(p.requests || 0);
+        acc.evaluationFailures += Number(p.evaluation_failures || 0);
+        acc.negativeFeedback += Number(p.negative_feedback || 0);
+        acc.feedbackTotal += Number(p.feedback_total || 0);
+        acc.alignmentSamples += Number(p.alignment_samples || 0);
+        acc.weightedAlignment += Number(p.alignment_rate || 0) * Number(p.alignment_samples || 0);
+        return acc;
+      }, { requests: 0, evaluationFailures: 0, negativeFeedback: 0, feedbackTotal: 0, alignmentSamples: 0, weightedAlignment: 0 });
+    }
+
+    function llmTrendSummaryBar(summary) {
+      const alignmentRate = summary.alignmentSamples ? (summary.weightedAlignment / summary.alignmentSamples) : 0;
+      return '<div class="kpis" style="margin-bottom:1px">' +
+        kpi('요청', fmt(summary.requests)) +
+        kpi('평가 실패', fmt(summary.evaluationFailures)) +
+        kpi('부정 피드백', fmt(summary.negativeFeedback)) +
+        kpi('관측 Alignment', pct(alignmentRate)) +
+      '</div>';
+    }
+
+    function llmQualityChart(points, bucket) {
+      if (!points.length) return '<div class="empty">데이터 없음</div>';
+      const W = 720, H = 220, padL = 56, padR = 42, padT = 14, padB = 28;
+      const innerW = W - padL - padR, innerH = H - padT - padB;
+      const maxCount = Math.max(1, ...points.map(p => Math.max(p.evaluation_failures || 0, p.negative_feedback || 0, p.feedback_total || 0)));
+      const x = i => padL + (points.length === 1 ? innerW / 2 : (i * innerW) / (points.length - 1));
+      const yCount = v => padT + innerH - (v / maxCount) * innerH;
+      const yRate = v => padT + innerH - Math.max(0, Math.min(1, v || 0)) * innerH;
+      const line = (getter) => points.map((p, i) => (i ? 'L' : 'M') + x(i) + ',' + getter(p)).join(' ');
+      const evalLine = line(p => yCount(p.evaluation_failures || 0));
+      const feedbackLine = line(p => yCount(p.negative_feedback || 0));
+      const alignLine = line(p => yRate(p.alignment_rate || 0));
+      const labelEvery = Math.max(1, Math.ceil(points.length / 8));
+      const xLabels = points.map((p, i) => {
+        if (i % labelEvery !== 0 && i !== points.length - 1) return '';
+        const label = bucket === 'hour'
+          ? p.date.replace('T', ' ').slice(5, 13) + 'h'
+          : p.date.slice(5);
+        return '<text x="' + x(i) + '" y="' + (H - 8) + '" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.6">' + escapeHTML(label) + '</text>';
+      }).join('');
+      const dots = points.map((p, i) =>
+        '<g>' +
+          '<circle cx="' + x(i) + '" cy="' + yCount(p.evaluation_failures || 0) + '" r="3" fill="var(--bad)"><title>' +
+            escapeHTML(p.date) + ' · 평가 실패 ' + fmt(p.evaluation_failures || 0) + ' · 부정 피드백 ' + fmt(p.negative_feedback || 0) + ' · alignment ' + pct(p.alignment_rate || 0) +
+          '</title></circle>' +
+          '<circle cx="' + x(i) + '" cy="' + yCount(p.negative_feedback || 0) + '" r="3" fill="var(--warn)"></circle>' +
+          '<circle cx="' + x(i) + '" cy="' + yRate(p.alignment_rate || 0) + '" r="3" fill="var(--accent-2)"></circle>' +
+        '</g>'
+      ).join('');
+      return '<div style="padding:14px"><svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" height="' + H + '" style="font-family:inherit; color:var(--ink)">' +
+        '<line x1="' + padL + '" y1="' + (padT + innerH) + '" x2="' + (W - padR) + '" y2="' + (padT + innerH) + '" stroke="var(--line)"/>' +
+        '<path d="' + evalLine + '" fill="none" stroke="var(--bad)" stroke-width="2"/>' +
+        '<path d="' + feedbackLine + '" fill="none" stroke="var(--warn)" stroke-width="2" stroke-dasharray="4 3"/>' +
+        '<path d="' + alignLine + '" fill="none" stroke="var(--accent-2)" stroke-width="2"/>' +
+        dots + xLabels +
+        '<text x="6" y="' + (padT + 8) + '" font-size="10" fill="currentColor" opacity="0.7">이슈 ' + fmt(maxCount) + '</text>' +
+        '<text x="' + (W - 6) + '" y="' + (padT + 8) + '" font-size="10" text-anchor="end" fill="currentColor" opacity="0.7">정렬 100%</text>' +
+        '<text x="' + (W - 6) + '" y="' + (padT + innerH) + '" font-size="10" text-anchor="end" fill="currentColor" opacity="0.5">0%</text>' +
+      '</svg>' +
+      '<div class="muted" style="font-size:12px; margin-top:4px">빨강 = 평가 실패, 노랑 = 부정 피드백, 보라 = human/eval alignment.</div></div>';
     }
 
     function llmTraceTable(rows) {
@@ -787,6 +950,81 @@ const adminHTML = `<!doctype html>
         '</tr>').join('') + '</tbody></table>';
     }
 
+    function llmFeedbackTable(rows) {
+      if (!rows.length) return '<div class="empty">feedback 없음</div>';
+      return '<table><thead><tr><th data-sort="str">시각</th><th data-sort="str">Trace</th><th data-sort="num">평가</th><th data-sort="str">Label</th><th>Comment</th><th data-sort="str">By</th></tr></thead><tbody>' +
+        rows.map(f => '<tr class="row-link" data-request-id="' + escapeHTML(f.request_id) + '">' +
+          '<td>' + ago(f.created_at) + '</td>' +
+          '<td>' + escapeHTML(f.trace_id || '') + '</td>' +
+          '<td data-num="' + (f.rating || 0) + '">' + feedbackBadge(f.rating) + '</td>' +
+          '<td>' + escapeHTML(f.label || '') + '</td>' +
+          '<td>' + escapeHTML(f.comment || '') + '</td>' +
+          '<td>' + escapeHTML(f.created_by || f.source || '') + '</td>' +
+        '</tr>').join('') + '</tbody></table>';
+    }
+
+    function llmFeedbackSummaryCard(summary) {
+      return '<div class="kpis">' +
+        kpi('전체', fmt(summary.total || 0)) +
+        kpi('긍정', fmt(summary.positive || 0)) +
+        kpi('부정', fmt(summary.negative || 0)) +
+        kpi('중립', fmt(summary.neutral || 0)) +
+        kpi('평균', Number(summary.average_rating || 0).toFixed(2)) +
+      '</div>';
+    }
+
+    function llmFeedbackLabelTable(rows) {
+      if (!rows.length) return '<div class="empty">label 없음</div>';
+      return '<table><thead><tr><th data-sort="str">Label</th><th data-sort="num">전체</th><th data-sort="num">긍정</th><th data-sort="num">부정</th><th data-sort="num">중립</th><th data-sort="num">평균</th></tr></thead><tbody>' +
+        rows.map(r => '<tr>' +
+          '<td>' + escapeHTML(r.label || '') + '</td>' +
+          '<td data-num="' + (r.total || 0) + '">' + fmt(r.total || 0) + '</td>' +
+          '<td data-num="' + (r.positive || 0) + '">' + fmt(r.positive || 0) + '</td>' +
+          '<td data-num="' + (r.negative || 0) + '">' + fmt(r.negative || 0) + '</td>' +
+          '<td data-num="' + (r.neutral || 0) + '">' + fmt(r.neutral || 0) + '</td>' +
+          '<td data-num="' + (r.average_rating || 0) + '">' + Number(r.average_rating || 0).toFixed(2) + '</td>' +
+        '</tr>').join('') + '</tbody></table>';
+    }
+
+    function llmFeedbackPromptTable(rows) {
+      if (!rows.length) return '<div class="empty">prompt feedback 없음</div>';
+      return '<table><thead><tr><th data-sort="str">Prompt</th><th data-sort="num">전체</th><th data-sort="num">긍정</th><th data-sort="num">부정</th><th data-sort="num">중립</th><th data-sort="num">평균</th><th data-sort="str">최근</th></tr></thead><tbody>' +
+        rows.map(r => '<tr>' +
+          '<td>' + escapeHTML(r.prompt_name || 'ad-hoc') + '<div class="muted">' + escapeHTML(r.prompt_version || '') + '</div></td>' +
+          '<td data-num="' + (r.total || 0) + '">' + fmt(r.total || 0) + '</td>' +
+          '<td data-num="' + (r.positive || 0) + '">' + fmt(r.positive || 0) + '</td>' +
+          '<td data-num="' + (r.negative || 0) + '">' + fmt(r.negative || 0) + '</td>' +
+          '<td data-num="' + (r.neutral || 0) + '">' + fmt(r.neutral || 0) + '</td>' +
+          '<td data-num="' + (r.average_rating || 0) + '">' + Number(r.average_rating || 0).toFixed(2) + '</td>' +
+          '<td>' + ago(r.last_seen) + '</td>' +
+        '</tr>').join('') + '</tbody></table>';
+    }
+
+    function llmAlignmentSummaryCard(summary) {
+      return '<div class="kpis">' +
+        kpi('전체', fmt(summary.total || 0)) +
+        kpi('일치', fmt(summary.aligned || 0)) +
+        kpi('불일치', fmt(summary.misaligned || 0)) +
+        kpi('일치율', pct(summary.alignment_rate || 0)) +
+        kpi('사람 부정', fmt(summary.human_negative_count || 0)) +
+      '</div>';
+    }
+
+    function llmAlignmentPromptTable(rows) {
+      if (!rows.length) return '<div class="empty">alignment 없음</div>';
+      return '<table><thead><tr><th data-sort="str">Prompt</th><th data-sort="num">전체</th><th data-sort="num">일치</th><th data-sort="num">불일치</th><th data-sort="num">일치율</th><th data-sort="num">사람 부정</th><th data-sort="num">Eval 실패율</th><th data-sort="str">최근</th></tr></thead><tbody>' +
+        rows.map(r => '<tr>' +
+          '<td>' + escapeHTML(r.prompt_name || 'ad-hoc') + '<div class="muted">' + escapeHTML(r.prompt_version || '') + '</div></td>' +
+          '<td data-num="' + (r.total || 0) + '">' + fmt(r.total || 0) + '</td>' +
+          '<td data-num="' + (r.aligned || 0) + '">' + fmt(r.aligned || 0) + '</td>' +
+          '<td data-num="' + (r.misaligned || 0) + '">' + fmt(r.misaligned || 0) + '</td>' +
+          '<td data-num="' + (r.alignment_rate || 0) + '">' + pct(r.alignment_rate || 0) + '</td>' +
+          '<td data-num="' + (r.human_negative || 0) + '">' + fmt(r.human_negative || 0) + '</td>' +
+          '<td data-num="' + (r.eval_failure_rate || 0) + '">' + pct(r.eval_failure_rate || 0) + '</td>' +
+          '<td>' + ago(r.last_seen) + '</td>' +
+        '</tr>').join('') + '</tbody></table>';
+    }
+
     function groupedTable(rows, firstCol, hrefBuilder) {
       if (!rows.length) return '<div class="empty">데이터 없음</div>';
       return '<table><thead><tr>' +
@@ -857,6 +1095,7 @@ const adminHTML = `<!doctype html>
             ]);
             openModal('요청 상세 - ' + (detail.request.trace_id || id), requestDetailHTML(detail, note));
             wireNoteEditor(id);
+            wireFeedbackEditor(id);
           } catch (err) {
             openModal('오류', '<div class="error-line">' + escapeHTML(err.message) + '</div>');
           }
@@ -878,6 +1117,18 @@ const adminHTML = `<!doctype html>
           (note.updated_at ? '<span class="muted" style="margin-left:auto; align-self:center">최근 변경 ' + escapeHTML(note.updated_at) + ' by ' + escapeHTML(note.created_by || '') + '</span>' : '') +
         '</div>' +
         '<pre id="replay-output" class="prompt-block" style="display:none; margin-top:10px; max-height:240px; overflow:auto"></pre>' +
+      '</div></section>';
+    }
+
+    function feedbackComposer(id) {
+      return '<section style="margin-top:18px"><h2>LLM Feedback</h2><div style="padding:14px">' +
+        '<div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center">' +
+          '<button id="fb-positive" type="button" data-id="' + escapeHTML(id) + '">좋음</button>' +
+          '<button id="fb-negative" type="button" class="ghost" data-id="' + escapeHTML(id) + '">문제 있음</button>' +
+          '<button id="fb-neutral" type="button" class="secondary" data-id="' + escapeHTML(id) + '">중립</button>' +
+          '<input id="fb-label" placeholder="라벨 (예: helpful, hallucination, unsafe)">' +
+        '</div>' +
+        '<textarea id="fb-comment" rows="3" style="width:100%; height:auto; padding:8px 10px; margin-top:10px" placeholder="짧은 코멘트"></textarea>' +
       '</div></section>';
     }
 
@@ -917,22 +1168,52 @@ const adminHTML = `<!doctype html>
         }
       });
     }
+    function wireFeedbackEditor(id) {
+      [['fb-positive', 1], ['fb-negative', -1], ['fb-neutral', 0]].forEach(([buttonID, rating]) => {
+        const button = document.getElementById(buttonID);
+        if (!button) return;
+        button.addEventListener('click', async () => {
+          const label = (document.getElementById('fb-label') || {}).value || '';
+          const comment = (document.getElementById('fb-comment') || {}).value || '';
+          await api('/admin/llm/feedback', {
+            method: 'POST',
+            body: JSON.stringify({ request_id: id, rating, label: label.trim(), comment: comment.trim() })
+          });
+          closeModal();
+          route();
+        });
+      });
+    }
     function requestDetailHTML(d, note) {
       const r = d.request;
       const langs = (d.languages || []).map(l => escapeHTML(l.language) + ' <span class="muted">(' + pct(l.confidence) + ')</span>').join(', ') || '<span class="muted">없음</span>';
-      const prompts = (d.prompts || []).map(p =>
-        '<div class="prompt-block"><div class="prompt-role">' + escapeHTML(p.role) + (p.language_hint ? ' · ' + escapeHTML(p.language_hint) : '') + '</div>' +
-        escapeHTML(p.redacted_text || p.content_text || '') +
-        (p.content_text && p.content_text !== p.redacted_text ? '<div class="muted" style="margin-top:6px">원문 별도 보관됨</div>' : '') +
-        '</div>'
-      ).join('<div style="height:8px"></div>') || '<div class="empty">프롬프트 없음</div>';
+      const prompts = (d.prompts || []).map(p => {
+        const text = p.redacted_text || p.content_text || '';
+        const trimmed = text.trim();
+        const isJson = (trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'));
+        
+        let formatted = '';
+        if (isJson) {
+          formatted = '<pre style="margin:0; white-space:pre-wrap; font-family:ui-monospace, SFMono-Regular, Consolas, monospace; font-size:13px; background:transparent; border:none; padding:0;">' + escapeHTML(formatTextIfJSON(text)) + '</pre>';
+        } else {
+          formatted = '<div style="white-space:normal; line-height:1.6; font-size:13.5px;">' + renderMarkdown(text) + '</div>';
+        }
+        
+        return '<div class="prompt-block" style="white-space:normal;">' +
+          '<div class="prompt-role" style="border-bottom:1px solid var(--line); padding-bottom:6px; margin-bottom:10px; font-weight:800;">' + 
+            escapeHTML(p.role) + (p.language_hint ? ' · <span class="pill">' + escapeHTML(p.language_hint) + '</span>' : '') + 
+          '</div>' +
+          formatted +
+          (p.content_text && p.content_text !== p.redacted_text ? '<div class="muted" style="margin-top:8px; font-size:12px;">원문 별도 보관됨</div>' : '') +
+          '</div>';
+      }).join('<div style="height:12px"></div>') || '<div class="empty">프롬프트 없음</div>';
 
       const resp = d.response ? (
         '<div class="kv">' +
           '<div class="k">상태</div><div class="v">' + statusBadge(d.response.status_code) + '</div>' +
           '<div class="k">finish_reason</div><div class="v">' + escapeHTML(d.response.finish_reason || '') + '</div>' +
           '<div class="k">응답 hash</div><div class="v">' + escapeHTML(d.response.response_hash || '') + '</div>' +
-          '<div class="k">캡처된 응답</div><div class="v">' + (d.response.response_text_optional ? ('<div class="prompt-block">' + escapeHTML(d.response.response_text_optional) + '</div>') : '<span class="muted">없음 (LOG_RESPONSE_TEXT=false)</span>') + '</div>' +
+          '<div class="k">캡처된 응답</div><div class="v">' + (d.response.response_text_optional ? ('<div class="prompt-block">' + escapeHTML(formatTextIfJSON(d.response.response_text_optional)) + '</div>') : '<span class="muted">없음 (LOG_RESPONSE_TEXT=false)</span>') + '</div>' +
         '</div>'
       ) : '<div class="muted">응답 메타 없음</div>';
       const spans = (d.spans || []).length ? (
@@ -956,6 +1237,16 @@ const adminHTML = `<!doctype html>
           '<td>' + escapeHTML(e.reason || '') + '</td>' +
         '</tr>').join('') + '</tbody></table>'
       ) : '<div class="muted">평가 없음</div>';
+      const feedback = (d.feedback || []).length ? (
+        '<table><thead><tr><th>시각</th><th>평가</th><th>Label</th><th>Comment</th><th>By</th></tr></thead><tbody>' +
+        (d.feedback || []).map(f => '<tr>' +
+          '<td>' + ago(f.created_at) + '</td>' +
+          '<td>' + feedbackBadge(f.rating) + '</td>' +
+          '<td>' + escapeHTML(f.label || '') + '</td>' +
+          '<td>' + escapeHTML(f.comment || '') + '</td>' +
+          '<td>' + escapeHTML(f.created_by || f.source || '') + '</td>' +
+        '</tr>').join('') + '</tbody></table>'
+      ) : '<div class="muted">feedback 없음</div>';
 
       return (
         '<div class="kv">' +
@@ -985,6 +1276,8 @@ const adminHTML = `<!doctype html>
         '<h3 style="margin-top:18px">응답</h3>' + resp +
         '<h3 style="margin-top:18px">LLM Spans</h3>' + spans +
         '<h3 style="margin-top:18px">LLM Evaluation</h3>' + evals +
+        '<h3 style="margin-top:18px">LLM Feedback</h3>' + feedback +
+        feedbackComposer(r.id) +
         noteEditor(r.id, note || { tags: [], note: '' })
       );
     }
@@ -993,6 +1286,11 @@ const adminHTML = `<!doctype html>
     }
     function latencyLabel(r) {
       return '첫 청크 ' + fmt(r.first_chunk_ms || 0) + ' ms / 전체 ' + fmt(r.latency_ms || 0) + ' ms';
+    }
+    function feedbackBadge(rating) {
+      if (Number(rating) > 0) return '<span class="status">좋음</span>';
+      if (Number(rating) < 0) return '<span class="status error">문제 있음</span>';
+      return '<span class="status">중립</span>';
     }
 
     // ---------- requests view ----------
@@ -1253,6 +1551,7 @@ const adminHTML = `<!doctype html>
       const k = d.api_key, s = d.stats;
       const a = d.advanced || {};
       const heat = d.heatmap || {};
+      const llm = d.llm || {};
       const html =
         '<section><h2>사용자 ' + escapeHTML(k.name) + '</h2>' +
           '<div style="padding:14px"><div class="kv">' +
@@ -1268,6 +1567,15 @@ const adminHTML = `<!doctype html>
           '</div></div>' +
         '</section>' +
         section('사용자 고급 지표', userAdvancedHTML(a)) +
+        section('사용자 LLM 관측', userLLMSummaryHTML(llm.summary || {})) +
+        '<div class="grid2">' +
+          card('LLM Trend (24h)', llmQualityChart(llm.timeseries || [], 'hour')) +
+          card('상위 Prompt (LLM)', llmUserPromptTable(llm.prompts || [])) +
+        '</div>' +
+        '<div class="grid2">' +
+          card('LLM Feedback Labels', llmFeedbackLabelTable(llm.feedback_labels || [])) +
+          card('최근 호출', requestsTable(d.recent || [])) +
+        '</div>' +
         '<div class="grid3">' +
           card('일별 사용량', dailyTable(d.daily || [])) +
           card('모델별', groupedTable(d.by_model || [], '모델')) +
@@ -1276,10 +1584,10 @@ const adminHTML = `<!doctype html>
         '<div class="grid2">' +
           card('상태 분포', statusCard(d.by_status || [], s.requests || 0)) +
           card('시간대 히트맵 (Asia/Seoul, 최근 30일)', heatmapHTML(heat.cells || [])) +
-        '</div>' +
+        '</div>' + 
         '<div class="grid2">' +
           card('언어별', languagesTable(d.by_language || [])) +
-          card('최근 호출', requestsTable(d.recent || [])) +
+          card('LLM Trend Summary', llmTrendSummaryBar(llmTimeseriesSummary(llm.timeseries || []))) +
         '</div>';
       document.getElementById('view').innerHTML = html;
       attachRequestRowHandlers();
@@ -1299,6 +1607,36 @@ const adminHTML = `<!doctype html>
         kpi('Cached 토큰', fmt(a.cached_tokens || 0)) +
         kpi('Reasoning 토큰', fmt(a.reasoning_tokens || 0)) +
       '</div>';
+    }
+
+    function userLLMSummaryHTML(s) {
+      return '<div class="kpis">' +
+        kpi('LLM 요청', fmt(s.requests || 0)) +
+        kpi('세션', fmt(s.sessions || 0)) +
+        kpi('Prompt variant', fmt(s.prompt_variants || 0)) +
+        kpi('Eval 실패', fmt(s.eval_failures || 0) + '<div class="muted" style="font-size:11px; font-weight:500; margin-top:6px">' + fmt(s.evaluations || 0) + ' eval</div>') +
+      '</div>' +
+      '<div class="kpis" style="margin-top:1px">' +
+        kpi('부정 피드백', fmt(s.negative_feedback || 0) + '<div class="muted" style="font-size:11px; font-weight:500; margin-top:6px">' + fmt(s.feedback_total || 0) + ' feedback</div>') +
+        kpi('Alignment', pct(s.alignment_rate || 0) + '<div class="muted" style="font-size:11px; font-weight:500; margin-top:6px">' + fmt(s.alignment_samples || 0) + ' samples</div>') +
+        kpi('평균 첫 청크', fmt(Math.round(s.average_first_chunk_ms || 0)) + ' ms') +
+        kpi('마지막 LLM 호출', s.last_seen ? ago(s.last_seen) : '<span class="muted">-</span>') +
+      '</div>';
+    }
+
+    function llmUserPromptTable(rows) {
+      if (!rows.length) return '<div class="empty">prompt 없음</div>';
+      return '<table><thead><tr>' +
+        '<th data-sort="str">Prompt</th><th data-sort="num">호출</th><th data-sort="num">평균 지연</th><th data-sort="num">평가 실패</th><th data-sort="str">최근</th>' +
+        '</tr></thead><tbody>' +
+        rows.map(r => '<tr>' +
+          '<td>' + escapeHTML(r.prompt_name || 'ad-hoc') + '<div class="muted">' + escapeHTML(r.prompt_version || '') + '</div></td>' +
+          '<td data-num="' + (r.calls || 0) + '">' + fmt(r.calls || 0) + '</td>' +
+          '<td data-num="' + (r.average_latency_ms || 0) + '">' + Math.round(r.average_latency_ms || 0) + ' ms</td>' +
+          '<td data-num="' + (r.eval_failures || 0) + '">' + fmt(r.eval_failures || 0) + '</td>' +
+          '<td>' + ago(r.last_seen) + '</td>' +
+        '</tr>').join('') +
+        '</tbody></table>';
     }
 
     function dailyTable(rows) {
