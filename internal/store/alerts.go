@@ -169,7 +169,7 @@ func (s *SQLStore) MetricSince(ctx context.Context, scope, scopeValue string, si
 		where = append(where, "r.api_key_id = ?")
 		args = append(args, scopeValue)
 	case "team":
-		where = append(where, "EXISTS (SELECT 1 FROM api_keys k WHERE k.id = r.api_key_id AND k.team = ?)")
+		where = append(where, `COALESCE(NULLIF((SELECT k.team FROM api_keys k WHERE k.id = r.api_key_id), ''), 'unassigned') = ?`)
 		args = append(args, scopeValue)
 	case "ip":
 		where = append(where, "COALESCE(NULLIF(r.client_ip, ''), 'unknown') = ?")
@@ -224,7 +224,7 @@ func (s *SQLStore) MetricSince(ctx context.Context, scope, scopeValue string, si
 		evalWhere = append(evalWhere, "r.api_key_id = ?")
 		evalArgs = append(evalArgs, scopeValue)
 	case "team":
-		evalWhere = append(evalWhere, "EXISTS (SELECT 1 FROM api_keys k WHERE k.id = r.api_key_id AND k.team = ?)")
+		evalWhere = append(evalWhere, `COALESCE(NULLIF((SELECT k.team FROM api_keys k WHERE k.id = r.api_key_id), ''), 'unassigned') = ?`)
 		evalArgs = append(evalArgs, scopeValue)
 	case "ip":
 		evalWhere = append(evalWhere, "COALESCE(NULLIF(r.client_ip, ''), 'unknown') = ?")
@@ -242,6 +242,36 @@ func (s *SQLStore) MetricSince(ctx context.Context, scope, scopeValue string, si
 		JOIN request_logs r ON r.id = e.request_id
 		WHERE ` + strings.Join(evalWhere, " AND "))
 	if err := s.db.QueryRowContext(ctx, evalQuery, evalArgs...).Scan(&snapshot.LLMEvaluations, &snapshot.LLMEvalFailures); err != nil {
+		return snapshot, err
+	}
+
+	// tool/MCP metrics over the same scope+window (joined to request_logs for scoping).
+	// Build a dedicated WHERE so the time column references tool_invocations (ti), not e.
+	toolWhere := []string{"ti.created_at >= ?"}
+	toolArgs := []any{since.UTC().Format(time.RFC3339Nano)}
+	switch scope {
+	case "api_key":
+		toolWhere = append(toolWhere, "r.api_key_id = ?")
+		toolArgs = append(toolArgs, scopeValue)
+	case "team":
+		toolWhere = append(toolWhere, `COALESCE(NULLIF((SELECT k.team FROM api_keys k WHERE k.id = r.api_key_id), ''), 'unassigned') = ?`)
+		toolArgs = append(toolArgs, scopeValue)
+	case "ip":
+		toolWhere = append(toolWhere, "COALESCE(NULLIF(r.client_ip, ''), 'unknown') = ?")
+		toolArgs = append(toolArgs, scopeValue)
+	case "model":
+		toolWhere = append(toolWhere, "r.model = ?")
+		toolArgs = append(toolArgs, scopeValue)
+	case "", "global":
+		// no extra
+	}
+	toolQuery := s.bind(`SELECT
+			COALESCE(SUM(CASE WHEN ti.source = 'call' THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN ti.is_error = 1 THEN 1 ELSE 0 END), 0)
+		FROM tool_invocations ti
+		JOIN request_logs r ON r.id = ti.request_id
+		WHERE ` + strings.Join(toolWhere, " AND "))
+	if err := s.db.QueryRowContext(ctx, toolQuery, toolArgs...).Scan(&snapshot.ToolCalls, &snapshot.ToolErrors); err != nil {
 		return snapshot, err
 	}
 	return snapshot, nil

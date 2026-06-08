@@ -145,6 +145,9 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/admin/llm/timeseries", s.handleLLMTimeseries)
 	mux.HandleFunc("/admin/llm/feedback", s.handleLLMFeedback)
 	mux.HandleFunc("/admin/llm/evaluations", s.handleLLMEvaluations)
+	mux.HandleFunc("/admin/mcp/tools", s.handleMCPTools)
+	mux.HandleFunc("/admin/mcp/servers", s.handleMCPServers)
+	mux.HandleFunc("/admin/mcp/requests", s.handleMCPRequests)
 	mux.HandleFunc("/admin/kill-switch", s.handleKillSwitch)
 	mux.HandleFunc("/admin/alerts", s.handleAlertRules)
 	mux.HandleFunc("/admin/alerts/", s.handleAlertRuleByID)
@@ -678,6 +681,10 @@ func (s *Server) handleOpenAI(w http.ResponseWriter, r *http.Request) {
 			CreatedAt:        time.Now().UTC(),
 		}
 	}
+	if len(analysis.ToolCalls) > 0 {
+		meta.Tools = append(meta.Tools, toolInvocations(meta.Request, analysis.ToolCalls)...)
+	}
+	s.metrics.ObserveToolInvocations(meta.Tools)
 	meta.Evaluations = buildLLMEvaluations(meta, analysis)
 	s.metrics.ObserveLLMEvaluations(meta.Evaluations)
 	s.enqueue(meta)
@@ -1084,7 +1091,7 @@ func (s *Server) auditRequest(endpoint string, body []byte, apiKeyID string, tra
 		rawBody = string(body)
 	}
 	llmMeta := llmRequestMetadata(r, body, traceID)
-	return store.LogRecord{
+	record := store.LogRecord{
 		Request: store.RequestLog{
 			ID:                  requestID,
 			TraceID:             traceID,
@@ -1110,6 +1117,8 @@ func (s *Server) auditRequest(endpoint string, body []byte, apiKeyID string, tra
 		Prompts:   prompts,
 		Languages: languageStats,
 	}
+	record.Tools = toolInvocations(record.Request, extractRequestTools(body))
+	return record
 }
 
 func extractAudit(body []byte, endpoint string, rawPrompts bool) (string, bool, []store.PromptLog, []audit.LanguageSignal) {

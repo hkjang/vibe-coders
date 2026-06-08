@@ -18,6 +18,7 @@ type ResponseAnalysis struct {
 	Usage                    audit.Usage
 	HasUsage                 bool
 	CompletionTokensEstimate int
+	ToolCalls                []parsedTool
 }
 
 type ResponseAnalyzer struct {
@@ -31,6 +32,9 @@ type ResponseAnalyzer struct {
 	completion   strings.Builder
 	usage        audit.Usage
 	hasUsage     bool
+	toolCalls    []parsedTool
+	// streaming tool_calls arrive in fragments keyed by index; we accumulate names.
+	streamToolNames map[int]string
 }
 
 func NewResponseAnalyzer(stream bool, captureText bool, maxBytes int) *ResponseAnalyzer {
@@ -70,6 +74,15 @@ func (a *ResponseAnalyzer) Finalize() ResponseAnalysis {
 	if a.captureText {
 		text = a.capture.String()
 	}
+	// finalize any streamed tool-call names that were assembled across chunks
+	for _, name := range a.streamToolNames {
+		if name == "" {
+			continue
+		}
+		server, tool, isMCP := classifyToolName(name)
+		a.toolCalls = append(a.toolCalls, parsedTool{Server: server, Tool: tool, Source: "call", IsMCP: isMCP})
+	}
+
 	return ResponseAnalysis{
 		Hash:                     hex.EncodeToString(a.hasher.Sum(nil)),
 		Text:                     text,
@@ -77,6 +90,7 @@ func (a *ResponseAnalyzer) Finalize() ResponseAnalysis {
 		Usage:                    a.usage,
 		HasUsage:                 a.hasUsage,
 		CompletionTokensEstimate: audit.EstimateTokens(a.completion.String()),
+		ToolCalls:                a.toolCalls,
 	}
 }
 
@@ -113,10 +127,25 @@ func (a *ResponseAnalyzer) parseChunk(payload []byte) {
 	var chunk struct {
 		Choices []struct {
 			Delta struct {
-				Content any `json:"content"`
+				Content   any `json:"content"`
+				ToolCalls []struct {
+					Index    int    `json:"index"`
+					Type     string `json:"type"`
+					Function struct {
+						Name      string `json:"name"`
+						Arguments string `json:"arguments"`
+					} `json:"function"`
+				} `json:"tool_calls"`
 			} `json:"delta"`
 			Message struct {
-				Content any `json:"content"`
+				Content   any `json:"content"`
+				ToolCalls []struct {
+					Type     string `json:"type"`
+					Function struct {
+						Name      string `json:"name"`
+						Arguments string `json:"arguments"`
+					} `json:"function"`
+				} `json:"tool_calls"`
 			} `json:"message"`
 			Text         any `json:"text"`
 			FinishReason any `json:"finish_reason"`
@@ -142,6 +171,26 @@ func (a *ResponseAnalyzer) parseChunk(payload []byte) {
 		a.completion.WriteString(contentString(choice.Delta.Content))
 		a.completion.WriteString(contentString(choice.Message.Content))
 		a.completion.WriteString(contentString(choice.Text))
+
+		// Non-streaming: message.tool_calls carries complete names.
+		for _, tc := range choice.Message.ToolCalls {
+			if tc.Function.Name != "" {
+				server, tool, isMCP := classifyToolName(tc.Function.Name)
+				a.toolCalls = append(a.toolCalls, parsedTool{Server: server, Tool: tool, Source: "call", IsMCP: isMCP, ArgHash: hashArgs(tc.Function.Arguments)})
+			}
+		}
+		// Streaming: delta.tool_calls fragments — accumulate by index, name appears once.
+		for _, tc := range choice.Delta.ToolCalls {
+			if tc.Function.Name != "" {
+				if a.streamToolNames == nil {
+					a.streamToolNames = map[int]string{}
+				}
+				if a.streamToolNames[tc.Index] == "" {
+					a.streamToolNames[tc.Index] = tc.Function.Name
+				}
+			}
+		}
+
 		if choice.FinishReason == nil {
 			continue
 		}

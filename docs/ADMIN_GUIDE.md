@@ -32,6 +32,7 @@
 | --- | --- |
 | 대시보드 | 총 요청·토큰·KRW·평균 지연·첫 청크 지연, 24h/7d/30d 시계열 차트, 상위 사용자, 상태 분포, 시간대 히트맵, 최근 20건 |
 | LLM 관측 | Datadog LLM Observability 대응 Trace/Span/Session/Prompt/Patterns/Insights/Feedback/Evaluation 화면 |
+| MCP | MCP/tool 서버·도구 리더보드, 호출/오류 집계, 오류 호출 drill-down |
 | 호출 이력 | IP/모델/언어 필터로 검색, 두 행 선택 후 비교, 행 클릭 시 상세 모달 |
 | 프롬프트 검색 | 키워드/언어/IP/키/기간으로 마스킹 프롬프트 검색, CSV 다운로드, 저장된 필터 |
 | 사용자 | Proxy API 키별 사용량·비용, 키 클릭 시 일별·모델별·IP별 상세와 LLM trend/eval failure/feedback drill-down |
@@ -105,6 +106,54 @@ curl -X POST http://<host>:8080/admin/llm/feedback \
   -H "Content-Type: application/json" \
   -d '{ "request_id": "req_xxxxxxxx", "rating": -1, "label": "hallucination", "comment": "근거 없는 답변" }'
 ```
+
+---
+
+## 4-1. MCP / Tool 관측
+
+AI 코딩 도구(Roo Code·Cline·Cursor·Claude Desktop)가 MCP 서버나 함수 호출(tool/function calling)을 사용할 때, 게이트웨이는 어떤 서버·어떤 도구가 정의·호출·실패했는지 자동 집계합니다. 별도 설정 없이 OpenAI 호환 트래픽에서 추출됩니다.
+
+### 수집 대상
+
+| 종류 | 출처 |
+| --- | --- |
+| 정의(definition) | 요청 `tools[]` / `functions[]` 카탈로그. Responses API `{type:"mcp", server_label}` 포함 |
+| 호출(call) | 응답 `tool_calls[]` (스트리밍·논스트리밍 모두), 요청 내 assistant `tool_calls` |
+| 결과(result) | 요청의 `role:"tool"` 메시지. `{"isError":true}` 등은 오류로 분류 |
+
+### MCP 서버 분류 규칙
+
+도구 이름에서 서버 라벨을 자동 추출합니다.
+
+- `mcp__github__create_issue` → 서버 `github`, 도구 `create_issue` (MCP)
+- `mcp__korean-law__search_law` → 서버 `korean-law` (MCP)
+- Responses API `{type:"mcp", server_label:"filesystem"}` → 서버 `filesystem` (MCP)
+- `github.create_issue`, `fs/read_file` → 서버 추출하되 MCP 플래그는 false (일반 함수)
+- `web_search` 같은 built-in tool type → 서버 `builtin`
+
+### MCP 탭 구성
+
+1. **요약 KPI**: tool 호출 수 / tool 오류 수(+오류율) / 고유 tool 수 / MCP 서버 수
+2. **필터**: API 키 ID, 서버 라벨, "MCP만" 체크. 필터는 URL hash 에 보관되어 공유 가능
+3. **MCP 서버별 표**: 서버마다 도구 종류·호출·오류·오류율·고유 키·마지막 사용. 행 클릭 시 그 서버로 필터링
+4. **Tool 리더보드**: (서버, 도구) 별 정의·호출·결과·오류·오류율·고유 키. `호출`/`오류` 버튼으로 해당 도구를 사용한 요청을 모달로 drill-down
+
+### MCP 관련 알림 / 평가
+
+- 알림 지표 `tool_errors`(윈도우 내 tool 오류 수), `tool_error_rate`(오류/호출 비율) 를 안전 탭에서 규칙으로 걸 수 있습니다.
+- 요청 상세의 LLM 평가에 `tools.no_error`(tool 결과 오류 여부), `tools.mcp_servers`(사용된 MCP 서버 수) 가 추가됩니다.
+- 요청 상세의 trace span 에 도구마다 개별 span(`mcp`/`tool` kind)이 표시됩니다.
+- Prometheus: `proxy_mcp_tool_calls_total`, `proxy_mcp_tool_errors_total`.
+
+### API
+
+```bash
+curl -H "Authorization: Bearer $ADMIN_TOKEN" http://localhost:8080/admin/mcp/servers
+curl -H "Authorization: Bearer $ADMIN_TOKEN" "http://localhost:8080/admin/mcp/tools?mcp_only=1"
+curl -H "Authorization: Bearer $ADMIN_TOKEN" "http://localhost:8080/admin/mcp/requests?server=github&tool=create_issue&errors=1"
+```
+
+> 보안 참고: MCP 도구 결과(`role:tool`)도 프롬프트로 캡처되어 기존 `prompt.injection` 평가가 도구 응답을 통한 프롬프트 인젝션까지 스캔합니다. MCP 서버가 신뢰 경계 밖이라면 이 평가 실패를 모니터링하세요.
 
 ---
 

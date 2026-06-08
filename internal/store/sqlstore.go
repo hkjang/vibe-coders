@@ -204,6 +204,22 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 		`CREATE INDEX IF NOT EXISTS idx_llm_feedback_request_id ON llm_feedback(request_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_llm_feedback_trace_id ON llm_feedback(trace_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_llm_feedback_created_at ON llm_feedback(created_at)`,
+		`CREATE TABLE IF NOT EXISTS tool_invocations (
+			id TEXT PRIMARY KEY,
+			request_id TEXT NOT NULL,
+			trace_id TEXT NOT NULL,
+			api_key_id TEXT,
+			server_label TEXT,
+			tool_name TEXT NOT NULL,
+			source TEXT NOT NULL,
+			is_mcp INTEGER NOT NULL DEFAULT 0,
+			is_error INTEGER NOT NULL DEFAULT 0,
+			arg_hash TEXT,
+			created_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_tool_invocations_request_id ON tool_invocations(request_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_tool_invocations_server ON tool_invocations(server_label, tool_name)`,
+		`CREATE INDEX IF NOT EXISTS idx_tool_invocations_created_at ON tool_invocations(created_at)`,
 		`CREATE TABLE IF NOT EXISTS provider_configs (
 			name TEXT PRIMARY KEY,
 			base_url TEXT NOT NULL,
@@ -629,6 +645,20 @@ func (s *SQLStore) InsertLogRecord(ctx context.Context, record LogRecord) error 
 		}
 	}
 
+	for _, tool := range record.Tools {
+		if tool.CreatedAt.IsZero() {
+			tool.CreatedAt = req.CreatedAt
+		}
+		_, err = tx.ExecContext(ctx, s.bind(`INSERT INTO tool_invocations
+			(id, request_id, trace_id, api_key_id, server_label, tool_name, source, is_mcp, is_error, arg_hash, created_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+			tool.ID, tool.RequestID, tool.TraceID, tool.APIKeyID, tool.ServerLabel, tool.ToolName, tool.Source,
+			boolInt(tool.IsMCP), boolInt(tool.IsError), tool.ArgHash, formatTime(tool.CreatedAt))
+		if err != nil {
+			return err
+		}
+	}
+
 	return tx.Commit()
 }
 
@@ -840,7 +870,7 @@ func (s *SQLStore) RecentRequests(ctx context.Context, filter RequestFilter) ([]
 		args = append(args, filter.APIKeyID)
 	}
 	if filter.Team != "" {
-		where = append(where, "EXISTS (SELECT 1 FROM api_keys k WHERE k.id = r.api_key_id AND COALESCE(NULLIF(k.team, ''), 'unassigned') = ?)")
+		where = append(where, `COALESCE(NULLIF((SELECT k.team FROM api_keys k WHERE k.id = r.api_key_id), ''), 'unassigned') = ?`)
 		args = append(args, filter.Team)
 	}
 	if filter.SessionID != "" {
@@ -858,6 +888,21 @@ func (s *SQLStore) RecentRequests(ctx context.Context, filter RequestFilter) ([]
 	if filter.EvaluationName != "" {
 		where = append(where, "EXISTS (SELECT 1 FROM llm_evaluations e WHERE e.request_id = r.id AND e.name = ?)")
 		args = append(args, filter.EvaluationName)
+	}
+	if filter.ToolServer != "" || filter.ToolName != "" || filter.ToolErrorsOnly {
+		toolClauses := []string{"ti.request_id = r.id"}
+		if filter.ToolServer != "" {
+			toolClauses = append(toolClauses, "COALESCE(NULLIF(ti.server_label, ''), '(none)') = ?")
+			args = append(args, filter.ToolServer)
+		}
+		if filter.ToolName != "" {
+			toolClauses = append(toolClauses, "ti.tool_name = ?")
+			args = append(args, filter.ToolName)
+		}
+		if filter.ToolErrorsOnly {
+			toolClauses = append(toolClauses, "ti.is_error = 1")
+		}
+		where = append(where, "EXISTS (SELECT 1 FROM tool_invocations ti WHERE "+strings.Join(toolClauses, " AND ")+")")
 	}
 	args = append(args, limit)
 

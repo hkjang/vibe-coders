@@ -156,7 +156,67 @@ func buildLLMEvaluations(record store.LogRecord, analysis ResponseAnalysis) []st
 			evalBool(record, "response.toxicity", "safety", !keywordHit(responseText, toxicKeywords), "no_toxicity_detected", "response contains toxic content keywords", now),
 		)
 	}
+	// MCP / tool evaluations
+	if hasToolResults(record.Tools) {
+		evaluations = append(evaluations,
+			evalBool(record, "tools.no_error", "tools", !hasToolError(record.Tools), "no_tool_error", "an MCP/tool result returned an error", now),
+		)
+	}
+	if mcpServers := distinctMCPServers(record.Tools); mcpServers > 0 {
+		// informational evaluation: passes always, label carries the server count
+		evaluations = append(evaluations, evalScore(record, "tools.mcp_servers", "tools", 1, "servers="+itoaProxy(mcpServers), "", now))
+	}
 	return evaluations
+}
+
+func hasToolResults(tools []store.ToolInvocation) bool {
+	for _, t := range tools {
+		if t.Source == "result" {
+			return true
+		}
+	}
+	return false
+}
+
+func hasToolError(tools []store.ToolInvocation) bool {
+	for _, t := range tools {
+		if t.IsError {
+			return true
+		}
+	}
+	return false
+}
+
+func distinctMCPServers(tools []store.ToolInvocation) int {
+	seen := map[string]bool{}
+	for _, t := range tools {
+		if t.IsMCP && t.ServerLabel != "" {
+			seen[t.ServerLabel] = true
+		}
+	}
+	return len(seen)
+}
+
+func itoaProxy(v int) string {
+	if v == 0 {
+		return "0"
+	}
+	neg := v < 0
+	if neg {
+		v = -v
+	}
+	buf := [20]byte{}
+	i := len(buf)
+	for v > 0 {
+		i--
+		buf[i] = byte('0' + v%10)
+		v /= 10
+	}
+	if neg {
+		i--
+		buf[i] = '-'
+	}
+	return string(buf[i:])
 }
 
 func promptsText(prompts []store.PromptLog) string {

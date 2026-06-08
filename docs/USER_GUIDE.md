@@ -133,6 +133,10 @@ X-LLM-Prompt-Variables-Hash: vars-sha256
 
 헤더가 없어도 호출은 정상 처리됩니다. 다만 어드민의 LLM 관측 탭에서는 session이 개별 trace 단위로, prompt가 `ad-hoc` 으로 표시됩니다.
 
+### 3.9 MCP / 도구 사용 가시성
+
+MCP 서버나 function calling 을 쓰는 경우(예: `tools` 배열을 보내거나 `tool_calls` 가 오가는 경우), 게이트웨이가 자동으로 어떤 서버·도구가 호출·실패했는지 집계합니다. 별도 설정은 필요 없습니다. `mcp__<서버>__<도구>` 형태의 도구 이름은 서버별로 자동 분류됩니다. 도구 결과(`role:tool`)가 오류(`{"isError":true}` 등)이면 어드민 MCP 탭에서 오류로 집계되고, 운영자가 `tool_error_rate` 알림을 걸어두었다면 임계치 초과 시 통보됩니다.
+
 ---
 
 ## 4. provider 명시적 선택

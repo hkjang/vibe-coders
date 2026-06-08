@@ -21,6 +21,8 @@ type Metrics struct {
 	failovers       atomic.Uint64
 	llmEvaluations  atomic.Uint64
 	llmEvalFailures atomic.Uint64
+	mcpToolCalls    atomic.Uint64
+	mcpToolErrors   atomic.Uint64
 	latency         *LatencyDigest
 	firstChunk      *LatencyDigest
 }
@@ -66,6 +68,18 @@ func (m *Metrics) IncRequest(stream bool) {
 
 func (m *Metrics) IncUpstreamError() {
 	m.upstreamError.Add(1)
+}
+
+// ObserveToolInvocations counts MCP/tool calls and tool-result errors for metrics.
+func (m *Metrics) ObserveToolInvocations(tools []store.ToolInvocation) {
+	for _, t := range tools {
+		if t.Source == "call" {
+			m.mcpToolCalls.Add(1)
+		}
+		if t.IsError {
+			m.mcpToolErrors.Add(1)
+		}
+	}
 }
 
 func (m *Metrics) IncQuotaBlock() {
@@ -135,6 +149,12 @@ func (m *Metrics) Prometheus(queueDepth int, logDropped uint64, logWritten uint6
 		"# HELP proxy_llm_evaluation_failures_total Total failed LLM evaluations observed by this process.",
 		"# TYPE proxy_llm_evaluation_failures_total counter",
 		fmt.Sprintf("proxy_llm_evaluation_failures_total %d", m.llmEvalFailures.Load()),
+		"# HELP proxy_mcp_tool_calls_total Total MCP/tool calls observed in responses.",
+		"# TYPE proxy_mcp_tool_calls_total counter",
+		fmt.Sprintf("proxy_mcp_tool_calls_total %d", m.mcpToolCalls.Load()),
+		"# HELP proxy_mcp_tool_errors_total Total tool-result errors observed in requests.",
+		"# TYPE proxy_mcp_tool_errors_total counter",
+		fmt.Sprintf("proxy_mcp_tool_errors_total %d", m.mcpToolErrors.Load()),
 		"# HELP proxy_log_queue_depth Current async log queue depth.",
 		"# TYPE proxy_log_queue_depth gauge",
 		fmt.Sprintf("proxy_log_queue_depth %d", queueDepth),

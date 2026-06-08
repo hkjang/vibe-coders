@@ -10,17 +10,48 @@ import (
 	"time"
 )
 
+// requestTeamExpr maps a request row (alias r) to its team. Requests whose API key
+// is unknown (passthrough / anonymous / legacy) or has no team fall into "unassigned",
+// so traffic that never minted a gateway proxy key is still attributed somewhere.
+const requestTeamExpr = `COALESCE(NULLIF((SELECT k.team FROM api_keys k WHERE k.id = r.api_key_id), ''), 'unassigned')`
+
+// requestTeamFilter is requestTeamExpr compared to a bound parameter.
+const requestTeamFilter = requestTeamExpr + ` = ?`
+
+// friendlyAPIKeyName turns synthetic api_key_id values into human labels.
+func friendlyAPIKeyName(id string) string {
+	switch id {
+	case "passthrough":
+		return "패스스루 (직접 키)"
+	case "anonymous":
+		return "익명"
+	default:
+		return id
+	}
+}
+
 func (s *SQLStore) ListUsers(ctx context.Context) ([]UserSummary, error) {
+	// Driven by the union of every api_key_id seen in traffic AND every configured key,
+	// so passthrough/anonymous callers (which have no api_keys row) still appear.
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT k.id, k.name, COALESCE(k.owner, ''), COALESCE(k.team, ''), k.status,
-			COALESCE(stat.requests, 0) AS requests,
-			COALESCE(stat.tokens, 0) AS tokens,
-			COALESCE(stat.cost, 0) AS cost,
-			COALESCE(stat.avg_latency, 0) AS avg_latency,
-			COALESCE(stat.last_seen, '') AS last_seen
-		FROM api_keys k
+		SELECT ids.akid AS id,
+			COALESCE(NULLIF(k.name, ''), ids.akid) AS name,
+			COALESCE(k.owner, '') AS owner,
+			COALESCE(NULLIF(k.team, ''), '') AS team,
+			COALESCE(NULLIF(k.status, ''), CASE WHEN k.id IS NULL THEN 'external' ELSE 'active' END) AS status,
+			COALESCE(u.requests, 0) AS requests,
+			COALESCE(u.tokens, 0) AS tokens,
+			COALESCE(u.cost, 0) AS cost,
+			COALESCE(u.avg_latency, 0) AS avg_latency,
+			COALESCE(u.last_seen, '') AS last_seen
+		FROM (
+			SELECT COALESCE(NULLIF(api_key_id, ''), 'anonymous') AS akid FROM request_logs
+			UNION
+			SELECT id AS akid FROM api_keys
+		) ids
+		LEFT JOIN api_keys k ON k.id = ids.akid
 		LEFT JOIN (
-			SELECT r.api_key_id,
+			SELECT COALESCE(NULLIF(r.api_key_id, ''), 'anonymous') AS akid,
 				COUNT(r.id) AS requests,
 				SUM(COALESCE(t.total_tokens, 0)) AS tokens,
 				SUM(COALESCE(t.estimated_cost, 0)) AS cost,
@@ -28,9 +59,9 @@ func (s *SQLStore) ListUsers(ctx context.Context) ([]UserSummary, error) {
 				MAX(r.created_at) AS last_seen
 			FROM request_logs r
 			LEFT JOIN token_usage t ON t.request_id = r.id
-			GROUP BY r.api_key_id
-		) stat ON stat.api_key_id = k.id
-		ORDER BY requests DESC, k.name ASC
+			GROUP BY COALESCE(NULLIF(r.api_key_id, ''), 'anonymous')
+		) u ON u.akid = ids.akid
+		ORDER BY 6 DESC, 2 ASC
 	`)
 	if err != nil {
 		return nil, err
@@ -42,6 +73,9 @@ func (s *SQLStore) ListUsers(ctx context.Context) ([]UserSummary, error) {
 		var u UserSummary
 		if err := rows.Scan(&u.APIKeyID, &u.Name, &u.Owner, &u.Team, &u.Status, &u.Requests, &u.Tokens, &u.CostKRW, &u.AverageLatencyMS, &u.LastSeen); err != nil {
 			return nil, err
+		}
+		if u.Name == u.APIKeyID {
+			u.Name = friendlyAPIKeyName(u.APIKeyID)
 		}
 		result = append(result, u)
 	}
@@ -80,27 +114,19 @@ func (s *SQLStore) ListIPs(ctx context.Context) ([]IPSummary, error) {
 }
 
 func (s *SQLStore) ListTeams(ctx context.Context) ([]TeamSummary, error) {
+	// Driven by request_logs so passthrough/anonymous traffic lands in "unassigned".
+	// token_usage is 1:1 with request_logs, so the direct join does not multiply counts.
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT COALESCE(NULLIF(k.team, ''), 'unassigned') AS team,
-			COUNT(DISTINCT k.id) AS keys,
-			COALESCE(SUM(stat.requests), 0) AS requests,
-			COALESCE(SUM(stat.tokens), 0) AS tokens,
-			COALESCE(SUM(stat.cost), 0) AS cost,
-			COALESCE(AVG(stat.avg_latency), 0) AS avg_latency,
-			COALESCE(MAX(stat.last_seen), '') AS last_seen
-		FROM api_keys k
-		LEFT JOIN (
-			SELECT r.api_key_id,
-				COUNT(r.id) AS requests,
-				SUM(COALESCE(t.total_tokens, 0)) AS tokens,
-				SUM(COALESCE(t.estimated_cost, 0)) AS cost,
-				AVG(r.latency_ms) AS avg_latency,
-				MAX(r.created_at) AS last_seen
-			FROM request_logs r
-			LEFT JOIN token_usage t ON t.request_id = r.id
-			GROUP BY r.api_key_id
-		) stat ON stat.api_key_id = k.id
-		GROUP BY COALESCE(NULLIF(k.team, ''), 'unassigned')
+		SELECT `+requestTeamExpr+` AS team,
+			COUNT(DISTINCT COALESCE(NULLIF(r.api_key_id, ''), 'anonymous')) AS keys,
+			COUNT(r.id) AS requests,
+			SUM(COALESCE(t.total_tokens, 0)) AS tokens,
+			SUM(COALESCE(t.estimated_cost, 0)) AS cost,
+			AVG(r.latency_ms) AS avg_latency,
+			MAX(r.created_at) AS last_seen
+		FROM request_logs r
+		LEFT JOIN token_usage t ON t.request_id = r.id
+		GROUP BY `+requestTeamExpr+`
 		ORDER BY requests DESC, team ASC
 	`)
 	if err != nil {
@@ -111,9 +137,17 @@ func (s *SQLStore) ListTeams(ctx context.Context) ([]TeamSummary, error) {
 	result := []TeamSummary{}
 	for rows.Next() {
 		var item TeamSummary
-		if err := rows.Scan(&item.Team, &item.Keys, &item.Requests, &item.Tokens, &item.CostKRW, &item.AverageLatencyMS, &item.LastSeen); err != nil {
+		var tokens, requests sql.NullInt64
+		var cost, avgLatency sql.NullFloat64
+		var lastSeen sql.NullString
+		if err := rows.Scan(&item.Team, &item.Keys, &requests, &tokens, &cost, &avgLatency, &lastSeen); err != nil {
 			return nil, err
 		}
+		item.Requests = requests.Int64
+		item.Tokens = tokens.Int64
+		item.CostKRW = cost.Float64
+		item.AverageLatencyMS = avgLatency.Float64
+		item.LastSeen = lastSeen.String
 		result = append(result, item)
 	}
 	return result, rows.Err()
@@ -141,9 +175,17 @@ func (s *SQLStore) GetUserDetail(ctx context.Context, apiKeyID string, recent in
 		FROM api_keys WHERE id = ?
 	`), apiKeyID).Scan(&key.ID, &key.Name, &key.Owner, &key.Team, &key.Status, &key.CreatedAt)
 	if err == sql.ErrNoRows {
-		return detail, ErrNotFound
-	}
-	if err != nil {
+		// passthrough / anonymous / legacy callers have no api_keys row. Only treat as
+		// a synthetic user if they actually produced traffic; otherwise it's a 404.
+		var seen int
+		if cErr := s.db.QueryRowContext(ctx, s.bind(`SELECT COUNT(1) FROM request_logs WHERE api_key_id = ? LIMIT 1`), apiKeyID).Scan(&seen); cErr != nil {
+			return detail, cErr
+		}
+		if seen == 0 {
+			return detail, ErrNotFound
+		}
+		key = APIKeyPublic{ID: apiKeyID, Name: friendlyAPIKeyName(apiKeyID), Status: "external"}
+	} else if err != nil {
 		return detail, err
 	}
 	detail.APIKey = key
@@ -220,20 +262,19 @@ func (s *SQLStore) GetTeamDetail(ctx context.Context, team string, recent int) (
 			FeedbackLabels: []LLMFeedbackLabelSummary{},
 		},
 	}
-	teamFilter := "COALESCE(NULLIF(k.team, ''), 'unassigned') = ?"
+	whereClause := requestTeamFilter
 	err := s.db.QueryRowContext(ctx, s.bind(`
-		SELECT COALESCE(NULLIF(k.team, ''), 'unassigned') AS team,
-			COUNT(DISTINCT k.id) AS keys,
+		SELECT `+requestTeamExpr+` AS team,
+			COUNT(DISTINCT COALESCE(NULLIF(r.api_key_id, ''), 'anonymous')) AS keys,
 			COUNT(r.id) AS requests,
 			COALESCE(SUM(t.total_tokens), 0) AS tokens,
 			COALESCE(SUM(t.estimated_cost), 0) AS cost,
 			COALESCE(AVG(r.latency_ms), 0) AS avg_latency,
 			COALESCE(MAX(r.created_at), '') AS last_seen
-		FROM api_keys k
-		LEFT JOIN request_logs r ON r.api_key_id = k.id
+		FROM request_logs r
 		LEFT JOIN token_usage t ON t.request_id = r.id
-		WHERE `+teamFilter+`
-		GROUP BY COALESCE(NULLIF(k.team, ''), 'unassigned')
+		WHERE `+whereClause+`
+		GROUP BY `+requestTeamExpr+`
 	`), team).Scan(&detail.Stats.Team, &detail.Stats.Keys, &detail.Stats.Requests, &detail.Stats.Tokens, &detail.Stats.CostKRW, &detail.Stats.AverageLatencyMS, &detail.Stats.LastSeen)
 	if err == sql.ErrNoRows {
 		return detail, ErrNotFound
@@ -241,7 +282,6 @@ func (s *SQLStore) GetTeamDetail(ctx context.Context, team string, recent int) (
 	if err != nil {
 		return detail, err
 	}
-	whereClause := "EXISTS (SELECT 1 FROM api_keys k WHERE k.id = r.api_key_id AND COALESCE(NULLIF(k.team, ''), 'unassigned') = ?)"
 	if detail.Advanced, err = s.teamAdvancedStats(ctx, team); err != nil {
 		return detail, err
 	}
@@ -392,7 +432,7 @@ func (s *SQLStore) teamLLMStats(ctx context.Context, team string) (UserLLMStats,
 			FROM request_logs r
 			LEFT JOIN feedback_per_request fp ON fp.request_id = r.id
 			LEFT JOIN evaluation_per_request ep ON ep.request_id = r.id
-			WHERE EXISTS (SELECT 1 FROM api_keys k WHERE k.id = r.api_key_id AND COALESCE(NULLIF(k.team, ''), 'unassigned') = ?)
+			WHERE `+requestTeamFilter+`
 		)
 		SELECT COUNT(*),
 			COUNT(DISTINCT NULLIF(session_id, '')),
@@ -483,7 +523,7 @@ func (s *SQLStore) teamAdvancedStats(ctx context.Context, team string) (UserAdva
 	var stats UserAdvancedStats
 	since24h := time.Now().Add(-24 * time.Hour).UTC().Format(time.RFC3339Nano)
 	var totalRequests int64
-	teamWhere := "EXISTS (SELECT 1 FROM api_keys k WHERE k.id = r.api_key_id AND COALESCE(NULLIF(k.team, ''), 'unassigned') = ?)"
+	teamWhere := requestTeamFilter
 	err := s.db.QueryRowContext(ctx, s.bind(`
 		SELECT
 			COUNT(r.id),
@@ -771,7 +811,12 @@ func (s *SQLStore) RequestDetail(ctx context.Context, id string) (RequestDetail,
 	item.Prompts = previews
 	detail.Request = item
 	detail.Languages = languages
-	detail.Spans = llmSpansForRequest(item)
+	tools, err := s.ToolsForRequest(ctx, item.ID)
+	if err != nil {
+		return detail, err
+	}
+	detail.Tools = tools
+	detail.Spans = llmSpansForRequest(item, tools)
 	evaluations, err := s.EvaluationsForRequest(ctx, item.ID)
 	if err != nil {
 		return detail, err
@@ -813,7 +858,7 @@ func (s *SQLStore) FeedbackForRequest(ctx context.Context, requestID string) ([]
 	return scanLLMFeedback(rows)
 }
 
-func llmSpansForRequest(item RecentRequest) []LLMSpan {
+func llmSpansForRequest(item RecentRequest, tools []ToolInvocation) []LLMSpan {
 	status := "ok"
 	if item.StatusCode >= 400 || item.Error != "" {
 		status = "error"
@@ -840,7 +885,46 @@ func llmSpansForRequest(item RecentRequest) []LLMSpan {
 		ToolCount:        item.ToolCount,
 		CreatedAt:        item.CreatedAt,
 	}}
-	if item.ToolCount > 0 {
+	// Emit one span per actual tool call/result so the trace explorer shows real
+	// MCP/tool spans (Datadog-style) instead of a single aggregate.
+	emitted := 0
+	for i, t := range tools {
+		if t.Source == "definition" {
+			continue // definitions are catalog, not spans
+		}
+		spanStatus := "ok"
+		if t.IsError {
+			spanStatus = "error"
+		}
+		name := t.ToolName
+		if t.ServerLabel != "" && t.ServerLabel != "(none)" {
+			name = t.ServerLabel + " · " + t.ToolName
+		}
+		spanKind := "tool"
+		if t.IsMCP {
+			spanKind = "mcp"
+		}
+		errText := ""
+		if t.IsError {
+			errText = "tool returned an error result"
+		}
+		spans = append(spans, LLMSpan{
+			ID:        "span:" + item.ID + ":tool:" + itoa(i),
+			TraceID:   item.TraceID,
+			RequestID: item.ID,
+			ParentID:  rootID,
+			Name:      name,
+			Kind:      spanKind,
+			Status:    spanStatus,
+			Error:     errText,
+			ToolCount: 1,
+			CreatedAt: item.CreatedAt,
+		})
+		emitted++
+	}
+	// Fall back to the aggregate span when no per-tool rows exist but tool_count > 0
+	// (legacy rows captured before tool tracking shipped).
+	if emitted == 0 && item.ToolCount > 0 {
 		spans = append(spans, LLMSpan{
 			ID:        "span:" + item.ID + ":tools",
 			TraceID:   item.TraceID,
@@ -855,6 +939,28 @@ func llmSpansForRequest(item RecentRequest) []LLMSpan {
 		})
 	}
 	return spans
+}
+
+func itoa(v int) string {
+	if v == 0 {
+		return "0"
+	}
+	neg := v < 0
+	if neg {
+		v = -v
+	}
+	buf := [20]byte{}
+	i := len(buf)
+	for v > 0 {
+		i--
+		buf[i] = byte('0' + v%10)
+		v /= 10
+	}
+	if neg {
+		i--
+		buf[i] = '-'
+	}
+	return string(buf[i:])
 }
 
 func (s *SQLStore) promptDetailsForRequest(ctx context.Context, requestID string) ([]PromptDetail, error) {
@@ -2312,7 +2418,7 @@ func (s *SQLStore) UsageSince(ctx context.Context, filter UsageFilter) (int64, f
 		where = append(where, "r.api_key_id = ?")
 		args = append(args, filter.ScopeValue)
 	case "team":
-		where = append(where, "EXISTS (SELECT 1 FROM api_keys k WHERE k.id = r.api_key_id AND k.team = ?)")
+		where = append(where, requestTeamFilter)
 		args = append(args, filter.ScopeValue)
 	case "ip":
 		where = append(where, "COALESCE(NULLIF(r.client_ip, ''), 'unknown') = ?")
@@ -2441,6 +2547,7 @@ func (s *SQLStore) PurgeOlderThan(ctx context.Context, table string, days int) (
 			`DELETE FROM language_stats WHERE request_id IN (SELECT id FROM request_logs WHERE created_at < ?)`,
 			`DELETE FROM llm_evaluations WHERE request_id IN (SELECT id FROM request_logs WHERE created_at < ?)`,
 			`DELETE FROM llm_feedback WHERE request_id IN (SELECT id FROM request_logs WHERE created_at < ?)`,
+			`DELETE FROM tool_invocations WHERE request_id IN (SELECT id FROM request_logs WHERE created_at < ?)`,
 			`DELETE FROM request_logs WHERE created_at < ?`,
 		}
 		for _, q := range queries {

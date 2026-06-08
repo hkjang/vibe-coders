@@ -157,6 +157,48 @@ type LogRecord struct {
 	Usage       *TokenUsage
 	Languages   []LanguageStat
 	Evaluations []LLMEvaluation
+	Tools       []ToolInvocation
+}
+
+// ToolInvocation captures a single tool/MCP interaction observed in a request or
+// response. Source is one of: definition (declared in request tools[]/functions[]),
+// call (model invoked the tool), result (a role:tool result message in the request).
+type ToolInvocation struct {
+	ID          string    `json:"id"`
+	RequestID   string    `json:"request_id"`
+	TraceID     string    `json:"trace_id"`
+	APIKeyID    string    `json:"api_key_id"`
+	ServerLabel string    `json:"server_label"` // MCP server name; "" for plain functions
+	ToolName    string    `json:"tool_name"`
+	Source      string    `json:"source"` // definition | call | result
+	IsMCP       bool      `json:"is_mcp"`
+	IsError     bool      `json:"is_error"`
+	ArgHash     string    `json:"arg_hash"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+type MCPToolStat struct {
+	ServerLabel  string  `json:"server_label"`
+	ToolName     string  `json:"tool_name"`
+	IsMCP        bool    `json:"is_mcp"`
+	Definitions  int64   `json:"definitions"`
+	Calls        int64   `json:"calls"`
+	Results      int64   `json:"results"`
+	Errors       int64   `json:"errors"`
+	ErrorRate    float64 `json:"error_rate"`
+	DistinctKeys int64   `json:"distinct_keys"`
+	LastSeen     string  `json:"last_seen"`
+}
+
+type MCPServerStat struct {
+	ServerLabel  string  `json:"server_label"`
+	IsMCP        bool    `json:"is_mcp"`
+	Tools        int64   `json:"tools"`
+	Calls        int64   `json:"calls"`
+	Errors       int64   `json:"errors"`
+	ErrorRate    float64 `json:"error_rate"`
+	DistinctKeys int64   `json:"distinct_keys"`
+	LastSeen     string  `json:"last_seen"`
 }
 
 type SummaryStats struct {
@@ -219,6 +261,9 @@ type RequestFilter struct {
 	PromptName     string
 	PromptVersion  string
 	EvaluationName string
+	ToolServer     string
+	ToolName       string
+	ToolErrorsOnly bool
 }
 
 type RecentRequest struct {
@@ -283,13 +328,14 @@ type ResponseDetail struct {
 }
 
 type RequestDetail struct {
-	Request     RecentRequest   `json:"request"`
-	Prompts     []PromptDetail  `json:"prompts"`
-	Response    *ResponseDetail `json:"response,omitempty"`
-	Languages   []LanguageStat  `json:"languages"`
-	Spans       []LLMSpan       `json:"spans"`
-	Evaluations []LLMEvaluation `json:"evaluations"`
-	Feedback    []LLMFeedback   `json:"feedback"`
+	Request     RecentRequest    `json:"request"`
+	Prompts     []PromptDetail   `json:"prompts"`
+	Response    *ResponseDetail  `json:"response,omitempty"`
+	Languages   []LanguageStat   `json:"languages"`
+	Spans       []LLMSpan        `json:"spans"`
+	Evaluations []LLMEvaluation  `json:"evaluations"`
+	Feedback    []LLMFeedback    `json:"feedback"`
+	Tools       []ToolInvocation `json:"tools"`
 }
 
 type LLMSpan struct {
@@ -695,6 +741,8 @@ type AlertMetricSnapshot struct {
 	FirstChunkP95MS float64
 	LLMEvaluations  int64
 	LLMEvalFailures int64
+	ToolCalls       int64
+	ToolErrors      int64
 }
 
 type AlertEvent struct {

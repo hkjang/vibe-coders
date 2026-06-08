@@ -189,6 +189,7 @@ const adminHTML = `<!doctype html>
     <nav id="tabs">
       <a href="#/dashboard" data-tab="dashboard" class="active">대시보드</a>
       <a href="#/llm" data-tab="llm">LLM 관측</a>
+      <a href="#/mcp" data-tab="mcp">MCP</a>
       <a href="#/requests" data-tab="requests">호출 이력</a>
       <a href="#/prompts" data-tab="prompts">프롬프트 검색</a>
       <a href="#/users" data-tab="users">사용자</a>
@@ -338,6 +339,10 @@ const adminHTML = `<!doctype html>
     function escapeHTML(value) {
       return String(value ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
     }
+    // escapeAttr is for values placed inside a single-quoted inline handler string.
+    function escapeAttr(value) {
+      return String(value ?? '').replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/[<>&"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
+    }
     function formatTextIfJSON(text) {
       if (!text) return '';
       const trimmed = text.trim();
@@ -468,6 +473,7 @@ const adminHTML = `<!doctype html>
           case 'teams':     rest.length ? await renderTeamDetail(decodeURIComponent(rest.join('/'))) : await renderTeams(); break;
           case 'ips':       rest.length ? await renderIPDetail(decodeURIComponent(rest.join('/'))) : await renderIPs(); break;
           case 'quotas':    await renderQuotas(); break;
+          case 'mcp':       await renderMCP(params); break;
           case 'safety':    await renderSafety(); break;
           case 'settings':  await renderSettings(); break;
           default: await renderDashboard();
@@ -2335,6 +2341,113 @@ const adminHTML = `<!doctype html>
       route();
     };
 
+    // ---------- MCP / tool observability ----------
+    async function renderMCP(initial) {
+      const apiKeyId = initial ? (initial.get('api_key_id') || '') : '';
+      const serverFilter = initial ? (initial.get('server') || '') : '';
+      const mcpOnly = initial ? (initial.get('mcp_only') === '1') : false;
+      const qs = new URLSearchParams();
+      if (apiKeyId) qs.set('api_key_id', apiKeyId);
+      if (serverFilter) qs.set('server', serverFilter);
+      if (mcpOnly) qs.set('mcp_only', '1');
+
+      const [serversResp, toolsResp] = await Promise.all([
+        api('/admin/mcp/servers' + (qs.toString() ? '?' + qs.toString() : '')),
+        api('/admin/mcp/tools' + (qs.toString() ? '?' + qs.toString() : '')),
+      ]);
+      const servers = serversResp.servers || [];
+      const summary = serversResp.summary || {};
+      const tools = toolsResp.tools || [];
+
+      const kpis = '<div class="kpis">' +
+        kpi('tool 호출 수', fmt(summary.total_calls)) +
+        kpi('tool 오류 수', fmt(summary.total_errors) + '<div class="muted" style="font-size:11px; font-weight:500; margin-top:6px">' + errorRatePct(summary.total_errors, summary.total_calls) + '</div>') +
+        kpi('고유 tool 수', fmt(summary.distinct_tools)) +
+        kpi('MCP 서버 수', fmt(summary.mcp_servers)) +
+      '</div>';
+
+      const filterBar =
+        '<form class="toolbar" id="mcp-filter" autocomplete="off">' +
+          '<input id="mcp-api-key" placeholder="API 키 ID" value="' + escapeHTML(apiKeyId) + '">' +
+          '<input id="mcp-server" placeholder="서버 라벨" value="' + escapeHTML(serverFilter) + '">' +
+          '<label style="display:flex; align-items:center; gap:6px"><input type="checkbox" id="mcp-only" ' + (mcpOnly ? 'checked' : '') + ' style="width:auto; height:auto; min-width:0"> MCP만</label>' +
+          '<button type="submit">적용</button>' +
+        '</form>';
+
+      const serverRows = servers.length ? servers.map(s =>
+        '<tr class="row-link" onclick="mcpFilterServer(\'' + escapeAttr(s.server_label) + '\')">' +
+          '<td>' + (s.is_mcp ? '<span class="pill">MCP</span> ' : '') + escapeHTML(s.server_label) + '</td>' +
+          '<td data-num="' + (s.tools || 0) + '">' + fmt(s.tools) + '</td>' +
+          '<td data-num="' + (s.calls || 0) + '">' + fmt(s.calls) + '</td>' +
+          '<td data-num="' + (s.errors || 0) + '">' + fmt(s.errors) + '</td>' +
+          '<td data-num="' + (s.error_rate || 0) + '">' + (Number(s.error_rate || 0) * 100).toFixed(1) + '%</td>' +
+          '<td data-num="' + (s.distinct_keys || 0) + '">' + fmt(s.distinct_keys) + '</td>' +
+          '<td>' + ago(s.last_seen) + '</td>' +
+        '</tr>').join('') : '';
+      const serverTable = servers.length ?
+        '<table><thead><tr><th data-sort="str">서버</th><th data-sort="num">tool 종류</th><th data-sort="num">호출</th><th data-sort="num">오류</th><th data-sort="num">오류율</th><th data-sort="num">고유 키</th><th data-sort="str">마지막</th></tr></thead><tbody>' + serverRows + '</tbody></table>'
+        : '<div class="empty">MCP/tool 호출 기록 없음. 클라이언트가 tools/MCP 서버를 사용하면 여기에 집계됩니다.</div>';
+
+      const toolRows = tools.map(t => {
+        const sl = t.server_label || '(none)';
+        return '<tr>' +
+          '<td>' + (t.is_mcp ? '<span class="pill">MCP</span> ' : '') + escapeHTML(t.tool_name) + '<div class="muted">' + escapeHTML(sl) + '</div></td>' +
+          '<td data-num="' + (t.definitions || 0) + '">' + fmt(t.definitions) + '</td>' +
+          '<td data-num="' + (t.calls || 0) + '">' + fmt(t.calls) + '</td>' +
+          '<td data-num="' + (t.results || 0) + '">' + fmt(t.results) + '</td>' +
+          '<td data-num="' + (t.errors || 0) + '">' + fmt(t.errors) + '</td>' +
+          '<td data-num="' + (t.error_rate || 0) + '">' + (Number(t.error_rate || 0) * 100).toFixed(1) + '%</td>' +
+          '<td data-num="' + (t.distinct_keys || 0) + '">' + fmt(t.distinct_keys) + '</td>' +
+          '<td><button class="secondary" type="button" onclick="mcpToolRequests(\'' + escapeAttr(sl) + '\',\'' + escapeAttr(t.tool_name) + '\',false)">호출</button> ' +
+          (t.errors > 0 ? '<button class="danger" type="button" onclick="mcpToolRequests(\'' + escapeAttr(sl) + '\',\'' + escapeAttr(t.tool_name) + '\',true)">오류</button>' : '') +
+          '</td>' +
+        '</tr>';
+      }).join('');
+      const toolTable = tools.length ?
+        '<table><thead><tr><th data-sort="str">tool</th><th data-sort="num">정의</th><th data-sort="num">호출</th><th data-sort="num">결과</th><th data-sort="num">오류</th><th data-sort="num">오류율</th><th data-sort="num">고유 키</th><th>드릴다운</th></tr></thead><tbody>' + toolRows + '</tbody></table>'
+        : '<div class="empty">tool 기록 없음</div>';
+
+      document.getElementById('view').innerHTML =
+        section('MCP / Tool 요약', kpis + filterBar) +
+        section('MCP 서버별', serverTable) +
+        section('Tool 리더보드', toolTable);
+
+      document.getElementById('mcp-filter').addEventListener('submit', (e) => {
+        e.preventDefault();
+        const p = new URLSearchParams();
+        const k = document.getElementById('mcp-api-key').value.trim();
+        const sv = document.getElementById('mcp-server').value.trim();
+        if (k) p.set('api_key_id', k);
+        if (sv) p.set('server', sv);
+        if (document.getElementById('mcp-only').checked) p.set('mcp_only', '1');
+        location.hash = '#/mcp' + (p.toString() ? '?' + p.toString() : '');
+      });
+      makeSortable('#view', 'mcp');
+    }
+    function errorRatePct(errors, calls) {
+      const c = Number(calls || 0);
+      if (c === 0) return '호출 없음';
+      return (Number(errors || 0) / c * 100).toFixed(1) + '% 오류율';
+    }
+    window.mcpFilterServer = (server) => {
+      location.hash = '#/mcp?server=' + encodeURIComponent(server);
+    };
+    window.mcpToolRequests = async (server, tool, errorsOnly) => {
+      const p = new URLSearchParams();
+      if (server && server !== '(none)') p.set('server', server);
+      if (tool) p.set('tool', tool);
+      if (errorsOnly) p.set('errors', '1');
+      p.set('limit', '50');
+      try {
+        const r = await api('/admin/mcp/requests?' + p.toString());
+        const title = (errorsOnly ? '오류 호출' : '호출') + ' - ' + tool;
+        openModal(title, requestsTable(r.requests || []));
+        attachRequestRowHandlers();
+      } catch (err) {
+        openModal('오류', '<div class="error-line">' + escapeHTML(err.message) + '</div>');
+      }
+    };
+
     // ---------- safety (kill switch + alerts) ----------
     async function renderSafety() {
       const [kill, alerts] = await Promise.all([
@@ -2407,6 +2520,8 @@ const adminHTML = `<!doctype html>
               '<option value="first_chunk_p95_ms">첫 청크 P95</option>' +
               '<option value="llm_eval_failures">LLM 평가 실패 수</option>' +
               '<option value="llm_eval_failure_rate">LLM 평가 실패율</option>' +
+              '<option value="tool_errors">tool 오류 수</option>' +
+              '<option value="tool_error_rate">tool 오류율</option>' +
             '</select>' +
             '<select id="alert-scope">' +
               '<option value="global">전체</option>' +
@@ -2442,7 +2557,7 @@ const adminHTML = `<!doctype html>
     }
 
     function metricLabel(metric) {
-      return { requests: '요청 수', errors: '오류율', krw: 'KRW 비용', tokens: '토큰', latency_p95_ms: '전체 지연 P95', first_chunk_p95_ms: '첫 청크 P95', llm_eval_failures: 'LLM 평가 실패 수', llm_eval_failure_rate: 'LLM 평가 실패율' }[metric] || metric;
+      return { requests: '요청 수', errors: '오류율', krw: 'KRW 비용', tokens: '토큰', latency_p95_ms: '전체 지연 P95', first_chunk_p95_ms: '첫 청크 P95', llm_eval_failures: 'LLM 평가 실패 수', llm_eval_failure_rate: 'LLM 평가 실패율', tool_errors: 'tool 오류 수', tool_error_rate: 'tool 오류율' }[metric] || metric;
     }
     function formatThreshold(metric, value) {
       if (metric === 'krw') return money(value);
@@ -2653,7 +2768,7 @@ const adminHTML = `<!doctype html>
     }
 
     // ---------- keyboard ----------
-    const tabMap = { d: 'dashboard', l: 'llm', r: 'requests', p: 'prompts', u: 'users', m: 'teams', i: 'ips', q: 'quotas', a: 'safety', s: 'settings' };
+    const tabMap = { d: 'dashboard', l: 'llm', c: 'mcp', r: 'requests', p: 'prompts', u: 'users', m: 'teams', i: 'ips', q: 'quotas', a: 'safety', s: 'settings' };
     let gPending = false;
     let gTimer = null;
     function isTyping(target) {
@@ -2707,6 +2822,7 @@ const adminHTML = `<!doctype html>
         ['<kbd>Esc</kbd>', '모달/오버레이 닫기'],
         ['<kbd>g</kbd> <kbd>d</kbd>', '대시보드'],
         ['<kbd>g</kbd> <kbd>l</kbd>', 'LLM 관측'],
+        ['<kbd>g</kbd> <kbd>c</kbd>', 'MCP'],
         ['<kbd>g</kbd> <kbd>r</kbd>', '호출 이력'],
         ['<kbd>g</kbd> <kbd>p</kbd>', '프롬프트 검색'],
         ['<kbd>g</kbd> <kbd>u</kbd>', '사용자 목록'],

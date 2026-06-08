@@ -114,6 +114,13 @@ func metricValue(metric string, snapshot store.AlertMetricSnapshot) float64 {
 			return 0
 		}
 		return float64(snapshot.LLMEvalFailures) / float64(snapshot.LLMEvaluations)
+	case "tool_errors":
+		return float64(snapshot.ToolErrors)
+	case "tool_error_rate":
+		if snapshot.ToolCalls == 0 {
+			return 0
+		}
+		return float64(snapshot.ToolErrors) / float64(snapshot.ToolCalls)
 	}
 	return 0
 }
@@ -180,7 +187,7 @@ func formatMetricValue(metric string, value float64) string {
 	switch metric {
 	case "krw":
 		return fmt.Sprintf("₩%.0f", value)
-	case "errors", "llm_eval_failure_rate":
+	case "errors", "llm_eval_failure_rate", "tool_error_rate":
 		return fmt.Sprintf("%.1f%%", value*100)
 	case "llm_eval_failures":
 		return fmt.Sprintf("%.0f failures", value)
