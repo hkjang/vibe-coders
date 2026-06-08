@@ -16,8 +16,8 @@ $cleanVer = $Version.TrimStart('v')
 
 $notes = "## AI Coding Proxy Gateway v" + $cleanVer + "`r`n`r`n"
 $notes += "### 주요 변경 사항`r`n"
-$notes += "- 데이터베이스 드라이버 감지 우선순위 개선: DSN(POSTGRES_DSN, DATABASE_URL, DB_DSN)이 postgres:// 또는 postgresql://로 시작하는 경우 Docker 환경의 DB_DRIVER=sqlite 기본값을 덮어쓰고 PostgreSQL을 자동 감지하여 기동하도록 견고화`r`n"
-$notes += "- 환경변수 충돌 방지: DB_DRIVER와 DSN 설정이 혼재될 때의 오작동 및 충돌 원인 제거`r`n`r`n"
+$notes += "- PostgreSQL 마이그레이션 호환성 강화: SQLite와 달리 PostgreSQL에서 지원하지 않는 BLOB 데이터 타입을 BYTEA 데이터 타입으로 기동 시 자동 매핑/치환하여 'type blob is not exist' 오류 해결`r`n"
+$notes += "- 환경변수 자동 감지 및 충돌 방지 로직 고도화`r`n`r`n"
 $notes += "### 배포 파일`r`n"
 $notes += "| 파일 | 설명 |`r`n"
 $notes += "|------|------|`r`n"
