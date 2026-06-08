@@ -775,15 +775,23 @@ func statusClass(code int) string {
 func (s *SQLStore) topUsers(ctx context.Context, limit int) ([]UserSummary, error) {
 	rows, err := s.db.QueryContext(ctx, s.bind(`
 		SELECT k.id, k.name, COALESCE(k.owner, ''), COALESCE(k.team, ''), k.status,
-			COUNT(r.id) AS requests,
-			COALESCE(SUM(t.total_tokens), 0) AS tokens,
-			COALESCE(SUM(t.estimated_cost), 0) AS cost,
-			COALESCE(AVG(r.latency_ms), 0) AS avg_latency,
-			COALESCE(MAX(r.created_at), '') AS last_seen
+			COALESCE(stat.requests, 0) AS requests,
+			COALESCE(stat.tokens, 0) AS tokens,
+			COALESCE(stat.cost, 0) AS cost,
+			COALESCE(stat.avg_latency, 0) AS avg_latency,
+			COALESCE(stat.last_seen, '') AS last_seen
 		FROM api_keys k
-		LEFT JOIN request_logs r ON r.api_key_id = k.id
-		LEFT JOIN token_usage t ON t.request_id = r.id
-		GROUP BY k.id, k.name, k.owner, k.team, k.status
+		LEFT JOIN (
+			SELECT r.api_key_id,
+				COUNT(r.id) AS requests,
+				SUM(COALESCE(t.total_tokens, 0)) AS tokens,
+				SUM(COALESCE(t.estimated_cost, 0)) AS cost,
+				AVG(r.latency_ms) AS avg_latency,
+				MAX(r.created_at) AS last_seen
+			FROM request_logs r
+			LEFT JOIN token_usage t ON t.request_id = r.id
+			GROUP BY r.api_key_id
+		) stat ON stat.api_key_id = k.id
 		ORDER BY requests DESC
 		LIMIT ?
 	`), limit)

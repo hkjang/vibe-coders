@@ -13,15 +13,23 @@ import (
 func (s *SQLStore) ListUsers(ctx context.Context) ([]UserSummary, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT k.id, k.name, COALESCE(k.owner, ''), COALESCE(k.team, ''), k.status,
-			COUNT(r.id) AS requests,
-			COALESCE(SUM(t.total_tokens), 0) AS tokens,
-			COALESCE(SUM(t.estimated_cost), 0) AS cost,
-			COALESCE(AVG(r.latency_ms), 0) AS avg_latency,
-			COALESCE(MAX(r.created_at), '') AS last_seen
+			COALESCE(stat.requests, 0) AS requests,
+			COALESCE(stat.tokens, 0) AS tokens,
+			COALESCE(stat.cost, 0) AS cost,
+			COALESCE(stat.avg_latency, 0) AS avg_latency,
+			COALESCE(stat.last_seen, '') AS last_seen
 		FROM api_keys k
-		LEFT JOIN request_logs r ON r.api_key_id = k.id
-		LEFT JOIN token_usage t ON t.request_id = r.id
-		GROUP BY k.id, k.name, k.owner, k.team, k.status
+		LEFT JOIN (
+			SELECT r.api_key_id,
+				COUNT(r.id) AS requests,
+				SUM(COALESCE(t.total_tokens, 0)) AS tokens,
+				SUM(COALESCE(t.estimated_cost, 0)) AS cost,
+				AVG(r.latency_ms) AS avg_latency,
+				MAX(r.created_at) AS last_seen
+			FROM request_logs r
+			LEFT JOIN token_usage t ON t.request_id = r.id
+			GROUP BY r.api_key_id
+		) stat ON stat.api_key_id = k.id
 		ORDER BY requests DESC, k.name ASC
 	`)
 	if err != nil {
@@ -75,14 +83,23 @@ func (s *SQLStore) ListTeams(ctx context.Context) ([]TeamSummary, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT COALESCE(NULLIF(k.team, ''), 'unassigned') AS team,
 			COUNT(DISTINCT k.id) AS keys,
-			COUNT(r.id) AS requests,
-			COALESCE(SUM(t.total_tokens), 0) AS tokens,
-			COALESCE(SUM(t.estimated_cost), 0) AS cost,
-			COALESCE(AVG(r.latency_ms), 0) AS avg_latency,
-			COALESCE(MAX(r.created_at), '') AS last_seen
+			COALESCE(SUM(stat.requests), 0) AS requests,
+			COALESCE(SUM(stat.tokens), 0) AS tokens,
+			COALESCE(SUM(stat.cost), 0) AS cost,
+			COALESCE(AVG(stat.avg_latency), 0) AS avg_latency,
+			COALESCE(MAX(stat.last_seen), '') AS last_seen
 		FROM api_keys k
-		LEFT JOIN request_logs r ON r.api_key_id = k.id
-		LEFT JOIN token_usage t ON t.request_id = r.id
+		LEFT JOIN (
+			SELECT r.api_key_id,
+				COUNT(r.id) AS requests,
+				SUM(COALESCE(t.total_tokens, 0)) AS tokens,
+				SUM(COALESCE(t.estimated_cost, 0)) AS cost,
+				AVG(r.latency_ms) AS avg_latency,
+				MAX(r.created_at) AS last_seen
+			FROM request_logs r
+			LEFT JOIN token_usage t ON t.request_id = r.id
+			GROUP BY r.api_key_id
+		) stat ON stat.api_key_id = k.id
 		GROUP BY COALESCE(NULLIF(k.team, ''), 'unassigned')
 		ORDER BY requests DESC, team ASC
 	`)
@@ -1064,7 +1081,7 @@ func (s *SQLStore) llmFeedbackLabelsFilter(ctx context.Context, whereClause stri
 	}
 	queryArgs := append(args, limit)
 	rows, err := s.db.QueryContext(ctx, s.bind(fmt.Sprintf(`
-		SELECT COALESCE(NULLIF(f.label, ''), 'unlabeled'),
+		SELECT COALESCE(NULLIF(f.label, ''), 'unlabeled') AS label,
 			COUNT(*),
 			COALESCE(SUM(CASE WHEN f.rating > 0 THEN 1 ELSE 0 END), 0),
 			COALESCE(SUM(CASE WHEN f.rating < 0 THEN 1 ELSE 0 END), 0),
@@ -1074,7 +1091,7 @@ func (s *SQLStore) llmFeedbackLabelsFilter(ctx context.Context, whereClause stri
 		JOIN request_logs r ON r.id = f.request_id
 		WHERE %s
 		GROUP BY COALESCE(NULLIF(f.label, ''), 'unlabeled')
-		ORDER BY COUNT(*) DESC, f.label ASC
+		ORDER BY COUNT(*) DESC, label ASC
 		LIMIT ?
 	`, whereClause)), queryArgs...)
 	if err != nil {
