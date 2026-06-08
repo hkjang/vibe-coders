@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -14,6 +15,8 @@ import (
 
 	"vibe-coders/internal/config"
 )
+
+var blobRegex = regexp.MustCompile(`(?i)\bblob\b`)
 
 type SQLStore struct {
 	db      *sql.DB
@@ -301,8 +304,8 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 		execQuery := statement
 		if s.dialect == "postgres" {
 			// PostgreSQL does not support BLOB; it uses BYTEA instead.
-			execQuery = strings.ReplaceAll(execQuery, " BLOB ", " BYTEA ")
-			execQuery = strings.ReplaceAll(execQuery, " BLOB,", " BYTEA,")
+			// Using regex guarantees that any variation of case or spacing is handled properly.
+			execQuery = blobRegex.ReplaceAllString(execQuery, "BYTEA")
 		}
 		if _, err := s.db.ExecContext(ctx, execQuery); err != nil {
 			if isAlreadyExistsErr(err) {
