@@ -16,7 +16,7 @@ $cleanVer = $Version.TrimStart('v')
 
 $notes = "## AI Coding Proxy Gateway v" + $cleanVer + "`r`n`r`n"
 $notes += "### 주요 변경 사항`r`n"
-$notes += "- PostgreSQL 마이그레이션 호환성 강화: SQLite와 달리 PostgreSQL에서 지원하지 않는 BLOB 데이터 타입을 BYTEA 데이터 타입으로 기동 시 자동 매핑/치환하여 'type blob is not exist' 오류 해결`r`n"
+$notes += "- PostgreSQL 마이그레이션 호환성 강화: 정규식(\`(?i)\\bblob\\b\`)을 도입하여 SQL 문 내의 탭, 줄바꿈, 대소문자 표기에 상관없이 BLOB 데이터 타입을 PostgreSQL의 BYTEA 데이터 타입으로 완벽하게 매핑/치환하여 'type blob is not exist' 기동 실패 오류 완벽 해결`r`n"
 $notes += "- 환경변수 자동 감지 및 충돌 방지 로직 고도화`r`n`r`n"
 $notes += "### 배포 파일`r`n"
 $notes += "| 파일 | 설명 |`r`n"
