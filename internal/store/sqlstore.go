@@ -298,7 +298,13 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 	}
 
 	for _, statement := range statements {
-		if _, err := s.db.ExecContext(ctx, statement); err != nil {
+		execQuery := statement
+		if s.dialect == "postgres" {
+			// PostgreSQL does not support BLOB; it uses BYTEA instead.
+			execQuery = strings.ReplaceAll(execQuery, " BLOB ", " BYTEA ")
+			execQuery = strings.ReplaceAll(execQuery, " BLOB,", " BYTEA,")
+		}
+		if _, err := s.db.ExecContext(ctx, execQuery); err != nil {
 			if isAlreadyExistsErr(err) {
 				continue
 			}
