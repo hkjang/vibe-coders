@@ -68,11 +68,15 @@ go run ./cmd/gateway
 
 ---
 
-## 4. Docker Compose 연동 및 기동 가이드
+## 4. 기동 가이드
 
-PostgreSQL 컨테이너와 Gateway 컨테이너를 Docker Compose를 통해 패키징하여 함께 구동하는 가장 표준적인 구성 예시입니다.
+기동 환경 및 데이터베이스 구성에 따라 아래의 방식을 선택합니다.
 
-### 4.1 `docker-compose.yml` 작성
+### 4.1 Docker Compose (DB 컨테이너와 Gateway 동시 기동)
+
+PostgreSQL 컨테이너와 Gateway 컨테이너를 Docker Compose를 통해 패키징하여 함께 구동하는 단일 테스트/운영 구성 예시입니다.
+
+#### 4.1.1 `docker-compose.postgres.yml` 작성
 워크스페이스 폴더 또는 배포 폴더에 `docker-compose.postgres.yml` 등의 이름으로 설정을 구성합니다.
 
 ```yaml
@@ -123,13 +127,13 @@ volumes:
   postgres_data:
 ```
 
-### 4.2 서비스 기동
+#### 4.1.2 서비스 기동
 작성된 Docker Compose 설정을 이용해 백그라운드로 구동합니다.
 ```bash
 docker compose -f docker-compose.postgres.yml up -d
 ```
 
-### 4.3 헬스체크 및 기동 확인
+#### 4.1.3 헬스체크 및 기동 확인
 컨테이너 로그 및 Gateway 상태를 점검합니다.
 ```bash
 # 로그 확인
@@ -137,6 +141,80 @@ docker compose -f docker-compose.postgres.yml logs -f gateway
 
 # 서비스 헬스체크 호출
 curl -fsS http://localhost:8080/ready
+```
+
+---
+
+### 4.2 기존 외부 PostgreSQL VM 서버 연동 기동 (실운영 권장)
+
+이미 인프라 내에 구축되어 있는 **독립된 PostgreSQL VM 서버** 또는 **RDS(클라우드 DB)** 인스턴스를 메인 데이터베이스로 사용하고, Gateway 서비스만 단독으로 실행하여 연동하는 가이드입니다.
+
+#### 4.2.1 PostgreSQL VM 서버 사전 설정
+외부 대역(Gateway가 구동 중인 서버/컨테이너)에서 PostgreSQL에 접속할 수 있도록 VM 내부의 접근 제어 설정을 확인해야 합니다.
+
+1. **외부 접근 설정 허용 (`postgresql.conf`)**
+   PostgreSQL이 루프백(`localhost`) 외에 외부 네트워크 대역에서도 연결을 대기하도록 변경합니다.
+   ```ini
+   # /etc/postgresql/15/main/postgresql.conf (설치 환경에 따라 경로 상이)
+   listen_addresses = '*'
+   ```
+
+2. **클라이언트 주소 허용 설정 (`pg_hba.conf`)**
+   Gateway가 구동되는 서버의 IP 주소에 대해 접근 권한을 명시적으로 선언합니다.
+   *(예: Gateway 서비스가 돌아가는 서버 IP가 `192.168.10.50`인 경우)*
+   ```ini
+   # /etc/postgresql/15/main/pg_hba.conf
+   # TYPE  DATABASE        USER            ADDRESS                 METHOD
+   host    gateway_db      gateway_user    192.168.10.50/32        scram-sha-256
+   ```
+   *만약 특정 IP 대역 전체 또는 Docker 브리지 대역 전체를 열어두려면 `192.168.10.0/24` 형태로 주소를 지정하세요.*
+
+3. **설정 적용 및 방화벽 오픈**
+   PostgreSQL 서비스를 재구동하여 설정을 리로드하고, VM의 방화벽 포트(기본 5432)를 오픈합니다.
+   ```bash
+   sudo systemctl restart postgresql
+   
+   # Ubuntu UFW 방화벽 사용 시
+   sudo ufw allow 5432/tcp
+   ```
+
+#### 4.2.2 Gateway 컨테이너 기동 설정 (`docker-compose.external.yml`)
+별도의 내부 DB 컨테이너 없이 외부 VM을 다이렉트로 바라보도록 `docker-compose.external.yml`을 구성합니다.
+
+```yaml
+version: '3.8'
+
+services:
+  gateway:
+    image: ai-coding-proxy-gateway:v0.1.5
+    container_name: proxy-gateway
+    restart: always
+    ports:
+      - "8080:8080"
+    environment:
+      - UPSTREAM_BASE_URL=https://api.openai.com
+      - UPSTREAM_API_KEY=sk-...
+      - ADMIN_TOKEN=change-me-to-secure-token
+      - GATEWAY_SECRET=encryption-key-must-be-32-bytes-long!
+      # 기존 외부 Postgres VM DB 연결 정보 지정 (192.168.10.20 VM 서버 예시)
+      - POSTGRES_DSN=postgres://gateway_user:gateway_password_123@192.168.10.20:5432/gateway_db?sslmode=disable
+    volumes:
+      - ./data:/data
+```
+
+기동 명령어:
+```bash
+docker compose -f docker-compose.external.yml up -d
+```
+
+#### 4.2.3 네트워크 연동 테스트 팁
+Gateway 구동 중 데이터베이스 연결 오류가 발생한다면, 게이트웨이 컨테이너 안에서 외부 Postgres VM 포트(5432)가 성공적으로 열려 있는지 테스트해볼 수 있습니다.
+```bash
+# nc 명령어를 이용한 포트 통신 검증
+docker exec -it proxy-gateway nc -zv 192.168.10.20 5432
+
+# nc가 없는 간이 환경인 경우 bash dev tcp 채널 검증
+docker exec -it proxy-gateway bash -c "cat < /dev/tcp/192.168.10.20/5432"
 ```
 
 ---
@@ -168,12 +246,18 @@ SQLite와 달리 단일 DB 파일 복사 방식이 아닌, PostgreSQL의 표준 
 
 ### 6.1 데이터베이스 백업
 ```bash
-# Docker Compose 환경에서 백업 파일 추출
+# 1. 내부 Docker 컨테이너 DB인 경우
 docker exec -t gateway-postgres pg_dump -U gateway_user -d gateway_db > backup_gateway_$(date +%Y%m%d).sql
+
+# 2. 외부 Postgres VM 서버인 경우 (로컬 PC 또는 Gateway 서버에서 원격 백업)
+pg_dump -h 192.168.10.20 -p 5432 -U gateway_user -d gateway_db > backup_gateway_$(date +%Y%m%d).sql
 ```
 
 ### 6.2 데이터베이스 복구
 ```bash
-# 복구 대상 데이터베이스 초기화 및 적용
+# 1. 내부 Docker 컨테이너 DB인 경우 복구
 docker exec -i gateway-postgres psql -U gateway_user -d gateway_db < backup_gateway_YYYYMMDD.sql
+
+# 2. 외부 Postgres VM 서버인 경우 복구
+psql -h 192.168.10.20 -p 5432 -U gateway_user -d gateway_db < backup_gateway_YYYYMMDD.sql
 ```
