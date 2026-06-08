@@ -139,15 +139,25 @@ func Load() (Config, error) {
 }
 
 func databaseConfig() DatabaseConfig {
-	if dsn := firstNonEmpty(os.Getenv("POSTGRES_DSN"), os.Getenv("DATABASE_URL")); strings.HasPrefix(dsn, "postgres://") || strings.HasPrefix(dsn, "postgresql://") {
+	// 1. Precedence 1: Auto-detect PostgreSQL if any key DSN environment variable starts with postgres:// or postgresql://.
+	// This ensures that even if DB_DRIVER=sqlite is hardcoded in Docker, it will be overridden if PostgreSQL DSN is supplied.
+	for _, envName := range []string{"POSTGRES_DSN", "DATABASE_URL", "DB_DSN"} {
+		if dsn := os.Getenv(envName); dsn != "" {
+			if strings.HasPrefix(dsn, "postgres://") || strings.HasPrefix(dsn, "postgresql://") {
+				return DatabaseConfig{Driver: "postgres", DSN: dsn}
+			}
+		}
+	}
+
+	// 2. Precedence 2: If DB_DRIVER is explicitly configured as postgres or postgresql.
+	driver := strings.ToLower(os.Getenv("DB_DRIVER"))
+	if driver == "postgres" || driver == "postgresql" {
+		dsn := firstNonEmpty(os.Getenv("DB_DSN"), os.Getenv("POSTGRES_DSN"), os.Getenv("DATABASE_URL"))
 		return DatabaseConfig{Driver: "postgres", DSN: dsn}
 	}
 
-	driver := strings.ToLower(getEnv("DB_DRIVER", "sqlite"))
-	if driver == "postgres" || driver == "postgresql" {
-		return DatabaseConfig{Driver: "postgres", DSN: firstNonEmpty(os.Getenv("DB_DSN"), os.Getenv("POSTGRES_DSN"), os.Getenv("DATABASE_URL"))}
-	}
-
+	// 3. Fallback: Default to SQLite.
+	// Uses DB_DSN if set, otherwise falls back to the default "data/gateway.db".
 	return DatabaseConfig{Driver: "sqlite", DSN: getEnv("DB_DSN", filepath.Join("data", "gateway.db"))}
 }
 
