@@ -16,10 +16,8 @@ $cleanVer = $Version.TrimStart('v')
 
 $notes = "## AI Coding Proxy Gateway v" + $cleanVer + "`r`n`r`n"
 $notes += "### 주요 변경 사항`r`n"
-$notes += "- 어드민 API에 업스트림 프로바이더 삭제 기능 추가 (DELETE /admin/providers/{name})`r`n"
-$notes += "- /v1/models GET 엔드포인트에 대한 Proxy Key 인증 예외 적용 (인증 없이 조회 가능)`r`n"
-$notes += "- 클라이언트가 직접 Upstream API Key (sk-... 등)를 보낼 때 Proxy Key DB에 일치하지 않아도 통과(Passthrough) 처리하도록 프록시 로직 개선`r`n"
-$notes += "- 업스트림 프로바이더 삭제 API에 대한 테스트 추가 및 통합 검증 완료`r`n`r`n"
+$notes += "- 데이터베이스 드라이버 감지 우선순위 개선: DSN(POSTGRES_DSN, DATABASE_URL, DB_DSN)이 postgres:// 또는 postgresql://로 시작하는 경우 Docker 환경의 DB_DRIVER=sqlite 기본값을 덮어쓰고 PostgreSQL을 자동 감지하여 기동하도록 견고화`r`n"
+$notes += "- 환경변수 충돌 방지: DB_DRIVER와 DSN 설정이 혼재될 때의 오작동 및 충돌 원인 제거`r`n`r`n"
 $notes += "### 배포 파일`r`n"
 $notes += "| 파일 | 설명 |`r`n"
 $notes += "|------|------|`r`n"
