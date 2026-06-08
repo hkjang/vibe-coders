@@ -16,8 +16,10 @@ $cleanVer = $Version.TrimStart('v')
 
 $notes = "## AI Coding Proxy Gateway v" + $cleanVer + "`r`n`r`n"
 $notes += "### 주요 변경 사항`r`n"
-$notes += "- PostgreSQL 쿼리 호환성 강화: LLM 관측 피드백 라벨 집계 시 GROUP BY 표현식과 ORDER BY 표현식 불일치로 발생하던 'sqlstate 42803' 에러 완벽 해결`r`n"
-$notes += "- 사용자/팀 집계 정합성 강화: 다중 LEFT JOIN 시 통계 수치(토큰, 비용 등)가 배수로 불어나는 현상을 서브쿼리 사전 집계 조인 구조로 변경하여 해결`r`n`r`n"
+$notes += "- Model Context Protocol (MCP) 관리 기능 추가 및 관련 엔드포인트 연동 테스트 완료`r`n"
+$notes += "- LLM 툴(Tools) 호출 카탈로그 분석 및 결과값 파싱 로직 탑재`r`n"
+$notes += "- 사용자/팀 집계(Passthrough 및 익명 사용자 처리 포함) 데이터 정합성 검증 테스트 보강`r`n"
+$notes += "- 어드민 UI 및 안전/조사 관련 버그 수정 및 개선`r`n`r`n"
 $notes += "### 배포 파일`r`n"
 $notes += "| 파일 | 설명 |`r`n"
 $notes += "|------|------|`r`n"
