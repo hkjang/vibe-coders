@@ -16,8 +16,8 @@ $cleanVer = $Version.TrimStart('v')
 
 $notes = "## AI Coding Proxy Gateway v" + $cleanVer + "`r`n`r`n"
 $notes += "### 주요 변경 사항`r`n"
-$notes += "- PostgreSQL 마이그레이션 호환성 강화: 정규식(\`(?i)\\bblob\\b\`)을 도입하여 SQL 문 내의 탭, 줄바꿈, 대소문자 표기에 상관없이 BLOB 데이터 타입을 PostgreSQL의 BYTEA 데이터 타입으로 완벽하게 매핑/치환하여 'type blob is not exist' 기동 실패 오류 완벽 해결`r`n"
-$notes += "- 환경변수 자동 감지 및 충돌 방지 로직 고도화`r`n`r`n"
+$notes += "- PostgreSQL 쿼리 호환성 강화: LLM 관측 피드백 라벨 집계 시 GROUP BY 표현식과 ORDER BY 표현식 불일치로 발생하던 'sqlstate 42803' 에러 완벽 해결`r`n"
+$notes += "- 사용자/팀 집계 정합성 강화: 다중 LEFT JOIN 시 통계 수치(토큰, 비용 등)가 배수로 불어나는 현상을 서브쿼리 사전 집계 조인 구조로 변경하여 해결`r`n`r`n"
 $notes += "### 배포 파일`r`n"
 $notes += "| 파일 | 설명 |`r`n"
 $notes += "|------|------|`r`n"
