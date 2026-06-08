@@ -36,7 +36,7 @@ $notes += "  -e UPSTREAM_BASE_URL=https://api.openai.com \`n"
 $notes += "  -e UPSTREAM_API_KEY=sk-... \`n"
 $notes += "  -e ADMIN_TOKEN=change-me \`n"
 $notes += "  ai-coding-proxy-gateway:" + $Version + "`r`n"
-$notes += "```"
+$notes += '```'
 
 $notesPath = Join-Path $repoRoot "release\release-notes.txt"
 Set-Content -Path $notesPath -Value $notes -Encoding utf8
