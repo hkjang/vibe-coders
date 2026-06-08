@@ -209,13 +209,16 @@ type LanguageGrouped struct {
 }
 
 type RequestFilter struct {
-	Limit      int
-	IP         string
-	Model      string
-	Language   string
-	APIKeyID   string
-	SessionID  string
-	PromptName string
+	Limit          int
+	IP             string
+	Model          string
+	Language       string
+	APIKeyID       string
+	Team           string
+	SessionID      string
+	PromptName     string
+	PromptVersion  string
+	EvaluationName string
 }
 
 type RecentRequest struct {
@@ -286,6 +289,7 @@ type RequestDetail struct {
 	Languages   []LanguageStat  `json:"languages"`
 	Spans       []LLMSpan       `json:"spans"`
 	Evaluations []LLMEvaluation `json:"evaluations"`
+	Feedback    []LLMFeedback   `json:"feedback"`
 }
 
 type LLMSpan struct {
@@ -331,6 +335,81 @@ type LLMEvaluationSummary struct {
 	AverageScore float64 `json:"average_score"`
 }
 
+type LLMFeedback struct {
+	ID        string    `json:"id"`
+	RequestID string    `json:"request_id"`
+	TraceID   string    `json:"trace_id"`
+	Rating    int       `json:"rating"`
+	Label     string    `json:"label"`
+	Comment   string    `json:"comment"`
+	Source    string    `json:"source"`
+	CreatedBy string    `json:"created_by"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+type LLMFeedbackSummary struct {
+	Total         int64   `json:"total"`
+	Positive      int64   `json:"positive"`
+	Negative      int64   `json:"negative"`
+	Neutral       int64   `json:"neutral"`
+	AverageRating float64 `json:"average_rating"`
+}
+
+type LLMFeedbackLabelSummary struct {
+	Label         string  `json:"label"`
+	Total         int64   `json:"total"`
+	Positive      int64   `json:"positive"`
+	Negative      int64   `json:"negative"`
+	Neutral       int64   `json:"neutral"`
+	AverageRating float64 `json:"average_rating"`
+}
+
+type LLMFeedbackPromptSummary struct {
+	PromptName    string  `json:"prompt_name"`
+	PromptVersion string  `json:"prompt_version"`
+	Total         int64   `json:"total"`
+	Positive      int64   `json:"positive"`
+	Negative      int64   `json:"negative"`
+	Neutral       int64   `json:"neutral"`
+	AverageRating float64 `json:"average_rating"`
+	LastSeen      string  `json:"last_seen"`
+}
+
+type LLMAlignmentSummary struct {
+	Total              int64   `json:"total"`
+	Aligned            int64   `json:"aligned"`
+	Misaligned         int64   `json:"misaligned"`
+	AlignmentRate      float64 `json:"alignment_rate"`
+	HumanNegativeCount int64   `json:"human_negative_count"`
+}
+
+type LLMAlignmentPromptSummary struct {
+	PromptName      string  `json:"prompt_name"`
+	PromptVersion   string  `json:"prompt_version"`
+	Total           int64   `json:"total"`
+	Aligned         int64   `json:"aligned"`
+	Misaligned      int64   `json:"misaligned"`
+	AlignmentRate   float64 `json:"alignment_rate"`
+	HumanNegative   int64   `json:"human_negative"`
+	EvalFailureRate float64 `json:"eval_failure_rate"`
+	LastSeen        string  `json:"last_seen"`
+}
+
+type LLMTimeseriesPoint struct {
+	Date                string  `json:"date"`
+	Bucket              string  `json:"bucket"`
+	Requests            int64   `json:"requests"`
+	Tokens              int64   `json:"tokens"`
+	CostKRW             float64 `json:"cost_krw"`
+	Errors              int64   `json:"errors"`
+	AverageFirstChunkMS float64 `json:"average_first_chunk_ms"`
+	EvaluationFailures  int64   `json:"evaluation_failures"`
+	FeedbackTotal       int64   `json:"feedback_total"`
+	NegativeFeedback    int64   `json:"negative_feedback"`
+	AlignmentSamples    int64   `json:"alignment_samples"`
+	AlignmentRate       float64 `json:"alignment_rate"`
+}
+
 type LLMPromptSummary struct {
 	PromptName       string  `json:"prompt_name"`
 	PromptVersion    string  `json:"prompt_version"`
@@ -342,6 +421,40 @@ type LLMPromptSummary struct {
 	EvalFailures     int64   `json:"eval_failures"`
 	FirstSeen        string  `json:"first_seen"`
 	LastSeen         string  `json:"last_seen"`
+}
+
+type LLMPromptComparisonDelta struct {
+	Calls            int64   `json:"calls"`
+	Tokens           int64   `json:"tokens"`
+	CostKRW          float64 `json:"cost_krw"`
+	AverageLatencyMS float64 `json:"average_latency_ms"`
+	ErrorRate        float64 `json:"error_rate"`
+	EvalFailureRate  float64 `json:"eval_failure_rate"`
+}
+
+type LLMPromptBaselineCandidate struct {
+	PromptVersion    string  `json:"prompt_version"`
+	Reason           string  `json:"reason"`
+	Calls            int64   `json:"calls"`
+	AverageLatencyMS float64 `json:"average_latency_ms"`
+	ErrorRate        float64 `json:"error_rate"`
+	EvalFailureRate  float64 `json:"eval_failure_rate"`
+	LastSeen         string  `json:"last_seen"`
+}
+
+type LLMPromptComparison struct {
+	PromptName         string                       `json:"prompt_name"`
+	Candidate          LLMPromptSummary             `json:"candidate"`
+	Baseline           *LLMPromptSummary            `json:"baseline,omitempty"`
+	BaselineReason     string                       `json:"baseline_reason,omitempty"`
+	BaselineCandidates []LLMPromptBaselineCandidate `json:"baseline_candidates,omitempty"`
+	CandidateOrdering  string                       `json:"candidate_ordering,omitempty"`
+	AvailableVersions  []string                     `json:"available_versions"`
+	CandidateErrorRate float64                      `json:"candidate_error_rate"`
+	BaselineErrorRate  float64                      `json:"baseline_error_rate"`
+	CandidateEvalRate  float64                      `json:"candidate_eval_failure_rate"`
+	BaselineEvalRate   float64                      `json:"baseline_eval_failure_rate"`
+	Delta              LLMPromptComparisonDelta     `json:"delta"`
 }
 
 type LLMPatternSummary struct {
@@ -363,6 +476,7 @@ type LLMInsight struct {
 	Detail         string  `json:"detail"`
 	Scope          string  `json:"scope"`
 	ScopeValue     string  `json:"scope_value"`
+	ScopeDetail    string  `json:"scope_detail,omitempty"`
 	Count          int64   `json:"count"`
 	MetricValue    float64 `json:"metric_value"`
 	Recommendation string  `json:"recommendation"`
@@ -428,16 +542,62 @@ type UserAdvancedStats struct {
 	DistinctIPs         int64   `json:"distinct_ips"`
 }
 
+type UserLLMStats struct {
+	Requests            int64   `json:"requests"`
+	Sessions            int64   `json:"sessions"`
+	PromptVariants      int64   `json:"prompt_variants"`
+	Evaluations         int64   `json:"evaluations"`
+	EvalFailures        int64   `json:"eval_failures"`
+	FeedbackTotal       int64   `json:"feedback_total"`
+	NegativeFeedback    int64   `json:"negative_feedback"`
+	AlignmentSamples    int64   `json:"alignment_samples"`
+	AlignmentRate       float64 `json:"alignment_rate"`
+	AverageFirstChunkMS float64 `json:"average_first_chunk_ms"`
+	LastSeen            string  `json:"last_seen"`
+}
+
+type UserLLMDetail struct {
+	Summary        UserLLMStats              `json:"summary"`
+	Timeseries     []LLMTimeseriesPoint      `json:"timeseries"`
+	Prompts        []LLMPromptSummary        `json:"prompts"`
+	FeedbackLabels []LLMFeedbackLabelSummary `json:"feedback_labels"`
+}
+
 type UserDetail struct {
 	APIKey     APIKeyPublic      `json:"api_key"`
 	Stats      UserSummary       `json:"stats"`
 	Advanced   UserAdvancedStats `json:"advanced"`
+	LLM        UserLLMDetail     `json:"llm"`
 	ByStatus   []StatusBucket    `json:"by_status"`
 	Heatmap    Heatmap           `json:"heatmap"`
 	Daily      []TimeseriesPoint `json:"daily"`
 	ByModel    []GroupedStat     `json:"by_model"`
 	ByLanguage []LanguageGrouped `json:"by_language"`
 	ByIP       []GroupedStat     `json:"by_ip"`
+	Recent     []RecentRequest   `json:"recent"`
+}
+
+type TeamSummary struct {
+	Team             string  `json:"team"`
+	Keys             int64   `json:"keys"`
+	Requests         int64   `json:"requests"`
+	Tokens           int64   `json:"tokens"`
+	CostKRW          float64 `json:"cost_krw"`
+	AverageLatencyMS float64 `json:"average_latency_ms"`
+	LastSeen         string  `json:"last_seen"`
+}
+
+type TeamDetail struct {
+	Stats      TeamSummary       `json:"stats"`
+	Advanced   UserAdvancedStats `json:"advanced"`
+	LLM        UserLLMDetail     `json:"llm"`
+	ByStatus   []StatusBucket    `json:"by_status"`
+	Heatmap    Heatmap           `json:"heatmap"`
+	Daily      []TimeseriesPoint `json:"daily"`
+	ByModel    []GroupedStat     `json:"by_model"`
+	ByLanguage []LanguageGrouped `json:"by_language"`
+	ByIP       []GroupedStat     `json:"by_ip"`
+	ByKey      []GroupedStat     `json:"by_key"`
 	Recent     []RecentRequest   `json:"recent"`
 }
 

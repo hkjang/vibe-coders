@@ -27,6 +27,41 @@ func (s *Server) handleUsers(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"users": users})
 }
 
+func (s *Server) handleTeams(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	teams, err := s.db.ListTeams(r.Context())
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "teams_failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"teams": teams})
+}
+
+func (s *Server) handleTeamDetail(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	team := strings.TrimPrefix(r.URL.Path, "/admin/teams/")
+	if team == "" || strings.Contains(team, "/") {
+		writeOpenAIError(w, http.StatusBadRequest, "invalid team", "invalid_request_error", "invalid_team")
+		return
+	}
+	detail, err := s.db.GetTeamDetail(r.Context(), team, recentLimit(r))
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeOpenAIError(w, http.StatusNotFound, "team not found", "invalid_request_error", "team_not_found")
+			return
+		}
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "team_detail_failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, detail)
+}
+
 func (s *Server) handleUserDetail(w http.ResponseWriter, r *http.Request) {
 	if !s.authorizeAdmin(r) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")

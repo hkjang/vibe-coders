@@ -35,13 +35,31 @@ Roo Code / Cursor / Continue 등 OpenAI 호환 API 를 호출하는 VS Code 확�
 - API 키 / 팀 / IP / 전체 단위 일별·월별 쿼터 (토큰·KRW). 한도 초과 시 429 + Retry-After + X-Quota-*
 - 보존 정책 (RETENTION_REQUEST_DAYS / RETENTION_PROMPT_DAYS / RETENTION_RESPONSE_DAYS) 기반 백그라운드 cleanup
 - 한국어 어드민 UI 다중 탭 (대시보드 / LLM 관측 / 호출 이력 / 프롬프트 검색 / 사용자 / IP / 사용 한도 / 안전 / 설정), 비용 KRW 표기
-- Datadog LLM Observability 대응 기능: Trace/Span Explorer, Session Explorer, Prompt Tracking, Patterns, Insights, managed evaluation, external evaluation submit API
+- Datadog LLM Observability 대응 기능: Trace/Span Explorer, Session Explorer, Prompt Tracking, Patterns, Insights, trend timeseries, human feedback(label/prompt/alignment summary), managed evaluation, external evaluation submit API
+- 사용자 상세 화면에 API 키별 LLM 요청/eval failure/feedback/alignment trend drill-down 제공
+- prompt name/version 비교 API와 UI 모달로 버전별 지연·비용·오류율·평가 실패율 비교 제공
+- prompt compare도 현재 `api_key_id`, `team` 스코프를 그대로 따라가도록 지원
+- prompt compare baseline 자동 선택 개선: 가까운 이전 버전 우선, 없으면 최근성 기준 fallback
+- prompt compare 모달에 baseline 자동 선택 근거 표시
+- prompt compare 응답과 모달에 추천 baseline 후보 목록 추가
+- 추천 baseline 후보를 버튼으로 바로 눌러 재비교 가능
+- 추천 baseline 후보에 호출량, 평균 지연, 오류율, 평가 실패율, 최근 시각 메타데이터 노출
+- compare 모달에 추천 후보 정렬 기준 설명 추가
+- prompt compare 추천 baseline 후보 개수를 3/5/10개로 조절 가능
+- 팀 탭과 `/admin/teams`, `/admin/teams/{team}` API로 팀별 사용량/LLM 관측 drill-down 제공
+- LLM 관측 탭에 `api_key_id`, `team` 스코프 필터 추가, sessions/patterns/insights 까지 같은 스코프로 조회
+- LLM 관측 drill-down 스코프에 `model`, `session_id`, `prompt_name`, `prompt_version` 포함
+- insight drill-down 이 `evaluation_name`까지 전달되어 관련 evaluation/trace만 바로 추적 가능
+- prompt 계열 insight 에서 바로 Prompt Compare 모달을 열 수 있는 액션 추가
+- session 계열 insight 에서 최근 trace bundle 모달을 바로 여는 액션 추가
+- session bundle 모달에서 JSON/CSV 즉시 다운로드 지원
+- 사용자/팀 상세 화면에서 필터가 채워진 `LLM 관측` deep link 제공
 - 강화된 PII 마스킹 (한국 주민번호·휴대전화·일반전화·사업자등록번호, 카드번호, 이메일, IPv4, JWT, PEM private key, AWS/GitHub/Slack/Anthropic/OpenAI 키)
 - OpenAI `prompt_tokens_details.cached_tokens`, `completion_tokens_details.reasoning_tokens` 추적 + cached 단가 분리 KRW 비용 계산
 - 모델 패턴(`claude-*`, `anthropic/*` 등) 기반 provider 자동 라우팅. 클라이언트가 `X-Proxy-Provider` 를 지정하지 않아도 모델명만으로 라우팅
 - 호출 이력 CSV 다운로드 `/admin/export.csv` (Excel UTF-8 BOM 포함, 한국어 그대로 열림)
 - 운영용 백업 스크립트 `scripts/backup.ps1` / `scripts/backup.sh` (SQLite `.backup` + fallback ndjson + 보존 일수 적용)
-- `/health`, `/ready`, `/metrics`, `/admin`, `/admin/stats`, `/admin/requests`, `/admin/requests/{id}`, `/admin/prompts`, `/admin/export.csv`, `/admin/users`, `/admin/users/{id}`, `/admin/ips`, `/admin/ips/{ip}`, `/admin/llm/traces`, `/admin/llm/traces/{id}`, `/admin/llm/sessions`, `/admin/llm/prompts`, `/admin/llm/patterns`, `/admin/llm/insights`, `/admin/llm/evaluations`, `/admin/quotas`, `/admin/retention`, `/admin/fallback`, `/admin/api-keys`, `/admin/providers`, `/admin/audit-logs`
+- `/health`, `/ready`, `/metrics`, `/admin`, `/admin/stats`, `/admin/requests`, `/admin/requests/{id}`, `/admin/prompts`, `/admin/export.csv`, `/admin/users`, `/admin/users/{id}`, `/admin/teams`, `/admin/teams/{team}`, `/admin/ips`, `/admin/ips/{ip}`, `/admin/llm/traces`, `/admin/llm/traces/{id}`, `/admin/llm/sessions`, `/admin/llm/prompts`, `/admin/llm/prompts/compare`, `/admin/llm/patterns`, `/admin/llm/insights`, `/admin/llm/timeseries`, `/admin/llm/feedback`, `/admin/llm/evaluations`, `/admin/quotas`, `/admin/retention`, `/admin/fallback`, `/admin/api-keys`, `/admin/providers`, `/admin/audit-logs`
 
 ## 실행 (개발)
 
@@ -136,6 +154,8 @@ curl.exe "http://localhost:8080/admin/llm/sessions"
 curl.exe "http://localhost:8080/admin/llm/prompts"
 curl.exe "http://localhost:8080/admin/llm/patterns"
 curl.exe "http://localhost:8080/admin/llm/insights?window=24h"
+curl.exe "http://localhost:8080/admin/llm/timeseries?window=24h&bucket=hour"
+curl.exe "http://localhost:8080/admin/llm/feedback"
 curl.exe "http://localhost:8080/admin/llm/evaluations"
 ```
 
@@ -172,6 +192,14 @@ curl.exe -X POST http://localhost:8080/admin/llm/evaluations `
     "passed": true,
     "label": "pass"
   }] }'
+```
+
+운영자가 trace 상세를 보고 사람 피드백을 남길 때는 다음 API를 사용할 수 있습니다.
+
+```powershell
+curl.exe -X POST http://localhost:8080/admin/llm/feedback `
+  -H "Content-Type: application/json" `
+  -d '{ "request_id": "req_xxxxxxxx", "rating": -1, "label": "hallucination", "comment": "근거 없는 답변" }'
 ```
 
 ## 안전 운영 (Kill Switch + 알림)

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -70,6 +71,37 @@ func (s *SQLStore) ListIPs(ctx context.Context) ([]IPSummary, error) {
 	return result, rows.Err()
 }
 
+func (s *SQLStore) ListTeams(ctx context.Context) ([]TeamSummary, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT COALESCE(NULLIF(k.team, ''), 'unassigned') AS team,
+			COUNT(DISTINCT k.id) AS keys,
+			COUNT(r.id) AS requests,
+			COALESCE(SUM(t.total_tokens), 0) AS tokens,
+			COALESCE(SUM(t.estimated_cost), 0) AS cost,
+			COALESCE(AVG(r.latency_ms), 0) AS avg_latency,
+			COALESCE(MAX(r.created_at), '') AS last_seen
+		FROM api_keys k
+		LEFT JOIN request_logs r ON r.api_key_id = k.id
+		LEFT JOIN token_usage t ON t.request_id = r.id
+		GROUP BY COALESCE(NULLIF(k.team, ''), 'unassigned')
+		ORDER BY requests DESC, team ASC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := []TeamSummary{}
+	for rows.Next() {
+		var item TeamSummary
+		if err := rows.Scan(&item.Team, &item.Keys, &item.Requests, &item.Tokens, &item.CostKRW, &item.AverageLatencyMS, &item.LastSeen); err != nil {
+			return nil, err
+		}
+		result = append(result, item)
+	}
+	return result, rows.Err()
+}
+
 func (s *SQLStore) GetUserDetail(ctx context.Context, apiKeyID string, recent int) (UserDetail, error) {
 	detail := UserDetail{
 		Daily:      []TimeseriesPoint{},
@@ -79,6 +111,11 @@ func (s *SQLStore) GetUserDetail(ctx context.Context, apiKeyID string, recent in
 		ByStatus:   []StatusBucket{},
 		Recent:     []RecentRequest{},
 		Heatmap:    Heatmap{Cells: []HeatmapCell{}},
+		LLM: UserLLMDetail{
+			Timeseries:     []LLMTimeseriesPoint{},
+			Prompts:        []LLMPromptSummary{},
+			FeedbackLabels: []LLMFeedbackLabelSummary{},
+		},
 	}
 
 	key := APIKeyPublic{}
@@ -131,11 +168,247 @@ func (s *SQLStore) GetUserDetail(ctx context.Context, apiKeyID string, recent in
 	if detail.ByLanguage, err = s.languagesFilter(ctx, "r.api_key_id = ?", apiKeyID); err != nil {
 		return detail, err
 	}
+	if detail.LLM.Summary, err = s.userLLMStats(ctx, apiKeyID); err != nil {
+		return detail, err
+	}
+	if detail.LLM.Timeseries, err = s.llmTimeseriesFilter(ctx, "hour", time.Now().Add(-24*time.Hour), "r.api_key_id = ?", apiKeyID); err != nil {
+		return detail, err
+	}
+	if detail.LLM.Prompts, err = s.llmPromptsFilter(ctx, "r.api_key_id = ?", 10, apiKeyID); err != nil {
+		return detail, err
+	}
+	if detail.LLM.FeedbackLabels, err = s.llmFeedbackLabelsFilter(ctx, "r.api_key_id = ?", 10, apiKeyID); err != nil {
+		return detail, err
+	}
 	if detail.Recent, err = s.RecentRequests(ctx, RequestFilter{Limit: recent, APIKeyID: apiKeyID}); err != nil {
 		return detail, err
 	}
 
 	return detail, nil
+}
+
+func (s *SQLStore) GetTeamDetail(ctx context.Context, team string, recent int) (TeamDetail, error) {
+	detail := TeamDetail{
+		Daily:      []TimeseriesPoint{},
+		ByModel:    []GroupedStat{},
+		ByLanguage: []LanguageGrouped{},
+		ByIP:       []GroupedStat{},
+		ByKey:      []GroupedStat{},
+		ByStatus:   []StatusBucket{},
+		Recent:     []RecentRequest{},
+		Heatmap:    Heatmap{Cells: []HeatmapCell{}},
+		LLM: UserLLMDetail{
+			Timeseries:     []LLMTimeseriesPoint{},
+			Prompts:        []LLMPromptSummary{},
+			FeedbackLabels: []LLMFeedbackLabelSummary{},
+		},
+	}
+	teamFilter := "COALESCE(NULLIF(k.team, ''), 'unassigned') = ?"
+	err := s.db.QueryRowContext(ctx, s.bind(`
+		SELECT COALESCE(NULLIF(k.team, ''), 'unassigned') AS team,
+			COUNT(DISTINCT k.id) AS keys,
+			COUNT(r.id) AS requests,
+			COALESCE(SUM(t.total_tokens), 0) AS tokens,
+			COALESCE(SUM(t.estimated_cost), 0) AS cost,
+			COALESCE(AVG(r.latency_ms), 0) AS avg_latency,
+			COALESCE(MAX(r.created_at), '') AS last_seen
+		FROM api_keys k
+		LEFT JOIN request_logs r ON r.api_key_id = k.id
+		LEFT JOIN token_usage t ON t.request_id = r.id
+		WHERE `+teamFilter+`
+		GROUP BY COALESCE(NULLIF(k.team, ''), 'unassigned')
+	`), team).Scan(&detail.Stats.Team, &detail.Stats.Keys, &detail.Stats.Requests, &detail.Stats.Tokens, &detail.Stats.CostKRW, &detail.Stats.AverageLatencyMS, &detail.Stats.LastSeen)
+	if err == sql.ErrNoRows {
+		return detail, ErrNotFound
+	}
+	if err != nil {
+		return detail, err
+	}
+	whereClause := "EXISTS (SELECT 1 FROM api_keys k WHERE k.id = r.api_key_id AND COALESCE(NULLIF(k.team, ''), 'unassigned') = ?)"
+	if detail.Advanced, err = s.teamAdvancedStats(ctx, team); err != nil {
+		return detail, err
+	}
+	if detail.ByStatus, err = s.statusBreakdownFilter(ctx, whereClause, team); err != nil {
+		return detail, err
+	}
+	if detail.Heatmap, err = s.heatmapKSTFilter(ctx, time.Now().Add(-30*24*time.Hour), whereClause, team); err != nil {
+		return detail, err
+	}
+	if detail.Daily, err = s.dailyTimeseries(ctx, whereClause, team); err != nil {
+		return detail, err
+	}
+	if detail.ByModel, err = s.groupedFilter(ctx, "r.model", whereClause, team); err != nil {
+		return detail, err
+	}
+	if detail.ByIP, err = s.groupedFilter(ctx, "r.client_ip", whereClause, team); err != nil {
+		return detail, err
+	}
+	if detail.ByKey, err = s.groupedFilter(ctx, "r.api_key_id", whereClause, team); err != nil {
+		return detail, err
+	}
+	if detail.ByLanguage, err = s.languagesFilter(ctx, whereClause, team); err != nil {
+		return detail, err
+	}
+	if detail.LLM.Summary, err = s.teamLLMStats(ctx, team); err != nil {
+		return detail, err
+	}
+	if detail.LLM.Timeseries, err = s.llmTimeseriesFilter(ctx, "hour", time.Now().Add(-24*time.Hour), whereClause, team); err != nil {
+		return detail, err
+	}
+	if detail.LLM.Prompts, err = s.llmPromptsFilter(ctx, whereClause, 10, team); err != nil {
+		return detail, err
+	}
+	if detail.LLM.FeedbackLabels, err = s.llmFeedbackLabelsFilter(ctx, whereClause, 10, team); err != nil {
+		return detail, err
+	}
+	if detail.Recent, err = s.RecentRequests(ctx, RequestFilter{Limit: recent, Team: team}); err != nil {
+		return detail, err
+	}
+	return detail, nil
+}
+
+func (s *SQLStore) userLLMStats(ctx context.Context, apiKeyID string) (UserLLMStats, error) {
+	var stats UserLLMStats
+	var aligned int64
+	err := s.db.QueryRowContext(ctx, s.bind(`
+		WITH feedback_per_request AS (
+			SELECT request_id,
+				COUNT(*) AS feedback_total,
+				COALESCE(SUM(CASE WHEN rating < 0 THEN 1 ELSE 0 END), 0) AS negative_feedback,
+				MAX(CASE WHEN rating < 0 THEN 1 ELSE 0 END) AS human_negative
+			FROM llm_feedback
+			GROUP BY request_id
+		),
+		evaluation_per_request AS (
+			SELECT request_id,
+				COUNT(*) AS evaluations,
+				COALESCE(SUM(CASE WHEN passed = 0 THEN 1 ELSE 0 END), 0) AS eval_failures,
+				MAX(CASE WHEN passed = 0 THEN 1 ELSE 0 END) AS eval_failed
+			FROM llm_evaluations
+			GROUP BY request_id
+		),
+		per_request AS (
+			SELECT r.id,
+				COALESCE(NULLIF(r.session_id, ''), '') AS session_id,
+				COALESCE(NULLIF(r.prompt_name, ''), 'ad-hoc') AS prompt_name,
+				COALESCE(r.prompt_version, '') AS prompt_version,
+				COALESCE(r.first_chunk_ms, 0) AS first_chunk_ms,
+				r.created_at,
+				COALESCE(fp.human_negative, 0) AS human_negative,
+				COALESCE(ep.eval_failed, 0) AS eval_failed,
+				COALESCE(ep.evaluations, 0) AS evaluations,
+				COALESCE(ep.eval_failures, 0) AS eval_failures,
+				COALESCE(fp.feedback_total, 0) AS feedback_total,
+				COALESCE(fp.negative_feedback, 0) AS negative_feedback
+			FROM request_logs r
+			LEFT JOIN feedback_per_request fp ON fp.request_id = r.id
+			LEFT JOIN evaluation_per_request ep ON ep.request_id = r.id
+			WHERE r.api_key_id = ?
+		)
+		SELECT COUNT(*),
+			COUNT(DISTINCT NULLIF(session_id, '')),
+			COUNT(DISTINCT prompt_name || '::' || prompt_version),
+			COALESCE(SUM(evaluations), 0),
+			COALESCE(SUM(eval_failures), 0),
+			COALESCE(SUM(feedback_total), 0),
+			COALESCE(SUM(negative_feedback), 0),
+			COALESCE(SUM(CASE WHEN feedback_total > 0 THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN feedback_total > 0 AND human_negative = eval_failed THEN 1 ELSE 0 END), 0),
+			COALESCE(AVG(CASE WHEN first_chunk_ms > 0 THEN first_chunk_ms END), 0),
+			COALESCE(MAX(created_at), '')
+		FROM per_request
+	`), apiKeyID).Scan(
+		&stats.Requests,
+		&stats.Sessions,
+		&stats.PromptVariants,
+		&stats.Evaluations,
+		&stats.EvalFailures,
+		&stats.FeedbackTotal,
+		&stats.NegativeFeedback,
+		&stats.AlignmentSamples,
+		&aligned,
+		&stats.AverageFirstChunkMS,
+		&stats.LastSeen,
+	)
+	if err != nil {
+		return stats, err
+	}
+	if stats.AlignmentSamples > 0 {
+		stats.AlignmentRate = float64(aligned) / float64(stats.AlignmentSamples)
+	}
+	return stats, nil
+}
+
+func (s *SQLStore) teamLLMStats(ctx context.Context, team string) (UserLLMStats, error) {
+	var stats UserLLMStats
+	var aligned int64
+	err := s.db.QueryRowContext(ctx, s.bind(`
+		WITH feedback_per_request AS (
+			SELECT request_id,
+				COUNT(*) AS feedback_total,
+				COALESCE(SUM(CASE WHEN rating < 0 THEN 1 ELSE 0 END), 0) AS negative_feedback,
+				MAX(CASE WHEN rating < 0 THEN 1 ELSE 0 END) AS human_negative
+			FROM llm_feedback
+			GROUP BY request_id
+		),
+		evaluation_per_request AS (
+			SELECT request_id,
+				COUNT(*) AS evaluations,
+				COALESCE(SUM(CASE WHEN passed = 0 THEN 1 ELSE 0 END), 0) AS eval_failures,
+				MAX(CASE WHEN passed = 0 THEN 1 ELSE 0 END) AS eval_failed
+			FROM llm_evaluations
+			GROUP BY request_id
+		),
+		per_request AS (
+			SELECT r.id,
+				COALESCE(NULLIF(r.session_id, ''), '') AS session_id,
+				COALESCE(NULLIF(r.prompt_name, ''), 'ad-hoc') AS prompt_name,
+				COALESCE(r.prompt_version, '') AS prompt_version,
+				COALESCE(r.first_chunk_ms, 0) AS first_chunk_ms,
+				r.created_at,
+				COALESCE(fp.human_negative, 0) AS human_negative,
+				COALESCE(ep.eval_failed, 0) AS eval_failed,
+				COALESCE(ep.evaluations, 0) AS evaluations,
+				COALESCE(ep.eval_failures, 0) AS eval_failures,
+				COALESCE(fp.feedback_total, 0) AS feedback_total,
+				COALESCE(fp.negative_feedback, 0) AS negative_feedback
+			FROM request_logs r
+			LEFT JOIN feedback_per_request fp ON fp.request_id = r.id
+			LEFT JOIN evaluation_per_request ep ON ep.request_id = r.id
+			WHERE EXISTS (SELECT 1 FROM api_keys k WHERE k.id = r.api_key_id AND COALESCE(NULLIF(k.team, ''), 'unassigned') = ?)
+		)
+		SELECT COUNT(*),
+			COUNT(DISTINCT NULLIF(session_id, '')),
+			COUNT(DISTINCT prompt_name || '::' || prompt_version),
+			COALESCE(SUM(evaluations), 0),
+			COALESCE(SUM(eval_failures), 0),
+			COALESCE(SUM(feedback_total), 0),
+			COALESCE(SUM(negative_feedback), 0),
+			COALESCE(SUM(CASE WHEN feedback_total > 0 THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN feedback_total > 0 AND human_negative = eval_failed THEN 1 ELSE 0 END), 0),
+			COALESCE(AVG(CASE WHEN first_chunk_ms > 0 THEN first_chunk_ms END), 0),
+			COALESCE(MAX(created_at), '')
+		FROM per_request
+	`), team).Scan(
+		&stats.Requests,
+		&stats.Sessions,
+		&stats.PromptVariants,
+		&stats.Evaluations,
+		&stats.EvalFailures,
+		&stats.FeedbackTotal,
+		&stats.NegativeFeedback,
+		&stats.AlignmentSamples,
+		&aligned,
+		&stats.AverageFirstChunkMS,
+		&stats.LastSeen,
+	)
+	if err != nil {
+		return stats, err
+	}
+	if stats.AlignmentSamples > 0 {
+		stats.AlignmentRate = float64(aligned) / float64(stats.AlignmentSamples)
+	}
+	return stats, nil
 }
 
 func (s *SQLStore) userAdvancedStats(ctx context.Context, apiKeyID string) (UserAdvancedStats, error) {
@@ -181,6 +454,57 @@ func (s *SQLStore) userAdvancedStats(ctx context.Context, apiKeyID string) (User
 	}
 
 	latencies, firstChunks, err := s.latencySamplesFilter(ctx, "r.api_key_id = ?", apiKeyID)
+	if err != nil {
+		return stats, err
+	}
+	stats.LatencyP95MS = percentile95MS(latencies)
+	stats.FirstChunkP95MS = percentile95MS(firstChunks)
+	return stats, nil
+}
+
+func (s *SQLStore) teamAdvancedStats(ctx context.Context, team string) (UserAdvancedStats, error) {
+	var stats UserAdvancedStats
+	since24h := time.Now().Add(-24 * time.Hour).UTC().Format(time.RFC3339Nano)
+	var totalRequests int64
+	teamWhere := "EXISTS (SELECT 1 FROM api_keys k WHERE k.id = r.api_key_id AND COALESCE(NULLIF(k.team, ''), 'unassigned') = ?)"
+	err := s.db.QueryRowContext(ctx, s.bind(`
+		SELECT
+			COUNT(r.id),
+			COALESCE(SUM(CASE WHEN r.status_code >= 400 THEN 1 ELSE 0 END), 0),
+			COALESCE(AVG(NULLIF(r.first_chunk_ms, 0)), 0),
+			COALESCE(SUM(t.prompt_tokens), 0),
+			COALESCE(SUM(t.completion_tokens), 0),
+			COALESCE(SUM(t.cached_tokens), 0),
+			COALESCE(SUM(t.reasoning_tokens), 0),
+			COUNT(DISTINCT NULLIF(r.model, '')),
+			COUNT(DISTINCT NULLIF(r.client_ip, '')),
+			COALESCE(SUM(CASE WHEN r.created_at >= ? THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN r.created_at >= ? THEN t.total_tokens ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN r.created_at >= ? THEN t.estimated_cost ELSE 0 END), 0)
+		FROM request_logs r
+		LEFT JOIN token_usage t ON t.request_id = r.id
+		WHERE `+teamWhere+`
+	`), since24h, since24h, since24h, team).Scan(
+		&totalRequests,
+		&stats.Errors,
+		&stats.AverageFirstChunkMS,
+		&stats.PromptTokens,
+		&stats.CompletionTokens,
+		&stats.CachedTokens,
+		&stats.ReasoningTokens,
+		&stats.DistinctModels,
+		&stats.DistinctIPs,
+		&stats.Requests24h,
+		&stats.Tokens24h,
+		&stats.CostKRW24h,
+	)
+	if err != nil {
+		return stats, err
+	}
+	if totalRequests > 0 {
+		stats.ErrorRate = float64(stats.Errors) / float64(totalRequests)
+	}
+	latencies, firstChunks, err := s.latencySamplesFilter(ctx, teamWhere, team)
 	if err != nil {
 		return stats, err
 	}
@@ -384,7 +708,7 @@ func (s *SQLStore) languagesFilter(ctx context.Context, whereClause string, args
 }
 
 func (s *SQLStore) RequestDetail(ctx context.Context, id string) (RequestDetail, error) {
-	detail := RequestDetail{Prompts: []PromptDetail{}, Languages: []LanguageStat{}}
+	detail := RequestDetail{Prompts: []PromptDetail{}, Languages: []LanguageStat{}, Feedback: []LLMFeedback{}}
 
 	query := s.bind(`
 		SELECT r.id, r.trace_id, COALESCE(r.api_key_id, ''), COALESCE(r.client_ip, ''), COALESCE(r.forwarded_for, ''),
@@ -436,6 +760,11 @@ func (s *SQLStore) RequestDetail(ctx context.Context, id string) (RequestDetail,
 		return detail, err
 	}
 	detail.Evaluations = evaluations
+	feedback, err := s.FeedbackForRequest(ctx, item.ID)
+	if err != nil {
+		return detail, err
+	}
+	detail.Feedback = feedback
 
 	prompts, err := s.promptDetailsForRequest(ctx, item.ID)
 	if err != nil {
@@ -451,6 +780,20 @@ func (s *SQLStore) RequestDetail(ctx context.Context, id string) (RequestDetail,
 		detail.Response = &resp
 	}
 	return detail, nil
+}
+
+func (s *SQLStore) FeedbackForRequest(ctx context.Context, requestID string) ([]LLMFeedback, error) {
+	rows, err := s.db.QueryContext(ctx, s.bind(`
+		SELECT id, request_id, trace_id, rating, label, COALESCE(comment, ''), source, COALESCE(created_by, ''), created_at
+		FROM llm_feedback
+		WHERE request_id = ?
+		ORDER BY created_at DESC
+	`), requestID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanLLMFeedback(rows)
 }
 
 func llmSpansForRequest(item RecentRequest) []LLMSpan {
@@ -551,24 +894,66 @@ func (s *SQLStore) EvaluationsForRequest(ctx context.Context, requestID string) 
 }
 
 func (s *SQLStore) RecentEvaluations(ctx context.Context, limit int) ([]LLMEvaluation, error) {
+	return s.recentEvaluationsFilter(ctx, "1=1", limit)
+}
+
+func (s *SQLStore) RecentEvaluationsFilter(ctx context.Context, whereClause string, limit int, args ...any) ([]LLMEvaluation, error) {
+	return s.recentEvaluationsFilter(ctx, whereClause, limit, args...)
+}
+
+func (s *SQLStore) recentEvaluationsFilter(ctx context.Context, whereClause string, limit int, args ...any) ([]LLMEvaluation, error) {
 	if limit <= 0 {
 		limit = 100
 	}
 	if limit > 1000 {
 		limit = 1000
 	}
-	rows, err := s.db.QueryContext(ctx, s.bind(`
-		SELECT id, request_id, trace_id, name, category, evaluator, score, label, passed,
-			COALESCE(reason, ''), COALESCE(metadata, ''), created_at
-		FROM llm_evaluations
-		ORDER BY created_at DESC
+	queryArgs := append(args, limit)
+	rows, err := s.db.QueryContext(ctx, s.bind(fmt.Sprintf(`
+		SELECT e.id, e.request_id, e.trace_id, e.name, e.category, e.evaluator, e.score, e.label, e.passed,
+			COALESCE(e.reason, ''), COALESCE(e.metadata, ''), e.created_at
+		FROM llm_evaluations e
+		JOIN request_logs r ON r.id = e.request_id
+		WHERE %s
+		ORDER BY e.created_at DESC
 		LIMIT ?
-	`), limit)
+	`, whereClause)), queryArgs...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	return scanEvaluations(rows)
+}
+
+func (s *SQLStore) RecentLLMFeedback(ctx context.Context, limit int) ([]LLMFeedback, error) {
+	return s.recentLLMFeedbackFilter(ctx, "1=1", limit)
+}
+
+func (s *SQLStore) RecentLLMFeedbackFilter(ctx context.Context, whereClause string, limit int, args ...any) ([]LLMFeedback, error) {
+	return s.recentLLMFeedbackFilter(ctx, whereClause, limit, args...)
+}
+
+func (s *SQLStore) recentLLMFeedbackFilter(ctx context.Context, whereClause string, limit int, args ...any) ([]LLMFeedback, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	if limit > 1000 {
+		limit = 1000
+	}
+	queryArgs := append(args, limit)
+	rows, err := s.db.QueryContext(ctx, s.bind(fmt.Sprintf(`
+		SELECT f.id, f.request_id, f.trace_id, f.rating, f.label, COALESCE(f.comment, ''), f.source, COALESCE(f.created_by, ''), f.created_at
+		FROM llm_feedback f
+		JOIN request_logs r ON r.id = f.request_id
+		WHERE %s
+		ORDER BY f.created_at DESC
+		LIMIT ?
+	`, whereClause)), queryArgs...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanLLMFeedback(rows)
 }
 
 func scanEvaluations(rows *sql.Rows) ([]LLMEvaluation, error) {
@@ -590,14 +975,40 @@ func scanEvaluations(rows *sql.Rows) ([]LLMEvaluation, error) {
 	return result, rows.Err()
 }
 
+func scanLLMFeedback(rows *sql.Rows) ([]LLMFeedback, error) {
+	result := []LLMFeedback{}
+	for rows.Next() {
+		var item LLMFeedback
+		var createdAt string
+		if err := rows.Scan(&item.ID, &item.RequestID, &item.TraceID, &item.Rating, &item.Label, &item.Comment, &item.Source, &item.CreatedBy, &createdAt); err != nil {
+			return nil, err
+		}
+		if parsed, err := time.Parse(time.RFC3339Nano, createdAt); err == nil {
+			item.CreatedAt = parsed
+		}
+		result = append(result, item)
+	}
+	return result, rows.Err()
+}
+
 func (s *SQLStore) EvaluationSummary(ctx context.Context) ([]LLMEvaluationSummary, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	return s.evaluationSummaryFilter(ctx, "1=1")
+}
+
+func (s *SQLStore) EvaluationSummaryFilter(ctx context.Context, whereClause string, args ...any) ([]LLMEvaluationSummary, error) {
+	return s.evaluationSummaryFilter(ctx, whereClause, args...)
+}
+
+func (s *SQLStore) evaluationSummaryFilter(ctx context.Context, whereClause string, args ...any) ([]LLMEvaluationSummary, error) {
+	rows, err := s.db.QueryContext(ctx, s.bind(fmt.Sprintf(`
 		SELECT name, category, COUNT(*), SUM(CASE WHEN passed = 1 THEN 1 ELSE 0 END),
 			SUM(CASE WHEN passed = 0 THEN 1 ELSE 0 END), COALESCE(AVG(score), 0)
-		FROM llm_evaluations
+		FROM llm_evaluations e
+		JOIN request_logs r ON r.id = e.request_id
+		WHERE %s
 		GROUP BY name, category
 		ORDER BY name ASC
-	`)
+	`, whereClause)), args...)
 	if err != nil {
 		return nil, err
 	}
@@ -613,14 +1024,324 @@ func (s *SQLStore) EvaluationSummary(ctx context.Context) ([]LLMEvaluationSummar
 	return result, rows.Err()
 }
 
+func (s *SQLStore) LLMFeedbackSummary(ctx context.Context) (LLMFeedbackSummary, error) {
+	return s.llmFeedbackSummaryFilter(ctx, "1=1")
+}
+
+func (s *SQLStore) LLMFeedbackSummaryFilter(ctx context.Context, whereClause string, args ...any) (LLMFeedbackSummary, error) {
+	return s.llmFeedbackSummaryFilter(ctx, whereClause, args...)
+}
+
+func (s *SQLStore) llmFeedbackSummaryFilter(ctx context.Context, whereClause string, args ...any) (LLMFeedbackSummary, error) {
+	var summary LLMFeedbackSummary
+	err := s.db.QueryRowContext(ctx, s.bind(fmt.Sprintf(`
+		SELECT COUNT(*),
+			COALESCE(SUM(CASE WHEN f.rating > 0 THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN f.rating < 0 THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN f.rating = 0 THEN 1 ELSE 0 END), 0),
+			COALESCE(AVG(f.rating), 0)
+		FROM llm_feedback f
+		JOIN request_logs r ON r.id = f.request_id
+		WHERE %s
+	`, whereClause)), args...).Scan(&summary.Total, &summary.Positive, &summary.Negative, &summary.Neutral, &summary.AverageRating)
+	return summary, err
+}
+
+func (s *SQLStore) LLMFeedbackLabels(ctx context.Context, limit int) ([]LLMFeedbackLabelSummary, error) {
+	return s.llmFeedbackLabelsFilter(ctx, "1=1", limit)
+}
+
+func (s *SQLStore) LLMFeedbackLabelsFilter(ctx context.Context, whereClause string, limit int, args ...any) ([]LLMFeedbackLabelSummary, error) {
+	return s.llmFeedbackLabelsFilter(ctx, whereClause, limit, args...)
+}
+
+func (s *SQLStore) llmFeedbackLabelsFilter(ctx context.Context, whereClause string, limit int, args ...any) ([]LLMFeedbackLabelSummary, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 200 {
+		limit = 200
+	}
+	queryArgs := append(args, limit)
+	rows, err := s.db.QueryContext(ctx, s.bind(fmt.Sprintf(`
+		SELECT COALESCE(NULLIF(f.label, ''), 'unlabeled'),
+			COUNT(*),
+			COALESCE(SUM(CASE WHEN f.rating > 0 THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN f.rating < 0 THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN f.rating = 0 THEN 1 ELSE 0 END), 0),
+			COALESCE(AVG(f.rating), 0)
+		FROM llm_feedback f
+		JOIN request_logs r ON r.id = f.request_id
+		WHERE %s
+		GROUP BY COALESCE(NULLIF(f.label, ''), 'unlabeled')
+		ORDER BY COUNT(*) DESC, f.label ASC
+		LIMIT ?
+	`, whereClause)), queryArgs...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := []LLMFeedbackLabelSummary{}
+	for rows.Next() {
+		var item LLMFeedbackLabelSummary
+		if err := rows.Scan(&item.Label, &item.Total, &item.Positive, &item.Negative, &item.Neutral, &item.AverageRating); err != nil {
+			return nil, err
+		}
+		result = append(result, item)
+	}
+	return result, rows.Err()
+}
+
+func (s *SQLStore) LLMFeedbackPrompts(ctx context.Context, limit int) ([]LLMFeedbackPromptSummary, error) {
+	return s.llmFeedbackPromptsFilter(ctx, "1=1", limit)
+}
+
+func (s *SQLStore) LLMFeedbackPromptsFilter(ctx context.Context, whereClause string, limit int, args ...any) ([]LLMFeedbackPromptSummary, error) {
+	return s.llmFeedbackPromptsFilter(ctx, whereClause, limit, args...)
+}
+
+func (s *SQLStore) llmFeedbackPromptsFilter(ctx context.Context, whereClause string, limit int, args ...any) ([]LLMFeedbackPromptSummary, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 200 {
+		limit = 200
+	}
+	queryArgs := append(args, limit)
+	rows, err := s.db.QueryContext(ctx, s.bind(fmt.Sprintf(`
+		SELECT COALESCE(NULLIF(r.prompt_name, ''), 'ad-hoc'),
+			COALESCE(r.prompt_version, ''),
+			COUNT(f.id),
+			COALESCE(SUM(CASE WHEN f.rating > 0 THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN f.rating < 0 THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN f.rating = 0 THEN 1 ELSE 0 END), 0),
+			COALESCE(AVG(f.rating), 0),
+			COALESCE(MAX(f.created_at), '')
+		FROM llm_feedback f
+		JOIN request_logs r ON r.id = f.request_id
+		WHERE %s
+		GROUP BY COALESCE(NULLIF(r.prompt_name, ''), 'ad-hoc'), COALESCE(r.prompt_version, '')
+		ORDER BY COUNT(f.id) DESC, MAX(f.created_at) DESC
+		LIMIT ?
+	`, whereClause)), queryArgs...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := []LLMFeedbackPromptSummary{}
+	for rows.Next() {
+		var item LLMFeedbackPromptSummary
+		if err := rows.Scan(&item.PromptName, &item.PromptVersion, &item.Total, &item.Positive, &item.Negative, &item.Neutral, &item.AverageRating, &item.LastSeen); err != nil {
+			return nil, err
+		}
+		result = append(result, item)
+	}
+	return result, rows.Err()
+}
+
+func (s *SQLStore) LLMAlignmentSummary(ctx context.Context) (LLMAlignmentSummary, error) {
+	return s.llmAlignmentSummaryFilter(ctx, "1=1")
+}
+
+func (s *SQLStore) LLMAlignmentSummaryFilter(ctx context.Context, whereClause string, args ...any) (LLMAlignmentSummary, error) {
+	return s.llmAlignmentSummaryFilter(ctx, whereClause, args...)
+}
+
+func (s *SQLStore) llmAlignmentSummaryFilter(ctx context.Context, whereClause string, args ...any) (LLMAlignmentSummary, error) {
+	var summary LLMAlignmentSummary
+	err := s.db.QueryRowContext(ctx, s.bind(fmt.Sprintf(`
+		WITH per_request AS (
+			SELECT r.id,
+				MAX(CASE WHEN f.rating < 0 THEN 1 ELSE 0 END) AS human_negative,
+				MAX(CASE WHEN e.passed = 0 THEN 1 ELSE 0 END) AS eval_failed
+			FROM request_logs r
+			LEFT JOIN llm_feedback f ON f.request_id = r.id
+			LEFT JOIN llm_evaluations e ON e.request_id = r.id
+			WHERE EXISTS (SELECT 1 FROM llm_feedback f2 WHERE f2.request_id = r.id) AND %s
+			GROUP BY r.id
+		)
+		SELECT COUNT(*),
+			COALESCE(SUM(CASE WHEN human_negative = eval_failed THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN human_negative != eval_failed THEN 1 ELSE 0 END), 0),
+			COALESCE(AVG(CASE WHEN human_negative = eval_failed THEN 1.0 ELSE 0.0 END), 0),
+			COALESCE(SUM(human_negative), 0)
+		FROM per_request
+	`, whereClause)), args...).Scan(&summary.Total, &summary.Aligned, &summary.Misaligned, &summary.AlignmentRate, &summary.HumanNegativeCount)
+	return summary, err
+}
+
+func (s *SQLStore) LLMAlignmentPrompts(ctx context.Context, limit int) ([]LLMAlignmentPromptSummary, error) {
+	return s.llmAlignmentPromptsFilter(ctx, "1=1", limit)
+}
+
+func (s *SQLStore) LLMAlignmentPromptsFilter(ctx context.Context, whereClause string, limit int, args ...any) ([]LLMAlignmentPromptSummary, error) {
+	return s.llmAlignmentPromptsFilter(ctx, whereClause, limit, args...)
+}
+
+func (s *SQLStore) llmAlignmentPromptsFilter(ctx context.Context, whereClause string, limit int, args ...any) ([]LLMAlignmentPromptSummary, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 200 {
+		limit = 200
+	}
+	queryArgs := append(args, limit)
+	rows, err := s.db.QueryContext(ctx, s.bind(fmt.Sprintf(`
+		WITH per_request AS (
+			SELECT r.id,
+				COALESCE(NULLIF(r.prompt_name, ''), 'ad-hoc') AS prompt_name,
+				COALESCE(r.prompt_version, '') AS prompt_version,
+				MAX(CASE WHEN f.rating < 0 THEN 1 ELSE 0 END) AS human_negative,
+				MAX(CASE WHEN e.passed = 0 THEN 1 ELSE 0 END) AS eval_failed,
+				COALESCE(MAX(COALESCE(f.created_at, e.created_at, r.created_at)), '') AS last_seen
+			FROM request_logs r
+			LEFT JOIN llm_feedback f ON f.request_id = r.id
+			LEFT JOIN llm_evaluations e ON e.request_id = r.id
+			WHERE EXISTS (SELECT 1 FROM llm_feedback f2 WHERE f2.request_id = r.id) AND %s
+			GROUP BY r.id, COALESCE(NULLIF(r.prompt_name, ''), 'ad-hoc'), COALESCE(r.prompt_version, '')
+		)
+		SELECT prompt_name, prompt_version, COUNT(*),
+			COALESCE(SUM(CASE WHEN human_negative = eval_failed THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN human_negative != eval_failed THEN 1 ELSE 0 END), 0),
+			COALESCE(AVG(CASE WHEN human_negative = eval_failed THEN 1.0 ELSE 0.0 END), 0),
+			COALESCE(SUM(human_negative), 0),
+			COALESCE(AVG(CASE WHEN eval_failed = 1 THEN 1.0 ELSE 0.0 END), 0),
+			COALESCE(MAX(last_seen), '')
+		FROM per_request
+		GROUP BY prompt_name, prompt_version
+		ORDER BY COUNT(*) DESC, MAX(last_seen) DESC
+		LIMIT ?
+	`, whereClause)), queryArgs...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := []LLMAlignmentPromptSummary{}
+	for rows.Next() {
+		var item LLMAlignmentPromptSummary
+		if err := rows.Scan(&item.PromptName, &item.PromptVersion, &item.Total, &item.Aligned, &item.Misaligned, &item.AlignmentRate, &item.HumanNegative, &item.EvalFailureRate, &item.LastSeen); err != nil {
+			return nil, err
+		}
+		result = append(result, item)
+	}
+	return result, rows.Err()
+}
+
+func (s *SQLStore) LLMTimeseries(ctx context.Context, bucket string, since time.Time) ([]LLMTimeseriesPoint, error) {
+	return s.llmTimeseriesFilter(ctx, bucket, since, "1=1")
+}
+
+func (s *SQLStore) LLMTimeseriesFilter(ctx context.Context, bucket string, since time.Time, whereClause string, args ...any) ([]LLMTimeseriesPoint, error) {
+	return s.llmTimeseriesFilter(ctx, bucket, since, whereClause, args...)
+}
+
+func (s *SQLStore) llmTimeseriesFilter(ctx context.Context, bucket string, since time.Time, whereClause string, args ...any) ([]LLMTimeseriesPoint, error) {
+	if bucket != "day" {
+		bucket = "hour"
+	}
+	bucketExpr := "substr(r.created_at, 1, 13)"
+	if bucket == "day" {
+		bucketExpr = "substr(r.created_at, 1, 10)"
+	}
+	sinceText := since.UTC().Format(time.RFC3339Nano)
+	queryArgs := append([]any{sinceText}, args...)
+	rows, err := s.db.QueryContext(ctx, s.bind(fmt.Sprintf(`
+		WITH request_buckets AS (
+			SELECT r.id,
+				%s AS bucket,
+				r.status_code,
+				COALESCE(r.first_chunk_ms, 0) AS first_chunk_ms,
+				COALESCE(t.total_tokens, 0) AS total_tokens,
+				COALESCE(t.estimated_cost, 0) AS estimated_cost
+			FROM request_logs r
+			LEFT JOIN token_usage t ON t.request_id = r.id
+			WHERE r.created_at >= ? AND %s
+		),
+		feedback_per_request AS (
+			SELECT request_id,
+				COUNT(*) AS feedback_total,
+				COALESCE(SUM(CASE WHEN rating < 0 THEN 1 ELSE 0 END), 0) AS feedback_negative,
+				MAX(CASE WHEN rating < 0 THEN 1 ELSE 0 END) AS human_negative
+			FROM llm_feedback
+			GROUP BY request_id
+		),
+		evaluation_per_request AS (
+			SELECT request_id,
+				COALESCE(SUM(CASE WHEN passed = 0 THEN 1 ELSE 0 END), 0) AS eval_failures,
+				MAX(CASE WHEN passed = 0 THEN 1 ELSE 0 END) AS eval_failed
+			FROM llm_evaluations
+			GROUP BY request_id
+		)
+		SELECT rb.bucket,
+			COUNT(*) AS requests,
+			COALESCE(SUM(rb.total_tokens), 0) AS tokens,
+			COALESCE(SUM(rb.estimated_cost), 0) AS cost_krw,
+			COALESCE(SUM(CASE WHEN rb.status_code >= 400 THEN 1 ELSE 0 END), 0) AS errors,
+			COALESCE(AVG(CASE WHEN rb.first_chunk_ms > 0 THEN rb.first_chunk_ms END), 0) AS avg_first_chunk_ms,
+			COALESCE(SUM(COALESCE(ep.eval_failures, 0)), 0) AS evaluation_failures,
+			COALESCE(SUM(COALESCE(fp.feedback_total, 0)), 0) AS feedback_total,
+			COALESCE(SUM(COALESCE(fp.feedback_negative, 0)), 0) AS negative_feedback,
+			COALESCE(SUM(CASE
+				WHEN fp.request_id IS NOT NULL AND COALESCE(fp.human_negative, 0) = COALESCE(ep.eval_failed, 0) THEN 1
+				ELSE 0
+			END), 0) AS aligned,
+			COALESCE(SUM(CASE WHEN fp.request_id IS NOT NULL THEN 1 ELSE 0 END), 0) AS alignment_samples
+		FROM request_buckets rb
+		LEFT JOIN feedback_per_request fp ON fp.request_id = rb.id
+		LEFT JOIN evaluation_per_request ep ON ep.request_id = rb.id
+		GROUP BY rb.bucket
+		ORDER BY rb.bucket ASC
+	`, bucketExpr, whereClause)), queryArgs...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := []LLMTimeseriesPoint{}
+	for rows.Next() {
+		var item LLMTimeseriesPoint
+		var aligned int64
+		if err := rows.Scan(
+			&item.Date,
+			&item.Requests,
+			&item.Tokens,
+			&item.CostKRW,
+			&item.Errors,
+			&item.AverageFirstChunkMS,
+			&item.EvaluationFailures,
+			&item.FeedbackTotal,
+			&item.NegativeFeedback,
+			&aligned,
+			&item.AlignmentSamples,
+		); err != nil {
+			return nil, err
+		}
+		item.Bucket = bucket
+		if item.AlignmentSamples > 0 {
+			item.AlignmentRate = float64(aligned) / float64(item.AlignmentSamples)
+		}
+		result = append(result, item)
+	}
+	return result, rows.Err()
+}
+
 func (s *SQLStore) LLMPrompts(ctx context.Context, limit int) ([]LLMPromptSummary, error) {
+	return s.llmPromptsFilter(ctx, "1=1", limit)
+}
+
+func (s *SQLStore) LLMPromptsFilter(ctx context.Context, whereClause string, limit int, args ...any) ([]LLMPromptSummary, error) {
+	return s.llmPromptsFilter(ctx, whereClause, limit, args...)
+}
+
+func (s *SQLStore) llmPromptsFilter(ctx context.Context, whereClause string, limit int, args ...any) ([]LLMPromptSummary, error) {
 	if limit <= 0 {
 		limit = 100
 	}
 	if limit > 500 {
 		limit = 500
 	}
-	rows, err := s.db.QueryContext(ctx, s.bind(`
+	queryArgs := append(args, limit)
+	rows, err := s.db.QueryContext(ctx, s.bind(fmt.Sprintf(`
 		SELECT COALESCE(NULLIF(r.prompt_name, ''), 'ad-hoc') AS prompt_name,
 			COALESCE(r.prompt_version, '') AS prompt_version,
 			COUNT(r.id),
@@ -638,10 +1359,11 @@ func (s *SQLStore) LLMPrompts(ctx context.Context, limit int) ([]LLMPromptSummar
 			FROM llm_evaluations
 			GROUP BY request_id
 		) ef ON ef.request_id = r.id
+		WHERE %s
 		GROUP BY COALESCE(NULLIF(r.prompt_name, ''), 'ad-hoc'), COALESCE(r.prompt_version, '')
 		ORDER BY COUNT(r.id) DESC, MAX(r.created_at) DESC
 		LIMIT ?
-	`), limit)
+	`, whereClause)), queryArgs...)
 	if err != nil {
 		return nil, err
 	}
@@ -658,14 +1380,243 @@ func (s *SQLStore) LLMPrompts(ctx context.Context, limit int) ([]LLMPromptSummar
 	return result, rows.Err()
 }
 
+func (s *SQLStore) LLMPromptComparison(ctx context.Context, promptName, candidateVersion, baselineVersion string) (LLMPromptComparison, error) {
+	return s.llmPromptComparisonFilter(ctx, promptName, candidateVersion, baselineVersion, 3, "1=1")
+}
+
+func (s *SQLStore) LLMPromptComparisonLimit(ctx context.Context, promptName, candidateVersion, baselineVersion string, candidateLimit int) (LLMPromptComparison, error) {
+	return s.llmPromptComparisonFilter(ctx, promptName, candidateVersion, baselineVersion, candidateLimit, "1=1")
+}
+
+func (s *SQLStore) LLMPromptComparisonFilter(ctx context.Context, promptName, candidateVersion, baselineVersion string, whereClause string, args ...any) (LLMPromptComparison, error) {
+	return s.llmPromptComparisonFilter(ctx, promptName, candidateVersion, baselineVersion, 3, whereClause, args...)
+}
+
+func (s *SQLStore) LLMPromptComparisonFilterLimit(ctx context.Context, promptName, candidateVersion, baselineVersion string, candidateLimit int, whereClause string, args ...any) (LLMPromptComparison, error) {
+	return s.llmPromptComparisonFilter(ctx, promptName, candidateVersion, baselineVersion, candidateLimit, whereClause, args...)
+}
+
+func (s *SQLStore) llmPromptComparisonFilter(ctx context.Context, promptName, candidateVersion, baselineVersion string, candidateLimit int, whereClause string, args ...any) (LLMPromptComparison, error) {
+	result := LLMPromptComparison{PromptName: promptName, AvailableVersions: []string{}}
+	if strings.TrimSpace(promptName) == "" {
+		return result, ErrNotFound
+	}
+	if candidateLimit <= 0 {
+		candidateLimit = 3
+	}
+	if candidateLimit > 10 {
+		candidateLimit = 10
+	}
+	queryWhere := "COALESCE(NULLIF(r.prompt_name, ''), 'ad-hoc') = ?"
+	queryArgs := append([]any{promptName}, args...)
+	if whereClause != "" && whereClause != "1=1" {
+		queryWhere += " AND " + whereClause
+	}
+	rows, err := s.llmPromptsFilter(ctx, queryWhere, 200, queryArgs...)
+	if err != nil {
+		return result, err
+	}
+	if len(rows) == 0 {
+		return result, ErrNotFound
+	}
+	byVersion := make(map[string]LLMPromptSummary, len(rows))
+	for _, row := range rows {
+		result.AvailableVersions = append(result.AvailableVersions, row.PromptVersion)
+		byVersion[row.PromptVersion] = row
+	}
+	if candidateVersion == "" {
+		candidateVersion = rows[0].PromptVersion
+	}
+	candidate, ok := byVersion[candidateVersion]
+	if !ok {
+		return result, ErrNotFound
+	}
+	result.Candidate = candidate
+	result.CandidateErrorRate = promptErrorRate(candidate)
+	result.CandidateEvalRate = promptEvalFailureRate(candidate)
+	result.BaselineCandidates = promptBaselineCandidates(rows, candidateVersion, candidateLimit)
+	if len(result.BaselineCandidates) > 0 {
+		result.CandidateOrdering = "nearest_previous_version_then_recent_activity"
+	}
+	manualBaseline := strings.TrimSpace(baselineVersion) != ""
+	if baselineVersion == "" {
+		baselineVersion, result.BaselineReason = selectPromptBaselineVersion(rows, candidateVersion)
+	}
+	if baselineVersion != "" {
+		if result.BaselineReason == "" && manualBaseline {
+			result.BaselineReason = "manual"
+		}
+		if baseline, ok := byVersion[baselineVersion]; ok {
+			result.Baseline = &baseline
+			result.BaselineErrorRate = promptErrorRate(baseline)
+			result.BaselineEvalRate = promptEvalFailureRate(baseline)
+			result.Delta = LLMPromptComparisonDelta{
+				Calls:            candidate.Calls - baseline.Calls,
+				Tokens:           candidate.Tokens - baseline.Tokens,
+				CostKRW:          candidate.CostKRW - baseline.CostKRW,
+				AverageLatencyMS: candidate.AverageLatencyMS - baseline.AverageLatencyMS,
+				ErrorRate:        result.CandidateErrorRate - result.BaselineErrorRate,
+				EvalFailureRate:  result.CandidateEvalRate - result.BaselineEvalRate,
+			}
+		}
+	}
+	return result, nil
+}
+
+func selectPromptBaselineVersion(rows []LLMPromptSummary, candidateVersion string) (string, string) {
+	candidates := promptBaselineCandidates(rows, candidateVersion, 1)
+	if len(candidates) == 0 {
+		return "", ""
+	}
+	return candidates[0].PromptVersion, candidates[0].Reason
+}
+
+func promptBaselineCandidates(rows []LLMPromptSummary, candidateVersion string, limit int) []LLMPromptBaselineCandidate {
+	if candidateVersion == "" {
+		return nil
+	}
+	byVersion := make(map[string]LLMPromptSummary, len(rows))
+	for _, row := range rows {
+		byVersion[row.PromptVersion] = row
+	}
+	candidatePrefix, candidateNumber, candidateHasNumber := splitVersionNumber(candidateVersion)
+	candidates := make([]LLMPromptBaselineCandidate, 0, limit)
+	seen := map[string]bool{}
+	if candidateHasNumber {
+		type numbered struct {
+			version string
+			number  int
+		}
+		numberedRows := []numbered{}
+		for _, row := range rows {
+			if row.PromptVersion == candidateVersion {
+				continue
+			}
+			prefix, number, ok := splitVersionNumber(row.PromptVersion)
+			if !ok || prefix != candidatePrefix || number >= candidateNumber {
+				continue
+			}
+			numberedRows = append(numberedRows, numbered{version: row.PromptVersion, number: number})
+		}
+		sort.Slice(numberedRows, func(i, j int) bool {
+			return numberedRows[i].number > numberedRows[j].number
+		})
+		for _, row := range numberedRows {
+			if !seen[row.version] {
+				summary := byVersion[row.version]
+				candidates = append(candidates, promptBaselineCandidate(summary, "nearest_previous_version"))
+				seen[row.version] = true
+				if len(candidates) >= limit {
+					return candidates
+				}
+			}
+		}
+	}
+
+	fallback := append([]LLMPromptSummary{}, rows...)
+	sort.Slice(fallback, func(i, j int) bool {
+		ti := parseRFC3339OrZero(fallback[i].LastSeen)
+		tj := parseRFC3339OrZero(fallback[j].LastSeen)
+		if !ti.Equal(tj) {
+			return tj.Before(ti)
+		}
+		if fallback[i].Calls != fallback[j].Calls {
+			return fallback[i].Calls > fallback[j].Calls
+		}
+		return fallback[i].PromptVersion > fallback[j].PromptVersion
+	})
+	for _, row := range fallback {
+		if row.PromptVersion != candidateVersion {
+			if !seen[row.PromptVersion] {
+				candidates = append(candidates, promptBaselineCandidate(row, "recent_activity_fallback"))
+				seen[row.PromptVersion] = true
+				if len(candidates) >= limit {
+					return candidates
+				}
+			}
+		}
+	}
+	return candidates
+}
+
+func promptBaselineCandidate(summary LLMPromptSummary, reason string) LLMPromptBaselineCandidate {
+	return LLMPromptBaselineCandidate{
+		PromptVersion:    summary.PromptVersion,
+		Reason:           reason,
+		Calls:            summary.Calls,
+		AverageLatencyMS: summary.AverageLatencyMS,
+		ErrorRate:        promptErrorRate(summary),
+		EvalFailureRate:  promptEvalFailureRate(summary),
+		LastSeen:         summary.LastSeen,
+	}
+}
+
+func splitVersionNumber(version string) (string, int, bool) {
+	version = strings.TrimSpace(version)
+	if version == "" {
+		return "", 0, false
+	}
+	end := len(version)
+	start := end
+	for start > 0 {
+		ch := version[start-1]
+		if ch < '0' || ch > '9' {
+			break
+		}
+		start--
+	}
+	if start == end {
+		return version, 0, false
+	}
+	number, err := strconv.Atoi(version[start:end])
+	if err != nil {
+		return version, 0, false
+	}
+	return version[:start], number, true
+}
+
+func parseRFC3339OrZero(value string) time.Time {
+	parsed, err := time.Parse(time.RFC3339Nano, value)
+	if err != nil {
+		return time.Time{}
+	}
+	return parsed
+}
+
+func promptErrorRate(item LLMPromptSummary) float64 {
+	if item.Calls == 0 {
+		return 0
+	}
+	return float64(item.Errors) / float64(item.Calls)
+}
+
+func promptEvalFailureRate(item LLMPromptSummary) float64 {
+	if item.Calls == 0 {
+		return 0
+	}
+	return float64(item.EvalFailures) / float64(item.Calls)
+}
+
 func (s *SQLStore) LLMSessions(ctx context.Context, limit int) ([]LLMSessionSummary, error) {
+	return s.llmSessionsFilter(ctx, "1=1", limit)
+}
+
+func (s *SQLStore) LLMSessionsFilter(ctx context.Context, whereClause string, limit int, args ...any) ([]LLMSessionSummary, error) {
+	return s.llmSessionsFilter(ctx, whereClause, limit, args...)
+}
+
+func (s *SQLStore) llmSessionsFilter(ctx context.Context, whereClause string, limit int, args ...any) ([]LLMSessionSummary, error) {
 	if limit <= 0 {
 		limit = 100
 	}
 	if limit > 500 {
 		limit = 500
 	}
-	rows, err := s.db.QueryContext(ctx, s.bind(`
+	evalWhereClause := strings.ReplaceAll(whereClause, "r.", "r2.")
+	queryArgs := append([]any{}, args...)
+	queryArgs = append(queryArgs, args...)
+	queryArgs = append(queryArgs, limit)
+	rows, err := s.db.QueryContext(ctx, s.bind(fmt.Sprintf(`
 		SELECT COALESCE(NULLIF(r.session_id, ''), 'no-session') AS session_id,
 			COUNT(r.id),
 			COALESCE(SUM(t.total_tokens), 0),
@@ -680,13 +1631,14 @@ func (s *SQLStore) LLMSessions(ctx context.Context, limit int) ([]LLMSessionSumm
 			SELECT COALESCE(NULLIF(r2.session_id, ''), 'no-session') AS session_id, COUNT(*) AS failures
 			FROM llm_evaluations e
 			JOIN request_logs r2 ON r2.id = e.request_id
-			WHERE e.passed = 0
+			WHERE e.passed = 0 AND %s
 			GROUP BY COALESCE(NULLIF(r2.session_id, ''), 'no-session')
 		) ef ON ef.session_id = COALESCE(NULLIF(r.session_id, ''), 'no-session')
+		WHERE %s
 		GROUP BY COALESCE(NULLIF(r.session_id, ''), 'no-session'), ef.failures
 		ORDER BY MAX(r.created_at) DESC
 		LIMIT ?
-	`), limit)
+	`, evalWhereClause, whereClause)), queryArgs...)
 	if err != nil {
 		return nil, err
 	}
@@ -704,13 +1656,23 @@ func (s *SQLStore) LLMSessions(ctx context.Context, limit int) ([]LLMSessionSumm
 }
 
 func (s *SQLStore) LLMPatterns(ctx context.Context, limit int) ([]LLMPatternSummary, error) {
+	return s.llmPatternsFilter(ctx, "1=1", limit)
+}
+
+func (s *SQLStore) LLMPatternsFilter(ctx context.Context, whereClause string, limit int, args ...any) ([]LLMPatternSummary, error) {
+	return s.llmPatternsFilter(ctx, whereClause, limit, args...)
+}
+
+func (s *SQLStore) llmPatternsFilter(ctx context.Context, whereClause string, limit int, args ...any) ([]LLMPatternSummary, error) {
 	if limit <= 0 {
 		limit = 50
 	}
 	if limit > 200 {
 		limit = 200
 	}
-	rows, err := s.db.QueryContext(ctx, s.bind(`
+	queryArgs := append([]any{}, args...)
+	queryArgs = append(queryArgs, limit*20)
+	rows, err := s.db.QueryContext(ctx, s.bind(fmt.Sprintf(`
 		SELECT r.id,
 			COALESCE(pl.redacted_text, ''),
 			COALESCE(pl.language_hint, ''),
@@ -721,10 +1683,10 @@ func (s *SQLStore) LLMPatterns(ctx context.Context, limit int) ([]LLMPatternSumm
 		FROM request_logs r
 		JOIN prompt_logs pl ON pl.request_id = r.id
 		LEFT JOIN token_usage t ON t.request_id = r.id
-		WHERE COALESCE(pl.redacted_text, '') != ''
+		WHERE COALESCE(pl.redacted_text, '') != '' AND %s
 		ORDER BY r.created_at DESC
 		LIMIT ?
-	`), limit*20)
+	`, whereClause)), queryArgs...)
 	if err != nil {
 		return nil, err
 	}
@@ -852,6 +1814,14 @@ func truncatePatternSample(text string, max int) string {
 }
 
 func (s *SQLStore) LLMInsights(ctx context.Context, since time.Time, limit int) ([]LLMInsight, error) {
+	return s.llmInsightsFilter(ctx, since, "1=1", limit)
+}
+
+func (s *SQLStore) LLMInsightsFilter(ctx context.Context, since time.Time, whereClause string, limit int, args ...any) ([]LLMInsight, error) {
+	return s.llmInsightsFilter(ctx, since, whereClause, limit, args...)
+}
+
+func (s *SQLStore) llmInsightsFilter(ctx context.Context, since time.Time, whereClause string, limit int, args ...any) ([]LLMInsight, error) {
 	if limit <= 0 {
 		limit = 50
 	}
@@ -861,14 +1831,20 @@ func (s *SQLStore) LLMInsights(ctx context.Context, since time.Time, limit int) 
 	sinceText := since.UTC().Format(time.RFC3339Nano)
 	insights := []LLMInsight{}
 
-	if rows, err := s.db.QueryContext(ctx, s.bind(`
+	withLimit := func(values ...any) []any {
+		queryArgs := append([]any{sinceText}, values...)
+		return append(queryArgs, limit)
+	}
+
+	if rows, err := s.db.QueryContext(ctx, s.bind(fmt.Sprintf(`
 		SELECT e.name, e.category, COUNT(*), COALESCE(MAX(e.created_at), '')
 		FROM llm_evaluations e
-		WHERE e.created_at >= ? AND e.passed = 0
+		JOIN request_logs r ON r.id = e.request_id
+		WHERE e.created_at >= ? AND e.passed = 0 AND %s
 		GROUP BY e.name, e.category
 		ORDER BY COUNT(*) DESC
 		LIMIT ?
-	`), sinceText, limit); err != nil {
+	`, whereClause)), withLimit(args...)...); err != nil {
 		return nil, err
 	} else {
 		for rows.Next() {
@@ -886,6 +1862,7 @@ func (s *SQLStore) LLMInsights(ctx context.Context, since time.Time, limit int) 
 				Detail:         fmt.Sprintf("%s evaluation failed %d times in the selected window.", category, count),
 				Scope:          "evaluation",
 				ScopeValue:     name,
+				ScopeDetail:    category,
 				Count:          count,
 				MetricValue:    float64(count),
 				Recommendation: "Open the LLM Observability evaluation table and inspect the latest failing traces for this evaluator.",
@@ -899,16 +1876,16 @@ func (s *SQLStore) LLMInsights(ctx context.Context, since time.Time, limit int) 
 		rows.Close()
 	}
 
-	if rows, err := s.db.QueryContext(ctx, s.bind(`
+	if rows, err := s.db.QueryContext(ctx, s.bind(fmt.Sprintf(`
 		SELECT COALESCE(NULLIF(r.session_id, ''), 'no-session'), COALESCE(NULLIF(r.prompt_name, ''), 'ad-hoc'),
 			COUNT(*), COALESCE(MAX(e.created_at), '')
 		FROM llm_evaluations e
 		JOIN request_logs r ON r.id = e.request_id
-		WHERE e.created_at >= ? AND e.name = 'prompt.injection' AND e.passed = 0
+		WHERE e.created_at >= ? AND e.name = 'prompt.injection' AND e.passed = 0 AND %s
 		GROUP BY COALESCE(NULLIF(r.session_id, ''), 'no-session'), COALESCE(NULLIF(r.prompt_name, ''), 'ad-hoc')
 		ORDER BY COUNT(*) DESC
 		LIMIT ?
-	`), sinceText, limit); err != nil {
+	`, whereClause)), withLimit(args...)...); err != nil {
 		return nil, err
 	} else {
 		for rows.Next() {
@@ -939,16 +1916,16 @@ func (s *SQLStore) LLMInsights(ctx context.Context, since time.Time, limit int) 
 		rows.Close()
 	}
 
-	if rows, err := s.db.QueryContext(ctx, s.bind(`
+	if rows, err := s.db.QueryContext(ctx, s.bind(fmt.Sprintf(`
 		SELECT COALESCE(NULLIF(r.model, ''), 'unknown'), COALESCE(NULLIF(r.provider, ''), 'unknown'),
 			COUNT(*), COALESCE(MAX(e.created_at), '')
 		FROM llm_evaluations e
 		JOIN request_logs r ON r.id = e.request_id
-		WHERE e.created_at >= ? AND e.name = 'cost.has_usage' AND e.passed = 0
+		WHERE e.created_at >= ? AND e.name = 'cost.has_usage' AND e.passed = 0 AND %s
 		GROUP BY COALESCE(NULLIF(r.model, ''), 'unknown'), COALESCE(NULLIF(r.provider, ''), 'unknown')
 		ORDER BY COUNT(*) DESC
 		LIMIT ?
-	`), sinceText, limit); err != nil {
+	`, whereClause)), withLimit(args...)...); err != nil {
 		return nil, err
 	} else {
 		for rows.Next() {
@@ -979,15 +1956,15 @@ func (s *SQLStore) LLMInsights(ctx context.Context, since time.Time, limit int) 
 		rows.Close()
 	}
 
-	if rows, err := s.db.QueryContext(ctx, s.bind(`
-		SELECT COALESCE(NULLIF(model, ''), 'unknown'), COALESCE(NULLIF(provider, ''), 'unknown'),
-			COUNT(*), COALESCE(AVG(first_chunk_ms), 0), COALESCE(MAX(created_at), '')
-		FROM request_logs
-		WHERE created_at >= ? AND first_chunk_ms >= 3000
-		GROUP BY COALESCE(NULLIF(model, ''), 'unknown'), COALESCE(NULLIF(provider, ''), 'unknown')
+	if rows, err := s.db.QueryContext(ctx, s.bind(fmt.Sprintf(`
+		SELECT COALESCE(NULLIF(r.model, ''), 'unknown'), COALESCE(NULLIF(r.provider, ''), 'unknown'),
+			COUNT(*), COALESCE(AVG(r.first_chunk_ms), 0), COALESCE(MAX(r.created_at), '')
+		FROM request_logs r
+		WHERE r.created_at >= ? AND r.first_chunk_ms >= 3000 AND %s
+		GROUP BY COALESCE(NULLIF(r.model, ''), 'unknown'), COALESCE(NULLIF(r.provider, ''), 'unknown')
 		ORDER BY COUNT(*) DESC, AVG(first_chunk_ms) DESC
 		LIMIT ?
-	`), sinceText, limit); err != nil {
+	`, whereClause)), withLimit(args...)...); err != nil {
 		return nil, err
 	} else {
 		for rows.Next() {
@@ -1019,14 +1996,14 @@ func (s *SQLStore) LLMInsights(ctx context.Context, since time.Time, limit int) 
 		rows.Close()
 	}
 
-	if rows, err := s.db.QueryContext(ctx, s.bind(`
-		SELECT COALESCE(NULLIF(session_id, ''), 'no-session'), COUNT(*), COALESCE(MAX(created_at), '')
-		FROM request_logs
-		WHERE created_at >= ? AND status_code >= 400
-		GROUP BY COALESCE(NULLIF(session_id, ''), 'no-session')
+	if rows, err := s.db.QueryContext(ctx, s.bind(fmt.Sprintf(`
+		SELECT COALESCE(NULLIF(r.session_id, ''), 'no-session'), COUNT(*), COALESCE(MAX(r.created_at), '')
+		FROM request_logs r
+		WHERE r.created_at >= ? AND r.status_code >= 400 AND %s
+		GROUP BY COALESCE(NULLIF(r.session_id, ''), 'no-session')
 		ORDER BY COUNT(*) DESC
 		LIMIT ?
-	`), sinceText, limit); err != nil {
+	`, whereClause)), withLimit(args...)...); err != nil {
 		return nil, err
 	} else {
 		for rows.Next() {
@@ -1047,6 +2024,106 @@ func (s *SQLStore) LLMInsights(ctx context.Context, since time.Time, limit int) 
 				Count:          count,
 				MetricValue:    float64(count),
 				Recommendation: "Open the session in Trace Explorer and check quota, provider, model, and prompt changes around the failing calls.",
+				LastSeen:       lastSeen,
+			})
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		rows.Close()
+	}
+
+	if rows, err := s.db.QueryContext(ctx, s.bind(fmt.Sprintf(`
+		SELECT COALESCE(NULLIF(r.prompt_name, ''), 'ad-hoc'),
+			COALESCE(r.prompt_version, ''),
+			COALESCE(NULLIF(f.label, ''), 'unlabeled'),
+			COUNT(f.id),
+			COALESCE(AVG(f.rating), 0),
+			COALESCE(MAX(f.created_at), '')
+		FROM llm_feedback f
+		JOIN request_logs r ON r.id = f.request_id
+		WHERE f.created_at >= ? AND f.rating < 0 AND %s
+		GROUP BY COALESCE(NULLIF(r.prompt_name, ''), 'ad-hoc'), COALESCE(r.prompt_version, ''), COALESCE(NULLIF(f.label, ''), 'unlabeled')
+		ORDER BY COUNT(f.id) DESC, AVG(f.rating) ASC
+		LIMIT ?
+	`, whereClause)), withLimit(args...)...); err != nil {
+		return nil, err
+	} else {
+		for rows.Next() {
+			var promptName, promptVersion, label, lastSeen string
+			var count int64
+			var avgRating float64
+			if err := rows.Scan(&promptName, &promptVersion, &label, &count, &avgRating, &lastSeen); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			insights = append(insights, LLMInsight{
+				ID:             insightID("feedback", promptName, promptVersion, label),
+				Severity:       insightSeverity(count, 5, 2),
+				Kind:           "negative_human_feedback",
+				Title:          "Negative human feedback cluster",
+				Detail:         fmt.Sprintf("Prompt %s@%s collected %d negative feedback items with label %s.", promptName, promptVersion, count, label),
+				Scope:          "prompt",
+				ScopeValue:     promptName,
+				ScopeDetail:    promptVersion,
+				Count:          count,
+				MetricValue:    avgRating,
+				Recommendation: "Inspect recent traces for this prompt version and compare human feedback with managed evaluation failures before changing the template.",
+				LastSeen:       lastSeen,
+			})
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		rows.Close()
+	}
+
+	if rows, err := s.db.QueryContext(ctx, s.bind(fmt.Sprintf(`
+		WITH per_request AS (
+			SELECT r.id,
+				COALESCE(NULLIF(r.prompt_name, ''), 'ad-hoc') AS prompt_name,
+				COALESCE(r.prompt_version, '') AS prompt_version,
+				MAX(CASE WHEN f.rating < 0 THEN 1 ELSE 0 END) AS human_negative,
+				MAX(CASE WHEN e.passed = 0 THEN 1 ELSE 0 END) AS eval_failed,
+				COALESCE(MAX(COALESCE(f.created_at, e.created_at, r.created_at)), '') AS last_seen
+			FROM request_logs r
+			LEFT JOIN llm_feedback f ON f.request_id = r.id
+			LEFT JOIN llm_evaluations e ON e.request_id = r.id
+			WHERE COALESCE(f.created_at, e.created_at, r.created_at) >= ?
+				AND EXISTS (SELECT 1 FROM llm_feedback f2 WHERE f2.request_id = r.id)
+				AND %s
+			GROUP BY r.id, COALESCE(NULLIF(r.prompt_name, ''), 'ad-hoc'), COALESCE(r.prompt_version, '')
+		)
+		SELECT prompt_name, prompt_version, COUNT(*), COALESCE(MAX(last_seen), '')
+		FROM per_request
+		WHERE human_negative != eval_failed
+		GROUP BY prompt_name, prompt_version
+		ORDER BY COUNT(*) DESC, MAX(last_seen) DESC
+		LIMIT ?
+	`, whereClause)), withLimit(args...)...); err != nil {
+		return nil, err
+	} else {
+		for rows.Next() {
+			var promptName, promptVersion, lastSeen string
+			var count int64
+			if err := rows.Scan(&promptName, &promptVersion, &count, &lastSeen); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			insights = append(insights, LLMInsight{
+				ID:             insightID("alignment-mismatch", promptName, promptVersion),
+				Severity:       insightSeverity(count, 4, 2),
+				Kind:           "feedback_eval_mismatch",
+				Title:          "Human feedback and managed eval disagree",
+				Detail:         fmt.Sprintf("Prompt %s@%s has %d requests where human negative feedback and eval failure status do not match.", promptName, promptVersion, count),
+				Scope:          "prompt",
+				ScopeValue:     promptName,
+				ScopeDetail:    promptVersion,
+				Count:          count,
+				MetricValue:    float64(count),
+				Recommendation: "Open Alignment by Prompt and inspect traces where human feedback disagrees with managed evaluation before tuning thresholds or prompts.",
 				LastSeen:       lastSeen,
 			})
 		}
@@ -1331,7 +2408,7 @@ func (s *SQLStore) PurgeOlderThan(ctx context.Context, table string, days int) (
 	if days <= 0 {
 		return 0, nil
 	}
-	allowed := map[string]bool{"request_logs": true, "prompt_logs": true, "response_logs": true, "token_usage": true, "language_stats": true, "llm_evaluations": true}
+	allowed := map[string]bool{"request_logs": true, "prompt_logs": true, "response_logs": true, "token_usage": true, "language_stats": true, "llm_evaluations": true, "llm_feedback": true}
 	if !allowed[table] {
 		return 0, fmt.Errorf("unsupported table %q for purge", table)
 	}
@@ -1346,6 +2423,7 @@ func (s *SQLStore) PurgeOlderThan(ctx context.Context, table string, days int) (
 			`DELETE FROM token_usage WHERE request_id IN (SELECT id FROM request_logs WHERE created_at < ?)`,
 			`DELETE FROM language_stats WHERE request_id IN (SELECT id FROM request_logs WHERE created_at < ?)`,
 			`DELETE FROM llm_evaluations WHERE request_id IN (SELECT id FROM request_logs WHERE created_at < ?)`,
+			`DELETE FROM llm_feedback WHERE request_id IN (SELECT id FROM request_logs WHERE created_at < ?)`,
 			`DELETE FROM request_logs WHERE created_at < ?`,
 		}
 		for _, q := range queries {

@@ -122,6 +122,40 @@ func TestUserAndIPDetailAggregateAcrossRequests(t *testing.T) {
 		t.Fatalf("expected 3 recent rows, got %d", len(detail.Recent))
 	}
 
+	teamsResp, err := http.Get(proxy.URL + "/admin/teams")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer teamsResp.Body.Close()
+	var teams struct {
+		Teams []store.TeamSummary `json:"teams"`
+	}
+	if err := json.NewDecoder(teamsResp.Body).Decode(&teams); err != nil {
+		t.Fatal(err)
+	}
+	if len(teams.Teams) == 0 || teams.Teams[0].Team != "platform" {
+		t.Fatalf("expected platform team summary, got %#v", teams)
+	}
+
+	teamDetailResp, err := http.Get(proxy.URL + "/admin/teams/platform")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer teamDetailResp.Body.Close()
+	var teamDetail store.TeamDetail
+	if err := json.NewDecoder(teamDetailResp.Body).Decode(&teamDetail); err != nil {
+		t.Fatal(err)
+	}
+	if teamDetail.Stats.Requests != 3 || teamDetail.Stats.Keys != 1 {
+		t.Fatalf("unexpected team detail stats: %#v", teamDetail.Stats)
+	}
+	if len(teamDetail.ByKey) != 1 || len(teamDetail.Recent) != 3 {
+		t.Fatalf("expected team drill-down data, got %#v", teamDetail)
+	}
+	if teamDetail.LLM.Summary.Requests != 3 || len(teamDetail.LLM.Timeseries) == 0 {
+		t.Fatalf("expected team llm observability, got %#v", teamDetail.LLM)
+	}
+
 	// ip list
 	ipsResp, err := http.Get(proxy.URL + "/admin/ips")
 	if err != nil {

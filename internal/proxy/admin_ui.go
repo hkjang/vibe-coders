@@ -192,6 +192,7 @@ const adminHTML = `<!doctype html>
       <a href="#/requests" data-tab="requests">호출 이력</a>
       <a href="#/prompts" data-tab="prompts">프롬프트 검색</a>
       <a href="#/users" data-tab="users">사용자</a>
+      <a href="#/teams" data-tab="teams">팀</a>
       <a href="#/ips" data-tab="ips">IP</a>
       <a href="#/quotas" data-tab="quotas">사용 한도</a>
       <a href="#/safety" data-tab="safety">안전</a>
@@ -464,6 +465,7 @@ const adminHTML = `<!doctype html>
           case 'requests':  await renderRequestsView(params); break;
           case 'prompts':   await renderPromptsView(params); break;
           case 'users':     rest.length ? await renderUserDetail(rest.join('/')) : await renderUsers(); break;
+          case 'teams':     rest.length ? await renderTeamDetail(decodeURIComponent(rest.join('/'))) : await renderTeams(); break;
           case 'ips':       rest.length ? await renderIPDetail(decodeURIComponent(rest.join('/'))) : await renderIPs(); break;
           case 'quotas':    await renderQuotas(); break;
           case 'safety':    await renderSafety(); break;
@@ -732,21 +734,34 @@ const adminHTML = `<!doctype html>
     }
     function section(title, inner) { return '<section><h2>' + escapeHTML(title) + '</h2>' + inner + '</section>'; }
     function card(title, inner)    { return '<section><h2>' + escapeHTML(title) + '</h2>' + inner + '</section>'; }
+    function cardWithID(id, title, inner) { return '<section id="' + escapeHTML(id) + '"><h2>' + escapeHTML(title) + '</h2>' + inner + '</section>'; }
 
     // ---------- LLM observability ----------
-    const llmState = { window: sessionStorage.getItem('llmWindow') || '24h' };
+    const llmState = {
+      window: sessionStorage.getItem('llmWindow') || '24h',
+      apiKeyID: sessionStorage.getItem('llmApiKeyID') || '',
+      team: sessionStorage.getItem('llmTeam') || '',
+      model: '',
+      sessionID: '',
+      promptName: '',
+      promptVersion: '',
+      evaluationName: '',
+      focus: '',
+    };
     async function renderLLMObservability() {
+      syncLLMStateFromHash();
       const win = llmState.window;
       const bucket = win === '24h' ? 'hour' : 'day';
+      const scope = llmScopeParams();
       const [traces, sessions, evals, prompts, patterns, insights, feedback, ts] = await Promise.all([
-        api('/admin/llm/traces?limit=100'),
-        api('/admin/llm/sessions?limit=100'),
-        api('/admin/llm/evaluations?limit=100'),
-        api('/admin/llm/prompts?limit=100'),
-        api('/admin/llm/patterns?limit=50'),
-        api('/admin/llm/insights?window=' + win + '&limit=50'),
-        api('/admin/llm/feedback?limit=50'),
-        api('/admin/llm/timeseries?window=' + win + '&bucket=' + bucket),
+        api('/admin/llm/traces?limit=100&' + scope.toString()),
+        api('/admin/llm/sessions?limit=100&' + scope.toString()),
+        api('/admin/llm/evaluations?limit=100&' + scope.toString()),
+        api('/admin/llm/prompts?limit=100&' + scope.toString()),
+        api('/admin/llm/patterns?limit=50&' + scope.toString()),
+        api('/admin/llm/insights?window=' + win + '&limit=50&' + scope.toString()),
+        api('/admin/llm/feedback?limit=50&' + scope.toString()),
+        api('/admin/llm/timeseries?window=' + win + '&bucket=' + bucket + '&' + scope.toString()),
       ]);
       const summary = evals.summary || [];
       const recentEvals = evals.evaluations || [];
@@ -763,6 +778,7 @@ const adminHTML = `<!doctype html>
       const alignmentPrompts = feedback.alignment_prompts || [];
       const trend = llmTimeseriesSummary(tsPoints);
       const html =
+        section('LLM 필터', llmScopeToolbar()) +
         section('LLM Observability 요약',
           '<div class="kpis">' +
             kpi('Trace', fmt((traces.traces || []).length)) +
@@ -789,19 +805,19 @@ const adminHTML = `<!doctype html>
         '</div>' +
         section('Insights', llmInsightTable(insightRows)) +
         '<div class="grid2">' +
-          card('Trace Explorer', llmTraceTable(traces.traces || [])) +
-          card('Session Explorer', llmSessionTable(sessions.sessions || [])) +
+          cardWithID('llm-card-traces', 'Trace Explorer', llmTraceTable(traces.traces || [])) +
+          cardWithID('llm-card-sessions', 'Session Explorer', llmSessionTable(sessions.sessions || [])) +
         '</div>' +
         '<div class="grid2">' +
-          card('Prompt Tracking', llmPromptTable(promptRows)) +
-          card('Patterns', llmPatternTable(patternRows)) +
+          cardWithID('llm-card-prompts', 'Prompt Tracking', llmPromptTable(promptRows)) +
+          cardWithID('llm-card-patterns', 'Patterns', llmPatternTable(patternRows)) +
         '</div>' +
         '<div class="grid2">' +
-          card('Evaluation 요약', llmEvaluationSummaryTable(summary)) +
-          card('최근 Evaluation', llmEvaluationTable(recentEvals)) +
+          cardWithID('llm-card-evaluations', 'Evaluation 요약', llmEvaluationSummaryTable(summary)) +
+          cardWithID('llm-card-evaluation-list', '최근 Evaluation', llmEvaluationTable(recentEvals)) +
         '</div>' +
         '<div class="grid2">' +
-          card('최근 Feedback', llmFeedbackTable(feedbackRows)) +
+          cardWithID('llm-card-feedback', '최근 Feedback', llmFeedbackTable(feedbackRows)) +
           card('Feedback 요약', llmFeedbackSummaryCard(feedbackSummary)) +
         '</div>' +
         '<div class="grid2">' +
@@ -809,19 +825,146 @@ const adminHTML = `<!doctype html>
           card('Feedback Labels', llmFeedbackLabelTable(feedbackLabels)) +
         '</div>' +
         '<div class="grid2">' +
-          card('Alignment 요약', llmAlignmentSummaryCard(alignment)) +
-          card('Alignment by Prompt', llmAlignmentPromptTable(alignmentPrompts)) +
+          cardWithID('llm-card-alignment', 'Alignment 요약', llmAlignmentSummaryCard(alignment)) +
+          cardWithID('llm-card-alignment-prompts', 'Alignment by Prompt', llmAlignmentPromptTable(alignmentPrompts)) +
         '</div>';
       document.getElementById('view').innerHTML = html;
       attachRequestRowHandlers();
       makeSortable('#view', 'llm');
+      document.querySelectorAll('.prompt-compare').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          openPromptCompare(btn.dataset.promptName || '', btn.dataset.promptVersion || '', '');
+        });
+      });
+      document.querySelectorAll('.insight-compare').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          openPromptCompare(btn.dataset.promptName || '', btn.dataset.promptVersion || '', '');
+        });
+      });
+      document.querySelectorAll('.insight-session-bundle').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          await openSessionInsightBundle(btn.dataset.sessionId || '', btn.dataset.title || '');
+        });
+      });
       document.querySelectorAll('[data-llm-window]').forEach(btn => {
         btn.addEventListener('click', () => {
           llmState.window = btn.dataset.llmWindow;
           sessionStorage.setItem('llmWindow', llmState.window);
+          updateHashParams(llmHashParams());
           route();
         });
       });
+      const applyBtn = document.getElementById('llm-scope-apply');
+      if (applyBtn) {
+        applyBtn.addEventListener('click', () => {
+          llmState.apiKeyID = document.getElementById('llm-api-key').value.trim();
+          llmState.team = document.getElementById('llm-team').value.trim();
+          sessionStorage.setItem('llmApiKeyID', llmState.apiKeyID);
+          sessionStorage.setItem('llmTeam', llmState.team);
+          updateHashParams(llmHashParams());
+          route();
+        });
+      }
+      const clearBtn = document.getElementById('llm-scope-clear');
+      if (clearBtn) {
+        clearBtn.addEventListener('click', () => {
+          llmState.apiKeyID = '';
+          llmState.team = '';
+          llmState.model = '';
+          llmState.sessionID = '';
+          llmState.promptName = '';
+          llmState.promptVersion = '';
+          llmState.evaluationName = '';
+          llmState.focus = '';
+          sessionStorage.removeItem('llmApiKeyID');
+          sessionStorage.removeItem('llmTeam');
+          updateHashParams(llmHashParams());
+          route();
+        });
+      }
+      const clearFocusBtn = document.getElementById('llm-focus-clear');
+      if (clearFocusBtn) {
+        clearFocusBtn.addEventListener('click', () => {
+          llmState.model = '';
+          llmState.sessionID = '';
+          llmState.promptName = '';
+          llmState.promptVersion = '';
+          llmState.evaluationName = '';
+          llmState.focus = '';
+          updateHashParams(llmHashParams());
+          route();
+        });
+      }
+      if (llmState.focus) {
+        const target = document.getElementById('llm-card-' + llmState.focus);
+        if (target) target.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      }
+    }
+
+    function syncLLMStateFromHash() {
+      const { params } = parseHash();
+      if (!params.has('window') && !params.has('api_key_id') && !params.has('team') &&
+          !params.has('model') && !params.has('session_id') && !params.has('prompt_name') &&
+          !params.has('prompt_version') && !params.has('evaluation_name') && !params.has('focus')) return;
+      llmState.window = params.get('window') || llmState.window || '24h';
+      llmState.apiKeyID = params.get('api_key_id') || '';
+      llmState.team = params.get('team') || '';
+      llmState.model = params.get('model') || '';
+      llmState.sessionID = params.get('session_id') || '';
+      llmState.promptName = params.get('prompt_name') || '';
+      llmState.promptVersion = params.get('prompt_version') || '';
+      llmState.evaluationName = params.get('evaluation_name') || '';
+      llmState.focus = params.get('focus') || '';
+      sessionStorage.setItem('llmWindow', llmState.window);
+      if (llmState.apiKeyID) sessionStorage.setItem('llmApiKeyID', llmState.apiKeyID);
+      else sessionStorage.removeItem('llmApiKeyID');
+      if (llmState.team) sessionStorage.setItem('llmTeam', llmState.team);
+      else sessionStorage.removeItem('llmTeam');
+    }
+
+    function llmScopeParams() {
+      const params = new URLSearchParams();
+      if (llmState.apiKeyID) params.set('api_key_id', llmState.apiKeyID);
+      if (llmState.team) params.set('team', llmState.team);
+      if (llmState.model) params.set('model', llmState.model);
+      if (llmState.sessionID) params.set('session_id', llmState.sessionID);
+      if (llmState.promptName) params.set('prompt_name', llmState.promptName);
+      if (llmState.promptVersion) params.set('prompt_version', llmState.promptVersion);
+      if (llmState.evaluationName) params.set('evaluation_name', llmState.evaluationName);
+      return params;
+    }
+
+    function llmHashParams() {
+      const params = llmScopeParams();
+      if (llmState.window) params.set('window', llmState.window);
+      if (llmState.focus) params.set('focus', llmState.focus);
+      return params;
+    }
+
+    function llmScopeToolbar() {
+      let focusHTML = '';
+      const chips = [];
+      if (llmState.model) chips.push('<span class="status">모델 ' + escapeHTML(llmState.model) + '</span>');
+      if (llmState.sessionID) chips.push('<span class="status">세션 ' + escapeHTML(llmState.sessionID) + '</span>');
+      if (llmState.promptName) chips.push('<span class="status">프롬프트 ' + escapeHTML(llmState.promptName) + '</span>');
+      if (llmState.promptVersion) chips.push('<span class="status">버전 ' + escapeHTML(llmState.promptVersion) + '</span>');
+      if (llmState.evaluationName) chips.push('<span class="status">평가 ' + escapeHTML(llmState.evaluationName) + '</span>');
+      if (chips.length) {
+        focusHTML = '<div style="padding:0 14px 14px"><div class="muted" style="margin-bottom:8px">현재 drill-down</div>' +
+          chips.join(' ') + ' <button type="button" class="ghost" id="llm-focus-clear">focus 해제</button></div>';
+      }
+      return '<div class="toolbar">' +
+        '<input id="llm-api-key" placeholder="API 키 ID" value="' + escapeHTML(llmState.apiKeyID || '') + '">' +
+        '<input id="llm-team" placeholder="팀" value="' + escapeHTML(llmState.team || '') + '">' +
+        '<button type="button" id="llm-scope-apply">적용</button>' +
+        '<button type="button" id="llm-scope-clear" class="secondary">초기화</button>' +
+      '</div>' + focusHTML;
     }
 
     function llmWindowToolbar() {
@@ -830,6 +973,146 @@ const adminHTML = `<!doctype html>
         '<button type="button" class="' + (cur === w ? '' : 'secondary') + '" data-llm-window="' + w + '">' + label + '</button>';
       return '<div class="toolbar" style="border-bottom:0; padding-bottom:0">' +
         btn('24h', '24시간') + btn('7d', '7일') + btn('30d', '30일') + '</div>';
+    }
+
+    function llmScopedLink(apiKeyID, team) {
+      const params = new URLSearchParams();
+      if (llmState.window) params.set('window', llmState.window);
+      if (apiKeyID) params.set('api_key_id', apiKeyID);
+      if (team) params.set('team', team);
+      return '#/llm?' + params.toString();
+    }
+
+    function llmInsightLink(insight) {
+      const params = llmHashParams();
+      switch (insight.kind) {
+        case 'prompt_injection_risk':
+        case 'session_errors':
+          if (insight.scope_value) params.set('session_id', insight.scope_value);
+          params.set('focus', 'traces');
+          break;
+        case 'missing_usage':
+        case 'slow_first_chunk':
+          if (insight.scope_value) params.set('model', insight.scope_value);
+          params.set('focus', 'traces');
+          break;
+        case 'negative_human_feedback':
+          if (insight.scope_value) params.set('prompt_name', insight.scope_value);
+          if (insight.scope_detail) params.set('prompt_version', insight.scope_detail);
+          params.set('focus', 'feedback');
+          break;
+        case 'feedback_eval_mismatch':
+          if (insight.scope_value) params.set('prompt_name', insight.scope_value);
+          if (insight.scope_detail) params.set('prompt_version', insight.scope_detail);
+          params.set('focus', 'alignment');
+          break;
+        case 'evaluation_failure':
+          if (insight.scope_value) params.set('evaluation_name', insight.scope_value);
+          params.set('focus', 'evaluation-list');
+          break;
+        default:
+          params.set('focus', 'traces');
+      }
+      return '#/llm?' + params.toString();
+    }
+
+    function llmInsightActions(insight) {
+      let html = '<a class="ghost" href="' + llmInsightLink(insight) + '">열기</a>';
+      if ((insight.kind === 'prompt_injection_risk' || insight.kind === 'session_errors') && insight.scope_value) {
+        html += ' <button type="button" class="ghost insight-session-bundle" data-session-id="' + escapeHTML(insight.scope_value || '') + '" data-title="' + escapeHTML(insight.title || '') + '">세션 묶음</button>';
+      }
+      if ((insight.kind === 'negative_human_feedback' || insight.kind === 'feedback_eval_mismatch') && insight.scope_value) {
+        html += ' <button type="button" class="ghost insight-compare" data-prompt-name="' + escapeHTML(insight.scope_value || '') + '" data-prompt-version="' + escapeHTML(insight.scope_detail || '') + '">비교</button>';
+      }
+      return html + '<div class="muted" style="margin-top:6px">' + escapeHTML(insight.recommendation || '') + '</div>';
+    }
+
+    async function openSessionInsightBundle(sessionID, title) {
+      if (!sessionID) return;
+      const q = llmScopeParams();
+      q.set('session_id', sessionID);
+      q.set('limit', '50');
+      const rows = (await api('/admin/llm/traces?' + q.toString())).traces || [];
+      openModal((title || '세션 묶음') + ' - ' + sessionID, llmSessionInsightBundleHTML(sessionID, rows));
+      const jsonBtn = document.getElementById('llm-session-bundle-json');
+      if (jsonBtn) {
+        jsonBtn.addEventListener('click', () => {
+          downloadBlob(
+            new Blob([JSON.stringify(rows, null, 2)], { type: 'application/json;charset=utf-8' }),
+            'llm-session-' + safeFilePart(sessionID) + '-' + timestampForFile() + '.json'
+          );
+        });
+      }
+      const csvBtn = document.getElementById('llm-session-bundle-csv');
+      if (csvBtn) {
+        csvBtn.addEventListener('click', () => {
+          downloadBlob(
+            new Blob([traceRowsToCSV(rows)], { type: 'text/csv;charset=utf-8' }),
+            'llm-session-' + safeFilePart(sessionID) + '-' + timestampForFile() + '.csv'
+          );
+        });
+      }
+      attachRequestRowHandlers();
+      makeSortable('#modal-body', 'llm-session-bundle');
+    }
+
+    function llmSessionInsightBundleHTML(sessionID, rows) {
+      return '<div class="toolbar" style="justify-content:flex-end; border-bottom:0; padding-bottom:8px">' +
+        '<button type="button" id="llm-session-bundle-json" class="secondary">JSON 다운로드</button>' +
+        '<button type="button" id="llm-session-bundle-csv" class="secondary">CSV 다운로드</button>' +
+      '</div>' +
+      '<div class="kpis" style="margin-bottom:12px">' +
+        kpi('Session', escapeHTML(sessionID || 'no-session')) +
+        kpi('최근 Trace', fmt(rows.length)) +
+      '</div>' +
+      llmTraceTable(rows);
+    }
+
+    function timestampForFile() {
+      return new Date().toISOString().replace(/[:.]/g, '-');
+    }
+
+    function safeFilePart(value) {
+      return String(value || 'bundle').replace(/[^a-zA-Z0-9._-]+/g, '_');
+    }
+
+    function downloadBlob(blob, filename) {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    }
+
+    function traceRowsToCSV(rows) {
+      const header = ['request_id', 'trace_id', 'created_at', 'session_id', 'prompt_name', 'prompt_version', 'model', 'provider', 'status_code', 'first_chunk_ms', 'latency_ms', 'total_tokens', 'estimated_cost', 'tool_count'];
+      const esc = (value) => {
+        const text = String(value ?? '');
+        return '"' + text.replace(/"/g, '""') + '"';
+      };
+      const lines = [header.join(',')];
+      rows.forEach(r => {
+        lines.push([
+          r.id,
+          r.trace_id,
+          r.created_at,
+          r.session_id,
+          r.prompt_name,
+          r.prompt_version,
+          r.model,
+          r.provider,
+          r.status_code,
+          r.first_chunk_ms,
+          r.latency_ms,
+          r.total_tokens,
+          r.estimated_cost,
+          r.tool_count,
+        ].map(esc).join(','));
+      });
+      return '\uFEFF' + lines.join('\n');
     }
 
     function llmTimeseriesSummary(points) {
@@ -920,10 +1203,10 @@ const adminHTML = `<!doctype html>
         rows.map(i => '<tr>' +
           '<td><span class="status ' + (i.severity === 'high' ? 'error' : '') + '">' + escapeHTML(i.severity || '') + '</span></td>' +
           '<td>' + escapeHTML(i.title || '') + '<div class="muted">' + escapeHTML(i.detail || '') + '</div></td>' +
-          '<td>' + escapeHTML(i.scope || '') + '<div class="muted">' + escapeHTML(i.scope_value || '') + '</div></td>' +
+          '<td>' + escapeHTML(i.scope || '') + '<div class="muted">' + escapeHTML(i.scope_value || '') + (i.scope_detail ? (' / ' + escapeHTML(i.scope_detail)) : '') + '</div></td>' +
           '<td data-num="' + (i.count || 0) + '">' + fmt(i.count || 0) + '</td>' +
           '<td data-num="' + (i.metric_value || 0) + '">' + fmt(Math.round(i.metric_value || 0)) + '</td>' +
-          '<td>' + escapeHTML(i.recommendation || '') + '</td>' +
+          '<td>' + llmInsightActions(i) + '</td>' +
           '<td>' + ago(i.last_seen) + '</td>' +
         '</tr>').join('') + '</tbody></table>';
     }
@@ -956,7 +1239,7 @@ const adminHTML = `<!doctype html>
 
     function llmPromptTable(rows) {
       if (!rows.length) return '<div class="empty">prompt 없음</div>';
-      return '<table><thead><tr><th data-sort="str">Prompt</th><th data-sort="num">호출</th><th data-sort="num">지연</th><th data-sort="num">토큰/비용</th><th data-sort="num">오류</th><th data-sort="num">평가 실패</th><th data-sort="str">최근</th></tr></thead><tbody>' +
+      return '<table><thead><tr><th data-sort="str">Prompt</th><th data-sort="num">호출</th><th data-sort="num">지연</th><th data-sort="num">토큰/비용</th><th data-sort="num">오류</th><th data-sort="num">평가 실패</th><th data-sort="str">최근</th><th>비교</th></tr></thead><tbody>' +
         rows.map(p => '<tr>' +
           '<td>' + escapeHTML(p.prompt_name || 'ad-hoc') + '<div class="muted">' + escapeHTML(p.prompt_version || '') + '</div></td>' +
           '<td data-num="' + (p.calls || 0) + '">' + fmt(p.calls || 0) + '</td>' +
@@ -965,7 +1248,147 @@ const adminHTML = `<!doctype html>
           '<td data-num="' + (p.errors || 0) + '">' + fmt(p.errors || 0) + '</td>' +
           '<td data-num="' + (p.eval_failures || 0) + '">' + fmt(p.eval_failures || 0) + '</td>' +
           '<td>' + ago(p.last_seen) + '</td>' +
+          '<td><button type="button" class="ghost prompt-compare" data-prompt-name="' + escapeHTML(p.prompt_name || 'ad-hoc') + '" data-prompt-version="' + escapeHTML(p.prompt_version || '') + '">비교</button></td>' +
         '</tr>').join('') + '</tbody></table>';
+    }
+
+    async function openPromptCompare(promptName, candidateVersion, baselineVersion, candidateLimit) {
+      const q = new URLSearchParams({ prompt_name: promptName || '' });
+      if (candidateVersion) q.set('candidate', candidateVersion);
+      if (baselineVersion) q.set('baseline', baselineVersion);
+      const compareLimit = String(candidateLimit || sessionStorage.getItem('promptCompareCandidateLimit') || '3');
+      q.set('candidate_limit', compareLimit);
+      const scope = llmScopeParams();
+      scope.forEach((value, key) => q.set(key, value));
+      const data = await api('/admin/llm/prompts/compare?' + q.toString());
+      data.candidate_limit = compareLimit;
+      openModal('Prompt 비교 - ' + (data.prompt_name || promptName), promptCompareHTML(data));
+      const candidateSel = document.getElementById('prompt-compare-candidate');
+      const baselineSel = document.getElementById('prompt-compare-baseline');
+      const limitSel = document.getElementById('prompt-compare-candidate-limit');
+      const reloadBtn = document.getElementById('prompt-compare-reload');
+      document.querySelectorAll('.prompt-compare-candidate-pick').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          await openPromptCompare(data.prompt_name || promptName, currentCandidateVersion(promptName, data), btn.dataset.baselineVersion || '', limitSel ? limitSel.value : compareLimit);
+        });
+      });
+      if (limitSel) {
+        limitSel.addEventListener('change', () => {
+          sessionStorage.setItem('promptCompareCandidateLimit', limitSel.value);
+        });
+      }
+      if (reloadBtn && candidateSel && baselineSel) {
+        reloadBtn.addEventListener('click', async () => {
+          const nextLimit = limitSel ? limitSel.value : compareLimit;
+          sessionStorage.setItem('promptCompareCandidateLimit', nextLimit);
+          await openPromptCompare(data.prompt_name || promptName, candidateSel.value, baselineSel.value, nextLimit);
+        });
+      }
+    }
+
+    function currentCandidateVersion(promptName, data) {
+      return (data && data.candidate && data.candidate.prompt_version) || '';
+    }
+
+    function promptCompareHTML(data) {
+      const versions = data.available_versions || [];
+      const current = data.candidate || {};
+      const baseline = data.baseline || null;
+      const optionHTML = (selected) => versions.map(v =>
+        '<option value="' + escapeHTML(v) + '"' + (v === selected ? ' selected' : '') + '>' + escapeHTML(v || '(empty)') + '</option>'
+      ).join('');
+      const signed = (value, render) => {
+        const n = Number(value || 0);
+        const text = render ? render(Math.abs(n)) : String(Math.abs(n));
+        return (n > 0 ? '+' : n < 0 ? '-' : '') + text;
+      };
+      const deltaPct = (value) => signed(value, v => pct(v));
+      const deltaNum = (value) => signed(value, v => fmt(Math.round(v)));
+      const limitOption = (value) =>
+        '<option value="' + value + '"' + (String(data.candidate_limit || '3') === String(value) ? ' selected' : '') + '>' + value + '개 후보</option>';
+      return '<div class="toolbar">' +
+        '<select id="prompt-compare-candidate">' + optionHTML(current.prompt_version || '') + '</select>' +
+        '<select id="prompt-compare-baseline">' + optionHTML((baseline && baseline.prompt_version) || '') + '</select>' +
+        '<select id="prompt-compare-candidate-limit">' + limitOption(3) + limitOption(5) + limitOption(10) + '</select>' +
+        '<button type="button" id="prompt-compare-reload">다시 비교</button>' +
+      '</div>' +
+      (data.baseline_reason ? '<div class="muted" style="padding:0 14px 10px">baseline 선택: ' + escapeHTML(promptCompareReasonLabel(data.baseline_reason)) + '</div>' : '') +
+      (data.candidate_ordering ? '<div class="muted" style="padding:0 14px 10px">후보 정렬: ' + escapeHTML(promptCompareOrderingLabel(data.candidate_ordering)) + '</div>' : '') +
+      promptCompareCandidatesHTML(data.baseline_candidates || []) +
+      (!baseline ? '<div class="empty">비교 가능한 다른 버전이 없습니다.</div>' : (
+        '<div class="kpis">' +
+          kpi('호출 delta', signed(data.delta.calls || 0, v => fmt(v))) +
+          kpi('토큰 delta', signed(data.delta.tokens || 0, v => fmt(v))) +
+          kpi('비용 delta', signed(data.delta.cost_krw || 0, v => money(v))) +
+          kpi('지연 delta', deltaNum(data.delta.average_latency_ms || 0) + ' ms') +
+        '</div>' +
+        '<div class="kpis" style="margin-top:1px">' +
+          kpi('오류율 delta', deltaPct(data.delta.error_rate || 0)) +
+          kpi('평가 실패율 delta', deltaPct(data.delta.eval_failure_rate || 0)) +
+          kpi('현재 버전', escapeHTML(current.prompt_version || '')) +
+          kpi('기준 버전', escapeHTML(baseline.prompt_version || '')) +
+        '</div>' +
+        '<div class="grid2" style="margin-top:16px">' +
+          card('Candidate', promptCompareSummaryCard(current, data.candidate_error_rate || 0, data.candidate_eval_failure_rate || 0)) +
+          card('Baseline', promptCompareSummaryCard(baseline, data.baseline_error_rate || 0, data.baseline_eval_failure_rate || 0)) +
+        '</div>'
+      ));
+    }
+
+    function promptCompareCandidatesHTML(candidates) {
+      if (!candidates.length) return '';
+      return '<div style="padding:0 14px 10px"><div class="muted" style="margin-bottom:8px">추천 후보</div><div style="display:flex; flex-wrap:wrap; gap:8px">' +
+        candidates.map(c =>
+          '<button type="button" class="ghost prompt-compare-candidate-pick" data-baseline-version="' + escapeHTML(c.prompt_version || '') + '">' +
+            escapeHTML((c.prompt_version || '(empty)') + ' - ' + promptCompareReasonLabel(c.reason)) +
+            '<div class="muted" style="font-size:11px; margin-top:4px">' + escapeHTML(promptCompareCandidateMeta(c)) + '</div>' +
+          '</button>'
+        ).join('') +
+      '</div></div>';
+    }
+
+    function promptCompareCandidateMeta(c) {
+      return fmt(c.calls || 0) + ' calls · ' +
+        fmt(Math.round(c.average_latency_ms || 0)) + ' ms · 오류 ' +
+        pct(c.error_rate || 0) + ' · 평가 실패 ' +
+        pct(c.eval_failure_rate || 0) + ' · ' +
+        (c.last_seen || '');
+    }
+
+    function promptCompareReasonLabel(reason) {
+      switch (reason) {
+        case 'manual':
+          return '수동 지정';
+        case 'nearest_previous_version':
+          return '가장 가까운 이전 버전 자동 선택';
+        case 'recent_activity_fallback':
+          return '최근 활동 기준 대체 baseline 자동 선택';
+        default:
+          return reason || '';
+      }
+    }
+
+    function promptCompareOrderingLabel(ordering) {
+      switch (ordering) {
+        case 'nearest_previous_version_then_recent_activity':
+          return '가까운 이전 버전 우선, 이후 최근 활동 순';
+        default:
+          return ordering || '';
+      }
+    }
+
+    function promptCompareSummaryCard(item, errorRate, evalRate) {
+      return '<div style="padding:14px"><div class="kv">' +
+        row('버전', escapeHTML(item.prompt_version || '')) +
+        row('호출', fmt(item.calls || 0)) +
+        row('토큰', fmt(item.tokens || 0)) +
+        row('비용', money(item.cost_krw || 0)) +
+        row('평균 지연', Math.round(item.average_latency_ms || 0) + ' ms') +
+        row('오류율', pct(errorRate || 0)) +
+        row('평가 실패율', pct(evalRate || 0)) +
+        row('첫 시각', escapeHTML(item.first_seen || '')) +
+        row('최근 시각', escapeHTML(item.last_seen || '')) +
+      '</div></div>';
     }
 
     function llmPatternTable(rows) {
@@ -1574,7 +1997,7 @@ const adminHTML = `<!doctype html>
             '<tr class="row-link" onclick="location.hash=\'#/users/' + encodeURIComponent(u.api_key_id) + '\'">' +
               '<td>' + escapeHTML(u.name) + '<div class="muted">' + escapeHTML(u.api_key_id) + '</div></td>' +
               '<td>' + escapeHTML(u.owner || '') + '</td>' +
-              '<td>' + escapeHTML(u.team || '') + '</td>' +
+              '<td>' + (u.team ? '<a href="#/teams/' + encodeURIComponent(u.team) + '" onclick="event.stopPropagation()">' + escapeHTML(u.team) + '</a>' : '') + '</td>' +
               '<td><span class="status ' + (u.status === 'active' ? '' : 'error') + '">' + escapeHTML(u.status) + '</span></td>' +
               '<td data-num="' + (u.requests || 0) + '">' + fmt(u.requests) + '</td>' +
               '<td data-num="' + (u.tokens || 0) + '">' + fmt(u.tokens) + '</td>' +
@@ -1600,13 +2023,14 @@ const adminHTML = `<!doctype html>
           '<div style="padding:14px"><div class="kv">' +
             row('API 키 ID', escapeHTML(k.id)) +
             row('소유자', escapeHTML(k.owner || '')) +
-            row('팀', escapeHTML(k.team || '')) +
+            row('팀', k.team ? '<a href="#/teams/' + encodeURIComponent(k.team) + '">' + escapeHTML(k.team) + '</a>' : '') +
             row('상태', escapeHTML(k.status)) +
             row('총 요청', fmt(s.requests)) +
             row('총 토큰', fmt(s.tokens)) +
             row('누적 비용', money(s.cost_krw)) +
             row('평균 지연', Math.round(s.average_latency_ms || 0) + ' ms') +
             row('마지막 호출', ago(s.last_seen)) +
+            row('LLM 관측', '<a href="' + llmScopedLink(k.id, k.team || '') + '">필터된 LLM 보기</a>') +
           '</div></div>' +
         '</section>' +
         section('사용자 고급 지표', userAdvancedHTML(a)) +
@@ -1635,6 +2059,83 @@ const adminHTML = `<!doctype html>
       document.getElementById('view').innerHTML = html;
       attachRequestRowHandlers();
       makeSortable('#view', 'user-detail');
+    }
+
+    async function renderTeams() {
+      const r = await api('/admin/teams');
+      const rows = r.teams || [];
+      const html = section('팀별 사용량',
+        rows.length ? (
+          '<table><thead><tr>' +
+          '<th data-sort="str">팀</th>' +
+          '<th data-sort="num">키 수</th>' +
+          '<th data-sort="num">요청</th>' +
+          '<th data-sort="num">토큰</th>' +
+          '<th data-sort="num">비용</th>' +
+          '<th data-sort="num">평균 지연</th>' +
+          '<th data-sort="str">마지막 호출</th></tr></thead><tbody>' +
+          rows.map(t =>
+            '<tr class="row-link" onclick="location.hash=\'#/teams/' + encodeURIComponent(t.team) + '\'">' +
+              '<td>' + escapeHTML(t.team || 'unassigned') + '</td>' +
+              '<td data-num="' + (t.keys || 0) + '">' + fmt(t.keys || 0) + '</td>' +
+              '<td data-num="' + (t.requests || 0) + '">' + fmt(t.requests || 0) + '</td>' +
+              '<td data-num="' + (t.tokens || 0) + '">' + fmt(t.tokens || 0) + '</td>' +
+              '<td data-num="' + (t.cost_krw || 0) + '">' + money(t.cost_krw || 0) + '</td>' +
+              '<td data-num="' + (t.average_latency_ms || 0) + '">' + Math.round(t.average_latency_ms || 0) + ' ms</td>' +
+              '<td>' + ago(t.last_seen) + '</td>' +
+            '</tr>'
+          ).join('') + '</tbody></table>'
+        ) : '<div class="empty">팀 없음</div>'
+      );
+      document.getElementById('view').innerHTML = html;
+      makeSortable('#view', 'teams');
+    }
+
+    async function renderTeamDetail(team) {
+      const d = await api('/admin/teams/' + encodeURIComponent(team) + '?limit=100');
+      const s = d.stats || {};
+      const a = d.advanced || {};
+      const heat = d.heatmap || {};
+      const llm = d.llm || {};
+      const html =
+        '<section><h2>팀 ' + escapeHTML(s.team || team) + '</h2>' +
+          '<div style="padding:14px"><div class="kv">' +
+            row('팀', escapeHTML(s.team || team)) +
+            row('API 키 수', fmt(s.keys || 0)) +
+            row('총 요청', fmt(s.requests || 0)) +
+            row('총 토큰', fmt(s.tokens || 0)) +
+            row('누적 비용', money(s.cost_krw || 0)) +
+            row('평균 지연', Math.round(s.average_latency_ms || 0) + ' ms') +
+            row('마지막 호출', ago(s.last_seen)) +
+            row('LLM 관측', '<a href="' + llmScopedLink('', s.team || team) + '">필터된 LLM 보기</a>') +
+          '</div></div>' +
+        '</section>' +
+        section('팀 고급 지표', userAdvancedHTML(a)) +
+        section('팀 LLM 관측', userLLMSummaryHTML(llm.summary || {})) +
+        '<div class="grid2">' +
+          card('LLM Trend (24h)', llmQualityChart(llm.timeseries || [], 'hour')) +
+          card('상위 Prompt (LLM)', llmUserPromptTable(llm.prompts || [])) +
+        '</div>' +
+        '<div class="grid2">' +
+          card('LLM Feedback Labels', llmFeedbackLabelTable(llm.feedback_labels || [])) +
+          card('최근 호출', requestsTable(d.recent || [])) +
+        '</div>' +
+        '<div class="grid3">' +
+          card('일별 사용량', dailyTable(d.daily || [])) +
+          card('모델별', groupedTable(d.by_model || [], '모델')) +
+          card('API 키별', groupedTable(d.by_key || [], 'API 키', (key) => '#/users/' + encodeURIComponent(key))) +
+        '</div>' +
+        '<div class="grid2">' +
+          card('상태 분포', statusCard(d.by_status || [], s.requests || 0)) +
+          card('시간대 히트맵 (Asia/Seoul, 최근 30일)', heatmapHTML(heat.cells || [])) +
+        '</div>' +
+        '<div class="grid2">' +
+          card('언어별', languagesTable(d.by_language || [])) +
+          card('IP별', groupedTable(d.by_ip || [], 'IP', (key) => '#/ips/' + encodeURIComponent(key))) +
+        '</div>';
+      document.getElementById('view').innerHTML = html;
+      attachRequestRowHandlers();
+      makeSortable('#view', 'team-detail');
     }
 
     function userAdvancedHTML(a) {
@@ -2152,7 +2653,7 @@ const adminHTML = `<!doctype html>
     }
 
     // ---------- keyboard ----------
-    const tabMap = { d: 'dashboard', l: 'llm', r: 'requests', p: 'prompts', u: 'users', i: 'ips', q: 'quotas', a: 'safety', s: 'settings' };
+    const tabMap = { d: 'dashboard', l: 'llm', r: 'requests', p: 'prompts', u: 'users', m: 'teams', i: 'ips', q: 'quotas', a: 'safety', s: 'settings' };
     let gPending = false;
     let gTimer = null;
     function isTyping(target) {
@@ -2209,6 +2710,7 @@ const adminHTML = `<!doctype html>
         ['<kbd>g</kbd> <kbd>r</kbd>', '호출 이력'],
         ['<kbd>g</kbd> <kbd>p</kbd>', '프롬프트 검색'],
         ['<kbd>g</kbd> <kbd>u</kbd>', '사용자 목록'],
+        ['<kbd>g</kbd> <kbd>m</kbd>', '팀 목록'],
         ['<kbd>g</kbd> <kbd>i</kbd>', 'IP 목록'],
         ['<kbd>g</kbd> <kbd>q</kbd>', '사용 한도'],
         ['<kbd>g</kbd> <kbd>a</kbd>', '안전 (Kill Switch / 알림)'],

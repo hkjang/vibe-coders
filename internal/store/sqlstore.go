@@ -187,6 +187,20 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 		`CREATE INDEX IF NOT EXISTS idx_llm_evaluations_request_id ON llm_evaluations(request_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_llm_evaluations_name ON llm_evaluations(name)`,
 		`CREATE INDEX IF NOT EXISTS idx_llm_evaluations_created_at ON llm_evaluations(created_at)`,
+		`CREATE TABLE IF NOT EXISTS llm_feedback (
+			id TEXT PRIMARY KEY,
+			request_id TEXT NOT NULL,
+			trace_id TEXT NOT NULL,
+			rating INTEGER NOT NULL,
+			label TEXT NOT NULL,
+			comment TEXT,
+			source TEXT NOT NULL,
+			created_by TEXT,
+			created_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_llm_feedback_request_id ON llm_feedback(request_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_llm_feedback_trace_id ON llm_feedback(trace_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_llm_feedback_created_at ON llm_feedback(created_at)`,
 		`CREATE TABLE IF NOT EXISTS provider_configs (
 			name TEXT PRIMARY KEY,
 			base_url TEXT NOT NULL,
@@ -637,6 +651,17 @@ func (s *SQLStore) InsertLLMEvaluations(ctx context.Context, evaluations []LLMEv
 	return tx.Commit()
 }
 
+func (s *SQLStore) InsertLLMFeedback(ctx context.Context, feedback LLMFeedback) error {
+	if feedback.CreatedAt.IsZero() {
+		feedback.CreatedAt = time.Now().UTC()
+	}
+	_, err := s.db.ExecContext(ctx, s.bind(`INSERT INTO llm_feedback
+		(id, request_id, trace_id, rating, label, comment, source, created_by, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+		feedback.ID, feedback.RequestID, feedback.TraceID, feedback.Rating, feedback.Label, feedback.Comment, feedback.Source, feedback.CreatedBy, formatTime(feedback.CreatedAt))
+	return err
+}
+
 func (s *SQLStore) Summary(ctx context.Context) (SummaryStats, error) {
 	var stats SummaryStats
 	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*), COALESCE(AVG(latency_ms), 0) FROM request_logs`).Scan(&stats.TotalRequests, &stats.AverageLatencyMS)
@@ -797,6 +822,10 @@ func (s *SQLStore) RecentRequests(ctx context.Context, filter RequestFilter) ([]
 		where = append(where, "r.api_key_id = ?")
 		args = append(args, filter.APIKeyID)
 	}
+	if filter.Team != "" {
+		where = append(where, "EXISTS (SELECT 1 FROM api_keys k WHERE k.id = r.api_key_id AND COALESCE(NULLIF(k.team, ''), 'unassigned') = ?)")
+		args = append(args, filter.Team)
+	}
 	if filter.SessionID != "" {
 		where = append(where, "COALESCE(NULLIF(r.session_id, ''), 'no-session') = ?")
 		args = append(args, filter.SessionID)
@@ -804,6 +833,14 @@ func (s *SQLStore) RecentRequests(ctx context.Context, filter RequestFilter) ([]
 	if filter.PromptName != "" {
 		where = append(where, "r.prompt_name = ?")
 		args = append(args, filter.PromptName)
+	}
+	if filter.PromptVersion != "" {
+		where = append(where, "r.prompt_version = ?")
+		args = append(args, filter.PromptVersion)
+	}
+	if filter.EvaluationName != "" {
+		where = append(where, "EXISTS (SELECT 1 FROM llm_evaluations e WHERE e.request_id = r.id AND e.name = ?)")
+		args = append(args, filter.EvaluationName)
 	}
 	args = append(args, limit)
 

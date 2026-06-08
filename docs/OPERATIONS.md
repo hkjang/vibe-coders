@@ -200,6 +200,8 @@ curl "http://localhost:8080/admin/llm/sessions?limit=100"
 curl "http://localhost:8080/admin/llm/prompts?limit=100"
 curl "http://localhost:8080/admin/llm/patterns?limit=50"
 curl "http://localhost:8080/admin/llm/insights?window=24h&limit=50"
+curl "http://localhost:8080/admin/llm/timeseries?window=24h&bucket=hour"
+curl "http://localhost:8080/admin/llm/feedback?limit=100"
 curl "http://localhost:8080/admin/llm/evaluations?limit=100"
 ```
 
@@ -208,6 +210,7 @@ curl "http://localhost:8080/admin/llm/evaluations?limit=100"
 - agent/chat 단위로 `X-LLM-Session-ID` 를 넣어 세션별 비용·오류·평가 실패를 묶습니다.
 - 프롬프트 템플릿은 `X-LLM-Prompt-Name`, `X-LLM-Prompt-Version` 또는 body의 `metadata._dd.ml_obs.prompt_tracking` 로 버전 추적합니다.
 - gateway-managed evaluation 실패가 많은 session/prompt/pattern을 우선 조사합니다.
+- 사람이 직접 본 품질 판단은 `POST /admin/llm/feedback` 로 남겨 운영 피드백과 자동 평가를 분리해 봅니다.
 - 사내 평가기나 CI가 별도 품질 점수를 계산한다면 `POST /admin/llm/evaluations` 로 제출해 같은 trace detail에서 보이게 합니다.
 
 ### 5.4 로그 위치
@@ -280,7 +283,7 @@ curl -X POST http://localhost:8080/admin/fallback
 
 | 환경변수 | 기본값 | 대상 |
 | --- | --- | --- |
-| `RETENTION_REQUEST_DAYS` | 90 | request_logs + prompt/response/token/language/llm_evaluations 자식 테이블 |
+| `RETENTION_REQUEST_DAYS` | 90 | request_logs + prompt/response/token/language/llm_evaluations/llm_feedback 자식 테이블 |
 | `RETENTION_PROMPT_DAYS` | 30 | prompt_logs |
 | `RETENTION_RESPONSE_DAYS` | 30 | response_logs |
 | `RETENTION_INTERVAL` | 1h | cleanup 워커 주기 |

@@ -31,10 +31,11 @@
 | 탭 | 무엇을 할까 |
 | --- | --- |
 | 대시보드 | 총 요청·토큰·KRW·평균 지연·첫 청크 지연, 24h/7d/30d 시계열 차트, 상위 사용자, 상태 분포, 시간대 히트맵, 최근 20건 |
-| LLM 관측 | Datadog LLM Observability 대응 Trace/Span/Session/Prompt/Patterns/Insights/Evaluation 화면 |
+| LLM 관측 | Datadog LLM Observability 대응 Trace/Span/Session/Prompt/Patterns/Insights/Feedback/Evaluation 화면 |
 | 호출 이력 | IP/모델/언어 필터로 검색, 두 행 선택 후 비교, 행 클릭 시 상세 모달 |
 | 프롬프트 검색 | 키워드/언어/IP/키/기간으로 마스킹 프롬프트 검색, CSV 다운로드, 저장된 필터 |
-| 사용자 | Proxy API 키별 사용량·비용, 키 클릭 시 일별·모델별·IP별 상세 |
+| 사용자 | Proxy API 키별 사용량·비용, 키 클릭 시 일별·모델별·IP별 상세와 LLM trend/eval failure/feedback drill-down |
+| 팀 | 팀별 사용량·비용, 팀 클릭 시 API 키/모델/IP/LLM trend drill-down |
 | IP | 호출 IP 별 사용량, IP 클릭 시 일별·모델별·키별 상세 |
 | 사용 한도 | API 키/팀/IP/전체 단위 일별·월별 토큰·KRW 한도 |
 | 안전 | Kill Switch + 알림 규칙 + 발화 이력 |
@@ -65,9 +66,14 @@ Datadog LLM Observability의 핵심 기능을 게이트웨이 내부 데이터�
 | Trace Explorer | 요청 단위 trace 목록. session, prompt, 모델/provider, 첫 청크/전체 지연, 토큰·비용, tool count, 상태를 한눈에 확인. 상세 모달에는 파생 LLM/tool span 표시 |
 | Session Explorer | `session_id` 별 요청 수, 토큰, KRW, 오류, 평가 실패, 최초/최근 시각 |
 | Prompt Tracking | prompt name/version 별 호출 수, 평균 지연, 토큰·비용, 오류, 평가 실패 |
+| Prompt Compare | Prompt Tracking 행에서 `비교`를 눌러 버전 간 호출량, 토큰, KRW, 지연, 오류율, 평가 실패율 차이 확인. 상단 `API 키 ID` / `팀` 필터가 켜져 있으면 같은 스코프 안에서만 비교. baseline 미지정 시 가까운 이전 버전, 없으면 최근성 기준 대체 baseline 자동 선택하며, 선택 근거와 추천 후보 목록을 모달 상단에 표시. 추천 후보는 3/5/10개로 조절 가능하고, 버튼으로 바로 눌러 baseline을 교체 가능하며, 각 후보에 호출량/평균 지연/오류율/평가 실패율/최근 시각과 정렬 기준이 함께 보임 |
 | Patterns | 최근 프롬프트를 debugging/testing/refactoring/security/prompt-injection-risk 등 운영 토픽으로 자동 묶음 |
-| Insights | 평가 실패, 프롬프트 인젝션 위험, usage 누락, 느린 첫 청크, 오류 세션을 최근 윈도우 기준으로 자동 추출 |
+| Insights | 평가 실패, 프롬프트 인젝션 위험, usage 누락, 느린 첫 청크, 오류 세션을 최근 윈도우 기준으로 자동 추출. 각 행의 `열기`로 관련 trace/prompt/evaluation 위치로 즉시 drill-down 하고, prompt 계열 인사이트는 `비교`, session 계열 인사이트는 `세션 묶음`으로 최근 trace bundle 모달을 바로 열 수 있음. 세션 묶음 모달에서는 JSON/CSV 다운로드 가능 |
+| Trend | 최근 24시간/7일/30일 기준으로 요청량, 비용, 평가 실패, 부정 피드백, human/eval alignment 흐름을 시계열로 표시 |
+| Feedback | 운영자가 trace 상세에서 `좋음/문제 있음/중립` 피드백과 라벨, 코멘트를 남기고 최근/라벨별/prompt별 피드백과 alignment를 집계 |
 | Evaluation | gateway-managed 평가(prompt PII, prompt injection, toxicity, completion, usage, first chunk latency)와 외부 평가 결과 |
+
+LLM 관측 탭 상단 필터에서 `API 키 ID`, `팀` 값을 넣으면 trace/session/prompt/patterns/insights/evaluation/feedback/timeseries 패널을 해당 범위로 좁혀 볼 수 있습니다. drill-down 링크로 들어오면 `model`, `session_id`, `prompt_name`, `prompt_version`, `evaluation_name`까지 함께 걸립니다. 사용자 상세와 팀 상세에는 같은 스코프를 채운 `필터된 LLM 보기` deep link가 있습니다.
 
 정확한 세션·프롬프트 집계를 원하면 클라이언트가 다음 헤더를 보내도록 설정합니다.
 
@@ -78,7 +84,7 @@ X-LLM-Prompt-Version: v7
 X-LLM-Prompt-Variables-Hash: vars-sha256
 ```
 
-요청 body의 `metadata.prompt`, `metadata.prompt_tracking`, `metadata._dd.ml_obs.prompt_tracking` 에 구조화 프롬프트 메타데이터가 들어와도 자동 수집합니다. 외부 평가기는 `POST /admin/llm/evaluations` 로 결과를 제출할 수 있습니다.
+요청 body의 `metadata.prompt`, `metadata.prompt_tracking`, `metadata._dd.ml_obs.prompt_tracking` 에 구조화 프롬프트 메타데이터가 들어와도 자동 수집합니다. 외부 평가기는 `POST /admin/llm/evaluations` 로 결과를 제출할 수 있고, 운영자는 trace 상세에서 사람 피드백을 남길 수 있습니다.
 
 ```bash
 curl -X POST http://<host>:8080/admin/llm/evaluations \
@@ -92,6 +98,12 @@ curl -X POST http://<host>:8080/admin/llm/evaluations \
     "passed": true,
     "label": "pass"
   }] }'
+```
+
+```bash
+curl -X POST http://<host>:8080/admin/llm/feedback \
+  -H "Content-Type: application/json" \
+  -d '{ "request_id": "req_xxxxxxxx", "rating": -1, "label": "hallucination", "comment": "근거 없는 답변" }'
 ```
 
 ---

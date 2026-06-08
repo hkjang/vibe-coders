@@ -123,6 +123,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/admin/audit-logs", s.handleAuditLogs)
 	mux.HandleFunc("/admin/users", s.handleUsers)
 	mux.HandleFunc("/admin/users/", s.handleUserDetail)
+	mux.HandleFunc("/admin/teams", s.handleTeams)
+	mux.HandleFunc("/admin/teams/", s.handleTeamDetail)
 	mux.HandleFunc("/admin/ips", s.handleIPs)
 	mux.HandleFunc("/admin/ips/", s.handleIPDetail)
 	mux.HandleFunc("/admin/requests/", s.handleRequestDetail)
@@ -137,8 +139,11 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/admin/llm/traces/", s.handleLLMTraceDetail)
 	mux.HandleFunc("/admin/llm/sessions", s.handleLLMSessions)
 	mux.HandleFunc("/admin/llm/prompts", s.handleLLMPrompts)
+	mux.HandleFunc("/admin/llm/prompts/compare", s.handleLLMPromptCompare)
 	mux.HandleFunc("/admin/llm/patterns", s.handleLLMPatterns)
 	mux.HandleFunc("/admin/llm/insights", s.handleLLMInsights)
+	mux.HandleFunc("/admin/llm/timeseries", s.handleLLMTimeseries)
+	mux.HandleFunc("/admin/llm/feedback", s.handleLLMFeedback)
 	mux.HandleFunc("/admin/llm/evaluations", s.handleLLMEvaluations)
 	mux.HandleFunc("/admin/kill-switch", s.handleKillSwitch)
 	mux.HandleFunc("/admin/alerts", s.handleAlertRules)
@@ -511,7 +516,6 @@ func (s *Server) handleOpenAI(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-
 	clientAddr := clientIP(r)
 	if decision, err := s.checkQuotas(r.Context(), apiKeyID, clientAddr); err != nil {
 		slog.Warn("quota check failed", "error", err)
@@ -759,7 +763,6 @@ func (s *Server) authenticateProxy(r *http.Request) (string, bool) {
 	}
 	return "", false
 }
-
 
 type resolvedProvider struct {
 	Name    string
