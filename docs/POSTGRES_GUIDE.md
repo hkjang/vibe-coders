@@ -104,7 +104,7 @@ services:
 
   # 2. AI Coding Proxy Gateway 서비스
   gateway:
-    image: ai-coding-proxy-gateway:v0.1.10
+    image: ai-coding-proxy-gateway:v0.1.11
     container_name: proxy-gateway
     restart: always
     ports:
@@ -186,7 +186,7 @@ version: '3.8'
 
 services:
   gateway:
-    image: ai-coding-proxy-gateway:v0.1.10
+    image: ai-coding-proxy-gateway:v0.1.11
     container_name: proxy-gateway
     restart: always
     ports:
