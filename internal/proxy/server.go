@@ -37,6 +37,7 @@ type Server struct {
 	secrets   *secret.Cipher
 	retention *store.RetentionWorker
 	killState atomicKillState
+	mcpPolicy atomic.Pointer[mcpPolicySnapshot]
 }
 
 type atomicKillState struct {
@@ -135,9 +136,12 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/admin/export.csv", s.handleExportCSV)
 	mux.HandleFunc("/admin/timeseries", s.handleTimeseries)
 	mux.HandleFunc("/admin/heatmap", s.handleHeatmap)
+	mux.HandleFunc("/admin/anomalies", s.handleAnomalies)
+	mux.HandleFunc("/admin/scatter", s.handleScatter)
 	mux.HandleFunc("/admin/llm/traces", s.handleLLMTraces)
 	mux.HandleFunc("/admin/llm/traces/", s.handleLLMTraceDetail)
 	mux.HandleFunc("/admin/llm/sessions", s.handleLLMSessions)
+	mux.HandleFunc("/admin/llm/session", s.handleLLMSessionTimeline)
 	mux.HandleFunc("/admin/llm/prompts", s.handleLLMPrompts)
 	mux.HandleFunc("/admin/llm/prompts/compare", s.handleLLMPromptCompare)
 	mux.HandleFunc("/admin/llm/patterns", s.handleLLMPatterns)
@@ -148,6 +152,10 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/admin/mcp/tools", s.handleMCPTools)
 	mux.HandleFunc("/admin/mcp/servers", s.handleMCPServers)
 	mux.HandleFunc("/admin/mcp/requests", s.handleMCPRequests)
+	mux.HandleFunc("/admin/mcp/policies", s.handleMCPPolicies)
+	mux.HandleFunc("/admin/mcp/policies/", s.handleMCPPolicyByServer)
+	mux.HandleFunc("/admin/mcp/loops", s.handleMCPLoops)
+	mux.HandleFunc("/admin/mcp/catalog", s.handleMCPCatalog)
 	mux.HandleFunc("/admin/kill-switch", s.handleKillSwitch)
 	mux.HandleFunc("/admin/alerts", s.handleAlertRules)
 	mux.HandleFunc("/admin/alerts/", s.handleAlertRuleByID)
@@ -547,6 +555,12 @@ func (s *Server) handleOpenAI(w http.ResponseWriter, r *http.Request) {
 	traceID := traceIDFromRequest(r)
 	meta := s.auditRequest(r.URL.Path, body, apiKeyID, traceID, r)
 
+	// MCP server policy (allowlist / block) — reject requests that use a disallowed
+	// MCP server before they ever reach the upstream.
+	if s.enforceMCPPolicy(w, r, meta, traceID) {
+		return
+	}
+
 	// Embedding cache (idempotent) — only applies to /v1/embeddings + POST.
 	if r.URL.Path == "/v1/embeddings" && r.Method == http.MethodPost && s.cfg.Cache.EmbeddingEnabled {
 		if served := s.serveEmbeddingFromCache(r.Context(), w, r, body, meta, traceID); served {
@@ -560,6 +574,8 @@ func (s *Server) handleOpenAI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	meta.Request.Provider = provider.Name
+	meta.Request.RouteReason = provider.Reason
+	meta.Request.RouteDetail = provider.Detail
 
 	// Identify failover candidates: only when the client did NOT explicitly pin a provider.
 	failoverCandidates := []string{}
@@ -581,6 +597,7 @@ func (s *Server) handleOpenAI(w http.ResponseWriter, r *http.Request) {
 		meta.Request.StatusCode = status
 		meta.Request.LatencyMS = time.Since(start).Milliseconds()
 		meta.Request.Error = err.Error()
+		meta.Request.FallbackReason = err.Error()
 		meta.Evaluations = buildLLMEvaluations(meta, ResponseAnalysis{})
 		s.metrics.ObserveLLMEvaluations(meta.Evaluations)
 		s.enqueue(meta)
@@ -591,6 +608,8 @@ func (s *Server) handleOpenAI(w http.ResponseWriter, r *http.Request) {
 	if failoverFrom != "" {
 		s.metrics.IncFailover()
 		w.Header().Set("X-Failover-From", failoverFrom)
+		meta.Request.Failover = true
+		meta.Request.FallbackFrom = failoverFrom
 	}
 	if resolvedName != "" {
 		meta.Request.Provider = resolvedName
@@ -776,6 +795,8 @@ type resolvedProvider struct {
 	BaseURL string
 	APIKey  string
 	Timeout time.Duration
+	Reason  string // header | query | model_pattern | default
+	Detail  string // e.g. matched glob pattern, or header name
 }
 
 // dialUpstream sends the request to `primary`. On transport-level failure (timeout,
@@ -848,19 +869,26 @@ func (s *Server) dialUpstream(reqCtx context.Context, r *http.Request, body []by
 }
 
 func (s *Server) selectProvider(ctx context.Context, r *http.Request, model string) (resolvedProvider, error) {
+	reason, detail := "default", ""
 	name := strings.TrimSpace(r.Header.Get("X-Proxy-Provider"))
+	if name != "" {
+		reason, detail = "header", "X-Proxy-Provider"
+	}
 	if name == "" {
-		name = strings.TrimSpace(r.URL.Query().Get("provider"))
+		if q := strings.TrimSpace(r.URL.Query().Get("provider")); q != "" {
+			name, reason, detail = q, "query", "?provider="
+		}
 	}
 
 	// If the client did not pin a provider, try to auto-route by model glob.
 	if name == "" && model != "" {
-		if matched, ok, err := s.matchProviderByModel(ctx, model); err == nil && ok {
-			name = matched
+		if matched, pattern, ok, err := s.matchProviderByModelDetail(ctx, model); err == nil && ok {
+			name, reason, detail = matched, "model_pattern", pattern
 		}
 	}
 	if name == "" {
 		name = s.cfg.Upstream.Provider
+		reason, detail = "default", "UPSTREAM_PROVIDER"
 	}
 
 	provider, found, err := s.db.GetProvider(ctx, name)
@@ -884,7 +912,31 @@ func (s *Server) selectProvider(ctx context.Context, r *http.Request, model stri
 	if timeout <= 0 {
 		timeout = s.cfg.Upstream.Timeout
 	}
-	return resolvedProvider{Name: provider.Name, BaseURL: provider.BaseURL, APIKey: apiKey, Timeout: timeout}, nil
+	return resolvedProvider{Name: provider.Name, BaseURL: provider.BaseURL, APIKey: apiKey, Timeout: timeout, Reason: reason, Detail: detail}, nil
+}
+
+// matchProviderByModelDetail is matchProviderByModel but also returns the matched glob.
+func (s *Server) matchProviderByModelDetail(ctx context.Context, model string) (string, string, bool, error) {
+	providers, err := s.db.ListProviderConfigs(ctx)
+	if err != nil || len(providers) == 0 {
+		return "", "", false, err
+	}
+	normalized := strings.ToLower(strings.TrimSpace(model))
+	for _, p := range providers {
+		if p.ModelPatterns == "" {
+			continue
+		}
+		for _, raw := range strings.Split(p.ModelPatterns, ",") {
+			pattern := strings.ToLower(strings.TrimSpace(raw))
+			if pattern == "" {
+				continue
+			}
+			if matchGlob(pattern, normalized) {
+				return p.Name, pattern, true, nil
+			}
+		}
+	}
+	return "", "", false, nil
 }
 
 func (s *Server) matchProviderByModel(ctx context.Context, model string) (string, bool, error) {
@@ -1109,6 +1161,7 @@ func (s *Server) auditRequest(endpoint string, body []byte, apiKeyID string, tra
 			PromptVersion:       llmMeta.PromptVersion,
 			PromptVariablesHash: llmMeta.PromptVariablesHash,
 			ToolCount:           llmMeta.ToolCount,
+			Complexity:          complexityScore(prompts, llmMeta.ToolCount),
 			RequestHash:         audit.HashText(string(body)),
 			BodyRaw:             rawBody,
 			ReplayOf:            r.Header.Get("X-Proxy-Replay-Of"),

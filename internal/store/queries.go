@@ -1778,6 +1778,70 @@ func (s *SQLStore) llmSessionsFilter(ctx context.Context, whereClause string, li
 	return result, rows.Err()
 }
 
+// SessionTimeline returns the ordered turns of a single session with running
+// cumulative cost/token totals — the basis for the session cost timeline view.
+func (s *SQLStore) SessionTimeline(ctx context.Context, sessionID string, limit int) (SessionTimeline, error) {
+	timeline := SessionTimeline{SessionID: sessionID, Points: []SessionTimelinePoint{}}
+	if limit <= 0 || limit > 2000 {
+		limit = 1000
+	}
+	query := s.bind(`
+		SELECT r.id, r.trace_id, COALESCE(r.model, ''), COALESCE(r.provider, ''),
+			COALESCE(NULLIF(r.prompt_name, ''), 'ad-hoc'),
+			r.status_code, r.latency_ms, COALESCE(r.first_chunk_ms, 0),
+			COALESCE(t.total_tokens, 0), COALESCE(t.estimated_cost, 0),
+			(SELECT COUNT(*) FROM tool_invocations ti WHERE ti.request_id = r.id AND ti.source = 'call'),
+			(SELECT COUNT(*) FROM tool_invocations ti WHERE ti.request_id = r.id AND ti.is_error = 1),
+			(SELECT COUNT(*) FROM llm_evaluations e WHERE e.request_id = r.id AND e.passed = 0),
+			r.created_at
+		FROM request_logs r
+		LEFT JOIN token_usage t ON t.request_id = r.id
+		WHERE COALESCE(NULLIF(r.session_id, ''), 'no-session') = ?
+		ORDER BY r.created_at ASC
+		LIMIT ?`)
+	rows, err := s.db.QueryContext(ctx, query, sessionID, limit)
+	if err != nil {
+		return timeline, err
+	}
+	defer rows.Close()
+
+	var cumCost float64
+	var cumTokens int64
+	var firstTS, lastTS string
+	for rows.Next() {
+		var p SessionTimelinePoint
+		if err := rows.Scan(&p.RequestID, &p.TraceID, &p.Model, &p.Provider, &p.PromptName,
+			&p.StatusCode, &p.LatencyMS, &p.FirstChunkMS, &p.TotalTokens, &p.CostKRW,
+			&p.ToolCalls, &p.ToolErrors, &p.EvalFailures, &p.CreatedAt); err != nil {
+			return timeline, err
+		}
+		cumCost += p.CostKRW
+		cumTokens += p.TotalTokens
+		p.CumulativeCostKRW = cumCost
+		p.CumulativeTokens = cumTokens
+		timeline.ToolCalls += p.ToolCalls
+		if firstTS == "" {
+			firstTS = p.CreatedAt
+		}
+		lastTS = p.CreatedAt
+		timeline.Points = append(timeline.Points, p)
+	}
+	if err := rows.Err(); err != nil {
+		return timeline, err
+	}
+	timeline.Requests = len(timeline.Points)
+	timeline.TotalCostKRW = cumCost
+	timeline.TotalTokens = cumTokens
+	if firstTS != "" && lastTS != "" {
+		if a, err1 := time.Parse(time.RFC3339Nano, firstTS); err1 == nil {
+			if b, err2 := time.Parse(time.RFC3339Nano, lastTS); err2 == nil {
+				timeline.DurationSeconds = int64(b.Sub(a).Seconds())
+			}
+		}
+	}
+	return timeline, nil
+}
+
 func (s *SQLStore) LLMPatterns(ctx context.Context, limit int) ([]LLMPatternSummary, error) {
 	return s.llmPatternsFilter(ctx, "1=1", limit)
 }

@@ -84,6 +84,28 @@ func (s *Server) handleLLMSessions(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"sessions": sessions})
 }
 
+func (s *Server) handleLLMSessionTimeline(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	if r.Method != http.MethodGet {
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
+	sessionID := strings.TrimSpace(r.URL.Query().Get("session_id"))
+	if sessionID == "" {
+		writeOpenAIError(w, http.StatusBadRequest, "session_id is required", "invalid_request_error", "missing_session_id")
+		return
+	}
+	timeline, err := s.db.SessionTimeline(r.Context(), sessionID, llmLimit(r, 1000, 2000))
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "session_timeline_failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, timeline)
+}
+
 func (s *Server) handleLLMPrompts(w http.ResponseWriter, r *http.Request) {
 	if !s.authorizeAdmin(r) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")

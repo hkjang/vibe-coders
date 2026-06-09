@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -34,6 +35,59 @@ func (s *Server) handleTimeseries(w http.ResponseWriter, r *http.Request) {
 		"since":  since.UTC().Format(time.RFC3339),
 		"points": points,
 	})
+}
+
+func (s *Server) handleScatter(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	since := parseWindow(r.URL.Query().Get("window"), time.Hour, "hour")
+	limit := 5000
+	if v := strings.TrimSpace(r.URL.Query().Get("limit")); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 {
+			limit = parsed
+		}
+	}
+	points, truncated, err := s.db.ScatterPoints(r.Context(), store.ScatterFilter{
+		Since:    since,
+		Endpoint: strings.TrimSpace(r.URL.Query().Get("endpoint")),
+		Model:    strings.TrimSpace(r.URL.Query().Get("model")),
+		APIKeyID: strings.TrimSpace(r.URL.Query().Get("api_key_id")),
+		Limit:    limit,
+	})
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "scatter_failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"points":    points,
+		"truncated": truncated,
+		"since":     since.UTC().Format(time.RFC3339),
+	})
+}
+
+func (s *Server) handleAnomalies(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	baseline := parseWindow(r.URL.Query().Get("baseline"), 7*24*time.Hour, "day")
+	recent := parseWindow(r.URL.Query().Get("recent"), time.Hour, "hour")
+	z := 3.0
+	if v := strings.TrimSpace(r.URL.Query().Get("z")); v != "" {
+		if parsed, err := strconv.ParseFloat(v, 64); err == nil && parsed > 0 {
+			z = parsed
+		}
+	}
+	// parseWindow returns an absolute time; convert back to durations from now.
+	now := time.Now()
+	findings, err := s.db.ModelAnomalies(r.Context(), now.Sub(baseline), now.Sub(recent), z)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "anomalies_failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"anomalies": findings, "z_threshold": z})
 }
 
 func (s *Server) handleHeatmap(w http.ResponseWriter, r *http.Request) {

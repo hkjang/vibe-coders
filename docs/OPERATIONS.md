@@ -188,7 +188,17 @@ test -s data/fallback.ndjson || true   # 비정상 종료 시 fallback 에 잔�
 
 ### 5.2 어드민 알림
 
-`/admin/alerts` 에서 게이트웨이 자체 알림 규칙을 설정하면 외부 모니터링 없이도 Slack/Teams/사내 웹훅으로 즉시 통보합니다. 자체 알림 지표에는 `requests/errors/krw/tokens`, 지연 기반 `latency_p95_ms/first_chunk_p95_ms`, LLM 평가 기반 `llm_eval_failures/llm_eval_failure_rate` 가 포함됩니다. 자세한 사용법은 [관리자 가이드](./ADMIN_GUIDE.md) 참조.
+`/admin/alerts` 에서 게이트웨이 자체 알림 규칙을 설정하면 외부 모니터링 없이도 Slack/Teams/사내 웹훅으로 즉시 통보합니다. 자체 알림 지표에는 `requests/errors/krw/tokens`, 지연 기반 `latency_p95_ms/first_chunk_p95_ms`, LLM 평가 기반 `llm_eval_failures/llm_eval_failure_rate`, MCP/도구 기반 `tool_errors/tool_error_rate/tool_loop/mcp_new_tools`, 이상 탐지 `anomaly_zmax` 가 포함됩니다. 자세한 사용법은 [관리자 가이드](./ADMIN_GUIDE.md) 참조.
+
+### 5.2.1 이상 탐지 (Anomaly Detection)
+
+`/admin/anomalies` 는 모델별 요청당 비용·전체 지연·첫 청크 지연을 최근 윈도우(기본 1시간) 와 장기 기준선(기본 7일) 으로 비교해 z-score 가 임계(기본 3) 를 넘는 항목을 반환합니다. 대시보드의 "이상 징후" 카드에도 표시되며, `anomaly_zmax` 알림 지표로 임계 초과 시 통보할 수 있습니다.
+
+```bash
+curl "http://localhost:8080/admin/anomalies?baseline=7d&recent=1h&z=3"
+```
+
+기준선 표본이 일정해도(분산 0) 평균의 5% 를 최소 노이즈로 두어 진짜 급증을 놓치지 않습니다. 최소 표본(기준선 20건, 최근 5건) 미만 모델은 노이즈 방지를 위해 제외됩니다.
 
 ### 5.3 LLM Observability
 

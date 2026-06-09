@@ -111,11 +111,23 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 			request_hash TEXT,
 			body_raw TEXT,
 			replay_of TEXT,
+			failover INTEGER NOT NULL DEFAULT 0,
+			route_reason TEXT,
+			route_detail TEXT,
+			complexity INTEGER NOT NULL DEFAULT 0,
+			fallback_from TEXT,
+			fallback_reason TEXT,
 			created_at TEXT NOT NULL
 		)`,
 		// Idempotent ALTERs for legacy installations of request_logs
 		`ALTER TABLE request_logs ADD COLUMN body_raw TEXT`,
 		`ALTER TABLE request_logs ADD COLUMN replay_of TEXT`,
+		`ALTER TABLE request_logs ADD COLUMN failover INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE request_logs ADD COLUMN route_reason TEXT`,
+		`ALTER TABLE request_logs ADD COLUMN route_detail TEXT`,
+		`ALTER TABLE request_logs ADD COLUMN complexity INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE request_logs ADD COLUMN fallback_from TEXT`,
+		`ALTER TABLE request_logs ADD COLUMN fallback_reason TEXT`,
 		`ALTER TABLE request_logs ADD COLUMN first_chunk_ms INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE request_logs ADD COLUMN session_id TEXT`,
 		`ALTER TABLE request_logs ADD COLUMN prompt_name TEXT`,
@@ -220,6 +232,24 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 		`CREATE INDEX IF NOT EXISTS idx_tool_invocations_request_id ON tool_invocations(request_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_tool_invocations_server ON tool_invocations(server_label, tool_name)`,
 		`CREATE INDEX IF NOT EXISTS idx_tool_invocations_created_at ON tool_invocations(created_at)`,
+		`CREATE TABLE IF NOT EXISTS mcp_policies (
+			server_label TEXT PRIMARY KEY,
+			mode TEXT NOT NULL,
+			note TEXT,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS mcp_tool_catalog (
+			server_label TEXT NOT NULL,
+			tool_name TEXT NOT NULL,
+			is_mcp INTEGER NOT NULL DEFAULT 0,
+			first_seen TEXT NOT NULL,
+			last_seen TEXT NOT NULL,
+			PRIMARY KEY (server_label, tool_name)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_mcp_tool_catalog_first_seen ON mcp_tool_catalog(first_seen)`,
+		// Idempotent ALTER for tool argument sensitivity flag
+		`ALTER TABLE tool_invocations ADD COLUMN arg_sensitive INTEGER NOT NULL DEFAULT 0`,
 		`CREATE TABLE IF NOT EXISTS provider_configs (
 			name TEXT PRIMARY KEY,
 			base_url TEXT NOT NULL,
@@ -570,9 +600,9 @@ func (s *SQLStore) InsertLogRecord(ctx context.Context, record LogRecord) error 
 		req.CreatedAt = time.Now().UTC()
 	}
 	_, err = tx.ExecContext(ctx, s.bind(`INSERT INTO request_logs
-		(id, trace_id, api_key_id, client_ip, forwarded_for, user_agent, hostname, model, endpoint, stream, provider, status_code, latency_ms, first_chunk_ms, session_id, prompt_name, prompt_version, prompt_variables_hash, tool_count, error, request_hash, body_raw, replay_of, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
-		req.ID, req.TraceID, req.APIKeyID, req.ClientIP, req.ForwardedFor, req.UserAgent, req.Hostname, req.Model, req.Endpoint, boolInt(req.Stream), req.Provider, req.StatusCode, req.LatencyMS, req.FirstChunkMS, req.SessionID, req.PromptName, req.PromptVersion, req.PromptVariablesHash, req.ToolCount, req.Error, req.RequestHash, req.BodyRaw, req.ReplayOf, formatTime(req.CreatedAt))
+		(id, trace_id, api_key_id, client_ip, forwarded_for, user_agent, hostname, model, endpoint, stream, provider, status_code, latency_ms, first_chunk_ms, session_id, prompt_name, prompt_version, prompt_variables_hash, tool_count, error, request_hash, body_raw, replay_of, failover, route_reason, route_detail, complexity, fallback_from, fallback_reason, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+		req.ID, req.TraceID, req.APIKeyID, req.ClientIP, req.ForwardedFor, req.UserAgent, req.Hostname, req.Model, req.Endpoint, boolInt(req.Stream), req.Provider, req.StatusCode, req.LatencyMS, req.FirstChunkMS, req.SessionID, req.PromptName, req.PromptVersion, req.PromptVariablesHash, req.ToolCount, req.Error, req.RequestHash, req.BodyRaw, req.ReplayOf, boolInt(req.Failover), req.RouteReason, req.RouteDetail, req.Complexity, req.FallbackFrom, req.FallbackReason, formatTime(req.CreatedAt))
 	if err != nil {
 		return err
 	}
@@ -650,12 +680,27 @@ func (s *SQLStore) InsertLogRecord(ctx context.Context, record LogRecord) error 
 			tool.CreatedAt = req.CreatedAt
 		}
 		_, err = tx.ExecContext(ctx, s.bind(`INSERT INTO tool_invocations
-			(id, request_id, trace_id, api_key_id, server_label, tool_name, source, is_mcp, is_error, arg_hash, created_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+			(id, request_id, trace_id, api_key_id, server_label, tool_name, source, is_mcp, is_error, arg_sensitive, arg_hash, created_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
 			tool.ID, tool.RequestID, tool.TraceID, tool.APIKeyID, tool.ServerLabel, tool.ToolName, tool.Source,
-			boolInt(tool.IsMCP), boolInt(tool.IsError), tool.ArgHash, formatTime(tool.CreatedAt))
+			boolInt(tool.IsMCP), boolInt(tool.IsError), boolInt(tool.ArgSensitive), tool.ArgHash, formatTime(tool.CreatedAt))
 		if err != nil {
 			return err
+		}
+		// Maintain the per-server tool catalog from declared definitions.
+		if tool.Source == "definition" && tool.ToolName != "" {
+			server := tool.ServerLabel
+			if server == "" {
+				server = "(none)"
+			}
+			ts := formatTime(tool.CreatedAt)
+			_, err = tx.ExecContext(ctx, s.bind(`INSERT INTO mcp_tool_catalog (server_label, tool_name, is_mcp, first_seen, last_seen)
+				VALUES (?, ?, ?, ?, ?)
+				ON CONFLICT(server_label, tool_name) DO UPDATE SET last_seen = excluded.last_seen, is_mcp = excluded.is_mcp`),
+				server, tool.ToolName, boolInt(tool.IsMCP), ts, ts)
+			if err != nil {
+				return err
+			}
 		}
 	}
 

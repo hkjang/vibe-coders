@@ -121,6 +121,12 @@ func metricValue(metric string, snapshot store.AlertMetricSnapshot) float64 {
 			return 0
 		}
 		return float64(snapshot.ToolErrors) / float64(snapshot.ToolCalls)
+	case "tool_loop":
+		return float64(snapshot.MaxSessionToolCall)
+	case "mcp_new_tools":
+		return float64(snapshot.NewCatalogTools)
+	case "anomaly_zmax":
+		return snapshot.MaxAnomalyZ
 	}
 	return 0
 }

@@ -77,6 +77,9 @@ var validAlertMetrics = map[string]bool{
 	"llm_eval_failure_rate": true,
 	"tool_errors":           true,
 	"tool_error_rate":       true,
+	"tool_loop":             true,
+	"mcp_new_tools":         true,
+	"anomaly_zmax":          true,
 }
 var validAlertScopes = map[string]bool{"global": true, "api_key": true, "team": true, "ip": true, "model": true}
 

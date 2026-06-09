@@ -30,7 +30,8 @@
 
 | 탭 | 무엇을 할까 |
 | --- | --- |
-| 대시보드 | 총 요청·토큰·KRW·평균 지연·첫 청크 지연, 24h/7d/30d 시계열 차트, 상위 사용자, 상태 분포, 시간대 히트맵, 최근 20건 |
+| 대시보드 | 총 요청·토큰·KRW·평균 지연·첫 청크 지연, 24h/7d/30d 시계열 차트, 상위 사용자, 상태 분포, 이상 징후, 시간대 히트맵, 최근 20건 |
+| XView | 요청 1건=점 1개의 응답시간 분포(스캐터)로 이상치를 발견하고, 점을 클릭하면 그 요청이 **왜** 그렇게 처리됐는지(라우팅·폴백·캐시·안전·비용·세션) 설명하는 eXplainability View |
 | LLM 관측 | Datadog LLM Observability 대응 Trace/Span/Session/Prompt/Patterns/Insights/Feedback/Evaluation 화면 |
 | MCP | MCP/tool 서버·도구 리더보드, 호출/오류 집계, 오류 호출 drill-down |
 | 호출 이력 | IP/모델/언어 필터로 검색, 두 행 선택 후 비교, 행 클릭 시 상세 모달 |
@@ -52,9 +53,48 @@
 2. **시계열 차트**: 24h(시간별) / 7d(일별) / 30d(일별) 토글. 실선은 요청 수, 점선은 KRW 비용. 점에 마우스를 올리면 토큰·비용까지 툴팁.
 3. **상위 사용자**: 요청 수 기준 Top 5. 클릭 시 그 사용자의 상세 페이지로 이동.
 4. **상태 분포**: 2xx/3xx/4xx/429/5xx 비율 막대 + 표.
-5. **IP별 / 모델별 / 언어별** 표 (헤더 클릭 시 정렬).
+5. **이상 징후**: 모델별 요청당 비용·지연을 최근 6시간 vs 7일 기준선으로 비교해 z-score ≥ 3 인 급변(급증/급감)을 표로 표시. 모델 가격 변동·성능 저하·폭주를 선제적으로 포착. `/admin/anomalies` API, `anomaly_zmax` 알림 지표.
+6. **IP별 / 모델별 / 언어별** 표 (헤더 클릭 시 정렬).
 6. **시간대 히트맵**: Asia/Seoul 기준 요일(가로)×시간(세로). 색이 짙을수록 그 시간대 호출이 많음. 트래픽 패턴 + 비정상 시간대(새벽 폭주 등) 발견용.
 7. **최근 호출 이력 20건**.
+
+---
+
+## 3-1. XView (트랜잭션 응답시간 분포)
+
+평균 응답시간 차트는 9초짜리 장애가 100ms 요청들 사이에 묻혀도 "평균 130ms 정상"처럼 보입니다. XView는 **요청 1건을 점 1개**로 찍어(가로=시간, 세로=응답시간) 이상치를 즉시 드러냅니다.
+
+- **세로축 스케일**: 로그(기본) / 선형 토글. 로그 스케일이면 100ms 군집과 9초 이상치를 한 화면에서 봅니다.
+- **지표 토글**: 전체 응답시간 / 첫 청크 지연(스트리밍 TTFB).
+- **보조선**: P50(회색)·P95(노랑)·P99(빨강) 백분위 기준선.
+- **색상 분류**:
+  - 🟢 캐시 히트 (`provider=cache`)
+  - 🔵 정상
+  - 🟡 폴백 (upstream 장애로 대체 provider 사용)
+  - 🔴 오류 (status ≥ 400, kill switch·정책 차단 포함)
+  - 🟣 고비용/복잡 (토큰이 상위 10% 또는 4000 이상)
+- **창**: 5m / 15m / 1h / 6h / 24h. **필터**: 모델, endpoint.
+- **드릴다운**: 점에 마우스를 올리면 모델·provider·지연·토큰·비용·상태 툴팁, 클릭하면 요청 상세 모달.
+- 점이 6000건을 넘으면 최근 6000건으로 제한(범례 옆에 표시).
+
+API: `GET /admin/scatter?window=1h&metric=latency&model=&endpoint=&limit=6000` — 점 배열(`request_id, created_at, latency_ms, first_chunk_ms, status_code, provider, model, total_tokens, cost_krw, stream, tool_count, failover`)과 `truncated` 플래그를 반환합니다.
+
+### eXplainability View (점 클릭 → "왜 이렇게 처리됐나")
+
+스캐터의 점(또는 호출 이력/상세 모달의 "🧭 XView 설명" 버튼)을 클릭하면 그 요청 1건의 처리 근거를 6개 패널로 설명합니다. 감사·보안·비용 통제 근거가 요청별로 남으므로 금융권 등 규제 환경에 적합합니다.
+
+| 패널 | 내용 |
+| --- | --- |
+| 🧭 라우팅 | 선택된 provider·모델, 라우팅 근거(헤더 지정/쿼리/모델 패턴 자동/기본), 매칭된 패턴, **복잡도 점수(0~100)와 티어**(low/medium/high) |
+| 🔁 폴백 | 폴백 발생 여부, 최초→대체 provider, 사유(전송 실패 등) |
+| 🟢 캐시 | 캐시 히트 여부, cached 토큰, **절감액**(전체 캐시 / 프롬프트 캐시) |
+| 🛡 안전 | 차단 여부, 마스킹 적용, 실패한 안전·보안 평가(PII/인젝션/독성/도구 인자 시크릿) |
+| 💰 비용 | 실제 비용 vs 정가(캐시 미적용 시), **절감액**, 토큰 분해(prompt/completion/cached/reasoning) |
+| 🧵 세션 | 세션 타임라인 링크, 스트리밍 여부, 원문 상세 링크 |
+
+복잡도 점수는 프롬프트 토큰·대화 깊이·도구 수 기반 휴리스틱 추정치이며(모델 산출값 아님) UI에 그 사실이 명시됩니다.
+
+API: `GET /admin/requests/{id}/explain` → `{routing, fallback, cache, safety, cost, session}`.
 
 ---
 
@@ -65,7 +105,8 @@ Datadog LLM Observability의 핵심 기능을 게이트웨이 내부 데이터�
 | 영역 | 내용 |
 | --- | --- |
 | Trace Explorer | 요청 단위 trace 목록. session, prompt, 모델/provider, 첫 청크/전체 지연, 토큰·비용, tool count, 상태를 한눈에 확인. 상세 모달에는 파생 LLM/tool span 표시 |
-| Session Explorer | `session_id` 별 요청 수, 토큰, KRW, 오류, 평가 실패, 최초/최근 시각 |
+| Session Explorer | `session_id` 별 요청 수, 토큰, KRW, 오류, 평가 실패, 최초/최근 시각. 행의 `타임라인 > 보기` 로 세션 비용 타임라인 모달 표시 |
+| Session Timeline | 한 세션의 턴을 시간순으로 펼쳐 누적 비용 곡선(SVG)과 턴별 모델·상태·첫청크·토큰·비용·누적비용·도구 호출 표를 보여줌. 점 색: 초록=정상, 노랑=평가실패, 빨강=오류. 어떤 턴에서 비용이 급증했는지 한눈에 파악. API: `GET /admin/llm/session?session_id=` |
 | Prompt Tracking | prompt name/version 별 호출 수, 평균 지연, 토큰·비용, 오류, 평가 실패 |
 | Prompt Compare | Prompt Tracking 행에서 `비교`를 눌러 버전 간 호출량, 토큰, KRW, 지연, 오류율, 평가 실패율 차이 확인. 상단 `API 키 ID` / `팀` 필터가 켜져 있으면 같은 스코프 안에서만 비교. baseline 미지정 시 가까운 이전 버전, 없으면 최근성 기준 대체 baseline 자동 선택하며, 선택 근거와 추천 후보 목록을 모달 상단에 표시. 추천 후보는 3/5/10개로 조절 가능하고, 버튼으로 바로 눌러 baseline을 교체 가능하며, 각 후보에 호출량/평균 지연/오류율/평가 실패율/최근 시각과 정렬 기준이 함께 보임 |
 | Patterns | 최근 프롬프트를 debugging/testing/refactoring/security/prompt-injection-risk 등 운영 토픽으로 자동 묶음 |
@@ -137,13 +178,40 @@ AI 코딩 도구(Roo Code·Cline·Cursor·Claude Desktop)가 MCP 서버나 함�
 2. **필터**: API 키 ID, 서버 라벨, "MCP만" 체크. 필터는 URL hash 에 보관되어 공유 가능
 3. **MCP 서버별 표**: 서버마다 도구 종류·호출·오류·오류율·고유 키·마지막 사용. 행 클릭 시 그 서버로 필터링
 4. **Tool 리더보드**: (서버, 도구) 별 정의·호출·결과·오류·오류율·고유 키. `호출`/`오류` 버튼으로 해당 도구를 사용한 요청을 모달로 drill-down
+5. **에이전트 루프 의심**: 최근 24시간 동안 한 세션에서 같은 도구를 10회 이상 호출한 경우 표시. 폭주/무한루프 에이전트를 비용 사고 전에 발견. 30회 이상은 빨간색.
+6. **도구 카탈로그 / 드리프트**: 서버별로 관측된 도구 목록과 최초/최근 관측 시각. 최근 24시간 내 처음 나타난 도구는 `신규` 배지로 강조(공급망 변조·권한 확대 탐지), 30일간 안 보이면 `미사용` 배지. 섹션 제목에 신규 도구 수 표시.
+7. **MCP 서버 정책**: 아래 보안 절 참고
+
+### MCP 서버 정책 (allowlist / 차단)
+
+미승인 MCP 서버 사용을 차단해 섀도우 MCP·신뢰 경계 밖 서버 연결을 막습니다. MCP 탭의 "MCP 서버 정책" 섹션 또는 API로 관리합니다.
+
+- **모드**: `block`(차단), `warn`(허용하되 경고 헤더·기록), `allow`(명시적 허용)
+- **Allowlist 모드** 토글: 켜면 `allow` 로 등록된 서버만 통과하고 나머지 MCP 서버는 모두 차단(화이트리스트). 끄면 `block` 으로 지정한 서버만 차단(블랙리스트).
+- 차단된 요청은 upstream 에 도달하기 전 `HTTP 403 + X-MCP-Blocked-Server: <서버>` 로 거부되고 호출 이력에 `blocked` provider 로 기록됩니다. `warn` 서버는 `X-MCP-Warn-Servers` 헤더를 붙여 통과시킵니다.
+- 정책 변경은 5초 캐시로 모든 인스턴스에 전파됩니다.
+
+```bash
+# github MCP 서버 차단
+curl -X POST http://<host>:8080/admin/mcp/policies \
+  -H "Content-Type: application/json" \
+  -d '{ "server_label": "github", "mode": "block", "note": "외부 PR 자동화 금지" }'
+
+# allowlist 모드 켜기 (등록된 allow 서버만 통과)
+curl -X POST http://<host>:8080/admin/mcp/policies \
+  -H "Content-Type: application/json" -d '{ "allowlist_enabled": true }'
+
+# 정책 삭제
+curl -X DELETE http://<host>:8080/admin/mcp/policies/github
+```
 
 ### MCP 관련 알림 / 평가
 
-- 알림 지표 `tool_errors`(윈도우 내 tool 오류 수), `tool_error_rate`(오류/호출 비율) 를 안전 탭에서 규칙으로 걸 수 있습니다.
-- 요청 상세의 LLM 평가에 `tools.no_error`(tool 결과 오류 여부), `tools.mcp_servers`(사용된 MCP 서버 수) 가 추가됩니다.
+- 알림 지표(안전 탭): `tool_errors`(윈도우 내 tool 오류 수), `tool_error_rate`(오류/호출 비율), `tool_loop`(한 세션에서 한 도구의 최대 호출수 — 루프 임계), `mcp_new_tools`(윈도우 내 새로 관측된 도구 수 — 드리프트).
+- 요청 상세의 LLM 평가에 `tools.no_error`(tool 결과 오류 여부), `tools.mcp_servers`(사용된 MCP 서버 수), `tools.args_no_secret`(도구 호출 인자·결과에 시크릿/PII 포함 여부)가 추가됩니다.
+- 도구 호출 인자와 결과는 기존 마스킹 규칙(시크릿/PII)으로 스캔되어, 민감정보가 도구 입출력으로 새는지 `tools.args_no_secret` 평가로 감지합니다.
 - 요청 상세의 trace span 에 도구마다 개별 span(`mcp`/`tool` kind)이 표시됩니다.
-- Prometheus: `proxy_mcp_tool_calls_total`, `proxy_mcp_tool_errors_total`.
+- Prometheus: `proxy_mcp_tool_calls_total`, `proxy_mcp_tool_errors_total`, `proxy_mcp_blocked_total`.
 
 ### API
 
@@ -151,9 +219,12 @@ AI 코딩 도구(Roo Code·Cline·Cursor·Claude Desktop)가 MCP 서버나 함�
 curl -H "Authorization: Bearer $ADMIN_TOKEN" http://localhost:8080/admin/mcp/servers
 curl -H "Authorization: Bearer $ADMIN_TOKEN" "http://localhost:8080/admin/mcp/tools?mcp_only=1"
 curl -H "Authorization: Bearer $ADMIN_TOKEN" "http://localhost:8080/admin/mcp/requests?server=github&tool=create_issue&errors=1"
+curl -H "Authorization: Bearer $ADMIN_TOKEN" "http://localhost:8080/admin/mcp/loops?window=24h&threshold=10"
+curl -H "Authorization: Bearer $ADMIN_TOKEN" "http://localhost:8080/admin/mcp/catalog?server=github"
+curl -H "Authorization: Bearer $ADMIN_TOKEN" http://localhost:8080/admin/mcp/policies
 ```
 
-> 보안 참고: MCP 도구 결과(`role:tool`)도 프롬프트로 캡처되어 기존 `prompt.injection` 평가가 도구 응답을 통한 프롬프트 인젝션까지 스캔합니다. MCP 서버가 신뢰 경계 밖이라면 이 평가 실패를 모니터링하세요.
+> 보안 참고: MCP 도구 결과(`role:tool`)도 프롬프트로 캡처되어 기존 `prompt.injection` 평가가 도구 응답을 통한 프롬프트 인젝션까지 스캔합니다. MCP 서버가 신뢰 경계 밖이라면 이 평가 실패를 모니터링하고, 위험 서버는 위 정책으로 차단하세요.
 
 ---
 

@@ -141,6 +141,9 @@ func (s *Server) handleRequestDetail(w http.ResponseWriter, r *http.Request) {
 		case "analyze":
 			s.handleRequestAnalyze(w, r)
 			return
+		case "explain":
+			s.handleRequestExplain(w, r)
+			return
 		}
 		writeOpenAIError(w, http.StatusNotFound, "not found", "invalid_request_error", "not_found")
 		return

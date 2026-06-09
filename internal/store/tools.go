@@ -125,7 +125,7 @@ func (s *SQLStore) ListMCPServers(ctx context.Context, f ToolFilter) ([]MCPServe
 // ToolsForRequest returns the tool invocations for a single request (for trace detail).
 func (s *SQLStore) ToolsForRequest(ctx context.Context, requestID string) ([]ToolInvocation, error) {
 	rows, err := s.db.QueryContext(ctx, s.bind(`
-		SELECT id, request_id, trace_id, COALESCE(api_key_id, ''), COALESCE(server_label, ''), tool_name, source, is_mcp, is_error, COALESCE(arg_hash, ''), created_at
+		SELECT id, request_id, trace_id, COALESCE(api_key_id, ''), COALESCE(server_label, ''), tool_name, source, is_mcp, is_error, COALESCE(arg_sensitive, 0), COALESCE(arg_hash, ''), created_at
 		FROM tool_invocations WHERE request_id = ? ORDER BY created_at ASC, source ASC`), requestID)
 	if err != nil {
 		return nil, err
@@ -134,13 +134,14 @@ func (s *SQLStore) ToolsForRequest(ctx context.Context, requestID string) ([]Too
 	result := []ToolInvocation{}
 	for rows.Next() {
 		var t ToolInvocation
-		var isMCP, isErr int
+		var isMCP, isErr, argSensitive int
 		var createdAt string
-		if err := rows.Scan(&t.ID, &t.RequestID, &t.TraceID, &t.APIKeyID, &t.ServerLabel, &t.ToolName, &t.Source, &isMCP, &isErr, &t.ArgHash, &createdAt); err != nil {
+		if err := rows.Scan(&t.ID, &t.RequestID, &t.TraceID, &t.APIKeyID, &t.ServerLabel, &t.ToolName, &t.Source, &isMCP, &isErr, &argSensitive, &t.ArgHash, &createdAt); err != nil {
 			return nil, err
 		}
 		t.IsMCP = isMCP == 1
 		t.IsError = isErr == 1
+		t.ArgSensitive = argSensitive == 1
 		if parsed, err := time.Parse(time.RFC3339Nano, createdAt); err == nil {
 			t.CreatedAt = parsed
 		}

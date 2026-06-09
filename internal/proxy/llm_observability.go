@@ -162,6 +162,11 @@ func buildLLMEvaluations(record store.LogRecord, analysis ResponseAnalysis) []st
 			evalBool(record, "tools.no_error", "tools", !hasToolError(record.Tools), "no_tool_error", "an MCP/tool result returned an error", now),
 		)
 	}
+	if hasToolActivity(record.Tools) {
+		evaluations = append(evaluations,
+			evalBool(record, "tools.args_no_secret", "security", !hasSensitiveToolArgs(record.Tools), "no_secret_in_tool_io", "a tool call argument or result contained secret/PII markers", now),
+		)
+	}
 	if mcpServers := distinctMCPServers(record.Tools); mcpServers > 0 {
 		// informational evaluation: passes always, label carries the server count
 		evaluations = append(evaluations, evalScore(record, "tools.mcp_servers", "tools", 1, "servers="+itoaProxy(mcpServers), "", now))
@@ -181,6 +186,24 @@ func hasToolResults(tools []store.ToolInvocation) bool {
 func hasToolError(tools []store.ToolInvocation) bool {
 	for _, t := range tools {
 		if t.IsError {
+			return true
+		}
+	}
+	return false
+}
+
+func hasToolActivity(tools []store.ToolInvocation) bool {
+	for _, t := range tools {
+		if t.Source == "call" || t.Source == "result" {
+			return true
+		}
+	}
+	return false
+}
+
+func hasSensitiveToolArgs(tools []store.ToolInvocation) bool {
+	for _, t := range tools {
+		if t.ArgSensitive {
 			return true
 		}
 	}

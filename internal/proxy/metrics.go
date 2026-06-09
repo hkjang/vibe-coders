@@ -23,6 +23,7 @@ type Metrics struct {
 	llmEvalFailures atomic.Uint64
 	mcpToolCalls    atomic.Uint64
 	mcpToolErrors   atomic.Uint64
+	mcpBlocked      atomic.Uint64
 	latency         *LatencyDigest
 	firstChunk      *LatencyDigest
 }
@@ -98,9 +99,10 @@ func (m *Metrics) IncAlertDelivered() {
 	m.alertsDelivered.Add(1)
 }
 
-func (m *Metrics) IncCacheHit()  { m.cacheHits.Add(1) }
-func (m *Metrics) IncCacheMiss() { m.cacheMisses.Add(1) }
-func (m *Metrics) IncFailover()  { m.failovers.Add(1) }
+func (m *Metrics) IncCacheHit()   { m.cacheHits.Add(1) }
+func (m *Metrics) IncCacheMiss()  { m.cacheMisses.Add(1) }
+func (m *Metrics) IncFailover()   { m.failovers.Add(1) }
+func (m *Metrics) IncMCPBlocked() { m.mcpBlocked.Add(1) }
 
 func (m *Metrics) ObserveLLMEvaluations(evaluations []store.LLMEvaluation) {
 	for _, evaluation := range evaluations {
@@ -155,6 +157,9 @@ func (m *Metrics) Prometheus(queueDepth int, logDropped uint64, logWritten uint6
 		"# HELP proxy_mcp_tool_errors_total Total tool-result errors observed in requests.",
 		"# TYPE proxy_mcp_tool_errors_total counter",
 		fmt.Sprintf("proxy_mcp_tool_errors_total %d", m.mcpToolErrors.Load()),
+		"# HELP proxy_mcp_blocked_total Requests blocked by MCP server policy.",
+		"# TYPE proxy_mcp_blocked_total counter",
+		fmt.Sprintf("proxy_mcp_blocked_total %d", m.mcpBlocked.Load()),
 		"# HELP proxy_log_queue_depth Current async log queue depth.",
 		"# TYPE proxy_log_queue_depth gauge",
 		fmt.Sprintf("proxy_log_queue_depth %d", queueDepth),

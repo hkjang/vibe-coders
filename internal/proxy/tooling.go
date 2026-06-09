@@ -10,12 +10,24 @@ import (
 
 // parsedTool is the intermediate result before it becomes a store.ToolInvocation.
 type parsedTool struct {
-	Server  string
-	Tool    string
-	Source  string // definition | call | result
-	IsMCP   bool
-	IsError bool
-	ArgHash string
+	Server    string
+	Tool      string
+	Source    string // definition | call | result
+	IsMCP     bool
+	IsError   bool
+	Sensitive bool // arguments / result contain secret or PII markers
+	ArgHash   string
+}
+
+// argsString normalizes a tool arguments value into text for hashing / scanning.
+func argsString(value any) string {
+	if value == nil {
+		return ""
+	}
+	if s, ok := value.(string); ok {
+		return s
+	}
+	return jsonString(value)
 }
 
 // classifyToolName splits a flat tool name into (server, tool, isMCP).
@@ -118,7 +130,8 @@ func extractRequestTools(body []byte) []parsedTool {
 			if fnCall, ok := msg["function_call"].(map[string]any); ok {
 				if name, _ := fnCall["name"].(string); name != "" {
 					server, tool, isMCP := classifyToolName(name)
-					out = append(out, parsedTool{Server: server, Tool: tool, Source: "call", IsMCP: isMCP, ArgHash: hashArgs(fnCall["arguments"])})
+					out = append(out, parsedTool{Server: server, Tool: tool, Source: "call", IsMCP: isMCP,
+						Sensitive: audit.Contains(argsString(fnCall["arguments"])), ArgHash: hashArgs(fnCall["arguments"])})
 				}
 			}
 			if role == "tool" || role == "function" {
@@ -126,12 +139,13 @@ func extractRequestTools(body []byte) []parsedTool {
 				server, tool, isMCP := classifyToolName(name)
 				content := flattenContent(msg["content"])
 				out = append(out, parsedTool{
-					Server:  server,
-					Tool:    tool,
-					Source:  "result",
-					IsMCP:   isMCP,
-					IsError: looksLikeToolError(content),
-					ArgHash: audit.HashText(content),
+					Server:    server,
+					Tool:      tool,
+					Source:    "result",
+					IsMCP:     isMCP,
+					IsError:   looksLikeToolError(content),
+					Sensitive: audit.Contains(content),
+					ArgHash:   audit.HashText(content),
 				})
 			}
 		}
@@ -182,7 +196,8 @@ func toolCallFromEntry(call map[string]any, source string) []parsedTool {
 			return nil
 		}
 		server, tool, isMCP := classifyToolName(name)
-		return []parsedTool{{Server: server, Tool: tool, Source: source, IsMCP: isMCP, ArgHash: hashArgs(fn["arguments"])}}
+		return []parsedTool{{Server: server, Tool: tool, Source: source, IsMCP: isMCP,
+			Sensitive: audit.Contains(argsString(fn["arguments"])), ArgHash: hashArgs(fn["arguments"])}}
 	}
 	// Responses API style: {type:"mcp_call", server_label, name, arguments}
 	if name, ok := call["name"].(string); ok && name != "" {
@@ -192,7 +207,8 @@ func toolCallFromEntry(call map[string]any, source string) []parsedTool {
 		if server == "" {
 			server, stool, isMCP = classifyToolName(name)
 		}
-		return []parsedTool{{Server: strings.TrimSpace(server), Tool: stool, Source: source, IsMCP: isMCP, ArgHash: hashArgs(call["arguments"])}}
+		return []parsedTool{{Server: strings.TrimSpace(server), Tool: stool, Source: source, IsMCP: isMCP,
+			Sensitive: audit.Contains(argsString(call["arguments"])), ArgHash: hashArgs(call["arguments"])}}
 	}
 	return nil
 }
@@ -237,6 +253,39 @@ func looksLikeToolError(content string) bool {
 	return false
 }
 
+// complexityScore is a 0-100 proxy for request complexity used by the Explainability
+// View to justify routing/tier decisions. It blends prompt size (token estimate),
+// conversation depth (message count) and tool surface (declared/called tools). It is a
+// heuristic, not a model-derived score, and is documented as such in the UI.
+func complexityScore(prompts []store.PromptLog, toolCount int) int {
+	tokens := 0
+	messages := 0
+	for _, p := range prompts {
+		text := p.RedactedText
+		if text == "" {
+			text = p.ContentText
+		}
+		tokens += audit.EstimateTokens(text)
+		messages++
+	}
+	norm := func(x, cap float64) float64 {
+		if cap <= 0 {
+			return 0
+		}
+		if x > cap {
+			return 1
+		}
+		return x / cap
+	}
+	score := 100 * (0.55*norm(float64(tokens), 8000) +
+		0.25*norm(float64(messages), 20) +
+		0.20*norm(float64(toolCount), 10))
+	if score > 100 {
+		score = 100
+	}
+	return int(score + 0.5)
+}
+
 // toolInvocations stamps parsed tools with the request's identity context.
 func toolInvocations(req store.RequestLog, tools []parsedTool) []store.ToolInvocation {
 	if len(tools) == 0 {
@@ -248,17 +297,18 @@ func toolInvocations(req store.RequestLog, tools []parsedTool) []store.ToolInvoc
 			continue
 		}
 		out = append(out, store.ToolInvocation{
-			ID:          newID("tool"),
-			RequestID:   req.ID,
-			TraceID:     req.TraceID,
-			APIKeyID:    req.APIKeyID,
-			ServerLabel: t.Server,
-			ToolName:    t.Tool,
-			Source:      t.Source,
-			IsMCP:       t.IsMCP,
-			IsError:     t.IsError,
-			ArgHash:     t.ArgHash,
-			CreatedAt:   req.CreatedAt,
+			ID:           newID("tool"),
+			RequestID:    req.ID,
+			TraceID:      req.TraceID,
+			APIKeyID:     req.APIKeyID,
+			ServerLabel:  t.Server,
+			ToolName:     t.Tool,
+			Source:       t.Source,
+			IsMCP:        t.IsMCP,
+			IsError:      t.IsError,
+			ArgSensitive: t.Sensitive,
+			ArgHash:      t.ArgHash,
+			CreatedAt:    req.CreatedAt,
 		})
 	}
 	return out

@@ -103,6 +103,12 @@ type RequestLog struct {
 	RequestHash         string
 	BodyRaw             string // populated only when LOG_RAW_BODIES=true
 	ReplayOf            string // request_id this row is a replay of, if any
+	Failover            bool   // true when the request fell back to an alternate provider
+	RouteReason         string // header | query | model_pattern | default
+	RouteDetail         string // matched glob / header name
+	Complexity          int    // 0-100 complexity proxy score
+	FallbackFrom        string // original provider before failover
+	FallbackReason      string // transport error that triggered failover
 	CreatedAt           time.Time
 }
 
@@ -164,17 +170,28 @@ type LogRecord struct {
 // response. Source is one of: definition (declared in request tools[]/functions[]),
 // call (model invoked the tool), result (a role:tool result message in the request).
 type ToolInvocation struct {
-	ID          string    `json:"id"`
-	RequestID   string    `json:"request_id"`
-	TraceID     string    `json:"trace_id"`
-	APIKeyID    string    `json:"api_key_id"`
-	ServerLabel string    `json:"server_label"` // MCP server name; "" for plain functions
-	ToolName    string    `json:"tool_name"`
-	Source      string    `json:"source"` // definition | call | result
-	IsMCP       bool      `json:"is_mcp"`
-	IsError     bool      `json:"is_error"`
-	ArgHash     string    `json:"arg_hash"`
-	CreatedAt   time.Time `json:"created_at"`
+	ID           string    `json:"id"`
+	RequestID    string    `json:"request_id"`
+	TraceID      string    `json:"trace_id"`
+	APIKeyID     string    `json:"api_key_id"`
+	ServerLabel  string    `json:"server_label"` // MCP server name; "" for plain functions
+	ToolName     string    `json:"tool_name"`
+	Source       string    `json:"source"` // definition | call | result
+	IsMCP        bool      `json:"is_mcp"`
+	IsError      bool      `json:"is_error"`
+	ArgSensitive bool      `json:"arg_sensitive"`
+	ArgHash      string    `json:"arg_hash"`
+	CreatedAt    time.Time `json:"created_at"`
+}
+
+type MCPCatalogEntry struct {
+	ServerLabel string `json:"server_label"`
+	ToolName    string `json:"tool_name"`
+	IsMCP       bool   `json:"is_mcp"`
+	FirstSeen   string `json:"first_seen"`
+	LastSeen    string `json:"last_seen"`
+	IsNew       bool   `json:"is_new"`   // first_seen within the query window
+	IsStale     bool   `json:"is_stale"` // not seen recently
 }
 
 type MCPToolStat struct {
@@ -188,6 +205,26 @@ type MCPToolStat struct {
 	ErrorRate    float64 `json:"error_rate"`
 	DistinctKeys int64   `json:"distinct_keys"`
 	LastSeen     string  `json:"last_seen"`
+}
+
+type MCPPolicy struct {
+	ServerLabel string    `json:"server_label"`
+	Mode        string    `json:"mode"` // allow | block | warn
+	Note        string    `json:"note"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+type SessionToolLoop struct {
+	SessionID   string `json:"session_id"`
+	ServerLabel string `json:"server_label"`
+	ToolName    string `json:"tool_name"`
+	IsMCP       bool   `json:"is_mcp"`
+	Calls       int64  `json:"calls"`
+	Errors      int64  `json:"errors"`
+	APIKeyID    string `json:"api_key_id"`
+	FirstSeen   string `json:"first_seen"`
+	LastSeen    string `json:"last_seen"`
 }
 
 type MCPServerStat struct {
@@ -540,6 +577,72 @@ type LLMSessionSummary struct {
 	LastSeen           string  `json:"last_seen"`
 }
 
+type SessionTimelinePoint struct {
+	RequestID         string  `json:"request_id"`
+	TraceID           string  `json:"trace_id"`
+	Model             string  `json:"model"`
+	Provider          string  `json:"provider"`
+	PromptName        string  `json:"prompt_name"`
+	StatusCode        int     `json:"status_code"`
+	LatencyMS         int64   `json:"latency_ms"`
+	FirstChunkMS      int64   `json:"first_chunk_ms"`
+	TotalTokens       int64   `json:"total_tokens"`
+	CostKRW           float64 `json:"cost_krw"`
+	ToolCalls         int64   `json:"tool_calls"`
+	ToolErrors        int64   `json:"tool_errors"`
+	EvalFailures      int64   `json:"eval_failures"`
+	CreatedAt         string  `json:"created_at"`
+	CumulativeCostKRW float64 `json:"cumulative_cost_krw"`
+	CumulativeTokens  int64   `json:"cumulative_tokens"`
+}
+
+type ScatterPoint struct {
+	RequestID    string  `json:"request_id"`
+	TraceID      string  `json:"trace_id"`
+	CreatedAt    string  `json:"created_at"`
+	LatencyMS    int64   `json:"latency_ms"`
+	FirstChunkMS int64   `json:"first_chunk_ms"`
+	StatusCode   int     `json:"status_code"`
+	Provider     string  `json:"provider"`
+	Model        string  `json:"model"`
+	Endpoint     string  `json:"endpoint"`
+	TotalTokens  int64   `json:"total_tokens"`
+	CostKRW      float64 `json:"cost_krw"`
+	Stream       bool    `json:"stream"`
+	ToolCount    int     `json:"tool_count"`
+	Failover     bool    `json:"failover"`
+}
+
+type ScatterFilter struct {
+	Since    time.Time
+	Endpoint string
+	Model    string
+	APIKeyID string
+	Limit    int
+}
+
+type AnomalyFinding struct {
+	Model           string  `json:"model"`
+	Metric          string  `json:"metric"` // cost_per_request | latency_ms | first_chunk_ms
+	BaselineMean    float64 `json:"baseline_mean"`
+	BaselineStd     float64 `json:"baseline_std"`
+	RecentMean      float64 `json:"recent_mean"`
+	ZScore          float64 `json:"z_score"`
+	Direction       string  `json:"direction"` // up | down
+	BaselineSamples int64   `json:"baseline_samples"`
+	RecentSamples   int64   `json:"recent_samples"`
+}
+
+type SessionTimeline struct {
+	SessionID       string                 `json:"session_id"`
+	Requests        int                    `json:"requests"`
+	TotalCostKRW    float64                `json:"total_cost_krw"`
+	TotalTokens     int64                  `json:"total_tokens"`
+	ToolCalls       int64                  `json:"tool_calls"`
+	DurationSeconds int64                  `json:"duration_seconds"`
+	Points          []SessionTimelinePoint `json:"points"`
+}
+
 type UserSummary struct {
 	APIKeyID         string  `json:"api_key_id"`
 	Name             string  `json:"name"`
@@ -733,16 +836,19 @@ type AlertRule struct {
 }
 
 type AlertMetricSnapshot struct {
-	Requests        int64
-	Errors          int64
-	CostKRW         float64
-	Tokens          int64
-	LatencyP95MS    float64
-	FirstChunkP95MS float64
-	LLMEvaluations  int64
-	LLMEvalFailures int64
-	ToolCalls       int64
-	ToolErrors      int64
+	Requests           int64
+	Errors             int64
+	CostKRW            float64
+	Tokens             int64
+	LatencyP95MS       float64
+	FirstChunkP95MS    float64
+	LLMEvaluations     int64
+	LLMEvalFailures    int64
+	ToolCalls          int64
+	ToolErrors         int64
+	MaxSessionToolCall int64
+	NewCatalogTools    int64
+	MaxAnomalyZ        float64
 }
 
 type AlertEvent struct {

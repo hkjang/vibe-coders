@@ -274,6 +274,22 @@ func (s *SQLStore) MetricSince(ctx context.Context, scope, scopeValue string, si
 	if err := s.db.QueryRowContext(ctx, toolQuery, toolArgs...).Scan(&snapshot.ToolCalls, &snapshot.ToolErrors); err != nil {
 		return snapshot, err
 	}
+
+	// loop signal: highest single (session, tool) call count in the window (scope-independent).
+	if maxLoop, err := s.MaxSessionToolCallsSince(ctx, since); err == nil {
+		snapshot.MaxSessionToolCall = maxLoop
+	}
+	// catalog drift: number of tools first observed within the window (scope-independent).
+	if newTools, err := s.CountNewCatalogTools(ctx, since); err == nil {
+		snapshot.NewCatalogTools = newTools
+	}
+	// anomaly: strongest model cost/latency z-score, baseline 7d vs the alert window.
+	recentDur := time.Since(since)
+	if recentDur > 0 && recentDur < 24*time.Hour {
+		if z, err := s.MaxAnomalyZ(ctx, 7*24*time.Hour, recentDur); err == nil {
+			snapshot.MaxAnomalyZ = z
+		}
+	}
 	return snapshot, nil
 }
 

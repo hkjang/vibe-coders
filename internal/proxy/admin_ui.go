@@ -188,6 +188,7 @@ const adminHTML = `<!doctype html>
     <h1>AI 코딩 프록시 게이트웨이</h1>
     <nav id="tabs">
       <a href="#/dashboard" data-tab="dashboard" class="active">대시보드</a>
+      <a href="#/xview" data-tab="xview">XView</a>
       <a href="#/llm" data-tab="llm">LLM 관측</a>
       <a href="#/mcp" data-tab="mcp">MCP</a>
       <a href="#/requests" data-tab="requests">호출 이력</a>
@@ -466,6 +467,7 @@ const adminHTML = `<!doctype html>
       try {
         switch (tab) {
           case 'dashboard': await renderDashboard(); break;
+          case 'xview':     await renderXView(params); break;
           case 'llm':       await renderLLMObservability(); break;
           case 'requests':  await renderRequestsView(params); break;
           case 'prompts':   await renderPromptsView(params); break;
@@ -554,18 +556,283 @@ const adminHTML = `<!doctype html>
       return txt.toLowerCase();
     }
 
+    // ---------- XView (transaction scatter plot) ----------
+    const xviewState = {
+      window: sessionStorage.getItem('xviewWindow') || '1h',
+      scale: sessionStorage.getItem('xviewScale') || 'log',
+      metric: sessionStorage.getItem('xviewMetric') || 'latency',
+    };
+    function xviewCategory(p) {
+      // priority: error > kill/blocked > cache > failover > high-cost > normal
+      if (p.status_code >= 400) return 'error';
+      if (p.provider === 'cache') return 'cache';
+      if (p.failover) return 'failover';
+      if ((p.total_tokens || 0) >= xviewState.complexityTokens) return 'complex';
+      return 'normal';
+    }
+    const xviewColors = {
+      error:   { c: '#ef4444', label: '오류' },
+      cache:   { c: '#22c55e', label: '캐시 히트' },
+      failover:{ c: '#eab308', label: '폴백' },
+      complex: { c: '#a855f7', label: '고비용/복잡' },
+      normal:  { c: '#3b82f6', label: '정상' },
+    };
+
+    async function renderXView(initial) {
+      if (initial) {
+        if (initial.get('window')) xviewState.window = initial.get('window');
+        if (initial.get('metric')) xviewState.metric = initial.get('metric');
+      }
+      const params = new URLSearchParams();
+      params.set('window', xviewState.window);
+      const model = initial ? (initial.get('model') || '') : '';
+      const endpoint = initial ? (initial.get('endpoint') || '') : '';
+      if (model) params.set('model', model);
+      if (endpoint) params.set('endpoint', endpoint);
+      params.set('limit', '6000');
+
+      const data = await api('/admin/scatter?' + params.toString());
+      const points = data.points || [];
+      // complexity threshold = 90th percentile of tokens (so "high" is relative), min 4000
+      const tokenVals = points.map(p => p.total_tokens || 0).filter(v => v > 0).sort((a, b) => a - b);
+      xviewState.complexityTokens = Math.max(4000, tokenVals.length ? tokenVals[Math.floor(tokenVals.length * 0.9)] : 4000);
+
+      const view = document.getElementById('view');
+      view.innerHTML = section('XView — 트랜잭션 응답시간 분포',
+        '<div class="toolbar">' +
+          '<select id="xv-window">' +
+            ['5m','15m','1h','6h','24h'].map(wd => '<option value="' + wd + '"' + (xviewState.window === wd ? ' selected' : '') + '>' + wd + '</option>').join('') +
+          '</select>' +
+          '<select id="xv-metric">' +
+            '<option value="latency"' + (xviewState.metric === 'latency' ? ' selected' : '') + '>전체 응답시간</option>' +
+            '<option value="first_chunk"' + (xviewState.metric === 'first_chunk' ? ' selected' : '') + '>첫 청크 지연</option>' +
+          '</select>' +
+          '<select id="xv-scale">' +
+            '<option value="log"' + (xviewState.scale === 'log' ? ' selected' : '') + '>로그 스케일</option>' +
+            '<option value="linear"' + (xviewState.scale === 'linear' ? ' selected' : '') + '>선형 스케일</option>' +
+          '</select>' +
+          '<input id="xv-model" placeholder="모델 필터" value="' + escapeHTML(model) + '">' +
+          '<input id="xv-endpoint" placeholder="endpoint 필터" value="' + escapeHTML(endpoint) + '">' +
+          '<button id="xv-apply" type="submit">적용</button>' +
+          '<span class="muted">' + fmt(points.length) + '건' + (data.truncated ? ' (최근 6000건으로 제한됨)' : '') + '</span>' +
+        '</div>' +
+        '<div id="xv-chart" style="padding:14px"></div>' +
+        '<div id="xv-legend" style="padding:0 14px 14px"></div>'
+      );
+      drawScatter(points);
+
+      const apply = () => {
+        xviewState.window = document.getElementById('xv-window').value;
+        xviewState.metric = document.getElementById('xv-metric').value;
+        xviewState.scale = document.getElementById('xv-scale').value;
+        sessionStorage.setItem('xviewWindow', xviewState.window);
+        sessionStorage.setItem('xviewMetric', xviewState.metric);
+        sessionStorage.setItem('xviewScale', xviewState.scale);
+        const p = new URLSearchParams();
+        p.set('window', xviewState.window);
+        p.set('metric', xviewState.metric);
+        const m = document.getElementById('xv-model').value.trim();
+        const e = document.getElementById('xv-endpoint').value.trim();
+        if (m) p.set('model', m);
+        if (e) p.set('endpoint', e);
+        location.hash = '#/xview?' + p.toString();
+      };
+      document.getElementById('xv-apply').addEventListener('click', apply);
+      ['xv-window', 'xv-metric', 'xv-scale'].forEach(id => document.getElementById(id).addEventListener('change', apply));
+    }
+
+    function drawScatter(points) {
+      const host = document.getElementById('xv-chart');
+      if (!points.length) { host.innerHTML = '<div class="empty">해당 구간에 요청 없음</div>'; return; }
+      const yField = xviewState.metric === 'first_chunk' ? 'first_chunk_ms' : 'latency_ms';
+      const W = 1000, H = 420, padL = 64, padR = 16, padT = 14, padB = 34;
+      const innerW = W - padL - padR, innerH = H - padT - padB;
+
+      const times = points.map(p => Date.parse(p.created_at)).filter(t => !isNaN(t));
+      const tMin = Math.min(...times), tMax = Math.max(...times);
+      const tSpan = Math.max(1, tMax - tMin);
+      const yMaxRaw = Math.max(1, ...points.map(p => p[yField] || 0));
+      const logScale = xviewState.scale === 'log';
+      const yMin = logScale ? 1 : 0;
+      const yMax = yMaxRaw;
+      const yPos = v => {
+        v = Math.max(yMin, v || 0);
+        if (logScale) {
+          const lo = Math.log10(Math.max(1, yMin)), hi = Math.log10(Math.max(10, yMax));
+          return padT + innerH - ((Math.log10(v) - lo) / (hi - lo)) * innerH;
+        }
+        return padT + innerH - (v / yMax) * innerH;
+      };
+      const xPos = t => padL + ((t - tMin) / tSpan) * innerW;
+
+      // y gridlines (ms markers)
+      const yTicks = logScale ? [1, 10, 100, 500, 1000, 2000, 5000, 10000, 30000].filter(v => v <= yMax * 1.2)
+                              : [0, yMax * 0.25, yMax * 0.5, yMax * 0.75, yMax];
+      const grid = yTicks.map(v => {
+        const y = yPos(v);
+        return '<line x1="' + padL + '" y1="' + y.toFixed(1) + '" x2="' + (W - padR) + '" y2="' + y.toFixed(1) + '" stroke="var(--line)" stroke-dasharray="2 3"/>' +
+          '<text x="' + (padL - 6) + '" y="' + (y + 3).toFixed(1) + '" text-anchor="end" font-size="10" fill="currentColor" opacity="0.6">' + msLabel(v) + '</text>';
+      }).join('');
+
+      // x time labels
+      const xLabels = [0, 0.25, 0.5, 0.75, 1].map(f => {
+        const t = tMin + tSpan * f, x = xPos(t);
+        const d = new Date(t);
+        const hh = String(d.getHours()).padStart(2, '0'), mm = String(d.getMinutes()).padStart(2, '0'), ss = String(d.getSeconds()).padStart(2, '0');
+        return '<text x="' + x.toFixed(1) + '" y="' + (H - 10) + '" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.6">' + hh + ':' + mm + ':' + ss + '</text>';
+      }).join('');
+
+      // percentile reference lines (on the chosen metric)
+      const sorted = points.map(p => p[yField] || 0).sort((a, b) => a - b);
+      const pct = q => sorted[Math.min(sorted.length - 1, Math.floor((sorted.length - 1) * q))];
+      const p50 = pct(0.5), p95 = pct(0.95), p99 = pct(0.99);
+      const pctLine = (v, label, color) => {
+        const y = yPos(v);
+        return '<line x1="' + padL + '" y1="' + y.toFixed(1) + '" x2="' + (W - padR) + '" y2="' + y.toFixed(1) + '" stroke="' + color + '" stroke-width="1" stroke-opacity="0.7"/>' +
+          '<text x="' + (W - padR) + '" y="' + (y - 3).toFixed(1) + '" text-anchor="end" font-size="10" fill="' + color + '">' + label + ' ' + msLabel(v) + '</text>';
+      };
+
+      // dots
+      const dots = points.map((p, i) => {
+        const cat = xviewCategory(p);
+        const col = xviewColors[cat].c;
+        const t = Date.parse(p.created_at);
+        if (isNaN(t)) return '';
+        const cx = xPos(t).toFixed(1), cy = yPos(p[yField] || 0).toFixed(1);
+        const tip = (p.model || '?') + ' · ' + (p.provider || '?') + ' · ' + msLabel(p[yField] || 0) +
+          ' · ' + fmt(p.total_tokens) + 'tok · ' + money(p.cost_krw) + ' · ' + (p.status_code) +
+          ' · ' + new Date(t).toLocaleTimeString('ko-KR');
+        return '<circle class="xv-dot" data-rid="' + escapeHTML(p.request_id) + '" cx="' + cx + '" cy="' + cy + '" r="3.2" fill="' + col + '" fill-opacity="0.72" stroke="' + col + '" stroke-opacity="0.9"><title>' + escapeHTML(tip) + '</title></circle>';
+      }).join('');
+
+      host.innerHTML = '<svg id="xv-svg" viewBox="0 0 ' + W + ' ' + H + '" width="100%" height="' + H + '" style="color:var(--ink); cursor:crosshair">' +
+        grid +
+        '<line x1="' + padL + '" y1="' + (padT + innerH) + '" x2="' + (W - padR) + '" y2="' + (padT + innerH) + '" stroke="var(--line-strong)"/>' +
+        '<line x1="' + padL + '" y1="' + padT + '" x2="' + padL + '" y2="' + (padT + innerH) + '" stroke="var(--line-strong)"/>' +
+        pctLine(p99, 'P99', 'var(--bad)') + pctLine(p95, 'P95', 'var(--warn)') + pctLine(p50, 'P50', 'var(--muted)') +
+        dots + xLabels +
+        '</svg>';
+
+      // legend with live counts
+      const counts = { error: 0, cache: 0, failover: 0, complex: 0, normal: 0 };
+      points.forEach(p => counts[xviewCategory(p)]++);
+      document.getElementById('xv-legend').innerHTML =
+        '<div style="display:flex; gap:16px; flex-wrap:wrap; align-items:center">' +
+        Object.keys(xviewColors).map(k =>
+          '<span style="display:inline-flex; align-items:center; gap:6px"><span style="width:10px;height:10px;border-radius:50%;background:' + xviewColors[k].c + '"></span>' +
+          xviewColors[k].label + ' <span class="muted">' + fmt(counts[k]) + '</span></span>').join('') +
+        '<span class="muted" style="margin-left:auto">점을 클릭하면 요청 상세, 가로=시간 / 세로=' + (xviewState.metric === 'first_chunk' ? '첫 청크 지연' : '응답시간') + '</span>' +
+        '</div>';
+
+      // click → explainability panel (why was this handled this way)
+      host.querySelectorAll('.xv-dot').forEach(dot => {
+        dot.addEventListener('click', () => openExplain(dot.getAttribute('data-rid')));
+      });
+    }
+
+    // ---------- Explainability View (XView) ----------
+    window.openExplain = async (id) => {
+      if (!id) return;
+      try {
+        const x = await api('/admin/requests/' + encodeURIComponent(id) + '/explain');
+        openModal('XView 설명 — ' + (x.trace_id || id), explainHTML(x));
+      } catch (err) {
+        openModal('오류', '<div class="error-line">' + escapeHTML(err.message) + '</div>');
+      }
+    };
+    function explainPanel(title, bodyHTML, accent) {
+      return '<section style="margin-top:14px"><h2 style="border-left:4px solid ' + (accent || 'var(--accent)') + '">' + escapeHTML(title) + '</h2>' +
+        '<div style="padding:14px">' + bodyHTML + '</div></section>';
+    }
+    function explainHTML(x) {
+      const rt = x.routing || {}, fb = x.fallback || {}, ca = x.cache || {}, sf = x.safety || {}, co = x.cost || {}, se = x.session || {};
+      const tierBadge = { high: 'error', medium: 'warn', low: '' }[rt.tier] || '';
+
+      const routing = '<div class="kv">' +
+        row('선택 provider', escapeHTML(rt.chosen_provider || '')) +
+        row('선택 모델', escapeHTML(rt.chosen_model || '')) +
+        row('라우팅 근거', escapeHTML(rt.reason_text || rt.reason || '') + (rt.detail ? ' <span class="muted">(' + escapeHTML(rt.detail) + ')</span>' : '')) +
+        row('복잡도 점수', '<span class="status ' + tierBadge + '">' + fmt(rt.complexity || 0) + ' / 100 · ' + escapeHTML(rt.tier || '') + ' tier</span>' + progressBar((rt.complexity || 0) / 100)) +
+        row('endpoint', escapeHTML(rt.endpoint || '')) +
+      '</div><div class="muted" style="font-size:12px; margin-top:6px">복잡도는 프롬프트 토큰·대화 깊이·도구 수 기반 휴리스틱 추정치입니다.</div>';
+
+      const fallback = fb.occurred
+        ? '<div class="kv">' +
+            row('상태', '<span class="status warn">폴백 발생</span>') +
+            row('최초 provider', escapeHTML(fb.from_provider || '')) +
+            row('대체 provider', escapeHTML(fb.to_provider || '')) +
+            row('사유', escapeHTML(fb.reason || '')) +
+            (fb.error ? row('오류', escapeHTML(fb.error)) : '') +
+          '</div>'
+        : '<div class="muted">폴백 없음 — 최초 선택 provider가 정상 응답했습니다.' + (fb.error ? ' (' + escapeHTML(fb.error) + ')' : '') + '</div>';
+
+      const cacheRows = [];
+      cacheRows.push(row('캐시 히트', ca.hit ? '<span class="status">예 (응답 재사용)</span>' : '아니오'));
+      cacheRows.push(row('cached 토큰', fmt(ca.cached_tokens || 0)));
+      if (ca.savings_krw) cacheRows.push(row('캐시 절감액', '<strong>' + money(ca.savings_krw) + '</strong>'));
+      if (ca.cached_savings_krw) cacheRows.push(row('프롬프트 캐시 절감액', '<strong>' + money(ca.cached_savings_krw) + '</strong>'));
+      const cache = '<div class="kv">' + cacheRows.join('') + '</div>';
+
+      const findings = (sf.findings || []).map(f =>
+        '<div style="margin-top:4px"><span class="status error">' + escapeHTML(f.name) + '</span> <span class="muted">' + escapeHTML(f.reason || f.label || '') + '</span></div>').join('');
+      const safety = '<div class="kv">' +
+        row('차단 여부', sf.blocked ? '<span class="status error">차단됨</span>' : '<span class="status">통과</span>') +
+        row('마스킹', escapeHTML(sf.masking || '')) +
+        row('안전 위반', sf.finding_count > 0 ? (fmt(sf.finding_count) + '건' + findings) : '<span class="muted">없음</span>') +
+      '</div>';
+
+      const cost = '<div class="kv">' +
+        row('실제 비용', '<strong>' + money(co.actual_krw) + '</strong> <span class="muted">(' + escapeHTML(sourceLabel(co.token_source)) + ')</span>') +
+        (co.priced ? row('정가(캐시 미적용 시)', money(co.list_krw)) : row('가격표', '<span class="muted">이 모델은 가격 미설정</span>')) +
+        (co.savings_krw ? row('절감액', '<strong style="color:var(--accent)">' + money(co.savings_krw) + '</strong>') : '') +
+        row('토큰 분해', escapeHTML('prompt ' + fmt(co.prompt_tokens) + ' / completion ' + fmt(co.completion_tokens) + ' / cached ' + fmt(co.cached_tokens) + ' / reasoning ' + fmt(co.reasoning_tokens) + ' / total ' + fmt(co.total_tokens))) +
+      '</div>';
+
+      const session = '<div class="kv">' +
+        row('세션', se.session_id ? ('<a href="#" onclick="closeModal();openSessionTimeline(\'' + escapeAttr(se.session_id) + '\');return false">' + escapeHTML(se.session_id) + '</a>') : '<span class="muted">없음</span>') +
+        row('스트리밍', se.stream ? '예' : '아니오') +
+        row('요청 상세', '<a href="#" onclick="closeModal();openRequestDetail(\'' + escapeAttr(x.request_id) + '\');return false">원문/프롬프트/응답 보기</a>') +
+      '</div>';
+
+      return explainPanel('🧭 라우팅 (왜 이 모델인가)', routing, 'var(--accent)') +
+        explainPanel('🔁 폴백', fallback, 'var(--warn)') +
+        explainPanel('🟢 캐시', cache, '#22c55e') +
+        explainPanel('🛡 안전', safety, 'var(--bad)') +
+        explainPanel('💰 비용', cost, 'var(--accent-2)') +
+        explainPanel('🧵 세션', session, 'var(--muted)');
+    }
+    window.openRequestDetail = async (id) => {
+      try {
+        const [detail, note] = await Promise.all([
+          api('/admin/requests/' + encodeURIComponent(id)),
+          api('/admin/requests/' + encodeURIComponent(id) + '/note').catch(() => ({ tags: [], note: '' })),
+        ]);
+        openModal('요청 상세 - ' + (detail.request.trace_id || id), requestDetailHTML(detail, note));
+        wireNoteEditor(id);
+      } catch (err) {
+        openModal('오류', '<div class="error-line">' + escapeHTML(err.message) + '</div>');
+      }
+    };
+    function msLabel(v) {
+      v = Math.round(v || 0);
+      if (v >= 1000) return (v / 1000).toFixed(v % 1000 === 0 ? 0 : 1) + 's';
+      return v + 'ms';
+    }
+
     // ---------- dashboard ----------
     const dashboardState = { window: sessionStorage.getItem('dashWindow') || '24h' };
     async function renderDashboard() {
       const win = dashboardState.window;
       const bucket = win === '24h' ? 'hour' : 'day';
       const heatWindow = win === '24h' ? '7d' : (win === '30d' ? '30d' : '7d');
-      const [stats, ts, heat, recent] = await Promise.all([
+      const [stats, ts, heat, recent, anomalyResp] = await Promise.all([
         api('/admin/stats'),
         api('/admin/timeseries?window=' + win + '&bucket=' + bucket),
         api('/admin/heatmap?window=' + heatWindow),
         api('/admin/requests?limit=20'),
+        api('/admin/anomalies?recent=6h&z=3').catch(() => ({ anomalies: [] })),
       ]);
+      const anomalies = (anomalyResp && anomalyResp.anomalies) || [];
 
       const html =
         section('요약', kpiBlock(stats)) +
@@ -582,6 +849,7 @@ const adminHTML = `<!doctype html>
           card('모델별 사용량', groupedTable(stats.by_model || [], '모델')) +
           card('언어별 사용량', languagesTable(stats.by_language || [])) +
         '</div>' +
+        section('이상 징후 (최근 6시간 vs 7일 기준선, |z| ≥ 3)', anomalyTable(anomalies)) +
         section('시간대 히트맵 (Asia/Seoul, 최근 ' + heatWindow + ')', heatmapHTML(heat.cells || [])) +
         section('최근 호출 이력', requestsTable(recent.requests || []));
 
@@ -681,6 +949,27 @@ const adminHTML = `<!doctype html>
         '<div class="progress" style="height:14px; display:flex">' + segs + '</div>' +
         '<div style="margin-top:10px">' + list + '</div>' +
       '</div>';
+    }
+
+    function anomalyTable(rows) {
+      if (!rows.length) return '<div class="empty">최근 이상 징후 없음 (모델별 비용·지연이 기준선 범위 내).</div>';
+      const metricLabel = (m) => ({ cost_per_request: '요청당 비용', latency_ms: '전체 지연', first_chunk_ms: '첫 청크 지연' }[m] || m);
+      const fmtVal = (m, v) => m === 'cost_per_request' ? money(v) : (fmt(Math.round(v)) + ' ms');
+      return '<table><thead><tr><th data-sort="str">모델</th><th data-sort="str">지표</th><th>방향</th><th data-sort="num">기준선</th><th data-sort="num">최근</th><th data-sort="num">z-score</th><th>표본</th></tr></thead><tbody>' +
+        rows.map(a => {
+          const up = a.direction === 'up';
+          const arrow = up ? '▲' : '▼';
+          const cls = (Math.abs(a.z_score) >= 5 || up) ? 'error' : 'warn';
+          return '<tr>' +
+            '<td>' + escapeHTML(a.model) + '</td>' +
+            '<td>' + metricLabel(a.metric) + '</td>' +
+            '<td><span class="status ' + cls + '">' + arrow + ' ' + (up ? '급증' : '급감') + '</span></td>' +
+            '<td data-num="' + a.baseline_mean + '">' + fmtVal(a.metric, a.baseline_mean) + '<div class="muted">σ ' + fmtVal(a.metric, a.baseline_std) + '</div></td>' +
+            '<td data-num="' + a.recent_mean + '">' + fmtVal(a.metric, a.recent_mean) + '</td>' +
+            '<td data-num="' + Math.abs(a.z_score) + '"><strong>' + a.z_score.toFixed(1) + '</strong></td>' +
+            '<td class="muted">기준 ' + fmt(a.baseline_samples) + ' / 최근 ' + fmt(a.recent_samples) + '</td>' +
+          '</tr>';
+        }).join('') + '</tbody></table>';
     }
 
     function heatmapHTML(cells) {
@@ -1219,7 +1508,7 @@ const adminHTML = `<!doctype html>
 
     function llmSessionTable(rows) {
       if (!rows.length) return '<div class="empty">session 없음</div>';
-      return '<table><thead><tr><th data-sort="str">Session</th><th data-sort="num">요청</th><th data-sort="num">토큰</th><th data-sort="num">비용</th><th data-sort="num">오류</th><th data-sort="num">평가 실패</th><th data-sort="str">최근</th></tr></thead><tbody>' +
+      return '<table><thead><tr><th data-sort="str">Session</th><th data-sort="num">요청</th><th data-sort="num">토큰</th><th data-sort="num">비용</th><th data-sort="num">오류</th><th data-sort="num">평가 실패</th><th data-sort="str">최근</th><th>타임라인</th></tr></thead><tbody>' +
         rows.map(s => '<tr>' +
           '<td>' + escapeHTML(s.session_id || 'no-session') + '</td>' +
           '<td data-num="' + (s.requests || 0) + '">' + fmt(s.requests || 0) + '</td>' +
@@ -1228,7 +1517,63 @@ const adminHTML = `<!doctype html>
           '<td data-num="' + (s.errors || 0) + '">' + fmt(s.errors || 0) + '</td>' +
           '<td data-num="' + (s.evaluation_failures || 0) + '">' + fmt(s.evaluation_failures || 0) + '</td>' +
           '<td>' + ago(s.last_seen) + '</td>' +
+          '<td><button class="secondary" type="button" onclick="openSessionTimeline(\'' + escapeAttr(s.session_id || 'no-session') + '\')">보기</button></td>' +
         '</tr>').join('') + '</tbody></table>';
+    }
+
+    window.openSessionTimeline = async (sessionID) => {
+      try {
+        const tl = await api('/admin/llm/session?session_id=' + encodeURIComponent(sessionID));
+        openModal('세션 타임라인 - ' + sessionID, sessionTimelineHTML(tl));
+      } catch (err) {
+        openModal('오류', '<div class="error-line">' + escapeHTML(err.message) + '</div>');
+      }
+    };
+
+    function sessionTimelineHTML(tl) {
+      const pts = tl.points || [];
+      const summary = '<div class="kv" style="margin-bottom:14px">' +
+        row('요청 수', fmt(tl.requests)) +
+        row('누적 비용', money(tl.total_cost_krw)) +
+        row('누적 토큰', fmt(tl.total_tokens)) +
+        row('도구 호출', fmt(tl.tool_calls)) +
+        row('세션 길이', fmt(tl.duration_seconds) + ' 초') +
+      '</div>';
+      if (!pts.length) return summary + '<div class="empty">턴 없음</div>';
+
+      // cumulative cost area chart
+      const W = 880, H = 200, padL = 56, padR = 16, padT = 14, padB = 26;
+      const innerW = W - padL - padR, innerH = H - padT - padB;
+      const maxCum = Math.max(1, ...pts.map(p => p.cumulative_cost_krw || 0));
+      const x = i => padL + (pts.length === 1 ? innerW / 2 : (i * innerW) / (pts.length - 1));
+      const y = v => padT + innerH - (v / maxCum) * innerH;
+      const line = pts.map((p, i) => (i ? 'L' : 'M') + x(i) + ',' + y(p.cumulative_cost_krw || 0)).join(' ');
+      const area = 'M' + x(0) + ',' + (padT + innerH) + ' ' + line.replace(/^M/, 'L') + ' L' + x(pts.length - 1) + ',' + (padT + innerH) + ' Z';
+      const dots = pts.map((p, i) => {
+        const cls = p.status_code >= 400 ? 'var(--bad)' : (p.eval_failures > 0 ? 'var(--warn)' : 'var(--accent)');
+        return '<circle cx="' + x(i) + '" cy="' + y(p.cumulative_cost_krw || 0) + '" r="3" fill="' + cls + '"><title>' +
+          escapeHTML('#' + (i + 1) + ' ' + p.model + ' · ' + money(p.cost_krw) + ' (누적 ' + money(p.cumulative_cost_krw) + ') · ' + fmt(p.total_tokens) + 'tok · 도구 ' + fmt(p.tool_calls) + (p.status_code >= 400 ? ' · 오류 ' + p.status_code : '')) + '</title></circle>';
+      }).join('');
+      const chart = '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" height="' + H + '" style="color:var(--ink)">' +
+        '<path d="' + area + '" fill="var(--accent)" fill-opacity="0.12"/>' +
+        '<path d="' + line + '" fill="none" stroke="var(--accent)" stroke-width="2"/>' + dots +
+        '<text x="6" y="' + (padT + 8) + '" font-size="10" fill="currentColor" opacity="0.7">누적 ' + money(maxCum) + '</text>' +
+      '</svg><div class="muted" style="font-size:12px; margin:4px 0 12px">누적 비용 곡선. 점: 초록=정상, 노랑=평가실패, 빨강=오류. 마우스 오버로 턴 상세.</div>';
+
+      const tbl = '<table><thead><tr><th>#</th><th>시각</th><th>모델</th><th>프롬프트</th><th data-sort="num">상태</th><th data-sort="num">첫청크</th><th data-sort="num">토큰</th><th data-sort="num">비용</th><th data-sort="num">누적비용</th><th data-sort="num">도구</th></tr></thead><tbody>' +
+        pts.map((p, i) => '<tr>' +
+          '<td>' + (i + 1) + '</td>' +
+          '<td>' + ago(p.created_at) + '</td>' +
+          '<td>' + escapeHTML(p.model || '') + '</td>' +
+          '<td>' + escapeHTML(p.prompt_name || '') + '</td>' +
+          '<td>' + statusBadge(p.status_code) + '</td>' +
+          '<td data-num="' + (p.first_chunk_ms || 0) + '">' + fmt(p.first_chunk_ms || 0) + ' ms</td>' +
+          '<td data-num="' + (p.total_tokens || 0) + '">' + fmt(p.total_tokens) + '</td>' +
+          '<td data-num="' + (p.cost_krw || 0) + '">' + money(p.cost_krw) + '</td>' +
+          '<td data-num="' + (p.cumulative_cost_krw || 0) + '">' + money(p.cumulative_cost_krw) + '</td>' +
+          '<td data-num="' + (p.tool_calls || 0) + '">' + fmt(p.tool_calls) + (p.tool_errors > 0 ? ' <span class="status error">' + fmt(p.tool_errors) + '오류</span>' : '') + '</td>' +
+        '</tr>').join('') + '</tbody></table>';
+      return summary + chart + tbl;
     }
 
     function llmEvaluationSummaryTable(rows) {
@@ -1658,6 +2003,7 @@ const adminHTML = `<!doctype html>
     }
     function requestDetailHTML(d, note) {
       const r = d.request;
+      const explainBtn = '<div style="margin-bottom:12px"><button class="secondary" type="button" onclick="closeModal();openExplain(\'' + escapeAttr(r.id) + '\')">🧭 XView 설명 (왜 이렇게 처리됐나)</button></div>';
       const langs = (d.languages || []).map(l => escapeHTML(l.language) + ' <span class="muted">(' + pct(l.confidence) + ')</span>').join(', ') || '<span class="muted">없음</span>';
       const prompts = (d.prompts || []).map(p => {
         const text = p.redacted_text || p.content_text || '';
@@ -1721,6 +2067,7 @@ const adminHTML = `<!doctype html>
       ) : '<div class="muted">feedback 없음</div>';
 
       return (
+        explainBtn +
         '<div class="kv">' +
           row('요청 ID', escapeHTML(r.id)) +
           row('Trace ID', escapeHTML(r.trace_id)) +
@@ -2351,13 +2698,21 @@ const adminHTML = `<!doctype html>
       if (serverFilter) qs.set('server', serverFilter);
       if (mcpOnly) qs.set('mcp_only', '1');
 
-      const [serversResp, toolsResp] = await Promise.all([
+      const [serversResp, toolsResp, policiesResp, loopsResp, catalogResp] = await Promise.all([
         api('/admin/mcp/servers' + (qs.toString() ? '?' + qs.toString() : '')),
         api('/admin/mcp/tools' + (qs.toString() ? '?' + qs.toString() : '')),
+        api('/admin/mcp/policies').catch(() => ({ policies: [], allowlist_enabled: false })),
+        api('/admin/mcp/loops?window=24h&threshold=10').catch(() => ({ loops: [], threshold: 10 })),
+        api('/admin/mcp/catalog' + (serverFilter ? '?server=' + encodeURIComponent(serverFilter) : '')).catch(() => ({ catalog: [], new_count: 0 })),
       ]);
       const servers = serversResp.servers || [];
       const summary = serversResp.summary || {};
       const tools = toolsResp.tools || [];
+      const policies = policiesResp.policies || [];
+      const allowlistEnabled = !!policiesResp.allowlist_enabled;
+      const loops = loopsResp.loops || [];
+      const catalog = catalogResp.catalog || [];
+      const newToolCount = catalogResp.new_count || 0;
 
       const kpis = '<div class="kpis">' +
         kpi('tool 호출 수', fmt(summary.total_calls)) +
@@ -2407,10 +2762,71 @@ const adminHTML = `<!doctype html>
         '<table><thead><tr><th data-sort="str">tool</th><th data-sort="num">정의</th><th data-sort="num">호출</th><th data-sort="num">결과</th><th data-sort="num">오류</th><th data-sort="num">오류율</th><th data-sort="num">고유 키</th><th>드릴다운</th></tr></thead><tbody>' + toolRows + '</tbody></table>'
         : '<div class="empty">tool 기록 없음</div>';
 
+      // ---- policy section ----
+      const modeLabel = (m) => ({ allow: '허용', block: '차단', warn: '경고' }[m] || m);
+      const modeBadge = (m) => '<span class="status ' + (m === 'block' ? 'error' : (m === 'warn' ? 'warn' : '')) + '">' + modeLabel(m) + '</span>';
+      const policyRows = policies.map(p =>
+        '<tr><td>' + escapeHTML(p.server_label) + '</td><td>' + modeBadge(p.mode) + '</td>' +
+        '<td>' + escapeHTML(p.note || '') + '</td>' +
+        '<td><button class="danger" type="button" onclick="deleteMCPPolicy(\'' + escapeAttr(p.server_label) + '\')">삭제</button></td></tr>'
+      ).join('');
+      const policyTable = policies.length ?
+        '<table><thead><tr><th data-sort="str">서버</th><th>모드</th><th>메모</th><th>동작</th></tr></thead><tbody>' + policyRows + '</tbody></table>'
+        : '<div class="empty">정책 없음. allowlist 모드가 켜지면 허용 목록에 없는 MCP 서버는 모두 차단됩니다.</div>';
+      const allowlistToggle =
+        '<div class="toolbar" style="border-bottom:0">' +
+          '<label style="display:flex; align-items:center; gap:6px; font-weight:700">' +
+            '<input type="checkbox" id="mcp-allowlist" ' + (allowlistEnabled ? 'checked' : '') + ' style="width:auto; height:auto; min-width:0"> ' +
+            'Allowlist 모드 (허용된 서버만 통과)' +
+          '</label>' +
+          '<span class="muted">' + (allowlistEnabled ? '켜짐 — 미등록 MCP 서버 차단' : '꺼짐 — block 지정 서버만 차단') + '</span>' +
+        '</div>';
+      const policyForm =
+        '<form class="inline-form" id="mcp-policy-form" style="grid-template-columns: minmax(140px,1fr) 110px minmax(140px,1fr) 80px;">' +
+          '<input id="mcp-policy-server" placeholder="서버 라벨 (예: github)" required>' +
+          '<select id="mcp-policy-mode"><option value="allow">허용</option><option value="block">차단</option><option value="warn">경고</option></select>' +
+          '<input id="mcp-policy-note" placeholder="메모">' +
+          '<button type="submit">저장</button>' +
+        '</form>';
+
+      // ---- loop section ----
+      const loopRows = loops.map(l =>
+        '<tr class="' + (l.calls >= 30 ? '' : '') + '">' +
+          '<td>' + escapeHTML(l.session_id) + '</td>' +
+          '<td>' + (l.is_mcp ? '<span class="pill">MCP</span> ' : '') + escapeHTML((l.server_label && l.server_label !== '(none)') ? (l.server_label + ' · ' + l.tool_name) : l.tool_name) + '</td>' +
+          '<td data-num="' + l.calls + '"><span class="status ' + (l.calls >= 30 ? 'error' : 'warn') + '">' + fmt(l.calls) + '회</span></td>' +
+          '<td data-num="' + (l.errors || 0) + '">' + fmt(l.errors) + '</td>' +
+          '<td>' + (l.api_key_id ? '<a href="#/users/' + encodeURIComponent(l.api_key_id) + '">' + escapeHTML(l.api_key_id) + '</a>' : '') + '</td>' +
+          '<td>' + ago(l.last_seen) + '</td>' +
+        '</tr>'
+      ).join('');
+      const loopTable = loops.length ?
+        '<table><thead><tr><th data-sort="str">세션</th><th data-sort="str">도구</th><th data-sort="num">호출수</th><th data-sort="num">오류</th><th>API 키</th><th data-sort="str">마지막</th></tr></thead><tbody>' + loopRows + '</tbody></table>'
+        : '<div class="empty">최근 24시간 내 반복 호출(≥10회) 의심 세션 없음.</div>';
+
+      // ---- catalog (drift) section ----
+      const catalogRows = catalog.map(c =>
+        '<tr>' +
+          '<td>' + escapeHTML(c.server_label) + '</td>' +
+          '<td>' + (c.is_mcp ? '<span class="pill">MCP</span> ' : '') + escapeHTML(c.tool_name) +
+            (c.is_new ? ' <span class="status warn">신규</span>' : '') +
+            (c.is_stale ? ' <span class="status">미사용</span>' : '') + '</td>' +
+          '<td>' + ago(c.first_seen) + '</td>' +
+          '<td>' + ago(c.last_seen) + '</td>' +
+        '</tr>'
+      ).join('');
+      const catalogTable = catalog.length ?
+        '<table><thead><tr><th data-sort="str">서버</th><th data-sort="str">도구</th><th data-sort="str">최초 관측</th><th data-sort="str">최근 관측</th></tr></thead><tbody>' + catalogRows + '</tbody></table>'
+        : '<div class="empty">관측된 도구 카탈로그 없음. 클라이언트가 tools[] 를 선언하면 서버별로 도구 목록이 누적됩니다.</div>';
+      const catalogTitle = '도구 카탈로그 / 드리프트' + (newToolCount > 0 ? ' — 최근 24시간 신규 ' + newToolCount + '개' : '');
+
       document.getElementById('view').innerHTML =
         section('MCP / Tool 요약', kpis + filterBar) +
         section('MCP 서버별', serverTable) +
-        section('Tool 리더보드', toolTable);
+        section('Tool 리더보드', toolTable) +
+        section('에이전트 루프 의심 (세션별 반복 호출 ≥ 10)', loopTable) +
+        section(catalogTitle, catalogTable) +
+        section('MCP 서버 정책', allowlistToggle + policyForm + policyTable);
 
       document.getElementById('mcp-filter').addEventListener('submit', (e) => {
         e.preventDefault();
@@ -2422,8 +2838,26 @@ const adminHTML = `<!doctype html>
         if (document.getElementById('mcp-only').checked) p.set('mcp_only', '1');
         location.hash = '#/mcp' + (p.toString() ? '?' + p.toString() : '');
       });
+      document.getElementById('mcp-policy-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        await api('/admin/mcp/policies', { method: 'POST', body: JSON.stringify({
+          server_label: document.getElementById('mcp-policy-server').value.trim(),
+          mode: document.getElementById('mcp-policy-mode').value,
+          note: document.getElementById('mcp-policy-note').value.trim(),
+        }) });
+        route();
+      });
+      document.getElementById('mcp-allowlist').addEventListener('change', async (e) => {
+        await api('/admin/mcp/policies', { method: 'POST', body: JSON.stringify({ allowlist_enabled: e.target.checked }) });
+        route();
+      });
       makeSortable('#view', 'mcp');
     }
+    window.deleteMCPPolicy = async (server) => {
+      if (!confirm('서버 정책 "' + server + '" 을(를) 삭제하시겠습니까?')) return;
+      await api('/admin/mcp/policies/' + encodeURIComponent(server), { method: 'DELETE' });
+      route();
+    };
     function errorRatePct(errors, calls) {
       const c = Number(calls || 0);
       if (c === 0) return '호출 없음';
@@ -2522,6 +2956,9 @@ const adminHTML = `<!doctype html>
               '<option value="llm_eval_failure_rate">LLM 평가 실패율</option>' +
               '<option value="tool_errors">tool 오류 수</option>' +
               '<option value="tool_error_rate">tool 오류율</option>' +
+              '<option value="tool_loop">에이전트 루프(세션 최대 호출수)</option>' +
+              '<option value="mcp_new_tools">MCP 신규 도구 수(드리프트)</option>' +
+              '<option value="anomaly_zmax">이상 징후 z-score(최대)</option>' +
             '</select>' +
             '<select id="alert-scope">' +
               '<option value="global">전체</option>' +
@@ -2557,7 +2994,7 @@ const adminHTML = `<!doctype html>
     }
 
     function metricLabel(metric) {
-      return { requests: '요청 수', errors: '오류율', krw: 'KRW 비용', tokens: '토큰', latency_p95_ms: '전체 지연 P95', first_chunk_p95_ms: '첫 청크 P95', llm_eval_failures: 'LLM 평가 실패 수', llm_eval_failure_rate: 'LLM 평가 실패율', tool_errors: 'tool 오류 수', tool_error_rate: 'tool 오류율' }[metric] || metric;
+      return { requests: '요청 수', errors: '오류율', krw: 'KRW 비용', tokens: '토큰', latency_p95_ms: '전체 지연 P95', first_chunk_p95_ms: '첫 청크 P95', llm_eval_failures: 'LLM 평가 실패 수', llm_eval_failure_rate: 'LLM 평가 실패율', tool_errors: 'tool 오류 수', tool_error_rate: 'tool 오류율', tool_loop: '에이전트 루프', mcp_new_tools: 'MCP 신규 도구 수', anomaly_zmax: '이상 징후 z-score' }[metric] || metric;
     }
     function formatThreshold(metric, value) {
       if (metric === 'krw') return money(value);
@@ -2768,7 +3205,7 @@ const adminHTML = `<!doctype html>
     }
 
     // ---------- keyboard ----------
-    const tabMap = { d: 'dashboard', l: 'llm', c: 'mcp', r: 'requests', p: 'prompts', u: 'users', m: 'teams', i: 'ips', q: 'quotas', a: 'safety', s: 'settings' };
+    const tabMap = { d: 'dashboard', x: 'xview', l: 'llm', c: 'mcp', r: 'requests', p: 'prompts', u: 'users', m: 'teams', i: 'ips', q: 'quotas', a: 'safety', s: 'settings' };
     let gPending = false;
     let gTimer = null;
     function isTyping(target) {
@@ -2821,6 +3258,7 @@ const adminHTML = `<!doctype html>
         ['<kbd>r</kbd>', '현재 페이지 다시 불러오기'],
         ['<kbd>Esc</kbd>', '모달/오버레이 닫기'],
         ['<kbd>g</kbd> <kbd>d</kbd>', '대시보드'],
+        ['<kbd>g</kbd> <kbd>x</kbd>', 'XView (응답시간 분포)'],
         ['<kbd>g</kbd> <kbd>l</kbd>', 'LLM 관측'],
         ['<kbd>g</kbd> <kbd>c</kbd>', 'MCP'],
         ['<kbd>g</kbd> <kbd>r</kbd>', '호출 이력'],
