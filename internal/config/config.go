@@ -56,6 +56,8 @@ type CacheConfig struct {
 	EmbeddingEnabled  bool
 	EmbeddingTTL      time.Duration
 	EmbeddingMaxBytes int
+	ChatEnabled       bool
+	ChatTTL           time.Duration
 }
 
 type AuthConfig struct {
@@ -110,6 +112,8 @@ func Load() (Config, error) {
 			EmbeddingEnabled:  boolEnv("CACHE_EMBEDDING_ENABLED", true),
 			EmbeddingTTL:      durationEnv("CACHE_EMBEDDING_TTL", 24*time.Hour),
 			EmbeddingMaxBytes: intEnv("CACHE_EMBEDDING_MAX_BYTES", 1<<20), // 1 MB per entry
+			ChatEnabled:       boolEnv("CACHE_CHAT_ENABLED", false),       // opt-in: chat responses are non-deterministic
+			ChatTTL:           durationEnv("CACHE_CHAT_TTL", time.Hour),
 		},
 		Auth: AuthConfig{
 			ProxyAPIKeys:       parseProxyKeys(os.Getenv("PROXY_API_KEYS")),

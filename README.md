@@ -116,6 +116,18 @@ $env:MODEL_PRICING_KRW_PER_1M='{ "gpt-4.1-mini": { "input_krw_per_1m": 540, "out
 
 `cached_input_krw_per_1m` 가 설정된 경우 OpenAI 가 `prompt_tokens_details.cached_tokens` 로 보고하는 캐시된 입력 토큰은 별도 단가로 정산됩니다 (설정이 없으면 일반 입력 단가 적용). 추론(reasoning) 토큰은 출력 단가로 함께 정산됩니다.
 
+### 응답 캐시 (비용 절감)
+
+| 변수 | 기본값 | 설명 |
+| --- | --- | --- |
+| `CACHE_EMBEDDING_ENABLED` | `true` | `/v1/embeddings` 동일 입력 응답 캐시 |
+| `CACHE_EMBEDDING_TTL` | `24h` | 임베딩 캐시 TTL |
+| `CACHE_CHAT_ENABLED` | `false` | `/v1/chat/completions` 응답 캐시 (opt-in) |
+| `CACHE_CHAT_TTL` | `1h` | chat 캐시 TTL |
+| `CACHE_EMBEDDING_MAX_BYTES` | `1048576` | 캐시 항목 최대 byte (chat 공용) |
+
+chat 응답은 비결정적이라 기본 비활성화입니다. 활성화해도 **재현 가능한 요청만** 캐시합니다: `temperature=0` 또는 `seed` 가 설정된 요청, 혹은 클라이언트가 `X-Proxy-Cache: 1` 헤더로 명시 동의한 경우. 캐시 적중 시 `X-Cache: HIT` 헤더로 응답하고 upstream 호출 없이 비용 0으로 처리되며, XView 캐시 패널에 절감액이 표시됩니다. 캐시 키는 model·messages·tools·temperature·top_p·max_tokens·seed·response_format 기준이며 `stream` 등 휘발성 필드는 제외합니다.
+
 ## 통계와 어드민
 
 ```powershell
@@ -137,7 +149,7 @@ curl.exe http://localhost:8080/metrics
 - **표 헤더 정렬**: 사용자/IP/모델/언어/호출이력 표의 헤더를 클릭하면 오름·내림 정렬. 정렬 상태는 화면별로 저장됩니다.
 - **키보드 단축키**:
   - `?` 도움말, `/` 검색 포커스, `t` 다크 모드, `r` 새로고침, `Esc` 모달 닫기
-  - `g` 다음에 `d`(대시보드) / `l`(LLM 관측) / `r`(호출 이력) / `p`(프롬프트 검색) / `u`(사용자) / `i`(IP) / `q`(사용 한도) / `s`(설정)
+  - `g` 다음에 `d`(대시보드) / `x`(XView) / `w`(Waterfall) / `l`(LLM 관측) / `c`(MCP) / `r`(호출 이력) / `p`(프롬프트 검색) / `u`(사용자) / `m`(팀) / `i`(IP) / `q`(사용 한도) / `a`(안전) / `s`(설정)
 - **시계열 차트**: 대시보드 상단에 24시간/7일/30일 토글로 요청 수(실선) + 비용 KRW(점선) SVG 라인 차트.
 - **상위 사용자 위젯**: 요청 수 기준 Top 5 API 키, 클릭 시 사용자 상세로 이동.
 - **상태 분포 카드**: 2xx / 3xx / 4xx / 429 / 5xx 비율을 막대와 표로 함께 표시.
@@ -151,6 +163,7 @@ curl.exe "http://localhost:8080/admin/timeseries?window=24h&bucket=hour&scope=ap
 curl.exe "http://localhost:8080/admin/heatmap?window=30d"
 curl.exe "http://localhost:8080/admin/llm/traces?session_id=sess-123"
 curl.exe "http://localhost:8080/admin/llm/sessions"
+curl.exe "http://localhost:8080/admin/waterfall?session_id=sess-123"
 curl.exe "http://localhost:8080/admin/llm/prompts"
 curl.exe "http://localhost:8080/admin/llm/patterns"
 curl.exe "http://localhost:8080/admin/llm/insights?window=24h"
@@ -160,6 +173,17 @@ curl.exe "http://localhost:8080/admin/llm/evaluations"
 ```
 
 `/admin/stats` 응답에는 기존 IP/모델/언어 외에 `by_status` (HTTP 상태 분포)와 `top_users` (상위 5 API 키) 가 포함됩니다.
+
+### Waterfall (트랜잭션 타임라인)
+
+`Waterfall` 탭은 한 세션의 요청들을 시간순 간트 막대로 펼칩니다. 막대의 연한 부분=첫 응답 대기(TTFB), 진한 부분=스트리밍 수신, 막대 사이 빈 공간=클라이언트 대기/생각 시간입니다. 상단 요약은 **총 소요(wall) vs LLM 처리(busy, 구간 합집합) vs 대기(idle)** 를 분해해 "느림"의 원인이 모델인지 클라이언트인지 가립니다.
+
+- **병목 분석(자동)**: 가장 느린 요청·가장 긴 대기를 % 와 함께 콜아웃하고, idle/busy·TTFB/스트리밍 비교로 병목 위치를 판정.
+- **세션 시간 구성 바**: 첫 응답 대기(Σ TTFB) / 스트리밍 수신 / 클라이언트 대기(idle) 비율을 스택 바로.
+- **느린 요청 플래그**: `slow_ms`(미지정 시 `max(3000, p95)` 자동) 초과 요청을 ⚠·빨간 테두리로 표시, 툴바에서 기준 조정.
+- **분류 필터·CSV**: 범례 클릭으로 분류별 표시 토글, 스팬 전체 CSV 내보내기.
+
+색상은 XView와 동일(정상/캐시/폴백/고복잡도/오류)하고 막대 클릭 시 그 요청의 라우팅 근거(Explain)로 이동합니다. API: `GET /admin/waterfall?session_id=<id>&slow_ms=<ms>` → 서버가 `start_offset_ms`·`ttfb_ms`·`total_ms`·`gap_before_ms`·`category`·`slow` 와 세션 집계(`wait_ms`/`stream_ms`/`slow_count`/`bottleneck`)를 미리 계산해 내려줍니다.
 
 ### LLM Observability 메타데이터
 
@@ -412,6 +436,22 @@ curl.exe http://localhost:8080/admin/quotas `
 ```
 
 쿼터 비활성/삭제는 `PATCH /admin/quotas/{id}` / `DELETE /admin/quotas/{id}` 또는 어드민 UI의 "사용 한도" 탭에서 가능합니다. 현재 기간 누적치와 남은 비율은 같은 탭의 진행률 막대로 시각화됩니다.
+
+### 월 예산 소진 예측 (Budget Burn-down)
+
+쿼터가 "도달 시 차단"하는 경성 한도라면, 예산은 "현재 추세면 월말에 얼마 쓸지"를 예측·경고하는 연성 관측 도구입니다(차단 없음). 전체 / 팀 / API 키 단위로 월 예산(KRW)을 등록하면, 월초(KST) 대비 누적 지출과 일평균 소진율을 월말까지 연장한 **예상 지출**·**소진 예상일**을 어드민 "사용 한도" 탭에서 보여줍니다.
+
+```powershell
+# 플랫폼 팀 월 예산 500,000원
+curl.exe http://localhost:8080/admin/budgets `
+  -H "Content-Type: application/json" `
+  -d '{ "scope": "team", "scope_value": "platform", "monthly_krw": 500000, "note": "플랫폼팀 월 예산" }'
+
+# 예산 현황(예측 포함) 조회
+curl.exe http://localhost:8080/admin/budgets
+```
+
+응답의 각 항목은 `spent_krw`(누적), `burn_ratio`(누적/예산), `projected_krw`(월말 예상), `projected_ratio`(예상/예산), `exhaustion_date`(소진 예상일, 이번 달 안일 때만), `on_track`(예산 이내 추세 여부)를 포함합니다. 삭제는 `DELETE /admin/budgets/{id}`. 안전 탭의 알림 지표 `budget_burn_ratio`(등록된 예산 중 최대 `projected_ratio`)로 임박 경보를 Webhook 통지할 수 있습니다.
 
 ## 보존 정책 (Retention)
 

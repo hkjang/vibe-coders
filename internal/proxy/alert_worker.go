@@ -127,6 +127,8 @@ func metricValue(metric string, snapshot store.AlertMetricSnapshot) float64 {
 		return float64(snapshot.NewCatalogTools)
 	case "anomaly_zmax":
 		return snapshot.MaxAnomalyZ
+	case "budget_burn_ratio":
+		return snapshot.MaxBudgetRatio
 	}
 	return 0
 }

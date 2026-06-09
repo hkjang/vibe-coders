@@ -188,7 +188,7 @@ test -s data/fallback.ndjson || true   # 비정상 종료 시 fallback 에 잔�
 
 ### 5.2 어드민 알림
 
-`/admin/alerts` 에서 게이트웨이 자체 알림 규칙을 설정하면 외부 모니터링 없이도 Slack/Teams/사내 웹훅으로 즉시 통보합니다. 자체 알림 지표에는 `requests/errors/krw/tokens`, 지연 기반 `latency_p95_ms/first_chunk_p95_ms`, LLM 평가 기반 `llm_eval_failures/llm_eval_failure_rate`, MCP/도구 기반 `tool_errors/tool_error_rate/tool_loop/mcp_new_tools`, 이상 탐지 `anomaly_zmax` 가 포함됩니다. 자세한 사용법은 [관리자 가이드](./ADMIN_GUIDE.md) 참조.
+`/admin/alerts` 에서 게이트웨이 자체 알림 규칙을 설정하면 외부 모니터링 없이도 Slack/Teams/사내 웹훅으로 즉시 통보합니다. 자체 알림 지표에는 `requests/errors/krw/tokens`, 지연 기반 `latency_p95_ms/first_chunk_p95_ms`, LLM 평가 기반 `llm_eval_failures/llm_eval_failure_rate`, MCP/도구 기반 `tool_errors/tool_error_rate/tool_loop/mcp_new_tools`, 이상 탐지 `anomaly_zmax`, 예산 소진 예측 `budget_burn_ratio`(등록된 예산 중 최대 *월말 예상/월 예산* 비율) 가 포함됩니다. 자세한 사용법은 [관리자 가이드](./ADMIN_GUIDE.md) 참조.
 
 ### 5.2.1 이상 탐지 (Anomaly Detection)
 

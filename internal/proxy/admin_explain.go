@@ -67,15 +67,17 @@ func tierForComplexity(c int) string {
 
 func (s *Server) explainRouting(d store.ExplainData) map[string]any {
 	reasonText := map[string]string{
-		"header":        "클라이언트가 X-Proxy-Provider 헤더로 명시 지정",
-		"query":         "요청 쿼리(?provider=)로 명시 지정",
-		"model_pattern": "모델 패턴 자동 라우팅",
-		"default":       "기본 provider(UPSTREAM_PROVIDER)",
+		"header":          "클라이언트가 X-Proxy-Provider 헤더로 명시 지정",
+		"query":           "요청 쿼리(?provider=)로 명시 지정",
+		"model_pattern":   "모델 패턴 자동 라우팅",
+		"default":         "기본 provider(UPSTREAM_PROVIDER)",
+		"complexity_rule": "복잡도 기반 비용 최적 라우팅 규칙",
+		"rule_provider":   "라우팅 규칙이 지정한 provider",
 	}[d.RouteReason]
 	if reasonText == "" {
 		reasonText = d.RouteReason
 	}
-	return map[string]any{
+	out := map[string]any{
 		"chosen_provider": d.Provider,
 		"chosen_model":    d.Model,
 		"reason":          d.RouteReason,
@@ -85,6 +87,12 @@ func (s *Server) explainRouting(d store.ExplainData) map[string]any {
 		"tier":            tierForComplexity(d.Complexity),
 		"endpoint":        d.Endpoint,
 	}
+	// surface model downgrade/upgrade when a complexity rule changed the model
+	if d.RequestedModel != "" && d.RequestedModel != d.Model {
+		out["requested_model"] = d.RequestedModel
+		out["model_changed"] = true
+	}
+	return out
 }
 
 func explainFallback(d store.ExplainData) map[string]any {

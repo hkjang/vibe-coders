@@ -286,6 +286,19 @@ func complexityScore(prompts []store.PromptLog, toolCount int) int {
 	return int(score + 0.5)
 }
 
+// previewModelComplexity does a lightweight parse to get (model, complexity) before
+// any routing rewrite. Complexity depends only on prompts/tools, so it is stable
+// across a model-only rewrite.
+func previewModelComplexity(body []byte, endpoint string) (string, int) {
+	model, _, prompts, _ := extractAudit(body, endpoint, false)
+	toolCount := 0
+	var root map[string]any
+	if json.Unmarshal(body, &root) == nil {
+		toolCount = countRequestTools(root)
+	}
+	return model, complexityScore(prompts, toolCount)
+}
+
 // toolInvocations stamps parsed tools with the request's identity context.
 func toolInvocations(req store.RequestLog, tools []parsedTool) []store.ToolInvocation {
 	if len(tools) == 0 {

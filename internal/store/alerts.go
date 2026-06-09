@@ -290,6 +290,10 @@ func (s *SQLStore) MetricSince(ctx context.Context, scope, scopeValue string, si
 			snapshot.MaxAnomalyZ = z
 		}
 	}
+	// budget: largest projected month-end spend ratio across budgets (scope-independent).
+	if ratio, err := s.MaxBudgetProjectedRatio(ctx, time.Now()); err == nil {
+		snapshot.MaxBudgetRatio = ratio
+	}
 	return snapshot, nil
 }
 

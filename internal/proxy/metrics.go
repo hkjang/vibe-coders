@@ -24,6 +24,7 @@ type Metrics struct {
 	mcpToolCalls    atomic.Uint64
 	mcpToolErrors   atomic.Uint64
 	mcpBlocked      atomic.Uint64
+	routingOverride atomic.Uint64
 	latency         *LatencyDigest
 	firstChunk      *LatencyDigest
 }
@@ -99,10 +100,11 @@ func (m *Metrics) IncAlertDelivered() {
 	m.alertsDelivered.Add(1)
 }
 
-func (m *Metrics) IncCacheHit()   { m.cacheHits.Add(1) }
-func (m *Metrics) IncCacheMiss()  { m.cacheMisses.Add(1) }
-func (m *Metrics) IncFailover()   { m.failovers.Add(1) }
-func (m *Metrics) IncMCPBlocked() { m.mcpBlocked.Add(1) }
+func (m *Metrics) IncCacheHit()        { m.cacheHits.Add(1) }
+func (m *Metrics) IncCacheMiss()       { m.cacheMisses.Add(1) }
+func (m *Metrics) IncFailover()        { m.failovers.Add(1) }
+func (m *Metrics) IncMCPBlocked()      { m.mcpBlocked.Add(1) }
+func (m *Metrics) IncRoutingOverride() { m.routingOverride.Add(1) }
 
 func (m *Metrics) ObserveLLMEvaluations(evaluations []store.LLMEvaluation) {
 	for _, evaluation := range evaluations {
@@ -160,6 +162,9 @@ func (m *Metrics) Prometheus(queueDepth int, logDropped uint64, logWritten uint6
 		"# HELP proxy_mcp_blocked_total Requests blocked by MCP server policy.",
 		"# TYPE proxy_mcp_blocked_total counter",
 		fmt.Sprintf("proxy_mcp_blocked_total %d", m.mcpBlocked.Load()),
+		"# HELP proxy_routing_overrides_total Requests whose model was changed by a complexity routing rule.",
+		"# TYPE proxy_routing_overrides_total counter",
+		fmt.Sprintf("proxy_routing_overrides_total %d", m.routingOverride.Load()),
 		"# HELP proxy_log_queue_depth Current async log queue depth.",
 		"# TYPE proxy_log_queue_depth gauge",
 		fmt.Sprintf("proxy_log_queue_depth %d", queueDepth),

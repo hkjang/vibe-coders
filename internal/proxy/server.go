@@ -29,15 +29,16 @@ import (
 )
 
 type Server struct {
-	cfg       config.Config
-	db        *store.SQLStore
-	logger    *store.AsyncLogger
-	client    *http.Client
-	metrics   *Metrics
-	secrets   *secret.Cipher
-	retention *store.RetentionWorker
-	killState atomicKillState
-	mcpPolicy atomic.Pointer[mcpPolicySnapshot]
+	cfg          config.Config
+	db           *store.SQLStore
+	logger       *store.AsyncLogger
+	client       *http.Client
+	metrics      *Metrics
+	secrets      *secret.Cipher
+	retention    *store.RetentionWorker
+	killState    atomicKillState
+	mcpPolicy    atomic.Pointer[mcpPolicySnapshot]
+	routingRules atomic.Pointer[routingRulesSnapshot]
 }
 
 type atomicKillState struct {
@@ -138,6 +139,11 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/admin/heatmap", s.handleHeatmap)
 	mux.HandleFunc("/admin/anomalies", s.handleAnomalies)
 	mux.HandleFunc("/admin/scatter", s.handleScatter)
+	mux.HandleFunc("/admin/routing-rules", s.handleRoutingRules)
+	mux.HandleFunc("/admin/routing-rules/", s.handleRoutingRuleByID)
+	mux.HandleFunc("/admin/budgets", s.handleBudgets)
+	mux.HandleFunc("/admin/budgets/", s.handleBudgetByID)
+	mux.HandleFunc("/admin/waterfall", s.handleWaterfall)
 	mux.HandleFunc("/admin/llm/traces", s.handleLLMTraces)
 	mux.HandleFunc("/admin/llm/traces/", s.handleLLMTraceDetail)
 	mux.HandleFunc("/admin/llm/sessions", s.handleLLMSessions)
@@ -553,7 +559,26 @@ func (s *Server) handleOpenAI(w http.ResponseWriter, r *http.Request) {
 	}
 
 	traceID := traceIDFromRequest(r)
+
+	// Complexity-based cost-optimal routing: when the client did not pin a provider,
+	// rewrite the requested model to a cheaper/premium one per configured rules.
+	var routeDecision routingDecision
+	pinned := strings.TrimSpace(r.Header.Get("X-Proxy-Provider")) != "" || strings.TrimSpace(r.URL.Query().Get("provider")) != ""
+	noRoute := strings.EqualFold(strings.TrimSpace(r.Header.Get("X-Proxy-No-Route")), "1")
+	if r.URL.Path == "/v1/chat/completions" && r.Method == http.MethodPost && !pinned && !noRoute {
+		origModel, complexity := previewModelComplexity(body, r.URL.Path)
+		if d := s.evaluateRoutingRules(r.Context(), origModel, complexity); d.Applied {
+			body = rewriteModelField(body, d.TargetModel)
+			routeDecision = d
+			w.Header().Set("X-Routed-Model", d.TargetModel)
+		}
+	}
+
 	meta := s.auditRequest(r.URL.Path, body, apiKeyID, traceID, r)
+	if routeDecision.Applied {
+		meta.Request.RequestedModel = routeDecision.OriginalModel
+		s.metrics.IncRoutingOverride()
+	}
 
 	// MCP server policy (allowlist / block) — reject requests that use a disallowed
 	// MCP server before they ever reach the upstream.
@@ -568,7 +593,15 @@ func (s *Server) handleOpenAI(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	provider, err := s.selectProvider(r.Context(), r, meta.Request.Model)
+	// Chat response cache — opt-in, only for deterministic (temp 0 / seed) requests.
+	chatCacheKey, chatCacheable := s.chatCacheEligible(r, body)
+	if chatCacheable {
+		if served := s.serveChatFromCache(r.Context(), w, chatCacheKey, meta, traceID); served {
+			return
+		}
+	}
+
+	provider, err := s.selectProviderForced(r.Context(), r, meta.Request.Model, routeDecision.TargetProvider)
 	if err != nil {
 		writeOpenAIError(w, http.StatusBadGateway, err.Error(), "server_error", "provider_unavailable")
 		return
@@ -576,6 +609,11 @@ func (s *Server) handleOpenAI(w http.ResponseWriter, r *http.Request) {
 	meta.Request.Provider = provider.Name
 	meta.Request.RouteReason = provider.Reason
 	meta.Request.RouteDetail = provider.Detail
+	if routeDecision.Applied {
+		// the model choice is the salient decision; surface it as the routing reason.
+		meta.Request.RouteReason = "complexity_rule"
+		meta.Request.RouteDetail = routeDecision.Desc
+	}
 
 	// Identify failover candidates: only when the client did NOT explicitly pin a provider.
 	failoverCandidates := []string{}
@@ -630,11 +668,12 @@ func (s *Server) handleOpenAI(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(resp.StatusCode)
 
 	captureForCache := !stream && r.URL.Path == "/v1/embeddings" && s.cfg.Cache.EmbeddingEnabled
+	captureForChatCache := !stream && chatCacheable && resp.StatusCode == http.StatusOK
 	captureLimit := s.cfg.Logging.ResponseMaxBytes
-	if captureForCache && s.cfg.Cache.EmbeddingMaxBytes > captureLimit {
+	if (captureForCache || captureForChatCache) && s.cfg.Cache.EmbeddingMaxBytes > captureLimit {
 		captureLimit = s.cfg.Cache.EmbeddingMaxBytes
 	}
-	analyzer := NewResponseAnalyzer(stream, captureForCache || s.cfg.Logging.ResponseText, captureLimit)
+	analyzer := NewResponseAnalyzer(stream, captureForCache || captureForChatCache || s.cfg.Logging.ResponseText, captureLimit)
 	firstChunkMS, firstChunkSeen, copyErr := s.copyResponse(w, resp.Body, analyzer, stream, start)
 	if firstChunkSeen {
 		meta.Request.FirstChunkMS = firstChunkMS
@@ -651,11 +690,14 @@ func (s *Server) handleOpenAI(w http.ResponseWriter, r *http.Request) {
 	if captureForCache && analysis.Text != "" {
 		s.maybeStoreEmbeddingCache(r.Context(), body, resp.StatusCode, resp.Header.Get("Content-Type"), []byte(analysis.Text))
 	}
-	if captureForCache {
+	if captureForChatCache && analysis.Text != "" {
+		s.maybeStoreChatCache(r.Context(), chatCacheKey, resp.StatusCode, resp.Header.Get("Content-Type"), []byte(analysis.Text))
+	}
+	if captureForCache || captureForChatCache {
 		s.metrics.IncCacheMiss()
 	}
 	// Clear captured text so we don't accidentally persist it when LOG_RESPONSE_TEXT=false.
-	if captureForCache && !s.cfg.Logging.ResponseText {
+	if (captureForCache || captureForChatCache) && !s.cfg.Logging.ResponseText {
 		analysis.Text = ""
 	}
 	meta.Response = &store.ResponseLog{
@@ -866,6 +908,22 @@ func (s *Server) dialUpstream(reqCtx context.Context, r *http.Request, body []by
 		lastErr = errors.New("no provider attempts made")
 	}
 	return nil, "", "", lastErr
+}
+
+// selectProviderForced resolves a provider, optionally pinned to forceProvider
+// (set by a complexity routing rule's target_provider). When forceProvider is empty
+// it behaves exactly like selectProvider.
+func (s *Server) selectProviderForced(ctx context.Context, r *http.Request, model, forceProvider string) (resolvedProvider, error) {
+	if strings.TrimSpace(forceProvider) != "" {
+		clone := r.Clone(ctx)
+		clone.Header.Set("X-Proxy-Provider", forceProvider)
+		rp, err := s.selectProvider(ctx, clone, model)
+		if err == nil {
+			rp.Reason, rp.Detail = "rule_provider", forceProvider
+		}
+		return rp, err
+	}
+	return s.selectProvider(ctx, r, model)
 }
 
 func (s *Server) selectProvider(ctx context.Context, r *http.Request, model string) (resolvedProvider, error) {

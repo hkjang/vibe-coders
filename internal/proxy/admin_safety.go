@@ -80,6 +80,7 @@ var validAlertMetrics = map[string]bool{
 	"tool_loop":             true,
 	"mcp_new_tools":         true,
 	"anomaly_zmax":          true,
+	"budget_burn_ratio":     true,
 }
 var validAlertScopes = map[string]bool{"global": true, "api_key": true, "team": true, "ip": true, "model": true}
 

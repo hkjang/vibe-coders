@@ -109,7 +109,42 @@ type RequestLog struct {
 	Complexity          int    // 0-100 complexity proxy score
 	FallbackFrom        string // original provider before failover
 	FallbackReason      string // transport error that triggered failover
+	RequestedModel      string // model the client asked for (before complexity routing)
 	CreatedAt           time.Time
+}
+
+type Budget struct {
+	ID         string    `json:"id"`
+	Scope      string    `json:"scope"` // global | api_key | team
+	ScopeValue string    `json:"scope_value"`
+	MonthlyKRW float64   `json:"monthly_krw"`
+	Note       string    `json:"note"`
+	CreatedAt  time.Time `json:"created_at"`
+}
+
+type BudgetStatus struct {
+	Budget         Budget  `json:"budget"`
+	SpentKRW       float64 `json:"spent_krw"`
+	BurnRatio      float64 `json:"burn_ratio"`      // spent / monthly
+	ProjectedKRW   float64 `json:"projected_krw"`   // run-rate extrapolated to month end
+	ProjectedRatio float64 `json:"projected_ratio"` // projected / monthly
+	DaysElapsed    float64 `json:"days_elapsed"`
+	DaysInMonth    float64 `json:"days_in_month"`
+	ExhaustionDate string  `json:"exhaustion_date"` // empty if not projected to exhaust this month
+	OnTrack        bool    `json:"on_track"`        // projected <= monthly
+}
+
+type RoutingRule struct {
+	ID             string    `json:"id"`
+	Enabled        bool      `json:"enabled"`
+	Priority       int       `json:"priority"`
+	MatchPattern   string    `json:"match_pattern"` // glob on incoming model; "" or "*" = all
+	MinComplexity  int       `json:"min_complexity"`
+	MaxComplexity  int       `json:"max_complexity"`
+	TargetModel    string    `json:"target_model"`
+	TargetProvider string    `json:"target_provider"`
+	Note           string    `json:"note"`
+	CreatedAt      time.Time `json:"created_at"`
 }
 
 type PromptLog struct {
@@ -849,6 +884,7 @@ type AlertMetricSnapshot struct {
 	MaxSessionToolCall int64
 	NewCatalogTools    int64
 	MaxAnomalyZ        float64
+	MaxBudgetRatio     float64
 }
 
 type AlertEvent struct {

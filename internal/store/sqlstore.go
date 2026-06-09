@@ -128,6 +128,7 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 		`ALTER TABLE request_logs ADD COLUMN complexity INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE request_logs ADD COLUMN fallback_from TEXT`,
 		`ALTER TABLE request_logs ADD COLUMN fallback_reason TEXT`,
+		`ALTER TABLE request_logs ADD COLUMN requested_model TEXT`,
 		`ALTER TABLE request_logs ADD COLUMN first_chunk_ms INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE request_logs ADD COLUMN session_id TEXT`,
 		`ALTER TABLE request_logs ADD COLUMN prompt_name TEXT`,
@@ -238,6 +239,26 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 			note TEXT,
 			created_at TEXT NOT NULL,
 			updated_at TEXT NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS budgets (
+			id TEXT PRIMARY KEY,
+			scope TEXT NOT NULL,
+			scope_value TEXT NOT NULL,
+			monthly_krw REAL NOT NULL,
+			note TEXT,
+			created_at TEXT NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS routing_rules (
+			id TEXT PRIMARY KEY,
+			enabled INTEGER NOT NULL DEFAULT 1,
+			priority INTEGER NOT NULL DEFAULT 100,
+			match_pattern TEXT NOT NULL,
+			min_complexity INTEGER NOT NULL DEFAULT 0,
+			max_complexity INTEGER NOT NULL DEFAULT 100,
+			target_model TEXT NOT NULL,
+			target_provider TEXT,
+			note TEXT,
+			created_at TEXT NOT NULL
 		)`,
 		`CREATE TABLE IF NOT EXISTS mcp_tool_catalog (
 			server_label TEXT NOT NULL,
@@ -600,9 +621,9 @@ func (s *SQLStore) InsertLogRecord(ctx context.Context, record LogRecord) error 
 		req.CreatedAt = time.Now().UTC()
 	}
 	_, err = tx.ExecContext(ctx, s.bind(`INSERT INTO request_logs
-		(id, trace_id, api_key_id, client_ip, forwarded_for, user_agent, hostname, model, endpoint, stream, provider, status_code, latency_ms, first_chunk_ms, session_id, prompt_name, prompt_version, prompt_variables_hash, tool_count, error, request_hash, body_raw, replay_of, failover, route_reason, route_detail, complexity, fallback_from, fallback_reason, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
-		req.ID, req.TraceID, req.APIKeyID, req.ClientIP, req.ForwardedFor, req.UserAgent, req.Hostname, req.Model, req.Endpoint, boolInt(req.Stream), req.Provider, req.StatusCode, req.LatencyMS, req.FirstChunkMS, req.SessionID, req.PromptName, req.PromptVersion, req.PromptVariablesHash, req.ToolCount, req.Error, req.RequestHash, req.BodyRaw, req.ReplayOf, boolInt(req.Failover), req.RouteReason, req.RouteDetail, req.Complexity, req.FallbackFrom, req.FallbackReason, formatTime(req.CreatedAt))
+		(id, trace_id, api_key_id, client_ip, forwarded_for, user_agent, hostname, model, endpoint, stream, provider, status_code, latency_ms, first_chunk_ms, session_id, prompt_name, prompt_version, prompt_variables_hash, tool_count, error, request_hash, body_raw, replay_of, failover, route_reason, route_detail, complexity, fallback_from, fallback_reason, requested_model, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+		req.ID, req.TraceID, req.APIKeyID, req.ClientIP, req.ForwardedFor, req.UserAgent, req.Hostname, req.Model, req.Endpoint, boolInt(req.Stream), req.Provider, req.StatusCode, req.LatencyMS, req.FirstChunkMS, req.SessionID, req.PromptName, req.PromptVersion, req.PromptVariablesHash, req.ToolCount, req.Error, req.RequestHash, req.BodyRaw, req.ReplayOf, boolInt(req.Failover), req.RouteReason, req.RouteDetail, req.Complexity, req.FallbackFrom, req.FallbackReason, req.RequestedModel, formatTime(req.CreatedAt))
 	if err != nil {
 		return err
 	}

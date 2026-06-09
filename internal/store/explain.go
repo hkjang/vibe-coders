@@ -21,6 +21,7 @@ type ExplainData struct {
 	SessionID        string
 	RouteReason      string
 	RouteDetail      string
+	RequestedModel   string
 	Complexity       int
 	Failover         bool
 	FallbackFrom     string
@@ -43,7 +44,7 @@ func (s *SQLStore) ExplainRow(ctx context.Context, id string) (ExplainData, erro
 	err := s.db.QueryRowContext(ctx, s.bind(`
 		SELECT r.id, r.trace_id, COALESCE(r.model, ''), COALESCE(r.provider, ''), r.endpoint,
 			r.status_code, COALESCE(r.error, ''), r.latency_ms, COALESCE(r.first_chunk_ms, 0), r.stream,
-			COALESCE(r.session_id, ''), COALESCE(r.route_reason, ''), COALESCE(r.route_detail, ''),
+			COALESCE(r.session_id, ''), COALESCE(r.route_reason, ''), COALESCE(r.route_detail, ''), COALESCE(r.requested_model, ''),
 			COALESCE(r.complexity, 0), COALESCE(r.failover, 0), COALESCE(r.fallback_from, ''), COALESCE(r.fallback_reason, ''),
 			COALESCE(t.prompt_tokens, 0), COALESCE(t.completion_tokens, 0), COALESCE(t.total_tokens, 0),
 			COALESCE(t.cached_tokens, 0), COALESCE(t.reasoning_tokens, 0),
@@ -54,7 +55,7 @@ func (s *SQLStore) ExplainRow(ctx context.Context, id string) (ExplainData, erro
 		WHERE r.id = ?`), id).Scan(
 		&d.RequestID, &d.TraceID, &d.Model, &d.Provider, &d.Endpoint,
 		&d.StatusCode, &d.Error, &d.LatencyMS, &d.FirstChunkMS, &streamInt,
-		&d.SessionID, &d.RouteReason, &d.RouteDetail,
+		&d.SessionID, &d.RouteReason, &d.RouteDetail, &d.RequestedModel,
 		&d.Complexity, &failoverInt, &d.FallbackFrom, &d.FallbackReason,
 		&d.PromptTokens, &d.CompletionTokens, &d.TotalTokens,
 		&d.CachedTokens, &d.ReasoningTokens,

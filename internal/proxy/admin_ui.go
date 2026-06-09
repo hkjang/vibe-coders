@@ -189,6 +189,7 @@ const adminHTML = `<!doctype html>
     <nav id="tabs">
       <a href="#/dashboard" data-tab="dashboard" class="active">대시보드</a>
       <a href="#/xview" data-tab="xview">XView</a>
+      <a href="#/waterfall" data-tab="waterfall">Waterfall</a>
       <a href="#/llm" data-tab="llm">LLM 관측</a>
       <a href="#/mcp" data-tab="mcp">MCP</a>
       <a href="#/requests" data-tab="requests">호출 이력</a>
@@ -468,6 +469,7 @@ const adminHTML = `<!doctype html>
         switch (tab) {
           case 'dashboard': await renderDashboard(); break;
           case 'xview':     await renderXView(params); break;
+          case 'waterfall': await renderWaterfall(params); break;
           case 'llm':       await renderLLMObservability(); break;
           case 'requests':  await renderRequestsView(params); break;
           case 'prompts':   await renderPromptsView(params); break;
@@ -730,6 +732,251 @@ const adminHTML = `<!doctype html>
       });
     }
 
+    // ---------- Waterfall View (transaction trace) ----------
+    const waterfallColors = {
+      error:    { c: '#ef4444', label: '오류' },
+      fallback: { c: '#eab308', label: '폴백' },
+      cache:    { c: '#22c55e', label: '캐시 히트' },
+      complex:  { c: '#a855f7', label: '고복잡도' },
+      normal:   { c: '#3b82f6', label: '정상' },
+    };
+    window.openWaterfall = (sessionID) => {
+      location.hash = '#/waterfall?session_id=' + encodeURIComponent(sessionID || 'no-session');
+    };
+    const wfState = { trace: null, sessionID: '', hidden: {}, slowMs: 0 };
+    let wfResizeBound = false;
+    async function renderWaterfall(initial) {
+      const sessionID = initial ? (initial.get('session_id') || '') : '';
+      const view = document.getElementById('view');
+      if (!sessionID) {
+        const data = await api('/admin/llm/sessions?limit=100');
+        const rows = data.sessions || [];
+        const picker = rows.length ? (
+          '<table><thead><tr><th data-sort="str">세션</th><th data-sort="num">요청</th><th data-sort="num">토큰</th><th data-sort="num">비용</th><th data-sort="num">오류</th><th data-sort="str">최근</th><th>워터폴</th></tr></thead><tbody>' +
+          rows.map(s => '<tr>' +
+            '<td>' + escapeHTML(s.session_id || 'no-session') + '</td>' +
+            '<td data-num="' + (s.requests || 0) + '">' + fmt(s.requests || 0) + '</td>' +
+            '<td data-num="' + (s.tokens || 0) + '">' + fmt(s.tokens || 0) + '</td>' +
+            '<td data-num="' + (s.cost_krw || 0) + '">' + money(s.cost_krw || 0) + '</td>' +
+            '<td data-num="' + (s.errors || 0) + '">' + fmt(s.errors || 0) + '</td>' +
+            '<td>' + ago(s.last_seen) + '</td>' +
+            '<td><button class="secondary" type="button" onclick="openWaterfall(\'' + escapeAttr(s.session_id || 'no-session') + '\')">보기</button></td>' +
+          '</tr>').join('') + '</tbody></table>'
+        ) : '<div class="empty">세션 없음</div>';
+        view.innerHTML = section('Waterfall — 세션 선택',
+          '<div style="padding:16px 18px 20px">' +
+          '<p class="muted" style="margin:0 0 16px 2px; line-height:1.7">트랜잭션(요청)을 시간순 워터폴로 펼쳐 봅니다. 세션을 고르면 각 요청의 시작 시점 · 첫 응답 대기(TTFB) · 스트리밍 수신 구간과, 요청 사이의 대기(생각) 시간을 한 줄씩 막대로 보여줍니다.</p>' +
+          picker + '</div>');
+        makeSortable('#view', 'wf-sessions');
+        return;
+      }
+      if (wfState.sessionID !== sessionID) wfState.hidden = {}; // reset filters on session switch
+      wfState.sessionID = sessionID;
+      const qs = '?session_id=' + encodeURIComponent(sessionID) + '&limit=500' + (wfState.slowMs > 0 ? '&slow_ms=' + wfState.slowMs : '');
+      const trace = await api('/admin/waterfall' + qs);
+      wfState.trace = trace;
+      view.innerHTML = section('Waterfall — ' + escapeHTML(sessionID),
+        '<div class="toolbar">' +
+          '<button class="secondary" type="button" onclick="location.hash=\'#/waterfall\'">← 세션 목록</button>' +
+          '<button class="secondary" type="button" onclick="openSessionTimeline(\'' + escapeAttr(sessionID) + '\')">비용 타임라인</button>' +
+          '<label class="muted" style="display:inline-flex; align-items:center; gap:6px">느림 기준(ms) <input id="wf-slow" type="number" min="0" step="500" value="' + (wfState.slowMs || '') + '" placeholder="' + fmt(trace.slow_ms) + ' 자동" style="width:110px"></label>' +
+          '<button class="secondary" type="button" onclick="wfExportCSV()">CSV 내보내기</button>' +
+          '<span class="muted" style="margin-left:auto">' + (trace.truncated ? '※ 최대 500개 요청만 표시' : (fmt(trace.requests) + '개 요청')) + '</span>' +
+        '</div>' +
+        '<div id="wf-body" style="padding:16px 18px 20px"></div>');
+      const slowInput = document.getElementById('wf-slow');
+      if (slowInput) slowInput.addEventListener('change', () => { wfState.slowMs = Number(slowInput.value || 0); renderWaterfall(initial); });
+      wfRenderBody();
+      if (!wfResizeBound) {
+        wfResizeBound = true;
+        let rt;
+        window.addEventListener('resize', () => {
+          clearTimeout(rt);
+          rt = setTimeout(() => {
+            if ((location.hash || '').indexOf('#/waterfall') === 0 && wfState.trace && document.getElementById('wf-body')) wfRenderBody();
+          }, 200);
+        });
+      }
+    }
+    function wfVisibleSpans() {
+      const t = wfState.trace;
+      return (t.spans || []).filter(s => !wfState.hidden[s.category]);
+    }
+    window.wfToggleCat = (cat) => {
+      wfState.hidden[cat] = !wfState.hidden[cat];
+      wfRenderBody();
+    };
+    window.wfExportCSV = () => {
+      const t = wfState.trace;
+      if (!t || !t.spans) return;
+      const head = ['seq', 'request_id', 'model', 'requested_model', 'provider', 'category', 'status', 'start_offset_ms', 'gap_before_ms', 'ttfb_ms', 'total_ms', 'tokens', 'cost_krw', 'tool_calls', 'tool_errors', 'slow', 'created_at'];
+      const esc = v => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
+      const lines = [head.join(',')].concat(t.spans.map(s => [s.seq, s.request_id, s.model, s.requested_model, s.provider, s.category, s.status_code, s.start_offset_ms, s.gap_before_ms, s.ttfb_ms, s.total_ms, s.total_tokens, s.cost_krw, s.tool_calls, s.tool_errors, s.slow ? 1 : 0, s.created_at].map(esc).join(',')));
+      const blob = new Blob(['\ufeff' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'waterfall_' + (t.session_id || 'session') + '.csv';
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    };
+    function wfRenderBody() {
+      const t = wfState.trace;
+      const spans = wfVisibleSpans();
+      document.getElementById('wf-body').innerHTML =
+        waterfallSummary(t) +
+        waterfallBottleneck(t) +
+        waterfallLegend(t) +
+        waterfallChartSVG(t, spans) +
+        waterfallTable(spans);
+      document.querySelectorAll('#wf-body .wf-row, #wf-body .wf-rowlink').forEach(el => el.addEventListener('click', () => openExplain(el.getAttribute('data-rid'))));
+      makeSortable('#wf-body', 'waterfall');
+    }
+    function waterfallSummary(t) {
+      const busyPct = t.wall_ms > 0 ? (t.busy_ratio * 100).toFixed(0) + '%' : '-';
+      // time-composition stacked bar: first-token wait vs streaming vs idle
+      const seg = [
+        { v: t.wait_ms || 0, c: '#f59e0b', label: '첫 응답 대기' },
+        { v: t.stream_ms || 0, c: '#3b82f6', label: '스트리밍 수신' },
+        { v: t.idle_ms || 0, c: 'var(--muted)', label: '클라이언트 대기' },
+      ];
+      const segSum = seg.reduce((a, s) => a + s.v, 0) || 1;
+      const phaseBar = '<div style="margin:12px 0 24px; padding:0 2px">' +
+        '<div style="display:flex; height:18px; border-radius:4px; overflow:hidden; border:1px solid var(--line)">' +
+        seg.map(s => '<div title="' + s.label + ' ' + msLabel(s.v) + '" style="width:' + (s.v / segSum * 100).toFixed(2) + '%; background:' + s.c + '"></div>').join('') +
+        '</div>' +
+        '<div style="display:flex; gap:20px; flex-wrap:wrap; margin-top:10px; padding-left:4px; font-size:12px" class="muted">' +
+        seg.map(s => '<span style="display:inline-flex; align-items:center; gap:6px"><span style="width:10px;height:10px;border-radius:2px;background:' + s.c + '"></span>' + s.label + ' ' + msLabel(s.v) + ' (' + (s.v / segSum * 100).toFixed(0) + '%)</span>').join('') +
+        '</div></div>';
+      return '<div class="kpis">' +
+        kpi('요청 수', fmt(t.requests)) +
+        kpi('총 소요(wall)', msLabel(t.wall_ms)) +
+        kpi('LLM 처리(busy)', msLabel(t.busy_ms) + '<div class="muted" style="font-size:11px; font-weight:500; margin-top:6px">처리율 ' + busyPct + '</div>') +
+        kpi('대기/생각(idle)', msLabel(t.idle_ms)) +
+        kpi('느린 요청', fmt(t.slow_count || 0) + '<div class="muted" style="font-size:11px; font-weight:500; margin-top:6px">기준 ' + msLabel(t.slow_ms) + ' 이상</div>') +
+        kpi('누적 비용', money(t.total_cost_krw) + '<div class="muted" style="font-size:11px; font-weight:500; margin-top:6px">' + fmt(t.total_tokens) + ' tok · 도구 ' + fmt(t.tool_calls) + '</div>') +
+      '</div>' + phaseBar;
+    }
+    function waterfallBottleneck(t) {
+      const bn = t.bottleneck || {};
+      const slowSpan = (t.spans || []).find(s => s.seq === bn.slowest_seq);
+      const items = [];
+      if (bn.slowest_ms > 0 && slowSpan) {
+        items.push('<div class="kpi" style="cursor:pointer" onclick="openExplain(\'' + escapeAttr(slowSpan.request_id) + '\')">' +
+          '<div class="label">가장 느린 요청</div>' +
+          '<div class="value">#' + bn.slowest_seq + ' · ' + msLabel(bn.slowest_ms) + '</div>' +
+          '<div class="muted" style="font-size:11px; font-weight:500; margin-top:6px">' + escapeHTML(slowSpan.model || '') + ' · 전체의 ' + (bn.slowest_pct || 0).toFixed(0) + '% · 클릭→근거</div></div>');
+      }
+      if (bn.longest_gap_ms > 0) {
+        const gapSpan = (t.spans || []).find(s => s.seq === bn.longest_gap_seq);
+        items.push('<div class="kpi">' +
+          '<div class="label">가장 긴 대기(생각)</div>' +
+          '<div class="value">' + msLabel(bn.longest_gap_ms) + '</div>' +
+          '<div class="muted" style="font-size:11px; font-weight:500; margin-top:6px">#' + bn.longest_gap_seq + (gapSpan ? ' (' + escapeHTML(gapSpan.model || '') + ')' : '') + ' 직전 · 전체의 ' + (bn.longest_gap_pct || 0).toFixed(0) + '%</div></div>');
+      }
+      if (!items.length) return '';
+      const verdict = (t.idle_ms > t.busy_ms)
+        ? '병목은 <strong>클라이언트 대기(생각·도구 실행)</strong> 쪽입니다. 모델 증설보다 에이전트 동작을 점검하세요.'
+        : ((t.wait_ms > t.stream_ms)
+          ? '업스트림 시간 대부분이 <strong>첫 토큰 대기(TTFB)</strong>입니다. 모델 큐·프롬프트 길이를 점검하세요.'
+          : '업스트림 시간 대부분이 <strong>스트리밍 수신</strong>입니다. 출력 길이가 깁니다.');
+      return '<h3 style="margin:20px 0 12px; font-size:14px">병목 분석</h3>' +
+        '<div class="kpis" style="margin-bottom:12px">' + items.join('') + '</div>' +
+        '<div class="muted" style="font-size:12px; margin-bottom:20px; padding-left:2px; line-height:1.6">' + verdict + '</div>';
+    }
+    function waterfallLegend(t) {
+      const cats = t.categories || {};
+      return '<div style="display:flex; gap:14px; flex-wrap:wrap; align-items:center; margin:0 0 16px; padding-left:2px">' +
+        '<span class="muted" style="font-size:12px">분류 필터:</span>' +
+        Object.keys(waterfallColors).map(k => {
+          const off = wfState.hidden[k];
+          return '<span onclick="wfToggleCat(\'' + k + '\')" title="클릭하여 숨기기/보이기" style="cursor:pointer; user-select:none; display:inline-flex; align-items:center; gap:6px; padding:4px 10px; border:1px solid var(--line); border-radius:14px; opacity:' + (off ? '0.4' : '1') + '; text-decoration:' + (off ? 'line-through' : 'none') + '">' +
+            '<span style="width:10px;height:10px;border-radius:2px;background:' + waterfallColors[k].c + '"></span>' +
+            waterfallColors[k].label + ' <span class="muted">' + fmt(cats[k] || 0) + '</span></span>';
+        }).join('') +
+        '</div>';
+    }
+    function waterfallChartSVG(t, spans) {
+      spans = spans || t.spans || [];
+      if (!spans.length) return '<div class="empty">표시할 요청 없음 (필터 확인)</div>';
+      // Size the viewBox to the actual panel width so the bar track fills the space
+      // instead of being letterboxed/centered at a fixed 960px width.
+      const host = document.getElementById('wf-body');
+      const W = Math.max(760, Math.round(((host && host.clientWidth) ? host.clientWidth : 960) - 4));
+      const padL = 168, padR = 30, padT = 36, padB = 14, rowH = 28, barH = 14;
+      const innerW = W - padL - padR;
+      const H = padT + spans.length * rowH + padB;
+      const span = Math.max(1, t.wall_ms);
+      const xs = ms => padL + (Math.max(0, ms) / span) * innerW;
+      const maxLabel = Math.max(8, Math.floor((padL - 12) / 6.4));
+      const ticks = [0, 0.25, 0.5, 0.75, 1];
+      const grid = ticks.map(f => {
+        const x = padL + f * innerW;
+        return '<line x1="' + x.toFixed(1) + '" y1="' + padT + '" x2="' + x.toFixed(1) + '" y2="' + (H - padB) + '" stroke="var(--line)" stroke-dasharray="2,3"/>' +
+          '<text x="' + x.toFixed(1) + '" y="' + (padT - 8) + '" font-size="10" fill="currentColor" opacity="0.6" text-anchor="middle">' + msLabel(span * f) + '</text>';
+      }).join('');
+      const rows = spans.map((sp, i) => {
+        const y = padT + i * rowH;
+        const col = (waterfallColors[sp.category] || waterfallColors.normal).c;
+        const x0 = xs(sp.start_offset_ms);
+        const totalW = Math.max(3, (sp.total_ms / span) * innerW);
+        const ttfbW = Math.min(totalW, (sp.ttfb_ms / span) * innerW);
+        const label = '#' + sp.seq + ' ' + (sp.model || '?');
+        const labelShort = label.length > maxLabel ? label.slice(0, maxLabel - 1) + '…' : label;
+        const tip = '#' + sp.seq + ' ' + (sp.model || '?') + (sp.requested_model && sp.requested_model !== sp.model ? ' (요청:' + sp.requested_model + ')' : '') +
+          ' · ' + (sp.provider || '?') + ' · 상태 ' + sp.status_code +
+          ' · TTFB ' + msLabel(sp.ttfb_ms) + ' · 총 ' + msLabel(sp.total_ms) +
+          (sp.gap_before_ms > 0 ? ' · 직전 대기 ' + msLabel(sp.gap_before_ms) : '') +
+          ' · ' + fmt(sp.total_tokens) + 'tok · ' + money(sp.cost_krw) +
+          (sp.tool_calls > 0 ? ' · 도구 ' + fmt(sp.tool_calls) + (sp.tool_errors > 0 ? '(' + fmt(sp.tool_errors) + '오류)' : '') : '') +
+          ' · ' + ((waterfallColors[sp.category] || {}).label || sp.category) +
+          (sp.slow ? ' · ⚠느림' : '');
+        const stripe = i % 2 ? '<rect x="0" y="' + y + '" width="' + W + '" height="' + rowH + '" fill="var(--line)" opacity="0.05"/>' : '';
+        const gapLabel = (sp.gap_before_ms >= 1000 && x0 - 4 > padL) ?
+          '<text x="' + (x0 - 4).toFixed(1) + '" y="' + (y + rowH / 2 + 3) + '" font-size="9" fill="currentColor" opacity="0.45" text-anchor="end">' + msLabel(sp.gap_before_ms) + ' 대기</text>' : '';
+        const barY = y + (rowH - barH) / 2;
+        const ttfbRect = ttfbW > 0.5 ? '<rect x="' + x0.toFixed(1) + '" y="' + barY + '" width="' + ttfbW.toFixed(1) + '" height="' + barH + '" rx="2" fill="' + col + '" fill-opacity="0.4"/>' : '';
+        const streamX = x0 + ttfbW, streamW = Math.max(1, totalW - ttfbW);
+        const slowStroke = sp.slow ? ' stroke="var(--bad)" stroke-width="1.5"' : '';
+        const streamRect = '<rect x="' + streamX.toFixed(1) + '" y="' + barY + '" width="' + streamW.toFixed(1) + '" height="' + barH + '" rx="2" fill="' + col + '" fill-opacity="0.95"' + slowStroke + '/>';
+        const markX = Math.min(x0 + totalW + 5, W - 12);
+        const slowMark = sp.slow ? '<text x="' + markX.toFixed(1) + '" y="' + (y + rowH / 2 + 3) + '" font-size="11" fill="var(--bad)">⚠</text>' : '';
+        return '<g class="wf-row" data-rid="' + escapeHTML(sp.request_id) + '" style="cursor:pointer">' +
+          stripe +
+          '<text x="6" y="' + (y + rowH / 2 + 3) + '" font-size="11" fill="currentColor" opacity="0.85">' + escapeHTML(labelShort) + '</text>' +
+          gapLabel + ttfbRect + streamRect + slowMark +
+          '<title>' + escapeHTML(tip) + '</title>' +
+        '</g>';
+      }).join('');
+      return '<div style="overflow:auto; max-height:600px; border:1px solid var(--line); border-radius:8px; margin-top:4px">' +
+        '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" height="' + H + '" preserveAspectRatio="xMinYMin meet" style="color:var(--ink); display:block">' +
+        grid +
+        '<line x1="' + padL + '" y1="' + padT + '" x2="' + padL + '" y2="' + (H - padB) + '" stroke="var(--line-strong)"/>' +
+        rows +
+        '</svg></div>' +
+        '<div class="muted" style="font-size:12px; margin:10px 0 20px; padding-left:2px; line-height:1.6">막대 = 한 요청. 연한 부분 = 첫 응답 대기(TTFB), 진한 부분 = 스트리밍 수신. 막대 사이 빈 공간 = 클라이언트 대기/생각 시간. ⚠/빨간 테두리 = 느린 요청(기준 ' + msLabel(t.slow_ms) + '). 막대 클릭 시 라우팅 근거(Explain) 표시.</div>';
+    }
+    function waterfallTable(spans) {
+      spans = spans || [];
+      if (!spans.length) return '';
+      return '<table><thead><tr><th data-sort="num">#</th><th data-sort="str">모델</th><th data-sort="str">분류</th><th data-sort="num">시작(+)</th><th data-sort="num">직전 대기</th><th data-sort="num">TTFB</th><th data-sort="num">총 지연</th><th data-sort="num">토큰</th><th data-sort="num">비용</th><th data-sort="num">도구</th><th data-sort="num">상태</th></tr></thead><tbody>' +
+        spans.map(sp => {
+          const cc = waterfallColors[sp.category] || waterfallColors.normal;
+          return '<tr class="wf-rowlink" data-rid="' + escapeAttr(sp.request_id) + '" style="cursor:pointer">' +
+            '<td>' + sp.seq + '</td>' +
+            '<td>' + escapeHTML(sp.model || '') + (sp.requested_model && sp.requested_model !== sp.model ? '<div class="muted">요청: ' + escapeHTML(sp.requested_model) + '</div>' : '') + '</td>' +
+            '<td><span class="status" style="background:' + cc.c + '22; color:' + cc.c + '">' + cc.label + '</span></td>' +
+            '<td data-num="' + sp.start_offset_ms + '">' + msLabel(sp.start_offset_ms) + '</td>' +
+            '<td data-num="' + sp.gap_before_ms + '">' + (sp.gap_before_ms > 0 ? msLabel(sp.gap_before_ms) : '-') + '</td>' +
+            '<td data-num="' + sp.ttfb_ms + '">' + msLabel(sp.ttfb_ms) + '</td>' +
+            '<td data-num="' + sp.total_ms + '">' + msLabel(sp.total_ms) + (sp.slow ? ' <span class="status error">느림</span>' : '') + '</td>' +
+            '<td data-num="' + (sp.total_tokens || 0) + '">' + fmt(sp.total_tokens) + '</td>' +
+            '<td data-num="' + (sp.cost_krw || 0) + '">' + money(sp.cost_krw) + '</td>' +
+            '<td data-num="' + (sp.tool_calls || 0) + '">' + fmt(sp.tool_calls) + (sp.tool_errors > 0 ? ' <span class="status error">' + fmt(sp.tool_errors) + '</span>' : '') + '</td>' +
+            '<td data-num="' + sp.status_code + '">' + statusBadge(sp.status_code) + '</td>' +
+          '</tr>';
+        }).join('') + '</tbody></table>';
+    }
+
     // ---------- Explainability View (XView) ----------
     window.openExplain = async (id) => {
       if (!id) return;
@@ -748,9 +995,12 @@ const adminHTML = `<!doctype html>
       const rt = x.routing || {}, fb = x.fallback || {}, ca = x.cache || {}, sf = x.safety || {}, co = x.cost || {}, se = x.session || {};
       const tierBadge = { high: 'error', medium: 'warn', low: '' }[rt.tier] || '';
 
+      const modelLine = rt.model_changed
+        ? '<span class="status warn">' + escapeHTML(rt.requested_model || '') + '</span> → <strong>' + escapeHTML(rt.chosen_model || '') + '</strong> <span class="muted">(복잡도 규칙으로 변경)</span>'
+        : escapeHTML(rt.chosen_model || '');
       const routing = '<div class="kv">' +
         row('선택 provider', escapeHTML(rt.chosen_provider || '')) +
-        row('선택 모델', escapeHTML(rt.chosen_model || '')) +
+        row('선택 모델', modelLine) +
         row('라우팅 근거', escapeHTML(rt.reason_text || rt.reason || '') + (rt.detail ? ' <span class="muted">(' + escapeHTML(rt.detail) + ')</span>' : '')) +
         row('복잡도 점수', '<span class="status ' + tierBadge + '">' + fmt(rt.complexity || 0) + ' / 100 · ' + escapeHTML(rt.tier || '') + ' tier</span>' + progressBar((rt.complexity || 0) / 100)) +
         row('endpoint', escapeHTML(rt.endpoint || '')) +
@@ -790,6 +1040,7 @@ const adminHTML = `<!doctype html>
 
       const session = '<div class="kv">' +
         row('세션', se.session_id ? ('<a href="#" onclick="closeModal();openSessionTimeline(\'' + escapeAttr(se.session_id) + '\');return false">' + escapeHTML(se.session_id) + '</a>') : '<span class="muted">없음</span>') +
+        (se.session_id ? row('워터폴', '<a href="#" onclick="closeModal();openWaterfall(\'' + escapeAttr(se.session_id) + '\');return false">트랜잭션 타임라인 보기</a>') : '') +
         row('스트리밍', se.stream ? '예' : '아니오') +
         row('요청 상세', '<a href="#" onclick="closeModal();openRequestDetail(\'' + escapeAttr(x.request_id) + '\');return false">원문/프롬프트/응답 보기</a>') +
       '</div>';
@@ -1538,6 +1789,7 @@ const adminHTML = `<!doctype html>
         row('누적 토큰', fmt(tl.total_tokens)) +
         row('도구 호출', fmt(tl.tool_calls)) +
         row('세션 길이', fmt(tl.duration_seconds) + ' 초') +
+        row('워터폴', '<a href="#" onclick="closeModal();openWaterfall(\'' + escapeAttr(tl.session_id || 'no-session') + '\');return false">트랜잭션 워터폴 보기</a>') +
       '</div>';
       if (!pts.length) return summary + '<div class="empty">턴 없음</div>';
 
@@ -2612,7 +2864,10 @@ const adminHTML = `<!doctype html>
 
     // ---------- quotas ----------
     async function renderQuotas() {
-      const r = await api('/admin/quotas');
+      const [r, br] = await Promise.all([
+        api('/admin/quotas'),
+        api('/admin/budgets').catch(() => ({ budgets: [] }))
+      ]);
       const usage = r.usage || [];
       const quotaRow = (u) => {
         const q = u.quota;
@@ -2635,6 +2890,34 @@ const adminHTML = `<!doctype html>
         usage.map(quotaRow).join('') + '</tbody></table>'
       ) : '<div class="empty">설정된 한도 없음</div>';
 
+      const budgets = br.budgets || [];
+      const budgetRow = (b) => {
+        const q = b.budget;
+        const burn = progressBar(b.burn_ratio);
+        const projPct = (b.projected_ratio * 100);
+        const projCls = b.on_track ? '' : (projPct >= 120 ? 'danger' : 'warn');
+        const exhaust = b.exhaustion_date
+          ? '<span class="status ' + (b.on_track ? 'warn' : 'error') + '">' + escapeHTML(b.exhaustion_date) + ' 소진 예상</span>'
+          : '<span class="status">월말까지 여유</span>';
+        const trackBadge = b.on_track
+          ? '<span class="status">정상 추세</span>'
+          : '<span class="status error">예산 초과 추세</span>';
+        return '<tr>' +
+          '<td>' + scopeLabel(q.scope) + '<div class="muted">' + escapeHTML(q.scope_value) + '</div></td>' +
+          '<td>' + money(b.spent_krw) + ' / ' + money(q.monthly_krw) + burn +
+            '<div class="muted">경과 ' + Math.round(b.days_elapsed) + '/' + Math.round(b.days_in_month) + '일</div></td>' +
+          '<td><span class="' + projCls + '">' + money(b.projected_krw) + '</span>' +
+            '<div class="muted">예산 대비 ' + projPct.toFixed(0) + '%</div></td>' +
+          '<td>' + trackBadge + '<div style="margin-top:4px">' + exhaust + '</div></td>' +
+          '<td>' + escapeHTML(q.note || '') + '</td>' +
+          '<td><button class="danger" type="button" onclick="deleteBudget(\'' + q.id + '\')">삭제</button></td>' +
+          '</tr>';
+      };
+      const budgetTable = budgets.length ? (
+        '<table><thead><tr><th>대상</th><th>이번 달 누적 / 월 예산</th><th>월말 예상 지출</th><th>소진 예측</th><th>메모</th><th>동작</th></tr></thead><tbody>' +
+        budgets.map(budgetRow).join('') + '</tbody></table>'
+      ) : '<div class="empty">설정된 예산 없음</div>';
+
       const html = section('사용 한도 (Quota)',
         '<form class="inline-form" id="quota-form" style="grid-template-columns: 120px minmax(120px,1fr) 110px minmax(120px,1fr) minmax(120px,1fr) minmax(120px,1fr) 80px;">' +
           '<select id="q-scope">' +
@@ -2654,10 +2937,42 @@ const adminHTML = `<!doctype html>
           '<button type="submit">추가</button>' +
         '</form>' +
         table
+      ) + section('월 예산 소진 예측 (Budget Burn-down)',
+        '<p class="muted" style="margin-top:0">월 예산 대비 이번 달 누적 지출과 현재 추세(일평균 소진율)를 월말까지 연장한 예상 지출을 보여줍니다. 추세가 예산을 초과하면 소진 예상일과 함께 경고합니다. 기준 시간대는 KST(월초~월말)입니다.</p>' +
+        '<form class="inline-form" id="budget-form" style="grid-template-columns: 120px minmax(120px,1fr) minmax(120px,1fr) minmax(160px,1fr) 80px;">' +
+          '<select id="b-scope">' +
+            '<option value="global">전체</option>' +
+            '<option value="team">팀</option>' +
+            '<option value="api_key">API 키</option>' +
+          '</select>' +
+          '<input id="b-value" placeholder="대상 값 (전체는 자동)">' +
+          '<input id="b-krw" type="number" min="0" step="1000" placeholder="월 예산(KRW)">' +
+          '<input id="b-note" placeholder="메모">' +
+          '<button type="submit">추가</button>' +
+        '</form>' +
+        budgetTable
       );
       document.getElementById('view').innerHTML = html;
       document.getElementById('quota-form').addEventListener('submit', addQuota);
+      document.getElementById('budget-form').addEventListener('submit', addBudget);
     }
+    async function addBudget(event) {
+      event.preventDefault();
+      const scope = document.getElementById('b-scope').value;
+      const body = {
+        scope,
+        scope_value: scope === 'global' ? '*' : document.getElementById('b-value').value.trim(),
+        monthly_krw: Number(document.getElementById('b-krw').value || 0),
+        note: document.getElementById('b-note').value.trim()
+      };
+      await api('/admin/budgets', { method: 'POST', body: JSON.stringify(body) });
+      route();
+    }
+    window.deleteBudget = async (id) => {
+      if (!confirm('해당 예산을 삭제하시겠습니까?')) return;
+      await api('/admin/budgets/' + encodeURIComponent(id), { method: 'DELETE' });
+      route();
+    };
     function progressBar(filled) {
       const pctVal = Math.max(0, Math.min(1, Number(filled) || 0));
       const cls = pctVal >= 1 ? 'danger' : (pctVal >= 0.8 ? 'warn' : '');
@@ -2959,6 +3274,7 @@ const adminHTML = `<!doctype html>
               '<option value="tool_loop">에이전트 루프(세션 최대 호출수)</option>' +
               '<option value="mcp_new_tools">MCP 신규 도구 수(드리프트)</option>' +
               '<option value="anomaly_zmax">이상 징후 z-score(최대)</option>' +
+              '<option value="budget_burn_ratio">예산 소진 예측 비율(최대)</option>' +
             '</select>' +
             '<select id="alert-scope">' +
               '<option value="global">전체</option>' +
@@ -2994,7 +3310,7 @@ const adminHTML = `<!doctype html>
     }
 
     function metricLabel(metric) {
-      return { requests: '요청 수', errors: '오류율', krw: 'KRW 비용', tokens: '토큰', latency_p95_ms: '전체 지연 P95', first_chunk_p95_ms: '첫 청크 P95', llm_eval_failures: 'LLM 평가 실패 수', llm_eval_failure_rate: 'LLM 평가 실패율', tool_errors: 'tool 오류 수', tool_error_rate: 'tool 오류율', tool_loop: '에이전트 루프', mcp_new_tools: 'MCP 신규 도구 수', anomaly_zmax: '이상 징후 z-score' }[metric] || metric;
+      return { requests: '요청 수', errors: '오류율', krw: 'KRW 비용', tokens: '토큰', latency_p95_ms: '전체 지연 P95', first_chunk_p95_ms: '첫 청크 P95', llm_eval_failures: 'LLM 평가 실패 수', llm_eval_failure_rate: 'LLM 평가 실패율', tool_errors: 'tool 오류 수', tool_error_rate: 'tool 오류율', tool_loop: '에이전트 루프', mcp_new_tools: 'MCP 신규 도구 수', anomaly_zmax: '이상 징후 z-score', budget_burn_ratio: '예산 소진 예측 비율' }[metric] || metric;
     }
     function formatThreshold(metric, value) {
       if (metric === 'krw') return money(value);
@@ -3030,12 +3346,13 @@ const adminHTML = `<!doctype html>
 
     // ---------- settings ----------
     async function renderSettings() {
-      const [keys, providers, retention, fallback, audit] = await Promise.all([
+      const [keys, providers, retention, fallback, audit, routes] = await Promise.all([
         api('/admin/api-keys'),
         api('/admin/providers'),
         api('/admin/retention'),
         api('/admin/fallback'),
         api('/admin/audit-logs?limit=50'),
+        api('/admin/routing-rules').catch(() => ({ rules: [] })),
       ]);
 
       const html =
@@ -3063,6 +3380,7 @@ const adminHTML = `<!doctype html>
             providerTable(providers.providers || [])
           ) +
         '</div>' +
+        section('복잡도 기반 비용 최적 라우팅 규칙', routingRulesPanel(routes.rules || [])) +
         section('데이터 보존 정책', retentionPanel(retention)) +
         section('Fallback 로그 재처리', fallbackPanel(fallback)) +
         section('관리자 변경 이력', auditPanel(audit.audit_logs || []));
@@ -3070,6 +3388,8 @@ const adminHTML = `<!doctype html>
       document.getElementById('view').innerHTML = html;
       document.getElementById('key-form').addEventListener('submit', createProxyKey);
       document.getElementById('provider-form').addEventListener('submit', saveProvider);
+      const rrForm = document.getElementById('routing-rule-form');
+      if (rrForm) rrForm.addEventListener('submit', addRoutingRule);
       const retentionBtn = document.getElementById('retention-run');
       if (retentionBtn) retentionBtn.addEventListener('click', runRetention);
       const fallbackBtn = document.getElementById('fallback-replay');
@@ -3120,6 +3440,65 @@ const adminHTML = `<!doctype html>
           '<td><button class="danger" type="button" onclick="deleteProvider(\'' + r.name + '\')">삭제</button></td></tr>').join('') +
         '</tbody></table>';
     }
+    function routingRulesPanel(rules) {
+      const form =
+        '<form class="inline-form" id="routing-rule-form" style="grid-template-columns: 80px minmax(120px,1fr) 80px 80px minmax(140px,1fr) minmax(120px,1fr) minmax(120px,1fr) 70px;">' +
+          '<input id="rr-priority" type="number" min="1" value="100" title="우선순위(낮을수록 먼저)">' +
+          '<input id="rr-pattern" placeholder="모델 패턴 (예: gpt-*)" value="*">' +
+          '<input id="rr-min" type="number" min="0" max="100" value="0" title="최소 복잡도">' +
+          '<input id="rr-max" type="number" min="0" max="100" value="34" title="최대 복잡도">' +
+          '<input id="rr-target" placeholder="대상 모델 (예: gpt-4.1-mini)" required>' +
+          '<input id="rr-provider" placeholder="대상 provider(선택)">' +
+          '<input id="rr-note" placeholder="메모">' +
+          '<button type="submit">추가</button>' +
+        '</form>';
+      const tierBadge = (lo, hi) => {
+        const mid = (lo + hi) / 2;
+        const cls = mid >= 70 ? 'error' : (mid >= 35 ? 'warn' : '');
+        return '<span class="status ' + cls + '">' + lo + '–' + hi + '</span>';
+      };
+      const table = rules.length ?
+        '<table><thead><tr><th>우선순위</th><th>모델 패턴</th><th>복잡도</th><th>→ 대상 모델</th><th>대상 provider</th><th>상태</th><th>메모</th><th>동작</th></tr></thead><tbody>' +
+        rules.map(r => '<tr>' +
+          '<td>' + fmt(r.priority) + '</td>' +
+          '<td><span class="pill">' + escapeHTML(r.match_pattern) + '</span></td>' +
+          '<td>' + tierBadge(r.min_complexity, r.max_complexity) + '</td>' +
+          '<td><strong>' + escapeHTML(r.target_model) + '</strong></td>' +
+          '<td>' + (r.target_provider ? escapeHTML(r.target_provider) : '<span class="muted">자동</span>') + '</td>' +
+          '<td><span class="status ' + (r.enabled ? '' : 'error') + '">' + (r.enabled ? '사용' : '중지') + '</span></td>' +
+          '<td>' + escapeHTML(r.note || '') + '</td>' +
+          '<td><button class="secondary" type="button" onclick="toggleRoutingRule(\'' + r.id + '\',' + (!r.enabled) + ')">' + (r.enabled ? '중지' : '사용') + '</button> ' +
+          '<button class="danger" type="button" onclick="deleteRoutingRule(\'' + r.id + '\')">삭제</button></td>' +
+        '</tr>').join('') + '</tbody></table>'
+        : '<div class="empty">규칙 없음. 예: 모델 패턴 <code>*</code>, 복잡도 0–34 → 저가 모델로 자동 다운그레이드.</div>';
+      return form + table +
+        '<div class="muted" style="padding:0 14px 12px; font-size:12px">클라이언트가 X-Proxy-Provider를 지정하거나 <code>X-Proxy-No-Route: 1</code> 헤더를 보내면 규칙이 적용되지 않습니다. 우선순위가 낮은 규칙부터 첫 매칭을 적용합니다.</div>';
+    }
+    async function addRoutingRule(e) {
+      e.preventDefault();
+      const body = {
+        priority: Number(document.getElementById('rr-priority').value || 100),
+        match_pattern: document.getElementById('rr-pattern').value.trim() || '*',
+        min_complexity: Number(document.getElementById('rr-min').value || 0),
+        max_complexity: Number(document.getElementById('rr-max').value || 100),
+        target_model: document.getElementById('rr-target').value.trim(),
+        target_provider: document.getElementById('rr-provider').value.trim(),
+        note: document.getElementById('rr-note').value.trim(),
+        enabled: true,
+      };
+      await api('/admin/routing-rules', { method: 'POST', body: JSON.stringify(body) });
+      route();
+    }
+    window.toggleRoutingRule = async (id, enabled) => {
+      await api('/admin/routing-rules/' + encodeURIComponent(id), { method: 'PATCH', body: JSON.stringify({ enabled }) });
+      route();
+    };
+    window.deleteRoutingRule = async (id) => {
+      if (!confirm('이 라우팅 규칙을 삭제하시겠습니까?')) return;
+      await api('/admin/routing-rules/' + encodeURIComponent(id), { method: 'DELETE' });
+      route();
+    };
+
     function retentionPanel(s) {
       return '<div style="padding:14px"><div class="kv">' +
         row('요청 보존', fmt(s.request_days) + ' 일') +
@@ -3205,7 +3584,7 @@ const adminHTML = `<!doctype html>
     }
 
     // ---------- keyboard ----------
-    const tabMap = { d: 'dashboard', x: 'xview', l: 'llm', c: 'mcp', r: 'requests', p: 'prompts', u: 'users', m: 'teams', i: 'ips', q: 'quotas', a: 'safety', s: 'settings' };
+    const tabMap = { d: 'dashboard', x: 'xview', w: 'waterfall', l: 'llm', c: 'mcp', r: 'requests', p: 'prompts', u: 'users', m: 'teams', i: 'ips', q: 'quotas', a: 'safety', s: 'settings' };
     let gPending = false;
     let gTimer = null;
     function isTyping(target) {
@@ -3259,6 +3638,7 @@ const adminHTML = `<!doctype html>
         ['<kbd>Esc</kbd>', '모달/오버레이 닫기'],
         ['<kbd>g</kbd> <kbd>d</kbd>', '대시보드'],
         ['<kbd>g</kbd> <kbd>x</kbd>', 'XView (응답시간 분포)'],
+        ['<kbd>g</kbd> <kbd>w</kbd>', 'Waterfall (트랜잭션 타임라인)'],
         ['<kbd>g</kbd> <kbd>l</kbd>', 'LLM 관측'],
         ['<kbd>g</kbd> <kbd>c</kbd>', 'MCP'],
         ['<kbd>g</kbd> <kbd>r</kbd>', '호출 이력'],
