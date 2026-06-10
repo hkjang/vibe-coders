@@ -108,6 +108,7 @@ $env:PROXY_API_KEYS="dev:dev-proxy-key:alice:platform,team:team-proxy-key:bob:ba
 | `POSTGRES_DSN` / `DATABASE_URL` | 없음 | 있으면 PostgreSQL 사용 |
 | `PROXY_API_KEYS` | 없음 | `name:key:owner:team` CSV |
 | `ATTRIBUTE_EXTERNAL_KEYS` | `true` | 미등록 키를 키 지문(`key_…`, 상태 external)으로 사용자별 귀속. `false`면 단일 `passthrough` |
+| `VCS_WEBHOOK_SECRET` | 없음 | 설정 시 `/vcs/*` 수집 엔드포인트 활성화(GitLab/Bitbucket/범용 → Prompt↔Commit↔MR 상관). 미설정 시 비활성 |
 | `ADMIN_TOKEN` | 없음 | 설정 시 `/admin/*` Bearer 토큰 요구 (전권) |
 | `ADMIN_READONLY_TOKEN` | 없음 | 설정 시 GET/HEAD 만 허용되는 읽기전용 admin 토큰 |
 | `GATEWAY_SECRET` | 개발용 기본값 | Provider API key 암호화 secret. 운영에서는 반드시 설정 |
@@ -484,6 +485,19 @@ curl.exe http://localhost:8080/admin/mcp/upstreams `
 ```
 
 클라이언트는 MCP 서버 URL 로 `http://<gateway>:8080/mcp` 하나만 설정하면 됩니다. (현재 Streamable HTTP 업스트림 지원; stdio 서브프로세스는 향후 과제)
+
+## VCS 상관 (Prompt → Commit → MR → Merge)
+
+단순 게이트웨이를 넘어 **프롬프트가 실제 코드/MR 로 이어졌는지** 추적합니다. 오프라인망의 **GitLab·Bitbucket(Server/Cloud)** 과 범용 수집을 모두 지원합니다(외부 의존성 0).
+
+- **수집 활성화**: `VCS_WEBHOOK_SECRET` 설정 → `/vcs/*` 엔드포인트 활성화.
+  - GitLab: 프로젝트 웹훅 URL `http://<gateway>:8080/vcs/webhook/gitlab`, Secret Token = `VCS_WEBHOOK_SECRET` (Push·Merge request events).
+  - Bitbucket: 웹훅 URL `http://<gateway>:8080/vcs/webhook/bitbucket?token=<VCS_WEBHOOK_SECRET>` (PR·push; Server `pr:*`/`repo:refs_changed`, Cloud `pullrequest:*`/`repo:push`).
+  - 범용/CI·git 훅: `POST /vcs/events` (헤더 `X-Vibe-VCS-Secret`) 로 `{provider,kind,repo,branch,sha,title,session_id?}` 또는 `{events:[...]}`.
+- **세션 연결**: 커밋 메시지·MR 제목·브랜치에 `Vibe-Session: <id>`(또는 `[vibe:<id>]`) 마커를 넣으면 그 세션에 연결되고, 세션의 **주 사용자(api_key)** 까지 자동 연결됩니다. 범용 수집은 `session_id` 를 직접 지정 가능.
+- **표시**: 세션 타임라인 모달에 "연결된 VCS(커밋/MR)" 표(유형·제목·저장소·작성자·시각, MR 상태 배지). API: `GET /admin/vcs/events?session_id=&repo=&api_key_id=`.
+
+이로써 `Prompt → Response → Commit → MR → Merge` 전 구간을 한 게이트웨이에서 연결합니다.
 
 ## 사용자·IP 별 이력 조회
 

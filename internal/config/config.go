@@ -22,7 +22,14 @@ type Config struct {
 	Auth       AuthConfig
 	Secret     SecretConfig
 	Session    SessionConfig
+	VCS        VCSConfig
 	Pricing    map[string]ModelPrice
+}
+
+// VCSConfig gates the VCS correlation ingest endpoints. When WebhookSecret is empty
+// the public /vcs/* endpoints are disabled (admins can still ingest via /admin/vcs).
+type VCSConfig struct {
+	WebhookSecret string
 }
 
 type UpstreamConfig struct {
@@ -143,6 +150,9 @@ func Load() (Config, error) {
 		Session: SessionConfig{
 			InferenceEnabled: boolEnv("SESSION_INFERENCE_ENABLED", true),
 			IdleTimeout:      durationEnv("SESSION_IDLE_TIMEOUT", 30*time.Minute),
+		},
+		VCS: VCSConfig{
+			WebhookSecret: os.Getenv("VCS_WEBHOOK_SECRET"),
 		},
 		Pricing: map[string]ModelPrice{},
 	}

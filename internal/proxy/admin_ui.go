@@ -1827,12 +1827,35 @@ const adminHTML = `<!doctype html>
 
     window.openSessionTimeline = async (sessionID) => {
       try {
-        const tl = await api('/admin/llm/session?session_id=' + encodeURIComponent(sessionID));
-        openModal('세션 타임라인 - ' + sessionID, sessionTimelineHTML(tl));
+        const [tl, vcs] = await Promise.all([
+          api('/admin/llm/session?session_id=' + encodeURIComponent(sessionID)),
+          api('/admin/vcs/events?session_id=' + encodeURIComponent(sessionID)).catch(() => ({ events: [] })),
+        ]);
+        openModal('세션 타임라인 - ' + sessionID, sessionTimelineHTML(tl) + vcsEventsHTML(vcs.events || []));
       } catch (err) {
         openModal('오류', '<div class="error-line">' + escapeHTML(err.message) + '</div>');
       }
     };
+    function vcsEventsHTML(events) {
+      if (!events.length) {
+        return '<h4 style="margin:16px 0 6px; font-size:14px">연결된 VCS (커밋 / MR)</h4>' +
+          '<div class="muted" style="font-size:12px">이 세션에 연결된 커밋·MR 이 없습니다. 커밋 메시지/브랜치/ MR 제목에 <code>Vibe-Session: ' + '…' + '</code> 마커를 넣고 GitLab/Bitbucket 웹훅(또는 CI)을 게이트웨이로 보내면 Prompt→Commit→MR 이 연결됩니다.</div>';
+      }
+      const kindBadge = (e) => e.kind === 'merge_request'
+        ? '<span class="status ' + (e.state === 'merged' ? '' : (e.state === 'closed' ? 'error' : 'warn')) + '">MR ' + escapeHTML(e.state || '') + '</span>'
+        : '<span class="pill">commit</span>';
+      const rowsHtml = events.map(e => {
+        const label = e.url ? '<a href="' + escapeAttr(e.url) + '" target="_blank" rel="noopener">' + escapeHTML(e.title || e.ref) + '</a>' : escapeHTML(e.title || e.ref);
+        return '<tr>' +
+          '<td>' + kindBadge(e) + '</td>' +
+          '<td>' + label + '<div class="muted">' + escapeHTML(e.provider) + ' · ' + escapeHTML(e.repo || '') + (e.branch ? (' · ' + escapeHTML(e.branch)) : '') + '</div></td>' +
+          '<td>' + escapeHTML(e.author_name || e.author_email || '') + '</td>' +
+          '<td>' + ago(e.created_at) + '</td>' +
+        '</tr>';
+      }).join('');
+      return '<h4 style="margin:16px 0 6px; font-size:14px">연결된 VCS (커밋 / MR) — ' + events.length + '건</h4>' +
+        '<table><thead><tr><th>유형</th><th>제목 / 저장소</th><th>작성자</th><th>시각</th></tr></thead><tbody>' + rowsHtml + '</tbody></table>';
+    }
 
     function sessionTimelineHTML(tl) {
       const pts = tl.points || [];

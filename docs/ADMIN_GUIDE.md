@@ -337,6 +337,34 @@ curl -H "Authorization: Bearer $ADMIN_TOKEN" http://localhost:8080/admin/mcp/pol
 
 ---
 
+## 4-3. VCS 상관 (Prompt → Commit → MR → Merge)
+
+프롬프트가 실제 코드/MR 로 이어졌는지 추적합니다. **GitLab·Bitbucket(Server/Cloud)·범용** 수집을 지원하며 오프라인망에서 동작합니다(외부 의존성 없음).
+
+### 활성화 (필수: `VCS_WEBHOOK_SECRET`)
+
+이 환경변수를 설정해야 `/vcs/*` 수집 엔드포인트가 켜집니다(미설정 시 403).
+
+| 소스 | 설정 |
+| --- | --- |
+| GitLab | 프로젝트 → 설정 → 웹훅. URL `http://<gateway>:8080/vcs/webhook/gitlab`, **Secret Token** = `VCS_WEBHOOK_SECRET`, 트리거: Push events, Merge request events |
+| Bitbucket | 웹훅 URL `http://<gateway>:8080/vcs/webhook/bitbucket?token=<VCS_WEBHOOK_SECRET>`. Server `pr:*`/`repo:refs_changed`, Cloud `pullrequest:*`/`repo:push` |
+| 범용 / CI · git 훅 | `POST http://<gateway>:8080/vcs/events`, 헤더 `X-Vibe-VCS-Secret: <secret>`, 바디 `{provider,kind,repo,branch,sha,title,session_id?}` 또는 `{events:[...]}` |
+
+### 세션·사용자 연결
+
+- 커밋 메시지 · MR 제목 · 브랜치에 **`Vibe-Session: <세션ID>`**(또는 `[vibe:<세션ID>]`) 마커가 있으면 그 세션에 연결됩니다. (개발자 commit template / `commit-msg` 훅으로 자동 삽입 권장)
+- 연결된 세션의 **주 사용자(api_key)** 가 자동으로 함께 연결되어, 어느 개발자의 프롬프트가 이 커밋/MR 로 이어졌는지 추적됩니다.
+- 범용 수집은 `session_id` 를 직접 지정할 수 있어, 마커 없이 CI 가 빌드 컨텍스트로 연결할 수 있습니다.
+
+### 보기
+
+세션 타임라인 모달(세션 탐색기·워터폴·XView 설명의 "세션" 링크) 하단에 **"연결된 VCS(커밋/MR)"** 표가 나타납니다 — 유형(commit / MR + 상태 배지), 제목(링크), 저장소·브랜치, 작성자, 시각. API: `GET /admin/vcs/events?session_id=&repo=&api_key_id=&kind=`.
+
+> 현재 라우팅/표시는 마커로 연결된 이벤트 중심입니다. Bitbucket Server push 웹훅은 커밋 메시지를 포함하지 않으므로(레퍼런스 변경만), 그 경우 마커 연결은 MR 제목 또는 범용 수집(git 훅)으로 보완하세요.
+
+---
+
 ## 5. 호출 이력 / 프롬프트 검색
 
 ### 호출 이력 탭

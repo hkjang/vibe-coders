@@ -251,6 +251,24 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 			note TEXT,
 			created_at TEXT NOT NULL
 		)`,
+		`CREATE TABLE IF NOT EXISTS vcs_events (
+				id TEXT PRIMARY KEY,
+				provider TEXT NOT NULL,
+				kind TEXT NOT NULL,
+				repo TEXT,
+				branch TEXT,
+				ref TEXT,
+				title TEXT,
+				url TEXT,
+				author_email TEXT,
+				author_name TEXT,
+				state TEXT,
+				session_id TEXT,
+				api_key_id TEXT,
+				created_at TEXT NOT NULL
+			)`,
+		`CREATE INDEX IF NOT EXISTS idx_vcs_events_session ON vcs_events(session_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_vcs_events_created_at ON vcs_events(created_at)`,
 		`CREATE TABLE IF NOT EXISTS mcp_upstreams (
 				id TEXT PRIMARY KEY,
 				name TEXT NOT NULL,
