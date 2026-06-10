@@ -20,6 +20,7 @@ import (
 	"strings"
 	"time"
 
+	"sync"
 	"sync/atomic"
 
 	"vibe-coders/internal/audit"
@@ -39,6 +40,8 @@ type Server struct {
 	killState    atomicKillState
 	mcpPolicy    atomic.Pointer[mcpPolicySnapshot]
 	routingRules atomic.Pointer[routingRulesSnapshot]
+	sessions     *sessionInferer
+	extSeen      sync.Map // external key id -> struct{}; dedupes lazy registration
 }
 
 type atomicKillState struct {
@@ -71,6 +74,7 @@ func NewServer(cfg config.Config, db *store.SQLStore, logger *store.AsyncLogger,
 		metrics:   newMetrics(),
 		secrets:   secrets,
 		retention: retention,
+		sessions:  newSessionInferer(cfg.Session.IdleTimeout),
 	}
 
 	if cfg.Upstream.APIKey != "" {
@@ -144,6 +148,9 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/admin/budgets", s.handleBudgets)
 	mux.HandleFunc("/admin/budgets/", s.handleBudgetByID)
 	mux.HandleFunc("/admin/waterfall", s.handleWaterfall)
+	mux.HandleFunc("/admin/routing/learning", s.handleRoutingLearning)
+	mux.HandleFunc("/admin/agents", s.handleAgents)
+	mux.HandleFunc("/admin/prompts/fingerprints", s.handlePromptFingerprints)
 	mux.HandleFunc("/admin/llm/traces", s.handleLLMTraces)
 	mux.HandleFunc("/admin/llm/traces/", s.handleLLMTraceDetail)
 	mux.HandleFunc("/admin/llm/sessions", s.handleLLMSessions)
@@ -340,30 +347,64 @@ func (s *Server) handleAPIKeyByID(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusBadRequest, "invalid API key id", "invalid_request_error", "invalid_api_key_id")
 		return
 	}
-	status := "disabled"
-	if r.Method == http.MethodPatch {
+	switch r.Method {
+	case http.MethodDelete:
+		if err := s.db.SetAPIKeyStatus(r.Context(), id, "disabled"); err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "api_key_update_failed")
+			return
+		}
+		s.auditAdmin(r, "api_key.status", "", auditJSON(map[string]any{"id": id, "status": "disabled"}))
+		writeJSON(w, http.StatusOK, map[string]string{"id": id, "status": "disabled"})
+	case http.MethodPatch:
+		// Partial update: status and/or label (name/owner/team). This is also how an
+		// observed external key (ext_…, whose hash the gateway already stored) is
+		// promoted to a named, active managed user — no plaintext needed.
 		var payload struct {
-			Status string `json:"status"`
+			Status *string `json:"status"`
+			Name   *string `json:"name"`
+			Owner  *string `json:"owner"`
+			Team   *string `json:"team"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 			writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "invalid_body")
 			return
 		}
-		status = strings.TrimSpace(payload.Status)
-	} else if r.Method != http.MethodDelete {
+		existing, found, err := s.db.GetAPIKey(r.Context(), id)
+		if err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "api_key_lookup_failed")
+			return
+		}
+		if !found {
+			writeOpenAIError(w, http.StatusNotFound, "api key not found", "invalid_request_error", "api_key_not_found")
+			return
+		}
+		updated := existing
+		if payload.Status != nil {
+			st := strings.TrimSpace(*payload.Status)
+			if st != "active" && st != "disabled" {
+				writeOpenAIError(w, http.StatusBadRequest, "status must be active or disabled", "invalid_request_error", "invalid_status")
+				return
+			}
+			updated.Status = st
+		}
+		if payload.Name != nil {
+			updated.Name = strings.TrimSpace(*payload.Name)
+		}
+		if payload.Owner != nil {
+			updated.Owner = strings.TrimSpace(*payload.Owner)
+		}
+		if payload.Team != nil {
+			updated.Team = strings.TrimSpace(*payload.Team)
+		}
+		if err := s.db.UpsertAPIKey(r.Context(), updated); err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "api_key_update_failed")
+			return
+		}
+		s.auditAdmin(r, "api_key.update", auditJSON(existing), auditJSON(updated))
+		writeJSON(w, http.StatusOK, map[string]any{"id": updated.ID, "name": updated.Name, "owner": updated.Owner, "team": updated.Team, "status": updated.Status})
+	default:
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
-		return
 	}
-	if status != "active" && status != "disabled" {
-		writeOpenAIError(w, http.StatusBadRequest, "status must be active or disabled", "invalid_request_error", "invalid_status")
-		return
-	}
-	if err := s.db.SetAPIKeyStatus(r.Context(), id, status); err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "api_key_update_failed")
-		return
-	}
-	s.auditAdmin(r, "api_key.status", "", auditJSON(map[string]any{"id": id, "status": status}))
-	writeJSON(w, http.StatusOK, map[string]string{"id": id, "status": status})
 }
 
 func (s *Server) handleProviders(w http.ResponseWriter, r *http.Request) {
@@ -808,7 +849,8 @@ func (s *Server) authenticateProxy(r *http.Request) (string, bool) {
 		}
 		return "", false
 	}
-	key, found, err := s.db.FindActiveAPIKeyByHash(r.Context(), hashProxyKey(token))
+	keyHash := hashProxyKey(token)
+	key, found, err := s.db.FindActiveAPIKeyByHash(r.Context(), keyHash)
 	if err != nil {
 		slog.Warn("lookup proxy api key failed", "error", err)
 		return "", false
@@ -819,7 +861,7 @@ func (s *Server) authenticateProxy(r *http.Request) (string, bool) {
 	// 토큰이 proxy key(pcg_ 접두사)가 아니면 upstream API key passthrough 로 허용
 	// 이를 통해 Roo Code / Cursor 등이 upstream key 를 직접 보내도 프록시가 작동함
 	if !strings.HasPrefix(token, "pcg_") {
-		return "passthrough", true
+		return s.attributeExternalKey(r, keyHash), true
 	}
 	hasKeys, err := s.db.HasActiveAPIKeys(r.Context())
 	if err != nil {
@@ -830,6 +872,38 @@ func (s *Server) authenticateProxy(r *http.Request) (string, bool) {
 		return "anonymous", true
 	}
 	return "", false
+}
+
+// attributeExternalKey maps an unregistered (non-proxy) bearer key to a stable
+// per-key identity so distinct client keys appear as distinct users in history,
+// instead of collapsing into one shared "passthrough" bucket. The id is derived
+// from the key hash (the gateway never stores the plaintext). On first sight it
+// lazily registers a labeled api_keys row (status "external") so the user shows up
+// with a name/team; an optional X-Vibe-User / X-Vibe-Team header sets those.
+func (s *Server) attributeExternalKey(r *http.Request, keyHash string) string {
+	if !s.cfg.Auth.AttributeExternalKeys {
+		return "passthrough"
+	}
+	id := "ext_" + keyHash[:16]
+	if _, seen := s.extSeen.Load(id); !seen {
+		name := firstNonEmptyHeader(r, "X-Vibe-User", "X-User-Id", "X-Title")
+		if name == "" {
+			name = "external-" + keyHash[:8]
+		}
+		rec := store.APIKeyRecord{
+			ID:      id,
+			Name:    name,
+			KeyHash: keyHash,
+			Team:    firstNonEmptyHeader(r, "X-Vibe-Team", "X-Team"),
+			Status:  "external",
+		}
+		if err := s.db.EnsureExternalAPIKey(r.Context(), rec); err != nil {
+			slog.Warn("register external api key failed", "error", err)
+		} else {
+			s.extSeen.Store(id, struct{}{})
+		}
+	}
+	return id
 }
 
 type resolvedProvider struct {
@@ -1201,6 +1275,16 @@ func (s *Server) auditRequest(endpoint string, body []byte, apiKeyID string, tra
 		rawBody = string(body)
 	}
 	llmMeta := llmRequestMetadata(r, body, traceID)
+	if llmMeta.SessionID == "" {
+		// No explicit session id from the client (the Claude Code / Cursor / Roo /
+		// Qwen case). Infer one from client identity + a sliding inactivity window,
+		// or fall back to per-request grouping if inference is disabled.
+		if s.cfg.Session.InferenceEnabled && s.sessions != nil {
+			llmMeta.SessionID = s.inferSessionID(r, apiKeyID, now)
+		} else {
+			llmMeta.SessionID = "trace:" + traceID
+		}
+	}
 	record := store.LogRecord{
 		Request: store.RequestLog{
 			ID:                  requestID,
@@ -1220,6 +1304,8 @@ func (s *Server) auditRequest(endpoint string, body []byte, apiKeyID string, tra
 			PromptVariablesHash: llmMeta.PromptVariablesHash,
 			ToolCount:           llmMeta.ToolCount,
 			Complexity:          complexityScore(prompts, llmMeta.ToolCount),
+			TaskType:            classifyTaskType(prompts),
+			PromptFingerprint:   promptFingerprint(prompts),
 			RequestHash:         audit.HashText(string(body)),
 			BodyRaw:             rawBody,
 			ReplayOf:            r.Header.Get("X-Proxy-Replay-Of"),
@@ -1230,6 +1316,26 @@ func (s *Server) auditRequest(endpoint string, body []byte, apiKeyID string, tra
 	}
 	record.Tools = toolInvocations(record.Request, extractRequestTools(body))
 	return record
+}
+
+// inferSessionID builds a stable client identity and asks the session inferer for
+// a sliding-window session id. Identity = api key (or "anon") + client IP +
+// user-agent + optional repo/branch project hints, so different tools, machines,
+// or working branches map to different sessions while a single client's burst of
+// requests groups together.
+func (s *Server) inferSessionID(r *http.Request, apiKeyID string, now time.Time) string {
+	keyPart := apiKeyID
+	if keyPart == "" {
+		keyPart = "anon"
+	}
+	identity := strings.Join([]string{
+		keyPart,
+		clientIP(r),
+		r.UserAgent(),
+		firstNonEmptyHeader(r, "X-Vibe-Repo", "X-Repo", "X-Project"),
+		firstNonEmptyHeader(r, "X-Vibe-Branch", "X-Branch"),
+	}, "|")
+	return s.sessions.sessionFor(identity, now)
 }
 
 func extractAudit(body []byte, endpoint string, rawPrompts bool) (string, bool, []store.PromptLog, []audit.LanguageSignal) {

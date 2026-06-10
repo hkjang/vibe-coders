@@ -19,14 +19,25 @@ type llmMetadata struct {
 	ToolCount           int
 }
 
+// explicit session id headers, in priority order. Covers our own conventions plus
+// common third-party ones (Datadog LLM Obs, generic gateways).
+var sessionHeaderNames = []string{
+	"X-LLM-Session-ID", "X-Datadog-Session-ID", "X-Session-ID",
+	"X-Vibe-Session-ID", "X-Conversation-ID", "X-Vibe-Conversation-ID", "X-Chat-ID",
+}
+
+// explicit session id fields inside the JSON body / its metadata object, in
+// priority order. Langflow uses session_id, OpenWebUI uses chat_id, others vary.
+var sessionBodyFields = []string{"session_id", "chat_id", "conversation_id", "thread_id"}
+
+// llmRequestMetadata extracts only the EXPLICIT session id (header or body). When
+// the client sent none, SessionID is left empty and the caller falls back to an
+// inferred session (see Server.inferSessionID).
 func llmRequestMetadata(r *http.Request, body []byte, traceID string) llmMetadata {
 	meta := llmMetadata{
-		SessionID:     firstNonEmptyHeader(r, "X-LLM-Session-ID", "X-Datadog-Session-ID", "X-Session-ID"),
+		SessionID:     firstNonEmptyHeader(r, sessionHeaderNames...),
 		PromptName:    firstNonEmptyHeader(r, "X-LLM-Prompt-Name", "X-Prompt-Name"),
 		PromptVersion: firstNonEmptyHeader(r, "X-LLM-Prompt-Version", "X-Prompt-Version"),
-	}
-	if meta.SessionID == "" {
-		meta.SessionID = "trace:" + traceID
 	}
 	if meta.PromptName == "" {
 		meta.PromptName = "ad-hoc"
@@ -35,6 +46,9 @@ func llmRequestMetadata(r *http.Request, body []byte, traceID string) llmMetadat
 
 	var root map[string]any
 	if err := json.Unmarshal(body, &root); err == nil {
+		if meta.SessionID == "" {
+			meta.SessionID = explicitBodySession(root)
+		}
 		meta.ToolCount = countRequestTools(root)
 		applyStructuredPromptMetadata(&meta, root)
 		if meta.PromptVariablesHash == "" {
@@ -113,6 +127,30 @@ func firstNonEmptyHeader(r *http.Request, names ...string) string {
 		}
 	}
 	return ""
+}
+
+// explicitBodySession looks for a client-supplied session id in the request body:
+// top-level fields first (session_id / chat_id / conversation_id / thread_id),
+// then inside a metadata object (OpenAI-style metadata.session_id).
+func explicitBodySession(root map[string]any) string {
+	for _, key := range sessionBodyFields {
+		if v := stringField(root[key]); v != "" {
+			return v
+		}
+	}
+	if md, ok := root["metadata"].(map[string]any); ok {
+		for _, key := range sessionBodyFields {
+			if v := stringField(md[key]); v != "" {
+				return v
+			}
+		}
+	}
+	return ""
+}
+
+func stringField(v any) string {
+	s, _ := v.(string)
+	return strings.TrimSpace(s)
 }
 
 func countRequestTools(root map[string]any) int {

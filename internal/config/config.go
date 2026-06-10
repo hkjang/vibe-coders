@@ -21,6 +21,7 @@ type Config struct {
 	Cache      CacheConfig
 	Auth       AuthConfig
 	Secret     SecretConfig
+	Session    SessionConfig
 	Pricing    map[string]ModelPrice
 }
 
@@ -61,13 +62,28 @@ type CacheConfig struct {
 }
 
 type AuthConfig struct {
-	ProxyAPIKeys     []ProxyAPIKey
-	AdminToken       string
+	ProxyAPIKeys       []ProxyAPIKey
+	AdminToken         string
 	AdminReadonlyToken string
+	// AttributeExternalKeys: when a request carries a bearer key that is NOT a
+	// registered proxy key (e.g. the client sends its own upstream key), attribute
+	// it to a stable per-key identity (ext_<hash>) instead of lumping all such
+	// traffic into one shared "passthrough" bucket. Lets per-user keys show up as
+	// distinct users even when they were never registered in the gateway.
+	AttributeExternalKeys bool
 }
 
 type SecretConfig struct {
 	GatewaySecret string
+}
+
+// SessionConfig controls how requests are grouped into sessions. Most AI coding
+// tools (Claude Code, Cursor, Roo, Qwen) send no session id at the API level, so
+// the gateway infers one from client identity + a sliding inactivity window when
+// no explicit id (header or body) is present.
+type SessionConfig struct {
+	InferenceEnabled bool          // infer a session when the client sends none
+	IdleTimeout      time.Duration // gap of inactivity that starts a new inferred session
 }
 
 type ProxyAPIKey struct {
@@ -79,9 +95,9 @@ type ProxyAPIKey struct {
 }
 
 type ModelPrice struct {
-	InputKRWPer1M        float64 `json:"input_krw_per_1m"`
-	OutputKRWPer1M       float64 `json:"output_krw_per_1m"`
-	CachedInputKRWPer1M  float64 `json:"cached_input_krw_per_1m"`
+	InputKRWPer1M       float64 `json:"input_krw_per_1m"`
+	OutputKRWPer1M      float64 `json:"output_krw_per_1m"`
+	CachedInputKRWPer1M float64 `json:"cached_input_krw_per_1m"`
 }
 
 func Load() (Config, error) {
@@ -116,12 +132,17 @@ func Load() (Config, error) {
 			ChatTTL:           durationEnv("CACHE_CHAT_TTL", time.Hour),
 		},
 		Auth: AuthConfig{
-			ProxyAPIKeys:       parseProxyKeys(os.Getenv("PROXY_API_KEYS")),
-			AdminToken:         os.Getenv("ADMIN_TOKEN"),
-			AdminReadonlyToken: os.Getenv("ADMIN_READONLY_TOKEN"),
+			ProxyAPIKeys:          parseProxyKeys(os.Getenv("PROXY_API_KEYS")),
+			AdminToken:            os.Getenv("ADMIN_TOKEN"),
+			AdminReadonlyToken:    os.Getenv("ADMIN_READONLY_TOKEN"),
+			AttributeExternalKeys: boolEnv("ATTRIBUTE_EXTERNAL_KEYS", true),
 		},
 		Secret: SecretConfig{
 			GatewaySecret: getEnv("GATEWAY_SECRET", "dev-local-insecure-secret-change-me"),
+		},
+		Session: SessionConfig{
+			InferenceEnabled: boolEnv("SESSION_INFERENCE_ENABLED", true),
+			IdleTimeout:      durationEnv("SESSION_IDLE_TIMEOUT", 30*time.Minute),
 		},
 		Pricing: map[string]ModelPrice{},
 	}

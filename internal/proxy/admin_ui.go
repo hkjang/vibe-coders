@@ -132,6 +132,10 @@ const adminHTML = `<!doctype html>
     .muted { color: var(--muted); }
     .empty, .error-line { padding: 18px; color: var(--muted); }
     .error-line { color: var(--bad); }
+    .banner { padding: 12px 14px; border-radius: 8px; font-size: 13px; line-height: 1.5; border: 1px solid var(--line); color: var(--ink); }
+    .banner.warn { background: var(--warn-bg); border-color: var(--warn); }
+    .banner.error { background: var(--bad-bg); border-color: var(--bad); }
+    .banner code { font-size: 12px; padding: 1px 4px; border-radius: 4px; background: var(--pill-bg); }
     .prompt { max-height: 80px; overflow: hidden; color: var(--ink); white-space: pre-wrap; }
     .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; background: var(--pill-bg); color: var(--ink); font-size: 12px; }
 
@@ -192,6 +196,7 @@ const adminHTML = `<!doctype html>
       <a href="#/waterfall" data-tab="waterfall">Waterfall</a>
       <a href="#/llm" data-tab="llm">LLM 관측</a>
       <a href="#/mcp" data-tab="mcp">MCP</a>
+      <a href="#/agents" data-tab="agents">에이전트</a>
       <a href="#/requests" data-tab="requests">호출 이력</a>
       <a href="#/prompts" data-tab="prompts">프롬프트 검색</a>
       <a href="#/users" data-tab="users">사용자</a>
@@ -478,6 +483,7 @@ const adminHTML = `<!doctype html>
           case 'ips':       rest.length ? await renderIPDetail(decodeURIComponent(rest.join('/'))) : await renderIPs(); break;
           case 'quotas':    await renderQuotas(); break;
           case 'mcp':       await renderMCP(params); break;
+          case 'agents':    await renderAgents(params); break;
           case 'safety':    await renderSafety(); break;
           case 'settings':  await renderSettings(); break;
           default: await renderDashboard();
@@ -975,6 +981,53 @@ const adminHTML = `<!doctype html>
             '<td data-num="' + sp.status_code + '">' + statusBadge(sp.status_code) + '</td>' +
           '</tr>';
         }).join('') + '</tbody></table>';
+    }
+
+    // ---------- Agent Performance Analytics ----------
+    const agentsState = { window: sessionStorage.getItem('agentsWindow') || '7d' };
+    async function renderAgents(initial) {
+      if (initial && initial.get('window')) agentsState.window = initial.get('window');
+      const view = document.getElementById('view');
+      const data = await api('/admin/agents?window=' + encodeURIComponent(agentsState.window));
+      const agents = data.agents || [];
+      const totalReq = agents.reduce((a, x) => a + (x.requests || 0), 0);
+      const totalCost = agents.reduce((a, x) => a + (x.total_cost_krw || 0), 0);
+      const weighted = totalReq ? agents.reduce((a, x) => a + (x.success_rate || 0) * (x.requests || 0), 0) / totalReq : 0;
+      const rateCell = (v) => { const pc = Math.round((v || 0) * 100); const cls = pc >= 90 ? '' : (pc >= 75 ? 'warn' : 'error'); return '<span class="status ' + cls + '">' + pc + '%</span>'; };
+      const toolCell = (r) => (r.tool_calls > 0) ? ('<span class="status ' + ((r.tool_error_rate || 0) >= 0.1 ? 'error' : '') + '">' + Math.round((r.tool_error_rate || 0) * 100) + '%</span> <span class="muted">' + fmt(r.tool_errors) + '/' + fmt(r.tool_calls) + '</span>') : '<span class="muted">-</span>';
+      const table = agents.length ? (
+        '<table><thead><tr>' +
+        '<th data-sort="str">에이전트</th><th data-sort="num">요청</th><th data-sort="num">성공률</th><th data-sort="num">폴백률</th>' +
+        '<th data-sort="num">평균 비용</th><th data-sort="num">누적 비용</th><th data-sort="num">평균 지연</th><th data-sort="num">첫 청크</th>' +
+        '<th data-sort="num">도구 오류율</th><th data-sort="num">토큰</th><th data-sort="str">최근</th></tr></thead><tbody>' +
+        agents.map(r => '<tr title="' + escapeAttr(r.sample_ua || '') + '">' +
+          '<td><strong>' + escapeHTML(r.agent) + '</strong></td>' +
+          '<td data-num="' + (r.requests || 0) + '">' + fmt(r.requests) + '</td>' +
+          '<td data-num="' + (r.success_rate || 0) + '">' + rateCell(r.success_rate) + '</td>' +
+          '<td data-num="' + (r.fallback_rate || 0) + '">' + Math.round((r.fallback_rate || 0) * 100) + '%</td>' +
+          '<td data-num="' + (r.avg_cost_krw || 0) + '">' + money(r.avg_cost_krw) + '</td>' +
+          '<td data-num="' + (r.total_cost_krw || 0) + '">' + money(r.total_cost_krw) + '</td>' +
+          '<td data-num="' + (r.avg_latency_ms || 0) + '">' + Math.round(r.avg_latency_ms || 0) + ' ms</td>' +
+          '<td data-num="' + (r.avg_first_chunk_ms || 0) + '">' + Math.round(r.avg_first_chunk_ms || 0) + ' ms</td>' +
+          '<td data-num="' + (r.tool_error_rate || 0) + '">' + toolCell(r) + '</td>' +
+          '<td data-num="' + (r.tokens || 0) + '">' + fmt(r.tokens) + '</td>' +
+          '<td>' + ago(r.last_seen) + '</td>' +
+        '</tr>').join('') + '</tbody></table>'
+      ) : '<div class="empty">에이전트 데이터 없음 (chat 호출이 쌓이면 표시됩니다)</div>';
+      const windowSel = '<select id="agents-window">' + ['24h', '7d', '30d'].map(wd => '<option value="' + wd + '"' + (agentsState.window === wd ? ' selected' : '') + '>' + wd + '</option>').join('') + '</select>';
+      view.innerHTML = section('에이전트 성능 분석 (Agent Performance)',
+        '<div class="toolbar">' + windowSel + '<span class="muted" style="margin-left:auto">User-Agent 기반 식별 · chat 호출 기준</span></div>' +
+        '<div class="kpis">' +
+          kpi('에이전트 수', fmt(agents.length)) +
+          kpi('총 요청', fmt(totalReq)) +
+          kpi('가중 성공률', Math.round(weighted * 100) + '%') +
+          kpi('누적 비용', money(totalCost)) +
+        '</div>' +
+        table +
+        '<div class="muted" style="font-size:12px; padding:0 14px 12px">성공 = 2xx · 오류 없음 · 폴백 없음. 에이전트는 User-Agent 키워드로 분류하며(미상은 UA 앞 토큰), 행에 마우스를 올리면 예시 User-Agent가 보입니다. 성공률 ≥90% 녹색 · ≥75% 노랑 · 그 외 빨강.</div>');
+      const sel = document.getElementById('agents-window');
+      if (sel) sel.addEventListener('change', () => { agentsState.window = sel.value; sessionStorage.setItem('agentsWindow', agentsState.window); renderAgents(); });
+      makeSortable('#view', 'agents');
     }
 
     // ---------- Explainability View (XView) ----------
@@ -2495,6 +2548,11 @@ const adminHTML = `<!doctype html>
           '<button type="button" id="p-delete-saved" class="ghost" title="선택한 저장된 필터 삭제">선택 삭제</button>' +
         '</form>' +
         '<div id="prompt-results"></div>'
+      ) + section('프롬프트 지문 — 반복 작업 클러스터 (Prompt Fingerprint)',
+        '<div class="toolbar"><select id="pf-window">' +
+          ['24h', '7d', '30d'].map(wd => '<option value="' + wd + '"' + (wd === '7d' ? ' selected' : '') + '>' + wd + '</option>').join('') +
+        '</select><span class="muted" style="margin-left:auto">유사한 작업 프롬프트를 지문으로 묶어 건수·평균 비용·추천 모델을 집계합니다</span></div>' +
+        '<div id="prompt-fingerprints"></div>'
       );
       const collectParams = () => {
         const params = new URLSearchParams();
@@ -2566,6 +2624,37 @@ const adminHTML = `<!doctype html>
         await api('/admin/saved-filters/' + encodeURIComponent(id), { method: 'DELETE' });
         route();
       });
+
+      const pfWindow = document.getElementById('pf-window');
+      const loadFingerprints = async () => {
+        const host = document.getElementById('prompt-fingerprints');
+        host.innerHTML = '<div class="muted" style="padding:14px">불러오는 중…</div>';
+        const d = await api('/admin/prompts/fingerprints?window=' + pfWindow.value + '&limit=100').catch(() => ({ fingerprints: [] }));
+        host.innerHTML = promptFingerprintTable(d.fingerprints || []);
+        makeSortable('#prompt-fingerprints', 'pf');
+      };
+      pfWindow.addEventListener('change', loadFingerprints);
+      loadFingerprints();
+    }
+    function promptFingerprintTable(rows) {
+      if (!rows.length) return '<div class="empty">지문 데이터 없음 (chat 호출이 쌓이면 표시됩니다)</div>';
+      return '<table><thead><tr>' +
+        '<th>예시 프롬프트</th><th data-sort="str">유형</th><th data-sort="num">건수</th>' +
+        '<th data-sort="num">성공률</th><th data-sort="num">평균 비용</th><th data-sort="num">누적 비용</th>' +
+        '<th data-sort="num">평균 토큰</th><th data-sort="num">모델 수</th><th>최다/최저가 모델</th><th data-sort="str">최근</th></tr></thead><tbody>' +
+        rows.map(r => '<tr title="' + escapeAttr(r.fingerprint) + '">' +
+          '<td>' + escapeHTML(r.sample_prompt || r.fingerprint) + '<div class="muted">' + escapeHTML(r.fingerprint) + '</div></td>' +
+          '<td>' + escapeHTML(wfTaskLabel[r.task_type] || r.task_type || '') + '</td>' +
+          '<td data-num="' + (r.requests || 0) + '">' + fmt(r.requests) + '</td>' +
+          '<td data-num="' + (r.success_rate || 0) + '">' + Math.round((r.success_rate || 0) * 100) + '%</td>' +
+          '<td data-num="' + (r.avg_cost_krw || 0) + '">' + money(r.avg_cost_krw || 0) + '</td>' +
+          '<td data-num="' + (r.total_cost_krw || 0) + '">' + money(r.total_cost_krw || 0) + '</td>' +
+          '<td data-num="' + (r.avg_tokens || 0) + '">' + fmt(Math.round(r.avg_tokens || 0)) + '</td>' +
+          '<td data-num="' + (r.distinct_models || 0) + '">' + fmt(r.distinct_models) + '</td>' +
+          '<td>' + escapeHTML(r.top_model || '') + (r.cheapest_model && r.cheapest_model !== r.top_model ? '<div class="muted">최저가: ' + escapeHTML(r.cheapest_model) + '</div>' : '') + '</td>' +
+          '<td>' + ago(r.last_seen) + '</td>' +
+        '</tr>').join('') + '</tbody></table>' +
+        '<div class="muted" style="font-size:12px; padding:8px 14px">프롬프트에서 붙여넣은 코드를 제거하고 핵심 키워드 + 작업유형으로 만든 <strong>어휘 지문</strong>입니다(의미 임베딩 아님). 같은 템플릿/반복 작업이 한 행으로 묶입니다. "최저가 모델" = 최고 성공률 대비 5%p 이내에서 가장 저렴한 모델.</div>';
     }
 
     function applyPromptParams(params) {
@@ -2597,18 +2686,20 @@ const adminHTML = `<!doctype html>
           '<th data-sort="num">토큰</th>' +
           '<th data-sort="num">비용</th>' +
           '<th data-sort="num">평균 지연</th>' +
-          '<th data-sort="str">마지막 호출</th></tr></thead><tbody>' +
+          '<th data-sort="str">마지막 호출</th>' +
+          '<th>동작</th></tr></thead><tbody>' +
           rows.map(u =>
             '<tr class="row-link" onclick="location.hash=\'#/users/' + encodeURIComponent(u.api_key_id) + '\'">' +
               '<td>' + escapeHTML(u.name) + '<div class="muted">' + escapeHTML(u.api_key_id) + '</div></td>' +
               '<td>' + escapeHTML(u.owner || '') + '</td>' +
               '<td>' + (u.team ? '<a href="#/teams/' + encodeURIComponent(u.team) + '" onclick="event.stopPropagation()">' + escapeHTML(u.team) + '</a>' : '') + '</td>' +
-              '<td><span class="status ' + (u.status === 'active' ? '' : 'error') + '">' + escapeHTML(u.status) + '</span></td>' +
+              '<td><span class="status ' + (u.status === 'active' ? '' : (u.status === 'external' ? 'warn' : 'error')) + '">' + escapeHTML(u.status) + '</span></td>' +
               '<td data-num="' + (u.requests || 0) + '">' + fmt(u.requests) + '</td>' +
               '<td data-num="' + (u.tokens || 0) + '">' + fmt(u.tokens) + '</td>' +
               '<td data-num="' + (u.cost_krw || 0) + '">' + money(u.cost_krw) + '</td>' +
               '<td data-num="' + (u.average_latency_ms || 0) + '">' + Math.round(u.average_latency_ms || 0) + ' ms</td>' +
               '<td>' + ago(u.last_seen) + '</td>' +
+              '<td>' + (u.api_key_id.indexOf('ext_') === 0 ? '<button class="secondary" type="button" onclick="event.stopPropagation();promoteExternalKey(\'' + escapeAttr(u.api_key_id) + '\', \'' + escapeAttr(u.name) + '\')">관리 등록</button>' : '') + '</td>' +
             '</tr>'
           ).join('') + '</tbody></table>'
         ) : '<div class="empty">사용자 없음</div>'
@@ -2616,6 +2707,14 @@ const adminHTML = `<!doctype html>
       document.getElementById('view').innerHTML = html;
       makeSortable('#view', 'users');
     }
+    window.promoteExternalKey = async (id, current) => {
+      const name = prompt('외부(미등록) 키를 관리 사용자로 등록합니다.\n클라이언트가 보내는 키는 그대로 두고, 이 식별자에 이름·팀을 부여해 정식 사용자(active)로 승격합니다.\n\n표시 이름:', current && current.indexOf('external-') !== 0 ? current : '');
+      if (name === null) return;
+      const team = prompt('팀 (선택, 비우면 미지정):', '');
+      if (team === null) return;
+      await api('/admin/api-keys/' + encodeURIComponent(id), { method: 'PATCH', body: JSON.stringify({ status: 'active', name: name.trim() || id, team: team.trim() }) });
+      route();
+    };
 
     async function renderUserDetail(id) {
       const d = await api('/admin/users/' + encodeURIComponent(id) + '?limit=100');
@@ -2623,8 +2722,18 @@ const adminHTML = `<!doctype html>
       const a = d.advanced || {};
       const heat = d.heatmap || {};
       const llm = d.llm || {};
+      const isExternal = (k.id || '').indexOf('ext_') === 0 || k.status === 'external';
+      let notice = '';
+      if (isExternal) {
+        notice = '<div class="banner warn" style="margin:0 14px 12px">외부(미등록) 키 — 클라이언트가 보낸 키를 지문(<code>ext_…</code>)으로 자동 식별한 사용자입니다. ' +
+          '<button class="secondary" type="button" onclick="promoteExternalKey(\'' + escapeAttr(k.id) + '\', \'' + escapeAttr(k.name) + '\')">관리 사용자로 등록</button> 하면 이름·팀을 부여하고 정식(active) 키로 승격합니다(클라이언트 재설정 불필요).</div>';
+      } else if (k.status === 'active' && (s.requests || 0) === 0) {
+        notice = '<div class="banner error" style="margin:0 14px 12px"><strong>이 키로 집계된 요청이 0건입니다.</strong> 클라이언트가 <em>이 키를 정확히</em> 보내고 있는지 확인하세요(키 오타·공백·옛 키·잘못된 Bearer 값). ' +
+          '실제 트래픽은 <a href="#/users">사용자 목록</a>의 <code>passthrough</code>/<code>anonymous</code> 또는 <code>ext_…</code> 항목에 있을 수 있습니다. 클라이언트가 보내는 키가 곧 사용자 식별자이며, 등록된 키와 글자 단위로 일치해야 집계됩니다.</div>';
+      }
       const html =
         '<section><h2>사용자 ' + escapeHTML(k.name) + '</h2>' +
+          notice +
           '<div style="padding:14px"><div class="kv">' +
             row('API 키 ID', escapeHTML(k.id)) +
             row('소유자', escapeHTML(k.owner || '')) +
@@ -3346,13 +3455,14 @@ const adminHTML = `<!doctype html>
 
     // ---------- settings ----------
     async function renderSettings() {
-      const [keys, providers, retention, fallback, audit, routes] = await Promise.all([
+      const [keys, providers, retention, fallback, audit, routes, learning] = await Promise.all([
         api('/admin/api-keys'),
         api('/admin/providers'),
         api('/admin/retention'),
         api('/admin/fallback'),
         api('/admin/audit-logs?limit=50'),
         api('/admin/routing-rules').catch(() => ({ rules: [] })),
+        api('/admin/routing/learning?window=7d').catch(() => ({ recommendations: [], cells: [] })),
       ]);
 
       const html =
@@ -3381,6 +3491,7 @@ const adminHTML = `<!doctype html>
           ) +
         '</div>' +
         section('복잡도 기반 비용 최적 라우팅 규칙', routingRulesPanel(routes.rules || [])) +
+        section('라우팅 학습 추천 (Routing Learning)', routingLearningPanel(learning)) +
         section('데이터 보존 정책', retentionPanel(retention)) +
         section('Fallback 로그 재처리', fallbackPanel(fallback)) +
         section('관리자 변경 이력', auditPanel(audit.audit_logs || []));
@@ -3474,6 +3585,48 @@ const adminHTML = `<!doctype html>
       return form + table +
         '<div class="muted" style="padding:0 14px 12px; font-size:12px">클라이언트가 X-Proxy-Provider를 지정하거나 <code>X-Proxy-No-Route: 1</code> 헤더를 보내면 규칙이 적용되지 않습니다. 우선순위가 낮은 규칙부터 첫 매칭을 적용합니다.</div>';
     }
+    const wfTaskLabel = { refactor: '리팩토링', generate: '생성', debug: '디버그', explain: '설명/분석', test: '테스트', translate: '변환', docs: '문서', review: '리뷰', other: '기타' };
+    const wfBucketLabel = { low: '낮음(0–33)', medium: '중간(34–66)', high: '높음(67–100)' };
+    function routingLearningPanel(report) {
+      const recs = (report && report.recommendations) || [];
+      const cells = (report && report.cells) || [];
+      const recTable = recs.length ? (
+        '<table><thead><tr><th>작업유형</th><th>복잡도</th><th>추천 모델</th><th data-sort="num">성공률</th><th data-sort="num">평균 비용</th><th data-sort="num">표본</th><th>현재 최다 사용</th><th>동작</th></tr></thead><tbody>' +
+        recs.map(r => '<tr>' +
+          '<td>' + escapeHTML(wfTaskLabel[r.task_type] || r.task_type) + '</td>' +
+          '<td>' + escapeHTML(wfBucketLabel[r.bucket] || r.bucket) + '</td>' +
+          '<td><strong>' + escapeHTML(r.recommended_model) + '</strong>' + (r.confident ? '' : ' <span class="status warn" title="비교 모델 중 일부가 표본 부족">저신뢰</span>') + '</td>' +
+          '<td data-num="' + r.success_rate + '">' + Math.round((r.success_rate || 0) * 100) + '%</td>' +
+          '<td data-num="' + (r.avg_cost_krw || 0) + '">' + money(r.avg_cost_krw || 0) + '</td>' +
+          '<td data-num="' + (r.samples || 0) + '">' + fmt(r.samples || 0) + '</td>' +
+          '<td>' + (r.differs ? '<span class="status warn">' + escapeHTML(r.top_model) + ' ' + Math.round((r.top_success_rate || 0) * 100) + '%</span>' : '<span class="muted">동일</span>') + '</td>' +
+          '<td><button class="secondary" type="button" onclick="applyLearnedRule(\'' + escapeAttr(r.bucket) + '\',\'' + escapeAttr(r.recommended_model) + '\',\'' + escapeAttr(r.task_type) + '\')">규칙으로 적용</button></td>' +
+        '</tr>').join('') + '</tbody></table>'
+      ) : '<div class="empty">추천할 만한 표본이 아직 부족합니다. 트래픽이 쌓이면 (작업유형 × 복잡도)별 최적 모델이 학습됩니다.</div>';
+      const matrix = cells.length ? (
+        '<details style="margin-top:8px"><summary style="cursor:pointer; padding:8px 14px; color:var(--muted); font-size:12px">상세 매트릭스 — 작업유형 × 복잡도 × 모델 (' + fmt(cells.length) + '셀)</summary>' +
+        '<table><thead><tr><th>작업유형</th><th>복잡도</th><th>모델</th><th data-sort="num">요청</th><th data-sort="num">성공률</th><th data-sort="num">폴백률</th><th data-sort="num">평균 비용</th><th data-sort="num">평균 지연</th><th>피드백</th></tr></thead><tbody>' +
+        cells.map(c => '<tr>' +
+          '<td>' + escapeHTML(wfTaskLabel[c.task_type] || c.task_type) + '</td>' +
+          '<td>' + escapeHTML(wfBucketLabel[c.bucket] || c.bucket) + '</td>' +
+          '<td>' + escapeHTML(c.model) + '</td>' +
+          '<td data-num="' + c.requests + '">' + fmt(c.requests) + '</td>' +
+          '<td data-num="' + c.success_rate + '">' + Math.round((c.success_rate || 0) * 100) + '%</td>' +
+          '<td data-num="' + c.fallback_rate + '">' + Math.round((c.fallback_rate || 0) * 100) + '%</td>' +
+          '<td data-num="' + (c.avg_cost_krw || 0) + '">' + money(c.avg_cost_krw || 0) + '</td>' +
+          '<td data-num="' + (c.avg_latency_ms || 0) + '">' + Math.round(c.avg_latency_ms || 0) + ' ms</td>' +
+          '<td>' + (c.thumbs_up ? '👍' + c.thumbs_up + ' ' : '') + (c.thumbs_down ? '👎' + c.thumbs_down : '') + '</td>' +
+        '</tr>').join('') + '</tbody></table></details>'
+      ) : '';
+      return recTable + matrix +
+        '<div class="muted" style="padding:0 14px 12px; font-size:12px">최근 7일 chat 호출의 (작업유형 × 복잡도 × 모델)별 성공률·비용·피드백을 학습한 결과입니다. 성공 = 2xx · 오류 없음 · 폴백 없음. 작업유형은 프롬프트 키워드 기반 추정치입니다. "규칙으로 적용"은 해당 <strong>복잡도 구간 전체</strong>를 추천 모델로 라우팅하는 규칙을 만듭니다(작업유형은 참고용).</div>';
+    }
+    window.applyLearnedRule = async (bucket, model, taskType) => {
+      const range = { low: [0, 33], medium: [34, 66], high: [67, 100] }[bucket] || [0, 100];
+      if (!confirm('복잡도 ' + range[0] + '–' + range[1] + ' 구간을 ' + model + ' 로 라우팅하는 규칙을 만듭니다.\n(작업유형 "' + (wfTaskLabel[taskType] || taskType) + '" 학습 추천 기반 · 구간 전체에 적용)')) return;
+      await api('/admin/routing-rules', { method: 'POST', body: JSON.stringify({ match_pattern: '*', min_complexity: range[0], max_complexity: range[1], target_model: model, priority: 90, note: '학습추천: ' + taskType + '/' + bucket }) });
+      route();
+    };
     async function addRoutingRule(e) {
       e.preventDefault();
       const body = {
@@ -3584,7 +3737,7 @@ const adminHTML = `<!doctype html>
     }
 
     // ---------- keyboard ----------
-    const tabMap = { d: 'dashboard', x: 'xview', w: 'waterfall', l: 'llm', c: 'mcp', r: 'requests', p: 'prompts', u: 'users', m: 'teams', i: 'ips', q: 'quotas', a: 'safety', s: 'settings' };
+    const tabMap = { d: 'dashboard', x: 'xview', w: 'waterfall', l: 'llm', c: 'mcp', e: 'agents', r: 'requests', p: 'prompts', u: 'users', m: 'teams', i: 'ips', q: 'quotas', a: 'safety', s: 'settings' };
     let gPending = false;
     let gTimer = null;
     function isTyping(target) {
@@ -3641,6 +3794,7 @@ const adminHTML = `<!doctype html>
         ['<kbd>g</kbd> <kbd>w</kbd>', 'Waterfall (트랜잭션 타임라인)'],
         ['<kbd>g</kbd> <kbd>l</kbd>', 'LLM 관측'],
         ['<kbd>g</kbd> <kbd>c</kbd>', 'MCP'],
+        ['<kbd>g</kbd> <kbd>e</kbd>', '에이전트 성능'],
         ['<kbd>g</kbd> <kbd>r</kbd>', '호출 이력'],
         ['<kbd>g</kbd> <kbd>p</kbd>', '프롬프트 검색'],
         ['<kbd>g</kbd> <kbd>u</kbd>', '사용자 목록'],

@@ -110,6 +110,8 @@ type RequestLog struct {
 	FallbackFrom        string // original provider before failover
 	FallbackReason      string // transport error that triggered failover
 	RequestedModel      string // model the client asked for (before complexity routing)
+	TaskType            string // heuristic task class (refactor/generate/debug/...) for routing learning
+	PromptFingerprint   string // lexical fingerprint grouping near-identical task prompts
 	CreatedAt           time.Time
 }
 

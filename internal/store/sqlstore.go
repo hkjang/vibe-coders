@@ -129,6 +129,8 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 		`ALTER TABLE request_logs ADD COLUMN fallback_from TEXT`,
 		`ALTER TABLE request_logs ADD COLUMN fallback_reason TEXT`,
 		`ALTER TABLE request_logs ADD COLUMN requested_model TEXT`,
+		`ALTER TABLE request_logs ADD COLUMN task_type TEXT`,
+		`ALTER TABLE request_logs ADD COLUMN prompt_fingerprint TEXT`,
 		`ALTER TABLE request_logs ADD COLUMN first_chunk_ms INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE request_logs ADD COLUMN session_id TEXT`,
 		`ALTER TABLE request_logs ADD COLUMN prompt_name TEXT`,
@@ -140,6 +142,7 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 		`CREATE INDEX IF NOT EXISTS idx_request_logs_model ON request_logs(model)`,
 		`CREATE INDEX IF NOT EXISTS idx_request_logs_session_id ON request_logs(session_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_request_logs_prompt_name ON request_logs(prompt_name)`,
+		`CREATE INDEX IF NOT EXISTS idx_request_logs_prompt_fingerprint ON request_logs(prompt_fingerprint)`,
 		`CREATE TABLE IF NOT EXISTS prompt_logs (
 			id TEXT PRIMARY KEY,
 			request_id TEXT NOT NULL,
@@ -436,6 +439,24 @@ func (s *SQLStore) UpsertAPIKey(ctx context.Context, key APIKeyRecord) error {
 	return err
 }
 
+// EnsureExternalAPIKey inserts a lightweight row for an externally-attributed key
+// (status "external") only if one does not already exist. Uses ON CONFLICT DO
+// NOTHING so it never clobbers an operator's later edits (name/team/status) on
+// restart or repeat traffic.
+func (s *SQLStore) EnsureExternalAPIKey(ctx context.Context, key APIKeyRecord) error {
+	if key.CreatedAt.IsZero() {
+		key.CreatedAt = time.Now().UTC()
+	}
+	if key.Status == "" {
+		key.Status = "external"
+	}
+	query := s.bind(`INSERT INTO api_keys (id, name, key_hash, owner, team, status, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO NOTHING`)
+	_, err := s.db.ExecContext(ctx, query, key.ID, key.Name, key.KeyHash, key.Owner, key.Team, key.Status, formatTime(key.CreatedAt))
+	return err
+}
+
 func (s *SQLStore) FindActiveAPIKeyByHash(ctx context.Context, keyHash string) (APIKeyRecord, bool, error) {
 	var key APIKeyRecord
 	var createdAt string
@@ -449,6 +470,25 @@ func (s *SQLStore) FindActiveAPIKeyByHash(ctx context.Context, keyHash string) (
 		return APIKeyRecord{}, false, err
 	}
 	if parsed, err := time.Parse(time.RFC3339Nano, createdAt); err == nil {
+		key.CreatedAt = parsed
+	}
+	return key, true, nil
+}
+
+// GetAPIKey fetches a single api_keys row by id (any status), used to apply
+// partial metadata/status updates without losing the stored key_hash.
+func (s *SQLStore) GetAPIKey(ctx context.Context, id string) (APIKeyRecord, bool, error) {
+	var key APIKeyRecord
+	var createdAt string
+	err := s.db.QueryRowContext(ctx, s.bind(`SELECT id, name, key_hash, COALESCE(owner, ''), COALESCE(team, ''), status, created_at
+		FROM api_keys WHERE id = ?`), id).Scan(&key.ID, &key.Name, &key.KeyHash, &key.Owner, &key.Team, &key.Status, &createdAt)
+	if err == sql.ErrNoRows {
+		return APIKeyRecord{}, false, nil
+	}
+	if err != nil {
+		return APIKeyRecord{}, false, err
+	}
+	if parsed, perr := time.Parse(time.RFC3339Nano, createdAt); perr == nil {
 		key.CreatedAt = parsed
 	}
 	return key, true, nil
@@ -621,9 +661,9 @@ func (s *SQLStore) InsertLogRecord(ctx context.Context, record LogRecord) error 
 		req.CreatedAt = time.Now().UTC()
 	}
 	_, err = tx.ExecContext(ctx, s.bind(`INSERT INTO request_logs
-		(id, trace_id, api_key_id, client_ip, forwarded_for, user_agent, hostname, model, endpoint, stream, provider, status_code, latency_ms, first_chunk_ms, session_id, prompt_name, prompt_version, prompt_variables_hash, tool_count, error, request_hash, body_raw, replay_of, failover, route_reason, route_detail, complexity, fallback_from, fallback_reason, requested_model, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
-		req.ID, req.TraceID, req.APIKeyID, req.ClientIP, req.ForwardedFor, req.UserAgent, req.Hostname, req.Model, req.Endpoint, boolInt(req.Stream), req.Provider, req.StatusCode, req.LatencyMS, req.FirstChunkMS, req.SessionID, req.PromptName, req.PromptVersion, req.PromptVariablesHash, req.ToolCount, req.Error, req.RequestHash, req.BodyRaw, req.ReplayOf, boolInt(req.Failover), req.RouteReason, req.RouteDetail, req.Complexity, req.FallbackFrom, req.FallbackReason, req.RequestedModel, formatTime(req.CreatedAt))
+		(id, trace_id, api_key_id, client_ip, forwarded_for, user_agent, hostname, model, endpoint, stream, provider, status_code, latency_ms, first_chunk_ms, session_id, prompt_name, prompt_version, prompt_variables_hash, tool_count, error, request_hash, body_raw, replay_of, failover, route_reason, route_detail, complexity, fallback_from, fallback_reason, requested_model, task_type, prompt_fingerprint, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+		req.ID, req.TraceID, req.APIKeyID, req.ClientIP, req.ForwardedFor, req.UserAgent, req.Hostname, req.Model, req.Endpoint, boolInt(req.Stream), req.Provider, req.StatusCode, req.LatencyMS, req.FirstChunkMS, req.SessionID, req.PromptName, req.PromptVersion, req.PromptVariablesHash, req.ToolCount, req.Error, req.RequestHash, req.BodyRaw, req.ReplayOf, boolInt(req.Failover), req.RouteReason, req.RouteDetail, req.Complexity, req.FallbackFrom, req.FallbackReason, req.RequestedModel, req.TaskType, req.PromptFingerprint, formatTime(req.CreatedAt))
 	if err != nil {
 		return err
 	}

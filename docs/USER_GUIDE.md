@@ -131,7 +131,18 @@ X-LLM-Prompt-Version: v7
 X-LLM-Prompt-Variables-Hash: vars-sha256
 ```
 
-헤더가 없어도 호출은 정상 처리됩니다. 다만 어드민의 LLM 관측 탭에서는 session이 개별 trace 단위로, prompt가 `ad-hoc` 으로 표시됩니다.
+헤더가 없어도 호출은 정상 처리됩니다. prompt 메타데이터가 없으면 prompt는 `ad-hoc` 으로 표시됩니다. session은 아래 규칙으로 자동 그룹화됩니다.
+
+#### 세션 그룹화 — 무엇을 보내면 되나
+
+게이트웨이는 **명시적 → 추론** 순으로 세션을 정합니다.
+
+- **세션을 보내는 경우**(권장): 다음 중 아무거나. 헤더가 바디보다 우선합니다.
+  - 헤더: `X-Session-ID`, `X-Vibe-Session-ID`, `X-Conversation-ID`
+  - 바디 필드: `session_id`(Langflow), `chat_id`(OpenWebUI), `conversation_id`, `thread_id`, 또는 `metadata.session_id`
+- **세션을 안 보내는 경우**(Claude Code·Cursor·Roo·Qwen 등 대부분의 코딩 툴): 게이트웨이가 `api_key + IP + User-Agent` 신원과 **30분 비활성 윈도우**로 세션(`sess_…`)을 자동 추론합니다. 한 작업 흐름의 연속 호출이 자연스럽게 한 세션으로 묶입니다. 30분 이상 멈췄다가 다시 호출하면 새 세션이 됩니다.
+
+repo/branch 단위로 더 잘게 나누고 싶으면 `X-Vibe-Repo`·`X-Vibe-Branch` 헤더를 추가하세요(추론 신원에 반영됨). 한 작업을 확실히 한 세션으로 고정하려면 작업 시작 시 만든 UUID를 매 호출에 `X-Vibe-Session-ID` 로 보내는 것이 가장 정확합니다.
 
 ### 3.9 MCP / 도구 사용 가시성
 
@@ -235,6 +246,9 @@ A. 한 번만 표시되므로 다시 볼 수 없습니다. 운영자에게 비�
 
 **Q. 사용량 알림을 받고 싶어요.**
 A. 운영자에게 알림 규칙 추가를 요청할 수 있습니다 (지표 `requests/errors/krw/tokens/latency_p95_ms/first_chunk_p95_ms/llm_eval_failures/llm_eval_failure_rate`, 윈도우 N초, 임계값, Slack 웹훅).
+
+**Q. 사용자별 이력이 전부 `passthrough` 나 `anonymous` 로 묶여요.**
+A. 게이트웨이는 키의 해시만 저장하므로, **등록된 proxy key** 로 호출해야 그 사용자로 정확히 집계됩니다. 운영자에게 사용자별 키 발급(`PROXY_API_KEYS` 또는 어드민 "API 키 발급")을 요청하세요. 등록 없이 사용자별로 **다른 키**를 보내는 경우에도 게이트웨이가 키 지문으로 `ext_…` 사용자를 자동 분리합니다(같은 키=같은 사용자). 이때 `X-Vibe-User`(표시 이름)·`X-Vibe-Team`(팀) 헤더를 함께 보내면 사용자/팀 화면에 이름·팀이 표시됩니다. 모두가 **같은 키**(예: 공용 upstream 키)를 쓰면 한 사용자로 합쳐지니, 분리가 필요하면 사용자마다 다른 키를 쓰세요.
 
 ---
 

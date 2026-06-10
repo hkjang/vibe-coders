@@ -83,6 +83,16 @@ curl.exe http://localhost:8080/v1/chat/completions `
 $env:PROXY_API_KEYS="dev:dev-proxy-key:alice:platform,team:team-proxy-key:bob:backend"
 ```
 
+### 사용자 귀속 (왜 passthrough/anonymous 로 묶이나)
+
+게이트웨이는 키의 **해시만** 저장하므로, 들어온 Bearer 키를 사용자에 귀속시키려면 그 키가 **등록된 proxy key**(위 `PROXY_API_KEYS` 또는 어드민 "API 키 발급")여야 합니다. 등록되지 않은 키는 기본적으로 사용자 식별이 불가능합니다.
+
+- **익명(anonymous)**: 키가 아예 없고 등록 키도 없을 때.
+- **외부 키 자동 귀속(ext_…)**: 등록 안 된 키(예: 클라이언트가 upstream 키를 직접 전달)라도 **키 지문(`ext_<해시16>`)으로 사용자별 분리**됩니다. 같은 키=같은 사용자, 다른 키=다른 사용자. 따라서 "사용자별로 다른 키"를 보내면 등록 없이도 사용자 이력이 분리됩니다. (구버전은 모두 `passthrough` 한 덩어리로 묶였음.)
+  - `X-Vibe-User`(또는 `X-User-Id`/`X-Title`) 헤더로 표시 이름을, `X-Vibe-Team` 헤더로 팀을 지정하면 사용자/팀 화면에 그대로 나타납니다.
+  - 정확한 통제(쿼터·팀 강제·인증)가 필요하면 키를 **등록**하세요. 등록 키 매칭이 외부 귀속보다 항상 우선합니다.
+  - `ATTRIBUTE_EXTERNAL_KEYS=false` 로 두면 구버전처럼 모든 미등록 키를 단일 `passthrough` 로 묶습니다.
+
 ## 주요 환경변수
 
 | 변수 | 기본값 | 설명 |
@@ -95,6 +105,7 @@ $env:PROXY_API_KEYS="dev:dev-proxy-key:alice:platform,team:team-proxy-key:bob:ba
 | `DB_DSN` | `data/gateway.db` | SQLite 파일 경로 |
 | `POSTGRES_DSN` / `DATABASE_URL` | 없음 | 있으면 PostgreSQL 사용 |
 | `PROXY_API_KEYS` | 없음 | `name:key:owner:team` CSV |
+| `ATTRIBUTE_EXTERNAL_KEYS` | `true` | 미등록 키를 키 지문(`ext_…`)으로 사용자별 귀속. `false`면 단일 `passthrough` |
 | `ADMIN_TOKEN` | 없음 | 설정 시 `/admin/*` Bearer 토큰 요구 (전권) |
 | `ADMIN_READONLY_TOKEN` | 없음 | 설정 시 GET/HEAD 만 허용되는 읽기전용 admin 토큰 |
 | `GATEWAY_SECRET` | 개발용 기본값 | Provider API key 암호화 secret. 운영에서는 반드시 설정 |
@@ -128,6 +139,28 @@ $env:MODEL_PRICING_KRW_PER_1M='{ "gpt-4.1-mini": { "input_krw_per_1m": 540, "out
 
 chat 응답은 비결정적이라 기본 비활성화입니다. 활성화해도 **재현 가능한 요청만** 캐시합니다: `temperature=0` 또는 `seed` 가 설정된 요청, 혹은 클라이언트가 `X-Proxy-Cache: 1` 헤더로 명시 동의한 경우. 캐시 적중 시 `X-Cache: HIT` 헤더로 응답하고 upstream 호출 없이 비용 0으로 처리되며, XView 캐시 패널에 절감액이 표시됩니다. 캐시 키는 model·messages·tools·temperature·top_p·max_tokens·seed·response_format 기준이며 `stream` 등 휘발성 필드는 제외합니다.
 
+### 세션 그룹화 (명시적 + 추론)
+
+세션 비용 타임라인·Waterfall·에이전트 루프 탐지는 모두 `session_id` 기준으로 요청을 묶습니다. 그런데 대부분의 AI 코딩 툴은 HTTP 레벨에서 세션을 보내지 않습니다.
+
+| 툴 | 세션 전달 방식 |
+| --- | --- |
+| Langflow | 바디 `session_id` |
+| OpenWebUI | 바디 `chat_id` |
+| Claude Code / Cursor / Roo Code / Qwen Code | **안 보냄** (대화 상태를 클라이언트 메모리로만 유지) |
+
+게이트웨이는 **명시적(explicit) → 추론(inferred)** 2단계로 처리합니다.
+
+1. **명시적**: 클라이언트가 보낸 값을 그대로 사용 — 헤더(`X-Session-ID`, `X-Vibe-Session-ID`, `X-Conversation-ID`, `X-Datadog-Session-ID` 등) 또는 바디(`session_id`/`chat_id`/`conversation_id`/`thread_id`, `metadata.*` 포함). 헤더가 바디보다 우선.
+2. **추론**: 명시적 세션이 없으면 클라이언트 신원 + **슬라이딩 비활성 윈도우**로 자동 생성. 신원 = `api_key + client_ip + user-agent + (옵션) X-Vibe-Repo/X-Vibe-Branch`. 같은 클라이언트의 연속 호출은 한 세션으로 묶이고, `SESSION_IDLE_TIMEOUT`(기본 30분) 이상 잠잠하면 새 세션이 시작됩니다. 생성 ID는 `sess_<12hex>` 형태(인메모리, 비영속).
+
+| 변수 | 기본값 | 설명 |
+| --- | --- | --- |
+| `SESSION_INFERENCE_ENABLED` | `true` | 명시적 세션이 없을 때 자동 추론. `false`면 요청별(`trace:<id>`)로 분리(레거시 동작) |
+| `SESSION_IDLE_TIMEOUT` | `30m` | 이 시간 이상 비활성이면 새 추론 세션 시작 |
+
+> 더 정확한 그룹화가 필요하면 클라이언트(플러그인)에서 `X-Vibe-Session-ID` 헤더를 직접 보내는 것이 가장 좋습니다. repo/branch 단위로 나누려면 `X-Vibe-Repo`·`X-Vibe-Branch` 헤더를 추가하세요.
+
 ## 통계와 어드민
 
 ```powershell
@@ -149,7 +182,7 @@ curl.exe http://localhost:8080/metrics
 - **표 헤더 정렬**: 사용자/IP/모델/언어/호출이력 표의 헤더를 클릭하면 오름·내림 정렬. 정렬 상태는 화면별로 저장됩니다.
 - **키보드 단축키**:
   - `?` 도움말, `/` 검색 포커스, `t` 다크 모드, `r` 새로고침, `Esc` 모달 닫기
-  - `g` 다음에 `d`(대시보드) / `x`(XView) / `w`(Waterfall) / `l`(LLM 관측) / `c`(MCP) / `r`(호출 이력) / `p`(프롬프트 검색) / `u`(사용자) / `m`(팀) / `i`(IP) / `q`(사용 한도) / `a`(안전) / `s`(설정)
+  - `g` 다음에 `d`(대시보드) / `x`(XView) / `w`(Waterfall) / `l`(LLM 관측) / `c`(MCP) / `e`(에이전트) / `r`(호출 이력) / `p`(프롬프트 검색) / `u`(사용자) / `m`(팀) / `i`(IP) / `q`(사용 한도) / `a`(안전) / `s`(설정)
 - **시계열 차트**: 대시보드 상단에 24시간/7일/30일 토글로 요청 수(실선) + 비용 KRW(점선) SVG 라인 차트.
 - **상위 사용자 위젯**: 요청 수 기준 Top 5 API 키, 클릭 시 사용자 상세로 이동.
 - **상태 분포 카드**: 2xx / 3xx / 4xx / 429 / 5xx 비율을 막대와 표로 함께 표시.
@@ -383,6 +416,22 @@ curl.exe http://localhost:8080/admin/providers `
 ```
 
 이후 `model=claude-3-5-sonnet` 요청은 자동으로 anthropic provider 로, `model=gpt-4.1-mini` 는 기본 openai 로 라우팅됩니다. 어드민 UI 의 설정 탭 > 업스트림 프로바이더 폼에서도 동일하게 입력할 수 있습니다.
+
+### 라우팅 학습 (Routing Learning Engine)
+
+운영 계층(고정 복잡도 규칙) 위의 **학습 계층**입니다. 게이트웨이는 모든 chat 호출에 대해 **작업유형**(프롬프트 키워드로 추정: 리팩토링/생성/디버그/설명/테스트/변환/문서/리뷰)과 **복잡도 버킷**(낮음 0–33 / 중간 34–66 / 높음 67–100)을 기록하고, 모델별 **성공률·평균 비용·평균 지연·👍/👎**를 누적합니다.
+
+`GET /admin/routing/learning?window=7d&min_samples=20` 은 (작업유형 × 복잡도 × 모델) 매트릭스와, 셀별로 **표본이 충분한 모델 중 성공률이 가장 높은(동률 시 저비용)** 모델을 고른 추천을 반환합니다(성공 = 2xx · 오류 없음 · 폴백 없음). 예: `복잡도 82 → GPT-5(성공 92%) vs Claude(96%) → Claude 추천`.
+
+설정 탭의 **"라우팅 학습 추천"** 표에서 현재 최다 사용 모델과 추천 모델을 비교하고, **"규칙으로 적용"** 버튼으로 해당 복잡도 구간에 대한 라우팅 규칙을 즉시 생성합니다(human-in-the-loop). 작업유형은 추정치이며 적용 규칙은 복잡도 구간 단위로 동작합니다.
+
+### 에이전트 성능 분석 (Agent Performance Analytics)
+
+**에이전트** 탭은 코딩 에이전트(Claude Code/Cursor/Roo Code/Cline/Qwen Code/Continue/…)별 리더보드입니다. 요청 User-Agent로 에이전트를 분류해 **성공률**(2xx·오류無·폴백無)·**평균/누적 비용**·**평균 지연/TTFB**·**도구 오류율**·토큰을 비교합니다. `GET /admin/agents?window=7d` → `{agents[]}`. 어떤 에이전트가 가장 안정적이고(성공률) 가성비가 좋은지(평균 비용) 한눈에 보고 표준 도구를 정하는 데 씁니다.
+
+### 프롬프트 지문 (Prompt Fingerprint)
+
+프롬프트 검색 탭 하단의 **"프롬프트 지문"** 표는 의미적으로 유사한 작업 프롬프트를 하나로 묶습니다. 붙여넣은 코드를 제거하고 핵심 키워드 + 작업유형(+한국어 조사·어미 정규화)으로 만든 **어휘 지문**(`fp_…`, 의미 임베딩 아님)으로 클러스터링하여, 코딩 도구가 반복 전송하는 정형 프롬프트를 드러냅니다. 클러스터별 **건수·성공률·평균/누적 비용·평균 토큰·최다 사용 모델·최저가(성공률 5%p 이내) 모델·예시 프롬프트**를 제공합니다. 예: `"REST 컨트롤러 만들어줘" 계열 412건, 평균 ₩X, 최저가 모델 gpt-4.1-mini`. `GET /admin/prompts/fingerprints?window=7d&limit=100`.
 
 Proxy API Key 발급:
 
