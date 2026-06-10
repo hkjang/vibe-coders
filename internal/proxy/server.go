@@ -40,8 +40,11 @@ type Server struct {
 	killState    atomicKillState
 	mcpPolicy    atomic.Pointer[mcpPolicySnapshot]
 	routingRules atomic.Pointer[routingRulesSnapshot]
+	knowledge    atomic.Pointer[knowledgeSnapshot]
 	sessions     *sessionInferer
 	extSeen      sync.Map // external key id -> struct{}; dedupes lazy registration
+	mcpConns     sync.Map // upstream id -> *mcpUpstreamConn (MCP gateway session state)
+	mcpTools     atomic.Pointer[mcpToolsSnapshot]
 }
 
 type atomicKillState struct {
@@ -151,6 +154,11 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/admin/routing/learning", s.handleRoutingLearning)
 	mux.HandleFunc("/admin/agents", s.handleAgents)
 	mux.HandleFunc("/admin/prompts/fingerprints", s.handlePromptFingerprints)
+	mux.HandleFunc("/admin/knowledge", s.handleKnowledge)
+	mux.HandleFunc("/admin/knowledge/", s.handleKnowledgeByID)
+	mux.HandleFunc("/admin/mcp/upstreams", s.handleMCPUpstreams)
+	mux.HandleFunc("/admin/mcp/upstreams/", s.handleMCPUpstreamByID)
+	mux.HandleFunc("/mcp", s.handleMCPGateway)
 	mux.HandleFunc("/admin/llm/traces", s.handleLLMTraces)
 	mux.HandleFunc("/admin/llm/traces/", s.handleLLMTraceDetail)
 	mux.HandleFunc("/admin/llm/sessions", s.handleLLMSessions)
@@ -619,6 +627,21 @@ func (s *Server) handleOpenAI(w http.ResponseWriter, r *http.Request) {
 	if routeDecision.Applied {
 		meta.Request.RequestedModel = routeDecision.OriginalModel
 		s.metrics.IncRoutingOverride()
+	}
+
+	// Knowledge cache: expand {{kb:slug}} references / X-Vibe-Knowledge into the body
+	// sent upstream. Audit (above) keeps the compact reference; the model gets full text.
+	if r.URL.Path == "/v1/chat/completions" && r.Method == http.MethodPost {
+		if expanded, ids, tokens := s.expandKnowledge(r, body); len(ids) > 0 {
+			body = expanded
+			w.Header().Set("X-Knowledge-Expanded", strings.Join(ids, ","))
+			s.metrics.AddKnowledgeExpansion(tokens)
+			go func(ids []string) {
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				_ = s.db.TouchKnowledge(ctx, ids)
+			}(ids)
+		}
 	}
 
 	// MCP server policy (allowlist / block) — reject requests that use a disallowed

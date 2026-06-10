@@ -240,7 +240,24 @@ AI 코딩 도구(Roo Code·Cline·Cursor·Claude Desktop)가 MCP 서버나 함�
 4. **Tool 리더보드**: (서버, 도구) 별 정의·호출·결과·오류·오류율·고유 키. `호출`/`오류` 버튼으로 해당 도구를 사용한 요청을 모달로 drill-down
 5. **에이전트 루프 의심**: 최근 24시간 동안 한 세션에서 같은 도구를 10회 이상 호출한 경우 표시. 폭주/무한루프 에이전트를 비용 사고 전에 발견. 30회 이상은 빨간색.
 6. **도구 카탈로그 / 드리프트**: 서버별로 관측된 도구 목록과 최초/최근 관측 시각. 최근 24시간 내 처음 나타난 도구는 `신규` 배지로 강조(공급망 변조·권한 확대 탐지), 30일간 안 보이면 `미사용` 배지. 섹션 제목에 신규 도구 수 표시.
-7. **MCP 서버 정책**: 아래 보안 절 참고
+7. **MCP Gateway 업스트림**: 아래 게이트웨이 절 참고
+8. **MCP 서버 정책**: 아래 보안 절 참고
+
+### MCP Gateway — 업스트림 서버 집약 (단일 /mcp)
+
+vibe-coders 는 LLM 게이트웨이이자 **MCP 게이트웨이**입니다. 여러 업스트림 MCP 서버를 한 곳(`/mcp`, JSON-RPC 2.0 Streamable HTTP)에 모아, 클라이언트는 게이트웨이 하나만 연결하면 모든 서버의 도구를 씁니다.
+
+- **등록 폼**: 이름(네임스페이스), Streamable HTTP MCP URL, Bearer 토큰(선택, 암호화 저장). ID는 이름에서 슬러그로 자동 생성되며 도구 접두사로 쓰입니다(`<id>__`).
+- **표**: 이름/ID·URL·인증 여부·상태(사용/중지)·동작(중지/삭제). 업스트림 도구 탐색에 실패하면 `탐색 오류` 배지(마우스 오버 시 사유).
+- **동작 원리**: 세 가지 MCP 1차 객체를 모두 집약합니다(30초 캐시).
+  - **도구**: `tools/list` 를 합쳐 `<id>__<도구>` 로 노출, `tools/call` 은 네임스페이스로 라우팅.
+  - **프롬프트**: `prompts/list` 를 `<id>__<프롬프트>` 로 노출, `prompts/get` 은 네임스페이스를 떼어 해당 업스트림으로 라우팅.
+  - **리소스**: `resources/list`·`resources/templates/list` 를 집약(원본 URI 보존), `resources/read` 는 URI로 소유 업스트림에 라우팅. (URI 충돌 시 먼저 등록된 업스트림 우선)
+  모든 호출은 위의 MCP 서버 정책(allowlist/차단, 서버 라벨=업스트림 이름)과 사용자 귀속·MCP 관측에 통합 기록됩니다. `initialize` 응답은 tools+resources+prompts capability 를 광고합니다.
+- **클라이언트 설정**: MCP 서버 URL 을 `http://<gateway>:8080/mcp` 하나로. 인증은 `/v1` 과 동일한 proxy key(`Authorization: Bearer …`).
+- API: `GET|POST /admin/mcp/upstreams`, `PATCH|DELETE /admin/mcp/upstreams/{id}`. 메트릭은 기존 `proxy_mcp_tool_calls_total`/`proxy_mcp_tool_errors_total` 에 합산.
+
+> 현재 Streamable HTTP 업스트림을 지원합니다(JSON 및 SSE 응답 모두 처리). 라우팅은 목록에 노출된 도구·프롬프트·리소스 대상입니다(템플릿으로 동적 생성된 미등록 URI 읽기는 미지원). stdio 서브프로세스 MCP 서버 연결은 향후 과제입니다.
 
 ### MCP 서버 정책 (allowlist / 차단)
 
@@ -552,6 +569,25 @@ curl -X POST http://<host>:8080/admin/routing-rules \
 - API: `GET /admin/routing/learning?window=7d&min_samples=20` → `{cells[], recommendations[]}`.
 - **human-in-the-loop**: 추천은 자동 적용되지 않습니다. 운영자가 "규칙으로 적용"을 눌러야 9.2.1 규칙으로 반영됩니다. 적용 규칙은 **복잡도 구간 단위**로 동작하므로(작업유형은 참고용), 같은 구간에서 작업유형별 추천이 갈리면 운영자가 판단해 적용하세요.
 - 작업유형·복잡도는 프롬프트 기반 휴리스틱 추정치입니다(모델 산출값 아님).
+
+### 9.2.3 Knowledge Cache (반복 규칙 중앙 등록)
+
+매 호출에 반복 전송되는 사내 코딩 규칙·시스템 프롬프트를 한 번 등록해 두고, 클라이언트가 짧은 참조만 보내면 게이트웨이가 업스트림 전송 시 전체 텍스트로 확장합니다.
+
+- 등록 폼: 이름, ID(slug, 비우면 이름에서 자동 생성), 본문. 토큰 추정치는 자동 계산. 표에서 사용 횟수·최근 사용·참조 문자열(`{{kb:ID}}`)·사용/중지·삭제.
+- 클라이언트 참조 방법(둘 중 하나):
+  - 메시지 본문 플레이스홀더 `{{kb:ID}}`
+  - 헤더 `X-Vibe-Knowledge: ID1,ID2` → 시스템 메시지로 맨 앞에 주입
+- 확장된 응답에는 `X-Knowledge-Expanded: <id,...>` 헤더. 메트릭 `proxy_knowledge_expansions_total`, `proxy_knowledge_tokens_total`. 5초 캐시로 변경이 약 5초 내 전파.
+- **감사 로그에는 확장 전 짧은 참조가 그대로 보존**되고(저장 절감), 모델에는 전체 본문이 전달됩니다. 프롬프트 지문에서 발견한 반복 정형 프롬프트를 여기에 등록하는 워크플로가 자연스럽습니다.
+
+| 효과 | 설명 |
+| --- | --- |
+| 거버넌스 | 규칙을 한 곳에서 고치면 모든 호출에 즉시 반영 (클라이언트 수정 불필요) |
+| 페이로드·저장 | 클라이언트→게이트웨이 본문과 프롬프트 로그가 짧아짐 |
+| 업스트림 비용 | provider 프리픽스 캐싱(cached 토큰)과 결합될 때 절감 — 게이트웨이가 안정적 프리픽스로 주입 |
+
+API: `GET /admin/knowledge`, `POST /admin/knowledge`(`{name, id?, content, enabled?}`), `PATCH|DELETE /admin/knowledge/{id}`.
 
 ### 9.3 데이터 보존 정책
 

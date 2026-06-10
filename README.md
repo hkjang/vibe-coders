@@ -23,6 +23,7 @@ Roo Code / Cursor / Continue 등 OpenAI 호환 API 를 호출하는 VS Code 확�
 ## 현재 구현 범위
 
 - `/v1/chat/completions`, `/v1/models`, `/v1/embeddings` 프록시
+- **MCP Gateway**: 여러 업스트림 MCP 서버를 단일 `/mcp` (JSON-RPC 2.0) 엔드포인트로 집약 — 도구 네임스페이스(`<업스트림>__<도구>`)·라우팅, 기존 MCP 정책(allowlist/차단)·사용자 귀속·관측에 통합
 - `stream=true` SSE 응답 즉시 중계 및 flush
 - SQLite 기본 저장, PostgreSQL DSN 지원
 - 비동기 감사 로그 + fallback NDJSON
@@ -433,6 +434,18 @@ curl.exe http://localhost:8080/admin/providers `
 
 프롬프트 검색 탭 하단의 **"프롬프트 지문"** 표는 의미적으로 유사한 작업 프롬프트를 하나로 묶습니다. 붙여넣은 코드를 제거하고 핵심 키워드 + 작업유형(+한국어 조사·어미 정규화)으로 만든 **어휘 지문**(`fp_…`, 의미 임베딩 아님)으로 클러스터링하여, 코딩 도구가 반복 전송하는 정형 프롬프트를 드러냅니다. 클러스터별 **건수·성공률·평균/누적 비용·평균 토큰·최다 사용 모델·최저가(성공률 5%p 이내) 모델·예시 프롬프트**를 제공합니다. 예: `"REST 컨트롤러 만들어줘" 계열 412건, 평균 ₩X, 최저가 모델 gpt-4.1-mini`. `GET /admin/prompts/fingerprints?window=7d&limit=100`.
 
+### Knowledge Cache (반복 규칙 중앙 등록)
+
+매 호출에 반복 전송되는 사내 코딩 규칙·시스템 프롬프트를 **한 번 등록**하고, 클라이언트는 본문 대신 짧은 참조만 보냅니다. 게이트웨이가 업스트림 전송 시 전체 텍스트로 **확장**합니다.
+
+- 등록: 설정 탭 > "Knowledge Cache" (이름·ID·본문). API: `POST /admin/knowledge`, 목록/삭제/토글 `GET|DELETE|PATCH /admin/knowledge[/{id}]`.
+- 참조 방법 (둘 중 하나):
+  - 메시지 본문에 플레이스홀더: `{{kb:coding-standards}}`
+  - 헤더: `X-Vibe-Knowledge: coding-standards,security-rules` → 시스템 메시지로 맨 앞에 주입
+- 확장된 호출은 응답 헤더 `X-Knowledge-Expanded: <id,...>` 로 확인. 메트릭 `proxy_knowledge_expansions_total`, `proxy_knowledge_tokens_total`.
+
+효과: 규칙을 한 곳에서 고치면 **모든 호출에 즉시 반영**(거버넌스), 클라이언트→게이트웨이 페이로드·프롬프트 로그 저장 감소. 업스트림 토큰 *비용* 절감은 안정적 프리픽스에 대한 provider 프리픽스 캐싱(cached 토큰)과 결합될 때 발생합니다. 감사 로그에는 확장 전 짧은 참조가 보존되고, 모델에는 전체 본문이 전달됩니다.
+
 Proxy API Key 발급:
 
 ```powershell
@@ -442,6 +455,26 @@ curl.exe http://localhost:8080/admin/api-keys `
 ```
 
 응답의 `secret` 은 한 번만 확인할 수 있습니다.
+
+## MCP Gateway (프로토콜 집약 게이트웨이)
+
+LLM 게이트웨이이자 **MCP 게이트웨이**입니다. 여러 업스트림 MCP 서버를 단일 `/mcp` 엔드포인트(JSON-RPC 2.0, Streamable HTTP) 뒤에 모아, 클라이언트(Claude Code·Cursor 등)는 게이트웨이 한 곳에만 연결합니다.
+
+- **집약·네임스페이스**: 등록된 모든 업스트림의 `tools/list`·`prompts/list` 를 합쳐 `<업스트림ID>__<이름>` 로 노출, `resources/list`·`resources/templates/list` 도 집약(원본 URI 보존). 충돌 없이 한 목록으로 제공.
+- **라우팅**: `tools/call`·`prompts/get` 은 네임스페이스로, `resources/read` 는 URI로 해당 업스트림에 라우팅(전체 타임아웃·세션 핸드셰이크/세션ID 자동 관리).
+- **정책 재사용**: 기존 MCP allowlist/차단 정책(서버 라벨=업스트림 이름)으로 게이트웨이 호출을 차단.
+- **통합 관측·귀속**: 모든 호출을 `tool_invocations` 파이프라인으로 로깅 → MCP 탭(서버/도구/루프/카탈로그)·사용자 귀속·세션에 그대로 합산. 메트릭 `proxy_mcp_tool_calls_total` 등.
+- 지원 메서드: `initialize`(tools+resources+prompts capability 광고) / `tools/list`·`tools/call` / `resources/list`·`resources/read`·`resources/templates/list` / `prompts/list`·`prompts/get` / `ping`. 인증은 `/v1` 과 동일하게 proxy key.
+
+등록(어드민 MCP 탭 또는 API):
+
+```powershell
+curl.exe http://localhost:8080/admin/mcp/upstreams `
+  -H "Content-Type: application/json" `
+  -d '{ "name": "github", "url": "https://mcp.example.com/github/mcp", "auth_token": "ghp_..." }'
+```
+
+클라이언트는 MCP 서버 URL 로 `http://<gateway>:8080/mcp` 하나만 설정하면 됩니다. (현재 Streamable HTTP 업스트림 지원; stdio 서브프로세스는 향후 과제)
 
 ## 사용자·IP 별 이력 조회
 

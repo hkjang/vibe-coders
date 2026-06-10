@@ -251,6 +251,24 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 			note TEXT,
 			created_at TEXT NOT NULL
 		)`,
+		`CREATE TABLE IF NOT EXISTS mcp_upstreams (
+				id TEXT PRIMARY KEY,
+				name TEXT NOT NULL,
+				url TEXT NOT NULL,
+				encrypted_auth TEXT,
+				enabled INTEGER NOT NULL DEFAULT 1,
+				created_at TEXT NOT NULL
+			)`,
+		`CREATE TABLE IF NOT EXISTS knowledge_snippets (
+				id TEXT PRIMARY KEY,
+				name TEXT NOT NULL,
+				content TEXT NOT NULL,
+				enabled INTEGER NOT NULL DEFAULT 1,
+				token_estimate INTEGER NOT NULL DEFAULT 0,
+				use_count INTEGER NOT NULL DEFAULT 0,
+				last_used_at TEXT,
+				created_at TEXT NOT NULL
+			)`,
 		`CREATE TABLE IF NOT EXISTS routing_rules (
 			id TEXT PRIMARY KEY,
 			enabled INTEGER NOT NULL DEFAULT 1,

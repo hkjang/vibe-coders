@@ -25,6 +25,8 @@ type Metrics struct {
 	mcpToolErrors   atomic.Uint64
 	mcpBlocked      atomic.Uint64
 	routingOverride atomic.Uint64
+	knowledgeExpand atomic.Uint64 // requests that expanded ≥1 knowledge snippet
+	knowledgeTokens atomic.Uint64 // estimated tokens injected via knowledge expansion
 	latency         *LatencyDigest
 	firstChunk      *LatencyDigest
 }
@@ -105,6 +107,12 @@ func (m *Metrics) IncCacheMiss()       { m.cacheMisses.Add(1) }
 func (m *Metrics) IncFailover()        { m.failovers.Add(1) }
 func (m *Metrics) IncMCPBlocked()      { m.mcpBlocked.Add(1) }
 func (m *Metrics) IncRoutingOverride() { m.routingOverride.Add(1) }
+func (m *Metrics) AddKnowledgeExpansion(tokens int) {
+	m.knowledgeExpand.Add(1)
+	if tokens > 0 {
+		m.knowledgeTokens.Add(uint64(tokens))
+	}
+}
 
 func (m *Metrics) ObserveLLMEvaluations(evaluations []store.LLMEvaluation) {
 	for _, evaluation := range evaluations {
@@ -165,6 +173,12 @@ func (m *Metrics) Prometheus(queueDepth int, logDropped uint64, logWritten uint6
 		"# HELP proxy_routing_overrides_total Requests whose model was changed by a complexity routing rule.",
 		"# TYPE proxy_routing_overrides_total counter",
 		fmt.Sprintf("proxy_routing_overrides_total %d", m.routingOverride.Load()),
+		"# HELP proxy_knowledge_expansions_total Requests that expanded one or more knowledge snippets.",
+		"# TYPE proxy_knowledge_expansions_total counter",
+		fmt.Sprintf("proxy_knowledge_expansions_total %d", m.knowledgeExpand.Load()),
+		"# HELP proxy_knowledge_tokens_total Estimated tokens injected via knowledge expansion.",
+		"# TYPE proxy_knowledge_tokens_total counter",
+		fmt.Sprintf("proxy_knowledge_tokens_total %d", m.knowledgeTokens.Load()),
 		"# HELP proxy_log_queue_depth Current async log queue depth.",
 		"# TYPE proxy_log_queue_depth gauge",
 		fmt.Sprintf("proxy_log_queue_depth %d", queueDepth),

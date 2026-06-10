@@ -3122,12 +3122,13 @@ const adminHTML = `<!doctype html>
       if (serverFilter) qs.set('server', serverFilter);
       if (mcpOnly) qs.set('mcp_only', '1');
 
-      const [serversResp, toolsResp, policiesResp, loopsResp, catalogResp] = await Promise.all([
+      const [serversResp, toolsResp, policiesResp, loopsResp, catalogResp, upstreamsResp] = await Promise.all([
         api('/admin/mcp/servers' + (qs.toString() ? '?' + qs.toString() : '')),
         api('/admin/mcp/tools' + (qs.toString() ? '?' + qs.toString() : '')),
         api('/admin/mcp/policies').catch(() => ({ policies: [], allowlist_enabled: false })),
         api('/admin/mcp/loops?window=24h&threshold=10').catch(() => ({ loops: [], threshold: 10 })),
         api('/admin/mcp/catalog' + (serverFilter ? '?server=' + encodeURIComponent(serverFilter) : '')).catch(() => ({ catalog: [], new_count: 0 })),
+        api('/admin/mcp/upstreams').catch(() => ({ upstreams: [], discovery_errors: {} })),
       ]);
       const servers = serversResp.servers || [];
       const summary = serversResp.summary || {};
@@ -3244,13 +3245,51 @@ const adminHTML = `<!doctype html>
         : '<div class="empty">관측된 도구 카탈로그 없음. 클라이언트가 tools[] 를 선언하면 서버별로 도구 목록이 누적됩니다.</div>';
       const catalogTitle = '도구 카탈로그 / 드리프트' + (newToolCount > 0 ? ' — 최근 24시간 신규 ' + newToolCount + '개' : '');
 
+      // ---- MCP Gateway upstreams section ----
+      const upstreams = upstreamsResp.upstreams || [];
+      const discErrors = upstreamsResp.discovery_errors || {};
+      const upstreamForm =
+        '<form class="inline-form" id="mcp-upstream-form" autocomplete="off" style="grid-template-columns: minmax(120px,1fr) minmax(200px,2fr) minmax(120px,1fr) 70px;">' +
+          '<input id="mcp-up-name" placeholder="이름 (네임스페이스)" required>' +
+          '<input id="mcp-up-url" type="url" placeholder="Streamable HTTP MCP URL (https://…/mcp)" required>' +
+          '<input id="mcp-up-auth" type="password" autocomplete="new-password" placeholder="Bearer 토큰(선택)">' +
+          '<button type="submit">추가</button>' +
+        '</form>';
+      const upstreamRows = upstreams.map(u =>
+        '<tr>' +
+          '<td><strong>' + escapeHTML(u.name) + '</strong><div class="muted">' + escapeHTML(u.id) + ' · 도구 접두사 <code>' + escapeHTML(u.id) + '__</code></div>' +
+            (discErrors[u.name] ? '<div class="status error" style="margin-top:4px" title="' + escapeAttr(discErrors[u.name]) + '">탐색 오류</div>' : '') + '</td>' +
+          '<td class="muted">' + escapeHTML(u.url) + '</td>' +
+          '<td>' + (u.has_auth ? '<span class="pill">인증</span>' : '<span class="muted">없음</span>') + '</td>' +
+          '<td><span class="status ' + (u.enabled ? '' : 'error') + '">' + (u.enabled ? '사용' : '중지') + '</span></td>' +
+          '<td><button class="secondary" type="button" onclick="toggleMCPUpstream(\'' + escapeAttr(u.id) + '\',' + (!u.enabled) + ')">' + (u.enabled ? '중지' : '사용') + '</button> ' +
+          '<button class="danger" type="button" onclick="deleteMCPUpstream(\'' + escapeAttr(u.id) + '\')">삭제</button></td>' +
+        '</tr>').join('');
+      const upstreamTable = upstreams.length ?
+        '<table><thead><tr><th>이름</th><th>URL</th><th>인증</th><th>상태</th><th>동작</th></tr></thead><tbody>' + upstreamRows + '</tbody></table>'
+        : '<div class="empty">등록된 업스트림 MCP 서버 없음. 등록하면 게이트웨이 엔드포인트 <code>/mcp</code> 가 모든 서버의 도구를 <code>&lt;이름&gt;__&lt;도구&gt;</code> 로 합쳐 제공합니다.</div>';
+      const gatewayHelp = '<div class="muted" style="font-size:12px; padding:0 14px 12px">클라이언트(Claude Code·Cursor 등)를 게이트웨이 <code>/mcp</code> 한 곳에만 연결하면 등록된 모든 MCP 서버의 도구를 함께 사용합니다. 도구 이름은 <code>&lt;업스트림ID&gt;__&lt;도구&gt;</code> 로 네임스페이스되고, 호출은 위 정책(allowlist/차단)과 사용자 귀속·관측에 통합됩니다. (Streamable HTTP 업스트림 지원)</div>';
+
       document.getElementById('view').innerHTML =
         section('MCP / Tool 요약', kpis + filterBar) +
+        section('MCP Gateway — 업스트림 서버 (단일 /mcp 로 집약)', upstreamForm + upstreamTable + gatewayHelp) +
         section('MCP 서버별', serverTable) +
         section('Tool 리더보드', toolTable) +
         section('에이전트 루프 의심 (세션별 반복 호출 ≥ 10)', loopTable) +
         section(catalogTitle, catalogTable) +
         section('MCP 서버 정책', allowlistToggle + policyForm + policyTable);
+
+      document.getElementById('mcp-upstream-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const body = {
+          name: document.getElementById('mcp-up-name').value.trim(),
+          url: document.getElementById('mcp-up-url').value.trim(),
+          auth_token: document.getElementById('mcp-up-auth').value,
+        };
+        if (!body.name || !body.url) { alert('이름과 URL을 입력하세요'); return; }
+        await api('/admin/mcp/upstreams', { method: 'POST', body: JSON.stringify(body) });
+        route();
+      });
 
       document.getElementById('mcp-filter').addEventListener('submit', (e) => {
         e.preventDefault();
@@ -3280,6 +3319,15 @@ const adminHTML = `<!doctype html>
     window.deleteMCPPolicy = async (server) => {
       if (!confirm('서버 정책 "' + server + '" 을(를) 삭제하시겠습니까?')) return;
       await api('/admin/mcp/policies/' + encodeURIComponent(server), { method: 'DELETE' });
+      route();
+    };
+    window.toggleMCPUpstream = async (id, enabled) => {
+      await api('/admin/mcp/upstreams/' + encodeURIComponent(id), { method: 'PATCH', body: JSON.stringify({ enabled }) });
+      route();
+    };
+    window.deleteMCPUpstream = async (id) => {
+      if (!confirm('업스트림 MCP 서버 "' + id + '" 을(를) 삭제하시겠습니까?')) return;
+      await api('/admin/mcp/upstreams/' + encodeURIComponent(id), { method: 'DELETE' });
       route();
     };
     function errorRatePct(errors, calls) {
@@ -3455,7 +3503,7 @@ const adminHTML = `<!doctype html>
 
     // ---------- settings ----------
     async function renderSettings() {
-      const [keys, providers, retention, fallback, audit, routes, learning] = await Promise.all([
+      const [keys, providers, retention, fallback, audit, routes, learning, knowledge] = await Promise.all([
         api('/admin/api-keys'),
         api('/admin/providers'),
         api('/admin/retention'),
@@ -3463,6 +3511,7 @@ const adminHTML = `<!doctype html>
         api('/admin/audit-logs?limit=50'),
         api('/admin/routing-rules').catch(() => ({ rules: [] })),
         api('/admin/routing/learning?window=7d').catch(() => ({ recommendations: [], cells: [] })),
+        api('/admin/knowledge').catch(() => ({ snippets: [] })),
       ]);
 
       const html =
@@ -3492,6 +3541,7 @@ const adminHTML = `<!doctype html>
         '</div>' +
         section('복잡도 기반 비용 최적 라우팅 규칙', routingRulesPanel(routes.rules || [])) +
         section('라우팅 학습 추천 (Routing Learning)', routingLearningPanel(learning)) +
+        section('Knowledge Cache (반복 규칙·시스템 프롬프트 중앙 등록)', knowledgePanel(knowledge.snippets || [])) +
         section('데이터 보존 정책', retentionPanel(retention)) +
         section('Fallback 로그 재처리', fallbackPanel(fallback)) +
         section('관리자 변경 이력', auditPanel(audit.audit_logs || []));
@@ -3501,6 +3551,8 @@ const adminHTML = `<!doctype html>
       document.getElementById('provider-form').addEventListener('submit', saveProvider);
       const rrForm = document.getElementById('routing-rule-form');
       if (rrForm) rrForm.addEventListener('submit', addRoutingRule);
+      const kbForm = document.getElementById('knowledge-form');
+      if (kbForm) kbForm.addEventListener('submit', addKnowledge);
       const retentionBtn = document.getElementById('retention-run');
       if (retentionBtn) retentionBtn.addEventListener('click', runRetention);
       const fallbackBtn = document.getElementById('fallback-replay');
@@ -3625,6 +3677,50 @@ const adminHTML = `<!doctype html>
       const range = { low: [0, 33], medium: [34, 66], high: [67, 100] }[bucket] || [0, 100];
       if (!confirm('복잡도 ' + range[0] + '–' + range[1] + ' 구간을 ' + model + ' 로 라우팅하는 규칙을 만듭니다.\n(작업유형 "' + (wfTaskLabel[taskType] || taskType) + '" 학습 추천 기반 · 구간 전체에 적용)')) return;
       await api('/admin/routing-rules', { method: 'POST', body: JSON.stringify({ match_pattern: '*', min_complexity: range[0], max_complexity: range[1], target_model: model, priority: 90, note: '학습추천: ' + taskType + '/' + bucket }) });
+      route();
+    };
+    function knowledgePanel(snippets) {
+      const form =
+        '<form class="inline-form" id="knowledge-form" style="grid-template-columns: minmax(120px,1fr) 140px minmax(220px,2fr) 70px; align-items:start;">' +
+          '<input id="kb-name" placeholder="이름 (예: 사내 코딩 규칙)" required>' +
+          '<input id="kb-id" placeholder="ID(slug, 비우면 자동)">' +
+          '<textarea id="kb-content" rows="3" placeholder="규칙/시스템 프롬프트 본문" required style="resize:vertical"></textarea>' +
+          '<button type="submit">등록</button>' +
+        '</form>';
+      const table = snippets.length ?
+        '<table><thead><tr><th>이름 / ID</th><th data-sort="num">토큰</th><th data-sort="num">사용 횟수</th><th data-sort="str">최근 사용</th><th>참조</th><th>상태</th><th>동작</th></tr></thead><tbody>' +
+        snippets.map(k => '<tr>' +
+          '<td><strong>' + escapeHTML(k.name) + '</strong><div class="muted">' + escapeHTML(k.id) + '</div></td>' +
+          '<td data-num="' + (k.token_estimate || 0) + '">' + fmt(k.token_estimate || 0) + '</td>' +
+          '<td data-num="' + (k.use_count || 0) + '">' + fmt(k.use_count || 0) + '</td>' +
+          '<td>' + (k.last_used_at ? ago(k.last_used_at) : '<span class="muted">미사용</span>') + '</td>' +
+          '<td><code>{{kb:' + escapeHTML(k.id) + '}}</code></td>' +
+          '<td><span class="status ' + (k.enabled ? '' : 'error') + '">' + (k.enabled ? '사용' : '중지') + '</span></td>' +
+          '<td><button class="secondary" type="button" onclick="toggleKnowledge(\'' + escapeAttr(k.id) + '\',' + (!k.enabled) + ')">' + (k.enabled ? '중지' : '사용') + '</button> ' +
+          '<button class="danger" type="button" onclick="deleteKnowledge(\'' + escapeAttr(k.id) + '\')">삭제</button></td>' +
+        '</tr>').join('') + '</tbody></table>'
+        : '<div class="empty">등록된 지식 없음.</div>';
+      return form + table +
+        '<div class="muted" style="font-size:12px; padding:0 14px 12px">반복되는 규칙/시스템 프롬프트를 한 번 등록하면, 클라이언트는 본문 대신 <code>{{kb:ID}}</code> 참조만 보내거나 <code>X-Vibe-Knowledge: ID1,ID2</code> 헤더를 붙이면 됩니다. 게이트웨이가 업스트림 전송 시 전체 텍스트로 확장합니다(응답 헤더 <code>X-Knowledge-Expanded</code>로 확인). 규칙을 한 곳에서 고치면 모든 호출에 즉시 반영되고, 클라이언트 페이로드·로그 저장이 줄어듭니다. 업스트림 토큰 비용은 provider 프리픽스 캐싱(cached 토큰)과 결합될 때 절감됩니다.</div>';
+    }
+    async function addKnowledge(e) {
+      e.preventDefault();
+      const body = {
+        name: document.getElementById('kb-name').value.trim(),
+        id: document.getElementById('kb-id').value.trim(),
+        content: document.getElementById('kb-content').value,
+      };
+      if (!body.name || !body.content.trim()) { alert('이름과 본문을 입력하세요'); return; }
+      await api('/admin/knowledge', { method: 'POST', body: JSON.stringify(body) });
+      route();
+    }
+    window.toggleKnowledge = async (id, enabled) => {
+      await api('/admin/knowledge/' + encodeURIComponent(id), { method: 'PATCH', body: JSON.stringify({ enabled }) });
+      route();
+    };
+    window.deleteKnowledge = async (id) => {
+      if (!confirm('이 지식 항목을 삭제하시겠습니까? 이 ID를 참조하는 호출은 더 이상 확장되지 않습니다.')) return;
+      await api('/admin/knowledge/' + encodeURIComponent(id), { method: 'DELETE' });
       route();
     };
     async function addRoutingRule(e) {
