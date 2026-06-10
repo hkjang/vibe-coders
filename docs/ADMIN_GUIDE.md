@@ -513,6 +513,15 @@ curl -i http://<host>:8080/v1/chat/completions -H "Authorization: Bearer <발급
 - 릴리즈 롤백 / 보안 사고 / vendor 측 대량 장애
 - 짧은 시간 안에 다시 켤 예정일 때 (몇 시간 차단은 쿼터/키 비활성화로 대체)
 
+### 비용 가드 / 예측 (Cost Guard)
+
+호출을 업스트림에 보내기 **전에** 입력/출력 토큰·KRW 비용·지연을 예측하고, 예상 비용이 임계값을 넘으면 차단합니다(쿼터가 *누적 사용량*을 막는다면, 비용 가드는 *단일 호출*의 예상 비용을 막습니다).
+
+- **가드 사용 + 임계값(KRW)**: 켜면 예상 비용 > 임계값인 chat 호출을 `HTTP 402` + `X-Cost-Guard: blocked` 로 차단. 클라이언트가 `X-Cost-Approve: 1` 헤더를 보내면 승인되어 통과합니다(대형 작업 의도적 실행). 메트릭 `proxy_cost_guard_blocked_total`.
+- **응답 헤더**: 모든 chat 응답에 `X-Estimated-Input-Tokens / X-Estimated-Output-Tokens / X-Estimated-Cost-KRW / X-Estimated-Latency-MS`.
+- **예측 근거**: 출력 토큰은 모델별 최근 7일 평균(표본 ≥5), 없으면 요청 `max_tokens`, 그것도 없으면 기본 600. 비용은 모델 가격표 기준(가격 미설정 모델은 차단하지 않음).
+- **비용 예측기(dry-run)**: 같은 카드에서 모델·입력 토큰·max_tokens 를 넣어 즉시 예상 비용을 확인. API `POST /admin/cost/predict`. 가드 설정 API `GET|POST /admin/cost {enabled, threshold_krw}`.
+
 ### 알림 규칙
 
 | 지표 | 의미 | 예시 임계값 |

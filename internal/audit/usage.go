@@ -40,6 +40,12 @@ func EstimateCostKRW(model string, usage Usage, pricing map[string]config.ModelP
 	return input + output
 }
 
+// ModelPriced reports whether the model (exact or prefix) has a price entry.
+func ModelPriced(model string, pricing map[string]config.ModelPrice) bool {
+	_, ok := lookupPrice(model, pricing)
+	return ok
+}
+
 func EstimateTokens(text string) int {
 	text = strings.TrimSpace(text)
 	if text == "" {

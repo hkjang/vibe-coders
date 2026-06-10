@@ -170,6 +170,18 @@ curl http://proxy-gateway.intra:8080/v1/chat/completions \
 - 확장 여부는 응답 헤더 `X-Knowledge-Expanded: <id,...>` 로 확인할 수 있습니다.
 - 장점: 규칙이 바뀌어도 클라이언트 수정 없이 자동 반영, 매 호출 본문이 짧아짐.
 
+### 3.10b 비용 예측 헤더 / 큰 호출 승인
+
+모든 chat 응답에는 게이트웨이가 호출 전에 추정한 값이 헤더로 붙습니다: `X-Estimated-Input-Tokens`, `X-Estimated-Output-Tokens`, `X-Estimated-Cost-KRW`, `X-Estimated-Latency-MS`. (`X-Api-Key-Id` 로 어떤 키로 인식됐는지도 확인할 수 있습니다.)
+
+운영자가 **비용 가드**를 켜 둔 경우, 예상 비용이 임계값을 넘는 호출은 `HTTP 402` 로 거부됩니다. 의도한 대형 작업이면 같은 요청에 `X-Cost-Approve: 1` 헤더를 붙여 다시 보내면 승인되어 통과합니다.
+
+```bash
+curl http://proxy-gateway.intra:8080/v1/chat/completions \
+  -H "Authorization: Bearer pcg_..." -H "X-Cost-Approve: 1" \
+  -H "Content-Type: application/json" -d '{ "model":"...", "messages":[...] }'
+```
+
 ### 3.11 MCP Gateway — 여러 MCP 서버를 한 곳에 연결
 
 여러 MCP 서버(GitHub·파일시스템·사내 도구 등)를 각각 등록하는 대신, 게이트웨이 한 곳만 클라이언트에 설정하면 등록된 모든 서버의 도구를 함께 쓸 수 있습니다.

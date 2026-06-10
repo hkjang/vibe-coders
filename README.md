@@ -429,6 +429,14 @@ curl.exe http://localhost:8080/admin/providers `
 
 ### 에이전트 성능 분석 (Agent Performance Analytics)
 
+### AI Cost Predictor (사전 비용 예측 + 가드)
+
+호출을 업스트림에 보내기 **전에** 입력/출력 토큰·KRW 비용·지연을 예측합니다. 출력 토큰은 모델별 최근 7일 평균(표본 부족 시 요청의 `max_tokens`, 그것도 없으면 기본값)으로 추정하고, 비용은 모델 가격표로 계산합니다.
+
+- 모든 chat 응답에 헤더: `X-Estimated-Input-Tokens`, `X-Estimated-Output-Tokens`, `X-Estimated-Cost-KRW`, `X-Estimated-Latency-MS`.
+- **비용 가드**(안전 탭): 예상 비용이 임계값(KRW)을 넘으면 `HTTP 402` 로 차단. 클라이언트가 `X-Cost-Approve: 1` 헤더를 보내면 승인되어 통과. 메트릭 `proxy_cost_guard_blocked_total`.
+- **예측기(dry-run)**: `POST /admin/cost/predict {model, input_tokens, max_tokens?}` → `{input_tokens, output_tokens, cost_krw, latency_ms, priced, basis}`. 가드 설정: `GET|POST /admin/cost {enabled, threshold_krw}`.
+
 **에이전트** 탭은 코딩 에이전트(Claude Code/Cursor/Roo Code/Cline/Qwen Code/Continue/…)별 리더보드입니다. 요청 User-Agent로 에이전트를 분류해 **성공률**(2xx·오류無·폴백無)·**평균/누적 비용**·**평균 지연/TTFB**·**도구 오류율**·토큰을 비교합니다. `GET /admin/agents?window=7d` → `{agents[]}`. 어떤 에이전트가 가장 안정적이고(성공률) 가성비가 좋은지(평균 비용) 한눈에 보고 표준 도구를 정하는 데 씁니다.
 
 ### 프롬프트 지문 (Prompt Fingerprint)

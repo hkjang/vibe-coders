@@ -312,9 +312,9 @@
             <div class="architecture-diagram-simple">
                 <div class="diag-node">App / AI Client</div>
                 <div class="diag-arrow">&rarr;</div>
-                <div class="diag-node primary">Proxy Gateway (v0.1.11)</div>
+                <div class="diag-node primary">Proxy Gateway (v0.1.15)</div>
                 <div class="diag-arrow">&rarr;</div>
-                <div class="diag-node accent">Multi-Upstream AI</div>
+                <div class="diag-node accent">KB & MCP / Upstream LLM</div>
             </div>
         </div>
 
@@ -323,8 +323,8 @@
                 <strong>작성 부서:</strong> IT AI 추진단<br>
             </div>
             <div style="text-align: right;">
-                <strong>문서 번호:</strong> SEC-APG-2026-V11<br>
-                <strong>최종 승인 버전:</strong> v0.1.11 (Production Stable)
+                <strong>문서 번호:</strong> SEC-APG-2026-V15<br>
+                <strong>최종 승인 버전:</strong> v0.1.15 (Production Stable)
             </div>
         </div>
     </div>
@@ -527,31 +527,48 @@
 
     <!-- Section 5 -->
     <div class="section">
-        <h2 class="section-title">5. 차세대 통제 기능 (Advanced Security & Monitoring)</h2>
-        <h3>5.1 MCP (Model Context Protocol) 및 툴 통제</h3>
+        <h2 class="section-title">5. 에이전트 엔지니어링 분석 및 차세대 보안 (Agent Analytics & Security)</h2>
+        
+        <h3>5.1 3계층 세션 추론 엔진 (3-Tier Session Inference)</h3>
         <p>
-            프로젝트 최신 버전(v0.1.11)에 도입된 주요 특징 중 하나는 LLM이 사용하는 다양한 로컬 툴(Tools)과 MCP 서버에 대한 정책(Policy) 제어 능력입니다.
+            단순 개별 API 호출 로그 적재 방식을 넘어, 개발자의 의도적인 워크플로우를 분석하기 위해 <strong>Work Session(개발자 작업) - Task Session(개별 작업 태스크) - Request(개별 요청)</strong>의 3계층 구조로 데이터를 구조화하고 자동 추론합니다.
         </p>
         <ul>
-            <li><strong>도구 실행 파싱 및 로깅:</strong> JSON 요청 페이로드 내의 `tools` 영역 및 실행 결과를 실시간으로 파싱하여 비인가 도구가 사용되는지 감시합니다.</li>
-            <li><strong>민감한 인자 필터링:</strong> 비인가 툴 호출이 포함된 경우 정책 엔진(`EvaluateMCPPolicy`)이 이를 탐지하여 해당 요청을 즉시 차단(Block)하거나 위반 플래그(Flag)를 남깁니다.</li>
-            <li><strong>세션 도구 루프(Loop) 방지:</strong> AI 에이전트가 동일한 툴을 반복 호출하며 토큰 비용을 폭주시키는 툴 루프 현상을 탐지 및 차단합니다.</li>
+            <li><strong>Work Session (최상위):</strong> 개발자가 리포지토리나 특정 브랜치에서 수행하는 하나의 전체 개발 프로젝트 단위 세션.</li>
+            <li><strong>Task Session (중간):</strong> "에러 수정", "테스트 코드 생성", "리팩토링" 등 구체적인 태스크 단위로 구분된 작업 세션. 프롬프트 간의 유사도와 시간차(time gap)를 계산하여 동일 태스크 여부를 판정합니다.</li>
+            <li><strong>Request (최하위):</strong> 실제 Gateway를 거쳐간 개별 API 트랜잭션 호출 로그.</li>
         </ul>
 
-        <h3>5.2 실시간 비용 급증 탐지 (Model Anomaly Detection)</h3>
+        <h3>5.2 에이전트 분석 및 프롬프트 핑거프린트 (Agent & Prompt Analytics)</h3>
         <p>
-            어드민 세션 및 백그라운드 워커를 통해 특정 모델이나 유저가 예측 범위를 넘어서는 급격한 비용(estimated_cost) 소모 추세를 보이는 경우, 이를 통계적으로 자동 식별하는 알고리즘이 탑재되었습니다.
+            에이전트 거버넌스 및 자원 소모의 투명성을 극대화하기 위해 에이전트별 성능 및 비용 통계를 정밀 추적합니다.
         </p>
-        <pre><code>// internal/store/anomaly.go - Anomaly Detection 알고리즘
-func (s *SQLStore) DetectModelAnomalies(ctx context.Context, window time.Duration, threshold float64) ([]Anomaly, error) {
-    // 1. 최근 트래픽 및 비용 소모 추이 산출
-    // 2. 평시 이동 평균(EMA) 및 표준 편차 계산
-    // 3. 임계치(Threshold)를 초과하는 이상 지표 탐지 및 슬랙/웹훅 얼럿 트리거
-}</code></pre>
+        <ul style="font-size: 13px;">
+            <li><strong>Agent Analytics:</strong> Cursor, Roo Code 등 사내에서 활용되는 개발 에이전트 종류를 탐지하고, 에이전트별 도구(Tools) 호출 빈도 및 연산 비용을 지표화합니다.</li>
+            <li><strong>Prompt Fingerprints:</strong> AI 요청에서 빈번하게 사용되는 프롬프트의 특징적 핑거프린트(템플릿 구조)를 추출하여, 어떤 프롬프트가 과도하게 반복되고 토큰을 낭비하고 있는지 분석합니다.</li>
+        </ul>
 
-        <h3>5.3 세션 타임라인 및 복잡도 분석 (Session Timeline Analysis)</h3>
+        <h3>5.3 지식 베이스(Knowledge Base) & MCP 업스트림 게이트웨이</h3>
         <p>
-            AI 서비스 활용 세션 전체에 걸쳐 누적 토큰 비용과 컨텍스트의 누적 깊이에 따른 <strong>복잡도 점수(Complexity Score)</strong>를 동적으로 계산하여, 무의미하게 길어지는 세션을 관리자 화면에 시각적으로 강조해 줍니다.
+            개발 인프라 환경에서 모델에 대한 지식 주입 및 환경 결합을 단순화하기 위해 게이트웨이 단에서 프레임워크를 직접 연동합니다.
+        </p>
+        <ul style="font-size: 13px;">
+            <li><strong>지식 베이스(RAG) 엔진:</strong> 프록시 수준에서 RAG를 적용하여, 사내 개발 표준 가이드라인이나 보안 규정을 AI 호출 시 실시간으로 컨텍스트에 바인딩하여 안전한 답변을 유도합니다.</li>
+            <li><strong>MCP Upstream Gateway:</strong> Model Context Protocol(MCP) 서버군을 게이트웨이로 중계 관리하여, 다수의 에이전트 클라이언트가 사내 인트라넷 도구에 안전하고 효율적으로 접속하도록 제어합니다.</li>
+        </ul>
+
+        <h3>5.4 도구별 IP 보안 필터링 및 이상 탐지 (Security & Anomalies)</h3>
+        <p>
+            민감한 로컬 및 인프라 도구 사용에 대한 보안 경계를 강화합니다.
+        </p>
+        <div class="warning-box" style="margin-top: 10px; margin-bottom: 10px;">
+            <h4>도구별 IP 제한 필터링 (Tool-specific IP Filtering)</h4>
+            <p style="font-size: 13px; margin: 5px 0 0 0;">
+                특정 툴(예: 데이터베이스 쓰기, 쉘 실행, 빌드 배포) 호출 요청이 감지되었을 때, 요청을 보낸 클라이언트가 허용된 IP 대역(예: 사내 VPN, 특정 관리자 IP)에 있는지 검증하고 차단함으로써 권한 없는 도구 오용을 프록시 레벨에서 방어합니다.
+            </p>
+        </div>
+        <p style="font-size: 13px; margin-top: 10px;">
+            또한, <strong>비용 급증 이상 탐지(Anomaly Detection)</strong> 엔진을 통해 단시간 내 비정상적인 호출 횟수 또는 비용 폭증을 이동 평균(EMA) 및 표준 편차 기준(Sigma)으로 실시간 자동 차단 및 슬랙/웹훅 얼럿을 발송합니다.
         </p>
     </div>
 

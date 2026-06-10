@@ -3395,9 +3395,10 @@ const adminHTML = `<!doctype html>
 
     // ---------- safety (kill switch + alerts) ----------
     async function renderSafety() {
-      const [kill, alerts] = await Promise.all([
+      const [kill, alerts, cost] = await Promise.all([
         api('/admin/kill-switch'),
         api('/admin/alerts'),
+        api('/admin/cost').catch(() => ({ enabled: false, threshold_krw: 0 })),
       ]);
       const rules = alerts.rules || [];
       const events = alerts.events || [];
@@ -3451,8 +3452,29 @@ const adminHTML = `<!doctype html>
           '</tr>').join('') + '</tbody></table>'
       ) : '<div class="empty">발화 이력 없음</div>';
 
+      const costCard = '<div style="padding:14px">' +
+        '<div class="kv">' +
+          row('상태', cost.enabled ? '<span class="status warn">가드 켜짐</span>' : '<span class="status">꺼짐</span>') +
+          row('임계값', money(cost.threshold_krw || 0) + ' <span class="muted">(예상 비용이 이 값을 넘으면 차단)</span>') +
+        '</div>' +
+        '<div style="margin-top:12px; display:flex; gap:8px; align-items:center; flex-wrap:wrap">' +
+          '<label style="display:flex; align-items:center; gap:6px; font-weight:700"><input type="checkbox" id="cost-enabled" ' + (cost.enabled ? 'checked' : '') + ' style="width:auto; height:auto; min-width:0"> 가드 사용</label>' +
+          '<input id="cost-threshold" type="number" min="0" step="100" value="' + (cost.threshold_krw || 0) + '" placeholder="임계값(KRW)" style="width:160px">' +
+          '<button id="cost-save" class="secondary" type="button">저장</button>' +
+        '</div>' +
+        '<div class="muted" style="margin-top:8px; font-size:12px">예상 비용이 임계값을 초과하면 HTTP 402 로 차단합니다. 클라이언트가 <code>X-Cost-Approve: 1</code> 헤더를 보내면 승인되어 통과합니다. 모든 chat 응답에는 <code>X-Estimated-Input-Tokens / X-Estimated-Output-Tokens / X-Estimated-Cost-KRW / X-Estimated-Latency-MS</code> 헤더가 붙습니다. 예상 출력 토큰은 모델별 최근 7일 평균(표본 부족 시 max_tokens 또는 기본 600).</div>' +
+        '<div style="margin-top:12px; display:flex; gap:8px; align-items:flex-end; flex-wrap:wrap">' +
+          '<label class="muted" style="font-size:12px">모델<br><input id="cp-model" placeholder="gpt-4.1" style="width:160px"></label>' +
+          '<label class="muted" style="font-size:12px">입력 토큰<br><input id="cp-input" type="number" min="0" value="2000" style="width:110px"></label>' +
+          '<label class="muted" style="font-size:12px">max_tokens<br><input id="cp-max" type="number" min="0" value="0" style="width:110px"></label>' +
+          '<button id="cp-run" class="secondary" type="button">비용 예측</button>' +
+          '<span id="cp-result" class="muted" style="font-size:13px"></span>' +
+        '</div>' +
+      '</div>';
+
       const html =
         section('긴급 정지 (Kill Switch)', killCard) +
+        section('비용 가드 / 예측 (Cost Guard)', costCard) +
         section('알림 규칙',
           '<form class="inline-form" id="alert-form" style="grid-template-columns: minmax(140px,1fr) 150px 90px 100px 110px minmax(160px,1fr) minmax(150px,1.4fr) 80px;">' +
             '<input id="alert-name" placeholder="이름" required>' +
@@ -3495,6 +3517,29 @@ const adminHTML = `<!doctype html>
       if (stopBtn) stopBtn.addEventListener('click', () => toggleKillSwitch(true));
       if (resumeBtn) resumeBtn.addEventListener('click', () => toggleKillSwitch(false));
       document.getElementById('alert-form').addEventListener('submit', addAlert);
+      document.getElementById('cost-save').addEventListener('click', async () => {
+        await api('/admin/cost', { method: 'POST', body: JSON.stringify({
+          enabled: document.getElementById('cost-enabled').checked,
+          threshold_krw: Number(document.getElementById('cost-threshold').value || 0),
+        }) });
+        route();
+      });
+      document.getElementById('cp-run').addEventListener('click', async () => {
+        const out = document.getElementById('cp-result');
+        const model = document.getElementById('cp-model').value.trim();
+        if (!model) { out.textContent = '모델을 입력하세요'; return; }
+        try {
+          const e = await api('/admin/cost/predict', { method: 'POST', body: JSON.stringify({
+            model,
+            input_tokens: Number(document.getElementById('cp-input').value || 0),
+            max_tokens: Number(document.getElementById('cp-max').value || 0),
+          }) });
+          out.innerHTML = '입력 ' + fmt(e.input_tokens) + ' + 출력 ' + fmt(e.output_tokens) + ' tok → ' +
+            (e.priced ? '<strong>' + money(e.cost_krw) + '</strong>' : '<span class="status error">가격표 없음</span>') +
+            (e.latency_ms ? ' · 예상 지연 ' + Math.round(e.latency_ms) + 'ms' : '') +
+            ' <span class="muted">(' + escapeHTML(e.basis) + ')</span>';
+        } catch (err) { out.textContent = '오류: ' + err.message; }
+      });
       makeSortable('#view', 'safety');
     }
 

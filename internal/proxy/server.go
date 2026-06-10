@@ -41,6 +41,7 @@ type Server struct {
 	mcpPolicy    atomic.Pointer[mcpPolicySnapshot]
 	routingRules atomic.Pointer[routingRulesSnapshot]
 	knowledge    atomic.Pointer[knowledgeSnapshot]
+	costCache    atomic.Pointer[costSnapshot]
 	sessions     *sessionInferer
 	extSeen      sync.Map // external key id -> struct{}; dedupes lazy registration
 	mcpConns     sync.Map // upstream id -> *mcpUpstreamConn (MCP gateway session state)
@@ -153,6 +154,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/admin/waterfall", s.handleWaterfall)
 	mux.HandleFunc("/admin/routing/learning", s.handleRoutingLearning)
 	mux.HandleFunc("/admin/agents", s.handleAgents)
+	mux.HandleFunc("/admin/cost", s.handleCostGuard)
+	mux.HandleFunc("/admin/cost/predict", s.handleCostPredict)
 	mux.HandleFunc("/admin/prompts/fingerprints", s.handlePromptFingerprints)
 	mux.HandleFunc("/admin/knowledge", s.handleKnowledge)
 	mux.HandleFunc("/admin/knowledge/", s.handleKnowledgeByID)
@@ -665,6 +668,30 @@ func (s *Server) handleOpenAI(w http.ResponseWriter, r *http.Request) {
 	chatCacheKey, chatCacheable := s.chatCacheEligible(r, body)
 	if chatCacheable {
 		if served := s.serveChatFromCache(r.Context(), w, chatCacheKey, meta, traceID); served {
+			return
+		}
+	}
+
+	// Cost prediction (pre-call): estimate tokens/cost/latency, expose as headers, and
+	// optionally gate calls whose predicted cost exceeds the configured threshold.
+	if r.URL.Path == "/v1/chat/completions" && r.Method == http.MethodPost {
+		snap := s.costSnapshotCached(r.Context())
+		est := predictCost(meta.Request.Model, promptTokenEstimate(meta.Prompts), parseMaxTokens(body), snap, s.cfg.Pricing)
+		w.Header().Set("X-Estimated-Input-Tokens", strconv.Itoa(est.InputTokens))
+		w.Header().Set("X-Estimated-Output-Tokens", strconv.Itoa(est.OutputTokens))
+		if est.Priced {
+			w.Header().Set("X-Estimated-Cost-KRW", formatKRW(est.CostKRW))
+		}
+		if est.LatencyMS > 0 {
+			w.Header().Set("X-Estimated-Latency-MS", strconv.Itoa(int(est.LatencyMS+0.5)))
+		}
+		if snap.guardEnabled && snap.guardThreshold > 0 && est.Priced && est.CostKRW > snap.guardThreshold &&
+			!strings.EqualFold(strings.TrimSpace(r.Header.Get("X-Cost-Approve")), "1") {
+			s.metrics.IncCostGuardBlock()
+			w.Header().Set("X-Cost-Guard", "blocked")
+			writeOpenAIError(w, http.StatusPaymentRequired,
+				"estimated cost "+formatKRW(est.CostKRW)+" exceeds the cost guard threshold "+formatKRW(snap.guardThreshold)+
+					"; resend with header 'X-Cost-Approve: 1' to proceed", "cost_guard_error", "cost_threshold_exceeded")
 			return
 		}
 	}
