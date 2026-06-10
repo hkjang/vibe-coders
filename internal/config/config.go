@@ -28,8 +28,11 @@ type Config struct {
 
 // VCSConfig gates the VCS correlation ingest endpoints. When WebhookSecret is empty
 // the public /vcs/* endpoints are disabled (admins can still ingest via /admin/vcs).
+// InferFromContent mines git activity (git commit/push) out of the LLM traffic the
+// gateway already sees, so the VCS tab shows commits even without any webhook setup.
 type VCSConfig struct {
-	WebhookSecret string
+	WebhookSecret    string
+	InferFromContent bool
 }
 
 type UpstreamConfig struct {
@@ -152,7 +155,8 @@ func Load() (Config, error) {
 			IdleTimeout:      durationEnv("SESSION_IDLE_TIMEOUT", 30*time.Minute),
 		},
 		VCS: VCSConfig{
-			WebhookSecret: os.Getenv("VCS_WEBHOOK_SECRET"),
+			WebhookSecret:    os.Getenv("VCS_WEBHOOK_SECRET"),
+			InferFromContent: boolEnv("VCS_INFER_FROM_CONTENT", true),
 		},
 		Pricing: map[string]ModelPrice{},
 	}

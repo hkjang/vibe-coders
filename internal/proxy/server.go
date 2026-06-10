@@ -639,6 +639,17 @@ func (s *Server) handleOpenAI(w http.ResponseWriter, r *http.Request) {
 		s.metrics.IncRoutingOverride()
 	}
 
+	// Inferred VCS: mine git commit/push activity out of the conversation so the VCS
+	// tab shows commits even without any webhook setup. Best-effort, async.
+	if s.cfg.VCS.InferFromContent && r.URL.Path == "/v1/chat/completions" && r.Method == http.MethodPost {
+		sid, akid, b := meta.Request.SessionID, meta.Request.APIKeyID, body
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			s.recordInferredVCS(ctx, sid, akid, b)
+		}()
+	}
+
 	// Knowledge cache: expand {{kb:slug}} references / X-Vibe-Knowledge into the body
 	// sent upstream. Audit (above) keeps the compact reference; the model gets full text.
 	if r.URL.Path == "/v1/chat/completions" && r.Method == http.MethodPost {

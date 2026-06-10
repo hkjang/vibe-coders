@@ -172,6 +172,56 @@ func TestVCSDisabledWithoutSecret(t *testing.T) {
 	}
 }
 
+func TestInferVCSFromContent(t *testing.T) {
+	// JSON-escaped quotes (as they appear in a chat body) + a push
+	content := `{"messages":[{"role":"assistant","content":"running: git commit -m \"fix: null guard in OrderService\" && git push -u origin feature/guard"}]}`
+	events := inferVCSFromContent(content)
+	var gotCommit, gotPush *store.VCSEvent
+	for i := range events {
+		switch events[i].Kind {
+		case "commit":
+			gotCommit = &events[i]
+		case "push":
+			gotPush = &events[i]
+		}
+	}
+	if gotCommit == nil || gotCommit.Title != "fix: null guard in OrderService" {
+		t.Fatalf("commit not detected: %+v", events)
+	}
+	if gotPush == nil || gotPush.Branch != "feature/guard" {
+		t.Fatalf("push/branch not detected: %+v", events)
+	}
+	// no git activity → no events
+	if ev := inferVCSFromContent(`{"messages":[{"role":"user","content":"explain this function"}]}`); len(ev) != 0 {
+		t.Fatalf("expected no events, got %+v", ev)
+	}
+}
+
+func TestRecordInferredVCSDedupesAndLinks(t *testing.T) {
+	s, db, _ := newVCSServer(t, "") // inference works even without webhook secret
+	ctx := context.Background()
+	body := []byte(`{"messages":[{"role":"assistant","content":"git commit -m \"add tests\""}]}`)
+
+	// record twice (e.g. same command resent across turns) → single deduped row
+	s.recordInferredVCS(ctx, "sess_dev", "key_dev", body)
+	s.recordInferredVCS(ctx, "sess_dev", "key_dev", body)
+
+	events, err := db.ListVCSEvents(ctx, store.VCSEventFilter{SessionID: "sess_dev"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("expected 1 deduped inferred event, got %d", len(events))
+	}
+	e := events[0]
+	if e.Provider != "inferred" || e.Kind != "commit" || e.Title != "add tests" {
+		t.Fatalf("unexpected inferred event: %+v", e)
+	}
+	if e.SessionID != "sess_dev" || e.APIKeyID != "key_dev" {
+		t.Fatalf("inferred event not linked to session/user: %+v", e)
+	}
+}
+
 func TestVCSWebhookGitLabEndToEnd(t *testing.T) {
 	_, db, proxy := newVCSServer(t, "gl-tok")
 	payload, _ := json.Marshal(map[string]any{

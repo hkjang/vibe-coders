@@ -197,6 +197,7 @@ const adminHTML = `<!doctype html>
       <a href="#/llm" data-tab="llm">LLM 관측</a>
       <a href="#/mcp" data-tab="mcp">MCP</a>
       <a href="#/agents" data-tab="agents">에이전트</a>
+      <a href="#/vcs" data-tab="vcs">VCS</a>
       <a href="#/requests" data-tab="requests">호출 이력</a>
       <a href="#/prompts" data-tab="prompts">프롬프트 검색</a>
       <a href="#/users" data-tab="users">사용자</a>
@@ -484,6 +485,7 @@ const adminHTML = `<!doctype html>
           case 'quotas':    await renderQuotas(); break;
           case 'mcp':       await renderMCP(params); break;
           case 'agents':    await renderAgents(params); break;
+          case 'vcs':       await renderVCS(params); break;
           case 'safety':    await renderSafety(); break;
           case 'settings':  await renderSettings(); break;
           default: await renderDashboard();
@@ -1028,6 +1030,81 @@ const adminHTML = `<!doctype html>
       const sel = document.getElementById('agents-window');
       if (sel) sel.addEventListener('change', () => { agentsState.window = sel.value; sessionStorage.setItem('agentsWindow', agentsState.window); renderAgents(); });
       makeSortable('#view', 'agents');
+    }
+
+    // ---------- VCS correlation (Prompt → Commit → MR) ----------
+    async function renderVCS(initial) {
+      const view = document.getElementById('view');
+      const get = (k) => initial ? (initial.get(k) || '') : '';
+      const repo = get('repo'), session = get('session_id'), key = get('api_key_id'), kind = get('kind');
+      const qs = new URLSearchParams();
+      if (repo) qs.set('repo', repo);
+      if (session) qs.set('session_id', session);
+      if (key) qs.set('api_key_id', key);
+      if (kind) qs.set('kind', kind);
+      qs.set('limit', '300');
+      const data = await api('/admin/vcs/events?' + qs.toString());
+      const events = data.events || [];
+
+      const filter =
+        '<form class="toolbar" id="vcs-filter" autocomplete="off">' +
+          '<input id="vcs-repo" placeholder="저장소" value="' + escapeHTML(repo) + '">' +
+          '<input id="vcs-session" placeholder="세션 ID" value="' + escapeHTML(session) + '">' +
+          '<input id="vcs-key" placeholder="API 키 ID" value="' + escapeHTML(key) + '">' +
+          '<select id="vcs-kind">' +
+            '<option value="">전체 유형</option>' +
+            '<option value="commit"' + (kind === 'commit' ? ' selected' : '') + '>commit</option>' +
+            '<option value="merge_request"' + (kind === 'merge_request' ? ' selected' : '') + '>merge_request</option>' +
+          '</select>' +
+          '<button type="submit">검색</button>' +
+        '</form>';
+
+      const kindBadge = (e) => e.kind === 'merge_request'
+        ? '<span class="status ' + (e.state === 'merged' ? '' : (e.state === 'closed' ? 'error' : 'warn')) + '">MR ' + escapeHTML(e.state || '') + '</span>'
+        : '<span class="pill">' + escapeHTML(e.kind || 'commit') + '</span>' + (e.provider === 'inferred' ? ' <span class="muted" style="font-size:11px">추론</span>' : '');
+      const rows = events.map(e => {
+        const title = e.url ? '<a href="' + escapeAttr(e.url) + '" target="_blank" rel="noopener">' + escapeHTML(e.title || e.ref) + '</a>' : escapeHTML(e.title || e.ref);
+        const sess = e.session_id ? '<a href="#" onclick="openSessionTimeline(\'' + escapeAttr(e.session_id) + '\');return false">' + escapeHTML(e.session_id) + '</a>' : '<span class="muted">미연결</span>';
+        const usr = e.api_key_id ? '<a href="#/users/' + encodeURIComponent(e.api_key_id) + '">' + escapeHTML(e.api_key_id) + '</a>' : '';
+        return '<tr>' +
+          '<td>' + kindBadge(e) + '</td>' +
+          '<td>' + title + '<div class="muted">' + escapeHTML(e.provider) + ' · ' + escapeHTML(e.repo || '') + (e.branch ? (' · ' + escapeHTML(e.branch)) : '') + '</div></td>' +
+          '<td>' + escapeHTML(e.author_name || e.author_email || '') + '</td>' +
+          '<td>' + sess + '</td>' +
+          '<td>' + usr + '</td>' +
+          '<td>' + ago(e.created_at) + '</td>' +
+        '</tr>';
+      }).join('');
+
+      const setupHelp =
+        '<div class="banner warn" style="margin:0 14px 14px">' +
+          '<strong>아직 수집된 VCS 이벤트가 없습니다.</strong><br>' +
+          '· <strong>자동(설정 불필요)</strong>: 에이전트 대화에 <code>git commit -m "…"</code>·<code>git push</code> 가 나타나면 <em>추론</em> 이벤트로 자동 기록됩니다(현재 세션·사용자에 연결). 아직 그런 호출이 없으면 비어 있습니다.<br>' +
+          '· <strong>정식 연동(MR·머지까지)</strong>: <code>VCS_WEBHOOK_SECRET</code> 설정 후 GitLab 웹훅 <code>http://&lt;gateway&gt;:8080/vcs/webhook/gitlab</code>(Secret Token=시크릿, Push·MR) 또는 Bitbucket <code>/vcs/webhook/bitbucket?token=&lt;시크릿&gt;</code>, 또는 CI·git 훅 <code>POST /vcs/events</code>(헤더 <code>X-Vibe-VCS-Secret</code>). 커밋 메시지/MR 제목의 <code>Vibe-Session: &lt;세션ID&gt;</code> 마커로 세션 연결.' +
+        '</div>';
+
+      const table = events.length
+        ? '<table><thead><tr><th data-sort="str">유형</th><th data-sort="str">제목 / 저장소</th><th data-sort="str">작성자</th><th>세션</th><th>사용자</th><th data-sort="str">시각</th></tr></thead><tbody>' + rows + '</tbody></table>'
+        : setupHelp;
+
+      view.innerHTML = section('VCS 상관 (Prompt → Commit → MR → Merge)',
+        filter + table +
+        '<div class="muted" style="font-size:12px; padding:0 14px 12px">커밋·MR 을 코딩 세션과 사용자에 연결합니다. 세션/사용자 링크로 그 작업의 프롬프트 타임라인·사용량으로 이동할 수 있습니다. (GitLab·Bitbucket·범용 수집, 오프라인망 지원)</div>');
+
+      document.getElementById('vcs-filter').addEventListener('submit', (ev) => {
+        ev.preventDefault();
+        const p = new URLSearchParams();
+        const rv = document.getElementById('vcs-repo').value.trim();
+        const sv = document.getElementById('vcs-session').value.trim();
+        const kv = document.getElementById('vcs-key').value.trim();
+        const tv = document.getElementById('vcs-kind').value;
+        if (rv) p.set('repo', rv);
+        if (sv) p.set('session_id', sv);
+        if (kv) p.set('api_key_id', kv);
+        if (tv) p.set('kind', tv);
+        location.hash = '#/vcs' + (p.toString() ? '?' + p.toString() : '');
+      });
+      makeSortable('#view', 'vcs');
     }
 
     // ---------- Explainability View (XView) ----------
@@ -1843,7 +1920,7 @@ const adminHTML = `<!doctype html>
       }
       const kindBadge = (e) => e.kind === 'merge_request'
         ? '<span class="status ' + (e.state === 'merged' ? '' : (e.state === 'closed' ? 'error' : 'warn')) + '">MR ' + escapeHTML(e.state || '') + '</span>'
-        : '<span class="pill">commit</span>';
+        : '<span class="pill">' + escapeHTML(e.kind || 'commit') + '</span>' + (e.provider === 'inferred' ? ' <span class="muted" style="font-size:11px">추론</span>' : '');
       const rowsHtml = events.map(e => {
         const label = e.url ? '<a href="' + escapeAttr(e.url) + '" target="_blank" rel="noopener">' + escapeHTML(e.title || e.ref) + '</a>' : escapeHTML(e.title || e.ref);
         return '<tr>' +
@@ -3940,7 +4017,7 @@ const adminHTML = `<!doctype html>
     }
 
     // ---------- keyboard ----------
-    const tabMap = { d: 'dashboard', x: 'xview', w: 'waterfall', l: 'llm', c: 'mcp', e: 'agents', r: 'requests', p: 'prompts', u: 'users', m: 'teams', i: 'ips', q: 'quotas', a: 'safety', s: 'settings' };
+    const tabMap = { d: 'dashboard', x: 'xview', w: 'waterfall', l: 'llm', c: 'mcp', e: 'agents', v: 'vcs', r: 'requests', p: 'prompts', u: 'users', m: 'teams', i: 'ips', q: 'quotas', a: 'safety', s: 'settings' };
     let gPending = false;
     let gTimer = null;
     function isTyping(target) {
@@ -3998,6 +4075,7 @@ const adminHTML = `<!doctype html>
         ['<kbd>g</kbd> <kbd>l</kbd>', 'LLM 관측'],
         ['<kbd>g</kbd> <kbd>c</kbd>', 'MCP'],
         ['<kbd>g</kbd> <kbd>e</kbd>', '에이전트 성능'],
+        ['<kbd>g</kbd> <kbd>v</kbd>', 'VCS 상관'],
         ['<kbd>g</kbd> <kbd>r</kbd>', '호출 이력'],
         ['<kbd>g</kbd> <kbd>p</kbd>', '프롬프트 검색'],
         ['<kbd>g</kbd> <kbd>u</kbd>', '사용자 목록'],

@@ -22,7 +22,7 @@
 ### 키보드 단축키
 
 - `?` 도움말, `/` 검색 입력 포커스, `t` 테마, `r` 새로고침, `Esc` 모달 닫기
-- `g` 후 한 글자: `d`(대시보드), `x`(XView), `w`(Waterfall), `l`(LLM 관측), `c`(MCP), `e`(에이전트), `r`(호출 이력), `p`(프롬프트 검색), `u`(사용자), `m`(팀), `i`(IP), `q`(사용 한도), `a`(안전), `s`(설정)
+- `g` 후 한 글자: `d`(대시보드), `x`(XView), `w`(Waterfall), `l`(LLM 관측), `c`(MCP), `e`(에이전트), `v`(VCS), `r`(호출 이력), `p`(프롬프트 검색), `u`(사용자), `m`(팀), `i`(IP), `q`(사용 한도), `a`(안전), `s`(설정)
 
 ---
 
@@ -36,6 +36,7 @@
 | LLM 관측 | Datadog LLM Observability 대응 Trace/Span/Session/Prompt/Patterns/Insights/Feedback/Evaluation 화면 |
 | MCP | MCP/tool 서버·도구 리더보드, 호출/오류 집계, 오류 호출 drill-down |
 | 에이전트 | 코딩 에이전트(Claude Code/Cursor/Roo/Qwen…)별 성공률·평균 비용·지연·도구 오류율 리더보드 (User-Agent 기반) |
+| VCS | GitLab/Bitbucket 커밋·MR 을 세션·사용자에 연결한 목록(Prompt→Commit→MR 상관). 저장소/세션/키/유형 필터 |
 | 호출 이력 | IP/모델/언어 필터로 검색, 두 행 선택 후 비교, 행 클릭 시 상세 모달 |
 | 프롬프트 검색 | 키워드/언어/IP/키/기간으로 마스킹 프롬프트 검색, CSV 다운로드, 저장된 필터 |
 | 사용자 | Proxy API 키별 사용량·비용, 키 클릭 시 일별·모델별·IP별 상세와 LLM trend/eval failure/feedback drill-down |
@@ -359,7 +360,7 @@ curl -H "Authorization: Bearer $ADMIN_TOKEN" http://localhost:8080/admin/mcp/pol
 
 ### 보기
 
-세션 타임라인 모달(세션 탐색기·워터폴·XView 설명의 "세션" 링크) 하단에 **"연결된 VCS(커밋/MR)"** 표가 나타납니다 — 유형(commit / MR + 상태 배지), 제목(링크), 저장소·브랜치, 작성자, 시각. API: `GET /admin/vcs/events?session_id=&repo=&api_key_id=&kind=`.
+두 곳에서 봅니다: **(1) `VCS` 탭** — 전체 커밋·MR 목록(저장소/세션/키/유형 필터, 세션·사용자 링크로 드릴다운). **(2) 세션 타임라인 모달** — 그 세션에 연결된 커밋/MR 표(유형 + MR 상태 배지, 제목 링크, 저장소·브랜치, 작성자, 시각). API: `GET /admin/vcs/events?session_id=&repo=&api_key_id=&kind=`.
 
 > 현재 라우팅/표시는 마커로 연결된 이벤트 중심입니다. Bitbucket Server push 웹훅은 커밋 메시지를 포함하지 않으므로(레퍼런스 변경만), 그 경우 마커 연결은 MR 제목 또는 범용 수집(git 훅)으로 보완하세요.
 

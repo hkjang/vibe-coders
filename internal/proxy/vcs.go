@@ -228,3 +228,76 @@ func bitbucketServerRepo(pr map[string]any) string {
 	to := mmap(pr, "toRef")
 	return mstr(mmap(to, "repository"), "name")
 }
+
+// ---- inferred VCS events from LLM traffic (no webhook required) ----
+
+var (
+	gitCommitRe = regexp.MustCompile(`(?i)git\s+commit\b[^\n]*?-m\s+["']([^"'\n]{1,200})["']`)
+	gitPushRe   = regexp.MustCompile(`(?i)git\s+push\b([^\n&|;"']{0,80})`)
+	vcsMaxScan  = 256 * 1024
+)
+
+// inferVCSFromContent scans request content (prompts / tool commands) for git
+// activity and returns inferred commit/push events. Heuristic, best-effort.
+func inferVCSFromContent(content string) []store.VCSEvent {
+	if len(content) > vcsMaxScan {
+		content = content[:vcsMaxScan]
+	}
+	// undo common JSON escaping so `git commit -m \"x\"` is matchable
+	content = strings.ReplaceAll(content, `\"`, `"`)
+	content = strings.ReplaceAll(content, `\n`, " ")
+
+	var out []store.VCSEvent
+	seen := map[string]bool{}
+	add := func(kind, title, branch string) {
+		title = strings.TrimSpace(title)
+		if title == "" {
+			return
+		}
+		key := kind + "|" + title
+		if seen[key] {
+			return
+		}
+		seen[key] = true
+		out = append(out, store.VCSEvent{Provider: "inferred", Kind: kind, Title: title, Branch: branch})
+	}
+	for _, m := range gitCommitRe.FindAllStringSubmatch(content, -1) {
+		if len(m) == 2 {
+			add("commit", audit.Redact(m[1]), "")
+		}
+	}
+	for _, m := range gitPushRe.FindAllStringSubmatch(content, -1) {
+		args := strings.TrimSpace(m[1])
+		add("push", strings.TrimSpace("git push "+args), pushBranch(args))
+	}
+	return out
+}
+
+// pushBranch picks the likely branch from `git push` args (last non-flag token).
+func pushBranch(args string) string {
+	branch := ""
+	for _, tok := range strings.Fields(args) {
+		if strings.HasPrefix(tok, "-") {
+			continue
+		}
+		branch = tok // last non-flag wins (remote then branch → branch)
+	}
+	if branch == "origin" || branch == "" {
+		return ""
+	}
+	return branch
+}
+
+// recordInferredVCS detects git activity in a chat body and stores it as inferred
+// VCS events linked to the request's session + api key. Best-effort, async.
+func (s *Server) recordInferredVCS(ctx context.Context, sessionID, apiKeyID string, body []byte) {
+	events := inferVCSFromContent(string(body))
+	for _, e := range events {
+		e.SessionID = sessionID
+		e.APIKeyID = apiKeyID
+		e.ID = "vcs_inf_" + audit.HashText(sessionID + "|" + e.Kind + "|" + e.Title)[:16]
+		if err := s.db.InsertVCSEvent(ctx, e); err != nil {
+			return
+		}
+	}
+}

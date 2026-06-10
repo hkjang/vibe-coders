@@ -185,7 +185,7 @@ curl.exe http://localhost:8080/metrics
 - **표 헤더 정렬**: 사용자/IP/모델/언어/호출이력 표의 헤더를 클릭하면 오름·내림 정렬. 정렬 상태는 화면별로 저장됩니다.
 - **키보드 단축키**:
   - `?` 도움말, `/` 검색 포커스, `t` 다크 모드, `r` 새로고침, `Esc` 모달 닫기
-  - `g` 다음에 `d`(대시보드) / `x`(XView) / `w`(Waterfall) / `l`(LLM 관측) / `c`(MCP) / `e`(에이전트) / `r`(호출 이력) / `p`(프롬프트 검색) / `u`(사용자) / `m`(팀) / `i`(IP) / `q`(사용 한도) / `a`(안전) / `s`(설정)
+  - `g` 다음에 `d`(대시보드) / `x`(XView) / `w`(Waterfall) / `l`(LLM 관측) / `c`(MCP) / `e`(에이전트) / `v`(VCS) / `r`(호출 이력) / `p`(프롬프트 검색) / `u`(사용자) / `m`(팀) / `i`(IP) / `q`(사용 한도) / `a`(안전) / `s`(설정)
 - **시계열 차트**: 대시보드 상단에 24시간/7일/30일 토글로 요청 수(실선) + 비용 KRW(점선) SVG 라인 차트.
 - **상위 사용자 위젯**: 요청 수 기준 Top 5 API 키, 클릭 시 사용자 상세로 이동.
 - **상태 분포 카드**: 2xx / 3xx / 4xx / 429 / 5xx 비율을 막대와 표로 함께 표시.
@@ -490,7 +490,8 @@ curl.exe http://localhost:8080/admin/mcp/upstreams `
 
 단순 게이트웨이를 넘어 **프롬프트가 실제 코드/MR 로 이어졌는지** 추적합니다. 오프라인망의 **GitLab·Bitbucket(Server/Cloud)** 과 범용 수집을 모두 지원합니다(외부 의존성 0).
 
-- **수집 활성화**: `VCS_WEBHOOK_SECRET` 설정 → `/vcs/*` 엔드포인트 활성화.
+- **자동 감지(설정 불필요)**: 에이전트 대화에 `git commit -m "…"` · `git push` 가 보이면 게이트웨이가 **추론(inferred) 이벤트**로 자동 기록하고 현재 세션·사용자에 연결합니다. `VCS_INFER_FROM_CONTENT`(기본 `true`)로 끌 수 있습니다. (커밋 SHA·URL·MR/머지 상태는 없음 — 정식 연동으로 보완)
+- **수집 활성화(정식: MR·머지 상태·URL)**: `VCS_WEBHOOK_SECRET` 설정 → `/vcs/*` 엔드포인트 활성화.
   - GitLab: 프로젝트 웹훅 URL `http://<gateway>:8080/vcs/webhook/gitlab`, Secret Token = `VCS_WEBHOOK_SECRET` (Push·Merge request events).
   - Bitbucket: 웹훅 URL `http://<gateway>:8080/vcs/webhook/bitbucket?token=<VCS_WEBHOOK_SECRET>` (PR·push; Server `pr:*`/`repo:refs_changed`, Cloud `pullrequest:*`/`repo:push`).
   - 범용/CI·git 훅: `POST /vcs/events` (헤더 `X-Vibe-VCS-Secret`) 로 `{provider,kind,repo,branch,sha,title,session_id?}` 또는 `{events:[...]}`.
