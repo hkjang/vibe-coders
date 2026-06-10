@@ -241,6 +241,8 @@ type MCPToolStat struct {
 	Errors       int64   `json:"errors"`
 	ErrorRate    float64 `json:"error_rate"`
 	DistinctKeys int64   `json:"distinct_keys"`
+	DistinctIPs  int64   `json:"distinct_ips"`
+	SampleIP     string  `json:"sample_ip"`
 	LastSeen     string  `json:"last_seen"`
 }
 
@@ -272,6 +274,8 @@ type MCPServerStat struct {
 	Errors       int64   `json:"errors"`
 	ErrorRate    float64 `json:"error_rate"`
 	DistinctKeys int64   `json:"distinct_keys"`
+	DistinctIPs  int64   `json:"distinct_ips"`
+	SampleIP     string  `json:"sample_ip"`
 	LastSeen     string  `json:"last_seen"`
 }
 

@@ -386,6 +386,14 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 			created_by TEXT,
 			created_at TEXT NOT NULL
 		)`,
+		// Legacy migration: external-key identities used to carry an "ext_" prefix.
+		// They now share the "key_" prefix (registration is distinguished by status,
+		// not id), so rename existing rows + repoint their logs. Idempotent: after the
+		// first run no ext_ rows remain, so these become no-ops.
+		`UPDATE request_logs SET api_key_id = 'key_' || substr(api_key_id, 5) WHERE api_key_id LIKE 'ext\_%' ESCAPE '\'`,
+		`UPDATE tool_invocations SET api_key_id = 'key_' || substr(api_key_id, 5) WHERE api_key_id LIKE 'ext\_%' ESCAPE '\'`,
+		`DELETE FROM api_keys WHERE id LIKE 'ext\_%' ESCAPE '\' AND EXISTS (SELECT 1 FROM api_keys k2 WHERE k2.id = 'key_' || substr(api_keys.id, 5))`,
+		`UPDATE api_keys SET id = 'key_' || substr(id, 5) WHERE id LIKE 'ext\_%' ESCAPE '\'`,
 	}
 
 	for _, statement := range statements {

@@ -1,9 +1,11 @@
 package proxy
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
+	"time"
 
 	"vibe-coders/internal/store"
 )
@@ -87,8 +89,18 @@ func (s *Server) handleMCPUpstreamByID(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
 	}
-	id := strings.TrimPrefix(r.URL.Path, "/admin/mcp/upstreams/")
-	if id == "" || strings.Contains(id, "/") {
+	path := strings.TrimPrefix(r.URL.Path, "/admin/mcp/upstreams/")
+	// support a /probe sub-path: GET /admin/mcp/upstreams/{id}/probe → live discovery
+	if id, rest, ok := strings.Cut(path, "/"); ok {
+		if rest == "probe" && r.Method == http.MethodGet {
+			s.handleMCPUpstreamProbe(w, r, id)
+			return
+		}
+		writeOpenAIError(w, http.StatusBadRequest, "invalid upstream path", "invalid_request_error", "invalid_upstream_path")
+		return
+	}
+	id := path
+	if id == "" {
 		writeOpenAIError(w, http.StatusBadRequest, "invalid upstream id", "invalid_request_error", "invalid_upstream_id")
 		return
 	}
@@ -158,4 +170,67 @@ func (s *Server) handleMCPUpstreamByID(w http.ResponseWriter, r *http.Request) {
 func (s *Server) resetMCPUpstream(id string) {
 	s.mcpConns.Delete(id)
 	s.invalidateMCPToolsCache()
+}
+
+// handleMCPUpstreamProbe live-queries one upstream (fresh handshake) and reports
+// the discovered tools/resources/prompts or the connection error — the "is this
+// registration working, and what does it expose?" check.
+func (s *Server) handleMCPUpstreamProbe(w http.ResponseWriter, r *http.Request, id string) {
+	up, found, err := s.db.GetMCPUpstream(r.Context(), id)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "mcp_upstream_lookup_failed")
+		return
+	}
+	if !found {
+		writeOpenAIError(w, http.StatusNotFound, "upstream not found", "invalid_request_error", "upstream_not_found")
+		return
+	}
+	s.mcpConns.Delete(id) // force a fresh initialize handshake
+
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	defer cancel()
+
+	out := map[string]any{"id": up.ID, "name": up.Name, "url": up.URL}
+	errs := map[string]string{}
+
+	tools, terr := s.listUpstreamTools(ctx, up)
+	if terr != nil {
+		errs["tools"] = terr.Error()
+	}
+	toolNames := make([]map[string]string, 0, len(tools))
+	for _, t := range tools {
+		toolNames = append(toolNames, map[string]string{"name": t.Name, "namespaced": up.ID + "__" + t.Name, "description": t.Description})
+	}
+	out["tools"] = toolNames
+	out["tool_count"] = len(tools)
+
+	if resources, rerr := s.listUpstreamResources(ctx, up); rerr == nil {
+		res := make([]map[string]string, 0, len(resources))
+		for _, rsc := range resources {
+			res = append(res, map[string]string{"uri": rsc.URI, "name": rsc.Name})
+		}
+		out["resources"] = res
+		out["resource_count"] = len(resources)
+	} else {
+		errs["resources"] = rerr.Error()
+	}
+
+	if prompts, perr := s.listUpstreamPrompts(ctx, up); perr == nil {
+		pr := make([]map[string]string, 0, len(prompts))
+		for _, p := range prompts {
+			pr = append(pr, map[string]string{"name": p.Name, "namespaced": up.ID + "__" + p.Name})
+		}
+		out["prompts"] = pr
+		out["prompt_count"] = len(prompts)
+	} else {
+		errs["prompts"] = perr.Error()
+	}
+
+	out["ok"] = terr == nil // tools is the primary capability
+	out["errors"] = errs
+	// a successful probe means the global catalog should be refreshed
+	if terr == nil {
+		s.invalidateMCPToolsCache()
+	}
+	writeJSON(w, http.StatusOK, out)
 }

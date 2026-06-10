@@ -582,6 +582,10 @@ func (s *Server) handleOpenAI(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// echo the resolved identity so clients/operators can verify which key the
+	// gateway attributed the request to (e.g. confirm a newly-issued key is used).
+	w.Header().Set("X-Api-Key-Id", apiKeyID)
+
 	clientAddr := clientIP(r)
 	if decision, err := s.checkQuotas(r.Context(), apiKeyID, clientAddr); err != nil {
 		slog.Warn("quota check failed", "error", err)
@@ -900,14 +904,17 @@ func (s *Server) authenticateProxy(r *http.Request) (string, bool) {
 // attributeExternalKey maps an unregistered (non-proxy) bearer key to a stable
 // per-key identity so distinct client keys appear as distinct users in history,
 // instead of collapsing into one shared "passthrough" bucket. The id is derived
-// from the key hash (the gateway never stores the plaintext). On first sight it
-// lazily registers a labeled api_keys row (status "external") so the user shows up
-// with a name/team; an optional X-Vibe-User / X-Vibe-Team header sets those.
+// from the key hash (the gateway never stores the plaintext) and uses the same
+// "key_" prefix as issued keys — registration is distinguished by status
+// ("external" vs "active"), not by id prefix — so promoting an external key to a
+// managed one is just a status flip on the same identity. On first sight it lazily
+// registers a labeled api_keys row (status "external") with name/team from an
+// optional X-Vibe-User / X-Vibe-Team header.
 func (s *Server) attributeExternalKey(r *http.Request, keyHash string) string {
 	if !s.cfg.Auth.AttributeExternalKeys {
 		return "passthrough"
 	}
-	id := "ext_" + keyHash[:16]
+	id := "key_" + keyHash[:16]
 	if _, seen := s.extSeen.Load(id); !seen {
 		name := firstNonEmptyHeader(r, "X-Vibe-User", "X-User-Id", "X-Title")
 		if name == "" {

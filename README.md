@@ -89,10 +89,11 @@ $env:PROXY_API_KEYS="dev:dev-proxy-key:alice:platform,team:team-proxy-key:bob:ba
 게이트웨이는 키의 **해시만** 저장하므로, 들어온 Bearer 키를 사용자에 귀속시키려면 그 키가 **등록된 proxy key**(위 `PROXY_API_KEYS` 또는 어드민 "API 키 발급")여야 합니다. 등록되지 않은 키는 기본적으로 사용자 식별이 불가능합니다.
 
 - **익명(anonymous)**: 키가 아예 없고 등록 키도 없을 때.
-- **외부 키 자동 귀속(ext_…)**: 등록 안 된 키(예: 클라이언트가 upstream 키를 직접 전달)라도 **키 지문(`ext_<해시16>`)으로 사용자별 분리**됩니다. 같은 키=같은 사용자, 다른 키=다른 사용자. 따라서 "사용자별로 다른 키"를 보내면 등록 없이도 사용자 이력이 분리됩니다. (구버전은 모두 `passthrough` 한 덩어리로 묶였음.)
+- **외부 키 자동 귀속(status `external`)**: 등록 안 된 키(예: 클라이언트가 upstream 키를 직접 전달)라도 **키 지문으로 사용자별 분리**됩니다. 식별자는 발급 키와 동일하게 `key_<해시16>` 이며, 등록 여부는 **상태(active/external)** 로만 구분합니다(prefix 아님). 같은 키=같은 사용자, 다른 키=다른 사용자. "사용자별로 다른 키"를 보내면 등록 없이도 이력이 분리됩니다. 응답 헤더 `X-Api-Key-Id` 로 게이트웨이가 인식한 식별자를 즉시 확인할 수 있습니다. (구버전 `ext_…` 식별자는 시작 시 `key_…` 로 자동 이관)
   - `X-Vibe-User`(또는 `X-User-Id`/`X-Title`) 헤더로 표시 이름을, `X-Vibe-Team` 헤더로 팀을 지정하면 사용자/팀 화면에 그대로 나타납니다.
   - 정확한 통제(쿼터·팀 강제·인증)가 필요하면 키를 **등록**하세요. 등록 키 매칭이 외부 귀속보다 항상 우선합니다.
   - `ATTRIBUTE_EXTERNAL_KEYS=false` 로 두면 구버전처럼 모든 미등록 키를 단일 `passthrough` 로 묶습니다.
+  - 응답 헤더 `X-Api-Key-Id` 로 어떤 식별자로 인식됐는지 확인 → "발급 키로 호출했는데 다른 데로 잡힌다" 진단에 사용.
 
 ## 주요 환경변수
 
@@ -106,7 +107,7 @@ $env:PROXY_API_KEYS="dev:dev-proxy-key:alice:platform,team:team-proxy-key:bob:ba
 | `DB_DSN` | `data/gateway.db` | SQLite 파일 경로 |
 | `POSTGRES_DSN` / `DATABASE_URL` | 없음 | 있으면 PostgreSQL 사용 |
 | `PROXY_API_KEYS` | 없음 | `name:key:owner:team` CSV |
-| `ATTRIBUTE_EXTERNAL_KEYS` | `true` | 미등록 키를 키 지문(`ext_…`)으로 사용자별 귀속. `false`면 단일 `passthrough` |
+| `ATTRIBUTE_EXTERNAL_KEYS` | `true` | 미등록 키를 키 지문(`key_…`, 상태 external)으로 사용자별 귀속. `false`면 단일 `passthrough` |
 | `ADMIN_TOKEN` | 없음 | 설정 시 `/admin/*` Bearer 토큰 요구 (전권) |
 | `ADMIN_READONLY_TOKEN` | 없음 | 설정 시 GET/HEAD 만 허용되는 읽기전용 admin 토큰 |
 | `GATEWAY_SECRET` | 개발용 기본값 | Provider API key 암호화 secret. 운영에서는 반드시 설정 |

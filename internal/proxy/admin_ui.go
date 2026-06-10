@@ -2699,7 +2699,7 @@ const adminHTML = `<!doctype html>
               '<td data-num="' + (u.cost_krw || 0) + '">' + money(u.cost_krw) + '</td>' +
               '<td data-num="' + (u.average_latency_ms || 0) + '">' + Math.round(u.average_latency_ms || 0) + ' ms</td>' +
               '<td>' + ago(u.last_seen) + '</td>' +
-              '<td>' + (u.api_key_id.indexOf('ext_') === 0 ? '<button class="secondary" type="button" onclick="event.stopPropagation();promoteExternalKey(\'' + escapeAttr(u.api_key_id) + '\', \'' + escapeAttr(u.name) + '\')">관리 등록</button>' : '') + '</td>' +
+              '<td>' + (u.status === 'external' ? '<button class="secondary" type="button" onclick="event.stopPropagation();promoteExternalKey(\'' + escapeAttr(u.api_key_id) + '\', \'' + escapeAttr(u.name) + '\')">관리 등록</button>' : '') + '</td>' +
             '</tr>'
           ).join('') + '</tbody></table>'
         ) : '<div class="empty">사용자 없음</div>'
@@ -2722,14 +2722,14 @@ const adminHTML = `<!doctype html>
       const a = d.advanced || {};
       const heat = d.heatmap || {};
       const llm = d.llm || {};
-      const isExternal = (k.id || '').indexOf('ext_') === 0 || k.status === 'external';
+      const isExternal = k.status === 'external';
       let notice = '';
       if (isExternal) {
-        notice = '<div class="banner warn" style="margin:0 14px 12px">외부(미등록) 키 — 클라이언트가 보낸 키를 지문(<code>ext_…</code>)으로 자동 식별한 사용자입니다. ' +
+        notice = '<div class="banner warn" style="margin:0 14px 12px">외부(미등록) 키 — 클라이언트가 보낸 키를 지문(키 해시)으로 자동 식별한 사용자입니다(상태 <code>external</code>). ' +
           '<button class="secondary" type="button" onclick="promoteExternalKey(\'' + escapeAttr(k.id) + '\', \'' + escapeAttr(k.name) + '\')">관리 사용자로 등록</button> 하면 이름·팀을 부여하고 정식(active) 키로 승격합니다(클라이언트 재설정 불필요).</div>';
       } else if (k.status === 'active' && (s.requests || 0) === 0) {
         notice = '<div class="banner error" style="margin:0 14px 12px"><strong>이 키로 집계된 요청이 0건입니다.</strong> 클라이언트가 <em>이 키를 정확히</em> 보내고 있는지 확인하세요(키 오타·공백·옛 키·잘못된 Bearer 값). ' +
-          '실제 트래픽은 <a href="#/users">사용자 목록</a>의 <code>passthrough</code>/<code>anonymous</code> 또는 <code>ext_…</code> 항목에 있을 수 있습니다. 클라이언트가 보내는 키가 곧 사용자 식별자이며, 등록된 키와 글자 단위로 일치해야 집계됩니다.</div>';
+          '실제 트래픽은 <a href="#/users">사용자 목록</a>의 <code>passthrough</code>/<code>anonymous</code> 또는 상태가 <code>external</code> 인 항목에 있을 수 있습니다. 클라이언트가 보내는 키가 곧 사용자 식별자이며, 등록된 키와 글자 단위로 일치해야 집계됩니다. 응답 헤더 <code>X-Api-Key-Id</code> 로 게이트웨이가 어떤 식별자로 인식했는지 확인할 수 있습니다.</div>';
       }
       const html =
         '<section><h2>사용자 ' + escapeHTML(k.name) + '</h2>' +
@@ -3162,10 +3162,11 @@ const adminHTML = `<!doctype html>
           '<td data-num="' + (s.errors || 0) + '">' + fmt(s.errors) + '</td>' +
           '<td data-num="' + (s.error_rate || 0) + '">' + (Number(s.error_rate || 0) * 100).toFixed(1) + '%</td>' +
           '<td data-num="' + (s.distinct_keys || 0) + '">' + fmt(s.distinct_keys) + '</td>' +
+          '<td data-num="' + (s.distinct_ips || 0) + '">' + fmt(s.distinct_ips || 0) + (s.sample_ip ? ' <span class="muted">' + escapeHTML(s.sample_ip) + (s.distinct_ips > 1 ? ' 외' : '') + '</span>' : '') + '</td>' +
           '<td>' + ago(s.last_seen) + '</td>' +
         '</tr>').join('') : '';
       const serverTable = servers.length ?
-        '<table><thead><tr><th data-sort="str">서버</th><th data-sort="num">tool 종류</th><th data-sort="num">호출</th><th data-sort="num">오류</th><th data-sort="num">오류율</th><th data-sort="num">고유 키</th><th data-sort="str">마지막</th></tr></thead><tbody>' + serverRows + '</tbody></table>'
+        '<table><thead><tr><th data-sort="str">서버</th><th data-sort="num">tool 종류</th><th data-sort="num">호출</th><th data-sort="num">오류</th><th data-sort="num">오류율</th><th data-sort="num">고유 키</th><th data-sort="num">호출 IP</th><th data-sort="str">마지막</th></tr></thead><tbody>' + serverRows + '</tbody></table>'
         : '<div class="empty">MCP/tool 호출 기록 없음. 클라이언트가 tools/MCP 서버를 사용하면 여기에 집계됩니다.</div>';
 
       const toolRows = tools.map(t => {
@@ -3178,13 +3179,14 @@ const adminHTML = `<!doctype html>
           '<td data-num="' + (t.errors || 0) + '">' + fmt(t.errors) + '</td>' +
           '<td data-num="' + (t.error_rate || 0) + '">' + (Number(t.error_rate || 0) * 100).toFixed(1) + '%</td>' +
           '<td data-num="' + (t.distinct_keys || 0) + '">' + fmt(t.distinct_keys) + '</td>' +
+          '<td data-num="' + (t.distinct_ips || 0) + '">' + fmt(t.distinct_ips || 0) + (t.sample_ip ? ' <span class="muted">' + escapeHTML(t.sample_ip) + (t.distinct_ips > 1 ? ' 외' : '') + '</span>' : '') + '</td>' +
           '<td><button class="secondary" type="button" onclick="mcpToolRequests(\'' + escapeAttr(sl) + '\',\'' + escapeAttr(t.tool_name) + '\',false)">호출</button> ' +
           (t.errors > 0 ? '<button class="danger" type="button" onclick="mcpToolRequests(\'' + escapeAttr(sl) + '\',\'' + escapeAttr(t.tool_name) + '\',true)">오류</button>' : '') +
           '</td>' +
         '</tr>';
       }).join('');
       const toolTable = tools.length ?
-        '<table><thead><tr><th data-sort="str">tool</th><th data-sort="num">정의</th><th data-sort="num">호출</th><th data-sort="num">결과</th><th data-sort="num">오류</th><th data-sort="num">오류율</th><th data-sort="num">고유 키</th><th>드릴다운</th></tr></thead><tbody>' + toolRows + '</tbody></table>'
+        '<table><thead><tr><th data-sort="str">tool</th><th data-sort="num">정의</th><th data-sort="num">호출</th><th data-sort="num">결과</th><th data-sort="num">오류</th><th data-sort="num">오류율</th><th data-sort="num">고유 키</th><th data-sort="num">호출 IP</th><th>드릴다운</th></tr></thead><tbody>' + toolRows + '</tbody></table>'
         : '<div class="empty">tool 기록 없음</div>';
 
       // ---- policy section ----
@@ -3262,13 +3264,20 @@ const adminHTML = `<!doctype html>
           '<td class="muted">' + escapeHTML(u.url) + '</td>' +
           '<td>' + (u.has_auth ? '<span class="pill">인증</span>' : '<span class="muted">없음</span>') + '</td>' +
           '<td><span class="status ' + (u.enabled ? '' : 'error') + '">' + (u.enabled ? '사용' : '중지') + '</span></td>' +
-          '<td><button class="secondary" type="button" onclick="toggleMCPUpstream(\'' + escapeAttr(u.id) + '\',' + (!u.enabled) + ')">' + (u.enabled ? '중지' : '사용') + '</button> ' +
+          '<td><button class="secondary" type="button" onclick="testMCPUpstream(\'' + escapeAttr(u.id) + '\')">테스트/도구</button> ' +
+          '<button class="secondary" type="button" onclick="toggleMCPUpstream(\'' + escapeAttr(u.id) + '\',' + (!u.enabled) + ')">' + (u.enabled ? '중지' : '사용') + '</button> ' +
           '<button class="danger" type="button" onclick="deleteMCPUpstream(\'' + escapeAttr(u.id) + '\')">삭제</button></td>' +
         '</tr>').join('');
       const upstreamTable = upstreams.length ?
         '<table><thead><tr><th>이름</th><th>URL</th><th>인증</th><th>상태</th><th>동작</th></tr></thead><tbody>' + upstreamRows + '</tbody></table>'
         : '<div class="empty">등록된 업스트림 MCP 서버 없음. 등록하면 게이트웨이 엔드포인트 <code>/mcp</code> 가 모든 서버의 도구를 <code>&lt;이름&gt;__&lt;도구&gt;</code> 로 합쳐 제공합니다.</div>';
-      const gatewayHelp = '<div class="muted" style="font-size:12px; padding:0 14px 12px">클라이언트(Claude Code·Cursor 등)를 게이트웨이 <code>/mcp</code> 한 곳에만 연결하면 등록된 모든 MCP 서버의 도구를 함께 사용합니다. 도구 이름은 <code>&lt;업스트림ID&gt;__&lt;도구&gt;</code> 로 네임스페이스되고, 호출은 위 정책(allowlist/차단)과 사용자 귀속·관측에 통합됩니다. (Streamable HTTP 업스트림 지원)</div>';
+      const gatewayHelp = '<div class="muted" style="font-size:12px; padding:0 14px 12px">' +
+        '클라이언트(Claude Code·Cursor 등)를 게이트웨이 <code>/mcp</code> 한 곳에만 연결하면 등록된 모든 MCP 서버의 도구를 함께 사용합니다. 도구·프롬프트는 <code>&lt;업스트림ID&gt;__&lt;이름&gt;</code> 로 네임스페이스되고, 호출은 위 정책(allowlist/차단)과 사용자 귀속·관측에 통합됩니다. (Streamable HTTP 업스트림 지원)' +
+        '<br><strong>등록 확인</strong>: 각 행의 <em>테스트/도구</em> 버튼으로 연결·노출 도구를 즉시 확인. ' +
+        '<br><strong>호출 검증(curl)</strong>: <code>curl -s http://&lt;gateway&gt;:8080/mcp -H "Authorization: Bearer pcg_..." -H "Content-Type: application/json" -d \'{"jsonrpc":"2.0","id":1,"method":"tools/list"}\'</code> → 집약된 도구 목록 JSON. ' +
+        '<code>tools/call</code> 은 <code>{"method":"tools/call","params":{"name":"&lt;업스트림ID&gt;__&lt;도구&gt;","arguments":{}}}</code>. ' +
+        '<br><strong>클라이언트 설정</strong>: MCP 서버 URL 을 <code>http://&lt;gateway&gt;:8080/mcp</code>, 헤더 <code>Authorization: Bearer &lt;발급키&gt;</code>.' +
+        '</div>';
 
       document.getElementById('view').innerHTML =
         section('MCP / Tool 요약', kpis + filterBar) +
@@ -3329,6 +3338,36 @@ const adminHTML = `<!doctype html>
       if (!confirm('업스트림 MCP 서버 "' + id + '" 을(를) 삭제하시겠습니까?')) return;
       await api('/admin/mcp/upstreams/' + encodeURIComponent(id), { method: 'DELETE' });
       route();
+    };
+    window.testMCPUpstream = async (id) => {
+      openModal('업스트림 테스트 — ' + id, '<div class="muted" style="padding:14px">연결 중…</div>');
+      try {
+        const d = await api('/admin/mcp/upstreams/' + encodeURIComponent(id) + '/probe');
+        const errs = d.errors || {};
+        const status = d.ok
+          ? '<span class="status">연결 성공</span> 도구 ' + fmt(d.tool_count || 0) + '개'
+          : '<span class="status error">연결 실패</span> ' + escapeHTML(errs.tools || '도구 목록 조회 실패');
+        const listBlock = (title, items, render) => items && items.length
+          ? '<h4 style="margin:14px 0 6px; font-size:14px">' + title + ' (' + items.length + ')</h4><div class="kv">' + items.map(render).join('') + '</div>'
+          : '';
+        const toolBlock = listBlock('도구', d.tools, t =>
+          '<div class="k"><code>' + escapeHTML(t.namespaced) + '</code></div><div class="v muted">' + escapeHTML(t.description || '') + '</div>');
+        const resBlock = listBlock('리소스', d.resources, x =>
+          '<div class="k"><code>' + escapeHTML(x.uri) + '</code></div><div class="v muted">' + escapeHTML(x.name || '') + '</div>');
+        const promptBlock = listBlock('프롬프트', d.prompts, x =>
+          '<div class="k"><code>' + escapeHTML(x.namespaced) + '</code></div><div class="v"></div>');
+        const otherErrs = ['resources', 'prompts'].filter(k => errs[k]).map(k => '<div class="muted" style="font-size:12px">' + k + ': ' + escapeHTML(errs[k]) + '</div>').join('');
+        openModal('업스트림 테스트 — ' + escapeHTML(d.name || id),
+          '<div style="padding:14px">' +
+            '<div style="margin-bottom:6px">' + status + '</div>' +
+            '<div class="muted" style="font-size:12px; margin-bottom:8px">' + escapeHTML(d.url || '') + '</div>' +
+            (d.tools && d.tools.length ? '<div class="muted" style="font-size:12px">게이트웨이에서 호출 시 위 <code>네임스페이스</code> 이름을 사용하세요.</div>' : '') +
+            toolBlock + resBlock + promptBlock +
+            (otherErrs ? '<h4 style="margin:14px 0 6px; font-size:14px">선택 기능 오류</h4>' + otherErrs : '') +
+          '</div>');
+      } catch (err) {
+        openModal('업스트림 테스트 — ' + id, '<div class="error-line">' + escapeHTML(err.message) + '</div>');
+      }
     };
     function errorRatePct(errors, calls) {
       const c = Number(calls || 0);

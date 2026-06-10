@@ -50,9 +50,9 @@ func TestExternalKeyAttributionPerKey(t *testing.T) {
 		t.Fatalf("registered key should resolve to key_real, got %q ok=%v", id, ok)
 	}
 
-	// unregistered per-user keys → distinct, stable ext_ identities
+	// unregistered per-user keys → distinct, stable key_ identities (status external)
 	aliceTok, bobTok := "alice-personal-key", "bob-personal-key"
-	wantAlice := "ext_" + hashProxyKey(aliceTok)[:16]
+	wantAlice := "key_" + hashProxyKey(aliceTok)[:16]
 	id, ok := s.authenticateProxy(reqWithAuth(aliceTok, map[string]string{"X-Vibe-User": "alice", "X-Vibe-Team": "platform"}))
 	if !ok || id != wantAlice {
 		t.Fatalf("alice key should attribute to %q, got %q ok=%v", wantAlice, id, ok)

@@ -36,27 +36,54 @@ func (f ToolFilter) where() (string, []any) {
 	return strings.Join(clauses, " AND "), args
 }
 
+// whereAliased is where() with every tool_invocations column qualified by the given
+// alias, so the clause is unambiguous when joined to request_logs.
+func (f ToolFilter) whereAliased(a string) (string, []any) {
+	p := a + "."
+	clauses := []string{"1=1"}
+	args := []any{}
+	if f.APIKeyID != "" {
+		clauses = append(clauses, p+"api_key_id = ?")
+		args = append(args, f.APIKeyID)
+	}
+	if f.ServerLabel != "" {
+		clauses = append(clauses, "COALESCE(NULLIF("+p+"server_label, ''), '(none)') = ?")
+		args = append(args, f.ServerLabel)
+	}
+	if f.MCPOnly {
+		clauses = append(clauses, p+"is_mcp = 1")
+	}
+	if !f.Since.IsZero() {
+		clauses = append(clauses, p+"created_at >= ?")
+		args = append(args, f.Since.UTC().Format(time.RFC3339Nano))
+	}
+	return strings.Join(clauses, " AND "), args
+}
+
 // ListMCPTools returns per-(server,tool) aggregates ordered by total activity.
 func (s *SQLStore) ListMCPTools(ctx context.Context, f ToolFilter) ([]MCPToolStat, error) {
 	limit := f.Limit
 	if limit <= 0 || limit > 500 {
 		limit = 200
 	}
-	whereSQL, args := f.where()
+	whereSQL, args := f.whereAliased("ti")
 	args = append(args, limit)
 	query := s.bind(`
-		SELECT COALESCE(NULLIF(server_label, ''), '(none)') AS server,
-			tool_name,
-			MAX(is_mcp) AS is_mcp,
-			SUM(CASE WHEN source = 'definition' THEN 1 ELSE 0 END) AS definitions,
-			SUM(CASE WHEN source = 'call' THEN 1 ELSE 0 END) AS calls,
-			SUM(CASE WHEN source = 'result' THEN 1 ELSE 0 END) AS results,
-			SUM(CASE WHEN is_error = 1 THEN 1 ELSE 0 END) AS errors,
-			COUNT(DISTINCT NULLIF(api_key_id, '')) AS distinct_keys,
-			MAX(created_at) AS last_seen
-		FROM tool_invocations
+		SELECT COALESCE(NULLIF(ti.server_label, ''), '(none)') AS server,
+			ti.tool_name,
+			MAX(ti.is_mcp) AS is_mcp,
+			SUM(CASE WHEN ti.source = 'definition' THEN 1 ELSE 0 END) AS definitions,
+			SUM(CASE WHEN ti.source = 'call' THEN 1 ELSE 0 END) AS calls,
+			SUM(CASE WHEN ti.source = 'result' THEN 1 ELSE 0 END) AS results,
+			SUM(CASE WHEN ti.is_error = 1 THEN 1 ELSE 0 END) AS errors,
+			COUNT(DISTINCT NULLIF(ti.api_key_id, '')) AS distinct_keys,
+			COUNT(DISTINCT NULLIF(r.client_ip, '')) AS distinct_ips,
+			COALESCE(MAX(NULLIF(r.client_ip, '')), '') AS sample_ip,
+			MAX(ti.created_at) AS last_seen
+		FROM tool_invocations ti
+		LEFT JOIN request_logs r ON r.id = ti.request_id
 		WHERE ` + whereSQL + `
-		GROUP BY COALESCE(NULLIF(server_label, ''), '(none)'), tool_name
+		GROUP BY COALESCE(NULLIF(ti.server_label, ''), '(none)'), ti.tool_name
 		ORDER BY calls DESC, results DESC, definitions DESC
 		LIMIT ?`)
 	rows, err := s.db.QueryContext(ctx, query, args...)
@@ -68,7 +95,7 @@ func (s *SQLStore) ListMCPTools(ctx context.Context, f ToolFilter) ([]MCPToolSta
 	for rows.Next() {
 		var t MCPToolStat
 		var isMCP int
-		if err := rows.Scan(&t.ServerLabel, &t.ToolName, &isMCP, &t.Definitions, &t.Calls, &t.Results, &t.Errors, &t.DistinctKeys, &t.LastSeen); err != nil {
+		if err := rows.Scan(&t.ServerLabel, &t.ToolName, &isMCP, &t.Definitions, &t.Calls, &t.Results, &t.Errors, &t.DistinctKeys, &t.DistinctIPs, &t.SampleIP, &t.LastSeen); err != nil {
 			return nil, err
 		}
 		t.IsMCP = isMCP == 1
@@ -82,18 +109,21 @@ func (s *SQLStore) ListMCPTools(ctx context.Context, f ToolFilter) ([]MCPToolSta
 
 // ListMCPServers groups invocations by MCP server label.
 func (s *SQLStore) ListMCPServers(ctx context.Context, f ToolFilter) ([]MCPServerStat, error) {
-	whereSQL, args := f.where()
+	whereSQL, args := f.whereAliased("ti")
 	query := s.bind(`
-		SELECT COALESCE(NULLIF(server_label, ''), '(none)') AS server,
-			MAX(is_mcp) AS is_mcp,
-			COUNT(DISTINCT tool_name) AS tools,
-			SUM(CASE WHEN source = 'call' THEN 1 ELSE 0 END) AS calls,
-			SUM(CASE WHEN is_error = 1 THEN 1 ELSE 0 END) AS errors,
-			COUNT(DISTINCT NULLIF(api_key_id, '')) AS distinct_keys,
-			MAX(created_at) AS last_seen
-		FROM tool_invocations
+		SELECT COALESCE(NULLIF(ti.server_label, ''), '(none)') AS server,
+			MAX(ti.is_mcp) AS is_mcp,
+			COUNT(DISTINCT ti.tool_name) AS tools,
+			SUM(CASE WHEN ti.source = 'call' THEN 1 ELSE 0 END) AS calls,
+			SUM(CASE WHEN ti.is_error = 1 THEN 1 ELSE 0 END) AS errors,
+			COUNT(DISTINCT NULLIF(ti.api_key_id, '')) AS distinct_keys,
+			COUNT(DISTINCT NULLIF(r.client_ip, '')) AS distinct_ips,
+			COALESCE(MAX(NULLIF(r.client_ip, '')), '') AS sample_ip,
+			MAX(ti.created_at) AS last_seen
+		FROM tool_invocations ti
+		LEFT JOIN request_logs r ON r.id = ti.request_id
 		WHERE ` + whereSQL + `
-		GROUP BY COALESCE(NULLIF(server_label, ''), '(none)')
+		GROUP BY COALESCE(NULLIF(ti.server_label, ''), '(none)')
 		ORDER BY calls DESC, tools DESC`)
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -106,7 +136,7 @@ func (s *SQLStore) ListMCPServers(ctx context.Context, f ToolFilter) ([]MCPServe
 		var isMCP int
 		var results int64
 		// reuse calls slot; compute error rate against calls+results via a second pass
-		if err := rows.Scan(&srv.ServerLabel, &isMCP, &srv.Tools, &srv.Calls, &srv.Errors, &srv.DistinctKeys, &srv.LastSeen); err != nil {
+		if err := rows.Scan(&srv.ServerLabel, &isMCP, &srv.Tools, &srv.Calls, &srv.Errors, &srv.DistinctKeys, &srv.DistinctIPs, &srv.SampleIP, &srv.LastSeen); err != nil {
 			return nil, err
 		}
 		srv.IsMCP = isMCP == 1

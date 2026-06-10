@@ -205,6 +205,54 @@ func TestMCPGatewayResourcesAndPrompts(t *testing.T) {
 	}
 }
 
+func TestMCPUpstreamProbe(t *testing.T) {
+	up := fakeMCPUpstream(t)
+	defer up.Close()
+	s, db := newKnowledgeServer(t)
+	proxy := httptest.NewServer(s.Routes())
+	defer proxy.Close()
+	if err := db.UpsertMCPUpstream(context.Background(), store.MCPUpstream{ID: "fake", Name: "fake", URL: up.URL, Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	resp, err := http.Get(proxy.URL + "/admin/mcp/upstreams/fake/probe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("probe status %d", resp.StatusCode)
+	}
+	var out struct {
+		OK        bool `json:"ok"`
+		ToolCount int  `json:"tool_count"`
+		Tools     []struct {
+			Name       string `json:"name"`
+			Namespaced string `json:"namespaced"`
+		} `json:"tools"`
+		ResourceCount int `json:"resource_count"`
+		PromptCount   int `json:"prompt_count"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	if !out.OK || out.ToolCount != 2 {
+		t.Fatalf("probe expected ok + 2 tools, got ok=%v count=%d", out.OK, out.ToolCount)
+	}
+	if out.ResourceCount != 1 || out.PromptCount != 1 {
+		t.Fatalf("probe expected 1 resource + 1 prompt, got %d/%d", out.ResourceCount, out.PromptCount)
+	}
+	found := false
+	for _, tl := range out.Tools {
+		if tl.Name == "echo" && tl.Namespaced == "fake__echo" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("probe should report echo tool with namespaced name, got %+v", out.Tools)
+	}
+}
+
 func TestMCPGatewayPolicyBlocks(t *testing.T) {
 	up := fakeMCPUpstream(t)
 	defer up.Close()
