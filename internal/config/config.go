@@ -81,6 +81,14 @@ type AuthConfig struct {
 	// traffic into one shared "passthrough" bucket. Lets per-user keys show up as
 	// distinct users even when they were never registered in the gateway.
 	AttributeExternalKeys bool
+	Enabled               bool
+	JWTSecret             string
+	AccessTokenTTL        time.Duration
+	RefreshTokenTTL       time.Duration
+	APIKeyPrefix          string
+	ServiceKeyPrefix      string
+	BootstrapEmail        string
+	BootstrapPassword     string
 }
 
 type SecretConfig struct {
@@ -146,6 +154,14 @@ func Load() (Config, error) {
 			AdminToken:            os.Getenv("ADMIN_TOKEN"),
 			AdminReadonlyToken:    os.Getenv("ADMIN_READONLY_TOKEN"),
 			AttributeExternalKeys: boolEnv("ATTRIBUTE_EXTERNAL_KEYS", true),
+			Enabled:               boolEnv("AUTH_ENABLED", false),
+			JWTSecret:             os.Getenv("AUTH_JWT_SECRET"),
+			AccessTokenTTL:        durationEnv("AUTH_ACCESS_TOKEN_TTL", 15*time.Minute),
+			RefreshTokenTTL:       durationEnv("AUTH_REFRESH_TOKEN_TTL", 168*time.Hour),
+			APIKeyPrefix:          getEnv("AUTH_API_KEY_PREFIX", "vc_sk_"),
+			ServiceKeyPrefix:      getEnv("AUTH_SERVICE_KEY_PREFIX", "vc_sa_"),
+			BootstrapEmail:        strings.TrimSpace(os.Getenv("AUTH_ADMIN_BOOTSTRAP_EMAIL")),
+			BootstrapPassword:     os.Getenv("AUTH_ADMIN_BOOTSTRAP_PASSWORD"),
 		},
 		Secret: SecretConfig{
 			GatewaySecret: getEnv("GATEWAY_SECRET", "dev-local-insecure-secret-change-me"),
@@ -172,6 +188,9 @@ func Load() (Config, error) {
 	}
 	if err := json.Unmarshal([]byte(getEnv("MODEL_PRICING_KRW_PER_1M", "{}")), &cfg.Pricing); err != nil {
 		return Config{}, fmt.Errorf("parse MODEL_PRICING_KRW_PER_1M: %w", err)
+	}
+	if cfg.Auth.Enabled && cfg.Auth.JWTSecret == "" {
+		return Config{}, fmt.Errorf("AUTH_JWT_SECRET is required when AUTH_ENABLED=true")
 	}
 
 	return cfg, nil

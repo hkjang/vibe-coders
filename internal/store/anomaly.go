@@ -5,6 +5,7 @@ import (
 	"math"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -141,6 +142,141 @@ func (s *SQLStore) MaxAnomalyZ(ctx context.Context, baseline, recent time.Durati
 		return 0, nil
 	}
 	return math.Abs(findings[0].ZScore), nil
+}
+
+type costAnomalyBucket struct {
+	baseline map[int]float64
+	recent   float64
+	samples  int64
+}
+
+// CostAnomalies compares total KRW spend in the recent window with previous
+// same-sized windows across global, api_key, team and model scopes.
+func (s *SQLStore) CostAnomalies(ctx context.Context, baseline, recent time.Duration, z float64) ([]CostAnomalyFinding, error) {
+	if z <= 0 {
+		z = 3
+	}
+	if recent <= 0 {
+		recent = time.Hour
+	}
+	if baseline <= recent {
+		baseline = 7 * 24 * time.Hour
+	}
+	now := time.Now().UTC()
+	recentStart := now.Add(-recent)
+	baselineStart := now.Add(-baseline)
+	rows, err := s.db.QueryContext(ctx, s.bind(`SELECT r.created_at, COALESCE(t.estimated_cost, 0),
+			COALESCE(NULLIF(r.api_key_id, ''), 'anonymous'),
+			COALESCE(NULLIF(k.team, ''), 'unassigned'),
+			COALESCE(NULLIF(r.model, ''), 'unknown')
+		FROM request_logs r
+		LEFT JOIN token_usage t ON t.request_id = r.id
+		LEFT JOIN api_keys k ON k.id = r.api_key_id
+		WHERE r.created_at >= ?`), baselineStart.Format(time.RFC3339Nano))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	buckets := map[string]*costAnomalyBucket{}
+	add := func(scope, value string, when time.Time, cost float64) {
+		if value == "" {
+			value = "*"
+		}
+		key := scope + "\x00" + value
+		b := buckets[key]
+		if b == nil {
+			b = &costAnomalyBucket{baseline: map[int]float64{}}
+			buckets[key] = b
+		}
+		if !when.Before(recentStart) {
+			b.recent += cost
+			b.samples++
+			return
+		}
+		idx := int(recentStart.Sub(when) / recent)
+		if idx < 0 {
+			idx = 0
+		}
+		b.baseline[idx] += cost
+	}
+	for rows.Next() {
+		var createdAt string
+		var cost float64
+		var apiKeyID, team, model string
+		if err := rows.Scan(&createdAt, &cost, &apiKeyID, &team, &model); err != nil {
+			return nil, err
+		}
+		when := parseOptionalTime(createdAt)
+		if when.IsZero() {
+			continue
+		}
+		add("global", "*", when, cost)
+		add("api_key", apiKeyID, when, cost)
+		add("team", team, when, cost)
+		add("model", model, when, cost)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	findings := []CostAnomalyFinding{}
+	for key, bucket := range buckets {
+		if bucket.samples < anomalyMinRecent || len(bucket.baseline) < 2 {
+			continue
+		}
+		values := make([]float64, 0, len(bucket.baseline))
+		for _, v := range bucket.baseline {
+			values = append(values, v)
+		}
+		mean, std := meanStd(values)
+		if floor := 0.05 * math.Abs(mean); floor > std {
+			std = floor
+		}
+		if std <= 0 {
+			continue
+		}
+		zs := (bucket.recent - mean) / std
+		if math.Abs(zs) < z {
+			continue
+		}
+		parts := strings.SplitN(key, "\x00", 2)
+		dir := "up"
+		if zs < 0 {
+			dir = "down"
+		}
+		findings = append(findings, CostAnomalyFinding{
+			Scope:           parts[0],
+			ScopeValue:      parts[1],
+			Metric:          "cost_total",
+			BaselineMean:    mean,
+			BaselineStd:     std,
+			RecentValue:     bucket.recent,
+			ZScore:          zs,
+			Direction:       dir,
+			BaselineBuckets: int64(len(values)),
+			RecentSamples:   bucket.samples,
+		})
+	}
+	sort.Slice(findings, func(i, j int) bool {
+		return math.Abs(findings[i].ZScore) > math.Abs(findings[j].ZScore)
+	})
+	return findings, nil
+}
+
+func meanStd(values []float64) (float64, float64) {
+	if len(values) == 0 {
+		return 0, 0
+	}
+	sum := 0.0
+	sumSq := 0.0
+	for _, v := range values {
+		sum += v
+		sumSq += v * v
+	}
+	mean := sum / float64(len(values))
+	variance := math.Max(0, sumSq/float64(len(values))-mean*mean)
+	return mean, math.Sqrt(variance)
 }
 
 type nullableFloat struct{ v float64 }

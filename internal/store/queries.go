@@ -817,6 +817,26 @@ func (s *SQLStore) RequestDetail(ctx context.Context, id string) (RequestDetail,
 	}
 	detail.Tools = tools
 	detail.Spans = llmSpansForRequest(item, tools)
+	if secretEvents, err := s.SecretEventsForRequest(ctx, item.ID); err != nil {
+		return detail, err
+	} else {
+		detail.Governance.SecretEvents = secretEvents
+	}
+	if approvals, err := s.ApprovalsForRequest(ctx, item.ID); err != nil {
+		return detail, err
+	} else {
+		detail.Governance.Approvals = approvals
+	}
+	if anomalyEvents, err := s.AnomalyEventsForRequest(ctx, item.ID, time.Hour); err != nil {
+		return detail, err
+	} else {
+		detail.Governance.AnomalyEvents = anomalyEvents
+	}
+	if policyDecisions, err := s.PolicyDecisionEventsForRequest(ctx, item.ID); err != nil {
+		return detail, err
+	} else {
+		detail.Governance.PolicyDecisions = policyDecisions
+	}
 	evaluations, err := s.EvaluationsForRequest(ctx, item.ID)
 	if err != nil {
 		return detail, err

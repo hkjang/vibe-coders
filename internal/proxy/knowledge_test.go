@@ -104,6 +104,36 @@ func TestExpandKnowledgeSkipsDisabled(t *testing.T) {
 	}
 }
 
+func TestExpandContextRegistryPlaceholderAndHeader(t *testing.T) {
+	s, db := newKnowledgeServer(t)
+	ctx := context.Background()
+	if err := db.UpsertContextRegistry(ctx, store.ContextRegistryEntry{ID: "ctx1", Key: "ctx_architecture", Name: "Architecture", Content: "Use hexagonal boundaries.", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.UpsertContextRegistry(ctx, store.ContextRegistryEntry{ID: "ctx2", Key: "ctx_api_standard", Name: "API", Content: "Return RFC7807 errors.", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	body := []byte(`{"model":"m","messages":[{"role":"user","content":"{{ctx:ctx_architecture}}\nDesign it"}]}`)
+	out, ids, tokens := s.expandKnowledge(httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader("")), body)
+	if len(ids) != 1 || ids[0] != "ctx:ctx_architecture" || tokens <= 0 {
+		t.Fatalf("context placeholder ids=%v tokens=%d", ids, tokens)
+	}
+	if !strings.Contains(string(out), "Use hexagonal boundaries.") || strings.Contains(string(out), "{{ctx:ctx_architecture}}") {
+		t.Fatalf("context placeholder not expanded: %s", out)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(""))
+	req.Header.Set("X-Vibe-Context", "ctx_api_standard")
+	out2, ids2, _ := s.expandKnowledge(req, []byte(`{"model":"m","messages":[{"role":"user","content":"hi"}]}`))
+	if len(ids2) != 1 || ids2[0] != "ctx:ctx_api_standard" {
+		t.Fatalf("context header ids=%v", ids2)
+	}
+	if !strings.Contains(string(out2), "Return RFC7807 errors.") {
+		t.Fatalf("context header not prepended: %s", out2)
+	}
+}
+
 func TestKnowledgeCRUDEndpoint(t *testing.T) {
 	s, db := newKnowledgeServer(t)
 	proxy := httptest.NewServer(s.Routes())

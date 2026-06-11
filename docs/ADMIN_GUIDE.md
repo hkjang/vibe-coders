@@ -43,8 +43,24 @@
 | 팀 | 팀별 사용량·비용, 팀 클릭 시 API 키/모델/IP/LLM trend drill-down |
 | IP | 호출 IP 별 사용량, IP 클릭 시 일별·모델별·키별 상세 |
 | 사용 한도 | API 키/팀/IP/전체 단위 일별·월별 토큰·KRW 한도 |
-| 안전 | Kill Switch + 알림 규칙 + 발화 이력 |
+| 안전 | Kill Switch + 비용 가드 + AI 정책 엔진 + Secret Firewall 이벤트 + 승인 큐 + 정책 판단 이벤트 + 알림 규칙 + 발화 이력 |
 | 설정 | Proxy API 키 발급/비활성화, 업스트림 provider, 보존 정책, 변경 이력 + 감사 CSV |
+
+## 2-1. 인증 / RBAC
+
+기본 운영은 기존 호환 모드(`AUTH_ENABLED=false`)입니다. `AUTH_ENABLED=true` 로 켜면 Admin API는 `/auth/login` 으로 받은 JWT access token이 필요하고, refresh token은 `/auth/refresh` 호출마다 rotation 됩니다. `/auth/logout` 은 세션/refresh token을 폐기합니다.
+
+역할은 `super_admin`, `admin`, `team_admin`, `developer`, `viewer`, `service_account` 를 지원합니다. API key는 원문을 저장하지 않고 hash만 저장하며, `expires_at`, `revoked_at`, `allowed_ips`, `scopes`, `allowed_models`/`denied_models`, `allowed_providers`/`denied_providers`, `budget_limit_krw` 정책을 검사합니다. Scope는 `chat:completion`, `embeddings:create`, `models:read`, `admin:read`, `admin:write`, `routing:read`, `routing:write`, `observability:read`, `costs:read`, `security:read`, `mcp:use`, `mcp:admin` 입니다.
+
+인증/정책 이벤트는 `GET /admin/audit/auth-events` 에 기록됩니다. 기록 대상은 `login_success`, `login_failed`, `api_key_created`, `api_key_revoked`, `api_key_denied`, `ip_denied`, `scope_denied`, `model_denied`, `budget_denied`, `role_changed` 입니다.
+
+## 2-2. Governance Layer
+
+거버넌스 레이어는 요청을 upstream으로 보내기 전에 정책, secret, 승인, MCP tool 위험도를 평가합니다. 정책은 안전 탭의 "AI 정책 엔진" 또는 `GET/POST /admin/policies` 로 관리하며 rule은 `conditions`와 `actions` JSON을 사용합니다. 예: `{ "contains_secret": true, "block": true }`, `{ "risk_score": ">80", "require_approval": true }`, `{ "team": "security", "allow_models": ["gpt-5", "claude-sonnet"] }`. `team` 조건은 팀 ID와 팀명을 모두 매칭하며, 엄격히 구분하려면 `team_id` 또는 `team_name` 을 사용할 수 있습니다.
+
+Secret Firewall은 API key, JWT, private key, password, AWS secret, DB connection string, access token을 탐지하고 정책에 따라 `detect`, `mask`, `block`으로 처리합니다. 탐지 이벤트는 안전 탭의 "Secret Firewall 이벤트" 또는 `GET /admin/security/secrets` 에서 확인합니다. `/admin/security/secrets` 는 `request_id`, `action`, `secret_type`, `team_id`, `api_key_id`, `user_id`, `location`, `matched_hash`, `window`, `since`, `limit` 필터를 지원합니다. 정책 판단 이벤트는 안전 탭의 "정책 판단 이벤트", `GET /admin/policies/decisions`, 요청별 XView/요청 상세의 Governance 패널에서 확인합니다. `/admin/policies/decisions` 는 `request_id`, `decision`, `policy_id`, `rule_id`, `team_id`, `api_key_id`, `user_id`, `endpoint`, `phase`, `model`, `provider`, `window`, `since`, `limit` 필터를 지원합니다. 승인 필요 요청은 `pending` approval을 만들고 `X-Governance-Approval-ID` 헤더를 반환합니다. 운영자는 안전 탭의 "승인 큐" 또는 `GET /admin/approvals` 로 승인 항목을 조회하고, `POST /admin/approvals/{id}/approve` / `/reject` 로 결정합니다. `/admin/approvals` 는 `id`, `request_id`, `status`, `team_id`, `api_key_id`, `user_id`, `subject_type`, `subject_id`, `decided_by`, `reason`, `window`, `since`, `limit` 필터를 지원합니다. 클라이언트는 승인된 ID를 같은 헤더로 재전송합니다.
+
+MCP Security Center는 MCP 탭 또는 `GET/POST /admin/mcp/tools` 에서 tool별 `low|medium|high|critical` risk와 `allow|require_approval|block` action을 관리합니다. `/admin/mcp/tools` 는 `server`, `tool`, `api_key_id`, `mcp_only`, `risk_level`, `action`, `configured`, `window`, `limit` 필터를 지원하며, UI에서는 tool 행에서 risk/action/note를 바로 저장할 수 있습니다. `/admin/anomalies` 는 기존 모델 이상탐지에 더해 비용 anomaly event 뷰를 반환하며, replay/golden/context 운영 API는 `/admin/replay`, `/admin/golden-prompts`, `/admin/contexts` 입니다.
 
 ---
 
@@ -88,7 +104,7 @@ API: `GET /admin/scatter?window=1h&metric=latency&model=&endpoint=&limit=6000` �
 
 | 패널 | 내용 |
 | --- | --- |
-| 🧭 라우팅 | 선택된 provider·모델, 라우팅 근거(헤더 지정/쿼리/모델 패턴 자동/기본), 매칭된 패턴, **복잡도 점수(0~100)와 티어**(low/medium/high) |
+| 🧭 라우팅 | 선택된 provider·모델, 라우팅 근거(헤더 지정/쿼리/모델 패턴 자동/기본/auto router), 매칭된 패턴, **복잡도 점수(0~100)와 티어**(simple/standard/complex/reasoning), risk score, provider health score, fallback chain, decision reason |
 | 🔁 폴백 | 폴백 발생 여부, 최초→대체 provider, 사유(전송 실패 등) |
 | 🟢 캐시 | 캐시 히트 여부, cached 토큰, **절감액**(전체 캐시 / 프롬프트 캐시) |
 | 🛡 안전 | 차단 여부, 마스킹 적용, 실패한 안전·보안 평가(PII/인젝션/독성/도구 인자 시크릿) |
@@ -97,7 +113,13 @@ API: `GET /admin/scatter?window=1h&metric=latency&model=&endpoint=&limit=6000` �
 
 복잡도 점수는 프롬프트 토큰·대화 깊이·도구 수 기반 휴리스틱 추정치이며(모델 산출값 아님) UI에 그 사실이 명시됩니다.
 
-API: `GET /admin/requests/{id}/explain` → `{routing, fallback, cache, safety, cost, session}`.
+API: `GET /admin/requests/{id}/explain` → `{routing, fallback, cache, safety, cost, session}`. `routing` 에는 `chosen_model`, `chosen_provider`, `complexity`, `risk_score`, `health_score`, `fallback_path`, `decision_reason` 이 포함됩니다.
+
+Intelligent Routing Engine API:
+
+- `POST /admin/routing/preview` — 실제 upstream 호출 없이 `auto` / `vibe/auto` / `vibe-coders/auto` 라우팅 결과 미리보기
+- `GET /admin/routing/decisions` / `GET /admin/routing/decisions/{id}` — 요청별 selected model/provider, complexity/risk/health, fallback path, decision reason 조회
+- `GET /admin/routing/health` — 최근 latency/p95/timeout/429/5xx/fallback rate 기반 provider health score 조회
 
 ---
 

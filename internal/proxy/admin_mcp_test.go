@@ -106,6 +106,60 @@ func TestMCPEndToEndAggregation(t *testing.T) {
 	if len(toolsPayload.Tools) == 0 {
 		t.Fatal("expected tool aggregates")
 	}
+	saveRisk := postJSON(t, proxy.URL+"/admin/mcp/tools", "", map[string]any{
+		"server_label": "github",
+		"tool_name":    "create_issue",
+		"risk_level":   "high",
+		"action":       "block",
+		"note":         "test block",
+	})
+	if saveRisk.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(saveRisk.Body)
+		t.Fatalf("tool risk save status %d: %s", saveRisk.StatusCode, body)
+	}
+	saveRisk.Body.Close()
+	riskResp, err := http.Get(proxy.URL + "/admin/mcp/tools?server=github&tool=create_issue&risk_level=high&action=block&configured=true")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer riskResp.Body.Close()
+	if riskResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(riskResp.Body)
+		t.Fatalf("tool risk filter status %d: %s", riskResp.StatusCode, body)
+	}
+	var riskPayload struct {
+		Tools    []store.MCPToolStat `json:"tools"`
+		ToolRisk []map[string]any    `json:"tool_risk"`
+		Count    int                 `json:"count"`
+		Filters  map[string]any      `json:"filters"`
+	}
+	if err := json.NewDecoder(riskResp.Body).Decode(&riskPayload); err != nil {
+		t.Fatal(err)
+	}
+	if riskPayload.Count != 1 || len(riskPayload.Tools) != 1 || len(riskPayload.ToolRisk) != 1 {
+		t.Fatalf("expected one filtered high-risk tool, got %+v", riskPayload)
+	}
+	if riskPayload.Filters["risk_level"] != "high" || riskPayload.Filters["action"] != "block" || riskPayload.Filters["configured"] != "true" {
+		t.Fatalf("expected risk filters to echo, got %+v", riskPayload.Filters)
+	}
+	if riskPayload.ToolRisk[0]["risk_level"] != "high" || riskPayload.ToolRisk[0]["action"] != "block" || riskPayload.ToolRisk[0]["configured"] != true {
+		t.Fatalf("expected configured high/block risk row, got %+v", riskPayload.ToolRisk[0])
+	}
+	riskMiss, err := http.Get(proxy.URL + "/admin/mcp/tools?server=github&tool=create_issue&risk_level=critical")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer riskMiss.Body.Close()
+	var missPayload struct {
+		Tools []store.MCPToolStat `json:"tools"`
+		Count int                 `json:"count"`
+	}
+	if err := json.NewDecoder(riskMiss.Body).Decode(&missPayload); err != nil {
+		t.Fatal(err)
+	}
+	if missPayload.Count != 0 || len(missPayload.Tools) != 0 {
+		t.Fatalf("expected critical risk filter miss, got %+v", missPayload)
+	}
 
 	// /admin/mcp/requests drill-down by tool (errors only)
 	drillResp, err := http.Get(proxy.URL + "/admin/mcp/requests?server=github&tool=create_issue&errors=1")

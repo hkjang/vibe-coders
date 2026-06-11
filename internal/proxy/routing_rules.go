@@ -22,6 +22,7 @@ type routingDecision struct {
 	TargetModel    string
 	TargetProvider string
 	Desc           string // e.g. "low(0-34) → gpt-4.1-mini"
+	Reason         string
 }
 
 func (s *Server) routingRulesSnapshot(ctx context.Context) []store.RoutingRule {
@@ -69,6 +70,7 @@ func (s *Server) evaluateRoutingRules(ctx context.Context, model string, complex
 			TargetModel:    target,
 			TargetProvider: strings.TrimSpace(rule.TargetProvider),
 			Desc:           complexityTierName(complexity) + "(" + itoaProxy(rule.MinComplexity) + "-" + itoaProxy(rule.MaxComplexity) + ") " + model + " → " + target,
+			Reason:         "complexity_rule",
 		}
 	}
 	return routingDecision{}
@@ -76,12 +78,14 @@ func (s *Server) evaluateRoutingRules(ctx context.Context, model string, complex
 
 func complexityTierName(c int) string {
 	switch {
-	case c >= 70:
-		return "high"
-	case c >= 35:
-		return "medium"
+	case c >= 85:
+		return "reasoning"
+	case c >= 60:
+		return "complex"
+	case c >= 30:
+		return "standard"
 	default:
-		return "low"
+		return "simple"
 	}
 }
 

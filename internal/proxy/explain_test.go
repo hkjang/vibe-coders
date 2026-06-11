@@ -148,3 +148,94 @@ func TestExplain404ForUnknownRequest(t *testing.T) {
 		t.Fatalf("expected 404, got %d", resp.StatusCode)
 	}
 }
+
+func TestExplainAndDetailIncludeGovernanceEvents(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("upstream should not be called for blocked secret")
+	}))
+	defer upstream.Close()
+
+	db := openTestStore(t)
+	defer db.Close()
+	logger := store.NewAsyncLogger(db, 32, filepath.Join(t.TempDir(), "fallback.ndjson"))
+	logger.Start()
+	defer logger.Stop(context.Background())
+	server, err := NewServer(testConfig(upstream.URL, "secret"), db, logger, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxy := httptest.NewServer(server.Routes())
+	defer proxy.Close()
+
+	pol := postJSON(t, proxy.URL+"/admin/policies", "", map[string]any{
+		"name": "secret block",
+		"rules": []any{
+			map[string]any{"contains_secret": true, "block": true},
+		},
+	})
+	pol.Body.Close()
+	if pol.StatusCode != http.StatusCreated {
+		t.Fatalf("policy status %d", pol.StatusCode)
+	}
+
+	blocked := postJSON(t, proxy.URL+"/v1/chat/completions", "", map[string]any{
+		"model": "gpt-4.1",
+		"messages": []any{
+			map[string]any{"role": "user", "content": "use api_key=sk-1234567890abcdefghijklmnopqrstuv"},
+		},
+	})
+	blocked.Body.Close()
+	if blocked.StatusCode != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d", blocked.StatusCode)
+	}
+
+	waitFor(t, 2*time.Second, func() bool {
+		recent, _ := db.RecentRequests(context.Background(), store.RequestFilter{Limit: 1})
+		return len(recent) == 1 && recent[0].StatusCode == http.StatusForbidden
+	})
+	recent, _ := db.RecentRequests(context.Background(), store.RequestFilter{Limit: 1})
+	id := recent[0].ID
+
+	detailResp, err := http.Get(proxy.URL + "/admin/requests/" + id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer detailResp.Body.Close()
+	var detail store.RequestDetail
+	if err := json.NewDecoder(detailResp.Body).Decode(&detail); err != nil {
+		t.Fatal(err)
+	}
+	if len(detail.Governance.SecretEvents) == 0 {
+		t.Fatalf("expected secret events in request detail, got %+v", detail.Governance)
+	}
+	if len(detail.Governance.PolicyDecisions) == 0 || detail.Governance.PolicyDecisions[0].Decision != "block" {
+		t.Fatalf("expected policy decisions in request detail, got %+v", detail.Governance)
+	}
+
+	explainResp, err := http.Get(proxy.URL + "/admin/requests/" + id + "/explain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer explainResp.Body.Close()
+	var explain struct {
+		Safety     map[string]any `json:"safety"`
+		Governance struct {
+			SecretEventCount    float64                     `json:"secret_event_count"`
+			SecretEvents        []store.SecretEvent         `json:"secret_events"`
+			PolicyDecisionCount float64                     `json:"policy_decision_count"`
+			PolicyDecisions     []store.PolicyDecisionEvent `json:"policy_decisions"`
+		} `json:"governance"`
+	}
+	if err := json.NewDecoder(explainResp.Body).Decode(&explain); err != nil {
+		t.Fatal(err)
+	}
+	if explain.Safety["blocked"] != true {
+		t.Fatalf("expected safety blocked, got %+v", explain.Safety)
+	}
+	if explain.Governance.SecretEventCount == 0 || len(explain.Governance.SecretEvents) == 0 {
+		t.Fatalf("expected governance secret events, got %+v", explain.Governance)
+	}
+	if explain.Governance.PolicyDecisionCount == 0 || len(explain.Governance.PolicyDecisions) == 0 {
+		t.Fatalf("expected governance policy decisions, got %+v", explain.Governance)
+	}
+}

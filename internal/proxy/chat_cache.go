@@ -102,6 +102,11 @@ func (s *Server) serveChatFromCache(ctx context.Context, w http.ResponseWriter, 
 	meta.Request.StatusCode = http.StatusOK
 	meta.Request.LatencyMS = 0
 	meta.Request.RouteReason = "cache"
+	if meta.Routing != nil {
+		meta.Routing.SelectedProvider = "cache"
+		meta.Routing.HealthScore = 100
+		meta.Routing.DecisionReason = strings.TrimSpace(meta.Routing.DecisionReason + "; cache hit served without upstream call")
+	}
 	meta.Response = &store.ResponseLog{
 		ID:           newID("resp"),
 		RequestID:    meta.Request.ID,

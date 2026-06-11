@@ -256,39 +256,6 @@ func looksLikeToolError(content string) bool {
 	return false
 }
 
-// complexityScore is a 0-100 proxy for request complexity used by the Explainability
-// View to justify routing/tier decisions. It blends prompt size (token estimate),
-// conversation depth (message count) and tool surface (declared/called tools). It is a
-// heuristic, not a model-derived score, and is documented as such in the UI.
-func complexityScore(prompts []store.PromptLog, toolCount int) int {
-	tokens := 0
-	messages := 0
-	for _, p := range prompts {
-		text := p.RedactedText
-		if text == "" {
-			text = p.ContentText
-		}
-		tokens += audit.EstimateTokens(text)
-		messages++
-	}
-	norm := func(x, cap float64) float64 {
-		if cap <= 0 {
-			return 0
-		}
-		if x > cap {
-			return 1
-		}
-		return x / cap
-	}
-	score := 100 * (0.55*norm(float64(tokens), 8000) +
-		0.25*norm(float64(messages), 20) +
-		0.20*norm(float64(toolCount), 10))
-	if score > 100 {
-		score = 100
-	}
-	return int(score + 0.5)
-}
-
 // taskTypeKeywords maps a coding task class to its trigger keywords (Korean + English).
 // First class whose keyword is found (in declaration order) wins; order encodes priority
 // so that more specific intents (debug/test) beat generic ones (generate/explain).

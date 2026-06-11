@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -85,6 +86,83 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 			owner TEXT,
 			team TEXT,
 			status TEXT NOT NULL,
+			created_at TEXT NOT NULL
+		)`,
+		`ALTER TABLE api_keys ADD COLUMN user_id TEXT`,
+		`ALTER TABLE api_keys ADD COLUMN service_account_id TEXT`,
+		`ALTER TABLE api_keys ADD COLUMN role TEXT`,
+		`ALTER TABLE api_keys ADD COLUMN scopes TEXT`,
+		`ALTER TABLE api_keys ADD COLUMN allowed_ips TEXT`,
+		`ALTER TABLE api_keys ADD COLUMN allowed_models TEXT`,
+		`ALTER TABLE api_keys ADD COLUMN denied_models TEXT`,
+		`ALTER TABLE api_keys ADD COLUMN allowed_providers TEXT`,
+		`ALTER TABLE api_keys ADD COLUMN denied_providers TEXT`,
+		`ALTER TABLE api_keys ADD COLUMN budget_limit_krw REAL NOT NULL DEFAULT 0`,
+		`ALTER TABLE api_keys ADD COLUMN expires_at TEXT`,
+		`ALTER TABLE api_keys ADD COLUMN revoked_at TEXT`,
+		`CREATE TABLE IF NOT EXISTS users (
+			id TEXT PRIMARY KEY,
+			email TEXT NOT NULL UNIQUE,
+			password_hash TEXT NOT NULL,
+			name TEXT,
+			role TEXT NOT NULL,
+			status TEXT NOT NULL,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS teams (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL UNIQUE,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS user_team_memberships (
+			user_id TEXT NOT NULL,
+			team_id TEXT NOT NULL,
+			role TEXT NOT NULL,
+			created_at TEXT NOT NULL,
+			PRIMARY KEY (user_id, team_id)
+		)`,
+		`CREATE TABLE IF NOT EXISTS refresh_tokens (
+			id TEXT PRIMARY KEY,
+			user_id TEXT NOT NULL,
+			session_id TEXT NOT NULL,
+			token_hash TEXT NOT NULL UNIQUE,
+			revoked_at TEXT,
+			expires_at TEXT NOT NULL,
+			created_at TEXT NOT NULL,
+			rotated_from TEXT
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_refresh_tokens_hash ON refresh_tokens(token_hash)`,
+		`CREATE TABLE IF NOT EXISTS auth_sessions (
+			id TEXT PRIMARY KEY,
+			user_id TEXT NOT NULL,
+			ip TEXT,
+			user_agent TEXT,
+			revoked_at TEXT,
+			expires_at TEXT NOT NULL,
+			created_at TEXT NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS audit_events (
+			id TEXT PRIMARY KEY,
+			event_type TEXT NOT NULL,
+			actor_user_id TEXT,
+			api_key_id TEXT,
+			team_id TEXT,
+			ip TEXT,
+			user_agent TEXT,
+			detail TEXT,
+			created_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_audit_events_created_at ON audit_events(created_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_audit_events_type ON audit_events(event_type)`,
+		`CREATE TABLE IF NOT EXISTS login_attempts (
+			id TEXT PRIMARY KEY,
+			email TEXT NOT NULL,
+			success INTEGER NOT NULL,
+			ip TEXT,
+			user_agent TEXT,
+			reason TEXT,
 			created_at TEXT NOT NULL
 		)`,
 		`CREATE TABLE IF NOT EXISTS request_logs (
@@ -243,6 +321,150 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 			created_at TEXT NOT NULL,
 			updated_at TEXT NOT NULL
 		)`,
+		`CREATE TABLE IF NOT EXISTS policies (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			description TEXT,
+			enabled INTEGER NOT NULL DEFAULT 1,
+			priority INTEGER NOT NULL DEFAULT 100,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS policy_rules (
+			id TEXT PRIMARY KEY,
+			policy_id TEXT NOT NULL,
+			name TEXT,
+			enabled INTEGER NOT NULL DEFAULT 1,
+			priority INTEGER NOT NULL DEFAULT 100,
+			conditions_json TEXT NOT NULL,
+			actions_json TEXT NOT NULL,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_policy_rules_policy ON policy_rules(policy_id)`,
+		`CREATE TABLE IF NOT EXISTS policy_decision_events (
+			id TEXT PRIMARY KEY,
+			request_id TEXT,
+			api_key_id TEXT,
+			user_id TEXT,
+			team_id TEXT,
+			endpoint TEXT,
+			phase TEXT,
+			policy_id TEXT,
+			rule_id TEXT,
+			rule_name TEXT,
+			decision TEXT NOT NULL,
+			reason TEXT,
+			model TEXT,
+			provider TEXT,
+			risk_score INTEGER NOT NULL DEFAULT 0,
+			complexity_score INTEGER NOT NULL DEFAULT 0,
+			cost_krw REAL NOT NULL DEFAULT 0,
+			created_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_policy_decision_events_request ON policy_decision_events(request_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_policy_decision_events_created_at ON policy_decision_events(created_at)`,
+		`CREATE TABLE IF NOT EXISTS approvals (
+			id TEXT PRIMARY KEY,
+			request_id TEXT,
+			api_key_id TEXT,
+			user_id TEXT,
+			team_id TEXT,
+			subject_type TEXT,
+			subject_id TEXT,
+			status TEXT NOT NULL,
+			reason TEXT,
+			risk_score INTEGER NOT NULL DEFAULT 0,
+			cost_krw REAL NOT NULL DEFAULT 0,
+			payload TEXT,
+			expires_at TEXT,
+			decided_by TEXT,
+			decided_at TEXT,
+			created_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_approvals_status ON approvals(status)`,
+		`CREATE INDEX IF NOT EXISTS idx_approvals_request ON approvals(request_id)`,
+		`CREATE TABLE IF NOT EXISTS secret_events (
+			id TEXT PRIMARY KEY,
+			request_id TEXT,
+			api_key_id TEXT,
+			user_id TEXT,
+			team_id TEXT,
+			secret_type TEXT NOT NULL,
+			action TEXT NOT NULL,
+			location TEXT,
+			matched_hash TEXT,
+			created_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_secret_events_created_at ON secret_events(created_at)`,
+		`CREATE TABLE IF NOT EXISTS tool_risk_profiles (
+			id TEXT PRIMARY KEY,
+			server_label TEXT NOT NULL,
+			tool_name TEXT NOT NULL,
+			risk_level TEXT NOT NULL,
+			action TEXT NOT NULL,
+			note TEXT,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			UNIQUE(server_label, tool_name)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_tool_risk_profiles_tool ON tool_risk_profiles(server_label, tool_name)`,
+		`CREATE TABLE IF NOT EXISTS replay_jobs (
+			id TEXT PRIMARY KEY,
+			source_request_id TEXT,
+			prompt TEXT NOT NULL,
+			models TEXT NOT NULL,
+			status TEXT NOT NULL,
+			results TEXT,
+			created_by TEXT,
+			created_at TEXT NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS golden_prompts (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			prompt TEXT NOT NULL,
+			expected TEXT,
+			tags TEXT,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS golden_prompt_results (
+			id TEXT PRIMARY KEY,
+			prompt_id TEXT NOT NULL,
+			model TEXT NOT NULL,
+			score REAL NOT NULL DEFAULT 0,
+			passed INTEGER NOT NULL DEFAULT 0,
+			cost_krw REAL NOT NULL DEFAULT 0,
+			latency_ms INTEGER NOT NULL DEFAULT 0,
+			response TEXT,
+			created_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_golden_prompt_results_prompt ON golden_prompt_results(prompt_id)`,
+		`CREATE TABLE IF NOT EXISTS anomaly_events (
+			id TEXT PRIMARY KEY,
+			scope TEXT NOT NULL,
+			scope_value TEXT,
+			metric TEXT NOT NULL,
+			value REAL NOT NULL,
+			baseline REAL NOT NULL DEFAULT 0,
+			severity TEXT NOT NULL,
+			channel TEXT,
+			status TEXT NOT NULL,
+			created_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_anomaly_events_created_at ON anomaly_events(created_at)`,
+		`CREATE TABLE IF NOT EXISTS context_registry (
+			id TEXT PRIMARY KEY,
+			key TEXT NOT NULL UNIQUE,
+			name TEXT NOT NULL,
+			content TEXT NOT NULL,
+			enabled INTEGER NOT NULL DEFAULT 1,
+			token_estimate INTEGER NOT NULL DEFAULT 0,
+			use_count INTEGER NOT NULL DEFAULT 0,
+			last_used_at TEXT,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)`,
 		`CREATE TABLE IF NOT EXISTS budgets (
 			id TEXT PRIMARY KEY,
 			scope TEXT NOT NULL,
@@ -299,6 +521,34 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 			note TEXT,
 			created_at TEXT NOT NULL
 		)`,
+		`CREATE TABLE IF NOT EXISTS routing_decisions (
+			id TEXT PRIMARY KEY,
+			request_id TEXT NOT NULL,
+			trace_id TEXT NOT NULL,
+			requested_model TEXT,
+			selected_model TEXT,
+			selected_provider TEXT,
+			complexity_score INTEGER NOT NULL DEFAULT 0,
+			complexity_tier TEXT,
+			prompt_length INTEGER NOT NULL DEFAULT 0,
+			token_estimate INTEGER NOT NULL DEFAULT 0,
+			code_density REAL NOT NULL DEFAULT 0,
+			file_count INTEGER NOT NULL DEFAULT 0,
+			conversation_depth INTEGER NOT NULL DEFAULT 0,
+			instruction_density REAL NOT NULL DEFAULT 0,
+			reasoning_keywords INTEGER NOT NULL DEFAULT 0,
+			refactoring_keywords INTEGER NOT NULL DEFAULT 0,
+			debugging_keywords INTEGER NOT NULL DEFAULT 0,
+			risk_score INTEGER NOT NULL DEFAULT 0,
+			risk_tier TEXT,
+			risk_categories TEXT,
+			health_score INTEGER NOT NULL DEFAULT 0,
+			fallback_path TEXT,
+			decision_reason TEXT,
+			created_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_routing_decisions_created_at ON routing_decisions(created_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_routing_decisions_request_id ON routing_decisions(request_id)`,
 		`CREATE TABLE IF NOT EXISTS mcp_tool_catalog (
 			server_label TEXT NOT NULL,
 			tool_name TEXT NOT NULL,
@@ -442,7 +692,11 @@ func isAlreadyExistsErr(err error) bool {
 }
 
 func (s *SQLStore) ListAPIKeys(ctx context.Context) ([]APIKeyPublic, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, name, COALESCE(owner, ''), COALESCE(team, ''), status, created_at
+	rows, err := s.db.QueryContext(ctx, `SELECT id, name, COALESCE(owner, ''), COALESCE(team, ''),
+		COALESCE(user_id, ''), COALESCE(service_account_id, ''), COALESCE(role, ''), status,
+		COALESCE(scopes, '[]'), COALESCE(allowed_ips, '[]'), COALESCE(allowed_models, '[]'), COALESCE(denied_models, '[]'),
+		COALESCE(allowed_providers, '[]'), COALESCE(denied_providers, '[]'), COALESCE(budget_limit_krw, 0),
+		COALESCE(expires_at, ''), COALESCE(revoked_at, ''), created_at
 		FROM api_keys
 		ORDER BY created_at DESC`)
 	if err != nil {
@@ -453,9 +707,18 @@ func (s *SQLStore) ListAPIKeys(ctx context.Context) ([]APIKeyPublic, error) {
 	var result []APIKeyPublic
 	for rows.Next() {
 		var key APIKeyPublic
-		if err := rows.Scan(&key.ID, &key.Name, &key.Owner, &key.Team, &key.Status, &key.CreatedAt); err != nil {
+		var scopes, allowedIPs, allowedModels, deniedModels, allowedProviders, deniedProviders string
+		if err := rows.Scan(&key.ID, &key.Name, &key.Owner, &key.Team, &key.UserID, &key.ServiceAccountID, &key.Role, &key.Status,
+			&scopes, &allowedIPs, &allowedModels, &deniedModels, &allowedProviders, &deniedProviders, &key.BudgetLimitKRW,
+			&key.ExpiresAt, &key.RevokedAt, &key.CreatedAt); err != nil {
 			return nil, err
 		}
+		key.Scopes = decodeStringList(scopes)
+		key.AllowedIPs = decodeStringList(allowedIPs)
+		key.AllowedModels = decodeStringList(allowedModels)
+		key.DeniedModels = decodeStringList(deniedModels)
+		key.AllowedProviders = decodeStringList(allowedProviders)
+		key.DeniedProviders = decodeStringList(deniedProviders)
 		result = append(result, key)
 	}
 	if result == nil {
@@ -471,15 +734,32 @@ func (s *SQLStore) UpsertAPIKey(ctx context.Context, key APIKeyRecord) error {
 	if key.Status == "" {
 		key.Status = "active"
 	}
-	query := s.bind(`INSERT INTO api_keys (id, name, key_hash, owner, team, status, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
+	query := s.bind(`INSERT INTO api_keys (id, name, key_hash, owner, team, user_id, service_account_id, role, status,
+			scopes, allowed_ips, allowed_models, denied_models, allowed_providers, denied_providers, budget_limit_krw,
+			expires_at, revoked_at, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			name = excluded.name,
 			key_hash = excluded.key_hash,
 			owner = excluded.owner,
 			team = excluded.team,
-			status = excluded.status`)
-	_, err := s.db.ExecContext(ctx, query, key.ID, key.Name, key.KeyHash, key.Owner, key.Team, key.Status, formatTime(key.CreatedAt))
+			user_id = excluded.user_id,
+			service_account_id = excluded.service_account_id,
+			role = excluded.role,
+			status = excluded.status,
+			scopes = excluded.scopes,
+			allowed_ips = excluded.allowed_ips,
+			allowed_models = excluded.allowed_models,
+			denied_models = excluded.denied_models,
+			allowed_providers = excluded.allowed_providers,
+			denied_providers = excluded.denied_providers,
+			budget_limit_krw = excluded.budget_limit_krw,
+			expires_at = excluded.expires_at,
+			revoked_at = excluded.revoked_at`)
+	_, err := s.db.ExecContext(ctx, query, key.ID, key.Name, key.KeyHash, key.Owner, key.Team, key.UserID, key.ServiceAccountID, key.Role, key.Status,
+		encodeStringList(key.Scopes), encodeStringList(key.AllowedIPs), encodeStringList(key.AllowedModels), encodeStringList(key.DeniedModels),
+		encodeStringList(key.AllowedProviders), encodeStringList(key.DeniedProviders), key.BudgetLimitKRW,
+		formatOptionalTime(key.ExpiresAt), formatOptionalTime(key.RevokedAt), formatTime(key.CreatedAt))
 	return err
 }
 
@@ -494,19 +774,31 @@ func (s *SQLStore) EnsureExternalAPIKey(ctx context.Context, key APIKeyRecord) e
 	if key.Status == "" {
 		key.Status = "external"
 	}
-	query := s.bind(`INSERT INTO api_keys (id, name, key_hash, owner, team, status, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
+	query := s.bind(`INSERT INTO api_keys (id, name, key_hash, owner, team, user_id, service_account_id, role, status,
+			scopes, allowed_ips, allowed_models, denied_models, allowed_providers, denied_providers, budget_limit_krw,
+			expires_at, revoked_at, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO NOTHING`)
-	_, err := s.db.ExecContext(ctx, query, key.ID, key.Name, key.KeyHash, key.Owner, key.Team, key.Status, formatTime(key.CreatedAt))
+	_, err := s.db.ExecContext(ctx, query, key.ID, key.Name, key.KeyHash, key.Owner, key.Team, key.UserID, key.ServiceAccountID, key.Role, key.Status,
+		encodeStringList(key.Scopes), encodeStringList(key.AllowedIPs), encodeStringList(key.AllowedModels), encodeStringList(key.DeniedModels),
+		encodeStringList(key.AllowedProviders), encodeStringList(key.DeniedProviders), key.BudgetLimitKRW,
+		formatOptionalTime(key.ExpiresAt), formatOptionalTime(key.RevokedAt), formatTime(key.CreatedAt))
 	return err
 }
 
 func (s *SQLStore) FindActiveAPIKeyByHash(ctx context.Context, keyHash string) (APIKeyRecord, bool, error) {
 	var key APIKeyRecord
-	var createdAt string
-	err := s.db.QueryRowContext(ctx, s.bind(`SELECT id, name, key_hash, COALESCE(owner, ''), COALESCE(team, ''), status, created_at
+	var scopes, allowedIPs, allowedModels, deniedModels, allowedProviders, deniedProviders string
+	var createdAt, expiresAt, revokedAt string
+	err := s.db.QueryRowContext(ctx, s.bind(`SELECT id, name, key_hash, COALESCE(owner, ''), COALESCE(team, ''),
+			COALESCE(user_id, ''), COALESCE(service_account_id, ''), COALESCE(role, ''), status,
+			COALESCE(scopes, '[]'), COALESCE(allowed_ips, '[]'), COALESCE(allowed_models, '[]'), COALESCE(denied_models, '[]'),
+			COALESCE(allowed_providers, '[]'), COALESCE(denied_providers, '[]'), COALESCE(budget_limit_krw, 0),
+			COALESCE(expires_at, ''), COALESCE(revoked_at, ''), created_at
 		FROM api_keys
-		WHERE key_hash = ? AND status = 'active'`), keyHash).Scan(&key.ID, &key.Name, &key.KeyHash, &key.Owner, &key.Team, &key.Status, &createdAt)
+		WHERE key_hash = ? AND status = 'active'`), keyHash).Scan(&key.ID, &key.Name, &key.KeyHash, &key.Owner, &key.Team,
+		&key.UserID, &key.ServiceAccountID, &key.Role, &key.Status, &scopes, &allowedIPs, &allowedModels, &deniedModels,
+		&allowedProviders, &deniedProviders, &key.BudgetLimitKRW, &expiresAt, &revokedAt, &createdAt)
 	if err == sql.ErrNoRows {
 		return APIKeyRecord{}, false, nil
 	}
@@ -516,6 +808,14 @@ func (s *SQLStore) FindActiveAPIKeyByHash(ctx context.Context, keyHash string) (
 	if parsed, err := time.Parse(time.RFC3339Nano, createdAt); err == nil {
 		key.CreatedAt = parsed
 	}
+	key.Scopes = decodeStringList(scopes)
+	key.AllowedIPs = decodeStringList(allowedIPs)
+	key.AllowedModels = decodeStringList(allowedModels)
+	key.DeniedModels = decodeStringList(deniedModels)
+	key.AllowedProviders = decodeStringList(allowedProviders)
+	key.DeniedProviders = decodeStringList(deniedProviders)
+	key.ExpiresAt = parseOptionalTime(expiresAt)
+	key.RevokedAt = parseOptionalTime(revokedAt)
 	return key, true, nil
 }
 
@@ -523,9 +823,16 @@ func (s *SQLStore) FindActiveAPIKeyByHash(ctx context.Context, keyHash string) (
 // partial metadata/status updates without losing the stored key_hash.
 func (s *SQLStore) GetAPIKey(ctx context.Context, id string) (APIKeyRecord, bool, error) {
 	var key APIKeyRecord
-	var createdAt string
-	err := s.db.QueryRowContext(ctx, s.bind(`SELECT id, name, key_hash, COALESCE(owner, ''), COALESCE(team, ''), status, created_at
-		FROM api_keys WHERE id = ?`), id).Scan(&key.ID, &key.Name, &key.KeyHash, &key.Owner, &key.Team, &key.Status, &createdAt)
+	var scopes, allowedIPs, allowedModels, deniedModels, allowedProviders, deniedProviders string
+	var createdAt, expiresAt, revokedAt string
+	err := s.db.QueryRowContext(ctx, s.bind(`SELECT id, name, key_hash, COALESCE(owner, ''), COALESCE(team, ''),
+			COALESCE(user_id, ''), COALESCE(service_account_id, ''), COALESCE(role, ''), status,
+			COALESCE(scopes, '[]'), COALESCE(allowed_ips, '[]'), COALESCE(allowed_models, '[]'), COALESCE(denied_models, '[]'),
+			COALESCE(allowed_providers, '[]'), COALESCE(denied_providers, '[]'), COALESCE(budget_limit_krw, 0),
+			COALESCE(expires_at, ''), COALESCE(revoked_at, ''), created_at
+		FROM api_keys WHERE id = ?`), id).Scan(&key.ID, &key.Name, &key.KeyHash, &key.Owner, &key.Team,
+		&key.UserID, &key.ServiceAccountID, &key.Role, &key.Status, &scopes, &allowedIPs, &allowedModels, &deniedModels,
+		&allowedProviders, &deniedProviders, &key.BudgetLimitKRW, &expiresAt, &revokedAt, &createdAt)
 	if err == sql.ErrNoRows {
 		return APIKeyRecord{}, false, nil
 	}
@@ -535,6 +842,14 @@ func (s *SQLStore) GetAPIKey(ctx context.Context, id string) (APIKeyRecord, bool
 	if parsed, perr := time.Parse(time.RFC3339Nano, createdAt); perr == nil {
 		key.CreatedAt = parsed
 	}
+	key.Scopes = decodeStringList(scopes)
+	key.AllowedIPs = decodeStringList(allowedIPs)
+	key.AllowedModels = decodeStringList(allowedModels)
+	key.DeniedModels = decodeStringList(deniedModels)
+	key.AllowedProviders = decodeStringList(allowedProviders)
+	key.DeniedProviders = decodeStringList(deniedProviders)
+	key.ExpiresAt = parseOptionalTime(expiresAt)
+	key.RevokedAt = parseOptionalTime(revokedAt)
 	return key, true, nil
 }
 
@@ -806,6 +1121,39 @@ func (s *SQLStore) InsertLogRecord(ctx context.Context, record LogRecord) error 
 			if err != nil {
 				return err
 			}
+		}
+	}
+
+	if record.Routing != nil {
+		routing := *record.Routing
+		if routing.ID == "" {
+			routing.ID = "route_" + req.ID
+		}
+		if routing.RequestID == "" {
+			routing.RequestID = req.ID
+		}
+		if routing.TraceID == "" {
+			routing.TraceID = req.TraceID
+		}
+		if routing.CreatedAt.IsZero() {
+			routing.CreatedAt = req.CreatedAt
+		}
+		riskCategories, _ := json.Marshal(routing.Risk.Categories)
+		fallbackPath, _ := json.Marshal(routing.FallbackPath)
+		_, err = tx.ExecContext(ctx, s.bind(`INSERT INTO routing_decisions
+			(id, request_id, trace_id, requested_model, selected_model, selected_provider,
+			 complexity_score, complexity_tier, prompt_length, token_estimate, code_density,
+			 file_count, conversation_depth, instruction_density, reasoning_keywords,
+			 refactoring_keywords, debugging_keywords, risk_score, risk_tier, risk_categories,
+			 health_score, fallback_path, decision_reason, created_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+			routing.ID, routing.RequestID, routing.TraceID, routing.RequestedModel, routing.SelectedModel, routing.SelectedProvider,
+			routing.Complexity.Score, routing.Complexity.Tier, routing.Complexity.PromptLength, routing.Complexity.TokenEstimate, routing.Complexity.CodeDensity,
+			routing.Complexity.FileCount, routing.Complexity.ConversationDepth, routing.Complexity.InstructionDensity, routing.Complexity.ReasoningKeywords,
+			routing.Complexity.RefactoringKeywords, routing.Complexity.DebuggingKeywords, routing.Risk.Score, routing.Risk.Tier, string(riskCategories),
+			routing.HealthScore, string(fallbackPath), routing.DecisionReason, formatTime(routing.CreatedAt))
+		if err != nil {
+			return err
 		}
 	}
 

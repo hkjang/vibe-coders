@@ -10,7 +10,11 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
+	"golang.org/x/crypto/bcrypt"
+
+	"vibe-coders/internal/audit"
 	"vibe-coders/internal/store"
 )
 
@@ -19,12 +23,69 @@ func (s *Server) handleUsers(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
 	}
-	users, err := s.db.ListUsers(r.Context())
-	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "users_failed")
-		return
+	switch r.Method {
+	case http.MethodGet:
+		users, err := s.db.ListUsers(r.Context())
+		if err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "users_failed")
+			return
+		}
+		authUsers, _ := s.db.ListAuthUsers(r.Context())
+		writeJSON(w, http.StatusOK, map[string]any{"users": users, "auth_users": authUsers})
+	case http.MethodPost:
+		var p struct {
+			Email    string `json:"email"`
+			Password string `json:"password"`
+			Name     string `json:"name"`
+			Role     string `json:"role"`
+			TeamID   string `json:"team_id"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+			writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "invalid_body")
+			return
+		}
+		email := strings.ToLower(strings.TrimSpace(p.Email))
+		if email == "" || p.Password == "" {
+			writeOpenAIError(w, http.StatusBadRequest, "email and password are required", "invalid_request_error", "missing_user_fields")
+			return
+		}
+		role := strings.TrimSpace(p.Role)
+		if role == "" {
+			role = "developer"
+		}
+		if claims, ok := s.currentAccessClaims(r); ok && claims.Role == "team_admin" {
+			if strings.TrimSpace(p.TeamID) == "" || strings.TrimSpace(p.TeamID) != claims.TeamID {
+				writeOpenAIError(w, http.StatusForbidden, "team_admin can only manage own team", "permission_error", "team_scope_denied")
+				return
+			}
+		}
+		hash, err := bcrypt.GenerateFromPassword([]byte(p.Password), bcrypt.DefaultCost)
+		if err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "password_hash_failed")
+			return
+		}
+		user := store.AuthUser{
+			ID:           "usr_" + audit.HashText(email)[:16],
+			Email:        email,
+			PasswordHash: string(hash),
+			Name:         strings.TrimSpace(p.Name),
+			Role:         role,
+			Status:       "active",
+		}
+		if err := s.db.CreateAuthUser(r.Context(), user); err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "user_create_failed")
+			return
+		}
+		if teamID := strings.TrimSpace(p.TeamID); teamID != "" {
+			_ = s.db.UpsertMembership(r.Context(), store.UserTeamMembership{UserID: user.ID, TeamID: teamID, Role: role, CreatedAt: time.Now().UTC()})
+		}
+		if role != "" {
+			_ = s.db.InsertAuditEvent(r.Context(), store.AuthEvent{ID: newID("ae"), EventType: "role_changed", ActorUserID: user.ID, IP: clientIP(r), UserAgent: r.UserAgent(), Detail: role, CreatedAt: time.Now().UTC()})
+		}
+		writeJSON(w, http.StatusCreated, map[string]any{"user": user})
+	default:
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"users": users})
 }
 
 func (s *Server) handleTeams(w http.ResponseWriter, r *http.Request) {
@@ -32,12 +93,46 @@ func (s *Server) handleTeams(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
 	}
-	teams, err := s.db.ListTeams(r.Context())
-	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "teams_failed")
-		return
+	switch r.Method {
+	case http.MethodGet:
+		teams, err := s.db.ListTeams(r.Context())
+		if err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "teams_failed")
+			return
+		}
+		authTeams, _ := s.db.ListAuthTeams(r.Context())
+		writeJSON(w, http.StatusOK, map[string]any{"teams": teams, "auth_teams": authTeams})
+	case http.MethodPost:
+		var p struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+			writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "invalid_body")
+			return
+		}
+		name := strings.TrimSpace(p.Name)
+		if name == "" {
+			writeOpenAIError(w, http.StatusBadRequest, "name is required", "invalid_request_error", "missing_name")
+			return
+		}
+		id := strings.TrimSpace(p.ID)
+		if id == "" {
+			id = "team_" + audit.HashText(name)[:16]
+		}
+		if claims, ok := s.currentAccessClaims(r); ok && claims.Role == "team_admin" && id != claims.TeamID {
+			writeOpenAIError(w, http.StatusForbidden, "team_admin can only manage own team", "permission_error", "team_scope_denied")
+			return
+		}
+		team := store.AuthTeam{ID: id, Name: name}
+		if err := s.db.UpsertAuthTeam(r.Context(), team); err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "team_create_failed")
+			return
+		}
+		writeJSON(w, http.StatusCreated, map[string]any{"team": team})
+	default:
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"teams": teams})
 }
 
 func (s *Server) handleTeamDetail(w http.ResponseWriter, r *http.Request) {

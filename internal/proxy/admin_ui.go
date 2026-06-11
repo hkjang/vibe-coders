@@ -575,13 +575,16 @@ const adminHTML = `<!doctype html>
     function xviewCategory(p) {
       // priority: error > kill/blocked > cache > failover > high-cost > normal
       if (p.status_code >= 400) return 'error';
+      if (p.policy_decision_count || p.approval_count || p.secret_event_count) return 'governance';
       if (p.provider === 'cache') return 'cache';
       if (p.failover) return 'failover';
+      if ((p.risk_score || 0) >= 60) return 'complex';
       if ((p.total_tokens || 0) >= xviewState.complexityTokens) return 'complex';
       return 'normal';
     }
     const xviewColors = {
       error:   { c: '#ef4444', label: '오류' },
+      governance: { c: '#f97316', label: '거버넌스' },
       cache:   { c: '#22c55e', label: '캐시 히트' },
       failover:{ c: '#eab308', label: '폴백' },
       complex: { c: '#a855f7', label: '고비용/복잡' },
@@ -709,9 +712,15 @@ const adminHTML = `<!doctype html>
         const t = Date.parse(p.created_at);
         if (isNaN(t)) return '';
         const cx = xPos(t).toFixed(1), cy = yPos(p[yField] || 0).toFixed(1);
+        const gov = (p.policy_decision_count || p.approval_count || p.secret_event_count)
+          ? ' · policy ' + fmt(p.policy_decision_count || 0) + (p.policy_decision ? '(' + p.policy_decision + ')' : '') +
+            ' · approval ' + fmt(p.approval_count || 0) + (p.approval_status ? '(' + p.approval_status + ')' : '') +
+            ' · secret ' + fmt(p.secret_event_count || 0) + (p.secret_action ? '(' + p.secret_action + ')' : '')
+          : '';
         const tip = (p.model || '?') + ' · ' + (p.provider || '?') + ' · ' + msLabel(p[yField] || 0) +
-          ' · ' + fmt(p.total_tokens) + 'tok · ' + money(p.cost_krw) + ' · ' + (p.status_code) +
-          ' · ' + new Date(t).toLocaleTimeString('ko-KR');
+          ' · complexity ' + fmt(p.complexity || 0) + ' · risk ' + fmt(p.risk_score || 0) +
+          ' · health ' + fmt(p.health_score || 0) + ' · ' + fmt(p.total_tokens) + 'tok · ' + money(p.cost_krw) + ' · ' + (p.status_code) +
+          gov + ' · ' + new Date(t).toLocaleTimeString('ko-KR');
         return '<circle class="xv-dot" data-rid="' + escapeHTML(p.request_id) + '" cx="' + cx + '" cy="' + cy + '" r="3.2" fill="' + col + '" fill-opacity="0.72" stroke="' + col + '" stroke-opacity="0.9"><title>' + escapeHTML(tip) + '</title></circle>';
       }).join('');
 
@@ -724,7 +733,7 @@ const adminHTML = `<!doctype html>
         '</svg>';
 
       // legend with live counts
-      const counts = { error: 0, cache: 0, failover: 0, complex: 0, normal: 0 };
+      const counts = { error: 0, governance: 0, cache: 0, failover: 0, complex: 0, normal: 0 };
       points.forEach(p => counts[xviewCategory(p)]++);
       document.getElementById('xv-legend').innerHTML =
         '<div style="display:flex; gap:16px; flex-wrap:wrap; align-items:center">' +
@@ -1122,8 +1131,8 @@ const adminHTML = `<!doctype html>
         '<div style="padding:14px">' + bodyHTML + '</div></section>';
     }
     function explainHTML(x) {
-      const rt = x.routing || {}, fb = x.fallback || {}, ca = x.cache || {}, sf = x.safety || {}, co = x.cost || {}, se = x.session || {};
-      const tierBadge = { high: 'error', medium: 'warn', low: '' }[rt.tier] || '';
+      const rt = x.routing || {}, fb = x.fallback || {}, ca = x.cache || {}, sf = x.safety || {}, gv = x.governance || {}, co = x.cost || {}, se = x.session || {};
+      const tierBadge = { reasoning: 'error', complex: 'warn', standard: '', simple: '' }[rt.tier] || '';
 
       const modelLine = rt.model_changed
         ? '<span class="status warn">' + escapeHTML(rt.requested_model || '') + '</span> → <strong>' + escapeHTML(rt.chosen_model || '') + '</strong> <span class="muted">(복잡도 규칙으로 변경)</span>'
@@ -1133,8 +1142,12 @@ const adminHTML = `<!doctype html>
         row('선택 모델', modelLine) +
         row('라우팅 근거', escapeHTML(rt.reason_text || rt.reason || '') + (rt.detail ? ' <span class="muted">(' + escapeHTML(rt.detail) + ')</span>' : '')) +
         row('복잡도 점수', '<span class="status ' + tierBadge + '">' + fmt(rt.complexity || 0) + ' / 100 · ' + escapeHTML(rt.tier || '') + ' tier</span>' + progressBar((rt.complexity || 0) / 100)) +
+        row('위험도 점수', '<span class="status ' + ((rt.risk_score || 0) >= 60 ? 'warn' : '') + '">' + fmt(rt.risk_score || 0) + ' / 100 · ' + escapeHTML(rt.risk_tier || 'low') + '</span>' + ((rt.risk_categories || []).length ? ' <span class="muted">(' + escapeHTML((rt.risk_categories || []).join(', ')) + ')</span>' : '')) +
+        row('Provider health', '<span class="status">' + fmt(rt.health_score || 0) + ' / 100</span>') +
+        (rt.decision_reason ? row('Explain reason', escapeHTML(rt.decision_reason)) : '') +
+        ((rt.fallback_path || []).length ? row('Fallback chain', escapeHTML((rt.fallback_path || []).join(' → '))) : '') +
         row('endpoint', escapeHTML(rt.endpoint || '')) +
-      '</div><div class="muted" style="font-size:12px; margin-top:6px">복잡도는 프롬프트 토큰·대화 깊이·도구 수 기반 휴리스틱 추정치입니다.</div>';
+      '</div><div class="muted" style="font-size:12px; margin-top:6px">복잡도는 길이·토큰 추정·코드 밀도·파일 수·대화 깊이·지시/추론/리팩토링/디버깅 키워드 기반 휴리스틱 추정치입니다.</div>';
 
       const fallback = fb.occurred
         ? '<div class="kv">' +
@@ -1160,6 +1173,7 @@ const adminHTML = `<!doctype html>
         row('마스킹', escapeHTML(sf.masking || '')) +
         row('안전 위반', sf.finding_count > 0 ? (fmt(sf.finding_count) + '건' + findings) : '<span class="muted">없음</span>') +
       '</div>';
+      const governance = governanceHTML(gv);
 
       const cost = '<div class="kv">' +
         row('실제 비용', '<strong>' + money(co.actual_krw) + '</strong> <span class="muted">(' + escapeHTML(sourceLabel(co.token_source)) + ')</span>') +
@@ -1179,8 +1193,70 @@ const adminHTML = `<!doctype html>
         explainPanel('🔁 폴백', fallback, 'var(--warn)') +
         explainPanel('🟢 캐시', cache, '#22c55e') +
         explainPanel('🛡 안전', safety, 'var(--bad)') +
+        explainPanel('거버넌스', governance, 'var(--accent-2)') +
         explainPanel('💰 비용', cost, 'var(--accent-2)') +
         explainPanel('🧵 세션', session, 'var(--muted)');
+    }
+    function governanceStatusClass(value) {
+      const v = String(value || '').toLowerCase();
+      if (v === 'block' || v.startsWith('deny_') || v === 'rejected' || v === 'expired' || v === 'critical' || v === 'high') return 'error';
+      if (v === 'require_approval' || v === 'pending' || v === 'mask' || v === 'medium' || v === 'warn') return 'warn';
+      return '';
+    }
+    function governanceHTML(gv) {
+      gv = gv || {};
+      const policy = gv.policy_decisions || [];
+      const approvals = gv.approvals || [];
+      const secrets = gv.secret_events || [];
+      const anomalies = gv.anomaly_events || [];
+      const summary = '<div class="kv">' +
+        row('정책 판단', fmt(gv.policy_decision_count || policy.length || 0) + '건') +
+        row('승인', fmt(gv.approval_count || approvals.length || 0) + '건' + (gv.approval_status ? ' · <span class="status ' + governanceStatusClass(gv.approval_status) + '">' + escapeHTML(gv.approval_status) + '</span>' : '')) +
+        row('Secret Firewall', fmt(gv.secret_event_count || secrets.length || 0) + '건') +
+        row('이상 탐지', fmt(gv.anomaly_event_count || anomalies.length || 0) + '건') +
+      '</div>';
+      const policyTable = policy.length ? (
+        '<table style="margin-top:12px"><thead><tr><th>단계</th><th>판단</th><th>정책 / 룰</th><th>대상</th><th>점수</th><th>근거</th></tr></thead><tbody>' +
+        policy.map(e => '<tr>' +
+          '<td>' + escapeHTML(e.phase || '') + '</td>' +
+          '<td><span class="status ' + governanceStatusClass(e.decision) + '">' + escapeHTML(e.decision || '') + '</span></td>' +
+          '<td>' + escapeHTML(e.policy_id || '') + '<div class="muted">' + escapeHTML(e.rule_name || e.rule_id || '') + '</div></td>' +
+          '<td>' + escapeHTML(e.model || '') + '<div class="muted">' + escapeHTML(e.provider || e.endpoint || '') + '</div></td>' +
+          '<td>risk ' + fmt(e.risk_score || 0) + '<div class="muted">complexity ' + fmt(e.complexity_score || 0) + (e.cost_krw ? ' · ' + money(e.cost_krw) : '') + '</div></td>' +
+          '<td>' + escapeHTML(e.reason || '') + '</td>' +
+        '</tr>').join('') + '</tbody></table>'
+      ) : '<div class="muted" style="margin-top:12px">정책 판단 이벤트 없음</div>';
+      const approvalTable = approvals.length ? (
+        '<table style="margin-top:12px"><thead><tr><th>상태</th><th>승인 ID</th><th>사유</th><th>위험/비용</th><th>만료/결정</th></tr></thead><tbody>' +
+        approvals.map(a => '<tr>' +
+          '<td><span class="status ' + governanceStatusClass(a.status) + '">' + escapeHTML(a.status || '') + '</span></td>' +
+          '<td>' + escapeHTML(a.id || '') + '</td>' +
+          '<td>' + escapeHTML(a.reason || '') + '</td>' +
+          '<td>risk ' + fmt(a.risk_score || 0) + '<div class="muted">' + money(a.cost_krw || 0) + '</div></td>' +
+          '<td>' + (a.expires_at ? ('만료 ' + ago(a.expires_at)) : '<span class="muted">-</span>') + (a.decided_by ? '<div class="muted">' + escapeHTML(a.decided_by) + '</div>' : '') + '</td>' +
+        '</tr>').join('') + '</tbody></table>'
+      ) : '';
+      const secretTable = secrets.length ? (
+        '<table style="margin-top:12px"><thead><tr><th>Action</th><th>유형</th><th>위치</th><th>Hash</th><th>시각</th></tr></thead><tbody>' +
+        secrets.map(s => '<tr>' +
+          '<td><span class="status ' + governanceStatusClass(s.action) + '">' + escapeHTML(s.action || '') + '</span></td>' +
+          '<td>' + escapeHTML(s.secret_type || '') + '</td>' +
+          '<td>' + escapeHTML(s.location || '') + '</td>' +
+          '<td>' + escapeHTML(s.matched_hash || '') + '</td>' +
+          '<td>' + (s.created_at ? ago(s.created_at) : '') + '</td>' +
+        '</tr>').join('') + '</tbody></table>'
+      ) : '';
+      const anomalyTable = anomalies.length ? (
+        '<table style="margin-top:12px"><thead><tr><th>심각도</th><th>범위</th><th>지표</th><th>값 / 기준선</th><th>상태</th></tr></thead><tbody>' +
+        anomalies.map(a => '<tr>' +
+          '<td><span class="status ' + governanceStatusClass(a.severity) + '">' + escapeHTML(a.severity || '') + '</span></td>' +
+          '<td>' + escapeHTML(a.scope || '') + '<div class="muted">' + escapeHTML(a.scope_value || '') + '</div></td>' +
+          '<td>' + escapeHTML(a.metric || '') + '</td>' +
+          '<td>' + fmt(a.value || 0) + '<div class="muted">baseline ' + fmt(a.baseline || 0) + '</div></td>' +
+          '<td>' + escapeHTML(a.status || '') + '</td>' +
+        '</tr>').join('') + '</tbody></table>'
+      ) : '';
+      return summary + policyTable + approvalTable + secretTable + anomalyTable;
     }
     window.openRequestDetail = async (id) => {
       try {
@@ -2470,6 +2546,7 @@ const adminHTML = `<!doctype html>
           '<td>' + escapeHTML(f.created_by || f.source || '') + '</td>' +
         '</tr>').join('') + '</tbody></table>'
       ) : '<div class="muted">feedback 없음</div>';
+      const governance = governanceHTML(d.governance || {});
 
       return (
         explainBtn +
@@ -2500,6 +2577,7 @@ const adminHTML = `<!doctype html>
         '<h3 style="margin-top:18px">응답</h3>' + resp +
         '<h3 style="margin-top:18px">LLM Spans</h3>' + spans +
         '<h3 style="margin-top:18px">LLM Evaluation</h3>' + evals +
+        '<h3 style="margin-top:18px">Governance</h3>' + governance +
         '<h3 style="margin-top:18px">LLM Feedback</h3>' + feedback +
         feedbackComposer(r.id) +
         noteEditor(r.id, note || { tags: [], note: '' })
@@ -3216,14 +3294,22 @@ const adminHTML = `<!doctype html>
     async function renderMCP(initial) {
       const apiKeyId = initial ? (initial.get('api_key_id') || '') : '';
       const serverFilter = initial ? (initial.get('server') || '') : '';
+      const toolFilter = initial ? (initial.get('tool') || '') : '';
+      const riskFilter = initial ? (initial.get('risk_level') || '') : '';
+      const actionFilter = initial ? (initial.get('action') || '') : '';
+      const configuredFilter = initial ? (initial.get('configured') || '') : '';
       const mcpOnly = initial ? (initial.get('mcp_only') === '1') : false;
       const qs = new URLSearchParams();
       if (apiKeyId) qs.set('api_key_id', apiKeyId);
       if (serverFilter) qs.set('server', serverFilter);
+      if (toolFilter) qs.set('tool', toolFilter);
+      if (riskFilter) qs.set('risk_level', riskFilter);
+      if (actionFilter) qs.set('action', actionFilter);
+      if (configuredFilter) qs.set('configured', configuredFilter);
       if (mcpOnly) qs.set('mcp_only', '1');
 
       const [serversResp, toolsResp, policiesResp, loopsResp, catalogResp, upstreamsResp] = await Promise.all([
-        api('/admin/mcp/servers' + (qs.toString() ? '?' + qs.toString() : '')),
+        api('/admin/mcp/servers' + (serverFilter || apiKeyId || mcpOnly ? '?' + new URLSearchParams([...qs].filter(([k]) => ['server','api_key_id','mcp_only'].includes(k))).toString() : '')),
         api('/admin/mcp/tools' + (qs.toString() ? '?' + qs.toString() : '')),
         api('/admin/mcp/policies').catch(() => ({ policies: [], allowlist_enabled: false })),
         api('/admin/mcp/loops?window=24h&threshold=10').catch(() => ({ loops: [], threshold: 10 })),
@@ -3233,6 +3319,10 @@ const adminHTML = `<!doctype html>
       const servers = serversResp.servers || [];
       const summary = serversResp.summary || {};
       const tools = toolsResp.tools || [];
+      const toolRisk = toolsResp.tool_risk || [];
+      window.mcpToolRiskRows = toolRisk;
+      const riskByTool = {};
+      toolRisk.forEach((r, idx) => { riskByTool[(r.server_label || '') + '\u0000' + (r.tool_name || '')] = { ...r, idx }; });
       const policies = policiesResp.policies || [];
       const allowlistEnabled = !!policiesResp.allowlist_enabled;
       const loops = loopsResp.loops || [];
@@ -3250,6 +3340,25 @@ const adminHTML = `<!doctype html>
         '<form class="toolbar" id="mcp-filter" autocomplete="off">' +
           '<input id="mcp-api-key" placeholder="API 키 ID" value="' + escapeHTML(apiKeyId) + '">' +
           '<input id="mcp-server" placeholder="서버 라벨" value="' + escapeHTML(serverFilter) + '">' +
+          '<input id="mcp-tool" placeholder="tool 이름" value="' + escapeHTML(toolFilter) + '">' +
+          '<select id="mcp-risk-filter">' +
+            '<option value="">전체 risk</option>' +
+            '<option value="low" ' + (riskFilter === 'low' ? 'selected' : '') + '>low</option>' +
+            '<option value="medium" ' + (riskFilter === 'medium' ? 'selected' : '') + '>medium</option>' +
+            '<option value="high" ' + (riskFilter === 'high' ? 'selected' : '') + '>high</option>' +
+            '<option value="critical" ' + (riskFilter === 'critical' ? 'selected' : '') + '>critical</option>' +
+          '</select>' +
+          '<select id="mcp-action-filter">' +
+            '<option value="">전체 action</option>' +
+            '<option value="allow" ' + (actionFilter === 'allow' ? 'selected' : '') + '>allow</option>' +
+            '<option value="require_approval" ' + (actionFilter === 'require_approval' ? 'selected' : '') + '>require_approval</option>' +
+            '<option value="block" ' + (actionFilter === 'block' ? 'selected' : '') + '>block</option>' +
+          '</select>' +
+          '<select id="mcp-configured-filter">' +
+            '<option value="">전체 설정</option>' +
+            '<option value="true" ' + (configuredFilter === 'true' || configuredFilter === '1' ? 'selected' : '') + '>configured</option>' +
+            '<option value="false" ' + (configuredFilter === 'false' || configuredFilter === '0' ? 'selected' : '') + '>inferred</option>' +
+          '</select>' +
           '<label style="display:flex; align-items:center; gap:6px"><input type="checkbox" id="mcp-only" ' + (mcpOnly ? 'checked' : '') + ' style="width:auto; height:auto; min-width:0"> MCP만</label>' +
           '<button type="submit">적용</button>' +
         '</form>';
@@ -3271,8 +3380,12 @@ const adminHTML = `<!doctype html>
 
       const toolRows = tools.map(t => {
         const sl = t.server_label || '(none)';
+        const risk = riskByTool[sl + '\u0000' + (t.tool_name || '')] || { risk_level: 'low', action: 'allow', configured: false, idx: -1 };
+        const idx = risk.idx;
         return '<tr>' +
           '<td>' + (t.is_mcp ? '<span class="pill">MCP</span> ' : '') + escapeHTML(t.tool_name) + '<div class="muted">' + escapeHTML(sl) + '</div></td>' +
+          '<td><span class="status ' + governanceStatusClass(risk.risk_level) + '">' + escapeHTML(risk.risk_level || '') + '</span><div class="muted">' + (risk.configured ? 'configured' : 'inferred') + '</div></td>' +
+          '<td><span class="status ' + governanceStatusClass(risk.action) + '">' + escapeHTML(risk.action || '') + '</span></td>' +
           '<td data-num="' + (t.definitions || 0) + '">' + fmt(t.definitions) + '</td>' +
           '<td data-num="' + (t.calls || 0) + '">' + fmt(t.calls) + '</td>' +
           '<td data-num="' + (t.results || 0) + '">' + fmt(t.results) + '</td>' +
@@ -3280,13 +3393,14 @@ const adminHTML = `<!doctype html>
           '<td data-num="' + (t.error_rate || 0) + '">' + (Number(t.error_rate || 0) * 100).toFixed(1) + '%</td>' +
           '<td data-num="' + (t.distinct_keys || 0) + '">' + fmt(t.distinct_keys) + '</td>' +
           '<td data-num="' + (t.distinct_ips || 0) + '">' + fmt(t.distinct_ips || 0) + (t.sample_ip ? ' <span class="muted">' + escapeHTML(t.sample_ip) + (t.distinct_ips > 1 ? ' 외' : '') + '</span>' : '') + '</td>' +
+          '<td>' + mcpToolRiskControls(idx) + '</td>' +
           '<td><button class="secondary" type="button" onclick="mcpToolRequests(\'' + escapeAttr(sl) + '\',\'' + escapeAttr(t.tool_name) + '\',false)">호출</button> ' +
           (t.errors > 0 ? '<button class="danger" type="button" onclick="mcpToolRequests(\'' + escapeAttr(sl) + '\',\'' + escapeAttr(t.tool_name) + '\',true)">오류</button>' : '') +
           '</td>' +
         '</tr>';
       }).join('');
       const toolTable = tools.length ?
-        '<table><thead><tr><th data-sort="str">tool</th><th data-sort="num">정의</th><th data-sort="num">호출</th><th data-sort="num">결과</th><th data-sort="num">오류</th><th data-sort="num">오류율</th><th data-sort="num">고유 키</th><th data-sort="num">호출 IP</th><th>드릴다운</th></tr></thead><tbody>' + toolRows + '</tbody></table>'
+        '<table><thead><tr><th data-sort="str">tool</th><th data-sort="str">risk</th><th data-sort="str">action</th><th data-sort="num">정의</th><th data-sort="num">호출</th><th data-sort="num">결과</th><th data-sort="num">오류</th><th data-sort="num">오류율</th><th data-sort="num">고유 키</th><th data-sort="num">호출 IP</th><th>정책</th><th>드릴다운</th></tr></thead><tbody>' + toolRows + '</tbody></table>'
         : '<div class="empty">tool 기록 없음</div>';
 
       // ---- policy section ----
@@ -3405,8 +3519,16 @@ const adminHTML = `<!doctype html>
         const p = new URLSearchParams();
         const k = document.getElementById('mcp-api-key').value.trim();
         const sv = document.getElementById('mcp-server').value.trim();
+        const tv = document.getElementById('mcp-tool').value.trim();
+        const rv = document.getElementById('mcp-risk-filter').value;
+        const av = document.getElementById('mcp-action-filter').value;
+        const cv = document.getElementById('mcp-configured-filter').value;
         if (k) p.set('api_key_id', k);
         if (sv) p.set('server', sv);
+        if (tv) p.set('tool', tv);
+        if (rv) p.set('risk_level', rv);
+        if (av) p.set('action', av);
+        if (cv) p.set('configured', cv);
         if (document.getElementById('mcp-only').checked) p.set('mcp_only', '1');
         location.hash = '#/mcp' + (p.toString() ? '?' + p.toString() : '');
       });
@@ -3425,6 +3547,46 @@ const adminHTML = `<!doctype html>
       });
       makeSortable('#view', 'mcp');
     }
+    function mcpRiskOption(value, current) {
+      return '<option value="' + value + '" ' + (value === current ? 'selected' : '') + '>' + value + '</option>';
+    }
+    function mcpToolRiskControls(idx) {
+      if (idx < 0) return '<span class="muted">risk 정보 없음</span>';
+      const risk = (window.mcpToolRiskRows || [])[idx] || {};
+      const level = risk.risk_level || 'low';
+      const action = risk.action || 'allow';
+      return '<div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap">' +
+        '<select id="mcp-risk-level-' + idx + '" style="width:100px">' +
+          mcpRiskOption('low', level) +
+          mcpRiskOption('medium', level) +
+          mcpRiskOption('high', level) +
+          mcpRiskOption('critical', level) +
+        '</select>' +
+        '<select id="mcp-risk-action-' + idx + '" style="width:138px">' +
+          mcpRiskOption('allow', action) +
+          mcpRiskOption('require_approval', action) +
+          mcpRiskOption('block', action) +
+        '</select>' +
+        '<input id="mcp-risk-note-' + idx + '" placeholder="메모" value="' + escapeHTML(risk.note || '') + '" style="width:130px">' +
+        '<button class="secondary" type="button" onclick="saveMCPToolRisk(' + idx + ')">저장</button>' +
+      '</div>';
+    }
+    window.saveMCPToolRisk = async (idx) => {
+      const risk = (window.mcpToolRiskRows || [])[idx];
+      if (!risk) return;
+      try {
+        await api('/admin/mcp/tools', { method: 'POST', body: JSON.stringify({
+          server_label: risk.server_label,
+          tool_name: risk.tool_name,
+          risk_level: document.getElementById('mcp-risk-level-' + idx).value,
+          action: document.getElementById('mcp-risk-action-' + idx).value,
+          note: document.getElementById('mcp-risk-note-' + idx).value.trim(),
+        }) });
+        route();
+      } catch (err) {
+        openModal('MCP Tool Risk 저장 오류', '<div class="error-line">' + escapeHTML(err.message) + '</div>');
+      }
+    };
     window.deleteMCPPolicy = async (server) => {
       if (!confirm('서버 정책 "' + server + '" 을(를) 삭제하시겠습니까?')) return;
       await api('/admin/mcp/policies/' + encodeURIComponent(server), { method: 'DELETE' });
@@ -3495,13 +3657,22 @@ const adminHTML = `<!doctype html>
 
     // ---------- safety (kill switch + alerts) ----------
     async function renderSafety() {
-      const [kill, alerts, cost] = await Promise.all([
+      const [kill, alerts, cost, policiesResp, secretResp, policyResp, approvalResp] = await Promise.all([
         api('/admin/kill-switch'),
         api('/admin/alerts'),
         api('/admin/cost').catch(() => ({ enabled: false, threshold_krw: 0 })),
+        api('/admin/policies').catch(() => ({ policies: [] })),
+        api('/admin/security/secrets?window=24h&limit=80').catch(() => ({ secret_events: [], count: 0, filters: {} })),
+        api('/admin/policies/decisions?window=24h&limit=80').catch(() => ({ policy_decisions: [], count: 0, filters: {} })),
+        api('/admin/approvals?status=pending&window=24h&limit=50').catch(() => ({ approvals: [], count: 0, filters: {} })),
       ]);
       const rules = alerts.rules || [];
       const events = alerts.events || [];
+      const aiPolicies = policiesResp.policies || [];
+      window.safetyPolicies = aiPolicies;
+      const secretEvents = secretResp.secret_events || [];
+      const policyDecisions = policyResp.policy_decisions || [];
+      const approvals = approvalResp.approvals || [];
 
       const killCard = '<div style="padding:14px"><div class="kv">' +
         row('현재 상태', kill.disabled
@@ -3572,9 +3743,125 @@ const adminHTML = `<!doctype html>
         '</div>' +
       '</div>';
 
+      const policyDecisionCard =
+        '<form class="inline-form" id="policy-decision-form" style="grid-template-columns: 120px repeat(6, minmax(110px, 1fr)) 90px;">' +
+          '<select id="pd-window">' +
+            '<option value="1h">1시간</option>' +
+            '<option value="6h">6시간</option>' +
+            '<option value="24h" selected>24시간</option>' +
+            '<option value="7d">7일</option>' +
+            '<option value="30d">30일</option>' +
+          '</select>' +
+          '<select id="pd-decision">' +
+            '<option value="">전체 판단</option>' +
+            '<option value="block">block</option>' +
+            '<option value="require_approval">require_approval</option>' +
+            '<option value="deny_model">deny_model</option>' +
+            '<option value="deny_provider">deny_provider</option>' +
+            '<option value="mask">mask</option>' +
+            '<option value="detect">detect</option>' +
+          '</select>' +
+          '<input id="pd-request" placeholder="request_id">' +
+          '<input id="pd-team" placeholder="team_id">' +
+          '<input id="pd-key" placeholder="api_key_id">' +
+          '<input id="pd-model" placeholder="model">' +
+          '<input id="pd-policy" placeholder="policy_id">' +
+          '<button type="submit">조회</button>' +
+        '</form>' +
+        '<div id="policy-decision-results">' + policyDecisionTable(policyDecisions, policyResp) + '</div>';
+
+      const approvalCard =
+        '<form class="inline-form" id="approval-form" style="grid-template-columns: 110px 120px repeat(7, minmax(110px, 1fr)) 80px;">' +
+          '<select id="approval-window">' +
+            '<option value="1h">1시간</option>' +
+            '<option value="6h">6시간</option>' +
+            '<option value="24h" selected>24시간</option>' +
+            '<option value="7d">7일</option>' +
+            '<option value="30d">30일</option>' +
+            '<option value="">전체 기간</option>' +
+          '</select>' +
+          '<select id="approval-status">' +
+            '<option value="pending" selected>pending</option>' +
+            '<option value="approved">approved</option>' +
+            '<option value="rejected">rejected</option>' +
+            '<option value="expired">expired</option>' +
+            '<option value="">전체</option>' +
+          '</select>' +
+          '<input id="approval-id" placeholder="approval_id">' +
+          '<input id="approval-request" placeholder="request_id">' +
+          '<input id="approval-team" placeholder="team_id">' +
+          '<input id="approval-key" placeholder="api_key_id">' +
+          '<input id="approval-user" placeholder="user_id">' +
+          '<input id="approval-subject" placeholder="subject_type">' +
+          '<input id="approval-subject-id" placeholder="subject_id">' +
+          '<button type="submit">조회</button>' +
+        '</form>' +
+        '<div class="muted" style="padding:0 12px 10px; font-size:12px">승인/거절 후 클라이언트는 <code>X-Governance-Approval-ID</code>로 같은 요청을 재전송합니다.</div>' +
+        '<div id="approval-results">' + approvalQueueTable(approvals, approvalResp) + '</div>';
+
+      const policyCard =
+        '<form class="inline-form" id="ai-policy-form" style="grid-template-columns: minmax(150px,1.2fr) 110px minmax(130px,1fr) minmax(140px,1fr) minmax(140px,1fr) minmax(140px,1fr) 80px;">' +
+          '<input id="ai-pol-name" placeholder="정책 이름" required>' +
+          '<input id="ai-pol-priority" type="number" value="100" min="1" max="999" title="낮을수록 먼저 평가">' +
+          '<select id="ai-pol-condition">' +
+            '<option value="contains_secret">contains_secret</option>' +
+            '<option value="risk_score">risk_score</option>' +
+            '<option value="complexity_score">complexity_score</option>' +
+            '<option value="cost_krw">cost_krw</option>' +
+            '<option value="team">team</option>' +
+            '<option value="role">role</option>' +
+            '<option value="model">model</option>' +
+            '<option value="provider">provider</option>' +
+            '<option value="mcp_tool">mcp_tool</option>' +
+          '</select>' +
+          '<input id="ai-pol-condition-value" placeholder="조건값 (예: >80, security, gpt-*)">' +
+          '<select id="ai-pol-action">' +
+            '<option value="block">block</option>' +
+            '<option value="require_approval">require_approval</option>' +
+            '<option value="secret_mask">secret_action=mask</option>' +
+            '<option value="secret_block">secret_action=block</option>' +
+            '<option value="deny_models">deny_models</option>' +
+            '<option value="allow_models">allow_models</option>' +
+            '<option value="deny_providers">deny_providers</option>' +
+            '<option value="allow_providers">allow_providers</option>' +
+          '</select>' +
+          '<input id="ai-pol-action-value" placeholder="모델/provider 목록(선택)">' +
+          '<button type="submit">추가</button>' +
+        '</form>' +
+        '<div class="muted" style="padding:0 12px 10px; font-size:12px">복잡한 정책은 API로도 등록할 수 있습니다. 이 폼은 자주 쓰는 단일 rule 정책을 빠르게 생성합니다.</div>' +
+        '<div id="ai-policy-results">' + aiPolicyTable(aiPolicies) + '</div>';
+
+      const secretFirewallCard =
+        '<form class="inline-form" id="secret-event-form" style="grid-template-columns: 110px 120px 150px repeat(4, minmax(110px, 1fr)) 80px;">' +
+          '<select id="se-window">' +
+            '<option value="1h">1시간</option>' +
+            '<option value="6h">6시간</option>' +
+            '<option value="24h" selected>24시간</option>' +
+            '<option value="7d">7일</option>' +
+            '<option value="30d">30일</option>' +
+          '</select>' +
+          '<select id="se-action">' +
+            '<option value="">전체 action</option>' +
+            '<option value="detect">detect</option>' +
+            '<option value="mask">mask</option>' +
+            '<option value="block">block</option>' +
+          '</select>' +
+          '<input id="se-type" placeholder="secret_type">' +
+          '<input id="se-request" placeholder="request_id">' +
+          '<input id="se-team" placeholder="team_id">' +
+          '<input id="se-key" placeholder="api_key_id">' +
+          '<input id="se-user" placeholder="user_id">' +
+          '<button type="submit">조회</button>' +
+        '</form>' +
+        '<div id="secret-event-results">' + secretEventTable(secretEvents, secretResp) + '</div>';
+
       const html =
         section('긴급 정지 (Kill Switch)', killCard) +
         section('비용 가드 / 예측 (Cost Guard)', costCard) +
+        section('AI 정책 엔진 (AI Policy Engine)', policyCard) +
+        section('Secret Firewall 이벤트', secretFirewallCard) +
+        section('승인 큐 (Approval Workflow)', approvalCard) +
+        section('정책 판단 이벤트 (Policy Decision Audit)', policyDecisionCard) +
         section('알림 규칙',
           '<form class="inline-form" id="alert-form" style="grid-template-columns: minmax(140px,1fr) 150px 90px 100px 110px minmax(160px,1fr) minmax(150px,1.4fr) 80px;">' +
             '<input id="alert-name" placeholder="이름" required>' +
@@ -3616,6 +3903,11 @@ const adminHTML = `<!doctype html>
       const resumeBtn = document.getElementById('kill-resume');
       if (stopBtn) stopBtn.addEventListener('click', () => toggleKillSwitch(true));
       if (resumeBtn) resumeBtn.addEventListener('click', () => toggleKillSwitch(false));
+      document.getElementById('ai-policy-form').addEventListener('submit', addAIPolicy);
+      document.getElementById('secret-event-form').addEventListener('submit', refreshSecretEvents);
+      document.getElementById('approval-form').addEventListener('submit', refreshApprovals);
+      document.getElementById('approval-status').addEventListener('change', refreshApprovals);
+      document.getElementById('policy-decision-form').addEventListener('submit', refreshPolicyDecisionEvents);
       document.getElementById('alert-form').addEventListener('submit', addAlert);
       document.getElementById('cost-save').addEventListener('click', async () => {
         await api('/admin/cost', { method: 'POST', body: JSON.stringify({
@@ -3641,6 +3933,294 @@ const adminHTML = `<!doctype html>
         } catch (err) { out.textContent = '오류: ' + err.message; }
       });
       makeSortable('#view', 'safety');
+    }
+
+    function approvalQueryFromForm() {
+      const p = new URLSearchParams();
+      const add = (id, name) => {
+        const el = document.getElementById(id);
+        const value = el ? el.value.trim() : '';
+        if (value) p.set(name, value);
+      };
+      add('approval-window', 'window');
+      add('approval-status', 'status');
+      add('approval-id', 'id');
+      add('approval-request', 'request_id');
+      add('approval-team', 'team_id');
+      add('approval-key', 'api_key_id');
+      add('approval-user', 'user_id');
+      add('approval-subject', 'subject_type');
+      add('approval-subject-id', 'subject_id');
+      p.set('limit', '120');
+      return p;
+    }
+    async function refreshApprovals(event) {
+      if (event && event.preventDefault) event.preventDefault();
+      const host = document.getElementById('approval-results');
+      host.innerHTML = '<div class="empty">조회 중...</div>';
+      try {
+        const data = await api('/admin/approvals?' + approvalQueryFromForm().toString());
+        host.innerHTML = approvalQueueTable(data.approvals || [], data);
+        makeSortable('#approval-results', 'approvals');
+      } catch (err) {
+        host.innerHTML = '<div class="error-line">' + escapeHTML(err.message) + '</div>';
+      }
+    }
+    function approvalQueueTable(rows, payload) {
+      const count = Number((payload || {}).count ?? rows.length);
+      const filters = (payload || {}).filters || {};
+      const since = filters.since || '';
+      const meta = '<div class="muted" style="padding:10px 12px; font-size:12px">' +
+        '조회 결과 ' + fmt(count) + '건' + (since ? ' · since ' + escapeHTML(since) : '') +
+        ' · 승인 ID나 요청 ID로 좁힌 뒤 XView를 열 수 있습니다.' +
+      '</div>';
+      if (!rows.length) return meta + '<div class="empty">승인 항목 없음</div>';
+      return meta + '<table><thead><tr>' +
+        '<th data-sort="str">상태</th><th data-sort="str">승인 ID</th><th>대상</th><th data-sort="num">위험/비용</th><th>사유</th><th data-sort="str">만료</th><th>동작</th>' +
+      '</tr></thead><tbody>' +
+      rows.map(a => {
+        const payload = approvalPayloadSummary(a.payload || '');
+        return '<tr>' +
+          '<td><span class="status ' + governanceStatusClass(a.status) + '">' + escapeHTML(a.status || '') + '</span></td>' +
+          '<td>' + escapeHTML(a.id || '') + '<div class="muted">' + escapeHTML(a.subject_type || '') + '</div></td>' +
+          '<td>' + escapeHTML(a.model || payload.model || '') +
+            '<div class="muted">' + escapeHTML(a.team_id || a.user_id || a.api_key_id || '') + '</div>' +
+            (a.request_id ? '<button class="secondary" type="button" onclick="openExplain(\'' + escapeAttr(a.request_id) + '\')">XView</button>' : '') +
+          '</td>' +
+          '<td data-num="' + (a.risk_score || 0) + '">risk ' + fmt(a.risk_score || 0) + '<div class="muted">' + money(a.cost_krw || 0) + '</div></td>' +
+          '<td>' + escapeHTML(a.reason || '') + (payload.detail ? '<div class="muted">' + escapeHTML(payload.detail) + '</div>' : '') + '</td>' +
+          '<td>' + (a.expires_at ? ago(a.expires_at) + '<div class="muted">' + escapeHTML(a.expires_at) + '</div>' : '<span class="muted">-</span>') + '</td>' +
+          '<td>' + (a.status === 'pending'
+            ? '<button type="button" onclick="decideApproval(\'' + escapeAttr(a.id) + '\',\'approve\')">승인</button> ' +
+              '<button class="danger" type="button" onclick="decideApproval(\'' + escapeAttr(a.id) + '\',\'reject\')">거절</button>'
+            : '<span class="muted">' + escapeHTML(a.decided_by || '') + '</span>') + '</td>' +
+        '</tr>';
+      }).join('') + '</tbody></table>';
+    }
+    function approvalPayloadSummary(raw) {
+      if (!raw) return {};
+      try {
+        const p = JSON.parse(raw);
+        const parts = [];
+        if (p.provider) parts.push('provider ' + p.provider);
+        if (p.endpoint) parts.push(p.endpoint);
+        if (p.mcp_server || p.mcp_tool) parts.push([p.mcp_server, p.mcp_tool].filter(Boolean).join('/'));
+        return { model: p.model || '', detail: parts.join(' · ') };
+      } catch (e) {
+        return { detail: raw.slice(0, 120) };
+      }
+    }
+    window.decideApproval = async (id, action) => {
+      if (!id) return;
+      const label = action === 'approve' ? '승인' : '거절';
+      if (!confirm('이 approval을 ' + label + '하시겠습니까?')) return;
+      try {
+        await api('/admin/approvals/' + encodeURIComponent(id) + '/' + action, { method: 'POST', body: JSON.stringify({}) });
+        await refreshApprovals();
+      } catch (err) {
+        openModal('승인 처리 오류', '<div class="error-line">' + escapeHTML(err.message) + '</div>');
+      }
+    };
+
+    function aiPolicyTable(rows) {
+      if (!rows.length) return '<div class="empty">등록된 AI 정책 없음</div>';
+      return '<table><thead><tr>' +
+        '<th data-sort="num">우선순위</th><th data-sort="str">정책</th><th>Rules</th><th data-sort="str">상태</th><th>동작</th>' +
+      '</tr></thead><tbody>' +
+      rows.map((p, idx) => '<tr>' +
+        '<td data-num="' + (p.priority || 100) + '">' + fmt(p.priority || 100) + '</td>' +
+        '<td>' + escapeHTML(p.name || p.id || '') + '<div class="muted">' + escapeHTML(p.id || '') + '</div>' +
+          (p.description ? '<div class="muted">' + escapeHTML(p.description) + '</div>' : '') + '</td>' +
+        '<td>' + policyRuleSummary(p.rules || []) + '</td>' +
+        '<td><span class="status ' + (p.enabled ? '' : 'error') + '">' + (p.enabled ? 'enabled' : 'disabled') + '</span></td>' +
+        '<td><button class="secondary" type="button" onclick="toggleAIPolicy(' + idx + ')">' + (p.enabled ? '중지' : '사용') + '</button></td>' +
+      '</tr>').join('') + '</tbody></table>';
+    }
+    function policyRuleSummary(rules) {
+      if (!rules.length) return '<span class="muted">rule 없음</span>';
+      return rules.slice(0, 4).map(r => {
+        const cond = compactJSON(r.conditions || {});
+        const act = compactJSON(r.actions || {});
+        return '<div style="margin-bottom:6px"><strong>' + escapeHTML(r.name || r.id || 'rule') + '</strong>' +
+          '<div class="muted">if ' + escapeHTML(cond || '{}') + '</div>' +
+          '<div class="muted">then ' + escapeHTML(act || '{}') + '</div></div>';
+      }).join('') + (rules.length > 4 ? '<div class="muted">+' + fmt(rules.length - 4) + ' rules</div>' : '');
+    }
+    function compactJSON(value) {
+      try { return JSON.stringify(value); } catch (e) { return ''; }
+    }
+    function splitCSV(value) {
+      return String(value || '').split(',').map(v => v.trim()).filter(Boolean);
+    }
+    function aiPolicyPayloadFromForm() {
+      const name = document.getElementById('ai-pol-name').value.trim();
+      const priority = Number(document.getElementById('ai-pol-priority').value || 100);
+      const conditionKey = document.getElementById('ai-pol-condition').value;
+      const conditionValue = document.getElementById('ai-pol-condition-value').value.trim();
+      const action = document.getElementById('ai-pol-action').value;
+      const actionValue = document.getElementById('ai-pol-action-value').value.trim();
+      const conditions = {};
+      if (conditionKey === 'contains_secret') {
+        conditions.contains_secret = true;
+      } else if (conditionKey === 'risk_score' || conditionKey === 'complexity_score' || conditionKey === 'cost_krw') {
+        conditions[conditionKey] = conditionValue || '>80';
+      } else {
+        conditions[conditionKey] = conditionValue || '*';
+      }
+      const actions = {};
+      if (action === 'block') actions.block = true;
+      if (action === 'require_approval') actions.require_approval = true;
+      if (action === 'secret_mask') actions.secret_action = 'mask';
+      if (action === 'secret_block') actions.secret_action = 'block';
+      if (action === 'deny_models') actions.deny_models = splitCSV(actionValue || '*');
+      if (action === 'allow_models') actions.allow_models = splitCSV(actionValue || '*');
+      if (action === 'deny_providers') actions.deny_providers = splitCSV(actionValue || '*');
+      if (action === 'allow_providers') actions.allow_providers = splitCSV(actionValue || '*');
+      return {
+        name,
+        description: 'created from Safety tab quick policy form',
+        enabled: true,
+        priority,
+        rules: [{
+          name: conditionKey + ' -> ' + action,
+          enabled: true,
+          priority: 100,
+          conditions,
+          actions,
+        }],
+      };
+    }
+    async function addAIPolicy(event) {
+      event.preventDefault();
+      const payload = aiPolicyPayloadFromForm();
+      if (!payload.name) return;
+      try {
+        await api('/admin/policies', { method: 'POST', body: JSON.stringify(payload) });
+        route();
+      } catch (err) {
+        openModal('정책 저장 오류', '<div class="error-line">' + escapeHTML(err.message) + '</div>');
+      }
+    }
+    window.toggleAIPolicy = async (idx) => {
+      const p = (window.safetyPolicies || [])[idx];
+      if (!p) return;
+      const next = { ...p, enabled: !p.enabled, rules: p.rules || [] };
+      try {
+        await api('/admin/policies', { method: 'POST', body: JSON.stringify(next) });
+        route();
+      } catch (err) {
+        openModal('정책 변경 오류', '<div class="error-line">' + escapeHTML(err.message) + '</div>');
+      }
+    };
+
+    function secretEventQueryFromForm() {
+      const p = new URLSearchParams();
+      const add = (id, name) => {
+        const el = document.getElementById(id);
+        const value = el ? el.value.trim() : '';
+        if (value) p.set(name, value);
+      };
+      add('se-window', 'window');
+      add('se-action', 'action');
+      add('se-type', 'secret_type');
+      add('se-request', 'request_id');
+      add('se-team', 'team_id');
+      add('se-key', 'api_key_id');
+      add('se-user', 'user_id');
+      p.set('limit', '120');
+      return p;
+    }
+    async function refreshSecretEvents(event) {
+      event.preventDefault();
+      const host = document.getElementById('secret-event-results');
+      host.innerHTML = '<div class="empty">조회 중...</div>';
+      try {
+        const data = await api('/admin/security/secrets?' + secretEventQueryFromForm().toString());
+        host.innerHTML = secretEventTable(data.secret_events || [], data);
+        makeSortable('#secret-event-results', 'secret-events');
+      } catch (err) {
+        host.innerHTML = '<div class="error-line">' + escapeHTML(err.message) + '</div>';
+      }
+    }
+    function secretEventTable(rows, payload) {
+      const count = Number((payload || {}).count ?? rows.length);
+      const filters = (payload || {}).filters || {};
+      const since = filters.since || '';
+      const meta = '<div class="muted" style="padding:10px 12px; font-size:12px">' +
+        '조회 결과 ' + fmt(count) + '건' + (since ? ' · since ' + escapeHTML(since) : '') +
+        ' · Secret 값은 저장하지 않고 hash와 유형만 기록합니다.' +
+      '</div>';
+      if (!rows.length) return meta + '<div class="empty">Secret Firewall 이벤트 없음</div>';
+      return meta +
+        '<table><thead><tr>' +
+          '<th data-sort="str">시각</th><th data-sort="str">Action</th><th data-sort="str">유형</th><th>대상</th><th>위치 / Hash</th><th>요청</th>' +
+        '</tr></thead><tbody>' +
+        rows.map(e => {
+          const hash = e.matched_hash ? String(e.matched_hash).slice(0, 18) : '';
+          return '<tr>' +
+            '<td>' + (e.created_at ? ago(e.created_at) : '') + '</td>' +
+            '<td><span class="status ' + governanceStatusClass(e.action) + '">' + escapeHTML(e.action || '') + '</span></td>' +
+            '<td>' + escapeHTML(e.secret_type || '') + '</td>' +
+            '<td>' + escapeHTML(e.team_id || '') +
+              '<div class="muted">' + escapeHTML(e.user_id || e.api_key_id || '') + '</div></td>' +
+            '<td>' + escapeHTML(e.location || '') +
+              (hash ? '<div class="muted" title="' + escapeAttr(e.matched_hash || '') + '">' + escapeHTML(hash) + '</div>' : '') + '</td>' +
+            '<td>' + (e.request_id ? '<button class="secondary" type="button" onclick="openExplain(\'' + escapeAttr(e.request_id) + '\')">XView</button><div class="muted">' + escapeHTML(e.request_id) + '</div>' : '<span class="muted">요청 없음</span>') + '</td>' +
+          '</tr>';
+        }).join('') + '</tbody></table>';
+    }
+
+    function policyDecisionQueryFromForm() {
+      const p = new URLSearchParams();
+      const add = (id, name) => {
+        const el = document.getElementById(id);
+        const value = el ? el.value.trim() : '';
+        if (value) p.set(name, value);
+      };
+      add('pd-window', 'window');
+      add('pd-decision', 'decision');
+      add('pd-request', 'request_id');
+      add('pd-team', 'team_id');
+      add('pd-key', 'api_key_id');
+      add('pd-model', 'model');
+      add('pd-policy', 'policy_id');
+      p.set('limit', '120');
+      return p;
+    }
+    async function refreshPolicyDecisionEvents(event) {
+      event.preventDefault();
+      const host = document.getElementById('policy-decision-results');
+      host.innerHTML = '<div class="empty">조회 중...</div>';
+      try {
+        const data = await api('/admin/policies/decisions?' + policyDecisionQueryFromForm().toString());
+        host.innerHTML = policyDecisionTable(data.policy_decisions || [], data);
+        makeSortable('#policy-decision-results', 'policy-decisions');
+      } catch (err) {
+        host.innerHTML = '<div class="error-line">' + escapeHTML(err.message) + '</div>';
+      }
+    }
+    function policyDecisionTable(rows, payload) {
+      const count = Number((payload || {}).count ?? rows.length);
+      const since = ((payload || {}).filters || {}).since || '';
+      const meta = '<div class="muted" style="padding:10px 12px; font-size:12px">' +
+        '조회 결과 ' + fmt(count) + '건' + (since ? ' · since ' + escapeHTML(since) : '') +
+        ' · 행의 요청 링크를 열면 XView 설명으로 이동합니다.' +
+      '</div>';
+      if (!rows.length) return meta + '<div class="empty">정책 판단 이벤트 없음</div>';
+      return meta +
+        '<table><thead><tr>' +
+          '<th data-sort="str">시각</th><th data-sort="str">판단</th><th data-sort="str">정책 / 룰</th><th data-sort="str">대상</th><th data-sort="num">점수</th><th>근거</th><th>요청</th>' +
+        '</tr></thead><tbody>' +
+        rows.map(e => '<tr>' +
+          '<td>' + (e.created_at ? ago(e.created_at) : '') + '<div class="muted">' + escapeHTML(e.phase || '') + '</div></td>' +
+          '<td><span class="status ' + governanceStatusClass(e.decision) + '">' + escapeHTML(e.decision || '') + '</span></td>' +
+          '<td>' + escapeHTML(e.policy_id || '') + '<div class="muted">' + escapeHTML(e.rule_name || e.rule_id || '') + '</div></td>' +
+          '<td>' + escapeHTML(e.model || '') + '<div class="muted">' + escapeHTML(e.provider || e.endpoint || '') + '</div>' +
+            '<div class="muted">' + escapeHTML(e.team_id || e.api_key_id || '') + '</div></td>' +
+          '<td data-num="' + (e.risk_score || 0) + '">risk ' + fmt(e.risk_score || 0) + '<div class="muted">complexity ' + fmt(e.complexity_score || 0) + (e.cost_krw ? ' · ' + money(e.cost_krw) : '') + '</div></td>' +
+          '<td>' + escapeHTML(e.reason || '') + '</td>' +
+          '<td>' + (e.request_id ? '<button class="secondary" type="button" onclick="openExplain(\'' + escapeAttr(e.request_id) + '\')">XView</button><div class="muted">' + escapeHTML(e.request_id) + '</div>' : '<span class="muted">요청 없음</span>') + '</td>' +
+        '</tr>').join('') + '</tbody></table>';
     }
 
     async function toggleKillSwitch(disable) {

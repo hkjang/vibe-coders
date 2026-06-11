@@ -38,6 +38,7 @@ func (s *Server) knowledgeSnapshot(ctx context.Context) map[string]store.Knowled
 func (s *Server) invalidateKnowledgeCache() { s.knowledge.Store(nil) }
 
 var knowledgePlaceholder = regexp.MustCompile(`\{\{\s*kb:([a-zA-Z0-9_-]{1,64})\s*\}\}`)
+var contextPlaceholder = regexp.MustCompile(`\{\{\s*ctx:([a-zA-Z0-9_-]{1,96})\s*\}\}`)
 
 // expandKnowledge substitutes {{kb:slug}} placeholders in chat message contents and,
 // when the X-Vibe-Knowledge header lists slugs, prepends a system message with their
@@ -47,11 +48,13 @@ var knowledgePlaceholder = regexp.MustCompile(`\{\{\s*kb:([a-zA-Z0-9_-]{1,64})\s
 // a placeholder nor the header is present.
 func (s *Server) expandKnowledge(r *http.Request, body []byte) ([]byte, []string, int) {
 	header := firstNonEmptyHeader(r, "X-Vibe-Knowledge", "X-Knowledge")
-	if header == "" && !bytes.Contains(body, []byte("{{")) {
+	contextHeader := firstNonEmptyHeader(r, "X-Vibe-Context", "X-Context")
+	if header == "" && contextHeader == "" && !bytes.Contains(body, []byte("{{")) {
 		return body, nil, 0
 	}
 	snap := s.knowledgeSnapshot(r.Context())
-	if len(snap) == 0 {
+	contexts := s.contextRegistrySnapshot(r.Context())
+	if len(snap) == 0 && len(contexts) == 0 {
 		return body, nil, 0
 	}
 	var root map[string]any
@@ -72,7 +75,7 @@ func (s *Server) expandKnowledge(r *http.Request, body []byte) ([]byte, []string
 			if !ok || !strings.Contains(content, "{{") {
 				continue
 			}
-			msg["content"] = knowledgePlaceholder.ReplaceAllStringFunc(content, func(match string) string {
+			content = knowledgePlaceholder.ReplaceAllStringFunc(content, func(match string) string {
 				sub := knowledgePlaceholder.FindStringSubmatch(match)
 				if len(sub) != 2 {
 					return match
@@ -85,11 +88,25 @@ func (s *Server) expandKnowledge(r *http.Request, body []byte) ([]byte, []string
 				tokens += audit.EstimateTokens(k.Content)
 				return k.Content
 			})
+			content = contextPlaceholder.ReplaceAllStringFunc(content, func(match string) string {
+				sub := contextPlaceholder.FindStringSubmatch(match)
+				if len(sub) != 2 {
+					return match
+				}
+				c, found := contexts[sub[1]]
+				if !found {
+					return match
+				}
+				used["ctx:"+sub[1]] = true
+				tokens += audit.EstimateTokens(c.Content)
+				return c.Content
+			})
+			msg["content"] = content
 		}
 	}
 
-	// 2) header-driven prepend (attach org rules without the client embedding them)
-	if header != "" {
+	// 2) header-driven prepend (attach org rules/context without the client embedding them)
+	if header != "" || contextHeader != "" {
 		var parts, ids []string
 		for _, raw := range strings.Split(header, ",") {
 			slug := strings.TrimSpace(raw)
@@ -99,6 +116,18 @@ func (s *Server) expandKnowledge(r *http.Request, body []byte) ([]byte, []string
 			if k, found := snap[slug]; found {
 				parts = append(parts, k.Content)
 				ids = append(ids, slug)
+			}
+		}
+		if contextHeader != "" {
+			for _, raw := range strings.Split(contextHeader, ",") {
+				key := strings.TrimSpace(raw)
+				if key == "" {
+					continue
+				}
+				if c, found := contexts[key]; found {
+					parts = append(parts, c.Content)
+					ids = append(ids, "ctx:"+key)
+				}
 			}
 		}
 		if len(parts) > 0 {
@@ -129,4 +158,34 @@ func (s *Server) expandKnowledge(r *http.Request, body []byte) ([]byte, []string
 	}
 	sort.Strings(ids)
 	return out, ids, tokens
+}
+
+func (s *Server) contextRegistrySnapshot(ctx context.Context) map[string]store.ContextRegistryEntry {
+	out := map[string]store.ContextRegistryEntry{}
+	list, err := s.db.ActiveContextRegistry(ctx)
+	if err != nil {
+		return out
+	}
+	for _, entry := range list {
+		out[entry.Key] = entry
+	}
+	return out
+}
+
+func splitExpandedRefs(ids []string) ([]string, []string) {
+	kbIDs := []string{}
+	ctxKeys := []string{}
+	for _, id := range ids {
+		if strings.HasPrefix(id, "ctx:") {
+			key := strings.TrimPrefix(id, "ctx:")
+			if key != "" {
+				ctxKeys = append(ctxKeys, key)
+			}
+			continue
+		}
+		if id != "" {
+			kbIDs = append(kbIDs, id)
+		}
+	}
+	return kbIDs, ctxKeys
 }

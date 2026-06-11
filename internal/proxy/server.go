@@ -110,6 +110,9 @@ func NewServer(cfg config.Config, db *store.SQLStore, logger *store.AsyncLogger,
 			return nil, fmt.Errorf("upsert proxy api key %s: %w", key.Name, err)
 		}
 	}
+	if err := server.bootstrapAdmin(context.Background()); err != nil {
+		return nil, fmt.Errorf("bootstrap admin: %w", err)
+	}
 
 	return server, nil
 }
@@ -122,6 +125,10 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/health", s.handleHealth)
 	mux.HandleFunc("/ready", s.handleReady)
 	mux.HandleFunc("/metrics", s.handleMetrics)
+	mux.HandleFunc("/auth/login", s.handleAuthLogin)
+	mux.HandleFunc("/auth/logout", s.handleAuthLogout)
+	mux.HandleFunc("/auth/refresh", s.handleAuthRefresh)
+	mux.HandleFunc("/auth/me", s.handleAuthMe)
 	mux.HandleFunc("/admin", s.handleAdminUI)
 	mux.HandleFunc("/admin/", s.handleAdminUI)
 	mux.HandleFunc("/admin/stats", s.handleStats)
@@ -131,6 +138,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/admin/providers", s.handleProviders)
 	mux.HandleFunc("/admin/providers/", s.handleProviderByName)
 	mux.HandleFunc("/admin/audit-logs", s.handleAuditLogs)
+	mux.HandleFunc("/admin/audit/auth-events", s.handleAuthAuditEvents)
 	mux.HandleFunc("/admin/users", s.handleUsers)
 	mux.HandleFunc("/admin/users/", s.handleUserDetail)
 	mux.HandleFunc("/admin/teams", s.handleTeams)
@@ -146,6 +154,14 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/admin/timeseries", s.handleTimeseries)
 	mux.HandleFunc("/admin/heatmap", s.handleHeatmap)
 	mux.HandleFunc("/admin/anomalies", s.handleAnomalies)
+	mux.HandleFunc("/admin/policies/decisions", s.handlePolicyDecisions)
+	mux.HandleFunc("/admin/policies", s.handlePolicies)
+	mux.HandleFunc("/admin/approvals", s.handleApprovals)
+	mux.HandleFunc("/admin/approvals/", s.handleApprovalDecision)
+	mux.HandleFunc("/admin/security/secrets", s.handleSecretEvents)
+	mux.HandleFunc("/admin/replay", s.handleReplay)
+	mux.HandleFunc("/admin/golden-prompts", s.handleGoldenPrompts)
+	mux.HandleFunc("/admin/contexts", s.handleContexts)
 	mux.HandleFunc("/admin/scatter", s.handleScatter)
 	mux.HandleFunc("/admin/routing-rules", s.handleRoutingRules)
 	mux.HandleFunc("/admin/routing-rules/", s.handleRoutingRuleByID)
@@ -153,6 +169,10 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/admin/budgets/", s.handleBudgetByID)
 	mux.HandleFunc("/admin/waterfall", s.handleWaterfall)
 	mux.HandleFunc("/admin/routing/learning", s.handleRoutingLearning)
+	mux.HandleFunc("/admin/routing/preview", s.handleRoutingPreview)
+	mux.HandleFunc("/admin/routing/decisions", s.handleRoutingDecisions)
+	mux.HandleFunc("/admin/routing/decisions/", s.handleRoutingDecisionByID)
+	mux.HandleFunc("/admin/routing/health", s.handleRoutingHealth)
 	mux.HandleFunc("/admin/agents", s.handleAgents)
 	mux.HandleFunc("/admin/cost", s.handleCostGuard)
 	mux.HandleFunc("/admin/cost/predict", s.handleCostPredict)
@@ -297,10 +317,21 @@ func (s *Server) handleAPIKeys(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"api_keys": keys})
 	case http.MethodPost:
 		var payload struct {
-			Name  string `json:"name"`
-			Key   string `json:"key"`
-			Owner string `json:"owner"`
-			Team  string `json:"team"`
+			Name             string   `json:"name"`
+			Key              string   `json:"key"`
+			Owner            string   `json:"owner"`
+			Team             string   `json:"team"`
+			UserID           string   `json:"user_id"`
+			ServiceAccountID string   `json:"service_account_id"`
+			Role             string   `json:"role"`
+			Scopes           []string `json:"scopes"`
+			AllowedIPs       []string `json:"allowed_ips"`
+			AllowedModels    []string `json:"allowed_models"`
+			DeniedModels     []string `json:"denied_models"`
+			AllowedProviders []string `json:"allowed_providers"`
+			DeniedProviders  []string `json:"denied_providers"`
+			BudgetLimitKRW   float64  `json:"budget_limit_krw"`
+			ExpiresAt        string   `json:"expires_at"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 			writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "invalid_body")
@@ -308,6 +339,9 @@ func (s *Server) handleAPIKeys(w http.ResponseWriter, r *http.Request) {
 		}
 		payload.Name = strings.TrimSpace(payload.Name)
 		payload.Key = strings.TrimSpace(payload.Key)
+		if claims, ok := s.currentAccessClaims(r); ok && claims.Role == "team_admin" {
+			payload.Team = claims.TeamID
+		}
 		if payload.Name == "" {
 			writeOpenAIError(w, http.StatusBadRequest, "name is required", "invalid_request_error", "missing_name")
 			return
@@ -316,7 +350,11 @@ func (s *Server) handleAPIKeys(w http.ResponseWriter, r *http.Request) {
 		generated := false
 		if plainKey == "" {
 			var err error
-			plainKey, err = generateProxyKey()
+			prefix := s.cfg.Auth.APIKeyPrefix
+			if payload.Role == "service_account" || payload.ServiceAccountID != "" {
+				prefix = s.cfg.Auth.ServiceKeyPrefix
+			}
+			plainKey, err = generateAuthAPIKey(prefix)
 			if err != nil {
 				writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "key_generation_failed")
 				return
@@ -324,25 +362,35 @@ func (s *Server) handleAPIKeys(w http.ResponseWriter, r *http.Request) {
 			generated = true
 		}
 		record := store.APIKeyRecord{
-			ID:      "key_" + hashProxyKey(plainKey)[:16],
-			Name:    payload.Name,
-			KeyHash: hashProxyKey(plainKey),
-			Owner:   strings.TrimSpace(payload.Owner),
-			Team:    strings.TrimSpace(payload.Team),
-			Status:  "active",
+			ID:               "key_" + hashProxyKey(plainKey)[:16],
+			Name:             payload.Name,
+			KeyHash:          hashProxyKey(plainKey),
+			Owner:            strings.TrimSpace(payload.Owner),
+			Team:             strings.TrimSpace(payload.Team),
+			UserID:           strings.TrimSpace(payload.UserID),
+			ServiceAccountID: strings.TrimSpace(payload.ServiceAccountID),
+			Role:             strings.TrimSpace(payload.Role),
+			Status:           "active",
+			Scopes:           payload.Scopes,
+			AllowedIPs:       payload.AllowedIPs,
+			AllowedModels:    payload.AllowedModels,
+			DeniedModels:     payload.DeniedModels,
+			AllowedProviders: payload.AllowedProviders,
+			DeniedProviders:  payload.DeniedProviders,
+			BudgetLimitKRW:   payload.BudgetLimitKRW,
+			ExpiresAt:        parseAPITime(payload.ExpiresAt),
 		}
 		if err := s.db.UpsertAPIKey(r.Context(), record); err != nil {
 			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "api_key_create_failed")
 			return
 		}
 		s.auditAdmin(r, "api_key.upsert", "", auditJSON(map[string]any{"id": record.ID, "name": record.Name, "owner": record.Owner, "team": record.Team, "generated": generated}))
+		_ = s.db.InsertAuditEvent(r.Context(), store.AuthEvent{ID: newID("ae"), EventType: "api_key_created", APIKeyID: record.ID, TeamID: record.Team, IP: clientIP(r), UserAgent: r.UserAgent(), Detail: record.Name, CreatedAt: time.Now().UTC()})
 		writeJSON(w, http.StatusCreated, map[string]any{
 			"api_key": map[string]any{
-				"id":     record.ID,
-				"name":   record.Name,
-				"owner":  record.Owner,
-				"team":   record.Team,
-				"status": record.Status,
+				"id": record.ID, "name": record.Name, "owner": record.Owner, "team": record.Team, "user_id": record.UserID,
+				"service_account_id": record.ServiceAccountID, "role": record.Role, "status": record.Status,
+				"scopes": record.Scopes, "allowed_ips": record.AllowedIPs,
 			},
 			"secret": plainKey,
 		})
@@ -356,28 +404,54 @@ func (s *Server) handleAPIKeyByID(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
 	}
-	id := strings.TrimPrefix(r.URL.Path, "/admin/api-keys/")
+	rest := strings.TrimPrefix(r.URL.Path, "/admin/api-keys/")
+	id := rest
+	action := ""
+	if idx := strings.Index(rest, "/"); idx >= 0 {
+		id = rest[:idx]
+		action = rest[idx+1:]
+	}
 	if id == "" || strings.Contains(id, "/") {
 		writeOpenAIError(w, http.StatusBadRequest, "invalid API key id", "invalid_request_error", "invalid_api_key_id")
 		return
 	}
+	if action == "revoke" {
+		if r.Method != http.MethodPost {
+			writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+			return
+		}
+		if err := s.db.RevokeAPIKey(r.Context(), id); err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "api_key_revoke_failed")
+			return
+		}
+		_ = s.db.InsertAuditEvent(r.Context(), store.AuthEvent{ID: newID("ae"), EventType: "api_key_revoked", APIKeyID: id, IP: clientIP(r), UserAgent: r.UserAgent(), CreatedAt: time.Now().UTC()})
+		writeJSON(w, http.StatusOK, map[string]string{"id": id, "status": "revoked"})
+		return
+	}
+	if action != "" {
+		writeOpenAIError(w, http.StatusNotFound, "not found", "invalid_request_error", "not_found")
+		return
+	}
 	switch r.Method {
 	case http.MethodDelete:
-		if err := s.db.SetAPIKeyStatus(r.Context(), id, "disabled"); err != nil {
+		if err := s.db.RevokeAPIKey(r.Context(), id); err != nil {
 			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "api_key_update_failed")
 			return
 		}
-		s.auditAdmin(r, "api_key.status", "", auditJSON(map[string]any{"id": id, "status": "disabled"}))
-		writeJSON(w, http.StatusOK, map[string]string{"id": id, "status": "disabled"})
+		s.auditAdmin(r, "api_key.status", "", auditJSON(map[string]any{"id": id, "status": "revoked"}))
+		_ = s.db.InsertAuditEvent(r.Context(), store.AuthEvent{ID: newID("ae"), EventType: "api_key_revoked", APIKeyID: id, IP: clientIP(r), UserAgent: r.UserAgent(), CreatedAt: time.Now().UTC()})
+		writeJSON(w, http.StatusOK, map[string]string{"id": id, "status": "revoked"})
 	case http.MethodPatch:
 		// Partial update: status and/or label (name/owner/team). This is also how an
 		// observed external key (ext_…, whose hash the gateway already stored) is
 		// promoted to a named, active managed user — no plaintext needed.
 		var payload struct {
-			Status *string `json:"status"`
-			Name   *string `json:"name"`
-			Owner  *string `json:"owner"`
-			Team   *string `json:"team"`
+			Status *string  `json:"status"`
+			Name   *string  `json:"name"`
+			Owner  *string  `json:"owner"`
+			Team   *string  `json:"team"`
+			Role   *string  `json:"role"`
+			Scopes []string `json:"scopes"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 			writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "invalid_body")
@@ -410,12 +484,21 @@ func (s *Server) handleAPIKeyByID(w http.ResponseWriter, r *http.Request) {
 		if payload.Team != nil {
 			updated.Team = strings.TrimSpace(*payload.Team)
 		}
+		if payload.Role != nil {
+			updated.Role = strings.TrimSpace(*payload.Role)
+		}
+		if payload.Scopes != nil {
+			updated.Scopes = payload.Scopes
+		}
 		if err := s.db.UpsertAPIKey(r.Context(), updated); err != nil {
 			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "api_key_update_failed")
 			return
 		}
 		s.auditAdmin(r, "api_key.update", auditJSON(existing), auditJSON(updated))
-		writeJSON(w, http.StatusOK, map[string]any{"id": updated.ID, "name": updated.Name, "owner": updated.Owner, "team": updated.Team, "status": updated.Status})
+		if existing.Role != updated.Role {
+			_ = s.db.InsertAuditEvent(r.Context(), store.AuthEvent{ID: newID("ae"), EventType: "role_changed", APIKeyID: id, TeamID: updated.Team, IP: clientIP(r), UserAgent: r.UserAgent(), Detail: existing.Role + " -> " + updated.Role, CreatedAt: time.Now().UTC()})
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"id": updated.ID, "name": updated.Name, "owner": updated.Owner, "team": updated.Team, "role": updated.Role, "scopes": updated.Scopes, "status": updated.Status})
 	default:
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
 	}
@@ -576,12 +659,13 @@ func (s *Server) handleOpenAI(w http.ResponseWriter, r *http.Request) {
 	isModelsGet := r.Method == http.MethodGet && r.URL.Path == "/v1/models"
 
 	var apiKeyID string
-	if isModelsGet {
+	var authCtx *store.AuthContext
+	if isModelsGet && !s.cfg.Auth.Enabled {
 		// /v1/models는 인증 불필요 — anonymous로 처리
 		apiKeyID = "anonymous"
 	} else {
 		var ok bool
-		apiKeyID, ok = s.authenticateProxy(r)
+		apiKeyID, authCtx, ok = s.authenticateProxyContext(r)
 		if !ok {
 			writeOpenAIError(w, http.StatusUnauthorized, "invalid proxy API key", "invalid_request_error", "invalid_api_key")
 			return
@@ -619,24 +703,60 @@ func (s *Server) handleOpenAI(w http.ResponseWriter, r *http.Request) {
 
 	traceID := traceIDFromRequest(r)
 
-	// Complexity-based cost-optimal routing: when the client did not pin a provider,
-	// rewrite the requested model to a cheaper/premium one per configured rules.
+	// Intelligent routing: score complexity/risk, expand auto model aliases, and
+	// optionally rewrite the requested model/provider when the client did not pin routing.
 	var routeDecision routingDecision
 	pinned := strings.TrimSpace(r.Header.Get("X-Proxy-Provider")) != "" || strings.TrimSpace(r.URL.Query().Get("provider")) != ""
 	noRoute := strings.EqualFold(strings.TrimSpace(r.Header.Get("X-Proxy-No-Route")), "1")
-	if r.URL.Path == "/v1/chat/completions" && r.Method == http.MethodPost && !pinned && !noRoute {
-		origModel, complexity := previewModelComplexity(body, r.URL.Path)
-		if d := s.evaluateRoutingRules(r.Context(), origModel, complexity); d.Applied {
-			body = rewriteModelField(body, d.TargetModel)
-			routeDecision = d
-			w.Header().Set("X-Routed-Model", d.TargetModel)
+	var routingPlan *intelligentRoutingPlan
+	if r.URL.Path == "/v1/chat/completions" && r.Method == http.MethodPost {
+		plan := s.planIntelligentRouting(r.Context(), body, r.URL.Path, pinned, noRoute, authCtx)
+		routingPlan = &plan
+		w.Header().Set("X-Routing-Complexity", strconv.Itoa(plan.Complexity.Score))
+		w.Header().Set("X-Routing-Complexity-Tier", plan.Complexity.Tier)
+		w.Header().Set("X-Routing-Risk", strconv.Itoa(plan.Risk.Score))
+		if authCtx != nil && (plan.SelectedModel == "" || !listAllows(plan.SelectedModel, authCtx.AllowedModels, authCtx.DeniedModels)) {
+			_ = s.db.InsertAuditEvent(r.Context(), store.AuthEvent{ID: newID("ae"), EventType: "model_denied", APIKeyID: authCtx.APIKeyID, TeamID: authCtx.TeamID, IP: clientIP(r), UserAgent: r.UserAgent(), Detail: plan.SelectedModel, CreatedAt: time.Now().UTC()})
+			writeOpenAIError(w, http.StatusForbidden, "model is not allowed by auth policy", "permission_error", "model_denied")
+			return
+		}
+		if !pinned && !noRoute && plan.SelectedModel != "" && plan.RequestedModel != "" && plan.SelectedModel != plan.RequestedModel {
+			body = rewriteModelField(body, plan.SelectedModel)
+			routeDecision = routingDecision{
+				Applied:       true,
+				OriginalModel: plan.RequestedModel,
+				TargetModel:   plan.SelectedModel,
+				Desc:          plan.DecisionReason,
+				Reason:        plan.RouteReason,
+			}
+			if plan.ForceProvider {
+				routeDecision.TargetProvider = plan.SelectedProvider
+			}
+			w.Header().Set("X-Routed-Model", plan.SelectedModel)
+		} else if !pinned && !noRoute && plan.ForceProvider && plan.SelectedProvider != "" {
+			routeDecision.TargetProvider = plan.SelectedProvider
 		}
 	}
 
 	meta := s.auditRequest(r.URL.Path, body, apiKeyID, traceID, r)
+	if routingPlan != nil {
+		meta.Request.Complexity = routingPlan.Complexity.Score
+		if routingPlan.RequestedModel != "" && routingPlan.RequestedModel != meta.Request.Model {
+			meta.Request.RequestedModel = routingPlan.RequestedModel
+		}
+		meta.Routing = routingPlan.toStore(meta.Request.ID, traceID, meta.Request.Provider)
+	}
 	if routeDecision.Applied {
 		meta.Request.RequestedModel = routeDecision.OriginalModel
 		s.metrics.IncRoutingOverride()
+	}
+
+	if r.Method == http.MethodPost {
+		var blocked bool
+		body, blocked = s.enforceOpenAIGovernance(w, r, &meta, body, authCtx, routingPlan, 0, true, "request")
+		if blocked {
+			return
+		}
 	}
 
 	// Inferred VCS: mine git commit/push activity out of the conversation so the VCS
@@ -656,12 +776,21 @@ func (s *Server) handleOpenAI(w http.ResponseWriter, r *http.Request) {
 		if expanded, ids, tokens := s.expandKnowledge(r, body); len(ids) > 0 {
 			body = expanded
 			w.Header().Set("X-Knowledge-Expanded", strings.Join(ids, ","))
+			kbIDs, ctxKeys := splitExpandedRefs(ids)
+			if len(ctxKeys) > 0 {
+				w.Header().Set("X-Context-Expanded", strings.Join(ctxKeys, ","))
+			}
 			s.metrics.AddKnowledgeExpansion(tokens)
-			go func(ids []string) {
+			go func(kbIDs, ctxKeys []string) {
 				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer cancel()
-				_ = s.db.TouchKnowledge(ctx, ids)
-			}(ids)
+				if len(kbIDs) > 0 {
+					_ = s.db.TouchKnowledge(ctx, kbIDs)
+				}
+				if len(ctxKeys) > 0 {
+					_ = s.db.TouchContextRegistry(ctx, ctxKeys)
+				}
+			}(kbIDs, ctxKeys)
 		}
 	}
 
@@ -688,9 +817,11 @@ func (s *Server) handleOpenAI(w http.ResponseWriter, r *http.Request) {
 
 	// Cost prediction (pre-call): estimate tokens/cost/latency, expose as headers, and
 	// optionally gate calls whose predicted cost exceeds the configured threshold.
+	estimatedCostKRW := 0.0
 	if r.URL.Path == "/v1/chat/completions" && r.Method == http.MethodPost {
 		snap := s.costSnapshotCached(r.Context())
 		est := predictCost(meta.Request.Model, promptTokenEstimate(meta.Prompts), parseMaxTokens(body), snap, s.cfg.Pricing)
+		estimatedCostKRW = est.CostKRW
 		w.Header().Set("X-Estimated-Input-Tokens", strconv.Itoa(est.InputTokens))
 		w.Header().Set("X-Estimated-Output-Tokens", strconv.Itoa(est.OutputTokens))
 		if est.Priced {
@@ -698,6 +829,16 @@ func (s *Server) handleOpenAI(w http.ResponseWriter, r *http.Request) {
 		}
 		if est.LatencyMS > 0 {
 			w.Header().Set("X-Estimated-Latency-MS", strconv.Itoa(int(est.LatencyMS+0.5)))
+		}
+		if authCtx != nil && authCtx.BudgetLimitKRW > 0 && est.Priced && est.CostKRW > authCtx.BudgetLimitKRW {
+			_ = s.db.InsertAuditEvent(r.Context(), store.AuthEvent{ID: newID("ae"), EventType: "budget_denied", APIKeyID: authCtx.APIKeyID, TeamID: authCtx.TeamID, IP: clientIP(r), UserAgent: r.UserAgent(), Detail: formatKRW(est.CostKRW) + " > " + formatKRW(authCtx.BudgetLimitKRW), CreatedAt: time.Now().UTC()})
+			writeOpenAIError(w, http.StatusPaymentRequired, "estimated cost exceeds key budget limit", "budget_error", "budget_denied")
+			return
+		}
+		var blocked bool
+		body, blocked = s.enforceOpenAIGovernance(w, r, &meta, body, authCtx, routingPlan, estimatedCostKRW, false, "cost")
+		if blocked {
+			return
 		}
 		if snap.guardEnabled && snap.guardThreshold > 0 && est.Priced && est.CostKRW > snap.guardThreshold &&
 			!strings.EqualFold(strings.TrimSpace(r.Header.Get("X-Cost-Approve")), "1") {
@@ -715,18 +856,36 @@ func (s *Server) handleOpenAI(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusBadGateway, err.Error(), "server_error", "provider_unavailable")
 		return
 	}
+	if authCtx != nil && !listAllows(provider.Name, authCtx.AllowedProviders, authCtx.DeniedProviders) {
+		_ = s.db.InsertAuditEvent(r.Context(), store.AuthEvent{ID: newID("ae"), EventType: "model_denied", APIKeyID: authCtx.APIKeyID, TeamID: authCtx.TeamID, IP: clientIP(r), UserAgent: r.UserAgent(), Detail: "provider:" + provider.Name, CreatedAt: time.Now().UTC()})
+		writeOpenAIError(w, http.StatusForbidden, "provider is not allowed by auth policy", "permission_error", "provider_denied")
+		return
+	}
 	meta.Request.Provider = provider.Name
 	meta.Request.RouteReason = provider.Reason
 	meta.Request.RouteDetail = provider.Detail
 	if routeDecision.Applied {
 		// the model choice is the salient decision; surface it as the routing reason.
-		meta.Request.RouteReason = "complexity_rule"
+		meta.Request.RouteReason = firstNonEmpty(routeDecision.Reason, "complexity_rule")
 		meta.Request.RouteDetail = routeDecision.Desc
+	}
+	if routingPlan != nil {
+		routingPlan.SelectedProvider = provider.Name
+		routingPlan.HealthScore = s.healthScoreForProvider(r.Context(), provider.Name)
+		meta.Routing = routingPlan.toStore(meta.Request.ID, traceID, provider.Name)
+	}
+	if r.Method == http.MethodPost {
+		var blocked bool
+		body, blocked = s.enforceOpenAIGovernance(w, r, &meta, body, authCtx, routingPlan, estimatedCostKRW, false, "provider")
+		if blocked {
+			return
+		}
 	}
 
 	// Identify failover candidates: only when the client did NOT explicitly pin a provider.
 	failoverCandidates := []string{}
-	if strings.TrimSpace(r.Header.Get("X-Proxy-Provider")) == "" && strings.TrimSpace(r.URL.Query().Get("provider")) == "" {
+	fallbackAllowed := routingPlan == nil || !riskDisablesFallback(routingPlan.Risk)
+	if fallbackAllowed && strings.TrimSpace(r.Header.Get("X-Proxy-Provider")) == "" && strings.TrimSpace(r.URL.Query().Get("provider")) == "" {
 		if cands, _ := s.providersForModel(r.Context(), meta.Request.Model); len(cands) > 1 {
 			for _, name := range cands {
 				if name != provider.Name {
@@ -737,7 +896,16 @@ func (s *Server) handleOpenAI(w http.ResponseWriter, r *http.Request) {
 	}
 
 	start := time.Now()
-	resp, resolvedName, failoverFrom, err := s.dialUpstream(r.Context(), r, body, provider, traceID, failoverCandidates)
+	resp, resolvedName, failoverFrom, failoverReason, failoverPath, finalBody, finalModel, err := s.dialUpstream(r.Context(), r, body, provider, traceID, failoverCandidates)
+	if finalBody != nil {
+		body = finalBody
+	}
+	if finalModel != "" && finalModel != meta.Request.Model {
+		meta.Request.Model = finalModel
+		if routingPlan != nil {
+			routingPlan.SelectedModel = finalModel
+		}
+	}
 	if err != nil {
 		s.metrics.IncUpstreamError()
 		status := statusForUpstreamError(err)
@@ -745,6 +913,10 @@ func (s *Server) handleOpenAI(w http.ResponseWriter, r *http.Request) {
 		meta.Request.LatencyMS = time.Since(start).Milliseconds()
 		meta.Request.Error = err.Error()
 		meta.Request.FallbackReason = err.Error()
+		if routingPlan != nil {
+			routingPlan.FallbackPath = append(routingPlan.FallbackPath, failoverPath...)
+			meta.Routing = routingPlan.toStore(meta.Request.ID, traceID, meta.Request.Provider)
+		}
 		meta.Evaluations = buildLLMEvaluations(meta, ResponseAnalysis{})
 		s.metrics.ObserveLLMEvaluations(meta.Evaluations)
 		s.enqueue(meta)
@@ -757,9 +929,17 @@ func (s *Server) handleOpenAI(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Failover-From", failoverFrom)
 		meta.Request.Failover = true
 		meta.Request.FallbackFrom = failoverFrom
+		meta.Request.FallbackReason = failoverReason
 	}
 	if resolvedName != "" {
 		meta.Request.Provider = resolvedName
+	}
+	if routingPlan != nil {
+		routingPlan.SelectedProvider = meta.Request.Provider
+		if len(failoverPath) > 0 {
+			routingPlan.FallbackPath = append(routingPlan.FallbackPath, failoverPath...)
+		}
+		meta.Routing = routingPlan.toStore(meta.Request.ID, traceID, meta.Request.Provider)
 	}
 
 	stream := meta.Request.Stream || strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream")
@@ -905,41 +1085,67 @@ func (s *Server) upstreamURL(baseURL string, incoming *url.URL) (string, error) 
 }
 
 func (s *Server) authenticateProxy(r *http.Request) (string, bool) {
+	id, _, ok := s.authenticateProxyContext(r)
+	return id, ok
+}
+
+func (s *Server) authenticateProxyContext(r *http.Request) (string, *store.AuthContext, bool) {
 	token := bearerToken(r.Header.Get("Authorization"))
 	if token == "" {
 		hasKeys, err := s.db.HasActiveAPIKeys(r.Context())
 		if err != nil {
 			slog.Warn("check active proxy keys failed", "error", err)
-			return "", false
+			return "", nil, false
 		}
-		if !hasKeys {
-			return "anonymous", true
+		if !hasKeys && !s.cfg.Auth.Enabled {
+			return "anonymous", nil, true
 		}
-		return "", false
+		_ = s.db.InsertAuditEvent(r.Context(), store.AuthEvent{ID: newID("ae"), EventType: "api_key_denied", IP: clientIP(r), UserAgent: r.UserAgent(), Detail: "missing bearer token", CreatedAt: time.Now().UTC()})
+		return "", nil, false
 	}
 	keyHash := hashProxyKey(token)
 	key, found, err := s.db.FindActiveAPIKeyByHash(r.Context(), keyHash)
 	if err != nil {
 		slog.Warn("lookup proxy api key failed", "error", err)
-		return "", false
+		return "", nil, false
 	}
 	if found {
-		return key.ID, true
+		authCtx := authContextFromAPIKey(key)
+		s.enrichAuthContextTeam(r.Context(), &authCtx)
+		if !key.RevokedAt.IsZero() || key.Status != "active" {
+			_ = s.db.InsertAuditEvent(r.Context(), store.AuthEvent{ID: newID("ae"), EventType: "api_key_denied", APIKeyID: key.ID, IP: clientIP(r), UserAgent: r.UserAgent(), Detail: "revoked_or_inactive", CreatedAt: time.Now().UTC()})
+			return "", nil, false
+		}
+		if !key.ExpiresAt.IsZero() && key.ExpiresAt.Before(time.Now().UTC()) {
+			_ = s.db.InsertAuditEvent(r.Context(), store.AuthEvent{ID: newID("ae"), EventType: "api_key_denied", APIKeyID: key.ID, IP: clientIP(r), UserAgent: r.UserAgent(), Detail: "expired", CreatedAt: time.Now().UTC()})
+			return "", nil, false
+		}
+		if !ipAllowed(clientIP(r), key.AllowedIPs) {
+			_ = s.db.InsertAuditEvent(r.Context(), store.AuthEvent{ID: newID("ae"), EventType: "ip_denied", APIKeyID: key.ID, IP: clientIP(r), UserAgent: r.UserAgent(), Detail: strings.Join(key.AllowedIPs, ","), CreatedAt: time.Now().UTC()})
+			return "", nil, false
+		}
+		scope := apiScopeForRequest(r)
+		if s.cfg.Auth.Enabled && scope != "" && !hasScope(key.Scopes, scope) {
+			_ = s.db.InsertAuditEvent(r.Context(), store.AuthEvent{ID: newID("ae"), EventType: "scope_denied", APIKeyID: key.ID, TeamID: key.Team, IP: clientIP(r), UserAgent: r.UserAgent(), Detail: scope, CreatedAt: time.Now().UTC()})
+			return "", nil, false
+		}
+		return key.ID, &authCtx, true
 	}
 	// 토큰이 proxy key(pcg_ 접두사)가 아니면 upstream API key passthrough 로 허용
 	// 이를 통해 Roo Code / Cursor 등이 upstream key 를 직접 보내도 프록시가 작동함
-	if !strings.HasPrefix(token, "pcg_") {
-		return s.attributeExternalKey(r, keyHash), true
+	if !s.cfg.Auth.Enabled && !strings.HasPrefix(token, "pcg_") {
+		return s.attributeExternalKey(r, keyHash), nil, true
 	}
 	hasKeys, err := s.db.HasActiveAPIKeys(r.Context())
 	if err != nil {
 		slog.Warn("check active proxy keys failed", "error", err)
-		return "", false
+		return "", nil, false
 	}
-	if !hasKeys {
-		return "anonymous", true
+	if !hasKeys && !s.cfg.Auth.Enabled {
+		return "anonymous", nil, true
 	}
-	return "", false
+	_ = s.db.InsertAuditEvent(r.Context(), store.AuthEvent{ID: newID("ae"), EventType: "api_key_denied", IP: clientIP(r), UserAgent: r.UserAgent(), Detail: "unknown key", CreatedAt: time.Now().UTC()})
+	return "", nil, false
 }
 
 // attributeExternalKey maps an unregistered (non-proxy) bearer key to a stable
@@ -991,7 +1197,7 @@ type resolvedProvider struct {
 // in `failoverCandidates`, in order. Returns the live response, the name of the
 // provider that actually answered, and (if a failover occurred) the original primary's
 // name in `failoverFrom`.
-func (s *Server) dialUpstream(reqCtx context.Context, r *http.Request, body []byte, primary resolvedProvider, traceID string, failoverCandidates []string) (*http.Response, string, string, error) {
+func (s *Server) dialUpstream(reqCtx context.Context, r *http.Request, body []byte, primary resolvedProvider, traceID string, failoverCandidates []string) (*http.Response, string, string, string, []string, []byte, string, error) {
 	type attempt struct {
 		provider resolvedProvider
 	}
@@ -1009,22 +1215,27 @@ func (s *Server) dialUpstream(reqCtx context.Context, r *http.Request, body []by
 	}
 
 	var lastErr error
-	for i, att := range attempts {
+	failoverPath := []string{}
+	currentBody := body
+	currentModel, _ := previewModelComplexity(currentBody, r.URL.Path)
+	usedLongContext := false
+	for i := 0; i < len(attempts); {
+		att := attempts[i]
 		upstreamURL, err := s.upstreamURL(att.provider.BaseURL, r.URL)
 		if err != nil {
-			return nil, "", "", err
+			return nil, "", "", "", failoverPath, currentBody, currentModel, err
 		}
 		ctx := reqCtx
 		var cancel context.CancelFunc
 		if att.provider.Timeout > 0 {
 			ctx, cancel = context.WithTimeout(reqCtx, att.provider.Timeout)
 		}
-		upstreamReq, err := http.NewRequestWithContext(ctx, r.Method, upstreamURL, bytes.NewReader(body))
+		upstreamReq, err := http.NewRequestWithContext(ctx, r.Method, upstreamURL, bytes.NewReader(currentBody))
 		if err != nil {
 			if cancel != nil {
 				cancel()
 			}
-			return nil, "", "", err
+			return nil, "", "", "", failoverPath, currentBody, currentModel, err
 		}
 		copyUpstreamHeaders(upstreamReq.Header, r.Header)
 		upstreamReq.Header.Set("Authorization", "Bearer "+att.provider.APIKey)
@@ -1035,24 +1246,63 @@ func (s *Server) dialUpstream(reqCtx context.Context, r *http.Request, body []by
 
 		resp, doErr := s.client.Do(upstreamReq)
 		if doErr == nil {
+			if statusFallbackAllowed(resp.StatusCode) && i+1 < len(attempts) {
+				reason := fallbackReasonForStatus(resp.StatusCode)
+				_, _ = io.Copy(io.Discard, resp.Body)
+				_ = resp.Body.Close()
+				if cancel != nil {
+					cancel()
+				}
+				failoverPath = append(failoverPath, reason+":"+att.provider.Name+"->"+attempts[i+1].provider.Name)
+				slog.Warn("upstream status fallback", "provider", att.provider.Name, "status", resp.StatusCode, "next", attempts[i+1].provider.Name)
+				i++
+				continue
+			}
+			if resp.StatusCode == http.StatusBadRequest && !usedLongContext {
+				sniff, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+				_ = resp.Body.Close()
+				if cancel != nil {
+					cancel()
+				}
+				if contextOverflowBody(sniff) {
+					longModel := defaultAutoModel("reasoning")
+					if longModel != "" && longModel != currentModel {
+						failoverPath = append(failoverPath, "context_overflow:"+currentModel+"->"+longModel)
+						currentBody = rewriteModelField(currentBody, longModel)
+						currentModel = longModel
+						usedLongContext = true
+						continue
+					}
+				}
+				resp.Body = io.NopCloser(bytes.NewReader(sniff))
+			}
 			// Note: ctx must outlive resp.Body reads, so we do NOT call cancel() here.
 			_ = cancel
 			from := ""
+			reason := ""
 			if i > 0 {
 				from = primary.Name
+				if len(failoverPath) > 0 {
+					reason = failoverPath[len(failoverPath)-1]
+				}
 			}
-			return resp, att.provider.Name, from, nil
+			return resp, att.provider.Name, from, reason, failoverPath, currentBody, currentModel, nil
 		}
 		if cancel != nil {
 			cancel()
 		}
 		lastErr = doErr
+		reason := fallbackReasonForError(doErr)
 		slog.Warn("upstream call failed", "provider", att.provider.Name, "attempt", i, "error", doErr)
+		if i+1 < len(attempts) {
+			failoverPath = append(failoverPath, reason+":"+att.provider.Name+"->"+attempts[i+1].provider.Name)
+		}
+		i++
 	}
 	if lastErr == nil {
 		lastErr = errors.New("no provider attempts made")
 	}
-	return nil, "", "", lastErr
+	return nil, "", "", fallbackReasonForError(lastErr), failoverPath, currentBody, currentModel, lastErr
 }
 
 // selectProviderForced resolves a provider, optionally pinned to forceProvider
@@ -1267,6 +1517,23 @@ func providerAuditJSON(provider store.ProviderConfig) string {
 }
 
 func (s *Server) authorizeAdmin(r *http.Request) bool {
+	if s.cfg.Auth.Enabled {
+		claims, ok := s.verifyAccessToken(r.Context(), bearerToken(r.Header.Get("Authorization")))
+		if !ok {
+			_ = s.db.InsertAuditEvent(r.Context(), store.AuthEvent{ID: newID("ae"), EventType: "login_failed", IP: clientIP(r), UserAgent: r.UserAgent(), Detail: "admin jwt invalid", CreatedAt: time.Now().UTC()})
+			return false
+		}
+		required := adminRequiredScope(r)
+		if !hasScope(claims.Scopes, required) {
+			if required == "admin:write" && claims.Role == "team_admin" &&
+				(strings.HasPrefix(r.URL.Path, "/admin/users") || strings.HasPrefix(r.URL.Path, "/admin/teams") || strings.HasPrefix(r.URL.Path, "/admin/api-keys")) {
+				return true
+			}
+			_ = s.db.InsertAuditEvent(r.Context(), store.AuthEvent{ID: newID("ae"), EventType: "scope_denied", ActorUserID: claims.Subject, TeamID: claims.TeamID, IP: clientIP(r), UserAgent: r.UserAgent(), Detail: required, CreatedAt: time.Now().UTC()})
+			return false
+		}
+		return true
+	}
 	if s.cfg.Auth.AdminToken == "" && s.cfg.Auth.AdminReadonlyToken == "" {
 		return true
 	}
@@ -1284,6 +1551,44 @@ func (s *Server) authorizeAdmin(r *http.Request) bool {
 	}
 	slog.Warn("admin auth failed: token mismatch", "received_token", token, "expected_token", s.cfg.Auth.AdminToken)
 	return false
+}
+
+func (s *Server) currentAccessClaims(r *http.Request) (accessClaims, bool) {
+	if !s.cfg.Auth.Enabled {
+		return accessClaims{}, false
+	}
+	return s.verifyAccessToken(r.Context(), bearerToken(r.Header.Get("Authorization")))
+}
+
+func adminRequiredScope(r *http.Request) string {
+	if strings.HasPrefix(r.URL.Path, "/admin/routing") {
+		if r.Method == http.MethodGet || r.Method == http.MethodHead || r.URL.Path == "/admin/routing/preview" {
+			return "routing:read"
+		}
+		return "routing:write"
+	}
+	if strings.HasPrefix(r.URL.Path, "/admin/security") || strings.HasPrefix(r.URL.Path, "/admin/policies") || strings.HasPrefix(r.URL.Path, "/admin/approvals") {
+		if r.Method == http.MethodGet || r.Method == http.MethodHead {
+			return "security:read"
+		}
+		return "admin:write"
+	}
+	if strings.HasPrefix(r.URL.Path, "/admin/anomalies") {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			return "admin:write"
+		}
+		return "costs:read"
+	}
+	if strings.HasPrefix(r.URL.Path, "/admin/mcp") {
+		if r.Method == http.MethodGet || r.Method == http.MethodHead {
+			return "observability:read"
+		}
+		return "mcp:admin"
+	}
+	if r.Method == http.MethodGet || r.Method == http.MethodHead {
+		return "admin:read"
+	}
+	return "admin:write"
 }
 
 const killSnapshotTTL = 5 * time.Second

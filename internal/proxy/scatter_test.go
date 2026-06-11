@@ -38,6 +38,34 @@ func TestScatterPointsCarryCategoryFields(t *testing.T) {
 	mk("err1", 300, 500, "openai", false, 0, 0)
 	mk("cache1", 1, 200, "cache", false, 50, 0)
 	mk("fb1", 400, 200, "backup", true, 200, 10)
+	if err := db.InsertPolicyDecisionEvent(ctx, store.PolicyDecisionEvent{
+		ID:        "pde_ok1",
+		RequestID: "ok1",
+		Decision:  "mask",
+		Reason:    "masked by policy",
+		CreatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.InsertApproval(ctx, store.Approval{
+		ID:        "appr_ok1",
+		RequestID: "ok1",
+		Status:    "pending",
+		Reason:    "approval pending",
+		CreatedAt: now,
+		ExpiresAt: now.Add(time.Hour),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.InsertSecretEvent(ctx, store.SecretEvent{
+		ID:         "sec_ok1",
+		RequestID:  "ok1",
+		SecretType: "api_key",
+		Action:     "mask",
+		CreatedAt:  now,
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	points, truncated, err := db.ScatterPoints(ctx, store.ScatterFilter{Since: now.Add(-time.Hour), Limit: 100})
 	if err != nil {
@@ -67,6 +95,15 @@ func TestScatterPointsCarryCategoryFields(t *testing.T) {
 	}
 	if by["slow"].TotalTokens != 9000 {
 		t.Errorf("tokens not preserved: %d", by["slow"].TotalTokens)
+	}
+	if by["ok1"].PolicyDecisionCount != 1 || by["ok1"].PolicyDecision != "mask" {
+		t.Errorf("policy decision summary not preserved: %+v", by["ok1"])
+	}
+	if by["ok1"].ApprovalCount != 1 || by["ok1"].ApprovalStatus != "pending" {
+		t.Errorf("approval summary not preserved: %+v", by["ok1"])
+	}
+	if by["ok1"].SecretEventCount != 1 || by["ok1"].SecretAction != "mask" {
+		t.Errorf("secret summary not preserved: %+v", by["ok1"])
 	}
 }
 

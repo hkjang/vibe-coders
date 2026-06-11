@@ -1,11 +1,14 @@
 package proxy
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -122,14 +125,92 @@ func TestAnomaliesEndpoint(t *testing.T) {
 	}
 	defer resp.Body.Close()
 	var payload struct {
-		Anomalies  []store.AnomalyFinding `json:"anomalies"`
-		ZThreshold float64                `json:"z_threshold"`
+		Anomalies      []store.AnomalyFinding     `json:"anomalies"`
+		CostAnomalies  []store.CostAnomalyFinding `json:"cost_anomalies"`
+		InsertedEvents []store.AnomalyEvent       `json:"inserted_events"`
+		Events         []store.AnomalyEvent       `json:"events"`
+		ZThreshold     float64                    `json:"z_threshold"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
 		t.Fatal(err)
 	}
 	if len(payload.Anomalies) == 0 {
 		t.Fatal("expected anomalies from cost spike via endpoint")
+	}
+	if len(payload.CostAnomalies) == 0 {
+		t.Fatal("expected scope cost anomalies via endpoint")
+	}
+	if len(payload.InsertedEvents) == 0 || len(payload.Events) == 0 {
+		t.Fatalf("expected anomaly events to be recorded, inserted=%v events=%v", payload.InsertedEvents, payload.Events)
+	}
+}
+
+func TestAnomalyAlertWebhook(t *testing.T) {
+	var calls atomic.Int32
+	webhook := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		body, _ := io.ReadAll(r.Body)
+		if !bytes.Contains(body, []byte("cost")) && !bytes.Contains(body, []byte("비용")) {
+			t.Errorf("webhook payload missing anomaly text: %s", body)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer webhook.Close()
+
+	db := openTestStore(t)
+	defer db.Close()
+	logger := store.NewAsyncLogger(db, 32, filepath.Join(t.TempDir(), "fallback.ndjson"))
+	logger.Start()
+	defer logger.Stop(context.Background())
+	server, err := NewServer(testConfig("http://example.invalid", "secret"), db, logger, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxy := httptest.NewServer(server.Routes())
+	defer proxy.Close()
+
+	cfgResp := postJSON(t, proxy.URL+"/admin/anomalies", "", map[string]any{
+		"enabled":     true,
+		"webhook_url": webhook.URL,
+	})
+	if cfgResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(cfgResp.Body)
+		t.Fatalf("config status %d: %s", cfgResp.StatusCode, body)
+	}
+	cfgResp.Body.Close()
+
+	now := time.Now().UTC()
+	for i := 0; i < 40; i++ {
+		seedCostReq(t, db, "wb-"+itoaT(i), 100, now.Add(-time.Duration(48+i)*time.Hour))
+	}
+	for i := 0; i < 10; i++ {
+		seedCostReq(t, db, "wr-"+itoaT(i), 900, now.Add(-time.Duration(i)*time.Minute))
+	}
+	resp, err := http.Get(proxy.URL + "/admin/anomalies?recent=1h&z=3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var payload struct {
+		InsertedEvents []store.AnomalyEvent `json:"inserted_events"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.InsertedEvents) == 0 {
+		t.Fatalf("expected inserted anomaly events")
+	}
+	if calls.Load() == 0 {
+		t.Fatalf("expected anomaly webhook to be called")
+	}
+	notified := false
+	for _, event := range payload.InsertedEvents {
+		if event.Status == "notified" && event.Channel == "admin_ui,webhook" {
+			notified = true
+		}
+	}
+	if !notified {
+		t.Fatalf("expected at least one notified webhook event, got %+v", payload.InsertedEvents)
 	}
 }
 

@@ -1,9 +1,11 @@
 package proxy
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"vibe-coders/internal/config"
 	"vibe-coders/internal/store"
@@ -40,6 +42,11 @@ func (s *Server) handleRequestExplain(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "explain_failed")
 		return
 	}
+	governance, err := s.governanceEventsForRequest(r.Context(), id)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "explain_failed")
+		return
+	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"request_id": d.RequestID,
@@ -48,21 +55,15 @@ func (s *Server) handleRequestExplain(w http.ResponseWriter, r *http.Request) {
 		"routing":    s.explainRouting(d),
 		"fallback":   explainFallback(d),
 		"cache":      s.explainCache(d),
-		"safety":     explainSafety(d, evals),
+		"safety":     explainSafety(d, evals, governance),
+		"governance": explainGovernance(governance),
 		"cost":       s.explainCost(d),
 		"session":    map[string]any{"session_id": d.SessionID, "stream": d.Stream},
 	})
 }
 
 func tierForComplexity(c int) string {
-	switch {
-	case c >= 70:
-		return "high"
-	case c >= 35:
-		return "medium"
-	default:
-		return "low"
-	}
+	return complexityTierName(c)
 }
 
 func (s *Server) explainRouting(d store.ExplainData) map[string]any {
@@ -72,7 +73,9 @@ func (s *Server) explainRouting(d store.ExplainData) map[string]any {
 		"model_pattern":   "모델 패턴 자동 라우팅",
 		"default":         "기본 provider(UPSTREAM_PROVIDER)",
 		"complexity_rule": "복잡도 기반 비용 최적 라우팅 규칙",
+		"auto_router":     "Intelligent Routing Engine 자동 모델 선택",
 		"rule_provider":   "라우팅 규칙이 지정한 provider",
+		"cache":           "응답 캐시 히트",
 	}[d.RouteReason]
 	if reasonText == "" {
 		reasonText = d.RouteReason
@@ -84,7 +87,13 @@ func (s *Server) explainRouting(d store.ExplainData) map[string]any {
 		"reason_text":     reasonText,
 		"detail":          d.RouteDetail,
 		"complexity":      d.Complexity,
-		"tier":            tierForComplexity(d.Complexity),
+		"tier":            firstNonEmpty(d.ComplexityTier, tierForComplexity(d.Complexity)),
+		"risk_score":      d.RiskScore,
+		"risk_tier":       d.RiskTier,
+		"risk_categories": d.RiskCategories,
+		"health_score":    d.HealthScore,
+		"decision_reason": d.RoutingReason,
+		"fallback_path":   d.RoutingFallbackPath,
 		"endpoint":        d.Endpoint,
 	}
 	// surface model downgrade/upgrade when a complexity rule changed the model
@@ -129,7 +138,7 @@ func (s *Server) explainCache(d store.ExplainData) map[string]any {
 	return out
 }
 
-func explainSafety(d store.ExplainData, evals []store.LLMEvaluation) map[string]any {
+func explainSafety(d store.ExplainData, evals []store.LLMEvaluation, governance store.GovernanceEvents) map[string]any {
 	findings := []map[string]any{}
 	blocked := false
 	for _, e := range evals {
@@ -143,6 +152,44 @@ func explainSafety(d store.ExplainData, evals []store.LLMEvaluation) map[string]
 			"name": e.Name, "label": e.Label, "reason": e.Reason, "category": e.Category,
 		})
 	}
+	for _, event := range governance.SecretEvents {
+		findings = append(findings, map[string]any{
+			"name":     "secret_firewall." + event.SecretType,
+			"label":    event.Action,
+			"reason":   "secret firewall " + event.Action,
+			"category": "security",
+		})
+		if event.Action == "block" {
+			blocked = true
+		}
+	}
+	for _, approval := range governance.Approvals {
+		if approval.Status == "pending" || approval.Status == "rejected" || approval.Status == "expired" {
+			findings = append(findings, map[string]any{
+				"name":     "governance.approval",
+				"label":    approval.Status,
+				"reason":   approval.Reason,
+				"category": "governance",
+			})
+			if approval.Status != "approved" {
+				blocked = true
+			}
+		}
+	}
+	for _, event := range governance.PolicyDecisions {
+		if event.Decision == "allow" || event.Decision == "detect" {
+			continue
+		}
+		findings = append(findings, map[string]any{
+			"name":     "policy." + firstNonEmpty(event.RuleName, event.RuleID, event.PolicyID),
+			"label":    event.Decision,
+			"reason":   event.Reason,
+			"category": "governance",
+		})
+		if event.Decision == "block" || strings.HasPrefix(event.Decision, "deny_") {
+			blocked = true
+		}
+	}
 	if d.StatusCode == http.StatusForbidden || d.Provider == "blocked" {
 		blocked = true
 	}
@@ -151,6 +198,52 @@ func explainSafety(d store.ExplainData, evals []store.LLMEvaluation) map[string]
 		"masking":       "프롬프트/응답에 마스킹 규칙 적용 (PII·시크릿·카드·주민번호 등)",
 		"findings":      findings,
 		"finding_count": len(findings),
+	}
+}
+
+func (s *Server) governanceEventsForRequest(ctx context.Context, requestID string) (store.GovernanceEvents, error) {
+	var out store.GovernanceEvents
+	var err error
+	if _, err = s.db.ExpireApprovals(ctx, time.Now().UTC()); err != nil {
+		return out, err
+	}
+	if out.SecretEvents, err = s.db.SecretEventsForRequest(ctx, requestID); err != nil {
+		return out, err
+	}
+	if out.Approvals, err = s.db.ApprovalsForRequest(ctx, requestID); err != nil {
+		return out, err
+	}
+	if out.AnomalyEvents, err = s.db.AnomalyEventsForRequest(ctx, requestID, 1*time.Hour); err != nil {
+		return out, err
+	}
+	if out.PolicyDecisions, err = s.db.PolicyDecisionEventsForRequest(ctx, requestID); err != nil {
+		return out, err
+	}
+	return out, nil
+}
+
+func explainGovernance(events store.GovernanceEvents) map[string]any {
+	approvalStatus := ""
+	for _, approval := range events.Approvals {
+		if approvalStatus == "" || approval.Status == "pending" || approval.Status == "rejected" {
+			approvalStatus = approval.Status
+		}
+	}
+	secretActions := map[string]int{}
+	for _, event := range events.SecretEvents {
+		secretActions[event.Action]++
+	}
+	return map[string]any{
+		"secret_events":         events.SecretEvents,
+		"secret_event_count":    len(events.SecretEvents),
+		"secret_actions":        secretActions,
+		"approvals":             events.Approvals,
+		"approval_count":        len(events.Approvals),
+		"approval_status":       approvalStatus,
+		"anomaly_events":        events.AnomalyEvents,
+		"anomaly_event_count":   len(events.AnomalyEvents),
+		"policy_decisions":      events.PolicyDecisions,
+		"policy_decision_count": len(events.PolicyDecisions),
 	}
 }
 

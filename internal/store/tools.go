@@ -10,6 +10,7 @@ import (
 type ToolFilter struct {
 	APIKeyID    string
 	ServerLabel string
+	ToolName    string
 	MCPOnly     bool
 	Since       time.Time
 	Limit       int
@@ -25,6 +26,10 @@ func (f ToolFilter) where() (string, []any) {
 	if f.ServerLabel != "" {
 		clauses = append(clauses, "COALESCE(NULLIF(server_label, ''), '(none)') = ?")
 		args = append(args, f.ServerLabel)
+	}
+	if f.ToolName != "" {
+		clauses = append(clauses, "tool_name = ?")
+		args = append(args, f.ToolName)
 	}
 	if f.MCPOnly {
 		clauses = append(clauses, "is_mcp = 1")
@@ -49,6 +54,10 @@ func (f ToolFilter) whereAliased(a string) (string, []any) {
 	if f.ServerLabel != "" {
 		clauses = append(clauses, "COALESCE(NULLIF("+p+"server_label, ''), '(none)') = ?")
 		args = append(args, f.ServerLabel)
+	}
+	if f.ToolName != "" {
+		clauses = append(clauses, p+"tool_name = ?")
+		args = append(args, f.ToolName)
 	}
 	if f.MCPOnly {
 		clauses = append(clauses, p+"is_mcp = 1")

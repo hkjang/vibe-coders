@@ -125,7 +125,7 @@ func (s *Server) handleMCPGateway(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
 		return
 	}
-	apiKeyID, ok := s.authenticateProxy(r)
+	apiKeyID, authCtx, ok := s.authenticateProxyContext(r)
 	if !ok {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid proxy API key", "invalid_request_error", "invalid_api_key")
 		return
@@ -145,7 +145,7 @@ func (s *Server) handleMCPGateway(w http.ResponseWriter, r *http.Request) {
 		}
 		var responses []any
 		for _, item := range batch {
-			if resp := s.dispatchMCP(w, r, apiKeyID, item); resp != nil {
+			if resp := s.dispatchMCP(w, r, apiKeyID, authCtx, item); resp != nil {
 				responses = append(responses, resp)
 			}
 		}
@@ -156,7 +156,7 @@ func (s *Server) handleMCPGateway(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, responses)
 		return
 	}
-	resp := s.dispatchMCP(w, r, apiKeyID, raw)
+	resp := s.dispatchMCP(w, r, apiKeyID, authCtx, raw)
 	if resp == nil { // notification: no body
 		w.WriteHeader(http.StatusAccepted)
 		return
@@ -166,7 +166,7 @@ func (s *Server) handleMCPGateway(w http.ResponseWriter, r *http.Request) {
 
 // dispatchMCP handles a single JSON-RPC message and returns the response object, or
 // nil for notifications (no id).
-func (s *Server) dispatchMCP(w http.ResponseWriter, r *http.Request, apiKeyID string, raw json.RawMessage) *rpcResponse {
+func (s *Server) dispatchMCP(w http.ResponseWriter, r *http.Request, apiKeyID string, authCtx *store.AuthContext, raw json.RawMessage) *rpcResponse {
 	var msg struct {
 		JSONRPC string          `json:"jsonrpc"`
 		ID      json.RawMessage `json:"id"`
@@ -201,7 +201,7 @@ func (s *Server) dispatchMCP(w http.ResponseWriter, r *http.Request, apiKeyID st
 		}
 		return rpcResultResponse(msg.ID, map[string]any{"tools": tools})
 	case "tools/call":
-		return s.mcpToolsCall(r, apiKeyID, msg.ID, msg.Params)
+		return s.mcpToolsCall(r, apiKeyID, authCtx, msg.ID, msg.Params)
 	case "resources/list":
 		snap := s.mcpToolsSnapshotCached(r.Context())
 		res := snap.resources
@@ -217,7 +217,7 @@ func (s *Server) dispatchMCP(w http.ResponseWriter, r *http.Request, apiKeyID st
 		}
 		return rpcResultResponse(msg.ID, map[string]any{"resourceTemplates": tpls})
 	case "resources/read":
-		return s.mcpResourcesRead(r, apiKeyID, msg.ID, msg.Params)
+		return s.mcpResourcesRead(r, apiKeyID, authCtx, msg.ID, msg.Params)
 	case "prompts/list":
 		snap := s.mcpToolsSnapshotCached(r.Context())
 		prompts := snap.prompts
@@ -226,7 +226,7 @@ func (s *Server) dispatchMCP(w http.ResponseWriter, r *http.Request, apiKeyID st
 		}
 		return rpcResultResponse(msg.ID, map[string]any{"prompts": prompts})
 	case "prompts/get":
-		return s.mcpPromptsGet(r, apiKeyID, msg.ID, msg.Params)
+		return s.mcpPromptsGet(r, apiKeyID, authCtx, msg.ID, msg.Params)
 	default:
 		if isNotification {
 			return nil
@@ -235,7 +235,7 @@ func (s *Server) dispatchMCP(w http.ResponseWriter, r *http.Request, apiKeyID st
 	}
 }
 
-func (s *Server) mcpToolsCall(r *http.Request, apiKeyID string, id, params json.RawMessage) *rpcResponse {
+func (s *Server) mcpToolsCall(r *http.Request, apiKeyID string, authCtx *store.AuthContext, id, params json.RawMessage) *rpcResponse {
 	var p struct {
 		Name      string          `json:"name"`
 		Arguments json.RawMessage `json:"arguments"`
@@ -256,6 +256,9 @@ func (s *Server) mcpToolsCall(r *http.Request, apiKeyID string, id, params json.
 		s.metrics.IncMCPBlocked()
 		s.logMCPCall(r, apiKeyID, route.upstreamName, route.bareTool, p.Arguments, true, http.StatusForbidden, 0)
 		return rpcErrorResponse(id, -32000, "blocked by MCP policy: "+decision.Reason+" ("+decision.BlockedServer+")")
+	}
+	if resp := s.enforceMCPToolGovernance(r, apiKeyID, authCtx, route, route.bareTool, p.Arguments, id); resp != nil {
+		return resp
 	}
 
 	up, found, err := s.db.GetMCPUpstream(r.Context(), route.upstreamID)
@@ -285,7 +288,7 @@ func (s *Server) mcpToolsCall(r *http.Request, apiKeyID string, id, params json.
 }
 
 // mcpResourcesRead routes a resources/read to the upstream that advertised the URI.
-func (s *Server) mcpResourcesRead(r *http.Request, apiKeyID string, id, params json.RawMessage) *rpcResponse {
+func (s *Server) mcpResourcesRead(r *http.Request, apiKeyID string, authCtx *store.AuthContext, id, params json.RawMessage) *rpcResponse {
 	var p struct {
 		URI string `json:"uri"`
 	}
@@ -297,11 +300,11 @@ func (s *Server) mcpResourcesRead(r *http.Request, apiKeyID string, id, params j
 	if !found {
 		return rpcErrorResponse(id, -32602, "unknown resource: "+p.URI)
 	}
-	return s.routeUpstreamRPC(r, apiKeyID, id, route, "resources/read", "resources/read", map[string]any{"uri": p.URI}, params)
+	return s.routeUpstreamRPC(r, apiKeyID, authCtx, id, route, "resources/read", "resources/read", map[string]any{"uri": p.URI}, params)
 }
 
 // mcpPromptsGet routes a prompts/get to the owning upstream using the namespaced name.
-func (s *Server) mcpPromptsGet(r *http.Request, apiKeyID string, id, params json.RawMessage) *rpcResponse {
+func (s *Server) mcpPromptsGet(r *http.Request, apiKeyID string, authCtx *store.AuthContext, id, params json.RawMessage) *rpcResponse {
 	var p struct {
 		Name      string          `json:"name"`
 		Arguments json.RawMessage `json:"arguments"`
@@ -314,18 +317,21 @@ func (s *Server) mcpPromptsGet(r *http.Request, apiKeyID string, id, params json
 	if !found {
 		return rpcErrorResponse(id, -32602, "unknown prompt: "+p.Name)
 	}
-	return s.routeUpstreamRPC(r, apiKeyID, id, route, "prompts/get", route.bareTool, map[string]any{"name": route.bareTool, "arguments": rawOrEmpty(p.Arguments)}, params)
+	return s.routeUpstreamRPC(r, apiKeyID, authCtx, id, route, "prompts/get", route.bareTool, map[string]any{"name": route.bareTool, "arguments": rawOrEmpty(p.Arguments)}, params)
 }
 
 // routeUpstreamRPC enforces policy, forwards a (non tools/call) MCP method to the
 // owning upstream, and logs it into the unified observability pipeline. logLabel is
 // the tool_name recorded for the call.
-func (s *Server) routeUpstreamRPC(r *http.Request, apiKeyID string, id json.RawMessage, route mcpRoute, method, logLabel string, params map[string]any, rawParams json.RawMessage) *rpcResponse {
+func (s *Server) routeUpstreamRPC(r *http.Request, apiKeyID string, authCtx *store.AuthContext, id json.RawMessage, route mcpRoute, method, logLabel string, params map[string]any, rawParams json.RawMessage) *rpcResponse {
 	policySnap := s.mcpPolicySnapshot(r.Context())
 	if evaluateMCPPolicy(policySnap, []store.ToolInvocation{{IsMCP: true, ServerLabel: route.upstreamName, ToolName: logLabel}}).Blocked {
 		s.metrics.IncMCPBlocked()
 		s.logMCPCall(r, apiKeyID, route.upstreamName, logLabel, rawParams, true, http.StatusForbidden, 0)
 		return rpcErrorResponse(id, -32000, "blocked by MCP policy: "+route.upstreamName)
+	}
+	if resp := s.enforceMCPToolGovernance(r, apiKeyID, authCtx, route, logLabel, rawParams, id); resp != nil {
+		return resp
 	}
 	up, found, err := s.db.GetMCPUpstream(r.Context(), route.upstreamID)
 	if err != nil || !found || !up.Enabled {
@@ -347,7 +353,7 @@ func (s *Server) routeUpstreamRPC(r *http.Request, apiKeyID string, id json.RawM
 // logMCPCall records a gateway MCP call into the same tool_invocations pipeline as
 // chat-embedded tool calls, so all MCP observability (servers, loops, catalog,
 // policy) and user attribution include protocol-level calls.
-func (s *Server) logMCPCall(r *http.Request, apiKeyID, serverName, toolName string, args json.RawMessage, isErr bool, status int, latency int64) {
+func (s *Server) logMCPCall(r *http.Request, apiKeyID, serverName, toolName string, args json.RawMessage, isErr bool, status int, latency int64) string {
 	now := time.Now().UTC()
 	reqID := newID("req")
 	traceID := traceIDFromRequest(r)
@@ -387,6 +393,7 @@ func (s *Server) logMCPCall(r *http.Request, apiKeyID, serverName, toolName stri
 	}
 	s.metrics.ObserveToolInvocations(record.Tools)
 	s.enqueue(record)
+	return reqID
 }
 
 func rawOrEmpty(raw json.RawMessage) json.RawMessage {

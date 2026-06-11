@@ -23,22 +23,109 @@ type UsageFilter struct {
 }
 
 type APIKeyRecord struct {
-	ID        string
-	Name      string
-	KeyHash   string
-	Owner     string
-	Team      string
-	Status    string
-	CreatedAt time.Time
+	ID               string
+	Name             string
+	KeyHash          string
+	Owner            string
+	Team             string
+	UserID           string
+	ServiceAccountID string
+	Role             string
+	Status           string
+	Scopes           []string
+	AllowedIPs       []string
+	AllowedModels    []string
+	DeniedModels     []string
+	AllowedProviders []string
+	DeniedProviders  []string
+	BudgetLimitKRW   float64
+	ExpiresAt        time.Time
+	RevokedAt        time.Time
+	CreatedAt        time.Time
 }
 
 type APIKeyPublic struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	Owner     string `json:"owner"`
-	Team      string `json:"team"`
-	Status    string `json:"status"`
-	CreatedAt string `json:"created_at"`
+	ID               string   `json:"id"`
+	Name             string   `json:"name"`
+	Owner            string   `json:"owner"`
+	Team             string   `json:"team"`
+	UserID           string   `json:"user_id"`
+	ServiceAccountID string   `json:"service_account_id"`
+	Role             string   `json:"role"`
+	Status           string   `json:"status"`
+	Scopes           []string `json:"scopes"`
+	AllowedIPs       []string `json:"allowed_ips"`
+	AllowedModels    []string `json:"allowed_models"`
+	DeniedModels     []string `json:"denied_models"`
+	AllowedProviders []string `json:"allowed_providers"`
+	DeniedProviders  []string `json:"denied_providers"`
+	BudgetLimitKRW   float64  `json:"budget_limit_krw"`
+	ExpiresAt        string   `json:"expires_at"`
+	RevokedAt        string   `json:"revoked_at"`
+	CreatedAt        string   `json:"created_at"`
+}
+
+type AuthUser struct {
+	ID           string    `json:"id"`
+	Email        string    `json:"email"`
+	PasswordHash string    `json:"-"`
+	Name         string    `json:"name"`
+	Role         string    `json:"role"`
+	Status       string    `json:"status"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+}
+
+type AuthTeam struct {
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+type UserTeamMembership struct {
+	UserID    string    `json:"user_id"`
+	TeamID    string    `json:"team_id"`
+	Role      string    `json:"role"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+type AuthContext struct {
+	UserID           string   `json:"user_id"`
+	TeamID           string   `json:"team_id"`
+	TeamName         string   `json:"team_name"`
+	Role             string   `json:"role"`
+	Scopes           []string `json:"scopes"`
+	AllowedModels    []string `json:"allowed_models"`
+	DeniedModels     []string `json:"denied_models"`
+	AllowedProviders []string `json:"allowed_providers"`
+	DeniedProviders  []string `json:"denied_providers"`
+	BudgetLimitKRW   float64  `json:"budget_limit_krw"`
+	AllowedIPs       []string `json:"allowed_ips"`
+	APIKeyID         string   `json:"api_key_id"`
+}
+
+type AuthEvent struct {
+	ID          string    `json:"id"`
+	EventType   string    `json:"event_type"`
+	ActorUserID string    `json:"actor_user_id"`
+	APIKeyID    string    `json:"api_key_id"`
+	TeamID      string    `json:"team_id"`
+	IP          string    `json:"ip"`
+	UserAgent   string    `json:"user_agent"`
+	Detail      string    `json:"detail"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+type RefreshTokenRecord struct {
+	ID          string
+	UserID      string
+	SessionID   string
+	TokenHash   string
+	RevokedAt   time.Time
+	ExpiresAt   time.Time
+	CreatedAt   time.Time
+	RotatedFrom string
 }
 
 type ProviderConfig struct {
@@ -113,6 +200,54 @@ type RequestLog struct {
 	TaskType            string // heuristic task class (refactor/generate/debug/...) for routing learning
 	PromptFingerprint   string // lexical fingerprint grouping near-identical task prompts
 	CreatedAt           time.Time
+}
+
+type ComplexityAnalysis struct {
+	Score               int     `json:"score"`
+	Tier                string  `json:"tier"`
+	PromptLength        int     `json:"prompt_length"`
+	TokenEstimate       int     `json:"token_estimate"`
+	CodeDensity         float64 `json:"code_density"`
+	FileCount           int     `json:"file_count"`
+	ConversationDepth   int     `json:"conversation_depth"`
+	InstructionDensity  float64 `json:"instruction_density"`
+	ReasoningKeywords   int     `json:"reasoning_keywords"`
+	RefactoringKeywords int     `json:"refactoring_keywords"`
+	DebuggingKeywords   int     `json:"debugging_keywords"`
+}
+
+type RiskAnalysis struct {
+	Score      int      `json:"score"`
+	Tier       string   `json:"tier"`
+	Categories []string `json:"categories"`
+}
+
+type RoutingDecisionLog struct {
+	ID               string             `json:"id"`
+	RequestID        string             `json:"request_id"`
+	TraceID          string             `json:"trace_id"`
+	RequestedModel   string             `json:"requested_model"`
+	SelectedModel    string             `json:"selected_model"`
+	SelectedProvider string             `json:"selected_provider"`
+	Complexity       ComplexityAnalysis `json:"complexity"`
+	Risk             RiskAnalysis       `json:"risk"`
+	HealthScore      int                `json:"health_score"`
+	FallbackPath     []string           `json:"fallback_path"`
+	DecisionReason   string             `json:"decision_reason"`
+	CreatedAt        time.Time          `json:"created_at"`
+}
+
+type ProviderHealthScore struct {
+	Provider         string  `json:"provider"`
+	Score            int     `json:"score"`
+	Requests         int64   `json:"requests"`
+	AverageLatencyMS float64 `json:"average_latency_ms"`
+	P95LatencyMS     int64   `json:"p95_latency_ms"`
+	Timeouts         int64   `json:"timeouts"`
+	Rate429          int64   `json:"rate_429"`
+	Rate5xx          int64   `json:"rate_5xx"`
+	Fallbacks        int64   `json:"fallbacks"`
+	FallbackRate     float64 `json:"fallback_rate"`
 }
 
 type Budget struct {
@@ -201,6 +336,7 @@ type LogRecord struct {
 	Languages   []LanguageStat
 	Evaluations []LLMEvaluation
 	Tools       []ToolInvocation
+	Routing     *RoutingDecisionLog
 }
 
 // ToolInvocation captures a single tool/MCP interaction observed in a request or
@@ -252,6 +388,196 @@ type MCPPolicy struct {
 	Note        string    `json:"note"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+type Policy struct {
+	ID          string       `json:"id"`
+	Name        string       `json:"name"`
+	Description string       `json:"description"`
+	Enabled     bool         `json:"enabled"`
+	Priority    int          `json:"priority"`
+	CreatedAt   time.Time    `json:"created_at"`
+	UpdatedAt   time.Time    `json:"updated_at"`
+	Rules       []PolicyRule `json:"rules,omitempty"`
+}
+
+type PolicyRule struct {
+	ID         string         `json:"id"`
+	PolicyID   string         `json:"policy_id"`
+	Name       string         `json:"name"`
+	Enabled    bool           `json:"enabled"`
+	Priority   int            `json:"priority"`
+	Conditions map[string]any `json:"conditions"`
+	Actions    map[string]any `json:"actions"`
+	CreatedAt  time.Time      `json:"created_at"`
+	UpdatedAt  time.Time      `json:"updated_at"`
+}
+
+type PolicyDecisionEvent struct {
+	ID              string    `json:"id"`
+	RequestID       string    `json:"request_id"`
+	APIKeyID        string    `json:"api_key_id"`
+	UserID          string    `json:"user_id"`
+	TeamID          string    `json:"team_id"`
+	Endpoint        string    `json:"endpoint"`
+	Phase           string    `json:"phase"`
+	PolicyID        string    `json:"policy_id"`
+	RuleID          string    `json:"rule_id"`
+	RuleName        string    `json:"rule_name"`
+	Decision        string    `json:"decision"`
+	Reason          string    `json:"reason"`
+	Model           string    `json:"model"`
+	Provider        string    `json:"provider"`
+	RiskScore       int       `json:"risk_score"`
+	ComplexityScore int       `json:"complexity_score"`
+	CostKRW         float64   `json:"cost_krw"`
+	CreatedAt       time.Time `json:"created_at"`
+}
+
+type PolicyDecisionFilter struct {
+	Limit     int
+	Since     time.Time
+	RequestID string
+	APIKeyID  string
+	UserID    string
+	TeamID    string
+	Endpoint  string
+	Phase     string
+	PolicyID  string
+	RuleID    string
+	Decision  string
+	Model     string
+	Provider  string
+}
+
+type Approval struct {
+	ID          string    `json:"id"`
+	RequestID   string    `json:"request_id"`
+	APIKeyID    string    `json:"api_key_id"`
+	UserID      string    `json:"user_id"`
+	TeamID      string    `json:"team_id"`
+	SubjectType string    `json:"subject_type"`
+	SubjectID   string    `json:"subject_id"`
+	Status      string    `json:"status"` // pending | approved | rejected | expired
+	Reason      string    `json:"reason"`
+	RiskScore   int       `json:"risk_score"`
+	CostKRW     float64   `json:"cost_krw"`
+	Payload     string    `json:"payload"`
+	ExpiresAt   time.Time `json:"expires_at"`
+	DecidedBy   string    `json:"decided_by"`
+	DecidedAt   time.Time `json:"decided_at"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+type ApprovalFilter struct {
+	Limit       int
+	Since       time.Time
+	ID          string
+	RequestID   string
+	APIKeyID    string
+	UserID      string
+	TeamID      string
+	SubjectType string
+	SubjectID   string
+	Status      string
+	DecidedBy   string
+	Reason      string
+}
+
+type SecretEvent struct {
+	ID          string    `json:"id"`
+	RequestID   string    `json:"request_id"`
+	APIKeyID    string    `json:"api_key_id"`
+	UserID      string    `json:"user_id"`
+	TeamID      string    `json:"team_id"`
+	SecretType  string    `json:"secret_type"`
+	Action      string    `json:"action"` // detect | mask | block
+	Location    string    `json:"location"`
+	MatchedHash string    `json:"matched_hash"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+type SecretEventFilter struct {
+	Limit       int
+	Since       time.Time
+	RequestID   string
+	APIKeyID    string
+	UserID      string
+	TeamID      string
+	SecretType  string
+	Action      string
+	Location    string
+	MatchedHash string
+}
+
+type ToolRiskProfile struct {
+	ID          string    `json:"id"`
+	ServerLabel string    `json:"server_label"`
+	ToolName    string    `json:"tool_name"`
+	RiskLevel   string    `json:"risk_level"` // low | medium | high | critical
+	Action      string    `json:"action"`     // allow | require_approval | block
+	Note        string    `json:"note"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+type ReplayJob struct {
+	ID              string    `json:"id"`
+	SourceRequestID string    `json:"source_request_id"`
+	Prompt          string    `json:"prompt"`
+	Models          []string  `json:"models"`
+	Status          string    `json:"status"`
+	Results         string    `json:"results"`
+	CreatedBy       string    `json:"created_by"`
+	CreatedAt       time.Time `json:"created_at"`
+}
+
+type GoldenPrompt struct {
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	Prompt    string    `json:"prompt"`
+	Expected  string    `json:"expected"`
+	Tags      []string  `json:"tags"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+type GoldenPromptResult struct {
+	ID        string    `json:"id"`
+	PromptID  string    `json:"prompt_id"`
+	Model     string    `json:"model"`
+	Score     float64   `json:"score"`
+	Passed    bool      `json:"passed"`
+	CostKRW   float64   `json:"cost_krw"`
+	LatencyMS int64     `json:"latency_ms"`
+	Response  string    `json:"response"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+type AnomalyEvent struct {
+	ID         string    `json:"id"`
+	Scope      string    `json:"scope"`
+	ScopeValue string    `json:"scope_value"`
+	Metric     string    `json:"metric"`
+	Value      float64   `json:"value"`
+	Baseline   float64   `json:"baseline"`
+	Severity   string    `json:"severity"`
+	Channel    string    `json:"channel"`
+	Status     string    `json:"status"`
+	CreatedAt  time.Time `json:"created_at"`
+}
+
+type ContextRegistryEntry struct {
+	ID            string    `json:"id"`
+	Key           string    `json:"key"`
+	Name          string    `json:"name"`
+	Content       string    `json:"content"`
+	Enabled       bool      `json:"enabled"`
+	TokenEstimate int       `json:"token_estimate"`
+	UseCount      int       `json:"use_count"`
+	LastUsedAt    time.Time `json:"last_used_at"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 type SessionToolLoop struct {
@@ -414,6 +740,14 @@ type RequestDetail struct {
 	Evaluations []LLMEvaluation  `json:"evaluations"`
 	Feedback    []LLMFeedback    `json:"feedback"`
 	Tools       []ToolInvocation `json:"tools"`
+	Governance  GovernanceEvents `json:"governance"`
+}
+
+type GovernanceEvents struct {
+	SecretEvents    []SecretEvent         `json:"secret_events"`
+	Approvals       []Approval            `json:"approvals"`
+	AnomalyEvents   []AnomalyEvent        `json:"anomaly_events"`
+	PolicyDecisions []PolicyDecisionEvent `json:"policy_decisions"`
 }
 
 type LLMSpan struct {
@@ -638,20 +972,30 @@ type SessionTimelinePoint struct {
 }
 
 type ScatterPoint struct {
-	RequestID    string  `json:"request_id"`
-	TraceID      string  `json:"trace_id"`
-	CreatedAt    string  `json:"created_at"`
-	LatencyMS    int64   `json:"latency_ms"`
-	FirstChunkMS int64   `json:"first_chunk_ms"`
-	StatusCode   int     `json:"status_code"`
-	Provider     string  `json:"provider"`
-	Model        string  `json:"model"`
-	Endpoint     string  `json:"endpoint"`
-	TotalTokens  int64   `json:"total_tokens"`
-	CostKRW      float64 `json:"cost_krw"`
-	Stream       bool    `json:"stream"`
-	ToolCount    int     `json:"tool_count"`
-	Failover     bool    `json:"failover"`
+	RequestID           string  `json:"request_id"`
+	TraceID             string  `json:"trace_id"`
+	CreatedAt           string  `json:"created_at"`
+	LatencyMS           int64   `json:"latency_ms"`
+	FirstChunkMS        int64   `json:"first_chunk_ms"`
+	StatusCode          int     `json:"status_code"`
+	Provider            string  `json:"provider"`
+	Model               string  `json:"model"`
+	Endpoint            string  `json:"endpoint"`
+	TotalTokens         int64   `json:"total_tokens"`
+	CostKRW             float64 `json:"cost_krw"`
+	Stream              bool    `json:"stream"`
+	ToolCount           int     `json:"tool_count"`
+	Failover            bool    `json:"failover"`
+	Complexity          int     `json:"complexity"`
+	RiskScore           int     `json:"risk_score"`
+	HealthScore         int     `json:"health_score"`
+	DecisionReason      string  `json:"decision_reason"`
+	PolicyDecisionCount int     `json:"policy_decision_count"`
+	PolicyDecision      string  `json:"policy_decision"`
+	ApprovalCount       int     `json:"approval_count"`
+	ApprovalStatus      string  `json:"approval_status"`
+	SecretEventCount    int     `json:"secret_event_count"`
+	SecretAction        string  `json:"secret_action"`
 }
 
 type ScatterFilter struct {
@@ -671,6 +1015,19 @@ type AnomalyFinding struct {
 	ZScore          float64 `json:"z_score"`
 	Direction       string  `json:"direction"` // up | down
 	BaselineSamples int64   `json:"baseline_samples"`
+	RecentSamples   int64   `json:"recent_samples"`
+}
+
+type CostAnomalyFinding struct {
+	Scope           string  `json:"scope"` // global | api_key | team | model
+	ScopeValue      string  `json:"scope_value"`
+	Metric          string  `json:"metric"` // cost_total
+	BaselineMean    float64 `json:"baseline_mean"`
+	BaselineStd     float64 `json:"baseline_std"`
+	RecentValue     float64 `json:"recent_value"`
+	ZScore          float64 `json:"z_score"`
+	Direction       string  `json:"direction"` // up | down
+	BaselineBuckets int64   `json:"baseline_buckets"`
 	RecentSamples   int64   `json:"recent_samples"`
 }
 

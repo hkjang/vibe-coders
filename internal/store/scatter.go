@@ -35,9 +35,49 @@ func (s *SQLStore) ScatterPoints(ctx context.Context, f ScatterFilter) ([]Scatte
 		SELECT r.id, r.trace_id, r.created_at, r.latency_ms, COALESCE(r.first_chunk_ms, 0),
 			r.status_code, COALESCE(r.provider, ''), COALESCE(r.model, ''), r.endpoint,
 			COALESCE(t.total_tokens, 0), COALESCE(t.estimated_cost, 0),
-			r.stream, COALESCE(r.tool_count, 0), COALESCE(r.failover, 0)
+			r.stream, COALESCE(r.tool_count, 0), COALESCE(r.failover, 0),
+			COALESCE(r.complexity, 0), COALESCE(rd.risk_score, 0), COALESCE(rd.health_score, 0), COALESCE(rd.decision_reason, ''),
+			COALESCE((SELECT COUNT(*) FROM policy_decision_events pde WHERE pde.request_id = r.id), 0),
+			COALESCE((
+				SELECT pde.decision FROM policy_decision_events pde
+				WHERE pde.request_id = r.id
+				ORDER BY CASE
+					WHEN pde.decision = 'block' THEN 1
+					WHEN pde.decision LIKE 'deny_%' THEN 2
+					WHEN pde.decision = 'require_approval' THEN 3
+					WHEN pde.decision = 'mask' THEN 4
+					ELSE 5
+				END, pde.created_at DESC
+				LIMIT 1
+			), ''),
+			COALESCE((SELECT COUNT(*) FROM approvals a WHERE a.request_id = r.id), 0),
+			COALESCE((
+				SELECT a.status FROM approvals a
+				WHERE a.request_id = r.id
+				ORDER BY CASE a.status
+					WHEN 'rejected' THEN 1
+					WHEN 'expired' THEN 2
+					WHEN 'pending' THEN 3
+					WHEN 'approved' THEN 4
+					ELSE 5
+				END, a.created_at DESC
+				LIMIT 1
+			), ''),
+			COALESCE((SELECT COUNT(*) FROM secret_events se WHERE se.request_id = r.id), 0),
+			COALESCE((
+				SELECT se.action FROM secret_events se
+				WHERE se.request_id = r.id
+				ORDER BY CASE se.action
+					WHEN 'block' THEN 1
+					WHEN 'mask' THEN 2
+					WHEN 'detect' THEN 3
+					ELSE 4
+				END, se.created_at DESC
+				LIMIT 1
+			), '')
 		FROM request_logs r
 		LEFT JOIN token_usage t ON t.request_id = r.id
+		LEFT JOIN routing_decisions rd ON rd.request_id = r.id
 		WHERE ` + strings.Join(where, " AND ") + `
 		ORDER BY r.created_at DESC
 		LIMIT ?`)
@@ -54,7 +94,10 @@ func (s *SQLStore) ScatterPoints(ctx context.Context, f ScatterFilter) ([]Scatte
 		var streamInt, failoverInt int
 		if err := rows.Scan(&p.RequestID, &p.TraceID, &p.CreatedAt, &p.LatencyMS, &p.FirstChunkMS,
 			&p.StatusCode, &p.Provider, &p.Model, &p.Endpoint,
-			&p.TotalTokens, &p.CostKRW, &streamInt, &p.ToolCount, &failoverInt); err != nil {
+			&p.TotalTokens, &p.CostKRW, &streamInt, &p.ToolCount, &failoverInt,
+			&p.Complexity, &p.RiskScore, &p.HealthScore, &p.DecisionReason,
+			&p.PolicyDecisionCount, &p.PolicyDecision, &p.ApprovalCount, &p.ApprovalStatus,
+			&p.SecretEventCount, &p.SecretAction); err != nil {
 			return nil, false, err
 		}
 		p.Stream = streamInt == 1

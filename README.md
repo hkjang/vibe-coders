@@ -57,10 +57,14 @@ Roo Code / Cursor / Continue 등 OpenAI 호환 API 를 호출하는 VS Code 확�
 - 사용자/팀 상세 화면에서 필터가 채워진 `LLM 관측` deep link 제공
 - 강화된 PII 마스킹 (한국 주민번호·휴대전화·일반전화·사업자등록번호, 카드번호, 이메일, IPv4, JWT, PEM private key, AWS/GitHub/Slack/Anthropic/OpenAI 키)
 - OpenAI `prompt_tokens_details.cached_tokens`, `completion_tokens_details.reasoning_tokens` 추적 + cached 단가 분리 KRW 비용 계산
+- Intelligent Routing Engine: `auto` / `vibe/auto` / `vibe-coders/auto` 모델 별칭을 complexity·risk·provider health 기반으로 자동 모델/프로바이더 선택
+- 요청별 routing decision 저장: selected model/provider, complexity score, risk score, health score, fallback path, decision reason
+- 인증 확장: email/password admin login, JWT access/refresh rotation, role/scope 기반 Admin API, API key 만료·폐기·IP·scope·모델/provider 정책 검사
+- Governance Layer: 정책 rule 기반 allow/block/approval, 팀 ID/팀명 조건, Secret Firewall detect/mask/block, 승인 workflow, MCP tool risk profile, policy decision audit, anomaly event 조회, replay/golden prompt/context registry API
 - 모델 패턴(`claude-*`, `anthropic/*` 등) 기반 provider 자동 라우팅. 클라이언트가 `X-Proxy-Provider` 를 지정하지 않아도 모델명만으로 라우팅
 - 호출 이력 CSV 다운로드 `/admin/export.csv` (Excel UTF-8 BOM 포함, 한국어 그대로 열림)
 - 운영용 백업 스크립트 `scripts/backup.ps1` / `scripts/backup.sh` (SQLite `.backup` + fallback ndjson + 보존 일수 적용)
-- `/health`, `/ready`, `/metrics`, `/admin`, `/admin/stats`, `/admin/requests`, `/admin/requests/{id}`, `/admin/prompts`, `/admin/export.csv`, `/admin/users`, `/admin/users/{id}`, `/admin/teams`, `/admin/teams/{team}`, `/admin/ips`, `/admin/ips/{ip}`, `/admin/llm/traces`, `/admin/llm/traces/{id}`, `/admin/llm/sessions`, `/admin/llm/prompts`, `/admin/llm/prompts/compare`, `/admin/llm/patterns`, `/admin/llm/insights`, `/admin/llm/timeseries`, `/admin/llm/feedback`, `/admin/llm/evaluations`, `/admin/quotas`, `/admin/retention`, `/admin/fallback`, `/admin/api-keys`, `/admin/providers`, `/admin/audit-logs`
+- `/health`, `/ready`, `/metrics`, `/auth/login`, `/auth/logout`, `/auth/refresh`, `/auth/me`, `/admin`, `/admin/stats`, `/admin/requests`, `/admin/requests/{id}`, `/admin/prompts`, `/admin/export.csv`, `/admin/users`, `/admin/users/{id}`, `/admin/teams`, `/admin/teams/{team}`, `/admin/ips`, `/admin/ips/{ip}`, `/admin/routing/preview`, `/admin/routing/decisions`, `/admin/routing/decisions/{id}`, `/admin/routing/health`, `/admin/policies`, `/admin/policies/decisions`, `/admin/approvals`, `/admin/approvals/{id}/approve`, `/admin/approvals/{id}/reject`, `/admin/security/secrets`, `/admin/replay`, `/admin/golden-prompts`, `/admin/contexts`, `/admin/anomalies`, `/admin/llm/traces`, `/admin/llm/traces/{id}`, `/admin/llm/sessions`, `/admin/llm/prompts`, `/admin/llm/prompts/compare`, `/admin/llm/patterns`, `/admin/llm/insights`, `/admin/llm/timeseries`, `/admin/llm/feedback`, `/admin/llm/evaluations`, `/admin/quotas`, `/admin/retention`, `/admin/fallback`, `/admin/api-keys`, `/admin/api-keys/{id}/revoke`, `/admin/providers`, `/admin/mcp/tools`, `/admin/audit-logs`, `/admin/audit/auth-events`
 
 ## 실행 (개발)
 
@@ -111,6 +115,14 @@ $env:PROXY_API_KEYS="dev:dev-proxy-key:alice:platform,team:team-proxy-key:bob:ba
 | `VCS_WEBHOOK_SECRET` | 없음 | 설정 시 `/vcs/*` 수집 엔드포인트 활성화(GitLab/Bitbucket/범용 → Prompt↔Commit↔MR 상관). 미설정 시 비활성 |
 | `ADMIN_TOKEN` | 없음 | 설정 시 `/admin/*` Bearer 토큰 요구 (전권) |
 | `ADMIN_READONLY_TOKEN` | 없음 | 설정 시 GET/HEAD 만 허용되는 읽기전용 admin 토큰 |
+| `AUTH_ENABLED` | `false` | `true`면 Admin API는 JWT, OpenAI/MCP API는 scope 정책이 있는 API key를 요구 |
+| `AUTH_JWT_SECRET` | 없음 | `AUTH_ENABLED=true`일 때 필수 JWT 서명 secret |
+| `AUTH_ACCESS_TOKEN_TTL` | `15m` | admin JWT access token TTL |
+| `AUTH_REFRESH_TOKEN_TTL` | `168h` | refresh token TTL. refresh 시 rotation 및 이전 토큰 폐기 |
+| `AUTH_API_KEY_PREFIX` | `vc_sk_` | 일반 API key 자동 생성 prefix |
+| `AUTH_SERVICE_KEY_PREFIX` | `vc_sa_` | service account key 자동 생성 prefix |
+| `AUTH_ADMIN_BOOTSTRAP_EMAIL` | 없음 | 초기 `super_admin` 생성 email |
+| `AUTH_ADMIN_BOOTSTRAP_PASSWORD` | 없음 | 초기 `super_admin` 생성 password. DB에는 bcrypt hash만 저장 |
 | `GATEWAY_SECRET` | 개발용 기본값 | Provider API key 암호화 secret. 운영에서는 반드시 설정 |
 | `LOG_RAW_PROMPTS` | `false` | 원문 prompt 저장 여부 |
 | `LOG_RAW_BODIES` | `false` | 요청 원본 JSON body 저장 여부 (요청 재실행에 필요) |
@@ -129,6 +141,26 @@ $env:MODEL_PRICING_KRW_PER_1M='{ "gpt-4.1-mini": { "input_krw_per_1m": 540, "out
 ```
 
 `cached_input_krw_per_1m` 가 설정된 경우 OpenAI 가 `prompt_tokens_details.cached_tokens` 로 보고하는 캐시된 입력 토큰은 별도 단가로 정산됩니다 (설정이 없으면 일반 입력 단가 적용). 추론(reasoning) 토큰은 출력 단가로 함께 정산됩니다.
+
+### 인증 / RBAC
+
+기본값은 기존 호환 모드(`AUTH_ENABLED=false`)입니다. 켜면 admin API는 `/auth/login` JWT가 필요하고, OpenAI 호환 API key는 hash만 저장되며 만료·폐기·IP·scope·모델/provider 정책을 검사합니다.
+
+```powershell
+$env:AUTH_ENABLED="true"
+$env:AUTH_JWT_SECRET="change-me-long-random"
+$env:AUTH_ADMIN_BOOTSTRAP_EMAIL="admin@example.com"
+$env:AUTH_ADMIN_BOOTSTRAP_PASSWORD="change-me"
+
+curl.exe -X POST http://localhost:8080/auth/login `
+  -H "Content-Type: application/json" `
+  -d '{ "email": "admin@example.com", "password": "change-me" }'
+
+curl.exe -X POST http://localhost:8080/admin/api-keys `
+  -H "Authorization: Bearer <access_token>" `
+  -H "Content-Type: application/json" `
+  -d '{ "name": "dev", "scopes": ["chat:completion","models:read"], "allowed_models": ["gpt-4.1-mini","gpt-4.1"] }'
+```
 
 ### 응답 캐시 (비용 절감)
 
@@ -419,6 +451,24 @@ curl.exe http://localhost:8080/admin/providers `
 ```
 
 이후 `model=claude-3-5-sonnet` 요청은 자동으로 anthropic provider 로, `model=gpt-4.1-mini` 는 기본 openai 로 라우팅됩니다. 어드민 UI 의 설정 탭 > 업스트림 프로바이더 폼에서도 동일하게 입력할 수 있습니다.
+
+### Intelligent Routing Engine
+
+`model` 에 `auto`, `vibe/auto`, `vibe-coders/auto` 를 넣으면 게이트웨이가 요청 complexity, risk, provider health 를 계산해 모델과 provider 를 자동 선택합니다. 기본 매핑은 simple→`gpt-4.1-mini`, standard/complex→`gpt-4.1`, reasoning→`o3` 이며, `/admin/routing-rules` 로 운영 규칙을 추가하면 규칙이 우선 적용됩니다.
+
+Complexity score 는 0~100이며 simple(0~29), standard(30~59), complex(60~84), reasoning(85~100) 으로 분류합니다. 입력 길이, 토큰 추정, 코드 밀도, 파일 수, 대화 깊이, 지시 밀도, 추론/리팩토링/디버깅 키워드를 반영합니다. Risk score 는 PII, secret/API key, SQL, 인증/인가, crypto, deployment/infrastructure command를 탐지합니다. 최근 latency/p95/timeout/429/5xx/fallback rate는 provider health score(0~100)에 반영됩니다.
+
+```powershell
+curl.exe http://localhost:8080/admin/routing/preview `
+  -H "Content-Type: application/json" `
+  -d '{ "model": "vibe-coders/auto", "messages": [{ "role": "user", "content": "auth middleware를 리팩터링하고 배포 리스크를 검토해줘" }] }'
+```
+
+운영 API:
+
+- `POST /admin/routing/preview` — upstream 호출 없이 routing 결과만 계산
+- `GET /admin/routing/decisions` / `GET /admin/routing/decisions/{id}` — 요청별 selected model/provider, complexity/risk/health, fallback path, decision reason 조회
+- `GET /admin/routing/health` — 최근 provider health score 조회
 
 ### 라우팅 학습 (Routing Learning Engine)
 
