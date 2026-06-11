@@ -312,9 +312,9 @@
             <div class="architecture-diagram-simple">
                 <div class="diag-node">App / AI Client</div>
                 <div class="diag-arrow">&rarr;</div>
-                <div class="diag-node primary">Proxy Gateway (v0.1.15)</div>
+                <div class="diag-node primary">Proxy Gateway (v0.1.19)</div>
                 <div class="diag-arrow">&rarr;</div>
-                <div class="diag-node accent">KB & MCP / Upstream LLM</div>
+                <div class="diag-node accent">Governance & KB / LLM</div>
             </div>
         </div>
 
@@ -323,8 +323,8 @@
                 <strong>작성 부서:</strong> IT AI 추진단<br>
             </div>
             <div style="text-align: right;">
-                <strong>문서 번호:</strong> SEC-APG-2026-V15<br>
-                <strong>최종 승인 버전:</strong> v0.1.15 (Production Stable)
+                <strong>문서 번호:</strong> SEC-APG-2026-V19<br>
+                <strong>최종 승인 버전:</strong> v0.1.19 (Production Stable)
             </div>
         </div>
     </div>
@@ -557,25 +557,222 @@
             <li><strong>MCP Upstream Gateway:</strong> Model Context Protocol(MCP) 서버군을 게이트웨이로 중계 관리하여, 다수의 에이전트 클라이언트가 사내 인트라넷 도구에 안전하고 효율적으로 접속하도록 제어합니다.</li>
         </ul>
 
-        <h3>5.4 도구별 IP 보안 필터링 및 이상 탐지 (Security & Anomalies)</h3>
+        <h3>5.4 지능형 라우팅 (Intelligent Routing) & 통합 인증 (Enterprise Auth)</h3>
         <p>
-            민감한 로컬 및 인프라 도구 사용에 대한 보안 경계를 강화합니다.
+            동적 인프라 환경에서 연산 효율성을 높이고 보안 경계를 명확히 하기 위해 강화된 라우팅 및 인증 메커니즘을 제공합니다.
         </p>
-        <div class="warning-box" style="margin-top: 10px; margin-bottom: 10px;">
-            <h4>도구별 IP 제한 필터링 (Tool-specific IP Filtering)</h4>
-            <p style="font-size: 13px; margin: 5px 0 0 0;">
-                특정 툴(예: 데이터베이스 쓰기, 쉘 실행, 빌드 배포) 호출 요청이 감지되었을 때, 요청을 보낸 클라이언트가 허용된 IP 대역(예: 사내 VPN, 특정 관리자 IP)에 있는지 검증하고 차단함으로써 권한 없는 도구 오용을 프록시 레벨에서 방어합니다.
-            </p>
-        </div>
-        <p style="font-size: 13px; margin-top: 10px;">
-            또한, <strong>비용 급증 이상 탐지(Anomaly Detection)</strong> 엔진을 통해 단시간 내 비정상적인 호출 횟수 또는 비용 폭증을 이동 평균(EMA) 및 표준 편차 기준(Sigma)으로 실시간 자동 차단 및 슬랙/웹훅 얼럿을 발송합니다.
+        <ul style="font-size: 13px;">
+            <li><strong>지능형 라우팅:</strong> 각 업스트림 공급자(Provider)의 실시간 상태 지표(Latency, Success Rate) 및 비용 효율성을 종합 분석하여, 런타임 최적의 업스트림으로 호를 동적 전환하는 Intelligent Routing 엔진을 내장했습니다.</li>
+            <li><strong>엔터프라이즈 통합 인증:</strong> Gateway 인입 시점의 API Key 유효성 정밀 검증, 어드민 권한 제어 및 클라이언트 그룹 식별을 통해 전사 다중 테넌트(Multi-tenant) 통신 보안을 완성합니다.</li>
+        </ul>
+
+        <h3>5.5 사내 보안 거버넌스 및 규칙 실행기 (Governance & Runner)</h3>
+        <p>
+            비정상 비용 소모와 보안 정책 위반을 프록시 레벨에서 선제 방어하기 위한 거버넌스 계층입니다.
         </p>
+        <ul style="font-size: 13px;">
+            <li><strong>Governance Rule:</strong> 특정 툴 차단, 보안 민감 인자 검열, 사용 가능 범위 통제 등 상세 규칙을 중앙 어드민에서 정의하고 일괄 전파합니다.</li>
+            <li><strong>Governance Runner 워커:</strong> 백그라운드에서 주기적으로 도구 사용 기록 및 요금 한도 위반 여부를 스캔하여, 위반 사항 발생 시 API 호출을 즉각 중지하거나 강제 토큰을 차단합니다.</li>
+            <li><strong>도구별 IP 제한 필터링:</strong> 민감 툴(예: 시스템 명령 실행) 감지 시 클라이언트 IP 대역의 VPN 소속 여부를 사전 검증합니다.</li>
+        </ul>
     </div>
 
     <!-- Section 6 -->
     <div class="section">
         <h2 class="section-title">6. 운영 가이드 및 런북 (Operations & HA Runbook)</h2>
-        <h3>6.1 운영 통제 및 이중화 구성</h3>
+        
+        <h3>6.1 시스템 환경변수 구성 가이드 (Configuration Variables)</h3>
+        <p>
+            AI Proxy Gateway는 기동 시 환경변수를 참조하여 모든 하부 기능(데이터베이스, 로그, 캐시, 인증, VCS 연동 등)의 설정을 활성화합니다.
+        </p>
+        <table style="font-size: 11px; margin-top: 10px;">
+            <thead>
+                <tr>
+                    <th style="width: 25%;">환경변수 키 (Key)</th>
+                    <th style="width: 15%;">기본값 (Default)</th>
+                    <th>상세 설명 및 의미</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><code>LISTEN_ADDR</code></td>
+                    <td><code>:8080</code></td>
+                    <td>Gateway 서버가 수신 대기할 포트 및 네트워크 주소.</td>
+                </tr>
+                <tr>
+                    <td><code>UPSTREAM_PROVIDER</code></td>
+                    <td><code>openai</code></td>
+                    <td>기본 타겟 업스트림 공급자 명칭 (예: openai, anthropic 등).</td>
+                </tr>
+                <tr>
+                    <td><code>UPSTREAM_BASE_URL</code></td>
+                    <td><code>https://api.openai.com</code></td>
+                    <td>기본 업스트림 API 서버의 Base URL 주소.</td>
+                </tr>
+                <tr>
+                    <td><code>UPSTREAM_API_KEY</code></td>
+                    <td>(없음)</td>
+                    <td>업스트림 공급자 통신용 Bearer 인증 키.</td>
+                </tr>
+                <tr>
+                    <td><code>UPSTREAM_TIMEOUT</code></td>
+                    <td><code>10m</code></td>
+                    <td>업스트림에 전달된 LLM 요청의 타임아웃 제한 시간.</td>
+                </tr>
+                <tr>
+                    <td><code>DB_DRIVER</code></td>
+                    <td><code>sqlite</code></td>
+                    <td>데이터베이스 엔진 드라이버 지정 (<code>sqlite</code> 또는 <code>postgres</code>).</td>
+                </tr>
+                <tr>
+                    <td><code>DB_DSN</code></td>
+                    <td><code>data/gateway.db</code></td>
+                    <td>데이터베이스 연결 DSN 문자열. PostgreSQL 지정 시 해당 접속 URI 입력.</td>
+                </tr>
+                <tr>
+                    <td><code>LOG_RAW_PROMPTS</code></td>
+                    <td><code>false</code></td>
+                    <td>사용자가 AI로 보낸 원본 프롬프트 텍스트를 디스크에 상세 로깅할지 여부.</td>
+                </tr>
+                <tr>
+                    <td><code>LOG_RAW_BODIES</code></td>
+                    <td><code>false</code></td>
+                    <td>API 요청/응답 전체 페이로드(JSON 바디)에 대한 원본 기록 여부.</td>
+                </tr>
+                <tr>
+                    <td><code>LOG_RESPONSE_TEXT</code></td>
+                    <td><code>false</code></td>
+                    <td>AI 답변의 전체 텍스트 본문 기록 여부.</td>
+                </tr>
+                <tr>
+                    <td><code>LOG_RESPONSE_MAX_BYTES</code></td>
+                    <td><code>1048576</code> (1MB)</td>
+                    <td>단일 응답에 대해 로깅할 수 있는 최대 바이트 크기 제한.</td>
+                </tr>
+                <tr>
+                    <td><code>LOG_QUEUE_SIZE</code></td>
+                    <td><code>4096</code></td>
+                    <td>비동기 감사 로그 처리를 위한 백그라운드 버퍼 큐 사이즈.</td>
+                </tr>
+                <tr>
+                    <td><code>LOG_FALLBACK_PATH</code></td>
+                    <td><code>data/fallback.ndjson</code></td>
+                    <td>데이터베이스 장애 시 임시로 적재할 fallback 로그 파일 경로.</td>
+                </tr>
+                <tr>
+                    <td><code>RETENTION_REQUEST_DAYS</code></td>
+                    <td><code>90</code></td>
+                    <td>일반 트래픽 및 감사 요청 로그의 보관 기간 (일 단위).</td>
+                </tr>
+                <tr>
+                    <td><code>RETENTION_PROMPT_DAYS</code></td>
+                    <td><code>30</code></td>
+                    <td>원본 프롬프트 텍스트 데이터 보존 기간.</td>
+                </tr>
+                <tr>
+                    <td><code>RETENTION_RESPONSE_DAYS</code></td>
+                    <td><code>30</code></td>
+                    <td>AI 응답 본문 텍스트 보존 기간.</td>
+                </tr>
+                <tr>
+                    <td><code>RETENTION_INTERVAL</code></td>
+                    <td><code>1h</code></td>
+                    <td>보관 만료된 데이터 청소(Pruning)를 실행하는 백그라운드 태스크 주기.</td>
+                </tr>
+                <tr>
+                    <td><code>CACHE_EMBEDDING_ENABLED</code></td>
+                    <td><code>true</code></td>
+                    <td>임베딩 벡터 연산 결과의 캐싱 처리 활성화 여부.</td>
+                </tr>
+                <tr>
+                    <td><code>CACHE_EMBEDDING_TTL</code></td>
+                    <td><code>24h</code></td>
+                    <td>임베딩 캐시 엔트리의 만료 시간.</td>
+                </tr>
+                <tr>
+                    <td><code>CACHE_CHAT_ENABLED</code></td>
+                    <td><code>false</code></td>
+                    <td>동일 프롬프트에 대한 챗 완료 응답 캐싱(Chat Cache) 활성화 여부.</td>
+                </tr>
+                <tr>
+                    <td><code>CACHE_CHAT_TTL</code></td>
+                    <td><code>1h</code></td>
+                    <td>챗 응답 캐시의 만료 시간.</td>
+                </tr>
+                <tr>
+                    <td><code>PROXY_API_KEYS</code></td>
+                    <td>(없음)</td>
+                    <td>정적 프록시 접근 허용 API 키 정의 (형식: <code>name:key:owner:team</code>, 쉼표 구분).</td>
+                </tr>
+                <tr>
+                    <td><code>ADMIN_TOKEN</code></td>
+                    <td>(없음)</td>
+                    <td>어드민 대시보드 및 관리자 API 제어를 위한 Bearer 토큰.</td>
+                </tr>
+                <tr>
+                    <td><code>ADMIN_READONLY_TOKEN</code></td>
+                    <td>(없음)</td>
+                    <td>읽기 전용 어드민 기능 접근에 사용되는 서브 토큰.</td>
+                </tr>
+                <tr>
+                    <td><code>ATTRIBUTE_EXTERNAL_KEYS</code></td>
+                    <td><code>true</code></td>
+                    <td>미등록 클라이언트 키 유입 시 고유 Identity 해싱 후 사용자 매핑 지원 여부.</td>
+                </tr>
+                <tr>
+                    <td><code>AUTH_ENABLED</code></td>
+                    <td><code>false</code></td>
+                    <td>엔터프라이즈 JWT 인증 및 동적 권한 제어 활성화 여부.</td>
+                </tr>
+                <tr>
+                    <td><code>AUTH_JWT_SECRET</code></td>
+                    <td>(없음)</td>
+                    <td>인증 활성화 시, JWT 서명/검증에 사용될 대칭형 시크릿 문자열.</td>
+                </tr>
+                <tr>
+                    <td><code>AUTH_ACCESS_TOKEN_TTL</code></td>
+                    <td><code>15m</code></td>
+                    <td>발행되는 JWT 로그인 액세스 토큰의 유효 기간.</td>
+                </tr>
+                <tr>
+                    <td><code>AUTH_REFRESH_TOKEN_TTL</code></td>
+                    <td><code>168h</code> (7일)</td>
+                    <td>JWT 리프레시 토큰의 만료 기간.</td>
+                </tr>
+                <tr>
+                    <td><code>GATEWAY_SECRET</code></td>
+                    <td><code>dev-local-...</code></td>
+                    <td>데이터베이스 내 민감 데이터 암호화 및 인스턴스 무결성 검증 비밀 키.</td>
+                </tr>
+                <tr>
+                    <td><code>SESSION_INFERENCE_ENABLED</code></td>
+                    <td><code>true</code></td>
+                    <td>클라이언트에서 세션 미제공 시 유휴 시간 기반 3계층 세션 자동 추론 활성화 여부.</td>
+                </tr>
+                <tr>
+                    <td><code>SESSION_IDLE_TIMEOUT</code></td>
+                    <td><code>30m</code></td>
+                    <td>추론 세션 전환을 판정하기 위한 무활동 임계 지연 시간.</td>
+                </tr>
+                <tr>
+                    <td><code>VCS_WEBHOOK_SECRET</code></td>
+                    <td>(없음)</td>
+                    <td>VCS Webhook 인입 시 데이터 무결성을 대조하기 위한 비밀 시크릿 키.</td>
+                </tr>
+                <tr>
+                    <td><code>VCS_INFER_FROM_CONTENT</code></td>
+                    <td><code>true</code></td>
+                    <td>LLM 트래픽 내 Git 커맨드를 분석하여 웹훅 연결 없이 Git 이벤트를 자동 추론할지 여부.</td>
+                </tr>
+                <tr>
+                    <td><code>MODEL_PRICING_KRW_PER_1M</code></td>
+                    <td><code>{}</code></td>
+                    <td>원화(KRW) 요금 정산용 모델별 1M 토큰당 가격 정보 매핑 (JSON 형식).</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <h3 style="margin-top: 25px;">6.2 운영 통제 및 이중화 구성</h3>
         <p>
             Gateway를 사내 이중화 서비스로 구성하여 무장애 운영을 실현하기 위한 구성 기준입니다.
         </p>
