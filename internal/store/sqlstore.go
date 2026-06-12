@@ -862,6 +862,13 @@ func (s *SQLStore) HasActiveAPIKeys(ctx context.Context) (bool, error) {
 	return count > 0, nil
 }
 
+// DeleteAPIKey permanently removes an api_keys row (hard delete). Usage history in
+// request_logs keeps the id and shows as external afterwards.
+func (s *SQLStore) DeleteAPIKey(ctx context.Context, id string) error {
+	_, err := s.db.ExecContext(ctx, s.bind(`DELETE FROM api_keys WHERE id = ?`), id)
+	return err
+}
+
 func (s *SQLStore) SetAPIKeyStatus(ctx context.Context, id string, status string) error {
 	_, err := s.db.ExecContext(ctx, s.bind(`UPDATE api_keys SET status = ? WHERE id = ?`), status, id)
 	return err

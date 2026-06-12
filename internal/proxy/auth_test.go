@@ -207,6 +207,121 @@ func TestAuthUserRoleChangeAndDeactivation(t *testing.T) {
 	}
 }
 
+// TestHardDeleteKeyTeamChangeAndScopeEdit covers the three management additions:
+// super_admin-only hard delete, account team change, and API key scope editing.
+func TestHardDeleteKeyTeamChangeAndScopeEdit(t *testing.T) {
+	db, proxy := newAuthTestServer(t, "http://example.invalid")
+	defer proxy.Close()
+	ctx := context.Background()
+
+	login := postJSON(t, proxy.URL+"/auth/login", "", map[string]string{"email": "root@example.com", "password": "correct-password"})
+	var rootTok struct {
+		AccessToken string `json:"access_token"`
+	}
+	_ = json.NewDecoder(login.Body).Decode(&rootTok)
+	login.Body.Close()
+	authedReq := func(method, path, body string) *http.Response {
+		req, _ := http.NewRequest(method, proxy.URL+path, strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+rootTok.AccessToken)
+		if body != "" {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res
+	}
+
+	// --- ① scope edit: create a key, then PATCH scopes ---
+	created := postJSON(t, proxy.URL+"/admin/api-keys", rootTok.AccessToken, map[string]any{"name": "scoped-key"})
+	var keyOut struct {
+		APIKey struct {
+			ID string `json:"id"`
+		} `json:"api_key"`
+	}
+	_ = json.NewDecoder(created.Body).Decode(&keyOut)
+	created.Body.Close()
+	keyID := keyOut.APIKey.ID
+	pr := authedReq(http.MethodPatch, "/admin/api-keys/"+keyID, `{"scopes":["models:read"]}`)
+	pr.Body.Close()
+	if pr.StatusCode != http.StatusOK {
+		t.Fatalf("scope patch failed: %d", pr.StatusCode)
+	}
+	rec, found, _ := db.GetAPIKey(ctx, keyID)
+	if !found || len(rec.Scopes) != 1 || rec.Scopes[0] != "models:read" {
+		t.Fatalf("scopes not updated: %+v", rec.Scopes)
+	}
+
+	// --- ② hard delete: admin role denied, super_admin allowed ---
+	cu := postJSON(t, proxy.URL+"/admin/users", rootTok.AccessToken, map[string]string{"email": "adm@example.com", "password": "pw-adm", "role": "admin"})
+	cu.Body.Close()
+	admLogin := postJSON(t, proxy.URL+"/auth/login", "", map[string]string{"email": "adm@example.com", "password": "pw-adm"})
+	var admTok struct {
+		AccessToken string `json:"access_token"`
+	}
+	_ = json.NewDecoder(admLogin.Body).Decode(&admTok)
+	admLogin.Body.Close()
+	denyReq, _ := http.NewRequest(http.MethodDelete, proxy.URL+"/admin/api-keys/"+keyID+"?hard=1", nil)
+	denyReq.Header.Set("Authorization", "Bearer "+admTok.AccessToken)
+	denyRes, err := http.DefaultClient.Do(denyReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	denyRes.Body.Close()
+	if denyRes.StatusCode != http.StatusForbidden {
+		t.Fatalf("admin role should be denied hard delete, got %d", denyRes.StatusCode)
+	}
+	delRes := authedReq(http.MethodDelete, "/admin/api-keys/"+keyID+"?hard=1", "")
+	delRes.Body.Close()
+	if delRes.StatusCode != http.StatusOK {
+		t.Fatalf("super_admin hard delete failed: %d", delRes.StatusCode)
+	}
+	if _, found, _ := db.GetAPIKey(ctx, keyID); found {
+		t.Fatal("key row should be gone after hard delete")
+	}
+
+	// --- ③ team change on a login account ---
+	tm := postJSON(t, proxy.URL+"/admin/teams", rootTok.AccessToken, map[string]string{"name": "platform"})
+	var teamOut struct {
+		Team struct {
+			ID string `json:"id"`
+		} `json:"team"`
+	}
+	_ = json.NewDecoder(tm.Body).Decode(&teamOut)
+	tm.Body.Close()
+	cu2 := postJSON(t, proxy.URL+"/admin/users", rootTok.AccessToken, map[string]string{"email": "member@example.com", "password": "pw-m", "role": "developer"})
+	var memberOut struct {
+		User struct {
+			ID string `json:"id"`
+		} `json:"user"`
+	}
+	_ = json.NewDecoder(cu2.Body).Decode(&memberOut)
+	cu2.Body.Close()
+	tp := authedReq(http.MethodPatch, "/admin/users/"+memberOut.User.ID, `{"team_id":"`+teamOut.Team.ID+`"}`)
+	tp.Body.Close()
+	if tp.StatusCode != http.StatusOK {
+		t.Fatalf("team patch failed: %d", tp.StatusCode)
+	}
+	gotTeam, _ := db.PrimaryTeamForUser(ctx, memberOut.User.ID)
+	if gotTeam != teamOut.Team.ID {
+		t.Fatalf("team not applied: %q want %q", gotTeam, teamOut.Team.ID)
+	}
+	// clear team
+	tc := authedReq(http.MethodPatch, "/admin/users/"+memberOut.User.ID, `{"team_id":""}`)
+	tc.Body.Close()
+	gotTeam, _ = db.PrimaryTeamForUser(ctx, memberOut.User.ID)
+	if gotTeam != "" {
+		t.Fatalf("team should be cleared, got %q", gotTeam)
+	}
+	// unknown team rejected
+	bad := authedReq(http.MethodPatch, "/admin/users/"+memberOut.User.ID, `{"team_id":"team_nope"}`)
+	bad.Body.Close()
+	if bad.StatusCode != http.StatusBadRequest {
+		t.Fatalf("unknown team should be 400, got %d", bad.StatusCode)
+	}
+}
+
 func TestAdminLoginRefreshRotationLogoutAndJWTRequired(t *testing.T) {
 	_, proxy := newAuthTestServer(t, "http://example.invalid")
 	defer proxy.Close()

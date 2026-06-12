@@ -31,7 +31,15 @@ func (s *Server) handleUsers(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		authUsers, _ := s.db.ListAuthUsers(r.Context())
-		writeJSON(w, http.StatusOK, map[string]any{"users": users, "auth_users": authUsers})
+		enriched := make([]map[string]any, 0, len(authUsers))
+		for _, u := range authUsers {
+			teamID, _ := s.db.PrimaryTeamForUser(r.Context(), u.ID)
+			enriched = append(enriched, map[string]any{
+				"id": u.ID, "email": u.Email, "name": u.Name, "role": u.Role,
+				"status": u.Status, "team_id": teamID, "created_at": u.CreatedAt,
+			})
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"users": users, "auth_users": enriched})
 	case http.MethodPost:
 		var p struct {
 			Email    string `json:"email"`
@@ -196,6 +204,7 @@ func (s *Server) handleAuthUserUpdate(w http.ResponseWriter, r *http.Request, id
 	var p struct {
 		Role   *string `json:"role"`
 		Status *string `json:"status"`
+		TeamID *string `json:"team_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
 		writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "invalid_body")
@@ -225,13 +234,33 @@ func (s *Server) handleAuthUserUpdate(w http.ResponseWriter, r *http.Request, id
 			return
 		}
 	}
-	if role == "" && status == "" {
+	if role == "" && status == "" && p.TeamID == nil {
 		writeOpenAIError(w, http.StatusBadRequest, "nothing to update", "invalid_request_error", "empty_update")
 		return
 	}
-	if err := s.db.UpdateAuthUserRoleStatus(r.Context(), id, role, status); err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "user_update_failed")
-		return
+	if role != "" || status != "" {
+		if err := s.db.UpdateAuthUserRoleStatus(r.Context(), id, role, status); err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "user_update_failed")
+			return
+		}
+	}
+	oldTeam, _ := s.db.PrimaryTeamForUser(r.Context(), id)
+	if p.TeamID != nil {
+		teamID := strings.TrimSpace(*p.TeamID)
+		if teamID != "" {
+			if _, found, terr := s.db.AuthTeamByIDOrName(r.Context(), teamID); terr != nil || !found {
+				writeOpenAIError(w, http.StatusBadRequest, "unknown team", "invalid_request_error", "unknown_team")
+				return
+			}
+		}
+		memberRole := role
+		if memberRole == "" {
+			memberRole = user.Role
+		}
+		if err := s.db.SetUserTeam(r.Context(), id, teamID, memberRole); err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "team_update_failed")
+			return
+		}
 	}
 	if status == "disabled" {
 		// kill live sessions + refresh tokens so the account stops working now
@@ -241,8 +270,11 @@ func (s *Server) handleAuthUserUpdate(w http.ResponseWriter, r *http.Request, id
 		_ = s.db.InsertAuditEvent(r.Context(), store.AuthEvent{ID: newID("ae"), EventType: "role_changed", ActorUserID: id, IP: clientIP(r), UserAgent: r.UserAgent(), Detail: user.Role + " → " + role, CreatedAt: time.Now().UTC()})
 	}
 	updated, _, _ := s.db.AuthUserByID(r.Context(), id)
-	s.auditAdmin(r, "auth_user.update", auditJSON(map[string]string{"id": id, "role": user.Role, "status": user.Status}), auditJSON(map[string]string{"id": id, "role": updated.Role, "status": updated.Status}))
-	writeJSON(w, http.StatusOK, map[string]any{"user": updated})
+	newTeam, _ := s.db.PrimaryTeamForUser(r.Context(), id)
+	s.auditAdmin(r, "auth_user.update",
+		auditJSON(map[string]string{"id": id, "role": user.Role, "status": user.Status, "team": oldTeam}),
+		auditJSON(map[string]string{"id": id, "role": updated.Role, "status": updated.Status, "team": newTeam}))
+	writeJSON(w, http.StatusOK, map[string]any{"user": updated, "team_id": newTeam})
 }
 
 func (s *Server) handleIPs(w http.ResponseWriter, r *http.Request) {

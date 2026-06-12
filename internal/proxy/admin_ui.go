@@ -4610,13 +4610,17 @@ const adminHTML = `<!doctype html>
           '<select id="au-team">' + teamOptions + '</select>' +
           '<button type="submit">생성</button>' +
         '</form>';
-      const roleSelect = (u) => '<select onchange="applyAuthUserRole(\'' + escapeAttr(u.id) + '\', this.value)" ' + (u.role === 'super_admin' && u.status === 'active' ? '' : '') + '>' +
+      const roleSelect = (u) => '<select onchange="applyAuthUserRole(\'' + escapeAttr(u.id) + '\', this.value)">' +
         authRoleOptions.map(r => '<option value="' + r + '"' + (r === u.role ? ' selected' : '') + '>' + r + '</option>').join('') + '</select>';
+      const teamSelect = (u) => '<select onchange="applyAuthUserTeam(\'' + escapeAttr(u.id) + '\', this.value)">' +
+        '<option value=""' + (!u.team_id ? ' selected' : '') + '>팀 없음</option>' +
+        teams.map(t => '<option value="' + escapeAttr(t.id) + '"' + (t.id === u.team_id ? ' selected' : '') + '>' + escapeHTML(t.name) + '</option>').join('') + '</select>';
       const userTable = users.length ?
-        '<table><thead><tr><th data-sort="str">이메일 / 이름</th><th>역할</th><th data-sort="str">상태</th><th data-sort="str">생성</th><th>동작</th></tr></thead><tbody>' +
+        '<table><thead><tr><th data-sort="str">이메일 / 이름</th><th>역할</th><th>팀</th><th data-sort="str">상태</th><th data-sort="str">생성</th><th>동작</th></tr></thead><tbody>' +
         users.map(u => '<tr>' +
           '<td><strong>' + escapeHTML(u.email) + '</strong><div class="muted">' + escapeHTML(u.name || '') + ' · ' + escapeHTML(u.id) + '</div></td>' +
           '<td>' + roleSelect(u) + '</td>' +
+          '<td>' + teamSelect(u) + '</td>' +
           '<td><span class="status ' + (u.status === 'active' ? '' : 'error') + '">' + (u.status === 'active' ? '활성' : '비활성') + '</span></td>' +
           '<td>' + ago(u.created_at) + '</td>' +
           '<td><button class="' + (u.status === 'active' ? 'danger' : 'secondary') + '" type="button" onclick="toggleAuthUser(\'' + escapeAttr(u.id) + '\', \'' + (u.status === 'active' ? 'disabled' : 'active') + '\')">' + (u.status === 'active' ? '비활성화' : '활성화') + '</button></td>' +
@@ -4667,6 +4671,12 @@ const adminHTML = `<!doctype html>
       await api('/admin/users/' + encodeURIComponent(id), { method: 'PATCH', body: JSON.stringify({ role }) });
       route();
     };
+    window.applyAuthUserTeam = async (id, teamId) => {
+      const label = teamId || '팀 없음';
+      if (!confirm('이 계정의 팀을 "' + label + '" 로 변경하시겠습니까?')) { route(); return; }
+      await api('/admin/users/' + encodeURIComponent(id), { method: 'PATCH', body: JSON.stringify({ team_id: teamId }) });
+      route();
+    };
     window.toggleAuthUser = async (id, status) => {
       const msg = status === 'disabled'
         ? '이 계정을 비활성화하시겠습니까? 모든 활성 세션과 refresh token이 즉시 폐기됩니다.'
@@ -4682,21 +4692,68 @@ const adminHTML = `<!doctype html>
       await api('/admin/teams', { method: 'POST', body: JSON.stringify({ name }) });
       route();
     }
+    const allApiScopes = ['chat:completion', 'embeddings:create', 'models:read', 'admin:read', 'admin:write', 'routing:read', 'routing:write', 'observability:read', 'costs:read', 'security:read', 'mcp:use', 'mcp:admin'];
+    let apiKeysCache = {};
+    function canHardDeleteKeys() {
+      return !authState.enabled || (authState.user && authState.user.role === 'super_admin');
+    }
     function apiKeyTable(rows) {
       if (!rows.length) return '<div class="empty">발급된 키 없음</div>';
+      apiKeysCache = {};
+      rows.forEach(r => { apiKeysCache[r.id] = r; });
+      const scopesCell = (r) => {
+        const sc = r.scopes || [];
+        if (!sc.length) return '<span class="muted">전체(미지정)</span>';
+        const shown = sc.slice(0, 3).map(s => '<span class="pill">' + escapeHTML(s) + '</span>').join(' ');
+        return shown + (sc.length > 3 ? ' <span class="muted">+' + (sc.length - 3) + '</span>' : '');
+      };
       return '<table><thead><tr>' +
         '<th data-sort="str">이름</th>' +
         '<th data-sort="str">소유자</th>' +
         '<th data-sort="str">팀</th>' +
+        '<th>스코프</th>' +
         '<th data-sort="str">상태</th>' +
         '<th>동작</th></tr></thead><tbody>' +
         rows.map(r =>
           '<tr><td><a href="#/users/' + encodeURIComponent(r.id) + '">' + escapeHTML(r.name) + '</a><div class="muted">' + escapeHTML(r.id) + '</div></td>' +
           '<td>' + escapeHTML(r.owner || '') + '</td><td>' + escapeHTML(r.team || '') + '</td>' +
+          '<td>' + scopesCell(r) + '</td>' +
           '<td><span class="status ' + (r.status === 'active' ? '' : 'error') + '">' + (r.status === 'active' ? '활성' : '비활성') + '</span></td>' +
-          '<td><button class="secondary" type="button" onclick="setKeyStatus(\'' + r.id + '\', \'' + (r.status === 'active' ? 'disabled' : 'active') + '\')">' + (r.status === 'active' ? '비활성화' : '활성화') + '</button></td></tr>'
-        ).join('') + '</tbody></table>';
+          '<td><button class="ghost" type="button" onclick="openScopeEditor(\'' + r.id + '\')">스코프</button> ' +
+          '<button class="secondary" type="button" onclick="setKeyStatus(\'' + r.id + '\', \'' + (r.status === 'active' ? 'disabled' : 'active') + '\')">' + (r.status === 'active' ? '비활성화' : '활성화') + '</button>' +
+          (canHardDeleteKeys() ? ' <button class="danger" type="button" onclick="hardDeleteKey(\'' + r.id + '\', \'' + escapeAttr(r.name) + '\')">삭제</button>' : '') +
+          '</td></tr>'
+        ).join('') + '</tbody></table>' +
+        '<div class="muted" style="font-size:12px; padding:8px 14px 0">스코프 미지정(전체) 키는 모든 API 사용이 가능합니다. "삭제"는 키 행을 영구 제거하며' + (authState.enabled ? ' super_admin 만 가능합니다' : ' 전권 관리자 토큰으로 가능합니다') + ' — 과거 사용 이력은 보존됩니다(이후 external로 표시).</div>';
     }
+    window.hardDeleteKey = async (id, name) => {
+      if (!confirm('프록시 API 키 "' + name + '" (' + id + ') 를 영구 삭제하시겠습니까?\n비활성화와 달리 되돌릴 수 없습니다. 과거 사용 이력 통계는 유지됩니다.')) return;
+      await api('/admin/api-keys/' + encodeURIComponent(id) + '?hard=1', { method: 'DELETE' });
+      route();
+    };
+    window.openScopeEditor = (id) => {
+      const key = apiKeysCache[id];
+      if (!key) return;
+      const current = key.scopes || [];
+      const boxes = allApiScopes.map(s =>
+        '<label style="display:flex; align-items:center; gap:8px; padding:4px 0; font-size:13px">' +
+          '<input type="checkbox" class="scope-box" value="' + s + '"' + (current.indexOf(s) >= 0 ? ' checked' : '') + ' style="width:auto; height:auto; min-width:0">' +
+          '<code>' + s + '</code>' +
+        '</label>').join('');
+      openModal('스코프 편집 — ' + key.name,
+        '<div class="muted" style="margin-bottom:10px">이 키로 호출할 수 있는 API 범위를 제한합니다. <strong>전부 해제하면 "전체(미지정)"</strong> 가 되어 모든 API를 허용합니다. 스코프 밖 호출은 403 + <code>scope_denied</code> 감사 기록.</div>' +
+        '<div style="columns:2; gap:24px">' + boxes + '</div>' +
+        '<div style="margin-top:14px; display:flex; gap:8px">' +
+          '<button type="button" onclick="saveScopeEditor(\'' + escapeAttr(id) + '\')">저장</button>' +
+          '<button type="button" class="secondary" onclick="closeModal()">취소</button>' +
+        '</div>');
+    };
+    window.saveScopeEditor = async (id) => {
+      const scopes = Array.from(document.querySelectorAll('#modal-body .scope-box:checked')).map(b => b.value);
+      await api('/admin/api-keys/' + encodeURIComponent(id), { method: 'PATCH', body: JSON.stringify({ scopes }) });
+      closeModal();
+      route();
+    };
     function providerTable(rows) {
       if (!rows.length) return '<div class="empty">등록된 프로바이더 없음</div>';
       return '<table><thead><tr>' +

@@ -444,6 +444,22 @@ func (s *Server) handleAPIKeyByID(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.Method {
 	case http.MethodDelete:
+		// ?hard=1 → permanent row delete; super_admin only when auth is enabled
+		// (legacy ADMIN_TOKEN mode: the full-access token is the super user).
+		if r.URL.Query().Get("hard") == "1" {
+			if claims, ok := s.currentAccessClaims(r); s.cfg.Auth.Enabled && (!ok || claims.Role != "super_admin") {
+				writeOpenAIError(w, http.StatusForbidden, "hard delete requires super_admin", "permission_error", "super_admin_required")
+				return
+			}
+			if err := s.db.DeleteAPIKey(r.Context(), id); err != nil {
+				writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "api_key_delete_failed")
+				return
+			}
+			s.auditAdmin(r, "api_key.delete", auditJSON(map[string]string{"id": id}), "")
+			_ = s.db.InsertAuditEvent(r.Context(), store.AuthEvent{ID: newID("ae"), EventType: "api_key_revoked", APIKeyID: id, IP: clientIP(r), UserAgent: r.UserAgent(), Detail: "hard_delete", CreatedAt: time.Now().UTC()})
+			writeJSON(w, http.StatusOK, map[string]string{"id": id, "status": "deleted"})
+			return
+		}
 		if err := s.db.RevokeAPIKey(r.Context(), id); err != nil {
 			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "api_key_update_failed")
 			return

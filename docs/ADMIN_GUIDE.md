@@ -72,9 +72,15 @@
 | --- | --- | --- |
 | 계정 생성 | 폼: 이메일·초기 비밀번호·이름·역할·팀 | `POST /admin/users`. team_admin 은 자기 팀 계정만 생성 가능 |
 | 역할 변경 | 표의 역할 드롭다운 선택 | `PATCH /admin/users/{usr_id}` `{"role":"…"}`. `role_changed` 감사 기록. team_admin 불가 |
+| **팀 변경** | 표의 팀 드롭다운 선택 | `PATCH … {"team_id":"…"}` (빈 값 = 팀 해제). 존재하지 않는 팀은 400. 멤버십이 교체됩니다 |
 | 비활성화/활성화 | 표의 버튼 | `PATCH … {"status":"disabled"}`. **비활성화 즉시 그 계정의 모든 세션·refresh token 폐기** → 발급된 access token도 바로 거부됩니다 |
 | 팀 생성 | 팀 폼 | `POST /admin/teams` |
 | 인증 이벤트 확인 | 같은 섹션 하단 표 | 실패 계열(login_failed/scope_denied/…)은 빨간 배지 |
+
+### API 키 스코프 편집 · 영구 삭제
+
+- **스코프 편집**: 설정 탭 프록시 API 키 표의 "스코프" 버튼 → 12개 스코프 체크박스 모달 → 저장(`PATCH /admin/api-keys/{id}` `{"scopes":[…]}`). **전부 해제하면 "전체(미지정)"** 로 모든 API 허용. 스코프 밖 호출은 403 + `scope_denied` 감사 기록.
+- **영구 삭제**: 같은 표의 "삭제" 버튼(`DELETE /admin/api-keys/{id}?hard=1`). 비활성화(soft)와 달리 키 행을 제거하며 되돌릴 수 없습니다. **`AUTH_ENABLED=true` 에서는 super_admin 전용**(그 외 역할 403), 레거시 모드에서는 전권 관리자 토큰으로 가능. 과거 사용 이력 통계는 보존됩니다(이후 external 표시). `api_key.delete` 관리자 감사 + `api_key_revoked(hard_delete)` 인증 이벤트 기록.
 
 `AUTH_ENABLED=false` 상태에서도 섹션은 보이지만(사전 준비용), 로그인 모드가 꺼져 있다는 경고 배너가 표시됩니다.
 

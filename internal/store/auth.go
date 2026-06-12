@@ -175,6 +175,18 @@ func (s *SQLStore) UpsertMembership(ctx context.Context, m UserTeamMembership) e
 	return err
 }
 
+// SetUserTeam replaces a user's team memberships with a single team (empty teamID
+// removes all memberships). Keeps PrimaryTeamForUser deterministic.
+func (s *SQLStore) SetUserTeam(ctx context.Context, userID, teamID, role string) error {
+	if _, err := s.db.ExecContext(ctx, s.bind(`DELETE FROM user_team_memberships WHERE user_id = ?`), userID); err != nil {
+		return err
+	}
+	if teamID == "" {
+		return nil
+	}
+	return s.UpsertMembership(ctx, UserTeamMembership{UserID: userID, TeamID: teamID, Role: role, CreatedAt: time.Now().UTC()})
+}
+
 func (s *SQLStore) PrimaryTeamForUser(ctx context.Context, userID string) (string, error) {
 	var teamID string
 	err := s.db.QueryRowContext(ctx, s.bind(`SELECT team_id FROM user_team_memberships WHERE user_id = ? ORDER BY created_at ASC LIMIT 1`), userID).Scan(&teamID)
