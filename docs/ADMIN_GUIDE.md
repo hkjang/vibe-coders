@@ -6,6 +6,17 @@
 
 ## 1. 첫 접속
 
+접속 방법은 인증 모드에 따라 둘 중 하나입니다. `/admin` 에 들어가면 UI가 모드를 자동 감지해 알맞은 화면을 띄웁니다.
+
+**A. 계정 로그인 모드 (`AUTH_ENABLED=true`, 권장)**
+
+1. 브라우저로 `http://<host>:8080/admin` 접속 → **이메일/비밀번호 로그인 화면이 바로 표시**됩니다.
+2. 최초 1회는 부트스트랩 계정(`AUTH_ADMIN_BOOTSTRAP_EMAIL` / `AUTH_ADMIN_BOOTSTRAP_PASSWORD`)으로 로그인하세요.
+3. 로그인하면 헤더에 `이메일 · 역할` 칩과 "로그아웃" 버튼이 나타나고 대시보드로 이동합니다.
+4. access token 만료 시 UI가 refresh token으로 **자동 갱신(rotation)** 하므로 끊김이 없고, refresh까지 만료되면 로그인 화면으로 돌아갑니다. 토큰은 sessionStorage에만 보관됩니다(탭 닫으면 소멸).
+
+**B. 레거시 토큰 모드 (`AUTH_ENABLED=false`, 기본)**
+
 1. 브라우저로 `http://<host>:8080/admin` 접속
 2. 상단 우측 "관리자 토큰" 입력란에 `ADMIN_TOKEN` 값 붙여넣기
 3. 데이터가 보이면 정상. 401 이 나오면 토큰이 잘못된 것입니다.
@@ -17,7 +28,8 @@
 | 자동 새로고침 드롭다운 | 끔/5/10/30/60초 마다 현재 화면 다시 로드. 세션에 보관. |
 | 🌓 / ☀️ | 라이트/다크 테마 전환 (`t` 단축키 동일). |
 | `?` | 단축키 도움말 오버레이. |
-| 관리자 토큰 | 입력값은 sessionStorage 에만 저장되고, 다른 탭/세션에는 공유되지 않습니다. |
+| 사용자 칩 · 로그아웃 | (로그인 모드) 현재 로그인한 이메일·역할 표시, 로그아웃 시 세션/refresh token 폐기 후 로그인 화면으로. |
+| 관리자 토큰 | (레거시 모드에만 표시) 입력값은 sessionStorage 에만 저장되고, 다른 탭/세션에는 공유되지 않습니다. |
 
 ### 키보드 단축키
 
@@ -39,20 +51,32 @@
 | VCS | GitLab/Bitbucket 커밋·MR 을 세션·사용자에 연결한 목록(Prompt→Commit→MR 상관). 저장소/세션/키/유형 필터 |
 | 호출 이력 | IP/모델/언어 필터로 검색, 두 행 선택 후 비교, 행 클릭 시 상세 모달 |
 | 프롬프트 검색 | 키워드/언어/IP/키/기간으로 마스킹 프롬프트 검색, CSV 다운로드, 저장된 필터 |
-| 사용자 | Proxy API 키별 사용량·비용, 키 클릭 시 일별·모델별·IP별 상세와 LLM trend/eval failure/feedback drill-down |
-| 팀 | 팀별 사용량·비용, 팀 클릭 시 API 키/모델/IP/LLM trend drill-down |
+| 사용자 | Proxy API 키별 사용량·비용 + **AI 활용지수**(요청·활동일·커밋·머지MR·성공률 기반), 키 클릭 시 상세 drill-down |
+| 팀 | **팀 벤치마크**(월비용 × 생산성 점수) + 팀별 사용량, 팀 클릭 시 API 키/모델/IP/LLM trend drill-down |
 | IP | 호출 IP 별 사용량, IP 클릭 시 일별·모델별·키별 상세 |
 | 사용 한도 | API 키/팀/IP/전체 단위 일별·월별 토큰·KRW 한도 |
-| 안전 | Kill Switch + 비용 가드 + AI 정책 엔진 + Secret Firewall 이벤트 + 승인 큐 + 정책 판단 이벤트 + 알림 규칙 + 발화 이력 |
-| 설정 | Proxy API 키 발급/비활성화, 업스트림 provider, 보존 정책, 변경 이력 + 감사 CSV |
+| 안전 | Kill Switch + **AI Incident(프로바이더 장애 감지)** + 비용 가드 + AI 정책 엔진 + Secret Firewall 이벤트 + 승인 큐 + 정책 판단 이벤트 + 알림 규칙 + 발화 이력 |
+| 설정 | Proxy API 키 발급/비활성화, **로그인 계정·팀 관리(RBAC)**, 업스트림 provider, 보존 정책, 변경 이력 + 감사 CSV |
 
 ## 2-1. 인증 / RBAC
 
-기본 운영은 기존 호환 모드(`AUTH_ENABLED=false`)입니다. `AUTH_ENABLED=true` 로 켜면 Admin API는 `/auth/login` 으로 받은 JWT access token이 필요하고, refresh token은 `/auth/refresh` 호출마다 rotation 됩니다. `/auth/logout` 은 세션/refresh token을 폐기합니다.
+기본 운영은 기존 호환 모드(`AUTH_ENABLED=false`)입니다. `AUTH_ENABLED=true` 로 켜면 Admin API는 `/auth/login` 으로 받은 JWT access token이 필요하고, refresh token은 `/auth/refresh` 호출마다 rotation 됩니다. `/auth/logout` 은 세션/refresh token을 폐기합니다. **어드민 UI는 이 모드에서 `/admin` 진입 즉시 이메일/비밀번호 로그인 화면을 띄우고**, 토큰 만료 시 자동 갱신, 만료 실패 시 재로그인을 유도합니다(1장 참고).
 
 역할은 `super_admin`, `admin`, `team_admin`, `developer`, `viewer`, `service_account` 를 지원합니다. API key는 원문을 저장하지 않고 hash만 저장하며, `expires_at`, `revoked_at`, `allowed_ips`, `scopes`, `allowed_models`/`denied_models`, `allowed_providers`/`denied_providers`, `budget_limit_krw` 정책을 검사합니다. Scope는 `chat:completion`, `embeddings:create`, `models:read`, `admin:read`, `admin:write`, `routing:read`, `routing:write`, `observability:read`, `costs:read`, `security:read`, `mcp:use`, `mcp:admin` 입니다.
 
 인증/정책 이벤트는 `GET /admin/audit/auth-events` 에 기록됩니다. 기록 대상은 `login_success`, `login_failed`, `api_key_created`, `api_key_revoked`, `api_key_denied`, `ip_denied`, `scope_denied`, `model_denied`, `budget_denied`, `role_changed` 입니다.
+
+### 계정 · 팀 관리 (설정 탭 → "로그인 계정 · 팀 (RBAC)")
+
+| 동작 | 방법 | 비고 |
+| --- | --- | --- |
+| 계정 생성 | 폼: 이메일·초기 비밀번호·이름·역할·팀 | `POST /admin/users`. team_admin 은 자기 팀 계정만 생성 가능 |
+| 역할 변경 | 표의 역할 드롭다운 선택 | `PATCH /admin/users/{usr_id}` `{"role":"…"}`. `role_changed` 감사 기록. team_admin 불가 |
+| 비활성화/활성화 | 표의 버튼 | `PATCH … {"status":"disabled"}`. **비활성화 즉시 그 계정의 모든 세션·refresh token 폐기** → 발급된 access token도 바로 거부됩니다 |
+| 팀 생성 | 팀 폼 | `POST /admin/teams` |
+| 인증 이벤트 확인 | 같은 섹션 하단 표 | 실패 계열(login_failed/scope_denied/…)은 빨간 배지 |
+
+`AUTH_ENABLED=false` 상태에서도 섹션은 보이지만(사전 준비용), 로그인 모드가 꺼져 있다는 경고 배너가 표시됩니다.
 
 ## 2-2. Governance Layer
 
@@ -488,6 +512,16 @@ curl -i http://<host>:8080/v1/chat/completions -H "Authorization: Bearer <발급
 ### IP 목록 / 상세
 
 같은 구조이며, IP 별 상세에는 "API 키별" 표가 함께 표시됩니다 — 한 공용 IP 에서 어떤 키들이 호출했는지 확인할 때 사용.
+
+### 팀 벤치마크 / AI 활용지수 / AI Incident
+
+| 화면 | 내용 | API |
+| --- | --- | --- |
+| 팀 탭 상단 "팀 벤치마크" | 팀별 활성 인원·요청·**월비용(30d)**·성공률·커밋·머지 MR·**생산성 점수**(멤버 점수의 요청 가중 평균) | `GET /admin/benchmark/teams?window=30d` |
+| 사용자 탭 하단 "AI 활용지수" | 사용자별 Prompt 수·세션·활동일·커밋·머지 MR·도구 호출·성공률·비용·**활용지수(0~100)** | `GET /admin/benchmark/users?window=30d&limit=100` |
+| 안전 탭 "AI Incident" | 프로바이더별 **폴백/5xx 급증(시간당 ≥ 5건)** 을 장애로 추정, 연속 시간대 병합, 폴백·5xx·**영향 사용자 수**·진행 중 여부 | `GET /admin/incidents?window=7d&min_events=5` |
+
+활용지수 공식(관측 기반 휴리스틱, **인사평가 지표 아님** — 도입 현황 파악용): `요청량 30% + 활동일수 20% + 커밋 20% + 머지 MR 15% + 성공률 15%` (포화 상한: 요청 300, 활동일 20, 커밋 30, MR 10 / 30일 기준). 커밋·MR 은 VCS 상관(웹훅 또는 추론)으로 사용자에 연결된 것만 집계됩니다 — VCS 연동이 없으면 해당 컬럼은 0으로 나오고 나머지 요소만으로 점수가 계산됩니다.
 
 ---
 

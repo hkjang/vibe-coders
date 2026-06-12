@@ -5,7 +5,7 @@ const adminHTML = `<!doctype html>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>AI 코딩 프록시 게이트웨이</title>
+  <title>AI 게이트웨이</title>
   <style>
     :root[data-theme="light"], :root {
       color-scheme: light;
@@ -145,6 +145,26 @@ const adminHTML = `<!doctype html>
       z-index: 10; padding: 32px;
     }
     .modal-backdrop.open { display: flex; }
+    .login-backdrop {
+      position: fixed; inset: 0; background: var(--bg, #f4f6fa);
+      display: none; align-items: center; justify-content: center; z-index: 50;
+    }
+    .login-backdrop.open { display: flex; }
+    .login-card {
+      width: min(380px, 92vw); background: var(--panel); border: 1px solid var(--line);
+      border-radius: 12px; padding: 28px; box-shadow: 0 8px 30px rgba(15,23,42,0.12);
+    }
+    .login-card h2 { margin: 0 0 4px; font-size: 18px; }
+    .login-card .sub { color: var(--muted); font-size: 13px; margin-bottom: 18px; }
+    .login-card label { display: block; font-size: 12px; font-weight: 700; color: var(--muted); margin: 12px 0 4px; }
+    .login-card input { width: 100%; box-sizing: border-box; }
+    .login-card button[type="submit"] { width: 100%; margin-top: 18px; height: 38px; }
+    .login-card .error-line { padding: 8px 0 0; font-size: 13px; }
+    .user-chip {
+      display: none; align-items: center; gap: 6px; padding: 4px 10px;
+      border: 1px solid var(--line); border-radius: 999px; font-size: 12px; color: var(--ink);
+      background: var(--pill-bg); white-space: nowrap;
+    }
     .modal {
       width: min(960px, 100%); max-height: 90vh; background: var(--panel);
       border-radius: 10px; overflow: auto; border: 1px solid var(--line);
@@ -189,7 +209,7 @@ const adminHTML = `<!doctype html>
 </head>
 <body>
   <header>
-    <h1>AI 코딩 프록시 게이트웨이</h1>
+    <h1>AI 게이트웨이</h1>
     <nav id="tabs">
       <a href="#/dashboard" data-tab="dashboard" class="active">대시보드</a>
       <a href="#/xview" data-tab="xview">XView</a>
@@ -217,12 +237,27 @@ const adminHTML = `<!doctype html>
       </select>
       <button id="theme-toggle" class="ghost" type="button" title="라이트/다크 전환 (t)">🌓</button>
       <button id="help-toggle" class="ghost" type="button" title="단축키 도움말 (?)">?</button>
+      <span id="auth-user" class="user-chip"></span>
+      <button id="auth-logout" class="ghost" type="button" style="display:none" title="로그아웃">로그아웃</button>
       <input id="token" type="password" autocomplete="off" placeholder="관리자 토큰">
     </div>
   </header>
   <main>
     <div id="view"></div>
   </main>
+
+  <div id="login-backdrop" class="login-backdrop">
+    <form class="login-card" id="login-form" autocomplete="on">
+      <h2>관리자 로그인</h2>
+      <div class="sub">AI 게이트웨이 어드민</div>
+      <label for="login-email">이메일</label>
+      <input id="login-email" type="email" autocomplete="username" placeholder="admin@company.com" required>
+      <label for="login-password">비밀번호</label>
+      <input id="login-password" type="password" autocomplete="current-password" placeholder="••••••••" required>
+      <div id="login-error" class="error-line" style="display:none"></div>
+      <button type="submit" id="login-submit">로그인</button>
+    </form>
+  </div>
 
   <div id="modal-backdrop" class="modal-backdrop">
     <div class="modal">
@@ -251,13 +286,148 @@ const adminHTML = `<!doctype html>
       applyTheme(next);
     });
 
-    // ---------- token ----------
+    // ---------- token (legacy ADMIN_TOKEN mode) ----------
     const tokenInput = document.getElementById('token');
     tokenInput.value = sessionStorage.getItem('adminToken') || '';
     tokenInput.addEventListener('change', () => {
       sessionStorage.setItem('adminToken', tokenInput.value);
       route();
     });
+
+    // ---------- auth (AUTH_ENABLED: email/password → JWT) ----------
+    const authState = {
+      enabled: false,
+      access: sessionStorage.getItem('authAccess') || '',
+      refresh: sessionStorage.getItem('authRefresh') || '',
+      user: JSON.parse(sessionStorage.getItem('authUser') || 'null'),
+    };
+    function saveAuth(tokens) {
+      authState.access = tokens.access_token || '';
+      authState.refresh = tokens.refresh_token || '';
+      if (tokens.user) authState.user = tokens.user;
+      sessionStorage.setItem('authAccess', authState.access);
+      sessionStorage.setItem('authRefresh', authState.refresh);
+      if (authState.user) sessionStorage.setItem('authUser', JSON.stringify(authState.user));
+    }
+    function clearAuth() {
+      authState.access = ''; authState.refresh = ''; authState.user = null;
+      sessionStorage.removeItem('authAccess');
+      sessionStorage.removeItem('authRefresh');
+      sessionStorage.removeItem('authUser');
+    }
+    function renderAuthHeader() {
+      const chip = document.getElementById('auth-user');
+      const logoutBtn = document.getElementById('auth-logout');
+      if (authState.enabled) {
+        tokenInput.style.display = 'none'; // JWT 모드: 수동 토큰 입력 숨김
+        if (authState.user) {
+          chip.style.display = 'inline-flex';
+          const loginId = (authState.user.email || '').split('@')[0];
+          chip.textContent = loginId + ' · ' + (authState.user.role || '');
+          chip.title = authState.user.email || ''; // 전체 이메일은 hover로
+          logoutBtn.style.display = 'inline-block';
+        } else {
+          chip.style.display = 'none';
+          logoutBtn.style.display = 'none';
+        }
+      } else {
+        tokenInput.style.display = '';
+        chip.style.display = 'none';
+        logoutBtn.style.display = 'none';
+      }
+    }
+    function showLogin(message) {
+      renderAuthHeader();
+      const err = document.getElementById('login-error');
+      if (message) { err.textContent = message; err.style.display = 'block'; }
+      else { err.style.display = 'none'; }
+      document.getElementById('login-backdrop').classList.add('open');
+      setTimeout(() => document.getElementById('login-email').focus(), 50);
+    }
+    function hideLogin() {
+      document.getElementById('login-backdrop').classList.remove('open');
+    }
+    async function tryRefresh() {
+      if (!authState.refresh) return false;
+      try {
+        const res = await fetch('/auth/refresh', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ refresh_token: authState.refresh }),
+        });
+        if (!res.ok) return false;
+        saveAuth(await res.json()); // rotation: 새 access + 새 refresh 저장
+        return true;
+      } catch { return false; }
+    }
+    document.getElementById('login-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const btn = document.getElementById('login-submit');
+      const err = document.getElementById('login-error');
+      btn.disabled = true; btn.textContent = '로그인 중…'; err.style.display = 'none';
+      try {
+        const res = await fetch('/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email: document.getElementById('login-email').value.trim(),
+            password: document.getElementById('login-password').value,
+          }),
+        });
+        if (!res.ok) {
+          err.textContent = res.status === 401 ? '이메일 또는 비밀번호가 올바르지 않습니다.' : '로그인 실패 (' + res.status + ')';
+          err.style.display = 'block';
+          return;
+        }
+        saveAuth(await res.json());
+        document.getElementById('login-password').value = '';
+        hideLogin();
+        renderAuthHeader();
+        route();
+      } catch (ex) {
+        err.textContent = '로그인 실패: ' + ex.message;
+        err.style.display = 'block';
+      } finally {
+        btn.disabled = false; btn.textContent = '로그인';
+      }
+    });
+    document.getElementById('auth-logout').addEventListener('click', async () => {
+      try {
+        await fetch('/auth/logout', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + authState.access },
+          body: JSON.stringify({ refresh_token: authState.refresh }),
+        });
+      } catch {}
+      clearAuth();
+      renderAuthHeader();
+      showLogin();
+    });
+    // 부팅 동선: 인증 모드 감지 → 세션 복원/리프레시 → 즉시 로그인 화면 또는 대시보드
+    async function initAuth() {
+      try {
+        const h = authState.access ? { Authorization: 'Bearer ' + authState.access } : {};
+        const res = await fetch('/auth/me', { headers: h });
+        if (res.ok) {
+          const me = await res.json();
+          authState.enabled = !!me.auth_enabled;
+          if (me.user) { authState.user = me.user; sessionStorage.setItem('authUser', JSON.stringify(me.user)); }
+          renderAuthHeader();
+          route();
+          return;
+        }
+        if (res.status === 401) { // 인증 모드인데 access 만료/없음 → 조용히 refresh 시도
+          authState.enabled = true;
+          if (await tryRefresh()) { renderAuthHeader(); route(); return; }
+          clearAuth();
+          showLogin();
+          return;
+        }
+      } catch {}
+      // /auth/me 자체가 실패해도 화면은 띄움 (레거시 모드 가정)
+      renderAuthHeader();
+      route();
+    }
 
     // ---------- modal ----------
     document.getElementById('modal-close').addEventListener('click', () => closeModal());
@@ -316,14 +486,31 @@ const adminHTML = `<!doctype html>
     // ---------- HTTP ----------
     function headers() {
       const h = { Accept: 'application/json' };
+      if (authState.enabled) {
+        if (authState.access) h.Authorization = 'Bearer ' + authState.access;
+        return h;
+      }
       const token = tokenInput.value.trim();
       if (token) h.Authorization = 'Bearer ' + token;
       return h;
     }
     async function api(path, options = {}) {
-      const requestHeaders = headers();
-      if (options.body) requestHeaders['Content-Type'] = 'application/json';
-      const res = await fetch(path, { ...options, headers: requestHeaders });
+      const doFetch = () => {
+        const requestHeaders = headers();
+        if (options.body) requestHeaders['Content-Type'] = 'application/json';
+        return fetch(path, { ...options, headers: requestHeaders });
+      };
+      let res = await doFetch();
+      // JWT 모드: access 만료 시 refresh 회전 후 1회 재시도, 실패하면 재로그인 유도
+      if (res.status === 401 && authState.enabled) {
+        if (await tryRefresh()) {
+          res = await doFetch();
+        } else {
+          clearAuth();
+          showLogin('세션이 만료되었습니다. 다시 로그인해주세요.');
+          throw new Error('세션 만료');
+        }
+      }
       if (!res.ok) {
         const text = await res.text();
         throw new Error(text || res.statusText);
@@ -2851,8 +3038,12 @@ const adminHTML = `<!doctype html>
 
     // ---------- users ----------
     async function renderUsers() {
-      const r = await api('/admin/users');
+      const [r, prod] = await Promise.all([
+        api('/admin/users'),
+        api('/admin/benchmark/users?window=30d&limit=50').catch(() => ({ users: [] })),
+      ]);
       const rows = r.users || [];
+      const prodRows = prod.users || [];
       const html = section('사용자 (Proxy API 키) 별 사용량',
         rows.length ? (
           '<table><thead><tr>' +
@@ -2881,9 +3072,30 @@ const adminHTML = `<!doctype html>
             '</tr>'
           ).join('') + '</tbody></table>'
         ) : '<div class="empty">사용자 없음</div>'
-      );
+      ) + section('AI 활용지수 (최근 30일)', productivityTable(prodRows));
       document.getElementById('view').innerHTML = html;
       makeSortable('#view', 'users');
+    }
+    function productivityTable(rows) {
+      if (!rows.length) return '<div class="empty">활동 데이터 없음 (chat 호출이 쌓이면 표시됩니다)</div>';
+      const scoreBadge = (s) => '<span class="status ' + (s >= 70 ? '' : (s >= 40 ? 'warn' : 'error')) + '">' + fmt(s) + '점</span>';
+      return '<table><thead><tr>' +
+        '<th data-sort="str">사용자</th><th data-sort="str">팀</th><th data-sort="num">Prompt</th><th data-sort="num">세션</th><th data-sort="num">활동일</th>' +
+        '<th data-sort="num">커밋</th><th data-sort="num">머지 MR</th><th data-sort="num">도구 호출</th><th data-sort="num">성공률</th><th data-sort="num">비용</th><th data-sort="num">활용지수</th></tr></thead><tbody>' +
+        rows.map(u => '<tr class="row-link" onclick="location.hash=\'#/users/' + encodeURIComponent(u.api_key_id) + '\'">' +
+          '<td>' + escapeHTML(u.name) + '<div class="muted">' + escapeHTML(u.api_key_id) + '</div></td>' +
+          '<td>' + escapeHTML(u.team || '') + '</td>' +
+          '<td data-num="' + (u.requests || 0) + '">' + fmt(u.requests) + '</td>' +
+          '<td data-num="' + (u.sessions || 0) + '">' + fmt(u.sessions) + '</td>' +
+          '<td data-num="' + (u.active_days || 0) + '">' + fmt(u.active_days) + '</td>' +
+          '<td data-num="' + (u.commits || 0) + '">' + fmt(u.commits) + '</td>' +
+          '<td data-num="' + (u.merged_mrs || 0) + '">' + fmt(u.merged_mrs) + '</td>' +
+          '<td data-num="' + (u.tool_calls || 0) + '">' + fmt(u.tool_calls) + '</td>' +
+          '<td data-num="' + (u.success_rate || 0) + '">' + Math.round((u.success_rate || 0) * 100) + '%</td>' +
+          '<td data-num="' + (u.cost_krw || 0) + '">' + money(u.cost_krw) + '</td>' +
+          '<td data-num="' + (u.score || 0) + '">' + scoreBadge(u.score || 0) + '</td>' +
+        '</tr>').join('') + '</tbody></table>' +
+        '<div class="muted" style="font-size:12px; padding:8px 14px 12px">활용지수 = 요청량 30% + 활동일수 20% + 커밋 20% + 머지 MR 15% + 성공률 15% (관측 기반 휴리스틱 — 인사평가 지표가 아닌 도입 현황 파악용). 커밋·MR은 VCS 상관으로 연결된 것만 집계됩니다.</div>';
     }
     window.promoteExternalKey = async (id, current) => {
       const name = prompt('외부(미등록) 키를 관리 사용자로 등록합니다.\n클라이언트가 보내는 키는 그대로 두고, 이 식별자에 이름·팀을 부여해 정식 사용자(active)로 승격합니다.\n\n표시 이름:', current && current.indexOf('external-') !== 0 ? current : '');
@@ -2954,9 +3166,30 @@ const adminHTML = `<!doctype html>
     }
 
     async function renderTeams() {
-      const r = await api('/admin/teams');
+      const [r, bench] = await Promise.all([
+        api('/admin/teams'),
+        api('/admin/benchmark/teams?window=30d').catch(() => ({ teams: [] })),
+      ]);
       const rows = r.teams || [];
-      const html = section('팀별 사용량',
+      const benchRows = bench.teams || [];
+      const scoreBadge = (s) => '<span class="status ' + (s >= 70 ? '' : (s >= 40 ? 'warn' : 'error')) + '">' + fmt(s) + '점</span>';
+      const benchTable = benchRows.length ? (
+        '<table><thead><tr>' +
+        '<th data-sort="str">팀</th><th data-sort="num">활성 인원</th><th data-sort="num">요청</th><th data-sort="num">월비용(30d)</th>' +
+        '<th data-sort="num">성공률</th><th data-sort="num">커밋</th><th data-sort="num">머지 MR</th><th data-sort="num">생산성 점수</th></tr></thead><tbody>' +
+        benchRows.map(b => '<tr class="row-link" onclick="location.hash=\'#/teams/' + encodeURIComponent(b.team) + '\'">' +
+          '<td>' + escapeHTML(b.team) + '</td>' +
+          '<td data-num="' + (b.active_users || 0) + '">' + fmt(b.active_users) + '</td>' +
+          '<td data-num="' + (b.requests || 0) + '">' + fmt(b.requests) + '</td>' +
+          '<td data-num="' + (b.cost_krw || 0) + '">' + money(b.cost_krw) + '</td>' +
+          '<td data-num="' + (b.success_rate || 0) + '">' + Math.round((b.success_rate || 0) * 100) + '%</td>' +
+          '<td data-num="' + (b.commits || 0) + '">' + fmt(b.commits) + '</td>' +
+          '<td data-num="' + (b.merged_mrs || 0) + '">' + fmt(b.merged_mrs) + '</td>' +
+          '<td data-num="' + (b.score || 0) + '">' + scoreBadge(b.score || 0) + '</td>' +
+        '</tr>').join('') + '</tbody></table>' +
+        '<div class="muted" style="font-size:12px; padding:8px 14px 12px">생산성 점수 = 요청량 30% + 활동일수 20% + 커밋 20% + 머지 MR 15% + 성공률 15% (최근 30일, 관측 기반 휴리스틱 — 코드 품질 평가 아님). 커밋·MR은 VCS 상관으로 연결된 것만 집계됩니다.</div>'
+      ) : '<div class="empty">벤치마크 데이터 없음</div>';
+      const html = section('팀 벤치마크 (월비용 × 생산성, 최근 30일)', benchTable) + section('팀별 사용량',
         rows.length ? (
           '<table><thead><tr>' +
           '<th data-sort="str">팀</th>' +
@@ -3656,8 +3889,24 @@ const adminHTML = `<!doctype html>
     };
 
     // ---------- safety (kill switch + alerts) ----------
+    function incidentsTable(incidents) {
+      if (!incidents.length) return '<div class="empty">최근 7일 내 감지된 프로바이더 장애 없음 (시간당 폴백/5xx ≥ 5건 기준)</div>';
+      return '<table><thead><tr><th data-sort="str">프로바이더</th><th data-sort="str">시작</th><th data-sort="str">종료</th>' +
+        '<th data-sort="num">폴백</th><th data-sort="num">5xx</th><th data-sort="num">영향 사용자</th><th data-sort="num">요청</th><th>상태</th></tr></thead><tbody>' +
+        incidents.map(i => '<tr>' +
+          '<td><strong>' + escapeHTML(i.provider) + '</strong></td>' +
+          '<td>' + ago(i.started_at) + '</td>' +
+          '<td>' + ago(i.ended_at) + '</td>' +
+          '<td data-num="' + (i.failovers || 0) + '">' + fmt(i.failovers) + '</td>' +
+          '<td data-num="' + (i.errors_5xx || 0) + '">' + fmt(i.errors_5xx) + '</td>' +
+          '<td data-num="' + (i.affected_users || 0) + '">' + fmt(i.affected_users) + '명</td>' +
+          '<td data-num="' + (i.requests || 0) + '">' + fmt(i.requests) + '</td>' +
+          '<td>' + (i.ongoing ? '<span class="status error">진행 중</span>' : '<span class="status">종료</span>') + '</td>' +
+        '</tr>').join('') + '</tbody></table>' +
+        '<div class="muted" style="font-size:12px; padding:8px 14px 12px">폴백(자동 전환) 또는 5xx 가 시간당 ' + '5건 이상인 시간대를 프로바이더별로 묶어 장애로 추정합니다. 연속된 시간대는 한 건으로 병합. 예: "openai 응답 장애 → anthropic 자동 전환, 폴백 212회, 영향 사용자 18명". API: <code>GET /admin/incidents?window=7d&min_events=5</code></div>';
+    }
     async function renderSafety() {
-      const [kill, alerts, cost, policiesResp, secretResp, policyResp, approvalResp] = await Promise.all([
+      const [kill, alerts, cost, policiesResp, secretResp, policyResp, approvalResp, incidentsResp] = await Promise.all([
         api('/admin/kill-switch'),
         api('/admin/alerts'),
         api('/admin/cost').catch(() => ({ enabled: false, threshold_krw: 0 })),
@@ -3665,6 +3914,7 @@ const adminHTML = `<!doctype html>
         api('/admin/security/secrets?window=24h&limit=80').catch(() => ({ secret_events: [], count: 0, filters: {} })),
         api('/admin/policies/decisions?window=24h&limit=80').catch(() => ({ policy_decisions: [], count: 0, filters: {} })),
         api('/admin/approvals?status=pending&window=24h&limit=50').catch(() => ({ approvals: [], count: 0, filters: {} })),
+        api('/admin/incidents?window=7d').catch(() => ({ incidents: [] })),
       ]);
       const rules = alerts.rules || [];
       const events = alerts.events || [];
@@ -3673,6 +3923,7 @@ const adminHTML = `<!doctype html>
       const secretEvents = secretResp.secret_events || [];
       const policyDecisions = policyResp.policy_decisions || [];
       const approvals = approvalResp.approvals || [];
+      const incidents = incidentsResp.incidents || [];
 
       const killCard = '<div style="padding:14px"><div class="kv">' +
         row('현재 상태', kill.disabled
@@ -3857,6 +4108,7 @@ const adminHTML = `<!doctype html>
 
       const html =
         section('긴급 정지 (Kill Switch)', killCard) +
+        section('AI Incident (프로바이더 장애 감지, 최근 7일)', incidentsTable(incidents)) +
         section('비용 가드 / 예측 (Cost Guard)', costCard) +
         section('AI 정책 엔진 (AI Policy Engine)', policyCard) +
         section('Secret Firewall 이벤트', secretFirewallCard) +
@@ -4267,7 +4519,7 @@ const adminHTML = `<!doctype html>
 
     // ---------- settings ----------
     async function renderSettings() {
-      const [keys, providers, retention, fallback, audit, routes, learning, knowledge] = await Promise.all([
+      const [keys, providers, retention, fallback, audit, routes, learning, knowledge, usersResp, teamsResp, authEvents] = await Promise.all([
         api('/admin/api-keys'),
         api('/admin/providers'),
         api('/admin/retention'),
@@ -4276,6 +4528,9 @@ const adminHTML = `<!doctype html>
         api('/admin/routing-rules').catch(() => ({ rules: [] })),
         api('/admin/routing/learning?window=7d').catch(() => ({ recommendations: [], cells: [] })),
         api('/admin/knowledge').catch(() => ({ snippets: [] })),
+        api('/admin/users').catch(() => ({ auth_users: [] })),
+        api('/admin/teams').catch(() => ({ auth_teams: [] })),
+        api('/admin/audit/auth-events?limit=30').catch(() => ({ events: [] })),
       ]);
 
       const html =
@@ -4303,6 +4558,7 @@ const adminHTML = `<!doctype html>
             providerTable(providers.providers || [])
           ) +
         '</div>' +
+        section('로그인 계정 · 팀 (RBAC)', authAccountsPanel(usersResp.auth_users || [], teamsResp.auth_teams || [], authEvents.events || [])) +
         section('복잡도 기반 비용 최적 라우팅 규칙', routingRulesPanel(routes.rules || [])) +
         section('라우팅 학습 추천 (Routing Learning)', routingLearningPanel(learning)) +
         section('Knowledge Cache (반복 규칙·시스템 프롬프트 중앙 등록)', knowledgePanel(knowledge.snippets || [])) +
@@ -4313,6 +4569,10 @@ const adminHTML = `<!doctype html>
       document.getElementById('view').innerHTML = html;
       document.getElementById('key-form').addEventListener('submit', createProxyKey);
       document.getElementById('provider-form').addEventListener('submit', saveProvider);
+      const auForm = document.getElementById('auth-user-form');
+      if (auForm) auForm.addEventListener('submit', createAuthUser);
+      const atForm = document.getElementById('auth-team-form');
+      if (atForm) atForm.addEventListener('submit', createAuthTeam);
       const rrForm = document.getElementById('routing-rule-form');
       if (rrForm) rrForm.addEventListener('submit', addRoutingRule);
       const kbForm = document.getElementById('knowledge-form');
@@ -4333,6 +4593,94 @@ const adminHTML = `<!doctype html>
         URL.revokeObjectURL(url);
       });
       makeSortable('#view', 'settings');
+    }
+    const authRoleOptions = ['developer', 'viewer', 'team_admin', 'admin', 'super_admin', 'service_account'];
+    function authAccountsPanel(users, teams, events) {
+      const note = authState.enabled
+        ? ''
+        : '<div class="banner warn" style="margin:0 14px 12px">현재 <code>AUTH_ENABLED=false</code> — 계정을 만들어도 로그인 모드가 꺼져 있어 사용되지 않습니다. 켜려면 <code>AUTH_ENABLED=true</code> + <code>AUTH_JWT_SECRET</code> 설정 후 재기동하세요.</div>';
+      const teamOptions = '<option value="">팀 없음</option>' +
+        teams.map(t => '<option value="' + escapeAttr(t.id) + '">' + escapeHTML(t.name) + '</option>').join('');
+      const userForm =
+        '<form class="inline-form" id="auth-user-form" autocomplete="off" style="grid-template-columns: minmax(160px,1.4fr) minmax(120px,1fr) minmax(100px,1fr) 130px minmax(110px,1fr) 70px;">' +
+          '<input id="au-email" type="email" placeholder="이메일" required>' +
+          '<input id="au-password" type="password" autocomplete="new-password" placeholder="초기 비밀번호" required>' +
+          '<input id="au-name" placeholder="이름">' +
+          '<select id="au-role">' + authRoleOptions.map(r => '<option value="' + r + '"' + (r === 'developer' ? ' selected' : '') + '>' + r + '</option>').join('') + '</select>' +
+          '<select id="au-team">' + teamOptions + '</select>' +
+          '<button type="submit">생성</button>' +
+        '</form>';
+      const roleSelect = (u) => '<select onchange="applyAuthUserRole(\'' + escapeAttr(u.id) + '\', this.value)" ' + (u.role === 'super_admin' && u.status === 'active' ? '' : '') + '>' +
+        authRoleOptions.map(r => '<option value="' + r + '"' + (r === u.role ? ' selected' : '') + '>' + r + '</option>').join('') + '</select>';
+      const userTable = users.length ?
+        '<table><thead><tr><th data-sort="str">이메일 / 이름</th><th>역할</th><th data-sort="str">상태</th><th data-sort="str">생성</th><th>동작</th></tr></thead><tbody>' +
+        users.map(u => '<tr>' +
+          '<td><strong>' + escapeHTML(u.email) + '</strong><div class="muted">' + escapeHTML(u.name || '') + ' · ' + escapeHTML(u.id) + '</div></td>' +
+          '<td>' + roleSelect(u) + '</td>' +
+          '<td><span class="status ' + (u.status === 'active' ? '' : 'error') + '">' + (u.status === 'active' ? '활성' : '비활성') + '</span></td>' +
+          '<td>' + ago(u.created_at) + '</td>' +
+          '<td><button class="' + (u.status === 'active' ? 'danger' : 'secondary') + '" type="button" onclick="toggleAuthUser(\'' + escapeAttr(u.id) + '\', \'' + (u.status === 'active' ? 'disabled' : 'active') + '\')">' + (u.status === 'active' ? '비활성화' : '활성화') + '</button></td>' +
+        '</tr>').join('') + '</tbody></table>'
+        : '<div class="empty">로그인 계정 없음. 부트스트랩 계정은 AUTH_ADMIN_BOOTSTRAP_EMAIL/PASSWORD 로 첫 기동 시 자동 생성됩니다.</div>';
+      const teamForm =
+        '<form class="inline-form" id="auth-team-form" autocomplete="off" style="grid-template-columns: minmax(160px,1fr) 70px;">' +
+          '<input id="at-name" placeholder="팀 이름 (예: platform)" required>' +
+          '<button type="submit">팀 생성</button>' +
+        '</form>';
+      const teamList = teams.length
+        ? '<div style="padding:0 14px 12px; display:flex; gap:8px; flex-wrap:wrap">' + teams.map(t => '<span class="pill">' + escapeHTML(t.name) + ' <span class="muted">' + escapeHTML(t.id) + '</span></span>').join('') + '</div>'
+        : '<div class="empty">인증 팀 없음</div>';
+      const eventTable = events.length ?
+        '<table><thead><tr><th data-sort="str">시각</th><th data-sort="str">이벤트</th><th>대상</th><th>IP</th><th>상세</th></tr></thead><tbody>' +
+        events.map(e => {
+          const bad = ['login_failed', 'api_key_denied', 'ip_denied', 'scope_denied', 'model_denied', 'budget_denied'].indexOf(e.event_type) >= 0;
+          return '<tr>' +
+            '<td>' + ago(e.created_at) + '</td>' +
+            '<td><span class="status ' + (bad ? 'error' : '') + '">' + escapeHTML(e.event_type) + '</span></td>' +
+            '<td>' + escapeHTML(e.actor_user_id || e.api_key_id || '') + '</td>' +
+            '<td>' + escapeHTML(e.ip || '') + '</td>' +
+            '<td>' + escapeHTML(e.detail || '') + '</td>' +
+          '</tr>';
+        }).join('') + '</tbody></table>'
+        : '<div class="empty">인증 이벤트 없음</div>';
+      return note +
+        '<h3 style="margin:6px 14px 8px; font-size:14px">계정</h3>' + userForm + userTable +
+        '<h3 style="margin:14px 14px 8px; font-size:14px">팀</h3>' + teamForm + teamList +
+        '<h3 style="margin:14px 14px 8px; font-size:14px">최근 인증 이벤트</h3>' + eventTable +
+        '<div class="muted" style="font-size:12px; padding:8px 14px 12px">역할 변경은 즉시 적용되며 <code>role_changed</code> 로 감사 기록됩니다. 비활성화하면 그 계정의 모든 세션·refresh token이 즉시 폐기됩니다. team_admin 은 자기 팀의 계정 생성만 가능하고 역할 변경/비활성화는 불가합니다.</div>';
+    }
+    async function createAuthUser(e) {
+      e.preventDefault();
+      const body = {
+        email: document.getElementById('au-email').value.trim(),
+        password: document.getElementById('au-password').value,
+        name: document.getElementById('au-name').value.trim(),
+        role: document.getElementById('au-role').value,
+        team_id: document.getElementById('au-team').value,
+      };
+      if (!body.email || !body.password) { alert('이메일과 초기 비밀번호를 입력하세요'); return; }
+      await api('/admin/users', { method: 'POST', body: JSON.stringify(body) });
+      route();
+    }
+    window.applyAuthUserRole = async (id, role) => {
+      if (!confirm('이 계정의 역할을 "' + role + '" 로 변경하시겠습니까?')) { route(); return; }
+      await api('/admin/users/' + encodeURIComponent(id), { method: 'PATCH', body: JSON.stringify({ role }) });
+      route();
+    };
+    window.toggleAuthUser = async (id, status) => {
+      const msg = status === 'disabled'
+        ? '이 계정을 비활성화하시겠습니까? 모든 활성 세션과 refresh token이 즉시 폐기됩니다.'
+        : '이 계정을 다시 활성화하시겠습니까?';
+      if (!confirm(msg)) return;
+      await api('/admin/users/' + encodeURIComponent(id), { method: 'PATCH', body: JSON.stringify({ status }) });
+      route();
+    };
+    async function createAuthTeam(e) {
+      e.preventDefault();
+      const name = document.getElementById('at-name').value.trim();
+      if (!name) return;
+      await api('/admin/teams', { method: 'POST', body: JSON.stringify({ name }) });
+      route();
     }
     function apiKeyTable(rows) {
       if (!rows.length) return '<div class="empty">발급된 키 없음</div>';
@@ -4671,7 +5019,7 @@ const adminHTML = `<!doctype html>
     }
     document.getElementById('help-toggle').addEventListener('click', openHelp);
 
-    route();
+    initAuth();
   </script>
 </body>
 </html>`

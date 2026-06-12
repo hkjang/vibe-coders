@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -39,6 +40,171 @@ func newAuthTestServer(t *testing.T, upstreamURL string) (*store.SQLStore, *http
 		t.Fatal(err)
 	}
 	return db, httptest.NewServer(server.Routes())
+}
+
+// TestAdminLoginFlowBootContract pins the contract the admin UI boot sequence
+// relies on to route the operator straight to the login page:
+//   - auth mode: GET /auth/me without a token → 401 (UI shows the login overlay)
+//   - the /admin HTML itself loads without auth and contains the login form
+//   - after login, /auth/me returns auth_enabled + user identity for the header chip
+//   - legacy mode (auth disabled): /auth/me → 200 {auth_enabled:false} (token input UI)
+func TestAdminLoginFlowBootContract(t *testing.T) {
+	_, proxy := newAuthTestServer(t, "http://example.invalid")
+	defer proxy.Close()
+
+	// 1) auth mode + no token → 401 drives the UI to the login overlay
+	me, err := http.Get(proxy.URL + "/auth/me")
+	if err != nil {
+		t.Fatal(err)
+	}
+	me.Body.Close()
+	if me.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("/auth/me without token should be 401 in auth mode, got %d", me.StatusCode)
+	}
+
+	// 2) the admin HTML must render without auth so the login form can appear
+	page, err := http.Get(proxy.URL + "/admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	html, _ := io.ReadAll(page.Body)
+	page.Body.Close()
+	if page.StatusCode != http.StatusOK {
+		t.Fatalf("/admin page should load without auth, got %d", page.StatusCode)
+	}
+	for _, needle := range []string{"login-form", "login-email", "login-password", "initAuth()"} {
+		if !strings.Contains(string(html), needle) {
+			t.Fatalf("admin HTML missing %q (login flow not wired)", needle)
+		}
+	}
+
+	// 3) login → /auth/me returns identity for the header chip
+	login := postJSON(t, proxy.URL+"/auth/login", "", map[string]string{"email": "root@example.com", "password": "correct-password"})
+	var tokens struct {
+		AccessToken string `json:"access_token"`
+	}
+	if err := json.NewDecoder(login.Body).Decode(&tokens); err != nil {
+		t.Fatal(err)
+	}
+	login.Body.Close()
+	req, _ := http.NewRequest(http.MethodGet, proxy.URL+"/auth/me", nil)
+	req.Header.Set("Authorization", "Bearer "+tokens.AccessToken)
+	me2, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var meOut struct {
+		AuthEnabled bool `json:"auth_enabled"`
+		User        struct {
+			Email string `json:"email"`
+			Role  string `json:"role"`
+		} `json:"user"`
+	}
+	if err := json.NewDecoder(me2.Body).Decode(&meOut); err != nil {
+		t.Fatal(err)
+	}
+	me2.Body.Close()
+	if !meOut.AuthEnabled || meOut.User.Email != "root@example.com" || meOut.User.Role != "super_admin" {
+		t.Fatalf("unexpected /auth/me after login: %+v", meOut)
+	}
+}
+
+// TestAuthUserRoleChangeAndDeactivation covers the account-management flow added
+// to the settings tab: create → role change (audited) → deactivate (sessions die).
+func TestAuthUserRoleChangeAndDeactivation(t *testing.T) {
+	db, proxy := newAuthTestServer(t, "http://example.invalid")
+	defer proxy.Close()
+
+	// login as bootstrap super_admin
+	login := postJSON(t, proxy.URL+"/auth/login", "", map[string]string{"email": "root@example.com", "password": "correct-password"})
+	var rootTok struct {
+		AccessToken string `json:"access_token"`
+	}
+	_ = json.NewDecoder(login.Body).Decode(&rootTok)
+	login.Body.Close()
+
+	// create a developer account
+	create := postJSON(t, proxy.URL+"/admin/users", rootTok.AccessToken, map[string]string{
+		"email": "dev@example.com", "password": "dev-password", "name": "Dev", "role": "developer",
+	})
+	if create.StatusCode != http.StatusCreated {
+		b, _ := io.ReadAll(create.Body)
+		t.Fatalf("user create failed: %d %s", create.StatusCode, b)
+	}
+	var created struct {
+		User struct {
+			ID string `json:"id"`
+		} `json:"user"`
+	}
+	_ = json.NewDecoder(create.Body).Decode(&created)
+	create.Body.Close()
+
+	// the new account can log in
+	devLogin := postJSON(t, proxy.URL+"/auth/login", "", map[string]string{"email": "dev@example.com", "password": "dev-password"})
+	var devTok struct {
+		AccessToken string `json:"access_token"`
+	}
+	_ = json.NewDecoder(devLogin.Body).Decode(&devTok)
+	devLogin.Body.Close()
+	if devTok.AccessToken == "" {
+		t.Fatal("dev login should succeed")
+	}
+
+	// role change developer → admin, audited as role_changed
+	patch, _ := http.NewRequest(http.MethodPatch, proxy.URL+"/admin/users/"+created.User.ID, strings.NewReader(`{"role":"admin"}`))
+	patch.Header.Set("Authorization", "Bearer "+rootTok.AccessToken)
+	patch.Header.Set("Content-Type", "application/json")
+	pr, err := http.DefaultClient.Do(patch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pr.Body.Close()
+	if pr.StatusCode != http.StatusOK {
+		t.Fatalf("role patch failed: %d", pr.StatusCode)
+	}
+	user, _, _ := db.AuthUserByID(context.Background(), created.User.ID)
+	if user.Role != "admin" {
+		t.Fatalf("role not updated: %q", user.Role)
+	}
+	events, _ := db.ListAuditEvents(context.Background(), 50)
+	foundRoleChange := false
+	for _, e := range events {
+		if e.EventType == "role_changed" && e.ActorUserID == created.User.ID && strings.Contains(e.Detail, "developer → admin") {
+			foundRoleChange = true
+		}
+	}
+	if !foundRoleChange {
+		t.Fatalf("role_changed audit event missing: %+v", events)
+	}
+
+	// deactivate → live access token dies immediately (session revoked)
+	patch2, _ := http.NewRequest(http.MethodPatch, proxy.URL+"/admin/users/"+created.User.ID, strings.NewReader(`{"status":"disabled"}`))
+	patch2.Header.Set("Authorization", "Bearer "+rootTok.AccessToken)
+	patch2.Header.Set("Content-Type", "application/json")
+	pr2, err := http.DefaultClient.Do(patch2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pr2.Body.Close()
+	if pr2.StatusCode != http.StatusOK {
+		t.Fatalf("status patch failed: %d", pr2.StatusCode)
+	}
+	meReq, _ := http.NewRequest(http.MethodGet, proxy.URL+"/auth/me", nil)
+	meReq.Header.Set("Authorization", "Bearer "+devTok.AccessToken)
+	meRes, err := http.DefaultClient.Do(meReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	meRes.Body.Close()
+	if meRes.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("deactivated user's access token should be rejected, got %d", meRes.StatusCode)
+	}
+	// and a fresh login is refused
+	relogin := postJSON(t, proxy.URL+"/auth/login", "", map[string]string{"email": "dev@example.com", "password": "dev-password"})
+	relogin.Body.Close()
+	if relogin.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("deactivated user login should fail, got %d", relogin.StatusCode)
+	}
 }
 
 func TestAdminLoginRefreshRotationLogoutAndJWTRequired(t *testing.T) {

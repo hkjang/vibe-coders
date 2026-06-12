@@ -86,6 +86,27 @@ func (s *SQLStore) ListAuthUsers(ctx context.Context) ([]AuthUser, error) {
 	return out, rows.Err()
 }
 
+// UpdateAuthUserRoleStatus applies a partial role/status update (empty = keep).
+func (s *SQLStore) UpdateAuthUserRoleStatus(ctx context.Context, id, role, status string) error {
+	_, err := s.db.ExecContext(ctx, s.bind(`UPDATE users SET
+			role = CASE WHEN ? = '' THEN role ELSE ? END,
+			status = CASE WHEN ? = '' THEN status ELSE ? END,
+			updated_at = ?
+		WHERE id = ?`), role, role, status, status, formatTime(time.Now().UTC()), id)
+	return err
+}
+
+// RevokeAuthSessionsForUser revokes every active session for one user — used when
+// an account is deactivated so its access tokens stop working immediately.
+func (s *SQLStore) RevokeAuthSessionsForUser(ctx context.Context, userID string) error {
+	now := formatTime(time.Now().UTC())
+	if _, err := s.db.ExecContext(ctx, s.bind(`UPDATE auth_sessions SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL`), now, userID); err != nil {
+		return err
+	}
+	_, err := s.db.ExecContext(ctx, s.bind(`UPDATE refresh_tokens SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL`), now, userID)
+	return err
+}
+
 func (s *SQLStore) UpsertAuthTeam(ctx context.Context, team AuthTeam) error {
 	now := time.Now().UTC()
 	if team.CreatedAt.IsZero() {

@@ -167,6 +167,11 @@ func (s *Server) handleUserDetail(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusBadRequest, "invalid user id", "invalid_request_error", "invalid_user_id")
 		return
 	}
+	// usr_ ids are login accounts: PATCH updates role/status (admin only).
+	if r.Method == http.MethodPatch && strings.HasPrefix(id, "usr_") {
+		s.handleAuthUserUpdate(w, r, id)
+		return
+	}
 	detail, err := s.db.GetUserDetail(r.Context(), id, recentLimit(r))
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
@@ -177,6 +182,67 @@ func (s *Server) handleUserDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, detail)
+}
+
+// handleAuthUserUpdate applies a role/status change to a login account.
+// team_admin may not change roles or deactivate accounts (privilege escalation
+// guard) — only admin/super_admin scopes pass authorizeAdmin for PATCH anyway,
+// but team_admin gets an /admin/users bypass for its own team, so re-check here.
+func (s *Server) handleAuthUserUpdate(w http.ResponseWriter, r *http.Request, id string) {
+	if claims, ok := s.currentAccessClaims(r); ok && claims.Role == "team_admin" {
+		writeOpenAIError(w, http.StatusForbidden, "team_admin cannot change roles or account status", "permission_error", "role_change_denied")
+		return
+	}
+	var p struct {
+		Role   *string `json:"role"`
+		Status *string `json:"status"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+		writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "invalid_body")
+		return
+	}
+	user, found, err := s.db.AuthUserByID(r.Context(), id)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "user_lookup_failed")
+		return
+	}
+	if !found {
+		writeOpenAIError(w, http.StatusNotFound, "user not found", "invalid_request_error", "user_not_found")
+		return
+	}
+	role, status := "", ""
+	if p.Role != nil {
+		role = strings.TrimSpace(*p.Role)
+		if _, ok := roleScopes[role]; role != "" && !ok {
+			writeOpenAIError(w, http.StatusBadRequest, "invalid role", "invalid_request_error", "invalid_role")
+			return
+		}
+	}
+	if p.Status != nil {
+		status = strings.TrimSpace(*p.Status)
+		if status != "active" && status != "disabled" {
+			writeOpenAIError(w, http.StatusBadRequest, "status must be active or disabled", "invalid_request_error", "invalid_status")
+			return
+		}
+	}
+	if role == "" && status == "" {
+		writeOpenAIError(w, http.StatusBadRequest, "nothing to update", "invalid_request_error", "empty_update")
+		return
+	}
+	if err := s.db.UpdateAuthUserRoleStatus(r.Context(), id, role, status); err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "user_update_failed")
+		return
+	}
+	if status == "disabled" {
+		// kill live sessions + refresh tokens so the account stops working now
+		_ = s.db.RevokeAuthSessionsForUser(r.Context(), id)
+	}
+	if role != "" && role != user.Role {
+		_ = s.db.InsertAuditEvent(r.Context(), store.AuthEvent{ID: newID("ae"), EventType: "role_changed", ActorUserID: id, IP: clientIP(r), UserAgent: r.UserAgent(), Detail: user.Role + " → " + role, CreatedAt: time.Now().UTC()})
+	}
+	updated, _, _ := s.db.AuthUserByID(r.Context(), id)
+	s.auditAdmin(r, "auth_user.update", auditJSON(map[string]string{"id": id, "role": user.Role, "status": user.Status}), auditJSON(map[string]string{"id": id, "role": updated.Role, "status": updated.Status}))
+	writeJSON(w, http.StatusOK, map[string]any{"user": updated})
 }
 
 func (s *Server) handleIPs(w http.ResponseWriter, r *http.Request) {
