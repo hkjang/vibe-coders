@@ -2,6 +2,9 @@
 
 `http://<host>:8080/admin` 에 접속하는 운영 관리자를 위한 사용 설명서입니다. 한국어 UI 와 다중 탭으로 구성되어 있고, 모든 동작은 동일한 이름의 REST API 로도 자동화할 수 있습니다.
 
+> [!NOTE]
+> AI Proxy Gateway의 안전성 통제(긴급 정지, 비용 가드, 정책 엔진, 민감 정보 방화벽 등)에 관한 더욱 상세한 레벨의 스펙은 [안전 및 보안 거버넌스 운영 가이드 (SAFETY_GUIDE.md)](file:///c:/Users/USER/projects/vibe-coders/docs/SAFETY_GUIDE.md)를 참고해 주십시오.
+
 ---
 
 ## 1. 첫 접속
