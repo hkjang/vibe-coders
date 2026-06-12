@@ -105,6 +105,7 @@ func NewServer(cfg config.Config, db *store.SQLStore, logger *store.AsyncLogger,
 			Owner:   key.Owner,
 			Team:    key.Team,
 			Status:  "active",
+			Scopes:  defaultAPIKeyScopes("", false),
 		})
 		if err != nil {
 			return nil, fmt.Errorf("upsert proxy api key %s: %w", key.Name, err)
@@ -320,21 +321,21 @@ func (s *Server) handleAPIKeys(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"api_keys": keys})
 	case http.MethodPost:
 		var payload struct {
-			Name             string   `json:"name"`
-			Key              string   `json:"key"`
-			Owner            string   `json:"owner"`
-			Team             string   `json:"team"`
-			UserID           string   `json:"user_id"`
-			ServiceAccountID string   `json:"service_account_id"`
-			Role             string   `json:"role"`
-			Scopes           []string `json:"scopes"`
-			AllowedIPs       []string `json:"allowed_ips"`
-			AllowedModels    []string `json:"allowed_models"`
-			DeniedModels     []string `json:"denied_models"`
-			AllowedProviders []string `json:"allowed_providers"`
-			DeniedProviders  []string `json:"denied_providers"`
-			BudgetLimitKRW   float64  `json:"budget_limit_krw"`
-			ExpiresAt        string   `json:"expires_at"`
+			Name             string    `json:"name"`
+			Key              string    `json:"key"`
+			Owner            string    `json:"owner"`
+			Team             string    `json:"team"`
+			UserID           string    `json:"user_id"`
+			ServiceAccountID string    `json:"service_account_id"`
+			Role             string    `json:"role"`
+			Scopes           *[]string `json:"scopes"`
+			AllowedIPs       []string  `json:"allowed_ips"`
+			AllowedModels    []string  `json:"allowed_models"`
+			DeniedModels     []string  `json:"denied_models"`
+			AllowedProviders []string  `json:"allowed_providers"`
+			DeniedProviders  []string  `json:"denied_providers"`
+			BudgetLimitKRW   float64   `json:"budget_limit_krw"`
+			ExpiresAt        string    `json:"expires_at"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 			writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "invalid_body")
@@ -364,6 +365,12 @@ func (s *Server) handleAPIKeys(w http.ResponseWriter, r *http.Request) {
 			}
 			generated = true
 		}
+		role := strings.TrimSpace(payload.Role)
+		serviceAccount := role == "service_account" || strings.TrimSpace(payload.ServiceAccountID) != ""
+		scopes := defaultAPIKeyScopes(role, serviceAccount)
+		if payload.Scopes != nil {
+			scopes = append([]string{}, (*payload.Scopes)...)
+		}
 		record := store.APIKeyRecord{
 			ID:               "key_" + hashProxyKey(plainKey)[:16],
 			Name:             payload.Name,
@@ -372,9 +379,9 @@ func (s *Server) handleAPIKeys(w http.ResponseWriter, r *http.Request) {
 			Team:             strings.TrimSpace(payload.Team),
 			UserID:           strings.TrimSpace(payload.UserID),
 			ServiceAccountID: strings.TrimSpace(payload.ServiceAccountID),
-			Role:             strings.TrimSpace(payload.Role),
+			Role:             role,
 			Status:           "active",
-			Scopes:           payload.Scopes,
+			Scopes:           scopes,
 			AllowedIPs:       payload.AllowedIPs,
 			AllowedModels:    payload.AllowedModels,
 			DeniedModels:     payload.DeniedModels,
@@ -663,7 +670,7 @@ func (s *Server) handleOpenAI(w http.ResponseWriter, r *http.Request) {
 
 	var apiKeyID string
 	var authCtx *store.AuthContext
-	if isModelsGet && !s.cfg.Auth.Enabled {
+	if isModelsGet {
 		// /v1/models는 인증 불필요 — anonymous로 처리
 		apiKeyID = "anonymous"
 	} else {
@@ -723,7 +730,9 @@ func (s *Server) handleOpenAI(w http.ResponseWriter, r *http.Request) {
 			writeOpenAIError(w, http.StatusForbidden, "model is not allowed by auth policy", "permission_error", "model_denied")
 			return
 		}
-		if !pinned && !noRoute && plan.SelectedModel != "" && plan.RequestedModel != "" && plan.SelectedModel != plan.RequestedModel {
+		shouldRewriteModel := !noRoute && plan.SelectedModel != "" && plan.RequestedModel != "" && plan.SelectedModel != plan.RequestedModel &&
+			(!pinned || isAutoModelAlias(plan.RequestedModel))
+		if shouldRewriteModel {
 			body = rewriteModelField(body, plan.SelectedModel)
 			routeDecision = routingDecision{
 				Applied:       true,
@@ -732,7 +741,7 @@ func (s *Server) handleOpenAI(w http.ResponseWriter, r *http.Request) {
 				Desc:          plan.DecisionReason,
 				Reason:        plan.RouteReason,
 			}
-			if plan.ForceProvider {
+			if !pinned && plan.ForceProvider {
 				routeDecision.TargetProvider = plan.SelectedProvider
 			}
 			w.Header().Set("X-Routed-Model", plan.SelectedModel)

@@ -44,31 +44,30 @@ func (s *Server) planIntelligentRouting(ctx context.Context, body []byte, endpoi
 	routeReason := "client_model"
 	reasons := []string{"client requested " + firstNonEmpty(model, "(empty)")}
 
-	routingAllowed := !pinned && !noRoute
 	auto := isAutoModelAlias(model)
 	tier := elevatedTierForRisk(complexity.Tier, risk.Score)
 	if tier != complexity.Tier {
 		reasons = append(reasons, "risk escalated tier "+complexity.Tier+" -> "+tier)
 	}
 
-	if !routingAllowed {
+	if noRoute {
+		reasons = append(reasons, "routing disabled by X-Proxy-No-Route")
+	} else if auto {
+		selectedModel = s.defaultAutoModelForPolicy(tier, authCtx)
+		routeReason = "auto_router"
+		forceProvider = !pinned
+		reasons = append(reasons, "auto alias mapped "+tier+" tier to "+selectedModel)
 		if pinned {
 			reasons = append(reasons, "provider pinned by client")
 		}
-		if noRoute {
-			reasons = append(reasons, "routing disabled by X-Proxy-No-Route")
-		}
+	} else if pinned {
+		reasons = append(reasons, "provider pinned by client")
 	} else if d := s.evaluateRoutingRules(ctx, model, complexity.Score); d.Applied {
 		selectedModel = d.TargetModel
 		forcedProvider = d.TargetProvider
 		forceProvider = forcedProvider != ""
 		routeReason = d.Reason
 		reasons = append(reasons, d.Desc)
-	} else if auto {
-		selectedModel = s.defaultAutoModelForPolicy(tier, authCtx)
-		routeReason = "auto_router"
-		forceProvider = true
-		reasons = append(reasons, "auto alias mapped "+tier+" tier to "+selectedModel)
 	}
 	if authCtx != nil && auto && selectedModel != "" && !listAllows(selectedModel, authCtx.AllowedModels, authCtx.DeniedModels) {
 		if replacement := s.defaultAutoModelForPolicy(tier, authCtx); replacement != "" && replacement != selectedModel {
@@ -81,8 +80,12 @@ func (s *Server) planIntelligentRouting(ctx context.Context, body []byte, endpoi
 	if forcedProvider != "" {
 		selectedProvider = forcedProvider
 		health = s.healthScoreForProvider(ctx, selectedProvider)
-	} else {
-		selectedProvider, health = s.bestProviderForRouting(ctx, selectedModel, authCtx)
+	} else if !pinned {
+		if auto {
+			selectedProvider, health = s.bestProviderForRoutingModels(ctx, []string{selectedModel, model}, authCtx)
+		} else {
+			selectedProvider, health = s.bestProviderForRouting(ctx, selectedModel, authCtx)
+		}
 	}
 	if selectedProvider != "" {
 		reasons = append(reasons, "provider health selected "+selectedProvider+"("+itoaProxy(health)+")")
@@ -409,7 +412,21 @@ func (s *Server) defaultAutoModelForPolicy(tier string, authCtx *store.AuthConte
 }
 
 func (s *Server) bestProviderForRouting(ctx context.Context, model string, authCtx *store.AuthContext) (string, int) {
-	candidates, _ := s.providersForModel(ctx, model)
+	return s.bestProviderForRoutingModels(ctx, []string{model}, authCtx)
+}
+
+func (s *Server) bestProviderForRoutingModels(ctx context.Context, models []string, authCtx *store.AuthContext) (string, int) {
+	candidates := []string{}
+	seen := map[string]bool{}
+	for _, model := range models {
+		for _, candidate := range providerCandidates(ctx, s, model) {
+			if seen[candidate] {
+				continue
+			}
+			seen[candidate] = true
+			candidates = append(candidates, candidate)
+		}
+	}
 	if len(candidates) == 0 {
 		candidates = []string{s.cfg.Upstream.Provider}
 	}
@@ -440,6 +457,14 @@ func (s *Server) bestProviderForRouting(ctx context.Context, model string, authC
 		}
 	}
 	return bestProvider, bestScore
+}
+
+func providerCandidates(ctx context.Context, s *Server, model string) []string {
+	candidates, err := s.providersForModel(ctx, model)
+	if err != nil {
+		return nil
+	}
+	return candidates
 }
 
 func (s *Server) providerHealthMap(ctx context.Context) map[string]store.ProviderHealthScore {

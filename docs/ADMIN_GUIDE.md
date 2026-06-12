@@ -145,6 +145,8 @@ Intelligent Routing Engine API:
 - `GET /admin/routing/decisions` / `GET /admin/routing/decisions/{id}` — 요청별 selected model/provider, complexity/risk/health, fallback path, decision reason 조회
 - `GET /admin/routing/health` — 최근 latency/p95/timeout/429/5xx/fallback rate 기반 provider health score 조회
 
+`auto` 계열 모델 별칭은 일반 라우팅 규칙보다 우선합니다. `X-Proxy-Provider` 또는 `?provider=` 로 provider 를 고정해도 auto 모델 rewrite 는 계속 수행되고, provider 선택만 클라이언트 지정값을 따릅니다. Provider `model_patterns` 가 `vibe/*` 처럼 alias 기준으로 등록되어 있으면, 선택된 실제 모델 패턴이 없을 때 요청 alias 기준 provider도 후보로 사용합니다. `GET /v1/models` 는 SDK 호환성을 위해 인증 모드에서도 공개 조회로 처리합니다.
+
 ---
 
 ## 3-2. Waterfall (트랜잭션 타임라인)

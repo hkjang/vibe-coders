@@ -4544,7 +4544,7 @@ const adminHTML = `<!doctype html>
               '<button type="submit">발급</button>' +
             '</form>' +
             '<div id="key-secret" class="secret-once"></div>' +
-            apiKeyTable(keys.api_keys || [])
+            '<div id="api-key-list">' + apiKeyTable(keys.api_keys || []) + '</div>'
           ) +
           card('업스트림 프로바이더',
             '<form class="inline-form" id="provider-form" autocomplete="off" style="grid-template-columns: 110px minmax(160px, 1.5fr) minmax(120px, 1fr) 100px minmax(140px, 1fr) 80px;">' +
@@ -4905,7 +4905,13 @@ const adminHTML = `<!doctype html>
       const secret = document.getElementById('key-secret');
       secret.style.display = 'block';
       secret.textContent = '발급된 시크릿(한 번만 표시): ' + result.secret;
-      route();
+      document.getElementById('key-secret-input').value = '';
+      const refreshed = await api('/admin/api-keys');
+      const list = document.getElementById('api-key-list');
+      if (list) {
+        list.innerHTML = apiKeyTable(refreshed.api_keys || []);
+        makeSortable('#api-key-list', 'settings-keys');
+      }
     }
     window.setKeyStatus = async (id, status) => {
       await api('/admin/api-keys/' + encodeURIComponent(id), { method: 'PATCH', body: JSON.stringify({ status }) });

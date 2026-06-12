@@ -454,7 +454,7 @@ curl.exe http://localhost:8080/admin/providers `
 
 ### Intelligent Routing Engine
 
-`model` 에 `auto`, `vibe/auto`, `vibe-coders/auto` 를 넣으면 게이트웨이가 요청 complexity, risk, provider health 를 계산해 모델과 provider 를 자동 선택합니다. 기본 매핑은 simple→`gpt-4.1-mini`, standard/complex→`gpt-4.1`, reasoning→`o3` 이며, `/admin/routing-rules` 로 운영 규칙을 추가하면 규칙이 우선 적용됩니다.
+`model` 에 `auto`, `vibe/auto`, `vibe-coders/auto` 를 넣으면 게이트웨이가 요청 complexity, risk, provider health 를 계산해 모델과 provider 를 자동 선택합니다. 기본 매핑은 simple→`gpt-4.1-mini`, standard/complex→`gpt-4.1`, reasoning→`o3` 입니다. auto alias 는 명시적 자동 라우팅 요청이므로 일반 `/admin/routing-rules` 보다 우선합니다. `X-Proxy-Provider` 로 provider 를 고정해도 auto 모델 선택은 계속 동작하며, provider 만 고정됩니다. Provider `model_patterns` 가 `vibe/*` 처럼 alias 기준으로 등록되어 있으면, 선택된 실제 모델 패턴이 없을 때 요청 alias 기준 provider도 후보로 사용합니다.
 
 Complexity score 는 0~100이며 simple(0~29), standard(30~59), complex(60~84), reasoning(85~100) 으로 분류합니다. 입력 길이, 토큰 추정, 코드 밀도, 파일 수, 대화 깊이, 지시 밀도, 추론/리팩토링/디버깅 키워드를 반영합니다. Risk score 는 PII, secret/API key, SQL, 인증/인가, crypto, deployment/infrastructure command를 탐지합니다. 최근 latency/p95/timeout/429/5xx/fallback rate는 provider health score(0~100)에 반영됩니다.
 

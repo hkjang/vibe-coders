@@ -312,8 +312,7 @@ A. 게이트웨이는 키의 해시만 저장하므로, **등록된 proxy key** 
 ## 9. 한 줄 점검
 
 ```bash
-curl -fsS -H "Authorization: Bearer pcg_..." \
-  http://proxy-gateway.intra:8080/v1/models | head
+curl -fsS http://proxy-gateway.intra:8080/v1/models | head
 ```
 
-위 명령이 200 + 모델 리스트 JSON 을 반환하면 연결이 정상입니다. 401 이 나오면 키가 잘못되었거나 비활성화된 것입니다.
+위 명령이 200 + 모델 리스트 JSON 을 반환하면 게이트웨이와 upstream 연결이 정상입니다. 모델 목록 조회는 SDK 호환성을 위해 인증 없이 허용됩니다. 실제 채팅/임베딩 호출에서 401 이 나오면 키가 잘못되었거나 비활성화된 것입니다.

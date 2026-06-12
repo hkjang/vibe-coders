@@ -231,6 +231,17 @@ func scopesForRole(role string) []string {
 	return append([]string{}, roleScopes["viewer"]...)
 }
 
+func defaultAPIKeyScopes(role string, serviceAccount bool) []string {
+	if strings.TrimSpace(role) == "" {
+		if serviceAccount {
+			role = "service_account"
+		} else {
+			role = "developer"
+		}
+	}
+	return scopesForRole(role)
+}
+
 func hasScope(scopes []string, scope string) bool {
 	for _, s := range scopes {
 		if s == scope {

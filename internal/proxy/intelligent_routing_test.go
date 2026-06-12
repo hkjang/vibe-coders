@@ -93,6 +93,149 @@ func TestAutoRouterRewritesModelAndStoresDecision(t *testing.T) {
 	}
 }
 
+func TestAutoRouterRewritesWhenProviderPinnedAndIgnoresWildcardRule(t *testing.T) {
+	var seenModel string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var root map[string]any
+		_ = json.Unmarshal(body, &root)
+		seenModel, _ = root["model"].(string)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":1,"total_tokens":3}}`))
+	}))
+	defer upstream.Close()
+
+	db := openTestStore(t)
+	defer db.Close()
+	if err := db.UpsertRoutingRule(context.Background(), store.RoutingRule{
+		ID:            "rule_wildcard",
+		Enabled:       true,
+		Priority:      1,
+		MatchPattern:  "*",
+		MinComplexity: 0,
+		MaxComplexity: 100,
+		TargetModel:   "bad-rule-model",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	logger := store.NewAsyncLogger(db, 32, filepath.Join(t.TempDir(), "fallback.ndjson"))
+	logger.Start()
+	defer logger.Stop(context.Background())
+
+	server, err := NewServer(testConfig(upstream.URL, "secret"), db, logger, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxy := httptest.NewServer(server.Routes())
+	defer proxy.Close()
+
+	bodyBytes, _ := json.Marshal(map[string]any{
+		"model": "vibe/auto",
+		"messages": []any{
+			map[string]any{"role": "user", "content": "hello"},
+		},
+	})
+	req, err := http.NewRequest(http.MethodPost, proxy.URL+"/v1/chat/completions", strings.NewReader(string(bodyBytes)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Proxy-Provider", "test")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, body)
+	}
+	if got := resp.Header.Get("X-Routed-Model"); got != "gpt-4.1-mini" {
+		t.Fatalf("expected auto to route to gpt-4.1-mini, got %q", got)
+	}
+	if seenModel != "gpt-4.1-mini" {
+		t.Fatalf("upstream saw model %q", seenModel)
+	}
+}
+
+func TestVibeAutoUsesAliasProviderPatternWhenSelectedModelHasNoPattern(t *testing.T) {
+	defaultUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "default provider should not receive vibe/auto", http.StatusTeapot)
+	}))
+	defer defaultUpstream.Close()
+
+	var seenModel string
+	aliasUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var root map[string]any
+		_ = json.Unmarshal(body, &root)
+		seenModel, _ = root["model"].(string)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":1,"total_tokens":3}}`))
+	}))
+	defer aliasUpstream.Close()
+
+	db := openTestStore(t)
+	defer db.Close()
+	logger := store.NewAsyncLogger(db, 32, filepath.Join(t.TempDir(), "fallback.ndjson"))
+	logger.Start()
+	defer logger.Stop(context.Background())
+
+	server, err := NewServer(testConfig(defaultUpstream.URL, "default-secret"), db, logger, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxy := httptest.NewServer(server.Routes())
+	defer proxy.Close()
+
+	providerResp := postJSON(t, proxy.URL+"/admin/providers", "", map[string]any{
+		"name":           "alias-provider",
+		"base_url":       aliasUpstream.URL,
+		"api_key":        "alias-secret",
+		"timeout_ms":     1000,
+		"enabled":        true,
+		"model_patterns": "vibe/*",
+	})
+	providerResp.Body.Close()
+	if providerResp.StatusCode != http.StatusOK {
+		t.Fatalf("provider create status %d", providerResp.StatusCode)
+	}
+
+	resp := postJSON(t, proxy.URL+"/v1/chat/completions", "", map[string]any{
+		"model": "vibe/auto",
+		"messages": []any{
+			map[string]any{"role": "user", "content": "hello"},
+		},
+	})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected vibe/auto alias provider route to pass, got %d: %s", resp.StatusCode, body)
+	}
+	if got := resp.Header.Get("X-Routed-Model"); got != "gpt-4.1-mini" {
+		t.Fatalf("expected X-Routed-Model=gpt-4.1-mini, got %q", got)
+	}
+	if seenModel != "gpt-4.1-mini" {
+		t.Fatalf("alias provider saw model %q", seenModel)
+	}
+
+	waitFor(t, time.Second, func() bool {
+		recent, _ := db.RecentRequests(context.Background(), store.RequestFilter{Limit: 1})
+		return len(recent) == 1 && recent[0].Provider == "alias-provider"
+	})
+	recent, _ := db.RecentRequests(context.Background(), store.RequestFilter{Limit: 1})
+	if len(recent) != 1 || recent[0].Provider != "alias-provider" || recent[0].Model != "gpt-4.1-mini" {
+		t.Fatalf("unexpected audited route: %+v", recent)
+	}
+	decisions, err := db.ListRoutingDecisions(context.Background(), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(decisions) != 1 || decisions[0].RequestedModel != "vibe/auto" || decisions[0].SelectedModel != "gpt-4.1-mini" || decisions[0].SelectedProvider != "alias-provider" {
+		t.Fatalf("unexpected routing decision: %+v", decisions)
+	}
+}
+
 func TestRoutingPreviewAndHealthAPIs(t *testing.T) {
 	db := openTestStore(t)
 	defer db.Close()

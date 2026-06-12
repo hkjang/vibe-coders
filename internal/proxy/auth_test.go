@@ -277,6 +277,37 @@ func TestAdminLoginRefreshRotationLogoutAndJWTRequired(t *testing.T) {
 	}
 }
 
+func TestModelsEndpointDoesNotRequireAuthWhenAuthEnabled(t *testing.T) {
+	var upstreamAuth string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamAuth = r.Header.Get("Authorization")
+		if r.Method != http.MethodGet || r.URL.Path != "/v1/models" {
+			t.Fatalf("unexpected upstream request %s %s", r.Method, r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"object":"list","data":[{"id":"gpt-4.1-mini","object":"model"}]}`))
+	}))
+	defer upstream.Close()
+	_, proxy := newAuthTestServer(t, upstream.URL)
+	defer proxy.Close()
+
+	resp, err := http.Get(proxy.URL + "/v1/models")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("models endpoint should be public, got %d: %s", resp.StatusCode, body)
+	}
+	if got := resp.Header.Get("X-Api-Key-Id"); got != "anonymous" {
+		t.Fatalf("expected anonymous api key id, got %q", got)
+	}
+	if upstreamAuth != "Bearer secret" {
+		t.Fatalf("upstream should still receive provider key, got %q", upstreamAuth)
+	}
+}
+
 func TestAPIKeyScopesRevokeAndModelPolicy(t *testing.T) {
 	var seenAuth string
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -369,6 +400,70 @@ func TestAPIKeyScopesRevokeAndModelPolicy(t *testing.T) {
 	}
 	if !seenCreated || !seenRevoked || !seenModelDenied {
 		t.Fatalf("expected auth audit events, got %#v", events)
+	}
+}
+
+func TestGeneratedAPIKeyDefaultsScopesAndAuthenticates(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`))
+	}))
+	defer upstream.Close()
+	db, proxy := newAuthTestServer(t, upstream.URL)
+	defer proxy.Close()
+
+	login := postJSON(t, proxy.URL+"/auth/login", "", map[string]string{"email": "root@example.com", "password": "correct-password"})
+	var tokens struct {
+		AccessToken string `json:"access_token"`
+	}
+	if err := json.NewDecoder(login.Body).Decode(&tokens); err != nil {
+		t.Fatal(err)
+	}
+	login.Body.Close()
+
+	createKey := postJSON(t, proxy.URL+"/admin/api-keys", tokens.AccessToken, map[string]any{
+		"name": "generated-default-scope",
+	})
+	defer createKey.Body.Close()
+	if createKey.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(createKey.Body)
+		t.Fatalf("api key create failed: %d %s", createKey.StatusCode, body)
+	}
+	var created struct {
+		APIKey struct {
+			ID     string   `json:"id"`
+			Scopes []string `json:"scopes"`
+		} `json:"api_key"`
+		Secret string `json:"secret"`
+	}
+	if err := json.NewDecoder(createKey.Body).Decode(&created); err != nil {
+		t.Fatal(err)
+	}
+	if created.Secret == "" || !strings.HasPrefix(created.Secret, "vc_sk_") {
+		t.Fatalf("expected generated vc_sk secret, got %#v", created)
+	}
+	if !hasScope(created.APIKey.Scopes, "chat:completion") {
+		t.Fatalf("generated key should default chat scope, got %+v", created.APIKey.Scopes)
+	}
+	rec, found, err := db.GetAPIKey(context.Background(), created.APIKey.ID)
+	if err != nil || !found {
+		t.Fatalf("stored key lookup failed found=%v err=%v", found, err)
+	}
+	if rec.KeyHash == "" || rec.KeyHash == created.Secret {
+		t.Fatalf("api key plaintext must not be stored; hash=%q secret=%q", rec.KeyHash, created.Secret)
+	}
+	if !hasScope(rec.Scopes, "chat:completion") {
+		t.Fatalf("stored generated key should have default scopes, got %+v", rec.Scopes)
+	}
+
+	okResp := postJSON(t, proxy.URL+"/v1/chat/completions", created.Secret, chatBody("gpt-4.1-mini", false))
+	defer okResp.Body.Close()
+	if okResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(okResp.Body)
+		t.Fatalf("generated key should authenticate and allow chat, got %d: %s", okResp.StatusCode, body)
+	}
+	if got := okResp.Header.Get("X-Api-Key-Id"); got != created.APIKey.ID {
+		t.Fatalf("expected X-Api-Key-Id %q, got %q", created.APIKey.ID, got)
 	}
 }
 
