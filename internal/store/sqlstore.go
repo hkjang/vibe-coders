@@ -662,6 +662,7 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 		`UPDATE tool_invocations SET api_key_id = 'key_' || substr(api_key_id, 5) WHERE api_key_id LIKE 'ext\_%' ESCAPE '\'`,
 		`DELETE FROM api_keys WHERE id LIKE 'ext\_%' ESCAPE '\' AND EXISTS (SELECT 1 FROM api_keys k2 WHERE k2.id = 'key_' || substr(api_keys.id, 5))`,
 		`UPDATE api_keys SET id = 'key_' || substr(id, 5) WHERE id LIKE 'ext\_%' ESCAPE '\'`,
+		`UPDATE api_keys SET scopes = '["chat:completion","embeddings:create","models:read","mcp:use"]' WHERE status = 'active' AND (scopes IS NULL OR scopes = '' OR scopes = '[]')`,
 	}
 
 	for _, statement := range statements {
