@@ -57,7 +57,7 @@ func (s *SQLStore) ListText2SQLLogs(ctx context.Context, limit int) ([]Text2SQLQ
 		COALESCE(virtual_model,''), COALESCE(upstream_model,''), COALESCE(mode,''), COALESCE(question,''), COALESCE(generated_sql,''),
 		COALESCE(schema_name,''), COALESCE(schema_version,0), COALESCE(permission_hash,''), COALESCE(glossary_hash,''),
 		valid, COALESCE(reject_reason,''), executed, row_count, COALESCE(error,''), COALESCE(failure_category,''), explain_cost, explain_risk, cost_krw, latency_ms, created_at
-		FROM text2sql_query_logs ORDER BY created_at DESC LIMIT ?`), limit)
+		FROM text2sql_query_logs WHERE COALESCE(mode,'') <> 'shadow' ORDER BY created_at DESC LIMIT ?`), limit)
 	if err != nil {
 		return nil, err
 	}
@@ -103,7 +103,7 @@ func (s *SQLStore) RiskyText2SQLLogs(ctx context.Context, since time.Time, minRi
 		COALESCE(schema_name,''), COALESCE(schema_version,0), COALESCE(permission_hash,''), COALESCE(glossary_hash,''),
 		valid, COALESCE(reject_reason,''), executed, row_count, COALESCE(error,''), COALESCE(failure_category,''), explain_cost, explain_risk, cost_krw, latency_ms, created_at
 		FROM text2sql_query_logs
-		WHERE created_at >= ? AND (valid = 0 OR explain_risk >= ? OR COALESCE(failure_category,'') <> '')
+		WHERE created_at >= ? AND COALESCE(mode,'') <> 'shadow' AND (valid = 0 OR explain_risk >= ? OR COALESCE(failure_category,'') <> '')
 		ORDER BY created_at DESC LIMIT ?`), since.UTC().Format(time.RFC3339Nano), minRisk, limit)
 	if err != nil {
 		return nil, err
@@ -138,7 +138,7 @@ type Text2SQLFailureBucket struct {
 // Text2SQLFailureBreakdownSince groups failed Text2SQL requests by failure_category.
 func (s *SQLStore) Text2SQLFailureBreakdownSince(ctx context.Context, since time.Time) ([]Text2SQLFailureBucket, error) {
 	rows, err := s.db.QueryContext(ctx, s.bind(`SELECT COALESCE(NULLIF(failure_category,''),'(none)'), COUNT(*)
-		FROM text2sql_query_logs WHERE created_at >= ? AND COALESCE(failure_category,'') <> ''
+		FROM text2sql_query_logs WHERE created_at >= ? AND COALESCE(mode,'') <> 'shadow' AND COALESCE(failure_category,'') <> ''
 		GROUP BY COALESCE(NULLIF(failure_category,''),'(none)') ORDER BY COUNT(*) DESC`), since.UTC().Format(time.RFC3339Nano))
 	if err != nil {
 		return nil, err
@@ -206,7 +206,7 @@ func (s *SQLStore) Text2SQLStatsSince(ctx context.Context, since time.Time) (Tex
 		COALESCE(SUM(CASE WHEN executed = 1 THEN 1 ELSE 0 END),0),
 		COALESCE(SUM(CASE WHEN COALESCE(error,'') <> '' THEN 1 ELSE 0 END),0),
 		COALESCE(SUM(cost_krw),0)
-		FROM text2sql_query_logs WHERE created_at >= ?`), since.UTC().Format(time.RFC3339Nano)).
+		FROM text2sql_query_logs WHERE created_at >= ? AND COALESCE(mode,'') <> 'shadow'`), since.UTC().Format(time.RFC3339Nano)).
 		Scan(&st.Total, &st.Valid, &st.Executed, &st.Errors, &st.CostKRW)
 	if err != nil {
 		return st, err

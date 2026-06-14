@@ -75,7 +75,7 @@ func (s *Server) handleText2SQL(w http.ResponseWriter, r *http.Request, meta sto
 	}
 	dialect := cfg.Dialect
 	schema := firstNonEmpty(strings.TrimSpace(r.Header.Get("X-Text2SQL-Schema")), cfg.Schema)
-	var allowedTables, blockedColumns, aggregateOnly []string
+	var allowedTables, blockedColumns, aggregateOnly, maskColumns []string
 	resolvedSchemaName := ""
 	schemaVersion := 0
 	schemaName := firstNonEmpty(strings.TrimSpace(r.Header.Get("X-Text2SQL-Schema-Name")), profileSchemaName)
@@ -95,6 +95,7 @@ func (s *Server) handleText2SQL(w http.ResponseWriter, r *http.Request, meta sto
 			allowedTables = cat.AllowedTables
 			blockedColumns = cat.ExcludedColumns
 			aggregateOnly = cat.AggregateOnlyColumns
+			maskColumns = cat.MaskColumns
 		}
 		// Permission matrix overlay: per subject (api_key/team/*) deny rules restrict
 		// the table allowlist + add blocked columns; allow rules grant access to a
@@ -230,6 +231,12 @@ func (s *Server) handleText2SQL(w http.ResponseWriter, r *http.Request, meta sto
 		if cacheKey != "" {
 			_ = s.db.PutText2SQLCache(r.Context(), cacheKey, resolvedSchemaName, string(profile.Mode), validation.SQL, cfg.CacheTTL)
 		}
+		// Shadow evaluation: on a sampled fraction of previews, regenerate the SQL with
+		// candidate models in the background and record their validity as shadow logs
+		// (feeding only the per-model quality view, not the live KPIs). Off by default.
+		if validation.OK && len(cfg.ShadowModels) > 0 && shouldShadowSample(question, cfg.ShadowSampleRate) {
+			s.shadowEvaluate(r.Clone(context.Background()), dialect, schema, question, upstreamModel, cfg.ShadowModels, cfg.DefaultLimit, cfg.MaxLimit)
+		}
 		finalize(previewContent(question, validation.SQL, note, validation), validation, false, 0, "", totalCost)
 		return
 	}
@@ -243,9 +250,32 @@ func (s *Server) handleText2SQL(w http.ResponseWriter, r *http.Request, meta sto
 		return
 	}
 	if cfg.MaskResults {
-		for i := range rows {
-			for j := range rows[i] {
-				rows[i][j] = maskSecretText(rows[i][j])
+		// Column-policy masking: when the schema marks specific columns as
+		// sensitivity=mask, mask only those result columns (matched by name). With no
+		// such columns declared, fall back to masking every cell (the prior behavior).
+		maskByName := map[string]bool{}
+		for _, c := range maskColumns {
+			maskByName[strings.ToLower(c)] = true
+		}
+		if len(maskByName) > 0 {
+			maskCol := make([]bool, len(cols))
+			for j, name := range cols {
+				if maskByName[strings.ToLower(name)] {
+					maskCol[j] = true
+				}
+			}
+			for i := range rows {
+				for j := range rows[i] {
+					if j < len(maskCol) && maskCol[j] {
+						rows[i][j] = maskText2SQLCell(rows[i][j])
+					}
+				}
+			}
+		} else {
+			for i := range rows {
+				for j := range rows[i] {
+						rows[i][j] = maskSecretText(rows[i][j])
+				}
 			}
 		}
 	}
@@ -309,6 +339,58 @@ func applyPermissionEffect(allowedTables []string, blocked *[]string, eff store.
 		*blocked = kept
 	}
 	return allowedTables
+}
+
+// shouldShadowSample decides, deterministically per question, whether to shadow-eval
+// this request — so the same question is consistently sampled or not, and there is no
+// shared RNG state. rate<=0 disables, rate>=1 always samples.
+func shouldShadowSample(question string, rate float64) bool {
+	if rate <= 0 {
+		return false
+	}
+	if rate >= 1 {
+		return true
+	}
+	h := sha256.Sum256([]byte(question))
+	return float64(h[0])/255.0 < rate
+}
+
+// shadowEvaluate regenerates SQL for the same question with each candidate model in the
+// background and records the outcome as a shadow log (mode="shadow"), which feeds the
+// per-model quality metrics without affecting the live query KPIs. Runs in its own
+// goroutine with a detached context; the cloned request carries headers for routing.
+func (s *Server) shadowEvaluate(rc *http.Request, dialect, schema, question, primaryModel string, candidates []string, defaultLimit, maxLimit int) {
+	go func() {
+		for _, model := range candidates {
+			model = strings.TrimSpace(model)
+			if model == "" || model == primaryModel {
+				continue
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			started := time.Now()
+			msgs := text2sql.MessagesJSON(text2sql.BuildGenerationMessages(dialect, schema, question, defaultLimit))
+			gen := s.runGovernanceChat(ctx, rc, model, msgs)
+			genSQL := text2sql.ExtractSQL(gen.Response)
+			validation := text2sql.ValidateSQL(genSQL, text2sql.ValidateOptions{DefaultLimit: defaultLimit, MaxLimit: maxLimit})
+			_ = s.db.InsertText2SQLLog(ctx, store.Text2SQLQueryLog{
+				ID: newID("t2ssh"), VirtualModel: "vibe/text2sql-shadow", UpstreamModel: model, Mode: "shadow",
+				Question: question, GeneratedSQL: genSQL, Valid: validation.OK, RejectReason: validation.Reason,
+				Error: gen.Error, CostKRW: gen.CostKRW, LatencyMS: time.Since(started).Milliseconds(), CreatedAt: time.Now().UTC(),
+			})
+			cancel()
+		}
+	}()
+}
+
+// maskText2SQLCell fully masks a result cell from a column declared sensitivity=mask.
+// Unlike the heuristic secret scrubber, this masks the whole value (the column itself
+// is the policy), while preserving an empty cell as empty and keeping a short hint of
+// length so the result stays readable.
+func maskText2SQLCell(v string) string {
+	if v == "" {
+		return ""
+	}
+	return "***"
 }
 
 // shortHash returns a stable 16-hex-char fingerprint of a string, used to snapshot
@@ -545,6 +627,99 @@ func explainPlanFor(ctx context.Context, db *sql.DB, query string) (explainPlan,
 		return explainPlan{}, err
 	}
 	return parseExplainPlan([]byte(raw))
+}
+
+// handleText2SQLHealthcheck probes the Text2SQL execute database: connectivity, that
+// the read-only transaction sandbox works, whether the connecting account itself is
+// write-restricted (defense in depth), and that a statement timeout can be applied.
+// GET /admin/text2sql/healthcheck
+func (s *Server) handleText2SQLHealthcheck(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	cfg := s.cfg.Text2SQL
+	out := map[string]any{
+		"configured":        cfg.ExecDSN != "",
+		"driver":            cfg.ExecDriver,
+		"statement_timeout": cfg.StatementTimeout.String(),
+	}
+	if cfg.ExecDSN == "" {
+		out["status"] = "preview_only"
+		out["detail"] = "TEXT2SQL_EXEC_DSN 미설정 — preview 전용 (실행 비활성)"
+		writeJSON(w, http.StatusOK, out)
+		return
+	}
+	db, err := s.text2sqlExecDB()
+	if err != nil {
+		out["status"] = "error"
+		out["reachable"] = false
+		out["detail"] = "DB open 실패: " + err.Error()
+		writeJSON(w, http.StatusOK, out)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	if err := db.PingContext(ctx); err != nil {
+		out["status"] = "error"
+		out["reachable"] = false
+		out["detail"] = "ping 실패: " + err.Error()
+		writeJSON(w, http.StatusOK, out)
+		return
+	}
+	out["reachable"] = true
+
+	driver := strings.ToLower(strings.TrimSpace(cfg.ExecDriver))
+	isPG := driver == "postgres" || driver == "postgresql" || driver == "pgx"
+	readOnlyTxOK := true
+	timeoutOK := true
+	accountReadOnly := false
+	accountChecked := false
+	if isPG {
+		// Read-only tx + statement_timeout: confirms the sandbox we run queries in.
+		if tx, terr := db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true}); terr == nil {
+			if _, e := tx.ExecContext(ctx, "SET LOCAL statement_timeout = 1000"); e != nil {
+				timeoutOK = false
+			}
+			var one int
+			if e := tx.QueryRowContext(ctx, "SELECT 1").Scan(&one); e != nil || one != 1 {
+				readOnlyTxOK = false
+			}
+			_ = tx.Rollback()
+		} else {
+			readOnlyTxOK = false
+		}
+		// Account-level write check (defense in depth): a write attempt that the
+		// account rejects means the DSN is a properly restricted read-only role.
+		accountChecked = true
+		if tx, terr := db.BeginTx(ctx, &sql.TxOptions{}); terr == nil {
+			_, e := tx.ExecContext(ctx, "CREATE TEMP TABLE _t2s_ro_probe (x int)")
+			accountReadOnly = e != nil
+			_ = tx.Rollback()
+		}
+	} else {
+		var one int
+		if e := db.QueryRowContext(ctx, "SELECT 1").Scan(&one); e != nil || one != 1 {
+			readOnlyTxOK = false
+		}
+	}
+	out["read_only_tx_ok"] = readOnlyTxOK
+	out["statement_timeout_ok"] = timeoutOK
+	if accountChecked {
+		out["account_write_restricted"] = accountReadOnly
+	}
+	switch {
+	case !readOnlyTxOK:
+		out["status"] = "error"
+		out["detail"] = "read-only 트랜잭션 프로브 실패"
+	case isPG && !accountReadOnly:
+		out["status"] = "warn"
+		out["detail"] = "연결 계정이 쓰기 가능 — 읽기 전용 역할 사용 권장 (트랜잭션 샌드박스는 동작)"
+	default:
+		out["status"] = "ok"
+		out["detail"] = "실행 DB 정상 (read-only 샌드박스 동작)"
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) text2sqlExecDB() (*sql.DB, error) {

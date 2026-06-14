@@ -87,6 +87,30 @@ func TestValidateSQLStringLiteralScrubbing(t *testing.T) {
 	}
 }
 
+func TestValidateSQLStructural(t *testing.T) {
+	opts := ValidateOptions{DefaultLimit: 100}
+	// Truncated subquery (unclosed paren) → rejected.
+	if r := ValidateSQL("SELECT * FROM t WHERE id IN (SELECT id FROM u", opts); r.OK {
+		t.Errorf("unbalanced parentheses should be rejected: %+v", r)
+	}
+	// Extra closing paren → rejected.
+	if r := ValidateSQL("SELECT count(*)) FROM t", opts); r.OK {
+		t.Errorf("extra ')' should be rejected: %+v", r)
+	}
+	// Unterminated quoted identifier → rejected.
+	if r := ValidateSQL(`SELECT "col FROM t`, opts); r.OK {
+		t.Errorf("unterminated quoted identifier should be rejected: %+v", r)
+	}
+	// Well-formed nested query → passes.
+	if r := ValidateSQL("SELECT * FROM t WHERE id IN (SELECT id FROM u)", opts); !r.OK {
+		t.Errorf("balanced nested query should pass: %+v", r)
+	}
+	// A ')' inside a string literal must not trip the balance check.
+	if r := ValidateSQL("SELECT name FROM t WHERE note = 'a) b ('", opts); !r.OK {
+		t.Errorf("parens inside a string literal should be ignored: %+v", r)
+	}
+}
+
 func TestValidateSQLAggregateOnly(t *testing.T) {
 	opts := ValidateOptions{DefaultLimit: 100, AggregateOnlyColumns: []string{"salary"}}
 	// Raw select of an aggregate-only column → rejected.

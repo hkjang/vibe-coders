@@ -1,7 +1,9 @@
 package proxy
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"regexp"
 	"strings"
@@ -526,6 +528,10 @@ func (s *Server) handleText2SQLGoldenRun(w http.ResponseWriter, r *http.Request)
 	}
 	_ = json.NewDecoder(r.Body).Decode(&p)
 	model := firstNonEmpty(strings.TrimSpace(p.Model), s.cfg.Text2SQL.PreviewModel)
+	// Opt-in result-equivalence: execute both expected and generated SQL read-only and
+	// compare the row sets, catching semantically-wrong SQL that token matching passes.
+	// Requires a configured execute DB; otherwise it silently falls back to token match.
+	wantExec := r.URL.Query().Get("execute") == "1" && s.cfg.Text2SQL.ExecDSN != ""
 
 	goldens, err := s.db.ListText2SQLGoldenQueries(r.Context(), true)
 	if err != nil {
@@ -533,7 +539,7 @@ func (s *Server) handleText2SQLGoldenRun(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	results := []map[string]any{}
-	passed := 0
+	passed, resultChecked, resultMatched := 0, 0, 0
 	for _, g := range goldens {
 		schema := s.cfg.Text2SQL.Schema
 		if g.SchemaName != "" {
@@ -545,23 +551,104 @@ func (s *Server) handleText2SQLGoldenRun(w http.ResponseWriter, r *http.Request)
 		gen := s.runGovernanceChat(r.Context(), r, model, msgs)
 		genSQL := text2sql.ExtractSQL(gen.Response)
 		validation := text2sql.ValidateSQL(genSQL, text2sql.ValidateOptions{DefaultLimit: s.cfg.Text2SQL.DefaultLimit, MaxLimit: s.cfg.Text2SQL.MaxLimit})
-		ok := validation.OK && goldenSQLMatch(g.ExpectedSQL, genSQL)
+		tokenOK := validation.OK && goldenSQLMatch(g.ExpectedSQL, genSQL)
+		row := map[string]any{
+			"id": g.ID, "name": g.Name, "valid": validation.OK,
+			"generated_sql": genSQL, "reject_reason": validation.Reason, "token_match": tokenOK,
+		}
+		ok := tokenOK
+		if wantExec && validation.OK {
+			match, detail := s.goldenResultEquivalent(r.Context(), validation.SQL, g.ExpectedSQL)
+			resultChecked++
+			row["result_match"] = match
+			if detail != "" {
+				row["result_detail"] = detail
+			}
+			if match {
+				resultMatched++
+			}
+			// With execution enabled, result equivalence is the authority; token match
+			// is reported but a true result match passes even if tokens drift.
+			ok = match
+		}
+		row["passed"] = ok
 		if ok {
 			passed++
 		}
-		results = append(results, map[string]any{
-			"id": g.ID, "name": g.Name, "passed": ok, "valid": validation.OK,
-			"generated_sql": genSQL, "reject_reason": validation.Reason,
-		})
+		results = append(results, row)
 	}
 	rate := 1.0
 	if len(goldens) > 0 {
 		rate = float64(passed) / float64(len(goldens))
 	}
-	s.auditAdmin(r, "text2sql.golden.run", "", auditJSON(map[string]any{"model": model, "total": len(goldens), "passed": passed}))
-	writeJSON(w, http.StatusOK, map[string]any{
+	resp := map[string]any{
 		"model": model, "total": len(goldens), "passed": passed, "pass_rate": rate, "results": results,
-	})
+	}
+	if wantExec {
+		resp["result_checked"] = resultChecked
+		resp["result_matched"] = resultMatched
+	}
+	s.auditAdmin(r, "text2sql.golden.run", "", auditJSON(map[string]any{"model": model, "total": len(goldens), "passed": passed, "execute": wantExec}))
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// goldenResultEquivalent executes the generated and expected SQL read-only and reports
+// whether they return the same rows (order-insensitive multiset). Returns (match, detail)
+// where detail explains a mismatch or execution error.
+func (s *Server) goldenResultEquivalent(ctx context.Context, generatedSQL, expectedSQL string) (bool, string) {
+	db, err := s.text2sqlExecDB()
+	if err != nil {
+		return false, "exec db: " + err.Error()
+	}
+	driver := s.cfg.Text2SQL.ExecDriver
+	rowCap := s.cfg.Text2SQL.MaxLimit
+	if rowCap <= 0 {
+		rowCap = 1000
+	}
+	expValid := text2sql.ValidateSQL(expectedSQL, text2sql.ValidateOptions{DefaultLimit: s.cfg.Text2SQL.DefaultLimit, MaxLimit: s.cfg.Text2SQL.MaxLimit})
+	if !expValid.OK {
+		return false, "expected SQL invalid: " + expValid.Reason
+	}
+	gCols, gRows, _, gErr := executeReadOnlyQuery(ctx, db, driver, generatedSQL, rowCap, s.cfg.Text2SQL.StatementTimeout, s.cfg.Text2SQL.WorkMem)
+	if gErr != nil {
+		return false, "generated exec: " + gErr.Error()
+	}
+	eCols, eRows, _, eErr := executeReadOnlyQuery(ctx, db, driver, expValid.SQL, rowCap, s.cfg.Text2SQL.StatementTimeout, s.cfg.Text2SQL.WorkMem)
+	if eErr != nil {
+		return false, "expected exec: " + eErr.Error()
+	}
+	if len(gCols) != len(eCols) {
+		return false, fmt.Sprintf("column count differs (%d vs %d)", len(gCols), len(eCols))
+	}
+	if !resultSetsEqual(gRows, eRows) {
+		return false, fmt.Sprintf("row sets differ (%d vs %d rows)", len(gRows), len(eRows))
+	}
+	return true, ""
+}
+
+// resultSetsEqual compares two result sets as multisets of rows (order-insensitive),
+// so equivalent queries with different ORDER BY still match.
+func resultSetsEqual(a, b [][]string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	counts := map[string]int{}
+	for _, row := range a {
+		counts[strings.Join(row, "\x1f")]++
+	}
+	for _, row := range b {
+		k := strings.Join(row, "\x1f")
+		counts[k]--
+		if counts[k] < 0 {
+			return false
+		}
+	}
+	for _, v := range counts {
+		if v != 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // handleText2SQLSchemas manages the Text2SQL schema catalog (schema context + table

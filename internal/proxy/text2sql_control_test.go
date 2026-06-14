@@ -68,6 +68,43 @@ func TestClassifyText2SQLFailure(t *testing.T) {
 	}
 }
 
+func TestShouldShadowSample(t *testing.T) {
+	if shouldShadowSample("q", 0) {
+		t.Error("rate 0 should never sample")
+	}
+	if !shouldShadowSample("q", 1) {
+		t.Error("rate 1 should always sample")
+	}
+	// Deterministic per question.
+	if shouldShadowSample("부서별 매출", 0.5) != shouldShadowSample("부서별 매출", 0.5) {
+		t.Error("sampling must be deterministic for the same question")
+	}
+	// A full-rate is inclusive; a near-zero rate excludes essentially everything.
+	if shouldShadowSample("anything", 0.0000001) {
+		t.Error("near-zero rate should exclude")
+	}
+}
+
+func TestResultSetsEqual(t *testing.T) {
+	a := [][]string{{"1", "x"}, {"2", "y"}}
+	// Same rows, different order → equal (order-insensitive).
+	if !resultSetsEqual(a, [][]string{{"2", "y"}, {"1", "x"}}) {
+		t.Error("row order should not matter")
+	}
+	// Different row count → not equal.
+	if resultSetsEqual(a, [][]string{{"1", "x"}}) {
+		t.Error("differing row counts must not be equal")
+	}
+	// Same multiset shape but different value → not equal.
+	if resultSetsEqual(a, [][]string{{"1", "x"}, {"2", "z"}}) {
+		t.Error("differing values must not be equal")
+	}
+	// Duplicate handling: multiset, not set.
+	if resultSetsEqual([][]string{{"1"}, {"1"}}, [][]string{{"1"}, {"2"}}) {
+		t.Error("duplicates must be counted as a multiset")
+	}
+}
+
 func TestChooseUpstreamByQuality(t *testing.T) {
 	const base, accurate = "gpt-4.1-mini", "claude-sonnet-4"
 	// Below the sample threshold → keep base even with a poor valid rate.

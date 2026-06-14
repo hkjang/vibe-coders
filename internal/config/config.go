@@ -121,6 +121,8 @@ type Text2SQLConfig struct {
 	RequireDateFilter bool          // when clarifying, require a time qualifier
 	StatementTimeout  time.Duration // (postgres execute) per-statement timeout
 	WorkMem           string        // (postgres execute) SET LOCAL work_mem, e.g. "64MB"
+	ShadowModels      []string      // candidate upstream models to shadow-evaluate on preview (quality data)
+	ShadowSampleRate  float64       // 0..1 fraction of eligible preview requests to shadow-evaluate
 }
 
 // ClickHouseConfig configures the long-term analytics sink. When URL is empty the
@@ -239,6 +241,8 @@ func Load() (Config, error) {
 			RequireDateFilter: boolEnv("TEXT2SQL_REQUIRE_DATE_FILTER", false),
 			StatementTimeout:  durationEnv("TEXT2SQL_STATEMENT_TIMEOUT", 15*time.Second),
 			WorkMem:           os.Getenv("TEXT2SQL_WORK_MEM"),
+			ShadowModels:      csvEnv("TEXT2SQL_SHADOW_MODELS"),
+			ShadowSampleRate:  floatEnv("TEXT2SQL_SHADOW_SAMPLE_RATE", 0),
 		},
 		ClickHouse: ClickHouseConfig{
 			URL:          strings.TrimRight(os.Getenv("CLICKHOUSE_URL"), "/"),
@@ -385,6 +389,22 @@ func floatEnv(key string, fallback float64) float64 {
 		return fallback
 	}
 	return parsed
+}
+
+// csvEnv parses a comma-separated env var into a trimmed, non-empty slice.
+func csvEnv(key string) []string {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return nil
+	}
+	parts := strings.Split(value, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if t := strings.TrimSpace(p); t != "" {
+			out = append(out, t)
+		}
+	}
+	return out
 }
 
 func durationEnv(key string, fallback time.Duration) time.Duration {

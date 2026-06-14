@@ -46,6 +46,7 @@ type SchemaCatalog struct {
 	AllowedTables        []string `json:"allowed_tables"`
 	ExcludedColumns      []string `json:"excluded_columns"`
 	AggregateOnlyColumns []string `json:"aggregate_only_columns"`
+	MaskColumns          []string `json:"mask_columns"`
 	HasTables            bool     `json:"has_tables"`
 }
 
@@ -241,7 +242,7 @@ func (s *SQLStore) CollectInformationSchema(ctx context.Context, src *sql.DB, dr
 // permission metadata. Excluded (sensitive) columns are omitted from the context
 // and returned separately so the validator can reject SQL that references them.
 func (s *SQLStore) BuildSchemaCatalog(ctx context.Context, schemaName string) (SchemaCatalog, error) {
-	cat := SchemaCatalog{AllowedTables: []string{}, ExcludedColumns: []string{}, AggregateOnlyColumns: []string{}}
+	cat := SchemaCatalog{AllowedTables: []string{}, ExcludedColumns: []string{}, AggregateOnlyColumns: []string{}, MaskColumns: []string{}}
 	tables, err := s.ListText2SQLTables(ctx, schemaName)
 	if err != nil {
 		return cat, err
@@ -279,6 +280,9 @@ func (s *SQLStore) BuildSchemaCatalog(ctx context.Context, schemaName string) (S
 			}
 			if c.Sensitivity == SensitivityAggregateOnly {
 				cat.AggregateOnlyColumns = append(cat.AggregateOnlyColumns, strings.ToLower(c.ColumnName))
+			}
+			if c.Sensitivity == SensitivityMask {
+				cat.MaskColumns = append(cat.MaskColumns, strings.ToLower(c.ColumnName))
 			}
 			b.WriteString("    - " + c.ColumnName)
 			if c.DataType != "" {

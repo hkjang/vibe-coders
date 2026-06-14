@@ -72,6 +72,12 @@ func ValidateSQL(raw string, opts ValidateOptions) ValidationResult {
 	if multiStatement(stripped) {
 		return ValidationResult{Reason: "multiple statements are not allowed"}
 	}
+	// Structural sanity (in-tree, no external parser): balanced parentheses and
+	// double-quoted identifiers. Catches SQL truncated mid-generation (an unclosed
+	// subquery/CTE/identifier) before it reaches the database.
+	if reason := structuralCheck(stripped); reason != "" {
+		return ValidationResult{Reason: reason}
+	}
 	sql = strings.TrimRight(strings.TrimSpace(sql), ";")
 	stripped = strings.TrimRight(strings.TrimSpace(scrubSQL(sql)), ";")
 	lower := strings.ToLower(stripped)
@@ -154,6 +160,35 @@ func ValidateSQL(raw string, opts ValidateOptions) ValidationResult {
 		result.LimitAdded = true
 	}
 	return result
+}
+
+// structuralCheck does a lightweight in-tree structural validation on already-scrubbed
+// SQL (comments and string literals removed): parentheses must be balanced and never
+// close below zero, and double-quoted identifiers must be paired. It returns an empty
+// string when the structure is well-formed, else a rejection reason.
+func structuralCheck(stripped string) string {
+	depth := 0
+	quotes := 0
+	for _, c := range stripped {
+		switch c {
+		case '(':
+			depth++
+		case ')':
+			depth--
+			if depth < 0 {
+				return "unbalanced parentheses (unexpected ')')"
+			}
+		case '"':
+			quotes++
+		}
+	}
+	if depth != 0 {
+		return "unbalanced parentheses (unclosed '(')"
+	}
+	if quotes%2 != 0 {
+		return "unterminated quoted identifier"
+	}
+	return ""
 }
 
 func stripComments(sql string) string {
