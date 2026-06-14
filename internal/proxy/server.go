@@ -215,6 +215,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/admin/saved-filters/", s.handleSavedFilterByID)
 	mux.HandleFunc("/admin/audit-logs.csv", s.handleAuditExportCSV)
 	mux.HandleFunc("/admin/fallback", s.handleFallback)
+	mux.HandleFunc("/admin/ops/status", s.handleOpsStatus)
 	mux.HandleFunc("/admin/requests/diff", s.handleRequestDiff)
 	mux.HandleFunc("/admin/suggest", s.handleSuggest)
 	mux.HandleFunc("/v1/chat/completions", s.handleOpenAI)

@@ -95,6 +95,10 @@ type SecretConfig struct {
 	GatewaySecret string
 }
 
+// DefaultGatewaySecret is the insecure development fallback used when
+// GATEWAY_SECRET is unset. Operational tooling flags it as a risk in production.
+const DefaultGatewaySecret = "dev-local-insecure-secret-change-me"
+
 // SessionConfig controls how requests are grouped into sessions. Most AI coding
 // tools (Claude Code, Cursor, Roo, Qwen) send no session id at the API level, so
 // the gateway infers one from client identity + a sliding inactivity window when
@@ -164,7 +168,7 @@ func Load() (Config, error) {
 			BootstrapPassword:     os.Getenv("AUTH_ADMIN_BOOTSTRAP_PASSWORD"),
 		},
 		Secret: SecretConfig{
-			GatewaySecret: getEnv("GATEWAY_SECRET", "dev-local-insecure-secret-change-me"),
+			GatewaySecret: getEnv("GATEWAY_SECRET", DefaultGatewaySecret),
 		},
 		Session: SessionConfig{
 			InferenceEnabled: boolEnv("SESSION_INFERENCE_ENABLED", true),

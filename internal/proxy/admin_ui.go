@@ -1469,17 +1469,19 @@ const adminHTML = `<!doctype html>
       const win = dashboardState.window;
       const bucket = win === '24h' ? 'hour' : 'day';
       const heatWindow = win === '24h' ? '7d' : (win === '30d' ? '30d' : '7d');
-      const [stats, ts, heat, recent, anomalyResp] = await Promise.all([
+      const [stats, ts, heat, recent, anomalyResp, ops] = await Promise.all([
         api('/admin/stats'),
         api('/admin/timeseries?window=' + win + '&bucket=' + bucket),
         api('/admin/heatmap?window=' + heatWindow),
         api('/admin/requests?limit=20'),
         api('/admin/anomalies?recent=6h&z=3').catch(() => ({ anomalies: [] })),
+        api('/admin/ops/status').catch(() => null),
       ]);
       const anomalies = (anomalyResp && anomalyResp.anomalies) || [];
 
       const html =
         section('요약', kpiBlock(stats)) +
+        (ops ? section('운영 상태', opsStatusHTML(ops)) : '') +
         '<div class="grid3" style="grid-template-columns: 2fr 1fr 1fr;">' +
           card('시계열 — ' + windowLabel(win),
             windowToolbar() +
@@ -1572,6 +1574,74 @@ const adminHTML = `<!doctype html>
             '<td data-num="' + (u.cost_krw || 0) + '">' + money(u.cost_krw) + '</td>' +
           '</tr>').join('') +
         '</tbody></table>';
+    }
+
+    function opsBytes(n) {
+      n = n || 0;
+      const u = ['B', 'KB', 'MB', 'GB', 'TB'];
+      let i = 0;
+      while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+      return (i === 0 ? n : n.toFixed(1)) + ' ' + u[i];
+    }
+    function opsPill(ok, label) {
+      const color = ok ? 'var(--accent)' : 'var(--bad)';
+      return '<span style="display:inline-block; padding:2px 8px; border-radius:10px; font-size:12px; font-weight:700; color:#fff; background:' + color + '">' + escapeHTML(label) + '</span>';
+    }
+    function opsStatusHTML(ops) {
+      const sec = ops.security || {};
+      const log = ops.logging || {};
+      const fb = ops.fallback || {};
+      const disk = ops.disk || {};
+      const providers = ops.providers || [];
+
+      const secItems = [
+        opsPill(sec.auth_enabled, sec.auth_enabled ? '인증 ON' : '인증 OFF'),
+        opsPill(!sec.dev_secret, sec.dev_secret ? '개발용 secret' : 'secret 설정됨'),
+        opsPill(sec.pricing_configured, sec.pricing_configured ? '가격표 설정' : '가격표 미설정'),
+        opsPill(!sec.raw_prompts_logged, sec.raw_prompts_logged ? '원문 프롬프트 저장' : '프롬프트 마스킹'),
+        opsPill(!sec.raw_bodies_logged, sec.raw_bodies_logged ? '원본 body 저장' : 'body 미저장'),
+      ].join(' ');
+
+      const logDropOk = (log.dropped || 0) === 0;
+      const logHTML =
+        '<div>큐 깊이 <b>' + fmt(log.queue_depth || 0) + '</b> · 기록 <b>' + fmt(log.written || 0) + '</b></div>' +
+        '<div>로그 drop ' + opsPill(logDropOk, fmt(log.dropped || 0) + ' 건') + '</div>';
+
+      const fbOk = !fb.exists || (fb.lines || 0) === 0;
+      const fbHTML = fb.exists
+        ? '<div>적체 ' + opsPill(fbOk, fmt(fb.lines || 0) + ' 줄 · ' + opsBytes(fb.bytes)) + '</div>' +
+          '<div class="muted" style="font-size:12px">' + escapeHTML(fb.path || '') + '</div>'
+        : '<div>' + opsPill(true, '백로그 없음') + '</div>';
+
+      const diskOk = !disk.available || disk.used_percent < 90;
+      const diskHTML = disk.available
+        ? '<div>사용률 ' + opsPill(diskOk, (disk.used_percent || 0).toFixed(1) + '%') + '</div>' +
+          '<div class="muted" style="font-size:12px">여유 ' + opsBytes(disk.free_bytes) + ' / ' + opsBytes(disk.total_bytes) + ' · ' + escapeHTML(disk.path || '') + '</div>'
+        : '<div class="muted">디스크 정보 없음</div>';
+
+      const provRows = providers.length
+        ? '<table><thead><tr><th data-sort="str">Provider</th><th data-sort="num">점수</th><th data-sort="num">P95(ms)</th><th data-sort="num">429</th><th data-sort="num">5xx</th><th data-sort="num">fallback%</th></tr></thead><tbody>' +
+          providers.map(p => {
+            const score = p.score || 0;
+            const color = score >= 80 ? 'var(--accent)' : (score >= 50 ? 'var(--warn)' : 'var(--bad)');
+            return '<tr>' +
+              '<td>' + escapeHTML(p.provider || '') + '</td>' +
+              '<td data-num="' + score + '"><b style="color:' + color + '">' + score + '</b></td>' +
+              '<td data-num="' + (p.p95_latency_ms || 0) + '">' + fmt(p.p95_latency_ms || 0) + '</td>' +
+              '<td data-num="' + (p.rate_429 || 0) + '">' + fmt(p.rate_429 || 0) + '</td>' +
+              '<td data-num="' + (p.rate_5xx || 0) + '">' + fmt(p.rate_5xx || 0) + '</td>' +
+              '<td data-num="' + (p.fallback_rate || 0) + '">' + ((p.fallback_rate || 0) * 100).toFixed(1) + '%</td>' +
+            '</tr>';
+          }).join('') +
+          '</tbody></table>'
+        : '<div class="empty">최근 1시간 Provider 트래픽 없음</div>';
+
+      return '<div class="grid3">' +
+        card('보안 위험 설정', '<div style="padding:12px; line-height:2">' + secItems + '</div>') +
+        card('로그 / Fallback', '<div style="padding:12px; line-height:1.8">' + logHTML + fbHTML + '</div>') +
+        card('디스크', '<div style="padding:12px; line-height:1.8">' + diskHTML + '</div>') +
+      '</div>' +
+      card('Provider 상태 (최근 1시간)', provRows);
     }
 
     function statusCard(rows, total) {
