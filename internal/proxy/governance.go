@@ -93,6 +93,9 @@ func (s *Server) enforceOpenAIGovernance(w http.ResponseWriter, r *http.Request,
 		s.recordSecretEvents(r, meta.Request.ID, action, authCtx, findings)
 		w.Header().Set("X-Secret-Firewall", action)
 		w.Header().Set("X-Secret-Firewall-Types", strings.Join(gctx.SecretTypes, ","))
+		if action == "block" || action == "mask" {
+			s.notifyMattermost(r.Context(), "secret", "Secret 탐지("+action+"): "+strings.Join(gctx.SecretTypes, ", ")+" (key "+meta.Request.APIKeyID+")")
+		}
 	}
 	if action == "mask" && len(findings) > 0 {
 		body = []byte(maskSecretText(string(body)))
@@ -115,6 +118,7 @@ func (s *Server) enforceOpenAIGovernance(w http.ResponseWriter, r *http.Request,
 		}
 		w.Header().Set("X-Governance-Approval-ID", approvalID)
 		decision.ApprovalID = approvalID
+		s.notifyMattermost(r.Context(), "approval", "승인 대기: 요청 "+meta.Request.ID+" (key "+meta.Request.APIKeyID+", model "+gctx.Model+") — "+reason)
 		s.writeGovernanceOpenAIBlock(w, meta, http.StatusLocked, "governance_approval_required", "approval_required", reason)
 		return body, true
 	}

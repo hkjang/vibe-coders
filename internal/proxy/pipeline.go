@@ -319,6 +319,7 @@ func (rc *requestPipeline) stepCost() bool {
 			!strings.EqualFold(strings.TrimSpace(r.Header.Get("X-Cost-Approve")), "1") {
 			s.metrics.IncCostGuardBlock()
 			w.Header().Set("X-Cost-Guard", "blocked")
+			s.notifyMattermost(r.Context(), "cost", "비용 가드 차단: 예상 비용 "+formatKRW(est.CostKRW)+" > 임계값 "+formatKRW(snap.guardThreshold)+" (model "+rc.meta.Request.Model+")")
 			writeOpenAIError(w, http.StatusPaymentRequired,
 				"estimated cost "+formatKRW(est.CostKRW)+" exceeds the cost guard threshold "+formatKRW(snap.guardThreshold)+
 					"; resend with header 'X-Cost-Approve: 1' to proceed", "cost_guard_error", "cost_threshold_exceeded")
@@ -407,6 +408,7 @@ func (rc *requestPipeline) stepUpstream() bool {
 		meta.Evaluations = buildLLMEvaluations(meta, ResponseAnalysis{})
 		s.metrics.ObserveLLMEvaluations(meta.Evaluations)
 		s.enqueue(meta)
+		s.notifyMattermost(r.Context(), "provider", "Provider 장애: "+meta.Request.Provider+" 요청 실패 ("+err.Error()+")")
 		writeOpenAIError(w, status, "upstream request failed: "+err.Error(), "server_error", "upstream_request_failed")
 		return false
 	}

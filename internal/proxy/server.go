@@ -44,6 +44,7 @@ type Server struct {
 	costCache    atomic.Pointer[costSnapshot]
 	learnCache   atomic.Pointer[routingLearnSnapshot]
 	priceCache   atomic.Pointer[pricingSnapshot]
+	mmCache      atomic.Pointer[mattermostSnapshot]
 	sessions     *sessionInferer
 	sessionGCAt  atomic.Int64
 	extSeen      sync.Map // external key id -> struct{}; dedupes lazy registration
@@ -224,6 +225,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/admin/mcp/loops", s.handleMCPLoops)
 	mux.HandleFunc("/admin/mcp/catalog", s.handleMCPCatalog)
 	mux.HandleFunc("/admin/kill-switch", s.handleKillSwitch)
+	mux.HandleFunc("/admin/notifications/mattermost", s.handleMattermostConfig)
+	mux.HandleFunc("/admin/notifications/mattermost/test", s.handleMattermostTest)
 	mux.HandleFunc("/admin/alerts", s.handleAlertRules)
 	mux.HandleFunc("/admin/alerts/", s.handleAlertRuleByID)
 	mux.HandleFunc("/admin/saved-filters", s.handleSavedFilters)
