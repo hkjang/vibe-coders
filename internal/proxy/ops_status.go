@@ -105,7 +105,7 @@ func (s *Server) opsStatusSnapshot(ctx context.Context) OpsStatus {
 			DevSecret:         s.cfg.Secret.GatewaySecret == config.DefaultGatewaySecret,
 			RawPromptsLogged:  s.cfg.Logging.RawPrompts,
 			RawBodiesLogged:   s.cfg.Logging.RawBodies,
-			PricingConfigured: len(s.cfg.Pricing) > 0,
+			PricingConfigured: len(s.pricingMap(ctx)) > 0,
 		},
 	}
 

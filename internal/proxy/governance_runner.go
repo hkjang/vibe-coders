@@ -90,7 +90,7 @@ func (s *Server) runGovernanceChat(ctx context.Context, r *http.Request, model, 
 		result.PromptTokens = analysis.Usage.PromptTokens
 		result.CompletionTokens = analysis.Usage.CompletionTokens
 		result.TotalTokens = analysis.Usage.TotalTokens
-		result.CostKRW = audit.EstimateCostKRW(model, analysis.Usage, s.cfg.Pricing)
+		result.CostKRW = audit.EstimateCostKRW(model, analysis.Usage, s.pricingMap(ctx))
 		return result
 	}
 	result.PromptTokens = audit.EstimateTokens(string(body))
@@ -101,7 +101,7 @@ func (s *Server) runGovernanceChat(ctx context.Context, r *http.Request, model, 
 		CompletionTokens: result.CompletionTokens,
 		TotalTokens:      result.TotalTokens,
 		Source:           "estimated",
-	}, s.cfg.Pricing)
+	}, s.pricingMap(ctx))
 	return result
 }
 

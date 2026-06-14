@@ -43,6 +43,7 @@ type Server struct {
 	knowledge    atomic.Pointer[knowledgeSnapshot]
 	costCache    atomic.Pointer[costSnapshot]
 	learnCache   atomic.Pointer[routingLearnSnapshot]
+	priceCache   atomic.Pointer[pricingSnapshot]
 	sessions     *sessionInferer
 	sessionGCAt  atomic.Int64
 	extSeen      sync.Map // external key id -> struct{}; dedupes lazy registration
@@ -187,6 +188,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/admin/cost/predict", s.handleCostPredict)
 	mux.HandleFunc("/admin/cost/allocation", s.handleCostAllocation)
 	mux.HandleFunc("/admin/cost/anomalies", s.handleCostAnomalies)
+	mux.HandleFunc("/admin/pricing", s.handlePricing)
+	mux.HandleFunc("/admin/pricing/seed", s.handlePricingSeed)
 	mux.HandleFunc("/admin/benchmark/teams", s.handleTeamBenchmark)
 	mux.HandleFunc("/admin/benchmark/users", s.handleUserProductivity)
 	mux.HandleFunc("/admin/incidents", s.handleIncidents)

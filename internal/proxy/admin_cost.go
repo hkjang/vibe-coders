@@ -166,6 +166,6 @@ func (s *Server) handleCostPredict(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	snap := s.costSnapshotCached(r.Context())
-	est := predictCost(p.Model, p.InputTokens, p.MaxTokens, snap, s.cfg.Pricing)
+	est := predictCost(p.Model, p.InputTokens, p.MaxTokens, snap, s.pricingMap(r.Context()))
 	writeJSON(w, http.StatusOK, est)
 }

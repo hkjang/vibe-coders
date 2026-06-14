@@ -295,7 +295,7 @@ func (rc *requestPipeline) stepCost() bool {
 	rc.estimatedCostKRW = 0.0
 	if r.URL.Path == "/v1/chat/completions" && r.Method == http.MethodPost {
 		snap := s.costSnapshotCached(r.Context())
-		est := predictCost(rc.meta.Request.Model, promptTokenEstimate(rc.meta.Prompts), parseMaxTokens(rc.body), snap, s.cfg.Pricing)
+		est := predictCost(rc.meta.Request.Model, promptTokenEstimate(rc.meta.Prompts), parseMaxTokens(rc.body), snap, s.pricingMap(r.Context()))
 		rc.estimatedCostKRW = est.CostKRW
 		w.Header().Set("X-Estimated-Input-Tokens", strconv.Itoa(est.InputTokens))
 		w.Header().Set("X-Estimated-Output-Tokens", strconv.Itoa(est.OutputTokens))
@@ -494,7 +494,7 @@ func (rc *requestPipeline) stepUpstream() bool {
 			TotalTokens:      analysis.Usage.TotalTokens,
 			CachedTokens:     analysis.Usage.CachedTokens,
 			ReasoningTokens:  analysis.Usage.ReasoningTokens,
-			EstimatedCost:    audit.EstimateCostKRW(meta.Request.Model, analysis.Usage, s.cfg.Pricing),
+			EstimatedCost:    audit.EstimateCostKRW(meta.Request.Model, analysis.Usage, s.pricingMap(r.Context())),
 			Currency:         "KRW",
 			Source:           analysis.Usage.Source,
 			CreatedAt:        time.Now().UTC(),
@@ -512,7 +512,7 @@ func (rc *requestPipeline) stepUpstream() bool {
 			PromptTokens:     estimated.PromptTokens,
 			CompletionTokens: estimated.CompletionTokens,
 			TotalTokens:      estimated.TotalTokens,
-			EstimatedCost:    audit.EstimateCostKRW(meta.Request.Model, estimated, s.cfg.Pricing),
+			EstimatedCost:    audit.EstimateCostKRW(meta.Request.Model, estimated, s.pricingMap(r.Context())),
 			Currency:         "KRW",
 			Source:           estimated.Source,
 			CreatedAt:        time.Now().UTC(),
