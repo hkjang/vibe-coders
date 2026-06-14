@@ -603,18 +603,50 @@ func withPolicyDecisionRequestID(events []store.PolicyDecisionEvent, requestID s
 }
 
 func inferMCPRisk(server, tool string) (string, string) {
+	level, _ := accessClassDefaults(inferToolAccessClass(server, tool))
+	return level, "allow"
+}
+
+// inferToolAccessClass grades an MCP tool into one of five access tiers by name:
+// secret > execute > network > write > read (most-sensitive first). This is the
+// dimension the roadmap calls for — read/write/execute/network/secret — which
+// then maps to a default risk level and a recommended policy action.
+func inferToolAccessClass(server, tool string) string {
 	lower := strings.ToLower(server + " " + tool)
+	contains := func(words ...string) bool {
+		for _, w := range words {
+			if strings.Contains(lower, w) {
+				return true
+			}
+		}
+		return false
+	}
 	switch {
-	case strings.Contains(lower, "shell") || strings.Contains(lower, "exec") || strings.Contains(lower, "bash") ||
-		strings.Contains(lower, "powershell") || strings.Contains(lower, "terminal") || strings.Contains(lower, "kubectl") ||
-		strings.Contains(lower, "terraform") || strings.Contains(lower, "docker") || strings.Contains(lower, "deploy"):
-		return "critical", "allow"
-	case strings.Contains(lower, "database") || strings.Contains(lower, "db_") || strings.Contains(lower, "sql") ||
-		strings.Contains(lower, "update") || strings.Contains(lower, "delete") || strings.Contains(lower, "drop") ||
-		strings.Contains(lower, "migrate"):
-		return "high", "allow"
-	case strings.Contains(lower, "git") || strings.Contains(lower, "commit") || strings.Contains(lower, "push") ||
-		strings.Contains(lower, "write") || strings.Contains(lower, "create"):
+	case contains("secret", "credential", "password", "vault", "apikey", "api_key", "access key", "access_key", "token", "private key", "private_key", "env var", "환경 변수", "비밀"):
+		return "secret"
+	case contains("shell", "exec", "bash", "powershell", "terminal", "command", "run_", "kubectl", "terraform", "docker", "deploy", "ssh", "systemctl", "sudo"):
+		return "execute"
+	case contains("http", "fetch", "request", "curl", "url", "web", "browse", "download", "upload", "webhook", "email", "send_", "smtp", "network", "socket"):
+		return "network"
+	case contains("write", "create", "update", "delete", "remove", "put", "post", "commit", "push", "mkdir", "edit", "modify", "insert", "drop", "migrate", "save", "rename", "db_", "database", "sql", "git"):
+		return "write"
+	default:
+		return "read"
+	}
+}
+
+// accessClassDefaults maps an access class to its default risk level and the
+// recommended policy action (connecting grading to policy/approval). Execute and
+// secret tiers default to requiring approval; network is high but advisory.
+func accessClassDefaults(class string) (level, recommendedAction string) {
+	switch class {
+	case "secret":
+		return "critical", "require_approval"
+	case "execute":
+		return "critical", "require_approval"
+	case "network":
+		return "high", "require_approval"
+	case "write":
 		return "medium", "allow"
 	default:
 		return "low", "allow"

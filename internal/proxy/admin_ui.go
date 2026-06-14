@@ -1716,6 +1716,9 @@ const adminHTML = `<!doctype html>
       '</div>';
     }
 
+    function accessClassLabel(cls) {
+      return ({ read: '읽기', write: '쓰기', execute: '실행', network: '네트워크', secret: '시크릿' }[cls]) || (cls || 'read');
+    }
     function modelQualityHTML(models) {
       if (!models.length) return '<div class="empty">데이터 없음 — 요청·골든 프롬프트·평가 결과가 쌓이면 모델별 품질 점수가 계산됩니다.</div>';
       const pct = (v) => ((v || 0) * 100).toFixed(0) + '%';
@@ -3788,6 +3791,7 @@ const adminHTML = `<!doctype html>
         const idx = risk.idx;
         return '<tr>' +
           '<td>' + (t.is_mcp ? '<span class="pill">MCP</span> ' : '') + escapeHTML(t.tool_name) + '<div class="muted">' + escapeHTML(sl) + '</div></td>' +
+          '<td><span class="pill">' + escapeHTML(accessClassLabel(risk.access_class)) + '</span>' + (risk.recommended_action && risk.recommended_action !== 'allow' ? '<div class="muted" style="font-size:11px">권장: ' + escapeHTML(risk.recommended_action) + '</div>' : '') + '</td>' +
           '<td><span class="status ' + governanceStatusClass(risk.risk_level) + '">' + escapeHTML(risk.risk_level || '') + '</span><div class="muted">' + (risk.configured ? 'configured' : 'inferred') + '</div></td>' +
           '<td><span class="status ' + governanceStatusClass(risk.action) + '">' + escapeHTML(risk.action || '') + '</span></td>' +
           '<td data-num="' + (t.definitions || 0) + '">' + fmt(t.definitions) + '</td>' +
@@ -3804,7 +3808,7 @@ const adminHTML = `<!doctype html>
         '</tr>';
       }).join('');
       const toolTable = tools.length ?
-        '<table><thead><tr><th data-sort="str">tool</th><th data-sort="str">risk</th><th data-sort="str">action</th><th data-sort="num">정의</th><th data-sort="num">호출</th><th data-sort="num">결과</th><th data-sort="num">오류</th><th data-sort="num">오류율</th><th data-sort="num">고유 키</th><th data-sort="num">호출 IP</th><th>정책</th><th>드릴다운</th></tr></thead><tbody>' + toolRows + '</tbody></table>'
+        '<table><thead><tr><th data-sort="str">tool</th><th data-sort="str">접근등급</th><th data-sort="str">risk</th><th data-sort="str">action</th><th data-sort="num">정의</th><th data-sort="num">호출</th><th data-sort="num">결과</th><th data-sort="num">오류</th><th data-sort="num">오류율</th><th data-sort="num">고유 키</th><th data-sort="num">호출 IP</th><th>정책</th><th>드릴다운</th></tr></thead><tbody>' + toolRows + '</tbody></table>'
         : '<div class="empty">tool 기록 없음</div>';
 
       // ---- policy section ----

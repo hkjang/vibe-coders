@@ -36,7 +36,9 @@ func (s *Server) handleMCPTools(w http.ResponseWriter, r *http.Request) {
 		filteredTools := []store.MCPToolStat{}
 		toolRisk := []map[string]any{}
 		for _, tool := range tools {
-			level, action := inferMCPRisk(tool.ServerLabel, tool.ToolName)
+			accessClass := inferToolAccessClass(tool.ServerLabel, tool.ToolName)
+			level, recommendedAction := accessClassDefaults(accessClass)
+			action := "allow"
 			configured := false
 			note := ""
 			if p, ok := byTool[tool.ServerLabel+"\x00"+tool.ToolName]; ok {
@@ -50,12 +52,14 @@ func (s *Server) handleMCPTools(w http.ResponseWriter, r *http.Request) {
 			}
 			filteredTools = append(filteredTools, tool)
 			toolRisk = append(toolRisk, map[string]any{
-				"server_label": tool.ServerLabel,
-				"tool_name":    tool.ToolName,
-				"risk_level":   level,
-				"action":       action,
-				"configured":   configured,
-				"note":         note,
+				"server_label":       tool.ServerLabel,
+				"tool_name":          tool.ToolName,
+				"access_class":       accessClass,
+				"risk_level":         level,
+				"action":             action,
+				"recommended_action": recommendedAction,
+				"configured":         configured,
+				"note":               note,
 			})
 		}
 		writeJSON(w, http.StatusOK, map[string]any{
