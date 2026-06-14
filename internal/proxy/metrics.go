@@ -28,6 +28,7 @@ type Metrics struct {
 	knowledgeExpand atomic.Uint64 // requests that expanded ≥1 knowledge snippet
 	knowledgeTokens atomic.Uint64 // estimated tokens injected via knowledge expansion
 	costGuardBlock  atomic.Uint64 // requests blocked by the pre-call cost guard
+	promptInjection atomic.Uint64 // requests where prompt-injection patterns were detected
 	latency         *LatencyDigest
 	firstChunk      *LatencyDigest
 }
@@ -114,7 +115,8 @@ func (m *Metrics) AddKnowledgeExpansion(tokens int) {
 		m.knowledgeTokens.Add(uint64(tokens))
 	}
 }
-func (m *Metrics) IncCostGuardBlock() { m.costGuardBlock.Add(1) }
+func (m *Metrics) IncCostGuardBlock()  { m.costGuardBlock.Add(1) }
+func (m *Metrics) IncPromptInjection() { m.promptInjection.Add(1) }
 
 func (m *Metrics) ObserveLLMEvaluations(evaluations []store.LLMEvaluation) {
 	for _, evaluation := range evaluations {
@@ -184,6 +186,9 @@ func (m *Metrics) Prometheus(queueDepth int, logDropped uint64, logWritten uint6
 		"# HELP proxy_cost_guard_blocked_total Requests blocked by the pre-call cost guard.",
 		"# TYPE proxy_cost_guard_blocked_total counter",
 		fmt.Sprintf("proxy_cost_guard_blocked_total %d", m.costGuardBlock.Load()),
+		"# HELP proxy_prompt_injection_total Requests where prompt-injection patterns were detected.",
+		"# TYPE proxy_prompt_injection_total counter",
+		fmt.Sprintf("proxy_prompt_injection_total %d", m.promptInjection.Load()),
 		"# HELP proxy_log_queue_depth Current async log queue depth.",
 		"# TYPE proxy_log_queue_depth gauge",
 		fmt.Sprintf("proxy_log_queue_depth %d", queueDepth),

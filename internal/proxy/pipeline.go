@@ -157,6 +157,10 @@ func (rc *requestPipeline) stepRouting() bool {
 		w.Header().Set("X-Routing-Complexity", strconv.Itoa(plan.Complexity.Score))
 		w.Header().Set("X-Routing-Complexity-Tier", plan.Complexity.Tier)
 		w.Header().Set("X-Routing-Risk", strconv.Itoa(plan.Risk.Score))
+		if containsString(plan.Risk.Categories, "prompt_injection") {
+			s.metrics.IncPromptInjection()
+			w.Header().Set("X-Prompt-Injection", "detected")
+		}
 		if rc.authCtx != nil && (plan.SelectedModel == "" || !listAllows(plan.SelectedModel, rc.authCtx.AllowedModels, rc.authCtx.DeniedModels)) {
 			_ = s.db.InsertAuditEvent(r.Context(), store.AuthEvent{ID: newID("ae"), EventType: "model_denied", APIKeyID: rc.authCtx.APIKeyID, TeamID: rc.authCtx.TeamID, IP: clientIP(r), UserAgent: r.UserAgent(), Detail: plan.SelectedModel, CreatedAt: time.Now().UTC()})
 			writeOpenAIError(w, http.StatusForbidden, "model is not allowed by auth policy", "permission_error", "model_denied")

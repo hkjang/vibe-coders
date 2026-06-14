@@ -259,6 +259,11 @@ func analyzeRisk(prompts []store.PromptLog) store.RiskAnalysis {
 	if keywordHit(lower, []string{"rm -rf", "chmod ", "chown ", "iptables", "sudo ", "ssh ", "scp ", "aws ", "gcloud ", "az ", "terraform destroy"}) {
 		add("infrastructure_command", 25)
 	}
+	// Prompt-injection / jailbreak attempts are tracked as their own category so
+	// operators can policy/alert on them independent of generic risk.
+	if _, injectionScore := detectPromptInjection(text); injectionScore > 0 {
+		add("prompt_injection", injectionScore)
+	}
 	if score > 100 {
 		score = 100
 	}
