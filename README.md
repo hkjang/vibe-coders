@@ -63,6 +63,8 @@ Roo Code / Cursor / Continue 등 OpenAI 호환 API 를 호출하는 VS Code 확�
 - 인증 확장: email/password admin login, JWT access/refresh rotation, role/scope 기반 Admin API, API key 만료·폐기·IP·scope·모델/provider 정책 검사
 - Governance Layer: 정책 rule 기반 allow/block/approval, 팀 ID/팀명 조건, Secret Firewall detect/mask/block, 승인 workflow, MCP tool risk profile, policy decision audit, anomaly event 조회, replay/golden prompt/context registry API
 - 모델 패턴(`claude-*`, `anthropic/*` 등) 기반 provider 자동 라우팅. 클라이언트가 `X-Proxy-Provider` 를 지정하지 않아도 모델명만으로 라우팅
+- **Text2SQL 게이트웨이** (`v0.3.0`): `vibe/text2sql-*` 가상 모델로 자연어→읽기전용 SQL 생성. 기존 `/v1/chat/completions` 그대로 사용하되 내부에서 실제 업스트림 모델 선택 → SQL 검증(SELECT 전용·자동 LIMIT·테이블 권한)·EXPLAIN 비용 가드·결과 PII 마스킹·few-shot 골든쿼리. 자세한 내용은 아래 "Text2SQL" 절 참고
+- **운영·거버넌스 확장** (`v0.3.0`): 정책 시뮬레이터(`/admin/policies/simulate`), 모델 가격표 버전 이력(`/admin/pricing`, `/admin/pricing/seed`), 운영 리스크 스코어(`/admin/ops/risk`)·상태(`/admin/ops/status`), Provider SLO(`/admin/providers/slo`), 비용 이상탐지(`/admin/cost/anomalies`)·배부(`/admin/cost/allocation`)·팀 예산 예측(`/admin/budgets/projection`), 모델별 코딩 품질(`/admin/models/quality`), 작업 템플릿(`/admin/templates`), 프롬프트 버전 승격(`/admin/prompts/promotions`), 자동 라우팅 학습 루프(`/admin/routing/learning/auto`), DW 롤업(`/admin/dw/rollups`), Mattermost 알림(`/admin/notifications/mattermost`)
 - 호출 이력 CSV 다운로드 `/admin/export.csv` (Excel UTF-8 BOM 포함, 한국어 그대로 열림)
 - 운영용 백업 스크립트 `scripts/backup.ps1` / `scripts/backup.sh` (SQLite `.backup` + fallback ndjson + 보존 일수 적용)
 - `/health`, `/ready`, `/metrics`, `/auth/login`, `/auth/logout`, `/auth/refresh`, `/auth/me`, `/admin`, `/admin/stats`, `/admin/requests`, `/admin/requests/{id}`, `/admin/prompts`, `/admin/export.csv`, `/admin/users`, `/admin/users/{id}`, `/admin/teams`, `/admin/teams/{team}`, `/admin/ips`, `/admin/ips/{ip}`, `/admin/routing/preview`, `/admin/routing/decisions`, `/admin/routing/decisions/{id}`, `/admin/routing/health`, `/admin/policies`, `/admin/policies/decisions`, `/admin/approvals`, `/admin/approvals/{id}/approve`, `/admin/approvals/{id}/reject`, `/admin/security/secrets`, `/admin/replay`, `/admin/golden-prompts`, `/admin/contexts`, `/admin/anomalies`, `/admin/llm/traces`, `/admin/llm/traces/{id}`, `/admin/llm/sessions`, `/admin/llm/prompts`, `/admin/llm/prompts/compare`, `/admin/llm/patterns`, `/admin/llm/insights`, `/admin/llm/timeseries`, `/admin/llm/feedback`, `/admin/llm/evaluations`, `/admin/quotas`, `/admin/retention`, `/admin/fallback`, `/admin/api-keys`, `/admin/api-keys/{id}/revoke`, `/admin/providers`, `/admin/mcp/tools`, `/admin/audit-logs`, `/admin/audit/auth-events`
@@ -560,6 +562,47 @@ curl.exe http://localhost:8080/admin/api-keys `
 ```
 
 응답의 `secret` 은 한 번만 확인할 수 있습니다.
+
+## Text2SQL (자연어 → 읽기전용 SQL)
+
+`TEXT2SQL_ENABLED=true` 면 `vibe/text2sql-*` 가상 모델로 자연어 질문을 읽기 전용 SQL 로 변환합니다. **사용자 계약은 그대로** — 기존 `/v1/chat/completions` 에 `model` 만 바꿔 호출하면 됩니다. 게이트웨이는 가상 모델을 그대로 업스트림에 보내지 않고, 내부에서 **실제 업스트림 모델**을 선택해 SQL 을 생성·검증·(선택)실행한 뒤 일반 Chat Completion 형식으로 응답합니다.
+
+```powershell
+curl.exe http://localhost:8080/v1/chat/completions `
+  -H "Authorization: Bearer dev-proxy-key" `
+  -H "Content-Type: application/json" `
+  -H "X-Text2SQL-Schema-Name: analytics" `
+  -d '{ "model": "vibe/text2sql-preview", "messages": [{ "role": "user", "content": "지난달 부서별 ITSM 요청 건수를 알려줘" }] }'
+```
+
+| 가상 모델 | 모드 | 기본 업스트림 |
+| --- | --- | --- |
+| `vibe/text2sql-preview` | SQL 생성만 | `TEXT2SQL_PREVIEW_MODEL` |
+| `vibe/text2sql-execute` | 정책 통과 시 read-only 실행 | `TEXT2SQL_EXECUTE_MODEL` |
+| `vibe/text2sql-accurate` | 생성(복잡 분석) | `TEXT2SQL_ACCURATE_MODEL` |
+| `vibe/text2sql-local` | 생성(폐쇄망·저비용) | `TEXT2SQL_LOCAL_MODEL` |
+| `vibe/text2sql-auto` | 복잡도 기반 자동 | 라우팅 선택 |
+
+- **안전장치**: SELECT/CTE 전용(DDL·DML·스택쿼리·`SELECT INTO`·위험함수 차단), 자동 `LIMIT`, 테이블 allowlist(스키마 카탈로그), 결과 PII 마스킹, PostgreSQL `EXPLAIN` 비용 상한, 가상모델 비유출(업스트림엔 실제 모델만), `task_type=text2sql` + `requested_model`/`upstream_model` 감사.
+- **few-shot**: 검증된 골든 쿼리를 질문 유사도 기준으로 생성 프롬프트에 자동 주입.
+- **관리**: 어드민 `Text2SQL` 탭 + `GET /admin/text2sql`(프로필·통계·로그·모델 메트릭), 스키마 카탈로그 `(/admin/text2sql/schemas)`, 런타임 프로필 `(/admin/text2sql/profiles)`, 골든 쿼리 `(/admin/text2sql/golden[/run])`.
+
+| 변수 | 기본값 | 설명 |
+| --- | --- | --- |
+| `TEXT2SQL_ENABLED` | `false` | Text2SQL 모드 활성화 |
+| `TEXT2SQL_PREVIEW_MODEL` | `gpt-4.1-mini` | preview 업스트림 모델 |
+| `TEXT2SQL_EXECUTE_MODEL` | `gpt-4.1-mini` | execute 업스트림 모델 |
+| `TEXT2SQL_ACCURATE_MODEL` | `claude-sonnet-4` | accurate 업스트림 모델 |
+| `TEXT2SQL_LOCAL_MODEL` | `qwen-coder` | local 업스트림 모델 |
+| `TEXT2SQL_SUMMARY_MODEL` | `gpt-4.1-mini` | 실행 결과 요약 모델 |
+| `TEXT2SQL_DIALECT` | `PostgreSQL` | SQL 방언 |
+| `TEXT2SQL_SCHEMA` | 없음 | 인라인 스키마 컨텍스트(카탈로그 미사용 시) |
+| `TEXT2SQL_DEFAULT_LIMIT` | `100` | 자동 LIMIT |
+| `TEXT2SQL_MAX_LIMIT` | `1000` | 명시 LIMIT 상한 / 실행 행 cap |
+| `TEXT2SQL_MAX_EXPLAIN_COST` | `0` | (postgres) EXPLAIN 총비용 상한, 0=미적용 |
+| `TEXT2SQL_MASK_RESULTS` | `true` | 실행 결과 PII 마스킹 |
+| `TEXT2SQL_EXEC_DRIVER` | `postgres` | execute용 DB 드라이버 |
+| `TEXT2SQL_EXEC_DSN` | 없음 | execute용 read-only DSN(미설정 시 preview만) |
 
 ## MCP Gateway (프로토콜 집약 게이트웨이)
 
