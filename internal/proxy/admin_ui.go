@@ -1475,7 +1475,7 @@ const adminHTML = `<!doctype html>
         api('/admin/heatmap?window=' + heatWindow),
         api('/admin/requests?limit=20'),
         api('/admin/anomalies?recent=6h&z=3').catch(() => ({ anomalies: [] })),
-        api('/admin/ops/status').catch(() => null),
+        api('/admin/ops/risk').catch(() => null),
       ]);
       const modelQuality = await api('/admin/models/quality?window=30d').catch(() => ({ models: [] }));
       const costAnomalies = await api('/admin/cost/anomalies?window=6h&min_repeats=5').catch(() => null);
@@ -1483,7 +1483,7 @@ const adminHTML = `<!doctype html>
 
       const html =
         section('요약', kpiBlock(stats)) +
-        (ops ? section('운영 상태', opsStatusHTML(ops)) : '') +
+        (ops ? section('운영 리스크 스코어 · 운영 상태', opsRiskHTML(ops.risk) + opsStatusHTML(ops.status || {})) : '') +
         '<div class="grid3" style="grid-template-columns: 2fr 1fr 1fr;">' +
           card('시계열 — ' + windowLabel(win),
             windowToolbar() +
@@ -1631,6 +1631,26 @@ const adminHTML = `<!doctype html>
     function opsPill(ok, label) {
       const color = ok ? 'var(--accent)' : 'var(--bad)';
       return '<span style="display:inline-block; padding:2px 8px; border-radius:10px; font-size:12px; font-weight:700; color:#fff; background:' + color + '">' + escapeHTML(label) + '</span>';
+    }
+    function opsRiskHTML(risk) {
+      if (!risk) return '';
+      const score = risk.score || 0;
+      const tierColor = { low: 'var(--accent)', medium: 'var(--warn)', high: '#e8590c', critical: 'var(--bad)' }[risk.tier] || 'var(--muted)';
+      const tierLabel = { low: '양호', medium: '주의', high: '높음', critical: '심각' }[risk.tier] || risk.tier;
+      const factors = (risk.factors || []).map(f => {
+        const sevColor = f.severity === 'critical' ? 'var(--bad)' : (f.severity === 'warning' ? 'var(--warn)' : 'var(--muted)');
+        return '<li style="margin:4px 0"><span style="display:inline-block; min-width:34px; font-weight:800; color:' + sevColor + '">+' + f.points + '</span> ' + escapeHTML(f.message) + '</li>';
+      }).join('');
+      return '<div style="display:flex; gap:18px; align-items:center; padding:14px; flex-wrap:wrap">' +
+        '<div style="text-align:center; min-width:120px">' +
+          '<div style="font-size:42px; font-weight:800; line-height:1; color:' + tierColor + '">' + score + '</div>' +
+          '<div style="margin-top:4px"><span class="status" style="background:' + tierColor + '; color:#fff">' + escapeHTML(tierLabel) + '</span></div>' +
+          '<div class="muted" style="font-size:11px; margin-top:4px">/ 100 (높을수록 위험)</div>' +
+        '</div>' +
+        '<div style="flex:1; min-width:260px">' +
+          (factors ? '<ul style="margin:0; padding-left:4px; list-style:none; font-size:13px">' + factors + '</ul>' : '<div class="muted">감지된 운영 리스크 없음 — 양호합니다.</div>') +
+        '</div>' +
+      '</div>';
     }
     function opsStatusHTML(ops) {
       const sec = ops.security || {};

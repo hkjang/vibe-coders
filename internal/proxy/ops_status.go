@@ -119,6 +119,111 @@ func (s *Server) opsStatusSnapshot(ctx context.Context) OpsStatus {
 	return status
 }
 
+// OpsRiskFactor is one contributor to the overall operational risk score.
+type OpsRiskFactor struct {
+	Key      string `json:"key"`
+	Points   int    `json:"points"`
+	Severity string `json:"severity"` // info | warning | critical
+	Message  string `json:"message"`
+}
+
+// OpsRisk is a single operational-readiness risk score (0-100, higher = worse)
+// rolled up from the configuration, logging, fallback, disk, and provider-health
+// signals in the ops status snapshot.
+type OpsRisk struct {
+	Score   int             `json:"score"`
+	Tier    string          `json:"tier"` // low | medium | high | critical
+	Factors []OpsRiskFactor `json:"factors"`
+}
+
+// opsRiskScore rolls the ops status snapshot up into a single risk score with a
+// per-factor breakdown so operators see both the headline number and the why.
+func opsRiskScore(status OpsStatus) OpsRisk {
+	factors := []OpsRiskFactor{}
+	score := 0
+	add := func(key, severity, msg string, points int) {
+		factors = append(factors, OpsRiskFactor{Key: key, Points: points, Severity: severity, Message: msg})
+		score += points
+	}
+
+	if !status.Security.AuthEnabled {
+		add("auth_disabled", "warning", "인증(AUTH_ENABLED)이 꺼져 있습니다.", 20)
+	}
+	if status.Security.DevSecret {
+		add("dev_secret", "critical", "개발용 기본 GATEWAY_SECRET을 사용 중입니다.", 25)
+	}
+	if !status.Security.PricingConfigured {
+		add("pricing_missing", "warning", "모델 가격표가 설정되지 않아 비용 추적이 불가합니다.", 15)
+	}
+	if status.Security.RawPromptsLogged {
+		add("raw_prompts", "warning", "원문 프롬프트가 저장되고 있습니다(LOG_RAW_PROMPTS).", 10)
+	}
+	if status.Security.RawBodiesLogged {
+		add("raw_bodies", "info", "원본 요청 body가 저장되고 있습니다(LOG_RAW_BODIES).", 5)
+	}
+	if status.Logging.Dropped > 0 {
+		pts := 10
+		if status.Logging.Dropped > 1000 {
+			pts = 20
+		}
+		add("log_drops", "critical", fmtCount(status.Logging.Dropped)+"건의 감사 로그가 드롭되었습니다(큐 포화).", pts)
+	}
+	if status.Fallback.Exists && status.Fallback.Lines > 0 {
+		pts := 10
+		if status.Fallback.Lines > 1000 {
+			pts = 20
+		}
+		add("fallback_backlog", "warning", "Fallback NDJSON에 "+itoaProxy(int(status.Fallback.Lines))+"줄이 미처리 상태입니다.", pts)
+	}
+	if status.Disk.Available && status.Disk.UsedPercent >= 90 {
+		add("disk_low", "critical", "데이터 디스크 사용률이 90%를 넘었습니다.", 20)
+	} else if status.Disk.Available && status.Disk.UsedPercent >= 80 {
+		add("disk_warning", "warning", "데이터 디스크 사용률이 80%를 넘었습니다.", 10)
+	}
+	for _, p := range status.Providers {
+		if p.Requests > 0 && p.Score < 50 {
+			add("provider_degraded", "warning", "Provider "+p.Provider+"의 health 점수가 낮습니다("+itoaProxy(p.Score)+").", 10)
+			break
+		}
+	}
+
+	if score > 100 {
+		score = 100
+	}
+	return OpsRisk{Score: score, Tier: opsRiskTier(score), Factors: factors}
+}
+
+func opsRiskTier(score int) string {
+	switch {
+	case score >= 60:
+		return "critical"
+	case score >= 35:
+		return "high"
+	case score >= 15:
+		return "medium"
+	default:
+		return "low"
+	}
+}
+
+// fmtCount renders a count for risk-factor messages.
+func fmtCount(n uint64) string {
+	return itoaProxy(int(n))
+}
+
+func (s *Server) handleOpsRisk(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	if r.Method != http.MethodGet {
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
+	status := s.opsStatusSnapshot(r.Context())
+	writeJSON(w, http.StatusOK, map[string]any{"risk": opsRiskScore(status), "status": status})
+}
+
 func (s *Server) handleOpsStatus(w http.ResponseWriter, r *http.Request) {
 	if !s.authorizeAdmin(r) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
