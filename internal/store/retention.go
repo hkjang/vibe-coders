@@ -64,6 +64,13 @@ func (w *RetentionWorker) runOnce() {
 }
 
 func (w *RetentionWorker) runOnceWith(ctx context.Context) int64 {
+	// Roll up the last few days into analytics_daily BEFORE purging detailed logs,
+	// so long-term aggregates survive retention even though the raw rows are gone.
+	now := time.Now().UTC()
+	if _, err := w.store.RollupRange(ctx, now.AddDate(0, 0, -3), now); err != nil {
+		slog.Warn("retention rollup failed", "error", err)
+	}
+
 	var totalDeleted int64
 	if w.cfg.PromptDays > 0 && (w.cfg.RequestDays <= 0 || w.cfg.PromptDays < w.cfg.RequestDays) {
 		n, err := w.store.PurgeOlderThan(ctx, "prompt_logs", w.cfg.PromptDays)

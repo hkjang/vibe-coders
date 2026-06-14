@@ -153,6 +153,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/admin/quotas", s.handleQuotas)
 	mux.HandleFunc("/admin/quotas/", s.handleQuotaByID)
 	mux.HandleFunc("/admin/retention", s.handleRetention)
+	mux.HandleFunc("/admin/dw/rollups", s.handleDWRollups)
 	mux.HandleFunc("/admin/export.csv", s.handleExportCSV)
 	mux.HandleFunc("/admin/timeseries", s.handleTimeseries)
 	mux.HandleFunc("/admin/heatmap", s.handleHeatmap)

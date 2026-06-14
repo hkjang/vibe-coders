@@ -527,6 +527,17 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 				last_used_at TEXT,
 				created_at TEXT NOT NULL
 			)`,
+		`CREATE TABLE IF NOT EXISTS analytics_daily (
+				day TEXT NOT NULL,
+				dimension TEXT NOT NULL,
+				dim_value TEXT NOT NULL,
+				requests INTEGER NOT NULL DEFAULT 0,
+				tokens INTEGER NOT NULL DEFAULT 0,
+				cost_krw REAL NOT NULL DEFAULT 0,
+				errors INTEGER NOT NULL DEFAULT 0,
+				PRIMARY KEY (day, dimension, dim_value)
+			)`,
+		`CREATE INDEX IF NOT EXISTS idx_analytics_daily_day ON analytics_daily(day)`,
 		`CREATE TABLE IF NOT EXISTS prompt_promotions (
 				prompt_name TEXT NOT NULL,
 				prompt_version TEXT NOT NULL,
