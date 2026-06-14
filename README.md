@@ -65,6 +65,7 @@ Roo Code / Cursor / Continue 등 OpenAI 호환 API 를 호출하는 VS Code 확�
 - 모델 패턴(`claude-*`, `anthropic/*` 등) 기반 provider 자동 라우팅. 클라이언트가 `X-Proxy-Provider` 를 지정하지 않아도 모델명만으로 라우팅
 - **Text2SQL 게이트웨이** (`v0.3.0`): `vibe/text2sql-*` 가상 모델로 자연어→읽기전용 SQL 생성. 기존 `/v1/chat/completions` 그대로 사용하되 내부에서 실제 업스트림 모델 선택 → SQL 검증(SELECT 전용·자동 LIMIT·테이블 권한)·EXPLAIN 비용 가드·결과 PII 마스킹·few-shot 골든쿼리. 자세한 내용은 아래 "Text2SQL" 절 참고
 - **Text2SQL 백로그 완결** (`v0.3.3`): preview 결과 캐시(스키마 버전 키 + TTL), 스키마 버전 관리(지문 기반 자동 증가), 민감도 세분화(`approval_required`/`aggregate_only`), 실행 샌드박스(read-only tx + statement_timeout·work_mem), 자연어 재질문(clarification), 비용·품질 기반 업스트림 자동 승격, 관리자 위험 요청 큐(`/admin/text2sql/risk-queue`), 업무 용어 사전(`/admin/text2sql/glossary`)
+- **재현성·권한 안전성·DW 신뢰성** (`v0.3.4`): Text2SQL 로그에 재현성 필드(`schema_name`·`schema_version`·`permission_hash`·`glossary_hash`) — 사후에 당시 스키마·권한·용어사전 상태로 SQL 생성 근거 재현. preview 캐시 키에 권한·용어사전 해시 포함 → 권한이 다른 사용자 간 SQL 재사용 방지. ClickHouse Sink에 dimension별 watermark + 실패 재처리 큐 — 실패가 유실되지 않고 `/admin/dw/sink-retry`(수동)·다음 주기(자동)로 복구, `/admin/dw/sink-status` 로 진행 상태 조회
 - **운영·거버넌스 확장** (`v0.3.0`): 정책 시뮬레이터(`/admin/policies/simulate`), 모델 가격표 버전 이력(`/admin/pricing`, `/admin/pricing/seed`), 운영 리스크 스코어(`/admin/ops/risk`)·상태(`/admin/ops/status`), Provider SLO(`/admin/providers/slo`), 비용 이상탐지(`/admin/cost/anomalies`)·배부(`/admin/cost/allocation`)·팀 예산 예측(`/admin/budgets/projection`), 모델별 코딩 품질(`/admin/models/quality`), 작업 템플릿(`/admin/templates`), 프롬프트 버전 승격(`/admin/prompts/promotions`), 자동 라우팅 학습 루프(`/admin/routing/learning/auto`), DW 롤업(`/admin/dw/rollups`), Mattermost 알림(`/admin/notifications/mattermost`)
 - 호출 이력 CSV 다운로드 `/admin/export.csv` (Excel UTF-8 BOM 포함, 한국어 그대로 열림)
 - 운영용 백업 스크립트 `scripts/backup.ps1` / `scripts/backup.sh` (SQLite `.backup` + fallback ndjson + 보존 일수 적용)
@@ -594,10 +595,10 @@ curl.exe http://localhost:8080/v1/chat/completions `
 - **업무 용어 사전**: `text2sql_business_terms`(`/admin/text2sql/glossary`) — 업무 용어→테이블/컬럼/조건 매핑을 생성 프롬프트에 주입해 현업 언어로 질문 가능.
 - **스키마 레지스트리**: `text2sql_schemas`(이름·팀·기본) + `text2sql_tables`/`text2sql_columns`(업무 설명·민감도)로 프롬프트 컨텍스트를 구조화 생성. `POST /admin/text2sql/collect` 로 실행 DB(`information_schema`/`sqlite_master`)에서 자동 수집(운영자 태그 보존).
 - **권한 매트릭스**: `text2sql_permissions`(`/admin/text2sql/permissions`) 로 팀·API Key·사용자별 schema/table/column allow·deny 정책 — deny는 테이블/컬럼 접근 제한, allow는 민감(exclude) 컬럼 접근을 특정 주체에 부여.
-- **운영 분석**: 실패 원인 표준 분류(syntax/permission/cost/timeout/unknown_column/empty)와 EXPLAIN 위험도(cost·risk_score)를 로그에 저장, ClickHouse 자동 적재 스케줄러(`CLICKHOUSE_SINK_INTERVAL`) + 정합성 검증(`/admin/dw/consistency`).
+- **운영 분석**: 실패 원인 표준 분류(syntax/permission/cost/timeout/unknown_column/empty)와 EXPLAIN 위험도(cost·risk_score), **재현성 필드**(schema_name·schema_version·permission_hash·glossary_hash)를 로그에 저장, ClickHouse 자동 적재 스케줄러(`CLICKHOUSE_SINK_INTERVAL`) + 정합성 검증(`/admin/dw/consistency`) + dimension별 watermark·실패 재처리 큐(`/admin/dw/sink-status`, `/admin/dw/sink-retry`).
 - **few-shot · 품질**: 검증된 골든 쿼리를 질문 유사도로 생성 프롬프트에 주입하고, 성공 쿼리는 골든 자동 후보로 적립. `text2sql.sql_valid`/`executed` 평가를 LLM evaluation 파이프라인으로 emit, 모델별 SQL 품질 메트릭 제공.
 - **응답 포맷**: 해석 / 생성 SQL / 결과 / 주의사항 / 실행 가능 여부 / 다음 질문 제안 섹션으로 현업 친화 구성.
-- **장기 분석**: `POST /admin/dw/clickhouse` 로 일별 rollup 을 ClickHouse HTTP 인터페이스(JSONEachRow)로 적재(`CLICKHOUSE_URL` 설정 시).
+- **장기 분석**: `POST /admin/dw/clickhouse` 로 일별 rollup 을 ClickHouse HTTP 인터페이스(JSONEachRow)로 적재(`CLICKHOUSE_URL` 설정 시). dimension별 마지막 성공 watermark 와 실패 재처리 큐를 영속화 — `GET /admin/dw/sink-status` 로 진행 상태 조회, `POST /admin/dw/sink-retry`(또는 `?all=1`)로 실패분 재적재.
 - **관리**: 어드민 `Text2SQL` 탭 + `GET /admin/text2sql`(프로필·통계·로그·모델 메트릭), 스키마 카탈로그/레지스트리 `(/admin/text2sql/schemas|tables|columns|collect)`, 런타임 프로필 `(/admin/text2sql/profiles)`, 골든 쿼리 `(/admin/text2sql/golden[/run])`, 위험 요청 큐 `(/admin/text2sql/risk-queue)`, 업무 용어 사전 `(/admin/text2sql/glossary)`.
 
 | 변수 | 기본값 | 설명 |

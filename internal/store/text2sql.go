@@ -18,6 +18,10 @@ type Text2SQLQueryLog struct {
 	Mode            string    `json:"mode"`
 	Question        string    `json:"question"`
 	GeneratedSQL    string    `json:"generated_sql"`
+	SchemaName      string    `json:"schema_name"`
+	SchemaVersion   int       `json:"schema_version"`
+	PermissionHash  string    `json:"permission_hash"`
+	GlossaryHash    string    `json:"glossary_hash"`
 	Valid           bool      `json:"valid"`
 	RejectReason    string    `json:"reject_reason"`
 	Executed        bool      `json:"executed"`
@@ -36,9 +40,10 @@ func (s *SQLStore) InsertText2SQLLog(ctx context.Context, l Text2SQLQueryLog) er
 		l.CreatedAt = time.Now().UTC()
 	}
 	_, err := s.db.ExecContext(ctx, s.bind(`INSERT INTO text2sql_query_logs
-		(id, request_id, api_key_id, team, virtual_model, upstream_model, mode, question, generated_sql, valid, reject_reason, executed, row_count, error, failure_category, explain_cost, explain_risk, cost_krw, latency_ms, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+		(id, request_id, api_key_id, team, virtual_model, upstream_model, mode, question, generated_sql, schema_name, schema_version, permission_hash, glossary_hash, valid, reject_reason, executed, row_count, error, failure_category, explain_cost, explain_risk, cost_krw, latency_ms, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
 		l.ID, l.RequestID, l.APIKeyID, l.Team, l.VirtualModel, l.UpstreamModel, l.Mode, l.Question, l.GeneratedSQL,
+		l.SchemaName, l.SchemaVersion, l.PermissionHash, l.GlossaryHash,
 		boolInt(l.Valid), l.RejectReason, boolInt(l.Executed), l.RowCount, l.Error, l.FailureCategory, l.ExplainCost, l.ExplainRisk, l.CostKRW, l.LatencyMS, formatTime(l.CreatedAt))
 	return err
 }
@@ -50,6 +55,7 @@ func (s *SQLStore) ListText2SQLLogs(ctx context.Context, limit int) ([]Text2SQLQ
 	}
 	rows, err := s.db.QueryContext(ctx, s.bind(`SELECT id, COALESCE(request_id,''), COALESCE(api_key_id,''), COALESCE(team,''),
 		COALESCE(virtual_model,''), COALESCE(upstream_model,''), COALESCE(mode,''), COALESCE(question,''), COALESCE(generated_sql,''),
+		COALESCE(schema_name,''), COALESCE(schema_version,0), COALESCE(permission_hash,''), COALESCE(glossary_hash,''),
 		valid, COALESCE(reject_reason,''), executed, row_count, COALESCE(error,''), COALESCE(failure_category,''), explain_cost, explain_risk, cost_krw, latency_ms, created_at
 		FROM text2sql_query_logs ORDER BY created_at DESC LIMIT ?`), limit)
 	if err != nil {
@@ -62,7 +68,8 @@ func (s *SQLStore) ListText2SQLLogs(ctx context.Context, limit int) ([]Text2SQLQ
 		var valid, executed int
 		var createdAt string
 		if err := rows.Scan(&l.ID, &l.RequestID, &l.APIKeyID, &l.Team, &l.VirtualModel, &l.UpstreamModel, &l.Mode,
-			&l.Question, &l.GeneratedSQL, &valid, &l.RejectReason, &executed, &l.RowCount, &l.Error, &l.FailureCategory, &l.ExplainCost, &l.ExplainRisk, &l.CostKRW, &l.LatencyMS, &createdAt); err != nil {
+			&l.Question, &l.GeneratedSQL, &l.SchemaName, &l.SchemaVersion, &l.PermissionHash, &l.GlossaryHash,
+			&valid, &l.RejectReason, &executed, &l.RowCount, &l.Error, &l.FailureCategory, &l.ExplainCost, &l.ExplainRisk, &l.CostKRW, &l.LatencyMS, &createdAt); err != nil {
 			return nil, err
 		}
 		l.Valid = valid == 1
@@ -93,6 +100,7 @@ func (s *SQLStore) RiskyText2SQLLogs(ctx context.Context, since time.Time, minRi
 	}
 	rows, err := s.db.QueryContext(ctx, s.bind(`SELECT id, COALESCE(request_id,''), COALESCE(api_key_id,''), COALESCE(team,''),
 		COALESCE(virtual_model,''), COALESCE(upstream_model,''), COALESCE(mode,''), COALESCE(question,''), COALESCE(generated_sql,''),
+		COALESCE(schema_name,''), COALESCE(schema_version,0), COALESCE(permission_hash,''), COALESCE(glossary_hash,''),
 		valid, COALESCE(reject_reason,''), executed, row_count, COALESCE(error,''), COALESCE(failure_category,''), explain_cost, explain_risk, cost_krw, latency_ms, created_at
 		FROM text2sql_query_logs
 		WHERE created_at >= ? AND (valid = 0 OR explain_risk >= ? OR COALESCE(failure_category,'') <> '')
@@ -107,7 +115,8 @@ func (s *SQLStore) RiskyText2SQLLogs(ctx context.Context, since time.Time, minRi
 		var valid, executed int
 		var createdAt string
 		if err := rows.Scan(&l.ID, &l.RequestID, &l.APIKeyID, &l.Team, &l.VirtualModel, &l.UpstreamModel, &l.Mode,
-			&l.Question, &l.GeneratedSQL, &valid, &l.RejectReason, &executed, &l.RowCount, &l.Error, &l.FailureCategory, &l.ExplainCost, &l.ExplainRisk, &l.CostKRW, &l.LatencyMS, &createdAt); err != nil {
+			&l.Question, &l.GeneratedSQL, &l.SchemaName, &l.SchemaVersion, &l.PermissionHash, &l.GlossaryHash,
+			&valid, &l.RejectReason, &executed, &l.RowCount, &l.Error, &l.FailureCategory, &l.ExplainCost, &l.ExplainRisk, &l.CostKRW, &l.LatencyMS, &createdAt); err != nil {
 			return nil, err
 		}
 		l.Valid = valid == 1

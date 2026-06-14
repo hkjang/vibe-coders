@@ -4903,6 +4903,7 @@ const adminHTML = `<!doctype html>
         '<tr class="' + (l.valid ? '' : 'row-error') + '">' +
           '<td>' + ago(l.created_at) + '</td>' +
           '<td>' + escapeHTML(l.team || '-') + '<div class="muted">' + escapeHTML(l.upstream_model || '') + '</div></td>' +
+          '<td>' + escapeHTML(l.schema_name || '-') + (l.schema_version ? '<div class="muted">v' + l.schema_version + (l.permission_hash ? ' · perm ' + escapeHTML(l.permission_hash) : '') + '</div>' : '') + '</td>' +
           '<td>' + escapeHTML((l.question || '').slice(0, 50)) + '</td>' +
           '<td>' + (l.valid ? '<span class="status">유효</span>' : '<span class="status error">' + escapeHTML(l.reject_reason || '거부') + '</span>') + '</td>' +
           '<td>' + (l.failure_category ? '<span class="status error">' + escapeHTML(l.failure_category) + '</span>' : '-') + '</td>' +
@@ -4911,7 +4912,7 @@ const adminHTML = `<!doctype html>
         '</tr>'
       ).join('');
       const riskTable = riskQ.length ?
-        '<table><thead><tr><th>시각</th><th>팀</th><th>질문</th><th>검증</th><th>실패분류</th><th data-sort="num">EXPLAIN 위험</th><th>생성 SQL</th></tr></thead><tbody>' + riskRows + '</tbody></table>'
+        '<table><thead><tr><th>시각</th><th>팀</th><th>스키마(버전)</th><th>질문</th><th>검증</th><th>실패분류</th><th data-sort="num">EXPLAIN 위험</th><th>생성 SQL</th></tr></thead><tbody>' + riskRows + '</tbody></table>'
         : '<div class="empty">최근 7일 위험 요청 없음 (거부 · 고위험 EXPLAIN · 실패 분류 대상).</div>';
       document.getElementById('view').innerHTML =
         '<section><h2>Text2SQL</h2><div style="padding:0 14px 8px" class="muted">자연어 질문을 읽기 전용 SQL로 변환합니다. 사용자는 <code>vibe/text2sql-*</code> 가상 모델을 호출하고, 게이트웨이가 내부적으로 실제 업스트림 모델을 선택해 SQL을 생성·검증·(선택)실행합니다.</div></section>' +

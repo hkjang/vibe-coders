@@ -74,6 +74,26 @@ func clickhouseSink(ctx context.Context, client *http.Client, cfg config.ClickHo
 	return len(rows), nil
 }
 
+// dwDimensions is the set of rollup dimensions shipped to ClickHouse.
+var dwDimensions = []string{"all", "model", "provider", "project", "cost_center"}
+
+// syncClickHouseDimension ships one dimension's daily rollups since sinceDay and
+// records the outcome: a watermark on success, or a persisted retry entry on failure.
+func (s *Server) syncClickHouseDimension(ctx context.Context, dim, sinceDay string) (int, error) {
+	rows, err := s.db.ListDailyRollups(ctx, dim, sinceDay, 5000)
+	if err != nil {
+		_ = s.db.RecordClickHouseSinkFailure(ctx, dim, sinceDay, "rollup read: "+err.Error())
+		return 0, err
+	}
+	n, err := clickhouseSink(ctx, s.client, s.cfg.ClickHouse, rows)
+	if err != nil {
+		_ = s.db.RecordClickHouseSinkFailure(ctx, dim, sinceDay, err.Error())
+		return 0, err
+	}
+	_ = s.db.RecordClickHouseSinkSuccess(ctx, dim, sinceDay, int64(n))
+	return n, nil
+}
+
 // handleClickHouseSink rolls up the last N days and ships every dimension's daily
 // aggregates to ClickHouse for long-term analysis.
 // POST /admin/dw/clickhouse?days=30
@@ -98,21 +118,95 @@ func (s *Server) handleClickHouseSink(w http.ResponseWriter, r *http.Request) {
 	}
 	sinceDay := time.Now().UTC().AddDate(0, 0, -days).Format("2006-01-02")
 	total := 0
-	for _, dim := range []string{"all", "model", "provider", "project", "cost_center"} {
-		rows, err := s.db.ListDailyRollups(r.Context(), dim, sinceDay, 5000)
+	failed := map[string]string{}
+	for _, dim := range dwDimensions {
+		n, err := s.syncClickHouseDimension(r.Context(), dim, sinceDay)
 		if err != nil {
-			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "rollups_failed")
-			return
-		}
-		n, err := clickhouseSink(r.Context(), s.client, s.cfg.ClickHouse, rows)
-		if err != nil {
-			writeOpenAIError(w, http.StatusBadGateway, "clickhouse sink failed: "+err.Error(), "server_error", "clickhouse_failed")
-			return
+			failed[dim] = err.Error()
+			continue
 		}
 		total += n
 	}
-	s.auditAdmin(r, "dw.clickhouse.sink", "", auditJSON(map[string]any{"days": days, "rows": total}))
+	s.auditAdmin(r, "dw.clickhouse.sink", "", auditJSON(map[string]any{"days": days, "rows": total, "failed": failed}))
+	if len(failed) > 0 {
+		// Partial success: report what landed and what was queued for retry.
+		writeJSON(w, http.StatusBadGateway, map[string]any{"sent_rows": total, "since": sinceDay, "failed": failed, "queued_for_retry": true})
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"sent_rows": total, "since": sinceDay})
+}
+
+// handleClickHouseSinkStatus reports per-dimension watermarks and the pending retry
+// queue, so operators can see how far each dimension has shipped.
+// GET /admin/dw/sink-status
+func (s *Server) handleClickHouseSinkStatus(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	state, err := s.db.ListClickHouseSinkState(r.Context())
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "sink_state_failed")
+		return
+	}
+	retries, err := s.db.ListClickHouseSinkRetries(r.Context())
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "sink_retry_failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"state": state, "retries": retries, "configured": s.cfg.ClickHouse.URL != ""})
+}
+
+// handleClickHouseSinkRetry reprocesses the pending retry queue (or all dimensions
+// when ?all=1), clearing entries that now succeed.
+// POST /admin/dw/sink-retry[?all=1]
+func (s *Server) handleClickHouseSinkRetry(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	if r.Method != http.MethodPost {
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
+	if s.cfg.ClickHouse.URL == "" {
+		writeOpenAIError(w, http.StatusBadRequest, "ClickHouse is not configured (CLICKHOUSE_URL)", "invalid_request_error", "no_clickhouse")
+		return
+	}
+	type job struct{ dim, since string }
+	var jobs []job
+	if r.URL.Query().Get("all") == "1" {
+		days := s.cfg.ClickHouse.SinkDays
+		if days <= 0 {
+			days = 3
+		}
+		sinceDay := time.Now().UTC().AddDate(0, 0, -days).Format("2006-01-02")
+		for _, dim := range dwDimensions {
+			jobs = append(jobs, job{dim, sinceDay})
+		}
+	} else {
+		retries, err := s.db.ListClickHouseSinkRetries(r.Context())
+		if err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "sink_retry_failed")
+			return
+		}
+		for _, rt := range retries {
+			jobs = append(jobs, job{rt.Dimension, rt.SinceDay})
+		}
+	}
+	total, recovered := 0, 0
+	failed := map[string]string{}
+	for _, j := range jobs {
+		n, err := s.syncClickHouseDimension(r.Context(), j.dim, j.since)
+		if err != nil {
+			failed[j.dim] = err.Error()
+			continue
+		}
+		total += n
+		recovered++
+	}
+	s.auditAdmin(r, "dw.clickhouse.retry", "", auditJSON(map[string]any{"recovered": recovered, "rows": total, "failed": failed}))
+	writeJSON(w, http.StatusOK, map[string]any{"recovered_dimensions": recovered, "sent_rows": total, "failed": failed})
 }
 
 // clickhouseAggregate queries ClickHouse for the summed metrics of dimension "all"
@@ -213,12 +307,11 @@ func (s *Server) clickhouseSinkLoop() {
 		now := time.Now().UTC()
 		_, _ = s.db.RollupRange(ctx, now.AddDate(0, 0, -days), now)
 		sinceDay := now.AddDate(0, 0, -days).Format("2006-01-02")
-		for _, dim := range []string{"all", "model", "provider", "project", "cost_center"} {
-			rows, err := s.db.ListDailyRollups(ctx, dim, sinceDay, 5000)
-			if err != nil {
-				continue
-			}
-			if _, err := clickhouseSink(ctx, s.client, s.cfg.ClickHouse, rows); err != nil {
+		for _, dim := range dwDimensions {
+			// syncClickHouseDimension records a watermark on success and persists a
+			// retry entry on failure, so a failed window survives to the next cycle
+			// (and the manual /admin/dw/sink-retry endpoint) instead of being lost.
+			if _, err := s.syncClickHouseDimension(ctx, dim, sinceDay); err != nil {
 				slog.Warn("clickhouse auto-sink failed", "dimension", dim, "error", err)
 			}
 		}

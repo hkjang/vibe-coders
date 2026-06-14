@@ -11,10 +11,18 @@ func TestText2SQLCache(t *testing.T) {
 	defer db.Close()
 	ctx := context.Background()
 
-	key := Text2SQLCacheKey("부서별 매출", "global", "preview", 1)
+	key := Text2SQLCacheKey("부서별 매출", "global", "preview", 1, "permA", "glossA")
 	// Different schema version → different key (invalidation).
-	if key == Text2SQLCacheKey("부서별 매출", "global", "preview", 2) {
+	if key == Text2SQLCacheKey("부서별 매출", "global", "preview", 2, "permA", "glossA") {
 		t.Fatal("schema version must affect the cache key")
+	}
+	// Different permission hash → different key (no cross-subject reuse).
+	if key == Text2SQLCacheKey("부서별 매출", "global", "preview", 1, "permB", "glossA") {
+		t.Fatal("permission hash must affect the cache key")
+	}
+	// Different glossary hash → different key.
+	if key == Text2SQLCacheKey("부서별 매출", "global", "preview", 1, "permA", "glossB") {
+		t.Fatal("glossary hash must affect the cache key")
 	}
 
 	// Miss before put.
@@ -31,7 +39,7 @@ func TestText2SQLCache(t *testing.T) {
 	}
 
 	// Expired entry → miss.
-	expKey := Text2SQLCacheKey("만료", "global", "preview", 1)
+	expKey := Text2SQLCacheKey("만료", "global", "preview", 1, "permA", "glossA")
 	if err := db.PutText2SQLCache(ctx, expKey, "global", "preview", "SELECT 2", -time.Minute); err != nil {
 		t.Fatal(err)
 	}

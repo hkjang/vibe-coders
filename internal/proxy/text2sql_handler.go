@@ -2,10 +2,13 @@ package proxy
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -101,10 +104,20 @@ func (s *Server) handleText2SQL(w http.ResponseWriter, r *http.Request, meta sto
 		}
 	}
 
+	// Glossary text + reproducibility hashes. These capture the exact state that
+	// shaped this generation — the effective table/column access after the permission
+	// overlay, and the business-glossary revision — so a logged SQL can be explained
+	// later, and so the preview cache never reuses SQL across subjects whose access or
+	// vocabulary differ.
+	glossaryText, _ := s.db.BuildGlossaryText(r.Context(), resolvedSchemaName)
+	glossaryHash := shortHash(glossaryText)
+	permissionHash := shortHash(strings.Join(sortedCopy(allowedTables), ",") + "|" + strings.Join(sortedCopy(blockedColumns), ",") + "|" + strings.Join(sortedCopy(aggregateOnly), ","))
+
 	logRec := store.Text2SQLQueryLog{
 		ID: newID("t2s"), RequestID: meta.Request.ID, APIKeyID: meta.Request.APIKeyID,
 		VirtualModel: meta.Request.Model, UpstreamModel: upstreamModel, Mode: string(profile.Mode),
-		Question: question, CreatedAt: time.Now().UTC(),
+		Question: question, SchemaName: resolvedSchemaName, SchemaVersion: schemaVersion,
+		PermissionHash: permissionHash, GlossaryHash: glossaryHash, CreatedAt: time.Now().UTC(),
 	}
 	if authCtx != nil {
 		logRec.Team = authCtx.TeamID
@@ -169,7 +182,7 @@ func (s *Server) handleText2SQL(w http.ResponseWriter, r *http.Request, meta sto
 	// avoid repeated upstream generation cost.
 	cacheKey := ""
 	if cfg.CacheEnabled && profile.Mode != text2sql.ModeExecute {
-		cacheKey = store.Text2SQLCacheKey(question, resolvedSchemaName, string(profile.Mode), schemaVersion)
+		cacheKey = store.Text2SQLCacheKey(question, resolvedSchemaName, string(profile.Mode), schemaVersion, permissionHash, glossaryHash)
 		if cached, hit, _ := s.db.GetText2SQLCache(r.Context(), cacheKey); hit {
 			validation := text2sql.ValidateSQL(cached, text2sql.ValidateOptions{DefaultLimit: cfg.DefaultLimit, MaxLimit: cfg.MaxLimit, AllowedTables: allowedTables, BlockedColumns: blockedColumns, AggregateOnlyColumns: aggregateOnly})
 			if validation.OK {
@@ -179,8 +192,8 @@ func (s *Server) handleText2SQL(w http.ResponseWriter, r *http.Request, meta sto
 		}
 	}
 	msgs := text2sql.BuildGenerationMessages(dialect, schema, question, cfg.DefaultLimit)
-	if glossary, _ := s.db.BuildGlossaryText(r.Context(), resolvedSchemaName); glossary != "" {
-		msgs = text2sql.WithGlossary(msgs, glossary)
+	if glossaryText != "" {
+		msgs = text2sql.WithGlossary(msgs, glossaryText)
 	}
 	// Few-shot: inject the most relevant verified golden queries to improve generation.
 	if goldens, err := s.db.ListText2SQLGoldenQueries(r.Context(), true); err == nil && len(goldens) > 0 {
@@ -296,6 +309,25 @@ func applyPermissionEffect(allowedTables []string, blocked *[]string, eff store.
 		*blocked = kept
 	}
 	return allowedTables
+}
+
+// shortHash returns a stable 16-hex-char fingerprint of a string, used to snapshot
+// the permission/glossary state into a log row and the cache key. Empty input maps
+// to "" so an absent glossary doesn't shift the key.
+func shortHash(s string) string {
+	if s == "" {
+		return ""
+	}
+	h := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(h[:8])
+}
+
+// sortedCopy returns a sorted copy of a slice without mutating the input (the input
+// slices back the live allowlist/blocklist, which must stay in their original order).
+func sortedCopy(in []string) []string {
+	out := append([]string(nil), in...)
+	sort.Strings(out)
+	return out
 }
 
 // chooseUpstreamByQuality upgrades a complexity-chosen base model to the accurate

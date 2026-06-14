@@ -633,6 +633,25 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 		`ALTER TABLE text2sql_query_logs ADD COLUMN failure_category TEXT`,
 		`ALTER TABLE text2sql_query_logs ADD COLUMN explain_cost REAL NOT NULL DEFAULT 0`,
 		`ALTER TABLE text2sql_query_logs ADD COLUMN explain_risk INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE text2sql_query_logs ADD COLUMN schema_name TEXT`,
+		`ALTER TABLE text2sql_query_logs ADD COLUMN schema_version INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE text2sql_query_logs ADD COLUMN permission_hash TEXT`,
+		`ALTER TABLE text2sql_query_logs ADD COLUMN glossary_hash TEXT`,
+		`CREATE TABLE IF NOT EXISTS clickhouse_sink_state (
+				dimension TEXT PRIMARY KEY,
+				last_synced_day TEXT,
+				last_success_at TEXT,
+				rows_sent INTEGER NOT NULL DEFAULT 0,
+				updated_at TEXT
+			)`,
+		`CREATE TABLE IF NOT EXISTS clickhouse_sink_retry (
+				dimension TEXT PRIMARY KEY,
+				since_day TEXT,
+				error TEXT,
+				attempts INTEGER NOT NULL DEFAULT 0,
+				first_failed_at TEXT,
+				last_attempt_at TEXT
+			)`,
 		`CREATE TABLE IF NOT EXISTS model_pricing_versions (
 				id TEXT PRIMARY KEY,
 				model TEXT NOT NULL,

@@ -9,9 +9,11 @@ import (
 
 // Text2SQLCacheKey derives a deterministic cache key for a preview generation from
 // the question, the resolved schema, and the profile mode. Schema version is folded
-// in so a schema change invalidates stale cached SQL.
-func Text2SQLCacheKey(question, schemaName, mode string, schemaVersion int) string {
-	h := sha256.Sum256([]byte(question + "\x00" + schemaName + "\x00" + mode + "\x00" + itoaStore(schemaVersion)))
+// in so a schema change invalidates stale cached SQL, and the permission + glossary
+// hashes are folded in so SQL generated under one subject's access (or one glossary
+// revision) is never reused for a subject whose effective access or vocabulary differs.
+func Text2SQLCacheKey(question, schemaName, mode string, schemaVersion int, permissionHash, glossaryHash string) string {
+	h := sha256.Sum256([]byte(question + "\x00" + schemaName + "\x00" + mode + "\x00" + itoaStore(schemaVersion) + "\x00" + permissionHash + "\x00" + glossaryHash))
 	return hex.EncodeToString(h[:])
 }
 
