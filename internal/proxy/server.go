@@ -42,6 +42,7 @@ type Server struct {
 	routingRules atomic.Pointer[routingRulesSnapshot]
 	knowledge    atomic.Pointer[knowledgeSnapshot]
 	costCache    atomic.Pointer[costSnapshot]
+	learnCache   atomic.Pointer[routingLearnSnapshot]
 	sessions     *sessionInferer
 	sessionGCAt  atomic.Int64
 	extSeen      sync.Map // external key id -> struct{}; dedupes lazy registration
@@ -172,6 +173,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/admin/budgets/", s.handleBudgetByID)
 	mux.HandleFunc("/admin/waterfall", s.handleWaterfall)
 	mux.HandleFunc("/admin/routing/learning", s.handleRoutingLearning)
+	mux.HandleFunc("/admin/routing/learning/auto", s.handleRoutingLearningAuto)
 	mux.HandleFunc("/admin/routing/preview", s.handleRoutingPreview)
 	mux.HandleFunc("/admin/routing/decisions", s.handleRoutingDecisions)
 	mux.HandleFunc("/admin/routing/decisions/", s.handleRoutingDecisionByID)

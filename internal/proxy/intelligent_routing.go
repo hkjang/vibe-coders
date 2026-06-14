@@ -57,6 +57,16 @@ func (s *Server) planIntelligentRouting(ctx context.Context, body []byte, endpoi
 		routeReason = "auto_router"
 		forceProvider = !pinned
 		reasons = append(reasons, "auto alias mapped "+tier+" tier to "+selectedModel)
+		// Closed learning loop: prefer the model that historically performed best
+		// for this (task type, complexity bucket), when the loop is enabled and the
+		// learned choice is allowed by the key's policy.
+		if learned, why, ok := s.learnedModelFor(ctx, classifyTaskType(prompts), complexity.Score); ok && learned != selectedModel {
+			if authCtx == nil || listAllows(learned, authCtx.AllowedModels, authCtx.DeniedModels) {
+				selectedModel = learned
+				routeReason = "auto_router_learned"
+				reasons = append(reasons, why)
+			}
+		}
 		if pinned {
 			reasons = append(reasons, "provider pinned by client")
 		}
