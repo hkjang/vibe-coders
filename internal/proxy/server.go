@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"database/sql"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -45,6 +46,7 @@ type Server struct {
 	learnCache   atomic.Pointer[routingLearnSnapshot]
 	priceCache   atomic.Pointer[pricingSnapshot]
 	mmCache      atomic.Pointer[mattermostSnapshot]
+	t2sExec      atomic.Pointer[sql.DB] // lazily-opened read-only DB for Text2SQL execute mode
 	sessions     *sessionInferer
 	sessionGCAt  atomic.Int64
 	extSeen      sync.Map // external key id -> struct{}; dedupes lazy registration
@@ -156,6 +158,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/admin/quotas/", s.handleQuotaByID)
 	mux.HandleFunc("/admin/retention", s.handleRetention)
 	mux.HandleFunc("/admin/dw/rollups", s.handleDWRollups)
+	mux.HandleFunc("/admin/text2sql", s.handleText2SQLAdmin)
 	mux.HandleFunc("/admin/export.csv", s.handleExportCSV)
 	mux.HandleFunc("/admin/timeseries", s.handleTimeseries)
 	mux.HandleFunc("/admin/heatmap", s.handleHeatmap)

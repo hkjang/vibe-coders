@@ -12,6 +12,7 @@ import (
 
 	"vibe-coders/internal/audit"
 	"vibe-coders/internal/store"
+	"vibe-coders/internal/text2sql"
 )
 
 // PipelineStep is one named stage of the OpenAI-compatible request pipeline.
@@ -338,6 +339,14 @@ func (rc *requestPipeline) stepUpstream() bool {
 	body := rc.body
 	traceID := rc.traceID
 	routingPlan := rc.routingPlan
+
+	// Text2SQL: a vibe/text2sql-* virtual model is not proxied verbatim — it runs the
+	// Text2SQL pipeline (generate read-only SQL via a real upstream model, validate,
+	// optionally execute) and writes a normal Chat Completion response here.
+	if s.cfg.Text2SQL.Enabled && r.Method == http.MethodPost && text2sql.IsModel(meta.Request.Model) {
+		s.handleText2SQL(w, r, meta, body, rc.authCtx)
+		return false
+	}
 
 	provider, err := s.selectProviderForced(r.Context(), r, meta.Request.Model, rc.routeDecision.TargetProvider)
 	if err != nil {

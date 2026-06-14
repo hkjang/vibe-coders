@@ -527,6 +527,26 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 				last_used_at TEXT,
 				created_at TEXT NOT NULL
 			)`,
+		`CREATE TABLE IF NOT EXISTS text2sql_query_logs (
+				id TEXT PRIMARY KEY,
+				request_id TEXT,
+				api_key_id TEXT,
+				team TEXT,
+				virtual_model TEXT,
+				upstream_model TEXT,
+				mode TEXT,
+				question TEXT,
+				generated_sql TEXT,
+				valid INTEGER NOT NULL DEFAULT 0,
+				reject_reason TEXT,
+				executed INTEGER NOT NULL DEFAULT 0,
+				row_count INTEGER NOT NULL DEFAULT 0,
+				error TEXT,
+				cost_krw REAL NOT NULL DEFAULT 0,
+				latency_ms INTEGER NOT NULL DEFAULT 0,
+				created_at TEXT NOT NULL
+			)`,
+		`CREATE INDEX IF NOT EXISTS idx_text2sql_query_logs_created_at ON text2sql_query_logs(created_at)`,
 		`CREATE TABLE IF NOT EXISTS model_pricing_versions (
 				id TEXT PRIMARY KEY,
 				model TEXT NOT NULL,

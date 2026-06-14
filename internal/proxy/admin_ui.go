@@ -225,6 +225,7 @@ const adminHTML = `<!doctype html>
       <a href="#/ips" data-tab="ips">IP</a>
       <a href="#/quotas" data-tab="quotas">사용 한도</a>
       <a href="#/safety" data-tab="safety">안전</a>
+      <a href="#/text2sql" data-tab="text2sql">Text2SQL</a>
       <a href="#/settings" data-tab="settings">설정</a>
     </nav>
     <div class="header-tools">
@@ -674,6 +675,7 @@ const adminHTML = `<!doctype html>
           case 'agents':    await renderAgents(params); break;
           case 'vcs':       await renderVCS(params); break;
           case 'safety':    await renderSafety(); break;
+          case 'text2sql':  await renderText2SQL(); break;
           case 'settings':  await renderSettings(); break;
           default: await renderDashboard();
         }
@@ -4748,6 +4750,44 @@ const adminHTML = `<!doctype html>
     };
 
     // ---------- settings ----------
+    async function renderText2SQL() {
+      const d = await api('/admin/text2sql?window=7d').catch(() => ({ logs: [], profiles: [], stats: {} }));
+      const st = d.stats || {};
+      const enabled = d.enabled;
+      const kpis = '<div class="kpis">' +
+        kpi('상태', enabled ? '<span class="status">활성</span>' : '<span class="status error">비활성</span>') +
+        kpi('질의 수(7d)', fmt(st.total || 0)) +
+        kpi('유효 SQL', fmt(st.valid || 0) + '<div class="muted" style="font-size:11px;margin-top:6px">' + ((st.valid_rate || 0) * 100).toFixed(0) + '%</div>') +
+        kpi('실행', fmt(st.executed || 0)) +
+        kpi('오류', fmt(st.errors || 0)) +
+        kpi('비용(7d)', money(st.cost_krw || 0)) +
+      '</div>';
+      const profileRows = (d.profiles || []).map(p =>
+        '<tr><td><code>' + escapeHTML(p.model) + '</code></td><td>' + escapeHTML(p.mode) + '</td><td>' + escapeHTML(p.upstream) + '</td></tr>'
+      ).join('');
+      const profileTable = '<table><thead><tr><th>가상 모델</th><th>모드</th><th>업스트림 모델</th></tr></thead><tbody>' + profileRows + '</tbody></table>';
+      const logRows = (d.logs || []).map(l =>
+        '<tr class="' + (l.valid ? '' : 'row-error') + '">' +
+          '<td>' + ago(l.created_at) + '</td>' +
+          '<td>' + escapeHTML(l.virtual_model) + '<div class="muted">→ ' + escapeHTML(l.upstream_model) + '</div></td>' +
+          '<td>' + escapeHTML(l.mode) + '</td>' +
+          '<td>' + escapeHTML((l.question || '').slice(0, 60)) + '</td>' +
+          '<td>' + (l.valid ? '<span class="status">유효</span>' : '<span class="status error">' + escapeHTML(l.reject_reason || '거부') + '</span>') + (l.executed ? ' <span class="pill">실행 ' + fmt(l.row_count) + '행</span>' : '') + '</td>' +
+          '<td><code style="font-size:11px">' + escapeHTML((l.generated_sql || '').slice(0, 120)) + '</code></td>' +
+          '<td>' + money(l.cost_krw) + '</td>' +
+        '</tr>'
+      ).join('');
+      const logTable = (d.logs || []).length ?
+        '<table><thead><tr><th>시각</th><th>모델</th><th>모드</th><th>질문</th><th>검증</th><th>생성 SQL</th><th>비용</th></tr></thead><tbody>' + logRows + '</tbody></table>'
+        : '<div class="empty">Text2SQL 질의 기록 없음. 사용자가 <code>vibe/text2sql-preview</code> 모델로 <code>/v1/chat/completions</code> 를 호출하면 여기에 집계됩니다.</div>';
+      document.getElementById('view').innerHTML =
+        '<section><h2>Text2SQL</h2><div style="padding:0 14px 8px" class="muted">자연어 질문을 읽기 전용 SQL로 변환합니다. 사용자는 <code>vibe/text2sql-*</code> 가상 모델을 호출하고, 게이트웨이가 내부적으로 실제 업스트림 모델을 선택해 SQL을 생성·검증·(선택)실행합니다.</div></section>' +
+        section('요약 (최근 7일)', kpis) +
+        section('가상 모델 프로필', profileTable) +
+        section('최근 Text2SQL 질의', logTable);
+      makeSortable('#view', 'text2sql');
+    }
+
     async function renderSettings() {
       const [keys, providers, retention, fallback, audit, routes, learning, knowledge, usersResp, teamsResp, authEvents] = await Promise.all([
         api('/admin/api-keys'),

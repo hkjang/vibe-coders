@@ -1,0 +1,102 @@
+package store
+
+import (
+	"context"
+	"time"
+)
+
+// Text2SQLQueryLog records one Text2SQL request: the natural-language question, the
+// generated SQL, validation outcome, optional execution result, and cost — with
+// both the user-facing virtual model and the real upstream model that produced it.
+type Text2SQLQueryLog struct {
+	ID            string    `json:"id"`
+	RequestID     string    `json:"request_id"`
+	APIKeyID      string    `json:"api_key_id"`
+	Team          string    `json:"team"`
+	VirtualModel  string    `json:"virtual_model"`
+	UpstreamModel string    `json:"upstream_model"`
+	Mode          string    `json:"mode"`
+	Question      string    `json:"question"`
+	GeneratedSQL  string    `json:"generated_sql"`
+	Valid         bool      `json:"valid"`
+	RejectReason  string    `json:"reject_reason"`
+	Executed      bool      `json:"executed"`
+	RowCount      int64     `json:"row_count"`
+	Error         string    `json:"error"`
+	CostKRW       float64   `json:"cost_krw"`
+	LatencyMS     int64     `json:"latency_ms"`
+	CreatedAt     time.Time `json:"created_at"`
+}
+
+func (s *SQLStore) InsertText2SQLLog(ctx context.Context, l Text2SQLQueryLog) error {
+	if l.CreatedAt.IsZero() {
+		l.CreatedAt = time.Now().UTC()
+	}
+	_, err := s.db.ExecContext(ctx, s.bind(`INSERT INTO text2sql_query_logs
+		(id, request_id, api_key_id, team, virtual_model, upstream_model, mode, question, generated_sql, valid, reject_reason, executed, row_count, error, cost_krw, latency_ms, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+		l.ID, l.RequestID, l.APIKeyID, l.Team, l.VirtualModel, l.UpstreamModel, l.Mode, l.Question, l.GeneratedSQL,
+		boolInt(l.Valid), l.RejectReason, boolInt(l.Executed), l.RowCount, l.Error, l.CostKRW, l.LatencyMS, formatTime(l.CreatedAt))
+	return err
+}
+
+// ListText2SQLLogs returns recent Text2SQL query logs, newest first.
+func (s *SQLStore) ListText2SQLLogs(ctx context.Context, limit int) ([]Text2SQLQueryLog, error) {
+	if limit <= 0 || limit > 1000 {
+		limit = 100
+	}
+	rows, err := s.db.QueryContext(ctx, s.bind(`SELECT id, COALESCE(request_id,''), COALESCE(api_key_id,''), COALESCE(team,''),
+		COALESCE(virtual_model,''), COALESCE(upstream_model,''), COALESCE(mode,''), COALESCE(question,''), COALESCE(generated_sql,''),
+		valid, COALESCE(reject_reason,''), executed, row_count, COALESCE(error,''), cost_krw, latency_ms, created_at
+		FROM text2sql_query_logs ORDER BY created_at DESC LIMIT ?`), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Text2SQLQueryLog{}
+	for rows.Next() {
+		var l Text2SQLQueryLog
+		var valid, executed int
+		var createdAt string
+		if err := rows.Scan(&l.ID, &l.RequestID, &l.APIKeyID, &l.Team, &l.VirtualModel, &l.UpstreamModel, &l.Mode,
+			&l.Question, &l.GeneratedSQL, &valid, &l.RejectReason, &executed, &l.RowCount, &l.Error, &l.CostKRW, &l.LatencyMS, &createdAt); err != nil {
+			return nil, err
+		}
+		l.Valid = valid == 1
+		l.Executed = executed == 1
+		if ts, ok := parseStoredTime(createdAt); ok {
+			l.CreatedAt = ts
+		}
+		out = append(out, l)
+	}
+	return out, rows.Err()
+}
+
+// Text2SQLStats summarises recent Text2SQL activity for the admin tab.
+type Text2SQLStats struct {
+	Total     int64   `json:"total"`
+	Valid     int64   `json:"valid"`
+	Executed  int64   `json:"executed"`
+	Errors    int64   `json:"errors"`
+	CostKRW   float64 `json:"cost_krw"`
+	ValidRate float64 `json:"valid_rate"`
+}
+
+// Text2SQLStatsSince aggregates Text2SQL logs since a time.
+func (s *SQLStore) Text2SQLStatsSince(ctx context.Context, since time.Time) (Text2SQLStats, error) {
+	var st Text2SQLStats
+	err := s.db.QueryRowContext(ctx, s.bind(`SELECT COUNT(*),
+		COALESCE(SUM(CASE WHEN valid = 1 THEN 1 ELSE 0 END),0),
+		COALESCE(SUM(CASE WHEN executed = 1 THEN 1 ELSE 0 END),0),
+		COALESCE(SUM(CASE WHEN COALESCE(error,'') <> '' THEN 1 ELSE 0 END),0),
+		COALESCE(SUM(cost_krw),0)
+		FROM text2sql_query_logs WHERE created_at >= ?`), since.UTC().Format(time.RFC3339Nano)).
+		Scan(&st.Total, &st.Valid, &st.Executed, &st.Errors, &st.CostKRW)
+	if err != nil {
+		return st, err
+	}
+	if st.Total > 0 {
+		st.ValidRate = float64(st.Valid) / float64(st.Total)
+	}
+	return st, nil
+}
