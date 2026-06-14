@@ -4802,6 +4802,25 @@ const adminHTML = `<!doctype html>
       const logTable = (d.logs || []).length ?
         '<table><thead><tr><th>시각</th><th>모델</th><th>모드</th><th>질문</th><th>검증</th><th>생성 SQL</th><th>비용</th></tr></thead><tbody>' + logRows + '</tbody></table>'
         : '<div class="empty">Text2SQL 질의 기록 없음. 사용자가 <code>vibe/text2sql-preview</code> 모델로 <code>/v1/chat/completions</code> 를 호출하면 여기에 집계됩니다.</div>';
+      const dbProfiles = d.db_profiles || [];
+      const dbpForm =
+        '<form class="inline-form" id="t2s-profile-form" style="grid-template-columns: 170px 90px 130px 130px 110px 70px; align-items:start;">' +
+          '<input id="tp-model" placeholder="vibe/text2sql-finance" required>' +
+          '<select id="tp-mode"><option value="preview">preview</option><option value="execute">execute</option></select>' +
+          '<input id="tp-upstream" placeholder="업스트림 모델">' +
+          '<input id="tp-summary" placeholder="요약 모델(선택)">' +
+          '<input id="tp-schema" placeholder="스키마명(선택)">' +
+          '<button type="submit">저장</button>' +
+        '</form>';
+      const dbpRows = dbProfiles.map(p =>
+        '<tr><td><code>' + escapeHTML(p.virtual_model) + '</code>' + (p.enabled ? '' : ' <span class="status error">중지</span>') + '</td>' +
+        '<td>' + escapeHTML(p.mode) + '</td><td>' + escapeHTML(p.upstream_model || '') + '</td>' +
+        '<td>' + escapeHTML(p.summary_model || '') + '</td><td>' + escapeHTML(p.schema_name || '') + '</td>' +
+        '<td><button class="danger" type="button" onclick="deleteT2SProfile(\'' + escapeAttr(p.virtual_model) + '\')">삭제</button></td></tr>'
+      ).join('');
+      const dbpTable = dbProfiles.length ?
+        '<table><thead><tr><th>가상 모델</th><th>모드</th><th>업스트림</th><th>요약</th><th>스키마</th><th>동작</th></tr></thead><tbody>' + dbpRows + '</tbody></table>'
+        : '<div class="empty">런타임 프로필 없음. 등록하면 env 기본값을 오버라이드하거나 새 가상 모델(예: <code>vibe/text2sql-finance</code>)을 추가할 수 있습니다.</div>';
       const mm = d.model_metrics || [];
       const mmTable = mm.length ?
         '<table><thead><tr><th>업스트림 모델</th><th data-sort="num">질의</th><th data-sort="num">유효율</th><th data-sort="num">실행</th><th data-sort="num">오류</th><th data-sort="num">평균비용</th><th data-sort="num">평균지연</th></tr></thead><tbody>' +
@@ -4837,19 +4856,40 @@ const adminHTML = `<!doctype html>
       document.getElementById('view').innerHTML =
         '<section><h2>Text2SQL</h2><div style="padding:0 14px 8px" class="muted">자연어 질문을 읽기 전용 SQL로 변환합니다. 사용자는 <code>vibe/text2sql-*</code> 가상 모델을 호출하고, 게이트웨이가 내부적으로 실제 업스트림 모델을 선택해 SQL을 생성·검증·(선택)실행합니다.</div></section>' +
         section('요약 (최근 7일)', kpis) +
-        section('가상 모델 프로필', profileTable) +
+        section('가상 모델 프로필 (기본)', profileTable) +
+        section('런타임 프로필 (DB 오버라이드 · 신규 가상모델)', dbpForm + dbpTable) +
         section('모델별 SQL 품질 (최근 7일)', mmTable) +
         section('스키마 카탈로그 · 테이블 권한', schemaForm + schemaTable) +
         section('Golden Query (few-shot · 회귀)', goldenRun + goldenForm + goldenTable) +
         section('최근 Text2SQL 질의', logTable);
       const sf = document.getElementById('t2s-schema-form');
       if (sf) sf.addEventListener('submit', addT2SSchema);
+      const pf = document.getElementById('t2s-profile-form');
+      if (pf) pf.addEventListener('submit', addT2SProfile);
       const gf = document.getElementById('t2s-golden-form');
       if (gf) gf.addEventListener('submit', addT2SGolden);
       const gr = document.getElementById('t2s-golden-run');
       if (gr) gr.addEventListener('click', runT2SGolden);
       makeSortable('#view', 'text2sql');
     }
+    async function addT2SProfile(e) {
+      e.preventDefault();
+      const body = {
+        virtual_model: document.getElementById('tp-model').value.trim(),
+        mode: document.getElementById('tp-mode').value,
+        upstream_model: document.getElementById('tp-upstream').value.trim(),
+        summary_model: document.getElementById('tp-summary').value.trim(),
+        schema_name: document.getElementById('tp-schema').value.trim(),
+      };
+      if (!body.virtual_model) { alert('가상 모델명을 입력하세요'); return; }
+      await api('/admin/text2sql/profiles', { method: 'POST', body: JSON.stringify(body) });
+      route();
+    }
+    window.deleteT2SProfile = async (vm) => {
+      if (!confirm(vm + ' 프로필을 삭제하시겠습니까?')) return;
+      await api('/admin/text2sql/profiles?virtual_model=' + encodeURIComponent(vm), { method: 'DELETE' });
+      route();
+    };
     async function addT2SGolden(e) {
       e.preventDefault();
       const body = {

@@ -65,10 +65,12 @@ func (s *Server) handleText2SQLAdmin(w http.ResponseWriter, r *http.Request) {
 	schemas, _ := s.db.ListText2SQLSchemas(r.Context())
 	modelMetrics, _ := s.db.Text2SQLModelMetricsSince(r.Context(), since)
 	goldens, _ := s.db.ListText2SQLGoldenQueries(r.Context(), false)
+	dbProfiles, _ := s.db.ListText2SQLProfiles(r.Context())
 	writeJSON(w, http.StatusOK, map[string]any{
 		"schemas":       schemas,
 		"model_metrics": modelMetrics,
 		"golden":        goldens,
+		"db_profiles":   dbProfiles,
 		"enabled":       s.cfg.Text2SQL.Enabled,
 		"profiles": []map[string]string{
 			{"model": "vibe/text2sql-preview", "mode": "preview", "upstream": s.cfg.Text2SQL.PreviewModel},
@@ -80,6 +82,74 @@ func (s *Server) handleText2SQLAdmin(w http.ResponseWriter, r *http.Request) {
 		"stats": stats,
 		"logs":  logs,
 	})
+}
+
+// handleText2SQLProfiles manages runtime virtual-model profiles (DB overrides of the
+// env defaults; can also define new virtual models).
+// GET /admin/text2sql/profiles · POST {virtual_model,mode,upstream_model,summary_model,schema_name,enabled} · DELETE ?virtual_model=
+func (s *Server) handleText2SQLProfiles(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		list, err := s.db.ListText2SQLProfiles(r.Context())
+		if err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "profiles_failed")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"profiles": list})
+	case http.MethodPost:
+		var p struct {
+			VirtualModel  string `json:"virtual_model"`
+			Mode          string `json:"mode"`
+			UpstreamModel string `json:"upstream_model"`
+			SummaryModel  string `json:"summary_model"`
+			SchemaName    string `json:"schema_name"`
+			Enabled       *bool  `json:"enabled"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+			writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "invalid_body")
+			return
+		}
+		vm := strings.ToLower(strings.TrimSpace(p.VirtualModel))
+		if !text2sql.IsModel(vm) {
+			writeOpenAIError(w, http.StatusBadRequest, "virtual_model must start with vibe/text2sql", "invalid_request_error", "invalid_virtual_model")
+			return
+		}
+		mode := strings.ToLower(strings.TrimSpace(p.Mode))
+		if mode != "" && mode != "preview" && mode != "execute" {
+			writeOpenAIError(w, http.StatusBadRequest, "mode must be preview or execute", "invalid_request_error", "invalid_mode")
+			return
+		}
+		prof := store.Text2SQLProfile{
+			VirtualModel: vm, Mode: mode, UpstreamModel: strings.TrimSpace(p.UpstreamModel),
+			SummaryModel: strings.TrimSpace(p.SummaryModel), SchemaName: strings.TrimSpace(p.SchemaName), Enabled: true,
+		}
+		if p.Enabled != nil {
+			prof.Enabled = *p.Enabled
+		}
+		if err := s.db.UpsertText2SQLProfile(r.Context(), prof); err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "profile_save_failed")
+			return
+		}
+		s.auditAdmin(r, "text2sql.profile.upsert", "", auditJSON(prof))
+		writeJSON(w, http.StatusCreated, map[string]any{"profile": prof})
+	case http.MethodDelete:
+		vm := strings.TrimSpace(r.URL.Query().Get("virtual_model"))
+		if vm == "" {
+			writeOpenAIError(w, http.StatusBadRequest, "virtual_model query param is required", "invalid_request_error", "missing_virtual_model")
+			return
+		}
+		if err := s.db.DeleteText2SQLProfile(r.Context(), vm); err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "profile_delete_failed")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"virtual_model": vm, "status": "deleted"})
+	default:
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+	}
 }
 
 // handleText2SQLGolden manages verified Text2SQL golden queries (few-shot + regression).

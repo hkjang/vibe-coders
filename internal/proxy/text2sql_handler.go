@@ -27,6 +27,23 @@ func (s *Server) handleText2SQL(w http.ResponseWriter, r *http.Request, meta sto
 	}
 	profile := text2sql.ResolveProfile(meta.Request.Model, models)
 
+	// DB profile override: lets operators define/override virtual-model mappings (and
+	// add new virtual models) at runtime without a redeploy.
+	profileSchemaName := ""
+	if dbp, found, _ := s.db.GetText2SQLProfile(r.Context(), meta.Request.Model); found && dbp.Enabled {
+		if dbp.Mode != "" {
+			profile.Mode = text2sql.Mode(dbp.Mode)
+		}
+		if dbp.UpstreamModel != "" {
+			profile.UpstreamModel = dbp.UpstreamModel
+			profile.Auto = false
+		}
+		if dbp.SummaryModel != "" {
+			profile.SummaryModel = dbp.SummaryModel
+		}
+		profileSchemaName = dbp.SchemaName
+	}
+
 	// Auto profile: pick the upstream model from the (already computed) complexity.
 	upstreamModel := profile.UpstreamModel
 	if profile.Auto || upstreamModel == "" {
@@ -46,7 +63,8 @@ func (s *Server) handleText2SQL(w http.ResponseWriter, r *http.Request, meta sto
 	dialect := cfg.Dialect
 	schema := firstNonEmpty(strings.TrimSpace(r.Header.Get("X-Text2SQL-Schema")), cfg.Schema)
 	var allowedTables []string
-	if sc, found, _ := s.db.ResolveText2SQLSchema(r.Context(), strings.TrimSpace(r.Header.Get("X-Text2SQL-Schema-Name")), team); found {
+	schemaName := firstNonEmpty(strings.TrimSpace(r.Header.Get("X-Text2SQL-Schema-Name")), profileSchemaName)
+	if sc, found, _ := s.db.ResolveText2SQLSchema(r.Context(), schemaName, team); found {
 		schema = sc.SchemaText
 		allowedTables = sc.AllowedTables
 		if sc.Dialect != "" {

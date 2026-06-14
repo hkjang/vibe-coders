@@ -527,6 +527,15 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 				last_used_at TEXT,
 				created_at TEXT NOT NULL
 			)`,
+		`CREATE TABLE IF NOT EXISTS text2sql_profiles (
+				virtual_model TEXT PRIMARY KEY,
+				mode TEXT NOT NULL DEFAULT 'preview',
+				upstream_model TEXT,
+				summary_model TEXT,
+				schema_name TEXT,
+				enabled INTEGER NOT NULL DEFAULT 1,
+				updated_at TEXT NOT NULL
+			)`,
 		`CREATE TABLE IF NOT EXISTS text2sql_golden_queries (
 				id TEXT PRIMARY KEY,
 				name TEXT NOT NULL,
