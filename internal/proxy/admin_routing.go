@@ -31,11 +31,16 @@ func (s *Server) handleRoutingPreview(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "invalid_body")
 		return
 	}
-	plan := s.planIntelligentRouting(r.Context(), body, "/v1/chat/completions", false, false, nil)
+	authCtx, policyKeyID, ok := s.routingPreviewAuthContext(w, r, probe)
+	if !ok {
+		return
+	}
+	plan := s.planIntelligentRouting(r.Context(), body, "/v1/chat/completions", false, false, authCtx)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"requested_model":   plan.RequestedModel,
 		"selected_model":    plan.SelectedModel,
 		"selected_provider": plan.SelectedProvider,
+		"policy_api_key_id": policyKeyID,
 		"complexity":        plan.Complexity,
 		"risk":              plan.Risk,
 		"health_score":      plan.HealthScore,
@@ -43,6 +48,29 @@ func (s *Server) handleRoutingPreview(w http.ResponseWriter, r *http.Request) {
 		"decision_reason":   plan.DecisionReason,
 		"would_rewrite":     plan.RequestedModel != "" && plan.SelectedModel != "" && plan.RequestedModel != plan.SelectedModel,
 	})
+}
+
+func (s *Server) routingPreviewAuthContext(w http.ResponseWriter, r *http.Request, probe map[string]any) (*store.AuthContext, string, bool) {
+	apiKeyID := strings.TrimSpace(toString(probe["api_key_id"]))
+	if apiKeyID == "" {
+		return nil, "", true
+	}
+	key, found, err := s.db.GetAPIKey(r.Context(), apiKeyID)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "api_key_lookup_failed")
+		return nil, "", false
+	}
+	if !found {
+		writeOpenAIError(w, http.StatusNotFound, "api key not found", "invalid_request_error", "api_key_not_found")
+		return nil, "", false
+	}
+	if claims, ok := s.currentAccessClaims(r); ok && claims.Role == "team_admin" && key.Team != claims.TeamID {
+		writeOpenAIError(w, http.StatusForbidden, "team_admin can only preview own team api keys", "permission_error", "team_scope_denied")
+		return nil, "", false
+	}
+	authCtx := authContextFromAPIKey(key)
+	s.enrichAuthContextTeam(r.Context(), &authCtx)
+	return &authCtx, key.ID, true
 }
 
 func (s *Server) handleRoutingDecisions(w http.ResponseWriter, r *http.Request) {

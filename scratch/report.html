@@ -315,7 +315,7 @@
                     <div class="diag-node" style="padding: 10px;">IDE / Chat Clients<br><span style="font-size: 10px; font-weight: normal; color: #64748b;">(Cursor, Roo Code, etc.)</span></div>
                     <div class="diag-arrow">&rarr;</div>
                     <div class="diag-node primary" style="background: #f0f6ff; border-color: #2563eb; color: #1d4ed8; padding: 12px 10px;">
-                        <strong>Proxy Gateway Core (v0.1.25)</strong>
+                        <strong>Proxy Gateway Core (v0.1.26)</strong>
                         <div style="font-size: 9px; font-weight: normal; color: #475569; margin-top: 6px; text-align: left; line-height: 1.3;">
                             • 3-Tier Session Inference Engine<br>
                             • Intelligent Cost/Latency Router<br>
@@ -336,7 +336,7 @@
             </div>
             <div style="text-align: right;">
                 <strong>문서 번호:</strong> SEC-APG-2026-V22<br>
-                <strong>최종 승인 버전:</strong> v0.1.25 (Production Stable)
+                <strong>최종 승인 버전:</strong> v0.1.26 (Production Stable)
             </div>
         </div>
     </div>
@@ -418,7 +418,7 @@
             <div class="card" style="background: #faf5ff; border-color: #d8b4fe;">
                 <h3 style="color: #7c3aed; border-left-color: #a855f7;">① 3계층 세션 추론 엔진</h3>
                 <p style="font-size: 12.5px; color: #475569; line-height: 1.5; margin-bottom: 0;">
-                    클라이언트가 명시적 세션을 제공하지 않더라도 API 트래픽 내의 지연 간격 및 사용자 아이덴티티를 비교하여 <strong>Work Session</strong>(최상위 작업 브랜치 단위) - <strong>Task Session</strong>(유사 태스크 단위) - <strong>Request</strong>(개별 요청)의 다차원 세션으로 추론 및 연결합니다.
+                    클라이언트가 명시적 세션을 제공하지 않더라도 API 트래픽 내의 지연 간격 및 사용자 아이덴티티를 비교하여 <strong>Work Session</strong>(최상위 작업 브랜치 단위) - <strong>Task Session</strong>(유사 태스크 단위) - <strong>Request</strong>(개별 요청)의 다차원 세션으로 추론 및 연결합니다. 특히 서버 재기동 시에도 세션이 유실되지 않도록 데이터베이스(inferred_sessions)와 실시간 연동해 영속 추론 상태를 자동 복구하며 주기적 GC 청소를 지원합니다.
                 </p>
             </div>
             <div class="card" style="background: #f0fdf4; border-color: #bbf7d0;">
@@ -914,7 +914,7 @@ psql -h [VM_IP_OR_DNS] -p 5432 -U gateway_user -d gateway_db < backup_gateway_YY
 
     <!-- Section 7 -->
     <div class="section">
-        <h2 class="section-title">7. 부록: 전체 릴리즈 히스토리 (Full Release History v0.1.0 ~ v0.1.25)</h2>
+        <h2 class="section-title">7. 부록: 전체 릴리즈 히스토리 (Full Release History v0.1.0 ~ v0.1.26)</h2>
         <p>
             AI Proxy Gateway는 지속적으로 진화하며 고가용성, 인프라 보안, 에이전트 엔지니어링 분석 및 성능 평가 요소를 추가해 왔습니다. v0.1.0 최초 배포부터 가장 최신 버전까지의 전체 릴리즈 히스토리는 다음과 같습니다.
         </p>
@@ -1002,6 +1002,11 @@ psql -h [VM_IP_OR_DNS] -p 5432 -U gateway_user -d gateway_db < backup_gateway_YY
                     <td><strong>v0.1.25</strong></td>
                     <td>사용자 팀 매핑 및 API Key 영구 폐기 관리</td>
                     <td>관리자 목록 내 소속 팀 정보 연동 및 패치를 통한 소속 팀 수정·탈퇴 지원, API Key의 개별 세부 권한을 어드민 UI에서 팝업으로 조절 가능한 스코프 편집기 연동, super_admin 한정 키 영구 삭제(?hard=1) 정책 도입.</td>
+                </tr>
+                <tr>
+                    <td><strong>v0.1.26</strong></td>
+                    <td>영속적 세션 추론 및 위임 거버넌스</td>
+                    <td>재기동에 안전한 세션 영속 추론 테이블 inferred_sessions 추가 및 자동 GC 청소 기능 탑재, team_admin 소속팀 API Key 한정 필터링 조회, 권한 상승(Privilege Escalation) 방지를 위한 계층형 롤/스코프 위임 거버넌스 구현.</td>
                 </tr>
             </tbody>
         </table>

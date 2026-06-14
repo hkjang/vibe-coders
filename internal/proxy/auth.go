@@ -231,6 +231,95 @@ func scopesForRole(role string) []string {
 	return append([]string{}, roleScopes["viewer"]...)
 }
 
+func validRole(role string) bool {
+	_, ok := roleScopes[role]
+	return ok
+}
+
+func roleRank(role string) int {
+	switch role {
+	case "super_admin":
+		return 5
+	case "admin":
+		return 4
+	case "team_admin":
+		return 3
+	case "developer", "service_account":
+		return 2
+	case "viewer":
+		return 1
+	default:
+		return 0
+	}
+}
+
+func (s *Server) canAssignRole(r *http.Request, role string) bool {
+	role = strings.TrimSpace(role)
+	if role == "" || !s.cfg.Auth.Enabled {
+		return true
+	}
+	claims, ok := s.currentAccessClaims(r)
+	if !ok {
+		return false
+	}
+	if claims.Role == "super_admin" {
+		return true
+	}
+	return roleRank(role) > 0 && roleRank(role) < roleRank(claims.Role)
+}
+
+func (s *Server) canModifySubjectRole(r *http.Request, currentRole string) bool {
+	if !s.cfg.Auth.Enabled {
+		return true
+	}
+	claims, ok := s.currentAccessClaims(r)
+	if !ok {
+		return false
+	}
+	if claims.Role == "super_admin" {
+		return true
+	}
+	return roleRank(currentRole) > 0 && roleRank(currentRole) < roleRank(claims.Role)
+}
+
+func normalizeScopes(scopes []string) ([]string, bool) {
+	out := []string{}
+	seen := map[string]bool{}
+	for _, raw := range scopes {
+		scope := strings.TrimSpace(raw)
+		if scope == "" {
+			continue
+		}
+		if !hasScope(allScopes, scope) {
+			return nil, false
+		}
+		if !seen[scope] {
+			seen[scope] = true
+			out = append(out, scope)
+		}
+	}
+	return out, true
+}
+
+func (s *Server) scopesAssignable(r *http.Request, scopes []string) bool {
+	if !s.cfg.Auth.Enabled {
+		return true
+	}
+	claims, ok := s.currentAccessClaims(r)
+	if !ok {
+		return false
+	}
+	if claims.Role == "super_admin" {
+		return true
+	}
+	for _, scope := range scopes {
+		if !hasScope(claims.Scopes, scope) {
+			return false
+		}
+	}
+	return true
+}
+
 func defaultAPIKeyScopes(role string, serviceAccount bool) []string {
 	if strings.TrimSpace(role) == "" {
 		if serviceAccount {

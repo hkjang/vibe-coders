@@ -3,7 +3,7 @@
 `http://<host>:8080/admin` 에 접속하는 운영 관리자를 위한 사용 설명서입니다. 한국어 UI 와 다중 탭으로 구성되어 있고, 모든 동작은 동일한 이름의 REST API 로도 자동화할 수 있습니다.
 
 > [!NOTE]
-> AI Proxy Gateway의 안전성 통제(긴급 정지, 비용 가드, 정책 엔진, 민감 정보 방화벽 등)에 관한 더욱 상세한 레벨의 스펙은 [안전 및 보안 거버넌스 운영 가이드 (SAFETY_GUIDE.md)](file:///c:/Users/USER/projects/vibe-coders/docs/SAFETY_GUIDE.md)를 참고해 주십시오.
+> AI Proxy Gateway의 안전성 통제(긴급 정지, 비용 가드, 정책 엔진, 민감 정보 방화벽 등)에 관한 더욱 상세한 레벨의 스펙은 [안전 및 보안 거버넌스 운영 가이드](./SAFETY_GUIDE.md)를 참고해 주십시오.
 
 ---
 
@@ -73,16 +73,16 @@
 
 | 동작 | 방법 | 비고 |
 | --- | --- | --- |
-| 계정 생성 | 폼: 이메일·초기 비밀번호·이름·역할·팀 | `POST /admin/users`. team_admin 은 자기 팀 계정만 생성 가능 |
-| 역할 변경 | 표의 역할 드롭다운 선택 | `PATCH /admin/users/{usr_id}` `{"role":"…"}`. `role_changed` 감사 기록. team_admin 불가 |
+| 계정 생성 | 폼: 이메일·초기 비밀번호·이름·역할·팀 | `POST /admin/users`. team_admin 은 자기 팀 계정만 생성 가능하며 자기 역할보다 높은 역할은 지정 불가 |
+| 역할 변경 | 표의 역할 드롭다운 선택 | `PATCH /admin/users/{usr_id}` `{"role":"…"}`. `role_changed` 감사 기록. 자기 역할 이상으로 승격하거나 자기보다 높은 역할 계정 수정은 차단. team_admin 불가 |
 | **팀 변경** | 표의 팀 드롭다운 선택 | `PATCH … {"team_id":"…"}` (빈 값 = 팀 해제). 존재하지 않는 팀은 400. 멤버십이 교체됩니다 |
 | 비활성화/활성화 | 표의 버튼 | `PATCH … {"status":"disabled"}`. **비활성화 즉시 그 계정의 모든 세션·refresh token 폐기** → 발급된 access token도 바로 거부됩니다 |
-| 팀 생성 | 팀 폼 | `POST /admin/teams` |
+| 팀 생성/조회 | 팀 폼 또는 팀 목록 | `POST /admin/teams` / `GET /admin/teams`. team_admin 은 팀 생성 불가, 자기 팀만 조회 가능 |
 | 인증 이벤트 확인 | 같은 섹션 하단 표 | 실패 계열(login_failed/scope_denied/…)은 빨간 배지 |
 
 ### API 키 스코프 편집 · 영구 삭제
 
-- **스코프 편집**: 설정 탭 프록시 API 키 표의 "스코프" 버튼 → 12개 스코프 체크박스 모달 → 저장(`PATCH /admin/api-keys/{id}` `{"scopes":[…]}`). **전부 해제하면 "전체(미지정)"** 로 모든 API 허용. 스코프 밖 호출은 403 + `scope_denied` 감사 기록.
+- **스코프 편집**: 설정 탭 프록시 API 키 표의 "스코프" 버튼 → 12개 스코프 체크박스 모달 → 저장(`PATCH /admin/api-keys/{id}` `{"scopes":[…]}`). 스코프 밖 호출은 403 + `scope_denied` 감사 기록. 로그인 모드에서 team_admin 은 자기 팀 키만 볼 수 있고, 자기 역할에 없는 스코프나 높은 역할은 API 키에 부여할 수 없습니다.
 - **영구 삭제**: 같은 표의 "삭제" 버튼(`DELETE /admin/api-keys/{id}?hard=1`). 비활성화(soft)와 달리 키 행을 제거하며 되돌릴 수 없습니다. **`AUTH_ENABLED=true` 에서는 super_admin 전용**(그 외 역할 403), 레거시 모드에서는 전권 관리자 토큰으로 가능. 과거 사용 이력 통계는 보존됩니다(이후 external 표시). `api_key.delete` 관리자 감사 + `api_key_revoked(hard_delete)` 인증 이벤트 기록.
 
 `AUTH_ENABLED=false` 상태에서도 섹션은 보이지만(사전 준비용), 로그인 모드가 꺼져 있다는 경고 배너가 표시됩니다.
@@ -150,7 +150,7 @@ API: `GET /admin/requests/{id}/explain` → `{routing, fallback, cache, safety, 
 
 Intelligent Routing Engine API:
 
-- `POST /admin/routing/preview` — 실제 upstream 호출 없이 `auto` / `vibe/auto` / `vibe-coders/auto` 라우팅 결과 미리보기
+- `POST /admin/routing/preview` — 실제 upstream 호출 없이 `auto` / `vibe/auto` / `vibe-coders/auto` 라우팅 결과 미리보기. body에 `api_key_id` 를 넣으면 해당 API 키의 allowed/denied model/provider 정책까지 반영합니다(team_admin은 자기 팀 키만 가능)
 - `GET /admin/routing/decisions` / `GET /admin/routing/decisions/{id}` — 요청별 selected model/provider, complexity/risk/health, fallback path, decision reason 조회
 - `GET /admin/routing/health` — 최근 latency/p95/timeout/429/5xx/fallback rate 기반 provider health score 조회
 
@@ -169,7 +169,7 @@ Waterfall·세션 비용 타임라인·LLM Session Explorer·에이전트 루프
 1. **명시적**: 클라이언트가 보낸 값(헤더 `X-Session-ID`/`X-Vibe-Session-ID`/`X-Conversation-ID` 또는 바디 `session_id`/`chat_id`/`conversation_id`/`thread_id`/`metadata.*`). Langflow·OpenWebUI 등이 해당.
 2. **추론**: 명시적 세션이 없으면(Claude Code·Cursor·Roo·Qwen 등 대부분의 코딩 툴) `api_key + IP + User-Agent`(+ 옵션 `X-Vibe-Repo`/`X-Vibe-Branch`) 신원과 **슬라이딩 비활성 윈도우**로 자동 생성. ID는 `sess_<12hex>`. 같은 클라이언트의 연속 호출은 한 세션이 되고, `SESSION_IDLE_TIMEOUT`(기본 30분) 이상 비활성이면 새 세션이 시작됩니다.
 
-`SESSION_INFERENCE_ENABLED=false` 로 두면 추론을 끄고 요청별(`trace:<id>`)로 분리됩니다(세션 묶음 없음). 추론은 인메모리이므로 게이트웨이 재시작 시 진행 중이던 추론 세션 경계가 새로 시작될 수 있습니다(과거 로그의 session_id 는 그대로 보존). 세션 헤더가 전혀 없던 레거시 요청은 `no-session` 으로 묶입니다.
+`SESSION_INFERENCE_ENABLED=false` 로 두면 추론을 끄고 요청별(`trace:<id>`)로 분리됩니다(세션 묶음 없음). 추론 세션은 DB의 `inferred_sessions` 테이블에도 저장되므로 게이트웨이 재시작 후에도 idle window 안에 들어온 같은 클라이언트는 기존 `sess_<12hex>` 를 복구합니다. `SESSION_IDLE_TIMEOUT` 을 지난 추론 세션은 새 세션으로 분리되고, 오래된 복구 상태는 자동 정리됩니다. 세션 헤더가 전혀 없던 레거시 요청은 `no-session` 으로 묶입니다.
 
 ### 보는 법
 

@@ -182,6 +182,10 @@ func (s *Server) evaluateGovernance(r *http.Request, g governanceContext) govern
 				reason := "rule " + ruleName(rule) + " did not allow model " + model
 				reasons = append(reasons, reason)
 				decision.PolicyEvents = append(decision.PolicyEvents, policyDecisionEvent(g, rule, "deny_model", reason))
+			} else if len(allowed) > 0 {
+				reason := "rule " + ruleName(rule) + " allowed model " + model
+				reasons = append(reasons, reason)
+				decision.PolicyEvents = append(decision.PolicyEvents, policyDecisionEvent(g, rule, "allow_model", reason))
 			}
 		}
 		if provider := strings.TrimSpace(g.Provider); provider != "" {
@@ -196,6 +200,10 @@ func (s *Server) evaluateGovernance(r *http.Request, g governanceContext) govern
 				reason := "rule " + ruleName(rule) + " did not allow provider " + provider
 				reasons = append(reasons, reason)
 				decision.PolicyEvents = append(decision.PolicyEvents, policyDecisionEvent(g, rule, "deny_provider", reason))
+			} else if len(allowed) > 0 {
+				reason := "rule " + ruleName(rule) + " allowed provider " + provider
+				reasons = append(reasons, reason)
+				decision.PolicyEvents = append(decision.PolicyEvents, policyDecisionEvent(g, rule, "allow_provider", reason))
 			}
 		}
 		if boolAction(actions["block"]) {
@@ -210,6 +218,14 @@ func (s *Server) evaluateGovernance(r *http.Request, g governanceContext) govern
 			reasons = append(reasons, reason)
 			decision.PolicyEvents = append(decision.PolicyEvents, policyDecisionEvent(g, rule, "require_approval", reason))
 		}
+		if boolAction(actions["allow"]) {
+			reason := "rule " + ruleName(rule) + " requested allow"
+			reasons = append(reasons, reason)
+			decision.PolicyEvents = append(decision.PolicyEvents, policyDecisionEvent(g, rule, "allow", reason))
+		}
+	}
+	if decision.Blocked {
+		decision.RequireApproval = false
 	}
 	if len(reasons) > 0 {
 		decision.Reason = strings.Join(reasons, "; ")

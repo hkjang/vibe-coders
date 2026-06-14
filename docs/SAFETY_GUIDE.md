@@ -68,7 +68,9 @@ curl -X POST http://localhost:8080/admin/kill-switch \
 사내 규정 준수 및 보안 등급 관리를 위한 **동적 룰 평가 엔진(Governance Rule Engine)**입니다. 
 
 ### 3.1 룰 평가 우선순위
-- 정책 리스트의 **우선순위(Priority, 1~999)** 값을 기준으로 정렬되어 순차적으로 평가됩니다. **우선순위 숫자가 낮을수록** 먼저 검사되므로, 강력한 차단(Block) 정책을 낮은 숫자로 설정하여 선행 평가하는 것이 안전합니다.
+- 정책 리스트의 **우선순위(Priority, 1~999)** 값을 기준으로 정렬되어 순차적으로 평가됩니다. **우선순위 숫자가 낮을수록** 먼저 검사됩니다.
+- 여러 정책이 동시에 매칭되면 최종 동작은 `BLOCK > APPROVAL > ALLOW > DEFAULT` 순서로 결정됩니다. 예를 들어 한 rule이 `require_approval` 을 만들고 다른 rule이 `block` 을 만들면 HTTP 403 차단이 승인을 이깁니다.
+- 매칭된 판단은 `policy_decision_events` 에 남습니다. 차단/승인뿐 아니라 허용 판단(`allow`, `allow_model`, `allow_provider`)도 감사 추적을 위해 기록됩니다.
 
 ### 3.2 9대 정책 조건 (Conditions)
 정책 규칙 생성 시 매핑할 수 있는 조건 항목 명세입니다:
@@ -77,7 +79,7 @@ curl -X POST http://localhost:8080/admin/kill-switch \
 | :--- | :--- | :--- |
 | `contains_secret` | `true` / `false` | 민감 정보(Secret) 발견 여부 |
 | `risk_score` | `>80`, `>=50` | AI Risk Analyzer가 분석한 위험도 점수 |
-| `complexity_score` | `>150` | 프롬프트 및 코드 밀도 기반 복잡도 점수 |
+| `complexity_score` | `>85`, `>=60` | 프롬프트 및 코드 밀도 기반 0~100 복잡도 점수 |
 | `cost_krw` | `>1000` | 요청 1건당 예상 환산 비용(원) |
 | `team` | `platform` | 호출 사용자의 소속 팀 ID 또는 팀명 매핑 |
 | `role` | `developer`, `viewer` | 사용자의 권한 등급 |
@@ -95,6 +97,27 @@ curl -X POST http://localhost:8080/admin/kill-switch \
 - **`deny_models`**: 특정 모델 리스트에 대한 호출 권한을 박탈 (액션값에 모델명 명시).
 - **`allow_models`**: 허용된 모델 리스트 외의 모든 모델 호출 차단.
 - **`deny_providers`** / **`allow_providers`**: 특정 업스트림 공급자 대상 라우팅 통제.
+- **`allow`**: 명시적 허용 판단을 감사 로그에 남김. 단, 같은 요청에서 `block` 이 매칭되면 차단이 우선합니다.
+
+### 3.4 정책 예제
+
+```yaml
+- name: block-secret-leak
+  contains_secret: true
+  block: true
+
+- name: approve-high-risk
+  risk_score: ">80"
+  require_approval: true
+
+- name: security-team-model-allowlist
+  team: security
+  allow_models:
+    - gpt-5
+    - claude-sonnet
+```
+
+동시에 매칭되는 경우 `block-secret-leak` 가 최종 동작을 결정합니다. `approve-high-risk` 와 `security-team-model-allowlist` 의 판단도 감사 이벤트에 남아 사후 설명과 증빙에 사용할 수 있습니다.
 
 ---
 
@@ -125,7 +148,7 @@ sequenceDiagram
     autonumber
     Client->>Gateway: API 요청 (예상 비용/위험도 높음)
     Note over Gateway: AI 정책 엔진 평가<br/>(require_approval 작동)
-    Gateway-->>Client: HTTP 403 Forbidden + Approval ID 반환
+    Gateway-->>Client: HTTP 423 Locked + Approval ID 반환
     Note over Gateway: 승인 대기열(Pending Queue)에 등록
     Note over Admin UI: 관리자가 승인 큐 확인 후 [승인] 결정
     Client->>Gateway: X-Governance-Approval-ID 헤더에 승인 ID 추가하여 재요청

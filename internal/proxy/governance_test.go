@@ -509,6 +509,202 @@ func TestGovernancePolicyMatchesTeamName(t *testing.T) {
 	}
 }
 
+func TestGovernancePolicyPrecedenceBlockBeatsApprovalAndAuditsAllow(t *testing.T) {
+	var upstreamCalls atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamCalls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`))
+	}))
+	defer upstream.Close()
+
+	db := openTestStore(t)
+	defer db.Close()
+	logger := store.NewAsyncLogger(db, 32, filepath.Join(t.TempDir(), "fallback.ndjson"))
+	logger.Start()
+	defer logger.Stop(context.Background())
+	server, err := NewServer(testConfig(upstream.URL, "secret"), db, logger, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxy := httptest.NewServer(server.Routes())
+	defer proxy.Close()
+
+	resp := postJSON(t, proxy.URL+"/admin/policies", "", map[string]any{
+		"name": "conflicting rules",
+		"rules": []any{
+			map[string]any{"name": "allow gpt", "model": "gpt-4.1", "allow_models": []string{"gpt-4.1"}, "allow": true},
+			map[string]any{"name": "approval gpt", "model": "gpt-4.1", "require_approval": true},
+			map[string]any{"name": "block gpt", "model": "gpt-4.1", "block": true},
+		},
+	})
+	if resp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("policy create status %d: %s", resp.StatusCode, body)
+	}
+	resp.Body.Close()
+
+	resp = postJSON(t, proxy.URL+"/v1/chat/completions", "", map[string]any{
+		"model": "gpt-4.1",
+		"messages": []any{
+			map[string]any{"role": "user", "content": "hello"},
+		},
+	})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("BLOCK must win over APPROVAL, got %d: %s", resp.StatusCode, body)
+	}
+	if resp.Header.Get("X-Governance-Approval-ID") != "" {
+		t.Fatalf("blocked request must not allocate approval id, got %q", resp.Header.Get("X-Governance-Approval-ID"))
+	}
+	if upstreamCalls.Load() != 0 {
+		t.Fatal("upstream should not be called on block precedence")
+	}
+
+	events, err := db.ListPolicyDecisionEvents(context.Background(), 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{}
+	for _, e := range events {
+		seen[e.Decision] = true
+	}
+	for _, want := range []string{"allow_model", "allow", "require_approval", "block"} {
+		if !seen[want] {
+			t.Fatalf("expected %s policy event, got %+v", want, events)
+		}
+	}
+}
+
+func TestGovernanceConditionHelpersCoverNumericAndSecretLists(t *testing.T) {
+	g := governanceContext{
+		TeamID:          "team_security",
+		TeamName:        "security",
+		Role:            "developer",
+		Model:           "gpt-5",
+		Provider:        "openai",
+		Endpoint:        "/v1/chat/completions",
+		RiskScore:       82,
+		ComplexityScore: 64,
+		CostKRW:         123.45,
+		ContainsSecret:  true,
+		SecretTypes:     []string{"password", "aws_secret"},
+	}
+	if !governanceRuleMatches(map[string]any{
+		"team":             []any{"platform", "security"},
+		"role":             "developer",
+		"model":            "gpt-*",
+		"provider":         "openai",
+		"endpoint":         "/v1/*",
+		"risk_score":       ">80",
+		"complexity_score": json.Number("64"),
+		"cost_krw":         "<=200",
+		"contains_secret":  "true",
+		"secret_type":      []any{"jwt", "aws_*"},
+	}, g) {
+		t.Fatal("expected mixed governance conditions to match")
+	}
+	for name, conditions := range map[string]map[string]any{
+		"unknown condition": {"unknown": "value"},
+		"bad number":        {"risk_score": ">>80"},
+		"missing secret":    {"secret_type": []any{"jwt", "private_key"}},
+		"wrong boolean":     {"contains_secret": false},
+	} {
+		if governanceRuleMatches(conditions, g) {
+			t.Fatalf("%s should not match", name)
+		}
+	}
+	for _, expr := range []string{">=82", "==82", "!=80", "<83", "82"} {
+		if !numberCondition(82, expr) {
+			t.Fatalf("number expression %q should match", expr)
+		}
+	}
+	if numberCondition(82, "<=80") || numberCondition(82, "not-a-number") {
+		t.Fatal("invalid numeric expressions should not match")
+	}
+	if secretActionDecision("weird") != "detect" || secretActionDecision("mask") != "mask" || secretActionDecision("block") != "block" {
+		t.Fatal("unexpected secret action decision normalization")
+	}
+	masked := maskSecretText(`password=supersecret123 api_key=abcd1234abcd1234abcd sk-abcdefghijklmnopqrstuv`)
+	for _, raw := range []string{"supersecret123", "abcd1234abcd1234abcd", "sk-abcdefghijklmnopqrstuv"} {
+		if strings.Contains(masked, raw) {
+			t.Fatalf("masked text leaked %q: %s", raw, masked)
+		}
+	}
+}
+
+func TestGovernanceSecretMaskPolicyRedactsBeforeUpstream(t *testing.T) {
+	var upstreamBody string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		upstreamBody = string(raw)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`))
+	}))
+	defer upstream.Close()
+
+	db := openTestStore(t)
+	defer db.Close()
+	logger := store.NewAsyncLogger(db, 32, filepath.Join(t.TempDir(), "fallback.ndjson"))
+	logger.Start()
+	defer logger.Stop(context.Background())
+	server, err := NewServer(testConfig(upstream.URL, "secret"), db, logger, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxy := httptest.NewServer(server.Routes())
+	defer proxy.Close()
+
+	resp := postJSON(t, proxy.URL+"/admin/policies", "", map[string]any{
+		"name": "mask request secrets",
+		"rules": []any{
+			map[string]any{"name": "mask passwords", "contains_secret": true, "secret_action": "mask"},
+		},
+	})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("policy create status %d", resp.StatusCode)
+	}
+
+	resp = postJSON(t, proxy.URL+"/v1/chat/completions", "", map[string]any{
+		"model": "gpt-4.1-mini",
+		"messages": []any{
+			map[string]any{"role": "user", "content": "deploy with password=supersecret123 and api_key=abcd1234abcd1234abcd"},
+		},
+	})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected masked request to pass, got %d: %s", resp.StatusCode, body)
+	}
+	if resp.Header.Get("X-Secret-Firewall") != "mask" {
+		t.Fatalf("expected secret firewall mask header, got %q", resp.Header.Get("X-Secret-Firewall"))
+	}
+	for _, raw := range []string{"supersecret123", "abcd1234abcd1234abcd"} {
+		if strings.Contains(upstreamBody, raw) {
+			t.Fatalf("upstream body leaked %q: %s", raw, upstreamBody)
+		}
+	}
+	if !strings.Contains(upstreamBody, "[REDACTED]") {
+		t.Fatalf("expected upstream body to contain redaction marker, got %s", upstreamBody)
+	}
+	events, err := db.ListSecretEvents(context.Background(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) == 0 || events[0].Action != "mask" {
+		t.Fatalf("expected masked secret event, got %+v", events)
+	}
+	decisions, err := db.ListPolicyDecisionEvents(context.Background(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(decisions) == 0 || decisions[0].Decision != "mask" || decisions[0].RuleName != "mask passwords" {
+		t.Fatalf("expected mask policy decision, got %+v", decisions)
+	}
+}
+
 func TestMCPToolRiskProfileBlocksCall(t *testing.T) {
 	up := fakeMCPUpstream(t)
 	defer up.Close()

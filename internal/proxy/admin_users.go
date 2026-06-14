@@ -30,10 +30,22 @@ func (s *Server) handleUsers(w http.ResponseWriter, r *http.Request) {
 			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "users_failed")
 			return
 		}
+		if claims, ok := s.currentAccessClaims(r); ok && claims.Role == "team_admin" {
+			filtered := users[:0]
+			for _, u := range users {
+				if u.Team == claims.TeamID {
+					filtered = append(filtered, u)
+				}
+			}
+			users = filtered
+		}
 		authUsers, _ := s.db.ListAuthUsers(r.Context())
 		enriched := make([]map[string]any, 0, len(authUsers))
 		for _, u := range authUsers {
 			teamID, _ := s.db.PrimaryTeamForUser(r.Context(), u.ID)
+			if claims, ok := s.currentAccessClaims(r); ok && claims.Role == "team_admin" && teamID != claims.TeamID {
+				continue
+			}
 			enriched = append(enriched, map[string]any{
 				"id": u.ID, "email": u.Email, "name": u.Name, "role": u.Role,
 				"status": u.Status, "team_id": teamID, "created_at": u.CreatedAt,
@@ -61,8 +73,26 @@ func (s *Server) handleUsers(w http.ResponseWriter, r *http.Request) {
 		if role == "" {
 			role = "developer"
 		}
+		if !validRole(role) {
+			writeOpenAIError(w, http.StatusBadRequest, "invalid role", "invalid_request_error", "invalid_role")
+			return
+		}
+		if !s.canAssignRole(r, role) {
+			s.auditAuthEvent(r.Context(), "role_denied", "", "", "", "create user role "+role)
+			writeOpenAIError(w, http.StatusForbidden, "cannot assign role at or above your role", "permission_error", "role_escalation_denied")
+			return
+		}
+		teamID := strings.TrimSpace(p.TeamID)
+		if teamID != "" {
+			team, found, terr := s.db.AuthTeamByIDOrName(r.Context(), teamID)
+			if terr != nil || !found {
+				writeOpenAIError(w, http.StatusBadRequest, "unknown team", "invalid_request_error", "unknown_team")
+				return
+			}
+			teamID = team.ID
+		}
 		if claims, ok := s.currentAccessClaims(r); ok && claims.Role == "team_admin" {
-			if strings.TrimSpace(p.TeamID) == "" || strings.TrimSpace(p.TeamID) != claims.TeamID {
+			if teamID == "" || teamID != claims.TeamID {
 				writeOpenAIError(w, http.StatusForbidden, "team_admin can only manage own team", "permission_error", "team_scope_denied")
 				return
 			}
@@ -84,7 +114,7 @@ func (s *Server) handleUsers(w http.ResponseWriter, r *http.Request) {
 			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "user_create_failed")
 			return
 		}
-		if teamID := strings.TrimSpace(p.TeamID); teamID != "" {
+		if teamID != "" {
 			_ = s.db.UpsertMembership(r.Context(), store.UserTeamMembership{UserID: user.ID, TeamID: teamID, Role: role, CreatedAt: time.Now().UTC()})
 		}
 		if role != "" {
@@ -109,6 +139,22 @@ func (s *Server) handleTeams(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		authTeams, _ := s.db.ListAuthTeams(r.Context())
+		if claims, ok := s.currentAccessClaims(r); ok && claims.Role == "team_admin" {
+			filteredTeams := teams[:0]
+			for _, team := range teams {
+				if s.claimsTeamMatches(r, claims, team.Team) {
+					filteredTeams = append(filteredTeams, team)
+				}
+			}
+			teams = filteredTeams
+			filteredAuthTeams := authTeams[:0]
+			for _, team := range authTeams {
+				if team.ID == claims.TeamID {
+					filteredAuthTeams = append(filteredAuthTeams, team)
+				}
+			}
+			authTeams = filteredAuthTeams
+		}
 		writeJSON(w, http.StatusOK, map[string]any{"teams": teams, "auth_teams": authTeams})
 	case http.MethodPost:
 		var p struct {
@@ -153,6 +199,10 @@ func (s *Server) handleTeamDetail(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusBadRequest, "invalid team", "invalid_request_error", "invalid_team")
 		return
 	}
+	if claims, ok := s.currentAccessClaims(r); ok && claims.Role == "team_admin" && !s.claimsTeamMatches(r, claims, team) {
+		writeOpenAIError(w, http.StatusForbidden, "team_admin can only access own team", "permission_error", "team_scope_denied")
+		return
+	}
 	detail, err := s.db.GetTeamDetail(r.Context(), team, recentLimit(r))
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
@@ -175,6 +225,10 @@ func (s *Server) handleUserDetail(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusBadRequest, "invalid user id", "invalid_request_error", "invalid_user_id")
 		return
 	}
+	if claims, ok := s.currentAccessClaims(r); ok && claims.Role == "team_admin" && r.Method != http.MethodPatch && !s.subjectBelongsToTeam(r, id, claims.TeamID) {
+		writeOpenAIError(w, http.StatusForbidden, "team_admin can only access own team users", "permission_error", "team_scope_denied")
+		return
+	}
 	// usr_ ids are login accounts: PATCH updates role/status (admin only).
 	if r.Method == http.MethodPatch && strings.HasPrefix(id, "usr_") {
 		s.handleAuthUserUpdate(w, r, id)
@@ -190,6 +244,30 @@ func (s *Server) handleUserDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, detail)
+}
+
+func (s *Server) claimsTeamMatches(r *http.Request, claims accessClaims, team string) bool {
+	team = strings.TrimSpace(team)
+	if team == "" {
+		return false
+	}
+	if team == claims.TeamID {
+		return true
+	}
+	authTeam, found, err := s.db.AuthTeamByIDOrName(r.Context(), team)
+	return err == nil && found && authTeam.ID == claims.TeamID
+}
+
+func (s *Server) subjectBelongsToTeam(r *http.Request, id, teamID string) bool {
+	if teamID == "" {
+		return false
+	}
+	if strings.HasPrefix(id, "usr_") {
+		primary, _ := s.db.PrimaryTeamForUser(r.Context(), id)
+		return primary == teamID
+	}
+	key, found, err := s.db.GetAPIKey(r.Context(), id)
+	return err == nil && found && key.Team == teamID
 }
 
 // handleAuthUserUpdate applies a role/status change to a login account.
@@ -219,11 +297,21 @@ func (s *Server) handleAuthUserUpdate(w http.ResponseWriter, r *http.Request, id
 		writeOpenAIError(w, http.StatusNotFound, "user not found", "invalid_request_error", "user_not_found")
 		return
 	}
+	if !s.canModifySubjectRole(r, user.Role) {
+		s.auditAuthEvent(r.Context(), "role_denied", id, "", "", "modify user role "+user.Role)
+		writeOpenAIError(w, http.StatusForbidden, "cannot modify a user at or above your role", "permission_error", "role_escalation_denied")
+		return
+	}
 	role, status := "", ""
 	if p.Role != nil {
 		role = strings.TrimSpace(*p.Role)
 		if _, ok := roleScopes[role]; role != "" && !ok {
 			writeOpenAIError(w, http.StatusBadRequest, "invalid role", "invalid_request_error", "invalid_role")
+			return
+		}
+		if role != "" && !s.canAssignRole(r, role) {
+			s.auditAuthEvent(r.Context(), "role_denied", id, "", "", "assign user role "+role)
+			writeOpenAIError(w, http.StatusForbidden, "cannot assign role at or above your role", "permission_error", "role_escalation_denied")
 			return
 		}
 	}

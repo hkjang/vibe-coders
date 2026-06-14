@@ -43,6 +43,7 @@ type Server struct {
 	knowledge    atomic.Pointer[knowledgeSnapshot]
 	costCache    atomic.Pointer[costSnapshot]
 	sessions     *sessionInferer
+	sessionGCAt  atomic.Int64
 	extSeen      sync.Map // external key id -> struct{}; dedupes lazy registration
 	mcpConns     sync.Map // upstream id -> *mcpUpstreamConn (MCP gateway session state)
 	mcpTools     atomic.Pointer[mcpToolsSnapshot]
@@ -318,6 +319,15 @@ func (s *Server) handleAPIKeys(w http.ResponseWriter, r *http.Request) {
 			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "api_keys_failed")
 			return
 		}
+		if claims, ok := s.currentAccessClaims(r); ok && claims.Role == "team_admin" {
+			filtered := keys[:0]
+			for _, key := range keys {
+				if key.Team == claims.TeamID {
+					filtered = append(filtered, key)
+				}
+			}
+			keys = filtered
+		}
 		writeJSON(w, http.StatusOK, map[string]any{"api_keys": keys})
 	case http.MethodPost:
 		var payload struct {
@@ -366,10 +376,33 @@ func (s *Server) handleAPIKeys(w http.ResponseWriter, r *http.Request) {
 			generated = true
 		}
 		role := strings.TrimSpace(payload.Role)
+		if role != "" && !validRole(role) {
+			writeOpenAIError(w, http.StatusBadRequest, "invalid role", "invalid_request_error", "invalid_role")
+			return
+		}
+		if role != "" && !s.canAssignRole(r, role) {
+			s.auditAuthEvent(r.Context(), "role_denied", "", "", strings.TrimSpace(payload.Team), "create api key role "+role)
+			writeOpenAIError(w, http.StatusForbidden, "cannot assign role at or above your role", "permission_error", "role_escalation_denied")
+			return
+		}
 		serviceAccount := role == "service_account" || strings.TrimSpace(payload.ServiceAccountID) != ""
 		scopes := defaultAPIKeyScopes(role, serviceAccount)
 		if payload.Scopes != nil {
-			scopes = append([]string{}, (*payload.Scopes)...)
+			normalized, ok := normalizeScopes(*payload.Scopes)
+			if !ok {
+				writeOpenAIError(w, http.StatusBadRequest, "invalid scope", "invalid_request_error", "invalid_scope")
+				return
+			}
+			if !s.scopesAssignable(r, normalized) {
+				s.auditAuthEvent(r.Context(), "scope_denied", "", "", strings.TrimSpace(payload.Team), "create api key scopes")
+				writeOpenAIError(w, http.StatusForbidden, "cannot assign scopes outside your role", "permission_error", "scope_denied")
+				return
+			}
+			scopes = normalized
+		} else if !s.scopesAssignable(r, scopes) {
+			s.auditAuthEvent(r.Context(), "scope_denied", "", "", strings.TrimSpace(payload.Team), "create api key default scopes")
+			writeOpenAIError(w, http.StatusForbidden, "cannot assign default scopes for requested role", "permission_error", "scope_denied")
+			return
 		}
 		record := store.APIKeyRecord{
 			ID:               "key_" + hashProxyKey(plainKey)[:16],
@@ -423,6 +456,32 @@ func (s *Server) handleAPIKeyByID(w http.ResponseWriter, r *http.Request) {
 	}
 	if id == "" || strings.Contains(id, "/") {
 		writeOpenAIError(w, http.StatusBadRequest, "invalid API key id", "invalid_request_error", "invalid_api_key_id")
+		return
+	}
+	existing, found, err := s.db.GetAPIKey(r.Context(), id)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "api_key_lookup_failed")
+		return
+	}
+	if !found {
+		writeOpenAIError(w, http.StatusNotFound, "api key not found", "invalid_request_error", "api_key_not_found")
+		return
+	}
+	if claims, ok := s.currentAccessClaims(r); ok && claims.Role == "team_admin" && existing.Team != claims.TeamID {
+		writeOpenAIError(w, http.StatusForbidden, "team_admin can only manage own team api keys", "permission_error", "team_scope_denied")
+		return
+	}
+	existingRole := existing.Role
+	if existingRole == "" {
+		if existing.ServiceAccountID != "" {
+			existingRole = "service_account"
+		} else {
+			existingRole = "developer"
+		}
+	}
+	if !s.canModifySubjectRole(r, existingRole) {
+		s.auditAuthEvent(r.Context(), "role_denied", "", id, existing.Team, "modify api key role "+existingRole)
+		writeOpenAIError(w, http.StatusForbidden, "cannot modify an api key at or above your role", "permission_error", "role_escalation_denied")
 		return
 	}
 	if action == "revoke" {
@@ -483,15 +542,6 @@ func (s *Server) handleAPIKeyByID(w http.ResponseWriter, r *http.Request) {
 			writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "invalid_body")
 			return
 		}
-		existing, found, err := s.db.GetAPIKey(r.Context(), id)
-		if err != nil {
-			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "api_key_lookup_failed")
-			return
-		}
-		if !found {
-			writeOpenAIError(w, http.StatusNotFound, "api key not found", "invalid_request_error", "api_key_not_found")
-			return
-		}
 		updated := existing
 		if payload.Status != nil {
 			st := strings.TrimSpace(*payload.Status)
@@ -508,13 +558,38 @@ func (s *Server) handleAPIKeyByID(w http.ResponseWriter, r *http.Request) {
 			updated.Owner = strings.TrimSpace(*payload.Owner)
 		}
 		if payload.Team != nil {
-			updated.Team = strings.TrimSpace(*payload.Team)
+			nextTeam := strings.TrimSpace(*payload.Team)
+			if claims, ok := s.currentAccessClaims(r); ok && claims.Role == "team_admin" && nextTeam != claims.TeamID {
+				writeOpenAIError(w, http.StatusForbidden, "team_admin cannot move api keys across teams", "permission_error", "team_scope_denied")
+				return
+			}
+			updated.Team = nextTeam
 		}
 		if payload.Role != nil {
-			updated.Role = strings.TrimSpace(*payload.Role)
+			nextRole := strings.TrimSpace(*payload.Role)
+			if nextRole != "" && !validRole(nextRole) {
+				writeOpenAIError(w, http.StatusBadRequest, "invalid role", "invalid_request_error", "invalid_role")
+				return
+			}
+			if nextRole != "" && !s.canAssignRole(r, nextRole) {
+				s.auditAuthEvent(r.Context(), "role_denied", "", id, updated.Team, "assign api key role "+nextRole)
+				writeOpenAIError(w, http.StatusForbidden, "cannot assign role at or above your role", "permission_error", "role_escalation_denied")
+				return
+			}
+			updated.Role = nextRole
 		}
 		if payload.Scopes != nil {
-			updated.Scopes = payload.Scopes
+			normalized, ok := normalizeScopes(payload.Scopes)
+			if !ok {
+				writeOpenAIError(w, http.StatusBadRequest, "invalid scope", "invalid_request_error", "invalid_scope")
+				return
+			}
+			if !s.scopesAssignable(r, normalized) {
+				s.auditAuthEvent(r.Context(), "scope_denied", "", id, updated.Team, "update api key scopes")
+				writeOpenAIError(w, http.StatusForbidden, "cannot assign scopes outside your role", "permission_error", "scope_denied")
+				return
+			}
+			updated.Scopes = normalized
 		}
 		if err := s.db.UpsertAPIKey(r.Context(), updated); err != nil {
 			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "api_key_update_failed")
@@ -1739,7 +1814,42 @@ func (s *Server) inferSessionID(r *http.Request, apiKeyID string, now time.Time)
 		firstNonEmptyHeader(r, "X-Vibe-Repo", "X-Repo", "X-Project"),
 		firstNonEmptyHeader(r, "X-Vibe-Branch", "X-Branch"),
 	}, "|")
-	return s.sessions.sessionFor(identity, now)
+	identityHash := audit.HashText(identity)
+	if sessionID, ok := s.sessions.existingSession(identity, now); ok {
+		s.persistInferredSession(r.Context(), identityHash, sessionID, now)
+		return sessionID
+	}
+	recoveredID, recoveredLastSeen := "", time.Time{}
+	if rec, found, err := s.db.InferredSessionByIdentity(r.Context(), identityHash); err == nil && found {
+		recoveredID = rec.SessionID
+		recoveredLastSeen = rec.LastSeen
+	}
+	sessionID := s.sessions.sessionForRecovered(identity, now, recoveredID, recoveredLastSeen)
+	s.persistInferredSession(r.Context(), identityHash, sessionID, now)
+	return sessionID
+}
+
+func (s *Server) persistInferredSession(ctx context.Context, identityHash, sessionID string, now time.Time) {
+	if identityHash == "" || sessionID == "" || s.db == nil {
+		return
+	}
+	_ = s.db.UpsertInferredSession(ctx, store.InferredSessionRecord{
+		IdentityHash: identityHash,
+		SessionID:    sessionID,
+		LastSeen:     now,
+		UpdatedAt:    now,
+	})
+	idle := s.cfg.Session.IdleTimeout
+	if idle <= 0 {
+		idle = 30 * time.Minute
+	}
+	lastUnix := s.sessionGCAt.Load()
+	if lastUnix != 0 && now.Sub(time.Unix(lastUnix, 0)) < idle {
+		return
+	}
+	if s.sessionGCAt.CompareAndSwap(lastUnix, now.Unix()) {
+		_, _ = s.db.DeleteExpiredInferredSessions(ctx, now.Add(-idle))
+	}
 }
 
 func extractAudit(body []byte, endpoint string, rawPrompts bool) (string, bool, []store.PromptLog, []audit.LanguageSignal) {

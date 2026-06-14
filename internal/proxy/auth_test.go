@@ -322,6 +322,186 @@ func TestHardDeleteKeyTeamChangeAndScopeEdit(t *testing.T) {
 	}
 }
 
+func TestTeamAdminIsolationAndRoleEscalationGuards(t *testing.T) {
+	_, proxy := newAuthTestServer(t, "http://example.invalid")
+	defer proxy.Close()
+
+	login := postJSON(t, proxy.URL+"/auth/login", "", map[string]string{"email": "root@example.com", "password": "correct-password"})
+	var rootTok struct {
+		AccessToken string `json:"access_token"`
+	}
+	_ = json.NewDecoder(login.Body).Decode(&rootTok)
+	login.Body.Close()
+
+	alpha := postJSON(t, proxy.URL+"/admin/teams", rootTok.AccessToken, map[string]string{"id": "team_alpha", "name": "Alpha"})
+	alpha.Body.Close()
+	beta := postJSON(t, proxy.URL+"/admin/teams", rootTok.AccessToken, map[string]string{"id": "team_beta", "name": "Beta"})
+	beta.Body.Close()
+
+	teamAdmin := postJSON(t, proxy.URL+"/admin/users", rootTok.AccessToken, map[string]string{
+		"email": "team-admin@example.com", "password": "team-admin-password", "role": "team_admin", "team_id": "team_alpha",
+	})
+	teamAdmin.Body.Close()
+	if teamAdmin.StatusCode != http.StatusCreated {
+		t.Fatalf("super_admin should create team_admin, got %d", teamAdmin.StatusCode)
+	}
+	teamLogin := postJSON(t, proxy.URL+"/auth/login", "", map[string]string{"email": "team-admin@example.com", "password": "team-admin-password"})
+	var teamTok struct {
+		AccessToken string `json:"access_token"`
+	}
+	_ = json.NewDecoder(teamLogin.Body).Decode(&teamTok)
+	teamLogin.Body.Close()
+
+	crossTeamUser := postJSON(t, proxy.URL+"/admin/users", teamTok.AccessToken, map[string]string{
+		"email": "beta-dev@example.com", "password": "pw-beta", "role": "developer", "team_id": "team_beta",
+	})
+	crossTeamUser.Body.Close()
+	if crossTeamUser.StatusCode != http.StatusForbidden {
+		t.Fatalf("team_admin should not create users in another team, got %d", crossTeamUser.StatusCode)
+	}
+	escalatedUser := postJSON(t, proxy.URL+"/admin/users", teamTok.AccessToken, map[string]string{
+		"email": "bad-admin@example.com", "password": "pw-bad", "role": "admin", "team_id": "team_alpha",
+	})
+	escalatedUser.Body.Close()
+	if escalatedUser.StatusCode != http.StatusForbidden {
+		t.Fatalf("team_admin should not assign admin role, got %d", escalatedUser.StatusCode)
+	}
+	ownTeamUser := postJSON(t, proxy.URL+"/admin/users", teamTok.AccessToken, map[string]string{
+		"email": "alpha-dev@example.com", "password": "pw-alpha", "role": "developer", "team_id": "team_alpha",
+	})
+	ownTeamUser.Body.Close()
+	if ownTeamUser.StatusCode != http.StatusCreated {
+		t.Fatalf("team_admin should create own-team developer, got %d", ownTeamUser.StatusCode)
+	}
+	teamsReq, _ := http.NewRequest(http.MethodGet, proxy.URL+"/admin/teams", nil)
+	teamsReq.Header.Set("Authorization", "Bearer "+teamTok.AccessToken)
+	teamsResp, err := http.DefaultClient.Do(teamsReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var teamsOut struct {
+		AuthTeams []store.AuthTeam `json:"auth_teams"`
+	}
+	_ = json.NewDecoder(teamsResp.Body).Decode(&teamsOut)
+	teamsResp.Body.Close()
+	if teamsResp.StatusCode != http.StatusOK || len(teamsOut.AuthTeams) != 1 || teamsOut.AuthTeams[0].ID != "team_alpha" {
+		t.Fatalf("team_admin should only list own auth team, status=%d teams=%+v", teamsResp.StatusCode, teamsOut.AuthTeams)
+	}
+	betaDetailReq, _ := http.NewRequest(http.MethodGet, proxy.URL+"/admin/teams/team_beta", nil)
+	betaDetailReq.Header.Set("Authorization", "Bearer "+teamTok.AccessToken)
+	betaDetailResp, err := http.DefaultClient.Do(betaDetailReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	betaDetailResp.Body.Close()
+	if betaDetailResp.StatusCode != http.StatusForbidden {
+		t.Fatalf("team_admin should not access other-team detail, got %d", betaDetailResp.StatusCode)
+	}
+
+	alphaKey := postJSON(t, proxy.URL+"/admin/api-keys", rootTok.AccessToken, map[string]any{"name": "alpha-key", "team": "team_alpha"})
+	var alphaKeyOut struct {
+		APIKey struct {
+			ID string `json:"id"`
+		} `json:"api_key"`
+	}
+	_ = json.NewDecoder(alphaKey.Body).Decode(&alphaKeyOut)
+	alphaKey.Body.Close()
+	betaKey := postJSON(t, proxy.URL+"/admin/api-keys", rootTok.AccessToken, map[string]any{"name": "beta-key", "team": "team_beta"})
+	var betaKeyOut struct {
+		APIKey struct {
+			ID string `json:"id"`
+		} `json:"api_key"`
+	}
+	_ = json.NewDecoder(betaKey.Body).Decode(&betaKeyOut)
+	betaKey.Body.Close()
+
+	listReq, _ := http.NewRequest(http.MethodGet, proxy.URL+"/admin/api-keys", nil)
+	listReq.Header.Set("Authorization", "Bearer "+teamTok.AccessToken)
+	listResp, err := http.DefaultClient.Do(listReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var listed struct {
+		APIKeys []store.APIKeyPublic `json:"api_keys"`
+	}
+	_ = json.NewDecoder(listResp.Body).Decode(&listed)
+	listResp.Body.Close()
+	if listResp.StatusCode != http.StatusOK || len(listed.APIKeys) != 1 || listed.APIKeys[0].Team != "team_alpha" {
+		t.Fatalf("team_admin should only list own-team keys, status=%d keys=%+v", listResp.StatusCode, listed.APIKeys)
+	}
+
+	overScoped := postJSON(t, proxy.URL+"/admin/api-keys", teamTok.AccessToken, map[string]any{
+		"name": "bad-scope", "scopes": []string{"chat:completion", "admin:write"},
+	})
+	overScoped.Body.Close()
+	if overScoped.StatusCode != http.StatusForbidden {
+		t.Fatalf("team_admin should not assign admin:write scope, got %d", overScoped.StatusCode)
+	}
+	invalidScope := postJSON(t, proxy.URL+"/admin/api-keys", teamTok.AccessToken, map[string]any{
+		"name": "bad-scope-name", "scopes": []string{"chat:completion", "not:a_scope"},
+	})
+	invalidScope.Body.Close()
+	if invalidScope.StatusCode != http.StatusBadRequest {
+		t.Fatalf("invalid scope should be rejected, got %d", invalidScope.StatusCode)
+	}
+	ownKey := postJSON(t, proxy.URL+"/admin/api-keys", teamTok.AccessToken, map[string]any{
+		"name": "team-owned", "team": "team_beta", "scopes": []string{"chat:completion", "models:read"},
+	})
+	var ownKeyOut struct {
+		APIKey struct {
+			ID   string `json:"id"`
+			Team string `json:"team"`
+		} `json:"api_key"`
+	}
+	_ = json.NewDecoder(ownKey.Body).Decode(&ownKeyOut)
+	ownKey.Body.Close()
+	if ownKey.StatusCode != http.StatusCreated || ownKeyOut.APIKey.Team != "team_alpha" {
+		t.Fatalf("team_admin key should be forced to own team, status=%d out=%+v", ownKey.StatusCode, ownKeyOut)
+	}
+
+	patchOther, _ := http.NewRequest(http.MethodPatch, proxy.URL+"/admin/api-keys/"+betaKeyOut.APIKey.ID, strings.NewReader(`{"scopes":["chat:completion"]}`))
+	patchOther.Header.Set("Authorization", "Bearer "+teamTok.AccessToken)
+	patchOther.Header.Set("Content-Type", "application/json")
+	patchOtherResp, err := http.DefaultClient.Do(patchOther)
+	if err != nil {
+		t.Fatal(err)
+	}
+	patchOtherResp.Body.Close()
+	if patchOtherResp.StatusCode != http.StatusForbidden {
+		t.Fatalf("team_admin should not patch other-team api key, got %d", patchOtherResp.StatusCode)
+	}
+	patchEscalate, _ := http.NewRequest(http.MethodPatch, proxy.URL+"/admin/api-keys/"+alphaKeyOut.APIKey.ID, strings.NewReader(`{"role":"admin"}`))
+	patchEscalate.Header.Set("Authorization", "Bearer "+teamTok.AccessToken)
+	patchEscalate.Header.Set("Content-Type", "application/json")
+	patchEscalateResp, err := http.DefaultClient.Do(patchEscalate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	patchEscalateResp.Body.Close()
+	if patchEscalateResp.StatusCode != http.StatusForbidden {
+		t.Fatalf("team_admin should not escalate own api key role, got %d", patchEscalateResp.StatusCode)
+	}
+
+	otherPreview := postJSON(t, proxy.URL+"/admin/routing/preview", teamTok.AccessToken, map[string]any{
+		"api_key_id": betaKeyOut.APIKey.ID,
+		"model":      "vibe/auto",
+		"messages":   []any{map[string]any{"role": "user", "content": "hello"}},
+	})
+	otherPreview.Body.Close()
+	if otherPreview.StatusCode != http.StatusForbidden {
+		t.Fatalf("team_admin should not preview routing for other-team api key, got %d", otherPreview.StatusCode)
+	}
+	ownPreview := postJSON(t, proxy.URL+"/admin/routing/preview", teamTok.AccessToken, map[string]any{
+		"api_key_id": ownKeyOut.APIKey.ID,
+		"model":      "vibe/auto",
+		"messages":   []any{map[string]any{"role": "user", "content": "hello"}},
+	})
+	ownPreview.Body.Close()
+	if ownPreview.StatusCode != http.StatusOK {
+		t.Fatalf("team_admin should preview own-team api key, got %d", ownPreview.StatusCode)
+	}
+}
+
 func TestAdminLoginRefreshRotationLogoutAndJWTRequired(t *testing.T) {
 	_, proxy := newAuthTestServer(t, "http://example.invalid")
 	defer proxy.Close()
@@ -379,6 +559,34 @@ func TestAdminLoginRefreshRotationLogoutAndJWTRequired(t *testing.T) {
 	reuseOld.Body.Close()
 	if reuseOld.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("old refresh token should be revoked after rotation, got %d", reuseOld.StatusCode)
+	}
+	auditReq, _ := http.NewRequest(http.MethodGet, proxy.URL+"/admin/audit/auth-events?limit=20", nil)
+	auditReq.Header.Set("Authorization", "Bearer "+rotated.AccessToken)
+	auditResp, err := http.DefaultClient.Do(auditReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var auditOut struct {
+		Events []store.AuthEvent `json:"events"`
+	}
+	if err := json.NewDecoder(auditResp.Body).Decode(&auditOut); err != nil {
+		t.Fatal(err)
+	}
+	auditResp.Body.Close()
+	if auditResp.StatusCode != http.StatusOK {
+		t.Fatalf("auth audit API should allow admin JWT, got %d", auditResp.StatusCode)
+	}
+	seenLoginSuccess, seenLoginFailed := false, false
+	for _, event := range auditOut.Events {
+		if event.EventType == "login_success" {
+			seenLoginSuccess = true
+		}
+		if event.EventType == "login_failed" {
+			seenLoginFailed = true
+		}
+	}
+	if !seenLoginSuccess || !seenLoginFailed {
+		t.Fatalf("expected login_success and login_failed audit events, got %+v", auditOut.Events)
 	}
 	logout := postJSON(t, proxy.URL+"/auth/logout", rotated.AccessToken, map[string]string{"refresh_token": rotated.RefreshToken})
 	logout.Body.Close()
@@ -605,5 +813,74 @@ func TestAPIKeyWithoutRequiredScopeDenied(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("expected scope_denied audit event, got %#v", events)
+	}
+}
+
+func TestAPIKeyExpiryIPRestrictionAndServiceAccountAccess(t *testing.T) {
+	var upstreamCalls int
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamCalls++
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`))
+	}))
+	defer upstream.Close()
+	db, proxy := newAuthTestServer(t, upstream.URL)
+	defer proxy.Close()
+	ctx := context.Background()
+
+	expiredSecret := "vc_sk_expired_lifecycle"
+	if err := db.UpsertAPIKey(ctx, store.APIKeyRecord{
+		ID: "key_expired_lifecycle", Name: "expired", KeyHash: hashProxyKey(expiredSecret), Status: "active",
+		Scopes: []string{"chat:completion"}, ExpiresAt: time.Now().UTC().Add(-time.Minute),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	expiredResp := postJSON(t, proxy.URL+"/v1/chat/completions", expiredSecret, chatBody("gpt-4.1-mini", false))
+	expiredResp.Body.Close()
+	if expiredResp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expired key should be denied, got %d", expiredResp.StatusCode)
+	}
+
+	ipSecret := "vc_sk_ip_restricted"
+	if err := db.UpsertAPIKey(ctx, store.APIKeyRecord{
+		ID: "key_ip_restricted", Name: "ip-restricted", KeyHash: hashProxyKey(ipSecret), Status: "active",
+		Scopes: []string{"chat:completion"}, AllowedIPs: []string{"203.0.113.0/24"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	ipResp := postJSON(t, proxy.URL+"/v1/chat/completions", ipSecret, chatBody("gpt-4.1-mini", false))
+	ipResp.Body.Close()
+	if ipResp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("IP-restricted key should be denied from httptest IP, got %d", ipResp.StatusCode)
+	}
+
+	serviceSecret := "vc_sa_service_account_ok"
+	if err := db.UpsertAPIKey(ctx, store.APIKeyRecord{
+		ID: "key_service_account_ok", Name: "service", KeyHash: hashProxyKey(serviceSecret), Status: "active",
+		Role: "service_account", ServiceAccountID: "svc_ci", Scopes: []string{"chat:completion", "models:read"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	okResp := postJSON(t, proxy.URL+"/v1/chat/completions", serviceSecret, chatBody("gpt-4.1-mini", false))
+	okResp.Body.Close()
+	if okResp.StatusCode != http.StatusOK {
+		t.Fatalf("service account key should allow chat, got %d", okResp.StatusCode)
+	}
+	if upstreamCalls != 1 {
+		t.Fatalf("expected only service account request to hit upstream, got %d", upstreamCalls)
+	}
+
+	events, _ := db.ListAuditEvents(ctx, 20)
+	seenExpired, seenIPDenied := false, false
+	for _, e := range events {
+		if e.EventType == "api_key_denied" && e.APIKeyID == "key_expired_lifecycle" && strings.Contains(e.Detail, "expired") {
+			seenExpired = true
+		}
+		if e.EventType == "ip_denied" && e.APIKeyID == "key_ip_restricted" {
+			seenIPDenied = true
+		}
+	}
+	if !seenExpired || !seenIPDenied {
+		t.Fatalf("expected expired and ip_denied audit events, got %#v", events)
 	}
 }

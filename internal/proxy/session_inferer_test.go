@@ -145,3 +145,41 @@ func TestAuditRequestInferenceDisabledFallsBackToTrace(t *testing.T) {
 		t.Fatalf("inference disabled should fall back to trace:, got %q", rec.Request.SessionID)
 	}
 }
+
+func TestInferredSessionRecoversAcrossServerRestart(t *testing.T) {
+	db := openTestStore(t)
+	defer db.Close()
+	logger := store.NewAsyncLogger(db, 32, filepath.Join(t.TempDir(), "fallback.ndjson"))
+	logger.Start()
+	defer logger.Stop(context.Background())
+	cfg := testConfig("http://example.invalid", "secret")
+	cfg.Session.InferenceEnabled = true
+	cfg.Session.IdleTimeout = 30 * time.Minute
+
+	s1, err := NewServer(cfg, db, logger, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := `{"model":"m","messages":[{"role":"user","content":"hi"}]}`
+	r1 := reqFor(body, "cursor/1.0", "10.0.0.7:5000", map[string]string{"X-Vibe-Repo": "vibe-coders"})
+	t0 := time.Date(2026, 6, 12, 9, 0, 0, 0, time.UTC)
+	first := s1.inferSessionID(r1, "key_restart", t0)
+	if first == "" {
+		t.Fatal("expected inferred session id")
+	}
+
+	s2, err := NewServer(cfg, db, logger, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r2 := reqFor(body, "cursor/1.0", "10.0.0.7:5111", map[string]string{"X-Vibe-Repo": "vibe-coders"})
+	recovered := s2.inferSessionID(r2, "key_restart", t0.Add(5*time.Minute))
+	if recovered != first {
+		t.Fatalf("restart should recover session %q, got %q", first, recovered)
+	}
+
+	expired := s2.inferSessionID(r2, "key_restart", t0.Add(37*time.Minute))
+	if expired == first {
+		t.Fatalf("idle timeout should mint a new session after recovery, still got %q", expired)
+	}
+}

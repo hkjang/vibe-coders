@@ -7,6 +7,7 @@ Roo Code / Cursor / Continue 등 OpenAI 호환 API 를 호출하는 VS Code 확�
 - **[운영 가이드](docs/OPERATIONS.md)** — 기동/종료, 헬스체크, 백업·복구, 장애 대응 런북
 - **[사용자 가이드](docs/USER_GUIDE.md)** — Roo Code / Cline / Cursor / OpenAI SDK 연결, 본인 사용량 확인
 - **[관리자 가이드](docs/ADMIN_GUIDE.md)** — 어드민 UI 탭 사용법, 일상/주간/월간 운영 체크리스트
+- **[안전 및 보안 거버넌스 가이드](docs/SAFETY_GUIDE.md)** — 정책 엔진, Secret Firewall, 승인 워크플로우 운영
 - **[릴리즈 가이드](docs/RELEASE_GUIDE.md)** — 빌드·태깅·GitHub 릴리즈·오프라인 패키지 산출·롤백 절차
 
 ## 추적 항목
@@ -87,6 +88,15 @@ curl.exe http://localhost:8080/v1/chat/completions `
 ```powershell
 $env:PROXY_API_KEYS="dev:dev-proxy-key:alice:platform,team:team-proxy-key:bob:backend"
 ```
+
+## 운영자 Quick Start
+
+1. 운영 secret 설정: `UPSTREAM_API_KEY`, `GATEWAY_SECRET`, `ADMIN_TOKEN` 또는 `AUTH_ENABLED=true` + `AUTH_JWT_SECRET` + 부트스트랩 계정.
+2. 기동: `go run ./cmd/gateway` 또는 Docker/Compose로 실행.
+3. 헬스체크: `GET /health`, `GET /ready`, `GET /metrics`.
+4. 어드민 접속: `http://<host>:8080/admin` 에서 provider, proxy API key, 예산, 정책을 확인.
+5. 라우팅 검증: `POST /admin/routing/preview` 로 `vibe/auto` 결정 이유를 확인한 뒤 SDK base URL을 `http://<host>:8080/v1` 로 변경.
+6. 운영 백업: `scripts/backup.ps1` 또는 `scripts/backup.sh` 를 주기 실행하고 fallback NDJSON 재처리 상태를 점검.
 
 ### 사용자 귀속 (왜 passthrough/anonymous 로 묶이나)
 
@@ -187,7 +197,7 @@ chat 응답은 비결정적이라 기본 비활성화입니다. 활성화해도 
 게이트웨이는 **명시적(explicit) → 추론(inferred)** 2단계로 처리합니다.
 
 1. **명시적**: 클라이언트가 보낸 값을 그대로 사용 — 헤더(`X-Session-ID`, `X-Vibe-Session-ID`, `X-Conversation-ID`, `X-Datadog-Session-ID` 등) 또는 바디(`session_id`/`chat_id`/`conversation_id`/`thread_id`, `metadata.*` 포함). 헤더가 바디보다 우선.
-2. **추론**: 명시적 세션이 없으면 클라이언트 신원 + **슬라이딩 비활성 윈도우**로 자동 생성. 신원 = `api_key + client_ip + user-agent + (옵션) X-Vibe-Repo/X-Vibe-Branch`. 같은 클라이언트의 연속 호출은 한 세션으로 묶이고, `SESSION_IDLE_TIMEOUT`(기본 30분) 이상 잠잠하면 새 세션이 시작됩니다. 생성 ID는 `sess_<12hex>` 형태(인메모리, 비영속).
+2. **추론**: 명시적 세션이 없으면 클라이언트 신원 + **슬라이딩 비활성 윈도우**로 자동 생성. 신원 = `api_key + client_ip + user-agent + (옵션) X-Vibe-Repo/X-Vibe-Branch`. 같은 클라이언트의 연속 호출은 한 세션으로 묶이고, `SESSION_IDLE_TIMEOUT`(기본 30분) 이상 잠잠하면 새 세션이 시작됩니다. 생성 ID는 `sess_<12hex>` 형태이며, DB의 `inferred_sessions` 에 저장되어 재시작 후에도 idle window 안이면 복구됩니다.
 
 | 변수 | 기본값 | 설명 |
 | --- | --- | --- |
@@ -464,11 +474,40 @@ curl.exe http://localhost:8080/admin/routing/preview `
   -d '{ "model": "vibe-coders/auto", "messages": [{ "role": "user", "content": "auth middleware를 리팩터링하고 배포 리스크를 검토해줘" }] }'
 ```
 
+Routing Explain 예시:
+
+```json
+{
+  "selected_model": "gpt-4.1",
+  "selected_provider": "openai",
+  "complexity": { "score": 63, "tier": "complex" },
+  "risk": { "score": 38, "tier": "medium", "categories": ["authentication", "deployment_command"] },
+  "health_score": 96,
+  "fallback_path": ["429:backup", "5xx:backup", "timeout:lowest-latency-provider"],
+  "decision_reason": "client requested vibe/auto; auto alias mapped complex tier to gpt-4.1; provider health selected openai(96)"
+}
+```
+
 운영 API:
 
-- `POST /admin/routing/preview` — upstream 호출 없이 routing 결과만 계산
+- `POST /admin/routing/preview` — upstream 호출 없이 routing 결과만 계산. 선택적으로 `api_key_id` 를 넣으면 해당 키의 allowed/denied model/provider 정책까지 반영
 - `GET /admin/routing/decisions` / `GET /admin/routing/decisions/{id}` — 요청별 selected model/provider, complexity/risk/health, fallback path, decision reason 조회
 - `GET /admin/routing/health` — 최근 provider health score 조회
+
+Governance 정책 예시:
+
+```json
+{
+  "name": "enterprise-safety",
+  "rules": [
+    { "name": "block secrets", "contains_secret": true, "block": true },
+    { "name": "approve high risk", "risk_score": ">80", "require_approval": true },
+    { "name": "security model allowlist", "team": "security", "allow_models": ["gpt-5", "claude-sonnet"] }
+  ]
+}
+```
+
+정책 충돌은 `BLOCK > APPROVAL > ALLOW > DEFAULT` 순서로 결정되며, 매칭된 판단은 정책 감사 이벤트에 기록됩니다.
 
 ### 라우팅 학습 (Routing Learning Engine)
 
@@ -645,6 +684,19 @@ pwsh -File scripts/backup.ps1 -DataDir data -OutDir backups -KeepDays 14
 ```bash
 ./scripts/backup.sh -d data -o backups -k 14
 ```
+
+## 변경사항
+
+### v0.1.26 Stability Release
+
+- 문서 링크 정리, 운영자 Quick Start, Routing Explain/Governance 예제 보강.
+- `vibe/auto` 점수·provider health·fallback 금지 조건 회귀 테스트 확대.
+- Governance 정책 충돌 우선순위 `BLOCK > APPROVAL > ALLOW > DEFAULT` 고정 및 allow 감사 이벤트 기록.
+- inferred session DB 영속화와 재시작 복구 추가.
+
+### 이전 v0.1.x
+
+- OpenAI 호환 프록시, Datadog형 LLM Observability, Intelligent Routing, Auth/RBAC, Governance Layer, MCP Gateway, 비용/쿼터/백업 운영 기능을 단계적으로 추가.
 
 ## Docker 빌드와 오프라인망 릴리즈
 

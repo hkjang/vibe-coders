@@ -323,6 +323,50 @@ func TestProviderHeaderRoutesToConfiguredProvider(t *testing.T) {
 	}
 }
 
+func TestOperationalHealthReadyMetricsAndFavicon(t *testing.T) {
+	db := openTestStore(t)
+	defer db.Close()
+	logger := store.NewAsyncLogger(db, 32, filepath.Join(t.TempDir(), "fallback.ndjson"))
+	logger.Start()
+	defer logger.Stop(context.Background())
+	server, err := NewServer(testConfig("http://example.invalid", "secret"), db, logger, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxy := httptest.NewServer(server.Routes())
+	defer proxy.Close()
+
+	for path, want := range map[string]string{"/health": `"status":"ok"`, "/ready": `"status":"ready"`} {
+		resp, err := http.Get(proxy.URL + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), want) {
+			t.Fatalf("%s returned status=%d body=%s", path, resp.StatusCode, body)
+		}
+	}
+	metrics, err := http.Get(proxy.URL + "/metrics")
+	if err != nil {
+		t.Fatal(err)
+	}
+	metricsBody, _ := io.ReadAll(metrics.Body)
+	metrics.Body.Close()
+	if metrics.StatusCode != http.StatusOK || !strings.Contains(metrics.Header.Get("Content-Type"), "text/plain") || !strings.Contains(string(metricsBody), "proxy_requests_total") {
+		t.Fatalf("metrics response unexpected status=%d content-type=%q body=%s", metrics.StatusCode, metrics.Header.Get("Content-Type"), metricsBody)
+	}
+	favicon, err := http.Get(proxy.URL + "/favicon.ico")
+	if err != nil {
+		t.Fatal(err)
+	}
+	faviconBody, _ := io.ReadAll(favicon.Body)
+	favicon.Body.Close()
+	if favicon.StatusCode != http.StatusOK || !strings.Contains(favicon.Header.Get("Content-Type"), "image/svg+xml") || !strings.Contains(string(faviconBody), "<svg") {
+		t.Fatalf("favicon response unexpected status=%d content-type=%q body=%s", favicon.StatusCode, favicon.Header.Get("Content-Type"), faviconBody)
+	}
+}
+
 func openTestStore(t *testing.T) *store.SQLStore {
 	t.Helper()
 	db, err := store.Open(context.Background(), config.DatabaseConfig{

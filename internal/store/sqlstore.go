@@ -143,6 +143,14 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 			expires_at TEXT NOT NULL,
 			created_at TEXT NOT NULL
 		)`,
+		`CREATE TABLE IF NOT EXISTS inferred_sessions (
+			identity_hash TEXT PRIMARY KEY,
+			session_id TEXT NOT NULL,
+			last_seen TEXT NOT NULL,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_inferred_sessions_last_seen ON inferred_sessions(last_seen)`,
 		`CREATE TABLE IF NOT EXISTS audit_events (
 			id TEXT PRIMARY KEY,
 			event_type TEXT NOT NULL,

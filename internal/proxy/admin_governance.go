@@ -21,7 +21,7 @@ var governanceConditionKeys = map[string]bool{
 
 var governanceActionKeys = map[string]bool{
 	"block": true, "require_approval": true, "secret_action": true, "allow_models": true,
-	"deny_models": true, "allow_providers": true, "deny_providers": true,
+	"deny_models": true, "allow_providers": true, "deny_providers": true, "allow": true,
 }
 
 func (s *Server) handlePolicies(w http.ResponseWriter, r *http.Request) {

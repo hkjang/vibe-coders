@@ -52,6 +52,34 @@ func (si *sessionInferer) sessionFor(identity string, now time.Time) string {
 	return id
 }
 
+func (si *sessionInferer) existingSession(identity string, now time.Time) (string, bool) {
+	si.mu.Lock()
+	defer si.mu.Unlock()
+	si.gc(now)
+	if e, ok := si.entries[identity]; ok && now.Sub(e.lastSeen) <= si.idle {
+		e.lastSeen = now
+		return e.id, true
+	}
+	return "", false
+}
+
+func (si *sessionInferer) sessionForRecovered(identity string, now time.Time, recoveredID string, recoveredLastSeen time.Time) string {
+	si.mu.Lock()
+	defer si.mu.Unlock()
+	si.gc(now)
+	if e, ok := si.entries[identity]; ok && now.Sub(e.lastSeen) <= si.idle {
+		e.lastSeen = now
+		return e.id
+	}
+	if recoveredID != "" && !recoveredLastSeen.IsZero() && now.Sub(recoveredLastSeen) <= si.idle {
+		si.entries[identity] = &inferredSession{id: recoveredID, lastSeen: now}
+		return recoveredID
+	}
+	id := mintSessionID(identity, now)
+	si.entries[identity] = &inferredSession{id: id, lastSeen: now}
+	return id
+}
+
 // mintSessionID derives a short, opaque, stable id from the identity and the
 // session's start time, so re-minting after an idle gap yields a distinct id.
 func mintSessionID(identity string, now time.Time) string {
