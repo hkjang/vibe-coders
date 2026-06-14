@@ -315,13 +315,14 @@
                     <div class="diag-node" style="padding: 10px;">IDE / Chat Clients<br><span style="font-size: 10px; font-weight: normal; color: #64748b;">(Cursor, Roo Code, etc.)</span></div>
                     <div class="diag-arrow">&rarr;</div>
                     <div class="diag-node primary" style="background: #f0f6ff; border-color: #2563eb; color: #1d4ed8; padding: 12px 10px;">
-                        <strong>Proxy Gateway Core (v0.1.26)</strong>
+                        <strong>Proxy Gateway Core (v0.1.27)</strong>
                         <div style="font-size: 9px; font-weight: normal; color: #475569; margin-top: 6px; text-align: left; line-height: 1.3;">
                             • 3-Tier Session Inference Engine<br>
                             • Intelligent Cost/Latency Router<br>
                             • Governance Rule Engine & Runner<br>
                             • VCS Event Traffic Inferer<br>
-                            • Automated Performance Benchmarker
+                            • Automated Performance Benchmarker<br>
+                            • Multi-tenant Team Mapper & Scope Editor
                         </div>
                     </div>
                     <div class="diag-arrow">&rarr;</div>
@@ -335,8 +336,8 @@
                 <strong>작성 부서:</strong> IT AI 추진단<br>
             </div>
             <div style="text-align: right;">
-                <strong>문서 번호:</strong> SEC-APG-2026-V22<br>
-                <strong>최종 승인 버전:</strong> v0.1.26 (Production Stable)
+                <strong>문서 번호:</strong> SEC-APG-2026-V23<br>
+                <strong>최종 승인 버전:</strong> v0.1.27 (Production Stable)
             </div>
         </div>
     </div>
@@ -411,7 +412,7 @@
     <div class="section">
         <h2 class="section-title">1.2 시스템 세부 구성 요소 분석 (System Component Breakdown)</h2>
         <p>
-            본 게이트웨이는 엔터프라이즈 거버넌스 및 AI APM 요건을 충족하기 위해 유기적으로 연동되는 6대 핵심 서브시스템으로 구성되어 있습니다.
+            본 게이트웨이는 엔터프라이즈 거버넌스 및 AI APM 요건을 충족하기 위해 유기적으로 연동되는 8대 핵심 서브시스템으로 구성되어 있습니다.
         </p>
 
         <div class="grid-2" style="margin-top: 15px;">
@@ -449,6 +450,18 @@
                 <h3 style="color: #475569; border-left-color: #64748b;">⑥ 감사 및 설명성 데이터 스토어</h3>
                 <p style="font-size: 12.5px; color: #475569; line-height: 1.5; margin-bottom: 0;">
                     SQLite 및 PostgreSQL 다중 호환 스키마 상에 토큰 사용량과 피드백 라벨을 집계하고, XView APM 대시보드의 데이터 닷을 분석하여 병목 원인을 자연어 해설로 설명(Explain)해 주는 감사 스토어입니다.
+                </p>
+            </div>
+            <div class="card" style="background: #f0fdfa; border-color: #99f6e4;">
+                <h3 style="color: #0f766e; border-left-color: #14b8a6;">⑦ 위임형 스코프 거버넌스 & API Key 생명주기 관리자</h3>
+                <p style="font-size: 12.5px; color: #475569; line-height: 1.5; margin-bottom: 0;">
+                    어드민 UI 내에서 API Key의 개별 세부 권한을 실시간 제어할 수 있는 Scopes Editor를 연동하여, super_admin의 권한으로 API Key를 안전하게 영구 폐기(?hard=1)하고, 권한이 부여되지 않은 구형 키의 비정상 차단 상태(scope_denied)를 백그라운드 마이그레이션 및 기본 롤 권한 자동 상속 메커니즘을 통해 유기적으로 자동 조율합니다.
+                </p>
+            </div>
+            <div class="card" style="background: #fff1f2; border-color: #fecdd3;">
+                <h3 style="color: #be123c; border-left-color: #f43f5e;">⑧ 사용자-팀 소속 동적 매핑 엔진</h3>
+                <p style="font-size: 12.5px; color: #475569; line-height: 1.5; margin-bottom: 0;">
+                    다중 테넌트(Multi-tenant) 환경에서 사용자를 특정 팀에 유연하게 바인딩하고, 관리자 권한 수준(team_admin 등)에 따라 자신의 소속 팀 정보 및 관련 API Key에만 접근하도록 필터링해 정보 노출 및 권한 상승(Privilege Escalation) 위험을 원천 차단합니다.
                 </p>
             </div>
         </div>
@@ -1007,6 +1020,11 @@ psql -h [VM_IP_OR_DNS] -p 5432 -U gateway_user -d gateway_db < backup_gateway_YY
                     <td><strong>v0.1.26</strong></td>
                     <td>영속적 세션 추론 및 위임 거버넌스</td>
                     <td>재기동에 안전한 세션 영속 추론 테이블 inferred_sessions 추가 및 자동 GC 청소 기능 탑재, team_admin 소속팀 API Key 한정 필터링 조회, 권한 상승(Privilege Escalation) 방지를 위한 계층형 롤/스코프 위임 거버넌스 구현.</td>
+                </tr>
+                <tr>
+                    <td><strong>v0.1.27</strong></td>
+                    <td>영속적 세션 추론 안정화 및 위임 거버넌스 종합 보고서 갱신</td>
+                    <td>보고서 메인 및 아키텍처 내에 8대 핵심 서브시스템(위임형 스코프 거버넌스 및 사용자-팀 매핑) 구조를 상세히 명세하고 v0.1.27 릴리즈 배포 완료.</td>
                 </tr>
             </tbody>
         </table>
