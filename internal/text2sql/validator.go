@@ -44,7 +44,10 @@ var dangerousFunctions = []string{
 var (
 	wordRe       = regexp.MustCompile(`[a-zA-Z_][a-zA-Z0-9_]*`)
 	limitRe      = regexp.MustCompile(`(?is)\blimit\s+\d+`)
-	fromJoin     = regexp.MustCompile(`(?is)\b(?:from|join)\s+([a-zA-Z_][a-zA-Z0-9_\.]*)`)
+	// Captures the table reference after FROM/JOIN, allowing double-quoted and
+	// schema-qualified identifiers (e.g. FROM "Sales"."Orders" o). A leading "(" is
+	// not matched, so subquery sources are skipped.
+	fromJoin = regexp.MustCompile(`(?is)\b(?:from|join)\s+("?[a-zA-Z_][a-zA-Z0-9_]*"?(?:\."?[a-zA-Z_][a-zA-Z0-9_]*"?)*)`)
 	lineComment  = regexp.MustCompile(`--[^\n]*`)
 	blockComment = regexp.MustCompile(`(?s)/\*.*?\*/`)
 )
@@ -166,6 +169,7 @@ func referencedTables(sql string) []string {
 	out := []string{}
 	for _, m := range fromJoin.FindAllStringSubmatch(sql, -1) {
 		t := strings.ToLower(strings.TrimSpace(m[1]))
+		t = strings.ReplaceAll(t, `"`, "") // normalize quoted identifiers
 		if t == "" || seen[t] {
 			continue
 		}

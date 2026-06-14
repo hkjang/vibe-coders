@@ -585,6 +585,8 @@ curl.exe http://localhost:8080/v1/chat/completions `
 
 - **안전장치**: SELECT/CTE 전용(DDL·DML·스택쿼리·`SELECT INTO`·위험함수 차단, 문자열/주석 리터럴 스크럽 후 분석), 자동 `LIMIT`, 테이블 allowlist + **컬럼 민감도(normal/mask/exclude)** — `exclude` 컬럼은 LLM 컨텍스트에서 제외되고 참조 SQL은 차단, 결과 PII 마스킹, PostgreSQL `EXPLAIN` **위험 점수화**(비용·seq scan·nested loop) 차단, 가상모델 비유출(업스트림엔 실제 모델만), `task_type=text2sql` + `requested_model`/`upstream_model` 감사.
 - **스키마 레지스트리**: `text2sql_schemas`(이름·팀·기본) + `text2sql_tables`/`text2sql_columns`(업무 설명·민감도)로 프롬프트 컨텍스트를 구조화 생성. `POST /admin/text2sql/collect` 로 실행 DB(`information_schema`/`sqlite_master`)에서 자동 수집(운영자 태그 보존).
+- **권한 매트릭스**: `text2sql_permissions`(`/admin/text2sql/permissions`) 로 팀·API Key·사용자별 schema/table/column allow·deny 정책 — deny는 테이블/컬럼 접근 제한, allow는 민감(exclude) 컬럼 접근을 특정 주체에 부여.
+- **운영 분석**: 실패 원인 표준 분류(syntax/permission/cost/timeout/unknown_column/empty)와 EXPLAIN 위험도(cost·risk_score)를 로그에 저장, ClickHouse 자동 적재 스케줄러(`CLICKHOUSE_SINK_INTERVAL`) + 정합성 검증(`/admin/dw/consistency`).
 - **few-shot · 품질**: 검증된 골든 쿼리를 질문 유사도로 생성 프롬프트에 주입하고, 성공 쿼리는 골든 자동 후보로 적립. `text2sql.sql_valid`/`executed` 평가를 LLM evaluation 파이프라인으로 emit, 모델별 SQL 품질 메트릭 제공.
 - **응답 포맷**: 해석 / 생성 SQL / 결과 / 주의사항 / 실행 가능 여부 / 다음 질문 제안 섹션으로 현업 친화 구성.
 - **장기 분석**: `POST /admin/dw/clickhouse` 로 일별 rollup 을 ClickHouse HTTP 인터페이스(JSONEachRow)로 적재(`CLICKHOUSE_URL` 설정 시).

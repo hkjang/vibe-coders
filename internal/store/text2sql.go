@@ -22,10 +22,13 @@ type Text2SQLQueryLog struct {
 	RejectReason  string    `json:"reject_reason"`
 	Executed      bool      `json:"executed"`
 	RowCount      int64     `json:"row_count"`
-	Error         string    `json:"error"`
-	CostKRW       float64   `json:"cost_krw"`
-	LatencyMS     int64     `json:"latency_ms"`
-	CreatedAt     time.Time `json:"created_at"`
+	Error           string    `json:"error"`
+	FailureCategory string    `json:"failure_category"`
+	ExplainCost     float64   `json:"explain_cost"`
+	ExplainRisk     int       `json:"explain_risk"`
+	CostKRW         float64   `json:"cost_krw"`
+	LatencyMS       int64     `json:"latency_ms"`
+	CreatedAt       time.Time `json:"created_at"`
 }
 
 func (s *SQLStore) InsertText2SQLLog(ctx context.Context, l Text2SQLQueryLog) error {
@@ -33,10 +36,10 @@ func (s *SQLStore) InsertText2SQLLog(ctx context.Context, l Text2SQLQueryLog) er
 		l.CreatedAt = time.Now().UTC()
 	}
 	_, err := s.db.ExecContext(ctx, s.bind(`INSERT INTO text2sql_query_logs
-		(id, request_id, api_key_id, team, virtual_model, upstream_model, mode, question, generated_sql, valid, reject_reason, executed, row_count, error, cost_krw, latency_ms, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+		(id, request_id, api_key_id, team, virtual_model, upstream_model, mode, question, generated_sql, valid, reject_reason, executed, row_count, error, failure_category, explain_cost, explain_risk, cost_krw, latency_ms, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
 		l.ID, l.RequestID, l.APIKeyID, l.Team, l.VirtualModel, l.UpstreamModel, l.Mode, l.Question, l.GeneratedSQL,
-		boolInt(l.Valid), l.RejectReason, boolInt(l.Executed), l.RowCount, l.Error, l.CostKRW, l.LatencyMS, formatTime(l.CreatedAt))
+		boolInt(l.Valid), l.RejectReason, boolInt(l.Executed), l.RowCount, l.Error, l.FailureCategory, l.ExplainCost, l.ExplainRisk, l.CostKRW, l.LatencyMS, formatTime(l.CreatedAt))
 	return err
 }
 
@@ -47,7 +50,7 @@ func (s *SQLStore) ListText2SQLLogs(ctx context.Context, limit int) ([]Text2SQLQ
 	}
 	rows, err := s.db.QueryContext(ctx, s.bind(`SELECT id, COALESCE(request_id,''), COALESCE(api_key_id,''), COALESCE(team,''),
 		COALESCE(virtual_model,''), COALESCE(upstream_model,''), COALESCE(mode,''), COALESCE(question,''), COALESCE(generated_sql,''),
-		valid, COALESCE(reject_reason,''), executed, row_count, COALESCE(error,''), cost_krw, latency_ms, created_at
+		valid, COALESCE(reject_reason,''), executed, row_count, COALESCE(error,''), COALESCE(failure_category,''), explain_cost, explain_risk, cost_krw, latency_ms, created_at
 		FROM text2sql_query_logs ORDER BY created_at DESC LIMIT ?`), limit)
 	if err != nil {
 		return nil, err
@@ -59,7 +62,7 @@ func (s *SQLStore) ListText2SQLLogs(ctx context.Context, limit int) ([]Text2SQLQ
 		var valid, executed int
 		var createdAt string
 		if err := rows.Scan(&l.ID, &l.RequestID, &l.APIKeyID, &l.Team, &l.VirtualModel, &l.UpstreamModel, &l.Mode,
-			&l.Question, &l.GeneratedSQL, &valid, &l.RejectReason, &executed, &l.RowCount, &l.Error, &l.CostKRW, &l.LatencyMS, &createdAt); err != nil {
+			&l.Question, &l.GeneratedSQL, &valid, &l.RejectReason, &executed, &l.RowCount, &l.Error, &l.FailureCategory, &l.ExplainCost, &l.ExplainRisk, &l.CostKRW, &l.LatencyMS, &createdAt); err != nil {
 			return nil, err
 		}
 		l.Valid = valid == 1
@@ -80,6 +83,32 @@ type Text2SQLStats struct {
 	Errors    int64   `json:"errors"`
 	CostKRW   float64 `json:"cost_krw"`
 	ValidRate float64 `json:"valid_rate"`
+}
+
+// Text2SQLFailureBucket counts Text2SQL failures by standard category.
+type Text2SQLFailureBucket struct {
+	Category string `json:"category"`
+	Count    int64  `json:"count"`
+}
+
+// Text2SQLFailureBreakdownSince groups failed Text2SQL requests by failure_category.
+func (s *SQLStore) Text2SQLFailureBreakdownSince(ctx context.Context, since time.Time) ([]Text2SQLFailureBucket, error) {
+	rows, err := s.db.QueryContext(ctx, s.bind(`SELECT COALESCE(NULLIF(failure_category,''),'(none)'), COUNT(*)
+		FROM text2sql_query_logs WHERE created_at >= ? AND COALESCE(failure_category,'') <> ''
+		GROUP BY COALESCE(NULLIF(failure_category,''),'(none)') ORDER BY COUNT(*) DESC`), since.UTC().Format(time.RFC3339Nano))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Text2SQLFailureBucket{}
+	for rows.Next() {
+		var b Text2SQLFailureBucket
+		if err := rows.Scan(&b.Category, &b.Count); err != nil {
+			return nil, err
+		}
+		out = append(out, b)
+	}
+	return out, rows.Err()
 }
 
 // Text2SQLModelMetric is per-upstream-model Text2SQL quality derived from the logs.

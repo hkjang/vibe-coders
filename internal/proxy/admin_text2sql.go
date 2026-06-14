@@ -66,11 +66,15 @@ func (s *Server) handleText2SQLAdmin(w http.ResponseWriter, r *http.Request) {
 	modelMetrics, _ := s.db.Text2SQLModelMetricsSince(r.Context(), since)
 	goldens, _ := s.db.ListText2SQLGoldenQueries(r.Context(), false)
 	dbProfiles, _ := s.db.ListText2SQLProfiles(r.Context())
+	permissions, _ := s.db.ListText2SQLPermissions(r.Context())
+	failures, _ := s.db.Text2SQLFailureBreakdownSince(r.Context(), since)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"schemas":       schemas,
 		"model_metrics": modelMetrics,
 		"golden":        goldens,
 		"db_profiles":   dbProfiles,
+		"permissions":   permissions,
+		"failures":      failures,
 		"enabled":       s.cfg.Text2SQL.Enabled,
 		"profiles": []map[string]string{
 			{"model": "vibe/text2sql-preview", "mode": "preview", "upstream": s.cfg.Text2SQL.PreviewModel},
@@ -188,6 +192,69 @@ func (s *Server) handleText2SQLColumns(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+	default:
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+	}
+}
+
+// handleText2SQLPermissions manages the access matrix (subject × schema/table/column × allow/deny).
+// GET /admin/text2sql/permissions · POST {subject_type,subject_id,schema_name,table_name,column_name,action} · DELETE ?id=
+func (s *Server) handleText2SQLPermissions(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		list, err := s.db.ListText2SQLPermissions(r.Context())
+		if err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "permissions_failed")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"permissions": list})
+	case http.MethodPost:
+		var p struct {
+			SubjectType, SubjectID, SchemaName, TableName, ColumnName, Action string
+		}
+		if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+			writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "invalid_body")
+			return
+		}
+		st := strings.ToLower(strings.TrimSpace(p.SubjectType))
+		if st != "team" && st != "api_key" && st != "user" && st != "*" {
+			writeOpenAIError(w, http.StatusBadRequest, "subject_type must be team/api_key/user/*", "invalid_request_error", "invalid_subject")
+			return
+		}
+		act := strings.ToLower(strings.TrimSpace(p.Action))
+		if act != "allow" && act != "deny" {
+			writeOpenAIError(w, http.StatusBadRequest, "action must be allow or deny", "invalid_request_error", "invalid_action")
+			return
+		}
+		if st != "*" && strings.TrimSpace(p.SubjectID) == "" {
+			writeOpenAIError(w, http.StatusBadRequest, "subject_id is required unless subject_type=*", "invalid_request_error", "missing_subject_id")
+			return
+		}
+		perm := store.Text2SQLPermission{
+			ID: newID("t2sp"), SubjectType: st, SubjectID: firstNonEmpty(strings.TrimSpace(p.SubjectID), "*"),
+			SchemaName: strings.TrimSpace(p.SchemaName), TableName: strings.TrimSpace(p.TableName), ColumnName: strings.TrimSpace(p.ColumnName), Action: act,
+		}
+		if err := s.db.UpsertText2SQLPermission(r.Context(), perm); err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "permission_save_failed")
+			return
+		}
+		s.auditAdmin(r, "text2sql.permission.upsert", "", auditJSON(perm))
+		writeJSON(w, http.StatusCreated, map[string]any{"permission": perm})
+	case http.MethodDelete:
+		id := strings.TrimSpace(r.URL.Query().Get("id"))
+		if id == "" {
+			writeOpenAIError(w, http.StatusBadRequest, "id query param is required", "invalid_request_error", "missing_id")
+			return
+		}
+		if err := s.db.DeleteText2SQLPermission(r.Context(), id); err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "permission_delete_failed")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"id": id, "status": "deleted"})
 	default:
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
 	}

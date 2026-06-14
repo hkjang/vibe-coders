@@ -4821,6 +4821,31 @@ const adminHTML = `<!doctype html>
       const dbpTable = dbProfiles.length ?
         '<table><thead><tr><th>가상 모델</th><th>모드</th><th>업스트림</th><th>요약</th><th>스키마</th><th>동작</th></tr></thead><tbody>' + dbpRows + '</tbody></table>'
         : '<div class="empty">런타임 프로필 없음. 등록하면 env 기본값을 오버라이드하거나 새 가상 모델(예: <code>vibe/text2sql-finance</code>)을 추가할 수 있습니다.</div>';
+      const perms = d.permissions || [];
+      const permForm =
+        '<form class="inline-form" id="t2s-perm-form" style="grid-template-columns: 100px 130px 110px 110px 110px 90px 70px; align-items:start;">' +
+          '<select id="tpm-subtype"><option value="team">team</option><option value="api_key">api_key</option><option value="user">user</option><option value="*">전체(*)</option></select>' +
+          '<input id="tpm-subid" placeholder="subject id (* 가능)">' +
+          '<input id="tpm-schema" placeholder="schema (*)">' +
+          '<input id="tpm-table" placeholder="table (*)">' +
+          '<input id="tpm-column" placeholder="column (*)">' +
+          '<select id="tpm-action"><option value="deny">deny</option><option value="allow">allow</option></select>' +
+          '<button type="submit">추가</button>' +
+        '</form>';
+      const permRows = perms.map(p =>
+        '<tr><td>' + escapeHTML(p.subject_type) + '</td><td>' + escapeHTML(p.subject_id) + '</td>' +
+        '<td>' + escapeHTML(p.schema_name) + '.' + escapeHTML(p.table_name) + '.' + escapeHTML(p.column_name) + '</td>' +
+        '<td><span class="status ' + (p.action === 'deny' ? 'error' : '') + '">' + escapeHTML(p.action) + '</span></td>' +
+        '<td><button class="danger" type="button" onclick="deleteT2SPermission(\'' + escapeAttr(p.id) + '\')">삭제</button></td></tr>'
+      ).join('');
+      const permTable = perms.length
+        ? '<table><thead><tr><th>주체유형</th><th>주체ID</th><th>schema.table.column</th><th>동작</th><th></th></tr></thead><tbody>' + permRows + '</tbody></table>'
+        : '<div class="empty">권한 규칙 없음. deny 규칙은 테이블/컬럼 접근을 제한하고, allow 규칙은 민감(exclude) 컬럼 접근을 특정 주체에 부여합니다.</div>';
+      const failures = d.failures || [];
+      const failTable = failures.length
+        ? '<table><thead><tr><th>실패 분류</th><th data-sort="num">건수</th></tr></thead><tbody>' +
+          failures.map(f => '<tr><td>' + escapeHTML(f.category) + '</td><td data-num="' + (f.count || 0) + '">' + fmt(f.count) + '</td></tr>').join('') + '</tbody></table>'
+        : '<div class="empty">최근 7일 실패 없음.</div>';
       const mm = d.model_metrics || [];
       const mmTable = mm.length ?
         '<table><thead><tr><th>업스트림 모델</th><th data-sort="num">질의</th><th data-sort="num">유효율</th><th data-sort="num">실행</th><th data-sort="num">오류</th><th data-sort="num">평균비용</th><th data-sort="num">평균지연</th></tr></thead><tbody>' +
@@ -4861,6 +4886,8 @@ const adminHTML = `<!doctype html>
         section('모델별 SQL 품질 (최근 7일)', mmTable) +
         section('스키마 카탈로그 · 테이블 권한', schemaForm + schemaTable) +
         section('스키마 레지스트리 (테이블 · 컬럼 · 민감도)', registryHTML()) +
+        section('권한 매트릭스 (subject × schema/table/column)', permForm + permTable) +
+        section('실패 원인 분류 (최근 7일)', failTable) +
         section('Golden Query (few-shot · 회귀)', goldenRun + goldenForm + goldenTable) +
         section('최근 Text2SQL 질의', logTable);
       const sf = document.getElementById('t2s-schema-form');
@@ -4875,6 +4902,8 @@ const adminHTML = `<!doctype html>
       if (rcBtn) rcBtn.addEventListener('click', collectT2SRegistry);
       const pf = document.getElementById('t2s-profile-form');
       if (pf) pf.addEventListener('submit', addT2SProfile);
+      const pmf = document.getElementById('t2s-perm-form');
+      if (pmf) pmf.addEventListener('submit', addT2SPermission);
       const gf = document.getElementById('t2s-golden-form');
       if (gf) gf.addEventListener('submit', addT2SGolden);
       const gr = document.getElementById('t2s-golden-run');
@@ -4947,6 +4976,25 @@ const adminHTML = `<!doctype html>
       if (!confirm(table + ' 테이블을 삭제하시겠습니까? (컬럼도 함께 삭제)')) return;
       await api('/admin/text2sql/tables?schema=' + encodeURIComponent(schema) + '&table=' + encodeURIComponent(table), { method: 'DELETE' });
       loadT2SRegistry();
+    };
+    async function addT2SPermission(e) {
+      e.preventDefault();
+      const body = {
+        subject_type: document.getElementById('tpm-subtype').value,
+        subject_id: document.getElementById('tpm-subid').value.trim(),
+        schema_name: document.getElementById('tpm-schema').value.trim(),
+        table_name: document.getElementById('tpm-table').value.trim(),
+        column_name: document.getElementById('tpm-column').value.trim(),
+        action: document.getElementById('tpm-action').value,
+      };
+      if (body.subject_type !== '*' && !body.subject_id) { alert('subject id를 입력하세요'); return; }
+      await api('/admin/text2sql/permissions', { method: 'POST', body: JSON.stringify(body) });
+      route();
+    }
+    window.deleteT2SPermission = async (id) => {
+      if (!confirm('이 권한 규칙을 삭제하시겠습니까?')) return;
+      await api('/admin/text2sql/permissions?id=' + encodeURIComponent(id), { method: 'DELETE' });
+      route();
     };
     async function addT2SProfile(e) {
       e.preventDefault();

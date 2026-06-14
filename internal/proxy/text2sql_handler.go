@@ -78,6 +78,12 @@ func (s *Server) handleText2SQL(w http.ResponseWriter, r *http.Request, meta sto
 			allowedTables = cat.AllowedTables
 			blockedColumns = cat.ExcludedColumns
 		}
+		// Permission matrix overlay: per subject (api_key/team/*) deny rules restrict
+		// the table allowlist + add blocked columns; allow rules grant access to a
+		// sensitivity-excluded column for that subject.
+		if eff, err := s.db.ResolveText2SQLPermissions(r.Context(), sc.Name, meta.Request.APIKeyID, team); err == nil {
+			allowedTables = applyPermissionEffect(allowedTables, &blockedColumns, eff)
+		}
 	}
 
 	logRec := store.Text2SQLQueryLog{
@@ -97,6 +103,7 @@ func (s *Server) handleText2SQL(w http.ResponseWriter, r *http.Request, meta sto
 		logRec.Executed = executed
 		logRec.RowCount = rowCount
 		logRec.Error = errMsg
+		logRec.FailureCategory = classifyText2SQLFailure(validation, executed, rowCount, errMsg)
 		logRec.CostKRW = costKRW
 		logRec.LatencyMS = time.Since(start).Milliseconds()
 		_ = s.db.InsertText2SQLLog(r.Context(), logRec)
@@ -173,7 +180,9 @@ func (s *Server) handleText2SQL(w http.ResponseWriter, r *http.Request, meta sto
 	}
 
 	// 4) Execute mode: run the validated SELECT read-only.
-	cols, rows, rowCount, execErr := s.execText2SQL(r.Context(), validation.SQL)
+	cols, rows, rowCount, risk, execErr := s.execText2SQL(r.Context(), validation.SQL)
+	logRec.ExplainCost = risk.Cost
+	logRec.ExplainRisk = risk.Score
 	if execErr != nil {
 		finalize("SQL 실행 실패: "+execErr.Error()+"\n\n```sql\n"+validation.SQL+"\n```", validation, false, 0, execErr.Error(), totalCost)
 		return
@@ -203,6 +212,48 @@ func (s *Server) handleText2SQL(w http.ResponseWriter, r *http.Request, meta sto
 
 	content := executeContent(question, validation.SQL, table, rowCount, summary, validation)
 	finalize(content, validation, true, rowCount, "", totalCost)
+}
+
+// applyPermissionEffect overlays the permission matrix onto the catalog-derived
+// allowlist/blocklist: deny removes tables and adds blocked columns; allow removes
+// a column from the blocked set (granting access to an otherwise-sensitive column).
+func applyPermissionEffect(allowedTables []string, blocked *[]string, eff store.Text2SQLPermissionEffect) []string {
+	denyAll := false
+	deniedT := map[string]bool{}
+	for _, t := range eff.DeniedTables {
+		if t == "*" {
+			denyAll = true
+		}
+		deniedT[t] = true
+	}
+	if denyAll {
+		allowedTables = []string{} // schema-wide deny → nothing allowed
+	} else if len(deniedT) > 0 {
+		kept := allowedTables[:0]
+		for _, t := range allowedTables {
+			if !deniedT[strings.ToLower(t)] {
+				kept = append(kept, t)
+			}
+		}
+		allowedTables = kept
+	}
+	// Add denied columns to the blocked set.
+	*blocked = append(*blocked, eff.DeniedColumns...)
+	// Remove explicitly-allowed columns from the blocked set.
+	if len(eff.AllowedColumns) > 0 {
+		allow := map[string]bool{}
+		for _, c := range eff.AllowedColumns {
+			allow[strings.ToLower(c)] = true
+		}
+		kept := (*blocked)[:0]
+		for _, c := range *blocked {
+			if !allow[strings.ToLower(c)] {
+				kept = append(kept, c)
+			}
+		}
+		*blocked = kept
+	}
+	return allowedTables
 }
 
 // text2sqlAutoModelByComplexity maps a complexity score to an upstream model for
@@ -339,28 +390,67 @@ func renderResultTable(cols []string, rows [][]string) string {
 	return b.String()
 }
 
-// execText2SQL opens (lazily) the read-only execute DB and runs the validated query.
-func (s *Server) execText2SQL(ctx context.Context, query string) ([]string, [][]string, int64, error) {
+// execText2SQL opens (lazily) the read-only execute DB, scores the plan, and runs
+// the validated query. The returned explainRisk is recorded even when the query is
+// allowed (risk < 50).
+func (s *Server) execText2SQL(ctx context.Context, query string) ([]string, [][]string, int64, explainRisk, error) {
 	db, err := s.text2sqlExecDB()
 	if err != nil {
-		return nil, nil, 0, err
+		return nil, nil, 0, explainRisk{}, err
 	}
 	rowLimit := s.cfg.Text2SQL.MaxLimit
 	if rowLimit <= 0 {
 		rowLimit = 1000
 	}
 	driver := strings.ToLower(strings.TrimSpace(s.cfg.Text2SQL.ExecDriver))
+	var risk explainRisk
 	// EXPLAIN risk guard (PostgreSQL): score the plan (cost + seq-scan/nested-loop on
 	// large row estimates) and reject high-risk plans before running the query.
 	if s.cfg.Text2SQL.MaxExplainCost > 0 && (driver == "postgres" || driver == "postgresql" || driver == "pgx") {
 		if plan, err := explainPlanFor(ctx, db, query); err == nil {
-			risk := scoreExplainPlan(plan, s.cfg.Text2SQL.MaxExplainCost)
+			risk = scoreExplainPlan(plan, s.cfg.Text2SQL.MaxExplainCost)
 			if risk.Score >= 50 {
-				return nil, nil, 0, fmt.Errorf("EXPLAIN risk %d/100: %s", risk.Score, strings.Join(risk.Reasons, "; "))
+				return nil, nil, 0, risk, fmt.Errorf("EXPLAIN risk %d/100: %s", risk.Score, strings.Join(risk.Reasons, "; "))
 			}
 		}
 	}
-	return executeReadOnlyQuery(ctx, db, s.cfg.Text2SQL.ExecDriver, query, rowLimit)
+	cols, rows, count, err := executeReadOnlyQuery(ctx, db, s.cfg.Text2SQL.ExecDriver, query, rowLimit)
+	return cols, rows, count, risk, err
+}
+
+// classifyText2SQLFailure maps a request outcome to a standard failure category for
+// operational analysis. Returns "" on success.
+func classifyText2SQLFailure(v text2sql.ValidationResult, executed bool, rowCount int64, errMsg string) string {
+	if !v.OK {
+		reason := strings.ToLower(v.Reason)
+		switch {
+		case strings.Contains(reason, "not allowed"), strings.Contains(reason, "sensitive"):
+			return "permission_denied"
+		case strings.Contains(reason, "upstream"):
+			return "generation_error"
+		case strings.Contains(reason, "empty"):
+			return "empty_generation"
+		default: // SELECT-only, forbidden keyword, stacked, dangerous, etc.
+			return "syntax_error"
+		}
+	}
+	if errMsg != "" {
+		lower := strings.ToLower(errMsg)
+		switch {
+		case strings.Contains(lower, "explain risk"), strings.Contains(lower, "cost"):
+			return "cost_exceeded"
+		case strings.Contains(lower, "timeout"), strings.Contains(lower, "deadline"):
+			return "timeout"
+		case strings.Contains(lower, "column"), strings.Contains(lower, "does not exist"), strings.Contains(lower, "no such"):
+			return "unknown_column"
+		default:
+			return "execution_error"
+		}
+	}
+	if executed && rowCount == 0 {
+		return "empty_result"
+	}
+	return ""
 }
 
 // explainPlanFor runs EXPLAIN (FORMAT JSON) and parses the plan tree.

@@ -545,6 +545,17 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 				updated_at TEXT NOT NULL,
 				PRIMARY KEY (schema_name, table_name, column_name)
 			)`,
+		`CREATE TABLE IF NOT EXISTS text2sql_permissions (
+				id TEXT PRIMARY KEY,
+				subject_type TEXT NOT NULL,
+				subject_id TEXT NOT NULL,
+				schema_name TEXT NOT NULL DEFAULT '*',
+				table_name TEXT NOT NULL DEFAULT '*',
+				column_name TEXT NOT NULL DEFAULT '*',
+				action TEXT NOT NULL,
+				created_at TEXT NOT NULL
+			)`,
+		`CREATE INDEX IF NOT EXISTS idx_text2sql_permissions_subject ON text2sql_permissions(subject_type, subject_id)`,
 		`CREATE TABLE IF NOT EXISTS text2sql_profiles (
 				virtual_model TEXT PRIMARY KEY,
 				mode TEXT NOT NULL DEFAULT 'preview',
@@ -596,6 +607,9 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 				created_at TEXT NOT NULL
 			)`,
 		`CREATE INDEX IF NOT EXISTS idx_text2sql_query_logs_created_at ON text2sql_query_logs(created_at)`,
+		`ALTER TABLE text2sql_query_logs ADD COLUMN failure_category TEXT`,
+		`ALTER TABLE text2sql_query_logs ADD COLUMN explain_cost REAL NOT NULL DEFAULT 0`,
+		`ALTER TABLE text2sql_query_logs ADD COLUMN explain_risk INTEGER NOT NULL DEFAULT 0`,
 		`CREATE TABLE IF NOT EXISTS model_pricing_versions (
 				id TEXT PRIMARY KEY,
 				model TEXT NOT NULL,

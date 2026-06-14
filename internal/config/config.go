@@ -120,11 +120,13 @@ type Text2SQLConfig struct {
 // ClickHouseConfig configures the long-term analytics sink. When URL is empty the
 // sink is disabled; the PostgreSQL/SQLite rollup ledger remains the source of truth.
 type ClickHouseConfig struct {
-	URL      string // HTTP endpoint, e.g. http://clickhouse:8123
-	Database string
-	Table    string
-	User     string
-	Password string
+	URL          string // HTTP endpoint, e.g. http://clickhouse:8123
+	Database     string
+	Table        string
+	User         string
+	Password     string
+	SinkInterval time.Duration // > 0 enables the background auto-sink worker
+	SinkDays     int           // how many recent days each auto-sink covers
 }
 
 // DefaultGatewaySecret is the insecure development fallback used when
@@ -227,11 +229,13 @@ func Load() (Config, error) {
 			ExecDSN:        os.Getenv("TEXT2SQL_EXEC_DSN"),
 		},
 		ClickHouse: ClickHouseConfig{
-			URL:      strings.TrimRight(os.Getenv("CLICKHOUSE_URL"), "/"),
-			Database: getEnv("CLICKHOUSE_DB", "default"),
-			Table:    getEnv("CLICKHOUSE_TABLE", "analytics_daily"),
-			User:     os.Getenv("CLICKHOUSE_USER"),
-			Password: os.Getenv("CLICKHOUSE_PASSWORD"),
+			URL:          strings.TrimRight(os.Getenv("CLICKHOUSE_URL"), "/"),
+			Database:     getEnv("CLICKHOUSE_DB", "default"),
+			Table:        getEnv("CLICKHOUSE_TABLE", "analytics_daily"),
+			User:         os.Getenv("CLICKHOUSE_USER"),
+			Password:     os.Getenv("CLICKHOUSE_PASSWORD"),
+			SinkInterval: durationEnv("CLICKHOUSE_SINK_INTERVAL", 0),
+			SinkDays:     intEnv("CLICKHOUSE_SINK_DAYS", 3),
 		},
 		Pricing: map[string]ModelPrice{},
 	}

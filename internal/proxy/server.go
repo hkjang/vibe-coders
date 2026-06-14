@@ -87,6 +87,11 @@ func NewServer(cfg config.Config, db *store.SQLStore, logger *store.AsyncLogger,
 		sessions:  newSessionInferer(cfg.Session.IdleTimeout),
 	}
 
+	// Background ClickHouse auto-sink (only when explicitly configured).
+	if cfg.ClickHouse.URL != "" && cfg.ClickHouse.SinkInterval > 0 {
+		go server.clickhouseSinkLoop()
+	}
+
 	if cfg.Upstream.APIKey != "" {
 		encrypted, err := secrets.Encrypt(cfg.Upstream.APIKey)
 		if err != nil {
@@ -159,12 +164,14 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/admin/retention", s.handleRetention)
 	mux.HandleFunc("/admin/dw/rollups", s.handleDWRollups)
 	mux.HandleFunc("/admin/dw/clickhouse", s.handleClickHouseSink)
+	mux.HandleFunc("/admin/dw/consistency", s.handleClickHouseConsistency)
 	mux.HandleFunc("/admin/text2sql", s.handleText2SQLAdmin)
 	mux.HandleFunc("/admin/text2sql/schemas", s.handleText2SQLSchemas)
 	mux.HandleFunc("/admin/text2sql/profiles", s.handleText2SQLProfiles)
 	mux.HandleFunc("/admin/text2sql/tables", s.handleText2SQLTables)
 	mux.HandleFunc("/admin/text2sql/columns", s.handleText2SQLColumns)
 	mux.HandleFunc("/admin/text2sql/collect", s.handleText2SQLCollect)
+	mux.HandleFunc("/admin/text2sql/permissions", s.handleText2SQLPermissions)
 	mux.HandleFunc("/admin/text2sql/golden", s.handleText2SQLGolden)
 	mux.HandleFunc("/admin/text2sql/golden/", s.handleText2SQLGolden)
 	mux.HandleFunc("/admin/export.csv", s.handleExportCSV)
