@@ -4766,6 +4766,28 @@ const adminHTML = `<!doctype html>
         '<tr><td><code>' + escapeHTML(p.model) + '</code></td><td>' + escapeHTML(p.mode) + '</td><td>' + escapeHTML(p.upstream) + '</td></tr>'
       ).join('');
       const profileTable = '<table><thead><tr><th>가상 모델</th><th>모드</th><th>업스트림 모델</th></tr></thead><tbody>' + profileRows + '</tbody></table>';
+      const schemas = d.schemas || [];
+      const schemaForm =
+        '<form class="inline-form" id="t2s-schema-form" style="grid-template-columns: 130px 90px 90px minmax(200px,2fr) minmax(140px,1fr) 70px; align-items:start;">' +
+          '<input id="t2s-name" placeholder="이름 (예: analytics)" required>' +
+          '<input id="t2s-team" placeholder="팀(빈칸=전역)">' +
+          '<input id="t2s-dialect" placeholder="PostgreSQL">' +
+          '<textarea id="t2s-schema" rows="3" placeholder="테이블/컬럼 설명 (프롬프트 컨텍스트)" required style="resize:vertical"></textarea>' +
+          '<input id="t2s-tables" placeholder="허용 테이블(콤마)">' +
+          '<button type="submit">저장</button>' +
+        '</form>';
+      const schemaRows = schemas.map(sc =>
+        '<tr>' +
+          '<td><strong>' + escapeHTML(sc.name) + '</strong>' + (sc.is_default ? ' <span class="pill">기본</span>' : '') + (sc.enabled ? '' : ' <span class="status error">중지</span>') + '</td>' +
+          '<td>' + escapeHTML(sc.team || '전역') + '</td>' +
+          '<td>' + escapeHTML(sc.dialect || '') + '</td>' +
+          '<td>' + ((sc.allowed_tables || []).length ? escapeHTML((sc.allowed_tables || []).join(', ')) : '<span class="muted">전체</span>') + '</td>' +
+          '<td><button class="danger" type="button" onclick="deleteT2SSchema(\'' + escapeAttr(sc.name) + '\')">삭제</button></td>' +
+        '</tr>'
+      ).join('');
+      const schemaTable = schemas.length ?
+        '<table><thead><tr><th>이름</th><th>팀</th><th>Dialect</th><th>허용 테이블</th><th>동작</th></tr></thead><tbody>' + schemaRows + '</tbody></table>'
+        : '<div class="empty">등록된 스키마 카탈로그 없음. 등록하면 프롬프트 컨텍스트와 테이블 허용목록(검증)에 사용됩니다. 클라이언트는 <code>X-Text2SQL-Schema-Name</code> 헤더로 선택할 수 있습니다.</div>';
       const logRows = (d.logs || []).map(l =>
         '<tr class="' + (l.valid ? '' : 'row-error') + '">' +
           '<td>' + ago(l.created_at) + '</td>' +
@@ -4784,9 +4806,31 @@ const adminHTML = `<!doctype html>
         '<section><h2>Text2SQL</h2><div style="padding:0 14px 8px" class="muted">자연어 질문을 읽기 전용 SQL로 변환합니다. 사용자는 <code>vibe/text2sql-*</code> 가상 모델을 호출하고, 게이트웨이가 내부적으로 실제 업스트림 모델을 선택해 SQL을 생성·검증·(선택)실행합니다.</div></section>' +
         section('요약 (최근 7일)', kpis) +
         section('가상 모델 프로필', profileTable) +
+        section('스키마 카탈로그 · 테이블 권한', schemaForm + schemaTable) +
         section('최근 Text2SQL 질의', logTable);
+      const sf = document.getElementById('t2s-schema-form');
+      if (sf) sf.addEventListener('submit', addT2SSchema);
       makeSortable('#view', 'text2sql');
     }
+    async function addT2SSchema(e) {
+      e.preventDefault();
+      const tables = document.getElementById('t2s-tables').value.split(',').map(x => x.trim()).filter(Boolean);
+      const body = {
+        name: document.getElementById('t2s-name').value.trim(),
+        team: document.getElementById('t2s-team').value.trim(),
+        dialect: document.getElementById('t2s-dialect').value.trim(),
+        schema_text: document.getElementById('t2s-schema').value,
+        allowed_tables: tables,
+      };
+      if (!body.name || !body.schema_text.trim()) { alert('이름과 스키마를 입력하세요'); return; }
+      await api('/admin/text2sql/schemas', { method: 'POST', body: JSON.stringify(body) });
+      route();
+    }
+    window.deleteT2SSchema = async (name) => {
+      if (!confirm(name + ' 스키마를 삭제하시겠습니까?')) return;
+      await api('/admin/text2sql/schemas?name=' + encodeURIComponent(name), { method: 'DELETE' });
+      route();
+    };
 
     async function renderSettings() {
       const [keys, providers, retention, fallback, audit, routes, learning, knowledge, usersResp, teamsResp, authEvents] = await Promise.all([

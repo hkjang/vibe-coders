@@ -100,18 +100,20 @@ type SecretConfig struct {
 // request whose model is vibe/text2sql-* is generated as read-only SQL by an
 // internal upstream model instead of being proxied verbatim.
 type Text2SQLConfig struct {
-	Enabled       bool
-	PreviewModel  string
-	ExecuteModel  string
-	AccurateModel string
-	LocalModel    string
-	SummaryModel  string
-	Dialect       string // e.g. "PostgreSQL"
-	Schema        string // inline schema/catalog context injected into the prompt
-	DefaultLimit  int
-	MaxLimit      int
-	ExecDriver    string // database/sql driver for execute mode (e.g. "postgres", "sqlite")
-	ExecDSN       string // read-only DSN for execute mode; empty disables execution
+	Enabled        bool
+	PreviewModel   string
+	ExecuteModel   string
+	AccurateModel  string
+	LocalModel     string
+	SummaryModel   string
+	Dialect        string // e.g. "PostgreSQL"
+	Schema         string // inline schema/catalog context injected into the prompt
+	DefaultLimit   int
+	MaxLimit       int
+	MaxExplainCost float64 // when > 0 (postgres), reject queries whose EXPLAIN total cost exceeds this
+	MaskResults    bool    // mask secrets/PII in executed result cells
+	ExecDriver     string  // database/sql driver for execute mode (e.g. "postgres", "sqlite")
+	ExecDSN        string  // read-only DSN for execute mode; empty disables execution
 }
 
 // DefaultGatewaySecret is the insecure development fallback used when
@@ -198,18 +200,20 @@ func Load() (Config, error) {
 			InferFromContent: boolEnv("VCS_INFER_FROM_CONTENT", true),
 		},
 		Text2SQL: Text2SQLConfig{
-			Enabled:       boolEnv("TEXT2SQL_ENABLED", false),
-			PreviewModel:  getEnv("TEXT2SQL_PREVIEW_MODEL", "gpt-4.1-mini"),
-			ExecuteModel:  getEnv("TEXT2SQL_EXECUTE_MODEL", "gpt-4.1-mini"),
-			AccurateModel: getEnv("TEXT2SQL_ACCURATE_MODEL", "claude-sonnet-4"),
-			LocalModel:    getEnv("TEXT2SQL_LOCAL_MODEL", "qwen-coder"),
-			SummaryModel:  getEnv("TEXT2SQL_SUMMARY_MODEL", "gpt-4.1-mini"),
-			Dialect:       getEnv("TEXT2SQL_DIALECT", "PostgreSQL"),
-			Schema:        os.Getenv("TEXT2SQL_SCHEMA"),
-			DefaultLimit:  intEnv("TEXT2SQL_DEFAULT_LIMIT", 100),
-			MaxLimit:      intEnv("TEXT2SQL_MAX_LIMIT", 1000),
-			ExecDriver:    getEnv("TEXT2SQL_EXEC_DRIVER", "postgres"),
-			ExecDSN:       os.Getenv("TEXT2SQL_EXEC_DSN"),
+			Enabled:        boolEnv("TEXT2SQL_ENABLED", false),
+			PreviewModel:   getEnv("TEXT2SQL_PREVIEW_MODEL", "gpt-4.1-mini"),
+			ExecuteModel:   getEnv("TEXT2SQL_EXECUTE_MODEL", "gpt-4.1-mini"),
+			AccurateModel:  getEnv("TEXT2SQL_ACCURATE_MODEL", "claude-sonnet-4"),
+			LocalModel:     getEnv("TEXT2SQL_LOCAL_MODEL", "qwen-coder"),
+			SummaryModel:   getEnv("TEXT2SQL_SUMMARY_MODEL", "gpt-4.1-mini"),
+			Dialect:        getEnv("TEXT2SQL_DIALECT", "PostgreSQL"),
+			Schema:         os.Getenv("TEXT2SQL_SCHEMA"),
+			DefaultLimit:   intEnv("TEXT2SQL_DEFAULT_LIMIT", 100),
+			MaxLimit:       intEnv("TEXT2SQL_MAX_LIMIT", 1000),
+			MaxExplainCost: floatEnv("TEXT2SQL_MAX_EXPLAIN_COST", 0),
+			MaskResults:    boolEnv("TEXT2SQL_MASK_RESULTS", true),
+			ExecDriver:     getEnv("TEXT2SQL_EXEC_DRIVER", "postgres"),
+			ExecDSN:        os.Getenv("TEXT2SQL_EXEC_DSN"),
 		},
 		Pricing: map[string]ModelPrice{},
 	}
@@ -331,6 +335,18 @@ func intEnv(key string, fallback int) int {
 		return fallback
 	}
 	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return fallback
+	}
+	return parsed
+}
+
+func floatEnv(key string, fallback float64) float64 {
+	value := os.Getenv(key)
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseFloat(value, 64)
 	if err != nil {
 		return fallback
 	}

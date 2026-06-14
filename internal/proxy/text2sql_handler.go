@@ -35,7 +35,24 @@ func (s *Server) handleText2SQL(w http.ResponseWriter, r *http.Request, meta sto
 	summaryModel := firstNonEmpty(profile.SummaryModel, cfg.SummaryModel, upstreamModel)
 
 	question := text2sql.LastUserQuestion(body)
+
+	// Resolve the schema catalog: an explicitly named schema (team-scoped), else the
+	// team/global default, else the inline config schema. The catalog also supplies
+	// the table allowlist used to validate the generated SQL.
+	team := ""
+	if authCtx != nil {
+		team = authCtx.TeamID
+	}
+	dialect := cfg.Dialect
 	schema := firstNonEmpty(strings.TrimSpace(r.Header.Get("X-Text2SQL-Schema")), cfg.Schema)
+	var allowedTables []string
+	if sc, found, _ := s.db.ResolveText2SQLSchema(r.Context(), strings.TrimSpace(r.Header.Get("X-Text2SQL-Schema-Name")), team); found {
+		schema = sc.SchemaText
+		allowedTables = sc.AllowedTables
+		if sc.Dialect != "" {
+			dialect = sc.Dialect
+		}
+	}
 
 	logRec := store.Text2SQLQueryLog{
 		ID: newID("t2s"), RequestID: meta.Request.ID, APIKeyID: meta.Request.APIKeyID,
@@ -80,7 +97,7 @@ func (s *Server) handleText2SQL(w http.ResponseWriter, r *http.Request, meta sto
 	}
 
 	// 1) Generate SQL via the chosen upstream model (internal, non-recursive call).
-	msgs := text2sql.BuildGenerationMessages(cfg.Dialect, schema, question, cfg.DefaultLimit)
+	msgs := text2sql.BuildGenerationMessages(dialect, schema, question, cfg.DefaultLimit)
 	gen := s.runGovernanceChat(r.Context(), r, upstreamModel, text2sql.MessagesJSON(msgs))
 	totalCost := gen.CostKRW
 	if gen.Error != "" {
@@ -91,7 +108,7 @@ func (s *Server) handleText2SQL(w http.ResponseWriter, r *http.Request, meta sto
 	// 2) Extract + validate.
 	rawSQL := text2sql.ExtractSQL(gen.Response)
 	validation := text2sql.ValidateSQL(rawSQL, text2sql.ValidateOptions{
-		DefaultLimit: cfg.DefaultLimit, MaxLimit: cfg.MaxLimit,
+		DefaultLimit: cfg.DefaultLimit, MaxLimit: cfg.MaxLimit, AllowedTables: allowedTables,
 	})
 	if !validation.OK {
 		content := fmt.Sprintf("생성된 SQL이 안전 검증을 통과하지 못했습니다 (사유: %s).\n\n```sql\n%s\n```", validation.Reason, strings.TrimSpace(rawSQL))
@@ -114,6 +131,13 @@ func (s *Server) handleText2SQL(w http.ResponseWriter, r *http.Request, meta sto
 	if execErr != nil {
 		finalize("SQL 실행 실패: "+execErr.Error()+"\n\n```sql\n"+validation.SQL+"\n```", validation, false, 0, execErr.Error(), totalCost)
 		return
+	}
+	if cfg.MaskResults {
+		for i := range rows {
+			for j := range rows[i] {
+				rows[i][j] = maskSecretText(rows[i][j])
+			}
+		}
 	}
 	table := renderResultTable(cols, rows)
 
@@ -223,7 +247,43 @@ func (s *Server) execText2SQL(ctx context.Context, query string) ([]string, [][]
 	if rowLimit <= 0 {
 		rowLimit = 1000
 	}
+	driver := strings.ToLower(strings.TrimSpace(s.cfg.Text2SQL.ExecDriver))
+	// EXPLAIN cost guard (PostgreSQL): reject plans whose estimated total cost is
+	// above the configured ceiling before running the query.
+	if s.cfg.Text2SQL.MaxExplainCost > 0 && (driver == "postgres" || driver == "postgresql" || driver == "pgx") {
+		if cost, err := explainTotalCost(ctx, db, query); err == nil && cost > s.cfg.Text2SQL.MaxExplainCost {
+			return nil, nil, 0, fmt.Errorf("EXPLAIN total cost %.0f exceeds limit %.0f", cost, s.cfg.Text2SQL.MaxExplainCost)
+		}
+	}
 	return executeReadOnlyQuery(ctx, db, s.cfg.Text2SQL.ExecDriver, query, rowLimit)
+}
+
+// explainTotalCost runs EXPLAIN (FORMAT JSON) and returns the plan's total cost.
+func explainTotalCost(ctx context.Context, db *sql.DB, query string) (float64, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	var raw string
+	if err := db.QueryRowContext(ctx, "EXPLAIN (FORMAT JSON) "+query).Scan(&raw); err != nil {
+		return 0, err
+	}
+	return parseExplainCost([]byte(raw))
+}
+
+// parseExplainCost extracts the top-level "Total Cost" from a PostgreSQL
+// EXPLAIN (FORMAT JSON) result.
+func parseExplainCost(raw []byte) (float64, error) {
+	var plans []struct {
+		Plan struct {
+			TotalCost float64 `json:"Total Cost"`
+		} `json:"Plan"`
+	}
+	if err := json.Unmarshal(raw, &plans); err != nil {
+		return 0, err
+	}
+	if len(plans) == 0 {
+		return 0, fmt.Errorf("empty EXPLAIN output")
+	}
+	return plans[0].Plan.TotalCost, nil
 }
 
 func (s *Server) text2sqlExecDB() (*sql.DB, error) {
