@@ -185,6 +185,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/admin/prompts/fingerprints", s.handlePromptFingerprints)
 	mux.HandleFunc("/admin/knowledge", s.handleKnowledge)
 	mux.HandleFunc("/admin/knowledge/", s.handleKnowledgeByID)
+	mux.HandleFunc("/admin/templates", s.handleTemplates)
+	mux.HandleFunc("/admin/templates/", s.handleTemplateByID)
 	mux.HandleFunc("/admin/mcp/upstreams", s.handleMCPUpstreams)
 	mux.HandleFunc("/admin/mcp/upstreams/", s.handleMCPUpstreamByID)
 	mux.HandleFunc("/mcp", s.handleMCPGateway)

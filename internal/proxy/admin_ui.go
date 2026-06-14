@@ -4676,6 +4676,7 @@ const adminHTML = `<!doctype html>
         api('/admin/teams').catch(() => ({ auth_teams: [] })),
         api('/admin/audit/auth-events?limit=30').catch(() => ({ events: [] })),
       ]);
+      const templates = await api('/admin/templates').catch(() => ({ templates: [], categories: [] }));
 
       const html =
         '<div class="grid2">' +
@@ -4706,6 +4707,7 @@ const adminHTML = `<!doctype html>
         section('복잡도 기반 비용 최적 라우팅 규칙', routingRulesPanel(routes.rules || [])) +
         section('라우팅 학습 추천 (Routing Learning)', routingLearningPanel(learning)) +
         section('Knowledge Cache (반복 규칙·시스템 프롬프트 중앙 등록)', knowledgePanel(knowledge.snippets || [])) +
+        section('AI 코딩 작업 템플릿 (리팩터링·테스트·보안·문서화)', templatesPanel(templates.templates || [], templates.categories || [])) +
         section('데이터 보존 정책', retentionPanel(retention)) +
         section('Fallback 로그 재처리', fallbackPanel(fallback)) +
         section('관리자 변경 이력', auditPanel(audit.audit_logs || []));
@@ -4721,6 +4723,8 @@ const adminHTML = `<!doctype html>
       if (rrForm) rrForm.addEventListener('submit', addRoutingRule);
       const kbForm = document.getElementById('knowledge-form');
       if (kbForm) kbForm.addEventListener('submit', addKnowledge);
+      const tplForm = document.getElementById('template-form');
+      if (tplForm) tplForm.addEventListener('submit', addTemplate);
       const retentionBtn = document.getElementById('retention-run');
       if (retentionBtn) retentionBtn.addEventListener('click', runRetention);
       const fallbackBtn = document.getElementById('fallback-replay');
@@ -5034,6 +5038,52 @@ const adminHTML = `<!doctype html>
     window.deleteKnowledge = async (id) => {
       if (!confirm('이 지식 항목을 삭제하시겠습니까? 이 ID를 참조하는 호출은 더 이상 확장되지 않습니다.')) return;
       await api('/admin/knowledge/' + encodeURIComponent(id), { method: 'DELETE' });
+      route();
+    };
+    function templatesPanel(templates, categories) {
+      const cats = (categories && categories.length) ? categories : [{ key: 'custom', label: '기타' }];
+      const catLabel = (key) => { const c = cats.find(x => x.key === key); return c ? c.label : key; };
+      const options = cats.map(c => '<option value="' + escapeAttr(c.key) + '">' + escapeHTML(c.label) + '</option>').join('');
+      const form =
+        '<form class="inline-form" id="template-form" style="grid-template-columns: minmax(120px,1fr) 130px minmax(220px,2fr) 70px; align-items:start;">' +
+          '<input id="tpl-name" placeholder="이름 (예: 보안 점검)" required>' +
+          '<select id="tpl-category">' + options + '</select>' +
+          '<textarea id="tpl-body" rows="3" placeholder="표준 프롬프트 본문" required style="resize:vertical"></textarea>' +
+          '<button type="submit">등록</button>' +
+        '</form>';
+      const table = templates.length ?
+        '<table><thead><tr><th>이름 / ID</th><th data-sort="str">분류</th><th data-sort="num">사용</th><th data-sort="str">최근</th><th>상태</th><th>동작</th></tr></thead><tbody>' +
+        templates.map(t => '<tr>' +
+          '<td><strong>' + escapeHTML(t.name) + '</strong><div class="muted">' + escapeHTML(t.id) + (t.description ? ' · ' + escapeHTML(t.description) : '') + '</div></td>' +
+          '<td><span class="status">' + escapeHTML(catLabel(t.category)) + '</span></td>' +
+          '<td data-num="' + (t.use_count || 0) + '">' + fmt(t.use_count || 0) + '</td>' +
+          '<td>' + (t.last_used_at ? ago(t.last_used_at) : '<span class="muted">미사용</span>') + '</td>' +
+          '<td><span class="status ' + (t.enabled ? '' : 'error') + '">' + (t.enabled ? '사용' : '중지') + '</span></td>' +
+          '<td><button class="secondary" type="button" onclick="toggleTemplate(\'' + escapeAttr(t.id) + '\',' + (!t.enabled) + ')">' + (t.enabled ? '중지' : '사용') + '</button> ' +
+          '<button class="danger" type="button" onclick="deleteTemplate(\'' + escapeAttr(t.id) + '\')">삭제</button></td>' +
+        '</tr>').join('') + '</tbody></table>'
+        : '<div class="empty">등록된 템플릿 없음.</div>';
+      return form + table +
+        '<div class="muted" style="font-size:12px; padding:0 14px 12px">리팩터링·테스트 생성·보안 점검·문서화 등 표준 프롬프트를 중앙에서 관리합니다. <code>GET /admin/templates</code> 로 조회해 코딩 도구·스니펫에 배포하세요.</div>';
+    }
+    async function addTemplate(e) {
+      e.preventDefault();
+      const body = {
+        name: document.getElementById('tpl-name').value.trim(),
+        category: document.getElementById('tpl-category').value,
+        body: document.getElementById('tpl-body').value,
+      };
+      if (!body.name || !body.body.trim()) { alert('이름과 본문을 입력하세요'); return; }
+      await api('/admin/templates', { method: 'POST', body: JSON.stringify(body) });
+      route();
+    }
+    window.toggleTemplate = async (id, enabled) => {
+      await api('/admin/templates/' + encodeURIComponent(id), { method: 'PATCH', body: JSON.stringify({ enabled }) });
+      route();
+    };
+    window.deleteTemplate = async (id) => {
+      if (!confirm('이 작업 템플릿을 삭제하시겠습니까?')) return;
+      await api('/admin/templates/' + encodeURIComponent(id), { method: 'DELETE' });
       route();
     };
     async function addRoutingRule(e) {

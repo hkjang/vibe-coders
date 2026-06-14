@@ -527,6 +527,18 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 				last_used_at TEXT,
 				created_at TEXT NOT NULL
 			)`,
+		`CREATE TABLE IF NOT EXISTS prompt_templates (
+				id TEXT PRIMARY KEY,
+				name TEXT NOT NULL,
+				category TEXT NOT NULL DEFAULT 'custom',
+				description TEXT,
+				body TEXT NOT NULL,
+				enabled INTEGER NOT NULL DEFAULT 1,
+				use_count INTEGER NOT NULL DEFAULT 0,
+				last_used_at TEXT,
+				created_at TEXT NOT NULL,
+				updated_at TEXT NOT NULL
+			)`,
 		`CREATE TABLE IF NOT EXISTS routing_rules (
 			id TEXT PRIMARY KEY,
 			enabled INTEGER NOT NULL DEFAULT 1,
