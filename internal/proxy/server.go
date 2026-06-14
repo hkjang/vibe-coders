@@ -161,6 +161,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/admin/text2sql", s.handleText2SQLAdmin)
 	mux.HandleFunc("/admin/text2sql/schemas", s.handleText2SQLSchemas)
 	mux.HandleFunc("/admin/text2sql/profiles", s.handleText2SQLProfiles)
+	mux.HandleFunc("/admin/text2sql/tables", s.handleText2SQLTables)
+	mux.HandleFunc("/admin/text2sql/columns", s.handleText2SQLColumns)
 	mux.HandleFunc("/admin/text2sql/golden", s.handleText2SQLGolden)
 	mux.HandleFunc("/admin/text2sql/golden/", s.handleText2SQLGolden)
 	mux.HandleFunc("/admin/export.csv", s.handleExportCSV)

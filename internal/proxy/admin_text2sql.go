@@ -84,6 +84,115 @@ func (s *Server) handleText2SQLAdmin(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleText2SQLTables manages the table registry for a schema.
+// GET /admin/text2sql/tables?schema=NAME · POST {schema_name,table_name,description,enabled} · DELETE ?schema=&table=
+func (s *Server) handleText2SQLTables(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		schema := strings.TrimSpace(r.URL.Query().Get("schema"))
+		tables, err := s.db.ListText2SQLTables(r.Context(), schema)
+		if err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "tables_failed")
+			return
+		}
+		cols, _ := s.db.ListText2SQLColumns(r.Context(), schema)
+		writeJSON(w, http.StatusOK, map[string]any{"tables": tables, "columns": cols})
+	case http.MethodPost:
+		var p struct {
+			SchemaName  string `json:"schema_name"`
+			TableName   string `json:"table_name"`
+			Description string `json:"description"`
+			Enabled     *bool  `json:"enabled"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+			writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "invalid_body")
+			return
+		}
+		if strings.TrimSpace(p.SchemaName) == "" || strings.TrimSpace(p.TableName) == "" {
+			writeOpenAIError(w, http.StatusBadRequest, "schema_name and table_name are required", "invalid_request_error", "missing_fields")
+			return
+		}
+		t := store.Text2SQLTable{SchemaName: strings.TrimSpace(p.SchemaName), TableName: strings.TrimSpace(p.TableName), Description: strings.TrimSpace(p.Description), Enabled: true}
+		if p.Enabled != nil {
+			t.Enabled = *p.Enabled
+		}
+		if err := s.db.UpsertText2SQLTable(r.Context(), t); err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "table_save_failed")
+			return
+		}
+		s.auditAdmin(r, "text2sql.table.upsert", "", auditJSON(t))
+		writeJSON(w, http.StatusCreated, map[string]any{"table": t})
+	case http.MethodDelete:
+		schema, table := strings.TrimSpace(r.URL.Query().Get("schema")), strings.TrimSpace(r.URL.Query().Get("table"))
+		if schema == "" || table == "" {
+			writeOpenAIError(w, http.StatusBadRequest, "schema and table query params required", "invalid_request_error", "missing_params")
+			return
+		}
+		if err := s.db.DeleteText2SQLTable(r.Context(), schema, table); err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "table_delete_failed")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"schema": schema, "table": table, "status": "deleted"})
+	default:
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+	}
+}
+
+// handleText2SQLColumns manages the column registry (descriptions + sensitivity).
+// POST {schema_name,table_name,column_name,data_type,description,sensitivity} · DELETE ?schema=&table=&column=
+func (s *Server) handleText2SQLColumns(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	switch r.Method {
+	case http.MethodPost:
+		var p struct {
+			SchemaName, TableName, ColumnName, DataType, Description, Sensitivity string
+		}
+		if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+			writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "invalid_body")
+			return
+		}
+		if strings.TrimSpace(p.SchemaName) == "" || strings.TrimSpace(p.TableName) == "" || strings.TrimSpace(p.ColumnName) == "" {
+			writeOpenAIError(w, http.StatusBadRequest, "schema_name, table_name, column_name are required", "invalid_request_error", "missing_fields")
+			return
+		}
+		sens := strings.ToLower(strings.TrimSpace(p.Sensitivity))
+		if sens != "" && sens != store.SensitivityNormal && sens != store.SensitivityMask && sens != store.SensitivityExclude {
+			writeOpenAIError(w, http.StatusBadRequest, "sensitivity must be normal/mask/exclude", "invalid_request_error", "invalid_sensitivity")
+			return
+		}
+		c := store.Text2SQLColumn{
+			SchemaName: strings.TrimSpace(p.SchemaName), TableName: strings.TrimSpace(p.TableName), ColumnName: strings.TrimSpace(p.ColumnName),
+			DataType: strings.TrimSpace(p.DataType), Description: strings.TrimSpace(p.Description), Sensitivity: sens,
+		}
+		if err := s.db.UpsertText2SQLColumn(r.Context(), c); err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "column_save_failed")
+			return
+		}
+		s.auditAdmin(r, "text2sql.column.upsert", "", auditJSON(c))
+		writeJSON(w, http.StatusCreated, map[string]any{"column": c})
+	case http.MethodDelete:
+		schema, table, col := strings.TrimSpace(r.URL.Query().Get("schema")), strings.TrimSpace(r.URL.Query().Get("table")), strings.TrimSpace(r.URL.Query().Get("column"))
+		if schema == "" || table == "" || col == "" {
+			writeOpenAIError(w, http.StatusBadRequest, "schema, table, column query params required", "invalid_request_error", "missing_params")
+			return
+		}
+		if err := s.db.DeleteText2SQLColumn(r.Context(), schema, table, col); err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "column_delete_failed")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+	default:
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+	}
+}
+
 // handleText2SQLProfiles manages runtime virtual-model profiles (DB overrides of the
 // env defaults; can also define new virtual models).
 // GET /admin/text2sql/profiles · POST {virtual_model,mode,upstream_model,summary_model,schema_name,enabled} · DELETE ?virtual_model=

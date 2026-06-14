@@ -4860,10 +4860,17 @@ const adminHTML = `<!doctype html>
         section('런타임 프로필 (DB 오버라이드 · 신규 가상모델)', dbpForm + dbpTable) +
         section('모델별 SQL 품질 (최근 7일)', mmTable) +
         section('스키마 카탈로그 · 테이블 권한', schemaForm + schemaTable) +
+        section('스키마 레지스트리 (테이블 · 컬럼 · 민감도)', registryHTML()) +
         section('Golden Query (few-shot · 회귀)', goldenRun + goldenForm + goldenTable) +
         section('최근 Text2SQL 질의', logTable);
       const sf = document.getElementById('t2s-schema-form');
       if (sf) sf.addEventListener('submit', addT2SSchema);
+      const rtf = document.getElementById('t2s-table-form');
+      if (rtf) rtf.addEventListener('submit', addT2STable);
+      const rcf = document.getElementById('t2s-column-form');
+      if (rcf) rcf.addEventListener('submit', addT2SColumn);
+      const rlBtn = document.getElementById('t2s-registry-load');
+      if (rlBtn) rlBtn.addEventListener('click', loadT2SRegistry);
       const pf = document.getElementById('t2s-profile-form');
       if (pf) pf.addEventListener('submit', addT2SProfile);
       const gf = document.getElementById('t2s-golden-form');
@@ -4872,6 +4879,60 @@ const adminHTML = `<!doctype html>
       if (gr) gr.addEventListener('click', runT2SGolden);
       makeSortable('#view', 'text2sql');
     }
+    function registryHTML() {
+      return '<div class="toolbar" style="border-bottom:0"><input id="t2s-reg-schema" placeholder="스키마명 (예: analytics)" style="max-width:220px"><button type="button" id="t2s-registry-load">불러오기</button></div>' +
+        '<form class="inline-form" id="t2s-table-form" style="grid-template-columns: 140px minmax(220px,2fr) 70px; align-items:start;">' +
+          '<input id="rt-table" placeholder="테이블명" required>' +
+          '<input id="rt-desc" placeholder="테이블 업무 설명">' +
+          '<button type="submit">테이블 저장</button>' +
+        '</form>' +
+        '<form class="inline-form" id="t2s-column-form" style="grid-template-columns: 130px 130px 100px minmax(160px,2fr) 110px 70px; align-items:start;">' +
+          '<input id="rc-table" placeholder="테이블명" required>' +
+          '<input id="rc-column" placeholder="컬럼명" required>' +
+          '<input id="rc-type" placeholder="타입">' +
+          '<input id="rc-desc" placeholder="컬럼 업무 설명">' +
+          '<select id="rc-sens"><option value="normal">일반</option><option value="mask">마스킹</option><option value="exclude">제외(민감)</option></select>' +
+          '<button type="submit">컬럼 저장</button>' +
+        '</form>' +
+        '<div id="t2s-registry-body"><div class="muted" style="padding:0 14px 12px">스키마명을 입력하고 "불러오기"를 누르면 등록된 테이블·컬럼이 표시됩니다. <code>exclude</code> 컬럼은 LLM 컨텍스트에서 제외되고 SQL에서 참조 시 차단됩니다.</div></div>';
+    }
+    function t2sRegSchema() { return (document.getElementById('t2s-reg-schema') || {}).value ? document.getElementById('t2s-reg-schema').value.trim() : ''; }
+    async function loadT2SRegistry() {
+      const schema = t2sRegSchema();
+      const body = document.getElementById('t2s-registry-body');
+      if (!schema) { alert('스키마명을 입력하세요'); return; }
+      const d = await api('/admin/text2sql/tables?schema=' + encodeURIComponent(schema)).catch(() => ({ tables: [], columns: [] }));
+      const colsByTable = {};
+      (d.columns || []).forEach(c => { (colsByTable[c.table_name] = colsByTable[c.table_name] || []).push(c); });
+      const sens = (s) => ({ normal: '일반', mask: '<span class="status warn">마스킹</span>', exclude: '<span class="status error">제외</span>' }[s] || s);
+      const rows = (d.tables || []).map(t =>
+        '<tr><td><strong>' + escapeHTML(t.table_name) + '</strong>' + (t.enabled ? '' : ' <span class="status error">중지</span>') + '<div class="muted">' + escapeHTML(t.description || '') + '</div></td>' +
+        '<td>' + ((colsByTable[t.table_name] || []).map(c => escapeHTML(c.column_name) + (c.sensitivity !== 'normal' ? ' ' + sens(c.sensitivity) : '')).join(', ') || '<span class="muted">컬럼 없음</span>') + '</td>' +
+        '<td><button class="danger" type="button" onclick="deleteT2STable(\'' + escapeAttr(schema) + '\',\'' + escapeAttr(t.table_name) + '\')">삭제</button></td></tr>'
+      ).join('');
+      body.innerHTML = (d.tables || []).length
+        ? '<table><thead><tr><th>테이블</th><th>컬럼(민감도)</th><th>동작</th></tr></thead><tbody>' + rows + '</tbody></table>'
+        : '<div class="empty">' + escapeHTML(schema) + ' 스키마에 등록된 테이블 없음.</div>';
+    }
+    async function addT2STable(e) {
+      e.preventDefault();
+      const schema = t2sRegSchema();
+      if (!schema) { alert('스키마명을 먼저 입력하세요'); return; }
+      await api('/admin/text2sql/tables', { method: 'POST', body: JSON.stringify({ schema_name: schema, table_name: document.getElementById('rt-table').value.trim(), description: document.getElementById('rt-desc').value.trim() }) });
+      loadT2SRegistry();
+    }
+    async function addT2SColumn(e) {
+      e.preventDefault();
+      const schema = t2sRegSchema();
+      if (!schema) { alert('스키마명을 먼저 입력하세요'); return; }
+      await api('/admin/text2sql/columns', { method: 'POST', body: JSON.stringify({ schema_name: schema, table_name: document.getElementById('rc-table').value.trim(), column_name: document.getElementById('rc-column').value.trim(), data_type: document.getElementById('rc-type').value.trim(), description: document.getElementById('rc-desc').value.trim(), sensitivity: document.getElementById('rc-sens').value }) });
+      loadT2SRegistry();
+    }
+    window.deleteT2STable = async (schema, table) => {
+      if (!confirm(table + ' 테이블을 삭제하시겠습니까? (컬럼도 함께 삭제)')) return;
+      await api('/admin/text2sql/tables?schema=' + encodeURIComponent(schema) + '&table=' + encodeURIComponent(table), { method: 'DELETE' });
+      loadT2SRegistry();
+    };
     async function addT2SProfile(e) {
       e.preventDefault();
       const body = {

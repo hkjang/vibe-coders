@@ -62,13 +62,21 @@ func (s *Server) handleText2SQL(w http.ResponseWriter, r *http.Request, meta sto
 	}
 	dialect := cfg.Dialect
 	schema := firstNonEmpty(strings.TrimSpace(r.Header.Get("X-Text2SQL-Schema")), cfg.Schema)
-	var allowedTables []string
+	var allowedTables, blockedColumns []string
 	schemaName := firstNonEmpty(strings.TrimSpace(r.Header.Get("X-Text2SQL-Schema-Name")), profileSchemaName)
 	if sc, found, _ := s.db.ResolveText2SQLSchema(r.Context(), schemaName, team); found {
 		schema = sc.SchemaText
 		allowedTables = sc.AllowedTables
 		if sc.Dialect != "" {
 			dialect = sc.Dialect
+		}
+		// Structured registry (tables/columns) takes precedence over the free-text
+		// schema blob: render the prompt context from it (excluding sensitive
+		// columns) and derive the table allowlist + blocked-column list from it.
+		if cat, err := s.db.BuildSchemaCatalog(r.Context(), sc.Name); err == nil && cat.HasTables {
+			schema = cat.ContextText
+			allowedTables = cat.AllowedTables
+			blockedColumns = cat.ExcludedColumns
 		}
 	}
 
@@ -134,7 +142,7 @@ func (s *Server) handleText2SQL(w http.ResponseWriter, r *http.Request, meta sto
 	// 2) Extract + validate.
 	rawSQL := text2sql.ExtractSQL(gen.Response)
 	validation := text2sql.ValidateSQL(rawSQL, text2sql.ValidateOptions{
-		DefaultLimit: cfg.DefaultLimit, MaxLimit: cfg.MaxLimit, AllowedTables: allowedTables,
+		DefaultLimit: cfg.DefaultLimit, MaxLimit: cfg.MaxLimit, AllowedTables: allowedTables, BlockedColumns: blockedColumns,
 	})
 	if !validation.OK {
 		content := fmt.Sprintf("생성된 SQL이 안전 검증을 통과하지 못했습니다 (사유: %s).\n\n```sql\n%s\n```", validation.Reason, strings.TrimSpace(rawSQL))

@@ -67,6 +67,16 @@ func TestValidateSQLAllowedTables(t *testing.T) {
 	}
 }
 
+func TestValidateSQLBlockedColumns(t *testing.T) {
+	opts := ValidateOptions{DefaultLimit: 100, BlockedColumns: []string{"ssn", "salary"}}
+	if r := ValidateSQL("SELECT name, salary FROM employees", opts); r.OK {
+		t.Errorf("query referencing a blocked column should be rejected: %+v", r)
+	}
+	if r := ValidateSQL("SELECT name, dept FROM employees", opts); !r.OK {
+		t.Errorf("query without blocked columns should pass: %+v", r)
+	}
+}
+
 func TestExtractSQL(t *testing.T) {
 	cases := map[string]string{
 		"```sql\nSELECT 1\n```":         "SELECT 1",

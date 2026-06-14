@@ -12,9 +12,10 @@ import (
 
 // ValidateOptions tunes SQL validation.
 type ValidateOptions struct {
-	DefaultLimit  int      // when > 0, a LIMIT is appended to limit-less SELECTs
-	AllowedTables []string // when non-empty, every referenced table must be in this set
-	MaxLimit      int      // when > 0, an explicit LIMIT larger than this is rejected
+	DefaultLimit   int      // when > 0, a LIMIT is appended to limit-less SELECTs
+	AllowedTables  []string // when non-empty, every referenced table must be in this set
+	BlockedColumns []string // sensitive columns that must not appear anywhere in the SQL
+	MaxLimit       int      // when > 0, an explicit LIMIT larger than this is rejected
 }
 
 // ValidationResult is the outcome of validating a generated SQL statement.
@@ -86,6 +87,11 @@ func ValidateSQL(raw string, opts ValidateOptions) ValidationResult {
 	for _, fn := range dangerousFunctions {
 		if strings.Contains(lower, fn) {
 			return ValidationResult{Reason: "dangerous function: " + fn}
+		}
+	}
+	for _, col := range opts.BlockedColumns {
+		if c := strings.ToLower(strings.TrimSpace(col)); c != "" && words[c] {
+			return ValidationResult{Reason: "sensitive column not allowed: " + c}
 		}
 	}
 
