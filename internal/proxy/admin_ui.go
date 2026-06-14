@@ -4844,7 +4844,7 @@ const adminHTML = `<!doctype html>
           '<button type="submit">저장</button>' +
         '</form>';
       const goldenRows = golden.map(g =>
-        '<tr><td><strong>' + escapeHTML(g.name) + '</strong>' + (g.enabled ? '' : ' <span class="status error">중지</span>') + '</td>' +
+        '<tr><td><strong>' + escapeHTML(g.name) + '</strong>' + (g.source === 'auto' ? ' <span class="pill">자동후보</span>' : '') + (g.enabled ? '' : ' <span class="status error">중지</span>') + '</td>' +
         '<td>' + escapeHTML((g.question || '').slice(0, 60)) + '</td>' +
         '<td><code style="font-size:11px">' + escapeHTML((g.expected_sql || '').slice(0, 80)) + '</code></td>' +
         '<td><button class="danger" type="button" onclick="deleteT2SGolden(\'' + escapeAttr(g.id) + '\')">삭제</button></td></tr>'
@@ -4871,6 +4871,8 @@ const adminHTML = `<!doctype html>
       if (rcf) rcf.addEventListener('submit', addT2SColumn);
       const rlBtn = document.getElementById('t2s-registry-load');
       if (rlBtn) rlBtn.addEventListener('click', loadT2SRegistry);
+      const rcBtn = document.getElementById('t2s-registry-collect');
+      if (rcBtn) rcBtn.addEventListener('click', collectT2SRegistry);
       const pf = document.getElementById('t2s-profile-form');
       if (pf) pf.addEventListener('submit', addT2SProfile);
       const gf = document.getElementById('t2s-golden-form');
@@ -4880,7 +4882,7 @@ const adminHTML = `<!doctype html>
       makeSortable('#view', 'text2sql');
     }
     function registryHTML() {
-      return '<div class="toolbar" style="border-bottom:0"><input id="t2s-reg-schema" placeholder="스키마명 (예: analytics)" style="max-width:220px"><button type="button" id="t2s-registry-load">불러오기</button></div>' +
+      return '<div class="toolbar" style="border-bottom:0"><input id="t2s-reg-schema" placeholder="스키마명 (예: analytics)" style="max-width:220px"><button type="button" id="t2s-registry-load">불러오기</button><button type="button" class="secondary" id="t2s-registry-collect">실행DB에서 자동 수집</button><span class="muted" id="t2s-collect-result"></span></div>' +
         '<form class="inline-form" id="t2s-table-form" style="grid-template-columns: 140px minmax(220px,2fr) 70px; align-items:start;">' +
           '<input id="rt-table" placeholder="테이블명" required>' +
           '<input id="rt-desc" placeholder="테이블 업무 설명">' +
@@ -4913,6 +4915,19 @@ const adminHTML = `<!doctype html>
       body.innerHTML = (d.tables || []).length
         ? '<table><thead><tr><th>테이블</th><th>컬럼(민감도)</th><th>동작</th></tr></thead><tbody>' + rows + '</tbody></table>'
         : '<div class="empty">' + escapeHTML(schema) + ' 스키마에 등록된 테이블 없음.</div>';
+    }
+    async function collectT2SRegistry() {
+      const schema = t2sRegSchema();
+      const el = document.getElementById('t2s-collect-result');
+      if (!schema) { alert('스키마명을 입력하세요'); return; }
+      if (el) el.textContent = ' 수집 중…';
+      try {
+        const res = await api('/admin/text2sql/collect', { method: 'POST', body: JSON.stringify({ schema_name: schema }) });
+        if (el) el.textContent = ' 테이블 ' + res.added_tables + ' · 컬럼 ' + res.added_columns + ' 추가';
+        loadT2SRegistry();
+      } catch (err) {
+        if (el) el.textContent = ' 실패: ' + err.message;
+      }
     }
     async function addT2STable(e) {
       e.preventDefault();

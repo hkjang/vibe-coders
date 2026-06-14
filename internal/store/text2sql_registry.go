@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"strings"
 	"time"
 )
@@ -115,6 +116,110 @@ func (s *SQLStore) UpsertText2SQLColumn(ctx context.Context, c Text2SQLColumn) e
 func (s *SQLStore) DeleteText2SQLColumn(ctx context.Context, schemaName, tableName, columnName string) error {
 	_, err := s.db.ExecContext(ctx, s.bind(`DELETE FROM text2sql_columns WHERE schema_name = ? AND table_name = ? AND column_name = ?`), schemaName, tableName, columnName)
 	return err
+}
+
+// CollectInformationSchema reads the table/column layout from a source database
+// (src) and populates the registry under registrySchema. Existing sensitivity tags
+// and descriptions are preserved (it only upserts structure). Supports PostgreSQL
+// (information_schema) and SQLite (sqlite_master + PRAGMA). Returns counts.
+func (s *SQLStore) CollectInformationSchema(ctx context.Context, src *sql.DB, driver, dbSchema, registrySchema string) (int, int, error) {
+	driver = strings.ToLower(strings.TrimSpace(driver))
+	type col struct{ table, name, typ string }
+	var cols []col
+
+	if driver == "sqlite" {
+		rows, err := src.QueryContext(ctx, `SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name`)
+		if err != nil {
+			return 0, 0, err
+		}
+		var tables []string
+		for rows.Next() {
+			var t string
+			if err := rows.Scan(&t); err != nil {
+				rows.Close()
+				return 0, 0, err
+			}
+			tables = append(tables, t)
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return 0, 0, err
+		}
+		for _, t := range tables {
+			cr, err := src.QueryContext(ctx, `SELECT name, type FROM pragma_table_info(?)`, t)
+			if err != nil {
+				return 0, 0, err
+			}
+			for cr.Next() {
+				var name, typ string
+				if err := cr.Scan(&name, &typ); err != nil {
+					cr.Close()
+					return 0, 0, err
+				}
+				cols = append(cols, col{t, name, typ})
+			}
+			cr.Close()
+		}
+	} else { // postgres / pgx
+		if dbSchema == "" {
+			dbSchema = "public"
+		}
+		rows, err := src.QueryContext(ctx, `SELECT table_name, column_name, data_type
+			FROM information_schema.columns WHERE table_schema = $1 ORDER BY table_name, ordinal_position`, dbSchema)
+		if err != nil {
+			return 0, 0, err
+		}
+		for rows.Next() {
+			var c col
+			if err := rows.Scan(&c.table, &c.name, &c.typ); err != nil {
+				rows.Close()
+				return 0, 0, err
+			}
+			cols = append(cols, c)
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return 0, 0, err
+		}
+	}
+
+	// Ensure a schema row exists so the registry is resolvable by name.
+	if _, found, _ := s.ResolveText2SQLSchema(ctx, registrySchema, ""); !found {
+		_ = s.UpsertText2SQLSchema(ctx, Text2SQLSchema{Name: registrySchema, SchemaText: "(auto-collected)", Enabled: true})
+	}
+	// Preserve operator-set descriptions/sensitivity: only add tables/columns that
+	// aren't already registered.
+	existingTables, _ := s.ListText2SQLTables(ctx, registrySchema)
+	haveTable := map[string]bool{}
+	for _, t := range existingTables {
+		haveTable[t.TableName] = true
+	}
+	existingCols, _ := s.ListText2SQLColumns(ctx, registrySchema)
+	haveCol := map[string]bool{}
+	for _, c := range existingCols {
+		haveCol[c.TableName+"\x00"+c.ColumnName] = true
+	}
+
+	addedTables, addedCols := 0, 0
+	tableSeen := map[string]bool{}
+	for _, c := range cols {
+		if !tableSeen[c.table] {
+			tableSeen[c.table] = true
+			if !haveTable[c.table] {
+				if err := s.UpsertText2SQLTable(ctx, Text2SQLTable{SchemaName: registrySchema, TableName: c.table, Enabled: true}); err != nil {
+					return addedTables, addedCols, err
+				}
+				addedTables++
+			}
+		}
+		if !haveCol[c.table+"\x00"+c.name] {
+			if err := s.UpsertText2SQLColumn(ctx, Text2SQLColumn{SchemaName: registrySchema, TableName: c.table, ColumnName: c.name, DataType: c.typ, Sensitivity: SensitivityNormal}); err != nil {
+				return addedTables, addedCols, err
+			}
+			addedCols++
+		}
+	}
+	return addedTables, addedCols, nil
 }
 
 // BuildSchemaCatalog renders the registry for a schema into prompt context +

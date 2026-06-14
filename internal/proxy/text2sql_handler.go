@@ -113,7 +113,19 @@ func (s *Server) handleText2SQL(w http.ResponseWriter, r *http.Request, meta sto
 			}
 		}
 		meta.Evaluations = buildLLMEvaluations(meta, ResponseAnalysis{})
+		meta.Evaluations = append(meta.Evaluations, text2sqlEvaluations(meta.Request.ID, meta.Request.TraceID, validation, executed, errMsg)...)
+		s.metrics.ObserveLLMEvaluations(meta.Evaluations)
 		s.enqueue(meta)
+		// Auto-candidate: a valid (and, in execute mode, successful) query is worth
+		// proposing as a golden example for later admin promotion. Best-effort, async.
+		if validation.OK && question != "" && (profile.Mode != text2sql.ModeExecute || executed) {
+			q, sqlText, sn := question, validation.SQL, schemaName
+			go func() {
+				cctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				_ = s.db.AddText2SQLGoldenCandidate(cctx, newID("t2sg"), q, sqlText, sn)
+			}()
+		}
 		s.writeChatCompletion(w, meta.Request.Model, content)
 	}
 
@@ -156,7 +168,7 @@ func (s *Server) handleText2SQL(w http.ResponseWriter, r *http.Request, meta sto
 		if profile.Mode == text2sql.ModeExecute && cfg.ExecDSN == "" {
 			note = "실행 DB가 설정되지 않아 미리보기만 제공합니다 (TEXT2SQL_EXEC_DSN)."
 		}
-		finalize(previewContent(validation.SQL, note, validation.Tables), validation, false, 0, "", totalCost)
+		finalize(previewContent(question, validation.SQL, note, validation), validation, false, 0, "", totalCost)
 		return
 	}
 
@@ -189,7 +201,7 @@ func (s *Server) handleText2SQL(w http.ResponseWriter, r *http.Request, meta sto
 		}
 	}
 
-	content := executeContent(validation.SQL, table, rowCount, summary)
+	content := executeContent(question, validation.SQL, table, rowCount, summary, validation)
 	finalize(content, validation, true, rowCount, "", totalCost)
 }
 
@@ -207,30 +219,57 @@ func (s *Server) text2sqlAutoModelByComplexity(complexity int) string {
 	}
 }
 
-func previewContent(sql, note string, tables []string) string {
+// previewContent renders a business-friendly preview response: interpretation,
+// the generated SQL, cautions, executability, and follow-up suggestions.
+func previewContent(question, sql, note string, v text2sql.ValidationResult) string {
 	var b strings.Builder
-	b.WriteString("```sql\n")
-	b.WriteString(sql)
-	b.WriteString("\n```\n\n")
-	b.WriteString(note)
-	if len(tables) > 0 {
-		b.WriteString("\n\n참조 테이블: " + strings.Join(tables, ", "))
+	b.WriteString("### 해석\n" + question + "\n\n")
+	b.WriteString("### 생성 SQL\n```sql\n" + sql + "\n```\n\n")
+	b.WriteString("### 주의사항\n")
+	cautions := []string{}
+	if v.LimitAdded {
+		cautions = append(cautions, "결과 보호를 위해 LIMIT 이 자동 추가되었습니다.")
 	}
+	if len(v.Tables) > 0 {
+		cautions = append(cautions, "참조 테이블: "+strings.Join(v.Tables, ", "))
+	}
+	cautions = append(cautions, note)
+	for _, c := range cautions {
+		b.WriteString("- " + c + "\n")
+	}
+	b.WriteString("\n### 실행 가능 여부\n- 검증 통과(읽기 전용). 이 모드는 SQL 만 생성하고 실행하지 않습니다. 실행하려면 `vibe/text2sql-execute` 를 사용하세요.\n\n")
+	b.WriteString("### 다음 질문 제안\n" + nextQuestionHints(v.Tables))
 	return b.String()
 }
 
-func executeContent(sql, table string, rowCount int64, summary string) string {
+func executeContent(question, sql, table string, rowCount int64, summary string, v text2sql.ValidationResult) string {
 	var b strings.Builder
+	b.WriteString("### 해석\n")
 	if summary != "" {
-		b.WriteString(summary)
-		b.WriteString("\n\n")
+		b.WriteString(summary + "\n\n")
+	} else {
+		b.WriteString(question + "\n\n")
 	}
-	b.WriteString(fmt.Sprintf("결과 %d행.\n\n", rowCount))
-	b.WriteString(table)
-	b.WriteString("\n\n```sql\n")
-	b.WriteString(sql)
-	b.WriteString("\n```")
+	b.WriteString(fmt.Sprintf("### 결과 (%d행)\n%s\n\n", rowCount, table))
+	b.WriteString("### 생성 SQL\n```sql\n" + sql + "\n```\n\n")
+	b.WriteString("### 주의사항\n")
+	if v.LimitAdded {
+		b.WriteString("- LIMIT 이 자동 적용되어 일부 행만 표시될 수 있습니다.\n")
+	}
+	b.WriteString("- 결과의 민감 컬럼은 마스킹될 수 있습니다.\n\n")
+	b.WriteString("### 실행 가능 여부\n- 읽기 전용으로 실행 완료.\n\n")
+	b.WriteString("### 다음 질문 제안\n" + nextQuestionHints(v.Tables))
 	return b.String()
+}
+
+// nextQuestionHints offers lightweight follow-up suggestions derived from the
+// referenced tables (no extra LLM call).
+func nextQuestionHints(tables []string) string {
+	if len(tables) == 0 {
+		return "- 기간/그룹 기준을 바꿔 다시 질문해 보세요 (예: 월별, 팀별)."
+	}
+	t := tables[0]
+	return "- " + t + " 를 기간별(월/주)로 집계해 보세요.\n- " + t + " 를 다른 차원(부서/상태)으로 분해해 보세요."
 }
 
 // writeChatCompletion emits an OpenAI-compatible chat.completion response so the
@@ -251,6 +290,35 @@ func (s *Server) writeChatCompletion(w http.ResponseWriter, model, content strin
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("X-Task-Type", "text2sql")
 	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// text2sqlEvaluations emits quality signals for a Text2SQL request into the shared
+// llm_evaluations pipeline: SQL validity (and the rejection reason) plus, for
+// execute mode, whether the query actually ran.
+func text2sqlEvaluations(requestID, traceID string, v text2sql.ValidationResult, executed bool, errMsg string) []store.LLMEvaluation {
+	now := time.Now().UTC()
+	score := 0.0
+	label := "rejected"
+	if v.OK {
+		score, label = 1, "valid"
+	}
+	evals := []store.LLMEvaluation{{
+		ID: newID("eval"), RequestID: requestID, TraceID: traceID, Name: "text2sql.sql_valid",
+		Category: "text2sql", Evaluator: "gateway", Score: score, Passed: v.OK, Label: label,
+		Reason: v.Reason, CreatedAt: now,
+	}}
+	if v.OK {
+		execScore := 0.0
+		if executed {
+			execScore = 1
+		}
+		evals = append(evals, store.LLMEvaluation{
+			ID: newID("eval"), RequestID: requestID, TraceID: traceID, Name: "text2sql.executed",
+			Category: "text2sql", Evaluator: "gateway", Score: execScore, Passed: executed,
+			Label: map[bool]string{true: "executed", false: "not_executed"}[executed], Reason: errMsg, CreatedAt: now,
+		})
+	}
+	return evals
 }
 
 // renderResultTable renders columns + rows as a compact Markdown table (capped).
@@ -282,42 +350,28 @@ func (s *Server) execText2SQL(ctx context.Context, query string) ([]string, [][]
 		rowLimit = 1000
 	}
 	driver := strings.ToLower(strings.TrimSpace(s.cfg.Text2SQL.ExecDriver))
-	// EXPLAIN cost guard (PostgreSQL): reject plans whose estimated total cost is
-	// above the configured ceiling before running the query.
+	// EXPLAIN risk guard (PostgreSQL): score the plan (cost + seq-scan/nested-loop on
+	// large row estimates) and reject high-risk plans before running the query.
 	if s.cfg.Text2SQL.MaxExplainCost > 0 && (driver == "postgres" || driver == "postgresql" || driver == "pgx") {
-		if cost, err := explainTotalCost(ctx, db, query); err == nil && cost > s.cfg.Text2SQL.MaxExplainCost {
-			return nil, nil, 0, fmt.Errorf("EXPLAIN total cost %.0f exceeds limit %.0f", cost, s.cfg.Text2SQL.MaxExplainCost)
+		if plan, err := explainPlanFor(ctx, db, query); err == nil {
+			risk := scoreExplainPlan(plan, s.cfg.Text2SQL.MaxExplainCost)
+			if risk.Score >= 50 {
+				return nil, nil, 0, fmt.Errorf("EXPLAIN risk %d/100: %s", risk.Score, strings.Join(risk.Reasons, "; "))
+			}
 		}
 	}
 	return executeReadOnlyQuery(ctx, db, s.cfg.Text2SQL.ExecDriver, query, rowLimit)
 }
 
-// explainTotalCost runs EXPLAIN (FORMAT JSON) and returns the plan's total cost.
-func explainTotalCost(ctx context.Context, db *sql.DB, query string) (float64, error) {
+// explainPlanFor runs EXPLAIN (FORMAT JSON) and parses the plan tree.
+func explainPlanFor(ctx context.Context, db *sql.DB, query string) (explainPlan, error) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	var raw string
 	if err := db.QueryRowContext(ctx, "EXPLAIN (FORMAT JSON) "+query).Scan(&raw); err != nil {
-		return 0, err
+		return explainPlan{}, err
 	}
-	return parseExplainCost([]byte(raw))
-}
-
-// parseExplainCost extracts the top-level "Total Cost" from a PostgreSQL
-// EXPLAIN (FORMAT JSON) result.
-func parseExplainCost(raw []byte) (float64, error) {
-	var plans []struct {
-		Plan struct {
-			TotalCost float64 `json:"Total Cost"`
-		} `json:"Plan"`
-	}
-	if err := json.Unmarshal(raw, &plans); err != nil {
-		return 0, err
-	}
-	if len(plans) == 0 {
-		return 0, fmt.Errorf("empty EXPLAIN output")
-	}
-	return plans[0].Plan.TotalCost, nil
+	return parseExplainPlan([]byte(raw))
 }
 
 func (s *Server) text2sqlExecDB() (*sql.DB, error) {

@@ -67,6 +67,26 @@ func TestValidateSQLAllowedTables(t *testing.T) {
 	}
 }
 
+func TestValidateSQLStringLiteralScrubbing(t *testing.T) {
+	opts := ValidateOptions{DefaultLimit: 100}
+	// Forbidden keywords inside a string literal must NOT trigger rejection.
+	if r := ValidateSQL("SELECT name FROM users WHERE note = 'please drop the table'", opts); !r.OK {
+		t.Errorf("keyword inside a string literal should not be rejected: %+v", r)
+	}
+	// A semicolon inside a string is not a second statement.
+	if r := ValidateSQL("SELECT name FROM users WHERE sep = ';'", opts); !r.OK {
+		t.Errorf("semicolon inside a string should not count as multi-statement: %+v", r)
+	}
+	// A real second statement is still caught.
+	if r := ValidateSQL("SELECT 1 FROM users; DROP TABLE users", opts); r.OK {
+		t.Error("a real stacked statement must still be rejected")
+	}
+	// Doubled-quote escape handled.
+	if r := ValidateSQL("SELECT id FROM t WHERE name = 'O''Brien drop'", opts); !r.OK {
+		t.Errorf("doubled-quote escaped literal should be handled: %+v", r)
+	}
+}
+
 func TestValidateSQLBlockedColumns(t *testing.T) {
 	opts := ValidateOptions{DefaultLimit: 100, BlockedColumns: []string{"ssn", "salary"}}
 	if r := ValidateSQL("SELECT name, salary FROM employees", opts); r.OK {

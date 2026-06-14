@@ -57,13 +57,16 @@ func ValidateSQL(raw string, opts ValidateOptions) ValidationResult {
 	if sql == "" {
 		return ValidationResult{Reason: "empty SQL"}
 	}
-	// Strip a trailing semicolon, then ensure no further statement follows.
-	stripped := stripComments(sql)
+	// Scrub comments AND single-quoted string literals before any keyword/structure
+	// analysis, so values like '...drop table...' or a ';' inside a string can't
+	// trigger a false rejection or hide a real second statement. Double-quoted
+	// identifiers are preserved (they are names, not data).
+	stripped := scrubSQL(sql)
 	if multiStatement(stripped) {
 		return ValidationResult{Reason: "multiple statements are not allowed"}
 	}
 	sql = strings.TrimRight(strings.TrimSpace(sql), ";")
-	stripped = strings.TrimRight(strings.TrimSpace(stripComments(sql)), ";")
+	stripped = strings.TrimRight(strings.TrimSpace(scrubSQL(sql)), ";")
 	lower := strings.ToLower(stripped)
 
 	// Must begin with SELECT or WITH (CTE → SELECT).
@@ -136,6 +139,18 @@ func ValidateSQL(raw string, opts ValidateOptions) ValidationResult {
 func stripComments(sql string) string {
 	sql = lineComment.ReplaceAllString(sql, " ")
 	sql = blockComment.ReplaceAllString(sql, " ")
+	return sql
+}
+
+// stringLiteral matches a single-quoted SQL string, including doubled-quote ('')
+// escapes inside it.
+var stringLiteral = regexp.MustCompile(`'(?:[^']|'')*'`)
+
+// scrubSQL removes comments and blanks out single-quoted string literals (keeping
+// the quotes so token boundaries are preserved), leaving structure + identifiers.
+func scrubSQL(sql string) string {
+	sql = stripComments(sql)
+	sql = stringLiteral.ReplaceAllString(sql, "''")
 	return sql
 }
 

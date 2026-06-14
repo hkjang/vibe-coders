@@ -565,6 +565,7 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 				created_at TEXT NOT NULL,
 				updated_at TEXT NOT NULL
 			)`,
+		`ALTER TABLE text2sql_golden_queries ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'`,
 		`CREATE TABLE IF NOT EXISTS text2sql_schemas (
 				name TEXT PRIMARY KEY,
 				team TEXT,

@@ -24,6 +24,7 @@ type Config struct {
 	Session    SessionConfig
 	VCS        VCSConfig
 	Text2SQL   Text2SQLConfig
+	ClickHouse ClickHouseConfig
 	Pricing    map[string]ModelPrice
 }
 
@@ -114,6 +115,16 @@ type Text2SQLConfig struct {
 	MaskResults    bool    // mask secrets/PII in executed result cells
 	ExecDriver     string  // database/sql driver for execute mode (e.g. "postgres", "sqlite")
 	ExecDSN        string  // read-only DSN for execute mode; empty disables execution
+}
+
+// ClickHouseConfig configures the long-term analytics sink. When URL is empty the
+// sink is disabled; the PostgreSQL/SQLite rollup ledger remains the source of truth.
+type ClickHouseConfig struct {
+	URL      string // HTTP endpoint, e.g. http://clickhouse:8123
+	Database string
+	Table    string
+	User     string
+	Password string
 }
 
 // DefaultGatewaySecret is the insecure development fallback used when
@@ -214,6 +225,13 @@ func Load() (Config, error) {
 			MaskResults:    boolEnv("TEXT2SQL_MASK_RESULTS", true),
 			ExecDriver:     getEnv("TEXT2SQL_EXEC_DRIVER", "postgres"),
 			ExecDSN:        os.Getenv("TEXT2SQL_EXEC_DSN"),
+		},
+		ClickHouse: ClickHouseConfig{
+			URL:      strings.TrimRight(os.Getenv("CLICKHOUSE_URL"), "/"),
+			Database: getEnv("CLICKHOUSE_DB", "default"),
+			Table:    getEnv("CLICKHOUSE_TABLE", "analytics_daily"),
+			User:     os.Getenv("CLICKHOUSE_USER"),
+			Password: os.Getenv("CLICKHOUSE_PASSWORD"),
 		},
 		Pricing: map[string]ModelPrice{},
 	}

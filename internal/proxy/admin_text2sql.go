@@ -193,6 +193,45 @@ func (s *Server) handleText2SQLColumns(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// handleText2SQLCollect auto-collects the table/column layout from the execute DB
+// (information_schema / sqlite_master) into the registry under a schema name.
+// POST /admin/text2sql/collect {schema_name, db_schema}
+func (s *Server) handleText2SQLCollect(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	if r.Method != http.MethodPost {
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
+	if s.cfg.Text2SQL.ExecDSN == "" {
+		writeOpenAIError(w, http.StatusBadRequest, "execute DB is not configured (TEXT2SQL_EXEC_DSN)", "invalid_request_error", "no_exec_db")
+		return
+	}
+	var p struct {
+		SchemaName string `json:"schema_name"`
+		DBSchema   string `json:"db_schema"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&p)
+	if strings.TrimSpace(p.SchemaName) == "" {
+		writeOpenAIError(w, http.StatusBadRequest, "schema_name is required", "invalid_request_error", "missing_schema")
+		return
+	}
+	db, err := s.text2sqlExecDB()
+	if err != nil {
+		writeOpenAIError(w, http.StatusBadGateway, "exec DB open failed: "+err.Error(), "server_error", "exec_db_failed")
+		return
+	}
+	tables, cols, err := s.db.CollectInformationSchema(r.Context(), db, s.cfg.Text2SQL.ExecDriver, strings.TrimSpace(p.DBSchema), strings.TrimSpace(p.SchemaName))
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "collect_failed")
+		return
+	}
+	s.auditAdmin(r, "text2sql.schema.collect", "", auditJSON(map[string]any{"schema": p.SchemaName, "added_tables": tables, "added_columns": cols}))
+	writeJSON(w, http.StatusOK, map[string]any{"schema_name": p.SchemaName, "added_tables": tables, "added_columns": cols})
+}
+
 // handleText2SQLProfiles manages runtime virtual-model profiles (DB overrides of the
 // env defaults; can also define new virtual models).
 // GET /admin/text2sql/profiles · POST {virtual_model,mode,upstream_model,summary_model,schema_name,enabled} · DELETE ?virtual_model=
