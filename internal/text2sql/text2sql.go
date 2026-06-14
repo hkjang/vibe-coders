@@ -86,6 +86,83 @@ func BuildGenerationMessages(dialect, schema, question string, limit int) []Mess
 	return msgs
 }
 
+// Example is a verified question→SQL pair used as a few-shot example.
+type Example struct {
+	Question string
+	SQL      string
+}
+
+// SelectExamples ranks examples by word-overlap with the question and returns the
+// top n (most relevant first). Examples with no overlap are dropped.
+func SelectExamples(all []Example, question string, n int) []Example {
+	if n <= 0 || len(all) == 0 {
+		return nil
+	}
+	qWords := wordSet(question)
+	type scored struct {
+		ex    Example
+		score int
+	}
+	ranked := make([]scored, 0, len(all))
+	for _, ex := range all {
+		score := 0
+		for w := range wordSet(ex.Question) {
+			if qWords[w] {
+				score++
+			}
+		}
+		if score > 0 {
+			ranked = append(ranked, scored{ex, score})
+		}
+	}
+	// simple selection sort for the top-n (lists are small)
+	out := []Example{}
+	for len(out) < n && len(ranked) > 0 {
+		best := 0
+		for i := 1; i < len(ranked); i++ {
+			if ranked[i].score > ranked[best].score {
+				best = i
+			}
+		}
+		out = append(out, ranked[best].ex)
+		ranked = append(ranked[:best], ranked[best+1:]...)
+	}
+	return out
+}
+
+func wordSet(s string) map[string]bool {
+	out := map[string]bool{}
+	for _, w := range strings.Fields(strings.ToLower(s)) {
+		w = strings.Trim(w, ".,?!()[]{}\"'`")
+		if len(w) >= 2 {
+			out[w] = true
+		}
+	}
+	return out
+}
+
+// WithExamples prepends few-shot examples (as assistant-demonstration messages)
+// to a generation message set, right before the user question.
+func WithExamples(msgs []Message, examples []Example) []Message {
+	if len(examples) == 0 {
+		return msgs
+	}
+	var b strings.Builder
+	b.WriteString("예시 (질문 → SQL):\n")
+	for _, ex := range examples {
+		b.WriteString("Q: " + ex.Question + "\nSQL:\n" + ex.SQL + "\n\n")
+	}
+	exampleMsg := Message{Role: "system", Content: strings.TrimSpace(b.String())}
+	// Insert the examples just before the final (user) message.
+	if len(msgs) == 0 {
+		return []Message{exampleMsg}
+	}
+	last := msgs[len(msgs)-1]
+	head := append([]Message{}, msgs[:len(msgs)-1]...)
+	head = append(head, exampleMsg, last)
+	return head
+}
+
 // MessagesJSON marshals messages into the body shape runGovernanceChat understands
 // (it preserves a `messages` array and only overwrites model/stream).
 func MessagesJSON(msgs []Message) string {

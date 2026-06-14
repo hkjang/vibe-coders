@@ -82,6 +82,49 @@ type Text2SQLStats struct {
 	ValidRate float64 `json:"valid_rate"`
 }
 
+// Text2SQLModelMetric is per-upstream-model Text2SQL quality derived from the logs.
+type Text2SQLModelMetric struct {
+	UpstreamModel string  `json:"upstream_model"`
+	Total         int64   `json:"total"`
+	Valid         int64   `json:"valid"`
+	Executed      int64   `json:"executed"`
+	Errors        int64   `json:"errors"`
+	ValidRate     float64 `json:"valid_rate"`
+	AvgCostKRW    float64 `json:"avg_cost_krw"`
+	AvgLatencyMS  float64 `json:"avg_latency_ms"`
+}
+
+// Text2SQLModelMetricsSince ranks upstream models by how well they generate SQL.
+func (s *SQLStore) Text2SQLModelMetricsSince(ctx context.Context, since time.Time) ([]Text2SQLModelMetric, error) {
+	rows, err := s.db.QueryContext(ctx, s.bind(`
+		SELECT COALESCE(NULLIF(upstream_model,''),'(unknown)'),
+			COUNT(*),
+			COALESCE(SUM(CASE WHEN valid = 1 THEN 1 ELSE 0 END),0),
+			COALESCE(SUM(CASE WHEN executed = 1 THEN 1 ELSE 0 END),0),
+			COALESCE(SUM(CASE WHEN COALESCE(error,'') <> '' THEN 1 ELSE 0 END),0),
+			COALESCE(AVG(cost_krw),0),
+			COALESCE(AVG(latency_ms),0)
+		FROM text2sql_query_logs WHERE created_at >= ?
+		GROUP BY COALESCE(NULLIF(upstream_model,''),'(unknown)')
+		ORDER BY COUNT(*) DESC`), since.UTC().Format(time.RFC3339Nano))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Text2SQLModelMetric{}
+	for rows.Next() {
+		var m Text2SQLModelMetric
+		if err := rows.Scan(&m.UpstreamModel, &m.Total, &m.Valid, &m.Executed, &m.Errors, &m.AvgCostKRW, &m.AvgLatencyMS); err != nil {
+			return nil, err
+		}
+		if m.Total > 0 {
+			m.ValidRate = float64(m.Valid) / float64(m.Total)
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
 // Text2SQLStatsSince aggregates Text2SQL logs since a time.
 func (s *SQLStore) Text2SQLStatsSince(ctx context.Context, since time.Time) (Text2SQLStats, error) {
 	var st Text2SQLStats

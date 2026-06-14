@@ -3,11 +3,41 @@ package proxy
 import (
 	"encoding/json"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
 	"vibe-coders/internal/store"
+	"vibe-coders/internal/text2sql"
 )
+
+var sqlTokenRe = regexp.MustCompile(`[a-zA-Z_][a-zA-Z0-9_]*`)
+
+// goldenSQLMatch is a lenient comparison: the generated SQL passes if it references
+// the same set of identifier tokens as the expected SQL (order/whitespace/alias
+// differences are tolerated, since LLM SQL is rarely byte-identical).
+func goldenSQLMatch(expected, generated string) bool {
+	want := sqlTokenRe.FindAllString(strings.ToLower(expected), -1)
+	if len(want) == 0 {
+		return false
+	}
+	got := map[string]bool{}
+	for _, t := range sqlTokenRe.FindAllString(strings.ToLower(generated), -1) {
+		got[t] = true
+	}
+	// Every expected identifier/keyword (except the optional "as" alias keyword) must
+	// appear in the generated SQL. Extra tokens (aliases, formatting) are tolerated;
+	// a missing table/column/keyword means the query diverged.
+	for _, t := range want {
+		if t == "as" {
+			continue
+		}
+		if !got[t] {
+			return false
+		}
+	}
+	return true
+}
 
 // handleText2SQLAdmin serves the Text2SQL admin tab data: recent query logs +
 // aggregate stats over a window.
@@ -33,9 +63,13 @@ func (s *Server) handleText2SQLAdmin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	schemas, _ := s.db.ListText2SQLSchemas(r.Context())
+	modelMetrics, _ := s.db.Text2SQLModelMetricsSince(r.Context(), since)
+	goldens, _ := s.db.ListText2SQLGoldenQueries(r.Context(), false)
 	writeJSON(w, http.StatusOK, map[string]any{
-		"schemas": schemas,
-		"enabled": s.cfg.Text2SQL.Enabled,
+		"schemas":       schemas,
+		"model_metrics": modelMetrics,
+		"golden":        goldens,
+		"enabled":       s.cfg.Text2SQL.Enabled,
 		"profiles": []map[string]string{
 			{"model": "vibe/text2sql-preview", "mode": "preview", "upstream": s.cfg.Text2SQL.PreviewModel},
 			{"model": "vibe/text2sql-execute", "mode": "execute", "upstream": s.cfg.Text2SQL.ExecuteModel},
@@ -45,6 +79,125 @@ func (s *Server) handleText2SQLAdmin(w http.ResponseWriter, r *http.Request) {
 		},
 		"stats": stats,
 		"logs":  logs,
+	})
+}
+
+// handleText2SQLGolden manages verified Text2SQL golden queries (few-shot + regression).
+// GET /admin/text2sql/golden · POST {name,question,expected_sql,schema_name,tags[],enabled} · DELETE ?id=
+func (s *Server) handleText2SQLGolden(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	// /admin/text2sql/golden/run — regression replay.
+	if strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/admin/text2sql/golden"), "/") == "/run" {
+		s.handleText2SQLGoldenRun(w, r)
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		list, err := s.db.ListText2SQLGoldenQueries(r.Context(), false)
+		if err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "golden_list_failed")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"golden": list})
+	case http.MethodPost:
+		var p struct {
+			ID          string   `json:"id"`
+			Name        string   `json:"name"`
+			Question    string   `json:"question"`
+			ExpectedSQL string   `json:"expected_sql"`
+			SchemaName  string   `json:"schema_name"`
+			Tags        []string `json:"tags"`
+			Enabled     *bool    `json:"enabled"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+			writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "invalid_body")
+			return
+		}
+		if strings.TrimSpace(p.Name) == "" || strings.TrimSpace(p.Question) == "" || strings.TrimSpace(p.ExpectedSQL) == "" {
+			writeOpenAIError(w, http.StatusBadRequest, "name, question, expected_sql are required", "invalid_request_error", "missing_fields")
+			return
+		}
+		g := store.Text2SQLGoldenQuery{
+			ID: firstNonEmpty(strings.TrimSpace(p.ID), newID("t2sg")), Name: strings.TrimSpace(p.Name),
+			Question: strings.TrimSpace(p.Question), ExpectedSQL: strings.TrimSpace(p.ExpectedSQL),
+			SchemaName: strings.TrimSpace(p.SchemaName), Tags: p.Tags, Enabled: true,
+		}
+		if p.Enabled != nil {
+			g.Enabled = *p.Enabled
+		}
+		if err := s.db.UpsertText2SQLGoldenQuery(r.Context(), g); err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "golden_save_failed")
+			return
+		}
+		s.auditAdmin(r, "text2sql.golden.upsert", "", auditJSON(map[string]string{"id": g.ID, "name": g.Name}))
+		writeJSON(w, http.StatusCreated, map[string]any{"golden": g})
+	case http.MethodDelete:
+		id := strings.TrimSpace(r.URL.Query().Get("id"))
+		if id == "" {
+			writeOpenAIError(w, http.StatusBadRequest, "id query param is required", "invalid_request_error", "missing_id")
+			return
+		}
+		if err := s.db.DeleteText2SQLGoldenQuery(r.Context(), id); err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "golden_delete_failed")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"id": id, "status": "deleted"})
+	default:
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+	}
+}
+
+// handleText2SQLGoldenRun replays golden queries against a model: it regenerates SQL
+// and checks that it validates and contains the expected SQL's key tokens.
+// POST /admin/text2sql/golden/run {model}
+func (s *Server) handleText2SQLGoldenRun(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
+	var p struct {
+		Model string `json:"model"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&p)
+	model := firstNonEmpty(strings.TrimSpace(p.Model), s.cfg.Text2SQL.PreviewModel)
+
+	goldens, err := s.db.ListText2SQLGoldenQueries(r.Context(), true)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "golden_list_failed")
+		return
+	}
+	results := []map[string]any{}
+	passed := 0
+	for _, g := range goldens {
+		schema := s.cfg.Text2SQL.Schema
+		if g.SchemaName != "" {
+			if sc, found, _ := s.db.ResolveText2SQLSchema(r.Context(), g.SchemaName, ""); found {
+				schema = sc.SchemaText
+			}
+		}
+		msgs := text2sql.MessagesJSON(text2sql.BuildGenerationMessages(s.cfg.Text2SQL.Dialect, schema, g.Question, s.cfg.Text2SQL.DefaultLimit))
+		gen := s.runGovernanceChat(r.Context(), r, model, msgs)
+		genSQL := text2sql.ExtractSQL(gen.Response)
+		validation := text2sql.ValidateSQL(genSQL, text2sql.ValidateOptions{DefaultLimit: s.cfg.Text2SQL.DefaultLimit, MaxLimit: s.cfg.Text2SQL.MaxLimit})
+		ok := validation.OK && goldenSQLMatch(g.ExpectedSQL, genSQL)
+		if ok {
+			passed++
+		}
+		results = append(results, map[string]any{
+			"id": g.ID, "name": g.Name, "passed": ok, "valid": validation.OK,
+			"generated_sql": genSQL, "reject_reason": validation.Reason,
+		})
+	}
+	rate := 1.0
+	if len(goldens) > 0 {
+		rate = float64(passed) / float64(len(goldens))
+	}
+	s.auditAdmin(r, "text2sql.golden.run", "", auditJSON(map[string]any{"model": model, "total": len(goldens), "passed": passed}))
+	writeJSON(w, http.StatusOK, map[string]any{
+		"model": model, "total": len(goldens), "passed": passed, "pass_rate": rate, "results": results,
 	})
 }
 

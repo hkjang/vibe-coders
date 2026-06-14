@@ -98,6 +98,14 @@ func (s *Server) handleText2SQL(w http.ResponseWriter, r *http.Request, meta sto
 
 	// 1) Generate SQL via the chosen upstream model (internal, non-recursive call).
 	msgs := text2sql.BuildGenerationMessages(dialect, schema, question, cfg.DefaultLimit)
+	// Few-shot: inject the most relevant verified golden queries to improve generation.
+	if goldens, err := s.db.ListText2SQLGoldenQueries(r.Context(), true); err == nil && len(goldens) > 0 {
+		examples := make([]text2sql.Example, 0, len(goldens))
+		for _, g := range goldens {
+			examples = append(examples, text2sql.Example{Question: g.Question, SQL: g.ExpectedSQL})
+		}
+		msgs = text2sql.WithExamples(msgs, text2sql.SelectExamples(examples, question, 3))
+	}
 	gen := s.runGovernanceChat(r.Context(), r, upstreamModel, text2sql.MessagesJSON(msgs))
 	totalCost := gen.CostKRW
 	if gen.Error != "" {

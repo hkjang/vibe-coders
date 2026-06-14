@@ -4802,15 +4802,80 @@ const adminHTML = `<!doctype html>
       const logTable = (d.logs || []).length ?
         '<table><thead><tr><th>시각</th><th>모델</th><th>모드</th><th>질문</th><th>검증</th><th>생성 SQL</th><th>비용</th></tr></thead><tbody>' + logRows + '</tbody></table>'
         : '<div class="empty">Text2SQL 질의 기록 없음. 사용자가 <code>vibe/text2sql-preview</code> 모델로 <code>/v1/chat/completions</code> 를 호출하면 여기에 집계됩니다.</div>';
+      const mm = d.model_metrics || [];
+      const mmTable = mm.length ?
+        '<table><thead><tr><th>업스트림 모델</th><th data-sort="num">질의</th><th data-sort="num">유효율</th><th data-sort="num">실행</th><th data-sort="num">오류</th><th data-sort="num">평균비용</th><th data-sort="num">평균지연</th></tr></thead><tbody>' +
+        mm.map(m => '<tr>' +
+          '<td>' + escapeHTML(m.upstream_model) + '</td>' +
+          '<td data-num="' + (m.total || 0) + '">' + fmt(m.total) + '</td>' +
+          '<td data-num="' + (m.valid_rate || 0) + '">' + ((m.valid_rate || 0) * 100).toFixed(0) + '%</td>' +
+          '<td data-num="' + (m.executed || 0) + '">' + fmt(m.executed) + '</td>' +
+          '<td data-num="' + (m.errors || 0) + '">' + fmt(m.errors) + '</td>' +
+          '<td data-num="' + (m.avg_cost_krw || 0) + '">' + money(m.avg_cost_krw) + '</td>' +
+          '<td data-num="' + (m.avg_latency_ms || 0) + '">' + fmt(Math.round(m.avg_latency_ms || 0)) + 'ms</td>' +
+        '</tr>').join('') + '</tbody></table>'
+        : '<div class="empty">모델별 메트릭 없음.</div>';
+      const golden = d.golden || [];
+      const goldenForm =
+        '<form class="inline-form" id="t2s-golden-form" style="grid-template-columns: 130px minmax(160px,1fr) minmax(200px,2fr) 110px 70px; align-items:start;">' +
+          '<input id="tg-name" placeholder="이름" required>' +
+          '<textarea id="tg-question" rows="2" placeholder="자연어 질문" required style="resize:vertical"></textarea>' +
+          '<textarea id="tg-sql" rows="2" placeholder="검증된 기대 SQL" required style="resize:vertical"></textarea>' +
+          '<input id="tg-schema" placeholder="스키마명(선택)">' +
+          '<button type="submit">저장</button>' +
+        '</form>';
+      const goldenRows = golden.map(g =>
+        '<tr><td><strong>' + escapeHTML(g.name) + '</strong>' + (g.enabled ? '' : ' <span class="status error">중지</span>') + '</td>' +
+        '<td>' + escapeHTML((g.question || '').slice(0, 60)) + '</td>' +
+        '<td><code style="font-size:11px">' + escapeHTML((g.expected_sql || '').slice(0, 80)) + '</code></td>' +
+        '<td><button class="danger" type="button" onclick="deleteT2SGolden(\'' + escapeAttr(g.id) + '\')">삭제</button></td></tr>'
+      ).join('');
+      const goldenTable = golden.length ?
+        '<table><thead><tr><th>이름</th><th>질문</th><th>기대 SQL</th><th>동작</th></tr></thead><tbody>' + goldenRows + '</tbody></table>'
+        : '<div class="empty">Golden Query 없음. 등록하면 생성 프롬프트에 few-shot 예시로 주입되고, 회귀 검증에 사용됩니다.</div>';
+      const goldenRun = '<div class="toolbar" style="border-bottom:0"><button type="button" id="t2s-golden-run">회귀 검증 실행</button><span class="muted" id="t2s-golden-run-result"></span></div>';
       document.getElementById('view').innerHTML =
         '<section><h2>Text2SQL</h2><div style="padding:0 14px 8px" class="muted">자연어 질문을 읽기 전용 SQL로 변환합니다. 사용자는 <code>vibe/text2sql-*</code> 가상 모델을 호출하고, 게이트웨이가 내부적으로 실제 업스트림 모델을 선택해 SQL을 생성·검증·(선택)실행합니다.</div></section>' +
         section('요약 (최근 7일)', kpis) +
         section('가상 모델 프로필', profileTable) +
+        section('모델별 SQL 품질 (최근 7일)', mmTable) +
         section('스키마 카탈로그 · 테이블 권한', schemaForm + schemaTable) +
+        section('Golden Query (few-shot · 회귀)', goldenRun + goldenForm + goldenTable) +
         section('최근 Text2SQL 질의', logTable);
       const sf = document.getElementById('t2s-schema-form');
       if (sf) sf.addEventListener('submit', addT2SSchema);
+      const gf = document.getElementById('t2s-golden-form');
+      if (gf) gf.addEventListener('submit', addT2SGolden);
+      const gr = document.getElementById('t2s-golden-run');
+      if (gr) gr.addEventListener('click', runT2SGolden);
       makeSortable('#view', 'text2sql');
+    }
+    async function addT2SGolden(e) {
+      e.preventDefault();
+      const body = {
+        name: document.getElementById('tg-name').value.trim(),
+        question: document.getElementById('tg-question').value,
+        expected_sql: document.getElementById('tg-sql').value,
+        schema_name: document.getElementById('tg-schema').value.trim(),
+      };
+      if (!body.name || !body.question.trim() || !body.expected_sql.trim()) { alert('이름·질문·기대 SQL을 입력하세요'); return; }
+      await api('/admin/text2sql/golden', { method: 'POST', body: JSON.stringify(body) });
+      route();
+    }
+    window.deleteT2SGolden = async (id) => {
+      if (!confirm('이 Golden Query를 삭제하시겠습니까?')) return;
+      await api('/admin/text2sql/golden?id=' + encodeURIComponent(id), { method: 'DELETE' });
+      route();
+    };
+    async function runT2SGolden() {
+      const el = document.getElementById('t2s-golden-run-result');
+      if (el) el.textContent = ' 실행 중…';
+      try {
+        const res = await api('/admin/text2sql/golden/run', { method: 'POST', body: JSON.stringify({}) });
+        if (el) el.textContent = ' 통과 ' + res.passed + '/' + res.total + ' (' + Math.round((res.pass_rate || 0) * 100) + '%)';
+      } catch (err) {
+        if (el) el.textContent = ' 실패: ' + err.message;
+      }
     }
     async function addT2SSchema(e) {
       e.preventDefault();

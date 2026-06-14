@@ -160,6 +160,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/admin/dw/rollups", s.handleDWRollups)
 	mux.HandleFunc("/admin/text2sql", s.handleText2SQLAdmin)
 	mux.HandleFunc("/admin/text2sql/schemas", s.handleText2SQLSchemas)
+	mux.HandleFunc("/admin/text2sql/golden", s.handleText2SQLGolden)
+	mux.HandleFunc("/admin/text2sql/golden/", s.handleText2SQLGolden)
 	mux.HandleFunc("/admin/export.csv", s.handleExportCSV)
 	mux.HandleFunc("/admin/timeseries", s.handleTimeseries)
 	mux.HandleFunc("/admin/heatmap", s.handleHeatmap)

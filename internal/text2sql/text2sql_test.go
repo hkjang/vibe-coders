@@ -110,6 +110,41 @@ func TestIsModelAndQuestion(t *testing.T) {
 	}
 }
 
+func TestSelectExamples(t *testing.T) {
+	all := []Example{
+		{Question: "부서별 ITSM 요청 건수", SQL: "SELECT ..."},
+		{Question: "월별 매출 합계", SQL: "SELECT ..."},
+		{Question: "부서별 평균 처리 시간", SQL: "SELECT ..."},
+	}
+	got := SelectExamples(all, "지난달 부서별 ITSM 요청 건수를 알려줘", 2)
+	if len(got) == 0 {
+		t.Fatal("expected at least one relevant example")
+	}
+	// The exact-overlap example should rank first.
+	if got[0].Question != "부서별 ITSM 요청 건수" {
+		t.Errorf("most relevant example should rank first, got %q", got[0].Question)
+	}
+	// Unrelated question → no examples.
+	if ex := SelectExamples(all, "xyzzy foobar", 2); len(ex) != 0 {
+		t.Errorf("expected no examples for unrelated question, got %d", len(ex))
+	}
+}
+
+func TestWithExamples(t *testing.T) {
+	msgs := []Message{{Role: "system", Content: "sys"}, {Role: "user", Content: "q"}}
+	out := WithExamples(msgs, []Example{{Question: "x", SQL: "SELECT 1"}})
+	if len(out) != 3 {
+		t.Fatalf("expected 3 messages, got %d", len(out))
+	}
+	// examples injected just before the final user message
+	if out[len(out)-1].Role != "user" {
+		t.Error("user message should remain last")
+	}
+	if !contains(out[1].Content, "SELECT 1") {
+		t.Errorf("example SQL should be injected: %q", out[1].Content)
+	}
+}
+
 func contains(s, sub string) bool {
 	for i := 0; i+len(sub) <= len(s); i++ {
 		if s[i:i+len(sub)] == sub {
