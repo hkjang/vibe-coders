@@ -315,14 +315,17 @@
                     <div class="diag-node" style="padding: 10px;">IDE / Chat Clients<br><span style="font-size: 10px; font-weight: normal; color: #64748b;">(Cursor, Roo Code, etc.)</span></div>
                     <div class="diag-arrow">&rarr;</div>
                     <div class="diag-node primary" style="background: #f0f6ff; border-color: #2563eb; color: #1d4ed8; padding: 12px 10px;">
-                        <strong>Proxy Gateway Core (v0.1.27)</strong>
+                        <strong>Proxy Gateway Core (v0.2.0)</strong>
                         <div style="font-size: 9px; font-weight: normal; color: #475569; margin-top: 6px; text-align: left; line-height: 1.3;">
                             • 3-Tier Session Inference Engine<br>
                             • Intelligent Cost/Latency Router<br>
                             • Governance Rule Engine & Runner<br>
                             • VCS Event Traffic Inferer<br>
                             • Automated Performance Benchmarker<br>
-                            • Multi-tenant Team Mapper & Scope Editor
+                            • Multi-tenant Team Mapper & Scope Editor<br>
+                            • Explicit Request Pipeline (PipelineStep)<br>
+                            • Operational Risk & Safety Control (MCP & Injection)<br>
+                            • Multi-dimensional Cost Allocation
                         </div>
                     </div>
                     <div class="diag-arrow">&rarr;</div>
@@ -336,8 +339,8 @@
                 <strong>작성 부서:</strong> IT AI 추진단<br>
             </div>
             <div style="text-align: right;">
-                <strong>문서 번호:</strong> SEC-APG-2026-V23<br>
-                <strong>최종 승인 버전:</strong> v0.1.27 (Production Stable)
+                <strong>문서 번호:</strong> SEC-APG-2026-V30<br>
+                <strong>최종 승인 버전:</strong> v0.2.0 (Production Stable)
             </div>
         </div>
     </div>
@@ -412,7 +415,7 @@
     <div class="section">
         <h2 class="section-title">1.2 시스템 세부 구성 요소 분석 (System Component Breakdown)</h2>
         <p>
-            본 게이트웨이는 엔터프라이즈 거버넌스 및 AI APM 요건을 충족하기 위해 유기적으로 연동되는 8대 핵심 서브시스템으로 구성되어 있습니다.
+            본 게이트웨이는 엔터프라이즈 거버넌스 및 AI APM 요건을 충족하기 위해 유기적으로 연동되는 13대 핵심 서브시스템으로 구성되어 있습니다.
         </p>
 
         <div class="grid-2" style="margin-top: 15px;">
@@ -462,6 +465,36 @@
                 <h3 style="color: #be123c; border-left-color: #f43f5e;">⑧ 사용자-팀 소속 동적 매핑 엔진</h3>
                 <p style="font-size: 12.5px; color: #475569; line-height: 1.5; margin-bottom: 0;">
                     다중 테넌트(Multi-tenant) 환경에서 사용자를 특정 팀에 유연하게 바인딩하고, 관리자 권한 수준(team_admin 등)에 따라 자신의 소속 팀 정보 및 관련 API Key에만 접근하도록 필터링해 정보 노출 및 권한 상승(Privilege Escalation) 위험을 원천 차단합니다.
+                </p>
+            </div>
+            <div class="card" style="background: #f5f3ff; border-color: #ddd6fe;">
+                <h3 style="color: #6d28d9; border-left-color: #8b5cf6;">⑨ 명시적 파이프라인 및 단계별 미들웨어 (`PipelineStep`)</h3>
+                <p style="font-size: 12.5px; color: #475569; line-height: 1.5; margin-bottom: 0;">
+                    게이트웨이에 유입되는 API 호출 라이프사이클을 <code>PipelineStep</code> 인터페이스로 구조화하여, 각 단계(인증, 속도 제한, 룰 검사, 라우팅, 로깅)가 순차 미들웨어 체인처럼 동작하도록 설계함으로써 유지보수성과 확장성을 대폭 강화한 리팩토링 아키텍처입니다.
+                </p>
+            </div>
+            <div class="card" style="background: #fff7ed; border-color: #ffedd5;">
+                <h3 style="color: #c2410c; border-left-color: #f97316;">⑩ 다차원 비용 할당 및 정산 모듈</h3>
+                <p style="font-size: 12.5px; color: #475569; line-height: 1.5; margin-bottom: 0;">
+                    전사 API 트래픽을 Git 리포지토리, 브랜치, 프로젝트, 서비스, 코스트 센터 단위로 세분화하여 토큰 소모량과 원화 환산 비용을 즉각 연동하고, 사용자별 주간 리포트를 자동 적재하여 클라우드 자산의 정량적 회계 정산 프로세스를 수립합니다.
+                </p>
+            </div>
+            <div class="card" style="background: #f0fdf4; border-color: #dcfce7;">
+                <h3 style="color: #15803d; border-left-color: #22c55e;">⑪ 엔터프라이즈 프롬프트 관리 및 회귀 게이트 (Prompt CI Gate)</h3>
+                <p style="font-size: 12.5px; color: #475569; line-height: 1.5; margin-bottom: 0;">
+                    골든 프롬프트 회귀 테스트 게이트를 통해 배포 전 품질 규격을 CI 상에서 자동 계량 검증하며, 실험-검증-배포로 이어지는 프롬프트 라이프사이클 승격 단계와 중앙 집중형 AI Task 템플릿 관리 기능을 결합하여 전사적 프롬프트 자산화를 제공합니다.
+                </p>
+            </div>
+            <div class="card" style="background: #eff6ff; border-color: #dbeafe;">
+                <h3 style="color: #1d4ed8; border-left-color: #3b82f6;">⑫ 능동적 보안 위험도 및 안심 통제 계층 (Ops Risk Score)</h3>
+                <p style="font-size: 12.5px; color: #475569; line-height: 1.5; margin-bottom: 0;">
+                    실시간 프롬프트 인젝션 차단 및 MCP 도구에 대한 정밀 권한 등급 분석(Access-class Risk Grading), 가용성 기반 업스트림 SLO 실시간 통계 및 월말 비용 예측 알고리즘을 조합하여 시스템의 전반적인 운영 위험 점수(Operational Risk Score)를 산출 및 통제합니다.
+                </p>
+            </div>
+            <div class="card" style="background: #fdf2f8; border-color: #fce7f3;">
+                <h3 style="color: #be185d; border-left-color: #ec4899;">⑬ 폐루프 자동 라우팅 강화 학습 및 DW 적재 (DW Staging)</h3>
+                <p style="font-size: 12.5px; color: #475569; line-height: 1.5; margin-bottom: 0;">
+                    실제 LLM 호출 처리 결과(TTFT, 성공/실패 여부, 단가)의 피드백 루프를 통해 차기 최적 경로를 능동 수정하는 폐루프 강화 학습 라우터 및 대규모 아카이빙을 위한 분석용 DW 스태이징 롤업 테이블 연동 기능을 내장했습니다.
                 </p>
             </div>
         </div>
@@ -1025,6 +1058,11 @@ psql -h [VM_IP_OR_DNS] -p 5432 -U gateway_user -d gateway_db < backup_gateway_YY
                     <td><strong>v0.1.27</strong></td>
                     <td>영속적 세션 추론 안정화 및 위임 거버넌스 종합 보고서 갱신</td>
                     <td>보고서 메인 및 아키텍처 내에 8대 핵심 서브시스템(위임형 스코프 거버넌스 및 사용자-팀 매핑) 구조를 상세히 명세하고 v0.1.27 릴리즈 배포 완료.</td>
+                </tr>
+                <tr>
+                    <td><strong>v0.2.0</strong></td>
+                    <td>로드맵 Part 1 완료 및 엔터프라이즈 거버넌스 대대적 확장</td>
+                    <td>Explicit PipelineStep 구조 리팩토링, Ops Health 대시보드 및 주간 AI 리포트 생성, 다차원 비용 할당, CI용 골든 프롬프트 회귀 테스트 게이트, 프롬프트 인젝션 탐지 및 MCP 도구 위험등급 분류, 프로바이더 SLO 모니터링, 월말 비용 예측 및 Operational Risk Score 산출, 폐루프 자동 라우팅 강화 학습, DW 롤업 스태이징 탑재.</td>
                 </tr>
             </tbody>
         </table>

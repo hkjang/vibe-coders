@@ -153,11 +153,18 @@ func (s *Server) openAIGovernanceContext(r *http.Request, meta *store.LogRecord,
 }
 
 func (s *Server) evaluateGovernance(r *http.Request, g governanceContext) governanceDecision {
-	decision := governanceDecision{SecretAction: "detect"}
 	rules, err := s.db.ActivePolicyRules(r.Context())
 	if err != nil {
-		return decision
+		return governanceDecision{SecretAction: "detect"}
 	}
+	return evaluatePolicyRules(rules, g)
+}
+
+// evaluatePolicyRules applies a rule set to one governance context and returns the
+// resulting decision. Pure (no DB / request access) so the policy simulator can
+// replay candidate rules against historical request contexts.
+func evaluatePolicyRules(rules []store.PolicyRule, g governanceContext) governanceDecision {
+	decision := governanceDecision{SecretAction: "detect"}
 	reasons := []string{}
 	for _, rule := range rules {
 		if !governanceRuleMatches(rule.Conditions, g) {

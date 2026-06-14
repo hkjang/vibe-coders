@@ -487,6 +487,108 @@ func (s *Server) handleGoldenPrompts(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// handlePolicySimulate replays a candidate rule set against recent request
+// contexts and reports how many would be blocked / require approval / allowed —
+// a dry-run preview before the rules are saved.
+// POST /admin/policies/simulate {rules:[{name,conditions,actions}], window?, limit?}
+// Optionally {policy_id} to simulate an existing policy's saved rules.
+func (s *Server) handlePolicySimulate(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	if r.Method != http.MethodPost {
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
+	var payload struct {
+		Rules []struct {
+			Name       string         `json:"name"`
+			Conditions map[string]any `json:"conditions"`
+			Actions    map[string]any `json:"actions"`
+		} `json:"rules"`
+		PolicyID string `json:"policy_id"`
+		Window   string `json:"window"`
+		Limit    int    `json:"limit"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "invalid_body")
+		return
+	}
+
+	rules := make([]store.PolicyRule, 0, len(payload.Rules))
+	for i, rr := range payload.Rules {
+		rules = append(rules, store.PolicyRule{
+			ID: "sim-" + itoaProxy(i), Name: firstNonEmpty(rr.Name, "sim-rule-"+itoaProxy(i)),
+			Conditions: rr.Conditions, Actions: rr.Actions,
+		})
+	}
+	// Fall back to an existing policy's active rules when no inline rules are given.
+	if len(rules) == 0 && strings.TrimSpace(payload.PolicyID) != "" {
+		all, err := s.db.ActivePolicyRules(r.Context())
+		if err == nil {
+			for _, rule := range all {
+				if rule.PolicyID == payload.PolicyID {
+					rules = append(rules, rule)
+				}
+			}
+		}
+	}
+	if len(rules) == 0 {
+		writeOpenAIError(w, http.StatusBadRequest, "provide rules[] or a policy_id to simulate", "invalid_request_error", "no_rules")
+		return
+	}
+
+	since := parseWindow(payload.Window, 7*24*time.Hour, "day")
+	contexts, err := s.db.GovernanceSimContexts(r.Context(), since, payload.Limit)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "policy_sim_failed")
+		return
+	}
+
+	var blocked, approval, allowed int
+	sampleBlocked := []map[string]any{}
+	for _, c := range contexts {
+		gctx := governanceContext{
+			APIKeyID: c.APIKeyID, TeamID: c.TeamID, Model: c.Model, Provider: c.Provider,
+			ComplexityScore: c.ComplexityScore, RiskScore: c.RiskScore,
+		}
+		d := evaluatePolicyRules(rules, gctx)
+		switch {
+		case d.Blocked:
+			blocked++
+			if len(sampleBlocked) < 20 {
+				sampleBlocked = append(sampleBlocked, map[string]any{
+					"api_key_id": c.APIKeyID, "model": c.Model, "provider": c.Provider,
+					"risk_score": c.RiskScore, "reason": d.Reason,
+				})
+			}
+		case d.RequireApproval:
+			approval++
+		default:
+			allowed++
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"evaluated":        len(contexts),
+		"blocked":          blocked,
+		"require_approval": approval,
+		"allowed":          allowed,
+		"block_rate":       safeRate(blocked, len(contexts)),
+		"sample_blocked":   sampleBlocked,
+		"since":            since.UTC().Format(time.RFC3339),
+		"note":             "secret/PII conditions are not evaluated from historical logs; model/provider/complexity/risk/team conditions are.",
+	})
+}
+
+func safeRate(n, total int) float64 {
+	if total == 0 {
+		return 0
+	}
+	return float64(n) / float64(total)
+}
+
 // handleGoldenRun runs every golden prompt (optionally filtered by tag) against
 // the given models and reports an aggregate pass/fail — the CI regression gate.
 // POST /admin/golden-prompts/run {models[], tag?, min_pass_rate?}
