@@ -1,9 +1,11 @@
 package proxy
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
+	"time"
 
 	"vibe-coders/internal/store"
 )
@@ -101,7 +103,19 @@ func (s *Server) handleTemplateByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := strings.TrimPrefix(r.URL.Path, "/admin/templates/")
-	if id == "" || strings.Contains(id, "/") {
+	// /admin/templates/{id}/use — fetch a template's body and record a usage (the
+	// "use from the market" action coding tools call).
+	if idx := strings.Index(id, "/"); idx >= 0 {
+		sub := id[idx+1:]
+		id = id[:idx]
+		if sub == "use" && r.Method == http.MethodPost {
+			s.handleTemplateUse(w, r, id)
+			return
+		}
+		writeOpenAIError(w, http.StatusNotFound, "not found", "invalid_request_error", "not_found")
+		return
+	}
+	if id == "" {
 		writeOpenAIError(w, http.StatusBadRequest, "invalid template id", "invalid_request_error", "invalid_template_id")
 		return
 	}
@@ -158,6 +172,34 @@ func (s *Server) handleTemplateByID(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
 	}
+}
+
+// handleTemplateUse returns a template's body and records a usage, powering the
+// "shared template market": teams discover standard prompts and pull them by id.
+func (s *Server) handleTemplateUse(w http.ResponseWriter, r *http.Request, id string) {
+	tmpl, found, err := s.db.GetPromptTemplate(r.Context(), id)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "template_lookup_failed")
+		return
+	}
+	if !found {
+		writeOpenAIError(w, http.StatusNotFound, "template not found", "invalid_request_error", "template_not_found")
+		return
+	}
+	if !tmpl.Enabled {
+		writeOpenAIError(w, http.StatusForbidden, "template is disabled", "invalid_request_error", "template_disabled")
+		return
+	}
+	// Best-effort usage tracking (popularity ranking in the market).
+	go func(id string) {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = s.db.TouchPromptTemplate(ctx, id)
+	}(id)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"id": tmpl.ID, "name": tmpl.Name, "category": tmpl.Category,
+		"description": tmpl.Description, "body": tmpl.Body,
+	})
 }
 
 func templateCategoryList() []map[string]string {

@@ -68,7 +68,47 @@ func (s *Server) handleBudgets(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// handleBudgetProjection forecasts each team's month-end spend at the current
+// run-rate and flags teams projected to exceed their team budget.
+// GET /admin/budgets/projection
+func (s *Server) handleBudgetProjection(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	if r.Method != http.MethodGet {
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
+	teams, err := s.db.TeamMonthlyForecast(r.Context(), time.Now())
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "team_forecast_failed")
+		return
+	}
+	// team_admin sees only its own team.
+	if claims, ok := s.currentAccessClaims(r); ok && claims.Role == "team_admin" {
+		filtered := teams[:0]
+		for _, t := range teams {
+			if s.claimsTeamMatches(r, claims, t.Team) {
+				filtered = append(filtered, t)
+			}
+		}
+		teams = filtered
+	}
+	exceeding := 0
+	for _, t := range teams {
+		if t.WillExceed {
+			exceeding++
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"teams": teams, "exceeding": exceeding})
+}
+
 func (s *Server) handleBudgetByID(w http.ResponseWriter, r *http.Request) {
+	if strings.TrimPrefix(r.URL.Path, "/admin/budgets/") == "projection" {
+		s.handleBudgetProjection(w, r)
+		return
+	}
 	if !s.authorizeAdmin(r) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return

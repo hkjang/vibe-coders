@@ -144,6 +144,75 @@ func (s *SQLStore) sessionWorkSeconds(ctx context.Context, apiKeyID, sinceStr st
 	return sessions, total, rows.Err()
 }
 
+// TeamForecast projects a team's month-to-date spend to month end at the current
+// run-rate, and (when a team budget exists) whether it will exceed it.
+type TeamForecast struct {
+	Team         string  `json:"team"`
+	SpentKRW     float64 `json:"spent_krw"`
+	ProjectedKRW float64 `json:"projected_krw"`
+	BudgetKRW    float64 `json:"budget_krw"` // 0 when no team budget is set
+	HasBudget    bool    `json:"has_budget"`
+	WillExceed   bool    `json:"will_exceed"`
+	OverageKRW   float64 `json:"projected_overage_krw"`
+	DaysElapsed  float64 `json:"days_elapsed"`
+	DaysInMonth  float64 `json:"days_in_month"`
+}
+
+// TeamMonthlyForecast computes, for every team with traffic this calendar month,
+// its run-rate projection to month end and overage vs any configured team budget.
+func (s *SQLStore) TeamMonthlyForecast(ctx context.Context, now time.Time) ([]TeamForecast, error) {
+	start, daysInMonth := kstMonthBounds(now)
+	elapsed := now.Sub(start).Hours() / 24
+	if elapsed < 0.02 {
+		elapsed = 0.02
+	}
+
+	// Resolve team budgets first (a separate query) so its connection is released
+	// before the main cursor opens — opening it mid-iteration deadlocks on SQLite's
+	// single connection.
+	budgets, err := s.ListBudgets(ctx)
+	if err != nil {
+		return nil, err
+	}
+	budgetByTeam := map[string]float64{}
+	for _, b := range budgets {
+		if b.Scope == "team" && b.MonthlyKRW > 0 {
+			budgetByTeam[b.ScopeValue] = b.MonthlyKRW
+		}
+	}
+
+	rows, err := s.db.QueryContext(ctx, s.bind(`
+		SELECT COALESCE(NULLIF(k.team, ''), '(none)') AS team, COALESCE(SUM(t.estimated_cost), 0)
+		FROM request_logs r
+		LEFT JOIN token_usage t ON t.request_id = r.id
+		LEFT JOIN api_keys k ON k.id = r.api_key_id
+		WHERE r.created_at >= ?
+		GROUP BY COALESCE(NULLIF(k.team, ''), '(none)')`), start.UTC().Format(time.RFC3339Nano))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := []TeamForecast{}
+	for rows.Next() {
+		var f TeamForecast
+		if err := rows.Scan(&f.Team, &f.SpentKRW); err != nil {
+			return nil, err
+		}
+		f.DaysElapsed, f.DaysInMonth = elapsed, daysInMonth
+		f.ProjectedKRW = (f.SpentKRW / elapsed) * daysInMonth
+		if b, ok := budgetByTeam[f.Team]; ok {
+			f.HasBudget, f.BudgetKRW = true, b
+			if f.ProjectedKRW > b {
+				f.WillExceed = true
+				f.OverageKRW = f.ProjectedKRW - b
+			}
+		}
+		out = append(out, f)
+	}
+	return out, rows.Err()
+}
+
 // CostAllocationRow is one bucket of cost attribution for a chosen dimension.
 type CostAllocationRow struct {
 	Key      string  `json:"key"`
