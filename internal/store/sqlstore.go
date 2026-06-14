@@ -527,6 +527,15 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 				last_used_at TEXT,
 				created_at TEXT NOT NULL
 			)`,
+		`CREATE TABLE IF NOT EXISTS prompt_promotions (
+				prompt_name TEXT NOT NULL,
+				prompt_version TEXT NOT NULL,
+				stage TEXT NOT NULL DEFAULT 'experiment',
+				note TEXT,
+				promoted_by TEXT,
+				updated_at TEXT NOT NULL,
+				PRIMARY KEY (prompt_name, prompt_version)
+			)`,
 		`CREATE TABLE IF NOT EXISTS provider_slos (
 				provider TEXT PRIMARY KEY,
 				availability_target REAL NOT NULL DEFAULT 0,

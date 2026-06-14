@@ -187,6 +187,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/admin/benchmark/users", s.handleUserProductivity)
 	mux.HandleFunc("/admin/incidents", s.handleIncidents)
 	mux.HandleFunc("/admin/prompts/fingerprints", s.handlePromptFingerprints)
+	mux.HandleFunc("/admin/prompts/promotions", s.handlePromptPromotions)
 	mux.HandleFunc("/admin/knowledge", s.handleKnowledge)
 	mux.HandleFunc("/admin/knowledge/", s.handleKnowledgeByID)
 	mux.HandleFunc("/admin/templates", s.handleTemplates)
