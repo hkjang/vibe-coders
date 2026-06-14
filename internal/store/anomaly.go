@@ -15,6 +15,62 @@ const (
 	anomalyMinRecent   = 5
 )
 
+// SessionLoopAnomaly flags a session that repeated the same prompt fingerprint
+// many times in a window — the signature of an agent stuck in a loop burning
+// tokens/cost without converging.
+type SessionLoopAnomaly struct {
+	SessionID   string  `json:"session_id"`
+	APIKeyID    string  `json:"api_key_id"`
+	Fingerprint string  `json:"prompt_fingerprint"`
+	Repeats     int64   `json:"repeats"`
+	CostKRW     float64 `json:"cost_krw"`
+	Tokens      int64   `json:"tokens"`
+	FirstSeen   string  `json:"first_seen"`
+	LastSeen    string  `json:"last_seen"`
+}
+
+// SessionLoopAnomalies finds (session, prompt-fingerprint) pairs repeated at
+// least minRepeats times since `since` — likely runaway agent loops. Ordered by
+// repeat count, then wasted cost.
+func (s *SQLStore) SessionLoopAnomalies(ctx context.Context, since time.Time, minRepeats, limit int) ([]SessionLoopAnomaly, error) {
+	if minRepeats <= 0 {
+		minRepeats = 5
+	}
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	query := s.bind(`
+		SELECT COALESCE(NULLIF(r.session_id, ''), 'trace:' || r.trace_id) AS session_id,
+			MAX(COALESCE(r.api_key_id, '')) AS api_key_id,
+			r.prompt_fingerprint,
+			COUNT(*) AS repeats,
+			COALESCE(SUM(t.estimated_cost), 0) AS cost,
+			COALESCE(SUM(t.total_tokens), 0) AS tokens,
+			MIN(r.created_at) AS first_seen,
+			MAX(r.created_at) AS last_seen
+		FROM request_logs r
+		LEFT JOIN token_usage t ON t.request_id = r.id
+		WHERE r.created_at >= ? AND COALESCE(r.session_id, '') <> '' AND COALESCE(r.prompt_fingerprint, '') <> ''
+		GROUP BY COALESCE(NULLIF(r.session_id, ''), 'trace:' || r.trace_id), r.prompt_fingerprint
+		HAVING COUNT(*) >= ?
+		ORDER BY repeats DESC, cost DESC
+		LIMIT ?`)
+	rows, err := s.db.QueryContext(ctx, query, since.UTC().Format(time.RFC3339Nano), minRepeats, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []SessionLoopAnomaly{}
+	for rows.Next() {
+		var a SessionLoopAnomaly
+		if err := rows.Scan(&a.SessionID, &a.APIKeyID, &a.Fingerprint, &a.Repeats, &a.CostKRW, &a.Tokens, &a.FirstSeen, &a.LastSeen); err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
 type anomalyAgg struct {
 	model string
 	// baseline

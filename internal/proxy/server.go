@@ -182,6 +182,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/admin/cost", s.handleCostGuard)
 	mux.HandleFunc("/admin/cost/predict", s.handleCostPredict)
 	mux.HandleFunc("/admin/cost/allocation", s.handleCostAllocation)
+	mux.HandleFunc("/admin/cost/anomalies", s.handleCostAnomalies)
 	mux.HandleFunc("/admin/benchmark/teams", s.handleTeamBenchmark)
 	mux.HandleFunc("/admin/benchmark/users", s.handleUserProductivity)
 	mux.HandleFunc("/admin/incidents", s.handleIncidents)

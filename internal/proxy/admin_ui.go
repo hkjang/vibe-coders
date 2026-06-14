@@ -1478,6 +1478,7 @@ const adminHTML = `<!doctype html>
         api('/admin/ops/status').catch(() => null),
       ]);
       const modelQuality = await api('/admin/models/quality?window=30d').catch(() => ({ models: [] }));
+      const costAnomalies = await api('/admin/cost/anomalies?window=6h&min_repeats=5').catch(() => null);
       const anomalies = (anomalyResp && anomalyResp.anomalies) || [];
 
       const html =
@@ -1498,6 +1499,7 @@ const adminHTML = `<!doctype html>
         '</div>' +
         section('모델별 코딩 품질 점수 (최근 30일)', modelQualityHTML(modelQuality.models || [])) +
         section('프로젝트별 비용 (최근 30일)', costAllocationPanel()) +
+        (costAnomalies ? section('비용 이상탐지 (월말 예상 초과 · 세션 루프)', costAnomalyHTML(costAnomalies)) : '') +
         section('이상 징후 (최근 6시간 vs 7일 기준선, |z| ≥ 3)', anomalyTable(anomalies)) +
         section('시간대 히트맵 (Asia/Seoul, 최근 ' + heatWindow + ')', heatmapHTML(heat.cells || [])) +
         section('최근 호출 이력', requestsTable(recent.requests || []));
@@ -1716,6 +1718,39 @@ const adminHTML = `<!doctype html>
       '</div>';
     }
 
+    function costAnomalyHTML(data) {
+      const over = data.over_projected || [];
+      const loops = data.session_loops || [];
+      const overTable = over.length ?
+        '<table><thead><tr><th>예산 범위</th><th data-sort="num">현재 지출</th><th data-sort="num">월말 예상</th><th data-sort="num">예산</th><th data-sort="num">예상 초과율</th><th>소진 예정</th></tr></thead><tbody>' +
+        over.map(st => {
+          const b = st.budget || {};
+          const ratio = ((st.projected_ratio || 0) * 100).toFixed(0);
+          return '<tr>' +
+            '<td>' + escapeHTML((b.scope || '') + ':' + (b.scope_value || '')) + '</td>' +
+            '<td data-num="' + (st.spent_krw || 0) + '">' + money(st.spent_krw) + '</td>' +
+            '<td data-num="' + (st.projected_krw || 0) + '">' + money(st.projected_krw) + '</td>' +
+            '<td data-num="' + (b.monthly_krw || 0) + '">' + money(b.monthly_krw) + '</td>' +
+            '<td data-num="' + (st.projected_ratio || 0) + '"><span class="status error">' + ratio + '%</span></td>' +
+            '<td>' + escapeHTML(st.exhaustion_date || '—') + '</td>' +
+          '</tr>';
+        }).join('') + '</tbody></table>'
+        : '<div class="empty">월말 예산 초과가 예상되는 범위 없음.</div>';
+      const loopTable = loops.length ?
+        '<table><thead><tr><th>세션</th><th>사용자</th><th data-sort="num">반복</th><th data-sort="num">비용</th><th data-sort="num">토큰</th></tr></thead><tbody>' +
+        loops.map(l => '<tr>' +
+          '<td><code>' + escapeHTML(l.session_id) + '</code></td>' +
+          '<td>' + escapeHTML(l.api_key_id || '') + '</td>' +
+          '<td data-num="' + (l.repeats || 0) + '"><span class="status warn">' + fmt(l.repeats) + '회</span></td>' +
+          '<td data-num="' + (l.cost_krw || 0) + '">' + money(l.cost_krw) + '</td>' +
+          '<td data-num="' + (l.tokens || 0) + '">' + fmt(l.tokens) + '</td>' +
+        '</tr>').join('') + '</tbody></table>'
+        : '<div class="empty">최근 6시간 비정상 세션 루프 없음.</div>';
+      return '<div class="grid2">' +
+        card('팀·범위별 월말 예상 초과', overTable) +
+        card('비정상 세션 루프 (동일 프롬프트 5회+)', loopTable) +
+      '</div>';
+    }
     function accessClassLabel(cls) {
       return ({ read: '읽기', write: '쓰기', execute: '실행', network: '네트워크', secret: '시크릿' }[cls]) || (cls || 'read');
     }

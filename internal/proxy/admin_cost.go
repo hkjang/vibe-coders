@@ -85,6 +85,62 @@ func (s *Server) handleCostAllocation(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleCostAnomalies surfaces two forward-looking cost risks:
+//   - budget projections (per scope/team) that are forecast to exceed their
+//     monthly budget at the current run-rate, and
+//   - sessions repeating the same prompt fingerprint (likely runaway agent loops
+//     burning cost).
+// GET /admin/cost/anomalies?window=6h&min_repeats=5&projected_ratio=1.0
+func (s *Server) handleCostAnomalies(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	if r.Method != http.MethodGet {
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
+	now := time.Now().UTC()
+	statuses, err := s.db.BudgetStatuses(r.Context(), now)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "budget_status_failed")
+		return
+	}
+	projectedRatio := 1.0
+	if v := strings.TrimSpace(r.URL.Query().Get("projected_ratio")); v != "" {
+		if parsed, perr := strconv.ParseFloat(v, 64); perr == nil && parsed > 0 {
+			projectedRatio = parsed
+		}
+	}
+	overProjected := []store.BudgetStatus{}
+	for _, st := range statuses {
+		if st.Budget.MonthlyKRW > 0 && st.ProjectedRatio >= projectedRatio {
+			overProjected = append(overProjected, st)
+		}
+	}
+
+	since := parseWindow(r.URL.Query().Get("window"), 6*time.Hour, "hour")
+	minRepeats := 5
+	if v := strings.TrimSpace(r.URL.Query().Get("min_repeats")); v != "" {
+		if parsed, perr := strconv.Atoi(v); perr == nil && parsed > 0 {
+			minRepeats = parsed
+		}
+	}
+	loops, err := s.db.SessionLoopAnomalies(r.Context(), since, minRepeats, recentLimit(r))
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "session_loops_failed")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"budget_projections": statuses,
+		"over_projected":     overProjected,
+		"session_loops":      loops,
+		"window_since":       since.UTC().Format(time.RFC3339),
+		"projected_ratio":    projectedRatio,
+	})
+}
+
 // handleCostPredict is a dry-run estimator for the UI calculator.
 // POST /admin/cost/predict {model, input_tokens?, max_tokens?, messages?[]}
 func (s *Server) handleCostPredict(w http.ResponseWriter, r *http.Request) {
