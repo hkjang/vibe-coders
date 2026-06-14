@@ -64,6 +64,7 @@ Roo Code / Cursor / Continue 등 OpenAI 호환 API 를 호출하는 VS Code 확�
 - Governance Layer: 정책 rule 기반 allow/block/approval, 팀 ID/팀명 조건, Secret Firewall detect/mask/block, 승인 workflow, MCP tool risk profile, policy decision audit, anomaly event 조회, replay/golden prompt/context registry API
 - 모델 패턴(`claude-*`, `anthropic/*` 등) 기반 provider 자동 라우팅. 클라이언트가 `X-Proxy-Provider` 를 지정하지 않아도 모델명만으로 라우팅
 - **Text2SQL 게이트웨이** (`v0.3.0`): `vibe/text2sql-*` 가상 모델로 자연어→읽기전용 SQL 생성. 기존 `/v1/chat/completions` 그대로 사용하되 내부에서 실제 업스트림 모델 선택 → SQL 검증(SELECT 전용·자동 LIMIT·테이블 권한)·EXPLAIN 비용 가드·결과 PII 마스킹·few-shot 골든쿼리. 자세한 내용은 아래 "Text2SQL" 절 참고
+- **Text2SQL 백로그 완결** (`v0.3.3`): preview 결과 캐시(스키마 버전 키 + TTL), 스키마 버전 관리(지문 기반 자동 증가), 민감도 세분화(`approval_required`/`aggregate_only`), 실행 샌드박스(read-only tx + statement_timeout·work_mem), 자연어 재질문(clarification), 비용·품질 기반 업스트림 자동 승격, 관리자 위험 요청 큐(`/admin/text2sql/risk-queue`), 업무 용어 사전(`/admin/text2sql/glossary`)
 - **운영·거버넌스 확장** (`v0.3.0`): 정책 시뮬레이터(`/admin/policies/simulate`), 모델 가격표 버전 이력(`/admin/pricing`, `/admin/pricing/seed`), 운영 리스크 스코어(`/admin/ops/risk`)·상태(`/admin/ops/status`), Provider SLO(`/admin/providers/slo`), 비용 이상탐지(`/admin/cost/anomalies`)·배부(`/admin/cost/allocation`)·팀 예산 예측(`/admin/budgets/projection`), 모델별 코딩 품질(`/admin/models/quality`), 작업 템플릿(`/admin/templates`), 프롬프트 버전 승격(`/admin/prompts/promotions`), 자동 라우팅 학습 루프(`/admin/routing/learning/auto`), DW 롤업(`/admin/dw/rollups`), Mattermost 알림(`/admin/notifications/mattermost`)
 - 호출 이력 CSV 다운로드 `/admin/export.csv` (Excel UTF-8 BOM 포함, 한국어 그대로 열림)
 - 운영용 백업 스크립트 `scripts/backup.ps1` / `scripts/backup.sh` (SQLite `.backup` + fallback ndjson + 보존 일수 적용)
@@ -583,14 +584,21 @@ curl.exe http://localhost:8080/v1/chat/completions `
 | `vibe/text2sql-local` | 생성(폐쇄망·저비용) | `TEXT2SQL_LOCAL_MODEL` |
 | `vibe/text2sql-auto` | 복잡도 기반 자동 | 라우팅 선택 |
 
-- **안전장치**: SELECT/CTE 전용(DDL·DML·스택쿼리·`SELECT INTO`·위험함수 차단, 문자열/주석 리터럴 스크럽 후 분석), 자동 `LIMIT`, 테이블 allowlist + **컬럼 민감도(normal/mask/exclude)** — `exclude` 컬럼은 LLM 컨텍스트에서 제외되고 참조 SQL은 차단, 결과 PII 마스킹, PostgreSQL `EXPLAIN` **위험 점수화**(비용·seq scan·nested loop) 차단, 가상모델 비유출(업스트림엔 실제 모델만), `task_type=text2sql` + `requested_model`/`upstream_model` 감사.
+- **안전장치**: SELECT/CTE 전용(DDL·DML·스택쿼리·`SELECT INTO`·위험함수 차단, 문자열/주석 리터럴 스크럽 후 분석), 자동 `LIMIT`, 테이블 allowlist + **컬럼 민감도(normal/mask/aggregate_only/approval_required/exclude)** — `exclude`·`approval_required` 컬럼은 LLM 컨텍스트에서 제외되고 참조 SQL은 차단, `aggregate_only` 컬럼은 집계함수(`count/sum/avg/min/max/…`) 내에서만 허용(원시 참조 차단), 결과 PII 마스킹, PostgreSQL `EXPLAIN` **위험 점수화**(비용·seq scan·nested loop) 차단, 가상모델 비유출(업스트림엔 실제 모델만), `task_type=text2sql` + `requested_model`/`upstream_model` 감사.
+- **실행 샌드박스**: execute 모드는 read-only 트랜잭션 + `SET LOCAL statement_timeout`·`work_mem`(`TEXT2SQL_STATEMENT_TIMEOUT`·`TEXT2SQL_WORK_MEM`)로 격리 실행.
+- **결과 캐시**: preview 생성 결과를 `text2sql_cache`(질문·스키마·모드·**스키마 버전** 키 + TTL)에 캐시 — 스키마 버전이 바뀌면 자동 무효화(`TEXT2SQL_CACHE_ENABLED`·`TEXT2SQL_CACHE_TTL`).
+- **스키마 버전 관리**: `text2sql_schemas` 에 version/collected_at/source_fingerprint — 자동 수집 시 컬럼 지문이 바뀌면 버전 자동 증가.
+- **재질문(clarification)**: 모호하거나(너무 짧음) 기간 필터가 필요한데 누락된 질문은 곧바로 SQL 을 만들지 않고 보완 질문을 돌려줌(`TEXT2SQL_CLARIFY_ENABLED`·`TEXT2SQL_REQUIRE_DATE_FILTER`).
+- **비용·품질 라우팅**: 기본 모델의 최근 유효율이 낮으면(충분한 표본에서) accurate 모델로 자동 승격.
+- **위험 요청 큐**: `/admin/text2sql/risk-queue` — 거부·고위험 EXPLAIN·실패로 분류된 요청을 운영자가 한 화면에서 검토.
+- **업무 용어 사전**: `text2sql_business_terms`(`/admin/text2sql/glossary`) — 업무 용어→테이블/컬럼/조건 매핑을 생성 프롬프트에 주입해 현업 언어로 질문 가능.
 - **스키마 레지스트리**: `text2sql_schemas`(이름·팀·기본) + `text2sql_tables`/`text2sql_columns`(업무 설명·민감도)로 프롬프트 컨텍스트를 구조화 생성. `POST /admin/text2sql/collect` 로 실행 DB(`information_schema`/`sqlite_master`)에서 자동 수집(운영자 태그 보존).
 - **권한 매트릭스**: `text2sql_permissions`(`/admin/text2sql/permissions`) 로 팀·API Key·사용자별 schema/table/column allow·deny 정책 — deny는 테이블/컬럼 접근 제한, allow는 민감(exclude) 컬럼 접근을 특정 주체에 부여.
 - **운영 분석**: 실패 원인 표준 분류(syntax/permission/cost/timeout/unknown_column/empty)와 EXPLAIN 위험도(cost·risk_score)를 로그에 저장, ClickHouse 자동 적재 스케줄러(`CLICKHOUSE_SINK_INTERVAL`) + 정합성 검증(`/admin/dw/consistency`).
 - **few-shot · 품질**: 검증된 골든 쿼리를 질문 유사도로 생성 프롬프트에 주입하고, 성공 쿼리는 골든 자동 후보로 적립. `text2sql.sql_valid`/`executed` 평가를 LLM evaluation 파이프라인으로 emit, 모델별 SQL 품질 메트릭 제공.
 - **응답 포맷**: 해석 / 생성 SQL / 결과 / 주의사항 / 실행 가능 여부 / 다음 질문 제안 섹션으로 현업 친화 구성.
 - **장기 분석**: `POST /admin/dw/clickhouse` 로 일별 rollup 을 ClickHouse HTTP 인터페이스(JSONEachRow)로 적재(`CLICKHOUSE_URL` 설정 시).
-- **관리**: 어드민 `Text2SQL` 탭 + `GET /admin/text2sql`(프로필·통계·로그·모델 메트릭), 스키마 카탈로그/레지스트리 `(/admin/text2sql/schemas|tables|columns|collect)`, 런타임 프로필 `(/admin/text2sql/profiles)`, 골든 쿼리 `(/admin/text2sql/golden[/run])`.
+- **관리**: 어드민 `Text2SQL` 탭 + `GET /admin/text2sql`(프로필·통계·로그·모델 메트릭), 스키마 카탈로그/레지스트리 `(/admin/text2sql/schemas|tables|columns|collect)`, 런타임 프로필 `(/admin/text2sql/profiles)`, 골든 쿼리 `(/admin/text2sql/golden[/run])`, 위험 요청 큐 `(/admin/text2sql/risk-queue)`, 업무 용어 사전 `(/admin/text2sql/glossary)`.
 
 | 변수 | 기본값 | 설명 |
 | --- | --- | --- |
@@ -608,6 +616,12 @@ curl.exe http://localhost:8080/v1/chat/completions `
 | `TEXT2SQL_MASK_RESULTS` | `true` | 실행 결과 PII 마스킹 |
 | `TEXT2SQL_EXEC_DRIVER` | `postgres` | execute용 DB 드라이버 |
 | `TEXT2SQL_EXEC_DSN` | 없음 | execute용 read-only DSN(미설정 시 preview만) |
+| `TEXT2SQL_CACHE_ENABLED` | `true` | preview 결과 캐시 사용 |
+| `TEXT2SQL_CACHE_TTL` | `1h` | 캐시 TTL |
+| `TEXT2SQL_CLARIFY_ENABLED` | `false` | 모호 질문 재질문(clarification) 모드 |
+| `TEXT2SQL_REQUIRE_DATE_FILTER` | `false` | 기간 필터 누락 시 재질문 요구 |
+| `TEXT2SQL_STATEMENT_TIMEOUT` | `15s` | (postgres) 실행 statement_timeout |
+| `TEXT2SQL_WORK_MEM` | 없음 | (postgres) 실행 시 SET LOCAL work_mem |
 
 ## MCP Gateway (프로토콜 집약 게이트웨이)
 
