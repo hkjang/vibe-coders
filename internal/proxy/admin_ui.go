@@ -4878,6 +4878,41 @@ const adminHTML = `<!doctype html>
         '<table><thead><tr><th>이름</th><th>질문</th><th>기대 SQL</th><th>동작</th></tr></thead><tbody>' + goldenRows + '</tbody></table>'
         : '<div class="empty">Golden Query 없음. 등록하면 생성 프롬프트에 few-shot 예시로 주입되고, 회귀 검증에 사용됩니다.</div>';
       const goldenRun = '<div class="toolbar" style="border-bottom:0"><button type="button" id="t2s-golden-run">회귀 검증 실행</button><span class="muted" id="t2s-golden-run-result"></span></div>';
+      const glossary = (await api('/admin/text2sql/glossary').catch(() => ({ terms: [] }))).terms || [];
+      const glossForm =
+        '<form class="inline-form" id="t2s-gloss-form" style="grid-template-columns: 130px 150px minmax(200px,2fr) minmax(140px,1fr) 70px; align-items:start;">' +
+          '<input id="tgl-schema" placeholder="스키마명(빈칸=전역)">' +
+          '<input id="tgl-term" placeholder="업무 용어 (예: 활성 고객)" required>' +
+          '<input id="tgl-mapping" placeholder="매핑 (예: users WHERE status=\'active\')" required>' +
+          '<input id="tgl-desc" placeholder="설명(선택)">' +
+          '<button type="submit">저장</button>' +
+        '</form>';
+      const glossRows = glossary.map(g =>
+        '<tr><td><strong>' + escapeHTML(g.term) + '</strong></td>' +
+        '<td><code style="font-size:11px">' + escapeHTML(g.mapping) + '</code></td>' +
+        '<td>' + escapeHTML(g.description || '') + '</td>' +
+        '<td>' + escapeHTML(g.schema_name === '*' ? '전역' : g.schema_name) + '</td>' +
+        '<td><button class="danger" type="button" onclick="deleteT2SGloss(\'' + escapeAttr(g.id) + '\')">삭제</button></td></tr>'
+      ).join('');
+      const glossTable = glossary.length ?
+        '<table><thead><tr><th>용어</th><th>매핑</th><th>설명</th><th>스키마</th><th></th></tr></thead><tbody>' + glossRows + '</tbody></table>'
+        : '<div class="empty">업무 용어 사전 없음. 등록하면 사용자가 업무 언어로 질문할 때 매핑이 프롬프트에 주입됩니다.</div>';
+      const riskData = await api('/admin/text2sql/risk-queue?window=7d&min_risk=50').catch(() => ({ queue: [] }));
+      const riskQ = riskData.queue || [];
+      const riskRows = riskQ.map(l =>
+        '<tr class="' + (l.valid ? '' : 'row-error') + '">' +
+          '<td>' + ago(l.created_at) + '</td>' +
+          '<td>' + escapeHTML(l.team || '-') + '<div class="muted">' + escapeHTML(l.upstream_model || '') + '</div></td>' +
+          '<td>' + escapeHTML((l.question || '').slice(0, 50)) + '</td>' +
+          '<td>' + (l.valid ? '<span class="status">유효</span>' : '<span class="status error">' + escapeHTML(l.reject_reason || '거부') + '</span>') + '</td>' +
+          '<td>' + (l.failure_category ? '<span class="status error">' + escapeHTML(l.failure_category) + '</span>' : '-') + '</td>' +
+          '<td data-num="' + (l.explain_risk || 0) + '">' + (l.explain_risk ? '<span class="status ' + (l.explain_risk >= 70 ? 'error' : 'warn') + '">' + l.explain_risk + '</span>' : '-') + '</td>' +
+          '<td><code style="font-size:11px">' + escapeHTML((l.generated_sql || '').slice(0, 100)) + '</code></td>' +
+        '</tr>'
+      ).join('');
+      const riskTable = riskQ.length ?
+        '<table><thead><tr><th>시각</th><th>팀</th><th>질문</th><th>검증</th><th>실패분류</th><th data-sort="num">EXPLAIN 위험</th><th>생성 SQL</th></tr></thead><tbody>' + riskRows + '</tbody></table>'
+        : '<div class="empty">최근 7일 위험 요청 없음 (거부 · 고위험 EXPLAIN · 실패 분류 대상).</div>';
       document.getElementById('view').innerHTML =
         '<section><h2>Text2SQL</h2><div style="padding:0 14px 8px" class="muted">자연어 질문을 읽기 전용 SQL로 변환합니다. 사용자는 <code>vibe/text2sql-*</code> 가상 모델을 호출하고, 게이트웨이가 내부적으로 실제 업스트림 모델을 선택해 SQL을 생성·검증·(선택)실행합니다.</div></section>' +
         section('요약 (최근 7일)', kpis) +
@@ -4888,6 +4923,8 @@ const adminHTML = `<!doctype html>
         section('스키마 레지스트리 (테이블 · 컬럼 · 민감도)', registryHTML()) +
         section('권한 매트릭스 (subject × schema/table/column)', permForm + permTable) +
         section('실패 원인 분류 (최근 7일)', failTable) +
+        section('관리자 위험 요청 큐 (거부 · 고위험 EXPLAIN · 실패)', riskTable) +
+        section('업무 용어 사전 (자연어 → SQL 매핑)', glossForm + glossTable) +
         section('Golden Query (few-shot · 회귀)', goldenRun + goldenForm + goldenTable) +
         section('최근 Text2SQL 질의', logTable);
       const sf = document.getElementById('t2s-schema-form');
@@ -4908,8 +4945,27 @@ const adminHTML = `<!doctype html>
       if (gf) gf.addEventListener('submit', addT2SGolden);
       const gr = document.getElementById('t2s-golden-run');
       if (gr) gr.addEventListener('click', runT2SGolden);
+      const glf = document.getElementById('t2s-gloss-form');
+      if (glf) glf.addEventListener('submit', addT2SGloss);
       makeSortable('#view', 'text2sql');
     }
+    async function addT2SGloss(e) {
+      e.preventDefault();
+      const body = {
+        schema_name: document.getElementById('tgl-schema').value.trim(),
+        term: document.getElementById('tgl-term').value.trim(),
+        mapping: document.getElementById('tgl-mapping').value.trim(),
+        description: document.getElementById('tgl-desc').value.trim(),
+      };
+      if (!body.term || !body.mapping) { alert('용어와 매핑을 입력하세요'); return; }
+      await api('/admin/text2sql/glossary', { method: 'POST', body: JSON.stringify(body) });
+      route();
+    }
+    window.deleteT2SGloss = async (id) => {
+      if (!confirm('이 업무 용어를 삭제하시겠습니까?')) return;
+      await api('/admin/text2sql/glossary?id=' + encodeURIComponent(id), { method: 'DELETE' });
+      route();
+    };
     function registryHTML() {
       return '<div class="toolbar" style="border-bottom:0"><input id="t2s-reg-schema" placeholder="스키마명 (예: analytics)" style="max-width:220px"><button type="button" id="t2s-registry-load">불러오기</button><button type="button" class="secondary" id="t2s-registry-collect">실행DB에서 자동 수집</button><span class="muted" id="t2s-collect-result"></span></div>' +
         '<form class="inline-form" id="t2s-table-form" style="grid-template-columns: 140px minmax(220px,2fr) 70px; align-items:start;">' +
@@ -4922,7 +4978,7 @@ const adminHTML = `<!doctype html>
           '<input id="rc-column" placeholder="컬럼명" required>' +
           '<input id="rc-type" placeholder="타입">' +
           '<input id="rc-desc" placeholder="컬럼 업무 설명">' +
-          '<select id="rc-sens"><option value="normal">일반</option><option value="mask">마스킹</option><option value="exclude">제외(민감)</option></select>' +
+          '<select id="rc-sens"><option value="normal">일반</option><option value="mask">마스킹</option><option value="aggregate_only">집계만 허용</option><option value="approval_required">승인 필요</option><option value="exclude">제외(민감)</option></select>' +
           '<button type="submit">컬럼 저장</button>' +
         '</form>' +
         '<div id="t2s-registry-body"><div class="muted" style="padding:0 14px 12px">스키마명을 입력하고 "불러오기"를 누르면 등록된 테이블·컬럼이 표시됩니다. <code>exclude</code> 컬럼은 LLM 컨텍스트에서 제외되고 SQL에서 참조 시 차단됩니다.</div></div>';
@@ -4935,7 +4991,7 @@ const adminHTML = `<!doctype html>
       const d = await api('/admin/text2sql/tables?schema=' + encodeURIComponent(schema)).catch(() => ({ tables: [], columns: [] }));
       const colsByTable = {};
       (d.columns || []).forEach(c => { (colsByTable[c.table_name] = colsByTable[c.table_name] || []).push(c); });
-      const sens = (s) => ({ normal: '일반', mask: '<span class="status warn">마스킹</span>', exclude: '<span class="status error">제외</span>' }[s] || s);
+      const sens = (s) => ({ normal: '일반', mask: '<span class="status warn">마스킹</span>', aggregate_only: '<span class="status warn">집계만</span>', approval_required: '<span class="status error">승인필요</span>', exclude: '<span class="status error">제외</span>' }[s] || s);
       const rows = (d.tables || []).map(t =>
         '<tr><td><strong>' + escapeHTML(t.table_name) + '</strong>' + (t.enabled ? '' : ' <span class="status error">중지</span>') + '<div class="muted">' + escapeHTML(t.description || '') + '</div></td>' +
         '<td>' + ((colsByTable[t.table_name] || []).map(c => escapeHTML(c.column_name) + (c.sensitivity !== 'normal' ? ' ' + sens(c.sensitivity) : '')).join(', ') || '<span class="muted">컬럼 없음</span>') + '</td>' +

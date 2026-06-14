@@ -197,6 +197,84 @@ func (s *Server) handleText2SQLColumns(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// handleText2SQLRiskQueue returns Text2SQL requests needing operator attention:
+// rejected, high EXPLAIN risk, or classified failures.
+// GET /admin/text2sql/risk-queue?window=7d&min_risk=50
+func (s *Server) handleText2SQLRiskQueue(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	if r.Method != http.MethodGet {
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
+	since := parseWindow(r.URL.Query().Get("window"), 7*24*time.Hour, "day")
+	minRisk := 50
+	if v := strings.TrimSpace(r.URL.Query().Get("min_risk")); v != "" {
+		if n := atoiDefault(v, 50); n >= 0 {
+			minRisk = n
+		}
+	}
+	logs, err := s.db.RiskyText2SQLLogs(r.Context(), since, minRisk, recentLimit(r))
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "risk_queue_failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"queue": logs, "count": len(logs)})
+}
+
+// handleText2SQLGlossary manages the business-term glossary.
+// GET /admin/text2sql/glossary[?schema=] · POST {schema_name,term,mapping,description} · DELETE ?id=
+func (s *Server) handleText2SQLGlossary(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		terms, err := s.db.ListText2SQLBusinessTerms(r.Context(), strings.TrimSpace(r.URL.Query().Get("schema")))
+		if err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "glossary_failed")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"terms": terms})
+	case http.MethodPost:
+		var p struct{ SchemaName, Term, Mapping, Description string }
+		if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+			writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "invalid_body")
+			return
+		}
+		if strings.TrimSpace(p.Term) == "" || strings.TrimSpace(p.Mapping) == "" {
+			writeOpenAIError(w, http.StatusBadRequest, "term and mapping are required", "invalid_request_error", "missing_fields")
+			return
+		}
+		t := store.Text2SQLBusinessTerm{
+			ID: newID("t2sbt"), SchemaName: strings.TrimSpace(p.SchemaName), Term: strings.TrimSpace(p.Term),
+			Mapping: strings.TrimSpace(p.Mapping), Description: strings.TrimSpace(p.Description),
+		}
+		if err := s.db.UpsertText2SQLBusinessTerm(r.Context(), t); err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "glossary_save_failed")
+			return
+		}
+		s.auditAdmin(r, "text2sql.glossary.upsert", "", auditJSON(t))
+		writeJSON(w, http.StatusCreated, map[string]any{"term": t})
+	case http.MethodDelete:
+		id := strings.TrimSpace(r.URL.Query().Get("id"))
+		if id == "" {
+			writeOpenAIError(w, http.StatusBadRequest, "id query param is required", "invalid_request_error", "missing_id")
+			return
+		}
+		if err := s.db.DeleteText2SQLBusinessTerm(r.Context(), id); err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "glossary_delete_failed")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"id": id, "status": "deleted"})
+	default:
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+	}
+}
+
 // handleText2SQLPermissions manages the access matrix (subject × schema/table/column × allow/deny).
 // GET /admin/text2sql/permissions · POST {subject_type,subject_id,schema_name,table_name,column_name,action} · DELETE ?id=
 func (s *Server) handleText2SQLPermissions(w http.ResponseWriter, r *http.Request) {

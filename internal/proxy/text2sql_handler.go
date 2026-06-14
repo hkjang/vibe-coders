@@ -44,10 +44,20 @@ func (s *Server) handleText2SQL(w http.ResponseWriter, r *http.Request, meta sto
 		profileSchemaName = dbp.SchemaName
 	}
 
-	// Auto profile: pick the upstream model from the (already computed) complexity.
+	// Auto profile: pick the upstream model from complexity, then upgrade to the
+	// accurate model when recent metrics show the cheaper pick is unreliable.
 	upstreamModel := profile.UpstreamModel
 	if profile.Auto || upstreamModel == "" {
-		upstreamModel = s.text2sqlAutoModelByComplexity(meta.Request.Complexity)
+		base := s.text2sqlAutoModelByComplexity(meta.Request.Complexity)
+		upstreamModel = base
+		if metrics, err := s.db.Text2SQLModelMetricsSince(r.Context(), time.Now().Add(-7*24*time.Hour)); err == nil {
+			for _, m := range metrics {
+				if m.UpstreamModel == base {
+					upstreamModel = chooseUpstreamByQuality(base, cfg.AccurateModel, m)
+					break
+				}
+			}
+		}
 	}
 	summaryModel := firstNonEmpty(profile.SummaryModel, cfg.SummaryModel, upstreamModel)
 
@@ -62,21 +72,26 @@ func (s *Server) handleText2SQL(w http.ResponseWriter, r *http.Request, meta sto
 	}
 	dialect := cfg.Dialect
 	schema := firstNonEmpty(strings.TrimSpace(r.Header.Get("X-Text2SQL-Schema")), cfg.Schema)
-	var allowedTables, blockedColumns []string
+	var allowedTables, blockedColumns, aggregateOnly []string
+	resolvedSchemaName := ""
+	schemaVersion := 0
 	schemaName := firstNonEmpty(strings.TrimSpace(r.Header.Get("X-Text2SQL-Schema-Name")), profileSchemaName)
 	if sc, found, _ := s.db.ResolveText2SQLSchema(r.Context(), schemaName, team); found {
 		schema = sc.SchemaText
 		allowedTables = sc.AllowedTables
+		resolvedSchemaName = sc.Name
+		schemaVersion = sc.Version
 		if sc.Dialect != "" {
 			dialect = sc.Dialect
 		}
 		// Structured registry (tables/columns) takes precedence over the free-text
 		// schema blob: render the prompt context from it (excluding sensitive
-		// columns) and derive the table allowlist + blocked-column list from it.
+		// columns) and derive the table allowlist + blocked/aggregate-only lists.
 		if cat, err := s.db.BuildSchemaCatalog(r.Context(), sc.Name); err == nil && cat.HasTables {
 			schema = cat.ContextText
 			allowedTables = cat.AllowedTables
 			blockedColumns = cat.ExcludedColumns
+			aggregateOnly = cat.AggregateOnlyColumns
 		}
 		// Permission matrix overlay: per subject (api_key/team/*) deny rules restrict
 		// the table allowlist + add blocked columns; allow rules grant access to a
@@ -141,8 +156,32 @@ func (s *Server) handleText2SQL(w http.ResponseWriter, r *http.Request, meta sto
 		return
 	}
 
-	// 1) Generate SQL via the chosen upstream model (internal, non-recursive call).
+	// 0) Clarification: ask instead of guessing when the question is underspecified.
+	if cfg.ClarifyEnabled {
+		if need, missing := text2sql.NeedsClarification(question, cfg.RequireDateFilter); need {
+			content := "질문을 명확히 하기 위해 다음 정보가 필요합니다:\n- " + strings.Join(missing, "\n- ") + "\n\n위 내용을 포함해 다시 질문해 주세요."
+			finalize(content, text2sql.ValidationResult{Reason: "clarification_required"}, false, 0, "clarification", 0)
+			return
+		}
+	}
+
+	// 1) Generate SQL. Preview results are cached by question+schema(version)+mode to
+	// avoid repeated upstream generation cost.
+	cacheKey := ""
+	if cfg.CacheEnabled && profile.Mode != text2sql.ModeExecute {
+		cacheKey = store.Text2SQLCacheKey(question, resolvedSchemaName, string(profile.Mode), schemaVersion)
+		if cached, hit, _ := s.db.GetText2SQLCache(r.Context(), cacheKey); hit {
+			validation := text2sql.ValidateSQL(cached, text2sql.ValidateOptions{DefaultLimit: cfg.DefaultLimit, MaxLimit: cfg.MaxLimit, AllowedTables: allowedTables, BlockedColumns: blockedColumns, AggregateOnlyColumns: aggregateOnly})
+			if validation.OK {
+				finalize(previewContent(question, validation.SQL, "검증된 읽기 전용 SQL입니다 (캐시 적중, 실행하지 않음).", validation), validation, false, 0, "", 0)
+				return
+			}
+		}
+	}
 	msgs := text2sql.BuildGenerationMessages(dialect, schema, question, cfg.DefaultLimit)
+	if glossary, _ := s.db.BuildGlossaryText(r.Context(), resolvedSchemaName); glossary != "" {
+		msgs = text2sql.WithGlossary(msgs, glossary)
+	}
 	// Few-shot: inject the most relevant verified golden queries to improve generation.
 	if goldens, err := s.db.ListText2SQLGoldenQueries(r.Context(), true); err == nil && len(goldens) > 0 {
 		examples := make([]text2sql.Example, 0, len(goldens))
@@ -161,7 +200,7 @@ func (s *Server) handleText2SQL(w http.ResponseWriter, r *http.Request, meta sto
 	// 2) Extract + validate.
 	rawSQL := text2sql.ExtractSQL(gen.Response)
 	validation := text2sql.ValidateSQL(rawSQL, text2sql.ValidateOptions{
-		DefaultLimit: cfg.DefaultLimit, MaxLimit: cfg.MaxLimit, AllowedTables: allowedTables, BlockedColumns: blockedColumns,
+		DefaultLimit: cfg.DefaultLimit, MaxLimit: cfg.MaxLimit, AllowedTables: allowedTables, BlockedColumns: blockedColumns, AggregateOnlyColumns: aggregateOnly,
 	})
 	if !validation.OK {
 		content := fmt.Sprintf("생성된 SQL이 안전 검증을 통과하지 못했습니다 (사유: %s).\n\n```sql\n%s\n```", validation.Reason, strings.TrimSpace(rawSQL))
@@ -174,6 +213,9 @@ func (s *Server) handleText2SQL(w http.ResponseWriter, r *http.Request, meta sto
 		note := "검증된 읽기 전용 SQL입니다 (실행하지 않음)."
 		if profile.Mode == text2sql.ModeExecute && cfg.ExecDSN == "" {
 			note = "실행 DB가 설정되지 않아 미리보기만 제공합니다 (TEXT2SQL_EXEC_DSN)."
+		}
+		if cacheKey != "" {
+			_ = s.db.PutText2SQLCache(r.Context(), cacheKey, resolvedSchemaName, string(profile.Mode), validation.SQL, cfg.CacheTTL)
 		}
 		finalize(previewContent(question, validation.SQL, note, validation), validation, false, 0, "", totalCost)
 		return
@@ -254,6 +296,15 @@ func applyPermissionEffect(allowedTables []string, blocked *[]string, eff store.
 		*blocked = kept
 	}
 	return allowedTables
+}
+
+// chooseUpstreamByQuality upgrades a complexity-chosen base model to the accurate
+// model when the base has a meaningful sample size but a low SQL-validity rate.
+func chooseUpstreamByQuality(base, accurate string, m store.Text2SQLModelMetric) string {
+	if accurate != "" && accurate != base && m.Total >= 10 && m.ValidRate < 0.7 {
+		return accurate
+	}
+	return base
 }
 
 // text2sqlAutoModelByComplexity maps a complexity score to an upstream model for
@@ -414,7 +465,7 @@ func (s *Server) execText2SQL(ctx context.Context, query string) ([]string, [][]
 			}
 		}
 	}
-	cols, rows, count, err := executeReadOnlyQuery(ctx, db, s.cfg.Text2SQL.ExecDriver, query, rowLimit)
+	cols, rows, count, err := executeReadOnlyQuery(ctx, db, driver, query, rowLimit, s.cfg.Text2SQL.StatementTimeout, s.cfg.Text2SQL.WorkMem)
 	return cols, rows, count, risk, err
 }
 
@@ -485,11 +536,32 @@ func (s *Server) text2sqlExecDB() (*sql.DB, error) {
 }
 
 // executeReadOnlyQuery runs a SELECT with a timeout and row cap. The SQL has already
-// been validated as a single read-only statement.
-func executeReadOnlyQuery(ctx context.Context, db *sql.DB, driver, query string, rowLimit int) ([]string, [][]string, int64, error) {
+// been validated as a single read-only statement. For PostgreSQL it runs inside a
+// READ ONLY transaction with a per-statement timeout and optional work_mem cap
+// (sandbox), so a heavy or accidentally-mutating query can't harm the source DB.
+func executeReadOnlyQuery(ctx context.Context, db *sql.DB, driver, query string, rowLimit int, stmtTimeout time.Duration, workMem string) ([]string, [][]string, int64, error) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	rows, err := db.QueryContext(ctx, query)
+
+	driver = strings.ToLower(strings.TrimSpace(driver))
+	var rows *sql.Rows
+	var err error
+	if driver == "postgres" || driver == "postgresql" || driver == "pgx" {
+		tx, terr := db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+		if terr != nil {
+			return nil, nil, 0, terr
+		}
+		defer tx.Rollback()
+		if stmtTimeout > 0 {
+			_, _ = tx.ExecContext(ctx, fmt.Sprintf("SET LOCAL statement_timeout = %d", stmtTimeout.Milliseconds()))
+		}
+		if workMem != "" {
+			_, _ = tx.ExecContext(ctx, "SET LOCAL work_mem = '"+strings.ReplaceAll(workMem, "'", "")+"'")
+		}
+		rows, err = tx.QueryContext(ctx, query)
+	} else {
+		rows, err = db.QueryContext(ctx, query)
+	}
 	if err != nil {
 		return nil, nil, 0, err
 	}

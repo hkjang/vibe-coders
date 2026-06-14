@@ -592,8 +592,9 @@ func safeRate(n, total int) float64 {
 // handleGoldenRun runs every golden prompt (optionally filtered by tag) against
 // the given models and reports an aggregate pass/fail — the CI regression gate.
 // POST /admin/golden-prompts/run {models[], tag?, min_pass_rate?}
-//   ?fail_on_regression=1 → returns HTTP 422 when not all checks pass, so a CI
-//   step using `curl --fail` (or a non-zero exit) flags the regression.
+//
+//	?fail_on_regression=1 → returns HTTP 422 when not all checks pass, so a CI
+//	step using `curl --fail` (or a non-zero exit) flags the regression.
 func (s *Server) handleGoldenRun(w http.ResponseWriter, r *http.Request) {
 	if !s.authorizeAdmin(r) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")

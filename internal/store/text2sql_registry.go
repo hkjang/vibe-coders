@@ -2,16 +2,20 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"strings"
 	"time"
 )
 
 // Column sensitivity levels.
 const (
-	SensitivityNormal  = "normal"  // fully usable
-	SensitivityMask    = "mask"    // usable, but result values are masked
-	SensitivityExclude = "exclude" // hidden from the LLM and rejected if referenced
+	SensitivityNormal           = "normal"            // fully usable
+	SensitivityMask             = "mask"              // usable, but result values are masked
+	SensitivityExclude          = "exclude"           // hidden from the LLM and rejected if referenced
+	SensitivityApprovalRequired = "approval_required" // blocked unless explicitly granted (like exclude)
+	SensitivityAggregateOnly    = "aggregate_only"    // usable only inside an aggregate function
 )
 
 // Text2SQLTable is one table in a schema registry (replaces free-text schema blobs).
@@ -38,10 +42,11 @@ type Text2SQLColumn struct {
 // from tables/columns (excluding sensitivity=exclude columns), the enabled-table
 // allowlist, and the set of excluded columns that must not appear in generated SQL.
 type SchemaCatalog struct {
-	ContextText     string   `json:"context_text"`
-	AllowedTables   []string `json:"allowed_tables"`
-	ExcludedColumns []string `json:"excluded_columns"`
-	HasTables       bool     `json:"has_tables"`
+	ContextText          string   `json:"context_text"`
+	AllowedTables        []string `json:"allowed_tables"`
+	ExcludedColumns      []string `json:"excluded_columns"`
+	AggregateOnlyColumns []string `json:"aggregate_only_columns"`
+	HasTables            bool     `json:"has_tables"`
 }
 
 func (s *SQLStore) ListText2SQLTables(ctx context.Context, schemaName string) ([]Text2SQLTable, error) {
@@ -219,6 +224,16 @@ func (s *SQLStore) CollectInformationSchema(ctx context.Context, src *sql.DB, dr
 			addedCols++
 		}
 	}
+	// Bump the schema version + fingerprint so cached SQL/golden queries can detect
+	// a schema change.
+	h := sha256.New()
+	for _, c := range cols {
+		h.Write([]byte(c.table + "." + c.name + ":" + c.typ + ";"))
+	}
+	fp := hex.EncodeToString(h.Sum(nil))[:16]
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	_, _ = s.db.ExecContext(ctx, s.bind(`UPDATE text2sql_schemas SET version = COALESCE(version,1) + 1, collected_at = ?, source_fingerprint = ?, updated_at = ? WHERE name = ?`),
+		now, fp, now, registrySchema)
 	return addedTables, addedCols, nil
 }
 
@@ -226,7 +241,7 @@ func (s *SQLStore) CollectInformationSchema(ctx context.Context, src *sql.DB, dr
 // permission metadata. Excluded (sensitive) columns are omitted from the context
 // and returned separately so the validator can reject SQL that references them.
 func (s *SQLStore) BuildSchemaCatalog(ctx context.Context, schemaName string) (SchemaCatalog, error) {
-	cat := SchemaCatalog{AllowedTables: []string{}, ExcludedColumns: []string{}}
+	cat := SchemaCatalog{AllowedTables: []string{}, ExcludedColumns: []string{}, AggregateOnlyColumns: []string{}}
 	tables, err := s.ListText2SQLTables(ctx, schemaName)
 	if err != nil {
 		return cat, err
@@ -256,9 +271,14 @@ func (s *SQLStore) BuildSchemaCatalog(ctx context.Context, schemaName string) (S
 		}
 		b.WriteString("\n")
 		for _, c := range colsByTable[t.TableName] {
-			if c.Sensitivity == SensitivityExclude {
+			// exclude + approval_required are hidden from the model and rejected if
+			// referenced (approval_required can be granted via an allow permission).
+			if c.Sensitivity == SensitivityExclude || c.Sensitivity == SensitivityApprovalRequired {
 				cat.ExcludedColumns = append(cat.ExcludedColumns, strings.ToLower(c.ColumnName))
-				continue // never expose excluded columns to the model
+				continue
+			}
+			if c.Sensitivity == SensitivityAggregateOnly {
+				cat.AggregateOnlyColumns = append(cat.AggregateOnlyColumns, strings.ToLower(c.ColumnName))
 			}
 			b.WriteString("    - " + c.ColumnName)
 			if c.DataType != "" {
@@ -267,8 +287,11 @@ func (s *SQLStore) BuildSchemaCatalog(ctx context.Context, schemaName string) (S
 			if c.Description != "" {
 				b.WriteString(": " + c.Description)
 			}
-			if c.Sensitivity == SensitivityMask {
+			switch c.Sensitivity {
+			case SensitivityMask:
 				b.WriteString(" [민감: 결과 마스킹됨]")
+			case SensitivityAggregateOnly:
+				b.WriteString(" [집계 함수 내에서만 사용 가능]")
 			}
 			b.WriteString("\n")
 		}

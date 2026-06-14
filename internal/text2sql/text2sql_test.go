@@ -87,6 +87,41 @@ func TestValidateSQLStringLiteralScrubbing(t *testing.T) {
 	}
 }
 
+func TestValidateSQLAggregateOnly(t *testing.T) {
+	opts := ValidateOptions{DefaultLimit: 100, AggregateOnlyColumns: []string{"salary"}}
+	// Raw select of an aggregate-only column → rejected.
+	if r := ValidateSQL("SELECT dept, salary FROM employees", opts); r.OK {
+		t.Errorf("raw aggregate-only column should be rejected: %+v", r)
+	}
+	// Inside an aggregate → allowed.
+	if r := ValidateSQL("SELECT dept, avg(salary) FROM employees GROUP BY dept", opts); !r.OK {
+		t.Errorf("aggregate use should pass: %+v", r)
+	}
+}
+
+func TestNeedsClarification(t *testing.T) {
+	if need, _ := NeedsClarification("부서별 매출", false); need {
+		t.Error("a reasonable question without date requirement should not need clarification")
+	}
+	if need, missing := NeedsClarification("부서별 매출", true); !need || len(missing) == 0 {
+		t.Errorf("date required but missing → should clarify: %v", missing)
+	}
+	if need, _ := NeedsClarification("지난달 부서별 매출", true); need {
+		t.Error("question with a time qualifier should pass the date requirement")
+	}
+	if need, _ := NeedsClarification("?", false); !need {
+		t.Error("a too-short question should need clarification")
+	}
+}
+
+func TestWithGlossary(t *testing.T) {
+	msgs := []Message{{Role: "system", Content: "schema"}, {Role: "user", Content: "상담 건수"}}
+	out := WithGlossary(msgs, "상담 → tickets 테이블")
+	if len(out) != 3 || !contains(out[1].Content, "tickets") {
+		t.Errorf("glossary should be injected after the first system message: %+v", out)
+	}
+}
+
 func TestValidateSQLBlockedColumns(t *testing.T) {
 	opts := ValidateOptions{DefaultLimit: 100, BlockedColumns: []string{"ssn", "salary"}}
 	if r := ValidateSQL("SELECT name, salary FROM employees", opts); r.OK {

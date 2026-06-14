@@ -9,19 +9,19 @@ import (
 // generated SQL, validation outcome, optional execution result, and cost — with
 // both the user-facing virtual model and the real upstream model that produced it.
 type Text2SQLQueryLog struct {
-	ID            string    `json:"id"`
-	RequestID     string    `json:"request_id"`
-	APIKeyID      string    `json:"api_key_id"`
-	Team          string    `json:"team"`
-	VirtualModel  string    `json:"virtual_model"`
-	UpstreamModel string    `json:"upstream_model"`
-	Mode          string    `json:"mode"`
-	Question      string    `json:"question"`
-	GeneratedSQL  string    `json:"generated_sql"`
-	Valid         bool      `json:"valid"`
-	RejectReason  string    `json:"reject_reason"`
-	Executed      bool      `json:"executed"`
-	RowCount      int64     `json:"row_count"`
+	ID              string    `json:"id"`
+	RequestID       string    `json:"request_id"`
+	APIKeyID        string    `json:"api_key_id"`
+	Team            string    `json:"team"`
+	VirtualModel    string    `json:"virtual_model"`
+	UpstreamModel   string    `json:"upstream_model"`
+	Mode            string    `json:"mode"`
+	Question        string    `json:"question"`
+	GeneratedSQL    string    `json:"generated_sql"`
+	Valid           bool      `json:"valid"`
+	RejectReason    string    `json:"reject_reason"`
+	Executed        bool      `json:"executed"`
+	RowCount        int64     `json:"row_count"`
 	Error           string    `json:"error"`
 	FailureCategory string    `json:"failure_category"`
 	ExplainCost     float64   `json:"explain_cost"`
@@ -83,6 +83,41 @@ type Text2SQLStats struct {
 	Errors    int64   `json:"errors"`
 	CostKRW   float64 `json:"cost_krw"`
 	ValidRate float64 `json:"valid_rate"`
+}
+
+// RiskyText2SQLLogs returns the queue of Text2SQL requests that warrant operator
+// attention: rejected, high EXPLAIN risk, or classified as a failure — newest first.
+func (s *SQLStore) RiskyText2SQLLogs(ctx context.Context, since time.Time, minRisk, limit int) ([]Text2SQLQueryLog, error) {
+	if limit <= 0 || limit > 1000 {
+		limit = 100
+	}
+	rows, err := s.db.QueryContext(ctx, s.bind(`SELECT id, COALESCE(request_id,''), COALESCE(api_key_id,''), COALESCE(team,''),
+		COALESCE(virtual_model,''), COALESCE(upstream_model,''), COALESCE(mode,''), COALESCE(question,''), COALESCE(generated_sql,''),
+		valid, COALESCE(reject_reason,''), executed, row_count, COALESCE(error,''), COALESCE(failure_category,''), explain_cost, explain_risk, cost_krw, latency_ms, created_at
+		FROM text2sql_query_logs
+		WHERE created_at >= ? AND (valid = 0 OR explain_risk >= ? OR COALESCE(failure_category,'') <> '')
+		ORDER BY created_at DESC LIMIT ?`), since.UTC().Format(time.RFC3339Nano), minRisk, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Text2SQLQueryLog{}
+	for rows.Next() {
+		var l Text2SQLQueryLog
+		var valid, executed int
+		var createdAt string
+		if err := rows.Scan(&l.ID, &l.RequestID, &l.APIKeyID, &l.Team, &l.VirtualModel, &l.UpstreamModel, &l.Mode,
+			&l.Question, &l.GeneratedSQL, &valid, &l.RejectReason, &executed, &l.RowCount, &l.Error, &l.FailureCategory, &l.ExplainCost, &l.ExplainRisk, &l.CostKRW, &l.LatencyMS, &createdAt); err != nil {
+			return nil, err
+		}
+		l.Valid = valid == 1
+		l.Executed = executed == 1
+		if ts, ok := parseStoredTime(createdAt); ok {
+			l.CreatedAt = ts
+		}
+		out = append(out, l)
+	}
+	return out, rows.Err()
 }
 
 // Text2SQLFailureBucket counts Text2SQL failures by standard category.

@@ -68,6 +68,26 @@ func TestClassifyText2SQLFailure(t *testing.T) {
 	}
 }
 
+func TestChooseUpstreamByQuality(t *testing.T) {
+	const base, accurate = "gpt-4.1-mini", "claude-sonnet-4"
+	// Below the sample threshold → keep base even with a poor valid rate.
+	if got := chooseUpstreamByQuality(base, accurate, store.Text2SQLModelMetric{Total: 5, ValidRate: 0.3}); got != base {
+		t.Errorf("insufficient samples should keep base, got %q", got)
+	}
+	// Enough samples + low valid rate → upgrade to accurate.
+	if got := chooseUpstreamByQuality(base, accurate, store.Text2SQLModelMetric{Total: 20, ValidRate: 0.5}); got != accurate {
+		t.Errorf("low quality should upgrade to accurate, got %q", got)
+	}
+	// Enough samples + healthy valid rate → keep base.
+	if got := chooseUpstreamByQuality(base, accurate, store.Text2SQLModelMetric{Total: 20, ValidRate: 0.95}); got != base {
+		t.Errorf("healthy quality should keep base, got %q", got)
+	}
+	// No accurate model configured → always base.
+	if got := chooseUpstreamByQuality(base, "", store.Text2SQLModelMetric{Total: 20, ValidRate: 0.1}); got != base {
+		t.Errorf("missing accurate model should keep base, got %q", got)
+	}
+}
+
 func TestClickhouseAggregate(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("100\t1000\t50.5\n"))

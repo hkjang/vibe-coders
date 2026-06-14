@@ -163,6 +163,49 @@ func WithExamples(msgs []Message, examples []Example) []Message {
 	return head
 }
 
+// WithGlossary prepends a business-glossary system message (term → table/column
+// mapping) so the model can resolve business vocabulary to the schema.
+func WithGlossary(msgs []Message, glossary string) []Message {
+	if strings.TrimSpace(glossary) == "" {
+		return msgs
+	}
+	g := Message{Role: "system", Content: "업무 용어 사전 (용어 → 테이블/컬럼/조건):\n" + glossary}
+	if len(msgs) == 0 {
+		return []Message{g}
+	}
+	// insert right after the first system message (schema/instructions stay first)
+	return append([]Message{msgs[0], g}, msgs[1:]...)
+}
+
+var clarifyTimeTokens = []string{
+	"기간", "날짜", "월", "주간", "일별", "년", "분기", "오늘", "어제", "지난", "이번", "최근", "올해", "작년", "당월", "전월",
+	"between", "last ", "this ", "since", "from ", "until", "yesterday", "today", "week", "month", "year", "quarter", "daily", "20",
+}
+
+// NeedsClarification returns true (with the missing items) when a question is too
+// vague to safely generate SQL — e.g. an aggregation with no time qualifier, or a
+// very short prompt. Conservative: only fires for clearly underspecified questions.
+func NeedsClarification(question string, requireDate bool) (bool, []string) {
+	q := strings.ToLower(strings.TrimSpace(question))
+	missing := []string{}
+	if len([]rune(q)) < 6 {
+		missing = append(missing, "구체적인 질문(대상 테이블/지표를 명시)")
+	}
+	if requireDate && !containsAnyToken(q, clarifyTimeTokens) {
+		missing = append(missing, "조회 기간(예: 지난달, 2026-01 ~ 2026-03)")
+	}
+	return len(missing) > 0, missing
+}
+
+func containsAnyToken(s string, tokens []string) bool {
+	for _, t := range tokens {
+		if strings.Contains(s, t) {
+			return true
+		}
+	}
+	return false
+}
+
 // MessagesJSON marshals messages into the body shape runGovernanceChat understands
 // (it preserves a `messages` array and only overwrites model/stream).
 func MessagesJSON(msgs []Message) string {

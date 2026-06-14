@@ -101,20 +101,26 @@ type SecretConfig struct {
 // request whose model is vibe/text2sql-* is generated as read-only SQL by an
 // internal upstream model instead of being proxied verbatim.
 type Text2SQLConfig struct {
-	Enabled        bool
-	PreviewModel   string
-	ExecuteModel   string
-	AccurateModel  string
-	LocalModel     string
-	SummaryModel   string
-	Dialect        string // e.g. "PostgreSQL"
-	Schema         string // inline schema/catalog context injected into the prompt
-	DefaultLimit   int
-	MaxLimit       int
-	MaxExplainCost float64 // when > 0 (postgres), reject queries whose EXPLAIN total cost exceeds this
-	MaskResults    bool    // mask secrets/PII in executed result cells
-	ExecDriver     string  // database/sql driver for execute mode (e.g. "postgres", "sqlite")
-	ExecDSN        string  // read-only DSN for execute mode; empty disables execution
+	Enabled           bool
+	PreviewModel      string
+	ExecuteModel      string
+	AccurateModel     string
+	LocalModel        string
+	SummaryModel      string
+	Dialect           string // e.g. "PostgreSQL"
+	Schema            string // inline schema/catalog context injected into the prompt
+	DefaultLimit      int
+	MaxLimit          int
+	MaxExplainCost    float64       // when > 0 (postgres), reject queries whose EXPLAIN total cost exceeds this
+	MaskResults       bool          // mask secrets/PII in executed result cells
+	ExecDriver        string        // database/sql driver for execute mode (e.g. "postgres", "sqlite")
+	ExecDSN           string        // read-only DSN for execute mode; empty disables execution
+	CacheEnabled      bool          // cache generated preview SQL by question+schema+mode
+	CacheTTL          time.Duration // preview SQL cache TTL
+	ClarifyEnabled    bool          // ask a clarification question instead of guessing on vague prompts
+	RequireDateFilter bool          // when clarifying, require a time qualifier
+	StatementTimeout  time.Duration // (postgres execute) per-statement timeout
+	WorkMem           string        // (postgres execute) SET LOCAL work_mem, e.g. "64MB"
 }
 
 // ClickHouseConfig configures the long-term analytics sink. When URL is empty the
@@ -213,20 +219,26 @@ func Load() (Config, error) {
 			InferFromContent: boolEnv("VCS_INFER_FROM_CONTENT", true),
 		},
 		Text2SQL: Text2SQLConfig{
-			Enabled:        boolEnv("TEXT2SQL_ENABLED", false),
-			PreviewModel:   getEnv("TEXT2SQL_PREVIEW_MODEL", "gpt-4.1-mini"),
-			ExecuteModel:   getEnv("TEXT2SQL_EXECUTE_MODEL", "gpt-4.1-mini"),
-			AccurateModel:  getEnv("TEXT2SQL_ACCURATE_MODEL", "claude-sonnet-4"),
-			LocalModel:     getEnv("TEXT2SQL_LOCAL_MODEL", "qwen-coder"),
-			SummaryModel:   getEnv("TEXT2SQL_SUMMARY_MODEL", "gpt-4.1-mini"),
-			Dialect:        getEnv("TEXT2SQL_DIALECT", "PostgreSQL"),
-			Schema:         os.Getenv("TEXT2SQL_SCHEMA"),
-			DefaultLimit:   intEnv("TEXT2SQL_DEFAULT_LIMIT", 100),
-			MaxLimit:       intEnv("TEXT2SQL_MAX_LIMIT", 1000),
-			MaxExplainCost: floatEnv("TEXT2SQL_MAX_EXPLAIN_COST", 0),
-			MaskResults:    boolEnv("TEXT2SQL_MASK_RESULTS", true),
-			ExecDriver:     getEnv("TEXT2SQL_EXEC_DRIVER", "postgres"),
-			ExecDSN:        os.Getenv("TEXT2SQL_EXEC_DSN"),
+			Enabled:           boolEnv("TEXT2SQL_ENABLED", false),
+			PreviewModel:      getEnv("TEXT2SQL_PREVIEW_MODEL", "gpt-4.1-mini"),
+			ExecuteModel:      getEnv("TEXT2SQL_EXECUTE_MODEL", "gpt-4.1-mini"),
+			AccurateModel:     getEnv("TEXT2SQL_ACCURATE_MODEL", "claude-sonnet-4"),
+			LocalModel:        getEnv("TEXT2SQL_LOCAL_MODEL", "qwen-coder"),
+			SummaryModel:      getEnv("TEXT2SQL_SUMMARY_MODEL", "gpt-4.1-mini"),
+			Dialect:           getEnv("TEXT2SQL_DIALECT", "PostgreSQL"),
+			Schema:            os.Getenv("TEXT2SQL_SCHEMA"),
+			DefaultLimit:      intEnv("TEXT2SQL_DEFAULT_LIMIT", 100),
+			MaxLimit:          intEnv("TEXT2SQL_MAX_LIMIT", 1000),
+			MaxExplainCost:    floatEnv("TEXT2SQL_MAX_EXPLAIN_COST", 0),
+			MaskResults:       boolEnv("TEXT2SQL_MASK_RESULTS", true),
+			ExecDriver:        getEnv("TEXT2SQL_EXEC_DRIVER", "postgres"),
+			ExecDSN:           os.Getenv("TEXT2SQL_EXEC_DSN"),
+			CacheEnabled:      boolEnv("TEXT2SQL_CACHE_ENABLED", true),
+			CacheTTL:          durationEnv("TEXT2SQL_CACHE_TTL", time.Hour),
+			ClarifyEnabled:    boolEnv("TEXT2SQL_CLARIFY_ENABLED", false),
+			RequireDateFilter: boolEnv("TEXT2SQL_REQUIRE_DATE_FILTER", false),
+			StatementTimeout:  durationEnv("TEXT2SQL_STATEMENT_TIMEOUT", 15*time.Second),
+			WorkMem:           os.Getenv("TEXT2SQL_WORK_MEM"),
 		},
 		ClickHouse: ClickHouseConfig{
 			URL:          strings.TrimRight(os.Getenv("CLICKHOUSE_URL"), "/"),

@@ -577,6 +577,7 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 				updated_at TEXT NOT NULL
 			)`,
 		`ALTER TABLE text2sql_golden_queries ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'`,
+		`ALTER TABLE text2sql_golden_queries ADD COLUMN schema_version INTEGER NOT NULL DEFAULT 0`,
 		`CREATE TABLE IF NOT EXISTS text2sql_schemas (
 				name TEXT PRIMARY KEY,
 				team TEXT,
@@ -587,6 +588,28 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 				enabled INTEGER NOT NULL DEFAULT 1,
 				updated_at TEXT NOT NULL
 			)`,
+		`ALTER TABLE text2sql_schemas ADD COLUMN version INTEGER NOT NULL DEFAULT 1`,
+		`ALTER TABLE text2sql_schemas ADD COLUMN collected_at TEXT`,
+		`ALTER TABLE text2sql_schemas ADD COLUMN source_fingerprint TEXT`,
+		`CREATE TABLE IF NOT EXISTS text2sql_cache (
+				cache_key TEXT PRIMARY KEY,
+				schema_name TEXT,
+				mode TEXT,
+				generated_sql TEXT NOT NULL,
+				hits INTEGER NOT NULL DEFAULT 0,
+				created_at TEXT NOT NULL,
+				expires_at TEXT NOT NULL
+			)`,
+		`CREATE INDEX IF NOT EXISTS idx_text2sql_cache_expires ON text2sql_cache(expires_at)`,
+		`CREATE TABLE IF NOT EXISTS text2sql_business_terms (
+				id TEXT PRIMARY KEY,
+				schema_name TEXT NOT NULL DEFAULT '*',
+				term TEXT NOT NULL,
+				mapping TEXT NOT NULL,
+				description TEXT,
+				updated_at TEXT NOT NULL
+			)`,
+		`CREATE INDEX IF NOT EXISTS idx_text2sql_business_terms_schema ON text2sql_business_terms(schema_name)`,
 		`CREATE TABLE IF NOT EXISTS text2sql_query_logs (
 				id TEXT PRIMARY KEY,
 				request_id TEXT,

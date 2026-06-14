@@ -11,18 +11,22 @@ import (
 // validate generated SQL. A blank Team makes it global; otherwise it is scoped to
 // that team. IsDefault marks the schema picked when a request names none.
 type Text2SQLSchema struct {
-	Team          string   `json:"team"`
-	Name          string   `json:"name"`
-	Dialect       string   `json:"dialect"`
-	SchemaText    string   `json:"schema_text"`
-	AllowedTables []string `json:"allowed_tables"`
-	IsDefault     bool     `json:"is_default"`
-	Enabled       bool     `json:"enabled"`
-	UpdatedAt     string   `json:"updated_at"`
+	Team              string   `json:"team"`
+	Name              string   `json:"name"`
+	Dialect           string   `json:"dialect"`
+	SchemaText        string   `json:"schema_text"`
+	AllowedTables     []string `json:"allowed_tables"`
+	IsDefault         bool     `json:"is_default"`
+	Enabled           bool     `json:"enabled"`
+	Version           int      `json:"version"`
+	CollectedAt       string   `json:"collected_at"`
+	SourceFingerprint string   `json:"source_fingerprint"`
+	UpdatedAt         string   `json:"updated_at"`
 }
 
 func (s *SQLStore) ListText2SQLSchemas(ctx context.Context) ([]Text2SQLSchema, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT name, COALESCE(team,''), COALESCE(dialect,''), schema_text, COALESCE(allowed_tables,''), is_default, enabled, updated_at
+	rows, err := s.db.QueryContext(ctx, `SELECT name, COALESCE(team,''), COALESCE(dialect,''), schema_text, COALESCE(allowed_tables,''), is_default, enabled,
+		COALESCE(version,1), COALESCE(collected_at,''), COALESCE(source_fingerprint,''), updated_at
 		FROM text2sql_schemas ORDER BY team, name`)
 	if err != nil {
 		return nil, err
@@ -33,7 +37,7 @@ func (s *SQLStore) ListText2SQLSchemas(ctx context.Context) ([]Text2SQLSchema, e
 		var sc Text2SQLSchema
 		var allowed string
 		var isDefault, enabled int
-		if err := rows.Scan(&sc.Name, &sc.Team, &sc.Dialect, &sc.SchemaText, &allowed, &isDefault, &enabled, &sc.UpdatedAt); err != nil {
+		if err := rows.Scan(&sc.Name, &sc.Team, &sc.Dialect, &sc.SchemaText, &allowed, &isDefault, &enabled, &sc.Version, &sc.CollectedAt, &sc.SourceFingerprint, &sc.UpdatedAt); err != nil {
 			return nil, err
 		}
 		sc.AllowedTables = splitCSV(allowed)

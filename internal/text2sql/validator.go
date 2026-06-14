@@ -12,10 +12,11 @@ import (
 
 // ValidateOptions tunes SQL validation.
 type ValidateOptions struct {
-	DefaultLimit   int      // when > 0, a LIMIT is appended to limit-less SELECTs
-	AllowedTables  []string // when non-empty, every referenced table must be in this set
-	BlockedColumns []string // sensitive columns that must not appear anywhere in the SQL
-	MaxLimit       int      // when > 0, an explicit LIMIT larger than this is rejected
+	DefaultLimit         int      // when > 0, a LIMIT is appended to limit-less SELECTs
+	AllowedTables        []string // when non-empty, every referenced table must be in this set
+	BlockedColumns       []string // sensitive columns that must not appear anywhere in the SQL
+	AggregateOnlyColumns []string // columns that may appear ONLY inside an aggregate function
+	MaxLimit             int      // when > 0, an explicit LIMIT larger than this is rejected
 }
 
 // ValidationResult is the outcome of validating a generated SQL statement.
@@ -50,6 +51,9 @@ var (
 	fromJoin = regexp.MustCompile(`(?is)\b(?:from|join)\s+("?[a-zA-Z_][a-zA-Z0-9_]*"?(?:\."?[a-zA-Z_][a-zA-Z0-9_]*"?)*)`)
 	lineComment  = regexp.MustCompile(`--[^\n]*`)
 	blockComment = regexp.MustCompile(`(?s)/\*.*?\*/`)
+	// aggCallRe matches a single-level aggregate function call, used to detect
+	// columns that are only permitted inside an aggregate.
+	aggCallRe = regexp.MustCompile(`(?is)\b(?:count|sum|avg|min|max|stddev|variance|var_pop|var_samp)\s*\([^()]*\)`)
 )
 
 // ValidateSQL enforces that the generated SQL is a single, read-only SELECT (or a
@@ -98,6 +102,19 @@ func ValidateSQL(raw string, opts ValidateOptions) ValidationResult {
 	for _, col := range opts.BlockedColumns {
 		if c := strings.ToLower(strings.TrimSpace(col)); c != "" && words[c] {
 			return ValidationResult{Reason: "sensitive column not allowed: " + c}
+		}
+	}
+	// aggregate-only columns may appear only inside an aggregate call. Strip aggregate
+	// call bodies, then any remaining occurrence is a raw (disallowed) use.
+	if len(opts.AggregateOnlyColumns) > 0 {
+		nonAgg := map[string]bool{}
+		for _, m := range wordRe.FindAllString(aggCallRe.ReplaceAllString(lower, " "), -1) {
+			nonAgg[m] = true
+		}
+		for _, col := range opts.AggregateOnlyColumns {
+			if c := strings.ToLower(strings.TrimSpace(col)); c != "" && nonAgg[c] {
+				return ValidationResult{Reason: "aggregate-only column used outside an aggregate: " + c}
+			}
 		}
 	}
 

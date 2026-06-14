@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
-	"database/sql"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -172,6 +172,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/admin/text2sql/columns", s.handleText2SQLColumns)
 	mux.HandleFunc("/admin/text2sql/collect", s.handleText2SQLCollect)
 	mux.HandleFunc("/admin/text2sql/permissions", s.handleText2SQLPermissions)
+	mux.HandleFunc("/admin/text2sql/glossary", s.handleText2SQLGlossary)
+	mux.HandleFunc("/admin/text2sql/risk-queue", s.handleText2SQLRiskQueue)
 	mux.HandleFunc("/admin/text2sql/golden", s.handleText2SQLGolden)
 	mux.HandleFunc("/admin/text2sql/golden/", s.handleText2SQLGolden)
 	mux.HandleFunc("/admin/export.csv", s.handleExportCSV)
