@@ -221,6 +221,17 @@ func (s *Server) handleUserDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := strings.TrimPrefix(r.URL.Path, "/admin/users/")
+	// /admin/users/{id}/report — per-user weekly coding report.
+	if idx := strings.Index(id, "/"); idx >= 0 {
+		sub := id[idx+1:]
+		id = id[:idx]
+		if sub == "report" {
+			s.handleUserReport(w, r, id)
+			return
+		}
+		writeOpenAIError(w, http.StatusNotFound, "not found", "invalid_request_error", "not_found")
+		return
+	}
 	if id == "" || strings.Contains(id, "/") {
 		writeOpenAIError(w, http.StatusBadRequest, "invalid user id", "invalid_request_error", "invalid_user_id")
 		return
@@ -244,6 +255,35 @@ func (s *Server) handleUserDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, detail)
+}
+
+// handleUserReport returns a per-user AI coding report over a window (default 7d):
+// request volume, cost, error rate, top models/languages, daily trend, and the
+// wall-clock time the user's sessions span.
+func (s *Server) handleUserReport(w http.ResponseWriter, r *http.Request, id string) {
+	if r.Method != http.MethodGet {
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
+	if id == "" {
+		writeOpenAIError(w, http.StatusBadRequest, "invalid user id", "invalid_request_error", "invalid_user_id")
+		return
+	}
+	if claims, ok := s.currentAccessClaims(r); ok && claims.Role == "team_admin" && !s.subjectBelongsToTeam(r, id, claims.TeamID) {
+		writeOpenAIError(w, http.StatusForbidden, "team_admin can only access own team users", "permission_error", "team_scope_denied")
+		return
+	}
+	since := parseWindow(r.URL.Query().Get("window"), 7*24*time.Hour, "day")
+	report, err := s.db.UserCodingReportSince(r.Context(), id, since)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeOpenAIError(w, http.StatusNotFound, "user not found", "invalid_request_error", "user_not_found")
+			return
+		}
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "user_report_failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, report)
 }
 
 func (s *Server) claimsTeamMatches(r *http.Request, claims accessClaims, team string) bool {

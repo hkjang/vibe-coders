@@ -1644,6 +1644,35 @@ const adminHTML = `<!doctype html>
       card('Provider 상태 (최근 1시간)', provRows);
     }
 
+    function opsDuration(sec) {
+      sec = Math.round(sec || 0);
+      if (sec < 60) return sec + '초';
+      if (sec < 3600) return Math.round(sec / 60) + '분';
+      const h = Math.floor(sec / 3600), m = Math.round((sec % 3600) / 60);
+      return h + '시간' + (m ? ' ' + m + '분' : '');
+    }
+    function weeklyReportHTML(rep) {
+      const topModel = (rep.top_models && rep.top_models[0]) ? rep.top_models[0].key : '—';
+      const topLang = (rep.top_languages && rep.top_languages[0]) ? rep.top_languages[0].language : '—';
+      const errPct = ((rep.error_rate || 0) * 100).toFixed(1);
+      const errCls = (rep.error_rate || 0) > 0.1 ? 'error' : ((rep.error_rate || 0) > 0.03 ? 'warn' : '');
+      const kpi = (label, value, sub) =>
+        '<div style="flex:1; min-width:120px; padding:12px; background:var(--panel-alt); border:1px solid var(--line); border-radius:10px">' +
+          '<div class="muted" style="font-size:12px">' + escapeHTML(label) + '</div>' +
+          '<div style="font-size:20px; font-weight:800; margin-top:2px">' + value + '</div>' +
+          (sub ? '<div class="muted" style="font-size:11px; margin-top:2px">' + escapeHTML(sub) + '</div>' : '') +
+        '</div>';
+      return '<div style="padding:14px; display:flex; gap:10px; flex-wrap:wrap">' +
+        kpi('요청 수', fmt(rep.requests || 0), '') +
+        kpi('비용', money(rep.cost_krw || 0), fmt(rep.tokens || 0) + ' 토큰') +
+        kpi('오류율', '<span class="status ' + errCls + '">' + errPct + '%</span>', fmt(rep.error_requests || 0) + ' 건') +
+        kpi('주 사용 모델', '<span style="font-size:15px">' + escapeHTML(topModel) + '</span>', '') +
+        kpi('많이 쓰는 언어', '<span style="font-size:15px">' + escapeHTML(topLang) + '</span>', '') +
+        kpi('세션', fmt(rep.sessions || 0), '평균 ' + opsDuration(rep.average_session_seconds)) +
+        kpi('총 작업 시간', opsDuration(rep.work_seconds), '세션 합산') +
+      '</div>';
+    }
+
     function statusCard(rows, total) {
       if (!rows.length) return '<div class="empty">데이터 없음</div>';
       const cls = (c) => c === '2xx' ? '' : (c === 'quota' ? 'warn' : 'error');
@@ -3177,7 +3206,10 @@ const adminHTML = `<!doctype html>
     };
 
     async function renderUserDetail(id) {
-      const d = await api('/admin/users/' + encodeURIComponent(id) + '?limit=100');
+      const [d, report] = await Promise.all([
+        api('/admin/users/' + encodeURIComponent(id) + '?limit=100'),
+        api('/admin/users/' + encodeURIComponent(id) + '/report?window=7d').catch(() => null),
+      ]);
       const k = d.api_key, s = d.stats;
       const a = d.advanced || {};
       const heat = d.heatmap || {};
@@ -3207,6 +3239,7 @@ const adminHTML = `<!doctype html>
             row('LLM 관측', '<a href="' + llmScopedLink(k.id, k.team || '') + '">필터된 LLM 보기</a>') +
           '</div></div>' +
         '</section>' +
+        (report ? section('주간 AI 코딩 리포트 (최근 7일)', weeklyReportHTML(report)) : '') +
         section('사용자 고급 지표', userAdvancedHTML(a)) +
         section('사용자 LLM 관측', userLLMSummaryHTML(llm.summary || {})) +
         '<div class="grid2">' +
