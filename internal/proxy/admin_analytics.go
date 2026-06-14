@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -299,6 +300,33 @@ func (s *Server) handleHeatmap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, heat)
+}
+
+// handleModelQuality reports a composite per-model coding-quality score over a
+// window (default 30d): success rate + golden regression pass + evaluation pass
+// rates (overall and per category: compile/tests/security/review).
+// GET /admin/models/quality?window=30d
+func (s *Server) handleModelQuality(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	if r.Method != http.MethodGet {
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
+	since := parseWindow(r.URL.Query().Get("window"), 30*24*time.Hour, "day")
+	scores, err := s.db.ModelQualityScores(r.Context(), since)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "model_quality_failed")
+		return
+	}
+	sort.Slice(scores, func(i, j int) bool { return scores[i].QualityScore > scores[j].QualityScore })
+	writeJSON(w, http.StatusOK, map[string]any{
+		"since":      since.UTC().Format(time.RFC3339),
+		"models":     scores,
+		"categories": []string{"compile", "tests", "security", "review"},
+	})
 }
 
 func parseWindow(raw string, fallback time.Duration, bucket string) time.Time {

@@ -1477,6 +1477,7 @@ const adminHTML = `<!doctype html>
         api('/admin/anomalies?recent=6h&z=3').catch(() => ({ anomalies: [] })),
         api('/admin/ops/status').catch(() => null),
       ]);
+      const modelQuality = await api('/admin/models/quality?window=30d').catch(() => ({ models: [] }));
       const anomalies = (anomalyResp && anomalyResp.anomalies) || [];
 
       const html =
@@ -1495,6 +1496,7 @@ const adminHTML = `<!doctype html>
           card('모델별 사용량', groupedTable(stats.by_model || [], '모델')) +
           card('언어별 사용량', languagesTable(stats.by_language || [])) +
         '</div>' +
+        section('모델별 코딩 품질 점수 (최근 30일)', modelQualityHTML(modelQuality.models || [])) +
         section('프로젝트별 비용 (최근 30일)', costAllocationPanel()) +
         section('이상 징후 (최근 6시간 vs 7일 기준선, |z| ≥ 3)', anomalyTable(anomalies)) +
         section('시간대 히트맵 (Asia/Seoul, 최근 ' + heatWindow + ')', heatmapHTML(heat.cells || [])) +
@@ -1712,6 +1714,31 @@ const adminHTML = `<!doctype html>
         kpi('세션', fmt(rep.sessions || 0), '평균 ' + opsDuration(rep.average_session_seconds)) +
         kpi('총 작업 시간', opsDuration(rep.work_seconds), '세션 합산') +
       '</div>';
+    }
+
+    function modelQualityHTML(models) {
+      if (!models.length) return '<div class="empty">데이터 없음 — 요청·골든 프롬프트·평가 결과가 쌓이면 모델별 품질 점수가 계산됩니다.</div>';
+      const pct = (v) => ((v || 0) * 100).toFixed(0) + '%';
+      const cat = (m, key) => (m.categories && m.categories[key]) ? pct(m.categories[key].pass_rate) : '<span class="muted">—</span>';
+      return '<table><thead><tr>' +
+        '<th data-sort="str">모델</th><th data-sort="num">품질점수</th><th data-sort="num">요청</th>' +
+        '<th data-sort="num">성공률</th><th data-sort="num">골든</th><th data-sort="num">평가</th>' +
+        '<th data-sort="num">컴파일</th><th data-sort="num">테스트</th><th data-sort="num">보안</th><th data-sort="num">리뷰</th></tr></thead><tbody>' +
+        models.map(m => {
+          const score = Math.round(m.quality_score || 0);
+          const color = score >= 80 ? 'var(--accent)' : (score >= 50 ? 'var(--warn)' : 'var(--bad)');
+          return '<tr>' +
+            '<td><strong>' + escapeHTML(m.model) + '</strong></td>' +
+            '<td data-num="' + score + '"><b style="color:' + color + '">' + score + '</b></td>' +
+            '<td data-num="' + (m.requests || 0) + '">' + fmt(m.requests) + '</td>' +
+            '<td data-num="' + (m.success_rate || 0) + '">' + pct(m.success_rate) + '</td>' +
+            '<td data-num="' + (m.golden_pass_rate || 0) + '">' + (m.golden_samples ? pct(m.golden_pass_rate) : '<span class="muted">—</span>') + '</td>' +
+            '<td data-num="' + (m.eval_pass_rate || 0) + '">' + (m.eval_samples ? pct(m.eval_pass_rate) : '<span class="muted">—</span>') + '</td>' +
+            '<td>' + cat(m, 'compile') + '</td><td>' + cat(m, 'tests') + '</td><td>' + cat(m, 'security') + '</td><td>' + cat(m, 'review') + '</td>' +
+          '</tr>';
+        }).join('') +
+        '</tbody></table>' +
+        '<div class="muted" style="font-size:12px; padding:0 14px 12px">품질점수 = 성공률·골든 회귀 통과·평가 통과율·코딩 카테고리(컴파일/테스트/보안/리뷰) 가중 평균. 외부 평가는 <code>POST /admin/llm/evaluations</code> 의 category 로 분류됩니다.</div>';
     }
 
     function statusCard(rows, total) {
