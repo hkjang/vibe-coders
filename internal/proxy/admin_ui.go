@@ -1495,6 +1495,7 @@ const adminHTML = `<!doctype html>
           card('모델별 사용량', groupedTable(stats.by_model || [], '모델')) +
           card('언어별 사용량', languagesTable(stats.by_language || [])) +
         '</div>' +
+        section('프로젝트별 비용 (최근 30일)', costAllocationPanel()) +
         section('이상 징후 (최근 6시간 vs 7일 기준선, |z| ≥ 3)', anomalyTable(anomalies)) +
         section('시간대 히트맵 (Asia/Seoul, 최근 ' + heatWindow + ')', heatmapHTML(heat.cells || [])) +
         section('최근 호출 이력', requestsTable(recent.requests || []));
@@ -1509,6 +1510,46 @@ const adminHTML = `<!doctype html>
           route();
         });
       });
+      loadAllocation(allocDim);
+      document.querySelectorAll('[data-alloc]').forEach(btn => {
+        btn.addEventListener('click', () => loadAllocation(btn.dataset.alloc));
+      });
+    }
+
+    let allocDim = sessionStorage.getItem('allocDim') || 'project';
+    function costAllocationPanel() {
+      const dims = [['project', '프로젝트'], ['repo', '저장소'], ['branch', '브랜치'], ['cost_center', '예산코드'], ['service', '서비스'], ['model', '모델']];
+      const btns = dims.map(d => '<button type="button" class="' + (d[0] === allocDim ? '' : 'secondary') + '" data-alloc="' + d[0] + '">' + d[1] + '</button>').join('');
+      return '<div class="toolbar">' + btns + '</div><div id="allocBody"><div class="empty">불러오는 중…</div></div>';
+    }
+    function allocationTable(rows) {
+      if (!rows.length) return '<div class="empty">데이터 없음 — 클라이언트가 X-Vibe-Repo / X-Vibe-Project / X-Vibe-Cost-Center 헤더를 보내면 집계됩니다.</div>';
+      const totalCost = rows.reduce((a, r) => a + (r.cost_krw || 0), 0) || 1;
+      return '<table><thead><tr>' +
+        '<th data-sort="str">구분</th><th data-sort="num">요청</th><th data-sort="num">토큰</th>' +
+        '<th data-sort="num">비용</th><th data-sort="num">비중</th><th data-sort="num">오류</th></tr></thead><tbody>' +
+        rows.map(r => {
+          const pct = ((r.cost_krw || 0) / totalCost) * 100;
+          return '<tr>' +
+            '<td>' + escapeHTML(r.key) + '</td>' +
+            '<td data-num="' + (r.requests || 0) + '">' + fmt(r.requests) + '</td>' +
+            '<td data-num="' + (r.tokens || 0) + '">' + fmt(r.tokens) + '</td>' +
+            '<td data-num="' + (r.cost_krw || 0) + '">' + money(r.cost_krw) + '</td>' +
+            '<td data-num="' + pct.toFixed(1) + '">' + pct.toFixed(1) + '%</td>' +
+            '<td data-num="' + (r.error_requests || 0) + '">' + fmt(r.error_requests) + '</td>' +
+          '</tr>';
+        }).join('') +
+        '</tbody></table>';
+    }
+    async function loadAllocation(dim) {
+      allocDim = dim;
+      sessionStorage.setItem('allocDim', dim);
+      const body = document.getElementById('allocBody');
+      if (!body) return;
+      const data = await api('/admin/cost/allocation?dimension=' + encodeURIComponent(dim) + '&window=30d').catch(() => null);
+      body.innerHTML = allocationTable((data && data.rows) || []);
+      document.querySelectorAll('[data-alloc]').forEach(b => b.classList.toggle('secondary', b.dataset.alloc !== dim));
+      makeSortable('#allocBody', 'alloc');
     }
     function windowLabel(win) {
       return { '24h': '최근 24시간 (시간별)', '7d': '최근 7일 (일별)', '30d': '최근 30일 (일별)' }[win] || win;

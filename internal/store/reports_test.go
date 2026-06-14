@@ -62,6 +62,62 @@ func TestUserCodingReportSince(t *testing.T) {
 	}
 }
 
+func TestCostAllocationByProject(t *testing.T) {
+	db := openAggTestStore(t)
+	defer db.Close()
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	rec := func(id, project, costCenter string, status int, cost float64) {
+		if err := db.InsertLogRecord(ctx, LogRecord{
+			Request: RequestLog{
+				ID: id, TraceID: id, APIKeyID: "key_x", Endpoint: "/v1/chat/completions",
+				Model: "gpt-4.1", Provider: "openai", StatusCode: status,
+				Project: project, CostCenter: costCenter, CreatedAt: now,
+			},
+			Usage: &TokenUsage{ID: id + "_u", RequestID: id, TotalTokens: 10, EstimatedCost: cost, Currency: "KRW", CreatedAt: now},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	rec("p1", "alpha", "CC-100", 200, 100)
+	rec("p2", "alpha", "CC-100", 500, 200)
+	rec("p3", "beta", "CC-200", 200, 50)
+	rec("p4", "", "", 200, 5) // unset bucket
+
+	rows, err := db.CostAllocation(ctx, "project", now.Add(-time.Hour), 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byKey := map[string]CostAllocationRow{}
+	for _, r := range rows {
+		byKey[r.Key] = r
+	}
+	if byKey["alpha"].CostKRW != 300 {
+		t.Errorf("alpha cost = %f, want 300", byKey["alpha"].CostKRW)
+	}
+	if byKey["alpha"].Errors != 1 {
+		t.Errorf("alpha errors = %d, want 1", byKey["alpha"].Errors)
+	}
+	if byKey["beta"].Requests != 1 {
+		t.Errorf("beta requests = %d, want 1", byKey["beta"].Requests)
+	}
+	if _, ok := byKey["(unset)"]; !ok {
+		t.Error("expected an (unset) bucket for the empty project")
+	}
+
+	// cost_center dimension works too.
+	ccRows, err := db.CostAllocation(ctx, "cost_center", now.Add(-time.Hour), 100)
+	if err != nil || len(ccRows) == 0 {
+		t.Fatalf("cost_center allocation failed: %v rows=%d", err, len(ccRows))
+	}
+
+	if _, err := db.CostAllocation(ctx, "bogus", now.Add(-time.Hour), 100); err == nil {
+		t.Error("expected error for unsupported dimension")
+	}
+}
+
 func TestUserCodingReportNotFound(t *testing.T) {
 	db := openAggTestStore(t)
 	defer db.Close()

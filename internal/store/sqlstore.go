@@ -223,6 +223,16 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 		`ALTER TABLE request_logs ADD COLUMN prompt_version TEXT`,
 		`ALTER TABLE request_logs ADD COLUMN prompt_variables_hash TEXT`,
 		`ALTER TABLE request_logs ADD COLUMN tool_count INTEGER NOT NULL DEFAULT 0`,
+		// Cost-allocation dimensions: repo/branch/project from client headers,
+		// service + cost_center for chargeback/budget-code reporting.
+		`ALTER TABLE request_logs ADD COLUMN repo TEXT`,
+		`ALTER TABLE request_logs ADD COLUMN branch TEXT`,
+		`ALTER TABLE request_logs ADD COLUMN project TEXT`,
+		`ALTER TABLE request_logs ADD COLUMN service TEXT`,
+		`ALTER TABLE request_logs ADD COLUMN cost_center TEXT`,
+		`CREATE INDEX IF NOT EXISTS idx_request_logs_repo ON request_logs(repo)`,
+		`CREATE INDEX IF NOT EXISTS idx_request_logs_project ON request_logs(project)`,
+		`CREATE INDEX IF NOT EXISTS idx_request_logs_cost_center ON request_logs(cost_center)`,
 		`CREATE INDEX IF NOT EXISTS idx_request_logs_created_at ON request_logs(created_at)`,
 		`CREATE INDEX IF NOT EXISTS idx_request_logs_client_ip ON request_logs(client_ip)`,
 		`CREATE INDEX IF NOT EXISTS idx_request_logs_model ON request_logs(model)`,
@@ -1036,9 +1046,9 @@ func (s *SQLStore) InsertLogRecord(ctx context.Context, record LogRecord) error 
 		req.CreatedAt = time.Now().UTC()
 	}
 	_, err = tx.ExecContext(ctx, s.bind(`INSERT INTO request_logs
-		(id, trace_id, api_key_id, client_ip, forwarded_for, user_agent, hostname, model, endpoint, stream, provider, status_code, latency_ms, first_chunk_ms, session_id, prompt_name, prompt_version, prompt_variables_hash, tool_count, error, request_hash, body_raw, replay_of, failover, route_reason, route_detail, complexity, fallback_from, fallback_reason, requested_model, task_type, prompt_fingerprint, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
-		req.ID, req.TraceID, req.APIKeyID, req.ClientIP, req.ForwardedFor, req.UserAgent, req.Hostname, req.Model, req.Endpoint, boolInt(req.Stream), req.Provider, req.StatusCode, req.LatencyMS, req.FirstChunkMS, req.SessionID, req.PromptName, req.PromptVersion, req.PromptVariablesHash, req.ToolCount, req.Error, req.RequestHash, req.BodyRaw, req.ReplayOf, boolInt(req.Failover), req.RouteReason, req.RouteDetail, req.Complexity, req.FallbackFrom, req.FallbackReason, req.RequestedModel, req.TaskType, req.PromptFingerprint, formatTime(req.CreatedAt))
+		(id, trace_id, api_key_id, client_ip, forwarded_for, user_agent, hostname, model, endpoint, stream, provider, status_code, latency_ms, first_chunk_ms, session_id, prompt_name, prompt_version, prompt_variables_hash, tool_count, error, request_hash, body_raw, replay_of, failover, route_reason, route_detail, complexity, fallback_from, fallback_reason, requested_model, task_type, prompt_fingerprint, repo, branch, project, service, cost_center, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+		req.ID, req.TraceID, req.APIKeyID, req.ClientIP, req.ForwardedFor, req.UserAgent, req.Hostname, req.Model, req.Endpoint, boolInt(req.Stream), req.Provider, req.StatusCode, req.LatencyMS, req.FirstChunkMS, req.SessionID, req.PromptName, req.PromptVersion, req.PromptVariablesHash, req.ToolCount, req.Error, req.RequestHash, req.BodyRaw, req.ReplayOf, boolInt(req.Failover), req.RouteReason, req.RouteDetail, req.Complexity, req.FallbackFrom, req.FallbackReason, req.RequestedModel, req.TaskType, req.PromptFingerprint, req.Repo, req.Branch, req.Project, req.Service, req.CostCenter, formatTime(req.CreatedAt))
 	if err != nil {
 		return err
 	}

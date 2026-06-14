@@ -199,6 +199,11 @@ type RequestLog struct {
 	RequestedModel      string // model the client asked for (before complexity routing)
 	TaskType            string // heuristic task class (refactor/generate/debug/...) for routing learning
 	PromptFingerprint   string // lexical fingerprint grouping near-identical task prompts
+	Repo                string // X-Vibe-Repo / X-Repo — source repository
+	Branch              string // X-Vibe-Branch / X-Branch — working branch
+	Project             string // X-Vibe-Project / X-Project — logical project
+	Service             string // X-Vibe-Service — calling service/app, for chargeback
+	CostCenter          string // X-Vibe-Cost-Center / X-Budget-Code — budget allocation code
 	CreatedAt           time.Time
 }
 

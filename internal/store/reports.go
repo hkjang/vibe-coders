@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"time"
 )
 
@@ -141,6 +142,74 @@ func (s *SQLStore) sessionWorkSeconds(ctx context.Context, apiKeyID, sinceStr st
 		}
 	}
 	return sessions, total, rows.Err()
+}
+
+// CostAllocationRow is one bucket of cost attribution for a chosen dimension.
+type CostAllocationRow struct {
+	Key      string  `json:"key"`
+	Requests int64   `json:"requests"`
+	Tokens   int64   `json:"tokens"`
+	CostKRW  float64 `json:"cost_krw"`
+	Errors   int64   `json:"error_requests"`
+}
+
+// costAllocationColumns maps an allocation dimension to its request_logs column.
+var costAllocationColumns = map[string]string{
+	"repo":        "r.repo",
+	"branch":      "r.branch",
+	"project":     "r.project",
+	"service":     "r.service",
+	"cost_center": "r.cost_center",
+	"model":       "r.model",
+	"provider":    "r.provider",
+	"api_key_id":  "r.api_key_id",
+}
+
+// CostAllocationDimensions lists the dimensions CostAllocation accepts.
+func CostAllocationDimensions() []string {
+	return []string{"repo", "branch", "project", "service", "cost_center", "model", "provider", "api_key_id"}
+}
+
+// CostAllocation attributes requests/tokens/cost/errors to buckets of the given
+// dimension over [since, now]. Unknown dimensions return an error. Rows whose
+// dimension value is empty are bucketed under "(unset)".
+func (s *SQLStore) CostAllocation(ctx context.Context, dimension string, since time.Time, limit int) ([]CostAllocationRow, error) {
+	col, ok := costAllocationColumns[dimension]
+	if !ok {
+		return nil, fmt.Errorf("unsupported allocation dimension %q", dimension)
+	}
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	query := s.bind(fmt.Sprintf(`
+		SELECT COALESCE(NULLIF(%s, ''), '(unset)') AS key,
+			COUNT(r.id),
+			COALESCE(SUM(t.total_tokens), 0),
+			COALESCE(SUM(t.estimated_cost), 0),
+			COALESCE(SUM(CASE WHEN r.status_code >= 400 THEN 1 ELSE 0 END), 0)
+		FROM request_logs r
+		LEFT JOIN token_usage t ON t.request_id = r.id
+		WHERE r.created_at >= ?
+		GROUP BY COALESCE(NULLIF(%s, ''), '(unset)')
+		ORDER BY 4 DESC
+		LIMIT %d
+	`, col, col, limit))
+
+	rows, err := s.db.QueryContext(ctx, query, since.UTC().Format(time.RFC3339Nano))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := []CostAllocationRow{}
+	for rows.Next() {
+		var row CostAllocationRow
+		if err := rows.Scan(&row.Key, &row.Requests, &row.Tokens, &row.CostKRW, &row.Errors); err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
 }
 
 // parseStoredTime parses a timestamp persisted by the gateway (RFC3339Nano,

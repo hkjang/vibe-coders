@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"vibe-coders/internal/store"
@@ -52,6 +53,36 @@ func (s *Server) handleCostGuard(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
 	}
+}
+
+// handleCostAllocation attributes cost/requests/tokens/errors to a dimension
+// (repo, branch, project, service, cost_center, model, provider, api_key_id)
+// over a window (default 30d). GET /admin/cost/allocation?dimension=repo&window=30d
+func (s *Server) handleCostAllocation(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	if r.Method != http.MethodGet {
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
+	dimension := strings.TrimSpace(r.URL.Query().Get("dimension"))
+	if dimension == "" {
+		dimension = "project"
+	}
+	since := parseWindow(r.URL.Query().Get("window"), 30*24*time.Hour, "day")
+	rows, err := s.db.CostAllocation(r.Context(), dimension, since, recentLimit(r))
+	if err != nil {
+		writeOpenAIError(w, http.StatusBadRequest, err.Error(), "invalid_request_error", "invalid_dimension")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"dimension":  dimension,
+		"dimensions": store.CostAllocationDimensions(),
+		"since":      since.UTC().Format(time.RFC3339),
+		"rows":       rows,
+	})
 }
 
 // handleCostPredict is a dry-run estimator for the UI calculator.

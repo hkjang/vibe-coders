@@ -178,6 +178,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/admin/agents", s.handleAgents)
 	mux.HandleFunc("/admin/cost", s.handleCostGuard)
 	mux.HandleFunc("/admin/cost/predict", s.handleCostPredict)
+	mux.HandleFunc("/admin/cost/allocation", s.handleCostAllocation)
 	mux.HandleFunc("/admin/benchmark/teams", s.handleTeamBenchmark)
 	mux.HandleFunc("/admin/benchmark/users", s.handleUserProductivity)
 	mux.HandleFunc("/admin/incidents", s.handleIncidents)
@@ -1414,6 +1415,11 @@ func (s *Server) auditRequest(endpoint string, body []byte, apiKeyID string, tra
 			RequestHash:         audit.HashText(string(body)),
 			BodyRaw:             rawBody,
 			ReplayOf:            r.Header.Get("X-Proxy-Replay-Of"),
+			Repo:                firstNonEmptyHeader(r, "X-Vibe-Repo", "X-Repo"),
+			Branch:              firstNonEmptyHeader(r, "X-Vibe-Branch", "X-Branch"),
+			Project:             firstNonEmptyHeader(r, "X-Vibe-Project", "X-Project"),
+			Service:             firstNonEmptyHeader(r, "X-Vibe-Service", "X-Service"),
+			CostCenter:          firstNonEmptyHeader(r, "X-Vibe-Cost-Center", "X-Budget-Code"),
 			CreatedAt:           now,
 		},
 		Prompts:   prompts,
