@@ -487,6 +487,96 @@ func (s *Server) handleGoldenPrompts(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// handleGoldenRun runs every golden prompt (optionally filtered by tag) against
+// the given models and reports an aggregate pass/fail — the CI regression gate.
+// POST /admin/golden-prompts/run {models[], tag?, min_pass_rate?}
+//   ?fail_on_regression=1 → returns HTTP 422 when not all checks pass, so a CI
+//   step using `curl --fail` (or a non-zero exit) flags the regression.
+func (s *Server) handleGoldenRun(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	if r.Method != http.MethodPost {
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
+	var payload struct {
+		Models      []string `json:"models"`
+		Tag         string   `json:"tag"`
+		MinPassRate *float64 `json:"min_pass_rate"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "invalid_body")
+		return
+	}
+	models := normalizeModelList(payload.Models)
+	if len(models) == 0 {
+		writeOpenAIError(w, http.StatusBadRequest, "models is required", "invalid_request_error", "missing_models")
+		return
+	}
+	prompts, err := s.db.ListGoldenPrompts(r.Context())
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "golden_prompts_failed")
+		return
+	}
+	tag := strings.TrimSpace(payload.Tag)
+
+	results := []store.GoldenPromptResult{}
+	failures := []map[string]any{}
+	total, passed := 0, 0
+	for _, p := range prompts {
+		if tag != "" && !containsString(p.Tags, tag) {
+			continue
+		}
+		for _, model := range models {
+			run := s.runGovernanceChat(r.Context(), r, model, p.Prompt)
+			score, ok := scoreGoldenResponse(p.Expected, run.Response)
+			if run.Error != "" {
+				ok = false
+			}
+			result := store.GoldenPromptResult{
+				ID: newID("gpr"), PromptID: p.ID, Model: model, Score: score, Passed: ok,
+				CostKRW: run.CostKRW, LatencyMS: run.LatencyMS, Response: run.Response, CreatedAt: time.Now().UTC(),
+			}
+			if run.Error != "" {
+				result.Response = "ERROR: " + run.Error
+			}
+			_ = s.db.InsertGoldenPromptResult(r.Context(), result)
+			results = append(results, result)
+			total++
+			if ok {
+				passed++
+			} else {
+				failures = append(failures, map[string]any{"prompt_id": p.ID, "name": p.Name, "model": model, "score": score})
+			}
+		}
+	}
+
+	passRate := 1.0
+	if total > 0 {
+		passRate = float64(passed) / float64(total)
+	}
+	minPassRate := 1.0
+	if payload.MinPassRate != nil {
+		minPassRate = *payload.MinPassRate
+	}
+	regressed := total > 0 && passRate < minPassRate
+
+	s.auditAdmin(r, "governance.golden.run", "", auditJSON(map[string]any{"total": total, "passed": passed, "tag": tag, "models": models}))
+
+	body := map[string]any{
+		"total": total, "passed": passed, "failed": total - passed,
+		"pass_rate": passRate, "min_pass_rate": minPassRate,
+		"regressed": regressed, "failures": failures, "results": results,
+	}
+	status := http.StatusOK
+	if regressed && strings.TrimSpace(r.URL.Query().Get("fail_on_regression")) == "1" {
+		status = http.StatusUnprocessableEntity
+	}
+	writeJSON(w, status, body)
+}
+
 func (s *Server) handleContexts(w http.ResponseWriter, r *http.Request) {
 	if !s.authorizeAdmin(r) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
@@ -637,6 +727,15 @@ func intFromAny(value any, fallback int) int {
 		}
 	}
 	return fallback
+}
+
+func containsString(list []string, want string) bool {
+	for _, v := range list {
+		if v == want {
+			return true
+		}
+	}
+	return false
 }
 
 func normalizeModelList(models []string) []string {

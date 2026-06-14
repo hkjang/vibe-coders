@@ -1,0 +1,79 @@
+name: Golden Prompt Regression
+
+# Quality gate: before model/prompt changes merge, replay the registered golden
+# prompts through a freshly-built gateway and fail if the pass rate regresses.
+#
+# This workflow boots the gateway pointed at a mock OpenAI-compatible upstream so
+# it runs hermetically in CI. To gate against a real provider instead, set
+# UPSTREAM_BASE_URL / UPSTREAM_API_KEY secrets and seed golden prompts beforehand.
+
+on:
+  pull_request:
+    paths:
+      - 'internal/**'
+      - 'cmd/**'
+      - '.github/workflows/golden-regression.yml'
+  workflow_dispatch:
+    inputs:
+      models:
+        description: 'Comma-separated models to evaluate'
+        default: 'test-model'
+      min_pass_rate:
+        description: 'Minimum acceptable pass rate (0-1)'
+        default: '1.0'
+
+jobs:
+  golden:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+
+      - name: Build gateway
+        run: go build -o gateway ./cmd/gateway
+
+      - name: Start mock upstream
+        run: |
+          cat > mock_upstream.py <<'PY'
+          from http.server import BaseHTTPRequestHandler, HTTPServer
+          import json
+          class H(BaseHTTPRequestHandler):
+              def do_POST(self):
+                  self.send_response(200); self.send_header('Content-Type','application/json'); self.end_headers()
+                  self.wfile.write(json.dumps({"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}).encode())
+              def log_message(self, *a): pass
+          HTTPServer(('127.0.0.1', 9099), H).serve_forever()
+          PY
+          python3 mock_upstream.py &
+          echo "MOCK_PID=$!" >> "$GITHUB_ENV"
+
+      - name: Start gateway
+        env:
+          UPSTREAM_BASE_URL: http://127.0.0.1:9099
+          UPSTREAM_API_KEY: test
+          DB_DSN: ci-gateway.db
+        run: |
+          ./gateway &
+          echo "GATEWAY_PID=$!" >> "$GITHUB_ENV"
+          for i in $(seq 1 30); do curl -sf http://localhost:8080/ready && break || sleep 0.5; done
+
+      - name: Seed golden prompts
+        run: |
+          curl -sS -X POST http://localhost:8080/admin/golden-prompts \
+            -H 'Content-Type: application/json' \
+            -d '{"name":"smoke","prompt":"say ok","expected":"ok","tags":["ci"]}'
+
+      - name: Run golden regression gate
+        env:
+          GATEWAY_URL: http://localhost:8080
+        run: |
+          chmod +x scripts/golden-regression.sh
+          scripts/golden-regression.sh "${{ github.event.inputs.models || 'test-model' }}" "${{ github.event.inputs.min_pass_rate || '1.0' }}" ci
+
+      - name: Stop services
+        if: always()
+        run: |
+          kill "${GATEWAY_PID:-0}" 2>/dev/null || true
+          kill "${MOCK_PID:-0}" 2>/dev/null || true
