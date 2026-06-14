@@ -176,6 +176,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/admin/routing/decisions", s.handleRoutingDecisions)
 	mux.HandleFunc("/admin/routing/decisions/", s.handleRoutingDecisionByID)
 	mux.HandleFunc("/admin/routing/health", s.handleRoutingHealth)
+	mux.HandleFunc("/admin/providers/slo", s.handleProviderSLOs)
 	mux.HandleFunc("/admin/agents", s.handleAgents)
 	mux.HandleFunc("/admin/models/quality", s.handleModelQuality)
 	mux.HandleFunc("/admin/cost", s.handleCostGuard)

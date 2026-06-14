@@ -4708,6 +4708,7 @@ const adminHTML = `<!doctype html>
         api('/admin/audit/auth-events?limit=30').catch(() => ({ events: [] })),
       ]);
       const templates = await api('/admin/templates').catch(() => ({ templates: [], categories: [] }));
+      const slo = await api('/admin/providers/slo').catch(() => ({ slos: [], evaluations: [] }));
 
       const html =
         '<div class="grid2">' +
@@ -4739,6 +4740,7 @@ const adminHTML = `<!doctype html>
         section('라우팅 학습 추천 (Routing Learning)', routingLearningPanel(learning)) +
         section('Knowledge Cache (반복 규칙·시스템 프롬프트 중앙 등록)', knowledgePanel(knowledge.snippets || [])) +
         section('AI 코딩 작업 템플릿 (리팩터링·테스트·보안·문서화)', templatesPanel(templates.templates || [], templates.categories || [])) +
+        section('Provider SLO 관리', providerSLOPanel(slo.slos || [], slo.evaluations || [])) +
         section('데이터 보존 정책', retentionPanel(retention)) +
         section('Fallback 로그 재처리', fallbackPanel(fallback)) +
         section('관리자 변경 이력', auditPanel(audit.audit_logs || []));
@@ -4756,6 +4758,8 @@ const adminHTML = `<!doctype html>
       if (kbForm) kbForm.addEventListener('submit', addKnowledge);
       const tplForm = document.getElementById('template-form');
       if (tplForm) tplForm.addEventListener('submit', addTemplate);
+      const sloForm = document.getElementById('slo-form');
+      if (sloForm) sloForm.addEventListener('submit', addProviderSLO);
       const retentionBtn = document.getElementById('retention-run');
       if (retentionBtn) retentionBtn.addEventListener('click', runRetention);
       const fallbackBtn = document.getElementById('fallback-replay');
@@ -5097,6 +5101,59 @@ const adminHTML = `<!doctype html>
       return form + table +
         '<div class="muted" style="font-size:12px; padding:0 14px 12px">리팩터링·테스트 생성·보안 점검·문서화 등 표준 프롬프트를 중앙에서 관리합니다. <code>GET /admin/templates</code> 로 조회해 코딩 도구·스니펫에 배포하세요.</div>';
     }
+    function providerSLOPanel(slos, evaluations) {
+      const evalByProvider = {};
+      (evaluations || []).forEach(e => { evalByProvider[e.provider] = e; });
+      const form =
+        '<form class="inline-form" id="slo-form" style="grid-template-columns: minmax(110px,1fr) 100px 110px 100px 110px 70px; align-items:start;">' +
+          '<input id="slo-provider" placeholder="provider (예: openai)" required>' +
+          '<input id="slo-availability" type="number" step="0.001" min="0" max="1" placeholder="가용성 0.99">' +
+          '<input id="slo-p95" type="number" min="0" placeholder="P95 ms">' +
+          '<input id="slo-error" type="number" step="0.001" min="0" max="1" placeholder="오류율 0.02">' +
+          '<input id="slo-fallback" type="number" step="0.001" min="0" max="1" placeholder="fallback 0.05">' +
+          '<button type="submit">저장</button>' +
+        '</form>';
+      const metricCell = (m) => {
+        if (!m || !m.enforced) return '<span class="muted">—</span>';
+        const cls = m.breached ? 'error' : '';
+        return '<span class="status ' + cls + '">' + (m.actual != null ? Number(m.actual).toFixed(3) : '?') + ' / ' + Number(m.target).toFixed(3) + '</span>';
+      };
+      const rows = slos.map(s => {
+        const ev = evalByProvider[s.provider] || { metrics: {}, requests: 0, breached: false };
+        const m = ev.metrics || {};
+        return '<tr>' +
+          '<td><strong>' + escapeHTML(s.provider) + '</strong>' + (ev.breached ? ' <span class="status error">SLO 위반</span>' : (s.enabled ? ' <span class="status">정상</span>' : ' <span class="muted">비활성</span>')) + '</td>' +
+          '<td>' + metricCell(m.availability) + '</td>' +
+          '<td>' + (m.p95_latency_ms && m.p95_latency_ms.enforced ? '<span class="status ' + (m.p95_latency_ms.breached ? 'error' : '') + '">' + fmt(m.p95_latency_ms.actual) + ' / ' + fmt(m.p95_latency_ms.target) + '</span>' : '<span class="muted">—</span>') + '</td>' +
+          '<td>' + metricCell(m.error_rate) + '</td>' +
+          '<td>' + metricCell(m.fallback_rate) + '</td>' +
+          '<td data-num="' + (ev.requests || 0) + '">' + fmt(ev.requests) + '</td>' +
+          '<td><button class="danger" type="button" onclick="deleteProviderSLO(\'' + escapeAttr(s.provider) + '\')">삭제</button></td>' +
+        '</tr>';
+      }).join('');
+      const table = slos.length ?
+        '<table><thead><tr><th>Provider</th><th>가용성(현재/목표)</th><th>P95(ms)</th><th>오류율</th><th>fallback율</th><th data-sort="num">요청(1h)</th><th>동작</th></tr></thead><tbody>' + rows + '</tbody></table>'
+        : '<div class="empty">등록된 SLO 없음. provider별 가용성·P95·오류율·fallback 목표를 등록하면 최근 1시간 실측과 비교해 위반을 표시합니다.</div>';
+      return form + table;
+    }
+    async function addProviderSLO(e) {
+      e.preventDefault();
+      const body = {
+        provider: document.getElementById('slo-provider').value.trim(),
+        availability_target: Number(document.getElementById('slo-availability').value || 0),
+        p95_latency_target_ms: Number(document.getElementById('slo-p95').value || 0),
+        error_rate_target: Number(document.getElementById('slo-error').value || 0),
+        fallback_rate_target: Number(document.getElementById('slo-fallback').value || 0),
+      };
+      if (!body.provider) { alert('provider를 입력하세요'); return; }
+      await api('/admin/providers/slo', { method: 'POST', body: JSON.stringify(body) });
+      route();
+    }
+    window.deleteProviderSLO = async (provider) => {
+      if (!confirm(provider + ' SLO를 삭제하시겠습니까?')) return;
+      await api('/admin/providers/slo?provider=' + encodeURIComponent(provider), { method: 'DELETE' });
+      route();
+    };
     async function addTemplate(e) {
       e.preventDefault();
       const body = {
