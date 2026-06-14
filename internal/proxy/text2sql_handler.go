@@ -235,7 +235,14 @@ func (s *Server) handleText2SQL(w http.ResponseWriter, r *http.Request, meta sto
 		// candidate models in the background and record their validity as shadow logs
 		// (feeding only the per-model quality view, not the live KPIs). Off by default.
 		if validation.OK && len(cfg.ShadowModels) > 0 && shouldShadowSample(question, cfg.ShadowSampleRate) {
-			s.shadowEvaluate(r.Clone(context.Background()), dialect, schema, question, upstreamModel, cfg.ShadowModels, cfg.DefaultLimit, cfg.MaxLimit)
+			// Validate shadow output under the SAME policy as the live path (table
+			// allowlist, blocked + aggregate-only columns), so shadow validity rates are
+			// comparable to live quality and not inflated by a laxer check.
+			shadowOpts := text2sql.ValidateOptions{
+				DefaultLimit: cfg.DefaultLimit, MaxLimit: cfg.MaxLimit,
+				AllowedTables: allowedTables, BlockedColumns: blockedColumns, AggregateOnlyColumns: aggregateOnly,
+			}
+			s.shadowEvaluate(r.Clone(context.Background()), dialect, schema, question, upstreamModel, cfg.ShadowModels, shadowOpts)
 		}
 		finalize(previewContent(question, validation.SQL, note, validation), validation, false, 0, "", totalCost)
 		return
@@ -359,7 +366,7 @@ func shouldShadowSample(question string, rate float64) bool {
 // background and records the outcome as a shadow log (mode="shadow"), which feeds the
 // per-model quality metrics without affecting the live query KPIs. Runs in its own
 // goroutine with a detached context; the cloned request carries headers for routing.
-func (s *Server) shadowEvaluate(rc *http.Request, dialect, schema, question, primaryModel string, candidates []string, defaultLimit, maxLimit int) {
+func (s *Server) shadowEvaluate(rc *http.Request, dialect, schema, question, primaryModel string, candidates []string, opts text2sql.ValidateOptions) {
 	go func() {
 		for _, model := range candidates {
 			model = strings.TrimSpace(model)
@@ -368,10 +375,10 @@ func (s *Server) shadowEvaluate(rc *http.Request, dialect, schema, question, pri
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			started := time.Now()
-			msgs := text2sql.MessagesJSON(text2sql.BuildGenerationMessages(dialect, schema, question, defaultLimit))
+			msgs := text2sql.MessagesJSON(text2sql.BuildGenerationMessages(dialect, schema, question, opts.DefaultLimit))
 			gen := s.runGovernanceChat(ctx, rc, model, msgs)
 			genSQL := text2sql.ExtractSQL(gen.Response)
-			validation := text2sql.ValidateSQL(genSQL, text2sql.ValidateOptions{DefaultLimit: defaultLimit, MaxLimit: maxLimit})
+			validation := text2sql.ValidateSQL(genSQL, opts)
 			_ = s.db.InsertText2SQLLog(ctx, store.Text2SQLQueryLog{
 				ID: newID("t2ssh"), VirtualModel: "vibe/text2sql-shadow", UpstreamModel: model, Mode: "shadow",
 				Question: question, GeneratedSQL: genSQL, Valid: validation.OK, RejectReason: validation.Reason,

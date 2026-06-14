@@ -121,6 +121,14 @@ func TestValidateSQLAggregateOnly(t *testing.T) {
 	if r := ValidateSQL("SELECT dept, avg(salary) FROM employees GROUP BY dept", opts); !r.OK {
 		t.Errorf("aggregate use should pass: %+v", r)
 	}
+	// Nested inside an aggregate (balanced-paren body) → allowed.
+	if r := ValidateSQL("SELECT dept, sum(coalesce(salary,0)) FROM employees GROUP BY dept", opts); !r.OK {
+		t.Errorf("aggregate-only column nested in an aggregate should pass: %+v", r)
+	}
+	// Aggregate-only column in a window PARTITION BY (raw, not aggregated) → rejected.
+	if r := ValidateSQL("SELECT dept, sum(amount) OVER (PARTITION BY salary) FROM employees", opts); r.OK {
+		t.Errorf("aggregate-only column in OVER(PARTITION BY ...) should be rejected: %+v", r)
+	}
 }
 
 func TestNeedsClarification(t *testing.T) {

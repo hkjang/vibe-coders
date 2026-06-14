@@ -51,10 +51,40 @@ var (
 	fromJoin = regexp.MustCompile(`(?is)\b(?:from|join)\s+("?[a-zA-Z_][a-zA-Z0-9_]*"?(?:\."?[a-zA-Z_][a-zA-Z0-9_]*"?)*)`)
 	lineComment  = regexp.MustCompile(`--[^\n]*`)
 	blockComment = regexp.MustCompile(`(?s)/\*.*?\*/`)
-	// aggCallRe matches a single-level aggregate function call, used to detect
-	// columns that are only permitted inside an aggregate.
-	aggCallRe = regexp.MustCompile(`(?is)\b(?:count|sum|avg|min|max|stddev|variance|var_pop|var_samp)\s*\([^()]*\)`)
+	// aggFuncRe matches an aggregate function name immediately followed by its opening
+	// paren; stripAggregateBodies then removes the balanced parenthesized body so nested
+	// calls (e.g. sum(coalesce(col,0))) are fully accounted for.
+	aggFuncRe = regexp.MustCompile(`(?is)\b(?:count|sum|avg|min|max|stddev|variance|var_pop|var_samp)\s*\(`)
 )
+
+// stripAggregateBodies blanks out the (balanced-parenthesis) argument list of every
+// aggregate function call in the SQL, leaving the rest intact. Used to detect raw use
+// of aggregate-only columns: anything still present after stripping is outside an
+// aggregate. Operates on already-scrubbed SQL (string literals removed).
+func stripAggregateBodies(sql string) string {
+	b := []byte(sql)
+	locs := aggFuncRe.FindAllStringIndex(sql, -1)
+	for _, loc := range locs {
+		// loc[1]-1 is the index of the opening '('. Walk to its matching ')'.
+		open := loc[1] - 1
+		depth := 0
+		for i := open; i < len(b); i++ {
+			switch b[i] {
+			case '(':
+				depth++
+			case ')':
+				depth--
+			}
+			if i > open || b[i] != '(' {
+				b[i] = ' '
+			}
+			if depth == 0 {
+				break
+			}
+		}
+	}
+	return string(b)
+}
 
 // ValidateSQL enforces that the generated SQL is a single, read-only SELECT (or a
 // CTE that resolves to a SELECT), rejects dangerous statements/functions, optionally
@@ -111,10 +141,12 @@ func ValidateSQL(raw string, opts ValidateOptions) ValidationResult {
 		}
 	}
 	// aggregate-only columns may appear only inside an aggregate call. Strip aggregate
-	// call bodies, then any remaining occurrence is a raw (disallowed) use.
+	// call bodies (balanced parens, so nested calls like sum(coalesce(col,0)) are fully
+	// removed), then any remaining occurrence is a raw (disallowed) use. A column in a
+	// window OVER(...) clause stays raw on purpose — it is not an aggregated reference.
 	if len(opts.AggregateOnlyColumns) > 0 {
 		nonAgg := map[string]bool{}
-		for _, m := range wordRe.FindAllString(aggCallRe.ReplaceAllString(lower, " "), -1) {
+		for _, m := range wordRe.FindAllString(stripAggregateBodies(lower), -1) {
 			nonAgg[m] = true
 		}
 		for _, col := range opts.AggregateOnlyColumns {
