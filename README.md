@@ -68,6 +68,7 @@ Roo Code / Cursor / Continue 등 OpenAI 호환 API 를 호출하는 VS Code 확�
 - **재현성·권한 안전성·DW 신뢰성** (`v0.3.4`): Text2SQL 로그에 재현성 필드(`schema_name`·`schema_version`·`permission_hash`·`glossary_hash`) — 사후에 당시 스키마·권한·용어사전 상태로 SQL 생성 근거 재현. preview 캐시 키에 권한·용어사전 해시 포함 → 권한이 다른 사용자 간 SQL 재사용 방지. ClickHouse Sink에 dimension별 watermark + 실패 재처리 큐 — 실패가 유실되지 않고 `/admin/dw/sink-retry`(수동)·다음 주기(자동)로 복구, `/admin/dw/sink-status` 로 진행 상태 조회
 - **검증 정확도·결과 보호·모델 품질 평가** (`v0.3.5`): 컬럼 민감도(`mask`) 기반 컬럼 단위 결과 마스킹, 검증기 in-tree 구조 검증(괄호·따옴표 균형 → 잘린 SQL 차단), 실행 DB read-only 헬스체크(`/admin/text2sql/healthcheck`), Golden Query 결과 동등성 평가(`/admin/text2sql/golden/run?execute=1`), shadow 모델 평가(`TEXT2SQL_SHADOW_MODELS`·`TEXT2SQL_SHADOW_SAMPLE_RATE`)
 - **shadow 정책 일치·집계 검증 정확도** (`v0.3.6`): shadow 평가가 live와 동일한 검증 정책(allowlist·blocked·aggregate-only) 적용 → 모델 품질 지표 일관성, aggregate-only 판정을 중첩 괄호 균형 기반으로 고도화(`sum(coalesce(col,0))` 허용, window `OVER(PARTITION BY col)` 원시 참조 차단)
+- **운영 가시성·재현성 확장** (`v0.3.7`): 업무 용어 사전 충돌 탐지(동일 용어 복수 매핑·전역/스키마 shadowing 경고), 위험 요청 큐 자동 개선 제안(기간 조건·집계 변경·민감 컬럼 제외·LIMIT 축소), 스키마 변경 영향도 리포트(`/admin/text2sql/schema-impact`), Replay Bundle(opt-in `TEXT2SQL_REPLAY_BUNDLES` → `/admin/text2sql/replay`)
 - **운영·거버넌스 확장** (`v0.3.0`): 정책 시뮬레이터(`/admin/policies/simulate`), 모델 가격표 버전 이력(`/admin/pricing`, `/admin/pricing/seed`), 운영 리스크 스코어(`/admin/ops/risk`)·상태(`/admin/ops/status`), Provider SLO(`/admin/providers/slo`), 비용 이상탐지(`/admin/cost/anomalies`)·배부(`/admin/cost/allocation`)·팀 예산 예측(`/admin/budgets/projection`), 모델별 코딩 품질(`/admin/models/quality`), 작업 템플릿(`/admin/templates`), 프롬프트 버전 승격(`/admin/prompts/promotions`), 자동 라우팅 학습 루프(`/admin/routing/learning/auto`), DW 롤업(`/admin/dw/rollups`), Mattermost 알림(`/admin/notifications/mattermost`)
 - 호출 이력 CSV 다운로드 `/admin/export.csv` (Excel UTF-8 BOM 포함, 한국어 그대로 열림)
 - 운영용 백업 스크립트 `scripts/backup.ps1` / `scripts/backup.sh` (SQLite `.backup` + fallback ndjson + 보존 일수 적용)
@@ -601,7 +602,7 @@ curl.exe http://localhost:8080/v1/chat/completions `
 - **few-shot · 품질**: 검증된 골든 쿼리를 질문 유사도로 생성 프롬프트에 주입하고, 성공 쿼리는 골든 자동 후보로 적립. `text2sql.sql_valid`/`executed` 평가를 LLM evaluation 파이프라인으로 emit, 모델별 SQL 품질 메트릭 제공.
 - **응답 포맷**: 해석 / 생성 SQL / 결과 / 주의사항 / 실행 가능 여부 / 다음 질문 제안 섹션으로 현업 친화 구성.
 - **장기 분석**: `POST /admin/dw/clickhouse` 로 일별 rollup 을 ClickHouse HTTP 인터페이스(JSONEachRow)로 적재(`CLICKHOUSE_URL` 설정 시). dimension별 마지막 성공 watermark 와 실패 재처리 큐를 영속화 — `GET /admin/dw/sink-status` 로 진행 상태 조회, `POST /admin/dw/sink-retry`(또는 `?all=1`)로 실패분 재적재.
-- **관리**: 어드민 `Text2SQL` 탭 + `GET /admin/text2sql`(프로필·통계·로그·모델 메트릭), 스키마 카탈로그/레지스트리 `(/admin/text2sql/schemas|tables|columns|collect)`, 런타임 프로필 `(/admin/text2sql/profiles)`, 골든 쿼리 `(/admin/text2sql/golden[/run])` — `?execute=1` 시 결과 동등성 검증, 위험 요청 큐 `(/admin/text2sql/risk-queue)`, 업무 용어 사전 `(/admin/text2sql/glossary)`, 실행 DB 헬스체크 `(/admin/text2sql/healthcheck)`.
+- **관리**: 어드민 `Text2SQL` 탭 + `GET /admin/text2sql`(프로필·통계·로그·모델 메트릭), 스키마 카탈로그/레지스트리 `(/admin/text2sql/schemas|tables|columns|collect)`, 런타임 프로필 `(/admin/text2sql/profiles)`, 골든 쿼리 `(/admin/text2sql/golden[/run])` — `?execute=1` 시 결과 동등성 검증, 위험 요청 큐 `(/admin/text2sql/risk-queue` — 자동 개선 제안 포함), 업무 용어 사전 `(/admin/text2sql/glossary` — 충돌 탐지 포함), 실행 DB 헬스체크 `(/admin/text2sql/healthcheck)`, 스키마 영향도 `(/admin/text2sql/schema-impact)`, Replay Bundle `(/admin/text2sql/replay)`.
 
 | 변수 | 기본값 | 설명 |
 | --- | --- | --- |
@@ -627,6 +628,7 @@ curl.exe http://localhost:8080/v1/chat/completions `
 | `TEXT2SQL_WORK_MEM` | 없음 | (postgres) 실행 시 SET LOCAL work_mem |
 | `TEXT2SQL_SHADOW_MODELS` | 없음 | shadow 평가 후보 업스트림 모델(콤마) |
 | `TEXT2SQL_SHADOW_SAMPLE_RATE` | `0` | preview shadow 평가 샘플링 비율(0~1) |
+| `TEXT2SQL_REPLAY_BUNDLES` | `false` | 질의별 생성 컨텍스트(프롬프트·스키마·용어·권한) 저장(감사/재현) |
 
 ## MCP Gateway (프로토콜 집약 게이트웨이)
 

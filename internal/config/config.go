@@ -123,6 +123,7 @@ type Text2SQLConfig struct {
 	WorkMem           string        // (postgres execute) SET LOCAL work_mem, e.g. "64MB"
 	ShadowModels      []string      // candidate upstream models to shadow-evaluate on preview (quality data)
 	ShadowSampleRate  float64       // 0..1 fraction of eligible preview requests to shadow-evaluate
+	ReplayBundles     bool          // persist full generation context (prompt/schema/glossary/permissions) per query for audit/replay
 }
 
 // ClickHouseConfig configures the long-term analytics sink. When URL is empty the
@@ -243,6 +244,7 @@ func Load() (Config, error) {
 			WorkMem:           os.Getenv("TEXT2SQL_WORK_MEM"),
 			ShadowModels:      csvEnv("TEXT2SQL_SHADOW_MODELS"),
 			ShadowSampleRate:  floatEnv("TEXT2SQL_SHADOW_SAMPLE_RATE", 0),
+			ReplayBundles:     boolEnv("TEXT2SQL_REPLAY_BUNDLES", false),
 		},
 		ClickHouse: ClickHouseConfig{
 			URL:          strings.TrimRight(os.Getenv("CLICKHOUSE_URL"), "/"),

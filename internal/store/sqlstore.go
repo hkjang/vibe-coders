@@ -652,6 +652,19 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 				first_failed_at TEXT,
 				last_attempt_at TEXT
 			)`,
+		`CREATE TABLE IF NOT EXISTS text2sql_replay_bundles (
+				id TEXT PRIMARY KEY,
+				request_id TEXT,
+				schema_name TEXT,
+				schema_version INTEGER NOT NULL DEFAULT 0,
+				system_prompt TEXT,
+				schema_context TEXT,
+				glossary_text TEXT,
+				permission_snapshot TEXT,
+				generated_sql TEXT,
+				created_at TEXT NOT NULL
+			)`,
+		`CREATE INDEX IF NOT EXISTS idx_text2sql_replay_request ON text2sql_replay_bundles(request_id)`,
 		`CREATE TABLE IF NOT EXISTS model_pricing_versions (
 				id TEXT PRIMARY KEY,
 				model TEXT NOT NULL,

@@ -223,7 +223,100 @@ func (s *Server) handleText2SQLRiskQueue(w http.ResponseWriter, r *http.Request)
 		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "risk_queue_failed")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"queue": logs, "count": len(logs)})
+	// Attach actionable fix suggestions per entry so operators get next steps, not just
+	// a block reason.
+	queue := make([]map[string]any, 0, len(logs))
+	for _, l := range logs {
+		queue = append(queue, map[string]any{"log": l, "suggestions": suggestText2SQLFixes(l)})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"queue": queue, "count": len(queue)})
+}
+
+// suggestText2SQLFixes derives operator-facing remediation hints from a risky/failed
+// Text2SQL log: what to change in the question (date filter, aggregation, dropping a
+// sensitive column, tightening LIMIT) to get a safe, valid query.
+func suggestText2SQLFixes(l store.Text2SQLQueryLog) []string {
+	out := []string{}
+	reason := strings.ToLower(l.RejectReason + " " + l.Error)
+	switch l.FailureCategory {
+	case "permission_denied":
+		out = append(out, "민감 컬럼/비허용 테이블을 질문에서 제외하거나 권한 부여를 요청하세요.")
+	case "cost_exceeded":
+		out = append(out, "조회 범위를 좁히는 기간/필터 조건을 추가하세요.", "원시 행 대신 집계(GROUP BY)로 변경을 고려하세요.")
+	case "timeout":
+		out = append(out, "기간 조건을 추가하고 LIMIT을 축소하세요.")
+	case "unknown_column":
+		out = append(out, "스키마 카탈로그의 실제 컬럼명을 확인해 질문을 수정하세요.")
+	case "empty_result":
+		out = append(out, "조건이 과도하게 제한적입니다 — 필터를 완화하세요.")
+	case "clarification":
+		out = append(out, "기간·대상 등 누락된 조건을 명시해 다시 질문하세요.")
+	}
+	if strings.Contains(reason, "aggregate-only") {
+		out = append(out, "해당 컬럼은 원시 조회가 불가합니다 — 집계 함수(sum/avg/count 등) 안에서 사용하세요.")
+	}
+	if strings.Contains(reason, "sensitive column") {
+		out = append(out, "민감 컬럼을 SELECT 목록에서 제거하세요.")
+	}
+	if strings.Contains(reason, "exceeds max") || strings.Contains(reason, "limit") {
+		out = append(out, "명시 LIMIT을 허용 상한 이하로 축소하세요.")
+	}
+	if l.ExplainRisk >= 70 {
+		out = append(out, "EXPLAIN 위험이 높습니다 — 인덱스 가능한 조건 추가 또는 결과 범위 축소를 검토하세요.")
+	}
+	if len(out) == 0 && !l.Valid {
+		out = append(out, "질문을 더 구체적으로 작성하거나 대상 테이블/기간을 명시하세요.")
+	}
+	return out
+}
+
+// handleText2SQLSchemaImpact reports what depends on a schema (golden queries, cache,
+// glossary, permissions) — the blast radius of a schema version change.
+// GET /admin/text2sql/schema-impact?schema=NAME
+func (s *Server) handleText2SQLSchemaImpact(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	schema := strings.TrimSpace(r.URL.Query().Get("schema"))
+	if schema == "" {
+		writeOpenAIError(w, http.StatusBadRequest, "schema query param is required", "invalid_request_error", "missing_schema")
+		return
+	}
+	rep, err := s.db.Text2SQLSchemaImpact(r.Context(), schema)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "schema_impact_failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, rep)
+}
+
+// handleText2SQLReplay returns the stored replay bundle (full generation context) for a
+// query, by query log ID or request ID. Available only when replay bundles are enabled.
+// GET /admin/text2sql/replay?id=... (or ?request_id=...)
+func (s *Server) handleText2SQLReplay(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	key := strings.TrimSpace(r.URL.Query().Get("id"))
+	if key == "" {
+		key = strings.TrimSpace(r.URL.Query().Get("request_id"))
+	}
+	if key == "" {
+		writeOpenAIError(w, http.StatusBadRequest, "id or request_id is required", "invalid_request_error", "missing_id")
+		return
+	}
+	bundle, found, err := s.db.GetText2SQLReplayBundle(r.Context(), key)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "replay_failed")
+		return
+	}
+	if !found {
+		writeJSON(w, http.StatusNotFound, map[string]any{"found": false, "enabled": s.cfg.Text2SQL.ReplayBundles, "detail": "no replay bundle for this id (enable TEXT2SQL_REPLAY_BUNDLES to capture)"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"found": true, "bundle": bundle})
 }
 
 // handleText2SQLGlossary manages the business-term glossary.
@@ -235,12 +328,14 @@ func (s *Server) handleText2SQLGlossary(w http.ResponseWriter, r *http.Request) 
 	}
 	switch r.Method {
 	case http.MethodGet:
-		terms, err := s.db.ListText2SQLBusinessTerms(r.Context(), strings.TrimSpace(r.URL.Query().Get("schema")))
+		schema := strings.TrimSpace(r.URL.Query().Get("schema"))
+		terms, err := s.db.ListText2SQLBusinessTerms(r.Context(), schema)
 		if err != nil {
 			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "glossary_failed")
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"terms": terms})
+		conflicts, _ := s.db.DetectGlossaryConflicts(r.Context(), schema)
+		writeJSON(w, http.StatusOK, map[string]any{"terms": terms, "conflicts": conflicts})
 	case http.MethodPost:
 		var p struct{ SchemaName, Term, Mapping, Description string }
 		if err := json.NewDecoder(r.Body).Decode(&p); err != nil {

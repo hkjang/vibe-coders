@@ -120,6 +120,10 @@ func (s *Server) handleText2SQL(w http.ResponseWriter, r *http.Request, meta sto
 		Question: question, SchemaName: resolvedSchemaName, SchemaVersion: schemaVersion,
 		PermissionHash: permissionHash, GlossaryHash: glossaryHash, CreatedAt: time.Now().UTC(),
 	}
+
+	// generationPrompt captures the exact messages JSON sent upstream for replay bundles
+	// (set once the prompt is assembled). Empty for cache hits / clarifications.
+	generationPrompt := ""
 	if authCtx != nil {
 		logRec.Team = authCtx.TeamID
 	}
@@ -136,6 +140,20 @@ func (s *Server) handleText2SQL(w http.ResponseWriter, r *http.Request, meta sto
 		logRec.CostKRW = costKRW
 		logRec.LatencyMS = time.Since(start).Milliseconds()
 		_ = s.db.InsertText2SQLLog(r.Context(), logRec)
+
+		// Replay bundle (opt-in): persist the full generation context so an operator can
+		// reproduce/explain this SQL later, beyond the hashes on the log row.
+		if cfg.ReplayBundles && generationPrompt != "" {
+			snapshot, _ := json.Marshal(map[string][]string{
+				"allowed_tables": allowedTables, "blocked_columns": blockedColumns,
+				"aggregate_only": aggregateOnly, "mask_columns": maskColumns,
+			})
+			_ = s.db.PutText2SQLReplayBundle(r.Context(), store.Text2SQLReplayBundle{
+				ID: logRec.ID, RequestID: logRec.RequestID, SchemaName: resolvedSchemaName, SchemaVersion: schemaVersion,
+				SystemPrompt: generationPrompt, SchemaContext: schema, GlossaryText: glossaryText,
+				PermissionSnapshot: string(snapshot), GeneratedSQL: validation.SQL,
+			})
+		}
 
 		meta.Request.TaskType = "text2sql"
 		meta.Request.RouteReason = "text2sql"
@@ -204,7 +222,8 @@ func (s *Server) handleText2SQL(w http.ResponseWriter, r *http.Request, meta sto
 		}
 		msgs = text2sql.WithExamples(msgs, text2sql.SelectExamples(examples, question, 3))
 	}
-	gen := s.runGovernanceChat(r.Context(), r, upstreamModel, text2sql.MessagesJSON(msgs))
+	generationPrompt = text2sql.MessagesJSON(msgs)
+	gen := s.runGovernanceChat(r.Context(), r, upstreamModel, generationPrompt)
 	totalCost := gen.CostKRW
 	if gen.Error != "" {
 		finalize("SQL 생성 업스트림 호출 실패: "+gen.Error, text2sql.ValidationResult{Reason: "upstream error"}, false, 0, gen.Error, totalCost)

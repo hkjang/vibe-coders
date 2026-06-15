@@ -177,6 +177,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/admin/text2sql/glossary", s.handleText2SQLGlossary)
 	mux.HandleFunc("/admin/text2sql/risk-queue", s.handleText2SQLRiskQueue)
 	mux.HandleFunc("/admin/text2sql/healthcheck", s.handleText2SQLHealthcheck)
+	mux.HandleFunc("/admin/text2sql/schema-impact", s.handleText2SQLSchemaImpact)
+	mux.HandleFunc("/admin/text2sql/replay", s.handleText2SQLReplay)
 	mux.HandleFunc("/admin/text2sql/golden", s.handleText2SQLGolden)
 	mux.HandleFunc("/admin/text2sql/golden/", s.handleText2SQLGolden)
 	mux.HandleFunc("/admin/export.csv", s.handleExportCSV)

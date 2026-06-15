@@ -68,6 +68,42 @@ func TestClassifyText2SQLFailure(t *testing.T) {
 	}
 }
 
+func TestSuggestText2SQLFixes(t *testing.T) {
+	hasSubstr := func(list []string, sub string) bool {
+		for _, s := range list {
+			if containsP2(s, sub) {
+				return true
+			}
+		}
+		return false
+	}
+	// Cost-exceeded → suggests narrowing range and aggregation.
+	if s := suggestText2SQLFixes(store.Text2SQLQueryLog{FailureCategory: "cost_exceeded", Valid: true}); !hasSubstr(s, "기간") || !hasSubstr(s, "집계") {
+		t.Errorf("cost_exceeded suggestions weak: %v", s)
+	}
+	// Aggregate-only reject → suggests aggregate usage.
+	if s := suggestText2SQLFixes(store.Text2SQLQueryLog{RejectReason: "aggregate-only column used outside an aggregate: salary"}); !hasSubstr(s, "집계 함수") {
+		t.Errorf("aggregate-only suggestion missing: %v", s)
+	}
+	// High EXPLAIN risk → suggests index/range.
+	if s := suggestText2SQLFixes(store.Text2SQLQueryLog{Valid: true, ExplainRisk: 85}); !hasSubstr(s, "EXPLAIN") {
+		t.Errorf("high-risk suggestion missing: %v", s)
+	}
+	// A clean valid query with nothing wrong → no false suggestions.
+	if s := suggestText2SQLFixes(store.Text2SQLQueryLog{Valid: true}); len(s) != 0 {
+		t.Errorf("clean query should yield no suggestions: %v", s)
+	}
+}
+
+func containsP2(s, sub string) bool {
+	for i := 0; i+len(sub) <= len(s); i++ {
+		if s[i:i+len(sub)] == sub {
+			return true
+		}
+	}
+	return false
+}
+
 func TestShouldShadowSample(t *testing.T) {
 	if shouldShadowSample("q", 0) {
 		t.Error("rate 0 should never sample")

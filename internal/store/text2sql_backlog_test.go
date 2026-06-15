@@ -138,6 +138,89 @@ func TestRiskyText2SQLLogs(t *testing.T) {
 	}
 }
 
+func TestDetectGlossaryConflicts(t *testing.T) {
+	db := openAggTestStore(t)
+	defer db.Close()
+	ctx := context.Background()
+
+	// Same term, two different mappings in the same schema → duplicate_mapping.
+	_ = db.UpsertText2SQLBusinessTerm(ctx, Text2SQLBusinessTerm{ID: "c1", SchemaName: "global", Term: "활성", Mapping: "status='active'"})
+	_ = db.UpsertText2SQLBusinessTerm(ctx, Text2SQLBusinessTerm{ID: "c2", SchemaName: "global", Term: "활성", Mapping: "is_active=1"})
+	// A clean term with one mapping → no conflict.
+	_ = db.UpsertText2SQLBusinessTerm(ctx, Text2SQLBusinessTerm{ID: "c3", SchemaName: "global", Term: "상담", Mapping: "tickets"})
+	// A schema-specific term shadowing a global one with a different mapping → shadowed.
+	_ = db.UpsertText2SQLBusinessTerm(ctx, Text2SQLBusinessTerm{ID: "c4", Term: "매출", Mapping: "revenue"})            // global "*"
+	_ = db.UpsertText2SQLBusinessTerm(ctx, Text2SQLBusinessTerm{ID: "c5", SchemaName: "global", Term: "매출", Mapping: "sales"})
+
+	conflicts, err := db.DetectGlossaryConflicts(ctx, "global")
+	if err != nil {
+		t.Fatal(err)
+	}
+	byTerm := map[string]Text2SQLGlossaryConflict{}
+	for _, c := range conflicts {
+		byTerm[c.Term] = c
+	}
+	if c, ok := byTerm["활성"]; !ok || c.Kind != "duplicate_mapping" || len(c.Mappings) != 2 {
+		t.Errorf("활성 should be a duplicate_mapping conflict: %+v", c)
+	}
+	if _, ok := byTerm["상담"]; ok {
+		t.Error("상담 has a single mapping and must not be a conflict")
+	}
+	if c, ok := byTerm["매출"]; !ok || c.Kind != "shadowed" {
+		t.Errorf("매출 should be a shadowed conflict: %+v", c)
+	}
+}
+
+func TestText2SQLReplayBundle(t *testing.T) {
+	db := openAggTestStore(t)
+	defer db.Close()
+	ctx := context.Background()
+
+	if _, found, _ := db.GetText2SQLReplayBundle(ctx, "missing"); found {
+		t.Fatal("expected no bundle before put")
+	}
+	b := Text2SQLReplayBundle{
+		ID: "t2s_1", RequestID: "req_1", SchemaName: "global", SchemaVersion: 3,
+		SystemPrompt: `[{"role":"system"}]`, SchemaContext: "t(x)", GlossaryText: "상담 → tickets",
+		PermissionSnapshot: `{"allowed_tables":["t"]}`, GeneratedSQL: "SELECT 1",
+	}
+	if err := db.PutText2SQLReplayBundle(ctx, b); err != nil {
+		t.Fatal(err)
+	}
+	// Fetch by id and by request id.
+	for _, key := range []string{"t2s_1", "req_1"} {
+		got, found, err := db.GetText2SQLReplayBundle(ctx, key)
+		if err != nil || !found {
+			t.Fatalf("expected bundle for %q: found=%v err=%v", key, found, err)
+		}
+		if got.SchemaVersion != 3 || got.GeneratedSQL != "SELECT 1" || got.GlossaryText != "상담 → tickets" {
+			t.Errorf("bundle mismatch for %q: %+v", key, got)
+		}
+	}
+}
+
+func TestText2SQLSchemaImpact(t *testing.T) {
+	db := openAggTestStore(t)
+	defer db.Close()
+	ctx := context.Background()
+
+	_ = db.UpsertText2SQLSchema(ctx, Text2SQLSchema{Name: "analytics", SchemaText: "t(x)", Enabled: true})
+	_ = db.UpsertText2SQLBusinessTerm(ctx, Text2SQLBusinessTerm{ID: "g1", SchemaName: "analytics", Term: "매출", Mapping: "revenue"})
+	_ = db.UpsertText2SQLBusinessTerm(ctx, Text2SQLBusinessTerm{ID: "g2", Term: "공통", Mapping: "x"}) // global "*"
+	_ = db.PutText2SQLCache(ctx, Text2SQLCacheKey("q", "analytics", "preview", 1, "", ""), "analytics", "preview", "SELECT 1", time.Hour)
+
+	rep, err := db.Text2SQLSchemaImpact(ctx, "analytics")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.GlossaryTerms != 2 { // schema-specific + global wildcard
+		t.Errorf("expected 2 glossary terms in impact, got %d", rep.GlossaryTerms)
+	}
+	if rep.CacheEntries != 1 {
+		t.Errorf("expected 1 cache entry in impact, got %d", rep.CacheEntries)
+	}
+}
+
 func containsStore(s, sub string) bool {
 	for i := 0; i+len(sub) <= len(s); i++ {
 		if s[i:i+len(sub)] == sub {

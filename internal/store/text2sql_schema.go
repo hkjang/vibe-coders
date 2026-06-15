@@ -24,6 +24,36 @@ type Text2SQLSchema struct {
 	UpdatedAt         string   `json:"updated_at"`
 }
 
+// Text2SQLSchemaImpactReport summarizes what depends on a schema, so an operator can
+// see the blast radius of a schema change (version bump) before/after it happens.
+type Text2SQLSchemaImpactReport struct {
+	SchemaName    string `json:"schema_name"`
+	Version       int    `json:"version"`
+	GoldenQueries int64  `json:"golden_queries"`
+	CacheEntries  int64  `json:"cache_entries"`
+	GlossaryTerms int64  `json:"glossary_terms"`
+	Permissions   int64  `json:"permissions"`
+}
+
+// Text2SQLSchemaImpact counts the golden queries, cache entries, glossary terms, and
+// permission rules tied to a schema — the blast radius of a schema version change.
+func (s *SQLStore) Text2SQLSchemaImpact(ctx context.Context, schemaName string) (Text2SQLSchemaImpactReport, error) {
+	rep := Text2SQLSchemaImpactReport{SchemaName: schemaName}
+	if sc, found, err := s.ResolveText2SQLSchema(ctx, schemaName, ""); err == nil && found {
+		rep.Version = sc.Version
+	}
+	count := func(query string, args ...any) int64 {
+		var n int64
+		_ = s.db.QueryRowContext(ctx, s.bind(query), args...).Scan(&n)
+		return n
+	}
+	rep.GoldenQueries = count(`SELECT COUNT(*) FROM text2sql_golden_queries WHERE schema_name = ?`, schemaName)
+	rep.CacheEntries = count(`SELECT COUNT(*) FROM text2sql_cache WHERE schema_name = ?`, schemaName)
+	rep.GlossaryTerms = count(`SELECT COUNT(*) FROM text2sql_business_terms WHERE schema_name = ? OR schema_name = '*'`, schemaName)
+	rep.Permissions = count(`SELECT COUNT(*) FROM text2sql_permissions WHERE schema_name = ? OR schema_name = '*'`, schemaName)
+	return rep, nil
+}
+
 func (s *SQLStore) ListText2SQLSchemas(ctx context.Context) ([]Text2SQLSchema, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT name, COALESCE(team,''), COALESCE(dialect,''), schema_text, COALESCE(allowed_tables,''), is_default, enabled,
 		COALESCE(version,1), COALESCE(collected_at,''), COALESCE(source_fingerprint,''), updated_at

@@ -4878,7 +4878,13 @@ const adminHTML = `<!doctype html>
         '<table><thead><tr><th>이름</th><th>질문</th><th>기대 SQL</th><th>동작</th></tr></thead><tbody>' + goldenRows + '</tbody></table>'
         : '<div class="empty">Golden Query 없음. 등록하면 생성 프롬프트에 few-shot 예시로 주입되고, 회귀 검증에 사용됩니다.</div>';
       const goldenRun = '<div class="toolbar" style="border-bottom:0"><button type="button" id="t2s-golden-run">회귀 검증 실행</button><span class="muted" id="t2s-golden-run-result"></span></div>';
-      const glossary = (await api('/admin/text2sql/glossary').catch(() => ({ terms: [] }))).terms || [];
+      const glossaryResp = await api('/admin/text2sql/glossary').catch(() => ({ terms: [], conflicts: [] }));
+      const glossary = glossaryResp.terms || [];
+      const glossConflicts = glossaryResp.conflicts || [];
+      const glossConflictBanner = glossConflicts.length
+        ? '<div class="status error" style="display:block;margin:0 14px 10px;padding:8px 10px">⚠ 용어 충돌 ' + glossConflicts.length + '건: ' +
+          glossConflicts.map(c => escapeHTML(c.term) + ' (' + escapeHTML(c.kind) + ' → ' + escapeHTML((c.mappings || []).join(' | ')) + ')').join('; ') + '</div>'
+        : '';
       const glossForm =
         '<form class="inline-form" id="t2s-gloss-form" style="grid-template-columns: 130px 150px minmax(200px,2fr) minmax(140px,1fr) 70px; align-items:start;">' +
           '<input id="tgl-schema" placeholder="스키마명(빈칸=전역)">' +
@@ -4899,8 +4905,10 @@ const adminHTML = `<!doctype html>
         : '<div class="empty">업무 용어 사전 없음. 등록하면 사용자가 업무 언어로 질문할 때 매핑이 프롬프트에 주입됩니다.</div>';
       const riskData = await api('/admin/text2sql/risk-queue?window=7d&min_risk=50').catch(() => ({ queue: [] }));
       const riskQ = riskData.queue || [];
-      const riskRows = riskQ.map(l =>
-        '<tr class="' + (l.valid ? '' : 'row-error') + '">' +
+      const riskRows = riskQ.map(e => {
+        const l = e.log || e;
+        const sugg = (e.suggestions || []);
+        return '<tr class="' + (l.valid ? '' : 'row-error') + '">' +
           '<td>' + ago(l.created_at) + '</td>' +
           '<td>' + escapeHTML(l.team || '-') + '<div class="muted">' + escapeHTML(l.upstream_model || '') + '</div></td>' +
           '<td>' + escapeHTML(l.schema_name || '-') + (l.schema_version ? '<div class="muted">v' + l.schema_version + (l.permission_hash ? ' · perm ' + escapeHTML(l.permission_hash) : '') + '</div>' : '') + '</td>' +
@@ -4908,11 +4916,11 @@ const adminHTML = `<!doctype html>
           '<td>' + (l.valid ? '<span class="status">유효</span>' : '<span class="status error">' + escapeHTML(l.reject_reason || '거부') + '</span>') + '</td>' +
           '<td>' + (l.failure_category ? '<span class="status error">' + escapeHTML(l.failure_category) + '</span>' : '-') + '</td>' +
           '<td data-num="' + (l.explain_risk || 0) + '">' + (l.explain_risk ? '<span class="status ' + (l.explain_risk >= 70 ? 'error' : 'warn') + '">' + l.explain_risk + '</span>' : '-') + '</td>' +
-          '<td><code style="font-size:11px">' + escapeHTML((l.generated_sql || '').slice(0, 100)) + '</code></td>' +
-        '</tr>'
-      ).join('');
+          '<td>' + (sugg.length ? '<ul style="margin:0;padding-left:16px">' + sugg.map(s => '<li>' + escapeHTML(s) + '</li>').join('') + '</ul>' : '<span class="muted">-</span>') + '</td>' +
+        '</tr>';
+      }).join('');
       const riskTable = riskQ.length ?
-        '<table><thead><tr><th>시각</th><th>팀</th><th>스키마(버전)</th><th>질문</th><th>검증</th><th>실패분류</th><th data-sort="num">EXPLAIN 위험</th><th>생성 SQL</th></tr></thead><tbody>' + riskRows + '</tbody></table>'
+        '<table><thead><tr><th>시각</th><th>팀</th><th>스키마(버전)</th><th>질문</th><th>검증</th><th>실패분류</th><th data-sort="num">EXPLAIN 위험</th><th>개선 제안</th></tr></thead><tbody>' + riskRows + '</tbody></table>'
         : '<div class="empty">최근 7일 위험 요청 없음 (거부 · 고위험 EXPLAIN · 실패 분류 대상).</div>';
       document.getElementById('view').innerHTML =
         '<section><h2>Text2SQL</h2><div style="padding:0 14px 8px" class="muted">자연어 질문을 읽기 전용 SQL로 변환합니다. 사용자는 <code>vibe/text2sql-*</code> 가상 모델을 호출하고, 게이트웨이가 내부적으로 실제 업스트림 모델을 선택해 SQL을 생성·검증·(선택)실행합니다.</div></section>' +
@@ -4925,7 +4933,7 @@ const adminHTML = `<!doctype html>
         section('권한 매트릭스 (subject × schema/table/column)', permForm + permTable) +
         section('실패 원인 분류 (최근 7일)', failTable) +
         section('관리자 위험 요청 큐 (거부 · 고위험 EXPLAIN · 실패)', riskTable) +
-        section('업무 용어 사전 (자연어 → SQL 매핑)', glossForm + glossTable) +
+        section('업무 용어 사전 (자연어 → SQL 매핑)', glossConflictBanner + glossForm + glossTable) +
         section('Golden Query (few-shot · 회귀)', goldenRun + goldenForm + goldenTable) +
         section('최근 Text2SQL 질의', logTable);
       const sf = document.getElementById('t2s-schema-form');
