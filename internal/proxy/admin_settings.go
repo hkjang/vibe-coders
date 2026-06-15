@@ -165,6 +165,71 @@ func buildSettingRegistry() []settingDef {
 	}
 }
 
+// settingDescriptions maps each setting key to a short Korean help string shown under the key
+// in the admin UI. Kept separate from the registry so the registry stays terse.
+var settingDescriptions = map[string]string{
+	// ClickHouse
+	"clickhouse.url":                 "ClickHouse HTTP 엔드포인트 URL. 비우면 DW 적재 비활성. 변경 시 sink 워커 재시작.",
+	"clickhouse.database":            "적재 대상 데이터베이스 이름.",
+	"clickhouse.table":               "일별 rollup 적재 테이블 이름.",
+	"clickhouse.user":                "ClickHouse 접속 계정.",
+	"clickhouse.password":            "ClickHouse 접속 비밀번호. 암호화 저장·마스킹.",
+	"clickhouse.sink_interval":       "자동 적재 주기(예: 1h). 변경 시 sink 워커 재시작.",
+	"clickhouse.sink_days":           "적재 시 조회할 최근 일수(증분 watermark 기준 백필 범위).",
+	"clickhouse.text2sql_fact_table": "Text2SQL 질의 단위 fact 테이블 이름. 지정 시 질의별 상세 적재(질문 원문 제외).",
+	// Text2SQL
+	"text2sql.enabled":             "Text2SQL 가상 모델(자연어→읽기전용 SQL) 기능 전체 on/off.",
+	"text2sql.preview_model":       "preview(미실행 SQL 생성) 모드에 사용할 업스트림 모델.",
+	"text2sql.execute_model":       "execute(실행 포함) 모드의 SQL 생성 모델.",
+	"text2sql.accurate_model":      "정확도 우선 승격 시 사용할 모델(기본 모델 유효율 저하 시).",
+	"text2sql.local_model":         "로컬/저비용 경로용 모델.",
+	"text2sql.summary_model":       "결과 요약·자연어 설명 생성 모델.",
+	"text2sql.dialect":             "생성 SQL 방언(예: PostgreSQL, MySQL).",
+	"text2sql.default_limit":       "SQL에 자동 주입할 기본 LIMIT 행 수.",
+	"text2sql.max_limit":           "허용 최대 LIMIT(초과 시 강제 축소). default_limit ≤ max_limit 이어야 함.",
+	"text2sql.max_explain_cost":    "EXPLAIN 추정 비용 상한. 초과 시 위험 처리(차단/경고).",
+	"text2sql.mask_results":        "실행 결과의 민감 컬럼 마스킹 여부.",
+	"text2sql.exec_driver":         "실행 DB 드라이버(postgres/mysql/sqlite). 변경 시 커넥션 재오픈.",
+	"text2sql.exec_dsn":            "실행 DB 접속 DSN. read-only 계정 권장. 암호화 저장·마스킹, 변경 시 재오픈.",
+	"text2sql.cache_enabled":       "preview 결과 캐시 사용 여부.",
+	"text2sql.cache_ttl":           "preview 캐시 보존 시간(예: 10m).",
+	"text2sql.clarify_enabled":     "모호한 질문에 재질문(clarification) 게이트 사용.",
+	"text2sql.require_date_filter": "기간 필터가 없는 질문을 차단/재질문.",
+	"text2sql.statement_timeout":   "실행 SQL의 statement timeout(예: 15s).",
+	"text2sql.work_mem":            "실행 세션 work_mem(예: 64MB).",
+	"text2sql.shadow_models":       "shadow 평가용 후보 모델(CSV). 비동기 재생성으로 라이브 KPI 비오염.",
+	"text2sql.shadow_sample_rate":  "shadow 평가 샘플 비율(0~1).",
+	"text2sql.replay_bundles":      "질의 사후 재현용 Replay Bundle 저장 on/off.",
+	"text2sql.daily_risk_limit":    "API Key 일일 위험 요청 차단 한도(초과 시 SQL 생성 전 차단).",
+	"text2sql.daily_risk_warn":     "일일 위험 요청 경고 임계값(차단 한도 미만 경고 구간).",
+	"text2sql.twin_driver":         "Twin(마스킹·샘플) DB 드라이버. 변경 시 커넥션 재오픈.",
+	"text2sql.twin_dsn":            "Twin DB DSN. 골든 결과 동등성 검증용. 암호화 저장·마스킹, 변경 시 재오픈.",
+	// Carbon
+	"carbon.wh_per_1k_tokens": "토큰 1K당 기본 전력(Wh). 탄소 점수 계산 계수.",
+	"carbon.pue":              "데이터센터 PUE(전력 사용 효율). 전력 환산 배수.",
+	"carbon.grid_intensity_g": "전력망 탄소 강도(gCO2e/kWh).",
+	// Insurance
+	"insurance.sla_target": "SLA 목표 성공률(0~1, 예: 0.99).",
+	"insurance.fast_burn":  "fast burn 임계 배수(즉시 page 경보 기준).",
+	"insurance.slow_burn":  "slow burn 임계 배수(ticket 경보 기준).",
+	// Cache
+	"cache.embedding_enabled":            "임베딩 응답 캐시 on/off.",
+	"cache.embedding_ttl":                "임베딩 캐시 보존 시간.",
+	"cache.embedding_max_bytes":          "임베딩 캐시 항목 최대 바이트.",
+	"cache.chat_enabled":                 "chat 정확 캐시(temperature 0/seed 고정) on/off.",
+	"cache.chat_ttl":                     "chat 캐시 보존 시간.",
+	"cache.chat_semantic_enabled":        "의미(임베딩) 유사도 기반 chat 근사 캐시 on/off.",
+	"cache.chat_semantic_model":          "시맨틱 캐시용 임베딩 모델.",
+	"cache.chat_semantic_threshold":      "시맨틱 캐시 적중 코사인 유사도 임계값(0~1).",
+	"cache.chat_semantic_max_candidates": "시맨틱 비교 후보 최대 개수.",
+	// Retention
+	"retention.request_days":         "요청 로그 보존 일수.",
+	"retention.prompt_days":          "프롬프트 본문 보존 일수.",
+	"retention.response_days":        "응답 본문 보존 일수.",
+	"retention.text2sql_replay_days": "Text2SQL Replay Bundle 보존 일수.",
+	"retention.interval":             "보존 정리 워커 실행 주기(예: 6h). 변경 시 ticker 재생성.",
+}
+
 // t2sConf returns the effective Text2SQL config (admin-settings overlay over env/default).
 func (s *Server) t2sConf() config.Text2SQLConfig {
 	if p := s.t2sRuntime.Load(); p != nil {
@@ -521,6 +586,7 @@ func (s *Server) settingView(stored map[string]store.AdminSetting, d settingDef)
 	view := map[string]any{
 		"key": d.Key, "category": d.Category, "type": string(d.Type),
 		"is_secret": d.Secret, "restart_required": d.Restart, "source": source,
+		"description": settingDescriptions[d.Key],
 	}
 	if a, ok := stored[d.Key]; ok {
 		view["version"] = a.Version

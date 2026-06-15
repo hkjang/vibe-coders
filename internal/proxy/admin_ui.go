@@ -5021,7 +5021,8 @@ const adminHTML = `<!doctype html>
             ? '<button class="secondary" type="button" onclick="revertSetting(\'' + s.key + '\')">기본값</button> ' +
               (s.is_secret ? '' : '<button class="secondary" type="button" onclick="rollbackSetting(\'' + s.key + '\')">롤백</button> ')
             : '';
-          html += '<tr><td>' + escapeHTML(s.key) + '</td><td>' + editor + '</td>' +
+          const desc = s.description ? '<div class="muted" style="font-size:11px;margin-top:2px;max-width:320px;white-space:normal;line-height:1.4">' + escapeHTML(s.description) + '</div>' : '';
+          html += '<tr><td><code>' + escapeHTML(s.key) + '</code>' + desc + '</td><td>' + editor + '</td>' +
             '<td><span class="status ' + (s.source === 'admin' ? '' : '') + '">' + escapeHTML(s.source) + '</span>' + ver + '</td>' +
             '<td>' + restart + '</td><td>' +
               '<button type="button" onclick="saveSetting(\'' + s.key + '\',\'' + id + '\',' + (s.is_secret ? 'true' : 'false') + ')">저장</button> ' +
