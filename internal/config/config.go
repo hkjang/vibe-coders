@@ -59,10 +59,11 @@ type LoggingConfig struct {
 }
 
 type RetentionConfig struct {
-	RequestDays  int
-	PromptDays   int
-	ResponseDays int
-	Interval     time.Duration
+	RequestDays        int
+	PromptDays         int
+	ResponseDays       int
+	Text2SQLReplayDays int // retention for Text2SQL replay bundles (audit artifacts)
+	Interval           time.Duration
 }
 
 type CacheConfig struct {
@@ -184,10 +185,11 @@ func Load() (Config, error) {
 			FallbackPath:     getEnv("LOG_FALLBACK_PATH", filepath.Join("data", "fallback.ndjson")),
 		},
 		Retention: RetentionConfig{
-			RequestDays:  intEnv("RETENTION_REQUEST_DAYS", 90),
-			PromptDays:   intEnv("RETENTION_PROMPT_DAYS", 30),
-			ResponseDays: intEnv("RETENTION_RESPONSE_DAYS", 30),
-			Interval:     durationEnv("RETENTION_INTERVAL", time.Hour),
+			RequestDays:        intEnv("RETENTION_REQUEST_DAYS", 90),
+			PromptDays:         intEnv("RETENTION_PROMPT_DAYS", 30),
+			ResponseDays:       intEnv("RETENTION_RESPONSE_DAYS", 30),
+			Text2SQLReplayDays: intEnv("RETENTION_TEXT2SQL_REPLAY_DAYS", 30),
+			Interval:           durationEnv("RETENTION_INTERVAL", time.Hour),
 		},
 		Cache: CacheConfig{
 			EmbeddingEnabled:  boolEnv("CACHE_EMBEDDING_ENABLED", true),

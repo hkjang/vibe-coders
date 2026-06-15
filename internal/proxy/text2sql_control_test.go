@@ -68,6 +68,19 @@ func TestClassifyText2SQLFailure(t *testing.T) {
 	}
 }
 
+func TestValidText2SQLSensitivity(t *testing.T) {
+	for _, ok := range []string{"normal", "mask", "aggregate_only", "approval_required", "exclude"} {
+		if !validText2SQLSensitivity(ok) {
+			t.Errorf("%q should be a valid sensitivity", ok)
+		}
+	}
+	for _, bad := range []string{"secret", "hidden", "AGGREGATE_ONLY", ""} {
+		if validText2SQLSensitivity(bad) {
+			t.Errorf("%q should be rejected", bad)
+		}
+	}
+}
+
 func TestSuggestText2SQLFixes(t *testing.T) {
 	hasSubstr := func(list []string, sub string) bool {
 		for _, s := range list {
@@ -167,7 +180,7 @@ func TestClickhouseAggregate(t *testing.T) {
 	}))
 	defer srv.Close()
 	req, tok, cost, err := clickhouseAggregate(context.Background(), http.DefaultClient,
-		config.ClickHouseConfig{URL: srv.URL, Database: "a", Table: "t"}, "2026-06-01")
+		config.ClickHouseConfig{URL: srv.URL, Database: "a", Table: "t"}, "2026-06-01", "all")
 	if err != nil {
 		t.Fatal(err)
 	}

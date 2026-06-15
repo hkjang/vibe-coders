@@ -93,6 +93,13 @@ func (w *RetentionWorker) runOnceWith(ctx context.Context) int64 {
 		}
 		totalDeleted += n
 	}
+	if w.cfg.Text2SQLReplayDays > 0 {
+		n, err := w.store.PurgeText2SQLReplayBundles(ctx, w.cfg.Text2SQLReplayDays)
+		if err != nil {
+			slog.Warn("retention purge text2sql_replay_bundles failed", "error", err)
+		}
+		totalDeleted += n
+	}
 	w.deleted.Add(totalDeleted)
 	w.lastRun.Store(time.Now().UTC().Format(time.RFC3339))
 	return totalDeleted

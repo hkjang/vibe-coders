@@ -148,6 +148,18 @@ func (s *Server) handleText2SQLTables(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// validText2SQLSensitivity reports whether a sensitivity value is one the registry
+// understands. Keep in sync with the column-policy handling in BuildSchemaCatalog and
+// the admin UI dropdown.
+func validText2SQLSensitivity(sens string) bool {
+	switch sens {
+	case store.SensitivityNormal, store.SensitivityMask, store.SensitivityAggregateOnly,
+		store.SensitivityApprovalRequired, store.SensitivityExclude:
+		return true
+	}
+	return false
+}
+
 // handleText2SQLColumns manages the column registry (descriptions + sensitivity).
 // POST {schema_name,table_name,column_name,data_type,description,sensitivity} · DELETE ?schema=&table=&column=
 func (s *Server) handleText2SQLColumns(w http.ResponseWriter, r *http.Request) {
@@ -169,8 +181,8 @@ func (s *Server) handleText2SQLColumns(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		sens := strings.ToLower(strings.TrimSpace(p.Sensitivity))
-		if sens != "" && sens != store.SensitivityNormal && sens != store.SensitivityMask && sens != store.SensitivityExclude {
-			writeOpenAIError(w, http.StatusBadRequest, "sensitivity must be normal/mask/exclude", "invalid_request_error", "invalid_sensitivity")
+		if sens != "" && !validText2SQLSensitivity(sens) {
+			writeOpenAIError(w, http.StatusBadRequest, "sensitivity must be one of normal/mask/aggregate_only/approval_required/exclude", "invalid_request_error", "invalid_sensitivity")
 			return
 		}
 		c := store.Text2SQLColumn{
@@ -623,10 +635,11 @@ func (s *Server) handleText2SQLGoldenRun(w http.ResponseWriter, r *http.Request)
 	}
 	_ = json.NewDecoder(r.Body).Decode(&p)
 	model := firstNonEmpty(strings.TrimSpace(p.Model), s.cfg.Text2SQL.PreviewModel)
-	// Opt-in result-equivalence: execute both expected and generated SQL read-only and
-	// compare the row sets, catching semantically-wrong SQL that token matching passes.
-	// Requires a configured execute DB; otherwise it silently falls back to token match.
-	wantExec := r.URL.Query().Get("execute") == "1" && s.cfg.Text2SQL.ExecDSN != ""
+	// Result-equivalence: execute both expected and generated SQL read-only and compare
+	// the row sets, catching semantically-wrong SQL that token matching passes. When an
+	// execute DB is configured this is the DEFAULT (the authoritative CI signal); pass
+	// ?execute=0 to force token-only matching. With no execute DB it is unavailable.
+	wantExec := s.cfg.Text2SQL.ExecDSN != "" && r.URL.Query().Get("execute") != "0"
 
 	goldens, err := s.db.ListText2SQLGoldenQueries(r.Context(), true)
 	if err != nil {

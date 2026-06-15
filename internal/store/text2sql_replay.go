@@ -35,6 +35,22 @@ func (s *SQLStore) PutText2SQLReplayBundle(ctx context.Context, b Text2SQLReplay
 	return err
 }
 
+// PurgeText2SQLReplayBundles deletes replay bundles older than the retention window.
+// Bundles hold full prompt/schema/permission context, so they should not be kept
+// indefinitely; the retention worker calls this each cycle.
+func (s *SQLStore) PurgeText2SQLReplayBundles(ctx context.Context, days int) (int64, error) {
+	if days <= 0 {
+		return 0, nil
+	}
+	cutoff := time.Now().UTC().AddDate(0, 0, -days).Format(time.RFC3339Nano)
+	res, err := s.db.ExecContext(ctx, s.bind(`DELETE FROM text2sql_replay_bundles WHERE created_at < ?`), cutoff)
+	if err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	return n, nil
+}
+
 // GetText2SQLReplayBundle fetches a replay bundle by query log ID or request ID.
 func (s *SQLStore) GetText2SQLReplayBundle(ctx context.Context, idOrRequestID string) (Text2SQLReplayBundle, bool, error) {
 	var b Text2SQLReplayBundle

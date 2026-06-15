@@ -148,9 +148,12 @@ func (s *Server) handleText2SQL(w http.ResponseWriter, r *http.Request, meta sto
 				"allowed_tables": allowedTables, "blocked_columns": blockedColumns,
 				"aggregate_only": aggregateOnly, "mask_columns": maskColumns,
 			})
+			// Masking policy: scrub secret-looking tokens from the stored prompt/context
+			// so an audit artifact can't itself leak a credential embedded in the schema
+			// or examples. (Retention is enforced by the retention worker.)
 			_ = s.db.PutText2SQLReplayBundle(r.Context(), store.Text2SQLReplayBundle{
 				ID: logRec.ID, RequestID: logRec.RequestID, SchemaName: resolvedSchemaName, SchemaVersion: schemaVersion,
-				SystemPrompt: generationPrompt, SchemaContext: schema, GlossaryText: glossaryText,
+				SystemPrompt: maskSecretText(generationPrompt), SchemaContext: maskSecretText(schema), GlossaryText: maskSecretText(glossaryText),
 				PermissionSnapshot: string(snapshot), GeneratedSQL: validation.SQL,
 			})
 		}
@@ -225,6 +228,7 @@ func (s *Server) handleText2SQL(w http.ResponseWriter, r *http.Request, meta sto
 	generationPrompt = text2sql.MessagesJSON(msgs)
 	gen := s.runGovernanceChat(r.Context(), r, upstreamModel, generationPrompt)
 	totalCost := gen.CostKRW
+	logRec.GenerationCost = gen.CostKRW
 	if gen.Error != "" {
 		finalize("SQL 생성 업스트림 호출 실패: "+gen.Error, text2sql.ValidationResult{Reason: "upstream error"}, false, 0, gen.Error, totalCost)
 		return
@@ -316,6 +320,7 @@ func (s *Server) handleText2SQL(w http.ResponseWriter, r *http.Request, meta sto
 		})
 		sum := s.runGovernanceChat(r.Context(), r, summaryModel, sumPrompt)
 		totalCost += sum.CostKRW
+		logRec.SummaryCost = sum.CostKRW
 		if sum.Error == "" {
 			summary = strings.TrimSpace(sum.Response)
 		}

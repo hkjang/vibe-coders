@@ -637,6 +637,8 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 		`ALTER TABLE text2sql_query_logs ADD COLUMN schema_version INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE text2sql_query_logs ADD COLUMN permission_hash TEXT`,
 		`ALTER TABLE text2sql_query_logs ADD COLUMN glossary_hash TEXT`,
+		`ALTER TABLE text2sql_query_logs ADD COLUMN generation_cost REAL NOT NULL DEFAULT 0`,
+		`ALTER TABLE text2sql_query_logs ADD COLUMN summary_cost REAL NOT NULL DEFAULT 0`,
 		`CREATE TABLE IF NOT EXISTS clickhouse_sink_state (
 				dimension TEXT PRIMARY KEY,
 				last_synced_day TEXT,

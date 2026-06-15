@@ -221,6 +221,27 @@ func TestText2SQLSchemaImpact(t *testing.T) {
 	}
 }
 
+func TestPurgeText2SQLReplayBundles(t *testing.T) {
+	db := openAggTestStore(t)
+	defer db.Close()
+	ctx := context.Background()
+
+	if err := db.PutText2SQLReplayBundle(ctx, Text2SQLReplayBundle{ID: "b1", RequestID: "r1", GeneratedSQL: "SELECT 1"}); err != nil {
+		t.Fatal(err)
+	}
+	// days<=0 is a no-op.
+	if n, err := db.PurgeText2SQLReplayBundles(ctx, 0); err != nil || n != 0 {
+		t.Fatalf("days<=0 should purge nothing: n=%d err=%v", n, err)
+	}
+	// A fresh bundle is within the 30-day window → survives.
+	if n, _ := db.PurgeText2SQLReplayBundles(ctx, 30); n != 0 {
+		t.Errorf("fresh bundle should not be purged, deleted %d", n)
+	}
+	if _, found, _ := db.GetText2SQLReplayBundle(ctx, "b1"); !found {
+		t.Error("fresh bundle should still exist after a 30-day purge")
+	}
+}
+
 func containsStore(s, sub string) bool {
 	for i := 0; i+len(sub) <= len(s); i++ {
 		if s[i:i+len(sub)] == sub {

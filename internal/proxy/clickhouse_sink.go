@@ -209,14 +209,17 @@ func (s *Server) handleClickHouseSinkRetry(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, map[string]any{"recovered_dimensions": recovered, "sent_rows": total, "failed": failed})
 }
 
-// clickhouseAggregate queries ClickHouse for the summed metrics of dimension "all"
-// since sinceDay, used for consistency verification against the local ledger.
-func clickhouseAggregate(ctx context.Context, client *http.Client, cfg config.ClickHouseConfig, sinceDay string) (requests, tokens int64, cost float64, err error) {
+// clickhouseAggregate queries ClickHouse for the summed metrics of a dimension since
+// sinceDay, used for consistency verification against the local ledger.
+func clickhouseAggregate(ctx context.Context, client *http.Client, cfg config.ClickHouseConfig, sinceDay string, dimension string) (requests, tokens int64, cost float64, err error) {
+	if dimension == "" {
+		dimension = "all"
+	}
 	table := cfg.Table
 	if cfg.Database != "" {
 		table = cfg.Database + "." + cfg.Table
 	}
-	q := fmt.Sprintf("SELECT sum(requests), sum(tokens), sum(cost_krw) FROM %s WHERE dimension='all' AND day >= '%s' FORMAT TabSeparated", table, sinceDay)
+	q := fmt.Sprintf("SELECT sum(requests), sum(tokens), sum(cost_krw) FROM %s WHERE dimension='%s' AND day >= '%s' FORMAT TabSeparated", table, dimension, sinceDay)
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, cfg.URL+"/?query="+url.QueryEscape(q), nil)
@@ -265,30 +268,125 @@ func (s *Server) handleClickHouseConsistency(w http.ResponseWriter, r *http.Requ
 		}
 	}
 	sinceDay := time.Now().UTC().AddDate(0, 0, -days).Format("2006-01-02")
-	local, err := s.db.ListDailyRollups(r.Context(), "all", sinceDay, 5000)
-	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "rollups_failed")
+	// Compare the local ledger against ClickHouse per dimension, not just "all", so a
+	// drift isolated to one dimension (e.g. project) is caught.
+	dims := dwDimensions
+	if d := strings.TrimSpace(r.URL.Query().Get("dimension")); d != "" {
+		dims = []string{d}
+	}
+	perDim := make([]map[string]any, 0, len(dims))
+	allConsistent := true
+	for _, dim := range dims {
+		local, err := s.db.ListDailyRollups(r.Context(), dim, sinceDay, 5000)
+		if err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "rollups_failed")
+			return
+		}
+		var lReq, lTok int64
+		var lCost float64
+		for _, row := range local {
+			lReq += row.Requests
+			lTok += row.Tokens
+			lCost += row.CostKRW
+		}
+		chReq, chTok, chCost, err := clickhouseAggregate(r.Context(), s.client, s.cfg.ClickHouse, sinceDay, dim)
+		if err != nil {
+			writeOpenAIError(w, http.StatusBadGateway, "clickhouse query failed: "+err.Error(), "server_error", "clickhouse_failed")
+			return
+		}
+		consistent := lReq == chReq && lTok == chTok
+		if !consistent {
+			allConsistent = false
+		}
+		perDim = append(perDim, map[string]any{
+			"dimension":  dim,
+			"consistent": consistent,
+			"postgres":   map[string]any{"requests": lReq, "tokens": lTok, "cost_krw": lCost},
+			"clickhouse": map[string]any{"requests": chReq, "tokens": chTok, "cost_krw": chCost},
+			"diff":       map[string]any{"requests": lReq - chReq, "tokens": lTok - chTok, "cost_krw": lCost - chCost},
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"since":      sinceDay,
+		"consistent": allConsistent,
+		"dimensions": perDim,
+	})
+}
+
+// handleClickHouseTableInfo inspects the target table's engine and sort key via
+// system.tables, so an operator can confirm the dedupe assumption (ReplacingMergeTree
+// keyed by day/dimension/dim_value) that makes re-sending a window safe.
+// GET /admin/dw/table-info
+func (s *Server) handleClickHouseTableInfo(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
 	}
-	var lReq, lTok int64
-	var lCost float64
-	for _, row := range local {
-		lReq += row.Requests
-		lTok += row.Tokens
-		lCost += row.CostKRW
+	cfg := s.cfg.ClickHouse
+	if cfg.URL == "" {
+		writeOpenAIError(w, http.StatusBadRequest, "ClickHouse is not configured", "invalid_request_error", "no_clickhouse")
+		return
 	}
-	chReq, chTok, chCost, err := clickhouseAggregate(r.Context(), s.client, s.cfg.ClickHouse, sinceDay)
+	db := cfg.Database
+	if db == "" {
+		db = "default"
+	}
+	q := fmt.Sprintf("SELECT engine, sorting_key, primary_key FROM system.tables WHERE database='%s' AND name='%s' FORMAT TabSeparated", db, cfg.Table)
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, cfg.URL+"/?query="+url.QueryEscape(q), nil)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "clickhouse_failed")
+		return
+	}
+	if cfg.User != "" {
+		req.Header.Set("X-ClickHouse-User", cfg.User)
+		req.Header.Set("X-ClickHouse-Key", cfg.Password)
+	}
+	resp, err := s.client.Do(req)
 	if err != nil {
 		writeOpenAIError(w, http.StatusBadGateway, "clickhouse query failed: "+err.Error(), "server_error", "clickhouse_failed")
 		return
 	}
-	consistent := lReq == chReq && lTok == chTok
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 300 {
+		writeOpenAIError(w, http.StatusBadGateway, fmt.Sprintf("clickhouse status %d: %s", resp.StatusCode, strings.TrimSpace(string(body))), "server_error", "clickhouse_failed")
+		return
+	}
+	line := strings.TrimSpace(string(body))
+	if line == "" {
+		writeJSON(w, http.StatusOK, map[string]any{"exists": false, "database": db, "table": cfg.Table, "detail": "테이블이 존재하지 않습니다 — 적재 전 생성이 필요합니다."})
+		return
+	}
+	fields := strings.Split(line, "\t")
+	engine, sortingKey, primaryKey := "", "", ""
+	if len(fields) > 0 {
+		engine = fields[0]
+	}
+	if len(fields) > 1 {
+		sortingKey = fields[1]
+	}
+	if len(fields) > 2 {
+		primaryKey = fields[2]
+	}
+	replacing := strings.Contains(engine, "ReplacingMergeTree")
+	// The sink de-dupes by (day, dimension, dim_value); confirm those are in the sort key.
+	dedupeOK := strings.Contains(sortingKey, "day") && strings.Contains(sortingKey, "dimension") && strings.Contains(sortingKey, "dim_value")
+	status, detail := "ok", "ReplacingMergeTree + (day,dimension,dim_value) 정렬키 — 재전송 시 안전하게 중복 제거됩니다."
+	switch {
+	case !replacing && !dedupeOK:
+		status, detail = "warn", "엔진이 ReplacingMergeTree가 아니고 정렬키도 dedupe 키를 포함하지 않습니다 — 재전송 시 중복 적재 위험."
+	case !replacing:
+		status, detail = "warn", "엔진이 ReplacingMergeTree가 아닙니다 — 재전송 시 중복 행이 누적될 수 있습니다."
+	case !dedupeOK:
+		status, detail = "warn", "정렬키에 (day,dimension,dim_value)가 모두 포함되지 않아 dedupe가 의도대로 동작하지 않을 수 있습니다."
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"since":      sinceDay,
-		"consistent": consistent,
-		"postgres":   map[string]any{"requests": lReq, "tokens": lTok, "cost_krw": lCost},
-		"clickhouse": map[string]any{"requests": chReq, "tokens": chTok, "cost_krw": chCost},
-		"diff":       map[string]any{"requests": lReq - chReq, "tokens": lTok - chTok, "cost_krw": lCost - chCost},
+		"exists": true, "database": db, "table": cfg.Table,
+		"engine": engine, "sorting_key": sortingKey, "primary_key": primaryKey,
+		"replacing_merge_tree": replacing, "dedupe_key_ok": dedupeOK,
+		"status": status, "detail": detail,
 	})
 }
 
