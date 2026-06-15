@@ -217,6 +217,13 @@ func (s *Server) handleText2SQL(w http.ResponseWriter, r *http.Request, meta sto
 	if glossaryText != "" {
 		msgs = text2sql.WithGlossary(msgs, glossaryText)
 	}
+	// Gateway Memory (admin-toggle): hint the model with the tables this user queries
+	// most often, so ambiguous questions resolve toward their usual working set.
+	if s.t2sFeatureOn(t2sFeatureGatewayMemory) {
+		if hint := s.gatewayMemoryHint(r.Context(), meta.Request.APIKeyID); hint != "" {
+			msgs = text2sql.WithGlossary(msgs, hint)
+		}
+	}
 	// Few-shot: inject the most relevant verified golden queries to improve generation.
 	if goldens, err := s.db.ListText2SQLGoldenQueries(r.Context(), true); err == nil && len(goldens) > 0 {
 		examples := make([]text2sql.Example, 0, len(goldens))
@@ -245,11 +252,27 @@ func (s *Server) handleText2SQL(w http.ResponseWriter, r *http.Request, meta sto
 		return
 	}
 
+	// 2.5) Self Challenge (admin-toggle): have a secondary model review the generated
+	// SQL against the question. Annotates the response; if it judges the SQL unsafe and
+	// this is execute mode, the query is downgraded to preview (not run).
+	challengeNote, challengeUnsafe := "", false
+	if s.t2sFeatureOn(t2sFeatureSelfChallenge) {
+		if reviewer := firstNonEmpty(cfg.SummaryModel, cfg.PreviewModel); reviewer != "" {
+			safe, note, cost := s.selfChallengeReview(r, reviewer, question, validation.SQL)
+			totalCost += cost
+			challengeNote = note
+			challengeUnsafe = !safe
+		}
+	}
+
 	// 3) Preview mode (default): return the validated SQL + a short note.
 	if profile.Mode != text2sql.ModeExecute || cfg.ExecDSN == "" {
 		note := "검증된 읽기 전용 SQL입니다 (실행하지 않음)."
 		if profile.Mode == text2sql.ModeExecute && cfg.ExecDSN == "" {
 			note = "실행 DB가 설정되지 않아 미리보기만 제공합니다 (TEXT2SQL_EXEC_DSN)."
+		}
+		if challengeNote != "" {
+			note = note + " " + challengeNote
 		}
 		if cacheKey != "" {
 			_ = s.db.PutText2SQLCache(r.Context(), cacheKey, resolvedSchemaName, string(profile.Mode), validation.SQL, cfg.CacheTTL)
@@ -268,6 +291,14 @@ func (s *Server) handleText2SQL(w http.ResponseWriter, r *http.Request, meta sto
 			s.shadowEvaluate(r.Clone(context.Background()), dialect, schema, question, upstreamModel, cfg.ShadowModels, shadowOpts)
 		}
 		finalize(previewContent(question, validation.SQL, note, validation), validation, false, 0, "", totalCost)
+		return
+	}
+
+	// Self-challenge veto: a reviewer judged the SQL unsafe — do not execute; return the
+	// validated SQL as a preview with the reviewer's caution so a human can decide.
+	if challengeUnsafe {
+		note := "보조 모델 검토 결과 실행을 보류했습니다. " + challengeNote
+		finalize(previewContent(question, validation.SQL, note, validation), validation, false, 0, "self_challenge_veto", totalCost)
 		return
 	}
 
@@ -304,7 +335,7 @@ func (s *Server) handleText2SQL(w http.ResponseWriter, r *http.Request, meta sto
 		} else {
 			for i := range rows {
 				for j := range rows[i] {
-						rows[i][j] = maskSecretText(rows[i][j])
+					rows[i][j] = maskSecretText(rows[i][j])
 				}
 			}
 		}
@@ -370,6 +401,79 @@ func applyPermissionEffect(allowedTables []string, blocked *[]string, eff store.
 		*blocked = kept
 	}
 	return allowedTables
+}
+
+// gatewayMemoryHint summarizes the tables an API key has queried most across its recent
+// valid SQL, as a one-line prompt hint. Returns "" when there's no usable history.
+func (s *Server) gatewayMemoryHint(ctx context.Context, apiKeyID string) string {
+	sqls, err := s.db.RecentText2SQLSQLByAPIKey(ctx, apiKeyID, 50)
+	if err != nil || len(sqls) == 0 {
+		return ""
+	}
+	counts := map[string]int{}
+	for _, q := range sqls {
+		seen := map[string]bool{}
+		for _, t := range text2sql.ReferencedTables(q) {
+			if t == "" || seen[t] {
+				continue
+			}
+			seen[t] = true
+			counts[t]++
+		}
+	}
+	if len(counts) == 0 {
+		return ""
+	}
+	type tc struct {
+		table string
+		n     int
+	}
+	ranked := make([]tc, 0, len(counts))
+	for t, n := range counts {
+		ranked = append(ranked, tc{t, n})
+	}
+	sort.Slice(ranked, func(i, j int) bool {
+		if ranked[i].n != ranked[j].n {
+			return ranked[i].n > ranked[j].n
+		}
+		return ranked[i].table < ranked[j].table
+	})
+	top := []string{}
+	for i, r := range ranked {
+		if i >= 3 || r.n < 2 { // require at least 2 uses to count as a habit
+			break
+		}
+		top = append(top, r.table)
+	}
+	if len(top) == 0 {
+		return ""
+	}
+	return "이 사용자가 자주 조회하는 테이블(참고용, 무관하면 무시): " + strings.Join(top, ", ")
+}
+
+// selfChallengeReview asks a secondary (cheaper) model to critique the generated SQL
+// against the question for correctness and safety. Returns (safe, note, costKRW). It is
+// conservative: an upstream error or empty reply is treated as safe (no veto) so the
+// review never hard-blocks on its own failure — it only adds signal when it succeeds.
+func (s *Server) selfChallengeReview(r *http.Request, reviewer, question, sql string) (bool, string, float64) {
+	prompt := text2sql.MessagesJSON([]text2sql.Message{
+		{Role: "system", Content: "너는 SQL 검토자다. 주어진 자연어 질문과 생성된 읽기 전용 SQL을 비교해, SQL이 질문 의도에 맞고 안전한지 검토하라. 1줄로 답하라. 형식: 'OK: <간단한 사유>' 또는 'RISK: <문제 사유>'. 의미가 어긋나거나 위험하면 RISK."},
+		{Role: "user", Content: "질문: " + question + "\n\nSQL:\n" + sql},
+	})
+	res := s.runGovernanceChat(r.Context(), r, reviewer, prompt)
+	if res.Error != "" {
+		return true, "", res.CostKRW // review failed → no veto
+	}
+	resp := strings.TrimSpace(res.Response)
+	if resp == "" {
+		return true, "", res.CostKRW
+	}
+	upper := strings.ToUpper(resp)
+	// Treat an explicit RISK verdict (not preceded by an OK) as unsafe.
+	if strings.HasPrefix(upper, "RISK") || (strings.Contains(upper, "RISK:") && !strings.HasPrefix(upper, "OK")) {
+		return false, "검토 의견: " + resp, res.CostKRW
+	}
+	return true, "검토 의견: " + resp, res.CostKRW
 }
 
 // shouldShadowSample decides, deterministically per question, whether to shadow-eval

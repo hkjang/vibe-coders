@@ -43,12 +43,12 @@ var dangerousFunctions = []string{
 }
 
 var (
-	wordRe       = regexp.MustCompile(`[a-zA-Z_][a-zA-Z0-9_]*`)
-	limitRe      = regexp.MustCompile(`(?is)\blimit\s+\d+`)
+	wordRe  = regexp.MustCompile(`[a-zA-Z_][a-zA-Z0-9_]*`)
+	limitRe = regexp.MustCompile(`(?is)\blimit\s+\d+`)
 	// Captures the table reference after FROM/JOIN, allowing double-quoted and
 	// schema-qualified identifiers (e.g. FROM "Sales"."Orders" o). A leading "(" is
 	// not matched, so subquery sources are skipped.
-	fromJoin = regexp.MustCompile(`(?is)\b(?:from|join)\s+("?[a-zA-Z_][a-zA-Z0-9_]*"?(?:\."?[a-zA-Z_][a-zA-Z0-9_]*"?)*)`)
+	fromJoin     = regexp.MustCompile(`(?is)\b(?:from|join)\s+("?[a-zA-Z_][a-zA-Z0-9_]*"?(?:\."?[a-zA-Z_][a-zA-Z0-9_]*"?)*)`)
 	lineComment  = regexp.MustCompile(`--[^\n]*`)
 	blockComment = regexp.MustCompile(`(?s)/\*.*?\*/`)
 	// aggFuncRe matches an aggregate function name immediately followed by its opening
@@ -246,6 +246,13 @@ func scrubSQL(sql string) string {
 func multiStatement(sql string) bool {
 	trimmed := strings.TrimRight(strings.TrimSpace(sql), ";")
 	return strings.Contains(trimmed, ";")
+}
+
+// ReferencedTables returns the table names referenced by a SQL statement (best-effort),
+// scrubbing comments/string literals first. Exported for callers (e.g. gateway memory)
+// that need to summarize which tables a user tends to query.
+func ReferencedTables(sql string) []string {
+	return referencedTables(strings.TrimRight(strings.TrimSpace(scrubSQL(sql)), ";"))
 }
 
 func referencedTables(sql string) []string {

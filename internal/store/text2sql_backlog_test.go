@@ -346,6 +346,59 @@ func TestText2SQLAnomalyDetectors(t *testing.T) {
 	}
 }
 
+func TestText2SQLFeatureFlags(t *testing.T) {
+	db := openAggTestStore(t)
+	defer db.Close()
+	ctx := context.Background()
+
+	// Unset flag → absent from map (treated as off by callers).
+	m, err := db.Text2SQLFeatureFlagMap(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m["self_challenge"] {
+		t.Error("unset flag should not be enabled")
+	}
+	if err := db.SetText2SQLFeatureFlag(ctx, "self_challenge", true); err != nil {
+		t.Fatal(err)
+	}
+	m, _ = db.Text2SQLFeatureFlagMap(ctx)
+	if !m["self_challenge"] {
+		t.Error("flag should be enabled after set")
+	}
+	// Toggle back off.
+	if err := db.SetText2SQLFeatureFlag(ctx, "self_challenge", false); err != nil {
+		t.Fatal(err)
+	}
+	m, _ = db.Text2SQLFeatureFlagMap(ctx)
+	if m["self_challenge"] {
+		t.Error("flag should be disabled after toggle off")
+	}
+}
+
+func TestRecentText2SQLSQLByAPIKey(t *testing.T) {
+	db := openAggTestStore(t)
+	defer db.Close()
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	_ = db.InsertText2SQLLog(ctx, Text2SQLQueryLog{ID: "a1", APIKeyID: "k1", Valid: true, GeneratedSQL: "SELECT * FROM orders", CreatedAt: now})
+	_ = db.InsertText2SQLLog(ctx, Text2SQLQueryLog{ID: "a2", APIKeyID: "k1", Valid: false, GeneratedSQL: "bad", CreatedAt: now})              // invalid → excluded
+	_ = db.InsertText2SQLLog(ctx, Text2SQLQueryLog{ID: "a3", APIKeyID: "k1", Valid: true, Mode: "shadow", GeneratedSQL: "x", CreatedAt: now}) // shadow → excluded
+	_ = db.InsertText2SQLLog(ctx, Text2SQLQueryLog{ID: "a4", APIKeyID: "k2", Valid: true, GeneratedSQL: "SELECT 1", CreatedAt: now})
+
+	sqls, err := db.RecentText2SQLSQLByAPIKey(ctx, "k1", 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sqls) != 1 || sqls[0] != "SELECT * FROM orders" {
+		t.Fatalf("expected one valid non-shadow SQL for k1, got %+v", sqls)
+	}
+	if got, _ := db.RecentText2SQLSQLByAPIKey(ctx, "", 50); got != nil {
+		t.Error("empty api key should return nil")
+	}
+}
+
 func containsStore(s, sub string) bool {
 	for i := 0; i+len(sub) <= len(s); i++ {
 		if s[i:i+len(sub)] == sub {

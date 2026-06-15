@@ -46,8 +46,9 @@ type Server struct {
 	learnCache   atomic.Pointer[routingLearnSnapshot]
 	priceCache   atomic.Pointer[pricingSnapshot]
 	mmCache      atomic.Pointer[mattermostSnapshot]
-	t2sExec      atomic.Pointer[sql.DB] // lazily-opened read-only DB for Text2SQL execute mode
-	t2sKilled    atomic.Bool            // runtime kill switch: when set, Text2SQL is disabled regardless of config
+	t2sExec      atomic.Pointer[sql.DB]          // lazily-opened read-only DB for Text2SQL execute mode
+	t2sKilled    atomic.Bool                     // runtime kill switch: when set, Text2SQL is disabled regardless of config
+	t2sFeatures  atomic.Pointer[map[string]bool] // runtime Text2SQL feature toggles (admin-managed)
 	sessions     *sessionInferer
 	sessionGCAt  atomic.Int64
 	extSeen      sync.Map // external key id -> struct{}; dedupes lazy registration
@@ -92,6 +93,9 @@ func NewServer(cfg config.Config, db *store.SQLStore, logger *store.AsyncLogger,
 	if cfg.ClickHouse.URL != "" && cfg.ClickHouse.SinkInterval > 0 {
 		go server.clickhouseSinkLoop()
 	}
+
+	// Load admin-managed Text2SQL feature toggles into the in-memory cache.
+	server.reloadText2SQLFeatures(context.Background())
 
 	if cfg.Upstream.APIKey != "" {
 		encrypted, err := secrets.Encrypt(cfg.Upstream.APIKey)
@@ -184,6 +188,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/admin/text2sql/kill-switch", s.handleText2SQLKillSwitch)
 	mux.HandleFunc("/admin/text2sql/miners", s.handleText2SQLMiners)
 	mux.HandleFunc("/admin/text2sql/anomalies", s.handleText2SQLAnomalies)
+	mux.HandleFunc("/admin/text2sql/features", s.handleText2SQLFeatures)
 	mux.HandleFunc("/admin/text2sql/golden", s.handleText2SQLGolden)
 	mux.HandleFunc("/admin/text2sql/golden/", s.handleText2SQLGolden)
 	mux.HandleFunc("/admin/export.csv", s.handleExportCSV)

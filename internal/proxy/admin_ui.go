@@ -4903,6 +4903,16 @@ const adminHTML = `<!doctype html>
       const glossTable = glossary.length ?
         '<table><thead><tr><th>용어</th><th>매핑</th><th>설명</th><th>스키마</th><th></th></tr></thead><tbody>' + glossRows + '</tbody></table>'
         : '<div class="empty">업무 용어 사전 없음. 등록하면 사용자가 업무 언어로 질문할 때 매핑이 프롬프트에 주입됩니다.</div>';
+      const featData = await api('/admin/text2sql/features').catch(() => ({ features: [] }));
+      const killState = await api('/admin/text2sql/kill-switch').catch(() => ({ disabled: false }));
+      const featRows = (featData.features || []).map(f =>
+        '<tr><td><strong>' + escapeHTML(f.name) + '</strong><div class="muted">' + escapeHTML(f.description || '') + '</div></td>' +
+        '<td><label class="switch"><input type="checkbox" onchange="toggleT2SFeature(\'' + escapeAttr(f.name) + '\', this.checked)"' + (f.enabled ? ' checked' : '') + '> ' + (f.enabled ? '<span class="status">ON</span>' : '<span class="muted">OFF</span>') + '</label></td></tr>'
+      ).join('');
+      const featTable = '<table><thead><tr><th>기능</th><th>상태</th></tr></thead><tbody>' +
+        '<tr><td><strong>kill_switch</strong><div class="muted">Text2SQL 전체 즉시 중지 (장애·비용·보안 대응)</div></td>' +
+        '<td><label class="switch"><input type="checkbox" onchange="toggleT2SKill(this.checked)"' + (killState.disabled ? ' checked' : '') + '> ' + (killState.disabled ? '<span class="status error">중지됨</span>' : '<span class="status">정상</span>') + '</label></td></tr>' +
+        featRows + '</tbody></table>';
       const riskData = await api('/admin/text2sql/risk-queue?window=7d&min_risk=50').catch(() => ({ queue: [] }));
       const riskQ = riskData.queue || [];
       const riskRows = riskQ.map(e => {
@@ -4932,6 +4942,7 @@ const adminHTML = `<!doctype html>
         section('스키마 레지스트리 (테이블 · 컬럼 · 민감도)', registryHTML()) +
         section('권한 매트릭스 (subject × schema/table/column)', permForm + permTable) +
         section('실패 원인 분류 (최근 7일)', failTable) +
+        section('기능 토글 (런타임 온오프)', featTable) +
         section('관리자 위험 요청 큐 (거부 · 고위험 EXPLAIN · 실패)', riskTable) +
         section('업무 용어 사전 (자연어 → SQL 매핑)', glossConflictBanner + glossForm + glossTable) +
         section('Golden Query (few-shot · 회귀)', goldenRun + goldenForm + goldenTable) +
@@ -4958,6 +4969,19 @@ const adminHTML = `<!doctype html>
       if (glf) glf.addEventListener('submit', addT2SGloss);
       makeSortable('#view', 'text2sql');
     }
+    window.toggleT2SFeature = async (name, enabled) => {
+      try {
+        await api('/admin/text2sql/features', { method: 'POST', body: JSON.stringify({ name, enabled }) });
+      } catch (err) { alert('토글 실패: ' + err.message); }
+      route();
+    };
+    window.toggleT2SKill = async (disabled) => {
+      if (disabled && !confirm('Text2SQL 전체를 중지하시겠습니까? 모든 vibe/text2sql-* 요청이 안전 메시지를 반환합니다.')) { route(); return; }
+      try {
+        await api('/admin/text2sql/kill-switch', { method: 'POST', body: JSON.stringify({ disabled }) });
+      } catch (err) { alert('변경 실패: ' + err.message); }
+      route();
+    };
     async function addT2SGloss(e) {
       e.preventDefault();
       const body = {

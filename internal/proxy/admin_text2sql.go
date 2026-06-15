@@ -311,6 +311,81 @@ func (s *Server) handleText2SQLMiners(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"report_candidates": reports, "glossary_candidates": terms})
 }
 
+// Text2SQL runtime feature toggles (admin-managed, default off).
+const (
+	t2sFeatureSelfChallenge = "self_challenge"
+	t2sFeatureGatewayMemory = "gateway_memory"
+)
+
+// t2sKnownFeatures is the catalog of toggleable features shown in the admin panel.
+var t2sKnownFeatures = []struct{ Name, Description string }{
+	{t2sFeatureSelfChallenge, "생성된 SQL을 보조 모델이 한 번 더 검토 (정확도↑, 요청당 추가 호출 비용 발생)"},
+	{t2sFeatureGatewayMemory, "사용자가 최근 자주 사용한 스키마/테이블을 프롬프트 힌트로 보강"},
+}
+
+// reloadText2SQLFeatures refreshes the in-memory feature-flag cache from the DB.
+func (s *Server) reloadText2SQLFeatures(ctx context.Context) {
+	m, err := s.db.Text2SQLFeatureFlagMap(ctx)
+	if err != nil || m == nil {
+		m = map[string]bool{}
+	}
+	s.t2sFeatures.Store(&m)
+}
+
+// t2sFeatureOn reports whether a runtime Text2SQL feature toggle is enabled.
+func (s *Server) t2sFeatureOn(name string) bool {
+	if m := s.t2sFeatures.Load(); m != nil {
+		return (*m)[name]
+	}
+	return false
+}
+
+// handleText2SQLFeatures lists and toggles runtime Text2SQL features from the admin UI.
+// GET /admin/text2sql/features · POST {name, enabled}
+func (s *Server) handleText2SQLFeatures(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		features := make([]map[string]any, 0, len(t2sKnownFeatures))
+		for _, f := range t2sKnownFeatures {
+			features = append(features, map[string]any{"name": f.Name, "description": f.Description, "enabled": s.t2sFeatureOn(f.Name)})
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"features": features})
+	case http.MethodPost:
+		var p struct {
+			Name    string `json:"name"`
+			Enabled bool   `json:"enabled"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+			writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "invalid_body")
+			return
+		}
+		known := false
+		for _, f := range t2sKnownFeatures {
+			if f.Name == p.Name {
+				known = true
+				break
+			}
+		}
+		if !known {
+			writeOpenAIError(w, http.StatusBadRequest, "unknown feature: "+p.Name, "invalid_request_error", "unknown_feature")
+			return
+		}
+		if err := s.db.SetText2SQLFeatureFlag(r.Context(), p.Name, p.Enabled); err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "feature_save_failed")
+			return
+		}
+		s.reloadText2SQLFeatures(r.Context())
+		s.auditAdmin(r, "text2sql.feature.toggle", "", auditJSON(map[string]any{"name": p.Name, "enabled": p.Enabled}))
+		writeJSON(w, http.StatusOK, map[string]any{"name": p.Name, "enabled": p.Enabled})
+	default:
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+	}
+}
+
 // handleText2SQLAnomalies returns detection-only behavioral signals over the question
 // logs: usage smells (repetition / permission probing / broad-scope requests),
 // per-team cumulative risk exposure, and intent-drift flags. Nothing here blocks a

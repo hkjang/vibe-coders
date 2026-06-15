@@ -667,6 +667,11 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 				created_at TEXT NOT NULL
 			)`,
 		`CREATE INDEX IF NOT EXISTS idx_text2sql_replay_request ON text2sql_replay_bundles(request_id)`,
+		`CREATE TABLE IF NOT EXISTS text2sql_feature_flags (
+				name TEXT PRIMARY KEY,
+				enabled INTEGER NOT NULL DEFAULT 0,
+				updated_at TEXT
+			)`,
 		`CREATE TABLE IF NOT EXISTS model_pricing_versions (
 				id TEXT PRIMARY KEY,
 				model TEXT NOT NULL,
