@@ -52,6 +52,9 @@ type Server struct {
 	t2sFeatures  atomic.Pointer[map[string]bool] // runtime Text2SQL feature toggles (admin-managed)
 	t2sRuntime   atomic.Pointer[config.Text2SQLConfig]    // admin-settings overlay over cfg.Text2SQL (runtime snapshot)
 	chRuntime    atomic.Pointer[config.ClickHouseConfig]  // admin-settings overlay over cfg.ClickHouse (runtime snapshot)
+	chSinkMu      sync.Mutex         // guards the managed ClickHouse sink worker lifecycle
+	chSinkStop    context.CancelFunc // cancels the running sink worker (nil when stopped)
+	chSinkStarted bool               // true once the startup worker apply has run (gates reload-time restarts)
 	sessions     *sessionInferer
 	sessionGCAt  atomic.Int64
 	extSeen      sync.Map // external key id -> struct{}; dedupes lazy registration
@@ -96,10 +99,9 @@ func NewServer(cfg config.Config, db *store.SQLStore, logger *store.AsyncLogger,
 	// before starting workers, so workers and handlers see admin-managed values.
 	server.reloadRuntimeConfig(context.Background())
 
-	// Background ClickHouse auto-sink (only when explicitly configured).
-	if server.chConf().URL != "" && server.chConf().SinkInterval > 0 {
-		go server.clickhouseSinkLoop()
-	}
+	// Background ClickHouse auto-sink, managed so it can be (re)started/stopped when
+	// settings change (only runs when URL + interval are configured).
+	server.applyClickHouseSinkWorker()
 
 	// Load admin-managed Text2SQL feature toggles into the in-memory cache.
 	server.reloadText2SQLFeatures(context.Background())
@@ -234,6 +236,9 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/admin/settings/validate", s.handleAdminSettingsValidate)
 	mux.HandleFunc("/admin/settings/history", s.handleAdminSettingsHistory)
 	mux.HandleFunc("/admin/settings/rollback", s.handleAdminSettingsRollback)
+	mux.HandleFunc("/admin/settings/test/clickhouse", s.handleSettingsTestClickHouse)
+	mux.HandleFunc("/admin/settings/test/text2sql-exec", s.handleSettingsTestText2SQLExec)
+	mux.HandleFunc("/admin/settings/test/text2sql-twin", s.handleSettingsTestText2SQLTwin)
 	mux.HandleFunc("/admin/policies/decisions", s.handlePolicyDecisions)
 	mux.HandleFunc("/admin/policies/simulate", s.handlePolicySimulate)
 	mux.HandleFunc("/admin/policies/export", s.handlePolicyExport)

@@ -2,9 +2,11 @@ package proxy
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -12,6 +14,24 @@ import (
 	"vibe-coders/internal/config"
 	"vibe-coders/internal/store"
 )
+
+// openTransientSQLDB opens a short-lived DB connection (for connection tests), applying the
+// same driver normalization as the Text2SQL execute/twin DBs.
+func openTransientSQLDB(dsn, driver string) (*sql.DB, string, error) {
+	d := strings.ToLower(strings.TrimSpace(driver))
+	if d == "postgres" || d == "postgresql" {
+		d = "pgx"
+	}
+	if d == "" {
+		d = "sqlite"
+	}
+	db, err := sql.Open(d, dsn)
+	if err != nil {
+		return nil, d, err
+	}
+	db.SetMaxOpenConns(2)
+	return db, d, nil
+}
 
 // settingType describes how a setting's string value is parsed/validated.
 type settingType string
@@ -128,6 +148,8 @@ func (s *Server) reloadRuntimeConfig(ctx context.Context) {
 			stored[a.Key] = a
 		}
 	}
+	prevT2S := s.t2sConf()
+	prevCH := s.chConf()
 	t2s := s.cfg.Text2SQL
 	ch := s.cfg.ClickHouse
 	for _, d := range settingRegistry {
@@ -142,6 +164,23 @@ func (s *Server) reloadRuntimeConfig(ctx context.Context) {
 	}
 	s.t2sRuntime.Store(&t2s)
 	s.chRuntime.Store(&ch)
+
+	// Swap Text2SQL execute/twin DB connections when their DSN/driver changed: close the
+	// cached *sql.DB so the next request lazily reopens against the new target.
+	if prevT2S.ExecDSN != t2s.ExecDSN || prevT2S.ExecDriver != t2s.ExecDriver {
+		if db := s.t2sExec.Swap(nil); db != nil {
+			_ = db.Close()
+		}
+	}
+	if prevT2S.TwinDSN != t2s.TwinDSN || prevT2S.TwinDriver != t2s.TwinDriver {
+		if db := s.t2sTwin.Swap(nil); db != nil {
+			_ = db.Close()
+		}
+	}
+	// Restart the ClickHouse sink worker when its URL or interval changed (start/stop too).
+	if s.chSinkStarted && (prevCH.URL != ch.URL || prevCH.SinkInterval != ch.SinkInterval) {
+		s.applyClickHouseSinkWorker()
+	}
 }
 
 func applyRuntimeSetting(t2s *config.Text2SQLConfig, ch *config.ClickHouseConfig, key, val string) {
@@ -484,6 +523,126 @@ func (s *Server) crossLimit(stored map[string]store.AdminSetting, changingKey, n
 		max = n
 	}
 	return def, max
+}
+
+// handleSettingsTestClickHouse pings ClickHouse and (when a table is given) checks the
+// table exists, using provided overrides or the current effective config.
+// POST /admin/settings/test/clickhouse {url?,user?,password?,database?,table?}
+func (s *Server) handleSettingsTestClickHouse(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	var p struct{ URL, User, Password, Database, Table string }
+	_ = json.NewDecoder(r.Body).Decode(&p)
+	ch := s.chConf()
+	pick := func(override, cur string) string {
+		if strings.TrimSpace(override) != "" {
+			return strings.TrimSpace(override)
+		}
+		return cur
+	}
+	chURL := pick(p.URL, ch.URL)
+	if chURL == "" {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "message": "no ClickHouse URL configured or provided"})
+		return
+	}
+	user, pass, dbName := pick(p.User, ch.User), pick(p.Password, ch.Password), pick(p.Database, ch.Database)
+	table := pick(p.Table, ch.Table)
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	start := time.Now()
+	chGet := func(query string) (int, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, chURL+"/?query="+url.QueryEscape(query), nil)
+		if err != nil {
+			return 0, err
+		}
+		if user != "" {
+			req.Header.Set("X-ClickHouse-User", user)
+			req.Header.Set("X-ClickHouse-Key", pass)
+		}
+		resp, err := s.client.Do(req)
+		if err != nil {
+			return 0, err
+		}
+		resp.Body.Close()
+		return resp.StatusCode, nil
+	}
+	code, err := chGet("SELECT 1")
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "message": "ping failed: " + err.Error()})
+		return
+	}
+	if code != http.StatusOK {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "message": fmt.Sprintf("ping returned HTTP %d (check auth/url)", code)})
+		return
+	}
+	result := map[string]any{"ok": true, "latency_ms": time.Since(start).Milliseconds(), "ping": "ok"}
+	if table != "" {
+		ref := table
+		if dbName != "" && !strings.Contains(table, ".") {
+			ref = dbName + "." + table
+		}
+		tc, terr := chGet("EXISTS TABLE " + ref)
+		result["table_checked"] = ref
+		result["table_ok"] = terr == nil && tc == http.StatusOK
+		if terr != nil || tc != http.StatusOK {
+			result["table_message"] = "table existence check failed (table may be missing or no permission)"
+		}
+	}
+	s.auditAdmin(r, "setting.test.clickhouse", "", auditJSON(map[string]any{"url_set": chURL != "", "table": table}))
+	writeJSON(w, http.StatusOK, result)
+}
+
+// handleSettingsTestText2SQLDB opens a Text2SQL execute/twin DB (provided override or
+// effective config) and runs SELECT 1. dbKind is "exec" or "twin".
+func (s *Server) handleSettingsTestText2SQLDB(w http.ResponseWriter, r *http.Request, dbKind string) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	var p struct{ DSN, Driver string }
+	_ = json.NewDecoder(r.Body).Decode(&p)
+	t2s := s.t2sConf()
+	dsn, driver := strings.TrimSpace(p.DSN), strings.TrimSpace(p.Driver)
+	if dsn == "" {
+		if dbKind == "twin" {
+			dsn, driver = t2s.TwinDSN, t2s.TwinDriver
+		} else {
+			dsn, driver = t2s.ExecDSN, t2s.ExecDriver
+		}
+	}
+	if strings.TrimSpace(dsn) == "" {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "message": "no DSN configured or provided"})
+		return
+	}
+	db, drv, err := openTransientSQLDB(dsn, driver)
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "message": "open failed: " + err.Error()})
+		return
+	}
+	defer db.Close()
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	start := time.Now()
+	var one int
+	if err := db.QueryRowContext(ctx, "SELECT 1").Scan(&one); err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "message": "SELECT 1 failed: " + err.Error()})
+		return
+	}
+	result := map[string]any{"ok": true, "driver": drv, "latency_ms": time.Since(start).Milliseconds()}
+	if dbKind == "twin" && dsn == t2s.ExecDSN && dsn != "" {
+		result["warning"] = "twin DSN equals the execute DSN — a separate masked/sample DB is recommended"
+	}
+	s.auditAdmin(r, "setting.test.text2sql_"+dbKind, "", "")
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (s *Server) handleSettingsTestText2SQLExec(w http.ResponseWriter, r *http.Request) {
+	s.handleSettingsTestText2SQLDB(w, r, "exec")
+}
+func (s *Server) handleSettingsTestText2SQLTwin(w http.ResponseWriter, r *http.Request) {
+	s.handleSettingsTestText2SQLDB(w, r, "twin")
 }
 
 // handleAdminSettingsHistory serves GET /admin/settings/history?key=.

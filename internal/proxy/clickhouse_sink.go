@@ -521,16 +521,43 @@ func (s *Server) handleClickHouseTableInfo(w http.ResponseWriter, r *http.Reques
 
 // clickhouseSinkLoop periodically ships recent rollups to ClickHouse. Started only
 // when a URL and a positive interval are configured.
-func (s *Server) clickhouseSinkLoop() {
+// applyClickHouseSinkWorker (re)starts or stops the background sink worker according to
+// the current effective ClickHouse config. Safe to call at startup and on settings change.
+func (s *Server) applyClickHouseSinkWorker() {
+	s.chSinkMu.Lock()
+	defer s.chSinkMu.Unlock()
+	s.chSinkStarted = true
+	if s.chSinkStop != nil {
+		s.chSinkStop()
+		s.chSinkStop = nil
+	}
+	ch := s.chConf()
+	if ch.URL == "" || ch.SinkInterval <= 0 {
+		return // disabled
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	s.chSinkStop = cancel
+	go s.clickhouseSinkLoop(ctx)
+}
+
+func (s *Server) clickhouseSinkLoop(parent context.Context) {
 	interval := s.chConf().SinkInterval
-	days := s.chConf().SinkDays
-	if days <= 0 {
-		days = 3
+	if interval <= 0 {
+		return
 	}
 	t := time.NewTicker(interval)
 	defer t.Stop()
-	for range t.C {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	for {
+		select {
+		case <-parent.Done():
+			return
+		case <-t.C:
+		}
+		days := s.chConf().SinkDays
+		if days <= 0 {
+			days = 3
+		}
+		ctx, cancel := context.WithTimeout(parent, 2*time.Minute)
 		now := time.Now().UTC()
 		_, _ = s.db.RollupRange(ctx, now.AddDate(0, 0, -days), now)
 		sinceDay := now.AddDate(0, 0, -days).Format("2006-01-02")

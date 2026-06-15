@@ -107,7 +107,8 @@ Roo Code / Cursor / Continue 등 OpenAI 호환 API 를 호출하는 VS Code 확�
 - **개인 메뉴 (auth-user 드롭다운)** (`v0.7.3`): 사용자 칩 클릭 시 드롭다운으로 개인화·내 키·자동 새로고침·테마 전환·단축키 도움말을 모음 — 상단 nav 정리, 토큰 모드에서도 `☰ 메뉴`로 접근 가능
 - **개인 메뉴 정리·콘텐츠 여백** (`v0.7.4`): 로그아웃 버튼을 개인 메뉴 내 `내 키` 아래로 이동, `내 키`·`개인화`·`사용 한도` 패널 콘텐츠에 들여쓰기 여백 적용
 - **런타임 관리자 설정 — 기반** (`v0.8.0`): ClickHouse·Text2SQL 설정을 `env 기본값 + DB 관리자 오버레이`로 관리하는 기반(`/admin/settings` 조회·`/by-key/{key}` PUT/DELETE·`/validate`·`/rollback`·`/history`) — 민감값 암호화 저장 + `********` 마스킹, 변경 이력·롤백·교차 검증
-- **런타임 관리자 설정 — 즉시 반영** (`v0.8.1`): 설정 저장소를 런타임 atomic 스냅샷(`s.t2sConf()`/`s.chConf()`)에 연결 — Text2SQL 모델·limit·mask·shadow·risk 및 ClickHouse DB/table/계정/fact table이 재배포 없이 다음 요청·다음 적재부터 반영. DSN 핫스왑·sink worker 재시작은 v0.8.2
+- **런타임 관리자 설정 — 즉시 반영** (`v0.8.1`): 설정 저장소를 런타임 atomic 스냅샷(`s.t2sConf()`/`s.chConf()`)에 연결 — Text2SQL 모델·limit·mask·shadow·risk 및 ClickHouse DB/table/계정/fact table이 재배포 없이 다음 요청·다음 적재부터 반영
+- **런타임 관리자 설정 — 커넥션 스왑·워커·테스트** (`v0.8.2`): Exec/Twin DSN 변경 시 캐시 `sql.DB` close+재오픈(swap), ClickHouse sink worker 관리형 stop/start/restart(URL·interval 변경), 연결 테스트 API(`/admin/settings/test/clickhouse`·`/text2sql-exec`·`/text2sql-twin`)
 - **운영·거버넌스 확장** (`v0.3.0`): 정책 시뮬레이터(`/admin/policies/simulate`), 모델 가격표 버전 이력(`/admin/pricing`, `/admin/pricing/seed`), 운영 리스크 스코어(`/admin/ops/risk`)·상태(`/admin/ops/status`), Provider SLO(`/admin/providers/slo`), 비용 이상탐지(`/admin/cost/anomalies`)·배부(`/admin/cost/allocation`)·팀 예산 예측(`/admin/budgets/projection`), 모델별 코딩 품질(`/admin/models/quality`), 작업 템플릿(`/admin/templates`), 프롬프트 버전 승격(`/admin/prompts/promotions`), 자동 라우팅 학습 루프(`/admin/routing/learning/auto`), DW 롤업(`/admin/dw/rollups`), Mattermost 알림(`/admin/notifications/mattermost`)
 - 호출 이력 CSV 다운로드 `/admin/export.csv` (Excel UTF-8 BOM 포함, 한국어 그대로 열림)
 - 운영용 백업 스크립트 `scripts/backup.ps1` / `scripts/backup.sh` (SQLite `.backup` + fallback ndjson + 보존 일수 적용)
