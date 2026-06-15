@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -199,6 +200,83 @@ type PersonalProfileSnapshot struct {
 	ID        string `json:"id"`
 	Profile   string `json:"profile"`
 	CreatedAt string `json:"created_at"`
+}
+
+// ProfileDrift summarizes how a user's profile changed between their two most recent
+// snapshots: deltas in volume, cost, reliability, and shifts in the dominant model/task.
+// Flags surface notable movements. Read-only.
+type ProfileDrift struct {
+	UserID           string   `json:"user_id"`
+	HasBaseline      bool     `json:"has_baseline"` // false when < 2 snapshots exist
+	From             string   `json:"from"`         // older snapshot timestamp
+	To               string   `json:"to"`           // newer snapshot timestamp
+	RequestsDelta    int64    `json:"requests_delta"`
+	CostDeltaKRW     float64  `json:"cost_delta_krw"`
+	AvgCostDelta     float64  `json:"avg_cost_delta_krw"`
+	SuccessRateDelta float64  `json:"success_rate_delta"`
+	TopModelFrom     string   `json:"top_model_from"`
+	TopModelTo       string   `json:"top_model_to"`
+	TopModelChanged  bool     `json:"top_model_changed"`
+	TopTaskFrom      string   `json:"top_task_from"`
+	TopTaskTo        string   `json:"top_task_to"`
+	TopTaskChanged   bool     `json:"top_task_changed"`
+	Flags            []string `json:"flags"`
+}
+
+func topKeyOf(list []ProfileCount) string {
+	if len(list) > 0 {
+		return list[0].Key
+	}
+	return ""
+}
+
+// ProfileDriftForUser computes drift between the user's two most recent profile snapshots.
+// Returns HasBaseline=false when fewer than two snapshots exist.
+func (s *SQLStore) ProfileDriftForUser(ctx context.Context, userID string) (ProfileDrift, error) {
+	d := ProfileDrift{UserID: userID, Flags: []string{}}
+	snaps, err := s.ListPersonalProfileSnapshots(ctx, userID, 2)
+	if err != nil {
+		return d, err
+	}
+	if len(snaps) < 2 {
+		return d, nil
+	}
+	var newer, older PersonalProfile
+	if err := json.Unmarshal([]byte(snaps[0].Profile), &newer); err != nil {
+		return d, nil
+	}
+	if err := json.Unmarshal([]byte(snaps[1].Profile), &older); err != nil {
+		return d, nil
+	}
+	d.HasBaseline = true
+	d.From = snaps[1].CreatedAt
+	d.To = snaps[0].CreatedAt
+	d.RequestsDelta = newer.Requests - older.Requests
+	d.CostDeltaKRW = newer.TotalCostKRW - older.TotalCostKRW
+	d.AvgCostDelta = newer.AvgCostPerRequest - older.AvgCostPerRequest
+	d.SuccessRateDelta = newer.SuccessRate - older.SuccessRate
+	d.TopModelFrom = topKeyOf(older.TopModels)
+	d.TopModelTo = topKeyOf(newer.TopModels)
+	d.TopModelChanged = d.TopModelFrom != d.TopModelTo
+	d.TopTaskFrom = topKeyOf(older.TopTaskTypes)
+	d.TopTaskTo = topKeyOf(newer.TopTaskTypes)
+	d.TopTaskChanged = d.TopTaskFrom != d.TopTaskTo
+
+	if d.AvgCostDelta > 0.01 {
+		d.Flags = append(d.Flags, "cost_up")
+	} else if d.AvgCostDelta < -0.01 {
+		d.Flags = append(d.Flags, "cost_down")
+	}
+	if d.SuccessRateDelta < -0.02 {
+		d.Flags = append(d.Flags, "success_down")
+	}
+	if d.TopModelChanged {
+		d.Flags = append(d.Flags, "model_shift")
+	}
+	if d.TopTaskChanged {
+		d.Flags = append(d.Flags, "task_shift")
+	}
+	return d, nil
 }
 
 // ListPersonalProfileSnapshots returns a user's snapshots newest-first.

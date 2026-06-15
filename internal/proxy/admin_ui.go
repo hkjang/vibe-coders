@@ -4812,6 +4812,25 @@ const adminHTML = `<!doctype html>
           '<div><h3>선호 모델</h3>' + topKeyText(p.top_models) + '</div>' +
           '<div><h3>선호 언어</h3>' + topKeyText(p.top_languages) + '</div>' +
         '</div>';
+      const drift = d.drift || {};
+      let driftCard = '';
+      if (drift.has_baseline) {
+        const sign = v => (v > 0 ? '+' : '') + v;
+        const flags = (drift.flags || []).length ? (drift.flags || []).map(f => '<span class="pill">' + escapeHTML(f) + '</span>').join(' ') : '<span class="muted">변동 없음</span>';
+        driftCard = '<div style="margin-top:16px"><h3>스냅샷 추세 (drift)</h3>' +
+          '<div class="muted">' + escapeHTML(drift.from || '') + ' → ' + escapeHTML(drift.to || '') + '</div>' +
+          '<div class="kv" style="margin-top:8px">' +
+            row('요청 변화', sign(drift.requests_delta || 0)) +
+            row('총비용 변화', sign(Math.round(drift.cost_delta_krw || 0)) + ' KRW') +
+            row('요청당 평균 변화', (drift.avg_cost_delta_krw || 0).toFixed(2) + ' KRW') +
+            row('성공률 변화', sign(((drift.success_rate_delta || 0) * 100).toFixed(1)) + '%p') +
+            row('대표 모델', escapeHTML((drift.top_model_from || '-') + ' → ' + (drift.top_model_to || '-')) + (drift.top_model_changed ? ' <span class="pill">변경</span>' : '')) +
+            row('주요 작업', escapeHTML((drift.top_task_from || '-') + ' → ' + (drift.top_task_to || '-')) + (drift.top_task_changed ? ' <span class="pill">변경</span>' : '')) +
+            row('신호', flags) +
+          '</div></div>';
+      } else {
+        driftCard = '<div style="margin-top:16px"><h3>스냅샷 추세 (drift)</h3><p class="muted">추세 계산에는 스냅샷이 2개 이상 필요합니다. 시점을 두고 스냅샷 생성을 여러 번 실행하세요.</p></div>';
+      }
       const snapBtn = '<div style="margin-top:12px"><button type="button" onclick="snapshotProfile(\'' + userID.replace(/'/g, "\\'") + '\')">스냅샷 생성</button> ' +
         '<span class="muted">현재 프로필을 시점 기록으로 저장합니다.</span></div>';
       const snapTable = snaps.length ? (
@@ -4823,7 +4842,7 @@ const adminHTML = `<!doctype html>
             '<td>' + fmt(Math.round(parsed.total_cost_krw || 0)) + '</td><td>' + pctText(parsed.success_rate) + '</td></tr>';
         }).join('') + '</tbody></table>'
       ) : '<p class="muted" style="margin-top:16px">스냅샷이 없습니다.</p>';
-      view.innerHTML = back + card('프로필: ' + escapeHTML(userID), kv + prefs + snapBtn + snapTable);
+      view.innerHTML = back + card('프로필: ' + escapeHTML(userID), kv + prefs + driftCard + snapBtn + snapTable);
     }
 
     async function snapshotProfile(userID) {

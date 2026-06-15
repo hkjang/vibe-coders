@@ -50,6 +50,17 @@ func (s *Server) handlePersonalProfileDetail(w http.ResponseWriter, r *http.Requ
 		s.handlePersonalProfiles(w, r)
 		return
 	}
+	// {user_id}/drift → return only the drift between the two latest snapshots.
+	if strings.HasSuffix(userID, "/drift") {
+		uid := strings.TrimSuffix(userID, "/drift")
+		drift, err := s.db.ProfileDriftForUser(r.Context(), uid)
+		if err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "drift_failed")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"drift": drift})
+		return
+	}
 	since := parseWindow(r.URL.Query().Get("window"), 30*24*time.Hour, "day")
 	p, err := s.db.BuildPersonalProfile(r.Context(), userID, since)
 	if err != nil {
@@ -75,5 +86,10 @@ func (s *Server) handlePersonalProfileDetail(w http.ResponseWriter, r *http.Requ
 		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "profile_failed")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"profile": p, "snapshots": snapshots})
+	drift, err := s.db.ProfileDriftForUser(r.Context(), userID)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "profile_failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"profile": p, "snapshots": snapshots, "drift": drift})
 }
