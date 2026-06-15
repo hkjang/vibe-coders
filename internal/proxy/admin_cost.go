@@ -96,6 +96,47 @@ func (s *Server) handleWorkMap(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"dimension": dimension, "nodes": nodes})
 }
 
+// handleInsuranceClaims returns the AI Request Insurance ledger: per insured scope it
+// treats requests as "covered" and degraded outcomes (4xx/5xx/failover/error) as
+// "claims", comparing the claim rate to an SLA target to surface breaches. Read-only.
+// GET /admin/insurance/claims?dimension=project&window=7d&sla=0.99
+func (s *Server) handleInsuranceClaims(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	dimension := strings.TrimSpace(r.URL.Query().Get("dimension"))
+	if dimension == "" {
+		dimension = "project"
+	}
+	since := parseWindow(r.URL.Query().Get("window"), 7*24*time.Hour, "day")
+	slaTarget := s.cfg.Insurance.SLATarget
+	if raw := strings.TrimSpace(r.URL.Query().Get("sla")); raw != "" {
+		if v, err := strconv.ParseFloat(raw, 64); err == nil {
+			slaTarget = v
+		}
+	}
+	claims, err := s.db.InsuranceClaims(r.Context(), dimension, since, recentLimit(r), slaTarget)
+	if err != nil {
+		writeOpenAIError(w, http.StatusBadRequest, err.Error(), "invalid_request_error", "insurance_failed")
+		return
+	}
+	var totalCovered, totalClaims int64
+	breaches := 0
+	for _, c := range claims {
+		totalCovered += c.Covered
+		totalClaims += c.Claims
+		if !c.SLAMet {
+			breaches++
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"dimension": dimension, "sla_target": slaTarget,
+		"total_covered": totalCovered, "total_claims": totalClaims, "scopes_in_breach": breaches,
+		"scopes": claims,
+	})
+}
+
 // handleCostGuard manages the pre-call cost guard config.
 // GET /admin/cost → {enabled, threshold_krw}; POST sets it.
 func (s *Server) handleCostGuard(w http.ResponseWriter, r *http.Request) {

@@ -90,6 +90,7 @@ Roo Code / Cursor / Continue 등 OpenAI 호환 API 를 호출하는 VS Code 확�
 - **AI 업무지도 (Work Map)** (`v0.5.6`): work 차원(project/repo/team 등)별 요청·토큰·비용·distinct 사용자/모델·오류율·대표 모델·task_type 분포를 모은 통합 뷰(`/admin/work-map`) — 어떤 AI 업무가 어디서 일어나는지 read-only 집계
 - **Golden Workflow** (`v0.5.7`): 정렬된 골든 스텝들을 하나의 회귀 단위로 묶는 1급 엔터티(`/admin/golden-workflows` CRUD, `/admin/golden-workflows/run`) — 스텝별 통과/점수 + 전체 pass_rate, `?fail_on_regression=1`+`min_pass_rate`로 CI 게이트(스텝 간 체이닝 없음)
 - **Prompt to Product** (`v0.5.8`): 반복되는 프롬프트 지문을 재사용 가능한 명명된 템플릿(제품)으로 승격하는 루프(`/admin/prompt-products` + `/candidates`) — 후보 발굴(빈도·비용·모델·제품화 여부)→승격(정식 템플릿 생성 + 출처/ reach 스냅샷)→채택도 추적
+- **AI 요청 보험 모드** (`v0.5.9`): scope별 요청(covered) 대비 저하 결과(4xx/5xx/failover/error=claim)를 SLA 목표와 비교하는 read-only 원장(`/admin/insurance/claims`) — claim_rate·허용치 대비 초과 claim·sla_met, `INSURANCE_SLA_TARGET`(기본 0.99)/`?sla=`
 - **운영·거버넌스 확장** (`v0.3.0`): 정책 시뮬레이터(`/admin/policies/simulate`), 모델 가격표 버전 이력(`/admin/pricing`, `/admin/pricing/seed`), 운영 리스크 스코어(`/admin/ops/risk`)·상태(`/admin/ops/status`), Provider SLO(`/admin/providers/slo`), 비용 이상탐지(`/admin/cost/anomalies`)·배부(`/admin/cost/allocation`)·팀 예산 예측(`/admin/budgets/projection`), 모델별 코딩 품질(`/admin/models/quality`), 작업 템플릿(`/admin/templates`), 프롬프트 버전 승격(`/admin/prompts/promotions`), 자동 라우팅 학습 루프(`/admin/routing/learning/auto`), DW 롤업(`/admin/dw/rollups`), Mattermost 알림(`/admin/notifications/mattermost`)
 - 호출 이력 CSV 다운로드 `/admin/export.csv` (Excel UTF-8 BOM 포함, 한국어 그대로 열림)
 - 운영용 백업 스크립트 `scripts/backup.ps1` / `scripts/backup.sh` (SQLite `.backup` + fallback ndjson + 보존 일수 적용)
@@ -175,6 +176,7 @@ $env:PROXY_API_KEYS="dev:dev-proxy-key:alice:platform,team:team-proxy-key:bob:ba
 | `CARBON_MODEL_WH_PER_1K` | 없음 | 모델별 에너지 계수 오버라이드(`gpt-4.1=0.8,gpt-4.1-mini=0.2`) |
 | `CARBON_PUE` | `1.2` | 데이터센터 PUE(전력 사용 효율) 배수 |
 | `CARBON_GRID_INTENSITY_G` | `475` | 그리드 탄소 강도(gCO2e/kWh) |
+| `INSURANCE_SLA_TARGET` | `0.99` | AI 요청 보험 SLA 신뢰도 목표(claim_rate 허용치=1-목표) |
 
 비용 계산은 가격표가 설정된 모델에만 적용되며 단위는 원(₩) 입니다.
 

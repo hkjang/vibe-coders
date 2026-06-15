@@ -26,7 +26,18 @@ type Config struct {
 	Text2SQL   Text2SQLConfig
 	ClickHouse ClickHouseConfig
 	Carbon     CarbonConfig
+	Insurance  InsuranceConfig
 	Pricing    map[string]ModelPrice
+}
+
+// InsuranceConfig parameterizes the AI Request Insurance view: an SLA-claims ledger
+// that treats degraded outcomes (4xx/5xx/failover/error) as "claims" against the
+// "covered" requests of an insured scope and compares the claim rate to an SLA target.
+// Read-only — nothing enforces on it.
+type InsuranceConfig struct {
+	// SLATarget is the reliability promise (0..1) used as the default claim-rate
+	// allowance: a scope is "met" when its claim rate <= (1 - SLATarget). Default 0.99.
+	SLATarget float64
 }
 
 // CarbonConfig parameterizes the Prompt Carbon Score: an estimate of the electricity
@@ -298,6 +309,9 @@ func Load() (Config, error) {
 			PerModelWhPer1K: floatMapEnv("CARBON_MODEL_WH_PER_1K"),
 			PUE:             floatEnv("CARBON_PUE", 1.2),
 			GridIntensityG:  floatEnv("CARBON_GRID_INTENSITY_G", 475),
+		},
+		Insurance: InsuranceConfig{
+			SLATarget: floatEnv("INSURANCE_SLA_TARGET", 0.99),
 		},
 		ClickHouse: ClickHouseConfig{
 			URL:               strings.TrimRight(os.Getenv("CLICKHOUSE_URL"), "/"),

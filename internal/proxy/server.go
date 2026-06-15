@@ -207,6 +207,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/admin/ai-credit-score", s.handleAICreditScore)
 	mux.HandleFunc("/admin/carbon-score", s.handleCarbonScore)
 	mux.HandleFunc("/admin/work-map", s.handleWorkMap)
+	mux.HandleFunc("/admin/insurance/claims", s.handleInsuranceClaims)
 	mux.HandleFunc("/admin/policies/decisions", s.handlePolicyDecisions)
 	mux.HandleFunc("/admin/policies/simulate", s.handlePolicySimulate)
 	mux.HandleFunc("/admin/policies/export", s.handlePolicyExport)
