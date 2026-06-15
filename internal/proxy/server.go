@@ -57,6 +57,7 @@ type Server struct {
 	chSinkStarted bool                                   // true once the startup worker apply has run (gates reload-time restarts)
 	carbonRuntime atomic.Pointer[config.CarbonConfig]    // admin-settings overlay over cfg.Carbon
 	insRuntime    atomic.Pointer[config.InsuranceConfig] // admin-settings overlay over cfg.Insurance
+	cacheRuntime  atomic.Pointer[config.CacheConfig]     // admin-settings overlay over cfg.Cache
 	sessions     *sessionInferer
 	sessionGCAt  atomic.Int64
 	extSeen      sync.Map // external key id -> struct{}; dedupes lazy registration

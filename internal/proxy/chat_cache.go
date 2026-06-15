@@ -61,7 +61,7 @@ func chatCacheKey(body []byte) (string, string, bool) {
 // chatCacheEligible reports whether this request may be served/stored from the chat
 // cache: feature on, deterministic body (temp 0 / seed) OR explicit opt-in header.
 func (s *Server) chatCacheEligible(r *http.Request, body []byte) (string, bool) {
-	if !s.cfg.Cache.ChatEnabled || r.Method != http.MethodPost || r.URL.Path != "/v1/chat/completions" {
+	if !s.cacheConf().ChatEnabled || r.Method != http.MethodPost || r.URL.Path != "/v1/chat/completions" {
 		return "", false
 	}
 	key, _, deterministic := chatCacheKey(body)
@@ -136,11 +136,11 @@ func (s *Server) maybeStoreChatCache(ctx context.Context, key string, statusCode
 	if key == "" || statusCode != http.StatusOK {
 		return
 	}
-	maxBytes := s.cfg.Cache.EmbeddingMaxBytes
+	maxBytes := s.cacheConf().EmbeddingMaxBytes
 	if len(responseBody) == 0 || (maxBytes > 0 && len(responseBody) > maxBytes) {
 		return
 	}
-	if err := s.db.PutEmbeddingCache(ctx, key, "chat", contentType, responseBody, s.cfg.Cache.ChatTTL); err != nil {
+	if err := s.db.PutEmbeddingCache(ctx, key, "chat", contentType, responseBody, s.cacheConf().ChatTTL); err != nil {
 		slog.Warn("chat cache store failed", "error", err)
 	}
 }

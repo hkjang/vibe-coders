@@ -95,7 +95,7 @@ func (e *cacheEmbedError) Error() string { return "embedding upstream failed" }
 // caller can store the eventual response under it. Any failure → (nil, false): the
 // request proceeds normally.
 func (s *Server) serveChatSemantic(ctx context.Context, w http.ResponseWriter, r *http.Request, body []byte, meta store.LogRecord, traceID string) ([]float64, bool) {
-	cfg := s.cfg.Cache
+	cfg := s.cacheConf()
 	if !cfg.ChatSemanticEnabled || strings.TrimSpace(cfg.ChatSemanticModel) == "" {
 		return nil, false
 	}
@@ -143,17 +143,17 @@ func (s *Server) serveChatSemantic(ctx context.Context, w http.ResponseWriter, r
 // maybeStoreChatSemantic stores a successful chat response under the query embedding for
 // future semantic reuse.
 func (s *Server) maybeStoreChatSemantic(ctx context.Context, body []byte, vec []float64, statusCode int, contentType string, responseBody []byte) {
-	if !s.cfg.Cache.ChatSemanticEnabled || len(vec) == 0 || statusCode != http.StatusOK || len(responseBody) == 0 {
+	if !s.cacheConf().ChatSemanticEnabled || len(vec) == 0 || statusCode != http.StatusOK || len(responseBody) == 0 {
 		return
 	}
-	if maxBytes := s.cfg.Cache.EmbeddingMaxBytes; maxBytes > 0 && len(responseBody) > maxBytes {
+	if maxBytes := s.cacheConf().EmbeddingMaxBytes; maxBytes > 0 && len(responseBody) > maxBytes {
 		return
 	}
 	_, model, _ := chatCacheKey(body)
 	if model == "" {
 		return
 	}
-	if err := s.db.PutChatSemanticEntry(ctx, newID("sem"), model, vec, contentType, responseBody, s.cfg.Cache.ChatTTL); err != nil {
+	if err := s.db.PutChatSemanticEntry(ctx, newID("sem"), model, vec, contentType, responseBody, s.cacheConf().ChatTTL); err != nil {
 		slog.Warn("semantic cache store failed", "error", err)
 	}
 }

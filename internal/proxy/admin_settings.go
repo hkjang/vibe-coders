@@ -144,6 +144,24 @@ func buildSettingRegistry() []settingDef {
 		{Key: "insurance.sla_target", Category: "insurance", Type: stFloat, validate: rate01, envValue: func(c config.Config) string { return strconv.FormatFloat(c.Insurance.SLATarget, 'f', -1, 64) }},
 		{Key: "insurance.fast_burn", Category: "insurance", Type: stFloat, validate: posFloat, envValue: func(c config.Config) string { return strconv.FormatFloat(c.Insurance.FastBurnThreshold, 'f', -1, 64) }},
 		{Key: "insurance.slow_burn", Category: "insurance", Type: stFloat, validate: posFloat, envValue: func(c config.Config) string { return strconv.FormatFloat(c.Insurance.SlowBurnThreshold, 'f', -1, 64) }},
+
+		// ---- Cache ----
+		{Key: "cache.embedding_enabled", Category: "cache", Type: stBool, envValue: func(c config.Config) string { return strconv.FormatBool(c.Cache.EmbeddingEnabled) }},
+		{Key: "cache.embedding_ttl", Category: "cache", Type: stDuration, validate: dur, envValue: func(c config.Config) string { return c.Cache.EmbeddingTTL.String() }},
+		{Key: "cache.embedding_max_bytes", Category: "cache", Type: stInt, validate: posInt, envValue: func(c config.Config) string { return strconv.Itoa(c.Cache.EmbeddingMaxBytes) }},
+		{Key: "cache.chat_enabled", Category: "cache", Type: stBool, envValue: func(c config.Config) string { return strconv.FormatBool(c.Cache.ChatEnabled) }},
+		{Key: "cache.chat_ttl", Category: "cache", Type: stDuration, validate: dur, envValue: func(c config.Config) string { return c.Cache.ChatTTL.String() }},
+		{Key: "cache.chat_semantic_enabled", Category: "cache", Type: stBool, envValue: func(c config.Config) string { return strconv.FormatBool(c.Cache.ChatSemanticEnabled) }},
+		{Key: "cache.chat_semantic_model", Category: "cache", Type: stString, envValue: func(c config.Config) string { return c.Cache.ChatSemanticModel }},
+		{Key: "cache.chat_semantic_threshold", Category: "cache", Type: stFloat, validate: rate01, envValue: func(c config.Config) string { return strconv.FormatFloat(c.Cache.ChatSemanticThreshold, 'f', -1, 64) }},
+		{Key: "cache.chat_semantic_max_candidates", Category: "cache", Type: stInt, validate: posInt, envValue: func(c config.Config) string { return strconv.Itoa(c.Cache.ChatSemanticMaxCandidates) }},
+
+		// ---- Retention ----
+		{Key: "retention.request_days", Category: "retention", Type: stInt, validate: posInt, envValue: func(c config.Config) string { return strconv.Itoa(c.Retention.RequestDays) }},
+		{Key: "retention.prompt_days", Category: "retention", Type: stInt, validate: posInt, envValue: func(c config.Config) string { return strconv.Itoa(c.Retention.PromptDays) }},
+		{Key: "retention.response_days", Category: "retention", Type: stInt, validate: posInt, envValue: func(c config.Config) string { return strconv.Itoa(c.Retention.ResponseDays) }},
+		{Key: "retention.text2sql_replay_days", Category: "retention", Type: stInt, validate: posInt, envValue: func(c config.Config) string { return strconv.Itoa(c.Retention.Text2SQLReplayDays) }},
+		{Key: "retention.interval", Category: "retention", Type: stDuration, Restart: true, validate: dur, envValue: func(c config.Config) string { return c.Retention.Interval.String() }},
 	}
 }
 
@@ -179,6 +197,14 @@ func (s *Server) insuranceConf() config.InsuranceConfig {
 	return s.cfg.Insurance
 }
 
+// cacheConf returns the effective Cache config (admin-settings overlay over env/default).
+func (s *Server) cacheConf() config.CacheConfig {
+	if p := s.cacheRuntime.Load(); p != nil {
+		return *p
+	}
+	return s.cfg.Cache
+}
+
 // reloadRuntimeConfig rebuilds the Text2SQL/ClickHouse runtime snapshots from env defaults
 // overlaid with admin-managed settings. Called at startup and after every settings change.
 func (s *Server) reloadRuntimeConfig(ctx context.Context) {
@@ -190,10 +216,16 @@ func (s *Server) reloadRuntimeConfig(ctx context.Context) {
 	}
 	prevT2S := s.t2sConf()
 	prevCH := s.chConf()
+	prevRet := s.cfg.Retention
+	if s.retention != nil {
+		prevRet = s.retention.Config()
+	}
 	t2s := s.cfg.Text2SQL
 	ch := s.cfg.ClickHouse
 	carbon := s.cfg.Carbon
 	ins := s.cfg.Insurance
+	cache := s.cfg.Cache
+	ret := s.cfg.Retention
 	for _, d := range settingRegistry {
 		if _, ok := stored[d.Key]; !ok {
 			continue
@@ -202,12 +234,17 @@ func (s *Server) reloadRuntimeConfig(ctx context.Context) {
 		if source != "admin" {
 			continue
 		}
-		applyRuntimeSetting(&t2s, &ch, &carbon, &ins, d.Key, val)
+		applyRuntimeSetting(&t2s, &ch, &carbon, &ins, &cache, &ret, d.Key, val)
 	}
 	s.t2sRuntime.Store(&t2s)
 	s.chRuntime.Store(&ch)
 	s.carbonRuntime.Store(&carbon)
 	s.insRuntime.Store(&ins)
+	s.cacheRuntime.Store(&cache)
+	// Apply retention changes to the running worker (day thresholds next run; interval recreates the ticker).
+	if s.retention != nil && prevRet != ret {
+		s.retention.Reconfigure(ret)
+	}
 
 	// Swap Text2SQL execute/twin DB connections when their DSN/driver changed: close the
 	// cached *sql.DB so the next request lazily reopens against the new target.
@@ -227,7 +264,7 @@ func (s *Server) reloadRuntimeConfig(ctx context.Context) {
 	}
 }
 
-func applyRuntimeSetting(t2s *config.Text2SQLConfig, ch *config.ClickHouseConfig, carbon *config.CarbonConfig, ins *config.InsuranceConfig, key, val string) {
+func applyRuntimeSetting(t2s *config.Text2SQLConfig, ch *config.ClickHouseConfig, carbon *config.CarbonConfig, ins *config.InsuranceConfig, cache *config.CacheConfig, ret *config.RetentionConfig, key, val string) {
 	val = strings.TrimSpace(val)
 	atoi := func() int { n, _ := strconv.Atoi(val); return n }
 	atof := func() float64 { f, _ := strconv.ParseFloat(val, 64); return f }
@@ -330,6 +367,34 @@ func applyRuntimeSetting(t2s *config.Text2SQLConfig, ch *config.ClickHouseConfig
 		ins.FastBurnThreshold = atof()
 	case "insurance.slow_burn":
 		ins.SlowBurnThreshold = atof()
+	case "cache.embedding_enabled":
+		cache.EmbeddingEnabled = atob()
+	case "cache.embedding_ttl":
+		cache.EmbeddingTTL = adur(cache.EmbeddingTTL)
+	case "cache.embedding_max_bytes":
+		cache.EmbeddingMaxBytes = atoi()
+	case "cache.chat_enabled":
+		cache.ChatEnabled = atob()
+	case "cache.chat_ttl":
+		cache.ChatTTL = adur(cache.ChatTTL)
+	case "cache.chat_semantic_enabled":
+		cache.ChatSemanticEnabled = atob()
+	case "cache.chat_semantic_model":
+		cache.ChatSemanticModel = val
+	case "cache.chat_semantic_threshold":
+		cache.ChatSemanticThreshold = atof()
+	case "cache.chat_semantic_max_candidates":
+		cache.ChatSemanticMaxCandidates = atoi()
+	case "retention.request_days":
+		ret.RequestDays = atoi()
+	case "retention.prompt_days":
+		ret.PromptDays = atoi()
+	case "retention.response_days":
+		ret.ResponseDays = atoi()
+	case "retention.text2sql_replay_days":
+		ret.Text2SQLReplayDays = atoi()
+	case "retention.interval":
+		ret.Interval = adur(ret.Interval)
 	}
 }
 

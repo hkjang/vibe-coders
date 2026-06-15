@@ -139,20 +139,20 @@ func (s *Server) serveEmbeddingFromCache(ctx context.Context, w http.ResponseWri
 }
 
 func (s *Server) maybeStoreEmbeddingCache(ctx context.Context, requestBody []byte, statusCode int, contentType string, responseBody []byte) {
-	if !s.cfg.Cache.EmbeddingEnabled {
+	if !s.cacheConf().EmbeddingEnabled {
 		return
 	}
 	if statusCode != http.StatusOK {
 		return
 	}
-	if len(responseBody) == 0 || len(responseBody) > s.cfg.Cache.EmbeddingMaxBytes {
+	if len(responseBody) == 0 || len(responseBody) > s.cacheConf().EmbeddingMaxBytes {
 		return
 	}
 	key, model, ok := embeddingCacheKey(requestBody)
 	if !ok {
 		return
 	}
-	if err := s.db.PutEmbeddingCache(ctx, key, model, contentType, responseBody, s.cfg.Cache.EmbeddingTTL); err != nil {
+	if err := s.db.PutEmbeddingCache(ctx, key, model, contentType, responseBody, s.cacheConf().EmbeddingTTL); err != nil {
 		slog.Warn("embedding cache store failed", "error", err)
 	}
 }

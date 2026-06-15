@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"path/filepath"
 	"testing"
+	"time"
 
+	"vibe-coders/internal/config"
 	"vibe-coders/internal/store"
 )
 
@@ -42,6 +44,7 @@ func TestRuntimeConfigOverlay(t *testing.T) {
 	put("clickhouse.table", "string", enc("ch_facts"), false)
 	put("carbon.pue", "float", enc("1.5"), false)
 	put("insurance.sla_target", "float", enc("0.995"), false)
+	put("cache.chat_enabled", "bool", enc("true"), false)
 
 	// Secret overlay: store encrypted, expect decrypted at runtime.
 	cipher, err := server.secrets.Encrypt("postgres://u:p@h/db")
@@ -73,5 +76,30 @@ func TestRuntimeConfigOverlay(t *testing.T) {
 	}
 	if got := server.insuranceConf().SLATarget; got < 0.994 || got > 0.996 {
 		t.Errorf("insurance SLA target = %f, want 0.995", got)
+	}
+	if !server.cacheConf().ChatEnabled {
+		t.Error("cache.chat_enabled overlay should be true")
+	}
+}
+
+func TestRetentionReconfigure(t *testing.T) {
+	db := openTestStore(t)
+	defer db.Close()
+	logger := store.NewAsyncLogger(db, 32, filepath.Join(t.TempDir(), "fallback.ndjson"))
+	logger.Start()
+	defer logger.Stop(context.Background())
+	worker := store.NewRetentionWorker(db, config.RetentionConfig{RequestDays: 90, Interval: time.Hour})
+	server, err := NewServer(testConfig("http://upstream.invalid", "secret"), db, logger, worker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	enc := func(v string) string { b, _ := json.Marshal(v); return string(b) }
+	if err := db.UpsertAdminSetting(ctx, store.AdminSetting{Key: "retention.request_days", Category: "retention", ValueJSON: enc("30"), ValueType: "int", Source: "admin"}, "t", ""); err != nil {
+		t.Fatal(err)
+	}
+	server.reloadRuntimeConfig(ctx)
+	if got := worker.Config().RequestDays; got != 30 {
+		t.Errorf("retention worker RequestDays = %d, want 30 after reconfigure", got)
 	}
 }
