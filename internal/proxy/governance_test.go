@@ -17,6 +17,74 @@ import (
 	"vibe-coders/internal/store"
 )
 
+func TestPolicyExportImport(t *testing.T) {
+	db := openTestStore(t)
+	defer db.Close()
+	logger := store.NewAsyncLogger(db, 32, filepath.Join(t.TempDir(), "fallback.ndjson"))
+	logger.Start()
+	defer logger.Stop(context.Background())
+	server, err := NewServer(testConfig("http://unused", "secret"), db, logger, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxy := httptest.NewServer(server.Routes())
+	defer proxy.Close()
+
+	// Seed one policy.
+	resp := postJSON(t, proxy.URL+"/admin/policies", "", map[string]any{
+		"name":  "seed",
+		"rules": []any{map[string]any{"name": "r1", "contains_secret": true, "block": true}},
+	})
+	resp.Body.Close()
+
+	// Export.
+	exp, err := http.Get(proxy.URL + "/admin/policies/export")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var export struct {
+		Policies []store.Policy `json:"policies"`
+	}
+	json.NewDecoder(exp.Body).Decode(&export)
+	exp.Body.Close()
+	if len(export.Policies) != 1 {
+		t.Fatalf("expected 1 exported policy, got %d", len(export.Policies))
+	}
+
+	// Build an import doc with a new policy id.
+	imported := export.Policies[0]
+	imported.ID = "imported-pol-1"
+	imported.Name = "imported"
+	// A new policy carries new rule IDs (rule IDs are globally unique).
+	for i := range imported.Rules {
+		imported.Rules[i].ID = "imported-rule-" + imported.Rules[i].ID
+		imported.Rules[i].PolicyID = imported.ID
+	}
+	importBody := map[string]any{"policies": []store.Policy{imported}}
+
+	// Dry-run: must NOT write.
+	resp = postJSON(t, proxy.URL+"/admin/policies/import?dry_run=1", "", importBody)
+	var dryResp struct {
+		DryRun  bool `json:"dry_run"`
+		Created int  `json:"created"`
+	}
+	json.NewDecoder(resp.Body).Decode(&dryResp)
+	resp.Body.Close()
+	if !dryResp.DryRun || dryResp.Created != 1 {
+		t.Fatalf("dry-run plan wrong: %+v", dryResp)
+	}
+	if pols, _ := db.ListPolicies(context.Background()); len(pols) != 1 {
+		t.Fatalf("dry-run must not write, got %d policies", len(pols))
+	}
+
+	// Apply.
+	resp = postJSON(t, proxy.URL+"/admin/policies/import", "", importBody)
+	resp.Body.Close()
+	if pols, _ := db.ListPolicies(context.Background()); len(pols) != 2 {
+		t.Fatalf("apply should add the imported policy, got %d", len(pols))
+	}
+}
+
 func TestGovernanceSecretPolicyBlocksBeforeUpstream(t *testing.T) {
 	var upstreamCalls atomic.Int32
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

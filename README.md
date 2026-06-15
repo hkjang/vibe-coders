@@ -78,6 +78,7 @@ Roo Code / Cursor / Continue 등 OpenAI 호환 API 를 호출하는 VS Code 확�
 - **질문 자산화 + 위험 단계화** (`v0.4.4`): 반복 질문 원클릭 승격(`/admin/text2sql/promote` — report/golden/glossary; 저장 리포트 `/admin/text2sql/reports`). 누적 위험 단계화(감지 < `TEXT2SQL_DAILY_RISK_WARN` ≤ 경고 < `TEXT2SQL_DAILY_RISK_LIMIT` ≤ 차단) — 경고 구간은 주의 문구만 첨부하고 정상 처리
 - **응답 품질 강화** (`v0.4.5`): 검증 통과 응답에 감사 근거 푸터(스키마·버전·권한/용어 지문·EXPLAIN 위험·마스킹 컬럼), 검증 거부 시 수정 방법 안내, 실행 결과 0행 시 복구 제안 자동 첨부
 - **ClickHouse Text2SQL fact 적재** (`v0.4.6`): 일별 rollup에 더해 질의 단위 fact 테이블 적재(`CLICKHOUSE_TEXT2SQL_FACT_TABLE`) — 질문/SQL 원문 제외(마스킹), watermark 증분 + 자동/수동(`/admin/dw/text2sql-fact`)
+- **정책 GitOps** (`v0.4.7`): 거버넌스 정책+룰 portable JSON 내보내기(`GET /admin/policies/export`)·가져오기(`POST /admin/policies/import`, `?dry_run=1`이면 생성/수정 플랜만) — repo 커밋·PR 리뷰·diff·롤백
 - **운영·거버넌스 확장** (`v0.3.0`): 정책 시뮬레이터(`/admin/policies/simulate`), 모델 가격표 버전 이력(`/admin/pricing`, `/admin/pricing/seed`), 운영 리스크 스코어(`/admin/ops/risk`)·상태(`/admin/ops/status`), Provider SLO(`/admin/providers/slo`), 비용 이상탐지(`/admin/cost/anomalies`)·배부(`/admin/cost/allocation`)·팀 예산 예측(`/admin/budgets/projection`), 모델별 코딩 품질(`/admin/models/quality`), 작업 템플릿(`/admin/templates`), 프롬프트 버전 승격(`/admin/prompts/promotions`), 자동 라우팅 학습 루프(`/admin/routing/learning/auto`), DW 롤업(`/admin/dw/rollups`), Mattermost 알림(`/admin/notifications/mattermost`)
 - 호출 이력 CSV 다운로드 `/admin/export.csv` (Excel UTF-8 BOM 포함, 한국어 그대로 열림)
 - 운영용 백업 스크립트 `scripts/backup.ps1` / `scripts/backup.sh` (SQLite `.backup` + fallback ndjson + 보존 일수 적용)

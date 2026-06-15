@@ -201,6 +201,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/admin/anomalies", s.handleAnomalies)
 	mux.HandleFunc("/admin/policies/decisions", s.handlePolicyDecisions)
 	mux.HandleFunc("/admin/policies/simulate", s.handlePolicySimulate)
+	mux.HandleFunc("/admin/policies/export", s.handlePolicyExport)
+	mux.HandleFunc("/admin/policies/import", s.handlePolicyImport)
 	mux.HandleFunc("/admin/policies", s.handlePolicies)
 	mux.HandleFunc("/admin/approvals", s.handleApprovals)
 	mux.HandleFunc("/admin/approvals/", s.handleApprovalDecision)

@@ -55,6 +55,84 @@ func (s *Server) handlePolicies(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// handlePolicyExport returns all policies (with rules) as a portable JSON document for
+// GitOps — commit it to a repo, review changes as a diff, and re-import.
+// GET /admin/policies/export
+func (s *Server) handlePolicyExport(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	policies, err := s.db.ListPolicies(r.Context())
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "policies_failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"version": 1, "count": len(policies), "policies": policies})
+}
+
+// handlePolicyImport applies an exported policy document. With ?dry_run=1 it reports the
+// plan (which policies would be created vs updated, and rule counts) without writing —
+// the GitOps "plan" step. Without it, the policies are upserted.
+// POST /admin/policies/import[?dry_run=1] {policies:[...]}
+func (s *Server) handlePolicyImport(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	if r.Method != http.MethodPost {
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
+	var payload struct {
+		Policies []store.Policy `json:"policies"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "invalid_body")
+		return
+	}
+	if len(payload.Policies) == 0 {
+		writeOpenAIError(w, http.StatusBadRequest, "no policies in payload", "invalid_request_error", "empty_payload")
+		return
+	}
+	existing, err := s.db.ListPolicies(r.Context())
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "policies_failed")
+		return
+	}
+	existingIDs := map[string]bool{}
+	for _, p := range existing {
+		existingIDs[p.ID] = true
+	}
+	dryRun := r.URL.Query().Get("dry_run") == "1"
+	plan := []map[string]any{}
+	created, updated := 0, 0
+	for _, p := range payload.Policies {
+		if strings.TrimSpace(p.ID) == "" || strings.TrimSpace(p.Name) == "" {
+			writeOpenAIError(w, http.StatusBadRequest, "each policy needs id and name", "invalid_request_error", "invalid_policy")
+			return
+		}
+		action := "create"
+		if existingIDs[p.ID] {
+			action = "update"
+			updated++
+		} else {
+			created++
+		}
+		plan = append(plan, map[string]any{"id": p.ID, "name": p.Name, "action": action, "rules": len(p.Rules)})
+		if !dryRun {
+			if err := s.db.UpsertPolicyWithRules(r.Context(), p, p.Rules); err != nil {
+				writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "policy_import_failed")
+				return
+			}
+		}
+	}
+	if !dryRun {
+		s.auditAdmin(r, "governance.policy.import", "", auditJSON(map[string]any{"created": created, "updated": updated}))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"dry_run": dryRun, "created": created, "updated": updated, "plan": plan})
+}
+
 func (s *Server) handlePolicyDecisions(w http.ResponseWriter, r *http.Request) {
 	if !s.authorizeAdmin(r) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
