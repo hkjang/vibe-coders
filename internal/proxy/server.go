@@ -1368,6 +1368,11 @@ func (s *Server) authorizeAdmin(r *http.Request) bool {
 				(strings.HasPrefix(r.URL.Path, "/admin/users") || strings.HasPrefix(r.URL.Path, "/admin/teams") || strings.HasPrefix(r.URL.Path, "/admin/api-keys")) {
 				return true
 			}
+			// Settings sub-admins (ops/ai/security) may write under /admin/settings even
+			// without admin:write; the settings handlers enforce per-category restrictions.
+			if required == "admin:write" && strings.HasPrefix(r.URL.Path, "/admin/settings") && settingsSubAdminRole(claims.Role) {
+				return true
+			}
 			_ = s.db.InsertAuditEvent(r.Context(), store.AuthEvent{ID: newID("ae"), EventType: "scope_denied", ActorUserID: claims.Subject, TeamID: claims.TeamID, IP: clientIP(r), UserAgent: r.UserAgent(), Detail: required, CreatedAt: time.Now().UTC()})
 			return false
 		}

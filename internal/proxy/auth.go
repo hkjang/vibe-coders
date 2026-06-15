@@ -33,6 +33,13 @@ var roleScopes = map[string][]string{
 	"developer":       {"chat:completion", "embeddings:create", "models:read", "routing:read", "observability:read", "costs:read", "mcp:use"},
 	"viewer":          {"models:read", "admin:read", "routing:read", "observability:read", "costs:read", "security:read"},
 	"service_account": {"chat:completion", "embeddings:create", "models:read", "mcp:use"},
+	// Settings-scoped sub-admins: they can read the admin surface (admin:read) and write
+	// only their slice of runtime settings (enforced per-category in the settings handlers,
+	// not via a broad admin:write grant).
+	"ops_admin":      {"admin:read", "observability:read", "costs:read", "models:read"},
+	"ai_admin":       {"admin:read", "models:read", "routing:read", "observability:read"},
+	"security_admin": {"admin:read", "security:read"},
+	"readonly_admin": {"admin:read", "observability:read", "costs:read", "security:read"},
 }
 
 type accessClaims struct {
@@ -244,9 +251,11 @@ func roleRank(role string) int {
 		return 4
 	case "team_admin":
 		return 3
+	case "ops_admin", "ai_admin", "security_admin":
+		return 3
 	case "developer", "service_account":
 		return 2
-	case "viewer":
+	case "viewer", "readonly_admin":
 		return 1
 	default:
 		return 0

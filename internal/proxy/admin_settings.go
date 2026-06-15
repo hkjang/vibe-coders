@@ -398,6 +398,67 @@ func applyRuntimeSetting(t2s *config.Text2SQLConfig, ch *config.ClickHouseConfig
 	}
 }
 
+// settingPermissionGroup classifies a setting key into a permission group so role-scoped
+// admins can be limited to their slice (per spec §11). Secret keys and masking/risk/replay
+// controls are "security"; ClickHouse/retention/cache are "ops"; Text2SQL (model/eval/etc.)
+// is "ai"; everything else (carbon/insurance) is admin-only.
+func settingPermissionGroup(d settingDef) string {
+	if d.Secret {
+		return "security"
+	}
+	switch d.Key {
+	case "text2sql.mask_results", "text2sql.daily_risk_limit", "text2sql.daily_risk_warn", "text2sql.replay_bundles":
+		return "security"
+	}
+	switch {
+	case strings.HasPrefix(d.Category, "clickhouse"), strings.HasPrefix(d.Category, "retention"), strings.HasPrefix(d.Category, "cache"):
+		return "ops"
+	case strings.HasPrefix(d.Category, "text2sql"):
+		return "ai"
+	default:
+		return "admin"
+	}
+}
+
+// settingsSubAdminRole reports whether a role is one of the settings-scoped sub-admins.
+func settingsSubAdminRole(role string) bool {
+	switch role {
+	case "ops_admin", "ai_admin", "security_admin":
+		return true
+	}
+	return false
+}
+
+// roleCanWriteGroup reports whether a role may write settings in a permission group.
+func roleCanWriteGroup(role, group string) bool {
+	switch role {
+	case "super_admin", "admin", "":
+		return true // full admins (and legacy ADMIN_TOKEN mode → empty role) write anything
+	case "ops_admin":
+		return group == "ops"
+	case "ai_admin":
+		return group == "ai"
+	case "security_admin":
+		return group == "security"
+	default:
+		return false
+	}
+}
+
+// callerSettingsRole returns the caller's role for settings authorization. In ADMIN_TOKEN
+// mode (no JWT) it returns "" which roleCanWriteGroup treats as full admin.
+func (s *Server) callerSettingsRole(r *http.Request) string {
+	if claims, ok := s.currentAccessClaims(r); ok {
+		return claims.Role
+	}
+	return ""
+}
+
+// canWriteSetting reports whether the caller may modify a specific setting.
+func (s *Server) canWriteSetting(r *http.Request, d settingDef) bool {
+	return roleCanWriteGroup(s.callerSettingsRole(r), settingPermissionGroup(d))
+}
+
 func settingDefByKey(key string) (settingDef, bool) {
 	for _, d := range settingRegistry {
 		if d.Key == key {
@@ -512,7 +573,10 @@ func (s *Server) handleAdminSettings(w http.ResponseWriter, r *http.Request) {
 		if category != "" && d.Category != category && !strings.HasPrefix(d.Category, category+".") {
 			continue
 		}
-		items = append(items, s.settingView(stored, d))
+		view := s.settingView(stored, d)
+		view["permission_group"] = settingPermissionGroup(d)
+		view["can_write"] = s.canWriteSetting(r, d)
+		items = append(items, view)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"settings": items, "category": category})
 }
@@ -527,6 +591,10 @@ func (s *Server) handleAdminSettingByKey(w http.ResponseWriter, r *http.Request)
 	d, ok := settingDefByKey(key)
 	if !ok {
 		writeOpenAIError(w, http.StatusNotFound, "unknown setting key", "invalid_request_error", "unknown_key")
+		return
+	}
+	if (r.Method == http.MethodPut || r.Method == http.MethodDelete) && !s.canWriteSetting(r, d) {
+		writeOpenAIError(w, http.StatusForbidden, "your role cannot modify this setting category", "permission_error", "settings_role_denied")
 		return
 	}
 	switch r.Method {
@@ -662,6 +730,10 @@ func (s *Server) applySettingsBatch(w http.ResponseWriter, r *http.Request, item
 		}
 		if rejectSecret && d.Secret {
 			errs[key] = "secret keys cannot be imported; set them individually"
+			continue
+		}
+		if !s.canWriteSetting(r, d) {
+			errs[key] = "your role cannot modify this setting category"
 			continue
 		}
 		val := strings.TrimSpace(it.Value)
@@ -933,6 +1005,10 @@ func (s *Server) handleAdminSettingsRollback(w http.ResponseWriter, r *http.Requ
 	d, ok := settingDefByKey(key)
 	if !ok {
 		writeOpenAIError(w, http.StatusNotFound, "unknown setting key", "invalid_request_error", "unknown_key")
+		return
+	}
+	if !s.canWriteSetting(r, d) {
+		writeOpenAIError(w, http.StatusForbidden, "your role cannot modify this setting category", "permission_error", "settings_role_denied")
 		return
 	}
 	if d.Secret {
