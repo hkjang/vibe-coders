@@ -3,10 +3,12 @@ package proxy
 import (
 	"encoding/json"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	"vibe-coders/internal/audit"
 	"vibe-coders/internal/store"
 )
 
@@ -94,6 +96,103 @@ func (s *Server) handleWorkMap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"dimension": dimension, "nodes": nodes})
+}
+
+// handleSavings returns the Savings Report: per scope, how much the gateway saved via
+// routing downshifts (served a cheaper model than requested — priced exactly against the
+// requested model) and via cache hits (estimated as avoided cost). Read-only.
+// GET /admin/savings?dimension=project&window=7d
+func (s *Server) handleSavings(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	dimension := strings.TrimSpace(r.URL.Query().Get("dimension"))
+	if dimension == "" {
+		dimension = "project"
+	}
+	since := parseWindow(r.URL.Query().Get("window"), 7*24*time.Hour, "day")
+	ctx := r.Context()
+
+	downshift, err := s.db.RoutingDownshiftUsage(ctx, dimension, since)
+	if err != nil {
+		writeOpenAIError(w, http.StatusBadRequest, err.Error(), "invalid_request_error", "savings_failed")
+		return
+	}
+	cacheRows, err := s.db.CacheUsage(ctx, dimension, since)
+	if err != nil {
+		writeOpenAIError(w, http.StatusBadRequest, err.Error(), "invalid_request_error", "savings_failed")
+		return
+	}
+	pricing := s.pricingMap(ctx)
+
+	type savingsScope struct {
+		Scope               string  `json:"scope"`
+		DownshiftRequests   int64   `json:"downshift_requests"`
+		DownshiftSavingsKRW float64 `json:"downshift_savings_krw"`
+		CacheHits           int64   `json:"cache_hits"`
+		CacheSavingsKRW     float64 `json:"cache_savings_krw"` // estimated
+		TotalSavingsKRW     float64 `json:"total_savings_krw"`
+	}
+	scopes := map[string]*savingsScope{}
+	get := func(name string) *savingsScope {
+		sc := scopes[name]
+		if sc == nil {
+			sc = &savingsScope{Scope: name}
+			scopes[name] = sc
+		}
+		return sc
+	}
+
+	// Exact downshift savings: baseline at the requested model minus actual cost.
+	for _, d := range downshift {
+		baseline := audit.EstimateCostKRW(d.RequestedModel, audit.Usage{
+			PromptTokens: int(d.PromptTokens), CompletionTokens: int(d.CompletionTokens), CachedTokens: int(d.CachedTokens),
+		}, pricing)
+		saved := baseline - d.ActualCostKRW
+		if saved < 0 {
+			saved = 0
+		}
+		sc := get(d.Scope)
+		sc.DownshiftRequests += d.Requests
+		sc.DownshiftSavingsKRW += saved
+	}
+	// Estimated cache savings: cache hits × average non-cache cost per request in scope.
+	for _, c := range cacheRows {
+		if c.CacheHits == 0 {
+			continue
+		}
+		sc := get(c.Scope)
+		sc.CacheHits += c.CacheHits
+		if c.NonCacheRequests > 0 {
+			sc.CacheSavingsKRW += float64(c.CacheHits) * (c.NonCacheCostKRW / float64(c.NonCacheRequests))
+		}
+	}
+
+	out := make([]savingsScope, 0, len(scopes))
+	var totalDownshift, totalCache float64
+	for _, sc := range scopes {
+		sc.TotalSavingsKRW = sc.DownshiftSavingsKRW + sc.CacheSavingsKRW
+		if sc.TotalSavingsKRW <= 0 && sc.CacheHits == 0 && sc.DownshiftRequests == 0 {
+			continue
+		}
+		totalDownshift += sc.DownshiftSavingsKRW
+		totalCache += sc.CacheSavingsKRW
+		out = append(out, *sc)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].TotalSavingsKRW > out[j].TotalSavingsKRW })
+	limit := recentLimit(r)
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"dimension":                 dimension,
+		"total_downshift_savings_krw": totalDownshift,
+		"total_cache_savings_krw":     totalCache,
+		"total_savings_krw":           totalDownshift + totalCache,
+		"cache_savings_estimated":     true,
+		"scopes":                      out,
+	})
 }
 
 // handleInsuranceClaims returns the AI Request Insurance ledger: per insured scope it
