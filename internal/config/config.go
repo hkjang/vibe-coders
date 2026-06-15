@@ -25,7 +25,29 @@ type Config struct {
 	VCS        VCSConfig
 	Text2SQL   Text2SQLConfig
 	ClickHouse ClickHouseConfig
+	Carbon     CarbonConfig
 	Pricing    map[string]ModelPrice
+}
+
+// CarbonConfig parameterizes the Prompt Carbon Score: an estimate of the electricity
+// (Wh) and operational carbon (gCO2e) attributable to LLM token throughput. The
+// estimate is intentionally coarse and fully configurable — published per-token energy
+// figures vary by an order of magnitude — so treat the output as a relative signal for
+// comparing subjects, not an audited measurement.
+type CarbonConfig struct {
+	// WhPer1KTokens is the default electricity (watt-hours) drawn per 1,000 tokens
+	// processed (prompt+completion). Default 0.4 Wh/1K is a mid-range public estimate.
+	WhPer1KTokens float64
+	// PerModelWhPer1K overrides WhPer1KTokens per model (name → Wh/1K), since larger
+	// models draw far more. Parsed from CARBON_MODEL_WH_PER_1K
+	// ("gpt-4.1=0.8,gpt-4.1-mini=0.2").
+	PerModelWhPer1K map[string]float64
+	// PUE (Power Usage Effectiveness) scales IT energy up to include datacenter overhead
+	// (cooling, etc.). Default 1.2 reflects efficient cloud datacenters.
+	PUE float64
+	// GridIntensityG is the grid carbon intensity in gCO2e per kWh used to convert energy
+	// to emissions. Default 475 is a commonly cited global-average figure.
+	GridIntensityG float64
 }
 
 // VCSConfig gates the VCS correlation ingest endpoints. When WebhookSecret is empty
@@ -271,6 +293,12 @@ func Load() (Config, error) {
 			TwinDSN:           os.Getenv("TEXT2SQL_TWIN_DSN"),
 			TwinDriver:        getEnv("TEXT2SQL_TWIN_DRIVER", "postgres"),
 		},
+		Carbon: CarbonConfig{
+			WhPer1KTokens:   floatEnv("CARBON_WH_PER_1K_TOKENS", 0.4),
+			PerModelWhPer1K: floatMapEnv("CARBON_MODEL_WH_PER_1K"),
+			PUE:             floatEnv("CARBON_PUE", 1.2),
+			GridIntensityG:  floatEnv("CARBON_GRID_INTENSITY_G", 475),
+		},
 		ClickHouse: ClickHouseConfig{
 			URL:               strings.TrimRight(os.Getenv("CLICKHOUSE_URL"), "/"),
 			Database:          getEnv("CLICKHOUSE_DB", "default"),
@@ -417,6 +445,32 @@ func floatEnv(key string, fallback float64) float64 {
 		return fallback
 	}
 	return parsed
+}
+
+// floatMapEnv parses a comma-separated "key=float" env var into a map (e.g.
+// "gpt-4.1=0.8,gpt-4.1-mini=0.2"). Malformed pairs are skipped; returns nil if empty.
+func floatMapEnv(key string) map[string]float64 {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return nil
+	}
+	out := map[string]float64{}
+	for _, pair := range strings.Split(raw, ",") {
+		kv := strings.SplitN(pair, "=", 2)
+		if len(kv) != 2 {
+			continue
+		}
+		name := strings.TrimSpace(kv[0])
+		v, err := strconv.ParseFloat(strings.TrimSpace(kv[1]), 64)
+		if name == "" || err != nil {
+			continue
+		}
+		out[name] = v
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // csvEnv parses a comma-separated env var into a trimmed, non-empty slice.

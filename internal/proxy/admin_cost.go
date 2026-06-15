@@ -31,6 +31,49 @@ func (s *Server) handleAICreditScore(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"dimension": dimension, "scores": scores})
 }
 
+// handleCarbonScore estimates per-subject energy (Wh) and operational carbon (gCO2e)
+// from logged token throughput, applying per-model energy coefficients. Coarse,
+// configurable, read-only operational signal.
+// GET /admin/carbon-score?dimension=model&window=7d
+func (s *Server) handleCarbonScore(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	dimension := strings.TrimSpace(r.URL.Query().Get("dimension"))
+	if dimension == "" {
+		dimension = "model"
+	}
+	since := parseWindow(r.URL.Query().Get("window"), 7*24*time.Hour, "day")
+	coeff := store.CarbonCoeff{
+		DefaultWhPer1K:  s.cfg.Carbon.WhPer1KTokens,
+		PerModelWhPer1K: s.cfg.Carbon.PerModelWhPer1K,
+		PUE:             s.cfg.Carbon.PUE,
+		GridIntensityG:  s.cfg.Carbon.GridIntensityG,
+	}
+	scores, err := s.db.CarbonScores(r.Context(), dimension, since, recentLimit(r), coeff)
+	if err != nil {
+		writeOpenAIError(w, http.StatusBadRequest, err.Error(), "invalid_request_error", "carbon_score_failed")
+		return
+	}
+	var totalWh, totalCO2e float64
+	for _, c := range scores {
+		totalWh += c.EnergyWh
+		totalCO2e += c.CO2eGrams
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"dimension":        dimension,
+		"scores":           scores,
+		"total_energy_wh":  totalWh,
+		"total_co2e_grams": totalCO2e,
+		"coefficients": map[string]any{
+			"wh_per_1k_tokens": coeff.DefaultWhPer1K,
+			"pue":              coeff.PUE,
+			"grid_intensity_g": coeff.GridIntensityG,
+		},
+	})
+}
+
 // handleCostGuard manages the pre-call cost guard config.
 // GET /admin/cost → {enabled, threshold_krw}; POST sets it.
 func (s *Server) handleCostGuard(w http.ResponseWriter, r *http.Request) {

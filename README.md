@@ -86,6 +86,7 @@ Roo Code / Cursor / Continue 등 OpenAI 호환 API 를 호출하는 VS Code 확�
 - **데이터 상품 추천** (`v0.5.2`): 반복 질문(report candidate)에 SQL 형태 기반 추천 산출물(dashboard/data_mart/api) 분류 — 어드민 인사이트 표에 노출
 - **사내 AI 신용점수** (`v0.5.3`): subject(API Key·project·model 등)별 신뢰도(성공률)+비용효율 블렌드 점수(`/admin/ai-credit-score`) — read-only
 - **SQL Digital Twin** (`v0.5.4`): Golden 결과 동등성 검증을 운영 DB 대신 마스킹·샘플 트윈 DB에서 실행하는 opt-in 경로(`TEXT2SQL_TWIN_DSN`) — 미설정 시 execute DB 폴백(동작 변화 없음)
+- **Prompt Carbon Score** (`v0.5.5`): 토큰 사용량 기반 요청 전력(Wh)·탄소(gCO2e) 추정(`/admin/carbon-score`) — 모델별 에너지 계수·PUE·그리드 강도 모두 설정값, 주체 간 상대 비교용 read-only 신호
 - **운영·거버넌스 확장** (`v0.3.0`): 정책 시뮬레이터(`/admin/policies/simulate`), 모델 가격표 버전 이력(`/admin/pricing`, `/admin/pricing/seed`), 운영 리스크 스코어(`/admin/ops/risk`)·상태(`/admin/ops/status`), Provider SLO(`/admin/providers/slo`), 비용 이상탐지(`/admin/cost/anomalies`)·배부(`/admin/cost/allocation`)·팀 예산 예측(`/admin/budgets/projection`), 모델별 코딩 품질(`/admin/models/quality`), 작업 템플릿(`/admin/templates`), 프롬프트 버전 승격(`/admin/prompts/promotions`), 자동 라우팅 학습 루프(`/admin/routing/learning/auto`), DW 롤업(`/admin/dw/rollups`), Mattermost 알림(`/admin/notifications/mattermost`)
 - 호출 이력 CSV 다운로드 `/admin/export.csv` (Excel UTF-8 BOM 포함, 한국어 그대로 열림)
 - 운영용 백업 스크립트 `scripts/backup.ps1` / `scripts/backup.sh` (SQLite `.backup` + fallback ndjson + 보존 일수 적용)
@@ -167,6 +168,10 @@ $env:PROXY_API_KEYS="dev:dev-proxy-key:alice:platform,team:team-proxy-key:bob:ba
 | `RETENTION_PROMPT_DAYS` | `30` | 프롬프트 로그 보존 일수 |
 | `RETENTION_RESPONSE_DAYS` | `30` | 응답 로그 보존 일수 |
 | `RETENTION_INTERVAL` | `1h` | 보존 정책 cleanup 워커 주기 |
+| `CARBON_WH_PER_1K_TOKENS` | `0.4` | Prompt Carbon Score 기본 에너지 계수(1K 토큰당 Wh) |
+| `CARBON_MODEL_WH_PER_1K` | 없음 | 모델별 에너지 계수 오버라이드(`gpt-4.1=0.8,gpt-4.1-mini=0.2`) |
+| `CARBON_PUE` | `1.2` | 데이터센터 PUE(전력 사용 효율) 배수 |
+| `CARBON_GRID_INTENSITY_G` | `475` | 그리드 탄소 강도(gCO2e/kWh) |
 
 비용 계산은 가격표가 설정된 모델에만 적용되며 단위는 원(₩) 입니다.
 
