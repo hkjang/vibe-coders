@@ -161,6 +161,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/admin/providers/", s.handleProviderByName)
 	mux.HandleFunc("/admin/audit-logs", s.handleAuditLogs)
 	mux.HandleFunc("/admin/audit/auth-events", s.handleAuthAuditEvents)
+	mux.HandleFunc("/admin/audit/anomalies", s.handleAuditAnomalies)
 	mux.HandleFunc("/admin/users", s.handleUsers)
 	mux.HandleFunc("/admin/users/", s.handleUserDetail)
 	mux.HandleFunc("/admin/teams", s.handleTeams)
