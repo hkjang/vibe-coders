@@ -760,6 +760,23 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 				created_at TEXT NOT NULL,
 				updated_at TEXT NOT NULL
 			)`,
+		// Prompt to Product: a recurring prompt cluster (by fingerprint) promoted into
+		// a named, reusable prompt template ("product"), with provenance + a usage
+		// snapshot taken at promotion time. The product points at a prompt_templates row.
+		`CREATE TABLE IF NOT EXISTS prompt_products (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			description TEXT,
+			category TEXT NOT NULL DEFAULT 'product',
+			source_fingerprint TEXT,
+			template_id TEXT NOT NULL,
+			request_count INTEGER NOT NULL DEFAULT 0,
+			distinct_users INTEGER NOT NULL DEFAULT 0,
+			created_by TEXT,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_prompt_products_fp ON prompt_products(source_fingerprint)`,
 		`CREATE TABLE IF NOT EXISTS routing_rules (
 			id TEXT PRIMARY KEY,
 			enabled INTEGER NOT NULL DEFAULT 1,
