@@ -99,6 +99,7 @@ Roo Code / Cursor / Continue 등 OpenAI 호환 API 를 호출하는 VS Code 확�
 - **Personal AI Profile** (`v0.6.5`): 사용자별 AI 사용 프로필(`/admin/personalization/profiles`, `/{user_id}`) — 팀·역할, 비용·성공률, 선호 task_type·모델·언어(Top5), 한 줄 요약. 최신 캐시 + `?snapshot=1` 시점 스냅샷, 라우팅·추천·코칭 기준점
 - **My AI Home** (`v0.6.6`): 사용자 본인용 self-service 대시보드(`/me/dashboard`, `/me/recommendations`) — JWT/API Key로 호출자 식별, 오늘 사용량·이번 달 비용·자주 쓰는 모델·최근 실패·절감 가능 금액·추천 템플릿·최근 Prompt Product + 본인 패턴 기반 모델 전환/템플릿 추천
 - **개인화 어드민 UI** (`v0.6.7`): 어드민 대시보드에 `개인화` 탭 추가 — Personal AI Profile 목록(정렬 가능)·상세(선호 작업/모델/언어, 비용 성향)·스냅샷 이력 및 생성 버튼
+- **추천 채택률 추적** (`v0.6.8`): 추천 피드백 기록·집계 — 사용자 채택/거절(`POST /me/recommendations/feedback`)을 `recommendation_feedback`에 저장, 관리자 종류별 채택률 조회(`GET /admin/recommendations/adoption`)
 - **운영·거버넌스 확장** (`v0.3.0`): 정책 시뮬레이터(`/admin/policies/simulate`), 모델 가격표 버전 이력(`/admin/pricing`, `/admin/pricing/seed`), 운영 리스크 스코어(`/admin/ops/risk`)·상태(`/admin/ops/status`), Provider SLO(`/admin/providers/slo`), 비용 이상탐지(`/admin/cost/anomalies`)·배부(`/admin/cost/allocation`)·팀 예산 예측(`/admin/budgets/projection`), 모델별 코딩 품질(`/admin/models/quality`), 작업 템플릿(`/admin/templates`), 프롬프트 버전 승격(`/admin/prompts/promotions`), 자동 라우팅 학습 루프(`/admin/routing/learning/auto`), DW 롤업(`/admin/dw/rollups`), Mattermost 알림(`/admin/notifications/mattermost`)
 - 호출 이력 CSV 다운로드 `/admin/export.csv` (Excel UTF-8 BOM 포함, 한국어 그대로 열림)
 - 운영용 백업 스크립트 `scripts/backup.ps1` / `scripts/backup.sh` (SQLite `.backup` + fallback ndjson + 보존 일수 적용)

@@ -804,6 +804,21 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 			created_at TEXT NOT NULL
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_personal_recommendations_user ON personal_recommendations(user_id)`,
+		// ref identifies the recommended target (model name / template id) so feedback can
+		// be keyed to it across recommendation rebuilds.
+		`ALTER TABLE personal_recommendations ADD COLUMN ref TEXT`,
+		// Recommendation feedback: records when a user adopts or dismisses a recommendation,
+		// for measuring adoption rate.
+		`CREATE TABLE IF NOT EXISTS recommendation_feedback (
+			id TEXT PRIMARY KEY,
+			user_id TEXT NOT NULL,
+			kind TEXT NOT NULL,
+			ref TEXT,
+			title TEXT,
+			action TEXT NOT NULL,
+			created_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_recommendation_feedback_kind ON recommendation_feedback(kind, created_at)`,
 		`CREATE TABLE IF NOT EXISTS routing_rules (
 			id TEXT PRIMARY KEY,
 			enabled INTEGER NOT NULL DEFAULT 1,

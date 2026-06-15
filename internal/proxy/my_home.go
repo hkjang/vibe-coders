@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -157,6 +158,7 @@ func (s *Server) handleMyRecommendations(w http.ResponseWriter, r *http.Request)
 		recs = append(recs, store.PersonalRecommendation{
 			ID:   newID("rec"),
 			Kind: "model_switch",
+			Ref:  cheapModel,
 			Title: fmt.Sprintf("자주 쓰는 %s 대신 %s 사용 고려", models[0].Model, cheapModel),
 			Detail: fmt.Sprintf("이번 달 사용 패턴 기준 %s로 전환 시 약 %.0f KRW 절감 가능 (성공률 유지).", cheapModel, savings),
 			EstSavingsKRW: savings,
@@ -176,6 +178,7 @@ func (s *Server) handleMyRecommendations(w http.ResponseWriter, r *http.Request)
 		recs = append(recs, store.PersonalRecommendation{
 			ID:    newID("rec"),
 			Kind:  "template",
+			Ref:   t.ID,
 			Title: "추천 템플릿: " + t.Name,
 			Detail: fmt.Sprintf("표준 템플릿(%s)을 사용하면 일관된 결과와 비용 예측에 도움이 됩니다.", t.Category),
 		})
@@ -191,4 +194,76 @@ func (s *Server) handleMyRecommendations(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"user_id": userID, "recommendations": stored})
+}
+
+// handleMyRecommendationFeedback records the calling user's action on a recommendation
+// (adopt/dismiss), keyed to the recommendation's kind/ref for adoption-rate tracking.
+// POST /me/recommendations/feedback {id, action}
+func (s *Server) handleMyRecommendationFeedback(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
+	userID, ok := s.meUserID(r)
+	if !ok {
+		writeOpenAIError(w, http.StatusUnauthorized, "could not identify caller", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	var payload struct {
+		ID     string `json:"id"`
+		Action string `json:"action"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "invalid_body")
+		return
+	}
+	action := strings.ToLower(strings.TrimSpace(payload.Action))
+	if action != "adopted" && action != "dismissed" {
+		writeOpenAIError(w, http.StatusBadRequest, "action must be 'adopted' or 'dismissed'", "invalid_request_error", "invalid_action")
+		return
+	}
+	rec, found, err := s.db.GetUserRecommendation(r.Context(), userID, strings.TrimSpace(payload.ID))
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "feedback_failed")
+		return
+	}
+	if !found {
+		writeOpenAIError(w, http.StatusNotFound, "recommendation not found (it may have been regenerated; refetch)", "invalid_request_error", "recommendation_not_found")
+		return
+	}
+	if err := s.db.InsertRecommendationFeedback(r.Context(), store.RecommendationFeedback{
+		ID: newID("rfb"), UserID: userID, Kind: rec.Kind, Ref: rec.Ref, Title: rec.Title, Action: action,
+	}); err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "feedback_failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "recorded", "kind": rec.Kind, "action": action})
+}
+
+// handleRecommendationAdoption returns adoption-rate aggregates per recommendation kind
+// over a window (admin). Read-only.
+// GET /admin/recommendations/adoption?window=30d
+func (s *Server) handleRecommendationAdoption(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	since := parseWindow(r.URL.Query().Get("window"), 30*24*time.Hour, "day")
+	byKind, err := s.db.RecommendationAdoption(r.Context(), since)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "adoption_failed")
+		return
+	}
+	var adopted, dismissed int64
+	for _, k := range byKind {
+		adopted += k.Adopted
+		dismissed += k.Dismissed
+	}
+	overall := 0.0
+	if total := adopted + dismissed; total > 0 {
+		overall = float64(adopted) / float64(total)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"by_kind": byKind, "total_adopted": adopted, "total_dismissed": dismissed, "overall_adoption_rate": overall,
+	})
 }

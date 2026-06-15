@@ -2,6 +2,8 @@ package store
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"time"
 )
 
@@ -110,6 +112,7 @@ type PersonalRecommendation struct {
 	ID            string  `json:"id"`
 	UserID        string  `json:"user_id"`
 	Kind          string  `json:"kind"`
+	Ref           string  `json:"ref"` // recommended target (model name / template id)
 	Title         string  `json:"title"`
 	Detail        string  `json:"detail"`
 	EstSavingsKRW float64 `json:"est_savings_krw"`
@@ -128,8 +131,8 @@ func (s *SQLStore) ReplaceUserRecommendations(ctx context.Context, userID string
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	for _, rec := range recs {
-		if _, err := tx.ExecContext(ctx, s.bind(`INSERT INTO personal_recommendations (id, user_id, kind, title, detail, est_savings_krw, created_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?)`), rec.ID, userID, rec.Kind, rec.Title, rec.Detail, rec.EstSavingsKRW, now); err != nil {
+		if _, err := tx.ExecContext(ctx, s.bind(`INSERT INTO personal_recommendations (id, user_id, kind, ref, title, detail, est_savings_krw, created_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`), rec.ID, userID, rec.Kind, rec.Ref, rec.Title, rec.Detail, rec.EstSavingsKRW, now); err != nil {
 			return err
 		}
 	}
@@ -138,7 +141,7 @@ func (s *SQLStore) ReplaceUserRecommendations(ctx context.Context, userID string
 
 // ListUserRecommendations returns a user's current recommendations.
 func (s *SQLStore) ListUserRecommendations(ctx context.Context, userID string) ([]PersonalRecommendation, error) {
-	rows, err := s.db.QueryContext(ctx, s.bind(`SELECT id, user_id, kind, title, COALESCE(detail, ''), est_savings_krw, created_at
+	rows, err := s.db.QueryContext(ctx, s.bind(`SELECT id, user_id, kind, COALESCE(ref, ''), title, COALESCE(detail, ''), est_savings_krw, created_at
 		FROM personal_recommendations WHERE user_id = ? ORDER BY est_savings_krw DESC, created_at DESC`), userID)
 	if err != nil {
 		return nil, err
@@ -147,10 +150,82 @@ func (s *SQLStore) ListUserRecommendations(ctx context.Context, userID string) (
 	out := []PersonalRecommendation{}
 	for rows.Next() {
 		var rec PersonalRecommendation
-		if err := rows.Scan(&rec.ID, &rec.UserID, &rec.Kind, &rec.Title, &rec.Detail, &rec.EstSavingsKRW, &rec.CreatedAt); err != nil {
+		if err := rows.Scan(&rec.ID, &rec.UserID, &rec.Kind, &rec.Ref, &rec.Title, &rec.Detail, &rec.EstSavingsKRW, &rec.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, rec)
+	}
+	return out, rows.Err()
+}
+
+// GetUserRecommendation returns a single recommendation owned by the user, if it still
+// exists (recommendations are regenerated on each rebuild).
+func (s *SQLStore) GetUserRecommendation(ctx context.Context, userID, id string) (PersonalRecommendation, bool, error) {
+	var rec PersonalRecommendation
+	err := s.db.QueryRowContext(ctx, s.bind(`SELECT id, user_id, kind, COALESCE(ref, ''), title, COALESCE(detail, ''), est_savings_krw, created_at
+		FROM personal_recommendations WHERE user_id = ? AND id = ?`), userID, id).
+		Scan(&rec.ID, &rec.UserID, &rec.Kind, &rec.Ref, &rec.Title, &rec.Detail, &rec.EstSavingsKRW, &rec.CreatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return PersonalRecommendation{}, false, nil
+	}
+	if err != nil {
+		return PersonalRecommendation{}, false, err
+	}
+	return rec, true, nil
+}
+
+// RecommendationFeedback records a user's action on a recommendation.
+type RecommendationFeedback struct {
+	ID        string `json:"id"`
+	UserID    string `json:"user_id"`
+	Kind      string `json:"kind"`
+	Ref       string `json:"ref"`
+	Title     string `json:"title"`
+	Action    string `json:"action"` // adopted | dismissed
+	CreatedAt string `json:"created_at"`
+}
+
+// InsertRecommendationFeedback records an adopt/dismiss action.
+func (s *SQLStore) InsertRecommendationFeedback(ctx context.Context, f RecommendationFeedback) error {
+	_, err := s.db.ExecContext(ctx, s.bind(`INSERT INTO recommendation_feedback (id, user_id, kind, ref, title, action, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`), f.ID, f.UserID, f.Kind, f.Ref, f.Title, f.Action, time.Now().UTC().Format(time.RFC3339Nano))
+	return err
+}
+
+// RecommendationAdoptionByKind is the adoption summary for one recommendation kind.
+type RecommendationAdoptionByKind struct {
+	Kind            string  `json:"kind"`
+	Adopted         int64   `json:"adopted"`
+	Dismissed       int64   `json:"dismissed"`
+	DistinctAdopters int64  `json:"distinct_adopters"`
+	AdoptionRate    float64 `json:"adoption_rate"` // adopted / (adopted + dismissed)
+}
+
+// RecommendationAdoption aggregates feedback per kind over the window.
+func (s *SQLStore) RecommendationAdoption(ctx context.Context, since time.Time) ([]RecommendationAdoptionByKind, error) {
+	rows, err := s.db.QueryContext(ctx, s.bind(`
+		SELECT kind,
+			COALESCE(SUM(CASE WHEN action = 'adopted' THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN action = 'dismissed' THEN 1 ELSE 0 END), 0),
+			COUNT(DISTINCT CASE WHEN action = 'adopted' THEN user_id END)
+		FROM recommendation_feedback
+		WHERE created_at >= ?
+		GROUP BY kind
+		ORDER BY kind`), since.UTC().Format(time.RFC3339Nano))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []RecommendationAdoptionByKind{}
+	for rows.Next() {
+		var a RecommendationAdoptionByKind
+		if err := rows.Scan(&a.Kind, &a.Adopted, &a.Dismissed, &a.DistinctAdopters); err != nil {
+			return nil, err
+		}
+		if total := a.Adopted + a.Dismissed; total > 0 {
+			a.AdoptionRate = float64(a.Adopted) / float64(total)
+		}
+		out = append(out, a)
 	}
 	return out, rows.Err()
 }
