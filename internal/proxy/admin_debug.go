@@ -71,7 +71,7 @@ type captureWriter struct {
 	status int
 }
 
-func (c *captureWriter) Header() http.Header     { return c.header }
+func (c *captureWriter) Header() http.Header { return c.header }
 func (c *captureWriter) Write(p []byte) (int, error) {
 	return c.body.Write(p)
 }

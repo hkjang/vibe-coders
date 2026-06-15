@@ -86,8 +86,8 @@ func TestMCPPolicyBlocksRequestEndToEnd(t *testing.T) {
 	resp.Body.Close()
 
 	reqBody := map[string]any{
-		"model": "gpt-4.1",
-		"tools": []any{map[string]any{"type": "function", "function": map[string]any{"name": "mcp__github__create_issue"}}},
+		"model":    "gpt-4.1",
+		"tools":    []any{map[string]any{"type": "function", "function": map[string]any{"name": "mcp__github__create_issue"}}},
 		"messages": []any{map[string]any{"role": "user", "content": "make an issue"}},
 	}
 	blocked := postJSON(t, proxy.URL+"/v1/chat/completions", "", reqBody)

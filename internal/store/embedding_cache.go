@@ -70,10 +70,10 @@ func (s *SQLStore) PurgeExpiredEmbeddings(ctx context.Context) (int64, error) {
 }
 
 type EmbeddingCacheStats struct {
-	Entries    int64   `json:"entries"`
-	Bytes      int64   `json:"bytes"`
-	TotalHits  int64   `json:"total_hits"`
-	TopModels  []EmbeddingCacheTop `json:"top_models"`
+	Entries   int64               `json:"entries"`
+	Bytes     int64               `json:"bytes"`
+	TotalHits int64               `json:"total_hits"`
+	TopModels []EmbeddingCacheTop `json:"top_models"`
 }
 
 type EmbeddingCacheTop struct {

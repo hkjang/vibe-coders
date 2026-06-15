@@ -315,7 +315,7 @@
                     <div class="diag-node" style="padding: 10px;">IDE / Chat Clients<br><span style="font-size: 10px; font-weight: normal; color: #64748b;">(Cursor, Roo Code, etc.)</span></div>
                     <div class="diag-arrow">&rarr;</div>
                     <div class="diag-node primary" style="background: #f0f6ff; border-color: #2563eb; color: #1d4ed8; padding: 12px 10px;">
-                        <strong>Proxy Gateway Core (v0.2.0)</strong>
+                        <strong>Proxy Gateway Core (v0.7.5)</strong>
                         <div style="font-size: 9px; font-weight: normal; color: #475569; margin-top: 6px; text-align: left; line-height: 1.3;">
                             • 3-Tier Session Inference Engine<br>
                             • Intelligent Cost/Latency Router<br>
@@ -325,7 +325,10 @@
                             • Multi-tenant Team Mapper & Scope Editor<br>
                             • Explicit Request Pipeline (PipelineStep)<br>
                             • Operational Risk & Safety Control (MCP & Injection)<br>
-                            • Multi-dimensional Cost Allocation
+                            • Multi-dimensional Cost Allocation<br>
+                            • Text2SQL Virtual Model & Sandbox Exec (v0.3.0+)<br>
+                            • SLA Request Insurance claims ledger (v0.5.9)<br>
+                            • ESG Prompt Carbon Tracking (Wh/gCO2e) (v0.5.5)
                         </div>
                     </div>
                     <div class="diag-arrow">&rarr;</div>
@@ -339,8 +342,8 @@
                 <strong>작성 부서:</strong> IT AI 추진단<br>
             </div>
             <div style="text-align: right;">
-                <strong>문서 번호:</strong> SEC-APG-2026-V30<br>
-                <strong>최종 승인 버전:</strong> v0.2.0 (Production Stable)
+                <strong>문서 번호:</strong> SEC-APG-2026-V75<br>
+                <strong>최종 승인 버전:</strong> v0.7.5 (Production Stable)
             </div>
         </div>
     </div>
@@ -411,11 +414,9 @@
         </div>
     </div>
 
-    <!-- Section 1.2 -->
-    <div class="section">
         <h2 class="section-title">1.2 시스템 세부 구성 요소 분석 (System Component Breakdown)</h2>
         <p>
-            본 게이트웨이는 엔터프라이즈 거버넌스 및 AI APM 요건을 충족하기 위해 유기적으로 연동되는 13대 핵심 서브시스템으로 구성되어 있습니다.
+            본 게이트웨이는 엔터프라이즈 거버넌스 및 AI APM 요건을 충족하기 위해 유기적으로 연동되는 18대 핵심 서브시스템으로 구성되어 있습니다.
         </p>
 
         <div class="grid-2" style="margin-top: 15px;">
@@ -495,6 +496,36 @@
                 <h3 style="color: #be185d; border-left-color: #ec4899;">⑬ 폐루프 자동 라우팅 강화 학습 및 DW 적재 (DW Staging)</h3>
                 <p style="font-size: 12.5px; color: #475569; line-height: 1.5; margin-bottom: 0;">
                     실제 LLM 호출 처리 결과(TTFT, 성공/실패 여부, 단가)의 피드백 루프를 통해 차기 최적 경로를 능동 수정하는 폐루프 강화 학습 라우터 및 대규모 아카이빙을 위한 분석용 DW 스태이징 롤업 테이블 연동 기능을 내장했습니다.
+                </p>
+            </div>
+            <div class="card" style="background: #faf5ff; border-color: #e9d5ff;">
+                <h3 style="color: #6b21a8; border-left-color: #a855f7;">⑭ 자연어 기반 SQL 번역 및 샌드박스 실행 엔진 (Text2SQL Pipeline)</h3>
+                <p style="font-size: 12.5px; color: #475569; line-height: 1.5; margin-bottom: 0;">
+                    vibe/text2sql-* 가상 모델 요청을 실시간 인터셉트하여, 사용자의 자연어 질의를 고효율 SQL 쿼리로 자동 변환하고 읽기전용 DB 커넥션을 통해 결과를 실행/필터링/마스킹하여 반환하는 가상 모델 지능형 컴파일러입니다.
+                </p>
+            </div>
+            <div class="card" style="background: #f0fdfa; border-color: #ccfbf1;">
+                <h3 style="color: #115e59; border-left-color: #14b8a6;">⑮ 장기 분석 및 클릭하우스 OLAP 스토어 (ClickHouse OLAP Sink)</h3>
+                <p style="font-size: 12.5px; color: #475569; line-height: 1.5; margin-bottom: 0;">
+                    게이트웨이를 거쳐가는 대규모 감사 로그 및 Text2SQL 실행 이력 등의 정밀 팩트 데이터를 분산 처리하여 컬럼형 OLAP인 ClickHouse 데이터베이스로 실시간 및 스케줄링 배치 적재하여 장기 대용량 통계 분석 성능을 극대화합니다.
+                </p>
+            </div>
+            <div class="card" style="background: #fffbeb; border-color: #fef3c7;">
+                <h3 style="color: #92400e; border-left-color: #f59e0b;">⑯ AI 보험(SLA-claims Ledger) 및 에러 버짓 분석</h3>
+                <p style="font-size: 12.5px; color: #475569; line-height: 1.5; margin-bottom: 0;">
+                    API 호출 중의 4xx/5xx 에러, 응답 지연, failover 우회 작동을 에러 버짓 소모(Claim)로 자동 식별 및 집계하여, 등록된 스코프별 SLA 약정 대비 가용율(SLA Target) 및 Burn Rate를 다차원 스코어링하는 서비스 안정성 회계 모듈입니다.
+                </p>
+            </div>
+            <div class="card" style="background: #f0fdf4; border-color: #dcfce7;">
+                <h3 style="color: #166534; border-left-color: #22c55e;">⑰ 프롬프트 탄소 배출량 추정기 (Prompt Carbon Estimator)</h3>
+                <p style="font-size: 12.5px; color: #475569; line-height: 1.5; margin-bottom: 0;">
+                    사용 토큰량 및 모델 가중치를 기반으로 전력 소모량(Wh)을 계량화하고, 데이터센터 PUE와 전력 생산 탄소 강도(gCO2e)를 조율 연산하여 AI 서비스 운용에 따른 탄소배출 기여도를 투명하게 보고하는 ESG 통계 엔진입니다.
+                </p>
+            </div>
+            <div class="card" style="background: #eff6ff; border-color: #dbeafe;">
+                <h3 style="color: #1e40af; border-left-color: #3b82f6;">⑱ 시맨틱 벡터 캐싱 계층 (Chat Semantic Cache)</h3>
+                <p style="font-size: 12.5px; color: #475569; line-height: 1.5; margin-bottom: 0;">
+                    단순 텍스트 일치 기반의 캐시 처리를 넘어, 질문 프롬프트를 실시간 벡터 임베딩화하고 코사인 유사도 연산을 적용하여 의미론적으로 유사한(Near-duplicate) 대화 요청에 대해서도 캐시 히트를 제공하는 지능형 캐시 계층입니다.
                 </p>
             </div>
         </div>
@@ -915,6 +946,246 @@
                     <td><code>{}</code></td>
                     <td>원화(KRW) 요금 정산용 모델별 1M 토큰당 가격 정보 매핑 (JSON 형식).</td>
                 </tr>
+                <tr>
+                    <td><code>CACHE_CHAT_SEMANTIC_ENABLED</code></td>
+                    <td><code>false</code></td>
+                    <td>시맨틱(임베딩 기반 유사도) 캐시 활성화 여부.</td>
+                </tr>
+                <tr>
+                    <td><code>CACHE_CHAT_SEMANTIC_MODEL</code></td>
+                    <td>(없음)</td>
+                    <td>시맨틱 캐시 매칭을 위해 사용할 프롬프트 벡터화 임베딩 모델명.</td>
+                </tr>
+                <tr>
+                    <td><code>CACHE_CHAT_SEMANTIC_THRESHOLD</code></td>
+                    <td><code>0.95</code></td>
+                    <td>코사인 유사도 기준 시맨틱 캐시 히트 판정 임계치 (0..1).</td>
+                </tr>
+                <tr>
+                    <td><code>CACHE_CHAT_SEMANTIC_MAX_CANDIDATES</code></td>
+                    <td><code>200</code></td>
+                    <td>모델별로 유사도를 스캔할 최근 캐시 후보군 최대 개수.</td>
+                </tr>
+                <tr>
+                    <td><code>SELF_SERVICE_KEYS_ENABLED</code></td>
+                    <td><code>false</code></td>
+                    <td>로그인한 인증 사용자가 자신의 API 키를 직접 관리(/me/keys)하도록 허용할지 여부.</td>
+                </tr>
+                <tr>
+                    <td><code>TEXT2SQL_ENABLED</code></td>
+                    <td><code>false</code></td>
+                    <td>vibe/text2sql-* 가상 모델 요청 처리용 Text2SQL 파이프라인 활성화 여부.</td>
+                </tr>
+                <tr>
+                    <td><code>TEXT2SQL_PREVIEW_MODEL</code></td>
+                    <td><code>gpt-4.1-mini</code></td>
+                    <td>SQL Preview 쿼리 생성에 사용할 기본 업스트림 모델명.</td>
+                </tr>
+                <tr>
+                    <td><code>TEXT2SQL_EXECUTE_MODEL</code></td>
+                    <td><code>gpt-4.1-mini</code></td>
+                    <td>SQL 쿼리 실행(Execute)에 사용할 기본 업스트림 모델명.</td>
+                </tr>
+                <tr>
+                    <td><code>TEXT2SQL_ACCURATE_MODEL</code></td>
+                    <td><code>claude-sonnet-4</code></td>
+                    <td>고정밀(Accurate) 분석 및 변환에 사용할 업스트림 모델명.</td>
+                </tr>
+                <tr>
+                    <td><code>TEXT2SQL_LOCAL_MODEL</code></td>
+                    <td><code>qwen-coder</code></td>
+                    <td>온프레미스/로컬 SQL 생성에 사용할 모델명.</td>
+                </tr>
+                <tr>
+                    <td><code>TEXT2SQL_SUMMARY_MODEL</code></td>
+                    <td><code>gpt-4.1-mini</code></td>
+                    <td>실행 결과 분석 요약에 사용할 업스트림 모델명.</td>
+                </tr>
+                <tr>
+                    <td><code>TEXT2SQL_DIALECT</code></td>
+                    <td><code>PostgreSQL</code></td>
+                    <td>변환 대상 DB SQL Dialect 방언 지정.</td>
+                </tr>
+                <tr>
+                    <td><code>TEXT2SQL_SCHEMA</code></td>
+                    <td>(없음)</td>
+                    <td>프롬프트 컨텍스트에 주입할 DB 스키마 카탈로그 구조 텍스트.</td>
+                </tr>
+                <tr>
+                    <td><code>TEXT2SQL_DEFAULT_LIMIT</code></td>
+                    <td><code>100</code></td>
+                    <td>실행 결과 반환 시 기본 행(Limit) 크기.</td>
+                </tr>
+                <tr>
+                    <td><code>TEXT2SQL_MAX_LIMIT</code></td>
+                    <td><code>1000</code></td>
+                    <td>실행 결과 반환 시 최대 행(Limit) 크기 제한.</td>
+                </tr>
+                <tr>
+                    <td><code>TEXT2SQL_MAX_EXPLAIN_COST</code></td>
+                    <td><code>0</code></td>
+                    <td>EXPLAIN 실행 시 total cost 상한 임계치 (0은 제한 없음).</td>
+                </tr>
+                <tr>
+                    <td><code>TEXT2SQL_MASK_RESULTS</code></td>
+                    <td><code>true</code></td>
+                    <td>실행 결과 데이터 셀 내 secrets 및 개인정보(PII) 마스킹 필터링 여부.</td>
+                </tr>
+                <tr>
+                    <td><code>TEXT2SQL_EXEC_DRIVER</code></td>
+                    <td><code>postgres</code></td>
+                    <td>샌드박스 쿼리 실행 엔진용 SQL 데이터베이스 드라이버.</td>
+                </tr>
+                <tr>
+                    <td><code>TEXT2SQL_EXEC_DSN</code></td>
+                    <td>(없음)</td>
+                    <td>쿼리 실행용 읽기전용 DB 연결 DSN (비어 있으면 실행 비활성화).</td>
+                </tr>
+                <tr>
+                    <td><code>TEXT2SQL_CACHE_ENABLED</code></td>
+                    <td><code>true</code></td>
+                    <td>변환 SQL 쿼리에 대한 캐싱 활성화 여부.</td>
+                </tr>
+                <tr>
+                    <td><code>TEXT2SQL_CACHE_TTL</code></td>
+                    <td><code>1h</code></td>
+                    <td>변환 SQL 캐시 TTL.</td>
+                </tr>
+                <tr>
+                    <td><code>TEXT2SQL_CLARIFY_ENABLED</code></td>
+                    <td><code>false</code></td>
+                    <td>모호한 자연어 질문 유입 시 되묻기(Clarification) 대화 유도 여부.</td>
+                </tr>
+                <tr>
+                    <td><code>TEXT2SQL_REQUIRE_DATE_FILTER</code></td>
+                    <td><code>false</code></td>
+                    <td>되묻기 실행 시 날짜/시간 필터 지정을 필수로 요구할지 여부.</td>
+                </tr>
+                <tr>
+                    <td><code>TEXT2SQL_STATEMENT_TIMEOUT</code></td>
+                    <td><code>15s</code></td>
+                    <td>샌드박스 쿼리 실행 시 단일 문장 타임아웃 제한 시간.</td>
+                </tr>
+                <tr>
+                    <td><code>TEXT2SQL_WORK_MEM</code></td>
+                    <td>(없음)</td>
+                    <td>PostgreSQL 실행 시 임시 할당할 work_mem 메모리 (예: "64MB").</td>
+                </tr>
+                <tr>
+                    <td><code>TEXT2SQL_SHADOW_MODELS</code></td>
+                    <td>(없음)</td>
+                    <td>Preview 시 백그라운드에서 비교 평가(Shadow)할 모델 목록 (쉼표 구분).</td>
+                </tr>
+                <tr>
+                    <td><code>TEXT2SQL_SHADOW_SAMPLE_RATE</code></td>
+                    <td><code>0</code></td>
+                    <td>섀도우 평가 대상 표본 샘플링 비율 (0..1).</td>
+                </tr>
+                <tr>
+                    <td><code>TEXT2SQL_REPLAY_BUNDLES</code></td>
+                    <td><code>false</code></td>
+                    <td>생성 컨텍스트 전체를 감사/재연(Replay)용 번들로 영속 저장할지 여부.</td>
+                </tr>
+                <tr>
+                    <td><code>TEXT2SQL_DAILY_RISK_LIMIT</code></td>
+                    <td><code>20</code></td>
+                    <td>API 키별 일일 고위험 요청(누적 위험도) 제한 한도 (0은 제한 없음).</td>
+                </tr>
+                <tr>
+                    <td><code>TEXT2SQL_DAILY_RISK_WARN</code></td>
+                    <td><code>0</code></td>
+                    <td>일일 고위험 요청 제한 한도 경고 기준 임계치 (0은 limit/2).</td>
+                </tr>
+                <tr>
+                    <td><code>TEXT2SQL_TWIN_DSN</code></td>
+                    <td>(없음)</td>
+                    <td>SQL 검증 및 동등성 비교용 가상 DB(Digital Twin) DSN.</td>
+                </tr>
+                <tr>
+                    <td><code>TEXT2SQL_TWIN_DRIVER</code></td>
+                    <td><code>postgres</code></td>
+                    <td>가상 DB용 SQL 드라이버.</td>
+                </tr>
+                <tr>
+                    <td><code>CARBON_WH_PER_1K_TOKENS</code></td>
+                    <td><code>0.4</code></td>
+                    <td>1,000 토큰당 기본 전력 소비량 추정치 (Wh).</td>
+                </tr>
+                <tr>
+                    <td><code>CARBON_MODEL_WH_PER_1K</code></td>
+                    <td>(없음)</td>
+                    <td>모델별 전력 소비량 override 맵 (형식: name=wh,...).</td>
+                </tr>
+                <tr>
+                    <td><code>CARBON_PUE</code></td>
+                    <td><code>1.2</code></td>
+                    <td>데이터센터 전력 효율성 지수 (PUE) 보정계수.</td>
+                </tr>
+                <tr>
+                    <td><code>CARBON_GRID_INTENSITY_G</code></td>
+                    <td><code>475</code></td>
+                    <td>1kWh 전력 생산 시 발생하는 이산화탄소량 (gCO2e).</td>
+                </tr>
+                <tr>
+                    <td><code>INSURANCE_SLA_TARGET</code></td>
+                    <td><code>0.99</code></td>
+                    <td>보험 약정 적용 스코프별 보장 대상 목표 가용률 (0..1).</td>
+                </tr>
+                <tr>
+                    <td><code>INSURANCE_FAST_BURN</code></td>
+                    <td><code>14.4</code></td>
+                    <td>긴급 에러 버짓 소모율(Fast Burn Rate) 판단 임계치.</td>
+                </tr>
+                <tr>
+                    <td><code>INSURANCE_SLOW_BURN</code></td>
+                    <td><code>3.0</code></td>
+                    <td>완만 에러 버짓 소모율(Slow Burn Rate) 판단 임계치.</td>
+                </tr>
+                <tr>
+                    <td><code>CLICKHOUSE_URL</code></td>
+                    <td>(없음)</td>
+                    <td>장기 OLAP 분석용 ClickHouse HTTP 연결 URL.</td>
+                </tr>
+                <tr>
+                    <td><code>CLICKHOUSE_DB</code></td>
+                    <td><code>default</code></td>
+                    <td>적재 대상 ClickHouse 데이터베이스명.</td>
+                </tr>
+                <tr>
+                    <td><code>CLICKHOUSE_TABLE</code></td>
+                    <td><code>analytics_daily</code></td>
+                    <td>적재 대상 ClickHouse 일별 분석 테이블명.</td>
+                </tr>
+                <tr>
+                    <td><code>CLICKHOUSE_USER</code></td>
+                    <td>(없음)</td>
+                    <td>ClickHouse 접속 유저 계정명.</td>
+                </tr>
+                <tr>
+                    <td><code>CLICKHOUSE_PASSWORD</code></td>
+                    <td>(없음)</td>
+                    <td>ClickHouse 접속 유저 비밀번호.</td>
+                </tr>
+                <tr>
+                    <td><code>CLICKHOUSE_SINK_INTERVAL</code></td>
+                    <td><code>0</code></td>
+                    <td>백그라운드 자동 싱크 주기 (0은 비활성화).</td>
+                </tr>
+                <tr>
+                    <td><code>CLICKHOUSE_SINK_DAYS</code></td>
+                    <td><code>3</code></td>
+                    <td>싱크 시 스캔할 최근 로그 일수 범위.</td>
+                </tr>
+                <tr>
+                    <td><code>CLICKHOUSE_TEXT2SQL_FACT_TABLE</code></td>
+                    <td>(없음)</td>
+                    <td>Text2SQL 상세 팩트 테이블을 적재할 ClickHouse 테이블명 (비어 있으면 비활성화).</td>
+                </tr>
+                <tr>
+                    <td><code>RETENTION_TEXT2SQL_REPLAY_DAYS</code></td>
+                    <td><code>30</code></td>
+                    <td>Text2SQL 감사 재연 번들의 보존 기간 (일 단위).</td>
+                </tr>
             </tbody>
         </table>
 
@@ -1063,6 +1334,36 @@ psql -h [VM_IP_OR_DNS] -p 5432 -U gateway_user -d gateway_db < backup_gateway_YY
                     <td><strong>v0.2.0</strong></td>
                     <td>로드맵 Part 1 완료 및 엔터프라이즈 거버넌스 대대적 확장</td>
                     <td>Explicit PipelineStep 구조 리팩토링, Ops Health 대시보드 및 주간 AI 리포트 생성, 다차원 비용 할당, CI용 골든 프롬프트 회귀 테스트 게이트, 프롬프트 인젝션 탐지 및 MCP 도구 위험등급 분류, 프로바이더 SLO 모니터링, 월말 비용 예측 및 Operational Risk Score 산출, 폐루프 자동 라우팅 강화 학습, DW 롤업 스태이징 탑재.</td>
+                </tr>
+                <tr>
+                    <td><strong>v0.3.0 ~ v0.3.9</strong></td>
+                    <td>Text2SQL 가상 모델 파이프라인 및 복제 복원</td>
+                    <td>자연어를 SQL로 자동 변환하여 실행하고 결과를 마스킹하여 반환하는 가상 모델 파이프라인 탑재. 실행 오류 상세 분류 및 권한 매트릭스 필터, ClickHouse 비동기 싱크 및 워터마크 자동 재시도, 스키마 변경 영향도 평가 및 질의 증거(Evidence) 수록.</td>
+                </tr>
+                <tr>
+                    <td><strong>v0.4.0 ~ v0.4.9</strong></td>
+                    <td>인사이트 마이너 및 자율 통제 정책 고도화</td>
+                    <td>반복 질의 유형 분석을 통한 리포트/용어집 후보군 자동 추천(Insight Miner), 누적 위험도 실시간 일일 한도 차단(Risk-Queue), GitOps 정책 내보내기/가져오기, 자율적 테스트 복구 및 Gateway Memory 탑재.</td>
+                </tr>
+                <tr>
+                    <td><strong>v0.5.0 ~ v0.5.9</strong></td>
+                    <td>ESG 탄소 점수 및 SLA 보험(Claims Ledger) 통합</td>
+                    <td>AI 사용에 따른 ESG 탄소배출량 추정기(Prompt Carbon Score), 실패율/지연 시간에 따라 에러 버짓 소모율을 스코어링하는 SLA 보험(AI Request Insurance) 및 Claims Ledger 적재, 챗 시맨틱 유사도 캐시 히트(Chat Semantic Cache), 디지털 트윈 DB 매핑.</td>
+                </tr>
+                <tr>
+                    <td><strong>v0.6.0 ~ v0.6.9</strong></td>
+                    <td>비용 절감 보고서 및 개인화 분석 홈 (My AI Home)</td>
+                    <td>전사 비용 절감 분석 원장(Savings Report) 및 에러 버짓 Burn rate 추적, 부서별 chargeback 청구서 자동 발행, 개인별 AI 역량 및 도구 분석 홈(My AI Home)과 personalization admin UI 구축.</td>
+                </tr>
+                <tr>
+                    <td><strong>v0.7.0 ~ v0.7.4</strong></td>
+                    <td>사용자 API Key 셀프 서비스 및 제어 프레임워크</td>
+                    <td>로그인 사용자가 본인의 키를 직접 발급/교체/폐기 관리하는 Self-service 키 관리 패널, 미사용/만료 예정 키 자동 알림 메일러, 개인화 프로필 이탈 탐지 및 padding UI 최적화 완료.</td>
+                </tr>
+                <tr>
+                    <td><strong>v0.7.5</strong></td>
+                    <td>엔터프라이즈 종합 기술 보고서 개정 및 공식 릴리즈 배포</td>
+                    <td>신규 환경변수 40여 종 완벽 매뉴얼화, 18대 서브시스템 아키텍처 수립 및 v0.7.5 최종 릴리즈 패키징 완료.</td>
                 </tr>
             </tbody>
         </table>

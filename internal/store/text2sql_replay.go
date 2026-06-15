@@ -15,10 +15,10 @@ type Text2SQLReplayBundle struct {
 	RequestID          string `json:"request_id"`
 	SchemaName         string `json:"schema_name"`
 	SchemaVersion      int    `json:"schema_version"`
-	SystemPrompt       string `json:"system_prompt"`        // full generation messages JSON sent upstream
-	SchemaContext      string `json:"schema_context"`       // schema/catalog text injected into the prompt
-	GlossaryText       string `json:"glossary_text"`        // business-glossary block injected
-	PermissionSnapshot string `json:"permission_snapshot"`  // JSON of effective allow/blocked/aggregate/mask lists
+	SystemPrompt       string `json:"system_prompt"`       // full generation messages JSON sent upstream
+	SchemaContext      string `json:"schema_context"`      // schema/catalog text injected into the prompt
+	GlossaryText       string `json:"glossary_text"`       // business-glossary block injected
+	PermissionSnapshot string `json:"permission_snapshot"` // JSON of effective allow/blocked/aggregate/mask lists
 	GeneratedSQL       string `json:"generated_sql"`
 	CreatedAt          string `json:"created_at"`
 }

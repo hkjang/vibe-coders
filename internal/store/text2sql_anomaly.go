@@ -209,12 +209,12 @@ func (s *SQLStore) Text2SQLPromptDNAReport(ctx context.Context, since time.Time,
 	}
 	defer rows.Close()
 	type agg struct {
-		display    string
-		count      int64
-		rejected   int64
-		executed   int64
-		cost       float64
-		users      map[string]bool
+		display  string
+		count    int64
+		rejected int64
+		executed int64
+		cost     float64
+		users    map[string]bool
 	}
 	byNorm := map[string]*agg{}
 	for rows.Next() {

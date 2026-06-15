@@ -17,7 +17,7 @@ type Text2SQLSavedReport struct {
 	Kind              string `json:"kind"` // report | dashboard_card
 	CreatedBy         string `json:"created_by"`
 	CreatedAt         string `json:"created_at"`
-	ScheduleInterval  string `json:"schedule_interval"`  // e.g. "24h"; empty = manual only
+	ScheduleInterval  string `json:"schedule_interval"` // e.g. "24h"; empty = manual only
 	ScheduleEnabled   bool   `json:"schedule_enabled"`
 	DeliverMattermost bool   `json:"deliver_mattermost"`
 	LastRunAt         string `json:"last_run_at"`
