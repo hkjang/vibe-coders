@@ -149,7 +149,7 @@ func TestDetectGlossaryConflicts(t *testing.T) {
 	// A clean term with one mapping → no conflict.
 	_ = db.UpsertText2SQLBusinessTerm(ctx, Text2SQLBusinessTerm{ID: "c3", SchemaName: "global", Term: "상담", Mapping: "tickets"})
 	// A schema-specific term shadowing a global one with a different mapping → shadowed.
-	_ = db.UpsertText2SQLBusinessTerm(ctx, Text2SQLBusinessTerm{ID: "c4", Term: "매출", Mapping: "revenue"})            // global "*"
+	_ = db.UpsertText2SQLBusinessTerm(ctx, Text2SQLBusinessTerm{ID: "c4", Term: "매출", Mapping: "revenue"}) // global "*"
 	_ = db.UpsertText2SQLBusinessTerm(ctx, Text2SQLBusinessTerm{ID: "c5", SchemaName: "global", Term: "매출", Mapping: "sales"})
 
 	conflicts, err := db.DetectGlossaryConflicts(ctx, "global")
@@ -281,6 +281,68 @@ func TestText2SQLMiners(t *testing.T) {
 		if c.Term == "상담" {
 			t.Error("defined glossary term should be excluded from candidates")
 		}
+	}
+}
+
+func TestText2SQLAnomalyDetectors(t *testing.T) {
+	db := openAggTestStore(t)
+	defer db.Close()
+	ctx := context.Background()
+	base := time.Now().UTC().Add(-time.Hour)
+	at := func(i int) time.Time { return base.Add(time.Duration(i) * time.Minute) }
+
+	// api key "k1": one benign lookup, then permission-denied probes ×5 → probing smell + intent drift.
+	_ = db.InsertText2SQLLog(ctx, Text2SQLQueryLog{ID: "b0", APIKeyID: "k1", Team: "sales", Question: "부서별 매출", Valid: true, CreatedAt: at(0)})
+	for i := 0; i < 5; i++ {
+		_ = db.InsertText2SQLLog(ctx, Text2SQLQueryLog{ID: "p" + itoaStore(i), APIKeyID: "k1", Team: "sales", Question: "급여 테이블 조회", Valid: false, FailureCategory: "permission_denied", RejectReason: "table not allowed", CreatedAt: at(1 + i)})
+	}
+	// api key "k2": same question ×8 → excessive_repetition.
+	for i := 0; i < 8; i++ {
+		_ = db.InsertText2SQLLog(ctx, Text2SQLQueryLog{ID: "r" + itoaStore(i), APIKeyID: "k2", Team: "ops", Question: "오늘 주문 수", Valid: true, CreatedAt: at(20 + i)})
+	}
+	// api key "k3": a broad-scope request.
+	_ = db.InsertText2SQLLog(ctx, Text2SQLQueryLog{ID: "bs", APIKeyID: "k3", Team: "ops", Question: "전체 스키마 모든 테이블 보여줘", Valid: true, CreatedAt: at(40)})
+
+	smells, err := db.Text2SQLUsageSmells(ctx, base.Add(-time.Minute), 8, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cats := map[string]bool{}
+	for _, sm := range smells {
+		cats[sm.Category] = true
+	}
+	for _, want := range []string{"excessive_repetition", "permission_probing", "broad_scope"} {
+		if !cats[want] {
+			t.Errorf("expected smell %q, got %+v", want, smells)
+		}
+	}
+
+	exposure, err := db.Text2SQLRiskExposureByTeam(ctx, base.Add(-time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sales *Text2SQLRiskExposure
+	for i := range exposure {
+		if exposure[i].Team == "sales" {
+			sales = &exposure[i]
+		}
+	}
+	if sales == nil || sales.Probes != 5 || sales.Rejected != 5 {
+		t.Errorf("sales risk exposure wrong: %+v", sales)
+	}
+
+	drifts, err := db.Text2SQLIntentDrifts(ctx, base.Add(-time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundK1 := false
+	for _, d := range drifts {
+		if d.Subject == "k1" {
+			foundK1 = true
+		}
+	}
+	if !foundK1 {
+		t.Errorf("expected intent drift for k1 (benign → probing), got %+v", drifts)
 	}
 }
 

@@ -311,6 +311,40 @@ func (s *Server) handleText2SQLMiners(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"report_candidates": reports, "glossary_candidates": terms})
 }
 
+// handleText2SQLAnomalies returns detection-only behavioral signals over the question
+// logs: usage smells (repetition / permission probing / broad-scope requests),
+// per-team cumulative risk exposure, and intent-drift flags. Nothing here blocks a
+// request — it is purely for operator visibility.
+// GET /admin/text2sql/anomalies?window=7d
+func (s *Server) handleText2SQLAnomalies(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	since := parseWindow(r.URL.Query().Get("window"), 7*24*time.Hour, "day")
+	smells, err := s.db.Text2SQLUsageSmells(r.Context(), since, 0, 0)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "smell_detect_failed")
+		return
+	}
+	exposure, err := s.db.Text2SQLRiskExposureByTeam(r.Context(), since)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "risk_exposure_failed")
+		return
+	}
+	drifts, err := s.db.Text2SQLIntentDrifts(r.Context(), since)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "intent_drift_failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"detection_only": true,
+		"usage_smells":   smells,
+		"risk_exposure":  exposure,
+		"intent_drifts":  drifts,
+	})
+}
+
 // handleText2SQLKillSwitch reads or toggles the runtime Text2SQL kill switch. When
 // engaged, vibe/text2sql-* requests return a safe "temporarily disabled" message
 // without generating or executing any SQL — for incident/cost/security response.
