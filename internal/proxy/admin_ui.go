@@ -82,6 +82,9 @@ const adminHTML = `<!doctype html>
       display: flex; justify-content: space-between; align-items: center; gap: 8px;
     }
     .toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; padding: 12px; border-bottom: 1px solid var(--line); }
+    /* Indented content body for panels whose content would otherwise sit flush to the section edge. */
+    .card-body { padding: 14px; }
+    .card-body > table:first-child, .card-body > :first-child { margin-top: 0; }
     input, button, select, textarea {
       height: 34px; border: 1px solid var(--line); border-radius: 6px;
       background: var(--panel); color: var(--ink); padding: 0 10px; font: inherit;
@@ -248,6 +251,7 @@ const adminHTML = `<!doctype html>
         <div id="user-menu" class="user-menu" style="display:none">
           <a href="#/personalization" data-tab="personalization">개인화</a>
           <a href="#/mykeys" data-tab="mykeys">내 키</a>
+          <button id="auth-logout" class="ghost" type="button" style="display:none" title="로그아웃">로그아웃</button>
           <div class="user-menu-sep"></div>
           <label class="user-menu-row">자동 새로고침
             <select id="refresh-interval" title="자동 새로고침 주기">
@@ -262,7 +266,6 @@ const adminHTML = `<!doctype html>
           <button id="help-toggle" class="ghost" type="button" title="단축키 도움말 (?)">? 단축키 도움말</button>
         </div>
       </div>
-      <button id="auth-logout" class="ghost" type="button" style="display:none" title="로그아웃">로그아웃</button>
       <input id="token" type="password" autocomplete="off" placeholder="관리자 토큰">
     </div>
   </header>
@@ -3720,6 +3723,7 @@ const adminHTML = `<!doctype html>
       ) : '<div class="empty">설정된 예산 없음</div>';
 
       const html = section('사용 한도 (Quota)',
+        '<div class="card-body">' +
         '<form class="inline-form" id="quota-form" style="grid-template-columns: 120px minmax(120px,1fr) 110px minmax(120px,1fr) minmax(120px,1fr) minmax(120px,1fr) 80px;">' +
           '<select id="q-scope">' +
             '<option value="api_key">API 키</option>' +
@@ -3737,8 +3741,9 @@ const adminHTML = `<!doctype html>
           '<input id="q-note" placeholder="메모">' +
           '<button type="submit">추가</button>' +
         '</form>' +
-        table
+        table + '</div>'
       ) + section('월 예산 소진 예측 (Budget Burn-down)',
+        '<div class="card-body">' +
         '<p class="muted" style="margin-top:0">월 예산 대비 이번 달 누적 지출과 현재 추세(일평균 소진율)를 월말까지 연장한 예상 지출을 보여줍니다. 추세가 예산을 초과하면 소진 예상일과 함께 경고합니다. 기준 시간대는 KST(월초~월말)입니다.</p>' +
         '<form class="inline-form" id="budget-form" style="grid-template-columns: 120px minmax(120px,1fr) minmax(120px,1fr) minmax(160px,1fr) 80px;">' +
           '<select id="b-scope">' +
@@ -3751,7 +3756,7 @@ const adminHTML = `<!doctype html>
           '<input id="b-note" placeholder="메모">' +
           '<button type="submit">추가</button>' +
         '</form>' +
-        budgetTable
+        budgetTable + '</div>'
       );
       document.getElementById('view').innerHTML = html;
       document.getElementById('quota-form').addEventListener('submit', addQuota);
@@ -4833,7 +4838,7 @@ const adminHTML = `<!doctype html>
             '</tr>';
           }).join('') + '</tbody></table>';
       }
-      view.innerHTML = card('개인 AI 프로필', html);
+      view.innerHTML = card('개인 AI 프로필', '<div class="card-body">' + html + '</div>');
       makeSortable('#view', 'personalization');
     }
 
@@ -4890,7 +4895,7 @@ const adminHTML = `<!doctype html>
             '<td>' + fmt(Math.round(parsed.total_cost_krw || 0)) + '</td><td>' + pctText(parsed.success_rate) + '</td></tr>';
         }).join('') + '</tbody></table>'
       ) : '<p class="muted" style="margin-top:16px">스냅샷이 없습니다.</p>';
-      view.innerHTML = back + card('프로필: ' + escapeHTML(userID), kv + prefs + driftCard + snapBtn + snapTable);
+      view.innerHTML = back + card('프로필: ' + escapeHTML(userID), '<div class="card-body">' + kv + prefs + driftCard + snapBtn + snapTable + '</div>');
     }
 
     async function snapshotProfile(userID) {
@@ -4911,9 +4916,9 @@ const adminHTML = `<!doctype html>
       } catch (err) {
         const msg = String(err.message || '');
         if (msg.indexOf('disabled') >= 0) {
-          view.innerHTML = card('내 키', '<p class="muted">셀프서비스 키 관리가 비활성화되어 있습니다. 관리자가 <code>SELF_SERVICE_KEYS_ENABLED=true</code>로 활성화해야 합니다.</p>');
+          view.innerHTML = card('내 키', '<div class="card-body"><p class="muted">셀프서비스 키 관리가 비활성화되어 있습니다. 관리자가 <code>SELF_SERVICE_KEYS_ENABLED=true</code>로 활성화해야 합니다.</p></div>');
         } else {
-          view.innerHTML = card('내 키', '<p class="muted">현재 로그인 주체를 사용자로 식별할 수 없습니다(JWT 로그인 또는 user_id가 매핑된 API Key 필요). 상세: ' + escapeHTML(msg) + '</p>');
+          view.innerHTML = card('내 키', '<div class="card-body"><p class="muted">현재 로그인 주체를 사용자로 식별할 수 없습니다(JWT 로그인 또는 user_id가 매핑된 API Key 필요). 상세: ' + escapeHTML(msg) + '</p></div>');
         }
         return;
       }
@@ -4943,7 +4948,7 @@ const adminHTML = `<!doctype html>
       const table = keys.length
         ? '<table><thead><tr><th>이름</th><th>역할</th><th>스코프</th><th>상태</th><th>만료</th><th>동작</th></tr></thead><tbody>' + tableRows + '</tbody></table>'
         : '<p class="muted">발급된 키가 없습니다.</p>';
-      view.innerHTML = card('내 키', secretBanner + form + table);
+      view.innerHTML = card('내 키', '<div class="card-body">' + secretBanner + form + table + '</div>');
     }
 
     async function createMyKey() {

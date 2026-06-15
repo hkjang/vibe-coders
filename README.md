@@ -105,6 +105,7 @@ Roo Code / Cursor / Continue 등 OpenAI 호환 API 를 호출하는 VS Code 확�
 - **내 키 패널 UI** (`v0.7.1`): 어드민 대시보드 `내 키` 탭 — 본인 키 발급/회전/폐기를 화면에서(`/me/keys` 연동), 시크릿 1회 배너 표시
 - **만료·미사용 키 알림** (`v0.7.2`): 활성 키의 만료 임박/만료/미사용/유휴를 탐지(`/admin/keys/health`) — flags+severity+유휴일수, My AI Home 대시보드(`/me/dashboard`)에 본인 키 알림 노출
 - **개인 메뉴 (auth-user 드롭다운)** (`v0.7.3`): 사용자 칩 클릭 시 드롭다운으로 개인화·내 키·자동 새로고침·테마 전환·단축키 도움말을 모음 — 상단 nav 정리, 토큰 모드에서도 `☰ 메뉴`로 접근 가능
+- **개인 메뉴 정리·콘텐츠 여백** (`v0.7.4`): 로그아웃 버튼을 개인 메뉴 내 `내 키` 아래로 이동, `내 키`·`개인화`·`사용 한도` 패널 콘텐츠에 들여쓰기 여백 적용
 - **운영·거버넌스 확장** (`v0.3.0`): 정책 시뮬레이터(`/admin/policies/simulate`), 모델 가격표 버전 이력(`/admin/pricing`, `/admin/pricing/seed`), 운영 리스크 스코어(`/admin/ops/risk`)·상태(`/admin/ops/status`), Provider SLO(`/admin/providers/slo`), 비용 이상탐지(`/admin/cost/anomalies`)·배부(`/admin/cost/allocation`)·팀 예산 예측(`/admin/budgets/projection`), 모델별 코딩 품질(`/admin/models/quality`), 작업 템플릿(`/admin/templates`), 프롬프트 버전 승격(`/admin/prompts/promotions`), 자동 라우팅 학습 루프(`/admin/routing/learning/auto`), DW 롤업(`/admin/dw/rollups`), Mattermost 알림(`/admin/notifications/mattermost`)
 - 호출 이력 CSV 다운로드 `/admin/export.csv` (Excel UTF-8 BOM 포함, 한국어 그대로 열림)
 - 운영용 백업 스크립트 `scripts/backup.ps1` / `scripts/backup.sh` (SQLite `.backup` + fallback ndjson + 보존 일수 적용)
