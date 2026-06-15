@@ -482,6 +482,31 @@ func (s *Server) handleText2SQLReports(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"reports": reports})
+	case http.MethodPost:
+		// Configure a report's schedule. interval is a Go duration ("24h", "1h"); empty
+		// or enabled=false leaves it manual-only.
+		var p struct {
+			ID                string `json:"id"`
+			Interval          string `json:"interval"`
+			Enabled           bool   `json:"enabled"`
+			DeliverMattermost bool   `json:"deliver_mattermost"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&p); err != nil || strings.TrimSpace(p.ID) == "" {
+			writeOpenAIError(w, http.StatusBadRequest, "id is required", "invalid_request_error", "missing_id")
+			return
+		}
+		if iv := strings.TrimSpace(p.Interval); iv != "" {
+			if d, err := time.ParseDuration(iv); err != nil || d <= 0 {
+				writeOpenAIError(w, http.StatusBadRequest, "interval must be a positive duration like 24h", "invalid_request_error", "invalid_interval")
+				return
+			}
+		}
+		if err := s.db.SetText2SQLReportSchedule(r.Context(), strings.TrimSpace(p.ID), strings.TrimSpace(p.Interval), p.Enabled, p.DeliverMattermost); err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "schedule_failed")
+			return
+		}
+		s.auditAdmin(r, "text2sql.report.schedule", "", auditJSON(p))
+		writeJSON(w, http.StatusOK, map[string]any{"id": p.ID, "interval": p.Interval, "enabled": p.Enabled, "deliver_mattermost": p.DeliverMattermost})
 	case http.MethodDelete:
 		id := strings.TrimSpace(r.URL.Query().Get("id"))
 		if id == "" {

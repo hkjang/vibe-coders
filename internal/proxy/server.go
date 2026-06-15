@@ -97,6 +97,10 @@ func NewServer(cfg config.Config, db *store.SQLStore, logger *store.AsyncLogger,
 	// Load admin-managed Text2SQL feature toggles into the in-memory cache.
 	server.reloadText2SQLFeatures(context.Background())
 
+	// Background scheduler for due saved Text2SQL reports (self-disables without an
+	// execute DB).
+	go server.text2sqlReportScheduler()
+
 	if cfg.Upstream.APIKey != "" {
 		encrypted, err := secrets.Encrypt(cfg.Upstream.APIKey)
 		if err != nil {

@@ -470,6 +470,39 @@ func TestText2SQLSavedReports(t *testing.T) {
 	}
 }
 
+func TestText2SQLReportSchedule(t *testing.T) {
+	db := openAggTestStore(t)
+	defer db.Close()
+	ctx := context.Background()
+
+	_ = db.UpsertText2SQLSavedReport(ctx, Text2SQLSavedReport{ID: "s1", Name: "daily", SQL: "SELECT 1"})
+	// Not scheduled yet → not due.
+	if due, _ := db.DueText2SQLReports(ctx, time.Now().UTC()); len(due) != 0 {
+		t.Fatalf("unscheduled report should not be due, got %d", len(due))
+	}
+	// Schedule it → due immediately (never run).
+	if err := db.SetText2SQLReportSchedule(ctx, "s1", "24h", true, true); err != nil {
+		t.Fatal(err)
+	}
+	due, err := db.DueText2SQLReports(ctx, time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(due) != 1 || !due[0].DeliverMattermost {
+		t.Fatalf("scheduled report should be due with deliver flag: %+v", due)
+	}
+	// Mark run now → not due again until interval elapses.
+	_ = db.MarkText2SQLReportRun(ctx, "s1", time.Now().UTC().Format(time.RFC3339Nano))
+	if d2, _ := db.DueText2SQLReports(ctx, time.Now().UTC()); len(d2) != 0 {
+		t.Errorf("just-run report should not be due, got %d", len(d2))
+	}
+	// A long-past run → due again.
+	_ = db.MarkText2SQLReportRun(ctx, "s1", time.Now().UTC().Add(-48*time.Hour).Format(time.RFC3339Nano))
+	if d3, _ := db.DueText2SQLReports(ctx, time.Now().UTC()); len(d3) != 1 {
+		t.Errorf("report past its interval should be due, got %d", len(d3))
+	}
+}
+
 func containsStore(s, sub string) bool {
 	for i := 0; i+len(sub) <= len(s); i++ {
 		if s[i:i+len(sub)] == sub {

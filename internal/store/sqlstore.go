@@ -682,6 +682,10 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 				created_by TEXT,
 				created_at TEXT NOT NULL
 			)`,
+		`ALTER TABLE text2sql_saved_reports ADD COLUMN schedule_interval TEXT`,
+		`ALTER TABLE text2sql_saved_reports ADD COLUMN schedule_enabled INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE text2sql_saved_reports ADD COLUMN deliver_mattermost INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE text2sql_saved_reports ADD COLUMN last_run_at TEXT`,
 		`CREATE TABLE IF NOT EXISTS model_pricing_versions (
 				id TEXT PRIMARY KEY,
 				model TEXT NOT NULL,
