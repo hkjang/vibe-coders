@@ -2,9 +2,12 @@ package proxy
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	"vibe-coders/internal/config"
 	"vibe-coders/internal/store"
@@ -199,6 +202,39 @@ func TestChooseUpstreamByQuality(t *testing.T) {
 	// No accurate model configured → always base.
 	if got := chooseUpstreamByQuality(base, "", store.Text2SQLModelMetric{Total: 20, ValidRate: 0.1}); got != base {
 		t.Errorf("missing accurate model should keep base, got %q", got)
+	}
+}
+
+func TestClickhouseText2SQLFactSink(t *testing.T) {
+	var gotBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		gotBody = string(b)
+		w.WriteHeader(200)
+	}))
+	defer srv.Close()
+	cfg := config.ClickHouseConfig{URL: srv.URL, Database: "dw", Table: "analytics_daily", Text2SQLFactTable: "t2s_fact"}
+	logs := []store.Text2SQLQueryLog{
+		{ID: "a", RequestID: "r1", Team: "sales", Mode: "preview", Valid: true, CostKRW: 5, Question: "월별 매출", CreatedAt: time.Now().UTC()},
+		{ID: "b", RequestID: "r2", Team: "ops", Mode: "execute", Valid: false, FailureCategory: "permission_denied", CreatedAt: time.Now().UTC()},
+	}
+	n, err := clickhouseText2SQLFactSink(context.Background(), srv.Client(), cfg, logs)
+	if err != nil || n != 2 {
+		t.Fatalf("fact sink = %d, err=%v", n, err)
+	}
+	// JSONEachRow → two newline-delimited objects; raw question text must NOT be shipped.
+	if lines := strings.Count(strings.TrimSpace(gotBody), "\n"); lines != 1 {
+		t.Errorf("expected 2 JSON lines (1 newline), got body: %q", gotBody)
+	}
+	if strings.Contains(gotBody, "월별 매출") {
+		t.Error("fact rows must not contain raw question text (masked)")
+	}
+	if !strings.Contains(gotBody, "question_chars") {
+		t.Error("fact rows should carry question_chars")
+	}
+	// No fact table configured → no-op.
+	if n2, _ := clickhouseText2SQLFactSink(context.Background(), srv.Client(), config.ClickHouseConfig{URL: srv.URL}, logs); n2 != 0 {
+		t.Errorf("missing fact table should be a no-op, got %d", n2)
 	}
 }
 

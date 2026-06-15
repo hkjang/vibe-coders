@@ -132,13 +132,14 @@ type Text2SQLConfig struct {
 // ClickHouseConfig configures the long-term analytics sink. When URL is empty the
 // sink is disabled; the PostgreSQL/SQLite rollup ledger remains the source of truth.
 type ClickHouseConfig struct {
-	URL          string // HTTP endpoint, e.g. http://clickhouse:8123
-	Database     string
-	Table        string
-	User         string
-	Password     string
-	SinkInterval time.Duration // > 0 enables the background auto-sink worker
-	SinkDays     int           // how many recent days each auto-sink covers
+	URL               string // HTTP endpoint, e.g. http://clickhouse:8123
+	Database          string
+	Table             string
+	User              string
+	Password          string
+	SinkInterval      time.Duration // > 0 enables the background auto-sink worker
+	SinkDays          int           // how many recent days each auto-sink covers
+	Text2SQLFactTable string        // when set, per-query Text2SQL facts are shipped here (detailed fact table); empty disables
 }
 
 // DefaultGatewaySecret is the insecure development fallback used when
@@ -253,13 +254,14 @@ func Load() (Config, error) {
 			DailyRiskWarn:     intEnv("TEXT2SQL_DAILY_RISK_WARN", 0),
 		},
 		ClickHouse: ClickHouseConfig{
-			URL:          strings.TrimRight(os.Getenv("CLICKHOUSE_URL"), "/"),
-			Database:     getEnv("CLICKHOUSE_DB", "default"),
-			Table:        getEnv("CLICKHOUSE_TABLE", "analytics_daily"),
-			User:         os.Getenv("CLICKHOUSE_USER"),
-			Password:     os.Getenv("CLICKHOUSE_PASSWORD"),
-			SinkInterval: durationEnv("CLICKHOUSE_SINK_INTERVAL", 0),
-			SinkDays:     intEnv("CLICKHOUSE_SINK_DAYS", 3),
+			URL:               strings.TrimRight(os.Getenv("CLICKHOUSE_URL"), "/"),
+			Database:          getEnv("CLICKHOUSE_DB", "default"),
+			Table:             getEnv("CLICKHOUSE_TABLE", "analytics_daily"),
+			User:              os.Getenv("CLICKHOUSE_USER"),
+			Password:          os.Getenv("CLICKHOUSE_PASSWORD"),
+			SinkInterval:      durationEnv("CLICKHOUSE_SINK_INTERVAL", 0),
+			SinkDays:          intEnv("CLICKHOUSE_SINK_DAYS", 3),
+			Text2SQLFactTable: os.Getenv("CLICKHOUSE_TEXT2SQL_FACT_TABLE"),
 		},
 		Pricing: map[string]ModelPrice{},
 	}

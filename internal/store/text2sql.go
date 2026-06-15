@@ -84,6 +84,41 @@ func (s *SQLStore) ListText2SQLLogs(ctx context.Context, limit int) ([]Text2SQLQ
 	return out, rows.Err()
 }
 
+// ListText2SQLLogsSince returns non-shadow Text2SQL logs created strictly after `since`,
+// oldest first — used to ship per-query facts to ClickHouse incrementally.
+func (s *SQLStore) ListText2SQLLogsSince(ctx context.Context, since time.Time, limit int) ([]Text2SQLQueryLog, error) {
+	if limit <= 0 || limit > 10000 {
+		limit = 5000
+	}
+	rows, err := s.db.QueryContext(ctx, s.bind(`SELECT id, COALESCE(request_id,''), COALESCE(api_key_id,''), COALESCE(team,''),
+		COALESCE(virtual_model,''), COALESCE(upstream_model,''), COALESCE(mode,''), COALESCE(question,''), COALESCE(generated_sql,''),
+		COALESCE(schema_name,''), COALESCE(schema_version,0), COALESCE(permission_hash,''), COALESCE(glossary_hash,''),
+		valid, COALESCE(reject_reason,''), executed, row_count, COALESCE(error,''), COALESCE(failure_category,''), explain_cost, explain_risk, cost_krw, COALESCE(generation_cost,0), COALESCE(summary_cost,0), latency_ms, created_at
+		FROM text2sql_query_logs WHERE created_at > ? AND COALESCE(mode,'') <> 'shadow' ORDER BY created_at ASC LIMIT ?`), since.UTC().Format(time.RFC3339Nano), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Text2SQLQueryLog{}
+	for rows.Next() {
+		var l Text2SQLQueryLog
+		var valid, executed int
+		var createdAt string
+		if err := rows.Scan(&l.ID, &l.RequestID, &l.APIKeyID, &l.Team, &l.VirtualModel, &l.UpstreamModel, &l.Mode,
+			&l.Question, &l.GeneratedSQL, &l.SchemaName, &l.SchemaVersion, &l.PermissionHash, &l.GlossaryHash,
+			&valid, &l.RejectReason, &executed, &l.RowCount, &l.Error, &l.FailureCategory, &l.ExplainCost, &l.ExplainRisk, &l.CostKRW, &l.GenerationCost, &l.SummaryCost, &l.LatencyMS, &createdAt); err != nil {
+			return nil, err
+		}
+		l.Valid = valid == 1
+		l.Executed = executed == 1
+		if ts, ok := parseStoredTime(createdAt); ok {
+			l.CreatedAt = ts
+		}
+		out = append(out, l)
+	}
+	return out, rows.Err()
+}
+
 // Text2SQLStats summarises recent Text2SQL activity for the admin tab.
 type Text2SQLStats struct {
 	Total     int64   `json:"total"`

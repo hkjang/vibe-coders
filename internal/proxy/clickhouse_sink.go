@@ -74,6 +74,110 @@ func clickhouseSink(ctx context.Context, client *http.Client, cfg config.ClickHo
 	return len(rows), nil
 }
 
+// clickhouseText2SQLFactSink ships per-query Text2SQL facts (masked — no raw question
+// or SQL text, only a length and the governance/outcome columns) to a detailed fact
+// table for long-term, row-level analysis. Returns rows sent.
+func clickhouseText2SQLFactSink(ctx context.Context, client *http.Client, cfg config.ClickHouseConfig, logs []store.Text2SQLQueryLog) (int, error) {
+	if cfg.URL == "" || cfg.Text2SQLFactTable == "" || len(logs) == 0 {
+		return 0, nil
+	}
+	var body bytes.Buffer
+	for _, l := range logs {
+		line, err := json.Marshal(map[string]any{
+			"ts":               l.CreatedAt.UTC().Format(time.RFC3339),
+			"request_id":       l.RequestID,
+			"team":             l.Team,
+			"virtual_model":    l.VirtualModel,
+			"upstream_model":   l.UpstreamModel,
+			"mode":             l.Mode,
+			"schema_name":      l.SchemaName,
+			"schema_version":   l.SchemaVersion,
+			"valid":            boolToInt(l.Valid),
+			"executed":         boolToInt(l.Executed),
+			"row_count":        l.RowCount,
+			"explain_risk":     l.ExplainRisk,
+			"cost_krw":         l.CostKRW,
+			"generation_cost":  l.GenerationCost,
+			"summary_cost":     l.SummaryCost,
+			"latency_ms":       l.LatencyMS,
+			"failure_category": l.FailureCategory,
+			"question_chars":   len([]rune(l.Question)),
+		})
+		if err != nil {
+			return 0, err
+		}
+		body.Write(line)
+		body.WriteByte('\n')
+	}
+	table := cfg.Text2SQLFactTable
+	if cfg.Database != "" && !strings.Contains(table, ".") {
+		table = cfg.Database + "." + table
+	}
+	q := "INSERT INTO " + table + " FORMAT JSONEachRow"
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, cfg.URL+"/?query="+url.QueryEscape(q), &body)
+	if err != nil {
+		return 0, err
+	}
+	req.Header.Set("Content-Type", "application/x-ndjson")
+	if cfg.User != "" {
+		req.Header.Set("X-ClickHouse-User", cfg.User)
+		req.Header.Set("X-ClickHouse-Key", cfg.Password)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		return 0, fmt.Errorf("clickhouse fact insert failed: status %d", resp.StatusCode)
+	}
+	return len(logs), nil
+}
+
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+// syncText2SQLFacts ships Text2SQL facts created since the stored watermark; first run
+// backfills the last 7 days. Advances the "text2sql_fact" watermark on success.
+func (s *Server) syncText2SQLFacts(ctx context.Context) (int, error) {
+	cfg := s.cfg.ClickHouse
+	if cfg.URL == "" || cfg.Text2SQLFactTable == "" {
+		return 0, nil
+	}
+	since := time.Now().UTC().AddDate(0, 0, -7)
+	if states, err := s.db.ListClickHouseSinkState(ctx); err == nil {
+		for _, st := range states {
+			if st.Dimension == "text2sql_fact" && st.LastSyncedDay != "" {
+				if t, perr := time.Parse(time.RFC3339Nano, st.LastSyncedDay); perr == nil {
+					since = t
+				}
+			}
+		}
+	}
+	logs, err := s.db.ListText2SQLLogsSince(ctx, since, 5000)
+	if err != nil {
+		_ = s.db.RecordClickHouseSinkFailure(ctx, "text2sql_fact", since.Format("2006-01-02"), "log read: "+err.Error())
+		return 0, err
+	}
+	if len(logs) == 0 {
+		return 0, nil
+	}
+	n, err := clickhouseText2SQLFactSink(ctx, s.client, cfg, logs)
+	if err != nil {
+		_ = s.db.RecordClickHouseSinkFailure(ctx, "text2sql_fact", since.Format("2006-01-02"), err.Error())
+		return 0, err
+	}
+	maxTS := logs[len(logs)-1].CreatedAt.UTC().Format(time.RFC3339Nano)
+	_ = s.db.RecordClickHouseSinkSuccess(ctx, "text2sql_fact", maxTS, int64(n))
+	return n, nil
+}
+
 // dwDimensions is the set of rollup dimensions shipped to ClickHouse.
 var dwDimensions = []string{"all", "model", "provider", "project", "cost_center"}
 
@@ -313,6 +417,31 @@ func (s *Server) handleClickHouseConsistency(w http.ResponseWriter, r *http.Requ
 	})
 }
 
+// handleClickHouseText2SQLFact manually ships pending Text2SQL facts to the configured
+// fact table (incremental from the watermark).
+// POST /admin/dw/text2sql-fact
+func (s *Server) handleClickHouseText2SQLFact(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	if r.Method != http.MethodPost {
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
+	if s.cfg.ClickHouse.URL == "" || s.cfg.ClickHouse.Text2SQLFactTable == "" {
+		writeOpenAIError(w, http.StatusBadRequest, "fact sink not configured (CLICKHOUSE_URL + CLICKHOUSE_TEXT2SQL_FACT_TABLE)", "invalid_request_error", "no_fact_table")
+		return
+	}
+	n, err := s.syncText2SQLFacts(r.Context())
+	if err != nil {
+		writeOpenAIError(w, http.StatusBadGateway, "text2sql fact sink failed: "+err.Error(), "server_error", "fact_sink_failed")
+		return
+	}
+	s.auditAdmin(r, "dw.text2sql_fact.sink", "", auditJSON(map[string]any{"rows": n}))
+	writeJSON(w, http.StatusOK, map[string]any{"sent_rows": n, "table": s.cfg.ClickHouse.Text2SQLFactTable})
+}
+
 // handleClickHouseTableInfo inspects the target table's engine and sort key via
 // system.tables, so an operator can confirm the dedupe assumption (ReplacingMergeTree
 // keyed by day/dimension/dim_value) that makes re-sending a window safe.
@@ -412,6 +541,10 @@ func (s *Server) clickhouseSinkLoop() {
 			if _, err := s.syncClickHouseDimension(ctx, dim, sinceDay); err != nil {
 				slog.Warn("clickhouse auto-sink failed", "dimension", dim, "error", err)
 			}
+		}
+		// Per-query Text2SQL facts (only when a fact table is configured).
+		if _, err := s.syncText2SQLFacts(ctx); err != nil {
+			slog.Warn("clickhouse text2sql fact sink failed", "error", err)
 		}
 		cancel()
 	}
