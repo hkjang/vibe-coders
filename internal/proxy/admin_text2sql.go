@@ -1040,11 +1040,10 @@ func (s *Server) handleText2SQLGoldenRun(w http.ResponseWriter, r *http.Request)
 // whether they return the same rows (order-insensitive multiset). Returns (match, detail)
 // where detail explains a mismatch or execution error.
 func (s *Server) goldenResultEquivalent(ctx context.Context, generatedSQL, expectedSQL string) (bool, string) {
-	db, err := s.text2sqlExecDB()
+	db, driver, err := s.text2sqlValidationDB()
 	if err != nil {
-		return false, "exec db: " + err.Error()
+		return false, "validation db: " + err.Error()
 	}
-	driver := s.cfg.Text2SQL.ExecDriver
 	rowCap := s.cfg.Text2SQL.MaxLimit
 	if rowCap <= 0 {
 		rowCap = 1000

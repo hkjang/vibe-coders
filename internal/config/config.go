@@ -134,6 +134,11 @@ type Text2SQLConfig struct {
 	ReplayBundles     bool          // persist full generation context (prompt/schema/glossary/permissions) per query for audit/replay
 	DailyRiskLimit    int           // per-API-key daily risky-request cap for the cumulative_risk_enforce toggle (0 disables enforcement)
 	DailyRiskWarn     int           // warn threshold below the cap; in [warn, limit) the response is served with a caution (0 → limit/2)
+	// SQL Digital Twin: an optional masked/sample database used for safe validation
+	// (e.g. golden result-equivalence) instead of the production execute DB. Empty
+	// falls back to the execute DB.
+	TwinDSN    string
+	TwinDriver string
 }
 
 // ClickHouseConfig configures the long-term analytics sink. When URL is empty the
@@ -263,6 +268,8 @@ func Load() (Config, error) {
 			ReplayBundles:     boolEnv("TEXT2SQL_REPLAY_BUNDLES", false),
 			DailyRiskLimit:    intEnv("TEXT2SQL_DAILY_RISK_LIMIT", 20),
 			DailyRiskWarn:     intEnv("TEXT2SQL_DAILY_RISK_WARN", 0),
+			TwinDSN:           os.Getenv("TEXT2SQL_TWIN_DSN"),
+			TwinDriver:        getEnv("TEXT2SQL_TWIN_DRIVER", "postgres"),
 		},
 		ClickHouse: ClickHouseConfig{
 			URL:               strings.TrimRight(os.Getenv("CLICKHOUSE_URL"), "/"),

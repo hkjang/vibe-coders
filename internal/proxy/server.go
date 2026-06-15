@@ -47,6 +47,7 @@ type Server struct {
 	priceCache   atomic.Pointer[pricingSnapshot]
 	mmCache      atomic.Pointer[mattermostSnapshot]
 	t2sExec      atomic.Pointer[sql.DB]          // lazily-opened read-only DB for Text2SQL execute mode
+	t2sTwin      atomic.Pointer[sql.DB]          // lazily-opened SQL Digital Twin DB (masked/sample) for safe validation
 	t2sKilled    atomic.Bool                     // runtime kill switch: when set, Text2SQL is disabled regardless of config
 	t2sFeatures  atomic.Pointer[map[string]bool] // runtime Text2SQL feature toggles (admin-managed)
 	sessions     *sessionInferer

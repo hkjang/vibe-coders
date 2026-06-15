@@ -984,6 +984,33 @@ func (s *Server) handleText2SQLHealthcheck(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, out)
 }
 
+// text2sqlValidationDB returns the database to use for safe validation (golden
+// result-equivalence): the SQL Digital Twin (masked/sample) when configured, else the
+// production execute DB. Also returns the driver name for the chosen DB.
+func (s *Server) text2sqlValidationDB() (*sql.DB, string, error) {
+	if strings.TrimSpace(s.cfg.Text2SQL.TwinDSN) != "" {
+		if db := s.t2sTwin.Load(); db != nil {
+			return db, s.cfg.Text2SQL.TwinDriver, nil
+		}
+		driver := strings.ToLower(strings.TrimSpace(s.cfg.Text2SQL.TwinDriver))
+		if driver == "postgres" || driver == "postgresql" {
+			driver = "pgx"
+		}
+		if driver == "" {
+			driver = "sqlite"
+		}
+		db, err := sql.Open(driver, s.cfg.Text2SQL.TwinDSN)
+		if err != nil {
+			return nil, "", err
+		}
+		db.SetMaxOpenConns(4)
+		s.t2sTwin.Store(db)
+		return db, s.cfg.Text2SQL.TwinDriver, nil
+	}
+	db, err := s.text2sqlExecDB()
+	return db, s.cfg.Text2SQL.ExecDriver, err
+}
+
 func (s *Server) text2sqlExecDB() (*sql.DB, error) {
 	if db := s.t2sExec.Load(); db != nil {
 		return db, nil
