@@ -560,8 +560,18 @@ func (s *Server) handleAdminSettingByKey(w http.ResponseWriter, r *http.Request)
 	}
 }
 
-// applySettingWrite validates, encrypts (if secret), and persists a setting value.
+// applySettingWrite persists one setting value and reloads the runtime snapshot.
 func (s *Server) applySettingWrite(r *http.Request, d settingDef, value, reason string) error {
+	if err := s.persistSettingValue(r, d, value, reason); err != nil {
+		return err
+	}
+	s.reloadRuntimeConfig(r.Context())
+	return nil
+}
+
+// persistSettingValue validates, encrypts (if secret), and writes a setting WITHOUT
+// reloading the runtime snapshot (callers reload once after a batch).
+func (s *Server) persistSettingValue(r *http.Request, d settingDef, value, reason string) error {
 	value = strings.TrimSpace(value)
 	if !d.Secret && value == "" && d.Type != stString && d.Type != stCSV {
 		return fmt.Errorf("value is required")
@@ -587,13 +597,140 @@ func (s *Server) applySettingWrite(r *http.Request, d settingDef, value, reason 
 	if err != nil {
 		return err
 	}
-	if err := s.db.UpsertAdminSetting(r.Context(), store.AdminSetting{
+	return s.db.UpsertAdminSetting(r.Context(), store.AdminSetting{
 		Key: d.Key, Category: d.Category, ValueJSON: string(encoded), ValueType: string(d.Type), IsSecret: d.Secret, Source: "admin",
-	}, adminID(r), reason); err != nil {
-		return err
+	}, adminID(r), reason)
+}
+
+// handleAdminSettingsBulk applies many settings atomically: validate all first, then write
+// all and reload once. POST /admin/settings/bulk {settings:[{key,value}], reason}
+func (s *Server) handleAdminSettingsBulk(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	var payload struct {
+		Settings []struct{ Key, Value string } `json:"settings"`
+		Reason   string                        `json:"reason"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "invalid_body")
+		return
+	}
+	s.applySettingsBatch(w, r, payload.Settings, payload.Reason, false)
+}
+
+// handleAdminSettingsImport imports non-secret settings (the export format). Secret keys
+// are rejected (they must be set individually). POST /admin/settings/import
+func (s *Server) handleAdminSettingsImport(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	var payload struct {
+		Settings []struct{ Key, Value string } `json:"settings"`
+		Reason   string                        `json:"reason"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "invalid_body")
+		return
+	}
+	s.applySettingsBatch(w, r, payload.Settings, payload.Reason, true)
+}
+
+// applySettingsBatch validates every item (rejecting the whole batch on any error, so a
+// partial apply can't break the gateway), then persists all and reloads once. When
+// rejectSecret is set (import), secret keys are refused.
+func (s *Server) applySettingsBatch(w http.ResponseWriter, r *http.Request, items []struct{ Key, Value string }, reason string, rejectSecret bool) {
+	if len(items) == 0 {
+		writeOpenAIError(w, http.StatusBadRequest, "no settings provided", "invalid_request_error", "empty_batch")
+		return
+	}
+	type resolved struct {
+		def   settingDef
+		value string
+	}
+	out := make([]resolved, 0, len(items))
+	errs := map[string]string{}
+	proposed := map[string]string{}
+	for _, it := range items {
+		key := strings.TrimSpace(it.Key)
+		d, ok := settingDefByKey(key)
+		if !ok {
+			errs[key] = "unknown setting key"
+			continue
+		}
+		if rejectSecret && d.Secret {
+			errs[key] = "secret keys cannot be imported; set them individually"
+			continue
+		}
+		val := strings.TrimSpace(it.Value)
+		if !d.Secret || val != "" {
+			if err := validateSettingValue(d, val); err != nil {
+				errs[key] = err.Error()
+				continue
+			}
+		}
+		proposed[key] = val
+		out = append(out, resolved{def: d, value: val})
+	}
+	// Cross-key: default_limit <= max_limit after the batch is applied.
+	if errs["text2sql.default_limit"] == "" && errs["text2sql.max_limit"] == "" {
+		stored, _ := s.loadStoredSettings(r)
+		get := func(key string) int {
+			if v, ok := proposed[key]; ok {
+				n, _ := strconv.Atoi(v)
+				return n
+			}
+			d, _ := settingDefByKey(key)
+			eff, _ := s.effectiveSettingValue(stored, d)
+			n, _ := strconv.Atoi(eff)
+			return n
+		}
+		if get("text2sql.default_limit") > get("text2sql.max_limit") {
+			errs["text2sql.default_limit"] = "default_limit must be <= max_limit"
+		}
+	}
+	if len(errs) > 0 {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"ok": false, "errors": errs})
+		return
+	}
+	for _, rsv := range out {
+		if err := s.persistSettingValue(r, rsv.def, rsv.value, reason); err != nil {
+			// Validation already passed; a write error here is a server fault.
+			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "bulk_write_failed")
+			return
+		}
 	}
 	s.reloadRuntimeConfig(r.Context())
-	return nil
+	s.auditAdmin(r, "setting.bulk", "", auditJSON(map[string]any{"count": len(out), "import": rejectSecret}))
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "applied": len(out)})
+}
+
+// handleAdminSettingsExport returns admin-overridden, non-secret settings (the importable
+// format). Secrets are excluded. GET /admin/settings/export
+func (s *Server) handleAdminSettingsExport(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	stored, err := s.loadStoredSettings(r)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "export_failed")
+		return
+	}
+	items := []map[string]string{}
+	for _, d := range settingRegistry {
+		if d.Secret {
+			continue
+		}
+		if _, ok := stored[d.Key]; !ok {
+			continue // only export admin overrides
+		}
+		val, _ := s.effectiveSettingValue(stored, d)
+		items = append(items, map[string]string{"key": d.Key, "value": val})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"settings": items, "note": "secrets excluded; set them individually after import"})
 }
 
 // handleAdminSettingsValidate validates a proposed value without persisting it.
