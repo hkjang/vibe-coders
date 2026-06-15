@@ -94,6 +94,7 @@ Roo Code / Cursor / Continue 등 OpenAI 호환 API 를 호출하는 VS Code 확�
 - **절감 리포트 (Savings Report)** (`v0.6.0`): scope별 비용 절감 정량화(`/admin/savings`) — 라우팅 다운시프트 절감(요청 모델 가격 baseline−실제 비용, 정확) + 캐시 절감(적중×비캐시 평균, 추정)을 합산해 게이트웨이 ROI를 숫자로 표시
 - **에러버짓 번레이트** (`v0.6.1`): SLA claim 위에 멀티윈도우 에러버짓 소진율(`/admin/insurance/burn-rate`) — short/long 윈도우 burn rate(claim_rate÷허용치)로 fast(page)/slow(ticket) 분류 + 30일 버짓 소진 일수 투영, `INSURANCE_FAST_BURN`/`INSURANCE_SLOW_BURN`
 - **모델 마이그레이션 어드바이저** (`v0.6.2`): 프롬프트 지문 클러스터별 지배 모델→더 싸고 충분히 좋은(성공률 5pp 이내) 모델 전환 추천(`/admin/model-migration`) — 모델별 평균비용·성공률 비교 + `요청수×(현재−추천 비용)` 절감 추정, 절감 큰 순 정렬
+- **비용센터 청구서** (`v0.6.3`): cost_center별 AI 사용료 chargeback 청구서(`/admin/invoices?cost_center=&format=markdown`) — 모델별 라인아이템+합계를 JSON/markdown으로, 미지정 시 전체 cost_center 요약
 - **운영·거버넌스 확장** (`v0.3.0`): 정책 시뮬레이터(`/admin/policies/simulate`), 모델 가격표 버전 이력(`/admin/pricing`, `/admin/pricing/seed`), 운영 리스크 스코어(`/admin/ops/risk`)·상태(`/admin/ops/status`), Provider SLO(`/admin/providers/slo`), 비용 이상탐지(`/admin/cost/anomalies`)·배부(`/admin/cost/allocation`)·팀 예산 예측(`/admin/budgets/projection`), 모델별 코딩 품질(`/admin/models/quality`), 작업 템플릿(`/admin/templates`), 프롬프트 버전 승격(`/admin/prompts/promotions`), 자동 라우팅 학습 루프(`/admin/routing/learning/auto`), DW 롤업(`/admin/dw/rollups`), Mattermost 알림(`/admin/notifications/mattermost`)
 - 호출 이력 CSV 다운로드 `/admin/export.csv` (Excel UTF-8 BOM 포함, 한국어 그대로 열림)
 - 운영용 백업 스크립트 `scripts/backup.ps1` / `scripts/backup.sh` (SQLite `.backup` + fallback ndjson + 보존 일수 적용)

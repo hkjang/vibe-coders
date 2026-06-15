@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"sort"
 	"strconv"
@@ -96,6 +97,56 @@ func (s *Server) handleWorkMap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"dimension": dimension, "nodes": nodes})
+}
+
+// handleInvoices generates a cost-center chargeback invoice. With ?cost_center= it
+// returns that center's per-model line items + totals (JSON, or markdown when
+// ?format=markdown). Without it, returns a summary of all cost centers. Read-only.
+// GET /admin/invoices?cost_center=ABC&window=30d&format=markdown
+func (s *Server) handleInvoices(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	since := parseWindow(r.URL.Query().Get("window"), 30*24*time.Hour, "day")
+	costCenter := strings.TrimSpace(r.URL.Query().Get("cost_center"))
+	if costCenter == "" {
+		// Summary: list all cost centers with totals so the caller can pick one.
+		rows, err := s.db.CostAllocation(r.Context(), "cost_center", since, recentLimit(r))
+		if err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "invoices_failed")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"cost_centers": rows})
+		return
+	}
+	inv, err := s.db.CostCenterInvoiceData(r.Context(), costCenter, since)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "invoice_failed")
+		return
+	}
+	if strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("format")), "markdown") {
+		w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(renderInvoiceMarkdown(inv)))
+		return
+	}
+	writeJSON(w, http.StatusOK, inv)
+}
+
+// renderInvoiceMarkdown formats a cost-center invoice as a markdown document suitable for
+// pasting into a ticket, wiki, or Mattermost message.
+func renderInvoiceMarkdown(inv store.CostCenterInvoice) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "# AI 사용료 청구서 — %s\n\n", inv.CostCenter)
+	fmt.Fprintf(&b, "- 기간 시작: %s\n", inv.Since)
+	fmt.Fprintf(&b, "- 총 요청: %d\n- 총 토큰: %d\n- **총액: %.2f KRW**\n\n", inv.TotalRequests, inv.TotalTokens, inv.TotalCostKRW)
+	b.WriteString("| 모델 | 요청 | 토큰 | 비용(KRW) |\n|------|------|------|-----------|\n")
+	for _, li := range inv.LineItems {
+		fmt.Fprintf(&b, "| %s | %d | %d | %.2f |\n", li.Model, li.Requests, li.TotalTokens, li.CostKRW)
+	}
+	fmt.Fprintf(&b, "| **합계** | **%d** | **%d** | **%.2f** |\n", inv.TotalRequests, inv.TotalTokens, inv.TotalCostKRW)
+	return b.String()
 }
 
 // handleModelMigration returns model-migration recommendations: per prompt-fingerprint
