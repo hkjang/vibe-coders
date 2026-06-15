@@ -635,6 +635,73 @@ func (s *SQLStore) UpsertGoldenPrompt(ctx context.Context, p GoldenPrompt) error
 	return err
 }
 
+func (s *SQLStore) ListGoldenWorkflows(ctx context.Context) ([]GoldenWorkflow, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id, name, COALESCE(description, ''), COALESCE(steps, '[]'), COALESCE(tags, '[]'), created_at, updated_at
+		FROM golden_workflows ORDER BY created_at DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := []GoldenWorkflow{}
+	for rows.Next() {
+		w, err := scanGoldenWorkflow(rows)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, w)
+	}
+	return result, rows.Err()
+}
+
+func (s *SQLStore) GetGoldenWorkflow(ctx context.Context, id string) (GoldenWorkflow, error) {
+	row := s.db.QueryRowContext(ctx, s.bind(`SELECT id, name, COALESCE(description, ''), COALESCE(steps, '[]'), COALESCE(tags, '[]'), created_at, updated_at
+		FROM golden_workflows WHERE id = ?`), id)
+	return scanGoldenWorkflow(row)
+}
+
+// scanGoldenWorkflow decodes a workflow row from either *sql.Rows or *sql.Row.
+func scanGoldenWorkflow(sc interface{ Scan(...any) error }) (GoldenWorkflow, error) {
+	var w GoldenWorkflow
+	var steps, tags, createdAt, updatedAt string
+	if err := sc.Scan(&w.ID, &w.Name, &w.Description, &steps, &tags, &createdAt, &updatedAt); err != nil {
+		return GoldenWorkflow{}, err
+	}
+	if err := json.Unmarshal([]byte(steps), &w.Steps); err != nil {
+		w.Steps = nil
+	}
+	w.Tags = decodeStringList(tags)
+	w.CreatedAt = parseOptionalTime(createdAt)
+	w.UpdatedAt = parseOptionalTime(updatedAt)
+	return w, nil
+}
+
+func (s *SQLStore) UpsertGoldenWorkflow(ctx context.Context, w GoldenWorkflow) error {
+	now := time.Now().UTC()
+	if w.CreatedAt.IsZero() {
+		w.CreatedAt = now
+	}
+	w.UpdatedAt = now
+	steps, err := json.Marshal(w.Steps)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, s.bind(`INSERT INTO golden_workflows (id, name, description, steps, tags, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+			name = excluded.name,
+			description = excluded.description,
+			steps = excluded.steps,
+			tags = excluded.tags,
+			updated_at = excluded.updated_at`),
+		w.ID, w.Name, w.Description, string(steps), encodeStringList(w.Tags), formatTime(w.CreatedAt), formatTime(w.UpdatedAt))
+	return err
+}
+
+func (s *SQLStore) DeleteGoldenWorkflow(ctx context.Context, id string) error {
+	_, err := s.db.ExecContext(ctx, s.bind(`DELETE FROM golden_workflows WHERE id = ?`), id)
+	return err
+}
+
 func (s *SQLStore) InsertGoldenPromptResult(ctx context.Context, r GoldenPromptResult) error {
 	if r.CreatedAt.IsZero() {
 		r.CreatedAt = time.Now().UTC()

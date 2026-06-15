@@ -458,6 +458,17 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 			created_at TEXT NOT NULL
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_golden_prompt_results_prompt ON golden_prompt_results(prompt_id)`,
+		// Golden Workflow: a named, ordered suite of golden steps run as one regression
+		// unit. Steps are stored inline as an ordered JSON array of {name,prompt,expected}.
+		`CREATE TABLE IF NOT EXISTS golden_workflows (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			description TEXT,
+			steps TEXT NOT NULL,
+			tags TEXT,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)`,
 		`CREATE TABLE IF NOT EXISTS anomaly_events (
 			id TEXT PRIMARY KEY,
 			scope TEXT NOT NULL,

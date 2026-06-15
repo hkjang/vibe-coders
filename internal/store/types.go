@@ -559,6 +559,26 @@ type GoldenPromptResult struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+// GoldenWorkflowStep is one ordered step of a Golden Workflow: a prompt and its
+// expected substring/marker, scored independently (no inter-step output chaining).
+type GoldenWorkflowStep struct {
+	Name     string `json:"name"`
+	Prompt   string `json:"prompt"`
+	Expected string `json:"expected"`
+}
+
+// GoldenWorkflow is a named, ordered suite of golden steps run together as one
+// regression unit — a first-class entity distinct from ad-hoc golden-prompt tags.
+type GoldenWorkflow struct {
+	ID          string               `json:"id"`
+	Name        string               `json:"name"`
+	Description string               `json:"description"`
+	Steps       []GoldenWorkflowStep `json:"steps"`
+	Tags        []string             `json:"tags"`
+	CreatedAt   time.Time            `json:"created_at"`
+	UpdatedAt   time.Time            `json:"updated_at"`
+}
+
 type AnomalyEvent struct {
 	ID         string    `json:"id"`
 	Scope      string    `json:"scope"`

@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -750,6 +751,162 @@ func (s *Server) handleGoldenRun(w http.ResponseWriter, r *http.Request) {
 		"total": total, "passed": passed, "failed": total - passed,
 		"pass_rate": passRate, "min_pass_rate": minPassRate,
 		"regressed": regressed, "failures": failures, "results": results,
+	}
+	status := http.StatusOK
+	if regressed && strings.TrimSpace(r.URL.Query().Get("fail_on_regression")) == "1" {
+		status = http.StatusUnprocessableEntity
+	}
+	writeJSON(w, status, body)
+}
+
+// handleGoldenWorkflows is CRUD for Golden Workflows (named, ordered golden suites).
+// GET → list; POST {id?,name,description?,steps[],tags?} → upsert; DELETE ?id= → remove.
+func (s *Server) handleGoldenWorkflows(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		wfs, err := s.db.ListGoldenWorkflows(r.Context())
+		if err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "golden_workflows_failed")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"workflows": wfs})
+	case http.MethodPost:
+		var wf store.GoldenWorkflow
+		if err := json.NewDecoder(r.Body).Decode(&wf); err != nil {
+			writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "invalid_body")
+			return
+		}
+		wf.Name = strings.TrimSpace(wf.Name)
+		if wf.Name == "" {
+			writeOpenAIError(w, http.StatusBadRequest, "name is required", "invalid_request_error", "missing_name")
+			return
+		}
+		cleaned := wf.Steps[:0]
+		for _, step := range wf.Steps {
+			step.Name = strings.TrimSpace(step.Name)
+			step.Prompt = strings.TrimSpace(step.Prompt)
+			if step.Prompt == "" {
+				continue
+			}
+			cleaned = append(cleaned, step)
+		}
+		wf.Steps = cleaned
+		if len(wf.Steps) == 0 {
+			writeOpenAIError(w, http.StatusBadRequest, "at least one step with a prompt is required", "invalid_request_error", "missing_steps")
+			return
+		}
+		if wf.ID == "" {
+			wf.ID = newID("gwf")
+		}
+		if err := s.db.UpsertGoldenWorkflow(r.Context(), wf); err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "golden_workflow_save_failed")
+			return
+		}
+		s.auditAdmin(r, "governance.golden.workflow.upsert", wf.ID, auditJSON(map[string]any{"name": wf.Name, "steps": len(wf.Steps)}))
+		writeJSON(w, http.StatusOK, wf)
+	case http.MethodDelete:
+		id := strings.TrimSpace(r.URL.Query().Get("id"))
+		if id == "" {
+			writeOpenAIError(w, http.StatusBadRequest, "id is required", "invalid_request_error", "missing_id")
+			return
+		}
+		if err := s.db.DeleteGoldenWorkflow(r.Context(), id); err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "golden_workflow_delete_failed")
+			return
+		}
+		s.auditAdmin(r, "governance.golden.workflow.delete", id, "")
+		writeJSON(w, http.StatusOK, map[string]any{"deleted": id})
+	default:
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+	}
+}
+
+// handleGoldenWorkflowRun runs a Golden Workflow's steps in order across the given
+// models and reports per-step results plus an aggregate pass rate.
+// POST /admin/golden-workflows/run {id, models[], min_pass_rate?}
+//
+//	?fail_on_regression=1 → HTTP 422 when pass_rate < min_pass_rate (CI gate).
+func (s *Server) handleGoldenWorkflowRun(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	if r.Method != http.MethodPost {
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
+	var payload struct {
+		ID          string   `json:"id"`
+		Models      []string `json:"models"`
+		MinPassRate *float64 `json:"min_pass_rate"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "invalid_body")
+		return
+	}
+	if strings.TrimSpace(payload.ID) == "" {
+		writeOpenAIError(w, http.StatusBadRequest, "id is required", "invalid_request_error", "missing_id")
+		return
+	}
+	models := normalizeModelList(payload.Models)
+	if len(models) == 0 {
+		writeOpenAIError(w, http.StatusBadRequest, "models is required", "invalid_request_error", "missing_models")
+		return
+	}
+	wf, err := s.db.GetGoldenWorkflow(r.Context(), strings.TrimSpace(payload.ID))
+	if err != nil || wf.ID == "" {
+		writeOpenAIError(w, http.StatusNotFound, "workflow not found", "invalid_request_error", "workflow_not_found")
+		return
+	}
+
+	steps := []map[string]any{}
+	failures := []map[string]any{}
+	total, passed := 0, 0
+	for _, model := range models {
+		for idx, step := range wf.Steps {
+			run := s.runGovernanceChat(r.Context(), r, model, step.Prompt)
+			score, ok := scoreGoldenResponse(step.Expected, run.Response)
+			if run.Error != "" {
+				ok = false
+			}
+			stepName := step.Name
+			if stepName == "" {
+				stepName = fmt.Sprintf("step %d", idx+1)
+			}
+			steps = append(steps, map[string]any{
+				"step": idx + 1, "name": stepName, "model": model,
+				"score": score, "passed": ok, "cost_krw": run.CostKRW, "latency_ms": run.LatencyMS,
+			})
+			total++
+			if ok {
+				passed++
+			} else {
+				failures = append(failures, map[string]any{"step": idx + 1, "name": stepName, "model": model, "score": score})
+			}
+		}
+	}
+
+	passRate := 1.0
+	if total > 0 {
+		passRate = float64(passed) / float64(total)
+	}
+	minPassRate := 1.0
+	if payload.MinPassRate != nil {
+		minPassRate = *payload.MinPassRate
+	}
+	regressed := total > 0 && passRate < minPassRate
+
+	s.auditAdmin(r, "governance.golden.workflow.run", wf.ID, auditJSON(map[string]any{"name": wf.Name, "total": total, "passed": passed, "models": models}))
+
+	body := map[string]any{
+		"workflow_id": wf.ID, "workflow_name": wf.Name,
+		"total": total, "passed": passed, "failed": total - passed,
+		"pass_rate": passRate, "min_pass_rate": minPassRate,
+		"regressed": regressed, "failures": failures, "steps": steps,
 	}
 	status := http.StatusOK
 	if regressed && strings.TrimSpace(r.URL.Query().Get("fail_on_regression")) == "1" {

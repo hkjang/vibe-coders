@@ -218,6 +218,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/admin/replay", s.handleReplay)
 	mux.HandleFunc("/admin/golden-prompts", s.handleGoldenPrompts)
 	mux.HandleFunc("/admin/golden-prompts/run", s.handleGoldenRun)
+	mux.HandleFunc("/admin/golden-workflows", s.handleGoldenWorkflows)
+	mux.HandleFunc("/admin/golden-workflows/run", s.handleGoldenWorkflowRun)
 	mux.HandleFunc("/admin/contexts", s.handleContexts)
 	mux.HandleFunc("/admin/scatter", s.handleScatter)
 	mux.HandleFunc("/admin/routing-rules", s.handleRoutingRules)
