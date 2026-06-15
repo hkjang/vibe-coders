@@ -18,6 +18,24 @@ import (
 	"vibe-coders/internal/store"
 )
 
+// teamNameByID maps auth team IDs to their display names. API keys store a team identifier
+// (self-service keys carry the user's team ID, e.g. "team_security"); this lets the UI show
+// the friendly name ("Security") while keeping the ID for links/filtering. Free-form team
+// strings with no matching auth team are simply absent from the map.
+func (s *Server) teamNameByID(r *http.Request) map[string]string {
+	out := map[string]string{}
+	teams, err := s.db.ListAuthTeams(r.Context())
+	if err != nil {
+		return out
+	}
+	for _, t := range teams {
+		if strings.TrimSpace(t.Name) != "" {
+			out[t.ID] = t.Name
+		}
+	}
+	return out
+}
+
 func (s *Server) handleUsers(w http.ResponseWriter, r *http.Request) {
 	if !s.authorizeAdmin(r) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
@@ -51,7 +69,7 @@ func (s *Server) handleUsers(w http.ResponseWriter, r *http.Request) {
 				"status": u.Status, "team_id": teamID, "created_at": u.CreatedAt,
 			})
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"users": users, "auth_users": enriched})
+		writeJSON(w, http.StatusOK, map[string]any{"users": users, "auth_users": enriched, "team_names": s.teamNameByID(r)})
 	case http.MethodPost:
 		var p struct {
 			Email    string `json:"email"`
@@ -254,7 +272,10 @@ func (s *Server) handleUserDetail(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "user_detail_failed")
 		return
 	}
-	writeJSON(w, http.StatusOK, detail)
+	writeJSON(w, http.StatusOK, struct {
+		*store.UserDetail
+		TeamNames map[string]string `json:"team_names"`
+	}{&detail, s.teamNameByID(r)})
 }
 
 // handleUserReport returns a per-user AI coding report over a window (default 7d):

@@ -3319,6 +3319,15 @@ const adminHTML = `<!doctype html>
     }
 
     // ---------- users ----------
+    // teamLabel renders a key's stored team identifier as its friendly auth-team name (with the
+    // raw id as small sub-text); falls back to the raw value for free-form teams with no match.
+    function teamLabel(team, names) {
+      if (!team) return '';
+      const nm = names && names[team];
+      return nm
+        ? escapeHTML(nm) + '<div class="muted" style="font-size:11px">' + escapeHTML(team) + '</div>'
+        : escapeHTML(team);
+    }
     async function renderUsers() {
       const [r, prod] = await Promise.all([
         api('/admin/users'),
@@ -3326,6 +3335,7 @@ const adminHTML = `<!doctype html>
       ]);
       const rows = r.users || [];
       const prodRows = prod.users || [];
+      const teamNames = r.team_names || {};
       const html = section('사용자 (Proxy API 키) 별 사용량',
         rows.length ? (
           '<table><thead><tr>' +
@@ -3343,7 +3353,7 @@ const adminHTML = `<!doctype html>
             '<tr class="row-link" onclick="location.hash=\'#/users/' + encodeURIComponent(u.api_key_id) + '\'">' +
               '<td>' + escapeHTML(u.name) + '<div class="muted">' + escapeHTML(u.api_key_id) + '</div></td>' +
               '<td>' + escapeHTML(u.owner || '') + '</td>' +
-              '<td>' + (u.team ? '<a href="#/teams/' + encodeURIComponent(u.team) + '" onclick="event.stopPropagation()">' + escapeHTML(u.team) + '</a>' : '') + '</td>' +
+              '<td>' + (u.team ? '<a href="#/teams/' + encodeURIComponent(u.team) + '" onclick="event.stopPropagation()">' + teamLabel(u.team, teamNames) + '</a>' : '') + '</td>' +
               '<td><span class="status ' + (u.status === 'active' ? '' : (u.status === 'external' ? 'warn' : 'error')) + '">' + escapeHTML(u.status) + '</span></td>' +
               '<td data-num="' + (u.requests || 0) + '">' + fmt(u.requests) + '</td>' +
               '<td data-num="' + (u.tokens || 0) + '">' + fmt(u.tokens) + '</td>' +
@@ -3354,11 +3364,11 @@ const adminHTML = `<!doctype html>
             '</tr>'
           ).join('') + '</tbody></table>'
         ) : '<div class="empty">사용자 없음</div>'
-      ) + section('AI 활용지수 (최근 30일)', productivityTable(prodRows));
+      ) + section('AI 활용지수 (최근 30일)', productivityTable(prodRows, teamNames));
       document.getElementById('view').innerHTML = html;
       makeSortable('#view', 'users');
     }
-    function productivityTable(rows) {
+    function productivityTable(rows, names) {
       if (!rows.length) return '<div class="empty">활동 데이터 없음 (chat 호출이 쌓이면 표시됩니다)</div>';
       const scoreBadge = (s) => '<span class="status ' + (s >= 70 ? '' : (s >= 40 ? 'warn' : 'error')) + '">' + fmt(s) + '점</span>';
       return '<table><thead><tr>' +
@@ -3366,7 +3376,7 @@ const adminHTML = `<!doctype html>
         '<th data-sort="num">커밋</th><th data-sort="num">머지 MR</th><th data-sort="num">도구 호출</th><th data-sort="num">성공률</th><th data-sort="num">비용</th><th data-sort="num">활용지수</th></tr></thead><tbody>' +
         rows.map(u => '<tr class="row-link" onclick="location.hash=\'#/users/' + encodeURIComponent(u.api_key_id) + '\'">' +
           '<td>' + escapeHTML(u.name) + '<div class="muted">' + escapeHTML(u.api_key_id) + '</div></td>' +
-          '<td>' + escapeHTML(u.team || '') + '</td>' +
+          '<td>' + teamLabel(u.team || '', names || {}) + '</td>' +
           '<td data-num="' + (u.requests || 0) + '">' + fmt(u.requests) + '</td>' +
           '<td data-num="' + (u.sessions || 0) + '">' + fmt(u.sessions) + '</td>' +
           '<td data-num="' + (u.active_days || 0) + '">' + fmt(u.active_days) + '</td>' +
@@ -3412,7 +3422,7 @@ const adminHTML = `<!doctype html>
           '<div style="padding:14px"><div class="kv">' +
             row('API 키 ID', escapeHTML(k.id)) +
             row('소유자', escapeHTML(k.owner || '')) +
-            row('팀', k.team ? '<a href="#/teams/' + encodeURIComponent(k.team) + '">' + escapeHTML(k.team) + '</a>' : '') +
+            row('팀', k.team ? '<a href="#/teams/' + encodeURIComponent(k.team) + '">' + teamLabel(k.team, d.team_names || {}) + '</a>' : '') +
             row('상태', escapeHTML(k.status)) +
             row('총 요청', fmt(s.requests)) +
             row('총 토큰', fmt(s.tokens)) +

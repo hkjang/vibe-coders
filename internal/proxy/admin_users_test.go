@@ -208,6 +208,48 @@ func TestUserAndIPDetailAggregateAcrossRequests(t *testing.T) {
 	}
 }
 
+func TestAdminUsersResolvesTeamNames(t *testing.T) {
+	db := openTestStore(t)
+	defer db.Close()
+	logger := store.NewAsyncLogger(db, 32, filepath.Join(t.TempDir(), "fallback.ndjson"))
+	logger.Start()
+	defer logger.Stop(context.Background())
+
+	ctx := context.Background()
+	if err := db.UpsertAuthTeam(ctx, store.AuthTeam{ID: "team_security", Name: "Security"}); err != nil {
+		t.Fatal(err)
+	}
+	// A self-service-style key stores the team ID, not the display name.
+	if err := db.UpsertAPIKey(ctx, store.APIKeyRecord{
+		ID: "key_member", Name: "member", KeyHash: "h_member", Team: "team_security",
+		UserID: "user_1", Role: "developer", Status: "active",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	server, err := NewServer(testConfig("http://upstream.invalid", "secret"), db, logger, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxy := httptest.NewServer(server.Routes())
+	defer proxy.Close()
+
+	resp, err := http.Get(proxy.URL + "/admin/users")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var out struct {
+		TeamNames map[string]string `json:"team_names"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	if out.TeamNames["team_security"] != "Security" {
+		t.Fatalf("expected team_names to resolve team_security -> Security, got %#v", out.TeamNames)
+	}
+}
+
 func TestQuotaBlocksWhenKRWLimitReached(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
