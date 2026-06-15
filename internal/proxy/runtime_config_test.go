@@ -40,6 +40,8 @@ func TestRuntimeConfigOverlay(t *testing.T) {
 	put("text2sql.mask_results", "bool", enc("false"), false)
 	put("text2sql.preview_model", "string", enc("gpt-4.1-mini-x"), false)
 	put("clickhouse.table", "string", enc("ch_facts"), false)
+	put("carbon.pue", "float", enc("1.5"), false)
+	put("insurance.sla_target", "float", enc("0.995"), false)
 
 	// Secret overlay: store encrypted, expect decrypted at runtime.
 	cipher, err := server.secrets.Encrypt("postgres://u:p@h/db")
@@ -65,5 +67,11 @@ func TestRuntimeConfigOverlay(t *testing.T) {
 	}
 	if server.chConf().Table != "ch_facts" {
 		t.Errorf("clickhouse table = %q, want ch_facts", server.chConf().Table)
+	}
+	if got := server.carbonConf().PUE; got < 1.49 || got > 1.51 {
+		t.Errorf("carbon PUE = %f, want 1.5", got)
+	}
+	if got := server.insuranceConf().SLATarget; got < 0.994 || got > 0.996 {
+		t.Errorf("insurance SLA target = %f, want 0.995", got)
 	}
 }

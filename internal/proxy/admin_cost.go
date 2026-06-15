@@ -49,10 +49,10 @@ func (s *Server) handleCarbonScore(w http.ResponseWriter, r *http.Request) {
 	}
 	since := parseWindow(r.URL.Query().Get("window"), 7*24*time.Hour, "day")
 	coeff := store.CarbonCoeff{
-		DefaultWhPer1K:  s.cfg.Carbon.WhPer1KTokens,
-		PerModelWhPer1K: s.cfg.Carbon.PerModelWhPer1K,
-		PUE:             s.cfg.Carbon.PUE,
-		GridIntensityG:  s.cfg.Carbon.GridIntensityG,
+		DefaultWhPer1K:  s.carbonConf().WhPer1KTokens,
+		PerModelWhPer1K: s.carbonConf().PerModelWhPer1K,
+		PUE:             s.carbonConf().PUE,
+		GridIntensityG:  s.carbonConf().GridIntensityG,
 	}
 	scores, err := s.db.CarbonScores(r.Context(), dimension, since, recentLimit(r), coeff)
 	if err != nil {
@@ -193,14 +193,14 @@ func (s *Server) handleErrorBudgetBurn(w http.ResponseWriter, r *http.Request) {
 	}
 	longSince := parseWindow(r.URL.Query().Get("window"), 24*time.Hour, "hour")
 	shortSince := parseWindow(r.URL.Query().Get("short"), time.Hour, "hour")
-	slaTarget := s.cfg.Insurance.SLATarget
+	slaTarget := s.insuranceConf().SLATarget
 	if raw := strings.TrimSpace(r.URL.Query().Get("sla")); raw != "" {
 		if v, err := strconv.ParseFloat(raw, 64); err == nil {
 			slaTarget = v
 		}
 	}
-	fast := floatQuery(r, "fast", s.cfg.Insurance.FastBurnThreshold)
-	slow := floatQuery(r, "slow", s.cfg.Insurance.SlowBurnThreshold)
+	fast := floatQuery(r, "fast", s.insuranceConf().FastBurnThreshold)
+	slow := floatQuery(r, "slow", s.insuranceConf().SlowBurnThreshold)
 	burns, err := s.db.ErrorBudgetBurn(r.Context(), dimension, longSince, shortSince, recentLimit(r), slaTarget, fast, slow)
 	if err != nil {
 		writeOpenAIError(w, http.StatusBadRequest, err.Error(), "invalid_request_error", "burn_rate_failed")
@@ -344,7 +344,7 @@ func (s *Server) handleInsuranceClaims(w http.ResponseWriter, r *http.Request) {
 		dimension = "project"
 	}
 	since := parseWindow(r.URL.Query().Get("window"), 7*24*time.Hour, "day")
-	slaTarget := s.cfg.Insurance.SLATarget
+	slaTarget := s.insuranceConf().SLATarget
 	if raw := strings.TrimSpace(r.URL.Query().Get("sla")); raw != "" {
 		if v, err := strconv.ParseFloat(raw, 64); err == nil {
 			slaTarget = v

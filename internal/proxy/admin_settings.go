@@ -76,6 +76,20 @@ func buildSettingRegistry() []settingDef {
 		}
 		return nil
 	}
+	nonNegFloat := func(v string) error {
+		f, err := strconv.ParseFloat(v, 64)
+		if err != nil || f < 0 {
+			return fmt.Errorf("must be a non-negative number")
+		}
+		return nil
+	}
+	posFloat := func(v string) error {
+		f, err := strconv.ParseFloat(v, 64)
+		if err != nil || f <= 0 {
+			return fmt.Errorf("must be a positive number")
+		}
+		return nil
+	}
 	dur := func(v string) error {
 		if _, err := time.ParseDuration(v); err != nil {
 			return fmt.Errorf("must be a duration (e.g. 15s, 1h)")
@@ -120,6 +134,16 @@ func buildSettingRegistry() []settingDef {
 		{Key: "text2sql.daily_risk_warn", Category: "text2sql.safety", Type: stInt, validate: posInt, envValue: func(c config.Config) string { return strconv.Itoa(c.Text2SQL.DailyRiskWarn) }},
 		{Key: "text2sql.twin_driver", Category: "text2sql", Type: stString, Restart: true, envValue: func(c config.Config) string { return c.Text2SQL.TwinDriver }},
 		{Key: "text2sql.twin_dsn", Category: "text2sql", Type: stString, Secret: true, Restart: true, envValue: func(c config.Config) string { return c.Text2SQL.TwinDSN }},
+
+		// ---- Carbon (Prompt Carbon Score coefficients) ----
+		{Key: "carbon.wh_per_1k_tokens", Category: "carbon", Type: stFloat, validate: nonNegFloat, envValue: func(c config.Config) string { return strconv.FormatFloat(c.Carbon.WhPer1KTokens, 'f', -1, 64) }},
+		{Key: "carbon.pue", Category: "carbon", Type: stFloat, validate: nonNegFloat, envValue: func(c config.Config) string { return strconv.FormatFloat(c.Carbon.PUE, 'f', -1, 64) }},
+		{Key: "carbon.grid_intensity_g", Category: "carbon", Type: stFloat, validate: nonNegFloat, envValue: func(c config.Config) string { return strconv.FormatFloat(c.Carbon.GridIntensityG, 'f', -1, 64) }},
+
+		// ---- Insurance (AI request SLA) ----
+		{Key: "insurance.sla_target", Category: "insurance", Type: stFloat, validate: rate01, envValue: func(c config.Config) string { return strconv.FormatFloat(c.Insurance.SLATarget, 'f', -1, 64) }},
+		{Key: "insurance.fast_burn", Category: "insurance", Type: stFloat, validate: posFloat, envValue: func(c config.Config) string { return strconv.FormatFloat(c.Insurance.FastBurnThreshold, 'f', -1, 64) }},
+		{Key: "insurance.slow_burn", Category: "insurance", Type: stFloat, validate: posFloat, envValue: func(c config.Config) string { return strconv.FormatFloat(c.Insurance.SlowBurnThreshold, 'f', -1, 64) }},
 	}
 }
 
@@ -139,6 +163,22 @@ func (s *Server) chConf() config.ClickHouseConfig {
 	return s.cfg.ClickHouse
 }
 
+// carbonConf returns the effective Carbon config (admin-settings overlay over env/default).
+func (s *Server) carbonConf() config.CarbonConfig {
+	if p := s.carbonRuntime.Load(); p != nil {
+		return *p
+	}
+	return s.cfg.Carbon
+}
+
+// insuranceConf returns the effective Insurance config (admin-settings overlay over env/default).
+func (s *Server) insuranceConf() config.InsuranceConfig {
+	if p := s.insRuntime.Load(); p != nil {
+		return *p
+	}
+	return s.cfg.Insurance
+}
+
 // reloadRuntimeConfig rebuilds the Text2SQL/ClickHouse runtime snapshots from env defaults
 // overlaid with admin-managed settings. Called at startup and after every settings change.
 func (s *Server) reloadRuntimeConfig(ctx context.Context) {
@@ -152,6 +192,8 @@ func (s *Server) reloadRuntimeConfig(ctx context.Context) {
 	prevCH := s.chConf()
 	t2s := s.cfg.Text2SQL
 	ch := s.cfg.ClickHouse
+	carbon := s.cfg.Carbon
+	ins := s.cfg.Insurance
 	for _, d := range settingRegistry {
 		if _, ok := stored[d.Key]; !ok {
 			continue
@@ -160,10 +202,12 @@ func (s *Server) reloadRuntimeConfig(ctx context.Context) {
 		if source != "admin" {
 			continue
 		}
-		applyRuntimeSetting(&t2s, &ch, d.Key, val)
+		applyRuntimeSetting(&t2s, &ch, &carbon, &ins, d.Key, val)
 	}
 	s.t2sRuntime.Store(&t2s)
 	s.chRuntime.Store(&ch)
+	s.carbonRuntime.Store(&carbon)
+	s.insRuntime.Store(&ins)
 
 	// Swap Text2SQL execute/twin DB connections when their DSN/driver changed: close the
 	// cached *sql.DB so the next request lazily reopens against the new target.
@@ -183,7 +227,7 @@ func (s *Server) reloadRuntimeConfig(ctx context.Context) {
 	}
 }
 
-func applyRuntimeSetting(t2s *config.Text2SQLConfig, ch *config.ClickHouseConfig, key, val string) {
+func applyRuntimeSetting(t2s *config.Text2SQLConfig, ch *config.ClickHouseConfig, carbon *config.CarbonConfig, ins *config.InsuranceConfig, key, val string) {
 	val = strings.TrimSpace(val)
 	atoi := func() int { n, _ := strconv.Atoi(val); return n }
 	atof := func() float64 { f, _ := strconv.ParseFloat(val, 64); return f }
@@ -274,6 +318,18 @@ func applyRuntimeSetting(t2s *config.Text2SQLConfig, ch *config.ClickHouseConfig
 		t2s.TwinDriver = val
 	case "text2sql.twin_dsn":
 		t2s.TwinDSN = val
+	case "carbon.wh_per_1k_tokens":
+		carbon.WhPer1KTokens = atof()
+	case "carbon.pue":
+		carbon.PUE = atof()
+	case "carbon.grid_intensity_g":
+		carbon.GridIntensityG = atof()
+	case "insurance.sla_target":
+		ins.SLATarget = atof()
+	case "insurance.fast_burn":
+		ins.FastBurnThreshold = atof()
+	case "insurance.slow_burn":
+		ins.SlowBurnThreshold = atof()
 	}
 }
 

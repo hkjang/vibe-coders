@@ -52,9 +52,11 @@ type Server struct {
 	t2sFeatures  atomic.Pointer[map[string]bool] // runtime Text2SQL feature toggles (admin-managed)
 	t2sRuntime   atomic.Pointer[config.Text2SQLConfig]    // admin-settings overlay over cfg.Text2SQL (runtime snapshot)
 	chRuntime    atomic.Pointer[config.ClickHouseConfig]  // admin-settings overlay over cfg.ClickHouse (runtime snapshot)
-	chSinkMu      sync.Mutex         // guards the managed ClickHouse sink worker lifecycle
-	chSinkStop    context.CancelFunc // cancels the running sink worker (nil when stopped)
-	chSinkStarted bool               // true once the startup worker apply has run (gates reload-time restarts)
+	chSinkMu      sync.Mutex                             // guards the managed ClickHouse sink worker lifecycle
+	chSinkStop    context.CancelFunc                     // cancels the running sink worker (nil when stopped)
+	chSinkStarted bool                                   // true once the startup worker apply has run (gates reload-time restarts)
+	carbonRuntime atomic.Pointer[config.CarbonConfig]    // admin-settings overlay over cfg.Carbon
+	insRuntime    atomic.Pointer[config.InsuranceConfig] // admin-settings overlay over cfg.Insurance
 	sessions     *sessionInferer
 	sessionGCAt  atomic.Int64
 	extSeen      sync.Map // external key id -> struct{}; dedupes lazy registration
