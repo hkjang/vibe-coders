@@ -243,6 +243,7 @@ const adminHTML = `<!doctype html>
       <a href="#/quotas" data-tab="quotas">사용 한도</a>
       <a href="#/safety" data-tab="safety">안전</a>
       <a href="#/text2sql" data-tab="text2sql">Text2SQL</a>
+      <a href="#/runtimesettings" data-tab="runtimesettings">런타임 설정</a>
       <a href="#/settings" data-tab="settings">설정</a>
     </nav>
     <div class="header-tools">
@@ -710,6 +711,7 @@ const adminHTML = `<!doctype html>
           case 'text2sql':  await renderText2SQL(); break;
           case 'personalization': rest.length ? await renderPersonalProfileDetail(decodeURIComponent(rest.join('/'))) : await renderPersonalization(); break;
           case 'mykeys':    await renderMyKeys(); break;
+          case 'runtimesettings': await renderRuntimeSettings(); break;
           case 'settings':  await renderSettings(); break;
           default: await renderDashboard();
         }
@@ -4981,6 +4983,104 @@ const adminHTML = `<!doctype html>
         await api('/me/keys/' + encodeURIComponent(id), { method: 'DELETE' });
         await renderMyKeys();
       } catch (err) { alert('폐기 실패: ' + err.message); }
+    }
+
+    // ---------- runtime settings (admin-managed config) ----------
+    function settingInputId(key) { return 'val-' + key.replace(/[^a-zA-Z0-9]/g, '-'); }
+    function jsonShort(s) { if (!s) return ''; try { return String(JSON.parse(s)); } catch (e) { return s; } }
+    async function renderRuntimeSettings() {
+      const view = document.getElementById('view');
+      const d = await api('/admin/settings').catch(() => ({ settings: [] }));
+      const settings = d.settings || [];
+      const groups = {};
+      settings.forEach(s => { (groups[s.category] = groups[s.category] || []).push(s); });
+      let html = '<div class="card-body"><p class="muted">환경변수 기본값 위에 관리자 설정을 오버레이합니다. 저장 시 즉시 런타임에 반영(민감값은 암호화·마스킹). 출처 env=기본값, admin=오버레이.</p>' +
+        '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">' +
+          '<button class="secondary" type="button" onclick="testSettingConn(\'clickhouse\')">ClickHouse 연결 테스트</button>' +
+          '<button class="secondary" type="button" onclick="testSettingConn(\'text2sql-exec\')">Text2SQL 실행 DB 테스트</button>' +
+          '<button class="secondary" type="button" onclick="testSettingConn(\'text2sql-twin\')">Twin DB 테스트</button>' +
+          '<span id="conn-test-result" class="muted"></span>' +
+        '</div></div>';
+      Object.keys(groups).sort().forEach(cat => {
+        html += '<section style="margin-top:14px"><h2>' + escapeHTML(cat) + '</h2><div class="card-body"><table><thead><tr>' +
+          '<th>키</th><th>값</th><th>출처</th><th>비고</th><th>동작</th></tr></thead><tbody>';
+        groups[cat].forEach(s => {
+          const id = settingInputId(s.key);
+          let editor;
+          if (s.type === 'bool') {
+            editor = '<select id="' + id + '"><option value="true"' + (String(s.value) === 'true' ? ' selected' : '') + '>true</option>' +
+              '<option value="false"' + (String(s.value) === 'false' ? ' selected' : '') + '>false</option></select>';
+          } else if (s.is_secret) {
+            editor = '<input id="' + id + '" type="password" placeholder="' + (s.is_set ? '******** (변경 시에만 입력)' : '(미설정)') + '">';
+          } else {
+            editor = '<input id="' + id + '" value="' + escapeHTML(String(s.value == null ? '' : s.value)) + '">';
+          }
+          const ver = s.version ? '<div class="muted">v' + s.version + ' · ' + escapeHTML(s.updated_by || '') + '</div>' : '';
+          const restart = s.restart_required ? '<span class="pill">재연결/재시작</span>' : '';
+          const revertBtns = s.source === 'admin'
+            ? '<button class="secondary" type="button" onclick="revertSetting(\'' + s.key + '\')">기본값</button> ' +
+              (s.is_secret ? '' : '<button class="secondary" type="button" onclick="rollbackSetting(\'' + s.key + '\')">롤백</button> ')
+            : '';
+          html += '<tr><td>' + escapeHTML(s.key) + '</td><td>' + editor + '</td>' +
+            '<td><span class="status ' + (s.source === 'admin' ? '' : '') + '">' + escapeHTML(s.source) + '</span>' + ver + '</td>' +
+            '<td>' + restart + '</td><td>' +
+              '<button type="button" onclick="saveSetting(\'' + s.key + '\',\'' + id + '\',' + (s.is_secret ? 'true' : 'false') + ')">저장</button> ' +
+              revertBtns +
+              '<button class="secondary" type="button" onclick="settingHistory(\'' + s.key + '\')">이력</button>' +
+            '</td></tr>';
+        });
+        html += '</tbody></table></div></section>';
+      });
+      html += '<section style="margin-top:14px" id="setting-history-section" style="display:none"><h2>변경 이력</h2><div class="card-body" id="setting-history"></div></section>';
+      view.innerHTML = card('런타임 설정', html);
+    }
+
+    async function saveSetting(key, inputId, secret) {
+      const el = document.getElementById(inputId);
+      const v = (el.value || '').trim();
+      if (secret && v === '') { alert('변경할 값을 입력하세요(빈 값은 변경하지 않음).'); return; }
+      try {
+        await api('/admin/settings/by-key/' + encodeURIComponent(key), { method: 'PUT', body: JSON.stringify({ value: v }) });
+        await renderRuntimeSettings();
+      } catch (e) { alert('저장 실패: ' + e.message); }
+    }
+    async function revertSetting(key) {
+      if (!confirm('이 설정을 환경변수 기본값으로 되돌릴까요?')) return;
+      try { await api('/admin/settings/by-key/' + encodeURIComponent(key), { method: 'DELETE' }); await renderRuntimeSettings(); }
+      catch (e) { alert('되돌리기 실패: ' + e.message); }
+    }
+    async function rollbackSetting(key) {
+      try { await api('/admin/settings/rollback', { method: 'POST', body: JSON.stringify({ key }) }); await renderRuntimeSettings(); }
+      catch (e) { alert('롤백 실패: ' + e.message); }
+    }
+    async function settingHistory(key) {
+      const sec = document.getElementById('setting-history-section');
+      const el = document.getElementById('setting-history');
+      sec.style.display = '';
+      el.innerHTML = '불러오는 중...';
+      try {
+        const d = await api('/admin/settings/history?key=' + encodeURIComponent(key));
+        const h = d.history || [];
+        el.innerHTML = '<div class="muted" style="margin-bottom:6px">' + escapeHTML(key) + '</div>' + (h.length
+          ? '<table><thead><tr><th>시각</th><th>변경자</th><th>이전</th><th>이후</th><th>사유</th></tr></thead><tbody>' +
+            h.map(r => '<tr><td>' + escapeHTML(r.changed_at) + '</td><td>' + escapeHTML(r.changed_by || '') + '</td>' +
+              '<td>' + (r.is_secret ? '<span class="muted">(secret)</span>' : escapeHTML(jsonShort(r.old_value_json))) + '</td>' +
+              '<td>' + (r.is_secret ? '<span class="muted">(secret)</span>' : escapeHTML(jsonShort(r.new_value_json))) + '</td>' +
+              '<td>' + escapeHTML(r.reason || '') + '</td></tr>').join('') + '</tbody></table>'
+          : '<p class="muted">이력이 없습니다.</p>');
+      } catch (e) { el.innerHTML = '<p class="error-line">' + escapeHTML(e.message) + '</p>'; }
+    }
+    async function testSettingConn(kind) {
+      const el = document.getElementById('conn-test-result');
+      el.textContent = '테스트 중...';
+      try {
+        const d = await api('/admin/settings/test/' + kind, { method: 'POST', body: '{}' });
+        el.textContent = (d.ok ? '✅ 성공' : '❌ 실패') +
+          (d.message ? ' — ' + d.message : '') +
+          (d.latency_ms != null ? ' (' + d.latency_ms + 'ms)' : '') +
+          (d.table_ok != null ? ' · table_ok=' + d.table_ok : '') +
+          (d.warning ? ' ⚠ ' + d.warning : '');
+      } catch (e) { el.textContent = '오류: ' + e.message; }
     }
 
     // ---------- settings ----------
