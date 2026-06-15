@@ -98,6 +98,36 @@ func (s *Server) handleWorkMap(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"dimension": dimension, "nodes": nodes})
 }
 
+// handleModelMigration returns model-migration recommendations: per prompt-fingerprint
+// cluster, switch from the dominant model to a cheaper adequate one, with estimated
+// savings. Read-only advisory.
+// GET /admin/model-migration?window=30d&min_requests=20
+func (s *Server) handleModelMigration(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	since := parseWindow(r.URL.Query().Get("window"), 30*24*time.Hour, "day")
+	minRequests := 20
+	if raw := strings.TrimSpace(r.URL.Query().Get("min_requests")); raw != "" {
+		if v, err := strconv.Atoi(raw); err == nil && v > 0 {
+			minRequests = v
+		}
+	}
+	advice, err := s.db.ModelMigrationAdvice(r.Context(), since, recentLimit(r), minRequests)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "model_migration_failed")
+		return
+	}
+	var totalSavings float64
+	for _, a := range advice {
+		totalSavings += a.EstimatedSavingsKRW
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"recommendations": advice, "count": len(advice), "total_estimated_savings_krw": totalSavings,
+	})
+}
+
 // handleErrorBudgetBurn returns the multi-window error-budget burn rate per scope,
 // classifying fast-burn (page) vs slow-burn (ticket) against the SLA target. Read-only.
 // GET /admin/insurance/burn-rate?dimension=project&window=24h&short=1h&sla=0.99
