@@ -92,6 +92,7 @@ Roo Code / Cursor / Continue 등 OpenAI 호환 API 를 호출하는 VS Code 확�
 - **Prompt to Product** (`v0.5.8`): 반복되는 프롬프트 지문을 재사용 가능한 명명된 템플릿(제품)으로 승격하는 루프(`/admin/prompt-products` + `/candidates`) — 후보 발굴(빈도·비용·모델·제품화 여부)→승격(정식 템플릿 생성 + 출처/ reach 스냅샷)→채택도 추적
 - **AI 요청 보험 모드** (`v0.5.9`): scope별 요청(covered) 대비 저하 결과(4xx/5xx/failover/error=claim)를 SLA 목표와 비교하는 read-only 원장(`/admin/insurance/claims`) — claim_rate·허용치 대비 초과 claim·sla_met, `INSURANCE_SLA_TARGET`(기본 0.99)/`?sla=`
 - **절감 리포트 (Savings Report)** (`v0.6.0`): scope별 비용 절감 정량화(`/admin/savings`) — 라우팅 다운시프트 절감(요청 모델 가격 baseline−실제 비용, 정확) + 캐시 절감(적중×비캐시 평균, 추정)을 합산해 게이트웨이 ROI를 숫자로 표시
+- **에러버짓 번레이트** (`v0.6.1`): SLA claim 위에 멀티윈도우 에러버짓 소진율(`/admin/insurance/burn-rate`) — short/long 윈도우 burn rate(claim_rate÷허용치)로 fast(page)/slow(ticket) 분류 + 30일 버짓 소진 일수 투영, `INSURANCE_FAST_BURN`/`INSURANCE_SLOW_BURN`
 - **운영·거버넌스 확장** (`v0.3.0`): 정책 시뮬레이터(`/admin/policies/simulate`), 모델 가격표 버전 이력(`/admin/pricing`, `/admin/pricing/seed`), 운영 리스크 스코어(`/admin/ops/risk`)·상태(`/admin/ops/status`), Provider SLO(`/admin/providers/slo`), 비용 이상탐지(`/admin/cost/anomalies`)·배부(`/admin/cost/allocation`)·팀 예산 예측(`/admin/budgets/projection`), 모델별 코딩 품질(`/admin/models/quality`), 작업 템플릿(`/admin/templates`), 프롬프트 버전 승격(`/admin/prompts/promotions`), 자동 라우팅 학습 루프(`/admin/routing/learning/auto`), DW 롤업(`/admin/dw/rollups`), Mattermost 알림(`/admin/notifications/mattermost`)
 - 호출 이력 CSV 다운로드 `/admin/export.csv` (Excel UTF-8 BOM 포함, 한국어 그대로 열림)
 - 운영용 백업 스크립트 `scripts/backup.ps1` / `scripts/backup.sh` (SQLite `.backup` + fallback ndjson + 보존 일수 적용)
@@ -178,6 +179,8 @@ $env:PROXY_API_KEYS="dev:dev-proxy-key:alice:platform,team:team-proxy-key:bob:ba
 | `CARBON_PUE` | `1.2` | 데이터센터 PUE(전력 사용 효율) 배수 |
 | `CARBON_GRID_INTENSITY_G` | `475` | 그리드 탄소 강도(gCO2e/kWh) |
 | `INSURANCE_SLA_TARGET` | `0.99` | AI 요청 보험 SLA 신뢰도 목표(claim_rate 허용치=1-목표) |
+| `INSURANCE_FAST_BURN` | `14.4` | 에러버짓 fast-burn(page) 임계 배수 |
+| `INSURANCE_SLOW_BURN` | `3.0` | 에러버짓 slow-burn(ticket) 임계 배수 |
 
 비용 계산은 가격표가 설정된 모델에만 적용되며 단위는 원(₩) 입니다.
 

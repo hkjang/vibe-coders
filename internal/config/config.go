@@ -38,6 +38,11 @@ type InsuranceConfig struct {
 	// SLATarget is the reliability promise (0..1) used as the default claim-rate
 	// allowance: a scope is "met" when its claim rate <= (1 - SLATarget). Default 0.99.
 	SLATarget float64
+	// FastBurnThreshold / SlowBurnThreshold are error-budget burn-rate multipliers
+	// (claim_rate / allowance) that classify a scope as fast-burning (page) or
+	// slow-burning (ticket). Defaults 14.4 and 3.0 follow the Google SRE workbook.
+	FastBurnThreshold float64
+	SlowBurnThreshold float64
 }
 
 // CarbonConfig parameterizes the Prompt Carbon Score: an estimate of the electricity
@@ -311,7 +316,9 @@ func Load() (Config, error) {
 			GridIntensityG:  floatEnv("CARBON_GRID_INTENSITY_G", 475),
 		},
 		Insurance: InsuranceConfig{
-			SLATarget: floatEnv("INSURANCE_SLA_TARGET", 0.99),
+			SLATarget:         floatEnv("INSURANCE_SLA_TARGET", 0.99),
+			FastBurnThreshold: floatEnv("INSURANCE_FAST_BURN", 14.4),
+			SlowBurnThreshold: floatEnv("INSURANCE_SLOW_BURN", 3.0),
 		},
 		ClickHouse: ClickHouseConfig{
 			URL:               strings.TrimRight(os.Getenv("CLICKHOUSE_URL"), "/"),

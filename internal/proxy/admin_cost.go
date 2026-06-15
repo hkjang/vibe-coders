@@ -98,6 +98,60 @@ func (s *Server) handleWorkMap(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"dimension": dimension, "nodes": nodes})
 }
 
+// handleErrorBudgetBurn returns the multi-window error-budget burn rate per scope,
+// classifying fast-burn (page) vs slow-burn (ticket) against the SLA target. Read-only.
+// GET /admin/insurance/burn-rate?dimension=project&window=24h&short=1h&sla=0.99
+func (s *Server) handleErrorBudgetBurn(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	dimension := strings.TrimSpace(r.URL.Query().Get("dimension"))
+	if dimension == "" {
+		dimension = "project"
+	}
+	longSince := parseWindow(r.URL.Query().Get("window"), 24*time.Hour, "hour")
+	shortSince := parseWindow(r.URL.Query().Get("short"), time.Hour, "hour")
+	slaTarget := s.cfg.Insurance.SLATarget
+	if raw := strings.TrimSpace(r.URL.Query().Get("sla")); raw != "" {
+		if v, err := strconv.ParseFloat(raw, 64); err == nil {
+			slaTarget = v
+		}
+	}
+	fast := floatQuery(r, "fast", s.cfg.Insurance.FastBurnThreshold)
+	slow := floatQuery(r, "slow", s.cfg.Insurance.SlowBurnThreshold)
+	burns, err := s.db.ErrorBudgetBurn(r.Context(), dimension, longSince, shortSince, recentLimit(r), slaTarget, fast, slow)
+	if err != nil {
+		writeOpenAIError(w, http.StatusBadRequest, err.Error(), "invalid_request_error", "burn_rate_failed")
+		return
+	}
+	fastCount, slowCount := 0, 0
+	for _, b := range burns {
+		switch b.Severity {
+		case "fast":
+			fastCount++
+		case "slow":
+			slowCount++
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"dimension": dimension, "sla_target": slaTarget,
+		"fast_burn_threshold": fast, "slow_burn_threshold": slow,
+		"scopes_fast_burning": fastCount, "scopes_slow_burning": slowCount,
+		"scopes": burns,
+	})
+}
+
+// floatQuery reads a float query param, falling back to a default on absence/parse error.
+func floatQuery(r *http.Request, key string, fallback float64) float64 {
+	if raw := strings.TrimSpace(r.URL.Query().Get(key)); raw != "" {
+		if v, err := strconv.ParseFloat(raw, 64); err == nil {
+			return v
+		}
+	}
+	return fallback
+}
+
 // handleSavings returns the Savings Report: per scope, how much the gateway saved via
 // routing downshifts (served a cheaper model than requested — priced exactly against the
 // requested model) and via cache hits (estimated as avoided cost). Read-only.
