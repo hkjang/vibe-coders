@@ -103,6 +103,7 @@ Roo Code / Cursor / Continue 등 OpenAI 호환 API 를 호출하는 VS Code 확�
 - **프로필 스냅샷 추세 (drift)** (`v0.6.9`): Personal AI Profile 스냅샷 2개를 비교해 요청·비용·성공률 델타와 모델/작업 전환을 산출(`/admin/personalization/profiles/{user_id}/drift`, 상세 응답에도 포함) — cost_up/down·success_down·model_shift·task_shift 신호, 어드민 개인화 탭에 추세 카드
 - **셀프서비스 키 관리** (`v0.7.0`): 사용자가 본인 API Key를 직접 관리하는 opt-in 경로(`SELF_SERVICE_KEYS_ENABLED`, 기본 off) — `GET/POST /me/keys`, `POST /me/keys/{id}/rotate`, `DELETE /me/keys/{id}`. 발급은 본인 role·스코프 이내(권한 상승 차단), 타인 키는 404, 시크릿 1회 노출 + 감사 로그
 - **내 키 패널 UI** (`v0.7.1`): 어드민 대시보드 `내 키` 탭 — 본인 키 발급/회전/폐기를 화면에서(`/me/keys` 연동), 시크릿 1회 배너 표시
+- **만료·미사용 키 알림** (`v0.7.2`): 활성 키의 만료 임박/만료/미사용/유휴를 탐지(`/admin/keys/health`) — flags+severity+유휴일수, My AI Home 대시보드(`/me/dashboard`)에 본인 키 알림 노출
 - **운영·거버넌스 확장** (`v0.3.0`): 정책 시뮬레이터(`/admin/policies/simulate`), 모델 가격표 버전 이력(`/admin/pricing`, `/admin/pricing/seed`), 운영 리스크 스코어(`/admin/ops/risk`)·상태(`/admin/ops/status`), Provider SLO(`/admin/providers/slo`), 비용 이상탐지(`/admin/cost/anomalies`)·배부(`/admin/cost/allocation`)·팀 예산 예측(`/admin/budgets/projection`), 모델별 코딩 품질(`/admin/models/quality`), 작업 템플릿(`/admin/templates`), 프롬프트 버전 승격(`/admin/prompts/promotions`), 자동 라우팅 학습 루프(`/admin/routing/learning/auto`), DW 롤업(`/admin/dw/rollups`), Mattermost 알림(`/admin/notifications/mattermost`)
 - 호출 이력 CSV 다운로드 `/admin/export.csv` (Excel UTF-8 BOM 포함, 한국어 그대로 열림)
 - 운영용 백업 스크립트 `scripts/backup.ps1` / `scripts/backup.sh` (SQLite `.backup` + fallback ndjson + 보존 일수 적용)

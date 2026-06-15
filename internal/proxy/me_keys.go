@@ -155,6 +155,33 @@ func (s *Server) handleMyKeyByID(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// handleKeyHealth returns active keys needing attention (expiring/expired/never-used/
+// idle) across all users, for admins. Read-only.
+// GET /admin/keys/health?stale_days=30&expiring_days=7
+func (s *Server) handleKeyHealth(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	staleDays := intQuery(r, "stale_days", 30)
+	expiringDays := intQuery(r, "expiring_days", 7)
+	alerts, err := s.db.KeyHealthAlerts(r.Context(), time.Now().UTC(), staleDays, expiringDays, "")
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "key_health_failed")
+		return
+	}
+	high := 0
+	for _, a := range alerts {
+		if a.Severity == "high" {
+			high++
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"stale_days": staleDays, "expiring_days": expiringDays,
+		"high_severity": high, "alerts": alerts,
+	})
+}
+
 type meKeyError struct {
 	status int
 	msg    string

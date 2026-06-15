@@ -102,6 +102,12 @@ func (s *Server) handleMyDashboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	keyAlerts, err := s.db.KeyHealthAlerts(ctx, time.Now().UTC(), 30, 7, userID)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "dashboard_failed")
+		return
+	}
+
 	savings, cheapModel := potentialSavingsKRW(month, models)
 	topModels := models
 	if len(topModels) > 5 {
@@ -124,6 +130,7 @@ func (s *Server) handleMyDashboard(w http.ResponseWriter, r *http.Request) {
 		"potential_savings_model":  cheapModel,
 		"recommended_templates":    templates,
 		"recent_prompt_products":   products,
+		"key_alerts":               keyAlerts,
 	})
 }
 
