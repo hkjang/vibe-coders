@@ -188,6 +188,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/admin/text2sql/kill-switch", s.handleText2SQLKillSwitch)
 	mux.HandleFunc("/admin/text2sql/miners", s.handleText2SQLMiners)
 	mux.HandleFunc("/admin/text2sql/anomalies", s.handleText2SQLAnomalies)
+	mux.HandleFunc("/admin/text2sql/prompt-dna", s.handleText2SQLPromptDNA)
 	mux.HandleFunc("/admin/text2sql/features", s.handleText2SQLFeatures)
 	mux.HandleFunc("/admin/text2sql/golden", s.handleText2SQLGolden)
 	mux.HandleFunc("/admin/text2sql/golden/", s.handleText2SQLGolden)

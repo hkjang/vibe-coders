@@ -74,6 +74,7 @@ Roo Code / Cursor / Continue 등 OpenAI 호환 API 를 호출하는 VS Code 확�
 - **인사이트 마이너** (`v0.4.0`): 질문 로그 기반 read-only 마이너(`/admin/text2sql/miners`) — Report Candidate Miner(반복 질문 → 리포트 후보 추천), Glossary Miner(빈출 토큰 → 업무 용어 사전 후보 추출, 스톱워드·기존 정의어 제외)
 - **행동 이상 탐지(탐지 전용)** (`v0.4.1`): 차단 없이 가시성만 제공하는 read-only 탐지(`/admin/text2sql/anomalies`) — AI Smell Detector(반복 질문·권한 우회성 거부 반복·스키마 전체 요청), 누적 위험 노출(팀별 가중 집계), Intent Drift Detector(조회→위험 키워드 이동)
 - **기능 토글 + Self Challenge·Gateway Memory** (`v0.4.2`): 관리자 런타임 온오프 토글(`/admin/text2sql/features` + 어드민 UI 스위치, kill-switch 동일 패널). Self Challenge Proxy(보조 모델이 생성 SQL 검토 — preview 의견 첨부, execute unsafe 시 실행 보류; 기본 OFF), Gateway Memory(자주 쓰는 테이블 프롬프트 힌트; 기본 OFF)
+- **Prompt DNA + 누적 위험 enforce** (`v0.4.3`): Prompt DNA(`/admin/text2sql/prompt-dna` — 질문 지문별 빈도·distinct 사용자·평균비용·거부율 + repeated/high_cost/risky 라벨), 누적 위험 한도 enforce 토글(`cumulative_risk_enforce` + `TEXT2SQL_DAILY_RISK_LIMIT` — API Key 당일 위험 요청이 한도 초과 시 차단; 탐지→차단 강제, 기본 OFF)
 - **운영·거버넌스 확장** (`v0.3.0`): 정책 시뮬레이터(`/admin/policies/simulate`), 모델 가격표 버전 이력(`/admin/pricing`, `/admin/pricing/seed`), 운영 리스크 스코어(`/admin/ops/risk`)·상태(`/admin/ops/status`), Provider SLO(`/admin/providers/slo`), 비용 이상탐지(`/admin/cost/anomalies`)·배부(`/admin/cost/allocation`)·팀 예산 예측(`/admin/budgets/projection`), 모델별 코딩 품질(`/admin/models/quality`), 작업 템플릿(`/admin/templates`), 프롬프트 버전 승격(`/admin/prompts/promotions`), 자동 라우팅 학습 루프(`/admin/routing/learning/auto`), DW 롤업(`/admin/dw/rollups`), Mattermost 알림(`/admin/notifications/mattermost`)
 - 호출 이력 CSV 다운로드 `/admin/export.csv` (Excel UTF-8 BOM 포함, 한국어 그대로 열림)
 - 운영용 백업 스크립트 `scripts/backup.ps1` / `scripts/backup.sh` (SQLite `.backup` + fallback ndjson + 보존 일수 적용)
@@ -607,7 +608,7 @@ curl.exe http://localhost:8080/v1/chat/completions `
 - **few-shot · 품질**: 검증된 골든 쿼리를 질문 유사도로 생성 프롬프트에 주입하고, 성공 쿼리는 골든 자동 후보로 적립. `text2sql.sql_valid`/`executed` 평가를 LLM evaluation 파이프라인으로 emit, 모델별 SQL 품질 메트릭 제공.
 - **응답 포맷**: 해석 / 생성 SQL / 결과 / 주의사항 / 실행 가능 여부 / 다음 질문 제안 섹션으로 현업 친화 구성.
 - **장기 분석**: `POST /admin/dw/clickhouse` 로 일별 rollup 을 ClickHouse HTTP 인터페이스(JSONEachRow)로 적재(`CLICKHOUSE_URL` 설정 시). dimension별 마지막 성공 watermark 와 실패 재처리 큐를 영속화 — `GET /admin/dw/sink-status` 로 진행 상태 조회, `POST /admin/dw/sink-retry`(또는 `?all=1`)로 실패분 재적재. `GET /admin/dw/consistency` 정합성 검증은 dimension별(all·model·provider·project·cost_center)로 비교하며, `GET /admin/dw/table-info` 로 대상 테이블 엔진(ReplacingMergeTree)·정렬키 dedupe 키를 점검할 수 있습니다.
-- **관리**: 어드민 `Text2SQL` 탭 + `GET /admin/text2sql`(프로필·통계·로그·모델 메트릭), 스키마 카탈로그/레지스트리 `(/admin/text2sql/schemas|tables|columns|collect)`, 런타임 프로필 `(/admin/text2sql/profiles)`, 골든 쿼리 `(/admin/text2sql/golden[/run])` — `?execute=1` 시 결과 동등성 검증, 위험 요청 큐 `(/admin/text2sql/risk-queue` — 자동 개선 제안 포함), 업무 용어 사전 `(/admin/text2sql/glossary` — 충돌 탐지 포함), 실행 DB 헬스체크 `(/admin/text2sql/healthcheck)`, 스키마 영향도 `(/admin/text2sql/schema-impact)`, Replay Bundle `(/admin/text2sql/replay)`, Kill Switch `(/admin/text2sql/kill-switch)`, 인사이트 마이너 `(/admin/text2sql/miners)`, 행동 이상 탐지 `(/admin/text2sql/anomalies)`, 기능 토글 `(/admin/text2sql/features)`.
+- **관리**: 어드민 `Text2SQL` 탭 + `GET /admin/text2sql`(프로필·통계·로그·모델 메트릭), 스키마 카탈로그/레지스트리 `(/admin/text2sql/schemas|tables|columns|collect)`, 런타임 프로필 `(/admin/text2sql/profiles)`, 골든 쿼리 `(/admin/text2sql/golden[/run])` — `?execute=1` 시 결과 동등성 검증, 위험 요청 큐 `(/admin/text2sql/risk-queue` — 자동 개선 제안 포함), 업무 용어 사전 `(/admin/text2sql/glossary` — 충돌 탐지 포함), 실행 DB 헬스체크 `(/admin/text2sql/healthcheck)`, 스키마 영향도 `(/admin/text2sql/schema-impact)`, Replay Bundle `(/admin/text2sql/replay)`, Kill Switch `(/admin/text2sql/kill-switch)`, 인사이트 마이너 `(/admin/text2sql/miners)`, 행동 이상 탐지 `(/admin/text2sql/anomalies)`, Prompt DNA `(/admin/text2sql/prompt-dna)`, 기능 토글 `(/admin/text2sql/features)`.
 
 | 변수 | 기본값 | 설명 |
 | --- | --- | --- |
@@ -635,6 +636,7 @@ curl.exe http://localhost:8080/v1/chat/completions `
 | `TEXT2SQL_SHADOW_SAMPLE_RATE` | `0` | preview shadow 평가 샘플링 비율(0~1) |
 | `TEXT2SQL_REPLAY_BUNDLES` | `false` | 질의별 생성 컨텍스트(프롬프트·스키마·용어·권한) 저장(감사/재현, secret 마스킹) |
 | `RETENTION_TEXT2SQL_REPLAY_DAYS` | `30` | Replay Bundle 보존 일수(이후 retention 워커가 GC) |
+| `TEXT2SQL_DAILY_RISK_LIMIT` | `20` | API Key 당일 위험 요청 한도(`cumulative_risk_enforce` 토글 ON 시 적용) |
 
 ## MCP Gateway (프로토콜 집약 게이트웨이)
 

@@ -315,12 +315,14 @@ func (s *Server) handleText2SQLMiners(w http.ResponseWriter, r *http.Request) {
 const (
 	t2sFeatureSelfChallenge = "self_challenge"
 	t2sFeatureGatewayMemory = "gateway_memory"
+	t2sFeatureRiskEnforce   = "cumulative_risk_enforce"
 )
 
 // t2sKnownFeatures is the catalog of toggleable features shown in the admin panel.
 var t2sKnownFeatures = []struct{ Name, Description string }{
 	{t2sFeatureSelfChallenge, "생성된 SQL을 보조 모델이 한 번 더 검토 (정확도↑, 요청당 추가 호출 비용 발생)"},
 	{t2sFeatureGatewayMemory, "사용자가 최근 자주 사용한 스키마/테이블을 프롬프트 힌트로 보강"},
+	{t2sFeatureRiskEnforce, "API Key의 당일 누적 위험 요청이 한도(TEXT2SQL_DAILY_RISK_LIMIT)를 넘으면 차단 (탐지→차단 강제)"},
 }
 
 // reloadText2SQLFeatures refreshes the in-memory feature-flag cache from the DB.
@@ -384,6 +386,30 @@ func (s *Server) handleText2SQLFeatures(w http.ResponseWriter, r *http.Request) 
 	default:
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
 	}
+}
+
+// handleText2SQLPromptDNA profiles recurring questions over a window — frequency,
+// distinct users, average cost, and reject/exec rates — labeling repeated, high-cost,
+// and risky patterns. Read-only.
+// GET /admin/text2sql/prompt-dna?window=30d&min_count=3
+func (s *Server) handleText2SQLPromptDNA(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	since := parseWindow(r.URL.Query().Get("window"), 30*24*time.Hour, "day")
+	minCount := 3
+	if v := strings.TrimSpace(r.URL.Query().Get("min_count")); v != "" {
+		if n := atoiDefault(v, 3); n >= 2 {
+			minCount = n
+		}
+	}
+	dna, err := s.db.Text2SQLPromptDNAReport(r.Context(), since, minCount, 100)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "prompt_dna_failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"prompt_dna": dna})
 }
 
 // handleText2SQLAnomalies returns detection-only behavioral signals over the question

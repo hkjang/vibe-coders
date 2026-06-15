@@ -399,6 +399,53 @@ func TestRecentText2SQLSQLByAPIKey(t *testing.T) {
 	}
 }
 
+func TestText2SQLPromptDNAAndRiskCount(t *testing.T) {
+	db := openAggTestStore(t)
+	defer db.Close()
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	// Same question asked by 2 users, one rejected → repeated + risky labels.
+	_ = db.InsertText2SQLLog(ctx, Text2SQLQueryLog{ID: "d1", APIKeyID: "u1", Question: "월별 매출", Valid: true, Executed: true, CostKRW: 10, CreatedAt: now})
+	_ = db.InsertText2SQLLog(ctx, Text2SQLQueryLog{ID: "d2", APIKeyID: "u2", Question: "월별 매출", Valid: true, CostKRW: 10, CreatedAt: now})
+	_ = db.InsertText2SQLLog(ctx, Text2SQLQueryLog{ID: "d3", APIKeyID: "u1", Question: "월별 매출", Valid: false, RejectReason: "x", CreatedAt: now})
+
+	dna, err := db.Text2SQLPromptDNAReport(ctx, now.Add(-time.Hour), 3, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(dna) != 1 {
+		t.Fatalf("expected 1 DNA entry (count>=3), got %d", len(dna))
+	}
+	d := dna[0]
+	if d.Count != 3 || d.DistinctUser != 2 {
+		t.Errorf("DNA aggregation wrong: %+v", d)
+	}
+	hasLabel := func(l string) bool {
+		for _, x := range d.Labels {
+			if x == l {
+				return true
+			}
+		}
+		return false
+	}
+	if !hasLabel("repeated") || !hasLabel("risky") {
+		t.Errorf("expected repeated+risky labels, got %v", d.Labels)
+	}
+
+	// Risky count for u1: one rejected (d3) → 1.
+	n, err := db.Text2SQLRiskyCountByAPIKey(ctx, "u1", now.Add(-time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Errorf("expected 1 risky request for u1, got %d", n)
+	}
+	if z, _ := db.Text2SQLRiskyCountByAPIKey(ctx, "", now.Add(-time.Hour)); z != 0 {
+		t.Error("empty api key should count 0")
+	}
+}
+
 func containsStore(s, sub string) bool {
 	for i := 0; i+len(sub) <= len(s); i++ {
 		if s[i:i+len(sub)] == sub {

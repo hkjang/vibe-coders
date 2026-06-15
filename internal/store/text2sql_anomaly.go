@@ -182,6 +182,130 @@ func (s *SQLStore) Text2SQLRiskExposureByTeam(ctx context.Context, since time.Ti
 	return out, nil
 }
 
+// Text2SQLPromptDNA is the aggregate "fingerprint" of a recurring question: how often
+// it is asked, by how many distinct users, its cost, and its risk/exec profile, with
+// human-readable labels (repeated / high_cost / risky).
+type Text2SQLPromptDNA struct {
+	Question     string   `json:"question"`
+	Count        int64    `json:"count"`
+	DistinctUser int64    `json:"distinct_users"`
+	AvgCostKRW   float64  `json:"avg_cost_krw"`
+	RejectRate   float64  `json:"reject_rate"`
+	ExecRate     float64  `json:"exec_rate"`
+	Labels       []string `json:"labels"`
+}
+
+// Text2SQLPromptDNAReport profiles recurring questions over a window: frequency,
+// distinct users, average cost, and reject/exec rates, labeling each.
+func (s *SQLStore) Text2SQLPromptDNAReport(ctx context.Context, since time.Time, minCount, limit int) ([]Text2SQLPromptDNA, error) {
+	if minCount < 2 {
+		minCount = 2
+	}
+	rows, err := s.db.QueryContext(ctx, s.bind(`SELECT COALESCE(question,''), COALESCE(api_key_id,''), valid, executed, cost_krw
+		FROM text2sql_query_logs WHERE created_at >= ? AND COALESCE(mode,'') <> 'shadow' AND COALESCE(question,'') <> ''`),
+		since.UTC().Format(time.RFC3339Nano))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	type agg struct {
+		display    string
+		count      int64
+		rejected   int64
+		executed   int64
+		cost       float64
+		users      map[string]bool
+	}
+	byNorm := map[string]*agg{}
+	for rows.Next() {
+		var q, apiKey string
+		var valid, executed int
+		var cost float64
+		if err := rows.Scan(&q, &apiKey, &valid, &executed, &cost); err != nil {
+			return nil, err
+		}
+		key := normalizeQuestion(q)
+		if key == "" {
+			continue
+		}
+		a := byNorm[key]
+		if a == nil {
+			a = &agg{display: strings.TrimSpace(q), users: map[string]bool{}}
+			byNorm[key] = a
+		}
+		a.count++
+		if valid == 0 {
+			a.rejected++
+		}
+		if executed == 1 {
+			a.executed++
+		}
+		a.cost += cost
+		if apiKey != "" {
+			a.users[apiKey] = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	// A "high cost" question is one whose average cost is in the top tier; compute the
+	// overall average as a simple reference point.
+	var totalCost float64
+	var totalCount int64
+	for _, a := range byNorm {
+		totalCost += a.cost
+		totalCount += a.count
+	}
+	avgAll := 0.0
+	if totalCount > 0 {
+		avgAll = totalCost / float64(totalCount)
+	}
+	out := []Text2SQLPromptDNA{}
+	for _, a := range byNorm {
+		if a.count < int64(minCount) {
+			continue
+		}
+		avg := a.cost / float64(a.count)
+		rejectRate := float64(a.rejected) / float64(a.count)
+		dna := Text2SQLPromptDNA{
+			Question: a.display, Count: a.count, DistinctUser: int64(len(a.users)),
+			AvgCostKRW: avg, RejectRate: rejectRate, ExecRate: float64(a.executed) / float64(a.count),
+		}
+		dna.Labels = append(dna.Labels, "repeated")
+		if avgAll > 0 && avg >= avgAll*2 {
+			dna.Labels = append(dna.Labels, "high_cost")
+		}
+		if rejectRate >= 0.3 {
+			dna.Labels = append(dna.Labels, "risky")
+		}
+		out = append(out, dna)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Count != out[j].Count {
+			return out[i].Count > out[j].Count
+		}
+		return out[i].Question < out[j].Question
+	})
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
+// Text2SQLRiskyCountByAPIKey counts an API key's risky requests since `since` — rejected,
+// high EXPLAIN risk (>=70), or classified failures — for cumulative-risk enforcement.
+func (s *SQLStore) Text2SQLRiskyCountByAPIKey(ctx context.Context, apiKeyID string, since time.Time) (int64, error) {
+	if apiKeyID == "" {
+		return 0, nil
+	}
+	var n int64
+	err := s.db.QueryRowContext(ctx, s.bind(`SELECT COUNT(*) FROM text2sql_query_logs
+		WHERE api_key_id = ? AND created_at >= ? AND COALESCE(mode,'') <> 'shadow'
+		AND (valid = 0 OR explain_risk >= 70 OR COALESCE(failure_category,'') <> '')`),
+		apiKeyID, since.UTC().Format(time.RFC3339Nano)).Scan(&n)
+	return n, err
+}
+
 // Text2SQLIntentDrift flags an API key whose questions escalate from benign lookups
 // toward higher-risk scope within the window (detection only).
 type Text2SQLIntentDrift struct {

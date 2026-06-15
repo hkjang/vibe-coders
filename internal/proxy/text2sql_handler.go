@@ -191,6 +191,18 @@ func (s *Server) handleText2SQL(w http.ResponseWriter, r *http.Request, meta sto
 		return
 	}
 
+	// 0a) Cumulative-risk enforcement (admin-toggle): block once an API key's running
+	// daily count of risky requests (rejected / high EXPLAIN risk / classified failure)
+	// exceeds the configured limit — promoting the detection-only signal to a guard.
+	if s.t2sFeatureOn(t2sFeatureRiskEnforce) && cfg.DailyRiskLimit > 0 && meta.Request.APIKeyID != "" {
+		dayStart := time.Now().UTC().Truncate(24 * time.Hour)
+		if n, err := s.db.Text2SQLRiskyCountByAPIKey(r.Context(), meta.Request.APIKeyID, dayStart); err == nil && n >= int64(cfg.DailyRiskLimit) {
+			content := fmt.Sprintf("당일 누적 위험 요청 한도(%d건)를 초과하여 Text2SQL 사용이 일시 제한되었습니다. 운영자에게 문의하세요.", cfg.DailyRiskLimit)
+			finalize(content, text2sql.ValidationResult{Reason: "risk budget exceeded"}, false, 0, "risk_budget_exceeded", 0)
+			return
+		}
+	}
+
 	// 0) Clarification: ask instead of guessing when the question is underspecified.
 	if cfg.ClarifyEnabled {
 		if need, missing := text2sql.NeedsClarification(question, cfg.RequireDateFilter); need {
