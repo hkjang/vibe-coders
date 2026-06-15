@@ -227,6 +227,7 @@ const adminHTML = `<!doctype html>
       <a href="#/safety" data-tab="safety">안전</a>
       <a href="#/text2sql" data-tab="text2sql">Text2SQL</a>
       <a href="#/personalization" data-tab="personalization">개인화</a>
+      <a href="#/mykeys" data-tab="mykeys">내 키</a>
       <a href="#/settings" data-tab="settings">설정</a>
     </nav>
     <div class="header-tools">
@@ -678,6 +679,7 @@ const adminHTML = `<!doctype html>
           case 'safety':    await renderSafety(); break;
           case 'text2sql':  await renderText2SQL(); break;
           case 'personalization': rest.length ? await renderPersonalProfileDetail(decodeURIComponent(rest.join('/'))) : await renderPersonalization(); break;
+          case 'mykeys':    await renderMyKeys(); break;
           case 'settings':  await renderSettings(); break;
           default: await renderDashboard();
         }
@@ -4852,6 +4854,82 @@ const adminHTML = `<!doctype html>
       } catch (err) {
         alert('스냅샷 생성 실패: ' + err.message);
       }
+    }
+
+    // ---------- my keys (self-service) ----------
+    async function renderMyKeys() {
+      const view = document.getElementById('view');
+      let data;
+      try {
+        data = await api('/me/keys');
+      } catch (err) {
+        const msg = String(err.message || '');
+        if (msg.indexOf('disabled') >= 0) {
+          view.innerHTML = card('내 키', '<p class="muted">셀프서비스 키 관리가 비활성화되어 있습니다. 관리자가 <code>SELF_SERVICE_KEYS_ENABLED=true</code>로 활성화해야 합니다.</p>');
+        } else {
+          view.innerHTML = card('내 키', '<p class="muted">현재 로그인 주체를 사용자로 식별할 수 없습니다(JWT 로그인 또는 user_id가 매핑된 API Key 필요). 상세: ' + escapeHTML(msg) + '</p>');
+        }
+        return;
+      }
+      const keys = data.api_keys || [];
+      const secretBanner = window.mykeysSecret
+        ? '<div class="status" style="padding:10px; margin-bottom:12px">새 키 시크릿 (한 번만 표시됩니다. 안전하게 보관하세요):<br><code style="user-select:all">' + escapeHTML(window.mykeysSecret) + '</code> <button class="secondary" type="button" onclick="window.mykeysSecret=null; renderMyKeys()">숨기기</button></div>'
+        : '';
+      const form = '<div style="margin:8px 0 16px; display:flex; gap:8px; flex-wrap:wrap; align-items:center">' +
+        '<input id="mk-name" placeholder="키 이름 (예: my-cli)" style="min-width:200px">' +
+        '<input id="mk-scopes" placeholder="스코프(쉼표, 비우면 내 권한 상속)" style="min-width:260px">' +
+        '<input id="mk-expires" placeholder="만료 (RFC3339, 선택)" style="min-width:200px">' +
+        '<button type="button" onclick="createMyKey()">키 발급</button>' +
+        '</div><div class="muted" style="font-size:12px; margin-bottom:8px">발급 키는 본인 권한 범위 내에서만 생성됩니다(권한 상승 불가).</div>';
+      const tableRows = keys.map(k => {
+        const expired = k.revoked_at || k.status !== 'active';
+        return '<tr>' +
+          '<td>' + escapeHTML(k.name) + '<div class="muted">' + escapeHTML(k.id) + '</div></td>' +
+          '<td>' + escapeHTML(k.role || '') + '</td>' +
+          '<td class="muted" style="max-width:260px">' + escapeHTML((k.scopes || []).join(', ')) + '</td>' +
+          '<td><span class="status ' + (expired ? 'error' : '') + '">' + escapeHTML(k.status) + '</span></td>' +
+          '<td>' + escapeHTML(k.expires_at || '-') + '</td>' +
+          '<td>' +
+            '<button class="secondary" type="button" onclick="rotateMyKey(\'' + k.id + '\')">회전</button> ' +
+            '<button class="danger" type="button" onclick="revokeMyKey(\'' + k.id + '\')">폐기</button>' +
+          '</td></tr>';
+      }).join('');
+      const table = keys.length
+        ? '<table><thead><tr><th>이름</th><th>역할</th><th>스코프</th><th>상태</th><th>만료</th><th>동작</th></tr></thead><tbody>' + tableRows + '</tbody></table>'
+        : '<p class="muted">발급된 키가 없습니다.</p>';
+      view.innerHTML = card('내 키', secretBanner + form + table);
+    }
+
+    async function createMyKey() {
+      const name = (document.getElementById('mk-name').value || '').trim();
+      if (!name) { alert('키 이름을 입력하세요.'); return; }
+      const scopesRaw = (document.getElementById('mk-scopes').value || '').trim();
+      const expires = (document.getElementById('mk-expires').value || '').trim();
+      const body = { name };
+      if (scopesRaw) body.scopes = scopesRaw.split(',').map(s => s.trim()).filter(Boolean);
+      if (expires) body.expires_at = expires;
+      try {
+        const res = await api('/me/keys', { method: 'POST', body: JSON.stringify(body) });
+        window.mykeysSecret = res.secret || null;
+        await renderMyKeys();
+      } catch (err) { alert('발급 실패: ' + err.message); }
+    }
+
+    async function rotateMyKey(id) {
+      if (!confirm('이 키를 회전하시겠습니까? 기존 키는 즉시 폐기됩니다.')) return;
+      try {
+        const res = await api('/me/keys/' + encodeURIComponent(id) + '/rotate', { method: 'POST', body: '{}' });
+        window.mykeysSecret = res.secret || null;
+        await renderMyKeys();
+      } catch (err) { alert('회전 실패: ' + err.message); }
+    }
+
+    async function revokeMyKey(id) {
+      if (!confirm('이 키를 폐기하시겠습니까?')) return;
+      try {
+        await api('/me/keys/' + encodeURIComponent(id), { method: 'DELETE' });
+        await renderMyKeys();
+      } catch (err) { alert('폐기 실패: ' + err.message); }
     }
 
     // ---------- settings ----------
