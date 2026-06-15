@@ -282,6 +282,35 @@ func suggestText2SQLFixes(l store.Text2SQLQueryLog) []string {
 	return out
 }
 
+// handleText2SQLMiners surfaces insight mined from the question logs: recurring
+// questions worth promoting to a saved report, and frequent undefined question tokens
+// worth adding to the business glossary. Read-only.
+// GET /admin/text2sql/miners?window=30d&min_count=3
+func (s *Server) handleText2SQLMiners(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	since := parseWindow(r.URL.Query().Get("window"), 30*24*time.Hour, "day")
+	minCount := 3
+	if v := strings.TrimSpace(r.URL.Query().Get("min_count")); v != "" {
+		if n := atoiDefault(v, 3); n >= 2 {
+			minCount = n
+		}
+	}
+	reports, err := s.db.Text2SQLReportCandidates(r.Context(), since, minCount, 100)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "report_miner_failed")
+		return
+	}
+	terms, err := s.db.Text2SQLGlossaryCandidates(r.Context(), since, minCount, 100)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "glossary_miner_failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"report_candidates": reports, "glossary_candidates": terms})
+}
+
 // handleText2SQLKillSwitch reads or toggles the runtime Text2SQL kill switch. When
 // engaged, vibe/text2sql-* requests return a safe "temporarily disabled" message
 // without generating or executing any SQL — for incident/cost/security response.

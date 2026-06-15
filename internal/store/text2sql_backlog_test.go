@@ -242,6 +242,48 @@ func TestPurgeText2SQLReplayBundles(t *testing.T) {
 	}
 }
 
+func TestText2SQLMiners(t *testing.T) {
+	db := openAggTestStore(t)
+	defer db.Close()
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	// Three identical valid questions → a report candidate; plus a one-off.
+	for i := 0; i < 3; i++ {
+		_ = db.InsertText2SQLLog(ctx, Text2SQLQueryLog{ID: "rep" + itoaStore(i), Question: "부서별 상담 건수", Valid: true, GeneratedSQL: "SELECT dept, count(*) FROM tickets GROUP BY dept", CreatedAt: now})
+	}
+	_ = db.InsertText2SQLLog(ctx, Text2SQLQueryLog{ID: "one", Question: "오늘 신규 가입자", Valid: true, GeneratedSQL: "SELECT 1", CreatedAt: now})
+
+	reports, err := db.Text2SQLReportCandidates(ctx, now.Add(-time.Hour), 3, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reports) != 1 || reports[0].Count != 3 {
+		t.Fatalf("expected one report candidate with count 3, got %+v", reports)
+	}
+
+	// "상담" / "부서별" appear in 3 distinct logs → glossary candidates (above min 3).
+	cands, err := db.Text2SQLGlossaryCandidates(ctx, now.Add(-time.Hour), 3, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := map[string]bool{}
+	for _, c := range cands {
+		found[c.Term] = true
+	}
+	if !found["상담"] {
+		t.Errorf("expected 상담 as a glossary candidate, got %+v", cands)
+	}
+	// A defined term should be excluded.
+	_ = db.UpsertText2SQLBusinessTerm(ctx, Text2SQLBusinessTerm{ID: "k", Term: "상담", Mapping: "tickets"})
+	cands2, _ := db.Text2SQLGlossaryCandidates(ctx, now.Add(-time.Hour), 3, 50)
+	for _, c := range cands2 {
+		if c.Term == "상담" {
+			t.Error("defined glossary term should be excluded from candidates")
+		}
+	}
+}
+
 func containsStore(s, sub string) bool {
 	for i := 0; i+len(sub) <= len(s); i++ {
 		if s[i:i+len(sub)] == sub {
