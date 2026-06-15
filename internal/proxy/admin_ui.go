@@ -226,6 +226,7 @@ const adminHTML = `<!doctype html>
       <a href="#/quotas" data-tab="quotas">사용 한도</a>
       <a href="#/safety" data-tab="safety">안전</a>
       <a href="#/text2sql" data-tab="text2sql">Text2SQL</a>
+      <a href="#/personalization" data-tab="personalization">개인화</a>
       <a href="#/settings" data-tab="settings">설정</a>
     </nav>
     <div class="header-tools">
@@ -676,6 +677,7 @@ const adminHTML = `<!doctype html>
           case 'vcs':       await renderVCS(params); break;
           case 'safety':    await renderSafety(); break;
           case 'text2sql':  await renderText2SQL(); break;
+          case 'personalization': rest.length ? await renderPersonalProfileDetail(decodeURIComponent(rest.join('/'))) : await renderPersonalization(); break;
           case 'settings':  await renderSettings(); break;
           default: await renderDashboard();
         }
@@ -4748,6 +4750,90 @@ const adminHTML = `<!doctype html>
       await api('/admin/alerts/' + encodeURIComponent(id), { method: 'DELETE' });
       route();
     };
+
+    // ---------- personalization (Personal AI Profile) ----------
+    function pctText(x) { return (Number(x || 0) * 100).toFixed(0) + '%'; }
+    function topKeyText(list) {
+      if (!list || !list.length) return '<span class="muted">-</span>';
+      return list.slice(0, 3).map(c => escapeHTML(c.key) + ' (' + fmt(c.requests) + ')').join(', ');
+    }
+    async function renderPersonalization() {
+      const view = document.getElementById('view');
+      const d = await api('/admin/personalization/profiles?window=30d&limit=50').catch(() => ({ profiles: [] }));
+      const profiles = d.profiles || [];
+      let html = '<p class="muted">사용자별 AI 사용 프로필 (최근 30일). 모델·작업·언어 선호, 비용 성향, 신뢰도를 요약합니다. 사용자를 클릭하면 상세·스냅샷을 볼 수 있습니다.</p>';
+      if (!profiles.length) {
+        html += '<p class="muted">표시할 프로필이 없습니다 (사용자 매핑된 API Key 활동 필요).</p>';
+      } else {
+        html += '<table><thead><tr>' +
+          '<th data-sort="str">사용자</th><th data-sort="str">팀</th><th data-sort="str">역할</th>' +
+          '<th data-sort="num">요청</th><th data-sort="num">총비용(KRW)</th><th data-sort="num">성공률</th>' +
+          '<th>대표 모델</th><th>주요 작업</th><th>요약</th>' +
+          '</tr></thead><tbody>' +
+          profiles.map(p => {
+            const topModel = (p.top_models && p.top_models.length) ? escapeHTML(p.top_models[0].key) : '-';
+            return '<tr>' +
+              '<td><a href="#/personalization/' + encodeURIComponent(p.user_id) + '">' + escapeHTML(p.user_id) + '</a></td>' +
+              '<td>' + escapeHTML(p.team || '') + '</td>' +
+              '<td>' + escapeHTML(p.role || '') + '</td>' +
+              '<td data-num="' + (p.requests || 0) + '">' + fmt(p.requests || 0) + '</td>' +
+              '<td data-num="' + (p.total_cost_krw || 0) + '">' + fmt(Math.round(p.total_cost_krw || 0)) + '</td>' +
+              '<td data-num="' + (p.success_rate || 0) + '">' + pctText(p.success_rate) + '</td>' +
+              '<td>' + topModel + '</td>' +
+              '<td>' + topKeyText(p.top_task_types) + '</td>' +
+              '<td class="muted" style="max-width:360px">' + escapeHTML(p.summary || '') + '</td>' +
+            '</tr>';
+          }).join('') + '</tbody></table>';
+      }
+      view.innerHTML = card('개인 AI 프로필', html);
+      makeSortable('#view', 'personalization');
+    }
+
+    async function renderPersonalProfileDetail(userID) {
+      const view = document.getElementById('view');
+      const d = await api('/admin/personalization/profiles/' + encodeURIComponent(userID) + '?window=30d')
+        .catch(() => ({ profile: null, snapshots: [] }));
+      const p = d.profile || {};
+      const snaps = d.snapshots || [];
+      const back = '<p><a href="#/personalization">← 전체 프로필</a></p>';
+      const kv = '<div class="kv">' +
+        row('사용자', escapeHTML(p.user_id || userID)) +
+        row('팀 / 역할', escapeHTML((p.team || '-') + ' / ' + (p.role || '-'))) +
+        row('요청 수', fmt(p.requests || 0)) +
+        row('총 비용', fmt(Math.round(p.total_cost_krw || 0)) + ' KRW') +
+        row('요청당 평균', (p.avg_cost_per_request || 0).toFixed(2) + ' KRW') +
+        row('성공률 / 오류율', pctText(p.success_rate) + ' / ' + pctText(p.error_rate)) +
+        row('distinct 모델 / 지문', fmt(p.distinct_models || 0) + ' / ' + fmt(p.distinct_prompt_fingerprints || 0)) +
+        row('요약', escapeHTML(p.summary || '')) +
+      '</div>';
+      const prefs =
+        '<div class="grid3" style="margin-top:12px">' +
+          '<div><h3>선호 작업(task_type)</h3>' + topKeyText(p.top_task_types) + '</div>' +
+          '<div><h3>선호 모델</h3>' + topKeyText(p.top_models) + '</div>' +
+          '<div><h3>선호 언어</h3>' + topKeyText(p.top_languages) + '</div>' +
+        '</div>';
+      const snapBtn = '<div style="margin-top:12px"><button type="button" onclick="snapshotProfile(\'' + userID.replace(/'/g, "\\'") + '\')">스냅샷 생성</button> ' +
+        '<span class="muted">현재 프로필을 시점 기록으로 저장합니다.</span></div>';
+      const snapTable = snaps.length ? (
+        '<h3 style="margin-top:16px">스냅샷 이력</h3><table><thead><tr><th>생성 시각</th><th>요청</th><th>총비용</th><th>성공률</th></tr></thead><tbody>' +
+        snaps.map(s => {
+          let parsed = {};
+          try { parsed = JSON.parse(s.profile || '{}'); } catch (e) { parsed = {}; }
+          return '<tr><td>' + escapeHTML(s.created_at) + '</td><td>' + fmt(parsed.requests || 0) + '</td>' +
+            '<td>' + fmt(Math.round(parsed.total_cost_krw || 0)) + '</td><td>' + pctText(parsed.success_rate) + '</td></tr>';
+        }).join('') + '</tbody></table>'
+      ) : '<p class="muted" style="margin-top:16px">스냅샷이 없습니다.</p>';
+      view.innerHTML = back + card('프로필: ' + escapeHTML(userID), kv + prefs + snapBtn + snapTable);
+    }
+
+    async function snapshotProfile(userID) {
+      try {
+        await api('/admin/personalization/profiles/' + encodeURIComponent(userID) + '?window=30d&snapshot=1');
+        await renderPersonalProfileDetail(userID);
+      } catch (err) {
+        alert('스냅샷 생성 실패: ' + err.message);
+      }
+    }
 
     // ---------- settings ----------
     async function renderText2SQL() {
