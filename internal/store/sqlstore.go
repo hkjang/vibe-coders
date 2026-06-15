@@ -777,6 +777,21 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 			updated_at TEXT NOT NULL
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_prompt_products_fp ON prompt_products(source_fingerprint)`,
+		// Personal AI Profile: a per-user summary (model/task/language preferences, cost
+		// tendency, reliability) computed from logs. personal_profiles holds the latest
+		// computed profile; personal_profile_snapshots keeps point-in-time history.
+		`CREATE TABLE IF NOT EXISTS personal_profiles (
+			user_id TEXT PRIMARY KEY,
+			profile TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS personal_profile_snapshots (
+			id TEXT PRIMARY KEY,
+			user_id TEXT NOT NULL,
+			profile TEXT NOT NULL,
+			created_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_personal_profile_snapshots_user ON personal_profile_snapshots(user_id, created_at)`,
 		`CREATE TABLE IF NOT EXISTS routing_rules (
 			id TEXT PRIMARY KEY,
 			enabled INTEGER NOT NULL DEFAULT 1,

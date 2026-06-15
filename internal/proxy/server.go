@@ -213,6 +213,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/admin/savings", s.handleSavings)
 	mux.HandleFunc("/admin/model-migration", s.handleModelMigration)
 	mux.HandleFunc("/admin/invoices", s.handleInvoices)
+	mux.HandleFunc("/admin/personalization/profiles", s.handlePersonalProfiles)
+	mux.HandleFunc("/admin/personalization/profiles/", s.handlePersonalProfileDetail)
 	mux.HandleFunc("/admin/policies/decisions", s.handlePolicyDecisions)
 	mux.HandleFunc("/admin/policies/simulate", s.handlePolicySimulate)
 	mux.HandleFunc("/admin/policies/export", s.handlePolicyExport)
