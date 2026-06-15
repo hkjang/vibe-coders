@@ -215,6 +215,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/admin/invoices", s.handleInvoices)
 	mux.HandleFunc("/admin/personalization/profiles", s.handlePersonalProfiles)
 	mux.HandleFunc("/admin/personalization/profiles/", s.handlePersonalProfileDetail)
+	mux.HandleFunc("/me/dashboard", s.handleMyDashboard)
+	mux.HandleFunc("/me/recommendations", s.handleMyRecommendations)
 	mux.HandleFunc("/admin/policies/decisions", s.handlePolicyDecisions)
 	mux.HandleFunc("/admin/policies/simulate", s.handlePolicySimulate)
 	mux.HandleFunc("/admin/policies/export", s.handlePolicyExport)

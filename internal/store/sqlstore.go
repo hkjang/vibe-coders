@@ -792,6 +792,18 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 			created_at TEXT NOT NULL
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_personal_profile_snapshots_user ON personal_profile_snapshots(user_id, created_at)`,
+		// My AI Home: per-user self-service recommendations (model switch, template
+		// suggestions) generated from the user's own usage. Replaced on each rebuild.
+		`CREATE TABLE IF NOT EXISTS personal_recommendations (
+			id TEXT PRIMARY KEY,
+			user_id TEXT NOT NULL,
+			kind TEXT NOT NULL,
+			title TEXT NOT NULL,
+			detail TEXT,
+			est_savings_krw REAL NOT NULL DEFAULT 0,
+			created_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_personal_recommendations_user ON personal_recommendations(user_id)`,
 		`CREATE TABLE IF NOT EXISTS routing_rules (
 			id TEXT PRIMARY KEY,
 			enabled INTEGER NOT NULL DEFAULT 1,
