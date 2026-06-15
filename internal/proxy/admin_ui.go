@@ -200,6 +200,20 @@ const adminHTML = `<!doctype html>
 
     .ago { cursor: help; }
 
+    .user-menu-wrap { position: relative; display: inline-block; }
+    #auth-user { cursor: pointer; }
+    .user-menu {
+      position: absolute; right: 0; top: 130%; z-index: 60;
+      background: var(--panel); border: 1px solid var(--accent); border-radius: 8px;
+      padding: 10px; min-width: 200px; display: flex; flex-direction: column; gap: 8px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.25);
+    }
+    .user-menu a { padding: 6px 8px; border-radius: 4px; color: var(--ink); text-decoration: none; }
+    .user-menu a:hover { background: var(--panel-alt); }
+    .user-menu .user-menu-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 13px; color: var(--muted); }
+    .user-menu .user-menu-sep { height: 1px; background: var(--accent); opacity: 0.3; margin: 2px 0; }
+    .user-menu button { width: 100%; text-align: left; }
+
     @media (max-width: 960px) {
       header { flex-direction: column; align-items: flex-start; gap: 8px; }
       main { padding: 14px; }
@@ -226,21 +240,28 @@ const adminHTML = `<!doctype html>
       <a href="#/quotas" data-tab="quotas">사용 한도</a>
       <a href="#/safety" data-tab="safety">안전</a>
       <a href="#/text2sql" data-tab="text2sql">Text2SQL</a>
-      <a href="#/personalization" data-tab="personalization">개인화</a>
-      <a href="#/mykeys" data-tab="mykeys">내 키</a>
       <a href="#/settings" data-tab="settings">설정</a>
     </nav>
     <div class="header-tools">
-      <select id="refresh-interval" title="자동 새로고침 주기">
-        <option value="0">자동 새로고침 끔</option>
-        <option value="5">5초 마다</option>
-        <option value="10">10초 마다</option>
-        <option value="30">30초 마다</option>
-        <option value="60">60초 마다</option>
-      </select>
-      <button id="theme-toggle" class="ghost" type="button" title="라이트/다크 전환 (t)">🌓</button>
-      <button id="help-toggle" class="ghost" type="button" title="단축키 도움말 (?)">?</button>
-      <span id="auth-user" class="user-chip"></span>
+      <div class="user-menu-wrap">
+        <span id="auth-user" class="user-chip" title="개인 메뉴 열기"></span>
+        <div id="user-menu" class="user-menu" style="display:none">
+          <a href="#/personalization" data-tab="personalization">개인화</a>
+          <a href="#/mykeys" data-tab="mykeys">내 키</a>
+          <div class="user-menu-sep"></div>
+          <label class="user-menu-row">자동 새로고침
+            <select id="refresh-interval" title="자동 새로고침 주기">
+              <option value="0">끔</option>
+              <option value="5">5초</option>
+              <option value="10">10초</option>
+              <option value="30">30초</option>
+              <option value="60">60초</option>
+            </select>
+          </label>
+          <button id="theme-toggle" class="ghost" type="button" title="라이트/다크 전환 (t)">🌓 테마 전환</button>
+          <button id="help-toggle" class="ghost" type="button" title="단축키 도움말 (?)">? 단축키 도움말</button>
+        </div>
+      </div>
       <button id="auth-logout" class="ghost" type="button" style="display:none" title="로그아웃">로그아웃</button>
       <input id="token" type="password" autocomplete="off" placeholder="관리자 토큰">
     </div>
@@ -326,16 +347,22 @@ const adminHTML = `<!doctype html>
         if (authState.user) {
           chip.style.display = 'inline-flex';
           const loginId = (authState.user.email || '').split('@')[0];
-          chip.textContent = loginId + ' · ' + (authState.user.role || '');
-          chip.title = authState.user.email || ''; // 전체 이메일은 hover로
+          chip.textContent = '☰ ' + loginId + ' · ' + (authState.user.role || '');
+          chip.title = (authState.user.email || '') + ' · 클릭하면 개인 메뉴';
           logoutBtn.style.display = 'inline-block';
         } else {
-          chip.style.display = 'none';
+          chip.style.display = 'inline-flex';
+          chip.textContent = '☰ 메뉴';
+          chip.title = '개인 메뉴 열기';
           logoutBtn.style.display = 'none';
         }
       } else {
         tokenInput.style.display = '';
-        chip.style.display = 'none';
+        // Token mode has no user, but the chip stays as the menu trigger so theme /
+        // refresh / help / 개인화 / 내 키 remain reachable.
+        chip.style.display = 'inline-flex';
+        chip.textContent = '☰ 메뉴';
+        chip.title = '개인 메뉴 열기';
         logoutBtn.style.display = 'none';
       }
     }
@@ -705,6 +732,25 @@ const adminHTML = `<!doctype html>
       applyRefreshInterval(v);
     });
     applyRefreshInterval(Number(refreshSelect.value || 0));
+
+    // ---------- user menu (auth-user dropdown) ----------
+    (function () {
+      const chip = document.getElementById('auth-user');
+      const menu = document.getElementById('user-menu');
+      if (!chip || !menu) return;
+      const closeMenu = () => { menu.style.display = 'none'; };
+      chip.addEventListener('click', (e) => {
+        e.stopPropagation();
+        menu.style.display = (menu.style.display === 'none' || !menu.style.display) ? 'flex' : 'none';
+      });
+      // Clicking a nav link inside the menu navigates and closes it.
+      menu.querySelectorAll('a').forEach(a => a.addEventListener('click', closeMenu));
+      // Click outside or Esc closes the menu (theme/refresh/help controls keep it open).
+      document.addEventListener('click', (e) => {
+        if (menu.style.display !== 'none' && !menu.contains(e.target) && e.target !== chip) closeMenu();
+      });
+      document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenu(); });
+    })();
 
     // ---------- sortable tables ----------
     // Use data-sort="num" on <th> for numeric columns, data-sort="str" otherwise.
