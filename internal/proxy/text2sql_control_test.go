@@ -68,6 +68,19 @@ func TestClassifyText2SQLFailure(t *testing.T) {
 	}
 }
 
+func TestAuditEvidenceFooter(t *testing.T) {
+	// Empty inputs → no footer.
+	if got := auditEvidenceFooter("", 0, "", "", 0, nil); got != "" {
+		t.Errorf("expected empty footer, got %q", got)
+	}
+	got := auditEvidenceFooter("analytics", 3, "permabc", "glossxyz", 55, []string{"salary"})
+	for _, want := range []string{"analytics", "v3", "permabc", "glossxyz", "55", "salary", "감사 근거"} {
+		if !containsP2(got, want) {
+			t.Errorf("footer missing %q: %s", want, got)
+		}
+	}
+}
+
 func TestWhereConditions(t *testing.T) {
 	// Extracts the WHERE clause up to the next major clause.
 	if got := whereConditions("SELECT * FROM t WHERE dept = 'sales' GROUP BY x ORDER BY y LIMIT 10"); got != "dept = 'sales'" {

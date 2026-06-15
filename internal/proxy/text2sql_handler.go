@@ -130,6 +130,12 @@ func (s *Server) handleText2SQL(w http.ResponseWriter, r *http.Request, meta sto
 
 	// finalize writes the response + audit + t2s log with a consistent shape.
 	finalize := func(content string, validation text2sql.ValidationResult, executed bool, rowCount int64, errMsg string, costKRW float64) {
+		// Audit-evidence footer: on a valid answer, append the exact governance state
+		// that produced it (schema version, permission/glossary fingerprints, EXPLAIN
+		// risk, masked columns) so the response is self-documenting for audit.
+		if validation.OK {
+			content += auditEvidenceFooter(resolvedSchemaName, schemaVersion, permissionHash, glossaryHash, logRec.ExplainRisk, maskColumns)
+		}
 		logRec.GeneratedSQL = validation.SQL
 		logRec.Valid = validation.OK
 		logRec.RejectReason = validation.Reason
@@ -271,6 +277,11 @@ func (s *Server) handleText2SQL(w http.ResponseWriter, r *http.Request, meta sto
 	})
 	if !validation.OK {
 		content := fmt.Sprintf("생성된 SQL이 안전 검증을 통과하지 못했습니다 (사유: %s).\n\n```sql\n%s\n```", validation.Reason, strings.TrimSpace(rawSQL))
+		// Rejection explainer: tell the user how to adjust the question, not just that
+		// it was blocked.
+		if hints := suggestText2SQLFixes(store.Text2SQLQueryLog{Valid: false, RejectReason: validation.Reason, FailureCategory: classifyText2SQLFailure(validation, false, 0, "")}); len(hints) > 0 {
+			content += "\n\n### 수정 방법\n- " + strings.Join(hints, "\n- ")
+		}
 		finalize(content, validation, false, 0, validation.Reason, totalCost)
 		return
 	}
@@ -384,6 +395,9 @@ func (s *Server) handleText2SQL(w http.ResponseWriter, r *http.Request, meta sto
 	}
 
 	content := executeContent(question, validation.SQL, table, rowCount, summary, validation)
+	if rowCount == 0 {
+		content += emptyResultRecovery()
+	}
 	if challengeNote != "" {
 		content += "\n\n> " + challengeNote
 	}
@@ -640,6 +654,41 @@ func evidenceSection(sql string, v text2sql.ValidationResult) string {
 	}
 	b.WriteString("\n")
 	return b.String()
+}
+
+// auditEvidenceFooter renders the governance fingerprint of an answer — the schema
+// version it was generated against, the permission/glossary hashes that scoped it, the
+// EXPLAIN risk, and any masked columns — appended to a valid response for audit.
+func auditEvidenceFooter(schemaName string, schemaVersion int, permHash, glossHash string, explainRisk int, maskColumns []string) string {
+	parts := []string{}
+	if schemaName != "" {
+		parts = append(parts, fmt.Sprintf("스키마 `%s` v%d", schemaName, schemaVersion))
+	}
+	if permHash != "" {
+		parts = append(parts, "권한 "+permHash)
+	}
+	if glossHash != "" {
+		parts = append(parts, "용어 "+glossHash)
+	}
+	if explainRisk > 0 {
+		parts = append(parts, fmt.Sprintf("EXPLAIN 위험 %d", explainRisk))
+	}
+	if len(maskColumns) > 0 {
+		parts = append(parts, "마스킹 컬럼: "+strings.Join(maskColumns, ", "))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "\n\n---\n*감사 근거: " + strings.Join(parts, " · ") + "*"
+}
+
+// emptyResultRecovery suggests how to broaden a query that returned no rows.
+func emptyResultRecovery() string {
+	return "\n\n### 결과 없음 — 복구 제안\n" +
+		"- 기간 조건을 넓혀 보세요 (예: 최근 7일 → 최근 30일).\n" +
+		"- 동등 비교 대신 부분 일치(LIKE)나 IN 목록을 고려하세요.\n" +
+		"- 필터 조건을 하나씩 제거해 어떤 조건이 결과를 비우는지 확인하세요.\n" +
+		"- 대상 테이블/컬럼명이 스키마와 일치하는지 확인하세요."
 }
 
 // whereConditions extracts a compact, single-line view of the WHERE clause for the
