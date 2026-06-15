@@ -819,6 +819,30 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 			created_at TEXT NOT NULL
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_recommendation_feedback_kind ON recommendation_feedback(kind, created_at)`,
+		// Runtime admin settings: env-bootstrapped defaults overlaid by admin-managed
+		// values. Secret values are stored encrypted in value_json (marked is_secret).
+		`CREATE TABLE IF NOT EXISTS admin_settings (
+			key TEXT PRIMARY KEY,
+			category TEXT NOT NULL,
+			value_json TEXT NOT NULL,
+			value_type TEXT NOT NULL,
+			is_secret INTEGER NOT NULL DEFAULT 0,
+			source TEXT NOT NULL DEFAULT 'admin',
+			version INTEGER NOT NULL DEFAULT 1,
+			updated_by TEXT,
+			updated_at TEXT NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS admin_setting_history (
+			id TEXT PRIMARY KEY,
+			key TEXT NOT NULL,
+			old_value_json TEXT,
+			new_value_json TEXT,
+			is_secret INTEGER NOT NULL DEFAULT 0,
+			changed_by TEXT,
+			reason TEXT,
+			changed_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_admin_setting_history_key ON admin_setting_history(key, changed_at)`,
 		`CREATE TABLE IF NOT EXISTS routing_rules (
 			id TEXT PRIMARY KEY,
 			enabled INTEGER NOT NULL DEFAULT 1,

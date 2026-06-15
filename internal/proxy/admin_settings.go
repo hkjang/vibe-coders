@@ -1,0 +1,404 @@
+package proxy
+
+import (
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"strconv"
+	"strings"
+	"time"
+
+	"vibe-coders/internal/config"
+	"vibe-coders/internal/store"
+)
+
+// settingType describes how a setting's string value is parsed/validated.
+type settingType string
+
+const (
+	stString   settingType = "string"
+	stInt      settingType = "int"
+	stBool     settingType = "bool"
+	stFloat    settingType = "float"
+	stDuration settingType = "duration"
+	stCSV      settingType = "csv"
+)
+
+// settingDef is a registry entry: the env/default source, type, category, and whether the
+// value is a secret (encrypted at rest, masked in responses). validate is optional.
+type settingDef struct {
+	Key      string
+	Category string
+	Type     settingType
+	Secret   bool
+	Restart  bool // changing this requires a worker restart / connection swap (informational)
+	envValue func(cfg config.Config) string
+	validate func(string) error
+}
+
+// settingRegistry is the ordered set of admin-manageable settings. First slice: ClickHouse
+// and Text2SQL (the spec's 1차 범위).
+var settingRegistry = buildSettingRegistry()
+
+func buildSettingRegistry() []settingDef {
+	posInt := func(v string) error {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 0 {
+			return fmt.Errorf("must be a non-negative integer")
+		}
+		return nil
+	}
+	rate01 := func(v string) error {
+		f, err := strconv.ParseFloat(v, 64)
+		if err != nil || f < 0 || f > 1 {
+			return fmt.Errorf("must be between 0 and 1")
+		}
+		return nil
+	}
+	dur := func(v string) error {
+		if _, err := time.ParseDuration(v); err != nil {
+			return fmt.Errorf("must be a duration (e.g. 15s, 1h)")
+		}
+		return nil
+	}
+	return []settingDef{
+		// ---- ClickHouse ----
+		{Key: "clickhouse.url", Category: "clickhouse", Type: stString, Restart: true, envValue: func(c config.Config) string { return c.ClickHouse.URL }},
+		{Key: "clickhouse.database", Category: "clickhouse", Type: stString, envValue: func(c config.Config) string { return c.ClickHouse.Database }},
+		{Key: "clickhouse.table", Category: "clickhouse", Type: stString, envValue: func(c config.Config) string { return c.ClickHouse.Table }},
+		{Key: "clickhouse.user", Category: "clickhouse", Type: stString, envValue: func(c config.Config) string { return c.ClickHouse.User }},
+		{Key: "clickhouse.password", Category: "clickhouse", Type: stString, Secret: true, envValue: func(c config.Config) string { return c.ClickHouse.Password }},
+		{Key: "clickhouse.sink_interval", Category: "clickhouse", Type: stDuration, Restart: true, validate: dur, envValue: func(c config.Config) string { return c.ClickHouse.SinkInterval.String() }},
+		{Key: "clickhouse.sink_days", Category: "clickhouse", Type: stInt, validate: posInt, envValue: func(c config.Config) string { return strconv.Itoa(c.ClickHouse.SinkDays) }},
+		{Key: "clickhouse.text2sql_fact_table", Category: "clickhouse", Type: stString, envValue: func(c config.Config) string { return c.ClickHouse.Text2SQLFactTable }},
+
+		// ---- Text2SQL ----
+		{Key: "text2sql.enabled", Category: "text2sql", Type: stBool, envValue: func(c config.Config) string { return strconv.FormatBool(c.Text2SQL.Enabled) }},
+		{Key: "text2sql.preview_model", Category: "text2sql.models", Type: stString, envValue: func(c config.Config) string { return c.Text2SQL.PreviewModel }},
+		{Key: "text2sql.execute_model", Category: "text2sql.models", Type: stString, envValue: func(c config.Config) string { return c.Text2SQL.ExecuteModel }},
+		{Key: "text2sql.accurate_model", Category: "text2sql.models", Type: stString, envValue: func(c config.Config) string { return c.Text2SQL.AccurateModel }},
+		{Key: "text2sql.local_model", Category: "text2sql.models", Type: stString, envValue: func(c config.Config) string { return c.Text2SQL.LocalModel }},
+		{Key: "text2sql.summary_model", Category: "text2sql.models", Type: stString, envValue: func(c config.Config) string { return c.Text2SQL.SummaryModel }},
+		{Key: "text2sql.dialect", Category: "text2sql", Type: stString, envValue: func(c config.Config) string { return c.Text2SQL.Dialect }},
+		{Key: "text2sql.default_limit", Category: "text2sql.safety", Type: stInt, validate: posInt, envValue: func(c config.Config) string { return strconv.Itoa(c.Text2SQL.DefaultLimit) }},
+		{Key: "text2sql.max_limit", Category: "text2sql.safety", Type: stInt, validate: posInt, envValue: func(c config.Config) string { return strconv.Itoa(c.Text2SQL.MaxLimit) }},
+		{Key: "text2sql.max_explain_cost", Category: "text2sql.safety", Type: stFloat, envValue: func(c config.Config) string { return strconv.FormatFloat(c.Text2SQL.MaxExplainCost, 'f', -1, 64) }},
+		{Key: "text2sql.mask_results", Category: "text2sql.safety", Type: stBool, envValue: func(c config.Config) string { return strconv.FormatBool(c.Text2SQL.MaskResults) }},
+		{Key: "text2sql.exec_driver", Category: "text2sql", Type: stString, Restart: true, envValue: func(c config.Config) string { return c.Text2SQL.ExecDriver }},
+		{Key: "text2sql.exec_dsn", Category: "text2sql", Type: stString, Secret: true, Restart: true, envValue: func(c config.Config) string { return c.Text2SQL.ExecDSN }},
+		{Key: "text2sql.cache_enabled", Category: "text2sql", Type: stBool, envValue: func(c config.Config) string { return strconv.FormatBool(c.Text2SQL.CacheEnabled) }},
+		{Key: "text2sql.cache_ttl", Category: "text2sql", Type: stDuration, validate: dur, envValue: func(c config.Config) string { return c.Text2SQL.CacheTTL.String() }},
+		{Key: "text2sql.clarify_enabled", Category: "text2sql", Type: stBool, envValue: func(c config.Config) string { return strconv.FormatBool(c.Text2SQL.ClarifyEnabled) }},
+		{Key: "text2sql.require_date_filter", Category: "text2sql", Type: stBool, envValue: func(c config.Config) string { return strconv.FormatBool(c.Text2SQL.RequireDateFilter) }},
+		{Key: "text2sql.statement_timeout", Category: "text2sql.safety", Type: stDuration, validate: dur, envValue: func(c config.Config) string { return c.Text2SQL.StatementTimeout.String() }},
+		{Key: "text2sql.work_mem", Category: "text2sql.safety", Type: stString, envValue: func(c config.Config) string { return c.Text2SQL.WorkMem }},
+		{Key: "text2sql.shadow_models", Category: "text2sql.eval", Type: stCSV, envValue: func(c config.Config) string { return strings.Join(c.Text2SQL.ShadowModels, ",") }},
+		{Key: "text2sql.shadow_sample_rate", Category: "text2sql.eval", Type: stFloat, validate: rate01, envValue: func(c config.Config) string { return strconv.FormatFloat(c.Text2SQL.ShadowSampleRate, 'f', -1, 64) }},
+		{Key: "text2sql.replay_bundles", Category: "text2sql", Type: stBool, envValue: func(c config.Config) string { return strconv.FormatBool(c.Text2SQL.ReplayBundles) }},
+		{Key: "text2sql.daily_risk_limit", Category: "text2sql.safety", Type: stInt, validate: posInt, envValue: func(c config.Config) string { return strconv.Itoa(c.Text2SQL.DailyRiskLimit) }},
+		{Key: "text2sql.daily_risk_warn", Category: "text2sql.safety", Type: stInt, validate: posInt, envValue: func(c config.Config) string { return strconv.Itoa(c.Text2SQL.DailyRiskWarn) }},
+		{Key: "text2sql.twin_driver", Category: "text2sql", Type: stString, Restart: true, envValue: func(c config.Config) string { return c.Text2SQL.TwinDriver }},
+		{Key: "text2sql.twin_dsn", Category: "text2sql", Type: stString, Secret: true, Restart: true, envValue: func(c config.Config) string { return c.Text2SQL.TwinDSN }},
+	}
+}
+
+func settingDefByKey(key string) (settingDef, bool) {
+	for _, d := range settingRegistry {
+		if d.Key == key {
+			return d, true
+		}
+	}
+	return settingDef{}, false
+}
+
+// validateSettingValue checks the proposed string value against the key's type + validator.
+func validateSettingValue(d settingDef, value string) error {
+	switch d.Type {
+	case stInt:
+		if _, err := strconv.Atoi(strings.TrimSpace(value)); err != nil {
+			return fmt.Errorf("must be an integer")
+		}
+	case stBool:
+		if _, err := strconv.ParseBool(strings.TrimSpace(value)); err != nil {
+			return fmt.Errorf("must be true or false")
+		}
+	case stFloat:
+		if _, err := strconv.ParseFloat(strings.TrimSpace(value), 64); err != nil {
+			return fmt.Errorf("must be a number")
+		}
+	case stDuration:
+		if _, err := time.ParseDuration(strings.TrimSpace(value)); err != nil {
+			return fmt.Errorf("must be a duration (e.g. 15s, 1h)")
+		}
+	}
+	if d.validate != nil {
+		return d.validate(strings.TrimSpace(value))
+	}
+	return nil
+}
+
+// effectiveSettingValue returns the current effective string value for a key: the stored
+// admin override (decrypted for secrets) if present, else the env/default. The second
+// return reports the source ("admin" or "env").
+func (s *Server) effectiveSettingValue(stored map[string]store.AdminSetting, d settingDef) (string, string) {
+	if a, ok := stored[d.Key]; ok {
+		raw := a.ValueJSON
+		var decoded string
+		if json.Unmarshal([]byte(raw), &decoded) != nil {
+			decoded = raw
+		}
+		if d.Secret {
+			if plain, err := s.secrets.Decrypt(decoded); err == nil {
+				return plain, "admin"
+			}
+			return "", "admin"
+		}
+		return decoded, "admin"
+	}
+	return d.envValue(s.cfg), "env"
+}
+
+// settingView is the API representation of one setting (secret-masked).
+func (s *Server) settingView(stored map[string]store.AdminSetting, d settingDef) map[string]any {
+	eff, source := s.effectiveSettingValue(stored, d)
+	view := map[string]any{
+		"key": d.Key, "category": d.Category, "type": string(d.Type),
+		"is_secret": d.Secret, "restart_required": d.Restart, "source": source,
+	}
+	if a, ok := stored[d.Key]; ok {
+		view["version"] = a.Version
+		view["updated_by"] = a.UpdatedBy
+		view["updated_at"] = a.UpdatedAt
+	}
+	if d.Secret {
+		view["is_set"] = strings.TrimSpace(eff) != ""
+		if strings.TrimSpace(eff) != "" {
+			view["value"] = "********"
+		} else {
+			view["value"] = ""
+		}
+	} else {
+		view["value"] = eff
+	}
+	return view
+}
+
+func (s *Server) loadStoredSettings(r *http.Request) (map[string]store.AdminSetting, error) {
+	list, err := s.db.ListAdminSettings(r.Context())
+	if err != nil {
+		return nil, err
+	}
+	m := map[string]store.AdminSetting{}
+	for _, a := range list {
+		m[a.Key] = a
+	}
+	return m, nil
+}
+
+// handleAdminSettings serves GET /admin/settings and GET /admin/settings/{category}.
+func (s *Server) handleAdminSettings(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	if r.Method != http.MethodGet {
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
+	category := strings.Trim(strings.TrimPrefix(r.URL.Path, "/admin/settings"), "/")
+	stored, err := s.loadStoredSettings(r)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "settings_failed")
+		return
+	}
+	items := []map[string]any{}
+	for _, d := range settingRegistry {
+		if category != "" && d.Category != category && !strings.HasPrefix(d.Category, category+".") {
+			continue
+		}
+		items = append(items, s.settingView(stored, d))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"settings": items, "category": category})
+}
+
+// handleAdminSettingByKey serves PUT (set) and DELETE (revert to env) for one key.
+func (s *Server) handleAdminSettingByKey(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	key := strings.Trim(strings.TrimPrefix(r.URL.Path, "/admin/settings/by-key/"), "/")
+	d, ok := settingDefByKey(key)
+	if !ok {
+		writeOpenAIError(w, http.StatusNotFound, "unknown setting key", "invalid_request_error", "unknown_key")
+		return
+	}
+	switch r.Method {
+	case http.MethodPut:
+		var payload struct {
+			Value  string `json:"value"`
+			Reason string `json:"reason"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "invalid_body")
+			return
+		}
+		if err := s.applySettingWrite(r, d, payload.Value, payload.Reason); err != nil {
+			writeOpenAIError(w, http.StatusBadRequest, err.Error(), "invalid_request_error", "setting_invalid")
+			return
+		}
+		s.auditAdmin(r, "setting.update", key, auditJSON(map[string]any{"key": key, "secret": d.Secret}))
+		stored, _ := s.loadStoredSettings(r)
+		writeJSON(w, http.StatusOK, s.settingView(stored, d))
+	case http.MethodDelete:
+		if err := s.db.DeleteAdminSetting(r.Context(), key, adminID(r), strings.TrimSpace(r.URL.Query().Get("reason"))); err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "setting_delete_failed")
+			return
+		}
+		s.auditAdmin(r, "setting.revert", key, "")
+		stored, _ := s.loadStoredSettings(r)
+		writeJSON(w, http.StatusOK, s.settingView(stored, d))
+	default:
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+	}
+}
+
+// applySettingWrite validates, encrypts (if secret), and persists a setting value.
+func (s *Server) applySettingWrite(r *http.Request, d settingDef, value, reason string) error {
+	value = strings.TrimSpace(value)
+	if !d.Secret && value == "" && d.Type != stString && d.Type != stCSV {
+		return fmt.Errorf("value is required")
+	}
+	if !d.Secret || value != "" {
+		if err := validateSettingValue(d, value); err != nil {
+			return err
+		}
+	}
+	// Secret with empty value = leave unchanged (don't overwrite with blank).
+	if d.Secret && value == "" {
+		return fmt.Errorf("secret value is empty; provide a value to change it or use DELETE to revert")
+	}
+	storeValue := value
+	if d.Secret {
+		enc, err := s.secrets.Encrypt(value)
+		if err != nil {
+			return fmt.Errorf("encrypt secret: %w", err)
+		}
+		storeValue = enc
+	}
+	encoded, err := json.Marshal(storeValue)
+	if err != nil {
+		return err
+	}
+	return s.db.UpsertAdminSetting(r.Context(), store.AdminSetting{
+		Key: d.Key, Category: d.Category, ValueJSON: string(encoded), ValueType: string(d.Type), IsSecret: d.Secret, Source: "admin",
+	}, adminID(r), reason)
+}
+
+// handleAdminSettingsValidate validates a proposed value without persisting it.
+// POST /admin/settings/validate {key, value}
+func (s *Server) handleAdminSettingsValidate(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	var payload struct{ Key, Value string }
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "invalid_body")
+		return
+	}
+	d, ok := settingDefByKey(strings.TrimSpace(payload.Key))
+	if !ok {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "message": "unknown setting key"})
+		return
+	}
+	if err := validateSettingValue(d, strings.TrimSpace(payload.Value)); err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "message": err.Error()})
+		return
+	}
+	// Cross-key check: default_limit <= max_limit.
+	stored, _ := s.loadStoredSettings(r)
+	if d.Key == "text2sql.default_limit" || d.Key == "text2sql.max_limit" {
+		def, max := s.crossLimit(stored, d.Key, strings.TrimSpace(payload.Value))
+		if def > max {
+			writeJSON(w, http.StatusOK, map[string]any{"ok": false, "message": "default_limit must be <= max_limit"})
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (s *Server) crossLimit(stored map[string]store.AdminSetting, changingKey, newValue string) (int, int) {
+	get := func(key string) int {
+		d, _ := settingDefByKey(key)
+		eff, _ := s.effectiveSettingValue(stored, d)
+		n, _ := strconv.Atoi(eff)
+		return n
+	}
+	def, max := get("text2sql.default_limit"), get("text2sql.max_limit")
+	n, _ := strconv.Atoi(newValue)
+	if changingKey == "text2sql.default_limit" {
+		def = n
+	} else {
+		max = n
+	}
+	return def, max
+}
+
+// handleAdminSettingsHistory serves GET /admin/settings/history?key=.
+func (s *Server) handleAdminSettingsHistory(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	hist, err := s.db.ListAdminSettingHistory(r.Context(), strings.TrimSpace(r.URL.Query().Get("key")), recentLimit(r))
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "history_failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"history": hist})
+}
+
+// handleAdminSettingsRollback reverts a (non-secret) key to its previous value from history.
+// POST /admin/settings/rollback {key, reason}
+func (s *Server) handleAdminSettingsRollback(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	var payload struct{ Key, Reason string }
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "invalid_body")
+		return
+	}
+	key := strings.TrimSpace(payload.Key)
+	d, ok := settingDefByKey(key)
+	if !ok {
+		writeOpenAIError(w, http.StatusNotFound, "unknown setting key", "invalid_request_error", "unknown_key")
+		return
+	}
+	if d.Secret {
+		writeOpenAIError(w, http.StatusBadRequest, "secret values cannot be rolled back (history stores no value); set or revert instead", "invalid_request_error", "secret_rollback_unsupported")
+		return
+	}
+	hist, err := s.db.ListAdminSettingHistory(r.Context(), key, 5)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "rollback_failed")
+		return
+	}
+	if len(hist) == 0 || strings.TrimSpace(hist[0].OldValueJSON) == "" {
+		writeOpenAIError(w, http.StatusBadRequest, "no previous value to roll back to", "invalid_request_error", "no_history")
+		return
+	}
+	var prev string
+	if json.Unmarshal([]byte(hist[0].OldValueJSON), &prev) != nil {
+		prev = hist[0].OldValueJSON
+	}
+	if err := s.applySettingWrite(r, d, prev, "rollback: "+strings.TrimSpace(payload.Reason)); err != nil {
+		writeOpenAIError(w, http.StatusBadRequest, err.Error(), "invalid_request_error", "rollback_failed")
+		return
+	}
+	s.auditAdmin(r, "setting.rollback", key, auditJSON(map[string]any{"key": key}))
+	stored, _ := s.loadStoredSettings(r)
+	writeJSON(w, http.StatusOK, s.settingView(stored, d))
+}
