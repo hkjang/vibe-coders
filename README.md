@@ -80,6 +80,7 @@ Roo Code / Cursor / Continue 등 OpenAI 호환 API 를 호출하는 VS Code 확�
 - **ClickHouse Text2SQL fact 적재** (`v0.4.6`): 일별 rollup에 더해 질의 단위 fact 테이블 적재(`CLICKHOUSE_TEXT2SQL_FACT_TABLE`) — 질문/SQL 원문 제외(마스킹), watermark 증분 + 자동/수동(`/admin/dw/text2sql-fact`)
 - **정책 GitOps** (`v0.4.7`): 거버넌스 정책+룰 portable JSON 내보내기(`GET /admin/policies/export`)·가져오기(`POST /admin/policies/import`, `?dry_run=1`이면 생성/수정 플랜만) — repo 커밋·PR 리뷰·diff·롤백
 - **저장 리포트 스케줄 실행** (`v0.4.8`): 승격된 리포트에 스케줄(`POST /admin/text2sql/reports {id,interval,enabled,deliver_mattermost}`) — 백그라운드 스케줄러가 도래분을 read-only 실행하고 Mattermost로 결과 요약 전달(실행 DB 설정 시)
+- **Text2SQL 관측 메트릭** (`v0.4.9`): `/metrics`에 `proxy_text2sql_requests_total`·`_cache_hits_total`·`_risk_blocked_total`·`_challenge_veto_total`·`_shadow_evals_total` 추가
 - **운영·거버넌스 확장** (`v0.3.0`): 정책 시뮬레이터(`/admin/policies/simulate`), 모델 가격표 버전 이력(`/admin/pricing`, `/admin/pricing/seed`), 운영 리스크 스코어(`/admin/ops/risk`)·상태(`/admin/ops/status`), Provider SLO(`/admin/providers/slo`), 비용 이상탐지(`/admin/cost/anomalies`)·배부(`/admin/cost/allocation`)·팀 예산 예측(`/admin/budgets/projection`), 모델별 코딩 품질(`/admin/models/quality`), 작업 템플릿(`/admin/templates`), 프롬프트 버전 승격(`/admin/prompts/promotions`), 자동 라우팅 학습 루프(`/admin/routing/learning/auto`), DW 롤업(`/admin/dw/rollups`), Mattermost 알림(`/admin/notifications/mattermost`)
 - 호출 이력 CSV 다운로드 `/admin/export.csv` (Excel UTF-8 BOM 포함, 한국어 그대로 열림)
 - 운영용 백업 스크립트 `scripts/backup.ps1` / `scripts/backup.sh` (SQLite `.backup` + fallback ndjson + 보존 일수 적용)

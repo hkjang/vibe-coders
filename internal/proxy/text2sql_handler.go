@@ -23,6 +23,7 @@ import (
 // upstream step's perspective (the response is fully written here).
 func (s *Server) handleText2SQL(w http.ResponseWriter, r *http.Request, meta store.LogRecord, body []byte, authCtx *store.AuthContext) {
 	start := time.Now()
+	s.metrics.IncText2SQLRequest()
 	cfg := s.cfg.Text2SQL
 	models := text2sql.Models{
 		Preview: cfg.PreviewModel, Execute: cfg.ExecuteModel, Accurate: cfg.AccurateModel,
@@ -211,6 +212,7 @@ func (s *Server) handleText2SQL(w http.ResponseWriter, r *http.Request, meta sto
 			}
 			switch {
 			case n >= int64(cfg.DailyRiskLimit):
+				s.metrics.IncText2SQLRiskBlocked()
 				content := fmt.Sprintf("당일 누적 위험 요청 한도(%d건)를 초과하여 Text2SQL 사용이 일시 제한되었습니다. 운영자에게 문의하세요.", cfg.DailyRiskLimit)
 				finalize(content, text2sql.ValidationResult{Reason: "risk budget exceeded"}, false, 0, "risk_budget_exceeded", 0)
 				return
@@ -237,6 +239,7 @@ func (s *Server) handleText2SQL(w http.ResponseWriter, r *http.Request, meta sto
 		if cached, hit, _ := s.db.GetText2SQLCache(r.Context(), cacheKey); hit {
 			validation := text2sql.ValidateSQL(cached, text2sql.ValidateOptions{DefaultLimit: cfg.DefaultLimit, MaxLimit: cfg.MaxLimit, AllowedTables: allowedTables, BlockedColumns: blockedColumns, AggregateOnlyColumns: aggregateOnly})
 			if validation.OK {
+				s.metrics.IncText2SQLCacheHit()
 				finalize(previewContent(question, validation.SQL, "검증된 읽기 전용 SQL입니다 (캐시 적중, 실행하지 않음).", validation), validation, false, 0, "", 0)
 				return
 			}
@@ -334,6 +337,7 @@ func (s *Server) handleText2SQL(w http.ResponseWriter, r *http.Request, meta sto
 	// Self-challenge veto: a reviewer judged the SQL unsafe — do not execute; return the
 	// validated SQL as a preview with the reviewer's caution so a human can decide.
 	if challengeUnsafe {
+		s.metrics.IncText2SQLChallengeVeto()
 		note := "보조 모델 검토 결과 실행을 보류했습니다. " + challengeNote
 		finalize(previewContent(question, validation.SQL, note, validation), validation, false, 0, "self_challenge_veto", totalCost)
 		return
@@ -553,6 +557,7 @@ func (s *Server) shadowEvaluate(rc *http.Request, dialect, schema, question, pri
 			gen := s.runGovernanceChat(ctx, rc, model, msgs)
 			genSQL := text2sql.ExtractSQL(gen.Response)
 			validation := text2sql.ValidateSQL(genSQL, opts)
+			s.metrics.IncText2SQLShadowEval()
 			_ = s.db.InsertText2SQLLog(ctx, store.Text2SQLQueryLog{
 				ID: newID("t2ssh"), VirtualModel: "vibe/text2sql-shadow", UpstreamModel: model, Mode: "shadow",
 				Question: question, GeneratedSQL: genSQL, Valid: validation.OK, RejectReason: validation.Reason,

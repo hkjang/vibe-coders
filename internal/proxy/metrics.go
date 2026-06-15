@@ -9,28 +9,33 @@ import (
 )
 
 type Metrics struct {
-	requests        atomic.Uint64
-	streams         atomic.Uint64
-	upstreamError   atomic.Uint64
-	quotaBlocked    atomic.Uint64
-	killSwitched    atomic.Uint64
-	alertsFired     atomic.Uint64
-	alertsDelivered atomic.Uint64
-	cacheHits       atomic.Uint64
-	cacheMisses     atomic.Uint64
-	failovers       atomic.Uint64
-	llmEvaluations  atomic.Uint64
-	llmEvalFailures atomic.Uint64
-	mcpToolCalls    atomic.Uint64
-	mcpToolErrors   atomic.Uint64
-	mcpBlocked      atomic.Uint64
-	routingOverride atomic.Uint64
-	knowledgeExpand atomic.Uint64 // requests that expanded ≥1 knowledge snippet
-	knowledgeTokens atomic.Uint64 // estimated tokens injected via knowledge expansion
-	costGuardBlock  atomic.Uint64 // requests blocked by the pre-call cost guard
-	promptInjection atomic.Uint64 // requests where prompt-injection patterns were detected
-	latency         *LatencyDigest
-	firstChunk      *LatencyDigest
+	requests         atomic.Uint64
+	streams          atomic.Uint64
+	upstreamError    atomic.Uint64
+	quotaBlocked     atomic.Uint64
+	killSwitched     atomic.Uint64
+	alertsFired      atomic.Uint64
+	alertsDelivered  atomic.Uint64
+	cacheHits        atomic.Uint64
+	cacheMisses      atomic.Uint64
+	failovers        atomic.Uint64
+	llmEvaluations   atomic.Uint64
+	llmEvalFailures  atomic.Uint64
+	mcpToolCalls     atomic.Uint64
+	mcpToolErrors    atomic.Uint64
+	mcpBlocked       atomic.Uint64
+	routingOverride  atomic.Uint64
+	knowledgeExpand  atomic.Uint64 // requests that expanded ≥1 knowledge snippet
+	knowledgeTokens  atomic.Uint64 // estimated tokens injected via knowledge expansion
+	costGuardBlock   atomic.Uint64 // requests blocked by the pre-call cost guard
+	promptInjection  atomic.Uint64 // requests where prompt-injection patterns were detected
+	t2sRequests      atomic.Uint64 // Text2SQL virtual-model requests handled
+	t2sCacheHit      atomic.Uint64 // Text2SQL preview cache hits
+	t2sRiskBlocked   atomic.Uint64 // Text2SQL requests blocked by cumulative-risk enforcement
+	t2sChallengeVeto atomic.Uint64 // Text2SQL execute vetoed by self-challenge review
+	t2sShadowEval    atomic.Uint64 // Text2SQL shadow model evaluations performed
+	latency          *LatencyDigest
+	firstChunk       *LatencyDigest
 }
 
 func newMetrics() *Metrics {
@@ -115,8 +120,13 @@ func (m *Metrics) AddKnowledgeExpansion(tokens int) {
 		m.knowledgeTokens.Add(uint64(tokens))
 	}
 }
-func (m *Metrics) IncCostGuardBlock()  { m.costGuardBlock.Add(1) }
-func (m *Metrics) IncPromptInjection() { m.promptInjection.Add(1) }
+func (m *Metrics) IncCostGuardBlock()        { m.costGuardBlock.Add(1) }
+func (m *Metrics) IncPromptInjection()       { m.promptInjection.Add(1) }
+func (m *Metrics) IncText2SQLRequest()       { m.t2sRequests.Add(1) }
+func (m *Metrics) IncText2SQLCacheHit()      { m.t2sCacheHit.Add(1) }
+func (m *Metrics) IncText2SQLRiskBlocked()   { m.t2sRiskBlocked.Add(1) }
+func (m *Metrics) IncText2SQLChallengeVeto() { m.t2sChallengeVeto.Add(1) }
+func (m *Metrics) IncText2SQLShadowEval()    { m.t2sShadowEval.Add(1) }
 
 func (m *Metrics) ObserveLLMEvaluations(evaluations []store.LLMEvaluation) {
 	for _, evaluation := range evaluations {
@@ -189,6 +199,21 @@ func (m *Metrics) Prometheus(queueDepth int, logDropped uint64, logWritten uint6
 		"# HELP proxy_prompt_injection_total Requests where prompt-injection patterns were detected.",
 		"# TYPE proxy_prompt_injection_total counter",
 		fmt.Sprintf("proxy_prompt_injection_total %d", m.promptInjection.Load()),
+		"# HELP proxy_text2sql_requests_total Text2SQL virtual-model requests handled.",
+		"# TYPE proxy_text2sql_requests_total counter",
+		fmt.Sprintf("proxy_text2sql_requests_total %d", m.t2sRequests.Load()),
+		"# HELP proxy_text2sql_cache_hits_total Text2SQL preview cache hits.",
+		"# TYPE proxy_text2sql_cache_hits_total counter",
+		fmt.Sprintf("proxy_text2sql_cache_hits_total %d", m.t2sCacheHit.Load()),
+		"# HELP proxy_text2sql_risk_blocked_total Text2SQL requests blocked by cumulative-risk enforcement.",
+		"# TYPE proxy_text2sql_risk_blocked_total counter",
+		fmt.Sprintf("proxy_text2sql_risk_blocked_total %d", m.t2sRiskBlocked.Load()),
+		"# HELP proxy_text2sql_challenge_veto_total Text2SQL executions vetoed by self-challenge review.",
+		"# TYPE proxy_text2sql_challenge_veto_total counter",
+		fmt.Sprintf("proxy_text2sql_challenge_veto_total %d", m.t2sChallengeVeto.Load()),
+		"# HELP proxy_text2sql_shadow_evals_total Text2SQL shadow model evaluations performed.",
+		"# TYPE proxy_text2sql_shadow_evals_total counter",
+		fmt.Sprintf("proxy_text2sql_shadow_evals_total %d", m.t2sShadowEval.Load()),
 		"# HELP proxy_log_queue_depth Current async log queue depth.",
 		"# TYPE proxy_log_queue_depth gauge",
 		fmt.Sprintf("proxy_log_queue_depth %d", queueDepth),
