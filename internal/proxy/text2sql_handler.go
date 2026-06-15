@@ -485,8 +485,48 @@ func previewContent(question, sql, note string, v text2sql.ValidationResult) str
 		b.WriteString("- " + c + "\n")
 	}
 	b.WriteString("\n### 실행 가능 여부\n- 검증 통과(읽기 전용). 이 모드는 SQL 만 생성하고 실행하지 않습니다. 실행하려면 `vibe/text2sql-execute` 를 사용하세요.\n\n")
+	b.WriteString(evidenceSection(sql, v))
 	b.WriteString("### 다음 질문 제안\n" + nextQuestionHints(v.Tables))
 	return b.String()
+}
+
+// evidenceSection renders the basis of the answer — the tables the SQL reads and the
+// filter conditions it applies — so a business user can judge whether the query
+// matches their intent without reading SQL.
+func evidenceSection(sql string, v text2sql.ValidationResult) string {
+	var b strings.Builder
+	b.WriteString("### 답변 근거\n")
+	if len(v.Tables) > 0 {
+		b.WriteString("- 사용한 테이블: " + strings.Join(v.Tables, ", ") + "\n")
+	}
+	if conds := whereConditions(sql); conds != "" {
+		b.WriteString("- 적용 조건: " + conds + "\n")
+	}
+	b.WriteString("\n")
+	return b.String()
+}
+
+// whereConditions extracts a compact, single-line view of the WHERE clause for the
+// evidence section (best-effort, up to the next major clause).
+func whereConditions(sql string) string {
+	lower := strings.ToLower(sql)
+	i := strings.Index(lower, " where ")
+	if i < 0 {
+		return ""
+	}
+	rest := sql[i+7:]
+	lowerRest := strings.ToLower(rest)
+	end := len(rest)
+	for _, kw := range []string{" group by ", " order by ", " limit ", " having ", " window "} {
+		if j := strings.Index(lowerRest, kw); j >= 0 && j < end {
+			end = j
+		}
+	}
+	cond := strings.Join(strings.Fields(rest[:end]), " ")
+	if len(cond) > 200 {
+		cond = cond[:200] + "…"
+	}
+	return cond
 }
 
 func executeContent(question, sql, table string, rowCount int64, summary string, v text2sql.ValidationResult) string {
@@ -505,6 +545,7 @@ func executeContent(question, sql, table string, rowCount int64, summary string,
 	}
 	b.WriteString("- 결과의 민감 컬럼은 마스킹될 수 있습니다.\n\n")
 	b.WriteString("### 실행 가능 여부\n- 읽기 전용으로 실행 완료.\n\n")
+	b.WriteString(evidenceSection(sql, v))
 	b.WriteString("### 다음 질문 제안\n" + nextQuestionHints(v.Tables))
 	return b.String()
 }

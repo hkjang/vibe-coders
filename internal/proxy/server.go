@@ -47,6 +47,7 @@ type Server struct {
 	priceCache   atomic.Pointer[pricingSnapshot]
 	mmCache      atomic.Pointer[mattermostSnapshot]
 	t2sExec      atomic.Pointer[sql.DB] // lazily-opened read-only DB for Text2SQL execute mode
+	t2sKilled    atomic.Bool            // runtime kill switch: when set, Text2SQL is disabled regardless of config
 	sessions     *sessionInferer
 	sessionGCAt  atomic.Int64
 	extSeen      sync.Map // external key id -> struct{}; dedupes lazy registration
@@ -180,6 +181,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/admin/text2sql/healthcheck", s.handleText2SQLHealthcheck)
 	mux.HandleFunc("/admin/text2sql/schema-impact", s.handleText2SQLSchemaImpact)
 	mux.HandleFunc("/admin/text2sql/replay", s.handleText2SQLReplay)
+	mux.HandleFunc("/admin/text2sql/kill-switch", s.handleText2SQLKillSwitch)
 	mux.HandleFunc("/admin/text2sql/golden", s.handleText2SQLGolden)
 	mux.HandleFunc("/admin/text2sql/golden/", s.handleText2SQLGolden)
 	mux.HandleFunc("/admin/export.csv", s.handleExportCSV)

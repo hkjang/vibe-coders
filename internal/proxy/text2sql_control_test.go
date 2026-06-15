@@ -68,6 +68,21 @@ func TestClassifyText2SQLFailure(t *testing.T) {
 	}
 }
 
+func TestWhereConditions(t *testing.T) {
+	// Extracts the WHERE clause up to the next major clause.
+	if got := whereConditions("SELECT * FROM t WHERE dept = 'sales' GROUP BY x ORDER BY y LIMIT 10"); got != "dept = 'sales'" {
+		t.Errorf("whereConditions = %q", got)
+	}
+	// No WHERE → empty.
+	if got := whereConditions("SELECT count(*) FROM t"); got != "" {
+		t.Errorf("expected empty, got %q", got)
+	}
+	// WHERE with no following clause runs to end.
+	if got := whereConditions("SELECT * FROM t WHERE a = 1 AND b = 2"); got != "a = 1 AND b = 2" {
+		t.Errorf("whereConditions = %q", got)
+	}
+}
+
 func TestValidText2SQLSensitivity(t *testing.T) {
 	for _, ok := range []string{"normal", "mask", "aggregate_only", "approval_required", "exclude"} {
 		if !validText2SQLSensitivity(ok) {

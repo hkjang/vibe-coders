@@ -282,6 +282,34 @@ func suggestText2SQLFixes(l store.Text2SQLQueryLog) []string {
 	return out
 }
 
+// handleText2SQLKillSwitch reads or toggles the runtime Text2SQL kill switch. When
+// engaged, vibe/text2sql-* requests return a safe "temporarily disabled" message
+// without generating or executing any SQL — for incident/cost/security response.
+// GET /admin/text2sql/kill-switch · POST {disabled: bool}
+func (s *Server) handleText2SQLKillSwitch(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		writeJSON(w, http.StatusOK, map[string]any{"disabled": s.t2sKilled.Load(), "config_enabled": s.cfg.Text2SQL.Enabled})
+	case http.MethodPost:
+		var p struct {
+			Disabled bool `json:"disabled"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+			writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "invalid_body")
+			return
+		}
+		s.t2sKilled.Store(p.Disabled)
+		s.auditAdmin(r, "text2sql.kill_switch", "", auditJSON(map[string]any{"disabled": p.Disabled}))
+		writeJSON(w, http.StatusOK, map[string]any{"disabled": p.Disabled})
+	default:
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+	}
+}
+
 // handleText2SQLSchemaImpact reports what depends on a schema (golden queries, cache,
 // glossary, permissions) — the blast radius of a schema version change.
 // GET /admin/text2sql/schema-impact?schema=NAME

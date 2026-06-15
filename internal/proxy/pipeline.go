@@ -344,6 +344,13 @@ func (rc *requestPipeline) stepUpstream() bool {
 	// Text2SQL pipeline (generate read-only SQL via a real upstream model, validate,
 	// optionally execute) and writes a normal Chat Completion response here.
 	if s.cfg.Text2SQL.Enabled && r.Method == http.MethodPost && text2sql.IsModel(meta.Request.Model) {
+		// Kill switch: an operator can disable Text2SQL at runtime (incident/cost/
+		// security) without a redeploy. The virtual model then returns a clear, safe
+		// message instead of generating or executing any SQL.
+		if s.t2sKilled.Load() {
+			s.writeChatCompletion(w, meta.Request.Model, "Text2SQL 기능이 현재 운영자에 의해 일시 중지되었습니다. 잠시 후 다시 시도해 주세요.")
+			return false
+		}
 		s.handleText2SQL(w, r, meta, body, rc.authCtx)
 		return false
 	}
