@@ -218,6 +218,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/me/dashboard", s.handleMyDashboard)
 	mux.HandleFunc("/me/recommendations", s.handleMyRecommendations)
 	mux.HandleFunc("/me/recommendations/feedback", s.handleMyRecommendationFeedback)
+	mux.HandleFunc("/me/keys", s.handleMyKeys)
+	mux.HandleFunc("/me/keys/", s.handleMyKeyByID)
 	mux.HandleFunc("/admin/recommendations/adoption", s.handleRecommendationAdoption)
 	mux.HandleFunc("/admin/policies/decisions", s.handlePolicyDecisions)
 	mux.HandleFunc("/admin/policies/simulate", s.handlePolicySimulate)

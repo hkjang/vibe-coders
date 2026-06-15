@@ -137,6 +137,9 @@ type AuthConfig struct {
 	ServiceKeyPrefix      string
 	BootstrapEmail        string
 	BootstrapPassword     string
+	// SelfServiceKeys lets an authenticated user manage their OWN API keys via /me/keys
+	// (list/create/rotate/revoke), capped to their own role's scopes. Default off.
+	SelfServiceKeys bool
 }
 
 type SecretConfig struct {
@@ -268,6 +271,7 @@ func Load() (Config, error) {
 			ServiceKeyPrefix:      getEnv("AUTH_SERVICE_KEY_PREFIX", "vc_sa_"),
 			BootstrapEmail:        strings.TrimSpace(os.Getenv("AUTH_ADMIN_BOOTSTRAP_EMAIL")),
 			BootstrapPassword:     os.Getenv("AUTH_ADMIN_BOOTSTRAP_PASSWORD"),
+			SelfServiceKeys:       boolEnv("SELF_SERVICE_KEYS_ENABLED", false),
 		},
 		Secret: SecretConfig{
 			GatewaySecret: getEnv("GATEWAY_SECRET", DefaultGatewaySecret),
