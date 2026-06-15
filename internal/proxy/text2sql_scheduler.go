@@ -14,7 +14,7 @@ import (
 // a short result summary to Mattermost when configured. It self-disables when no
 // execute DB is set — scheduled reports need a place to run.
 func (s *Server) text2sqlReportScheduler() {
-	if s.cfg.Text2SQL.ExecDSN == "" {
+	if s.t2sConf().ExecDSN == "" {
 		return
 	}
 	t := time.NewTicker(time.Minute)
@@ -38,7 +38,7 @@ func (s *Server) text2sqlReportScheduler() {
 // summary to Mattermost. It always records the run time so a failing report doesn't
 // retry every tick.
 func (s *Server) runScheduledReport(ctx context.Context, rep store.Text2SQLSavedReport) {
-	cfg := s.cfg.Text2SQL
+	cfg := s.t2sConf()
 	// Record the attempt up front to space out retries by the configured interval.
 	_ = s.db.MarkText2SQLReportRun(ctx, rep.ID, time.Now().UTC().Format(time.RFC3339Nano))
 

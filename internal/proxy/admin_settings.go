@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -99,6 +100,141 @@ func buildSettingRegistry() []settingDef {
 		{Key: "text2sql.daily_risk_warn", Category: "text2sql.safety", Type: stInt, validate: posInt, envValue: func(c config.Config) string { return strconv.Itoa(c.Text2SQL.DailyRiskWarn) }},
 		{Key: "text2sql.twin_driver", Category: "text2sql", Type: stString, Restart: true, envValue: func(c config.Config) string { return c.Text2SQL.TwinDriver }},
 		{Key: "text2sql.twin_dsn", Category: "text2sql", Type: stString, Secret: true, Restart: true, envValue: func(c config.Config) string { return c.Text2SQL.TwinDSN }},
+	}
+}
+
+// t2sConf returns the effective Text2SQL config (admin-settings overlay over env/default).
+func (s *Server) t2sConf() config.Text2SQLConfig {
+	if p := s.t2sRuntime.Load(); p != nil {
+		return *p
+	}
+	return s.cfg.Text2SQL
+}
+
+// chConf returns the effective ClickHouse config (admin-settings overlay over env/default).
+func (s *Server) chConf() config.ClickHouseConfig {
+	if p := s.chRuntime.Load(); p != nil {
+		return *p
+	}
+	return s.cfg.ClickHouse
+}
+
+// reloadRuntimeConfig rebuilds the Text2SQL/ClickHouse runtime snapshots from env defaults
+// overlaid with admin-managed settings. Called at startup and after every settings change.
+func (s *Server) reloadRuntimeConfig(ctx context.Context) {
+	stored := map[string]store.AdminSetting{}
+	if list, err := s.db.ListAdminSettings(ctx); err == nil {
+		for _, a := range list {
+			stored[a.Key] = a
+		}
+	}
+	t2s := s.cfg.Text2SQL
+	ch := s.cfg.ClickHouse
+	for _, d := range settingRegistry {
+		if _, ok := stored[d.Key]; !ok {
+			continue
+		}
+		val, source := s.effectiveSettingValue(stored, d)
+		if source != "admin" {
+			continue
+		}
+		applyRuntimeSetting(&t2s, &ch, d.Key, val)
+	}
+	s.t2sRuntime.Store(&t2s)
+	s.chRuntime.Store(&ch)
+}
+
+func applyRuntimeSetting(t2s *config.Text2SQLConfig, ch *config.ClickHouseConfig, key, val string) {
+	val = strings.TrimSpace(val)
+	atoi := func() int { n, _ := strconv.Atoi(val); return n }
+	atof := func() float64 { f, _ := strconv.ParseFloat(val, 64); return f }
+	atob := func() bool { b, _ := strconv.ParseBool(val); return b }
+	adur := func(d time.Duration) time.Duration {
+		if v, err := time.ParseDuration(val); err == nil {
+			return v
+		}
+		return d
+	}
+	switch key {
+	case "clickhouse.url":
+		ch.URL = val
+	case "clickhouse.database":
+		ch.Database = val
+	case "clickhouse.table":
+		ch.Table = val
+	case "clickhouse.user":
+		ch.User = val
+	case "clickhouse.password":
+		ch.Password = val
+	case "clickhouse.sink_interval":
+		ch.SinkInterval = adur(ch.SinkInterval)
+	case "clickhouse.sink_days":
+		ch.SinkDays = atoi()
+	case "clickhouse.text2sql_fact_table":
+		ch.Text2SQLFactTable = val
+	case "text2sql.enabled":
+		t2s.Enabled = atob()
+	case "text2sql.preview_model":
+		t2s.PreviewModel = val
+	case "text2sql.execute_model":
+		t2s.ExecuteModel = val
+	case "text2sql.accurate_model":
+		t2s.AccurateModel = val
+	case "text2sql.local_model":
+		t2s.LocalModel = val
+	case "text2sql.summary_model":
+		t2s.SummaryModel = val
+	case "text2sql.dialect":
+		t2s.Dialect = val
+	case "text2sql.default_limit":
+		t2s.DefaultLimit = atoi()
+	case "text2sql.max_limit":
+		t2s.MaxLimit = atoi()
+	case "text2sql.max_explain_cost":
+		t2s.MaxExplainCost = atof()
+	case "text2sql.mask_results":
+		t2s.MaskResults = atob()
+	case "text2sql.exec_driver":
+		t2s.ExecDriver = val
+	case "text2sql.exec_dsn":
+		t2s.ExecDSN = val
+	case "text2sql.cache_enabled":
+		t2s.CacheEnabled = atob()
+	case "text2sql.cache_ttl":
+		t2s.CacheTTL = adur(t2s.CacheTTL)
+	case "text2sql.clarify_enabled":
+		t2s.ClarifyEnabled = atob()
+	case "text2sql.require_date_filter":
+		t2s.RequireDateFilter = atob()
+	case "text2sql.statement_timeout":
+		t2s.StatementTimeout = adur(t2s.StatementTimeout)
+	case "text2sql.work_mem":
+		t2s.WorkMem = val
+	case "text2sql.shadow_models":
+		parts := strings.Split(val, ",")
+		out := parts[:0]
+		for _, p := range parts {
+			if p = strings.TrimSpace(p); p != "" {
+				out = append(out, p)
+			}
+		}
+		if len(out) == 0 {
+			t2s.ShadowModels = nil
+		} else {
+			t2s.ShadowModels = out
+		}
+	case "text2sql.shadow_sample_rate":
+		t2s.ShadowSampleRate = atof()
+	case "text2sql.replay_bundles":
+		t2s.ReplayBundles = atob()
+	case "text2sql.daily_risk_limit":
+		t2s.DailyRiskLimit = atoi()
+	case "text2sql.daily_risk_warn":
+		t2s.DailyRiskWarn = atoi()
+	case "text2sql.twin_driver":
+		t2s.TwinDriver = val
+	case "text2sql.twin_dsn":
+		t2s.TwinDSN = val
 	}
 }
 
@@ -255,6 +391,7 @@ func (s *Server) handleAdminSettingByKey(w http.ResponseWriter, r *http.Request)
 			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "setting_delete_failed")
 			return
 		}
+		s.reloadRuntimeConfig(r.Context())
 		s.auditAdmin(r, "setting.revert", key, "")
 		stored, _ := s.loadStoredSettings(r)
 		writeJSON(w, http.StatusOK, s.settingView(stored, d))
@@ -290,9 +427,13 @@ func (s *Server) applySettingWrite(r *http.Request, d settingDef, value, reason 
 	if err != nil {
 		return err
 	}
-	return s.db.UpsertAdminSetting(r.Context(), store.AdminSetting{
+	if err := s.db.UpsertAdminSetting(r.Context(), store.AdminSetting{
 		Key: d.Key, Category: d.Category, ValueJSON: string(encoded), ValueType: string(d.Type), IsSecret: d.Secret, Source: "admin",
-	}, adminID(r), reason)
+	}, adminID(r), reason); err != nil {
+		return err
+	}
+	s.reloadRuntimeConfig(r.Context())
+	return nil
 }
 
 // handleAdminSettingsValidate validates a proposed value without persisting it.

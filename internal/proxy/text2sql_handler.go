@@ -24,7 +24,7 @@ import (
 func (s *Server) handleText2SQL(w http.ResponseWriter, r *http.Request, meta store.LogRecord, body []byte, authCtx *store.AuthContext) {
 	start := time.Now()
 	s.metrics.IncText2SQLRequest()
-	cfg := s.cfg.Text2SQL
+	cfg := s.t2sConf()
 	models := text2sql.Models{
 		Preview: cfg.PreviewModel, Execute: cfg.ExecuteModel, Accurate: cfg.AccurateModel,
 		Local: cfg.LocalModel, Summary: cfg.SummaryModel,
@@ -610,7 +610,7 @@ func chooseUpstreamByQuality(base, accurate string, m store.Text2SQLModelMetric)
 // text2sqlAutoModelByComplexity maps a complexity score to an upstream model for
 // the auto profile (reusing the already-computed request complexity).
 func (s *Server) text2sqlAutoModelByComplexity(complexity int) string {
-	cfg := s.cfg.Text2SQL
+	cfg := s.t2sConf()
 	switch {
 	case complexity >= 67:
 		return firstNonEmpty(cfg.AccurateModel, cfg.ExecuteModel, cfg.PreviewModel)
@@ -825,23 +825,23 @@ func (s *Server) execText2SQL(ctx context.Context, query string) ([]string, [][]
 	if err != nil {
 		return nil, nil, 0, explainRisk{}, err
 	}
-	rowLimit := s.cfg.Text2SQL.MaxLimit
+	rowLimit := s.t2sConf().MaxLimit
 	if rowLimit <= 0 {
 		rowLimit = 1000
 	}
-	driver := strings.ToLower(strings.TrimSpace(s.cfg.Text2SQL.ExecDriver))
+	driver := strings.ToLower(strings.TrimSpace(s.t2sConf().ExecDriver))
 	var risk explainRisk
 	// EXPLAIN risk guard (PostgreSQL): score the plan (cost + seq-scan/nested-loop on
 	// large row estimates) and reject high-risk plans before running the query.
-	if s.cfg.Text2SQL.MaxExplainCost > 0 && (driver == "postgres" || driver == "postgresql" || driver == "pgx") {
+	if s.t2sConf().MaxExplainCost > 0 && (driver == "postgres" || driver == "postgresql" || driver == "pgx") {
 		if plan, err := explainPlanFor(ctx, db, query); err == nil {
-			risk = scoreExplainPlan(plan, s.cfg.Text2SQL.MaxExplainCost)
+			risk = scoreExplainPlan(plan, s.t2sConf().MaxExplainCost)
 			if risk.Score >= 50 {
 				return nil, nil, 0, risk, fmt.Errorf("EXPLAIN risk %d/100: %s", risk.Score, strings.Join(risk.Reasons, "; "))
 			}
 		}
 	}
-	cols, rows, count, err := executeReadOnlyQuery(ctx, db, driver, query, rowLimit, s.cfg.Text2SQL.StatementTimeout, s.cfg.Text2SQL.WorkMem)
+	cols, rows, count, err := executeReadOnlyQuery(ctx, db, driver, query, rowLimit, s.t2sConf().StatementTimeout, s.t2sConf().WorkMem)
 	return cols, rows, count, risk, err
 }
 
@@ -900,7 +900,7 @@ func (s *Server) handleText2SQLHealthcheck(w http.ResponseWriter, r *http.Reques
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
 	}
-	cfg := s.cfg.Text2SQL
+	cfg := s.t2sConf()
 	out := map[string]any{
 		"configured":        cfg.ExecDSN != "",
 		"driver":            cfg.ExecDriver,
@@ -988,41 +988,41 @@ func (s *Server) handleText2SQLHealthcheck(w http.ResponseWriter, r *http.Reques
 // result-equivalence): the SQL Digital Twin (masked/sample) when configured, else the
 // production execute DB. Also returns the driver name for the chosen DB.
 func (s *Server) text2sqlValidationDB() (*sql.DB, string, error) {
-	if strings.TrimSpace(s.cfg.Text2SQL.TwinDSN) != "" {
+	if strings.TrimSpace(s.t2sConf().TwinDSN) != "" {
 		if db := s.t2sTwin.Load(); db != nil {
-			return db, s.cfg.Text2SQL.TwinDriver, nil
+			return db, s.t2sConf().TwinDriver, nil
 		}
-		driver := strings.ToLower(strings.TrimSpace(s.cfg.Text2SQL.TwinDriver))
+		driver := strings.ToLower(strings.TrimSpace(s.t2sConf().TwinDriver))
 		if driver == "postgres" || driver == "postgresql" {
 			driver = "pgx"
 		}
 		if driver == "" {
 			driver = "sqlite"
 		}
-		db, err := sql.Open(driver, s.cfg.Text2SQL.TwinDSN)
+		db, err := sql.Open(driver, s.t2sConf().TwinDSN)
 		if err != nil {
 			return nil, "", err
 		}
 		db.SetMaxOpenConns(4)
 		s.t2sTwin.Store(db)
-		return db, s.cfg.Text2SQL.TwinDriver, nil
+		return db, s.t2sConf().TwinDriver, nil
 	}
 	db, err := s.text2sqlExecDB()
-	return db, s.cfg.Text2SQL.ExecDriver, err
+	return db, s.t2sConf().ExecDriver, err
 }
 
 func (s *Server) text2sqlExecDB() (*sql.DB, error) {
 	if db := s.t2sExec.Load(); db != nil {
 		return db, nil
 	}
-	driver := strings.ToLower(strings.TrimSpace(s.cfg.Text2SQL.ExecDriver))
+	driver := strings.ToLower(strings.TrimSpace(s.t2sConf().ExecDriver))
 	if driver == "postgres" || driver == "postgresql" {
 		driver = "pgx"
 	}
 	if driver == "" {
 		driver = "sqlite"
 	}
-	db, err := sql.Open(driver, s.cfg.Text2SQL.ExecDSN)
+	db, err := sql.Open(driver, s.t2sConf().ExecDSN)
 	if err != nil {
 		return nil, err
 	}

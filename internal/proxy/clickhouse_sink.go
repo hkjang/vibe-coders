@@ -146,7 +146,7 @@ func boolToInt(b bool) int {
 // syncText2SQLFacts ships Text2SQL facts created since the stored watermark; first run
 // backfills the last 7 days. Advances the "text2sql_fact" watermark on success.
 func (s *Server) syncText2SQLFacts(ctx context.Context) (int, error) {
-	cfg := s.cfg.ClickHouse
+	cfg := s.chConf()
 	if cfg.URL == "" || cfg.Text2SQLFactTable == "" {
 		return 0, nil
 	}
@@ -189,7 +189,7 @@ func (s *Server) syncClickHouseDimension(ctx context.Context, dim, sinceDay stri
 		_ = s.db.RecordClickHouseSinkFailure(ctx, dim, sinceDay, "rollup read: "+err.Error())
 		return 0, err
 	}
-	n, err := clickhouseSink(ctx, s.client, s.cfg.ClickHouse, rows)
+	n, err := clickhouseSink(ctx, s.client, s.chConf(), rows)
 	if err != nil {
 		_ = s.db.RecordClickHouseSinkFailure(ctx, dim, sinceDay, err.Error())
 		return 0, err
@@ -210,7 +210,7 @@ func (s *Server) handleClickHouseSink(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
 		return
 	}
-	if s.cfg.ClickHouse.URL == "" {
+	if s.chConf().URL == "" {
 		writeOpenAIError(w, http.StatusBadRequest, "ClickHouse is not configured (CLICKHOUSE_URL)", "invalid_request_error", "no_clickhouse")
 		return
 	}
@@ -258,7 +258,7 @@ func (s *Server) handleClickHouseSinkStatus(w http.ResponseWriter, r *http.Reque
 		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "sink_retry_failed")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"state": state, "retries": retries, "configured": s.cfg.ClickHouse.URL != ""})
+	writeJSON(w, http.StatusOK, map[string]any{"state": state, "retries": retries, "configured": s.chConf().URL != ""})
 }
 
 // handleClickHouseSinkRetry reprocesses the pending retry queue (or all dimensions
@@ -273,14 +273,14 @@ func (s *Server) handleClickHouseSinkRetry(w http.ResponseWriter, r *http.Reques
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
 		return
 	}
-	if s.cfg.ClickHouse.URL == "" {
+	if s.chConf().URL == "" {
 		writeOpenAIError(w, http.StatusBadRequest, "ClickHouse is not configured (CLICKHOUSE_URL)", "invalid_request_error", "no_clickhouse")
 		return
 	}
 	type job struct{ dim, since string }
 	var jobs []job
 	if r.URL.Query().Get("all") == "1" {
-		days := s.cfg.ClickHouse.SinkDays
+		days := s.chConf().SinkDays
 		if days <= 0 {
 			days = 3
 		}
@@ -361,7 +361,7 @@ func (s *Server) handleClickHouseConsistency(w http.ResponseWriter, r *http.Requ
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
 	}
-	if s.cfg.ClickHouse.URL == "" {
+	if s.chConf().URL == "" {
 		writeOpenAIError(w, http.StatusBadRequest, "ClickHouse is not configured", "invalid_request_error", "no_clickhouse")
 		return
 	}
@@ -393,7 +393,7 @@ func (s *Server) handleClickHouseConsistency(w http.ResponseWriter, r *http.Requ
 			lTok += row.Tokens
 			lCost += row.CostKRW
 		}
-		chReq, chTok, chCost, err := clickhouseAggregate(r.Context(), s.client, s.cfg.ClickHouse, sinceDay, dim)
+		chReq, chTok, chCost, err := clickhouseAggregate(r.Context(), s.client, s.chConf(), sinceDay, dim)
 		if err != nil {
 			writeOpenAIError(w, http.StatusBadGateway, "clickhouse query failed: "+err.Error(), "server_error", "clickhouse_failed")
 			return
@@ -429,7 +429,7 @@ func (s *Server) handleClickHouseText2SQLFact(w http.ResponseWriter, r *http.Req
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
 		return
 	}
-	if s.cfg.ClickHouse.URL == "" || s.cfg.ClickHouse.Text2SQLFactTable == "" {
+	if s.chConf().URL == "" || s.chConf().Text2SQLFactTable == "" {
 		writeOpenAIError(w, http.StatusBadRequest, "fact sink not configured (CLICKHOUSE_URL + CLICKHOUSE_TEXT2SQL_FACT_TABLE)", "invalid_request_error", "no_fact_table")
 		return
 	}
@@ -439,7 +439,7 @@ func (s *Server) handleClickHouseText2SQLFact(w http.ResponseWriter, r *http.Req
 		return
 	}
 	s.auditAdmin(r, "dw.text2sql_fact.sink", "", auditJSON(map[string]any{"rows": n}))
-	writeJSON(w, http.StatusOK, map[string]any{"sent_rows": n, "table": s.cfg.ClickHouse.Text2SQLFactTable})
+	writeJSON(w, http.StatusOK, map[string]any{"sent_rows": n, "table": s.chConf().Text2SQLFactTable})
 }
 
 // handleClickHouseTableInfo inspects the target table's engine and sort key via
@@ -451,7 +451,7 @@ func (s *Server) handleClickHouseTableInfo(w http.ResponseWriter, r *http.Reques
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
 	}
-	cfg := s.cfg.ClickHouse
+	cfg := s.chConf()
 	if cfg.URL == "" {
 		writeOpenAIError(w, http.StatusBadRequest, "ClickHouse is not configured", "invalid_request_error", "no_clickhouse")
 		return
@@ -522,8 +522,8 @@ func (s *Server) handleClickHouseTableInfo(w http.ResponseWriter, r *http.Reques
 // clickhouseSinkLoop periodically ships recent rollups to ClickHouse. Started only
 // when a URL and a positive interval are configured.
 func (s *Server) clickhouseSinkLoop() {
-	interval := s.cfg.ClickHouse.SinkInterval
-	days := s.cfg.ClickHouse.SinkDays
+	interval := s.chConf().SinkInterval
+	days := s.chConf().SinkDays
 	if days <= 0 {
 		days = 3
 	}

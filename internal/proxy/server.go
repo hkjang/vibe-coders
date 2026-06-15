@@ -50,6 +50,8 @@ type Server struct {
 	t2sTwin      atomic.Pointer[sql.DB]          // lazily-opened SQL Digital Twin DB (masked/sample) for safe validation
 	t2sKilled    atomic.Bool                     // runtime kill switch: when set, Text2SQL is disabled regardless of config
 	t2sFeatures  atomic.Pointer[map[string]bool] // runtime Text2SQL feature toggles (admin-managed)
+	t2sRuntime   atomic.Pointer[config.Text2SQLConfig]    // admin-settings overlay over cfg.Text2SQL (runtime snapshot)
+	chRuntime    atomic.Pointer[config.ClickHouseConfig]  // admin-settings overlay over cfg.ClickHouse (runtime snapshot)
 	sessions     *sessionInferer
 	sessionGCAt  atomic.Int64
 	extSeen      sync.Map // external key id -> struct{}; dedupes lazy registration
@@ -90,8 +92,12 @@ func NewServer(cfg config.Config, db *store.SQLStore, logger *store.AsyncLogger,
 		sessions:  newSessionInferer(cfg.Session.IdleTimeout),
 	}
 
+	// Build the runtime config snapshot (env defaults overlaid with admin settings)
+	// before starting workers, so workers and handlers see admin-managed values.
+	server.reloadRuntimeConfig(context.Background())
+
 	// Background ClickHouse auto-sink (only when explicitly configured).
-	if cfg.ClickHouse.URL != "" && cfg.ClickHouse.SinkInterval > 0 {
+	if server.chConf().URL != "" && server.chConf().SinkInterval > 0 {
 		go server.clickhouseSinkLoop()
 	}
 

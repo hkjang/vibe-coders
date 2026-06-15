@@ -77,12 +77,12 @@ func (s *Server) handleText2SQLAdmin(w http.ResponseWriter, r *http.Request) {
 		"db_profiles":   dbProfiles,
 		"permissions":   permissions,
 		"failures":      failures,
-		"enabled":       s.cfg.Text2SQL.Enabled,
+		"enabled":       s.t2sConf().Enabled,
 		"profiles": []map[string]string{
-			{"model": "vibe/text2sql-preview", "mode": "preview", "upstream": s.cfg.Text2SQL.PreviewModel},
-			{"model": "vibe/text2sql-execute", "mode": "execute", "upstream": s.cfg.Text2SQL.ExecuteModel},
-			{"model": "vibe/text2sql-accurate", "mode": "preview", "upstream": s.cfg.Text2SQL.AccurateModel},
-			{"model": "vibe/text2sql-local", "mode": "preview", "upstream": s.cfg.Text2SQL.LocalModel},
+			{"model": "vibe/text2sql-preview", "mode": "preview", "upstream": s.t2sConf().PreviewModel},
+			{"model": "vibe/text2sql-execute", "mode": "execute", "upstream": s.t2sConf().ExecuteModel},
+			{"model": "vibe/text2sql-accurate", "mode": "preview", "upstream": s.t2sConf().AccurateModel},
+			{"model": "vibe/text2sql-local", "mode": "preview", "upstream": s.t2sConf().LocalModel},
 			{"model": "vibe/text2sql-auto", "mode": "auto", "upstream": "(complexity 기반)"},
 		},
 		"stats": stats,
@@ -601,7 +601,7 @@ func (s *Server) handleText2SQLKillSwitch(w http.ResponseWriter, r *http.Request
 	}
 	switch r.Method {
 	case http.MethodGet:
-		writeJSON(w, http.StatusOK, map[string]any{"disabled": s.t2sKilled.Load(), "config_enabled": s.cfg.Text2SQL.Enabled})
+		writeJSON(w, http.StatusOK, map[string]any{"disabled": s.t2sKilled.Load(), "config_enabled": s.t2sConf().Enabled})
 	case http.MethodPost:
 		var p struct {
 			Disabled bool `json:"disabled"`
@@ -661,7 +661,7 @@ func (s *Server) handleText2SQLReplay(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !found {
-		writeJSON(w, http.StatusNotFound, map[string]any{"found": false, "enabled": s.cfg.Text2SQL.ReplayBundles, "detail": "no replay bundle for this id (enable TEXT2SQL_REPLAY_BUNDLES to capture)"})
+		writeJSON(w, http.StatusNotFound, map[string]any{"found": false, "enabled": s.t2sConf().ReplayBundles, "detail": "no replay bundle for this id (enable TEXT2SQL_REPLAY_BUNDLES to capture)"})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"found": true, "bundle": bundle})
@@ -795,7 +795,7 @@ func (s *Server) handleText2SQLCollect(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
 		return
 	}
-	if s.cfg.Text2SQL.ExecDSN == "" {
+	if s.t2sConf().ExecDSN == "" {
 		writeOpenAIError(w, http.StatusBadRequest, "execute DB is not configured (TEXT2SQL_EXEC_DSN)", "invalid_request_error", "no_exec_db")
 		return
 	}
@@ -813,7 +813,7 @@ func (s *Server) handleText2SQLCollect(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusBadGateway, "exec DB open failed: "+err.Error(), "server_error", "exec_db_failed")
 		return
 	}
-	tables, cols, err := s.db.CollectInformationSchema(r.Context(), db, s.cfg.Text2SQL.ExecDriver, strings.TrimSpace(p.DBSchema), strings.TrimSpace(p.SchemaName))
+	tables, cols, err := s.db.CollectInformationSchema(r.Context(), db, s.t2sConf().ExecDriver, strings.TrimSpace(p.DBSchema), strings.TrimSpace(p.SchemaName))
 	if err != nil {
 		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "collect_failed")
 		return
@@ -970,12 +970,12 @@ func (s *Server) handleText2SQLGoldenRun(w http.ResponseWriter, r *http.Request)
 		Model string `json:"model"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&p)
-	model := firstNonEmpty(strings.TrimSpace(p.Model), s.cfg.Text2SQL.PreviewModel)
+	model := firstNonEmpty(strings.TrimSpace(p.Model), s.t2sConf().PreviewModel)
 	// Result-equivalence: execute both expected and generated SQL read-only and compare
 	// the row sets, catching semantically-wrong SQL that token matching passes. When an
 	// execute DB is configured this is the DEFAULT (the authoritative CI signal); pass
 	// ?execute=0 to force token-only matching. With no execute DB it is unavailable.
-	wantExec := s.cfg.Text2SQL.ExecDSN != "" && r.URL.Query().Get("execute") != "0"
+	wantExec := s.t2sConf().ExecDSN != "" && r.URL.Query().Get("execute") != "0"
 
 	goldens, err := s.db.ListText2SQLGoldenQueries(r.Context(), true)
 	if err != nil {
@@ -985,16 +985,16 @@ func (s *Server) handleText2SQLGoldenRun(w http.ResponseWriter, r *http.Request)
 	results := []map[string]any{}
 	passed, resultChecked, resultMatched := 0, 0, 0
 	for _, g := range goldens {
-		schema := s.cfg.Text2SQL.Schema
+		schema := s.t2sConf().Schema
 		if g.SchemaName != "" {
 			if sc, found, _ := s.db.ResolveText2SQLSchema(r.Context(), g.SchemaName, ""); found {
 				schema = sc.SchemaText
 			}
 		}
-		msgs := text2sql.MessagesJSON(text2sql.BuildGenerationMessages(s.cfg.Text2SQL.Dialect, schema, g.Question, s.cfg.Text2SQL.DefaultLimit))
+		msgs := text2sql.MessagesJSON(text2sql.BuildGenerationMessages(s.t2sConf().Dialect, schema, g.Question, s.t2sConf().DefaultLimit))
 		gen := s.runGovernanceChat(r.Context(), r, model, msgs)
 		genSQL := text2sql.ExtractSQL(gen.Response)
-		validation := text2sql.ValidateSQL(genSQL, text2sql.ValidateOptions{DefaultLimit: s.cfg.Text2SQL.DefaultLimit, MaxLimit: s.cfg.Text2SQL.MaxLimit})
+		validation := text2sql.ValidateSQL(genSQL, text2sql.ValidateOptions{DefaultLimit: s.t2sConf().DefaultLimit, MaxLimit: s.t2sConf().MaxLimit})
 		tokenOK := validation.OK && goldenSQLMatch(g.ExpectedSQL, genSQL)
 		row := map[string]any{
 			"id": g.ID, "name": g.Name, "valid": validation.OK,
@@ -1044,19 +1044,19 @@ func (s *Server) goldenResultEquivalent(ctx context.Context, generatedSQL, expec
 	if err != nil {
 		return false, "validation db: " + err.Error()
 	}
-	rowCap := s.cfg.Text2SQL.MaxLimit
+	rowCap := s.t2sConf().MaxLimit
 	if rowCap <= 0 {
 		rowCap = 1000
 	}
-	expValid := text2sql.ValidateSQL(expectedSQL, text2sql.ValidateOptions{DefaultLimit: s.cfg.Text2SQL.DefaultLimit, MaxLimit: s.cfg.Text2SQL.MaxLimit})
+	expValid := text2sql.ValidateSQL(expectedSQL, text2sql.ValidateOptions{DefaultLimit: s.t2sConf().DefaultLimit, MaxLimit: s.t2sConf().MaxLimit})
 	if !expValid.OK {
 		return false, "expected SQL invalid: " + expValid.Reason
 	}
-	gCols, gRows, _, gErr := executeReadOnlyQuery(ctx, db, driver, generatedSQL, rowCap, s.cfg.Text2SQL.StatementTimeout, s.cfg.Text2SQL.WorkMem)
+	gCols, gRows, _, gErr := executeReadOnlyQuery(ctx, db, driver, generatedSQL, rowCap, s.t2sConf().StatementTimeout, s.t2sConf().WorkMem)
 	if gErr != nil {
 		return false, "generated exec: " + gErr.Error()
 	}
-	eCols, eRows, _, eErr := executeReadOnlyQuery(ctx, db, driver, expValid.SQL, rowCap, s.cfg.Text2SQL.StatementTimeout, s.cfg.Text2SQL.WorkMem)
+	eCols, eRows, _, eErr := executeReadOnlyQuery(ctx, db, driver, expValid.SQL, rowCap, s.t2sConf().StatementTimeout, s.t2sConf().WorkMem)
 	if eErr != nil {
 		return false, "expected exec: " + eErr.Error()
 	}
