@@ -261,6 +261,10 @@ func TestText2SQLMiners(t *testing.T) {
 	if len(reports) != 1 || reports[0].Count != 3 {
 		t.Fatalf("expected one report candidate with count 3, got %+v", reports)
 	}
+	// The sample SQL groups by dept → dashboard product recommendation.
+	if reports[0].RecommendedProduct != "dashboard" {
+		t.Errorf("aggregating query should recommend dashboard, got %q", reports[0].RecommendedProduct)
+	}
 
 	// "상담" / "부서별" appear in 3 distinct logs → glossary candidates (above min 3).
 	cands, err := db.Text2SQLGlossaryCandidates(ctx, now.Add(-time.Hour), 3, 50)

@@ -4936,8 +4936,9 @@ const adminHTML = `<!doctype html>
       const reportCand = (miners.report_candidates || []).slice(0, 15);
       const glossCand = (miners.glossary_candidates || []).slice(0, 20);
       const reportCandTable = reportCand.length
-        ? '<table><thead><tr><th>반복 질문</th><th data-sort="num">횟수</th><th></th></tr></thead><tbody>' +
+        ? '<table><thead><tr><th>반복 질문</th><th data-sort="num">횟수</th><th>추천 산출물</th><th></th></tr></thead><tbody>' +
           reportCand.map(c => '<tr><td>' + escapeHTML((c.question || '').slice(0, 70)) + '</td><td data-num="' + c.count + '">' + c.count + '</td>' +
+          '<td><span class="pill">' + escapeHTML(c.recommended_product || 'report') + '</span></td>' +
           '<td><button type="button" onclick="promoteT2SReport(' + escapeAttr(JSON.stringify(c.question)) + ',' + escapeAttr(JSON.stringify(c.sample_sql || '')) + ')">리포트로 승격</button></td></tr>').join('') + '</tbody></table>'
         : '<div class="empty">반복 질문 후보 없음 (최근 30일, 3회 이상).</div>';
       const glossCandHTML = glossCand.length

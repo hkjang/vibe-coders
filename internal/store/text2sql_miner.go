@@ -15,6 +15,27 @@ type Text2SQLReportCandidate struct {
 	Count     int64  `json:"count"`
 	LastSeen  string `json:"last_seen"`
 	SampleSQL string `json:"sample_sql"`
+	// RecommendedProduct classifies the best data-product shape for this recurring
+	// question from its SQL: "dashboard" (aggregation), "data_mart" (multi-table join),
+	// or "api" (point/list lookup).
+	RecommendedProduct string `json:"recommended_product"`
+}
+
+// recommendDataProduct infers a data-product type from a SQL query's shape.
+func recommendDataProduct(sql string) string {
+	lower := strings.ToLower(sql)
+	hasAgg := strings.Contains(lower, "group by") ||
+		strings.Contains(lower, "count(") || strings.Contains(lower, "sum(") ||
+		strings.Contains(lower, "avg(") || strings.Contains(lower, "min(") || strings.Contains(lower, "max(")
+	joins := strings.Count(lower, " join ")
+	switch {
+	case hasAgg:
+		return "dashboard"
+	case joins >= 2:
+		return "data_mart"
+	default:
+		return "api"
+	}
 }
 
 // Text2SQLGlossaryCandidate is a token that appears often in questions but is not yet a
@@ -113,7 +134,10 @@ func (s *SQLStore) Text2SQLReportCandidates(ctx context.Context, since time.Time
 	out := []Text2SQLReportCandidate{}
 	for _, a := range byNorm {
 		if a.count >= int64(minCount) {
-			out = append(out, Text2SQLReportCandidate{Question: a.display, Count: a.count, LastSeen: a.lastSeen, SampleSQL: a.sampleSQL})
+			out = append(out, Text2SQLReportCandidate{
+				Question: a.display, Count: a.count, LastSeen: a.lastSeen, SampleSQL: a.sampleSQL,
+				RecommendedProduct: recommendDataProduct(a.sampleSQL),
+			})
 		}
 	}
 	sort.Slice(out, func(i, j int) bool {
