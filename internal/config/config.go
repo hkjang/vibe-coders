@@ -72,6 +72,13 @@ type CacheConfig struct {
 	EmbeddingMaxBytes int
 	ChatEnabled       bool
 	ChatTTL           time.Duration
+	// Semantic (embedding-based near-duplicate) chat cache. Opt-in: requires both
+	// ChatSemanticEnabled and an embedding model. On an exact-cache miss, the prompt is
+	// embedded and matched against recent entries by cosine similarity.
+	ChatSemanticEnabled       bool
+	ChatSemanticModel         string  // embedding model used to vectorize prompts
+	ChatSemanticThreshold     float64 // cosine similarity required for a hit (0..1)
+	ChatSemanticMaxCandidates int     // max recent entries scanned per model
 }
 
 type AuthConfig struct {
@@ -195,11 +202,15 @@ func Load() (Config, error) {
 			Interval:           durationEnv("RETENTION_INTERVAL", time.Hour),
 		},
 		Cache: CacheConfig{
-			EmbeddingEnabled:  boolEnv("CACHE_EMBEDDING_ENABLED", true),
-			EmbeddingTTL:      durationEnv("CACHE_EMBEDDING_TTL", 24*time.Hour),
-			EmbeddingMaxBytes: intEnv("CACHE_EMBEDDING_MAX_BYTES", 1<<20), // 1 MB per entry
-			ChatEnabled:       boolEnv("CACHE_CHAT_ENABLED", false),       // opt-in: chat responses are non-deterministic
-			ChatTTL:           durationEnv("CACHE_CHAT_TTL", time.Hour),
+			EmbeddingEnabled:          boolEnv("CACHE_EMBEDDING_ENABLED", true),
+			EmbeddingTTL:              durationEnv("CACHE_EMBEDDING_TTL", 24*time.Hour),
+			EmbeddingMaxBytes:         intEnv("CACHE_EMBEDDING_MAX_BYTES", 1<<20), // 1 MB per entry
+			ChatEnabled:               boolEnv("CACHE_CHAT_ENABLED", false),       // opt-in: chat responses are non-deterministic
+			ChatTTL:                   durationEnv("CACHE_CHAT_TTL", time.Hour),
+			ChatSemanticEnabled:       boolEnv("CACHE_CHAT_SEMANTIC_ENABLED", false),
+			ChatSemanticModel:         os.Getenv("CACHE_CHAT_SEMANTIC_MODEL"),
+			ChatSemanticThreshold:     floatEnv("CACHE_CHAT_SEMANTIC_THRESHOLD", 0.95),
+			ChatSemanticMaxCandidates: intEnv("CACHE_CHAT_SEMANTIC_MAX_CANDIDATES", 200),
 		},
 		Auth: AuthConfig{
 			ProxyAPIKeys:          parseProxyKeys(os.Getenv("PROXY_API_KEYS")),

@@ -59,8 +59,9 @@ type requestPipeline struct {
 
 	estimatedCostKRW float64
 
-	chatCacheKey  string
-	chatCacheable bool
+	chatCacheKey    string
+	chatCacheable   bool
+	chatSemanticVec []float64
 }
 
 // pipelineSteps returns the ordered request pipeline. The order is the contract:
@@ -283,6 +284,13 @@ func (rc *requestPipeline) stepCache() bool {
 		if served := s.serveChatFromCache(r.Context(), w, rc.chatCacheKey, rc.meta, rc.traceID); served {
 			return false
 		}
+		// Exact miss → try the embedding-based semantic cache (opt-in). The query vector
+		// is kept on rc so a fresh upstream response is stored under it.
+		if vec, served := s.serveChatSemantic(r.Context(), w, r, rc.body, rc.meta, rc.traceID); served {
+			return false
+		} else {
+			rc.chatSemanticVec = vec
+		}
 	}
 	return true
 }
@@ -486,6 +494,7 @@ func (rc *requestPipeline) stepUpstream() bool {
 	}
 	if captureForChatCache && analysis.Text != "" {
 		s.maybeStoreChatCache(r.Context(), rc.chatCacheKey, resp.StatusCode, resp.Header.Get("Content-Type"), []byte(analysis.Text))
+		s.maybeStoreChatSemantic(r.Context(), rc.body, rc.chatSemanticVec, resp.StatusCode, resp.Header.Get("Content-Type"), []byte(analysis.Text))
 	}
 	if captureForCache || captureForChatCache {
 		s.metrics.IncCacheMiss()

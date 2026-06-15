@@ -100,6 +100,11 @@ func (w *RetentionWorker) runOnceWith(ctx context.Context) int64 {
 		}
 		totalDeleted += n
 	}
+	if n, err := w.store.PurgeChatSemanticExpired(ctx); err != nil {
+		slog.Warn("retention purge chat_semantic_cache failed", "error", err)
+	} else {
+		totalDeleted += n
+	}
 	w.deleted.Add(totalDeleted)
 	w.lastRun.Store(time.Now().UTC().Format(time.RFC3339))
 	return totalDeleted
