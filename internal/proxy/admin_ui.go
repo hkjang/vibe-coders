@@ -4932,6 +4932,42 @@ const adminHTML = `<!doctype html>
       const riskTable = riskQ.length ?
         '<table><thead><tr><th>시각</th><th>팀</th><th>스키마(버전)</th><th>질문</th><th>검증</th><th>실패분류</th><th data-sort="num">EXPLAIN 위험</th><th>개선 제안</th></tr></thead><tbody>' + riskRows + '</tbody></table>'
         : '<div class="empty">최근 7일 위험 요청 없음 (거부 · 고위험 EXPLAIN · 실패 분류 대상).</div>';
+      const miners = await api('/admin/text2sql/miners?window=30d&min_count=3').catch(() => ({ report_candidates: [], glossary_candidates: [] }));
+      const reportCand = (miners.report_candidates || []).slice(0, 15);
+      const glossCand = (miners.glossary_candidates || []).slice(0, 20);
+      const reportCandTable = reportCand.length
+        ? '<table><thead><tr><th>반복 질문</th><th data-sort="num">횟수</th><th></th></tr></thead><tbody>' +
+          reportCand.map(c => '<tr><td>' + escapeHTML((c.question || '').slice(0, 70)) + '</td><td data-num="' + c.count + '">' + c.count + '</td>' +
+          '<td><button type="button" onclick="promoteT2SReport(' + escapeAttr(JSON.stringify(c.question)) + ',' + escapeAttr(JSON.stringify(c.sample_sql || '')) + ')">리포트로 승격</button></td></tr>').join('') + '</tbody></table>'
+        : '<div class="empty">반복 질문 후보 없음 (최근 30일, 3회 이상).</div>';
+      const glossCandHTML = glossCand.length
+        ? '<div style="padding:4px 14px 12px">' + glossCand.map(g => '<span class="pill">' + escapeHTML(g.term) + ' ×' + g.count + '</span> ').join('') + '</div>'
+        : '<div class="empty">용어 후보 없음.</div>';
+      const anomalies = await api('/admin/text2sql/anomalies?window=7d').catch(() => ({ usage_smells: [], risk_exposure: [], intent_drifts: [] }));
+      const smells = anomalies.usage_smells || [];
+      const smellTable = smells.length
+        ? '<table><thead><tr><th>주체(api_key)</th><th>유형</th><th data-sort="num">횟수</th><th>예시</th></tr></thead><tbody>' +
+          smells.map(s => '<tr><td><code>' + escapeHTML(s.subject) + '</code></td><td><span class="status warn">' + escapeHTML(s.category) + '</span></td><td data-num="' + s.count + '">' + s.count + '</td><td>' + escapeHTML((s.sample || '').slice(0, 50)) + '</td></tr>').join('') + '</tbody></table>'
+        : '<div class="empty">이상 사용 신호 없음 (탐지 전용, 차단 안 함).</div>';
+      const exposure = anomalies.risk_exposure || [];
+      const exposureTable = exposure.length
+        ? '<table><thead><tr><th>팀</th><th data-sort="num">총</th><th data-sort="num">거부</th><th data-sort="num">고위험</th><th data-sort="num">탐침</th><th data-sort="num">위험점수</th></tr></thead><tbody>' +
+          exposure.map(e => '<tr><td>' + escapeHTML(e.team) + '</td><td data-num="' + e.total + '">' + e.total + '</td><td data-num="' + e.rejected + '">' + e.rejected + '</td><td data-num="' + e.high_risk + '">' + e.high_risk + '</td><td data-num="' + e.probes + '">' + e.probes + '</td><td data-num="' + e.risk_score + '"><strong>' + e.risk_score + '</strong></td></tr>').join('') + '</tbody></table>'
+        : '';
+      const drifts = anomalies.intent_drifts || [];
+      const driftHTML = drifts.length
+        ? '<div style="padding:4px 14px 12px" class="muted">의도 이동 감지: ' + drifts.map(d => escapeHTML(d.subject) + '(' + escapeHTML(d.reason) + ')').join(', ') + '</div>'
+        : '';
+      const repList = (await api('/admin/text2sql/reports').catch(() => ({ reports: [] }))).reports || [];
+      const repRows = repList.map(r =>
+        '<tr><td><strong>' + escapeHTML(r.name) + '</strong><div class="muted">' + escapeHTML((r.question || '').slice(0, 50)) + '</div></td>' +
+        '<td>' + (r.schedule_enabled && r.schedule_interval ? '<span class="status">' + escapeHTML(r.schedule_interval) + '</span>' : '<span class="muted">수동</span>') + (r.deliver_mattermost ? ' <span class="pill">MM</span>' : '') + '</td>' +
+        '<td>' + (r.last_run_at ? ago(r.last_run_at) : '-') + '</td>' +
+        '<td><button class="danger" type="button" onclick="deleteT2SReport(\'' + escapeAttr(r.id) + '\')">삭제</button></td></tr>'
+      ).join('');
+      const repTable = repList.length
+        ? '<table><thead><tr><th>리포트</th><th>스케줄</th><th>최근 실행</th><th></th></tr></thead><tbody>' + repRows + '</tbody></table>'
+        : '<div class="empty">저장 리포트 없음. 반복 질문을 "리포트로 승격"하면 여기에 표시되고 스케줄 실행할 수 있습니다.</div>';
       document.getElementById('view').innerHTML =
         '<section><h2>Text2SQL</h2><div style="padding:0 14px 8px" class="muted">자연어 질문을 읽기 전용 SQL로 변환합니다. 사용자는 <code>vibe/text2sql-*</code> 가상 모델을 호출하고, 게이트웨이가 내부적으로 실제 업스트림 모델을 선택해 SQL을 생성·검증·(선택)실행합니다.</div></section>' +
         section('요약 (최근 7일)', kpis) +
@@ -4945,6 +4981,10 @@ const adminHTML = `<!doctype html>
         section('기능 토글 (런타임 온오프)', featTable) +
         section('관리자 위험 요청 큐 (거부 · 고위험 EXPLAIN · 실패)', riskTable) +
         section('업무 용어 사전 (자연어 → SQL 매핑)', glossConflictBanner + glossForm + glossTable) +
+        section('저장 리포트 (스케줄 실행)', repTable) +
+        section('인사이트 — 반복 질문 리포트 후보', reportCandTable) +
+        section('인사이트 — 업무 용어 후보', glossCandHTML) +
+        section('행동 이상 탐지 (탐지 전용)', smellTable + exposureTable + driftHTML) +
         section('Golden Query (few-shot · 회귀)', goldenRun + goldenForm + goldenTable) +
         section('최근 Text2SQL 질의', logTable);
       const sf = document.getElementById('t2s-schema-form');
@@ -4969,6 +5009,19 @@ const adminHTML = `<!doctype html>
       if (glf) glf.addEventListener('submit', addT2SGloss);
       makeSortable('#view', 'text2sql');
     }
+    window.promoteT2SReport = async (question, sql) => {
+      const name = prompt('리포트 이름을 입력하세요', (question || '').slice(0, 40));
+      if (!name) return;
+      try {
+        await api('/admin/text2sql/promote', { method: 'POST', body: JSON.stringify({ target: 'report', name, question, sql }) });
+      } catch (err) { alert('승격 실패: ' + err.message); }
+      route();
+    };
+    window.deleteT2SReport = async (id) => {
+      if (!confirm('이 저장 리포트를 삭제하시겠습니까?')) return;
+      await api('/admin/text2sql/reports?id=' + encodeURIComponent(id), { method: 'DELETE' });
+      route();
+    };
     window.toggleT2SFeature = async (name, enabled) => {
       try {
         await api('/admin/text2sql/features', { method: 'POST', body: JSON.stringify({ name, enabled }) });
