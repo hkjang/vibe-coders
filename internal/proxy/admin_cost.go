@@ -74,6 +74,28 @@ func (s *Server) handleCarbonScore(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleWorkMap returns the AI Work Map: a consolidated per-node summary (volume,
+// tokens, cost, distinct users/models, error rate, dominant model, task-type
+// breakdown) of what AI work is happening under a work dimension. Read-only.
+// GET /admin/work-map?dimension=project&window=7d
+func (s *Server) handleWorkMap(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	dimension := strings.TrimSpace(r.URL.Query().Get("dimension"))
+	if dimension == "" {
+		dimension = "project"
+	}
+	since := parseWindow(r.URL.Query().Get("window"), 7*24*time.Hour, "day")
+	nodes, err := s.db.WorkMap(r.Context(), dimension, since, recentLimit(r))
+	if err != nil {
+		writeOpenAIError(w, http.StatusBadRequest, err.Error(), "invalid_request_error", "work_map_failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"dimension": dimension, "nodes": nodes})
+}
+
 // handleCostGuard manages the pre-call cost guard config.
 // GET /admin/cost → {enabled, threshold_krw}; POST sets it.
 func (s *Server) handleCostGuard(w http.ResponseWriter, r *http.Request) {

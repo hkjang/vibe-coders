@@ -87,6 +87,7 @@ Roo Code / Cursor / Continue 등 OpenAI 호환 API 를 호출하는 VS Code 확�
 - **사내 AI 신용점수** (`v0.5.3`): subject(API Key·project·model 등)별 신뢰도(성공률)+비용효율 블렌드 점수(`/admin/ai-credit-score`) — read-only
 - **SQL Digital Twin** (`v0.5.4`): Golden 결과 동등성 검증을 운영 DB 대신 마스킹·샘플 트윈 DB에서 실행하는 opt-in 경로(`TEXT2SQL_TWIN_DSN`) — 미설정 시 execute DB 폴백(동작 변화 없음)
 - **Prompt Carbon Score** (`v0.5.5`): 토큰 사용량 기반 요청 전력(Wh)·탄소(gCO2e) 추정(`/admin/carbon-score`) — 모델별 에너지 계수·PUE·그리드 강도 모두 설정값, 주체 간 상대 비교용 read-only 신호
+- **AI 업무지도 (Work Map)** (`v0.5.6`): work 차원(project/repo/team 등)별 요청·토큰·비용·distinct 사용자/모델·오류율·대표 모델·task_type 분포를 모은 통합 뷰(`/admin/work-map`) — 어떤 AI 업무가 어디서 일어나는지 read-only 집계
 - **운영·거버넌스 확장** (`v0.3.0`): 정책 시뮬레이터(`/admin/policies/simulate`), 모델 가격표 버전 이력(`/admin/pricing`, `/admin/pricing/seed`), 운영 리스크 스코어(`/admin/ops/risk`)·상태(`/admin/ops/status`), Provider SLO(`/admin/providers/slo`), 비용 이상탐지(`/admin/cost/anomalies`)·배부(`/admin/cost/allocation`)·팀 예산 예측(`/admin/budgets/projection`), 모델별 코딩 품질(`/admin/models/quality`), 작업 템플릿(`/admin/templates`), 프롬프트 버전 승격(`/admin/prompts/promotions`), 자동 라우팅 학습 루프(`/admin/routing/learning/auto`), DW 롤업(`/admin/dw/rollups`), Mattermost 알림(`/admin/notifications/mattermost`)
 - 호출 이력 CSV 다운로드 `/admin/export.csv` (Excel UTF-8 BOM 포함, 한국어 그대로 열림)
 - 운영용 백업 스크립트 `scripts/backup.ps1` / `scripts/backup.sh` (SQLite `.backup` + fallback ndjson + 보존 일수 적용)
