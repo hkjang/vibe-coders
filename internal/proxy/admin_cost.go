@@ -10,6 +10,27 @@ import (
 	"vibe-coders/internal/store"
 )
 
+// handleAICreditScore returns a per-subject "AI credit score" blending reliability
+// (success rate) and cost efficiency over a window. Read-only operational signal.
+// GET /admin/ai-credit-score?dimension=api_key_id&window=7d
+func (s *Server) handleAICreditScore(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	dimension := strings.TrimSpace(r.URL.Query().Get("dimension"))
+	if dimension == "" {
+		dimension = "api_key_id"
+	}
+	since := parseWindow(r.URL.Query().Get("window"), 7*24*time.Hour, "day")
+	scores, err := s.db.AICreditScores(r.Context(), dimension, since, recentLimit(r))
+	if err != nil {
+		writeOpenAIError(w, http.StatusBadRequest, err.Error(), "invalid_request_error", "credit_score_failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"dimension": dimension, "scores": scores})
+}
+
 // handleCostGuard manages the pre-call cost guard config.
 // GET /admin/cost → {enabled, threshold_krw}; POST sets it.
 func (s *Server) handleCostGuard(w http.ResponseWriter, r *http.Request) {

@@ -203,6 +203,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/admin/timeseries", s.handleTimeseries)
 	mux.HandleFunc("/admin/heatmap", s.handleHeatmap)
 	mux.HandleFunc("/admin/anomalies", s.handleAnomalies)
+	mux.HandleFunc("/admin/ai-credit-score", s.handleAICreditScore)
 	mux.HandleFunc("/admin/policies/decisions", s.handlePolicyDecisions)
 	mux.HandleFunc("/admin/policies/simulate", s.handlePolicySimulate)
 	mux.HandleFunc("/admin/policies/export", s.handlePolicyExport)
