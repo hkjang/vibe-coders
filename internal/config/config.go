@@ -126,6 +126,7 @@ type Text2SQLConfig struct {
 	ShadowSampleRate  float64       // 0..1 fraction of eligible preview requests to shadow-evaluate
 	ReplayBundles     bool          // persist full generation context (prompt/schema/glossary/permissions) per query for audit/replay
 	DailyRiskLimit    int           // per-API-key daily risky-request cap for the cumulative_risk_enforce toggle (0 disables enforcement)
+	DailyRiskWarn     int           // warn threshold below the cap; in [warn, limit) the response is served with a caution (0 → limit/2)
 }
 
 // ClickHouseConfig configures the long-term analytics sink. When URL is empty the
@@ -249,6 +250,7 @@ func Load() (Config, error) {
 			ShadowSampleRate:  floatEnv("TEXT2SQL_SHADOW_SAMPLE_RATE", 0),
 			ReplayBundles:     boolEnv("TEXT2SQL_REPLAY_BUNDLES", false),
 			DailyRiskLimit:    intEnv("TEXT2SQL_DAILY_RISK_LIMIT", 20),
+			DailyRiskWarn:     intEnv("TEXT2SQL_DAILY_RISK_WARN", 0),
 		},
 		ClickHouse: ClickHouseConfig{
 			URL:          strings.TrimRight(os.Getenv("CLICKHOUSE_URL"), "/"),

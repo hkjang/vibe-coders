@@ -90,6 +90,7 @@ func (s *Server) handleCostAllocation(w http.ResponseWriter, r *http.Request) {
 //     monthly budget at the current run-rate, and
 //   - sessions repeating the same prompt fingerprint (likely runaway agent loops
 //     burning cost).
+//
 // GET /admin/cost/anomalies?window=6h&min_repeats=5&projected_ratio=1.0
 func (s *Server) handleCostAnomalies(w http.ResponseWriter, r *http.Request) {
 	if !s.authorizeAdmin(r) {

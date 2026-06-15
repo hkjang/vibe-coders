@@ -672,6 +672,16 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 				enabled INTEGER NOT NULL DEFAULT 0,
 				updated_at TEXT
 			)`,
+		`CREATE TABLE IF NOT EXISTS text2sql_saved_reports (
+				id TEXT PRIMARY KEY,
+				name TEXT NOT NULL,
+				question TEXT,
+				sql TEXT,
+				schema_name TEXT,
+				kind TEXT,
+				created_by TEXT,
+				created_at TEXT NOT NULL
+			)`,
 		`CREATE TABLE IF NOT EXISTS model_pricing_versions (
 				id TEXT PRIMARY KEY,
 				model TEXT NOT NULL,

@@ -388,6 +388,125 @@ func (s *Server) handleText2SQLFeatures(w http.ResponseWriter, r *http.Request) 
 	}
 }
 
+// handleText2SQLPromote promotes a recurring question (typically surfaced by Prompt DNA
+// or the report miner) into a reusable asset: a saved report/dashboard card, a golden
+// query, or a business-glossary term. One endpoint, target-selected.
+// POST /admin/text2sql/promote {target: report|golden|glossary, ...}
+func (s *Server) handleText2SQLPromote(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	if r.Method != http.MethodPost {
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
+	var p struct {
+		Target     string `json:"target"`
+		Name       string `json:"name"`
+		Question   string `json:"question"`
+		SQL        string `json:"sql"`
+		SchemaName string `json:"schema_name"`
+		Kind       string `json:"kind"`
+		Term       string `json:"term"`
+		Mapping    string `json:"mapping"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+		writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "invalid_body")
+		return
+	}
+	switch strings.ToLower(strings.TrimSpace(p.Target)) {
+	case "report":
+		if strings.TrimSpace(p.Name) == "" || strings.TrimSpace(p.Question) == "" {
+			writeOpenAIError(w, http.StatusBadRequest, "name and question are required for a report", "invalid_request_error", "missing_fields")
+			return
+		}
+		rep := store.Text2SQLSavedReport{
+			ID: newID("t2srpt"), Name: strings.TrimSpace(p.Name), Question: strings.TrimSpace(p.Question),
+			SQL: strings.TrimSpace(p.SQL), SchemaName: strings.TrimSpace(p.SchemaName), Kind: strings.TrimSpace(p.Kind),
+		}
+		if err := s.db.UpsertText2SQLSavedReport(r.Context(), rep); err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "promote_failed")
+			return
+		}
+		s.auditAdmin(r, "text2sql.promote.report", "", auditJSON(rep))
+		writeJSON(w, http.StatusCreated, map[string]any{"target": "report", "report": rep})
+	case "golden":
+		if strings.TrimSpace(p.Question) == "" || strings.TrimSpace(p.SQL) == "" {
+			writeOpenAIError(w, http.StatusBadRequest, "question and sql are required for a golden query", "invalid_request_error", "missing_fields")
+			return
+		}
+		name := firstNonEmpty(strings.TrimSpace(p.Name), truncateForName(p.Question))
+		g := store.Text2SQLGoldenQuery{
+			ID: newID("t2sg"), Name: name, Question: strings.TrimSpace(p.Question), ExpectedSQL: strings.TrimSpace(p.SQL),
+			SchemaName: strings.TrimSpace(p.SchemaName), Enabled: true, Source: "manual",
+		}
+		if err := s.db.UpsertText2SQLGoldenQuery(r.Context(), g); err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "promote_failed")
+			return
+		}
+		s.auditAdmin(r, "text2sql.promote.golden", "", auditJSON(map[string]any{"id": g.ID, "name": g.Name}))
+		writeJSON(w, http.StatusCreated, map[string]any{"target": "golden", "golden": g})
+	case "glossary":
+		if strings.TrimSpace(p.Term) == "" || strings.TrimSpace(p.Mapping) == "" {
+			writeOpenAIError(w, http.StatusBadRequest, "term and mapping are required for a glossary entry", "invalid_request_error", "missing_fields")
+			return
+		}
+		t := store.Text2SQLBusinessTerm{
+			ID: newID("t2sbt"), SchemaName: strings.TrimSpace(p.SchemaName), Term: strings.TrimSpace(p.Term),
+			Mapping: strings.TrimSpace(p.Mapping),
+		}
+		if err := s.db.UpsertText2SQLBusinessTerm(r.Context(), t); err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "promote_failed")
+			return
+		}
+		s.auditAdmin(r, "text2sql.promote.glossary", "", auditJSON(t))
+		writeJSON(w, http.StatusCreated, map[string]any{"target": "glossary", "term": t})
+	default:
+		writeOpenAIError(w, http.StatusBadRequest, "target must be report, golden, or glossary", "invalid_request_error", "invalid_target")
+	}
+}
+
+// handleText2SQLReports lists/deletes saved reports promoted from questions.
+// GET /admin/text2sql/reports · DELETE ?id=
+func (s *Server) handleText2SQLReports(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		reports, err := s.db.ListText2SQLSavedReports(r.Context())
+		if err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "reports_failed")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"reports": reports})
+	case http.MethodDelete:
+		id := strings.TrimSpace(r.URL.Query().Get("id"))
+		if id == "" {
+			writeOpenAIError(w, http.StatusBadRequest, "id query param is required", "invalid_request_error", "missing_id")
+			return
+		}
+		if err := s.db.DeleteText2SQLSavedReport(r.Context(), id); err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "report_delete_failed")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"id": id, "status": "deleted"})
+	default:
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+	}
+}
+
+// truncateForName derives a short name from a question for a promoted golden query.
+func truncateForName(q string) string {
+	q = strings.Join(strings.Fields(q), " ")
+	if len(q) > 60 {
+		return q[:60]
+	}
+	return q
+}
+
 // handleText2SQLPromptDNA profiles recurring questions over a window — frequency,
 // distinct users, average cost, and reject/exec rates — labeling repeated, high-cost,
 // and risky patterns. Read-only.

@@ -446,6 +446,30 @@ func TestText2SQLPromptDNAAndRiskCount(t *testing.T) {
 	}
 }
 
+func TestText2SQLSavedReports(t *testing.T) {
+	db := openAggTestStore(t)
+	defer db.Close()
+	ctx := context.Background()
+
+	if err := db.UpsertText2SQLSavedReport(ctx, Text2SQLSavedReport{ID: "r1", Name: "월별 매출", Question: "월별 매출 추이", SQL: "SELECT 1", Kind: ""}); err != nil {
+		t.Fatal(err)
+	}
+	reports, err := db.ListText2SQLSavedReports(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reports) != 1 || reports[0].Name != "월별 매출" || reports[0].Kind != "report" {
+		t.Fatalf("saved report not stored correctly (kind should default to report): %+v", reports)
+	}
+	if err := db.DeleteText2SQLSavedReport(ctx, "r1"); err != nil {
+		t.Fatal(err)
+	}
+	reports, _ = db.ListText2SQLSavedReports(ctx)
+	if len(reports) != 0 {
+		t.Errorf("expected 0 reports after delete, got %d", len(reports))
+	}
+}
+
 func containsStore(s, sub string) bool {
 	for i := 0; i+len(sub) <= len(s); i++ {
 		if s[i:i+len(sub)] == sub {

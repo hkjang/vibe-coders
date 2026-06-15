@@ -191,15 +191,26 @@ func (s *Server) handleText2SQL(w http.ResponseWriter, r *http.Request, meta sto
 		return
 	}
 
-	// 0a) Cumulative-risk enforcement (admin-toggle): block once an API key's running
-	// daily count of risky requests (rejected / high EXPLAIN risk / classified failure)
-	// exceeds the configured limit — promoting the detection-only signal to a guard.
+	// 0a) Cumulative-risk staging (admin-toggle): based on an API key's running daily
+	// count of risky requests (rejected / high EXPLAIN risk / classified failure):
+	//   detect (< warn) → serve · warn ([warn, limit)) → serve with a caution ·
+	//   block (>= limit) → refuse before generation. warn defaults to limit/2.
+	riskWarnNote := ""
 	if s.t2sFeatureOn(t2sFeatureRiskEnforce) && cfg.DailyRiskLimit > 0 && meta.Request.APIKeyID != "" {
 		dayStart := time.Now().UTC().Truncate(24 * time.Hour)
-		if n, err := s.db.Text2SQLRiskyCountByAPIKey(r.Context(), meta.Request.APIKeyID, dayStart); err == nil && n >= int64(cfg.DailyRiskLimit) {
-			content := fmt.Sprintf("당일 누적 위험 요청 한도(%d건)를 초과하여 Text2SQL 사용이 일시 제한되었습니다. 운영자에게 문의하세요.", cfg.DailyRiskLimit)
-			finalize(content, text2sql.ValidationResult{Reason: "risk budget exceeded"}, false, 0, "risk_budget_exceeded", 0)
-			return
+		if n, err := s.db.Text2SQLRiskyCountByAPIKey(r.Context(), meta.Request.APIKeyID, dayStart); err == nil {
+			warn := cfg.DailyRiskWarn
+			if warn <= 0 || warn >= cfg.DailyRiskLimit {
+				warn = cfg.DailyRiskLimit / 2
+			}
+			switch {
+			case n >= int64(cfg.DailyRiskLimit):
+				content := fmt.Sprintf("당일 누적 위험 요청 한도(%d건)를 초과하여 Text2SQL 사용이 일시 제한되었습니다. 운영자에게 문의하세요.", cfg.DailyRiskLimit)
+				finalize(content, text2sql.ValidationResult{Reason: "risk budget exceeded"}, false, 0, "risk_budget_exceeded", 0)
+				return
+			case warn > 0 && n >= int64(warn):
+				riskWarnNote = fmt.Sprintf("⚠ 당일 위험 요청이 %d건으로 한도(%d건)에 근접했습니다. 한도 초과 시 차단됩니다.", n, cfg.DailyRiskLimit)
+			}
 		}
 	}
 
@@ -286,6 +297,9 @@ func (s *Server) handleText2SQL(w http.ResponseWriter, r *http.Request, meta sto
 		if challengeNote != "" {
 			note = note + " " + challengeNote
 		}
+		if riskWarnNote != "" {
+			note = note + " " + riskWarnNote
+		}
 		if cacheKey != "" {
 			_ = s.db.PutText2SQLCache(r.Context(), cacheKey, resolvedSchemaName, string(profile.Mode), validation.SQL, cfg.CacheTTL)
 		}
@@ -370,6 +384,12 @@ func (s *Server) handleText2SQL(w http.ResponseWriter, r *http.Request, meta sto
 	}
 
 	content := executeContent(question, validation.SQL, table, rowCount, summary, validation)
+	if challengeNote != "" {
+		content += "\n\n> " + challengeNote
+	}
+	if riskWarnNote != "" {
+		content += "\n\n> " + riskWarnNote
+	}
 	finalize(content, validation, true, rowCount, "", totalCost)
 }
 
