@@ -44,8 +44,22 @@ func TestOpenAPISwaggerAndVersion(t *testing.T) {
 	if info["version"] != AppVersion {
 		t.Errorf("openapi version = %v, want %s", info["version"], AppVersion)
 	}
-	if _, ok := spec["paths"].(map[string]any)["/v1/chat/completions"]; !ok {
+	pathsMap, _ := spec["paths"].(map[string]any)
+	if _, ok := pathsMap["/v1/chat/completions"]; !ok {
 		t.Error("openapi.json missing /v1/chat/completions path")
+	}
+	// Comprehensive coverage: the spec should document the whole surface, not a handful.
+	if len(pathsMap) < 120 {
+		t.Errorf("expected comprehensive spec (>=120 paths), got %d", len(pathsMap))
+	}
+	for _, p := range []string{
+		"/admin/text2sql/golden", "/admin/okf/documents", "/admin/llm/traces",
+		"/me/keys", "/admin/settings/by-key/{key}", "/admin/dw/clickhouse/overview",
+		"/admin/mcp/policies/{server}", "/admin/routing/decisions/{id}",
+	} {
+		if _, ok := pathsMap[p]; !ok {
+			t.Errorf("openapi.json missing expected path %s", p)
+		}
 	}
 
 	// swagger page renders and points at the spec.
