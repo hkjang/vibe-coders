@@ -31,7 +31,7 @@ import (
 )
 
 // AppVersion is the gateway build version, surfaced in /auth/me and the admin UI.
-const AppVersion = "v0.11.0"
+const AppVersion = "v0.12.0"
 
 type Server struct {
 	cfg          config.Config
@@ -62,6 +62,7 @@ type Server struct {
 	insRuntime    atomic.Pointer[config.InsuranceConfig] // admin-settings overlay over cfg.Insurance
 	cacheRuntime   atomic.Pointer[config.CacheConfig]     // admin-settings overlay over cfg.Cache
 	pricingRuntime atomic.Pointer[config.PricingConfig]   // admin-settings overlay over cfg.PricingConf
+	skillsRuntime  atomic.Pointer[config.SkillsConfig]    // admin-settings overlay over cfg.Skills
 	chFactQueue   chan store.LogRecord                   // async per-request fact ingest queue (bounded)
 	chFactDropped atomic.Int64                           // requests dropped when the fact queue was full
 	sessions     *sessionInferer
@@ -216,6 +217,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/admin/skills", s.handleSkills)
 	mux.HandleFunc("/admin/skills/by-name/", s.handleSkillByName)
 	mux.HandleFunc("/admin/skills/runs", s.handleSkillRuns)
+	mux.HandleFunc("/admin/skills/evaluate", s.handleSkillEvaluate)
+	mux.HandleFunc("/admin/skills/seed-recommended", s.handleSkillSeedRecommended)
 	mux.HandleFunc("/admin/dw/clickhouse", s.handleClickHouseSink)
 	mux.HandleFunc("/admin/dw/clickhouse/bootstrap", s.handleClickHouseBootstrap)
 	mux.HandleFunc("/admin/dw/clickhouse/overview", s.handleClickHouseOverview)

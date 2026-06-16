@@ -8,8 +8,160 @@ import (
 	"path/filepath"
 	"testing"
 
+	"vibe-coders/internal/config"
 	"vibe-coders/internal/store"
 )
+
+func TestEvaluateSkillPolicy(t *testing.T) {
+	sk := store.Skill{AllowedModels: "gpt-*, qwen-plus", AllowedTools: "sql-runner, search"}
+	cases := []struct {
+		name   string
+		model  string
+		tools  []string
+		wantOK bool
+	}{
+		{"model + tools ok", "gpt-4o", []string{"search"}, true},
+		{"model not allowed", "claude-3", nil, false},
+		{"tool not allowed", "qwen-plus", []string{"rm-rf"}, false},
+		{"exact model ok", "qwen-plus", nil, true},
+		{"empty model skips model check", "", []string{"search"}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			v := evaluateSkillPolicy(sk, tc.model, tc.tools)
+			if (len(v) == 0) != tc.wantOK {
+				t.Fatalf("model=%q tools=%v → violations=%v, wantOK=%v", tc.model, tc.tools, v, tc.wantOK)
+			}
+		})
+	}
+
+	// No restrictions configured → everything passes.
+	if v := evaluateSkillPolicy(store.Skill{}, "anything", []string{"any-tool"}); len(v) != 0 {
+		t.Fatalf("unrestricted skill should allow all, got %v", v)
+	}
+}
+
+func TestParseRequestToolNames(t *testing.T) {
+	body := []byte(`{"model":"m","tools":[{"type":"function","function":{"name":"search"}},{"type":"function","function":{"name":"sql-runner"}}]}`)
+	got := parseRequestToolNames(body)
+	if len(got) != 2 || got[0] != "search" || got[1] != "sql-runner" {
+		t.Fatalf("parseRequestToolNames = %v", got)
+	}
+	if legacy := parseRequestToolNames([]byte(`{"functions":[{"name":"calc"}]}`)); len(legacy) != 1 || legacy[0] != "calc" {
+		t.Fatalf("legacy functions parse = %v", legacy)
+	}
+}
+
+func TestSkillEnforceBlocks(t *testing.T) {
+	db := openTestStore(t)
+	defer db.Close()
+	logger := store.NewAsyncLogger(db, 8, filepath.Join(t.TempDir(), "e.ndjson"))
+	logger.Start()
+	defer logger.Stop(context.Background())
+	server, err := NewServer(testConfig("http://upstream.invalid", "secret"), db, logger, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server.skillsRuntime.Store(&config.SkillsConfig{Enforcement: "enforce"})
+	srv := httptest.NewServer(server.Routes())
+	defer srv.Close()
+
+	ctx := context.Background()
+	if _, err := db.UpsertSkill(ctx, store.Skill{Name: "gpt-only", Status: "production", AllowedModels: "gpt-*"}, "tester"); err != nil {
+		t.Fatal(err)
+	}
+
+	// A request that opts into the skill with a disallowed model is blocked before upstream.
+	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/v1/chat/completions", jsonReader(map[string]any{
+		"model": "claude-3", "messages": []map[string]string{{"role": "user", "content": "hi"}},
+	}))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Vibe-Skill", "gpt-only")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("enforce block = %d, want 403", resp.StatusCode)
+	}
+	if resp.Header.Get("X-Vibe-Skill-Policy") != "blocked" {
+		t.Fatalf("policy header = %q", resp.Header.Get("X-Vibe-Skill-Policy"))
+	}
+
+	// The blocked attempt is recorded in the run log (recorded async — poll briefly).
+	waitFor(t, 2e9, func() bool {
+		runs, _ := db.ListSkillRuns(ctx, "gpt-only", 10)
+		return len(runs) == 1 && runs[0].Status == "blocked"
+	})
+
+	// An unavailable (non-production) skill under enforce is also blocked.
+	if _, err := db.UpsertSkill(ctx, store.Skill{Name: "draft-skill", Status: "draft"}, "tester"); err != nil {
+		t.Fatal(err)
+	}
+	req2, _ := http.NewRequest(http.MethodPost, srv.URL+"/v1/chat/completions", jsonReader(map[string]any{
+		"model": "gpt-4o", "messages": []map[string]string{{"role": "user", "content": "hi"}},
+	}))
+	req2.Header.Set("Content-Type", "application/json")
+	req2.Header.Set("X-Vibe-Skill", "draft-skill")
+	resp2, err := http.DefaultClient.Do(req2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp2.Body.Close()
+	if resp2.StatusCode != http.StatusForbidden {
+		t.Fatalf("unavailable skill enforce = %d, want 403", resp2.StatusCode)
+	}
+}
+
+func TestSkillEvaluateAndSeed(t *testing.T) {
+	db := openTestStore(t)
+	defer db.Close()
+	logger := store.NewAsyncLogger(db, 8, filepath.Join(t.TempDir(), "v.ndjson"))
+	logger.Start()
+	defer logger.Stop(context.Background())
+	server, err := NewServer(testConfig("http://upstream.invalid", "secret"), db, logger, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(server.Routes())
+	defer srv.Close()
+
+	// Seed the recommended starter skills.
+	resp := postJSON(t, srv.URL+"/admin/skills/seed-recommended", "", map[string]any{})
+	var seed struct {
+		Seeded []string `json:"seeded"`
+	}
+	json.NewDecoder(resp.Body).Decode(&seed)
+	resp.Body.Close()
+	if len(seed.Seeded) != 3 {
+		t.Fatalf("seed-recommended = %v", seed.Seeded)
+	}
+
+	// Dry-run the policy of a seeded skill (text2sql-safety-test-generator allows sql-runner).
+	resp = postJSON(t, srv.URL+"/admin/skills/evaluate", "", map[string]any{
+		"name": "text2sql-safety-test-generator", "model": "gpt-4o", "tools": []string{"sql-runner"},
+	})
+	var ev struct {
+		Allowed    bool     `json:"allowed"`
+		Violations []string `json:"violations"`
+	}
+	json.NewDecoder(resp.Body).Decode(&ev)
+	resp.Body.Close()
+	if !ev.Allowed {
+		t.Fatalf("expected allowed, got violations %v", ev.Violations)
+	}
+
+	// A disallowed tool produces a violation.
+	resp = postJSON(t, srv.URL+"/admin/skills/evaluate", "", map[string]any{
+		"name": "text2sql-safety-test-generator", "tools": []string{"rm-rf"},
+	})
+	json.NewDecoder(resp.Body).Decode(&ev)
+	resp.Body.Close()
+	if ev.Allowed || len(ev.Violations) == 0 {
+		t.Fatalf("expected a tool violation, got %+v", ev)
+	}
+}
 
 func TestSkillRegistryLifecycle(t *testing.T) {
 	db := openTestStore(t)

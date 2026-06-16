@@ -5045,12 +5045,13 @@ const adminHTML = `<!doctype html>
       const badge = (st) => '<span class="status ' + (st === 'production' ? '' : (st === 'deprecated' ? 'error' : 'warn')) + '">' + escapeHTML(st || '') + '</span>';
       const riskBadge = (rk) => '<span class="status ' + (rk === 'high' ? 'error' : (rk === 'medium' ? 'warn' : '')) + '">' + escapeHTML(rk || '') + '</span>';
 
-      let html = '<div class="card-body"><p class="muted">Skill 레지스트리 — 재사용 가능한 AI 작업 매뉴얼(지침 + 정책 힌트)을 등록·승격하고 실행 로그를 점검합니다. <code>production</code> 상태만 <code>GET /v1/skills</code>로 호출자에게 노출됩니다.</p>' +
+      let html = '<div class="card-body"><p class="muted">Skill 레지스트리 — 재사용 가능한 AI 작업 매뉴얼(지침 + 정책 힌트)을 등록·승격하고 실행 로그를 점검합니다. <code>production</code> 상태만 <code>GET /v1/skills</code>로 호출자에게 노출됩니다. 요청이 <code>X-Vibe-Skill</code> 헤더로 Skill을 지정하면 <code>allowed_models</code>/<code>allowed_tools</code> 정책을 검사합니다 — 적용 모드는 <a href="#/runtimesettings">런타임 설정</a>의 <code>skills.enforcement</code>(off/warn/enforce)에서 변경하세요.</p>' +
         '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:6px">' +
           '<label class="muted">상태 <select id="skill-status-filter" onchange="skillFilter(this.value)">' +
             ['', 'draft', 'staging', 'production', 'deprecated'].map(s => '<option value="' + s + '"' + (s === statusFilter ? ' selected' : '') + '>' + (s || '전체') + '</option>').join('') +
           '</select></label>' +
           '<button type="button" onclick="skillEdit()">새 Skill</button>' +
+          '<button class="secondary" type="button" onclick="skillSeedRecommended()">추천 Skill 시드</button>' +
           '<span id="skill-action-result" class="muted"></span>' +
         '</div></div>';
 
@@ -5125,6 +5126,16 @@ const adminHTML = `<!doctype html>
         await renderSkills();
       } catch (e) {
         const out = document.getElementById('skill-action-result');
+        if (out) out.innerHTML = '<span class="status error">' + escapeHTML(e.message) + '</span>';
+      }
+    };
+    window.skillSeedRecommended = async () => {
+      const out = document.getElementById('skill-action-result');
+      try {
+        const r = await api('/admin/skills/seed-recommended', { method: 'POST' });
+        if (out) out.innerHTML = '<span class="status">시드됨: ' + escapeHTML((r.seeded || []).join(', ')) + '</span>';
+        await renderSkills();
+      } catch (e) {
         if (out) out.innerHTML = '<span class="status error">' + escapeHTML(e.message) + '</span>';
       }
     };

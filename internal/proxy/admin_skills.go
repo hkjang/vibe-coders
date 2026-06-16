@@ -182,6 +182,88 @@ func (s *Server) handleSkillByName(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// handleSkillEvaluate dry-runs a skill's allowed_models/allowed_tools policy against a
+// candidate model + tool set without making any upstream call — the policy-simulator
+// equivalent for skills, so operators can preview what enforce mode would do.
+// POST /admin/skills/evaluate {name, model, tools:[...]}
+func (s *Server) handleSkillEvaluate(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	if r.Method != http.MethodPost {
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
+	var p struct {
+		Name  string   `json:"name"`
+		Model string   `json:"model"`
+		Tools []string `json:"tools"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+		writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "invalid_body")
+		return
+	}
+	name := strings.TrimSpace(p.Name)
+	if name == "" {
+		writeOpenAIError(w, http.StatusBadRequest, "name is required", "invalid_request_error", "missing_name")
+		return
+	}
+	sk, found, err := s.db.GetSkill(r.Context(), name)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "skill_failed")
+		return
+	}
+	if !found {
+		writeOpenAIError(w, http.StatusNotFound, "skill not found", "invalid_request_error", "not_found")
+		return
+	}
+	violations := evaluateSkillPolicy(sk, strings.TrimSpace(p.Model), p.Tools)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"name":          sk.Name,
+		"status":        sk.Status,
+		"enforcement":   s.skillsConf().Enforcement,
+		"production":    sk.Status == "production",
+		"allowed":       len(violations) == 0,
+		"violations":    violations,
+		"would_block":   len(violations) > 0 && strings.EqualFold(s.skillsConf().Enforcement, "enforce"),
+	})
+}
+
+// recommendedSkills are the three starter skills suggested in the Skills design — seeded as
+// drafts so an operator can review, fill in instructions, and promote them to production.
+var recommendedSkills = []store.Skill{
+	{Name: "text2sql-safety-test-generator", Description: "Generate SELECT-only safety test cases for Text2SQL prompts.", RiskLevel: "medium", AllowedTools: "sql-runner", Status: "draft",
+		Instructions: "Given a Text2SQL question, produce read-only test queries that probe row-limit, date-filter, and PII-masking behavior. Never emit INSERT/UPDATE/DELETE/DDL."},
+	{Name: "prompt-regression-reviewer", Description: "Review prompt changes for regressions against golden prompts.", RiskLevel: "low", Status: "draft",
+		Instructions: "Compare a candidate prompt against the registered golden prompt set and flag semantic drift, removed guardrails, or weakened constraints."},
+	{Name: "mcp-tool-risk-classifier", Description: "Classify MCP/tool invocations into low/medium/high risk tiers.", RiskLevel: "high", Status: "draft",
+		Instructions: "Given an MCP tool name and arguments, assign a risk tier and justification (filesystem write, network egress, credential access raise the tier)."},
+}
+
+// handleSkillSeedRecommended inserts the recommended starter skills (idempotent upsert).
+// POST /admin/skills/seed-recommended
+func (s *Server) handleSkillSeedRecommended(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	if r.Method != http.MethodPost {
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
+	seeded := []string{}
+	for _, sk := range recommendedSkills {
+		if _, err := s.db.UpsertSkill(r.Context(), sk, s.skillActor(r)); err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "skill_seed_failed")
+			return
+		}
+		seeded = append(seeded, sk.Name)
+	}
+	s.auditAdmin(r, "skill.seed_recommended", strings.Join(seeded, ","), "")
+	writeJSON(w, http.StatusOK, map[string]any{"seeded": seeded})
+}
+
 // handleSkillRuns returns the skill execution log (optionally for one skill).
 // GET /admin/skills/runs?skill=&limit=
 func (s *Server) handleSkillRuns(w http.ResponseWriter, r *http.Request) {

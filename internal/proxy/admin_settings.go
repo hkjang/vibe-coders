@@ -179,7 +179,19 @@ func buildSettingRegistry() []settingDef {
 		// ---- Pricing ----
 		{Key: "pricing.fallback_model", Category: "pricing", Type: stString, envValue: func(c config.Config) string { return c.PricingConf.FallbackModel }},
 		{Key: "pricing.usd_krw", Category: "pricing", Type: stFloat, validate: posFloat, envValue: func(c config.Config) string { return strconv.FormatFloat(c.PricingConf.USDToKRW, 'f', -1, 64) }},
+
+		// ---- Skills (policy enforcement) ----
+		{Key: "skills.enforcement", Category: "skills", Type: stString, validate: skillEnforceMode, envValue: func(c config.Config) string { return c.Skills.Enforcement }},
 	}
+}
+
+// skillEnforceMode validates the Skill enforcement mode setting.
+func skillEnforceMode(v string) error {
+	switch strings.TrimSpace(strings.ToLower(v)) {
+	case "off", "warn", "enforce", "":
+		return nil
+	}
+	return fmt.Errorf("must be one of off|warn|enforce")
 }
 
 // settingDescriptions maps each setting key to a short Korean help string shown under the key
@@ -260,6 +272,8 @@ var settingDescriptions = map[string]string{
 	// Pricing
 	"pricing.fallback_model": "가격표에 매칭되지 않는 모델의 비용을 계산할 기준 모델(기본 qwen-plus). 해당 모델이 가격표에 있어야 적용, 없으면 0 처리.",
 	"pricing.usd_krw":        "가격 카탈로그 시드 시 USD→KRW 환율(기본 1380). 변경 후 /admin/pricing/seed?overwrite=1로 재적용.",
+	// Skills
+	"skills.enforcement": "Skill 정책(allowed_models/allowed_tools) 적용 모드. off=비활성, warn=위반 시 헤더 경고만(기본), enforce=위반 시 요청 차단(403). 요청은 X-Vibe-Skill 헤더로 Skill을 지정해야 검사됨.",
 }
 
 // t2sConf returns the effective Text2SQL config (admin-settings overlay over env/default).
@@ -310,6 +324,14 @@ func (s *Server) pricingConf() config.PricingConfig {
 	return s.cfg.PricingConf
 }
 
+// skillsConf returns the effective Skills config (admin-settings overlay over env/default).
+func (s *Server) skillsConf() config.SkillsConfig {
+	if p := s.skillsRuntime.Load(); p != nil {
+		return *p
+	}
+	return s.cfg.Skills
+}
+
 // reloadRuntimeConfig rebuilds the Text2SQL/ClickHouse runtime snapshots from env defaults
 // overlaid with admin-managed settings. Called at startup and after every settings change.
 func (s *Server) reloadRuntimeConfig(ctx context.Context) {
@@ -332,6 +354,7 @@ func (s *Server) reloadRuntimeConfig(ctx context.Context) {
 	cache := s.cfg.Cache
 	ret := s.cfg.Retention
 	pricing := s.cfg.PricingConf
+	skills := s.cfg.Skills
 	for _, d := range settingRegistry {
 		if _, ok := stored[d.Key]; !ok {
 			continue
@@ -340,7 +363,7 @@ func (s *Server) reloadRuntimeConfig(ctx context.Context) {
 		if source != "admin" {
 			continue
 		}
-		applyRuntimeSetting(&t2s, &ch, &carbon, &ins, &cache, &ret, &pricing, d.Key, val)
+		applyRuntimeSetting(&t2s, &ch, &carbon, &ins, &cache, &ret, &pricing, &skills, d.Key, val)
 	}
 	s.t2sRuntime.Store(&t2s)
 	s.chRuntime.Store(&ch)
@@ -348,6 +371,7 @@ func (s *Server) reloadRuntimeConfig(ctx context.Context) {
 	s.insRuntime.Store(&ins)
 	s.cacheRuntime.Store(&cache)
 	s.pricingRuntime.Store(&pricing)
+	s.skillsRuntime.Store(&skills)
 	audit.SetFallbackPriceModel(pricing.FallbackModel) // apply the runtime fallback model
 	// Apply retention changes to the running worker (day thresholds next run; interval recreates the ticker).
 	if s.retention != nil && prevRet != ret {
@@ -372,7 +396,7 @@ func (s *Server) reloadRuntimeConfig(ctx context.Context) {
 	}
 }
 
-func applyRuntimeSetting(t2s *config.Text2SQLConfig, ch *config.ClickHouseConfig, carbon *config.CarbonConfig, ins *config.InsuranceConfig, cache *config.CacheConfig, ret *config.RetentionConfig, pricing *config.PricingConfig, key, val string) {
+func applyRuntimeSetting(t2s *config.Text2SQLConfig, ch *config.ClickHouseConfig, carbon *config.CarbonConfig, ins *config.InsuranceConfig, cache *config.CacheConfig, ret *config.RetentionConfig, pricing *config.PricingConfig, skills *config.SkillsConfig, key, val string) {
 	val = strings.TrimSpace(val)
 	atoi := func() int { n, _ := strconv.Atoi(val); return n }
 	atof := func() float64 { f, _ := strconv.ParseFloat(val, 64); return f }
@@ -531,6 +555,8 @@ func applyRuntimeSetting(t2s *config.Text2SQLConfig, ch *config.ClickHouseConfig
 		pricing.FallbackModel = val
 	case "pricing.usd_krw":
 		pricing.USDToKRW = atof()
+	case "skills.enforcement":
+		skills.Enforcement = strings.ToLower(val)
 	}
 }
 
@@ -545,6 +571,9 @@ func settingPermissionGroup(d settingDef) string {
 	switch d.Key {
 	case "text2sql.mask_results", "text2sql.daily_risk_limit", "text2sql.daily_risk_warn", "text2sql.replay_bundles":
 		return "security"
+	}
+	if strings.HasPrefix(d.Category, "skills") {
+		return "security" // Skill policy enforcement is a governance gate
 	}
 	switch {
 	case strings.HasPrefix(d.Category, "clickhouse"), strings.HasPrefix(d.Category, "retention"), strings.HasPrefix(d.Category, "cache"):

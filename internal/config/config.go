@@ -29,6 +29,7 @@ type Config struct {
 	Insurance   InsuranceConfig
 	Pricing     map[string]ModelPrice
 	PricingConf PricingConfig
+	Skills      SkillsConfig
 }
 
 // InsuranceConfig parameterizes the AI Request Insurance view: an SLA-claims ledger
@@ -194,6 +195,14 @@ type Text2SQLConfig struct {
 type PricingConfig struct {
 	FallbackModel string  // model name used to cost unmatched models; "" → qwen-plus
 	USDToKRW      float64 // USD→KRW conversion applied at catalog seed time
+}
+
+// SkillsConfig controls the Skill policy enforcement engine. A request opts into a skill
+// via the X-Vibe-Skill header; the gateway then checks the requested model/tools against
+// the skill's allowed_models/allowed_tools policy. Enforcement is a runtime-tunable mode so
+// operators can roll it out as warn-only before blocking.
+type SkillsConfig struct {
+	Enforcement string // "off" | "warn" | "enforce" — default "warn"
 }
 
 // ClickHouseConfig configures the long-term analytics sink. When URL is empty the
@@ -376,6 +385,9 @@ func Load() (Config, error) {
 		PricingConf: PricingConfig{
 			FallbackModel: getEnv("PRICING_FALLBACK_MODEL", "qwen-plus"),
 			USDToKRW:      floatEnv("PRICING_USD_KRW", 1380.0),
+		},
+		Skills: SkillsConfig{
+			Enforcement: getEnv("SKILLS_ENFORCEMENT", "warn"),
 		},
 	}
 

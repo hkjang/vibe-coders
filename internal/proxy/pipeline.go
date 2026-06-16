@@ -21,7 +21,7 @@ import (
 // Returning true passes control (and the shared requestPipeline state) to the
 // next step. This makes the previously-inline handleOpenAI flow explicit:
 //
-//	Auth → Quota → Routing → Governance → Cache → Cost → Upstream
+//	Auth → Quota → Routing → Skill → Governance → Cache → Cost → Upstream
 type PipelineStep interface {
 	// Name is a short stable identifier used in logs/metrics/tests.
 	Name() string
@@ -62,6 +62,10 @@ type requestPipeline struct {
 	chatCacheKey    string
 	chatCacheable   bool
 	chatSemanticVec []float64
+
+	skillName    string
+	skillVersion string
+	skillTools   string
 }
 
 // pipelineSteps returns the ordered request pipeline. The order is the contract:
@@ -73,6 +77,7 @@ func (rc *requestPipeline) steps() []PipelineStep {
 		stepFunc{"auth", (*requestPipeline).stepAuth},
 		stepFunc{"quota", (*requestPipeline).stepQuota},
 		stepFunc{"routing", (*requestPipeline).stepRouting},
+		stepFunc{"skill", (*requestPipeline).stepSkill},
 		stepFunc{"governance", (*requestPipeline).stepGovernance},
 		stepFunc{"cache", (*requestPipeline).stepCache},
 		stepFunc{"cost", (*requestPipeline).stepCost},
@@ -431,6 +436,7 @@ func (rc *requestPipeline) stepUpstream() bool {
 		}
 		meta.Evaluations = buildLLMEvaluations(meta, ResponseAnalysis{})
 		s.metrics.ObserveLLMEvaluations(meta.Evaluations)
+		rc.recordSkillRun(rc.skillName, rc.skillVersion, "error", meta.Request.Model, 0, meta.Request.LatencyMS)
 		s.enqueue(meta)
 		s.notifyMattermost(r.Context(), "provider", "Provider 장애: "+meta.Request.Provider+" 요청 실패 ("+err.Error()+")")
 		writeOpenAIError(w, status, "upstream request failed: "+err.Error(), "server_error", "upstream_request_failed")
@@ -551,6 +557,17 @@ func (rc *requestPipeline) stepUpstream() bool {
 	s.metrics.ObserveToolInvocations(meta.Tools)
 	meta.Evaluations = buildLLMEvaluations(meta, analysis)
 	s.metrics.ObserveLLMEvaluations(meta.Evaluations)
+	if rc.skillName != "" {
+		cost := rc.estimatedCostKRW
+		if meta.Usage != nil {
+			cost = meta.Usage.EstimatedCost
+		}
+		status := "ok"
+		if meta.Request.StatusCode >= 400 {
+			status = "error"
+		}
+		rc.recordSkillRun(rc.skillName, rc.skillVersion, status, meta.Request.Model, cost, meta.Request.LatencyMS)
+	}
 	s.enqueue(meta)
 	return true
 }
