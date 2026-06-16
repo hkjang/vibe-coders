@@ -79,6 +79,77 @@ func TestClickHouseRequestFactSink(t *testing.T) {
 	}
 }
 
+func TestClickHouseFactFanout(t *testing.T) {
+	var mu sync.Mutex
+	byTable := map[string]string{} // table -> last body
+	ch := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query().Get("query")
+		if strings.Contains(q, "INSERT INTO") {
+			// query looks like: INSERT INTO db.table FORMAT JSONEachRow
+			fields := strings.Fields(q)
+			table := ""
+			if len(fields) >= 3 {
+				table = fields[2]
+				if i := strings.IndexByte(table, '.'); i >= 0 {
+					table = table[i+1:]
+				}
+			}
+			b, _ := io.ReadAll(r.Body)
+			mu.Lock()
+			byTable[table] = string(b)
+			mu.Unlock()
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ch.Close()
+
+	db := openTestStore(t)
+	defer db.Close()
+	logger := store.NewAsyncLogger(db, 8, filepath.Join(t.TempDir(), "f.ndjson"))
+	logger.Start()
+	defer logger.Stop(context.Background())
+
+	cfg := testConfig("http://upstream.invalid", "secret")
+	cfg.ClickHouse.URL = ch.URL
+	cfg.ClickHouse.RequestFactTable = "ai_request_fact"
+	cfg.ClickHouse.ToolFactTable = "ai_tool_fact"
+	cfg.ClickHouse.RoutingFactTable = "ai_routing_fact"
+	cfg.ClickHouse.EvalFactTable = "ai_eval_fact"
+	cfg.ClickHouse.BatchSize = 1
+	cfg.ClickHouse.FlushInterval = 200 * time.Millisecond
+	server, err := NewServer(cfg, db, logger, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Now().UTC()
+	server.enqueue(store.LogRecord{
+		Request: store.RequestLog{ID: "rq1", TraceID: "tr1", Model: "gpt-4.1", Provider: "openai", StatusCode: 200, CreatedAt: now},
+		Tools:   []store.ToolInvocation{{RequestID: "rq1", TraceID: "tr1", ServerLabel: "github", ToolName: "create_pr", Source: "call", IsMCP: true, CreatedAt: now}},
+		Routing: &store.RoutingDecisionLog{RequestID: "rq1", TraceID: "tr1", RequestedModel: "auto", SelectedModel: "gpt-4.1", SelectedProvider: "openai", DecisionReason: "complexity", CreatedAt: now},
+		Evaluations: []store.LLMEvaluation{{RequestID: "rq1", TraceID: "tr1", Name: "injection", Category: "security", Score: 0.9, Label: "clean", Passed: true, CreatedAt: now}},
+	})
+
+	waitFor(t, 3*time.Second, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return byTable["ai_request_fact"] != "" && byTable["ai_tool_fact"] != "" &&
+			byTable["ai_routing_fact"] != "" && byTable["ai_eval_fact"] != ""
+	})
+
+	mu.Lock()
+	defer mu.Unlock()
+	if !strings.Contains(byTable["ai_tool_fact"], `"tool_name":"create_pr"`) {
+		t.Errorf("tool fact wrong: %s", byTable["ai_tool_fact"])
+	}
+	if !strings.Contains(byTable["ai_routing_fact"], `"selected_model":"gpt-4.1"`) {
+		t.Errorf("routing fact wrong: %s", byTable["ai_routing_fact"])
+	}
+	if !strings.Contains(byTable["ai_eval_fact"], `"name":"injection"`) {
+		t.Errorf("eval fact wrong: %s", byTable["ai_eval_fact"])
+	}
+}
+
 func TestClickHouseRequestFactDisabledNoQueue(t *testing.T) {
 	db := openTestStore(t)
 	defer db.Close()

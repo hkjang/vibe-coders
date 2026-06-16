@@ -202,6 +202,9 @@ type ClickHouseConfig struct {
 	// Per-request fact sink (detailed behavioral DW). When RequestFactTable is set, every
 	// completed request is shipped as one row via an async batch queue (never on the hot path).
 	RequestFactTable string        // e.g. ai_request_fact; empty disables the request-fact sink
+	ToolFactTable    string        // e.g. ai_tool_fact; empty disables (one row per tool invocation)
+	RoutingFactTable string        // e.g. ai_routing_fact; empty disables (one row per routing decision)
+	EvalFactTable    string        // e.g. ai_eval_fact; empty disables (one row per LLM evaluation)
 	BatchSize        int           // rows per ClickHouse insert (queue flush)
 	FlushInterval    time.Duration // max time a row waits in the queue before a flush
 	MaxQueueSize     int           // bounded in-memory queue; excess is dropped (counted)
@@ -350,6 +353,9 @@ func Load() (Config, error) {
 			SinkDays:          intEnv("CLICKHOUSE_SINK_DAYS", 3),
 			Text2SQLFactTable: os.Getenv("CLICKHOUSE_TEXT2SQL_FACT_TABLE"),
 			RequestFactTable:  os.Getenv("CLICKHOUSE_REQUEST_FACT_TABLE"),
+			ToolFactTable:     os.Getenv("CLICKHOUSE_TOOL_FACT_TABLE"),
+			RoutingFactTable:  os.Getenv("CLICKHOUSE_ROUTING_FACT_TABLE"),
+			EvalFactTable:     os.Getenv("CLICKHOUSE_EVAL_FACT_TABLE"),
 			BatchSize:         intEnv("CLICKHOUSE_BATCH_SIZE", 200),
 			FlushInterval:     durationEnv("CLICKHOUSE_FLUSH_INTERVAL", 5*time.Second),
 			MaxQueueSize:      intEnv("CLICKHOUSE_MAX_QUEUE_SIZE", 10000),

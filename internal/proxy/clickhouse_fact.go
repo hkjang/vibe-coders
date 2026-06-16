@@ -66,6 +66,169 @@ const requestFactDDL = `CREATE TABLE IF NOT EXISTS %s (
 PARTITION BY toYYYYMM(event_date)
 ORDER BY (event_date, team, provider, model, request_id)`
 
+// toolFactDDL — one row per tool/MCP invocation (append; multiple per request).
+const toolFactDDL = `CREATE TABLE IF NOT EXISTS %s (
+	event_date Date,
+	event_time DateTime64(3),
+	request_id String,
+	trace_id String,
+	api_key_id String,
+	server_label LowCardinality(String),
+	tool_name LowCardinality(String),
+	source LowCardinality(String),
+	is_mcp UInt8,
+	is_error UInt8,
+	arg_sensitive UInt8,
+	arg_hash String,
+	ingested_at DateTime64(3)
+) ENGINE = MergeTree
+PARTITION BY toYYYYMM(event_date)
+ORDER BY (event_date, server_label, tool_name, request_id)`
+
+// routingFactDDL — one row per routing decision (1 per request; dedupe on request_id).
+const routingFactDDL = `CREATE TABLE IF NOT EXISTS %s (
+	event_date Date,
+	event_time DateTime64(3),
+	request_id String,
+	trace_id String,
+	requested_model LowCardinality(String),
+	selected_model LowCardinality(String),
+	selected_provider LowCardinality(String),
+	complexity_score UInt8,
+	complexity_tier LowCardinality(String),
+	risk_score UInt8,
+	risk_tier LowCardinality(String),
+	health_score Int16,
+	fallback_path String,
+	decision_reason String,
+	ingested_at DateTime64(3)
+) ENGINE = ReplacingMergeTree(ingested_at)
+PARTITION BY toYYYYMM(event_date)
+ORDER BY (event_date, selected_provider, selected_model, request_id)`
+
+// evalFactDDL — one row per LLM evaluation (dedupe on request_id+name).
+const evalFactDDL = `CREATE TABLE IF NOT EXISTS %s (
+	event_date Date,
+	event_time DateTime64(3),
+	request_id String,
+	trace_id String,
+	name LowCardinality(String),
+	category LowCardinality(String),
+	evaluator LowCardinality(String),
+	score Float64,
+	label LowCardinality(String),
+	passed UInt8,
+	reason String,
+	ingested_at DateTime64(3)
+) ENGINE = ReplacingMergeTree(ingested_at)
+PARTITION BY toYYYYMM(event_date)
+ORDER BY (event_date, request_id, name)`
+
+func b2i(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+func factEventTime(reqTime, rowTime time.Time) time.Time {
+	t := rowTime
+	if t.IsZero() {
+		t = reqTime
+	}
+	if t.IsZero() {
+		t = time.Now().UTC()
+	}
+	return t.UTC()
+}
+
+// toolFactRows flattens a request's tool invocations into ai_tool_fact rows.
+func toolFactRows(rec store.LogRecord) []map[string]any {
+	out := make([]map[string]any, 0, len(rec.Tools))
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	for _, t := range rec.Tools {
+		ts := factEventTime(rec.Request.CreatedAt, t.CreatedAt)
+		out = append(out, map[string]any{
+			"event_date":    ts.Format("2006-01-02"),
+			"event_time":    ts.Format(time.RFC3339Nano),
+			"request_id":    t.RequestID,
+			"trace_id":      t.TraceID,
+			"api_key_id":    t.APIKeyID,
+			"server_label":  t.ServerLabel,
+			"tool_name":     t.ToolName,
+			"source":        t.Source,
+			"is_mcp":        b2i(t.IsMCP),
+			"is_error":      b2i(t.IsError),
+			"arg_sensitive": b2i(t.ArgSensitive),
+			"arg_hash":      t.ArgHash,
+			"ingested_at":   now,
+		})
+	}
+	return out
+}
+
+// routingFactRow builds the ai_routing_fact row from the routing decision (when present).
+func routingFactRow(rec store.LogRecord) (map[string]any, bool) {
+	if rec.Routing == nil {
+		return nil, false
+	}
+	r := rec.Routing
+	ts := factEventTime(rec.Request.CreatedAt, r.CreatedAt)
+	fallback := ""
+	if len(r.FallbackPath) > 0 {
+		fallback = strings.Join(r.FallbackPath, ">")
+	}
+	return map[string]any{
+		"event_date":        ts.Format("2006-01-02"),
+		"event_time":        ts.Format(time.RFC3339Nano),
+		"request_id":        r.RequestID,
+		"trace_id":          r.TraceID,
+		"requested_model":   r.RequestedModel,
+		"selected_model":    r.SelectedModel,
+		"selected_provider": r.SelectedProvider,
+		"complexity_score":  r.Complexity.Score,
+		"complexity_tier":   r.Complexity.Tier,
+		"risk_score":        r.Risk.Score,
+		"risk_tier":         r.Risk.Tier,
+		"health_score":      r.HealthScore,
+		"fallback_path":     fallback,
+		"decision_reason":   r.DecisionReason,
+		"ingested_at":       time.Now().UTC().Format(time.RFC3339Nano),
+	}, true
+}
+
+// evalFactRows flattens a request's LLM evaluations into ai_eval_fact rows.
+func evalFactRows(rec store.LogRecord) []map[string]any {
+	out := make([]map[string]any, 0, len(rec.Evaluations))
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	for _, e := range rec.Evaluations {
+		ts := factEventTime(rec.Request.CreatedAt, e.CreatedAt)
+		out = append(out, map[string]any{
+			"event_date":  ts.Format("2006-01-02"),
+			"event_time":  ts.Format(time.RFC3339Nano),
+			"request_id":  e.RequestID,
+			"trace_id":    e.TraceID,
+			"name":        e.Name,
+			"category":    e.Category,
+			"evaluator":   e.Evaluator,
+			"score":       e.Score,
+			"label":       e.Label,
+			"passed":      b2i(e.Passed),
+			"reason":      e.Reason,
+			"ingested_at": now,
+		})
+	}
+	return out
+}
+
+// anyFactTableConfigured reports whether at least one fact sink is enabled.
+func anyFactTableConfigured(ch config.ClickHouseConfig) bool {
+	return strings.TrimSpace(ch.RequestFactTable) != "" ||
+		strings.TrimSpace(ch.ToolFactTable) != "" ||
+		strings.TrimSpace(ch.RoutingFactTable) != "" ||
+		strings.TrimSpace(ch.EvalFactTable) != ""
+}
+
 // insertJSONEachRow ships rows to a ClickHouse table via the HTTP interface as JSONEachRow.
 // best_effort lets RFC3339 timestamps parse into DateTime columns; skip_unknown_fields keeps
 // older table schemas accepting payloads after new columns are added. Returns the raw body
@@ -138,12 +301,6 @@ func requestFactRow(rec store.LogRecord) map[string]any {
 	ipHash := ""
 	if r.ClientIP != "" {
 		ipHash = audit.HashText(r.ClientIP)[:16]
-	}
-	b2i := func(b bool) int {
-		if b {
-			return 1
-		}
-		return 0
 	}
 	return map[string]any{
 		"event_date":        ts.Format("2006-01-02"),
@@ -273,7 +430,7 @@ func (s *Server) enqueueClickHouseFact(rec store.LogRecord) {
 		return
 	}
 	ch := s.chConf()
-	if ch.URL == "" || strings.TrimSpace(ch.RequestFactTable) == "" {
+	if ch.URL == "" || !anyFactTableConfigured(ch) {
 		return
 	}
 	if strings.TrimSpace(rec.Request.ID) == "" {
@@ -295,23 +452,45 @@ func (s *Server) clickhouseFactLoop(parent context.Context) {
 			return
 		}
 		ch := s.chConf()
-		table := strings.TrimSpace(ch.RequestFactTable)
-		if ch.URL == "" || table == "" {
+		if ch.URL == "" {
 			buf = buf[:0]
 			return
 		}
-		rows := make([]map[string]any, 0, len(buf))
+		// One INSERT per configured fact table. A failed table is persisted to the retry
+		// queue independently, so a single bad table doesn't lose the others.
+		sink := func(table string, rows []map[string]any) {
+			if strings.TrimSpace(table) == "" || len(rows) == 0 {
+				return
+			}
+			ctx, cancel := context.WithTimeout(parent, 45*time.Second)
+			payload, _, err := insertJSONEachRow(ctx, s.client, ch, table, rows)
+			cancel()
+			if err != nil {
+				slog.Warn("clickhouse fact flush failed", "table", table, "rows", len(rows), "error", err)
+				_ = s.db.RecordClickHouseFactRetry(parent, table, payload, len(rows), err.Error())
+			}
+		}
+		var reqRows, toolRows, routeRows, evalRows []map[string]any
 		for _, rec := range buf {
-			rows = append(rows, requestFactRow(rec))
+			if strings.TrimSpace(ch.RequestFactTable) != "" {
+				reqRows = append(reqRows, requestFactRow(rec))
+			}
+			if strings.TrimSpace(ch.ToolFactTable) != "" {
+				toolRows = append(toolRows, toolFactRows(rec)...)
+			}
+			if strings.TrimSpace(ch.RoutingFactTable) != "" {
+				if rr, ok := routingFactRow(rec); ok {
+					routeRows = append(routeRows, rr)
+				}
+			}
+			if strings.TrimSpace(ch.EvalFactTable) != "" {
+				evalRows = append(evalRows, evalFactRows(rec)...)
+			}
 		}
-		ctx, cancel := context.WithTimeout(parent, 45*time.Second)
-		payload, n, err := insertJSONEachRow(ctx, s.client, ch, table, rows)
-		cancel()
-		if err != nil {
-			slog.Warn("clickhouse request-fact flush failed", "rows", len(rows), "error", err)
-			_ = s.db.RecordClickHouseFactRetry(parent, table, payload, len(rows), err.Error())
-		}
-		_ = n
+		sink(ch.RequestFactTable, reqRows)
+		sink(ch.ToolFactTable, toolRows)
+		sink(ch.RoutingFactTable, routeRows)
+		sink(ch.EvalFactTable, evalRows)
 		buf = buf[:0]
 	}
 

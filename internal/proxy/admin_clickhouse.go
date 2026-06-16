@@ -156,6 +156,18 @@ func (s *Server) handleClickHouseBootstrap(w http.ResponseWriter, r *http.Reques
 		reqRef := chTableRef(cfg.Database, cfg.RequestFactTable)
 		allOK = run("table "+reqRef, fmt.Sprintf(requestFactDDL, reqRef)) && allOK
 	}
+	if strings.TrimSpace(cfg.ToolFactTable) != "" {
+		ref := chTableRef(cfg.Database, cfg.ToolFactTable)
+		allOK = run("table "+ref, fmt.Sprintf(toolFactDDL, ref)) && allOK
+	}
+	if strings.TrimSpace(cfg.RoutingFactTable) != "" {
+		ref := chTableRef(cfg.Database, cfg.RoutingFactTable)
+		allOK = run("table "+ref, fmt.Sprintf(routingFactDDL, ref)) && allOK
+	}
+	if strings.TrimSpace(cfg.EvalFactTable) != "" {
+		ref := chTableRef(cfg.Database, cfg.EvalFactTable)
+		allOK = run("table "+ref, fmt.Sprintf(evalFactDDL, ref)) && allOK
+	}
 
 	s.auditAdmin(r, "dw.clickhouse.bootstrap", "", auditJSON(map[string]any{"steps": steps, "ok": allOK}))
 	status := http.StatusOK
