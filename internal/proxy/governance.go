@@ -277,6 +277,7 @@ func secretActionDecision(action string) string {
 }
 
 func (s *Server) recordPolicyDecisionEvents(ctx context.Context, events []store.PolicyDecisionEvent) {
+	stored := events[:0]
 	for _, event := range events {
 		if strings.TrimSpace(event.Decision) == "" {
 			continue
@@ -288,7 +289,9 @@ func (s *Server) recordPolicyDecisionEvents(ctx context.Context, events []store.
 			event.CreatedAt = time.Now().UTC()
 		}
 		_ = s.db.InsertPolicyDecisionEvent(ctx, event)
+		stored = append(stored, event)
 	}
+	s.emitPolicyFacts(stored) // best-effort DW fact (no-op unless configured)
 }
 
 func governanceRuleMatches(conditions map[string]any, g governanceContext) bool {

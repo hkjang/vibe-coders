@@ -160,6 +160,82 @@ const evalFactDDL = `CREATE TABLE IF NOT EXISTS %s (
 PARTITION BY toYYYYMM(event_date)
 ORDER BY (event_date, request_id, name)`
 
+// policyFactDDL — one row per governance policy decision (append).
+const policyFactDDL = `CREATE TABLE IF NOT EXISTS %s (
+	event_date Date,
+	event_time DateTime64(3),
+	request_id String,
+	api_key_id String,
+	team_id LowCardinality(String),
+	endpoint LowCardinality(String),
+	phase LowCardinality(String),
+	policy_id String,
+	rule_id String,
+	rule_name LowCardinality(String),
+	decision LowCardinality(String),
+	reason String,
+	model LowCardinality(String),
+	provider LowCardinality(String),
+	risk_score UInt8,
+	complexity_score UInt8,
+	cost_krw Float64,
+	ingested_at DateTime64(3)
+) ENGINE = MergeTree
+PARTITION BY toYYYYMM(event_date)
+ORDER BY (event_date, decision, team_id, request_id)`
+
+// emitPolicyFacts ships governance policy-decision events to ai_policy_fact (best-effort,
+// off the request path). No-op when the sink is unconfigured.
+func (s *Server) emitPolicyFacts(events []store.PolicyDecisionEvent) {
+	ch := s.chConf()
+	table := strings.TrimSpace(ch.PolicyFactTable)
+	if ch.URL == "" || table == "" || len(events) == 0 {
+		return
+	}
+	rows := make([]map[string]any, 0, len(events))
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	for _, e := range events {
+		if strings.TrimSpace(e.Decision) == "" {
+			continue
+		}
+		ts := e.CreatedAt.UTC()
+		if ts.IsZero() {
+			ts = time.Now().UTC()
+		}
+		rows = append(rows, map[string]any{
+			"event_date":       ts.Format("2006-01-02"),
+			"event_time":       ts.Format(time.RFC3339Nano),
+			"request_id":       e.RequestID,
+			"api_key_id":       e.APIKeyID,
+			"team_id":          e.TeamID,
+			"endpoint":         e.Endpoint,
+			"phase":            e.Phase,
+			"policy_id":        e.PolicyID,
+			"rule_id":          e.RuleID,
+			"rule_name":        e.RuleName,
+			"decision":         e.Decision,
+			"reason":           e.Reason,
+			"model":            e.Model,
+			"provider":         e.Provider,
+			"risk_score":       e.RiskScore,
+			"complexity_score": e.ComplexityScore,
+			"cost_krw":         e.CostKRW,
+			"ingested_at":      now,
+		})
+	}
+	if len(rows) == 0 {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		payload, _, err := insertJSONEachRow(ctx, s.client, ch, table, rows)
+		if err != nil {
+			_ = s.db.RecordClickHouseFactRetry(context.Background(), table, payload, len(rows), err.Error())
+		}
+	}()
+}
+
 // feedbackFactDDL — one row per human feedback event (append; low volume).
 const feedbackFactDDL = `CREATE TABLE IF NOT EXISTS %s (
 	event_date Date,
@@ -510,6 +586,7 @@ func configuredFactTables(ch config.ClickHouseConfig) []struct{ Key, Table strin
 		{"routing_fact", ch.RoutingFactTable},
 		{"eval_fact", ch.EvalFactTable},
 		{"feedback_fact", ch.FeedbackFactTable},
+		{"policy_fact", ch.PolicyFactTable},
 		{"text2sql_fact", ch.Text2SQLFactTable},
 	}
 	out := all[:0]

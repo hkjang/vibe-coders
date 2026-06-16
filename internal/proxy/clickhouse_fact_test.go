@@ -287,6 +287,49 @@ func TestClickHouseFeedbackFact(t *testing.T) {
 	}
 }
 
+func TestClickHousePolicyFact(t *testing.T) {
+	var mu sync.Mutex
+	var body string
+	ch := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Query().Get("query"), "INSERT INTO") {
+			b, _ := io.ReadAll(r.Body)
+			mu.Lock()
+			body = string(b)
+			mu.Unlock()
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ch.Close()
+
+	db := openTestStore(t)
+	defer db.Close()
+	logger := store.NewAsyncLogger(db, 8, filepath.Join(t.TempDir(), "f.ndjson"))
+	logger.Start()
+	defer logger.Stop(context.Background())
+
+	cfg := testConfig("http://upstream.invalid", "secret")
+	cfg.ClickHouse.URL = ch.URL
+	cfg.ClickHouse.PolicyFactTable = "ai_policy_fact"
+	server, err := NewServer(cfg, db, logger, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	server.recordPolicyDecisionEvents(context.Background(), []store.PolicyDecisionEvent{
+		{RequestID: "rqp", TeamID: "platform", Phase: "pre", PolicyID: "pol1", RuleID: "r1", RuleName: "block-secrets", Decision: "block", Reason: "secret detected", Model: "gpt-4.1", RiskScore: 90},
+	})
+	waitFor(t, 3*time.Second, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return strings.Contains(body, "rqp")
+	})
+	mu.Lock()
+	defer mu.Unlock()
+	if !strings.Contains(body, `"decision":"block"`) || !strings.Contains(body, `"rule_name":"block-secrets"`) {
+		t.Errorf("policy fact wrong: %s", body)
+	}
+}
+
 func TestClickHouseRequestFactDisabledNoQueue(t *testing.T) {
 	db := openTestStore(t)
 	defer db.Close()

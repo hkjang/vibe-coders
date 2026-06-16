@@ -111,6 +111,7 @@ func buildSettingRegistry() []settingDef {
 		{Key: "clickhouse.routing_fact_table", Category: "clickhouse", Type: stString, envValue: func(c config.Config) string { return c.ClickHouse.RoutingFactTable }},
 		{Key: "clickhouse.eval_fact_table", Category: "clickhouse", Type: stString, envValue: func(c config.Config) string { return c.ClickHouse.EvalFactTable }},
 		{Key: "clickhouse.feedback_fact_table", Category: "clickhouse", Type: stString, envValue: func(c config.Config) string { return c.ClickHouse.FeedbackFactTable }},
+		{Key: "clickhouse.policy_fact_table", Category: "clickhouse", Type: stString, envValue: func(c config.Config) string { return c.ClickHouse.PolicyFactTable }},
 		{Key: "clickhouse.batch_size", Category: "clickhouse", Type: stInt, validate: posInt, envValue: func(c config.Config) string { return strconv.Itoa(c.ClickHouse.BatchSize) }},
 		{Key: "clickhouse.flush_interval", Category: "clickhouse", Type: stDuration, validate: dur, envValue: func(c config.Config) string { return c.ClickHouse.FlushInterval.String() }},
 
@@ -193,6 +194,7 @@ var settingDescriptions = map[string]string{
 	"clickhouse.routing_fact_table":  "라우팅 결정 fact 테이블 이름(예: ai_routing_fact). 요청당 1행(요청/선택 모델·complexity·risk·health·fallback).",
 	"clickhouse.eval_fact_table":     "LLM 평가 fact 테이블 이름(예: ai_eval_fact). 평가 1건당 1행(name/category/score/passed).",
 	"clickhouse.feedback_fact_table": "사람 피드백 fact 테이블 이름(예: ai_feedback_fact). 피드백 1건당 1행(rating/label/source/created_by). 직접 best-effort 적재.",
+	"clickhouse.policy_fact_table":   "거버넌스 정책 결정 fact 테이블 이름(예: ai_policy_fact). 결정 1건당 1행(phase/policy/rule/decision/risk). best-effort 적재.",
 	"clickhouse.batch_size":          "요청 fact 배치 적재 시 1회 INSERT 행 수(기본 200).",
 	"clickhouse.flush_interval":      "요청 fact 큐가 배치 미달이어도 강제 flush하는 주기(예: 5s).",
 	// Text2SQL
@@ -389,6 +391,8 @@ func applyRuntimeSetting(t2s *config.Text2SQLConfig, ch *config.ClickHouseConfig
 		ch.EvalFactTable = val
 	case "clickhouse.feedback_fact_table":
 		ch.FeedbackFactTable = val
+	case "clickhouse.policy_fact_table":
+		ch.PolicyFactTable = val
 	case "clickhouse.batch_size":
 		ch.BatchSize = atoi()
 	case "clickhouse.flush_interval":
