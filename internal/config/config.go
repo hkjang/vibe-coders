@@ -204,6 +204,7 @@ type PricingConfig struct {
 type LimitsConfig struct {
 	MaxOutputTokens int
 	MaxRequestBytes int // reject chat request bodies larger than this many bytes; 0 = disabled
+	MaxMessages     int // reject chat requests with more than this many messages; 0 = disabled
 }
 
 // SkillsConfig controls the Skill policy enforcement engine. A request opts into a skill
@@ -403,6 +404,7 @@ func Load() (Config, error) {
 		Limits: LimitsConfig{
 			MaxOutputTokens: intEnv("LIMITS_MAX_OUTPUT_TOKENS", 0),
 			MaxRequestBytes: intEnv("LIMITS_MAX_REQUEST_BYTES", 0),
+			MaxMessages:     intEnv("LIMITS_MAX_MESSAGES", 0),
 		},
 	}
 

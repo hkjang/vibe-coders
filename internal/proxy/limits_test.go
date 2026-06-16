@@ -80,6 +80,46 @@ func TestLimitsMaxRequestBytes(t *testing.T) {
 	}
 }
 
+func TestLimitsMaxMessages(t *testing.T) {
+	if countMessages([]byte(`{"messages":[{"role":"user","content":"a"},{"role":"assistant","content":"b"}]}`)) != 2 {
+		t.Fatal("countMessages should be 2")
+	}
+	if countMessages([]byte(`{"model":"m"}`)) != 0 {
+		t.Fatal("absent messages → 0")
+	}
+
+	db := openTestStore(t)
+	defer db.Close()
+	logger := store.NewAsyncLogger(db, 8, filepath.Join(t.TempDir(), "lm.ndjson"))
+	logger.Start()
+	defer logger.Stop(context.Background())
+	server, err := NewServer(testConfig("http://upstream.invalid", "secret"), db, logger, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server.limitsRuntime.Store(&config.LimitsConfig{MaxMessages: 3})
+	srv := httptest.NewServer(server.Routes())
+	defer srv.Close()
+
+	msgs := []map[string]string{}
+	for i := 0; i < 5; i++ {
+		msgs = append(msgs, map[string]string{"role": "user", "content": "x"})
+	}
+	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/v1/chat/completions", jsonReader(map[string]any{"model": "gpt-4o", "messages": msgs}))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("too many messages = %d, want 400", resp.StatusCode)
+	}
+	if resp.Header.Get("X-Message-Count") != "5" {
+		t.Fatalf("X-Message-Count = %q", resp.Header.Get("X-Message-Count"))
+	}
+}
+
 func TestLimitsStepForwardsClamped(t *testing.T) {
 	var seenMax float64 = -42
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

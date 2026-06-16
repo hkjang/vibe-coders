@@ -40,6 +40,21 @@ func clampMaxOutputTokens(body []byte, maxOut int) ([]byte, int, int, bool) {
 	return out, cur, maxOut, true
 }
 
+// countMessages returns the length of the chat request's messages array (0 on parse failure
+// or when absent).
+func countMessages(body []byte) int {
+	if len(body) == 0 {
+		return 0
+	}
+	var req struct {
+		Messages []json.RawMessage `json:"messages"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		return 0
+	}
+	return len(req.Messages)
+}
+
 // numField reads an integer-valued JSON field (numbers decode as float64).
 func numField(root map[string]any, key string) (int, bool) {
 	v, ok := root[key]
@@ -68,6 +83,17 @@ func (rc *requestPipeline) stepLimits() bool {
 			"request body exceeds the configured limit ("+strconv.Itoa(len(rc.body))+" > "+strconv.Itoa(lim.MaxRequestBytes)+" bytes)",
 			"invalid_request_error", "payload_too_large")
 		return false
+	}
+
+	// Message-count guard: reject context-stuffed message arrays.
+	if lim.MaxMessages > 0 {
+		if n := countMessages(rc.body); n > lim.MaxMessages {
+			w.Header().Set("X-Message-Count", strconv.Itoa(n))
+			writeOpenAIError(w, http.StatusBadRequest,
+				"too many messages ("+strconv.Itoa(n)+" > "+strconv.Itoa(lim.MaxMessages)+")",
+				"invalid_request_error", "too_many_messages")
+			return false
+		}
 	}
 
 	maxOut := lim.MaxOutputTokens
