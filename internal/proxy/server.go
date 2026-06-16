@@ -31,7 +31,7 @@ import (
 )
 
 // AppVersion is the gateway build version, surfaced in /auth/me and the admin UI.
-const AppVersion = "v0.9.9"
+const AppVersion = "v0.10.0"
 
 type Server struct {
 	cfg          config.Config
@@ -61,6 +61,8 @@ type Server struct {
 	carbonRuntime atomic.Pointer[config.CarbonConfig]    // admin-settings overlay over cfg.Carbon
 	insRuntime    atomic.Pointer[config.InsuranceConfig] // admin-settings overlay over cfg.Insurance
 	cacheRuntime  atomic.Pointer[config.CacheConfig]     // admin-settings overlay over cfg.Cache
+	chFactQueue   chan store.LogRecord                   // async per-request fact ingest queue (bounded)
+	chFactDropped atomic.Int64                           // requests dropped when the fact queue was full
 	sessions     *sessionInferer
 	sessionGCAt  atomic.Int64
 	extSeen      sync.Map // external key id -> struct{}; dedupes lazy registration
@@ -108,6 +110,15 @@ func NewServer(cfg config.Config, db *store.SQLStore, logger *store.AsyncLogger,
 	// Background ClickHouse auto-sink, managed so it can be (re)started/stopped when
 	// settings change (only runs when URL + interval are configured).
 	server.applyClickHouseSinkWorker()
+
+	// Async per-request fact ingest queue + batch worker (ships ai_request_fact rows off
+	// the hot path). The queue is always allocated; the worker no-ops until configured.
+	qsize := cfg.ClickHouse.MaxQueueSize
+	if qsize <= 0 {
+		qsize = 10000
+	}
+	server.chFactQueue = make(chan store.LogRecord, qsize)
+	go server.clickhouseFactLoop(context.Background())
 
 	// Pre-apply current model prices when the pricing table is empty (first boot).
 	server.seedPricingIfEmpty(context.Background())
@@ -204,6 +215,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/admin/dw/clickhouse", s.handleClickHouseSink)
 	mux.HandleFunc("/admin/dw/clickhouse/bootstrap", s.handleClickHouseBootstrap)
 	mux.HandleFunc("/admin/dw/clickhouse/overview", s.handleClickHouseOverview)
+	mux.HandleFunc("/admin/dw/clickhouse/fact-retry", s.handleClickHouseFactRetry)
 	mux.HandleFunc("/admin/dw/consistency", s.handleClickHouseConsistency)
 	mux.HandleFunc("/admin/dw/sink-status", s.handleClickHouseSinkStatus)
 	mux.HandleFunc("/admin/dw/sink-retry", s.handleClickHouseSinkRetry)
@@ -929,6 +941,7 @@ func (s *Server) copyResponse(w http.ResponseWriter, body io.Reader, analyzer *R
 
 func (s *Server) enqueue(record store.LogRecord) {
 	s.logger.Enqueue(record)
+	s.enqueueClickHouseFact(record)
 }
 
 func (s *Server) upstreamURL(baseURL string, incoming *url.URL) (string, error) {

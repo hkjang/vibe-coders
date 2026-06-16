@@ -152,6 +152,10 @@ func (s *Server) handleClickHouseBootstrap(w http.ResponseWriter, r *http.Reques
 		factRef := chTableRef(cfg.Database, cfg.Text2SQLFactTable)
 		allOK = run("table "+factRef, factTableDDL(factRef)) && allOK
 	}
+	if strings.TrimSpace(cfg.RequestFactTable) != "" {
+		reqRef := chTableRef(cfg.Database, cfg.RequestFactTable)
+		allOK = run("table "+reqRef, fmt.Sprintf(requestFactDDL, reqRef)) && allOK
+	}
 
 	s.auditAdmin(r, "dw.clickhouse.bootstrap", "", auditJSON(map[string]any{"steps": steps, "ok": allOK}))
 	status := http.StatusOK
@@ -182,6 +186,20 @@ func (s *Server) handleClickHouseOverview(w http.ResponseWriter, r *http.Request
 		},
 		"fact_table": map[string]any{"configured": strings.TrimSpace(cfg.Text2SQLFactTable) != "", "name": cfg.Text2SQLFactTable},
 	}
+	// Async per-request fact queue status (independent of ping).
+	reqFact := map[string]any{
+		"configured":  strings.TrimSpace(cfg.RequestFactTable) != "",
+		"table":       cfg.RequestFactTable,
+		"queue_depth": len(s.chFactQueue),
+		"queue_cap":   cap(s.chFactQueue),
+		"dropped":     s.chFactDropped.Load(),
+		"batch_size":  cfg.BatchSize,
+		"flush":       cfg.FlushInterval.String(),
+	}
+	if n, err := s.db.CountClickHouseFactRetries(r.Context()); err == nil {
+		reqFact["retry_batches"] = n
+	}
+	out["request_fact"] = reqFact
 	if cfg.URL == "" {
 		writeJSON(w, http.StatusOK, out)
 		return

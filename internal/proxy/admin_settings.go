@@ -106,6 +106,9 @@ func buildSettingRegistry() []settingDef {
 		{Key: "clickhouse.sink_interval", Category: "clickhouse", Type: stDuration, Restart: true, validate: dur, envValue: func(c config.Config) string { return c.ClickHouse.SinkInterval.String() }},
 		{Key: "clickhouse.sink_days", Category: "clickhouse", Type: stInt, validate: posInt, envValue: func(c config.Config) string { return strconv.Itoa(c.ClickHouse.SinkDays) }},
 		{Key: "clickhouse.text2sql_fact_table", Category: "clickhouse", Type: stString, envValue: func(c config.Config) string { return c.ClickHouse.Text2SQLFactTable }},
+		{Key: "clickhouse.request_fact_table", Category: "clickhouse", Type: stString, envValue: func(c config.Config) string { return c.ClickHouse.RequestFactTable }},
+		{Key: "clickhouse.batch_size", Category: "clickhouse", Type: stInt, validate: posInt, envValue: func(c config.Config) string { return strconv.Itoa(c.ClickHouse.BatchSize) }},
+		{Key: "clickhouse.flush_interval", Category: "clickhouse", Type: stDuration, validate: dur, envValue: func(c config.Config) string { return c.ClickHouse.FlushInterval.String() }},
 
 		// ---- Text2SQL ----
 		{Key: "text2sql.enabled", Category: "text2sql", Type: stBool, envValue: func(c config.Config) string { return strconv.FormatBool(c.Text2SQL.Enabled) }},
@@ -181,6 +184,9 @@ var settingDescriptions = map[string]string{
 	"clickhouse.sink_interval":       "자동 적재 주기(예: 1h). 변경 시 sink 워커 재시작.",
 	"clickhouse.sink_days":           "적재 시 조회할 최근 일수(증분 watermark 기준 백필 범위).",
 	"clickhouse.text2sql_fact_table": "Text2SQL 질의 단위 fact 테이블 이름. 지정 시 질의별 상세 적재(질문 원문 제외).",
+	"clickhouse.request_fact_table":  "요청 단위 fact 테이블 이름(예: ai_request_fact). 지정 시 모든 요청을 1행씩 비동기 배치 적재(프롬프트 원문 제외, IP는 해시).",
+	"clickhouse.batch_size":          "요청 fact 배치 적재 시 1회 INSERT 행 수(기본 200).",
+	"clickhouse.flush_interval":      "요청 fact 큐가 배치 미달이어도 강제 flush하는 주기(예: 5s).",
 	// Text2SQL
 	"text2sql.enabled":             "Text2SQL 가상 모델(자연어→읽기전용 SQL) 기능 전체 on/off.",
 	"text2sql.preview_model":       "preview(미실행 SQL 생성) 모드에 사용할 업스트림 모델.",
@@ -365,6 +371,12 @@ func applyRuntimeSetting(t2s *config.Text2SQLConfig, ch *config.ClickHouseConfig
 		ch.SinkDays = atoi()
 	case "clickhouse.text2sql_fact_table":
 		ch.Text2SQLFactTable = val
+	case "clickhouse.request_fact_table":
+		ch.RequestFactTable = val
+	case "clickhouse.batch_size":
+		ch.BatchSize = atoi()
+	case "clickhouse.flush_interval":
+		ch.FlushInterval = adur(ch.FlushInterval)
 	case "text2sql.enabled":
 		t2s.Enabled = atob()
 	case "text2sql.preview_model":

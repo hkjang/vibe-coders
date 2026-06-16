@@ -872,6 +872,19 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_okf_links_from ON okf_links(from_subject)`,
 		`CREATE INDEX IF NOT EXISTS idx_okf_links_to ON okf_links(to_subject)`,
+		// Failed ClickHouse fact batches, persisted so a ClickHouse outage never loses data
+		// and the batch can be replayed (the payload is the JSONEachRow body).
+		`CREATE TABLE IF NOT EXISTS clickhouse_fact_retry (
+			id TEXT PRIMARY KEY,
+			table_name TEXT NOT NULL,
+			payload TEXT NOT NULL,
+			rows INTEGER NOT NULL DEFAULT 0,
+			error TEXT,
+			attempts INTEGER NOT NULL DEFAULT 1,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_clickhouse_fact_retry_table ON clickhouse_fact_retry(table_name, created_at)`,
 		`CREATE TABLE IF NOT EXISTS routing_rules (
 			id TEXT PRIMARY KEY,
 			enabled INTEGER NOT NULL DEFAULT 1,

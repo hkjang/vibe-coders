@@ -199,6 +199,12 @@ type ClickHouseConfig struct {
 	SinkInterval      time.Duration // > 0 enables the background auto-sink worker
 	SinkDays          int           // how many recent days each auto-sink covers
 	Text2SQLFactTable string        // when set, per-query Text2SQL facts are shipped here (detailed fact table); empty disables
+	// Per-request fact sink (detailed behavioral DW). When RequestFactTable is set, every
+	// completed request is shipped as one row via an async batch queue (never on the hot path).
+	RequestFactTable string        // e.g. ai_request_fact; empty disables the request-fact sink
+	BatchSize        int           // rows per ClickHouse insert (queue flush)
+	FlushInterval    time.Duration // max time a row waits in the queue before a flush
+	MaxQueueSize     int           // bounded in-memory queue; excess is dropped (counted)
 }
 
 // DefaultGatewaySecret is the insecure development fallback used when
@@ -343,6 +349,10 @@ func Load() (Config, error) {
 			SinkInterval:      durationEnv("CLICKHOUSE_SINK_INTERVAL", 0),
 			SinkDays:          intEnv("CLICKHOUSE_SINK_DAYS", 3),
 			Text2SQLFactTable: os.Getenv("CLICKHOUSE_TEXT2SQL_FACT_TABLE"),
+			RequestFactTable:  os.Getenv("CLICKHOUSE_REQUEST_FACT_TABLE"),
+			BatchSize:         intEnv("CLICKHOUSE_BATCH_SIZE", 200),
+			FlushInterval:     durationEnv("CLICKHOUSE_FLUSH_INTERVAL", 5*time.Second),
+			MaxQueueSize:      intEnv("CLICKHOUSE_MAX_QUEUE_SIZE", 10000),
 		},
 		Pricing: map[string]ModelPrice{},
 	}
