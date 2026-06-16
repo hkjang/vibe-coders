@@ -223,7 +223,15 @@ func (s *Server) handleClickHouseSink(w http.ResponseWriter, r *http.Request) {
 			days = n
 		}
 	}
-	sinceDay := time.Now().UTC().AddDate(0, 0, -days).Format("2006-01-02")
+	now := time.Now().UTC()
+	since := now.AddDate(0, 0, -days)
+	sinceDay := since.Format("2006-01-02")
+	// Recompute the local daily rollups for the window first, so a manual sink ships current
+	// data even when the periodic rollup worker hasn't run yet (otherwise it would read an
+	// empty/stale daily_rollups table and report 0 rows despite live traffic).
+	if _, err := s.db.RollupRange(r.Context(), since, now); err != nil {
+		slog.Warn("clickhouse manual sink rollup failed", "error", err)
+	}
 	total := 0
 	failed := map[string]string{}
 	for _, dim := range dwDimensions {

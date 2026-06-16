@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"vibe-coders/internal/store"
 )
@@ -38,6 +39,49 @@ func fakeClickHouse() (*httptest.Server, *[]string) {
 		}
 	}))
 	return srv, &stmts
+}
+
+func TestClickHouseManualSinkRollsUpFirst(t *testing.T) {
+	ch, _ := fakeClickHouse()
+	defer ch.Close()
+
+	db := openTestStore(t)
+	defer db.Close()
+	logger := store.NewAsyncLogger(db, 8, filepath.Join(t.TempDir(), "f.ndjson"))
+	logger.Start()
+	defer logger.Stop(context.Background())
+
+	// A request today, but no rollup computed yet (no worker has run).
+	now := time.Now().UTC()
+	if err := db.InsertLogRecord(context.Background(), store.LogRecord{
+		Request: store.RequestLog{ID: "req1", TraceID: "req1", Endpoint: "/v1/chat/completions", Model: "gpt-4.1", StatusCode: 200, CreatedAt: now},
+		Usage:   &store.TokenUsage{ID: "u1", RequestID: "req1", TotalTokens: 10, Currency: "KRW", Source: "usage", CreatedAt: now},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := testConfig("http://upstream.invalid", "secret")
+	cfg.ClickHouse.URL = ch.URL
+	cfg.ClickHouse.Table = "daily_rollups"
+	server, err := NewServer(cfg, db, logger, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxy := httptest.NewServer(server.Routes())
+	defer proxy.Close()
+
+	resp, err := http.Post(proxy.URL+"/admin/dw/clickhouse?days=1", "application/json", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out struct {
+		SentRows int `json:"sent_rows"`
+	}
+	json.NewDecoder(resp.Body).Decode(&out)
+	resp.Body.Close()
+	if out.SentRows < 1 {
+		t.Fatalf("manual sink should roll up the window first and ship >=1 row, got %d", out.SentRows)
+	}
 }
 
 func TestClickHouseBootstrapAndOverview(t *testing.T) {
