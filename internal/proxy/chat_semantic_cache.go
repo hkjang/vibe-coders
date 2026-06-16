@@ -41,6 +41,37 @@ func chatPromptText(body []byte) string {
 	return strings.TrimSpace(b.String())
 }
 
+// chatIsSingleTurn reports whether the request is a fresh single-turn prompt — only system
+// and user message(s), no prior assistant/tool turns and no tools declared. This is the only
+// shape where a whole-conversation semantic match is both *likely* (the text is short and
+// self-contained) and *safe*. Multi-turn agent conversations grow monotonically, so their
+// full-text embedding almost never matches a stored entry, and a coincidental hit mid-thread
+// could serve an answer for the wrong context. Such requests skip the embedding entirely.
+func chatIsSingleTurn(body []byte) bool {
+	var root struct {
+		Messages []struct {
+			Role string `json:"role"`
+		} `json:"messages"`
+		Tools json.RawMessage `json:"tools"`
+	}
+	if err := json.Unmarshal(body, &root); err != nil {
+		return false
+	}
+	if len(root.Tools) > 0 && strings.TrimSpace(string(root.Tools)) != "null" {
+		return false
+	}
+	users := 0
+	for _, m := range root.Messages {
+		switch strings.ToLower(strings.TrimSpace(m.Role)) {
+		case "assistant", "tool", "function":
+			return false
+		case "user":
+			users++
+		}
+	}
+	return users >= 1
+}
+
 // embedText calls the configured embedding model (via the normal provider selection)
 // to vectorize text. Best-effort with a short timeout; returns an error the caller
 // treats as "no semantic cache for this request".
@@ -115,6 +146,11 @@ func (e *cacheEmbedError) Error() string { return "embedding upstream failed" }
 func (s *Server) serveChatSemantic(ctx context.Context, w http.ResponseWriter, r *http.Request, body []byte, meta store.LogRecord, traceID string) ([]float64, bool) {
 	cfg := s.cacheConf()
 	if !cfg.ChatSemanticEnabled || strings.TrimSpace(cfg.ChatSemanticModel) == "" {
+		return nil, false
+	}
+	// Skip the embedding call for multi-turn / tool-using requests unless explicitly opted in:
+	// their growing context makes a whole-prompt match unlikely (wasted embed) and unsafe.
+	if !cfg.ChatSemanticMultiTurn && !chatIsSingleTurn(body) {
 		return nil, false
 	}
 	text := chatPromptText(body)
