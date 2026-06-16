@@ -249,6 +249,12 @@ func (s *Server) handleText2SQL(w http.ResponseWriter, r *http.Request, meta sto
 	if glossaryText != "" {
 		msgs = text2sql.WithGlossary(msgs, glossaryText)
 	}
+	// OKF meta-knowledge: curated table notes, join paths, forbidden patterns, sample SQL
+	// scoped to the allowed tables — grounds generation and reduces hallucination. No-op
+	// until OKF documents are curated (see /admin/okf and /admin/okf/text2sql/sync).
+	if okfKnowledge := s.okfText2SQLKnowledge(r.Context(), allowedTables); okfKnowledge != "" {
+		msgs = text2sql.WithOKFKnowledge(msgs, okfKnowledge)
+	}
 	// Gateway Memory (admin-toggle): hint the model with the tables this user queries
 	// most often, so ambiguous questions resolve toward their usual working set.
 	if s.t2sFeatureOn(t2sFeatureGatewayMemory) {

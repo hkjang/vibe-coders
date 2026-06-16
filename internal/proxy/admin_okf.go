@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -8,6 +9,133 @@ import (
 
 	"vibe-coders/internal/store"
 )
+
+// okfSubjectTable extracts the table name from an OKF subject like "table:orders" or
+// "column:orders.amount" (returns "" when the subject isn't table-scoped).
+func okfSubjectTable(subject string) string {
+	s := subject
+	if i := strings.IndexByte(s, ':'); i >= 0 {
+		s = s[i+1:]
+	}
+	if i := strings.IndexByte(s, '.'); i >= 0 {
+		s = s[:i]
+	}
+	return strings.TrimSpace(s)
+}
+
+// okfText2SQLKnowledge renders the active OKF meta-knowledge relevant to a Text2SQL request
+// (table notes scoped to the allowed tables, plus join paths, forbidden-query patterns,
+// sample SQL, and general notes) into a compact, bounded prompt block. Empty when no OKF
+// documents exist, so injection is a safe no-op until knowledge is curated.
+func (s *Server) okfText2SQLKnowledge(ctx context.Context, allowed []string) string {
+	allowSet := map[string]bool{}
+	for _, t := range allowed {
+		allowSet[strings.ToLower(t)] = true
+	}
+	var b strings.Builder
+	add := func(kind, header string, scoped bool, max int) {
+		docs, err := s.db.ListOKFDocuments(ctx, store.OKFFilter{Kind: kind, Status: "active", Limit: 300})
+		if err != nil || len(docs) == 0 {
+			return
+		}
+		lines := []string{}
+		for _, d := range docs {
+			body := strings.TrimSpace(d.Body)
+			if body == "" {
+				continue
+			}
+			if scoped && len(allowSet) > 0 {
+				if tbl := okfSubjectTable(d.Subject); tbl != "" && !allowSet[strings.ToLower(tbl)] {
+					continue
+				}
+			}
+			title := d.Title
+			if title == "" {
+				title = d.Subject
+			}
+			lines = append(lines, "- "+title+": "+body)
+			if len(lines) >= max {
+				break
+			}
+		}
+		if len(lines) > 0 {
+			b.WriteString(header + "\n" + strings.Join(lines, "\n") + "\n\n")
+		}
+	}
+	add("table", "테이블 설명:", true, 40)
+	add("join_path", "조인 경로:", false, 30)
+	add("forbidden_query", "금지/주의 쿼리 패턴:", false, 30)
+	add("sample_sql", "샘플 SQL:", false, 8)
+	add("note", "추가 지침:", false, 20)
+	return strings.TrimSpace(b.String())
+}
+
+// handleOKFText2SQLSync seeds OKF documents from the Text2SQL schema registry (table and
+// column descriptions) and golden queries (sample SQL), so the meta-knowledge base is
+// pre-populated from what the gateway already knows. Idempotent (re-runnable).
+// POST /admin/okf/text2sql/sync?schema=
+func (s *Server) handleOKFText2SQLSync(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	if r.Method != http.MethodPost {
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
+	schema := strings.TrimSpace(r.URL.Query().Get("schema"))
+	if schema == "" {
+		schema = "public"
+	}
+	actor := s.okfActor(r)
+	tables, _ := s.db.ListText2SQLTables(r.Context(), schema)
+	cols, _ := s.db.ListText2SQLColumns(r.Context(), schema)
+	tableDocs, colDocs, sampleDocs := 0, 0, 0
+	for _, t := range tables {
+		if !t.Enabled || strings.TrimSpace(t.Description) == "" {
+			continue
+		}
+		if _, err := s.db.UpsertOKFDocument(r.Context(), store.OKFDocument{
+			Kind: "table", Subject: "table:" + t.TableName, Title: t.TableName,
+			Body: t.Description, Tags: schema, Source: "derived:schema",
+		}, actor); err == nil {
+			tableDocs++
+		}
+	}
+	for _, c := range cols {
+		if strings.TrimSpace(c.Description) == "" {
+			continue
+		}
+		body := c.Description
+		if c.DataType != "" {
+			body += " (" + c.DataType + ")"
+		}
+		if c.Sensitivity != "" && c.Sensitivity != "normal" {
+			body += " [민감도: " + c.Sensitivity + "]"
+		}
+		if _, err := s.db.UpsertOKFDocument(r.Context(), store.OKFDocument{
+			Kind: "column", Subject: "column:" + c.TableName + "." + c.ColumnName, Title: c.TableName + "." + c.ColumnName,
+			Body: body, Tags: schema, Source: "derived:schema",
+		}, actor); err == nil {
+			colDocs++
+		}
+	}
+	if goldens, err := s.db.ListText2SQLGoldenQueries(r.Context(), true); err == nil {
+		for _, g := range goldens {
+			if strings.TrimSpace(g.ExpectedSQL) == "" {
+				continue
+			}
+			if _, err := s.db.UpsertOKFDocument(r.Context(), store.OKFDocument{
+				Kind: "sample_sql", Subject: "sample_sql:" + g.ID, Title: g.Question,
+				Body: g.ExpectedSQL, Tags: schema, Source: "derived:golden",
+			}, actor); err == nil {
+				sampleDocs++
+			}
+		}
+	}
+	s.auditAdmin(r, "okf.text2sql.sync", schema, auditJSON(map[string]any{"tables": tableDocs, "columns": colDocs, "samples": sampleDocs}))
+	writeJSON(w, http.StatusOK, map[string]any{"schema": schema, "table_docs": tableDocs, "column_docs": colDocs, "sample_docs": sampleDocs})
+}
 
 // okfActor returns the caller identity for OKF audit/authorship.
 func (s *Server) okfActor(r *http.Request) string {

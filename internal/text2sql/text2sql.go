@@ -163,6 +163,20 @@ func WithExamples(msgs []Message, examples []Example) []Message {
 	return head
 }
 
+// WithOKFKnowledge inserts an OKF meta-knowledge system message (curated table notes,
+// join paths, forbidden query patterns, sample SQL) right after the schema/instructions,
+// so the model grounds generation in the organization's knowledge and hallucinates less.
+func WithOKFKnowledge(msgs []Message, knowledge string) []Message {
+	if strings.TrimSpace(knowledge) == "" {
+		return msgs
+	}
+	k := Message{Role: "system", Content: "메타지식 (OKF — 테이블 설명·조인 경로·금지 패턴·샘플 SQL):\n" + knowledge}
+	if len(msgs) == 0 {
+		return []Message{k}
+	}
+	return append([]Message{msgs[0], k}, msgs[1:]...)
+}
+
 // WithGlossary prepends a business-glossary system message (term → table/column
 // mapping) so the model can resolve business vocabulary to the schema.
 func WithGlossary(msgs []Message, glossary string) []Message {
