@@ -3,6 +3,7 @@ package audit
 import (
 	"math"
 	"strings"
+	"sync/atomic"
 
 	"vibe-coders/internal/config"
 )
@@ -59,10 +60,33 @@ func EstimateTokens(text string) int {
 	return byChars
 }
 
-// FallbackPriceModel is the model whose price is used to cost requests whose model name
-// matches no exact or prefix entry, so unknown/unlisted models are still billed at a
-// reasonable default instead of free.
-const FallbackPriceModel = "qwen-plus"
+// DefaultFallbackPriceModel is used until overridden at runtime.
+const DefaultFallbackPriceModel = "qwen-plus"
+
+// fallbackPriceModel holds the runtime-adjustable model whose price costs requests whose
+// model name matches no exact or prefix entry. Stored atomically so settings changes are
+// safe against concurrent cost calculations.
+var fallbackPriceModel atomic.Value // string
+
+func init() { fallbackPriceModel.Store(DefaultFallbackPriceModel) }
+
+// SetFallbackPriceModel updates the fallback model used for unmatched models. Empty resets
+// to the default.
+func SetFallbackPriceModel(model string) {
+	m := strings.ToLower(strings.TrimSpace(model))
+	if m == "" {
+		m = DefaultFallbackPriceModel
+	}
+	fallbackPriceModel.Store(m)
+}
+
+// FallbackPriceModel returns the current fallback model name.
+func FallbackPriceModel() string {
+	if v, ok := fallbackPriceModel.Load().(string); ok {
+		return v
+	}
+	return DefaultFallbackPriceModel
+}
 
 func lookupPrice(model string, pricing map[string]config.ModelPrice) (config.ModelPrice, bool) {
 	normalized := strings.ToLower(strings.TrimSpace(model))
@@ -79,7 +103,7 @@ func lookupPrice(model string, pricing map[string]config.ModelPrice) (config.Mod
 		}
 	}
 	// Last resort: cost unmatched models at the fallback model's price (when present).
-	if fb, ok := pricing[FallbackPriceModel]; ok {
+	if fb, ok := pricing[FallbackPriceModel()]; ok {
 		return fb, true
 	}
 	return config.ModelPrice{}, false

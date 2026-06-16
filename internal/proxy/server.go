@@ -31,7 +31,7 @@ import (
 )
 
 // AppVersion is the gateway build version, surfaced in /auth/me and the admin UI.
-const AppVersion = "v0.10.7"
+const AppVersion = "v0.10.8"
 
 type Server struct {
 	cfg          config.Config
@@ -60,7 +60,8 @@ type Server struct {
 	chSinkStarted bool                                   // true once the startup worker apply has run (gates reload-time restarts)
 	carbonRuntime atomic.Pointer[config.CarbonConfig]    // admin-settings overlay over cfg.Carbon
 	insRuntime    atomic.Pointer[config.InsuranceConfig] // admin-settings overlay over cfg.Insurance
-	cacheRuntime  atomic.Pointer[config.CacheConfig]     // admin-settings overlay over cfg.Cache
+	cacheRuntime   atomic.Pointer[config.CacheConfig]     // admin-settings overlay over cfg.Cache
+	pricingRuntime atomic.Pointer[config.PricingConfig]   // admin-settings overlay over cfg.PricingConf
 	chFactQueue   chan store.LogRecord                   // async per-request fact ingest queue (bounded)
 	chFactDropped atomic.Int64                           // requests dropped when the fact queue was full
 	sessions     *sessionInferer

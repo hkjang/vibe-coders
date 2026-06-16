@@ -42,8 +42,17 @@ func (s *Server) pricingMap(ctx context.Context) map[string]config.ModelPrice {
 
 func (s *Server) invalidatePricingCache() { s.priceCache.Store(nil) }
 
-// usdToKRW is the conversion rate used when seeding USD-quoted public prices.
+// usdToKRW is the default conversion rate used when seeding USD-quoted public prices.
 const usdToKRW = 1380.0
+
+// usdKRWRate returns the effective USD→KRW seed rate: the runtime-adjustable
+// pricing.usd_krw setting when positive, otherwise the built-in default.
+func (s *Server) usdKRWRate() float64 {
+	if r := s.pricingConf().USDToKRW; r > 0 {
+		return r
+	}
+	return usdToKRW
+}
 
 // pricingCatalogEntry is a built-in seed price (per 1M tokens).
 type pricingCatalogEntry struct {
@@ -167,6 +176,7 @@ func (s *Server) handlePricingSeed(w http.ResponseWriter, r *http.Request) {
 	}
 	existing, _ := s.db.LatestPricing(r.Context())
 	overwrite := strings.TrimSpace(r.URL.Query().Get("overwrite")) == "1"
+	rate := s.usdKRWRate()
 	added := 0
 	for _, e := range builtinPricingCatalog {
 		if _, ok := existing[e.model]; ok && !overwrite {
@@ -174,9 +184,9 @@ func (s *Server) handlePricingSeed(w http.ResponseWriter, r *http.Request) {
 		}
 		v := store.ModelPricingVersion{
 			ID: newID("price"), Model: e.model,
-			InputKRWPer1M: round2(e.inUSD * usdToKRW), OutputKRWPer1M: round2(e.outUSD * usdToKRW),
-			CachedInputKRWPer1M: round2(e.cachedUSD * usdToKRW), Source: e.source,
-			Note: "seeded from research catalog (USD×" + formatKRW(usdToKRW) + ")",
+			InputKRWPer1M: round2(e.inUSD * rate), OutputKRWPer1M: round2(e.outUSD * rate),
+			CachedInputKRWPer1M: round2(e.cachedUSD * rate), Source: e.source,
+			Note: "seeded from research catalog (USD×" + formatKRW(rate) + ")",
 		}
 		if err := s.db.InsertPricingVersion(r.Context(), v); err == nil {
 			added++
@@ -198,13 +208,14 @@ func (s *Server) seedPricingIfEmpty(ctx context.Context) {
 	if len(existing) > 0 {
 		return // already has managed prices — never clobber on boot
 	}
+	rate := s.usdKRWRate()
 	seeded := 0
 	for _, e := range builtinPricingCatalog {
 		v := store.ModelPricingVersion{
 			ID: newID("price"), Model: e.model,
-			InputKRWPer1M: round2(e.inUSD * usdToKRW), OutputKRWPer1M: round2(e.outUSD * usdToKRW),
-			CachedInputKRWPer1M: round2(e.cachedUSD * usdToKRW), Source: e.source,
-			Note: "auto-seeded at startup from research catalog (USD×" + formatKRW(usdToKRW) + ")",
+			InputKRWPer1M: round2(e.inUSD * rate), OutputKRWPer1M: round2(e.outUSD * rate),
+			CachedInputKRWPer1M: round2(e.cachedUSD * rate), Source: e.source,
+			Note: "auto-seeded at startup from research catalog (USD×" + formatKRW(rate) + ")",
 		}
 		if err := s.db.InsertPricingVersion(ctx, v); err == nil {
 			seeded++

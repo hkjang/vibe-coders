@@ -289,7 +289,7 @@ func lookupModelPrice(model string, pricing map[string]config.ModelPrice) (confi
 			return p, true
 		}
 	}
-	if fb, ok := pricing[audit.FallbackPriceModel]; ok {
+	if fb, ok := pricing[audit.FallbackPriceModel()]; ok {
 		return fb, true
 	}
 	return config.ModelPrice{}, false

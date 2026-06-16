@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"vibe-coders/internal/audit"
 	"vibe-coders/internal/config"
 	"vibe-coders/internal/store"
 )
@@ -174,6 +175,10 @@ func buildSettingRegistry() []settingDef {
 		{Key: "retention.response_days", Category: "retention", Type: stInt, validate: posInt, envValue: func(c config.Config) string { return strconv.Itoa(c.Retention.ResponseDays) }},
 		{Key: "retention.text2sql_replay_days", Category: "retention", Type: stInt, validate: posInt, envValue: func(c config.Config) string { return strconv.Itoa(c.Retention.Text2SQLReplayDays) }},
 		{Key: "retention.interval", Category: "retention", Type: stDuration, Restart: true, validate: dur, envValue: func(c config.Config) string { return c.Retention.Interval.String() }},
+
+		// ---- Pricing ----
+		{Key: "pricing.fallback_model", Category: "pricing", Type: stString, envValue: func(c config.Config) string { return c.PricingConf.FallbackModel }},
+		{Key: "pricing.usd_krw", Category: "pricing", Type: stFloat, validate: posFloat, envValue: func(c config.Config) string { return strconv.FormatFloat(c.PricingConf.USDToKRW, 'f', -1, 64) }},
 	}
 }
 
@@ -252,6 +257,9 @@ var settingDescriptions = map[string]string{
 	"retention.response_days":        "응답 본문 보존 일수.",
 	"retention.text2sql_replay_days": "Text2SQL Replay Bundle 보존 일수.",
 	"retention.interval":             "보존 정리 워커 실행 주기(예: 6h). 변경 시 ticker 재생성.",
+	// Pricing
+	"pricing.fallback_model": "가격표에 매칭되지 않는 모델의 비용을 계산할 기준 모델(기본 qwen-plus). 해당 모델이 가격표에 있어야 적용, 없으면 0 처리.",
+	"pricing.usd_krw":        "가격 카탈로그 시드 시 USD→KRW 환율(기본 1380). 변경 후 /admin/pricing/seed?overwrite=1로 재적용.",
 }
 
 // t2sConf returns the effective Text2SQL config (admin-settings overlay over env/default).
@@ -294,6 +302,14 @@ func (s *Server) cacheConf() config.CacheConfig {
 	return s.cfg.Cache
 }
 
+// pricingConf returns the effective pricing policy (admin-settings overlay over env/default).
+func (s *Server) pricingConf() config.PricingConfig {
+	if p := s.pricingRuntime.Load(); p != nil {
+		return *p
+	}
+	return s.cfg.PricingConf
+}
+
 // reloadRuntimeConfig rebuilds the Text2SQL/ClickHouse runtime snapshots from env defaults
 // overlaid with admin-managed settings. Called at startup and after every settings change.
 func (s *Server) reloadRuntimeConfig(ctx context.Context) {
@@ -315,6 +331,7 @@ func (s *Server) reloadRuntimeConfig(ctx context.Context) {
 	ins := s.cfg.Insurance
 	cache := s.cfg.Cache
 	ret := s.cfg.Retention
+	pricing := s.cfg.PricingConf
 	for _, d := range settingRegistry {
 		if _, ok := stored[d.Key]; !ok {
 			continue
@@ -323,13 +340,15 @@ func (s *Server) reloadRuntimeConfig(ctx context.Context) {
 		if source != "admin" {
 			continue
 		}
-		applyRuntimeSetting(&t2s, &ch, &carbon, &ins, &cache, &ret, d.Key, val)
+		applyRuntimeSetting(&t2s, &ch, &carbon, &ins, &cache, &ret, &pricing, d.Key, val)
 	}
 	s.t2sRuntime.Store(&t2s)
 	s.chRuntime.Store(&ch)
 	s.carbonRuntime.Store(&carbon)
 	s.insRuntime.Store(&ins)
 	s.cacheRuntime.Store(&cache)
+	s.pricingRuntime.Store(&pricing)
+	audit.SetFallbackPriceModel(pricing.FallbackModel) // apply the runtime fallback model
 	// Apply retention changes to the running worker (day thresholds next run; interval recreates the ticker).
 	if s.retention != nil && prevRet != ret {
 		s.retention.Reconfigure(ret)
@@ -353,7 +372,7 @@ func (s *Server) reloadRuntimeConfig(ctx context.Context) {
 	}
 }
 
-func applyRuntimeSetting(t2s *config.Text2SQLConfig, ch *config.ClickHouseConfig, carbon *config.CarbonConfig, ins *config.InsuranceConfig, cache *config.CacheConfig, ret *config.RetentionConfig, key, val string) {
+func applyRuntimeSetting(t2s *config.Text2SQLConfig, ch *config.ClickHouseConfig, carbon *config.CarbonConfig, ins *config.InsuranceConfig, cache *config.CacheConfig, ret *config.RetentionConfig, pricing *config.PricingConfig, key, val string) {
 	val = strings.TrimSpace(val)
 	atoi := func() int { n, _ := strconv.Atoi(val); return n }
 	atof := func() float64 { f, _ := strconv.ParseFloat(val, 64); return f }
@@ -508,6 +527,10 @@ func applyRuntimeSetting(t2s *config.Text2SQLConfig, ch *config.ClickHouseConfig
 		ret.Text2SQLReplayDays = atoi()
 	case "retention.interval":
 		ret.Interval = adur(ret.Interval)
+	case "pricing.fallback_model":
+		pricing.FallbackModel = val
+	case "pricing.usd_krw":
+		pricing.USDToKRW = atof()
 	}
 }
 

@@ -25,9 +25,10 @@ type Config struct {
 	VCS        VCSConfig
 	Text2SQL   Text2SQLConfig
 	ClickHouse ClickHouseConfig
-	Carbon     CarbonConfig
-	Insurance  InsuranceConfig
-	Pricing    map[string]ModelPrice
+	Carbon      CarbonConfig
+	Insurance   InsuranceConfig
+	Pricing     map[string]ModelPrice
+	PricingConf PricingConfig
 }
 
 // InsuranceConfig parameterizes the AI Request Insurance view: an SLA-claims ledger
@@ -186,6 +187,13 @@ type Text2SQLConfig struct {
 	// falls back to the execute DB.
 	TwinDSN    string
 	TwinDriver string
+}
+
+// PricingConfig holds runtime-adjustable pricing policy: the fallback model whose price
+// costs unmatched models, and the USD→KRW rate used when seeding the built-in catalog.
+type PricingConfig struct {
+	FallbackModel string  // model name used to cost unmatched models; "" → qwen-plus
+	USDToKRW      float64 // USD→KRW conversion applied at catalog seed time
 }
 
 // ClickHouseConfig configures the long-term analytics sink. When URL is empty the
@@ -365,6 +373,10 @@ func Load() (Config, error) {
 			MaxQueueSize:      intEnv("CLICKHOUSE_MAX_QUEUE_SIZE", 10000),
 		},
 		Pricing: map[string]ModelPrice{},
+		PricingConf: PricingConfig{
+			FallbackModel: getEnv("PRICING_FALLBACK_MODEL", "qwen-plus"),
+			USDToKRW:      floatEnv("PRICING_USD_KRW", 1380.0),
+		},
 	}
 
 	if cfg.Upstream.BaseURL == "" {
