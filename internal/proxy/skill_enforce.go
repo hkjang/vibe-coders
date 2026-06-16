@@ -15,7 +15,7 @@ import (
 // allowed_models / allowed_tools policy hints. Both lists are comma-separated globs;
 // an empty list means "no restriction" for that dimension. It returns a human-readable
 // violation message per failing item (empty slice = request complies).
-func evaluateSkillPolicy(sk store.Skill, model string, tools []string) []string {
+func evaluateSkillPolicy(sk store.Skill, model string, tools []string, team string) []string {
 	var violations []string
 	if allowed := splitSkillList(sk.AllowedModels); len(allowed) > 0 && strings.TrimSpace(model) != "" {
 		if !listAllows(model, allowed, nil) {
@@ -30,6 +30,11 @@ func evaluateSkillPolicy(sk store.Skill, model string, tools []string) []string 
 			if !listAllows(t, allowed, nil) {
 				violations = append(violations, "tool '"+t+"' is not in the skill's allowed_tools ("+sk.AllowedTools+")")
 			}
+		}
+	}
+	if allowed := splitSkillList(sk.AllowedTeams); len(allowed) > 0 {
+		if !listAllows(team, allowed, nil) {
+			violations = append(violations, "team '"+team+"' is not in the skill's allowed_teams ("+sk.AllowedTeams+")")
 		}
 	}
 	return violations
@@ -159,7 +164,11 @@ func (rc *requestPipeline) stepSkill() bool {
 	rc.skillTools = strings.Join(tools, ",")
 	w.Header().Set("X-Vibe-Skill-Version", sk.Version)
 
-	violations := evaluateSkillPolicy(sk, rc.meta.Request.Model, tools)
+	team := ""
+	if rc.authCtx != nil {
+		team = rc.authCtx.TeamID
+	}
+	violations := evaluateSkillPolicy(sk, rc.meta.Request.Model, tools, team)
 	detail := strings.Join(violations, "; ")
 
 	// enforce mode blocks on any violation (no injection).

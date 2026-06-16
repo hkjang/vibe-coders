@@ -5109,7 +5109,7 @@ const adminHTML = `<!doctype html>
     window.skillEdit = (name) => {
       const ed = document.getElementById('skill-editor');
       if (!ed) return;
-      const sk = (name && window._skillsByName && window._skillsByName[name]) || { name: '', description: '', version: '0.1.0', owner: '', status: 'draft', risk_level: 'low', allowed_models: '', allowed_tools: '', instructions: '' };
+      const sk = (name && window._skillsByName && window._skillsByName[name]) || { name: '', description: '', version: '0.1.0', owner: '', status: 'draft', risk_level: 'low', allowed_models: '', allowed_tools: '', allowed_teams: '', instructions: '' };
       const sel = (id, val, opts) => '<label class="muted">' + id + ' <select id="sk-' + id + '">' + opts.map(o => '<option value="' + o + '"' + (o === val ? ' selected' : '') + '>' + o + '</option>').join('') + '</select></label>';
       ed.style.display = '';
       ed.innerHTML = '<h2>' + (name ? ('편집: ' + escapeHTML(name)) : '새 Skill') + '</h2><div class="card-body">' +
@@ -5125,6 +5125,7 @@ const adminHTML = `<!doctype html>
           '<label class="muted" style="flex:1">allowed_models (glob, 콤마) <input id="sk-allowed_models" style="width:100%" value="' + escapeAttr(sk.allowed_models || '') + '"></label>' +
           '<label class="muted" style="flex:1">allowed_tools (콤마) <input id="sk-allowed_tools" style="width:100%" value="' + escapeAttr(sk.allowed_tools || '') + '"></label>' +
         '</div>' +
+        '<label class="muted" style="display:block;margin-bottom:6px">allowed_teams (팀 glob, 콤마; 비우면 전체 허용) <input id="sk-allowed_teams" style="width:100%" value="' + escapeAttr(sk.allowed_teams || '') + '"></label>' +
         '<label class="muted" style="display:block">instructions <textarea id="sk-instructions" style="width:100%;min-height:120px">' + escapeHTML(sk.instructions || '') + '</textarea></label>' +
         '<div style="margin-top:8px"><button type="button" onclick="skillSave()">저장</button> <button class="secondary" type="button" onclick="document.getElementById(\'skill-editor\').style.display=\'none\'">닫기</button></div>' +
         '</div>';
@@ -5135,7 +5136,7 @@ const adminHTML = `<!doctype html>
       const body = {
         name: val('name'), version: val('version'), owner: val('owner'), status: val('status'),
         risk_level: val('risk_level'), description: val('description'),
-        allowed_models: val('allowed_models'), allowed_tools: val('allowed_tools'), instructions: val('instructions'),
+        allowed_models: val('allowed_models'), allowed_tools: val('allowed_tools'), allowed_teams: val('allowed_teams'), instructions: val('instructions'),
       };
       const out = document.getElementById('skill-action-result');
       try {

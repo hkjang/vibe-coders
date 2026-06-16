@@ -117,7 +117,7 @@ func TestEvaluateSkillPolicy(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			v := evaluateSkillPolicy(sk, tc.model, tc.tools)
+			v := evaluateSkillPolicy(sk, tc.model, tc.tools, "")
 			if (len(v) == 0) != tc.wantOK {
 				t.Fatalf("model=%q tools=%v → violations=%v, wantOK=%v", tc.model, tc.tools, v, tc.wantOK)
 			}
@@ -125,8 +125,17 @@ func TestEvaluateSkillPolicy(t *testing.T) {
 	}
 
 	// No restrictions configured → everything passes.
-	if v := evaluateSkillPolicy(store.Skill{}, "anything", []string{"any-tool"}); len(v) != 0 {
+	if v := evaluateSkillPolicy(store.Skill{}, "anything", []string{"any-tool"}, "any-team"); len(v) != 0 {
 		t.Fatalf("unrestricted skill should allow all, got %v", v)
+	}
+
+	// allowed_teams gating.
+	teamSk := store.Skill{AllowedTeams: "team_pay, team_data"}
+	if v := evaluateSkillPolicy(teamSk, "", nil, "team_pay"); len(v) != 0 {
+		t.Fatalf("team_pay should be allowed, got %v", v)
+	}
+	if v := evaluateSkillPolicy(teamSk, "", nil, "team_other"); len(v) == 0 {
+		t.Fatal("team_other should be blocked by allowed_teams")
 	}
 }
 
