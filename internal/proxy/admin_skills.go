@@ -343,6 +343,22 @@ func (s *Server) handleSkillPromote(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusUnprocessableEntity, "promotion gate: "+reason, "invalid_request_error", "promotion_gate")
 		return
 	}
+	// Security gate: a skill with high-severity scan findings cannot reach production.
+	if to == "production" {
+		if scan := scanSkillSecurity(sk); scan.HighCount > 0 {
+			details := make([]string, 0, len(scan.Findings))
+			for _, f := range scan.Findings {
+				if f.Severity == "high" {
+					details = append(details, f.Category+" ("+f.Detail+")")
+				}
+			}
+			writeJSON(w, http.StatusUnprocessableEntity, map[string]any{
+				"error": map[string]any{"message": "security gate: skill has high-severity findings: " + strings.Join(details, "; "), "type": "invalid_request_error", "code": "security_gate"},
+				"scan":  scan,
+			})
+			return
+		}
+	}
 	saved, err := s.db.PromoteSkill(r.Context(), name, to, strings.TrimSpace(p.Version), s.skillActor(r), strings.TrimSpace(p.Note))
 	if err != nil {
 		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "skill_promote_failed")
@@ -365,6 +381,45 @@ func (s *Server) handleSkillPromotions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"promotions": proms})
+}
+
+// handleSkillScan runs the security scanner over one skill (?name=) or all skills (no name).
+// GET /admin/skills/scan?name=
+func (s *Server) handleSkillScan(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	name := strings.TrimSpace(r.URL.Query().Get("name"))
+	if name != "" {
+		sk, found, err := s.db.GetSkill(r.Context(), name)
+		if err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "skill_failed")
+			return
+		}
+		if !found {
+			writeOpenAIError(w, http.StatusNotFound, "skill not found", "invalid_request_error", "not_found")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"name": sk.Name, "scan": scanSkillSecurity(sk)})
+		return
+	}
+	skills, err := s.db.ListSkills(r.Context(), "")
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "skills_failed")
+		return
+	}
+	items := make([]map[string]any, 0, len(skills))
+	for _, sk := range skills {
+		res := scanSkillSecurity(sk)
+		items = append(items, map[string]any{
+			"name": sk.Name, "status": sk.Status, "risk_level": sk.RiskLevel,
+			"max_severity": res.MaxSeverity, "high_count": res.HighCount,
+			"medium_count": res.MediumCount, "low_count": res.LowCount,
+			"clean": res.Clean, "findings": res.Findings,
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"scans": items})
 }
 
 // handleSkillStats returns per-skill execution aggregates over a time window — the

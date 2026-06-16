@@ -5052,6 +5052,7 @@ const adminHTML = `<!doctype html>
           '</select></label>' +
           '<button type="button" onclick="skillEdit()">새 Skill</button>' +
           '<button class="secondary" type="button" onclick="skillSeedRecommended()">추천 Skill 시드</button>' +
+          '<button class="secondary" type="button" onclick="skillScanAll()">보안 스캔</button>' +
           '<span id="skill-action-result" class="muted"></span>' +
         '</div></div>';
 
@@ -5176,6 +5177,23 @@ const adminHTML = `<!doctype html>
         (proms.length ? '<table><thead><tr><th>시각</th><th>전이</th><th>버전</th><th>수행자</th><th>사유</th></tr></thead><tbody>' +
           proms.map(p => '<tr><td>' + ago(p.created_at) + '</td><td>' + escapeHTML(p.from_status) + ' → <strong>' + escapeHTML(p.to_status) + '</strong></td><td>' + escapeHTML(p.from_version) + ' → ' + escapeHTML(p.to_version) + '</td><td>' + escapeHTML(p.actor || '') + '</td><td class="muted">' + escapeHTML(p.note || '') + '</td></tr>').join('') + '</tbody></table>'
           : '<div class="empty">승격 이력이 없습니다.' + (d._err ? '<div class="muted">' + escapeHTML(d._err) + '</div>' : '') + '</div>') +
+        '</div>';
+      sec.scrollIntoView({ behavior: 'smooth' });
+    };
+    window.skillScanAll = async () => {
+      const sec = document.getElementById('skill-runs');
+      if (!sec) return;
+      const d = await api('/admin/skills/scan').catch(e => ({ scans: [], _err: e.message }));
+      const scans = d.scans || [];
+      const sev = (s) => s === 'high' ? '<span class="status error">high</span>' : (s === 'medium' ? '<span class="status warn">medium</span>' : (s === 'low' ? '<span class="status">low</span>' : '<span class="status">clean</span>'));
+      sec.style.display = '';
+      sec.innerHTML = '<h2>보안 스캔 ' + (scans.length ? '(' + scans.length + ')' : '') + '</h2><div class="card-body">' +
+        '<p class="muted">instructions·metadata의 임베딩 시크릿·프롬프트 인젝션 문구·파괴적 명령, 정책 위생(무제한 모델/도구)을 점검합니다. high 발견 시 production 승격이 차단됩니다.</p>' +
+        (scans.length ? '<table><thead><tr><th>Skill</th><th>상태</th><th>위험</th><th>최고 심각도</th><th>발견</th><th>상세</th></tr></thead><tbody>' +
+          scans.map(s => '<tr><td><strong>' + escapeHTML(s.name) + '</strong></td><td>' + escapeHTML(s.status) + '</td><td>' + escapeHTML(s.risk_level) + '</td><td>' + sev(s.max_severity) + '</td>' +
+            '<td>' + (s.clean ? '<span class="muted">없음</span>' : ('H' + s.high_count + ' / M' + s.medium_count + ' / L' + s.low_count)) + '</td>' +
+            '<td class="muted" style="font-size:11px">' + (s.findings || []).map(f => escapeHTML(f.category)).join(', ') + '</td></tr>').join('') + '</tbody></table>'
+          : '<div class="empty">스캔할 Skill이 없습니다.' + (d._err ? '<div class="muted">' + escapeHTML(d._err) + '</div>' : '') + '</div>') +
         '</div>';
       sec.scrollIntoView({ behavior: 'smooth' });
     };
