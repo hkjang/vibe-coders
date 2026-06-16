@@ -12,6 +12,55 @@ import (
 	"vibe-coders/internal/store"
 )
 
+func TestOKFGraphSync(t *testing.T) {
+	db := openTestStore(t)
+	defer db.Close()
+	logger := store.NewAsyncLogger(db, 8, filepath.Join(t.TempDir(), "g.ndjson"))
+	logger.Start()
+	defer logger.Stop(context.Background())
+	server, err := NewServer(testConfig("http://upstream.invalid", "secret"), db, logger, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(server.Routes())
+	defer srv.Close()
+
+	ctx := context.Background()
+	if err := db.UpsertAPIKey(ctx, store.APIKeyRecord{ID: "key_a", Name: "svc", KeyHash: "h", Team: "team_pay", UserID: "user_1", Role: "developer", Status: "active"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.UpsertProvider(ctx, store.ProviderConfig{Name: "openai", BaseURL: "http://oai.local", ModelPatterns: "gpt-*", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	resp, err := http.Post(srv.URL+"/admin/okf/graph/sync", "application/json", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("graph sync = %d", resp.StatusCode)
+	}
+
+	// api_key → team / user edges.
+	links, err := db.ListOKFLinks(ctx, "api_key:key_a", "", "", 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rels := map[string]string{}
+	for _, l := range links {
+		rels[l.Relation] = l.ToSubject
+	}
+	if rels["in_team"] != "team:team_pay" || rels["owned_by"] != "user:user_1" {
+		t.Fatalf("expected key→team/user edges, got %+v", rels)
+	}
+	// model glob → upstream edge (explains routing target).
+	served, err := db.ListOKFLinks(ctx, "model:gpt-*", "", "served_by", 50)
+	if err != nil || len(served) != 1 || served[0].ToSubject != "upstream:openai" {
+		t.Fatalf("expected model→upstream edge, got %v %+v", err, served)
+	}
+}
+
 func TestOKFDocumentsLinksExportImport(t *testing.T) {
 	db := openTestStore(t)
 	defer db.Close()

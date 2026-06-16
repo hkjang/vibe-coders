@@ -137,6 +137,131 @@ func (s *Server) handleOKFText2SQLSync(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"schema": schema, "table_docs": tableDocs, "column_docs": colDocs, "sample_docs": sampleDocs})
 }
 
+// okfSlug makes a short, stable, human-readable subject suffix from free text.
+func okfSlug(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	var b strings.Builder
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+		case r == ' ' || r == '\t' || r == '-' || r == '_':
+			b.WriteByte('-')
+		}
+		if b.Len() >= 60 {
+			break
+		}
+	}
+	out := strings.Trim(b.String(), "-")
+	if out == "" {
+		out = "item"
+	}
+	return out
+}
+
+// handleOKFGraphSync derives the gateway knowledge graph from existing entities: API keys
+// linked to their owner/team, and models linked to the upstream that serves them. These
+// edges make "왜 이 요청이 이 모델/업스트림으로 갔는지" explainable from OKF links.
+// POST /admin/okf/graph/sync
+func (s *Server) handleOKFGraphSync(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	if r.Method != http.MethodPost {
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
+	ctx := r.Context()
+	actor := s.okfActor(r)
+	docs, links := 0, 0
+
+	if keys, err := s.db.ListAPIKeys(ctx); err == nil {
+		for _, k := range keys {
+			if _, err := s.db.UpsertOKFDocument(ctx, store.OKFDocument{
+				Kind: "entity", Subject: "api_key:" + k.ID, Title: firstNonEmpty(k.Name, k.ID),
+				Body: "role=" + k.Role + (map[bool]string{true: ", status=" + k.Status, false: ""})[k.Status != ""],
+				Source: "derived:graph", Status: "active",
+			}, actor); err == nil {
+				docs++
+			}
+			if strings.TrimSpace(k.UserID) != "" {
+				if _, err := s.db.UpsertOKFLink(ctx, store.OKFLink{FromSubject: "api_key:" + k.ID, Relation: "owned_by", ToSubject: "user:" + k.UserID, Source: "derived:graph"}); err == nil {
+					links++
+				}
+			}
+			if strings.TrimSpace(k.Team) != "" {
+				if _, err := s.db.UpsertOKFLink(ctx, store.OKFLink{FromSubject: "api_key:" + k.ID, Relation: "in_team", ToSubject: "team:" + k.Team, Source: "derived:graph"}); err == nil {
+					links++
+				}
+			}
+		}
+	}
+
+	if provs, err := s.db.ListProviderConfigs(ctx); err == nil {
+		for _, p := range provs {
+			if _, err := s.db.UpsertOKFDocument(ctx, store.OKFDocument{
+				Kind: "entity", Subject: "upstream:" + p.Name, Title: p.Name, Body: p.BaseURL,
+				Source: "derived:graph", Status: "active",
+			}, actor); err == nil {
+				docs++
+			}
+			for _, pat := range strings.Split(p.ModelPatterns, ",") {
+				pat = strings.TrimSpace(pat)
+				if pat == "" {
+					continue
+				}
+				if _, err := s.db.UpsertOKFLink(ctx, store.OKFLink{FromSubject: "model:" + pat, Relation: "served_by", ToSubject: "upstream:" + p.Name, Source: "derived:graph"}); err == nil {
+					links++
+				}
+			}
+		}
+	}
+
+	s.auditAdmin(r, "okf.graph.sync", "", auditJSON(map[string]any{"entity_docs": docs, "links": links}))
+	writeJSON(w, http.StatusOK, map[string]any{"entity_docs": docs, "links": links})
+}
+
+// handleOKFPropose is the agent self-improvement loop: it mines recurring Text2SQL questions
+// (report candidates) into PROPOSED OKF sample_sql documents for human review. Approving a
+// proposal = re-saving it with status "active" (POST /admin/okf/documents). Nothing is added
+// to the active knowledge base automatically.
+// POST /admin/okf/propose?window=30d&min_count=3
+func (s *Server) handleOKFPropose(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	if r.Method != http.MethodPost {
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
+	since := parseWindow(r.URL.Query().Get("window"), 30*24*time.Hour, "day")
+	minCount := intQuery(r, "min_count", 3)
+	cands, err := s.db.Text2SQLReportCandidates(r.Context(), since, minCount, 100)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "propose_failed")
+		return
+	}
+	actor := s.okfActor(r)
+	proposed := []map[string]any{}
+	for _, c := range cands {
+		if strings.TrimSpace(c.SampleSQL) == "" {
+			continue
+		}
+		attrs := auditJSON(map[string]any{"count": c.Count, "recommended_product": c.RecommendedProduct, "origin": "report_candidate"})
+		doc, err := s.db.UpsertOKFDocument(r.Context(), store.OKFDocument{
+			Kind: "sample_sql", Subject: "sample_sql:proposed:" + okfSlug(c.Question), Title: c.Question,
+			Body: c.SampleSQL, Attributes: attrs, Source: "proposed:miner", Status: "proposed",
+		}, actor)
+		if err == nil {
+			proposed = append(proposed, map[string]any{"id": doc.ID, "subject": doc.Subject, "count": c.Count})
+		}
+	}
+	s.auditAdmin(r, "okf.propose", "", auditJSON(map[string]any{"proposed": len(proposed)}))
+	writeJSON(w, http.StatusOK, map[string]any{"proposed": len(proposed), "documents": proposed, "note": "status=proposed; review and re-save with status=active to approve"})
+}
+
 // okfActor returns the caller identity for OKF audit/authorship.
 func (s *Server) okfActor(r *http.Request) string {
 	if claims, ok := s.currentAccessClaims(r); ok && strings.TrimSpace(claims.Subject) != "" {

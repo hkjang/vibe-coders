@@ -194,6 +194,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/admin/okf/export", s.handleOKFExport)
 	mux.HandleFunc("/admin/okf/import", s.handleOKFImport)
 	mux.HandleFunc("/admin/okf/text2sql/sync", s.handleOKFText2SQLSync)
+	mux.HandleFunc("/admin/okf/graph/sync", s.handleOKFGraphSync)
+	mux.HandleFunc("/admin/okf/propose", s.handleOKFPropose)
 	mux.HandleFunc("/admin/dw/clickhouse", s.handleClickHouseSink)
 	mux.HandleFunc("/admin/dw/clickhouse/bootstrap", s.handleClickHouseBootstrap)
 	mux.HandleFunc("/admin/dw/clickhouse/overview", s.handleClickHouseOverview)
