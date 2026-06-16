@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+	"time"
 
 	"vibe-coders/internal/store"
 )
@@ -262,6 +263,36 @@ func (s *Server) handleSkillSeedRecommended(w http.ResponseWriter, r *http.Reque
 	}
 	s.auditAdmin(r, "skill.seed_recommended", strings.Join(seeded, ","), "")
 	writeJSON(w, http.StatusOK, map[string]any{"seeded": seeded})
+}
+
+// handleSkillStats returns per-skill execution aggregates over a time window — the
+// observability/cost view: runs, ok/error/blocked counts, block rate, total cost, avg
+// latency, distinct actors, last run.
+// GET /admin/skills/stats?window=
+func (s *Server) handleSkillStats(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	since := parseWindow(r.URL.Query().Get("window"), 30*24*time.Hour, "day")
+	stats, err := s.db.SkillRunStats(r.Context(), since)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "skill_stats_failed")
+		return
+	}
+	items := make([]map[string]any, 0, len(stats))
+	for _, st := range stats {
+		blockRate := 0.0
+		if st.Runs > 0 {
+			blockRate = float64(st.Blocked) / float64(st.Runs)
+		}
+		items = append(items, map[string]any{
+			"skill_name": st.SkillName, "runs": st.Runs, "ok": st.OK, "errors": st.Errors,
+			"blocked": st.Blocked, "block_rate": blockRate, "total_cost_krw": st.TotalCostKRW,
+			"avg_latency_ms": st.AvgLatencyMS, "actors": st.Actors, "last_run_at": st.LastRunAt,
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"window_since": since.UTC().Format(time.RFC3339), "stats": items})
 }
 
 // handleSkillRuns returns the skill execution log (optionally for one skill).

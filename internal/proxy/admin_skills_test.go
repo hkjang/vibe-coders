@@ -114,6 +114,66 @@ func TestSkillEnforceBlocks(t *testing.T) {
 	}
 }
 
+func TestSkillStats(t *testing.T) {
+	db := openTestStore(t)
+	defer db.Close()
+	logger := store.NewAsyncLogger(db, 8, filepath.Join(t.TempDir(), "st.ndjson"))
+	logger.Start()
+	defer logger.Stop(context.Background())
+	server, err := NewServer(testConfig("http://upstream.invalid", "secret"), db, logger, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(server.Routes())
+	defer srv.Close()
+
+	ctx := context.Background()
+	runs := []store.SkillRun{
+		{SkillName: "alpha", Status: "ok", Model: "gpt-4o", Actor: "a", CostKRW: 10, LatencyMS: 100},
+		{SkillName: "alpha", Status: "ok", Model: "gpt-4o", Actor: "b", CostKRW: 20, LatencyMS: 200},
+		{SkillName: "alpha", Status: "blocked", Model: "claude", Actor: "a"},
+		{SkillName: "beta", Status: "error", Model: "x", Actor: "c", CostKRW: 5, LatencyMS: 50},
+	}
+	for _, rn := range runs {
+		if err := db.RecordSkillRun(ctx, rn); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	resp, _ := http.Get(srv.URL + "/admin/skills/stats")
+	var out struct {
+		Stats []struct {
+			SkillName    string  `json:"skill_name"`
+			Runs         int64   `json:"runs"`
+			OK           int64   `json:"ok"`
+			Blocked      int64   `json:"blocked"`
+			BlockRate    float64 `json:"block_rate"`
+			TotalCostKRW float64 `json:"total_cost_krw"`
+			AvgLatencyMS float64 `json:"avg_latency_ms"`
+			Actors       int64   `json:"actors"`
+		} `json:"stats"`
+	}
+	json.NewDecoder(resp.Body).Decode(&out)
+	resp.Body.Close()
+	if len(out.Stats) != 2 {
+		t.Fatalf("expected 2 skills, got %d (%+v)", len(out.Stats), out.Stats)
+	}
+	// Busiest first → alpha.
+	a := out.Stats[0]
+	if a.SkillName != "alpha" || a.Runs != 3 || a.OK != 2 || a.Blocked != 1 {
+		t.Fatalf("alpha aggregate wrong: %+v", a)
+	}
+	if a.TotalCostKRW != 30 || a.Actors != 2 {
+		t.Fatalf("alpha cost/actors wrong: cost=%v actors=%d", a.TotalCostKRW, a.Actors)
+	}
+	if a.BlockRate < 0.33 || a.BlockRate > 0.34 {
+		t.Fatalf("alpha block_rate = %v, want ~0.333", a.BlockRate)
+	}
+	if a.AvgLatencyMS <= 0 {
+		t.Fatalf("alpha avg latency should be > 0, got %v", a.AvgLatencyMS)
+	}
+}
+
 func TestSkillEvaluateAndSeed(t *testing.T) {
 	db := openTestStore(t)
 	defer db.Close()

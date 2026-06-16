@@ -5055,6 +5055,26 @@ const adminHTML = `<!doctype html>
           '<span id="skill-action-result" class="muted"></span>' +
         '</div></div>';
 
+      // Observability/cost summary (last 30d by default).
+      const stats = await api('/admin/skills/stats').catch(() => ({ stats: [] }));
+      const srows = stats.stats || [];
+      if (srows.length) {
+        const pct = (v) => (v * 100).toFixed(1) + '%';
+        html += '<section><h2>실행·비용 요약 <span class="muted" style="font-size:12px">최근 30일</span></h2><div class="card-body">' +
+          '<table><thead><tr><th>Skill</th><th>실행</th><th>성공</th><th>오류</th><th>차단</th><th>차단율</th><th>비용(₩)</th><th>평균 지연(ms)</th><th>사용자</th><th>최근</th></tr></thead><tbody>' +
+          srows.map(st => '<tr><td><strong>' + escapeHTML(st.skill_name) + '</strong></td>' +
+            '<td data-num="' + st.runs + '">' + fmt(st.runs) + '</td>' +
+            '<td data-num="' + st.ok + '">' + fmt(st.ok) + '</td>' +
+            '<td data-num="' + st.errors + '">' + fmt(st.errors) + '</td>' +
+            '<td data-num="' + st.blocked + '">' + fmt(st.blocked) + '</td>' +
+            '<td>' + (st.blocked > 0 ? '<span class="status warn">' + pct(st.block_rate) + '</span>' : pct(st.block_rate)) + '</td>' +
+            '<td data-num="' + st.total_cost_krw + '">' + fmt(Math.round(st.total_cost_krw)) + '</td>' +
+            '<td data-num="' + st.avg_latency_ms + '">' + fmt(Math.round(st.avg_latency_ms)) + '</td>' +
+            '<td data-num="' + st.actors + '">' + fmt(st.actors) + '</td>' +
+            '<td>' + ago(st.last_run_at) + '</td></tr>').join('') +
+          '</tbody></table></div></section>';
+      }
+
       html += '<section><h2>Skill 목록 ' + (skills.length ? '(' + skills.length + ')' : '') + '</h2><div class="card-body">' +
         (skills.length ? '<table><thead><tr><th>이름</th><th>버전</th><th>상태</th><th>위험</th><th>허용 모델</th><th>허용 도구</th><th>수정</th><th></th></tr></thead><tbody>' +
           skills.map(sk => '<tr>' +

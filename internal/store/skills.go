@@ -148,6 +148,54 @@ func (s *SQLStore) RecordSkillRun(ctx context.Context, run SkillRun) error {
 	return err
 }
 
+// SkillRunStat is the aggregated execution profile of one skill over a time window.
+type SkillRunStat struct {
+	SkillName    string  `json:"skill_name"`
+	Runs         int64   `json:"runs"`
+	OK           int64   `json:"ok"`
+	Errors       int64   `json:"errors"`
+	Blocked      int64   `json:"blocked"`
+	TotalCostKRW float64 `json:"total_cost_krw"`
+	AvgLatencyMS float64 `json:"avg_latency_ms"`
+	Actors       int64   `json:"actors"`
+	LastRunAt    string  `json:"last_run_at"`
+}
+
+// SkillRunStats aggregates skill_runs since the given cutoff (RFC3339), one row per skill,
+// busiest first. A zero cutoff time aggregates all runs.
+func (s *SQLStore) SkillRunStats(ctx context.Context, since time.Time) ([]SkillRunStat, error) {
+	q := `SELECT skill_name,
+			COUNT(*),
+			SUM(CASE WHEN status = 'ok' THEN 1 ELSE 0 END),
+			SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END),
+			SUM(CASE WHEN status = 'blocked' THEN 1 ELSE 0 END),
+			COALESCE(SUM(cost_krw), 0),
+			COALESCE(AVG(latency_ms), 0),
+			COUNT(DISTINCT actor),
+			MAX(created_at)
+		FROM skill_runs`
+	args := []any{}
+	if !since.IsZero() {
+		q += " WHERE created_at >= ?"
+		args = append(args, since.UTC().Format(time.RFC3339Nano))
+	}
+	q += " GROUP BY skill_name ORDER BY COUNT(*) DESC"
+	rows, err := s.db.QueryContext(ctx, s.bind(q), args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []SkillRunStat{}
+	for rows.Next() {
+		var st SkillRunStat
+		if err := rows.Scan(&st.SkillName, &st.Runs, &st.OK, &st.Errors, &st.Blocked, &st.TotalCostKRW, &st.AvgLatencyMS, &st.Actors, &st.LastRunAt); err != nil {
+			return nil, err
+		}
+		out = append(out, st)
+	}
+	return out, rows.Err()
+}
+
 // ListSkillRuns returns recent skill runs (optionally for one skill), newest first.
 func (s *SQLStore) ListSkillRuns(ctx context.Context, skillName string, limit int) ([]SkillRun, error) {
 	if limit <= 0 || limit > 1000 {
