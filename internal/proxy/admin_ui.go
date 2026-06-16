@@ -5361,7 +5361,7 @@ const adminHTML = `<!doctype html>
       const dim = sessionStorage.getItem('dwDim') || 'model';
       const order = sessionStorage.getItem('dwOrder') || 'cost';
       const qs = '?window=' + encodeURIComponent(win);
-      const [ov, ts, dims, health, t2s, cons, rout, lat, qual] = await Promise.all([
+      const [ov, ts, dims, health, t2s, cons, rout, lat, qual, sav, mig] = await Promise.all([
         api('/admin/dw/dashboard/overview' + qs).catch(e => ({ _err: e.message })),
         api('/admin/dw/dashboard/timeseries' + qs).catch(() => ({ points: [] })),
         api('/admin/dw/dashboard/dimensions' + qs + '&dimension=' + encodeURIComponent(dim) + '&order_by=' + encodeURIComponent(order) + '&limit=10').catch(() => ({ rows: [] })),
@@ -5371,6 +5371,8 @@ const adminHTML = `<!doctype html>
         api('/admin/dw/dashboard/routing' + qs).catch(() => null),
         api('/admin/dw/dashboard/latency' + qs).catch(() => null),
         api('/admin/dw/dashboard/quality' + qs).catch(() => null),
+        api('/admin/savings' + qs + '&dimension=' + encodeURIComponent(dim === 'all' ? 'project' : dim)).catch(() => null),
+        api('/admin/model-migration' + qs).catch(() => null),
       ]);
 
       if (ov && ov.configured === false) {
@@ -5422,6 +5424,27 @@ const adminHTML = `<!doctype html>
           drows.map(rw => '<tr><td>' + escapeHTML(String(rw.value)) + '</td><td data-num="' + rw.requests + '">' + fmt(Math.round(rw.requests)) + '</td><td data-num="' + rw.tokens + '">' + fmt(Math.round(rw.tokens)) + '</td><td data-num="' + rw.cost_krw + '">' + fmt(Math.round(rw.cost_krw)) + '</td><td>' + ((rw.error_rate || 0) * 100).toFixed(1) + '%</td></tr>').join('') +
           '</tbody></table>' : '<div class="empty">데이터 없음</div>') +
         '</div></section>';
+
+      // 비용 절감 / 모델 전환 — 운영 DB 실시간 계산(savings·migration advisor)을 DW 대시보드에 표면화.
+      const savScopes = (sav && sav.scopes) || [];
+      const migRecs = (mig && mig.recommendations) || [];
+      if (savScopes.length || migRecs.length || (sav && sav.total_savings_krw)) {
+        const scard = (label, val, sub) => '<div style="flex:1;min-width:150px;border:1px solid var(--border,#333);border-radius:8px;padding:10px"><div class="muted" style="font-size:12px">' + label + '</div><div style="font-size:18px;font-weight:600">' + val + '</div>' + (sub ? '<div class="muted" style="font-size:11px">' + sub + '</div>' : '') + '</div>';
+        html += '<section><h2>비용 절감 / 모델 전환 <span class="muted" style="font-size:12px">(운영 DB 실시간)</span></h2><div class="card-body">' +
+          '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:8px">' +
+            scard('총 절감액(₩)', fmt(Math.round((sav && sav.total_savings_krw) || 0)), '다운시프트+캐시') +
+            scard('다운시프트 절감(₩)', fmt(Math.round((sav && sav.total_downshift_savings_krw) || 0))) +
+            scard('캐시 절감(₩)', fmt(Math.round((sav && sav.total_cache_savings_krw) || 0)), '추정') +
+            scard('모델 전환 추천', fmt(Math.round((mig && mig.count) || 0)) + '건') +
+            scard('전환 예상 절감(₩)', fmt(Math.round((mig && mig.total_estimated_savings_krw) || 0))) +
+          '</div>' +
+          (savScopes.length ? '<h3 style="margin-top:6px">절감 Top (' + escapeHTML(String((sav && sav.dimension) || 'project')) + ')</h3><table><thead><tr><th>scope</th><th>다운시프트 건수</th><th>다운시프트 절감(₩)</th><th>캐시 히트</th><th>총 절감(₩)</th></tr></thead><tbody>' +
+            savScopes.map(sc => '<tr><td>' + escapeHTML(String(sc.scope || '')) + '</td><td data-num="' + sc.downshift_requests + '">' + fmt(Math.round(sc.downshift_requests || 0)) + '</td><td data-num="' + sc.downshift_savings_krw + '">' + fmt(Math.round(sc.downshift_savings_krw || 0)) + '</td><td data-num="' + sc.cache_hits + '">' + fmt(Math.round(sc.cache_hits || 0)) + '</td><td data-num="' + sc.total_savings_krw + '">' + fmt(Math.round(sc.total_savings_krw || 0)) + '</td></tr>').join('') + '</tbody></table>' : '') +
+          (migRecs.length ? '<h3 style="margin-top:10px">모델 전환 추천 (현재 → 추천)</h3><table><thead><tr><th>task_type</th><th>요청</th><th>현재 모델</th><th>추천 모델</th><th>성공률(현재→추천)</th><th>예상 절감(₩)</th></tr></thead><tbody>' +
+            migRecs.map(m => '<tr><td>' + escapeHTML(String(m.task_type || '')) + '</td><td data-num="' + m.requests + '">' + fmt(Math.round(m.requests || 0)) + '</td><td>' + escapeHTML(String(m.current_model || '')) + '</td><td>' + escapeHTML(String(m.recommended_model || '')) + '</td><td>' + ((m.current_success_rate || 0) * 100).toFixed(0) + '% → ' + ((m.recommended_success_rate || 0) * 100).toFixed(0) + '%</td><td data-num="' + m.estimated_savings_krw + '">' + fmt(Math.round(m.estimated_savings_krw || 0)) + '</td></tr>').join('') + '</tbody></table>' : '') +
+          '<div class="muted" style="margin-top:8px;font-size:11px">상세 비용·절감 요약은 <a href="#/dashboard">대시보드</a>에서 확인하세요. 절감/전환 추천은 운영 DB의 정확한 모델별 단가 기준 실시간 계산입니다.</div>' +
+          '</div></section>';
+      }
 
       // Text2SQL 분석 (text2sql_fact 설정 시).
       if (t2s && t2s.configured) {
