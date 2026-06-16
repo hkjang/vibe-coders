@@ -47,11 +47,27 @@ func chatPromptText(body []byte) string {
 func (s *Server) embedText(ctx context.Context, r *http.Request, model, text string) ([]float64, error) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	provider, err := s.selectProvider(ctx, r, model)
-	if err != nil {
-		return nil, err
+	cfg := s.cacheConf()
+	var baseURL, apiKey string
+	if strings.TrimSpace(cfg.EmbeddingBaseURL) != "" {
+		// Dedicated embedding endpoint (e.g. a local embedding server). Use its own key
+		// when provided, else fall back to the default upstream provider's key.
+		baseURL = cfg.EmbeddingBaseURL
+		apiKey = cfg.EmbeddingAPIKey
+		if strings.TrimSpace(apiKey) == "" {
+			if provider, perr := s.selectProvider(ctx, r, model); perr == nil {
+				apiKey = provider.APIKey
+			}
+		}
+	} else {
+		// Optional provider override; empty → normal selection (model glob → default upstream).
+		provider, err := s.selectProviderForced(ctx, r, model, strings.TrimSpace(cfg.EmbeddingProvider))
+		if err != nil {
+			return nil, err
+		}
+		baseURL, apiKey = provider.BaseURL, provider.APIKey
 	}
-	upstreamURL, err := s.upstreamURL(provider.BaseURL, &url.URL{Path: "/v1/embeddings"})
+	upstreamURL, err := s.upstreamURL(baseURL, &url.URL{Path: "/v1/embeddings"})
 	if err != nil {
 		return nil, err
 	}
@@ -61,7 +77,9 @@ func (s *Server) embedText(ctx context.Context, r *http.Request, model, text str
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+provider.APIKey)
+	if strings.TrimSpace(apiKey) != "" {
+		req.Header.Set("Authorization", "Bearer "+apiKey)
+	}
 	resp, err := s.client.Do(req)
 	if err != nil {
 		return nil, err

@@ -155,6 +155,9 @@ func buildSettingRegistry() []settingDef {
 		{Key: "cache.chat_semantic_model", Category: "cache", Type: stString, envValue: func(c config.Config) string { return c.Cache.ChatSemanticModel }},
 		{Key: "cache.chat_semantic_threshold", Category: "cache", Type: stFloat, validate: rate01, envValue: func(c config.Config) string { return strconv.FormatFloat(c.Cache.ChatSemanticThreshold, 'f', -1, 64) }},
 		{Key: "cache.chat_semantic_max_candidates", Category: "cache", Type: stInt, validate: posInt, envValue: func(c config.Config) string { return strconv.Itoa(c.Cache.ChatSemanticMaxCandidates) }},
+		{Key: "cache.embedding_provider", Category: "cache", Type: stString, envValue: func(c config.Config) string { return c.Cache.EmbeddingProvider }},
+		{Key: "cache.embedding_base_url", Category: "cache", Type: stString, envValue: func(c config.Config) string { return c.Cache.EmbeddingBaseURL }},
+		{Key: "cache.embedding_api_key", Category: "cache", Type: stString, Secret: true, envValue: func(c config.Config) string { return c.Cache.EmbeddingAPIKey }},
 
 		// ---- Retention ----
 		{Key: "retention.request_days", Category: "retention", Type: stInt, validate: posInt, envValue: func(c config.Config) string { return strconv.Itoa(c.Retention.RequestDays) }},
@@ -222,6 +225,9 @@ var settingDescriptions = map[string]string{
 	"cache.chat_semantic_model":          "시맨틱 캐시용 임베딩 모델.",
 	"cache.chat_semantic_threshold":      "시맨틱 캐시 적중 코사인 유사도 임계값(0~1).",
 	"cache.chat_semantic_max_candidates": "시맨틱 비교 후보 최대 개수.",
+	"cache.embedding_provider":           "임베딩 호출에 강제할 프로바이더 이름. 비우면 기존 라우팅(모델 glob→기본 업스트림) 사용.",
+	"cache.embedding_base_url":           "임베딩 전용 엔드포인트 base URL(예: 사내 임베딩 서버). 설정 시 {base_url}/v1/embeddings로 직접 호출. 비우면 프로바이더 라우팅 사용.",
+	"cache.embedding_api_key":            "임베딩 base URL용 인증 키. 암호화 저장·마스킹. 비우면 기본 업스트림 키로 폴백(또는 무인증).",
 	// Retention
 	"retention.request_days":         "요청 로그 보존 일수.",
 	"retention.prompt_days":          "프롬프트 본문 보존 일수.",
@@ -450,6 +456,12 @@ func applyRuntimeSetting(t2s *config.Text2SQLConfig, ch *config.ClickHouseConfig
 		cache.ChatSemanticThreshold = atof()
 	case "cache.chat_semantic_max_candidates":
 		cache.ChatSemanticMaxCandidates = atoi()
+	case "cache.embedding_provider":
+		cache.EmbeddingProvider = val
+	case "cache.embedding_base_url":
+		cache.EmbeddingBaseURL = val
+	case "cache.embedding_api_key":
+		cache.EmbeddingAPIKey = val
 	case "retention.request_days":
 		ret.RequestDays = atoi()
 	case "retention.prompt_days":

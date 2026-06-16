@@ -117,6 +117,11 @@ type CacheConfig struct {
 	ChatSemanticModel         string  // embedding model used to vectorize prompts
 	ChatSemanticThreshold     float64 // cosine similarity required for a hit (0..1)
 	ChatSemanticMaxCandidates int     // max recent entries scanned per model
+	// Optional dedicated embedding endpoint for the semantic cache. When empty, embedding
+	// calls fall back to the normal provider selection (model glob → default upstream).
+	EmbeddingProvider string // force this configured provider for embedding calls
+	EmbeddingBaseURL  string // call this base URL directly (e.g. a local embedding server)
+	EmbeddingAPIKey   string // bearer key for EmbeddingBaseURL (secret); empty → no/default auth
 }
 
 type AuthConfig struct {
@@ -257,6 +262,9 @@ func Load() (Config, error) {
 			ChatSemanticModel:         os.Getenv("CACHE_CHAT_SEMANTIC_MODEL"),
 			ChatSemanticThreshold:     floatEnv("CACHE_CHAT_SEMANTIC_THRESHOLD", 0.95),
 			ChatSemanticMaxCandidates: intEnv("CACHE_CHAT_SEMANTIC_MAX_CANDIDATES", 200),
+			EmbeddingProvider:         os.Getenv("CACHE_EMBEDDING_PROVIDER"),
+			EmbeddingBaseURL:          os.Getenv("CACHE_EMBEDDING_BASE_URL"),
+			EmbeddingAPIKey:           os.Getenv("CACHE_EMBEDDING_API_KEY"),
 		},
 		Auth: AuthConfig{
 			ProxyAPIKeys:          parseProxyKeys(os.Getenv("PROXY_API_KEYS")),
