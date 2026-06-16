@@ -2,9 +2,11 @@ package proxy
 
 import (
 	"context"
+	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -199,4 +201,65 @@ func (s *Server) handleDWDashboardDimensions(w http.ResponseWriter, r *http.Requ
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"configured": true, "since": sinceStr, "dimension": dim, "order_by": orderCol, "rows": items})
+}
+
+// handleDWDashboardExportCSV exports the current dashboard view as UTF-8 CSV (Excel-friendly
+// BOM). A model/provider/project/cost_center dimension exports its Top-N rows; otherwise the
+// daily time series of the 'all' scope is exported.
+// GET /admin/dw/dashboard/export.csv?window=&dimension=&order_by=&limit=
+func (s *Server) handleDWDashboardExportCSV(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	cfg, ref, ok := s.dwReady()
+	if !ok {
+		writeOpenAIError(w, http.StatusBadRequest, "ClickHouse DW is not configured", "invalid_request_error", "dw_disabled")
+		return
+	}
+	sinceStr, _ := dwSinceDate(r)
+	dim := strings.TrimSpace(r.URL.Query().Get("dimension"))
+	var header []string
+	var query string
+	dimensional := dim != "" && dim != "all" && validDWDimensions[dim]
+	if dimensional {
+		orderCol := map[string]string{"cost": "cost_krw", "requests": "requests", "tokens": "tokens", "errors": "errors"}[strings.TrimSpace(r.URL.Query().Get("order_by"))]
+		if orderCol == "" {
+			orderCol = "cost_krw"
+		}
+		header = []string{dim, "requests", "tokens", "cost_krw", "errors"}
+		query = "SELECT dim_value, sum(requests) AS requests, sum(tokens) AS tokens, sum(cost_krw) AS cost_krw, sum(errors) AS errors FROM " +
+			ref + " FINAL WHERE dimension = '" + chEscape(dim) + "' AND day >= '" + sinceStr + "' GROUP BY dim_value ORDER BY " + orderCol + " DESC LIMIT " + strconv.Itoa(recentLimit(r))
+	} else {
+		header = []string{"day", "requests", "tokens", "cost_krw", "errors"}
+		query = "SELECT toString(day) AS day, sum(requests) AS requests, sum(tokens) AS tokens, sum(cost_krw) AS cost_krw, sum(errors) AS errors FROM " +
+			ref + " FINAL WHERE " + dwScopeClause(r) + " AND day >= '" + sinceStr + "' GROUP BY day ORDER BY day"
+	}
+	rows, err := s.dwQueryJSON(r.Context(), cfg, query)
+	if err != nil {
+		writeOpenAIError(w, http.StatusBadGateway, err.Error(), "server_error", "dw_query_failed")
+		return
+	}
+
+	stamp := time.Now().UTC().Format("20060102-150405")
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=dw-dashboard-%s.csv", stamp))
+	_, _ = w.Write([]byte{0xEF, 0xBB, 0xBF}) // BOM for Excel UTF-8
+	keyCol := "day"
+	if dimensional {
+		keyCol = "dim_value"
+	}
+	wr := csv.NewWriter(w)
+	_ = wr.Write(header)
+	for _, row := range rows {
+		_ = wr.Write([]string{
+			fmt.Sprintf("%v", row[keyCol]),
+			strconv.FormatFloat(asFloat(row["requests"]), 'f', 0, 64),
+			strconv.FormatFloat(asFloat(row["tokens"]), 'f', 0, 64),
+			strconv.FormatFloat(asFloat(row["cost_krw"]), 'f', 2, 64),
+			strconv.FormatFloat(asFloat(row["errors"]), 'f', 0, 64),
+		})
+	}
+	wr.Flush()
+	s.auditAdmin(r, "dw.dashboard.export", "", auditJSON(map[string]any{"dimension": dim, "since": sinceStr, "rows": len(rows)}))
 }

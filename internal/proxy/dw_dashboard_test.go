@@ -3,6 +3,7 @@ package proxy
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -76,6 +77,33 @@ func TestDWDashboardOverview(t *testing.T) {
 	}
 	if !strings.Contains(sawQuery, "FORMAT JSON") {
 		t.Fatalf("query missing FORMAT JSON: %s", sawQuery)
+	}
+}
+
+func TestDWDashboardExportCSV(t *testing.T) {
+	ch := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[{"dim_value":"gpt-4o","requests":"80","tokens":"4000","cost_krw":900,"errors":"1"}]}`))
+	}))
+	defer ch.Close()
+	srv := newDWTestServer(t, ch.URL)
+
+	resp, _ := http.Get(srv.URL + "/admin/dw/dashboard/export.csv?dimension=model&order_by=cost")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("export = %d", resp.StatusCode)
+	}
+	if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "text/csv") {
+		t.Fatalf("content-type = %s", ct)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	// UTF-8 BOM + header + data row.
+	if len(body) < 3 || body[0] != 0xEF || body[1] != 0xBB || body[2] != 0xBF {
+		t.Fatal("missing UTF-8 BOM")
+	}
+	text := string(body[3:])
+	if !strings.Contains(text, "model,requests,tokens,cost_krw,errors") || !strings.Contains(text, "gpt-4o,80,4000,900.00,1") {
+		t.Fatalf("csv content wrong: %q", text)
 	}
 }
 

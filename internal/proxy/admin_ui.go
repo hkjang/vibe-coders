@@ -5361,10 +5361,11 @@ const adminHTML = `<!doctype html>
       const dim = sessionStorage.getItem('dwDim') || 'model';
       const order = sessionStorage.getItem('dwOrder') || 'cost';
       const qs = '?window=' + encodeURIComponent(win);
-      const [ov, ts, dims] = await Promise.all([
+      const [ov, ts, dims, health] = await Promise.all([
         api('/admin/dw/dashboard/overview' + qs).catch(e => ({ _err: e.message })),
         api('/admin/dw/dashboard/timeseries' + qs).catch(() => ({ points: [] })),
         api('/admin/dw/dashboard/dimensions' + qs + '&dimension=' + encodeURIComponent(dim) + '&order_by=' + encodeURIComponent(order) + '&limit=10').catch(() => ({ rows: [] })),
+        api('/admin/dw/sink-status').catch(() => null),
       ]);
 
       if (ov && ov.configured === false) {
@@ -5381,6 +5382,8 @@ const adminHTML = `<!doctype html>
         '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
           '<label class="muted">기간 <select onchange="dwSet(\'dwWindow\', this.value)">' + winSel + '</select></label>' +
           '<span class="muted">since ' + escapeHTML(ov.since || '') + '</span>' +
+          '<button class="secondary" type="button" onclick="dwExportCSV()">CSV 내보내기</button>' +
+          '<span id="dw-action-result" class="muted"></span>' +
         '</div></div>';
 
       const card1 = (label, val, sub) => '<div style="flex:1;min-width:150px;border:1px solid var(--border,#333);border-radius:8px;padding:10px"><div class="muted" style="font-size:12px">' + label + '</div><div style="font-size:20px;font-weight:600">' + val + '</div>' + (sub ? '<div class="muted" style="font-size:11px">' + sub + '</div>' : '') + '</div>';
@@ -5415,9 +5418,51 @@ const adminHTML = `<!doctype html>
           '</tbody></table>' : '<div class="empty">데이터 없음</div>') +
         '</div></section>';
 
+      // DW Health: 적재 워터마크 · 실패 재처리 큐 (기존 sink-status 재사용).
+      if (health) {
+        const states = health.state || [];
+        const retries = health.retries || [];
+        html += '<section><h2>DW 적재 상태 ' + (retries.length ? '<span class="status warn">실패 큐 ' + retries.length + '</span>' : '<span class="status">정상</span>') + '</h2><div class="card-body">' +
+          '<div style="margin-bottom:8px"><button class="secondary" type="button" onclick="dwRetry()">실패분 재처리</button> <a href="#/clickhouse" class="muted">상세(ClickHouse 탭) →</a></div>' +
+          (states.length ? '<table><thead><tr><th>dimension</th><th>마지막 적재일</th><th>행수</th><th>갱신</th></tr></thead><tbody>' +
+            states.map(st => '<tr><td><code>' + escapeHTML(st.dimension || '') + '</code></td><td>' + escapeHTML(st.last_synced_day || st.since_day || '') + '</td><td data-num="' + (st.rows_sent || 0) + '">' + fmt(st.rows_sent || 0) + '</td><td>' + ago(st.updated_at) + '</td></tr>').join('') + '</tbody></table>'
+            : '<div class="empty">적재 이력이 없습니다.</div>') +
+          (retries.length ? '<table style="margin-top:10px"><thead><tr><th>dimension</th><th>since</th><th>마지막 오류</th><th>시도</th></tr></thead><tbody>' +
+            retries.map(rq => '<tr><td><code>' + escapeHTML(rq.dimension || '') + '</code></td><td>' + escapeHTML(rq.since_day || '') + '</td><td class="muted">' + escapeHTML((rq.error || '').slice(0, 80)) + '</td><td data-num="' + (rq.attempts || 0) + '">' + fmt(rq.attempts || 0) + '</td></tr>').join('') + '</tbody></table>' : '') +
+          '</div></section>';
+      }
+
       view.innerHTML = card('DW 대시보드', html);
     }
     window.dwSet = (key, val) => { sessionStorage.setItem(key, val); renderDWDashboard(); };
+    window.dwExportCSV = async () => {
+      const win = sessionStorage.getItem('dwWindow') || '30d';
+      const dim = sessionStorage.getItem('dwDim') || 'model';
+      const order = sessionStorage.getItem('dwOrder') || 'cost';
+      const out = document.getElementById('dw-action-result');
+      try {
+        const h = authState.access ? { Authorization: 'Bearer ' + authState.access } : {};
+        const res = await fetch('/admin/dw/dashboard/export.csv?window=' + encodeURIComponent(win) + '&dimension=' + encodeURIComponent(dim) + '&order_by=' + encodeURIComponent(order) + '&limit=100', { headers: h });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const blob = await res.blob();
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob); a.download = 'dw-dashboard.csv';
+        document.body.appendChild(a); a.click(); a.remove();
+        if (out) out.textContent = '내보냄';
+      } catch (e) {
+        if (out) out.innerHTML = '<span class="status error">' + escapeHTML(e.message) + '</span>';
+      }
+    };
+    window.dwRetry = async () => {
+      const out = document.getElementById('dw-action-result');
+      try {
+        const r = await api('/admin/dw/sink-retry', { method: 'POST' });
+        if (out) out.innerHTML = '<span class="status">재처리: ' + (r.recovered_dimensions || 0) + '개 dimension, ' + (r.sent_rows || 0) + '행</span>';
+        setTimeout(renderDWDashboard, 600);
+      } catch (e) {
+        if (out) out.innerHTML = '<span class="status error">' + escapeHTML(e.message) + '</span>';
+      }
+    };
     async function renderClickHouse() {
       const view = document.getElementById('view');
       const d = await api('/admin/dw/clickhouse/overview').catch(e => ({ configured: false, _err: e.message }));
