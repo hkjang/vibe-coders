@@ -341,6 +341,97 @@ func (s *Server) handleDWDashboardRouting(w http.ResponseWriter, r *http.Request
 	})
 }
 
+// dwRequestFactReady reports whether the per-request fact table is configured for dashboard reads.
+func (s *Server) dwRequestFactReady() (config.ClickHouseConfig, string, bool) {
+	cfg := s.chConf()
+	table := strings.TrimSpace(cfg.RequestFactTable)
+	if strings.TrimSpace(cfg.URL) == "" || table == "" {
+		return cfg, "", false
+	}
+	return cfg, chTableRef(cfg.Database, table), true
+}
+
+// dwFactScopeClause builds an AND-joined WHERE fragment from real fact columns. Unlike the
+// daily rollup (single-dimension), the request fact stores each dimension as its own column,
+// so model/provider/project/cost_center/team filters can be combined.
+func dwFactScopeClause(r *http.Request) string {
+	clauses := make([]string, 0, 5)
+	for _, dim := range []string{"model", "provider", "project", "cost_center", "team"} {
+		if v := strings.TrimSpace(r.URL.Query().Get(dim)); v != "" {
+			clauses = append(clauses, dim+" = '"+chEscape(v)+"'")
+		}
+	}
+	if len(clauses) == 0 {
+		return ""
+	}
+	return " AND " + strings.Join(clauses, " AND ")
+}
+
+// handleDWDashboardLatency returns performance (latency) analytics from the request fact:
+// P50/P95/P99 of total latency and time-to-first-chunk (streaming), average/max latency,
+// error rate, the streaming share, and per-model P95 latency Top-N.
+// GET /admin/dw/dashboard/latency?window=&model=&provider=&project=&cost_center=&team=
+func (s *Server) handleDWDashboardLatency(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	cfg, ref, ok := s.dwRequestFactReady()
+	if !ok {
+		writeJSON(w, http.StatusOK, map[string]any{"configured": false})
+		return
+	}
+	sinceStr, _ := dwSinceDate(r)
+	where := "event_date >= '" + sinceStr + "'" + dwFactScopeClause(r)
+
+	summary, err := s.dwQueryJSON(r.Context(), cfg, "SELECT count() AS total, "+
+		"quantile(0.5)(latency_ms) AS p50, quantile(0.95)(latency_ms) AS p95, quantile(0.99)(latency_ms) AS p99, "+
+		"avg(latency_ms) AS avg_ms, max(latency_ms) AS max_ms, "+
+		"quantile(0.95)(first_chunk_ms) AS ttfb_p95, sum(stream) AS streamed, "+
+		"sum(error_category != 'ok') AS errors FROM "+ref+" FINAL WHERE "+where)
+	if err != nil {
+		writeOpenAIError(w, http.StatusBadGateway, err.Error(), "server_error", "dw_query_failed")
+		return
+	}
+	byModel, err := s.dwQueryJSON(r.Context(), cfg, "SELECT model, count() AS n, quantile(0.95)(latency_ms) AS p95, "+
+		"sum(error_category != 'ok') AS errors FROM "+ref+" FINAL WHERE "+where+" GROUP BY model ORDER BY n DESC LIMIT "+strconv.Itoa(recentLimit(r)))
+	if err != nil {
+		writeOpenAIError(w, http.StatusBadGateway, err.Error(), "server_error", "dw_query_failed")
+		return
+	}
+
+	total, p50, p95, p99, avgMs, maxMs, ttfbP95, streamed, errors := 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+	if len(summary) > 0 {
+		s0 := summary[0]
+		total, p50, p95, p99 = asFloat(s0["total"]), asFloat(s0["p50"]), asFloat(s0["p95"]), asFloat(s0["p99"])
+		avgMs, maxMs, ttfbP95 = asFloat(s0["avg_ms"]), asFloat(s0["max_ms"]), asFloat(s0["ttfb_p95"])
+		streamed, errors = asFloat(s0["streamed"]), asFloat(s0["errors"])
+	}
+	errorRate, streamShare := 0.0, 0.0
+	if total > 0 {
+		errorRate = errors / total
+		streamShare = streamed / total
+	}
+	models := make([]map[string]any, 0, len(byModel))
+	for _, m := range byModel {
+		mReq := asFloat(m["n"])
+		mErr := asFloat(m["errors"])
+		mRate := 0.0
+		if mReq > 0 {
+			mRate = mErr / mReq
+		}
+		models = append(models, map[string]any{
+			"model": m["model"], "requests": mReq, "p95_ms": asFloat(m["p95"]), "errors": mErr, "error_rate": mRate,
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"configured": true, "since": sinceStr, "total": total,
+		"p50_ms": p50, "p95_ms": p95, "p99_ms": p99, "avg_ms": avgMs, "max_ms": maxMs,
+		"ttfb_p95_ms": ttfbP95, "streamed": streamed, "stream_share": streamShare,
+		"errors": errors, "error_rate": errorRate, "by_model": models,
+	})
+}
+
 // handleDWDashboardExportCSV exports the current dashboard view as UTF-8 CSV (Excel-friendly
 // BOM). A model/provider/project/cost_center dimension exports its Top-N rows; otherwise the
 // daily time series of the 'all' scope is exported.

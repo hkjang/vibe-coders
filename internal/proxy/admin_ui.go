@@ -5361,7 +5361,7 @@ const adminHTML = `<!doctype html>
       const dim = sessionStorage.getItem('dwDim') || 'model';
       const order = sessionStorage.getItem('dwOrder') || 'cost';
       const qs = '?window=' + encodeURIComponent(win);
-      const [ov, ts, dims, health, t2s, cons, rout] = await Promise.all([
+      const [ov, ts, dims, health, t2s, cons, rout, lat] = await Promise.all([
         api('/admin/dw/dashboard/overview' + qs).catch(e => ({ _err: e.message })),
         api('/admin/dw/dashboard/timeseries' + qs).catch(() => ({ points: [] })),
         api('/admin/dw/dashboard/dimensions' + qs + '&dimension=' + encodeURIComponent(dim) + '&order_by=' + encodeURIComponent(order) + '&limit=10').catch(() => ({ rows: [] })),
@@ -5369,6 +5369,7 @@ const adminHTML = `<!doctype html>
         api('/admin/dw/dashboard/text2sql' + qs).catch(() => null),
         api('/admin/dw/consistency?days=30').catch(() => null),
         api('/admin/dw/dashboard/routing' + qs).catch(() => null),
+        api('/admin/dw/dashboard/latency' + qs).catch(() => null),
       ]);
 
       if (ov && ov.configured === false) {
@@ -5439,6 +5440,28 @@ const adminHTML = `<!doctype html>
           ((t2s.failures && t2s.failures.length) ? '<h3 style="margin-top:10px">실패 원인 Top</h3><table><thead><tr><th>failure_category</th><th>건수</th></tr></thead><tbody>' +
             t2s.failures.map(f => '<tr><td>' + escapeHTML(String(f.reason || '')) + '</td><td data-num="' + f.count + '">' + fmt(Math.round(f.count)) + '</td></tr>').join('') + '</tbody></table>' : '') +
           '<div class="muted" style="margin-top:8px;font-size:11px">위험 요청·골든·replay 상세는 <a href="#/text2sql">Text2SQL 탭</a>에서 확인하세요.</div>' +
+          '</div></section>';
+      }
+
+      // 성능 분석 — 지연 P50/P95/P99 (request fact 설정 시).
+      if (lat && lat.configured) {
+        const lcard = (label, val, sub) => '<div style="flex:1;min-width:130px;border:1px solid var(--border,#333);border-radius:8px;padding:10px"><div class="muted" style="font-size:12px">' + label + '</div><div style="font-size:18px;font-weight:600">' + val + '</div>' + (sub ? '<div class="muted" style="font-size:11px">' + sub + '</div>' : '') + '</div>';
+        const ms = v => fmt(Math.round(v || 0)) + 'ms';
+        html += '<section><h2>성능 분석 <span class="muted" style="font-size:12px">(지연/오류)</span></h2><div class="card-body">' +
+          '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:8px">' +
+            lcard('요청 수', fmt(Math.round(lat.total || 0))) +
+            lcard('P50', ms(lat.p50_ms)) +
+            lcard('P95', ms(lat.p95_ms)) +
+            lcard('P99', ms(lat.p99_ms)) +
+            lcard('평균', ms(lat.avg_ms)) +
+            lcard('최대', ms(lat.max_ms)) +
+            lcard('TTFB P95', ms(lat.ttfb_p95_ms), '스트리밍 첫 청크') +
+            lcard('스트리밍 비율', ((lat.stream_share || 0) * 100).toFixed(1) + '%') +
+            lcard('오류율', ((lat.error_rate || 0) * 100).toFixed(2) + '%') +
+          '</div>' +
+          ((lat.by_model && lat.by_model.length) ? '<h3 style="margin-top:6px">모델별 지연 (P95) Top</h3><table><thead><tr><th>모델</th><th>요청</th><th>P95</th><th>오류율</th></tr></thead><tbody>' +
+            lat.by_model.map(m => '<tr><td>' + escapeHTML(String(m.model || '')) + '</td><td data-num="' + m.requests + '">' + fmt(Math.round(m.requests)) + '</td><td data-num="' + m.p95_ms + '">' + ms(m.p95_ms) + '</td><td>' + ((m.error_rate || 0) * 100).toFixed(1) + '%</td></tr>').join('') + '</tbody></table>' : '') +
+          '<div class="muted" style="margin-top:8px;font-size:11px">요청 단위 상세·트레이스는 <a href="#/requests">호출 이력</a>에서 확인하세요. (request fact: ai_request_fact)</div>' +
           '</div></section>';
       }
 

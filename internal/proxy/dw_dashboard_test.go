@@ -201,6 +201,66 @@ func TestDWDashboardRouting(t *testing.T) {
 	}
 }
 
+func TestDWDashboardLatency(t *testing.T) {
+	ch := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query().Get("query")
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.Contains(q, "GROUP BY model"):
+			_, _ = w.Write([]byte(`{"data":[{"model":"gpt-4o","n":"80","p95":1800,"errors":"2"}]}`))
+		default:
+			_, _ = w.Write([]byte(`{"data":[{"total":"100","p50":420,"p95":1800,"p99":3200,"avg_ms":650,"max_ms":5000,"ttfb_p95":300,"streamed":"60","errors":"4"}]}`))
+		}
+	}))
+	defer ch.Close()
+	db := openTestStore(t)
+	defer db.Close()
+	logger := store.NewAsyncLogger(db, 8, filepath.Join(t.TempDir(), "lat.ndjson"))
+	logger.Start()
+	defer logger.Stop(context.Background())
+	server, err := NewServer(testConfig("http://upstream.invalid", "secret"), db, logger, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server.chRuntime.Store(&config.ClickHouseConfig{URL: ch.URL, Table: "ai_request_rollup", RequestFactTable: "ai_request_fact"})
+	srv := httptest.NewServer(server.Routes())
+	defer srv.Close()
+
+	resp, _ := http.Get(srv.URL + "/admin/dw/dashboard/latency?window=7d&model=gpt-4o")
+	var out struct {
+		Configured  bool             `json:"configured"`
+		Total       float64          `json:"total"`
+		P95MS       float64          `json:"p95_ms"`
+		ErrorRate   float64          `json:"error_rate"`
+		StreamShare float64          `json:"stream_share"`
+		ByModel     []map[string]any `json:"by_model"`
+	}
+	json.NewDecoder(resp.Body).Decode(&out)
+	resp.Body.Close()
+	if !out.Configured || out.Total != 100 || out.P95MS != 1800 {
+		t.Fatalf("latency summary wrong: %+v", out)
+	}
+	if out.ErrorRate < 0.039 || out.ErrorRate > 0.041 {
+		t.Fatalf("error_rate = %v, want ~0.04", out.ErrorRate)
+	}
+	if out.StreamShare < 0.59 || out.StreamShare > 0.61 {
+		t.Fatalf("stream_share = %v, want ~0.60", out.StreamShare)
+	}
+	if len(out.ByModel) != 1 {
+		t.Fatalf("by_model wrong: %+v", out.ByModel)
+	}
+
+	// Unconfigured request fact → configured:false.
+	srv2 := newDWTestServer(t, "http://ch.invalid")
+	r2, _ := http.Get(srv2.URL + "/admin/dw/dashboard/latency")
+	var o2 map[string]any
+	json.NewDecoder(r2.Body).Decode(&o2)
+	r2.Body.Close()
+	if o2["configured"] != false {
+		t.Fatalf("expected configured=false without request fact, got %+v", o2)
+	}
+}
+
 func TestDWDashboardExportCSV(t *testing.T) {
 	ch := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
