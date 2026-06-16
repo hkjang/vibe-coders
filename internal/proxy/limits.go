@@ -78,6 +78,7 @@ func (rc *requestPipeline) stepLimits() bool {
 
 	// Input guard: reject oversized request bodies before any upstream work.
 	if lim.MaxRequestBytes > 0 && len(rc.body) > lim.MaxRequestBytes {
+		s.metrics.IncLimitsRejected()
 		w.Header().Set("X-Request-Bytes", strconv.Itoa(len(rc.body)))
 		writeOpenAIError(w, http.StatusRequestEntityTooLarge,
 			"request body exceeds the configured limit ("+strconv.Itoa(len(rc.body))+" > "+strconv.Itoa(lim.MaxRequestBytes)+" bytes)",
@@ -88,6 +89,7 @@ func (rc *requestPipeline) stepLimits() bool {
 	// Message-count guard: reject context-stuffed message arrays.
 	if lim.MaxMessages > 0 {
 		if n := countMessages(rc.body); n > lim.MaxMessages {
+			s.metrics.IncLimitsRejected()
 			w.Header().Set("X-Message-Count", strconv.Itoa(n))
 			writeOpenAIError(w, http.StatusBadRequest,
 				"too many messages ("+strconv.Itoa(n)+" > "+strconv.Itoa(lim.MaxMessages)+")",
@@ -105,6 +107,7 @@ func (rc *requestPipeline) stepLimits() bool {
 		return true
 	}
 	rc.body = newBody
+	s.metrics.IncLimitsClamped()
 	if from < 0 {
 		w.Header().Set("X-Max-Tokens-Clamped", "injected:"+strconv.Itoa(to))
 	} else {

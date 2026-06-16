@@ -151,6 +151,7 @@ func (rc *requestPipeline) stepSkill() bool {
 		w.Header().Set("X-Vibe-Skill-Status", "unavailable")
 		if mode == "enforce" {
 			rc.skillName = name
+			s.metrics.IncSkillBlocked()
 			rc.recordSkillRun(name, "", "blocked", rc.meta.Request.Model, 0, 0)
 			_ = s.db.InsertAuditEvent(r.Context(), store.AuthEvent{ID: newID("ae"), EventType: "skill_denied", APIKeyID: rc.apiKeyID, IP: clientIP(r), UserAgent: r.UserAgent(), Detail: "skill not in production: " + name, CreatedAt: time.Now().UTC()})
 			writeOpenAIError(w, http.StatusForbidden, "skill is not available (not found or not in production): "+name, "permission_error", "skill_unavailable")
@@ -175,6 +176,7 @@ func (rc *requestPipeline) stepSkill() bool {
 	// enforce mode blocks on any violation (no injection).
 	if len(violations) > 0 && mode == "enforce" {
 		w.Header().Set("X-Vibe-Skill-Policy", "blocked")
+		s.metrics.IncSkillBlocked()
 		rc.recordSkillRun(sk.Name, sk.Version, "blocked", rc.meta.Request.Model, 0, 0)
 		_ = s.db.InsertAuditEvent(r.Context(), store.AuthEvent{ID: newID("ae"), EventType: "skill_policy_blocked", APIKeyID: rc.apiKeyID, IP: clientIP(r), UserAgent: r.UserAgent(), Detail: sk.Name + ": " + detail, CreatedAt: time.Now().UTC()})
 		writeOpenAIError(w, http.StatusForbidden, "skill policy violation: "+detail, "permission_error", "skill_policy_violation")

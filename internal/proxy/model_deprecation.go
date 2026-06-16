@@ -87,10 +87,12 @@ func (rc *requestPipeline) stepDeprecation() bool {
 	}
 	// Sunset reached.
 	if dep.Replacement == "" {
+		s.metrics.IncModelSunsetBlock()
 		writeOpenAIError(w, http.StatusBadRequest, "model '"+rc.meta.Request.Model+"' is retired (sunset "+dep.SunsetDate+")", "invalid_request_error", "model_sunset")
 		return false
 	}
 	rc.body = rewriteModelField(rc.body, dep.Replacement)
+	s.metrics.IncModelSunsetRewrite()
 	w.Header().Set("X-Model-Sunset-Rewritten", dep.Replacement)
 	rc.meta.Request.Model = dep.Replacement
 	return true

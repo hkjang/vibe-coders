@@ -9,33 +9,38 @@ import (
 )
 
 type Metrics struct {
-	requests         atomic.Uint64
-	streams          atomic.Uint64
-	upstreamError    atomic.Uint64
-	quotaBlocked     atomic.Uint64
-	killSwitched     atomic.Uint64
-	alertsFired      atomic.Uint64
-	alertsDelivered  atomic.Uint64
-	cacheHits        atomic.Uint64
-	cacheMisses      atomic.Uint64
-	failovers        atomic.Uint64
-	llmEvaluations   atomic.Uint64
-	llmEvalFailures  atomic.Uint64
-	mcpToolCalls     atomic.Uint64
-	mcpToolErrors    atomic.Uint64
-	mcpBlocked       atomic.Uint64
-	routingOverride  atomic.Uint64
-	knowledgeExpand  atomic.Uint64 // requests that expanded ≥1 knowledge snippet
-	knowledgeTokens  atomic.Uint64 // estimated tokens injected via knowledge expansion
-	costGuardBlock   atomic.Uint64 // requests blocked by the pre-call cost guard
-	promptInjection  atomic.Uint64 // requests where prompt-injection patterns were detected
-	t2sRequests      atomic.Uint64 // Text2SQL virtual-model requests handled
-	t2sCacheHit      atomic.Uint64 // Text2SQL preview cache hits
-	t2sRiskBlocked   atomic.Uint64 // Text2SQL requests blocked by cumulative-risk enforcement
-	t2sChallengeVeto atomic.Uint64 // Text2SQL execute vetoed by self-challenge review
-	t2sShadowEval    atomic.Uint64 // Text2SQL shadow model evaluations performed
-	latency          *LatencyDigest
-	firstChunk       *LatencyDigest
+	requests           atomic.Uint64
+	streams            atomic.Uint64
+	upstreamError      atomic.Uint64
+	quotaBlocked       atomic.Uint64
+	killSwitched       atomic.Uint64
+	alertsFired        atomic.Uint64
+	alertsDelivered    atomic.Uint64
+	cacheHits          atomic.Uint64
+	cacheMisses        atomic.Uint64
+	failovers          atomic.Uint64
+	llmEvaluations     atomic.Uint64
+	llmEvalFailures    atomic.Uint64
+	mcpToolCalls       atomic.Uint64
+	mcpToolErrors      atomic.Uint64
+	mcpBlocked         atomic.Uint64
+	routingOverride    atomic.Uint64
+	knowledgeExpand    atomic.Uint64 // requests that expanded ≥1 knowledge snippet
+	knowledgeTokens    atomic.Uint64 // estimated tokens injected via knowledge expansion
+	costGuardBlock     atomic.Uint64 // requests blocked by the pre-call cost guard
+	promptInjection    atomic.Uint64 // requests where prompt-injection patterns were detected
+	t2sRequests        atomic.Uint64 // Text2SQL virtual-model requests handled
+	t2sCacheHit        atomic.Uint64 // Text2SQL preview cache hits
+	t2sRiskBlocked     atomic.Uint64 // Text2SQL requests blocked by cumulative-risk enforcement
+	t2sChallengeVeto   atomic.Uint64 // Text2SQL execute vetoed by self-challenge review
+	t2sShadowEval      atomic.Uint64 // Text2SQL shadow model evaluations performed
+	skillBlocked       atomic.Uint64 // requests blocked by Skill policy enforcement
+	modelSunsetRewrite atomic.Uint64 // requests rewritten to a replacement model after sunset
+	modelSunsetBlock   atomic.Uint64 // requests blocked because a model is retired with no replacement
+	limitsClamped      atomic.Uint64 // requests whose max output tokens were clamped/injected
+	limitsRejected     atomic.Uint64 // requests rejected by request-size / message-count guards
+	latency            *LatencyDigest
+	firstChunk         *LatencyDigest
 }
 
 func newMetrics() *Metrics {
@@ -127,6 +132,11 @@ func (m *Metrics) IncText2SQLCacheHit()      { m.t2sCacheHit.Add(1) }
 func (m *Metrics) IncText2SQLRiskBlocked()   { m.t2sRiskBlocked.Add(1) }
 func (m *Metrics) IncText2SQLChallengeVeto() { m.t2sChallengeVeto.Add(1) }
 func (m *Metrics) IncText2SQLShadowEval()    { m.t2sShadowEval.Add(1) }
+func (m *Metrics) IncSkillBlocked()          { m.skillBlocked.Add(1) }
+func (m *Metrics) IncModelSunsetRewrite()    { m.modelSunsetRewrite.Add(1) }
+func (m *Metrics) IncModelSunsetBlock()      { m.modelSunsetBlock.Add(1) }
+func (m *Metrics) IncLimitsClamped()         { m.limitsClamped.Add(1) }
+func (m *Metrics) IncLimitsRejected()        { m.limitsRejected.Add(1) }
 
 func (m *Metrics) ObserveLLMEvaluations(evaluations []store.LLMEvaluation) {
 	for _, evaluation := range evaluations {
@@ -214,6 +224,21 @@ func (m *Metrics) Prometheus(queueDepth int, logDropped uint64, logWritten uint6
 		"# HELP proxy_text2sql_shadow_evals_total Text2SQL shadow model evaluations performed.",
 		"# TYPE proxy_text2sql_shadow_evals_total counter",
 		fmt.Sprintf("proxy_text2sql_shadow_evals_total %d", m.t2sShadowEval.Load()),
+		"# HELP proxy_skill_blocked_total Requests blocked by Skill policy enforcement.",
+		"# TYPE proxy_skill_blocked_total counter",
+		fmt.Sprintf("proxy_skill_blocked_total %d", m.skillBlocked.Load()),
+		"# HELP proxy_model_sunset_rewrites_total Requests rewritten to a replacement model after sunset.",
+		"# TYPE proxy_model_sunset_rewrites_total counter",
+		fmt.Sprintf("proxy_model_sunset_rewrites_total %d", m.modelSunsetRewrite.Load()),
+		"# HELP proxy_model_sunset_blocked_total Requests blocked because a model is retired with no replacement.",
+		"# TYPE proxy_model_sunset_blocked_total counter",
+		fmt.Sprintf("proxy_model_sunset_blocked_total %d", m.modelSunsetBlock.Load()),
+		"# HELP proxy_limits_clamped_total Requests whose output-token ceiling was clamped or injected.",
+		"# TYPE proxy_limits_clamped_total counter",
+		fmt.Sprintf("proxy_limits_clamped_total %d", m.limitsClamped.Load()),
+		"# HELP proxy_limits_rejected_total Requests rejected by request-size or message-count guards.",
+		"# TYPE proxy_limits_rejected_total counter",
+		fmt.Sprintf("proxy_limits_rejected_total %d", m.limitsRejected.Load()),
 		"# HELP proxy_log_queue_depth Current async log queue depth.",
 		"# TYPE proxy_log_queue_depth gauge",
 		fmt.Sprintf("proxy_log_queue_depth %d", queueDepth),
