@@ -160,6 +160,55 @@ const evalFactDDL = `CREATE TABLE IF NOT EXISTS %s (
 PARTITION BY toYYYYMM(event_date)
 ORDER BY (event_date, request_id, name)`
 
+// feedbackFactDDL — one row per human feedback event (append; low volume).
+const feedbackFactDDL = `CREATE TABLE IF NOT EXISTS %s (
+	event_date Date,
+	event_time DateTime64(3),
+	request_id String,
+	trace_id String,
+	rating Int8,
+	label LowCardinality(String),
+	source LowCardinality(String),
+	created_by String,
+	ingested_at DateTime64(3)
+) ENGINE = MergeTree
+PARTITION BY toYYYYMM(event_date)
+ORDER BY (event_date, request_id)`
+
+// emitFeedbackFact ships one human-feedback row to ai_feedback_fact (best-effort, off the
+// response path). Feedback is sparse, so it inserts directly rather than via the batch queue;
+// a failed insert is persisted to the retry queue. No-op when the sink is unconfigured.
+func (s *Server) emitFeedbackFact(fb store.LLMFeedback) {
+	ch := s.chConf()
+	table := strings.TrimSpace(ch.FeedbackFactTable)
+	if ch.URL == "" || table == "" {
+		return
+	}
+	ts := fb.CreatedAt.UTC()
+	if ts.IsZero() {
+		ts = time.Now().UTC()
+	}
+	row := map[string]any{
+		"event_date":  ts.Format("2006-01-02"),
+		"event_time":  ts.Format(time.RFC3339Nano),
+		"request_id":  fb.RequestID,
+		"trace_id":    fb.TraceID,
+		"rating":      fb.Rating,
+		"label":       fb.Label,
+		"source":      fb.Source,
+		"created_by":  fb.CreatedBy,
+		"ingested_at": time.Now().UTC().Format(time.RFC3339Nano),
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		payload, _, err := insertJSONEachRow(ctx, s.client, ch, table, []map[string]any{row})
+		if err != nil {
+			_ = s.db.RecordClickHouseFactRetry(context.Background(), table, payload, 1, err.Error())
+		}
+	}()
+}
+
 func b2i(b bool) int {
 	if b {
 		return 1
@@ -460,6 +509,7 @@ func configuredFactTables(ch config.ClickHouseConfig) []struct{ Key, Table strin
 		{"tool_fact", ch.ToolFactTable},
 		{"routing_fact", ch.RoutingFactTable},
 		{"eval_fact", ch.EvalFactTable},
+		{"feedback_fact", ch.FeedbackFactTable},
 		{"text2sql_fact", ch.Text2SQLFactTable},
 	}
 	out := all[:0]

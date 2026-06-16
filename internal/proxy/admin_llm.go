@@ -421,6 +421,7 @@ func (s *Server) handleLLMFeedbackPost(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "llm_feedback_insert_failed")
 		return
 	}
+	s.emitFeedbackFact(feedback) // best-effort DW fact (no-op unless configured)
 	s.auditAdmin(r, "llm_feedback.create", "", auditJSON(map[string]any{
 		"id":         feedback.ID,
 		"request_id": feedback.RequestID,

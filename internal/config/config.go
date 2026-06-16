@@ -205,6 +205,7 @@ type ClickHouseConfig struct {
 	ToolFactTable    string        // e.g. ai_tool_fact; empty disables (one row per tool invocation)
 	RoutingFactTable string        // e.g. ai_routing_fact; empty disables (one row per routing decision)
 	EvalFactTable    string        // e.g. ai_eval_fact; empty disables (one row per LLM evaluation)
+	FeedbackFactTable string       // e.g. ai_feedback_fact; empty disables (one row per human feedback)
 	BatchSize        int           // rows per ClickHouse insert (queue flush)
 	FlushInterval    time.Duration // max time a row waits in the queue before a flush
 	MaxQueueSize     int           // bounded in-memory queue; excess is dropped (counted)
@@ -356,6 +357,7 @@ func Load() (Config, error) {
 			ToolFactTable:     os.Getenv("CLICKHOUSE_TOOL_FACT_TABLE"),
 			RoutingFactTable:  os.Getenv("CLICKHOUSE_ROUTING_FACT_TABLE"),
 			EvalFactTable:     os.Getenv("CLICKHOUSE_EVAL_FACT_TABLE"),
+			FeedbackFactTable: os.Getenv("CLICKHOUSE_FEEDBACK_FACT_TABLE"),
 			BatchSize:         intEnv("CLICKHOUSE_BATCH_SIZE", 200),
 			FlushInterval:     durationEnv("CLICKHOUSE_FLUSH_INTERVAL", 5*time.Second),
 			MaxQueueSize:      intEnv("CLICKHOUSE_MAX_QUEUE_SIZE", 10000),

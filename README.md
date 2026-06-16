@@ -130,6 +130,7 @@ Roo Code / Cursor / Continue 등 OpenAI 호환 API 를 호출하는 VS Code 확�
 - **ClickHouse Text2SQL fact 확장** (`v0.10.2`): Text2SQL fact에 `reject_reason`·`sql_hash`(원문 미전송) 추가 — 실패 원인·SQL 형태 클러스터 분석 강화
 - **ClickHouse fact 적재 상태 UI + lag/events API** (`v0.10.3`): ClickHouse 탭에 `Fact 적재 상태` 섹션(큐 깊이·드롭·request_fact lag·테이블별 행수·최근 행 보기). `GET /admin/dw/clickhouse/lag`·`/admin/dw/clickhouse/events?table=`(화이트리스트)
 - **ClickHouse Materialized View** (`v0.10.4`): bootstrap이 `ai_request_fact` 위에 일별·시간별 집계 MV(`<fact>_daily`·`_hourly`, SummingMergeTree)를 생성 — 대시보드 쿼리가 원본 스캔 없이 작은 집계만 읽어 가벼움
+- **ClickHouse 사람 피드백 fact** (`v0.10.5`): `/admin/llm/feedback` 기록 시 `ai_feedback_fact`(rating·label·source·created_by)를 best-effort 적재. `clickhouse.feedback_fact_table` 설정 시 활성화 — 모델/프롬프트별 피드백을 fact 조인으로 분석
 - **운영·거버넌스 확장** (`v0.3.0`): 정책 시뮬레이터(`/admin/policies/simulate`), 모델 가격표 버전 이력(`/admin/pricing`, `/admin/pricing/seed`), 운영 리스크 스코어(`/admin/ops/risk`)·상태(`/admin/ops/status`), Provider SLO(`/admin/providers/slo`), 비용 이상탐지(`/admin/cost/anomalies`)·배부(`/admin/cost/allocation`)·팀 예산 예측(`/admin/budgets/projection`), 모델별 코딩 품질(`/admin/models/quality`), 작업 템플릿(`/admin/templates`), 프롬프트 버전 승격(`/admin/prompts/promotions`), 자동 라우팅 학습 루프(`/admin/routing/learning/auto`), DW 롤업(`/admin/dw/rollups`), Mattermost 알림(`/admin/notifications/mattermost`)
 - 호출 이력 CSV 다운로드 `/admin/export.csv` (Excel UTF-8 BOM 포함, 한국어 그대로 열림)
 - 운영용 백업 스크립트 `scripts/backup.ps1` / `scripts/backup.sh` (SQLite `.backup` + fallback ndjson + 보존 일수 적용)
