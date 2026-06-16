@@ -61,14 +61,30 @@ type pricingCatalogEntry struct {
 var builtinPricingCatalog = []pricingCatalogEntry{
 	// OpenAI
 	{"gpt-5.2", 1.75, 14.0, 0.4375, "web:2026-06"},
+	{"gpt-5.1", 1.25, 10.0, 0.125, "approx:2026-06"},
+	{"gpt-5", 1.25, 10.0, 0.125, "approx:2026-06"},
 	{"gpt-4.1", 2.0, 8.0, 0.5, "approx:2026-06"},
 	{"gpt-4.1-mini", 0.4, 1.6, 0.1, "approx:2026-06"},
 	{"gpt-4.1-nano", 0.10, 0.40, 0.025, "web:2026-06"},
+	{"gpt-4o", 2.5, 10.0, 1.25, "approx:2026-06"},
+	{"gpt-4o-mini", 0.15, 0.60, 0.075, "approx:2026-06"},
 	{"o1", 15.0, 60.0, 7.5, "web:2026-06"},
-	// Anthropic (cache read ≈ 0.1× input)
+	{"o3", 2.0, 8.0, 0.5, "approx:2026-06"},
+	{"o4-mini", 1.1, 4.4, 0.275, "approx:2026-06"},
+	// Anthropic — current Claude 4.x family (cache read ≈ 0.1× input)
+	{"claude-opus-4-8", 5.0, 25.0, 0.5, "approx:2026-06"},
+	{"claude-opus-4-7", 5.0, 25.0, 0.5, "approx:2026-06"},
+	{"claude-opus-4-6", 5.0, 25.0, 0.5, "approx:2026-06"},
+	{"claude-sonnet-4-6", 3.0, 15.0, 0.3, "approx:2026-06"},
+	{"claude-sonnet-4-5", 3.0, 15.0, 0.3, "approx:2026-06"},
+	{"claude-haiku-4-5", 1.0, 5.0, 0.1, "approx:2026-06"},
+	{"claude-fable-5", 3.0, 15.0, 0.3, "approx:2026-06"},
+	// Anthropic — prior generation (kept for back-compat)
 	{"claude-opus-4", 5.0, 25.0, 0.5, "web:2026-06"},
 	{"claude-sonnet-4", 3.0, 15.0, 0.3, "web:2026-06"},
 	{"claude-haiku-4", 1.0, 5.0, 0.1, "web:2026-06"},
+	{"claude-3-5-sonnet", 3.0, 15.0, 0.3, "web:2026-06"},
+	{"claude-3-5-haiku", 0.80, 4.0, 0.08, "web:2026-06"},
 	// Google Gemini
 	{"gemini-3-pro", 2.0, 12.0, 0.5, "web:2026-06"},
 	{"gemini-2.5-pro", 1.25, 10.0, 0.3125, "web:2026-06"},
@@ -169,6 +185,34 @@ func (s *Server) handlePricingSeed(w http.ResponseWriter, r *http.Request) {
 	s.invalidatePricingCache()
 	s.auditAdmin(r, "pricing.seed", "", auditJSON(map[string]any{"added": added, "overwrite": overwrite}))
 	writeJSON(w, http.StatusOK, map[string]any{"added": added, "catalog_size": len(builtinPricingCatalog)})
+}
+
+// seedPricingIfEmpty inserts the built-in catalog at startup when no DB pricing versions
+// exist yet, so current model prices are pre-applied out of the box (operators can still
+// override per model via POST /admin/pricing, or re-run /admin/pricing/seed?overwrite=1).
+func (s *Server) seedPricingIfEmpty(ctx context.Context) {
+	existing, err := s.db.LatestPricing(ctx)
+	if err != nil {
+		return
+	}
+	if len(existing) > 0 {
+		return // already has managed prices — never clobber on boot
+	}
+	seeded := 0
+	for _, e := range builtinPricingCatalog {
+		v := store.ModelPricingVersion{
+			ID: newID("price"), Model: e.model,
+			InputKRWPer1M: round2(e.inUSD * usdToKRW), OutputKRWPer1M: round2(e.outUSD * usdToKRW),
+			CachedInputKRWPer1M: round2(e.cachedUSD * usdToKRW), Source: e.source,
+			Note: "auto-seeded at startup from research catalog (USD×" + formatKRW(usdToKRW) + ")",
+		}
+		if err := s.db.InsertPricingVersion(ctx, v); err == nil {
+			seeded++
+		}
+	}
+	if seeded > 0 {
+		s.invalidatePricingCache()
+	}
 }
 
 func round2(v float64) float64 {

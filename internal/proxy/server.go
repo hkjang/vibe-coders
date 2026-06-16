@@ -106,6 +106,9 @@ func NewServer(cfg config.Config, db *store.SQLStore, logger *store.AsyncLogger,
 	// settings change (only runs when URL + interval are configured).
 	server.applyClickHouseSinkWorker()
 
+	// Pre-apply current model prices when the pricing table is empty (first boot).
+	server.seedPricingIfEmpty(context.Background())
+
 	// Load admin-managed Text2SQL feature toggles into the in-memory cache.
 	server.reloadText2SQLFeatures(context.Background())
 

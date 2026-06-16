@@ -53,25 +53,42 @@ func TestPricingVersionsAndEffectiveMerge(t *testing.T) {
 		t.Errorf("newest version should win, got %+v", eff["test-model"])
 	}
 
-	// Seed the built-in catalog → adds known models (e.g. claude-opus-4).
-	seedResp, err := http.Post(srv.URL+"/admin/pricing/seed", "application/json", nil)
+	// Startup auto-seed should have pre-applied the built-in catalog (the pricing table
+	// was empty at NewServer time), so current models are present without a manual seed.
+	server.invalidatePricingCache()
+	eff = server.pricingMap(context.Background())
+	if _, ok := eff["claude-opus-4-8"]; !ok {
+		t.Error("expected claude-opus-4-8 in effective pricing from startup auto-seed")
+	}
+	if eff["kimi-k2.6"].OutputKRWPer1M <= 0 {
+		t.Error("expected kimi-k2.6 to have a positive KRW output price after auto-seed")
+	}
+
+	// A plain seed is now idempotent (entries already present → added 0); overwrite=1
+	// re-inserts the catalog as fresh versions.
+	plainResp, err := http.Post(srv.URL+"/admin/pricing/seed", "application/json", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var seed struct {
+	var plain struct {
 		Added int `json:"added"`
 	}
-	json.NewDecoder(seedResp.Body).Decode(&seed)
-	seedResp.Body.Close()
-	if seed.Added == 0 {
-		t.Error("expected seed to add catalog entries")
+	json.NewDecoder(plainResp.Body).Decode(&plain)
+	plainResp.Body.Close()
+	if plain.Added != 0 {
+		t.Errorf("plain seed after auto-seed should add 0, got %d", plain.Added)
 	}
-	server.invalidatePricingCache()
-	eff = server.pricingMap(context.Background())
-	if _, ok := eff["claude-opus-4"]; !ok {
-		t.Error("expected claude-opus-4 in effective pricing after seed")
+
+	owResp, err := http.Post(srv.URL+"/admin/pricing/seed?overwrite=1", "application/json", nil)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if eff["kimi-k2.6"].OutputKRWPer1M <= 0 {
-		t.Error("expected kimi-k2.6 to have a positive KRW output price after seed")
+	var ow struct {
+		Added int `json:"added"`
+	}
+	json.NewDecoder(owResp.Body).Decode(&ow)
+	owResp.Body.Close()
+	if ow.Added == 0 {
+		t.Error("expected overwrite seed to re-add catalog entries")
 	}
 }
