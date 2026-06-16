@@ -245,6 +245,7 @@ const adminHTML = `<!doctype html>
       <a href="#/safety" data-tab="safety">안전</a>
       <a href="#/text2sql" data-tab="text2sql">Text2SQL</a>
       <a href="#/skills" data-tab="skills">Skills</a>
+      <a href="#/modeldeprecations" data-tab="modeldeprecations">모델 일몰</a>
       <a href="#/clickhouse" data-tab="clickhouse">ClickHouse</a>
       <a href="#/runtimesettings" data-tab="runtimesettings">런타임 설정</a>
       <a href="#/settings" data-tab="settings">설정</a>
@@ -733,6 +734,7 @@ const adminHTML = `<!doctype html>
           case 'safety':    await renderSafety(); break;
           case 'text2sql':  await renderText2SQL(); break;
           case 'skills':    await renderSkills(); break;
+          case 'modeldeprecations': await renderModelDeprecations(); break;
           case 'personalization': rest.length ? await renderPersonalProfileDetail(decodeURIComponent(rest.join('/'))) : await renderPersonalization(); break;
           case 'mykeys':    await renderMyKeys(); break;
           case 'clickhouse': await renderClickHouse(); break;
@@ -5049,6 +5051,62 @@ const adminHTML = `<!doctype html>
     function chBadge(ok, okText, badText) {
       return '<span class="status ' + (ok ? '' : 'error') + '">' + escapeHTML(ok ? okText : badText) + '</span>';
     }
+    async function renderModelDeprecations() {
+      const view = document.getElementById('view');
+      const d = await api('/admin/model-deprecations').catch(e => ({ deprecations: [], _err: e.message }));
+      const items = d.deprecations || [];
+      const today = new Date().toISOString().slice(0, 10);
+      const phase = (dep) => {
+        if (!dep.sunset_date) return '<span class="status warn">경고만</span>';
+        if (dep.sunset_date <= today) return dep.replacement ? '<span class="status">자동 재작성</span>' : '<span class="status error">차단</span>';
+        return '<span class="status warn">' + escapeHTML(dep.sunset_date) + ' 일몰 예정</span>';
+      };
+      let html = '<div class="card-body"><p class="muted">구형 모델을 단계적으로 은퇴시킵니다. 요청 모델이 <code>model_glob</code>에 매칭되면 일몰일 전에는 응답 헤더로 경고만 하고, 일몰일(UTC) 도달 후에는 대체 모델로 자동 재작성하거나(없으면) 400으로 차단합니다.</p>' +
+        '<form class="inline-form" id="dep-form" style="grid-template-columns: minmax(120px,1fr) minmax(120px,1fr) 130px minmax(140px,1fr) 80px;">' +
+          '<input id="dep-glob" placeholder="model_glob (예: gpt-4-0314, old-*)">' +
+          '<input id="dep-replacement" placeholder="대체 모델 (선택)">' +
+          '<input id="dep-sunset" type="date" placeholder="일몰일">' +
+          '<input id="dep-message" placeholder="안내 메시지 (선택)">' +
+          '<button type="submit">추가</button>' +
+        '</form>' +
+        '<span id="dep-result" class="muted"></span></div>';
+
+      html += '<section><h2>폐기 정책 ' + (items.length ? '(' + items.length + ')' : '') + '</h2><div class="card-body">' +
+        (items.length ? '<table><thead><tr><th>model_glob</th><th>대체 모델</th><th>일몰일</th><th>현재 단계</th><th>메시지</th><th></th></tr></thead><tbody>' +
+          items.map(dep => '<tr><td><code>' + escapeHTML(dep.model_glob) + '</code></td>' +
+            '<td>' + (dep.replacement ? escapeHTML(dep.replacement) : '<span class="muted">없음(차단)</span>') + '</td>' +
+            '<td>' + (dep.sunset_date ? escapeHTML(dep.sunset_date) : '<span class="muted">-</span>') + '</td>' +
+            '<td>' + phase(dep) + '</td>' +
+            '<td class="muted">' + escapeHTML(dep.message || '') + '</td>' +
+            '<td><button class="danger" type="button" onclick="deleteModelDeprecation(\'' + escapeAttr(dep.id) + '\')">삭제</button></td></tr>').join('') + '</tbody></table>'
+          : '<div class="empty">등록된 폐기 정책이 없습니다.' + (d._err ? '<div class="muted">' + escapeHTML(d._err) + '</div>' : '') + '</div>') +
+        '</div></section>';
+      view.innerHTML = card('모델 일몰 정책', html);
+      const form = document.getElementById('dep-form');
+      if (form) form.addEventListener('submit', saveModelDeprecation);
+    }
+    async function saveModelDeprecation(event) {
+      event.preventDefault();
+      const out = document.getElementById('dep-result');
+      const body = {
+        model_glob: document.getElementById('dep-glob').value.trim(),
+        replacement: document.getElementById('dep-replacement').value.trim(),
+        sunset_date: document.getElementById('dep-sunset').value.trim(),
+        message: document.getElementById('dep-message').value.trim(),
+      };
+      if (!body.model_glob) { if (out) out.innerHTML = '<span class="status error">model_glob 필수</span>'; return; }
+      try {
+        await api('/admin/model-deprecations', { method: 'POST', body: JSON.stringify(body) });
+        await renderModelDeprecations();
+      } catch (e) {
+        if (out) out.innerHTML = '<span class="status error">' + escapeHTML(e.message) + '</span>';
+      }
+    }
+    window.deleteModelDeprecation = async (id) => {
+      if (!confirm('해당 폐기 정책을 삭제할까요?')) return;
+      await api('/admin/model-deprecations/' + encodeURIComponent(id), { method: 'DELETE' });
+      await renderModelDeprecations();
+    };
     async function renderSkills() {
       const view = document.getElementById('view');
       const statusFilter = sessionStorage.getItem('skillStatusFilter') || '';
