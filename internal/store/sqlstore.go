@@ -878,6 +878,15 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 			created_at TEXT NOT NULL
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_skill_runs_name ON skill_runs(skill_name, created_at)`,
+		`CREATE TABLE IF NOT EXISTS model_deprecations (
+			id TEXT PRIMARY KEY,
+			model_glob TEXT NOT NULL,
+			replacement TEXT NOT NULL DEFAULT '',
+			sunset_date TEXT NOT NULL DEFAULT '',
+			message TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)`,
 		`CREATE TABLE IF NOT EXISTS skill_promotions (
 			id TEXT PRIMARY KEY,
 			skill_name TEXT NOT NULL,

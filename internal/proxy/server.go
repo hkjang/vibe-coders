@@ -31,7 +31,7 @@ import (
 )
 
 // AppVersion is the gateway build version, surfaced in /auth/me and the admin UI.
-const AppVersion = "v0.22.0"
+const AppVersion = "v0.23.0"
 
 type Server struct {
 	cfg          config.Config
@@ -45,6 +45,7 @@ type Server struct {
 	mcpPolicy    atomic.Pointer[mcpPolicySnapshot]
 	routingRules atomic.Pointer[routingRulesSnapshot]
 	knowledge    atomic.Pointer[knowledgeSnapshot]
+	deprecations atomic.Pointer[deprecationSnapshot]
 	costCache    atomic.Pointer[costSnapshot]
 	learnCache   atomic.Pointer[routingLearnSnapshot]
 	priceCache   atomic.Pointer[pricingSnapshot]
@@ -312,6 +313,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/admin/routing-rules/", s.handleRoutingRuleByID)
 	mux.HandleFunc("/admin/budgets", s.handleBudgets)
 	mux.HandleFunc("/admin/budgets/", s.handleBudgetByID)
+	mux.HandleFunc("/admin/model-deprecations", s.handleModelDeprecations)
+	mux.HandleFunc("/admin/model-deprecations/", s.handleModelDeprecationByID)
 	mux.HandleFunc("/admin/waterfall", s.handleWaterfall)
 	mux.HandleFunc("/admin/routing/learning", s.handleRoutingLearning)
 	mux.HandleFunc("/admin/routing/learning/auto", s.handleRoutingLearningAuto)

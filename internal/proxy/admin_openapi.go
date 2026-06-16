@@ -121,6 +121,8 @@ var apiEndpoints = []apiEndpoint{
 	{"/admin/budgets", []string{"get", "post"}, "cost", "List / create budgets", false},
 	{"/admin/budgets/{id}", []string{"put", "delete"}, "cost", "Update / delete a budget", false},
 	{"/admin/budgets/alerts", []string{"get"}, "cost", "Budgets at warn/critical burn (optional Mattermost notify)", false},
+	{"/admin/model-deprecations", []string{"get", "post"}, "routing", "List / upsert model deprecations (sunset policy)", false},
+	{"/admin/model-deprecations/{id}", []string{"delete"}, "routing", "Delete a model deprecation", false},
 	{"/admin/savings", []string{"get"}, "cost", "Savings report", false},
 	{"/admin/invoices", []string{"get"}, "cost", "Cost-center invoices", false},
 	{"/admin/carbon-score", []string{"get"}, "cost", "Prompt carbon score", false},

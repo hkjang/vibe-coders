@@ -21,7 +21,7 @@ import (
 // Returning true passes control (and the shared requestPipeline state) to the
 // next step. This makes the previously-inline handleOpenAI flow explicit:
 //
-//	Auth → Quota → Routing → Skill → Governance → Cache → Cost → Upstream
+//	Auth → Quota → Routing → Skill → Deprecation → Governance → Cache → Cost → Upstream
 type PipelineStep interface {
 	// Name is a short stable identifier used in logs/metrics/tests.
 	Name() string
@@ -78,6 +78,7 @@ func (rc *requestPipeline) steps() []PipelineStep {
 		stepFunc{"quota", (*requestPipeline).stepQuota},
 		stepFunc{"routing", (*requestPipeline).stepRouting},
 		stepFunc{"skill", (*requestPipeline).stepSkill},
+		stepFunc{"deprecation", (*requestPipeline).stepDeprecation},
 		stepFunc{"governance", (*requestPipeline).stepGovernance},
 		stepFunc{"cache", (*requestPipeline).stepCache},
 		stepFunc{"cost", (*requestPipeline).stepCost},
