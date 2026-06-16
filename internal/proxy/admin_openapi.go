@@ -217,6 +217,7 @@ var apiEndpoints = []apiEndpoint{
 	{"/admin/dw/dashboard/timeseries", []string{"get"}, "dw", "DW dashboard daily time series", false},
 	{"/admin/dw/dashboard/dimensions", []string{"get"}, "dw", "DW dashboard Top-N by dimension", false},
 	{"/admin/dw/dashboard/text2sql", []string{"get"}, "dw", "DW dashboard Text2SQL analytics", false},
+	{"/admin/dw/dashboard/routing", []string{"get"}, "dw", "DW dashboard routing-decision analytics", false},
 	{"/admin/dw/dashboard/export.csv", []string{"get"}, "dw", "DW dashboard CSV export (current filter)", false},
 	{"/admin/dw/consistency", []string{"get"}, "dw", "Local vs ClickHouse consistency", false},
 	{"/admin/dw/sink-status", []string{"get"}, "dw", "Sink watermarks + retry queue", false},

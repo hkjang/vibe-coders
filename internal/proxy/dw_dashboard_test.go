@@ -142,6 +142,65 @@ func TestDWDashboardText2SQL(t *testing.T) {
 	}
 }
 
+func TestDWDashboardRouting(t *testing.T) {
+	ch := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query().Get("query")
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.Contains(q, "GROUP BY requested_model"):
+			_, _ = w.Write([]byte(`{"data":[{"from_model":"auto","to_model":"qwen-plus","n":"30"}]}`))
+		case strings.Contains(q, "decision_reason != ''"):
+			_, _ = w.Write([]byte(`{"data":[{"reason":"complexity_rule","n":"25"}]}`))
+		default:
+			_, _ = w.Write([]byte(`{"data":[{"total":"100","auto_routed":"40","fallback_used":"6","avg_complexity":3.2,"avg_risk":1.1,"avg_health":95}]}`))
+		}
+	}))
+	defer ch.Close()
+	db := openTestStore(t)
+	defer db.Close()
+	logger := store.NewAsyncLogger(db, 8, filepath.Join(t.TempDir(), "rt.ndjson"))
+	logger.Start()
+	defer logger.Stop(context.Background())
+	server, err := NewServer(testConfig("http://upstream.invalid", "secret"), db, logger, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server.chRuntime.Store(&config.ClickHouseConfig{URL: ch.URL, Table: "ai_request_rollup", RoutingFactTable: "ai_routing_fact"})
+	srv := httptest.NewServer(server.Routes())
+	defer srv.Close()
+
+	resp, _ := http.Get(srv.URL + "/admin/dw/dashboard/routing?window=7d")
+	var out struct {
+		Configured    bool             `json:"configured"`
+		Total         float64          `json:"total"`
+		AutoRouted    float64          `json:"auto_routed"`
+		AutoRouteRate float64          `json:"auto_route_rate"`
+		Rewrites      []map[string]any `json:"rewrites"`
+		Reasons       []map[string]any `json:"reasons"`
+	}
+	json.NewDecoder(resp.Body).Decode(&out)
+	resp.Body.Close()
+	if !out.Configured || out.Total != 100 || out.AutoRouted != 40 {
+		t.Fatalf("routing summary wrong: %+v", out)
+	}
+	if out.AutoRouteRate < 0.39 || out.AutoRouteRate > 0.41 {
+		t.Fatalf("auto_route_rate = %v, want ~0.40", out.AutoRouteRate)
+	}
+	if len(out.Rewrites) != 1 || len(out.Reasons) != 1 {
+		t.Fatalf("rewrites/reasons wrong: %+v / %+v", out.Rewrites, out.Reasons)
+	}
+
+	// Unconfigured routing fact → configured:false.
+	srv2 := newDWTestServer(t, "http://ch.invalid")
+	r2, _ := http.Get(srv2.URL + "/admin/dw/dashboard/routing")
+	var o2 map[string]any
+	json.NewDecoder(r2.Body).Decode(&o2)
+	r2.Body.Close()
+	if o2["configured"] != false {
+		t.Fatalf("expected configured=false without routing fact, got %+v", o2)
+	}
+}
+
 func TestDWDashboardExportCSV(t *testing.T) {
 	ch := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

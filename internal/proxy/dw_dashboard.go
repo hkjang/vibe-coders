@@ -271,6 +271,76 @@ func (s *Server) handleDWDashboardText2SQL(w http.ResponseWriter, r *http.Reques
 	})
 }
 
+// dwRoutingReady reports whether the routing fact table is configured for dashboard reads.
+func (s *Server) dwRoutingReady() (config.ClickHouseConfig, string, bool) {
+	cfg := s.chConf()
+	table := strings.TrimSpace(cfg.RoutingFactTable)
+	if strings.TrimSpace(cfg.URL) == "" || table == "" {
+		return cfg, "", false
+	}
+	return cfg, chTableRef(cfg.Database, table), true
+}
+
+// handleDWDashboardRouting summarizes intelligent-routing decisions from the routing fact:
+// auto-route/fallback counts, average complexity/risk/health, top decision reasons, and the
+// most common model rewrites (requested → selected).
+// GET /admin/dw/dashboard/routing?window=
+func (s *Server) handleDWDashboardRouting(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	cfg, ref, ok := s.dwRoutingReady()
+	if !ok {
+		writeJSON(w, http.StatusOK, map[string]any{"configured": false})
+		return
+	}
+	sinceStr, _ := dwSinceDate(r)
+	where := "event_date >= '" + sinceStr + "'"
+
+	summary, err := s.dwQueryJSON(r.Context(), cfg, "SELECT count() AS total, sum(requested_model != selected_model) AS auto_routed, "+
+		"sum(fallback_path != '') AS fallback_used, avg(complexity_score) AS avg_complexity, avg(risk_score) AS avg_risk, avg(health_score) AS avg_health FROM "+ref+" FINAL WHERE "+where)
+	if err != nil {
+		writeOpenAIError(w, http.StatusBadGateway, err.Error(), "server_error", "dw_query_failed")
+		return
+	}
+	reasons, err := s.dwQueryJSON(r.Context(), cfg, "SELECT decision_reason AS reason, count() AS n FROM "+ref+" FINAL WHERE "+where+" AND decision_reason != '' GROUP BY decision_reason ORDER BY n DESC LIMIT 10")
+	if err != nil {
+		writeOpenAIError(w, http.StatusBadGateway, err.Error(), "server_error", "dw_query_failed")
+		return
+	}
+	rewrites, err := s.dwQueryJSON(r.Context(), cfg, "SELECT requested_model AS from_model, selected_model AS to_model, count() AS n FROM "+ref+" FINAL WHERE "+where+" AND requested_model != selected_model GROUP BY requested_model, selected_model ORDER BY n DESC LIMIT 10")
+	if err != nil {
+		writeOpenAIError(w, http.StatusBadGateway, err.Error(), "server_error", "dw_query_failed")
+		return
+	}
+
+	total, autoRouted, fallback, avgComplex, avgRisk, avgHealth := 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+	if len(summary) > 0 {
+		s0 := summary[0]
+		total, autoRouted, fallback = asFloat(s0["total"]), asFloat(s0["auto_routed"]), asFloat(s0["fallback_used"])
+		avgComplex, avgRisk, avgHealth = asFloat(s0["avg_complexity"]), asFloat(s0["avg_risk"]), asFloat(s0["avg_health"])
+	}
+	autoRate := 0.0
+	if total > 0 {
+		autoRate = autoRouted / total
+	}
+	reasonRows := make([]map[string]any, 0, len(reasons))
+	for _, rr := range reasons {
+		reasonRows = append(reasonRows, map[string]any{"reason": rr["reason"], "count": asFloat(rr["n"])})
+	}
+	rewriteRows := make([]map[string]any, 0, len(rewrites))
+	for _, rw := range rewrites {
+		rewriteRows = append(rewriteRows, map[string]any{"from": rw["from_model"], "to": rw["to_model"], "count": asFloat(rw["n"])})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"configured": true, "since": sinceStr,
+		"total": total, "auto_routed": autoRouted, "auto_route_rate": autoRate, "fallback_used": fallback,
+		"avg_complexity": avgComplex, "avg_risk": avgRisk, "avg_health": avgHealth,
+		"reasons": reasonRows, "rewrites": rewriteRows,
+	})
+}
+
 // handleDWDashboardExportCSV exports the current dashboard view as UTF-8 CSV (Excel-friendly
 // BOM). A model/provider/project/cost_center dimension exports its Top-N rows; otherwise the
 // daily time series of the 'all' scope is exported.

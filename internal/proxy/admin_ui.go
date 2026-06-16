@@ -5361,13 +5361,14 @@ const adminHTML = `<!doctype html>
       const dim = sessionStorage.getItem('dwDim') || 'model';
       const order = sessionStorage.getItem('dwOrder') || 'cost';
       const qs = '?window=' + encodeURIComponent(win);
-      const [ov, ts, dims, health, t2s, cons] = await Promise.all([
+      const [ov, ts, dims, health, t2s, cons, rout] = await Promise.all([
         api('/admin/dw/dashboard/overview' + qs).catch(e => ({ _err: e.message })),
         api('/admin/dw/dashboard/timeseries' + qs).catch(() => ({ points: [] })),
         api('/admin/dw/dashboard/dimensions' + qs + '&dimension=' + encodeURIComponent(dim) + '&order_by=' + encodeURIComponent(order) + '&limit=10').catch(() => ({ rows: [] })),
         api('/admin/dw/sink-status').catch(() => null),
         api('/admin/dw/dashboard/text2sql' + qs).catch(() => null),
         api('/admin/dw/consistency?days=30').catch(() => null),
+        api('/admin/dw/dashboard/routing' + qs).catch(() => null),
       ]);
 
       if (ov && ov.configured === false) {
@@ -5438,6 +5439,26 @@ const adminHTML = `<!doctype html>
           ((t2s.failures && t2s.failures.length) ? '<h3 style="margin-top:10px">실패 원인 Top</h3><table><thead><tr><th>failure_category</th><th>건수</th></tr></thead><tbody>' +
             t2s.failures.map(f => '<tr><td>' + escapeHTML(String(f.reason || '')) + '</td><td data-num="' + f.count + '">' + fmt(Math.round(f.count)) + '</td></tr>').join('') + '</tbody></table>' : '') +
           '<div class="muted" style="margin-top:8px;font-size:11px">위험 요청·골든·replay 상세는 <a href="#/text2sql">Text2SQL 탭</a>에서 확인하세요.</div>' +
+          '</div></section>';
+      }
+
+      // 라우팅 분석 (routing fact 설정 시).
+      if (rout && rout.configured) {
+        const rcard = (label, val) => '<div style="flex:1;min-width:130px;border:1px solid var(--border,#333);border-radius:8px;padding:10px"><div class="muted" style="font-size:12px">' + label + '</div><div style="font-size:18px;font-weight:600">' + val + '</div></div>';
+        html += '<section><h2>라우팅 분석</h2><div class="card-body">' +
+          '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:8px">' +
+            rcard('총 라우팅', fmt(Math.round(rout.total || 0))) +
+            rcard('자동 재작성', fmt(Math.round(rout.auto_routed || 0))) +
+            rcard('자동 재작성율', ((rout.auto_route_rate || 0) * 100).toFixed(1) + '%') +
+            rcard('fallback', fmt(Math.round(rout.fallback_used || 0))) +
+            rcard('평균 complexity', (rout.avg_complexity || 0).toFixed(1)) +
+            rcard('평균 risk', (rout.avg_risk || 0).toFixed(1)) +
+            rcard('평균 health', (rout.avg_health || 0).toFixed(0)) +
+          '</div>' +
+          ((rout.rewrites && rout.rewrites.length) ? '<h3 style="margin-top:6px">모델 재작성 Top (요청 → 선택)</h3><table><thead><tr><th>요청 모델</th><th>선택 모델</th><th>건수</th></tr></thead><tbody>' +
+            rout.rewrites.map(rw => '<tr><td>' + escapeHTML(String(rw.from || '')) + '</td><td>' + escapeHTML(String(rw.to || '')) + '</td><td data-num="' + rw.count + '">' + fmt(Math.round(rw.count)) + '</td></tr>').join('') + '</tbody></table>' : '') +
+          ((rout.reasons && rout.reasons.length) ? '<h3 style="margin-top:10px">결정 근거 Top</h3><table><thead><tr><th>decision_reason</th><th>건수</th></tr></thead><tbody>' +
+            rout.reasons.map(rr => '<tr><td>' + escapeHTML(String(rr.reason || '')) + '</td><td data-num="' + rr.count + '">' + fmt(Math.round(rr.count)) + '</td></tr>').join('') + '</tbody></table>' : '') +
           '</div></section>';
       }
 
