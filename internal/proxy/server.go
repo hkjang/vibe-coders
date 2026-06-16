@@ -30,6 +30,9 @@ import (
 	"vibe-coders/internal/store"
 )
 
+// AppVersion is the gateway build version, surfaced in /auth/me and the admin UI.
+const AppVersion = "v0.9.7"
+
 type Server struct {
 	cfg          config.Config
 	db           *store.SQLStore
@@ -161,6 +164,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/health", s.handleHealth)
 	mux.HandleFunc("/ready", s.handleReady)
 	mux.HandleFunc("/metrics", s.handleMetrics)
+	mux.HandleFunc("/openapi.json", s.handleOpenAPISpec)
+	mux.HandleFunc("/swagger", s.handleSwaggerUI)
 	mux.HandleFunc("/auth/login", s.handleAuthLogin)
 	mux.HandleFunc("/auth/logout", s.handleAuthLogout)
 	mux.HandleFunc("/auth/refresh", s.handleAuthRefresh)
@@ -1477,7 +1482,7 @@ func (s *Server) handleAdminUI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = w.Write([]byte(adminHTML))
+	_, _ = w.Write([]byte(strings.ReplaceAll(adminHTML, "__APP_VERSION__", AppVersion)))
 }
 
 func (s *Server) auditRequest(endpoint string, body []byte, apiKeyID string, traceID string, r *http.Request) store.LogRecord {

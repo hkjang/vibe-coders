@@ -215,6 +215,7 @@ const adminHTML = `<!doctype html>
     .user-menu a:hover { background: var(--panel-alt); }
     .user-menu .user-menu-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 13px; color: var(--muted); }
     .user-menu .user-menu-sep { height: 1px; background: var(--accent); opacity: 0.3; margin: 2px 0; }
+    .user-menu .user-menu-meta { font-size: 11px; color: var(--muted); padding: 2px 8px; line-height: 1.4; }
     .user-menu button { width: 100%; text-align: left; }
 
     @media (max-width: 960px) {
@@ -254,6 +255,7 @@ const adminHTML = `<!doctype html>
           <a href="#/personalization" data-tab="personalization">개인화</a>
           <a href="#/mykeys" data-tab="mykeys">내 키</a>
           <button id="auth-logout" class="ghost" type="button" style="display:none" title="로그아웃">로그아웃</button>
+          <div id="session-expiry" class="user-menu-meta" style="display:none"></div>
           <div class="user-menu-sep"></div>
           <label class="user-menu-row">자동 새로고침
             <select id="refresh-interval" title="자동 새로고침 주기">
@@ -266,6 +268,10 @@ const adminHTML = `<!doctype html>
           </label>
           <button id="theme-toggle" class="ghost" type="button" title="라이트/다크 전환 (t)">🌓 테마 전환</button>
           <button id="help-toggle" class="ghost" type="button" title="단축키 도움말 (?)">? 단축키 도움말</button>
+          <div id="app-version" class="user-menu-meta">앱 버전 __APP_VERSION__</div>
+          <div class="user-menu-sep"></div>
+          <a href="/swagger" target="_blank" rel="noopener">📘 API 문서 (Swagger)</a>
+          <a href="/openapi.json" target="_blank" rel="noopener">openapi.json 내려받기</a>
         </div>
       </div>
       <input id="token" type="password" autocomplete="off" placeholder="관리자 토큰">
@@ -371,6 +377,20 @@ const adminHTML = `<!doctype html>
         logoutBtn.style.display = 'none';
       }
     }
+    // updateMenuMeta fills the session-expiry line (below 로그아웃) from /auth/me. The app
+    // version is injected server-side, so only expiry needs runtime data.
+    function updateMenuMeta(me) {
+      const exp = document.getElementById('session-expiry');
+      if (!exp) return;
+      if (me && me.expires_at) {
+        const d = new Date(me.expires_at * 1000);
+        const mins = Math.max(0, Math.round((d.getTime() - Date.now()) / 60000));
+        exp.textContent = '세션 만료 예정: ' + d.toLocaleString() + ' (약 ' + mins + '분 후)';
+        exp.style.display = 'block';
+      } else {
+        exp.style.display = 'none';
+      }
+    }
     function showLogin(message) {
       renderAuthHeader();
       const err = document.getElementById('login-error');
@@ -448,6 +468,7 @@ const adminHTML = `<!doctype html>
           authState.enabled = !!me.auth_enabled;
           if (me.user) { authState.user = me.user; sessionStorage.setItem('authUser', JSON.stringify(me.user)); }
           renderAuthHeader();
+          updateMenuMeta(me);
           route();
           return;
         }
@@ -2955,6 +2976,18 @@ const adminHTML = `<!doctype html>
     }
     function requestDetailHTML(d, note) {
       const r = d.request;
+      // Surface the most recent user message at the very top of the modal (above 요청 ID),
+      // rendered for maximum readability — it's the question the operator most wants to see.
+      let lastUserText = '';
+      for (const p of (d.prompts || [])) {
+        if ((p.role || '').toLowerCase() === 'user') lastUserText = p.redacted_text || p.content_text || '';
+      }
+      const lastUserBlock = lastUserText.trim() ? (
+        '<div style="border:1px solid var(--line); border-left:4px solid #6ea8fe; border-radius:8px; background:rgba(110,168,254,0.08); padding:12px 14px; margin-bottom:14px;">' +
+          '<div style="font-weight:800; font-size:11px; letter-spacing:.05em; color:var(--muted); margin-bottom:6px;">💬 마지막 사용자 메시지</div>' +
+          '<div style="white-space:normal; line-height:1.65; font-size:14.5px;">' + renderMarkdown(lastUserText) + '</div>' +
+        '</div>'
+      ) : '';
       const explainBtn = '<div style="margin-bottom:12px"><button class="secondary" type="button" onclick="closeModal();openExplain(\'' + escapeAttr(r.id) + '\')">🧭 XView 설명 (왜 이렇게 처리됐나)</button></div>';
       const langs = (d.languages || []).map(l => escapeHTML(l.language) + ' <span class="muted">(' + pct(l.confidence) + ')</span>').join(', ') || '<span class="muted">없음</span>';
       const prompts = (d.prompts || []).map(p => {
@@ -3020,6 +3053,7 @@ const adminHTML = `<!doctype html>
       const governance = governanceHTML(d.governance || {});
 
       return (
+        lastUserBlock +
         explainBtn +
         '<div class="kv">' +
           row('요청 ID', escapeHTML(r.id)) +
