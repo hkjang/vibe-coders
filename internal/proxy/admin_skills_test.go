@@ -114,6 +114,88 @@ func TestSkillEnforceBlocks(t *testing.T) {
 	}
 }
 
+func TestSkillPromotionGate(t *testing.T) {
+	// draft → production is blocked (must stage first).
+	if r := skillPromotionGate(store.Skill{Status: "draft", Instructions: "x"}, "production", ""); r == "" {
+		t.Fatal("expected draft→production to be gated")
+	}
+	// staging → production needs instructions.
+	if r := skillPromotionGate(store.Skill{Status: "staging", Instructions: ""}, "production", ""); r == "" {
+		t.Fatal("expected empty-instructions production promotion to be gated")
+	}
+	// high-risk staging → production needs a note.
+	if r := skillPromotionGate(store.Skill{Status: "staging", Instructions: "x", RiskLevel: "high"}, "production", ""); r == "" {
+		t.Fatal("expected high-risk production promotion without note to be gated")
+	}
+	// happy path: staging → production with instructions (+ note for high risk).
+	if r := skillPromotionGate(store.Skill{Status: "staging", Instructions: "x"}, "production", ""); r != "" {
+		t.Fatalf("expected staging→production to pass, got %q", r)
+	}
+	if r := skillPromotionGate(store.Skill{Status: "staging", Instructions: "x", RiskLevel: "high"}, "production", "reviewed"); r != "" {
+		t.Fatalf("expected high-risk with note to pass, got %q", r)
+	}
+}
+
+func TestSkillPromoteWorkflow(t *testing.T) {
+	db := openTestStore(t)
+	defer db.Close()
+	logger := store.NewAsyncLogger(db, 8, filepath.Join(t.TempDir(), "p.ndjson"))
+	logger.Start()
+	defer logger.Stop(context.Background())
+	server, err := NewServer(testConfig("http://upstream.invalid", "secret"), db, logger, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(server.Routes())
+	defer srv.Close()
+
+	ctx := context.Background()
+	if _, err := db.UpsertSkill(ctx, store.Skill{Name: "flow", Status: "draft", Instructions: "do the thing"}, "tester"); err != nil {
+		t.Fatal(err)
+	}
+
+	// draft → production directly is rejected (422 gate).
+	resp := postJSON(t, srv.URL+"/admin/skills/promote", "", map[string]any{"name": "flow", "to_status": "production"})
+	if resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("draft→production = %d, want 422", resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	// draft → staging → production (with version bump) succeeds.
+	resp = postJSON(t, srv.URL+"/admin/skills/promote", "", map[string]any{"name": "flow", "to_status": "staging"})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("draft→staging = %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+	resp = postJSON(t, srv.URL+"/admin/skills/promote", "", map[string]any{"name": "flow", "to_status": "production", "version": "1.0.0", "note": "ready"})
+	var out struct {
+		Skill store.Skill `json:"skill"`
+	}
+	json.NewDecoder(resp.Body).Decode(&out)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || out.Skill.Status != "production" || out.Skill.Version != "1.0.0" {
+		t.Fatalf("staging→production = %d %+v", resp.StatusCode, out.Skill)
+	}
+
+	// Two transitions recorded in history, newest first.
+	hist, _ := http.Get(srv.URL + "/admin/skills/promotions?skill=flow")
+	var h struct {
+		Promotions []store.SkillPromotion `json:"promotions"`
+	}
+	json.NewDecoder(hist.Body).Decode(&h)
+	hist.Body.Close()
+	if len(h.Promotions) != 2 || h.Promotions[0].ToStatus != "production" || h.Promotions[0].FromStatus != "staging" {
+		t.Fatalf("promotion history wrong: %+v", h.Promotions)
+	}
+
+	// Now visible in the public catalog (production).
+	pub, _ := http.Get(srv.URL + "/v1/skills/flow")
+	pub.Body.Close()
+	if pub.StatusCode != http.StatusOK {
+		t.Fatalf("promoted skill not public = %d", pub.StatusCode)
+	}
+}
+
 func TestSkillStats(t *testing.T) {
 	db := openTestStore(t)
 	defer db.Close()

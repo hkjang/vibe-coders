@@ -5086,7 +5086,9 @@ const adminHTML = `<!doctype html>
             '<td class="muted">' + escapeHTML(sk.allowed_tools || '*') + '</td>' +
             '<td>' + ago(sk.updated_at) + '<div class="muted" style="font-size:11px">' + escapeHTML(sk.updated_by || '') + '</div></td>' +
             '<td><button class="secondary" type="button" onclick="skillEdit(\'' + escapeAttr(sk.name) + '\')">편집</button> ' +
+              '<button class="secondary" type="button" onclick="skillPromote(\'' + escapeAttr(sk.name) + '\',\'' + escapeAttr(sk.status) + '\')">승격</button> ' +
               '<button class="secondary" type="button" onclick="skillRuns(\'' + escapeAttr(sk.name) + '\')">실행로그</button> ' +
+              '<button class="secondary" type="button" onclick="skillPromotions(\'' + escapeAttr(sk.name) + '\')">이력</button> ' +
               '<button class="secondary" type="button" onclick="skillDelete(\'' + escapeAttr(sk.name) + '\')">삭제</button></td>' +
           '</tr>').join('') + '</tbody></table>'
           : '<div class="empty">등록된 Skill이 없습니다. [새 Skill]로 추가하세요.' + (d._err ? '<div class="muted">' + escapeHTML(d._err) + '</div>' : '') + '</div>') +
@@ -5148,6 +5150,34 @@ const adminHTML = `<!doctype html>
         const out = document.getElementById('skill-action-result');
         if (out) out.innerHTML = '<span class="status error">' + escapeHTML(e.message) + '</span>';
       }
+    };
+    window.skillPromote = async (name, from) => {
+      const next = { draft: 'staging', staging: 'production', production: 'deprecated', deprecated: 'staging' };
+      const suggested = next[from] || 'staging';
+      const to = prompt('Skill "' + name + '" 승격 — 대상 상태 (draft/staging/production/deprecated)\n현재: ' + from, suggested);
+      if (!to) return;
+      const note = prompt('변경 사유(선택, high-risk → production 시 필수):', '') || '';
+      const out = document.getElementById('skill-action-result');
+      try {
+        const r = await api('/admin/skills/promote', { method: 'POST', body: JSON.stringify({ name: name, to_status: to.trim(), note: note }) });
+        if (out) out.innerHTML = '<span class="status">승격됨: ' + escapeHTML(name) + ' → ' + escapeHTML((r.skill || {}).status || to) + '</span>';
+        await renderSkills();
+      } catch (e) {
+        if (out) out.innerHTML = '<span class="status error">' + escapeHTML(e.message) + '</span>';
+      }
+    };
+    window.skillPromotions = async (name) => {
+      const sec = document.getElementById('skill-runs');
+      if (!sec) return;
+      const d = await api('/admin/skills/promotions?skill=' + encodeURIComponent(name)).catch(e => ({ promotions: [], _err: e.message }));
+      const proms = d.promotions || [];
+      sec.style.display = '';
+      sec.innerHTML = '<h2>승격 이력: ' + escapeHTML(name) + ' ' + (proms.length ? '(' + proms.length + ')' : '') + '</h2><div class="card-body">' +
+        (proms.length ? '<table><thead><tr><th>시각</th><th>전이</th><th>버전</th><th>수행자</th><th>사유</th></tr></thead><tbody>' +
+          proms.map(p => '<tr><td>' + ago(p.created_at) + '</td><td>' + escapeHTML(p.from_status) + ' → <strong>' + escapeHTML(p.to_status) + '</strong></td><td>' + escapeHTML(p.from_version) + ' → ' + escapeHTML(p.to_version) + '</td><td>' + escapeHTML(p.actor || '') + '</td><td class="muted">' + escapeHTML(p.note || '') + '</td></tr>').join('') + '</tbody></table>'
+          : '<div class="empty">승격 이력이 없습니다.' + (d._err ? '<div class="muted">' + escapeHTML(d._err) + '</div>' : '') + '</div>') +
+        '</div>';
+      sec.scrollIntoView({ behavior: 'smooth' });
     };
     window.skillSeedRecommended = async () => {
       const out = document.getElementById('skill-action-result');

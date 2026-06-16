@@ -265,6 +265,108 @@ func (s *Server) handleSkillSeedRecommended(w http.ResponseWriter, r *http.Reque
 	writeJSON(w, http.StatusOK, map[string]any{"seeded": seeded})
 }
 
+// validSkillTransitions defines the allowed lifecycle moves for the promotion gate.
+// Reaching production requires passing through staging first (no draft→production jump).
+var validSkillTransitions = map[string]map[string]bool{
+	"draft":      {"staging": true, "deprecated": true},
+	"staging":    {"production": true, "draft": true, "deprecated": true},
+	"production": {"staging": true, "deprecated": true},
+	"deprecated": {"staging": true, "draft": true},
+}
+
+// skillPromotionGate returns the reason a transition is not allowed, or "" if it passes.
+// Gate rules to production: instructions must be present (callers receive them); high-risk
+// skills require a justification note.
+func skillPromotionGate(sk store.Skill, toStatus, note string) string {
+	from := strings.TrimSpace(sk.Status)
+	if from == "" {
+		from = "draft"
+	}
+	if from == toStatus {
+		return "skill is already in status '" + toStatus + "'"
+	}
+	if allowed, ok := validSkillTransitions[from]; !ok || !allowed[toStatus] {
+		return "transition " + from + " → " + toStatus + " is not allowed"
+	}
+	if toStatus == "production" {
+		if strings.TrimSpace(sk.Instructions) == "" {
+			return "a production skill must have non-empty instructions"
+		}
+		if sk.RiskLevel == "high" && strings.TrimSpace(note) == "" {
+			return "high-risk skills require a justification note to reach production"
+		}
+	}
+	return ""
+}
+
+// handleSkillPromote performs a governed lifecycle transition with gate checks + history.
+// POST /admin/skills/promote {name, to_status, version, note}
+func (s *Server) handleSkillPromote(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	if r.Method != http.MethodPost {
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
+	var p struct {
+		Name     string `json:"name"`
+		ToStatus string `json:"to_status"`
+		Version  string `json:"version"`
+		Note     string `json:"note"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+		writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "invalid_body")
+		return
+	}
+	name := strings.TrimSpace(p.Name)
+	to := strings.TrimSpace(p.ToStatus)
+	if name == "" || to == "" {
+		writeOpenAIError(w, http.StatusBadRequest, "name and to_status are required", "invalid_request_error", "missing_fields")
+		return
+	}
+	if !validSkillStatus[to] {
+		writeOpenAIError(w, http.StatusBadRequest, "to_status must be draft|staging|production|deprecated", "invalid_request_error", "invalid_status")
+		return
+	}
+	sk, found, err := s.db.GetSkill(r.Context(), name)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "skill_failed")
+		return
+	}
+	if !found {
+		writeOpenAIError(w, http.StatusNotFound, "skill not found", "invalid_request_error", "not_found")
+		return
+	}
+	if reason := skillPromotionGate(sk, to, p.Note); reason != "" {
+		writeOpenAIError(w, http.StatusUnprocessableEntity, "promotion gate: "+reason, "invalid_request_error", "promotion_gate")
+		return
+	}
+	saved, err := s.db.PromoteSkill(r.Context(), name, to, strings.TrimSpace(p.Version), s.skillActor(r), strings.TrimSpace(p.Note))
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "skill_promote_failed")
+		return
+	}
+	s.auditAdmin(r, "skill.promote", saved.Name, auditJSON(map[string]any{"from": sk.Status, "to": to, "version": saved.Version}))
+	writeJSON(w, http.StatusOK, map[string]any{"skill": saved})
+}
+
+// handleSkillPromotions returns the promotion history (optionally for one skill).
+// GET /admin/skills/promotions?skill=&limit=
+func (s *Server) handleSkillPromotions(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	proms, err := s.db.ListSkillPromotions(r.Context(), strings.TrimSpace(r.URL.Query().Get("skill")), recentLimit(r))
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "skill_promotions_failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"promotions": proms})
+}
+
 // handleSkillStats returns per-skill execution aggregates over a time window — the
 // observability/cost view: runs, ok/error/blocked counts, block rate, total cost, avg
 // latency, distinct actors, last run.

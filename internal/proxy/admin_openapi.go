@@ -196,6 +196,8 @@ var apiEndpoints = []apiEndpoint{
 	{"/admin/skills/by-name/{name}", []string{"get", "delete"}, "skills", "Get / delete one skill", false},
 	{"/admin/skills/runs", []string{"get"}, "skills", "Skill execution log", false},
 	{"/admin/skills/stats", []string{"get"}, "skills", "Per-skill execution/cost aggregates", false},
+	{"/admin/skills/promote", []string{"post"}, "skills", "Promote a skill through its lifecycle (gated)", false},
+	{"/admin/skills/promotions", []string{"get"}, "skills", "Skill promotion history", false},
 	{"/admin/skills/evaluate", []string{"post"}, "skills", "Dry-run a skill's policy against a model/tools", false},
 	{"/admin/skills/seed-recommended", []string{"post"}, "skills", "Seed the recommended starter skills", false},
 

@@ -874,6 +874,18 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 			created_at TEXT NOT NULL
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_skill_runs_name ON skill_runs(skill_name, created_at)`,
+		`CREATE TABLE IF NOT EXISTS skill_promotions (
+			id TEXT PRIMARY KEY,
+			skill_name TEXT NOT NULL,
+			from_status TEXT NOT NULL DEFAULT '',
+			to_status TEXT NOT NULL DEFAULT '',
+			from_version TEXT NOT NULL DEFAULT '',
+			to_version TEXT NOT NULL DEFAULT '',
+			actor TEXT NOT NULL DEFAULT '',
+			note TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_skill_promotions_name ON skill_promotions(skill_name, created_at)`,
 		// OKF (Open Knowledge Format) — portable knowledge documents + relationship links.
 		`CREATE TABLE IF NOT EXISTS okf_documents (
 			id TEXT PRIMARY KEY,

@@ -148,6 +148,89 @@ func (s *SQLStore) RecordSkillRun(ctx context.Context, run SkillRun) error {
 	return err
 }
 
+// SkillPromotion is one lifecycle transition of a skill (e.g. staging → production),
+// recorded for audit/version history.
+type SkillPromotion struct {
+	ID          string `json:"id"`
+	SkillName   string `json:"skill_name"`
+	FromStatus  string `json:"from_status"`
+	ToStatus    string `json:"to_status"`
+	FromVersion string `json:"from_version"`
+	ToVersion   string `json:"to_version"`
+	Actor       string `json:"actor"`
+	Note        string `json:"note"`
+	CreatedAt   string `json:"created_at"`
+}
+
+// PromoteSkill atomically transitions a skill to a new status (and optional new version),
+// recording the change in skill_promotions. Transition/gate validation is the caller's
+// responsibility; this performs the mutation + history insert. Returns the updated skill.
+func (s *SQLStore) PromoteSkill(ctx context.Context, name, toStatus, toVersion, actor, note string) (Skill, error) {
+	cur, found, err := s.GetSkill(ctx, name)
+	if err != nil {
+		return Skill{}, err
+	}
+	if !found {
+		return Skill{}, sql.ErrNoRows
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	newVersion := strings.TrimSpace(toVersion)
+	if newVersion == "" {
+		newVersion = cur.Version
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Skill{}, err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, s.bind(`UPDATE skills SET status = ?, version = ?, updated_at = ?, updated_by = ? WHERE name = ?`),
+		toStatus, newVersion, now, actor, name); err != nil {
+		return Skill{}, err
+	}
+	if _, err := tx.ExecContext(ctx, s.bind(`INSERT INTO skill_promotions (id, skill_name, from_status, to_status, from_version, to_version, actor, note, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+		newStoreID("skprom"), name, cur.Status, toStatus, cur.Version, newVersion, actor, note, now); err != nil {
+		return Skill{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return Skill{}, err
+	}
+	cur.Status = toStatus
+	cur.Version = newVersion
+	cur.UpdatedAt = now
+	cur.UpdatedBy = actor
+	return cur, nil
+}
+
+// ListSkillPromotions returns the promotion history (optionally for one skill), newest first.
+func (s *SQLStore) ListSkillPromotions(ctx context.Context, skillName string, limit int) ([]SkillPromotion, error) {
+	if limit <= 0 || limit > 1000 {
+		limit = 100
+	}
+	q := `SELECT id, skill_name, from_status, to_status, from_version, to_version, actor, note, created_at FROM skill_promotions`
+	args := []any{}
+	if skillName != "" {
+		q += " WHERE skill_name = ?"
+		args = append(args, skillName)
+	}
+	q += " ORDER BY created_at DESC LIMIT ?"
+	args = append(args, limit)
+	rows, err := s.db.QueryContext(ctx, s.bind(q), args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []SkillPromotion{}
+	for rows.Next() {
+		var p SkillPromotion
+		if err := rows.Scan(&p.ID, &p.SkillName, &p.FromStatus, &p.ToStatus, &p.FromVersion, &p.ToVersion, &p.Actor, &p.Note, &p.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
 // SkillRunStat is the aggregated execution profile of one skill over a time window.
 type SkillRunStat struct {
 	SkillName    string  `json:"skill_name"`
