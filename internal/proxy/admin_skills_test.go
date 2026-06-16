@@ -196,6 +196,77 @@ func TestSkillPromoteWorkflow(t *testing.T) {
 	}
 }
 
+func TestSkillRecommendFromRecurringQuestions(t *testing.T) {
+	db := openTestStore(t)
+	defer db.Close()
+	logger := store.NewAsyncLogger(db, 8, filepath.Join(t.TempDir(), "rec.ndjson"))
+	logger.Start()
+	defer logger.Stop(context.Background())
+	server, err := NewServer(testConfig("http://upstream.invalid", "secret"), db, logger, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(server.Routes())
+	defer srv.Close()
+
+	ctx := context.Background()
+	// Three valid logs of the same recurring question → a report candidate.
+	for i := 0; i < 3; i++ {
+		if err := db.InsertText2SQLLog(ctx, store.Text2SQLQueryLog{
+			ID: "t2s_" + string(rune('a'+i)), Mode: "execute", Question: "지난달 팀별 매출 합계는?",
+			GeneratedSQL: "SELECT team, SUM(amount) FROM sales GROUP BY team", Valid: true,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Dry-run first: proposes but does not create.
+	resp := postJSON(t, srv.URL+"/admin/skills/recommend?min_count=2", "", map[string]any{})
+	var dry struct {
+		Count   int  `json:"count"`
+		Applied bool `json:"applied"`
+	}
+	json.NewDecoder(resp.Body).Decode(&dry)
+	resp.Body.Close()
+	if dry.Count < 1 || dry.Applied {
+		t.Fatalf("dry-run = %+v, want count>=1 applied=false", dry)
+	}
+	if skills, _ := db.ListSkills(ctx, ""); len(skills) != 0 {
+		t.Fatalf("dry-run must not create skills, got %d", len(skills))
+	}
+
+	// Apply: creates draft skills.
+	resp = postJSON(t, srv.URL+"/admin/skills/recommend?min_count=2&apply=1", "", map[string]any{})
+	var ap struct {
+		Count           int              `json:"count"`
+		Applied         bool             `json:"applied"`
+		Recommendations []map[string]any `json:"recommendations"`
+	}
+	json.NewDecoder(resp.Body).Decode(&ap)
+	resp.Body.Close()
+	if !ap.Applied || ap.Count < 1 {
+		t.Fatalf("apply = %+v", ap)
+	}
+	skills, _ := db.ListSkills(ctx, "draft")
+	if len(skills) < 1 {
+		t.Fatalf("expected a draft skill created, got %d", len(skills))
+	}
+	if skills[0].Status != "draft" {
+		t.Fatalf("recommended skill must be draft, got %q", skills[0].Status)
+	}
+
+	// Idempotent: re-applying does not duplicate (the name already exists).
+	resp = postJSON(t, srv.URL+"/admin/skills/recommend?min_count=2&apply=1", "", map[string]any{})
+	var again struct {
+		Count int `json:"count"`
+	}
+	json.NewDecoder(resp.Body).Decode(&again)
+	resp.Body.Close()
+	if again.Count != 0 {
+		t.Fatalf("re-apply should propose 0 (already exist), got %d", again.Count)
+	}
+}
+
 func TestScanSkillSecurity(t *testing.T) {
 	// Clean skill.
 	if r := scanSkillSecurity(store.Skill{Instructions: "Summarize the report politely.", AllowedTools: "search"}); !r.Clean {

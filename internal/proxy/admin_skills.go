@@ -383,6 +383,86 @@ func (s *Server) handleSkillPromotions(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"promotions": proms})
 }
 
+// handleSkillRecommend mines recurring Text2SQL questions (the report-candidate signal) and
+// proposes draft skills that standardize answering them — the OKF self-improvement loop's
+// Skill analogue. Dry-run by default; ?apply=1 creates the proposals as draft skills
+// (idempotent, never production — a human reviews then promotes through the gated workflow).
+// POST /admin/skills/recommend?window=&min_count=&apply=
+func (s *Server) handleSkillRecommend(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	if r.Method != http.MethodPost {
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
+	since := parseWindow(r.URL.Query().Get("window"), 30*24*time.Hour, "day")
+	minCount := intQuery(r, "min_count", 3)
+	apply := strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("apply")), "1")
+
+	cands, err := s.db.Text2SQLReportCandidates(r.Context(), since, minCount, 50)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "recommend_failed")
+		return
+	}
+	existing, err := s.db.ListSkills(r.Context(), "")
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "skills_failed")
+		return
+	}
+	have := map[string]bool{}
+	for _, sk := range existing {
+		have[sk.Name] = true
+	}
+
+	actor := s.skillActor(r)
+	recs := []map[string]any{}
+	for _, c := range cands {
+		q := strings.TrimSpace(c.Question)
+		if q == "" {
+			continue
+		}
+		slug := okfSlug(q)
+		if len(slug) > 40 {
+			slug = strings.Trim(slug[:40], "-")
+		}
+		if slug == "" {
+			continue
+		}
+		name := "answer-" + slug
+		if have[name] {
+			continue // already exists — don't re-propose
+		}
+		instr := "반복되는 질문 '" + q + "'에 답하는 표준 절차입니다."
+		if strings.TrimSpace(c.SampleSQL) != "" {
+			instr += "\n검증된 SQL 패턴:\n" + c.SampleSQL
+		}
+		rec := store.Skill{
+			Name: name, Description: q, Status: "draft", RiskLevel: "low",
+			Instructions: instr,
+			Metadata:     auditJSON(map[string]any{"origin": "skill_recommender", "count": c.Count, "recommended_product": c.RecommendedProduct}),
+		}
+		entry := map[string]any{"name": name, "description": q, "count": c.Count, "recommended_product": c.RecommendedProduct, "applied": false}
+		if apply {
+			if _, err := s.db.UpsertSkill(r.Context(), rec, actor); err != nil {
+				writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "skill_recommend_apply_failed")
+				return
+			}
+			have[name] = true
+			entry["applied"] = true
+		}
+		recs = append(recs, entry)
+	}
+	if apply {
+		s.auditAdmin(r, "skill.recommend_apply", "", auditJSON(map[string]any{"applied": len(recs)}))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"recommendations": recs, "applied": apply, "count": len(recs),
+		"note": "applied skills are status=draft — review, then promote through /admin/skills/promote (gated + scanned)",
+	})
+}
+
 // handleSkillScan runs the security scanner over one skill (?name=) or all skills (no name).
 // GET /admin/skills/scan?name=
 func (s *Server) handleSkillScan(w http.ResponseWriter, r *http.Request) {

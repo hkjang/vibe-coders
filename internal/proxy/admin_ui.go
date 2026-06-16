@@ -5053,6 +5053,7 @@ const adminHTML = `<!doctype html>
           '<button type="button" onclick="skillEdit()">새 Skill</button>' +
           '<button class="secondary" type="button" onclick="skillSeedRecommended()">추천 Skill 시드</button>' +
           '<button class="secondary" type="button" onclick="skillScanAll()">보안 스캔</button>' +
+          '<button class="secondary" type="button" onclick="skillRecommend()">Skill 추천</button>' +
           '<span id="skill-action-result" class="muted"></span>' +
         '</div></div>';
 
@@ -5179,6 +5180,31 @@ const adminHTML = `<!doctype html>
           : '<div class="empty">승격 이력이 없습니다.' + (d._err ? '<div class="muted">' + escapeHTML(d._err) + '</div>' : '') + '</div>') +
         '</div>';
       sec.scrollIntoView({ behavior: 'smooth' });
+    };
+    window.skillRecommend = async () => {
+      const sec = document.getElementById('skill-runs');
+      if (!sec) return;
+      const d = await api('/admin/skills/recommend?min_count=3', { method: 'POST' }).catch(e => ({ recommendations: [], _err: e.message }));
+      const recs = d.recommendations || [];
+      sec.style.display = '';
+      sec.innerHTML = '<h2>Skill 추천 ' + (recs.length ? '(' + recs.length + ')' : '') + '</h2><div class="card-body">' +
+        '<p class="muted">반복되는 Text2SQL 질문 패턴에서 표준화 가능한 Skill 초안을 제안합니다. 적용하면 draft로 생성되며, 검토 후 승격(게이트·스캔)하세요.</p>' +
+        (recs.length ? '<div style="margin-bottom:8px"><button type="button" onclick="skillRecommendApply()">draft로 적용</button></div>' +
+          '<table><thead><tr><th>제안 이름</th><th>질문</th><th>빈도</th><th>데이터 상품</th></tr></thead><tbody>' +
+          recs.map(rc => '<tr><td><code>' + escapeHTML(rc.name) + '</code></td><td>' + escapeHTML(rc.description || '') + '</td><td data-num="' + (rc.count || 0) + '">' + fmt(rc.count || 0) + '</td><td class="muted">' + escapeHTML(rc.recommended_product || '') + '</td></tr>').join('') + '</tbody></table>'
+          : '<div class="empty">추천할 패턴이 없습니다(반복 질문 부족).' + (d._err ? '<div class="muted">' + escapeHTML(d._err) + '</div>' : '') + '</div>') +
+        '</div>';
+      sec.scrollIntoView({ behavior: 'smooth' });
+    };
+    window.skillRecommendApply = async () => {
+      const out = document.getElementById('skill-action-result');
+      try {
+        const r = await api('/admin/skills/recommend?min_count=3&apply=1', { method: 'POST' });
+        if (out) out.innerHTML = '<span class="status">draft ' + (r.count || 0) + '건 생성됨</span>';
+        await renderSkills();
+      } catch (e) {
+        if (out) out.innerHTML = '<span class="status error">' + escapeHTML(e.message) + '</span>';
+      }
     };
     window.skillScanAll = async () => {
       const sec = document.getElementById('skill-runs');
