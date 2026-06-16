@@ -85,6 +85,32 @@ func parseRequestToolNames(body []byte) []string {
 	return out
 }
 
+// injectSkillInstructions prepends the skill's instructions as a system message so a request
+// that opts into a skill actually runs under its manual (not just its policy). Mirrors the
+// X-Vibe-Knowledge prepend. Only chat-style bodies (with a messages array) are rewritten;
+// returns (body, false) on any parse issue or empty instructions (safe no-op).
+func injectSkillInstructions(body []byte, instructions string) ([]byte, bool) {
+	instructions = strings.TrimSpace(instructions)
+	if instructions == "" || len(body) == 0 {
+		return body, false
+	}
+	var root map[string]any
+	if err := json.Unmarshal(body, &root); err != nil {
+		return body, false
+	}
+	msgs, ok := root["messages"].([]any)
+	if !ok {
+		return body, false
+	}
+	sysMsg := map[string]any{"role": "system", "content": "[Skill instructions]\n" + instructions}
+	root["messages"] = append([]any{sysMsg}, msgs...)
+	out, err := json.Marshal(root)
+	if err != nil {
+		return body, false
+	}
+	return out, true
+}
+
 // stepSkill enforces Skill policy when a request opts into a skill via the X-Vibe-Skill
 // header. It runs after routing (so the effective model is known) and before governance.
 // Modes (skills.enforcement runtime setting): off (skip), warn (header + audit only),
@@ -134,22 +160,29 @@ func (rc *requestPipeline) stepSkill() bool {
 	w.Header().Set("X-Vibe-Skill-Version", sk.Version)
 
 	violations := evaluateSkillPolicy(sk, rc.meta.Request.Model, tools)
-	if len(violations) == 0 {
-		w.Header().Set("X-Vibe-Skill-Policy", "ok")
-		return true
-	}
-
 	detail := strings.Join(violations, "; ")
-	if mode == "enforce" {
+
+	// enforce mode blocks on any violation (no injection).
+	if len(violations) > 0 && mode == "enforce" {
 		w.Header().Set("X-Vibe-Skill-Policy", "blocked")
 		rc.recordSkillRun(sk.Name, sk.Version, "blocked", rc.meta.Request.Model, 0, 0)
 		_ = s.db.InsertAuditEvent(r.Context(), store.AuthEvent{ID: newID("ae"), EventType: "skill_policy_blocked", APIKeyID: rc.apiKeyID, IP: clientIP(r), UserAgent: r.UserAgent(), Detail: sk.Name + ": " + detail, CreatedAt: time.Now().UTC()})
 		writeOpenAIError(w, http.StatusForbidden, "skill policy violation: "+detail, "permission_error", "skill_policy_violation")
 		return false
 	}
-	// warn: annotate and continue.
-	w.Header().Set("X-Vibe-Skill-Policy", "warn")
-	w.Header().Set("X-Vibe-Skill-Policy-Detail", detail)
+	if len(violations) == 0 {
+		w.Header().Set("X-Vibe-Skill-Policy", "ok")
+	} else {
+		w.Header().Set("X-Vibe-Skill-Policy", "warn")
+		w.Header().Set("X-Vibe-Skill-Policy-Detail", detail)
+	}
+
+	// Apply the skill: prepend its instructions as a system message so the request actually
+	// runs under the manual. The rewritten body flows to the remaining pipeline steps.
+	if newBody, applied := injectSkillInstructions(rc.body, sk.Instructions); applied {
+		rc.body = newBody
+		w.Header().Set("X-Vibe-Skill-Applied", "1")
+	}
 	return true
 }
 

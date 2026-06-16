@@ -3,14 +3,103 @@ package proxy
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"vibe-coders/internal/config"
 	"vibe-coders/internal/store"
 )
+
+func TestInjectSkillInstructions(t *testing.T) {
+	body := []byte(`{"model":"m","messages":[{"role":"user","content":"hi"}]}`)
+	out, applied := injectSkillInstructions(body, "Be concise.")
+	if !applied {
+		t.Fatal("expected injection to apply")
+	}
+	var root struct {
+		Messages []struct {
+			Role    string `json:"role"`
+			Content string `json:"content"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(out, &root); err != nil {
+		t.Fatal(err)
+	}
+	if len(root.Messages) != 2 || root.Messages[0].Role != "system" || !strings.Contains(root.Messages[0].Content, "Be concise.") {
+		t.Fatalf("expected prepended system message, got %+v", root.Messages)
+	}
+	// No-ops: empty instructions, non-chat body.
+	if _, ok := injectSkillInstructions(body, "  "); ok {
+		t.Fatal("empty instructions should be a no-op")
+	}
+	if _, ok := injectSkillInstructions([]byte(`{"prompt":"x"}`), "Be concise."); ok {
+		t.Fatal("non-chat body should be a no-op")
+	}
+}
+
+func TestSkillInstructionsForwardedUpstream(t *testing.T) {
+	var sawSystem string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		var root struct {
+			Messages []struct {
+				Role    string `json:"role"`
+				Content string `json:"content"`
+			} `json:"messages"`
+		}
+		_ = json.Unmarshal(b, &root)
+		for _, m := range root.Messages {
+			if m.Role == "system" {
+				sawSystem = m.Content
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`))
+	}))
+	defer upstream.Close()
+
+	db := openTestStore(t)
+	defer db.Close()
+	logger := store.NewAsyncLogger(db, 8, filepath.Join(t.TempDir(), "inj.ndjson"))
+	logger.Start()
+	defer logger.Stop(context.Background())
+	server, err := NewServer(testConfig(upstream.URL, "secret"), db, logger, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(server.Routes())
+	defer srv.Close()
+
+	ctx := context.Background()
+	if _, err := db.UpsertSkill(ctx, store.Skill{Name: "concise", Status: "production", Instructions: "Always answer in one sentence."}, "tester"); err != nil {
+		t.Fatal(err)
+	}
+
+	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/v1/chat/completions", jsonReader(map[string]any{
+		"model": "gpt-4o", "messages": []map[string]string{{"role": "user", "content": "hi"}},
+	}))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Vibe-Skill", "concise")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("chat with skill = %d: %s", resp.StatusCode, b)
+	}
+	if resp.Header.Get("X-Vibe-Skill-Applied") != "1" {
+		t.Fatalf("expected X-Vibe-Skill-Applied header")
+	}
+	if !strings.Contains(sawSystem, "Always answer in one sentence.") {
+		t.Fatalf("upstream did not receive injected skill instructions, got system=%q", sawSystem)
+	}
+}
 
 func TestEvaluateSkillPolicy(t *testing.T) {
 	sk := store.Skill{AllowedModels: "gpt-*, qwen-plus", AllowedTools: "sql-runner, search"}
