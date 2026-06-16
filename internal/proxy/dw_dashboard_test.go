@@ -360,6 +360,42 @@ func TestDWDashboardExportCSV(t *testing.T) {
 	}
 }
 
+func TestDWDashboardTimeseriesBucket(t *testing.T) {
+	var sawQuery string
+	ch := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sawQuery = r.URL.Query().Get("query")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[{"day":"2026-06-01","requests":"10","tokens":"100","cost_krw":5,"errors":"0"}]}`))
+	}))
+	defer ch.Close()
+	srv := newDWTestServer(t, ch.URL)
+
+	resp, _ := http.Get(srv.URL + "/admin/dw/dashboard/timeseries?window=30d&bucket=week")
+	var out struct {
+		Bucket string           `json:"bucket"`
+		Points []map[string]any `json:"points"`
+	}
+	json.NewDecoder(resp.Body).Decode(&out)
+	resp.Body.Close()
+	if out.Bucket != "week" {
+		t.Fatalf("bucket = %q, want week", out.Bucket)
+	}
+	if !strings.Contains(sawQuery, "toMonday(day)") {
+		t.Fatalf("week bucket should group by toMonday(day): %s", sawQuery)
+	}
+
+	// Unknown/absent bucket falls back to day.
+	r2, _ := http.Get(srv.URL + "/admin/dw/dashboard/timeseries?window=30d&bucket=bogus")
+	var o2 struct {
+		Bucket string `json:"bucket"`
+	}
+	json.NewDecoder(r2.Body).Decode(&o2)
+	r2.Body.Close()
+	if o2.Bucket != "day" {
+		t.Fatalf("bogus bucket should fall back to day, got %q", o2.Bucket)
+	}
+}
+
 func TestDWDashboardCacheAndRefresh(t *testing.T) {
 	var hits int32
 	ch := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

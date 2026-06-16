@@ -39,6 +39,8 @@ type Metrics struct {
 	modelSunsetBlock   atomic.Uint64 // requests blocked because a model is retired with no replacement
 	limitsClamped      atomic.Uint64 // requests whose max output tokens were clamped/injected
 	limitsRejected     atomic.Uint64 // requests rejected by request-size / message-count guards
+	dwCacheHit         atomic.Uint64 // DW dashboard query cache hits (served without hitting ClickHouse)
+	dwCacheMiss        atomic.Uint64 // DW dashboard query cache misses (fetched from ClickHouse)
 	latency            *LatencyDigest
 	firstChunk         *LatencyDigest
 }
@@ -137,6 +139,8 @@ func (m *Metrics) IncModelSunsetRewrite()    { m.modelSunsetRewrite.Add(1) }
 func (m *Metrics) IncModelSunsetBlock()      { m.modelSunsetBlock.Add(1) }
 func (m *Metrics) IncLimitsClamped()         { m.limitsClamped.Add(1) }
 func (m *Metrics) IncLimitsRejected()        { m.limitsRejected.Add(1) }
+func (m *Metrics) IncDWCacheHit()            { m.dwCacheHit.Add(1) }
+func (m *Metrics) IncDWCacheMiss()           { m.dwCacheMiss.Add(1) }
 
 func (m *Metrics) ObserveLLMEvaluations(evaluations []store.LLMEvaluation) {
 	for _, evaluation := range evaluations {
@@ -239,6 +243,12 @@ func (m *Metrics) Prometheus(queueDepth int, logDropped uint64, logWritten uint6
 		"# HELP proxy_limits_rejected_total Requests rejected by request-size or message-count guards.",
 		"# TYPE proxy_limits_rejected_total counter",
 		fmt.Sprintf("proxy_limits_rejected_total %d", m.limitsRejected.Load()),
+		"# HELP proxy_dw_dashboard_cache_hits_total DW dashboard queries served from the in-memory cache.",
+		"# TYPE proxy_dw_dashboard_cache_hits_total counter",
+		fmt.Sprintf("proxy_dw_dashboard_cache_hits_total %d", m.dwCacheHit.Load()),
+		"# HELP proxy_dw_dashboard_cache_misses_total DW dashboard queries fetched from ClickHouse (cache miss).",
+		"# TYPE proxy_dw_dashboard_cache_misses_total counter",
+		fmt.Sprintf("proxy_dw_dashboard_cache_misses_total %d", m.dwCacheMiss.Load()),
 		"# HELP proxy_log_queue_depth Current async log queue depth.",
 		"# TYPE proxy_log_queue_depth gauge",
 		fmt.Sprintf("proxy_log_queue_depth %d", queueDepth),

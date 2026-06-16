@@ -5360,10 +5360,11 @@ const adminHTML = `<!doctype html>
       const win = sessionStorage.getItem('dwWindow') || '30d';
       const dim = sessionStorage.getItem('dwDim') || 'model';
       const order = sessionStorage.getItem('dwOrder') || 'cost';
+      const bkt = sessionStorage.getItem('dwBucket') || 'day';
       const qs = '?window=' + encodeURIComponent(win);
       const [ov, ts, dims, health, t2s, cons, rout, lat, qual, sav, mig, miners] = await Promise.all([
         api('/admin/dw/dashboard/overview' + qs).catch(e => ({ _err: e.message })),
-        api('/admin/dw/dashboard/timeseries' + qs).catch(() => ({ points: [] })),
+        api('/admin/dw/dashboard/timeseries' + qs + '&bucket=' + encodeURIComponent(bkt)).catch(() => ({ points: [] })),
         api('/admin/dw/dashboard/dimensions' + qs + '&dimension=' + encodeURIComponent(dim) + '&order_by=' + encodeURIComponent(order) + '&limit=10').catch(() => ({ rows: [] })),
         api('/admin/dw/sink-status').catch(() => null),
         api('/admin/dw/dashboard/text2sql' + qs).catch(() => null),
@@ -5405,11 +5406,13 @@ const adminHTML = `<!doctype html>
         card1('1K토큰당(₩)', (ov.cost_per_1k_tokens_krw || 0).toFixed(2)) +
         '</div></div></section>';
 
-      // Daily series — simple inline bars (cost).
+      // 비용 추이 — 일/주 단위 inline bars (cost).
       const pts = (ts && ts.points) || [];
+      const bktSel = [['day', '일별'], ['week', '주별']].map(o => '<option value="' + o[0] + '"' + (o[0] === bkt ? ' selected' : '') + '>' + o[1] + '</option>').join('');
+      const bktLabel = bkt === 'week' ? '주' : '일';
       if (pts.length) {
         const maxCost = Math.max.apply(null, pts.map(p => p.cost_krw || 0).concat([1]));
-        html += '<section><h2>일별 비용 추이</h2><div class="card-body"><table><thead><tr><th>일자</th><th>요청</th><th>토큰</th><th>비용(₩)</th><th style="width:40%"></th></tr></thead><tbody>' +
+        html += '<section><h2>비용 추이 <label class="muted" style="font-size:12px">단위 <select onchange="dwSet(\'dwBucket\', this.value)">' + bktSel + '</select></label></h2><div class="card-body"><table><thead><tr><th>' + bktLabel + '자</th><th>요청</th><th>토큰</th><th>비용(₩)</th><th style="width:40%"></th></tr></thead><tbody>' +
           pts.map(p => '<tr><td>' + escapeHTML(p.day) + '</td><td data-num="' + p.requests + '">' + fmt(Math.round(p.requests)) + '</td><td data-num="' + p.tokens + '">' + fmt(Math.round(p.tokens)) + '</td><td data-num="' + p.cost_krw + '">' + fmt(Math.round(p.cost_krw)) + '</td>' +
             '<td><div class="progress"><span style="width:' + Math.round((p.cost_krw || 0) / maxCost * 100) + '%"></span></div></td></tr>').join('') +
           '</tbody></table></div></section>';

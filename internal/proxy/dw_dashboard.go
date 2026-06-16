@@ -37,8 +37,14 @@ func (s *Server) dwQueryJSON(ctx context.Context, cfg config.ClickHouseConfig, q
 	now := time.Now()
 	if s.dwCache != nil {
 		if rows, ok := s.dwCache.get(key, now); ok {
+			if s.metrics != nil {
+				s.metrics.IncDWCacheHit()
+			}
 			return rows, nil
 		}
+	}
+	if s.metrics != nil {
+		s.metrics.IncDWCacheMiss()
 	}
 	body, code, err := s.clickhouseQuery(ctx, cfg, full)
 	if err != nil {
@@ -150,8 +156,17 @@ func (s *Server) handleDWDashboardTimeseries(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	sinceStr, _ := dwSinceDate(r)
-	q := "SELECT toString(day) AS day, sum(requests) AS requests, sum(tokens) AS tokens, sum(cost_krw) AS cost_krw, sum(errors) AS errors FROM " +
-		ref + " FINAL WHERE " + dwScopeClause(r) + " AND day >= '" + sinceStr + "' GROUP BY day ORDER BY day"
+	// bucket=day (default) groups by calendar day; bucket=week groups by ISO week (Monday).
+	// The daily rollup has day grain, so hour is not available here.
+	bucket := strings.TrimSpace(r.URL.Query().Get("bucket"))
+	bucketExpr := "day"
+	if bucket == "week" {
+		bucketExpr = "toMonday(day)"
+	} else {
+		bucket = "day"
+	}
+	q := "SELECT toString(" + bucketExpr + ") AS day, sum(requests) AS requests, sum(tokens) AS tokens, sum(cost_krw) AS cost_krw, sum(errors) AS errors FROM " +
+		ref + " FINAL WHERE " + dwScopeClause(r) + " AND day >= '" + sinceStr + "' GROUP BY " + bucketExpr + " ORDER BY " + bucketExpr
 	rows, err := s.dwQueryJSON(r.Context(), cfg, q)
 	if err != nil {
 		writeOpenAIError(w, http.StatusBadGateway, err.Error(), "server_error", "dw_query_failed")
@@ -164,7 +179,7 @@ func (s *Server) handleDWDashboardTimeseries(w http.ResponseWriter, r *http.Requ
 			"cost_krw": asFloat(row["cost_krw"]), "errors": asFloat(row["errors"]),
 		})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"configured": true, "since": sinceStr, "bucket": "day", "points": points})
+	writeJSON(w, http.StatusOK, map[string]any{"configured": true, "since": sinceStr, "bucket": bucket, "points": points})
 }
 
 // handleDWDashboardDimensions returns Top-N rows for a dimension (model/provider/project/cost_center).
