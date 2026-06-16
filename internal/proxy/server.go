@@ -31,7 +31,7 @@ import (
 )
 
 // AppVersion is the gateway build version, surfaced in /auth/me and the admin UI.
-const AppVersion = "v0.10.8"
+const AppVersion = "v0.11.0"
 
 type Server struct {
 	cfg          config.Config
@@ -213,6 +213,9 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/admin/okf/text2sql/sync", s.handleOKFText2SQLSync)
 	mux.HandleFunc("/admin/okf/graph/sync", s.handleOKFGraphSync)
 	mux.HandleFunc("/admin/okf/propose", s.handleOKFPropose)
+	mux.HandleFunc("/admin/skills", s.handleSkills)
+	mux.HandleFunc("/admin/skills/by-name/", s.handleSkillByName)
+	mux.HandleFunc("/admin/skills/runs", s.handleSkillRuns)
 	mux.HandleFunc("/admin/dw/clickhouse", s.handleClickHouseSink)
 	mux.HandleFunc("/admin/dw/clickhouse/bootstrap", s.handleClickHouseBootstrap)
 	mux.HandleFunc("/admin/dw/clickhouse/overview", s.handleClickHouseOverview)
@@ -364,6 +367,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/v1/chat/completions", s.handleOpenAI)
 	mux.HandleFunc("/v1/models", s.handleOpenAI)
 	mux.HandleFunc("/v1/embeddings", s.handleOpenAI)
+	mux.HandleFunc("/v1/skills", s.handlePublicSkills)
+	mux.HandleFunc("/v1/skills/", s.handlePublicSkills)
 	return withTrace(mux)
 }
 

@@ -190,6 +190,11 @@ var apiEndpoints = []apiEndpoint{
 	{"/admin/okf/text2sql/sync", []string{"post"}, "okf", "Seed OKF docs from the schema registry", false},
 	{"/admin/okf/graph/sync", []string{"post"}, "okf", "Build the gateway knowledge graph", false},
 	{"/admin/okf/propose", []string{"post"}, "okf", "Propose OKF docs from recurring questions", false},
+	{"/v1/skills", []string{"get"}, "skills", "List production skills (caller-facing)", true},
+	{"/v1/skills/{name}", []string{"get"}, "skills", "Get one production skill with instructions", true},
+	{"/admin/skills", []string{"get", "post"}, "skills", "List (all statuses) / create-upsert a skill", false},
+	{"/admin/skills/by-name/{name}", []string{"get", "delete"}, "skills", "Get / delete one skill", false},
+	{"/admin/skills/runs", []string{"get"}, "skills", "Skill execution log", false},
 
 	// ---- admin: data warehouse (ClickHouse) ----
 	{"/admin/dw/rollups", []string{"get", "post"}, "dw", "Daily rollups / backfill", false},
@@ -279,7 +284,7 @@ func buildOpenAPISpec() map[string]any {
 		tagSet[e.tag] = true
 	}
 	tags := []any{}
-	for _, t := range []string{"ops", "inference", "auth", "self-service", "admin", "settings", "cost", "routing", "governance", "text2sql", "okf", "dw", "llm", "mcp", "vcs", "notifications"} {
+	for _, t := range []string{"ops", "inference", "auth", "self-service", "admin", "settings", "cost", "routing", "governance", "text2sql", "okf", "skills", "dw", "llm", "mcp", "vcs", "notifications"} {
 		if tagSet[t] {
 			tags = append(tags, map[string]any{"name": t})
 		}

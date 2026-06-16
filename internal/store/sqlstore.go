@@ -843,6 +843,37 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 			changed_at TEXT NOT NULL
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_admin_setting_history_key ON admin_setting_history(key, changed_at)`,
+		// Skills — reusable AI task manuals with metadata, lifecycle status, and policy hints.
+		`CREATE TABLE IF NOT EXISTS skills (
+			name TEXT PRIMARY KEY,
+			description TEXT NOT NULL DEFAULT '',
+			version TEXT NOT NULL DEFAULT '0.1.0',
+			owner TEXT NOT NULL DEFAULT '',
+			status TEXT NOT NULL DEFAULT 'draft',
+			risk_level TEXT NOT NULL DEFAULT 'low',
+			allowed_models TEXT NOT NULL DEFAULT '',
+			allowed_tools TEXT NOT NULL DEFAULT '',
+			instructions TEXT NOT NULL DEFAULT '',
+			metadata TEXT NOT NULL DEFAULT '{}',
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			updated_by TEXT
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_skills_status ON skills(status)`,
+		`CREATE TABLE IF NOT EXISTS skill_runs (
+			id TEXT PRIMARY KEY,
+			skill_name TEXT NOT NULL,
+			skill_version TEXT NOT NULL DEFAULT '',
+			actor TEXT NOT NULL DEFAULT '',
+			input_hash TEXT NOT NULL DEFAULT '',
+			tools_used TEXT NOT NULL DEFAULT '',
+			model TEXT NOT NULL DEFAULT '',
+			status TEXT NOT NULL DEFAULT '',
+			cost_krw REAL NOT NULL DEFAULT 0,
+			latency_ms INTEGER NOT NULL DEFAULT 0,
+			created_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_skill_runs_name ON skill_runs(skill_name, created_at)`,
 		// OKF (Open Knowledge Format) — portable knowledge documents + relationship links.
 		`CREATE TABLE IF NOT EXISTS okf_documents (
 			id TEXT PRIMARY KEY,

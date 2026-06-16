@@ -244,6 +244,7 @@ const adminHTML = `<!doctype html>
       <a href="#/quotas" data-tab="quotas">사용 한도</a>
       <a href="#/safety" data-tab="safety">안전</a>
       <a href="#/text2sql" data-tab="text2sql">Text2SQL</a>
+      <a href="#/skills" data-tab="skills">Skills</a>
       <a href="#/clickhouse" data-tab="clickhouse">ClickHouse</a>
       <a href="#/runtimesettings" data-tab="runtimesettings">런타임 설정</a>
       <a href="#/settings" data-tab="settings">설정</a>
@@ -731,6 +732,7 @@ const adminHTML = `<!doctype html>
           case 'vcs':       await renderVCS(params); break;
           case 'safety':    await renderSafety(); break;
           case 'text2sql':  await renderText2SQL(); break;
+          case 'skills':    await renderSkills(); break;
           case 'personalization': rest.length ? await renderPersonalProfileDetail(decodeURIComponent(rest.join('/'))) : await renderPersonalization(); break;
           case 'mykeys':    await renderMyKeys(); break;
           case 'clickhouse': await renderClickHouse(); break;
@@ -5035,6 +5037,110 @@ const adminHTML = `<!doctype html>
     function chBadge(ok, okText, badText) {
       return '<span class="status ' + (ok ? '' : 'error') + '">' + escapeHTML(ok ? okText : badText) + '</span>';
     }
+    async function renderSkills() {
+      const view = document.getElementById('view');
+      const statusFilter = sessionStorage.getItem('skillStatusFilter') || '';
+      const d = await api('/admin/skills' + (statusFilter ? ('?status=' + encodeURIComponent(statusFilter)) : '')).catch(e => ({ skills: [], _err: e.message }));
+      const skills = d.skills || [];
+      const badge = (st) => '<span class="status ' + (st === 'production' ? '' : (st === 'deprecated' ? 'error' : 'warn')) + '">' + escapeHTML(st || '') + '</span>';
+      const riskBadge = (rk) => '<span class="status ' + (rk === 'high' ? 'error' : (rk === 'medium' ? 'warn' : '')) + '">' + escapeHTML(rk || '') + '</span>';
+
+      let html = '<div class="card-body"><p class="muted">Skill 레지스트리 — 재사용 가능한 AI 작업 매뉴얼(지침 + 정책 힌트)을 등록·승격하고 실행 로그를 점검합니다. <code>production</code> 상태만 <code>GET /v1/skills</code>로 호출자에게 노출됩니다.</p>' +
+        '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:6px">' +
+          '<label class="muted">상태 <select id="skill-status-filter" onchange="skillFilter(this.value)">' +
+            ['', 'draft', 'staging', 'production', 'deprecated'].map(s => '<option value="' + s + '"' + (s === statusFilter ? ' selected' : '') + '>' + (s || '전체') + '</option>').join('') +
+          '</select></label>' +
+          '<button type="button" onclick="skillEdit()">새 Skill</button>' +
+          '<span id="skill-action-result" class="muted"></span>' +
+        '</div></div>';
+
+      html += '<section><h2>Skill 목록 ' + (skills.length ? '(' + skills.length + ')' : '') + '</h2><div class="card-body">' +
+        (skills.length ? '<table><thead><tr><th>이름</th><th>버전</th><th>상태</th><th>위험</th><th>허용 모델</th><th>허용 도구</th><th>수정</th><th></th></tr></thead><tbody>' +
+          skills.map(sk => '<tr>' +
+            '<td><strong>' + escapeHTML(sk.name) + '</strong><div class="muted" style="font-size:11px">' + escapeHTML(sk.description || '') + '</div></td>' +
+            '<td><code>' + escapeHTML(sk.version || '') + '</code></td>' +
+            '<td>' + badge(sk.status) + '</td>' +
+            '<td>' + riskBadge(sk.risk_level) + '</td>' +
+            '<td class="muted">' + escapeHTML(sk.allowed_models || '*') + '</td>' +
+            '<td class="muted">' + escapeHTML(sk.allowed_tools || '*') + '</td>' +
+            '<td>' + ago(sk.updated_at) + '<div class="muted" style="font-size:11px">' + escapeHTML(sk.updated_by || '') + '</div></td>' +
+            '<td><button class="secondary" type="button" onclick="skillEdit(\'' + escapeAttr(sk.name) + '\')">편집</button> ' +
+              '<button class="secondary" type="button" onclick="skillRuns(\'' + escapeAttr(sk.name) + '\')">실행로그</button> ' +
+              '<button class="secondary" type="button" onclick="skillDelete(\'' + escapeAttr(sk.name) + '\')">삭제</button></td>' +
+          '</tr>').join('') + '</tbody></table>'
+          : '<div class="empty">등록된 Skill이 없습니다. [새 Skill]로 추가하세요.' + (d._err ? '<div class="muted">' + escapeHTML(d._err) + '</div>' : '') + '</div>') +
+        '</div></section>';
+
+      html += '<section id="skill-editor" style="display:none"></section>';
+      html += '<section id="skill-runs" style="display:none"></section>';
+      view.innerHTML = card('Skills', html);
+      window._skillsByName = {};
+      skills.forEach(sk => { window._skillsByName[sk.name] = sk; });
+    }
+    window.skillFilter = (v) => { sessionStorage.setItem('skillStatusFilter', v || ''); renderSkills(); };
+    window.skillEdit = (name) => {
+      const ed = document.getElementById('skill-editor');
+      if (!ed) return;
+      const sk = (name && window._skillsByName && window._skillsByName[name]) || { name: '', description: '', version: '0.1.0', owner: '', status: 'draft', risk_level: 'low', allowed_models: '', allowed_tools: '', instructions: '' };
+      const sel = (id, val, opts) => '<label class="muted">' + id + ' <select id="sk-' + id + '">' + opts.map(o => '<option value="' + o + '"' + (o === val ? ' selected' : '') + '>' + o + '</option>').join('') + '</select></label>';
+      ed.style.display = '';
+      ed.innerHTML = '<h2>' + (name ? ('편집: ' + escapeHTML(name)) : '새 Skill') + '</h2><div class="card-body">' +
+        '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">' +
+          '<label class="muted">name <input id="sk-name" value="' + escapeAttr(sk.name) + '"' + (name ? ' readonly' : '') + '></label>' +
+          '<label class="muted">version <input id="sk-version" value="' + escapeAttr(sk.version || '') + '"></label>' +
+          '<label class="muted">owner <input id="sk-owner" value="' + escapeAttr(sk.owner || '') + '"></label>' +
+          sel('status', sk.status || 'draft', ['draft', 'staging', 'production', 'deprecated']) +
+          sel('risk_level', sk.risk_level || 'low', ['low', 'medium', 'high']) +
+        '</div>' +
+        '<label class="muted" style="display:block;margin-bottom:6px">description <input id="sk-description" style="width:100%" value="' + escapeAttr(sk.description || '') + '"></label>' +
+        '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px">' +
+          '<label class="muted" style="flex:1">allowed_models (glob, 콤마) <input id="sk-allowed_models" style="width:100%" value="' + escapeAttr(sk.allowed_models || '') + '"></label>' +
+          '<label class="muted" style="flex:1">allowed_tools (콤마) <input id="sk-allowed_tools" style="width:100%" value="' + escapeAttr(sk.allowed_tools || '') + '"></label>' +
+        '</div>' +
+        '<label class="muted" style="display:block">instructions <textarea id="sk-instructions" style="width:100%;min-height:120px">' + escapeHTML(sk.instructions || '') + '</textarea></label>' +
+        '<div style="margin-top:8px"><button type="button" onclick="skillSave()">저장</button> <button class="secondary" type="button" onclick="document.getElementById(\'skill-editor\').style.display=\'none\'">닫기</button></div>' +
+        '</div>';
+      ed.scrollIntoView({ behavior: 'smooth' });
+    };
+    window.skillSave = async () => {
+      const val = (id) => (document.getElementById('sk-' + id) || {}).value || '';
+      const body = {
+        name: val('name'), version: val('version'), owner: val('owner'), status: val('status'),
+        risk_level: val('risk_level'), description: val('description'),
+        allowed_models: val('allowed_models'), allowed_tools: val('allowed_tools'), instructions: val('instructions'),
+      };
+      const out = document.getElementById('skill-action-result');
+      try {
+        await api('/admin/skills', { method: 'POST', body: JSON.stringify(body) });
+        if (out) out.innerHTML = '<span class="status">저장됨</span>';
+        await renderSkills();
+      } catch (e) {
+        if (out) out.innerHTML = '<span class="status error">' + escapeHTML(e.message) + '</span>';
+      }
+    };
+    window.skillDelete = async (name) => {
+      if (!confirm('Skill "' + name + '"을 삭제할까요?')) return;
+      try {
+        await api('/admin/skills/by-name/' + encodeURIComponent(name), { method: 'DELETE' });
+        await renderSkills();
+      } catch (e) {
+        const out = document.getElementById('skill-action-result');
+        if (out) out.innerHTML = '<span class="status error">' + escapeHTML(e.message) + '</span>';
+      }
+    };
+    window.skillRuns = async (name) => {
+      const sec = document.getElementById('skill-runs');
+      if (!sec) return;
+      const d = await api('/admin/skills/runs?skill=' + encodeURIComponent(name)).catch(e => ({ runs: [], _err: e.message }));
+      const runs = d.runs || [];
+      sec.style.display = '';
+      sec.innerHTML = '<h2>실행 로그: ' + escapeHTML(name) + ' ' + (runs.length ? '(' + runs.length + ')' : '') + '</h2><div class="card-body">' +
+        (runs.length ? '<table><thead><tr><th>시각</th><th>버전</th><th>행위자</th><th>모델</th><th>상태</th><th>비용(₩)</th><th>지연(ms)</th><th>도구</th></tr></thead><tbody>' +
+          runs.map(r => '<tr><td>' + ago(r.created_at) + '</td><td><code>' + escapeHTML(r.skill_version || '') + '</code></td><td>' + escapeHTML(r.actor || '') + '</td><td>' + escapeHTML(r.model || '') + '</td><td>' + escapeHTML(r.status || '') + '</td><td data-num="' + (r.cost_krw || 0) + '">' + fmt(r.cost_krw || 0) + '</td><td data-num="' + (r.latency_ms || 0) + '">' + fmt(r.latency_ms || 0) + '</td><td class="muted">' + escapeHTML(r.tools_used || '') + '</td></tr>').join('') + '</tbody></table>'
+          : '<div class="empty">실행 이력이 없습니다.' + (d._err ? '<div class="muted">' + escapeHTML(d._err) + '</div>' : '') + '</div>') +
+        '</div>';
+      sec.scrollIntoView({ behavior: 'smooth' });
+    };
     async function renderClickHouse() {
       const view = document.getElementById('view');
       const d = await api('/admin/dw/clickhouse/overview').catch(e => ({ configured: false, _err: e.message }));
