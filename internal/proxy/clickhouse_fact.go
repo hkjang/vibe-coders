@@ -66,6 +66,42 @@ const requestFactDDL = `CREATE TABLE IF NOT EXISTS %s (
 PARTITION BY toYYYYMM(event_date)
 ORDER BY (event_date, team, provider, model, request_id)`
 
+// Materialized views roll ai_request_fact up into dashboard-ready aggregates on insert, so
+// cost/latency/error queries scan small SummingMergeTree tables instead of the raw fact.
+// %s placeholders are filled with table references in order noted per function.
+
+// requestFactDailyTableDDL — target table for the daily MV (%s = daily table ref).
+func requestFactDailyTableDDL(ref string) string {
+	return "CREATE TABLE IF NOT EXISTS " + ref + " (" +
+		"event_date Date, team LowCardinality(String), provider LowCardinality(String), model LowCardinality(String), " +
+		"requests UInt64, total_tokens UInt64, cost_krw Float64, errors UInt64" +
+		") ENGINE = SummingMergeTree ORDER BY (event_date, team, provider, model)"
+}
+
+// requestFactDailyMVDDL — the daily MV (mvRef, targetRef, sourceRef).
+func requestFactDailyMVDDL(mvRef, targetRef, sourceRef string) string {
+	return "CREATE MATERIALIZED VIEW IF NOT EXISTS " + mvRef + " TO " + targetRef + " AS " +
+		"SELECT event_date, team, provider, model, count() AS requests, sum(total_tokens) AS total_tokens, " +
+		"sum(cost_krw) AS cost_krw, countIf(error_category != 'ok') AS errors " +
+		"FROM " + sourceRef + " GROUP BY event_date, team, provider, model"
+}
+
+// requestFactHourlyTableDDL — target table for the hourly MV (%s = hourly table ref).
+func requestFactHourlyTableDDL(ref string) string {
+	return "CREATE TABLE IF NOT EXISTS " + ref + " (" +
+		"event_hour DateTime, team LowCardinality(String), provider LowCardinality(String), model LowCardinality(String), " +
+		"requests UInt64, total_tokens UInt64, cost_krw Float64, errors UInt64" +
+		") ENGINE = SummingMergeTree ORDER BY (event_hour, team, provider, model)"
+}
+
+// requestFactHourlyMVDDL — the hourly MV (mvRef, targetRef, sourceRef).
+func requestFactHourlyMVDDL(mvRef, targetRef, sourceRef string) string {
+	return "CREATE MATERIALIZED VIEW IF NOT EXISTS " + mvRef + " TO " + targetRef + " AS " +
+		"SELECT toStartOfHour(event_time) AS event_hour, team, provider, model, count() AS requests, " +
+		"sum(total_tokens) AS total_tokens, sum(cost_krw) AS cost_krw, countIf(error_category != 'ok') AS errors " +
+		"FROM " + sourceRef + " GROUP BY event_hour, team, provider, model"
+}
+
 // toolFactDDL — one row per tool/MCP invocation (append; multiple per request).
 const toolFactDDL = `CREATE TABLE IF NOT EXISTS %s (
 	event_date Date,

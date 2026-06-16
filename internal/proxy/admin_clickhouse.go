@@ -157,6 +157,13 @@ func (s *Server) handleClickHouseBootstrap(w http.ResponseWriter, r *http.Reques
 	if strings.TrimSpace(cfg.RequestFactTable) != "" {
 		reqRef := chTableRef(cfg.Database, cfg.RequestFactTable)
 		allOK = run("table "+reqRef, fmt.Sprintf(requestFactDDL, reqRef)) && allOK
+		// Dashboard-ready rollups of the request fact (daily + hourly) via materialized views.
+		dailyRef := chTableRef(cfg.Database, cfg.RequestFactTable+"_daily")
+		hourlyRef := chTableRef(cfg.Database, cfg.RequestFactTable+"_hourly")
+		allOK = run("table "+dailyRef, requestFactDailyTableDDL(dailyRef)) && allOK
+		allOK = run("view "+dailyRef+"_mv", requestFactDailyMVDDL(dailyRef+"_mv", dailyRef, reqRef)) && allOK
+		allOK = run("table "+hourlyRef, requestFactHourlyTableDDL(hourlyRef)) && allOK
+		allOK = run("view "+hourlyRef+"_mv", requestFactHourlyMVDDL(hourlyRef+"_mv", hourlyRef, reqRef)) && allOK
 	}
 	if strings.TrimSpace(cfg.ToolFactTable) != "" {
 		ref := chTableRef(cfg.Database, cfg.ToolFactTable)

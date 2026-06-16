@@ -84,6 +84,46 @@ func TestClickHouseManualSinkRollsUpFirst(t *testing.T) {
 	}
 }
 
+func TestClickHouseBootstrapCreatesMaterializedViews(t *testing.T) {
+	ch, stmts := fakeClickHouse()
+	defer ch.Close()
+
+	db := openTestStore(t)
+	defer db.Close()
+	logger := store.NewAsyncLogger(db, 8, filepath.Join(t.TempDir(), "f.ndjson"))
+	logger.Start()
+	defer logger.Stop(context.Background())
+
+	cfg := testConfig("http://upstream.invalid", "secret")
+	cfg.ClickHouse.URL = ch.URL
+	cfg.ClickHouse.Database = "ai_gateway"
+	cfg.ClickHouse.Table = "analytics_daily"
+	cfg.ClickHouse.RequestFactTable = "ai_request_fact"
+	server, err := NewServer(cfg, db, logger, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxy := httptest.NewServer(server.Routes())
+	defer proxy.Close()
+
+	resp, err := http.Post(proxy.URL+"/admin/dw/clickhouse/bootstrap", "application/json", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+
+	joined := strings.Join(*stmts, "\n")
+	if !strings.Contains(joined, "ai_request_fact_daily") || !strings.Contains(joined, "ai_request_fact_hourly") {
+		t.Errorf("expected daily+hourly aggregate tables, got: %s", joined)
+	}
+	if !strings.Contains(joined, "MATERIALIZED VIEW") || !strings.Contains(joined, "toStartOfHour(event_time)") {
+		t.Errorf("expected materialized views (daily+hourly), got: %s", joined)
+	}
+	if !strings.Contains(joined, "SummingMergeTree") {
+		t.Errorf("expected SummingMergeTree aggregate engine, got: %s", joined)
+	}
+}
+
 func TestClickHouseBootstrapAndOverview(t *testing.T) {
 	ch, stmts := fakeClickHouse()
 	defer ch.Close()
