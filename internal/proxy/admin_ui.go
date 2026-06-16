@@ -5361,12 +5361,13 @@ const adminHTML = `<!doctype html>
       const dim = sessionStorage.getItem('dwDim') || 'model';
       const order = sessionStorage.getItem('dwOrder') || 'cost';
       const qs = '?window=' + encodeURIComponent(win);
-      const [ov, ts, dims, health, t2s] = await Promise.all([
+      const [ov, ts, dims, health, t2s, cons] = await Promise.all([
         api('/admin/dw/dashboard/overview' + qs).catch(e => ({ _err: e.message })),
         api('/admin/dw/dashboard/timeseries' + qs).catch(() => ({ points: [] })),
         api('/admin/dw/dashboard/dimensions' + qs + '&dimension=' + encodeURIComponent(dim) + '&order_by=' + encodeURIComponent(order) + '&limit=10').catch(() => ({ rows: [] })),
         api('/admin/dw/sink-status').catch(() => null),
         api('/admin/dw/dashboard/text2sql' + qs).catch(() => null),
+        api('/admin/dw/consistency?days=30').catch(() => null),
       ]);
 
       if (ov && ov.configured === false) {
@@ -5451,6 +5452,26 @@ const adminHTML = `<!doctype html>
             : '<div class="empty">적재 이력이 없습니다.</div>') +
           (retries.length ? '<table style="margin-top:10px"><thead><tr><th>dimension</th><th>since</th><th>마지막 오류</th><th>시도</th></tr></thead><tbody>' +
             retries.map(rq => '<tr><td><code>' + escapeHTML(rq.dimension || '') + '</code></td><td>' + escapeHTML(rq.since_day || '') + '</td><td class="muted">' + escapeHTML((rq.error || '').slice(0, 80)) + '</td><td data-num="' + (rq.attempts || 0) + '">' + fmt(rq.attempts || 0) + '</td></tr>').join('') + '</tbody></table>' : '') +
+          '</div></section>';
+      }
+
+      // DW 정합성: 운영 DB vs ClickHouse (기존 consistency 재사용, 최근 30일).
+      if (cons && cons.dimensions) {
+        const cdims = cons.dimensions || [];
+        const badge = cons.consistent ? '<span class="status">일치</span>' : '<span class="status error">불일치</span>';
+        html += '<section><h2>DW 정합성 ' + badge + ' <span class="muted" style="font-size:12px">(최근 30일)</span></h2><div class="card-body">' +
+          '<p class="muted" style="margin-top:0">운영 DB rollup과 ClickHouse 적재량을 차원별로 비교합니다. 요청·토큰 수가 일치해야 정상입니다.</p>' +
+          '<table><thead><tr><th>dimension</th><th>상태</th><th>요청(DB→CH)</th><th>토큰(DB→CH)</th><th>요청 차이</th><th>비용 차이(₩)</th></tr></thead><tbody>' +
+          cdims.map(c => {
+            const pg = c.postgres || {}, chv = c.clickhouse || {}, df = c.diff || {};
+            return '<tr><td><code>' + escapeHTML(c.dimension || '') + '</code></td>' +
+              '<td>' + (c.consistent ? '<span class="status">OK</span>' : '<span class="status error">mismatch</span>') + '</td>' +
+              '<td>' + fmt(pg.requests || 0) + ' → ' + fmt(chv.requests || 0) + '</td>' +
+              '<td>' + fmt(pg.tokens || 0) + ' → ' + fmt(chv.tokens || 0) + '</td>' +
+              '<td>' + (df.requests ? '<span class="status warn">' + fmt(df.requests) + '</span>' : '0') + '</td>' +
+              '<td data-num="' + (df.cost_krw || 0) + '">' + fmt(Math.round(df.cost_krw || 0)) + '</td></tr>';
+          }).join('') + '</tbody></table>' +
+          '<div class="muted" style="margin-top:8px;font-size:11px">불일치 시 <a href="#/clickhouse">ClickHouse 탭</a>에서 재적재·테이블 점검(table-info)을 수행하세요.</div>' +
           '</div></section>';
       }
 
