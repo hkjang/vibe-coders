@@ -193,13 +193,7 @@ func (rc *requestPipeline) recordSkillRun(name, version, status, model string, c
 	if strings.TrimSpace(name) == "" {
 		return
 	}
-	go func(run store.SkillRun) {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if err := rc.s.db.RecordSkillRun(ctx, run); err != nil {
-			slog.Warn("record skill run failed", "skill", run.SkillName, "error", err)
-		}
-	}(store.SkillRun{
+	run := store.SkillRun{
 		SkillName:    name,
 		SkillVersion: version,
 		Actor:        rc.apiKeyID,
@@ -208,5 +202,15 @@ func (rc *requestPipeline) recordSkillRun(name, version, status, model string, c
 		Status:       status,
 		CostKRW:      costKRW,
 		LatencyMS:    latencyMS,
-	})
+		CreatedAt:    time.Now().UTC().Format(time.RFC3339Nano),
+	}
+	go func(run store.SkillRun) {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := rc.s.db.RecordSkillRun(ctx, run); err != nil {
+			slog.Warn("record skill run failed", "skill", run.SkillName, "error", err)
+		}
+	}(run)
+	// Mirror to the ClickHouse behavioral DW (best-effort, no-op when unconfigured).
+	rc.s.emitSkillFact(run)
 }

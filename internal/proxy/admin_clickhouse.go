@@ -185,6 +185,10 @@ func (s *Server) handleClickHouseBootstrap(w http.ResponseWriter, r *http.Reques
 		ref := chTableRef(cfg.Database, cfg.PolicyFactTable)
 		allOK = run("table "+ref, fmt.Sprintf(policyFactDDL, ref)) && allOK
 	}
+	if strings.TrimSpace(cfg.SkillFactTable) != "" {
+		ref := chTableRef(cfg.Database, cfg.SkillFactTable)
+		allOK = run("table "+ref, fmt.Sprintf(skillFactDDL, ref)) && allOK
+	}
 
 	s.auditAdmin(r, "dw.clickhouse.bootstrap", "", auditJSON(map[string]any{"steps": steps, "ok": allOK}))
 	status := http.StatusOK

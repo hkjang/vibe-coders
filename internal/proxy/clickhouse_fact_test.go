@@ -287,6 +287,56 @@ func TestClickHouseFeedbackFact(t *testing.T) {
 	}
 }
 
+func TestClickHouseSkillFact(t *testing.T) {
+	var mu sync.Mutex
+	var body string
+	ch := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Query().Get("query"), "INSERT INTO") {
+			b, _ := io.ReadAll(r.Body)
+			mu.Lock()
+			body = string(b)
+			mu.Unlock()
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ch.Close()
+
+	db := openTestStore(t)
+	defer db.Close()
+	logger := store.NewAsyncLogger(db, 8, filepath.Join(t.TempDir(), "sk.ndjson"))
+	logger.Start()
+	defer logger.Stop(context.Background())
+
+	cfg := testConfig("http://upstream.invalid", "secret")
+	cfg.ClickHouse.URL = ch.URL
+	cfg.ClickHouse.SkillFactTable = "ai_skill_fact"
+	server, err := NewServer(cfg, db, logger, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	server.emitSkillFact(store.SkillRun{
+		SkillName: "concise", SkillVersion: "1.0.0", Actor: "svc-key", Model: "gpt-4o",
+		Status: "ok", ToolsUsed: "search", CostKRW: 12.5, LatencyMS: 88,
+		CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+	})
+	waitFor(t, 3*time.Second, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return strings.Contains(body, "concise")
+	})
+	mu.Lock()
+	defer mu.Unlock()
+	if !strings.Contains(body, `"status":"ok"`) || !strings.Contains(body, `"actor":"svc-key"`) {
+		t.Errorf("skill fact wrong: %s", body)
+	}
+
+	// Unconfigured → no-op (must not panic / insert).
+	cfg2 := testConfig("http://upstream.invalid", "secret")
+	srv2, _ := NewServer(cfg2, db, logger, nil)
+	srv2.emitSkillFact(store.SkillRun{SkillName: "x", Status: "ok"})
+}
+
 func TestClickHousePolicyFact(t *testing.T) {
 	var mu sync.Mutex
 	var body string

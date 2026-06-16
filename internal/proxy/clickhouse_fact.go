@@ -285,6 +285,62 @@ func (s *Server) emitFeedbackFact(fb store.LLMFeedback) {
 	}()
 }
 
+// skillFactDDL — one row per skill run (append; low volume). No prompt text — only the
+// skill identity, actor, model, status, cost, latency, and tools used.
+const skillFactDDL = `CREATE TABLE IF NOT EXISTS %s (
+	event_date Date,
+	event_time DateTime64(3),
+	skill_name LowCardinality(String),
+	skill_version String,
+	actor String,
+	model LowCardinality(String),
+	status LowCardinality(String),
+	tools_used String,
+	cost_krw Float64,
+	latency_ms Int64,
+	ingested_at DateTime64(3)
+) ENGINE = MergeTree
+PARTITION BY toYYYYMM(event_date)
+ORDER BY (event_date, skill_name, status)`
+
+// emitSkillFact ships one skill-run row to ai_skill_fact (best-effort, off the request path).
+// Skill runs are sparse, so it inserts directly rather than via the batch queue; a failed
+// insert is persisted to the retry queue. No-op when the sink/table is unconfigured.
+func (s *Server) emitSkillFact(run store.SkillRun) {
+	ch := s.chConf()
+	table := strings.TrimSpace(ch.SkillFactTable)
+	if ch.URL == "" || table == "" {
+		return
+	}
+	ts := time.Now().UTC()
+	if strings.TrimSpace(run.CreatedAt) != "" {
+		if parsed, err := time.Parse(time.RFC3339Nano, run.CreatedAt); err == nil {
+			ts = parsed.UTC()
+		}
+	}
+	row := map[string]any{
+		"event_date":    ts.Format("2006-01-02"),
+		"event_time":    ts.Format(time.RFC3339Nano),
+		"skill_name":    run.SkillName,
+		"skill_version": run.SkillVersion,
+		"actor":         run.Actor,
+		"model":         run.Model,
+		"status":        run.Status,
+		"tools_used":    run.ToolsUsed,
+		"cost_krw":      run.CostKRW,
+		"latency_ms":    run.LatencyMS,
+		"ingested_at":   time.Now().UTC().Format(time.RFC3339Nano),
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		payload, _, err := insertJSONEachRow(ctx, s.client, ch, table, []map[string]any{row})
+		if err != nil {
+			_ = s.db.RecordClickHouseFactRetry(context.Background(), table, payload, 1, err.Error())
+		}
+	}()
+}
+
 func b2i(b bool) int {
 	if b {
 		return 1
@@ -587,6 +643,7 @@ func configuredFactTables(ch config.ClickHouseConfig) []struct{ Key, Table strin
 		{"eval_fact", ch.EvalFactTable},
 		{"feedback_fact", ch.FeedbackFactTable},
 		{"policy_fact", ch.PolicyFactTable},
+		{"skill_fact", ch.SkillFactTable},
 		{"text2sql_fact", ch.Text2SQLFactTable},
 	}
 	out := all[:0]
