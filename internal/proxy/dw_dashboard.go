@@ -203,6 +203,74 @@ func (s *Server) handleDWDashboardDimensions(w http.ResponseWriter, r *http.Requ
 	writeJSON(w, http.StatusOK, map[string]any{"configured": true, "since": sinceStr, "dimension": dim, "order_by": orderCol, "rows": items})
 }
 
+// dwText2SQLReady reports whether the Text2SQL fact table is configured for dashboard reads.
+func (s *Server) dwText2SQLReady() (config.ClickHouseConfig, string, bool) {
+	cfg := s.chConf()
+	table := strings.TrimSpace(cfg.Text2SQLFactTable)
+	if strings.TrimSpace(cfg.URL) == "" || table == "" {
+		return cfg, "", false
+	}
+	return cfg, chTableRef(cfg.Database, table), true
+}
+
+// handleDWDashboardText2SQL summarizes Text2SQL activity from the fact table: totals,
+// valid/executed/blocked, per-mode counts, and the top failure categories.
+// GET /admin/dw/dashboard/text2sql?window=
+func (s *Server) handleDWDashboardText2SQL(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	cfg, ref, ok := s.dwText2SQLReady()
+	if !ok {
+		writeJSON(w, http.StatusOK, map[string]any{"configured": false})
+		return
+	}
+	sinceStr, _ := dwSinceDate(r)
+	where := "ts >= '" + sinceStr + "'"
+
+	summary, err := s.dwQueryJSON(r.Context(), cfg, "SELECT count() AS total, sum(valid) AS valid, sum(executed) AS executed, "+
+		"sum(reject_reason != '') AS blocked, avg(explain_risk) AS avg_risk, sum(cost_krw) AS cost_krw FROM "+ref+" WHERE "+where)
+	if err != nil {
+		writeOpenAIError(w, http.StatusBadGateway, err.Error(), "server_error", "dw_query_failed")
+		return
+	}
+	byMode, err := s.dwQueryJSON(r.Context(), cfg, "SELECT mode, count() AS n, sum(executed) AS executed FROM "+ref+" WHERE "+where+" GROUP BY mode ORDER BY n DESC")
+	if err != nil {
+		writeOpenAIError(w, http.StatusBadGateway, err.Error(), "server_error", "dw_query_failed")
+		return
+	}
+	failures, err := s.dwQueryJSON(r.Context(), cfg, "SELECT failure_category AS reason, count() AS n FROM "+ref+" WHERE "+where+" AND failure_category != '' GROUP BY failure_category ORDER BY n DESC LIMIT 10")
+	if err != nil {
+		writeOpenAIError(w, http.StatusBadGateway, err.Error(), "server_error", "dw_query_failed")
+		return
+	}
+
+	total, valid, executed, blocked, avgRisk, cost := 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+	if len(summary) > 0 {
+		s0 := summary[0]
+		total, valid, executed, blocked = asFloat(s0["total"]), asFloat(s0["valid"]), asFloat(s0["executed"]), asFloat(s0["blocked"])
+		avgRisk, cost = asFloat(s0["avg_risk"]), asFloat(s0["cost_krw"])
+	}
+	blockRate := 0.0
+	if total > 0 {
+		blockRate = blocked / total
+	}
+	modes := make([]map[string]any, 0, len(byMode))
+	for _, m := range byMode {
+		modes = append(modes, map[string]any{"mode": m["mode"], "count": asFloat(m["n"]), "executed": asFloat(m["executed"])})
+	}
+	fails := make([]map[string]any, 0, len(failures))
+	for _, f := range failures {
+		fails = append(fails, map[string]any{"reason": f["reason"], "count": asFloat(f["n"])})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"configured": true, "since": sinceStr,
+		"total": total, "valid": valid, "executed": executed, "blocked": blocked, "block_rate": blockRate,
+		"avg_explain_risk": avgRisk, "cost_krw": cost, "by_mode": modes, "failures": fails,
+	})
+}
+
 // handleDWDashboardExportCSV exports the current dashboard view as UTF-8 CSV (Excel-friendly
 // BOM). A model/provider/project/cost_center dimension exports its Top-N rows; otherwise the
 // daily time series of the 'all' scope is exported.

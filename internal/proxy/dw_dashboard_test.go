@@ -80,6 +80,68 @@ func TestDWDashboardOverview(t *testing.T) {
 	}
 }
 
+func TestDWDashboardText2SQLDisabled(t *testing.T) {
+	// ClickHouse configured but no Text2SQL fact table → configured:false.
+	srv := newDWTestServer(t, "http://ch.invalid")
+	resp, _ := http.Get(srv.URL + "/admin/dw/dashboard/text2sql")
+	var out map[string]any
+	json.NewDecoder(resp.Body).Decode(&out)
+	resp.Body.Close()
+	if out["configured"] != false {
+		t.Fatalf("expected configured=false without fact table, got %+v", out)
+	}
+}
+
+func TestDWDashboardText2SQL(t *testing.T) {
+	// One CH stub answers the 3 queries by inspecting the SQL.
+	ch := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query().Get("query")
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.Contains(q, "GROUP BY mode"):
+			_, _ = w.Write([]byte(`{"data":[{"mode":"preview","n":"60","executed":"0"},{"mode":"execute","n":"40","executed":"38"}]}`))
+		case strings.Contains(q, "failure_category != ''"):
+			_, _ = w.Write([]byte(`{"data":[{"reason":"invalid_sql","n":"5"}]}`))
+		default:
+			_, _ = w.Write([]byte(`{"data":[{"total":"100","valid":"90","executed":"38","blocked":"7","avg_risk":2.5,"cost_krw":4200}]}`))
+		}
+	}))
+	defer ch.Close()
+	db := openTestStore(t)
+	defer db.Close()
+	logger := store.NewAsyncLogger(db, 8, filepath.Join(t.TempDir(), "t2s.ndjson"))
+	logger.Start()
+	defer logger.Stop(context.Background())
+	server, err := NewServer(testConfig("http://upstream.invalid", "secret"), db, logger, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server.chRuntime.Store(&config.ClickHouseConfig{URL: ch.URL, Table: "ai_request_rollup", Text2SQLFactTable: "text2sql_fact"})
+	srv := httptest.NewServer(server.Routes())
+	defer srv.Close()
+
+	resp, _ := http.Get(srv.URL + "/admin/dw/dashboard/text2sql?window=7d")
+	var out struct {
+		Configured bool             `json:"configured"`
+		Total      float64          `json:"total"`
+		Blocked    float64          `json:"blocked"`
+		BlockRate  float64          `json:"block_rate"`
+		ByMode     []map[string]any `json:"by_mode"`
+		Failures   []map[string]any `json:"failures"`
+	}
+	json.NewDecoder(resp.Body).Decode(&out)
+	resp.Body.Close()
+	if !out.Configured || out.Total != 100 || out.Blocked != 7 {
+		t.Fatalf("summary wrong: %+v", out)
+	}
+	if out.BlockRate < 0.069 || out.BlockRate > 0.071 {
+		t.Fatalf("block_rate = %v, want ~0.07", out.BlockRate)
+	}
+	if len(out.ByMode) != 2 || len(out.Failures) != 1 {
+		t.Fatalf("by_mode/failures wrong: %+v / %+v", out.ByMode, out.Failures)
+	}
+}
+
 func TestDWDashboardExportCSV(t *testing.T) {
 	ch := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

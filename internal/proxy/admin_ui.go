@@ -5361,11 +5361,12 @@ const adminHTML = `<!doctype html>
       const dim = sessionStorage.getItem('dwDim') || 'model';
       const order = sessionStorage.getItem('dwOrder') || 'cost';
       const qs = '?window=' + encodeURIComponent(win);
-      const [ov, ts, dims, health] = await Promise.all([
+      const [ov, ts, dims, health, t2s] = await Promise.all([
         api('/admin/dw/dashboard/overview' + qs).catch(e => ({ _err: e.message })),
         api('/admin/dw/dashboard/timeseries' + qs).catch(() => ({ points: [] })),
         api('/admin/dw/dashboard/dimensions' + qs + '&dimension=' + encodeURIComponent(dim) + '&order_by=' + encodeURIComponent(order) + '&limit=10').catch(() => ({ rows: [] })),
         api('/admin/dw/sink-status').catch(() => null),
+        api('/admin/dw/dashboard/text2sql' + qs).catch(() => null),
       ]);
 
       if (ov && ov.configured === false) {
@@ -5417,6 +5418,27 @@ const adminHTML = `<!doctype html>
           drows.map(rw => '<tr><td>' + escapeHTML(String(rw.value)) + '</td><td data-num="' + rw.requests + '">' + fmt(Math.round(rw.requests)) + '</td><td data-num="' + rw.tokens + '">' + fmt(Math.round(rw.tokens)) + '</td><td data-num="' + rw.cost_krw + '">' + fmt(Math.round(rw.cost_krw)) + '</td><td>' + ((rw.error_rate || 0) * 100).toFixed(1) + '%</td></tr>').join('') +
           '</tbody></table>' : '<div class="empty">데이터 없음</div>') +
         '</div></section>';
+
+      // Text2SQL 분석 (text2sql_fact 설정 시).
+      if (t2s && t2s.configured) {
+        const tcard = (label, val) => '<div style="flex:1;min-width:130px;border:1px solid var(--border,#333);border-radius:8px;padding:10px"><div class="muted" style="font-size:12px">' + label + '</div><div style="font-size:18px;font-weight:600">' + val + '</div></div>';
+        html += '<section><h2>Text2SQL 분석</h2><div class="card-body">' +
+          '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:8px">' +
+            tcard('질의 수', fmt(Math.round(t2s.total || 0))) +
+            tcard('유효(valid)', fmt(Math.round(t2s.valid || 0))) +
+            tcard('실행(executed)', fmt(Math.round(t2s.executed || 0))) +
+            tcard('차단', fmt(Math.round(t2s.blocked || 0))) +
+            tcard('차단율', ((t2s.block_rate || 0) * 100).toFixed(1) + '%') +
+            tcard('평균 EXPLAIN risk', (t2s.avg_explain_risk || 0).toFixed(1)) +
+            tcard('비용(₩)', fmt(Math.round(t2s.cost_krw || 0))) +
+          '</div>' +
+          ((t2s.by_mode && t2s.by_mode.length) ? '<table><thead><tr><th>모드</th><th>질의 수</th><th>실행</th></tr></thead><tbody>' +
+            t2s.by_mode.map(m => '<tr><td>' + escapeHTML(String(m.mode || '')) + '</td><td data-num="' + m.count + '">' + fmt(Math.round(m.count)) + '</td><td data-num="' + m.executed + '">' + fmt(Math.round(m.executed)) + '</td></tr>').join('') + '</tbody></table>' : '') +
+          ((t2s.failures && t2s.failures.length) ? '<h3 style="margin-top:10px">실패 원인 Top</h3><table><thead><tr><th>failure_category</th><th>건수</th></tr></thead><tbody>' +
+            t2s.failures.map(f => '<tr><td>' + escapeHTML(String(f.reason || '')) + '</td><td data-num="' + f.count + '">' + fmt(Math.round(f.count)) + '</td></tr>').join('') + '</tbody></table>' : '') +
+          '<div class="muted" style="margin-top:8px;font-size:11px">위험 요청·골든·replay 상세는 <a href="#/text2sql">Text2SQL 탭</a>에서 확인하세요.</div>' +
+          '</div></section>';
+      }
 
       // DW Health: 적재 워터마크 · 실패 재처리 큐 (기존 sink-status 재사용).
       if (health) {

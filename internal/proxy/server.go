@@ -31,7 +31,7 @@ import (
 )
 
 // AppVersion is the gateway build version, surfaced in /auth/me and the admin UI.
-const AppVersion = "v0.30.0" // DW dashboard: CSV export + health panel
+const AppVersion = "v0.31.0"
 
 type Server struct {
 	cfg          config.Config
@@ -231,6 +231,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/admin/dw/dashboard/overview", s.handleDWDashboardOverview)
 	mux.HandleFunc("/admin/dw/dashboard/timeseries", s.handleDWDashboardTimeseries)
 	mux.HandleFunc("/admin/dw/dashboard/dimensions", s.handleDWDashboardDimensions)
+	mux.HandleFunc("/admin/dw/dashboard/text2sql", s.handleDWDashboardText2SQL)
 	mux.HandleFunc("/admin/dw/dashboard/export.csv", s.handleDWDashboardExportCSV)
 	mux.HandleFunc("/admin/dw/clickhouse", s.handleClickHouseSink)
 	mux.HandleFunc("/admin/dw/clickhouse/bootstrap", s.handleClickHouseBootstrap)
