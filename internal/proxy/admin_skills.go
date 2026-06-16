@@ -383,6 +383,85 @@ func (s *Server) handleSkillPromotions(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"promotions": proms})
 }
 
+// skillBundle is the portable export/import format for skills (GitOps: version-control
+// curated skills and move them between gateway deployments).
+type skillBundle struct {
+	Version string        `json:"version"`
+	Skills  []store.Skill `json:"skills"`
+}
+
+// handleSkillExport returns a portable bundle of skills (optionally filtered by status).
+// GET /admin/skills/export?status=
+func (s *Server) handleSkillExport(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	skills, err := s.db.ListSkills(r.Context(), strings.TrimSpace(r.URL.Query().Get("status")))
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "skills_failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, skillBundle{Version: AppVersion, Skills: skills})
+}
+
+// handleSkillImport upserts skills from a bundle (idempotent by name). The security gate is
+// preserved: a skill imported as production with high-severity scan findings is skipped
+// (reported), not silently published.
+// POST /admin/skills/import {version, skills:[...]}
+func (s *Server) handleSkillImport(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	if r.Method != http.MethodPost {
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
+	var bundle skillBundle
+	if err := json.NewDecoder(r.Body).Decode(&bundle); err != nil {
+		writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "invalid_body")
+		return
+	}
+	actor := s.skillActor(r)
+	imported := []string{}
+	skipped := []map[string]any{}
+	for _, sk := range bundle.Skills {
+		name := strings.TrimSpace(sk.Name)
+		if name == "" {
+			skipped = append(skipped, map[string]any{"name": "", "reason": "missing name"})
+			continue
+		}
+		if sk.Status != "" && !validSkillStatus[sk.Status] {
+			skipped = append(skipped, map[string]any{"name": name, "reason": "invalid status: " + sk.Status})
+			continue
+		}
+		if sk.RiskLevel != "" && !validSkillRisk[sk.RiskLevel] {
+			skipped = append(skipped, map[string]any{"name": name, "reason": "invalid risk_level: " + sk.RiskLevel})
+			continue
+		}
+		meta := strings.TrimSpace(sk.Metadata)
+		if meta != "" && meta != "{}" && !json.Valid([]byte(meta)) {
+			skipped = append(skipped, map[string]any{"name": name, "reason": "invalid metadata JSON"})
+			continue
+		}
+		// Security gate: never import a production skill that fails the scanner.
+		if sk.Status == "production" {
+			if scan := scanSkillSecurity(sk); scan.HighCount > 0 {
+				skipped = append(skipped, map[string]any{"name": name, "reason": "security_gate: high-severity findings", "high_count": scan.HighCount})
+				continue
+			}
+		}
+		if _, err := s.db.UpsertSkill(r.Context(), sk, actor); err != nil {
+			skipped = append(skipped, map[string]any{"name": name, "reason": err.Error()})
+			continue
+		}
+		imported = append(imported, name)
+	}
+	s.auditAdmin(r, "skill.import", "", auditJSON(map[string]any{"imported": len(imported), "skipped": len(skipped)}))
+	writeJSON(w, http.StatusOK, map[string]any{"imported": imported, "imported_count": len(imported), "skipped": skipped})
+}
+
 // handleSkillRecommend mines recurring Text2SQL questions (the report-candidate signal) and
 // proposes draft skills that standardize answering them — the OKF self-improvement loop's
 // Skill analogue. Dry-run by default; ?apply=1 creates the proposals as draft skills

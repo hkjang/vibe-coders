@@ -200,6 +200,8 @@ var apiEndpoints = []apiEndpoint{
 	{"/admin/skills/promotions", []string{"get"}, "skills", "Skill promotion history", false},
 	{"/admin/skills/scan", []string{"get"}, "skills", "Security-scan one or all skills", false},
 	{"/admin/skills/recommend", []string{"post"}, "skills", "Recommend draft skills from recurring usage", false},
+	{"/admin/skills/export", []string{"get"}, "skills", "Export a portable skill bundle", false},
+	{"/admin/skills/import", []string{"post"}, "skills", "Import a skill bundle (security-gated)", false},
 	{"/admin/skills/evaluate", []string{"post"}, "skills", "Dry-run a skill's policy against a model/tools", false},
 	{"/admin/skills/seed-recommended", []string{"post"}, "skills", "Seed the recommended starter skills", false},
 

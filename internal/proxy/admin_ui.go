@@ -5054,6 +5054,9 @@ const adminHTML = `<!doctype html>
           '<button class="secondary" type="button" onclick="skillSeedRecommended()">추천 Skill 시드</button>' +
           '<button class="secondary" type="button" onclick="skillScanAll()">보안 스캔</button>' +
           '<button class="secondary" type="button" onclick="skillRecommend()">Skill 추천</button>' +
+          '<button class="secondary" type="button" onclick="skillExport()">내보내기</button>' +
+          '<button class="secondary" type="button" onclick="document.getElementById(\'skill-import-file\').click()">가져오기</button>' +
+          '<input type="file" id="skill-import-file" accept="application/json" style="display:none" onchange="skillImport(this)">' +
           '<span id="skill-action-result" class="muted"></span>' +
         '</div></div>';
 
@@ -5180,6 +5183,36 @@ const adminHTML = `<!doctype html>
           : '<div class="empty">승격 이력이 없습니다.' + (d._err ? '<div class="muted">' + escapeHTML(d._err) + '</div>' : '') + '</div>') +
         '</div>';
       sec.scrollIntoView({ behavior: 'smooth' });
+    };
+    window.skillExport = async () => {
+      const out = document.getElementById('skill-action-result');
+      try {
+        const data = await api('/admin/skills/export');
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = 'skills-bundle.json';
+        document.body.appendChild(a); a.click(); a.remove();
+        URL.revokeObjectURL(url);
+        if (out) out.innerHTML = '<span class="status">내보냄: ' + (data.skills || []).length + '개</span>';
+      } catch (e) {
+        if (out) out.innerHTML = '<span class="status error">' + escapeHTML(e.message) + '</span>';
+      }
+    };
+    window.skillImport = async (input) => {
+      const out = document.getElementById('skill-action-result');
+      const file = input.files && input.files[0];
+      if (!file) return;
+      try {
+        const text = await file.text();
+        const r = await api('/admin/skills/import', { method: 'POST', body: text });
+        const skipped = (r.skipped || []).length;
+        if (out) out.innerHTML = '<span class="status">가져옴: ' + (r.imported || []).length + '개' + (skipped ? (' · 건너뜀 ' + skipped) : '') + '</span>';
+        input.value = '';
+        await renderSkills();
+      } catch (e) {
+        if (out) out.innerHTML = '<span class="status error">' + escapeHTML(e.message) + '</span>';
+      }
     };
     window.skillRecommend = async () => {
       const sec = document.getElementById('skill-runs');
