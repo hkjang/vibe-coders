@@ -5361,7 +5361,7 @@ const adminHTML = `<!doctype html>
       const dim = sessionStorage.getItem('dwDim') || 'model';
       const order = sessionStorage.getItem('dwOrder') || 'cost';
       const qs = '?window=' + encodeURIComponent(win);
-      const [ov, ts, dims, health, t2s, cons, rout, lat] = await Promise.all([
+      const [ov, ts, dims, health, t2s, cons, rout, lat, qual] = await Promise.all([
         api('/admin/dw/dashboard/overview' + qs).catch(e => ({ _err: e.message })),
         api('/admin/dw/dashboard/timeseries' + qs).catch(() => ({ points: [] })),
         api('/admin/dw/dashboard/dimensions' + qs + '&dimension=' + encodeURIComponent(dim) + '&order_by=' + encodeURIComponent(order) + '&limit=10').catch(() => ({ rows: [] })),
@@ -5370,6 +5370,7 @@ const adminHTML = `<!doctype html>
         api('/admin/dw/consistency?days=30').catch(() => null),
         api('/admin/dw/dashboard/routing' + qs).catch(() => null),
         api('/admin/dw/dashboard/latency' + qs).catch(() => null),
+        api('/admin/dw/dashboard/quality' + qs).catch(() => null),
       ]);
 
       if (ov && ov.configured === false) {
@@ -5463,6 +5464,40 @@ const adminHTML = `<!doctype html>
             lat.by_model.map(m => '<tr><td>' + escapeHTML(String(m.model || '')) + '</td><td data-num="' + m.requests + '">' + fmt(Math.round(m.requests)) + '</td><td data-num="' + m.p95_ms + '">' + ms(m.p95_ms) + '</td><td>' + ((m.error_rate || 0) * 100).toFixed(1) + '%</td></tr>').join('') + '</tbody></table>' : '') +
           '<div class="muted" style="margin-top:8px;font-size:11px">요청 단위 상세·트레이스는 <a href="#/requests">호출 이력</a>에서 확인하세요. (request fact: ai_request_fact)</div>' +
           '</div></section>';
+      }
+
+      // 품질 분석 — 자동 평가(eval) + 사용자 피드백(feedback).
+      if (qual && qual.configured) {
+        const qcard = (label, val, sub) => '<div style="flex:1;min-width:130px;border:1px solid var(--border,#333);border-radius:8px;padding:10px"><div class="muted" style="font-size:12px">' + label + '</div><div style="font-size:18px;font-weight:600">' + val + '</div>' + (sub ? '<div class="muted" style="font-size:11px">' + sub + '</div>' : '') + '</div>';
+        const ev = qual.eval || {}, fb = qual.feedback || {};
+        html += '<section><h2>품질 분석 <span class="muted" style="font-size:12px">(평가/피드백)</span></h2><div class="card-body">';
+        if (ev.configured) {
+          html += '<h3 style="margin-top:0">자동 평가 (LLM eval)</h3>' +
+            '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:8px">' +
+              qcard('평가 수', fmt(Math.round(ev.total || 0))) +
+              qcard('평균 점수', (ev.avg_score || 0).toFixed(2)) +
+              qcard('통과율', ((ev.pass_rate || 0) * 100).toFixed(1) + '%') +
+            '</div>' +
+            ((ev.by_category && ev.by_category.length) ? '<table><thead><tr><th>카테고리</th><th>건수</th><th>평균 점수</th><th>통과율</th></tr></thead><tbody>' +
+              ev.by_category.map(c => '<tr><td>' + escapeHTML(String(c.category || '')) + '</td><td data-num="' + c.count + '">' + fmt(Math.round(c.count)) + '</td><td>' + (c.avg_score || 0).toFixed(2) + '</td><td>' + ((c.pass_rate || 0) * 100).toFixed(1) + '%</td></tr>').join('') + '</tbody></table>' : '');
+        } else {
+          html += '<div class="muted" style="font-size:12px">자동 평가 fact(ai_eval_fact) 미설정 — CLICKHOUSE_EVAL_FACT_TABLE 설정 시 표시됩니다.</div>';
+        }
+        if (fb.configured) {
+          html += '<h3 style="margin-top:12px">사용자 피드백</h3>' +
+            '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:8px">' +
+              qcard('피드백 수', fmt(Math.round(fb.total || 0))) +
+              qcard('평균 평점', (fb.avg_rating || 0).toFixed(2)) +
+              qcard('긍정', fmt(Math.round(fb.positive || 0))) +
+              qcard('부정', fmt(Math.round(fb.negative || 0))) +
+              qcard('긍정 비율', ((fb.positive_rate || 0) * 100).toFixed(1) + '%') +
+            '</div>' +
+            ((fb.by_label && fb.by_label.length) ? '<table><thead><tr><th>label</th><th>건수</th></tr></thead><tbody>' +
+              fb.by_label.map(l => '<tr><td>' + escapeHTML(String(l.label || '')) + '</td><td data-num="' + l.count + '">' + fmt(Math.round(l.count)) + '</td></tr>').join('') + '</tbody></table>' : '');
+        } else {
+          html += '<div class="muted" style="margin-top:8px;font-size:12px">피드백 fact(ai_feedback_fact) 미설정 — CLICKHOUSE_FEEDBACK_FACT_TABLE 설정 시 표시됩니다.</div>';
+        }
+        html += '</div></section>';
       }
 
       // 라우팅 분석 (routing fact 설정 시).

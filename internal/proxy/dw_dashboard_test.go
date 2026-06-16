@@ -261,6 +261,77 @@ func TestDWDashboardLatency(t *testing.T) {
 	}
 }
 
+func TestDWDashboardQuality(t *testing.T) {
+	ch := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query().Get("query")
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.Contains(q, "GROUP BY category"):
+			_, _ = w.Write([]byte(`{"data":[{"category":"security","n":"50","avg_score":0.9,"passed":"48"}]}`))
+		case strings.Contains(q, "label != ''"):
+			_, _ = w.Write([]byte(`{"data":[{"label":"good","n":"30"},{"label":"bad","n":"10"}]}`))
+		case strings.Contains(q, "avg(rating)"):
+			_, _ = w.Write([]byte(`{"data":[{"total":"40","avg_rating":0.5,"positive":"30","negative":"10"}]}`))
+		default: // eval summary
+			_, _ = w.Write([]byte(`{"data":[{"total":"100","avg_score":0.85,"passed":"90"}]}`))
+		}
+	}))
+	defer ch.Close()
+	db := openTestStore(t)
+	defer db.Close()
+	logger := store.NewAsyncLogger(db, 8, filepath.Join(t.TempDir(), "qual.ndjson"))
+	logger.Start()
+	defer logger.Stop(context.Background())
+	server, err := NewServer(testConfig("http://upstream.invalid", "secret"), db, logger, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server.chRuntime.Store(&config.ClickHouseConfig{URL: ch.URL, Table: "ai_request_rollup", EvalFactTable: "ai_eval_fact", FeedbackFactTable: "ai_feedback_fact"})
+	srv := httptest.NewServer(server.Routes())
+	defer srv.Close()
+
+	resp, _ := http.Get(srv.URL + "/admin/dw/dashboard/quality?window=7d")
+	var out struct {
+		Configured bool `json:"configured"`
+		Eval       struct {
+			Configured bool             `json:"configured"`
+			Total      float64          `json:"total"`
+			PassRate   float64          `json:"pass_rate"`
+			ByCategory []map[string]any `json:"by_category"`
+		} `json:"eval"`
+		Feedback struct {
+			Configured   bool             `json:"configured"`
+			Total        float64          `json:"total"`
+			PositiveRate float64          `json:"positive_rate"`
+			ByLabel      []map[string]any `json:"by_label"`
+		} `json:"feedback"`
+	}
+	json.NewDecoder(resp.Body).Decode(&out)
+	resp.Body.Close()
+	if !out.Configured || !out.Eval.Configured || out.Eval.Total != 100 {
+		t.Fatalf("eval summary wrong: %+v", out)
+	}
+	if out.Eval.PassRate < 0.89 || out.Eval.PassRate > 0.91 {
+		t.Fatalf("pass_rate = %v, want ~0.90", out.Eval.PassRate)
+	}
+	if !out.Feedback.Configured || out.Feedback.Total != 40 || len(out.Feedback.ByLabel) != 2 {
+		t.Fatalf("feedback wrong: %+v", out.Feedback)
+	}
+	if out.Feedback.PositiveRate < 0.74 || out.Feedback.PositiveRate > 0.76 {
+		t.Fatalf("positive_rate = %v, want ~0.75", out.Feedback.PositiveRate)
+	}
+
+	// Neither fact configured → configured:false.
+	srv2 := newDWTestServer(t, "http://ch.invalid")
+	r2, _ := http.Get(srv2.URL + "/admin/dw/dashboard/quality")
+	var o2 map[string]any
+	json.NewDecoder(r2.Body).Decode(&o2)
+	r2.Body.Close()
+	if o2["configured"] != false {
+		t.Fatalf("expected configured=false without eval/feedback facts, got %+v", o2)
+	}
+}
+
 func TestDWDashboardExportCSV(t *testing.T) {
 	ch := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

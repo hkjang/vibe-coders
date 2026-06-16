@@ -432,6 +432,103 @@ func (s *Server) handleDWDashboardLatency(w http.ResponseWriter, r *http.Request
 	})
 }
 
+// dwEvalFactReady reports whether the LLM-evaluation fact table is configured.
+func (s *Server) dwEvalFactReady() (config.ClickHouseConfig, string, bool) {
+	cfg := s.chConf()
+	table := strings.TrimSpace(cfg.EvalFactTable)
+	if strings.TrimSpace(cfg.URL) == "" || table == "" {
+		return cfg, "", false
+	}
+	return cfg, chTableRef(cfg.Database, table), true
+}
+
+// dwFeedbackFactReady reports whether the human-feedback fact table is configured.
+func (s *Server) dwFeedbackFactReady() (config.ClickHouseConfig, string, bool) {
+	cfg := s.chConf()
+	table := strings.TrimSpace(cfg.FeedbackFactTable)
+	if strings.TrimSpace(cfg.URL) == "" || table == "" {
+		return cfg, "", false
+	}
+	return cfg, chTableRef(cfg.Database, table), true
+}
+
+// handleDWDashboardQuality summarizes response quality from two fact tables: automated LLM
+// evaluations (ai_eval_fact: score/pass rate, per-category breakdown) and human feedback
+// (ai_feedback_fact: rating, positive/negative split, per-label). Either source is optional;
+// the panel reports configured:true if at least one is available.
+// GET /admin/dw/dashboard/quality?window=
+func (s *Server) handleDWDashboardQuality(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	sinceStr, _ := dwSinceDate(r)
+	where := "event_date >= '" + sinceStr + "'"
+
+	evalOut := map[string]any{"configured": false}
+	if cfg, ref, ok := s.dwEvalFactReady(); ok {
+		summary, err := s.dwQueryJSON(r.Context(), cfg, "SELECT count() AS total, avg(score) AS avg_score, sum(passed) AS passed FROM "+ref+" FINAL WHERE "+where)
+		if err != nil {
+			writeOpenAIError(w, http.StatusBadGateway, err.Error(), "server_error", "dw_query_failed")
+			return
+		}
+		byCat, err := s.dwQueryJSON(r.Context(), cfg, "SELECT category, count() AS n, avg(score) AS avg_score, sum(passed) AS passed FROM "+ref+" FINAL WHERE "+where+" GROUP BY category ORDER BY n DESC LIMIT "+strconv.Itoa(recentLimit(r)))
+		if err != nil {
+			writeOpenAIError(w, http.StatusBadGateway, err.Error(), "server_error", "dw_query_failed")
+			return
+		}
+		total, avgScore, passed := 0.0, 0.0, 0.0
+		if len(summary) > 0 {
+			total, avgScore, passed = asFloat(summary[0]["total"]), asFloat(summary[0]["avg_score"]), asFloat(summary[0]["passed"])
+		}
+		passRate := 0.0
+		if total > 0 {
+			passRate = passed / total
+		}
+		cats := make([]map[string]any, 0, len(byCat))
+		for _, c := range byCat {
+			cN := asFloat(c["n"])
+			cPass := asFloat(c["passed"])
+			cRate := 0.0
+			if cN > 0 {
+				cRate = cPass / cN
+			}
+			cats = append(cats, map[string]any{"category": c["category"], "count": cN, "avg_score": asFloat(c["avg_score"]), "pass_rate": cRate})
+		}
+		evalOut = map[string]any{"configured": true, "total": total, "avg_score": avgScore, "pass_rate": passRate, "by_category": cats}
+	}
+
+	fbOut := map[string]any{"configured": false}
+	if cfg, ref, ok := s.dwFeedbackFactReady(); ok {
+		summary, err := s.dwQueryJSON(r.Context(), cfg, "SELECT count() AS total, avg(rating) AS avg_rating, sum(rating > 0) AS positive, sum(rating < 0) AS negative FROM "+ref+" WHERE "+where)
+		if err != nil {
+			writeOpenAIError(w, http.StatusBadGateway, err.Error(), "server_error", "dw_query_failed")
+			return
+		}
+		byLabel, err := s.dwQueryJSON(r.Context(), cfg, "SELECT label, count() AS n FROM "+ref+" WHERE "+where+" AND label != '' GROUP BY label ORDER BY n DESC LIMIT "+strconv.Itoa(recentLimit(r)))
+		if err != nil {
+			writeOpenAIError(w, http.StatusBadGateway, err.Error(), "server_error", "dw_query_failed")
+			return
+		}
+		total, avgRating, positive, negative := 0.0, 0.0, 0.0, 0.0
+		if len(summary) > 0 {
+			total, avgRating, positive, negative = asFloat(summary[0]["total"]), asFloat(summary[0]["avg_rating"]), asFloat(summary[0]["positive"]), asFloat(summary[0]["negative"])
+		}
+		positiveRate := 0.0
+		if total > 0 {
+			positiveRate = positive / total
+		}
+		labels := make([]map[string]any, 0, len(byLabel))
+		for _, l := range byLabel {
+			labels = append(labels, map[string]any{"label": l["label"], "count": asFloat(l["n"])})
+		}
+		fbOut = map[string]any{"configured": true, "total": total, "avg_rating": avgRating, "positive": positive, "negative": negative, "positive_rate": positiveRate, "by_label": labels}
+	}
+
+	configured := evalOut["configured"] == true || fbOut["configured"] == true
+	writeJSON(w, http.StatusOK, map[string]any{"configured": configured, "since": sinceStr, "eval": evalOut, "feedback": fbOut})
+}
+
 // handleDWDashboardExportCSV exports the current dashboard view as UTF-8 CSV (Excel-friendly
 // BOM). A model/provider/project/cost_center dimension exports its Top-N rows; otherwise the
 // daily time series of the 'all' scope is exported.

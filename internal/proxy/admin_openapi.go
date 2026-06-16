@@ -219,6 +219,7 @@ var apiEndpoints = []apiEndpoint{
 	{"/admin/dw/dashboard/text2sql", []string{"get"}, "dw", "DW dashboard Text2SQL analytics", false},
 	{"/admin/dw/dashboard/routing", []string{"get"}, "dw", "DW dashboard routing-decision analytics", false},
 	{"/admin/dw/dashboard/latency", []string{"get"}, "dw", "DW dashboard latency/performance analytics", false},
+	{"/admin/dw/dashboard/quality", []string{"get"}, "dw", "DW dashboard quality analytics (eval + feedback)", false},
 	{"/admin/dw/dashboard/export.csv", []string{"get"}, "dw", "DW dashboard CSV export (current filter)", false},
 	{"/admin/dw/consistency", []string{"get"}, "dw", "Local vs ClickHouse consistency", false},
 	{"/admin/dw/sink-status", []string{"get"}, "dw", "Sink watermarks + retry queue", false},
