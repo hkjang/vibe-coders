@@ -32,6 +32,7 @@ func publicSkillView(sk store.Skill, withInstructions bool) map[string]any {
 		v["allowed_models"] = sk.AllowedModels
 		v["allowed_tools"] = sk.AllowedTools
 		v["allowed_teams"] = sk.AllowedTeams
+		v["daily_limit"] = sk.DailyLimit
 	}
 	return v
 }
@@ -84,6 +85,7 @@ type skillPayload struct {
 	AllowedModels string          `json:"allowed_models"`
 	AllowedTools  string          `json:"allowed_tools"`
 	AllowedTeams  string          `json:"allowed_teams"`
+	DailyLimit    int             `json:"daily_limit"`
 	Instructions  string          `json:"instructions"`
 	Metadata      json.RawMessage `json:"metadata"`
 }
@@ -136,7 +138,7 @@ func (s *Server) handleSkills(w http.ResponseWriter, r *http.Request) {
 		saved, err := s.db.UpsertSkill(r.Context(), store.Skill{
 			Name: name, Description: p.Description, Version: strings.TrimSpace(p.Version), Owner: strings.TrimSpace(p.Owner),
 			Status: status, RiskLevel: risk, AllowedModels: strings.TrimSpace(p.AllowedModels), AllowedTools: strings.TrimSpace(p.AllowedTools),
-			AllowedTeams: strings.TrimSpace(p.AllowedTeams), Instructions: p.Instructions, Metadata: meta,
+			AllowedTeams: strings.TrimSpace(p.AllowedTeams), DailyLimit: p.DailyLimit, Instructions: p.Instructions, Metadata: meta,
 		}, s.skillActor(r))
 		if err != nil {
 			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "skill_save_failed")

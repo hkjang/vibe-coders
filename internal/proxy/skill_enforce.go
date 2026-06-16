@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -184,6 +185,29 @@ func (rc *requestPipeline) stepSkill() bool {
 	} else {
 		w.Header().Set("X-Vibe-Skill-Policy", "warn")
 		w.Header().Set("X-Vibe-Skill-Policy-Detail", detail)
+	}
+
+	// Daily invocation cap (blast-radius control for expensive/high-risk skills). Counts
+	// today's actual executions (ok/error) from skill_runs; blocked attempts don't consume it.
+	if sk.DailyLimit > 0 {
+		startOfDay := time.Now().UTC().Truncate(24 * time.Hour)
+		used, err := s.db.CountSkillRunsSince(r.Context(), sk.Name, startOfDay, []string{"ok", "error"})
+		if err == nil {
+			w.Header().Set("X-Vibe-Skill-Daily-Used", strconv.FormatInt(used, 10))
+			w.Header().Set("X-Vibe-Skill-Daily-Limit", strconv.Itoa(sk.DailyLimit))
+			if used >= int64(sk.DailyLimit) {
+				if mode == "enforce" {
+					w.Header().Set("X-Vibe-Skill-Policy", "rate_limited")
+					rc.recordSkillRun(sk.Name, sk.Version, "blocked", rc.meta.Request.Model, 0, 0)
+					_ = s.db.InsertAuditEvent(r.Context(), store.AuthEvent{ID: newID("ae"), EventType: "skill_rate_limited", APIKeyID: rc.apiKeyID, IP: clientIP(r), UserAgent: r.UserAgent(), Detail: sk.Name + ": daily limit " + strconv.Itoa(sk.DailyLimit), CreatedAt: time.Now().UTC()})
+					w.Header().Set("Retry-After", "3600")
+					writeOpenAIError(w, http.StatusTooManyRequests, "skill daily limit reached for '"+sk.Name+"'", "rate_limit_error", "skill_rate_limited")
+					return false
+				}
+				w.Header().Set("X-Vibe-Skill-Policy", "warn")
+				w.Header().Set("X-Vibe-Skill-Policy-Detail", "daily limit reached")
+			}
+		}
 	}
 
 	// Apply the skill: prepend its instructions as a system message so the request actually

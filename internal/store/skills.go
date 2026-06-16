@@ -20,6 +20,7 @@ type Skill struct {
 	AllowedModels string `json:"allowed_models"` // comma-separated globs; empty = no restriction
 	AllowedTools  string `json:"allowed_tools"`  // comma-separated tool/server names; empty = no restriction
 	AllowedTeams  string `json:"allowed_teams"`  // comma-separated team globs; empty = any team
+	DailyLimit    int    `json:"daily_limit"`    // max executions per UTC day; 0 = unlimited
 	Instructions  string `json:"instructions"`
 	Metadata      string `json:"metadata"` // JSON object
 	CreatedAt     string `json:"created_at"`
@@ -74,14 +75,15 @@ func (s *SQLStore) UpsertSkill(ctx context.Context, sk Skill, updatedBy string) 
 		sk.CreatedAt = createdAt
 	}
 	if _, err := s.db.ExecContext(ctx, s.bind(`INSERT INTO skills
-		(name, description, version, owner, status, risk_level, allowed_models, allowed_tools, allowed_teams, instructions, metadata, created_at, updated_at, updated_by)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		(name, description, version, owner, status, risk_level, allowed_models, allowed_tools, allowed_teams, daily_limit, instructions, metadata, created_at, updated_at, updated_by)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(name) DO UPDATE SET
 			description = excluded.description, version = excluded.version, owner = excluded.owner,
 			status = excluded.status, risk_level = excluded.risk_level, allowed_models = excluded.allowed_models,
-			allowed_tools = excluded.allowed_tools, allowed_teams = excluded.allowed_teams, instructions = excluded.instructions, metadata = excluded.metadata,
+			allowed_tools = excluded.allowed_tools, allowed_teams = excluded.allowed_teams, daily_limit = excluded.daily_limit,
+			instructions = excluded.instructions, metadata = excluded.metadata,
 			updated_at = excluded.updated_at, updated_by = excluded.updated_by`),
-		sk.Name, sk.Description, sk.Version, sk.Owner, sk.Status, sk.RiskLevel, sk.AllowedModels, sk.AllowedTools, sk.AllowedTeams,
+		sk.Name, sk.Description, sk.Version, sk.Owner, sk.Status, sk.RiskLevel, sk.AllowedModels, sk.AllowedTools, sk.AllowedTeams, sk.DailyLimit,
 		sk.Instructions, sk.Metadata, sk.CreatedAt, sk.UpdatedAt, sk.UpdatedBy); err != nil {
 		return Skill{}, err
 	}
@@ -91,9 +93,9 @@ func (s *SQLStore) UpsertSkill(ctx context.Context, sk Skill, updatedBy string) 
 // GetSkill returns one skill by name.
 func (s *SQLStore) GetSkill(ctx context.Context, name string) (Skill, bool, error) {
 	var sk Skill
-	err := s.db.QueryRowContext(ctx, s.bind(`SELECT name, description, version, owner, status, risk_level, allowed_models, allowed_tools, COALESCE(allowed_teams,''), instructions, metadata, created_at, updated_at, COALESCE(updated_by,'')
+	err := s.db.QueryRowContext(ctx, s.bind(`SELECT name, description, version, owner, status, risk_level, allowed_models, allowed_tools, COALESCE(allowed_teams,''), COALESCE(daily_limit,0), instructions, metadata, created_at, updated_at, COALESCE(updated_by,'')
 		FROM skills WHERE name = ?`), name).
-		Scan(&sk.Name, &sk.Description, &sk.Version, &sk.Owner, &sk.Status, &sk.RiskLevel, &sk.AllowedModels, &sk.AllowedTools, &sk.AllowedTeams, &sk.Instructions, &sk.Metadata, &sk.CreatedAt, &sk.UpdatedAt, &sk.UpdatedBy)
+		Scan(&sk.Name, &sk.Description, &sk.Version, &sk.Owner, &sk.Status, &sk.RiskLevel, &sk.AllowedModels, &sk.AllowedTools, &sk.AllowedTeams, &sk.DailyLimit, &sk.Instructions, &sk.Metadata, &sk.CreatedAt, &sk.UpdatedAt, &sk.UpdatedBy)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Skill{}, false, nil
 	}
@@ -105,7 +107,7 @@ func (s *SQLStore) GetSkill(ctx context.Context, name string) (Skill, bool, erro
 
 // ListSkills returns skills, optionally filtered by status, name-ordered.
 func (s *SQLStore) ListSkills(ctx context.Context, status string) ([]Skill, error) {
-	q := `SELECT name, description, version, owner, status, risk_level, allowed_models, allowed_tools, COALESCE(allowed_teams,''), instructions, metadata, created_at, updated_at, COALESCE(updated_by,'')
+	q := `SELECT name, description, version, owner, status, risk_level, allowed_models, allowed_tools, COALESCE(allowed_teams,''), COALESCE(daily_limit,0), instructions, metadata, created_at, updated_at, COALESCE(updated_by,'')
 		FROM skills`
 	args := []any{}
 	if status != "" {
@@ -121,7 +123,7 @@ func (s *SQLStore) ListSkills(ctx context.Context, status string) ([]Skill, erro
 	out := []Skill{}
 	for rows.Next() {
 		var sk Skill
-		if err := rows.Scan(&sk.Name, &sk.Description, &sk.Version, &sk.Owner, &sk.Status, &sk.RiskLevel, &sk.AllowedModels, &sk.AllowedTools, &sk.AllowedTeams, &sk.Instructions, &sk.Metadata, &sk.CreatedAt, &sk.UpdatedAt, &sk.UpdatedBy); err != nil {
+		if err := rows.Scan(&sk.Name, &sk.Description, &sk.Version, &sk.Owner, &sk.Status, &sk.RiskLevel, &sk.AllowedModels, &sk.AllowedTools, &sk.AllowedTeams, &sk.DailyLimit, &sk.Instructions, &sk.Metadata, &sk.CreatedAt, &sk.UpdatedAt, &sk.UpdatedBy); err != nil {
 			return nil, err
 		}
 		out = append(out, sk)
@@ -230,6 +232,24 @@ func (s *SQLStore) ListSkillPromotions(ctx context.Context, skillName string, li
 		out = append(out, p)
 	}
 	return out, rows.Err()
+}
+
+// CountSkillRunsSince counts a skill's runs since the cutoff, optionally limited to the
+// given statuses (e.g. ["ok","error"] for actual executions). Used for the daily cap.
+func (s *SQLStore) CountSkillRunsSince(ctx context.Context, skillName string, since time.Time, statuses []string) (int64, error) {
+	q := `SELECT COUNT(*) FROM skill_runs WHERE skill_name = ? AND created_at >= ?`
+	args := []any{skillName, since.UTC().Format(time.RFC3339Nano)}
+	if len(statuses) > 0 {
+		placeholders := make([]string, len(statuses))
+		for i, st := range statuses {
+			placeholders[i] = "?"
+			args = append(args, st)
+		}
+		q += " AND status IN (" + strings.Join(placeholders, ",") + ")"
+	}
+	var n int64
+	err := s.db.QueryRowContext(ctx, s.bind(q), args...).Scan(&n)
+	return n, err
 }
 
 // SkillRunStat is the aggregated execution profile of one skill over a time window.

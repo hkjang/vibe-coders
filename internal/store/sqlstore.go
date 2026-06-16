@@ -854,6 +854,7 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 			allowed_models TEXT NOT NULL DEFAULT '',
 			allowed_tools TEXT NOT NULL DEFAULT '',
 			allowed_teams TEXT NOT NULL DEFAULT '',
+			daily_limit INTEGER NOT NULL DEFAULT 0,
 			instructions TEXT NOT NULL DEFAULT '',
 			metadata TEXT NOT NULL DEFAULT '{}',
 			created_at TEXT NOT NULL,
@@ -862,6 +863,7 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_skills_status ON skills(status)`,
 		`ALTER TABLE skills ADD COLUMN allowed_teams TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE skills ADD COLUMN daily_limit INTEGER NOT NULL DEFAULT 0`,
 		`CREATE TABLE IF NOT EXISTS skill_runs (
 			id TEXT PRIMARY KEY,
 			skill_name TEXT NOT NULL,

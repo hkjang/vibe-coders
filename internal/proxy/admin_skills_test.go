@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"vibe-coders/internal/config"
 	"vibe-coders/internal/store"
@@ -428,6 +429,55 @@ func TestSkillRecommendFromRecurringQuestions(t *testing.T) {
 	resp.Body.Close()
 	if again.Count != 0 {
 		t.Fatalf("re-apply should propose 0 (already exist), got %d", again.Count)
+	}
+}
+
+func TestSkillDailyLimitEnforced(t *testing.T) {
+	db := openTestStore(t)
+	defer db.Close()
+	logger := store.NewAsyncLogger(db, 8, filepath.Join(t.TempDir(), "dl.ndjson"))
+	logger.Start()
+	defer logger.Stop(context.Background())
+	server, err := NewServer(testConfig("http://upstream.invalid", "secret"), db, logger, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server.skillsRuntime.Store(&config.SkillsConfig{Enforcement: "enforce"})
+	srv := httptest.NewServer(server.Routes())
+	defer srv.Close()
+
+	ctx := context.Background()
+	if _, err := db.UpsertSkill(ctx, store.Skill{Name: "capped", Status: "production", Instructions: "do", DailyLimit: 2}, "tester"); err != nil {
+		t.Fatal(err)
+	}
+	// Two executions already today → at the cap.
+	for i := 0; i < 2; i++ {
+		if err := db.RecordSkillRun(ctx, store.SkillRun{SkillName: "capped", Status: "ok", Model: "m"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/v1/chat/completions", jsonReader(map[string]any{
+		"model": "gpt-4o", "messages": []map[string]string{{"role": "user", "content": "hi"}},
+	}))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Vibe-Skill", "capped")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("over daily limit = %d, want 429", resp.StatusCode)
+	}
+	if resp.Header.Get("X-Vibe-Skill-Policy") != "rate_limited" {
+		t.Fatalf("policy header = %q", resp.Header.Get("X-Vibe-Skill-Policy"))
+	}
+
+	// CountSkillRunsSince counts only the requested statuses.
+	n, _ := db.CountSkillRunsSince(ctx, "capped", time.Now().UTC().Truncate(24*time.Hour), []string{"ok", "error"})
+	if n < 2 {
+		t.Fatalf("expected >=2 executions counted, got %d", n)
 	}
 }
 

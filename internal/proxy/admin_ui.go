@@ -5125,7 +5125,10 @@ const adminHTML = `<!doctype html>
           '<label class="muted" style="flex:1">allowed_models (glob, 콤마) <input id="sk-allowed_models" style="width:100%" value="' + escapeAttr(sk.allowed_models || '') + '"></label>' +
           '<label class="muted" style="flex:1">allowed_tools (콤마) <input id="sk-allowed_tools" style="width:100%" value="' + escapeAttr(sk.allowed_tools || '') + '"></label>' +
         '</div>' +
-        '<label class="muted" style="display:block;margin-bottom:6px">allowed_teams (팀 glob, 콤마; 비우면 전체 허용) <input id="sk-allowed_teams" style="width:100%" value="' + escapeAttr(sk.allowed_teams || '') + '"></label>' +
+        '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px">' +
+          '<label class="muted" style="flex:2">allowed_teams (팀 glob, 콤마; 비우면 전체 허용) <input id="sk-allowed_teams" style="width:100%" value="' + escapeAttr(sk.allowed_teams || '') + '"></label>' +
+          '<label class="muted" style="flex:1">daily_limit (0=무제한) <input id="sk-daily_limit" type="number" min="0" style="width:100%" value="' + (sk.daily_limit || 0) + '"></label>' +
+        '</div>' +
         '<label class="muted" style="display:block">instructions <textarea id="sk-instructions" style="width:100%;min-height:120px">' + escapeHTML(sk.instructions || '') + '</textarea></label>' +
         '<div style="margin-top:8px"><button type="button" onclick="skillSave()">저장</button> <button class="secondary" type="button" onclick="document.getElementById(\'skill-editor\').style.display=\'none\'">닫기</button></div>' +
         '</div>';
@@ -5136,7 +5139,7 @@ const adminHTML = `<!doctype html>
       const body = {
         name: val('name'), version: val('version'), owner: val('owner'), status: val('status'),
         risk_level: val('risk_level'), description: val('description'),
-        allowed_models: val('allowed_models'), allowed_tools: val('allowed_tools'), allowed_teams: val('allowed_teams'), instructions: val('instructions'),
+        allowed_models: val('allowed_models'), allowed_tools: val('allowed_tools'), allowed_teams: val('allowed_teams'), daily_limit: Number(val('daily_limit') || 0), instructions: val('instructions'),
       };
       const out = document.getElementById('skill-action-result');
       try {
