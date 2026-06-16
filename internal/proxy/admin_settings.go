@@ -183,6 +183,9 @@ func buildSettingRegistry() []settingDef {
 
 		// ---- Skills (policy enforcement) ----
 		{Key: "skills.enforcement", Category: "skills", Type: stString, validate: skillEnforceMode, envValue: func(c config.Config) string { return c.Skills.Enforcement }},
+
+		// ---- Limits (request guardrails) ----
+		{Key: "limits.max_output_tokens", Category: "limits", Type: stInt, validate: posInt, envValue: func(c config.Config) string { return strconv.Itoa(c.Limits.MaxOutputTokens) }},
 	}
 }
 
@@ -276,6 +279,8 @@ var settingDescriptions = map[string]string{
 	"pricing.usd_krw":        "가격 카탈로그 시드 시 USD→KRW 환율(기본 1380). 변경 후 /admin/pricing/seed?overwrite=1로 재적용.",
 	// Skills
 	"skills.enforcement": "Skill 정책(allowed_models/allowed_tools) 적용 모드. off=비활성, warn=위반 시 헤더 경고만(기본), enforce=위반 시 요청 차단(403). 요청은 X-Vibe-Skill 헤더로 Skill을 지정해야 검사됨.",
+	// Limits
+	"limits.max_output_tokens": "응답 최대 출력 토큰 상한(0=비활성). >0이면 chat 요청의 max_tokens/max_completion_tokens를 이 값으로 클램프(없으면 주입). 런어웨이 생성·비용 폭주 가드.",
 }
 
 // t2sConf returns the effective Text2SQL config (admin-settings overlay over env/default).
@@ -334,6 +339,14 @@ func (s *Server) skillsConf() config.SkillsConfig {
 	return s.cfg.Skills
 }
 
+// limitsConf returns the effective Limits config (admin-settings overlay over env/default).
+func (s *Server) limitsConf() config.LimitsConfig {
+	if p := s.limitsRuntime.Load(); p != nil {
+		return *p
+	}
+	return s.cfg.Limits
+}
+
 // reloadRuntimeConfig rebuilds the Text2SQL/ClickHouse runtime snapshots from env defaults
 // overlaid with admin-managed settings. Called at startup and after every settings change.
 func (s *Server) reloadRuntimeConfig(ctx context.Context) {
@@ -357,6 +370,7 @@ func (s *Server) reloadRuntimeConfig(ctx context.Context) {
 	ret := s.cfg.Retention
 	pricing := s.cfg.PricingConf
 	skills := s.cfg.Skills
+	limits := s.cfg.Limits
 	for _, d := range settingRegistry {
 		if _, ok := stored[d.Key]; !ok {
 			continue
@@ -365,7 +379,7 @@ func (s *Server) reloadRuntimeConfig(ctx context.Context) {
 		if source != "admin" {
 			continue
 		}
-		applyRuntimeSetting(&t2s, &ch, &carbon, &ins, &cache, &ret, &pricing, &skills, d.Key, val)
+		applyRuntimeSetting(&t2s, &ch, &carbon, &ins, &cache, &ret, &pricing, &skills, &limits, d.Key, val)
 	}
 	s.t2sRuntime.Store(&t2s)
 	s.chRuntime.Store(&ch)
@@ -374,6 +388,7 @@ func (s *Server) reloadRuntimeConfig(ctx context.Context) {
 	s.cacheRuntime.Store(&cache)
 	s.pricingRuntime.Store(&pricing)
 	s.skillsRuntime.Store(&skills)
+	s.limitsRuntime.Store(&limits)
 	audit.SetFallbackPriceModel(pricing.FallbackModel) // apply the runtime fallback model
 	// Apply retention changes to the running worker (day thresholds next run; interval recreates the ticker).
 	if s.retention != nil && prevRet != ret {
@@ -398,7 +413,7 @@ func (s *Server) reloadRuntimeConfig(ctx context.Context) {
 	}
 }
 
-func applyRuntimeSetting(t2s *config.Text2SQLConfig, ch *config.ClickHouseConfig, carbon *config.CarbonConfig, ins *config.InsuranceConfig, cache *config.CacheConfig, ret *config.RetentionConfig, pricing *config.PricingConfig, skills *config.SkillsConfig, key, val string) {
+func applyRuntimeSetting(t2s *config.Text2SQLConfig, ch *config.ClickHouseConfig, carbon *config.CarbonConfig, ins *config.InsuranceConfig, cache *config.CacheConfig, ret *config.RetentionConfig, pricing *config.PricingConfig, skills *config.SkillsConfig, limits *config.LimitsConfig, key, val string) {
 	val = strings.TrimSpace(val)
 	atoi := func() int { n, _ := strconv.Atoi(val); return n }
 	atof := func() float64 { f, _ := strconv.ParseFloat(val, 64); return f }
@@ -561,6 +576,8 @@ func applyRuntimeSetting(t2s *config.Text2SQLConfig, ch *config.ClickHouseConfig
 		pricing.USDToKRW = atof()
 	case "skills.enforcement":
 		skills.Enforcement = strings.ToLower(val)
+	case "limits.max_output_tokens":
+		limits.MaxOutputTokens = atoi()
 	}
 }
 
@@ -580,7 +597,7 @@ func settingPermissionGroup(d settingDef) string {
 		return "security" // Skill policy enforcement is a governance gate
 	}
 	switch {
-	case strings.HasPrefix(d.Category, "clickhouse"), strings.HasPrefix(d.Category, "retention"), strings.HasPrefix(d.Category, "cache"):
+	case strings.HasPrefix(d.Category, "clickhouse"), strings.HasPrefix(d.Category, "retention"), strings.HasPrefix(d.Category, "cache"), strings.HasPrefix(d.Category, "limits"):
 		return "ops"
 	case strings.HasPrefix(d.Category, "text2sql"):
 		return "ai"

@@ -31,7 +31,7 @@ import (
 )
 
 // AppVersion is the gateway build version, surfaced in /auth/me and the admin UI.
-const AppVersion = "v0.24.0"
+const AppVersion = "v0.25.0"
 
 type Server struct {
 	cfg          config.Config
@@ -64,6 +64,7 @@ type Server struct {
 	cacheRuntime   atomic.Pointer[config.CacheConfig]     // admin-settings overlay over cfg.Cache
 	pricingRuntime atomic.Pointer[config.PricingConfig]   // admin-settings overlay over cfg.PricingConf
 	skillsRuntime  atomic.Pointer[config.SkillsConfig]    // admin-settings overlay over cfg.Skills
+	limitsRuntime  atomic.Pointer[config.LimitsConfig]    // admin-settings overlay over cfg.Limits
 	chFactQueue   chan store.LogRecord                   // async per-request fact ingest queue (bounded)
 	chFactDropped atomic.Int64                           // requests dropped when the fact queue was full
 	sessions     *sessionInferer

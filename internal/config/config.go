@@ -30,6 +30,7 @@ type Config struct {
 	Pricing     map[string]ModelPrice
 	PricingConf PricingConfig
 	Skills      SkillsConfig
+	Limits      LimitsConfig
 }
 
 // InsuranceConfig parameterizes the AI Request Insurance view: an SLA-claims ledger
@@ -195,6 +196,13 @@ type Text2SQLConfig struct {
 type PricingConfig struct {
 	FallbackModel string  // model name used to cost unmatched models; "" → qwen-plus
 	USDToKRW      float64 // USD→KRW conversion applied at catalog seed time
+}
+
+// LimitsConfig holds request-shaping guardrails applied in the pipeline. MaxOutputTokens,
+// when > 0, clamps a chat request's max_tokens/max_completion_tokens to that ceiling
+// (injecting it when the client omits one) — a cost/runaway-generation guard.
+type LimitsConfig struct {
+	MaxOutputTokens int
 }
 
 // SkillsConfig controls the Skill policy enforcement engine. A request opts into a skill
@@ -390,6 +398,9 @@ func Load() (Config, error) {
 		},
 		Skills: SkillsConfig{
 			Enforcement: getEnv("SKILLS_ENFORCEMENT", "warn"),
+		},
+		Limits: LimitsConfig{
+			MaxOutputTokens: intEnv("LIMITS_MAX_OUTPUT_TOKENS", 0),
 		},
 	}
 
