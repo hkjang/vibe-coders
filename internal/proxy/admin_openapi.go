@@ -120,6 +120,7 @@ var apiEndpoints = []apiEndpoint{
 	{"/admin/cost/anomalies", []string{"get"}, "cost", "Cost anomaly detection", false},
 	{"/admin/budgets", []string{"get", "post"}, "cost", "List / create budgets", false},
 	{"/admin/budgets/{id}", []string{"put", "delete"}, "cost", "Update / delete a budget", false},
+	{"/admin/budgets/alerts", []string{"get"}, "cost", "Budgets at warn/critical burn (optional Mattermost notify)", false},
 	{"/admin/savings", []string{"get"}, "cost", "Savings report", false},
 	{"/admin/invoices", []string{"get"}, "cost", "Cost-center invoices", false},
 	{"/admin/carbon-score", []string{"get"}, "cost", "Prompt carbon score", false},

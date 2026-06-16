@@ -3795,6 +3795,7 @@ const adminHTML = `<!doctype html>
       ) + section('월 예산 소진 예측 (Budget Burn-down)',
         '<div class="card-body">' +
         '<p class="muted" style="margin-top:0">월 예산 대비 이번 달 누적 지출과 현재 추세(일평균 소진율)를 월말까지 연장한 예상 지출을 보여줍니다. 추세가 예산을 초과하면 소진 예상일과 함께 경고합니다. 기준 시간대는 KST(월초~월말)입니다.</p>' +
+        '<div style="display:flex;gap:8px;align-items:center;margin-bottom:8px"><button class="secondary" type="button" onclick="checkBudgetAlerts(false)">예산 경보 확인</button><button class="secondary" type="button" onclick="checkBudgetAlerts(true)">경보 + Mattermost 알림</button><span id="budget-alert-result" class="muted"></span></div>' +
         '<form class="inline-form" id="budget-form" style="grid-template-columns: 120px minmax(120px,1fr) minmax(120px,1fr) minmax(160px,1fr) 80px;">' +
           '<select id="b-scope">' +
             '<option value="global">전체</option>' +
@@ -3828,6 +3829,17 @@ const adminHTML = `<!doctype html>
       if (!confirm('해당 예산을 삭제하시겠습니까?')) return;
       await api('/admin/budgets/' + encodeURIComponent(id), { method: 'DELETE' });
       route();
+    };
+    window.checkBudgetAlerts = async (notify) => {
+      const out = document.getElementById('budget-alert-result');
+      if (out) out.textContent = '확인 중…';
+      try {
+        const r = await api('/admin/budgets/alerts' + (notify ? '?notify=1' : ''));
+        const msg = 'critical ' + (r.critical || 0) + ' · warn ' + (r.warn || 0) + (notify ? ' (Mattermost 전송됨)' : '');
+        if (out) out.innerHTML = (r.critical || r.warn) ? '<span class="status ' + (r.critical ? 'error' : 'warn') + '">' + escapeHTML(msg) + '</span>' : '<span class="status">경보 없음</span>';
+      } catch (e) {
+        if (out) out.innerHTML = '<span class="status error">' + escapeHTML(e.message) + '</span>';
+      }
     };
     function progressBar(filled) {
       const pctVal = Math.max(0, Math.min(1, Number(filled) || 0));

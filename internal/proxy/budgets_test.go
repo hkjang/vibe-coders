@@ -12,6 +12,46 @@ import (
 	"vibe-coders/internal/store"
 )
 
+func TestBudgetAlerts(t *testing.T) {
+	db := openTestStore(t)
+	defer db.Close()
+	logger := store.NewAsyncLogger(db, 8, filepath.Join(t.TempDir(), "ba.ndjson"))
+	logger.Start()
+	defer logger.Stop(context.Background())
+	server, err := NewServer(testConfig("http://upstream.invalid", "secret"), db, logger, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxy := httptest.NewServer(server.Routes())
+	defer proxy.Close()
+
+	// A budget with no spend → "ok": absent from default alerts, present with ?all=1.
+	resp := postJSON(t, proxy.URL+"/admin/budgets", "", map[string]any{"scope": "global", "monthly_krw": 100000})
+	resp.Body.Close()
+
+	def, _ := http.Get(proxy.URL + "/admin/budgets/alerts")
+	var d struct {
+		Alerts   []map[string]any `json:"alerts"`
+		Warn     int              `json:"warn"`
+		Critical int              `json:"critical"`
+	}
+	json.NewDecoder(def.Body).Decode(&d)
+	def.Body.Close()
+	if len(d.Alerts) != 0 || d.Warn != 0 || d.Critical != 0 {
+		t.Fatalf("no-spend budget should raise no alerts, got %+v", d)
+	}
+
+	all, _ := http.Get(proxy.URL + "/admin/budgets/alerts?all=1")
+	var a struct {
+		Alerts []map[string]any `json:"alerts"`
+	}
+	json.NewDecoder(all.Body).Decode(&a)
+	all.Body.Close()
+	if len(a.Alerts) != 1 || a.Alerts[0]["severity"] != "ok" {
+		t.Fatalf("all=1 should include the ok budget, got %+v", a.Alerts)
+	}
+}
+
 func TestAdminBudgetsCRUD(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
