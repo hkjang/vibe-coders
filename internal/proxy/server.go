@@ -186,6 +186,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/admin/retention", s.handleRetention)
 	mux.HandleFunc("/admin/dw/rollups", s.handleDWRollups)
 	mux.HandleFunc("/admin/dw/clickhouse", s.handleClickHouseSink)
+	mux.HandleFunc("/admin/dw/clickhouse/bootstrap", s.handleClickHouseBootstrap)
+	mux.HandleFunc("/admin/dw/clickhouse/overview", s.handleClickHouseOverview)
 	mux.HandleFunc("/admin/dw/consistency", s.handleClickHouseConsistency)
 	mux.HandleFunc("/admin/dw/sink-status", s.handleClickHouseSinkStatus)
 	mux.HandleFunc("/admin/dw/sink-retry", s.handleClickHouseSinkRetry)

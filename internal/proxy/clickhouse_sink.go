@@ -116,7 +116,10 @@ func clickhouseText2SQLFactSink(ctx context.Context, client *http.Client, cfg co
 	q := "INSERT INTO " + table + " FORMAT JSONEachRow"
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, cfg.URL+"/?query="+url.QueryEscape(q), &body)
+	// best_effort lets ClickHouse parse the RFC3339 ts (e.g. 2026-06-16T03:15:56Z) into a
+	// DateTime/DateTime64 column without a separate transform.
+	endpoint := cfg.URL + "/?query=" + url.QueryEscape(q) + "&date_time_input_format=best_effort"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, &body)
 	if err != nil {
 		return 0, err
 	}

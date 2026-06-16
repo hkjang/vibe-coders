@@ -243,6 +243,7 @@ const adminHTML = `<!doctype html>
       <a href="#/quotas" data-tab="quotas">사용 한도</a>
       <a href="#/safety" data-tab="safety">안전</a>
       <a href="#/text2sql" data-tab="text2sql">Text2SQL</a>
+      <a href="#/clickhouse" data-tab="clickhouse">ClickHouse</a>
       <a href="#/runtimesettings" data-tab="runtimesettings">런타임 설정</a>
       <a href="#/settings" data-tab="settings">설정</a>
     </nav>
@@ -711,6 +712,7 @@ const adminHTML = `<!doctype html>
           case 'text2sql':  await renderText2SQL(); break;
           case 'personalization': rest.length ? await renderPersonalProfileDetail(decodeURIComponent(rest.join('/'))) : await renderPersonalization(); break;
           case 'mykeys':    await renderMyKeys(); break;
+          case 'clickhouse': await renderClickHouse(); break;
           case 'runtimesettings': await renderRuntimeSettings(); break;
           case 'settings':  await renderSettings(); break;
           default: await renderDashboard();
@@ -4994,6 +4996,99 @@ const adminHTML = `<!doctype html>
         await renderMyKeys();
       } catch (err) { alert('폐기 실패: ' + err.message); }
     }
+
+    // ---------- ClickHouse DW (setup + monitoring) ----------
+    function chBadge(ok, okText, badText) {
+      return '<span class="status ' + (ok ? '' : 'error') + '">' + escapeHTML(ok ? okText : badText) + '</span>';
+    }
+    async function renderClickHouse() {
+      const view = document.getElementById('view');
+      const d = await api('/admin/dw/clickhouse/overview').catch(e => ({ configured: false, _err: e.message }));
+      let html = '<div class="card-body"><p class="muted">ClickHouse 장기 분석(DW) 적재 상태를 한 화면에서 점검하고, 테이블 생성·적재·정합성 확인을 실행합니다. 연결/테이블/계정 설정은 <a href="#/runtimesettings">런타임 설정</a>의 <code>clickhouse.*</code> 키에서 변경하세요.</p>' +
+        '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:6px">' +
+          '<button class="secondary" type="button" onclick="chAction(\'test\')">연결 테스트</button>' +
+          '<button type="button" onclick="chAction(\'bootstrap\')">테이블 생성</button>' +
+          '<button class="secondary" type="button" onclick="chAction(\'sink\')">지금 적재</button>' +
+          '<button class="secondary" type="button" onclick="chAction(\'retry\')">실패분 재처리</button>' +
+          '<button class="secondary" type="button" onclick="chAction(\'consistency\')">정합성 확인</button>' +
+          '<span id="ch-action-result" class="muted"></span>' +
+        '</div></div>';
+
+      if (!d.configured) {
+        html += '<div class="card-body"><div class="empty">ClickHouse가 설정되지 않았습니다. <a href="#/runtimesettings">런타임 설정</a>에서 <code>clickhouse.url</code>(및 database/table/계정)을 먼저 지정하세요.' +
+          (d._err ? '<div class="muted">' + escapeHTML(d._err) + '</div>' : '') + '</div></div>';
+        view.innerHTML = card('ClickHouse', html);
+        return;
+      }
+
+      const ping = d.ping || {};
+      const rt = d.rollup_table || { exists: false };
+      const sink = d.sink || {};
+      const ft = d.fact_table || { configured: false };
+      const dedupe = rt.exists && rt.replacing_merge_tree && rt.dedupe_ok;
+
+      html += '<section><h2>상태</h2><div class="card-body"><div class="kv">' +
+        row('연결(ping)', ping.ok ? chBadge(true, 'OK', '') + ' <span class="muted">' + (ping.latency_ms || 0) + ' ms</span>' : chBadge(false, '', '실패') + ' <span class="muted">' + escapeHTML(ping.message || '') + '</span>') +
+        row('대상', escapeHTML((d.database ? d.database + '.' : '') + (d.table || ''))) +
+        row('rollup 테이블', rt.exists
+            ? chBadge(true, '존재', '') + ' <span class="muted">' + escapeHTML(rt.engine || '') + '</span>' + (dedupe ? '' : ' <span class="status warn">dedupe 키 확인 필요</span>')
+            : chBadge(false, '', '없음') + ' <span class="muted">테이블 생성 버튼으로 만들 수 있습니다</span>') +
+        row('정렬키', rt.exists ? '<code>' + escapeHTML(rt.sorting_key || '') + '</code>' : '—') +
+        row('자동 적재', sink.auto_enabled
+            ? chBadge(true, '켜짐', '') + ' <span class="muted">interval ' + escapeHTML(sink.interval || '') + ', 최근 ' + (sink.days || 0) + '일</span>'
+            : '<span class="status warn">꺼짐</span> <span class="muted">런타임 설정의 <code>clickhouse.sink_interval</code>을 1h 등으로 설정하면 자동 적재됩니다</span>') +
+        (ft.configured ? row('fact 테이블', escapeHTML(ft.name) + ' ' + (ft.exists ? chBadge(true, '존재', '') : chBadge(false, '', '없음'))) : '') +
+        '</div></div></section>';
+
+      const wm = d.watermarks || [];
+      html += '<section><h2>적재 워터마크 (dimension별)</h2><div class="card-body">' +
+        (wm.length ? '<table><thead><tr><th>dimension</th><th>마지막 적재 기준</th><th>행수</th><th>갱신</th></tr></thead><tbody>' +
+          wm.map(s => '<tr><td><code>' + escapeHTML(s.dimension || '') + '</code></td><td>' + escapeHTML(s.last_synced_day || '') + '</td><td data-num="' + (s.rows_sent || 0) + '">' + fmt(s.rows_sent || 0) + '</td><td>' + ago(s.updated_at) + '</td></tr>').join('') + '</tbody></table>'
+          : '<div class="empty">아직 적재 이력이 없습니다. [지금 적재]를 누르거나 자동 적재를 켜세요.</div>') +
+        '</div></section>';
+
+      const rq = d.retries || [];
+      html += '<section><h2>재처리 대기열 ' + (rq.length ? '(' + rq.length + ')' : '') + '</h2><div class="card-body">' +
+        (rq.length ? '<table><thead><tr><th>dimension</th><th>since</th><th>마지막 오류</th><th>시도</th></tr></thead><tbody>' +
+          rq.map(s => '<tr><td><code>' + escapeHTML(s.dimension || '') + '</code></td><td>' + escapeHTML(s.since_day || '') + '</td><td class="muted">' + escapeHTML((s.error || '').slice(0, 80)) + '</td><td data-num="' + (s.attempts || 0) + '">' + fmt(s.attempts || 0) + '</td></tr>').join('') + '</tbody></table>'
+          : '<div class="empty">대기 중인 실패 적재가 없습니다.</div>') +
+        '</div></section>';
+
+      view.innerHTML = card('ClickHouse', html);
+    }
+    window.chAction = async (kind) => {
+      const out = document.getElementById('ch-action-result');
+      const setMsg = (cls, msg) => { if (out) out.innerHTML = '<span class="status ' + cls + '">' + escapeHTML(msg) + '</span>'; };
+      try {
+        if (kind === 'test') {
+          setMsg('', '테스트 중…');
+          const r = await api('/admin/settings/test/clickhouse', { method: 'POST', body: '{}' });
+          setMsg(r.ok ? '' : 'error', r.ok ? ('연결 OK (' + (r.latency_ms || 0) + ' ms)' + (r.table_ok === false ? ' · 테이블 없음' : '')) : ('실패: ' + (r.message || '')));
+        } else if (kind === 'bootstrap') {
+          if (!confirm('ClickHouse에 데이터베이스/테이블을 생성합니다 (IF NOT EXISTS). 진행할까요?')) return;
+          setMsg('', '생성 중…');
+          const r = await api('/admin/dw/clickhouse/bootstrap', { method: 'POST' });
+          setMsg(r.ok ? '' : 'error', r.ok ? '테이블 생성 완료' : '일부 실패: ' + (r.steps || []).filter(s => !s.ok).map(s => s.object + '(' + s.error + ')').join(', '));
+        } else if (kind === 'sink') {
+          setMsg('', '적재 중…');
+          const r = await api('/admin/dw/clickhouse?days=7', { method: 'POST' });
+          setMsg('', '적재 완료: ' + (r.sent_rows || 0) + '행 (since ' + (r.since || '') + ')');
+        } else if (kind === 'retry') {
+          setMsg('', '재처리 중…');
+          const r = await api('/admin/dw/sink-retry', { method: 'POST' });
+          setMsg('', '재처리: ' + (r.recovered_dimensions || 0) + '개 dimension, ' + (r.sent_rows || 0) + '행');
+        } else if (kind === 'consistency') {
+          setMsg('', '확인 중…');
+          const r = await api('/admin/dw/consistency?days=30');
+          setMsg(r.consistent ? '' : 'warn', r.consistent ? '정합성 OK (최근 30일)' : '불일치 감지 — dimension별 차이 확인 필요');
+        }
+      } catch (e) {
+        setMsg('error', '실패: ' + e.message);
+      }
+      if (kind === 'bootstrap' || kind === 'sink' || kind === 'retry') {
+        setTimeout(renderClickHouse, 600);
+      }
+    };
 
     // ---------- runtime settings (admin-managed config) ----------
     function settingInputId(key) { return 'val-' + key.replace(/[^a-zA-Z0-9]/g, '-'); }
