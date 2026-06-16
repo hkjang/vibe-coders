@@ -22,9 +22,13 @@ func TestAdminAuditAnomalies(t *testing.T) {
 	}
 
 	// admin_destroyer: 6 delete actions (within window, daytime) → destructive_burst (high).
+	// Use a stable daytime instant inside the query window. When today's noon is still in
+	// the future (test running before 12:00 UTC), fall back to yesterday's noon — NOT
+	// now-2h, which can land in the off-hours window (22:00–06:00) and spuriously flag the
+	// "quiet" admin.
 	noonToday := time.Date(now.Year(), now.Month(), now.Day(), 12, 0, 0, 0, time.UTC)
 	if noonToday.After(now) {
-		noonToday = now.Add(-2 * time.Hour)
+		noonToday = noonToday.Add(-24 * time.Hour)
 	}
 	for i := 0; i < 6; i++ {
 		ins("admin_destroyer", "apikey.delete", noonToday.Add(time.Duration(i)*time.Minute))

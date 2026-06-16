@@ -843,6 +843,35 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 			changed_at TEXT NOT NULL
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_admin_setting_history_key ON admin_setting_history(key, changed_at)`,
+		// OKF (Open Knowledge Format) — portable knowledge documents + relationship links.
+		`CREATE TABLE IF NOT EXISTS okf_documents (
+			id TEXT PRIMARY KEY,
+			kind TEXT NOT NULL,
+			subject TEXT NOT NULL,
+			title TEXT NOT NULL DEFAULT '',
+			body TEXT NOT NULL DEFAULT '',
+			attributes TEXT NOT NULL DEFAULT '{}',
+			tags TEXT NOT NULL DEFAULT '',
+			source TEXT NOT NULL DEFAULT 'manual',
+			status TEXT NOT NULL DEFAULT 'active',
+			version INTEGER NOT NULL DEFAULT 1,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			updated_by TEXT
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_okf_documents_kind ON okf_documents(kind, subject)`,
+		`CREATE INDEX IF NOT EXISTS idx_okf_documents_status ON okf_documents(status)`,
+		`CREATE TABLE IF NOT EXISTS okf_links (
+			id TEXT PRIMARY KEY,
+			from_subject TEXT NOT NULL,
+			relation TEXT NOT NULL,
+			to_subject TEXT NOT NULL,
+			attributes TEXT NOT NULL DEFAULT '{}',
+			source TEXT NOT NULL DEFAULT 'manual',
+			created_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_okf_links_from ON okf_links(from_subject)`,
+		`CREATE INDEX IF NOT EXISTS idx_okf_links_to ON okf_links(to_subject)`,
 		`CREATE TABLE IF NOT EXISTS routing_rules (
 			id TEXT PRIMARY KEY,
 			enabled INTEGER NOT NULL DEFAULT 1,
