@@ -32,7 +32,15 @@ func chEscape(s string) string { return strings.ReplaceAll(s, "'", "''") }
 // dwQueryJSON runs a read query against ClickHouse and returns the decoded `data` rows.
 // It appends `FORMAT JSON` and parses ClickHouse's standard JSON envelope.
 func (s *Server) dwQueryJSON(ctx context.Context, cfg config.ClickHouseConfig, query string) ([]map[string]any, error) {
-	body, code, err := s.clickhouseQuery(ctx, cfg, query+" FORMAT JSON")
+	full := query + " FORMAT JSON"
+	key := cfg.URL + "\n" + full
+	now := time.Now()
+	if s.dwCache != nil {
+		if rows, ok := s.dwCache.get(key, now); ok {
+			return rows, nil
+		}
+	}
+	body, code, err := s.clickhouseQuery(ctx, cfg, full)
 	if err != nil {
 		return nil, err
 	}
@@ -44,6 +52,9 @@ func (s *Server) dwQueryJSON(ctx context.Context, cfg config.ClickHouseConfig, q
 	}
 	if err := json.Unmarshal([]byte(body), &env); err != nil {
 		return nil, fmt.Errorf("decode clickhouse response: %w", err)
+	}
+	if s.dwCache != nil {
+		s.dwCache.put(key, env.Data, now)
 	}
 	return env.Data, nil
 }
@@ -527,6 +538,23 @@ func (s *Server) handleDWDashboardQuality(w http.ResponseWriter, r *http.Request
 
 	configured := evalOut["configured"] == true || fbOut["configured"] == true
 	writeJSON(w, http.StatusOK, map[string]any{"configured": configured, "since": sinceStr, "eval": evalOut, "feedback": fbOut})
+}
+
+// handleDWDashboardRefresh clears the DW dashboard query cache so subsequent panel reads hit
+// ClickHouse fresh. Used by the "새로고침" button when an admin wants up-to-the-second numbers
+// rather than the cached (up to ~45s old) view. Audited.
+// POST /admin/dw/dashboard/refresh
+func (s *Server) handleDWDashboardRefresh(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	cleared := 0
+	if s.dwCache != nil {
+		cleared = s.dwCache.clear()
+	}
+	s.auditAdmin(r, "dw.dashboard.refresh", "", auditJSON(map[string]any{"cleared": cleared}))
+	writeJSON(w, http.StatusOK, map[string]any{"status": "refreshed", "cleared": cleared})
 }
 
 // handleDWDashboardExportCSV exports the current dashboard view as UTF-8 CSV (Excel-friendly

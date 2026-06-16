@@ -5391,6 +5391,7 @@ const adminHTML = `<!doctype html>
           '<label class="muted">기간 <select onchange="dwSet(\'dwWindow\', this.value)">' + winSel + '</select></label>' +
           '<span class="muted">since ' + escapeHTML(ov.since || '') + '</span>' +
           '<button class="secondary" type="button" onclick="dwExportCSV()">CSV 내보내기</button>' +
+          '<button class="secondary" type="button" onclick="dwRefresh()" title="대시보드 쿼리 캐시(약 45초)를 비우고 ClickHouse에서 최신 값을 다시 조회합니다">새로고침</button>' +
           '<span id="dw-action-result" class="muted"></span>' +
         '</div></div>';
 
@@ -5605,6 +5606,17 @@ const adminHTML = `<!doctype html>
       view.innerHTML = card('DW 대시보드', html);
     }
     window.dwSet = (key, val) => { sessionStorage.setItem(key, val); renderDWDashboard(); };
+    window.dwRefresh = async () => {
+      const out = document.getElementById('dw-action-result');
+      if (out) out.textContent = '새로고침 중…';
+      try {
+        const res = await api('/admin/dw/dashboard/refresh', { method: 'POST' });
+        if (out) out.textContent = '캐시 ' + ((res && res.cleared) || 0) + '건 비움';
+      } catch (e) {
+        if (out) out.textContent = '새로고침 실패: ' + e.message;
+      }
+      renderDWDashboard();
+    };
     window.dwExportCSV = async () => {
       const win = sessionStorage.getItem('dwWindow') || '30d';
       const dim = sessionStorage.getItem('dwDim') || 'model';

@@ -31,7 +31,7 @@ import (
 )
 
 // AppVersion is the gateway build version, surfaced in /auth/me and the admin UI.
-const AppVersion = "v0.37.0"
+const AppVersion = "v0.38.0"
 
 type Server struct {
 	cfg          config.Config
@@ -67,6 +67,7 @@ type Server struct {
 	limitsRuntime  atomic.Pointer[config.LimitsConfig]    // admin-settings overlay over cfg.Limits
 	chFactQueue   chan store.LogRecord                   // async per-request fact ingest queue (bounded)
 	chFactDropped atomic.Int64                           // requests dropped when the fact queue was full
+	dwCache       *dwQueryCache                          // short-TTL cache for DW dashboard ClickHouse reads
 	sessions     *sessionInferer
 	sessionGCAt  atomic.Int64
 	extSeen      sync.Map // external key id -> struct{}; dedupes lazy registration
@@ -105,6 +106,7 @@ func NewServer(cfg config.Config, db *store.SQLStore, logger *store.AsyncLogger,
 		secrets:   secrets,
 		retention: retention,
 		sessions:  newSessionInferer(cfg.Session.IdleTimeout),
+		dwCache:   newDWQueryCache(0),
 	}
 
 	// Build the runtime config snapshot (env defaults overlaid with admin settings)
@@ -235,6 +237,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/admin/dw/dashboard/routing", s.handleDWDashboardRouting)
 	mux.HandleFunc("/admin/dw/dashboard/latency", s.handleDWDashboardLatency)
 	mux.HandleFunc("/admin/dw/dashboard/quality", s.handleDWDashboardQuality)
+	mux.HandleFunc("/admin/dw/dashboard/refresh", s.handleDWDashboardRefresh)
 	mux.HandleFunc("/admin/dw/dashboard/export.csv", s.handleDWDashboardExportCSV)
 	mux.HandleFunc("/admin/dw/clickhouse", s.handleClickHouseSink)
 	mux.HandleFunc("/admin/dw/clickhouse/bootstrap", s.handleClickHouseBootstrap)

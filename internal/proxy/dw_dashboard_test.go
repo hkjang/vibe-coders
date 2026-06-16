@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"vibe-coders/internal/config"
@@ -356,6 +357,49 @@ func TestDWDashboardExportCSV(t *testing.T) {
 	text := string(body[3:])
 	if !strings.Contains(text, "model,requests,tokens,cost_krw,errors") || !strings.Contains(text, "gpt-4o,80,4000,900.00,1") {
 		t.Fatalf("csv content wrong: %q", text)
+	}
+}
+
+func TestDWDashboardCacheAndRefresh(t *testing.T) {
+	var hits int32
+	ch := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[{"requests":"10","tokens":"100","cost_krw":5,"errors":"0"}]}`))
+	}))
+	defer ch.Close()
+	srv := newDWTestServer(t, ch.URL)
+
+	get := func() {
+		resp, err := http.Get(srv.URL + "/admin/dw/dashboard/overview?window=7d")
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+	}
+	// Two identical reads → ClickHouse hit once (second served from cache).
+	get()
+	get()
+	if got := atomic.LoadInt32(&hits); got != 1 {
+		t.Fatalf("expected 1 ClickHouse hit with cache, got %d", got)
+	}
+	// Refresh clears the cache → next read hits ClickHouse again.
+	resp, err := http.Post(srv.URL+"/admin/dw/dashboard/refresh", "application/json", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rr struct {
+		Status  string `json:"status"`
+		Cleared int    `json:"cleared"`
+	}
+	json.NewDecoder(resp.Body).Decode(&rr)
+	resp.Body.Close()
+	if rr.Status != "refreshed" || rr.Cleared < 1 {
+		t.Fatalf("refresh wrong: %+v", rr)
+	}
+	get()
+	if got := atomic.LoadInt32(&hits); got != 2 {
+		t.Fatalf("expected 2 ClickHouse hits after refresh, got %d", got)
 	}
 }
 
