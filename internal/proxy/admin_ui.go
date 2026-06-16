@@ -5361,7 +5361,7 @@ const adminHTML = `<!doctype html>
       const dim = sessionStorage.getItem('dwDim') || 'model';
       const order = sessionStorage.getItem('dwOrder') || 'cost';
       const qs = '?window=' + encodeURIComponent(win);
-      const [ov, ts, dims, health, t2s, cons, rout, lat, qual, sav, mig] = await Promise.all([
+      const [ov, ts, dims, health, t2s, cons, rout, lat, qual, sav, mig, miners] = await Promise.all([
         api('/admin/dw/dashboard/overview' + qs).catch(e => ({ _err: e.message })),
         api('/admin/dw/dashboard/timeseries' + qs).catch(() => ({ points: [] })),
         api('/admin/dw/dashboard/dimensions' + qs + '&dimension=' + encodeURIComponent(dim) + '&order_by=' + encodeURIComponent(order) + '&limit=10').catch(() => ({ rows: [] })),
@@ -5373,6 +5373,7 @@ const adminHTML = `<!doctype html>
         api('/admin/dw/dashboard/quality' + qs).catch(() => null),
         api('/admin/savings' + qs + '&dimension=' + encodeURIComponent(dim === 'all' ? 'project' : dim)).catch(() => null),
         api('/admin/model-migration' + qs).catch(() => null),
+        api('/admin/text2sql/miners' + qs).catch(() => null),
       ]);
 
       if (ov && ov.configured === false) {
@@ -5574,6 +5575,30 @@ const adminHTML = `<!doctype html>
               '<td data-num="' + (df.cost_krw || 0) + '">' + fmt(Math.round(df.cost_krw || 0)) + '</td></tr>';
           }).join('') + '</tbody></table>' +
           '<div class="muted" style="margin-top:8px;font-size:11px">불일치 시 <a href="#/clickhouse">ClickHouse 탭</a>에서 재적재·테이블 점검(table-info)을 수행하세요.</div>' +
+          '</div></section>';
+      }
+
+      // 데이터 상품 후보 — Text2SQL 반복 질의 패턴을 정형 리포트·데이터 상품 후보로 표면화.
+      // 원문 SQL은 노출하지 않고, 추천 상품 유형·반복 횟수·요약만 표시한다.
+      const reportCands = (miners && miners.report_candidates) || [];
+      if (reportCands.length) {
+        const typeLabel = { dashboard: '대시보드', data_mart: '데이터마트', api: 'API' };
+        const byType = { dashboard: 0, data_mart: 0, api: 0 };
+        reportCands.forEach(c => { if (byType[c.recommended_product] !== undefined) byType[c.recommended_product] += 1; });
+        const pcard = (label, val) => '<div style="flex:1;min-width:130px;border:1px solid var(--border,#333);border-radius:8px;padding:10px"><div class="muted" style="font-size:12px">' + label + '</div><div style="font-size:18px;font-weight:600">' + val + '</div></div>';
+        const clip = s => { s = String(s || ''); return s.length > 60 ? s.slice(0, 60) + '…' : s; };
+        html += '<section><h2>데이터 상품 후보 <span class="muted" style="font-size:12px">(Text2SQL 반복 질의)</span></h2><div class="card-body">' +
+          '<p class="muted" style="margin-top:0">반복되는 자연어 질의를 정형 리포트·데이터 상품 후보로 분류합니다. 원문 SQL은 노출하지 않으며, 승격·상세는 Text2SQL 탭에서 수행하세요.</p>' +
+          '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:8px">' +
+            pcard('후보 수', fmt(reportCands.length) + '건') +
+            pcard('대시보드형', fmt(byType.dashboard) + '건') +
+            pcard('데이터마트형', fmt(byType.data_mart) + '건') +
+            pcard('API형', fmt(byType.api) + '건') +
+          '</div>' +
+          '<table><thead><tr><th>질의(요약)</th><th>반복</th><th>추천 상품</th><th>마지막 발생</th></tr></thead><tbody>' +
+          reportCands.slice(0, 15).map(c => '<tr><td>' + escapeHTML(clip(c.question)) + '</td><td data-num="' + c.count + '">' + fmt(Math.round(c.count || 0)) + '</td><td><span class="status">' + escapeHTML(typeLabel[c.recommended_product] || c.recommended_product || '') + '</span></td><td>' + escapeHTML(String(c.last_seen || '').slice(0, 10)) + '</td></tr>').join('') +
+          '</tbody></table>' +
+          '<div class="muted" style="margin-top:8px;font-size:11px">정형 리포트 승격·골든 쿼리 등록은 <a href="#/text2sql">Text2SQL 탭</a>에서 수행하세요.</div>' +
           '</div></section>';
       }
 
