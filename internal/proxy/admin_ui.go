@@ -246,6 +246,7 @@ const adminHTML = `<!doctype html>
       <a href="#/text2sql" data-tab="text2sql">Text2SQL</a>
       <a href="#/skills" data-tab="skills">Skills</a>
       <a href="#/modeldeprecations" data-tab="modeldeprecations">모델 일몰</a>
+      <a href="#/dwdashboard" data-tab="dwdashboard">DW 대시보드</a>
       <a href="#/clickhouse" data-tab="clickhouse">ClickHouse</a>
       <a href="#/runtimesettings" data-tab="runtimesettings">런타임 설정</a>
       <a href="#/settings" data-tab="settings">설정</a>
@@ -737,6 +738,7 @@ const adminHTML = `<!doctype html>
           case 'modeldeprecations': await renderModelDeprecations(); break;
           case 'personalization': rest.length ? await renderPersonalProfileDetail(decodeURIComponent(rest.join('/'))) : await renderPersonalization(); break;
           case 'mykeys':    await renderMyKeys(); break;
+          case 'dwdashboard': await renderDWDashboard(); break;
           case 'clickhouse': await renderClickHouse(); break;
           case 'runtimesettings': await renderRuntimeSettings(); break;
           case 'settings':  await renderSettings(); break;
@@ -5353,6 +5355,69 @@ const adminHTML = `<!doctype html>
         '</div>';
       sec.scrollIntoView({ behavior: 'smooth' });
     };
+    async function renderDWDashboard() {
+      const view = document.getElementById('view');
+      const win = sessionStorage.getItem('dwWindow') || '30d';
+      const dim = sessionStorage.getItem('dwDim') || 'model';
+      const order = sessionStorage.getItem('dwOrder') || 'cost';
+      const qs = '?window=' + encodeURIComponent(win);
+      const [ov, ts, dims] = await Promise.all([
+        api('/admin/dw/dashboard/overview' + qs).catch(e => ({ _err: e.message })),
+        api('/admin/dw/dashboard/timeseries' + qs).catch(() => ({ points: [] })),
+        api('/admin/dw/dashboard/dimensions' + qs + '&dimension=' + encodeURIComponent(dim) + '&order_by=' + encodeURIComponent(order) + '&limit=10').catch(() => ({ rows: [] })),
+      ]);
+
+      if (ov && ov.configured === false) {
+        view.innerHTML = card('DW 대시보드', '<div class="card-body"><div class="empty">ClickHouse DW가 설정되지 않았습니다. <a href="#/clickhouse">ClickHouse</a> 탭에서 연결·테이블 생성·적재를 먼저 구성하세요.</div></div>');
+        return;
+      }
+      if (ov && ov._err) {
+        view.innerHTML = card('DW 대시보드', '<div class="card-body"><div class="error-line">DW 조회 실패: ' + escapeHTML(ov._err) + '</div></div>');
+        return;
+      }
+
+      const winSel = ['1d', '7d', '30d', '90d'].map(o => '<option value="' + o + '"' + (o === win ? ' selected' : '') + '>' + o + '</option>').join('');
+      let html = '<div class="card-body"><p class="muted">ClickHouse 일별 rollup 기준 장기 추세·비용 분석. 모델/팀/비용센터 단위로 요청·토큰·비용·오류를 집계합니다. 요청 단위 실시간 상세는 <a href="#/requests">호출 이력</a>을 사용하세요.</p>' +
+        '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
+          '<label class="muted">기간 <select onchange="dwSet(\'dwWindow\', this.value)">' + winSel + '</select></label>' +
+          '<span class="muted">since ' + escapeHTML(ov.since || '') + '</span>' +
+        '</div></div>';
+
+      const card1 = (label, val, sub) => '<div style="flex:1;min-width:150px;border:1px solid var(--border,#333);border-radius:8px;padding:10px"><div class="muted" style="font-size:12px">' + label + '</div><div style="font-size:20px;font-weight:600">' + val + '</div>' + (sub ? '<div class="muted" style="font-size:11px">' + sub + '</div>' : '') + '</div>';
+      html += '<section><h2>KPI <span class="muted" style="font-size:12px">(' + escapeHTML(win) + ')</span></h2><div class="card-body"><div style="display:flex;gap:10px;flex-wrap:wrap">' +
+        card1('요청 수', fmt(Math.round(ov.requests || 0))) +
+        card1('총 토큰', fmt(Math.round(ov.tokens || 0))) +
+        card1('총 비용(₩)', fmt(Math.round(ov.cost_krw || 0))) +
+        card1('오류율', ((ov.error_rate || 0) * 100).toFixed(2) + '%') +
+        card1('요청당 비용(₩)', (ov.cost_per_request_krw || 0).toFixed(2)) +
+        card1('1K토큰당(₩)', (ov.cost_per_1k_tokens_krw || 0).toFixed(2)) +
+        '</div></div></section>';
+
+      // Daily series — simple inline bars (cost).
+      const pts = (ts && ts.points) || [];
+      if (pts.length) {
+        const maxCost = Math.max.apply(null, pts.map(p => p.cost_krw || 0).concat([1]));
+        html += '<section><h2>일별 비용 추이</h2><div class="card-body"><table><thead><tr><th>일자</th><th>요청</th><th>토큰</th><th>비용(₩)</th><th style="width:40%"></th></tr></thead><tbody>' +
+          pts.map(p => '<tr><td>' + escapeHTML(p.day) + '</td><td data-num="' + p.requests + '">' + fmt(Math.round(p.requests)) + '</td><td data-num="' + p.tokens + '">' + fmt(Math.round(p.tokens)) + '</td><td data-num="' + p.cost_krw + '">' + fmt(Math.round(p.cost_krw)) + '</td>' +
+            '<td><div class="progress"><span style="width:' + Math.round((p.cost_krw || 0) / maxCost * 100) + '%"></span></div></td></tr>').join('') +
+          '</tbody></table></div></section>';
+      }
+
+      // Top-N by dimension.
+      const dimSel = ['model', 'provider', 'project', 'cost_center'].map(o => '<option value="' + o + '"' + (o === dim ? ' selected' : '') + '>' + o + '</option>').join('');
+      const ordSel = ['cost', 'requests', 'tokens', 'errors'].map(o => '<option value="' + o + '"' + (o === order ? ' selected' : '') + '>' + o + '</option>').join('');
+      const drows = (dims && dims.rows) || [];
+      html += '<section><h2>Top N</h2><div class="card-body">' +
+        '<div style="display:flex;gap:8px;margin-bottom:8px"><label class="muted">차원 <select onchange="dwSet(\'dwDim\', this.value)">' + dimSel + '</select></label>' +
+        '<label class="muted">정렬 <select onchange="dwSet(\'dwOrder\', this.value)">' + ordSel + '</select></label></div>' +
+        (drows.length ? '<table><thead><tr><th>' + escapeHTML(dim) + '</th><th>요청</th><th>토큰</th><th>비용(₩)</th><th>오류율</th></tr></thead><tbody>' +
+          drows.map(rw => '<tr><td>' + escapeHTML(String(rw.value)) + '</td><td data-num="' + rw.requests + '">' + fmt(Math.round(rw.requests)) + '</td><td data-num="' + rw.tokens + '">' + fmt(Math.round(rw.tokens)) + '</td><td data-num="' + rw.cost_krw + '">' + fmt(Math.round(rw.cost_krw)) + '</td><td>' + ((rw.error_rate || 0) * 100).toFixed(1) + '%</td></tr>').join('') +
+          '</tbody></table>' : '<div class="empty">데이터 없음</div>') +
+        '</div></section>';
+
+      view.innerHTML = card('DW 대시보드', html);
+    }
+    window.dwSet = (key, val) => { sessionStorage.setItem(key, val); renderDWDashboard(); };
     async function renderClickHouse() {
       const view = document.getElementById('view');
       const d = await api('/admin/dw/clickhouse/overview').catch(e => ({ configured: false, _err: e.message }));
