@@ -47,6 +47,39 @@ func TestClampMaxOutputTokens(t *testing.T) {
 	}
 }
 
+func TestLimitsMaxRequestBytes(t *testing.T) {
+	db := openTestStore(t)
+	defer db.Close()
+	logger := store.NewAsyncLogger(db, 8, filepath.Join(t.TempDir(), "lb.ndjson"))
+	logger.Start()
+	defer logger.Stop(context.Background())
+	server, err := NewServer(testConfig("http://upstream.invalid", "secret"), db, logger, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server.limitsRuntime.Store(&config.LimitsConfig{MaxRequestBytes: 200})
+	srv := httptest.NewServer(server.Routes())
+	defer srv.Close()
+
+	big := make([]map[string]string, 0)
+	for i := 0; i < 50; i++ {
+		big = append(big, map[string]string{"role": "user", "content": "this is a fairly long message used to exceed the byte limit"})
+	}
+	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/v1/chat/completions", jsonReader(map[string]any{"model": "gpt-4o", "messages": big}))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusRequestEntityTooLarge {
+		t.Fatalf("oversized request = %d, want 413", resp.StatusCode)
+	}
+	if resp.Header.Get("X-Request-Bytes") == "" {
+		t.Fatal("expected X-Request-Bytes header")
+	}
+}
+
 func TestLimitsStepForwardsClamped(t *testing.T) {
 	var seenMax float64 = -42
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

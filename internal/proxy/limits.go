@@ -59,11 +59,22 @@ func (rc *requestPipeline) stepLimits() bool {
 	if r.Method != http.MethodPost {
 		return true
 	}
-	cap := s.limitsConf().MaxOutputTokens
-	if cap <= 0 {
+	lim := s.limitsConf()
+
+	// Input guard: reject oversized request bodies before any upstream work.
+	if lim.MaxRequestBytes > 0 && len(rc.body) > lim.MaxRequestBytes {
+		w.Header().Set("X-Request-Bytes", strconv.Itoa(len(rc.body)))
+		writeOpenAIError(w, http.StatusRequestEntityTooLarge,
+			"request body exceeds the configured limit ("+strconv.Itoa(len(rc.body))+" > "+strconv.Itoa(lim.MaxRequestBytes)+" bytes)",
+			"invalid_request_error", "payload_too_large")
+		return false
+	}
+
+	maxOut := lim.MaxOutputTokens
+	if maxOut <= 0 {
 		return true
 	}
-	newBody, from, to, changed := clampMaxOutputTokens(rc.body, cap)
+	newBody, from, to, changed := clampMaxOutputTokens(rc.body, maxOut)
 	if !changed {
 		return true
 	}

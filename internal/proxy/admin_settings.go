@@ -186,6 +186,7 @@ func buildSettingRegistry() []settingDef {
 
 		// ---- Limits (request guardrails) ----
 		{Key: "limits.max_output_tokens", Category: "limits", Type: stInt, validate: posInt, envValue: func(c config.Config) string { return strconv.Itoa(c.Limits.MaxOutputTokens) }},
+		{Key: "limits.max_request_bytes", Category: "limits", Type: stInt, validate: posInt, envValue: func(c config.Config) string { return strconv.Itoa(c.Limits.MaxRequestBytes) }},
 	}
 }
 
@@ -281,6 +282,7 @@ var settingDescriptions = map[string]string{
 	"skills.enforcement": "Skill 정책(allowed_models/allowed_tools) 적용 모드. off=비활성, warn=위반 시 헤더 경고만(기본), enforce=위반 시 요청 차단(403). 요청은 X-Vibe-Skill 헤더로 Skill을 지정해야 검사됨.",
 	// Limits
 	"limits.max_output_tokens": "응답 최대 출력 토큰 상한(0=비활성). >0이면 chat 요청의 max_tokens/max_completion_tokens를 이 값으로 클램프(없으면 주입). 런어웨이 생성·비용 폭주 가드.",
+	"limits.max_request_bytes": "chat 요청 본문 최대 바이트(0=비활성). 초과 시 413 payload_too_large로 거부. 비정상적으로 큰 프롬프트·남용 차단.",
 }
 
 // t2sConf returns the effective Text2SQL config (admin-settings overlay over env/default).
@@ -578,6 +580,8 @@ func applyRuntimeSetting(t2s *config.Text2SQLConfig, ch *config.ClickHouseConfig
 		skills.Enforcement = strings.ToLower(val)
 	case "limits.max_output_tokens":
 		limits.MaxOutputTokens = atoi()
+	case "limits.max_request_bytes":
+		limits.MaxRequestBytes = atoi()
 	}
 }
 
