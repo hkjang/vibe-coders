@@ -102,6 +102,8 @@ func clickhouseText2SQLFactSink(ctx context.Context, client *http.Client, cfg co
 			"latency_ms":       l.LatencyMS,
 			"failure_category": l.FailureCategory,
 			"question_chars":   len([]rune(l.Question)),
+			"reject_reason":    l.RejectReason,
+			"sql_hash":         text2sqlSQLHash(l.GeneratedSQL),
 		})
 		if err != nil {
 			return 0, err

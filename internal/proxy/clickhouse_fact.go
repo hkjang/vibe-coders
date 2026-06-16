@@ -406,6 +406,15 @@ func (s *Server) handleClickHouseFactRetry(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, map[string]any{"recovered_batches": recovered, "rows": rows, "still_failing": failed})
 }
 
+// text2sqlSQLHash returns a stable hash of generated SQL (the raw SQL is never shipped to
+// the DW). Empty SQL → empty hash.
+func text2sqlSQLHash(sql string) string {
+	if strings.TrimSpace(sql) == "" {
+		return ""
+	}
+	return audit.HashText(sql)[:16]
+}
+
 // errorCategory buckets a request outcome for fast filtering.
 func errorCategory(status int, errMsg string) string {
 	switch {

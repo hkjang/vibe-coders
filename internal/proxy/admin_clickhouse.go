@@ -102,7 +102,9 @@ func factTableDDL(ref string) string {
 		"summary_cost Float64, " +
 		"latency_ms Int64, " +
 		"failure_category LowCardinality(String), " +
-		"question_chars UInt32" +
+		"question_chars UInt32, " +
+		"reject_reason LowCardinality(String), " +
+		"sql_hash String" +
 		") ENGINE = MergeTree ORDER BY (ts, request_id)"
 }
 

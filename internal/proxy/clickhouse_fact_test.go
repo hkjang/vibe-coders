@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"vibe-coders/internal/config"
 	"vibe-coders/internal/store"
 )
 
@@ -147,6 +148,40 @@ func TestClickHouseFactFanout(t *testing.T) {
 	}
 	if !strings.Contains(byTable["ai_eval_fact"], `"name":"injection"`) {
 		t.Errorf("eval fact wrong: %s", byTable["ai_eval_fact"])
+	}
+}
+
+func TestClickHouseText2SQLFactExpanded(t *testing.T) {
+	var mu sync.Mutex
+	var body string
+	ch := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Query().Get("query"), "INSERT INTO") {
+			b, _ := io.ReadAll(r.Body)
+			mu.Lock()
+			body = string(b)
+			mu.Unlock()
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ch.Close()
+
+	cfg := config.ClickHouseConfig{URL: ch.URL, Database: "ai_gateway", Text2SQLFactTable: "ai_text2sql_fact"}
+	logs := []store.Text2SQLQueryLog{{
+		RequestID: "t2s1", Team: "platform", VirtualModel: "vibe/text2sql-preview", Mode: "preview",
+		Question: "지난달 매출", GeneratedSQL: "SELECT sum(amount) FROM orders", Valid: false,
+		RejectReason: "missing_date_filter", FailureCategory: "validation", CreatedAt: time.Now().UTC(),
+	}}
+	n, err := clickhouseText2SQLFactSink(context.Background(), http.DefaultClient, cfg, logs)
+	if err != nil || n != 1 {
+		t.Fatalf("fact sink = %d, %v", n, err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if !strings.Contains(body, `"reject_reason":"missing_date_filter"`) {
+		t.Errorf("expected reject_reason in fact: %s", body)
+	}
+	if !strings.Contains(body, `"sql_hash":`) || strings.Contains(body, "SELECT sum(amount)") {
+		t.Errorf("expected sql_hash and no raw SQL: %s", body)
 	}
 }
 
