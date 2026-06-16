@@ -5081,6 +5081,25 @@ const adminHTML = `<!doctype html>
           : '<div class="empty">아직 적재 이력이 없습니다. [지금 적재]를 누르거나 자동 적재를 켜세요.</div>') +
         '</div></section>';
 
+      // Fact 적재 상태 (ClickHouse row counts + queue lag).
+      const lag = await api('/admin/dw/clickhouse/lag').catch(() => null);
+      if (lag && lag.tables) {
+        html += '<section><h2>Fact 적재 상태</h2><div class="card-body">' +
+          '<div class="kv">' +
+            row('큐 깊이', (lag.queue_depth || 0) + ' / ' + (lag.queue_cap || 0) + (lag.dropped ? (' · 드롭 ' + fmt(lag.dropped)) : '')) +
+            (lag.request_fact_rows != null ? row('request_fact 적재', fmt(lag.request_fact_rows) + ' 행' + (lag.request_fact_lag > 0 ? (' · 로컬 대비 lag ' + fmt(lag.request_fact_lag)) : ' · 동기화됨')) : '') +
+            row('로컬 요청 수', fmt(lag.local_requests || 0)) +
+            (lag.retry_batches ? row('재처리 배치', fmt(lag.retry_batches)) : '') +
+          '</div>' +
+          '<table style="margin-top:10px"><thead><tr><th>테이블</th><th>이름</th><th>행수</th><th>최근 이벤트</th></tr></thead><tbody>' +
+          lag.tables.map(t => '<tr><td><code>' + escapeHTML(t.key) + '</code></td><td>' + escapeHTML(t.table) + '</td>' +
+            '<td data-num="' + (t.rows || 0) + '">' + (t.exists ? fmt(t.rows || 0) : '<span class="status warn">없음</span>') + '</td>' +
+            '<td>' + (t.exists ? '<button class="secondary" type="button" onclick="chViewEvents(\'' + escapeAttr(t.table) + '\')">최근 보기</button>' : '') + '</td></tr>').join('') +
+          '</tbody></table>' +
+          '<pre id="ch-events" class="muted" style="display:none;white-space:pre-wrap;font-size:11px;max-height:280px;overflow:auto;margin-top:10px"></pre>' +
+          '</div></section>';
+      }
+
       const rq = d.retries || [];
       html += '<section><h2>재처리 대기열 ' + (rq.length ? '(' + rq.length + ')' : '') + '</h2><div class="card-body">' +
         (rq.length ? '<table><thead><tr><th>dimension</th><th>since</th><th>마지막 오류</th><th>시도</th></tr></thead><tbody>' +
@@ -5121,6 +5140,19 @@ const adminHTML = `<!doctype html>
       }
       if (kind === 'bootstrap' || kind === 'sink' || kind === 'retry') {
         setTimeout(renderClickHouse, 600);
+      }
+    };
+    window.chViewEvents = async (table) => {
+      const pre = document.getElementById('ch-events');
+      if (!pre) return;
+      pre.style.display = 'block';
+      pre.textContent = table + ' 최근 행 불러오는 중…';
+      try {
+        const r = await api('/admin/dw/clickhouse/events?table=' + encodeURIComponent(table) + '&limit=20');
+        const rows = r.data || r.raw || r;
+        pre.textContent = table + '\n' + JSON.stringify(rows, null, 2);
+      } catch (e) {
+        pre.textContent = '조회 실패: ' + e.message;
       }
     };
 

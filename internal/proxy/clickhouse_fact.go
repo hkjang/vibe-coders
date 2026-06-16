@@ -415,6 +415,132 @@ func text2sqlSQLHash(sql string) string {
 	return audit.HashText(sql)[:16]
 }
 
+// configuredFactTables lists the (key,table) pairs that are currently enabled, including
+// the daily rollup, so status/lag views can iterate them uniformly.
+func configuredFactTables(ch config.ClickHouseConfig) []struct{ Key, Table string } {
+	all := []struct{ Key, Table string }{
+		{"rollup", ch.Table},
+		{"request_fact", ch.RequestFactTable},
+		{"tool_fact", ch.ToolFactTable},
+		{"routing_fact", ch.RoutingFactTable},
+		{"eval_fact", ch.EvalFactTable},
+		{"text2sql_fact", ch.Text2SQLFactTable},
+	}
+	out := all[:0]
+	for _, t := range all {
+		if strings.TrimSpace(t.Table) != "" {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+// handleClickHouseLag reports adoption/lag for the DW: per-table ClickHouse row counts, the
+// local request-log count, the derived request-fact lag, and the live queue/retry backlog.
+// GET /admin/dw/clickhouse/lag
+func (s *Server) handleClickHouseLag(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	cfg := s.chConf()
+	if cfg.URL == "" {
+		writeOpenAIError(w, http.StatusBadRequest, "ClickHouse is not configured", "invalid_request_error", "no_clickhouse")
+		return
+	}
+	tables := []map[string]any{}
+	reqFactCount := int64(-1)
+	for _, t := range configuredFactTables(cfg) {
+		ref := t.Table
+		if cfg.Database != "" && !strings.Contains(ref, ".") {
+			ref = cfg.Database + "." + ref
+		}
+		entry := map[string]any{"key": t.Key, "table": t.Table}
+		if body, code, err := s.clickhouseQuery(r.Context(), cfg, "SELECT count() FROM "+ref+" FORMAT TabSeparated"); err == nil && code == http.StatusOK {
+			c := parseInt64(strings.TrimSpace(body))
+			entry["rows"] = c
+			entry["exists"] = true
+			if t.Key == "request_fact" {
+				reqFactCount = c
+			}
+		} else {
+			entry["exists"] = false
+		}
+		tables = append(tables, entry)
+	}
+	localRequests := int64(0)
+	if reqs, _, _, err := s.db.Counts(r.Context()); err == nil {
+		localRequests = reqs
+	}
+	out := map[string]any{
+		"tables":         tables,
+		"local_requests": localRequests,
+		"queue_depth":    len(s.chFactQueue),
+		"queue_cap":      cap(s.chFactQueue),
+		"dropped":        s.chFactDropped.Load(),
+	}
+	if reqFactCount >= 0 {
+		out["request_fact_rows"] = reqFactCount
+		out["request_fact_lag"] = localRequests - reqFactCount // local minus shipped (approx)
+	}
+	if n, err := s.db.CountClickHouseFactRetries(r.Context()); err == nil {
+		out["retry_batches"] = n
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// handleClickHouseEvents returns recent rows from a configured fact table (read-only
+// passthrough) for spot-checking what landed. table must be one of the configured sinks.
+// GET /admin/dw/clickhouse/events?table=ai_request_fact&limit=20
+func (s *Server) handleClickHouseEvents(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	cfg := s.chConf()
+	if cfg.URL == "" {
+		writeOpenAIError(w, http.StatusBadRequest, "ClickHouse is not configured", "invalid_request_error", "no_clickhouse")
+		return
+	}
+	table := strings.TrimSpace(r.URL.Query().Get("table"))
+	allowed := false
+	for _, t := range configuredFactTables(cfg) {
+		if t.Table == table {
+			allowed = true
+			break
+		}
+	}
+	if !allowed {
+		writeOpenAIError(w, http.StatusBadRequest, "table must be one of the configured fact/rollup tables", "invalid_request_error", "bad_table")
+		return
+	}
+	limit := intQuery(r, "limit", 20)
+	if limit <= 0 || limit > 200 {
+		limit = 20
+	}
+	ref := table
+	if cfg.Database != "" && !strings.Contains(ref, ".") {
+		ref = cfg.Database + "." + ref
+	}
+	q := fmt.Sprintf("SELECT * FROM %s LIMIT %d FORMAT JSON", ref, limit)
+	body, code, err := s.clickhouseQuery(r.Context(), cfg, q)
+	if err != nil {
+		writeOpenAIError(w, http.StatusBadGateway, "clickhouse query failed: "+err.Error(), "server_error", "clickhouse_failed")
+		return
+	}
+	if code != http.StatusOK {
+		writeOpenAIError(w, http.StatusBadGateway, fmt.Sprintf("clickhouse status %d", code), "server_error", "clickhouse_failed")
+		return
+	}
+	var parsed map[string]any
+	if err := json.Unmarshal([]byte(body), &parsed); err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"table": table, "raw": body})
+		return
+	}
+	parsed["table"] = table
+	writeJSON(w, http.StatusOK, parsed)
+}
+
 // errorCategory buckets a request outcome for fast filtering.
 func errorCategory(status int, errMsg string) string {
 	switch {

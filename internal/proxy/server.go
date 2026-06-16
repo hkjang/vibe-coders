@@ -31,7 +31,7 @@ import (
 )
 
 // AppVersion is the gateway build version, surfaced in /auth/me and the admin UI.
-const AppVersion = "v0.10.2"
+const AppVersion = "v0.10.3"
 
 type Server struct {
 	cfg          config.Config
@@ -216,6 +216,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/admin/dw/clickhouse/bootstrap", s.handleClickHouseBootstrap)
 	mux.HandleFunc("/admin/dw/clickhouse/overview", s.handleClickHouseOverview)
 	mux.HandleFunc("/admin/dw/clickhouse/fact-retry", s.handleClickHouseFactRetry)
+	mux.HandleFunc("/admin/dw/clickhouse/lag", s.handleClickHouseLag)
+	mux.HandleFunc("/admin/dw/clickhouse/events", s.handleClickHouseEvents)
 	mux.HandleFunc("/admin/dw/consistency", s.handleClickHouseConsistency)
 	mux.HandleFunc("/admin/dw/sink-status", s.handleClickHouseSinkStatus)
 	mux.HandleFunc("/admin/dw/sink-retry", s.handleClickHouseSinkRetry)

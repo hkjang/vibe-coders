@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -183,6 +184,64 @@ func TestClickHouseText2SQLFactExpanded(t *testing.T) {
 	if !strings.Contains(body, `"sql_hash":`) || strings.Contains(body, "SELECT sum(amount)") {
 		t.Errorf("expected sql_hash and no raw SQL: %s", body)
 	}
+}
+
+func TestClickHouseLagAndEvents(t *testing.T) {
+	ch := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query().Get("query")
+		switch {
+		case strings.Contains(q, "count()"):
+			_, _ = w.Write([]byte("5\n"))
+		case strings.Contains(q, "FORMAT JSON"):
+			_, _ = w.Write([]byte(`{"data":[{"request_id":"x"}],"rows":1}`))
+		default:
+			_, _ = w.Write([]byte("1\n"))
+		}
+	}))
+	defer ch.Close()
+
+	db := openTestStore(t)
+	defer db.Close()
+	logger := store.NewAsyncLogger(db, 8, filepath.Join(t.TempDir(), "f.ndjson"))
+	logger.Start()
+	defer logger.Stop(context.Background())
+
+	cfg := testConfig("http://upstream.invalid", "secret")
+	cfg.ClickHouse.URL = ch.URL
+	cfg.ClickHouse.Table = "analytics_daily"
+	cfg.ClickHouse.RequestFactTable = "ai_request_fact"
+	server, err := NewServer(cfg, db, logger, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(server.Routes())
+	defer srv.Close()
+
+	lr, _ := http.Get(srv.URL + "/admin/dw/clickhouse/lag")
+	var lag map[string]any
+	json.NewDecoder(lr.Body).Decode(&lag)
+	lr.Body.Close()
+	if lag["request_fact_rows"] != float64(5) {
+		t.Fatalf("expected request_fact_rows=5, got %v", lag["request_fact_rows"])
+	}
+	if tbls, _ := lag["tables"].([]any); len(tbls) < 2 {
+		t.Fatalf("expected rollup + request_fact in tables, got %v", lag["tables"])
+	}
+
+	ev, _ := http.Get(srv.URL + "/admin/dw/clickhouse/events?table=ai_request_fact&limit=10")
+	var events map[string]any
+	json.NewDecoder(ev.Body).Decode(&events)
+	ev.Body.Close()
+	if _, ok := events["data"]; !ok {
+		t.Fatalf("expected events data, got %v", events)
+	}
+
+	// A non-configured table is rejected.
+	bad, _ := http.Get(srv.URL + "/admin/dw/clickhouse/events?table=secret_table")
+	if bad.StatusCode != http.StatusBadRequest {
+		t.Fatalf("non-configured table should 400, got %d", bad.StatusCode)
+	}
+	bad.Body.Close()
 }
 
 func TestClickHouseRequestFactDisabledNoQueue(t *testing.T) {
