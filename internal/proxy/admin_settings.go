@@ -97,23 +97,29 @@ func buildSettingRegistry() []settingDef {
 		}
 		return nil
 	}
+	chIdent := func(v string) error {
+		if !validCHIdentifier(v) {
+			return fmt.Errorf("must be a valid ClickHouse identifier (letters, digits, underscore, optional db.table)")
+		}
+		return nil
+	}
 	return []settingDef{
 		// ---- ClickHouse ----
 		{Key: "clickhouse.url", Category: "clickhouse", Type: stString, Restart: true, envValue: func(c config.Config) string { return c.ClickHouse.URL }},
-		{Key: "clickhouse.database", Category: "clickhouse", Type: stString, envValue: func(c config.Config) string { return c.ClickHouse.Database }},
-		{Key: "clickhouse.table", Category: "clickhouse", Type: stString, envValue: func(c config.Config) string { return c.ClickHouse.Table }},
+		{Key: "clickhouse.database", Category: "clickhouse", Type: stString, validate: chIdent, envValue: func(c config.Config) string { return c.ClickHouse.Database }},
+		{Key: "clickhouse.table", Category: "clickhouse", Type: stString, validate: chIdent, envValue: func(c config.Config) string { return c.ClickHouse.Table }},
 		{Key: "clickhouse.user", Category: "clickhouse", Type: stString, envValue: func(c config.Config) string { return c.ClickHouse.User }},
 		{Key: "clickhouse.password", Category: "clickhouse", Type: stString, Secret: true, envValue: func(c config.Config) string { return c.ClickHouse.Password }},
 		{Key: "clickhouse.sink_interval", Category: "clickhouse", Type: stDuration, Restart: true, validate: dur, envValue: func(c config.Config) string { return c.ClickHouse.SinkInterval.String() }},
 		{Key: "clickhouse.sink_days", Category: "clickhouse", Type: stInt, validate: posInt, envValue: func(c config.Config) string { return strconv.Itoa(c.ClickHouse.SinkDays) }},
-		{Key: "clickhouse.text2sql_fact_table", Category: "clickhouse", Type: stString, envValue: func(c config.Config) string { return c.ClickHouse.Text2SQLFactTable }},
-		{Key: "clickhouse.request_fact_table", Category: "clickhouse", Type: stString, envValue: func(c config.Config) string { return c.ClickHouse.RequestFactTable }},
-		{Key: "clickhouse.tool_fact_table", Category: "clickhouse", Type: stString, envValue: func(c config.Config) string { return c.ClickHouse.ToolFactTable }},
-		{Key: "clickhouse.routing_fact_table", Category: "clickhouse", Type: stString, envValue: func(c config.Config) string { return c.ClickHouse.RoutingFactTable }},
-		{Key: "clickhouse.eval_fact_table", Category: "clickhouse", Type: stString, envValue: func(c config.Config) string { return c.ClickHouse.EvalFactTable }},
-		{Key: "clickhouse.feedback_fact_table", Category: "clickhouse", Type: stString, envValue: func(c config.Config) string { return c.ClickHouse.FeedbackFactTable }},
-		{Key: "clickhouse.policy_fact_table", Category: "clickhouse", Type: stString, envValue: func(c config.Config) string { return c.ClickHouse.PolicyFactTable }},
-		{Key: "clickhouse.skill_fact_table", Category: "clickhouse", Type: stString, envValue: func(c config.Config) string { return c.ClickHouse.SkillFactTable }},
+		{Key: "clickhouse.text2sql_fact_table", Category: "clickhouse", Type: stString, validate: chIdent, envValue: func(c config.Config) string { return c.ClickHouse.Text2SQLFactTable }},
+		{Key: "clickhouse.request_fact_table", Category: "clickhouse", Type: stString, validate: chIdent, envValue: func(c config.Config) string { return c.ClickHouse.RequestFactTable }},
+		{Key: "clickhouse.tool_fact_table", Category: "clickhouse", Type: stString, validate: chIdent, envValue: func(c config.Config) string { return c.ClickHouse.ToolFactTable }},
+		{Key: "clickhouse.routing_fact_table", Category: "clickhouse", Type: stString, validate: chIdent, envValue: func(c config.Config) string { return c.ClickHouse.RoutingFactTable }},
+		{Key: "clickhouse.eval_fact_table", Category: "clickhouse", Type: stString, validate: chIdent, envValue: func(c config.Config) string { return c.ClickHouse.EvalFactTable }},
+		{Key: "clickhouse.feedback_fact_table", Category: "clickhouse", Type: stString, validate: chIdent, envValue: func(c config.Config) string { return c.ClickHouse.FeedbackFactTable }},
+		{Key: "clickhouse.policy_fact_table", Category: "clickhouse", Type: stString, validate: chIdent, envValue: func(c config.Config) string { return c.ClickHouse.PolicyFactTable }},
+		{Key: "clickhouse.skill_fact_table", Category: "clickhouse", Type: stString, validate: chIdent, envValue: func(c config.Config) string { return c.ClickHouse.SkillFactTable }},
 		{Key: "clickhouse.batch_size", Category: "clickhouse", Type: stInt, validate: posInt, envValue: func(c config.Config) string { return strconv.Itoa(c.ClickHouse.BatchSize) }},
 		{Key: "clickhouse.flush_interval", Category: "clickhouse", Type: stDuration, validate: dur, envValue: func(c config.Config) string { return c.ClickHouse.FlushInterval.String() }},
 

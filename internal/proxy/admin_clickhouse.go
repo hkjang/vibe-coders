@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -19,6 +20,23 @@ func chTableRef(database, name string) string {
 		return database + "." + name
 	}
 	return name
+}
+
+// chIdentRe matches a safe ClickHouse identifier: a database/table name made of
+// letters, digits and underscores, optionally one dot-qualified segment (db.table).
+// Identifiers are interpolated bare into DDL (CREATE TABLE/DATABASE) where they cannot be
+// escaped as string literals, so they must be validated rather than escaped.
+var chIdentRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)?$`)
+
+// validCHIdentifier reports whether name is a safe ClickHouse identifier (empty is allowed
+// so optional fact-table settings can be cleared). Guards against SQL injection through
+// admin-set table/database names.
+func validCHIdentifier(name string) bool {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return true
+	}
+	return chIdentRe.MatchString(name)
 }
 
 // clickhouseExec sends a statement (DDL/INSERT) to ClickHouse via its HTTP interface as the
@@ -128,6 +146,21 @@ func (s *Server) handleClickHouseBootstrap(w http.ResponseWriter, r *http.Reques
 	if strings.TrimSpace(cfg.Table) == "" {
 		writeOpenAIError(w, http.StatusBadRequest, "clickhouse.table is not set", "invalid_request_error", "no_table")
 		return
+	}
+	// Defense in depth: identifiers are interpolated bare into DDL, so reject any unsafe
+	// database/table name before issuing CREATE statements (settings validation also blocks
+	// these, but env-supplied values bypass that path).
+	for label, name := range map[string]string{
+		"clickhouse.database": cfg.Database, "clickhouse.table": cfg.Table,
+		"clickhouse.text2sql_fact_table": cfg.Text2SQLFactTable, "clickhouse.request_fact_table": cfg.RequestFactTable,
+		"clickhouse.tool_fact_table": cfg.ToolFactTable, "clickhouse.routing_fact_table": cfg.RoutingFactTable,
+		"clickhouse.eval_fact_table": cfg.EvalFactTable, "clickhouse.feedback_fact_table": cfg.FeedbackFactTable,
+		"clickhouse.policy_fact_table": cfg.PolicyFactTable, "clickhouse.skill_fact_table": cfg.SkillFactTable,
+	} {
+		if !validCHIdentifier(name) {
+			writeOpenAIError(w, http.StatusBadRequest, "invalid ClickHouse identifier for "+label+": "+name, "invalid_request_error", "invalid_identifier")
+			return
+		}
 	}
 	type step struct {
 		Object string `json:"object"`
@@ -258,7 +291,7 @@ func (s *Server) handleClickHouseOverview(w http.ResponseWriter, r *http.Request
 		if db == "" {
 			db = "default"
 		}
-		q := fmt.Sprintf("SELECT engine, sorting_key FROM system.tables WHERE database='%s' AND name='%s' FORMAT TabSeparated", db, cfg.Table)
+		q := fmt.Sprintf("SELECT engine, sorting_key FROM system.tables WHERE database='%s' AND name='%s' FORMAT TabSeparated", chEscape(db), chEscape(cfg.Table))
 		rollup := map[string]any{"exists": false}
 		if line, code, err := s.clickhouseQuery(r.Context(), cfg, q); err == nil && code == http.StatusOK && line != "" {
 			fields := strings.Split(line, "\t")
