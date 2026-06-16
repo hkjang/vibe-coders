@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"vibe-coders/internal/audit"
 	"vibe-coders/internal/config"
 	"vibe-coders/internal/store"
 )
@@ -287,6 +288,9 @@ func lookupModelPrice(model string, pricing map[string]config.ModelPrice) (confi
 		if key != "" && strings.HasPrefix(normalized, key) {
 			return p, true
 		}
+	}
+	if fb, ok := pricing[audit.FallbackPriceModel]; ok {
+		return fb, true
 	}
 	return config.ModelPrice{}, false
 }

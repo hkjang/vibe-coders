@@ -59,6 +59,11 @@ func EstimateTokens(text string) int {
 	return byChars
 }
 
+// FallbackPriceModel is the model whose price is used to cost requests whose model name
+// matches no exact or prefix entry, so unknown/unlisted models are still billed at a
+// reasonable default instead of free.
+const FallbackPriceModel = "qwen-plus"
+
 func lookupPrice(model string, pricing map[string]config.ModelPrice) (config.ModelPrice, bool) {
 	normalized := strings.ToLower(strings.TrimSpace(model))
 	if normalized == "" {
@@ -72,6 +77,10 @@ func lookupPrice(model string, pricing map[string]config.ModelPrice) (config.Mod
 		if key != "" && strings.HasPrefix(normalized, key) {
 			return price, true
 		}
+	}
+	// Last resort: cost unmatched models at the fallback model's price (when present).
+	if fb, ok := pricing[FallbackPriceModel]; ok {
+		return fb, true
 	}
 	return config.ModelPrice{}, false
 }
