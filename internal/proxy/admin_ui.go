@@ -6291,8 +6291,8 @@ const adminHTML = `<!doctype html>
         '<form class="inline-form" id="t2s-conn-form" style="grid-template-columns: 120px 140px 90px minmax(200px,2fr) minmax(120px,1fr) 70px; align-items:start;">' +
           '<input id="tc-id" placeholder="ID (슬러그)" required>' +
           '<input id="tc-name" placeholder="표시 이름" required>' +
-          '<select id="tc-driver"><option value="sqlite">SQLite</option><option value="postgres">PostgreSQL</option></select>' +
-          '<input id="tc-dsn" type="password" placeholder="DSN (암호화 저장)" autocomplete="new-password">' +
+          '<select id="tc-driver" onchange="updateT2SDsnHint(this)"><option value="sqlite">SQLite</option><option value="postgres">PostgreSQL</option><option value="mysql">MySQL</option><option value="mariadb">MariaDB</option><option value="oracle">Oracle</option></select>' +
+          '<input id="tc-dsn" type="password" placeholder="파일 경로 또는 :memory:" autocomplete="new-password">' +
           '<input id="tc-desc" placeholder="설명">' +
           '<button type="submit">저장</button>' +
         '</form>';
@@ -6707,6 +6707,17 @@ const adminHTML = `<!doctype html>
       if (!confirm(vm + ' 프로필을 삭제하시겠습니까?')) return;
       await api('/admin/text2sql/profiles?virtual_model=' + encodeURIComponent(vm), { method: 'DELETE' });
       route();
+    };
+    window.updateT2SDsnHint = (sel) => {
+      const hints = {
+        sqlite: '파일 경로 또는 :memory:',
+        postgres: 'host=... user=... dbname=... password=... sslmode=disable',
+        mysql: 'user:password@tcp(host:3306)/dbname',
+        mariadb: 'user:password@tcp(host:3306)/dbname',
+        oracle: 'oracle://user:password@host:1521/service',
+      };
+      const el = document.getElementById('tc-dsn');
+      if (el) el.placeholder = hints[sel.value] || 'DSN';
     };
     async function addT2SConn(e) {
       e.preventDefault();

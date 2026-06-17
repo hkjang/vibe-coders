@@ -825,6 +825,21 @@ func renderResultTable(cols []string, rows [][]string) string {
 	return b.String()
 }
 
+// normalizeExecDriver maps user-facing driver names to the registered database/sql
+// driver name. postgres/postgresql → pgx, mariadb → mysql, empty → sqlite.
+func normalizeExecDriver(driver string) string {
+	switch strings.ToLower(strings.TrimSpace(driver)) {
+	case "postgres", "postgresql":
+		return "pgx"
+	case "mariadb":
+		return "mysql"
+	case "":
+		return "sqlite"
+	default:
+		return strings.ToLower(strings.TrimSpace(driver))
+	}
+}
+
 // execText2SQL opens (lazily) the read-only execute DB for connID, scores the plan,
 // and runs the validated query. connID "" or "default" uses the env-configured DB.
 // The returned explainRisk is recorded even when the query is allowed (risk < 50).
@@ -1002,13 +1017,7 @@ func (s *Server) text2sqlValidationDB() (*sql.DB, string, error) {
 		if db := s.t2sTwin.Load(); db != nil {
 			return db, s.t2sConf().TwinDriver, nil
 		}
-		driver := strings.ToLower(strings.TrimSpace(s.t2sConf().TwinDriver))
-		if driver == "postgres" || driver == "postgresql" {
-			driver = "pgx"
-		}
-		if driver == "" {
-			driver = "sqlite"
-		}
+		driver := normalizeExecDriver(s.t2sConf().TwinDriver)
 		db, err := sql.Open(driver, s.t2sConf().TwinDSN)
 		if err != nil {
 			return nil, "", err
@@ -1025,13 +1034,7 @@ func (s *Server) text2sqlExecDB() (*sql.DB, error) {
 	if db := s.t2sExec.Load(); db != nil {
 		return db, nil
 	}
-	driver := strings.ToLower(strings.TrimSpace(s.t2sConf().ExecDriver))
-	if driver == "postgres" || driver == "postgresql" {
-		driver = "pgx"
-	}
-	if driver == "" {
-		driver = "sqlite"
-	}
+	driver := normalizeExecDriver(s.t2sConf().ExecDriver)
 	db, err := sql.Open(driver, s.t2sConf().ExecDSN)
 	if err != nil {
 		return nil, err
@@ -1063,13 +1066,7 @@ func (s *Server) text2sqlExecDBByID(ctx context.Context, connID string) (*sql.DB
 	if err != nil {
 		return nil, fmt.Errorf("exec connection %q: decrypt DSN: %w", connID, err)
 	}
-	driver := strings.ToLower(strings.TrimSpace(conn.Driver))
-	if driver == "postgres" || driver == "postgresql" {
-		driver = "pgx"
-	}
-	if driver == "" {
-		driver = "sqlite"
-	}
+	driver := normalizeExecDriver(conn.Driver)
 	db, err := sql.Open(driver, dsn)
 	if err != nil {
 		return nil, fmt.Errorf("exec connection %q: open: %w", connID, err)
@@ -1087,10 +1084,11 @@ func executeReadOnlyQuery(ctx context.Context, db *sql.DB, driver, query string,
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	driver = strings.ToLower(strings.TrimSpace(driver))
+	driver = normalizeExecDriver(driver)
 	var rows *sql.Rows
 	var err error
-	if driver == "postgres" || driver == "postgresql" || driver == "pgx" {
+	switch driver {
+	case "pgx":
 		tx, terr := db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 		if terr != nil {
 			return nil, nil, 0, terr
@@ -1103,7 +1101,14 @@ func executeReadOnlyQuery(ctx context.Context, db *sql.DB, driver, query string,
 			_, _ = tx.ExecContext(ctx, "SET LOCAL work_mem = '"+strings.ReplaceAll(workMem, "'", "")+"'")
 		}
 		rows, err = tx.QueryContext(ctx, query)
-	} else {
+	case "mysql":
+		tx, terr := db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+		if terr != nil {
+			return nil, nil, 0, terr
+		}
+		defer tx.Rollback()
+		rows, err = tx.QueryContext(ctx, query)
+	default:
 		rows, err = db.QueryContext(ctx, query)
 	}
 	if err != nil {

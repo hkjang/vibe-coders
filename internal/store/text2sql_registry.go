@@ -126,14 +126,26 @@ func (s *SQLStore) DeleteText2SQLColumn(ctx context.Context, schemaName, tableNa
 
 // CollectInformationSchema reads the table/column layout from a source database
 // (src) and populates the registry under registrySchema. Existing sensitivity tags
-// and descriptions are preserved (it only upserts structure). Supports PostgreSQL
-// (information_schema) and SQLite (sqlite_master + PRAGMA). Returns counts.
+// and descriptions are preserved (it only upserts structure). Supports SQLite,
+// PostgreSQL, MySQL/MariaDB, and Oracle. Returns counts.
 func (s *SQLStore) CollectInformationSchema(ctx context.Context, src *sql.DB, driver, dbSchema, registrySchema string) (int, int, error) {
-	driver = strings.ToLower(strings.TrimSpace(driver))
+	// Normalize driver names (mirrors proxy.normalizeExecDriver).
+	switch strings.ToLower(strings.TrimSpace(driver)) {
+	case "postgres", "postgresql", "pgx":
+		driver = "pgx"
+	case "mysql", "mariadb":
+		driver = "mysql"
+	case "oracle":
+		driver = "oracle"
+	default:
+		driver = "sqlite"
+	}
+
 	type col struct{ table, name, typ string }
 	var cols []col
 
-	if driver == "sqlite" {
+	switch driver {
+	case "sqlite":
 		rows, err := src.QueryContext(ctx, `SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name`)
 		if err != nil {
 			return 0, 0, err
@@ -166,7 +178,53 @@ func (s *SQLStore) CollectInformationSchema(ctx context.Context, src *sql.DB, dr
 			}
 			cr.Close()
 		}
-	} else { // postgres / pgx
+
+	case "mysql":
+		if dbSchema == "" {
+			_ = src.QueryRowContext(ctx, `SELECT DATABASE()`).Scan(&dbSchema)
+		}
+		rows, err := src.QueryContext(ctx, `SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE
+			FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = ? ORDER BY TABLE_NAME, ORDINAL_POSITION`, dbSchema)
+		if err != nil {
+			return 0, 0, err
+		}
+		for rows.Next() {
+			var c col
+			if err := rows.Scan(&c.table, &c.name, &c.typ); err != nil {
+				rows.Close()
+				return 0, 0, err
+			}
+			cols = append(cols, c)
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return 0, 0, err
+		}
+
+	case "oracle":
+		if dbSchema == "" {
+			_ = src.QueryRowContext(ctx, `SELECT USER FROM DUAL`).Scan(&dbSchema)
+		}
+		dbSchema = strings.ToUpper(dbSchema)
+		rows, err := src.QueryContext(ctx, `SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE
+			FROM ALL_TAB_COLUMNS WHERE OWNER = :1 ORDER BY TABLE_NAME, COLUMN_ID`, dbSchema)
+		if err != nil {
+			return 0, 0, err
+		}
+		for rows.Next() {
+			var c col
+			if err := rows.Scan(&c.table, &c.name, &c.typ); err != nil {
+				rows.Close()
+				return 0, 0, err
+			}
+			cols = append(cols, c)
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return 0, 0, err
+		}
+
+	default: // pgx / postgres
 		if dbSchema == "" {
 			dbSchema = "public"
 		}
