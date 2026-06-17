@@ -243,18 +243,11 @@ const adminHTML = `<!doctype html>
     <nav id="tabs">
       <a href="#/dashboard" data-tab="dashboard" class="active">대시보드</a>
       <a href="#/mcp" data-tab="mcp">MCP</a>
-      <a href="#/agents" data-tab="agents">에이전트</a>
-      <a href="#/vcs" data-tab="vcs">VCS</a>
       <a href="#/requests" data-tab="requests">호출 이력</a>
       <a href="#/prompts" data-tab="prompts">프롬프트 검색</a>
       <a href="#/users" data-tab="users">사용자</a>
-      <a href="#/teams" data-tab="teams">팀</a>
-      <a href="#/ips" data-tab="ips">IP</a>
-      <a href="#/quotas" data-tab="quotas">사용 한도</a>
       <a href="#/safety" data-tab="safety">안전</a>
       <a href="#/text2sql" data-tab="text2sql">Text2SQL</a>
-      <a href="#/skills" data-tab="skills">Skills</a>
-      <a href="#/modeldeprecations" data-tab="modeldeprecations">모델 일몰</a>
       <a href="#/dwdashboard" data-tab="dwdashboard">DW 대시보드</a>
       <a href="#/settings" data-tab="settings">설정</a>
     </nav>
@@ -751,6 +744,25 @@ const adminHTML = `<!doctype html>
           { label: '설정', href: '#/settings', active: !onRT },
           { label: '런타임 설정', href: '#/settings/runtime', active: onRT },
         ]);
+      } else if (tab === 'users' || tab === 'teams' || tab === 'ips' || tab === 'quotas') {
+        el.innerHTML = subNav([
+          { label: '사용자', href: '#/users', active: tab === 'users' },
+          { label: '팀', href: '#/teams', active: tab === 'teams' },
+          { label: 'IP', href: '#/ips', active: tab === 'ips' },
+          { label: '사용 한도', href: '#/quotas', active: tab === 'quotas' },
+        ]);
+      } else if (tab === 'safety' || tab === 'skills' || tab === 'modeldeprecations') {
+        el.innerHTML = subNav([
+          { label: '안전', href: '#/safety', active: tab === 'safety' },
+          { label: 'Skills', href: '#/skills', active: tab === 'skills' },
+          { label: '모델 일몰', href: '#/modeldeprecations', active: tab === 'modeldeprecations' },
+        ]);
+      } else if (tab === 'mcp' || tab === 'agents' || tab === 'vcs') {
+        el.innerHTML = subNav([
+          { label: 'MCP', href: '#/mcp', active: tab === 'mcp' },
+          { label: '에이전트', href: '#/agents', active: tab === 'agents' },
+          { label: 'VCS', href: '#/vcs', active: tab === 'vcs' },
+        ]);
       } else {
         el.innerHTML = '';
       }
@@ -760,9 +772,14 @@ const adminHTML = `<!doctype html>
       const { parts, params } = parseHash();
       const [tab, ...rest] = parts;
       // Nested sub-views keep their parent's top-level nav tab highlighted.
-      const navTab = (tab === 'xview' || tab === 'waterfall' || tab === 'llm') ? 'dashboard'
-        : tab === 'clickhouse' ? 'dwdashboard'
-        : tab === 'runtimesettings' ? 'settings' : tab;
+      const navParent = {
+        xview: 'dashboard', waterfall: 'dashboard', llm: 'dashboard',
+        teams: 'users', ips: 'users', quotas: 'users',
+        skills: 'safety', modeldeprecations: 'safety',
+        agents: 'mcp', vcs: 'mcp',
+        clickhouse: 'dwdashboard', runtimesettings: 'settings',
+      };
+      const navTab = navParent[tab] || tab;
       setActiveTab(navTab);
       renderSubTabs(tab, rest);
       try {
