@@ -1181,7 +1181,7 @@ const adminHTML = `<!doctype html>
         });
       });
       // drag-to-select: starts on empty canvas space, not on a dot
-      bindXVDragSelect(points, W, H);
+      bindXVDragSelect(points);
     }
 
     // Per-model summary table (sortable) below scatter
@@ -1252,7 +1252,7 @@ const adminHTML = `<!doctype html>
     // Flag to suppress a dot's click event if a drag just completed over it.
     let xvDragJustFired = false;
 
-    function bindXVDragSelect(points, W, H) {
+    function bindXVDragSelect(points) {
       const svg = document.getElementById('xv-svg');
       const selPanel = document.getElementById('xv-selection');
       if (!svg || !selPanel) return;
@@ -1265,11 +1265,14 @@ const adminHTML = `<!doctype html>
       const selRect = document.getElementById('xv-sel-rect');
 
       function toSVG(e) {
-        const r = svg.getBoundingClientRect();
-        return {
-          x: (e.clientX - r.left) * W / r.width,
-          y: (e.clientY - r.top) * H / r.height,
-        };
+        // createSVGPoint + getScreenCTM().inverse() correctly maps viewport
+        // coordinates to the SVG viewBox coordinate space, including
+        // preserveAspectRatio letterboxing, CSS transforms, and scroll offsets.
+        const pt = svg.createSVGPoint();
+        pt.x = e.clientX;
+        pt.y = e.clientY;
+        const svgPt = pt.matrixTransform(svg.getScreenCTM().inverse());
+        return { x: svgPt.x, y: svgPt.y };
       }
 
       function onMove(e) {
