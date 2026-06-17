@@ -822,6 +822,89 @@ func (s *Server) handleText2SQLCollect(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"schema_name": p.SchemaName, "added_tables": tables, "added_columns": cols})
 }
 
+// handleText2SQLRegistryExport exports all tables and columns in the schema registry
+// as a portable JSON bundle.
+// GET /admin/text2sql/registry/export?schema=NAME   (omit schema = all schemas)
+func (s *Server) handleText2SQLRegistryExport(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	if r.Method != http.MethodGet {
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
+	schema := strings.TrimSpace(r.URL.Query().Get("schema"))
+	tables, err := s.db.ListText2SQLTables(r.Context(), schema)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "export_failed")
+		return
+	}
+	cols, err := s.db.ListText2SQLColumns(r.Context(), schema)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "export_failed")
+		return
+	}
+	s.auditAdmin(r, "text2sql.registry.export", "", auditJSON(map[string]any{"schema": schema, "tables": len(tables), "columns": len(cols)}))
+	writeJSON(w, http.StatusOK, map[string]any{
+		"version": 1,
+		"schema":  schema,
+		"tables":  tables,
+		"columns": cols,
+	})
+}
+
+// handleText2SQLRegistryImport bulk-upserts tables and columns from a JSON bundle
+// produced by handleText2SQLRegistryExport (or hand-crafted).
+// POST /admin/text2sql/registry/import
+// Body: {"tables":[{schema_name,table_name,description,enabled},...], "columns":[{schema_name,table_name,column_name,data_type,description,sensitivity},...]}
+func (s *Server) handleText2SQLRegistryImport(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	if r.Method != http.MethodPost {
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
+	var body struct {
+		Tables  []store.Text2SQLTable  `json:"tables"`
+		Columns []store.Text2SQLColumn `json:"columns"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeOpenAIError(w, http.StatusBadRequest, "invalid JSON: "+err.Error(), "invalid_request_error", "invalid_body")
+		return
+	}
+	var tableErr, colErr int
+	for _, t := range body.Tables {
+		if strings.TrimSpace(t.SchemaName) == "" || strings.TrimSpace(t.TableName) == "" {
+			tableErr++
+			continue
+		}
+		_ = s.db.UpsertText2SQLTable(r.Context(), t)
+	}
+	for _, c := range body.Columns {
+		if strings.TrimSpace(c.SchemaName) == "" || strings.TrimSpace(c.TableName) == "" || strings.TrimSpace(c.ColumnName) == "" {
+			colErr++
+			continue
+		}
+		if c.Sensitivity != "" && !validText2SQLSensitivity(c.Sensitivity) {
+			c.Sensitivity = store.SensitivityNormal
+		}
+		_ = s.db.UpsertText2SQLColumn(r.Context(), c)
+	}
+	s.auditAdmin(r, "text2sql.registry.import", "", auditJSON(map[string]any{
+		"tables_requested": len(body.Tables), "columns_requested": len(body.Columns),
+		"table_errors": tableErr, "column_errors": colErr,
+	}))
+	writeJSON(w, http.StatusOK, map[string]any{
+		"tables_imported":  len(body.Tables) - tableErr,
+		"columns_imported": len(body.Columns) - colErr,
+		"table_errors":     tableErr,
+		"column_errors":    colErr,
+	})
+}
+
 // handleText2SQLProfiles manages runtime virtual-model profiles (DB overrides of the
 // env defaults; can also define new virtual models).
 // GET /admin/text2sql/profiles · POST {virtual_model,mode,upstream_model,summary_model,schema_name,enabled} · DELETE ?virtual_model=

@@ -6458,6 +6458,10 @@ const adminHTML = `<!doctype html>
       if (rlBtn) rlBtn.addEventListener('click', loadT2SRegistry);
       const rcBtn = document.getElementById('t2s-registry-collect');
       if (rcBtn) rcBtn.addEventListener('click', collectT2SRegistry);
+      const reBtn = document.getElementById('t2s-registry-export');
+      if (reBtn) reBtn.addEventListener('click', exportT2SRegistry);
+      const riFile = document.getElementById('t2s-registry-import-file');
+      if (riFile) riFile.addEventListener('change', importT2SRegistry);
       const pf = document.getElementById('t2s-profile-form');
       if (pf) pf.addEventListener('submit', addT2SProfile);
       const pmf = document.getElementById('t2s-perm-form');
@@ -6514,7 +6518,20 @@ const adminHTML = `<!doctype html>
       route();
     };
     function registryHTML() {
-      return '<div class="toolbar" style="border-bottom:0"><input id="t2s-reg-schema" placeholder="스키마명 (예: analytics)" style="max-width:220px"><button type="button" id="t2s-registry-load">불러오기</button><button type="button" class="secondary" id="t2s-registry-collect">실행DB에서 자동 수집</button><span class="muted" id="t2s-collect-result"></span></div>' +
+      return '<div class="muted" style="padding:10px 14px 6px;font-size:12px;line-height:1.5">' +
+        '<strong>스키마 레지스트리란?</strong> 프록시 내부 DB에 등록된 테이블·컬럼 목록입니다. ' +
+        'Text2SQL이 SQL을 생성할 때 이 목록을 참조합니다.<br>' +
+        '<strong>불러오기</strong> — 내부 레지스트리에서 해당 스키마명으로 등록된 테이블·컬럼을 화면에 표시합니다.<br>' +
+        '<strong>실행DB에서 자동 수집</strong> — 설정된 실행 DB(TEXT2SQL_EXEC_DSN)의 <code>information_schema</code>를 읽어 테이블·컬럼을 자동으로 레지스트리에 추가합니다.<br>' +
+        '<strong>내보내기</strong> — 현재 스키마(또는 전체)를 JSON 파일로 저장합니다. <strong>가져오기</strong> — JSON 파일로 일괄 등록합니다.</div>' +
+        '<div class="toolbar" style="border-bottom:0;flex-wrap:wrap;gap:6px">' +
+        '<input id="t2s-reg-schema" placeholder="스키마명 (예: analytics, 비우면 전체)" style="max-width:220px">' +
+        '<button type="button" id="t2s-registry-load">레지스트리 불러오기</button>' +
+        '<button type="button" class="secondary" id="t2s-registry-collect">실행DB에서 자동 수집</button>' +
+        '<button type="button" class="secondary" id="t2s-registry-export">JSON 내보내기</button>' +
+        '<label class="secondary" style="cursor:pointer;display:inline-flex;align-items:center;padding:0 10px;height:32px;border-radius:4px;border:1px solid var(--border);font-size:13px">' +
+        'JSON 가져오기<input type="file" id="t2s-registry-import-file" accept=".json" style="display:none"></label>' +
+        '<span class="muted" id="t2s-collect-result"></span></div>' +
         '<form class="inline-form" id="t2s-table-form" style="grid-template-columns: 140px minmax(220px,2fr) 70px; align-items:start;">' +
           '<input id="rt-table" placeholder="테이블명" required>' +
           '<input id="rt-desc" placeholder="테이블 업무 설명">' +
@@ -6559,6 +6576,44 @@ const adminHTML = `<!doctype html>
         loadT2SRegistry();
       } catch (err) {
         if (el) el.textContent = ' 실패: ' + err.message;
+      }
+    }
+    async function exportT2SRegistry() {
+      const schema = t2sRegSchema();
+      const el = document.getElementById('t2s-collect-result');
+      if (el) el.textContent = ' 내보내는 중…';
+      try {
+        const qs = schema ? '?schema=' + encodeURIComponent(schema) : '';
+        const d = await api('/admin/text2sql/registry/export' + qs);
+        const blob = new Blob([JSON.stringify(d, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 't2s-registry' + (schema ? '-' + schema : '') + '.json';
+        a.click();
+        URL.revokeObjectURL(url);
+        if (el) el.textContent = ' 내보내기 완료 (테이블 ' + (d.tables || []).length + '개, 컬럼 ' + (d.columns || []).length + '개)';
+      } catch (err) {
+        if (el) el.textContent = ' 내보내기 실패: ' + err.message;
+      }
+    }
+    async function importT2SRegistry(e) {
+      const file = e.target.files && e.target.files[0];
+      if (!file) return;
+      const el = document.getElementById('t2s-collect-result');
+      if (el) el.textContent = ' 가져오는 중…';
+      try {
+        const text = await file.text();
+        const bundle = JSON.parse(text);
+        const body = { tables: bundle.tables || [], columns: bundle.columns || [] };
+        const res = await api('/admin/text2sql/registry/import', { method: 'POST', body: JSON.stringify(body) });
+        if (el) el.textContent = ' 가져오기 완료 — 테이블 ' + res.tables_imported + '개, 컬럼 ' + res.columns_imported + '개 등록' +
+          (res.table_errors + res.column_errors > 0 ? ' (오류 ' + (res.table_errors + res.column_errors) + '건)' : '');
+        e.target.value = '';
+        loadT2SRegistry();
+      } catch (err) {
+        if (el) el.textContent = ' 가져오기 실패: ' + err.message;
+        e.target.value = '';
       }
     }
     async function addT2STable(e) {

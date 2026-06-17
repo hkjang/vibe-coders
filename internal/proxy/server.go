@@ -31,7 +31,7 @@ import (
 )
 
 // AppVersion is the gateway build version, surfaced in /auth/me and the admin UI.
-const AppVersion = "v0.44.0"
+const AppVersion = "v0.45.0"
 
 type Server struct {
 	cfg          config.Config
@@ -256,6 +256,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/admin/text2sql/tables", s.handleText2SQLTables)
 	mux.HandleFunc("/admin/text2sql/columns", s.handleText2SQLColumns)
 	mux.HandleFunc("/admin/text2sql/collect", s.handleText2SQLCollect)
+	mux.HandleFunc("/admin/text2sql/registry/export", s.handleText2SQLRegistryExport)
+	mux.HandleFunc("/admin/text2sql/registry/import", s.handleText2SQLRegistryImport)
 	mux.HandleFunc("/admin/text2sql/permissions", s.handleText2SQLPermissions)
 	mux.HandleFunc("/admin/text2sql/glossary", s.handleText2SQLGlossary)
 	mux.HandleFunc("/admin/text2sql/risk-queue", s.handleText2SQLRiskQueue)
