@@ -55,22 +55,42 @@ func (s *Server) handleScatter(w http.ResponseWriter, r *http.Request) {
 			limit = parsed
 		}
 	}
-	points, truncated, err := s.db.ScatterPoints(r.Context(), store.ScatterFilter{
+	// Multi-model filter: ?models=gpt-4.1,gpt-4.1-mini takes precedence over ?model=
+	models := parseModelsParam(r.URL.Query().Get("models"))
+	singleModel := strings.TrimSpace(r.URL.Query().Get("model"))
+
+	f := store.ScatterFilter{
 		Since:    since,
 		Endpoint: strings.TrimSpace(r.URL.Query().Get("endpoint")),
-		Model:    strings.TrimSpace(r.URL.Query().Get("model")),
 		APIKeyID: strings.TrimSpace(r.URL.Query().Get("api_key_id")),
 		Limit:    limit,
-	})
+	}
+	if len(models) > 0 {
+		f.Models = models
+	} else {
+		f.Model = singleModel
+	}
+
+	points, truncated, err := s.db.ScatterPoints(r.Context(), f)
 	if err != nil {
 		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "scatter_failed")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+
+	resp := map[string]any{
 		"points":    points,
 		"truncated": truncated,
 		"since":     since.UTC().Format(time.RFC3339),
-	})
+	}
+
+	// include per-model summary when requested
+	groupBy := strings.TrimSpace(r.URL.Query().Get("group_by"))
+	includeSummary := strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("include_summary")), "true")
+	if groupBy == "model" || includeSummary {
+		resp["groups"] = computeModelGroups(points)
+	}
+
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (s *Server) handleAnomalies(w http.ResponseWriter, r *http.Request) {

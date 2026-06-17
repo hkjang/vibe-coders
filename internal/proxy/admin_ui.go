@@ -906,12 +906,18 @@ const adminHTML = `<!doctype html>
 
     // ---------- XView (transaction scatter plot) ----------
     const xviewState = {
-      window: sessionStorage.getItem('xviewWindow') || '1h',
-      scale: sessionStorage.getItem('xviewScale') || 'log',
-      metric: sessionStorage.getItem('xviewMetric') || 'latency',
+      window:   sessionStorage.getItem('xviewWindow')    || '1h',
+      scale:    sessionStorage.getItem('xviewScale')     || 'log',
+      metric:   sessionStorage.getItem('xviewMetric')    || 'latency',
+      viewMode: sessionStorage.getItem('xviewViewMode')  || 'category', // 'category' | 'model'
     };
+    // per-model palette — up to 10 distinct colors
+    const MODEL_PALETTE = ['#3b82f6','#f97316','#22c55e','#a855f7','#eab308','#ec4899','#06b6d4','#ef4444','#84cc16','#8b5cf6'];
+    function modelColor(model, modelIndex) {
+      return MODEL_PALETTE[modelIndex % MODEL_PALETTE.length];
+    }
     function xviewCategory(p) {
-      // priority: error > kill/blocked > cache > failover > high-cost > normal
+      // priority: error > governance > cache > failover > high-cost > normal
       if (p.status_code >= 400) return 'error';
       if (p.policy_decision_count || p.approval_count || p.secret_event_count) return 'governance';
       if (p.provider === 'cache') return 'cache';
@@ -921,81 +927,138 @@ const adminHTML = `<!doctype html>
       return 'normal';
     }
     const xviewColors = {
-      error:   { c: '#ef4444', label: '오류' },
+      error:      { c: '#ef4444', label: '오류' },
       governance: { c: '#f97316', label: '거버넌스' },
-      cache:   { c: '#22c55e', label: '캐시 히트' },
-      failover:{ c: '#eab308', label: '폴백' },
-      complex: { c: '#a855f7', label: '고비용/복잡' },
-      normal:  { c: '#3b82f6', label: '정상' },
+      cache:      { c: '#22c55e', label: '캐시 히트' },
+      failover:   { c: '#eab308', label: '폴백' },
+      complex:    { c: '#a855f7', label: '고비용/복잡' },
+      normal:     { c: '#3b82f6', label: '정상' },
     };
+    // yField helper for metric switch (latency/first_chunk/tokens/cost/risk/health)
+    function xviewYField(metric) {
+      switch (metric) {
+        case 'first_chunk': return 'first_chunk_ms';
+        case 'tokens':      return 'total_tokens';
+        case 'cost':        return 'cost_krw';
+        case 'risk':        return 'risk_score';
+        case 'health':      return 'health_score';
+        default:            return 'latency_ms';
+      }
+    }
+    function xviewYLabel(metric) {
+      switch (metric) {
+        case 'first_chunk': return '첫 청크 지연(ms)';
+        case 'tokens':      return '토큰 수';
+        case 'cost':        return '비용(KRW)';
+        case 'risk':        return '위험 점수';
+        case 'health':      return '헬스 점수';
+        default:            return '응답시간(ms)';
+      }
+    }
+    function xviewFmtY(metric, v) {
+      switch (metric) {
+        case 'first_chunk': return msLabel(v);
+        case 'tokens':      return fmt(v);
+        case 'cost':        return money(v);
+        case 'risk':
+        case 'health':      return String(v);
+        default:            return msLabel(v);
+      }
+    }
 
     async function renderXView(initial) {
       if (initial) {
-        if (initial.get('window')) xviewState.window = initial.get('window');
-        if (initial.get('metric')) xviewState.metric = initial.get('metric');
+        if (initial.get('window'))   xviewState.window   = initial.get('window');
+        if (initial.get('metric'))   xviewState.metric   = initial.get('metric');
+        if (initial.get('viewMode')) xviewState.viewMode = initial.get('viewMode');
       }
       const params = new URLSearchParams();
       params.set('window', xviewState.window);
-      const model = initial ? (initial.get('model') || '') : '';
+      // multi-model: ?models= takes precedence; fall back to legacy ?model=
+      const modelsParam = initial ? (initial.get('models') || '') : '';
+      const singleModel = initial ? (initial.get('model') || '') : '';
       const endpoint = initial ? (initial.get('endpoint') || '') : '';
-      if (model) params.set('model', model);
+      if (modelsParam)    params.set('models', modelsParam);
+      else if (singleModel) params.set('model', singleModel);
       if (endpoint) params.set('endpoint', endpoint);
+      params.set('include_summary', 'true');
+      params.set('group_by', 'model');
       params.set('limit', '6000');
 
       const data = await api('/admin/scatter?' + params.toString());
       const points = data.points || [];
+      const groups = data.groups || [];
       // complexity threshold = 90th percentile of tokens (so "high" is relative), min 4000
       const tokenVals = points.map(p => p.total_tokens || 0).filter(v => v > 0).sort((a, b) => a - b);
       xviewState.complexityTokens = Math.max(4000, tokenVals.length ? tokenVals[Math.floor(tokenVals.length * 0.9)] : 4000);
 
+      // build model → index map for stable coloring
+      const modelIndex = {};
+      groups.forEach((g, i) => { modelIndex[g.model] = i; });
+
       const view = document.getElementById('view');
-      view.innerHTML = section('XView — 트랜잭션 응답시간 분포',
+      view.innerHTML = section('XView — 모델별 호출 분석',
         '<div class="toolbar">' +
           '<select id="xv-window">' +
             ['5m','15m','1h','6h','24h'].map(wd => '<option value="' + wd + '"' + (xviewState.window === wd ? ' selected' : '') + '>' + wd + '</option>').join('') +
           '</select>' +
           '<select id="xv-metric">' +
-            '<option value="latency"' + (xviewState.metric === 'latency' ? ' selected' : '') + '>전체 응답시간</option>' +
-            '<option value="first_chunk"' + (xviewState.metric === 'first_chunk' ? ' selected' : '') + '>첫 청크 지연</option>' +
+            '<option value="latency"'     + (xviewState.metric === 'latency'      ? ' selected' : '') + '>응답시간</option>' +
+            '<option value="first_chunk"' + (xviewState.metric === 'first_chunk'  ? ' selected' : '') + '>첫 청크 지연</option>' +
+            '<option value="tokens"'      + (xviewState.metric === 'tokens'       ? ' selected' : '') + '>토큰 수</option>' +
+            '<option value="cost"'        + (xviewState.metric === 'cost'         ? ' selected' : '') + '>비용</option>' +
+            '<option value="risk"'        + (xviewState.metric === 'risk'         ? ' selected' : '') + '>위험 점수</option>' +
+            '<option value="health"'      + (xviewState.metric === 'health'       ? ' selected' : '') + '>헬스 점수</option>' +
           '</select>' +
           '<select id="xv-scale">' +
-            '<option value="log"' + (xviewState.scale === 'log' ? ' selected' : '') + '>로그 스케일</option>' +
+            '<option value="log"'    + (xviewState.scale === 'log'    ? ' selected' : '') + '>로그 스케일</option>' +
             '<option value="linear"' + (xviewState.scale === 'linear' ? ' selected' : '') + '>선형 스케일</option>' +
           '</select>' +
-          '<input id="xv-model" placeholder="모델 필터" value="' + escapeHTML(model) + '">' +
+          '<select id="xv-viewmode">' +
+            '<option value="category"' + (xviewState.viewMode === 'category' ? ' selected' : '') + '>카테고리별 색상</option>' +
+            '<option value="model"'    + (xviewState.viewMode === 'model'    ? ' selected' : '') + '>모델별 색상</option>' +
+          '</select>' +
+          '<input id="xv-models" placeholder="모델 필터 (콤마 구분)" style="min-width:180px" value="' + escapeHTML(modelsParam || singleModel) + '">' +
           '<input id="xv-endpoint" placeholder="endpoint 필터" value="' + escapeHTML(endpoint) + '">' +
           '<button id="xv-apply" type="submit">적용</button>' +
           '<span class="muted">' + fmt(points.length) + '건' + (data.truncated ? ' (최근 6000건으로 제한됨)' : '') + '</span>' +
         '</div>' +
         '<div id="xv-chart" style="padding:14px"></div>' +
-        '<div id="xv-legend" style="padding:0 14px 14px"></div>'
+        '<div id="xv-legend" style="padding:0 14px 14px"></div>' +
+        '<div id="xv-model-table" style="padding:0 14px 14px"></div>'
       );
-      drawScatter(points);
+      drawScatter(points, groups, modelIndex);
+      renderModelGroupTable(groups);
 
       const apply = () => {
-        xviewState.window = document.getElementById('xv-window').value;
-        xviewState.metric = document.getElementById('xv-metric').value;
-        xviewState.scale = document.getElementById('xv-scale').value;
-        sessionStorage.setItem('xviewWindow', xviewState.window);
-        sessionStorage.setItem('xviewMetric', xviewState.metric);
-        sessionStorage.setItem('xviewScale', xviewState.scale);
+        xviewState.window   = document.getElementById('xv-window').value;
+        xviewState.metric   = document.getElementById('xv-metric').value;
+        xviewState.scale    = document.getElementById('xv-scale').value;
+        xviewState.viewMode = document.getElementById('xv-viewmode').value;
+        sessionStorage.setItem('xviewWindow',   xviewState.window);
+        sessionStorage.setItem('xviewMetric',   xviewState.metric);
+        sessionStorage.setItem('xviewScale',    xviewState.scale);
+        sessionStorage.setItem('xviewViewMode', xviewState.viewMode);
         const p = new URLSearchParams();
-        p.set('window', xviewState.window);
-        p.set('metric', xviewState.metric);
-        const m = document.getElementById('xv-model').value.trim();
-        const e = document.getElementById('xv-endpoint').value.trim();
-        if (m) p.set('model', m);
-        if (e) p.set('endpoint', e);
+        p.set('window',   xviewState.window);
+        p.set('metric',   xviewState.metric);
+        p.set('viewMode', xviewState.viewMode);
+        const ms = document.getElementById('xv-models').value.trim();
+        const e  = document.getElementById('xv-endpoint').value.trim();
+        if (ms) p.set('models', ms);
+        if (e)  p.set('endpoint', e);
         location.hash = '#/xview?' + p.toString();
       };
       document.getElementById('xv-apply').addEventListener('click', apply);
-      ['xv-window', 'xv-metric', 'xv-scale'].forEach(id => document.getElementById(id).addEventListener('change', apply));
+      ['xv-window', 'xv-metric', 'xv-scale', 'xv-viewmode'].forEach(id =>
+        document.getElementById(id).addEventListener('change', apply));
     }
 
-    function drawScatter(points) {
+    function drawScatter(points, groups, modelIndex) {
       const host = document.getElementById('xv-chart');
       if (!points.length) { host.innerHTML = '<div class="empty">해당 구간에 요청 없음</div>'; return; }
-      const yField = xviewState.metric === 'first_chunk' ? 'first_chunk_ms' : 'latency_ms';
+      const yField   = xviewYField(xviewState.metric);
+      const useModelColor = xviewState.viewMode === 'model';
       const W = 1000, H = 420, padL = 64, padR = 16, padT = 14, padB = 34;
       const innerW = W - padL - padR, innerH = H - padT - padB;
 
@@ -1016,13 +1079,14 @@ const adminHTML = `<!doctype html>
       };
       const xPos = t => padL + ((t - tMin) / tSpan) * innerW;
 
-      // y gridlines (ms markers)
-      const yTicks = logScale ? [1, 10, 100, 500, 1000, 2000, 5000, 10000, 30000].filter(v => v <= yMax * 1.2)
-                              : [0, yMax * 0.25, yMax * 0.5, yMax * 0.75, yMax];
+      // y gridlines
+      const yTicks = logScale
+        ? [1, 10, 100, 500, 1000, 2000, 5000, 10000, 30000].filter(v => v <= yMax * 1.2)
+        : [0, yMax * 0.25, yMax * 0.5, yMax * 0.75, yMax];
       const grid = yTicks.map(v => {
         const y = yPos(v);
         return '<line x1="' + padL + '" y1="' + y.toFixed(1) + '" x2="' + (W - padR) + '" y2="' + y.toFixed(1) + '" stroke="var(--line)" stroke-dasharray="2 3"/>' +
-          '<text x="' + (padL - 6) + '" y="' + (y + 3).toFixed(1) + '" text-anchor="end" font-size="10" fill="currentColor" opacity="0.6">' + msLabel(v) + '</text>';
+          '<text x="' + (padL - 6) + '" y="' + (y + 3).toFixed(1) + '" text-anchor="end" font-size="10" fill="currentColor" opacity="0.6">' + xviewFmtY(xviewState.metric, v) + '</text>';
       }).join('');
 
       // x time labels
@@ -1033,33 +1097,44 @@ const adminHTML = `<!doctype html>
         return '<text x="' + x.toFixed(1) + '" y="' + (H - 10) + '" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.6">' + hh + ':' + mm + ':' + ss + '</text>';
       }).join('');
 
-      // percentile reference lines (on the chosen metric)
+      // percentile reference lines
       const sorted = points.map(p => p[yField] || 0).sort((a, b) => a - b);
-      const pct = q => sorted[Math.min(sorted.length - 1, Math.floor((sorted.length - 1) * q))];
-      const p50 = pct(0.5), p95 = pct(0.95), p99 = pct(0.99);
+      const pctAt = q => sorted[Math.min(sorted.length - 1, Math.floor((sorted.length - 1) * q))];
+      const p50 = pctAt(0.5), p95 = pctAt(0.95), p99 = pctAt(0.99);
       const pctLine = (v, label, color) => {
         const y = yPos(v);
         return '<line x1="' + padL + '" y1="' + y.toFixed(1) + '" x2="' + (W - padR) + '" y2="' + y.toFixed(1) + '" stroke="' + color + '" stroke-width="1" stroke-opacity="0.7"/>' +
-          '<text x="' + (W - padR) + '" y="' + (y - 3).toFixed(1) + '" text-anchor="end" font-size="10" fill="' + color + '">' + label + ' ' + msLabel(v) + '</text>';
+          '<text x="' + (W - padR) + '" y="' + (y - 3).toFixed(1) + '" text-anchor="end" font-size="10" fill="' + color + '">' + label + ' ' + xviewFmtY(xviewState.metric, v) + '</text>';
       };
 
-      // dots
-      const dots = points.map((p, i) => {
+      // dots — colored by model or category, with outlier ring
+      const dots = points.map(p => {
         const cat = xviewCategory(p);
-        const col = xviewColors[cat].c;
+        let col;
+        if (useModelColor) {
+          const idx = modelIndex != null ? (modelIndex[p.model] !== undefined ? modelIndex[p.model] : Object.keys(modelIndex).length) : 0;
+          col = MODEL_PALETTE[idx % MODEL_PALETTE.length];
+        } else {
+          col = xviewColors[cat].c;
+        }
         const t = Date.parse(p.created_at);
         if (isNaN(t)) return '';
         const cx = xPos(t).toFixed(1), cy = yPos(p[yField] || 0).toFixed(1);
+        const isAnomaly = cat === 'error' || cat === 'failover' || p.policy_decision_count > 0;
         const gov = (p.policy_decision_count || p.approval_count || p.secret_event_count)
           ? ' · policy ' + fmt(p.policy_decision_count || 0) + (p.policy_decision ? '(' + p.policy_decision + ')' : '') +
             ' · approval ' + fmt(p.approval_count || 0) + (p.approval_status ? '(' + p.approval_status + ')' : '') +
             ' · secret ' + fmt(p.secret_event_count || 0) + (p.secret_action ? '(' + p.secret_action + ')' : '')
           : '';
-        const tip = (p.model || '?') + ' · ' + (p.provider || '?') + ' · ' + msLabel(p[yField] || 0) +
+        const tip = (p.model || '?') + ' · ' + (p.provider || '?') + ' · ' + xviewFmtY(xviewState.metric, p[yField] || 0) +
           ' · complexity ' + fmt(p.complexity || 0) + ' · risk ' + fmt(p.risk_score || 0) +
-          ' · health ' + fmt(p.health_score || 0) + ' · ' + fmt(p.total_tokens) + 'tok · ' + money(p.cost_krw) + ' · ' + (p.status_code) +
+          ' · health ' + fmt(p.health_score || 0) + ' · ' + fmt(p.total_tokens) + 'tok · ' + money(p.cost_krw) + ' · HTTP ' + (p.status_code) +
           gov + ' · ' + new Date(t).toLocaleTimeString('ko-KR');
-        return '<circle class="xv-dot" data-rid="' + escapeHTML(p.request_id) + '" cx="' + cx + '" cy="' + cy + '" r="3.2" fill="' + col + '" fill-opacity="0.72" stroke="' + col + '" stroke-opacity="0.9"><title>' + escapeHTML(tip) + '</title></circle>';
+        // anomaly outer ring for errors/failovers/governance
+        const ring = isAnomaly
+          ? '<circle cx="' + cx + '" cy="' + cy + '" r="5.5" fill="none" stroke="' + col + '" stroke-width="1.5" stroke-opacity="0.55"/>'
+          : '';
+        return ring + '<circle class="xv-dot" data-rid="' + escapeHTML(p.request_id) + '" cx="' + cx + '" cy="' + cy + '" r="3.2" fill="' + col + '" fill-opacity="0.72" stroke="' + col + '" stroke-opacity="0.9"><title>' + escapeHTML(tip) + '</title></circle>';
       }).join('');
 
       host.innerHTML = '<svg id="xv-svg" viewBox="0 0 ' + W + ' ' + H + '" width="100%" height="' + H + '" style="color:var(--ink); cursor:crosshair">' +
@@ -1070,21 +1145,100 @@ const adminHTML = `<!doctype html>
         dots + xLabels +
         '</svg>';
 
-      // legend with live counts
-      const counts = { error: 0, governance: 0, cache: 0, failover: 0, complex: 0, normal: 0 };
-      points.forEach(p => counts[xviewCategory(p)]++);
-      document.getElementById('xv-legend').innerHTML =
-        '<div style="display:flex; gap:16px; flex-wrap:wrap; align-items:center">' +
-        Object.keys(xviewColors).map(k =>
-          '<span style="display:inline-flex; align-items:center; gap:6px"><span style="width:10px;height:10px;border-radius:50%;background:' + xviewColors[k].c + '"></span>' +
-          xviewColors[k].label + ' <span class="muted">' + fmt(counts[k]) + '</span></span>').join('') +
-        '<span class="muted" style="margin-left:auto">점을 클릭하면 요청 상세, 가로=시간 / 세로=' + (xviewState.metric === 'first_chunk' ? '첫 청크 지연' : '응답시간') + '</span>' +
-        '</div>';
+      // legend — model-color mode or category mode
+      const legendEl = document.getElementById('xv-legend');
+      if (useModelColor && groups && groups.length) {
+        legendEl.innerHTML =
+          '<div style="display:flex; gap:14px; flex-wrap:wrap; align-items:center">' +
+          groups.map((g, i) =>
+            '<span style="display:inline-flex; align-items:center; gap:5px">' +
+            '<span style="width:10px;height:10px;border-radius:50%;background:' + MODEL_PALETTE[i % MODEL_PALETTE.length] + '"></span>' +
+            escapeHTML(g.model) + ' <span class="muted">' + fmt(g.count) + '건</span></span>'
+          ).join('') +
+          '<span class="muted" style="margin-left:auto">점을 클릭하면 요청 상세 · 가로=시간 / 세로=' + xviewYLabel(xviewState.metric) + ' · ○링=이상 항목</span>' +
+          '</div>';
+      } else {
+        const counts = { error: 0, governance: 0, cache: 0, failover: 0, complex: 0, normal: 0 };
+        points.forEach(p => counts[xviewCategory(p)]++);
+        legendEl.innerHTML =
+          '<div style="display:flex; gap:16px; flex-wrap:wrap; align-items:center">' +
+          Object.keys(xviewColors).map(k =>
+            '<span style="display:inline-flex; align-items:center; gap:6px">' +
+            '<span style="width:10px;height:10px;border-radius:50%;background:' + xviewColors[k].c + '"></span>' +
+            xviewColors[k].label + ' <span class="muted">' + fmt(counts[k]) + '</span></span>'
+          ).join('') +
+          '<span class="muted" style="margin-left:auto">점을 클릭하면 요청 상세 · 가로=시간 / 세로=' + xviewYLabel(xviewState.metric) + ' · ○링=이상 항목</span>' +
+          '</div>';
+      }
 
-      // click → explainability panel (why was this handled this way)
+      // click → explainability panel
       host.querySelectorAll('.xv-dot').forEach(dot => {
         dot.addEventListener('click', () => openExplain(dot.getAttribute('data-rid')));
       });
+    }
+
+    // Per-model summary table (sortable) below scatter
+    function renderModelGroupTable(groups) {
+      const el = document.getElementById('xv-model-table');
+      if (!groups || !groups.length) { el.innerHTML = ''; return; }
+      let sortKey = 'count', sortDir = -1;
+      const render = () => {
+        const sorted = [...groups].sort((a, b) => {
+          const va = a[sortKey] !== undefined ? a[sortKey] : 0;
+          const vb = b[sortKey] !== undefined ? b[sortKey] : 0;
+          return sortDir * (va < vb ? -1 : va > vb ? 1 : 0);
+        });
+        const cols = [
+          { key: 'model',            label: '모델' },
+          { key: 'count',            label: '건수' },
+          { key: 'error_rate',       label: '오류율' },
+          { key: 'p50',              label: 'P50(ms)' },
+          { key: 'p95',              label: 'P95(ms)' },
+          { key: 'p99',              label: 'P99(ms)' },
+          { key: 'avg_first_chunk_ms', label: '첫청크(ms)' },
+          { key: 'total_tokens',     label: '토큰합' },
+          { key: 'total_cost_krw',   label: '비용합(KRW)' },
+          { key: 'avg_cost_krw',     label: '평균비용' },
+          { key: 'failover_count',   label: '폴백' },
+          { key: 'governance_count', label: '거버넌스' },
+          { key: 'risk_p95',         label: '위험P95' },
+          { key: 'health_avg',       label: '헬스평균' },
+        ];
+        const thStyle = 'cursor:pointer; user-select:none; white-space:nowrap;';
+        el.innerHTML = '<h3 style="margin:12px 0 8px">모델별 요약</h3>' +
+          '<table id="xv-gtable"><thead><tr>' +
+          cols.map(c => '<th style="' + thStyle + '" data-k="' + c.key + '">' + c.label + (sortKey === c.key ? (sortDir > 0 ? ' ▲' : ' ▼') : '') + '</th>').join('') +
+          '</tr></thead><tbody>' +
+          sorted.map((g, gi) => {
+            const idx = groups.findIndex(x => x.model === g.model);
+            const dot = '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + MODEL_PALETTE[(idx >= 0 ? idx : gi) % MODEL_PALETTE.length] + ';margin-right:6px"></span>';
+            return '<tr>' +
+              '<td>' + dot + escapeHTML(g.model) + '</td>' +
+              '<td data-num="' + g.count + '">' + fmt(g.count) + '</td>' +
+              '<td data-num="' + g.error_rate + '">' + pct(g.error_rate) + '</td>' +
+              '<td data-num="' + g.p50 + '">' + msLabel(g.p50) + '</td>' +
+              '<td data-num="' + g.p95 + '">' + msLabel(g.p95) + '</td>' +
+              '<td data-num="' + g.p99 + '">' + msLabel(g.p99) + '</td>' +
+              '<td data-num="' + g.avg_first_chunk_ms + '">' + msLabel(Math.round(g.avg_first_chunk_ms)) + '</td>' +
+              '<td data-num="' + g.total_tokens + '">' + fmt(g.total_tokens) + '</td>' +
+              '<td data-num="' + g.total_cost_krw + '">' + money(g.total_cost_krw) + '</td>' +
+              '<td data-num="' + g.avg_cost_krw + '">' + money(g.avg_cost_krw) + '</td>' +
+              '<td data-num="' + g.failover_count + '">' + fmt(g.failover_count) + '</td>' +
+              '<td data-num="' + g.governance_count + '">' + fmt(g.governance_count) + '</td>' +
+              '<td data-num="' + g.risk_p95 + '">' + fmt(Math.round(g.risk_p95)) + '</td>' +
+              '<td data-num="' + g.health_avg + '">' + fmt(Math.round(g.health_avg)) + '</td>' +
+            '</tr>';
+          }).join('') +
+          '</tbody></table>';
+        el.querySelectorAll('#xv-gtable th').forEach(th => {
+          th.addEventListener('click', () => {
+            const k = th.getAttribute('data-k');
+            if (sortKey === k) sortDir *= -1; else { sortKey = k; sortDir = -1; }
+            render();
+          });
+        });
+      };
+      render();
     }
 
     // ---------- Waterfall View (transaction trace) ----------

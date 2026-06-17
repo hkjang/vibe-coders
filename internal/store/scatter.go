@@ -20,7 +20,17 @@ func (s *SQLStore) ScatterPoints(ctx context.Context, f ScatterFilter) ([]Scatte
 		where = append(where, "r.endpoint = ?")
 		args = append(args, f.Endpoint)
 	}
-	if f.Model != "" {
+	switch {
+	case len(f.Models) == 1:
+		where = append(where, "r.model = ?")
+		args = append(args, f.Models[0])
+	case len(f.Models) > 1:
+		placeholders := strings.Repeat(",?", len(f.Models))[1:]
+		where = append(where, "r.model IN ("+placeholders+")")
+		for _, m := range f.Models {
+			args = append(args, m)
+		}
+	case f.Model != "":
 		where = append(where, "r.model = ?")
 		args = append(args, f.Model)
 	}

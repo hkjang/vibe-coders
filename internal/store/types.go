@@ -1026,9 +1026,28 @@ type ScatterPoint struct {
 type ScatterFilter struct {
 	Since    time.Time
 	Endpoint string
-	Model    string
+	Model    string   // single model (backward compat); ignored when Models is non-empty
+	Models   []string // multi-model filter; empty = all models
 	APIKeyID string
 	Limit    int
+}
+
+// ScatterModelGroup holds per-model aggregate statistics computed from scatter points.
+type ScatterModelGroup struct {
+	Model           string  `json:"model"`
+	Count           int64   `json:"count"`
+	ErrorRate       float64 `json:"error_rate"`
+	P50             int64   `json:"p50"`
+	P95             int64   `json:"p95"`
+	P99             int64   `json:"p99"`
+	AvgFirstChunkMS float64 `json:"avg_first_chunk_ms"`
+	TotalTokens     int64   `json:"total_tokens"`
+	TotalCostKRW    float64 `json:"total_cost_krw"`
+	AvgCostKRW      float64 `json:"avg_cost_krw"`
+	FailoverCount   int64   `json:"failover_count"`
+	GovernanceCount int64   `json:"governance_count"`
+	RiskP95         float64 `json:"risk_p95"`
+	HealthAvg       float64 `json:"health_avg"`
 }
 
 type AnomalyFinding struct {
