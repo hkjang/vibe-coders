@@ -69,6 +69,18 @@ const adminHTML = `<!doctype html>
       border-radius: 6px; font-weight: 700;
     }
     nav a.active { background: var(--ink); color: var(--bg); }
+    #subtabs:empty { display: none; }
+    .subtabs {
+      display: flex; gap: 4px; flex-wrap: wrap;
+      margin: 4px 0 2px; padding-bottom: 8px;
+      border-bottom: 1px solid var(--line);
+    }
+    .subtabs a {
+      text-decoration: none; color: var(--muted);
+      padding: 6px 14px; border-radius: 6px 6px 0 0; font-weight: 700; font-size: 14px;
+    }
+    .subtabs a:hover { background: var(--line); }
+    .subtabs a.active { background: var(--ink); color: var(--bg); }
     .header-tools { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
     main { width: min(1440px, 100%); margin: 0 auto; padding: 18px 28px 60px; }
     section {
@@ -247,8 +259,6 @@ const adminHTML = `<!doctype html>
       <a href="#/skills" data-tab="skills">Skills</a>
       <a href="#/modeldeprecations" data-tab="modeldeprecations">모델 일몰</a>
       <a href="#/dwdashboard" data-tab="dwdashboard">DW 대시보드</a>
-      <a href="#/clickhouse" data-tab="clickhouse">ClickHouse</a>
-      <a href="#/runtimesettings" data-tab="runtimesettings">런타임 설정</a>
       <a href="#/settings" data-tab="settings">설정</a>
     </nav>
     <div class="header-tools">
@@ -281,6 +291,7 @@ const adminHTML = `<!doctype html>
     </div>
   </header>
   <main>
+    <div id="subtabs"></div>
     <div id="view"></div>
   </main>
 
@@ -713,10 +724,41 @@ const adminHTML = `<!doctype html>
         history.replaceState(null, '', next);
       }
     }
+    // subNav renders a secondary tab bar (used for tabs that nest sub-views).
+    function subNav(items) {
+      return '<nav class="subtabs">' + items.map(it =>
+        '<a href="' + it.href + '"' + (it.active ? ' class="active"' : '') + '>' + escapeHTML(it.label) + '</a>'
+      ).join('') + '</nav>';
+    }
+    // renderSubTabs populates the #subtabs strip for tabs that have nested sub-views, and
+    // clears it otherwise. navTab maps nested routes (clickhouse, runtimesettings) to their
+    // parent so the top-level nav stays highlighted.
+    function renderSubTabs(tab, rest) {
+      const el = document.getElementById('subtabs');
+      if (tab === 'dwdashboard' || tab === 'clickhouse') {
+        const onCH = tab === 'clickhouse' || rest[0] === 'clickhouse';
+        el.innerHTML = subNav([
+          { label: 'DW 대시보드', href: '#/dwdashboard', active: !onCH },
+          { label: 'ClickHouse', href: '#/dwdashboard/clickhouse', active: onCH },
+        ]);
+      } else if (tab === 'settings' || tab === 'runtimesettings') {
+        const onRT = tab === 'runtimesettings' || rest[0] === 'runtime';
+        el.innerHTML = subNav([
+          { label: '설정', href: '#/settings', active: !onRT },
+          { label: '런타임 설정', href: '#/settings/runtime', active: onRT },
+        ]);
+      } else {
+        el.innerHTML = '';
+      }
+    }
+
     async function route() {
       const { parts, params } = parseHash();
       const [tab, ...rest] = parts;
-      setActiveTab(tab);
+      // Nested sub-views keep their parent's top-level nav tab highlighted.
+      const navTab = tab === 'clickhouse' ? 'dwdashboard' : tab === 'runtimesettings' ? 'settings' : tab;
+      setActiveTab(navTab);
+      renderSubTabs(tab, rest);
       try {
         switch (tab) {
           case 'dashboard': await renderDashboard(); break;
@@ -738,10 +780,10 @@ const adminHTML = `<!doctype html>
           case 'modeldeprecations': await renderModelDeprecations(); break;
           case 'personalization': rest.length ? await renderPersonalProfileDetail(decodeURIComponent(rest.join('/'))) : await renderPersonalization(); break;
           case 'mykeys':    await renderMyKeys(); break;
-          case 'dwdashboard': await renderDWDashboard(); break;
-          case 'clickhouse': await renderClickHouse(); break;
-          case 'runtimesettings': await renderRuntimeSettings(); break;
-          case 'settings':  await renderSettings(); break;
+          case 'dwdashboard': rest[0] === 'clickhouse' ? await renderClickHouse() : await renderDWDashboard(); break;
+          case 'clickhouse': await renderClickHouse(); break; // legacy alias for #/dwdashboard/clickhouse
+          case 'runtimesettings': await renderRuntimeSettings(); break; // legacy alias for #/settings/runtime
+          case 'settings':  rest[0] === 'runtime' ? await renderRuntimeSettings() : await renderSettings(); break;
           default: await renderDashboard();
         }
       } catch (err) {
@@ -5117,7 +5159,7 @@ const adminHTML = `<!doctype html>
       const badge = (st) => '<span class="status ' + (st === 'production' ? '' : (st === 'deprecated' ? 'error' : 'warn')) + '">' + escapeHTML(st || '') + '</span>';
       const riskBadge = (rk) => '<span class="status ' + (rk === 'high' ? 'error' : (rk === 'medium' ? 'warn' : '')) + '">' + escapeHTML(rk || '') + '</span>';
 
-      let html = '<div class="card-body"><p class="muted">Skill 레지스트리 — 재사용 가능한 AI 작업 매뉴얼(지침 + 정책 힌트)을 등록·승격하고 실행 로그를 점검합니다. <code>production</code> 상태만 <code>GET /v1/skills</code>로 호출자에게 노출됩니다. 요청이 <code>X-Vibe-Skill</code> 헤더로 Skill을 지정하면 <code>allowed_models</code>/<code>allowed_tools</code> 정책을 검사합니다 — 적용 모드는 <a href="#/runtimesettings">런타임 설정</a>의 <code>skills.enforcement</code>(off/warn/enforce)에서 변경하세요.</p>' +
+      let html = '<div class="card-body"><p class="muted">Skill 레지스트리 — 재사용 가능한 AI 작업 매뉴얼(지침 + 정책 힌트)을 등록·승격하고 실행 로그를 점검합니다. <code>production</code> 상태만 <code>GET /v1/skills</code>로 호출자에게 노출됩니다. 요청이 <code>X-Vibe-Skill</code> 헤더로 Skill을 지정하면 <code>allowed_models</code>/<code>allowed_tools</code> 정책을 검사합니다 — 적용 모드는 <a href="#/settings/runtime">런타임 설정</a>의 <code>skills.enforcement</code>(off/warn/enforce)에서 변경하세요.</p>' +
         '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:6px">' +
           '<label class="muted">상태 <select id="skill-status-filter" onchange="skillFilter(this.value)">' +
             ['', 'draft', 'staging', 'production', 'deprecated'].map(s => '<option value="' + s + '"' + (s === statusFilter ? ' selected' : '') + '>' + (s || '전체') + '</option>').join('') +
@@ -5378,7 +5420,7 @@ const adminHTML = `<!doctype html>
       ]);
 
       if (ov && ov.configured === false) {
-        view.innerHTML = card('DW 대시보드', '<div class="card-body"><div class="empty">ClickHouse DW가 설정되지 않았습니다. <a href="#/clickhouse">ClickHouse</a> 탭에서 연결·테이블 생성·적재를 먼저 구성하세요.</div></div>');
+        view.innerHTML = card('DW 대시보드', '<div class="card-body"><div class="empty">ClickHouse DW가 설정되지 않았습니다. <a href="#/dwdashboard/clickhouse">ClickHouse</a> 탭에서 연결·테이블 생성·적재를 먼저 구성하세요.</div></div>');
         return;
       }
       if (ov && ov._err) {
@@ -5553,7 +5595,7 @@ const adminHTML = `<!doctype html>
         const states = health.state || [];
         const retries = health.retries || [];
         html += '<section><h2>DW 적재 상태 ' + (retries.length ? '<span class="status warn">실패 큐 ' + retries.length + '</span>' : '<span class="status">정상</span>') + '</h2><div class="card-body">' +
-          '<div style="margin-bottom:8px"><button class="secondary" type="button" onclick="dwRetry()">실패분 재처리</button> <a href="#/clickhouse" class="muted">상세(ClickHouse 탭) →</a></div>' +
+          '<div style="margin-bottom:8px"><button class="secondary" type="button" onclick="dwRetry()">실패분 재처리</button> <a href="#/dwdashboard/clickhouse" class="muted">상세(ClickHouse 탭) →</a></div>' +
           (states.length ? '<table><thead><tr><th>dimension</th><th>마지막 적재일</th><th>행수</th><th>갱신</th></tr></thead><tbody>' +
             states.map(st => '<tr><td><code>' + escapeHTML(st.dimension || '') + '</code></td><td>' + escapeHTML(st.last_synced_day || st.since_day || '') + '</td><td data-num="' + (st.rows_sent || 0) + '">' + fmt(st.rows_sent || 0) + '</td><td>' + ago(st.updated_at) + '</td></tr>').join('') + '</tbody></table>'
             : '<div class="empty">적재 이력이 없습니다.</div>') +
@@ -5578,7 +5620,7 @@ const adminHTML = `<!doctype html>
               '<td>' + (df.requests ? '<span class="status warn">' + fmt(df.requests) + '</span>' : '0') + '</td>' +
               '<td data-num="' + (df.cost_krw || 0) + '">' + fmt(Math.round(df.cost_krw || 0)) + '</td></tr>';
           }).join('') + '</tbody></table>' +
-          '<div class="muted" style="margin-top:8px;font-size:11px">불일치 시 <a href="#/clickhouse">ClickHouse 탭</a>에서 재적재·테이블 점검(table-info)을 수행하세요.</div>' +
+          '<div class="muted" style="margin-top:8px;font-size:11px">불일치 시 <a href="#/dwdashboard/clickhouse">ClickHouse 탭</a>에서 재적재·테이블 점검(table-info)을 수행하세요.</div>' +
           '</div></section>';
       }
 
@@ -5651,7 +5693,7 @@ const adminHTML = `<!doctype html>
     async function renderClickHouse() {
       const view = document.getElementById('view');
       const d = await api('/admin/dw/clickhouse/overview').catch(e => ({ configured: false, _err: e.message }));
-      let html = '<div class="card-body"><p class="muted">ClickHouse 장기 분석(DW) 적재 상태를 한 화면에서 점검하고, 테이블 생성·적재·정합성 확인을 실행합니다. 연결/테이블/계정 설정은 <a href="#/runtimesettings">런타임 설정</a>의 <code>clickhouse.*</code> 키에서 변경하세요.</p>' +
+      let html = '<div class="card-body"><p class="muted">ClickHouse 장기 분석(DW) 적재 상태를 한 화면에서 점검하고, 테이블 생성·적재·정합성 확인을 실행합니다. 연결/테이블/계정 설정은 <a href="#/settings/runtime">런타임 설정</a>의 <code>clickhouse.*</code> 키에서 변경하세요.</p>' +
         '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:6px">' +
           '<button class="secondary" type="button" onclick="chAction(\'test\')">연결 테스트</button>' +
           '<button type="button" onclick="chAction(\'bootstrap\')">테이블 생성</button>' +
@@ -5662,7 +5704,7 @@ const adminHTML = `<!doctype html>
         '</div></div>';
 
       if (!d.configured) {
-        html += '<div class="card-body"><div class="empty">ClickHouse가 설정되지 않았습니다. <a href="#/runtimesettings">런타임 설정</a>에서 <code>clickhouse.url</code>(및 database/table/계정)을 먼저 지정하세요.' +
+        html += '<div class="card-body"><div class="empty">ClickHouse가 설정되지 않았습니다. <a href="#/settings/runtime">런타임 설정</a>에서 <code>clickhouse.url</code>(및 database/table/계정)을 먼저 지정하세요.' +
           (d._err ? '<div class="muted">' + escapeHTML(d._err) + '</div>' : '') + '</div></div>';
         view.innerHTML = card('ClickHouse', html);
         return;
