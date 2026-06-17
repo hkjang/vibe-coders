@@ -1062,7 +1062,7 @@ func (s *Server) text2sqlExecDBByID(ctx context.Context, connID string) (*sql.DB
 	if !found || !conn.Enabled {
 		return nil, fmt.Errorf("exec connection %q not found or disabled", connID)
 	}
-	dsn, err := s.secrets.Decrypt(conn.EncryptedDSN)
+	dsn, err := s.secrets.Load().Decrypt(conn.EncryptedDSN)
 	if err != nil {
 		return nil, fmt.Errorf("exec connection %q: decrypt DSN: %w", connID, err)
 	}

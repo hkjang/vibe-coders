@@ -60,7 +60,7 @@ func (s *Server) handleMCPUpstreams(w http.ResponseWriter, r *http.Request) {
 		}
 		encAuth := ""
 		if strings.TrimSpace(p.AuthToken) != "" {
-			enc, err := s.secrets.Encrypt(strings.TrimSpace(p.AuthToken))
+			enc, err := s.secrets.Load().Encrypt(strings.TrimSpace(p.AuthToken))
 			if err != nil {
 				writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "encrypt_failed")
 				return
@@ -146,7 +146,7 @@ func (s *Server) handleMCPUpstreamByID(w http.ResponseWriter, r *http.Request) {
 			if strings.TrimSpace(*p.AuthToken) == "" {
 				cur.EncryptedAuth = ""
 			} else {
-				enc, eerr := s.secrets.Encrypt(strings.TrimSpace(*p.AuthToken))
+				enc, eerr := s.secrets.Load().Encrypt(strings.TrimSpace(*p.AuthToken))
 				if eerr != nil {
 					writeOpenAIError(w, http.StatusInternalServerError, eerr.Error(), "server_error", "encrypt_failed")
 					return

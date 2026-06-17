@@ -875,7 +875,7 @@ func (s *Server) handleText2SQLConnections(w http.ResponseWriter, r *http.Reques
 			c.Enabled = *p.Enabled
 		}
 		if strings.TrimSpace(p.DSN) != "" {
-			enc, err := s.secrets.Encrypt(strings.TrimSpace(p.DSN))
+			enc, err := s.secrets.Load().Encrypt(strings.TrimSpace(p.DSN))
 			if err != nil {
 				writeOpenAIError(w, http.StatusInternalServerError, "DSN 암호화 실패: "+err.Error(), "server_error", "encrypt_failed")
 				return

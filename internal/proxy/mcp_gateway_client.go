@@ -133,7 +133,7 @@ func (s *Server) postRPC(ctx context.Context, up store.MCPUpstream, conn *mcpUps
 		req.Header.Set("Mcp-Session-Id", conn.sessionID)
 	}
 	if up.EncryptedAuth != "" {
-		if token, derr := s.secrets.Decrypt(up.EncryptedAuth); derr == nil && token != "" {
+		if token, derr := s.secrets.Load().Decrypt(up.EncryptedAuth); derr == nil && token != "" {
 			req.Header.Set("Authorization", "Bearer "+token)
 		}
 	}

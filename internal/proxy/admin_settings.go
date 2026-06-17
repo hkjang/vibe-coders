@@ -705,7 +705,7 @@ func (s *Server) effectiveSettingValue(stored map[string]store.AdminSetting, d s
 			decoded = raw
 		}
 		if d.Secret {
-			if plain, err := s.secrets.Decrypt(decoded); err == nil {
+			if plain, err := s.secrets.Load().Decrypt(decoded); err == nil {
 				return plain, "admin"
 			}
 			return "", "admin"
@@ -856,7 +856,7 @@ func (s *Server) persistSettingValue(r *http.Request, d settingDef, value, reaso
 	}
 	storeValue := value
 	if d.Secret {
-		enc, err := s.secrets.Encrypt(value)
+		enc, err := s.secrets.Load().Encrypt(value)
 		if err != nil {
 			return fmt.Errorf("encrypt secret: %w", err)
 		}
