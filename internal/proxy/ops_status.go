@@ -103,8 +103,8 @@ func (s *Server) opsStatusSnapshot(ctx context.Context) OpsStatus {
 		Security: OpsSecurityStatus{
 			AuthEnabled:       s.cfg.Auth.Enabled,
 			DevSecret:         s.cfg.Secret.GatewaySecret == config.DefaultGatewaySecret,
-			RawPromptsLogged:  s.cfg.Logging.RawPrompts,
-			RawBodiesLogged:   s.cfg.Logging.RawBodies,
+			RawPromptsLogged:  s.loggingConf().RawPrompts,
+			RawBodiesLogged:   s.loggingConf().RawBodies,
 			PricingConfigured: len(s.pricingMap(ctx)) > 0,
 		},
 	}

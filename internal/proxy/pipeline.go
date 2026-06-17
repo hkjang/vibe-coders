@@ -479,11 +479,12 @@ func (rc *requestPipeline) stepUpstream() bool {
 
 	captureForCache := !stream && r.URL.Path == "/v1/embeddings" && s.cacheConf().EmbeddingEnabled
 	captureForChatCache := !stream && rc.chatCacheable && resp.StatusCode == http.StatusOK
-	captureLimit := s.cfg.Logging.ResponseMaxBytes
+	lc := s.loggingConf()
+	captureLimit := lc.ResponseMaxBytes
 	if (captureForCache || captureForChatCache) && s.cacheConf().EmbeddingMaxBytes > captureLimit {
 		captureLimit = s.cacheConf().EmbeddingMaxBytes
 	}
-	analyzer := NewResponseAnalyzer(stream, captureForCache || captureForChatCache || s.cfg.Logging.ResponseText, captureLimit)
+	analyzer := NewResponseAnalyzer(stream, captureForCache || captureForChatCache || lc.ResponseText, captureLimit)
 	firstChunkMS, firstChunkSeen, copyErr := s.copyResponse(w, resp.Body, analyzer, stream, start)
 	if firstChunkSeen {
 		meta.Request.FirstChunkMS = firstChunkMS
@@ -511,7 +512,7 @@ func (rc *requestPipeline) stepUpstream() bool {
 	// CompletionText is the clean extracted content (not raw SSE/JSON).
 	// Text (raw capture) is kept only for cache replay; never persisted to the log.
 	responseText := ""
-	if s.cfg.Logging.ResponseText {
+	if lc.ResponseText {
 		if analysis.CompletionText != "" {
 			responseText = analysis.CompletionText
 		} else {

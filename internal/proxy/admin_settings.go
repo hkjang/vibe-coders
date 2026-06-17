@@ -48,12 +48,14 @@ const (
 
 // settingDef is a registry entry: the env/default source, type, category, and whether the
 // value is a secret (encrypted at rest, masked in responses). validate is optional.
+// ReadOnly=true entries are shown in the UI as view-only (no save/revert) and reject PUT via API.
 type settingDef struct {
 	Key      string
 	Category string
 	Type     settingType
 	Secret   bool
-	Restart  bool // changing this requires a worker restart / connection swap (informational)
+	Restart  bool     // changing this requires a worker restart / connection swap (informational)
+	ReadOnly bool     // env-only: shown for visibility but cannot be changed via admin settings
 	envValue func(cfg config.Config) string
 	validate func(string) error
 }
@@ -194,6 +196,20 @@ func buildSettingRegistry() []settingDef {
 		{Key: "limits.max_output_tokens", Category: "limits", Type: stInt, validate: posInt, envValue: func(c config.Config) string { return strconv.Itoa(c.Limits.MaxOutputTokens) }},
 		{Key: "limits.max_request_bytes", Category: "limits", Type: stInt, validate: posInt, envValue: func(c config.Config) string { return strconv.Itoa(c.Limits.MaxRequestBytes) }},
 		{Key: "limits.max_messages", Category: "limits", Type: stInt, validate: posInt, envValue: func(c config.Config) string { return strconv.Itoa(c.Limits.MaxMessages) }},
+
+		// ---- Logging (runtime-adjustable capture flags) ----
+		{Key: "logging.response_text", Category: "logging", Type: stBool, envValue: func(c config.Config) string { return strconv.FormatBool(c.Logging.ResponseText) }},
+		{Key: "logging.raw_prompts", Category: "logging", Type: stBool, envValue: func(c config.Config) string { return strconv.FormatBool(c.Logging.RawPrompts) }},
+		{Key: "logging.raw_bodies", Category: "logging", Type: stBool, envValue: func(c config.Config) string { return strconv.FormatBool(c.Logging.RawBodies) }},
+		{Key: "logging.response_max_bytes", Category: "logging", Type: stInt, validate: posInt, envValue: func(c config.Config) string { return strconv.Itoa(c.Logging.ResponseMaxBytes) }},
+
+		// ---- Env (read-only view of startup environment variables) ----
+		{Key: "env.upstream_base_url", Category: "env", Type: stString, ReadOnly: true, envValue: func(c config.Config) string { return c.Upstream.BaseURL }},
+		{Key: "env.upstream_provider", Category: "env", Type: stString, ReadOnly: true, envValue: func(c config.Config) string { return c.Upstream.Provider }},
+		{Key: "env.upstream_api_key", Category: "env", Type: stString, Secret: true, ReadOnly: true, envValue: func(c config.Config) string { return c.Upstream.APIKey }},
+		{Key: "env.listen_addr", Category: "env", Type: stString, ReadOnly: true, envValue: func(c config.Config) string { return c.ListenAddr }},
+		{Key: "env.log_queue_size", Category: "env", Type: stInt, ReadOnly: true, envValue: func(c config.Config) string { return strconv.Itoa(c.Logging.QueueSize) }},
+		{Key: "env.log_fallback_path", Category: "env", Type: stString, ReadOnly: true, envValue: func(c config.Config) string { return c.Logging.FallbackPath }},
 	}
 }
 
@@ -291,6 +307,18 @@ var settingDescriptions = map[string]string{
 	"limits.max_output_tokens": "응답 최대 출력 토큰 상한(0=비활성). >0이면 chat 요청의 max_tokens/max_completion_tokens를 이 값으로 클램프(없으면 주입). 런어웨이 생성·비용 폭주 가드.",
 	"limits.max_request_bytes": "chat 요청 본문 최대 바이트(0=비활성). 초과 시 413 payload_too_large로 거부. 비정상적으로 큰 프롬프트·남용 차단.",
 	"limits.max_messages":      "chat 요청 messages 배열 최대 개수(0=비활성). 초과 시 400 too_many_messages로 거부. 컨텍스트 스터핑·과도한 멀티턴 누적 차단.",
+	// Logging
+	"logging.response_text":       "AI 응답 본문 캡처 여부(LOG_RESPONSE_TEXT). true면 response_text_optional에 전체 응답 텍스트를 저장, 요청 상세에서 조회 가능. 저장 공간 증가 주의.",
+	"logging.raw_prompts":         "프롬프트 원문 캡처 여부(LOG_RAW_PROMPTS). true면 content_text(원문)도 별도 저장. false면 redacted_text(리덕션)만 보관.",
+	"logging.raw_bodies":          "요청·응답 원시 바디 캡처 여부(LOG_RAW_BODIES). true면 raw_request/raw_response 컬럼에 전체 바이트 저장. 디버그 목적. 저장 공간 주의.",
+	"logging.response_max_bytes":  "응답 캡처 최대 바이트(LOG_RESPONSE_MAX_BYTES). 초과 분 잘림. 기본 1MB.",
+	// Env (read-only)
+	"env.upstream_base_url":  "업스트림 엔드포인트 URL(UPSTREAM_BASE_URL). 변경하려면 컨테이너 환경변수를 수정 후 재시작.",
+	"env.upstream_provider":  "업스트림 프로바이더 이름(UPSTREAM_PROVIDER). 변경하려면 환경변수 수정 후 재시작.",
+	"env.upstream_api_key":   "업스트림 API 키(UPSTREAM_API_KEY). 마스킹 표시. 변경하려면 환경변수 수정 후 재시작.",
+	"env.listen_addr":        "게이트웨이 수신 주소/포트(PORT or LISTEN_ADDR). 변경하려면 환경변수 수정 후 재시작.",
+	"env.log_queue_size":     "비동기 로그 큐 크기(LOG_QUEUE_SIZE). 변경하려면 환경변수 수정 후 재시작.",
+	"env.log_fallback_path":  "로그 큐 오버플로 시 fallback NDJSON 파일 경로(LOG_FALLBACK_PATH).",
 }
 
 // t2sConf returns the effective Text2SQL config (admin-settings overlay over env/default).
@@ -357,6 +385,14 @@ func (s *Server) limitsConf() config.LimitsConfig {
 	return s.cfg.Limits
 }
 
+// loggingConf returns the effective Logging config (admin-settings overlay over env/default).
+func (s *Server) loggingConf() config.LoggingConfig {
+	if p := s.loggingRuntime.Load(); p != nil {
+		return *p
+	}
+	return s.cfg.Logging
+}
+
 // reloadRuntimeConfig rebuilds the Text2SQL/ClickHouse runtime snapshots from env defaults
 // overlaid with admin-managed settings. Called at startup and after every settings change.
 func (s *Server) reloadRuntimeConfig(ctx context.Context) {
@@ -381,7 +417,11 @@ func (s *Server) reloadRuntimeConfig(ctx context.Context) {
 	pricing := s.cfg.PricingConf
 	skills := s.cfg.Skills
 	limits := s.cfg.Limits
+	logging := s.cfg.Logging
 	for _, d := range settingRegistry {
+		if d.ReadOnly {
+			continue
+		}
 		if _, ok := stored[d.Key]; !ok {
 			continue
 		}
@@ -389,7 +429,7 @@ func (s *Server) reloadRuntimeConfig(ctx context.Context) {
 		if source != "admin" {
 			continue
 		}
-		applyRuntimeSetting(&t2s, &ch, &carbon, &ins, &cache, &ret, &pricing, &skills, &limits, d.Key, val)
+		applyRuntimeSetting(&t2s, &ch, &carbon, &ins, &cache, &ret, &pricing, &skills, &limits, &logging, d.Key, val)
 	}
 	s.t2sRuntime.Store(&t2s)
 	s.chRuntime.Store(&ch)
@@ -399,6 +439,7 @@ func (s *Server) reloadRuntimeConfig(ctx context.Context) {
 	s.pricingRuntime.Store(&pricing)
 	s.skillsRuntime.Store(&skills)
 	s.limitsRuntime.Store(&limits)
+	s.loggingRuntime.Store(&logging)
 	audit.SetFallbackPriceModel(pricing.FallbackModel) // apply the runtime fallback model
 	// Apply retention changes to the running worker (day thresholds next run; interval recreates the ticker).
 	if s.retention != nil && prevRet != ret {
@@ -423,7 +464,7 @@ func (s *Server) reloadRuntimeConfig(ctx context.Context) {
 	}
 }
 
-func applyRuntimeSetting(t2s *config.Text2SQLConfig, ch *config.ClickHouseConfig, carbon *config.CarbonConfig, ins *config.InsuranceConfig, cache *config.CacheConfig, ret *config.RetentionConfig, pricing *config.PricingConfig, skills *config.SkillsConfig, limits *config.LimitsConfig, key, val string) {
+func applyRuntimeSetting(t2s *config.Text2SQLConfig, ch *config.ClickHouseConfig, carbon *config.CarbonConfig, ins *config.InsuranceConfig, cache *config.CacheConfig, ret *config.RetentionConfig, pricing *config.PricingConfig, skills *config.SkillsConfig, limits *config.LimitsConfig, logging *config.LoggingConfig, key, val string) {
 	val = strings.TrimSpace(val)
 	atoi := func() int { n, _ := strconv.Atoi(val); return n }
 	atof := func() float64 { f, _ := strconv.ParseFloat(val, 64); return f }
@@ -592,6 +633,14 @@ func applyRuntimeSetting(t2s *config.Text2SQLConfig, ch *config.ClickHouseConfig
 		limits.MaxRequestBytes = atoi()
 	case "limits.max_messages":
 		limits.MaxMessages = atoi()
+	case "logging.response_text":
+		logging.ResponseText = atob()
+	case "logging.raw_prompts":
+		logging.RawPrompts = atob()
+	case "logging.raw_bodies":
+		logging.RawBodies = atob()
+	case "logging.response_max_bytes":
+		logging.ResponseMaxBytes = atoi()
 	}
 }
 
@@ -615,6 +664,8 @@ func settingPermissionGroup(d settingDef) string {
 		return "ops"
 	case strings.HasPrefix(d.Category, "text2sql"):
 		return "ai"
+	case strings.HasPrefix(d.Category, "logging"):
+		return "security" // captures sensitive content (prompts/responses)
 	default:
 		return "admin"
 	}
@@ -721,7 +772,7 @@ func (s *Server) settingView(stored map[string]store.AdminSetting, d settingDef)
 	view := map[string]any{
 		"key": d.Key, "category": d.Category, "type": string(d.Type),
 		"is_secret": d.Secret, "restart_required": d.Restart, "source": source,
-		"description": settingDescriptions[d.Key],
+		"description": settingDescriptions[d.Key], "read_only": d.ReadOnly,
 	}
 	if a, ok := stored[d.Key]; ok {
 		view["version"] = a.Version
@@ -792,6 +843,10 @@ func (s *Server) handleAdminSettingByKey(w http.ResponseWriter, r *http.Request)
 	d, ok := settingDefByKey(key)
 	if !ok {
 		writeOpenAIError(w, http.StatusNotFound, "unknown setting key", "invalid_request_error", "unknown_key")
+		return
+	}
+	if (r.Method == http.MethodPut || r.Method == http.MethodDelete) && d.ReadOnly {
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "this setting is read-only (env variable); change it via container environment", "invalid_request_error", "setting_read_only")
 		return
 	}
 	if (r.Method == http.MethodPut || r.Method == http.MethodDelete) && !s.canWriteSetting(r, d) {

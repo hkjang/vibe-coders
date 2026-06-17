@@ -6133,6 +6133,16 @@ const adminHTML = `<!doctype html>
           '<th>키</th><th>값</th><th>출처</th><th>비고</th><th>동작</th></tr></thead><tbody>';
         groups[cat].forEach(s => {
           const id = settingInputId(s.key);
+          const desc = s.description ? '<div class="muted" style="font-size:11px;margin-top:2px;max-width:320px;white-space:normal;line-height:1.4">' + escapeHTML(s.description) + '</div>' : '';
+          if (s.read_only) {
+            // Read-only env vars: show value as plain text, no editor/save/revert
+            const displayVal = s.is_secret ? (s.is_set ? '********' : '<span class="muted">(미설정)</span>') : escapeHTML(String(s.value == null ? '' : s.value));
+            html += '<tr style="opacity:.85"><td><code>' + escapeHTML(s.key) + '</code>' + desc + '</td>' +
+              '<td><span style="font-family:ui-monospace,monospace;font-size:13px">' + displayVal + '</span></td>' +
+              '<td><span class="pill" style="background:var(--surface2,#333);color:var(--muted)">환경변수</span></td>' +
+              '<td></td><td><span class="muted" style="font-size:11px">변경 불가 (환경변수)</span></td></tr>';
+            return;
+          }
           let editor;
           if (s.type === 'bool') {
             editor = '<select id="' + id + '"><option value="true"' + (String(s.value) === 'true' ? ' selected' : '') + '>true</option>' +
@@ -6148,7 +6158,6 @@ const adminHTML = `<!doctype html>
             ? '<button class="secondary" type="button" onclick="revertSetting(\'' + s.key + '\')">기본값</button> ' +
               (s.is_secret ? '' : '<button class="secondary" type="button" onclick="rollbackSetting(\'' + s.key + '\')">롤백</button> ')
             : '';
-          const desc = s.description ? '<div class="muted" style="font-size:11px;margin-top:2px;max-width:320px;white-space:normal;line-height:1.4">' + escapeHTML(s.description) + '</div>' : '';
           html += '<tr><td><code>' + escapeHTML(s.key) + '</code>' + desc + '</td><td>' + editor + '</td>' +
             '<td><span class="status ' + (s.source === 'admin' ? '' : '') + '">' + escapeHTML(s.source) + '</span>' + ver + '</td>' +
             '<td>' + restart + '</td><td>' +

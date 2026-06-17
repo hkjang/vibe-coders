@@ -65,8 +65,9 @@ type Server struct {
 	insRuntime    atomic.Pointer[config.InsuranceConfig] // admin-settings overlay over cfg.Insurance
 	cacheRuntime   atomic.Pointer[config.CacheConfig]     // admin-settings overlay over cfg.Cache
 	pricingRuntime atomic.Pointer[config.PricingConfig]   // admin-settings overlay over cfg.PricingConf
-	skillsRuntime  atomic.Pointer[config.SkillsConfig]    // admin-settings overlay over cfg.Skills
-	limitsRuntime  atomic.Pointer[config.LimitsConfig]    // admin-settings overlay over cfg.Limits
+	skillsRuntime   atomic.Pointer[config.SkillsConfig]    // admin-settings overlay over cfg.Skills
+	limitsRuntime   atomic.Pointer[config.LimitsConfig]    // admin-settings overlay over cfg.Limits
+	loggingRuntime  atomic.Pointer[config.LoggingConfig]   // admin-settings overlay over cfg.Logging
 	chFactQueue   chan store.LogRecord                   // async per-request fact ingest queue (bounded)
 	chFactDropped atomic.Int64                           // requests dropped when the fact queue was full
 	dwCache       *dwQueryCache                          // short-TTL cache for DW dashboard ClickHouse reads
@@ -1542,7 +1543,8 @@ func (s *Server) handleAdminUI(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) auditRequest(endpoint string, body []byte, apiKeyID string, traceID string, r *http.Request) store.LogRecord {
 	requestID := newID("req")
-	model, stream, prompts, languages := extractAudit(body, endpoint, s.cfg.Logging.RawPrompts)
+	lc := s.loggingConf()
+	model, stream, prompts, languages := extractAudit(body, endpoint, lc.RawPrompts)
 	now := time.Now().UTC()
 
 	for i := range prompts {
@@ -1564,7 +1566,7 @@ func (s *Server) auditRequest(endpoint string, body []byte, apiKeyID string, tra
 	}
 
 	rawBody := ""
-	if s.cfg.Logging.RawBodies {
+	if lc.RawBodies {
 		rawBody = string(body)
 	}
 	llmMeta := llmRequestMetadata(r, body, traceID)

@@ -65,7 +65,7 @@ func (s *Server) runGovernanceChat(ctx context.Context, r *http.Request, model, 
 	}
 	defer resp.Body.Close()
 	result.StatusCode = resp.StatusCode
-	limit := int64(s.cfg.Logging.ResponseMaxBytes)
+	limit := int64(s.loggingConf().ResponseMaxBytes)
 	if limit <= 0 || limit > 4<<20 {
 		limit = 4 << 20
 	}
