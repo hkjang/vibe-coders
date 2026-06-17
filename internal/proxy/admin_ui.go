@@ -1345,6 +1345,7 @@ const adminHTML = `<!doctype html>
           '<td>' + xviewFmtY(xviewState.metric, p[yField] || 0) + '</td>' +
           '<td>' + escapeHTML(p.provider || '') + '</td>' +
           '<td class="muted">' + ts + '</td>' +
+          '<td><button class="secondary" type="button" onclick="openRequestDetail(\'' + escapeAttr(rid) + '\')">요청 상세</button></td>' +
           '<td><button class="secondary" type="button" onclick="openExplain(\'' + escapeAttr(rid) + '\')">XView 설명</button></td>' +
         '</tr>';
       }).join('');
@@ -1358,6 +1359,7 @@ const adminHTML = `<!doctype html>
           '<th>' + xviewYLabel(xviewState.metric) + '</th>' +
           '<th>provider</th>' +
           '<th>시간</th>' +
+          '<th>요청 상세</th>' +
           '<th>설명</th>' +
         '</tr></thead><tbody>' + rows + '</tbody></table>' +
         '</div>' + overflow;
