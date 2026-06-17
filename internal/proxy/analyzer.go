@@ -13,7 +13,8 @@ import (
 
 type ResponseAnalysis struct {
 	Hash                     string
-	Text                     string
+	Text                     string // raw captured bytes; used for cache replay
+	CompletionText           string // extracted content text; used for display/logging
 	FinishReason             string
 	Usage                    audit.Usage
 	HasUsage                 bool
@@ -74,6 +75,7 @@ func (a *ResponseAnalyzer) Finalize() ResponseAnalysis {
 	if a.captureText {
 		text = a.capture.String()
 	}
+	completionText := a.completion.String()
 	// finalize any streamed tool-call names that were assembled across chunks
 	for _, name := range a.streamToolNames {
 		if name == "" {
@@ -86,10 +88,11 @@ func (a *ResponseAnalyzer) Finalize() ResponseAnalysis {
 	return ResponseAnalysis{
 		Hash:                     hex.EncodeToString(a.hasher.Sum(nil)),
 		Text:                     text,
+		CompletionText:           completionText,
 		FinishReason:             a.finishReason,
 		Usage:                    a.usage,
 		HasUsage:                 a.hasUsage,
-		CompletionTokensEstimate: audit.EstimateTokens(a.completion.String()),
+		CompletionTokensEstimate: audit.EstimateTokens(completionText),
 		ToolCalls:                a.toolCalls,
 	}
 }

@@ -43,7 +43,7 @@ func TestSettingsRuntimeApply(t *testing.T) {
 
 	// Change the DSN → reload should close+clear the cached connection (swap).
 	dsn2 := "file:" + filepath.Join(t.TempDir(), "exec2.db") + "?cache=shared"
-	encDSN2, _ := server.secrets.Encrypt(dsn2)
+	encDSN2, _ := server.secrets.Load().Encrypt(dsn2)
 	if err := db.UpsertAdminSetting(ctx, store.AdminSetting{Key: "text2sql.exec_dsn", Category: "text2sql", ValueJSON: enc(encDSN2), ValueType: "string", IsSecret: true, Source: "admin"}, "t", ""); err != nil {
 		t.Fatal(err)
 	}

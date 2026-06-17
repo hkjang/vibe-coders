@@ -3365,7 +3365,7 @@ const adminHTML = `<!doctype html>
           '<div class="k">상태</div><div class="v">' + statusBadge(d.response.status_code) + '</div>' +
           '<div class="k">finish_reason</div><div class="v">' + escapeHTML(d.response.finish_reason || '') + '</div>' +
           '<div class="k">응답 hash</div><div class="v">' + escapeHTML(d.response.response_hash || '') + '</div>' +
-          '<div class="k">캡처된 응답</div><div class="v">' + (d.response.response_text_optional ? ('<div class="prompt-block">' + escapeHTML(formatTextIfJSON(d.response.response_text_optional)) + '</div>') : '<span class="muted">없음 (LOG_RESPONSE_TEXT=false)</span>') + '</div>' +
+          '<div class="k">캡처된 응답</div><div class="v">' + (d.response.response_text_optional ? ('<div class="prompt-block" style="white-space:normal;">' + renderMarkdown(d.response.response_text_optional) + '</div>') : '<span class="muted">없음 (LOG_RESPONSE_TEXT=false)</span>') + '</div>' +
         '</div>'
       ) : '<div class="muted">응답 메타 없음</div>';
       const spans = (d.spans || []).length ? (

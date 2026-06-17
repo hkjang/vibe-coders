@@ -507,9 +507,16 @@ func (rc *requestPipeline) stepUpstream() bool {
 	if captureForCache || captureForChatCache {
 		s.metrics.IncCacheMiss()
 	}
-	// Clear captured text so we don't accidentally persist it when LOG_RESPONSE_TEXT=false.
-	if (captureForCache || captureForChatCache) && !s.cfg.Logging.ResponseText {
-		analysis.Text = ""
+	// Determine what to persist as response text.
+	// CompletionText is the clean extracted content (not raw SSE/JSON).
+	// Text (raw capture) is kept only for cache replay; never persisted to the log.
+	responseText := ""
+	if s.cfg.Logging.ResponseText {
+		if analysis.CompletionText != "" {
+			responseText = analysis.CompletionText
+		} else {
+			responseText = analysis.Text
+		}
 	}
 	meta.Response = &store.ResponseLog{
 		ID:                   newID("resp"),
@@ -517,7 +524,7 @@ func (rc *requestPipeline) stepUpstream() bool {
 		StatusCode:           resp.StatusCode,
 		FinishReason:         analysis.FinishReason,
 		ResponseHash:         analysis.Hash,
-		ResponseTextOptional: analysis.Text,
+		ResponseTextOptional: responseText,
 		CreatedAt:            time.Now().UTC(),
 	}
 	if analysis.HasUsage {

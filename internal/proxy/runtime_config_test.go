@@ -47,7 +47,7 @@ func TestRuntimeConfigOverlay(t *testing.T) {
 	put("cache.chat_enabled", "bool", enc("true"), false)
 
 	// Secret overlay: store encrypted, expect decrypted at runtime.
-	cipher, err := server.secrets.Encrypt("postgres://u:p@h/db")
+	cipher, err := server.secrets.Load().Encrypt("postgres://u:p@h/db")
 	if err != nil {
 		t.Fatal(err)
 	}
