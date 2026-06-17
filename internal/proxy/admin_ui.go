@@ -1025,7 +1025,8 @@ const adminHTML = `<!doctype html>
         '</div>' +
         '<div id="xv-chart" style="padding:14px"></div>' +
         '<div id="xv-legend" style="padding:0 14px 14px"></div>' +
-        '<div id="xv-model-table" style="padding:0 14px 14px"></div>'
+        '<div id="xv-model-table" style="padding:0 14px 14px"></div>' +
+        '<div id="xv-selection" style="padding:0 14px 14px"></div>'
       );
       drawScatter(points, groups, modelIndex);
       renderModelGroupTable(groups);
@@ -1137,12 +1138,13 @@ const adminHTML = `<!doctype html>
         return ring + '<circle class="xv-dot" data-rid="' + escapeHTML(p.request_id) + '" cx="' + cx + '" cy="' + cy + '" r="3.2" fill="' + col + '" fill-opacity="0.72" stroke="' + col + '" stroke-opacity="0.9"><title>' + escapeHTML(tip) + '</title></circle>';
       }).join('');
 
-      host.innerHTML = '<svg id="xv-svg" viewBox="0 0 ' + W + ' ' + H + '" width="100%" height="' + H + '" style="color:var(--ink); cursor:crosshair">' +
+      host.innerHTML = '<svg id="xv-svg" viewBox="0 0 ' + W + ' ' + H + '" width="100%" height="' + H + '" style="color:var(--ink); cursor:crosshair; user-select:none">' +
         grid +
         '<line x1="' + padL + '" y1="' + (padT + innerH) + '" x2="' + (W - padR) + '" y2="' + (padT + innerH) + '" stroke="var(--line-strong)"/>' +
         '<line x1="' + padL + '" y1="' + padT + '" x2="' + padL + '" y2="' + (padT + innerH) + '" stroke="var(--line-strong)"/>' +
         pctLine(p99, 'P99', 'var(--bad)') + pctLine(p95, 'P95', 'var(--warn)') + pctLine(p50, 'P50', 'var(--muted)') +
         dots + xLabels +
+        '<rect id="xv-sel-rect" x="0" y="0" width="0" height="0" fill="var(--accent)" fill-opacity="0.1" stroke="var(--accent)" stroke-width="1" stroke-dasharray="4 2" style="display:none" pointer-events="none"/>' +
         '</svg>';
 
       // legend — model-color mode or category mode
@@ -1171,10 +1173,15 @@ const adminHTML = `<!doctype html>
           '</div>';
       }
 
-      // click → explainability panel
+      // single-dot click → explainability panel
       host.querySelectorAll('.xv-dot').forEach(dot => {
-        dot.addEventListener('click', () => openExplain(dot.getAttribute('data-rid')));
+        dot.addEventListener('click', () => {
+          if (xvDragJustFired) return; // drag just ended on this dot — skip click
+          openExplain(dot.getAttribute('data-rid'));
+        });
       });
+      // drag-to-select: starts on empty canvas space, not on a dot
+      bindXVDragSelect(points, W, H);
     }
 
     // Per-model summary table (sortable) below scatter
@@ -1239,6 +1246,150 @@ const adminHTML = `<!doctype html>
         });
       };
       render();
+    }
+
+    // ---------- XView drag-to-select ----------
+    // Flag to suppress a dot's click event if a drag just completed over it.
+    let xvDragJustFired = false;
+
+    function bindXVDragSelect(points, W, H) {
+      const svg = document.getElementById('xv-svg');
+      const selPanel = document.getElementById('xv-selection');
+      if (!svg || !selPanel) return;
+
+      // Build rid → point data map for the selection panel.
+      const ridMap = {};
+      points.forEach(p => { ridMap[p.request_id] = p; });
+
+      let dragStart = null, isDragging = false;
+      const selRect = document.getElementById('xv-sel-rect');
+
+      function toSVG(e) {
+        const r = svg.getBoundingClientRect();
+        return {
+          x: (e.clientX - r.left) * W / r.width,
+          y: (e.clientY - r.top) * H / r.height,
+        };
+      }
+
+      function onMove(e) {
+        if (!dragStart) return;
+        const cur = toSVG(e);
+        if (!isDragging && Math.hypot(cur.x - dragStart.x, cur.y - dragStart.y) < 4) return;
+        isDragging = true;
+        const rx = Math.min(dragStart.x, cur.x), ry = Math.min(dragStart.y, cur.y);
+        selRect.setAttribute('x', rx);
+        selRect.setAttribute('y', ry);
+        selRect.setAttribute('width',  Math.abs(cur.x - dragStart.x));
+        selRect.setAttribute('height', Math.abs(cur.y - dragStart.y));
+        selRect.style.display = '';
+      }
+
+      function onUp(e) {
+        window.removeEventListener('mousemove', onMove);
+        window.removeEventListener('mouseup',   onUp);
+        const end   = toSVG(e);
+        const start = dragStart;
+        dragStart = null;
+        selRect.style.display = 'none';
+        if (!isDragging) return;
+        isDragging = false;
+
+        const x1 = Math.min(start.x, end.x), x2 = Math.max(start.x, end.x);
+        const y1 = Math.min(start.y, end.y), y2 = Math.max(start.y, end.y);
+        if (x2 - x1 < 2 && y2 - y1 < 2) return;
+
+        const selected = [];
+        svg.querySelectorAll('.xv-dot').forEach(dot => {
+          const cx = parseFloat(dot.getAttribute('cx'));
+          const cy = parseFloat(dot.getAttribute('cy'));
+          if (cx >= x1 && cx <= x2 && cy >= y1 && cy <= y2) {
+            selected.push(dot.getAttribute('data-rid'));
+          }
+        });
+
+        if (!selected.length) { selPanel.innerHTML = ''; return; }
+
+        // Single point — open directly (suppress the simultaneous click event).
+        if (selected.length === 1) {
+          xvDragJustFired = true;
+          setTimeout(() => { xvDragJustFired = false; }, 0);
+          openExplain(selected[0]);
+          return;
+        }
+
+        // Dim unselected dots, enlarge selected ones.
+        svg.querySelectorAll('.xv-dot').forEach(dot => {
+          const inSel = selected.indexOf(dot.getAttribute('data-rid')) >= 0;
+          dot.setAttribute('fill-opacity', inSel ? '1'    : '0.12');
+          dot.setAttribute('r',           inSel ? '4.5'  : '3.2');
+        });
+
+        showXVSelectionPanel(selPanel, selected, ridMap);
+      }
+
+      // Drag starts only on the empty canvas, not on a dot.
+      svg.addEventListener('mousedown', e => {
+        if (e.button !== 0) return;
+        if (e.target.classList.contains('xv-dot')) return;
+        dragStart   = toSVG(e);
+        isDragging  = false;
+        window.addEventListener('mousemove', onMove);
+        window.addEventListener('mouseup',   onUp);
+      });
+    }
+
+    function showXVSelectionPanel(el, rids, ridMap) {
+      const yField = xviewYField(xviewState.metric);
+      const rows = rids.slice(0, 200).map(rid => {
+        const p   = ridMap[rid] || {};
+        const t   = Date.parse(p.created_at);
+        const ts  = isNaN(t) ? '' : new Date(t).toLocaleTimeString('ko-KR');
+        const sc  = p.status_code || 0;
+        const scStyle = sc >= 400 ? ' style="color:var(--bad)"' : '';
+        const badges  =
+          (sc >= 400                        ? '<span class="badge bad" style="margin-left:4px">' + sc + '</span>' : '') +
+          (p.failover                       ? '<span class="badge warn" style="margin-left:4px">폴백</span>' : '') +
+          ((p.policy_decision_count || 0) > 0 ? '<span class="badge" style="margin-left:4px">거버넌스</span>' : '');
+        return '<tr>' +
+          '<td>' + escapeHTML(p.model || '?') + badges + '</td>' +
+          '<td>' + xviewFmtY(xviewState.metric, p[yField] || 0) + '</td>' +
+          '<td>' + escapeHTML(p.provider || '') + '</td>' +
+          '<td class="muted">' + ts + '</td>' +
+          '<td><button class="secondary" type="button" onclick="openExplain(\'' + escapeAttr(rid) + '\')">XView 설명</button></td>' +
+        '</tr>';
+      }).join('');
+      const overflow = rids.length > 200
+        ? '<div class="muted" style="padding:4px 0">+' + fmt(rids.length - 200) + '개 더 선택됨 (목록은 200개로 제한)</div>'
+        : '';
+
+      el.innerHTML =
+        '<div style="border-top:2px solid var(--accent); padding-top:12px; margin-top:4px">' +
+          '<div style="display:flex; align-items:center; gap:12px; margin-bottom:8px; flex-wrap:wrap">' +
+            '<strong>' + fmt(rids.length) + '개 선택됨</strong>' +
+            '<span class="muted">각 항목의 XView 설명 버튼을 클릭하면 처리 근거를 확인합니다</span>' +
+            '<button class="secondary" type="button" id="xv-sel-clear" style="margin-left:auto">선택 해제 ✕</button>' +
+          '</div>' +
+          '<div style="overflow-x:auto">' +
+          '<table style="font-size:13px"><thead><tr>' +
+            '<th>모델</th>' +
+            '<th>' + xviewYLabel(xviewState.metric) + '</th>' +
+            '<th>provider</th>' +
+            '<th>시간</th>' +
+            '<th>설명</th>' +
+          '</tr></thead><tbody>' + rows + '</tbody></table>' +
+          '</div>' +
+          overflow +
+        '</div>';
+
+      document.getElementById('xv-sel-clear').addEventListener('click', () => {
+        el.innerHTML = '';
+        const svg = document.getElementById('xv-svg');
+        if (svg) svg.querySelectorAll('.xv-dot').forEach(dot => {
+          dot.setAttribute('fill-opacity', '0.72');
+          dot.setAttribute('r', '3.2');
+        });
+      });
     }
 
     // ---------- Waterfall View (transaction trace) ----------
