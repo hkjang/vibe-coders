@@ -6263,24 +6263,49 @@ const adminHTML = `<!doctype html>
         '<table><thead><tr><th>시각</th><th>모델</th><th>모드</th><th>질문</th><th>검증</th><th>생성 SQL</th><th>비용</th></tr></thead><tbody>' + logRows + '</tbody></table>'
         : '<div class="empty">Text2SQL 질의 기록 없음. 사용자가 <code>vibe/text2sql-preview</code> 모델로 <code>/v1/chat/completions</code> 를 호출하면 여기에 집계됩니다.</div>';
       const dbProfiles = d.db_profiles || [];
+      const connsData = await api('/admin/text2sql/connections').catch(() => ({ connections: [] }));
+      const conns = connsData.connections || [];
+      const connOptHtml = '<option value="">(기본 ENV)</option>' + conns.map(c =>
+        '<option value="' + escapeAttr(c.id) + '">' + escapeHTML(c.name) + (c.enabled ? '' : ' (중지)') + '</option>').join('');
       const dbpForm =
-        '<form class="inline-form" id="t2s-profile-form" style="grid-template-columns: 170px 90px 130px 130px 110px 70px; align-items:start;">' +
+        '<form class="inline-form" id="t2s-profile-form" style="grid-template-columns: 170px 90px 130px 130px 110px 140px 70px; align-items:start;">' +
           '<input id="tp-model" placeholder="vibe/text2sql-finance" required>' +
           '<select id="tp-mode"><option value="preview">preview</option><option value="execute">execute</option></select>' +
           '<input id="tp-upstream" placeholder="업스트림 모델">' +
           '<input id="tp-summary" placeholder="요약 모델(선택)">' +
           '<input id="tp-schema" placeholder="스키마명(선택)">' +
+          '<select id="tp-conn">' + connOptHtml + '</select>' +
           '<button type="submit">저장</button>' +
         '</form>';
       const dbpRows = dbProfiles.map(p =>
         '<tr><td><code>' + escapeHTML(p.virtual_model) + '</code>' + (p.enabled ? '' : ' <span class="status error">중지</span>') + '</td>' +
         '<td>' + escapeHTML(p.mode) + '</td><td>' + escapeHTML(p.upstream_model || '') + '</td>' +
         '<td>' + escapeHTML(p.summary_model || '') + '</td><td>' + escapeHTML(p.schema_name || '') + '</td>' +
+        '<td>' + escapeHTML(p.exec_connection_id || '(기본)') + '</td>' +
         '<td><button class="danger" type="button" onclick="deleteT2SProfile(\'' + escapeAttr(p.virtual_model) + '\')">삭제</button></td></tr>'
       ).join('');
       const dbpTable = dbProfiles.length ?
-        '<table><thead><tr><th>가상 모델</th><th>모드</th><th>업스트림</th><th>요약</th><th>스키마</th><th>동작</th></tr></thead><tbody>' + dbpRows + '</tbody></table>'
+        '<table><thead><tr><th>가상 모델</th><th>모드</th><th>업스트림</th><th>요약</th><th>스키마</th><th>실행DB</th><th>동작</th></tr></thead><tbody>' + dbpRows + '</tbody></table>'
         : '<div class="empty">런타임 프로필 없음. 등록하면 env 기본값을 오버라이드하거나 새 가상 모델(예: <code>vibe/text2sql-finance</code>)을 추가할 수 있습니다.</div>';
+      const connsForm =
+        '<form class="inline-form" id="t2s-conn-form" style="grid-template-columns: 120px 140px 90px minmax(200px,2fr) minmax(120px,1fr) 70px; align-items:start;">' +
+          '<input id="tc-id" placeholder="ID (슬러그)" required>' +
+          '<input id="tc-name" placeholder="표시 이름" required>' +
+          '<select id="tc-driver"><option value="sqlite">SQLite</option><option value="postgres">PostgreSQL</option></select>' +
+          '<input id="tc-dsn" type="password" placeholder="DSN (암호화 저장)" autocomplete="new-password">' +
+          '<input id="tc-desc" placeholder="설명">' +
+          '<button type="submit">저장</button>' +
+        '</form>';
+      const connsRows = conns.map(c =>
+        '<tr><td><code>' + escapeHTML(c.id) + '</code>' + (c.enabled ? '' : ' <span class="status error">중지</span>') + '</td>' +
+        '<td>' + escapeHTML(c.name) + '</td><td>' + escapeHTML(c.driver) + '</td>' +
+        '<td>' + escapeHTML(c.description || '') + '</td>' +
+        '<td><button type="button" onclick="t2sConnHealthcheck(\'' + escapeAttr(c.id) + '\')">헬스체크</button></td>' +
+        '<td><button class="danger" type="button" onclick="deleteT2SConn(\'' + escapeAttr(c.id) + '\')">삭제</button></td></tr>'
+      ).join('');
+      const connsTable = conns.length
+        ? '<table><thead><tr><th>ID</th><th>이름</th><th>드라이버</th><th>설명</th><th></th><th></th></tr></thead><tbody>' + connsRows + '</tbody></table>'
+        : '<div class="empty">등록된 실행 DB 연결 없음. 추가하면 각 프로필이 특정 DB를 지정해 SQL을 실행할 수 있습니다. (미등록 시 env TEXT2SQL_EXEC_DSN 사용)</div>';
       const perms = d.permissions || [];
       const permForm =
         '<form class="inline-form" id="t2s-perm-form" style="grid-template-columns: 100px 130px 110px 110px 110px 90px 70px; align-items:start;">' +
@@ -6434,9 +6459,10 @@ const adminHTML = `<!doctype html>
         section('요약 (최근 7일)', kpis) +
         section('가상 모델 프로필 (기본)', profileTable) +
         section('런타임 프로필 (DB 오버라이드 · 신규 가상모델)', dbpForm + dbpTable) +
+        section('실행 DB 연결 관리', connsForm + connsTable) +
         section('모델별 SQL 품질 (최근 7일)', mmTable) +
         section('스키마 카탈로그 · 테이블 권한', schemaForm + schemaTable) +
-        section('스키마 레지스트리 (테이블 · 컬럼 · 민감도)', registryHTML()) +
+        section('스키마 레지스트리 (테이블 · 컬럼 · 민감도)', registryHTML(conns)) +
         section('권한 매트릭스 (subject × schema/table/column)', permForm + permTable) +
         section('실패 원인 분류 (최근 7일)', failTable) +
         section('기능 토글 (런타임 온오프)', featTable) +
@@ -6462,6 +6488,8 @@ const adminHTML = `<!doctype html>
       if (reBtn) reBtn.addEventListener('click', exportT2SRegistry);
       const riFile = document.getElementById('t2s-registry-import-file');
       if (riFile) riFile.addEventListener('change', importT2SRegistry);
+      const cf2 = document.getElementById('t2s-conn-form');
+      if (cf2) cf2.addEventListener('submit', addT2SConn);
       const pf = document.getElementById('t2s-profile-form');
       if (pf) pf.addEventListener('submit', addT2SProfile);
       const pmf = document.getElementById('t2s-perm-form');
@@ -6517,20 +6545,23 @@ const adminHTML = `<!doctype html>
       await api('/admin/text2sql/glossary?id=' + encodeURIComponent(id), { method: 'DELETE' });
       route();
     };
-    function registryHTML() {
+    function registryHTML(conns) {
+      const connOpts = '<option value="">(기본 ENV)</option>' + (conns || []).map(c =>
+        '<option value="' + escapeAttr(c.id) + '">' + escapeHTML(c.name) + (c.enabled ? '' : ' (중지)') + '</option>').join('');
       return '<div class="muted" style="padding:10px 14px 6px;font-size:12px;line-height:1.5">' +
-        '<strong>스키마 레지스트리란?</strong> 프록시 내부 DB에 등록된 테이블·컬럼 목록입니다. ' +
-        'Text2SQL이 SQL을 생성할 때 이 목록을 참조합니다.<br>' +
-        '<strong>불러오기</strong> — 내부 레지스트리에서 해당 스키마명으로 등록된 테이블·컬럼을 화면에 표시합니다.<br>' +
-        '<strong>실행DB에서 자동 수집</strong> — 설정된 실행 DB(TEXT2SQL_EXEC_DSN)의 <code>information_schema</code>를 읽어 테이블·컬럼을 자동으로 레지스트리에 추가합니다.<br>' +
-        '<strong>내보내기</strong> — 현재 스키마(또는 전체)를 JSON 파일로 저장합니다. <strong>가져오기</strong> — JSON 파일로 일괄 등록합니다.</div>' +
+        '<strong>스키마 레지스트리란?</strong> 프록시 내부 DB에 저장된 테이블·컬럼 목록입니다. Text2SQL이 SQL 생성 시 이 목록을 참조합니다.<br>' +
+        '<strong>레지스트리 불러오기</strong> — 내부 레지스트리(프록시 DB)에 등록된 테이블·컬럼을 화면에 표시합니다.<br>' +
+        '<strong>실행DB에서 자동 수집</strong> — 아래 "수집 DB 선택"에서 고른 실행 DB의 <code>information_schema</code>를 읽어 테이블·컬럼을 자동으로 레지스트리에 추가합니다.<br>' +
+        '<strong>JSON 내보내기</strong> — 현재 스키마(또는 전체)를 JSON 파일로 저장합니다. <strong>JSON 가져오기</strong> — JSON 파일로 일괄 등록합니다. <strong>샘플 JSON</strong> — 가져오기 형식 예시를 다운로드합니다.</div>' +
         '<div class="toolbar" style="border-bottom:0;flex-wrap:wrap;gap:6px">' +
         '<input id="t2s-reg-schema" placeholder="스키마명 (예: analytics, 비우면 전체)" style="max-width:220px">' +
         '<button type="button" id="t2s-registry-load">레지스트리 불러오기</button>' +
+        '<select id="t2s-collect-conn" style="max-width:160px" title="자동 수집 시 사용할 실행 DB">' + connOpts + '</select>' +
         '<button type="button" class="secondary" id="t2s-registry-collect">실행DB에서 자동 수집</button>' +
         '<button type="button" class="secondary" id="t2s-registry-export">JSON 내보내기</button>' +
         '<label class="secondary" style="cursor:pointer;display:inline-flex;align-items:center;padding:0 10px;height:32px;border-radius:4px;border:1px solid var(--border);font-size:13px">' +
         'JSON 가져오기<input type="file" id="t2s-registry-import-file" accept=".json" style="display:none"></label>' +
+        '<button type="button" class="secondary" onclick="downloadT2SSample()">샘플 JSON</button>' +
         '<span class="muted" id="t2s-collect-result"></span></div>' +
         '<form class="inline-form" id="t2s-table-form" style="grid-template-columns: 140px minmax(220px,2fr) 70px; align-items:start;">' +
           '<input id="rt-table" placeholder="테이블명" required>' +
@@ -6568,10 +6599,14 @@ const adminHTML = `<!doctype html>
     async function collectT2SRegistry() {
       const schema = t2sRegSchema();
       const el = document.getElementById('t2s-collect-result');
+      const connEl = document.getElementById('t2s-collect-conn');
+      const connID = connEl ? connEl.value : '';
       if (!schema) { alert('스키마명을 입력하세요'); return; }
       if (el) el.textContent = ' 수집 중…';
       try {
-        const res = await api('/admin/text2sql/collect', { method: 'POST', body: JSON.stringify({ schema_name: schema }) });
+        const payload = { schema_name: schema };
+        if (connID) payload.connection_id = connID;
+        const res = await api('/admin/text2sql/collect', { method: 'POST', body: JSON.stringify(payload) });
         if (el) el.textContent = ' 테이블 ' + res.added_tables + ' · 컬럼 ' + res.added_columns + ' 추가';
         loadT2SRegistry();
       } catch (err) {
@@ -6662,6 +6697,7 @@ const adminHTML = `<!doctype html>
         upstream_model: document.getElementById('tp-upstream').value.trim(),
         summary_model: document.getElementById('tp-summary').value.trim(),
         schema_name: document.getElementById('tp-schema').value.trim(),
+        exec_connection_id: document.getElementById('tp-conn').value,
       };
       if (!body.virtual_model) { alert('가상 모델명을 입력하세요'); return; }
       await api('/admin/text2sql/profiles', { method: 'POST', body: JSON.stringify(body) });
@@ -6672,6 +6708,56 @@ const adminHTML = `<!doctype html>
       await api('/admin/text2sql/profiles?virtual_model=' + encodeURIComponent(vm), { method: 'DELETE' });
       route();
     };
+    async function addT2SConn(e) {
+      e.preventDefault();
+      const body = {
+        id: document.getElementById('tc-id').value.trim(),
+        name: document.getElementById('tc-name').value.trim(),
+        driver: document.getElementById('tc-driver').value,
+        dsn: document.getElementById('tc-dsn').value,
+        description: document.getElementById('tc-desc').value.trim(),
+        enabled: true,
+      };
+      if (!body.id || !body.name) { alert('ID와 이름을 입력하세요'); return; }
+      try {
+        await api('/admin/text2sql/connections', { method: 'POST', body: JSON.stringify(body) });
+        route();
+      } catch (err) { alert('저장 실패: ' + err.message); }
+    }
+    window.deleteT2SConn = async (id) => {
+      if (!confirm(id + ' 연결을 삭제하시겠습니까?')) return;
+      await api('/admin/text2sql/connections?id=' + encodeURIComponent(id), { method: 'DELETE' });
+      route();
+    };
+    window.t2sConnHealthcheck = async (connID) => {
+      const qs = connID ? '?connection_id=' + encodeURIComponent(connID) : '';
+      try {
+        const res = await api('/admin/text2sql/healthcheck' + qs);
+        alert('헬스체크 결과 (' + escapeHTML(connID || '기본') + '):\n상태: ' + (res.status || '-') + '\n' + (res.detail || ''));
+      } catch (err) { alert('헬스체크 실패: ' + err.message); }
+    };
+    function downloadT2SSample() {
+      const sample = {
+        version: 1,
+        tables: [
+          { schema_name: "analytics", table_name: "orders", description: "주문 테이블", enabled: true },
+          { schema_name: "analytics", table_name: "customers", description: "고객 테이블", enabled: true }
+        ],
+        columns: [
+          { schema_name: "analytics", table_name: "orders", column_name: "order_id", data_type: "bigint", description: "주문 고유 ID", sensitivity: "normal" },
+          { schema_name: "analytics", table_name: "orders", column_name: "customer_id", data_type: "bigint", description: "고객 ID", sensitivity: "normal" },
+          { schema_name: "analytics", table_name: "orders", column_name: "amount", data_type: "decimal", description: "주문 금액(원)", sensitivity: "normal" },
+          { schema_name: "analytics", table_name: "orders", column_name: "phone", data_type: "text", description: "고객 전화번호", sensitivity: "mask" },
+          { schema_name: "analytics", table_name: "customers", column_name: "id", data_type: "bigint", description: "고객 ID", sensitivity: "normal" },
+          { schema_name: "analytics", table_name: "customers", column_name: "email", data_type: "text", description: "이메일 주소", sensitivity: "exclude" }
+        ]
+      };
+      const blob = new Blob([JSON.stringify(sample, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = 't2s-registry-sample.json'; a.click();
+      URL.revokeObjectURL(url);
+    }
     async function addT2SGolden(e) {
       e.preventDefault();
       const body = {

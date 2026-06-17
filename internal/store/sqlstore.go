@@ -576,6 +576,17 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 				enabled INTEGER NOT NULL DEFAULT 1,
 				updated_at TEXT NOT NULL
 			)`,
+		`CREATE TABLE IF NOT EXISTS text2sql_exec_connections (
+				id TEXT PRIMARY KEY,
+				name TEXT NOT NULL,
+				driver TEXT NOT NULL DEFAULT 'sqlite',
+				encrypted_dsn TEXT NOT NULL DEFAULT '',
+				description TEXT,
+				enabled INTEGER NOT NULL DEFAULT 1,
+				created_at TEXT NOT NULL,
+				updated_at TEXT NOT NULL
+			)`,
+		`ALTER TABLE text2sql_profiles ADD COLUMN exec_connection_id TEXT NOT NULL DEFAULT ''`,
 		`CREATE TABLE IF NOT EXISTS text2sql_golden_queries (
 				id TEXT PRIMARY KEY,
 				name TEXT NOT NULL,

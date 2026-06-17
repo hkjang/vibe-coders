@@ -34,6 +34,7 @@ func (s *Server) handleText2SQL(w http.ResponseWriter, r *http.Request, meta sto
 	// DB profile override: lets operators define/override virtual-model mappings (and
 	// add new virtual models) at runtime without a redeploy.
 	profileSchemaName := ""
+	profileExecConnID := ""
 	if dbp, found, _ := s.db.GetText2SQLProfile(r.Context(), meta.Request.Model); found && dbp.Enabled {
 		if dbp.Mode != "" {
 			profile.Mode = text2sql.Mode(dbp.Mode)
@@ -46,6 +47,7 @@ func (s *Server) handleText2SQL(w http.ResponseWriter, r *http.Request, meta sto
 			profile.SummaryModel = dbp.SummaryModel
 		}
 		profileSchemaName = dbp.SchemaName
+		profileExecConnID = dbp.ExecConnectionID
 	}
 
 	// Auto profile: pick the upstream model from complexity, then upgrade to the
@@ -350,7 +352,7 @@ func (s *Server) handleText2SQL(w http.ResponseWriter, r *http.Request, meta sto
 	}
 
 	// 4) Execute mode: run the validated SELECT read-only.
-	cols, rows, rowCount, risk, execErr := s.execText2SQL(r.Context(), validation.SQL)
+	cols, rows, rowCount, risk, execErr := s.execText2SQL(r.Context(), profileExecConnID, validation.SQL)
 	logRec.ExplainCost = risk.Cost
 	logRec.ExplainRisk = risk.Score
 	if execErr != nil {
@@ -823,11 +825,11 @@ func renderResultTable(cols []string, rows [][]string) string {
 	return b.String()
 }
 
-// execText2SQL opens (lazily) the read-only execute DB, scores the plan, and runs
-// the validated query. The returned explainRisk is recorded even when the query is
-// allowed (risk < 50).
-func (s *Server) execText2SQL(ctx context.Context, query string) ([]string, [][]string, int64, explainRisk, error) {
-	db, err := s.text2sqlExecDB()
+// execText2SQL opens (lazily) the read-only execute DB for connID, scores the plan,
+// and runs the validated query. connID "" or "default" uses the env-configured DB.
+// The returned explainRisk is recorded even when the query is allowed (risk < 50).
+func (s *Server) execText2SQL(ctx context.Context, connID, query string) ([]string, [][]string, int64, explainRisk, error) {
+	db, err := s.text2sqlExecDBByID(ctx, connID)
 	if err != nil {
 		return nil, nil, 0, explainRisk{}, err
 	}
@@ -900,25 +902,27 @@ func explainPlanFor(ctx context.Context, db *sql.DB, query string) (explainPlan,
 // handleText2SQLHealthcheck probes the Text2SQL execute database: connectivity, that
 // the read-only transaction sandbox works, whether the connecting account itself is
 // write-restricted (defense in depth), and that a statement timeout can be applied.
-// GET /admin/text2sql/healthcheck
+// GET /admin/text2sql/healthcheck[?connection_id=ID]
 func (s *Server) handleText2SQLHealthcheck(w http.ResponseWriter, r *http.Request) {
 	if !s.authorizeAdmin(r) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
 	}
 	cfg := s.t2sConf()
+	connID := strings.TrimSpace(r.URL.Query().Get("connection_id"))
 	out := map[string]any{
-		"configured":        cfg.ExecDSN != "",
+		"configured":        cfg.ExecDSN != "" || connID != "",
 		"driver":            cfg.ExecDriver,
 		"statement_timeout": cfg.StatementTimeout.String(),
+		"connection_id":     connID,
 	}
-	if cfg.ExecDSN == "" {
+	if cfg.ExecDSN == "" && connID == "" {
 		out["status"] = "preview_only"
 		out["detail"] = "TEXT2SQL_EXEC_DSN 미설정 — preview 전용 (실행 비활성)"
 		writeJSON(w, http.StatusOK, out)
 		return
 	}
-	db, err := s.text2sqlExecDB()
+	db, err := s.text2sqlExecDBByID(r.Context(), connID)
 	if err != nil {
 		out["status"] = "error"
 		out["reachable"] = false
@@ -1034,6 +1038,44 @@ func (s *Server) text2sqlExecDB() (*sql.DB, error) {
 	}
 	db.SetMaxOpenConns(4)
 	s.t2sExec.Store(db)
+	return db, nil
+}
+
+// text2sqlExecDBByID returns the execution DB for a named connection ID.
+// "" / "default" falls back to the env-configured TEXT2SQL_EXEC_DSN (existing
+// behaviour). Named connections are looked up in text2sql_exec_connections and
+// cached in t2sExecConns (sync.Map) for the lifetime of the process.
+func (s *Server) text2sqlExecDBByID(ctx context.Context, connID string) (*sql.DB, error) {
+	if connID == "" || connID == "default" {
+		return s.text2sqlExecDB()
+	}
+	if cached, ok := s.t2sExecConns.Load(connID); ok {
+		return cached.(*sql.DB), nil
+	}
+	conn, found, err := s.db.GetText2SQLExecConnection(ctx, connID)
+	if err != nil {
+		return nil, fmt.Errorf("exec connection %q: %w", connID, err)
+	}
+	if !found || !conn.Enabled {
+		return nil, fmt.Errorf("exec connection %q not found or disabled", connID)
+	}
+	dsn, err := s.secrets.Decrypt(conn.EncryptedDSN)
+	if err != nil {
+		return nil, fmt.Errorf("exec connection %q: decrypt DSN: %w", connID, err)
+	}
+	driver := strings.ToLower(strings.TrimSpace(conn.Driver))
+	if driver == "postgres" || driver == "postgresql" {
+		driver = "pgx"
+	}
+	if driver == "" {
+		driver = "sqlite"
+	}
+	db, err := sql.Open(driver, dsn)
+	if err != nil {
+		return nil, fmt.Errorf("exec connection %q: open: %w", connID, err)
+	}
+	db.SetMaxOpenConns(4)
+	s.t2sExecConns.Store(connID, db)
 	return db, nil
 }
 

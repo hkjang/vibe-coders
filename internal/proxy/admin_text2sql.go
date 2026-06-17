@@ -785,7 +785,7 @@ func (s *Server) handleText2SQLPermissions(w http.ResponseWriter, r *http.Reques
 
 // handleText2SQLCollect auto-collects the table/column layout from the execute DB
 // (information_schema / sqlite_master) into the registry under a schema name.
-// POST /admin/text2sql/collect {schema_name, db_schema}
+// POST /admin/text2sql/collect {schema_name, db_schema, connection_id?}
 func (s *Server) handleText2SQLCollect(w http.ResponseWriter, r *http.Request) {
 	if !s.authorizeAdmin(r) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
@@ -795,31 +795,116 @@ func (s *Server) handleText2SQLCollect(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
 		return
 	}
-	if s.t2sConf().ExecDSN == "" {
-		writeOpenAIError(w, http.StatusBadRequest, "execute DB is not configured (TEXT2SQL_EXEC_DSN)", "invalid_request_error", "no_exec_db")
-		return
-	}
 	var p struct {
-		SchemaName string `json:"schema_name"`
-		DBSchema   string `json:"db_schema"`
+		SchemaName   string `json:"schema_name"`
+		DBSchema     string `json:"db_schema"`
+		ConnectionID string `json:"connection_id"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&p)
 	if strings.TrimSpace(p.SchemaName) == "" {
 		writeOpenAIError(w, http.StatusBadRequest, "schema_name is required", "invalid_request_error", "missing_schema")
 		return
 	}
-	db, err := s.text2sqlExecDB()
+	connID := strings.TrimSpace(p.ConnectionID)
+	if connID == "" && s.t2sConf().ExecDSN == "" {
+		writeOpenAIError(w, http.StatusBadRequest, "execute DB is not configured (TEXT2SQL_EXEC_DSN or connection_id required)", "invalid_request_error", "no_exec_db")
+		return
+	}
+	db, err := s.text2sqlExecDBByID(r.Context(), connID)
 	if err != nil {
 		writeOpenAIError(w, http.StatusBadGateway, "exec DB open failed: "+err.Error(), "server_error", "exec_db_failed")
 		return
 	}
-	tables, cols, err := s.db.CollectInformationSchema(r.Context(), db, s.t2sConf().ExecDriver, strings.TrimSpace(p.DBSchema), strings.TrimSpace(p.SchemaName))
+	// Determine driver: named connection owns its own driver; default falls back to env config.
+	driver := s.t2sConf().ExecDriver
+	if connID != "" && connID != "default" {
+		if conn, found, cerr := s.db.GetText2SQLExecConnection(r.Context(), connID); cerr == nil && found {
+			driver = conn.Driver
+		}
+	}
+	tables, cols, err := s.db.CollectInformationSchema(r.Context(), db, driver, strings.TrimSpace(p.DBSchema), strings.TrimSpace(p.SchemaName))
 	if err != nil {
 		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "collect_failed")
 		return
 	}
-	s.auditAdmin(r, "text2sql.schema.collect", "", auditJSON(map[string]any{"schema": p.SchemaName, "added_tables": tables, "added_columns": cols}))
-	writeJSON(w, http.StatusOK, map[string]any{"schema_name": p.SchemaName, "added_tables": tables, "added_columns": cols})
+	s.auditAdmin(r, "text2sql.schema.collect", "", auditJSON(map[string]any{"schema": p.SchemaName, "connection_id": connID, "added_tables": tables, "added_columns": cols}))
+	writeJSON(w, http.StatusOK, map[string]any{"schema_name": p.SchemaName, "connection_id": connID, "added_tables": tables, "added_columns": cols})
+}
+
+// handleText2SQLConnections manages named execution DB connections.
+// GET /admin/text2sql/connections
+// POST /admin/text2sql/connections  {id, name, driver, dsn, description, enabled}
+// DELETE /admin/text2sql/connections?id=
+func (s *Server) handleText2SQLConnections(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		conns, err := s.db.ListText2SQLExecConnections(r.Context())
+		if err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "connections_failed")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"connections": conns})
+	case http.MethodPost:
+		var p struct {
+			ID          string `json:"id"`
+			Name        string `json:"name"`
+			Driver      string `json:"driver"`
+			DSN         string `json:"dsn"`
+			Description string `json:"description"`
+			Enabled     *bool  `json:"enabled"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+			writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "invalid_body")
+			return
+		}
+		p.ID = strings.TrimSpace(p.ID)
+		p.Name = strings.TrimSpace(p.Name)
+		if p.ID == "" || p.Name == "" {
+			writeOpenAIError(w, http.StatusBadRequest, "id and name are required", "invalid_request_error", "missing_fields")
+			return
+		}
+		c := store.Text2SQLExecConnection{
+			ID: p.ID, Name: p.Name, Driver: firstNonEmpty(p.Driver, "sqlite"),
+			Description: p.Description, Enabled: true,
+		}
+		if p.Enabled != nil {
+			c.Enabled = *p.Enabled
+		}
+		if strings.TrimSpace(p.DSN) != "" {
+			enc, err := s.secrets.Encrypt(strings.TrimSpace(p.DSN))
+			if err != nil {
+				writeOpenAIError(w, http.StatusInternalServerError, "DSN 암호화 실패: "+err.Error(), "server_error", "encrypt_failed")
+				return
+			}
+			c.EncryptedDSN = enc
+		}
+		if err := s.db.UpsertText2SQLExecConnection(r.Context(), c); err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "connection_save_failed")
+			return
+		}
+		// Invalidate cached *sql.DB for this connection so next request re-opens it.
+		s.t2sExecConns.Delete(p.ID)
+		s.auditAdmin(r, "text2sql.connection.upsert", "", auditJSON(map[string]any{"id": c.ID, "name": c.Name, "driver": c.Driver}))
+		writeJSON(w, http.StatusCreated, map[string]any{"connection": c})
+	case http.MethodDelete:
+		id := strings.TrimSpace(r.URL.Query().Get("id"))
+		if id == "" {
+			writeOpenAIError(w, http.StatusBadRequest, "id query param required", "invalid_request_error", "missing_id")
+			return
+		}
+		if err := s.db.DeleteText2SQLExecConnection(r.Context(), id); err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "connection_delete_failed")
+			return
+		}
+		s.t2sExecConns.Delete(id)
+		writeJSON(w, http.StatusOK, map[string]string{"id": id, "status": "deleted"})
+	default:
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+	}
 }
 
 // handleText2SQLRegistryExport exports all tables and columns in the schema registry

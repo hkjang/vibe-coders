@@ -31,7 +31,7 @@ import (
 )
 
 // AppVersion is the gateway build version, surfaced in /auth/me and the admin UI.
-const AppVersion = "v0.45.0"
+const AppVersion = "v0.46.0"
 
 type Server struct {
 	cfg          config.Config
@@ -50,7 +50,8 @@ type Server struct {
 	learnCache   atomic.Pointer[routingLearnSnapshot]
 	priceCache   atomic.Pointer[pricingSnapshot]
 	mmCache      atomic.Pointer[mattermostSnapshot]
-	t2sExec      atomic.Pointer[sql.DB]          // lazily-opened read-only DB for Text2SQL execute mode
+	t2sExec      atomic.Pointer[sql.DB]          // lazily-opened read-only DB for Text2SQL execute mode (default / env)
+	t2sExecConns sync.Map                        // named exec connections: connID → *sql.DB
 	t2sTwin      atomic.Pointer[sql.DB]          // lazily-opened SQL Digital Twin DB (masked/sample) for safe validation
 	t2sKilled    atomic.Bool                     // runtime kill switch: when set, Text2SQL is disabled regardless of config
 	t2sFeatures  atomic.Pointer[map[string]bool] // runtime Text2SQL feature toggles (admin-managed)
@@ -255,6 +256,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/admin/text2sql/profiles", s.handleText2SQLProfiles)
 	mux.HandleFunc("/admin/text2sql/tables", s.handleText2SQLTables)
 	mux.HandleFunc("/admin/text2sql/columns", s.handleText2SQLColumns)
+	mux.HandleFunc("/admin/text2sql/connections", s.handleText2SQLConnections)
 	mux.HandleFunc("/admin/text2sql/collect", s.handleText2SQLCollect)
 	mux.HandleFunc("/admin/text2sql/registry/export", s.handleText2SQLRegistryExport)
 	mux.HandleFunc("/admin/text2sql/registry/import", s.handleText2SQLRegistryImport)
