@@ -1025,8 +1025,7 @@ const adminHTML = `<!doctype html>
         '</div>' +
         '<div id="xv-chart" style="padding:14px"></div>' +
         '<div id="xv-legend" style="padding:0 14px 14px"></div>' +
-        '<div id="xv-model-table" style="padding:0 14px 14px"></div>' +
-        '<div id="xv-selection" style="padding:0 14px 14px"></div>'
+        '<div id="xv-model-table" style="padding:0 14px 14px"></div>'
       );
       drawScatter(points, groups, modelIndex);
       renderModelGroupTable(groups);
@@ -1254,10 +1253,8 @@ const adminHTML = `<!doctype html>
 
     function bindXVDragSelect(points) {
       const svg = document.getElementById('xv-svg');
-      const selPanel = document.getElementById('xv-selection');
-      if (!svg || !selPanel) return;
+      if (!svg) return;
 
-      // Build rid → point data map for the selection panel.
       const ridMap = {};
       points.forEach(p => { ridMap[p.request_id] = p; });
 
@@ -1265,9 +1262,6 @@ const adminHTML = `<!doctype html>
       const selRect = document.getElementById('xv-sel-rect');
 
       function toSVG(e) {
-        // createSVGPoint + getScreenCTM().inverse() correctly maps viewport
-        // coordinates to the SVG viewBox coordinate space, including
-        // preserveAspectRatio letterboxing, CSS transforms, and scroll offsets.
         const pt = svg.createSVGPoint();
         pt.x = e.clientX;
         pt.y = e.clientY;
@@ -1311,9 +1305,9 @@ const adminHTML = `<!doctype html>
           }
         });
 
-        if (!selected.length) { selPanel.innerHTML = ''; return; }
+        if (!selected.length) return;
 
-        // Single point — open directly (suppress the simultaneous click event).
+        // Single point — open explain directly.
         if (selected.length === 1) {
           xvDragJustFired = true;
           setTimeout(() => { xvDragJustFired = false; }, 0);
@@ -1321,39 +1315,31 @@ const adminHTML = `<!doctype html>
           return;
         }
 
-        // Dim unselected dots, enlarge selected ones.
-        svg.querySelectorAll('.xv-dot').forEach(dot => {
-          const inSel = selected.indexOf(dot.getAttribute('data-rid')) >= 0;
-          dot.setAttribute('fill-opacity', inSel ? '1'    : '0.12');
-          dot.setAttribute('r',           inSel ? '4.5'  : '3.2');
-        });
-
-        showXVSelectionPanel(selPanel, selected, ridMap);
+        // Multiple points — open selection list in modal.
+        openModal('선택된 요청 ' + fmt(selected.length) + '개', buildXVSelectionHTML(selected, ridMap));
       }
 
-      // Drag starts only on the empty canvas, not on a dot.
       svg.addEventListener('mousedown', e => {
         if (e.button !== 0) return;
         if (e.target.classList.contains('xv-dot')) return;
-        dragStart   = toSVG(e);
-        isDragging  = false;
+        dragStart  = toSVG(e);
+        isDragging = false;
         window.addEventListener('mousemove', onMove);
         window.addEventListener('mouseup',   onUp);
       });
     }
 
-    function showXVSelectionPanel(el, rids, ridMap) {
+    function buildXVSelectionHTML(rids, ridMap) {
       const yField = xviewYField(xviewState.metric);
       const rows = rids.slice(0, 200).map(rid => {
-        const p   = ridMap[rid] || {};
-        const t   = Date.parse(p.created_at);
-        const ts  = isNaN(t) ? '' : new Date(t).toLocaleTimeString('ko-KR');
-        const sc  = p.status_code || 0;
-        const scStyle = sc >= 400 ? ' style="color:var(--bad)"' : '';
-        const badges  =
-          (sc >= 400                        ? '<span class="badge bad" style="margin-left:4px">' + sc + '</span>' : '') +
-          (p.failover                       ? '<span class="badge warn" style="margin-left:4px">폴백</span>' : '') +
-          ((p.policy_decision_count || 0) > 0 ? '<span class="badge" style="margin-left:4px">거버넌스</span>' : '');
+        const p  = ridMap[rid] || {};
+        const t  = Date.parse(p.created_at);
+        const ts = isNaN(t) ? '' : new Date(t).toLocaleTimeString('ko-KR');
+        const sc = p.status_code || 0;
+        const badges =
+          (sc >= 400                          ? '<span class="badge bad"  style="margin-left:4px">' + sc + '</span>' : '') +
+          (p.failover                         ? '<span class="badge warn" style="margin-left:4px">폴백</span>' : '') +
+          ((p.policy_decision_count || 0) > 0 ? '<span class="badge"      style="margin-left:4px">거버넌스</span>' : '');
         return '<tr>' +
           '<td>' + escapeHTML(p.model || '?') + badges + '</td>' +
           '<td>' + xviewFmtY(xviewState.metric, p[yField] || 0) + '</td>' +
@@ -1363,36 +1349,18 @@ const adminHTML = `<!doctype html>
         '</tr>';
       }).join('');
       const overflow = rids.length > 200
-        ? '<div class="muted" style="padding:4px 0">+' + fmt(rids.length - 200) + '개 더 선택됨 (목록은 200개로 제한)</div>'
+        ? '<div class="muted" style="margin-top:8px">+' + fmt(rids.length - 200) + '개 더 선택됨 (목록은 200개로 제한)</div>'
         : '';
-
-      el.innerHTML =
-        '<div style="border-top:2px solid var(--accent); padding-top:12px; margin-top:4px">' +
-          '<div style="display:flex; align-items:center; gap:12px; margin-bottom:8px; flex-wrap:wrap">' +
-            '<strong>' + fmt(rids.length) + '개 선택됨</strong>' +
-            '<span class="muted">각 항목의 XView 설명 버튼을 클릭하면 처리 근거를 확인합니다</span>' +
-            '<button class="secondary" type="button" id="xv-sel-clear" style="margin-left:auto">선택 해제 ✕</button>' +
-          '</div>' +
-          '<div style="overflow-x:auto">' +
-          '<table style="font-size:13px"><thead><tr>' +
-            '<th>모델</th>' +
-            '<th>' + xviewYLabel(xviewState.metric) + '</th>' +
-            '<th>provider</th>' +
-            '<th>시간</th>' +
-            '<th>설명</th>' +
-          '</tr></thead><tbody>' + rows + '</tbody></table>' +
-          '</div>' +
-          overflow +
-        '</div>';
-
-      document.getElementById('xv-sel-clear').addEventListener('click', () => {
-        el.innerHTML = '';
-        const svg = document.getElementById('xv-svg');
-        if (svg) svg.querySelectorAll('.xv-dot').forEach(dot => {
-          dot.setAttribute('fill-opacity', '0.72');
-          dot.setAttribute('r', '3.2');
-        });
-      });
+      return '<p class="muted" style="margin:0 0 10px">각 항목의 XView 설명 버튼을 클릭하면 처리 근거를 확인합니다.</p>' +
+        '<div style="overflow-x:auto">' +
+        '<table style="font-size:13px"><thead><tr>' +
+          '<th>모델</th>' +
+          '<th>' + xviewYLabel(xviewState.metric) + '</th>' +
+          '<th>provider</th>' +
+          '<th>시간</th>' +
+          '<th>설명</th>' +
+        '</tr></thead><tbody>' + rows + '</tbody></table>' +
+        '</div>' + overflow;
     }
 
     // ---------- Waterfall View (transaction trace) ----------
