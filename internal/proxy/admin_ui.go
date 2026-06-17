@@ -242,9 +242,6 @@ const adminHTML = `<!doctype html>
     <h1>AI 게이트웨이</h1>
     <nav id="tabs">
       <a href="#/dashboard" data-tab="dashboard" class="active">대시보드</a>
-      <a href="#/xview" data-tab="xview">XView</a>
-      <a href="#/waterfall" data-tab="waterfall">Waterfall</a>
-      <a href="#/llm" data-tab="llm">LLM 관측</a>
       <a href="#/mcp" data-tab="mcp">MCP</a>
       <a href="#/agents" data-tab="agents">에이전트</a>
       <a href="#/vcs" data-tab="vcs">VCS</a>
@@ -735,7 +732,14 @@ const adminHTML = `<!doctype html>
     // parent so the top-level nav stays highlighted.
     function renderSubTabs(tab, rest) {
       const el = document.getElementById('subtabs');
-      if (tab === 'dwdashboard' || tab === 'clickhouse') {
+      if (tab === 'dashboard' || tab === 'xview' || tab === 'waterfall' || tab === 'llm') {
+        el.innerHTML = subNav([
+          { label: '대시보드', href: '#/dashboard', active: tab === 'dashboard' },
+          { label: 'XView', href: '#/xview', active: tab === 'xview' },
+          { label: 'Waterfall', href: '#/waterfall', active: tab === 'waterfall' },
+          { label: 'LLM 관측', href: '#/llm', active: tab === 'llm' },
+        ]);
+      } else if (tab === 'dwdashboard' || tab === 'clickhouse') {
         const onCH = tab === 'clickhouse' || rest[0] === 'clickhouse';
         el.innerHTML = subNav([
           { label: 'DW 대시보드', href: '#/dwdashboard', active: !onCH },
@@ -756,7 +760,9 @@ const adminHTML = `<!doctype html>
       const { parts, params } = parseHash();
       const [tab, ...rest] = parts;
       // Nested sub-views keep their parent's top-level nav tab highlighted.
-      const navTab = tab === 'clickhouse' ? 'dwdashboard' : tab === 'runtimesettings' ? 'settings' : tab;
+      const navTab = (tab === 'xview' || tab === 'waterfall' || tab === 'llm') ? 'dashboard'
+        : tab === 'clickhouse' ? 'dwdashboard'
+        : tab === 'runtimesettings' ? 'settings' : tab;
       setActiveTab(navTab);
       renderSubTabs(tab, rest);
       try {
