@@ -71,6 +71,7 @@ curl -X POST http://localhost:8080/admin/kill-switch \
 - 정책 리스트의 **우선순위(Priority, 1~999)** 값을 기준으로 정렬되어 순차적으로 평가됩니다. **우선순위 숫자가 낮을수록** 먼저 검사됩니다.
 - 여러 정책이 동시에 매칭되면 최종 동작은 `BLOCK > APPROVAL > ALLOW > DEFAULT` 순서로 결정됩니다. 예를 들어 한 rule이 `require_approval` 을 만들고 다른 rule이 `block` 을 만들면 HTTP 403 차단이 승인을 이깁니다.
 - 매칭된 판단은 `policy_decision_events` 에 남습니다. 차단/승인뿐 아니라 허용 판단(`allow`, `allow_model`, `allow_provider`)도 감사 추적을 위해 기록됩니다.
+- 매칭 규칙이 없는 정상 허용 경로도 `decision=default` 로 기록됩니다. XView·Trace Links·요청 상세의 실질 거버넌스 카운트(`policy_decision_count`)는 `default`를 제외하고, 원시 감사 이벤트 수는 `policy_decision_total` 로 확인합니다.
 
 ### 3.2 9대 정책 조건 (Conditions)
 정책 규칙 생성 시 매핑할 수 있는 조건 항목 명세입니다:

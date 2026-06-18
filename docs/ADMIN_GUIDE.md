@@ -50,6 +50,7 @@
 | Waterfall | 한 세션의 트랜잭션(요청)들을 시간순 간트 막대로 펼쳐, 첫 응답 대기(TTFB)·스트리밍 수신 구간과 요청 사이의 대기(생각) 시간을 보고 LLM 처리시간(busy) vs 대기시간(idle)을 분해 |
 | LLM 관측 | Datadog LLM Observability 대응 Trace/Span/Session/Prompt/Patterns/Insights/Feedback/Evaluation 화면 |
 | MCP | MCP/tool 서버·도구 리더보드, 호출/오류 집계, 오류 호출 drill-down |
+| 라우팅 | Intelligent Routing 학습 루프, routing preview/decision 조회, Provider Health ranking/degradation/trend 운영 화면 |
 | 에이전트 | 코딩 에이전트(Claude Code/Cursor/Roo/Qwen…)별 성공률·평균 비용·지연·도구 오류율 리더보드 (User-Agent 기반) |
 | VCS | GitLab/Bitbucket 커밋·MR 을 세션·사용자에 연결한 목록(Prompt→Commit→MR 상관). 저장소/세션/키/유형 필터 |
 | 호출 이력 | IP/모델/언어 필터로 검색, 두 행 선택 후 비교, 행 클릭 시 상세 모달 |
@@ -91,7 +92,7 @@
 
 거버넌스 레이어는 요청을 upstream으로 보내기 전에 정책, secret, 승인, MCP tool 위험도를 평가합니다. 정책은 안전 탭의 "AI 정책 엔진" 또는 `GET/POST /admin/policies` 로 관리하며 rule은 `conditions`와 `actions` JSON을 사용합니다. 예: `{ "contains_secret": true, "block": true }`, `{ "risk_score": ">80", "require_approval": true }`, `{ "team": "security", "allow_models": ["gpt-5", "claude-sonnet"] }`. `team` 조건은 팀 ID와 팀명을 모두 매칭하며, 엄격히 구분하려면 `team_id` 또는 `team_name` 을 사용할 수 있습니다.
 
-Secret Firewall은 API key, JWT, private key, password, AWS secret, DB connection string, access token을 탐지하고 정책에 따라 `detect`, `mask`, `block`으로 처리합니다. 탐지 이벤트는 안전 탭의 "Secret Firewall 이벤트" 또는 `GET /admin/security/secrets` 에서 확인합니다. `/admin/security/secrets` 는 `request_id`, `action`, `secret_type`, `team_id`, `api_key_id`, `user_id`, `location`, `matched_hash`, `window`, `since`, `limit` 필터를 지원합니다. 정책 판단 이벤트는 안전 탭의 "정책 판단 이벤트", `GET /admin/policies/decisions`, 요청별 XView/요청 상세의 Governance 패널에서 확인합니다. `/admin/policies/decisions` 는 `request_id`, `decision`, `policy_id`, `rule_id`, `team_id`, `api_key_id`, `user_id`, `endpoint`, `phase`, `model`, `provider`, `window`, `since`, `limit` 필터를 지원합니다. 승인 필요 요청은 `pending` approval을 만들고 `X-Governance-Approval-ID` 헤더를 반환합니다. 운영자는 안전 탭의 "승인 큐" 또는 `GET /admin/approvals` 로 승인 항목을 조회하고, `POST /admin/approvals/{id}/approve` / `/reject` 로 결정합니다. `/admin/approvals` 는 `id`, `request_id`, `status`, `team_id`, `api_key_id`, `user_id`, `subject_type`, `subject_id`, `decided_by`, `reason`, `window`, `since`, `limit` 필터를 지원합니다. 클라이언트는 승인된 ID를 같은 헤더로 재전송합니다.
+Secret Firewall은 API key, JWT, private key, password, AWS secret, DB connection string, access token을 탐지하고 정책에 따라 `detect`, `mask`, `block`으로 처리합니다. 탐지 이벤트는 안전 탭의 "Secret Firewall 이벤트" 또는 `GET /admin/security/secrets` 에서 확인합니다. `/admin/security/secrets` 는 `request_id`, `action`, `secret_type`, `team_id`, `api_key_id`, `user_id`, `location`, `matched_hash`, `window`, `since`, `limit` 필터를 지원합니다. 정책 판단 이벤트는 안전 탭의 "정책 판단 이벤트", `GET /admin/policies/decisions`, 요청별 XView/요청 상세의 Governance 패널에서 확인합니다. 매칭 규칙이 없는 정상 허용 경로도 감사 추적을 위해 `decision=default` 이벤트를 남깁니다. 다만 운영 화면의 실질 판단 수(`policy_decision_count`)는 `default`를 제외하고, 원시 감사 이벤트 수는 `policy_decision_total` 로 별도 노출합니다. `/admin/policies/decisions` 는 `request_id`, `decision`, `policy_id`, `rule_id`, `team_id`, `api_key_id`, `user_id`, `endpoint`, `phase`, `model`, `provider`, `window`, `since`, `limit` 필터를 지원합니다. 승인 필요 요청은 `pending` approval을 만들고 `X-Governance-Approval-ID` 헤더를 반환합니다. 운영자는 안전 탭의 "승인 큐" 또는 `GET /admin/approvals` 로 승인 항목을 조회하고, `POST /admin/approvals/{id}/approve` / `/reject` 로 결정합니다. `/admin/approvals` 는 `id`, `request_id`, `status`, `team_id`, `api_key_id`, `user_id`, `subject_type`, `subject_id`, `decided_by`, `reason`, `window`, `since`, `limit` 필터를 지원합니다. 클라이언트는 승인된 ID를 같은 헤더로 재전송합니다.
 
 MCP Security Center는 MCP 탭 또는 `GET/POST /admin/mcp/tools` 에서 tool별 `low|medium|high|critical` risk와 `allow|require_approval|block` action을 관리합니다. `/admin/mcp/tools` 는 `server`, `tool`, `api_key_id`, `mcp_only`, `risk_level`, `action`, `configured`, `window`, `limit` 필터를 지원하며, UI에서는 tool 행에서 risk/action/note를 바로 저장할 수 있습니다. `/admin/anomalies` 는 기존 모델 이상탐지에 더해 비용 anomaly event 뷰를 반환하며, replay/golden/context 운영 API는 `/admin/replay`, `/admin/golden-prompts`, `/admin/contexts` 입니다.
 
@@ -137,7 +138,7 @@ API: `GET /admin/scatter?window=1h&metric=latency&model=&endpoint=&limit=6000` �
 
 | 패널 | 내용 |
 | --- | --- |
-| 🧭 라우팅 | 선택된 provider·모델, 라우팅 근거(헤더 지정/쿼리/모델 패턴 자동/기본/auto router), 매칭된 패턴, **복잡도 점수(0~100)와 티어**(simple/standard/complex/reasoning), risk score, provider health score, fallback chain, decision reason |
+| 🧭 라우팅 | 선택된 provider·모델, 라우팅 근거 코드(`route_reason`: 헤더 지정/쿼리/모델 패턴 자동/기본/auto router 등), 매칭된 패턴, **복잡도 점수(0~100)와 티어**(simple/standard/complex/reasoning), risk score, provider health score, fallback chain, 사람이 읽는 decision reason |
 | 🔁 폴백 | 폴백 발생 여부, 최초→대체 provider, 사유(전송 실패 등) |
 | 🟢 캐시 | 캐시 히트 여부, cached 토큰, **절감액**(전체 캐시 / 프롬프트 캐시) |
 | 🛡 안전 | 차단 여부, 마스킹 적용, 실패한 안전·보안 평가(PII/인젝션/독성/도구 인자 시크릿) |
@@ -146,13 +147,13 @@ API: `GET /admin/scatter?window=1h&metric=latency&model=&endpoint=&limit=6000` �
 
 복잡도 점수는 프롬프트 토큰·대화 깊이·도구 수 기반 휴리스틱 추정치이며(모델 산출값 아님) UI에 그 사실이 명시됩니다.
 
-API: `GET /admin/requests/{id}/explain` → `{routing, fallback, cache, safety, cost, session}`. `routing` 에는 `chosen_model`, `chosen_provider`, `complexity`, `risk_score`, `health_score`, `fallback_path`, `decision_reason` 이 포함됩니다.
+API: `GET /admin/requests/{id}/explain` → `{routing, fallback, cache, safety, cost, session}`. `routing` 에는 `chosen_model`, `chosen_provider`, `complexity`, `risk_score`, `health_score`, `fallback_path`, `route_reason`, `decision_reason` 이 포함됩니다. `GET /admin/requests/{id}/links` 는 요청 상세·XView·Waterfall·MCP Waterfall·Text2SQL Timeline·라우팅 결정 연결 정보와 카운트를 한 번에 반환합니다. 이때 `policy_decision_count` 는 `decision=default` 를 제외한 실질 거버넌스 판단 수이고, `policy_decision_total` 은 원시 감사 이벤트 수입니다.
 
 Intelligent Routing Engine API:
 
-- `POST /admin/routing/preview` — 실제 upstream 호출 없이 `auto` / `vibe/auto` / `vibe-coders/auto` 라우팅 결과 미리보기. body에 `api_key_id` 를 넣으면 해당 API 키의 allowed/denied model/provider 정책까지 반영합니다(team_admin은 자기 팀 키만 가능)
+- `POST /admin/routing/preview` — 실제 upstream 호출 없이 `auto` / `vibe/auto` / `vibe-coders/auto` 라우팅 결과 미리보기. 응답에는 자동화·필터링용 `route_reason` 과 사람이 읽는 `decision_reason` 이 함께 포함됩니다. body에 `api_key_id` 를 넣으면 해당 API 키의 allowed/denied model/provider 정책까지 반영합니다(team_admin은 자기 팀 키만 가능)
 - `GET /admin/routing/decisions` / `GET /admin/routing/decisions/{id}` — 요청별 selected model/provider, complexity/risk/health, fallback path, decision reason 조회
-- `GET /admin/routing/health` — 최근 latency/p95/timeout/429/5xx/fallback rate 기반 provider health score 조회
+- `GET /admin/routing/health` — 최근 latency/p95/timeout/429/5xx/fallback rate 기반 provider health score 조회. 응답에는 provider 원본 점수와 함께 `ranking`, `degraded`, `alerts`, `trend` 가 포함됩니다. 관리자 화면은 라우팅 탭의 `Provider Health` 하위 화면(`#/routing/health`)에서 같은 데이터를 표시합니다.
 
 `auto` 계열 모델 별칭은 일반 라우팅 규칙보다 우선합니다. `X-Proxy-Provider` 또는 `?provider=` 로 provider 를 고정해도 auto 모델 rewrite 는 계속 수행되고, provider 선택만 클라이언트 지정값을 따릅니다. Provider `model_patterns` 가 `vibe/*` 처럼 alias 기준으로 등록되어 있으면, 선택된 실제 모델 패턴이 없을 때 요청 alias 기준 provider도 후보로 사용합니다. `GET /v1/models` 는 SDK 호환성을 위해 인증 모드에서도 공개 조회로 처리합니다.
 
