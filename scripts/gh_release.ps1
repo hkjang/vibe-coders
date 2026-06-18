@@ -16,6 +16,7 @@ $cleanVer = $Version.TrimStart('v')
 
 $notes = "## AI Proxy Gateway v" + $cleanVer + "`r`n`r`n"
 $notes += "### 주요 변경 사항`r`n"
+$notes += "- **Governance DEFAULT 감사 이벤트 (`v0.50.6`)**: 정책 규칙이 매칭되지 않은 허용 요청도 `policy_decision_events`에 `decision=default`로 기록해 모든 정책 판단 경로를 감사 가능하게 보강. XView/scatter의 거버넌스 이상 카운트에서는 `default`를 제외해 정상 요청 전체가 경고로 표시되는 노이즈를 방지. default 감사와 XView 제외 회귀 테스트 추가.`r`n"
 $notes += "- **Routing preview reason code (`v0.50.5`)**: `POST /admin/routing/preview` 응답에 사람이 읽는 `decision_reason`과 별도로 코드형 `route_reason`을 추가. `auto_router`, `auto_router_learned`, `client_model`, routing rule reason 등을 자동화·UI 필터에서 안정적으로 사용할 수 있으며 preview 회귀 테스트로 고정.`r`n"
 $notes += "- **Provider Health 관리자 화면 (`v0.50.4`)**: 라우팅 탭에 `Provider Health` 하위 화면(`#/routing/health`)을 추가. `GET /admin/routing/health`의 ranking, degraded, alerts, trend 응답을 그대로 사용해 provider 수, 평균 health, 최상위/최하위 provider, degradation alert, bucket별 health trend를 표시하고 window/threshold 필터를 제공.`r`n"
 $notes += "- **Provider Health 운영 응답 확장 (`v0.50.3`)**: `GET /admin/routing/health` 응답에 기존 provider health score 원본을 유지하면서 ranking, degraded provider, alert, bounded trend bucket을 추가. 실시간 provider ranking, degradation alert, health trend UI가 별도 재계산 없이 같은 API를 사용할 수 있도록 하고, trend 계산은 `ProviderHealthScoresBetween` bounded 조회로 정확히 분리. store/API 회귀 테스트 추가.`r`n"

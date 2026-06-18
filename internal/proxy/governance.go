@@ -241,6 +241,9 @@ func evaluatePolicyRules(rules []store.PolicyRule, g governanceContext) governan
 	if len(reasons) > 0 {
 		decision.Reason = strings.Join(reasons, "; ")
 	}
+	if len(decision.PolicyEvents) == 0 {
+		decision.PolicyEvents = append(decision.PolicyEvents, defaultPolicyDecisionEvent(g))
+	}
 	return decision
 }
 
@@ -257,6 +260,27 @@ func policyDecisionEvent(g governanceContext, rule store.PolicyRule, decision, r
 		RuleName:        ruleName(rule),
 		Decision:        decision,
 		Reason:          reason,
+		Model:           g.Model,
+		Provider:        g.Provider,
+		RiskScore:       g.RiskScore,
+		ComplexityScore: g.ComplexityScore,
+		CostKRW:         g.CostKRW,
+	}
+}
+
+func defaultPolicyDecisionEvent(g governanceContext) store.PolicyDecisionEvent {
+	return store.PolicyDecisionEvent{
+		RequestID:       g.RequestID,
+		APIKeyID:        g.APIKeyID,
+		UserID:          g.UserID,
+		TeamID:          g.TeamID,
+		Endpoint:        g.Endpoint,
+		Phase:           firstNonEmpty(g.Phase, "request"),
+		PolicyID:        "default",
+		RuleID:          "default",
+		RuleName:        "DEFAULT",
+		Decision:        "default",
+		Reason:          "no governance policy matched; default allow",
 		Model:           g.Model,
 		Provider:        g.Provider,
 		RiskScore:       g.RiskScore,

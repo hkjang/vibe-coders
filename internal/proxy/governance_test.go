@@ -232,6 +232,78 @@ func TestGovernanceSecretPolicyBlocksBeforeUpstream(t *testing.T) {
 	}
 }
 
+func TestGovernanceDefaultAllowIsAuditedWithoutXViewNoise(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`))
+	}))
+	defer upstream.Close()
+
+	db := openTestStore(t)
+	defer db.Close()
+	logger := store.NewAsyncLogger(db, 32, filepath.Join(t.TempDir(), "fallback.ndjson"))
+	logger.Start()
+	defer logger.Stop(context.Background())
+	server, err := NewServer(testConfig(upstream.URL, "secret"), db, logger, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxy := httptest.NewServer(server.Routes())
+	defer proxy.Close()
+
+	resp := postJSON(t, proxy.URL+"/v1/chat/completions", "", map[string]any{
+		"model": "gpt-4.1-mini",
+		"messages": []any{
+			map[string]any{"role": "user", "content": "hello"},
+		},
+	})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected default allow request to pass, got %d: %s", resp.StatusCode, body)
+	}
+
+	var reqID string
+	waitFor(t, time.Second, func() bool {
+		recent, _ := db.RecentRequests(context.Background(), store.RequestFilter{Limit: 1})
+		if len(recent) == 0 {
+			return false
+		}
+		reqID = recent[0].ID
+		return reqID != ""
+	})
+	events, err := db.PolicyDecisionEventsForRequest(context.Background(), reqID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defaultPhases := map[string]bool{}
+	for _, event := range events {
+		if event.Decision == "default" && event.RuleName == "DEFAULT" {
+			defaultPhases[event.Phase] = true
+		}
+	}
+	if !defaultPhases["request"] || !defaultPhases["provider"] || !defaultPhases["cost"] {
+		t.Fatalf("expected default policy decision event, got %+v", events)
+	}
+	points, _, err := db.ScatterPoints(context.Background(), store.ScatterFilter{Since: time.Now().Add(-time.Hour), Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, point := range points {
+		if point.RequestID != reqID {
+			continue
+		}
+		found = true
+		if point.PolicyDecisionCount != 0 || point.PolicyDecision != "" {
+			t.Fatalf("default governance audit must not mark XView governance anomaly: %+v", point)
+		}
+	}
+	if !found {
+		t.Fatalf("request %s not found in scatter points: %+v", reqID, points)
+	}
+}
+
 func TestGovernanceApprovalWorkflowAllowsApprovedRequest(t *testing.T) {
 	var upstreamCalls atomic.Int32
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -768,7 +840,14 @@ func TestGovernanceSecretMaskPolicyRedactsBeforeUpstream(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(decisions) == 0 || decisions[0].Decision != "mask" || decisions[0].RuleName != "mask passwords" {
+	hasMask := false
+	for _, decision := range decisions {
+		if decision.Decision == "mask" && decision.RuleName == "mask passwords" {
+			hasMask = true
+			break
+		}
+	}
+	if !hasMask {
 		t.Fatalf("expected mask policy decision, got %+v", decisions)
 	}
 }

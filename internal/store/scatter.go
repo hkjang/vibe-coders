@@ -47,10 +47,11 @@ func (s *SQLStore) ScatterPoints(ctx context.Context, f ScatterFilter) ([]Scatte
 			COALESCE(t.total_tokens, 0), COALESCE(t.estimated_cost, 0),
 			r.stream, COALESCE(r.tool_count, 0), COALESCE(r.failover, 0),
 			COALESCE(r.complexity, 0), COALESCE(rd.risk_score, 0), COALESCE(rd.health_score, 0), COALESCE(rd.decision_reason, ''),
-			COALESCE((SELECT COUNT(*) FROM policy_decision_events pde WHERE pde.request_id = r.id), 0),
+			COALESCE((SELECT COUNT(*) FROM policy_decision_events pde WHERE pde.request_id = r.id AND LOWER(pde.decision) <> 'default'), 0),
 			COALESCE((
 				SELECT pde.decision FROM policy_decision_events pde
 				WHERE pde.request_id = r.id
+				  AND LOWER(pde.decision) <> 'default'
 				ORDER BY CASE
 					WHEN pde.decision = 'block' THEN 1
 					WHEN pde.decision LIKE 'deny_%' THEN 2
