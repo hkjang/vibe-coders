@@ -31,7 +31,7 @@ import (
 )
 
 // AppVersion is the gateway build version, surfaced in /auth/me and the admin UI.
-const AppVersion = "v0.49.0"
+const AppVersion = "v0.49.1"
 
 type Server struct {
 	cfg          config.Config
@@ -402,6 +402,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/v1/chat/completions", s.handleOpenAI)
 	mux.HandleFunc("/v1/models", s.handleOpenAI)
 	mux.HandleFunc("/v1/embeddings", s.handleOpenAI)
+	mux.HandleFunc("/v1/", s.handleOpenAI)
 	mux.HandleFunc("/v1/skills", s.handlePublicSkills)
 	mux.HandleFunc("/v1/skills/", s.handlePublicSkills)
 	return withTrace(mux)
@@ -923,6 +924,29 @@ func (s *Server) handleAuditLogs(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"audit_logs": logs})
 }
 
+type statusResponseWriter struct {
+	http.ResponseWriter
+	statusCode int
+}
+
+func (w *statusResponseWriter) WriteHeader(code int) {
+	w.statusCode = code
+	w.ResponseWriter.WriteHeader(code)
+}
+
+func (w *statusResponseWriter) Write(b []byte) (int, error) {
+	if w.statusCode == 0 {
+		w.statusCode = http.StatusOK
+	}
+	return w.ResponseWriter.Write(b)
+}
+
+func (w *statusResponseWriter) Flush() {
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
 func (s *Server) handleOpenAI(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost && !(r.Method == http.MethodGet && r.URL.Path == "/v1/models") {
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
@@ -944,9 +968,28 @@ func (s *Server) handleOpenAI(w http.ResponseWriter, r *http.Request) {
 	//   Auth → Quota → Routing → Governance → Cache → Cost → Upstream
 	// Each step shares the requestPipeline state and halts the chain (after
 	// writing its own response) by returning false. See pipeline.go.
-	rc := &requestPipeline{s: s, w: w, r: r}
+	sw := &statusResponseWriter{ResponseWriter: w}
+	rc := &requestPipeline{s: s, w: sw, r: r}
 	for _, step := range rc.steps() {
 		if !step.Run(rc) {
+			stepName := step.Name()
+			if stepName == "auth" || stepName == "quota" || stepName == "routing" || stepName == "skill" || stepName == "deprecation" || stepName == "limits" {
+				traceID := rc.traceID
+				if traceID == "" {
+					traceID = traceIDFromRequest(r)
+				}
+				meta := rc.meta
+				if meta.Request.ID == "" {
+					meta = s.auditRequest(r.URL.Path, rc.body, rc.apiKeyID, traceID, r)
+				}
+				statusCode := sw.statusCode
+				if statusCode == 0 {
+					statusCode = http.StatusBadRequest
+				}
+				meta.Request.StatusCode = statusCode
+				meta.Request.Error = "pipeline_blocked:" + stepName
+				s.enqueue(meta)
+			}
 			return
 		}
 	}

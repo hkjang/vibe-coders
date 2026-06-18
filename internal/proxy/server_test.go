@@ -445,3 +445,121 @@ func waitFor(t *testing.T, timeout time.Duration, fn func() bool) {
 	}
 	t.Fatal("condition was not met before timeout")
 }
+
+func TestUnregisteredAPIPathPassthrough(t *testing.T) {
+	upstreamHit := make(chan string, 1)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamHit <- r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"response content"}}],"usage":{"prompt_tokens":2,"completion_tokens":1,"total_tokens":3}}`))
+	}))
+	defer upstream.Close()
+
+	db := openTestStore(t)
+	defer db.Close()
+	logger := store.NewAsyncLogger(db, 32, filepath.Join(t.TempDir(), "fallback.ndjson"))
+	logger.Start()
+	defer logger.Stop(context.Background())
+
+	server, err := NewServer(testConfig(upstream.URL, "default-secret"), db, logger, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxy := httptest.NewServer(server.Routes())
+	defer proxy.Close()
+
+	// Create a proxy key so we can authenticate
+	createResp := postJSON(t, proxy.URL+"/admin/api-keys", "", map[string]any{
+		"name":  "User Key",
+		"key":   "user-secret",
+		"owner": "bob",
+		"team":  "dev",
+	})
+	if createResp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected key creation status 201, got %d", createResp.StatusCode)
+	}
+
+	// Request unregistered path
+	reqBody, _ := json.Marshal(chatBody("test-model", false))
+	req, err := http.NewRequest(http.MethodPost, proxy.URL+"/v1/responses", bytes.NewReader(reqBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer user-secret")
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected status 200, got %d: %s", resp.StatusCode, body)
+	}
+
+	select {
+	case path := <-upstreamHit:
+		if path != "/v1/responses" {
+			t.Fatalf("expected upstream path /v1/responses, got %s", path)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("upstream not hit")
+	}
+
+	waitFor(t, time.Second, func() bool {
+		recent, err := db.RecentRequests(context.Background(), store.RequestFilter{Limit: 1})
+		return err == nil && len(recent) == 1 && recent[0].Endpoint == "/v1/responses"
+	})
+}
+
+func TestEarlyPipelineBlockLogging(t *testing.T) {
+	db := openTestStore(t)
+	defer db.Close()
+	logger := store.NewAsyncLogger(db, 32, filepath.Join(t.TempDir(), "fallback.ndjson"))
+	logger.Start()
+	defer logger.Stop(context.Background())
+
+	server, err := NewServer(testConfig("http://example.invalid", "default-secret"), db, logger, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxy := httptest.NewServer(server.Routes())
+	defer proxy.Close()
+
+	// Create a proxy key first to enforce API key check, otherwise it falls back to anonymous/passthrough
+	createResp := postJSON(t, proxy.URL+"/admin/api-keys", "", map[string]any{
+		"name":  "User Key",
+		"key":   "user-secret",
+		"owner": "bob",
+		"team":  "dev",
+	})
+	if createResp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected key creation status 201, got %d", createResp.StatusCode)
+	}
+
+	// Send request with invalid API key (using pcg_ prefix to treat it as a proxy key) to trigger stepAuth failure
+	reqBody, _ := json.Marshal(chatBody("test-model", false))
+	req, err := http.NewRequest(http.MethodPost, proxy.URL+"/v1/chat/completions", bytes.NewReader(reqBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer pcg_invalid-secret")
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected status 401, got %d", resp.StatusCode)
+	}
+
+	waitFor(t, time.Second, func() bool {
+		recent, err := db.RecentRequests(context.Background(), store.RequestFilter{Limit: 1})
+		return err == nil && len(recent) == 1 && recent[0].StatusCode == http.StatusUnauthorized && recent[0].Error == "pipeline_blocked:auth"
+	})
+}
