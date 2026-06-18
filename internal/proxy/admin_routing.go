@@ -75,6 +75,7 @@ func (s *Server) handleRoutingPreview(w http.ResponseWriter, r *http.Request) {
 		"risk":              plan.Risk,
 		"health_score":      plan.HealthScore,
 		"fallback_path":     plan.FallbackPath,
+		"route_reason":      plan.RouteReason,
 		"decision_reason":   plan.DecisionReason,
 		"would_rewrite":     plan.RequestedModel != "" && plan.SelectedModel != "" && plan.RequestedModel != plan.SelectedModel,
 	})

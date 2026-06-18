@@ -582,6 +582,7 @@ Routing Explain 예시:
   "risk": { "score": 38, "tier": "medium", "categories": ["authentication", "deployment_command"] },
   "health_score": 96,
   "fallback_path": ["429:backup", "5xx:backup", "timeout:lowest-latency-provider"],
+  "route_reason": "auto_router",
   "decision_reason": "client requested vibe/auto; auto alias mapped complex tier to gpt-4.1; provider health selected openai(96)"
 }
 ```

@@ -326,6 +326,7 @@ func TestRoutingPreviewAndHealthAPIs(t *testing.T) {
 		SelectedModel  string             `json:"selected_model"`
 		Risk           store.RiskAnalysis `json:"risk"`
 		FallbackPath   []string           `json:"fallback_path"`
+		RouteReason    string             `json:"route_reason"`
 		WouldRewrite   bool               `json:"would_rewrite"`
 	}
 	if err := json.NewDecoder(preview.Body).Decode(&out); err != nil {
@@ -333,6 +334,9 @@ func TestRoutingPreviewAndHealthAPIs(t *testing.T) {
 	}
 	if out.RequestedModel != "vibe-coders/auto" || out.SelectedModel == "" || !out.WouldRewrite || out.Risk.Score == 0 {
 		t.Fatalf("unexpected preview: %#v", out)
+	}
+	if out.RouteReason != "auto_router" {
+		t.Fatalf("expected auto router route reason, got %q", out.RouteReason)
 	}
 	if len(out.FallbackPath) != 1 || out.FallbackPath[0] != "fallback_disabled:sensitive_data" {
 		t.Fatalf("expected sensitive fallback disabled, got %#v", out.FallbackPath)
