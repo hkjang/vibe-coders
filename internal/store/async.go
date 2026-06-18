@@ -226,6 +226,7 @@ func (l *AsyncLogger) write(record LogRecord) {
 	if err := l.store.InsertLogRecord(ctx, record); err != nil {
 		slog.Warn("write audit log failed", "error", err)
 		l.writeFallback(record)
+		_ = l.store.InsertSystemError(ctx, "async_logger", "Write audit log failed: "+err.Error())
 		return
 	}
 	l.written.Add(1)

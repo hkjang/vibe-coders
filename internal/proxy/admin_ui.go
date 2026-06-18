@@ -852,11 +852,13 @@ const adminHTML = `<!doctype html>
           { label: 'DW 대시보드', href: '#/dwdashboard', active: !onCH },
           { label: 'ClickHouse', href: '#/dwdashboard/clickhouse', active: onCH },
         ]);
-      } else if (tab === 'settings' || tab === 'runtimesettings') {
+      } else if (tab === 'settings' || tab === 'runtimesettings' || rest[0] === 'errors') {
         const onRT = tab === 'runtimesettings' || rest[0] === 'runtime';
+        const onErr = rest[0] === 'errors';
         el.innerHTML = subNav([
-          { label: '설정', href: '#/settings', active: !onRT },
+          { label: '설정', href: '#/settings', active: !onRT && !onErr },
           { label: '런타임 설정', href: '#/settings/runtime', active: onRT },
+          { label: '시스템 오류', href: '#/settings/errors', active: onErr },
         ]);
       } else if (tab === 'users' || tab === 'teams' || tab === 'ips' || tab === 'quotas') {
         el.innerHTML = subNav([
@@ -920,7 +922,15 @@ const adminHTML = `<!doctype html>
           case 'dwdashboard': rest[0] === 'clickhouse' ? await renderClickHouse() : await renderDWDashboard(); break;
           case 'clickhouse': await renderClickHouse(); break; // legacy alias for #/dwdashboard/clickhouse
           case 'runtimesettings': await renderRuntimeSettings(); break; // legacy alias for #/settings/runtime
-          case 'settings':  rest[0] === 'runtime' ? await renderRuntimeSettings() : await renderSettings(); break;
+          case 'settings':
+            if (rest[0] === 'runtime') {
+              await renderRuntimeSettings();
+            } else if (rest[0] === 'errors') {
+              await renderSystemErrors();
+            } else {
+              await renderSettings();
+            }
+            break;
           default: await renderDashboard();
         }
       } catch (err) {
@@ -6940,6 +6950,55 @@ const adminHTML = `<!doctype html>
       await api('/admin/text2sql/schemas?name=' + encodeURIComponent(name), { method: 'DELETE' });
       route();
     };
+
+    async function renderSystemErrors() {
+      const resp = await api('/admin/system-errors').catch(() => ({ errors: [] }));
+      const list = resp.errors || [];
+      let tableHtml = '';
+      if (!list.length) {
+        tableHtml = '<div class="empty">기록된 시스템 오류가 없습니다.</div>';
+      } else {
+        tableHtml =
+          '<table>' +
+            '<thead>' +
+              '<tr>' +
+                '<th style="width:180px;">발생 시간</th>' +
+                '<th style="width:120px;">컴포넌트</th>' +
+                '<th>에러 메시지</th>' +
+              '</tr>' +
+            '</thead>' +
+            '<tbody>' +
+              list.map(err =>
+                '<tr>' +
+                  '<td class="muted">' + escapeHTML(err.created_at) + '</td>' +
+                  '<td><span class="badge" style="background:var(--pill-bg); padding:2px 6px; border-radius:4px; font-size:11px;">' + escapeHTML(err.component) + '</span></td>' +
+                  '<td><pre style="white-space:pre-wrap; margin:0; font-family:ui-monospace,SFMono-Regular,Consolas,monospace; font-size:12px; color:var(--ink);">' + escapeHTML(err.error_message) + '</pre></td>' +
+                '</tr>'
+              ).join('') +
+            '</tbody>' +
+          '</table>';
+      }
+      const html =
+        '<div class="grid1">' +
+          card('시스템 오류 로그 (System Errors)',
+            '<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">' +
+              '<p class="muted" style="margin:0;">PostgreSQL/SQLite DB 적재 및 비동기 워커 실행 중 발생한 최신 시스템 오류 로그를 표시합니다.</p>' +
+              (list.length ? '<button id="clear-errors-btn" class="error" style="background:#dc2626; color:#fff; border:none; padding:6px 12px; border-radius:4px; cursor:pointer;">전체 비우기</button>' : '') +
+            '</div>' +
+            tableHtml
+          ) +
+        '</div>';
+      document.getElementById('view').innerHTML = html;
+      const clearBtn = document.getElementById('clear-errors-btn');
+      if (clearBtn) {
+        clearBtn.addEventListener('click', async () => {
+          if (confirm('모든 시스템 오류 로그를 삭제하시겠습니까?')) {
+            await api('/admin/system-errors/clear', { method: 'POST' });
+            route();
+          }
+        });
+      }
+    }
 
     async function renderSettings() {
       const [keys, providers, retention, fallback, audit, routes, learning, knowledge, usersResp, teamsResp, authEvents] = await Promise.all([

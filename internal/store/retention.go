@@ -100,6 +100,7 @@ func (w *RetentionWorker) runOnceWith(ctx context.Context) int64 {
 	now := time.Now().UTC()
 	if _, err := w.store.RollupRange(ctx, now.AddDate(0, 0, -3), now); err != nil {
 		slog.Warn("retention rollup failed", "error", err)
+		_ = w.store.InsertSystemError(ctx, "retention", "Retention rollup failed: "+err.Error())
 	}
 
 	var totalDeleted int64

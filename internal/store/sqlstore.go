@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -1115,6 +1116,13 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 		`DELETE FROM api_keys WHERE id LIKE 'ext\_%' ESCAPE '\' AND EXISTS (SELECT 1 FROM api_keys k2 WHERE k2.id = 'key_' || substr(api_keys.id, 5))`,
 		`UPDATE api_keys SET id = 'key_' || substr(id, 5) WHERE id LIKE 'ext\_%' ESCAPE '\'`,
 		`UPDATE api_keys SET scopes = '["chat:completion","embeddings:create","models:read","mcp:use"]' WHERE status = 'active' AND (scopes IS NULL OR scopes = '' OR scopes = '[]')`,
+		`CREATE TABLE IF NOT EXISTS system_error_logs (
+			id TEXT PRIMARY KEY,
+			component TEXT NOT NULL,
+			error_message TEXT NOT NULL,
+			created_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_system_error_logs_created_at ON system_error_logs(created_at)`,
 	}
 
 	for _, statement := range statements {
@@ -2082,7 +2090,8 @@ func cleanArgs(args []any) []any {
 	for i, arg := range args {
 		switch v := arg.(type) {
 		case string:
-			cleaned[i] = strings.ReplaceAll(v, "\x00", "")
+			s := strings.ReplaceAll(v, "\x00", "")
+			cleaned[i] = strings.ToValidUTF8(s, "")
 		case float64:
 			if math.IsNaN(v) || math.IsInf(v, 0) {
 				cleaned[i] = 0.0
@@ -2094,4 +2103,48 @@ func cleanArgs(args []any) []any {
 		}
 	}
 	return cleaned
+}
+
+type SystemErrorRow struct {
+	ID           string `json:"id"`
+	Component    string `json:"component"`
+	ErrorMessage string `json:"error_message"`
+	CreatedAt    string `json:"created_at"`
+}
+
+func (s *SQLStore) InsertSystemError(ctx context.Context, component string, errMsg string) error {
+	// Simple unique ID generator to bypass dependencies
+	var b [8]byte
+	_, _ = rand.Read(b[:])
+	id := fmt.Sprintf("err_%d_%x", time.Now().UTC().UnixNano(), b[:])
+
+	query := s.bind(`INSERT INTO system_error_logs (id, component, error_message, created_at) VALUES (?, ?, ?, ?)`)
+	_, err := s.db.ExecContext(ctx, query, cleanArgs([]any{id, component, errMsg, formatTime(time.Now().UTC())})...)
+	return err
+}
+
+func (s *SQLStore) ListSystemErrors(ctx context.Context, limit int) ([]SystemErrorRow, error) {
+	if limit <= 0 || limit > 1000 {
+		limit = 100
+	}
+	rows, err := s.db.QueryContext(ctx, s.bind(`SELECT id, component, error_message, created_at FROM system_error_logs ORDER BY created_at DESC LIMIT ?`), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := []SystemErrorRow{}
+	for rows.Next() {
+		var r SystemErrorRow
+		if err := rows.Scan(&r.ID, &r.Component, &r.ErrorMessage, &r.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+func (s *SQLStore) ClearSystemErrors(ctx context.Context) error {
+	_, err := s.db.ExecContext(ctx, s.bind(`DELETE FROM system_error_logs`))
+	return err
 }

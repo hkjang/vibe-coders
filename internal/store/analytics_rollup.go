@@ -64,8 +64,8 @@ func (s *SQLStore) rollupDayDimension(ctx context.Context, day, dimension, col s
 			COALESCE(SUM(CASE WHEN r.status_code >= 400 THEN 1 ELSE 0 END), 0)
 		FROM request_logs r
 		LEFT JOIN token_usage t ON t.request_id = r.id
-		WHERE substr(r.created_at, 1, 10) = ?
-		GROUP BY %s`, keyExpr, keyExpr))
+		WHERE substring(r.created_at, 1, 10) = ?
+		GROUP BY 3`, keyExpr))
 	if _, err := tx.ExecContext(ctx, query, day, dimension, day); err != nil {
 		return err
 	}

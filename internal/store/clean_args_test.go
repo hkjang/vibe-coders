@@ -88,3 +88,72 @@ func TestCleanArgsCleansing(t *testing.T) {
 		t.Errorf("unexpected cost: %v", cost)
 	}
 }
+
+func TestCleanArgsInvalidUTF8(t *testing.T) {
+	invalidStr := "hello\x8bworld"
+	cleaned := cleanArgs([]any{invalidStr})
+	if len(cleaned) != 1 {
+		t.Fatal("expected 1 arg")
+	}
+	resStr, ok := cleaned[0].(string)
+	if !ok {
+		t.Fatal("expected string")
+	}
+	if strings.Contains(resStr, "\x8b") {
+		t.Error("invalid UTF-8 sequence was not stripped")
+	}
+	if resStr != "helloworld" {
+		t.Errorf("expected helloworld, got %q", resStr)
+	}
+}
+
+func TestSystemErrorsStore(t *testing.T) {
+	db, err := Open(context.Background(), config.DatabaseConfig{
+		Driver: "sqlite",
+		DSN:    filepath.Join(t.TempDir(), "gateway_errors.db"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	if err := db.Migrate(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := context.Background()
+	// Insert system error
+	if err := db.InsertSystemError(ctx, "test_comp", "something went wrong\x8b"); err != nil {
+		t.Fatal(err)
+	}
+
+	list, err := db.ListSystemErrors(ctx, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(list) != 1 {
+		t.Fatalf("expected 1 system error, got %d", len(list))
+	}
+
+	errRow := list[0]
+	if errRow.Component != "test_comp" {
+		t.Errorf("unexpected component: %q", errRow.Component)
+	}
+	if strings.Contains(errRow.ErrorMessage, "\x8b") {
+		t.Error("error message still contains invalid UTF-8")
+	}
+
+	// Clear errors
+	if err := db.ClearSystemErrors(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	list2, err := db.ListSystemErrors(ctx, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list2) != 0 {
+		t.Errorf("expected 0 system errors after clear, got %d", len(list2))
+	}
+}
