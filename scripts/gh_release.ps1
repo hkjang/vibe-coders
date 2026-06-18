@@ -70,7 +70,7 @@ $notes += "| README-offline-v" + $cleanVer + ".md | 오프라인 배포 가이�
 $notes += "| AI_Proxy_Gateway_Report.pdf | AI Proxy Gateway 기능·역할 및 비즈니스 가치 종합 보고서 (v0.50.15) |`r`n`r`n"
 
 $notes += "### 빠른 시작`r`n"
-$notes += "```bash`r`n"
+$notes += '```' + "bash`r`n"
 $notes += "# 이미지 로드`r`n"
 $notes += "gunzip -c ai-coding-proxy-gateway-" + $Version + ".tar.gz | docker load`r`n`n"
 $notes += "# 실행`r`n"
