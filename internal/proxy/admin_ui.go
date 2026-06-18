@@ -888,8 +888,10 @@ const adminHTML = `<!doctype html>
           { label: 'VCS', href: '#/vcs', active: tab === 'vcs' },
         ]);
       } else if (tab === 'routing') {
+        const onHealth = rest[0] === 'health';
         el.innerHTML = subNav([
-          { label: '라우팅 학습', href: '#/routing', active: true },
+          { label: '라우팅 학습', href: '#/routing', active: !onHealth },
+          { label: 'Provider Health', href: '#/routing/health', active: onHealth },
         ]);
       } else {
         el.innerHTML = '';
@@ -923,7 +925,7 @@ const adminHTML = `<!doctype html>
           case 'ips':       rest.length ? await renderIPDetail(decodeURIComponent(rest.join('/'))) : await renderIPs(); break;
           case 'quotas':    await renderQuotas(); break;
           case 'mcp':       await renderMCP(params); break;
-          case 'routing':   await renderRoutingLearning(params); break;
+          case 'routing':   rest[0] === 'health' ? await renderRoutingHealth(params) : await renderRoutingLearning(params); break;
           case 'agents':    await renderAgents(params); break;
           case 'vcs':       await renderVCS(params); break;
           case 'safety':    await renderSafety(); break;
@@ -4524,6 +4526,106 @@ const adminHTML = `<!doctype html>
         location.hash = '#/routing' + (p.toString() ? '?' + p.toString() : '');
       });
       makeSortable('#view', 'routing-learning');
+    }
+    async function renderRoutingHealth(initial) {
+      const windowValue = initial ? (initial.get('window') || '1h') : '1h';
+      const threshold = Math.max(0, Math.min(100, Number(initial ? (initial.get('threshold') || 70) : 70)));
+      const qs = new URLSearchParams();
+      qs.set('window', windowValue);
+      qs.set('threshold', String(threshold));
+      const resp = await api('/admin/routing/health?' + qs.toString());
+      const providers = resp.providers || [];
+      const ranking = resp.ranking || [];
+      const degraded = resp.degraded || [];
+      const alerts = resp.alerts || [];
+      const trend = resp.trend || [];
+      const avgScore = providers.length ? providers.reduce((sum, p) => sum + Number(p.score || 0), 0) / providers.length : 0;
+      const best = ranking[0] || {};
+      const worst = ranking.length ? ranking[ranking.length - 1] : {};
+      const kpis = '<div class="kpis">' +
+        kpi('Provider', fmt(providers.length)) +
+        kpi('평균 health', healthScoreCell(avgScore, threshold)) +
+        kpi('최상위', best.provider ? '<strong>' + escapeHTML(best.provider) + '</strong><div class="muted" style="font-size:11px; font-weight:500; margin-top:6px">' + fmt(best.score) + '점 · ' + fmt(best.requests) + ' requests</div>' : '<span class="muted">-</span>') +
+        kpi('Degraded', '<span class="status ' + (degraded.length ? 'warn' : '') + '">' + fmt(degraded.length) + '</span>' + (worst.provider ? '<div class="muted" style="font-size:11px; font-weight:500; margin-top:6px">최저 ' + escapeHTML(worst.provider) + ' ' + fmt(worst.score) + '점</div>' : '')) +
+      '</div>';
+      const filters =
+        '<form class="toolbar" id="routing-health-filter" autocomplete="off">' +
+          '<select id="routing-health-window">' +
+            ['15m','1h','6h','24h','7d'].map(w => '<option value="' + w + '"' + (w === windowValue ? ' selected' : '') + '>' + w + '</option>').join('') +
+          '</select>' +
+          '<label class="muted" style="display:flex; align-items:center; gap:6px">threshold <input id="routing-health-threshold" type="number" min="0" max="100" value="' + threshold + '" style="width:86px"></label>' +
+          '<button type="submit">적용</button>' +
+          '<button type="button" class="secondary" onclick="route()">새로고침</button>' +
+          '<span class="muted" style="margin-left:auto">since ' + escapeHTML(resp.since || '') + ' · until ' + escapeHTML(resp.until || '') + '</span>' +
+        '</form>';
+      document.getElementById('view').innerHTML =
+        section('Provider Health', kpis + filters) +
+        section('Provider ranking', providerHealthRankingTable(ranking, threshold)) +
+        section('Degradation alerts', providerHealthAlertsTable(alerts)) +
+        section('Health trend', providerHealthTrendTable(trend, threshold));
+      document.getElementById('routing-health-filter').addEventListener('submit', (e) => {
+        e.preventDefault();
+        const p = new URLSearchParams();
+        p.set('window', document.getElementById('routing-health-window').value);
+        p.set('threshold', document.getElementById('routing-health-threshold').value || '70');
+        location.hash = '#/routing/health?' + p.toString();
+      });
+      makeSortable('#view', 'routing-health');
+    }
+    function healthStatusClass(score, threshold) {
+      const n = Number(score || 0);
+      if (n < 40) return 'error';
+      if (n < Number(threshold || 70)) return 'warn';
+      return '';
+    }
+    function healthScoreCell(score, threshold) {
+      const n = Math.round(Number(score || 0));
+      return '<span class="status ' + healthStatusClass(n, threshold) + '">' + fmt(n) + ' / 100</span>' + progressBar(n / 100);
+    }
+    function providerHealthRankingTable(rows, threshold) {
+      if (!rows.length) return '<div class="empty">선택한 기간의 provider health 데이터 없음</div>';
+      return '<table><thead><tr>' +
+        '<th data-sort="num">Rank</th><th data-sort="str">Provider</th><th data-sort="num">Health</th><th data-sort="num">Requests</th><th data-sort="num">P95</th><th data-sort="num">평균 지연</th><th data-sort="num">Fallback</th>' +
+      '</tr></thead><tbody>' +
+      rows.map(r => '<tr>' +
+        '<td data-num="' + Number(r.rank || 0) + '">' + fmt(r.rank || 0) + '</td>' +
+        '<td><strong>' + escapeHTML(r.provider || '') + '</strong></td>' +
+        '<td data-num="' + Number(r.score || 0) + '">' + healthScoreCell(r.score || 0, threshold) + '</td>' +
+        '<td data-num="' + Number(r.requests || 0) + '">' + fmt(r.requests || 0) + '</td>' +
+        '<td data-num="' + Number(r.p95_latency_ms || 0) + '">' + fmt(r.p95_latency_ms || 0) + ' ms</td>' +
+        '<td data-num="' + Number(r.average_latency_ms || 0) + '">' + fmt(Math.round(Number(r.average_latency_ms || 0))) + ' ms</td>' +
+        '<td data-num="' + Number(r.fallback_rate || 0) + '">' + pct(r.fallback_rate || 0) + '</td>' +
+      '</tr>').join('') + '</tbody></table>';
+    }
+    function providerHealthAlertsTable(rows) {
+      if (!rows.length) return '<div class="empty">선택한 기간의 degradation alert 없음</div>';
+      const cls = (s) => s === 'critical' ? 'error' : (s === 'warning' ? 'warn' : '');
+      return '<table><thead><tr><th data-sort="str">Provider</th><th data-sort="str">Severity</th><th data-sort="str">Code</th><th>Message</th></tr></thead><tbody>' +
+        rows.map(a => '<tr>' +
+          '<td><strong>' + escapeHTML(a.provider || '') + '</strong></td>' +
+          '<td><span class="status ' + cls(a.severity || '') + '">' + escapeHTML(a.severity || '') + '</span></td>' +
+          '<td><code>' + escapeHTML(a.code || '') + '</code></td>' +
+          '<td>' + escapeHTML(a.message || '') + '</td>' +
+        '</tr>').join('') + '</tbody></table>';
+    }
+    function providerHealthTrendTable(rows, threshold) {
+      if (!rows.length) return '<div class="empty">선택한 기간의 trend 데이터 없음</div>';
+      return '<table><thead><tr><th>Bucket</th><th>Providers</th></tr></thead><tbody>' +
+        rows.map(b => {
+          const providers = b.providers || [];
+          const cells = providers.length ? providers.map(p =>
+            '<span class="pill" style="margin:0 6px 6px 0">' + escapeHTML(p.provider || '') + ' <span class="status ' + healthStatusClass(p.score || 0, threshold) + '" style="margin-left:4px">' + fmt(p.score || 0) + '</span></span>'
+          ).join('') : '<span class="muted">no traffic</span>';
+          return '<tr><td><strong>' + escapeHTML(bucketLabel(b.since, b.until)) + '</strong><div class="muted">' + escapeHTML((b.since || '').replace('T',' ').replace('Z','')) + ' ~ ' + escapeHTML((b.until || '').replace('T',' ').replace('Z','')) + '</div></td><td>' + cells + '</td></tr>';
+        }).join('') + '</tbody></table>';
+    }
+    function bucketLabel(since, until) {
+      const fmtTime = (v) => {
+        const d = new Date(v);
+        if (isNaN(d.getTime())) return String(v || '');
+        return d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
+      };
+      return fmtTime(since) + ' - ' + fmtTime(until);
     }
     function domainDecisionTable(rows, signalMap) {
       if (!rows.length) return '<div class="empty">선택한 조건의 routing decision 없음</div>';

@@ -16,6 +16,7 @@ $cleanVer = $Version.TrimStart('v')
 
 $notes = "## AI Proxy Gateway v" + $cleanVer + "`r`n`r`n"
 $notes += "### 주요 변경 사항`r`n"
+$notes += "- **Provider Health 관리자 화면 (`v0.50.4`)**: 라우팅 탭에 `Provider Health` 하위 화면(`#/routing/health`)을 추가. `GET /admin/routing/health`의 ranking, degraded, alerts, trend 응답을 그대로 사용해 provider 수, 평균 health, 최상위/최하위 provider, degradation alert, bucket별 health trend를 표시하고 window/threshold 필터를 제공.`r`n"
 $notes += "- **Provider Health 운영 응답 확장 (`v0.50.3`)**: `GET /admin/routing/health` 응답에 기존 provider health score 원본을 유지하면서 ranking, degraded provider, alert, bounded trend bucket을 추가. 실시간 provider ranking, degradation alert, health trend UI가 별도 재계산 없이 같은 API를 사용할 수 있도록 하고, trend 계산은 `ProviderHealthScoresBetween` bounded 조회로 정확히 분리. store/API 회귀 테스트 추가.`r`n"
 $notes += "- **요청 Trace Links (`v0.50.2`)**: `GET /admin/requests/{id}/links`로 요청 상세·XView·Waterfall·MCP Waterfall·Text2SQL Timeline·라우팅 결정 연결 정보를 한 번에 반환. 요청 상세 모달 상단에 관련 아티팩트 버튼과 governance/MCP/Text2SQL 카운트 배지를 표시해 요청 1건의 인과관계를 빠르게 추적 가능.`r`n"
 $notes += "- **Settings Registry effective view (`v0.50.1`)**: `GET /admin/settings/effective`를 추가해 `bootstrap_env`·`db_setting`·`runtime_flag`·`request_override` 계층과 최종 적용 출처를 노출. 비밀값은 기존과 동일하게 마스킹하며, 런타임 설정 UI에서도 active/set/off 배지로 계층 상태를 표시.`r`n"
