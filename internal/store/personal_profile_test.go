@@ -20,13 +20,17 @@ func TestPersonalProfile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	rec := func(id, model, taskType, lang string, status int, cost float64) {
-		if err := db.InsertLogRecord(ctx, LogRecord{
+	rec := func(id, model, taskType, lang string, status int, cost float64, mutate ...func(*LogRecord)) {
+		record := LogRecord{
 			Request: RequestLog{ID: id, TraceID: id, APIKeyID: "k1", Endpoint: "/v1/chat/completions",
 				Model: model, TaskType: taskType, PromptFingerprint: "fp_" + taskType, StatusCode: status, CreatedAt: now},
 			Prompts: []PromptLog{{ID: id + "_p", RequestID: id, Role: "user", LanguageHint: lang, CreatedAt: now}},
 			Usage:   &TokenUsage{ID: id + "_u", RequestID: id, TotalTokens: 100, EstimatedCost: cost, Currency: "KRW", CreatedAt: now},
-		}); err != nil {
+		}
+		for _, fn := range mutate {
+			fn(&record)
+		}
+		if err := db.InsertLogRecord(ctx, record); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -35,9 +39,29 @@ func TestPersonalProfile(t *testing.T) {
 	for i := 0; i < 4; i++ {
 		rec("r"+itoaStore(i), "gpt-4.1-mini", "refactor", "java", 200, 1)
 	}
-	rec("s0", "gpt-4.1-mini", "sql_analysis", "sql", 200, 1)
+	rec("s0", "gpt-4.1-mini", "sql_analysis", "sql", 200, 1, func(lr *LogRecord) {
+		lr.Request.RouteReason = "text2sql"
+	})
 	rec("s1", "gpt-4.1", "sql_analysis", "sql", 200, 5)
-	rec("d0", "gpt-4.1", "debug", "go", 500, 5)
+	rec("d0", "gpt-4.1", "debug", "go", 500, 5, func(lr *LogRecord) {
+		lr.Usage.CachedTokens = 20
+		lr.Tools = []ToolInvocation{{
+			ID: "tool_d0", RequestID: "d0", TraceID: "d0", APIKeyID: "k1",
+			ServerLabel: "git", ToolName: "commit", Source: "call", IsMCP: true, IsError: true, CreatedAt: now,
+		}}
+	})
+	if err := db.InsertSecretEvent(ctx, SecretEvent{
+		ID: "sec_u1", RequestID: "d0", APIKeyID: "k1", UserID: "u1", TeamID: "platform",
+		SecretType: "API_KEY", Action: "detect", CreatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.InsertPolicyDecisionEvent(ctx, PolicyDecisionEvent{
+		ID: "pol_u1", RequestID: "d0", APIKeyID: "k1", UserID: "u1", TeamID: "platform",
+		Phase: "request", Decision: "approval_required", Reason: "test risk", CreatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	p, err := db.BuildPersonalProfile(ctx, "u1", now.Add(-time.Hour))
 	if err != nil {
@@ -56,6 +80,21 @@ func TestPersonalProfile(t *testing.T) {
 	if p.DistinctModels != 2 {
 		t.Errorf("distinct models = %d, want 2", p.DistinctModels)
 	}
+	if p.AvgLatencyMS < 0 {
+		t.Errorf("avg latency should be non-negative, got %f", p.AvgLatencyMS)
+	}
+	if p.CacheRate < 0.14 || p.CacheRate > 0.15 {
+		t.Errorf("cache rate = %f, want ~0.143", p.CacheRate)
+	}
+	if p.Text2SQLUsageRate < 0.14 || p.Text2SQLUsageRate > 0.15 {
+		t.Errorf("text2sql usage rate = %f, want ~0.143", p.Text2SQLUsageRate)
+	}
+	if p.MCPUsageRate < 0.14 || p.MCPUsageRate > 0.15 {
+		t.Errorf("mcp usage rate = %f, want ~0.143", p.MCPUsageRate)
+	}
+	if p.RiskScore <= 0 {
+		t.Errorf("risk score should be positive, got %d", p.RiskScore)
+	}
 	// Top task type = refactor (4).
 	if len(p.TopTaskTypes) == 0 || p.TopTaskTypes[0].Key != "refactor" || p.TopTaskTypes[0].Requests != 4 {
 		t.Errorf("top task type = %+v, want refactor/4", p.TopTaskTypes)
@@ -67,6 +106,9 @@ func TestPersonalProfile(t *testing.T) {
 	// Top language = java (4).
 	if len(p.TopLanguages) == 0 || p.TopLanguages[0].Key != "java" {
 		t.Errorf("top language = %+v, want java", p.TopLanguages)
+	}
+	if len(p.TopMCPTools) == 0 || p.TopMCPTools[0].Key != "git/commit" {
+		t.Errorf("top MCP tools = %+v, want git/commit", p.TopMCPTools)
 	}
 	if p.Summary == "" {
 		t.Error("summary should be non-empty")

@@ -16,6 +16,7 @@ $cleanVer = $Version.TrimStart('v')
 
 $notes = "## AI Proxy Gateway v" + $cleanVer + "`r`n`r`n"
 $notes += "### 주요 변경 사항`r`n"
+$notes += "- **Personal AI Profile 운영 지표 확장 (`v0.50.11`)**: 개인 프로필에 평균 지연, 캐시율, Text2SQL 사용률, MCP 사용률, 개인 위험 점수, 자주 쓰는 MCP 도구 Top5를 추가. `/me/dashboard`와 개인화 어드민 탭이 같은 프로필 기준을 표시하도록 연결하고 store 회귀 테스트를 보강.`r`n"
 $notes += "- **Text2SQL span timeline 안정화 (`v0.50.10`)**: preview/cache/검증 실패/실행 실패 경로에서도 `explain_guard`, `execute`, `mask_result`, `summarize` 후속 단계를 `skipped` span으로 기록해 XView·Text2SQL Timeline의 단계 비교를 안정화. preview flow 회귀 테스트가 요구 stage 전체와 skipped 상태를 검증하도록 강화.`r`n"
 $notes += "- **MCP Wizard 선택 상태 안정화 (`v0.50.9`)**: MCP 연결 상태 Wizard가 `#/mcp?server=...` 필터와 직전 선택 upstream을 기본 선택으로 유지하고, Wizard에서 업스트림 등록 직후 생성된 upstream을 바로 선택하도록 개선. 다중 upstream 운영에서 연결 테스트→Flow→정책 확인→로그 확인 흐름이 첫 upstream으로 되돌아가는 UX 문제를 제거.`r`n"
 $notes += "- **Routing/Governance 운영 문서 동기화 (`v0.50.8`)**: README, Admin Guide, Safety Guide에 Provider Health 화면(`#/routing/health`), `route_reason`, Trace Links, Governance default audit/effective count(`policy_decision_count`/`policy_decision_total`) 의미를 반영. 안정화 릴리즈 운영 문서와 현재 API/UI 동작을 일치시킴.`r`n"

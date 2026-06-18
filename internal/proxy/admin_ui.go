@@ -6112,6 +6112,7 @@ const adminHTML = `<!doctype html>
         html += '<table><thead><tr>' +
           '<th data-sort="str">사용자</th><th data-sort="str">팀</th><th data-sort="str">역할</th>' +
           '<th data-sort="num">요청</th><th data-sort="num">총비용(KRW)</th><th data-sort="num">성공률</th>' +
+          '<th data-sort="num">캐시</th><th data-sort="num">T2SQL</th><th data-sort="num">MCP</th><th data-sort="num">위험</th>' +
           '<th>대표 모델</th><th>주요 작업</th><th>요약</th>' +
           '</tr></thead><tbody>' +
           profiles.map(p => {
@@ -6123,6 +6124,10 @@ const adminHTML = `<!doctype html>
               '<td data-num="' + (p.requests || 0) + '">' + fmt(p.requests || 0) + '</td>' +
               '<td data-num="' + (p.total_cost_krw || 0) + '">' + fmt(Math.round(p.total_cost_krw || 0)) + '</td>' +
               '<td data-num="' + (p.success_rate || 0) + '">' + pctText(p.success_rate) + '</td>' +
+              '<td data-num="' + (p.cache_rate || 0) + '">' + pctText(p.cache_rate) + '</td>' +
+              '<td data-num="' + (p.text2sql_usage_rate || 0) + '">' + pctText(p.text2sql_usage_rate) + '</td>' +
+              '<td data-num="' + (p.mcp_usage_rate || 0) + '">' + pctText(p.mcp_usage_rate) + '</td>' +
+              '<td data-num="' + (p.risk_score || 0) + '"><span class="status ' + governanceStatusClass((p.risk_score || 0) >= 70 ? 'high' : ((p.risk_score || 0) >= 35 ? 'medium' : 'low')) + '">' + fmt(p.risk_score || 0) + '</span></td>' +
               '<td>' + topModel + '</td>' +
               '<td>' + topKeyText(p.top_task_types) + '</td>' +
               '<td class="muted" style="max-width:360px">' + escapeHTML(p.summary || '') + '</td>' +
@@ -6146,7 +6151,10 @@ const adminHTML = `<!doctype html>
         row('요청 수', fmt(p.requests || 0)) +
         row('총 비용', fmt(Math.round(p.total_cost_krw || 0)) + ' KRW') +
         row('요청당 평균', (p.avg_cost_per_request || 0).toFixed(2) + ' KRW') +
+        row('평균 지연', fmt(Math.round(p.avg_latency_ms || 0)) + ' ms') +
         row('성공률 / 오류율', pctText(p.success_rate) + ' / ' + pctText(p.error_rate)) +
+        row('캐시 / Text2SQL / MCP', pctText(p.cache_rate) + ' / ' + pctText(p.text2sql_usage_rate) + ' / ' + pctText(p.mcp_usage_rate)) +
+        row('개인 위험 점수', '<span class="status ' + governanceStatusClass((p.risk_score || 0) >= 70 ? 'high' : ((p.risk_score || 0) >= 35 ? 'medium' : 'low')) + '">' + fmt(p.risk_score || 0) + '</span>') +
         row('distinct 모델 / 지문', fmt(p.distinct_models || 0) + ' / ' + fmt(p.distinct_prompt_fingerprints || 0)) +
         row('요약', escapeHTML(p.summary || '')) +
       '</div>';
@@ -6155,6 +6163,7 @@ const adminHTML = `<!doctype html>
           '<div><h3>선호 작업(task_type)</h3>' + topKeyText(p.top_task_types) + '</div>' +
           '<div><h3>선호 모델</h3>' + topKeyText(p.top_models) + '</div>' +
           '<div><h3>선호 언어</h3>' + topKeyText(p.top_languages) + '</div>' +
+          '<div><h3>자주 쓰는 MCP 도구</h3>' + topKeyText(p.top_mcp_tools) + '</div>' +
         '</div>';
       const drift = d.drift || {};
       let driftCard = '';

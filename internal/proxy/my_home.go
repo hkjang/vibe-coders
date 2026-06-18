@@ -86,6 +86,11 @@ func (s *Server) handleMyDashboard(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "dashboard_failed")
 		return
 	}
+	profile, err := s.db.BuildPersonalProfile(ctx, userID, startMonth)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "dashboard_failed")
+		return
+	}
 	failures, err := s.db.UserRecentFailures(ctx, userID, 5)
 	if err != nil {
 		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "dashboard_failed")
@@ -121,16 +126,17 @@ func (s *Server) handleMyDashboard(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"user_id":                  userID,
-		"today":                    today,
-		"month":                    month,
-		"frequent_models":          topModels,
-		"recent_failures":          failures,
-		"potential_savings_krw":    savings,
-		"potential_savings_model":  cheapModel,
-		"recommended_templates":    templates,
-		"recent_prompt_products":   products,
-		"key_alerts":               keyAlerts,
+		"user_id":                 userID,
+		"today":                   today,
+		"month":                   month,
+		"profile":                 profile,
+		"frequent_models":         topModels,
+		"recent_failures":         failures,
+		"potential_savings_krw":   savings,
+		"potential_savings_model": cheapModel,
+		"recommended_templates":   templates,
+		"recent_prompt_products":  products,
+		"key_alerts":              keyAlerts,
 	})
 }
 
@@ -163,11 +169,11 @@ func (s *Server) handleMyRecommendations(w http.ResponseWriter, r *http.Request)
 	savings, cheapModel := potentialSavingsKRW(month, models)
 	if len(models) > 0 && cheapModel != "" && cheapModel != models[0].Model && savings > 0 {
 		recs = append(recs, store.PersonalRecommendation{
-			ID:   newID("rec"),
-			Kind: "model_switch",
-			Ref:  cheapModel,
-			Title: fmt.Sprintf("자주 쓰는 %s 대신 %s 사용 고려", models[0].Model, cheapModel),
-			Detail: fmt.Sprintf("이번 달 사용 패턴 기준 %s로 전환 시 약 %.0f KRW 절감 가능 (성공률 유지).", cheapModel, savings),
+			ID:            newID("rec"),
+			Kind:          "model_switch",
+			Ref:           cheapModel,
+			Title:         fmt.Sprintf("자주 쓰는 %s 대신 %s 사용 고려", models[0].Model, cheapModel),
+			Detail:        fmt.Sprintf("이번 달 사용 패턴 기준 %s로 전환 시 약 %.0f KRW 절감 가능 (성공률 유지).", cheapModel, savings),
 			EstSavingsKRW: savings,
 		})
 	}
@@ -183,10 +189,10 @@ func (s *Server) handleMyRecommendations(w http.ResponseWriter, r *http.Request)
 			break
 		}
 		recs = append(recs, store.PersonalRecommendation{
-			ID:    newID("rec"),
-			Kind:  "template",
-			Ref:   t.ID,
-			Title: "추천 템플릿: " + t.Name,
+			ID:     newID("rec"),
+			Kind:   "template",
+			Ref:    t.ID,
+			Title:  "추천 템플릿: " + t.Name,
 			Detail: fmt.Sprintf("표준 템플릿(%s)을 사용하면 일관된 결과와 비용 예측에 도움이 됩니다.", t.Category),
 		})
 	}
