@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
-    [string]$Version
+    [string]$Version,
+    [string]$PrevVersion = "v0.49.9"
 )
 
 $ErrorActionPreference = "Stop"
@@ -22,20 +23,39 @@ if (-not (Test-Path $changelogPath)) {
 $utf8 = [System.Text.Encoding]::UTF8
 $changelogLines = [System.IO.File]::ReadAllLines($changelogPath, $utf8)
 
-# Verify if version exists in changelog and extract its content
-$foundVersion = $false
-$targetChangelog = ""
+# Verify versions exist and extract all logs between Version and PrevVersion (exclusive)
+$foundStart = $false
+$foundEnd = $false
+$extractedLogs = @()
+
 foreach ($line in $changelogLines) {
     if ($line -match "^$Version`:") {
-        $foundVersion = $true
-        $targetChangelog = $line.Substring($Version.Length + 1).Trim()
-        break
+        $foundStart = $true
+    }
+    
+    if ($foundStart) {
+        if ($line -match "^$PrevVersion`:") {
+            $foundEnd = $true
+            break
+        }
+        # Extract the version change note content
+        # Line format: "vX.Y.Z:- Note"
+        $colonIdx = $line.IndexOf(':')
+        if ($colonIdx -gt 0) {
+            $note = $line.Substring($colonIdx + 1).Trim()
+            $extractedLogs += $note
+        }
     }
 }
 
-if (-not $foundVersion) {
-    throw "Version $Version is not documented in scripts/changelog.txt. Please document the release notes first."
+if (-not $foundStart) {
+    throw "Target version $Version is not documented in scripts/changelog.txt."
 }
+if (-not $foundEnd) {
+    throw "Previous version $PrevVersion is not documented in scripts/changelog.txt."
+}
+
+$targetChangelog = $extractedLogs -join "`r`n"
 
 $notes = "## AI Proxy Gateway v" + $cleanVer + "`r`n`r`n"
 $notes += "### 주요 변경 사항`r`n"
@@ -50,7 +70,7 @@ $notes += "| README-offline-v" + $cleanVer + ".md | 오프라인 배포 가이�
 $notes += "| AI_Proxy_Gateway_Report.pdf | AI Proxy Gateway 기능·역할 및 비즈니스 가치 종합 보고서 (v0.50.15) |`r`n`r`n"
 
 $notes += "### 빠른 시작`r`n"
-$notes += '```' + "bash`r`n"
+$notes += "```bash`r`n"
 $notes += "# 이미지 로드`r`n"
 $notes += "gunzip -c ai-coding-proxy-gateway-" + $Version + ".tar.gz | docker load`r`n`n"
 $notes += "# 실행`r`n"
@@ -70,6 +90,7 @@ if (-not (Test-Path $releaseDir)) {
     New-Item -ItemType Directory -Path $releaseDir -Force | Out-Null
 }
 
+# Set content as UTF-8
 Set-Content -Path $notesPath -Value $notes -Encoding utf8
 
 gh release create $Version "release\ai-coding-proxy-gateway-$Version.tar.gz" "release\ai-coding-proxy-gateway-$Version.tar.gz.sha256" "release\README-offline-$Version.md" "release\AI_Proxy_Gateway_Report.pdf" --repo hkjang/vibe-coders --title "$Version - AI Proxy Gateway" --notes-file $notesPath
