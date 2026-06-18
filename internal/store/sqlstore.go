@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -1481,7 +1482,7 @@ func (s *SQLStore) InsertLogRecord(ctx context.Context, record LogRecord) error 
 	_, err = tx.ExecContext(ctx, s.bind(`INSERT INTO request_logs
 		(id, trace_id, api_key_id, client_ip, forwarded_for, user_agent, hostname, model, endpoint, stream, provider, status_code, latency_ms, first_chunk_ms, session_id, prompt_name, prompt_version, prompt_variables_hash, tool_count, error, request_hash, body_raw, replay_of, failover, route_reason, route_detail, complexity, fallback_from, fallback_reason, requested_model, task_type, prompt_fingerprint, repo, branch, project, service, cost_center, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
-		req.ID, req.TraceID, req.APIKeyID, req.ClientIP, req.ForwardedFor, req.UserAgent, req.Hostname, req.Model, req.Endpoint, boolInt(req.Stream), req.Provider, req.StatusCode, req.LatencyMS, req.FirstChunkMS, req.SessionID, req.PromptName, req.PromptVersion, req.PromptVariablesHash, req.ToolCount, req.Error, req.RequestHash, req.BodyRaw, req.ReplayOf, boolInt(req.Failover), req.RouteReason, req.RouteDetail, req.Complexity, req.FallbackFrom, req.FallbackReason, req.RequestedModel, req.TaskType, req.PromptFingerprint, req.Repo, req.Branch, req.Project, req.Service, req.CostCenter, formatTime(req.CreatedAt))
+		cleanArgs([]any{req.ID, req.TraceID, req.APIKeyID, req.ClientIP, req.ForwardedFor, req.UserAgent, req.Hostname, req.Model, req.Endpoint, boolInt(req.Stream), req.Provider, req.StatusCode, req.LatencyMS, req.FirstChunkMS, req.SessionID, req.PromptName, req.PromptVersion, req.PromptVariablesHash, req.ToolCount, req.Error, req.RequestHash, req.BodyRaw, req.ReplayOf, boolInt(req.Failover), req.RouteReason, req.RouteDetail, req.Complexity, req.FallbackFrom, req.FallbackReason, req.RequestedModel, req.TaskType, req.PromptFingerprint, req.Repo, req.Branch, req.Project, req.Service, req.CostCenter, formatTime(req.CreatedAt)})...)
 	if err != nil {
 		return err
 	}
@@ -1493,7 +1494,7 @@ func (s *SQLStore) InsertLogRecord(ctx context.Context, record LogRecord) error 
 		_, err = tx.ExecContext(ctx, s.bind(`INSERT INTO prompt_logs
 			(id, request_id, role, content_hash, content_text, redacted_text, language_hint, created_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`),
-			prompt.ID, prompt.RequestID, prompt.Role, prompt.ContentHash, prompt.ContentText, prompt.RedactedText, prompt.LanguageHint, formatTime(prompt.CreatedAt))
+			cleanArgs([]any{prompt.ID, prompt.RequestID, prompt.Role, prompt.ContentHash, prompt.ContentText, prompt.RedactedText, prompt.LanguageHint, formatTime(prompt.CreatedAt)})...)
 		if err != nil {
 			return err
 		}
@@ -1507,7 +1508,7 @@ func (s *SQLStore) InsertLogRecord(ctx context.Context, record LogRecord) error 
 		_, err = tx.ExecContext(ctx, s.bind(`INSERT INTO response_logs
 			(id, request_id, status_code, finish_reason, response_hash, response_text_optional, created_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?)`),
-			resp.ID, resp.RequestID, resp.StatusCode, resp.FinishReason, resp.ResponseHash, resp.ResponseTextOptional, formatTime(resp.CreatedAt))
+			cleanArgs([]any{resp.ID, resp.RequestID, resp.StatusCode, resp.FinishReason, resp.ResponseHash, resp.ResponseTextOptional, formatTime(resp.CreatedAt)})...)
 		if err != nil {
 			return err
 		}
@@ -1521,7 +1522,7 @@ func (s *SQLStore) InsertLogRecord(ctx context.Context, record LogRecord) error 
 		_, err = tx.ExecContext(ctx, s.bind(`INSERT INTO token_usage
 			(id, request_id, prompt_tokens, completion_tokens, total_tokens, cached_tokens, reasoning_tokens, estimated_cost, currency, source, created_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
-			usage.ID, usage.RequestID, usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens, usage.CachedTokens, usage.ReasoningTokens, usage.EstimatedCost, usage.Currency, usage.Source, formatTime(usage.CreatedAt))
+			cleanArgs([]any{usage.ID, usage.RequestID, usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens, usage.CachedTokens, usage.ReasoningTokens, usage.EstimatedCost, usage.Currency, usage.Source, formatTime(usage.CreatedAt)})...)
 		if err != nil {
 			return err
 		}
@@ -1534,7 +1535,7 @@ func (s *SQLStore) InsertLogRecord(ctx context.Context, record LogRecord) error 
 		_, err = tx.ExecContext(ctx, s.bind(`INSERT INTO language_stats
 			(id, request_id, language, confidence, evidence, created_at)
 			VALUES (?, ?, ?, ?, ?, ?)`),
-			language.ID, language.RequestID, language.Language, language.Confidence, language.Evidence, formatTime(language.CreatedAt))
+			cleanArgs([]any{language.ID, language.RequestID, language.Language, language.Confidence, language.Evidence, formatTime(language.CreatedAt)})...)
 		if err != nil {
 			return err
 		}
@@ -1547,8 +1548,8 @@ func (s *SQLStore) InsertLogRecord(ctx context.Context, record LogRecord) error 
 		_, err = tx.ExecContext(ctx, s.bind(`INSERT INTO llm_evaluations
 			(id, request_id, trace_id, name, category, evaluator, score, label, passed, reason, metadata, created_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
-			evaluation.ID, evaluation.RequestID, evaluation.TraceID, evaluation.Name, evaluation.Category, evaluation.Evaluator, evaluation.Score,
-			evaluation.Label, boolInt(evaluation.Passed), evaluation.Reason, evaluation.Metadata, formatTime(evaluation.CreatedAt))
+			cleanArgs([]any{evaluation.ID, evaluation.RequestID, evaluation.TraceID, evaluation.Name, evaluation.Category, evaluation.Evaluator, evaluation.Score,
+				evaluation.Label, boolInt(evaluation.Passed), evaluation.Reason, evaluation.Metadata, formatTime(evaluation.CreatedAt)})...)
 		if err != nil {
 			return err
 		}
@@ -1561,8 +1562,8 @@ func (s *SQLStore) InsertLogRecord(ctx context.Context, record LogRecord) error 
 		_, err = tx.ExecContext(ctx, s.bind(`INSERT INTO tool_invocations
 			(id, request_id, trace_id, api_key_id, server_label, tool_name, source, is_mcp, is_error, arg_sensitive, arg_hash, created_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
-			tool.ID, tool.RequestID, tool.TraceID, tool.APIKeyID, tool.ServerLabel, tool.ToolName, tool.Source,
-			boolInt(tool.IsMCP), boolInt(tool.IsError), boolInt(tool.ArgSensitive), tool.ArgHash, formatTime(tool.CreatedAt))
+			cleanArgs([]any{tool.ID, tool.RequestID, tool.TraceID, tool.APIKeyID, tool.ServerLabel, tool.ToolName, tool.Source,
+				boolInt(tool.IsMCP), boolInt(tool.IsError), boolInt(tool.ArgSensitive), tool.ArgHash, formatTime(tool.CreatedAt)})...)
 		if err != nil {
 			return err
 		}
@@ -1576,7 +1577,7 @@ func (s *SQLStore) InsertLogRecord(ctx context.Context, record LogRecord) error 
 			_, err = tx.ExecContext(ctx, s.bind(`INSERT INTO mcp_tool_catalog (server_label, tool_name, is_mcp, first_seen, last_seen)
 				VALUES (?, ?, ?, ?, ?)
 				ON CONFLICT(server_label, tool_name) DO UPDATE SET last_seen = excluded.last_seen, is_mcp = excluded.is_mcp`),
-				server, tool.ToolName, boolInt(tool.IsMCP), ts, ts)
+				cleanArgs([]any{server, tool.ToolName, boolInt(tool.IsMCP), ts, ts})...)
 			if err != nil {
 				return err
 			}
@@ -2074,4 +2075,23 @@ func boolInt(value bool) int {
 
 func formatTime(value time.Time) string {
 	return value.UTC().Format(time.RFC3339Nano)
+}
+
+func cleanArgs(args []any) []any {
+	cleaned := make([]any, len(args))
+	for i, arg := range args {
+		switch v := arg.(type) {
+		case string:
+			cleaned[i] = strings.ReplaceAll(v, "\x00", "")
+		case float64:
+			if math.IsNaN(v) || math.IsInf(v, 0) {
+				cleaned[i] = 0.0
+			} else {
+				cleaned[i] = v
+			}
+		default:
+			cleaned[i] = arg
+		}
+	}
+	return cleaned
 }
