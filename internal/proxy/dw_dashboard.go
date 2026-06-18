@@ -252,7 +252,7 @@ func (s *Server) handleDWDashboardText2SQL(w http.ResponseWriter, r *http.Reques
 		writeJSON(w, http.StatusOK, map[string]any{"configured": false})
 		return
 	}
-	sinceStr, _ := dwSinceDate(r)
+	sinceStr, since := dwSinceDate(r)
 	where := "ts >= '" + sinceStr + "'"
 
 	summary, err := s.dwQueryJSON(r.Context(), cfg, "SELECT count() AS total, sum(valid) AS valid, sum(executed) AS executed, "+
@@ -290,10 +290,12 @@ func (s *Server) handleDWDashboardText2SQL(w http.ResponseWriter, r *http.Reques
 	for _, f := range failures {
 		fails = append(fails, map[string]any{"reason": f["reason"], "count": asFloat(f["n"])})
 	}
+	stageMetrics, _ := s.db.Text2SQLStageMetricsSince(r.Context(), since)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"configured": true, "since": sinceStr,
 		"total": total, "valid": valid, "executed": executed, "blocked": blocked, "block_rate": blockRate,
 		"avg_explain_risk": avgRisk, "cost_krw": cost, "by_mode": modes, "failures": fails,
+		"stage_metrics": stageMetrics,
 	})
 }
 

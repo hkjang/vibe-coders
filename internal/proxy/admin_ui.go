@@ -151,6 +151,13 @@ const adminHTML = `<!doctype html>
     .banner.warn { background: var(--warn-bg); border-color: var(--warn); }
     .banner.error { background: var(--bad-bg); border-color: var(--bad); }
     .banner code { font-size: 12px; padding: 1px 4px; border-radius: 4px; background: var(--pill-bg); }
+    .stepper { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; padding: 12px; border-bottom: 1px solid var(--line); }
+    .stepper .step { border: 1px solid var(--line); border-radius: 8px; padding: 10px; background: var(--panel-alt); min-height: 74px; }
+    .stepper .step strong { display: block; font-size: 12px; margin-bottom: 4px; }
+    .stepper .step .muted { font-size: 12px; line-height: 1.35; }
+    .stepper .step.ready { border-color: var(--good-ink); background: var(--good-bg); }
+    .stepper .step.warn { border-color: var(--warn); background: var(--warn-bg); }
+    .stepper .step.blocked { border-color: var(--bad); background: var(--bad-bg); }
     .prompt { max-height: 80px; overflow: hidden; color: var(--ink); white-space: pre-wrap; }
     .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; background: var(--pill-bg); color: var(--ink); font-size: 12px; }
 
@@ -1877,7 +1884,7 @@ const adminHTML = `<!doctype html>
         '<div style="padding:14px">' + bodyHTML + '</div></section>';
     }
     function explainHTML(x) {
-      const rt = x.routing || {}, fb = x.fallback || {}, ca = x.cache || {}, sf = x.safety || {}, gv = x.governance || {}, co = x.cost || {}, se = x.session || {};
+      const rt = x.routing || {}, fb = x.fallback || {}, ca = x.cache || {}, sf = x.safety || {}, gv = x.governance || {}, t2s = x.text2sql || {}, co = x.cost || {}, se = x.session || {};
       const tierBadge = { reasoning: 'error', complex: 'warn', standard: '', simple: '' }[rt.tier] || '';
 
       const modelLine = rt.model_changed
@@ -1920,6 +1927,14 @@ const adminHTML = `<!doctype html>
         row('안전 위반', sf.finding_count > 0 ? (fmt(sf.finding_count) + '건' + findings) : '<span class="muted">없음</span>') +
       '</div>';
       const governance = governanceHTML(gv);
+      const text2sql = (t2s.spans || []).length ? (
+        '<div class="kv">' +
+          row('상태', '<span class="status ' + governanceStatusClass(t2s.status || '') + '">' + escapeHTML(t2s.status || '') + '</span>') +
+          row('단계 수', fmt(t2s.span_count || (t2s.spans || []).length)) +
+          row('Span latency 합계', fmt(t2s.total_latency_ms || 0) + ' ms') +
+          row('Span cost 합계', money(t2s.total_cost_krw || 0)) +
+        '</div>' + text2SQLSpanTable(t2s.spans || [])
+      ) : '<div class="muted">Text2SQL span 없음. 일반 LLM 요청이거나 span 저장 전 로그입니다.</div>';
 
       const cost = '<div class="kv">' +
         row('실제 비용', '<strong>' + money(co.actual_krw) + '</strong> <span class="muted">(' + escapeHTML(sourceLabel(co.token_source)) + ')</span>') +
@@ -1940,6 +1955,7 @@ const adminHTML = `<!doctype html>
         explainPanel('🟢 캐시', cache, '#22c55e') +
         explainPanel('🛡 안전', safety, 'var(--bad)') +
         explainPanel('거버넌스', governance, 'var(--accent-2)') +
+        explainPanel('Text2SQL Timeline', text2sql, 'var(--accent)') +
         explainPanel('💰 비용', cost, 'var(--accent-2)') +
         explainPanel('🧵 세션', session, 'var(--muted)');
     }
@@ -2003,6 +2019,20 @@ const adminHTML = `<!doctype html>
         '</tr>').join('') + '</tbody></table>'
       ) : '';
       return summary + policyTable + approvalTable + secretTable + anomalyTable;
+    }
+    function text2SQLSpanTable(spans) {
+      spans = spans || [];
+      if (!spans.length) return '<div class="muted">Text2SQL span 없음</div>';
+      return '<table style="margin-top:12px"><thead><tr><th>#</th><th>Stage</th><th>Status</th><th>Latency</th><th>Cost</th><th>Hashes</th><th>Detail</th></tr></thead><tbody>' +
+        spans.map((s, idx) => '<tr>' +
+          '<td data-num="' + idx + '">' + (idx + 1) + '</td>' +
+          '<td><strong>' + escapeHTML(s.stage || '') + '</strong><div class="muted">' + escapeHTML(s.model || '') + '</div></td>' +
+          '<td><span class="status ' + governanceStatusClass(s.status || '') + '">' + escapeHTML(s.status || '') + '</span>' + (s.reject_reason ? '<div class="muted">' + escapeHTML(s.reject_reason) + '</div>' : '') + '</td>' +
+          '<td data-num="' + Number(s.latency_ms || 0) + '">' + fmt(s.latency_ms || 0) + ' ms</td>' +
+          '<td data-num="' + Number(s.cost_krw || 0) + '">' + money(s.cost_krw || 0) + '</td>' +
+          '<td><code style="font-size:11px">' + escapeHTML(s.input_hash || '') + '</code><div class="muted"><code>' + escapeHTML(s.output_hash || '') + '</code></div></td>' +
+          '<td><pre class="prompt-block" style="max-height:120px;overflow:auto;margin:0">' + escapeHTML(prettyJSON(s.detail || '')) + '</pre></td>' +
+        '</tr>').join('') + '</tbody></table>';
     }
     window.openRequestDetail = async (id) => {
       try {
@@ -3324,6 +3354,7 @@ const adminHTML = `<!doctype html>
     function requestsTable(rows, opts) {
       if (!rows.length) return '<div class="empty">요청 없음</div>';
       const selectable = opts && opts.selectable;
+      const mcpWaterfall = opts && opts.mcpWaterfall;
       const head =
         (selectable ? '<th style="width:32px"></th>' : '') +
         '<th data-sort="num">상태</th>' +
@@ -3332,7 +3363,8 @@ const adminHTML = `<!doctype html>
         '<th data-sort="str">모델</th>' +
         '<th data-sort="num">첫 청크/전체</th>' +
         '<th data-sort="num">토큰/비용</th>' +
-        '<th>프롬프트</th>';
+        '<th>프롬프트</th>' +
+        (mcpWaterfall ? '<th>워터폴</th>' : '');
       return '<table><thead><tr>' + head + '</tr></thead><tbody>' +
         rows.map(r => {
           const langs = (r.languages || []).map(l => l.language).join(', ');
@@ -3348,7 +3380,9 @@ const adminHTML = `<!doctype html>
             '<td>' + escapeHTML(r.model || '알 수 없음') + '<div class="muted">' + escapeHTML(langs || '') + '</div>' + (tags ? '<div style="margin-top:4px">' + tags + '</div>' : '') + '</td>' +
             '<td data-num="' + (r.first_chunk_ms || 0) + '">' + fmt(r.first_chunk_ms || 0) + ' ms<div class="muted">전체 ' + fmt(r.latency_ms || 0) + ' ms</div></td>' +
             '<td data-num="' + (r.total_tokens || 0) + '">' + fmt(r.total_tokens) + ' tok<div class="muted">' + money(r.estimated_cost) + ' · ' + escapeHTML(sourceLabel(r.token_source)) + '</div></td>' +
-            '<td><div class="prompt">' + escapeHTML(prompt) + '</div>' + note + '</td></tr>';
+            '<td><div class="prompt">' + escapeHTML(prompt) + '</div>' + note + '</td>' +
+            (mcpWaterfall ? '<td><button class="secondary" type="button" onclick="event.stopPropagation();openMCPRequestWaterfall(\'' + escapeAttr(r.id) + '\')">MCP Waterfall</button></td>' : '') +
+          '</tr>';
         }).join('') + '</tbody></table>';
     }
     function attachRequestRowHandlers() {
@@ -3530,6 +3564,7 @@ const adminHTML = `<!doctype html>
         '</tr>').join('') + '</tbody></table>'
       ) : '<div class="muted">feedback 없음</div>';
       const governance = governanceHTML(d.governance || {});
+      const text2sqlSpans = text2SQLSpanTable(d.text2sql_spans || []);
 
       return (
         lastUserBlock +
@@ -3560,6 +3595,7 @@ const adminHTML = `<!doctype html>
         '<h3 style="margin-top:18px">프롬프트 (마스킹 적용)</h3>' + prompts +
         '<h3 style="margin-top:18px">응답</h3>' + resp +
         '<h3 style="margin-top:18px">LLM Spans</h3>' + spans +
+        '<h3 style="margin-top:18px">Text2SQL Timeline</h3>' + text2sqlSpans +
         '<h3 style="margin-top:18px">LLM Evaluation</h3>' + evals +
         '<h3 style="margin-top:18px">Governance</h3>' + governance +
         '<h3 style="margin-top:18px">LLM Feedback</h3>' + feedback +
@@ -4565,9 +4601,10 @@ const adminHTML = `<!doctype html>
       if (configuredFilter) qs.set('configured', configuredFilter);
       if (mcpOnly) qs.set('mcp_only', '1');
 
-      const [overviewResp, routesResp, serversResp, toolsResp, policiesResp, loopsResp, catalogResp, upstreamsResp] = await Promise.all([
+      const [overviewResp, routesResp, topologyResp, serversResp, toolsResp, policiesResp, loopsResp, catalogResp, upstreamsResp] = await Promise.all([
         api('/admin/mcp/overview').catch(() => null),
         api('/admin/mcp/routes').catch(() => ({ routes: [], errors: {} })),
+        api('/admin/mcp/topology').catch(() => ({ nodes: [], edges: [] })),
         api('/admin/mcp/servers' + (serverFilter || apiKeyId || mcpOnly ? '?' + new URLSearchParams([...qs].filter(([k]) => ['server','api_key_id','mcp_only'].includes(k))).toString() : '')),
         api('/admin/mcp/tools' + (qs.toString() ? '?' + qs.toString() : '')),
         api('/admin/mcp/policies').catch(() => ({ policies: [], allowlist_enabled: false })),
@@ -4589,6 +4626,7 @@ const adminHTML = `<!doctype html>
       const newToolCount = catalogResp.new_count || 0;
       const routeRows = routesResp.routes || [];
       window.mcpRouteRows = routeRows;
+      window.mcpTopology = topologyResp || { nodes: [], edges: [] };
 
       const ov = overviewResp || {};
       const kpis = '<div class="kpis">' +
@@ -4741,7 +4779,8 @@ const adminHTML = `<!doctype html>
           '<td class="muted">' + escapeHTML(u.url) + '</td>' +
           '<td>' + (u.has_auth ? '<span class="pill">인증</span>' : '<span class="muted">없음</span>') + '</td>' +
           '<td><span class="status ' + (u.enabled ? '' : 'error') + '">' + (u.enabled ? '사용' : '중지') + '</span></td>' +
-          '<td><button class="secondary" type="button" onclick="testMCPUpstream(\'' + escapeAttr(u.id) + '\')">테스트/도구</button> ' +
+          '<td><button class="secondary" type="button" onclick="showMCPUpstreamFlow(\'' + escapeAttr(u.id) + '\')">Flow</button> ' +
+          '<button class="secondary" type="button" onclick="testMCPUpstream(\'' + escapeAttr(u.id) + '\')">테스트/도구</button> ' +
           '<button class="secondary" type="button" onclick="toggleMCPUpstream(\'' + escapeAttr(u.id) + '\',' + (!u.enabled) + ')">' + (u.enabled ? '중지' : '사용') + '</button> ' +
           '<button class="danger" type="button" onclick="deleteMCPUpstream(\'' + escapeAttr(u.id) + '\')">삭제</button></td>' +
         '</tr>').join('');
@@ -4757,6 +4796,9 @@ const adminHTML = `<!doctype html>
         '</div>';
 
       const routeMapTable = mcpRouteMapTable(routeRows);
+      const effectivePolicyTable = mcpEffectivePolicyTable(routeRows, riskByTool, allowlistEnabled, policies);
+      const topologyView = mcpTopologyView(topologyResp || {});
+      const wizard = mcpWizardView(upstreams, routeRows, policies, allowlistEnabled, servers);
       const testConsole =
         '<form class="inline-form" id="mcp-route-explain-form" autocomplete="off" style="grid-template-columns: 150px minmax(180px,1fr) minmax(180px,1fr) 90px 90px;">' +
           '<select id="mcp-explain-method">' +
@@ -4776,14 +4818,68 @@ const adminHTML = `<!doctype html>
 
       document.getElementById('view').innerHTML =
         section('MCP 운영 Overview', kpis + filterBar) +
+        section('MCP 연결 상태 Wizard', wizard) +
         section('MCP Route Explain / Test Console', testConsole) +
         section('MCP Gateway — 업스트림 등록과 연결 진단', upstreamForm + upstreamTable + gatewayHelp) +
         section('Route Map — 클라이언트 노출명 → 업스트림 원본', routeMapTable) +
+        section('Effective Policy Matrix — 최종 호출 가능 여부', effectivePolicyTable) +
+        section('Topology — Gateway / Upstream / Route 관계', topologyView) +
         section('MCP 서버별', serverTable) +
         section('Tool 리더보드', toolTable) +
         section('에이전트 루프 의심 (세션별 반복 호출 ≥ 10)', loopTable) +
         section(catalogTitle, catalogTable) +
         section('MCP 서버 정책', allowlistToggle + policyForm + policyTable);
+
+      const wizardSelect = document.getElementById('mcp-wizard-upstream');
+      if (wizardSelect) {
+        wizardSelect.addEventListener('change', () => refreshMCPWizardSelection(wizardSelect.value));
+      }
+      const wizardRegister = document.getElementById('mcp-wizard-register');
+      if (wizardRegister) {
+        wizardRegister.addEventListener('click', async () => {
+          const name = document.getElementById('mcp-wizard-name').value.trim();
+          const url = document.getElementById('mcp-wizard-url').value.trim();
+          const auth = document.getElementById('mcp-wizard-auth').value;
+          if (!name || !url) { alert('Wizard 등록에는 이름과 URL이 필요합니다.'); return; }
+          await api('/admin/mcp/upstreams', { method: 'POST', body: JSON.stringify({ name, url, auth_token: auth }) });
+          location.hash = '#/mcp?server=' + encodeURIComponent(name);
+          route();
+        });
+      }
+      const wizardProbe = document.getElementById('mcp-wizard-probe');
+      if (wizardProbe) {
+        wizardProbe.addEventListener('click', async () => {
+          const id = document.getElementById('mcp-wizard-upstream').value;
+          if (!id) return;
+          await window.testMCPUpstream(id);
+        });
+      }
+      const wizardFlow = document.getElementById('mcp-wizard-flow');
+      if (wizardFlow) {
+        wizardFlow.addEventListener('click', async () => {
+          const id = document.getElementById('mcp-wizard-upstream').value;
+          if (!id) return;
+          await window.showMCPUpstreamFlow(id);
+        });
+      }
+      const wizardExplain = document.getElementById('mcp-wizard-explain');
+      if (wizardExplain) {
+        wizardExplain.addEventListener('click', async () => {
+          const id = document.getElementById('mcp-wizard-upstream').value;
+          const routeRows = window.mcpRouteRows || [];
+          const routeRow = routeRows.find(r => (r.upstream_id || r.upstream_name) === id && r.kind === 'tool') || routeRows.find(r => r.upstream_id === id || r.upstream_name === id);
+          if (!routeRow) { alert('이 업스트림의 노출 route가 아직 없습니다. 먼저 Probe를 실행하세요.'); return; }
+          await window.explainMCPRouteFromRow(routeRow.kind || 'tool', routeRow.uri || routeRow.exposed_name || '');
+        });
+      }
+      const wizardLogs = document.getElementById('mcp-wizard-logs');
+      if (wizardLogs) {
+        wizardLogs.addEventListener('click', async () => {
+          const id = document.getElementById('mcp-wizard-upstream').value;
+          const up = (window.mcpWizardUpstreams || []).find(x => x.id === id) || {};
+          await window.mcpToolRequests(up.name || id, '', false);
+        });
+      }
 
       document.getElementById('mcp-upstream-form').addEventListener('submit', async (e) => {
         e.preventDefault();
@@ -4837,6 +4933,72 @@ const adminHTML = `<!doctype html>
       });
       makeSortable('#view', 'mcp');
     }
+    function mcpWizardView(upstreams, routes, policies, allowlistEnabled, servers) {
+      window.mcpWizardUpstreams = upstreams || [];
+      window.mcpWizardRoutes = routes || [];
+      window.mcpWizardPolicies = policies || [];
+      window.mcpWizardServers = servers || [];
+      const selected = (upstreams && upstreams[0]) ? upstreams[0].id : '';
+      const options = (upstreams || []).map(u => '<option value="' + escapeAttr(u.id) + '">' + escapeHTML(u.name || u.id) + '</option>').join('');
+      const selectedState = mcpWizardState(selected, upstreams, routes, policies, allowlistEnabled, servers);
+      const registerForm =
+        '<div class="inline-form" style="grid-template-columns: minmax(120px,1fr) minmax(220px,2fr) minmax(120px,1fr) 90px; border-bottom:1px solid var(--line)">' +
+          '<input id="mcp-wizard-name" placeholder="업스트림 이름">' +
+          '<input id="mcp-wizard-url" type="url" placeholder="Streamable HTTP URL">' +
+          '<input id="mcp-wizard-auth" type="password" autocomplete="new-password" placeholder="Bearer 토큰(선택)">' +
+          '<button type="button" id="mcp-wizard-register">등록</button>' +
+        '</div>';
+      const selector =
+        '<div class="toolbar" style="border-bottom:1px solid var(--line)">' +
+          '<select id="mcp-wizard-upstream" ' + (options ? '' : 'disabled') + '>' + options + '</select>' +
+          '<button type="button" class="secondary" id="mcp-wizard-probe" ' + (selected ? '' : 'disabled') + '>연결 테스트</button>' +
+          '<button type="button" class="secondary" id="mcp-wizard-flow" ' + (selected ? '' : 'disabled') + '>Flow</button>' +
+          '<button type="button" class="secondary" id="mcp-wizard-explain" ' + (selected ? '' : 'disabled') + '>정책/Route 확인</button>' +
+          '<button type="button" class="secondary" id="mcp-wizard-logs" ' + (selected ? '' : 'disabled') + '>로그 확인</button>' +
+        '</div>';
+      return registerForm + selector + '<div id="mcp-wizard-steps">' + mcpWizardStepsHTML(selectedState) + '</div>';
+    }
+    function mcpWizardState(id, upstreams, routes, policies, allowlistEnabled, servers) {
+      const up = (upstreams || []).find(u => u.id === id) || {};
+      const name = up.name || id || '';
+      const routeMatches = (routes || []).filter(r => (r.upstream_id || '') === id || (r.upstream_name || '') === name);
+      const server = (servers || []).find(s => (s.server_label || '') === name) || {};
+      const policy = (policies || []).find(p => (p.server_label || '') === name) || {};
+      const finalDecision = policy.mode === 'block' ? 'block' : (allowlistEnabled && policy.mode !== 'allow' ? 'block' : (policy.mode === 'warn' ? 'warn' : 'allow'));
+      const firstTool = routeMatches.find(r => r.kind === 'tool') || routeMatches[0] || {};
+      return {
+        registered: !!id,
+        enabled: !!up.enabled,
+        name,
+        routeCount: routeMatches.length,
+        firstRoute: firstTool.exposed_name || firstTool.uri || '',
+        policy: finalDecision,
+        policyReason: policy.mode ? ('server policy: ' + policy.mode) : (allowlistEnabled ? 'allowlist 미등록이면 차단' : '기본 허용'),
+        calls: Number(server.calls || 0),
+        errors: Number(server.errors || 0),
+      };
+    }
+    function mcpWizardStepsHTML(st) {
+      const cls = (ok, warn) => ok ? 'ready' : (warn ? 'warn' : 'blocked');
+      const routeReady = st.routeCount > 0;
+      const allowed = st.policy !== 'block';
+      const hasCalls = st.calls > 0;
+      const errText = hasCalls ? errorRatePct(st.errors, st.calls) : '아직 호출 로그 없음';
+      return '<div class="stepper">' +
+        '<div class="step ' + cls(st.registered, false) + '"><strong>1. 등록</strong><div class="muted">' + (st.registered ? escapeHTML(st.name) : '업스트림 등록 필요') + '</div></div>' +
+        '<div class="step ' + cls(st.enabled, st.registered) + '"><strong>2. 활성화</strong><div class="muted">' + (st.enabled ? 'enabled' : (st.registered ? 'disabled' : '대상 없음')) + '</div></div>' +
+        '<div class="step ' + cls(routeReady, st.registered) + '"><strong>3. 도구 목록</strong><div class="muted">' + fmt(st.routeCount) + '개 route' + (st.firstRoute ? '<br><code>' + escapeHTML(st.firstRoute) + '</code>' : '') + '</div></div>' +
+        '<div class="step ' + cls(allowed, st.policy === 'warn') + '"><strong>4. 정책</strong><div class="muted">' + escapeHTML(st.policy) + '<br>' + escapeHTML(st.policyReason) + '</div></div>' +
+        '<div class="step ' + cls(routeReady && allowed, routeReady && !allowed) + '"><strong>5. 호출 준비</strong><div class="muted">' + (routeReady && allowed ? 'Explain/Test 가능' : 'route 또는 정책 확인 필요') + '</div></div>' +
+        '<div class="step ' + cls(hasCalls, st.registered) + '"><strong>6. 관측 로그</strong><div class="muted">' + fmt(st.calls) + '건<br>' + escapeHTML(errText) + '</div></div>' +
+      '</div>';
+    }
+    function refreshMCPWizardSelection(id) {
+      const host = document.getElementById('mcp-wizard-steps');
+      if (!host) return;
+      const st = mcpWizardState(id, window.mcpWizardUpstreams || [], window.mcpWizardRoutes || [], window.mcpWizardPolicies || [], !!document.getElementById('mcp-allowlist')?.checked, window.mcpWizardServers || []);
+      host.innerHTML = mcpWizardStepsHTML(st);
+    }
     function mcpRiskOption(value, current) {
       return '<option value="' + value + '" ' + (value === current ? 'selected' : '') + '>' + value + '</option>';
     }
@@ -4878,6 +5040,58 @@ const adminHTML = `<!doctype html>
           '<td><button class="secondary" type="button" onclick="explainMCPRouteFromRow(\'' + escapeAttr(r.kind || '') + '\',\'' + escapeAttr(exposed) + '\')">Explain</button></td>' +
         '</tr>';
       }).join('') + '</tbody></table>';
+    }
+    function mcpEffectivePolicyTable(routes, riskByTool, allowlistEnabled, policies) {
+      const policyByServer = {};
+      (policies || []).forEach(p => { policyByServer[p.server_label || ''] = p.mode || 'allow'; });
+      const rows = (routes || []).filter(r => r.kind === 'tool').map(r => {
+        const server = r.upstream_name || '';
+        const tool = r.target_name || '';
+        const risk = (riskByTool || {})[server + '\u0000' + tool] || {};
+        const serverPolicy = policyByServer[server] || (allowlistEnabled ? 'not_in_allowlist' : 'allow');
+        const action = risk.action || 'allow';
+        let decision = 'allow';
+        let reason = '허용';
+        if (serverPolicy === 'block' || serverPolicy === 'not_in_allowlist') {
+          decision = 'block'; reason = serverPolicy;
+        } else if (action === 'block') {
+          decision = 'block'; reason = 'tool risk block';
+        } else if (action === 'require_approval') {
+          decision = 'approval_required'; reason = 'tool risk approval';
+        } else if (serverPolicy === 'warn') {
+          decision = 'warn'; reason = 'server warn';
+        }
+        return { route: r, risk, serverPolicy, decision, reason };
+      });
+      if (!rows.length) return '<div class="empty">정책을 계산할 tool route가 없습니다.</div>';
+      return '<table><thead><tr>' +
+        '<th data-sort="str">노출명</th><th data-sort="str">업스트림</th><th data-sort="str">서버 정책</th><th data-sort="str">Tool Risk</th><th data-sort="str">최종 상태</th><th>동작</th>' +
+      '</tr></thead><tbody>' +
+      rows.map(x => '<tr>' +
+        '<td><code>' + escapeHTML(x.route.exposed_name || '') + '</code><div class="muted">' + escapeHTML(x.route.target_name || '') + '</div></td>' +
+        '<td>' + escapeHTML(x.route.upstream_name || '') + '<div class="muted">' + escapeHTML(x.route.upstream_id || '') + '</div></td>' +
+        '<td><span class="status ' + governanceStatusClass(x.serverPolicy) + '">' + escapeHTML(x.serverPolicy) + '</span></td>' +
+        '<td><span class="status ' + governanceStatusClass(x.risk.risk_level || 'low') + '">' + escapeHTML(x.risk.risk_level || 'low') + '</span> ' +
+          '<span class="status ' + governanceStatusClass(x.risk.action || 'allow') + '">' + escapeHTML(x.risk.action || 'allow') + '</span>' +
+          (x.risk.configured ? '<div class="muted">configured</div>' : '<div class="muted">inferred</div>') + '</td>' +
+        '<td><span class="status ' + governanceStatusClass(x.decision) + '">' + escapeHTML(x.decision) + '</span><div class="muted">' + escapeHTML(x.reason) + '</div></td>' +
+        '<td><button class="secondary" type="button" onclick="showMCPEffectivePolicy(\'' + escapeAttr(x.route.upstream_name || '') + '\',\'' + escapeAttr(x.route.target_name || '') + '\')">API 확인</button></td>' +
+      '</tr>').join('') + '</tbody></table>';
+    }
+    function mcpTopologyView(topology) {
+      const nodes = (topology && topology.nodes) || [];
+      const edges = (topology && topology.edges) || [];
+      if (!nodes.length) return '<div class="empty">토폴로지 데이터 없음</div>';
+      const routeNodes = nodes.filter(n => n.kind === 'tool' || n.kind === 'prompt' || n.kind === 'resource');
+      const upstreamNodes = nodes.filter(n => n.kind === 'upstream');
+      const edgeRows = edges.slice(0, 80).map(e => '<tr><td>' + escapeHTML(e.from || '') + '</td><td>' + escapeHTML(e.label || '') + '</td><td>' + escapeHTML(e.to || '') + '</td></tr>').join('');
+      return '<div class="kpis">' +
+          kpi('Upstream', fmt(upstreamNodes.length)) +
+          kpi('Route Node', fmt(routeNodes.length)) +
+          kpi('Edge', fmt(edges.length)) +
+          kpi('Gateway', '1') +
+        '</div>' +
+        '<table><thead><tr><th>From</th><th>Relation</th><th>To</th></tr></thead><tbody>' + edgeRows + '</tbody></table>';
     }
     function mcpMethodForKind(kind) {
       if (kind === 'prompt') return 'prompts/get';
@@ -4943,6 +5157,49 @@ const adminHTML = `<!doctype html>
         document.getElementById('mcp-explain-uri').value = '';
       }
       await runMCPRouteExplain(false);
+    };
+    window.showMCPEffectivePolicy = async (server, tool) => {
+      try {
+        const q = new URLSearchParams({ server, tool });
+        const d = await api('/admin/mcp/effective-policy?' + q.toString());
+        openModal('Effective MCP Policy — ' + server + '/' + tool, mcpExplainHTML({ route: { found: true, upstream_name: server, target_name: tool }, policy: d.policy || {}, final: d.final || {} }));
+      } catch (err) {
+        openModal('Effective Policy 오류', '<div class="error-line">' + escapeHTML(err.message) + '</div>');
+      }
+    };
+    window.showMCPUpstreamFlow = async (id) => {
+      openModal('MCP Upstream Flow — ' + id, '<div class="empty">조회 중...</div>');
+      try {
+        const d = await api('/admin/mcp/upstreams/' + encodeURIComponent(id) + '/flow');
+        const steps = d.steps || [];
+        const stepTable = '<table><thead><tr><th>Step</th><th>Status</th><th>Detail</th></tr></thead><tbody>' +
+          steps.map(s => '<tr><td>' + escapeHTML(s.name || '') + '</td><td><span class="status ' + governanceStatusClass(s.status || '') + '">' + escapeHTML(String(s.status || '')) + '</span></td><td>' + escapeHTML(String(s.detail ?? '')) + '</td></tr>').join('') +
+          '</tbody></table>';
+        const runRows = (d.discovery_runs || []).map(x => '<tr>' +
+          '<td>' + ago(x.created_at) + '</td>' +
+          '<td><span class="status ' + governanceStatusClass(x.status || '') + '">' + escapeHTML(x.status || '') + '</span></td>' +
+          '<td data-num="' + Number(x.tool_count || 0) + '">' + fmt(x.tool_count || 0) + '</td>' +
+          '<td data-num="' + Number(x.prompt_count || 0) + '">' + fmt(x.prompt_count || 0) + '</td>' +
+          '<td data-num="' + Number(x.resource_count || 0) + '">' + fmt(x.resource_count || 0) + '</td>' +
+          '<td data-num="' + Number(x.latency_ms || 0) + '">' + fmt(x.latency_ms || 0) + ' ms</td>' +
+          '<td>' + escapeHTML(x.error || '') + '</td>' +
+        '</tr>').join('');
+        const runTable = runRows
+          ? '<table><thead><tr><th>시각</th><th>상태</th><th>Tools</th><th>Prompts</th><th>Resources</th><th>Latency</th><th>Error</th></tr></thead><tbody>' + runRows + '</tbody></table>'
+          : '<div class="empty">저장된 discovery run 없음. 테스트/도구 버튼으로 probe를 실행하면 이력이 쌓입니다.</div>';
+        const routes = mcpRouteMapTable(d.routes || []);
+        const recent = requestsTable(d.recent_requests || [], { mcpWaterfall: true });
+        openModal('MCP Upstream Flow — ' + escapeHTML((d.upstream || {}).name || id),
+          '<div class="kv">' +
+            row('URL', escapeHTML((d.upstream || {}).url || '')) +
+            row('상태', ((d.upstream || {}).enabled ? '<span class="status">enabled</span>' : '<span class="status error">disabled</span>')) +
+            row('정책', '<span class="status ' + governanceStatusClass(((d.final || {}).decision || '')) + '">' + escapeHTML((d.final || {}).decision || '') + '</span> ' + escapeHTML((d.final || {}).reason || '')) +
+            row('Discovery Error', escapeHTML(d.discovery_error || '')) +
+          '</div><h4>Flow</h4>' + stepTable + '<h4>Discovery Runs</h4>' + runTable + '<h4>Routes</h4>' + routes + '<h4>Recent Calls</h4>' + recent);
+        attachRequestRowHandlers();
+      } catch (err) {
+        openModal('MCP Upstream Flow 오류', '<div class="error-line">' + escapeHTML(err.message) + '</div>');
+      }
     };
     window.saveMCPToolRisk = async (idx) => {
       const risk = (window.mcpToolRiskRows || [])[idx];
@@ -5021,10 +5278,43 @@ const adminHTML = `<!doctype html>
       try {
         const r = await api('/admin/mcp/requests?' + p.toString());
         const title = (errorsOnly ? '오류 호출' : '호출') + ' - ' + tool;
-        openModal(title, requestsTable(r.requests || []));
+        openModal(title, requestsTable(r.requests || [], { mcpWaterfall: true }));
         attachRequestRowHandlers();
       } catch (err) {
         openModal('오류', '<div class="error-line">' + escapeHTML(err.message) + '</div>');
+      }
+    };
+    window.openMCPRequestWaterfall = async (id) => {
+      openModal('MCP Waterfall — ' + id, '<div class="empty">조회 중...</div>');
+      try {
+        const d = await api('/admin/mcp/requests/' + encodeURIComponent(id) + '/waterfall');
+        const steps = d.steps || [];
+        const rows = steps.map((s, idx) => '<tr>' +
+          '<td data-num="' + idx + '">' + (idx + 1) + '</td>' +
+          '<td>' + escapeHTML(s.name || '') + '</td>' +
+          '<td><span class="status ' + governanceStatusClass(String(s.status || '')) + '">' + escapeHTML(String(s.status || '')) + '</span></td>' +
+          '<td>' + escapeHTML(typeof s.detail === 'string' ? s.detail : JSON.stringify(s.detail || {})) + '</td>' +
+        '</tr>').join('');
+        const toolRows = (d.tools || []).map(t => '<tr><td>' + escapeHTML(t.server_label || '') + '</td><td>' + escapeHTML(t.tool_name || '') + '</td><td>' + escapeHTML(t.source || '') + '</td><td>' + (t.is_error ? '<span class="status error">error</span>' : '<span class="status">ok</span>') + '</td><td>' + escapeHTML(t.arg_hash || '') + '</td></tr>').join('');
+        const decisionRows = (d.route_decisions || []).map(x => '<tr>' +
+          '<td>' + escapeHTML(x.method || '') + '<div class="muted">' + escapeHTML(x.exposed_name || '') + '</div></td>' +
+          '<td>' + escapeHTML(x.upstream_name || '') + '<div class="muted">' + escapeHTML(x.target_name || '') + '</div></td>' +
+          '<td><span class="status ' + governanceStatusClass(x.server_policy || '') + '">' + escapeHTML(x.server_policy || '') + '</span></td>' +
+          '<td><span class="status ' + governanceStatusClass(x.tool_risk_level || '') + '">' + escapeHTML(x.tool_risk_level || '') + '</span> <span class="status ' + governanceStatusClass(x.tool_risk_action || '') + '">' + escapeHTML(x.tool_risk_action || '') + '</span></td>' +
+          '<td><span class="status ' + governanceStatusClass(x.final_decision || '') + '">' + escapeHTML(x.final_decision || '') + '</span><div class="muted">' + escapeHTML(x.reason || '') + '</div></td>' +
+          '<td data-num="' + Number(x.latency_ms || 0) + '">' + fmt(x.latency_ms || 0) + ' ms</td>' +
+        '</tr>').join('');
+        openModal('MCP Waterfall — ' + escapeHTML(d.trace_id || id),
+          '<div class="kv">' +
+            row('Request', escapeHTML(d.request_id || id)) +
+            row('Status / Latency', escapeHTML(String(d.status || '')) + ' · ' + fmt(d.latency_ms || 0) + ' ms') +
+            row('API Key', escapeHTML(d.api_key_id || '')) +
+          '</div>' +
+          '<h4>Routing Waterfall</h4><table><thead><tr><th>#</th><th>Step</th><th>Status</th><th>Detail</th></tr></thead><tbody>' + rows + '</tbody></table>' +
+          '<h4>Persisted Route Decisions</h4><table><thead><tr><th>Method</th><th>Route</th><th>Server Policy</th><th>Tool Risk</th><th>Final</th><th>Latency</th></tr></thead><tbody>' + decisionRows + '</tbody></table>' +
+          '<h4>Tool Invocations</h4><table><thead><tr><th>Server</th><th>Tool</th><th>Source</th><th>Status</th><th>Arg Hash</th></tr></thead><tbody>' + toolRows + '</tbody></table>');
+      } catch (err) {
+        openModal('MCP Waterfall 오류', '<div class="error-line">' + escapeHTML(err.message) + '</div>');
       }
     };
 
@@ -6255,6 +6545,17 @@ const adminHTML = `<!doctype html>
             t2s.by_mode.map(m => '<tr><td>' + escapeHTML(String(m.mode || '')) + '</td><td data-num="' + m.count + '">' + fmt(Math.round(m.count)) + '</td><td data-num="' + m.executed + '">' + fmt(Math.round(m.executed)) + '</td></tr>').join('') + '</tbody></table>' : '') +
           ((t2s.failures && t2s.failures.length) ? '<h3 style="margin-top:10px">실패 원인 Top</h3><table><thead><tr><th>failure_category</th><th>건수</th></tr></thead><tbody>' +
             t2s.failures.map(f => '<tr><td>' + escapeHTML(String(f.reason || '')) + '</td><td data-num="' + f.count + '">' + fmt(Math.round(f.count)) + '</td></tr>').join('') + '</tbody></table>' : '') +
+          ((t2s.stage_metrics && t2s.stage_metrics.length) ? '<h3 style="margin-top:10px">단계별 비용·지연 병목 (운영 DB span)</h3><table><thead><tr><th>단계</th><th>상태</th><th>모델</th><th>횟수</th><th>오류율</th><th>평균지연</th><th>최대지연</th><th>총비용</th></tr></thead><tbody>' +
+            t2s.stage_metrics.map(m => '<tr>' +
+              '<td><strong>' + escapeHTML(String(m.stage || '')) + '</strong></td>' +
+              '<td><span class="status ' + governanceStatusClass(m.status || '') + '">' + escapeHTML(String(m.status || '')) + '</span></td>' +
+              '<td>' + escapeHTML(String(m.model || '-')) + '</td>' +
+              '<td data-num="' + Number(m.count || 0) + '">' + fmt(Math.round(m.count || 0)) + '</td>' +
+              '<td data-num="' + Number(m.error_rate || 0) + '">' + (Number(m.error_rate || 0) * 100).toFixed(1) + '%</td>' +
+              '<td data-num="' + Number(m.avg_latency_ms || 0) + '">' + fmt(Math.round(m.avg_latency_ms || 0)) + 'ms</td>' +
+              '<td data-num="' + Number(m.max_latency_ms || 0) + '">' + fmt(Math.round(m.max_latency_ms || 0)) + 'ms</td>' +
+              '<td data-num="' + Number(m.total_cost_krw || 0) + '">' + money(m.total_cost_krw || 0) + '</td>' +
+            '</tr>').join('') + '</tbody></table>' : '') +
           '<div class="muted" style="margin-top:8px;font-size:11px">위험 요청·골든·replay 상세는 <a href="#/text2sql">Text2SQL 탭</a>에서 확인하세요.</div>' +
           '</div></section>';
       }
@@ -6712,10 +7013,11 @@ const adminHTML = `<!doctype html>
           '<td>' + (l.valid ? '<span class="status">유효</span>' : '<span class="status error">' + escapeHTML(l.reject_reason || '거부') + '</span>') + (l.executed ? ' <span class="pill">실행 ' + fmt(l.row_count) + '행</span>' : '') + '</td>' +
           '<td><code style="font-size:11px">' + escapeHTML((l.generated_sql || '').slice(0, 120)) + '</code></td>' +
           '<td>' + money(l.cost_krw) + '</td>' +
+          '<td><button class="secondary" type="button" onclick="openT2SSpans(\'' + escapeAttr(l.request_id || '') + '\')">Timeline</button></td>' +
         '</tr>'
       ).join('');
       const logTable = (d.logs || []).length ?
-        '<table><thead><tr><th>시각</th><th>모델</th><th>모드</th><th>질문</th><th>검증</th><th>생성 SQL</th><th>비용</th></tr></thead><tbody>' + logRows + '</tbody></table>'
+        '<table><thead><tr><th>시각</th><th>모델</th><th>모드</th><th>질문</th><th>검증</th><th>생성 SQL</th><th>비용</th><th>단계</th></tr></thead><tbody>' + logRows + '</tbody></table>'
         : '<div class="empty">Text2SQL 질의 기록 없음. 사용자가 <code>vibe/text2sql-preview</code> 모델로 <code>/v1/chat/completions</code> 를 호출하면 여기에 집계됩니다.</div>';
       const dbProfiles = d.db_profiles || [];
       const connsData = await api('/admin/text2sql/connections').catch(() => ({ connections: [] }));
@@ -6799,6 +7101,25 @@ const adminHTML = `<!doctype html>
           '<td data-num="' + (m.avg_latency_ms || 0) + '">' + fmt(Math.round(m.avg_latency_ms || 0)) + 'ms</td>' +
         '</tr>').join('') + '</tbody></table>'
         : '<div class="empty">모델별 메트릭 없음.</div>';
+      const stageMetrics = d.stage_metrics || [];
+      const totalStageCost = stageMetrics.reduce((sum, m) => sum + Number(m.total_cost_krw || 0), 0) || 1;
+      const stageTable = stageMetrics.length ?
+        '<table><thead><tr><th>단계</th><th>상태</th><th>모델</th><th data-sort="num">횟수</th><th data-sort="num">오류율</th><th data-sort="num">평균지연</th><th data-sort="num">최대지연</th><th data-sort="num">총비용</th><th data-sort="num">비용비중</th></tr></thead><tbody>' +
+        stageMetrics.map(m => {
+          const pctCost = (Number(m.total_cost_krw || 0) / totalStageCost) * 100;
+          return '<tr>' +
+            '<td><strong>' + escapeHTML(m.stage || '') + '</strong></td>' +
+            '<td><span class="status ' + governanceStatusClass(m.status || '') + '">' + escapeHTML(m.status || '') + '</span></td>' +
+            '<td>' + escapeHTML(m.model || '-') + '</td>' +
+            '<td data-num="' + Number(m.count || 0) + '">' + fmt(m.count || 0) + '</td>' +
+            '<td data-num="' + Number(m.error_rate || 0) + '">' + (Number(m.error_rate || 0) * 100).toFixed(1) + '%</td>' +
+            '<td data-num="' + Number(m.avg_latency_ms || 0) + '">' + fmt(Math.round(m.avg_latency_ms || 0)) + 'ms</td>' +
+            '<td data-num="' + Number(m.max_latency_ms || 0) + '">' + fmt(m.max_latency_ms || 0) + 'ms</td>' +
+            '<td data-num="' + Number(m.total_cost_krw || 0) + '">' + money(m.total_cost_krw || 0) + '</td>' +
+            '<td data-num="' + pctCost.toFixed(2) + '">' + pctCost.toFixed(1) + '%</td>' +
+          '</tr>';
+        }).join('') + '</tbody></table>'
+        : '<div class="empty">단계별 span 메트릭 없음. 신규 Text2SQL 요청부터 수집됩니다.</div>';
       const golden = d.golden || [];
       const goldenForm =
         '<form class="inline-form" id="t2s-golden-form" style="grid-template-columns: 130px minmax(160px,1fr) minmax(200px,2fr) 110px 70px; align-items:start;">' +
@@ -6916,6 +7237,7 @@ const adminHTML = `<!doctype html>
         section('런타임 프로필 (DB 오버라이드 · 신규 가상모델)', dbpForm + dbpTable) +
         section('실행 DB 연결 관리', connsForm + connsTable) +
         section('모델별 SQL 품질 (최근 7일)', mmTable) +
+        section('단계별 비용·지연 분석 (최근 7일)', stageTable) +
         section('스키마 카탈로그 · 테이블 권한', schemaForm + schemaTable) +
         section('스키마 레지스트리 (테이블 · 컬럼 · 민감도)', registryHTML(conns)) +
         section('권한 매트릭스 (subject × schema/table/column)', permForm + permTable) +
@@ -6970,6 +7292,42 @@ const adminHTML = `<!doctype html>
       await api('/admin/text2sql/reports?id=' + encodeURIComponent(id), { method: 'DELETE' });
       route();
     };
+    window.openT2SSpans = async (requestID) => {
+      if (!requestID) {
+        openModal('Text2SQL Timeline', '<div class="empty">request_id가 없는 오래된 로그입니다.</div>');
+        return;
+      }
+      openModal('Text2SQL Timeline — ' + requestID, '<div class="empty">조회 중...</div>');
+      try {
+        const d = await api('/admin/text2sql/spans?request_id=' + encodeURIComponent(requestID));
+        const spans = d.spans || [];
+        const rows = spans.map((s, idx) => '<tr>' +
+          '<td data-num="' + idx + '">' + (idx + 1) + '</td>' +
+          '<td><strong>' + escapeHTML(s.stage || '') + '</strong><div class="muted">' + escapeHTML(s.model || '') + '</div></td>' +
+          '<td><span class="status ' + governanceStatusClass(s.status || '') + '">' + escapeHTML(s.status || '') + '</span>' + (s.reject_reason ? '<div class="muted">' + escapeHTML(s.reject_reason) + '</div>' : '') + '</td>' +
+          '<td data-num="' + Number(s.latency_ms || 0) + '">' + fmt(s.latency_ms || 0) + ' ms</td>' +
+          '<td data-num="' + Number(s.cost_krw || 0) + '">' + money(s.cost_krw || 0) + '</td>' +
+          '<td><code style="font-size:11px">' + escapeHTML(s.input_hash || '') + '</code><div class="muted"><code>' + escapeHTML(s.output_hash || '') + '</code></div></td>' +
+          '<td><pre class="prompt-block" style="max-height:120px;overflow:auto;margin:0">' + escapeHTML(prettyJSON(s.detail || '')) + '</pre></td>' +
+        '</tr>').join('');
+        const totalLatency = spans.reduce((sum, s) => sum + Number(s.latency_ms || 0), 0);
+        const totalCost = spans.reduce((sum, s) => sum + Number(s.cost_krw || 0), 0);
+        openModal('Text2SQL Timeline — ' + escapeHTML(requestID),
+          '<div class="kv">' +
+            row('Request', escapeHTML(requestID)) +
+            row('Stages', fmt(spans.length)) +
+            row('Span Latency Sum', fmt(totalLatency) + ' ms') +
+            row('Span Cost Sum', money(totalCost)) +
+          '</div>' +
+          (spans.length ? '<table><thead><tr><th>#</th><th>Stage</th><th>Status</th><th>Latency</th><th>Cost</th><th>Hashes</th><th>Detail</th></tr></thead><tbody>' + rows + '</tbody></table>' : '<div class="empty">저장된 span 없음.</div>'));
+      } catch (err) {
+        openModal('Text2SQL Timeline 오류', '<div class="error-line">' + escapeHTML(err.message) + '</div>');
+      }
+    };
+    function prettyJSON(raw) {
+      if (!raw) return '';
+      try { return JSON.stringify(JSON.parse(raw), null, 2); } catch (_) { return raw; }
+    }
     window.toggleT2SFeature = async (name, enabled) => {
       try {
         await api('/admin/text2sql/features', { method: 'POST', body: JSON.stringify({ name, enabled }) });

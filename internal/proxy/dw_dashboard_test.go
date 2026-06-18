@@ -118,17 +118,30 @@ func TestDWDashboardText2SQL(t *testing.T) {
 		t.Fatal(err)
 	}
 	server.chRuntime.Store(&config.ClickHouseConfig{URL: ch.URL, Table: "ai_request_rollup", Text2SQLFactTable: "text2sql_fact"})
+	if err := db.InsertText2SQLSpans(context.Background(), []store.Text2SQLSpan{{
+		ID:            "span_generate",
+		RequestID:     "req_t2s_dw",
+		Text2SQLLogID: "t2s_dw",
+		Stage:         "sql_generate",
+		Status:        "ok",
+		Model:         "gpt-test",
+		LatencyMS:     120,
+		CostKRW:       13.5,
+	}}); err != nil {
+		t.Fatal(err)
+	}
 	srv := httptest.NewServer(server.Routes())
 	defer srv.Close()
 
 	resp, _ := http.Get(srv.URL + "/admin/dw/dashboard/text2sql?window=7d")
 	var out struct {
-		Configured bool             `json:"configured"`
-		Total      float64          `json:"total"`
-		Blocked    float64          `json:"blocked"`
-		BlockRate  float64          `json:"block_rate"`
-		ByMode     []map[string]any `json:"by_mode"`
-		Failures   []map[string]any `json:"failures"`
+		Configured   bool                        `json:"configured"`
+		Total        float64                     `json:"total"`
+		Blocked      float64                     `json:"blocked"`
+		BlockRate    float64                     `json:"block_rate"`
+		ByMode       []map[string]any            `json:"by_mode"`
+		Failures     []map[string]any            `json:"failures"`
+		StageMetrics []store.Text2SQLStageMetric `json:"stage_metrics"`
 	}
 	json.NewDecoder(resp.Body).Decode(&out)
 	resp.Body.Close()
@@ -140,6 +153,9 @@ func TestDWDashboardText2SQL(t *testing.T) {
 	}
 	if len(out.ByMode) != 2 || len(out.Failures) != 1 {
 		t.Fatalf("by_mode/failures wrong: %+v / %+v", out.ByMode, out.Failures)
+	}
+	if len(out.StageMetrics) == 0 || out.StageMetrics[0].Stage != "sql_generate" {
+		t.Fatalf("stage metrics missing from DW Text2SQL dashboard: %+v", out.StageMetrics)
 	}
 }
 
