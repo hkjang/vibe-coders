@@ -31,7 +31,7 @@ import (
 )
 
 // AppVersion is the gateway build version, surfaced in /auth/me and the admin UI.
-const AppVersion = "v0.49.1"
+const AppVersion = "v0.49.2"
 
 type Server struct {
 	cfg          config.Config
@@ -43,6 +43,7 @@ type Server struct {
 	secretsMu    sync.Mutex // guards concurrent rotation
 	retention    *store.RetentionWorker
 	killState    atomicKillState
+	loggedRequests sync.Map
 	mcpPolicy    atomic.Pointer[mcpPolicySnapshot]
 	routingRules atomic.Pointer[routingRulesSnapshot]
 	knowledge    atomic.Pointer[knowledgeSnapshot]
@@ -403,6 +404,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/v1/models", s.handleOpenAI)
 	mux.HandleFunc("/v1/embeddings", s.handleOpenAI)
 	mux.HandleFunc("/v1/", s.handleOpenAI)
+	mux.HandleFunc("/v1", s.handleOpenAI)
 	mux.HandleFunc("/v1/skills", s.handlePublicSkills)
 	mux.HandleFunc("/v1/skills/", s.handlePublicSkills)
 	return withTrace(mux)
@@ -948,19 +950,59 @@ func (w *statusResponseWriter) Flush() {
 }
 
 func (s *Server) handleOpenAI(w http.ResponseWriter, r *http.Request) {
+	sw := &statusResponseWriter{ResponseWriter: w}
+	rc := &requestPipeline{s: s, w: sw, r: r}
+
+	defer func() {
+		if r.Method == http.MethodGet && r.URL.Path == "/v1/models" && sw.statusCode == http.StatusOK {
+			return
+		}
+
+		meta := rc.meta
+		if meta.Request.ID != "" {
+			if _, logged := s.loggedRequests.LoadAndDelete(meta.Request.ID); !logged {
+				statusCode := sw.statusCode
+				if statusCode == 0 {
+					statusCode = http.StatusBadRequest
+				}
+				meta.Request.StatusCode = statusCode
+				if meta.Request.Error == "" {
+					meta.Request.Error = "pipeline_blocked"
+				}
+				s.enqueue(meta)
+			}
+		} else {
+			traceID := rc.traceID
+			if traceID == "" {
+				traceID = traceIDFromRequest(r)
+			}
+			meta = s.auditRequest(r.URL.Path, rc.body, rc.apiKeyID, traceID, r)
+			statusCode := sw.statusCode
+			if statusCode == 0 {
+				statusCode = http.StatusBadRequest
+			}
+			meta.Request.StatusCode = statusCode
+			if meta.Request.Error == "" {
+				meta.Request.Error = "early_blocked"
+			}
+			s.enqueue(meta)
+			s.loggedRequests.Delete(meta.Request.ID)
+		}
+	}()
+
 	if r.Method != http.MethodPost && !(r.Method == http.MethodGet && r.URL.Path == "/v1/models") {
-		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		writeOpenAIError(sw, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
 		return
 	}
 
 	if snap := s.killSnapshot(r.Context()); snap != nil && snap.disabled {
-		w.Header().Set("Retry-After", "60")
-		w.Header().Set("X-Kill-Switch", "global")
+		sw.Header().Set("Retry-After", "60")
+		sw.Header().Set("X-Kill-Switch", "global")
 		if snap.reason != "" {
-			w.Header().Set("X-Kill-Reason", snap.reason)
+			sw.Header().Set("X-Kill-Reason", snap.reason)
 		}
 		s.metrics.IncKillSwitch()
-		writeOpenAIError(w, http.StatusServiceUnavailable, "gateway is disabled by admin kill switch: "+snap.reason, "server_error", "kill_switch_active")
+		writeOpenAIError(sw, http.StatusServiceUnavailable, "gateway is disabled by admin kill switch: "+snap.reason, "server_error", "kill_switch_active")
 		return
 	}
 
@@ -968,28 +1010,8 @@ func (s *Server) handleOpenAI(w http.ResponseWriter, r *http.Request) {
 	//   Auth → Quota → Routing → Governance → Cache → Cost → Upstream
 	// Each step shares the requestPipeline state and halts the chain (after
 	// writing its own response) by returning false. See pipeline.go.
-	sw := &statusResponseWriter{ResponseWriter: w}
-	rc := &requestPipeline{s: s, w: sw, r: r}
 	for _, step := range rc.steps() {
 		if !step.Run(rc) {
-			stepName := step.Name()
-			if stepName == "auth" || stepName == "quota" || stepName == "routing" || stepName == "skill" || stepName == "deprecation" || stepName == "limits" {
-				traceID := rc.traceID
-				if traceID == "" {
-					traceID = traceIDFromRequest(r)
-				}
-				meta := rc.meta
-				if meta.Request.ID == "" {
-					meta = s.auditRequest(r.URL.Path, rc.body, rc.apiKeyID, traceID, r)
-				}
-				statusCode := sw.statusCode
-				if statusCode == 0 {
-					statusCode = http.StatusBadRequest
-				}
-				meta.Request.StatusCode = statusCode
-				meta.Request.Error = "pipeline_blocked:" + stepName
-				s.enqueue(meta)
-			}
 			return
 		}
 	}
@@ -1026,6 +1048,9 @@ func (s *Server) copyResponse(w http.ResponseWriter, body io.Reader, analyzer *R
 }
 
 func (s *Server) enqueue(record store.LogRecord) {
+	if record.Request.ID != "" {
+		s.loggedRequests.Store(record.Request.ID, true)
+	}
 	s.logger.Enqueue(record)
 	s.enqueueClickHouseFact(record)
 }

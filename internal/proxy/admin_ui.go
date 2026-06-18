@@ -195,6 +195,13 @@ const adminHTML = `<!doctype html>
       background: var(--panel-alt); white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
       font-size: 13px; overflow-wrap: anywhere;
     }
+    .markdown-view {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      font-size: 14px;
+      line-height: 1.6;
+      color: var(--text);
+      white-space: normal !important;
+    }
     .prompt-role { font-weight: 800; margin-bottom: 4px; }
 
     .progress {
@@ -613,34 +620,53 @@ const adminHTML = `<!doctype html>
     }
     function renderMarkdown(md) {
       if (!md) return '';
-      let html = escapeHTML(md);
-      
+      const blocks = [];
       const bt = String.fromCharCode(96);
       const bt3 = bt + bt + bt;
       
-      // Code blocks
+      let html = escapeHTML(md);
+      
+      // 1. Code blocks
       const reBlock = new RegExp(bt3 + '([\\s\\S]*?)' + bt3, 'gm');
       html = html.replace(reBlock, (match, p1) => {
-        return '<pre class="prompt-block" style="background:var(--panel-alt); border:1px solid var(--line); font-family:ui-monospace, SFMono-Regular, Consolas, monospace; padding:10px; margin:8px 0; overflow:auto; white-space:pre-wrap;">' + p1.trim() + '</pre>';
+        const placeholder = '<!--CODEBLOCK_' + blocks.length + '-->';
+        blocks.push('<pre class="prompt-block" style="background:var(--panel-alt); border:1px solid var(--line); font-family:ui-monospace, SFMono-Regular, Consolas, monospace; font-size:13px; padding:12px; margin:8px 0; overflow:auto; white-space:pre-wrap; border-radius:6px;">' + p1.trim() + '</pre>');
+        return placeholder;
       });
       
-      // Inline code
-      const reInline = new RegExp(bt + '([^' + bt + ']+)' + bt, 'g');
-      html = html.replace(reInline, '<code style="background:var(--pill-bg); padding:2px 4px; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Consolas, monospace; font-size:90%;">$1</code>');
+      // 2. Inline code
+      const reInline = new RegExp(bt + '([^' + bt + '\n]+)' + bt, 'g');
+      html = html.replace(reInline, (match, p1) => {
+        const placeholder = '<!--INLINECODE_' + blocks.length + '-->';
+        blocks.push('<code style="background:var(--pill-bg); padding:2px 6px; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Consolas, monospace; font-size:90%; font-weight:500;">' + p1 + '</code>');
+        return placeholder;
+      });
       
-      // Headings
-      html = html.replace(/^### (.*?)$/gm, '<h5 style="margin:12px 0 6px; font-size:14px; font-weight:700">$1</h5>');
-      html = html.replace(/^## (.*?)$/gm, '<h4 style="margin:16px 0 8px; font-size:15px; font-weight:700">$1</h4>');
-      html = html.replace(/^# (.*?)$/gm, '<h3 style="margin:20px 0 10px; font-size:16px; font-weight:800; border-bottom:1px solid var(--line); padding-bottom:4px;">$1</h3>');
+      // 3. Bold
+      html = html.replace(/\*\*([^*]+)\*\*/g, '<strong style="font-weight:700;">$1</strong>');
       
-      // Bold
-      html = html.replace(/\*\*([^*]+)\*\*/g, '<strong style="font-weight:700">$1</strong>');
+      // 4. Italic
+      html = html.replace(/\*([^*]+)\*/g, '<em style="font-style:italic;">$1</em>');
       
-      // Bullet lists
-      html = html.replace(/^\s*[-*]\s+(.*?)$/gm, '<li style="margin-left:16px; margin-top:4px;">$1</li>');
+      // 5. Headings
+      html = html.replace(/^### (.*?)$/gm, '<h5 style="margin:16px 0 8px; font-size:14px; font-weight:700;">$1</h5>');
+      html = html.replace(/^## (.*?)$/gm, '<h4 style="margin:20px 0 10px; font-size:16px; font-weight:700; border-bottom:1px solid var(--line); padding-bottom:4px;">$1</h4>');
+      html = html.replace(/^# (.*?)$/gm, '<h3 style="margin:24px 0 12px; font-size:18px; font-weight:800; border-bottom:2px solid var(--line); padding-bottom:6px;">$1</h3>');
       
-      // Line breaks
+      // 6. Bullet lists
+      html = html.replace(/^\s*[-*]\s+(.*?)$/gm, '<li style="margin-left:20px; margin-top:6px; margin-bottom:6px; line-height:1.6; list-style-type:disc;">$1</li>');
+      
+      // 7. Blockquotes
+      html = html.replace(/^\>\s+(.*?)$/gm, '<blockquote style="border-left:4px solid var(--primary, #0f766e); padding-left:12px; color:var(--muted); margin:8px 0; font-style:italic;">$1</blockquote>');
+      
+      // 8. Line breaks
       html = html.replace(/\n/g, '<br>');
+      
+      // 9. Restore code blocks
+      for (let i = 0; i < blocks.length; i++) {
+        html = html.replace('<!--CODEBLOCK_' + i + '-->', blocks[i]);
+        html = html.replace('<!--INLINECODE_' + i + '-->', blocks[i]);
+      }
       
       return html;
     }
@@ -3351,7 +3377,7 @@ const adminHTML = `<!doctype html>
           formatted = '<div style="white-space:normal; line-height:1.6; font-size:13.5px;">' + renderMarkdown(text) + '</div>';
         }
         
-        return '<div class="prompt-block" style="white-space:normal;">' +
+        return '<div class="prompt-block markdown-view">' +
           '<div class="prompt-role" style="border-bottom:1px solid var(--line); padding-bottom:6px; margin-bottom:10px; font-weight:800;">' + 
             escapeHTML(p.role) + (p.language_hint ? ' · <span class="pill">' + escapeHTML(p.language_hint) + '</span>' : '') + 
           '</div>' +
@@ -3365,7 +3391,7 @@ const adminHTML = `<!doctype html>
           '<div class="k">상태</div><div class="v">' + statusBadge(d.response.status_code) + '</div>' +
           '<div class="k">finish_reason</div><div class="v">' + escapeHTML(d.response.finish_reason || '') + '</div>' +
           '<div class="k">응답 hash</div><div class="v">' + escapeHTML(d.response.response_hash || '') + '</div>' +
-          '<div class="k">캡처된 응답</div><div class="v">' + (d.response.response_text_optional ? ('<div class="prompt-block" style="white-space:normal;">' + renderMarkdown(d.response.response_text_optional) + '</div>') : '<span class="muted">없음 (LOG_RESPONSE_TEXT=false)</span>') + '</div>' +
+          '<div class="k">캡처된 응답</div><div class="v">' + (d.response.response_text_optional ? ('<div class="prompt-block markdown-view">' + renderMarkdown(d.response.response_text_optional) + '</div>') : '<span class="muted">없음 (LOG_RESPONSE_TEXT=false)</span>') + '</div>' +
         '</div>'
       ) : '<div class="muted">응답 메타 없음</div>';
       const spans = (d.spans || []).length ? (

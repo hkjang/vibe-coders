@@ -560,6 +560,9 @@ func TestEarlyPipelineBlockLogging(t *testing.T) {
 
 	waitFor(t, time.Second, func() bool {
 		recent, err := db.RecentRequests(context.Background(), store.RequestFilter{Limit: 1})
-		return err == nil && len(recent) == 1 && recent[0].StatusCode == http.StatusUnauthorized && recent[0].Error == "pipeline_blocked:auth"
+		if err == nil && len(recent) > 0 {
+			t.Logf("recent request logged: ID=%s, StatusCode=%d, Error=%q", recent[0].ID, recent[0].StatusCode, recent[0].Error)
+		}
+		return err == nil && len(recent) == 1 && recent[0].StatusCode == http.StatusUnauthorized && recent[0].Error == "early_blocked"
 	})
 }
