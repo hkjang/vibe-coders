@@ -1,16 +1,46 @@
 package proxy
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"vibe-coders/internal/store"
 )
+
+const (
+	providerHealthDefaultThreshold = 70
+	providerHealthTrendBuckets     = 6
+)
+
+type providerHealthRankingItem struct {
+	Rank             int     `json:"rank"`
+	Provider         string  `json:"provider"`
+	Score            int     `json:"score"`
+	Requests         int64   `json:"requests"`
+	FallbackRate     float64 `json:"fallback_rate"`
+	P95LatencyMS     int64   `json:"p95_latency_ms"`
+	AverageLatencyMS float64 `json:"average_latency_ms"`
+}
+
+type providerHealthAlert struct {
+	Provider string `json:"provider"`
+	Code     string `json:"code"`
+	Severity string `json:"severity"`
+	Message  string `json:"message"`
+}
+
+type providerHealthTrendBucket struct {
+	Since     string                      `json:"since"`
+	Until     string                      `json:"until"`
+	Providers []store.ProviderHealthScore `json:"providers"`
+}
 
 func (s *Server) handleRoutingPreview(w http.ResponseWriter, r *http.Request) {
 	if !s.authorizeAdmin(r) {
@@ -132,13 +162,168 @@ func (s *Server) handleRoutingHealth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	since := parseWindow(r.URL.Query().Get("window"), providerHealthWindow, "hour")
-	scores, err := s.db.ProviderHealthScores(r.Context(), since)
+	until := time.Now().UTC()
+	threshold := parseProviderHealthThreshold(r.URL.Query().Get("threshold"))
+	scores, err := s.db.ProviderHealthScoresBetween(r.Context(), since, until.Add(time.Nanosecond))
 	if err != nil {
 		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "routing_health_failed")
 		return
 	}
+	trend, err := s.providerHealthTrend(r.Context(), since, until, providerHealthTrendBuckets)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "routing_health_trend_failed")
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"since":     since.UTC().Format(time.RFC3339),
+		"until":     until.Format(time.RFC3339),
+		"threshold": threshold,
 		"providers": scores,
+		"ranking":   providerHealthRanking(scores),
+		"degraded":  providerHealthDegraded(scores, threshold),
+		"alerts":    providerHealthAlerts(scores, threshold),
+		"trend":     trend,
 	})
+}
+
+func parseProviderHealthThreshold(raw string) int {
+	threshold := providerHealthDefaultThreshold
+	if parsed, err := strconv.Atoi(strings.TrimSpace(raw)); err == nil {
+		threshold = parsed
+	}
+	if threshold < 0 {
+		return 0
+	}
+	if threshold > 100 {
+		return 100
+	}
+	return threshold
+}
+
+func providerHealthRanking(scores []store.ProviderHealthScore) []providerHealthRankingItem {
+	ranked := append([]store.ProviderHealthScore(nil), scores...)
+	sort.Slice(ranked, func(i, j int) bool {
+		if ranked[i].Score != ranked[j].Score {
+			return ranked[i].Score > ranked[j].Score
+		}
+		return ranked[i].Provider < ranked[j].Provider
+	})
+	out := make([]providerHealthRankingItem, 0, len(ranked))
+	for i, score := range ranked {
+		out = append(out, providerHealthRankingItem{
+			Rank:             i + 1,
+			Provider:         score.Provider,
+			Score:            score.Score,
+			Requests:         score.Requests,
+			FallbackRate:     score.FallbackRate,
+			P95LatencyMS:     score.P95LatencyMS,
+			AverageLatencyMS: score.AverageLatencyMS,
+		})
+	}
+	return out
+}
+
+func providerHealthDegraded(scores []store.ProviderHealthScore, threshold int) []store.ProviderHealthScore {
+	out := []store.ProviderHealthScore{}
+	for _, score := range scores {
+		if score.Requests > 0 && score.Score < threshold {
+			out = append(out, score)
+		}
+	}
+	return out
+}
+
+func providerHealthAlerts(scores []store.ProviderHealthScore, threshold int) []providerHealthAlert {
+	alerts := []providerHealthAlert{}
+	for _, score := range scores {
+		if score.Requests == 0 {
+			continue
+		}
+		if score.Score < threshold {
+			alerts = append(alerts, providerHealthAlert{
+				Provider: score.Provider,
+				Code:     "provider_degraded",
+				Severity: providerHealthSeverity(score.Score, threshold),
+				Message:  "provider health score is below threshold",
+			})
+		}
+		if score.Timeouts > 0 {
+			alerts = append(alerts, providerHealthAlert{
+				Provider: score.Provider,
+				Code:     "timeouts_detected",
+				Severity: providerHealthSeverity(score.Score, threshold),
+				Message:  "timeout signals were observed in the selected window",
+			})
+		}
+		if score.Rate429 > 0 {
+			alerts = append(alerts, providerHealthAlert{
+				Provider: score.Provider,
+				Code:     "rate_limit_detected",
+				Severity: "warning",
+				Message:  "429 rate limit responses were observed in the selected window",
+			})
+		}
+		if score.Rate5xx > 0 {
+			alerts = append(alerts, providerHealthAlert{
+				Provider: score.Provider,
+				Code:     "server_error_detected",
+				Severity: providerHealthSeverity(score.Score, threshold),
+				Message:  "5xx provider responses were observed in the selected window",
+			})
+		}
+		if score.FallbackRate >= 0.1 {
+			alerts = append(alerts, providerHealthAlert{
+				Provider: score.Provider,
+				Code:     "fallback_rate_high",
+				Severity: providerHealthSeverity(score.Score, threshold),
+				Message:  "fallback rate is elevated for the selected window",
+			})
+		}
+	}
+	return alerts
+}
+
+func providerHealthSeverity(score, threshold int) string {
+	switch {
+	case score < 40:
+		return "critical"
+	case score < threshold:
+		return "warning"
+	default:
+		return "info"
+	}
+}
+
+func (s *Server) providerHealthTrend(ctx context.Context, since, until time.Time, buckets int) ([]providerHealthTrendBucket, error) {
+	if buckets <= 0 || !until.After(since) {
+		return []providerHealthTrendBucket{}, nil
+	}
+	window := until.Sub(since)
+	bucketSize := window / time.Duration(buckets)
+	if bucketSize <= 0 {
+		bucketSize = time.Second
+	}
+	trend := make([]providerHealthTrendBucket, 0, buckets)
+	start := since.UTC()
+	for i := 0; i < buckets && start.Before(until); i++ {
+		end := start.Add(bucketSize)
+		if i == buckets-1 || end.After(until) {
+			end = until
+		}
+		queryEnd := end
+		if !end.Before(until) {
+			queryEnd = end.Add(time.Nanosecond)
+		}
+		scores, err := s.db.ProviderHealthScoresBetween(ctx, start, queryEnd)
+		if err != nil {
+			return nil, err
+		}
+		trend = append(trend, providerHealthTrendBucket{
+			Since:     start.Format(time.RFC3339),
+			Until:     end.Format(time.RFC3339),
+			Providers: scores,
+		})
+		start = end
+	}
+	return trend, nil
 }

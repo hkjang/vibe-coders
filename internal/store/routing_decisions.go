@@ -91,6 +91,27 @@ func (s *SQLStore) ProviderHealthScores(ctx context.Context, since time.Time) ([
 	if err != nil {
 		return nil, err
 	}
+	return scanProviderHealthScores(rows)
+}
+
+func (s *SQLStore) ProviderHealthScoresBetween(ctx context.Context, since, until time.Time) ([]ProviderHealthScore, error) {
+	if !until.After(since) {
+		return []ProviderHealthScore{}, nil
+	}
+	rows, err := s.db.QueryContext(ctx, s.bind(`
+		SELECT COALESCE(provider, ''), latency_ms, status_code, COALESCE(error, ''),
+			COALESCE(failover, 0), COALESCE(fallback_from, ''), COALESCE(fallback_reason, '')
+		FROM request_logs
+		WHERE created_at >= ? AND created_at < ?`),
+		since.UTC().Format(time.RFC3339Nano),
+		until.UTC().Format(time.RFC3339Nano))
+	if err != nil {
+		return nil, err
+	}
+	return scanProviderHealthScores(rows)
+}
+
+func scanProviderHealthScores(rows *sql.Rows) ([]ProviderHealthScore, error) {
 	defer rows.Close()
 
 	type accum struct {

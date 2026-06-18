@@ -338,13 +338,65 @@ func TestRoutingPreviewAndHealthAPIs(t *testing.T) {
 		t.Fatalf("expected sensitive fallback disabled, got %#v", out.FallbackPath)
 	}
 
-	health, err := http.Get(proxy.URL + "/admin/routing/health?window=1h")
+	now := time.Now().UTC()
+	if err := db.InsertLogRecord(context.Background(), store.LogRecord{Request: store.RequestLog{
+		ID: "health-fast", TraceID: "health-fast", Endpoint: "/v1/chat/completions",
+		Model: "gpt-4.1-mini", Provider: "fast-provider", StatusCode: 200, LatencyMS: 80, CreatedAt: now.Add(-10 * time.Minute),
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.InsertLogRecord(context.Background(), store.LogRecord{Request: store.RequestLog{
+		ID: "health-bad", TraceID: "health-bad", Endpoint: "/v1/chat/completions",
+		Model: "gpt-4.1", Provider: "degraded-provider", StatusCode: 504, LatencyMS: 3000, Error: "timeout", CreatedAt: now.Add(-5 * time.Minute),
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	health, err := http.Get(proxy.URL + "/admin/routing/health?window=1h&threshold=90")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer health.Body.Close()
 	if health.StatusCode != http.StatusOK {
 		t.Fatalf("expected health status 200, got %d", health.StatusCode)
+	}
+	var healthOut struct {
+		Threshold int                         `json:"threshold"`
+		Providers []store.ProviderHealthScore `json:"providers"`
+		Ranking   []struct {
+			Provider string `json:"provider"`
+			Rank     int    `json:"rank"`
+		} `json:"ranking"`
+		Degraded []store.ProviderHealthScore `json:"degraded"`
+		Alerts   []struct {
+			Provider string `json:"provider"`
+			Code     string `json:"code"`
+		} `json:"alerts"`
+		Trend []struct {
+			Providers []store.ProviderHealthScore `json:"providers"`
+		} `json:"trend"`
+	}
+	if err := json.NewDecoder(health.Body).Decode(&healthOut); err != nil {
+		t.Fatal(err)
+	}
+	if healthOut.Threshold != 90 || len(healthOut.Providers) == 0 || len(healthOut.Ranking) == 0 || len(healthOut.Trend) == 0 {
+		t.Fatalf("unexpected health response: %+v", healthOut)
+	}
+	if healthOut.Ranking[0].Provider != "fast-provider" || healthOut.Ranking[0].Rank != 1 {
+		t.Fatalf("expected fast provider first in ranking: %+v", healthOut.Ranking)
+	}
+	if len(healthOut.Degraded) == 0 || healthOut.Degraded[0].Provider != "degraded-provider" {
+		t.Fatalf("expected degraded provider in health response: %+v", healthOut.Degraded)
+	}
+	hasTimeoutAlert := false
+	for _, alert := range healthOut.Alerts {
+		if alert.Provider == "degraded-provider" && alert.Code == "timeouts_detected" {
+			hasTimeoutAlert = true
+			break
+		}
+	}
+	if !hasTimeoutAlert {
+		t.Fatalf("expected timeout alert for degraded provider: %+v", healthOut.Alerts)
 	}
 }
 

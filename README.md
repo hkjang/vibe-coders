@@ -590,7 +590,7 @@ Routing Explain 예시:
 
 - `POST /admin/routing/preview` — upstream 호출 없이 routing 결과만 계산. 선택적으로 `api_key_id` 를 넣으면 해당 키의 allowed/denied model/provider 정책까지 반영
 - `GET /admin/routing/decisions` / `GET /admin/routing/decisions/{id}` — 요청별 selected model/provider, complexity/risk/health, fallback path, decision reason 조회
-- `GET /admin/routing/health` — 최근 provider health score 조회
+- `GET /admin/routing/health` — 최근 provider health score 조회. 응답에는 provider별 score 원본과 함께 ranking, degraded provider, alert, bounded trend bucket이 포함됩니다.
 
 Governance 정책 예시:
 

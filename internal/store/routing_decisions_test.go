@@ -59,3 +59,33 @@ func TestProviderHealthScoresRankDegradedProviders(t *testing.T) {
 		t.Fatalf("expected fallback rate for degraded provider, got %+v", degraded)
 	}
 }
+
+func TestProviderHealthScoresBetweenBoundsWindow(t *testing.T) {
+	db := openAggTestStore(t)
+	defer db.Close()
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	insertHealthRequest(t, db, "before", "old", 200, 100, false, "", "", now.Add(-2*time.Hour))
+	insertHealthRequest(t, db, "inside-fast", "fast", 200, 100, false, "", "", now.Add(-30*time.Minute))
+	insertHealthRequest(t, db, "inside-slow", "slow", 504, 2000, false, "", "timeout", now.Add(-20*time.Minute))
+	insertHealthRequest(t, db, "after", "future", 200, 100, false, "", "", now.Add(time.Hour))
+
+	scores, err := db.ProviderHealthScoresBetween(ctx, now.Add(-time.Hour), now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byProvider := map[string]ProviderHealthScore{}
+	for _, score := range scores {
+		byProvider[score.Provider] = score
+	}
+	if _, ok := byProvider["old"]; ok {
+		t.Fatalf("expected old provider outside lower bound, got %+v", byProvider)
+	}
+	if _, ok := byProvider["future"]; ok {
+		t.Fatalf("expected future provider outside upper bound, got %+v", byProvider)
+	}
+	if byProvider["fast"].Requests != 1 || byProvider["slow"].Timeouts != 1 {
+		t.Fatalf("bounded health signals not accumulated: %+v", byProvider)
+	}
+}
