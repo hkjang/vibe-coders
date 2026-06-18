@@ -641,6 +641,93 @@ const adminHTML = `<!doctype html>
         blocks.push('<code style="background:var(--pill-bg); padding:2px 6px; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Consolas, monospace; font-size:90%; font-weight:500;">' + p1 + '</code>');
         return placeholder;
       });
+
+      // 2.5 Markdown Tables
+      const lines = html.split('\n');
+      const newLines = [];
+      let i = 0;
+      while (i < lines.length) {
+        const line = lines[i];
+        const nextLine = lines[i+1];
+        
+        const hasPipe = line.indexOf('|') !== -1;
+        const nextHasPipe = nextLine && nextLine.indexOf('|') !== -1;
+        
+        if (hasPipe && nextHasPipe) {
+          const sepLine = nextLine.trim();
+          const isSeparator = /^\|?([\s:-]*\|)+[\s:-]*\|?$/.test(sepLine) && sepLine.indexOf('-') !== -1;
+          
+          if (isSeparator) {
+            let headerLine = line;
+            let sepParts = sepLine.split('|').map(s => s.trim());
+            if (sepLine.startsWith('|')) sepParts.shift();
+            if (sepLine.endsWith('|')) sepParts.pop();
+            
+            const aligns = sepParts.map(part => {
+              const left = part.startsWith(':');
+              const right = part.endsWith(':');
+              if (left && right) return 'center';
+              if (right) return 'right';
+              return 'left';
+            });
+            
+            let headerParts = headerLine.split('|').map(s => s.trim());
+            if (headerLine.trim().startsWith('|')) headerParts.shift();
+            if (headerLine.trim().endsWith('|')) headerParts.pop();
+            
+            let tableHtml = '<div style="overflow-x:auto; margin:16px 0;"><table style="border-collapse:collapse; width:100%; font-size:13.5px; border:1px solid var(--line);">';
+            
+            // headers rendering
+            tableHtml += '<thead style="background:var(--panel-alt); font-weight:600;"><tr>';
+            for (let c = 0; c < headerParts.length; c++) {
+              const align = aligns[c] || 'left';
+              tableHtml += '<th style="border:1px solid var(--line); padding:10px 12px; text-align:' + align + ';">' + headerParts[c] + '</th>';
+            }
+            tableHtml += '</tr></thead>';
+            
+            // body rendering
+            tableHtml += '<tbody>';
+            
+            let j = i + 2;
+            let rowIdx = 0;
+            while (j < lines.length) {
+              const rowLine = lines[j];
+              if (!rowLine || rowLine.indexOf('|') === -1) {
+                break;
+              }
+              
+              let rowParts = rowLine.split('|').map(s => s.trim());
+              if (rowLine.trim().startsWith('|')) rowParts.shift();
+              if (rowLine.trim().endsWith('|')) rowParts.pop();
+              
+              const bgStyle = rowIdx % 2 === 1 ? 'background:var(--panel-alt);' : '';
+              tableHtml += '<tr style="' + bgStyle + '">';
+              for (let c = 0; c < headerParts.length; c++) {
+                const align = aligns[c] || 'left';
+                const cellVal = rowParts[c] !== undefined ? rowParts[c] : '';
+                tableHtml += '<td style="border:1px solid var(--line); padding:8px 12px; text-align:' + align + ';">' + cellVal + '</td>';
+              }
+              tableHtml += '</tr>';
+              
+              j++;
+              rowIdx++;
+            }
+            
+            tableHtml += '</tbody></table></div>';
+            
+            const placeholder = '<!--TABLE_' + blocks.length + '-->';
+            blocks.push(tableHtml);
+            
+            newLines.push(placeholder);
+            i = j;
+            continue;
+          }
+        }
+        
+        newLines.push(line);
+        i++;
+      }
+      html = newLines.join('\n');
       
       // 3. Bold
       html = html.replace(/\*\*([^*]+)\*\*/g, '<strong style="font-weight:700;">$1</strong>');
@@ -666,6 +753,7 @@ const adminHTML = `<!doctype html>
       for (let i = 0; i < blocks.length; i++) {
         html = html.replace('<!--CODEBLOCK_' + i + '-->', blocks[i]);
         html = html.replace('<!--INLINECODE_' + i + '-->', blocks[i]);
+        html = html.replace('<!--TABLE_' + i + '-->', blocks[i]);
       }
       
       return html;
