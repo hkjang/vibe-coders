@@ -109,12 +109,19 @@ func TestText2SQLPreviewFlow(t *testing.T) {
 		t.Fatal(err)
 	}
 	seen := map[string]bool{}
+	statusByStage := map[string]string{}
 	for _, sp := range spans {
 		seen[sp.Stage] = true
+		statusByStage[sp.Stage] = sp.Status
 	}
-	for _, want := range []string{"classify", "schema_resolve", "glossary_apply", "sql_generate", "sql_validate", "execute", "evaluate"} {
+	for _, want := range []string{"classify", "schema_resolve", "glossary_apply", "sql_generate", "sql_validate", "explain_guard", "execute", "mask_result", "summarize", "evaluate"} {
 		if !seen[want] {
 			t.Fatalf("expected Text2SQL span %s, got %+v", want, spans)
+		}
+	}
+	for _, wantSkipped := range []string{"explain_guard", "execute", "mask_result", "summarize"} {
+		if statusByStage[wantSkipped] != "skipped" {
+			t.Fatalf("expected preview span %s to be skipped, got statuses=%+v spans=%+v", wantSkipped, statusByStage, spans)
 		}
 	}
 	spanResp, err := http.Get(proxy.URL + "/admin/text2sql/spans?request_id=" + log.RequestID)

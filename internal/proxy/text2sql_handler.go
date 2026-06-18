@@ -154,6 +154,15 @@ func (s *Server) handleText2SQL(w http.ResponseWriter, r *http.Request, meta sto
 			CreatedAt:     time.Now().UTC(),
 		})
 	}
+	recordSkippedText2SQLResultTail := func(reason, sqlText string, detail map[string]any) {
+		recordSpan("mask_result", "skipped", "", 0, reason, sqlText, "", time.Now(), detail)
+		recordSpan("summarize", "skipped", summaryModel, 0, reason, sqlText, "", time.Now(), detail)
+	}
+	recordSkippedText2SQLPostValidation := func(reason, sqlText string, detail map[string]any) {
+		recordSpan("explain_guard", "skipped", "", 0, reason, sqlText, "", time.Now(), detail)
+		recordSpan("execute", "skipped", "", 0, reason, sqlText, "", time.Now(), detail)
+		recordSkippedText2SQLResultTail(reason, sqlText, detail)
+	}
 	classifyStatus := "ok"
 	if question == "" {
 		classifyStatus = "error"
@@ -302,6 +311,7 @@ func (s *Server) handleText2SQL(w http.ResponseWriter, r *http.Request, meta sto
 			recordSpan("sql_validate", status, "", 0, validation.Reason, cached, validation.SQL, cacheStart, map[string]any{"source": "cache"})
 			if validation.OK {
 				s.metrics.IncText2SQLCacheHit()
+				recordSkippedText2SQLPostValidation("preview_cache_hit", validation.SQL, map[string]any{"mode": string(profile.Mode), "cache_hit": true})
 				finalize(previewContent(question, validation.SQL, "검증된 읽기 전용 SQL입니다 (캐시 적중, 실행하지 않음).", validation), validation, false, 0, "", 0)
 				return
 			}
@@ -366,6 +376,7 @@ func (s *Server) handleText2SQL(w http.ResponseWriter, r *http.Request, meta sto
 		if hints := suggestText2SQLFixes(store.Text2SQLQueryLog{Valid: false, RejectReason: validation.Reason, FailureCategory: classifyText2SQLFailure(validation, false, 0, "")}); len(hints) > 0 {
 			content += "\n\n### 수정 방법\n- " + strings.Join(hints, "\n- ")
 		}
+		recordSkippedText2SQLPostValidation("validation_failed", validation.SQL, map[string]any{"validation_reason": validation.Reason})
 		finalize(content, validation, false, 0, validation.Reason, totalCost)
 		return
 	}
@@ -411,7 +422,7 @@ func (s *Server) handleText2SQL(w http.ResponseWriter, r *http.Request, meta sto
 			}
 			s.shadowEvaluate(r.Clone(context.Background()), dialect, schema, question, upstreamModel, cfg.ShadowModels, shadowOpts)
 		}
-		recordSpan("execute", "skipped", "", 0, "preview_mode", validation.SQL, "", time.Now(), map[string]any{"mode": string(profile.Mode), "exec_dsn_configured": cfg.ExecDSN != ""})
+		recordSkippedText2SQLPostValidation("preview_mode", validation.SQL, map[string]any{"mode": string(profile.Mode), "exec_dsn_configured": cfg.ExecDSN != ""})
 		finalize(previewContent(question, validation.SQL, note, validation), validation, false, 0, "", totalCost)
 		return
 	}
@@ -421,6 +432,7 @@ func (s *Server) handleText2SQL(w http.ResponseWriter, r *http.Request, meta sto
 	if challengeUnsafe {
 		s.metrics.IncText2SQLChallengeVeto()
 		note := "보조 모델 검토 결과 실행을 보류했습니다. " + challengeNote
+		recordSkippedText2SQLPostValidation("self_challenge_veto", validation.SQL, map[string]any{"challenge_note": challengeNote})
 		finalize(previewContent(question, validation.SQL, note, validation), validation, false, 0, "self_challenge_veto", totalCost)
 		return
 	}
@@ -439,6 +451,7 @@ func (s *Server) handleText2SQL(w http.ResponseWriter, r *http.Request, meta sto
 			recordSpan("explain_guard", "ok", "", 0, "", validation.SQL, fmt.Sprint(risk.Score), execStart, map[string]any{"risk_score": risk.Score, "explain_cost": risk.Cost})
 			recordSpan("execute", "error", "", 0, execErr.Error(), validation.SQL, "", execStart, map[string]any{"latency_ms": execLatency})
 		}
+		recordSkippedText2SQLResultTail("execute_failed", validation.SQL, map[string]any{"error": execErr.Error()})
 		finalize("SQL 실행 실패: "+execErr.Error()+"\n\n```sql\n"+validation.SQL+"\n```", validation, false, 0, execErr.Error(), totalCost)
 		return
 	}
