@@ -16,6 +16,7 @@ $cleanVer = $Version.TrimStart('v')
 
 $notes = "## AI Proxy Gateway v" + $cleanVer + "`r`n`r`n"
 $notes += "### 주요 변경 사항`r`n"
+$notes += "- **개인화 코칭 후보 (`v0.50.14`)**: `GET /admin/personalization/coaching`과 어드민 개인화 탭의 코칭 후보 표를 추가. Personal AI Profile 지표만 사용해 보안·품질·재사용·비용·Text2SQL·MCP 코칭 후보를 read-only로 산출하며 원문 프롬프트/SQL/응답은 참조하지 않음.`r`n"
 $notes += "- **추천 피드백 API 호환성 (`v0.50.13`)**: 기존 `POST /me/recommendations/feedback`을 유지하면서 `POST /me/recommendations/{id}/feedback` 별칭을 추가. `accepted/rejected/dismissed/later` 액션 별칭과 선택 `reason` 저장을 지원해 추천 채택률 학습 데이터를 더 유연하게 수집.`r`n"
 $notes += "- **개인화 추천 후보 확장 (`v0.50.12`)**: `/me/recommendations`가 반복 Text2SQL 질문 기반 저장 리포트 후보와 사용자별 MCP 도구 affinity 추천을 생성. Text2SQL 추천은 원문 질문/SQL 대신 fingerprint·집계 지표만 저장하고, 차단/승인필요 MCP risk profile 도구는 추천에서 제외. 후보 산출 store 회귀 테스트 추가.`r`n"
 $notes += "- **Personal AI Profile 운영 지표 확장 (`v0.50.11`)**: 개인 프로필에 평균 지연, 캐시율, Text2SQL 사용률, MCP 사용률, 개인 위험 점수, 자주 쓰는 MCP 도구 Top5를 추가. `/me/dashboard`와 개인화 어드민 탭이 같은 프로필 기준을 표시하도록 연결하고 store 회귀 테스트를 보강.`r`n"

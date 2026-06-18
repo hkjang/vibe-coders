@@ -2,12 +2,120 @@ package proxy
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
 	"vibe-coders/internal/store"
 )
+
+type personalizationCoachingItem struct {
+	UserID   string         `json:"user_id"`
+	Team     string         `json:"team"`
+	Role     string         `json:"role"`
+	Category string         `json:"category"`
+	Severity string         `json:"severity"`
+	Score    float64        `json:"score"`
+	Title    string         `json:"title"`
+	Detail   string         `json:"detail"`
+	Reason   string         `json:"reason"`
+	Metrics  map[string]any `json:"metrics"`
+}
+
+func coachingSeverity(score float64) string {
+	switch {
+	case score >= 85:
+		return "critical"
+	case score >= 70:
+		return "high"
+	case score >= 45:
+		return "medium"
+	default:
+		return "low"
+	}
+}
+
+func personalizationCoachingItemsForProfile(p store.PersonalProfile) []personalizationCoachingItem {
+	base := func(category, title, detail, reason string, score float64, metrics map[string]any) personalizationCoachingItem {
+		return personalizationCoachingItem{
+			UserID: p.UserID, Team: p.Team, Role: p.Role,
+			Category: category, Severity: coachingSeverity(score), Score: score,
+			Title: title, Detail: detail, Reason: reason, Metrics: metrics,
+		}
+	}
+	items := []personalizationCoachingItem{}
+	if p.Requests == 0 {
+		return items
+	}
+	if p.RiskScore >= 35 {
+		items = append(items, base(
+			"security",
+			"민감정보·정책 위험 패턴 점검",
+			"최근 요청에서 secret/policy/Text2SQL/MCP 위험 신호가 누적되었습니다. 샘플 데이터 사용과 정책 안내가 필요합니다.",
+			fmt.Sprintf("risk_score=%d", p.RiskScore),
+			float64(p.RiskScore),
+			map[string]any{"risk_score": p.RiskScore, "requests": p.Requests},
+		))
+	}
+	if p.Requests >= 3 && p.ErrorRate >= 0.25 {
+		score := p.ErrorRate * 100
+		items = append(items, base(
+			"quality",
+			"오류율 높은 사용 패턴 코칭",
+			"최근 실패 비중이 높습니다. 템플릿 사용, 더 명확한 컨텍스트, 모델 선택 점검을 권장합니다.",
+			fmt.Sprintf("error_rate=%.0f%%", p.ErrorRate*100),
+			score,
+			map[string]any{"error_rate": p.ErrorRate, "requests": p.Requests},
+		))
+	}
+	if p.Requests >= 10 && p.CacheRate < 0.05 {
+		items = append(items, base(
+			"reuse",
+			"캐시·템플릿 재사용 기회",
+			"요청량은 충분하지만 캐시 적중률이 낮습니다. 반복 프롬프트를 Prompt Product나 템플릿으로 승격할 후보를 확인하세요.",
+			fmt.Sprintf("cache_rate=%.0f%%", p.CacheRate*100),
+			55,
+			map[string]any{"cache_rate": p.CacheRate, "requests": p.Requests, "distinct_prompt_fingerprints": p.DistinctFingerprints},
+		))
+	}
+	if p.TotalCostKRW >= 100 && p.AvgCostPerRequest >= 5 {
+		score := 45 + p.AvgCostPerRequest
+		if score > 90 {
+			score = 90
+		}
+		items = append(items, base(
+			"cost",
+			"고비용 모델 사용 점검",
+			"월 비용과 요청당 평균 비용이 높습니다. 모델 전환 추천과 routing preview로 저비용 대안을 검토하세요.",
+			fmt.Sprintf("avg_cost=%.2f KRW, total_cost=%.0f KRW", p.AvgCostPerRequest, p.TotalCostKRW),
+			score,
+			map[string]any{"avg_cost_per_request": p.AvgCostPerRequest, "total_cost_krw": p.TotalCostKRW, "top_models": p.TopModels},
+		))
+	}
+	if p.Text2SQLUsageRate >= 0.3 {
+		items = append(items, base(
+			"text2sql",
+			"반복 Text2SQL 리포트화 후보",
+			"Text2SQL 사용 비중이 높습니다. 반복 질문을 저장 리포트나 대시보드 후보로 승격하면 비용과 대기시간을 줄일 수 있습니다.",
+			fmt.Sprintf("text2sql_usage_rate=%.0f%%", p.Text2SQLUsageRate*100),
+			50+p.Text2SQLUsageRate*30,
+			map[string]any{"text2sql_usage_rate": p.Text2SQLUsageRate, "requests": p.Requests},
+		))
+	}
+	if p.MCPUsageRate >= 0.3 && len(p.TopMCPTools) > 0 {
+		items = append(items, base(
+			"mcp",
+			"MCP 도구 사용 표준화 후보",
+			"특정 MCP 도구 사용 비중이 높습니다. 팀 표준 workflow나 tool risk profile 안내로 재현성과 안전성을 높일 수 있습니다.",
+			fmt.Sprintf("mcp_usage_rate=%.0f%%", p.MCPUsageRate*100),
+			45+p.MCPUsageRate*25,
+			map[string]any{"mcp_usage_rate": p.MCPUsageRate, "top_mcp_tools": p.TopMCPTools},
+		))
+	}
+	return items
+}
 
 // handlePersonalProfiles lists per-user AI profiles for the most active users over a
 // window (computed live). Read-only.
@@ -34,6 +142,45 @@ func (s *Server) handlePersonalProfiles(w http.ResponseWriter, r *http.Request) 
 		profiles = append(profiles, p)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"profiles": profiles})
+}
+
+// handlePersonalizationCoaching returns read-only coaching candidates derived from
+// Personal AI Profile metrics. It never inspects raw prompts, SQL, or responses.
+// GET /admin/personalization/coaching?window=30d&limit=50
+func (s *Server) handlePersonalizationCoaching(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	since := parseWindow(r.URL.Query().Get("window"), 30*24*time.Hour, "day")
+	limit := recentLimit(r)
+	users, err := s.db.PersonalProfileActiveUsers(r.Context(), since, limit)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "coaching_failed")
+		return
+	}
+	items := []personalizationCoachingItem{}
+	for _, uid := range users {
+		p, err := s.db.BuildPersonalProfile(r.Context(), uid, since)
+		if err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "coaching_failed")
+			return
+		}
+		items = append(items, personalizationCoachingItemsForProfile(p)...)
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].Score != items[j].Score {
+			return items[i].Score > items[j].Score
+		}
+		if items[i].UserID != items[j].UserID {
+			return items[i].UserID < items[j].UserID
+		}
+		return items[i].Category < items[j].Category
+	})
+	if len(items) > limit {
+		items = items[:limit]
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items, "count": len(items)})
 }
 
 // handlePersonalProfileDetail computes one user's profile live, caches it as the latest

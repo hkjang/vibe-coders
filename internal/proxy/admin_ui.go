@@ -512,7 +512,7 @@ const adminHTML = `<!doctype html>
     function openModal(title, html, requestId) {
       document.getElementById('modal-title').textContent = title;
       document.getElementById('modal-body').innerHTML = html;
-      
+
       const btn = document.getElementById('modal-analyze');
       if (btn) {
         if (requestId) {
@@ -524,7 +524,7 @@ const adminHTML = `<!doctype html>
           btn.style.display = 'none';
         }
       }
-      
+
       document.getElementById('modal-backdrop').classList.add('open');
     }
     function closeModal() {
@@ -535,7 +535,7 @@ const adminHTML = `<!doctype html>
       let area = document.getElementById(areaId);
       if (!area) {
         const body = document.getElementById('modal-body');
-        body.insertAdjacentHTML('beforeend', 
+        body.insertAdjacentHTML('beforeend',
           '<section id="' + areaId + '-section" style="margin-top:18px; border:1px solid var(--accent); border-radius:8px; overflow:hidden;">' +
             '<h2 style="background:var(--accent); color:#fff; margin:0; padding:12px 14px; font-size:13px; font-weight:800;">AI 분석 요약</h2>' +
             '<div class="body-pad" id="' + areaId + '" style="padding:14px; line-height:1.6; white-space:normal;">' +
@@ -549,7 +549,7 @@ const adminHTML = `<!doctype html>
         area.innerHTML = '분석 중…';
         document.getElementById(areaId + '-section').scrollIntoView({ behavior: 'smooth' });
       }
-      
+
       try {
         const result = await api('/admin/requests/' + encodeURIComponent(id) + '/analyze', { method: 'POST' });
         area.innerHTML = renderMarkdown(result.analysis);
@@ -631,9 +631,9 @@ const adminHTML = `<!doctype html>
       const blocks = [];
       const bt = String.fromCharCode(96);
       const bt3 = bt + bt + bt;
-      
+
       let html = escapeHTML(md);
-      
+
       // 1. Code blocks
       const reBlock = new RegExp(bt3 + '([\\s\\S]*?)' + bt3, 'gm');
       html = html.replace(reBlock, (match, p1) => {
@@ -641,7 +641,7 @@ const adminHTML = `<!doctype html>
         blocks.push('<pre class="prompt-block" style="background:var(--panel-alt); border:1px solid var(--line); font-family:ui-monospace, SFMono-Regular, Consolas, monospace; font-size:13px; padding:12px; margin:8px 0; overflow:auto; white-space:pre-wrap; border-radius:6px;">' + p1.trim() + '</pre>');
         return placeholder;
       });
-      
+
       // 2. Inline code
       const reInline = new RegExp(bt + '([^' + bt + '\n]+)' + bt, 'g');
       html = html.replace(reInline, (match, p1) => {
@@ -657,20 +657,20 @@ const adminHTML = `<!doctype html>
       while (i < lines.length) {
         const line = lines[i];
         const nextLine = lines[i+1];
-        
+
         const hasPipe = line.indexOf('|') !== -1;
         const nextHasPipe = nextLine && nextLine.indexOf('|') !== -1;
-        
+
         if (hasPipe && nextHasPipe) {
           const sepLine = nextLine.trim();
           const isSeparator = /^\|?([\s:-]*\|)+[\s:-]*\|?$/.test(sepLine) && sepLine.indexOf('-') !== -1;
-          
+
           if (isSeparator) {
             let headerLine = line;
             let sepParts = sepLine.split('|').map(s => s.trim());
             if (sepLine.startsWith('|')) sepParts.shift();
             if (sepLine.endsWith('|')) sepParts.pop();
-            
+
             const aligns = sepParts.map(part => {
               const left = part.startsWith(':');
               const right = part.endsWith(':');
@@ -678,13 +678,13 @@ const adminHTML = `<!doctype html>
               if (right) return 'right';
               return 'left';
             });
-            
+
             let headerParts = headerLine.split('|').map(s => s.trim());
             if (headerLine.trim().startsWith('|')) headerParts.shift();
             if (headerLine.trim().endsWith('|')) headerParts.pop();
-            
+
             let tableHtml = '<div style="overflow-x:auto; margin:16px 0;"><table style="border-collapse:collapse; width:100%; font-size:13.5px; border:1px solid var(--line);">';
-            
+
             // headers rendering
             tableHtml += '<thead style="background:var(--panel-alt); font-weight:600;"><tr>';
             for (let c = 0; c < headerParts.length; c++) {
@@ -692,10 +692,10 @@ const adminHTML = `<!doctype html>
               tableHtml += '<th style="border:1px solid var(--line); padding:10px 12px; text-align:' + align + ';">' + headerParts[c] + '</th>';
             }
             tableHtml += '</tr></thead>';
-            
+
             // body rendering
             tableHtml += '<tbody>';
-            
+
             let j = i + 2;
             let rowIdx = 0;
             while (j < lines.length) {
@@ -703,11 +703,11 @@ const adminHTML = `<!doctype html>
               if (!rowLine || rowLine.indexOf('|') === -1) {
                 break;
               }
-              
+
               let rowParts = rowLine.split('|').map(s => s.trim());
               if (rowLine.trim().startsWith('|')) rowParts.shift();
               if (rowLine.trim().endsWith('|')) rowParts.pop();
-              
+
               const bgStyle = rowIdx % 2 === 1 ? 'background:var(--panel-alt);' : '';
               tableHtml += '<tr style="' + bgStyle + '">';
               for (let c = 0; c < headerParts.length; c++) {
@@ -716,54 +716,54 @@ const adminHTML = `<!doctype html>
                 tableHtml += '<td style="border:1px solid var(--line); padding:8px 12px; text-align:' + align + ';">' + cellVal + '</td>';
               }
               tableHtml += '</tr>';
-              
+
               j++;
               rowIdx++;
             }
-            
+
             tableHtml += '</tbody></table></div>';
-            
+
             const placeholder = '<!--TABLE_' + blocks.length + '-->';
             blocks.push(tableHtml);
-            
+
             newLines.push(placeholder);
             i = j;
             continue;
           }
         }
-        
+
         newLines.push(line);
         i++;
       }
       html = newLines.join('\n');
-      
+
       // 3. Bold
       html = html.replace(/\*\*([^*]+)\*\*/g, '<strong style="font-weight:700;">$1</strong>');
-      
+
       // 4. Italic
       html = html.replace(/\*([^*]+)\*/g, '<em style="font-style:italic;">$1</em>');
-      
+
       // 5. Headings
       html = html.replace(/^### (.*?)$/gm, '<h5 style="margin:16px 0 8px; font-size:14px; font-weight:700;">$1</h5>');
       html = html.replace(/^## (.*?)$/gm, '<h4 style="margin:20px 0 10px; font-size:16px; font-weight:700; border-bottom:1px solid var(--line); padding-bottom:4px;">$1</h4>');
       html = html.replace(/^# (.*?)$/gm, '<h3 style="margin:24px 0 12px; font-size:18px; font-weight:800; border-bottom:2px solid var(--line); padding-bottom:6px;">$1</h3>');
-      
+
       // 6. Bullet lists
       html = html.replace(/^\s*[-*]\s+(.*?)$/gm, '<li style="margin-left:20px; margin-top:6px; margin-bottom:6px; line-height:1.6; list-style-type:disc;">$1</li>');
-      
+
       // 7. Blockquotes
       html = html.replace(/^\>\s+(.*?)$/gm, '<blockquote style="border-left:4px solid var(--primary, #0f766e); padding-left:12px; color:var(--muted); margin:8px 0; font-style:italic;">$1</blockquote>');
-      
+
       // 8. Line breaks
       html = html.replace(/\n/g, '<br>');
-      
+
       // 9. Restore code blocks
       for (let i = 0; i < blocks.length; i++) {
         html = html.replace('<!--CODEBLOCK_' + i + '-->', blocks[i]);
         html = html.replace('<!--INLINECODE_' + i + '-->', blocks[i]);
         html = html.replace('<!--TABLE_' + i + '-->', blocks[i]);
       }
-      
+
       return html;
     }
     function statusBadge(code) {
@@ -3537,17 +3537,17 @@ const adminHTML = `<!doctype html>
         const text = p.redacted_text || p.content_text || '';
         const trimmed = text.trim();
         const isJson = (trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'));
-        
+
         let formatted = '';
         if (isJson) {
           formatted = '<pre style="margin:0; white-space:pre-wrap; font-family:ui-monospace, SFMono-Regular, Consolas, monospace; font-size:13px; background:transparent; border:none; padding:0;">' + escapeHTML(formatTextIfJSON(text)) + '</pre>';
         } else {
           formatted = '<div style="white-space:normal; line-height:1.6; font-size:13.5px;">' + renderMarkdown(text) + '</div>';
         }
-        
+
         return '<div class="prompt-block markdown-view">' +
-          '<div class="prompt-role" style="border-bottom:1px solid var(--line); padding-bottom:6px; margin-bottom:10px; font-weight:800;">' + 
-            escapeHTML(p.role) + (p.language_hint ? ' · <span class="pill">' + escapeHTML(p.language_hint) + '</span>' : '') + 
+          '<div class="prompt-role" style="border-bottom:1px solid var(--line); padding-bottom:6px; margin-bottom:10px; font-weight:800;">' +
+            escapeHTML(p.role) + (p.language_hint ? ' · <span class="pill">' + escapeHTML(p.language_hint) + '</span>' : '') +
           '</div>' +
           formatted +
           (p.content_text && p.content_text !== p.redacted_text ? '<div class="muted" style="margin-top:8px; font-size:12px;">원문 별도 보관됨</div>' : '') +
@@ -4033,7 +4033,7 @@ const adminHTML = `<!doctype html>
         '<div class="grid2">' +
           card('상태 분포', statusCard(d.by_status || [], s.requests || 0)) +
           card('시간대 히트맵 (Asia/Seoul, 최근 30일)', heatmapHTML(heat.cells || [])) +
-        '</div>' + 
+        '</div>' +
         '<div class="grid2">' +
           card('언어별', languagesTable(d.by_language || [])) +
           card('LLM Trend Summary', llmTrendSummaryBar(llmTimeseriesSummary(llm.timeseries || []))) +
@@ -6103,8 +6103,12 @@ const adminHTML = `<!doctype html>
     }
     async function renderPersonalization() {
       const view = document.getElementById('view');
-      const d = await api('/admin/personalization/profiles?window=30d&limit=50').catch(() => ({ profiles: [] }));
+      const [d, coachingResp] = await Promise.all([
+        api('/admin/personalization/profiles?window=30d&limit=50').catch(() => ({ profiles: [] })),
+        api('/admin/personalization/coaching?window=30d&limit=50').catch(() => ({ items: [] }))
+      ]);
       const profiles = d.profiles || [];
+      const coaching = coachingResp.items || [];
       let html = '<p class="muted">사용자별 AI 사용 프로필 (최근 30일). 모델·작업·언어 선호, 비용 성향, 신뢰도를 요약합니다. 사용자를 클릭하면 상세·스냅샷을 볼 수 있습니다.</p>';
       if (!profiles.length) {
         html += '<p class="muted">표시할 프로필이 없습니다 (사용자 매핑된 API Key 활동 필요).</p>';
@@ -6134,7 +6138,28 @@ const adminHTML = `<!doctype html>
             '</tr>';
           }).join('') + '</tbody></table>';
       }
-      view.innerHTML = card('개인 AI 프로필', '<div class="card-body">' + html + '</div>');
+      let coachingHtml = '<p class="muted">프로필 지표만으로 산출한 read-only 코칭 후보입니다. 원문 프롬프트·SQL·응답은 사용하지 않습니다.</p>';
+      if (!coaching.length) {
+        coachingHtml += '<p class="muted">현재 코칭 후보가 없습니다.</p>';
+      } else {
+        coachingHtml += '<table><thead><tr>' +
+          '<th data-sort="str">사용자</th><th data-sort="str">팀</th><th data-sort="str">분류</th>' +
+          '<th data-sort="num">점수</th><th data-sort="str">심각도</th><th>제목</th><th>근거</th><th>권장 코칭</th>' +
+          '</tr></thead><tbody>' +
+          coaching.map(c => '<tr>' +
+            '<td><a href="#/personalization/' + encodeURIComponent(c.user_id || '') + '">' + escapeHTML(c.user_id || '') + '</a></td>' +
+            '<td>' + escapeHTML(c.team || '') + '</td>' +
+            '<td>' + escapeHTML(c.category || '') + '</td>' +
+            '<td data-num="' + (c.score || 0) + '">' + fmt(Math.round(c.score || 0)) + '</td>' +
+            '<td><span class="status ' + governanceStatusClass(c.severity || 'low') + '">' + escapeHTML(c.severity || 'low') + '</span></td>' +
+            '<td>' + escapeHTML(c.title || '') + '</td>' +
+            '<td class="muted">' + escapeHTML(c.reason || '') + '</td>' +
+            '<td class="muted" style="max-width:360px">' + escapeHTML(c.detail || '') + '</td>' +
+          '</tr>').join('') + '</tbody></table>';
+      }
+      view.innerHTML =
+        card('개인 AI 프로필', '<div class="card-body">' + html + '</div>') +
+        card('개인화 코칭 후보', '<div class="card-body">' + coachingHtml + '</div>');
       makeSortable('#view', 'personalization');
     }
 
