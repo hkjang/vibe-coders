@@ -100,6 +100,7 @@ var apiEndpoints = []apiEndpoint{
 
 	// ---- admin: settings ----
 	{"/admin/settings", []string{"get"}, "settings", "List runtime settings (+ /{category})", false},
+	{"/admin/settings/effective", []string{"get"}, "settings", "List effective settings with source layers", false},
 	{"/admin/settings/by-key/{key}", []string{"put", "delete"}, "settings", "Set / revert a runtime setting", false},
 	{"/admin/settings/validate", []string{"post"}, "settings", "Validate a setting value", false},
 	{"/admin/settings/history", []string{"get"}, "settings", "Setting change history", false},

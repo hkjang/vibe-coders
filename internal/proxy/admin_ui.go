@@ -6860,13 +6860,24 @@ const adminHTML = `<!doctype html>
     // ---------- runtime settings (admin-managed config) ----------
     function settingInputId(key) { return 'val-' + key.replace(/[^a-zA-Z0-9]/g, '-'); }
     function jsonShort(s) { if (!s) return ''; try { return String(JSON.parse(s)); } catch (e) { return s; } }
+    function settingLayerBadges(s) {
+      const layers = s.layers || [];
+      if (!layers.length) return '';
+      const labels = { bootstrap_env: 'env', db_setting: 'DB', runtime_flag: 'flag', request_override: 'request' };
+      return '<div style="margin-top:5px;display:flex;gap:4px;flex-wrap:wrap">' + layers.map(l => {
+        const state = l.active ? 'active' : (l.configured ? 'set' : 'off');
+        const cls = l.active ? 'status' : 'pill';
+        const title = (l.name || '') + ' · ' + state + (l.is_set ? ' · value set' : '');
+        return '<span class="' + cls + '" title="' + escapeAttr(title) + '">' + escapeHTML(labels[l.name] || l.name || '') + ':' + state + '</span>';
+      }).join('') + '</div>';
+    }
     async function renderRuntimeSettings() {
       const view = document.getElementById('view');
-      const d = await api('/admin/settings').catch(() => ({ settings: [] }));
+      const d = await api('/admin/settings/effective').catch(() => ({ settings: [] }));
       const settings = d.settings || [];
       const groups = {};
       settings.forEach(s => { (groups[s.category] = groups[s.category] || []).push(s); });
-      let html = '<div class="card-body"><p class="muted">환경변수 기본값 위에 관리자 설정을 오버레이합니다. 저장 시 즉시 런타임에 반영(민감값은 암호화·마스킹). 출처 env=기본값, admin=오버레이.</p>' +
+      let html = '<div class="card-body"><p class="muted">환경변수 기본값 위에 관리자 설정을 오버레이합니다. 저장 시 즉시 런타임에 반영(민감값은 암호화·마스킹). 출처 계층은 env → DB → runtime flag → request override 순서로 표시합니다.</p>' +
         '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">' +
           '<button class="secondary" type="button" onclick="testSettingConn(\'clickhouse\')">ClickHouse 연결 테스트</button>' +
           '<button class="secondary" type="button" onclick="testSettingConn(\'text2sql-exec\')">Text2SQL 실행 DB 테스트</button>' +
@@ -6884,7 +6895,7 @@ const adminHTML = `<!doctype html>
             const displayVal = s.is_secret ? (s.is_set ? '********' : '<span class="muted">(미설정)</span>') : escapeHTML(String(s.value == null ? '' : s.value));
             html += '<tr style="opacity:.85"><td><code>' + escapeHTML(s.key) + '</code>' + desc + '</td>' +
               '<td><span style="font-family:ui-monospace,monospace;font-size:13px">' + displayVal + '</span></td>' +
-              '<td><span class="pill" style="background:var(--surface2,#333);color:var(--muted)">환경변수</span></td>' +
+              '<td><span class="pill" style="background:var(--surface2,#333);color:var(--muted)">환경변수</span>' + settingLayerBadges(s) + '</td>' +
               '<td></td><td><span class="muted" style="font-size:11px">변경 불가 (환경변수)</span></td></tr>';
             return;
           }
@@ -6899,12 +6910,13 @@ const adminHTML = `<!doctype html>
           }
           const ver = s.version ? '<div class="muted">v' + s.version + ' · ' + escapeHTML(s.updated_by || '') + '</div>' : '';
           const restart = s.restart_required ? '<span class="pill">재연결/재시작</span>' : '';
+          const activeSource = s.effective_source || (s.source === 'admin' ? 'db_setting' : 'bootstrap_env');
           const revertBtns = s.source === 'admin'
             ? '<button class="secondary" type="button" onclick="revertSetting(\'' + s.key + '\')">기본값</button> ' +
               (s.is_secret ? '' : '<button class="secondary" type="button" onclick="rollbackSetting(\'' + s.key + '\')">롤백</button> ')
             : '';
           html += '<tr><td><code>' + escapeHTML(s.key) + '</code>' + desc + '</td><td>' + editor + '</td>' +
-            '<td><span class="status ' + (s.source === 'admin' ? '' : '') + '">' + escapeHTML(s.source) + '</span>' + ver + '</td>' +
+            '<td><span class="status">' + escapeHTML(activeSource) + '</span>' + ver + settingLayerBadges(s) + '</td>' +
             '<td>' + restart + '</td><td>' +
               '<button type="button" onclick="saveSetting(\'' + s.key + '\',\'' + id + '\',' + (s.is_secret ? 'true' : 'false') + ')">저장</button> ' +
               revertBtns +

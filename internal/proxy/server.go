@@ -303,6 +303,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/admin/keys/health", s.handleKeyHealth)
 	mux.HandleFunc("/admin/recommendations/adoption", s.handleRecommendationAdoption)
 	mux.HandleFunc("/admin/secrets/rotate", s.handleSecretsRotate)
+	mux.HandleFunc("/admin/settings/effective", s.handleAdminSettingsEffective)
 	mux.HandleFunc("/admin/settings", s.handleAdminSettings)
 	mux.HandleFunc("/admin/settings/", s.handleAdminSettings)
 	mux.HandleFunc("/admin/settings/by-key/", s.handleAdminSettingByKey)

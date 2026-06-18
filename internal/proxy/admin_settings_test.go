@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -145,5 +146,61 @@ func TestAdminSettingsLifecycle(t *testing.T) {
 		if m["key"] == "text2sql.default_limit" && m["source"] != "env" {
 			t.Errorf("after delete source = %v, want env", m["source"])
 		}
+	}
+}
+
+func TestAdminSettingsEffectiveLayers(t *testing.T) {
+	ts, _ := settingsServer(t)
+	base := ts.URL + "/admin/settings"
+
+	resp, _ := req(t, http.MethodPut, base+"/by-key/text2sql.default_limit", `{"value":"50","reason":"layer test"}`)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("PUT default_limit = %d", resp.StatusCode)
+	}
+	resp, _ = req(t, http.MethodPut, base+"/by-key/text2sql.exec_dsn", `{"value":"postgres://user:pass@example/db","reason":"secret layer test"}`)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("PUT exec_dsn = %d", resp.StatusCode)
+	}
+
+	resp, out := req(t, http.MethodGet, base+"/effective?category=text2sql", "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET effective = %d %+v", resp.StatusCode, out)
+	}
+	if order, _ := out["resolution_order"].([]any); len(order) != 4 || order[0] != "request_override" || order[3] != "bootstrap_env" {
+		t.Fatalf("unexpected resolution_order: %+v", out["resolution_order"])
+	}
+	settings, _ := out["settings"].([]any)
+	var defLimit, execDSN map[string]any
+	for _, it := range settings {
+		m := it.(map[string]any)
+		switch m["key"] {
+		case "text2sql.default_limit":
+			defLimit = m
+		case "text2sql.exec_dsn":
+			execDSN = m
+		}
+	}
+	if defLimit == nil {
+		t.Fatal("text2sql.default_limit missing from effective settings")
+	}
+	if defLimit["effective_source"] != "db_setting" || defLimit["value"] != "50" || defLimit["source"] != "admin" {
+		t.Fatalf("default_limit effective view mismatch: %+v", defLimit)
+	}
+	foundActiveDB := false
+	for _, l := range defLimit["layers"].([]any) {
+		layer := l.(map[string]any)
+		if layer["name"] == "db_setting" {
+			foundActiveDB = layer["configured"] == true && layer["active"] == true && layer["value"] == "50"
+		}
+	}
+	if !foundActiveDB {
+		t.Fatalf("default_limit did not expose active db_setting layer: %+v", defLimit["layers"])
+	}
+
+	if execDSN == nil {
+		t.Fatal("text2sql.exec_dsn missing from effective settings")
+	}
+	if execDSN["value"] != "********" || execDSN["is_set"] != true || strings.Contains(fmt.Sprint(execDSN), "postgres://") {
+		t.Fatalf("secret effective view leaked or was not masked: %+v", execDSN)
 	}
 }

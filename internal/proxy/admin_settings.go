@@ -54,8 +54,8 @@ type settingDef struct {
 	Category string
 	Type     settingType
 	Secret   bool
-	Restart  bool     // changing this requires a worker restart / connection swap (informational)
-	ReadOnly bool     // env-only: shown for visibility but cannot be changed via admin settings
+	Restart  bool // changing this requires a worker restart / connection swap (informational)
+	ReadOnly bool // env-only: shown for visibility but cannot be changed via admin settings
 	envValue func(cfg config.Config) string
 	validate func(string) error
 }
@@ -308,17 +308,17 @@ var settingDescriptions = map[string]string{
 	"limits.max_request_bytes": "chat 요청 본문 최대 바이트(0=비활성). 초과 시 413 payload_too_large로 거부. 비정상적으로 큰 프롬프트·남용 차단.",
 	"limits.max_messages":      "chat 요청 messages 배열 최대 개수(0=비활성). 초과 시 400 too_many_messages로 거부. 컨텍스트 스터핑·과도한 멀티턴 누적 차단.",
 	// Logging
-	"logging.response_text":       "AI 응답 본문 캡처 여부(LOG_RESPONSE_TEXT). true면 response_text_optional에 전체 응답 텍스트를 저장, 요청 상세에서 조회 가능. 저장 공간 증가 주의.",
-	"logging.raw_prompts":         "프롬프트 원문 캡처 여부(LOG_RAW_PROMPTS). true면 content_text(원문)도 별도 저장. false면 redacted_text(리덕션)만 보관.",
-	"logging.raw_bodies":          "요청·응답 원시 바디 캡처 여부(LOG_RAW_BODIES). true면 raw_request/raw_response 컬럼에 전체 바이트 저장. 디버그 목적. 저장 공간 주의.",
-	"logging.response_max_bytes":  "응답 캡처 최대 바이트(LOG_RESPONSE_MAX_BYTES). 초과 분 잘림. 기본 1MB.",
+	"logging.response_text":      "AI 응답 본문 캡처 여부(LOG_RESPONSE_TEXT). true면 response_text_optional에 전체 응답 텍스트를 저장, 요청 상세에서 조회 가능. 저장 공간 증가 주의.",
+	"logging.raw_prompts":        "프롬프트 원문 캡처 여부(LOG_RAW_PROMPTS). true면 content_text(원문)도 별도 저장. false면 redacted_text(리덕션)만 보관.",
+	"logging.raw_bodies":         "요청·응답 원시 바디 캡처 여부(LOG_RAW_BODIES). true면 raw_request/raw_response 컬럼에 전체 바이트 저장. 디버그 목적. 저장 공간 주의.",
+	"logging.response_max_bytes": "응답 캡처 최대 바이트(LOG_RESPONSE_MAX_BYTES). 초과 분 잘림. 기본 1MB.",
 	// Env (read-only)
-	"env.upstream_base_url":  "업스트림 엔드포인트 URL(UPSTREAM_BASE_URL). 변경하려면 컨테이너 환경변수를 수정 후 재시작.",
-	"env.upstream_provider":  "업스트림 프로바이더 이름(UPSTREAM_PROVIDER). 변경하려면 환경변수 수정 후 재시작.",
-	"env.upstream_api_key":   "업스트림 API 키(UPSTREAM_API_KEY). 마스킹 표시. 변경하려면 환경변수 수정 후 재시작.",
-	"env.listen_addr":        "게이트웨이 수신 주소/포트(PORT or LISTEN_ADDR). 변경하려면 환경변수 수정 후 재시작.",
-	"env.log_queue_size":     "비동기 로그 큐 크기(LOG_QUEUE_SIZE). 변경하려면 환경변수 수정 후 재시작.",
-	"env.log_fallback_path":  "로그 큐 오버플로 시 fallback NDJSON 파일 경로(LOG_FALLBACK_PATH).",
+	"env.upstream_base_url": "업스트림 엔드포인트 URL(UPSTREAM_BASE_URL). 변경하려면 컨테이너 환경변수를 수정 후 재시작.",
+	"env.upstream_provider": "업스트림 프로바이더 이름(UPSTREAM_PROVIDER). 변경하려면 환경변수 수정 후 재시작.",
+	"env.upstream_api_key":  "업스트림 API 키(UPSTREAM_API_KEY). 마스킹 표시. 변경하려면 환경변수 수정 후 재시작.",
+	"env.listen_addr":       "게이트웨이 수신 주소/포트(PORT or LISTEN_ADDR). 변경하려면 환경변수 수정 후 재시작.",
+	"env.log_queue_size":    "비동기 로그 큐 크기(LOG_QUEUE_SIZE). 변경하려면 환경변수 수정 후 재시작.",
+	"env.log_fallback_path": "로그 큐 오버플로 시 fallback NDJSON 파일 경로(LOG_FALLBACK_PATH).",
 }
 
 // t2sConf returns the effective Text2SQL config (admin-settings overlay over env/default).
@@ -779,15 +779,116 @@ func (s *Server) settingView(stored map[string]store.AdminSetting, d settingDef)
 		view["updated_by"] = a.UpdatedBy
 		view["updated_at"] = a.UpdatedAt
 	}
+	value, isSet := settingMaskedValue(eff, d.Secret)
+	view["value"] = value
 	if d.Secret {
-		view["is_set"] = strings.TrimSpace(eff) != ""
-		if strings.TrimSpace(eff) != "" {
-			view["value"] = "********"
-		} else {
-			view["value"] = ""
-		}
+		view["is_set"] = isSet
+	}
+	return view
+}
+
+func settingMaskedValue(value string, secret bool) (string, bool) {
+	isSet := strings.TrimSpace(value) != ""
+	if !secret {
+		return value, isSet
+	}
+	if !isSet {
+		return "", false
+	}
+	return "********", true
+}
+
+func (s *Server) effectiveSettingView(stored map[string]store.AdminSetting, d settingDef, r *http.Request) map[string]any {
+	eff, source := s.effectiveSettingValue(stored, d)
+	effectiveSource := "bootstrap_env"
+	if source == "admin" {
+		effectiveSource = "db_setting"
+	}
+	value, isSet := settingMaskedValue(eff, d.Secret)
+	envRaw := d.envValue(s.cfg)
+	envValue, envSet := settingMaskedValue(envRaw, d.Secret)
+
+	layers := []map[string]any{
+		{
+			"name":       "bootstrap_env",
+			"source":     "env",
+			"configured": envSet,
+			"active":     effectiveSource == "bootstrap_env",
+			"value":      envValue,
+			"is_set":     envSet,
+			"writable":   false,
+		},
+	}
+	if a, ok := stored[d.Key]; ok {
+		adminRaw, _ := s.effectiveSettingValue(map[string]store.AdminSetting{d.Key: a}, d)
+		adminValue, adminSet := settingMaskedValue(adminRaw, d.Secret)
+		layers = append(layers, map[string]any{
+			"name":       "db_setting",
+			"source":     "admin",
+			"configured": true,
+			"active":     effectiveSource == "db_setting",
+			"value":      adminValue,
+			"is_set":     adminSet,
+			"writable":   !d.ReadOnly,
+			"version":    a.Version,
+			"updated_by": a.UpdatedBy,
+			"updated_at": a.UpdatedAt,
+		})
 	} else {
-		view["value"] = eff
+		layers = append(layers, map[string]any{
+			"name":       "db_setting",
+			"source":     "admin",
+			"configured": false,
+			"active":     false,
+			"value":      "",
+			"is_set":     false,
+			"writable":   !d.ReadOnly,
+		})
+	}
+	layers = append(layers,
+		map[string]any{
+			"name":       "runtime_flag",
+			"source":     "runtime",
+			"configured": false,
+			"active":     false,
+			"value":      "",
+			"is_set":     false,
+			"writable":   false,
+		},
+		map[string]any{
+			"name":       "request_override",
+			"source":     "request",
+			"configured": false,
+			"active":     false,
+			"value":      "",
+			"is_set":     false,
+			"writable":   false,
+		},
+	)
+
+	view := map[string]any{
+		"key":                d.Key,
+		"category":           d.Category,
+		"type":               string(d.Type),
+		"is_secret":          d.Secret,
+		"is_set":             isSet,
+		"value":              value,
+		"source":             source,
+		"effective_source":   effectiveSource,
+		"active_layer":       effectiveSource,
+		"layers":             layers,
+		"restart_required":   d.Restart,
+		"read_only":          d.ReadOnly,
+		"description":        settingDescriptions[d.Key],
+		"permission_group":   settingPermissionGroup(d),
+		"can_write":          s.canWriteSetting(r, d),
+		"runtime_overridden": false,
+		"request_scoped":     false,
+	}
+	if a, ok := stored[d.Key]; ok {
+		view["version"] = a.Version
+		view["updated_by"] = a.UpdatedBy
+		view["updated_at"] = a.UpdatedAt
 	}
 	return view
 }
@@ -802,6 +903,37 @@ func (s *Server) loadStoredSettings(r *http.Request) (map[string]store.AdminSett
 		m[a.Key] = a
 	}
 	return m, nil
+}
+
+// handleAdminSettingsEffective serves GET /admin/settings/effective.
+func (s *Server) handleAdminSettingsEffective(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	if r.Method != http.MethodGet {
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
+	category := strings.TrimSpace(r.URL.Query().Get("category"))
+	stored, err := s.loadStoredSettings(r)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "settings_failed")
+		return
+	}
+	items := []map[string]any{}
+	for _, d := range settingRegistry {
+		if category != "" && d.Category != category && !strings.HasPrefix(d.Category, category+".") {
+			continue
+		}
+		items = append(items, s.effectiveSettingView(stored, d, r))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"settings":         items,
+		"category":         category,
+		"layers":           []string{"bootstrap_env", "db_setting", "runtime_flag", "request_override"},
+		"resolution_order": []string{"request_override", "runtime_flag", "db_setting", "bootstrap_env"},
+	})
 }
 
 // handleAdminSettings serves GET /admin/settings and GET /admin/settings/{category}.
