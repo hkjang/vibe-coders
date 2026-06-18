@@ -465,7 +465,7 @@ func (s *Server) callOneMCPDiscoveryTool(r *http.Request, apiKeyID string, authC
 	args := map[string]any{"query": query, "top_k": candidate.MaxResults}
 	rawArgs, _ := json.Marshal(args)
 	route := mcpRoute{upstreamID: candidate.UpstreamID, upstreamName: candidate.UpstreamName, bareTool: candidate.ToolName}
-	if resp := s.enforceMCPToolGovernance(r, apiKeyID, authCtx, route, candidate.ToolName, rawArgs, json.RawMessage("null")); resp != nil {
+	if resp := s.enforceMCPToolGovernance(r, apiKeyID, authCtx, route, "tools/call", candidate.UpstreamID+"__"+candidate.ToolName, candidate.ToolName, rawArgs, json.RawMessage("null")); resp != nil {
 		msg := "blocked by governance"
 		if resp.Error != nil {
 			msg = resp.Error.Message

@@ -275,6 +275,68 @@ func TestMCPGatewayPolicyBlocks(t *testing.T) {
 	}
 }
 
+func TestMCPGatewayGovernanceDecisionsArePersisted(t *testing.T) {
+	up := fakeMCPUpstream(t)
+	defer up.Close()
+	s, db := newKnowledgeServer(t)
+	proxy := httptest.NewServer(s.Routes())
+	defer proxy.Close()
+	ctx := context.Background()
+
+	if err := db.UpsertMCPUpstream(ctx, store.MCPUpstream{ID: "fake", Name: "fake", URL: up.URL, Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.UpsertToolRiskProfile(ctx, store.ToolRiskProfile{ID: "trp_block", ServerLabel: "fake", ToolName: "echo", RiskLevel: "critical", Action: "block", Note: "dangerous write"}); err != nil {
+		t.Fatal(err)
+	}
+	blocked := mcpRPC(t, proxy.URL+"/mcp", `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"fake__echo","arguments":{"text":"hi"}}}`)
+	if blocked.Error == nil {
+		t.Fatalf("expected governance block error, got result: %s", blocked.Result)
+	}
+	var blockReqID string
+	waitFor(t, 2*time.Second, func() bool {
+		reqs, _ := db.RequestsForTool(ctx, "fake", "echo", true, 10)
+		for _, req := range reqs {
+			decisions, _ := db.MCPRouteDecisionsForRequest(ctx, req.ID)
+			for _, d := range decisions {
+				if d.ExposedName == "fake__echo" && d.FinalDecision == "block" {
+					blockReqID = req.ID
+					return true
+				}
+			}
+		}
+		return false
+	})
+	if blockReqID == "" {
+		t.Fatalf("expected persisted block route decision")
+	}
+
+	if err := db.UpsertToolRiskProfile(ctx, store.ToolRiskProfile{ID: "trp_approval", ServerLabel: "fake", ToolName: "add", RiskLevel: "high", Action: "require_approval", Note: "needs approval"}); err != nil {
+		t.Fatal(err)
+	}
+	approval := mcpRPC(t, proxy.URL+"/mcp", `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"fake__add","arguments":{"a":1,"b":2}}}`)
+	if approval.Error == nil {
+		t.Fatalf("expected governance approval error, got result: %s", approval.Result)
+	}
+	var approvalReqID string
+	waitFor(t, 2*time.Second, func() bool {
+		reqs, _ := db.RequestsForTool(ctx, "fake", "add", true, 10)
+		for _, req := range reqs {
+			decisions, _ := db.MCPRouteDecisionsForRequest(ctx, req.ID)
+			for _, d := range decisions {
+				if d.ExposedName == "fake__add" && d.FinalDecision == "approval_required" {
+					approvalReqID = req.ID
+					return true
+				}
+			}
+		}
+		return false
+	})
+	if approvalReqID == "" {
+		t.Fatalf("expected persisted approval route decision")
+	}
+}
+
 func TestMCPAdminConsoleRoutesExplainAndTest(t *testing.T) {
 	up := fakeMCPUpstream(t)
 	defer up.Close()
@@ -358,5 +420,93 @@ func TestMCPAdminConsoleRoutesExplainAndTest(t *testing.T) {
 	}
 	if !tested.OK || !strings.Contains(tested.ResponsePreview, "called echo") {
 		t.Fatalf("expected successful test call, got %+v", tested)
+	}
+	probeResp, err := http.Get(proxy.URL + "/admin/mcp/upstreams/fake/probe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	probeResp.Body.Close()
+
+	call := mcpRPC(t, proxy.URL+"/mcp", `{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"fake__add","arguments":{"a":1,"b":2}}}`)
+	if call.Error != nil {
+		t.Fatalf("tools/call add error: %+v", call.Error)
+	}
+	var reqID string
+	waitFor(t, 2*time.Second, func() bool {
+		reqs, _ := db.RequestsForTool(ctx, "fake", "add", false, 10)
+		if len(reqs) > 0 {
+			reqID = reqs[0].ID
+			return true
+		}
+		return false
+	})
+	wfResp, err := http.Get(proxy.URL + "/admin/mcp/requests/" + reqID + "/waterfall")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer wfResp.Body.Close()
+	var wf struct {
+		Steps          []map[string]any         `json:"steps"`
+		Tools          []store.ToolInvocation   `json:"tools"`
+		RouteDecisions []store.MCPRouteDecision `json:"route_decisions"`
+	}
+	if err := json.NewDecoder(wfResp.Body).Decode(&wf); err != nil {
+		t.Fatal(err)
+	}
+	if len(wf.Steps) < 5 || len(wf.Tools) == 0 {
+		t.Fatalf("expected MCP waterfall steps and tools, got %+v", wf)
+	}
+	if len(wf.RouteDecisions) == 0 || wf.RouteDecisions[0].ExposedName != "fake__add" || wf.RouteDecisions[0].FinalDecision != "allow" {
+		t.Fatalf("expected persisted MCP route decision for fake__add, got %+v", wf.RouteDecisions)
+	}
+
+	effResp, err := http.Get(proxy.URL + "/admin/mcp/effective-policy?server=fake&tool=echo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer effResp.Body.Close()
+	var eff map[string]any
+	if err := json.NewDecoder(effResp.Body).Decode(&eff); err != nil {
+		t.Fatal(err)
+	}
+	if eff["final"].(map[string]any)["decision"] != "approval_required" {
+		t.Fatalf("effective policy should require approval: %+v", eff)
+	}
+
+	flowResp, err := http.Get(proxy.URL + "/admin/mcp/upstreams/fake/flow")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer flowResp.Body.Close()
+	var flow struct {
+		Routes        []mcpRouteView          `json:"routes"`
+		Steps         []map[string]any        `json:"steps"`
+		Final         map[string]string       `json:"final"`
+		DiscoveryRuns []store.MCPDiscoveryRun `json:"discovery_runs"`
+	}
+	if err := json.NewDecoder(flowResp.Body).Decode(&flow); err != nil {
+		t.Fatal(err)
+	}
+	if len(flow.Routes) == 0 || len(flow.Steps) == 0 {
+		t.Fatalf("expected flow routes and steps, got %+v", flow)
+	}
+	if len(flow.DiscoveryRuns) == 0 || flow.DiscoveryRuns[0].ToolCount != 2 || flow.DiscoveryRuns[0].Status != "ok" {
+		t.Fatalf("expected persisted discovery run, got %+v", flow.DiscoveryRuns)
+	}
+
+	topoResp, err := http.Get(proxy.URL + "/admin/mcp/topology")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer topoResp.Body.Close()
+	var topo struct {
+		Nodes []map[string]any `json:"nodes"`
+		Edges []map[string]any `json:"edges"`
+	}
+	if err := json.NewDecoder(topoResp.Body).Decode(&topo); err != nil {
+		t.Fatal(err)
+	}
+	if len(topo.Nodes) < 3 || len(topo.Edges) < 2 {
+		t.Fatalf("expected topology nodes and edges, got %+v", topo)
 	}
 }

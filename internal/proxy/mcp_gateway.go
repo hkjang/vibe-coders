@@ -3,6 +3,7 @@ package proxy
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"sort"
 	"strings"
@@ -254,10 +255,11 @@ func (s *Server) mcpToolsCall(r *http.Request, apiKeyID string, authCtx *store.A
 	decision := evaluateMCPPolicy(policySnap, []store.ToolInvocation{{IsMCP: true, ServerLabel: route.upstreamName, ToolName: route.bareTool}})
 	if decision.Blocked {
 		s.metrics.IncMCPBlocked()
-		s.logMCPCall(r, apiKeyID, route.upstreamName, route.bareTool, p.Arguments, true, http.StatusForbidden, 0)
+		reqID := s.logMCPCall(r, apiKeyID, route.upstreamName, route.bareTool, p.Arguments, true, http.StatusForbidden, 0)
+		s.recordMCPRouteDecision(r, reqID, apiKeyID, "tools/call", p.Name, route, "block", decision.Reason, 0)
 		return rpcErrorResponse(id, -32000, "blocked by MCP policy: "+decision.Reason+" ("+decision.BlockedServer+")")
 	}
-	if resp := s.enforceMCPToolGovernance(r, apiKeyID, authCtx, route, route.bareTool, p.Arguments, id); resp != nil {
+	if resp := s.enforceMCPToolGovernance(r, apiKeyID, authCtx, route, "tools/call", p.Name, route.bareTool, p.Arguments, id); resp != nil {
 		return resp
 	}
 
@@ -272,7 +274,8 @@ func (s *Server) mcpToolsCall(r *http.Request, apiKeyID string, authCtx *store.A
 	result, callErr := s.callUpstream(callCtx, up, "tools/call", map[string]any{"name": route.bareTool, "arguments": rawOrEmpty(p.Arguments)})
 	latency := time.Since(start).Milliseconds()
 	if callErr != nil {
-		s.logMCPCall(r, apiKeyID, route.upstreamName, route.bareTool, p.Arguments, true, http.StatusBadGateway, latency)
+		reqID := s.logMCPCall(r, apiKeyID, route.upstreamName, route.bareTool, p.Arguments, true, http.StatusBadGateway, latency)
+		s.recordMCPRouteDecision(r, reqID, apiKeyID, "tools/call", p.Name, route, "upstream_error", callErr.Error(), latency)
 		return rpcErrorResponse(id, -32603, "upstream error: "+callErr.Error())
 	}
 	// detect tool-level error in the CallToolResult to flag it in observability
@@ -283,7 +286,14 @@ func (s *Server) mcpToolsCall(r *http.Request, apiKeyID string, authCtx *store.A
 	if json.Unmarshal(result, &probe) == nil {
 		isErr = probe.IsError
 	}
-	s.logMCPCall(r, apiKeyID, route.upstreamName, route.bareTool, p.Arguments, isErr, http.StatusOK, latency)
+	reqID := s.logMCPCall(r, apiKeyID, route.upstreamName, route.bareTool, p.Arguments, isErr, http.StatusOK, latency)
+	final := "allow"
+	reason := "upstream call completed"
+	if isErr {
+		final = "tool_error"
+		reason = "tool result isError=true"
+	}
+	s.recordMCPRouteDecision(r, reqID, apiKeyID, "tools/call", p.Name, route, final, reason, latency)
 	return &rpcResponse{JSONRPC: "2.0", ID: id, Result: result}
 }
 
@@ -300,7 +310,7 @@ func (s *Server) mcpResourcesRead(r *http.Request, apiKeyID string, authCtx *sto
 	if !found {
 		return rpcErrorResponse(id, -32602, "unknown resource: "+p.URI)
 	}
-	return s.routeUpstreamRPC(r, apiKeyID, authCtx, id, route, "resources/read", "resources/read", map[string]any{"uri": p.URI}, params)
+	return s.routeUpstreamRPC(r, apiKeyID, authCtx, id, route, "resources/read", p.URI, "resources/read", map[string]any{"uri": p.URI}, params)
 }
 
 // mcpPromptsGet routes a prompts/get to the owning upstream using the namespaced name.
@@ -317,20 +327,22 @@ func (s *Server) mcpPromptsGet(r *http.Request, apiKeyID string, authCtx *store.
 	if !found {
 		return rpcErrorResponse(id, -32602, "unknown prompt: "+p.Name)
 	}
-	return s.routeUpstreamRPC(r, apiKeyID, authCtx, id, route, "prompts/get", route.bareTool, map[string]any{"name": route.bareTool, "arguments": rawOrEmpty(p.Arguments)}, params)
+	return s.routeUpstreamRPC(r, apiKeyID, authCtx, id, route, "prompts/get", p.Name, route.bareTool, map[string]any{"name": route.bareTool, "arguments": rawOrEmpty(p.Arguments)}, params)
 }
 
 // routeUpstreamRPC enforces policy, forwards a (non tools/call) MCP method to the
 // owning upstream, and logs it into the unified observability pipeline. logLabel is
 // the tool_name recorded for the call.
-func (s *Server) routeUpstreamRPC(r *http.Request, apiKeyID string, authCtx *store.AuthContext, id json.RawMessage, route mcpRoute, method, logLabel string, params map[string]any, rawParams json.RawMessage) *rpcResponse {
+func (s *Server) routeUpstreamRPC(r *http.Request, apiKeyID string, authCtx *store.AuthContext, id json.RawMessage, route mcpRoute, method, exposedName, logLabel string, params map[string]any, rawParams json.RawMessage) *rpcResponse {
 	policySnap := s.mcpPolicySnapshot(r.Context())
-	if evaluateMCPPolicy(policySnap, []store.ToolInvocation{{IsMCP: true, ServerLabel: route.upstreamName, ToolName: logLabel}}).Blocked {
+	decision := evaluateMCPPolicy(policySnap, []store.ToolInvocation{{IsMCP: true, ServerLabel: route.upstreamName, ToolName: logLabel}})
+	if decision.Blocked {
 		s.metrics.IncMCPBlocked()
-		s.logMCPCall(r, apiKeyID, route.upstreamName, logLabel, rawParams, true, http.StatusForbidden, 0)
+		reqID := s.logMCPCall(r, apiKeyID, route.upstreamName, logLabel, rawParams, true, http.StatusForbidden, 0)
+		s.recordMCPRouteDecision(r, reqID, apiKeyID, method, exposedName, route, "block", decision.Reason, 0)
 		return rpcErrorResponse(id, -32000, "blocked by MCP policy: "+route.upstreamName)
 	}
-	if resp := s.enforceMCPToolGovernance(r, apiKeyID, authCtx, route, logLabel, rawParams, id); resp != nil {
+	if resp := s.enforceMCPToolGovernance(r, apiKeyID, authCtx, route, method, exposedName, logLabel, rawParams, id); resp != nil {
 		return resp
 	}
 	up, found, err := s.db.GetMCPUpstream(r.Context(), route.upstreamID)
@@ -343,11 +355,50 @@ func (s *Server) routeUpstreamRPC(r *http.Request, apiKeyID string, authCtx *sto
 	result, callErr := s.callUpstream(callCtx, up, method, params)
 	latency := time.Since(start).Milliseconds()
 	if callErr != nil {
-		s.logMCPCall(r, apiKeyID, route.upstreamName, logLabel, rawParams, true, http.StatusBadGateway, latency)
+		reqID := s.logMCPCall(r, apiKeyID, route.upstreamName, logLabel, rawParams, true, http.StatusBadGateway, latency)
+		s.recordMCPRouteDecision(r, reqID, apiKeyID, method, exposedName, route, "upstream_error", callErr.Error(), latency)
 		return rpcErrorResponse(id, -32603, "upstream error: "+callErr.Error())
 	}
-	s.logMCPCall(r, apiKeyID, route.upstreamName, logLabel, rawParams, false, http.StatusOK, latency)
+	reqID := s.logMCPCall(r, apiKeyID, route.upstreamName, logLabel, rawParams, false, http.StatusOK, latency)
+	s.recordMCPRouteDecision(r, reqID, apiKeyID, method, exposedName, route, "allow", "upstream call completed", latency)
 	return &rpcResponse{JSONRPC: "2.0", ID: id, Result: result}
+}
+
+func (s *Server) recordMCPRouteDecision(r *http.Request, requestID, apiKeyID, method, exposedName string, route mcpRoute, finalDecision, reason string, latency int64) {
+	if requestID == "" {
+		return
+	}
+	policy, final := s.effectiveMCPPolicy(r.Context(), route.upstreamName, route.bareTool)
+	if finalDecision == "" {
+		finalDecision, _ = final["decision"].(string)
+	}
+	if reason == "" {
+		reason, _ = final["reason"].(string)
+	}
+	decision := store.MCPRouteDecision{
+		ID:             newID("mrd"),
+		RequestID:      requestID,
+		TraceID:        traceIDFromRequest(r),
+		APIKeyID:       apiKeyID,
+		Method:         method,
+		ExposedName:    exposedName,
+		UpstreamID:     route.upstreamID,
+		UpstreamName:   route.upstreamName,
+		TargetName:     route.bareTool,
+		ServerPolicy:   toString(policy["server_policy"]),
+		ToolRiskLevel:  toString(policy["tool_risk_level"]),
+		ToolRiskAction: toString(policy["tool_risk_action"]),
+		FinalDecision:  finalDecision,
+		Reason:         reason,
+		LatencyMS:      latency,
+		CreatedAt:      time.Now().UTC(),
+	}
+	if decision.TraceID == "" {
+		decision.TraceID = requestID
+	}
+	if err := s.db.InsertMCPRouteDecision(r.Context(), decision); err != nil {
+		slog.Warn("insert MCP route decision failed", "request_id", requestID, "error", err)
+	}
 }
 
 // logMCPCall records a gateway MCP call into the same tool_invocations pipeline as

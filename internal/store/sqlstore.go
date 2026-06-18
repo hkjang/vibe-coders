@@ -1065,6 +1065,40 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 			PRIMARY KEY (server_label, tool_name)
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_mcp_tool_catalog_first_seen ON mcp_tool_catalog(first_seen)`,
+		`CREATE TABLE IF NOT EXISTS mcp_route_decisions (
+			id TEXT PRIMARY KEY,
+			request_id TEXT NOT NULL,
+			trace_id TEXT,
+			api_key_id TEXT,
+			method TEXT NOT NULL,
+			exposed_name TEXT,
+			upstream_id TEXT,
+			upstream_name TEXT,
+			target_name TEXT,
+			server_policy TEXT,
+			tool_risk_level TEXT,
+			tool_risk_action TEXT,
+			final_decision TEXT NOT NULL,
+			reason TEXT,
+			latency_ms INTEGER NOT NULL DEFAULT 0,
+			created_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_mcp_route_decisions_request_id ON mcp_route_decisions(request_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_mcp_route_decisions_created_at ON mcp_route_decisions(created_at)`,
+		`CREATE TABLE IF NOT EXISTS mcp_discovery_runs (
+			id TEXT PRIMARY KEY,
+			upstream_id TEXT NOT NULL,
+			upstream_name TEXT,
+			status TEXT NOT NULL,
+			tool_count INTEGER NOT NULL DEFAULT 0,
+			prompt_count INTEGER NOT NULL DEFAULT 0,
+			resource_count INTEGER NOT NULL DEFAULT 0,
+			error TEXT,
+			latency_ms INTEGER NOT NULL DEFAULT 0,
+			created_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_mcp_discovery_runs_upstream ON mcp_discovery_runs(upstream_id, created_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_mcp_discovery_runs_created_at ON mcp_discovery_runs(created_at)`,
 		// Idempotent ALTER for tool argument sensitivity flag
 		`ALTER TABLE tool_invocations ADD COLUMN arg_sensitive INTEGER NOT NULL DEFAULT 0`,
 		`CREATE TABLE IF NOT EXISTS provider_configs (

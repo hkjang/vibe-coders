@@ -107,6 +107,10 @@ func (s *Server) handleMCPUpstreamByID(w http.ResponseWriter, r *http.Request) {
 			s.handleMCPUpstreamProbe(w, r, id)
 			return
 		}
+		if rest == "flow" && r.Method == http.MethodGet {
+			s.handleMCPUpstreamFlow(w, r)
+			return
+		}
 		writeOpenAIError(w, http.StatusBadRequest, "invalid upstream path", "invalid_request_error", "invalid_upstream_path")
 		return
 	}
@@ -264,9 +268,12 @@ func (s *Server) handleMCPUpstreamProbe(w http.ResponseWriter, r *http.Request, 
 
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
+	start := time.Now()
 
 	out := map[string]any{"id": up.ID, "name": up.Name, "url": up.URL}
 	errs := map[string]string{}
+	resourceCount := 0
+	promptCount := 0
 
 	tools, terr := s.listUpstreamTools(ctx, up)
 	if terr != nil {
@@ -286,6 +293,7 @@ func (s *Server) handleMCPUpstreamProbe(w http.ResponseWriter, r *http.Request, 
 		}
 		out["resources"] = res
 		out["resource_count"] = len(resources)
+		resourceCount = len(resources)
 	} else {
 		errs["resources"] = rerr.Error()
 	}
@@ -297,12 +305,31 @@ func (s *Server) handleMCPUpstreamProbe(w http.ResponseWriter, r *http.Request, 
 		}
 		out["prompts"] = pr
 		out["prompt_count"] = len(prompts)
+		promptCount = len(prompts)
 	} else {
 		errs["prompts"] = perr.Error()
 	}
 
 	out["ok"] = terr == nil // tools is the primary capability
 	out["errors"] = errs
+	status := "ok"
+	errText := ""
+	if terr != nil {
+		status = "error"
+		errText = terr.Error()
+	}
+	_ = s.db.InsertMCPDiscoveryRun(r.Context(), store.MCPDiscoveryRun{
+		ID:            newID("mdr"),
+		UpstreamID:    up.ID,
+		UpstreamName:  up.Name,
+		Status:        status,
+		ToolCount:     len(tools),
+		PromptCount:   promptCount,
+		ResourceCount: resourceCount,
+		Error:         errText,
+		LatencyMS:     time.Since(start).Milliseconds(),
+		CreatedAt:     time.Now().UTC(),
+	})
 	// a successful probe means the global catalog should be refreshed
 	if terr == nil {
 		s.invalidateMCPToolsCache()

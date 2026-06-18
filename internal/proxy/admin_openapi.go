@@ -252,13 +252,17 @@ var apiEndpoints = []apiEndpoint{
 	{"/admin/mcp/routes", []string{"get"}, "mcp", "MCP namespaced route map", false},
 	{"/admin/mcp/route/explain", []string{"post"}, "mcp", "Explain MCP route and policy decision", false},
 	{"/admin/mcp/test", []string{"post"}, "mcp", "Run an MCP upstream test call", false},
+	{"/admin/mcp/effective-policy", []string{"get"}, "mcp", "Effective MCP server/tool policy", false},
+	{"/admin/mcp/topology", []string{"get"}, "mcp", "MCP topology graph data", false},
 	{"/admin/mcp/requests", []string{"get"}, "mcp", "MCP request log", false},
+	{"/admin/mcp/requests/{id}/waterfall", []string{"get"}, "mcp", "MCP request routing waterfall", false},
 	{"/admin/mcp/policies", []string{"get", "post"}, "mcp", "MCP policies", false},
 	{"/admin/mcp/policies/{server}", []string{"get", "put", "delete"}, "mcp", "MCP policy by server", false},
 	{"/admin/mcp/loops", []string{"get"}, "mcp", "MCP tool-call loops", false},
 	{"/admin/mcp/catalog", []string{"get"}, "mcp", "MCP catalog", false},
 	{"/admin/mcp/upstreams", []string{"get", "post"}, "mcp", "MCP upstreams", false},
 	{"/admin/mcp/upstreams/{id}", []string{"get", "put", "delete"}, "mcp", "MCP upstream by id", false},
+	{"/admin/mcp/upstreams/{id}/flow", []string{"get"}, "mcp", "MCP upstream operational flow", false},
 
 	// ---- admin: personalization / knowledge / templates / notifications ----
 	{"/admin/personalization/profiles", []string{"get"}, "admin", "Personal AI profiles", false},

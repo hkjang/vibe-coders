@@ -3,6 +3,7 @@ package proxy
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"sort"
 	"strings"
@@ -109,6 +110,240 @@ func (s *Server) handleMCPRoutes(w http.ResponseWriter, r *http.Request) {
 	}
 	snap := s.mcpToolsSnapshotCached(r.Context())
 	writeJSON(w, http.StatusOK, map[string]any{"routes": mcpRouteViews(snap), "fetched_at": snap.fetchedAt.UTC().Format(time.RFC3339), "errors": snap.errors})
+}
+
+func (s *Server) handleMCPEffectivePolicy(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	if r.Method != http.MethodGet {
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
+	server := strings.TrimSpace(r.URL.Query().Get("server"))
+	tool := strings.TrimSpace(r.URL.Query().Get("tool"))
+	if server == "" {
+		writeOpenAIError(w, http.StatusBadRequest, "server is required", "invalid_request_error", "missing_server")
+		return
+	}
+	policy, final := s.effectiveMCPPolicy(r.Context(), server, tool)
+	writeJSON(w, http.StatusOK, map[string]any{"server": server, "tool": tool, "policy": policy, "final": final})
+}
+
+func (s *Server) effectiveMCPPolicy(ctx context.Context, server, tool string) (map[string]any, map[string]any) {
+	policySnap := s.mcpPolicySnapshot(ctx)
+	serverMode := "allow"
+	decision := evaluateMCPPolicy(policySnap, []store.ToolInvocation{{IsMCP: true, ServerLabel: server, ToolName: tool}})
+	if policySnap != nil {
+		if mode := strings.TrimSpace(policySnap.modes[server]); mode != "" {
+			serverMode = mode
+		} else if policySnap.allowlist {
+			serverMode = "not_in_allowlist"
+		}
+	}
+	riskLevel, riskAction := inferMCPRisk(server, tool)
+	configured := false
+	note := ""
+	if tool != "" {
+		if profile, found, err := s.db.ToolRiskProfile(ctx, server, tool); err == nil && found {
+			riskLevel = normalizeRiskLevel(profile.RiskLevel, riskLevel)
+			riskAction = normalizeToolRiskAction(profile.Action, riskAction)
+			configured = true
+			note = profile.Note
+		}
+	}
+	finalDecision := "allow"
+	reason := "server and tool policy allow call"
+	if decision.Blocked {
+		finalDecision = "block"
+		reason = "server policy blocked: " + decision.Reason
+	} else if riskAction == "block" {
+		finalDecision = "block"
+		reason = firstNonEmpty(note, "tool risk profile blocks call")
+	} else if riskAction == "require_approval" {
+		finalDecision = "approval_required"
+		reason = firstNonEmpty(note, "tool risk profile requires approval")
+	} else if serverMode == "warn" || len(decision.Warnings) > 0 {
+		finalDecision = "warn"
+		reason = "server policy warns but allows call"
+	}
+	return map[string]any{
+			"server_policy":        serverMode,
+			"allowlist_enabled":    policySnap != nil && policySnap.allowlist,
+			"tool_risk_level":      riskLevel,
+			"tool_risk_action":     riskAction,
+			"tool_risk_configured": configured,
+			"tool_risk_note":       note,
+		}, map[string]any{
+			"decision": finalDecision,
+			"reason":   reason,
+		}
+}
+
+func (s *Server) handleMCPUpstreamFlow(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	if r.Method != http.MethodGet {
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
+	path := strings.TrimPrefix(r.URL.Path, "/admin/mcp/upstreams/")
+	id, tail, ok := strings.Cut(path, "/")
+	if !ok || tail != "flow" || strings.TrimSpace(id) == "" {
+		writeOpenAIError(w, http.StatusBadRequest, "invalid upstream flow path", "invalid_request_error", "invalid_upstream_flow_path")
+		return
+	}
+	up, found, err := s.db.GetMCPUpstream(r.Context(), id)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "mcp_upstream_lookup_failed")
+		return
+	}
+	if !found {
+		writeOpenAIError(w, http.StatusNotFound, "upstream not found", "invalid_request_error", "upstream_not_found")
+		return
+	}
+	snap := s.mcpToolsSnapshotCached(r.Context())
+	routes := []mcpRouteView{}
+	for _, rv := range mcpRouteViews(snap) {
+		if rv.UpstreamID == up.ID {
+			routes = append(routes, rv)
+		}
+	}
+	tools, _ := s.db.ListMCPTools(r.Context(), store.ToolFilter{ServerLabel: up.Name, MCPOnly: true, Since: time.Now().Add(-7 * 24 * time.Hour), Limit: 100})
+	recent, _ := s.db.RequestsForTool(r.Context(), up.Name, "", false, 20)
+	discoveryRuns, _ := s.db.MCPDiscoveryRuns(r.Context(), up.ID, 10)
+	policy, final := s.effectiveMCPPolicy(r.Context(), up.Name, "")
+	writeJSON(w, http.StatusOK, map[string]any{
+		"upstream":        up,
+		"routes":          routes,
+		"tool_stats":      tools,
+		"recent_requests": recent,
+		"discovery_runs":  discoveryRuns,
+		"discovery_error": snap.errors[up.Name],
+		"policy":          policy,
+		"final":           final,
+		"steps": []map[string]any{
+			{"name": "registered", "status": "ok", "detail": up.URL},
+			{"name": "enabled", "status": map[bool]string{true: "ok", false: "blocked"}[up.Enabled]},
+			{"name": "discovery", "status": map[bool]string{true: "error", false: "ok"}[snap.errors[up.Name] != ""], "detail": snap.errors[up.Name]},
+			{"name": "route_map", "status": map[bool]string{true: "ok", false: "warn"}[len(routes) > 0], "detail": len(routes)},
+			{"name": "policy", "status": final["decision"], "detail": final["reason"]},
+		},
+	})
+}
+
+func (s *Server) handleMCPTopology(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	if r.Method != http.MethodGet {
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
+	upstreams, _ := s.db.ListMCPUpstreams(r.Context())
+	routes := mcpRouteViews(s.mcpToolsSnapshotCached(r.Context()))
+	nodes := []map[string]any{{"id": "gateway", "label": "/mcp gateway", "kind": "gateway"}}
+	edges := []map[string]any{}
+	for _, up := range upstreams {
+		status := "disabled"
+		if up.Enabled {
+			status = "enabled"
+		}
+		nodes = append(nodes, map[string]any{"id": "upstream:" + up.ID, "label": up.Name, "kind": "upstream", "status": status})
+		edges = append(edges, map[string]any{"from": "gateway", "to": "upstream:" + up.ID, "label": "aggregates"})
+	}
+	for _, rv := range routes {
+		id := rv.Kind + ":" + firstNonEmpty(rv.ExposedName, rv.URI)
+		label := firstNonEmpty(rv.ExposedName, rv.URI)
+		nodes = append(nodes, map[string]any{"id": id, "label": label, "kind": rv.Kind, "decision": s.finalDecisionForMCPRoute(r.Context(), rv.UpstreamName, rv.TargetName)})
+		edges = append(edges, map[string]any{"from": "upstream:" + rv.UpstreamID, "to": id, "label": rv.TargetMethod})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"nodes": nodes, "edges": edges})
+}
+
+func (s *Server) handleMCPRequestWaterfall(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	if r.Method != http.MethodGet {
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
+	path := strings.TrimPrefix(r.URL.Path, "/admin/mcp/requests/")
+	id, tail, ok := strings.Cut(path, "/")
+	if !ok || tail != "waterfall" || strings.TrimSpace(id) == "" {
+		writeOpenAIError(w, http.StatusBadRequest, "invalid MCP request waterfall path", "invalid_request_error", "invalid_mcp_waterfall_path")
+		return
+	}
+	detail, err := s.db.RequestDetail(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeOpenAIError(w, http.StatusNotFound, "request not found", "invalid_request_error", "request_not_found")
+			return
+		}
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "mcp_waterfall_failed")
+		return
+	}
+	steps := s.mcpWaterfallSteps(r.Context(), detail)
+	decisions, _ := s.db.MCPRouteDecisionsForRequest(r.Context(), id)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"request_id":      detail.Request.ID,
+		"trace_id":        detail.Request.TraceID,
+		"api_key_id":      detail.Request.APIKeyID,
+		"status":          detail.Request.StatusCode,
+		"latency_ms":      detail.Request.LatencyMS,
+		"steps":           steps,
+		"tools":           detail.Tools,
+		"route_decisions": decisions,
+	})
+}
+
+func (s *Server) mcpWaterfallSteps(ctx context.Context, detail store.RequestDetail) []map[string]any {
+	steps := []map[string]any{
+		{"name": "auth", "status": "ok", "detail": firstNonEmpty(detail.Request.APIKeyID, "admin/legacy context")},
+	}
+	mcpTools := []store.ToolInvocation{}
+	for _, t := range detail.Tools {
+		if t.IsMCP {
+			mcpTools = append(mcpTools, t)
+		}
+	}
+	if len(mcpTools) == 0 {
+		steps = append(steps, map[string]any{"name": "mcp_detect", "status": "warn", "detail": "no MCP tool invocation on this request"})
+		return steps
+	}
+	for _, t := range mcpTools {
+		policy, final := s.effectiveMCPPolicy(ctx, t.ServerLabel, t.ToolName)
+		routeDetail := t.ServerLabel + "/" + t.ToolName
+		steps = append(steps,
+			map[string]any{"name": "route_lookup", "status": "ok", "detail": routeDetail},
+			map[string]any{"name": "policy_evaluation", "status": firstNonEmpty(toString(policy["server_policy"]), "allow"), "detail": policy},
+			map[string]any{"name": "governance_evaluation", "status": final["decision"], "detail": final["reason"]},
+			map[string]any{"name": "upstream_call", "status": map[bool]string{true: "error", false: "ok"}[t.IsError], "detail": routeDetail},
+		)
+	}
+	logStatus := "ok"
+	if detail.Request.StatusCode >= 400 {
+		logStatus = "error"
+	}
+	steps = append(steps,
+		map[string]any{"name": "response", "status": logStatus, "detail": detail.Request.StatusCode},
+		map[string]any{"name": "log_enqueue", "status": "ok", "detail": len(mcpTools)},
+	)
+	return steps
+}
+
+func (s *Server) finalDecisionForMCPRoute(ctx context.Context, server, tool string) string {
+	_, final := s.effectiveMCPPolicy(ctx, server, tool)
+	if d, _ := final["decision"].(string); d != "" {
+		return d
+	}
+	return "allow"
 }
 
 func mcpRouteViews(snap *mcpToolsSnapshot) []mcpRouteView {

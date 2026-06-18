@@ -526,6 +526,38 @@ type ToolRiskProfile struct {
 	UpdatedAt   time.Time `json:"updated_at"`
 }
 
+type MCPRouteDecision struct {
+	ID             string    `json:"id"`
+	RequestID      string    `json:"request_id"`
+	TraceID        string    `json:"trace_id"`
+	APIKeyID       string    `json:"api_key_id"`
+	Method         string    `json:"method"`
+	ExposedName    string    `json:"exposed_name"`
+	UpstreamID     string    `json:"upstream_id"`
+	UpstreamName   string    `json:"upstream_name"`
+	TargetName     string    `json:"target_name"`
+	ServerPolicy   string    `json:"server_policy"`
+	ToolRiskLevel  string    `json:"tool_risk_level"`
+	ToolRiskAction string    `json:"tool_risk_action"`
+	FinalDecision  string    `json:"final_decision"`
+	Reason         string    `json:"reason"`
+	LatencyMS      int64     `json:"latency_ms"`
+	CreatedAt      time.Time `json:"created_at"`
+}
+
+type MCPDiscoveryRun struct {
+	ID            string    `json:"id"`
+	UpstreamID    string    `json:"upstream_id"`
+	UpstreamName  string    `json:"upstream_name"`
+	Status        string    `json:"status"`
+	ToolCount     int       `json:"tool_count"`
+	PromptCount   int       `json:"prompt_count"`
+	ResourceCount int       `json:"resource_count"`
+	Error         string    `json:"error"`
+	LatencyMS     int64     `json:"latency_ms"`
+	CreatedAt     time.Time `json:"created_at"`
+}
+
 type ReplayJob struct {
 	ID              string    `json:"id"`
 	SourceRequestID string    `json:"source_request_id"`

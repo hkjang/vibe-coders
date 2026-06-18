@@ -511,7 +511,7 @@ func (s *Server) governanceApprovalGate(r *http.Request, g governanceContext, re
 	return false, approval.ID, "approval required: " + reason
 }
 
-func (s *Server) enforceMCPToolGovernance(r *http.Request, apiKeyID string, authCtx *store.AuthContext, route mcpRoute, toolName string, args json.RawMessage, id json.RawMessage) *rpcResponse {
+func (s *Server) enforceMCPToolGovernance(r *http.Request, apiKeyID string, authCtx *store.AuthContext, route mcpRoute, method, exposedName, toolName string, args json.RawMessage, id json.RawMessage) *rpcResponse {
 	profile, found, err := s.db.ToolRiskProfile(r.Context(), route.upstreamName, toolName)
 	if err != nil {
 		return nil
@@ -562,6 +562,7 @@ func (s *Server) enforceMCPToolGovernance(r *http.Request, apiKeyID string, auth
 	if decision.Blocked {
 		s.metrics.IncMCPBlocked()
 		reqID := s.logMCPCall(r, apiKeyID, route.upstreamName, toolName, args, true, http.StatusForbidden, 0)
+		s.recordMCPRouteDecision(r, reqID, apiKeyID, method, exposedName, route, "block", firstNonEmpty(decision.Reason, "mcp_tool_blocked"), 0)
 		s.recordPolicyDecisionEvents(r.Context(), withPolicyDecisionRequestID(decision.PolicyEvents, reqID))
 		return rpcErrorResponse(id, -32000, "blocked by governance policy: "+firstNonEmpty(decision.Reason, "mcp_tool_blocked"))
 	}
@@ -572,6 +573,7 @@ func (s *Server) enforceMCPToolGovernance(r *http.Request, apiKeyID string, auth
 			return nil
 		}
 		reqID := s.logMCPCall(r, apiKeyID, route.upstreamName, toolName, args, true, http.StatusLocked, 0)
+		s.recordMCPRouteDecision(r, reqID, apiKeyID, method, exposedName, route, "approval_required", reason, 0)
 		s.recordPolicyDecisionEvents(r.Context(), withPolicyDecisionRequestID(decision.PolicyEvents, reqID))
 		return rpcErrorResponse(id, -32000, "approval required: "+reason+"; approval_id="+approvalID)
 	}
