@@ -67,11 +67,13 @@ func (s *Server) handleText2SQL(w http.ResponseWriter, r *http.Request, meta sto
 	}
 	summaryModel := firstNonEmpty(profile.SummaryModel, cfg.SummaryModel, upstreamModel)
 
+	classifyStart := time.Now()
 	question := text2sql.LastUserQuestion(body)
 
 	// Resolve the schema catalog: an explicitly named schema (team-scoped), else the
 	// team/global default, else the inline config schema. The catalog also supplies
 	// the table allowlist used to validate the generated SQL.
+	schemaStart := time.Now()
 	team := ""
 	if authCtx != nil {
 		team = authCtx.TeamID
@@ -113,6 +115,7 @@ func (s *Server) handleText2SQL(w http.ResponseWriter, r *http.Request, meta sto
 	// overlay, and the business-glossary revision — so a logged SQL can be explained
 	// later, and so the preview cache never reuses SQL across subjects whose access or
 	// vocabulary differ.
+	glossaryStart := time.Now()
 	glossaryText, _ := s.db.BuildGlossaryText(r.Context(), resolvedSchemaName)
 	glossaryHash := shortHash(glossaryText)
 	permissionHash := shortHash(strings.Join(sortedCopy(allowedTables), ",") + "|" + strings.Join(sortedCopy(blockedColumns), ",") + "|" + strings.Join(sortedCopy(aggregateOnly), ","))
@@ -123,6 +126,48 @@ func (s *Server) handleText2SQL(w http.ResponseWriter, r *http.Request, meta sto
 		Question: question, SchemaName: resolvedSchemaName, SchemaVersion: schemaVersion,
 		PermissionHash: permissionHash, GlossaryHash: glossaryHash, CreatedAt: time.Now().UTC(),
 	}
+	spans := []store.Text2SQLSpan{}
+	recordSpan := func(stage, status, model string, cost float64, rejectReason, input, output string, started time.Time, detail map[string]any) {
+		if started.IsZero() {
+			started = time.Now()
+		}
+		detailJSON := ""
+		if len(detail) > 0 {
+			if b, err := json.Marshal(detail); err == nil {
+				detailJSON = string(b)
+			}
+		}
+		spans = append(spans, store.Text2SQLSpan{
+			ID:            newID("t2ssp"),
+			RequestID:     meta.Request.ID,
+			Text2SQLLogID: logRec.ID,
+			TraceID:       meta.Request.TraceID,
+			Stage:         stage,
+			Status:        firstNonEmpty(status, "ok"),
+			LatencyMS:     time.Since(started).Milliseconds(),
+			Model:         model,
+			CostKRW:       cost,
+			RejectReason:  rejectReason,
+			InputHash:     shortHash(input),
+			OutputHash:    shortHash(output),
+			Detail:        detailJSON,
+			CreatedAt:     time.Now().UTC(),
+		})
+	}
+	classifyStatus := "ok"
+	if question == "" {
+		classifyStatus = "error"
+	}
+	recordSpan("classify", classifyStatus, "", 0, "", string(body), question, classifyStart, map[string]any{
+		"virtual_model": meta.Request.Model, "mode": string(profile.Mode), "question_length": len(question),
+	})
+	recordSpan("schema_resolve", "ok", "", 0, "", schemaName, schema, schemaStart, map[string]any{
+		"schema_name": resolvedSchemaName, "schema_version": schemaVersion, "allowed_tables": len(allowedTables),
+		"blocked_columns": len(blockedColumns), "aggregate_only_columns": len(aggregateOnly), "mask_columns": len(maskColumns),
+	})
+	recordSpan("glossary_apply", "ok", "", 0, "", resolvedSchemaName, glossaryText, glossaryStart, map[string]any{
+		"glossary_hash": glossaryHash, "has_glossary": glossaryText != "",
+	})
 
 	// generationPrompt captures the exact messages JSON sent upstream for replay bundles
 	// (set once the prompt is assembled). Empty for cache hits / clarifications.
@@ -149,6 +194,14 @@ func (s *Server) handleText2SQL(w http.ResponseWriter, r *http.Request, meta sto
 		logRec.CostKRW = costKRW
 		logRec.LatencyMS = time.Since(start).Milliseconds()
 		_ = s.db.InsertText2SQLLog(r.Context(), logRec)
+		evalStatus := "ok"
+		if !validation.OK || errMsg != "" {
+			evalStatus = "error"
+		}
+		recordSpan("evaluate", evalStatus, "", 0, firstNonEmpty(validation.Reason, errMsg), validation.SQL, logRec.FailureCategory, time.Now(), map[string]any{
+			"valid": validation.OK, "executed": executed, "row_count": rowCount, "failure_category": logRec.FailureCategory,
+		})
+		_ = s.db.InsertText2SQLSpans(r.Context(), spans)
 
 		// Replay bundle (opt-in): persist the full generation context so an operator can
 		// reproduce/explain this SQL later, beyond the hashes on the log row.
@@ -239,7 +292,14 @@ func (s *Server) handleText2SQL(w http.ResponseWriter, r *http.Request, meta sto
 	if cfg.CacheEnabled && profile.Mode != text2sql.ModeExecute {
 		cacheKey = store.Text2SQLCacheKey(question, resolvedSchemaName, string(profile.Mode), schemaVersion, permissionHash, glossaryHash)
 		if cached, hit, _ := s.db.GetText2SQLCache(r.Context(), cacheKey); hit {
+			cacheStart := time.Now()
 			validation := text2sql.ValidateSQL(cached, text2sql.ValidateOptions{DefaultLimit: cfg.DefaultLimit, MaxLimit: cfg.MaxLimit, AllowedTables: allowedTables, BlockedColumns: blockedColumns, AggregateOnlyColumns: aggregateOnly})
+			status := "error"
+			if validation.OK {
+				status = "cache_hit"
+			}
+			recordSpan("sql_generate", status, upstreamModel, 0, validation.Reason, cacheKey, cached, cacheStart, map[string]any{"cache_hit": true})
+			recordSpan("sql_validate", status, "", 0, validation.Reason, cached, validation.SQL, cacheStart, map[string]any{"source": "cache"})
 			if validation.OK {
 				s.metrics.IncText2SQLCacheHit()
 				finalize(previewContent(question, validation.SQL, "검증된 읽기 전용 SQL입니다 (캐시 적중, 실행하지 않음).", validation), validation, false, 0, "", 0)
@@ -273,18 +333,31 @@ func (s *Server) handleText2SQL(w http.ResponseWriter, r *http.Request, meta sto
 		msgs = text2sql.WithExamples(msgs, text2sql.SelectExamples(examples, question, 3))
 	}
 	generationPrompt = text2sql.MessagesJSON(msgs)
+	generateStart := time.Now()
 	gen := s.runGovernanceChat(r.Context(), r, upstreamModel, generationPrompt)
 	totalCost := gen.CostKRW
 	logRec.GenerationCost = gen.CostKRW
+	genStatus := "ok"
 	if gen.Error != "" {
+		genStatus = "error"
+		recordSpan("sql_generate", genStatus, upstreamModel, gen.CostKRW, gen.Error, generationPrompt, gen.Response, generateStart, map[string]any{"prompt_bytes": len(generationPrompt)})
 		finalize("SQL 생성 업스트림 호출 실패: "+gen.Error, text2sql.ValidationResult{Reason: "upstream error"}, false, 0, gen.Error, totalCost)
 		return
 	}
+	recordSpan("sql_generate", genStatus, upstreamModel, gen.CostKRW, "", generationPrompt, gen.Response, generateStart, map[string]any{"prompt_bytes": len(generationPrompt), "response_bytes": len(gen.Response)})
 
 	// 2) Extract + validate.
 	rawSQL := text2sql.ExtractSQL(gen.Response)
+	validateStart := time.Now()
 	validation := text2sql.ValidateSQL(rawSQL, text2sql.ValidateOptions{
 		DefaultLimit: cfg.DefaultLimit, MaxLimit: cfg.MaxLimit, AllowedTables: allowedTables, BlockedColumns: blockedColumns, AggregateOnlyColumns: aggregateOnly,
+	})
+	validateStatus := "ok"
+	if !validation.OK {
+		validateStatus = "error"
+	}
+	recordSpan("sql_validate", validateStatus, "", 0, validation.Reason, rawSQL, validation.SQL, validateStart, map[string]any{
+		"allowed_tables": len(allowedTables), "blocked_columns": len(blockedColumns), "aggregate_only_columns": len(aggregateOnly),
 	})
 	if !validation.OK {
 		content := fmt.Sprintf("생성된 SQL이 안전 검증을 통과하지 못했습니다 (사유: %s).\n\n```sql\n%s\n```", validation.Reason, strings.TrimSpace(rawSQL))
@@ -338,6 +411,7 @@ func (s *Server) handleText2SQL(w http.ResponseWriter, r *http.Request, meta sto
 			}
 			s.shadowEvaluate(r.Clone(context.Background()), dialect, schema, question, upstreamModel, cfg.ShadowModels, shadowOpts)
 		}
+		recordSpan("execute", "skipped", "", 0, "preview_mode", validation.SQL, "", time.Now(), map[string]any{"mode": string(profile.Mode), "exec_dsn_configured": cfg.ExecDSN != ""})
 		finalize(previewContent(question, validation.SQL, note, validation), validation, false, 0, "", totalCost)
 		return
 	}
@@ -352,14 +426,26 @@ func (s *Server) handleText2SQL(w http.ResponseWriter, r *http.Request, meta sto
 	}
 
 	// 4) Execute mode: run the validated SELECT read-only.
+	execStart := time.Now()
 	cols, rows, rowCount, risk, execErr := s.execText2SQL(r.Context(), profileExecConnID, validation.SQL)
+	execLatency := time.Since(execStart).Milliseconds()
 	logRec.ExplainCost = risk.Cost
 	logRec.ExplainRisk = risk.Score
 	if execErr != nil {
+		if strings.Contains(execErr.Error(), "EXPLAIN risk") {
+			recordSpan("explain_guard", "error", "", 0, execErr.Error(), validation.SQL, "", execStart, map[string]any{"risk_score": risk.Score, "explain_cost": risk.Cost, "latency_ms": execLatency})
+			recordSpan("execute", "skipped", "", 0, "explain_guard_failed", validation.SQL, "", time.Now(), nil)
+		} else {
+			recordSpan("explain_guard", "ok", "", 0, "", validation.SQL, fmt.Sprint(risk.Score), execStart, map[string]any{"risk_score": risk.Score, "explain_cost": risk.Cost})
+			recordSpan("execute", "error", "", 0, execErr.Error(), validation.SQL, "", execStart, map[string]any{"latency_ms": execLatency})
+		}
 		finalize("SQL 실행 실패: "+execErr.Error()+"\n\n```sql\n"+validation.SQL+"\n```", validation, false, 0, execErr.Error(), totalCost)
 		return
 	}
+	recordSpan("explain_guard", "ok", "", 0, "", validation.SQL, fmt.Sprint(risk.Score), execStart, map[string]any{"risk_score": risk.Score, "explain_cost": risk.Cost})
+	recordSpan("execute", "ok", "", 0, "", validation.SQL, fmt.Sprintf("%d", rowCount), execStart, map[string]any{"row_count": rowCount, "columns": len(cols), "latency_ms": execLatency})
 	if cfg.MaskResults {
+		maskStart := time.Now()
 		// Column-policy masking: when the schema marks specific columns as
 		// sensitivity=mask, mask only those result columns (matched by name). With no
 		// such columns declared, fall back to masking every cell (the prior behavior).
@@ -388,12 +474,16 @@ func (s *Server) handleText2SQL(w http.ResponseWriter, r *http.Request, meta sto
 				}
 			}
 		}
+		recordSpan("mask_result", "ok", "", 0, "", strings.Join(cols, ","), fmt.Sprintf("%d", len(rows)), maskStart, map[string]any{"mask_columns": len(maskColumns), "rows": len(rows)})
+	} else {
+		recordSpan("mask_result", "skipped", "", 0, "mask_results_disabled", strings.Join(cols, ","), fmt.Sprintf("%d", len(rows)), time.Now(), nil)
 	}
 	table := renderResultTable(cols, rows)
 
 	// 5) Optional natural-language summary of the result.
 	summary := ""
 	if summaryModel != "" && rowCount > 0 {
+		summaryStart := time.Now()
 		sumPrompt := text2sql.MessagesJSON([]text2sql.Message{
 			{Role: "system", Content: "다음 SQL 실행 결과를 한국어로 2~3문장으로 간결하게 요약하라. 숫자는 정확히."},
 			{Role: "user", Content: "질문: " + question + "\n\nSQL:\n" + validation.SQL + "\n\n결과(상위 행):\n" + table},
@@ -404,6 +494,13 @@ func (s *Server) handleText2SQL(w http.ResponseWriter, r *http.Request, meta sto
 		if sum.Error == "" {
 			summary = strings.TrimSpace(sum.Response)
 		}
+		sumStatus := "ok"
+		if sum.Error != "" {
+			sumStatus = "error"
+		}
+		recordSpan("summarize", sumStatus, summaryModel, sum.CostKRW, sum.Error, sumPrompt, summary, summaryStart, map[string]any{"row_count": rowCount})
+	} else {
+		recordSpan("summarize", "skipped", summaryModel, 0, "no_rows_or_model", validation.SQL, "", time.Now(), map[string]any{"row_count": rowCount})
 	}
 
 	content := executeContent(question, validation.SQL, table, rowCount, summary, validation)

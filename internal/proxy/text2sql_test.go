@@ -95,8 +95,87 @@ func TestText2SQLPreviewFlow(t *testing.T) {
 	}
 
 	// A Text2SQL audit log row should be written.
+	var log store.Text2SQLQueryLog
 	waitFor(t, 2*time.Second, func() bool {
 		logs, _ := db.ListText2SQLLogs(context.Background(), 10)
-		return len(logs) == 1 && logs[0].Valid && logs[0].UpstreamModel == "test-model" && logs[0].VirtualModel == "vibe/text2sql-preview"
+		if len(logs) == 1 && logs[0].Valid && logs[0].UpstreamModel == "test-model" && logs[0].VirtualModel == "vibe/text2sql-preview" {
+			log = logs[0]
+			return true
+		}
+		return false
 	})
+	spans, err := db.Text2SQLSpansForRequest(context.Background(), log.RequestID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{}
+	for _, sp := range spans {
+		seen[sp.Stage] = true
+	}
+	for _, want := range []string{"classify", "schema_resolve", "glossary_apply", "sql_generate", "sql_validate", "execute", "evaluate"} {
+		if !seen[want] {
+			t.Fatalf("expected Text2SQL span %s, got %+v", want, spans)
+		}
+	}
+	spanResp, err := http.Get(proxy.URL + "/admin/text2sql/spans?request_id=" + log.RequestID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer spanResp.Body.Close()
+	if spanResp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(spanResp.Body)
+		t.Fatalf("spans API status %d: %s", spanResp.StatusCode, b)
+	}
+	detailResp, err := http.Get(proxy.URL + "/admin/requests/" + log.RequestID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer detailResp.Body.Close()
+	if detailResp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(detailResp.Body)
+		t.Fatalf("request detail status %d: %s", detailResp.StatusCode, b)
+	}
+	var detail struct {
+		Text2SQLSpans []store.Text2SQLSpan `json:"text2sql_spans"`
+	}
+	if err := json.NewDecoder(detailResp.Body).Decode(&detail); err != nil {
+		t.Fatal(err)
+	}
+	if len(detail.Text2SQLSpans) == 0 {
+		t.Fatalf("expected request detail to include Text2SQL spans")
+	}
+	explainResp, err := http.Get(proxy.URL + "/admin/requests/" + log.RequestID + "/explain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer explainResp.Body.Close()
+	if explainResp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(explainResp.Body)
+		t.Fatalf("explain status %d: %s", explainResp.StatusCode, b)
+	}
+	var explain struct {
+		Text2SQL struct {
+			SpanCount int `json:"span_count"`
+		} `json:"text2sql"`
+	}
+	if err := json.NewDecoder(explainResp.Body).Decode(&explain); err != nil {
+		t.Fatal(err)
+	}
+	if explain.Text2SQL.SpanCount == 0 {
+		t.Fatalf("expected XView explain to include Text2SQL span count")
+	}
+	adminResp, err := http.Get(proxy.URL + "/admin/text2sql?window=7d")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer adminResp.Body.Close()
+	var adminOut struct {
+		StageMetrics []store.Text2SQLStageMetric `json:"stage_metrics"`
+	}
+	if err := json.NewDecoder(adminResp.Body).Decode(&adminOut); err != nil {
+		t.Fatal(err)
+	}
+	if len(adminOut.StageMetrics) == 0 {
+		t.Fatalf("expected Text2SQL stage metrics")
+	}
 }

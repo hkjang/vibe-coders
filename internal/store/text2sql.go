@@ -37,6 +37,24 @@ type Text2SQLQueryLog struct {
 	CreatedAt       time.Time `json:"created_at"`
 }
 
+// Text2SQLSpan records one internal pipeline stage for a Text2SQL request.
+type Text2SQLSpan struct {
+	ID            string    `json:"id"`
+	RequestID     string    `json:"request_id"`
+	Text2SQLLogID string    `json:"text2sql_log_id"`
+	TraceID       string    `json:"trace_id"`
+	Stage         string    `json:"stage"`
+	Status        string    `json:"status"`
+	LatencyMS     int64     `json:"latency_ms"`
+	Model         string    `json:"model"`
+	CostKRW       float64   `json:"cost_krw"`
+	RejectReason  string    `json:"reject_reason"`
+	InputHash     string    `json:"input_hash"`
+	OutputHash    string    `json:"output_hash"`
+	Detail        string    `json:"detail"`
+	CreatedAt     time.Time `json:"created_at"`
+}
+
 func (s *SQLStore) InsertText2SQLLog(ctx context.Context, l Text2SQLQueryLog) error {
 	if l.CreatedAt.IsZero() {
 		l.CreatedAt = time.Now().UTC()
@@ -48,6 +66,46 @@ func (s *SQLStore) InsertText2SQLLog(ctx context.Context, l Text2SQLQueryLog) er
 		l.SchemaName, l.SchemaVersion, l.PermissionHash, l.GlossaryHash,
 		boolInt(l.Valid), l.RejectReason, boolInt(l.Executed), l.RowCount, l.Error, l.FailureCategory, l.ExplainCost, l.ExplainRisk, l.CostKRW, l.GenerationCost, l.SummaryCost, l.LatencyMS, formatTime(l.CreatedAt))
 	return err
+}
+
+func (s *SQLStore) InsertText2SQLSpans(ctx context.Context, spans []Text2SQLSpan) error {
+	for _, sp := range spans {
+		if sp.CreatedAt.IsZero() {
+			sp.CreatedAt = time.Now().UTC()
+		}
+		if _, err := s.db.ExecContext(ctx, s.bind(`INSERT INTO text2sql_spans
+			(id, request_id, text2sql_log_id, trace_id, stage, status, latency_ms, model, cost_krw, reject_reason, input_hash, output_hash, detail, created_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+			sp.ID, sp.RequestID, sp.Text2SQLLogID, sp.TraceID, sp.Stage, sp.Status, sp.LatencyMS, sp.Model, sp.CostKRW,
+			sp.RejectReason, sp.InputHash, sp.OutputHash, sp.Detail, formatTime(sp.CreatedAt)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *SQLStore) Text2SQLSpansForRequest(ctx context.Context, requestID string) ([]Text2SQLSpan, error) {
+	rows, err := s.db.QueryContext(ctx, s.bind(`SELECT id, request_id, text2sql_log_id, COALESCE(trace_id,''), stage, status, latency_ms,
+		COALESCE(model,''), COALESCE(cost_krw,0), COALESCE(reject_reason,''), COALESCE(input_hash,''), COALESCE(output_hash,''), COALESCE(detail,''), created_at
+		FROM text2sql_spans WHERE request_id = ? ORDER BY created_at ASC`), requestID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Text2SQLSpan{}
+	for rows.Next() {
+		var sp Text2SQLSpan
+		var createdAt string
+		if err := rows.Scan(&sp.ID, &sp.RequestID, &sp.Text2SQLLogID, &sp.TraceID, &sp.Stage, &sp.Status, &sp.LatencyMS,
+			&sp.Model, &sp.CostKRW, &sp.RejectReason, &sp.InputHash, &sp.OutputHash, &sp.Detail, &createdAt); err != nil {
+			return nil, err
+		}
+		if ts, ok := parseStoredTime(createdAt); ok {
+			sp.CreatedAt = ts
+		}
+		out = append(out, sp)
+	}
+	return out, rows.Err()
 }
 
 // ListText2SQLLogs returns recent Text2SQL query logs, newest first.
@@ -204,6 +262,20 @@ type Text2SQLModelMetric struct {
 	AvgLatencyMS  float64 `json:"avg_latency_ms"`
 }
 
+// Text2SQLStageMetric aggregates per-stage span telemetry for operational tuning.
+type Text2SQLStageMetric struct {
+	Stage        string  `json:"stage"`
+	Status       string  `json:"status"`
+	Model        string  `json:"model"`
+	Count        int64   `json:"count"`
+	ErrorCount   int64   `json:"error_count"`
+	TotalCostKRW float64 `json:"total_cost_krw"`
+	AvgCostKRW   float64 `json:"avg_cost_krw"`
+	AvgLatencyMS float64 `json:"avg_latency_ms"`
+	MaxLatencyMS int64   `json:"max_latency_ms"`
+	ErrorRate    float64 `json:"error_rate"`
+}
+
 // Text2SQLModelMetricsSince ranks upstream models by how well they generate SQL.
 func (s *SQLStore) Text2SQLModelMetricsSince(ctx context.Context, since time.Time) ([]Text2SQLModelMetric, error) {
 	rows, err := s.db.QueryContext(ctx, s.bind(`
@@ -229,6 +301,40 @@ func (s *SQLStore) Text2SQLModelMetricsSince(ctx context.Context, since time.Tim
 		}
 		if m.Total > 0 {
 			m.ValidRate = float64(m.Valid) / float64(m.Total)
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
+// Text2SQLStageMetricsSince ranks Text2SQL pipeline stages by total cost and latency.
+func (s *SQLStore) Text2SQLStageMetricsSince(ctx context.Context, since time.Time) ([]Text2SQLStageMetric, error) {
+	rows, err := s.db.QueryContext(ctx, s.bind(`
+		SELECT stage,
+			COALESCE(NULLIF(status,''),'unknown'),
+			COALESCE(NULLIF(model,''),''),
+			COUNT(*),
+			COALESCE(SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END),0),
+			COALESCE(SUM(cost_krw),0),
+			COALESCE(AVG(cost_krw),0),
+			COALESCE(AVG(latency_ms),0),
+			COALESCE(MAX(latency_ms),0)
+		FROM text2sql_spans
+		WHERE created_at >= ?
+		GROUP BY stage, COALESCE(NULLIF(status,''),'unknown'), COALESCE(NULLIF(model,''),'')
+		ORDER BY COALESCE(SUM(cost_krw),0) DESC, COALESCE(AVG(latency_ms),0) DESC, COUNT(*) DESC`), since.UTC().Format(time.RFC3339Nano))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Text2SQLStageMetric{}
+	for rows.Next() {
+		var m Text2SQLStageMetric
+		if err := rows.Scan(&m.Stage, &m.Status, &m.Model, &m.Count, &m.ErrorCount, &m.TotalCostKRW, &m.AvgCostKRW, &m.AvgLatencyMS, &m.MaxLatencyMS); err != nil {
+			return nil, err
+		}
+		if m.Count > 0 {
+			m.ErrorRate = float64(m.ErrorCount) / float64(m.Count)
 		}
 		out = append(out, m)
 	}

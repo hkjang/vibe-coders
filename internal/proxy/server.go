@@ -257,6 +257,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/admin/dw/table-info", s.handleClickHouseTableInfo)
 	mux.HandleFunc("/admin/dw/text2sql-fact", s.handleClickHouseText2SQLFact)
 	mux.HandleFunc("/admin/text2sql", s.handleText2SQLAdmin)
+	mux.HandleFunc("/admin/text2sql/spans", s.handleText2SQLSpans)
 	mux.HandleFunc("/admin/text2sql/schemas", s.handleText2SQLSchemas)
 	mux.HandleFunc("/admin/text2sql/profiles", s.handleText2SQLProfiles)
 	mux.HandleFunc("/admin/text2sql/tables", s.handleText2SQLTables)

@@ -66,6 +66,7 @@ func (s *Server) handleText2SQLAdmin(w http.ResponseWriter, r *http.Request) {
 	}
 	schemas, _ := s.db.ListText2SQLSchemas(r.Context())
 	modelMetrics, _ := s.db.Text2SQLModelMetricsSince(r.Context(), since)
+	stageMetrics, _ := s.db.Text2SQLStageMetricsSince(r.Context(), since)
 	goldens, _ := s.db.ListText2SQLGoldenQueries(r.Context(), false)
 	dbProfiles, _ := s.db.ListText2SQLProfiles(r.Context())
 	permissions, _ := s.db.ListText2SQLPermissions(r.Context())
@@ -73,6 +74,7 @@ func (s *Server) handleText2SQLAdmin(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"schemas":       schemas,
 		"model_metrics": modelMetrics,
+		"stage_metrics": stageMetrics,
 		"golden":        goldens,
 		"db_profiles":   dbProfiles,
 		"permissions":   permissions,
@@ -88,6 +90,30 @@ func (s *Server) handleText2SQLAdmin(w http.ResponseWriter, r *http.Request) {
 		"stats": stats,
 		"logs":  logs,
 	})
+}
+
+// handleText2SQLSpans returns the pipeline timeline for one Text2SQL request.
+// GET /admin/text2sql/spans?request_id=...
+func (s *Server) handleText2SQLSpans(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	if r.Method != http.MethodGet {
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
+	requestID := strings.TrimSpace(r.URL.Query().Get("request_id"))
+	if requestID == "" {
+		writeOpenAIError(w, http.StatusBadRequest, "request_id is required", "invalid_request_error", "missing_request_id")
+		return
+	}
+	spans, err := s.db.Text2SQLSpansForRequest(r.Context(), requestID)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "text2sql_spans_failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"request_id": requestID, "spans": spans})
 }
 
 // handleText2SQLTables manages the table registry for a schema.

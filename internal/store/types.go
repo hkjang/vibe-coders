@@ -789,15 +789,16 @@ type ResponseDetail struct {
 }
 
 type RequestDetail struct {
-	Request     RecentRequest    `json:"request"`
-	Prompts     []PromptDetail   `json:"prompts"`
-	Response    *ResponseDetail  `json:"response,omitempty"`
-	Languages   []LanguageStat   `json:"languages"`
-	Spans       []LLMSpan        `json:"spans"`
-	Evaluations []LLMEvaluation  `json:"evaluations"`
-	Feedback    []LLMFeedback    `json:"feedback"`
-	Tools       []ToolInvocation `json:"tools"`
-	Governance  GovernanceEvents `json:"governance"`
+	Request       RecentRequest    `json:"request"`
+	Prompts       []PromptDetail   `json:"prompts"`
+	Response      *ResponseDetail  `json:"response,omitempty"`
+	Languages     []LanguageStat   `json:"languages"`
+	Spans         []LLMSpan        `json:"spans"`
+	Text2SQLSpans []Text2SQLSpan   `json:"text2sql_spans"`
+	Evaluations   []LLMEvaluation  `json:"evaluations"`
+	Feedback      []LLMFeedback    `json:"feedback"`
+	Tools         []ToolInvocation `json:"tools"`
+	Governance    GovernanceEvents `json:"governance"`
 }
 
 type GovernanceEvents struct {

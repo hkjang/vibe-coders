@@ -168,6 +168,7 @@ var apiEndpoints = []apiEndpoint{
 
 	// ---- admin: Text2SQL ----
 	{"/admin/text2sql", []string{"get"}, "text2sql", "Text2SQL query logs / admin overview", false},
+	{"/admin/text2sql/spans", []string{"get"}, "text2sql", "Text2SQL per-request pipeline spans", false},
 	{"/admin/text2sql/schemas", []string{"get", "post", "delete"}, "text2sql", "Schema registry", false},
 	{"/admin/text2sql/profiles", []string{"get", "post", "delete"}, "text2sql", "Virtual-model profiles", false},
 	{"/admin/text2sql/tables", []string{"get", "post", "delete"}, "text2sql", "Registry tables", false},

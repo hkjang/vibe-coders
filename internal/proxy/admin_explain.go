@@ -48,6 +48,11 @@ func (s *Server) handleRequestExplain(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "explain_failed")
 		return
 	}
+	text2sqlSpans, err := s.db.Text2SQLSpansForRequest(r.Context(), id)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "explain_failed")
+		return
+	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"request_id": d.RequestID,
@@ -58,9 +63,32 @@ func (s *Server) handleRequestExplain(w http.ResponseWriter, r *http.Request) {
 		"cache":      s.explainCache(d),
 		"safety":     explainSafety(d, evals, governance),
 		"governance": explainGovernance(governance),
+		"text2sql":   explainText2SQL(text2sqlSpans),
 		"cost":       s.explainCost(d),
 		"session":    map[string]any{"session_id": d.SessionID, "stream": d.Stream},
 	})
+}
+
+func explainText2SQL(spans []store.Text2SQLSpan) map[string]any {
+	totalLatency := int64(0)
+	totalCost := 0.0
+	status := "none"
+	for _, sp := range spans {
+		totalLatency += sp.LatencyMS
+		totalCost += sp.CostKRW
+		if sp.Status == "error" {
+			status = "error"
+		} else if status == "none" && sp.Status != "" {
+			status = "ok"
+		}
+	}
+	return map[string]any{
+		"spans":            spans,
+		"span_count":       len(spans),
+		"status":           status,
+		"total_latency_ms": totalLatency,
+		"total_cost_krw":   totalCost,
+	}
 }
 
 func tierForComplexity(c int) string {

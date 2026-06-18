@@ -817,6 +817,11 @@ func (s *SQLStore) RequestDetail(ctx context.Context, id string) (RequestDetail,
 	}
 	detail.Tools = tools
 	detail.Spans = llmSpansForRequest(item, tools)
+	if text2sqlSpans, err := s.Text2SQLSpansForRequest(ctx, item.ID); err != nil {
+		return detail, err
+	} else {
+		detail.Text2SQLSpans = text2sqlSpans
+	}
 	if secretEvents, err := s.SecretEventsForRequest(ctx, item.ID); err != nil {
 		return detail, err
 	} else {
