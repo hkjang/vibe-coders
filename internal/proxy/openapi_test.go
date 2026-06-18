@@ -6,7 +6,10 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -84,4 +87,43 @@ func TestOpenAPISwaggerAndVersion(t *testing.T) {
 	if meBody["version"] != AppVersion {
 		t.Errorf("/auth/me version = %v, want %s", meBody["version"], AppVersion)
 	}
+}
+
+func TestAppVersionNotBelowReleaseNotes(t *testing.T) {
+	notesPath := filepath.Join("..", "..", "scripts", "gh_release.ps1")
+	body, err := os.ReadFile(notesPath)
+	if err != nil {
+		t.Fatalf("read release notes script: %v", err)
+	}
+	re := regexp.MustCompile(`v0\.(\d+)\.(\d+)`)
+	matches := re.FindAllStringSubmatch(string(body), -1)
+	if len(matches) == 0 {
+		t.Fatalf("no v0.x.y release versions found in %s", notesPath)
+	}
+	maxMinor, maxPatch := -1, -1
+	for _, m := range matches {
+		minor, _ := strconv.Atoi(m[1])
+		patch, _ := strconv.Atoi(m[2])
+		if minor > maxMinor || (minor == maxMinor && patch > maxPatch) {
+			maxMinor, maxPatch = minor, patch
+		}
+	}
+	appMinor, appPatch, ok := parseAppVersion(AppVersion)
+	if !ok {
+		t.Fatalf("AppVersion must use v0.x.y format, got %q", AppVersion)
+	}
+	if appMinor < maxMinor || (appMinor == maxMinor && appPatch < maxPatch) {
+		t.Fatalf("AppVersion %s is below release notes max v0.%d.%d", AppVersion, maxMinor, maxPatch)
+	}
+}
+
+func parseAppVersion(v string) (minor, patch int, ok bool) {
+	re := regexp.MustCompile(`^v0\.(\d+)\.(\d+)$`)
+	m := re.FindStringSubmatch(strings.TrimSpace(v))
+	if len(m) != 3 {
+		return 0, 0, false
+	}
+	minor, _ = strconv.Atoi(m[1])
+	patch, _ = strconv.Atoi(m[2])
+	return minor, patch, true
 }
