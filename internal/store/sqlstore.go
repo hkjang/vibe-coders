@@ -37,7 +37,15 @@ func Open(ctx context.Context, cfg config.DatabaseConfig) (*SQLStore, error) {
 		if dsn == "" {
 			dsn = filepath.Join("data", "gateway.db")
 		}
-		if err := os.MkdirAll(filepath.Dir(dsn), 0o755); err != nil {
+		if !strings.Contains(dsn, "busy_timeout") && !strings.Contains(dsn, "mode=memory") {
+			delim := "?"
+			if strings.Contains(dsn, "?") {
+				delim = "&"
+			}
+			dsn = dsn + delim + "_pragma=busy_timeout(10000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)"
+		}
+		dbPath := strings.Split(dsn, "?")[0]
+		if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
 			return nil, err
 		}
 	} else if driver != "postgres" {
