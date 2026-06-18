@@ -250,6 +250,7 @@ const adminHTML = `<!doctype html>
     <nav id="tabs">
       <a href="#/dashboard" data-tab="dashboard" class="active">대시보드</a>
       <a href="#/mcp" data-tab="mcp">MCP</a>
+      <a href="#/routing" data-tab="routing">라우팅</a>
       <a href="#/requests" data-tab="requests">호출 이력</a>
       <a href="#/prompts" data-tab="prompts">프롬프트 검색</a>
       <a href="#/users" data-tab="users">사용자</a>
@@ -879,6 +880,10 @@ const adminHTML = `<!doctype html>
           { label: '에이전트', href: '#/agents', active: tab === 'agents' },
           { label: 'VCS', href: '#/vcs', active: tab === 'vcs' },
         ]);
+      } else if (tab === 'routing') {
+        el.innerHTML = subNav([
+          { label: '라우팅 학습', href: '#/routing', active: true },
+        ]);
       } else {
         el.innerHTML = '';
       }
@@ -911,6 +916,7 @@ const adminHTML = `<!doctype html>
           case 'ips':       rest.length ? await renderIPDetail(decodeURIComponent(rest.join('/'))) : await renderIPs(); break;
           case 'quotas':    await renderQuotas(); break;
           case 'mcp':       await renderMCP(params); break;
+          case 'routing':   await renderRoutingLearning(params); break;
           case 'agents':    await renderAgents(params); break;
           case 'vcs':       await renderVCS(params); break;
           case 'safety':    await renderSafety(); break;
@@ -4340,6 +4346,205 @@ const adminHTML = `<!doctype html>
       if (!confirm('해당 한도를 삭제하시겠습니까?')) return;
       await api('/admin/quotas/' + encodeURIComponent(id), { method: 'DELETE' });
       route();
+    };
+
+    // ---------- routing learning ----------
+    function routeStatusClass(score) {
+      const n = Number(score || 0);
+      return n >= 0.85 ? '' : (n >= 0.70 ? 'warn' : 'error');
+    }
+    function routePct(score) {
+      return (Number(score || 0) * 100).toFixed(0) + '%';
+    }
+    function routeOptions(selected) {
+      const routes = ['', 'grounded', 'research', 'company_policy', 'legal', 'compliance', 'all_mcp'];
+      const labels = {
+        '': '전체 route',
+        grounded: 'grounded',
+        research: 'research',
+        company_policy: 'company_policy',
+        legal: 'legal',
+        compliance: 'compliance',
+        all_mcp: 'all_mcp',
+      };
+      return routes.map(r => '<option value="' + escapeHTML(r) + '" ' + (r === selected ? 'selected' : '') + '>' + escapeHTML(labels[r]) + '</option>').join('');
+    }
+    function routeLearningQuery(initial, defaults) {
+      const p = new URLSearchParams();
+      const route = initial ? (initial.get('route') || '') : '';
+      const windowValue = initial ? (initial.get('window') || defaults.window || '7d') : (defaults.window || '7d');
+      const status = initial ? (initial.get('status') || defaults.status || 'pending') : (defaults.status || 'pending');
+      if (route) p.set('route', route);
+      if (windowValue) p.set('window', windowValue);
+      if (status) p.set('status', status);
+      p.set('limit', defaults.limit || '80');
+      return p;
+    }
+    async function renderRoutingLearning(initial) {
+      const route = initial ? (initial.get('route') || '') : '';
+      const windowValue = initial ? (initial.get('window') || '7d') : '7d';
+      const status = initial ? (initial.get('status') || 'pending') : 'pending';
+      const decisionQ = routeLearningQuery(initial, { window: windowValue, limit: '80', status: '' });
+      decisionQ.delete('status');
+      const exampleQ = new URLSearchParams();
+      if (route) exampleQ.set('route', route);
+      exampleQ.set('limit', '80');
+      const reviewQ = routeLearningQuery(initial, { window: windowValue, status, limit: '80' });
+      const learningQ = new URLSearchParams();
+      learningQ.set('window', windowValue);
+      learningQ.set('min_samples', '20');
+
+      const [decisionsResp, examplesResp, reviewResp, learningResp] = await Promise.all([
+        api('/admin/routing/domain-decisions?' + decisionQ.toString()).catch(() => ({ decisions: [], signals: {} })),
+        api('/admin/routing/domain-examples?' + exampleQ.toString()).catch(() => ({ examples: [] })),
+        api('/admin/routing/domain-review?' + reviewQ.toString()).catch(() => ({ items: [] })),
+        api('/admin/routing/learning?' + learningQ.toString()).catch(() => ({ recommendations: [] })),
+      ]);
+      const decisions = decisionsResp.decisions || [];
+      const signals = decisionsResp.signals || {};
+      const examples = examplesResp.examples || [];
+      const reviews = reviewResp.items || [];
+      const recommendations = learningResp.recommendations || learningResp.items || learningResp.learning || [];
+      window.domainRoutingSignals = signals;
+
+      const avgConfidence = decisions.length ? decisions.reduce((sum, d) => sum + Number(d.confidence || 0), 0) / decisions.length : 0;
+      const avgEvidence = decisions.length ? decisions.reduce((sum, d) => sum + Number(d.evidence_score || 0), 0) / decisions.length : 0;
+      const blocked = decisions.filter(d => d.blocked_by_governance).length;
+      const pending = reviews.filter(r => (r.status || '') === 'pending').length;
+      const kpis = '<div class="kpis">' +
+        kpi('결정 로그', fmt(decisions.length)) +
+        kpi('평균 신뢰도', routePct(avgConfidence) + '<div style="margin-top:8px">' + progressBar(avgConfidence) + '</div>') +
+        kpi('평균 증거 점수', routePct(avgEvidence) + '<div style="margin-top:8px">' + progressBar(avgEvidence) + '</div>') +
+        kpi('검토 대기', fmt(pending) + (blocked ? '<div class="muted" style="font-size:11px; font-weight:500; margin-top:6px">거버넌스 차단 ' + fmt(blocked) + '건</div>' : '')) +
+      '</div>';
+
+      const filters =
+        '<form class="toolbar" id="routing-learning-filter" autocomplete="off">' +
+          '<select id="routing-route">' + routeOptions(route) + '</select>' +
+          '<select id="routing-window">' +
+            '<option value="24h" ' + (windowValue === '24h' ? 'selected' : '') + '>24시간</option>' +
+            '<option value="7d" ' + (windowValue === '7d' ? 'selected' : '') + '>7일</option>' +
+            '<option value="30d" ' + (windowValue === '30d' ? 'selected' : '') + '>30일</option>' +
+            '<option value="90d" ' + (windowValue === '90d' ? 'selected' : '') + '>90일</option>' +
+          '</select>' +
+          '<select id="routing-review-status">' +
+            '<option value="pending" ' + (status === 'pending' ? 'selected' : '') + '>pending review</option>' +
+            '<option value="approved" ' + (status === 'approved' ? 'selected' : '') + '>approved</option>' +
+            '<option value="rejected" ' + (status === 'rejected' ? 'selected' : '') + '>rejected</option>' +
+            '<option value="" ' + (status === '' ? 'selected' : '') + '>전체 review</option>' +
+          '</select>' +
+          '<button type="submit">적용</button>' +
+        '</form>';
+
+      const summary = '<div class="banner" style="margin:12px">' +
+        'MCP discovery 요청의 선택 route, 후보 점수, evidence gate 결과를 저장하고 confidence가 높은 요청은 예시로 자동 승격합니다. 낮은 신뢰도나 후보 충돌은 검토 큐에 쌓아 운영자가 승인/거절만 하도록 줄였습니다.' +
+      '</div>';
+
+      document.getElementById('view').innerHTML =
+        section('Intelligent Routing 학습 루프', kpis + filters + summary) +
+        section('검토 큐', domainReviewTable(reviews)) +
+        section('Domain Routing 결정 로그', domainDecisionTable(decisions, signals)) +
+        section('자동 승격 예시', domainExampleTable(examples)) +
+        section('모델 추천 학습', routingRecommendationTable(recommendations));
+
+      document.getElementById('routing-learning-filter').addEventListener('submit', (e) => {
+        e.preventDefault();
+        const p = new URLSearchParams();
+        const rv = document.getElementById('routing-route').value;
+        const wv = document.getElementById('routing-window').value;
+        const sv = document.getElementById('routing-review-status').value;
+        if (rv) p.set('route', rv);
+        if (wv) p.set('window', wv);
+        if (sv) p.set('status', sv);
+        location.hash = '#/routing' + (p.toString() ? '?' + p.toString() : '');
+      });
+      makeSortable('#view', 'routing-learning');
+    }
+    function domainDecisionTable(rows, signalMap) {
+      if (!rows.length) return '<div class="empty">선택한 조건의 routing decision 없음</div>';
+      return '<table><thead><tr>' +
+        '<th data-sort="str">시각</th><th data-sort="str">Route</th><th data-sort="num">신뢰도</th><th data-sort="num">Evidence</th><th>Tools</th><th>대상</th><th>근거</th><th>신호</th>' +
+      '</tr></thead><tbody>' +
+      rows.map(d => {
+        const sigs = (signalMap || {})[d.id] || [];
+        return '<tr>' +
+          '<td>' + ago(d.created_at) + '<div class="muted">' + escapeHTML(d.request_id || '') + '</div></td>' +
+          '<td><span class="pill">' + escapeHTML(d.route || '') + '</span>' +
+            (d.fallback_used ? '<div class="status warn" style="margin-top:4px">fallback</div>' : '') +
+            (d.blocked_by_governance ? '<div class="status error" style="margin-top:4px">blocked</div>' : '') + '</td>' +
+          '<td data-num="' + Number(d.confidence || 0) + '"><span class="status ' + routeStatusClass(d.confidence) + '">' + routePct(d.confidence) + '</span></td>' +
+          '<td data-num="' + Number(d.evidence_score || 0) + '">' + routePct(d.evidence_score) + '<div class="muted">' + fmt(d.evidence_count || 0) + '개</div></td>' +
+          '<td>' + listPills(d.tool_names || []) + '</td>' +
+          '<td>' + escapeHTML(d.team_id || '') + '<div class="muted">' + escapeHTML(d.user_id || '') + '</div></td>' +
+          '<td>' + escapeHTML(d.reason || '') + '</td>' +
+          '<td><button class="secondary" type="button" onclick="openDomainSignals(\'' + escapeAttr(d.id) + '\')">신호 ' + fmt(sigs.length) + '</button></td>' +
+        '</tr>';
+      }).join('') + '</tbody></table>';
+    }
+    function domainReviewTable(rows) {
+      if (!rows.length) return '<div class="empty">검토할 domain routing 항목 없음</div>';
+      return '<table><thead><tr>' +
+        '<th data-sort="str">시각</th><th data-sort="str">상태</th><th>Prompt</th><th data-sort="str">Route</th><th>사유</th><th>동작</th>' +
+      '</tr></thead><tbody>' +
+      rows.map(r => '<tr>' +
+        '<td>' + ago(r.created_at) + '<div class="muted">' + escapeHTML(r.decision_id || '') + '</div></td>' +
+        '<td><span class="status ' + governanceStatusClass(r.status) + '">' + escapeHTML(r.status || '') + '</span>' + (r.reviewed_at ? '<div class="muted">' + ago(r.reviewed_at) + '</div>' : '') + '</td>' +
+        '<td><div class="prompt">' + escapeHTML(r.query_text || '') + '</div></td>' +
+        '<td>' + escapeHTML(r.current_route || '') + '<div class="muted">suggested ' + escapeHTML(r.suggested_route || '') + '</div></td>' +
+        '<td>' + escapeHTML(r.reason || '') + '</td>' +
+        '<td>' + ((r.status || '') === 'pending'
+          ? '<button type="button" onclick="decideDomainReview(\'' + escapeAttr(r.id) + '\',\'approve\')">승인</button> ' +
+            '<button class="danger" type="button" onclick="decideDomainReview(\'' + escapeAttr(r.id) + '\',\'reject\')">거절</button>'
+          : '<span class="muted">처리됨</span>') + '</td>' +
+      '</tr>').join('') + '</tbody></table>';
+    }
+    function domainExampleTable(rows) {
+      if (!rows.length) return '<div class="empty">자동 승격 또는 승인된 domain example 없음</div>';
+      return '<table><thead><tr>' +
+        '<th data-sort="str">Route</th><th>예시</th><th data-sort="num">신뢰도</th><th data-sort="str">Source</th><th data-sort="str">시각</th>' +
+      '</tr></thead><tbody>' +
+      rows.map(e => '<tr>' +
+        '<td><span class="pill">' + escapeHTML(e.route || '') + '</span></td>' +
+        '<td><div class="prompt">' + escapeHTML(e.text || '') + '</div><div class="muted">' + escapeHTML((e.text_hash || '').slice(0, 18)) + '</div></td>' +
+        '<td data-num="' + Number(e.confidence || 0) + '"><span class="status ' + routeStatusClass(e.confidence) + '">' + routePct(e.confidence) + '</span></td>' +
+        '<td>' + escapeHTML(e.source || '') + (e.auto_promoted ? '<div class="muted">auto promoted</div>' : '') + '</td>' +
+        '<td>' + ago(e.created_at) + '</td>' +
+      '</tr>').join('') + '</tbody></table>';
+    }
+    function routingRecommendationTable(rows) {
+      if (!rows || !rows.length) return '<div class="empty">아직 추천 학습 표본이 부족합니다.</div>';
+      return '<table><thead><tr><th>Segment</th><th>추천 모델</th><th data-sort="num">표본</th><th data-sort="num">성공률</th><th data-sort="num">평균 비용</th><th data-sort="num">평균 지연</th></tr></thead><tbody>' +
+        rows.map(r => '<tr>' +
+          '<td>' + escapeHTML([r.task_type, r.complexity_bucket || r.bucket].filter(Boolean).join(' / ') || r.segment || '') + '</td>' +
+          '<td><strong>' + escapeHTML(r.model || r.recommended_model || '') + '</strong><div class="muted">' + escapeHTML(r.provider || '') + '</div></td>' +
+          '<td data-num="' + Number(r.samples || r.requests || 0) + '">' + fmt(r.samples || r.requests || 0) + '</td>' +
+          '<td data-num="' + Number(r.success_rate || 0) + '">' + routePct(r.success_rate || 0) + '</td>' +
+          '<td data-num="' + Number(r.avg_cost_krw || r.cost_krw || 0) + '">' + money(r.avg_cost_krw || r.cost_krw || 0) + '</td>' +
+          '<td data-num="' + Number(r.avg_latency_ms || r.latency_ms || 0) + '">' + fmt(Math.round(Number(r.avg_latency_ms || r.latency_ms || 0))) + ' ms</td>' +
+        '</tr>').join('') + '</tbody></table>';
+    }
+    function listPills(items) {
+      if (!items || !items.length) return '<span class="muted">-</span>';
+      return items.slice(0, 5).map(x => '<span class="pill" style="margin:0 4px 4px 0">' + escapeHTML(x) + '</span>').join('') +
+        (items.length > 5 ? '<span class="muted">+' + fmt(items.length - 5) + '</span>' : '');
+    }
+    window.openDomainSignals = (id) => {
+      const sigs = (window.domainRoutingSignals || {})[id] || [];
+      const body = sigs.length ? '<table><thead><tr><th>Source</th><th>Route</th><th>Score</th><th>Reason</th><th>시각</th></tr></thead><tbody>' +
+        sigs.map(s => '<tr><td>' + escapeHTML(s.source || '') + '</td><td>' + escapeHTML(s.route || '') + '</td><td>' + routePct(s.score || 0) + '</td><td>' + escapeHTML(s.reason || '') + '</td><td>' + ago(s.created_at) + '</td></tr>').join('') +
+        '</tbody></table>' : '<div class="empty">저장된 signal 없음</div>';
+      openModal('Routing Signals - ' + id, body);
+    };
+    window.decideDomainReview = async (id, action) => {
+      if (!id) return;
+      const label = action === 'approve' ? '승인' : '거절';
+      if (!confirm('이 routing review를 ' + label + '하시겠습니까?')) return;
+      try {
+        await api('/admin/routing/domain-review/' + encodeURIComponent(id) + '/' + action, { method: 'POST', body: JSON.stringify({}) });
+        route();
+      } catch (err) {
+        openModal('Routing Review 처리 오류', '<div class="error-line">' + escapeHTML(err.message) + '</div>');
+      }
     };
 
     // ---------- MCP / tool observability ----------
