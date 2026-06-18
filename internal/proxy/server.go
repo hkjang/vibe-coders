@@ -31,7 +31,7 @@ import (
 )
 
 // AppVersion is the gateway build version, surfaced in /auth/me and the admin UI.
-const AppVersion = "v0.49.8"
+const AppVersion = "v0.49.9"
 
 type Server struct {
 	cfg            config.Config
@@ -388,6 +388,10 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/admin/llm/evaluations", s.handleLLMEvaluations)
 	mux.HandleFunc("/admin/mcp/tools", s.handleMCPTools)
 	mux.HandleFunc("/admin/mcp/servers", s.handleMCPServers)
+	mux.HandleFunc("/admin/mcp/overview", s.handleMCPOverview)
+	mux.HandleFunc("/admin/mcp/routes", s.handleMCPRoutes)
+	mux.HandleFunc("/admin/mcp/route/explain", s.handleMCPRouteExplain)
+	mux.HandleFunc("/admin/mcp/test", s.handleMCPTest)
 	mux.HandleFunc("/admin/mcp/requests", s.handleMCPRequests)
 	mux.HandleFunc("/admin/mcp/policies", s.handleMCPPolicies)
 	mux.HandleFunc("/admin/mcp/policies/", s.handleMCPPolicyByServer)

@@ -4565,7 +4565,9 @@ const adminHTML = `<!doctype html>
       if (configuredFilter) qs.set('configured', configuredFilter);
       if (mcpOnly) qs.set('mcp_only', '1');
 
-      const [serversResp, toolsResp, policiesResp, loopsResp, catalogResp, upstreamsResp] = await Promise.all([
+      const [overviewResp, routesResp, serversResp, toolsResp, policiesResp, loopsResp, catalogResp, upstreamsResp] = await Promise.all([
+        api('/admin/mcp/overview').catch(() => null),
+        api('/admin/mcp/routes').catch(() => ({ routes: [], errors: {} })),
         api('/admin/mcp/servers' + (serverFilter || apiKeyId || mcpOnly ? '?' + new URLSearchParams([...qs].filter(([k]) => ['server','api_key_id','mcp_only'].includes(k))).toString() : '')),
         api('/admin/mcp/tools' + (qs.toString() ? '?' + qs.toString() : '')),
         api('/admin/mcp/policies').catch(() => ({ policies: [], allowlist_enabled: false })),
@@ -4585,12 +4587,15 @@ const adminHTML = `<!doctype html>
       const loops = loopsResp.loops || [];
       const catalog = catalogResp.catalog || [];
       const newToolCount = catalogResp.new_count || 0;
+      const routeRows = routesResp.routes || [];
+      window.mcpRouteRows = routeRows;
 
+      const ov = overviewResp || {};
       const kpis = '<div class="kpis">' +
-        kpi('tool 호출 수', fmt(summary.total_calls)) +
-        kpi('tool 오류 수', fmt(summary.total_errors) + '<div class="muted" style="font-size:11px; font-weight:500; margin-top:6px">' + errorRatePct(summary.total_errors, summary.total_calls) + '</div>') +
-        kpi('고유 tool 수', fmt(summary.distinct_tools)) +
-        kpi('MCP 서버 수', fmt(summary.mcp_servers)) +
+        kpi('업스트림 상태', fmt(ov.healthy_upstream_count ?? 0) + ' / ' + fmt(ov.enabled_upstream_count ?? 0) + '<div class="muted" style="font-size:11px; font-weight:500; margin-top:6px">등록 ' + fmt(ov.upstream_count ?? 0) + '개</div>') +
+        kpi('노출 Route', fmt((ov.total_tools || 0) + (ov.total_prompts || 0) + (ov.total_resources || 0)) + '<div class="muted" style="font-size:11px; font-weight:500; margin-top:6px">tool ' + fmt(ov.total_tools || 0) + ' · prompt ' + fmt(ov.total_prompts || 0) + ' · resource ' + fmt(ov.total_resources || 0) + '</div>') +
+        kpi('최근 MCP 호출', fmt(ov.recent_call_count ?? summary.total_calls) + '<div class="muted" style="font-size:11px; font-weight:500; margin-top:6px">오류율 ' + ((Number(ov.recent_error_rate || 0) * 100).toFixed(1)) + '%</div>') +
+        kpi('운영 경고', fmt((ov.discovery_error_count || 0) + (ov.blocked_count || 0)) + '<div class="muted" style="font-size:11px; font-weight:500; margin-top:6px">탐색 오류 ' + fmt(ov.discovery_error_count || 0) + ' · 차단 정책 ' + fmt(ov.blocked_count || 0) + '</div>') +
       '</div>';
 
       const filterBar =
@@ -4751,9 +4756,29 @@ const adminHTML = `<!doctype html>
         '<br><strong>클라이언트 설정</strong>: MCP 서버 URL 을 <code>http://&lt;gateway&gt;:8080/mcp</code>, 헤더 <code>Authorization: Bearer &lt;발급키&gt;</code>.' +
         '</div>';
 
+      const routeMapTable = mcpRouteMapTable(routeRows);
+      const testConsole =
+        '<form class="inline-form" id="mcp-route-explain-form" autocomplete="off" style="grid-template-columns: 150px minmax(180px,1fr) minmax(180px,1fr) 90px 90px;">' +
+          '<select id="mcp-explain-method">' +
+            '<option value="tools/call">tools/call</option>' +
+            '<option value="prompts/get">prompts/get</option>' +
+            '<option value="resources/read">resources/read</option>' +
+            '<option value="tools/list">tools/list</option>' +
+            '<option value="prompts/list">prompts/list</option>' +
+            '<option value="resources/list">resources/list</option>' +
+          '</select>' +
+          '<input id="mcp-explain-name" placeholder="노출명 예: github__create_issue">' +
+          '<input id="mcp-explain-uri" placeholder="resource URI 또는 비워둠">' +
+          '<button type="submit">Explain</button>' +
+          '<button type="button" class="secondary" id="mcp-test-run">Test</button>' +
+        '</form>' +
+        '<div id="mcp-route-explain-result" class="card-body"><span class="muted">Route Map 행의 Explain 버튼을 누르거나 method/name을 입력하세요.</span></div>';
+
       document.getElementById('view').innerHTML =
-        section('MCP / Tool 요약', kpis + filterBar) +
-        section('MCP Gateway — 업스트림 서버 (단일 /mcp 로 집약)', upstreamForm + upstreamTable + gatewayHelp) +
+        section('MCP 운영 Overview', kpis + filterBar) +
+        section('MCP Route Explain / Test Console', testConsole) +
+        section('MCP Gateway — 업스트림 등록과 연결 진단', upstreamForm + upstreamTable + gatewayHelp) +
+        section('Route Map — 클라이언트 노출명 → 업스트림 원본', routeMapTable) +
         section('MCP 서버별', serverTable) +
         section('Tool 리더보드', toolTable) +
         section('에이전트 루프 의심 (세션별 반복 호출 ≥ 10)', loopTable) +
@@ -4789,6 +4814,13 @@ const adminHTML = `<!doctype html>
         if (cv) p.set('configured', cv);
         if (document.getElementById('mcp-only').checked) p.set('mcp_only', '1');
         location.hash = '#/mcp' + (p.toString() ? '?' + p.toString() : '');
+      });
+      document.getElementById('mcp-route-explain-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        await runMCPRouteExplain(false);
+      });
+      document.getElementById('mcp-test-run').addEventListener('click', async () => {
+        await runMCPRouteExplain(true);
       });
       document.getElementById('mcp-policy-form').addEventListener('submit', async (e) => {
         e.preventDefault();
@@ -4829,6 +4861,89 @@ const adminHTML = `<!doctype html>
         '<button class="secondary" type="button" onclick="saveMCPToolRisk(' + idx + ')">저장</button>' +
       '</div>';
     }
+    function mcpRouteMapTable(routes) {
+      if (!routes || !routes.length) return '<div class="empty">현재 노출된 MCP route 없음. 업스트림을 등록하고 probe 또는 route refresh를 실행하세요.</div>';
+      return '<table><thead><tr>' +
+        '<th data-sort="str">종류</th><th data-sort="str">클라이언트 노출명</th><th data-sort="str">업스트림</th><th data-sort="str">원본 대상</th><th>설명</th><th>상태</th><th>동작</th>' +
+      '</tr></thead><tbody>' +
+      routes.map(r => {
+        const exposed = r.exposed_name || r.uri || '';
+        return '<tr>' +
+          '<td><span class="pill">' + escapeHTML(r.kind || '') + '</span></td>' +
+          '<td><code>' + escapeHTML(exposed) + '</code></td>' +
+          '<td>' + escapeHTML(r.upstream_name || '') + '<div class="muted">' + escapeHTML(r.upstream_id || '') + '</div></td>' +
+          '<td>' + escapeHTML(r.target_method || '') + '<div class="muted">' + escapeHTML(r.target_name || '') + '</div></td>' +
+          '<td class="muted">' + escapeHTML(r.description || '') + '</td>' +
+          '<td>' + (r.discovery_error ? '<span class="status error" title="' + escapeAttr(r.discovery_error) + '">discovery error</span>' : '<span class="status">routable</span>') + '<div class="muted">' + ago(r.last_discovered_at) + '</div></td>' +
+          '<td><button class="secondary" type="button" onclick="explainMCPRouteFromRow(\'' + escapeAttr(r.kind || '') + '\',\'' + escapeAttr(exposed) + '\')">Explain</button></td>' +
+        '</tr>';
+      }).join('') + '</tbody></table>';
+    }
+    function mcpMethodForKind(kind) {
+      if (kind === 'prompt') return 'prompts/get';
+      if (kind === 'resource') return 'resources/read';
+      return 'tools/call';
+    }
+    function mcpExplainPayloadFromForm() {
+      const method = document.getElementById('mcp-explain-method').value;
+      const name = document.getElementById('mcp-explain-name').value.trim();
+      const uri = document.getElementById('mcp-explain-uri').value.trim();
+      return { method, name, uri };
+    }
+    function mcpExplainHTML(d) {
+      const route = d.route || {};
+      const pol = d.policy || {};
+      const fin = d.final || {};
+      const routeBlock = '<div class="kv">' +
+        row('Route', route.found ? '<span class="status">found</span>' : '<span class="status error">missing</span>') +
+        row('업스트림', escapeHTML((route.upstream_name || '') + (route.upstream_id ? ' / ' + route.upstream_id : ''))) +
+        row('대상', escapeHTML((route.target_method || '') + ' ' + (route.target_name || ''))) +
+        row('서버 정책', '<span class="status ' + governanceStatusClass(pol.server_policy) + '">' + escapeHTML(pol.server_policy || '-') + '</span>') +
+        row('Tool Risk', '<span class="status ' + governanceStatusClass(pol.tool_risk_level) + '">' + escapeHTML(pol.tool_risk_level || '-') + '</span> · <span class="status ' + governanceStatusClass(pol.tool_risk_action) + '">' + escapeHTML(pol.tool_risk_action || '-') + '</span>' + (pol.tool_risk_configured ? ' <span class="pill">configured</span>' : '')) +
+        row('최종 판단', '<span class="status ' + governanceStatusClass(fin.decision) + '">' + escapeHTML(fin.decision || '-') + '</span>') +
+        row('근거', escapeHTML(fin.reason || '')) +
+      '</div>';
+      return routeBlock;
+    }
+    async function runMCPRouteExplain(runTest) {
+      const host = document.getElementById('mcp-route-explain-result');
+      const payload = mcpExplainPayloadFromForm();
+      host.innerHTML = '<div class="empty">확인 중...</div>';
+      try {
+        const explain = await api('/admin/mcp/route/explain', { method: 'POST', body: JSON.stringify(payload) });
+        let html = mcpExplainHTML(explain);
+        if (runTest) {
+          const route = explain.route || {};
+          const final = explain.final || {};
+          if (!route.found || final.decision === 'block') {
+            html += '<div class="banner warn" style="margin-top:12px">Route가 없거나 최종 판단이 block이라 테스트 호출을 생략했습니다.</div>';
+          } else {
+            const testBody = { ...payload, upstream_id: route.upstream_id, method: route.target_method || payload.method };
+            const tested = await api('/admin/mcp/test', { method: 'POST', body: JSON.stringify(testBody) });
+            html += '<h4 style="margin:16px 0 6px">Test Result</h4><div class="kv">' +
+              row('상태', tested.ok ? '<span class="status">ok</span>' : '<span class="status error">error</span>') +
+              row('Latency', fmt(tested.latency_ms || 0) + ' ms') +
+              row('Error', escapeHTML(tested.error || '')) +
+              '</div><pre class="prompt-block" style="margin-top:10px">' + escapeHTML(tested.response_preview || '') + '</pre>';
+          }
+        }
+        host.innerHTML = html;
+      } catch (err) {
+        host.innerHTML = '<div class="error-line">' + escapeHTML(err.message) + '</div>';
+      }
+    }
+    window.explainMCPRouteFromRow = async (kind, exposed) => {
+      const method = mcpMethodForKind(kind);
+      document.getElementById('mcp-explain-method').value = method;
+      if (kind === 'resource') {
+        document.getElementById('mcp-explain-uri').value = exposed;
+        document.getElementById('mcp-explain-name').value = '';
+      } else {
+        document.getElementById('mcp-explain-name').value = exposed;
+        document.getElementById('mcp-explain-uri').value = '';
+      }
+      await runMCPRouteExplain(false);
+    };
     window.saveMCPToolRisk = async (idx) => {
       const risk = (window.mcpToolRiskRows || [])[idx];
       if (!risk) return;

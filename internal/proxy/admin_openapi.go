@@ -248,6 +248,10 @@ var apiEndpoints = []apiEndpoint{
 	// ---- admin: MCP governance ----
 	{"/admin/mcp/tools", []string{"get"}, "mcp", "MCP tool risk grades", false},
 	{"/admin/mcp/servers", []string{"get"}, "mcp", "MCP servers", false},
+	{"/admin/mcp/overview", []string{"get"}, "mcp", "MCP operations overview", false},
+	{"/admin/mcp/routes", []string{"get"}, "mcp", "MCP namespaced route map", false},
+	{"/admin/mcp/route/explain", []string{"post"}, "mcp", "Explain MCP route and policy decision", false},
+	{"/admin/mcp/test", []string{"post"}, "mcp", "Run an MCP upstream test call", false},
 	{"/admin/mcp/requests", []string{"get"}, "mcp", "MCP request log", false},
 	{"/admin/mcp/policies", []string{"get", "post"}, "mcp", "MCP policies", false},
 	{"/admin/mcp/policies/{server}", []string{"get", "put", "delete"}, "mcp", "MCP policy by server", false},

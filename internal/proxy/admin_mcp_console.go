@@ -1,0 +1,354 @@
+package proxy
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"sort"
+	"strings"
+	"time"
+
+	"vibe-coders/internal/store"
+)
+
+type mcpRouteView struct {
+	Kind             string `json:"kind"`
+	ExposedName      string `json:"exposed_name,omitempty"`
+	URI              string `json:"uri,omitempty"`
+	UpstreamID       string `json:"upstream_id"`
+	UpstreamName     string `json:"upstream_name"`
+	TargetMethod     string `json:"target_method"`
+	TargetName       string `json:"target_name"`
+	Description      string `json:"description,omitempty"`
+	LastDiscoveredAt string `json:"last_discovered_at"`
+	DiscoveryError   string `json:"discovery_error,omitempty"`
+}
+
+func (s *Server) handleMCPOverview(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	if r.Method != http.MethodGet {
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
+	upstreams, err := s.db.ListMCPUpstreams(r.Context())
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "mcp_overview_failed")
+		return
+	}
+	snap := s.mcpToolsSnapshotCached(r.Context())
+	summary, _ := s.db.MCPSummary(r.Context())
+	tools, _ := s.db.ListMCPTools(r.Context(), store.ToolFilter{MCPOnly: true, Since: time.Now().Add(-24 * time.Hour), Limit: 500})
+	recentCalls := int64(0)
+	recentErrors := int64(0)
+	for _, t := range tools {
+		recentCalls += t.Calls
+		recentErrors += t.Errors
+	}
+	healthy := map[string]bool{}
+	for _, route := range snap.routes {
+		healthy[route.upstreamID] = true
+	}
+	for _, route := range snap.promptRoutes {
+		healthy[route.upstreamID] = true
+	}
+	for _, route := range snap.resourceRoutes {
+		healthy[route.upstreamID] = true
+	}
+	enabled := 0
+	for _, up := range upstreams {
+		if up.Enabled {
+			enabled++
+		}
+	}
+	blockedCount := 0
+	if profiles, err := s.db.ListToolRiskProfiles(r.Context()); err == nil {
+		for _, p := range profiles {
+			if normalizeToolRiskAction(p.Action, "") == "block" {
+				blockedCount++
+			}
+		}
+	}
+	if policies, err := s.db.ListMCPPolicies(r.Context()); err == nil {
+		for _, p := range policies {
+			if p.Mode == "block" {
+				blockedCount++
+			}
+		}
+	}
+	errorRate := 0.0
+	if recentCalls > 0 {
+		errorRate = float64(recentErrors) / float64(recentCalls)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"upstream_count":         len(upstreams),
+		"enabled_upstream_count": enabled,
+		"healthy_upstream_count": len(healthy),
+		"total_tools":            len(snap.tools),
+		"total_prompts":          len(snap.prompts),
+		"total_resources":        len(snap.resources),
+		"discovery_error_count":  len(snap.errors),
+		"blocked_count":          blockedCount,
+		"recent_call_count":      recentCalls,
+		"recent_error_rate":      errorRate,
+		"summary":                summary,
+		"fetched_at":             snap.fetchedAt.UTC().Format(time.RFC3339),
+	})
+}
+
+func (s *Server) handleMCPRoutes(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	if r.Method != http.MethodGet {
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
+	snap := s.mcpToolsSnapshotCached(r.Context())
+	writeJSON(w, http.StatusOK, map[string]any{"routes": mcpRouteViews(snap), "fetched_at": snap.fetchedAt.UTC().Format(time.RFC3339), "errors": snap.errors})
+}
+
+func mcpRouteViews(snap *mcpToolsSnapshot) []mcpRouteView {
+	if snap == nil {
+		return []mcpRouteView{}
+	}
+	descs := map[string]string{}
+	for _, t := range snap.tools {
+		descs["tool\x00"+t.Name] = t.Description
+	}
+	for _, p := range snap.prompts {
+		descs["prompt\x00"+p.Name] = p.Description
+	}
+	for _, r := range snap.resources {
+		descs["resource\x00"+r.URI] = r.Description
+	}
+	out := []mcpRouteView{}
+	at := snap.fetchedAt.UTC().Format(time.RFC3339)
+	for exposed, route := range snap.routes {
+		out = append(out, mcpRouteView{Kind: "tool", ExposedName: exposed, UpstreamID: route.upstreamID, UpstreamName: route.upstreamName, TargetMethod: "tools/call", TargetName: route.bareTool, Description: descs["tool\x00"+exposed], LastDiscoveredAt: at, DiscoveryError: snap.errors[route.upstreamName]})
+	}
+	for exposed, route := range snap.promptRoutes {
+		out = append(out, mcpRouteView{Kind: "prompt", ExposedName: exposed, UpstreamID: route.upstreamID, UpstreamName: route.upstreamName, TargetMethod: "prompts/get", TargetName: route.bareTool, Description: descs["prompt\x00"+exposed], LastDiscoveredAt: at, DiscoveryError: snap.errors[route.upstreamName]})
+	}
+	for uri, route := range snap.resourceRoutes {
+		out = append(out, mcpRouteView{Kind: "resource", URI: uri, UpstreamID: route.upstreamID, UpstreamName: route.upstreamName, TargetMethod: "resources/read", TargetName: route.bareTool, Description: descs["resource\x00"+uri], LastDiscoveredAt: at, DiscoveryError: snap.errors[route.upstreamName]})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Kind != out[j].Kind {
+			return out[i].Kind < out[j].Kind
+		}
+		return firstNonEmpty(out[i].ExposedName, out[i].URI) < firstNonEmpty(out[j].ExposedName, out[j].URI)
+	})
+	return out
+}
+
+func (s *Server) handleMCPRouteExplain(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	if r.Method != http.MethodPost {
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
+	var payload struct {
+		Method   string `json:"method"`
+		Name     string `json:"name"`
+		URI      string `json:"uri"`
+		APIKeyID string `json:"api_key_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "invalid_body")
+		return
+	}
+	explain := s.explainMCPRoute(r.Context(), strings.TrimSpace(payload.Method), strings.TrimSpace(payload.Name), strings.TrimSpace(payload.URI))
+	writeJSON(w, http.StatusOK, explain)
+}
+
+func (s *Server) explainMCPRoute(ctx context.Context, method, name, uri string) map[string]any {
+	snap := s.mcpToolsSnapshotCached(ctx)
+	route, found, targetMethod, lookup := mcpLookupRoute(snap, method, name, uri)
+	out := map[string]any{
+		"input": map[string]any{"method": method, "name": name, "uri": uri},
+		"route": map[string]any{
+			"found": found,
+		},
+	}
+	if !found {
+		out["final"] = map[string]any{"decision": "block", "reason": "route not found for method/name/uri"}
+		return out
+	}
+	out["route"] = map[string]any{
+		"found":         true,
+		"upstream_id":   route.upstreamID,
+		"upstream_name": route.upstreamName,
+		"target_method": targetMethod,
+		"target_name":   route.bareTool,
+		"lookup":        lookup,
+	}
+	policySnap := s.mcpPolicySnapshot(ctx)
+	serverMode := "allow"
+	policyDecision := evaluateMCPPolicy(policySnap, []store.ToolInvocation{{IsMCP: true, ServerLabel: route.upstreamName, ToolName: route.bareTool}})
+	if policySnap != nil {
+		if mode := strings.TrimSpace(policySnap.modes[route.upstreamName]); mode != "" {
+			serverMode = mode
+		} else if policySnap.allowlist {
+			serverMode = "not_in_allowlist"
+		}
+	}
+	riskLevel, riskAction := inferMCPRisk(route.upstreamName, route.bareTool)
+	configured := false
+	note := ""
+	if profile, found, err := s.db.ToolRiskProfile(ctx, route.upstreamName, route.bareTool); err == nil && found {
+		riskLevel = normalizeRiskLevel(profile.RiskLevel, riskLevel)
+		riskAction = normalizeToolRiskAction(profile.Action, riskAction)
+		configured = true
+		note = profile.Note
+	}
+	finalDecision := "allow"
+	reason := "route found and policy allows call"
+	if policyDecision.Blocked {
+		finalDecision = "block"
+		reason = "server policy blocked: " + policyDecision.Reason
+	} else if riskAction == "block" {
+		finalDecision = "block"
+		reason = firstNonEmpty(note, "tool risk profile blocks call")
+	} else if riskAction == "require_approval" {
+		finalDecision = "approval_required"
+		reason = firstNonEmpty(note, "tool risk profile requires approval")
+	} else if len(policyDecision.Warnings) > 0 || serverMode == "warn" {
+		finalDecision = "warn"
+		reason = "server policy warns but allows call"
+	}
+	out["policy"] = map[string]any{
+		"server_policy":        serverMode,
+		"tool_risk_level":      riskLevel,
+		"tool_risk_action":     riskAction,
+		"tool_risk_configured": configured,
+		"tool_risk_note":       note,
+	}
+	out["final"] = map[string]any{"decision": finalDecision, "reason": reason}
+	return out
+}
+
+func mcpLookupRoute(snap *mcpToolsSnapshot, method, name, uri string) (mcpRoute, bool, string, string) {
+	if snap == nil {
+		return mcpRoute{}, false, method, ""
+	}
+	switch method {
+	case "tools/call":
+		route, ok := snap.routes[name]
+		return route, ok, "tools/call", name
+	case "prompts/get":
+		route, ok := snap.promptRoutes[name]
+		return route, ok, "prompts/get", name
+	case "resources/read":
+		route, ok := snap.resourceRoutes[uri]
+		return route, ok, "resources/read", uri
+	default:
+		if name != "" {
+			if route, ok := snap.routes[name]; ok {
+				return route, true, "tools/call", name
+			}
+			if route, ok := snap.promptRoutes[name]; ok {
+				return route, true, "prompts/get", name
+			}
+		}
+		if uri != "" {
+			route, ok := snap.resourceRoutes[uri]
+			return route, ok, "resources/read", uri
+		}
+	}
+	return mcpRoute{}, false, method, firstNonEmpty(name, uri)
+}
+
+func (s *Server) handleMCPTest(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	if r.Method != http.MethodPost {
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
+	var payload struct {
+		UpstreamID string          `json:"upstream_id"`
+		Method     string          `json:"method"`
+		Name       string          `json:"name"`
+		URI        string          `json:"uri"`
+		Arguments  json.RawMessage `json:"arguments"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "invalid_body")
+		return
+	}
+	upID := strings.TrimSpace(payload.UpstreamID)
+	if upID == "" {
+		ex := s.explainMCPRoute(r.Context(), payload.Method, payload.Name, payload.URI)
+		if route, ok := ex["route"].(map[string]any); ok {
+			if id, _ := route["upstream_id"].(string); id != "" {
+				upID = id
+			}
+		}
+	}
+	up, found, err := s.db.GetMCPUpstream(r.Context(), upID)
+	if err != nil || !found || !up.Enabled {
+		writeOpenAIError(w, http.StatusNotFound, "upstream not found or disabled", "invalid_request_error", "upstream_not_found")
+		return
+	}
+	method := strings.TrimSpace(payload.Method)
+	params := mcpTestParams(method, payload.Name, payload.URI, payload.Arguments)
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	defer cancel()
+	start := time.Now()
+	result, callErr := s.callUpstream(ctx, up, method, params)
+	latency := time.Since(start).Milliseconds()
+	out := map[string]any{
+		"upstream_id":   up.ID,
+		"upstream_name": up.Name,
+		"method":        method,
+		"latency_ms":    latency,
+		"ok":            callErr == nil,
+	}
+	if callErr != nil {
+		out["error"] = callErr.Error()
+	} else {
+		out["response_preview"] = truncateForPreview(string(result), 4000)
+		var decoded any
+		if json.Unmarshal(result, &decoded) == nil {
+			out["response"] = decoded
+		}
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func mcpTestParams(method, name, uri string, args json.RawMessage) any {
+	switch method {
+	case "tools/call":
+		return map[string]any{"name": bareMCPName(name), "arguments": rawOrEmpty(args)}
+	case "prompts/get":
+		return map[string]any{"name": bareMCPName(name), "arguments": rawOrEmpty(args)}
+	case "resources/read":
+		return map[string]any{"uri": uri}
+	default:
+		return map[string]any{}
+	}
+}
+
+func bareMCPName(name string) string {
+	if _, bare, ok := strings.Cut(name, "__"); ok {
+		return bare
+	}
+	return name
+}
+
+func truncateForPreview(s string, n int) string {
+	s = strings.TrimSpace(s)
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "...(truncated)"
+}

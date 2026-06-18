@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -271,5 +272,91 @@ func TestMCPGatewayPolicyBlocks(t *testing.T) {
 	call := mcpRPC(t, proxy.URL+"/mcp", `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"fake__echo","arguments":{}}}`)
 	if call.Error == nil {
 		t.Fatalf("expected policy block error, got result: %s", call.Result)
+	}
+}
+
+func TestMCPAdminConsoleRoutesExplainAndTest(t *testing.T) {
+	up := fakeMCPUpstream(t)
+	defer up.Close()
+	s, db := newKnowledgeServer(t)
+	proxy := httptest.NewServer(s.Routes())
+	defer proxy.Close()
+	ctx := context.Background()
+
+	if err := db.UpsertMCPUpstream(ctx, store.MCPUpstream{ID: "fake", Name: "fake", URL: up.URL, Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.UpsertMCPUpstream(ctx, store.MCPUpstream{ID: "off", Name: "off", URL: up.URL, Enabled: false}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.UpsertToolRiskProfile(ctx, store.ToolRiskProfile{ID: "trp1", ServerLabel: "fake", ToolName: "echo", RiskLevel: "high", Action: "require_approval", Note: "writes issue"}); err != nil {
+		t.Fatal(err)
+	}
+
+	routesResp, err := http.Get(proxy.URL + "/admin/mcp/routes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer routesResp.Body.Close()
+	if routesResp.StatusCode != http.StatusOK {
+		t.Fatalf("routes status %d", routesResp.StatusCode)
+	}
+	var routesOut struct {
+		Routes []mcpRouteView `json:"routes"`
+	}
+	if err := json.NewDecoder(routesResp.Body).Decode(&routesOut); err != nil {
+		t.Fatal(err)
+	}
+	hasTool := false
+	hasDisabled := false
+	for _, r := range routesOut.Routes {
+		if r.Kind == "tool" && r.ExposedName == "fake__echo" && r.TargetName == "echo" && r.UpstreamID == "fake" {
+			hasTool = true
+		}
+		if r.UpstreamID == "off" {
+			hasDisabled = true
+		}
+	}
+	if !hasTool {
+		t.Fatalf("expected fake__echo route, got %+v", routesOut.Routes)
+	}
+	if hasDisabled {
+		t.Fatalf("disabled upstream must not appear in route map: %+v", routesOut.Routes)
+	}
+
+	explainResp := postJSON(t, proxy.URL+"/admin/mcp/route/explain", "", map[string]any{
+		"method": "tools/call",
+		"name":   "fake__echo",
+	})
+	defer explainResp.Body.Close()
+	var explain map[string]any
+	if err := json.NewDecoder(explainResp.Body).Decode(&explain); err != nil {
+		t.Fatal(err)
+	}
+	final := explain["final"].(map[string]any)
+	if final["decision"] != "approval_required" {
+		t.Fatalf("expected approval_required, got %+v", explain)
+	}
+	policy := explain["policy"].(map[string]any)
+	if policy["tool_risk_level"] != "high" || policy["tool_risk_action"] != "require_approval" {
+		t.Fatalf("risk profile not reflected: %+v", explain)
+	}
+
+	testResp := postJSON(t, proxy.URL+"/admin/mcp/test", "", map[string]any{
+		"method":      "tools/call",
+		"upstream_id": "fake",
+		"name":        "fake__echo",
+		"arguments":   map[string]any{"text": "hi"},
+	})
+	defer testResp.Body.Close()
+	var tested struct {
+		OK              bool   `json:"ok"`
+		ResponsePreview string `json:"response_preview"`
+	}
+	if err := json.NewDecoder(testResp.Body).Decode(&tested); err != nil {
+		t.Fatal(err)
+	}
+	if !tested.OK || !strings.Contains(tested.ResponsePreview, "called echo") {
+		t.Fatalf("expected successful test call, got %+v", tested)
 	}
 }
