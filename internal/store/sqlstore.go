@@ -911,6 +911,7 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 			action TEXT NOT NULL,
 			created_at TEXT NOT NULL
 		)`,
+		`ALTER TABLE recommendation_feedback ADD COLUMN reason TEXT`,
 		`CREATE INDEX IF NOT EXISTS idx_recommendation_feedback_kind ON recommendation_feedback(kind, created_at)`,
 		// Runtime admin settings: env-bootstrapped defaults overlaid by admin-managed
 		// values. Secret values are stored encrypted in value_json (marked is_secret).

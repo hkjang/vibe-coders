@@ -273,10 +273,39 @@ func (s *Server) handleMyRecommendations(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, map[string]any{"user_id": userID, "recommendations": stored})
 }
 
+func normalizeRecommendationFeedbackAction(action string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(action)) {
+	case "accepted", "accept", "adopted", "adopt":
+		return "adopted", true
+	case "rejected", "reject", "dismissed", "dismiss":
+		return "dismissed", true
+	case "later", "snoozed", "snooze":
+		return "later", true
+	default:
+		return "", false
+	}
+}
+
 // handleMyRecommendationFeedback records the calling user's action on a recommendation
-// (adopt/dismiss), keyed to the recommendation's kind/ref for adoption-rate tracking.
-// POST /me/recommendations/feedback {id, action}
+// (adopt/dismiss/later), keyed to the recommendation's kind/ref for adoption-rate tracking.
+// POST /me/recommendations/feedback {id, action, reason?}
 func (s *Server) handleMyRecommendationFeedback(w http.ResponseWriter, r *http.Request) {
+	s.handleMyRecommendationFeedbackWithID(w, r, "")
+}
+
+// handleMyRecommendationFeedbackByPath supports the REST-style alias:
+// POST /me/recommendations/{id}/feedback {action, reason?}
+func (s *Server) handleMyRecommendationFeedbackByPath(w http.ResponseWriter, r *http.Request) {
+	path := strings.Trim(strings.TrimPrefix(r.URL.Path, "/me/recommendations/"), "/")
+	if !strings.HasSuffix(path, "/feedback") {
+		writeOpenAIError(w, http.StatusNotFound, "recommendation feedback route not found", "invalid_request_error", "not_found")
+		return
+	}
+	recID := strings.Trim(strings.TrimSuffix(path, "/feedback"), "/")
+	s.handleMyRecommendationFeedbackWithID(w, r, recID)
+}
+
+func (s *Server) handleMyRecommendationFeedbackWithID(w http.ResponseWriter, r *http.Request, recIDFromPath string) {
 	if r.Method != http.MethodPost {
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
 		return
@@ -289,14 +318,18 @@ func (s *Server) handleMyRecommendationFeedback(w http.ResponseWriter, r *http.R
 	var payload struct {
 		ID     string `json:"id"`
 		Action string `json:"action"`
+		Reason string `json:"reason"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 		writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "invalid_body")
 		return
 	}
-	action := strings.ToLower(strings.TrimSpace(payload.Action))
-	if action != "adopted" && action != "dismissed" {
-		writeOpenAIError(w, http.StatusBadRequest, "action must be 'adopted' or 'dismissed'", "invalid_request_error", "invalid_action")
+	if strings.TrimSpace(recIDFromPath) != "" {
+		payload.ID = recIDFromPath
+	}
+	action, ok := normalizeRecommendationFeedbackAction(payload.Action)
+	if !ok {
+		writeOpenAIError(w, http.StatusBadRequest, "action must be one of accepted, rejected, dismissed, later", "invalid_request_error", "invalid_action")
 		return
 	}
 	rec, found, err := s.db.GetUserRecommendation(r.Context(), userID, strings.TrimSpace(payload.ID))
@@ -309,7 +342,7 @@ func (s *Server) handleMyRecommendationFeedback(w http.ResponseWriter, r *http.R
 		return
 	}
 	if err := s.db.InsertRecommendationFeedback(r.Context(), store.RecommendationFeedback{
-		ID: newID("rfb"), UserID: userID, Kind: rec.Kind, Ref: rec.Ref, Title: rec.Title, Action: action,
+		ID: newID("rfb"), UserID: userID, Kind: rec.Kind, Ref: rec.Ref, Title: rec.Title, Action: action, Reason: strings.TrimSpace(payload.Reason),
 	}); err != nil {
 		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "feedback_failed")
 		return

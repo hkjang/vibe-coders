@@ -39,6 +39,18 @@ func TestRecommendationFeedbackAndAdoption(t *testing.T) {
 	fb("u2", "model_switch", "dismissed")
 	fb("u3", "model_switch", "adopted")
 	fb("u1", "template", "adopted")
+	if err := db.InsertRecommendationFeedback(ctx, RecommendationFeedback{
+		ID: "model_switch_u4_later", UserID: "u4", Kind: "model_switch", Action: "later", Reason: "decide after team review",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var reason string
+	if err := db.db.QueryRowContext(ctx, `SELECT COALESCE(reason, '') FROM recommendation_feedback WHERE id = ?`, "model_switch_u4_later").Scan(&reason); err != nil {
+		t.Fatal(err)
+	}
+	if reason != "decide after team review" {
+		t.Fatalf("feedback reason = %q", reason)
+	}
 
 	adoption, err := db.RecommendationAdoption(ctx, now.Add(-time.Hour))
 	if err != nil {

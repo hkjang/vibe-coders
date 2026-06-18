@@ -31,7 +31,7 @@ import (
 )
 
 // AppVersion is the gateway build version, surfaced in /auth/me and the admin UI.
-const AppVersion = "v0.50.12"
+const AppVersion = "v0.50.13"
 
 type Server struct {
 	cfg            config.Config
@@ -298,6 +298,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/me/dashboard", s.handleMyDashboard)
 	mux.HandleFunc("/me/recommendations", s.handleMyRecommendations)
 	mux.HandleFunc("/me/recommendations/feedback", s.handleMyRecommendationFeedback)
+	mux.HandleFunc("/me/recommendations/", s.handleMyRecommendationFeedbackByPath)
 	mux.HandleFunc("/me/keys", s.handleMyKeys)
 	mux.HandleFunc("/me/keys/", s.handleMyKeyByID)
 	mux.HandleFunc("/admin/keys/health", s.handleKeyHealth)

@@ -48,7 +48,8 @@ var apiEndpoints = []apiEndpoint{
 	// ---- self-service (/me) ----
 	{"/me/dashboard", []string{"get"}, "self-service", "Caller's personal usage dashboard", false},
 	{"/me/recommendations", []string{"get"}, "self-service", "Caller's personalized recommendations", false},
-	{"/me/recommendations/feedback", []string{"post"}, "self-service", "Record adopt/dismiss feedback on a recommendation", false},
+	{"/me/recommendations/feedback", []string{"post"}, "self-service", "Record accepted/rejected/later feedback on a recommendation", false},
+	{"/me/recommendations/{id}/feedback", []string{"post"}, "self-service", "Record accepted/rejected/later feedback on a recommendation", false},
 	{"/me/keys", []string{"get", "post"}, "self-service", "List / issue the caller's own API keys", false},
 	{"/me/keys/{id}", []string{"post", "delete"}, "self-service", "Rotate ({id}/rotate) or revoke the caller's key", false},
 

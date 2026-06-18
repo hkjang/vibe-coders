@@ -181,24 +181,25 @@ type RecommendationFeedback struct {
 	Kind      string `json:"kind"`
 	Ref       string `json:"ref"`
 	Title     string `json:"title"`
-	Action    string `json:"action"` // adopted | dismissed
+	Action    string `json:"action"` // adopted | dismissed | later
+	Reason    string `json:"reason"`
 	CreatedAt string `json:"created_at"`
 }
 
-// InsertRecommendationFeedback records an adopt/dismiss action.
+// InsertRecommendationFeedback records an adopt/dismiss/later action.
 func (s *SQLStore) InsertRecommendationFeedback(ctx context.Context, f RecommendationFeedback) error {
-	_, err := s.db.ExecContext(ctx, s.bind(`INSERT INTO recommendation_feedback (id, user_id, kind, ref, title, action, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)`), f.ID, f.UserID, f.Kind, f.Ref, f.Title, f.Action, time.Now().UTC().Format(time.RFC3339Nano))
+	_, err := s.db.ExecContext(ctx, s.bind(`INSERT INTO recommendation_feedback (id, user_id, kind, ref, title, action, reason, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`), f.ID, f.UserID, f.Kind, f.Ref, f.Title, f.Action, f.Reason, time.Now().UTC().Format(time.RFC3339Nano))
 	return err
 }
 
 // RecommendationAdoptionByKind is the adoption summary for one recommendation kind.
 type RecommendationAdoptionByKind struct {
-	Kind            string  `json:"kind"`
-	Adopted         int64   `json:"adopted"`
-	Dismissed       int64   `json:"dismissed"`
-	DistinctAdopters int64  `json:"distinct_adopters"`
-	AdoptionRate    float64 `json:"adoption_rate"` // adopted / (adopted + dismissed)
+	Kind             string  `json:"kind"`
+	Adopted          int64   `json:"adopted"`
+	Dismissed        int64   `json:"dismissed"`
+	DistinctAdopters int64   `json:"distinct_adopters"`
+	AdoptionRate     float64 `json:"adoption_rate"` // adopted / (adopted + dismissed)
 }
 
 // RecommendationAdoption aggregates feedback per kind over the window.
