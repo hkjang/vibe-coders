@@ -238,4 +238,31 @@ func TestExplainAndDetailIncludeGovernanceEvents(t *testing.T) {
 	if explain.Governance.PolicyDecisionCount == 0 || len(explain.Governance.PolicyDecisions) == 0 {
 		t.Fatalf("expected governance policy decisions, got %+v", explain.Governance)
 	}
+
+	linksResp, err := http.Get(proxy.URL + "/admin/requests/" + id + "/links")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer linksResp.Body.Close()
+	var links struct {
+		RequestID  string         `json:"request_id"`
+		TraceID    string         `json:"trace_id"`
+		Counts     map[string]any `json:"counts"`
+		Artifacts  map[string]any `json:"artifacts"`
+		Governance struct {
+			Blocked bool `json:"blocked"`
+		} `json:"governance"`
+	}
+	if err := json.NewDecoder(linksResp.Body).Decode(&links); err != nil {
+		t.Fatal(err)
+	}
+	if links.RequestID != id || links.TraceID == "" {
+		t.Fatalf("unexpected links identity: %+v", links)
+	}
+	if links.Counts["secret_events"].(float64) == 0 || links.Counts["policy_decisions"].(float64) == 0 || !links.Governance.Blocked {
+		t.Fatalf("expected blocked governance counts in trace links: %+v", links)
+	}
+	if links.Artifacts["request_detail"] == "" || links.Artifacts["explain"] == "" || links.Artifacts["links"] == "" {
+		t.Fatalf("expected trace link artifacts, got %+v", links.Artifacts)
+	}
 }

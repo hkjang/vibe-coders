@@ -2034,13 +2034,41 @@ const adminHTML = `<!doctype html>
           '<td><pre class="prompt-block" style="max-height:120px;overflow:auto;margin:0">' + escapeHTML(prettyJSON(s.detail || '')) + '</pre></td>' +
         '</tr>').join('') + '</tbody></table>';
     }
+    function traceLinksHTML(requestID, links) {
+      if (!links) return '';
+      const c = links.counts || {};
+      const hasMCP = !!((links.artifacts || {}).mcp_waterfall);
+      const hasT2S = !!((links.artifacts || {}).text2sql_spans);
+      const sessionID = links.session_id || '';
+      const chip = (label, value, warn) => '<span class="pill' + (warn ? ' warn' : '') + '">' + escapeHTML(label) + ' ' + fmt(value || 0) + '</span>';
+      const buttons = [
+        '<button class="secondary" type="button" onclick="closeModal();openExplain(\'' + escapeAttr(requestID) + '\')">XView</button>'
+      ];
+      if (sessionID) buttons.push('<button class="secondary" type="button" onclick="closeModal();openWaterfall(\'' + escapeAttr(sessionID) + '\')">Waterfall</button>');
+      if (hasMCP) buttons.push('<button class="secondary" type="button" onclick="closeModal();openMCPRequestWaterfall(\'' + escapeAttr(requestID) + '\')">MCP Waterfall</button>');
+      if (hasT2S) buttons.push('<button class="secondary" type="button" onclick="openT2SSpans(\'' + escapeAttr(requestID) + '\')">Text2SQL Timeline</button>');
+      return '<div style="border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin-bottom:12px">' +
+        '<div style="display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px">' +
+          '<strong>Trace Links</strong><div style="display:flex;gap:6px;flex-wrap:wrap">' + buttons.join('') + '</div>' +
+        '</div>' +
+        '<div style="display:flex;gap:6px;flex-wrap:wrap">' +
+          chip('tools', c.tools) +
+          chip('mcp', c.mcp_tools) +
+          chip('text2sql', c.text2sql_spans) +
+          chip('policy', c.policy_decisions, (c.policy_decisions || 0) > 0) +
+          chip('secret', c.secret_events, (c.secret_events || 0) > 0) +
+          chip('approval', c.approvals, (c.approvals || 0) > 0) +
+        '</div>' +
+      '</div>';
+    }
     window.openRequestDetail = async (id) => {
       try {
-        const [detail, note] = await Promise.all([
+        const [detail, note, links] = await Promise.all([
           api('/admin/requests/' + encodeURIComponent(id)),
           api('/admin/requests/' + encodeURIComponent(id) + '/note').catch(() => ({ tags: [], note: '' })),
+          api('/admin/requests/' + encodeURIComponent(id) + '/links').catch(() => null),
         ]);
-        openModal('요청 상세 - ' + (detail.request.trace_id || id), requestDetailHTML(detail, note));
+        openModal('요청 상세 - ' + (detail.request.trace_id || id), requestDetailHTML(detail, note, links));
         wireNoteEditor(id);
       } catch (err) {
         openModal('오류', '<div class="error-line">' + escapeHTML(err.message) + '</div>');
@@ -3487,7 +3515,7 @@ const adminHTML = `<!doctype html>
         });
       });
     }
-    function requestDetailHTML(d, note) {
+    function requestDetailHTML(d, note, links) {
       const r = d.request;
       // Surface the most recent user message at the very top of the modal (above 요청 ID),
       // rendered for maximum readability — it's the question the operator most wants to see.
@@ -3569,6 +3597,7 @@ const adminHTML = `<!doctype html>
       return (
         lastUserBlock +
         explainBtn +
+        traceLinksHTML(r.id, links) +
         '<div class="kv">' +
           row('요청 ID', escapeHTML(r.id)) +
           row('Trace ID', escapeHTML(r.trace_id)) +

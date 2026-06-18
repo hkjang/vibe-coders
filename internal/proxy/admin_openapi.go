@@ -59,6 +59,7 @@ var apiEndpoints = []apiEndpoint{
 	{"/admin/stats", []string{"get"}, "admin", "Summary stats", false},
 	{"/admin/requests", []string{"get"}, "admin", "List recent requests", false},
 	{"/admin/requests/{id}", []string{"get"}, "admin", "Request detail (prompts/response/spans/evaluations)", false},
+	{"/admin/requests/{id}/links", []string{"get"}, "admin", "Request trace links across routing/MCP/Text2SQL/governance", false},
 	{"/admin/requests/diff", []string{"get"}, "admin", "Diff two requests", false},
 	{"/admin/prompts", []string{"get"}, "admin", "Search prompts", false},
 	{"/admin/timeseries", []string{"get"}, "admin", "Usage timeseries", false},
