@@ -30,11 +30,21 @@ func (s *Server) handleMCPUpstreams(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"upstreams": list, "discovery_errors": errs})
 	case http.MethodPost:
 		var p struct {
-			ID        string `json:"id"`
-			Name      string `json:"name"`
-			URL       string `json:"url"`
-			AuthToken string `json:"auth_token"`
-			Enabled   *bool  `json:"enabled"`
+			ID               string                     `json:"id"`
+			Name             string                     `json:"name"`
+			URL              string                     `json:"url"`
+			AuthToken        string                     `json:"auth_token"`
+			Enabled          *bool                      `json:"enabled"`
+			Metadata         *store.MCPUpstreamMetadata `json:"metadata"`
+			Description      string                     `json:"description"`
+			Domains          []string                   `json:"domains"`
+			RiskLevel        string                     `json:"risk_level"`
+			AllowedModels    []string                   `json:"allowed_models"`
+			DefaultTool      string                     `json:"default_tool"`
+			TimeoutMS        int                        `json:"timeout_ms"`
+			MaxResults       int                        `json:"max_results"`
+			RequiresApproval bool                       `json:"requires_approval"`
+			FallbackAllowed  bool                       `json:"fallback_allowed"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
 			writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "invalid_body")
@@ -71,14 +81,15 @@ func (s *Server) handleMCPUpstreams(w http.ResponseWriter, r *http.Request) {
 		if p.Enabled != nil {
 			enabled = *p.Enabled
 		}
-		up := store.MCPUpstream{ID: slug, Name: p.Name, URL: p.URL, EncryptedAuth: encAuth, Enabled: enabled}
+		meta := mcpMetadataFromPayload(p.Metadata, p.Description, p.Domains, p.RiskLevel, p.AllowedModels, p.DefaultTool, p.TimeoutMS, p.MaxResults, p.RequiresApproval, p.FallbackAllowed)
+		up := store.MCPUpstream{ID: slug, Name: p.Name, URL: p.URL, EncryptedAuth: encAuth, Enabled: enabled, Metadata: meta}
 		if err := s.db.UpsertMCPUpstream(r.Context(), up); err != nil {
 			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "mcp_upstream_save_failed")
 			return
 		}
 		s.resetMCPUpstream(slug)
 		s.auditAdmin(r, "mcp_upstream.upsert", "", auditJSON(map[string]any{"id": slug, "name": up.Name, "url": up.URL, "enabled": enabled, "auth": encAuth != ""}))
-		writeJSON(w, http.StatusCreated, map[string]any{"upstream": map[string]any{"id": slug, "name": up.Name, "url": up.URL, "enabled": enabled, "has_auth": encAuth != ""}})
+		writeJSON(w, http.StatusCreated, map[string]any{"upstream": map[string]any{"id": slug, "name": up.Name, "url": up.URL, "enabled": enabled, "has_auth": encAuth != "", "metadata": up.Metadata}})
 	default:
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
 	}
@@ -124,10 +135,20 @@ func (s *Server) handleMCPUpstreamByID(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		var p struct {
-			Name      *string `json:"name"`
-			URL       *string `json:"url"`
-			AuthToken *string `json:"auth_token"`
-			Enabled   *bool   `json:"enabled"`
+			Name             *string                    `json:"name"`
+			URL              *string                    `json:"url"`
+			AuthToken        *string                    `json:"auth_token"`
+			Enabled          *bool                      `json:"enabled"`
+			Metadata         *store.MCPUpstreamMetadata `json:"metadata"`
+			Description      *string                    `json:"description"`
+			Domains          []string                   `json:"domains"`
+			RiskLevel        *string                    `json:"risk_level"`
+			AllowedModels    []string                   `json:"allowed_models"`
+			DefaultTool      *string                    `json:"default_tool"`
+			TimeoutMS        *int                       `json:"timeout_ms"`
+			MaxResults       *int                       `json:"max_results"`
+			RequiresApproval *bool                      `json:"requires_approval"`
+			FallbackAllowed  *bool                      `json:"fallback_allowed"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
 			writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "invalid_body")
@@ -154,15 +175,69 @@ func (s *Server) handleMCPUpstreamByID(w http.ResponseWriter, r *http.Request) {
 				cur.EncryptedAuth = enc
 			}
 		}
+		if p.Metadata != nil {
+			cur.Metadata = *p.Metadata
+			cur.MetadataJSON = ""
+		} else {
+			patchMCPMetadata(&cur.Metadata, p.Description, p.Domains, p.RiskLevel, p.AllowedModels, p.DefaultTool, p.TimeoutMS, p.MaxResults, p.RequiresApproval, p.FallbackAllowed)
+			cur.MetadataJSON = ""
+		}
 		if err := s.db.UpsertMCPUpstream(r.Context(), cur); err != nil {
 			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "mcp_upstream_save_failed")
 			return
 		}
 		s.resetMCPUpstream(id)
 		s.auditAdmin(r, "mcp_upstream.update", "", auditJSON(map[string]any{"id": id, "enabled": cur.Enabled}))
-		writeJSON(w, http.StatusOK, map[string]any{"upstream": map[string]any{"id": cur.ID, "name": cur.Name, "url": cur.URL, "enabled": cur.Enabled, "has_auth": cur.EncryptedAuth != ""}})
+		writeJSON(w, http.StatusOK, map[string]any{"upstream": map[string]any{"id": cur.ID, "name": cur.Name, "url": cur.URL, "enabled": cur.Enabled, "has_auth": cur.EncryptedAuth != "", "metadata": cur.Metadata}})
 	default:
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+	}
+}
+
+func mcpMetadataFromPayload(meta *store.MCPUpstreamMetadata, description string, domains []string, riskLevel string, allowedModels []string, defaultTool string, timeoutMS, maxResults int, requiresApproval, fallbackAllowed bool) store.MCPUpstreamMetadata {
+	if meta != nil {
+		return *meta
+	}
+	return store.MCPUpstreamMetadata{
+		Description:      strings.TrimSpace(description),
+		Domains:          domains,
+		RiskLevel:        strings.TrimSpace(riskLevel),
+		AllowedModels:    allowedModels,
+		DefaultTool:      strings.TrimSpace(defaultTool),
+		TimeoutMS:        timeoutMS,
+		MaxResults:       maxResults,
+		RequiresApproval: requiresApproval,
+		FallbackAllowed:  fallbackAllowed,
+	}
+}
+
+func patchMCPMetadata(meta *store.MCPUpstreamMetadata, description *string, domains []string, riskLevel *string, allowedModels []string, defaultTool *string, timeoutMS, maxResults *int, requiresApproval, fallbackAllowed *bool) {
+	if description != nil {
+		meta.Description = strings.TrimSpace(*description)
+	}
+	if domains != nil {
+		meta.Domains = domains
+	}
+	if riskLevel != nil {
+		meta.RiskLevel = strings.TrimSpace(*riskLevel)
+	}
+	if allowedModels != nil {
+		meta.AllowedModels = allowedModels
+	}
+	if defaultTool != nil {
+		meta.DefaultTool = strings.TrimSpace(*defaultTool)
+	}
+	if timeoutMS != nil {
+		meta.TimeoutMS = *timeoutMS
+	}
+	if maxResults != nil {
+		meta.MaxResults = *maxResults
+	}
+	if requiresApproval != nil {
+		meta.RequiresApproval = *requiresApproval
+	}
+	if fallbackAllowed != nil {
+		meta.FallbackAllowed = *fallbackAllowed
 	}
 }
 

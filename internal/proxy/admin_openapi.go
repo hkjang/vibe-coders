@@ -141,6 +141,10 @@ var apiEndpoints = []apiEndpoint{
 	{"/admin/routing/health", []string{"get"}, "routing", "Provider routing health", false},
 	{"/admin/routing/learning", []string{"get"}, "routing", "Routing learning suggestions", false},
 	{"/admin/routing/learning/auto", []string{"post"}, "routing", "Apply auto routing learning", false},
+	{"/admin/routing/domain-decisions", []string{"get"}, "routing", "Domain routing decisions and signals", false},
+	{"/admin/routing/domain-examples", []string{"get"}, "routing", "Auto-promoted domain routing examples", false},
+	{"/admin/routing/domain-review", []string{"get"}, "routing", "Domain routing review queue", false},
+	{"/admin/routing/domain-review/{id}", []string{"post"}, "routing", "Approve/reject domain routing review item", false},
 	{"/admin/models/quality", []string{"get"}, "routing", "Per-model coding quality", false},
 
 	// ---- admin: governance ----

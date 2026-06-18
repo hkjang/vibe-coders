@@ -1,0 +1,227 @@
+package proxy
+
+import (
+	"bytes"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync/atomic"
+	"testing"
+
+	"vibe-coders/internal/store"
+)
+
+func TestMCPDiscoveryModelRoutesOnlyRelevantGroundedCandidates(t *testing.T) {
+	var policyCalls atomic.Int64
+	var legalCalls atomic.Int64
+	policyUpstream := fakeDiscoveryMCP(t, "policy vacation evidence", &policyCalls)
+	defer policyUpstream.Close()
+	legalUpstream := fakeDiscoveryMCP(t, "legal contract evidence", &legalCalls)
+	defer legalUpstream.Close()
+
+	s, db := newKnowledgeServer(t)
+	proxy := httptest.NewServer(s.Routes())
+	defer proxy.Close()
+
+	if err := db.UpsertMCPUpstream(t.Context(), store.MCPUpstream{
+		ID: "policy", Name: "Policy MCP", URL: policyUpstream.URL, Enabled: true,
+		Metadata: store.MCPUpstreamMetadata{
+			Description:   "company vacation policy hr rules",
+			Domains:       []string{"policy", "hr"},
+			RiskLevel:     "low",
+			AllowedModels: []string{"vibe/grounded", "vibe/policy"},
+			DefaultTool:   "search",
+			MaxResults:    3,
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.UpsertMCPUpstream(t.Context(), store.MCPUpstream{
+		ID: "legal", Name: "Legal MCP", URL: legalUpstream.URL, Enabled: true,
+		Metadata: store.MCPUpstreamMetadata{
+			Description:   "legal contracts law litigation",
+			Domains:       []string{"legal"},
+			RiskLevel:     "low",
+			AllowedModels: []string{"vibe/grounded", "vibe/legal"},
+			DefaultTool:   "search",
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	resp := postJSON(t, proxy.URL+"/v1/chat/completions", "", map[string]any{
+		"model": "vibe/grounded",
+		"messages": []map[string]string{{
+			"role": "user", "content": "what is our vacation policy?",
+		}},
+	})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("grounded response status=%d body=%s", resp.StatusCode, body)
+	}
+	if resp.Header.Get("X-Task-Type") != "mcp_discovery" || resp.Header.Get("X-MCP-Grounded") != "true" || resp.Header.Get("X-MCP-Candidates") != "1" {
+		t.Fatalf("unexpected discovery headers: task=%s grounded=%s candidates=%s", resp.Header.Get("X-Task-Type"), resp.Header.Get("X-MCP-Grounded"), resp.Header.Get("X-MCP-Candidates"))
+	}
+	var out struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+		Evidence []MCPEvidence `json:"evidence"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Choices) != 1 || !strings.Contains(out.Choices[0].Message.Content, "policy vacation evidence") {
+		t.Fatalf("missing policy evidence in response: %+v", out)
+	}
+	if len(out.Evidence) != 1 || out.Evidence[0].UpstreamID != "policy" || out.Evidence[0].EvidenceScore < 0.75 {
+		t.Fatalf("evidence ranking mismatch: %+v", out.Evidence)
+	}
+	if policyCalls.Load() != 1 {
+		t.Fatalf("policy MCP should be called once, got %d", policyCalls.Load())
+	}
+	if legalCalls.Load() != 0 {
+		t.Fatalf("irrelevant legal MCP should not be called, got %d", legalCalls.Load())
+	}
+	decisions, err := db.ListDomainRoutingDecisions(t.Context(), store.DomainRoutingFilter{Route: "grounded", Limit: 10})
+	if err != nil || len(decisions) != 1 || decisions[0].EvidenceCount != 1 || decisions[0].EvidenceScore < 0.75 {
+		t.Fatalf("domain routing decision not recorded decisions=%+v err=%v", decisions, err)
+	}
+	signals, err := db.DomainRoutingSignals(t.Context(), decisions[0].ID)
+	if err != nil || len(signals) < 3 {
+		t.Fatalf("domain routing signals not recorded signals=%+v err=%v", signals, err)
+	}
+	examples, err := db.ListDomainExamples(t.Context(), "grounded", 10)
+	if err != nil || len(examples) != 1 || !examples[0].AutoPromoted {
+		t.Fatalf("domain example not auto-promoted examples=%+v err=%v", examples, err)
+	}
+	review, err := db.ListDomainReviewQueue(t.Context(), store.DomainRoutingFilter{Status: "pending", Limit: 10})
+	if err != nil || len(review) != 0 {
+		t.Fatalf("high-confidence grounded route should not enqueue review review=%+v err=%v", review, err)
+	}
+}
+
+func TestMCPDiscoveryPolicyHelpers(t *testing.T) {
+	if !isMCPDiscoveryModel("vibe/grounded") || !isMCPDiscoveryModel("vibe/all-mcp") || isMCPDiscoveryModel("vibe/auto") {
+		t.Fatal("MCP discovery model detection mismatch")
+	}
+	grounded := mcpDiscoveryPolicyForModel("vibe/grounded")
+	if grounded.Mode != "selective" || grounded.MaxMCPs != 3 || grounded.MinSelectorScore < 0.6 {
+		t.Fatalf("grounded policy mismatch: %+v", grounded)
+	}
+	all := mcpDiscoveryPolicyForModel("vibe/all-mcp")
+	if all.Mode != "all_allowed" || all.MaxMCPs < grounded.MaxMCPs {
+		t.Fatalf("all-mcp policy mismatch: %+v", all)
+	}
+	if !mcpModelAllowed("vibe/grounded", []string{"vibe/*"}) || mcpModelAllowed("vibe/legal", []string{"vibe/policy"}) {
+		t.Fatal("model allow matcher mismatch")
+	}
+	if !mcpDomainMatches("vibe/policy", []string{"policy"}, "vacation rules") || mcpDomainMatches("vibe/legal", []string{"research"}, "contract") {
+		t.Fatal("domain matcher mismatch")
+	}
+	if score := scoreMCPEvidence(MCPCandidate{SelectorScore: 0.8, HealthScore: 1}, MCPEvidence{Items: []MCPResultItem{{Text: "evidence", URI: "doc://1"}}}); score < 0.75 {
+		t.Fatalf("evidence score too low: %v", score)
+	}
+}
+
+func TestDomainRoutingAdminEndpoints(t *testing.T) {
+	s, db := newKnowledgeServer(t)
+	proxy := httptest.NewServer(s.Routes())
+	defer proxy.Close()
+
+	decision := store.DomainRoutingDecision{
+		ID: "drd_admin", RequestID: "req_admin", QueryHash: "hash", Route: "grounded", Confidence: 0.5,
+		ToolNames: []string{"policy/search"}, Reason: "low confidence",
+	}
+	if err := db.InsertDomainRoutingDecision(t.Context(), decision, []store.DomainRoutingSignal{{
+		ID: "sig_admin", DecisionID: "drd_admin", Source: "selector", Route: "grounded", Score: 0.5,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.UpsertDomainExample(t.Context(), store.DomainExample{ID: "dex_admin", Route: "grounded", Text: "sample", TextHash: "h", Source: "test", Confidence: 0.9, Approved: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.EnqueueDomainReview(t.Context(), store.DomainReviewQueueItem{ID: "drv_admin", DecisionID: "drd_admin", QueryText: "sample", SuggestedRoute: "grounded", Status: "pending"}); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, path := range []string{"/admin/routing/domain-decisions", "/admin/routing/domain-examples", "/admin/routing/domain-review"} {
+		resp, err := http.Get(proxy.URL + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			t.Fatalf("%s status=%d body=%s", path, resp.StatusCode, body)
+		}
+		resp.Body.Close()
+	}
+	resp := postJSON(t, proxy.URL+"/admin/routing/domain-review/drv_admin/approve", "", map[string]any{})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("approve status=%d body=%s", resp.StatusCode, body)
+	}
+	queue, err := db.ListDomainReviewQueue(t.Context(), store.DomainRoutingFilter{Status: "approved", Limit: 10})
+	if err != nil || len(queue) != 1 {
+		t.Fatalf("review approval not persisted queue=%+v err=%v", queue, err)
+	}
+}
+
+func fakeDiscoveryMCP(t *testing.T, text string, calls *atomic.Int64) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			ID     json.RawMessage `json:"id"`
+			Method string          `json:"method"`
+			Params json.RawMessage `json:"params"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		if len(req.ID) == 0 {
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Mcp-Session-Id", "sess-discovery")
+		resp := map[string]any{"jsonrpc": "2.0", "id": req.ID}
+		switch req.Method {
+		case "initialize":
+			resp["result"] = map[string]any{
+				"protocolVersion": "2025-06-18",
+				"capabilities":    map[string]any{"tools": map[string]any{}},
+				"serverInfo":      map[string]any{"name": "fake", "version": "1"},
+			}
+		case "tools/list":
+			resp["result"] = map[string]any{"tools": []map[string]any{{
+				"name": "search", "description": "search indexed domain evidence", "inputSchema": map[string]any{"type": "object"},
+			}}}
+		case "tools/call":
+			calls.Add(1)
+			var p struct {
+				Arguments map[string]any `json:"arguments"`
+			}
+			_ = json.Unmarshal(req.Params, &p)
+			query, _ := p.Arguments["query"].(string)
+			resp["result"] = map[string]any{
+				"content": []map[string]any{{
+					"type":  "text",
+					"title": "result",
+					"uri":   "mcp://fixture",
+					"text":  text + " for " + query,
+				}},
+				"isError": false,
+			}
+		default:
+			resp["error"] = map[string]any{"code": -32601, "message": "method not found"}
+		}
+		var buf bytes.Buffer
+		_ = json.NewEncoder(&buf).Encode(resp)
+		_, _ = w.Write(buf.Bytes())
+	}))
+}

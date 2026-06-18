@@ -536,8 +536,10 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 				url TEXT NOT NULL,
 				encrypted_auth TEXT,
 				enabled INTEGER NOT NULL DEFAULT 1,
+				metadata_json TEXT,
 				created_at TEXT NOT NULL
 			)`,
+		`ALTER TABLE mcp_upstreams ADD COLUMN metadata_json TEXT`,
 		`CREATE TABLE IF NOT EXISTS knowledge_snippets (
 				id TEXT PRIMARY KEY,
 				name TEXT NOT NULL,
@@ -739,6 +741,58 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 				created_at TEXT NOT NULL
 			)`,
 		`CREATE INDEX IF NOT EXISTS idx_model_pricing_versions_model ON model_pricing_versions(model, created_at)`,
+		`CREATE TABLE IF NOT EXISTS domain_routing_decisions (
+				id TEXT PRIMARY KEY,
+				request_id TEXT NOT NULL,
+				user_id TEXT,
+				team_id TEXT,
+				query_hash TEXT NOT NULL,
+				route TEXT NOT NULL,
+				confidence REAL NOT NULL,
+				tool_names_json TEXT,
+				evidence_score REAL NOT NULL DEFAULT 0,
+				evidence_count INTEGER NOT NULL DEFAULT 0,
+				fallback_used INTEGER NOT NULL DEFAULT 0,
+				blocked_by_governance INTEGER NOT NULL DEFAULT 0,
+				reason TEXT,
+				created_at TEXT NOT NULL
+			)`,
+		`CREATE INDEX IF NOT EXISTS idx_domain_routing_decisions_created ON domain_routing_decisions(created_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_domain_routing_decisions_route ON domain_routing_decisions(route, created_at)`,
+		`CREATE TABLE IF NOT EXISTS domain_routing_signals (
+				id TEXT PRIMARY KEY,
+				decision_id TEXT NOT NULL,
+				source TEXT NOT NULL,
+				route TEXT NOT NULL,
+				score REAL NOT NULL,
+				reason TEXT,
+				created_at TEXT NOT NULL
+			)`,
+		`CREATE INDEX IF NOT EXISTS idx_domain_routing_signals_decision ON domain_routing_signals(decision_id)`,
+		`CREATE TABLE IF NOT EXISTS domain_examples (
+				id TEXT PRIMARY KEY,
+				route TEXT NOT NULL,
+				text TEXT NOT NULL,
+				text_hash TEXT NOT NULL,
+				source TEXT NOT NULL,
+				confidence REAL NOT NULL,
+				approved INTEGER NOT NULL DEFAULT 0,
+				auto_promoted INTEGER NOT NULL DEFAULT 0,
+				created_at TEXT NOT NULL
+			)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_domain_examples_hash ON domain_examples(route, text_hash)`,
+		`CREATE TABLE IF NOT EXISTS domain_review_queue (
+				id TEXT PRIMARY KEY,
+				decision_id TEXT NOT NULL,
+				query_text TEXT NOT NULL,
+				suggested_route TEXT NOT NULL,
+				current_route TEXT,
+				reason TEXT,
+				status TEXT NOT NULL DEFAULT 'pending',
+				created_at TEXT NOT NULL,
+				reviewed_at TEXT
+			)`,
+		`CREATE INDEX IF NOT EXISTS idx_domain_review_queue_status ON domain_review_queue(status, created_at)`,
 		`CREATE TABLE IF NOT EXISTS analytics_daily (
 				day TEXT NOT NULL,
 				dimension TEXT NOT NULL,

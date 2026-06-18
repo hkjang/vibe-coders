@@ -2,10 +2,16 @@ package store
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"vibe-coders/internal/config"
 )
+
+var pricingVersionClock struct {
+	sync.Mutex
+	last time.Time
+}
 
 // ModelPricingVersion is one historical price entry for a model. The newest row
 // per model (by created_at) is the effective price; older rows are kept as history.
@@ -23,13 +29,24 @@ type ModelPricingVersion struct {
 // InsertPricingVersion appends a new price version for a model.
 func (s *SQLStore) InsertPricingVersion(ctx context.Context, v ModelPricingVersion) error {
 	if v.CreatedAt == "" {
-		v.CreatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+		v.CreatedAt = nextPricingVersionTimestamp()
 	}
 	_, err := s.db.ExecContext(ctx, s.bind(`INSERT INTO model_pricing_versions
 		(id, model, input_krw_per_1m, output_krw_per_1m, cached_input_krw_per_1m, source, note, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`),
 		v.ID, v.Model, v.InputKRWPer1M, v.OutputKRWPer1M, v.CachedInputKRWPer1M, v.Source, v.Note, v.CreatedAt)
 	return err
+}
+
+func nextPricingVersionTimestamp() string {
+	pricingVersionClock.Lock()
+	defer pricingVersionClock.Unlock()
+	now := time.Now().UTC()
+	if !pricingVersionClock.last.IsZero() && !now.After(pricingVersionClock.last) {
+		now = pricingVersionClock.last.Add(time.Nanosecond)
+	}
+	pricingVersionClock.last = now
+	return now.Format("2006-01-02T15:04:05.000000000Z07:00")
 }
 
 // ListPricingVersions returns price versions for a model (or all when model==""),

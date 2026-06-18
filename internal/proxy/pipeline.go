@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"compress/gzip"
 	"context"
 	"errors"
 	"io"
@@ -21,7 +22,7 @@ import (
 // Returning true passes control (and the shared requestPipeline state) to the
 // next step. This makes the previously-inline handleOpenAI flow explicit:
 //
-//	Auth → Quota → Routing → Skill → Deprecation → Limits → Governance → Cache → Cost → Upstream
+//	Auth → Quota → MCP Discovery → Routing → Skill → Deprecation → Limits → Governance → Cache → Cost → Upstream
 type PipelineStep interface {
 	// Name is a short stable identifier used in logs/metrics/tests.
 	Name() string
@@ -69,13 +70,14 @@ type requestPipeline struct {
 }
 
 // pipelineSteps returns the ordered request pipeline. The order is the contract:
-// authentication first, then quota enforcement, intelligent routing, governance
-// (policy/secret/MCP/knowledge), response caches, pre-call cost guard, and finally
-// the upstream dial + response relay.
+// authentication first, then quota enforcement, optional MCP model discovery,
+// intelligent routing, governance (policy/secret/MCP/knowledge), response caches,
+// pre-call cost guard, and finally the upstream dial + response relay.
 func (rc *requestPipeline) steps() []PipelineStep {
 	return []PipelineStep{
 		stepFunc{"auth", (*requestPipeline).stepAuth},
 		stepFunc{"quota", (*requestPipeline).stepQuota},
+		stepFunc{"mcp_discovery", (*requestPipeline).stepMCPDiscovery},
 		stepFunc{"routing", (*requestPipeline).stepRouting},
 		stepFunc{"skill", (*requestPipeline).stepSkill},
 		stepFunc{"deprecation", (*requestPipeline).stepDeprecation},
@@ -140,9 +142,9 @@ func (rc *requestPipeline) stepQuota() bool {
 func (rc *requestPipeline) stepRouting() bool {
 	s, r, w := rc.s, rc.r, rc.w
 
-	var body []byte
+	body := rc.body
 	var err error
-	if r.Body != nil {
+	if body == nil && r.Body != nil {
 		body, err = io.ReadAll(r.Body)
 		if err != nil {
 			writeOpenAIError(w, http.StatusBadRequest, "failed to read request body", "invalid_request_error", "invalid_body")
@@ -469,6 +471,19 @@ func (rc *requestPipeline) stepUpstream() bool {
 	meta.Request.StatusCode = resp.StatusCode
 
 	copyDownstreamHeaders(w.Header(), resp.Header)
+
+	var responseBody io.Reader = resp.Body
+	if resp.Header.Get("Content-Encoding") == "gzip" {
+		gzipReader, err := gzip.NewReader(resp.Body)
+		if err == nil {
+			defer gzipReader.Close()
+			responseBody = gzipReader
+			w.Header().Del("Content-Encoding")
+		} else {
+			slog.Warn("failed to create gzip reader for response", "trace_id", traceID, "error", err)
+		}
+	}
+
 	if stream {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.Header().Set("Cache-Control", "no-cache")
@@ -485,7 +500,7 @@ func (rc *requestPipeline) stepUpstream() bool {
 		captureLimit = s.cacheConf().EmbeddingMaxBytes
 	}
 	analyzer := NewResponseAnalyzer(stream, captureForCache || captureForChatCache || lc.ResponseText, captureLimit)
-	firstChunkMS, firstChunkSeen, copyErr := s.copyResponse(w, resp.Body, analyzer, stream, start)
+	firstChunkMS, firstChunkSeen, copyErr := s.copyResponse(w, responseBody, analyzer, stream, start)
 	if firstChunkSeen {
 		meta.Request.FirstChunkMS = firstChunkMS
 		s.metrics.ObserveFirstChunk(firstChunkMS)

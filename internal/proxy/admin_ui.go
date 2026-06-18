@@ -6981,8 +6981,8 @@ const adminHTML = `<!doctype html>
       const html =
         '<div class="grid1">' +
           card('시스템 오류 로그 (System Errors)',
-            '<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">' +
-              '<p class="muted" style="margin:0;">PostgreSQL/SQLite DB 적재 및 비동기 워커 실행 중 발생한 최신 시스템 오류 로그를 표시합니다.</p>' +
+            '<div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px; margin-bottom:16px;">' +
+              '<p class="muted" style="margin:0; padding-left:4px;">PostgreSQL/SQLite DB 적재 및 비동기 워커 실행 중 발생한 최신 시스템 오류 로그를 표시합니다.</p>' +
               (list.length ? '<button id="clear-errors-btn" class="error" style="background:#dc2626; color:#fff; border:none; padding:6px 12px; border-radius:4px; cursor:pointer;">전체 비우기</button>' : '') +
             '</div>' +
             tableHtml

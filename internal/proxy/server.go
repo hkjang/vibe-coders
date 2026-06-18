@@ -31,52 +31,52 @@ import (
 )
 
 // AppVersion is the gateway build version, surfaced in /auth/me and the admin UI.
-const AppVersion = "v0.49.6"
+const AppVersion = "v0.49.7"
 
 type Server struct {
-	cfg          config.Config
-	db           *store.SQLStore
-	logger       *store.AsyncLogger
-	client       *http.Client
-	metrics      *Metrics
-	secrets      atomic.Pointer[secret.Cipher]
-	secretsMu    sync.Mutex // guards concurrent rotation
-	retention    *store.RetentionWorker
-	killState    atomicKillState
+	cfg            config.Config
+	db             *store.SQLStore
+	logger         *store.AsyncLogger
+	client         *http.Client
+	metrics        *Metrics
+	secrets        atomic.Pointer[secret.Cipher]
+	secretsMu      sync.Mutex // guards concurrent rotation
+	retention      *store.RetentionWorker
+	killState      atomicKillState
 	loggedRequests sync.Map
-	mcpPolicy    atomic.Pointer[mcpPolicySnapshot]
-	routingRules atomic.Pointer[routingRulesSnapshot]
-	knowledge    atomic.Pointer[knowledgeSnapshot]
-	deprecations atomic.Pointer[deprecationSnapshot]
-	costCache    atomic.Pointer[costSnapshot]
-	learnCache   atomic.Pointer[routingLearnSnapshot]
-	priceCache   atomic.Pointer[pricingSnapshot]
-	mmCache      atomic.Pointer[mattermostSnapshot]
-	t2sExec      atomic.Pointer[sql.DB]          // lazily-opened read-only DB for Text2SQL execute mode (default / env)
-	t2sExecConns sync.Map                        // named exec connections: connID → *sql.DB
-	t2sTwin      atomic.Pointer[sql.DB]          // lazily-opened SQL Digital Twin DB (masked/sample) for safe validation
-	t2sKilled    atomic.Bool                     // runtime kill switch: when set, Text2SQL is disabled regardless of config
-	t2sFeatures  atomic.Pointer[map[string]bool] // runtime Text2SQL feature toggles (admin-managed)
-	t2sRuntime   atomic.Pointer[config.Text2SQLConfig]    // admin-settings overlay over cfg.Text2SQL (runtime snapshot)
-	chRuntime    atomic.Pointer[config.ClickHouseConfig]  // admin-settings overlay over cfg.ClickHouse (runtime snapshot)
-	chSinkMu      sync.Mutex                             // guards the managed ClickHouse sink worker lifecycle
-	chSinkStop    context.CancelFunc                     // cancels the running sink worker (nil when stopped)
-	chSinkStarted bool                                   // true once the startup worker apply has run (gates reload-time restarts)
-	carbonRuntime atomic.Pointer[config.CarbonConfig]    // admin-settings overlay over cfg.Carbon
-	insRuntime    atomic.Pointer[config.InsuranceConfig] // admin-settings overlay over cfg.Insurance
-	cacheRuntime   atomic.Pointer[config.CacheConfig]     // admin-settings overlay over cfg.Cache
-	pricingRuntime atomic.Pointer[config.PricingConfig]   // admin-settings overlay over cfg.PricingConf
-	skillsRuntime   atomic.Pointer[config.SkillsConfig]    // admin-settings overlay over cfg.Skills
-	limitsRuntime   atomic.Pointer[config.LimitsConfig]    // admin-settings overlay over cfg.Limits
-	loggingRuntime  atomic.Pointer[config.LoggingConfig]   // admin-settings overlay over cfg.Logging
-	chFactQueue   chan store.LogRecord                   // async per-request fact ingest queue (bounded)
-	chFactDropped atomic.Int64                           // requests dropped when the fact queue was full
-	dwCache       *dwQueryCache                          // short-TTL cache for DW dashboard ClickHouse reads
-	sessions     *sessionInferer
-	sessionGCAt  atomic.Int64
-	extSeen      sync.Map // external key id -> struct{}; dedupes lazy registration
-	mcpConns     sync.Map // upstream id -> *mcpUpstreamConn (MCP gateway session state)
-	mcpTools     atomic.Pointer[mcpToolsSnapshot]
+	mcpPolicy      atomic.Pointer[mcpPolicySnapshot]
+	routingRules   atomic.Pointer[routingRulesSnapshot]
+	knowledge      atomic.Pointer[knowledgeSnapshot]
+	deprecations   atomic.Pointer[deprecationSnapshot]
+	costCache      atomic.Pointer[costSnapshot]
+	learnCache     atomic.Pointer[routingLearnSnapshot]
+	priceCache     atomic.Pointer[pricingSnapshot]
+	mmCache        atomic.Pointer[mattermostSnapshot]
+	t2sExec        atomic.Pointer[sql.DB]                  // lazily-opened read-only DB for Text2SQL execute mode (default / env)
+	t2sExecConns   sync.Map                                // named exec connections: connID → *sql.DB
+	t2sTwin        atomic.Pointer[sql.DB]                  // lazily-opened SQL Digital Twin DB (masked/sample) for safe validation
+	t2sKilled      atomic.Bool                             // runtime kill switch: when set, Text2SQL is disabled regardless of config
+	t2sFeatures    atomic.Pointer[map[string]bool]         // runtime Text2SQL feature toggles (admin-managed)
+	t2sRuntime     atomic.Pointer[config.Text2SQLConfig]   // admin-settings overlay over cfg.Text2SQL (runtime snapshot)
+	chRuntime      atomic.Pointer[config.ClickHouseConfig] // admin-settings overlay over cfg.ClickHouse (runtime snapshot)
+	chSinkMu       sync.Mutex                              // guards the managed ClickHouse sink worker lifecycle
+	chSinkStop     context.CancelFunc                      // cancels the running sink worker (nil when stopped)
+	chSinkStarted  bool                                    // true once the startup worker apply has run (gates reload-time restarts)
+	carbonRuntime  atomic.Pointer[config.CarbonConfig]     // admin-settings overlay over cfg.Carbon
+	insRuntime     atomic.Pointer[config.InsuranceConfig]  // admin-settings overlay over cfg.Insurance
+	cacheRuntime   atomic.Pointer[config.CacheConfig]      // admin-settings overlay over cfg.Cache
+	pricingRuntime atomic.Pointer[config.PricingConfig]    // admin-settings overlay over cfg.PricingConf
+	skillsRuntime  atomic.Pointer[config.SkillsConfig]     // admin-settings overlay over cfg.Skills
+	limitsRuntime  atomic.Pointer[config.LimitsConfig]     // admin-settings overlay over cfg.Limits
+	loggingRuntime atomic.Pointer[config.LoggingConfig]    // admin-settings overlay over cfg.Logging
+	chFactQueue    chan store.LogRecord                    // async per-request fact ingest queue (bounded)
+	chFactDropped  atomic.Int64                            // requests dropped when the fact queue was full
+	dwCache        *dwQueryCache                           // short-TTL cache for DW dashboard ClickHouse reads
+	sessions       *sessionInferer
+	sessionGCAt    atomic.Int64
+	extSeen        sync.Map // external key id -> struct{}; dedupes lazy registration
+	mcpConns       sync.Map // upstream id -> *mcpUpstreamConn (MCP gateway session state)
+	mcpTools       atomic.Pointer[mcpToolsSnapshot]
 }
 
 type atomicKillState struct {
@@ -343,6 +343,10 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/admin/waterfall", s.handleWaterfall)
 	mux.HandleFunc("/admin/routing/learning", s.handleRoutingLearning)
 	mux.HandleFunc("/admin/routing/learning/auto", s.handleRoutingLearningAuto)
+	mux.HandleFunc("/admin/routing/domain-decisions", s.handleDomainRoutingDecisions)
+	mux.HandleFunc("/admin/routing/domain-examples", s.handleDomainExamples)
+	mux.HandleFunc("/admin/routing/domain-review", s.handleDomainReviewQueue)
+	mux.HandleFunc("/admin/routing/domain-review/", s.handleDomainReviewAction)
 	mux.HandleFunc("/admin/routing/preview", s.handleRoutingPreview)
 	mux.HandleFunc("/admin/routing/decisions", s.handleRoutingDecisions)
 	mux.HandleFunc("/admin/routing/decisions/", s.handleRoutingDecisionByID)

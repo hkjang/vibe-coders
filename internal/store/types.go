@@ -977,6 +977,65 @@ type LLMSessionSummary struct {
 	LastSeen           string  `json:"last_seen"`
 }
 
+type DomainRoutingDecision struct {
+	ID                  string   `json:"id"`
+	RequestID           string   `json:"request_id"`
+	UserID              string   `json:"user_id"`
+	TeamID              string   `json:"team_id"`
+	QueryHash           string   `json:"query_hash"`
+	Route               string   `json:"route"`
+	Confidence          float64  `json:"confidence"`
+	ToolNames           []string `json:"tool_names"`
+	EvidenceScore       float64  `json:"evidence_score"`
+	EvidenceCount       int      `json:"evidence_count"`
+	FallbackUsed        bool     `json:"fallback_used"`
+	BlockedByGovernance bool     `json:"blocked_by_governance"`
+	Reason              string   `json:"reason"`
+	CreatedAt           string   `json:"created_at"`
+}
+
+type DomainRoutingSignal struct {
+	ID         string  `json:"id"`
+	DecisionID string  `json:"decision_id"`
+	Source     string  `json:"source"`
+	Route      string  `json:"route"`
+	Score      float64 `json:"score"`
+	Reason     string  `json:"reason"`
+	CreatedAt  string  `json:"created_at"`
+}
+
+type DomainExample struct {
+	ID           string  `json:"id"`
+	Route        string  `json:"route"`
+	Text         string  `json:"text"`
+	TextHash     string  `json:"text_hash"`
+	Source       string  `json:"source"`
+	Confidence   float64 `json:"confidence"`
+	Approved     bool    `json:"approved"`
+	AutoPromoted bool    `json:"auto_promoted"`
+	CreatedAt    string  `json:"created_at"`
+}
+
+type DomainReviewQueueItem struct {
+	ID             string `json:"id"`
+	DecisionID     string `json:"decision_id"`
+	QueryText      string `json:"query_text"`
+	SuggestedRoute string `json:"suggested_route"`
+	CurrentRoute   string `json:"current_route"`
+	Reason         string `json:"reason"`
+	Status         string `json:"status"`
+	CreatedAt      string `json:"created_at"`
+	ReviewedAt     string `json:"reviewed_at"`
+}
+
+type DomainRoutingFilter struct {
+	Limit     int
+	Route     string
+	Status    string
+	RequestID string
+	Since     time.Time
+}
+
 type SessionTimelinePoint struct {
 	RequestID         string  `json:"request_id"`
 	TraceID           string  `json:"trace_id"`
