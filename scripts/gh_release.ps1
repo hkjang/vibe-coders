@@ -16,6 +16,7 @@ $cleanVer = $Version.TrimStart('v')
 
 $notes = "## AI Proxy Gateway v" + $cleanVer + "`r`n`r`n"
 $notes += "### 주요 변경 사항`r`n"
+$notes += "- **MCP Wizard 선택 상태 안정화 (`v0.50.9`)**: MCP 연결 상태 Wizard가 `#/mcp?server=...` 필터와 직전 선택 upstream을 기본 선택으로 유지하고, Wizard에서 업스트림 등록 직후 생성된 upstream을 바로 선택하도록 개선. 다중 upstream 운영에서 연결 테스트→Flow→정책 확인→로그 확인 흐름이 첫 upstream으로 되돌아가는 UX 문제를 제거.`r`n"
 $notes += "- **Routing/Governance 운영 문서 동기화 (`v0.50.8`)**: README, Admin Guide, Safety Guide에 Provider Health 화면(`#/routing/health`), `route_reason`, Trace Links, Governance default audit/effective count(`policy_decision_count`/`policy_decision_total`) 의미를 반영. 안정화 릴리즈 운영 문서와 현재 API/UI 동작을 일치시킴.`r`n"
 $notes += "- **Governance effective count 정리 (`v0.50.7`)**: default 감사 이벤트 도입 후 요청 상세/Trace Links가 정상 요청을 거버넌스 이상으로 보지 않도록 `policy_decision_count`는 `decision=default`를 제외한 실질 판단 수로 계산. 원시 감사 이벤트 수는 `policy_decision_total`로 별도 노출. explain/links/scatter 회귀 테스트 보강.`r`n"
 $notes += "- **Governance DEFAULT 감사 이벤트 (`v0.50.6`)**: 정책 규칙이 매칭되지 않은 허용 요청도 `policy_decision_events`에 `decision=default`로 기록해 모든 정책 판단 경로를 감사 가능하게 보강. XView/scatter의 거버넌스 이상 카운트에서는 `default`를 제외해 정상 요청 전체가 경고로 표시되는 노이즈를 방지. default 감사와 XView 제외 회귀 테스트 추가.`r`n"

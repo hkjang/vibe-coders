@@ -4929,7 +4929,7 @@ const adminHTML = `<!doctype html>
       const routeMapTable = mcpRouteMapTable(routeRows);
       const effectivePolicyTable = mcpEffectivePolicyTable(routeRows, riskByTool, allowlistEnabled, policies);
       const topologyView = mcpTopologyView(topologyResp || {});
-      const wizard = mcpWizardView(upstreams, routeRows, policies, allowlistEnabled, servers);
+      const wizard = mcpWizardView(upstreams, routeRows, policies, allowlistEnabled, servers, serverFilter);
       const testConsole =
         '<form class="inline-form" id="mcp-route-explain-form" autocomplete="off" style="grid-template-columns: 150px minmax(180px,1fr) minmax(180px,1fr) 90px 90px;">' +
           '<select id="mcp-explain-method">' +
@@ -4963,7 +4963,10 @@ const adminHTML = `<!doctype html>
 
       const wizardSelect = document.getElementById('mcp-wizard-upstream');
       if (wizardSelect) {
-        wizardSelect.addEventListener('change', () => refreshMCPWizardSelection(wizardSelect.value));
+        wizardSelect.addEventListener('change', () => {
+          window.mcpWizardSelected = wizardSelect.value;
+          refreshMCPWizardSelection(wizardSelect.value);
+        });
       }
       const wizardRegister = document.getElementById('mcp-wizard-register');
       if (wizardRegister) {
@@ -4972,8 +4975,10 @@ const adminHTML = `<!doctype html>
           const url = document.getElementById('mcp-wizard-url').value.trim();
           const auth = document.getElementById('mcp-wizard-auth').value;
           if (!name || !url) { alert('Wizard 등록에는 이름과 URL이 필요합니다.'); return; }
-          await api('/admin/mcp/upstreams', { method: 'POST', body: JSON.stringify({ name, url, auth_token: auth }) });
-          location.hash = '#/mcp?server=' + encodeURIComponent(name);
+          const created = await api('/admin/mcp/upstreams', { method: 'POST', body: JSON.stringify({ name, url, auth_token: auth }) });
+          const up = (created && created.upstream) || {};
+          window.mcpWizardSelected = up.id || name;
+          location.hash = '#/mcp?server=' + encodeURIComponent(up.name || name);
           route();
         });
       }
@@ -5064,13 +5069,16 @@ const adminHTML = `<!doctype html>
       });
       makeSortable('#view', 'mcp');
     }
-    function mcpWizardView(upstreams, routes, policies, allowlistEnabled, servers) {
+    function mcpWizardView(upstreams, routes, policies, allowlistEnabled, servers, preferredSelection) {
       window.mcpWizardUpstreams = upstreams || [];
       window.mcpWizardRoutes = routes || [];
       window.mcpWizardPolicies = policies || [];
       window.mcpWizardServers = servers || [];
-      const selected = (upstreams && upstreams[0]) ? upstreams[0].id : '';
-      const options = (upstreams || []).map(u => '<option value="' + escapeAttr(u.id) + '">' + escapeHTML(u.name || u.id) + '</option>').join('');
+      const selected = mcpWizardSelectedID(upstreams, preferredSelection);
+      window.mcpWizardSelected = selected;
+      const options = (upstreams || []).map(u =>
+        '<option value="' + escapeAttr(u.id) + '"' + (u.id === selected ? ' selected' : '') + '>' + escapeHTML(u.name || u.id) + '</option>'
+      ).join('');
       const selectedState = mcpWizardState(selected, upstreams, routes, policies, allowlistEnabled, servers);
       const registerForm =
         '<div class="inline-form" style="grid-template-columns: minmax(120px,1fr) minmax(220px,2fr) minmax(120px,1fr) 90px; border-bottom:1px solid var(--line)">' +
@@ -5088,6 +5096,15 @@ const adminHTML = `<!doctype html>
           '<button type="button" class="secondary" id="mcp-wizard-logs" ' + (selected ? '' : 'disabled') + '>로그 확인</button>' +
         '</div>';
       return registerForm + selector + '<div id="mcp-wizard-steps">' + mcpWizardStepsHTML(selectedState) + '</div>';
+    }
+    function mcpWizardSelectedID(upstreams, preferredSelection) {
+      const list = upstreams || [];
+      if (!list.length) return '';
+      const preferred = String(preferredSelection || '').trim();
+      const remembered = String(window.mcpWizardSelected || '').trim();
+      const match = (needle) => needle ? list.find(u => u.id === needle || u.name === needle) : null;
+      const selected = match(preferred) || match(remembered) || list[0];
+      return selected ? selected.id : '';
     }
     function mcpWizardState(id, upstreams, routes, policies, allowlistEnabled, servers) {
       const up = (upstreams || []).find(u => u.id === id) || {};
