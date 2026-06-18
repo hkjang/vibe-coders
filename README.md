@@ -606,7 +606,7 @@ Governance 정책 예시:
 }
 ```
 
-정책 충돌은 `BLOCK > APPROVAL > ALLOW > DEFAULT` 순서로 결정됩니다. 매칭된 판단은 정책 감사 이벤트에 기록되며, 매칭 규칙이 없는 요청도 `decision=default` 로 감사 기록을 남깁니다. 단, `default` 판단은 XView의 거버넌스 이상 카운트에서는 제외해 정상 요청 전체가 경고로 보이지 않게 합니다.
+정책 충돌은 `BLOCK > APPROVAL > ALLOW > DEFAULT` 순서로 결정됩니다. 매칭된 판단은 정책 감사 이벤트에 기록되며, 매칭 규칙이 없는 요청도 `decision=default` 로 감사 기록을 남깁니다. 단, `default` 판단은 XView와 Trace Links의 실질 거버넌스 카운트(`policy_decision_count`)에서는 제외해 정상 요청 전체가 경고로 보이지 않게 합니다. 원시 감사 이벤트 수가 필요하면 `policy_decision_total` 을 확인합니다.
 
 ### 라우팅 학습 (Routing Learning Engine)
 

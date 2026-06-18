@@ -262,6 +262,7 @@ func explainGovernance(events store.GovernanceEvents) map[string]any {
 	for _, event := range events.SecretEvents {
 		secretActions[event.Action]++
 	}
+	effectivePolicyDecisions := effectivePolicyDecisionCount(events.PolicyDecisions)
 	return map[string]any{
 		"secret_events":         events.SecretEvents,
 		"secret_event_count":    len(events.SecretEvents),
@@ -272,8 +273,19 @@ func explainGovernance(events store.GovernanceEvents) map[string]any {
 		"anomaly_events":        events.AnomalyEvents,
 		"anomaly_event_count":   len(events.AnomalyEvents),
 		"policy_decisions":      events.PolicyDecisions,
-		"policy_decision_count": len(events.PolicyDecisions),
+		"policy_decision_count": effectivePolicyDecisions,
+		"policy_decision_total": len(events.PolicyDecisions),
 	}
+}
+
+func effectivePolicyDecisionCount(events []store.PolicyDecisionEvent) int {
+	count := 0
+	for _, event := range events {
+		if !strings.EqualFold(strings.TrimSpace(event.Decision), "default") {
+			count++
+		}
+	}
+	return count
 }
 
 func (s *Server) explainCost(d store.ExplainData) map[string]any {

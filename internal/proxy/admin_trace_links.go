@@ -101,6 +101,7 @@ func (s *Server) handleRequestLinks(w http.ResponseWriter, r *http.Request) {
 	if routingFound {
 		artifacts["routing_decision"] = "/admin/routing/decisions/" + url.PathEscape(routing.ID)
 	}
+	effectivePolicyDecisions := effectivePolicyDecisionCount(governance.PolicyDecisions)
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"request_id": detail.Request.ID,
@@ -111,18 +112,19 @@ func (s *Server) handleRequestLinks(w http.ResponseWriter, r *http.Request) {
 		"provider":   detail.Request.Provider,
 		"status":     detail.Request.StatusCode,
 		"counts": map[string]any{
-			"prompts":             len(detail.Prompts),
-			"tools":               len(detail.Tools),
-			"mcp_tools":           mcpTools,
-			"tool_errors":         toolErrors,
-			"text2sql_spans":      len(detail.Text2SQLSpans),
-			"evaluations":         len(detail.Evaluations),
-			"feedback":            len(detail.Feedback),
-			"secret_events":       len(governance.SecretEvents),
-			"approvals":           len(governance.Approvals),
-			"anomaly_events":      len(governance.AnomalyEvents),
-			"policy_decisions":    len(governance.PolicyDecisions),
-			"mcp_route_decisions": len(mcpDecisions),
+			"prompts":               len(detail.Prompts),
+			"tools":                 len(detail.Tools),
+			"mcp_tools":             mcpTools,
+			"tool_errors":           toolErrors,
+			"text2sql_spans":        len(detail.Text2SQLSpans),
+			"evaluations":           len(detail.Evaluations),
+			"feedback":              len(detail.Feedback),
+			"secret_events":         len(governance.SecretEvents),
+			"approvals":             len(governance.Approvals),
+			"anomaly_events":        len(governance.AnomalyEvents),
+			"policy_decisions":      effectivePolicyDecisions,
+			"policy_decision_total": len(governance.PolicyDecisions),
+			"mcp_route_decisions":   len(mcpDecisions),
 		},
 		"artifacts": artifacts,
 		"routing": map[string]any{

@@ -16,6 +16,7 @@ $cleanVer = $Version.TrimStart('v')
 
 $notes = "## AI Proxy Gateway v" + $cleanVer + "`r`n`r`n"
 $notes += "### 주요 변경 사항`r`n"
+$notes += "- **Governance effective count 정리 (`v0.50.7`)**: default 감사 이벤트 도입 후 요청 상세/Trace Links가 정상 요청을 거버넌스 이상으로 보지 않도록 `policy_decision_count`는 `decision=default`를 제외한 실질 판단 수로 계산. 원시 감사 이벤트 수는 `policy_decision_total`로 별도 노출. explain/links/scatter 회귀 테스트 보강.`r`n"
 $notes += "- **Governance DEFAULT 감사 이벤트 (`v0.50.6`)**: 정책 규칙이 매칭되지 않은 허용 요청도 `policy_decision_events`에 `decision=default`로 기록해 모든 정책 판단 경로를 감사 가능하게 보강. XView/scatter의 거버넌스 이상 카운트에서는 `default`를 제외해 정상 요청 전체가 경고로 표시되는 노이즈를 방지. default 감사와 XView 제외 회귀 테스트 추가.`r`n"
 $notes += "- **Routing preview reason code (`v0.50.5`)**: `POST /admin/routing/preview` 응답에 사람이 읽는 `decision_reason`과 별도로 코드형 `route_reason`을 추가. `auto_router`, `auto_router_learned`, `client_model`, routing rule reason 등을 자동화·UI 필터에서 안정적으로 사용할 수 있으며 preview 회귀 테스트로 고정.`r`n"
 $notes += "- **Provider Health 관리자 화면 (`v0.50.4`)**: 라우팅 탭에 `Provider Health` 하위 화면(`#/routing/health`)을 추가. `GET /admin/routing/health`의 ranking, degraded, alerts, trend 응답을 그대로 사용해 provider 수, 평균 health, 최상위/최하위 provider, degradation alert, bucket별 health trend를 표시하고 window/threshold 필터를 제공.`r`n"

@@ -285,6 +285,37 @@ func TestGovernanceDefaultAllowIsAuditedWithoutXViewNoise(t *testing.T) {
 	if !defaultPhases["request"] || !defaultPhases["provider"] || !defaultPhases["cost"] {
 		t.Fatalf("expected default policy decision event, got %+v", events)
 	}
+	explainResp, err := http.Get(proxy.URL + "/admin/requests/" + reqID + "/explain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer explainResp.Body.Close()
+	var explainOut struct {
+		Governance struct {
+			PolicyDecisionCount float64 `json:"policy_decision_count"`
+			PolicyDecisionTotal float64 `json:"policy_decision_total"`
+		} `json:"governance"`
+	}
+	if err := json.NewDecoder(explainResp.Body).Decode(&explainOut); err != nil {
+		t.Fatal(err)
+	}
+	if explainOut.Governance.PolicyDecisionCount != 0 || explainOut.Governance.PolicyDecisionTotal == 0 {
+		t.Fatalf("default-only policy events should be total-only in explain: %+v", explainOut.Governance)
+	}
+	linksResp, err := http.Get(proxy.URL + "/admin/requests/" + reqID + "/links")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer linksResp.Body.Close()
+	var linksOut struct {
+		Counts map[string]float64 `json:"counts"`
+	}
+	if err := json.NewDecoder(linksResp.Body).Decode(&linksOut); err != nil {
+		t.Fatal(err)
+	}
+	if linksOut.Counts["policy_decisions"] != 0 || linksOut.Counts["policy_decision_total"] == 0 {
+		t.Fatalf("default-only policy events should be total-only in trace links: %+v", linksOut.Counts)
+	}
 	points, _, err := db.ScatterPoints(context.Background(), store.ScatterFilter{Since: time.Now().Add(-time.Hour), Limit: 10})
 	if err != nil {
 		t.Fatal(err)
