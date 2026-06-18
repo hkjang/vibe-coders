@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -140,8 +141,31 @@ func (s *Server) handleMyDashboard(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func text2SQLProductLabel(kind string) string {
+	switch strings.ToLower(strings.TrimSpace(kind)) {
+	case "dashboard":
+		return "대시보드"
+	case "data_mart":
+		return "데이터마트"
+	case "api":
+		return "조회 API"
+	default:
+		return "저장 리포트"
+	}
+}
+
+func (s *Server) mcpAffinityAllowedForRecommendation(ctx context.Context, serverLabel, toolName string) bool {
+	profile, found, err := s.db.ToolRiskProfile(ctx, serverLabel, toolName)
+	if err != nil || !found {
+		return true
+	}
+	action := normalizeToolRiskAction(profile.Action, "allow")
+	return action == "allow"
+}
+
 // handleMyRecommendations generates, persists, and returns actionable recommendations for
-// the calling user (cheaper-model switch, template adoption), derived from their own usage.
+// the calling user (model switch, template adoption, Text2SQL report candidates, MCP tool
+// affinity), derived from their own usage.
 // GET /me/recommendations
 func (s *Server) handleMyRecommendations(w http.ResponseWriter, r *http.Request) {
 	userID, ok := s.meUserID(r)
@@ -152,6 +176,7 @@ func (s *Server) handleMyRecommendations(w http.ResponseWriter, r *http.Request)
 	ctx := r.Context()
 	startMonth := time.Now().UTC()
 	startMonth = time.Date(startMonth.Year(), startMonth.Month(), 1, 0, 0, 0, 0, time.UTC)
+	recommendationSince := time.Now().UTC().Add(-30 * 24 * time.Hour)
 
 	month, err := s.db.UserUsageTotalsSince(ctx, userID, startMonth)
 	if err != nil {
@@ -194,6 +219,45 @@ func (s *Server) handleMyRecommendations(w http.ResponseWriter, r *http.Request)
 			Ref:    t.ID,
 			Title:  "추천 템플릿: " + t.Name,
 			Detail: fmt.Sprintf("표준 템플릿(%s)을 사용하면 일관된 결과와 비용 예측에 도움이 됩니다.", t.Category),
+		})
+	}
+
+	text2sqlCandidates, err := s.db.UserText2SQLReportCandidates(ctx, userID, recommendationSince, 3, 2)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "recommendations_failed")
+		return
+	}
+	for _, c := range text2sqlCandidates {
+		schema := ""
+		if strings.TrimSpace(c.SchemaName) != "" {
+			schema = fmt.Sprintf(" schema=%s,", c.SchemaName)
+		}
+		product := text2SQLProductLabel(c.RecommendedProduct)
+		recs = append(recs, store.PersonalRecommendation{
+			ID:            newID("rec"),
+			Kind:          "text2sql_report_candidate",
+			Ref:           c.Fingerprint,
+			Title:         "반복 Text2SQL 질문을 " + product + " 후보로 검토",
+			Detail:        fmt.Sprintf("최근 30일%s %d회 반복, 성공률 %.0f%%, 평균 %.2f KRW. 원문 질문/SQL은 추천에 저장하지 않습니다.", schema, c.Count, c.SuccessRate*100, c.AvgCostKRW),
+			EstSavingsKRW: float64(c.Count-1) * c.AvgCostKRW,
+		})
+	}
+
+	mcpAffinities, err := s.db.UserMCPAffinities(ctx, userID, recommendationSince, 2, 3)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "recommendations_failed")
+		return
+	}
+	for _, a := range mcpAffinities {
+		if a.SuccessRate < 0.7 || !s.mcpAffinityAllowedForRecommendation(ctx, a.ServerLabel, a.ToolName) {
+			continue
+		}
+		recs = append(recs, store.PersonalRecommendation{
+			ID:     newID("rec"),
+			Kind:   "mcp_tool",
+			Ref:    a.Ref,
+			Title:  "자주 쓰는 MCP 도구: " + a.Ref,
+			Detail: fmt.Sprintf("최근 30일 %d회 사용, 성공률 %.0f%%, 평균 요청 지연 %.0fms. 차단/승인필요 정책 도구는 추천에서 제외됩니다.", a.Calls, a.SuccessRate*100, a.AvgRequestLatencyMS),
 		})
 	}
 
