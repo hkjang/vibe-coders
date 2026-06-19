@@ -251,6 +251,14 @@ func (s *Server) runMCPAgenticChat(w http.ResponseWriter, r *http.Request, model
 		}
 		out.Steps++
 		raw, provider, err := s.postUpstreamChatRetry(r.Context(), r, model, body)
+		// Not every provider supports tool_choice=required; on a deterministic (4xx)
+		// rejection of the forced first turn, degrade gracefully to "auto" rather than
+		// failing the whole request.
+		if err != nil && toolChoice == "required" && !isTransientUpstreamErr(err) {
+			emitReason("ℹ️ tool_choice=required 미지원 가능 — auto로 재시도합니다.\n")
+			body["tool_choice"] = "auto"
+			raw, provider, err = s.postUpstreamChatRetry(r.Context(), r, model, body)
+		}
 		if provider != "" {
 			out.Provider = provider
 		}
