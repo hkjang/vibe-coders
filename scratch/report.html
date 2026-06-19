@@ -315,7 +315,7 @@
                     <div class="diag-node" style="padding: 10px;">IDE / Chat Clients<br><span style="font-size: 10px; font-weight: normal; color: #64748b;">(Cursor, Roo Code, etc.)</span></div>
                     <div class="diag-arrow">&rarr;</div>
                     <div class="diag-node primary" style="background: #f0f6ff; border-color: #2563eb; color: #1d4ed8; padding: 12px 10px;">
-                        <strong>Proxy Gateway Core (v0.50.21)</strong>
+                        <strong>Proxy Gateway Core (v0.50.22)</strong>
                         <div style="font-size: 9px; font-weight: normal; color: #475569; margin-top: 6px; text-align: left; line-height: 1.3;">
                             • 3-Tier Session Inference Engine<br>
                             • Intelligent Cost/Latency Router<br>
@@ -342,8 +342,8 @@
                 <strong>작성 부서:</strong> IT AI 추진단<br>
             </div>
             <div style="text-align: right;">
-                <strong>문서 번호:</strong> SEC-APG-2026-V5021<br>
-                <strong>최종 승인 버전:</strong> v0.50.21 (Production Stable)
+                <strong>문서 번호:</strong> SEC-APG-2026-V5022<br>
+                <strong>최종 승인 버전:</strong> v0.50.22 (Production Stable)
             </div>
         </div>
     </div>
@@ -1231,7 +1231,7 @@ psql -h [VM_IP_OR_DNS] -p 5432 -U gateway_user -d gateway_db < backup_gateway_YY
 
     <!-- Section 7 -->
     <div class="section">
-        <h2 class="section-title">7. 부록: 전체 릴리즈 히스토리 (Full Release History v0.1.0 ~ v0.50.21)</h2>
+        <h2 class="section-title">7. 부록: 전체 릴리즈 히스토리 (Full Release History v0.1.0 ~ v0.50.22)</h2>
         <p>
             AI Proxy Gateway는 지속적으로 진화하며 고가용성, 인프라 보안, 에이전트 엔지니어링 분석 및 성능 평가 요소를 추가해 왔습니다. v0.1.0 최초 배포부터 가장 최신 버전까지의 전체 릴리즈 히스토리는 다음과 같습니다.
         </p>
@@ -1406,9 +1406,9 @@ psql -h [VM_IP_OR_DNS] -p 5432 -U gateway_user -d gateway_db < backup_gateway_YY
                     <td>ClickHouse 식별자 SQL Injection 원천 차단. 다중 모델 비교 분석용 XView 고도화. SQLite WAL/busy_timeout 10초 튜닝으로 동시성 Lock contention 해결. NULL 바이트, NaN/Infinity 수치 처리 무결성 및 gzip 자동 디컴프레션 처리(postgres 22021 오류 완화). 시스템 백그라운드 예외 감사용 system_error_logs 구축.</td>
                 </tr>
                 <tr>
-                    <td><strong>v0.50.0 ~ v0.50.21</strong></td>
-                    <td>Trace Links, 개인화 탭, Chat 테스트 콘솔 및 MCP 자가 진단 정밀화</td>
-                    <td>요청 1건의 인과관계를 추적하는 Trace Links 구현. Settings Registry 및 MCP 콘솔 연동. 사용자별 모델/MCP affinity 및 Text2SQL 힌트 표, 추천 채택률 분석 연동. Chat Completion 테스트 콘솔 및 실시간 SSE 스트리밍 테스트 기능 완비. MCP 디스커버리 미매칭 시 자가 진단(mcpSelectionDiag) 피드백 제공 및 디스커버리 정책 임계 조율. 릴리즈 이력 외부화.</td>
+                    <td><strong>v0.50.0 ~ v0.50.22</strong></td>
+                    <td>Trace Links, 개인화 탭, Chat 테스트 콘솔 및 Agentic MCP Discovery 루프</td>
+                    <td>요청 1건의 인과관계를 추적하는 Trace Links 구현. Settings Registry 및 MCP 콘솔 연동. 사용자별 모델/MCP affinity 및 Text2SQL 힌트 표, 추천 채택률 분석 연동. Chat Completion 테스트 콘솔 및 실시간 SSE 스트리밍 테스트 기능 완비. MCP 디스커버리 미매칭 시 자가 진단(mcpSelectionDiag) 피드백 및 디스커버리 정책 임계 조율. 백업 LLM이 후보 MCP 도구들을 직접 판단하고 연속 호출해 답변을 직접 합성하는 에이전트식 MCP Discovery 루프(mcp_agentic.go) 탑재. 릴리즈 이력 외부화.</td>
                 </tr>
             </tbody>
         </table>

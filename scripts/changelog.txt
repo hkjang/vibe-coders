@@ -1,3 +1,4 @@
+v0.50.22:- **에이전트식 MCP Discovery 도구 호출 루프 탑재 (v0.50.22)**: vibe/grounded 및 vibe/research 가상 모델 요청 시 백업 LLM이 후보 MCP 도구들을 직접 선별·실행해 최종 답변을 합성하는 에이전트 루프(mcp_agentic.go) 구현. SSE 스트리밍 시 reasoning_content 델타 전송 및 백업 모델 부재 시 정적 폴백 지원.
 v0.50.21:- **MCP Discovery 자가 진단 피드백 및 정책 정밀화 (v0.50.21)**: MCP 디스커버리 후보가 비어있을 때 누락 사유(도구 미확인·점수 미달·정책 필터 등)를 자연어 응답에 구조화해 반환하는 mcpSelectionDiag 진단 모듈 도입. vibe/grounded 및 vibe/research의 라우팅 기준 정책 세부 조율.
 v0.50.20:- **Chat Completion 스트리밍 테스트 지원 (v0.50.20)**: 테스트 콘솔에 /admin/chat-test/stream 엔드포인트를 추가하고 실시간 SSE 응답 스트리밍 렌더링 기능을 구현하여, 스트리밍 모드에서도 응답 헤더 및 본문의 동작 무결성을 한 화면에서 완벽 검증 가능.
 v0.50.19:- **Chat Completion 테스트 콘솔 (v0.50.19)**: `GET /admin/chat-test/targets`, `POST /admin/chat-test/run`과 어드민 `Chat 테스트` 탭을 추가. `vibe/auto`·`vibe/text2sql-*`·provider model pattern·MCP route 후보를 선택해 실제 `/v1/chat/completions` 파이프라인 호출, 라우팅 preview, 응답 헤더/본문을 한 화면에서 검증 가능.

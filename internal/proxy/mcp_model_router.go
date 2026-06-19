@@ -133,9 +133,10 @@ func mcpDiscoveryPolicyForModel(model string) MCPDiscoveryPolicy {
 	case "vibe/all-mcp":
 		return MCPDiscoveryPolicy{Model: normalized, Mode: "all_allowed", MaxMCPs: 20, Parallelism: 5, TimeoutMillis: 8000, MinSelectorScore: 0, MinEvidenceScore: 0.70}
 	case "vibe/grounded":
-		// Grounded answers ground any query with MCP evidence; all registered MCPs are
-		// candidates (MinSelectorScore=0) — the evidence-score gate handles quality.
-		return MCPDiscoveryPolicy{Model: normalized, Mode: "selective", MaxMCPs: 3, Parallelism: 3, TimeoutMillis: 7000, MinSelectorScore: 0, MinEvidenceScore: 0.60}
+		// Grounded casts a wide net: a low (not zero) selector bar drops only MCPs with no
+		// lexical relevance at all, while the agentic LLM + evidence-score gate handle
+		// precision. This is what fixes the "no candidates" case on ordinary queries.
+		return MCPDiscoveryPolicy{Model: normalized, Mode: "selective", MaxMCPs: 3, Parallelism: 3, TimeoutMillis: 7000, MinSelectorScore: 0.10, MinEvidenceScore: 0.60}
 	case "vibe/research":
 		// Research sweeps multiple MCPs; keep a low (not zero) selector bar so clearly
 		// irrelevant MCPs are skipped while still passing most registered MCPs.
@@ -174,6 +175,50 @@ func (s *Server) handleMCPDiscoveryChat(w http.ResponseWriter, r *http.Request, 
 		w.Header().Set("X-MCP-Other-Filtered", strconv.Itoa(diag.OtherFiltered))
 	}
 
+	// Agentic tool-calling path: hand the selected upstreams' MCP tools to a backing LLM
+	// and let it call them, read the results, and synthesize a grounded answer (티키타카).
+	// Falls back to the static evidence path when no backing model is resolvable.
+	if len(candidates) > 0 {
+		if model := s.mcpAgenticBackingModel(r.Context(), r, policy, authCtx); model != "" {
+			ts := s.buildMCPAgentToolset(r.Context(), candidates)
+			if len(ts.tools) > 0 {
+				messages := extractChatMessagesRaw(body)
+				if len(messages) == 0 {
+					messages = []any{map[string]any{"role": "user", "content": query}}
+				}
+				stream, _ := jsonMap(body)["stream"].(bool)
+				if stream {
+					w.Header().Set("Content-Type", "text/event-stream")
+					w.Header().Set("Cache-Control", "no-cache")
+					w.Header().Set("Connection", "keep-alive")
+					w.Header().Set("X-Accel-Buffering", "no")
+				}
+				w.Header().Set("X-MCP-Agentic", "true")
+				w.Header().Set("X-MCP-Backing-Model", model)
+				outcome := s.runMCPAgenticChat(w, r, model, messages, ts, policy, apiKeyID, authCtx, stream)
+				// Streaming has already committed the response; non-streaming with a real
+				// answer also commits. Only a non-streaming failure with no content falls
+				// through to the static evidence renderer below.
+				if stream || (outcome.Content != "" && outcome.Err == nil) {
+					filtered := make([]MCPEvidence, 0, len(outcome.Evidences))
+					for _, ev := range outcome.Evidences {
+						if ev.Error == "" && ev.EvidenceScore >= policy.MinEvidenceScore {
+							filtered = append(filtered, ev)
+						}
+					}
+					usage := agenticUsageRecord(outcome, meta, len(outcome.Content))
+					s.finishMCPDiscovery(r, meta, start, query, policy, candidates, outcome.Evidences, filtered, outcome.Content, usage, apiKeyID, authCtx)
+					if !stream {
+						w.Header().Set("X-MCP-Evidence", strconv.Itoa(len(filtered)))
+						w.Header().Set("X-MCP-Grounded", strconv.FormatBool(len(filtered) > 0))
+						writeMCPDiscoveryCompletion(w, policy.Model, outcome.Content, filtered)
+					}
+					return
+				}
+			}
+		}
+	}
+
 	evidences := s.callSelectedMCPs(r, apiKeyID, authCtx, candidates, query, policy)
 	filtered := make([]MCPEvidence, 0, len(evidences))
 	for _, evidence := range evidences {
@@ -189,6 +234,44 @@ func (s *Server) handleMCPDiscoveryChat(w http.ResponseWriter, r *http.Request, 
 		w.Header().Set("X-MCP-Grounded", "true")
 	}
 
+	usage := &store.TokenUsage{
+		ID:               newID("usage"),
+		PromptTokens:     promptTokenEstimate(meta.Prompts),
+		CompletionTokens: len(content) / 4,
+		TotalTokens:      promptTokenEstimate(meta.Prompts) + len(content)/4,
+		Currency:         "KRW",
+		Source:           "mcp_discovery_estimated",
+		CreatedAt:        time.Now().UTC(),
+	}
+	s.finishMCPDiscovery(r, meta, start, query, policy, candidates, evidences, filtered, content, usage, apiKeyID, authCtx)
+	writeMCPDiscoveryCompletion(w, policy.Model, content, filtered)
+}
+
+// agenticUsageRecord builds a TokenUsage row from the agentic loop's aggregated usage,
+// estimating from the content length when the provider returned no usage block.
+func agenticUsageRecord(outcome mcpAgentOutcome, meta store.LogRecord, contentLen int) *store.TokenUsage {
+	u := &store.TokenUsage{
+		ID:               newID("usage"),
+		PromptTokens:     outcome.Usage.PromptTokens,
+		CompletionTokens: outcome.Usage.CompletionTokens,
+		TotalTokens:      outcome.Usage.TotalTokens,
+		Currency:         "KRW",
+		Source:           "mcp_agentic",
+		CreatedAt:        time.Now().UTC(),
+	}
+	if u.TotalTokens == 0 {
+		u.PromptTokens = promptTokenEstimate(meta.Prompts)
+		u.CompletionTokens = contentLen / 4
+		u.TotalTokens = u.PromptTokens + u.CompletionTokens
+		u.Source = "mcp_agentic_estimated"
+	}
+	return u
+}
+
+// finishMCPDiscovery records the response, usage, tool invocations, routing-learning
+// signal and metrics for a completed MCP discovery request (shared by the agentic and
+// static evidence paths), then enqueues the audit record.
+func (s *Server) finishMCPDiscovery(r *http.Request, meta store.LogRecord, start time.Time, query string, policy MCPDiscoveryPolicy, candidates []MCPCandidate, evidences, filtered []MCPEvidence, content string, usage *store.TokenUsage, apiKeyID string, authCtx *store.AuthContext) {
 	meta.Request.StatusCode = http.StatusOK
 	meta.Request.LatencyMS = time.Since(start).Milliseconds()
 	meta.Request.ToolCount = len(evidences)
@@ -202,16 +285,10 @@ func (s *Server) handleMCPDiscoveryChat(w http.ResponseWriter, r *http.Request, 
 		ResponseTextOptional: content,
 		CreatedAt:            time.Now().UTC(),
 	}
-	meta.Usage = &store.TokenUsage{
-		ID:               newID("usage"),
-		RequestID:        meta.Request.ID,
-		PromptTokens:     promptTokenEstimate(meta.Prompts),
-		CompletionTokens: len(content) / 4,
-		TotalTokens:      promptTokenEstimate(meta.Prompts) + len(content)/4,
-		Currency:         "KRW",
-		Source:           "mcp_discovery_estimated",
-		CreatedAt:        time.Now().UTC(),
+	if usage != nil {
+		usage.RequestID = meta.Request.ID
 	}
+	meta.Usage = usage
 	for _, evidence := range evidences {
 		meta.Tools = append(meta.Tools, store.ToolInvocation{
 			ID:          newID("tool"),
@@ -232,7 +309,6 @@ func (s *Server) handleMCPDiscoveryChat(w http.ResponseWriter, r *http.Request, 
 	s.metrics.ObserveLatency(meta.Request.LatencyMS)
 	s.metrics.ObserveToolInvocations(meta.Tools)
 	s.enqueue(meta)
-	writeMCPDiscoveryCompletion(w, policy.Model, content, filtered)
 }
 
 func (s *Server) recordDomainRoutingLearning(r *http.Request, meta store.LogRecord, query string, policy MCPDiscoveryPolicy, candidates []MCPCandidate, evidences, filtered []MCPEvidence, authCtx *store.AuthContext) {

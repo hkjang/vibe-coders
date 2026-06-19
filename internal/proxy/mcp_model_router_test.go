@@ -111,7 +111,9 @@ func TestMCPDiscoveryPolicyHelpers(t *testing.T) {
 		t.Fatal("MCP discovery model detection mismatch")
 	}
 	grounded := mcpDiscoveryPolicyForModel("vibe/grounded")
-	if grounded.Mode != "selective" || grounded.MaxMCPs != 3 || grounded.MinSelectorScore < 0.6 {
+	// grounded is intentionally permissive on selector score (the agentic LLM + evidence
+	// gate handle precision); it must still drop zero-relevance MCPs (selector > 0).
+	if grounded.Mode != "selective" || grounded.MaxMCPs != 3 || grounded.MinSelectorScore <= 0 || grounded.MinSelectorScore > 0.2 {
 		t.Fatalf("grounded policy mismatch: %+v", grounded)
 	}
 	all := mcpDiscoveryPolicyForModel("vibe/all-mcp")
@@ -171,6 +173,89 @@ func TestDomainRoutingAdminEndpoints(t *testing.T) {
 	queue, err := db.ListDomainReviewQueue(t.Context(), store.DomainRoutingFilter{Status: "approved", Limit: 10})
 	if err != nil || len(queue) != 1 {
 		t.Fatalf("review approval not persisted queue=%+v err=%v", queue, err)
+	}
+}
+
+func TestMCPDiscoveryAgenticToolCallingLoop(t *testing.T) {
+	var mcpCalls atomic.Int64
+	mcpUpstream := fakeDiscoveryMCP(t, "vacation evidence", &mcpCalls)
+	defer mcpUpstream.Close()
+
+	// Fake backing LLM: first turn issues a tool call against the MCP search tool, second
+	// turn (after the tool result is fed back) returns the final grounded answer.
+	var llmCalls atomic.Int64
+	llm := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		// The second turn carries a tool-result message in the conversation.
+		if strings.Contains(string(body), "\"role\":\"tool\"") || llmCalls.Load() > 0 {
+			llmCalls.Add(1)
+			_, _ = io.WriteString(w, `{"choices":[{"message":{"role":"assistant","content":"휴가 정책은 근거 기반으로 정리되었습니다."},"finish_reason":"stop"}],"usage":{"prompt_tokens":20,"completion_tokens":8,"total_tokens":28}}`)
+			return
+		}
+		llmCalls.Add(1)
+		_, _ = io.WriteString(w, `{"choices":[{"message":{"role":"assistant","content":null,"tool_calls":[{"id":"call_1","type":"function","function":{"name":"kb__search","arguments":"{\"query\":\"vacation policy\"}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":12,"completion_tokens":6,"total_tokens":18}}`)
+	}))
+	defer llm.Close()
+
+	s, db := newKnowledgeServer(t)
+	proxy := httptest.NewServer(s.Routes())
+	defer proxy.Close()
+
+	provResp := postJSON(t, proxy.URL+"/admin/providers", "", map[string]any{
+		"name": "openai", "base_url": llm.URL, "api_key": "test-key",
+		"timeout_ms": 5000, "enabled": true, "model_patterns": "gpt-*,o3",
+	})
+	if provResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(provResp.Body)
+		t.Fatalf("provider upsert failed: %d %s", provResp.StatusCode, body)
+	}
+	provResp.Body.Close()
+	if err := db.UpsertMCPUpstream(t.Context(), store.MCPUpstream{
+		ID: "kb", Name: "Knowledge MCP", URL: mcpUpstream.URL, Enabled: true,
+		Metadata: store.MCPUpstreamMetadata{
+			Description:   "company vacation policy hr rules",
+			Domains:       []string{"policy", "hr"},
+			RiskLevel:     "low",
+			AllowedModels: []string{"vibe/grounded"},
+			DefaultTool:   "search",
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	resp := postJSON(t, proxy.URL+"/v1/chat/completions", "", map[string]any{
+		"model": "vibe/grounded",
+		"messages": []map[string]string{{
+			"role": "user", "content": "what is our vacation policy?",
+		}},
+	})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("agentic grounded status=%d body=%s", resp.StatusCode, body)
+	}
+	if resp.Header.Get("X-MCP-Agentic") != "true" || resp.Header.Get("X-MCP-Backing-Model") == "" {
+		t.Fatalf("expected agentic headers, got agentic=%s backing=%s", resp.Header.Get("X-MCP-Agentic"), resp.Header.Get("X-MCP-Backing-Model"))
+	}
+	var out struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Choices) != 1 || !strings.Contains(out.Choices[0].Message.Content, "근거 기반") {
+		t.Fatalf("expected synthesized final answer, got %+v", out)
+	}
+	if mcpCalls.Load() != 1 {
+		t.Fatalf("MCP search tool should be called once by the agent, got %d", mcpCalls.Load())
+	}
+	if llmCalls.Load() < 2 {
+		t.Fatalf("agentic loop should make at least 2 LLM turns, got %d", llmCalls.Load())
 	}
 }
 
