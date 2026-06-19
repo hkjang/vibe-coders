@@ -319,6 +319,7 @@ func (s *Server) handleChatTestRun(w http.ResponseWriter, r *http.Request) {
 
 	authMode := "admin_synthetic"
 	policyAPIKeyID := ""
+	var previewAuthCtx *store.AuthContext
 	if token := strings.TrimSpace(input.BearerToken); token != "" {
 		internalReq.Header.Set("Authorization", "Bearer "+token)
 		authMode = "bearer"
@@ -328,6 +329,7 @@ func (s *Server) handleChatTestRun(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		policyAPIKeyID = apiKeyID
+		previewAuthCtx = authCtx
 		internalReq = internalReq.WithContext(context.WithValue(internalReq.Context(), chatTestAuthContextKey{}, chatTestInjectedAuth{APIKeyID: apiKeyID, AuthCtx: authCtx}))
 		if strings.TrimSpace(input.APIKeyID) != "" {
 			authMode = "api_key_policy"
@@ -336,7 +338,7 @@ func (s *Server) handleChatTestRun(w http.ResponseWriter, r *http.Request) {
 
 	var preview map[string]any
 	if input.IncludePreview {
-		plan := s.planIntelligentRouting(r.Context(), encoded, "/v1/chat/completions", strings.TrimSpace(input.Provider) != "", input.NoRoute, nil)
+		plan := s.planIntelligentRouting(r.Context(), encoded, "/v1/chat/completions", strings.TrimSpace(input.Provider) != "", input.NoRoute, previewAuthCtx)
 		preview = map[string]any{
 			"requested_model":   plan.RequestedModel,
 			"selected_model":    plan.SelectedModel,

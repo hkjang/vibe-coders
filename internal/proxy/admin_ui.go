@@ -258,6 +258,7 @@ const adminHTML = `<!doctype html>
       <a href="#/dashboard" data-tab="dashboard" class="active">대시보드</a>
       <a href="#/mcp" data-tab="mcp">MCP</a>
       <a href="#/routing" data-tab="routing">라우팅</a>
+      <a href="#/chat-test" data-tab="chat-test">Chat 테스트</a>
       <a href="#/requests" data-tab="requests">호출 이력</a>
       <a href="#/prompts" data-tab="prompts">프롬프트 검색</a>
       <a href="#/users" data-tab="users">사용자</a>
@@ -926,6 +927,7 @@ const adminHTML = `<!doctype html>
           case 'quotas':    await renderQuotas(); break;
           case 'mcp':       await renderMCP(params); break;
           case 'routing':   rest[0] === 'health' ? await renderRoutingHealth(params) : await renderRoutingLearning(params); break;
+          case 'chat-test': await renderChatTest(params); break;
           case 'agents':    await renderAgents(params); break;
           case 'vcs':       await renderVCS(params); break;
           case 'safety':    await renderSafety(); break;
@@ -4713,6 +4715,231 @@ const adminHTML = `<!doctype html>
         openModal('Routing Review 처리 오류', '<div class="error-line">' + escapeHTML(err.message) + '</div>');
       }
     };
+
+    // ---------- Chat completion test console ----------
+    async function renderChatTest(initial) {
+      const catalog = await api('/admin/chat-test/targets');
+      const targets = catalog.targets || [];
+      const defaults = catalog.defaults || {};
+      window.chatTestTargets = targets;
+      const selectedTarget = initial ? (initial.get('target') || '') : '';
+      const selectedModel = initial ? (initial.get('model') || defaults.model || 'vibe/auto') : (defaults.model || 'vibe/auto');
+      const targetOptions = chatTestTargetOptions(targets, selectedTarget);
+      const providerOptions = chatTestProviderOptions(targets, initial ? (initial.get('provider') || '') : '');
+      const kpis = '<div class="kpis">' +
+        kpi('테스트 대상', fmt(targets.length)) +
+        kpi('라우팅', fmt(targets.filter(t => String(t.kind || '').startsWith('routing')).length)) +
+        kpi('Provider 패턴', fmt(targets.filter(t => String(t.kind || '').startsWith('provider')).length)) +
+        kpi('MCP route', fmt(targets.filter(t => String(t.kind || '').startsWith('mcp_')).length)) +
+      '</div>';
+      const form =
+        '<form id="chat-test-form" autocomplete="off">' +
+          '<div class="grid2">' +
+            '<label>대상<select id="chat-target">' + targetOptions + '</select></label>' +
+            '<label>Provider<select id="chat-provider">' + providerOptions + '</select></label>' +
+          '</div>' +
+          '<div class="grid2">' +
+            '<label>Model<input id="chat-model" value="' + escapeHTML(selectedModel) + '" placeholder="vibe/auto"></label>' +
+            '<label>API Key ID<input id="chat-api-key-id" value="' + escapeHTML(initial ? (initial.get('api_key_id') || '') : '') + '" placeholder="정책 시뮬레이션"></label>' +
+          '</div>' +
+          '<div class="grid2">' +
+            '<label>Max tokens<input id="chat-max-tokens" type="number" min="1" max="4096" value="' + Number(defaults.max_tokens || 64) + '"></label>' +
+            '<label>Temperature<input id="chat-temperature" type="number" step="0.1" min="0" max="2" value="' + Number(defaults.temperature || 0) + '"></label>' +
+          '</div>' +
+          '<label>Proxy Bearer 원문<input id="chat-bearer" type="password" placeholder="실제 proxy key 검증 시에만 입력"></label>' +
+          '<label>Prompt<textarea id="chat-prompt" rows="7" style="width:100%; min-height:150px; resize:vertical">' + escapeHTML(defaults.prompt || 'Reply with pong in one short sentence.') + '</textarea></label>' +
+          '<div class="toolbar">' +
+            '<label style="display:flex; align-items:center; gap:6px"><input type="checkbox" id="chat-no-route" style="width:auto; height:auto; min-width:0"> X-Proxy-No-Route</label>' +
+            '<label style="display:flex; align-items:center; gap:6px"><input type="checkbox" id="chat-include-preview" checked style="width:auto; height:auto; min-width:0"> preview 포함</label>' +
+            '<button type="button" class="secondary" id="chat-preview">라우팅 미리보기</button>' +
+            '<button type="submit">Chat 호출</button>' +
+          '</div>' +
+        '</form>';
+      document.getElementById('view').innerHTML =
+        section('Chat Completion 테스트', kpis + form) +
+        section('대상 카탈로그', chatTestTargetTable(targets)) +
+        section('결과', '<div id="chat-test-result" class="empty">아직 실행 결과 없음</div>');
+
+      const targetSelect = document.getElementById('chat-target');
+      const applySelectedTarget = () => {
+        const opt = targetSelect.selectedOptions[0];
+        if (!opt) return;
+        const model = opt.getAttribute('data-model') || '';
+        const provider = opt.getAttribute('data-provider') || '';
+        const kind = opt.getAttribute('data-kind') || '';
+        const label = opt.getAttribute('data-label') || '';
+        if (model) document.getElementById('chat-model').value = model;
+        if (provider) document.getElementById('chat-provider').value = provider;
+        if (kind.startsWith('mcp_')) {
+          document.getElementById('chat-prompt').value =
+            'Test this MCP route through chat completion. Route: ' + label + '\\nReturn the selected route, whether a tool call would be appropriate, and one safe sample request.';
+        }
+      };
+      targetSelect.addEventListener('change', applySelectedTarget);
+      if (selectedTarget) applySelectedTarget();
+
+      document.querySelectorAll('[data-chat-target-id]').forEach(row => {
+        row.addEventListener('click', () => {
+          const id = row.getAttribute('data-chat-target-id');
+          targetSelect.value = id;
+          applySelectedTarget();
+          document.getElementById('chat-test-form').scrollIntoView({ behavior: 'smooth', block: 'start' });
+        });
+      });
+
+      document.getElementById('chat-preview').addEventListener('click', async () => {
+        const result = document.getElementById('chat-test-result');
+        result.innerHTML = '미리보기 중...';
+        try {
+          const payload = chatTestPreviewPayload();
+          const preview = await api('/admin/routing/preview', { method: 'POST', body: JSON.stringify(payload) });
+          result.innerHTML = renderChatTestPreview(preview);
+        } catch (err) {
+          result.innerHTML = '<div class="error-line">' + escapeHTML(err.message) + '</div>';
+        }
+      });
+
+      document.getElementById('chat-test-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const result = document.getElementById('chat-test-result');
+        result.innerHTML = '호출 중...';
+        try {
+          const payload = chatTestPayload(true);
+          const out = await api('/admin/chat-test/run', { method: 'POST', body: JSON.stringify(payload) });
+          result.innerHTML = renderChatTestResult(out);
+        } catch (err) {
+          result.innerHTML = '<div class="error-line">' + escapeHTML(err.message) + '</div>';
+        }
+      });
+      makeSortable('#view', 'chat-test');
+    }
+    function chatTestPayload(forRun) {
+      const temperatureRaw = document.getElementById('chat-temperature').value;
+      const payload = {
+        target_id: document.getElementById('chat-target').value,
+        model: document.getElementById('chat-model').value.trim() || 'vibe/auto',
+        provider: document.getElementById('chat-provider').value.trim(),
+        api_key_id: document.getElementById('chat-api-key-id').value.trim(),
+        prompt: document.getElementById('chat-prompt').value,
+        max_tokens: Number(document.getElementById('chat-max-tokens').value || 64),
+        no_route: document.getElementById('chat-no-route').checked,
+        include_preview: document.getElementById('chat-include-preview').checked,
+      };
+      if (temperatureRaw !== '') payload.temperature = Number(temperatureRaw);
+      if (forRun) {
+        const bearer = document.getElementById('chat-bearer').value.trim();
+        if (bearer) payload.bearer_token = bearer;
+      }
+      return payload;
+    }
+    function chatTestPreviewPayload() {
+      const payload = chatTestPayload(false);
+      const out = {
+        model: payload.model,
+        messages: [{ role: 'user', content: payload.prompt || '' }],
+        max_tokens: payload.max_tokens,
+        stream: false,
+      };
+      if (payload.api_key_id) out.api_key_id = payload.api_key_id;
+      if (payload.temperature !== undefined) out.temperature = payload.temperature;
+      return out;
+    }
+    function chatTestTargetOptions(targets, selected) {
+      if (!targets.length) return '<option value="">대상 없음</option>';
+      const selectedID = selected || 'routing:vibe/auto';
+      const groupLabel = {
+        routing: 'Routing',
+        routing_rule: 'Routing Rules',
+        provider: 'Providers',
+        provider_pattern: 'Provider Patterns',
+        text2sql: 'Text2SQL',
+        text2sql_profile: 'Text2SQL Profiles',
+        mcp_tool: 'MCP Tools',
+        mcp_prompt: 'MCP Prompts',
+        mcp_resource: 'MCP Resources',
+      };
+      const order = ['routing', 'routing_rule', 'provider', 'provider_pattern', 'text2sql', 'text2sql_profile', 'mcp_tool', 'mcp_prompt', 'mcp_resource'];
+      return order.map(kind => {
+        const rows = targets.filter(t => (t.kind || '') === kind);
+        if (!rows.length) return '';
+        return '<optgroup label="' + escapeHTML(groupLabel[kind] || kind) + '">' + rows.map(t =>
+          '<option value="' + escapeHTML(t.id) + '"' +
+            (t.id === selectedID ? ' selected' : '') +
+            ' data-model="' + escapeHTML(t.model || '') + '"' +
+            ' data-provider="' + escapeHTML(t.provider || '') + '"' +
+            ' data-kind="' + escapeHTML(t.kind || '') + '"' +
+            ' data-label="' + escapeHTML(t.label || '') + '">' +
+            escapeHTML((t.enabled === false ? '[off] ' : '') + (t.label || t.id)) +
+          '</option>'
+        ).join('') + '</optgroup>';
+      }).join('');
+    }
+    function chatTestProviderOptions(targets, selected) {
+      const names = [];
+      const seen = {};
+      targets.forEach(t => {
+        const name = t.provider || '';
+        if (name && !seen[name]) {
+          seen[name] = true;
+          names.push(name);
+        }
+      });
+      names.sort();
+      return '<option value="">자동</option>' + names.map(name => '<option value="' + escapeHTML(name) + '"' + (name === selected ? ' selected' : '') + '>' + escapeHTML(name) + '</option>').join('');
+    }
+    function chatTestTargetTable(targets) {
+      if (!targets.length) return '<div class="empty">등록된 테스트 대상 없음</div>';
+      return '<table><thead><tr><th data-sort="str">Kind</th><th data-sort="str">대상</th><th data-sort="str">Model</th><th data-sort="str">Provider</th><th data-sort="str">상태</th></tr></thead><tbody>' +
+        targets.map(t => '<tr class="row-link" data-chat-target-id="' + escapeHTML(t.id || '') + '">' +
+          '<td><span class="pill">' + escapeHTML(t.kind || '') + '</span></td>' +
+          '<td><strong>' + escapeHTML(t.label || t.id || '') + '</strong>' + (t.description ? '<div class="muted">' + escapeHTML(t.description) + '</div>' : '') + '</td>' +
+          '<td><code>' + escapeHTML(t.model || t.pattern || '-') + '</code>' + (t.editable ? '<div class="muted">editable</div>' : '') + '</td>' +
+          '<td>' + escapeHTML(t.provider || '-') + '</td>' +
+          '<td><span class="status ' + (t.enabled === false ? 'warn' : '') + '">' + (t.enabled === false ? 'off' : 'ready') + '</span></td>' +
+        '</tr>').join('') + '</tbody></table>';
+    }
+    function renderChatTestPreview(preview) {
+      const complexity = preview.complexity || {};
+      const risk = preview.risk || {};
+      return '<div class="kpis">' +
+        kpi('선택 모델', '<strong>' + escapeHTML(preview.selected_model || '-') + '</strong><div class="muted">' + escapeHTML(preview.selected_provider || 'provider 자동') + '</div>') +
+        kpi('Complexity', fmt(complexity.score || 0) + '<div class="muted">' + escapeHTML(complexity.tier || '') + '</div>') +
+        kpi('Risk', fmt(risk.score || 0) + '<div class="muted">' + escapeHTML((risk.categories || []).join(', ') || '-') + '</div>') +
+        kpi('Rewrite', preview.would_rewrite ? '<span class="status warn">yes</span>' : '<span class="status">no</span>') +
+      '</div>' +
+      '<table><tbody>' +
+        '<tr><th>Route reason</th><td>' + escapeHTML(preview.route_reason || '') + '</td></tr>' +
+        '<tr><th>Decision reason</th><td>' + escapeHTML(preview.decision_reason || '') + '</td></tr>' +
+        '<tr><th>Fallback path</th><td>' + escapeHTML((preview.fallback_path || []).join(' -> ') || '-') + '</td></tr>' +
+      '</tbody></table>';
+    }
+    function renderChatTestResult(out) {
+      const preview = out.preview || null;
+      const headers = out.headers || {};
+      const raw = formatTextIfJSON(out.raw || '');
+      let html = '<div class="kpis">' +
+        kpi('Status', '<span class="status ' + (out.ok ? '' : 'error') + '">' + fmt(out.status_code || 0) + '</span>') +
+        kpi('Latency', fmt(out.latency_ms || 0) + ' ms') +
+        kpi('Auth', escapeHTML(out.auth_mode || '') + '<div class="muted">' + escapeHTML(out.policy_api_key_id || headers['X-Api-Key-Id'] || '') + '</div>') +
+        kpi('Cache', escapeHTML(headers['X-Cache'] || 'MISS')) +
+      '</div>';
+      if (preview) {
+        html += '<h3 style="margin:14px 0 8px">Routing preview</h3>' + renderChatTestPreview(preview);
+      }
+      html += '<h3 style="margin:14px 0 8px">Response content</h3>' +
+        '<pre style="white-space:pre-wrap; margin:0">' + escapeHTML(out.content || '') + '</pre>' +
+        '<h3 style="margin:14px 0 8px">Headers</h3>' + chatTestHeadersTable(headers) +
+        '<h3 style="margin:14px 0 8px">Raw JSON</h3>' +
+        '<pre style="white-space:pre-wrap; max-height:420px; overflow:auto; margin:0">' + escapeHTML(raw) + '</pre>';
+      return html;
+    }
+    function chatTestHeadersTable(headers) {
+      const entries = Object.entries(headers || {}).sort((a, b) => a[0].localeCompare(b[0]));
+      if (!entries.length) return '<div class="empty">응답 헤더 없음</div>';
+      return '<table><thead><tr><th data-sort="str">Header</th><th>Value</th></tr></thead><tbody>' +
+        entries.map(([k, v]) => '<tr><td><code>' + escapeHTML(k) + '</code></td><td>' + escapeHTML(v) + '</td></tr>').join('') +
+        '</tbody></table>';
+    }
 
     // ---------- MCP / tool observability ----------
     async function renderMCP(initial) {
