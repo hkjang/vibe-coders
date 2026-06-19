@@ -60,6 +60,7 @@ type MCPEvidence struct {
 	UpstreamID    string          `json:"upstream_id"`
 	UpstreamName  string          `json:"upstream_name"`
 	ToolName      string          `json:"tool_name"`
+	Args          string          `json:"args,omitempty"` // actual JSON arguments the model used (agentic path)
 	Items         []MCPResultItem `json:"items"`
 	SelectorScore float64         `json:"selector_score"`
 	EvidenceScore float64         `json:"evidence_score"`
@@ -347,6 +348,13 @@ func (s *Server) finishMCPDiscovery(r *http.Request, meta store.LogRecord, start
 	}
 	meta.Usage = usage
 	for _, evidence := range evidences {
+		// Hash the model's actual per-call args when present (agentic path) so distinct/
+		// repeated tool calls are distinguishable in the request detail; fall back to the
+		// query for the static fan-out path where the query is the argument.
+		argSrc := evidence.Args
+		if argSrc == "" {
+			argSrc = query
+		}
 		meta.Tools = append(meta.Tools, store.ToolInvocation{
 			ID:          newID("tool"),
 			RequestID:   meta.Request.ID,
@@ -357,7 +365,7 @@ func (s *Server) finishMCPDiscovery(r *http.Request, meta store.LogRecord, start
 			Source:      "call",
 			IsMCP:       true,
 			IsError:     evidence.Error != "",
-			ArgHash:     audit.HashText(query),
+			ArgHash:     audit.HashText(argSrc),
 			CreatedAt:   time.Now().UTC(),
 		})
 	}

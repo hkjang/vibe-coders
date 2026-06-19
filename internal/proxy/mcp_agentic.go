@@ -456,6 +456,7 @@ func (s *Server) execAgentToolCall(r *http.Request, apiKeyID string, authCtx *st
 		args = map[string]any{}
 	}
 	argsJSON, _ := json.Marshal(args)
+	ev.Args = truncateText(string(argsJSON), 600)
 
 	mroute := mcpRoute{upstreamID: route.upstreamID, upstreamName: route.upstreamName, bareTool: route.bareTool}
 	if resp := s.enforceMCPToolGovernance(r, apiKeyID, authCtx, mroute, "tools/call", route.namespaced, route.bareTool, argsJSON, json.RawMessage("null")); resp != nil {

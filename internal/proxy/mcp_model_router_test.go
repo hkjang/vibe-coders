@@ -264,12 +264,17 @@ func TestMCPDiscoveryAgenticToolCallingLoop(t *testing.T) {
 				Content string `json:"content"`
 			} `json:"message"`
 		} `json:"choices"`
+		Evidence []MCPEvidence `json:"evidence"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		t.Fatal(err)
 	}
 	if len(out.Choices) != 1 || !strings.Contains(out.Choices[0].Message.Content, "근거 기반") {
 		t.Fatalf("expected synthesized final answer, got %+v", out)
+	}
+	// The evidence records the model's actual per-call arguments for after-the-fact review.
+	if len(out.Evidence) != 1 || !strings.Contains(out.Evidence[0].Args, "vacation policy") {
+		t.Fatalf("expected evidence with the model's tool args, got %+v", out.Evidence)
 	}
 	if mcpCalls.Load() != 1 {
 		t.Fatalf("MCP search tool should be called once by the agent, got %d", mcpCalls.Load())
