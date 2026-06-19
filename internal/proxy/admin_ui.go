@@ -6103,18 +6103,20 @@ const adminHTML = `<!doctype html>
     }
     async function renderPersonalization() {
       const view = document.getElementById('view');
-      const [d, coachingResp, modelAffinityResp, mcpAffinityResp, text2sqlHintsResp] = await Promise.all([
+      const [d, coachingResp, modelAffinityResp, mcpAffinityResp, text2sqlHintsResp, adoptionResp] = await Promise.all([
         api('/admin/personalization/profiles?window=30d&limit=50').catch(() => ({ profiles: [] })),
         api('/admin/personalization/coaching?window=30d&limit=50').catch(() => ({ items: [] })),
         api('/admin/personalization/model-affinity?window=30d&limit=50').catch(() => ({ items: [] })),
         api('/admin/personalization/mcp-affinity?window=30d&limit=50').catch(() => ({ items: [] })),
-        api('/admin/personalization/text2sql-hints?window=30d&limit=50&min_count=3').catch(() => ({ items: [] }))
+        api('/admin/personalization/text2sql-hints?window=30d&limit=50&min_count=3').catch(() => ({ items: [] })),
+        api('/admin/recommendations/adoption?window=30d').catch(() => ({ by_kind: [] }))
       ]);
       const profiles = d.profiles || [];
       const coaching = coachingResp.items || [];
       const modelAffinity = modelAffinityResp.items || [];
       const mcpAffinity = mcpAffinityResp.items || [];
       const text2sqlHints = text2sqlHintsResp.items || [];
+      const adoption = adoptionResp.by_kind || [];
       let html = '<p class="muted">사용자별 AI 사용 프로필 (최근 30일). 모델·작업·언어 선호, 비용 성향, 신뢰도를 요약합니다. 사용자를 클릭하면 상세·스냅샷을 볼 수 있습니다.</p>';
       if (!profiles.length) {
         html += '<p class="muted">표시할 프로필이 없습니다 (사용자 매핑된 API Key 활동 필요).</p>';
@@ -6183,6 +6185,21 @@ const adminHTML = `<!doctype html>
             '<td class="muted">' + escapeHTML(h.fingerprint || '') + '<div>' + escapeHTML(h.reason || '') + '</div></td>' +
           '</tr>').join('') + '</tbody></table>';
       }
+      let adoptionHtml = '<p class="muted">사용자가 추천을 채택·거절한 결과입니다. 추천 품질을 낮은 개입으로 점검할 때 사용합니다.</p>';
+      if (!adoption.length) {
+        adoptionHtml += '<p class="muted">아직 추천 피드백이 없습니다.</p>';
+      } else {
+        adoptionHtml += '<table><thead><tr>' +
+          '<th data-sort="str">추천 종류</th><th data-sort="num">채택</th><th data-sort="num">거절</th><th data-sort="num">채택자</th><th data-sort="num">채택률</th>' +
+          '</tr></thead><tbody>' +
+          adoption.map(a => '<tr>' +
+            '<td>' + escapeHTML(a.kind || '') + '</td>' +
+            '<td data-num="' + (a.adopted || 0) + '">' + fmt(a.adopted || 0) + '</td>' +
+            '<td data-num="' + (a.dismissed || 0) + '">' + fmt(a.dismissed || 0) + '</td>' +
+            '<td data-num="' + (a.distinct_adopters || 0) + '">' + fmt(a.distinct_adopters || 0) + '</td>' +
+            '<td data-num="' + (a.adoption_rate || 0) + '">' + pctText(a.adoption_rate) + '</td>' +
+          '</tr>').join('') + '</tbody></table>';
+      }
       let modelAffinityHtml = '<p class="muted">사용자별 모델 적합도입니다. 성공률·사용량·평균 비용으로 점수를 계산합니다.</p>';
       if (!modelAffinity.length) {
         modelAffinityHtml += '<p class="muted">표시할 모델 affinity가 없습니다.</p>';
@@ -6226,6 +6243,7 @@ const adminHTML = `<!doctype html>
         card('개인 AI 프로필', '<div class="card-body">' + html + '</div>') +
         card('개인화 코칭 후보', '<div class="card-body">' + coachingHtml + '</div>') +
         card('Text2SQL 개인 힌트', '<div class="card-body">' + text2sqlHintsHtml + '</div>') +
+        card('추천 채택률', '<div class="card-body">' + adoptionHtml + '</div>') +
         card('모델 Affinity', '<div class="card-body">' + modelAffinityHtml + '</div>') +
         card('MCP Affinity', '<div class="card-body">' + mcpAffinityHtml + '</div>');
       makeSortable('#view', 'personalization');
