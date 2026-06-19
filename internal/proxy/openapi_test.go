@@ -90,22 +90,27 @@ func TestOpenAPISwaggerAndVersion(t *testing.T) {
 }
 
 func TestAppVersionNotBelowReleaseNotes(t *testing.T) {
-	notesPath := filepath.Join("..", "..", "scripts", "gh_release.ps1")
-	body, err := os.ReadFile(notesPath)
-	if err != nil {
-		t.Fatalf("read release notes script: %v", err)
-	}
 	re := regexp.MustCompile(`v0\.(\d+)\.(\d+)`)
-	matches := re.FindAllStringSubmatch(string(body), -1)
-	if len(matches) == 0 {
-		t.Fatalf("no v0.x.y release versions found in %s", notesPath)
+	paths := []string{
+		filepath.Join("..", "..", "scripts", "gh_release.ps1"),
+		filepath.Join("..", "..", "scripts", "changelog.txt"),
 	}
 	maxMinor, maxPatch := -1, -1
-	for _, m := range matches {
-		minor, _ := strconv.Atoi(m[1])
-		patch, _ := strconv.Atoi(m[2])
-		if minor > maxMinor || (minor == maxMinor && patch > maxPatch) {
-			maxMinor, maxPatch = minor, patch
+	for _, path := range paths {
+		body, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read release notes source %s: %v", path, err)
+		}
+		matches := re.FindAllStringSubmatch(string(body), -1)
+		if len(matches) == 0 {
+			t.Fatalf("no v0.x.y release versions found in %s", path)
+		}
+		for _, m := range matches {
+			minor, _ := strconv.Atoi(m[1])
+			patch, _ := strconv.Atoi(m[2])
+			if minor > maxMinor || (minor == maxMinor && patch > maxPatch) {
+				maxMinor, maxPatch = minor, patch
+			}
 		}
 	}
 	appMinor, appPatch, ok := parseAppVersion(AppVersion)
