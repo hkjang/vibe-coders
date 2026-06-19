@@ -67,7 +67,7 @@ $notes += "|------|------|`r`n"
 $notes += "| ai-coding-proxy-gateway-v" + $cleanVer + ".tar.gz | Docker 이미지 패키지 (linux/amd64) |`r`n"
 $notes += "| ai-coding-proxy-gateway-v" + $cleanVer + ".tar.gz.sha256 | SHA256 체크섬 |`r`n"
 $notes += "| README-offline-v" + $cleanVer + ".md | 오프라인 배포 가이드 |`r`n"
-$notes += "| AI_Proxy_Gateway_Report.pdf | AI Proxy Gateway 기능·역할 및 비즈니스 가치 종합 보고서 (v0.50.18) |`r`n`r`n"
+$notes += "| AI_Proxy_Gateway_Report.pdf | AI Proxy Gateway 기능·역할 및 비즈니스 가치 종합 보고서 (v0.50.20) |`r`n`r`n"
 
 $notes += "### 빠른 시작`r`n"
 $notes += '```' + "bash`r`n"

@@ -191,9 +191,57 @@ const adminHTML = `<!doctype html>
       width: min(960px, 100%); max-height: 90vh; background: var(--panel);
       border-radius: 10px; overflow: auto; border: 1px solid var(--line);
     }
+    .modal.modal-wide { width: min(1280px, 100%); }
     .modal header { position: sticky; top: 0; }
     .modal .body { padding: 18px; }
     .modal h3 { margin: 0 0 4px; }
+
+    /* Chat-test result popup: conversation pane on the left, debug rail on the right. */
+    .chat-pop { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 0; }
+    .chat-pop > .chat-stream { display: flex; flex-direction: column; border-right: 1px solid var(--line); min-height: 320px; }
+    .chat-pop > .chat-debug { padding: 4px 0 4px 18px; }
+    .chat-messages { flex: 1; overflow-y: auto; padding: 4px 18px 8px 0; }
+    .ct-input-row { display: flex; gap: 8px; align-items: flex-end; padding: 10px 18px 10px 0; border-top: 1px solid var(--line); background: var(--panel-alt); flex-shrink: 0; }
+    .ct-followup-ta { flex: 1; resize: none; min-width: 0; box-sizing: border-box; height: 58px; }
+    .ct-input-row button { height: 58px; flex-shrink: 0; }
+    .chat-debug h4 { margin: 16px 0 8px; font-size: 12px; color: var(--muted); font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em; }
+    .chat-debug h4:first-child { margin-top: 0; }
+    .chat-msg { margin: 0 0 14px; }
+    .chat-msg .who { font-size: 11px; font-weight: 800; color: var(--muted); margin-bottom: 5px; letter-spacing: 0.03em; }
+    .chat-bubble {
+      padding: 12px 14px; border-radius: 12px; border: 1px solid var(--line);
+      background: var(--panel-alt); line-height: 1.6; overflow-wrap: anywhere;
+    }
+    .chat-msg.user .chat-bubble { background: rgba(110,168,254,0.10); border-color: rgba(110,168,254,0.4); border-top-left-radius: 4px; }
+    .chat-msg.assistant .chat-bubble { background: var(--panel-alt); border-top-left-radius: 4px; }
+    .chat-msg.assistant.error .chat-bubble { background: var(--bad-bg); border-color: var(--bad); }
+    .chat-debug pre {
+      white-space: pre-wrap; margin: 0; padding: 12px; border-radius: 6px;
+      background: var(--panel-alt); border: 1px solid var(--line);
+      font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px;
+      max-height: 320px; overflow: auto;
+    }
+    .ct-caret { display: inline-block; margin-left: 1px; color: var(--accent); animation: ct-blink 1s steps(2, start) infinite; }
+    @keyframes ct-blink { to { visibility: hidden; } }
+    /* Chat test input form */
+    .ct-form { display: flex; flex-direction: column; }
+    .ct-group { padding: 14px 16px; border-bottom: 1px solid var(--line); }
+    .ct-glabel { font-size: 11px; font-weight: 800; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 10px; }
+    .ct-glabel-note { font-weight: 400; text-transform: none; letter-spacing: 0; font-size: 11px; margin-left: 8px; opacity: 0.8; }
+    .ct-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }
+    .ct-row + .ct-row { margin-top: 10px; }
+    .ct-field { display: flex; flex-direction: column; gap: 5px; }
+    .ct-field > span { font-size: 12px; font-weight: 700; }
+    .ct-field input, .ct-field select, .ct-field textarea { width: 100%; box-sizing: border-box; min-width: 0; }
+    .ct-field-wide { display: flex; flex-direction: column; gap: 5px; margin-bottom: 10px; }
+    .ct-field-wide > span { font-size: 12px; font-weight: 700; }
+    .ct-field-wide input { width: 100%; box-sizing: border-box; min-width: 0; }
+    .ct-prompt { width: 100%; box-sizing: border-box; min-width: 0; min-height: 150px; height: auto; resize: vertical; }
+    .ct-footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; padding: 12px 16px; background: var(--panel-alt); }
+    .ct-options { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
+    .ct-check { display: flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer; user-select: none; white-space: nowrap; }
+    .ct-check input[type="checkbox"] { width: auto; height: auto; min-width: 0; margin: 0; }
+    .ct-btns { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
     .kv { display: grid; grid-template-columns: 160px 1fr; gap: 6px 16px; }
     .kv .k { color: var(--muted); font-size: 12px; font-weight: 700; }
     .kv .v { overflow-wrap: anywhere; }
@@ -248,6 +296,11 @@ const adminHTML = `<!doctype html>
       header { flex-direction: column; align-items: flex-start; gap: 8px; }
       main { padding: 14px; }
       .kpis, .grid3, .grid2 { grid-template-columns: 1fr; }
+      .chat-pop { grid-template-columns: 1fr; }
+      .chat-pop > .chat-stream { border-right: none; border-bottom: 1px solid var(--line); }
+      .chat-pop > .chat-debug { padding: 14px 0 0; }
+      .chat-messages { padding: 0 0 8px; }
+      .ct-input-row { padding: 10px 0; }
     }
   </style>
 </head>
@@ -510,9 +563,13 @@ const adminHTML = `<!doctype html>
     document.getElementById('modal-backdrop').addEventListener('click', (e) => {
       if (e.target.id === 'modal-backdrop') closeModal();
     });
-    function openModal(title, html, requestId) {
+    function openModal(title, html, requestId, opts) {
+      opts = opts || {};
       document.getElementById('modal-title').textContent = title;
       document.getElementById('modal-body').innerHTML = html;
+
+      const modalEl = document.querySelector('#modal-backdrop .modal');
+      if (modalEl) modalEl.classList.toggle('modal-wide', !!opts.wide);
 
       const btn = document.getElementById('modal-analyze');
       if (btn) {
@@ -4733,34 +4790,51 @@ const adminHTML = `<!doctype html>
         kpi('MCP route', fmt(targets.filter(t => String(t.kind || '').startsWith('mcp_')).length)) +
       '</div>';
       const form =
-        '<form id="chat-test-form" autocomplete="off">' +
-          '<div class="grid2">' +
-            '<label>대상<select id="chat-target">' + targetOptions + '</select></label>' +
-            '<label>Provider<select id="chat-provider">' + providerOptions + '</select></label>' +
+        '<form id="chat-test-form" autocomplete="off" class="ct-form">' +
+          '<div class="ct-group">' +
+            '<div class="ct-glabel">연결 대상</div>' +
+            '<div class="ct-row">' +
+              '<label class="ct-field"><span>대상</span><select id="chat-target">' + targetOptions + '</select></label>' +
+              '<label class="ct-field"><span>Provider</span><select id="chat-provider">' + providerOptions + '</select></label>' +
+            '</div>' +
           '</div>' +
-          '<div class="grid2">' +
-            '<label>Model<input id="chat-model" value="' + escapeHTML(selectedModel) + '" placeholder="vibe/auto"></label>' +
-            '<label>API Key ID<input id="chat-api-key-id" value="' + escapeHTML(initial ? (initial.get('api_key_id') || '') : '') + '" placeholder="정책 시뮬레이션"></label>' +
+          '<div class="ct-group">' +
+            '<div class="ct-glabel">모델 파라미터</div>' +
+            '<div class="ct-field-wide"><span>Model</span><input id="chat-model" value="' + escapeHTML(selectedModel) + '" placeholder="vibe/auto"></div>' +
+            '<div class="ct-row">' +
+              '<label class="ct-field"><span>Max tokens</span><input id="chat-max-tokens" type="number" min="1" max="4096" value="' + Number(defaults.max_tokens || 1024) + '"></label>' +
+              '<label class="ct-field"><span>Temperature</span><input id="chat-temperature" type="number" step="0.1" min="0" max="2" value="' + Number(defaults.temperature || 0) + '"></label>' +
+            '</div>' +
           '</div>' +
-          '<div class="grid2">' +
-            '<label>Max tokens<input id="chat-max-tokens" type="number" min="1" max="4096" value="' + Number(defaults.max_tokens || 64) + '"></label>' +
-            '<label>Temperature<input id="chat-temperature" type="number" step="0.1" min="0" max="2" value="' + Number(defaults.temperature || 0) + '"></label>' +
+          '<div class="ct-group">' +
+            '<div class="ct-glabel">인증<span class="ct-glabel-note">실제 proxy key 검증 시만 입력</span></div>' +
+            '<div class="ct-row">' +
+              '<label class="ct-field"><span>API Key ID</span><input id="chat-api-key-id" value="' + escapeHTML(initial ? (initial.get('api_key_id') || '') : '') + '" placeholder="정책 시뮬레이션"></label>' +
+              '<label class="ct-field"><span>Proxy Bearer 원문</span><input id="chat-bearer" type="password" placeholder="실제 proxy key 검증 시에만 입력"></label>' +
+            '</div>' +
           '</div>' +
-          '<label>Proxy Bearer 원문<input id="chat-bearer" type="password" placeholder="실제 proxy key 검증 시에만 입력"></label>' +
-          '<label>Prompt<textarea id="chat-prompt" rows="7" style="width:100%; min-height:150px; resize:vertical">' + escapeHTML(defaults.prompt || 'Reply with pong in one short sentence.') + '</textarea></label>' +
-          '<div class="toolbar">' +
-            '<label style="display:flex; align-items:center; gap:6px"><input type="checkbox" id="chat-no-route" style="width:auto; height:auto; min-width:0"> X-Proxy-No-Route</label>' +
-            '<label style="display:flex; align-items:center; gap:6px"><input type="checkbox" id="chat-include-preview" checked style="width:auto; height:auto; min-width:0"> preview 포함</label>' +
-            '<button type="button" class="secondary" id="chat-preview">라우팅 미리보기</button>' +
-            '<button type="submit">Chat 호출</button>' +
+          '<div class="ct-group">' +
+            '<div class="ct-glabel">Prompt</div>' +
+            '<textarea id="chat-prompt" class="ct-prompt" rows="7">' + escapeHTML(defaults.prompt || 'Reply with pong in one short sentence.') + '</textarea>' +
+          '</div>' +
+          '<div class="ct-footer">' +
+            '<div class="ct-options">' +
+              '<label class="ct-check"><input type="checkbox" id="chat-no-route"> X-Proxy-No-Route</label>' +
+              '<label class="ct-check"><input type="checkbox" id="chat-include-preview" checked> preview 포함</label>' +
+            '</div>' +
+            '<div class="ct-btns">' +
+              '<button type="button" class="secondary" id="chat-preview">라우팅 미리보기</button>' +
+              '<button type="button" class="secondary" id="chat-mcp-route" disabled title="MCP 대상을 선택하면 활성화됩니다">MCP 라우팅 테스트</button>' +
+              '<button type="submit">Chat 호출</button>' +
+            '</div>' +
           '</div>' +
         '</form>';
       document.getElementById('view').innerHTML =
         section('Chat Completion 테스트', kpis + form) +
-        section('대상 카탈로그', chatTestTargetTable(targets)) +
-        section('결과', '<div id="chat-test-result" class="empty">아직 실행 결과 없음</div>');
+        section('대상 카탈로그', chatTestTargetTable(targets));
 
       const targetSelect = document.getElementById('chat-target');
+      const mcpRouteBtn = document.getElementById('chat-mcp-route');
       const applySelectedTarget = () => {
         const opt = targetSelect.selectedOptions[0];
         if (!opt) return;
@@ -4770,13 +4844,16 @@ const adminHTML = `<!doctype html>
         const label = opt.getAttribute('data-label') || '';
         if (model) document.getElementById('chat-model').value = model;
         if (provider) document.getElementById('chat-provider').value = provider;
-        if (kind.startsWith('mcp_')) {
+        const isMCP = kind.startsWith('mcp_');
+        window.chatTestSelected = (window.chatTestTargets || []).find(t => t.id === targetSelect.value) || null;
+        if (mcpRouteBtn) mcpRouteBtn.disabled = !isMCP;
+        if (isMCP) {
           document.getElementById('chat-prompt').value =
             'Test this MCP route through chat completion. Route: ' + label + '\\nReturn the selected route, whether a tool call would be appropriate, and one safe sample request.';
         }
       };
       targetSelect.addEventListener('change', applySelectedTarget);
-      if (selectedTarget) applySelectedTarget();
+      applySelectedTarget();
 
       document.querySelectorAll('[data-chat-target-id]').forEach(row => {
         row.addEventListener('click', () => {
@@ -4788,30 +4865,366 @@ const adminHTML = `<!doctype html>
       });
 
       document.getElementById('chat-preview').addEventListener('click', async () => {
-        const result = document.getElementById('chat-test-result');
-        result.innerHTML = '미리보기 중...';
+        openModal('라우팅 미리보기', '<div class="empty">미리보기 중...</div>');
         try {
           const payload = chatTestPreviewPayload();
           const preview = await api('/admin/routing/preview', { method: 'POST', body: JSON.stringify(payload) });
-          result.innerHTML = renderChatTestPreview(preview);
+          openModal('라우팅 미리보기 — ' + (payload.model || ''), '<div class="card-body">' + renderChatTestPreview(preview) + '</div>');
         } catch (err) {
-          result.innerHTML = '<div class="error-line">' + escapeHTML(err.message) + '</div>';
+          openModal('라우팅 미리보기 오류', '<div class="error-line">' + escapeHTML(err.message) + '</div>');
         }
       });
 
+      if (mcpRouteBtn) {
+        mcpRouteBtn.addEventListener('click', () => runMCPRoutingTestFromConsole(window.chatTestSelected));
+      }
+
       document.getElementById('chat-test-form').addEventListener('submit', async (e) => {
         e.preventDefault();
-        const result = document.getElementById('chat-test-result');
-        result.innerHTML = '호출 중...';
+        const payload = chatTestPayload(true);
+        const submitBtn = e.submitter || document.querySelector('#chat-test-form button[type="submit"]');
+        const prevLabel = submitBtn ? submitBtn.textContent : '';
+        if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = '호출 중…'; }
         try {
-          const payload = chatTestPayload(true);
-          const out = await api('/admin/chat-test/run', { method: 'POST', body: JSON.stringify(payload) });
-          result.innerHTML = renderChatTestResult(out);
-        } catch (err) {
-          result.innerHTML = '<div class="error-line">' + escapeHTML(err.message) + '</div>';
+          await streamChatTest(payload);
+        } finally {
+          if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = prevLabel; }
         }
       });
       makeSortable('#view', 'chat-test');
+    }
+    // ---------- Multi-turn chat popup (conversation + debug rail) ----------
+    // window.chatSession = { messages, model, config, turn, streaming }
+
+    function openChatStreamPopup(model) {
+      window.chatSession = { messages: [], model: model || 'vibe/auto', config: {}, turn: -1, streaming: false };
+      const inputRow =
+        '<div class="ct-input-row">' +
+          '<textarea id="ct-followup" class="ct-followup-ta" placeholder="후속 질문… (Enter 전송, Shift+Enter 줄바꿈)" disabled></textarea>' +
+          '<button type="button" id="ct-send" onclick="sendChatFollowup()" disabled>전송</button>' +
+        '</div>';
+      openModal('Chat — ' + escapeHTML(model || 'vibe/auto'),
+        '<div class="chat-pop">' +
+          '<div class="chat-stream"><div class="chat-messages" id="ct-messages"></div>' + inputRow + '</div>' +
+          '<div class="chat-debug"><div id="ct-debug"><div class="empty">스트리밍 중…</div></div></div>' +
+        '</div>', null, { wide: true });
+      setTimeout(() => {
+        const ta = document.getElementById('ct-followup');
+        if (ta) ta.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChatFollowup(); } });
+      }, 0);
+    }
+    function appendChatUserBubble(text) {
+      const msgs = document.getElementById('ct-messages');
+      if (!msgs) return;
+      const el = document.createElement('div');
+      el.className = 'chat-msg user';
+      el.innerHTML = '<div class="who">USER</div><div class="chat-bubble" style="white-space:pre-wrap">' + escapeHTML(text || '') + '</div>';
+      msgs.appendChild(el);
+      msgs.scrollTop = msgs.scrollHeight;
+    }
+    function appendChatAssistantBubble(turn) {
+      const msgs = document.getElementById('ct-messages');
+      if (!msgs) return;
+      const r = document.createElement('div');
+      r.className = 'chat-msg assistant'; r.id = 'ct-reasoning-msg-' + turn; r.style.display = 'none';
+      r.innerHTML = '<div class="who">REASONING (추론)</div><div class="chat-bubble" id="ct-reasoning-' + turn + '" style="white-space:pre-wrap;opacity:.8;font-size:13px"></div>';
+      msgs.appendChild(r);
+      const a = document.createElement('div');
+      a.className = 'chat-msg assistant';
+      a.innerHTML = '<div class="who">ASSISTANT <span class="muted" id="ct-finish-' + turn + '"></span></div><div class="chat-bubble"><div id="ct-answer-' + turn + '" class="markdown-view"><span class="muted">호출 중…<span class="ct-caret">▋</span></span></div></div>';
+      msgs.appendChild(a);
+      msgs.scrollTop = msgs.scrollHeight;
+    }
+    function sendChatFollowup() {
+      const sess = window.chatSession;
+      if (!sess || sess.streaming) return;
+      const ta = document.getElementById('ct-followup');
+      const btn = document.getElementById('ct-send');
+      if (!ta) return;
+      const text = ta.value.trim();
+      if (!text) return;
+      ta.value = ''; ta.disabled = true;
+      if (btn) btn.disabled = true;
+      sess.messages.push({ role: 'user', content: text });
+      sess.turn++;
+      appendChatUserBubble(text);
+      doStreamTurn(sess.turn, sess);
+    }
+    // Initial call: build session and open popup.
+    async function streamChatTest(payload) {
+      const initialText = (payload.prompt || '').trim() || 'Reply with pong in one short sentence.';
+      openChatStreamPopup(payload.model);
+      const sess = window.chatSession;
+      sess.config = {
+        max_tokens: payload.max_tokens,
+        temperature: payload.temperature,
+        api_key_id: payload.api_key_id,
+        bearer_token: payload.bearer_token,
+        provider: payload.provider,
+        no_route: payload.no_route,
+        target_id: payload.target_id,
+        include_preview: payload.include_preview,
+      };
+      sess.messages = [{ role: 'user', content: initialText }];
+      sess.turn = 0;
+      appendChatUserBubble(initialText);
+      await doStreamTurn(0, sess);
+    }
+    // Core streaming engine — reused for every turn including follow-ups.
+    async function doStreamTurn(turn, sess) {
+      sess.streaming = true;
+      appendChatAssistantBubble(turn);
+      const previewPayload = { model: sess.model, messages: sess.messages, provider: sess.config.provider || '', no_route: !!sess.config.no_route };
+      const previewPromise = sess.config.include_preview
+        ? api('/admin/routing/preview', { method: 'POST', body: JSON.stringify(previewPayload) }).catch(() => null)
+        : Promise.resolve(null);
+      const payload = { model: sess.model, messages: sess.messages, max_tokens: sess.config.max_tokens,
+        temperature: sess.config.temperature, api_key_id: sess.config.api_key_id,
+        bearer_token: sess.config.bearer_token, provider: sess.config.provider,
+        no_route: sess.config.no_route, target_id: sess.config.target_id };
+      const started = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+      let answer = '', reasoning = '', finish = '', usage = null, raw = '';
+      let renderQueued = false;
+      const ansEl = () => document.getElementById('ct-answer-' + turn);
+      const reasonEl = () => document.getElementById('ct-reasoning-' + turn);
+      const reasonMsg = () => document.getElementById('ct-reasoning-msg-' + turn);
+      const msgsEl = () => document.getElementById('ct-messages');
+      const paint = () => {
+        renderQueued = false;
+        const a = ansEl();
+        if (a) a.innerHTML = answer ? renderMarkdown(answer) + '<span class="ct-caret">▋</span>' : '<span class="muted">…<span class="ct-caret">▋</span></span>';
+        if (reasoning) {
+          const rm = reasonMsg(), re = reasonEl();
+          if (rm) rm.style.display = '';
+          if (re) re.textContent = reasoning;
+        }
+        const m = msgsEl(); if (m) m.scrollTop = m.scrollHeight;
+      };
+      const queuePaint = () => { if (!renderQueued) { renderQueued = true; requestAnimationFrame(paint); } };
+      let res;
+      try {
+        const reqHeaders = headers();
+        reqHeaders['Content-Type'] = 'application/json';
+        reqHeaders['Accept'] = 'text/event-stream';
+        res = await fetch('/admin/chat-test/stream', { method: 'POST', headers: reqHeaders, body: JSON.stringify(payload) });
+      } catch (err) {
+        finalizeChatStream({ error: err.message, payload, started, turn, answer, sess });
+        return;
+      }
+      const ctype = res.headers.get('Content-Type') || '';
+      // Pipeline blocked the request before streaming: body is a JSON error/result, not SSE.
+      if (!res.body || ctype.indexOf('text/event-stream') < 0) {
+        const text = await res.text();
+        raw = text;
+        let parsed = null;
+        try { parsed = JSON.parse(text); } catch (e) {}
+        if (parsed && parsed.choices && parsed.choices[0]) {
+          const m = parsed.choices[0].message || {};
+          answer = (typeof m.content === 'string') ? m.content : (parsed.choices[0].text || '');
+          reasoning = m.reasoning_content || m.reasoning || '';
+          finish = parsed.choices[0].finish_reason || '';
+          usage = parsed.usage || null;
+          paint();
+          finalizeChatStream({ res, payload, started, finish, usage, raw, previewPromise, turn, answer, sess });
+        } else {
+          const msg = (parsed && parsed.error && parsed.error.message) ? parsed.error.message : (text || ('HTTP ' + res.status));
+          finalizeChatStream({ res, payload, started, error: msg, raw, previewPromise, turn, answer, sess });
+        }
+        return;
+      }
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      try {
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          const text = decoder.decode(value, { stream: true });
+          raw += text;
+          buffer += text;
+          let nl;
+          while ((nl = buffer.indexOf('\n')) >= 0) {
+            const line = buffer.slice(0, nl).trim();
+            buffer = buffer.slice(nl + 1);
+            if (!line || line.indexOf('data:') !== 0) continue;
+            const data = line.slice(5).trim();
+            if (data === '[DONE]') continue;
+            let chunk;
+            try { chunk = JSON.parse(data); } catch (e) { continue; }
+            const choices = chunk.choices || [];
+            for (const c of choices) {
+              const d = c.delta || c.message || {};
+              if (typeof d.content === 'string') answer += d.content;
+              else if (Array.isArray(d.content)) answer += d.content.map(x => (x && x.text) || '').join('');
+              const rc = d.reasoning_content || d.reasoning;
+              if (typeof rc === 'string') reasoning += rc;
+              if (c.finish_reason) finish = c.finish_reason;
+            }
+            if (chunk.usage) usage = chunk.usage;
+            queuePaint();
+          }
+        }
+      } catch (err) {
+        finalizeChatStream({ res, payload, started, error: err.message, finish, usage, raw, previewPromise, turn, answer, sess });
+        return;
+      }
+      paint();
+      finalizeChatStream({ res, payload, started, finish, usage, raw, previewPromise, turn, answer, sess });
+    }
+    async function finalizeChatStream(s) {
+      const turn = s.turn || 0;
+      const latency = Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - (s.started || 0));
+      const a = document.getElementById('ct-answer-' + turn);
+      if (a) {
+        const hasText = a.textContent && a.textContent.replace('▋', '').trim();
+        if (s.error && !hasText) {
+          const msg = a.closest('.chat-msg');
+          if (msg) msg.classList.add('error');
+          a.innerHTML = '<span>' + escapeHTML(s.error) + '</span>';
+        } else if (!hasText) {
+          a.innerHTML = '<span class="muted">(빈 응답 — finish_reason=' + escapeHTML(s.finish || '') + ', max tokens를 늘려보세요)</span>';
+        } else {
+          a.innerHTML = a.innerHTML.replace(/<span class="ct-caret">▋<\/span>\s*$/, '');
+        }
+      }
+      const fin = document.getElementById('ct-finish-' + turn);
+      if (fin && s.finish) fin.textContent = '· ' + s.finish;
+      const headersObj = {};
+      if (s.res && s.res.headers) {
+        s.res.headers.forEach((v, k) => {
+          const lower = k.toLowerCase();
+          if (lower.indexOf('x-') === 0 || lower === 'content-type') headersObj[k] = v;
+        });
+      }
+      let preview = null;
+      if (s.previewPromise) { try { preview = await s.previewPromise; } catch (e) {} }
+      const debug = document.getElementById('ct-debug');
+      if (debug) {
+        debug.innerHTML = renderChatStreamDebug({
+          status: s.res ? s.res.status : 0,
+          ok: s.res ? s.res.ok : false,
+          latency_ms: latency,
+          model: s.payload ? s.payload.model : '',
+          provider: s.payload ? s.payload.provider : '',
+          headers: headersObj,
+          preview: preview,
+          usage: s.usage,
+          raw: s.raw || '',
+          error: s.error,
+        });
+      }
+      // Append assistant answer to conversation history, then enable follow-up.
+      const sess = s.sess || window.chatSession;
+      if (sess) {
+        if (s.answer && !s.error) sess.messages.push({ role: 'assistant', content: s.answer });
+        sess.streaming = false;
+      }
+      const ta = document.getElementById('ct-followup');
+      const btn = document.getElementById('ct-send');
+      if (ta) { ta.disabled = false; ta.focus(); }
+      if (btn) btn.disabled = false;
+    }
+    function renderChatStreamDebug(info) {
+      const headers = info.headers || {};
+      let html = '<h4>실행 요약</h4><div class="kv">' +
+        row('Status', '<span class="status ' + (info.ok ? '' : 'error') + '">' + fmt(info.status || 0) + '</span>') +
+        row('Latency', fmt(info.latency_ms || 0) + ' ms (브라우저 측정)') +
+        row('Cache', escapeHTML(headers['X-Cache'] || 'MISS')) +
+        row('Model', escapeHTML(info.model || '')) +
+        row('Provider', escapeHTML(info.provider || '자동')) +
+        (info.error ? row('Error', '<span class="status error">' + escapeHTML(info.error) + '</span>') : '') +
+      '</div>';
+      if (info.usage) {
+        const u = info.usage;
+        html += '<h4>토큰</h4><div class="kv">' +
+          row('Prompt', fmt(u.prompt_tokens || 0)) +
+          row('Completion', fmt(u.completion_tokens || 0)) +
+          (u.completion_tokens_details && u.completion_tokens_details.reasoning_tokens ? row('추론', fmt(u.completion_tokens_details.reasoning_tokens)) : '') +
+          row('Total', fmt(u.total_tokens || 0)) +
+        '</div>';
+      }
+      if (info.preview) {
+        html += '<h4>라우팅 결정</h4>' + renderChatTestPreviewCompact(info.preview);
+      }
+      html += '<h4>응답 헤더</h4>' + chatTestHeadersTable(headers);
+      html += '<h4>Raw SSE</h4><pre>' + escapeHTML(info.raw || '') + '</pre>';
+      return html;
+    }
+    // ---------- MCP routing test (explain + upstream call) ----------
+    async function runMCPRoutingTestFromConsole(target) {
+      if (!target) { openModal('MCP 라우팅 테스트', '<div class="error-line">MCP 대상을 먼저 선택하세요.</div>'); return; }
+      const meta = target.metadata || {};
+      const kind = meta.kind || (String(target.kind || '').replace('mcp_', '')) || 'tool';
+      const method = mcpMethodForKind(kind);
+      const name = meta.exposed_name || target.label || '';
+      const uri = meta.uri || '';
+      const reqLabel = method + ' ' + (uri || name);
+      openMCPRoutingPopup({ pending: true, request: reqLabel });
+      try {
+        const explain = await api('/admin/mcp/route/explain', { method: 'POST', body: JSON.stringify({ method, name, uri }) });
+        const route = explain.route || {};
+        const final = explain.final || {};
+        let tested = null;
+        let skipped = '';
+        if (!route.found) {
+          skipped = 'Route를 찾지 못해 업스트림 호출을 생략했습니다.';
+        } else if (final.decision === 'block') {
+          skipped = '최종 판단이 block이라 업스트림 호출을 생략했습니다.';
+        } else {
+          const testBody = { method: route.target_method || method, name, uri, upstream_id: route.upstream_id };
+          tested = await api('/admin/mcp/test', { method: 'POST', body: JSON.stringify(testBody) });
+        }
+        openMCPRoutingPopup({ request: reqLabel, explain: explain, tested: tested, skipped: skipped });
+      } catch (err) {
+        openMCPRoutingPopup({ request: reqLabel, error: err.message });
+      }
+    }
+    function openMCPRoutingPopup(state) {
+      const title = 'MCP 라우팅 테스트 — ' + escapeHTML(state.request || '');
+      let stream;
+      let debug;
+      if (state.pending) {
+        stream = mcpReqBubble(state.request) + '<div class="chat-msg assistant"><div class="who">UPSTREAM</div><div class="chat-bubble"><span class="muted">라우팅 확인 중…</span></div></div>';
+        debug = '<div class="empty">대기 중…</div>';
+      } else if (state.error) {
+        stream = mcpReqBubble(state.request) + '<div class="chat-msg assistant error"><div class="who">UPSTREAM</div><div class="chat-bubble">' + escapeHTML(state.error) + '</div></div>';
+        debug = '<div class="empty">실패</div>';
+      } else {
+        const tested = state.tested;
+        let respBubble;
+        if (state.skipped) {
+          respBubble = '<div class="chat-msg assistant error"><div class="who">UPSTREAM</div><div class="chat-bubble">' + escapeHTML(state.skipped) + '</div></div>';
+        } else if (tested) {
+          const body = tested.ok
+            ? '<pre style="white-space:pre-wrap; margin:0">' + escapeHTML(formatTextIfJSON(tested.response_preview || '')) + '</pre>'
+            : escapeHTML(tested.error || '(오류)');
+          respBubble = '<div class="chat-msg assistant' + (tested.ok ? '' : ' error') + '"><div class="who">UPSTREAM · ' + escapeHTML(tested.upstream_name || '') + '</div><div class="chat-bubble">' + body + '</div></div>';
+        } else {
+          respBubble = '';
+        }
+        stream = mcpReqBubble(state.request) + respBubble;
+        debug = renderMCPRoutingDebug(state.explain || {}, tested);
+      }
+      openModal(title, '<div class="chat-pop"><div class="chat-stream">' + stream + '</div><div class="chat-debug">' + debug + '</div></div>', null, { wide: true });
+    }
+    function mcpReqBubble(reqLabel) {
+      return '<div class="chat-msg user"><div class="who">MCP REQUEST</div><div class="chat-bubble" style="font-family:ui-monospace,SFMono-Regular,Consolas,monospace">' + escapeHTML(reqLabel || '') + '</div></div>';
+    }
+    function renderMCPRoutingDebug(explain, tested) {
+      let html = '<h4>라우트 / 정책</h4>' + mcpExplainHTML(explain);
+      if (tested) {
+        html += '<h4>업스트림 호출</h4><div class="kv">' +
+          row('상태', tested.ok ? '<span class="status">ok</span>' : '<span class="status error">error</span>') +
+          row('업스트림', escapeHTML((tested.upstream_name || '') + (tested.upstream_id ? ' / ' + tested.upstream_id : ''))) +
+          row('Method', escapeHTML(tested.method || '')) +
+          row('Latency', fmt(tested.latency_ms || 0) + ' ms') +
+          (tested.error ? row('Error', escapeHTML(tested.error)) : '') +
+        '</div>';
+        if (tested.response_preview) {
+          html += '<h4>Response preview</h4><pre>' + escapeHTML(formatTextIfJSON(tested.response_preview)) + '</pre>';
+        }
+      }
+      return html;
     }
     function chatTestPayload(forRun) {
       const temperatureRaw = document.getElementById('chat-temperature').value;
@@ -4913,25 +5326,19 @@ const adminHTML = `<!doctype html>
         '<tr><th>Fallback path</th><td>' + escapeHTML((preview.fallback_path || []).join(' -> ') || '-') + '</td></tr>' +
       '</tbody></table>';
     }
-    function renderChatTestResult(out) {
-      const preview = out.preview || null;
-      const headers = out.headers || {};
-      const raw = formatTextIfJSON(out.raw || '');
-      let html = '<div class="kpis">' +
-        kpi('Status', '<span class="status ' + (out.ok ? '' : 'error') + '">' + fmt(out.status_code || 0) + '</span>') +
-        kpi('Latency', fmt(out.latency_ms || 0) + ' ms') +
-        kpi('Auth', escapeHTML(out.auth_mode || '') + '<div class="muted">' + escapeHTML(out.policy_api_key_id || headers['X-Api-Key-Id'] || '') + '</div>') +
-        kpi('Cache', escapeHTML(headers['X-Cache'] || 'MISS')) +
+    // Narrow-rail variant of the routing preview (kv rows, no wide kpi grid) for the debug pane.
+    function renderChatTestPreviewCompact(preview) {
+      const complexity = preview.complexity || {};
+      const risk = preview.risk || {};
+      return '<div class="kv">' +
+        row('선택 모델', '<strong>' + escapeHTML(preview.selected_model || '-') + '</strong>' + (preview.selected_provider ? ' <span class="muted">/ ' + escapeHTML(preview.selected_provider) + '</span>' : '')) +
+        row('Complexity', fmt(complexity.score || 0) + ' <span class="muted">' + escapeHTML(complexity.tier || '') + '</span>') +
+        row('Risk', fmt(risk.score || 0) + ' <span class="muted">' + escapeHTML((risk.categories || []).join(', ') || '-') + '</span>') +
+        row('Rewrite', preview.would_rewrite ? '<span class="status warn">yes</span>' : '<span class="status">no</span>') +
+        row('Route reason', escapeHTML(preview.route_reason || '-')) +
+        row('Decision reason', escapeHTML(preview.decision_reason || '-')) +
+        row('Fallback', escapeHTML((preview.fallback_path || []).join(' → ') || '-')) +
       '</div>';
-      if (preview) {
-        html += '<h3 style="margin:14px 0 8px">Routing preview</h3>' + renderChatTestPreview(preview);
-      }
-      html += '<h3 style="margin:14px 0 8px">Response content</h3>' +
-        '<pre style="white-space:pre-wrap; margin:0">' + escapeHTML(out.content || '') + '</pre>' +
-        '<h3 style="margin:14px 0 8px">Headers</h3>' + chatTestHeadersTable(headers) +
-        '<h3 style="margin:14px 0 8px">Raw JSON</h3>' +
-        '<pre style="white-space:pre-wrap; max-height:420px; overflow:auto; margin:0">' + escapeHTML(raw) + '</pre>';
-      return html;
     }
     function chatTestHeadersTable(headers) {
       const entries = Object.entries(headers || {}).sort((a, b) => a[0].localeCompare(b[0]));

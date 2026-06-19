@@ -102,6 +102,35 @@ func (s *Server) chatTestTargetCatalog(ctx context.Context) map[string]any {
 			Description: "Complexity, risk, provider health, auth policy를 반영해 모델을 자동 선택합니다.",
 		})
 	}
+	// MCP discovery / grounding virtual models: route the chat through MCP candidate
+	// selection + evidence grounding instead of a single upstream model.
+	for _, m := range []struct {
+		model string
+		desc  string
+	}{
+		{"vibe/grounded", "선택적 MCP 검색으로 근거(evidence)를 수집해 그라운딩된 답변을 생성합니다."},
+		{"vibe/research", "여러 MCP를 병렬 탐색해 리서치 근거를 모아 답변합니다."},
+		{"vibe/all-mcp", "등록된 모든 MCP를 탐색합니다(관리자 전용)."},
+		{"vibe/policy", "정책 도메인 MCP로 필터링해 근거를 수집합니다."},
+		{"vibe/legal", "법무 도메인 MCP로 필터링해 근거를 수집합니다."},
+		{"vibe/compliance", "컴플라이언스 도메인 MCP(승인 필요)로 근거를 수집합니다."},
+	} {
+		policy := mcpDiscoveryPolicyForModel(m.model)
+		add("routing", chatTestTarget{
+			ID:          "routing:" + m.model,
+			Kind:        "routing",
+			Label:       m.model + " · MCP Discovery",
+			Model:       m.model,
+			Enabled:     true,
+			Description: m.desc,
+			Metadata: map[string]any{
+				"mode":               policy.Mode,
+				"max_mcps":           policy.MaxMCPs,
+				"min_evidence_score": policy.MinEvidenceScore,
+				"require_approval":   policy.RequireApproval,
+			},
+		})
+	}
 	if rules, err := s.db.ListRoutingRules(ctx); err == nil {
 		for _, rule := range rules {
 			label := strings.TrimSpace(rule.TargetModel)
@@ -244,26 +273,27 @@ func (s *Server) chatTestTargetCatalog(ctx context.Context) map[string]any {
 	return map[string]any{
 		"targets":        flat,
 		"grouped":        grouped,
-		"defaults":       map[string]any{"model": "vibe/auto", "prompt": "Reply with pong in one short sentence.", "max_tokens": 64, "temperature": 0},
+		"defaults":       map[string]any{"model": "vibe/auto", "prompt": "Reply with pong in one short sentence.", "max_tokens": 1024, "temperature": 0},
 		"mcp_fetched_at": snap.fetchedAt.UTC().Format(time.RFC3339),
 		"mcp_errors":     snap.errors,
 	}
 }
 
-func (s *Server) handleChatTestRun(w http.ResponseWriter, r *http.Request) {
-	if !s.authorizeAdmin(r) {
-		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
-		return
-	}
-	if r.Method != http.MethodPost {
-		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
-		return
-	}
-	var input chatTestRunRequest
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-		writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "invalid_body")
-		return
-	}
+// chatTestPrep is the assembled internal /v1/chat/completions request plus admin auth
+// metadata, shared by the buffered (run) and streaming (stream) chat-test handlers.
+type chatTestPrep struct {
+	req            *http.Request
+	body           []byte
+	authMode       string
+	policyAPIKeyID string
+	previewAuthCtx *store.AuthContext
+}
+
+// prepareChatTestRequest normalizes the input, builds the OpenAI chat body with the
+// requested stream flag, and assembles the internal upstream request carrying the
+// admin-injected auth context and proxy control headers. On auth failure it writes the
+// error to w and returns ok=false.
+func (s *Server) prepareChatTestRequest(w http.ResponseWriter, r *http.Request, input chatTestRunRequest, stream bool) (chatTestPrep, bool) {
 	input.Model = strings.TrimSpace(input.Model)
 	if input.Model == "" {
 		input.Model = "vibe/auto"
@@ -286,7 +316,11 @@ func (s *Server) handleChatTestRun(w http.ResponseWriter, r *http.Request) {
 		"model":      input.Model,
 		"messages":   messages,
 		"max_tokens": input.MaxTokens,
-		"stream":     false,
+		"stream":     stream,
+	}
+	if stream {
+		// Ask the upstream for a final usage chunk so the debug rail can show token counts.
+		body["stream_options"] = map[string]any{"include_usage": true}
 	}
 	if input.Temperature != nil {
 		body["temperature"] = *input.Temperature
@@ -294,13 +328,17 @@ func (s *Server) handleChatTestRun(w http.ResponseWriter, r *http.Request) {
 	encoded, err := json.Marshal(body)
 	if err != nil {
 		writeOpenAIError(w, http.StatusBadRequest, "invalid chat body", "invalid_request_error", "invalid_body")
-		return
+		return chatTestPrep{}, false
 	}
 
 	internalReq := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(encoded))
 	internalReq.RemoteAddr = r.RemoteAddr
 	internalReq.Header.Set("Content-Type", "application/json")
-	internalReq.Header.Set("Accept", "application/json")
+	if stream {
+		internalReq.Header.Set("Accept", "text/event-stream")
+	} else {
+		internalReq.Header.Set("Accept", "application/json")
+	}
 	internalReq.Header.Set("User-Agent", "vibe-admin-chat-test")
 	internalReq.Header.Set("X-Request-ID", newID("trace_chat_test"))
 	if input.Provider = strings.TrimSpace(input.Provider); input.Provider != "" {
@@ -317,50 +355,75 @@ func (s *Server) handleChatTestRun(w http.ResponseWriter, r *http.Request) {
 		internalReq.Header.Set(k, v)
 	}
 
-	authMode := "admin_synthetic"
-	policyAPIKeyID := ""
-	var previewAuthCtx *store.AuthContext
+	prep := chatTestPrep{body: encoded, authMode: "admin_synthetic"}
 	if token := strings.TrimSpace(input.BearerToken); token != "" {
 		internalReq.Header.Set("Authorization", "Bearer "+token)
-		authMode = "bearer"
+		prep.authMode = "bearer"
 	} else {
 		authCtx, apiKeyID, ok := s.chatTestInjectedAuthContext(w, r, input.APIKeyID)
 		if !ok {
-			return
+			return chatTestPrep{}, false
 		}
-		policyAPIKeyID = apiKeyID
-		previewAuthCtx = authCtx
+		prep.policyAPIKeyID = apiKeyID
+		prep.previewAuthCtx = authCtx
 		internalReq = internalReq.WithContext(context.WithValue(internalReq.Context(), chatTestAuthContextKey{}, chatTestInjectedAuth{APIKeyID: apiKeyID, AuthCtx: authCtx}))
 		if strings.TrimSpace(input.APIKeyID) != "" {
-			authMode = "api_key_policy"
+			prep.authMode = "api_key_policy"
 		}
+	}
+	prep.req = internalReq
+	return prep, true
+}
+
+// chatTestRoutingPreview returns the intelligent-routing plan summary for the debug rail.
+func (s *Server) chatTestRoutingPreview(r *http.Request, prep chatTestPrep, input chatTestRunRequest) map[string]any {
+	plan := s.planIntelligentRouting(r.Context(), prep.body, "/v1/chat/completions", strings.TrimSpace(input.Provider) != "", input.NoRoute, prep.previewAuthCtx)
+	return map[string]any{
+		"requested_model":   plan.RequestedModel,
+		"selected_model":    plan.SelectedModel,
+		"selected_provider": plan.SelectedProvider,
+		"complexity":        plan.Complexity,
+		"risk":              plan.Risk,
+		"health_score":      plan.HealthScore,
+		"fallback_path":     plan.FallbackPath,
+		"route_reason":      plan.RouteReason,
+		"decision_reason":   plan.DecisionReason,
+		"would_rewrite":     plan.RequestedModel != "" && plan.SelectedModel != "" && plan.RequestedModel != plan.SelectedModel,
+	}
+}
+
+func (s *Server) handleChatTestRun(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	if r.Method != http.MethodPost {
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
+	var input chatTestRunRequest
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "invalid_body")
+		return
+	}
+	prep, ok := s.prepareChatTestRequest(w, r, input, false)
+	if !ok {
+		return
 	}
 
 	var preview map[string]any
 	if input.IncludePreview {
-		plan := s.planIntelligentRouting(r.Context(), encoded, "/v1/chat/completions", strings.TrimSpace(input.Provider) != "", input.NoRoute, previewAuthCtx)
-		preview = map[string]any{
-			"requested_model":   plan.RequestedModel,
-			"selected_model":    plan.SelectedModel,
-			"selected_provider": plan.SelectedProvider,
-			"complexity":        plan.Complexity,
-			"risk":              plan.Risk,
-			"health_score":      plan.HealthScore,
-			"fallback_path":     plan.FallbackPath,
-			"route_reason":      plan.RouteReason,
-			"decision_reason":   plan.DecisionReason,
-			"would_rewrite":     plan.RequestedModel != "" && plan.SelectedModel != "" && plan.RequestedModel != plan.SelectedModel,
-		}
+		preview = s.chatTestRoutingPreview(r, prep, input)
 	}
 
 	rec := httptest.NewRecorder()
 	start := time.Now()
-	s.handleOpenAI(rec, internalReq)
+	s.handleOpenAI(rec, prep.req)
 	latency := time.Since(start)
 	resp := rec.Result()
 	defer resp.Body.Close()
 	respBody, _ := io.ReadAll(resp.Body)
-	content, finishReason := extractChatTestContent(respBody)
+	content, reasoning, finishReason := extractChatTestContent(respBody)
 
 	headers := map[string]string{}
 	for key, values := range resp.Header {
@@ -381,16 +444,16 @@ func (s *Server) handleChatTestRun(w http.ResponseWriter, r *http.Request) {
 		"target_id":         input.TargetID,
 		"model":             input.Model,
 		"provider":          input.Provider,
-		"auth_mode":         authMode,
-		"policy_api_key_id": policyAPIKeyID,
+		"auth_mode":         prep.authMode,
+		"policy_api_key_id": prep.policyAPIKeyID,
 		"status_code":       statusCode,
 	}))
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status_code":       statusCode,
 		"ok":                statusCode >= 200 && statusCode < 300,
 		"latency_ms":        latency.Milliseconds(),
-		"auth_mode":         authMode,
-		"policy_api_key_id": policyAPIKeyID,
+		"auth_mode":         prep.authMode,
+		"policy_api_key_id": prep.policyAPIKeyID,
 		"request": map[string]any{
 			"model":      input.Model,
 			"provider":   input.Provider,
@@ -400,10 +463,52 @@ func (s *Server) handleChatTestRun(w http.ResponseWriter, r *http.Request) {
 		},
 		"headers":       headers,
 		"content":       content,
+		"reasoning":     reasoning,
 		"finish_reason": finishReason,
 		"raw":           string(respBody),
 		"preview":       preview,
 	})
+}
+
+// handleChatTestStream runs the chat-test as a streaming (SSE) call and pipes the
+// upstream event stream straight to the browser so the console can render a typing
+// effect and reasoning deltas in real time. The OpenAI chunks flow verbatim — the
+// console fetches the routing preview separately so this path never pre-commits the
+// response (handleOpenAI may still need to emit its own JSON error + status code when
+// the pipeline blocks the request before any upstream bytes are produced).
+func (s *Server) handleChatTestStream(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	if r.Method != http.MethodPost {
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
+	var input chatTestRunRequest
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "invalid_body")
+		return
+	}
+	prep, ok := s.prepareChatTestRequest(w, r, input, true)
+	if !ok {
+		return
+	}
+
+	sw := &statusResponseWriter{ResponseWriter: w}
+	s.handleOpenAI(sw, prep.req)
+	statusCode := sw.statusCode
+	if statusCode == 0 {
+		statusCode = http.StatusOK
+	}
+	s.auditAdmin(r, "chat_test.stream", "", auditJSON(map[string]any{
+		"target_id":         input.TargetID,
+		"model":             input.Model,
+		"provider":          input.Provider,
+		"auth_mode":         prep.authMode,
+		"policy_api_key_id": prep.policyAPIKeyID,
+		"status_code":       statusCode,
+	}))
 }
 
 func (s *Server) chatTestInjectedAuthContext(w http.ResponseWriter, r *http.Request, apiKeyID string) (*store.AuthContext, string, bool) {
@@ -447,29 +552,35 @@ func (s *Server) chatTestInjectedAuthContext(w http.ResponseWriter, r *http.Requ
 	return &authCtx, key.ID, true
 }
 
-func extractChatTestContent(body []byte) (string, string) {
+// extractChatTestContent pulls the answer text, reasoning text (when the model exposes
+// it via reasoning_content/reasoning), and finish reason from a non-streaming response.
+func extractChatTestContent(body []byte) (content, reasoning, finishReason string) {
 	var parsed struct {
 		Choices []struct {
 			Message struct {
-				Content any `json:"content"`
+				Content          any    `json:"content"`
+				ReasoningContent string `json:"reasoning_content"`
+				Reasoning        string `json:"reasoning"`
 			} `json:"message"`
 			Text         string `json:"text"`
 			FinishReason string `json:"finish_reason"`
 		} `json:"choices"`
 	}
 	if err := json.Unmarshal(body, &parsed); err != nil || len(parsed.Choices) == 0 {
-		return "", ""
+		return "", "", ""
 	}
-	content := parsed.Choices[0].Text
+	choice := parsed.Choices[0]
+	content = choice.Text
 	if content == "" {
-		content = toString(parsed.Choices[0].Message.Content)
+		content = toString(choice.Message.Content)
 	}
-	if content == "" && parsed.Choices[0].Message.Content != nil {
-		if encoded, err := json.Marshal(parsed.Choices[0].Message.Content); err == nil {
+	if content == "" && choice.Message.Content != nil {
+		if encoded, err := json.Marshal(choice.Message.Content); err == nil {
 			content = string(encoded)
 		}
 	}
-	return content, parsed.Choices[0].FinishReason
+	reasoning = firstNonEmpty(choice.Message.ReasoningContent, choice.Message.Reasoning)
+	return content, reasoning, choice.FinishReason
 }
 
 func splitChatTestPatterns(raw string) []string {

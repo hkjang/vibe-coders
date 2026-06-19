@@ -1,3 +1,4 @@
+v0.50.20:- **Chat Completion 스트리밍 테스트 지원 (v0.50.20)**: 테스트 콘솔에 /admin/chat-test/stream 엔드포인트를 추가하고 실시간 SSE 응답 스트리밍 렌더링 기능을 구현하여, 스트리밍 모드에서도 응답 헤더 및 본문의 동작 무결성을 한 화면에서 완벽 검증 가능.
 v0.50.19:- **Chat Completion 테스트 콘솔 (v0.50.19)**: `GET /admin/chat-test/targets`, `POST /admin/chat-test/run`과 어드민 `Chat 테스트` 탭을 추가. `vibe/auto`·`vibe/text2sql-*`·provider model pattern·MCP route 후보를 선택해 실제 `/v1/chat/completions` 파이프라인 호출, 라우팅 preview, 응답 헤더/본문을 한 화면에서 검증 가능.
 v0.50.18:- **추천 채택률 개인화 탭 연동 (v0.50.18)**: 기존 `GET /admin/recommendations/adoption`을 개인화 탭에 연결해 추천 종류별 채택/거절/채택자/채택률을 같은 운영 화면에서 확인 가능. 추천형 개인화의 품질 루프를 관리자 UI에서 바로 점검.
 v0.50.17:- **Text2SQL 개인 힌트 운영 표 (v0.50.17)**: `GET /admin/personalization/text2sql-hints`와 어드민 개인화 탭 표를 추가. 사용자별 반복 Text2SQL 질문을 원문 없이 fingerprint·schema·성공률·비용·절감 추정으로 노출해 저장 리포트/대시보드/데이터마트 후보를 운영자가 검토 가능.
