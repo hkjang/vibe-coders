@@ -99,6 +99,9 @@ func (rc *requestPipeline) stepAuth() bool {
 	if rc.isModelsGet {
 		// /v1/models는 인증 불필요 — anonymous로 처리
 		rc.apiKeyID = "anonymous"
+	} else if injected, ok := injectedChatTestAuth(r.Context()); ok {
+		rc.apiKeyID = injected.APIKeyID
+		rc.authCtx = injected.AuthCtx
 	} else {
 		var ok bool
 		rc.apiKeyID, rc.authCtx, ok = s.authenticateProxyContext(r)

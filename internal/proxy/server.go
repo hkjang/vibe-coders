@@ -199,6 +199,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/admin/api-keys/", s.handleAPIKeyByID)
 	mux.HandleFunc("/admin/providers", s.handleProviders)
 	mux.HandleFunc("/admin/providers/", s.handleProviderByName)
+	mux.HandleFunc("/admin/chat-test/targets", s.handleChatTestTargets)
+	mux.HandleFunc("/admin/chat-test/run", s.handleChatTestRun)
 	mux.HandleFunc("/admin/audit-logs", s.handleAuditLogs)
 	mux.HandleFunc("/admin/audit/auth-events", s.handleAuthAuditEvents)
 	mux.HandleFunc("/admin/audit/anomalies", s.handleAuditAnomalies)

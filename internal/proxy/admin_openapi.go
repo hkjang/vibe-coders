@@ -86,6 +86,8 @@ var apiEndpoints = []apiEndpoint{
 	{"/admin/providers", []string{"get", "post"}, "admin", "List / upsert providers", false},
 	{"/admin/providers/{name}", []string{"get", "put", "delete"}, "admin", "Provider detail / update / delete", false},
 	{"/admin/providers/slo", []string{"get"}, "admin", "Provider SLOs", false},
+	{"/admin/chat-test/targets", []string{"get"}, "admin", "List Chat Completions test targets across routing, providers, Text2SQL, and MCP", false},
+	{"/admin/chat-test/run", []string{"post"}, "admin", "Run a real /v1/chat/completions test through the gateway pipeline", false},
 
 	// ---- admin: audit ----
 	{"/admin/audit-logs", []string{"get"}, "admin", "Admin audit logs", false},
