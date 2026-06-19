@@ -316,6 +316,7 @@ const adminHTML = `<!doctype html>
       <a href="#/chat-test" data-tab="chat-test">Chat 테스트</a>
       <a href="#/requests" data-tab="requests">호출 이력</a>
       <a href="#/prompts" data-tab="prompts">프롬프트 검색</a>
+      <a href="#/prompt-assets" data-tab="prompt-assets">자산 관리소</a>
       <a href="#/users" data-tab="users">사용자</a>
       <a href="#/safety" data-tab="safety">안전</a>
       <a href="#/text2sql" data-tab="text2sql">Text2SQL</a>
@@ -979,7 +980,8 @@ const adminHTML = `<!doctype html>
           case 'waterfall': await renderWaterfall(params); break;
           case 'llm':       await renderLLMObservability(); break;
           case 'requests':  await renderRequestsView(params); break;
-          case 'prompts':   await renderPromptsView(params); break;
+          case 'prompts':       await renderPromptsView(params); break;
+          case 'prompt-assets': await renderPromptAssets(params); break;
           case 'users':     rest.length ? await renderUserDetail(rest.join('/')) : await renderUsers(); break;
           case 'teams':     rest.length ? await renderTeamDetail(decodeURIComponent(rest.join('/'))) : await renderTeams(); break;
           case 'ips':       rest.length ? await renderIPDetail(decodeURIComponent(rest.join('/'))) : await renderIPs(); break;
@@ -3971,6 +3973,296 @@ const adminHTML = `<!doctype html>
         ? escapeHTML(nm) + '<div class="muted" style="font-size:11px">' + escapeHTML(team) + '</div>'
         : escapeHTML(team);
     }
+    // ── 프롬프트 자산 관리소 ──────────────────────────────────────────────
+    async function renderPromptAssets(initial) {
+      const statusFilter   = (initial && initial.get('status'))   || '';
+      const tagFilter      = (initial && initial.get('tag'))      || '';
+      const categoryFilter = (initial && initial.get('category')) || '';
+      const q              = (initial && initial.get('q'))        || '';
+
+      const qs = new URLSearchParams();
+      if (statusFilter)   qs.set('status',   statusFilter);
+      if (tagFilter)      qs.set('tag',      tagFilter);
+      if (categoryFilter) qs.set('category', categoryFilter);
+      if (q)              qs.set('q',        q);
+
+      const d = await api('/admin/prompt-assets' + (qs.toString() ? '?' + qs.toString() : ''));
+      const assets      = d.assets    || [];
+      const stats       = d.stats     || {};
+      const knownTags   = d.known_tags || [];
+      const categories  = d.categories || [];
+
+      const total = Object.values(stats).reduce((s, v) => s + Number(v), 0);
+      const kpis = '<div class="kpis">' +
+        kpi('전체 자산', fmt(total)) +
+        kpi('조직 표준', fmt(stats.standard || 0), 'status') +
+        kpi('승인됨', fmt(stats.approved || 0)) +
+        kpi('검토 대기', fmt(stats.pending || 0)) +
+        kpi('초안', fmt(stats.draft || 0)) +
+      '</div>';
+
+      // Status badge helper
+      function statusBadge(st) {
+        const map = { standard: ['status', '표준'], approved: ['', '승인'], pending: ['warn', '검토중'], draft: ['muted', '초안'] };
+        const [cls, label] = map[st] || ['muted', st || 'draft'];
+        return '<span class="status ' + cls + '">' + label + '</span>';
+      }
+
+      // Filter bar
+      const filterBar =
+        '<form class="toolbar" id="pa-filter" autocomplete="off">' +
+          '<input id="pa-q" placeholder="검색 (이름·설명)" value="' + escapeHTML(q) + '" style="min-width:160px">' +
+          '<select id="pa-status">' +
+            '<option value="">전체 상태</option>' +
+            ['draft','pending','approved','standard'].map(s => '<option value="' + s + '" ' + (statusFilter===s?'selected':'') + '>' + ({'draft':'초안','pending':'검토중','approved':'승인','standard':'조직표준'}[s]) + '</option>').join('') +
+          '</select>' +
+          '<select id="pa-category">' +
+            '<option value="">전체 카테고리</option>' +
+            categories.map(c => '<option value="' + escapeHTML(c.key) + '" ' + (categoryFilter===c.key?'selected':'') + '>' + escapeHTML(c.label) + '</option>').join('') +
+          '</select>' +
+          '<select id="pa-tag">' +
+            '<option value="">전체 태그</option>' +
+            knownTags.map(t => '<option value="' + escapeHTML(t.key) + '" ' + (tagFilter===t.key?'selected':'') + '>' + escapeHTML(t.label) + '</option>').join('') +
+          '</select>' +
+          '<button type="submit">적용</button>' +
+          '<button type="button" class="secondary" onclick="openAddAssetModal()">+ 새 자산</button>' +
+        '</form>';
+
+      // Asset table
+      const tableRows = assets.length ? assets.map(a =>
+        '<tr onclick="openAssetDetail(\'' + escapeAttr(a.id) + '\')" style="cursor:pointer">' +
+        '<td><strong>' + escapeHTML(a.name) + '</strong><div class="muted" style="font-size:11px">' + escapeHTML(a.category) + ' · ' + escapeHTML(a.id) + '</div></td>' +
+        '<td>' + (a.tags||[]).map(t => '<span class="pill">' + escapeHTML(t) + '</span>').join(' ') + '</td>' +
+        '<td>' + statusBadge(a.status) + '</td>' +
+        '<td data-num="' + (a.use_count||0) + '">' + fmt(a.use_count||0) + '</td>' +
+        '<td data-num="' + (a.call_count||0) + '">' + fmt(a.call_count||0) + '<div class="muted" style="font-size:10px">90일</div></td>' +
+        '<td data-num="' + ((a.success_rate||0)*100).toFixed(0) + '">' + (a.call_count ? ((a.success_rate||0)*100).toFixed(1)+'%' : '<span class="muted">-</span>') + '</td>' +
+        '<td data-num="' + (a.avg_cost_krw||0) + '">' + (a.call_count ? '₩'+Number(a.avg_cost_krw||0).toFixed(1) : '<span class="muted">-</span>') + '</td>' +
+        '<td data-num="' + (a.avg_latency_ms||0) + '">' + (a.call_count ? fmt(Math.round(a.avg_latency_ms||0))+'ms' : '<span class="muted">-</span>') + '</td>' +
+        '<td>' + (a.approved_by ? escapeHTML(a.approved_by) + '<div class="muted" style="font-size:10px">' + ago(a.approved_at) + '</div>' : '<span class="muted">-</span>') + '</td>' +
+        '<td onclick="event.stopPropagation()">' +
+          (a.status === 'draft'    ? '<button class="secondary" type="button" style="font-size:11px" onclick="submitAsset(\'' + escapeAttr(a.id) + '\')">검토 제출</button> ' : '') +
+          (a.status === 'pending'  ? '<button class="secondary" type="button" style="font-size:11px" onclick="approveAsset(\'' + escapeAttr(a.id) + '\',\'approved\')">승인</button> ' : '') +
+          (a.status === 'approved' ? '<button class="secondary" type="button" style="font-size:11px" onclick="approveAsset(\'' + escapeAttr(a.id) + '\',\'standard\')">표준 승격</button> ' : '') +
+          ((a.status === 'pending' || a.status === 'approved' || a.status === 'standard')
+            ? '<button class="secondary" type="button" style="font-size:11px" onclick="approveAsset(\'' + escapeAttr(a.id) + '\',\'draft\')">반려</button> ' : '') +
+          '<button class="danger" type="button" style="font-size:11px" onclick="deleteAsset(\'' + escapeAttr(a.id) + '\')">삭제</button>' +
+        '</td>' +
+        '</tr>'
+      ).join('') : '<tr><td colspan="10"><div class="empty">자산이 없습니다. "+ 새 자산" 버튼으로 등록하세요.</div></td></tr>';
+
+      const assetTable =
+        '<table id="pa-table">' +
+          '<thead><tr>' +
+            '<th data-sort="str">이름</th>' +
+            '<th>태그</th>' +
+            '<th data-sort="str">상태</th>' +
+            '<th data-sort="num">재사용</th>' +
+            '<th data-sort="num">호출수</th>' +
+            '<th data-sort="num">성공률</th>' +
+            '<th data-sort="num">평균비용</th>' +
+            '<th data-sort="num">평균지연</th>' +
+            '<th data-sort="str">승인자</th>' +
+            '<th>액션</th>' +
+          '</tr></thead>' +
+          '<tbody>' + tableRows + '</tbody>' +
+        '</table>';
+
+      document.getElementById('view').innerHTML =
+        section('프롬프트 자산 관리소', kpis + filterBar) +
+        section('자산 목록', assetTable);
+
+      makeSortable('#pa-table', 'prompt-assets');
+
+      document.getElementById('pa-filter').addEventListener('submit', e => {
+        e.preventDefault();
+        const p = new URLSearchParams();
+        const qv = document.getElementById('pa-q').value.trim();
+        const sv = document.getElementById('pa-status').value;
+        const cv = document.getElementById('pa-category').value;
+        const tv = document.getElementById('pa-tag').value;
+        if (qv) p.set('q', qv);
+        if (sv) p.set('status', sv);
+        if (cv) p.set('category', cv);
+        if (tv) p.set('tag', tv);
+        location.hash = '#/prompt-assets' + (p.toString() ? '?' + p.toString() : '');
+        route();
+      });
+    }
+
+    window.openAddAssetModal = () => {
+      const catOptions = [
+        {key:'refactor',label:'리팩터링'},{key:'test',label:'테스트 생성'},{key:'security',label:'보안 점검'},
+        {key:'docs',label:'문서화'},{key:'review',label:'코드 리뷰'},{key:'custom',label:'기타'},
+      ];
+      const tagPreset = ['java','go','python','javascript','typescript','sql','rust','security','test','docs','refactor','review','policy','legal','compliance','general'];
+      openModal('새 프롬프트 자산 등록',
+        '<form id="pa-add-form" autocomplete="off">' +
+          '<div class="kv">' +
+            row('이름 *', '<input id="pa-add-name" placeholder="예: Java 코드 리뷰 표준" style="width:100%">') +
+            row('ID (slug)', '<input id="pa-add-id" placeholder="자동 생성 (비워두면 이름에서 생성)" style="width:100%">') +
+            row('카테고리', '<select id="pa-add-cat">' + catOptions.map(c=>'<option value="'+c.key+'">'+c.label+'</option>').join('') + '</select>') +
+            row('태그', '<input id="pa-add-tags" placeholder="쉼표 구분: java, security, review" style="width:100%"><div class="muted" style="font-size:11px;margin-top:4px">추천: ' + tagPreset.map(t=>'<span class="pill" style="cursor:pointer" onclick="addTagToInput(\''+t+'\')">'+t+'</span>').join(' ') + '</div>') +
+            row('설명', '<input id="pa-add-desc" placeholder="한 줄 설명" style="width:100%">') +
+            row('프롬프트 본문 *', '<textarea id="pa-add-body" style="width:100%;min-height:200px;resize:vertical" placeholder="프롬프트 내용을 입력하세요..."></textarea>') +
+            row('초안으로 저장', '<label><input type="checkbox" id="pa-add-draft" checked style="width:auto"> 저장 후 검토 제출 필요</label>') +
+          '</div>' +
+          '<div style="margin-top:12px;display:flex;gap:8px">' +
+            '<button type="submit" id="pa-add-btn">저장</button>' +
+            '<button type="button" class="secondary" onclick="closeModal()">취소</button>' +
+          '</div>' +
+        '</form>'
+      );
+      document.getElementById('pa-add-form').addEventListener('submit', async e => {
+        e.preventDefault();
+        const btn = document.getElementById('pa-add-btn');
+        btn.disabled = true; btn.textContent = '저장 중...';
+        const tags = (document.getElementById('pa-add-tags').value||'').split(',').map(t=>t.trim()).filter(Boolean);
+        const isDraft = document.getElementById('pa-add-draft').checked;
+        try {
+          const body = {
+            id: document.getElementById('pa-add-id').value.trim(),
+            name: document.getElementById('pa-add-name').value.trim(),
+            category: document.getElementById('pa-add-cat').value,
+            description: document.getElementById('pa-add-desc').value.trim(),
+            body: document.getElementById('pa-add-body').value.trim(),
+            tags,
+            status: isDraft ? 'draft' : 'pending',
+            enabled: true,
+          };
+          if (!body.name || !body.body) { alert('이름과 본문은 필수입니다.'); btn.disabled=false; btn.textContent='저장'; return; }
+          await api('/admin/templates', { method: 'POST', body: JSON.stringify(body) });
+          closeModal();
+          route();
+        } catch(err) {
+          alert('오류: ' + err.message);
+          btn.disabled=false; btn.textContent='저장';
+        }
+      });
+    };
+
+    window.addTagToInput = (tag) => {
+      const el = document.getElementById('pa-add-tags');
+      if (!el) return;
+      const existing = el.value.split(',').map(t=>t.trim()).filter(Boolean);
+      if (!existing.includes(tag)) { el.value = [...existing, tag].join(', '); }
+    };
+
+    window.openAssetDetail = async (id) => {
+      openModal('자산 상세 — ' + id, '<div class="empty">불러오는 중...</div>');
+      try {
+        const resp = await api('/admin/prompt-assets?q=' + encodeURIComponent(id));
+        const a = (resp.assets || []).find(x => x.id === id) || {};
+        const tagPreset = ['java','go','python','javascript','typescript','sql','rust','security','test','docs','refactor','review','policy','legal','compliance','general'];
+        const catOptions = [
+          {key:'refactor',label:'리팩터링'},{key:'test',label:'테스트 생성'},{key:'security',label:'보안 점검'},
+          {key:'docs',label:'문서화'},{key:'review',label:'코드 리뷰'},{key:'custom',label:'기타'},
+        ];
+        function statusBadge(st) {
+          const map = {standard:['status','표준'],approved:['','승인'],pending:['warn','검토중'],draft:['muted','초안']};
+          const [cls, label] = map[st] || ['muted', st||'draft'];
+          return '<span class="status '+cls+'">'+label+'</span>';
+        }
+        const metricsBlock = a.call_count ? (
+          '<div class="kpis" style="margin:0 0 12px">' +
+          kpi('호출수 (90일)', fmt(a.call_count||0)) +
+          kpi('성공률', ((a.success_rate||0)*100).toFixed(1)+'%') +
+          kpi('평균비용', '₩'+Number(a.avg_cost_krw||0).toFixed(2)) +
+          kpi('평균지연', fmt(Math.round(a.avg_latency_ms||0))+'ms') +
+          '</div>'
+        ) : '<div class="muted" style="margin-bottom:12px;font-size:12px">아직 수집된 성과 지표가 없습니다 (90일 내 요청 없음).</div>';
+        openModal('자산 상세 — ' + escapeHTML(a.name || id),
+          metricsBlock +
+          '<div class="kv">' +
+            row('상태', statusBadge(a.status)) +
+            row('카테고리', escapeHTML(a.category||'')) +
+            row('태그', (a.tags||[]).map(t=>'<span class="pill">'+escapeHTML(t)+'</span>').join(' ')||'<span class="muted">없음</span>') +
+            row('재사용 횟수', fmt(a.use_count||0)) +
+            row('승인자', escapeHTML(a.approved_by||'-')) +
+            row('승인 시각', a.approved_at ? ago(a.approved_at) : '-') +
+            row('노트', escapeHTML(a.note||'-')) +
+            row('생성', ago(a.created_at)) +
+            row('수정', ago(a.updated_at)) +
+          '</div>' +
+          '<h4 style="margin:12px 0 6px">편집</h4>' +
+          '<div class="kv">' +
+            row('이름', '<input id="pa-edit-name" value="' + escapeAttr(a.name||'') + '" style="width:100%">') +
+            row('카테고리', '<select id="pa-edit-cat">' + catOptions.map(c=>'<option value="'+c.key+'"'+(a.category===c.key?' selected':'')+'>'+c.label+'</option>').join('') + '</select>') +
+            row('태그', '<input id="pa-edit-tags" value="' + escapeAttr((a.tags||[]).join(', ')) + '" style="width:100%"><div class="muted" style="font-size:11px;margin-top:4px">추천: ' + tagPreset.map(t=>'<span class="pill" style="cursor:pointer" onclick="addTagToEditInput(\''+t+'\')">'+t+'</span>').join(' ') + '</div>') +
+            row('설명', '<input id="pa-edit-desc" value="' + escapeAttr(a.description||'') + '" style="width:100%">') +
+            row('본문', '<textarea id="pa-edit-body" style="width:100%;min-height:160px;resize:vertical">' + escapeHTML(a.body||'') + '</textarea>') +
+            row('노트', '<input id="pa-edit-note" value="' + escapeAttr(a.note||'') + '" style="width:100%">') +
+          '</div>' +
+          '<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">' +
+            '<button type="button" onclick="saveAssetEdit(\'' + escapeAttr(id) + '\')">저장</button>' +
+            (a.status==='draft' ? '<button type="button" class="secondary" onclick="submitAsset(\''+escapeAttr(id)+'\')">검토 제출</button>' : '') +
+            (a.status==='pending' ? '<button type="button" class="secondary" onclick="approveAsset(\''+escapeAttr(id)+'\',\'approved\')">승인</button>' : '') +
+            (a.status==='approved' ? '<button type="button" class="secondary" onclick="approveAsset(\''+escapeAttr(id)+'\',\'standard\')">표준 승격</button>' : '') +
+            ((a.status==='pending'||a.status==='approved'||a.status==='standard') ? '<button type="button" class="secondary" onclick="approveAsset(\''+escapeAttr(id)+'\',\'draft\')">반려</button>' : '') +
+            '<button type="button" class="secondary" onclick="closeModal()">닫기</button>' +
+          '</div>'
+        );
+      } catch(err) {
+        openModal('자산 상세 오류', '<div class="error-line">' + escapeHTML(err.message) + '</div>');
+      }
+    };
+
+    window.addTagToEditInput = (tag) => {
+      const el = document.getElementById('pa-edit-tags');
+      if (!el) return;
+      const existing = el.value.split(',').map(t=>t.trim()).filter(Boolean);
+      if (!existing.includes(tag)) { el.value = [...existing, tag].join(', '); }
+    };
+
+    window.saveAssetEdit = async (id) => {
+      try {
+        const tags = (document.getElementById('pa-edit-tags').value||'').split(',').map(t=>t.trim()).filter(Boolean);
+        await api('/admin/templates/' + encodeURIComponent(id), {
+          method: 'PATCH',
+          body: JSON.stringify({
+            name: document.getElementById('pa-edit-name').value.trim(),
+            category: document.getElementById('pa-edit-cat').value,
+            description: document.getElementById('pa-edit-desc').value.trim(),
+            body: document.getElementById('pa-edit-body').value.trim(),
+            tags,
+            note: document.getElementById('pa-edit-note').value.trim(),
+          }),
+        });
+        closeModal();
+        route();
+      } catch(err) { alert('저장 오류: ' + err.message); }
+    };
+
+    window.submitAsset = async (id) => {
+      try {
+        await api('/admin/templates/' + encodeURIComponent(id) + '/submit', { method: 'POST', body: '{}' });
+        route();
+      } catch(err) { alert('제출 오류: ' + err.message); }
+    };
+
+    window.approveAsset = async (id, status) => {
+      const labels = { approved: '승인', standard: '조직 표준으로 승격', draft: '반려 (초안으로 되돌리기)' };
+      const note = prompt((labels[status] || status) + ' 메모 (선택):', '');
+      if (note === null) return;
+      try {
+        await api('/admin/templates/' + encodeURIComponent(id) + '/approve', {
+          method: 'POST',
+          body: JSON.stringify({ status, note }),
+        });
+        closeModal();
+        route();
+      } catch(err) { alert('처리 오류: ' + err.message); }
+    };
+
+    window.deleteAsset = async (id) => {
+      if (!confirm('"' + id + '" 자산을 삭제하시겠습니까? 되돌릴 수 없습니다.')) return;
+      try {
+        await api('/admin/templates/' + encodeURIComponent(id), { method: 'DELETE' });
+        route();
+      } catch(err) { alert('삭제 오류: ' + err.message); }
+    };
+    // ── 프롬프트 자산 관리소 끝 ──────────────────────────────────────────
+
     async function renderUsers() {
       const [r, prod] = await Promise.all([
         api('/admin/users'),

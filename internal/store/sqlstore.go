@@ -1230,6 +1230,13 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 			created_at TEXT NOT NULL
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_system_error_logs_created_at ON system_error_logs(created_at)`,
+		// Prompt asset library v2: tags + approval workflow columns
+		`ALTER TABLE prompt_templates ADD COLUMN tags TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE prompt_templates ADD COLUMN status TEXT NOT NULL DEFAULT 'draft'`,
+		`ALTER TABLE prompt_templates ADD COLUMN approved_by TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE prompt_templates ADD COLUMN approved_at TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE prompt_templates ADD COLUMN note TEXT NOT NULL DEFAULT ''`,
+		`CREATE INDEX IF NOT EXISTS idx_prompt_templates_status ON prompt_templates(status)`,
 	}
 
 	for _, statement := range statements {

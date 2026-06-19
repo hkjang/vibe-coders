@@ -21,6 +21,13 @@ var validTemplateCategories = map[string]bool{
 	"custom":   true,
 }
 
+var validAssetStatuses = map[string]bool{
+	"draft":    true,
+	"pending":  true,
+	"approved": true,
+	"standard": true,
+}
+
 func normalizeTemplateCategory(c string) string {
 	c = strings.ToLower(strings.TrimSpace(c))
 	if validTemplateCategories[c] {
@@ -47,12 +54,15 @@ func (s *Server) handleTemplates(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"templates": list, "categories": templateCategoryList()})
 	case http.MethodPost:
 		var p struct {
-			ID          string `json:"id"`
-			Name        string `json:"name"`
-			Category    string `json:"category"`
-			Description string `json:"description"`
-			Body        string `json:"body"`
-			Enabled     *bool  `json:"enabled"`
+			ID          string   `json:"id"`
+			Name        string   `json:"name"`
+			Category    string   `json:"category"`
+			Description string   `json:"description"`
+			Body        string   `json:"body"`
+			Enabled     *bool    `json:"enabled"`
+			Tags        []string `json:"tags"`
+			Status      string   `json:"status"`
+			Note        string   `json:"note"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
 			writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "invalid_body")
@@ -76,6 +86,10 @@ func (s *Server) handleTemplates(w http.ResponseWriter, r *http.Request) {
 		if p.Enabled != nil {
 			enabled = *p.Enabled
 		}
+		status := "draft"
+		if validAssetStatuses[p.Status] {
+			status = p.Status
+		}
 		tmpl := store.PromptTemplate{
 			ID:          slug,
 			Name:        p.Name,
@@ -83,12 +97,15 @@ func (s *Server) handleTemplates(w http.ResponseWriter, r *http.Request) {
 			Description: strings.TrimSpace(p.Description),
 			Body:        p.Body,
 			Enabled:     enabled,
+			Tags:        p.Tags,
+			Status:      status,
+			Note:        strings.TrimSpace(p.Note),
 		}
 		if err := s.db.UpsertPromptTemplate(r.Context(), tmpl); err != nil {
 			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "template_save_failed")
 			return
 		}
-		s.auditAdmin(r, "template.upsert", "", auditJSON(map[string]any{"id": slug, "name": tmpl.Name, "category": tmpl.Category, "enabled": enabled}))
+		s.auditAdmin(r, "template.upsert", "", auditJSON(map[string]any{"id": slug, "name": tmpl.Name, "category": tmpl.Category, "enabled": enabled, "status": status}))
 		writeJSON(w, http.StatusCreated, map[string]any{"template": tmpl})
 	default:
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
@@ -97,20 +114,34 @@ func (s *Server) handleTemplates(w http.ResponseWriter, r *http.Request) {
 
 // handleTemplateByID updates or deletes a single template.
 // PATCH/DELETE /admin/templates/{id}
+// POST /admin/templates/{id}/use       — fetch + record usage
+// POST /admin/templates/{id}/approve   — change status
+// POST /admin/templates/{id}/submit    — submit for review (draft→pending)
 func (s *Server) handleTemplateByID(w http.ResponseWriter, r *http.Request) {
 	if !s.authorizeAdmin(r) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
 	}
 	id := strings.TrimPrefix(r.URL.Path, "/admin/templates/")
-	// /admin/templates/{id}/use — fetch a template's body and record a usage (the
-	// "use from the market" action coding tools call).
 	if idx := strings.Index(id, "/"); idx >= 0 {
 		sub := id[idx+1:]
 		id = id[:idx]
-		if sub == "use" && r.Method == http.MethodPost {
-			s.handleTemplateUse(w, r, id)
-			return
+		switch sub {
+		case "use":
+			if r.Method == http.MethodPost {
+				s.handleTemplateUse(w, r, id)
+				return
+			}
+		case "approve":
+			if r.Method == http.MethodPost {
+				s.handleTemplateApprove(w, r, id)
+				return
+			}
+		case "submit":
+			if r.Method == http.MethodPost {
+				s.handleTemplateSubmit(w, r, id)
+				return
+			}
 		}
 		writeOpenAIError(w, http.StatusNotFound, "not found", "invalid_request_error", "not_found")
 		return
@@ -138,11 +169,13 @@ func (s *Server) handleTemplateByID(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		var p struct {
-			Name        *string `json:"name"`
-			Category    *string `json:"category"`
-			Description *string `json:"description"`
-			Body        *string `json:"body"`
-			Enabled     *bool   `json:"enabled"`
+			Name        *string  `json:"name"`
+			Category    *string  `json:"category"`
+			Description *string  `json:"description"`
+			Body        *string  `json:"body"`
+			Enabled     *bool    `json:"enabled"`
+			Tags        []string `json:"tags"`
+			Note        *string  `json:"note"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
 			writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "invalid_body")
@@ -163,6 +196,12 @@ func (s *Server) handleTemplateByID(w http.ResponseWriter, r *http.Request) {
 		if p.Enabled != nil {
 			cur.Enabled = *p.Enabled
 		}
+		if p.Tags != nil {
+			cur.Tags = p.Tags
+		}
+		if p.Note != nil {
+			cur.Note = strings.TrimSpace(*p.Note)
+		}
 		if err := s.db.UpsertPromptTemplate(r.Context(), cur); err != nil {
 			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "template_save_failed")
 			return
@@ -172,6 +211,41 @@ func (s *Server) handleTemplateByID(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
 	}
+}
+
+// handleTemplateApprove changes a template's approval status.
+// POST /admin/templates/{id}/approve  body: {"status":"approved","note":"..."}
+func (s *Server) handleTemplateApprove(w http.ResponseWriter, r *http.Request, id string) {
+	var p struct {
+		Status string `json:"status"` // approved | standard | draft (reject)
+		Note   string `json:"note"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+		writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "invalid_body")
+		return
+	}
+	if !validAssetStatuses[p.Status] {
+		writeOpenAIError(w, http.StatusBadRequest, "status must be draft|pending|approved|standard", "invalid_request_error", "invalid_status")
+		return
+	}
+	by := adminID(r)
+	if err := s.db.ApprovePromptTemplate(r.Context(), id, p.Status, by, strings.TrimSpace(p.Note)); err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "template_approve_failed")
+		return
+	}
+	s.auditAdmin(r, "template.approve", "", auditJSON(map[string]any{"id": id, "status": p.Status, "by": by}))
+	writeJSON(w, http.StatusOK, map[string]string{"id": id, "status": p.Status})
+}
+
+// handleTemplateSubmit transitions a template from draft to pending (submit for review).
+// POST /admin/templates/{id}/submit
+func (s *Server) handleTemplateSubmit(w http.ResponseWriter, r *http.Request, id string) {
+	if err := s.db.ApprovePromptTemplate(r.Context(), id, "pending", adminID(r), ""); err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "template_submit_failed")
+		return
+	}
+	s.auditAdmin(r, "template.submit", "", auditJSON(map[string]string{"id": id}))
+	writeJSON(w, http.StatusOK, map[string]string{"id": id, "status": "pending"})
 }
 
 // handleTemplateUse returns a template's body and records a usage, powering the
@@ -199,6 +273,7 @@ func (s *Server) handleTemplateUse(w http.ResponseWriter, r *http.Request, id st
 	writeJSON(w, http.StatusOK, map[string]any{
 		"id": tmpl.ID, "name": tmpl.Name, "category": tmpl.Category,
 		"description": tmpl.Description, "body": tmpl.Body,
+		"tags": tmpl.Tags, "status": tmpl.Status,
 	})
 }
 
