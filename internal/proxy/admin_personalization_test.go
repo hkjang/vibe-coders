@@ -51,3 +51,26 @@ func TestPersonalizationAffinityScores(t *testing.T) {
 		t.Fatalf("expected strong MCP affinity score > weak score, got %f <= %f", goodMCP, slowFailingMCP)
 	}
 }
+
+func TestPersonalizationText2SQLHintItemsForUser(t *testing.T) {
+	items := personalizationText2SQLHintItemsForUser("u1", store.PersonalProfile{
+		Team: "analytics",
+		Role: "developer",
+	}, []store.UserText2SQLReportCandidate{{
+		Fingerprint: "t2sql_abc123", SchemaName: "sales", Count: 4,
+		SuccessRate: 1, AvgCostKRW: 2.5, RecommendedProduct: "dashboard", LastSeen: "2026-06-19T00:00:00Z",
+	}})
+	if len(items) != 1 {
+		t.Fatalf("expected 1 hint item, got %+v", items)
+	}
+	item := items[0]
+	if item.UserID != "u1" || item.Team != "analytics" || item.HintType != "saved_dashboard" {
+		t.Fatalf("unexpected hint item: %+v", item)
+	}
+	if item.EstimatedSavingsKRW != 7.5 {
+		t.Fatalf("estimated savings = %f, want 7.5", item.EstimatedSavingsKRW)
+	}
+	if item.Fingerprint != "t2sql_abc123" {
+		t.Fatalf("fingerprint should be preserved, got %+v", item)
+	}
+}

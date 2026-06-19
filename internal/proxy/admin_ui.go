@@ -6103,16 +6103,18 @@ const adminHTML = `<!doctype html>
     }
     async function renderPersonalization() {
       const view = document.getElementById('view');
-      const [d, coachingResp, modelAffinityResp, mcpAffinityResp] = await Promise.all([
+      const [d, coachingResp, modelAffinityResp, mcpAffinityResp, text2sqlHintsResp] = await Promise.all([
         api('/admin/personalization/profiles?window=30d&limit=50').catch(() => ({ profiles: [] })),
         api('/admin/personalization/coaching?window=30d&limit=50').catch(() => ({ items: [] })),
         api('/admin/personalization/model-affinity?window=30d&limit=50').catch(() => ({ items: [] })),
-        api('/admin/personalization/mcp-affinity?window=30d&limit=50').catch(() => ({ items: [] }))
+        api('/admin/personalization/mcp-affinity?window=30d&limit=50').catch(() => ({ items: [] })),
+        api('/admin/personalization/text2sql-hints?window=30d&limit=50&min_count=3').catch(() => ({ items: [] }))
       ]);
       const profiles = d.profiles || [];
       const coaching = coachingResp.items || [];
       const modelAffinity = modelAffinityResp.items || [];
       const mcpAffinity = mcpAffinityResp.items || [];
+      const text2sqlHints = text2sqlHintsResp.items || [];
       let html = '<p class="muted">사용자별 AI 사용 프로필 (최근 30일). 모델·작업·언어 선호, 비용 성향, 신뢰도를 요약합니다. 사용자를 클릭하면 상세·스냅샷을 볼 수 있습니다.</p>';
       if (!profiles.length) {
         html += '<p class="muted">표시할 프로필이 없습니다 (사용자 매핑된 API Key 활동 필요).</p>';
@@ -6161,6 +6163,26 @@ const adminHTML = `<!doctype html>
             '<td class="muted" style="max-width:360px">' + escapeHTML(c.detail || '') + '</td>' +
           '</tr>').join('') + '</tbody></table>';
       }
+      let text2sqlHintsHtml = '<p class="muted">사용자별 반복 Text2SQL 질문을 저장 리포트·대시보드·데이터마트 후보로 정리합니다. 원문 질문과 SQL은 표시하지 않습니다.</p>';
+      if (!text2sqlHints.length) {
+        text2sqlHintsHtml += '<p class="muted">표시할 Text2SQL 힌트가 없습니다.</p>';
+      } else {
+        text2sqlHintsHtml += '<table><thead><tr>' +
+          '<th data-sort="str">사용자</th><th data-sort="str">팀</th><th data-sort="str">힌트</th><th data-sort="str">스키마</th>' +
+          '<th data-sort="num">반복</th><th data-sort="num">성공률</th><th data-sort="num">평균비용</th><th data-sort="num">절감추정</th><th>지문/근거</th>' +
+          '</tr></thead><tbody>' +
+          text2sqlHints.map(h => '<tr>' +
+            '<td><a href="#/personalization/' + encodeURIComponent(h.user_id || '') + '">' + escapeHTML(h.user_id || '') + '</a></td>' +
+            '<td>' + escapeHTML(h.team || '') + '</td>' +
+            '<td>' + escapeHTML(h.hint_type || h.recommended_product || '') + '</td>' +
+            '<td>' + escapeHTML(h.schema_name || '') + '</td>' +
+            '<td data-num="' + (h.count || 0) + '">' + fmt(h.count || 0) + '</td>' +
+            '<td data-num="' + (h.success_rate || 0) + '">' + pctText(h.success_rate) + '</td>' +
+            '<td data-num="' + (h.avg_cost_krw || 0) + '">' + (h.avg_cost_krw || 0).toFixed(2) + '</td>' +
+            '<td data-num="' + (h.estimated_savings_krw || 0) + '">' + fmt(Math.round(h.estimated_savings_krw || 0)) + '</td>' +
+            '<td class="muted">' + escapeHTML(h.fingerprint || '') + '<div>' + escapeHTML(h.reason || '') + '</div></td>' +
+          '</tr>').join('') + '</tbody></table>';
+      }
       let modelAffinityHtml = '<p class="muted">사용자별 모델 적합도입니다. 성공률·사용량·평균 비용으로 점수를 계산합니다.</p>';
       if (!modelAffinity.length) {
         modelAffinityHtml += '<p class="muted">표시할 모델 affinity가 없습니다.</p>';
@@ -6203,6 +6225,7 @@ const adminHTML = `<!doctype html>
       view.innerHTML =
         card('개인 AI 프로필', '<div class="card-body">' + html + '</div>') +
         card('개인화 코칭 후보', '<div class="card-body">' + coachingHtml + '</div>') +
+        card('Text2SQL 개인 힌트', '<div class="card-body">' + text2sqlHintsHtml + '</div>') +
         card('모델 Affinity', '<div class="card-body">' + modelAffinityHtml + '</div>') +
         card('MCP Affinity', '<div class="card-body">' + mcpAffinityHtml + '</div>');
       makeSortable('#view', 'personalization');

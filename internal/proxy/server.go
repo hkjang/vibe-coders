@@ -31,7 +31,7 @@ import (
 )
 
 // AppVersion is the gateway build version, surfaced in /auth/me and the admin UI.
-const AppVersion = "v0.50.16"
+const AppVersion = "v0.50.17"
 
 type Server struct {
 	cfg            config.Config
@@ -296,6 +296,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/admin/personalization/coaching", s.handlePersonalizationCoaching)
 	mux.HandleFunc("/admin/personalization/model-affinity", s.handlePersonalizationModelAffinity)
 	mux.HandleFunc("/admin/personalization/mcp-affinity", s.handlePersonalizationMCPAffinity)
+	mux.HandleFunc("/admin/personalization/text2sql-hints", s.handlePersonalizationText2SQLHints)
 	mux.HandleFunc("/admin/personalization/profiles", s.handlePersonalProfiles)
 	mux.HandleFunc("/admin/personalization/profiles/", s.handlePersonalProfileDetail)
 	mux.HandleFunc("/me/dashboard", s.handleMyDashboard)

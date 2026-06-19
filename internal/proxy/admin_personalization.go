@@ -51,6 +51,53 @@ type personalizationMCPAffinityItem struct {
 	Reason              string  `json:"reason"`
 }
 
+type personalizationText2SQLHintItem struct {
+	UserID              string  `json:"user_id"`
+	Team                string  `json:"team"`
+	Role                string  `json:"role"`
+	Fingerprint         string  `json:"fingerprint"`
+	SchemaName          string  `json:"schema_name"`
+	Count               int64   `json:"count"`
+	SuccessRate         float64 `json:"success_rate"`
+	AvgCostKRW          float64 `json:"avg_cost_krw"`
+	EstimatedSavingsKRW float64 `json:"estimated_savings_krw"`
+	LastSeen            string  `json:"last_seen"`
+	RecommendedProduct  string  `json:"recommended_product"`
+	HintType            string  `json:"hint_type"`
+	Reason              string  `json:"reason"`
+}
+
+func text2SQLHintType(product string) string {
+	switch strings.ToLower(strings.TrimSpace(product)) {
+	case "dashboard":
+		return "saved_dashboard"
+	case "data_mart":
+		return "data_mart_candidate"
+	case "api":
+		return "query_api_candidate"
+	default:
+		return "saved_report_candidate"
+	}
+}
+
+func personalizationText2SQLHintItemsForUser(userID string, profile store.PersonalProfile, candidates []store.UserText2SQLReportCandidate) []personalizationText2SQLHintItem {
+	items := make([]personalizationText2SQLHintItem, 0, len(candidates))
+	for _, c := range candidates {
+		savings := 0.0
+		if c.Count > 1 {
+			savings = float64(c.Count-1) * c.AvgCostKRW
+		}
+		items = append(items, personalizationText2SQLHintItem{
+			UserID: userID, Team: profile.Team, Role: profile.Role,
+			Fingerprint: c.Fingerprint, SchemaName: c.SchemaName, Count: c.Count,
+			SuccessRate: c.SuccessRate, AvgCostKRW: c.AvgCostKRW, EstimatedSavingsKRW: savings,
+			LastSeen: c.LastSeen, RecommendedProduct: c.RecommendedProduct, HintType: text2SQLHintType(c.RecommendedProduct),
+			Reason: fmt.Sprintf("count=%d, success=%.0f%%, avg_cost=%.2f KRW, product=%s", c.Count, c.SuccessRate*100, c.AvgCostKRW, text2SQLProductLabel(c.RecommendedProduct)),
+		})
+	}
+	return items
+}
+
 func modelAffinityScore(requests int64, successRate, avgCostKRW float64) float64 {
 	volume := float64(requests)
 	if volume > 20 {
@@ -341,6 +388,57 @@ func (s *Server) handlePersonalizationMCPAffinity(w http.ResponseWriter, r *http
 			return items[i].UserID < items[j].UserID
 		}
 		return items[i].Ref < items[j].Ref
+	})
+	if len(items) > limit {
+		items = items[:limit]
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items, "count": len(items)})
+}
+
+// handlePersonalizationText2SQLHints returns per-user Text2SQL report/data-product
+// hints. It uses only fingerprints and aggregate metrics in the response.
+// GET /admin/personalization/text2sql-hints?window=30d&limit=50&min_count=3
+func (s *Server) handlePersonalizationText2SQLHints(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	since := parseWindow(r.URL.Query().Get("window"), 30*24*time.Hour, "day")
+	limit := recentLimit(r)
+	minCount := atoiDefault(r.URL.Query().Get("min_count"), 3)
+	if minCount < 2 {
+		minCount = 3
+	}
+	users, err := s.db.PersonalProfileActiveUsers(r.Context(), since, limit)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "text2sql_hints_failed")
+		return
+	}
+	items := []personalizationText2SQLHintItem{}
+	for _, uid := range users {
+		profile, err := s.db.BuildPersonalProfile(r.Context(), uid, since)
+		if err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "text2sql_hints_failed")
+			return
+		}
+		candidates, err := s.db.UserText2SQLReportCandidates(r.Context(), uid, since, minCount, 5)
+		if err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "text2sql_hints_failed")
+			return
+		}
+		items = append(items, personalizationText2SQLHintItemsForUser(uid, profile, candidates)...)
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].EstimatedSavingsKRW != items[j].EstimatedSavingsKRW {
+			return items[i].EstimatedSavingsKRW > items[j].EstimatedSavingsKRW
+		}
+		if items[i].Count != items[j].Count {
+			return items[i].Count > items[j].Count
+		}
+		if items[i].UserID != items[j].UserID {
+			return items[i].UserID < items[j].UserID
+		}
+		return items[i].Fingerprint < items[j].Fingerprint
 	})
 	if len(items) > limit {
 		items = items[:limit]
