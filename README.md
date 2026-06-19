@@ -145,6 +145,8 @@ Roo Code / Cursor / Continue 등 OpenAI 호환 API 를 호출하는 VS Code 확�
 - **MCP Discovery 자가 진단 피드백** (`v0.50.21`): 후보가 비어 있을 때 도구 미확인·점수 미달·정책 필터 등 누락 사유를 구조화해 반환하고 `vibe/grounded`·`vibe/research` 정책을 조율
 - **에이전트식 MCP Discovery 도구 호출 루프** (`v0.50.22`): `vibe/grounded`·`vibe/research` 요청에서 백킹 LLM이 후보 MCP 도구를 직접 선별·실행해 답변을 합성. 백킹 모델 부재 시 정적 fallback 유지
 - **MCP Discovery selector 보조화 및 백킹 모델 설정** (`v0.50.23`): agentic 경로에서 selector는 hard gate가 아니라 후보 정렬 가중치로 사용. `MCP_AGENTIC_MODEL` 또는 런타임 설정 `mcp.agentic_model`로 백킹 Chat 모델을 지정 가능하며 `vibe/all_mcp` 별칭도 지원
+- **MCP Discovery agentic loop 스트리밍·설정화** (`v0.50.24`): `mcp.max_agent_steps`·`mcp.max_tokens`·`mcp.force_tool_first`·`mcp.max_tools`로 루프 동작을 설정화하고, 최종 답변을 실제 upstream stream으로 전달하며 `X-MCP-*`/`x_mcp` 통계를 노출
+- **Chat 테스트 MCP Discovery 운영 가시성** (`v0.50.25`): 테스트 카탈로그와 선택 대상 상세 패널에 MCP Discovery 정책·agentic loop 설정을 표시하고, 디버그 레일이 소문자 `x-mcp-*` 헤더까지 인식해 후보/관련성 gate/백킹 모델/도구 호출 통계를 안정적으로 표시
 - **ClickHouse 요청 단위 fact 적재** (`v0.10.0`): 일별 rollup 유지 + **요청 1건당 1행**을 `ai_request_fact`로 비동기 배치 적재(팀·모델·provider·프로젝트·프롬프트·라우팅·토큰·비용·지연·오류). bounded 큐→batch flush(`clickhouse.batch_size`/`flush_interval`), `ReplacingMergeTree`로 멱등, 프롬프트 원문 미전송·IP 해시. 장애 시 `clickhouse_fact_retry`에 저장→`POST /admin/dw/clickhouse/fact-retry` 재처리. `clickhouse.request_fact_table` 설정 시 활성화
 - **ClickHouse 세부 이벤트 fact (tool·routing·eval)** (`v0.10.1`): 같은 요청 큐에서 `ai_tool_fact`(MCP/도구 호출)·`ai_routing_fact`(라우팅 결정)·`ai_eval_fact`(LLM 평가)를 fan-out 적재. `clickhouse.tool_fact_table`·`routing_fact_table`·`eval_fact_table`로 개별 on/off, bootstrap이 DDL 생성. "위험한 MCP 도구·라우팅 절감·프롬프트 버전 품질"을 ClickHouse에서 분석
 - **ClickHouse Text2SQL fact 확장** (`v0.10.2`): Text2SQL fact에 `reject_reason`·`sql_hash`(원문 미전송) 추가 — 실패 원인·SQL 형태 클러스터 분석 강화

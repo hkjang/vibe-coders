@@ -102,6 +102,7 @@ func (s *Server) chatTestTargetCatalog(ctx context.Context) map[string]any {
 			Description: "Complexity, risk, provider health, auth policy를 반영해 모델을 자동 선택합니다.",
 		})
 	}
+	mcpAgentic := s.chatTestMCPAgenticMetadata()
 	// MCP discovery / grounding virtual models: route the chat through MCP candidate
 	// selection + evidence grounding instead of a single upstream model.
 	for _, m := range []struct {
@@ -117,6 +118,20 @@ func (s *Server) chatTestTargetCatalog(ctx context.Context) map[string]any {
 		{"vibe/compliance", "컴플라이언스 도메인 MCP(승인 필요)로 근거를 수집합니다."},
 	} {
 		policy := mcpDiscoveryPolicyForModel(m.model)
+		metadata := map[string]any{
+			"route_family":                  "mcp_discovery",
+			"canonical_model":               policy.Model,
+			"mode":                          policy.Mode,
+			"max_mcps":                      policy.MaxMCPs,
+			"min_selector_score":            policy.MinSelectorScore,
+			"min_evidence_score":            policy.MinEvidenceScore,
+			"require_approval":              policy.RequireApproval,
+			"selector_behavior":             "ranking_boost_agentic",
+			"static_fallback_selector_gate": !strings.EqualFold(policy.Mode, "all_allowed") && policy.MinSelectorScore > 0,
+		}
+		for k, v := range mcpAgentic {
+			metadata[k] = v
+		}
 		add("routing", chatTestTarget{
 			ID:          "routing:" + m.model,
 			Kind:        "routing",
@@ -124,12 +139,7 @@ func (s *Server) chatTestTargetCatalog(ctx context.Context) map[string]any {
 			Model:       m.model,
 			Enabled:     true,
 			Description: m.desc,
-			Metadata: map[string]any{
-				"mode":               policy.Mode,
-				"max_mcps":           policy.MaxMCPs,
-				"min_evidence_score": policy.MinEvidenceScore,
-				"require_approval":   policy.RequireApproval,
-			},
+			Metadata:    metadata,
 		})
 	}
 	if rules, err := s.db.ListRoutingRules(ctx); err == nil {
@@ -277,6 +287,39 @@ func (s *Server) chatTestTargetCatalog(ctx context.Context) map[string]any {
 		"defaults":       map[string]any{"model": "vibe/auto", "prompt": "Reply with pong in one short sentence.", "max_tokens": 1024, "temperature": 0},
 		"mcp_fetched_at": snap.fetchedAt.UTC().Format(time.RFC3339),
 		"mcp_errors":     snap.errors,
+	}
+}
+
+func (s *Server) chatTestMCPAgenticMetadata() map[string]any {
+	cfg := s.mcpConf()
+	agenticModel := strings.TrimSpace(cfg.AgenticModel)
+	agenticSource := "mcp.agentic_model"
+	if agenticModel == "" {
+		agenticModel = "auto-router"
+		agenticSource = "auto-router"
+	}
+	steps := cfg.MaxAgentSteps
+	if steps <= 0 {
+		steps = 8
+	}
+	if steps > 16 {
+		steps = 16
+	}
+	tokens := cfg.MaxTokens
+	if tokens <= 0 {
+		tokens = mcpAgentMaxTokens
+	}
+	maxTools := cfg.MaxTools
+	if maxTools <= 0 {
+		maxTools = 32
+	}
+	return map[string]any{
+		"agentic_model":        agenticModel,
+		"agentic_model_source": agenticSource,
+		"max_agent_steps":      steps,
+		"mcp_max_tokens":       tokens,
+		"force_tool_first":     cfg.ForceToolFirst,
+		"max_tools":            maxTools,
 	}
 }
 

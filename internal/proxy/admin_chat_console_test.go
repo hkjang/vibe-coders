@@ -78,15 +78,29 @@ func TestAdminChatTestTargetsIncludeGatewaySurfaces(t *testing.T) {
 		"routing:vibe/legal":             false,
 		"routing:vibe/compliance":        false,
 	}
+	var grounded *chatTestTarget
 	for _, target := range out.Targets {
 		if _, ok := want[target.ID]; ok {
 			want[target.ID] = true
+		}
+		if target.ID == "routing:vibe/grounded" {
+			cp := target
+			grounded = &cp
 		}
 	}
 	for id, found := range want {
 		if !found {
 			t.Fatalf("target %s not found in %#v", id, out.Targets)
 		}
+	}
+	if grounded == nil || grounded.Metadata["route_family"] != "mcp_discovery" || grounded.Metadata["selector_behavior"] != "ranking_boost_agentic" {
+		t.Fatalf("grounded target missing MCP discovery metadata: %#v", grounded)
+	}
+	if grounded.Metadata["agentic_model"] != "auto-router" || grounded.Metadata["agentic_model_source"] != "auto-router" {
+		t.Fatalf("grounded target missing agentic model source: %#v", grounded.Metadata)
+	}
+	if got, ok := grounded.Metadata["static_fallback_selector_gate"].(bool); !ok || !got {
+		t.Fatalf("grounded target should surface static fallback selector gate: %#v", grounded.Metadata)
 	}
 }
 

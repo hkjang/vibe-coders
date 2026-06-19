@@ -236,6 +236,8 @@ const adminHTML = `<!doctype html>
     .ct-field-wide { display: flex; flex-direction: column; gap: 5px; margin-bottom: 10px; }
     .ct-field-wide > span { font-size: 12px; font-weight: 700; }
     .ct-field-wide input { width: 100%; box-sizing: border-box; min-width: 0; }
+    .ct-target-detail { margin-top: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: rgba(148,163,184,.08); }
+    .ct-target-detail .kv { grid-template-columns: 130px 1fr; }
     .ct-prompt { width: 100%; box-sizing: border-box; min-width: 0; min-height: 150px; height: auto; resize: vertical; }
     .ct-footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; padding: 12px 16px; background: var(--panel-alt); }
     .ct-options { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
@@ -4797,6 +4799,7 @@ const adminHTML = `<!doctype html>
               '<label class="ct-field"><span>대상</span><select id="chat-target">' + targetOptions + '</select></label>' +
               '<label class="ct-field"><span>Provider</span><select id="chat-provider">' + providerOptions + '</select></label>' +
             '</div>' +
+            '<div id="chat-target-detail" class="ct-target-detail"></div>' +
           '</div>' +
           '<div class="ct-group">' +
             '<div class="ct-glabel">모델 파라미터</div>' +
@@ -4834,6 +4837,7 @@ const adminHTML = `<!doctype html>
         section('대상 카탈로그', chatTestTargetTable(targets));
 
       const targetSelect = document.getElementById('chat-target');
+      const targetDetail = document.getElementById('chat-target-detail');
       const mcpRouteBtn = document.getElementById('chat-mcp-route');
       const applySelectedTarget = () => {
         const opt = targetSelect.selectedOptions[0];
@@ -4846,6 +4850,7 @@ const adminHTML = `<!doctype html>
         if (provider) document.getElementById('chat-provider').value = provider;
         const isMCP = kind.startsWith('mcp_');
         window.chatTestSelected = (window.chatTestTargets || []).find(t => t.id === targetSelect.value) || null;
+        if (targetDetail) targetDetail.innerHTML = chatTestTargetDetail(window.chatTestSelected);
         if (mcpRouteBtn) mcpRouteBtn.disabled = !isMCP;
         if (isMCP) {
           document.getElementById('chat-prompt').value =
@@ -5131,7 +5136,7 @@ const adminHTML = `<!doctype html>
       let html = '<h4>실행 요약</h4><div class="kv">' +
         row('Status', '<span class="status ' + (info.ok ? '' : 'error') + '">' + fmt(info.status || 0) + '</span>') +
         row('Latency', fmt(info.latency_ms || 0) + ' ms (브라우저 측정)') +
-        row('Cache', escapeHTML(headers['X-Cache'] || 'MISS')) +
+        row('Cache', escapeHTML(chatHeader(headers, 'x-cache') || 'MISS')) +
         row('Model', escapeHTML(info.model || '')) +
         row('Provider', escapeHTML(info.provider || '자동')) +
         (info.error ? row('Error', '<span class="status error">' + escapeHTML(info.error) + '</span>') : '') +
@@ -5145,13 +5150,23 @@ const adminHTML = `<!doctype html>
           row('Total', fmt(u.total_tokens || 0)) +
         '</div>';
       }
+      const discoveryModel = chatHeader(headers, 'x-mcp-discovery-model');
+      if (discoveryModel) {
+        html += '<h4>MCP Discovery</h4><div class="kv">' +
+          row('모델', escapeHTML(discoveryModel)) +
+          row('모드', escapeHTML(chatHeader(headers, 'x-mcp-discovery-mode') || '-')) +
+          row('후보/확인', fmt(Number(chatHeader(headers, 'x-mcp-candidates')) || 0) + ' / ' + fmt(Number(chatHeader(headers, 'x-mcp-checked')) || 0)) +
+          (chatHeader(headers, 'x-mcp-score-filtered') ? row('관련성 gate', fmt(Number(chatHeader(headers, 'x-mcp-score-filtered')) || 0)) : '') +
+          (chatHeader(headers, 'x-mcp-grounded') ? row('Grounded', escapeHTML(chatHeader(headers, 'x-mcp-grounded'))) : '') +
+        '</div>';
+      }
       // Agentic MCP loop stats: prefer the structured x_mcp chunk (streaming), fall back to
       // the X-MCP-* response headers (non-streaming).
-      const agentic = info.mcp || (headers['X-Mcp-Agentic'] || headers['X-MCP-Agentic'] ? {
-        steps: headers['X-Mcp-Steps'] || headers['X-MCP-Steps'],
-        tool_calls: headers['X-Mcp-Tool-Calls'] || headers['X-MCP-Tool-Calls'],
-        evidence: headers['X-Mcp-Evidence'] || headers['X-MCP-Evidence'],
-        backing_model: headers['X-Mcp-Backing-Model'] || headers['X-MCP-Backing-Model'],
+      const agentic = info.mcp || (chatHeader(headers, 'x-mcp-agentic') ? {
+        steps: chatHeader(headers, 'x-mcp-steps'),
+        tool_calls: chatHeader(headers, 'x-mcp-tool-calls'),
+        evidence: chatHeader(headers, 'x-mcp-evidence'),
+        backing_model: chatHeader(headers, 'x-mcp-backing-model'),
       } : null);
       if (agentic) {
         html += '<h4>에이전틱 MCP</h4><div class="kv">' +
@@ -5167,6 +5182,13 @@ const adminHTML = `<!doctype html>
       html += '<h4>응답 헤더</h4>' + chatTestHeadersTable(headers);
       html += '<h4>Raw SSE</h4><pre>' + escapeHTML(info.raw || '') + '</pre>';
       return html;
+    }
+    function chatHeader(headers, name) {
+      const want = String(name || '').toLowerCase();
+      for (const k in (headers || {})) {
+        if (String(k).toLowerCase() === want) return headers[k];
+      }
+      return '';
     }
     // ---------- MCP routing test (explain + upstream call) ----------
     async function runMCPRoutingTestFromConsole(target) {
@@ -5320,14 +5342,58 @@ const adminHTML = `<!doctype html>
     }
     function chatTestTargetTable(targets) {
       if (!targets.length) return '<div class="empty">등록된 테스트 대상 없음</div>';
-      return '<table><thead><tr><th data-sort="str">Kind</th><th data-sort="str">대상</th><th data-sort="str">Model</th><th data-sort="str">Provider</th><th data-sort="str">상태</th></tr></thead><tbody>' +
+      return '<table><thead><tr><th data-sort="str">Kind</th><th data-sort="str">대상</th><th data-sort="str">Model</th><th data-sort="str">Provider</th><th data-sort="str">세부</th><th data-sort="str">상태</th></tr></thead><tbody>' +
         targets.map(t => '<tr class="row-link" data-chat-target-id="' + escapeHTML(t.id || '') + '">' +
           '<td><span class="pill">' + escapeHTML(t.kind || '') + '</span></td>' +
           '<td><strong>' + escapeHTML(t.label || t.id || '') + '</strong>' + (t.description ? '<div class="muted">' + escapeHTML(t.description) + '</div>' : '') + '</td>' +
           '<td><code>' + escapeHTML(t.model || t.pattern || '-') + '</code>' + (t.editable ? '<div class="muted">editable</div>' : '') + '</td>' +
           '<td>' + escapeHTML(t.provider || '-') + '</td>' +
+          '<td>' + chatTestTargetMetaLine(t) + '</td>' +
           '<td><span class="status ' + (t.enabled === false ? 'warn' : '') + '">' + (t.enabled === false ? 'off' : 'ready') + '</span></td>' +
         '</tr>').join('') + '</tbody></table>';
+    }
+    function chatTestTargetMetaLine(t) {
+      const m = (t && t.metadata) || {};
+      if (m.route_family === 'mcp_discovery') {
+        return '<span class="status">' + escapeHTML(m.mode || '') + '</span>' +
+          '<div class="muted">MCP ' + fmt(Number(m.max_mcps) || 0) + ' · evidence ' + escapeHTML(String(m.min_evidence_score || '-')) + '</div>' +
+          '<div class="muted">backing ' + escapeHTML(String(m.agentic_model || 'auto-router')) + '</div>';
+      }
+      if (String(t.kind || '').startsWith('mcp_')) {
+        return '<span class="status">' + escapeHTML(m.upstream_name || '') + '</span>' +
+          '<div class="muted">' + escapeHTML(m.target_method || m.kind || '') + '</div>';
+      }
+      if (t.provider || t.pattern) return '<span class="muted">' + escapeHTML(t.pattern || t.provider || '') + '</span>';
+      return '<span class="muted">-</span>';
+    }
+    function chatTestTargetDetail(t) {
+      if (!t) return '<div class="muted">대상 없음</div>';
+      const m = t.metadata || {};
+      if (m.route_family === 'mcp_discovery') {
+        const selector = (m.selector_behavior === 'ranking_boost_agentic') ? 'agentic=ranking' : String(m.selector_behavior || '-');
+        const fallback = m.static_fallback_selector_gate ? ('fallback gate ' + String(m.min_selector_score || '-')) : 'fallback open';
+        return '<div class="kv">' +
+          row('MCP Discovery', '<strong>' + escapeHTML(m.canonical_model || t.model || '') + '</strong> <span class="muted">' + escapeHTML(m.mode || '') + '</span>') +
+          row('후보 정책', 'max ' + fmt(Number(m.max_mcps) || 0) + ' · evidence ' + escapeHTML(String(m.min_evidence_score || '-')) + ' · ' + escapeHTML(selector + ' / ' + fallback)) +
+          row('백킹 모델', '<code>' + escapeHTML(String(m.agentic_model || 'auto-router')) + '</code> <span class="muted">' + escapeHTML(String(m.agentic_model_source || '')) + '</span>') +
+          row('루프 설정', 'steps ' + fmt(Number(m.max_agent_steps) || 0) + ' · tokens ' + fmt(Number(m.mcp_max_tokens) || 0) + ' · tools ' + fmt(Number(m.max_tools) || 0) + ' · force first ' + escapeHTML(String(!!m.force_tool_first))) +
+          row('설정', '<a href="#/settings/runtime"><code>mcp.agentic_model</code></a>') +
+        '</div>';
+      }
+      if (String(t.kind || '').startsWith('mcp_')) {
+        return '<div class="kv">' +
+          row('MCP route', '<strong>' + escapeHTML(t.label || t.id || '') + '</strong>') +
+          row('Upstream', escapeHTML((m.upstream_name || '-') + (m.upstream_id ? ' / ' + m.upstream_id : ''))) +
+          row('Target', '<code>' + escapeHTML(m.target_method || m.kind || '') + '</code> ' + escapeHTML(m.target_name || m.uri || m.exposed_name || '')) +
+          (m.discovery_error ? row('Discovery', '<span class="status error">' + escapeHTML(m.discovery_error) + '</span>') : row('Discovery', '<span class="status">ready</span>')) +
+        '</div>';
+      }
+      return '<div class="kv">' +
+        row('Target', '<strong>' + escapeHTML(t.label || t.id || '') + '</strong>') +
+        row('Kind', escapeHTML(t.kind || '-')) +
+        row('Model', '<code>' + escapeHTML(t.model || t.pattern || '-') + '</code>') +
+        row('Provider', escapeHTML(t.provider || '자동')) +
+      '</div>';
     }
     function renderChatTestPreview(preview) {
       const complexity = preview.complexity || {};
