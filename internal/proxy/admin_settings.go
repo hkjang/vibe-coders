@@ -197,6 +197,7 @@ func buildSettingRegistry() []settingDef {
 		{Key: "mcp.max_agent_steps", Category: "mcp", Type: stInt, validate: posInt, envValue: func(c config.Config) string { return strconv.Itoa(c.MCP.MaxAgentSteps) }},
 		{Key: "mcp.max_tokens", Category: "mcp", Type: stInt, validate: posInt, envValue: func(c config.Config) string { return strconv.Itoa(c.MCP.MaxTokens) }},
 		{Key: "mcp.force_tool_first", Category: "mcp", Type: stBool, envValue: func(c config.Config) string { return strconv.FormatBool(c.MCP.ForceToolFirst) }},
+		{Key: "mcp.max_tools", Category: "mcp", Type: stInt, validate: posInt, envValue: func(c config.Config) string { return strconv.Itoa(c.MCP.MaxTools) }},
 
 		// ---- Limits (request guardrails) ----
 		{Key: "limits.max_output_tokens", Category: "limits", Type: stInt, validate: posInt, envValue: func(c config.Config) string { return strconv.Itoa(c.Limits.MaxOutputTokens) }},
@@ -314,6 +315,7 @@ var settingDescriptions = map[string]string{
 	"mcp.max_agent_steps":  "에이전틱 MCP 루프의 최대 LLM 턴 수(기본 8, 상한 16). 한 턴에 여러 도구를 호출할 수 있으며, 이 수를 넘으면 도구 없이 최종 답변을 강제 생성.",
 	"mcp.max_tokens":       "에이전틱 MCP 루프의 턴당 completion 토큰 예산(기본 2048). 너무 작으면 도구 호출 인자 JSON이나 최종 답변이 잘려 간헐적 실패의 원인이 됨.",
 	"mcp.force_tool_first": "true면 첫 턴에 MCP 도구를 최소 1회 호출하도록 강제(tool_choice=required)해 근거 기반 답변을 보장. false면 모델이 도구 사용 여부를 자유 판단(기본 true).",
+	"mcp.max_tools":        "에이전틱 루프에서 모델에 노출할 MCP 도구 최대 개수(기본 32). vibe/all-mcp처럼 도구가 많으면 선택 정확도·토큰 비용이 나빠지므로 상위 랭크 후보의 도구만 노출.",
 	// Limits
 	"limits.max_output_tokens": "응답 최대 출력 토큰 상한(0=비활성). >0이면 chat 요청의 max_tokens/max_completion_tokens를 이 값으로 클램프(없으면 주입). 런어웨이 생성·비용 폭주 가드.",
 	"limits.max_request_bytes": "chat 요청 본문 최대 바이트(0=비활성). 초과 시 413 payload_too_large로 거부. 비정상적으로 큰 프롬프트·남용 차단.",
@@ -656,6 +658,8 @@ func applyRuntimeSetting(t2s *config.Text2SQLConfig, ch *config.ClickHouseConfig
 		mcp.MaxTokens = atoi()
 	case "mcp.force_tool_first":
 		mcp.ForceToolFirst = atob()
+	case "mcp.max_tools":
+		mcp.MaxTools = atoi()
 	case "limits.max_output_tokens":
 		limits.MaxOutputTokens = atoi()
 	case "limits.max_request_bytes":

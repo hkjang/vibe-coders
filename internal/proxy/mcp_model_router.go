@@ -248,6 +248,8 @@ func (s *Server) handleMCPDiscoveryChat(w http.ResponseWriter, r *http.Request, 
 				if !stream {
 					w.Header().Set("X-MCP-Evidence", strconv.Itoa(len(filtered)))
 					w.Header().Set("X-MCP-Grounded", strconv.FormatBool(len(filtered) > 0))
+					w.Header().Set("X-MCP-Steps", strconv.Itoa(outcome.Steps))
+					w.Header().Set("X-MCP-Tool-Calls", strconv.Itoa(outcome.ToolCalls))
 					writeMCPDiscoveryCompletion(w, policy.Model, outcome.Content, filtered)
 				}
 				return

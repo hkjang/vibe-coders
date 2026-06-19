@@ -54,6 +54,11 @@ type MCPConfig struct {
 	// call on the first turn (tool_choice=required) so the answer is actually grounded
 	// instead of free-form from the model's own knowledge. Default true.
 	ForceToolFirst bool
+	// MaxTools caps how many MCP tools are exposed to the backing model in one loop. Too
+	// many tools (e.g. vibe/all-mcp across dozens of upstreams) degrade tool-selection
+	// accuracy and inflate token cost; the highest-ranked candidates' tools are kept.
+	// Default 32.
+	MaxTools int
 }
 
 // InsuranceConfig parameterizes the AI Request Insurance view: an SLA-claims ledger
@@ -434,6 +439,7 @@ func Load() (Config, error) {
 			MaxAgentSteps:  intEnv("MCP_MAX_AGENT_STEPS", 8),
 			MaxTokens:      intEnv("MCP_MAX_TOKENS", 2048),
 			ForceToolFirst: boolEnv("MCP_FORCE_TOOL_FIRST", true),
+			MaxTools:       intEnv("MCP_MAX_TOOLS", 32),
 		},
 	}
 

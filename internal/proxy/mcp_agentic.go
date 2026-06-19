@@ -67,6 +67,7 @@ type mcpAgentOutcome struct {
 	Usage     mcpAgentUsage
 	Provider  string
 	ToolCalls int
+	Steps     int
 	Streamed  bool
 	Err       error
 }
@@ -109,48 +110,63 @@ func (s *Server) mcpAgenticModelResolvable(ctx context.Context, r *http.Request,
 	return authCtx == nil || listAllows(provider.Name, authCtx.AllowedProviders, authCtx.DeniedProviders)
 }
 
-// buildMCPAgentToolset collects every tool advertised by the selected candidate upstreams
-// and exposes them as OpenAI function definitions with sanitized, unique names.
+// buildMCPAgentToolset exposes the selected candidate upstreams' MCP tools as OpenAI
+// function definitions, walking candidates in rank order (best FinalScore first) so that
+// when the MaxTools cap is hit, the highest-ranked upstreams' tools are the ones kept.
 func (s *Server) buildMCPAgentToolset(ctx context.Context, candidates []MCPCandidate) mcpAgentToolset {
 	snap := s.mcpToolsSnapshotCached(ctx)
 	ts := mcpAgentToolset{routes: map[string]mcpAgentRoute{}}
-	usedUpstream := map[string]bool{}
-	for _, c := range candidates {
-		usedUpstream[c.UpstreamID] = true
-	}
-	seen := map[string]bool{}
+
+	// Group advertised tools by upstream so we can add them in candidate-rank order.
+	toolsByUpstream := map[string][]mcpToolDef{}
 	for _, tool := range snap.tools {
-		route, ok := snap.routes[tool.Name]
-		if !ok || !usedUpstream[route.upstreamID] {
-			continue
+		if route, ok := snap.routes[tool.Name]; ok {
+			toolsByUpstream[route.upstreamID] = append(toolsByUpstream[route.upstreamID], tool)
 		}
-		fnName := sanitizeAgentToolName(tool.Name)
-		base := fnName
-		for i := 2; seen[fnName]; i++ {
-			fnName = truncateText(base, 58) + "_" + fmt.Sprint(i)
-		}
-		seen[fnName] = true
-		var params json.RawMessage = tool.InputSchema
-		if len(params) == 0 || string(params) == "null" {
-			params = json.RawMessage(`{"type":"object","properties":{}}`)
-		}
-		desc := strings.TrimSpace(tool.Description)
-		if desc == "" {
-			desc = route.upstreamName + " 도구 " + route.bareTool
-		}
-		ts.tools = append(ts.tools, map[string]any{
-			"type": "function",
-			"function": map[string]any{
-				"name":        fnName,
-				"description": desc,
-				"parameters":  params,
-			},
-		})
-		ts.routes[fnName] = mcpAgentRoute{
-			upstreamID:   route.upstreamID,
-			upstreamName: route.upstreamName,
-			bareTool:     route.bareTool,
-			namespaced:   tool.Name,
+	}
+	maxTools := s.mcpConf().MaxTools
+	if maxTools <= 0 {
+		maxTools = 32
+	}
+
+	seen := map[string]bool{}
+	for _, cand := range candidates {
+		for _, tool := range toolsByUpstream[cand.UpstreamID] {
+			if len(ts.tools) >= maxTools {
+				return ts
+			}
+			route, ok := snap.routes[tool.Name]
+			if !ok {
+				continue
+			}
+			fnName := sanitizeAgentToolName(tool.Name)
+			base := fnName
+			for i := 2; seen[fnName]; i++ {
+				fnName = truncateText(base, 58) + "_" + fmt.Sprint(i)
+			}
+			seen[fnName] = true
+			var params json.RawMessage = tool.InputSchema
+			if len(params) == 0 || string(params) == "null" {
+				params = json.RawMessage(`{"type":"object","properties":{}}`)
+			}
+			desc := strings.TrimSpace(tool.Description)
+			if desc == "" {
+				desc = route.upstreamName + " 도구 " + route.bareTool
+			}
+			ts.tools = append(ts.tools, map[string]any{
+				"type": "function",
+				"function": map[string]any{
+					"name":        fnName,
+					"description": desc,
+					"parameters":  params,
+				},
+			})
+			ts.routes[fnName] = mcpAgentRoute{
+				upstreamID:   route.upstreamID,
+				upstreamName: route.upstreamName,
+				bareTool:     route.bareTool,
+				namespaced:   tool.Name,
+			}
 		}
 	}
 	return ts
@@ -233,6 +249,7 @@ func (s *Server) runMCPAgenticChat(w http.ResponseWriter, r *http.Request, model
 			"tool_choice": toolChoice,
 			"max_tokens":  maxTokens,
 		}
+		out.Steps++
 		raw, provider, err := s.postUpstreamChatRetry(r.Context(), r, model, body)
 		if provider != "" {
 			out.Provider = provider
@@ -317,6 +334,9 @@ func (s *Server) runMCPAgenticChat(w http.ResponseWriter, r *http.Request, model
 	}
 
 	if streaming {
+		// Closing summary so the loop's shape (turns/tool calls/model) is visible even
+		// though those counts can't be response headers on an already-streaming response.
+		emitReason(fmt.Sprintf("✅ 완료 · %d턴 · 도구호출 %d회 · 모델 %s\n", out.Steps, out.ToolCalls, firstNonEmpty(out.Provider+"/"+model, model)))
 		if out.Content == "" {
 			if out.Err != nil {
 				out.Content = "MCP 근거 기반 응답을 생성하지 못했습니다: " + out.Err.Error()
