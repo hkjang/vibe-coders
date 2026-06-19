@@ -13,24 +13,36 @@ import (
 )
 
 type Config struct {
-	ListenAddr string
-	Upstream   UpstreamConfig
-	Database   DatabaseConfig
-	Logging    LoggingConfig
-	Retention  RetentionConfig
-	Cache      CacheConfig
-	Auth       AuthConfig
-	Secret     SecretConfig
-	Session    SessionConfig
-	VCS        VCSConfig
-	Text2SQL   Text2SQLConfig
-	ClickHouse ClickHouseConfig
+	ListenAddr  string
+	Upstream    UpstreamConfig
+	Database    DatabaseConfig
+	Logging     LoggingConfig
+	Retention   RetentionConfig
+	Cache       CacheConfig
+	Auth        AuthConfig
+	Secret      SecretConfig
+	Session     SessionConfig
+	VCS         VCSConfig
+	Text2SQL    Text2SQLConfig
+	ClickHouse  ClickHouseConfig
 	Carbon      CarbonConfig
 	Insurance   InsuranceConfig
 	Pricing     map[string]ModelPrice
 	PricingConf PricingConfig
 	Skills      SkillsConfig
 	Limits      LimitsConfig
+	MCP         MCPConfig
+}
+
+// MCPConfig parameterizes the MCP discovery / grounding virtual models (vibe/grounded,
+// vibe/research, vibe/all-mcp, ...). The agentic loop hands the selected upstreams' MCP
+// tools to a backing LLM that decides which to call; this config picks that backing LLM.
+type MCPConfig struct {
+	// AgenticModel is the upstream model that drives the MCP discovery tool-calling loop.
+	// When empty, the gateway falls back to the auto-router's policy-aware model selection
+	// (same logic as vibe/auto). Set it to pin a specific model (e.g. "claude-sonnet-4",
+	// "gpt-4.1") whose provider is configured.
+	AgenticModel string
 }
 
 // InsuranceConfig parameterizes the AI Request Insurance view: an SLA-claims ledger
@@ -228,16 +240,16 @@ type ClickHouseConfig struct {
 	Text2SQLFactTable string        // when set, per-query Text2SQL facts are shipped here (detailed fact table); empty disables
 	// Per-request fact sink (detailed behavioral DW). When RequestFactTable is set, every
 	// completed request is shipped as one row via an async batch queue (never on the hot path).
-	RequestFactTable string        // e.g. ai_request_fact; empty disables the request-fact sink
-	ToolFactTable    string        // e.g. ai_tool_fact; empty disables (one row per tool invocation)
-	RoutingFactTable string        // e.g. ai_routing_fact; empty disables (one row per routing decision)
-	EvalFactTable    string        // e.g. ai_eval_fact; empty disables (one row per LLM evaluation)
-	FeedbackFactTable string       // e.g. ai_feedback_fact; empty disables (one row per human feedback)
-	PolicyFactTable   string       // e.g. ai_policy_fact; empty disables (one row per policy decision)
-	SkillFactTable    string       // e.g. ai_skill_fact; empty disables (one row per skill run)
-	BatchSize        int           // rows per ClickHouse insert (queue flush)
-	FlushInterval    time.Duration // max time a row waits in the queue before a flush
-	MaxQueueSize     int           // bounded in-memory queue; excess is dropped (counted)
+	RequestFactTable  string        // e.g. ai_request_fact; empty disables the request-fact sink
+	ToolFactTable     string        // e.g. ai_tool_fact; empty disables (one row per tool invocation)
+	RoutingFactTable  string        // e.g. ai_routing_fact; empty disables (one row per routing decision)
+	EvalFactTable     string        // e.g. ai_eval_fact; empty disables (one row per LLM evaluation)
+	FeedbackFactTable string        // e.g. ai_feedback_fact; empty disables (one row per human feedback)
+	PolicyFactTable   string        // e.g. ai_policy_fact; empty disables (one row per policy decision)
+	SkillFactTable    string        // e.g. ai_skill_fact; empty disables (one row per skill run)
+	BatchSize         int           // rows per ClickHouse insert (queue flush)
+	FlushInterval     time.Duration // max time a row waits in the queue before a flush
+	MaxQueueSize      int           // bounded in-memory queue; excess is dropped (counted)
 }
 
 // DefaultGatewaySecret is the insecure development fallback used when
@@ -405,6 +417,9 @@ func Load() (Config, error) {
 			MaxOutputTokens: intEnv("LIMITS_MAX_OUTPUT_TOKENS", 0),
 			MaxRequestBytes: intEnv("LIMITS_MAX_REQUEST_BYTES", 0),
 			MaxMessages:     intEnv("LIMITS_MAX_MESSAGES", 0),
+		},
+		MCP: MCPConfig{
+			AgenticModel: os.Getenv("MCP_AGENTIC_MODEL"),
 		},
 	}
 

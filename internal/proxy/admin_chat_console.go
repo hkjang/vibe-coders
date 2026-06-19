@@ -111,6 +111,7 @@ func (s *Server) chatTestTargetCatalog(ctx context.Context) map[string]any {
 		{"vibe/grounded", "선택적 MCP 검색으로 근거(evidence)를 수집해 그라운딩된 답변을 생성합니다."},
 		{"vibe/research", "여러 MCP를 병렬 탐색해 리서치 근거를 모아 답변합니다."},
 		{"vibe/all-mcp", "등록된 모든 MCP를 탐색합니다(관리자 전용)."},
+		{"vibe/all_mcp", "등록된 모든 MCP를 탐색합니다(관리자 전용, vibe/all-mcp 별칭)."},
 		{"vibe/policy", "정책 도메인 MCP로 필터링해 근거를 수집합니다."},
 		{"vibe/legal", "법무 도메인 MCP로 필터링해 근거를 수집합니다."},
 		{"vibe/compliance", "컴플라이언스 도메인 MCP(승인 필요)로 근거를 수집합니다."},

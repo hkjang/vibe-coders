@@ -74,6 +74,11 @@ type mcpAgentOutcome struct {
 // mcpAgenticBackingModel returns a concrete upstream model whose provider is resolvable for
 // the agentic loop, or "" if none (in which case the caller uses the static path).
 func (s *Server) mcpAgenticBackingModel(ctx context.Context, r *http.Request, policy MCPDiscoveryPolicy, authCtx *store.AuthContext) string {
+	if configured := strings.TrimSpace(s.mcpConf().AgenticModel); configured != "" {
+		if s.mcpAgenticModelResolvable(ctx, r, configured, authCtx) {
+			return configured
+		}
+	}
 	// domain_filtered / research lean on stronger reasoning; everything else can use the
 	// standard tier. Reuse the auto-router's policy-aware model selection.
 	tier := "standard"
@@ -86,11 +91,22 @@ func (s *Server) mcpAgenticBackingModel(ctx context.Context, r *http.Request, po
 		if model == "" {
 			continue
 		}
-		if _, err := s.selectProvider(ctx, r, model); err == nil {
+		if s.mcpAgenticModelResolvable(ctx, r, model, authCtx) {
 			return model
 		}
 	}
 	return ""
+}
+
+func (s *Server) mcpAgenticModelResolvable(ctx context.Context, r *http.Request, model string, authCtx *store.AuthContext) bool {
+	if authCtx != nil && !listAllows(model, authCtx.AllowedModels, authCtx.DeniedModels) {
+		return false
+	}
+	provider, err := s.selectProvider(ctx, r, model)
+	if err != nil {
+		return false
+	}
+	return authCtx == nil || listAllows(provider.Name, authCtx.AllowedProviders, authCtx.DeniedProviders)
 }
 
 // buildMCPAgentToolset collects every tool advertised by the selected candidate upstreams

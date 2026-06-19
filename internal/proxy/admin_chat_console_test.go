@@ -73,6 +73,7 @@ func TestAdminChatTestTargetsIncludeGatewaySurfaces(t *testing.T) {
 		"routing:vibe/grounded":          false,
 		"routing:vibe/research":          false,
 		"routing:vibe/all-mcp":           false,
+		"routing:vibe/all_mcp":           false,
 		"routing:vibe/policy":            false,
 		"routing:vibe/legal":             false,
 		"routing:vibe/compliance":        false,

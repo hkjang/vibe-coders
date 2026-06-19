@@ -330,6 +330,12 @@ vibe-coders 는 LLM 게이트웨이이자 **MCP 게이트웨이**입니다. 여�
 
 > 현재 Streamable HTTP 업스트림을 지원합니다(JSON 및 SSE 응답 모두 처리). 라우팅은 목록에 노출된 도구·프롬프트·리소스 대상입니다(템플릿으로 동적 생성된 미등록 URI 읽기는 미지원). stdio 서브프로세스 MCP 서버 연결은 향후 과제입니다.
 
+### MCP Discovery 가상 모델
+
+`/v1/chat/completions` 에서 `vibe/grounded`, `vibe/research`, `vibe/all-mcp`(별칭 `vibe/all_mcp`)를 모델명으로 호출하면 MCP Discovery 경로가 동작합니다. 후보 MCP는 설명·도메인·도구명·health를 기반으로 정렬되지만, agentic 경로에서는 selector 점수가 hard gate가 아니라 **백킹 LLM에게 넘길 후보 순위 가중치**로만 사용됩니다. 백킹 LLM이 직접 tool call 여부를 결정하고, 백킹 모델을 사용할 수 없을 때만 정적 fallback이 관련성 gate를 적용합니다.
+
+백킹 Chat 모델은 `MCP_AGENTIC_MODEL` 환경변수 또는 어드민 `설정 > 런타임 설정`의 `mcp.agentic_model`에서 지정합니다. 비워두면 기존 auto-router가 정책 기반으로 선택합니다. 예를 들어 `qwen-plus`, `claude-sonnet-4`, `gpt-4.1`처럼 provider model pattern에 등록된 실제 모델명을 넣으면 다음 MCP Discovery 요청부터 즉시 반영됩니다.
+
 ### MCP 서버 정책 (allowlist / 차단)
 
 미승인 MCP 서버 사용을 차단해 섀도우 MCP·신뢰 경계 밖 서버 연결을 막습니다. MCP 탭의 "MCP 서버 정책" 섹션 또는 API로 관리합니다.

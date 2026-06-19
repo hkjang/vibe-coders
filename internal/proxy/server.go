@@ -31,7 +31,7 @@ import (
 )
 
 // AppVersion is the gateway build version, surfaced in /auth/me and the admin UI.
-const AppVersion = "v0.50.22"
+const AppVersion = "v0.50.23"
 
 type Server struct {
 	cfg            config.Config
@@ -69,6 +69,7 @@ type Server struct {
 	skillsRuntime  atomic.Pointer[config.SkillsConfig]     // admin-settings overlay over cfg.Skills
 	limitsRuntime  atomic.Pointer[config.LimitsConfig]     // admin-settings overlay over cfg.Limits
 	loggingRuntime atomic.Pointer[config.LoggingConfig]    // admin-settings overlay over cfg.Logging
+	mcpRuntime     atomic.Pointer[config.MCPConfig]        // admin-settings overlay over cfg.MCP
 	chFactQueue    chan store.LogRecord                    // async per-request fact ingest queue (bounded)
 	chFactDropped  atomic.Int64                            // requests dropped when the fact queue was full
 	dwCache        *dwQueryCache                           // short-TTL cache for DW dashboard ClickHouse reads

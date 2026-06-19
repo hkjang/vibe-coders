@@ -90,7 +90,8 @@ func (rc *requestPipeline) stepMCPDiscovery() bool {
 	}
 
 	model, _, prompts, _ := extractAudit(rc.body, r.URL.Path, false)
-	if !isMCPDiscoveryModel(model) {
+	policyModel := canonicalMCPDiscoveryModel(model)
+	if !isMCPDiscoveryModel(policyModel) {
 		return true
 	}
 	if rc.authCtx != nil && !hasScope(rc.authCtx.Scopes, "mcp:use") {
@@ -98,13 +99,13 @@ func (rc *requestPipeline) stepMCPDiscovery() bool {
 		writeOpenAIError(w, http.StatusForbidden, "mcp:use scope is required for MCP discovery models", "permission_error", "scope_denied")
 		return false
 	}
-	if rc.authCtx != nil && !listAllows(model, rc.authCtx.AllowedModels, rc.authCtx.DeniedModels) {
+	if rc.authCtx != nil && !mcpAuthModelAllowed(model, policyModel, rc.authCtx.AllowedModels, rc.authCtx.DeniedModels) {
 		_ = s.db.InsertAuditEvent(r.Context(), store.AuthEvent{ID: newID("ae"), EventType: "model_denied", APIKeyID: rc.authCtx.APIKeyID, TeamID: rc.authCtx.TeamID, IP: clientIP(r), UserAgent: r.UserAgent(), Detail: model, CreatedAt: time.Now().UTC()})
 		writeOpenAIError(w, http.StatusForbidden, "model is not allowed by auth policy", "permission_error", "model_denied")
 		return false
 	}
 
-	policy := mcpDiscoveryPolicyForModel(model)
+	policy := mcpDiscoveryPolicyForModel(policyModel)
 	if strings.EqualFold(policy.Mode, "all_allowed") && rc.authCtx != nil && rc.authCtx.Role != "admin" && rc.authCtx.Role != "super_admin" {
 		writeOpenAIError(w, http.StatusForbidden, "vibe/all-mcp is restricted to admin roles", "permission_error", "mcp_all_admin_required")
 		return false
@@ -119,7 +120,7 @@ func (rc *requestPipeline) stepMCPDiscovery() bool {
 }
 
 func isMCPDiscoveryModel(model string) bool {
-	switch strings.ToLower(strings.TrimSpace(model)) {
+	switch canonicalMCPDiscoveryModel(model) {
 	case "vibe/grounded", "vibe/all-mcp", "vibe/research", "vibe/compliance", "vibe/policy", "vibe/legal":
 		return true
 	default:
@@ -127,20 +128,55 @@ func isMCPDiscoveryModel(model string) bool {
 	}
 }
 
-func mcpDiscoveryPolicyForModel(model string) MCPDiscoveryPolicy {
+func canonicalMCPDiscoveryModel(model string) string {
 	normalized := strings.ToLower(strings.TrimSpace(model))
+	switch normalized {
+	case "vibe/all_mcp":
+		return "vibe/all-mcp"
+	default:
+		return normalized
+	}
+}
+
+func canonicalMCPDiscoveryPattern(pattern string) string {
+	return strings.ReplaceAll(strings.ToLower(strings.TrimSpace(pattern)), "all_mcp", "all-mcp")
+}
+
+func mcpAuthModelAllowed(requested, canonical string, allowed, denied []string) bool {
+	requested = strings.ToLower(strings.TrimSpace(requested))
+	canonical = canonicalMCPDiscoveryModel(canonical)
+	for _, pattern := range denied {
+		p := canonicalMCPDiscoveryPattern(pattern)
+		if matchGlob(p, requested) || matchGlob(p, canonical) {
+			return false
+		}
+	}
+	if len(allowed) == 0 {
+		return true
+	}
+	for _, pattern := range allowed {
+		p := canonicalMCPDiscoveryPattern(pattern)
+		if matchGlob(p, requested) || matchGlob(p, canonical) {
+			return true
+		}
+	}
+	return false
+}
+
+func mcpDiscoveryPolicyForModel(model string) MCPDiscoveryPolicy {
+	normalized := canonicalMCPDiscoveryModel(model)
 	switch normalized {
 	case "vibe/all-mcp":
 		return MCPDiscoveryPolicy{Model: normalized, Mode: "all_allowed", MaxMCPs: 20, Parallelism: 5, TimeoutMillis: 8000, MinSelectorScore: 0, MinEvidenceScore: 0.70}
 	case "vibe/grounded":
-		// Grounded casts a wide net: a low (not zero) selector bar drops only MCPs with no
-		// lexical relevance at all, while the agentic LLM + evidence-score gate handle
-		// precision. This is what fixes the "no candidates" case on ordinary queries.
-		return MCPDiscoveryPolicy{Model: normalized, Mode: "selective", MaxMCPs: 3, Parallelism: 3, TimeoutMillis: 7000, MinSelectorScore: 0.10, MinEvidenceScore: 0.60}
+		// Grounded casts a wide net. In the agentic path the selector only ranks candidates
+		// and the backing LLM decides which MCP tools to call. MinSelectorScore is kept for
+		// static fallback, where broad blind fan-out would be noisy.
+		return MCPDiscoveryPolicy{Model: normalized, Mode: "selective", MaxMCPs: 8, Parallelism: 3, TimeoutMillis: 7000, MinSelectorScore: 0.10, MinEvidenceScore: 0.60}
 	case "vibe/research":
-		// Research sweeps multiple MCPs; keep a low (not zero) selector bar so clearly
-		// irrelevant MCPs are skipped while still passing most registered MCPs.
-		return MCPDiscoveryPolicy{Model: normalized, Mode: "selective", MaxMCPs: 5, Parallelism: 4, TimeoutMillis: 7000, MinSelectorScore: 0.10, MinEvidenceScore: 0.65}
+		// Research sweeps multiple MCPs; in agentic mode the selector ranks but does not
+		// exclude candidates. Static fallback still uses MinSelectorScore.
+		return MCPDiscoveryPolicy{Model: normalized, Mode: "selective", MaxMCPs: 10, Parallelism: 4, TimeoutMillis: 7000, MinSelectorScore: 0.10, MinEvidenceScore: 0.65}
 	case "vibe/policy", "vibe/legal", "vibe/compliance":
 		return MCPDiscoveryPolicy{Model: normalized, Mode: "domain_filtered", MaxMCPs: 5, Parallelism: 3, TimeoutMillis: 6000, MinSelectorScore: 0.60, MinEvidenceScore: 0.75, RequireApproval: normalized == "vibe/compliance"}
 	default:
@@ -156,7 +192,9 @@ func (s *Server) handleMCPDiscoveryChat(w http.ResponseWriter, r *http.Request, 
 	meta.Request.RouteReason = "mcp_discovery"
 	meta.Request.RouteDetail = policy.Mode
 
-	candidates, diag, err := s.selectMCPCandidates(r.Context(), query, policy, authCtx)
+	backingModel := s.mcpAgenticBackingModel(r.Context(), r, policy, authCtx)
+	selectorGate := backingModel == ""
+	candidates, diag, err := s.selectMCPCandidates(r.Context(), query, policy, authCtx, selectorGate)
 	if err != nil {
 		writeOpenAIError(w, http.StatusBadGateway, "mcp discovery failed: "+err.Error(), "mcp_error", "mcp_discovery_failed")
 		return
@@ -178,43 +216,60 @@ func (s *Server) handleMCPDiscoveryChat(w http.ResponseWriter, r *http.Request, 
 	// Agentic tool-calling path: hand the selected upstreams' MCP tools to a backing LLM
 	// and let it call them, read the results, and synthesize a grounded answer (티키타카).
 	// Falls back to the static evidence path when no backing model is resolvable.
-	if len(candidates) > 0 {
-		if model := s.mcpAgenticBackingModel(r.Context(), r, policy, authCtx); model != "" {
-			ts := s.buildMCPAgentToolset(r.Context(), candidates)
-			if len(ts.tools) > 0 {
-				messages := extractChatMessagesRaw(body)
-				if len(messages) == 0 {
-					messages = []any{map[string]any{"role": "user", "content": query}}
-				}
-				stream, _ := jsonMap(body)["stream"].(bool)
-				if stream {
-					w.Header().Set("Content-Type", "text/event-stream")
-					w.Header().Set("Cache-Control", "no-cache")
-					w.Header().Set("Connection", "keep-alive")
-					w.Header().Set("X-Accel-Buffering", "no")
-				}
-				w.Header().Set("X-MCP-Agentic", "true")
-				w.Header().Set("X-MCP-Backing-Model", model)
-				outcome := s.runMCPAgenticChat(w, r, model, messages, ts, policy, apiKeyID, authCtx, stream)
-				// Streaming has already committed the response; non-streaming with a real
-				// answer also commits. Only a non-streaming failure with no content falls
-				// through to the static evidence renderer below.
-				if stream || (outcome.Content != "" && outcome.Err == nil) {
-					filtered := make([]MCPEvidence, 0, len(outcome.Evidences))
-					for _, ev := range outcome.Evidences {
-						if ev.Error == "" && ev.EvidenceScore >= policy.MinEvidenceScore {
-							filtered = append(filtered, ev)
-						}
+	if len(candidates) > 0 && backingModel != "" {
+		ts := s.buildMCPAgentToolset(r.Context(), candidates)
+		if len(ts.tools) > 0 {
+			messages := extractChatMessagesRaw(body)
+			if len(messages) == 0 {
+				messages = []any{map[string]any{"role": "user", "content": query}}
+			}
+			stream, _ := jsonMap(body)["stream"].(bool)
+			if stream {
+				w.Header().Set("Content-Type", "text/event-stream")
+				w.Header().Set("Cache-Control", "no-cache")
+				w.Header().Set("Connection", "keep-alive")
+				w.Header().Set("X-Accel-Buffering", "no")
+			}
+			w.Header().Set("X-MCP-Agentic", "true")
+			w.Header().Set("X-MCP-Backing-Model", backingModel)
+			outcome := s.runMCPAgenticChat(w, r, backingModel, messages, ts, policy, apiKeyID, authCtx, stream)
+			// Streaming has already committed the response; non-streaming with a real
+			// answer also commits. Only a non-streaming failure with no content falls
+			// through to the static evidence renderer below.
+			if stream || (outcome.Content != "" && outcome.Err == nil) {
+				filtered := make([]MCPEvidence, 0, len(outcome.Evidences))
+				for _, ev := range outcome.Evidences {
+					if ev.Error == "" && ev.EvidenceScore >= policy.MinEvidenceScore {
+						filtered = append(filtered, ev)
 					}
-					usage := agenticUsageRecord(outcome, meta, len(outcome.Content))
-					s.finishMCPDiscovery(r, meta, start, query, policy, candidates, outcome.Evidences, filtered, outcome.Content, usage, apiKeyID, authCtx)
-					if !stream {
-						w.Header().Set("X-MCP-Evidence", strconv.Itoa(len(filtered)))
-						w.Header().Set("X-MCP-Grounded", strconv.FormatBool(len(filtered) > 0))
-						writeMCPDiscoveryCompletion(w, policy.Model, outcome.Content, filtered)
-					}
-					return
 				}
+				usage := agenticUsageRecord(outcome, meta, len(outcome.Content))
+				s.finishMCPDiscovery(r, meta, start, query, policy, candidates, outcome.Evidences, filtered, outcome.Content, usage, apiKeyID, authCtx)
+				if !stream {
+					w.Header().Set("X-MCP-Evidence", strconv.Itoa(len(filtered)))
+					w.Header().Set("X-MCP-Grounded", strconv.FormatBool(len(filtered) > 0))
+					writeMCPDiscoveryCompletion(w, policy.Model, outcome.Content, filtered)
+				}
+				return
+			}
+		}
+	}
+
+	if !selectorGate {
+		staticCandidates, staticDiag, staticErr := s.selectMCPCandidates(r.Context(), query, policy, authCtx, true)
+		if staticErr == nil {
+			candidates = staticCandidates
+			diag = staticDiag
+			w.Header().Set("X-MCP-Candidates", strconv.Itoa(len(candidates)))
+			w.Header().Set("X-MCP-Checked", strconv.Itoa(diag.TotalChecked))
+			if diag.NoToolsInSnap > 0 {
+				w.Header().Set("X-MCP-No-Tools", strconv.Itoa(diag.NoToolsInSnap))
+			}
+			if diag.ScoreFiltered > 0 {
+				w.Header().Set("X-MCP-Score-Filtered", strconv.Itoa(diag.ScoreFiltered))
+			}
+			if diag.OtherFiltered > 0 {
+				w.Header().Set("X-MCP-Other-Filtered", strconv.Itoa(diag.OtherFiltered))
 			}
 		}
 	}
@@ -458,7 +513,7 @@ func shouldReviewDomainDecision(decision store.DomainRoutingDecision, candidates
 	return false
 }
 
-func (s *Server) selectMCPCandidates(ctx context.Context, query string, policy MCPDiscoveryPolicy, authCtx *store.AuthContext) ([]MCPCandidate, mcpSelectionDiag, error) {
+func (s *Server) selectMCPCandidates(ctx context.Context, query string, policy MCPDiscoveryPolicy, authCtx *store.AuthContext, selectorGate bool) ([]MCPCandidate, mcpSelectionDiag, error) {
 	var diag mcpSelectionDiag
 	upstreams, err := s.db.ActiveMCPUpstreams(ctx)
 	if err != nil {
@@ -510,12 +565,15 @@ func (s *Server) selectMCPCandidates(ctx context.Context, query string, policy M
 			continue
 		}
 		selector := scoreMCPRelevance(query, up, meta, tool)
-		if !strings.EqualFold(policy.Mode, "all_allowed") && selector < policy.MinSelectorScore {
+		if selectorGate && !strings.EqualFold(policy.Mode, "all_allowed") && selector < policy.MinSelectorScore {
 			diag.ScoreFiltered++
 			continue
 		}
 		health := mcpHealthScoreFromSnapshot(snap, up)
-		final := selector*0.8 + health*0.2
+		// Selector score is a ranking boost, not an agentic-path gate. The LLM receives
+		// the resulting candidate toolset and decides which MCP to call. In static
+		// fallback mode selectorGate remains true above to avoid broad blind fan-out.
+		final := 0.5 + selector*0.35 + health*0.15
 		candidates = append(candidates, MCPCandidate{
 			UpstreamID:       up.ID,
 			UpstreamName:     up.Name,
@@ -680,7 +738,7 @@ func renderMCPDiscoveryAnswer(policy MCPDiscoveryPolicy, candidates []MCPCandida
 				}
 			}
 			if diag.ScoreFiltered > 0 {
-				b.WriteString(fmt.Sprintf("• 관련성 점수 미달 %d개 (MinSelectorScore=%.2f) — MCP metadata(description/domains)와 쿼리 키워드가 겹치지 않습니다.\n", diag.ScoreFiltered, policy.MinSelectorScore))
+				b.WriteString(fmt.Sprintf("• 관련성 점수 미달 %d개 (MinSelectorScore=%.2f) — 백킹 LLM을 사용할 수 없는 정적 fallback에서만 탈락합니다. agentic 경로에서는 selector가 후보 정렬 가중치로만 쓰입니다.\n", diag.ScoreFiltered, policy.MinSelectorScore))
 			}
 			if diag.OtherFiltered > 0 {
 				b.WriteString(fmt.Sprintf("• 모델/위험도/정책 필터 제외 %d개 — allowed_models, risk_level, MCP 정책 allowlist를 확인해 주세요.\n", diag.OtherFiltered))
@@ -792,9 +850,9 @@ func mcpModelAllowed(model string, allowed []string) bool {
 	if len(allowed) == 0 {
 		return true
 	}
-	model = strings.ToLower(strings.TrimSpace(model))
+	model = canonicalMCPDiscoveryModel(model)
 	for _, pattern := range allowed {
-		if wildcardMatch(strings.ToLower(strings.TrimSpace(pattern)), model) {
+		if wildcardMatch(canonicalMCPDiscoveryPattern(pattern), model) {
 			return true
 		}
 	}

@@ -107,21 +107,28 @@ func TestMCPDiscoveryModelRoutesOnlyRelevantGroundedCandidates(t *testing.T) {
 }
 
 func TestMCPDiscoveryPolicyHelpers(t *testing.T) {
-	if !isMCPDiscoveryModel("vibe/grounded") || !isMCPDiscoveryModel("vibe/all-mcp") || isMCPDiscoveryModel("vibe/auto") {
+	if !isMCPDiscoveryModel("vibe/grounded") || !isMCPDiscoveryModel("vibe/all-mcp") || !isMCPDiscoveryModel("vibe/all_mcp") || isMCPDiscoveryModel("vibe/auto") {
 		t.Fatal("MCP discovery model detection mismatch")
 	}
 	grounded := mcpDiscoveryPolicyForModel("vibe/grounded")
-	// grounded is intentionally permissive on selector score (the agentic LLM + evidence
-	// gate handle precision); it must still drop zero-relevance MCPs (selector > 0).
-	if grounded.Mode != "selective" || grounded.MaxMCPs != 3 || grounded.MinSelectorScore <= 0 || grounded.MinSelectorScore > 0.2 {
+	// grounded is intentionally broad: agentic mode lets the LLM pick tools from a wider
+	// candidate set while static fallback still uses MinSelectorScore as a guard.
+	if grounded.Mode != "selective" || grounded.MaxMCPs < 8 || grounded.MinSelectorScore <= 0 || grounded.MinSelectorScore > 0.2 {
 		t.Fatalf("grounded policy mismatch: %+v", grounded)
 	}
 	all := mcpDiscoveryPolicyForModel("vibe/all-mcp")
 	if all.Mode != "all_allowed" || all.MaxMCPs < grounded.MaxMCPs {
 		t.Fatalf("all-mcp policy mismatch: %+v", all)
 	}
-	if !mcpModelAllowed("vibe/grounded", []string{"vibe/*"}) || mcpModelAllowed("vibe/legal", []string{"vibe/policy"}) {
+	allAlias := mcpDiscoveryPolicyForModel("vibe/all_mcp")
+	if allAlias.Model != "vibe/all-mcp" || allAlias.Mode != "all_allowed" {
+		t.Fatalf("all_mcp alias policy mismatch: %+v", allAlias)
+	}
+	if !mcpModelAllowed("vibe/grounded", []string{"vibe/*"}) || !mcpModelAllowed("vibe/all_mcp", []string{"vibe/all-mcp"}) || mcpModelAllowed("vibe/legal", []string{"vibe/policy"}) {
 		t.Fatal("model allow matcher mismatch")
+	}
+	if !mcpAuthModelAllowed("vibe/all_mcp", "vibe/all-mcp", []string{"vibe/all-mcp"}, nil) || mcpAuthModelAllowed("vibe/all_mcp", "vibe/all-mcp", nil, []string{"vibe/all-mcp"}) {
+		t.Fatal("MCP discovery alias auth matcher mismatch")
 	}
 	if !mcpDomainMatches("vibe/policy", []string{"policy"}, "vacation rules") || mcpDomainMatches("vibe/legal", []string{"research"}, "contract") {
 		t.Fatal("domain matcher mismatch")
@@ -211,6 +218,18 @@ func TestMCPDiscoveryAgenticToolCallingLoop(t *testing.T) {
 		t.Fatalf("provider upsert failed: %d %s", provResp.StatusCode, body)
 	}
 	provResp.Body.Close()
+	mcpCfg := s.mcpConf()
+	mcpCfg.AgenticModel = "qwen-plus"
+	s.mcpRuntime.Store(&mcpCfg)
+	provResp = postJSON(t, proxy.URL+"/admin/providers", "", map[string]any{
+		"name": "qwen", "base_url": llm.URL, "api_key": "test-key",
+		"timeout_ms": 5000, "enabled": true, "model_patterns": "qwen-plus",
+	})
+	if provResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(provResp.Body)
+		t.Fatalf("qwen provider upsert failed: %d %s", provResp.StatusCode, body)
+	}
+	provResp.Body.Close()
 	if err := db.UpsertMCPUpstream(t.Context(), store.MCPUpstream{
 		ID: "kb", Name: "Knowledge MCP", URL: mcpUpstream.URL, Enabled: true,
 		Metadata: store.MCPUpstreamMetadata{
@@ -235,7 +254,7 @@ func TestMCPDiscoveryAgenticToolCallingLoop(t *testing.T) {
 		body, _ := io.ReadAll(resp.Body)
 		t.Fatalf("agentic grounded status=%d body=%s", resp.StatusCode, body)
 	}
-	if resp.Header.Get("X-MCP-Agentic") != "true" || resp.Header.Get("X-MCP-Backing-Model") == "" {
+	if resp.Header.Get("X-MCP-Agentic") != "true" || resp.Header.Get("X-MCP-Backing-Model") != "qwen-plus" {
 		t.Fatalf("expected agentic headers, got agentic=%s backing=%s", resp.Header.Get("X-MCP-Agentic"), resp.Header.Get("X-MCP-Backing-Model"))
 	}
 	var out struct {
@@ -256,6 +275,86 @@ func TestMCPDiscoveryAgenticToolCallingLoop(t *testing.T) {
 	}
 	if llmCalls.Load() < 2 {
 		t.Fatalf("agentic loop should make at least 2 LLM turns, got %d", llmCalls.Load())
+	}
+}
+
+func TestMCPDiscoveryAgenticSelectorIsRankingBoostNotGate(t *testing.T) {
+	var firstCalls atomic.Int64
+	var secondCalls atomic.Int64
+	firstMCP := fakeDiscoveryMCP(t, "first evidence", &firstCalls)
+	defer firstMCP.Close()
+	secondMCP := fakeDiscoveryMCP(t, "second evidence", &secondCalls)
+	defer secondMCP.Close()
+
+	llm := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"choices":[{"message":{"role":"assistant","content":"후보 MCP를 확인했습니다."},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":4,"total_tokens":14}}`)
+	}))
+	defer llm.Close()
+
+	s, db := newKnowledgeServer(t)
+	proxy := httptest.NewServer(s.Routes())
+	defer proxy.Close()
+	mcpCfg := s.mcpConf()
+	mcpCfg.AgenticModel = "qwen-plus"
+	s.mcpRuntime.Store(&mcpCfg)
+	provResp := postJSON(t, proxy.URL+"/admin/providers", "", map[string]any{
+		"name": "qwen", "base_url": llm.URL, "api_key": "test-key",
+		"timeout_ms": 5000, "enabled": true, "model_patterns": "qwen-plus",
+	})
+	if provResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(provResp.Body)
+		t.Fatalf("qwen provider upsert failed: %d %s", provResp.StatusCode, body)
+	}
+	provResp.Body.Close()
+
+	for _, up := range []store.MCPUpstream{
+		{
+			ID: "alpha", Name: "alpha", URL: firstMCP.URL, Enabled: true,
+			Metadata: store.MCPUpstreamMetadata{
+				Description:   "alpha invoices payments",
+				RiskLevel:     "low",
+				AllowedModels: []string{"vibe/grounded"},
+				DefaultTool:   "search",
+			},
+		},
+		{
+			ID: "beta", Name: "beta", URL: secondMCP.URL, Enabled: true,
+			Metadata: store.MCPUpstreamMetadata{
+				Description:   "beta calendar rooms",
+				RiskLevel:     "low",
+				AllowedModels: []string{"vibe/grounded"},
+				DefaultTool:   "search",
+			},
+		},
+	} {
+		if err := db.UpsertMCPUpstream(t.Context(), up); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	resp := postJSON(t, proxy.URL+"/v1/chat/completions", "", map[string]any{
+		"model": "vibe/grounded",
+		"messages": []map[string]string{{
+			"role": "user", "content": "zzzz unmatched query tokens",
+		}},
+	})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("agentic grounded status=%d body=%s", resp.StatusCode, body)
+	}
+	if resp.Header.Get("X-MCP-Agentic") != "true" || resp.Header.Get("X-MCP-Backing-Model") != "qwen-plus" {
+		t.Fatalf("expected configured agentic model, got agentic=%s backing=%s", resp.Header.Get("X-MCP-Agentic"), resp.Header.Get("X-MCP-Backing-Model"))
+	}
+	if resp.Header.Get("X-MCP-Candidates") != "2" {
+		t.Fatalf("low selector MCPs should remain candidates for the LLM, got %s", resp.Header.Get("X-MCP-Candidates"))
+	}
+	if got := resp.Header.Get("X-MCP-Score-Filtered"); got != "" {
+		t.Fatalf("agentic selector should rank, not filter; got X-MCP-Score-Filtered=%s", got)
+	}
+	if firstCalls.Load() != 0 || secondCalls.Load() != 0 {
+		t.Fatalf("backing LLM did not request tools, so MCP calls should be 0; got first=%d second=%d", firstCalls.Load(), secondCalls.Load())
 	}
 }
 
