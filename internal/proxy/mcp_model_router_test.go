@@ -279,6 +279,68 @@ func TestMCPDiscoveryAgenticToolCallingLoop(t *testing.T) {
 	}
 }
 
+func TestMCPDiscoveryAgenticStreamingEmitsStats(t *testing.T) {
+	var mcpCalls atomic.Int64
+	mcpUpstream := fakeDiscoveryMCP(t, "vacation evidence", &mcpCalls)
+	defer mcpUpstream.Close()
+
+	var llmCalls atomic.Int64
+	llm := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		if strings.Contains(string(body), "\"role\":\"tool\"") || llmCalls.Load() > 0 {
+			llmCalls.Add(1)
+			_, _ = io.WriteString(w, `{"choices":[{"message":{"role":"assistant","content":"근거 기반 최종 답변."},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":3,"total_tokens":8}}`)
+			return
+		}
+		llmCalls.Add(1)
+		_, _ = io.WriteString(w, `{"choices":[{"message":{"role":"assistant","content":null,"tool_calls":[{"id":"c1","type":"function","function":{"name":"kb__search","arguments":"{\"query\":\"vacation\"}"}}]},"finish_reason":"tool_calls"}]}`)
+	}))
+	defer llm.Close()
+
+	s, db := newKnowledgeServer(t)
+	proxy := httptest.NewServer(s.Routes())
+	defer proxy.Close()
+
+	provResp := postJSON(t, proxy.URL+"/admin/providers", "", map[string]any{
+		"name": "openai", "base_url": llm.URL, "api_key": "test-key",
+		"timeout_ms": 5000, "enabled": true, "model_patterns": "gpt-*,o3",
+	})
+	if provResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(provResp.Body)
+		t.Fatalf("provider upsert failed: %d %s", provResp.StatusCode, body)
+	}
+	provResp.Body.Close()
+	if err := db.UpsertMCPUpstream(t.Context(), store.MCPUpstream{
+		ID: "kb", Name: "Knowledge MCP", URL: mcpUpstream.URL, Enabled: true,
+		Metadata: store.MCPUpstreamMetadata{
+			Description: "company vacation policy hr rules", Domains: []string{"policy", "hr"},
+			RiskLevel: "low", AllowedModels: []string{"vibe/grounded"}, DefaultTool: "search",
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	resp := postJSON(t, proxy.URL+"/v1/chat/completions", "", map[string]any{
+		"model":    "vibe/grounded",
+		"stream":   true,
+		"messages": []map[string]string{{"role": "user", "content": "vacation policy?"}},
+	})
+	defer resp.Body.Close()
+	if ct := resp.Header.Get("Content-Type"); ct != "text/event-stream" {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected SSE, got ct=%q body=%s", ct, body)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	got := string(body)
+	// Reasoning narration (tool call), the final answer content, and the structured stats.
+	for _, want := range []string{"reasoning_content", "kb__search", "근거 기반", "x_mcp", "\"tool_calls\":1"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("streamed body missing %q; got: %s", want, got)
+		}
+	}
+}
+
 func TestMCPAgenticForcesFirstToolAndCachesRepeats(t *testing.T) {
 	var mcpCalls atomic.Int64
 	mcpUpstream := fakeDiscoveryMCP(t, "vacation evidence", &mcpCalls)

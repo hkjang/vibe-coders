@@ -4983,7 +4983,7 @@ const adminHTML = `<!doctype html>
         bearer_token: sess.config.bearer_token, provider: sess.config.provider,
         no_route: sess.config.no_route, target_id: sess.config.target_id };
       const started = (typeof performance !== 'undefined' ? performance.now() : Date.now());
-      let answer = '', reasoning = '', finish = '', usage = null, raw = '';
+      let answer = '', reasoning = '', finish = '', usage = null, raw = '', mcpStats = null;
       let renderQueued = false;
       const ansEl = () => document.getElementById('ct-answer-' + turn);
       const reasonEl = () => document.getElementById('ct-reasoning-' + turn);
@@ -5061,15 +5061,16 @@ const adminHTML = `<!doctype html>
               if (c.finish_reason) finish = c.finish_reason;
             }
             if (chunk.usage) usage = chunk.usage;
+            if (chunk.x_mcp) mcpStats = chunk.x_mcp;
             queuePaint();
           }
         }
       } catch (err) {
-        finalizeChatStream({ res, payload, started, error: err.message, finish, usage, raw, previewPromise, turn, answer, sess });
+        finalizeChatStream({ res, payload, started, error: err.message, finish, usage, raw, previewPromise, turn, answer, sess, mcpStats });
         return;
       }
       paint();
-      finalizeChatStream({ res, payload, started, finish, usage, raw, previewPromise, turn, answer, sess });
+      finalizeChatStream({ res, payload, started, finish, usage, raw, previewPromise, turn, answer, sess, mcpStats });
     }
     async function finalizeChatStream(s) {
       const turn = s.turn || 0;
@@ -5109,6 +5110,7 @@ const adminHTML = `<!doctype html>
           headers: headersObj,
           preview: preview,
           usage: s.usage,
+          mcp: s.mcpStats,
           raw: s.raw || '',
           error: s.error,
         });
@@ -5141,6 +5143,22 @@ const adminHTML = `<!doctype html>
           row('Completion', fmt(u.completion_tokens || 0)) +
           (u.completion_tokens_details && u.completion_tokens_details.reasoning_tokens ? row('추론', fmt(u.completion_tokens_details.reasoning_tokens)) : '') +
           row('Total', fmt(u.total_tokens || 0)) +
+        '</div>';
+      }
+      // Agentic MCP loop stats: prefer the structured x_mcp chunk (streaming), fall back to
+      // the X-MCP-* response headers (non-streaming).
+      const agentic = info.mcp || (headers['X-Mcp-Agentic'] || headers['X-MCP-Agentic'] ? {
+        steps: headers['X-Mcp-Steps'] || headers['X-MCP-Steps'],
+        tool_calls: headers['X-Mcp-Tool-Calls'] || headers['X-MCP-Tool-Calls'],
+        evidence: headers['X-Mcp-Evidence'] || headers['X-MCP-Evidence'],
+        backing_model: headers['X-Mcp-Backing-Model'] || headers['X-MCP-Backing-Model'],
+      } : null);
+      if (agentic) {
+        html += '<h4>에이전틱 MCP</h4><div class="kv">' +
+          (agentic.backing_model ? row('백킹 모델', escapeHTML(String(agentic.backing_model)) + (agentic.provider ? ' · ' + escapeHTML(String(agentic.provider)) : '')) : '') +
+          row('턴', fmt(Number(agentic.steps) || 0)) +
+          row('도구 호출', fmt(Number(agentic.tool_calls) || 0)) +
+          row('근거 수', fmt(Number(agentic.evidence) || 0)) +
         '</div>';
       }
       if (info.preview) {

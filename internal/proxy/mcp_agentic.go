@@ -356,7 +356,19 @@ func (s *Server) runMCPAgenticChat(w http.ResponseWriter, r *http.Request, model
 		for _, slice := range chunkForTyping(out.Content, 24) {
 			emitContent(slice)
 		}
-		sseAgentFinal(w, flusher, streamID, policy.Model, out.Usage)
+		// Structured agentic stats so the debug rail can render them (the step/tool counts
+		// can't be response headers on an already-streaming response).
+		grounded := 0
+		for _, ev := range out.Evidences {
+			if ev.Error == "" && ev.SourceCount > 0 {
+				grounded++
+			}
+		}
+		stats := map[string]any{
+			"steps": out.Steps, "tool_calls": out.ToolCalls,
+			"evidence": grounded, "backing_model": model, "provider": out.Provider,
+		}
+		sseAgentFinal(w, flusher, streamID, policy.Model, out.Usage, stats)
 	}
 	return out
 }
@@ -576,8 +588,9 @@ func sseAgentChunk(w io.Writer, fl http.Flusher, id, model string, delta map[str
 	}
 }
 
-// sseAgentFinal writes the closing finish chunk, the usage chunk, and [DONE].
-func sseAgentFinal(w io.Writer, fl http.Flusher, id, model string, usage mcpAgentUsage) {
+// sseAgentFinal writes the closing finish chunk, the usage chunk (carrying optional
+// agentic stats under "x_mcp" for the debug rail), and [DONE].
+func sseAgentFinal(w io.Writer, fl http.Flusher, id, model string, usage mcpAgentUsage, stats map[string]any) {
 	sseAgentChunk(w, fl, id, model, map[string]any{}, "stop")
 	usageChunk := map[string]any{
 		"id": id, "object": "chat.completion.chunk", "created": time.Now().Unix(),
@@ -586,6 +599,9 @@ func sseAgentFinal(w io.Writer, fl http.Flusher, id, model string, usage mcpAgen
 			"prompt_tokens": usage.PromptTokens, "completion_tokens": usage.CompletionTokens,
 			"total_tokens": usage.TotalTokens,
 		},
+	}
+	if len(stats) > 0 {
+		usageChunk["x_mcp"] = stats
 	}
 	if b, err := json.Marshal(usageChunk); err == nil {
 		_, _ = io.WriteString(w, "data: "+string(b)+"\n\n")
