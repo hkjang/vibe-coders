@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -275,6 +276,89 @@ func TestMCPDiscoveryAgenticToolCallingLoop(t *testing.T) {
 	}
 	if llmCalls.Load() < 2 {
 		t.Fatalf("agentic loop should make at least 2 LLM turns, got %d", llmCalls.Load())
+	}
+}
+
+func TestMCPAgenticForcesFirstToolAndCachesRepeats(t *testing.T) {
+	var mcpCalls atomic.Int64
+	mcpUpstream := fakeDiscoveryMCP(t, "vacation evidence", &mcpCalls)
+	defer mcpUpstream.Close()
+
+	// Record the tool_choice each turn sends. Turn 1 + turn 2 both issue the SAME tool call
+	// (to exercise the result cache); turn 3 returns the final answer.
+	var toolChoices []string
+	var mu sync.Mutex
+	var turn atomic.Int64
+	llm := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var parsed struct {
+			ToolChoice any `json:"tool_choice"`
+		}
+		_ = json.Unmarshal(body, &parsed)
+		mu.Lock()
+		toolChoices = append(toolChoices, toString(parsed.ToolChoice))
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		n := turn.Add(1)
+		switch n {
+		case 1, 2:
+			_, _ = io.WriteString(w, `{"choices":[{"message":{"role":"assistant","content":null,"tool_calls":[{"id":"call_`+toString(n)+`","type":"function","function":{"name":"kb__search","arguments":"{\"query\":\"vacation\"}"}}]},"finish_reason":"tool_calls"}]}`)
+		default:
+			_, _ = io.WriteString(w, `{"choices":[{"message":{"role":"assistant","content":"근거 기반 최종 답변."},"finish_reason":"stop"}]}`)
+		}
+	}))
+	defer llm.Close()
+
+	s, db := newKnowledgeServer(t)
+	proxy := httptest.NewServer(s.Routes())
+	defer proxy.Close()
+
+	provResp := postJSON(t, proxy.URL+"/admin/providers", "", map[string]any{
+		"name": "openai", "base_url": llm.URL, "api_key": "test-key",
+		"timeout_ms": 5000, "enabled": true, "model_patterns": "gpt-*,o3",
+	})
+	if provResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(provResp.Body)
+		t.Fatalf("provider upsert failed: %d %s", provResp.StatusCode, body)
+	}
+	provResp.Body.Close()
+
+	// Enable force-tool-first via the runtime config overlay.
+	mcpCfg := s.mcpConf()
+	mcpCfg.ForceToolFirst = true
+	mcpCfg.MaxAgentSteps = 8
+	mcpCfg.MaxTokens = 2048
+	s.mcpRuntime.Store(&mcpCfg)
+
+	if err := db.UpsertMCPUpstream(t.Context(), store.MCPUpstream{
+		ID: "kb", Name: "Knowledge MCP", URL: mcpUpstream.URL, Enabled: true,
+		Metadata: store.MCPUpstreamMetadata{
+			Description: "company vacation policy hr rules", Domains: []string{"policy", "hr"},
+			RiskLevel: "low", AllowedModels: []string{"vibe/grounded"}, DefaultTool: "search",
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	resp := postJSON(t, proxy.URL+"/v1/chat/completions", "", map[string]any{
+		"model":    "vibe/grounded",
+		"messages": []map[string]string{{"role": "user", "content": "vacation policy?"}},
+	})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, body)
+	}
+	_, _ = io.ReadAll(resp.Body)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(toolChoices) == 0 || toolChoices[0] != "required" {
+		t.Fatalf("first turn must force tool use (tool_choice=required), got %v", toolChoices)
+	}
+	// Two identical tool calls were issued but the cache should collapse them to one MCP hit.
+	if mcpCalls.Load() != 1 {
+		t.Fatalf("repeated identical tool call should be cached to 1 MCP hit, got %d", mcpCalls.Load())
 	}
 }
 

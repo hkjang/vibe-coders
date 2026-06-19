@@ -200,23 +200,40 @@ func (s *Server) runMCPAgenticChat(w http.ResponseWriter, r *http.Request, model
 	messages = append(messages, map[string]any{"role": "system", "content": mcpAgentSystemPrompt(policy)})
 	messages = append(messages, baseMessages...)
 
-	maxSteps := policy.MaxMCPs + 2
-	if maxSteps < 3 {
-		maxSteps = 3
+	// Step count and per-turn token budget are configurable; the loop runs at most
+	// maxSteps LLM turns (each may issue several tool calls) before forcing a final answer.
+	cfg := s.mcpConf()
+	maxSteps := cfg.MaxAgentSteps
+	if maxSteps <= 0 {
+		maxSteps = 8
 	}
-	if maxSteps > 6 {
-		maxSteps = 6
+	if maxSteps > 16 {
+		maxSteps = 16
 	}
+	maxTokens := cfg.MaxTokens
+	if maxTokens <= 0 {
+		maxTokens = mcpAgentMaxTokens
+	}
+	// toolResultCache short-circuits identical (tool+args) calls the model repeats across
+	// turns: cheaper and helps the loop converge instead of spinning on the same lookup.
+	toolResultCache := map[string]string{}
 	emitReason(fmt.Sprintf("🧭 %d개 MCP 도구를 사용해 근거를 탐색합니다…\n", len(ts.tools)))
 
 	for step := 0; step < maxSteps; step++ {
+		// Force at least one grounding tool call on the first turn (when enabled and tools
+		// exist) so the answer is evidence-backed rather than free-form; "auto" afterwards
+		// lets the model decide when it has enough to finalize.
+		toolChoice := "auto"
+		if step == 0 && cfg.ForceToolFirst && len(ts.tools) > 0 {
+			toolChoice = "required"
+		}
 		body := map[string]any{
 			"messages":    messages,
 			"tools":       ts.tools,
-			"tool_choice": "auto",
-			"max_tokens":  mcpAgentMaxTokens,
+			"tool_choice": toolChoice,
+			"max_tokens":  maxTokens,
 		}
-		raw, provider, err := s.postUpstreamChat(r.Context(), r, model, body)
+		raw, provider, err := s.postUpstreamChatRetry(r.Context(), r, model, body)
 		if provider != "" {
 			out.Provider = provider
 		}
@@ -225,17 +242,29 @@ func (s *Server) runMCPAgenticChat(w http.ResponseWriter, r *http.Request, model
 			emitReason("⚠️ 모델 호출 실패: " + err.Error() + "\n")
 			break
 		}
-		rawMsg, content, toolCalls, _, usage := parseAgentResponse(raw)
+		rawMsg, content, toolCalls, finish, usage := parseAgentResponse(raw)
 		out.Usage.add(usage)
 
 		if len(toolCalls) == 0 {
 			out.Content = strings.TrimSpace(content)
+			// A truncated turn (finish_reason=length) with no usable content shouldn't be
+			// treated as the final answer — surface it so the cause is visible.
+			if out.Content == "" && finish == "length" {
+				emitReason("⚠️ 응답이 max_tokens(" + fmt.Sprint(maxTokens) + ")에서 잘렸습니다. mcp.max_tokens를 늘려보세요.\n")
+			}
 			break
 		}
+		if finish == "length" {
+			emitReason("⚠️ 도구 호출이 max_tokens에서 잘렸을 수 있습니다(인자 불완전 가능). mcp.max_tokens 상향 권장.\n")
+		}
 
-		// Echo the assistant tool-call message verbatim, then run each tool.
+		// Echo the assistant tool-call message so the conversation stays valid: tool result
+		// messages MUST follow an assistant message carrying the matching tool_calls. When the
+		// provider omits a usable raw message, synthesize one from the parsed tool calls.
 		if len(rawMsg) > 0 {
 			messages = append(messages, rawMsg)
+		} else {
+			messages = append(messages, synthAssistantToolCallMsg(toolCalls))
 		}
 		for _, tc := range toolCalls {
 			out.ToolCalls++
@@ -250,6 +279,12 @@ func (s *Server) runMCPAgenticChat(w http.ResponseWriter, r *http.Request, model
 				emitReason("   → 알 수 없는 도구\n")
 				continue
 			}
+			cacheKey := tc.Name + "\x00" + strings.TrimSpace(tc.Args)
+			if cached, hit := toolResultCache[cacheKey]; hit {
+				emitReason("   → (캐시) 동일 호출 재사용\n")
+				messages = append(messages, map[string]any{"role": "tool", "tool_call_id": tc.ID, "content": cached})
+				continue
+			}
 			toolContent, ev := s.execAgentToolCall(r, apiKeyID, authCtx, route, tc.Args)
 			out.Evidences = append(out.Evidences, ev)
 			summary := fmt.Sprintf("   → %s · %d건 · %dms", route.upstreamName, ev.SourceCount, ev.LatencyMS)
@@ -257,6 +292,7 @@ func (s *Server) runMCPAgenticChat(w http.ResponseWriter, r *http.Request, model
 				summary = "   → 오류: " + truncateText(ev.Error, 200)
 			}
 			emitReason(summary + "\n")
+			toolResultCache[cacheKey] = toolContent
 			messages = append(messages, map[string]any{"role": "tool", "tool_call_id": tc.ID, "content": toolContent})
 		}
 	}
@@ -266,7 +302,7 @@ func (s *Server) runMCPAgenticChat(w http.ResponseWriter, r *http.Request, model
 		body := map[string]any{
 			"messages":    messages,
 			"tool_choice": "none",
-			"max_tokens":  mcpAgentMaxTokens,
+			"max_tokens":  maxTokens,
 		}
 		if raw, provider, err := s.postUpstreamChat(r.Context(), r, model, body); err == nil {
 			if provider != "" {
@@ -295,6 +331,24 @@ func (s *Server) runMCPAgenticChat(w http.ResponseWriter, r *http.Request, model
 		sseAgentFinal(w, flusher, streamID, policy.Model, out.Usage)
 	}
 	return out
+}
+
+// synthAssistantToolCallMsg rebuilds an OpenAI assistant message carrying the given tool
+// calls, used when the upstream response's raw message can't be echoed verbatim. Without a
+// preceding assistant tool_calls message, the follow-up tool result messages are rejected.
+func synthAssistantToolCallMsg(toolCalls []mcpAgentToolCall) map[string]any {
+	calls := make([]map[string]any, 0, len(toolCalls))
+	for _, tc := range toolCalls {
+		args := tc.Args
+		if strings.TrimSpace(args) == "" {
+			args = "{}"
+		}
+		calls = append(calls, map[string]any{
+			"id": tc.ID, "type": "function",
+			"function": map[string]any{"name": tc.Name, "arguments": args},
+		})
+	}
+	return map[string]any{"role": "assistant", "content": nil, "tool_calls": calls}
 }
 
 // mcpAgentSystemPrompt builds the grounding directive injected ahead of the user messages.
@@ -403,6 +457,38 @@ func (s *Server) postUpstreamChat(ctx context.Context, r *http.Request, model st
 		return raw, provider.Name, fmt.Errorf("upstream %d: %s", resp.StatusCode, truncateText(strings.TrimSpace(string(raw)), 400))
 	}
 	return raw, provider.Name, nil
+}
+
+// postUpstreamChatRetry wraps postUpstreamChat with a single retry on transient failures
+// (network error or 5xx), which are a common source of intermittent agentic-loop failures.
+// 4xx responses (bad request, auth, rate-limit semantics) are not retried.
+func (s *Server) postUpstreamChatRetry(ctx context.Context, r *http.Request, model string, bodyMap map[string]any) ([]byte, string, error) {
+	raw, provider, err := s.postUpstreamChat(ctx, r, model, bodyMap)
+	if err == nil || ctx.Err() != nil {
+		return raw, provider, err
+	}
+	if !isTransientUpstreamErr(err) {
+		return raw, provider, err
+	}
+	raw2, provider2, err2 := s.postUpstreamChat(ctx, r, model, bodyMap)
+	if provider2 != "" {
+		provider = provider2
+	}
+	return raw2, provider, err2
+}
+
+// isTransientUpstreamErr reports whether an upstream error is worth one retry: transport
+// errors (no status) or 5xx. The error from postUpstreamChat is formatted "upstream <code>: ..."
+// for HTTP responses, so a missing "upstream 4" prefix means transport-level or 5xx.
+func isTransientUpstreamErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "upstream 4") {
+		return false // 4xx — deterministic, don't retry
+	}
+	return true
 }
 
 // parseAgentResponse extracts the first choice's raw message (for verbatim echo), its text

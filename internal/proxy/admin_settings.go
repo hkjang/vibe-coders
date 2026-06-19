@@ -194,6 +194,9 @@ func buildSettingRegistry() []settingDef {
 
 		// ---- MCP (discovery / grounding agentic loop) ----
 		{Key: "mcp.agentic_model", Category: "mcp", Type: stString, envValue: func(c config.Config) string { return c.MCP.AgenticModel }},
+		{Key: "mcp.max_agent_steps", Category: "mcp", Type: stInt, validate: posInt, envValue: func(c config.Config) string { return strconv.Itoa(c.MCP.MaxAgentSteps) }},
+		{Key: "mcp.max_tokens", Category: "mcp", Type: stInt, validate: posInt, envValue: func(c config.Config) string { return strconv.Itoa(c.MCP.MaxTokens) }},
+		{Key: "mcp.force_tool_first", Category: "mcp", Type: stBool, envValue: func(c config.Config) string { return strconv.FormatBool(c.MCP.ForceToolFirst) }},
 
 		// ---- Limits (request guardrails) ----
 		{Key: "limits.max_output_tokens", Category: "limits", Type: stInt, validate: posInt, envValue: func(c config.Config) string { return strconv.Itoa(c.Limits.MaxOutputTokens) }},
@@ -307,7 +310,10 @@ var settingDescriptions = map[string]string{
 	// Skills
 	"skills.enforcement": "Skill 정책(allowed_models/allowed_tools) 적용 모드. off=비활성, warn=위반 시 헤더 경고만(기본), enforce=위반 시 요청 차단(403). 요청은 X-Vibe-Skill 헤더로 Skill을 지정해야 검사됨.",
 	// MCP
-	"mcp.agentic_model": "vibe/grounded·vibe/research·vibe/all-mcp가 MCP 도구 선택/합성에 사용할 백킹 Chat 모델. 비워두면 auto-router가 정책 기반으로 선택. 설정하면 해당 모델을 provider 설정에서 해석해 사용.",
+	"mcp.agentic_model":    "vibe/grounded·vibe/research·vibe/all-mcp가 MCP 도구 선택/합성에 사용할 백킹 Chat 모델. 비워두면 auto-router가 정책 기반으로 선택. 설정하면 해당 모델을 provider 설정에서 해석해 사용.",
+	"mcp.max_agent_steps":  "에이전틱 MCP 루프의 최대 LLM 턴 수(기본 8, 상한 16). 한 턴에 여러 도구를 호출할 수 있으며, 이 수를 넘으면 도구 없이 최종 답변을 강제 생성.",
+	"mcp.max_tokens":       "에이전틱 MCP 루프의 턴당 completion 토큰 예산(기본 2048). 너무 작으면 도구 호출 인자 JSON이나 최종 답변이 잘려 간헐적 실패의 원인이 됨.",
+	"mcp.force_tool_first": "true면 첫 턴에 MCP 도구를 최소 1회 호출하도록 강제(tool_choice=required)해 근거 기반 답변을 보장. false면 모델이 도구 사용 여부를 자유 판단(기본 true).",
 	// Limits
 	"limits.max_output_tokens": "응답 최대 출력 토큰 상한(0=비활성). >0이면 chat 요청의 max_tokens/max_completion_tokens를 이 값으로 클램프(없으면 주입). 런어웨이 생성·비용 폭주 가드.",
 	"limits.max_request_bytes": "chat 요청 본문 최대 바이트(0=비활성). 초과 시 413 payload_too_large로 거부. 비정상적으로 큰 프롬프트·남용 차단.",
@@ -644,6 +650,12 @@ func applyRuntimeSetting(t2s *config.Text2SQLConfig, ch *config.ClickHouseConfig
 		skills.Enforcement = strings.ToLower(val)
 	case "mcp.agentic_model":
 		mcp.AgenticModel = val
+	case "mcp.max_agent_steps":
+		mcp.MaxAgentSteps = atoi()
+	case "mcp.max_tokens":
+		mcp.MaxTokens = atoi()
+	case "mcp.force_tool_first":
+		mcp.ForceToolFirst = atob()
 	case "limits.max_output_tokens":
 		limits.MaxOutputTokens = atoi()
 	case "limits.max_request_bytes":

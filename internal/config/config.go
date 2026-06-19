@@ -43,6 +43,17 @@ type MCPConfig struct {
 	// (same logic as vibe/auto). Set it to pin a specific model (e.g. "claude-sonnet-4",
 	// "gpt-4.1") whose provider is configured.
 	AgenticModel string
+	// MaxAgentSteps caps how many LLM turns (tool-calling rounds) the agentic loop runs
+	// before forcing a final answer. Each turn may issue several tool calls. Default 8.
+	MaxAgentSteps int
+	// MaxTokens is the per-turn completion token budget for the backing model. Too small a
+	// value truncates tool-call argument JSON (causing dropped/garbled tool calls) and final
+	// answers. Default 2048.
+	MaxTokens int
+	// ForceToolFirst, when true, forces the backing model to issue at least one MCP tool
+	// call on the first turn (tool_choice=required) so the answer is actually grounded
+	// instead of free-form from the model's own knowledge. Default true.
+	ForceToolFirst bool
 }
 
 // InsuranceConfig parameterizes the AI Request Insurance view: an SLA-claims ledger
@@ -419,7 +430,10 @@ func Load() (Config, error) {
 			MaxMessages:     intEnv("LIMITS_MAX_MESSAGES", 0),
 		},
 		MCP: MCPConfig{
-			AgenticModel: os.Getenv("MCP_AGENTIC_MODEL"),
+			AgenticModel:   os.Getenv("MCP_AGENTIC_MODEL"),
+			MaxAgentSteps:  intEnv("MCP_MAX_AGENT_STEPS", 8),
+			MaxTokens:      intEnv("MCP_MAX_TOKENS", 2048),
+			ForceToolFirst: boolEnv("MCP_FORCE_TOOL_FIRST", true),
 		},
 	}
 
