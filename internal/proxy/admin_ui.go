@@ -5665,8 +5665,17 @@ const adminHTML = `<!doctype html>
         '</form>' +
         '<div id="mcp-route-explain-result" class="card-body"><span class="muted">Route Map 행의 Explain 버튼을 누르거나 method/name을 입력하세요.</span></div>';
 
+      const agenticFlowPanel =
+        '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:4px 0 12px">' +
+          '<button class="secondary" type="button" onclick="loadMCPAgenticRequests()">최근 MCP 요청 조회</button>' +
+          '<span class="muted" id="mcp-flow-hint" style="font-size:12px">버튼을 눌러 최근 MCP 요청을 불러옵니다. 요청을 선택하면 실행 흐름 그래프가 표시됩니다.</span>' +
+        '</div>' +
+        '<div id="mcp-flow-list" style="margin-bottom:8px"></div>' +
+        '<div id="mcp-flow-graph"></div>';
+
       document.getElementById('view').innerHTML =
         section('MCP 운영 Overview', kpis + filterBar) +
+        section('에이전틱 실행 흐름 — 질문에서 도구 실행까지', agenticFlowPanel) +
         section('MCP 연결 상태 Wizard', wizard) +
         section('MCP Route Explain / Test Console', testConsole) +
         section('MCP Gateway — 업스트림 등록과 연결 진단', upstreamForm + upstreamTable + gatewayHelp) +
@@ -5948,16 +5957,166 @@ const adminHTML = `<!doctype html>
       const nodes = (topology && topology.nodes) || [];
       const edges = (topology && topology.edges) || [];
       if (!nodes.length) return '<div class="empty">토폴로지 데이터 없음</div>';
-      const routeNodes = nodes.filter(n => n.kind === 'tool' || n.kind === 'prompt' || n.kind === 'resource');
+
       const upstreamNodes = nodes.filter(n => n.kind === 'upstream');
-      const edgeRows = edges.slice(0, 80).map(e => '<tr><td>' + escapeHTML(e.from || '') + '</td><td>' + escapeHTML(e.label || '') + '</td><td>' + escapeHTML(e.to || '') + '</td></tr>').join('');
+      const routeNodes   = nodes.filter(n => n.kind === 'tool' || n.kind === 'prompt' || n.kind === 'resource');
+
+      const NW = 140, NH = 34, GAP_Y = 8, GAP_X = 72, PAD = 16, CAP = 40;
+      const C0 = PAD, C1 = PAD + NW + GAP_X, C2 = PAD + 2*(NW + GAP_X);
+      const capped = routeNodes.slice(0, CAP);
+      const rows = Math.max(Math.max(upstreamNodes.length, capped.length), 1);
+      const svgH = rows * (NH + GAP_Y) + PAD * 2 + 26;
+      const svgW = C2 + NW + PAD;
+      const gwY  = (svgH - NH) / 2;
+
+      const nodePos = { __gw__: { x: C0, y: gwY } };
+      upstreamNodes.forEach((n,i) => { nodePos[n.id] = { x: C1, y: PAD+22+i*(NH+GAP_Y) }; });
+      capped.forEach((n,i)        => { nodePos[n.id] = { x: C2, y: PAD+22+i*(NH+GAP_Y) }; });
+
+      const kindFill = { gateway:'#2563eb', upstream:'#7c3aed', tool:'#059669', prompt:'#d97706', resource:'#4f46e5' };
+      function svgNode(id, kind, label) {
+        const p = nodePos[id]; if (!p) return '';
+        const fill = kindFill[kind] || '#6b7280';
+        const hasKind = kind !== 'gateway';
+        return '<rect x="'+p.x+'" y="'+p.y+'" width="'+NW+'" height="'+NH+'" rx="6" fill="'+fill+'"/>' +
+          '<text x="'+(p.x+NW/2)+'" y="'+(p.y+NH/2+(hasKind?-5:4))+'" text-anchor="middle" font-size="11" fill="#fff" font-family="system-ui">'+escapeHTML(label.substring(0,20))+'</text>' +
+          (hasKind ? '<text x="'+(p.x+NW/2)+'" y="'+(p.y+NH/2+9)+'" text-anchor="middle" font-size="8" fill="rgba(255,255,255,0.6)" font-family="system-ui">'+kind+'</text>' : '');
+      }
+      function svgEdge(fromId, toId) {
+        const f = nodePos[fromId], t = nodePos[toId]; if (!f || !t) return '';
+        const x1=f.x+NW, y1=f.y+NH/2, x2=t.x, y2=t.y+NH/2, cx=(x1+x2)/2;
+        return '<path d="M'+x1+','+y1+' C'+cx+','+y1+' '+cx+','+y2+' '+x2+','+y2+'" fill="none" stroke="#94a3b8" stroke-width="1.2" marker-end="url(#topo-arr)" opacity="0.7"/>';
+      }
+
+      const upEdgeByRoute = {};
+      edges.forEach(e => { if (nodePos[e.from] && nodePos[e.to]) upEdgeByRoute[e.to] = e.from; });
+
+      let svgE = '', svgN = '';
+      svgN += svgNode('__gw__', 'gateway', 'Gateway');
+      upstreamNodes.forEach(n => { svgE += svgEdge('__gw__', n.id); svgN += svgNode(n.id, 'upstream', n.label||n.id||''); });
+      capped.forEach((n,i) => {
+        const from = upEdgeByRoute[n.id] || ((upstreamNodes[i % Math.max(upstreamNodes.length,1)]||{}).id || '__gw__');
+        svgE += svgEdge(from, n.id);
+        svgN += svgNode(n.id, n.kind||'tool', n.label||n.id||'');
+      });
+      const overflow = routeNodes.length > CAP
+        ? '<text x="'+(C2+NW/2)+'" y="'+(svgH-4)+'" text-anchor="middle" font-size="9" fill="#94a3b8" font-family="system-ui">+' + (routeNodes.length-CAP) + '개 더...</text>'
+        : '';
+      const colLbls = [
+        '<text x="'+(C0+NW/2)+'" y="14" text-anchor="middle" font-size="9" fill="#94a3b8" font-family="system-ui">게이트웨이</text>',
+        '<text x="'+(C1+NW/2)+'" y="14" text-anchor="middle" font-size="9" fill="#94a3b8" font-family="system-ui">업스트림 ('+upstreamNodes.length+')</text>',
+        '<text x="'+(C2+NW/2)+'" y="14" text-anchor="middle" font-size="9" fill="#94a3b8" font-family="system-ui">Route ('+routeNodes.length+')</text>',
+      ].join('');
+
       return '<div class="kpis">' +
-          kpi('Upstream', fmt(upstreamNodes.length)) +
-          kpi('Route Node', fmt(routeNodes.length)) +
-          kpi('Edge', fmt(edges.length)) +
           kpi('Gateway', '1') +
+          kpi('Upstream', fmt(upstreamNodes.length)) +
+          kpi('Route', fmt(routeNodes.length)) +
+          kpi('Edge', fmt(edges.length)) +
         '</div>' +
-        '<table><thead><tr><th>From</th><th>Relation</th><th>To</th></tr></thead><tbody>' + edgeRows + '</tbody></table>';
+        '<div style="overflow-x:auto;overflow-y:auto;max-height:540px">' +
+        '<svg viewBox="0 0 '+svgW+' '+svgH+'" style="width:'+svgW+'px;display:block" xmlns="http://www.w3.org/2000/svg">' +
+        '<defs><marker id="topo-arr" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#94a3b8"/></marker></defs>' +
+        colLbls + svgE + svgN + overflow +
+        '</svg></div>';
+    }
+
+    function mcpAgenticFlowGraph(d) {
+      const tools     = (d.tools || []).filter(t => t.server_label || t.is_mcp);
+      const decisions = d.route_decisions || [];
+      const latency   = d.latency_ms || 0;
+      const ok        = Number(d.status || 200) < 400;
+
+      const NW = 148, NH = 50, GAP_X = 54, PAD_X = 14, PAD_Y = 42;
+      const TOOL_ROW = 64;
+      const toolCount = Math.max(tools.length, 1);
+      const svgH = toolCount * TOOL_ROW + PAD_Y * 2;
+      const midY = svgH / 2;
+      const C = [PAD_X, PAD_X+NW+GAP_X, PAD_X+2*(NW+GAP_X), PAD_X+3*(NW+GAP_X), PAD_X+4*(NW+GAP_X)];
+      const svgW = C[4] + NW + PAD_X;
+      const toolStartY = midY - (toolCount * TOOL_ROW)/2 + (TOOL_ROW-NH)/2;
+
+      const decByTool = {};
+      decisions.forEach(dec => {
+        if (dec.target_name)  decByTool[dec.target_name]  = dec;
+        if (dec.exposed_name) decByTool[dec.exposed_name] = dec;
+        const bare = (dec.target_name||'').split('__').pop();
+        if (bare) decByTool[bare] = dec;
+      });
+
+      function fnode(x, y, fill, stroke, l1, l2) {
+        return '<rect x="'+x+'" y="'+y+'" width="'+NW+'" height="'+NH+'" rx="10" fill="'+fill+'" stroke="'+stroke+'" stroke-width="1.5"/>' +
+          '<text x="'+(x+NW/2)+'" y="'+(y+NH/2+(l2?-7:0))+'" text-anchor="middle" dominant-baseline="middle" font-size="12" font-weight="700" fill="#fff" font-family="system-ui">'+escapeHTML(String(l1||''))+'</text>' +
+          (l2 ? '<text x="'+(x+NW/2)+'" y="'+(y+NH/2+11)+'" text-anchor="middle" font-size="9" fill="rgba(255,255,255,0.78)" font-family="system-ui">'+escapeHTML(String(l2))+'</text>' : '');
+      }
+      function arc(x1, y1, x2, y2, col) {
+        const mx = (x1+x2)/2;
+        return '<path d="M'+x1+','+y1+' C'+mx+','+y1+' '+mx+','+y2+' '+x2+','+y2+'" stroke="'+col+'" stroke-width="2" fill="none" marker-end="url(#flow-arr)"/>';
+      }
+
+      const defs = '<defs><marker id="flow-arr" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#94a3b8"/></marker></defs>';
+      const lblY = PAD_Y - 24;
+      const colTitles = ['질의','LLM','도구 실행','응답 합성','최종 응답'];
+      const lbls = C.map((cx,i) => '<text x="'+(cx+NW/2)+'" y="'+lblY+'" text-anchor="middle" font-size="9" fill="#94a3b8" font-family="system-ui">'+colTitles[i]+'</text>').join('');
+
+      let svgN = '', svgE = '', svgBadge = '';
+
+      // Query node
+      svgN += fnode(C[0], midY-NH/2, '#2563eb', '#1d4ed8', '사용자 질의', 'User Query');
+
+      // LLM Turn 1
+      svgN += fnode(C[1], midY-NH/2, '#7c3aed', '#5b21b6', 'LLM 에이전틱', tools.length + '개 도구 선택');
+      svgE += arc(C[0]+NW, midY, C[1], midY, '#94a3b8');
+
+      // Tool nodes
+      tools.forEach(function(t, i) {
+        const ty     = toolStartY + i * TOOL_ROW;
+        const toolCY = ty + NH/2;
+        const tname  = (t.tool_name||'').split('__').pop() || t.tool_name || 'tool';
+        const dec    = decByTool[t.tool_name] || decByTool[tname] || {};
+        const risk   = dec.tool_risk_level || '';
+        const decision = dec.final_decision || 'allow';
+        const isErr  = !!t.is_error;
+
+        let fill, stroke;
+        if (isErr || decision === 'block') { fill = '#dc2626'; stroke = '#991b1b'; }
+        else if (risk === 'critical')      { fill = '#dc2626'; stroke = '#991b1b'; }
+        else if (risk === 'high')          { fill = '#d97706'; stroke = '#b45309'; }
+        else if (risk === 'medium')        { fill = '#0284c7'; stroke = '#0369a1'; }
+        else                               { fill = '#059669'; stroke = '#047857'; }
+
+        const server = (t.server_label||'').substring(0,16);
+        svgN += fnode(C[2], ty, fill, stroke, tname.substring(0,16), server || (isErr ? 'error' : (risk || 'ok')));
+
+        const bc = decision==='allow' ? '#16a34a' : decision==='block' ? '#dc2626' : '#d97706';
+        svgBadge += '<rect x="'+(C[2]+NW-32)+'" y="'+(ty-1)+'" width="30" height="13" rx="4" fill="'+bc+'"/>';
+        svgBadge += '<text x="'+(C[2]+NW-17)+'" y="'+(ty+9)+'" text-anchor="middle" font-size="7.5" fill="#fff" font-family="system-ui" font-weight="600">'+escapeHTML(decision)+'</text>';
+        if (t.arg_hash) {
+          svgBadge += '<text x="'+(C[2])+'" y="'+(ty+NH+11)+'" font-size="7" fill="#94a3b8" font-family="system-ui">args: '+escapeHTML(t.arg_hash.substring(0,20))+'</text>';
+        }
+
+        svgE += arc(C[1]+NW, midY, C[2], toolCY, '#a78bfa');
+        svgE += arc(C[2]+NW, toolCY, C[3], midY, isErr ? '#fca5a5' : '#6ee7b7');
+      });
+
+      if (!tools.length) {
+        svgN += fnode(C[2], midY-NH/2, '#6b7280', '#4b5563', '(직접 응답)', 'No MCP tool');
+        svgE += arc(C[1]+NW, midY, C[2], midY, '#94a3b8');
+        svgE += arc(C[2]+NW, midY, C[3], midY, '#94a3b8');
+      }
+
+      // LLM synthesis
+      svgN += fnode(C[3], midY-NH/2, '#7c3aed', '#5b21b6', 'LLM 합성', '최종 답변 생성');
+
+      // Answer
+      const ac = ok ? '#059669' : '#dc2626', as_ = ok ? '#047857' : '#991b1b';
+      svgN += fnode(C[4], midY-NH/2, ac, as_, '최종 응답', ok ? fmt(latency)+'ms' : 'HTTP '+d.status);
+      svgE += arc(C[3]+NW, midY, C[4], midY, '#94a3b8');
+
+      return '<div style="overflow-x:auto">' +
+        '<svg viewBox="0 0 '+svgW+' '+svgH+'" style="min-width:'+svgW+'px;width:100%;display:block" xmlns="http://www.w3.org/2000/svg">' +
+        defs + lbls + svgE + svgN + svgBadge +
+        '</svg></div>';
     }
     function mcpMethodForKind(kind) {
       if (kind === 'prompt') return 'prompts/get';
@@ -6171,6 +6330,9 @@ const adminHTML = `<!doctype html>
           '<td data-num="' + Number(x.latency_ms || 0) + '">' + fmt(x.latency_ms || 0) + ' ms</td>' +
         '</tr>').join('');
         openModal('MCP Waterfall — ' + escapeHTML(d.trace_id || id),
+          '<h4 style="margin:0 0 8px">실행 흐름 그래프</h4>' +
+          mcpAgenticFlowGraph(d) +
+          '<h4 style="margin:16px 0 6px">요청 정보</h4>' +
           '<div class="kv">' +
             row('Request', escapeHTML(d.request_id || id)) +
             row('Status / Latency', escapeHTML(String(d.status || '')) + ' · ' + fmt(d.latency_ms || 0) + ' ms') +
@@ -6181,6 +6343,51 @@ const adminHTML = `<!doctype html>
           '<h4>Tool Invocations</h4><table><thead><tr><th>Server</th><th>Tool</th><th>Source</th><th>Status</th><th>Arg Hash</th></tr></thead><tbody>' + toolRows + '</tbody></table>');
       } catch (err) {
         openModal('MCP Waterfall 오류', '<div class="error-line">' + escapeHTML(err.message) + '</div>');
+      }
+    };
+
+    window.loadMCPAgenticRequests = async () => {
+      const list = document.getElementById('mcp-flow-list');
+      const hint = document.getElementById('mcp-flow-hint');
+      const graph = document.getElementById('mcp-flow-graph');
+      if (!list) return;
+      if (hint) hint.textContent = '조회 중...';
+      try {
+        const d = await api('/admin/mcp/requests?limit=15');
+        const reqs = (d.requests || []);
+        if (!reqs.length) {
+          if (hint) hint.textContent = 'MCP를 사용한 최근 요청이 없습니다.';
+          return;
+        }
+        if (hint) hint.textContent = '요청을 선택하면 실행 흐름 그래프를 표시합니다.';
+        list.innerHTML = reqs.map(r =>
+          '<button class="secondary" type="button" style="margin:3px;font-size:11px" onclick="showMCPFlowForRequest(\'' + escapeAttr(r.id||r.request_id||'') + '\')">' +
+          escapeHTML((r.id||r.request_id||'').substring(0,14)) + '… (' +
+          (r.status_code||r.status||'') + ' · ' + fmt(r.latency_ms||0) + ' ms)</button>'
+        ).join('');
+        // Auto-load the most recent one
+        const firstId = (reqs[0].id || reqs[0].request_id || '');
+        if (firstId) await window.showMCPFlowForRequest(firstId);
+      } catch(err) {
+        if (hint) hint.textContent = '오류: ' + escapeHTML(err.message);
+      }
+    };
+
+    window.showMCPFlowForRequest = async (id) => {
+      const graph = document.getElementById('mcp-flow-graph');
+      if (!graph) { await window.openMCPRequestWaterfall(id); return; }
+      graph.innerHTML = '<div class="empty">흐름 분석 중...</div>';
+      try {
+        const d = await api('/admin/mcp/requests/' + encodeURIComponent(id) + '/waterfall');
+        graph.innerHTML =
+          '<div style="display:flex;gap:10px;align-items:center;margin-bottom:8px">' +
+            '<strong style="font-size:12px">요청 ' + escapeHTML((id||'').substring(0,20)) + '</strong>' +
+            '<span class="muted" style="font-size:11px">· ' + (d.status||'') + ' · ' + fmt(d.latency_ms||0) + ' ms</span>' +
+            '<button class="secondary" type="button" style="font-size:11px;margin-left:auto" onclick="openMCPRequestWaterfall(\'' + escapeAttr(id) + '\')">상세 Waterfall</button>' +
+          '</div>' +
+          mcpAgenticFlowGraph(d);
+      } catch(err) {
+        graph.innerHTML = '<div class="error-line">' + escapeHTML(err.message) + '</div>';
       }
     };
 
