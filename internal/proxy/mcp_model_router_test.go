@@ -341,6 +341,92 @@ func TestMCPDiscoveryAgenticStreamingEmitsStats(t *testing.T) {
 	}
 }
 
+func TestMCPAgenticStreamsUpstreamSSE(t *testing.T) {
+	var mcpCalls atomic.Int64
+	mcpUpstream := fakeDiscoveryMCP(t, "vacation evidence", &mcpCalls)
+	defer mcpUpstream.Close()
+
+	// Fake LLM that actually emits SSE: turn 1 streams a fragmented tool_call, turn 2 streams
+	// the final answer content token-by-token. Exercises the real SSE accumulation path
+	// (fragmented tool_calls by index) rather than the single-shot JSON fallback.
+	var llmCalls atomic.Int64
+	llm := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher, _ := w.(http.Flusher)
+		write := func(s string) {
+			_, _ = io.WriteString(w, s)
+			if flusher != nil {
+				flusher.Flush()
+			}
+		}
+		if strings.Contains(string(body), "\"role\":\"tool\"") || llmCalls.Load() > 0 {
+			llmCalls.Add(1)
+			write("data: {\"choices\":[{\"delta\":{\"content\":\"근거 \"}}]}\n\n")
+			write("data: {\"choices\":[{\"delta\":{\"content\":\"기반 답변.\"}}]}\n\n")
+			write("data: {\"choices\":[{\"finish_reason\":\"stop\"}]}\n\n")
+			write("data: {\"choices\":[],\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":3,\"total_tokens\":8}}\n\n")
+			write("data: [DONE]\n\n")
+			return
+		}
+		llmCalls.Add(1)
+		write("data: {\"choices\":[{\"delta\":{\"role\":\"assistant\"}}]}\n\n")
+		write("data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"c1\",\"type\":\"function\",\"function\":{\"name\":\"kb__search\",\"arguments\":\"\"}}]}}]}\n\n")
+		write("data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"{\\\"query\\\":\"}}]}}]}\n\n")
+		write("data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\\\"vacation\\\"}\"}}]}}]}\n\n")
+		write("data: {\"choices\":[{\"finish_reason\":\"tool_calls\"}]}\n\n")
+		write("data: [DONE]\n\n")
+	}))
+	defer llm.Close()
+
+	s, db := newKnowledgeServer(t)
+	proxy := httptest.NewServer(s.Routes())
+	defer proxy.Close()
+
+	provResp := postJSON(t, proxy.URL+"/admin/providers", "", map[string]any{
+		"name": "openai", "base_url": llm.URL, "api_key": "test-key",
+		"timeout_ms": 5000, "enabled": true, "model_patterns": "gpt-*,o3",
+	})
+	if provResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(provResp.Body)
+		t.Fatalf("provider upsert failed: %d %s", provResp.StatusCode, body)
+	}
+	provResp.Body.Close()
+	if err := db.UpsertMCPUpstream(t.Context(), store.MCPUpstream{
+		ID: "kb", Name: "Knowledge MCP", URL: mcpUpstream.URL, Enabled: true,
+		Metadata: store.MCPUpstreamMetadata{
+			Description: "company vacation policy hr rules", Domains: []string{"policy", "hr"},
+			RiskLevel: "low", AllowedModels: []string{"vibe/grounded"}, DefaultTool: "search",
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	resp := postJSON(t, proxy.URL+"/v1/chat/completions", "", map[string]any{
+		"model":    "vibe/grounded",
+		"stream":   true,
+		"messages": []map[string]string{{"role": "user", "content": "vacation policy?"}},
+	})
+	defer resp.Body.Close()
+	if ct := resp.Header.Get("Content-Type"); ct != "text/event-stream" {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected SSE, got ct=%q body=%s", ct, body)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	got := string(body)
+	for _, want := range []string{"kb__search", "기반 답변", "x_mcp"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("streamed body missing %q; got: %s", want, got)
+		}
+	}
+	if mcpCalls.Load() != 1 {
+		t.Fatalf("the streamed (fragmented) tool call should reach the MCP once, got %d", mcpCalls.Load())
+	}
+	if llmCalls.Load() < 2 {
+		t.Fatalf("expected at least 2 streaming LLM turns, got %d", llmCalls.Load())
+	}
+}
+
 func TestMCPAgenticForcesFirstToolAndCachesRepeats(t *testing.T) {
 	var mcpCalls atomic.Int64
 	mcpUpstream := fakeDiscoveryMCP(t, "vacation evidence", &mcpCalls)

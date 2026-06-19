@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -250,14 +251,38 @@ func (s *Server) runMCPAgenticChat(w http.ResponseWriter, r *http.Request, model
 			"max_tokens":  maxTokens,
 		}
 		out.Steps++
-		raw, provider, err := s.postUpstreamChatRetry(r.Context(), r, model, body)
-		// Not every provider supports tool_choice=required; on a deterministic (4xx)
-		// rejection of the forced first turn, degrade gracefully to "auto" rather than
-		// failing the whole request.
-		if err != nil && toolChoice == "required" && !isTransientUpstreamErr(err) {
-			emitReason("ℹ️ tool_choice=required 미지원 가능 — auto로 재시도합니다.\n")
-			body["tool_choice"] = "auto"
+		// In streaming mode each turn is a streaming upstream call so the final answer's
+		// tokens reach the client live (real typing, not a post-hoc re-chunk); tool-calling
+		// turns usually carry no content so nothing visible streams for them.
+		var (
+			rawMsg    json.RawMessage
+			content   string
+			toolCalls []mcpAgentToolCall
+			finish    string
+			usage     mcpAgentUsage
+			provider  string
+			err       error
+		)
+		if streaming {
+			content, toolCalls, finish, usage, provider, err = s.postUpstreamChatStream(r.Context(), r, model, body, emitContent)
+			if err != nil && toolChoice == "required" && !isTransientUpstreamErr(err) {
+				emitReason("ℹ️ tool_choice=required 미지원 가능 — auto로 재시도합니다.\n")
+				body["tool_choice"] = "auto"
+				content, toolCalls, finish, usage, provider, err = s.postUpstreamChatStream(r.Context(), r, model, body, emitContent)
+			}
+		} else {
+			var raw []byte
 			raw, provider, err = s.postUpstreamChatRetry(r.Context(), r, model, body)
+			// Not every provider supports tool_choice=required; on a deterministic (4xx)
+			// rejection of the forced first turn, degrade gracefully to "auto".
+			if err != nil && toolChoice == "required" && !isTransientUpstreamErr(err) {
+				emitReason("ℹ️ tool_choice=required 미지원 가능 — auto로 재시도합니다.\n")
+				body["tool_choice"] = "auto"
+				raw, provider, err = s.postUpstreamChatRetry(r.Context(), r, model, body)
+			}
+			if err == nil {
+				rawMsg, content, toolCalls, finish, usage = parseAgentResponse(raw)
+			}
 		}
 		if provider != "" {
 			out.Provider = provider
@@ -267,7 +292,6 @@ func (s *Server) runMCPAgenticChat(w http.ResponseWriter, r *http.Request, model
 			emitReason("⚠️ 모델 호출 실패: " + err.Error() + "\n")
 			break
 		}
-		rawMsg, content, toolCalls, finish, usage := parseAgentResponse(raw)
 		out.Usage.add(usage)
 
 		if len(toolCalls) == 0 {
@@ -329,7 +353,18 @@ func (s *Server) runMCPAgenticChat(w http.ResponseWriter, r *http.Request, model
 			"tool_choice": "none",
 			"max_tokens":  maxTokens,
 		}
-		if raw, provider, err := s.postUpstreamChat(r.Context(), r, model, body); err == nil {
+		if streaming {
+			content, _, _, usage, provider, ferr := s.postUpstreamChatStream(r.Context(), r, model, body, emitContent)
+			if ferr == nil {
+				if provider != "" {
+					out.Provider = provider
+				}
+				out.Usage.add(usage)
+				out.Content = strings.TrimSpace(content)
+			} else {
+				out.Err = ferr
+			}
+		} else if raw, provider, err := s.postUpstreamChat(r.Context(), r, model, body); err == nil {
 			if provider != "" {
 				out.Provider = provider
 			}
@@ -345,16 +380,15 @@ func (s *Server) runMCPAgenticChat(w http.ResponseWriter, r *http.Request, model
 		// Closing summary so the loop's shape (turns/tool calls/model) is visible even
 		// though those counts can't be response headers on an already-streaming response.
 		emitReason(fmt.Sprintf("✅ 완료 · %d턴 · 도구호출 %d회 · 모델 %s\n", out.Steps, out.ToolCalls, firstNonEmpty(out.Provider+"/"+model, model)))
+		// The answer content was already streamed live during the loop / forced synthesis;
+		// only a fallback message (empty content) still needs to be emitted here.
 		if out.Content == "" {
 			if out.Err != nil {
 				out.Content = "MCP 근거 기반 응답을 생성하지 못했습니다: " + out.Err.Error()
 			} else {
 				out.Content = "충분한 근거를 찾지 못해 답변을 생성하지 못했습니다."
 			}
-		}
-		// Stream the final answer in small slices for a typing effect.
-		for _, slice := range chunkForTyping(out.Content, 24) {
-			emitContent(slice)
+			emitContent(out.Content)
 		}
 		// Structured agentic stats so the debug rail can render them (the step/tool counts
 		// can't be response headers on an already-streaming response).
@@ -517,6 +551,123 @@ func (s *Server) postUpstreamChatRetry(ctx context.Context, r *http.Request, mod
 	return raw2, provider, err2
 }
 
+// postUpstreamChatStream sends a streaming chat completion and parses the SSE stream,
+// forwarding text content deltas to onContent as they arrive (for live typing) while
+// accumulating fragmented tool_calls by index. Returns the assembled message. Falls back
+// to single-shot JSON parsing if the provider answers without an event stream.
+func (s *Server) postUpstreamChatStream(ctx context.Context, r *http.Request, model string, bodyMap map[string]any, onContent func(string)) (content string, toolCalls []mcpAgentToolCall, finish string, usage mcpAgentUsage, provider string, err error) {
+	bodyMap["model"] = model
+	bodyMap["stream"] = true
+	bodyMap["stream_options"] = map[string]any{"include_usage": true}
+	encoded, merr := json.Marshal(bodyMap)
+	if merr != nil {
+		return "", nil, "", usage, "", merr
+	}
+	rp, perr := s.selectProvider(ctx, r, model)
+	if perr != nil {
+		return "", nil, "", usage, "", perr
+	}
+	provider = rp.Name
+	upstreamURL, uerr := s.upstreamURL(rp.BaseURL, &url.URL{Path: "/v1/chat/completions"})
+	if uerr != nil {
+		return "", nil, "", usage, provider, uerr
+	}
+	req, rerr := http.NewRequestWithContext(ctx, http.MethodPost, upstreamURL, bytes.NewReader(encoded))
+	if rerr != nil {
+		return "", nil, "", usage, provider, rerr
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+rp.APIKey)
+	req.Header.Set("Accept", "text/event-stream")
+	req.Header.Set("X-Request-ID", traceIDFromRequest(r))
+	resp, derr := s.client.Do(req)
+	if derr != nil {
+		return "", nil, "", usage, provider, derr
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		return "", nil, "", usage, provider, fmt.Errorf("upstream %d: %s", resp.StatusCode, truncateText(strings.TrimSpace(string(raw)), 400))
+	}
+	// Provider ignored stream:true and returned a single JSON body — parse it as one shot.
+	if !strings.Contains(resp.Header.Get("Content-Type"), "text/event-stream") {
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+		_, content, toolCalls, finish, usage = parseAgentResponse(raw)
+		if content != "" && onContent != nil {
+			onContent(content)
+		}
+		return content, toolCalls, finish, usage, provider, nil
+	}
+
+	tcByIndex := map[int]*mcpAgentToolCall{}
+	var order []int
+	reader := bufio.NewReader(resp.Body)
+	for {
+		line, e := reader.ReadString('\n')
+		if trimmed := strings.TrimRight(line, "\r\n"); strings.HasPrefix(trimmed, "data:") {
+			data := strings.TrimSpace(trimmed[5:])
+			if data == "[DONE]" {
+				break
+			}
+			var chunk struct {
+				Choices []struct {
+					Delta struct {
+						Content   any `json:"content"`
+						ToolCalls []struct {
+							Index    int    `json:"index"`
+							ID       string `json:"id"`
+							Function struct {
+								Name      string `json:"name"`
+								Arguments string `json:"arguments"`
+							} `json:"function"`
+						} `json:"tool_calls"`
+					} `json:"delta"`
+					FinishReason string `json:"finish_reason"`
+				} `json:"choices"`
+				Usage *mcpAgentUsage `json:"usage"`
+			}
+			if json.Unmarshal([]byte(data), &chunk) == nil {
+				for _, ch := range chunk.Choices {
+					if cs := contentString(ch.Delta.Content); cs != "" {
+						content += cs
+						if onContent != nil {
+							onContent(cs)
+						}
+					}
+					for _, tc := range ch.Delta.ToolCalls {
+						cur := tcByIndex[tc.Index]
+						if cur == nil {
+							cur = &mcpAgentToolCall{}
+							tcByIndex[tc.Index] = cur
+							order = append(order, tc.Index)
+						}
+						if tc.ID != "" {
+							cur.ID = tc.ID
+						}
+						if tc.Function.Name != "" {
+							cur.Name = tc.Function.Name
+						}
+						cur.Args += tc.Function.Arguments
+					}
+					if ch.FinishReason != "" {
+						finish = ch.FinishReason
+					}
+				}
+				if chunk.Usage != nil {
+					usage = *chunk.Usage
+				}
+			}
+		}
+		if e != nil {
+			break
+		}
+	}
+	for _, idx := range order {
+		toolCalls = append(toolCalls, *tcByIndex[idx])
+	}
+	return content, toolCalls, finish, usage, provider, nil
+}
+
 // isTransientUpstreamErr reports whether an upstream error is worth one retry: transport
 // errors (no status) or 5xx. The error from postUpstreamChat is formatted "upstream <code>: ..."
 // for HTTP responses, so a missing "upstream 4" prefix means transport-level or 5xx.
@@ -610,27 +761,6 @@ func sseAgentFinal(w io.Writer, fl http.Flusher, id, model string, usage mcpAgen
 	if fl != nil {
 		fl.Flush()
 	}
-}
-
-// chunkForTyping splits text into UTF-8-safe slices of roughly `size` runes for a typing
-// effect (the browser renders each delta progressively via requestAnimationFrame).
-func chunkForTyping(text string, size int) []string {
-	if size <= 0 {
-		return []string{text}
-	}
-	runes := []rune(text)
-	out := []string{}
-	for i := 0; i < len(runes); i += size {
-		end := i + size
-		if end > len(runes) {
-			end = len(runes)
-		}
-		out = append(out, string(runes[i:end]))
-	}
-	if len(out) == 0 {
-		return []string{""}
-	}
-	return out
 }
 
 // extractChatMessagesRaw pulls the OpenAI `messages` array out of the request body as raw
