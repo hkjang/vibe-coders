@@ -24,6 +24,65 @@ type personalizationCoachingItem struct {
 	Metrics  map[string]any `json:"metrics"`
 }
 
+type personalizationModelAffinityItem struct {
+	UserID      string  `json:"user_id"`
+	Team        string  `json:"team"`
+	Role        string  `json:"role"`
+	Model       string  `json:"model"`
+	Requests    int64   `json:"requests"`
+	AvgCostKRW  float64 `json:"avg_cost_krw"`
+	SuccessRate float64 `json:"success_rate"`
+	Score       float64 `json:"score"`
+	Reason      string  `json:"reason"`
+}
+
+type personalizationMCPAffinityItem struct {
+	UserID              string  `json:"user_id"`
+	Team                string  `json:"team"`
+	Role                string  `json:"role"`
+	ServerLabel         string  `json:"server_label"`
+	ToolName            string  `json:"tool_name"`
+	Ref                 string  `json:"ref"`
+	Calls               int64   `json:"calls"`
+	Errors              int64   `json:"errors"`
+	SuccessRate         float64 `json:"success_rate"`
+	AvgRequestLatencyMS float64 `json:"avg_request_latency_ms"`
+	Score               float64 `json:"score"`
+	Reason              string  `json:"reason"`
+}
+
+func modelAffinityScore(requests int64, successRate, avgCostKRW float64) float64 {
+	volume := float64(requests)
+	if volume > 20 {
+		volume = 20
+	}
+	costPenalty := avgCostKRW
+	if costPenalty > 20 {
+		costPenalty = 20
+	}
+	score := successRate*80 + volume - costPenalty
+	if score < 0 {
+		return 0
+	}
+	return score
+}
+
+func mcpAffinityScore(calls int64, successRate, avgLatencyMS float64) float64 {
+	volume := float64(calls)
+	if volume > 20 {
+		volume = 20
+	}
+	latencyPenalty := avgLatencyMS / 1000
+	if latencyPenalty > 20 {
+		latencyPenalty = 20
+	}
+	score := successRate*80 + volume - latencyPenalty
+	if score < 0 {
+		return 0
+	}
+	return score
+}
+
 func coachingSeverity(score float64) string {
 	switch {
 	case score >= 85:
@@ -176,6 +235,112 @@ func (s *Server) handlePersonalizationCoaching(w http.ResponseWriter, r *http.Re
 			return items[i].UserID < items[j].UserID
 		}
 		return items[i].Category < items[j].Category
+	})
+	if len(items) > limit {
+		items = items[:limit]
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items, "count": len(items)})
+}
+
+// handlePersonalizationModelAffinity returns per-user model affinity rows from usage,
+// reliability, and cost. Read-only and derived from aggregate logs.
+// GET /admin/personalization/model-affinity?window=30d&limit=50
+func (s *Server) handlePersonalizationModelAffinity(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	since := parseWindow(r.URL.Query().Get("window"), 30*24*time.Hour, "day")
+	limit := recentLimit(r)
+	users, err := s.db.PersonalProfileActiveUsers(r.Context(), since, limit)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "model_affinity_failed")
+		return
+	}
+	items := []personalizationModelAffinityItem{}
+	for _, uid := range users {
+		profile, err := s.db.BuildPersonalProfile(r.Context(), uid, since)
+		if err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "model_affinity_failed")
+			return
+		}
+		models, err := s.db.UserModelCosts(r.Context(), uid, since)
+		if err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "model_affinity_failed")
+			return
+		}
+		for _, m := range models {
+			score := modelAffinityScore(m.Requests, m.SuccessRate, m.AvgCostKRW)
+			items = append(items, personalizationModelAffinityItem{
+				UserID: uid, Team: profile.Team, Role: profile.Role,
+				Model: m.Model, Requests: m.Requests, AvgCostKRW: m.AvgCostKRW, SuccessRate: m.SuccessRate,
+				Score:  score,
+				Reason: fmt.Sprintf("requests=%d, success=%.0f%%, avg_cost=%.2f KRW", m.Requests, m.SuccessRate*100, m.AvgCostKRW),
+			})
+		}
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].Score != items[j].Score {
+			return items[i].Score > items[j].Score
+		}
+		if items[i].UserID != items[j].UserID {
+			return items[i].UserID < items[j].UserID
+		}
+		return items[i].Model < items[j].Model
+	})
+	if len(items) > limit {
+		items = items[:limit]
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items, "count": len(items)})
+}
+
+// handlePersonalizationMCPAffinity returns per-user MCP tool affinity rows from MCP
+// invocation aggregates. Read-only and policy-neutral; blocked tools are still visible
+// here for operators, while user recommendations filter them out.
+// GET /admin/personalization/mcp-affinity?window=30d&limit=50
+func (s *Server) handlePersonalizationMCPAffinity(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	since := parseWindow(r.URL.Query().Get("window"), 30*24*time.Hour, "day")
+	limit := recentLimit(r)
+	users, err := s.db.PersonalProfileActiveUsers(r.Context(), since, limit)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "mcp_affinity_failed")
+		return
+	}
+	items := []personalizationMCPAffinityItem{}
+	for _, uid := range users {
+		profile, err := s.db.BuildPersonalProfile(r.Context(), uid, since)
+		if err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "mcp_affinity_failed")
+			return
+		}
+		affinities, err := s.db.UserMCPAffinities(r.Context(), uid, since, 1, 5)
+		if err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "mcp_affinity_failed")
+			return
+		}
+		for _, a := range affinities {
+			score := mcpAffinityScore(a.Calls, a.SuccessRate, a.AvgRequestLatencyMS)
+			items = append(items, personalizationMCPAffinityItem{
+				UserID: uid, Team: profile.Team, Role: profile.Role,
+				ServerLabel: a.ServerLabel, ToolName: a.ToolName, Ref: a.Ref,
+				Calls: a.Calls, Errors: a.Errors, SuccessRate: a.SuccessRate, AvgRequestLatencyMS: a.AvgRequestLatencyMS,
+				Score:  score,
+				Reason: fmt.Sprintf("calls=%d, success=%.0f%%, avg_latency=%.0fms", a.Calls, a.SuccessRate*100, a.AvgRequestLatencyMS),
+			})
+		}
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].Score != items[j].Score {
+			return items[i].Score > items[j].Score
+		}
+		if items[i].UserID != items[j].UserID {
+			return items[i].UserID < items[j].UserID
+		}
+		return items[i].Ref < items[j].Ref
 	})
 	if len(items) > limit {
 		items = items[:limit]

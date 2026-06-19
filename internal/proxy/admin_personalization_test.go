@@ -38,3 +38,16 @@ func TestPersonalizationCoachingItemsForProfile(t *testing.T) {
 		t.Fatalf("reuse metrics should include distinct prompt fingerprints: %+v", byCategory["reuse"])
 	}
 }
+
+func TestPersonalizationAffinityScores(t *testing.T) {
+	goodModel := modelAffinityScore(20, 0.95, 1)
+	weakModel := modelAffinityScore(2, 0.5, 20)
+	if goodModel <= weakModel {
+		t.Fatalf("expected strong model affinity score > weak score, got %f <= %f", goodModel, weakModel)
+	}
+	goodMCP := mcpAffinityScore(10, 1, 100)
+	slowFailingMCP := mcpAffinityScore(10, 0.4, 5000)
+	if goodMCP <= slowFailingMCP {
+		t.Fatalf("expected strong MCP affinity score > weak score, got %f <= %f", goodMCP, slowFailingMCP)
+	}
+}

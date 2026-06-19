@@ -1,3 +1,4 @@
+v0.50.16:- **개인화 Affinity 운영 표 (v0.50.16)**: `GET /admin/personalization/model-affinity`, `GET /admin/personalization/mcp-affinity`와 어드민 개인화 탭 표를 추가. 사용자별 모델 적합도와 MCP 도구 적합도를 성공률·사용량·비용/지연 기반 점수로 정렬해 추천·코칭의 운영 근거를 강화.
 v0.50.15:- **릴리즈 자동화 스크립트 리팩토링 (v0.50.15)**: gh_release.ps1 내의 모든 과거 변경 이력 하드코딩 리스트를 scripts/changelog.txt 외부 텍스트 파일로 분리하고, 지정 버전의 문서가 존재하는지 사전 검사하는 자동 검증 로직을 도입하여 릴리즈 관리 정합성 및 유지보수성을 극대화.
 v0.50.14:- **개인화 코칭 후보 (v0.50.14)**: `GET /admin/personalization/coaching`과 어드민 개인화 탭의 코칭 후보 표를 추가. Personal AI Profile 지표만 사용해 보안·품질·재사용·비용·Text2SQL·MCP 코칭 후보를 read-only로 산출하며 원문 프롬프트/SQL/응답은 참조하지 않음.
 v0.50.13:- **추천 피드백 API 호환성 (v0.50.13)**: 기존 `POST /me/recommendations/feedback`을 유지하면서 `POST /me/recommendations/{id}/feedback` 별칭을 추가. `accepted/rejected/dismissed/later` 액션 별칭과 선택 `reason` 저장을 지원해 추천 채택률 학습 데이터를 더 유연하게 수집.

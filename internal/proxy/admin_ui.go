@@ -6103,12 +6103,16 @@ const adminHTML = `<!doctype html>
     }
     async function renderPersonalization() {
       const view = document.getElementById('view');
-      const [d, coachingResp] = await Promise.all([
+      const [d, coachingResp, modelAffinityResp, mcpAffinityResp] = await Promise.all([
         api('/admin/personalization/profiles?window=30d&limit=50').catch(() => ({ profiles: [] })),
-        api('/admin/personalization/coaching?window=30d&limit=50').catch(() => ({ items: [] }))
+        api('/admin/personalization/coaching?window=30d&limit=50').catch(() => ({ items: [] })),
+        api('/admin/personalization/model-affinity?window=30d&limit=50').catch(() => ({ items: [] })),
+        api('/admin/personalization/mcp-affinity?window=30d&limit=50').catch(() => ({ items: [] }))
       ]);
       const profiles = d.profiles || [];
       const coaching = coachingResp.items || [];
+      const modelAffinity = modelAffinityResp.items || [];
+      const mcpAffinity = mcpAffinityResp.items || [];
       let html = '<p class="muted">사용자별 AI 사용 프로필 (최근 30일). 모델·작업·언어 선호, 비용 성향, 신뢰도를 요약합니다. 사용자를 클릭하면 상세·스냅샷을 볼 수 있습니다.</p>';
       if (!profiles.length) {
         html += '<p class="muted">표시할 프로필이 없습니다 (사용자 매핑된 API Key 활동 필요).</p>';
@@ -6157,9 +6161,50 @@ const adminHTML = `<!doctype html>
             '<td class="muted" style="max-width:360px">' + escapeHTML(c.detail || '') + '</td>' +
           '</tr>').join('') + '</tbody></table>';
       }
+      let modelAffinityHtml = '<p class="muted">사용자별 모델 적합도입니다. 성공률·사용량·평균 비용으로 점수를 계산합니다.</p>';
+      if (!modelAffinity.length) {
+        modelAffinityHtml += '<p class="muted">표시할 모델 affinity가 없습니다.</p>';
+      } else {
+        modelAffinityHtml += '<table><thead><tr>' +
+          '<th data-sort="str">사용자</th><th data-sort="str">팀</th><th data-sort="str">모델</th>' +
+          '<th data-sort="num">점수</th><th data-sort="num">요청</th><th data-sort="num">성공률</th><th data-sort="num">평균비용</th><th>근거</th>' +
+          '</tr></thead><tbody>' +
+          modelAffinity.map(m => '<tr>' +
+            '<td><a href="#/personalization/' + encodeURIComponent(m.user_id || '') + '">' + escapeHTML(m.user_id || '') + '</a></td>' +
+            '<td>' + escapeHTML(m.team || '') + '</td>' +
+            '<td>' + escapeHTML(m.model || '') + '</td>' +
+            '<td data-num="' + (m.score || 0) + '">' + fmt(Math.round(m.score || 0)) + '</td>' +
+            '<td data-num="' + (m.requests || 0) + '">' + fmt(m.requests || 0) + '</td>' +
+            '<td data-num="' + (m.success_rate || 0) + '">' + pctText(m.success_rate) + '</td>' +
+            '<td data-num="' + (m.avg_cost_krw || 0) + '">' + (m.avg_cost_krw || 0).toFixed(2) + '</td>' +
+            '<td class="muted">' + escapeHTML(m.reason || '') + '</td>' +
+          '</tr>').join('') + '</tbody></table>';
+      }
+      let mcpAffinityHtml = '<p class="muted">사용자별 MCP 도구 affinity입니다. 호출수·성공률·평균 요청 지연으로 점수를 계산합니다.</p>';
+      if (!mcpAffinity.length) {
+        mcpAffinityHtml += '<p class="muted">표시할 MCP affinity가 없습니다.</p>';
+      } else {
+        mcpAffinityHtml += '<table><thead><tr>' +
+          '<th data-sort="str">사용자</th><th data-sort="str">팀</th><th data-sort="str">도구</th>' +
+          '<th data-sort="num">점수</th><th data-sort="num">호출</th><th data-sort="num">오류</th><th data-sort="num">성공률</th><th data-sort="num">평균 지연</th><th>근거</th>' +
+          '</tr></thead><tbody>' +
+          mcpAffinity.map(m => '<tr>' +
+            '<td><a href="#/personalization/' + encodeURIComponent(m.user_id || '') + '">' + escapeHTML(m.user_id || '') + '</a></td>' +
+            '<td>' + escapeHTML(m.team || '') + '</td>' +
+            '<td>' + escapeHTML(m.ref || '') + '</td>' +
+            '<td data-num="' + (m.score || 0) + '">' + fmt(Math.round(m.score || 0)) + '</td>' +
+            '<td data-num="' + (m.calls || 0) + '">' + fmt(m.calls || 0) + '</td>' +
+            '<td data-num="' + (m.errors || 0) + '">' + fmt(m.errors || 0) + '</td>' +
+            '<td data-num="' + (m.success_rate || 0) + '">' + pctText(m.success_rate) + '</td>' +
+            '<td data-num="' + (m.avg_request_latency_ms || 0) + '">' + fmt(Math.round(m.avg_request_latency_ms || 0)) + ' ms</td>' +
+            '<td class="muted">' + escapeHTML(m.reason || '') + '</td>' +
+          '</tr>').join('') + '</tbody></table>';
+      }
       view.innerHTML =
         card('개인 AI 프로필', '<div class="card-body">' + html + '</div>') +
-        card('개인화 코칭 후보', '<div class="card-body">' + coachingHtml + '</div>');
+        card('개인화 코칭 후보', '<div class="card-body">' + coachingHtml + '</div>') +
+        card('모델 Affinity', '<div class="card-body">' + modelAffinityHtml + '</div>') +
+        card('MCP Affinity', '<div class="card-body">' + mcpAffinityHtml + '</div>');
       makeSortable('#view', 'personalization');
     }
 

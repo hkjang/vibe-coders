@@ -270,6 +270,8 @@ var apiEndpoints = []apiEndpoint{
 
 	// ---- admin: personalization / knowledge / templates / notifications ----
 	{"/admin/personalization/coaching", []string{"get"}, "admin", "Personalized coaching candidates", false},
+	{"/admin/personalization/model-affinity", []string{"get"}, "admin", "Per-user model affinity", false},
+	{"/admin/personalization/mcp-affinity", []string{"get"}, "admin", "Per-user MCP tool affinity", false},
 	{"/admin/personalization/profiles", []string{"get"}, "admin", "Personal AI profiles", false},
 	{"/admin/personalization/profiles/{user_id}", []string{"get", "post"}, "admin", "Profile detail / snapshot / drift", false},
 	{"/admin/recommendations/adoption", []string{"get"}, "admin", "Recommendation adoption rates", false},
