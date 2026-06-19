@@ -31,6 +31,15 @@ type MCPDiscoveryPolicy struct {
 	AllowNoGroundAnswer bool
 }
 
+// mcpSelectionDiag records why upstreams were excluded during candidate selection.
+type mcpSelectionDiag struct {
+	TotalChecked  int
+	NoToolsInSnap int      // no tools discovered for this upstream (includes snap errors)
+	ScoreFiltered int      // selector score below threshold
+	OtherFiltered int      // model/risk/policy filters
+	SnapErrors    []string // "upstreamName: error" for upstreams with discovery failures
+}
+
 type MCPCandidate struct {
 	UpstreamID       string   `json:"upstream_id"`
 	UpstreamName     string   `json:"upstream_name"`
@@ -123,8 +132,14 @@ func mcpDiscoveryPolicyForModel(model string) MCPDiscoveryPolicy {
 	switch normalized {
 	case "vibe/all-mcp":
 		return MCPDiscoveryPolicy{Model: normalized, Mode: "all_allowed", MaxMCPs: 20, Parallelism: 5, TimeoutMillis: 8000, MinSelectorScore: 0, MinEvidenceScore: 0.70}
+	case "vibe/grounded":
+		// Grounded answers ground any query with MCP evidence; all registered MCPs are
+		// candidates (MinSelectorScore=0) — the evidence-score gate handles quality.
+		return MCPDiscoveryPolicy{Model: normalized, Mode: "selective", MaxMCPs: 3, Parallelism: 3, TimeoutMillis: 7000, MinSelectorScore: 0, MinEvidenceScore: 0.60}
 	case "vibe/research":
-		return MCPDiscoveryPolicy{Model: normalized, Mode: "selective", MaxMCPs: 5, Parallelism: 4, TimeoutMillis: 7000, MinSelectorScore: 0.50, MinEvidenceScore: 0.70}
+		// Research sweeps multiple MCPs; keep a low (not zero) selector bar so clearly
+		// irrelevant MCPs are skipped while still passing most registered MCPs.
+		return MCPDiscoveryPolicy{Model: normalized, Mode: "selective", MaxMCPs: 5, Parallelism: 4, TimeoutMillis: 7000, MinSelectorScore: 0.10, MinEvidenceScore: 0.65}
 	case "vibe/policy", "vibe/legal", "vibe/compliance":
 		return MCPDiscoveryPolicy{Model: normalized, Mode: "domain_filtered", MaxMCPs: 5, Parallelism: 3, TimeoutMillis: 6000, MinSelectorScore: 0.60, MinEvidenceScore: 0.75, RequireApproval: normalized == "vibe/compliance"}
 	default:
@@ -140,7 +155,7 @@ func (s *Server) handleMCPDiscoveryChat(w http.ResponseWriter, r *http.Request, 
 	meta.Request.RouteReason = "mcp_discovery"
 	meta.Request.RouteDetail = policy.Mode
 
-	candidates, err := s.selectMCPCandidates(r.Context(), query, policy, authCtx)
+	candidates, diag, err := s.selectMCPCandidates(r.Context(), query, policy, authCtx)
 	if err != nil {
 		writeOpenAIError(w, http.StatusBadGateway, "mcp discovery failed: "+err.Error(), "mcp_error", "mcp_discovery_failed")
 		return
@@ -148,6 +163,16 @@ func (s *Server) handleMCPDiscoveryChat(w http.ResponseWriter, r *http.Request, 
 	w.Header().Set("X-MCP-Discovery-Model", policy.Model)
 	w.Header().Set("X-MCP-Discovery-Mode", policy.Mode)
 	w.Header().Set("X-MCP-Candidates", strconv.Itoa(len(candidates)))
+	w.Header().Set("X-MCP-Checked", strconv.Itoa(diag.TotalChecked))
+	if diag.NoToolsInSnap > 0 {
+		w.Header().Set("X-MCP-No-Tools", strconv.Itoa(diag.NoToolsInSnap))
+	}
+	if diag.ScoreFiltered > 0 {
+		w.Header().Set("X-MCP-Score-Filtered", strconv.Itoa(diag.ScoreFiltered))
+	}
+	if diag.OtherFiltered > 0 {
+		w.Header().Set("X-MCP-Other-Filtered", strconv.Itoa(diag.OtherFiltered))
+	}
 
 	evidences := s.callSelectedMCPs(r, apiKeyID, authCtx, candidates, query, policy)
 	filtered := make([]MCPEvidence, 0, len(evidences))
@@ -157,7 +182,7 @@ func (s *Server) handleMCPDiscoveryChat(w http.ResponseWriter, r *http.Request, 
 		}
 	}
 	w.Header().Set("X-MCP-Evidence", strconv.Itoa(len(filtered)))
-	content := renderMCPDiscoveryAnswer(policy, candidates, filtered)
+	content := renderMCPDiscoveryAnswer(policy, candidates, filtered, diag)
 	if len(filtered) == 0 && !policy.AllowNoGroundAnswer {
 		w.Header().Set("X-MCP-Grounded", "false")
 	} else {
@@ -357,10 +382,11 @@ func shouldReviewDomainDecision(decision store.DomainRoutingDecision, candidates
 	return false
 }
 
-func (s *Server) selectMCPCandidates(ctx context.Context, query string, policy MCPDiscoveryPolicy, authCtx *store.AuthContext) ([]MCPCandidate, error) {
+func (s *Server) selectMCPCandidates(ctx context.Context, query string, policy MCPDiscoveryPolicy, authCtx *store.AuthContext) ([]MCPCandidate, mcpSelectionDiag, error) {
+	var diag mcpSelectionDiag
 	upstreams, err := s.db.ActiveMCPUpstreams(ctx)
 	if err != nil {
-		return nil, err
+		return nil, diag, err
 	}
 	snap := s.mcpToolsSnapshotCached(ctx)
 	toolsByUpstream := map[string][]mcpToolDef{}
@@ -372,27 +398,44 @@ func (s *Server) selectMCPCandidates(ctx context.Context, query string, policy M
 	policySnap := s.mcpPolicySnapshot(ctx)
 	candidates := []MCPCandidate{}
 	for _, up := range upstreams {
+		diag.TotalChecked++
 		meta := defaultedMCPMetadata(up)
 		if !mcpModelAllowed(policy.Model, meta.AllowedModels) {
+			diag.OtherFiltered++
 			continue
 		}
 		if !mcpRiskAllowed(meta.RiskLevel, policy) || meta.RequiresApproval {
+			diag.OtherFiltered++
 			continue
 		}
 		if strings.EqualFold(policy.Mode, "domain_filtered") && !mcpDomainMatches(policy.Model, meta.Domains, query) {
+			diag.OtherFiltered++
 			continue
 		}
-		tool, ok := pickMCPDiscoveryTool(toolsByUpstream[up.ID], meta.DefaultTool)
+		tools := toolsByUpstream[up.ID]
+		if len(tools) == 0 {
+			diag.NoToolsInSnap++
+			if snapErr := snap.errors[up.Name]; snapErr != "" {
+				diag.SnapErrors = append(diag.SnapErrors, up.Name+": "+snapErr)
+			} else {
+				diag.SnapErrors = append(diag.SnapErrors, up.Name+": 도구 목록 없음")
+			}
+			continue
+		}
+		tool, ok := pickMCPDiscoveryTool(tools, meta.DefaultTool)
 		if !ok {
+			diag.NoToolsInSnap++
 			continue
 		}
 		route := snap.routes[tool.Name]
 		decision := evaluateMCPPolicy(policySnap, []store.ToolInvocation{{IsMCP: true, ServerLabel: route.upstreamName, ToolName: route.bareTool}})
 		if decision.Blocked {
+			diag.OtherFiltered++
 			continue
 		}
 		selector := scoreMCPRelevance(query, up, meta, tool)
 		if !strings.EqualFold(policy.Mode, "all_allowed") && selector < policy.MinSelectorScore {
+			diag.ScoreFiltered++
 			continue
 		}
 		health := mcpHealthScoreFromSnapshot(snap, up)
@@ -422,7 +465,7 @@ func (s *Server) selectMCPCandidates(ctx context.Context, query string, policy M
 	if policy.MaxMCPs > 0 && len(candidates) > policy.MaxMCPs {
 		candidates = candidates[:policy.MaxMCPs]
 	}
-	return candidates, nil
+	return candidates, diag, nil
 }
 
 func (s *Server) callSelectedMCPs(r *http.Request, apiKeyID string, authCtx *store.AuthContext, candidates []MCPCandidate, query string, policy MCPDiscoveryPolicy) []MCPEvidence {
@@ -544,9 +587,30 @@ func extractMCPResultItems(raw json.RawMessage) ([]MCPResultItem, string) {
 	return items, ""
 }
 
-func renderMCPDiscoveryAnswer(policy MCPDiscoveryPolicy, candidates []MCPCandidate, evidences []MCPEvidence) string {
+func renderMCPDiscoveryAnswer(policy MCPDiscoveryPolicy, candidates []MCPCandidate, evidences []MCPEvidence, diag mcpSelectionDiag) string {
 	if len(candidates) == 0 {
-		return "확인 가능한 MCP 후보가 없습니다. 등록된 MCP의 enabled 상태, metadata domains/allowed_models/default_tool 설정, 그리고 MCP 정책 allowlist를 확인해 주세요."
+		var b strings.Builder
+		b.WriteString("확인 가능한 MCP 후보가 없습니다.\n\n")
+		if diag.TotalChecked == 0 {
+			b.WriteString("등록된 활성 MCP 업스트림이 없습니다. MCP 설정 → 업스트림 등록을 먼저 완료해 주세요.")
+		} else {
+			b.WriteString(fmt.Sprintf("점검한 업스트림: %d개\n", diag.TotalChecked))
+			if diag.NoToolsInSnap > 0 {
+				b.WriteString(fmt.Sprintf("• 도구 목록 미확인 %d개 — MCP 서버가 응답하지 않거나 tools/list를 지원하지 않습니다:\n", diag.NoToolsInSnap))
+				for _, e := range diag.SnapErrors {
+					b.WriteString("  - ")
+					b.WriteString(e)
+					b.WriteString("\n")
+				}
+			}
+			if diag.ScoreFiltered > 0 {
+				b.WriteString(fmt.Sprintf("• 관련성 점수 미달 %d개 (MinSelectorScore=%.2f) — MCP metadata(description/domains)와 쿼리 키워드가 겹치지 않습니다.\n", diag.ScoreFiltered, policy.MinSelectorScore))
+			}
+			if diag.OtherFiltered > 0 {
+				b.WriteString(fmt.Sprintf("• 모델/위험도/정책 필터 제외 %d개 — allowed_models, risk_level, MCP 정책 allowlist를 확인해 주세요.\n", diag.OtherFiltered))
+			}
+		}
+		return b.String()
 	}
 	if len(evidences) == 0 {
 		names := candidateIDs(candidates)
