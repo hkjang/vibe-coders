@@ -6114,9 +6114,10 @@ const adminHTML = `<!doctype html>
           '<div style="margin-bottom:6px">' + badge(sum.best_latency_model, '최저 지연') + badge(sum.lowest_cost_success_model, '최저 비용') +
           '<span class="muted" style="font-size:12px">성공 ' + (sum.success||0) + ' / 실패 ' + (sum.failed||0) + (runId ? ' · run ' + escapeHTML(runId) : '') + '</span> ' +
           '<button type="button" class="secondary" style="font-size:11px" onclick="mmLoadHistory()">이력</button> ' +
+          (runId ? '<button type="button" class="secondary" style="font-size:11px" onclick="mmShowDiff()">Diff 보기</button> ' : '') +
           (runId ? '<button type="button" class="secondary" style="font-size:11px" onclick="mmExport(\'md\')">MD</button> <button type="button" class="secondary" style="font-size:11px" onclick="mmExport(\'csv\')">CSV</button> <button type="button" class="secondary" style="font-size:11px" onclick="mmExport(\'json\')">JSON</button>' : '') +
           '</div>' +
-          table + cards + '<div id="mm-history"></div>';
+          table + '<div id="mm-diff"></div>' + cards + '<div id="mm-history"></div>';
       } catch (e) {
         out.innerHTML = '<span class="status error">' + escapeHTML(e.message) + '</span>';
       } finally {
@@ -6164,6 +6165,45 @@ const adminHTML = `<!doctype html>
         document.body.appendChild(a); a.click(); a.remove();
         URL.revokeObjectURL(url);
       } catch (e) { alert('내보내기 오류: ' + e.message); }
+    };
+
+    // 모델별 응답 Diff: 공통 블록 / 모델별 누락·추가 블록 / 형식 차이.
+    window.mmShowDiff = async () => {
+      const runId = window.__mmRunId;
+      const host = document.getElementById('mm-diff');
+      if (!runId || !host) return;
+      if (host.innerHTML.trim()) { host.innerHTML = ''; return; } // toggle off
+      host.innerHTML = '<div class="empty">Diff 계산 중...</div>';
+      try {
+        const d = await api('/admin/chat-test/multi-run/runs/' + encodeURIComponent(runId) + '/diff');
+        const blk = (b) => '<div style="font-size:11px;margin:2px 0"><span class="status" style="font-size:9px">' + escapeHTML(b.type) + '</span> ' + escapeHTML(b.preview) + '</div>';
+        // 형식 차이 테이블.
+        const models = d.models || [];
+        const fmtRows = models.map(m => {
+          const st = m.stats || {};
+          if (!st.available) return '<tr><td>' + escapeHTML(m.model) + '</td><td colspan="5" class="muted">응답 없음</td></tr>';
+          return '<tr><td>' + escapeHTML(m.model) + '</td><td>' + (st.paragraphs||0) + '</td><td>' + (st.list_items||0) + '</td><td>' + (st.code_blocks||0) + '</td><td>' + (st.has_table ? '✓' : '-') + '</td><td>' + fmt(st.chars||0) + '</td></tr>';
+        }).join('');
+        const common = d.common_blocks || [];
+        const commonHTML = common.length
+          ? '<div style="margin-top:6px"><strong>공통 블록 (' + common.length + ') — 모든 모델 공통</strong>' + common.slice(0,20).map(blk).join('') + '</div>'
+          : '<p class="muted" style="font-size:11px">모든 모델에 공통인 블록이 없습니다.</p>';
+        const per = (d.per_model || []).map(p => {
+          if (!p.available) return '<div style="margin-top:6px"><strong>' + escapeHTML(p.model) + '</strong> <span class="muted">응답 없음</span></div>';
+          const miss = (p.missing||[]).slice(0,10), extra = (p.extra||[]).slice(0,10);
+          return '<div style="border:1px solid var(--border);border-radius:6px;padding:8px;margin-top:6px">' +
+            '<strong>' + escapeHTML(p.model) + '</strong> <span class="muted" style="font-size:11px">블록 ' + (p.block_count||0) + '</span>' +
+            '<div style="margin-top:4px"><span class="status warn" style="font-size:9px">누락 ' + (p.missing||[]).length + '</span> 다른 모델엔 있으나 이 모델엔 없음' + miss.map(blk).join('') + '</div>' +
+            '<div style="margin-top:4px"><span class="status" style="font-size:9px">고유 ' + (p.extra||[]).length + '</span> 이 모델에만 있음' + extra.map(blk).join('') + '</div>' +
+            '</div>';
+        }).join('');
+        host.innerHTML = card('모델별 응답 Diff (응답 모델 ' + (d.answered_models||0) + ')',
+          '<div class="card-body">' +
+          '<table><thead><tr><th>모델</th><th>문단</th><th>목록</th><th>코드</th><th>표</th><th>길이</th></tr></thead><tbody>' + fmtRows + '</tbody></table>' +
+          commonHTML + per +
+          '<p class="muted" style="font-size:10px;margin-top:6px">' + escapeHTML(d.note || '') + '</p>' +
+          '</div>');
+      } catch (e) { host.innerHTML = '<span class="status error">' + escapeHTML(e.message) + '</span>'; }
     };
 
     window.mmLoadHistory = async () => {
