@@ -208,6 +208,68 @@ func (s *SQLStore) RevokeAuthSession(ctx context.Context, sessionID string) erro
 	return err
 }
 
+// AuthSessionInfo is a user-facing view of an active session for the session-management UI.
+type AuthSessionInfo struct {
+	ID        string `json:"id"`
+	IP        string `json:"ip"`
+	UserAgent string `json:"user_agent"`
+	CreatedAt string `json:"created_at"`
+	ExpiresAt string `json:"expires_at"`
+	SSOLinked bool   `json:"sso_linked"` // true when tied to a Keycloak sid
+}
+
+// ListActiveAuthSessionsForUser returns the user's non-revoked, unexpired sessions, newest first.
+func (s *SQLStore) ListActiveAuthSessionsForUser(ctx context.Context, userID string) ([]AuthSessionInfo, error) {
+	now := formatTime(time.Now().UTC())
+	rows, err := s.db.QueryContext(ctx, s.bind(`SELECT id, COALESCE(ip,''), COALESCE(user_agent,''), created_at, expires_at, COALESCE(kc_sid,'')
+		FROM auth_sessions WHERE user_id = ? AND revoked_at IS NULL AND expires_at > ?
+		ORDER BY created_at DESC`), userID, now)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []AuthSessionInfo{}
+	for rows.Next() {
+		var si AuthSessionInfo
+		var kcSID string
+		if err := rows.Scan(&si.ID, &si.IP, &si.UserAgent, &si.CreatedAt, &si.ExpiresAt, &kcSID); err != nil {
+			return nil, err
+		}
+		si.SSOLinked = kcSID != ""
+		out = append(out, si)
+	}
+	return out, rows.Err()
+}
+
+// RevokeAuthSessionOwned revokes a single session only if it belongs to userID (returns whether
+// a row was affected), so users can't revoke other people's sessions.
+func (s *SQLStore) RevokeAuthSessionOwned(ctx context.Context, sessionID, userID string) (bool, error) {
+	now := formatTime(time.Now().UTC())
+	res, err := s.db.ExecContext(ctx, s.bind(`UPDATE auth_sessions SET revoked_at = ? WHERE id = ? AND user_id = ? AND revoked_at IS NULL`), now, sessionID, userID)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	if n > 0 {
+		// Also revoke refresh tokens bound to that session.
+		_, _ = s.db.ExecContext(ctx, s.bind(`UPDATE refresh_tokens SET revoked_at = ? WHERE session_id = ? AND revoked_at IS NULL`), now, sessionID)
+	}
+	return n > 0, nil
+}
+
+// RevokeOtherAuthSessionsForUser revokes all of a user's active sessions except keepSessionID
+// ("log out everywhere else"). Returns the number of sessions revoked.
+func (s *SQLStore) RevokeOtherAuthSessionsForUser(ctx context.Context, userID, keepSessionID string) (int, error) {
+	now := formatTime(time.Now().UTC())
+	res, err := s.db.ExecContext(ctx, s.bind(`UPDATE auth_sessions SET revoked_at = ? WHERE user_id = ? AND id <> ? AND revoked_at IS NULL`), now, userID, keepSessionID)
+	if err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	_, _ = s.db.ExecContext(ctx, s.bind(`UPDATE refresh_tokens SET revoked_at = ? WHERE user_id = ? AND session_id <> ? AND revoked_at IS NULL`), now, userID, keepSessionID)
+	return int(n), nil
+}
+
 // LinkAuthSessionKeycloakSID records the Keycloak session id (sid claim) on an internal
 // session so front-/back-channel logout can target the exact browser session.
 func (s *SQLStore) LinkAuthSessionKeycloakSID(ctx context.Context, sessionID, kcSID string) error {

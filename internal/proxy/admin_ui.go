@@ -8358,7 +8358,10 @@ const adminHTML = `<!doctype html>
       view.innerHTML = section('내 홈', kpis) +
         '<div id="me-actions"></div><div id="me-report"></div>' +
         profCard + usageCard + modelsCard + failCard + keyCard + recCard +
-        '<div id="me-notifications"></div>';
+        '<div id="me-notifications"></div><div id="me-sessions"></div>';
+
+      // 로그인 세션 관리 — 활성 세션 목록 + 개별/타 세션 일괄 종료.
+      meLoadSessions();
 
       // 개인 액션 큐 — 지금 바로 행동 가능한 카드.
       api('/me/actions').then(a => {
@@ -8404,6 +8407,52 @@ const adminHTML = `<!doctype html>
             : '<p class="muted">새 알림이 없습니다.</p>') + '</div>');
       }).catch(() => {});
     }
+
+    // 로그인 세션 관리: 활성 세션 목록(현재 세션 표시) + 개별/타 세션 종료.
+    window.meLoadSessions = async () => {
+      const host = document.getElementById('me-sessions');
+      if (!host) return;
+      let r;
+      try { r = await api('/me/sessions'); }
+      catch (e) { host.innerHTML = ''; return; }
+      const sessions = (r && r.sessions) || [];
+      const deviceOf = (ua) => {
+        ua = ua || '';
+        let os = 'Unknown', br = '';
+        if (/Windows/.test(ua)) os = 'Windows'; else if (/Mac OS X|Macintosh/.test(ua)) os = 'macOS';
+        else if (/Android/.test(ua)) os = 'Android'; else if (/iPhone|iPad|iOS/.test(ua)) os = 'iOS'; else if (/Linux/.test(ua)) os = 'Linux';
+        if (/Edg\//.test(ua)) br = 'Edge'; else if (/Chrome\//.test(ua)) br = 'Chrome'; else if (/Firefox\//.test(ua)) br = 'Firefox'; else if (/Safari\//.test(ua)) br = 'Safari'; else if (/curl|Go-http|python/i.test(ua)) br = 'API';
+        return (os + (br ? ' · ' + br : '')) || 'Unknown';
+      };
+      const rows = sessions.map(sx =>
+        '<tr>' +
+        '<td>' + escapeHTML(deviceOf(sx.user_agent)) + (sx.current ? ' <span class="status" style="font-size:10px">현재 세션</span>' : '') + (sx.sso_linked ? ' <span class="status warn" style="font-size:10px">SSO</span>' : '') + '</td>' +
+        '<td class="muted">' + escapeHTML(sx.ip || '-') + '</td>' +
+        '<td class="muted">' + ago(sx.created_at) + '</td>' +
+        '<td>' + (sx.current ? '<span class="muted">-</span>' : '<button type="button" class="secondary" style="font-size:11px" onclick="meRevokeSession(\'' + escapeAttr(sx.id) + '\')">종료</button>') + '</td>' +
+        '</tr>').join('');
+      const others = sessions.filter(sx => !sx.current).length;
+      host.innerHTML = card('로그인 세션 (' + sessions.length + ')',
+        '<div class="card-body">' +
+        (sessions.length
+          ? '<table><thead><tr><th>기기</th><th>IP</th><th>로그인</th><th></th></tr></thead><tbody>' + rows + '</tbody></table>'
+          : '<p class="muted">활성 세션이 없습니다.</p>') +
+        (others > 0 ? '<div style="margin-top:8px"><button type="button" onclick="meRevokeOtherSessions()">다른 모든 세션 로그아웃 (' + others + ')</button></div>' : '') +
+        '<div id="me-sessions-out" style="margin-top:6px"></div>' +
+        '</div>');
+    };
+    window.meRevokeSession = async (id) => {
+      if (!confirm('이 세션을 종료할까요? 해당 기기는 다시 로그인해야 합니다.')) return;
+      const out = document.getElementById('me-sessions-out');
+      try { await api('/me/sessions/' + encodeURIComponent(id), { method: 'DELETE' }); if (out) out.innerHTML = '<span class="status">세션을 종료했습니다.</span>'; await meLoadSessions(); }
+      catch (e) { if (out) out.innerHTML = '<span class="status error">' + escapeHTML(e.message) + '</span>'; }
+    };
+    window.meRevokeOtherSessions = async () => {
+      if (!confirm('현재 세션을 제외한 모든 세션을 로그아웃할까요?')) return;
+      const out = document.getElementById('me-sessions-out');
+      try { const r = await api('/me/sessions/revoke-others', { method: 'POST', body: '{}' }); if (out) out.innerHTML = '<span class="status">' + (r.revoked_count || 0) + '개 세션을 로그아웃했습니다.</span>'; await meLoadSessions(); }
+      catch (e) { if (out) out.innerHTML = '<span class="status error">' + escapeHTML(e.message) + '</span>'; }
+    };
 
     window.meLoadReport = async (win) => {
       const host = document.getElementById('me-report');
