@@ -174,6 +174,42 @@ func (s *SQLStore) GetUserRecommendation(ctx context.Context, userID, id string)
 	return rec, true, nil
 }
 
+// RecommendationAggregate is a cross-user rollup of one recurring recommendation
+// (same kind+ref+title), used by Skill Studio to surface org-wide skill candidates.
+type RecommendationAggregate struct {
+	Kind            string  `json:"kind"`
+	Ref             string  `json:"ref"`
+	Title           string  `json:"title"`
+	Detail          string  `json:"detail"`
+	Users           int64   `json:"users"` // distinct users with this recommendation
+	Count           int64   `json:"count"`
+	TotalSavingsKRW float64 `json:"total_savings_krw"`
+}
+
+// AggregateRecommendations rolls up personal_recommendations across all users by
+// kind+ref+title, most-shared first. Powers Skill Studio's personalization-derived
+// candidate source (a recommendation many users get is a good skill candidate).
+func (s *SQLStore) AggregateRecommendations(ctx context.Context) ([]RecommendationAggregate, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT kind, COALESCE(ref, ''), title, COALESCE(MAX(detail), ''),
+			COUNT(DISTINCT user_id), COUNT(*), COALESCE(SUM(est_savings_krw), 0)
+		FROM personal_recommendations
+		GROUP BY kind, COALESCE(ref, ''), title
+		ORDER BY COUNT(DISTINCT user_id) DESC, COUNT(*) DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []RecommendationAggregate{}
+	for rows.Next() {
+		var a RecommendationAggregate
+		if err := rows.Scan(&a.Kind, &a.Ref, &a.Title, &a.Detail, &a.Users, &a.Count, &a.TotalSavingsKRW); err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
 // RecommendationFeedback records a user's action on a recommendation.
 type RecommendationFeedback struct {
 	ID        string `json:"id"`

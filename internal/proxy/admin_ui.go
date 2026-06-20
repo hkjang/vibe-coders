@@ -936,10 +936,11 @@ const adminHTML = `<!doctype html>
           { label: 'IP', href: '#/ips', active: tab === 'ips' },
           { label: '사용 한도', href: '#/quotas', active: tab === 'quotas' },
         ]);
-      } else if (tab === 'safety' || tab === 'skills' || tab === 'modeldeprecations') {
+      } else if (tab === 'safety' || tab === 'skills' || tab === 'skill-studio' || tab === 'modeldeprecations') {
         el.innerHTML = subNav([
           { label: '안전', href: '#/safety', active: tab === 'safety' },
           { label: 'Skills', href: '#/skills', active: tab === 'skills' },
+          { label: 'Skill Studio', href: '#/skill-studio', active: tab === 'skill-studio' },
           { label: '모델 일몰', href: '#/modeldeprecations', active: tab === 'modeldeprecations' },
         ]);
       } else if (tab === 'mcp' || tab === 'agents' || tab === 'vcs') {
@@ -966,7 +967,7 @@ const adminHTML = `<!doctype html>
       const navParent = {
         xview: 'dashboard', waterfall: 'dashboard', llm: 'dashboard',
         teams: 'users', ips: 'users', quotas: 'users',
-        skills: 'safety', modeldeprecations: 'safety',
+        skills: 'safety', 'skill-studio': 'safety', modeldeprecations: 'safety',
         agents: 'mcp', vcs: 'mcp',
         clickhouse: 'dwdashboard', runtimesettings: 'settings',
       };
@@ -994,6 +995,7 @@ const adminHTML = `<!doctype html>
           case 'safety':    await renderSafety(); break;
           case 'text2sql':  await renderText2SQL(); break;
           case 'skills':    await renderSkills(); break;
+          case 'skill-studio': await renderSkillStudio(params); break;
           case 'modeldeprecations': await renderModelDeprecations(); break;
           case 'personalization': rest.length ? await renderPersonalProfileDetail(decodeURIComponent(rest.join('/'))) : await renderPersonalization(); break;
           case 'mykeys':    await renderMyKeys(); break;
@@ -7816,6 +7818,244 @@ const adminHTML = `<!doctype html>
       await api('/admin/model-deprecations/' + encodeURIComponent(id), { method: 'DELETE' });
       await renderModelDeprecations();
     };
+    // ── Skill Studio: 후보 추천 → 채택 → 평가 → Chat 테스트 → 스테이징 → 프로덕션 마법사 ──
+    function studioStatusBadge(st) {
+      const cls = st === 'production' ? '' : (st === 'deprecated' ? 'error' : 'warn');
+      return '<span class="status ' + cls + '">' + escapeHTML(st || '') + '</span>';
+    }
+    const studioSourceLabel = { fingerprint: '프롬프트 클러스터', product: '프롬프트 상품', text2sql: 'Text2SQL 반복질문', recommendation: '개인화 추천', skill_gap: '스킬 갭' };
+
+    async function renderSkillStudio() {
+      const view = document.getElementById('view');
+      view.innerHTML = section('Skill Studio', '<div class="empty">불러오는 중...</div>');
+      const [cand, sk] = await Promise.all([
+        api('/admin/skill-studio/candidates').catch(e => ({ candidates: [], _err: e.message })),
+        api('/admin/skills').catch(() => ({ skills: [] })),
+      ]);
+      const candidates = cand.candidates || [];
+      const skills = sk.skills || [];
+      window.__studioSkills = {}; skills.forEach(s => { window.__studioSkills[s.name] = s; });
+      window.__studioCands = {}; candidates.forEach(c => { window.__studioCands[c.id] = c; });
+
+      const bySource = cand.by_source || {};
+      const kpis = '<div class="kpis">' +
+        kpi('후보 총계', fmt(candidates.length)) +
+        Object.keys(bySource).map(s => kpi(studioSourceLabel[s] || s, fmt(bySource[s]))).join('') +
+      '</div>';
+
+      const candRows = candidates.length ? candidates.map(c =>
+        '<tr>' +
+        '<td><span class="status">' + escapeHTML(studioSourceLabel[c.source] || c.source) + '</span></td>' +
+        '<td><strong>' + escapeHTML(c.title) + '</strong><div class="muted" style="font-size:11px">' + escapeHTML(c.suggested_name) + '</div></td>' +
+        '<td class="muted" style="font-size:11px">' + escapeHTML(c.rationale || '') + '</td>' +
+        '<td>' + (c.already_skill
+            ? '<span class="status">이미 스킬</span> <button class="secondary" type="button" style="font-size:11px" onclick="studioOpenWizard(\'' + escapeAttr(c.suggested_name) + '\')">마법사</button>'
+            : '<button type="button" style="font-size:11px" onclick="studioAdopt(\'' + escapeAttr(c.id) + '\')">draft로 채택</button>') +
+        '</td>' +
+        '</tr>'
+      ).join('') : '<tr><td colspan="4"><div class="empty">추천 후보가 없습니다. 사용 데이터가 쌓이면 자동으로 나타납니다.</div></td></tr>';
+
+      const candTable =
+        '<table><thead><tr><th>출처</th><th>후보</th><th>근거 신호</th><th>액션</th></tr></thead><tbody>' + candRows + '</tbody></table>';
+
+      // Wizard skill selector: drafts + staging are in-flight; production/deprecated shown for reference.
+      const inflight = skills.filter(s => s.status === 'draft' || s.status === 'staging');
+      const wizSelect =
+        '<div class="toolbar">' +
+          '<label>마법사 대상 스킬 <select id="studio-skill-select" onchange="studioOpenWizard(this.value)">' +
+            '<option value="">— 선택 —</option>' +
+            inflight.map(s => '<option value="' + escapeAttr(s.name) + '">' + escapeHTML(s.name) + ' (' + s.status + ')</option>').join('') +
+          '</select></label>' +
+          '<span class="muted" style="font-size:12px">draft·staging 스킬을 선택해 평가→테스트→승격을 진행합니다.</span>' +
+        '</div>' +
+        '<div id="studio-wizard"></div>';
+
+      view.innerHTML =
+        section('Skill Studio — 후보 추천', kpis + (cand._err ? '<div class="status error">' + escapeHTML(cand._err) + '</div>' : '') + candTable) +
+        section('Skill Studio — 승격 마법사', wizSelect);
+    }
+
+    window.studioAdopt = (candID) => {
+      const c = (window.__studioCands || {})[candID];
+      if (!c) return;
+      const sug = c.suggested || {};
+      openModal('후보 채택 → draft 스킬',
+        '<div class="kv">' +
+          row('이름(slug)', '<input id="studio-ad-name" value="' + escapeAttr(c.suggested_name) + '" style="width:100%">') +
+          row('설명', '<input id="studio-ad-desc" value="' + escapeAttr(c.description || '') + '" style="width:100%">') +
+          row('위험도', '<select id="studio-ad-risk">' + ['low','medium','high'].map(x => '<option value="' + x + '"' + (x === (sug.risk_level||'low') ? ' selected' : '') + '>' + x + '</option>').join('') + '</select>') +
+          row('허용 모델', '<input id="studio-ad-models" value="' + escapeAttr(sug.allowed_models || '') + '" placeholder="예: gpt-*, qwen-plus" style="width:100%">') +
+          row('허용 도구', '<input id="studio-ad-tools" value="' + escapeAttr(sug.allowed_tools || '') + '" placeholder="예: sql-runner, search" style="width:100%">') +
+          row('지침', '<textarea id="studio-ad-instr" style="width:100%;min-height:140px;resize:vertical">' + escapeHTML(sug.instructions || '') + '</textarea>') +
+        '</div>' +
+        '<div style="margin-top:10px;display:flex;gap:8px"><button type="button" id="studio-ad-btn">채택</button><button type="button" class="secondary" onclick="closeModal()">취소</button></div>' +
+        '<div id="studio-ad-result" class="muted" style="margin-top:8px;font-size:12px"></div>'
+      );
+      document.getElementById('studio-ad-btn').onclick = async () => {
+        const out = document.getElementById('studio-ad-result');
+        try {
+          const r = await api('/admin/skill-studio/adopt', { method: 'POST', body: JSON.stringify({
+            name: document.getElementById('studio-ad-name').value.trim(),
+            description: document.getElementById('studio-ad-desc').value.trim(),
+            risk_level: document.getElementById('studio-ad-risk').value,
+            allowed_models: document.getElementById('studio-ad-models').value.trim(),
+            allowed_tools: document.getElementById('studio-ad-tools').value.trim(),
+            instructions: document.getElementById('studio-ad-instr').value,
+            source: c.source, signal: c.signal || {},
+          }) });
+          closeModal();
+          await renderSkillStudio();
+          studioOpenWizard((r.skill && r.skill.name) || '');
+        } catch (e) { out.innerHTML = '<span class="status error">' + escapeHTML(e.message) + '</span>'; }
+      };
+    };
+
+    window.studioOpenWizard = async (name) => {
+      window.__studioWizardName = name;
+      const sel = document.getElementById('studio-skill-select');
+      if (sel && sel.value !== name) sel.value = name;
+      await studioRenderWizard();
+    };
+
+    async function studioRenderWizard() {
+      const host = document.getElementById('studio-wizard');
+      if (!host) return;
+      const name = window.__studioWizardName;
+      if (!name) { host.innerHTML = ''; return; }
+      host.innerHTML = '<div class="empty">불러오는 중...</div>';
+      let rd, sk;
+      try {
+        [rd, sk] = await Promise.all([
+          api('/admin/skill-studio/readiness?name=' + encodeURIComponent(name)),
+          api('/admin/skills/by-name/' + encodeURIComponent(name)).then(r => r.skill),
+        ]);
+      } catch (e) { host.innerHTML = '<div class="status error">' + escapeHTML(e.message) + '</div>'; return; }
+      window.__studioSkills[name] = sk;
+
+      const steps = ['평가', 'Chat 테스트', '스테이징', '프로덕션'];
+      const curStep = sk.status === 'staging' ? 3 : 1;
+      const stepper = '<div style="display:flex;gap:6px;margin-bottom:12px">' + steps.map((s, i) =>
+        '<span class="status ' + (i + 1 <= curStep ? '' : 'warn') + '" style="font-size:11px">' + (i + 1) + '. ' + s + '</span>'
+      ).join('') + '</div>';
+
+      // Step 1: 평가 (policy dry-run)
+      const evalStep =
+        '<h4 style="margin:10px 0 6px">1. 정책 평가 (dry-run)</h4>' +
+        '<div class="toolbar">' +
+          '<input id="studio-ev-model" placeholder="모델 (예: gpt-4o)" value="' + escapeAttr((sk.allowed_models||'').split(',')[0].trim()) + '">' +
+          '<input id="studio-ev-tools" placeholder="도구 쉼표구분 (예: sql-runner)">' +
+          '<input id="studio-ev-team" placeholder="팀 (예: team_data)">' +
+          '<button type="button" onclick="studioEvaluate(\'' + escapeAttr(name) + '\')">평가</button>' +
+        '</div><div id="studio-ev-result" style="margin-top:6px"></div>';
+
+      // Step 2: Chat 테스트
+      const chatStep =
+        '<h4 style="margin:14px 0 6px">2. Chat 테스트 (스킬 지침 적용)</h4>' +
+        '<div class="toolbar">' +
+          '<input id="studio-ct-model" placeholder="모델 (기본 vibe/auto)" value="vibe/auto">' +
+          '<input id="studio-ct-prompt" placeholder="테스트 프롬프트" style="min-width:240px">' +
+          '<button type="button" onclick="studioChatTest(\'' + escapeAttr(name) + '\')">실행</button>' +
+        '</div><div id="studio-ct-result" style="margin-top:6px"></div>';
+
+      // Step 3: 스테이징
+      const stageStep = '<h4 style="margin:14px 0 6px">3. 스테이징 승격</h4>' +
+        (sk.status === 'draft'
+          ? '<button type="button" onclick="studioPromote(\'' + escapeAttr(name) + '\',\'staging\')">draft → staging 승격</button>'
+          : '<div class="muted" style="font-size:12px">현재 상태: ' + escapeHTML(sk.status) + ' (스테이징 완료)</div>');
+
+      // Step 4: 프로덕션 (mandatory readiness checklist + required policy editor)
+      const checklist = '<ul style="list-style:none;padding:0;margin:6px 0">' + (rd.checks || []).map(c =>
+        '<li style="margin:3px 0">' + (c.ok ? '✅' : (c.required ? '❌' : '⚠️')) + ' ' + escapeHTML(c.label) +
+        (c.ok ? '' : ' <span class="muted" style="font-size:11px">— ' + escapeHTML(c.detail) + '</span>') + '</li>'
+      ).join('') + '</ul>';
+      const policyEditor =
+        '<div class="kv" style="margin-top:6px">' +
+          row('허용 모델 *', '<input id="studio-pp-models" value="' + escapeAttr(sk.allowed_models || '') + '" placeholder="필수: gpt-*, qwen-plus" style="width:100%">') +
+          row('허용 도구 *', '<input id="studio-pp-tools" value="' + escapeAttr(sk.allowed_tools || '') + '" placeholder="필수: sql-runner" style="width:100%">') +
+          row('허용 팀 *', '<input id="studio-pp-teams" value="' + escapeAttr(sk.allowed_teams || '') + '" placeholder="필수: team_data, team_pay" style="width:100%">') +
+          row('일일 한도 *', '<input id="studio-pp-limit" type="number" min="1" value="' + (sk.daily_limit || '') + '" placeholder="필수: >0" style="width:120px">') +
+          row('승격 사유', '<input id="studio-pp-note" placeholder="high 위험도는 필수" style="width:100%">') +
+        '</div>' +
+        '<div style="margin-top:8px;display:flex;gap:8px">' +
+          '<button type="button" class="secondary" onclick="studioSavePolicy(\'' + escapeAttr(name) + '\')">정책 저장</button>' +
+          '<button type="button" onclick="studioPromote(\'' + escapeAttr(name) + '\',\'production\')"' + (rd.production_ready && sk.status === 'staging' ? '' : ' disabled title="스테이징 + 필수 항목 충족 시 활성화"') + '>프로덕션 승격</button>' +
+        '</div>';
+      const prodStep = '<h4 style="margin:14px 0 6px">4. 프로덕션 승격 — 필수 검증</h4>' +
+        '<div class="muted" style="font-size:12px;margin-bottom:4px">프로덕션 전환 전 allowed_models · allowed_tools · allowed_teams · daily_limit + 보안 스캔이 모두 통과해야 합니다.</div>' +
+        checklist + policyEditor;
+
+      host.innerHTML =
+        '<div style="border:1px solid var(--border);border-radius:8px;padding:12px">' +
+        '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><strong>' + escapeHTML(name) + '</strong> ' + studioStatusBadge(sk.status) +
+          (rd.production_ready ? '<span class="status">프로덕션 준비완료</span>' : '<span class="status warn">미충족 항목 있음</span>') + '</div>' +
+        stepper + evalStep + chatStep + stageStep + prodStep +
+        '<div id="studio-wiz-result" style="margin-top:8px"></div>' +
+        '</div>';
+    }
+
+    window.studioEvaluate = async (name) => {
+      const out = document.getElementById('studio-ev-result');
+      const tools = document.getElementById('studio-ev-tools').value.split(',').map(t => t.trim()).filter(Boolean);
+      try {
+        const r = await api('/admin/skills/evaluate', { method: 'POST', body: JSON.stringify({
+          name, model: document.getElementById('studio-ev-model').value.trim(), tools, team: document.getElementById('studio-ev-team').value.trim(),
+        }) });
+        out.innerHTML = r.allowed
+          ? '<span class="status">통과 — 위반 없음</span>'
+          : '<span class="status error">위반 ' + (r.violations || []).length + '건</span><ul style="margin:4px 0">' + (r.violations || []).map(v => '<li class="muted" style="font-size:12px">' + escapeHTML(v) + '</li>').join('') + '</ul>';
+      } catch (e) { out.innerHTML = '<span class="status error">' + escapeHTML(e.message) + '</span>'; }
+    };
+
+    window.studioChatTest = async (name) => {
+      const out = document.getElementById('studio-ct-result');
+      const sk = (window.__studioSkills || {})[name] || {};
+      const prompt = document.getElementById('studio-ct-prompt').value.trim() || '이 스킬을 한 문장으로 설명해줘.';
+      const messages = [];
+      if (sk.instructions) messages.push({ role: 'system', content: sk.instructions });
+      messages.push({ role: 'user', content: prompt });
+      out.innerHTML = '<span class="muted">실행 중...</span>';
+      try {
+        const r = await api('/admin/chat-test/run', { method: 'POST', body: JSON.stringify({
+          model: document.getElementById('studio-ct-model').value.trim() || 'vibe/auto',
+          messages, max_tokens: 256, headers: { 'X-Vibe-Skill': name },
+        }) });
+        out.innerHTML = '<div class="status ' + (r.ok ? '' : 'error') + '">HTTP ' + r.status_code + ' · ' + (r.latency_ms || 0) + 'ms</div>' +
+          '<pre style="white-space:pre-wrap;border:1px solid var(--border);border-radius:6px;padding:8px;font-size:12px;max-height:220px;overflow:auto">' + escapeHTML(r.content || r.raw || '(빈 응답)') + '</pre>';
+      } catch (e) { out.innerHTML = '<span class="status error">' + escapeHTML(e.message) + '</span>'; }
+    };
+
+    window.studioSavePolicy = async (name) => {
+      const out = document.getElementById('studio-wiz-result');
+      const sk = (window.__studioSkills || {})[name] || {};
+      try {
+        await api('/admin/skills', { method: 'POST', body: JSON.stringify({
+          name, description: sk.description, version: sk.version, owner: sk.owner,
+          status: sk.status, risk_level: sk.risk_level, instructions: sk.instructions,
+          allowed_models: document.getElementById('studio-pp-models').value.trim(),
+          allowed_tools: document.getElementById('studio-pp-tools').value.trim(),
+          allowed_teams: document.getElementById('studio-pp-teams').value.trim(),
+          daily_limit: parseInt(document.getElementById('studio-pp-limit').value, 10) || 0,
+        }) });
+        out.innerHTML = '<span class="status">정책 저장됨 — 검증 갱신 중...</span>';
+        await studioRenderWizard();
+      } catch (e) { out.innerHTML = '<span class="status error">' + escapeHTML(e.message) + '</span>'; }
+    };
+
+    window.studioPromote = async (name, to) => {
+      const out = document.getElementById('studio-wiz-result');
+      const note = (to === 'production') ? (document.getElementById('studio-pp-note') || {}).value || '' : '';
+      try {
+        await api('/admin/skills/promote', { method: 'POST', body: JSON.stringify({ name, to_status: to, note }) });
+        if (out) out.innerHTML = '<span class="status">' + escapeHTML(to) + ' 승격 완료</span>';
+        await renderSkillStudio();
+        studioOpenWizard(name);
+      } catch (e) {
+        if (out) out.innerHTML = '<span class="status error">' + escapeHTML(e.message) + '</span>';
+        else alert('승격 오류: ' + e.message);
+      }
+    };
+    // ── Skill Studio 끝 ──────────────────────────────────────────────────
+
     async function renderSkills() {
       const view = document.getElementById('view');
       const statusFilter = sessionStorage.getItem('skillStatusFilter') || '';

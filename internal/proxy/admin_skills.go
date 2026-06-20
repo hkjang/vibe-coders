@@ -279,8 +279,41 @@ var validSkillTransitions = map[string]map[string]bool{
 	"deprecated": {"staging": true, "draft": true},
 }
 
+// productionPolicyChecks returns one entry per mandatory production guardrail with whether
+// it is satisfied. Reaching production requires every required policy to be set so a skill
+// can never be published without explicit model/tool/team scoping and a daily cap.
+type policyCheck struct {
+	Key      string `json:"key"`
+	Label    string `json:"label"`
+	OK       bool   `json:"ok"`
+	Required bool   `json:"required"`
+	Detail   string `json:"detail"`
+}
+
+func productionPolicyChecks(sk store.Skill) []policyCheck {
+	return []policyCheck{
+		{Key: "instructions", Label: "지침(instructions)", Required: true, OK: strings.TrimSpace(sk.Instructions) != "", Detail: "호출자에게 전달되는 지침이 비어 있으면 안 됩니다"},
+		{Key: "allowed_models", Label: "허용 모델(allowed_models)", Required: true, OK: strings.TrimSpace(sk.AllowedModels) != "", Detail: "프로덕션 스킬은 모델 화이트리스트가 필요합니다"},
+		{Key: "allowed_tools", Label: "허용 도구(allowed_tools)", Required: true, OK: strings.TrimSpace(sk.AllowedTools) != "", Detail: "프로덕션 스킬은 도구 화이트리스트가 필요합니다"},
+		{Key: "allowed_teams", Label: "허용 팀(allowed_teams)", Required: true, OK: strings.TrimSpace(sk.AllowedTeams) != "", Detail: "프로덕션 스킬은 사용 가능 팀을 지정해야 합니다"},
+		{Key: "daily_limit", Label: "일일 한도(daily_limit)", Required: true, OK: sk.DailyLimit > 0, Detail: "프로덕션 스킬은 일일 실행 한도(>0)가 필요합니다"},
+	}
+}
+
+// missingProductionPolicies returns the labels of unmet mandatory production guardrails.
+func missingProductionPolicies(sk store.Skill) []string {
+	missing := []string{}
+	for _, c := range productionPolicyChecks(sk) {
+		if c.Required && !c.OK {
+			missing = append(missing, c.Label)
+		}
+	}
+	return missing
+}
+
 // skillPromotionGate returns the reason a transition is not allowed, or "" if it passes.
-// Gate rules to production: instructions must be present (callers receive them); high-risk
+// Gate rules to production: instructions must be present (callers receive them); the
+// mandatory guardrails (allowed_models/tools/teams + daily_limit) must all be set; high-risk
 // skills require a justification note.
 func skillPromotionGate(sk store.Skill, toStatus, note string) string {
 	from := strings.TrimSpace(sk.Status)
@@ -296,6 +329,9 @@ func skillPromotionGate(sk store.Skill, toStatus, note string) string {
 	if toStatus == "production" {
 		if strings.TrimSpace(sk.Instructions) == "" {
 			return "a production skill must have non-empty instructions"
+		}
+		if missing := missingProductionPolicies(sk); len(missing) > 0 {
+			return "프로덕션 전환 전 필수 항목 누락: " + strings.Join(missing, ", ")
 		}
 		if sk.RiskLevel == "high" && strings.TrimSpace(note) == "" {
 			return "high-risk skills require a justification note to reach production"

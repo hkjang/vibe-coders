@@ -214,6 +214,13 @@ func TestSkillEnforceBlocks(t *testing.T) {
 }
 
 func TestSkillPromotionGate(t *testing.T) {
+	// ready is a skill that satisfies every mandatory production guardrail.
+	ready := func() store.Skill {
+		return store.Skill{
+			Status: "staging", Instructions: "x",
+			AllowedModels: "gpt-*", AllowedTools: "sql-runner", AllowedTeams: "team_data", DailyLimit: 100,
+		}
+	}
 	// draft → production is blocked (must stage first).
 	if r := skillPromotionGate(store.Skill{Status: "draft", Instructions: "x"}, "production", ""); r == "" {
 		t.Fatal("expected draft→production to be gated")
@@ -222,16 +229,33 @@ func TestSkillPromotionGate(t *testing.T) {
 	if r := skillPromotionGate(store.Skill{Status: "staging", Instructions: ""}, "production", ""); r == "" {
 		t.Fatal("expected empty-instructions production promotion to be gated")
 	}
-	// high-risk staging → production needs a note.
-	if r := skillPromotionGate(store.Skill{Status: "staging", Instructions: "x", RiskLevel: "high"}, "production", ""); r == "" {
+	// staging → production with instructions but no policy guardrails is gated (mandatory).
+	if r := skillPromotionGate(store.Skill{Status: "staging", Instructions: "x"}, "production", ""); r == "" {
+		t.Fatal("expected production promotion without allowed_models/tools/teams/daily_limit to be gated")
+	}
+	// individually missing guardrails are each gated.
+	noLimit := ready()
+	noLimit.DailyLimit = 0
+	if r := skillPromotionGate(noLimit, "production", ""); r == "" {
+		t.Fatal("expected production promotion without daily_limit to be gated")
+	}
+	noTeam := ready()
+	noTeam.AllowedTeams = ""
+	if r := skillPromotionGate(noTeam, "production", ""); r == "" {
+		t.Fatal("expected production promotion without allowed_teams to be gated")
+	}
+	// high-risk staging → production needs a note (even when policies are set).
+	hr := ready()
+	hr.RiskLevel = "high"
+	if r := skillPromotionGate(hr, "production", ""); r == "" {
 		t.Fatal("expected high-risk production promotion without note to be gated")
 	}
-	// happy path: staging → production with instructions (+ note for high risk).
-	if r := skillPromotionGate(store.Skill{Status: "staging", Instructions: "x"}, "production", ""); r != "" {
-		t.Fatalf("expected staging→production to pass, got %q", r)
+	// happy path: all guardrails set (+ note for high risk).
+	if r := skillPromotionGate(ready(), "production", ""); r != "" {
+		t.Fatalf("expected fully-configured staging→production to pass, got %q", r)
 	}
-	if r := skillPromotionGate(store.Skill{Status: "staging", Instructions: "x", RiskLevel: "high"}, "production", "reviewed"); r != "" {
-		t.Fatalf("expected high-risk with note to pass, got %q", r)
+	if r := skillPromotionGate(hr, "production", "reviewed"); r != "" {
+		t.Fatalf("expected high-risk with note + guardrails to pass, got %q", r)
 	}
 }
 
@@ -249,7 +273,8 @@ func TestSkillPromoteWorkflow(t *testing.T) {
 	defer srv.Close()
 
 	ctx := context.Background()
-	if _, err := db.UpsertSkill(ctx, store.Skill{Name: "flow", Status: "draft", Instructions: "do the thing"}, "tester"); err != nil {
+	if _, err := db.UpsertSkill(ctx, store.Skill{Name: "flow", Status: "draft", Instructions: "do the thing",
+		AllowedModels: "gpt-*", AllowedTools: "sql-runner", AllowedTeams: "team_data", DailyLimit: 100}, "tester"); err != nil {
 		t.Fatal(err)
 	}
 
