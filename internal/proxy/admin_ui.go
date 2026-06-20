@@ -8819,8 +8819,10 @@ const adminHTML = `<!doctype html>
       view.innerHTML = section('내 홈', kpis) +
         '<div id="me-actions"></div><div id="me-report"></div>' +
         profCard + usageCard + modelsCard + failCard + keyCard + recCard +
-        '<div id="me-notifications"></div><div id="me-sessions"></div>';
+        '<div id="me-recmodels"></div><div id="me-notifications"></div><div id="me-sessions"></div>';
 
+      // 내 업무 추천 모델 — 최근 작업 유형 + 모델 용도 태그 결합.
+      meLoadRecommendedModels();
       // 로그인 세션 관리 — 활성 세션 목록 + 개별/타 세션 일괄 종료.
       meLoadSessions();
 
@@ -8868,6 +8870,28 @@ const adminHTML = `<!doctype html>
             : '<p class="muted">새 알림이 없습니다.</p>') + '</div>');
       }).catch(() => {});
     }
+
+    // 내 업무 추천 모델: 최근 작업 유형 + 관리자 모델 용도 태그 결합.
+    window.meLoadRecommendedModels = async () => {
+      const host = document.getElementById('me-recmodels');
+      if (!host) return;
+      let d;
+      try { d = await api('/me/recommended-models'); } catch (e) { host.innerHTML = ''; return; }
+      const recs = d.task_recommendations || [];
+      if (!recs.length && !(d.your_models || []).some(m => m.tags)) { host.innerHTML = ''; return; } // 태그 없으면 카드 숨김
+      const taskRows = recs.map(t =>
+        '<div style="font-size:12px;margin:3px 0"><strong>' + escapeHTML(t.task_type) + '</strong> <span class="muted">(' + fmt(t.requests) + '회)</span> ' +
+        ((t.recommend || []).length ? '👍 ' + (t.recommend || []).map(escapeHTML).join(', ') : '') +
+        ((t.avoid || []).length ? ' <span class="status warn" style="font-size:9px">지양: ' + (t.avoid || []).map(escapeHTML).join(', ') + '</span>' : '') +
+        '</div>').join('');
+      const mine = (d.your_models || []).filter(m => m.tags).slice(0, 6).map(m =>
+        '<div style="font-size:11px" class="muted">' + escapeHTML(m.model) + ': ' + (m.tags.good_for ? '👍' + escapeHTML(m.tags.good_for) : '') + (m.tags.risk_note ? ' ⚠' + escapeHTML(m.tags.risk_note) : '') + '</div>').join('');
+      host.innerHTML = card('내 업무 추천 모델',
+        '<div class="card-body">' +
+        (taskRows || '<p class="muted" style="font-size:12px">작업 유형에 매칭되는 추천 태그가 없습니다.</p>') +
+        (mine ? '<div style="margin-top:6px;border-top:1px solid var(--border);padding-top:6px"><strong style="font-size:11px">내가 쓰는 모델 태그</strong>' + mine + '</div>' : '') +
+        '<p class="muted" style="font-size:10px;margin-top:6px">' + escapeHTML(d.note || '') + '</p></div>');
+    };
 
     // 로그인 세션 관리: 활성 세션 목록(현재 세션 표시) + 개별/타 세션 종료.
     window.meLoadSessions = async () => {
