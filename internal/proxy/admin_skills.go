@@ -399,6 +399,18 @@ func (s *Server) handleSkillPromote(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
+		// Model-fitness gate: high-risk (or opt-in) skills need ≥N passing fitness-evidence records.
+		if modelFitnessRequired(sk) {
+			passing, _ := s.db.CountPassingSkillFitnessEvidence(r.Context(), name)
+			if reason := modelFitnessGate(sk, to, passing); reason != "" {
+				writeJSON(w, http.StatusUnprocessableEntity, map[string]any{
+					"error":          map[string]any{"message": reason, "type": "invalid_request_error", "code": "model_fitness_gate"},
+					"passing_count":  passing,
+					"required_count": skillFitnessMinEvidence,
+				})
+				return
+			}
+		}
 	}
 	saved, err := s.db.PromoteSkill(r.Context(), name, to, strings.TrimSpace(p.Version), s.skillActor(r), strings.TrimSpace(p.Note))
 	if err != nil {

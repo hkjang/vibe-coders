@@ -1418,6 +1418,20 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 			created_at TEXT NOT NULL
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_prompt_tc_runs_tc ON prompt_test_case_runs(test_case_id)`,
+		// Skill model-fitness evidence: records that a skill's models were validated (by a
+		// multi-model test / Golden Workflow / Prompt Lab case) — basis for the promotion gate.
+		`CREATE TABLE IF NOT EXISTS skill_fitness_evidence (
+			id TEXT PRIMARY KEY,
+			skill_name TEXT NOT NULL,
+			kind TEXT NOT NULL DEFAULT '',
+			ref_id TEXT NOT NULL DEFAULT '',
+			passed INTEGER NOT NULL DEFAULT 0,
+			score REAL NOT NULL DEFAULT 0,
+			note TEXT NOT NULL DEFAULT '',
+			created_by TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_skill_fitness_skill ON skill_fitness_evidence(skill_name)`,
 		// SSO (Keycloak/OIDC): external identity → internal user linkage.
 		`CREATE TABLE IF NOT EXISTS auth_identities (
 			id TEXT PRIMARY KEY,

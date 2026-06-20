@@ -9185,9 +9185,11 @@ const adminHTML = `<!doctype html>
           '<button type="button" class="secondary" onclick="studioSavePolicy(\'' + escapeAttr(name) + '\')">정책 저장</button>' +
           '<button type="button" onclick="studioPromote(\'' + escapeAttr(name) + '\',\'production\')"' + (rd.production_ready && sk.status === 'staging' ? '' : ' disabled title="스테이징 + 필수 항목 충족 시 활성화"') + '>프로덕션 승격</button>' +
         '</div>';
+      const fitnessPanel = '<div id="studio-fitness-' + escapeAttr(name) + '" style="margin-top:10px"></div>';
       const prodStep = '<h4 style="margin:14px 0 6px">4. 프로덕션 승격 — 필수 검증</h4>' +
-        '<div class="muted" style="font-size:12px;margin-bottom:4px">프로덕션 전환 전 allowed_models · allowed_tools · allowed_teams · daily_limit + 보안 스캔이 모두 통과해야 합니다.</div>' +
-        checklist + policyEditor;
+        '<div class="muted" style="font-size:12px;margin-bottom:4px">프로덕션 전환 전 allowed_models · allowed_tools · allowed_teams · daily_limit + 보안 스캔이 모두 통과해야 합니다. high 위험도(또는 require_model_fitness)는 모델 적합성 근거 ' + '2건 이상이 필요합니다.</div>' +
+        checklist + policyEditor + fitnessPanel;
+      setTimeout(() => studioLoadFitness(name), 0);
 
       host.innerHTML =
         '<div style="border:1px solid var(--border);border-radius:8px;padding:12px">' +
@@ -9244,6 +9246,41 @@ const adminHTML = `<!doctype html>
         out.innerHTML = '<span class="status">정책 저장됨 — 검증 갱신 중...</span>';
         await studioRenderWizard();
       } catch (e) { out.innerHTML = '<span class="status error">' + escapeHTML(e.message) + '</span>'; }
+    };
+
+    // 모델 적합성 근거: high 위험도(또는 require_model_fitness) 스킬의 프로덕션 게이트.
+    window.studioLoadFitness = async (name) => {
+      const host = document.getElementById('studio-fitness-' + name);
+      if (!host) return;
+      let d;
+      try { d = await api('/admin/skills/fitness?skill=' + encodeURIComponent(name)); }
+      catch (e) { host.innerHTML = ''; return; }
+      const ev = d.evidence || [];
+      const ok = (d.passing_count || 0) >= (d.required || 2);
+      const rows = ev.length
+        ? ev.map(e => '<div style="font-size:11px">• <span class="status ' + (e.passed ? '' : 'error') + '" style="font-size:9px">' + (e.passed ? 'pass' : 'fail') + '</span> ' + escapeHTML(e.kind) + (e.ref_id ? ' (' + escapeHTML(e.ref_id) + ')' : '') + (e.score ? ' · ' + e.score.toFixed(1) + '점' : '') + (e.note ? ' — ' + escapeHTML(e.note) : '') + '</div>').join('')
+        : '<span class="muted" style="font-size:11px">근거 없음</span>';
+      host.innerHTML = '<div style="border:1px solid var(--border);border-radius:6px;padding:8px">' +
+        '<strong style="font-size:12px">모델 적합성 근거</strong> <span class="status ' + (ok ? '' : 'warn') + '" style="font-size:9px">' + (d.passing_count || 0) + '/' + (d.required || 2) + ' 통과</span>' +
+        '<div style="margin:4px 0">' + rows + '</div>' +
+        '<div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center">' +
+        '<select id="studio-fit-kind-' + name + '" style="font-size:11px"><option value="multimodel">멀티모델</option><option value="golden">Golden</option><option value="testcase">테스트케이스</option></select>' +
+        '<input id="studio-fit-ref-' + name + '" placeholder="run/workflow/case id" style="font-size:11px;width:160px">' +
+        '<input id="studio-fit-score-' + name + '" type="number" placeholder="점수" style="font-size:11px;width:64px">' +
+        '<label style="font-size:11px"><input type="checkbox" id="studio-fit-pass-' + name + '" checked> 통과</label>' +
+        '<button type="button" class="secondary" style="font-size:11px" onclick="studioAddFitness(\'' + escapeAttr(name) + '\')">근거 추가</button>' +
+        '</div></div>';
+    };
+    window.studioAddFitness = async (name) => {
+      const body = {
+        skill: name,
+        kind: (document.getElementById('studio-fit-kind-' + name) || {}).value || 'multimodel',
+        ref_id: ((document.getElementById('studio-fit-ref-' + name) || {}).value || '').trim(),
+        score: parseFloat((document.getElementById('studio-fit-score-' + name) || {}).value || '0') || 0,
+        passed: (document.getElementById('studio-fit-pass-' + name) || {}).checked !== false,
+      };
+      try { await api('/admin/skills/fitness', { method: 'POST', body: JSON.stringify(body) }); await studioLoadFitness(name); }
+      catch (e) { alert('근거 추가 오류: ' + e.message); }
     };
 
     window.studioPromote = async (name, to) => {
