@@ -9,6 +9,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"vibe-coders/internal/audit"
+	"vibe-coders/internal/store"
 )
 
 // maxMultiRunModels caps how many models one multi-run may call, to bound real cost/latency.
@@ -122,9 +125,33 @@ func (s *Server) handleChatTestMultiRun(w http.ResponseWriter, r *http.Request) 
 			failed++
 		}
 	}
-	s.auditAdmin(r, "chat_test.multi_run", "", auditJSON(map[string]any{"models": len(models), "success": success, "failed": failed}))
+	// Persist the run (response previews/hashes always; prompt original only if opted in).
+	runID := newID("mmt")
+	msgJSON, _ := json.Marshal(req.Messages)
+	run := store.MultiModelTestRun{
+		ID: runID, Title: strings.TrimSpace(req.Title), CreatedBy: s.skillActor(r),
+		PromptHash: audit.HashText(string(msgJSON)), ModelCount: len(models), Success: success, Failed: failed,
+	}
+	if claims, ok := s.currentAccessClaims(r); ok {
+		run.Team = claims.TeamID
+	}
+	if req.SavePrompt {
+		run.PromptPreview = truncateRunes(firstUserMessage(req.Messages, req.Prompt), 300)
+	}
+	stored := make([]store.MultiModelTestResult, 0, len(results))
+	for _, res := range results {
+		stored = append(stored, store.MultiModelTestResult{
+			RunID: runID, Model: res.Model, Provider: res.Provider, Status: res.Status, StatusCode: res.StatusCode,
+			LatencyMS: res.LatencyMS, InputTokens: res.InputTokens, OutputTokens: res.OutputTokens, TotalTokens: res.TotalTokens,
+			CostKRW: res.CostKRWEst, ResponsePreview: truncateRunes(res.Content, 500), ResponseHash: audit.HashText(res.Content), Error: res.Error,
+		})
+	}
+	_ = s.db.SaveMultiModelRun(r.Context(), run, stored)
+
+	s.auditAdmin(r, "chat_test.multi_run", runID, auditJSON(map[string]any{"models": len(models), "success": success, "failed": failed}))
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status": "completed",
+		"run_id": runID,
 		"title":  strings.TrimSpace(req.Title),
 		"summary": map[string]any{
 			"total_models":              len(models),
@@ -217,4 +244,96 @@ func truncateRunes(s string, n int) string {
 		return s
 	}
 	return string(rs[:n]) + "…"
+}
+
+// firstUserMessage returns the first user message content (or the prompt fallback).
+func firstUserMessage(messages []map[string]any, prompt string) string {
+	for _, m := range messages {
+		if role, _ := m["role"].(string); role == "user" {
+			if c, ok := m["content"].(string); ok {
+				return c
+			}
+		}
+	}
+	return prompt
+}
+
+// handleChatTestMultiRuns lists recent multi-model runs (history). GET /admin/chat-test/multi-run/runs
+func (s *Server) handleChatTestMultiRuns(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	runs, err := s.db.ListMultiModelRuns(r.Context(), recentLimit(r))
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "multi_runs_failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"runs": runs})
+}
+
+// handleChatTestMultiRunByID serves a run's detail (GET /admin/chat-test/multi-run/runs/{id})
+// and feedback submission (POST /admin/chat-test/multi-run/runs/{id}/feedback).
+func (s *Server) handleChatTestMultiRunByID(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	rest := strings.TrimPrefix(r.URL.Path, "/admin/chat-test/multi-run/runs/")
+	id := rest
+	if idx := strings.Index(rest, "/"); idx >= 0 {
+		id = rest[:idx]
+		if rest[idx+1:] == "feedback" && r.Method == http.MethodPost {
+			s.handleMultiRunFeedback(w, r, id)
+			return
+		}
+		writeOpenAIError(w, http.StatusNotFound, "not found", "invalid_request_error", "not_found")
+		return
+	}
+	if id == "" || r.Method != http.MethodGet {
+		writeOpenAIError(w, http.StatusBadRequest, "invalid run id", "invalid_request_error", "invalid_run_id")
+		return
+	}
+	run, results, feedback, found, err := s.db.GetMultiModelRun(r.Context(), id)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "multi_run_failed")
+		return
+	}
+	if !found {
+		writeOpenAIError(w, http.StatusNotFound, "run not found", "invalid_request_error", "not_found")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"run": run, "results": results, "feedback": feedback})
+}
+
+// handleMultiRunFeedback records a human rating/comment for one model in a run.
+func (s *Server) handleMultiRunFeedback(w http.ResponseWriter, r *http.Request, runID string) {
+	var p struct {
+		Model   string `json:"model"`
+		Rating  int    `json:"rating"`
+		Label   string `json:"label"`
+		Comment string `json:"comment"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+		writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "invalid_body")
+		return
+	}
+	if strings.TrimSpace(p.Model) == "" {
+		writeOpenAIError(w, http.StatusBadRequest, "model is required", "invalid_request_error", "missing_model")
+		return
+	}
+	if p.Rating < 0 || p.Rating > 5 {
+		writeOpenAIError(w, http.StatusBadRequest, "rating must be 0-5", "invalid_request_error", "invalid_rating")
+		return
+	}
+	fb := store.MultiModelTestFeedback{
+		ID: newID("mmtfb"), RunID: runID, Model: strings.TrimSpace(p.Model),
+		Rating: p.Rating, Label: strings.TrimSpace(p.Label), Comment: strings.TrimSpace(p.Comment), CreatedBy: s.skillActor(r),
+	}
+	if err := s.db.InsertMultiModelFeedback(r.Context(), fb); err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "multi_feedback_failed")
+		return
+	}
+	s.auditAdmin(r, "chat_test.multi_feedback", runID, auditJSON(map[string]any{"model": fb.Model, "rating": fb.Rating}))
+	writeJSON(w, http.StatusOK, map[string]any{"status": "recorded", "run_id": runID, "model": fb.Model})
 }

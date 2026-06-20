@@ -1284,6 +1284,47 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 			created_at TEXT NOT NULL,
 			PRIMARY KEY (user_id, action_type)
 		)`,
+		// Multi-model comparison: persisted runs + per-model results + human feedback.
+		`CREATE TABLE IF NOT EXISTS multi_model_test_runs (
+			id TEXT PRIMARY KEY,
+			title TEXT NOT NULL DEFAULT '',
+			created_by TEXT NOT NULL DEFAULT '',
+			team TEXT NOT NULL DEFAULT '',
+			prompt_hash TEXT NOT NULL DEFAULT '',
+			prompt_preview TEXT NOT NULL DEFAULT '',
+			model_count INTEGER NOT NULL DEFAULT 0,
+			success INTEGER NOT NULL DEFAULT 0,
+			failed INTEGER NOT NULL DEFAULT 0,
+			created_at TEXT NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS multi_model_test_results (
+			run_id TEXT NOT NULL,
+			model TEXT NOT NULL,
+			provider TEXT NOT NULL DEFAULT '',
+			status TEXT NOT NULL DEFAULT '',
+			status_code INTEGER NOT NULL DEFAULT 0,
+			latency_ms INTEGER NOT NULL DEFAULT 0,
+			input_tokens INTEGER NOT NULL DEFAULT 0,
+			output_tokens INTEGER NOT NULL DEFAULT 0,
+			total_tokens INTEGER NOT NULL DEFAULT 0,
+			cost_krw REAL NOT NULL DEFAULT 0,
+			response_preview TEXT NOT NULL DEFAULT '',
+			response_hash TEXT NOT NULL DEFAULT '',
+			error TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_mmt_results_run ON multi_model_test_results(run_id)`,
+		`CREATE TABLE IF NOT EXISTS multi_model_test_feedback (
+			id TEXT PRIMARY KEY,
+			run_id TEXT NOT NULL,
+			model TEXT NOT NULL,
+			rating INTEGER NOT NULL DEFAULT 0,
+			label TEXT NOT NULL DEFAULT '',
+			comment TEXT NOT NULL DEFAULT '',
+			created_by TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_mmt_feedback_run ON multi_model_test_feedback(run_id)`,
 	}
 
 	for _, statement := range statements {

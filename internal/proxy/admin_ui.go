@@ -5943,6 +5943,8 @@ const adminHTML = `<!doctype html>
       try {
         const r = await api('/admin/chat-test/multi-run', { method: 'POST', body: JSON.stringify(body) });
         const results = r.results || [], sum = r.summary || {};
+        const runId = r.run_id || '';
+        window.__mmRunId = runId;
         const won = (v) => '₩' + fmt(Math.round(v || 0));
         const badge = (name, label) => name ? '<span class="status">' + label + ': ' + escapeHTML(name) + '</span> ' : '';
         const table =
@@ -5961,17 +5963,50 @@ const adminHTML = `<!doctype html>
           '<span class="status ' + (x.status === 'success' ? '' : 'error') + '">' + escapeHTML(x.status) + ' · ' + fmt(x.latency_ms) + 'ms</span></div>' +
           (x.error ? '<div class="status error" style="margin-top:6px">' + escapeHTML(x.error) + '</div>' : '') +
           '<pre style="white-space:pre-wrap;font-size:12px;max-height:280px;overflow:auto;margin-top:6px">' + escapeHTML(x.content || '(빈 응답)') + '</pre>' +
+          (runId ? '<div style="display:flex;gap:6px;margin-top:6px;align-items:center">' +
+            '<select id="mm-rate-' + escapeAttr(x.model) + '" style="font-size:11px"><option value="">평가</option>' + [5,4,3,2,1].map(n => '<option value="' + n + '">' + n + '점</option>').join('') + '</select>' +
+            '<input id="mm-comment-' + escapeAttr(x.model) + '" placeholder="코멘트" style="font-size:11px;flex:1">' +
+            '<button type="button" class="secondary" style="font-size:11px" onclick="mmSaveFeedback(\'' + escapeAttr(x.model) + '\')">평가 저장</button></div>' : '') +
           '</div>').join('');
         out.innerHTML =
           '<div style="margin-bottom:6px">' + badge(sum.best_latency_model, '최저 지연') + badge(sum.lowest_cost_success_model, '최저 비용') +
-          '<span class="muted" style="font-size:12px">성공 ' + (sum.success||0) + ' / 실패 ' + (sum.failed||0) + '</span></div>' +
-          table + cards;
+          '<span class="muted" style="font-size:12px">성공 ' + (sum.success||0) + ' / 실패 ' + (sum.failed||0) + (runId ? ' · run ' + escapeHTML(runId) : '') + '</span> ' +
+          '<button type="button" class="secondary" style="font-size:11px" onclick="mmLoadHistory()">이력</button></div>' +
+          table + cards + '<div id="mm-history"></div>';
       } catch (e) {
         out.innerHTML = '<span class="status error">' + escapeHTML(e.message) + '</span>';
       } finally {
         btn.disabled = false; btn.textContent = '멀티 실행';
       }
     }
+
+    window.mmSaveFeedback = async (model) => {
+      const runId = window.__mmRunId;
+      if (!runId) return;
+      const rating = parseInt((document.getElementById('mm-rate-' + model) || {}).value, 10) || 0;
+      const comment = ((document.getElementById('mm-comment-' + model) || {}).value || '').trim();
+      try {
+        await api('/admin/chat-test/multi-run/runs/' + encodeURIComponent(runId) + '/feedback', {
+          method: 'POST', body: JSON.stringify({ model, rating, comment }),
+        });
+        const sel = document.getElementById('mm-rate-' + model);
+        if (sel) sel.insertAdjacentHTML('afterend', '<span class="status" style="font-size:11px">저장됨</span>');
+      } catch (e) { alert('평가 저장 오류: ' + e.message); }
+    };
+
+    window.mmLoadHistory = async () => {
+      const host = document.getElementById('mm-history');
+      if (!host) return;
+      host.innerHTML = '<div class="empty">불러오는 중...</div>';
+      try {
+        const r = await api('/admin/chat-test/multi-run/runs?limit=20');
+        const runs = r.runs || [];
+        host.innerHTML = '<h4 style="margin:10px 0 6px">최근 비교 이력</h4>' + (runs.length
+          ? '<table><thead><tr><th>제목</th><th>모델수</th><th>성공/실패</th><th>작성자</th><th>시각</th></tr></thead><tbody>' +
+            runs.map(x => '<tr><td>' + escapeHTML(x.title || '(제목 없음)') + '<div class="muted" style="font-size:10px">' + escapeHTML(x.id) + '</div></td><td>' + fmt(x.model_count) + '</td><td>' + fmt(x.success) + '/' + fmt(x.failed) + '</td><td class="muted">' + escapeHTML(x.created_by || '') + '</td><td class="muted">' + ago(x.created_at) + '</td></tr>').join('') + '</tbody></table>'
+          : '<p class="muted">저장된 비교 이력이 없습니다.</p>');
+      } catch (e) { host.innerHTML = '<span class="status error">' + escapeHTML(e.message) + '</span>'; }
+    };
 
     function renderChatTestPreview(preview) {
       const complexity = preview.complexity || {};
