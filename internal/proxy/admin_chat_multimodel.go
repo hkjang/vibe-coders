@@ -386,7 +386,8 @@ func (s *Server) handleChatTestMultiRunByID(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	promotions, _ := s.db.ListMultiModelPromotions(r.Context(), id)
-	writeJSON(w, http.StatusOK, map[string]any{"run": run, "results": results, "feedback": feedback, "promotions": promotions})
+	judgements, _ := s.db.ListMultiModelJudgements(r.Context(), id)
+	writeJSON(w, http.StatusOK, map[string]any{"run": run, "results": results, "feedback": feedback, "promotions": promotions, "judgements": judgements})
 }
 
 // handleMultiRunPromote saves a "best model" as a routing-rule DRAFT candidate (never

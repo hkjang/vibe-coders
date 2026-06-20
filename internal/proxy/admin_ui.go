@@ -6115,9 +6115,10 @@ const adminHTML = `<!doctype html>
           '<span class="muted" style="font-size:12px">성공 ' + (sum.success||0) + ' / 실패 ' + (sum.failed||0) + (runId ? ' · run ' + escapeHTML(runId) : '') + '</span> ' +
           '<button type="button" class="secondary" style="font-size:11px" onclick="mmLoadHistory()">이력</button> ' +
           (runId ? '<button type="button" class="secondary" style="font-size:11px" onclick="mmShowDiff()">Diff 보기</button> ' : '') +
+          (runId ? '<button type="button" class="secondary" style="font-size:11px" onclick="mmJudge(\'rule\')">자동 평가</button> ' : '') +
           (runId ? '<button type="button" class="secondary" style="font-size:11px" onclick="mmExport(\'md\')">MD</button> <button type="button" class="secondary" style="font-size:11px" onclick="mmExport(\'csv\')">CSV</button> <button type="button" class="secondary" style="font-size:11px" onclick="mmExport(\'json\')">JSON</button>' : '') +
           '</div>' +
-          table + '<div id="mm-diff"></div>' + cards + '<div id="mm-history"></div>';
+          table + '<div id="mm-diff"></div><div id="mm-judge"></div>' + cards + '<div id="mm-history"></div>';
       } catch (e) {
         out.innerHTML = '<span class="status error">' + escapeHTML(e.message) + '</span>';
       } finally {
@@ -6202,6 +6203,43 @@ const adminHTML = `<!doctype html>
           '<table><thead><tr><th>모델</th><th>문단</th><th>목록</th><th>코드</th><th>표</th><th>길이</th></tr></thead><tbody>' + fmtRows + '</tbody></table>' +
           commonHTML + per +
           '<p class="muted" style="font-size:10px;margin-top:6px">' + escapeHTML(d.note || '') + '</p>' +
+          '</div>');
+      } catch (e) { host.innerHTML = '<span class="status error">' + escapeHTML(e.message) + '</span>'; }
+    };
+
+    // Rubric 기반 자동 평가 (rule 또는 judge model).
+    window.mmJudge = async (method) => {
+      const runId = window.__mmRunId;
+      const host = document.getElementById('mm-judge');
+      if (!runId || !host) return;
+      const body = { run_id: runId, method: method || 'rule' };
+      if (method === 'model') {
+        const jm = prompt('평가(judge) 모델 이름을 입력하세요 (예: claude-opus-4-8):', '');
+        if (!jm) return;
+        body.judge_model = jm.trim();
+      }
+      host.innerHTML = '<div class="empty">평가 중...</div>';
+      try {
+        const d = await api('/admin/chat-test/multi-run/judge', { method: 'POST', body: JSON.stringify(body) });
+        const js = d.judgements || [];
+        const vcls = (v) => v === 'pass' ? '' : (v === 'warn' ? 'warn' : 'error');
+        const rows = js.map(j =>
+          '<tr>' +
+          '<td>' + escapeHTML(j.model) + (j.model === d.best_model ? ' <span class="status" style="font-size:9px">BEST</span>' : '') + '</td>' +
+          '<td><span class="status ' + vcls(j.verdict) + '">' + (j.total_score||0).toFixed(1) + '</span></td>' +
+          '<td>' + (j.accuracy||0).toFixed(0) + '</td>' +
+          '<td>' + (j.completeness||0).toFixed(0) + '</td>' +
+          '<td>' + (j.format_score||0).toFixed(0) + '</td>' +
+          '<td>' + (j.safety||0).toFixed(0) + '</td>' +
+          '<td>' + (j.cost_efficiency||0).toFixed(0) + '</td>' +
+          '<td class="muted" style="font-size:11px">' + escapeHTML(j.reason_summary||'') + '</td>' +
+          '</tr>').join('');
+        host.innerHTML = card('자동 평가 (' + escapeHTML(d.method) + (d.best_model ? ' · best ' + escapeHTML(d.best_model) : '') + ')',
+          '<div class="card-body">' +
+          '<table><thead><tr><th>모델</th><th>총점</th><th>정확성</th><th>완성도</th><th>형식</th><th>안전</th><th>비용효율</th><th>요약</th></tr></thead><tbody>' + rows + '</tbody></table>' +
+          '<div style="margin-top:6px"><button type="button" class="secondary" style="font-size:11px" onclick="mmJudge(\'rule\')">규칙 평가</button> ' +
+          '<button type="button" class="secondary" style="font-size:11px" onclick="mmJudge(\'model\')">모델 평가</button></div>' +
+          '<p class="muted" style="font-size:10px;margin-top:6px">' + escapeHTML(d.note||'') + '</p>' +
           '</div>');
       } catch (e) { host.innerHTML = '<span class="status error">' + escapeHTML(e.message) + '</span>'; }
     };

@@ -1340,6 +1340,28 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 			created_at TEXT NOT NULL
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_mmt_promotions_run ON multi_model_test_promotions(run_id)`,
+		// Multi-model comparison: automated rubric judgements (rule-based or judge-model).
+		// Only scores + reason summary + response_hash are stored (never the raw response).
+		`CREATE TABLE IF NOT EXISTS multi_model_test_judgements (
+			id TEXT PRIMARY KEY,
+			run_id TEXT NOT NULL,
+			model TEXT NOT NULL,
+			method TEXT NOT NULL DEFAULT 'rule',
+			judge_model TEXT NOT NULL DEFAULT '',
+			rubric TEXT NOT NULL DEFAULT '',
+			accuracy REAL NOT NULL DEFAULT 0,
+			completeness REAL NOT NULL DEFAULT 0,
+			format_score REAL NOT NULL DEFAULT 0,
+			safety REAL NOT NULL DEFAULT 0,
+			cost_efficiency REAL NOT NULL DEFAULT 0,
+			total_score REAL NOT NULL DEFAULT 0,
+			verdict TEXT NOT NULL DEFAULT '',
+			reason_summary TEXT NOT NULL DEFAULT '',
+			response_hash TEXT NOT NULL DEFAULT '',
+			created_by TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_mmt_judgements_run ON multi_model_test_judgements(run_id)`,
 		// SSO (Keycloak/OIDC): external identity → internal user linkage.
 		`CREATE TABLE IF NOT EXISTS auth_identities (
 			id TEXT PRIMARY KEY,

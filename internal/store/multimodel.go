@@ -210,3 +210,75 @@ func (s *SQLStore) InsertMultiModelFeedback(ctx context.Context, f MultiModelTes
 		f.ID, f.RunID, f.Model, f.Rating, f.Label, f.Comment, f.CreatedBy, f.CreatedAt)
 	return err
 }
+
+// MultiModelTestJudgement is an automated rubric score for one model's response within a run.
+type MultiModelTestJudgement struct {
+	ID             string  `json:"id"`
+	RunID          string  `json:"run_id"`
+	Model          string  `json:"model"`
+	Method         string  `json:"method"`      // rule | model
+	JudgeModel     string  `json:"judge_model"` // populated for method=model
+	Rubric         string  `json:"rubric"`
+	Accuracy       float64 `json:"accuracy"`
+	Completeness   float64 `json:"completeness"`
+	FormatScore    float64 `json:"format_score"`
+	Safety         float64 `json:"safety"`
+	CostEfficiency float64 `json:"cost_efficiency"`
+	TotalScore     float64 `json:"total_score"`
+	Verdict        string  `json:"verdict"`
+	ReasonSummary  string  `json:"reason_summary"`
+	ResponseHash   string  `json:"response_hash"`
+	CreatedBy      string  `json:"created_by"`
+	CreatedAt      string  `json:"created_at"`
+}
+
+// ReplaceMultiModelJudgements deletes prior judgements for a run and inserts the new set in one
+// transaction (a run carries only its latest judgement pass).
+func (s *SQLStore) ReplaceMultiModelJudgements(ctx context.Context, runID string, js []MultiModelTestJudgement) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, s.bind(`DELETE FROM multi_model_test_judgements WHERE run_id = ?`), runID); err != nil {
+		return err
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	for _, j := range js {
+		if j.CreatedAt == "" {
+			j.CreatedAt = now
+		}
+		if _, err := tx.ExecContext(ctx, s.bind(`INSERT INTO multi_model_test_judgements
+			(id, run_id, model, method, judge_model, rubric, accuracy, completeness, format_score, safety,
+			 cost_efficiency, total_score, verdict, reason_summary, response_hash, created_by, created_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+			j.ID, j.RunID, j.Model, j.Method, j.JudgeModel, j.Rubric, j.Accuracy, j.Completeness, j.FormatScore, j.Safety,
+			j.CostEfficiency, j.TotalScore, j.Verdict, j.ReasonSummary, j.ResponseHash, j.CreatedBy, j.CreatedAt); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// ListMultiModelJudgements returns the stored judgements for a run, highest total first.
+func (s *SQLStore) ListMultiModelJudgements(ctx context.Context, runID string) ([]MultiModelTestJudgement, error) {
+	rows, err := s.db.QueryContext(ctx, s.bind(`SELECT id, run_id, model, method, judge_model, rubric,
+		accuracy, completeness, format_score, safety, cost_efficiency, total_score, verdict, reason_summary,
+		response_hash, created_by, created_at
+		FROM multi_model_test_judgements WHERE run_id = ? ORDER BY total_score DESC`), runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []MultiModelTestJudgement{}
+	for rows.Next() {
+		var j MultiModelTestJudgement
+		if err := rows.Scan(&j.ID, &j.RunID, &j.Model, &j.Method, &j.JudgeModel, &j.Rubric,
+			&j.Accuracy, &j.Completeness, &j.FormatScore, &j.Safety, &j.CostEfficiency, &j.TotalScore,
+			&j.Verdict, &j.ReasonSummary, &j.ResponseHash, &j.CreatedBy, &j.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, j)
+	}
+	return out, rows.Err()
+}
