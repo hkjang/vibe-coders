@@ -1351,6 +1351,21 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 			last_login_at TEXT NOT NULL DEFAULT ''
 		)`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_auth_identities_sub ON auth_identities(provider, issuer, subject)`,
+		`CREATE TABLE IF NOT EXISTS sso_provider_config (
+			provider TEXT PRIMARY KEY,
+			enabled INTEGER NOT NULL DEFAULT 0,
+			issuer_url TEXT NOT NULL DEFAULT '',
+			client_id TEXT NOT NULL DEFAULT '',
+			client_secret_enc TEXT NOT NULL DEFAULT '',
+			redirect_uri TEXT NOT NULL DEFAULT '',
+			scopes TEXT NOT NULL DEFAULT '',
+			default_role TEXT NOT NULL DEFAULT '',
+			role_claim TEXT NOT NULL DEFAULT '',
+			group_claim TEXT NOT NULL DEFAULT '',
+			allow_local_login INTEGER NOT NULL DEFAULT 1,
+			updated_at TEXT NOT NULL DEFAULT '',
+			updated_by TEXT NOT NULL DEFAULT ''
+		)`,
 	}
 
 	for _, statement := range statements {

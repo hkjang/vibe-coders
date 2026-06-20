@@ -31,7 +31,7 @@ import (
 )
 
 // AppVersion is the gateway build version, surfaced in /auth/me and the admin UI.
-const AppVersion = "v0.51.3"
+const AppVersion = "v0.51.4"
 
 type Server struct {
 	cfg            config.Config
@@ -70,6 +70,7 @@ type Server struct {
 	limitsRuntime  atomic.Pointer[config.LimitsConfig]     // admin-settings overlay over cfg.Limits
 	loggingRuntime atomic.Pointer[config.LoggingConfig]    // admin-settings overlay over cfg.Logging
 	mcpRuntime     atomic.Pointer[config.MCPConfig]        // admin-settings overlay over cfg.MCP
+	keycloakCfg    atomic.Pointer[config.KeycloakConfig]   // DB-backed Keycloak provider overlay over cfg.Keycloak (secret decrypted)
 	chFactQueue    chan store.LogRecord                    // async per-request fact ingest queue (bounded)
 	chFactDropped  atomic.Int64                            // requests dropped when the fact queue was full
 	dwCache        *dwQueryCache                           // short-TTL cache for DW dashboard ClickHouse reads
@@ -137,6 +138,10 @@ func NewServer(cfg config.Config, db *store.SQLStore, logger *store.AsyncLogger,
 	// Load admin-managed Text2SQL feature toggles into the in-memory cache.
 	server.reloadText2SQLFeatures(context.Background())
 
+	// Load the DB-backed Keycloak provider overlay (decrypts the stored client secret),
+	// falling back to environment config when no row exists.
+	server.reloadKeycloakConfig(context.Background())
+
 	// Background scheduler for due saved Text2SQL reports (self-disables without an
 	// execute DB).
 	go server.text2sqlReportScheduler()
@@ -197,7 +202,13 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/auth/keycloak/callback", s.handleKeycloakCallback)
 	mux.HandleFunc("/auth/keycloak/logout", s.handleKeycloakLogout)
 	mux.HandleFunc("/auth/keycloak/backchannel-logout", s.handleKeycloakBackchannelLogout)
-	mux.HandleFunc("/admin/sso/keycloak/config", s.handleKeycloakConfig)
+	mux.HandleFunc("/admin/sso/keycloak/config", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPut || r.Method == http.MethodPost {
+			s.handleKeycloakConfigSave(w, r)
+			return
+		}
+		s.handleKeycloakConfig(w, r)
+	})
 	mux.HandleFunc("/admin/sso/keycloak/test", s.handleKeycloakTest)
 	mux.HandleFunc("/admin", s.handleAdminUI)
 	mux.HandleFunc("/admin/", s.handleAdminUI)
@@ -1608,7 +1619,7 @@ func (s *Server) currentAccessClaims(r *http.Request) (accessClaims, bool) {
 		}
 	}
 	// Fall back to a Keycloak-issued RS256 access token (machine clients, SSO callers).
-	if s.cfg.Keycloak.Enabled {
+	if s.keycloakConfig().Enabled {
 		if c, ok := s.verifyKeycloakAccessToken(r.Context(), token); ok {
 			return c, true
 		}

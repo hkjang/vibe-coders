@@ -8600,21 +8600,35 @@ const adminHTML = `<!doctype html>
       try { c = await api('/admin/sso/keycloak/config'); }
       catch (e) { view.innerHTML = section('SSO (Keycloak)', '<div class="card-body" style="padding:16px"><p class="muted">설정을 불러올 수 없습니다: ' + escapeHTML(e.message) + '</p></div>'); return; }
       const yn = (b) => b ? '<span class="status">사용</span>' : '<span class="status warn">미사용</span>';
+      window.__ssoCfg = c;
+      const sourceBadge = c.source === 'db'
+        ? '<span class="status">DB 설정 (secret 암호화 저장)</span>'
+        : '<span class="status warn">환경변수(SSO_KEYCLOAK_*)</span>';
+      const updated = c.source === 'db' && c.updated_at
+        ? '<p class="muted" style="font-size:11px;margin-top:4px">최종 수정: ' + escapeHTML(ago(c.updated_at)) + (c.updated_by ? ' · ' + escapeHTML(c.updated_by) : '') + '</p>'
+        : '';
+      const ti = (id, label, val, ph) => '<label style="display:block;margin:6px 0">' + escapeHTML(label) +
+        '<input type="text" id="' + id + '" value="' + escapeAttr(val || '') + '"' + (ph ? ' placeholder="' + escapeAttr(ph) + '"' : '') + ' style="width:100%;box-sizing:border-box"></label>';
       const cfgCard = card('Keycloak 설정',
-        '<div class="card-body"><div class="kv">' +
-          row('SSO 활성화', yn(c.enabled)) +
-          row('Issuer', escapeHTML(c.issuer_url || '') || '<span class="muted">(미설정)</span>') +
-          row('Client ID', escapeHTML(c.client_id || '') || '<span class="muted">(미설정)</span>') +
-          row('Client Secret', c.client_secret_set ? '<span class="status">설정됨</span>' : '<span class="status error">없음</span>') +
-          row('Redirect URI', escapeHTML(c.redirect_uri || '')) +
-          row('Scopes', escapeHTML((c.scopes || []).join(' '))) +
-          row('기본 Role', escapeHTML(c.default_role || '')) +
-          row('Role Claim', escapeHTML(c.role_claim || '')) +
-          row('Group Claim', escapeHTML(c.group_claim || '')) +
-          row('로컬 로그인 허용', yn(c.allow_local_login)) +
-        '</div>' +
+        '<div class="card-body">' +
+        '<div style="margin-bottom:8px">현재 적용: ' + sourceBadge + ' · SSO ' + yn(c.enabled) + '</div>' + updated +
+        '<label style="display:block;margin:6px 0"><input type="checkbox" id="sso-enabled"' + (c.enabled ? ' checked' : '') + '> SSO 활성화</label>' +
+        ti('sso-issuer', 'Issuer URL', c.issuer_url, 'https://keycloak.example.com/realms/vibe') +
+        ti('sso-client-id', 'Client ID', c.client_id) +
+        '<label style="display:block;margin:6px 0">Client Secret ' +
+          (c.client_secret_set ? '<span class="status" style="font-size:10px">설정됨</span>' : '<span class="status error" style="font-size:10px">없음</span>') +
+          '<input type="password" id="sso-client-secret" value="" placeholder="변경 시에만 입력 (비우면 기존 값 유지)" style="width:100%;box-sizing:border-box"></label>' +
+        '<label style="display:block;margin:2px 0 8px"><input type="checkbox" id="sso-secret-clear"> Client Secret 비우기(public client)</label>' +
+        ti('sso-redirect', 'Redirect URI', c.redirect_uri, 'https://gateway.example.com/auth/keycloak/callback') +
+        ti('sso-scopes', 'Scopes (공백 구분)', (c.scopes || []).join(' '), 'openid profile email') +
+        ti('sso-default-role', '기본 Role (비우면 매핑 실패 시 로그인 차단)', c.default_role, 'developer') +
+        ti('sso-role-claim', 'Role Claim', c.role_claim, 'realm_access.roles') +
+        ti('sso-group-claim', 'Group Claim', c.group_claim, 'groups') +
+        '<label style="display:block;margin:6px 0"><input type="checkbox" id="sso-allow-local"' + (c.allow_local_login ? ' checked' : '') + '> 로컬 로그인 허용 (fallback)</label>' +
         '<p class="muted" style="font-size:11px;margin-top:8px">' + escapeHTML(c.note || '') + '</p>' +
-        '<div style="margin-top:8px"><button type="button" id="sso-test-btn">연결 테스트</button></div>' +
+        '<div style="margin-top:10px"><button type="button" id="sso-save-btn">저장 (DB)</button> ' +
+          '<button type="button" id="sso-test-btn">연결 테스트</button></div>' +
+        '<div id="sso-save-out" style="margin-top:8px"></div>' +
         '<div id="sso-test-out" style="margin-top:8px"></div>' +
         '</div>');
       const rm = c.role_map || {};
@@ -8624,6 +8638,33 @@ const adminHTML = `<!doctype html>
           '<tr><td class="muted">/teams/&lt;name&gt; (group)</td><td class="muted">team:&lt;name&gt;</td></tr>' +
         '</tbody></table><p class="muted" style="font-size:11px;margin-top:6px">매핑 실패 시 기본 Role(' + escapeHTML(c.default_role || '') + ')로 폴백, 기본 Role이 비어 있으면 로그인 차단.</p></div>');
       view.innerHTML = section('SSO (Keycloak)', '') + cfgCard + mapCard;
+      const saveBtn = document.getElementById('sso-save-btn');
+      if (saveBtn) saveBtn.addEventListener('click', async () => {
+        const out = document.getElementById('sso-save-out');
+        const v = (id) => (document.getElementById(id).value || '').trim();
+        const chk = (id) => document.getElementById(id).checked;
+        const body = {
+          enabled: chk('sso-enabled'),
+          issuer_url: v('sso-issuer'),
+          client_id: v('sso-client-id'),
+          redirect_uri: v('sso-redirect'),
+          scopes: v('sso-scopes') ? v('sso-scopes').split(/\s+/) : [],
+          default_role: v('sso-default-role'),
+          role_claim: v('sso-role-claim'),
+          group_claim: v('sso-group-claim'),
+          allow_local_login: chk('sso-allow-local'),
+        };
+        // Only send client_secret when re-entered or explicitly clearing; otherwise keep existing.
+        const sec = v('sso-client-secret');
+        if (chk('sso-secret-clear')) body.client_secret = '';
+        else if (sec) body.client_secret = sec;
+        out.innerHTML = '<span class="muted">저장 중...</span>';
+        try {
+          await api('/admin/sso/keycloak/config', { method: 'PUT', body: JSON.stringify(body) });
+          out.innerHTML = '<span class="status">저장됨 (DB 설정이 환경변수보다 우선 적용)</span>';
+          await renderSSOSettings();
+        } catch (e) { out.innerHTML = '<span class="status error">' + escapeHTML(e.message) + '</span>'; }
+      });
       const btn = document.getElementById('sso-test-btn');
       if (btn) btn.addEventListener('click', async () => {
         const out = document.getElementById('sso-test-out');

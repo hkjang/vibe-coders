@@ -15,7 +15,7 @@ import (
 // handleSSOStatus is a public endpoint telling the login screen whether SSO is available.
 // GET /auth/sso/status
 func (s *Server) handleSSOStatus(w http.ResponseWriter, r *http.Request) {
-	kc := s.cfg.Keycloak
+	kc := s.keycloakConfig()
 	writeJSON(w, http.StatusOK, map[string]any{
 		"keycloak_enabled":  kc.Enabled,
 		"allow_local_login": !kc.Enabled || kc.AllowLocalLogin,
@@ -26,7 +26,7 @@ func (s *Server) handleSSOStatus(w http.ResponseWriter, r *http.Request) {
 // handleKeycloakLogin starts the Authorization Code + PKCE flow and redirects to Keycloak.
 // GET /auth/keycloak/login
 func (s *Server) handleKeycloakLogin(w http.ResponseWriter, r *http.Request) {
-	kc := s.cfg.Keycloak
+	kc := s.keycloakConfig()
 	if !kc.Enabled {
 		writeOpenAIError(w, http.StatusNotFound, "SSO is not enabled", "invalid_request_error", "sso_disabled")
 		return
@@ -58,7 +58,7 @@ func (s *Server) handleKeycloakLogin(w http.ResponseWriter, r *http.Request) {
 // session, and redirects back to the admin UI with the tokens in the URL fragment.
 // GET /auth/keycloak/callback
 func (s *Server) handleKeycloakCallback(w http.ResponseWriter, r *http.Request) {
-	kc := s.cfg.Keycloak
+	kc := s.keycloakConfig()
 	if !kc.Enabled {
 		writeOpenAIError(w, http.StatusNotFound, "SSO is not enabled", "invalid_request_error", "sso_disabled")
 		return
@@ -128,7 +128,7 @@ type keycloakTokenResponse struct {
 
 // keycloakExchangeCode swaps an authorization code (+ PKCE verifier) for tokens.
 func (s *Server) keycloakExchangeCode(ctx context.Context, disc oidcDiscovery, code, verifier string) (keycloakTokenResponse, error) {
-	kc := s.cfg.Keycloak
+	kc := s.keycloakConfig()
 	form := url.Values{}
 	form.Set("grant_type", "authorization_code")
 	form.Set("code", code)
@@ -169,7 +169,7 @@ func (e *keycloakError) Error() string { return e.msg }
 // provisionKeycloakUser resolves (or creates) the internal user for a verified ID token,
 // syncing role and team from claims. Returns the user and resolved team id.
 func (s *Server) provisionKeycloakUser(ctx context.Context, claims map[string]any) (store.AuthUser, string, error) {
-	kc := s.cfg.Keycloak
+	kc := s.keycloakConfig()
 	sub := strClaim(claims, "sub")
 	email := strClaim(claims, "email")
 	name := firstNonEmpty(strClaim(claims, "name"), strClaim(claims, "preferred_username"), email)
@@ -218,7 +218,7 @@ func (s *Server) provisionKeycloakUser(ctx context.Context, claims map[string]an
 // finishKeycloakLink upserts the identity row and (best-effort) the team membership.
 func (s *Server) finishKeycloakLink(ctx context.Context, userID, sub, email, username, team string) {
 	_ = s.db.UpsertAuthIdentity(ctx, store.AuthIdentity{
-		ID: newID("authid"), UserID: userID, Provider: "keycloak", Issuer: s.cfg.Keycloak.IssuerURL,
+		ID: newID("authid"), UserID: userID, Provider: "keycloak", Issuer: s.keycloakConfig().IssuerURL,
 		Subject: sub, Email: email, PreferredUsername: username,
 	})
 	if team != "" {
@@ -244,7 +244,7 @@ func backchannelLogoutEvent(claims map[string]any) bool {
 // the subject is mapped to an internal user and all their sessions are revoked.
 // POST /auth/keycloak/backchannel-logout  (form: logout_token=<jwt>)
 func (s *Server) handleKeycloakBackchannelLogout(w http.ResponseWriter, r *http.Request) {
-	if !s.cfg.Keycloak.Enabled {
+	if !s.keycloakConfig().Enabled {
 		writeOpenAIError(w, http.StatusNotFound, "SSO is not enabled", "invalid_request_error", "sso_disabled")
 		return
 	}
@@ -265,7 +265,7 @@ func (s *Server) handleKeycloakBackchannelLogout(w http.ResponseWriter, r *http.
 		writeOpenAIError(w, http.StatusBadRequest, "missing logout_token", "invalid_request_error", "missing_token")
 		return
 	}
-	disc, err := keycloakDiscover(r.Context(), s.cfg.Keycloak.IssuerURL)
+	disc, err := keycloakDiscover(r.Context(), s.keycloakConfig().IssuerURL)
 	if err != nil {
 		writeOpenAIError(w, http.StatusBadGateway, "discovery failed", "server_error", "discovery_failed")
 		return
@@ -276,8 +276,8 @@ func (s *Server) handleKeycloakBackchannelLogout(w http.ResponseWriter, r *http.
 		return
 	}
 	// audience + back-channel event.
-	if !audienceMatches(claims["aud"], s.cfg.Keycloak.ClientID) {
-		if azp, _ := claims["azp"].(string); azp != s.cfg.Keycloak.ClientID {
+	if !audienceMatches(claims["aud"], s.keycloakConfig().ClientID) {
+		if azp, _ := claims["azp"].(string); azp != s.keycloakConfig().ClientID {
 			writeOpenAIError(w, http.StatusBadRequest, "logout_token audience mismatch", "invalid_request_error", "invalid_token")
 			return
 		}
@@ -291,7 +291,7 @@ func (s *Server) handleKeycloakBackchannelLogout(w http.ResponseWriter, r *http.
 		writeOpenAIError(w, http.StatusBadRequest, "logout_token missing sub", "invalid_request_error", "invalid_token")
 		return
 	}
-	if id, found, _ := s.db.AuthIdentityBySubject(r.Context(), "keycloak", s.cfg.Keycloak.IssuerURL, sub); found {
+	if id, found, _ := s.db.AuthIdentityBySubject(r.Context(), "keycloak", s.keycloakConfig().IssuerURL, sub); found {
 		_ = s.db.RevokeAuthSessionsForUser(r.Context(), id.UserID)
 		s.auditAuthEvent(r.Context(), "sso_backchannel_logout", id.UserID, "", "", "keycloak sub="+sub)
 	}
@@ -320,15 +320,15 @@ func (s *Server) handleKeycloakLogout(w http.ResponseWriter, r *http.Request) {
 		s.auditAuthEvent(r.Context(), "sso_logout", claims.Subject, "", claims.TeamID, "keycloak")
 	}
 	endSession := ""
-	if disc, err := keycloakDiscover(r.Context(), s.cfg.Keycloak.IssuerURL); err == nil && disc.EndSessionEndpoint != "" {
+	if disc, err := keycloakDiscover(r.Context(), s.keycloakConfig().IssuerURL); err == nil && disc.EndSessionEndpoint != "" {
 		q := url.Values{}
-		q.Set("client_id", s.cfg.Keycloak.ClientID)
+		q.Set("client_id", s.keycloakConfig().ClientID)
 		if p.IDTokenHint != "" {
 			q.Set("id_token_hint", p.IDTokenHint)
 		}
-		if s.cfg.Keycloak.RedirectURI != "" {
+		if s.keycloakConfig().RedirectURI != "" {
 			// post-logout lands back on the admin login.
-			base := s.cfg.Keycloak.RedirectURI
+			base := s.keycloakConfig().RedirectURI
 			if i := strings.Index(base, "/auth/keycloak/callback"); i >= 0 {
 				base = base[:i] + "/admin"
 			}
@@ -346,7 +346,14 @@ func (s *Server) handleKeycloakConfig(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
 	}
-	kc := s.cfg.Keycloak
+	kc := s.keycloakConfig()
+	rec, dbBacked := s.storedKeycloakConfig(r.Context())
+	source := "env"
+	updatedAt, updatedBy := "", ""
+	if dbBacked {
+		source = "db"
+		updatedAt, updatedBy = rec.UpdatedAt, rec.UpdatedBy
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"enabled":           kc.Enabled,
 		"issuer_url":        kc.IssuerURL,
@@ -359,8 +366,100 @@ func (s *Server) handleKeycloakConfig(w http.ResponseWriter, r *http.Request) {
 		"group_claim":       kc.GroupClaim,
 		"allow_local_login": kc.AllowLocalLogin,
 		"role_map":          keycloakRoleMap,
-		"note":              "설정은 환경변수(SSO_KEYCLOAK_*)로 관리됩니다. DB 기반 설정/secret 암호화는 후속.",
+		"source":            source, // "db" = admin override (secret AES-GCM at rest), "env" = SSO_KEYCLOAK_*
+		"db_backed":         dbBacked,
+		"updated_at":        updatedAt,
+		"updated_by":        updatedBy,
+		"note":              "source=db이면 관리자 화면 설정이 우선 적용되며 client secret은 AES-GCM으로 암호화 저장됩니다. db 설정이 없으면 환경변수(SSO_KEYCLOAK_*)가 사용됩니다.",
 	})
+}
+
+// handleKeycloakConfigSave persists a DB-backed Keycloak provider override. The client secret
+// is encrypted at rest (AES-GCM) and never echoed back. An omitted client_secret keeps the
+// stored one (so admins can edit other fields without re-entering it); an explicit empty string
+// clears it. PUT /admin/sso/keycloak/config
+func (s *Server) handleKeycloakConfigSave(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	if r.Method != http.MethodPut && r.Method != http.MethodPost {
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
+	var p struct {
+		Enabled         bool     `json:"enabled"`
+		IssuerURL       string   `json:"issuer_url"`
+		ClientID        string   `json:"client_id"`
+		ClientSecret    *string  `json:"client_secret"` // nil/omitted = keep existing; "" = clear
+		RedirectURI     string   `json:"redirect_uri"`
+		Scopes          []string `json:"scopes"`
+		DefaultRole     string   `json:"default_role"`
+		RoleClaim       string   `json:"role_claim"`
+		GroupClaim      string   `json:"group_claim"`
+		AllowLocalLogin bool     `json:"allow_local_login"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+		writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "bad_request")
+		return
+	}
+	p.IssuerURL = strings.TrimSpace(p.IssuerURL)
+	p.ClientID = strings.TrimSpace(p.ClientID)
+	p.RedirectURI = strings.TrimSpace(p.RedirectURI)
+	// Validation: when enabling, issuer must be an absolute URL and client id present.
+	if p.Enabled {
+		if !strings.HasPrefix(p.IssuerURL, "https://") && !strings.HasPrefix(p.IssuerURL, "http://") {
+			writeOpenAIError(w, http.StatusBadRequest, "issuer_url must be an absolute http(s) URL", "invalid_request_error", "bad_issuer")
+			return
+		}
+		if p.ClientID == "" {
+			writeOpenAIError(w, http.StatusBadRequest, "client_id is required when enabling SSO", "invalid_request_error", "bad_client_id")
+			return
+		}
+		if p.RedirectURI != "" && !strings.HasPrefix(p.RedirectURI, "http://") && !strings.HasPrefix(p.RedirectURI, "https://") {
+			writeOpenAIError(w, http.StatusBadRequest, "redirect_uri must be an absolute http(s) URL", "invalid_request_error", "bad_redirect")
+			return
+		}
+	}
+
+	prev, _ := s.storedKeycloakConfig(r.Context())
+	rec := store.SSOProviderConfig{
+		Provider:        "keycloak",
+		Enabled:         p.Enabled,
+		IssuerURL:       p.IssuerURL,
+		ClientID:        p.ClientID,
+		RedirectURI:     p.RedirectURI,
+		Scopes:          p.Scopes,
+		DefaultRole:     strings.TrimSpace(p.DefaultRole),
+		RoleClaim:       strings.TrimSpace(p.RoleClaim),
+		GroupClaim:      strings.TrimSpace(p.GroupClaim),
+		AllowLocalLogin: p.AllowLocalLogin,
+		ClientSecretEnc: prev.ClientSecretEnc, // default: keep the existing encrypted secret
+	}
+	if p.ClientSecret != nil {
+		sec := strings.TrimSpace(*p.ClientSecret)
+		if sec == "" {
+			rec.ClientSecretEnc = "" // explicit clear
+		} else {
+			enc, err := s.secrets.Load().Encrypt(sec)
+			if err != nil {
+				writeOpenAIError(w, http.StatusInternalServerError, "failed to encrypt client secret", "server_error", "encrypt_failed")
+				return
+			}
+			rec.ClientSecretEnc = enc
+		}
+	}
+	if claims, ok := s.currentAccessClaims(r); ok {
+		rec.UpdatedBy = claims.Email
+	}
+	if err := s.db.SaveSSOProviderConfig(r.Context(), rec); err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, "failed to save SSO config: "+err.Error(), "server_error", "save_failed")
+		return
+	}
+	s.reloadKeycloakConfig(r.Context())
+	// Never log the secret/code; record only the actor + enabled state.
+	s.auditAuthEvent(r.Context(), "sso_config_updated", rec.UpdatedBy, "", "", "keycloak enabled="+boolStr(rec.Enabled)+" issuer="+rec.IssuerURL)
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // handleKeycloakTest diagnoses the Keycloak connection: discovery reachability, endpoints,
@@ -370,15 +469,15 @@ func (s *Server) handleKeycloakTest(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
 	}
-	if !s.cfg.Keycloak.Enabled {
+	if !s.keycloakConfig().Enabled {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "reason": "SSO_KEYCLOAK_ENABLED=false"})
 		return
 	}
-	if strings.TrimSpace(s.cfg.Keycloak.IssuerURL) == "" {
+	if strings.TrimSpace(s.keycloakConfig().IssuerURL) == "" {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "reason": "issuer URL is empty"})
 		return
 	}
-	disc, err := keycloakDiscover(r.Context(), s.cfg.Keycloak.IssuerURL)
+	disc, err := keycloakDiscover(r.Context(), s.keycloakConfig().IssuerURL)
 	if err != nil {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "stage": "discovery", "reason": err.Error()})
 		return

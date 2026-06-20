@@ -185,8 +185,8 @@ func (s *Server) verifyKeycloakIDToken(ctx context.Context, disc oidcDiscovery, 
 	if err != nil {
 		return nil, err
 	}
-	if !audienceMatches(claims["aud"], s.cfg.Keycloak.ClientID) {
-		if azp, _ := claims["azp"].(string); azp != s.cfg.Keycloak.ClientID {
+	if !audienceMatches(claims["aud"], s.keycloakConfig().ClientID) {
+		if azp, _ := claims["azp"].(string); azp != s.keycloakConfig().ClientID {
 			return nil, errors.New("id_token audience mismatch")
 		}
 	}
@@ -203,7 +203,7 @@ func (s *Server) verifyKeycloakIDToken(ctx context.Context, disc oidcDiscovery, 
 // clients and SSO callers authenticate to the API/admin with a Keycloak bearer token. No
 // internal session is required (the token is externally minted).
 func (s *Server) verifyKeycloakAccessToken(ctx context.Context, token string) (accessClaims, bool) {
-	if !s.cfg.Keycloak.Enabled || token == "" {
+	if !s.keycloakConfig().Enabled || token == "" {
 		return accessClaims{}, false
 	}
 	// Cheap reject: our internal tokens are HS256; only attempt RS256 ones.
@@ -217,7 +217,7 @@ func (s *Server) verifyKeycloakAccessToken(ctx context.Context, token string) (a
 			return accessClaims{}, false
 		}
 	}
-	disc, err := keycloakDiscover(ctx, s.cfg.Keycloak.IssuerURL)
+	disc, err := keycloakDiscover(ctx, s.keycloakConfig().IssuerURL)
 	if err != nil {
 		return accessClaims{}, false
 	}
@@ -225,7 +225,7 @@ func (s *Server) verifyKeycloakAccessToken(ctx context.Context, token string) (a
 	if err != nil {
 		return accessClaims{}, false
 	}
-	role := resolveKeycloakRole(s.keycloakRolesFromClaims(claims), s.cfg.Keycloak.DefaultRole)
+	role := resolveKeycloakRole(s.keycloakRolesFromClaims(claims), s.keycloakConfig().DefaultRole)
 	if role == "" {
 		return accessClaims{}, false
 	}
@@ -237,7 +237,7 @@ func (s *Server) verifyKeycloakAccessToken(ctx context.Context, token string) (a
 		Subject:   strClaim(claims, "sub"),
 		Email:     strClaim(claims, "email"),
 		Role:      role,
-		TeamID:    keycloakTeamFromGroups(claimStrings(claims, s.cfg.Keycloak.GroupClaim)),
+		TeamID:    keycloakTeamFromGroups(claimStrings(claims, s.keycloakConfig().GroupClaim)),
 		Scopes:    s.effectiveScopesForRole(ctx, role),
 		ExpiresAt: exp,
 		Type:      "access",
@@ -394,9 +394,9 @@ func toStringSlice(v any) []string {
 // keycloakRolesFromClaims gathers realm roles (configured RoleClaim path) + client roles
 // (resource_access.<clientID>.roles).
 func (s *Server) keycloakRolesFromClaims(claims map[string]any) []string {
-	roles := claimStrings(claims, s.cfg.Keycloak.RoleClaim)
+	roles := claimStrings(claims, s.keycloakConfig().RoleClaim)
 	if ra, ok := claims["resource_access"].(map[string]any); ok {
-		if c, ok := ra[s.cfg.Keycloak.ClientID].(map[string]any); ok {
+		if c, ok := ra[s.keycloakConfig().ClientID].(map[string]any); ok {
 			roles = append(roles, toStringSlice(c["roles"])...)
 		}
 	}
