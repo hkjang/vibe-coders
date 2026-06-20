@@ -5432,6 +5432,7 @@ const adminHTML = `<!doctype html>
           '<div style="margin:4px 0">' + (comps || '<span class="muted" style="font-size:11px">컴포넌트 없음</span>') + '</div>' +
           '<div class="muted" style="font-size:11px">팀: ' + escapeHTML(a.allowed_teams || '전체') + ' · 역할: ' + escapeHTML(a.allowed_roles || '전체') + '</div>' +
           '<div style="margin-top:6px;display:flex;gap:4px"><button type="button" class="secondary" style="font-size:11px" onclick="appValidate(\'' + escapeAttr(a.id) + '\')">검증</button>' +
+          '<button type="button" class="secondary" style="font-size:11px" onclick="appRun(\'' + escapeAttr(a.id) + '\')">실행(플랜)</button>' +
           '<button type="button" class="secondary" style="font-size:11px" onclick="appDelete(\'' + escapeAttr(a.id) + '\')">삭제</button></div>' +
           '<div id="app-validate-' + escapeAttr(a.id) + '" style="margin-top:6px"></div>' +
           '</div>';
@@ -5476,6 +5477,17 @@ const adminHTML = `<!doctype html>
           '<strong style="font-size:11px">검증: ' + (d.ok ? '<span class="status">통과</span>' : '<span class="status error">실패</span>') + '</strong>' +
           checks + (d.allowed_models && d.allowed_models.length ? '<div class="muted" style="font-size:11px">허용 모델: ' + escapeHTML(d.allowed_models.join(', ')) + '</div>' : '') + warns +
           '</div>';
+      } catch (e) { if (host) host.innerHTML = '<span class="status error">' + escapeHTML(e.message) + '</span>'; }
+    };
+    window.appRun = async (id) => {
+      const host = document.getElementById('app-validate-' + id);
+      if (host) host.innerHTML = '<span class="muted">실행 플랜 생성 중...</span>';
+      try {
+        const d = await api('/v1/apps/' + encodeURIComponent(id) + '/run', { method: 'POST', body: '{}' });
+        const steps = (d.plan || []).map((p, i) => '<div style="font-size:11px">' + (i + 1) + '. ' + (p.resolved ? '' : '<span class="status error" style="font-size:9px">미해결</span> ') +
+          '<strong>' + escapeHTML(p.kind) + '</strong> ' + escapeHTML(p.ref || '') + ' <span class="muted">' + escapeHTML(p.hint || '') + (p.endpoint ? ' → ' + escapeHTML(p.endpoint) : '') + '</span></div>').join('');
+        if (host) host.innerHTML = '<div style="border:1px solid var(--border);border-radius:6px;padding:8px"><strong style="font-size:11px">실행 플랜</strong>' + steps +
+          '<p class="muted" style="font-size:10px;margin-top:4px">' + escapeHTML(d.note || '') + '</p></div>';
       } catch (e) { if (host) host.innerHTML = '<span class="status error">' + escapeHTML(e.message) + '</span>'; }
     };
     window.appDelete = async (id) => {

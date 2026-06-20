@@ -256,8 +256,12 @@ func (s *Server) handleUserAppByID(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusUnauthorized, "could not identify caller", "invalid_request_error", "invalid_api_key")
 		return
 	}
-	id := strings.TrimPrefix(r.URL.Path, "/v1/apps/")
-	if id == "" || strings.Contains(id, "/") {
+	rest := strings.TrimPrefix(r.URL.Path, "/v1/apps/")
+	id, action := rest, ""
+	if idx := strings.Index(rest, "/"); idx >= 0 {
+		id, action = rest[:idx], rest[idx+1:]
+	}
+	if id == "" {
 		writeOpenAIError(w, http.StatusBadRequest, "app id required", "invalid_request_error", "bad_request")
 		return
 	}
@@ -270,5 +274,65 @@ func (s *Server) handleUserAppByID(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusNotFound, "app not found", "invalid_request_error", "not_found")
 		return
 	}
+	if action == "run" && r.Method == http.MethodPost {
+		s.handleUserAppRun(w, r, app, claims)
+		return
+	}
+	if action != "" {
+		writeOpenAIError(w, http.StatusNotFound, "unknown action", "invalid_request_error", "not_found")
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"app": app})
+}
+
+// appComponentStep maps one component to a concrete next action the caller can take.
+func appComponentStep(c store.AppComponent) map[string]any {
+	step := map[string]any{"kind": c.Kind, "ref": c.Ref, "label": c.Label}
+	switch c.Kind {
+	case "skill":
+		step["action"] = "chat"
+		step["endpoint"] = "/v1/chat/completions"
+		step["hint"] = "X-Skill: " + c.Ref + " 헤더로 채팅 호출"
+	case "prompt_product":
+		step["action"] = "chat"
+		step["endpoint"] = "/v1/chat/completions"
+		step["hint"] = "프롬프트 상품 템플릿으로 채팅"
+	case "text2sql_report":
+		step["action"] = "text2sql_report"
+		step["endpoint"] = "/admin/text2sql/saved-reports/" + c.Ref
+		step["hint"] = "저장된 Text2SQL 리포트 실행"
+	case "mcp_tool":
+		step["action"] = "mcp"
+		step["hint"] = "MCP 가상 모델(vibe/grounded 등)로 도구 호출"
+	case "model":
+		step["action"] = "model"
+		step["hint"] = "추천 모델: " + c.Ref
+	default:
+		step["action"] = "unknown"
+	}
+	return step
+}
+
+// handleUserAppRun returns a validated execution plan for an app — resolved components mapped to
+// the endpoint each one is invoked through. (Heterogeneous server-side execution is a follow-up;
+// this gives the caller an actionable, permission-checked plan and records the run.)
+// POST /v1/apps/{id}/run
+func (s *Server) handleUserAppRun(w http.ResponseWriter, r *http.Request, app store.WorkApp, claims accessClaims) {
+	if len(app.Components) == 0 {
+		writeOpenAIError(w, http.StatusUnprocessableEntity, "app has no components to run", "invalid_request_error", "empty_app")
+		return
+	}
+	plan := make([]map[string]any, 0, len(app.Components))
+	for _, c := range app.Components {
+		ok, detail, _ := s.validateAppComponent(r, c)
+		step := appComponentStep(c)
+		step["resolved"] = ok
+		step["detail"] = detail
+		plan = append(plan, step)
+	}
+	s.auditAuthEvent(r.Context(), "work_app_run", claims.Subject, "", claims.TeamID, "app="+app.ID)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"app_id": app.ID, "title": app.Title, "plan": plan,
+		"note": "각 step의 endpoint로 호출해 앱을 실행하세요. 서버측 일괄 실행 오케스트레이션은 후속 예정.",
+	})
 }

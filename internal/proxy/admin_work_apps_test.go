@@ -38,6 +38,25 @@ func TestAppVisibleTo(t *testing.T) {
 	}
 }
 
+func TestAppComponentStep(t *testing.T) {
+	skill := appComponentStep(store.AppComponent{Kind: "skill", Ref: "code-review"})
+	if skill["action"] != "chat" || skill["endpoint"] != "/v1/chat/completions" {
+		t.Errorf("skill step mapping wrong: %+v", skill)
+	}
+	rep := appComponentStep(store.AppComponent{Kind: "text2sql_report", Ref: "rep1"})
+	if rep["action"] != "text2sql_report" || rep["endpoint"] != "/admin/text2sql/saved-reports/rep1" {
+		t.Errorf("report step mapping wrong: %+v", rep)
+	}
+	model := appComponentStep(store.AppComponent{Kind: "model", Ref: "claude-opus-4-8"})
+	if model["action"] != "model" {
+		t.Errorf("model step mapping wrong: %+v", model)
+	}
+	unknown := appComponentStep(store.AppComponent{Kind: "weird"})
+	if unknown["action"] != "unknown" {
+		t.Errorf("unknown kind should map to unknown action: %+v", unknown)
+	}
+}
+
 func TestWorkAppStore(t *testing.T) {
 	db := openTestStore(t)
 	defer db.Close()
