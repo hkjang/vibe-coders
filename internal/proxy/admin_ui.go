@@ -1015,12 +1015,14 @@ const adminHTML = `<!doctype html>
           { label: 'DW 대시보드', href: '#/dwdashboard', active: !onCH },
           { label: 'ClickHouse', href: '#/dwdashboard/clickhouse', active: onCH },
         ]);
-      } else if (tab === 'settings' || tab === 'runtimesettings' || rest[0] === 'errors') {
+      } else if (tab === 'settings' || tab === 'runtimesettings' || rest[0] === 'errors' || rest[0] === 'sso') {
         const onRT = tab === 'runtimesettings' || rest[0] === 'runtime';
         const onErr = rest[0] === 'errors';
+        const onSSO = rest[0] === 'sso';
         el.innerHTML = subNav([
-          { label: '설정', href: '#/settings', active: !onRT && !onErr },
+          { label: '설정', href: '#/settings', active: !onRT && !onErr && !onSSO },
           { label: '런타임 설정', href: '#/settings/runtime', active: onRT },
+          { label: 'SSO', href: '#/settings/sso', active: onSSO },
           { label: '시스템 오류', href: '#/settings/errors', active: onErr },
         ]);
       } else if (tab === 'users' || tab === 'teams' || tab === 'ips' || tab === 'quotas') {
@@ -1112,6 +1114,8 @@ const adminHTML = `<!doctype html>
               await renderRuntimeSettings();
             } else if (rest[0] === 'errors') {
               await renderSystemErrors();
+            } else if (rest[0] === 'sso') {
+              await renderSSOSettings();
             } else {
               await renderSettings();
             }
@@ -8588,6 +8592,60 @@ const adminHTML = `<!doctype html>
       await api('/admin/model-deprecations/' + encodeURIComponent(id), { method: 'DELETE' });
       await renderModelDeprecations();
     };
+    // ── SSO (Keycloak) 설정/진단 ──────────────────────────────────────────
+    async function renderSSOSettings() {
+      const view = document.getElementById('view');
+      view.innerHTML = section('SSO (Keycloak)', '<div class="empty">불러오는 중...</div>');
+      let c;
+      try { c = await api('/admin/sso/keycloak/config'); }
+      catch (e) { view.innerHTML = section('SSO (Keycloak)', '<div class="card-body" style="padding:16px"><p class="muted">설정을 불러올 수 없습니다: ' + escapeHTML(e.message) + '</p></div>'); return; }
+      const yn = (b) => b ? '<span class="status">사용</span>' : '<span class="status warn">미사용</span>';
+      const cfgCard = card('Keycloak 설정',
+        '<div class="card-body"><div class="kv">' +
+          row('SSO 활성화', yn(c.enabled)) +
+          row('Issuer', escapeHTML(c.issuer_url || '') || '<span class="muted">(미설정)</span>') +
+          row('Client ID', escapeHTML(c.client_id || '') || '<span class="muted">(미설정)</span>') +
+          row('Client Secret', c.client_secret_set ? '<span class="status">설정됨</span>' : '<span class="status error">없음</span>') +
+          row('Redirect URI', escapeHTML(c.redirect_uri || '')) +
+          row('Scopes', escapeHTML((c.scopes || []).join(' '))) +
+          row('기본 Role', escapeHTML(c.default_role || '')) +
+          row('Role Claim', escapeHTML(c.role_claim || '')) +
+          row('Group Claim', escapeHTML(c.group_claim || '')) +
+          row('로컬 로그인 허용', yn(c.allow_local_login)) +
+        '</div>' +
+        '<p class="muted" style="font-size:11px;margin-top:8px">' + escapeHTML(c.note || '') + '</p>' +
+        '<div style="margin-top:8px"><button type="button" id="sso-test-btn">연결 테스트</button></div>' +
+        '<div id="sso-test-out" style="margin-top:8px"></div>' +
+        '</div>');
+      const rm = c.role_map || {};
+      const mapCard = card('Role 매핑 (Keycloak → 내부)',
+        '<div class="card-body"><table><thead><tr><th>Keycloak Role</th><th>내부 Role</th></tr></thead><tbody>' +
+          Object.keys(rm).map(k => '<tr><td>' + escapeHTML(k) + '</td><td>' + escapeHTML(rm[k]) + '</td></tr>').join('') +
+          '<tr><td class="muted">/teams/&lt;name&gt; (group)</td><td class="muted">team:&lt;name&gt;</td></tr>' +
+        '</tbody></table><p class="muted" style="font-size:11px;margin-top:6px">매핑 실패 시 기본 Role(' + escapeHTML(c.default_role || '') + ')로 폴백, 기본 Role이 비어 있으면 로그인 차단.</p></div>');
+      view.innerHTML = section('SSO (Keycloak)', '') + cfgCard + mapCard;
+      const btn = document.getElementById('sso-test-btn');
+      if (btn) btn.addEventListener('click', async () => {
+        const out = document.getElementById('sso-test-out');
+        out.innerHTML = '<span class="muted">테스트 중...</span>';
+        try {
+          const t = await api('/admin/sso/keycloak/test', { method: 'POST', body: '{}' });
+          if (t.ok) {
+            out.innerHTML = '<div class="status">정상</div><div class="kv" style="margin-top:6px">' +
+              row('Issuer', escapeHTML(t.issuer || '')) +
+              row('Authorization', escapeHTML(t.authorization_endpoint || '')) +
+              row('Token', escapeHTML(t.token_endpoint || '')) +
+              row('JWKS', escapeHTML(t.jwks_uri || '')) +
+              row('End Session', escapeHTML(t.end_session_endpoint || '') || '<span class="muted">-</span>') +
+              row('RSA 서명 키', fmt(t.rsa_signing_keys || 0)) +
+            '</div>';
+          } else {
+            out.innerHTML = '<div class="status error">실패 (' + escapeHTML(t.stage || '') + '): ' + escapeHTML(t.reason || '') + '</div>';
+          }
+        } catch (e) { out.innerHTML = '<span class="status error">' + escapeHTML(e.message) + '</span>'; }
+      });
+    }
+
     // ── Skill Studio: 후보 추천 → 채택 → 평가 → Chat 테스트 → 스테이징 → 프로덕션 마법사 ──
     function studioStatusBadge(st) {
       const cls = st === 'production' ? '' : (st === 'deprecated' ? 'error' : 'warn');
