@@ -28,14 +28,17 @@ func TestMyHomeQueries(t *testing.T) {
 		}
 	}
 
-	// 3 today on expensive model (1 failing), 2 earlier this period on cheap model.
-	rec("t0", "gpt-4.1", 200, 10, now.Add(-1*time.Hour))
-	rec("t1", "gpt-4.1", 200, 10, now.Add(-2*time.Hour))
-	rec("t2", "gpt-4.1", 500, 10, now.Add(-3*time.Hour))
-	rec("e0", "gpt-4.1-mini", 200, 1, now.Add(-3*time.Hour))
-	rec("e1", "gpt-4.1-mini", 200, 1, now.Add(-4*time.Hour))
-
+	// Anchor records to fixed hours *today* (not now-relative offsets) so the test is
+	// deterministic regardless of run time — now-relative offsets cross the UTC midnight
+	// boundary when the suite runs in the first few hours of the day.
 	startToday := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+
+	// 3 today on expensive model (1 failing), 2 earlier this period on cheap model.
+	rec("t0", "gpt-4.1", 200, 10, startToday.Add(3*time.Hour))
+	rec("t1", "gpt-4.1", 200, 10, startToday.Add(2*time.Hour))
+	rec("t2", "gpt-4.1", 500, 10, startToday.Add(1*time.Hour))
+	rec("e0", "gpt-4.1-mini", 200, 1, startToday.Add(1*time.Hour))
+	rec("e1", "gpt-4.1-mini", 200, 1, startToday.Add(30*time.Minute))
 	today, err := db.UserUsageTotalsSince(ctx, "u1", startToday)
 	if err != nil {
 		t.Fatal(err)
