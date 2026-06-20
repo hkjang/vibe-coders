@@ -1434,6 +1434,14 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 		`CREATE INDEX IF NOT EXISTS idx_skill_fitness_skill ON skill_fitness_evidence(skill_name)`,
 		// AI work apps: user-facing bundles of skill / prompt product / Text2SQL report / MCP
 		// tool / recommended model, gated by team + role.
+		`CREATE TABLE IF NOT EXISTS model_usage_tags (
+			model TEXT PRIMARY KEY,
+			good_for TEXT NOT NULL DEFAULT '',
+			avoid_for TEXT NOT NULL DEFAULT '',
+			risk_note TEXT NOT NULL DEFAULT '',
+			updated_by TEXT NOT NULL DEFAULT '',
+			updated_at TEXT NOT NULL DEFAULT ''
+		)`,
 		`CREATE TABLE IF NOT EXISTS change_sets (
 			id TEXT PRIMARY KEY,
 			title TEXT NOT NULL DEFAULT '',

@@ -5717,8 +5717,10 @@ const adminHTML = `<!doctype html>
       document.getElementById('view').innerHTML =
         section('Chat Completion 테스트', kpis + form) +
         section('멀티 모델 응답 비교', multiPanel) +
+        '<div id="mm-tags-panel"></div>' +
         section('대상 카탈로그', chatTestTargetTable(targets));
 
+      mmRenderTagEditor();
       document.getElementById('mm-run').addEventListener('click', runMultiModelCompare);
       document.getElementById('mm-predict').addEventListener('click', predictMultiModelCost);
       document.getElementById('mm-stream').addEventListener('click', runMultiModelStream);
@@ -6374,11 +6376,57 @@ const adminHTML = `<!doctype html>
       if (lbl) lbl.textContent = Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - start) + 'ms';
     }
 
+    // mmLoadTags caches model usage tags (good_for/avoid_for/risk_note) for badge rendering.
+    async function mmLoadTags() {
+      if (window.__mmTags) return window.__mmTags;
+      const map = {};
+      try { const d = await api('/v1/model-tags'); (d.tags || []).forEach(t => { map[t.model] = t; }); } catch (e) {}
+      window.__mmTags = map;
+      return map;
+    }
+    function mmTagBadges(model) {
+      const t = (window.__mmTags || {})[model];
+      if (!t) return '';
+      let out = '';
+      if (t.good_for) out += ' <span class="status" style="font-size:9px" title="적합">👍 ' + escapeHTML(t.good_for) + '</span>';
+      if (t.avoid_for) out += ' <span class="status warn" style="font-size:9px" title="지양">⚠ ' + escapeHTML(t.avoid_for) + '</span>';
+      if (t.risk_note) out += ' <span class="status error" style="font-size:9px" title="위험">' + escapeHTML(t.risk_note) + '</span>';
+      return out;
+    }
+    // 모델 용도 태그 관리(관리자) — good_for/avoid_for/risk_note.
+    async function mmRenderTagEditor() {
+      const host = document.getElementById('mm-tags-panel');
+      if (!host) return;
+      let tags = [];
+      try { tags = (await api('/admin/model-tags')).tags || []; } catch (e) { return; }
+      window.__mmTags = {}; tags.forEach(t => { window.__mmTags[t.model] = t; });
+      const rows = tags.length ? tags.map(t => '<tr><td>' + escapeHTML(t.model) + '</td><td>' + escapeHTML(t.good_for || '-') + '</td><td>' + escapeHTML(t.avoid_for || '-') + '</td><td>' + escapeHTML(t.risk_note || '-') + '</td>' +
+        '<td><button type="button" class="secondary" style="font-size:11px" onclick="mmDeleteTag(\'' + escapeAttr(t.model) + '\')">삭제</button></td></tr>').join('') : '<tr><td colspan="5" class="muted">태그 없음</td></tr>';
+      host.innerHTML = section('모델 용도 태그', card('용도별 추천 (good_for / avoid_for / 위험)',
+        '<div class="card-body"><table><thead><tr><th>모델</th><th>적합(good_for)</th><th>지양(avoid_for)</th><th>위험 메모</th><th></th></tr></thead><tbody>' + rows + '</tbody></table>' +
+        '<div style="display:flex;gap:4px;margin-top:6px;flex-wrap:wrap">' +
+        '<input id="mt-model" placeholder="모델" style="width:160px"><input id="mt-good" placeholder="적합 (예: code_review,summary)" style="flex:1"><input id="mt-avoid" placeholder="지양" style="flex:1"><input id="mt-risk" placeholder="위험 메모" style="flex:1">' +
+        '<button type="button" onclick="mmSaveTag()">저장</button></div>' +
+        '<p class="muted" style="font-size:11px;margin-top:4px">멀티 비교 결과 카드에 모델별 용도 배지로 표시됩니다. 한 번 이긴 모델을 전체 기본값으로 착각하지 않도록 업무 유형별로 관리하세요.</p></div>'));
+    }
+    window.mmSaveTag = async () => {
+      const model = (document.getElementById('mt-model').value || '').trim();
+      if (!model) return;
+      const body = { model, good_for: (document.getElementById('mt-good').value || '').trim(), avoid_for: (document.getElementById('mt-avoid').value || '').trim(), risk_note: (document.getElementById('mt-risk').value || '').trim() };
+      try { await api('/admin/model-tags', { method: 'POST', body: JSON.stringify(body) }); await mmRenderTagEditor(); }
+      catch (e) { alert(e.message); }
+    };
+    window.mmDeleteTag = async (model) => {
+      if (!confirm(model + ' 태그를 삭제할까요?')) return;
+      try { await api('/admin/model-tags/' + encodeURIComponent(model), { method: 'DELETE' }); await mmRenderTagEditor(); }
+      catch (e) { alert(e.message); }
+    };
     async function runMultiModelCompare() {
       const out = document.getElementById('mm-results');
       const btn = document.getElementById('mm-run');
       const models = mmReadModels();
       if (!models.length) { out.innerHTML = '<span class="status error">비교할 모델을 1개 이상 입력하세요.</span>'; return; }
+      await mmLoadTags();
       if (models.length > 5) { out.innerHTML = '<span class="status error">한 번에 최대 5개 모델까지 비교할 수 있습니다.</span>'; return; }
       const messages = [];
       const sys = (document.getElementById('mm-system').value || '').trim();
@@ -6416,7 +6464,7 @@ const adminHTML = `<!doctype html>
           ).join('') + '</tbody></table>';
         const cards = results.map(x =>
           '<div style="border:1px solid var(--border);border-radius:8px;padding:10px;margin-top:8px">' +
-          '<div style="display:flex;justify-content:space-between;align-items:center"><strong>' + escapeHTML(x.model) + '</strong>' +
+          '<div style="display:flex;justify-content:space-between;align-items:center"><strong>' + escapeHTML(x.model) + '</strong>' + mmTagBadges(x.model) +
           '<span class="status ' + (x.status === 'success' ? '' : 'error') + '">' + escapeHTML(x.status) + ' · ' + fmt(x.latency_ms) + 'ms</span></div>' +
           (x.error ? '<div class="status error" style="margin-top:6px">' + escapeHTML(x.error) + '</div>' : '') +
           '<pre style="white-space:pre-wrap;font-size:12px;max-height:280px;overflow:auto;margin-top:6px">' + escapeHTML(x.content || '(빈 응답)') + '</pre>' +
