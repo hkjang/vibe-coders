@@ -209,6 +209,44 @@ func (s *Server) handleTeamRisk(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleTeamOnboarding assembles a team onboarding pack: the models, skills, and MCP tools
+// the team actually relies on — a ready-made starting kit for a new member. Derived from
+// team usage (model mix), team skill adoption, and team MCP affinity. GET /team/onboarding
+func (s *Server) handleTeamOnboarding(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
+	teamID, keys, ok := s.resolveTeamScope(w, r)
+	if !ok {
+		return
+	}
+	since := parseWindow(r.URL.Query().Get("window"), 90*24*time.Hour, "day")
+	ctx := r.Context()
+
+	// Recommended models: the team's top models by usage (with success/cost).
+	dash, _ := s.db.TeamDashboardSince(ctx, keys, since, 5)
+	models := dash.Models
+	if len(models) > 5 {
+		models = models[:5]
+	}
+
+	// Recommended skills: the team's adopted skills, success-weighted.
+	skills, _ := s.db.TeamPopularSkills(ctx, keys, since, 5)
+
+	// Recommended MCP tools: the team's most-used MCP tools.
+	tools, _ := s.db.TeamMCPTools(ctx, keys, since, 5)
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"team_id":             teamID,
+		"since":               since.UTC().Format(time.RFC3339),
+		"recommended_models":  models,
+		"recommended_skills":  skills,
+		"recommended_mcp":     tools,
+		"note":                "팀이 실제로 사용하는 모델·Skill·MCP 도구 묶음입니다. 신규 팀원의 시작 키트로 활용하세요.",
+	})
+}
+
 func uniqueNonEmpty(values ...string) []string {
 	seen := map[string]bool{}
 	out := []string{}

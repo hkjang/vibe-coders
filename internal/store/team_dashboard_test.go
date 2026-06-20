@@ -138,4 +138,29 @@ func TestTeamPopularSkillsAndTemplateCandidates(t *testing.T) {
 	if len(cands) != 1 || cands[0].Fingerprint != "fp_team" || cands[0].Requests != 3 {
 		t.Fatalf("template candidates = %+v, want fp_team(3)", cands)
 	}
+
+	// MCP tools: team members' calls aggregate; other team's excluded.
+	recMCP := func(id, apiKey, server, tool string, isErr int, when time.Time) {
+		if err := db.InsertLogRecord(ctx, LogRecord{
+			Request: RequestLog{ID: id, TraceID: id, APIKeyID: apiKey, Endpoint: "/v1/chat/completions",
+				Model: "gpt-4.1", StatusCode: 200, LatencyMS: 120, CreatedAt: when},
+			Tools: []ToolInvocation{{
+				ID: "t_" + id, RequestID: id, TraceID: id, APIKeyID: apiKey,
+				ServerLabel: server, ToolName: tool, Source: "call", IsMCP: true, IsError: isErr == 1, CreatedAt: when,
+			}},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	recMCP("m1", "k1", "jira", "create_issue", 0, base.Add(1*time.Hour))
+	recMCP("m2", "k2", "jira", "create_issue", 1, base.Add(2*time.Hour))
+	recMCP("m3", "k3", "jira", "create_issue", 0, base.Add(1*time.Hour)) // other team
+
+	tools, err := db.TeamMCPTools(ctx, []string{"team_platform"}, base, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tools) != 1 || tools[0].Ref != "jira/create_issue" || tools[0].Calls != 2 || tools[0].Errors != 1 {
+		t.Fatalf("team mcp tools = %+v, want jira/create_issue calls=2 errors=1 (other team excluded)", tools)
+	}
 }

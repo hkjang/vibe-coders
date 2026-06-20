@@ -175,6 +175,58 @@ func (s *SQLStore) TeamTemplateCandidates(ctx context.Context, keys []string, si
 	return out, nil
 }
 
+// TeamMCPTool is one MCP tool's usage within a team.
+type TeamMCPTool struct {
+	ServerLabel  string  `json:"server_label"`
+	ToolName     string  `json:"tool_name"`
+	Ref          string  `json:"ref"` // server/tool
+	Calls        int64   `json:"calls"`
+	Errors       int64   `json:"errors"`
+	SuccessRate  float64 `json:"success_rate"`
+	AvgLatencyMS float64 `json:"avg_latency_ms"`
+}
+
+// TeamMCPTools ranks the MCP tools a team actually uses (by call volume), with success
+// rate and latency. Powers the team onboarding pack's recommended-MCP section.
+func (s *SQLStore) TeamMCPTools(ctx context.Context, keys []string, since time.Time, limit int) ([]TeamMCPTool, error) {
+	teamFilter, teamArgs := teamInClause(keys)
+	if teamFilter == "" {
+		return []TeamMCPTool{}, nil
+	}
+	if limit <= 0 || limit > 50 {
+		limit = 5
+	}
+	q := `SELECT COALESCE(NULLIF(ti.server_label,''),'(none)') AS server_label, ti.tool_name,
+			COUNT(*),
+			COALESCE(SUM(CASE WHEN ti.is_error = 1 THEN 1 ELSE 0 END), 0),
+			COALESCE(AVG(r.latency_ms), 0)
+		FROM tool_invocations ti
+		JOIN request_logs r ON r.id = ti.request_id
+		WHERE ti.created_at >= ? AND ti.is_mcp = 1 AND ti.source = 'call' AND COALESCE(ti.tool_name,'') <> '' AND ` + teamFilter + `
+		GROUP BY server_label, ti.tool_name
+		ORDER BY COUNT(*) DESC LIMIT ?`
+	qArgs := append([]any{since.UTC().Format(time.RFC3339Nano)}, teamArgs...)
+	qArgs = append(qArgs, limit)
+	rows, err := s.db.QueryContext(ctx, s.bind(q), qArgs...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []TeamMCPTool{}
+	for rows.Next() {
+		var m TeamMCPTool
+		if err := rows.Scan(&m.ServerLabel, &m.ToolName, &m.Calls, &m.Errors, &m.AvgLatencyMS); err != nil {
+			return nil, err
+		}
+		if m.Calls > 0 {
+			m.SuccessRate = float64(m.Calls-m.Errors) / float64(m.Calls)
+		}
+		m.Ref = m.ServerLabel + "/" + m.ToolName
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
 // teamInClause builds "(requestTeamExpr) IN (?, ?, ...)" plus the bound args for a set of
 // acceptable team identifiers (a team is stored on api_keys.team as id-or-name, so callers
 // pass both their team id and name to match either).

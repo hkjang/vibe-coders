@@ -7896,7 +7896,22 @@ const adminHTML = `<!doctype html>
           : '<p class="muted">최근 실패가 없습니다. 👍</p>') + '</div>');
 
       view.innerHTML = section('팀 대시보드 — ' + escapeHTML(resp.team_id || ''), kpis) + usersCard + modelsCard + failCard +
-        '<div id="team-risk"></div><div id="team-skills"></div><div id="team-templates"></div>';
+        '<div id="team-risk"></div><div id="team-skills"></div><div id="team-templates"></div><div id="team-onboarding"></div>';
+
+      // 팀 온보딩 팩 (추천 모델·Skill·MCP 묶음).
+      api('/team/onboarding').then(ob => {
+        const host = document.getElementById('team-onboarding');
+        if (!host || !ob) return;
+        const m = ob.recommended_models || [], sk = ob.recommended_skills || [], tl = ob.recommended_mcp || [];
+        const pctv = (v) => (v == null ? '-' : (v * 100).toFixed(0) + '%');
+        const list = (items, render) => items.length ? '<ul style="margin:4px 0;padding-left:18px">' + items.map(render).join('') + '</ul>' : '<p class="muted" style="font-size:12px">데이터 없음</p>';
+        host.innerHTML = card('팀 온보딩 팩',
+          '<div class="card-body" style="display:flex;gap:24px;flex-wrap:wrap">' +
+            '<div><strong>추천 모델</strong>' + list(m, x => '<li>' + escapeHTML(x.model) + ' <span class="muted">(' + fmt(x.requests) + '회)</span></li>') + '</div>' +
+            '<div><strong>추천 Skill</strong>' + list(sk, x => '<li>' + escapeHTML(x.skill_name) + ' <span class="muted">(성공률 ' + pctv(x.success_rate) + ')</span></li>') + '</div>' +
+            '<div><strong>추천 MCP 도구</strong>' + list(tl, x => '<li>' + escapeHTML(x.ref) + ' <span class="muted">(' + fmt(x.calls) + '회)</span></li>') + '</div>' +
+          '</div><div class="muted" style="font-size:11px;padding:0 16px 12px">' + escapeHTML(ob.note || '') + '</div>');
+      }).catch(() => {});
 
       // 팀 위험 신호 (정책 위반·Secret·승인 대기 + 차단 추세).
       api('/team/risk').then(rk => {
