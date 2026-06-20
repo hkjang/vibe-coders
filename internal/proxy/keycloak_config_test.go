@@ -70,3 +70,33 @@ func TestKeycloakConfigDBOverlayAndSecretAtRest(t *testing.T) {
 		t.Fatalf("other fields not applied: %+v", got)
 	}
 }
+
+func TestResolveKeycloakRoleWithCustomMap(t *testing.T) {
+	// Empty/nil map falls back to the built-in defaults.
+	if got := resolveKeycloakRoleWith(nil, []string{"vibe-admin"}, "developer"); got != "admin" {
+		t.Errorf("nil map should use defaults, got %q", got)
+	}
+	// A custom map overrides the defaults (here vibe-admin is downgraded; a custom role wins).
+	custom := map[string]string{"sso-superuser": "admin", "vibe-admin": "developer"}
+	if got := resolveKeycloakRoleWith(custom, []string{"sso-superuser", "vibe-admin"}, "developer"); got != "admin" {
+		t.Errorf("custom map: highest-rank mapped role should win, got %q", got)
+	}
+	// A role only present in the default map is unknown under a custom map → default role.
+	if got := resolveKeycloakRoleWith(custom, []string{"vibe-auditor"}, "developer"); got != "developer" {
+		t.Errorf("unmapped role should fall back to default, got %q", got)
+	}
+}
+
+func TestEffectiveKeycloakRoleMap(t *testing.T) {
+	s := &Server{cfg: config.Config{Keycloak: config.KeycloakConfig{}}}
+	// No overlay → built-in defaults.
+	if s.effectiveKeycloakRoleMap()["vibe-admin"] != "admin" {
+		t.Error("default map expected without overlay")
+	}
+	// Overlay with a custom map → custom map returned.
+	s.keycloakCfg.Store(&config.KeycloakConfig{RoleMap: map[string]string{"x": "team_admin"}})
+	m := s.effectiveKeycloakRoleMap()
+	if m["x"] != "team_admin" || len(m) != 1 {
+		t.Errorf("custom overlay map expected, got %v", m)
+	}
+}

@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"strings"
 	"time"
@@ -21,25 +22,27 @@ type SSOProviderConfig struct {
 	Scopes          []string `json:"scopes"`
 	DefaultRole     string   `json:"default_role"`
 	RoleClaim       string   `json:"role_claim"`
-	GroupClaim      string   `json:"group_claim"`
-	AllowLocalLogin bool     `json:"allow_local_login"`
-	UpdatedAt       string   `json:"updated_at"`
-	UpdatedBy       string   `json:"updated_by"`
+	GroupClaim      string            `json:"group_claim"`
+	AllowLocalLogin bool              `json:"allow_local_login"`
+	RoleMap         map[string]string `json:"role_map"` // Keycloak role → internal role (overrides defaults)
+	UpdatedAt       string            `json:"updated_at"`
+	UpdatedBy       string            `json:"updated_by"`
 }
 
 // GetSSOProviderConfig returns the stored override for a provider, if any.
 func (s *SQLStore) GetSSOProviderConfig(ctx context.Context, provider string) (SSOProviderConfig, bool, error) {
 	var (
-		c       SSOProviderConfig
-		enabled int
-		allow   int
-		scopes  string
+		c        SSOProviderConfig
+		enabled  int
+		allow    int
+		scopes   string
+		roleMapJ string
 	)
 	err := s.db.QueryRowContext(ctx, s.bind(`SELECT provider, enabled, issuer_url, client_id, client_secret_enc,
-		redirect_uri, scopes, default_role, role_claim, group_claim, allow_local_login, updated_at, updated_by
+		redirect_uri, scopes, default_role, role_claim, group_claim, allow_local_login, COALESCE(role_map,''), updated_at, updated_by
 		FROM sso_provider_config WHERE provider = ?`), provider).
 		Scan(&c.Provider, &enabled, &c.IssuerURL, &c.ClientID, &c.ClientSecretEnc, &c.RedirectURI,
-			&scopes, &c.DefaultRole, &c.RoleClaim, &c.GroupClaim, &allow, &c.UpdatedAt, &c.UpdatedBy)
+			&scopes, &c.DefaultRole, &c.RoleClaim, &c.GroupClaim, &allow, &roleMapJ, &c.UpdatedAt, &c.UpdatedBy)
 	if errors.Is(err, sql.ErrNoRows) {
 		return SSOProviderConfig{}, false, nil
 	}
@@ -50,6 +53,9 @@ func (s *SQLStore) GetSSOProviderConfig(ctx context.Context, provider string) (S
 	c.AllowLocalLogin = allow != 0
 	if strings.TrimSpace(scopes) != "" {
 		c.Scopes = strings.Fields(scopes)
+	}
+	if strings.TrimSpace(roleMapJ) != "" {
+		_ = json.Unmarshal([]byte(roleMapJ), &c.RoleMap)
 	}
 	return c, true, nil
 }
@@ -68,17 +74,23 @@ func (s *SQLStore) SaveSSOProviderConfig(ctx context.Context, c SSOProviderConfi
 	if c.AllowLocalLogin {
 		allow = 1
 	}
+	roleMapJ := ""
+	if len(c.RoleMap) > 0 {
+		if b, err := json.Marshal(c.RoleMap); err == nil {
+			roleMapJ = string(b)
+		}
+	}
 	_, err := s.db.ExecContext(ctx, s.bind(`INSERT INTO sso_provider_config
 		(provider, enabled, issuer_url, client_id, client_secret_enc, redirect_uri, scopes,
-		 default_role, role_claim, group_claim, allow_local_login, updated_at, updated_by)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 default_role, role_claim, group_claim, allow_local_login, role_map, updated_at, updated_by)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(provider) DO UPDATE SET
 			enabled = excluded.enabled, issuer_url = excluded.issuer_url, client_id = excluded.client_id,
 			client_secret_enc = excluded.client_secret_enc, redirect_uri = excluded.redirect_uri,
 			scopes = excluded.scopes, default_role = excluded.default_role, role_claim = excluded.role_claim,
 			group_claim = excluded.group_claim, allow_local_login = excluded.allow_local_login,
-			updated_at = excluded.updated_at, updated_by = excluded.updated_by`),
+			role_map = excluded.role_map, updated_at = excluded.updated_at, updated_by = excluded.updated_by`),
 		c.Provider, enabled, c.IssuerURL, c.ClientID, c.ClientSecretEnc, c.RedirectURI,
-		strings.Join(c.Scopes, " "), c.DefaultRole, c.RoleClaim, c.GroupClaim, allow, c.UpdatedAt, c.UpdatedBy)
+		strings.Join(c.Scopes, " "), c.DefaultRole, c.RoleClaim, c.GroupClaim, allow, roleMapJ, c.UpdatedAt, c.UpdatedBy)
 	return err
 }

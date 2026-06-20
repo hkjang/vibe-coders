@@ -34,6 +34,9 @@ func (s *Server) reloadKeycloakConfig(ctx context.Context) {
 		if len(rec.Scopes) > 0 {
 			eff.Scopes = rec.Scopes
 		}
+		if len(rec.RoleMap) > 0 {
+			eff.RoleMap = rec.RoleMap
+		}
 		// Decrypt the client secret; if decryption fails, keep the env value rather than
 		// blanking it (prevents a key mismatch from silently breaking confidential clients).
 		if rec.ClientSecretEnc != "" {
@@ -45,6 +48,15 @@ func (s *Server) reloadKeycloakConfig(ctx context.Context) {
 		}
 	}
 	s.keycloakCfg.Store(&eff)
+}
+
+// effectiveKeycloakRoleMap returns the admin-edited Keycloak→internal role map when present,
+// otherwise the built-in default (keycloakRoleMap).
+func (s *Server) effectiveKeycloakRoleMap() map[string]string {
+	if m := s.keycloakConfig().RoleMap; len(m) > 0 {
+		return m
+	}
+	return keycloakRoleMap
 }
 
 // storedKeycloakConfig returns the raw DB override row for the admin screen (no plaintext

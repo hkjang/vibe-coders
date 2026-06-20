@@ -1363,9 +1363,11 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 			role_claim TEXT NOT NULL DEFAULT '',
 			group_claim TEXT NOT NULL DEFAULT '',
 			allow_local_login INTEGER NOT NULL DEFAULT 1,
+			role_map TEXT NOT NULL DEFAULT '',
 			updated_at TEXT NOT NULL DEFAULT '',
 			updated_by TEXT NOT NULL DEFAULT ''
 		)`,
+		`ALTER TABLE sso_provider_config ADD COLUMN role_map TEXT NOT NULL DEFAULT ''`,
 	}
 
 	for _, statement := range statements {

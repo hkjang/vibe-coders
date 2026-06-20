@@ -49,6 +49,7 @@ type KeycloakConfig struct {
 	RoleClaim       string   // dotted path to roles, e.g. realm_access.roles
 	GroupClaim      string   // claim holding group paths, e.g. groups
 	AllowLocalLogin bool
+	RoleMap         map[string]string // Keycloak role → internal role; nil = use built-in defaults
 }
 
 // MCPConfig parameterizes the MCP discovery / grounding virtual models (vibe/grounded,

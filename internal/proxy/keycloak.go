@@ -225,7 +225,7 @@ func (s *Server) verifyKeycloakAccessToken(ctx context.Context, token string) (a
 	if err != nil {
 		return accessClaims{}, false
 	}
-	role := resolveKeycloakRole(s.keycloakRolesFromClaims(claims), s.keycloakConfig().DefaultRole)
+	role := resolveKeycloakRoleWith(s.effectiveKeycloakRoleMap(), s.keycloakRolesFromClaims(claims), s.keycloakConfig().DefaultRole)
 	if role == "" {
 		return accessClaims{}, false
 	}
@@ -333,13 +333,21 @@ var keycloakRoleMap = map[string]string{
 	"vibe-auditor":    "readonly_admin",
 }
 
-// resolveKeycloakRole picks the highest-privilege internal role among the user's mapped
-// roles, falling back to defaultRole ("" = block login).
+// resolveKeycloakRole picks the highest-privilege internal role among the user's mapped roles
+// using the built-in default map, falling back to defaultRole ("" = block login).
 func resolveKeycloakRole(roles []string, defaultRole string) string {
+	return resolveKeycloakRoleWith(keycloakRoleMap, roles, defaultRole)
+}
+
+// resolveKeycloakRoleWith is resolveKeycloakRole with an explicit (possibly admin-edited) map.
+func resolveKeycloakRoleWith(roleMap map[string]string, roles []string, defaultRole string) string {
+	if len(roleMap) == 0 {
+		roleMap = keycloakRoleMap
+	}
 	best := ""
 	bestRank := -1
 	for _, r := range roles {
-		if internal, ok := keycloakRoleMap[strings.TrimSpace(r)]; ok {
+		if internal, ok := roleMap[strings.TrimSpace(r)]; ok {
 			if rank := roleRank(internal); rank > bestRank {
 				bestRank = rank
 				best = internal

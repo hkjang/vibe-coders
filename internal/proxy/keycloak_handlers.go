@@ -177,7 +177,7 @@ func (s *Server) provisionKeycloakUser(ctx context.Context, claims map[string]an
 	if sub == "" {
 		return store.AuthUser{}, "", &keycloakError{"id_token missing sub"}
 	}
-	role := resolveKeycloakRole(s.keycloakRolesFromClaims(claims), kc.DefaultRole)
+	role := resolveKeycloakRoleWith(s.effectiveKeycloakRoleMap(), s.keycloakRolesFromClaims(claims), kc.DefaultRole)
 	if role == "" {
 		return store.AuthUser{}, "", &keycloakError{"no role mapping matched and no default role — login blocked"}
 	}
@@ -365,7 +365,9 @@ func (s *Server) handleKeycloakConfig(w http.ResponseWriter, r *http.Request) {
 		"role_claim":        kc.RoleClaim,
 		"group_claim":       kc.GroupClaim,
 		"allow_local_login": kc.AllowLocalLogin,
-		"role_map":          keycloakRoleMap,
+		"role_map":          s.effectiveKeycloakRoleMap(),
+		"role_map_default":  keycloakRoleMap,
+		"role_map_custom":   len(kc.RoleMap) > 0,
 		"source":            source, // "db" = admin override (secret AES-GCM at rest), "env" = SSO_KEYCLOAK_*
 		"db_backed":         dbBacked,
 		"updated_at":        updatedAt,
@@ -396,8 +398,9 @@ func (s *Server) handleKeycloakConfigSave(w http.ResponseWriter, r *http.Request
 		Scopes          []string `json:"scopes"`
 		DefaultRole     string   `json:"default_role"`
 		RoleClaim       string   `json:"role_claim"`
-		GroupClaim      string   `json:"group_claim"`
-		AllowLocalLogin bool     `json:"allow_local_login"`
+		GroupClaim      string            `json:"group_claim"`
+		AllowLocalLogin bool              `json:"allow_local_login"`
+		RoleMap         map[string]string `json:"role_map"` // nil/omitted = keep existing; {} = reset to defaults
 	}
 	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
 		writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "bad_request")
@@ -435,6 +438,23 @@ func (s *Server) handleKeycloakConfigSave(w http.ResponseWriter, r *http.Request
 		GroupClaim:      strings.TrimSpace(p.GroupClaim),
 		AllowLocalLogin: p.AllowLocalLogin,
 		ClientSecretEnc: prev.ClientSecretEnc, // default: keep the existing encrypted secret
+		RoleMap:         prev.RoleMap,         // default: keep existing custom map
+	}
+	// role_map: nil/omitted → keep existing; non-nil (incl. {}) → replace (empty resets to defaults).
+	if p.RoleMap != nil {
+		cleaned := map[string]string{}
+		for k, v := range p.RoleMap {
+			k, v = strings.TrimSpace(k), strings.TrimSpace(v)
+			if k == "" || v == "" {
+				continue
+			}
+			if !s.effectiveValidRole(r.Context(), v) {
+				writeOpenAIError(w, http.StatusBadRequest, "role_map target is not a valid internal role: "+v, "invalid_request_error", "bad_role")
+				return
+			}
+			cleaned[k] = v
+		}
+		rec.RoleMap = cleaned
 	}
 	if p.ClientSecret != nil {
 		sec := strings.TrimSpace(*p.ClientSecret)

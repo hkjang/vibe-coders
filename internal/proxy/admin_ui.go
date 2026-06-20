@@ -8632,11 +8632,20 @@ const adminHTML = `<!doctype html>
         '<div id="sso-test-out" style="margin-top:8px"></div>' +
         '</div>');
       const rm = c.role_map || {};
-      const mapCard = card('Role 매핑 (Keycloak → 내부)',
-        '<div class="card-body"><table><thead><tr><th>Keycloak Role</th><th>내부 Role</th></tr></thead><tbody>' +
-          Object.keys(rm).map(k => '<tr><td>' + escapeHTML(k) + '</td><td>' + escapeHTML(rm[k]) + '</td></tr>').join('') +
-          '<tr><td class="muted">/teams/&lt;name&gt; (group)</td><td class="muted">team:&lt;name&gt;</td></tr>' +
-        '</tbody></table><p class="muted" style="font-size:11px;margin-top:6px">매핑 실패 시 기본 Role(' + escapeHTML(c.default_role || '') + ')로 폴백, 기본 Role이 비어 있으면 로그인 차단.</p></div>');
+      const rmRow = (k, v) => '<tr>' +
+        '<td><input type="text" class="sso-rm-k" value="' + escapeAttr(k || '') + '" placeholder="vibe-admin" style="width:100%;box-sizing:border-box"></td>' +
+        '<td><input type="text" class="sso-rm-v" value="' + escapeAttr(v || '') + '" placeholder="admin" style="width:100%;box-sizing:border-box"></td>' +
+        '<td><button type="button" onclick="this.closest(\'tr\').remove()">삭제</button></td></tr>';
+      const customBadge = c.role_map_custom ? '<span class="status">커스텀</span>' : '<span class="status warn">기본값</span>';
+      const mapCard = card('Role 매핑 (Keycloak → 내부) ' + customBadge,
+        '<div class="card-body"><table id="sso-rm-table"><thead><tr><th>Keycloak Role</th><th>내부 Role</th><th></th></tr></thead><tbody id="sso-rm-body">' +
+          Object.keys(rm).map(k => rmRow(k, rm[k])).join('') +
+        '</tbody></table>' +
+        '<div style="margin-top:6px"><button type="button" id="sso-rm-add">행 추가</button> ' +
+          '<button type="button" id="sso-rm-save">매핑 저장</button> ' +
+          '<button type="button" id="sso-rm-reset">기본값으로 초기화</button></div>' +
+        '<div id="sso-rm-out" style="margin-top:6px"></div>' +
+        '<p class="muted" style="font-size:11px;margin-top:6px">/teams/&lt;name&gt; (group) → team:&lt;name&gt; 매핑은 고정. 매핑 실패 시 기본 Role(' + escapeHTML(c.default_role || '') + ')로 폴백, 기본 Role이 비어 있으면 로그인 차단. 가장 높은 권한의 매핑이 우선합니다.</p></div>');
       view.innerHTML = section('SSO (Keycloak)', '') + cfgCard + mapCard;
       const saveBtn = document.getElementById('sso-save-btn');
       if (saveBtn) saveBtn.addEventListener('click', async () => {
@@ -8665,6 +8674,37 @@ const adminHTML = `<!doctype html>
           await renderSSOSettings();
         } catch (e) { out.innerHTML = '<span class="status error">' + escapeHTML(e.message) + '</span>'; }
       });
+      const rmAdd = document.getElementById('sso-rm-add');
+      if (rmAdd) rmAdd.addEventListener('click', () => {
+        const body = document.getElementById('sso-rm-body');
+        const tr = document.createElement('tr');
+        tr.innerHTML = '<td><input type="text" class="sso-rm-k" placeholder="vibe-admin" style="width:100%;box-sizing:border-box"></td>' +
+          '<td><input type="text" class="sso-rm-v" placeholder="admin" style="width:100%;box-sizing:border-box"></td>' +
+          '<td><button type="button" onclick="this.closest(\'tr\').remove()">삭제</button></td>';
+        body.appendChild(tr);
+      });
+      const collectRoleMap = () => {
+        const m = {};
+        document.querySelectorAll('#sso-rm-body tr').forEach(tr => {
+          const k = (tr.querySelector('.sso-rm-k').value || '').trim();
+          const val = (tr.querySelector('.sso-rm-v').value || '').trim();
+          if (k && val) m[k] = val;
+        });
+        return m;
+      };
+      const saveRoleMap = async (mapObj, msg) => {
+        const out = document.getElementById('sso-rm-out');
+        out.innerHTML = '<span class="muted">저장 중...</span>';
+        try {
+          await api('/admin/sso/keycloak/config', { method: 'PUT', body: JSON.stringify({ ...window.__ssoCfg, role_map: mapObj }) });
+          out.innerHTML = '<span class="status">' + msg + '</span>';
+          await renderSSOSettings();
+        } catch (e) { out.innerHTML = '<span class="status error">' + escapeHTML(e.message) + '</span>'; }
+      };
+      const rmSave = document.getElementById('sso-rm-save');
+      if (rmSave) rmSave.addEventListener('click', () => saveRoleMap(collectRoleMap(), '매핑 저장됨'));
+      const rmReset = document.getElementById('sso-rm-reset');
+      if (rmReset) rmReset.addEventListener('click', () => { if (confirm('Role 매핑을 기본값으로 초기화할까요?')) saveRoleMap({}, '기본값으로 초기화됨'); });
       const btn = document.getElementById('sso-test-btn');
       if (btn) btn.addEventListener('click', async () => {
         const out = document.getElementById('sso-test-out');
