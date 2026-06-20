@@ -139,3 +139,51 @@ func TestVerifyKeycloakIDToken(t *testing.T) {
 		t.Error("token signed by wrong key must fail signature check")
 	}
 }
+
+func TestVerifyKeycloakAccessToken(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	jwksMu.Lock()
+	jwksKeys = map[string]*rsa.PublicKey{"at-kid": &key.PublicKey}
+	jwksFetch = time.Now()
+	jwksMu.Unlock()
+	// Seed the discovery cache so verifyKeycloakAccessToken doesn't hit the network.
+	const issuer = "https://kc.example.com/realms/vibe"
+	discMu.Lock()
+	discCache = oidcDiscovery{Issuer: issuer, JWKSURI: "http://unused", AuthorizationEndpoint: "x", TokenEndpoint: "y"}
+	discFetch = time.Now()
+	discMu.Unlock()
+
+	db := openTestStore(t)
+	defer db.Close()
+	s := &Server{cfg: config.Config{Keycloak: config.KeycloakConfig{
+		Enabled: true, ClientID: "vibe-coders", IssuerURL: issuer, DefaultRole: "developer",
+		RoleClaim: "realm_access.roles", GroupClaim: "groups",
+	}}, db: db}
+
+	// Access token with an admin realm role → synthesized admin claims + scopes.
+	tok := signRS256(t, key, "at-kid", map[string]any{
+		"iss": issuer, "sub": "svc-1", "email": "svc@x.com",
+		"realm_access": map[string]any{"roles": []any{"vibe-admin"}},
+		"groups":       []any{"/teams/ai-platform"},
+		"exp":          float64(time.Now().Add(time.Hour).Unix()),
+	})
+	claims, ok := s.verifyKeycloakAccessToken(t.Context(), tok)
+	if !ok || claims.Role != "admin" || claims.Subject != "svc-1" || claims.TeamID != "ai-platform" {
+		t.Fatalf("access token claims = %+v ok=%v", claims, ok)
+	}
+	if !hasScope(claims.Scopes, "admin:read") {
+		t.Errorf("admin role should carry admin:read scope, got %v", claims.Scopes)
+	}
+	// Expired access token rejected.
+	expired := signRS256(t, key, "at-kid", map[string]any{"iss": issuer, "sub": "x", "realm_access": map[string]any{"roles": []any{"vibe-admin"}}, "exp": float64(time.Now().Add(-time.Hour).Unix())})
+	if _, ok := s.verifyKeycloakAccessToken(t.Context(), expired); ok {
+		t.Error("expired access token must be rejected")
+	}
+	// An HS256 token (our internal format) is ignored by the Keycloak verifier.
+	if _, ok := s.verifyKeycloakAccessToken(t.Context(), "eyJhbGciOiJIUzI1NiJ9.e30.x"); ok {
+		t.Error("HS256 token must not be accepted as a Keycloak access token")
+	}
+}

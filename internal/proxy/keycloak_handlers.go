@@ -267,6 +267,72 @@ func (s *Server) handleKeycloakLogout(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"status": "logged_out", "end_session_url": endSession})
 }
 
+// handleKeycloakConfig returns the (non-secret) Keycloak config for the admin SSO screen.
+// GET /admin/sso/keycloak/config
+func (s *Server) handleKeycloakConfig(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	kc := s.cfg.Keycloak
+	writeJSON(w, http.StatusOK, map[string]any{
+		"enabled":           kc.Enabled,
+		"issuer_url":        kc.IssuerURL,
+		"client_id":         kc.ClientID,
+		"client_secret_set": kc.ClientSecret != "",
+		"redirect_uri":      kc.RedirectURI,
+		"scopes":            kc.Scopes,
+		"default_role":      kc.DefaultRole,
+		"role_claim":        kc.RoleClaim,
+		"group_claim":       kc.GroupClaim,
+		"allow_local_login": kc.AllowLocalLogin,
+		"role_map":          keycloakRoleMap,
+		"note":              "설정은 환경변수(SSO_KEYCLOAK_*)로 관리됩니다. DB 기반 설정/secret 암호화는 후속.",
+	})
+}
+
+// handleKeycloakTest diagnoses the Keycloak connection: discovery reachability, endpoints,
+// and JWKS key count. Admin-only. POST /admin/sso/keycloak/test
+func (s *Server) handleKeycloakTest(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	if !s.cfg.Keycloak.Enabled {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "reason": "SSO_KEYCLOAK_ENABLED=false"})
+		return
+	}
+	if strings.TrimSpace(s.cfg.Keycloak.IssuerURL) == "" {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "reason": "issuer URL is empty"})
+		return
+	}
+	disc, err := keycloakDiscover(r.Context(), s.cfg.Keycloak.IssuerURL)
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "stage": "discovery", "reason": err.Error()})
+		return
+	}
+	var set jwkSet
+	keyCount := 0
+	if e := oidcGetJSON(r.Context(), disc.JWKSURI, &set); e == nil {
+		for _, k := range set.Keys {
+			if k.Kty == "RSA" {
+				keyCount++
+			}
+		}
+	} else {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "stage": "jwks", "reason": e.Error(), "discovery": disc})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok": true, "issuer": disc.Issuer,
+		"authorization_endpoint": disc.AuthorizationEndpoint,
+		"token_endpoint":         disc.TokenEndpoint,
+		"jwks_uri":               disc.JWKSURI,
+		"end_session_endpoint":   disc.EndSessionEndpoint,
+		"rsa_signing_keys":       keyCount,
+	})
+}
+
 func strClaim(claims map[string]any, key string) string {
 	if v, ok := claims[key].(string); ok {
 		return v

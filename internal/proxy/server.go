@@ -31,7 +31,7 @@ import (
 )
 
 // AppVersion is the gateway build version, surfaced in /auth/me and the admin UI.
-const AppVersion = "v0.51.0"
+const AppVersion = "v0.51.1"
 
 type Server struct {
 	cfg            config.Config
@@ -196,6 +196,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/auth/keycloak/login", s.handleKeycloakLogin)
 	mux.HandleFunc("/auth/keycloak/callback", s.handleKeycloakCallback)
 	mux.HandleFunc("/auth/keycloak/logout", s.handleKeycloakLogout)
+	mux.HandleFunc("/admin/sso/keycloak/config", s.handleKeycloakConfig)
+	mux.HandleFunc("/admin/sso/keycloak/test", s.handleKeycloakTest)
 	mux.HandleFunc("/admin", s.handleAdminUI)
 	mux.HandleFunc("/admin/", s.handleAdminUI)
 	mux.HandleFunc("/admin/stats", s.handleStats)
@@ -1594,10 +1596,23 @@ func (s *Server) authorizeAdmin(r *http.Request) bool {
 }
 
 func (s *Server) currentAccessClaims(r *http.Request) (accessClaims, bool) {
-	if !s.cfg.Auth.Enabled {
+	token := bearerToken(r.Header.Get("Authorization"))
+	if token == "" {
 		return accessClaims{}, false
 	}
-	return s.verifyAccessToken(r.Context(), bearerToken(r.Header.Get("Authorization")))
+	// Internal HS256 session token first (with session-active check).
+	if s.cfg.Auth.Enabled {
+		if c, ok := s.verifyAccessToken(r.Context(), token); ok {
+			return c, true
+		}
+	}
+	// Fall back to a Keycloak-issued RS256 access token (machine clients, SSO callers).
+	if s.cfg.Keycloak.Enabled {
+		if c, ok := s.verifyKeycloakAccessToken(r.Context(), token); ok {
+			return c, true
+		}
+	}
+	return accessClaims{}, false
 }
 
 func adminRequiredScope(r *http.Request) string {

@@ -126,12 +126,13 @@ func jwkToRSA(nB64, eB64 string) (*rsa.PublicKey, error) {
 	return &rsa.PublicKey{N: new(big.Int).SetBytes(nb), E: e}, nil
 }
 
-// verifyKeycloakIDToken verifies an RS256 ID token's signature (via JWKS), issuer, audience,
-// expiry, and nonce, returning its claims.
-func (s *Server) verifyKeycloakIDToken(ctx context.Context, disc oidcDiscovery, idToken, expectedNonce string) (map[string]any, error) {
-	parts := strings.Split(idToken, ".")
+// keycloakVerifyJWT verifies an RS256 JWT's signature (via JWKS), issuer, and expiry
+// (with a small clock skew), returning its claims. Shared by ID-token and access-token
+// verification; ID-token-specific checks (audience, nonce) are layered on top.
+func (s *Server) keycloakVerifyJWT(ctx context.Context, disc oidcDiscovery, token string) (map[string]any, error) {
+	parts := strings.Split(token, ".")
 	if len(parts) != 3 {
-		return nil, errors.New("malformed id_token")
+		return nil, errors.New("malformed jwt")
 	}
 	var header struct {
 		Alg string `json:"alg"`
@@ -139,10 +140,10 @@ func (s *Server) verifyKeycloakIDToken(ctx context.Context, disc oidcDiscovery, 
 	}
 	hb, err := base64.RawURLEncoding.DecodeString(parts[0])
 	if err != nil || json.Unmarshal(hb, &header) != nil {
-		return nil, errors.New("bad id_token header")
+		return nil, errors.New("bad jwt header")
 	}
 	if header.Alg != "RS256" {
-		return nil, errors.New("unsupported id_token alg: " + header.Alg)
+		return nil, errors.New("unsupported jwt alg: " + header.Alg)
 	}
 	key, err := keycloakJWKSKey(ctx, disc.JWKSURI, header.Kid)
 	if err != nil {
@@ -150,45 +151,97 @@ func (s *Server) verifyKeycloakIDToken(ctx context.Context, disc oidcDiscovery, 
 	}
 	sig, err := base64.RawURLEncoding.DecodeString(parts[2])
 	if err != nil {
-		return nil, errors.New("bad id_token signature encoding")
+		return nil, errors.New("bad jwt signature encoding")
 	}
 	signed := sha256.Sum256([]byte(parts[0] + "." + parts[1]))
 	if err := rsa.VerifyPKCS1v15(key, crypto.SHA256, signed[:], sig); err != nil {
-		return nil, errors.New("id_token signature verification failed")
+		return nil, errors.New("jwt signature verification failed")
 	}
 	pb, err := base64.RawURLEncoding.DecodeString(parts[1])
 	if err != nil {
-		return nil, errors.New("bad id_token payload")
+		return nil, errors.New("bad jwt payload")
 	}
 	var claims map[string]any
 	if err := json.Unmarshal(pb, &claims); err != nil {
-		return nil, errors.New("bad id_token claims")
+		return nil, errors.New("bad jwt claims")
 	}
-	// issuer (fixed against the configured/discovered issuer).
 	if iss, _ := claims["iss"].(string); iss != disc.Issuer {
-		return nil, errors.New("id_token issuer mismatch")
+		return nil, errors.New("jwt issuer mismatch")
 	}
-	// audience.
+	if exp, ok := claims["exp"].(float64); ok {
+		if time.Now().Add(-60 * time.Second).After(time.Unix(int64(exp), 0)) {
+			return nil, errors.New("jwt expired")
+		}
+	} else {
+		return nil, errors.New("jwt missing exp")
+	}
+	return claims, nil
+}
+
+// verifyKeycloakIDToken verifies an RS256 ID token (signature/issuer/expiry) plus audience
+// and nonce, returning its claims.
+func (s *Server) verifyKeycloakIDToken(ctx context.Context, disc oidcDiscovery, idToken, expectedNonce string) (map[string]any, error) {
+	claims, err := s.keycloakVerifyJWT(ctx, disc, idToken)
+	if err != nil {
+		return nil, err
+	}
 	if !audienceMatches(claims["aud"], s.cfg.Keycloak.ClientID) {
 		if azp, _ := claims["azp"].(string); azp != s.cfg.Keycloak.ClientID {
 			return nil, errors.New("id_token audience mismatch")
 		}
 	}
-	// expiry (with small clock skew).
-	if exp, ok := claims["exp"].(float64); ok {
-		if time.Now().Add(-60 * time.Second).After(time.Unix(int64(exp), 0)) {
-			return nil, errors.New("id_token expired")
-		}
-	} else {
-		return nil, errors.New("id_token missing exp")
-	}
-	// nonce (replay protection).
 	if expectedNonce != "" {
 		if n, _ := claims["nonce"].(string); n != expectedNonce {
 			return nil, errors.New("id_token nonce mismatch")
 		}
 	}
 	return claims, nil
+}
+
+// verifyKeycloakAccessToken verifies a Keycloak-issued RS256 access token (signature, issuer,
+// expiry) and synthesizes internal accessClaims (role/scopes from role mapping). Lets machine
+// clients and SSO callers authenticate to the API/admin with a Keycloak bearer token. No
+// internal session is required (the token is externally minted).
+func (s *Server) verifyKeycloakAccessToken(ctx context.Context, token string) (accessClaims, bool) {
+	if !s.cfg.Keycloak.Enabled || token == "" {
+		return accessClaims{}, false
+	}
+	// Cheap reject: our internal tokens are HS256; only attempt RS256 ones.
+	parts := strings.SplitN(token, ".", 3)
+	if len(parts) != 3 {
+		return accessClaims{}, false
+	}
+	if hb, err := base64.RawURLEncoding.DecodeString(parts[0]); err == nil {
+		var h struct{ Alg string `json:"alg"` }
+		if json.Unmarshal(hb, &h) == nil && h.Alg != "RS256" {
+			return accessClaims{}, false
+		}
+	}
+	disc, err := keycloakDiscover(ctx, s.cfg.Keycloak.IssuerURL)
+	if err != nil {
+		return accessClaims{}, false
+	}
+	claims, err := s.keycloakVerifyJWT(ctx, disc, token)
+	if err != nil {
+		return accessClaims{}, false
+	}
+	role := resolveKeycloakRole(s.keycloakRolesFromClaims(claims), s.cfg.Keycloak.DefaultRole)
+	if role == "" {
+		return accessClaims{}, false
+	}
+	exp := int64(0)
+	if v, ok := claims["exp"].(float64); ok {
+		exp = int64(v)
+	}
+	return accessClaims{
+		Subject:   strClaim(claims, "sub"),
+		Email:     strClaim(claims, "email"),
+		Role:      role,
+		TeamID:    keycloakTeamFromGroups(claimStrings(claims, s.cfg.Keycloak.GroupClaim)),
+		Scopes:    s.effectiveScopesForRole(ctx, role),
+		ExpiresAt: exp,
+		Type:      "access",
+	}, true
 }
 
 func audienceMatches(aud any, clientID string) bool {
