@@ -2272,6 +2272,30 @@ const adminHTML = `<!doctype html>
           rows + '<p class="muted" style="font-size:10px;margin-top:8px">' + escapeHTML(d.note || '') + '</p></div>');
       } catch (e) { openModal('오류', '<div class="error-line">' + escapeHTML(e.message) + '</div>'); }
     };
+    // MCP Agentic Loop Timeline — 후보 도구 점수, 증거, tool 호출, evidence gate.
+    window.showAgenticRun = async (id) => {
+      try {
+        const d = await api('/admin/mcp/agentic-runs?request_id=' + encodeURIComponent(id));
+        if (!d.agentic) { openModal('MCP Agentic', '<div class="card-body"><p class="muted">' + escapeHTML(d.note || 'MCP agentic 기록 없음') + '</p></div>'); return; }
+        const dec = d.decision || {};
+        const bar = (score) => '<span style="display:inline-block;height:6px;width:' + Math.max(2, Math.min(100, score)) + 'px;background:#6ea8fe;border-radius:3px;vertical-align:middle"></span>';
+        const cand = (d.candidate_scores || []).map(c => '<div style="font-size:12px">' + escapeHTML(c.tool) + ' ' + bar(c.score) + ' <span class="muted">' + (c.score || 0).toFixed(0) + '</span></div>').join('') || '<span class="muted" style="font-size:11px">없음</span>';
+        const ev = (d.evidence_scores || []).map(e => '<div style="font-size:12px">' + (e.error ? '⚠️ ' : '') + escapeHTML(e.tool) + ' ' + bar(e.score) + ' <span class="muted">' + (e.score || 0).toFixed(0) + '</span></div>').join('') || '<span class="muted" style="font-size:11px">없음</span>';
+        const tools = (d.tool_events || []).map(t => '<tr><td>' + escapeHTML(t.server) + '/' + escapeHTML(t.tool) + '</td><td>' + escapeHTML(t.source) + '</td><td>' + (t.is_error ? '<span class="status error">error</span>' : '<span class="status">ok</span>') + '</td><td class="muted" style="font-size:10px">' + escapeHTML(t.arg_hash || '') + '</td></tr>').join('');
+        const routes = (d.route_decisions || []).map(rd => '<tr><td>' + escapeHTML(rd.exposed_name || rd.target || '') + '</td><td>' + escapeHTML(rd.risk_level || '') + '</td><td>' + escapeHTML(rd.risk_action || '') + '</td><td>' + escapeHTML(rd.final_decision || '') + '</td></tr>').join('');
+        const gate = d.evidence_gate || {};
+        openModal('MCP Agentic Loop - ' + escapeHTML(id),
+          '<div class="card-body">' +
+          '<div style="margin-bottom:8px"><strong>라우팅 결정</strong> <span class="status">' + escapeHTML(dec.route || '') + '</span> ' +
+            '<span class="muted" style="font-size:12px">신뢰도 ' + (dec.confidence || 0).toFixed(0) + ' · 증거 ' + (dec.evidence_count || 0) + '건 · gate ' + (gate.passed ? '<span class="status">통과</span>' : '<span class="status warn">미통과</span>') + '</span></div>' +
+          (dec.reason ? '<div class="muted" style="font-size:11px;margin-bottom:8px">' + escapeHTML(dec.reason) + '</div>' : '') +
+          '<div style="display:flex;gap:20px;flex-wrap:wrap"><div style="flex:1;min-width:220px"><strong style="font-size:12px">후보 도구 점수 (selector)</strong>' + cand + '</div>' +
+          '<div style="flex:1;min-width:220px"><strong style="font-size:12px">증거 점수 (evidence)</strong>' + ev + '</div></div>' +
+          (tools ? '<div style="margin-top:10px"><strong style="font-size:12px">Tool 호출</strong><table><thead><tr><th>도구</th><th>단계</th><th>결과</th><th>arg hash</th></tr></thead><tbody>' + tools + '</tbody></table></div>' : '') +
+          (routes ? '<div style="margin-top:10px"><strong style="font-size:12px">Tool 정책/위험</strong><table><thead><tr><th>도구</th><th>위험</th><th>조치</th><th>결정</th></tr></thead><tbody>' + routes + '</tbody></table></div>' : '') +
+          '<p class="muted" style="font-size:10px;margin-top:8px">' + escapeHTML(d.note || '') + '</p></div>');
+      } catch (e) { openModal('오류', '<div class="error-line">' + escapeHTML(e.message) + '</div>'); }
+    };
     window.openRequestDetail = async (id) => {
       try {
         const [detail, note, links] = await Promise.all([
@@ -3741,7 +3765,8 @@ const adminHTML = `<!doctype html>
         '</div>'
       ) : '';
       const explainBtn = '<div style="margin-bottom:12px"><button class="secondary" type="button" onclick="closeModal();openExplain(\'' + escapeAttr(r.id) + '\')">🧭 XView 설명 (왜 이렇게 처리됐나)</button> ' +
-        '<button class="secondary" type="button" onclick="showFlowMap(\'' + escapeAttr(r.id) + '\')">🗺️ 처리 흐름</button></div>';
+        '<button class="secondary" type="button" onclick="showFlowMap(\'' + escapeAttr(r.id) + '\')">🗺️ 처리 흐름</button> ' +
+        '<button class="secondary" type="button" onclick="showAgenticRun(\'' + escapeAttr(r.id) + '\')">🔧 MCP Agentic</button></div>';
       const langs = (d.languages || []).map(l => escapeHTML(l.language) + ' <span class="muted">(' + pct(l.confidence) + ')</span>').join(', ') || '<span class="muted">없음</span>';
       const prompts = (d.prompts || []).map(p => {
         const text = p.redacted_text || p.content_text || '';
