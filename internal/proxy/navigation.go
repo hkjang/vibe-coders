@@ -56,6 +56,7 @@ var menuRegistry = []menuItem{
 // route guard treats a child as accessible exactly when its parent menu is accessible.
 var childTabs = map[string][]string{
 	"dashboard":   {"xview", "waterfall", "llm"},
+	"chat-test":   {"prompt-lab"},
 	"users":       {"teams", "ips", "quotas"},
 	"safety":      {"skills", "skill-studio", "modeldeprecations"},
 	"mcp":         {"agents", "vcs"},

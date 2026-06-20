@@ -1045,6 +1045,11 @@ const adminHTML = `<!doctype html>
           { label: '에이전트', href: '#/agents', active: tab === 'agents' },
           { label: 'VCS', href: '#/vcs', active: tab === 'vcs' },
         ]);
+      } else if (tab === 'chat-test' || tab === 'prompt-lab') {
+        el.innerHTML = subNav([
+          { label: 'Chat 테스트', href: '#/chat-test', active: tab === 'chat-test' },
+          { label: 'Prompt Lab', href: '#/prompt-lab', active: tab === 'prompt-lab' },
+        ]);
       } else if (tab === 'routing') {
         const onHealth = rest[0] === 'health';
         el.innerHTML = subNav([
@@ -1066,6 +1071,7 @@ const adminHTML = `<!doctype html>
         skills: 'safety', 'skill-studio': 'safety', modeldeprecations: 'safety',
         agents: 'mcp', vcs: 'mcp',
         clickhouse: 'dwdashboard', runtimesettings: 'settings',
+        'prompt-lab': 'chat-test',
       };
       const navTab = navParent[tab] || tab;
       setActiveTab(navTab);
@@ -1097,6 +1103,7 @@ const adminHTML = `<!doctype html>
           case 'mcp':       await renderMCP(params); break;
           case 'routing':   rest[0] === 'health' ? await renderRoutingHealth(params) : await renderRoutingLearning(params); break;
           case 'chat-test': await renderChatTest(params); break;
+          case 'prompt-lab': await renderPromptLab(params); break;
           case 'agents':    await renderAgents(params); break;
           case 'vcs':       await renderVCS(params); break;
           case 'safety':    await renderSafety(); break;
@@ -5321,6 +5328,150 @@ const adminHTML = `<!doctype html>
       } catch (err) {
         openModal('Routing Review 처리 오류', '<div class="error-line">' + escapeHTML(err.message) + '</div>');
       }
+    };
+
+    // ---------- Prompt Lab: experiments + test cases + rubrics/contracts ----------
+    async function renderPromptLab(params) {
+      const view = document.getElementById('view');
+      view.innerHTML = section('Prompt Lab', '<div class="empty">불러오는 중...</div>');
+      const expId = (params && params.get && params.get('exp')) || '';
+      if (expId) { await plRenderExperiment(expId); return; }
+      let d, contracts, rubrics;
+      try {
+        [d, contracts, rubrics] = await Promise.all([
+          api('/admin/prompt-lab/experiments'),
+          api('/admin/prompt-lab/contracts').catch(() => ({ contracts: [] })),
+          api('/admin/prompt-lab/rubrics').catch(() => ({ rubrics: [] })),
+        ]);
+      } catch (e) {
+        view.innerHTML = section('Prompt Lab', '<div class="card-body" style="padding:16px"><p class="muted">불러올 수 없습니다: ' + escapeHTML(e.message) + '</p></div>');
+        return;
+      }
+      window.__plContracts = contracts.contracts || [];
+      window.__plRubrics = rubrics.rubrics || [];
+      const exps = d.experiments || [];
+      const expRows = exps.length
+        ? exps.map(e => '<tr>' +
+            '<td><a href="#/prompt-lab?exp=' + encodeURIComponent(e.id) + '">' + escapeHTML(e.title) + '</a>' + (e.status === 'archived' ? ' <span class="status warn" style="font-size:9px">archived</span>' : '') + '</td>' +
+            '<td class="muted">' + escapeHTML(e.team || '-') + '</td>' +
+            '<td class="muted">' + escapeHTML(e.owner || '-') + '</td>' +
+            '<td class="muted">' + ago(e.updated_at) + '</td>' +
+            '</tr>').join('')
+        : '<tr><td colspan="4" class="muted">실험이 없습니다. 새 실험을 만들어 테스트케이스를 모아보세요.</td></tr>';
+      view.innerHTML = section('Prompt Lab', '<p class="muted" style="font-size:12px">프롬프트 테스트를 실험·테스트케이스로 저장하고, 여러 모델로 반복 실행해 품질·비용·지연·출력계약 통과를 비교합니다.</p>') +
+        card('실험 (Experiments)',
+          '<div class="card-body">' +
+          '<div style="display:flex;gap:6px;margin-bottom:8px"><input id="pl-exp-title" placeholder="새 실험 제목" style="flex:1"><input id="pl-exp-team" placeholder="팀(선택)" style="width:120px"><button type="button" onclick="plCreateExperiment()">실험 생성</button></div>' +
+          '<table><thead><tr><th>제목</th><th>팀</th><th>소유자</th><th>수정</th></tr></thead><tbody>' + expRows + '</tbody></table>' +
+          '</div>') +
+        card('평가 자산 (Rubric / 출력계약)',
+          '<div class="card-body" style="display:flex;gap:24px;flex-wrap:wrap">' +
+          '<div style="flex:1;min-width:280px"><strong>출력계약</strong>' +
+            '<div style="display:flex;gap:4px;margin:6px 0"><input id="pl-ctr-name" placeholder="이름" style="flex:1">' +
+            '<select id="pl-ctr-type"><option value="json">JSON</option><option value="json_schema">JSON Schema</option><option value="markdown_table">MD 표</option><option value="sql">SQL(읽기전용)</option><option value="regex">정규식</option></select></div>' +
+            '<textarea id="pl-ctr-schema" placeholder="schema_json (json_schema: {&quot;required&quot;:[..],&quot;properties&quot;:{..}}, regex: 패턴)" style="width:100%;height:48px"></textarea>' +
+            '<label style="font-size:11px"><input type="checkbox" id="pl-ctr-strict"> strict (위반 시 verdict 강등)</label>' +
+            '<div style="margin-top:4px"><button type="button" onclick="plCreateContract()">계약 추가</button></div>' +
+            '<div id="pl-ctr-list" style="margin-top:6px">' + plContractListHTML() + '</div>' +
+          '</div>' +
+          '<div style="flex:1;min-width:240px"><strong>Rubric</strong>' +
+            '<div style="display:flex;gap:4px;margin:6px 0"><input id="pl-rub-name" placeholder="이름" style="flex:1"><button type="button" onclick="plCreateRubric()">추가</button></div>' +
+            '<div id="pl-rub-list">' + (window.__plRubrics.length ? window.__plRubrics.map(rb => '<div style="font-size:12px">• ' + escapeHTML(rb.name) + '</div>').join('') : '<span class="muted" style="font-size:12px">없음</span>') + '</div>' +
+          '</div>' +
+          '</div>');
+    }
+    function plContractListHTML() {
+      const cs = window.__plContracts || [];
+      return cs.length ? cs.map(c => '<div style="font-size:12px">• ' + escapeHTML(c.name) + ' <span class="muted">(' + escapeHTML(c.type) + (c.strict ? ', strict' : '') + ')</span></div>').join('') : '<span class="muted" style="font-size:12px">없음</span>';
+    }
+    window.plCreateExperiment = async () => {
+      const title = (document.getElementById('pl-exp-title').value || '').trim();
+      if (!title) return;
+      const team = (document.getElementById('pl-exp-team').value || '').trim();
+      try { await api('/admin/prompt-lab/experiments', { method: 'POST', body: JSON.stringify({ title, team }) }); await renderPromptLab(); }
+      catch (e) { alert(e.message); }
+    };
+    window.plCreateContract = async () => {
+      const name = (document.getElementById('pl-ctr-name').value || '').trim();
+      if (!name) return;
+      const body = { name, type: document.getElementById('pl-ctr-type').value, schema_json: document.getElementById('pl-ctr-schema').value, strict: document.getElementById('pl-ctr-strict').checked };
+      try { await api('/admin/prompt-lab/contracts', { method: 'POST', body: JSON.stringify(body) }); await renderPromptLab(); }
+      catch (e) { alert(e.message); }
+    };
+    window.plCreateRubric = async () => {
+      const name = (document.getElementById('pl-rub-name').value || '').trim();
+      if (!name) return;
+      try { await api('/admin/prompt-lab/rubrics', { method: 'POST', body: JSON.stringify({ name, criteria: {} }) }); await renderPromptLab(); }
+      catch (e) { alert(e.message); }
+    };
+
+    async function plRenderExperiment(expId) {
+      const view = document.getElementById('view');
+      let d;
+      try { d = await api('/admin/prompt-lab/experiments/' + encodeURIComponent(expId)); }
+      catch (e) { view.innerHTML = section('Prompt Lab', '<div class="card-body"><p class="muted">' + escapeHTML(e.message) + '</p></div>'); return; }
+      if (!window.__plContracts) { try { window.__plContracts = (await api('/admin/prompt-lab/contracts')).contracts || []; } catch (e) { window.__plContracts = []; } }
+      const exp = d.experiment || {};
+      const cases = d.test_cases || [];
+      const ctrOpts = '<option value="">계약 없음</option>' + (window.__plContracts || []).map(c => '<option value="' + escapeAttr(c.id) + '">' + escapeHTML(c.name) + '</option>').join('');
+      const caseRows = cases.length
+        ? cases.map(tc => '<tr>' +
+            '<td>' + escapeHTML(tc.name) + '</td>' +
+            '<td class="muted" style="font-size:11px">' + escapeHTML((JSON.parse(tc.models_json || '[]') || []).join(', ') || '-') + '</td>' +
+            '<td><button type="button" class="secondary" style="font-size:11px" onclick="plRunCase(\'' + escapeAttr(tc.id) + '\')">실행</button> ' +
+            '<button type="button" class="secondary" style="font-size:11px" onclick="plDeleteCase(\'' + escapeAttr(tc.id) + '\',\'' + escapeAttr(expId) + '\')">삭제</button></td>' +
+            '</tr><tr><td colspan="3"><div id="pl-run-' + escapeAttr(tc.id) + '"></div></td></tr>').join('')
+        : '<tr><td colspan="3" class="muted">테스트케이스가 없습니다.</td></tr>';
+      view.innerHTML = section('Prompt Lab · ' + escapeHTML(exp.title || ''), '<a href="#/prompt-lab" class="muted">← 실험 목록</a>') +
+        card('테스트케이스',
+          '<div class="card-body"><table><thead><tr><th>이름</th><th>모델</th><th>액션</th></tr></thead><tbody>' + caseRows + '</tbody></table></div>') +
+        card('새 테스트케이스',
+          '<div class="card-body">' +
+          '<div style="display:flex;gap:6px;margin-bottom:6px"><input id="pl-tc-name" placeholder="이름" style="flex:1">' +
+          '<input id="pl-tc-models" placeholder="모델 (쉼표 구분, 예: gpt-4o, claude-opus-4-8)" style="flex:2">' +
+          '<select id="pl-tc-contract">' + ctrOpts + '</select></div>' +
+          '<textarea id="pl-tc-system" placeholder="system 프롬프트(선택)" style="width:100%;height:48px"></textarea>' +
+          '<textarea id="pl-tc-user" placeholder="user 프롬프트" style="width:100%;height:72px;margin-top:4px"></textarea>' +
+          '<div style="margin-top:6px"><button type="button" onclick="plCreateCase(\'' + escapeAttr(expId) + '\')">테스트케이스 저장</button></div>' +
+          '</div>');
+    }
+    window.plCreateCase = async (expId) => {
+      const name = (document.getElementById('pl-tc-name').value || '').trim();
+      const user = (document.getElementById('pl-tc-user').value || '').trim();
+      if (!name || !user) { alert('이름과 user 프롬프트는 필수입니다.'); return; }
+      const sys = (document.getElementById('pl-tc-system').value || '').trim();
+      const messages = [];
+      if (sys) messages.push({ role: 'system', content: sys });
+      messages.push({ role: 'user', content: user });
+      const models = (document.getElementById('pl-tc-models').value || '').split(',').map(x => x.trim()).filter(Boolean);
+      const body = { experiment_id: expId, name, messages, models, contract_id: document.getElementById('pl-tc-contract').value };
+      try { await api('/admin/prompt-lab/test-cases', { method: 'POST', body: JSON.stringify(body) }); await plRenderExperiment(expId); }
+      catch (e) { alert(e.message); }
+    };
+    window.plDeleteCase = async (id, expId) => {
+      if (!confirm('이 테스트케이스를 삭제할까요?')) return;
+      try { await api('/admin/prompt-lab/test-cases/' + encodeURIComponent(id), { method: 'DELETE' }); await plRenderExperiment(expId); }
+      catch (e) { alert(e.message); }
+    };
+    window.plRunCase = async (id) => {
+      const host = document.getElementById('pl-run-' + id);
+      if (host) host.innerHTML = '<div class="empty">실행 중...</div>';
+      try {
+        const d = await api('/admin/prompt-lab/test-cases/' + encodeURIComponent(id) + '/run', { method: 'POST', body: '{}' });
+        const won = (v) => '₩' + fmt(Math.round(v || 0));
+        const vcls = (v) => v === 'pass' ? '' : (v === 'warn' ? 'warn' : 'error');
+        const rows = (d.results || []).map(x =>
+          '<tr><td>' + escapeHTML(x.model) + (x.model === d.best_model ? ' <span class="status" style="font-size:9px">BEST</span>' : '') + '</td>' +
+          '<td><span class="status ' + vcls(x.verdict) + '">' + (x.score||0).toFixed(1) + '</span></td>' +
+          '<td>' + (x.contract_pass === true ? '<span class="status">통과</span>' : (x.contract_pass === false ? '<span class="status error">실패</span>' : '-')) + '</td>' +
+          '<td>' + fmt(x.latency_ms) + 'ms</td><td>' + won(x.cost_krw) + '</td></tr>').join('');
+        const hist = (d.history || []).slice(0, 8).map(h => '<span class="muted" style="font-size:11px">' + ago(h.created_at) + ': ' + (h.avg_score||0).toFixed(1) + '점' + (h.best_model ? ' · ' + escapeHTML(h.best_model) : '') + '</span>').join(' · ');
+        if (host) host.innerHTML = '<div style="border:1px solid var(--border);border-radius:6px;padding:8px;margin:4px 0">' +
+          '<div style="font-size:12px;margin-bottom:4px">평균 ' + (d.avg_score||0).toFixed(1) + '점 · best ' + escapeHTML(d.best_model||'-') + (d.contract_applied ? ' · 계약통과 ' + d.contract_pass + '/' + d.model_count : '') + ' · <a href="#/chat-test">run ' + escapeHTML(d.run_id) + '</a></div>' +
+          '<table><thead><tr><th>모델</th><th>점수</th><th>계약</th><th>지연</th><th>비용</th></tr></thead><tbody>' + rows + '</tbody></table>' +
+          (hist ? '<div style="margin-top:4px">회귀 이력: ' + hist + '</div>' : '') +
+          '</div>';
+      } catch (e) { if (host) host.innerHTML = '<span class="status error">' + escapeHTML(e.message) + '</span>'; }
     };
 
     // ---------- Chat completion test console ----------

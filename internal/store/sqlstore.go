@@ -1362,6 +1362,62 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 			created_at TEXT NOT NULL
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_mmt_judgements_run ON multi_model_test_judgements(run_id)`,
+		// Prompt Lab: experiments group reusable prompt test cases; rubrics + contracts are
+		// shared evaluation assets; test-case runs link to multi-model runs for regression.
+		`CREATE TABLE IF NOT EXISTS prompt_experiments (
+			id TEXT PRIMARY KEY,
+			title TEXT NOT NULL DEFAULT '',
+			description TEXT NOT NULL DEFAULT '',
+			team TEXT NOT NULL DEFAULT '',
+			owner TEXT NOT NULL DEFAULT '',
+			status TEXT NOT NULL DEFAULT 'active',
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS prompt_rubrics (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL DEFAULT '',
+			criteria_json TEXT NOT NULL DEFAULT '',
+			created_by TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS prompt_contracts (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL DEFAULT '',
+			type TEXT NOT NULL DEFAULT 'json_schema',
+			schema_json TEXT NOT NULL DEFAULT '',
+			strict INTEGER NOT NULL DEFAULT 0,
+			created_by TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS prompt_test_cases (
+			id TEXT PRIMARY KEY,
+			experiment_id TEXT NOT NULL,
+			name TEXT NOT NULL DEFAULT '',
+			messages_json TEXT NOT NULL DEFAULT '',
+			messages_hash TEXT NOT NULL DEFAULT '',
+			rubric_id TEXT NOT NULL DEFAULT '',
+			contract_id TEXT NOT NULL DEFAULT '',
+			models_json TEXT NOT NULL DEFAULT '',
+			created_by TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_prompt_test_cases_exp ON prompt_test_cases(experiment_id)`,
+		`CREATE TABLE IF NOT EXISTS prompt_test_case_runs (
+			id TEXT PRIMARY KEY,
+			test_case_id TEXT NOT NULL,
+			run_id TEXT NOT NULL DEFAULT '',
+			best_model TEXT NOT NULL DEFAULT '',
+			avg_score REAL NOT NULL DEFAULT 0,
+			contract_pass INTEGER NOT NULL DEFAULT 0,
+			model_count INTEGER NOT NULL DEFAULT 0,
+			avg_cost_krw REAL NOT NULL DEFAULT 0,
+			avg_latency_ms REAL NOT NULL DEFAULT 0,
+			created_by TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_prompt_tc_runs_tc ON prompt_test_case_runs(test_case_id)`,
 		// SSO (Keycloak/OIDC): external identity → internal user linkage.
 		`CREATE TABLE IF NOT EXISTS auth_identities (
 			id TEXT PRIMARY KEY,
