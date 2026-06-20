@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 	"time"
 )
 
@@ -99,6 +100,50 @@ func (s *SQLStore) ListMultiModelRuns(ctx context.Context, limit int) ([]MultiMo
 	for rows.Next() {
 		var r MultiModelTestRun
 		if err := rows.Scan(&r.ID, &r.Title, &r.CreatedBy, &r.Team, &r.PromptHash, &r.PromptPreview, &r.ModelCount, &r.Success, &r.Failed, &r.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// MMJudgementRow is a flattened judgement joined to its run, for leaderboard aggregation.
+type MMJudgementRow struct {
+	RunID      string  `json:"run_id"`
+	Team       string  `json:"team"`
+	Model      string  `json:"model"`
+	TotalScore float64 `json:"total_score"`
+	Verdict    string  `json:"verdict"`
+}
+
+// MultiModelJudgementRows returns judgements joined to their run, optionally filtered by team
+// and a created-at floor (RFC3339; empty = all time). Powers the model leaderboard ("which
+// model keeps winning").
+func (s *SQLStore) MultiModelJudgementRows(ctx context.Context, team, sinceRFC string) ([]MMJudgementRow, error) {
+	q := `SELECT j.run_id, COALESCE(r.team,''), j.model, j.total_score, j.verdict
+		FROM multi_model_test_judgements j JOIN multi_model_test_runs r ON r.id = j.run_id`
+	conds := []string{}
+	args := []any{}
+	if strings.TrimSpace(team) != "" {
+		conds = append(conds, "r.team = ?")
+		args = append(args, team)
+	}
+	if strings.TrimSpace(sinceRFC) != "" {
+		conds = append(conds, "r.created_at >= ?")
+		args = append(args, sinceRFC)
+	}
+	if len(conds) > 0 {
+		q += " WHERE " + strings.Join(conds, " AND ")
+	}
+	rows, err := s.db.QueryContext(ctx, s.bind(q), args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []MMJudgementRow{}
+	for rows.Next() {
+		var r MMJudgementRow
+		if err := rows.Scan(&r.RunID, &r.Team, &r.Model, &r.TotalScore, &r.Verdict); err != nil {
 			return nil, err
 		}
 		out = append(out, r)

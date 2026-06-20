@@ -5717,8 +5717,10 @@ const adminHTML = `<!doctype html>
       document.getElementById('view').innerHTML =
         section('Chat Completion 테스트', kpis + form) +
         section('멀티 모델 응답 비교', multiPanel) +
-        '<div id="mm-tags-panel"></div>' +
+        '<div id="mm-leaderboard"></div><div id="mm-tags-panel"></div>' +
         section('대상 카탈로그', chatTestTargetTable(targets));
+
+      mmLoadLeaderboard();
 
       mmRenderTagEditor();
       document.getElementById('mm-run').addEventListener('click', runMultiModelCompare);
@@ -6393,6 +6395,21 @@ const adminHTML = `<!doctype html>
       if (t.risk_note) out += ' <span class="status error" style="font-size:9px" title="위험">' + escapeHTML(t.risk_note) + '</span>';
       return out;
     }
+    // 모델 리더보드 — 저장된 자동 평가 기준 "어떤 모델이 계속 이기는지".
+    window.mmLoadLeaderboard = async () => {
+      const host = document.getElementById('mm-leaderboard');
+      if (!host) return;
+      let d;
+      try { d = await api('/admin/chat-test/multi-run/leaderboard?days=90'); } catch (e) { host.innerHTML = ''; return; }
+      const lb = d.leaderboard || [];
+      if (!lb.length) { host.innerHTML = ''; return; } // 평가 데이터 없으면 숨김
+      const rows = lb.map((m, i) => '<tr><td>' + (i + 1) + '</td><td>' + escapeHTML(m.model) + (i === 0 ? ' <span class="status" style="font-size:9px">최다 우승</span>' : '') + '</td>' +
+        '<td>' + m.wins + '</td><td>' + (m.avg_score || 0).toFixed(1) + '</td><td>' + (m.pass_rate || 0).toFixed(0) + '%</td><td>' + m.appearances + '</td></tr>').join('');
+      host.innerHTML = section('모델 리더보드 (최근 90일)', card('자동 평가 누적 (' + (d.runs || 0) + ' runs)',
+        '<div class="card-body"><table><thead><tr><th>#</th><th>모델</th><th>우승</th><th>평균점수</th><th>통과율</th><th>출전</th></tr></thead><tbody>' + rows + '</tbody></table>' +
+        '<p class="muted" style="font-size:10px;margin-top:4px">' + escapeHTML(d.note || '') + '</p></div>'));
+    };
+
     // 모델 용도 태그 관리(관리자) — good_for/avoid_for/risk_note.
     async function mmRenderTagEditor() {
       const host = document.getElementById('mm-tags-panel');
