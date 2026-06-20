@@ -5345,7 +5345,7 @@ const adminHTML = `<!doctype html>
         '<div class="ct-footer"><div class="ct-row">' +
           '<label class="ct-field"><span>Max tokens</span><input id="mm-max-tokens" type="number" min="1" max="4096" value="' + Number(defaults.max_tokens || 1024) + '"></label>' +
           '<label class="ct-field"><span>Temperature</span><input id="mm-temperature" type="number" step="0.1" min="0" max="2" value="' + Number(defaults.temperature || 0.2) + '"></label>' +
-          '</div><div class="ct-btns"><button type="button" class="secondary" id="mm-predict">예상 비용</button><button type="button" id="mm-run">멀티 실행</button></div>' +
+          '</div><div class="ct-btns"><button type="button" class="secondary" id="mm-predict">예상 비용</button><button type="button" class="secondary" id="mm-stream">스트리밍 비교</button><button type="button" id="mm-run">멀티 실행</button></div>' +
         '</div>' +
         '<div id="mm-predict-out" class="muted" style="font-size:12px;margin-top:6px"></div>' +
         '<div id="mm-results" style="margin-top:10px"></div>';
@@ -5356,6 +5356,7 @@ const adminHTML = `<!doctype html>
 
       document.getElementById('mm-run').addEventListener('click', runMultiModelCompare);
       document.getElementById('mm-predict').addEventListener('click', predictMultiModelCost);
+      document.getElementById('mm-stream').addEventListener('click', runMultiModelStream);
 
       const targetSelect = document.getElementById('chat-target');
       const targetDetail = document.getElementById('chat-target-detail');
@@ -5948,6 +5949,64 @@ const adminHTML = `<!doctype html>
         out.innerHTML = '예상 입력 토큰 ~' + fmt(r.input_tokens) + ' · 합계 예상비용 <strong>₩' + fmt(Math.round(r.total_cost_krw || 0)) + '</strong> (' +
           ests.map(e => escapeHTML(e.model) + ' ₩' + fmt(Math.round(e.cost_krw || 0)) + (e.priced ? '' : '(미가격)')).join(', ') + ')';
       } catch (e) { out.innerHTML = '<span class="status error">' + escapeHTML(e.message) + '</span>'; }
+    }
+
+    // runMultiModelStream renders one streaming card per model and streams each model's SSE
+    // (reusing /admin/chat-test/stream) into its card in parallel — live A/B/N comparison.
+    async function runMultiModelStream() {
+      const out = document.getElementById('mm-results');
+      const btn = document.getElementById('mm-stream');
+      const models = mmReadModels();
+      if (!models.length) { out.innerHTML = '<span class="status error">비교할 모델을 1개 이상 입력하세요.</span>'; return; }
+      if (models.length > 5) { out.innerHTML = '<span class="status error">한 번에 최대 5개 모델까지 비교할 수 있습니다.</span>'; return; }
+      const messages = mmReadMessages(), params = mmReadParams();
+      out.innerHTML = '<div class="muted" style="font-size:12px;margin-bottom:6px">스트리밍 비교 (' + models.length + '개 모델 동시)</div>' +
+        models.map((m, i) =>
+          '<div style="border:1px solid var(--border);border-radius:8px;padding:10px;margin-top:8px">' +
+          '<div style="display:flex;justify-content:space-between"><strong>' + escapeHTML(m.model) + (m.provider ? ' <span class="muted">(' + escapeHTML(m.provider) + ')</span>' : '') + '</strong><span class="muted" id="mm-stream-lat-' + i + '">…</span></div>' +
+          '<pre id="mm-stream-' + i + '" style="white-space:pre-wrap;font-size:12px;max-height:280px;overflow:auto;margin-top:6px">대기 중…</pre></div>'
+        ).join('');
+      btn.disabled = true; btn.textContent = '스트리밍 중...';
+      await Promise.all(models.map((m, i) => mmStreamOne(m, i, messages, params)));
+      btn.disabled = false; btn.textContent = '스트리밍 비교';
+    }
+
+    async function mmStreamOne(spec, idx, messages, params) {
+      const pre = document.getElementById('mm-stream-' + idx);
+      const start = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+      let answer = '';
+      try {
+        const h = headers(); h['Content-Type'] = 'application/json'; h['Accept'] = 'text/event-stream';
+        const res = await fetch('/admin/chat-test/stream', { method: 'POST', headers: h,
+          body: JSON.stringify({ model: spec.model, provider: spec.provider, messages, max_tokens: params.max_tokens, temperature: params.temperature }) });
+        const ctype = res.headers.get('content-type') || '';
+        if (!res.body || ctype.indexOf('text/event-stream') < 0) {
+          const t = await res.text(); pre.textContent = '(스트림 아님) ' + t.slice(0, 600); return;
+        }
+        const reader = res.body.getReader(), dec = new TextDecoder(); let buf = '';
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buf += dec.decode(value, { stream: true });
+          let nl;
+          while ((nl = buf.indexOf('\n')) >= 0) {
+            const line = buf.slice(0, nl).trim(); buf = buf.slice(nl + 1);
+            if (!line || line.indexOf('data:') !== 0) continue;
+            const data = line.slice(5).trim();
+            if (data === '[DONE]') continue;
+            let chunk; try { chunk = JSON.parse(data); } catch (e) { continue; }
+            for (const c of (chunk.choices || [])) {
+              const d = c.delta || c.message || {};
+              if (typeof d.content === 'string') answer += d.content;
+              else if (Array.isArray(d.content)) answer += d.content.map(x => (x && x.text) || '').join('');
+            }
+            pre.textContent = answer + '▋';
+          }
+        }
+        pre.textContent = answer || '(빈 응답)';
+      } catch (e) { pre.textContent = '오류: ' + e.message; }
+      const lbl = document.getElementById('mm-stream-lat-' + idx);
+      if (lbl) lbl.textContent = Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - start) + 'ms';
     }
 
     async function runMultiModelCompare() {
