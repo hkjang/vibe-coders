@@ -1338,6 +1338,19 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 			created_at TEXT NOT NULL
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_mmt_promotions_run ON multi_model_test_promotions(run_id)`,
+		// SSO (Keycloak/OIDC): external identity → internal user linkage.
+		`CREATE TABLE IF NOT EXISTS auth_identities (
+			id TEXT PRIMARY KEY,
+			user_id TEXT NOT NULL,
+			provider TEXT NOT NULL,
+			issuer TEXT NOT NULL DEFAULT '',
+			subject TEXT NOT NULL DEFAULT '',
+			email TEXT NOT NULL DEFAULT '',
+			preferred_username TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL,
+			last_login_at TEXT NOT NULL DEFAULT ''
+		)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_auth_identities_sub ON auth_identities(provider, issuer, subject)`,
 	}
 
 	for _, statement := range statements {

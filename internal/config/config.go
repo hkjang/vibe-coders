@@ -32,6 +32,23 @@ type Config struct {
 	Skills      SkillsConfig
 	Limits      LimitsConfig
 	MCP         MCPConfig
+	Keycloak    KeycloakConfig
+}
+
+// KeycloakConfig configures OIDC SSO via Keycloak (Authorization Code + PKCE). When
+// Enabled, the admin UI offers an "SSO 로그인" button and accepts Keycloak-issued logins;
+// AllowLocalLogin keeps the built-in email/password login available as a fallback.
+type KeycloakConfig struct {
+	Enabled         bool
+	IssuerURL       string   // e.g. https://keycloak.example.com/realms/vibe
+	ClientID        string
+	ClientSecret    string
+	RedirectURI     string
+	Scopes          []string // default: openid profile email
+	DefaultRole     string   // internal role when no mapping matches; "" = block login
+	RoleClaim       string   // dotted path to roles, e.g. realm_access.roles
+	GroupClaim      string   // claim holding group paths, e.g. groups
+	AllowLocalLogin bool
 }
 
 // MCPConfig parameterizes the MCP discovery / grounding virtual models (vibe/grounded,
@@ -350,6 +367,18 @@ func Load() (Config, error) {
 			BootstrapPassword:     os.Getenv("AUTH_ADMIN_BOOTSTRAP_PASSWORD"),
 			SelfServiceKeys:       boolEnv("SELF_SERVICE_KEYS_ENABLED", false),
 		},
+		Keycloak: KeycloakConfig{
+			Enabled:         boolEnv("SSO_KEYCLOAK_ENABLED", false),
+			IssuerURL:       strings.TrimRight(os.Getenv("SSO_KEYCLOAK_ISSUER_URL"), "/"),
+			ClientID:        os.Getenv("SSO_KEYCLOAK_CLIENT_ID"),
+			ClientSecret:    os.Getenv("SSO_KEYCLOAK_CLIENT_SECRET"),
+			RedirectURI:     os.Getenv("SSO_KEYCLOAK_REDIRECT_URI"),
+			Scopes:          keycloakScopes(),
+			DefaultRole:     getEnv("SSO_KEYCLOAK_DEFAULT_ROLE", "developer"),
+			RoleClaim:       getEnv("SSO_KEYCLOAK_ROLE_CLAIM", "realm_access.roles"),
+			GroupClaim:      getEnv("SSO_KEYCLOAK_GROUP_CLAIM", "groups"),
+			AllowLocalLogin: boolEnv("SSO_KEYCLOAK_ALLOW_LOCAL_LOGIN", true),
+		},
 		Secret: SecretConfig{
 			GatewaySecret: getEnv("GATEWAY_SECRET", DefaultGatewaySecret),
 		},
@@ -605,6 +634,32 @@ func floatMapEnv(key string) map[string]float64 {
 }
 
 // csvEnv parses a comma-separated env var into a trimmed, non-empty slice.
+// keycloakScopes parses SSO_KEYCLOAK_SCOPES (space- or comma-separated); defaults to the
+// standard OIDC set. "openid" is always included.
+func keycloakScopes() []string {
+	raw := strings.TrimSpace(os.Getenv("SSO_KEYCLOAK_SCOPES"))
+	if raw == "" {
+		return []string{"openid", "profile", "email"}
+	}
+	fields := strings.FieldsFunc(raw, func(r rune) bool { return r == ' ' || r == ',' })
+	hasOpenID := false
+	out := []string{}
+	for _, f := range fields {
+		f = strings.TrimSpace(f)
+		if f == "" {
+			continue
+		}
+		if f == "openid" {
+			hasOpenID = true
+		}
+		out = append(out, f)
+	}
+	if !hasOpenID {
+		out = append([]string{"openid"}, out...)
+	}
+	return out
+}
+
 func csvEnv(key string) []string {
 	value := strings.TrimSpace(os.Getenv(key))
 	if value == "" {

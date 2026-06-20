@@ -479,6 +479,28 @@ const adminHTML = `<!doctype html>
       else { err.style.display = 'none'; }
       document.getElementById('login-backdrop').classList.add('open');
       setTimeout(() => document.getElementById('login-email').focus(), 50);
+      maybeShowSSOButton();
+    }
+    // maybeShowSSOButton adds an "SSO 로그인" button to the login card when Keycloak is on.
+    async function maybeShowSSOButton() {
+      if (document.getElementById('sso-login-btn')) return;
+      let st;
+      try { st = await (await fetch('/auth/sso/status')).json(); } catch { return; }
+      if (!st || !st.keycloak_enabled) return;
+      const form = document.getElementById('login-form');
+      if (!form) return;
+      const btn = document.createElement('button');
+      btn.id = 'sso-login-btn'; btn.type = 'button'; btn.textContent = 'SSO 로그인 (Keycloak)';
+      btn.style.cssText = 'margin-top:8px;width:100%';
+      btn.onclick = () => { location.href = st.login_url || '/auth/keycloak/login'; };
+      form.appendChild(btn);
+      if (st.allow_local_login === false) {
+        // SSO-only: hide local email/password inputs.
+        ['login-email', 'login-password', 'login-submit'].forEach(id => {
+          const el = document.getElementById(id);
+          if (el) { const lbl = el.closest('label'); (lbl || el).style.display = 'none'; }
+        });
+      }
     }
     function hideLogin() {
       document.getElementById('login-backdrop').classList.remove('open');
@@ -586,7 +608,29 @@ const adminHTML = `<!doctype html>
       route();
     }
 
+    // captureSSOFragment reads tokens (or an error) left in the URL fragment by the Keycloak
+    // callback redirect (#kc_access=…&kc_refresh=… or #kc_error=…), stores them, and cleans
+    // the URL so tokens never linger in history.
+    function captureSSOFragment() {
+      const hash = location.hash || '';
+      const m = hash.match(/[#&]kc_access=([^&]+).*?[#&]kc_refresh=([^&]+)/);
+      const errM = hash.match(/[#&]kc_error=([^&]+)/);
+      if (m) {
+        saveAuth({ access_token: decodeURIComponent(m[1]), refresh_token: decodeURIComponent(m[2]) });
+        authState.enabled = true;
+        history.replaceState(null, '', location.pathname + location.search);
+        return { ok: true };
+      }
+      if (errM) {
+        history.replaceState(null, '', location.pathname + location.search);
+        return { error: decodeURIComponent(errM[1]) };
+      }
+      return {};
+    }
+
     async function initAuth() {
+      const sso = captureSSOFragment();
+      if (sso.error) { authState.enabled = true; renderAuthHeader(); showLogin('SSO 로그인 실패: ' + sso.error); return; }
       try {
         const h = authState.access ? { Authorization: 'Bearer ' + authState.access } : {};
         const res = await fetch('/auth/me', { headers: h });

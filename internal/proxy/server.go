@@ -31,7 +31,7 @@ import (
 )
 
 // AppVersion is the gateway build version, surfaced in /auth/me and the admin UI.
-const AppVersion = "v0.50.45"
+const AppVersion = "v0.51.0"
 
 type Server struct {
 	cfg            config.Config
@@ -192,6 +192,10 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/auth/logout", s.handleAuthLogout)
 	mux.HandleFunc("/auth/refresh", s.handleAuthRefresh)
 	mux.HandleFunc("/auth/me", s.handleAuthMe)
+	mux.HandleFunc("/auth/sso/status", s.handleSSOStatus)
+	mux.HandleFunc("/auth/keycloak/login", s.handleKeycloakLogin)
+	mux.HandleFunc("/auth/keycloak/callback", s.handleKeycloakCallback)
+	mux.HandleFunc("/auth/keycloak/logout", s.handleKeycloakLogout)
 	mux.HandleFunc("/admin", s.handleAdminUI)
 	mux.HandleFunc("/admin/", s.handleAdminUI)
 	mux.HandleFunc("/admin/stats", s.handleStats)
