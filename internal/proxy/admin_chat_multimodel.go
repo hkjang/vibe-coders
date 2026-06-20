@@ -147,6 +147,7 @@ func (s *Server) handleChatTestMultiRun(w http.ResponseWriter, r *http.Request) 
 		})
 	}
 	_ = s.db.SaveMultiModelRun(r.Context(), run, stored)
+	s.emitMultiModelFacts(run, stored, nil)
 
 	s.auditAdmin(r, "chat_test.multi_run", runID, auditJSON(map[string]any{"models": len(models), "success": success, "failed": failed}))
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -419,6 +420,11 @@ func (s *Server) handleMultiRunPromote(w http.ResponseWriter, r *http.Request, r
 		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "multi_promote_failed")
 		return
 	}
+	team := ""
+	if claims, ok := s.currentAccessClaims(r); ok {
+		team = claims.TeamID
+	}
+	s.emitMultiModelChoiceFact(runID, team, promo.TaskType, promo.SelectedModel, promo.Reason, true)
 	s.auditAdmin(r, "chat_test.multi_promote", runID, auditJSON(map[string]any{"model": promo.SelectedModel, "task_type": promo.TaskType}))
 	writeJSON(w, http.StatusOK, map[string]any{"status": "draft_saved", "promotion": promo,
 		"note": "routing rule DRAFT candidate — not applied to routing until a human reviews it"})

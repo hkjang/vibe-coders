@@ -40,7 +40,7 @@ type Config struct {
 // AllowLocalLogin keeps the built-in email/password login available as a fallback.
 type KeycloakConfig struct {
 	Enabled         bool
-	IssuerURL       string   // e.g. https://keycloak.example.com/realms/vibe
+	IssuerURL       string // e.g. https://keycloak.example.com/realms/vibe
 	ClientID        string
 	ClientSecret    string
 	RedirectURI     string
@@ -274,16 +274,17 @@ type ClickHouseConfig struct {
 	Text2SQLFactTable string        // when set, per-query Text2SQL facts are shipped here (detailed fact table); empty disables
 	// Per-request fact sink (detailed behavioral DW). When RequestFactTable is set, every
 	// completed request is shipped as one row via an async batch queue (never on the hot path).
-	RequestFactTable  string        // e.g. ai_request_fact; empty disables the request-fact sink
-	ToolFactTable     string        // e.g. ai_tool_fact; empty disables (one row per tool invocation)
-	RoutingFactTable  string        // e.g. ai_routing_fact; empty disables (one row per routing decision)
-	EvalFactTable     string        // e.g. ai_eval_fact; empty disables (one row per LLM evaluation)
-	FeedbackFactTable string        // e.g. ai_feedback_fact; empty disables (one row per human feedback)
-	PolicyFactTable   string        // e.g. ai_policy_fact; empty disables (one row per policy decision)
-	SkillFactTable    string        // e.g. ai_skill_fact; empty disables (one row per skill run)
-	BatchSize         int           // rows per ClickHouse insert (queue flush)
-	FlushInterval     time.Duration // max time a row waits in the queue before a flush
-	MaxQueueSize      int           // bounded in-memory queue; excess is dropped (counted)
+	RequestFactTable    string        // e.g. ai_request_fact; empty disables the request-fact sink
+	ToolFactTable       string        // e.g. ai_tool_fact; empty disables (one row per tool invocation)
+	RoutingFactTable    string        // e.g. ai_routing_fact; empty disables (one row per routing decision)
+	EvalFactTable       string        // e.g. ai_eval_fact; empty disables (one row per LLM evaluation)
+	FeedbackFactTable   string        // e.g. ai_feedback_fact; empty disables (one row per human feedback)
+	PolicyFactTable     string        // e.g. ai_policy_fact; empty disables (one row per policy decision)
+	SkillFactTable      string        // e.g. ai_skill_fact; empty disables (one row per skill run)
+	MultiModelFactTable string        // e.g. ai_multimodel_fact; empty disables (run + per-model result rows)
+	BatchSize           int           // rows per ClickHouse insert (queue flush)
+	FlushInterval       time.Duration // max time a row waits in the queue before a flush
+	MaxQueueSize        int           // bounded in-memory queue; excess is dropped (counted)
 }
 
 // DefaultGatewaySecret is the insecure development fallback used when
@@ -432,24 +433,25 @@ func Load() (Config, error) {
 			SlowBurnThreshold: floatEnv("INSURANCE_SLOW_BURN", 3.0),
 		},
 		ClickHouse: ClickHouseConfig{
-			URL:               strings.TrimRight(os.Getenv("CLICKHOUSE_URL"), "/"),
-			Database:          getEnv("CLICKHOUSE_DB", "default"),
-			Table:             getEnv("CLICKHOUSE_TABLE", "analytics_daily"),
-			User:              os.Getenv("CLICKHOUSE_USER"),
-			Password:          os.Getenv("CLICKHOUSE_PASSWORD"),
-			SinkInterval:      durationEnv("CLICKHOUSE_SINK_INTERVAL", 0),
-			SinkDays:          intEnv("CLICKHOUSE_SINK_DAYS", 3),
-			Text2SQLFactTable: os.Getenv("CLICKHOUSE_TEXT2SQL_FACT_TABLE"),
-			RequestFactTable:  os.Getenv("CLICKHOUSE_REQUEST_FACT_TABLE"),
-			ToolFactTable:     os.Getenv("CLICKHOUSE_TOOL_FACT_TABLE"),
-			RoutingFactTable:  os.Getenv("CLICKHOUSE_ROUTING_FACT_TABLE"),
-			EvalFactTable:     os.Getenv("CLICKHOUSE_EVAL_FACT_TABLE"),
-			FeedbackFactTable: os.Getenv("CLICKHOUSE_FEEDBACK_FACT_TABLE"),
-			SkillFactTable:    os.Getenv("CLICKHOUSE_SKILL_FACT_TABLE"),
-			PolicyFactTable:   os.Getenv("CLICKHOUSE_POLICY_FACT_TABLE"),
-			BatchSize:         intEnv("CLICKHOUSE_BATCH_SIZE", 200),
-			FlushInterval:     durationEnv("CLICKHOUSE_FLUSH_INTERVAL", 5*time.Second),
-			MaxQueueSize:      intEnv("CLICKHOUSE_MAX_QUEUE_SIZE", 10000),
+			URL:                 strings.TrimRight(os.Getenv("CLICKHOUSE_URL"), "/"),
+			Database:            getEnv("CLICKHOUSE_DB", "default"),
+			Table:               getEnv("CLICKHOUSE_TABLE", "analytics_daily"),
+			User:                os.Getenv("CLICKHOUSE_USER"),
+			Password:            os.Getenv("CLICKHOUSE_PASSWORD"),
+			SinkInterval:        durationEnv("CLICKHOUSE_SINK_INTERVAL", 0),
+			SinkDays:            intEnv("CLICKHOUSE_SINK_DAYS", 3),
+			Text2SQLFactTable:   os.Getenv("CLICKHOUSE_TEXT2SQL_FACT_TABLE"),
+			RequestFactTable:    os.Getenv("CLICKHOUSE_REQUEST_FACT_TABLE"),
+			ToolFactTable:       os.Getenv("CLICKHOUSE_TOOL_FACT_TABLE"),
+			RoutingFactTable:    os.Getenv("CLICKHOUSE_ROUTING_FACT_TABLE"),
+			EvalFactTable:       os.Getenv("CLICKHOUSE_EVAL_FACT_TABLE"),
+			FeedbackFactTable:   os.Getenv("CLICKHOUSE_FEEDBACK_FACT_TABLE"),
+			SkillFactTable:      os.Getenv("CLICKHOUSE_SKILL_FACT_TABLE"),
+			MultiModelFactTable: os.Getenv("CLICKHOUSE_MULTIMODEL_FACT_TABLE"),
+			PolicyFactTable:     os.Getenv("CLICKHOUSE_POLICY_FACT_TABLE"),
+			BatchSize:           intEnv("CLICKHOUSE_BATCH_SIZE", 200),
+			FlushInterval:       durationEnv("CLICKHOUSE_FLUSH_INTERVAL", 5*time.Second),
+			MaxQueueSize:        intEnv("CLICKHOUSE_MAX_QUEUE_SIZE", 10000),
 		},
 		Pricing: map[string]ModelPrice{},
 		PricingConf: PricingConfig{

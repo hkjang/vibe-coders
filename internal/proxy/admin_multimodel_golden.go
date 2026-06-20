@@ -116,6 +116,7 @@ func (s *Server) handleMultiRunGolden(w http.ResponseWriter, r *http.Request, ru
 		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "golden_save_failed")
 		return
 	}
+	s.emitMultiModelChoiceFact(runID, run.Team, step.TaskType, p.SelectedModel, "golden:"+wf.Name, true)
 	s.auditAdmin(r, "chat_test.multi_run_golden", runID, auditJSON(map[string]any{
 		"workflow_id": wf.ID, "step": stepName, "model": p.SelectedModel, "baseline": baseline,
 	}))

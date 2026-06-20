@@ -175,6 +175,7 @@ func (s *Server) handlePromptLabTestCaseRun(w http.ResponseWriter, r *http.Reque
 		pm = append(pm, row)
 	}
 	_ = s.db.ReplaceMultiModelJudgements(r.Context(), runID, judgements)
+	s.emitMultiModelFacts(run, stored, judgements)
 
 	avgScore := 0.0
 	if scored > 0 {
