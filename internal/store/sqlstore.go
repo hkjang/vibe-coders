@@ -1258,6 +1258,16 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 			created_at TEXT NOT NULL
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_prompt_template_history_tid ON prompt_template_history(template_id, created_at)`,
+		// Dynamic custom roles: an additive overlay over the built-in role→scope map. A row
+		// here defines a new role without a code change; built-in roles remain the fallback.
+		`CREATE TABLE IF NOT EXISTS custom_roles (
+			role TEXT PRIMARY KEY,
+			description TEXT NOT NULL DEFAULT '',
+			scopes TEXT NOT NULL DEFAULT '',
+			default_home TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)`,
 	}
 
 	for _, statement := range statements {

@@ -109,7 +109,7 @@ func (s *Server) issueTokenPair(ctx context.Context, user store.AuthUser, teamID
 		Email:     user.Email,
 		Role:      user.Role,
 		TeamID:    teamID,
-		Scopes:    scopesForRole(user.Role),
+		Scopes:    s.effectiveScopesForRole(ctx, user.Role),
 		SessionID: sessionID,
 		ExpiresAt: now.Add(s.cfg.Auth.AccessTokenTTL).Unix(),
 		IssuedAt:  now.Unix(),
@@ -174,7 +174,7 @@ func (s *Server) rotateRefreshToken(ctx context.Context, raw string, ip, ua stri
 	}
 	access, err := s.signAccessToken(accessClaims{
 		Subject: user.ID, Email: user.Email, Role: user.Role, TeamID: teamID,
-		Scopes: scopesForRole(user.Role), SessionID: rec.SessionID,
+		Scopes: s.effectiveScopesForRole(ctx, user.Role), SessionID: rec.SessionID,
 		ExpiresAt: now.Add(s.cfg.Auth.AccessTokenTTL).Unix(), IssuedAt: now.Unix(), Type: "access",
 	})
 	if err != nil {

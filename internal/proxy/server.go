@@ -31,7 +31,7 @@ import (
 )
 
 // AppVersion is the gateway build version, surfaced in /auth/me and the admin UI.
-const AppVersion = "v0.50.31"
+const AppVersion = "v0.50.32"
 
 type Server struct {
 	cfg            config.Config
@@ -596,7 +596,7 @@ func (s *Server) handleAPIKeys(w http.ResponseWriter, r *http.Request) {
 			generated = true
 		}
 		role := strings.TrimSpace(payload.Role)
-		if role != "" && !validRole(role) {
+		if role != "" && !s.effectiveValidRole(r.Context(), role) {
 			writeOpenAIError(w, http.StatusBadRequest, "invalid role", "invalid_request_error", "invalid_role")
 			return
 		}
@@ -787,7 +787,7 @@ func (s *Server) handleAPIKeyByID(w http.ResponseWriter, r *http.Request) {
 		}
 		if payload.Role != nil {
 			nextRole := strings.TrimSpace(*payload.Role)
-			if nextRole != "" && !validRole(nextRole) {
+			if nextRole != "" && !s.effectiveValidRole(r.Context(), nextRole) {
 				writeOpenAIError(w, http.StatusBadRequest, "invalid role", "invalid_request_error", "invalid_role")
 				return
 			}

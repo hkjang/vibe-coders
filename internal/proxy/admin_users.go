@@ -91,7 +91,7 @@ func (s *Server) handleUsers(w http.ResponseWriter, r *http.Request) {
 		if role == "" {
 			role = "developer"
 		}
-		if !validRole(role) {
+		if !s.effectiveValidRole(r.Context(), role) {
 			writeOpenAIError(w, http.StatusBadRequest, "invalid role", "invalid_request_error", "invalid_role")
 			return
 		}

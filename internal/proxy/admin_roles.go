@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -66,8 +67,29 @@ type roleInfo struct {
 	Scopes      []string `json:"scopes"`
 	DefaultHome string   `json:"default_home"`
 	IsAdmin     bool     `json:"is_admin"`
+	IsSystem    bool     `json:"is_system"`
 	Rank        int      `json:"rank"`
 	Description string   `json:"description"`
+}
+
+// effectiveScopesForRole resolves a role's scopes through the custom-role overlay first,
+// falling back to the built-in map. Used at token issuance so custom roles take effect.
+func (s *Server) effectiveScopesForRole(ctx context.Context, role string) []string {
+	if cr, found, err := s.db.GetCustomRole(ctx, role); err == nil && found {
+		return cr.Scopes
+	}
+	return scopesForRole(role)
+}
+
+// effectiveValidRole reports whether a role exists either built-in or as a custom role.
+func (s *Server) effectiveValidRole(ctx context.Context, role string) bool {
+	if validRole(role) {
+		return true
+	}
+	if _, found, err := s.db.GetCustomRole(ctx, role); err == nil && found {
+		return true
+	}
+	return false
 }
 
 // roleCatalog returns every built-in role with its derived scopes, default home, and
@@ -82,6 +104,7 @@ func roleCatalog() []roleInfo {
 			Scopes:      s,
 			DefaultHome: resolveDefaultHome(s),
 			IsAdmin:     hasScope(s, "admin:read"),
+			IsSystem:    true,
 			Rank:        roleRank(role),
 			Description: roleDescriptions[role],
 		})
@@ -97,14 +120,96 @@ func roleCatalog() []roleInfo {
 	return out
 }
 
-// handleAdminRoles returns the role catalog. Admin-only (powers the permissions screen).
-// GET /admin/roles
+// customRoleInfo projects a stored custom role into the catalog row shape.
+func customRoleInfo(c store.CustomRole) roleInfo {
+	home := strings.TrimSpace(c.DefaultHome)
+	if home == "" {
+		home = resolveDefaultHome(c.Scopes)
+	}
+	return roleInfo{
+		Role: c.Role, Scopes: c.Scopes, DefaultHome: home,
+		IsAdmin: hasScope(c.Scopes, "admin:read"), IsSystem: false,
+		Rank: 0, Description: c.Description,
+	}
+}
+
+// handleAdminRoles manages the role catalog. Admin-only.
+// GET    /admin/roles            → built-in + custom roles + all_scopes
+// POST   /admin/roles            → create/update a custom role {role, description, scopes, default_home}
+// DELETE /admin/roles?role=NAME  → remove a custom role
 func (s *Server) handleAdminRoles(w http.ResponseWriter, r *http.Request) {
 	if !s.authorizeAdmin(r) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"roles": roleCatalog(), "all_scopes": allScopes})
+	switch r.Method {
+	case http.MethodGet:
+		roles := roleCatalog()
+		if custom, err := s.db.ListCustomRoles(r.Context()); err == nil {
+			for _, c := range custom {
+				roles = append(roles, customRoleInfo(c))
+			}
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"roles": roles, "all_scopes": allScopes})
+	case http.MethodPost:
+		var p struct {
+			Role        string   `json:"role"`
+			Description string   `json:"description"`
+			Scopes      []string `json:"scopes"`
+			DefaultHome string   `json:"default_home"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+			writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "invalid_body")
+			return
+		}
+		role := strings.ToLower(strings.TrimSpace(p.Role))
+		if role == "" {
+			writeOpenAIError(w, http.StatusBadRequest, "role is required", "invalid_request_error", "missing_role")
+			return
+		}
+		if _, isBuiltin := roleScopes[role]; isBuiltin {
+			writeOpenAIError(w, http.StatusConflict, "'"+role+"' is a built-in role and cannot be overridden", "invalid_request_error", "builtin_role")
+			return
+		}
+		// Validate every scope against the known set.
+		clean := []string{}
+		for _, sc := range p.Scopes {
+			sc = strings.TrimSpace(sc)
+			if sc == "" {
+				continue
+			}
+			if !hasScope(allScopes, sc) {
+				writeOpenAIError(w, http.StatusBadRequest, "unknown scope: "+sc, "invalid_request_error", "invalid_scope")
+				return
+			}
+			clean = append(clean, sc)
+		}
+		cr := store.CustomRole{Role: role, Description: strings.TrimSpace(p.Description), Scopes: clean, DefaultHome: strings.TrimSpace(p.DefaultHome)}
+		if err := s.db.UpsertCustomRole(r.Context(), cr); err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "role_save_failed")
+			return
+		}
+		s.auditAdmin(r, "role.upsert", role, auditJSON(map[string]any{"scopes": clean}))
+		writeJSON(w, http.StatusCreated, map[string]any{"role": customRoleInfo(cr)})
+	case http.MethodDelete:
+		role := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("role")))
+		if role == "" {
+			writeOpenAIError(w, http.StatusBadRequest, "role query param is required", "invalid_request_error", "missing_role")
+			return
+		}
+		if _, isBuiltin := roleScopes[role]; isBuiltin {
+			writeOpenAIError(w, http.StatusConflict, "cannot delete built-in role", "invalid_request_error", "builtin_role")
+			return
+		}
+		if err := s.db.DeleteCustomRole(r.Context(), role); err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "role_delete_failed")
+			return
+		}
+		s.auditAdmin(r, "role.delete", role, "")
+		writeJSON(w, http.StatusOK, map[string]any{"role": role, "deleted": true})
+	default:
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+	}
 }
 
 // handlePermissionsEffective returns the caller's effective role/scopes/features plus a
@@ -133,11 +238,11 @@ func (s *Server) handlePermissionsEffective(w http.ResponseWriter, r *http.Reque
 				writeOpenAIError(w, http.StatusForbidden, "previewing another role requires admin", "invalid_request_error", "forbidden")
 				return
 			}
-			if !validRole(preview) {
+			if !s.effectiveValidRole(r.Context(), preview) {
 				writeOpenAIError(w, http.StatusBadRequest, "unknown role: "+preview, "invalid_request_error", "invalid_role")
 				return
 			}
-			role, scopes = preview, scopesForRole(preview)
+			role, scopes = preview, s.effectiveScopesForRole(r.Context(), preview)
 		}
 	}
 
