@@ -222,8 +222,80 @@ func (s *Server) finishKeycloakLink(ctx context.Context, userID, sub, email, use
 		Subject: sub, Email: email, PreferredUsername: username,
 	})
 	if team != "" {
+		// Group → team auto-create: ensure the team row exists before linking membership.
+		_ = s.db.UpsertAuthTeam(ctx, store.AuthTeam{ID: team, Name: team})
 		_ = s.db.SetUserTeam(ctx, userID, team, "")
 	}
+}
+
+// backchannelLogoutEvent reports whether a logout_token's `events` claim contains the
+// OIDC back-channel-logout event (per the spec it must).
+func backchannelLogoutEvent(claims map[string]any) bool {
+	ev, ok := claims["events"].(map[string]any)
+	if !ok {
+		return false
+	}
+	_, ok = ev["http://schemas.openid.net/event/backchannel-logout"]
+	return ok
+}
+
+// handleKeycloakBackchannelLogout terminates the internal sessions for a user when Keycloak
+// ends their SSO session and POSTs a (RS256-signed) logout_token. Verified against JWKS;
+// the subject is mapped to an internal user and all their sessions are revoked.
+// POST /auth/keycloak/backchannel-logout  (form: logout_token=<jwt>)
+func (s *Server) handleKeycloakBackchannelLogout(w http.ResponseWriter, r *http.Request) {
+	if !s.cfg.Keycloak.Enabled {
+		writeOpenAIError(w, http.StatusNotFound, "SSO is not enabled", "invalid_request_error", "sso_disabled")
+		return
+	}
+	if r.Method != http.MethodPost {
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
+	logoutToken := strings.TrimSpace(r.FormValue("logout_token"))
+	if logoutToken == "" {
+		// Some senders use JSON.
+		var body struct {
+			LogoutToken string `json:"logout_token"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		logoutToken = strings.TrimSpace(body.LogoutToken)
+	}
+	if logoutToken == "" {
+		writeOpenAIError(w, http.StatusBadRequest, "missing logout_token", "invalid_request_error", "missing_token")
+		return
+	}
+	disc, err := keycloakDiscover(r.Context(), s.cfg.Keycloak.IssuerURL)
+	if err != nil {
+		writeOpenAIError(w, http.StatusBadGateway, "discovery failed", "server_error", "discovery_failed")
+		return
+	}
+	claims, err := s.keycloakVerifyJWT(r.Context(), disc, logoutToken)
+	if err != nil {
+		writeOpenAIError(w, http.StatusBadRequest, "logout_token verification failed: "+err.Error(), "invalid_request_error", "invalid_token")
+		return
+	}
+	// audience + back-channel event.
+	if !audienceMatches(claims["aud"], s.cfg.Keycloak.ClientID) {
+		if azp, _ := claims["azp"].(string); azp != s.cfg.Keycloak.ClientID {
+			writeOpenAIError(w, http.StatusBadRequest, "logout_token audience mismatch", "invalid_request_error", "invalid_token")
+			return
+		}
+	}
+	if !backchannelLogoutEvent(claims) {
+		writeOpenAIError(w, http.StatusBadRequest, "logout_token missing back-channel-logout event", "invalid_request_error", "invalid_token")
+		return
+	}
+	sub := strClaim(claims, "sub")
+	if sub == "" {
+		writeOpenAIError(w, http.StatusBadRequest, "logout_token missing sub", "invalid_request_error", "invalid_token")
+		return
+	}
+	if id, found, _ := s.db.AuthIdentityBySubject(r.Context(), "keycloak", s.cfg.Keycloak.IssuerURL, sub); found {
+		_ = s.db.RevokeAuthSessionsForUser(r.Context(), id.UserID)
+		s.auditAuthEvent(r.Context(), "sso_backchannel_logout", id.UserID, "", "", "keycloak sub="+sub)
+	}
+	w.WriteHeader(http.StatusOK)
 }
 
 // handleKeycloakLogout clears the internal session and returns the Keycloak end-session URL
