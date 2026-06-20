@@ -11,6 +11,7 @@ var roleDescriptions = map[string]string{
 	"super_admin":     "최고 관리자 — 모든 권한",
 	"admin":           "관리자 — 전체 운영/설정",
 	"team_admin":      "팀 관리자 — 팀 단위 운영 조회 + 채팅",
+	"team_manager":    "팀 매니저 — 팀 대시보드(사용량/비용/실패), 운영 화면 없음",
 	"developer":       "개발자 — 채팅/임베딩/모델, 운영 화면 없음",
 	"viewer":          "뷰어 — 운영 조회 전용",
 	"service_account": "서비스 계정 — 채팅/임베딩/MCP",

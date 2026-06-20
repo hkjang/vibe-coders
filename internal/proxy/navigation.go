@@ -29,6 +29,8 @@ var menuRegistry = []menuItem{
 	// 내 영역 — every authenticated user.
 	{ID: "me.home", Label: "내 홈", Path: "#/me", Tab: "me", Group: "me", DataScope: "self"},
 	{ID: "me.keys", Label: "내 키", Path: "#/mykeys", Tab: "mykeys", Group: "me", Features: []string{"self_service_keys"}, DataScope: "self"},
+	// 팀 영역 — team_manager (and admins) see their team's usage/cost/failures.
+	{ID: "team.home", Label: "팀 대시보드", Path: "#/team", Tab: "team", Group: "team", Scopes: []string{"team:read"}, DataScope: "team"},
 	// 운영 영역 — operational surface (admin:read).
 	{ID: "ops.dashboard", Label: "대시보드", Path: "#/dashboard", Tab: "dashboard", Group: "ops", Scopes: []string{"admin:read"}, DataScope: "all"},
 	{ID: "ops.mcp", Label: "MCP", Path: "#/mcp", Tab: "mcp", Group: "ops", Scopes: []string{"admin:read"}, DataScope: "all"},
@@ -137,10 +139,14 @@ func allowedTabs(scopes []string, features map[string]bool) []string {
 }
 
 // resolveDefaultHome picks the landing route for a caller: operators (admin:read) land on
-// the operational dashboard; everyone else lands on their personalized home.
+// the operational dashboard; team managers (team:read without admin:read) land on their
+// team dashboard; everyone else lands on their personalized home.
 func resolveDefaultHome(scopes []string) string {
 	if hasScope(scopes, "admin:read") {
 		return "#/dashboard"
+	}
+	if hasScope(scopes, "team:read") {
+		return "#/team"
 	}
 	return "#/me"
 }

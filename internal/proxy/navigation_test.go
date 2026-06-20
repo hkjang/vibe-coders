@@ -185,6 +185,31 @@ func TestPermissionsEffectiveLegacyMode(t *testing.T) {
 	}
 }
 
+func TestTeamManagerNavigation(t *testing.T) {
+	features := map[string]bool{"self_service_keys": false, "personal_home": true}
+	scopes := roleScopes["team_manager"]
+	if len(scopes) == 0 {
+		t.Fatal("team_manager role must be defined")
+	}
+	// team_manager lands on the team dashboard, not /admin or /me.
+	if got := resolveDefaultHome(scopes); got != "#/team" {
+		t.Errorf("team_manager default_home = %q, want #/team", got)
+	}
+	tabs := tabSet(scopes, features)
+	if !tabs["team"] || !tabs["me"] {
+		t.Error("team_manager should see team + me tabs")
+	}
+	for _, forbidden := range []string{"dashboard", "users", "safety", "settings"} {
+		if tabs[forbidden] {
+			t.Errorf("team_manager must NOT see ops tab %q", forbidden)
+		}
+	}
+	// admins also have team:read → can see the team tab.
+	if !tabSet(roleScopes["admin"], features)["team"] {
+		t.Error("admin should also see the team tab (has team:read)")
+	}
+}
+
 func TestMeKeysMenuGatedByFeature(t *testing.T) {
 	on := tabSet(roleScopes["developer"], map[string]bool{"self_service_keys": true})
 	if !on["mykeys"] {

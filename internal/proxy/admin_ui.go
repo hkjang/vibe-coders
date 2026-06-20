@@ -311,6 +311,7 @@ const adminHTML = `<!doctype html>
     <h1>AI 게이트웨이</h1>
     <nav id="tabs">
       <a href="#/me" data-tab="me">내 홈</a>
+      <a href="#/team" data-tab="team">팀 대시보드</a>
       <a href="#/dashboard" data-tab="dashboard" class="active">대시보드</a>
       <a href="#/mcp" data-tab="mcp">MCP</a>
       <a href="#/routing" data-tab="routing">라우팅</a>
@@ -1022,6 +1023,7 @@ const adminHTML = `<!doctype html>
       try {
         switch (tab) {
           case 'me':        await renderMeHome(); break;
+          case 'team':      await renderTeamHome(); break;
           case 'dashboard': await renderDashboard(); break;
           case 'xview':     await renderXView(params); break;
           case 'waterfall': await renderWaterfall(params); break;
@@ -7747,6 +7749,52 @@ const adminHTML = `<!doctype html>
           '<p class="muted" style="margin-top:12px">접근이 필요하면 관리자에게 역할 변경을 요청하세요. ' +
           '<a href="#/me">내 홈으로 이동</a></p>' +
         '</div>');
+    }
+
+    // renderTeamHome is the team_manager landing: their team's usage, cost, top members,
+    // model mix, and recent failures — scoped to their team only.
+    async function renderTeamHome() {
+      const view = document.getElementById('view');
+      view.innerHTML = section('팀 대시보드', '<div class="empty">불러오는 중...</div>');
+      let resp;
+      try { resp = await api('/team/dashboard'); }
+      catch (e) {
+        view.innerHTML = section('팀 대시보드', '<div class="card-body" style="padding:16px"><p class="muted">팀 대시보드를 불러올 수 없습니다(team:read 권한 + 소속 팀 필요). 상세: ' + escapeHTML(e.message) + '</p></div>');
+        return;
+      }
+      const d = resp.dashboard || {}, tot = d.totals || {};
+      const pctv = (v) => (v == null ? '-' : (v * 100).toFixed(1) + '%');
+      const won = (v) => '₩' + fmt(Math.round(v || 0));
+      const kpis = '<div class="kpis">' +
+        kpi('팀 요청 (30일)', fmt(tot.requests || 0)) +
+        kpi('성공률', pctv(tot.success_rate)) +
+        kpi('오류', fmt(tot.errors || 0)) +
+        kpi('비용', won(tot.cost_krw)) +
+        kpi('평균 지연', fmt(Math.round(tot.avg_latency_ms || 0)) + 'ms') +
+      '</div>';
+
+      const users = d.top_users || [];
+      const usersCard = card('팀원 사용량 Top',
+        '<div class="card-body">' + (users.length
+          ? '<table><thead><tr><th>사용자</th><th>요청</th><th>오류</th><th>비용</th></tr></thead><tbody>' +
+            users.map(u => '<tr><td>' + escapeHTML(u.user_id) + '</td><td>' + fmt(u.requests) + '</td><td>' + fmt(u.errors) + '</td><td>' + won(u.cost_krw) + '</td></tr>').join('') + '</tbody></table>'
+          : '<p class="muted">데이터가 없습니다.</p>') + '</div>');
+
+      const models = d.models || [];
+      const modelsCard = card('팀 모델 사용',
+        '<div class="card-body">' + (models.length
+          ? '<table><thead><tr><th>모델</th><th>요청</th><th>비용</th></tr></thead><tbody>' +
+            models.map(m => '<tr><td>' + escapeHTML(m.model) + '</td><td>' + fmt(m.requests) + '</td><td>' + won(m.cost_krw) + '</td></tr>').join('') + '</tbody></table>'
+          : '<p class="muted">데이터가 없습니다.</p>') + '</div>');
+
+      const fails = d.recent_failures || [];
+      const failCard = card('팀 최근 실패',
+        '<div class="card-body">' + (fails.length
+          ? '<table><thead><tr><th>모델</th><th>코드</th><th>유형</th><th>시각</th></tr></thead><tbody>' +
+            fails.map(f => '<tr><td>' + escapeHTML(f.model) + '</td><td><span class="status error">' + f.status_code + '</span></td><td>' + escapeHTML(f.task_type || '') + '</td><td class="muted">' + ago(f.created_at) + '</td></tr>').join('') + '</tbody></table>'
+          : '<p class="muted">최근 실패가 없습니다. 👍</p>') + '</div>');
+
+      view.innerHTML = section('팀 대시보드 — ' + escapeHTML(resp.team_id || ''), kpis) + usersCard + modelsCard + failCard;
     }
 
     // renderMeHome is the personalized landing for non-operators: their own usage, cost,
