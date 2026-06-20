@@ -106,8 +106,15 @@ func (s *Server) handleAuthMe(w http.ResponseWriter, r *http.Request) {
 		"auth_enabled": true,
 		"version":      AppVersion,
 		"expires_at":   claims.ExpiresAt, // unix seconds; the access token's expiry
+		"menu_version": menuVersion,
 		"user": map[string]any{
-			"id": claims.Subject, "email": claims.Email, "role": claims.Role, "team_id": claims.TeamID, "scopes": claims.Scopes,
+			"id": claims.Subject, "email": claims.Email, "role": claims.Role,
+			"roles":        []string{claims.Role},
+			"team_id":      claims.TeamID,
+			"cost_center":  "",
+			"scopes":       claims.Scopes,
+			"features":     s.featureFlags(),
+			"default_home": resolveDefaultHome(claims.Scopes),
 		},
 	})
 }

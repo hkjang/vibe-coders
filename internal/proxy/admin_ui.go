@@ -310,6 +310,7 @@ const adminHTML = `<!doctype html>
   <header>
     <h1>AI 게이트웨이</h1>
     <nav id="tabs">
+      <a href="#/me" data-tab="me">내 홈</a>
       <a href="#/dashboard" data-tab="dashboard" class="active">대시보드</a>
       <a href="#/mcp" data-tab="mcp">MCP</a>
       <a href="#/routing" data-tab="routing">라우팅</a>
@@ -513,8 +514,8 @@ const adminHTML = `<!doctype html>
         saveAuth(await res.json());
         document.getElementById('login-password').value = '';
         hideLogin();
-        renderAuthHeader();
-        route();
+        location.hash = ''; // let bootAfterAuth route to the role's default home
+        await bootAfterAuth(null);
       } catch (ex) {
         err.textContent = '로그인 실패: ' + ex.message;
         err.style.display = 'block';
@@ -535,6 +536,44 @@ const adminHTML = `<!doctype html>
       showLogin();
     });
     // 부팅 동선: 인증 모드 감지 → 세션 복원/리프레시 → 즉시 로그인 화면 또는 대시보드
+    // loadNavigation fetches the server-computed accessible menu set and stores it. The
+    // SPA renders only these menus and guards routes against allowed_tabs — the same
+    // policy the server applies — so a hidden menu can never be reached by URL.
+    async function loadNavigation() {
+      try {
+        authState.nav = await api('/me/navigation');
+      } catch {
+        authState.nav = null; // fall back to showing everything (legacy/no policy)
+      }
+      applyNavPermissions();
+    }
+
+    // applyNavPermissions hides nav anchors whose tab is not in the caller's allowed_tabs.
+    function applyNavPermissions() {
+      const nav = authState.nav;
+      const allowed = nav && Array.isArray(nav.allowed_tabs) ? new Set(nav.allowed_tabs) : null;
+      document.querySelectorAll('#tabs a[data-tab], #user-menu a[data-tab]').forEach(a => {
+        const tab = a.getAttribute('data-tab');
+        a.style.display = (!allowed || allowed.has(tab)) ? '' : 'none';
+      });
+    }
+
+    // bootAfterAuth wires navigation + default-home routing once the session is known.
+    async function bootAfterAuth(me) {
+      renderAuthHeader();
+      if (me) updateMenuMeta(me);
+      await loadNavigation();
+      // Default home: send the user to their role-appropriate landing if they arrived at
+      // the app root (no explicit deep link).
+      const atRoot = !location.hash || location.hash === '#' || location.hash === '#/';
+      const home = (authState.nav && authState.nav.default_home) || '#/dashboard';
+      if (atRoot && home !== '#/dashboard') {
+        location.hash = home; // triggers hashchange → route()
+        return;
+      }
+      route();
+    }
+
     async function initAuth() {
       try {
         const h = authState.access ? { Authorization: 'Bearer ' + authState.access } : {};
@@ -543,14 +582,12 @@ const adminHTML = `<!doctype html>
           const me = await res.json();
           authState.enabled = !!me.auth_enabled;
           if (me.user) { authState.user = me.user; sessionStorage.setItem('authUser', JSON.stringify(me.user)); }
-          renderAuthHeader();
-          updateMenuMeta(me);
-          route();
+          await bootAfterAuth(me);
           return;
         }
         if (res.status === 401) { // 인증 모드인데 access 만료/없음 → 조용히 refresh 시도
           authState.enabled = true;
-          if (await tryRefresh()) { renderAuthHeader(); route(); return; }
+          if (await tryRefresh()) { await bootAfterAuth(null); return; }
           clearAuth();
           showLogin();
           return;
@@ -558,6 +595,7 @@ const adminHTML = `<!doctype html>
       } catch {}
       // /auth/me 자체가 실패해도 화면은 띄움 (레거시 모드 가정)
       renderAuthHeader();
+      await loadNavigation();
       route();
     }
 
@@ -974,8 +1012,16 @@ const adminHTML = `<!doctype html>
       const navTab = navParent[tab] || tab;
       setActiveTab(navTab);
       renderSubTabs(tab, rest);
+      // Route guard: the same allowed_tabs the server used to filter the menu also blocks
+      // direct URL access. Resolve nested routes to their parent tab before checking.
+      const navAllow = authState.nav && Array.isArray(authState.nav.allowed_tabs) ? new Set(authState.nav.allowed_tabs) : null;
+      if (navAllow && tab && !navAllow.has(tab) && !navAllow.has(navTab)) {
+        renderForbidden(tab);
+        return;
+      }
       try {
         switch (tab) {
+          case 'me':        await renderMeHome(); break;
           case 'dashboard': await renderDashboard(); break;
           case 'xview':     await renderXView(params); break;
           case 'waterfall': await renderWaterfall(params); break;
@@ -7683,6 +7729,127 @@ const adminHTML = `<!doctype html>
     }
 
     // ---------- my keys (self-service) ----------
+    // renderForbidden is shown when a user routes (or deep-links) to a tab outside their
+    // permissions — never a blank screen. Surfaces role, path, and how to get access.
+    function renderForbidden(tab) {
+      const u = authState.user || {};
+      const role = u.role || (authState.enabled ? '(알 수 없음)' : '레거시 토큰');
+      document.getElementById('view').innerHTML = section('접근 권한이 필요합니다',
+        '<div class="card-body" style="padding:16px">' +
+          '<p style="font-size:15px">이 메뉴(<code>#/' + escapeHTML(tab) + '</code>)에 접근할 권한이 없습니다.</p>' +
+          '<div class="kv" style="margin-top:10px">' +
+            row('내 역할', escapeHTML(role)) +
+            row('요청 경로', '<code>#/' + escapeHTML(tab) + '</code>') +
+            row('보유 권한', escapeHTML(((authState.nav && authState.nav.scopes) || []).join(', ') || '(없음)')) +
+          '</div>' +
+          '<p class="muted" style="margin-top:12px">접근이 필요하면 관리자에게 역할 변경을 요청하세요. ' +
+          '<a href="#/me">내 홈으로 이동</a></p>' +
+        '</div>');
+    }
+
+    // renderMeHome is the personalized landing for non-operators: their own usage, cost,
+    // models, failures, key alerts, risk, and recommendations — no operational metrics.
+    async function renderMeHome() {
+      const view = document.getElementById('view');
+      view.innerHTML = section('내 홈', '<div class="empty">불러오는 중...</div>');
+      let d;
+      try { d = await api('/me/dashboard'); }
+      catch (e) {
+        view.innerHTML = section('내 홈', '<div class="card-body" style="padding:16px"><p class="muted">개인 대시보드를 불러올 수 없습니다(로그인 또는 user_id 매핑이 필요). 상세: ' + escapeHTML(e.message) + '</p></div>');
+        return;
+      }
+      const today = d.today || {}, month = d.month || {}, prof = d.profile || {};
+      const pctv = (v) => (v == null ? '-' : (v * 100).toFixed(1) + '%');
+      const won = (v) => '₩' + fmt(Math.round(v || 0));
+      const todaySuccess = today.requests ? (1 - (today.errors || 0) / today.requests) : (prof.success_rate || 0);
+
+      const kpis = '<div class="kpis">' +
+        kpi('오늘 요청', fmt(today.requests || 0)) +
+        kpi('오늘 성공률', pctv(todaySuccess)) +
+        kpi('오늘 오류', fmt(today.errors || 0)) +
+        kpi('이번 달 비용', won(month.cost_krw)) +
+        kpi('절감 가능', won(d.potential_savings_krw)) +
+        kpi('개인 위험점수', fmt(prof.risk_score || 0)) +
+      '</div>';
+
+      // Profile rates card.
+      const profCard = card('내 프로필 (최근 30일)',
+        '<div class="card-body"><div class="kpis">' +
+          kpi('성공률', pctv(prof.success_rate)) +
+          kpi('평균 지연', fmt(Math.round(prof.avg_latency_ms || 0)) + 'ms') +
+          kpi('캐시율', pctv(prof.cache_rate)) +
+          kpi('Text2SQL 사용', pctv(prof.text2sql_usage_rate)) +
+          kpi('MCP 사용', pctv(prof.mcp_usage_rate)) +
+        '</div>' + (prof.summary ? '<p class="muted" style="margin-top:8px">' + escapeHTML(prof.summary) + '</p>' : '') + '</div>');
+
+      // Frequent models.
+      const models = d.frequent_models || [];
+      const modelsCard = card('자주 쓰는 모델',
+        '<div class="card-body">' + (models.length
+          ? '<table><thead><tr><th>모델</th><th>요청</th><th>성공률</th><th>평균비용</th></tr></thead><tbody>' +
+            models.map(m => '<tr><td>' + escapeHTML(m.model) + '</td><td>' + fmt(m.requests) + '</td><td>' + pctv(m.success_rate) + '</td><td>' + won(m.avg_cost_krw) + '</td></tr>').join('') + '</tbody></table>'
+          : '<p class="muted">데이터가 없습니다.</p>') + '</div>');
+
+      // Recent failures.
+      const fails = d.recent_failures || [];
+      const failCard = card('최근 실패',
+        '<div class="card-body">' + (fails.length
+          ? '<table><thead><tr><th>모델</th><th>코드</th><th>유형</th><th>시각</th></tr></thead><tbody>' +
+            fails.map(f => '<tr><td>' + escapeHTML(f.model) + '</td><td><span class="status error">' + f.status_code + '</span></td><td>' + escapeHTML(f.task_type || '') + '</td><td class="muted">' + ago(f.created_at) + '</td></tr>').join('') + '</tbody></table>'
+          : '<p class="muted">최근 실패가 없습니다. 👍</p>') + '</div>');
+
+      // Key alerts.
+      const alerts = d.key_alerts || [];
+      const keyCard = card('내 키 상태',
+        '<div class="card-body">' + (alerts.length
+          ? '<ul style="margin:0;padding-left:18px">' + alerts.map(a => '<li>' + escapeHTML(a.name || a.id || '') + ' — <span class="status warn">' + escapeHTML(a.reason || a.alert || '') + '</span></li>').join('') + '</ul>'
+          : '<p class="muted">주의가 필요한 키가 없습니다.</p>') +
+          '<div style="margin-top:8px"><a href="#/mykeys">내 키 관리 →</a></div></div>');
+
+      // Top MCP tools + task types from profile.
+      const mcpTop = prof.top_mcp_tools || [], taskTop = prof.top_task_types || [];
+      const usageCard = card('내 사용 패턴',
+        '<div class="card-body" style="display:flex;gap:24px;flex-wrap:wrap">' +
+          '<div><strong>작업 유형 Top</strong>' + (taskTop.length ? '<ul style="margin:4px 0;padding-left:18px">' + taskTop.map(x => '<li>' + escapeHTML(x.key) + ' (' + fmt(x.requests) + ')</li>').join('') + '</ul>' : '<p class="muted">-</p>') + '</div>' +
+          '<div><strong>MCP 도구 Top</strong>' + (mcpTop.length ? '<ul style="margin:4px 0;padding-left:18px">' + mcpTop.map(x => '<li>' + escapeHTML(x.key) + ' (' + fmt(x.requests) + ')</li>').join('') + '</ul>' : '<p class="muted">-</p>') + '</div>' +
+        '</div>');
+
+      // Recommendations (load on demand).
+      const recCard = card('내 추천',
+        '<div class="card-body"><div id="me-recs"><button type="button" class="secondary" onclick="meLoadRecommendations()">추천 불러오기</button></div></div>');
+
+      view.innerHTML = section('내 홈', kpis) + profCard + usageCard + modelsCard + failCard + keyCard + recCard;
+    }
+
+    window.meLoadRecommendations = async () => {
+      const host = document.getElementById('me-recs');
+      if (!host) return;
+      host.innerHTML = '<span class="muted">불러오는 중...</span>';
+      try {
+        const d = await api('/me/recommendations');
+        const recs = d.recommendations || [];
+        if (!recs.length) { host.innerHTML = '<p class="muted">현재 추천이 없습니다.</p>'; return; }
+        host.innerHTML = recs.map(r =>
+          '<div style="border:1px solid var(--border);border-radius:6px;padding:10px;margin-bottom:8px">' +
+          '<div><strong>' + escapeHTML(r.title) + '</strong> <span class="status">' + escapeHTML(r.kind) + '</span>' +
+          (r.est_savings_krw ? ' <span class="muted">~₩' + fmt(Math.round(r.est_savings_krw)) + ' 절감</span>' : '') + '</div>' +
+          (r.detail ? '<p class="muted" style="margin:4px 0;font-size:12px">' + escapeHTML(r.detail) + '</p>' : '') +
+          '<div style="display:flex;gap:6px;margin-top:4px">' +
+            '<button type="button" style="font-size:11px" onclick="meRecFeedback(\'' + escapeAttr(r.id) + '\',\'accepted\')">수락</button>' +
+            '<button type="button" class="secondary" style="font-size:11px" onclick="meRecFeedback(\'' + escapeAttr(r.id) + '\',\'later\')">나중에</button>' +
+            '<button type="button" class="danger" style="font-size:11px" onclick="meRecFeedback(\'' + escapeAttr(r.id) + '\',\'rejected\')">거절</button>' +
+          '</div></div>'
+        ).join('');
+      } catch (e) { host.innerHTML = '<span class="status error">' + escapeHTML(e.message) + '</span>'; }
+    };
+
+    window.meRecFeedback = async (id, action) => {
+      try {
+        await api('/me/recommendations/' + encodeURIComponent(id) + '/feedback', { method: 'POST', body: JSON.stringify({ action }) });
+        meLoadRecommendations();
+      } catch (e) { alert('피드백 오류: ' + e.message); }
+    };
+
     async function renderMyKeys() {
       const view = document.getElementById('view');
       let data;
