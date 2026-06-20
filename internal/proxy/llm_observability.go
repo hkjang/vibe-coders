@@ -39,6 +39,12 @@ func llmRequestMetadata(r *http.Request, body []byte, traceID string) llmMetadat
 		PromptName:    firstNonEmptyHeader(r, "X-LLM-Prompt-Name", "X-Prompt-Name"),
 		PromptVersion: firstNonEmptyHeader(r, "X-LLM-Prompt-Version", "X-Prompt-Version"),
 	}
+	// Prompt asset attribution: a client that pulled a managed asset via /use can echo
+	// its id back as X-Prompt-Asset-Id, giving the asset library exact (rather than
+	// name-matched) performance metrics. The asset id wins over a free-form prompt name.
+	if assetID := firstNonEmptyHeader(r, "X-Prompt-Asset-Id", "X-LLM-Prompt-Asset-Id"); assetID != "" {
+		meta.PromptName = assetID
+	}
 	if meta.PromptName == "" {
 		meta.PromptName = "ad-hoc"
 	}

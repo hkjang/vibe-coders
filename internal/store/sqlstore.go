@@ -1237,6 +1237,27 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 		`ALTER TABLE prompt_templates ADD COLUMN approved_at TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE prompt_templates ADD COLUMN note TEXT NOT NULL DEFAULT ''`,
 		`CREATE INDEX IF NOT EXISTS idx_prompt_templates_status ON prompt_templates(status)`,
+		// Prompt asset library v2: unified version/change history. Edit rows carry a
+		// full body snapshot (version_num monotonic per template); status events
+		// (submit/approve/promote/reject) reuse the current version_num with no snapshot.
+		`CREATE TABLE IF NOT EXISTS prompt_template_history (
+			id TEXT PRIMARY KEY,
+			template_id TEXT NOT NULL,
+			action TEXT NOT NULL,
+			version_num INTEGER NOT NULL DEFAULT 0,
+			name TEXT NOT NULL DEFAULT '',
+			category TEXT NOT NULL DEFAULT '',
+			description TEXT NOT NULL DEFAULT '',
+			body TEXT NOT NULL DEFAULT '',
+			tags TEXT NOT NULL DEFAULT '',
+			from_status TEXT NOT NULL DEFAULT '',
+			to_status TEXT NOT NULL DEFAULT '',
+			note TEXT NOT NULL DEFAULT '',
+			actor TEXT NOT NULL DEFAULT '',
+			has_snapshot INTEGER NOT NULL DEFAULT 0,
+			created_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_prompt_template_history_tid ON prompt_template_history(template_id, created_at)`,
 	}
 
 	for _, statement := range statements {

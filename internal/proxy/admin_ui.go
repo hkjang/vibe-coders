@@ -4026,6 +4026,7 @@ const adminHTML = `<!doctype html>
           '</select>' +
           '<button type="submit">적용</button>' +
           '<button type="button" class="secondary" onclick="openAddAssetModal()">+ 새 자산</button>' +
+          '<button type="button" class="secondary" onclick="openAssetCompare()">A/B 비교</button>' +
         '</form>';
 
       // Asset table
@@ -4151,8 +4152,15 @@ const adminHTML = `<!doctype html>
     window.openAssetDetail = async (id) => {
       openModal('자산 상세 — ' + id, '<div class="empty">불러오는 중...</div>');
       try {
-        const resp = await api('/admin/prompt-assets?q=' + encodeURIComponent(id));
+        const [resp, histResp, usageResp] = await Promise.all([
+          api('/admin/prompt-assets?q=' + encodeURIComponent(id)),
+          api('/admin/templates/' + encodeURIComponent(id) + '/history').catch(() => ({ history: [] })),
+          api('/admin/templates/' + encodeURIComponent(id) + '/usage').catch(() => ({ usage: [] })),
+        ]);
         const a = (resp.assets || []).find(x => x.id === id) || {};
+        const history = histResp.history || [];
+        const usage = usageResp.usage || [];
+        window.__assetHistory = history; // for diff lookup
         const tagPreset = ['java','go','python','javascript','typescript','sql','rust','security','test','docs','refactor','review','policy','legal','compliance','general'];
         const catOptions = [
           {key:'refactor',label:'리팩터링'},{key:'test',label:'테스트 생성'},{key:'security',label:'보안 점검'},
@@ -4171,6 +4179,58 @@ const adminHTML = `<!doctype html>
           kpi('평균지연', fmt(Math.round(a.avg_latency_ms||0))+'ms') +
           '</div>'
         ) : '<div class="muted" style="margin-bottom:12px;font-size:12px">아직 수집된 성과 지표가 없습니다 (90일 내 요청 없음).</div>';
+        // 사용처 역추적: per-team usage breakdown
+        const usageBlock = usage.length ? (
+          '<h4 style="margin:14px 0 6px">사용처 (팀별 · 90일)</h4>' +
+          '<table style="width:100%"><thead><tr><th>팀</th><th>호출수</th><th>오류</th><th>비용</th></tr></thead><tbody>' +
+          usage.map(u =>
+            '<tr><td>' + escapeHTML(u.team) + '</td>' +
+            '<td>' + fmt(u.calls||0) + '</td>' +
+            '<td>' + (u.errors ? '<span class="status warn">'+fmt(u.errors)+'</span>' : '0') + '</td>' +
+            '<td>₩' + Number(u.cost_krw||0).toFixed(1) + '</td></tr>'
+          ).join('') +
+          '</tbody></table>'
+        ) : '';
+
+        // 버전 이력 (스냅샷이 있는 항목만) — diff + rollback
+        const versions = history.filter(h => h.has_snapshot);
+        const actionLabel = { create:'생성', edit:'편집', rollback:'롤백', submit:'검토제출', approve:'승인', promote:'표준승격', reject:'반려' };
+        const versionBlock = versions.length ? (
+          '<h4 style="margin:14px 0 6px">버전 이력</h4>' +
+          '<table style="width:100%"><thead><tr><th>버전</th><th>작업</th><th>작성자</th><th>시각</th><th>비교/복원</th></tr></thead><tbody>' +
+          versions.map((v, i) => {
+            const prev = versions[i+1]; // older
+            const canDiff = !!prev;
+            return '<tr><td><strong>v' + v.version_num + '</strong></td>' +
+              '<td>' + (actionLabel[v.action]||v.action) + (v.note ? ' <span class="muted">('+escapeHTML(v.note)+')</span>' : '') + '</td>' +
+              '<td>' + escapeHTML(v.actor||'-') + '</td>' +
+              '<td class="muted">' + ago(v.created_at) + '</td>' +
+              '<td>' +
+                (canDiff ? '<button class="secondary" type="button" style="font-size:11px" onclick="diffAssetVersion('+v.version_num+','+prev.version_num+')">diff</button> ' : '') +
+                (i!==0 ? '<button class="secondary" type="button" style="font-size:11px" onclick="rollbackAsset(\''+escapeAttr(id)+'\','+v.version_num+')">이 버전으로 복원</button>' : '<span class="muted" style="font-size:11px">현재</span>') +
+              '</td></tr>';
+          }).join('') +
+          '</tbody></table>' +
+          '<div id="pa-diff" style="margin-top:8px"></div>'
+        ) : '';
+
+        // 변경 감사 푸터 — 모든 이력 (상태 이벤트 포함) 시간순
+        const auditBlock = history.length ? (
+          '<h4 style="margin:14px 0 6px">변경 이력</h4>' +
+          '<div style="border-left:2px solid var(--border);padding-left:10px">' +
+          history.map(h => {
+            const transition = (h.from_status || h.to_status) ? ' <span class="muted">'+escapeHTML(h.from_status||'-')+' → '+escapeHTML(h.to_status||'-')+'</span>' : '';
+            return '<div style="margin-bottom:6px;font-size:12px">' +
+              '<strong>' + (actionLabel[h.action]||h.action) + '</strong>' +
+              (h.has_snapshot ? ' <span class="pill">v'+h.version_num+'</span>' : '') +
+              transition +
+              (h.note ? ' — ' + escapeHTML(h.note) : '') +
+              '<div class="muted" style="font-size:11px">' + escapeHTML(h.actor||'system') + ' · ' + ago(h.created_at) + '</div>' +
+            '</div>';
+          }).join('') +
+          '</div>'
+        ) : '';
+
         openModal('자산 상세 — ' + escapeHTML(a.name || id),
           metricsBlock +
           '<div class="kv">' +
@@ -4184,6 +4244,9 @@ const adminHTML = `<!doctype html>
             row('생성', ago(a.created_at)) +
             row('수정', ago(a.updated_at)) +
           '</div>' +
+          usageBlock +
+          versionBlock +
+          auditBlock +
           '<h4 style="margin:12px 0 6px">편집</h4>' +
           '<div class="kv">' +
             row('이름', '<input id="pa-edit-name" value="' + escapeAttr(a.name||'') + '" style="width:100%">') +
@@ -4260,6 +4323,88 @@ const adminHTML = `<!doctype html>
         await api('/admin/templates/' + encodeURIComponent(id), { method: 'DELETE' });
         route();
       } catch(err) { alert('삭제 오류: ' + err.message); }
+    };
+
+    // Simple line-based diff between two snapshot versions, rendered into #pa-diff.
+    window.diffAssetVersion = (newer, older) => {
+      const hist = window.__assetHistory || [];
+      const nv = hist.find(h => h.has_snapshot && h.version_num === newer);
+      const ov = hist.find(h => h.has_snapshot && h.version_num === older);
+      const el = document.getElementById('pa-diff');
+      if (!el || !nv || !ov) return;
+      const oldLines = (ov.body||'').split('\n');
+      const newLines = (nv.body||'').split('\n');
+      const oldSet = new Set(oldLines);
+      const newSet = new Set(newLines);
+      const rows = [];
+      const max = Math.max(oldLines.length, newLines.length);
+      for (let i = 0; i < max; i++) {
+        const o = oldLines[i], n = newLines[i];
+        if (o !== undefined && !newSet.has(o)) rows.push('<div style="background:rgba(220,38,38,0.12);color:#b91c1c">- ' + escapeHTML(o) + '</div>');
+        if (n !== undefined && !oldSet.has(n)) rows.push('<div style="background:rgba(5,150,105,0.12);color:#047857">+ ' + escapeHTML(n) + '</div>');
+      }
+      el.innerHTML = '<div style="font-weight:600;margin-bottom:4px">v' + older + ' → v' + newer + ' diff</div>' +
+        '<pre style="font-size:11px;white-space:pre-wrap;border:1px solid var(--border);border-radius:6px;padding:8px;max-height:240px;overflow:auto">' +
+        (rows.length ? rows.join('') : '<span class="muted">본문 변경 없음</span>') + '</pre>';
+    };
+
+    // A/B 성과 비교: pick two assets, show success rate / cost / latency side-by-side.
+    window.openAssetCompare = async () => {
+      openModal('A/B 성과 비교', '<div class="empty">불러오는 중...</div>');
+      const resp = await api('/admin/prompt-assets');
+      const assets = (resp.assets || []).slice().sort((x,y)=> (x.name||'').localeCompare(y.name||''));
+      if (assets.length < 2) { openModal('A/B 성과 비교', '<div class="empty">비교하려면 자산이 2개 이상 필요합니다.</div>'); return; }
+      const opts = assets.map(a => '<option value="'+escapeAttr(a.id)+'">'+escapeHTML(a.name)+' ('+a.status+')</option>').join('');
+      openModal('A/B 성과 비교',
+        '<div class="toolbar">' +
+          '<select id="pa-cmp-a">' + opts + '</select>' +
+          '<span style="font-weight:600">vs</span>' +
+          '<select id="pa-cmp-b">' + opts + '</select>' +
+          '<button type="button" onclick="renderAssetCompare()">비교</button>' +
+        '</div>' +
+        '<div id="pa-cmp-result" style="margin-top:12px"></div>'
+      );
+      window.__cmpAssets = assets;
+      if (assets[1]) document.getElementById('pa-cmp-b').selectedIndex = 1;
+      renderAssetCompare();
+    };
+
+    window.renderAssetCompare = () => {
+      const assets = window.__cmpAssets || [];
+      const aId = document.getElementById('pa-cmp-a').value;
+      const bId = document.getElementById('pa-cmp-b').value;
+      const a = assets.find(x => x.id === aId) || {};
+      const b = assets.find(x => x.id === bId) || {};
+      const el = document.getElementById('pa-cmp-result');
+      function cell(v, other, fmtFn, higherBetter) {
+        const better = (v!=null && other!=null && v!==other) ? ((higherBetter ? v>other : v<other) ? ' style="font-weight:700;color:#047857"' : '') : '';
+        return '<td'+better+'>' + fmtFn(v) + '</td>';
+      }
+      const pct = v => v!=null ? (v*100).toFixed(1)+'%' : '-';
+      const won = v => v!=null ? '₩'+Number(v).toFixed(2) : '-';
+      const ms  = v => v!=null ? fmt(Math.round(v))+'ms' : '-';
+      const num = v => fmt(v||0);
+      el.innerHTML =
+        '<table style="width:100%"><thead><tr><th>지표</th><th>' + escapeHTML(a.name||'A') + '</th><th>' + escapeHTML(b.name||'B') + '</th></tr></thead><tbody>' +
+        '<tr><td>호출수 (90일)</td>' + cell(a.call_count, b.call_count, num, true) + cell(b.call_count, a.call_count, num, true) + '</tr>' +
+        '<tr><td>성공률</td>' + cell(a.success_rate, b.success_rate, pct, true) + cell(b.success_rate, a.success_rate, pct, true) + '</tr>' +
+        '<tr><td>평균비용</td>' + cell(a.avg_cost_krw, b.avg_cost_krw, won, false) + cell(b.avg_cost_krw, a.avg_cost_krw, won, false) + '</tr>' +
+        '<tr><td>평균지연</td>' + cell(a.avg_latency_ms, b.avg_latency_ms, ms, false) + cell(b.avg_latency_ms, a.avg_latency_ms, ms, false) + '</tr>' +
+        '<tr><td>재사용 횟수</td>' + cell(a.use_count, b.use_count, num, true) + cell(b.use_count, a.use_count, num, true) + '</tr>' +
+        '<tr><td>상태</td><td>'+escapeHTML(a.status||'-')+'</td><td>'+escapeHTML(b.status||'-')+'</td></tr>' +
+        '</tbody></table>' +
+        '<div class="muted" style="font-size:11px;margin-top:6px">굵게 표시된 값이 해당 지표에서 우세합니다. (성공률·호출·재사용 ↑ / 비용·지연 ↓)</div>';
+    };
+
+    window.rollbackAsset = async (id, version) => {
+      if (!confirm('v' + version + ' 본문으로 복원하시겠습니까? 현재 본문은 새 버전으로 기록됩니다.')) return;
+      try {
+        await api('/admin/templates/' + encodeURIComponent(id) + '/rollback', {
+          method: 'POST',
+          body: JSON.stringify({ version }),
+        });
+        openAssetDetail(id);
+      } catch(err) { alert('복원 오류: ' + err.message); }
     };
     // ── 프롬프트 자산 관리소 끝 ──────────────────────────────────────────
 

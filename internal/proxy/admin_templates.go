@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -101,10 +102,16 @@ func (s *Server) handleTemplates(w http.ResponseWriter, r *http.Request) {
 			Status:      status,
 			Note:        strings.TrimSpace(p.Note),
 		}
+		_, existed, _ := s.db.GetPromptTemplate(r.Context(), slug)
 		if err := s.db.UpsertPromptTemplate(r.Context(), tmpl); err != nil {
 			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "template_save_failed")
 			return
 		}
+		action := "create"
+		if existed {
+			action = "edit"
+		}
+		s.recordTemplateSnapshot(r, tmpl, action, "")
 		s.auditAdmin(r, "template.upsert", "", auditJSON(map[string]any{"id": slug, "name": tmpl.Name, "category": tmpl.Category, "enabled": enabled, "status": status}))
 		writeJSON(w, http.StatusCreated, map[string]any{"template": tmpl})
 	default:
@@ -142,6 +149,21 @@ func (s *Server) handleTemplateByID(w http.ResponseWriter, r *http.Request) {
 				s.handleTemplateSubmit(w, r, id)
 				return
 			}
+		case "history":
+			if r.Method == http.MethodGet {
+				s.handleTemplateHistory(w, r, id)
+				return
+			}
+		case "rollback":
+			if r.Method == http.MethodPost {
+				s.handleTemplateRollback(w, r, id)
+				return
+			}
+		case "usage":
+			if r.Method == http.MethodGet {
+				s.handleTemplateUsage(w, r, id)
+				return
+			}
 		}
 		writeOpenAIError(w, http.StatusNotFound, "not found", "invalid_request_error", "not_found")
 		return
@@ -168,6 +190,7 @@ func (s *Server) handleTemplateByID(w http.ResponseWriter, r *http.Request) {
 			writeOpenAIError(w, http.StatusNotFound, "template not found", "invalid_request_error", "template_not_found")
 			return
 		}
+		prevBody := cur.Body
 		var p struct {
 			Name        *string  `json:"name"`
 			Category    *string  `json:"category"`
@@ -206,6 +229,11 @@ func (s *Server) handleTemplateByID(w http.ResponseWriter, r *http.Request) {
 			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "template_save_failed")
 			return
 		}
+		// Snapshot a new version only when the body actually changed — field-only edits
+		// (rename, retag) don't create version noise.
+		if cur.Body != prevBody {
+			s.recordTemplateSnapshot(r, cur, "edit", "")
+		}
 		s.auditAdmin(r, "template.update", "", auditJSON(map[string]any{"id": id, "category": cur.Category, "enabled": cur.Enabled}))
 		writeJSON(w, http.StatusOK, map[string]any{"template": cur})
 	default:
@@ -228,10 +256,34 @@ func (s *Server) handleTemplateApprove(w http.ResponseWriter, r *http.Request, i
 		writeOpenAIError(w, http.StatusBadRequest, "status must be draft|pending|approved|standard", "invalid_request_error", "invalid_status")
 		return
 	}
+	cur, found, err := s.db.GetPromptTemplate(r.Context(), id)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "template_lookup_failed")
+		return
+	}
+	if !found {
+		writeOpenAIError(w, http.StatusNotFound, "template not found", "invalid_request_error", "template_not_found")
+		return
+	}
+	from := cur.Status
 	by := adminID(r)
-	if err := s.db.ApprovePromptTemplate(r.Context(), id, p.Status, by, strings.TrimSpace(p.Note)); err != nil {
+	note := strings.TrimSpace(p.Note)
+	if err := s.db.ApprovePromptTemplate(r.Context(), id, p.Status, by, note); err != nil {
 		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "template_approve_failed")
 		return
+	}
+	action := "approve"
+	switch {
+	case p.Status == "standard":
+		action = "promote"
+	case p.Status == "draft" && (from == "pending" || from == "approved" || from == "standard"):
+		action = "reject"
+	}
+	s.recordTemplateStatusEvent(r, id, action, from, p.Status, note, by)
+	// 골든 회귀 연결: promoting to 조직 표준 auto-registers a golden regression case so the
+	// standard prompt is covered by the existing Golden Prompt regression suite.
+	if p.Status == "standard" {
+		s.registerGoldenFromTemplate(r, cur)
 	}
 	s.auditAdmin(r, "template.approve", "", auditJSON(map[string]any{"id": id, "status": p.Status, "by": by}))
 	writeJSON(w, http.StatusOK, map[string]string{"id": id, "status": p.Status})
@@ -240,12 +292,138 @@ func (s *Server) handleTemplateApprove(w http.ResponseWriter, r *http.Request, i
 // handleTemplateSubmit transitions a template from draft to pending (submit for review).
 // POST /admin/templates/{id}/submit
 func (s *Server) handleTemplateSubmit(w http.ResponseWriter, r *http.Request, id string) {
-	if err := s.db.ApprovePromptTemplate(r.Context(), id, "pending", adminID(r), ""); err != nil {
+	cur, found, err := s.db.GetPromptTemplate(r.Context(), id)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "template_lookup_failed")
+		return
+	}
+	if !found {
+		writeOpenAIError(w, http.StatusNotFound, "template not found", "invalid_request_error", "template_not_found")
+		return
+	}
+	by := adminID(r)
+	from := cur.Status
+	if err := s.db.ApprovePromptTemplate(r.Context(), id, "pending", by, ""); err != nil {
 		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "template_submit_failed")
 		return
 	}
+	s.recordTemplateStatusEvent(r, id, "submit", from, "pending", "", by)
+	// 승인 대기 알림: notify reviewers that an asset is awaiting approval.
+	s.notifyMattermost(r.Context(), "approval", "프롬프트 자산 검토 요청: '"+cur.Name+"' (id "+id+") — 제출자 "+by)
 	s.auditAdmin(r, "template.submit", "", auditJSON(map[string]string{"id": id}))
 	writeJSON(w, http.StatusOK, map[string]string{"id": id, "status": "pending"})
+}
+
+// handleTemplateHistory returns a template's full change/version log.
+// GET /admin/templates/{id}/history
+func (s *Server) handleTemplateHistory(w http.ResponseWriter, r *http.Request, id string) {
+	hist, err := s.db.ListPromptTemplateHistory(r.Context(), id)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "template_history_failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"history": hist})
+}
+
+// handleTemplateRollback restores a template's body/fields to a prior version snapshot,
+// recording the restore as a new version. POST /admin/templates/{id}/rollback {"version":N}
+func (s *Server) handleTemplateRollback(w http.ResponseWriter, r *http.Request, id string) {
+	var p struct {
+		Version int64 `json:"version"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+		writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "invalid_body")
+		return
+	}
+	snap, found, err := s.db.GetPromptTemplateVersionSnapshot(r.Context(), id, p.Version)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "template_version_failed")
+		return
+	}
+	if !found {
+		writeOpenAIError(w, http.StatusNotFound, "version snapshot not found", "invalid_request_error", "version_not_found")
+		return
+	}
+	cur, found, err := s.db.GetPromptTemplate(r.Context(), id)
+	if err != nil || !found {
+		writeOpenAIError(w, http.StatusNotFound, "template not found", "invalid_request_error", "template_not_found")
+		return
+	}
+	cur.Name = snap.Name
+	cur.Category = snap.Category
+	cur.Description = snap.Description
+	cur.Body = snap.Body
+	cur.Tags = snap.Tags
+	if err := s.db.UpsertPromptTemplate(r.Context(), cur); err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "template_save_failed")
+		return
+	}
+	s.recordTemplateSnapshot(r, cur, "rollback", "v"+strconv.FormatInt(p.Version, 10)+" 복원")
+	s.auditAdmin(r, "template.rollback", "", auditJSON(map[string]any{"id": id, "version": p.Version}))
+	writeJSON(w, http.StatusOK, map[string]any{"template": cur, "restored_from": p.Version})
+}
+
+// handleTemplateUsage returns per-team usage of an asset (90-day window), matching by
+// asset id (header attribution) and display name. GET /admin/templates/{id}/usage
+func (s *Server) handleTemplateUsage(w http.ResponseWriter, r *http.Request, id string) {
+	cur, found, err := s.db.GetPromptTemplate(r.Context(), id)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "template_lookup_failed")
+		return
+	}
+	if !found {
+		writeOpenAIError(w, http.StatusNotFound, "template not found", "invalid_request_error", "template_not_found")
+		return
+	}
+	usage, err := s.db.PromptAssetUsage(r.Context(), []string{cur.ID, cur.Name})
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "template_usage_failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"usage": usage})
+}
+
+// recordTemplateSnapshot appends a version snapshot (create/edit/rollback) to the history log.
+func (s *Server) recordTemplateSnapshot(r *http.Request, t store.PromptTemplate, action, note string) {
+	_, _ = s.db.AddPromptTemplateHistory(r.Context(), store.PromptTemplateHistory{
+		ID:          newID("pth"),
+		TemplateID:  t.ID,
+		Action:      action,
+		Name:        t.Name,
+		Category:    t.Category,
+		Description: t.Description,
+		Body:        t.Body,
+		Tags:        t.Tags,
+		ToStatus:    t.Status,
+		Note:        note,
+		Actor:       adminID(r),
+		HasSnapshot: true,
+	})
+}
+
+// recordTemplateStatusEvent appends a non-snapshot status transition to the history log.
+func (s *Server) recordTemplateStatusEvent(r *http.Request, id, action, from, to, note, by string) {
+	_, _ = s.db.AddPromptTemplateHistory(r.Context(), store.PromptTemplateHistory{
+		ID:         newID("pth"),
+		TemplateID: id,
+		Action:     action,
+		FromStatus: from,
+		ToStatus:   to,
+		Note:       note,
+		Actor:      by,
+	})
+}
+
+// registerGoldenFromTemplate registers a Golden Prompt regression case for a template
+// promoted to 조직 표준, so the standard prompt is exercised by the regression suite.
+func (s *Server) registerGoldenFromTemplate(r *http.Request, t store.PromptTemplate) {
+	tags := append([]string{"prompt-asset", t.Category}, t.Tags...)
+	_ = s.db.UpsertGoldenPrompt(r.Context(), store.GoldenPrompt{
+		ID:     "asset_" + t.ID,
+		Name:   "[자산] " + t.Name,
+		Prompt: t.Body,
+		Tags:   tags,
+	})
 }
 
 // handleTemplateUse returns a template's body and records a usage, powering the
