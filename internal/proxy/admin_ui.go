@@ -8070,8 +8070,70 @@ const adminHTML = `<!doctype html>
       const recCard = card('내 추천',
         '<div class="card-body"><div id="me-recs"><button type="button" class="secondary" onclick="meLoadRecommendations()">추천 불러오기</button></div></div>');
 
-      view.innerHTML = section('내 홈', kpis) + profCard + usageCard + modelsCard + failCard + keyCard + recCard;
+      view.innerHTML = section('내 홈', kpis) +
+        '<div id="me-actions"></div><div id="me-report"></div>' +
+        profCard + usageCard + modelsCard + failCard + keyCard + recCard +
+        '<div id="me-notifications"></div>';
+
+      // 개인 액션 큐 — 지금 바로 행동 가능한 카드.
+      api('/me/actions').then(a => {
+        const host = document.getElementById('me-actions');
+        if (!host) return;
+        const acts = (a && a.actions) || [];
+        if (!acts.length) { host.innerHTML = ''; return; }
+        const sev = (s) => s === 'high' ? 'error' : (s === 'medium' ? 'warn' : '');
+        host.innerHTML = card('내 액션 큐 (' + acts.length + ')',
+          '<div class="card-body">' + acts.map(c =>
+            '<div style="display:flex;align-items:center;gap:10px;justify-content:space-between;border:1px solid var(--border);border-radius:6px;padding:8px 10px;margin-bottom:6px">' +
+            '<span><span class="status ' + sev(c.severity) + '" style="font-size:11px">' + escapeHTML(c.severity) + '</span> ' + escapeHTML(c.message) + '</span>' +
+            '<a href="' + escapeAttr(c.button_href || '#/me') + '"><button type="button" style="font-size:11px">' + escapeHTML(c.button_label) + '</button></a>' +
+            '</div>').join('') + '</div>');
+      }).catch(() => {});
+
+      // 주간 사용 리포트.
+      api('/me/report?window=weekly').then(rp => {
+        const host = document.getElementById('me-report');
+        if (!host || !rp) return;
+        const won = (v) => '₩' + fmt(Math.round(v || 0));
+        const delta = rp.cost_delta_ratio || 0;
+        const deltaBadge = delta > 0.05 ? '<span class="status warn">▲ ' + (delta*100).toFixed(0) + '%</span>' : (delta < -0.05 ? '<span class="status">▼ ' + Math.abs(delta*100).toFixed(0) + '%</span>' : '<span class="status">유사</span>');
+        host.innerHTML = card('주간 사용 리포트',
+          '<div class="card-body"><div class="kpis">' +
+            kpi('요청', fmt(rp.requests || 0)) +
+            kpi('비용', won(rp.cost_krw)) +
+            kpi('성공률', ((rp.success_rate||0)*100).toFixed(1)+'%') +
+            kpi('평균 지연', fmt(Math.round(rp.avg_latency_ms||0)) + 'ms') +
+          '</div><p style="margin:8px 0;font-size:12px">전주 대비 비용: ' + deltaBadge + ' <a href="#/me" onclick="meLoadReport(\'monthly\');return false" class="muted">월간 보기</a></p></div>');
+      }).catch(() => {});
+
+      // 개인 알림 센터.
+      api('/me/notifications').then(n => {
+        const host = document.getElementById('me-notifications');
+        if (!host || !n) return;
+        const items = (n.notifications || []).slice(0, 15);
+        const lvl = (l) => l === 'critical' ? 'error' : (l === 'warning' ? 'warn' : '');
+        host.innerHTML = card('알림 센터' + (n.critical_count ? ' (긴급 ' + n.critical_count + ')' : ''),
+          '<div class="card-body">' + (items.length
+            ? items.map(x => '<div style="margin:3px 0;font-size:12px"><span class="status ' + lvl(x.level) + '" style="font-size:10px">' + escapeHTML(x.category) + '</span> <strong>' + escapeHTML(x.title) + '</strong>' + (x.detail ? ' <span class="muted">— ' + escapeHTML(x.detail) + '</span>' : '') + '</div>').join('')
+            : '<p class="muted">새 알림이 없습니다.</p>') + '</div>');
+      }).catch(() => {});
     }
+
+    window.meLoadReport = async (win) => {
+      const host = document.getElementById('me-report');
+      if (!host) return;
+      try {
+        const rp = await api('/me/report?window=' + encodeURIComponent(win));
+        const won = (v) => '₩' + fmt(Math.round(v || 0));
+        host.innerHTML = card((win === 'monthly' ? '월간' : '주간') + ' 사용 리포트',
+          '<div class="card-body"><div class="kpis">' +
+            kpi('요청', fmt(rp.requests || 0)) +
+            kpi('비용', won(rp.cost_krw)) +
+            kpi('성공률', ((rp.success_rate||0)*100).toFixed(1)+'%') +
+            kpi('예상 절감', won(rp.potential_savings_krw)) +
+          '</div><p style="margin:8px 0;font-size:12px"><a href="#/me" onclick="meLoadReport(\'' + (win==='monthly'?'weekly':'monthly') + '\');return false" class="muted">' + (win==='monthly'?'주간':'월간') + ' 보기</a></p></div>');
+      } catch (e) { /* ignore */ }
+    };
 
     window.meLoadRecommendations = async () => {
       const host = document.getElementById('me-recs');
