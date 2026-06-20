@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"vibe-coders/internal/store"
 )
 
 // handleTeamDashboard returns the caller's team usage/cost/failures — the team_manager
@@ -130,6 +132,81 @@ func (s *Server) handleTeamTemplateCandidates(w http.ResponseWriter, r *http.Req
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"team_id": teamID, "since": since.UTC().Format(time.RFC3339), "candidates": cands})
+}
+
+// handleTeamRisk surfaces the team's risk posture: policy violations, Secret Firewall
+// hits, pending approvals, and the blocked-request trend vs the prior window. Reuses the
+// governance filters (whose team_id is the canonical team id, matching claims.TeamID).
+// GET /team/risk[?window=]
+func (s *Server) handleTeamRisk(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
+	teamID, _, ok := s.resolveTeamScope(w, r)
+	if !ok {
+		return
+	}
+	window := parseWindow(r.URL.Query().Get("window"), 7*24*time.Hour, "day")
+	now := time.Now().UTC()
+	prior := window.Add(-now.Sub(window)) // equal-length window immediately before `window`
+	ctx := r.Context()
+
+	countBlocked := func(events []store.PolicyDecisionEvent) (blocked, warned int) {
+		for _, e := range events {
+			switch strings.ToLower(e.Decision) {
+			case "block":
+				blocked++
+			case "warn":
+				warned++
+			}
+		}
+		return
+	}
+
+	cur, _ := s.db.ListPolicyDecisionEventsFiltered(ctx, store.PolicyDecisionFilter{TeamID: teamID, Since: window, Limit: 5000})
+	wide, _ := s.db.ListPolicyDecisionEventsFiltered(ctx, store.PolicyDecisionFilter{TeamID: teamID, Since: prior, Limit: 5000})
+	curBlocked, curWarned := countBlocked(cur)
+	wideBlocked, _ := countBlocked(wide)
+	priorBlocked := wideBlocked - curBlocked
+	if priorBlocked < 0 {
+		priorBlocked = 0
+	}
+
+	secrets, _ := s.db.ListSecretEventsFiltered(ctx, store.SecretEventFilter{TeamID: teamID, Since: window, Limit: 5000})
+	secretByType := map[string]int{}
+	for _, e := range secrets {
+		secretByType[e.SecretType]++
+	}
+
+	pending, _ := s.db.ListApprovalsFiltered(ctx, store.ApprovalFilter{TeamID: teamID, Status: "pending", Limit: 100})
+
+	recent := make([]map[string]any, 0, 10)
+	for _, e := range cur {
+		if strings.EqualFold(e.Decision, "allow") {
+			continue
+		}
+		if len(recent) >= 10 {
+			break
+		}
+		recent = append(recent, map[string]any{
+			"decision": e.Decision, "reason": e.Reason, "rule": e.RuleName,
+			"endpoint": e.Endpoint, "risk_score": e.RiskScore, "created_at": e.CreatedAt,
+		})
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"team_id": teamID,
+		"since":   window.UTC().Format(time.RFC3339),
+		"blocked": curBlocked,
+		"warned":  curWarned,
+		"blocked_prior_window": priorBlocked,
+		"blocked_trend":        curBlocked - priorBlocked, // >0 = rising risk
+		"secrets_total":        len(secrets),
+		"secrets_by_type":      secretByType,
+		"pending_approvals":    len(pending),
+		"recent_violations":    recent,
+	})
 }
 
 func uniqueNonEmpty(values ...string) []string {

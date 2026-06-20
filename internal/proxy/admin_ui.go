@@ -7896,7 +7896,29 @@ const adminHTML = `<!doctype html>
           : '<p class="muted">최근 실패가 없습니다. 👍</p>') + '</div>');
 
       view.innerHTML = section('팀 대시보드 — ' + escapeHTML(resp.team_id || ''), kpis) + usersCard + modelsCard + failCard +
-        '<div id="team-skills"></div><div id="team-templates"></div>';
+        '<div id="team-risk"></div><div id="team-skills"></div><div id="team-templates"></div>';
+
+      // 팀 위험 신호 (정책 위반·Secret·승인 대기 + 차단 추세).
+      api('/team/risk').then(rk => {
+        const host = document.getElementById('team-risk');
+        if (!host || !rk) return;
+        const trend = rk.blocked_trend || 0;
+        const trendBadge = trend > 0 ? '<span class="status error">▲ ' + trend + ' 증가</span>' : (trend < 0 ? '<span class="status">▼ ' + Math.abs(trend) + ' 감소</span>' : '<span class="status">변동 없음</span>');
+        const byType = rk.secrets_by_type || {};
+        const recent = rk.recent_violations || [];
+        host.innerHTML = card('팀 위험 신호',
+          '<div class="card-body"><div class="kpis">' +
+            kpi('차단(정책)', fmt(rk.blocked || 0)) +
+            kpi('경고(정책)', fmt(rk.warned || 0)) +
+            kpi('Secret 탐지', fmt(rk.secrets_total || 0)) +
+            kpi('승인 대기', fmt(rk.pending_approvals || 0)) +
+          '</div>' +
+          '<p style="margin:8px 0">차단 추세(이전 구간 대비): ' + trendBadge + '</p>' +
+          (Object.keys(byType).length ? '<div class="muted" style="font-size:12px">Secret 유형: ' + Object.keys(byType).map(k => escapeHTML(k) + '(' + byType[k] + ')').join(', ') + '</div>' : '') +
+          (recent.length ? '<table style="margin-top:8px"><thead><tr><th>결정</th><th>사유</th><th>위험</th><th>시각</th></tr></thead><tbody>' +
+            recent.map(x => '<tr><td><span class="status ' + (x.decision==='block'?'error':'warn') + '">' + escapeHTML(x.decision) + '</span></td><td>' + escapeHTML(x.reason||'') + '</td><td>' + fmt(x.risk_score||0) + '</td><td class="muted">' + ago(x.created_at) + '</td></tr>').join('') + '</tbody></table>' : '<p class="muted" style="margin-top:8px">최근 위반이 없습니다. 👍</p>') +
+          '</div>');
+      }).catch(() => {});
 
       // 팀 인기 Skill + 팀 추천 템플릿 후보 (병렬 로드, 실패해도 본문은 유지).
       const pctv = (v) => (v == null ? '-' : (v * 100).toFixed(1) + '%');
