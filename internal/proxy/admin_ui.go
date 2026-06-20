@@ -2248,6 +2248,30 @@ const adminHTML = `<!doctype html>
         '</div>' +
       '</div>';
     }
+    // Gateway Flow Map — 한 요청의 단계별 처리 흐름(인증→한도→Skill→거버넌스→라우팅→캐시→MCP→Text2SQL→업스트림→DW).
+    window.showFlowMap = async (id) => {
+      try {
+        const d = await api('/admin/flow-map?request_id=' + encodeURIComponent(id));
+        const cls = (st) => st === 'ok' ? '' : (st === 'blocked' || st === 'error' ? 'error' : (st === 'fallback' || st === 'warn' ? 'warn' : 'muted'));
+        const icon = (st) => ({ ok: '✅', blocked: '⛔', error: '🔥', fallback: '↩️', warn: '⚠️', skip: '➖' })[st] || '•';
+        const label = { auth: '인증', quota: '한도/쿼터', skill: 'Skill', governance: '거버넌스', routing: '라우팅', cache: '캐시', mcp: 'MCP', text2sql: 'Text2SQL', upstream: '업스트림', dw: 'DW 적재' };
+        const rows = (d.stages || []).map(st => {
+          const arts = st.linked_artifacts ? Object.entries(st.linked_artifacts).map(([k, v]) => '<span class="muted" style="font-size:10px;margin-right:8px">' + escapeHTML(k) + '=' + escapeHTML(String(v)) + '</span>').join('') : '';
+          return '<div style="display:flex;gap:10px;align-items:flex-start;border-left:3px solid var(--line);padding:8px 10px;margin:4px 0">' +
+            '<div style="font-size:16px">' + icon(st.status) + '</div>' +
+            '<div style="flex:1"><div><strong>' + escapeHTML(label[st.stage] || st.stage) + '</strong> <span class="status ' + cls(st.status) + '" style="font-size:9px">' + escapeHTML(st.status) + '</span>' +
+            (st.latency_ms ? ' <span class="muted" style="font-size:10px">' + fmt(st.latency_ms) + 'ms</span>' : '') + '</div>' +
+            (st.decision ? '<div style="font-size:12px">' + escapeHTML(st.decision) + '</div>' : '') +
+            (st.reason ? '<div class="muted" style="font-size:11px">' + escapeHTML(st.reason) + '</div>' : '') +
+            (arts ? '<div style="margin-top:2px">' + arts + '</div>' : '') +
+            '</div></div>';
+        }).join('');
+        const sm = d.summary || {};
+        openModal('처리 흐름 - ' + escapeHTML(sm.trace_id || id),
+          '<div class="card-body"><div class="muted" style="font-size:12px;margin-bottom:8px">' + escapeHTML(sm.model || '') + ' · ' + escapeHTML(sm.provider || '') + ' · ' + (sm.status_code || 0) + ' · ' + fmt(sm.latency_ms || 0) + 'ms</div>' +
+          rows + '<p class="muted" style="font-size:10px;margin-top:8px">' + escapeHTML(d.note || '') + '</p></div>');
+      } catch (e) { openModal('오류', '<div class="error-line">' + escapeHTML(e.message) + '</div>'); }
+    };
     window.openRequestDetail = async (id) => {
       try {
         const [detail, note, links] = await Promise.all([
@@ -3716,7 +3740,8 @@ const adminHTML = `<!doctype html>
           '<div style="white-space:normal; line-height:1.65; font-size:14.5px;">' + renderMarkdown(lastUserText) + '</div>' +
         '</div>'
       ) : '';
-      const explainBtn = '<div style="margin-bottom:12px"><button class="secondary" type="button" onclick="closeModal();openExplain(\'' + escapeAttr(r.id) + '\')">🧭 XView 설명 (왜 이렇게 처리됐나)</button></div>';
+      const explainBtn = '<div style="margin-bottom:12px"><button class="secondary" type="button" onclick="closeModal();openExplain(\'' + escapeAttr(r.id) + '\')">🧭 XView 설명 (왜 이렇게 처리됐나)</button> ' +
+        '<button class="secondary" type="button" onclick="showFlowMap(\'' + escapeAttr(r.id) + '\')">🗺️ 처리 흐름</button></div>';
       const langs = (d.languages || []).map(l => escapeHTML(l.language) + ' <span class="muted">(' + pct(l.confidence) + ')</span>').join(', ') || '<span class="muted">없음</span>';
       const prompts = (d.prompts || []).map(p => {
         const text = p.redacted_text || p.content_text || '';
