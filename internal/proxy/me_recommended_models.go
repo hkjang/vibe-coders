@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 )
@@ -84,10 +85,80 @@ func (s *Server) handleMeRecommendedModels(w http.ResponseWriter, r *http.Reques
 		yourModels = append(yourModels, row)
 	}
 
+	// Team winners: top models by wins from the team's recent multi-model judge results.
+	teamWinners := s.teamModelWinners(r, claims.TeamID, 3)
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"task_recommendations": taskRecs,
 		"your_models":          yourModels,
+		"team_winners":         teamWinners,
 		"tagged_model_count":   len(tags),
-		"note":                 "최근 30일 작업 유형과 관리자 모델 용도 태그를 결합한 추천입니다. 태그가 없으면 비어 있을 수 있습니다.",
+		"note":                 "최근 30일 작업 유형·관리자 모델 용도 태그·팀 멀티모델 평가 결과를 결합한 추천입니다.",
 	})
+}
+
+// teamModelWinners aggregates the team's recent (90d) multi-model judge results into the top-N
+// models by wins (times a model had the top score in its run), then avg score.
+func (s *Server) teamModelWinners(r *http.Request, team string, topN int) []map[string]any {
+	if strings.TrimSpace(team) == "" {
+		return []map[string]any{}
+	}
+	since := time.Now().UTC().AddDate(0, 0, -90).Format(time.RFC3339Nano)
+	rows, err := s.db.MultiModelJudgementRows(r.Context(), team, since)
+	if err != nil || len(rows) == 0 {
+		return []map[string]any{}
+	}
+	type agg struct {
+		appear int
+		sum    float64
+		wins   int
+	}
+	stats := map[string]*agg{}
+	get := func(m string) *agg {
+		if stats[m] == nil {
+			stats[m] = &agg{}
+		}
+		return stats[m]
+	}
+	byRun := map[string][]int{}
+	for i, row := range rows {
+		byRun[row.RunID] = append(byRun[row.RunID], i)
+		a := get(row.Model)
+		a.appear++
+		a.sum += row.TotalScore
+	}
+	for _, idxs := range byRun {
+		best, bestScore := "", -1.0
+		for _, i := range idxs {
+			if rows[i].Verdict == "fail" {
+				continue
+			}
+			if rows[i].TotalScore > bestScore {
+				bestScore = rows[i].TotalScore
+				best = rows[i].Model
+			}
+		}
+		if best != "" {
+			get(best).wins++
+		}
+	}
+	out := make([]map[string]any, 0, len(stats))
+	for model, a := range stats {
+		avg := 0.0
+		if a.appear > 0 {
+			avg = a.sum / float64(a.appear)
+		}
+		out = append(out, map[string]any{"model": model, "wins": a.wins, "avg_score": round1(avg), "appearances": a.appear})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		wi, wj := out[i]["wins"].(int), out[j]["wins"].(int)
+		if wi != wj {
+			return wi > wj
+		}
+		return out[i]["avg_score"].(float64) > out[j]["avg_score"].(float64)
+	})
+	if len(out) > topN {
+		out = out[:topN]
+	}
+	return out
 }

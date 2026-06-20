@@ -8895,7 +8895,8 @@ const adminHTML = `<!doctype html>
       let d;
       try { d = await api('/me/recommended-models'); } catch (e) { host.innerHTML = ''; return; }
       const recs = d.task_recommendations || [];
-      if (!recs.length && !(d.your_models || []).some(m => m.tags)) { host.innerHTML = ''; return; } // 태그 없으면 카드 숨김
+      const winners = d.team_winners || [];
+      if (!recs.length && !winners.length && !(d.your_models || []).some(m => m.tags)) { host.innerHTML = ''; return; } // 데이터 없으면 카드 숨김
       const taskRows = recs.map(t =>
         '<div style="font-size:12px;margin:3px 0"><strong>' + escapeHTML(t.task_type) + '</strong> <span class="muted">(' + fmt(t.requests) + '회)</span> ' +
         ((t.recommend || []).length ? '👍 ' + (t.recommend || []).map(escapeHTML).join(', ') : '') +
@@ -8903,9 +8904,14 @@ const adminHTML = `<!doctype html>
         '</div>').join('');
       const mine = (d.your_models || []).filter(m => m.tags).slice(0, 6).map(m =>
         '<div style="font-size:11px" class="muted">' + escapeHTML(m.model) + ': ' + (m.tags.good_for ? '👍' + escapeHTML(m.tags.good_for) : '') + (m.tags.risk_note ? ' ⚠' + escapeHTML(m.tags.risk_note) : '') + '</div>').join('');
+      const winnerRows = winners.length
+        ? '<div style="margin-top:6px;border-top:1px solid var(--border);padding-top:6px"><strong style="font-size:11px">팀 멀티모델 우승 모델 (90일)</strong>' +
+          winners.map(wm => '<div style="font-size:11px">🏆 ' + escapeHTML(wm.model) + ' <span class="muted">우승 ' + wm.wins + '회 · 평균 ' + (wm.avg_score || 0).toFixed(1) + '점</span></div>').join('') + '</div>'
+        : '';
       host.innerHTML = card('내 업무 추천 모델',
         '<div class="card-body">' +
         (taskRows || '<p class="muted" style="font-size:12px">작업 유형에 매칭되는 추천 태그가 없습니다.</p>') +
+        winnerRows +
         (mine ? '<div style="margin-top:6px;border-top:1px solid var(--border);padding-top:6px"><strong style="font-size:11px">내가 쓰는 모델 태그</strong>' + mine + '</div>' : '') +
         '<p class="muted" style="font-size:10px;margin-top:6px">' + escapeHTML(d.note || '') + '</p></div>');
     };
