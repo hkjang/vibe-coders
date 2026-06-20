@@ -74,3 +74,68 @@ func TestTeamDashboardSince(t *testing.T) {
 		t.Fatalf("empty keys should be zero data, got %+v err=%v", empty.Totals, err)
 	}
 }
+
+func TestTeamPopularSkillsAndTemplateCandidates(t *testing.T) {
+	db := openAggTestStore(t)
+	defer db.Close()
+	ctx := context.Background()
+	now := time.Now().UTC()
+	base := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC).Add(2 * time.Hour)
+
+	// u1,u2 in team_platform; u3 in team_other.
+	for _, k := range []struct{ id, user, team string }{
+		{"k1", "u1", "team_platform"}, {"k2", "u2", "team_platform"}, {"k3", "u3", "team_other"},
+	} {
+		if _, err := db.db.ExecContext(ctx,
+			`INSERT INTO api_keys (id, name, key_hash, status, created_at, user_id, team, role) VALUES (?,?,?,?,?,?,?,?)`,
+			k.id, k.id, "h-"+k.id, "active", now.Format(time.RFC3339Nano), k.user, k.team, "developer"); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Popular skills: team members u1/u2 run "refactor"; u3 (other team) runs it too but excluded.
+	for _, rn := range []SkillRun{
+		{SkillName: "refactor", Status: "ok", Actor: "u1", CostKRW: 3, LatencyMS: 100},
+		{SkillName: "refactor", Status: "ok", Actor: "u2", CostKRW: 3, LatencyMS: 100},
+		{SkillName: "refactor", Status: "error", Actor: "u1", CostKRW: 1, LatencyMS: 50},
+		{SkillName: "refactor", Status: "ok", Actor: "u3", CostKRW: 9, LatencyMS: 100}, // other team
+		{SkillName: "review", Status: "ok", Actor: "u2", CostKRW: 2, LatencyMS: 80},
+	} {
+		if err := db.RecordSkillRun(ctx, rn); err != nil {
+			t.Fatal(err)
+		}
+	}
+	skills, err := db.TeamPopularSkills(ctx, []string{"team_platform"}, base, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(skills) != 2 || skills[0].SkillName != "refactor" || skills[0].Runs != 3 {
+		t.Fatalf("popular skills = %+v, want refactor(3 in-team) then review", skills)
+	}
+	if skills[0].OK != 2 || skills[0].SuccessRate < 0.66 || skills[0].SuccessRate > 0.67 {
+		t.Fatalf("refactor stats wrong: %+v", skills[0])
+	}
+
+	// Template candidates: a repeated fingerprint within the team.
+	rec := func(id, apiKey, fp string, when time.Time) {
+		if err := db.InsertLogRecord(ctx, LogRecord{
+			Request: RequestLog{ID: id, TraceID: id, APIKeyID: apiKey, Endpoint: "/v1/chat/completions",
+				Model: "gpt-4.1", TaskType: "refactor", StatusCode: 200, PromptFingerprint: fp, CreatedAt: when},
+			Usage: &TokenUsage{ID: id + "_u", RequestID: id, TotalTokens: 10, EstimatedCost: 2, Currency: "KRW", CreatedAt: when},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rec("c1", "k1", "fp_team", base.Add(1*time.Hour))
+	rec("c2", "k2", "fp_team", base.Add(2*time.Hour))
+	rec("c3", "k1", "fp_team", base.Add(3*time.Hour))
+	rec("o1", "k3", "fp_other", base.Add(1*time.Hour)) // other team
+
+	cands, err := db.TeamTemplateCandidates(ctx, []string{"team_platform"}, base, 2, 15)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cands) != 1 || cands[0].Fingerprint != "fp_team" || cands[0].Requests != 3 {
+		t.Fatalf("template candidates = %+v, want fp_team(3)", cands)
+	}
+}

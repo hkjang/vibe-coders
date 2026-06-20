@@ -44,6 +44,137 @@ type TeamDashboardData struct {
 // teamErrorExpr classifies a failed request consistently across the team queries.
 const teamErrorExpr = `(r.status_code >= 400 OR COALESCE(r.error, '') <> '' OR COALESCE(r.failover, 0) = 1)`
 
+// TeamSkillStat is one skill's usage profile aggregated over a team's members.
+type TeamSkillStat struct {
+	SkillName    string  `json:"skill_name"`
+	Runs         int64   `json:"runs"`
+	OK           int64   `json:"ok"`
+	Errors       int64   `json:"errors"`
+	SuccessRate  float64 `json:"success_rate"`
+	TotalCostKRW float64 `json:"total_cost_krw"`
+	AvgLatencyMS float64 `json:"avg_latency_ms"`
+}
+
+// keyPlaceholders builds "?, ?, ..." + cleaned args for an IN clause.
+func keyPlaceholders(keys []string) (string, []any) {
+	ph := make([]string, 0, len(keys))
+	args := make([]any, 0, len(keys))
+	for _, k := range keys {
+		if k = strings.TrimSpace(k); k != "" {
+			ph = append(ph, "?")
+			args = append(args, k)
+		}
+	}
+	return strings.Join(ph, ","), args
+}
+
+// TeamPopularSkills ranks skills by usage among a team's members (skill_runs.actor → a
+// user whose api key belongs to the team), busiest first. Powers 팀 인기 Skill.
+func (s *SQLStore) TeamPopularSkills(ctx context.Context, keys []string, since time.Time, limit int) ([]TeamSkillStat, error) {
+	in, args := keyPlaceholders(keys)
+	if in == "" {
+		return []TeamSkillStat{}, nil
+	}
+	if limit <= 0 || limit > 100 {
+		limit = 10
+	}
+	q := `SELECT sr.skill_name,
+			COUNT(*),
+			SUM(CASE WHEN sr.status = 'ok' THEN 1 ELSE 0 END),
+			SUM(CASE WHEN sr.status = 'error' THEN 1 ELSE 0 END),
+			COALESCE(SUM(sr.cost_krw), 0),
+			COALESCE(AVG(sr.latency_ms), 0)
+		FROM skill_runs sr
+		WHERE sr.created_at >= ? AND EXISTS (
+			SELECT 1 FROM api_keys k WHERE k.user_id = sr.actor AND k.team IN (` + in + `))
+		GROUP BY sr.skill_name ORDER BY COUNT(*) DESC LIMIT ?`
+	qArgs := append([]any{since.UTC().Format(time.RFC3339Nano)}, args...)
+	qArgs = append(qArgs, limit)
+	rows, err := s.db.QueryContext(ctx, s.bind(q), qArgs...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []TeamSkillStat{}
+	for rows.Next() {
+		var st TeamSkillStat
+		if err := rows.Scan(&st.SkillName, &st.Runs, &st.OK, &st.Errors, &st.TotalCostKRW, &st.AvgLatencyMS); err != nil {
+			return nil, err
+		}
+		if st.Runs > 0 {
+			st.SuccessRate = float64(st.OK) / float64(st.Runs)
+		}
+		out = append(out, st)
+	}
+	return out, rows.Err()
+}
+
+// TeamTemplateCandidate is a recurring prompt cluster within a team, proposed as a team
+// template. AlreadyProduct marks clusters already promoted to a prompt product.
+type TeamTemplateCandidate struct {
+	Fingerprint   string  `json:"fingerprint"`
+	TaskType      string  `json:"task_type"`
+	Requests      int64   `json:"requests"`
+	AvgCostKRW    float64 `json:"avg_cost_krw"`
+	SuccessRate   float64 `json:"success_rate"`
+	AlreadyProduct bool   `json:"already_product"`
+}
+
+// TeamTemplateCandidates returns the most frequent prompt clusters for a team (≥minCount),
+// flagging those already productized. Powers 팀 추천 템플릿.
+func (s *SQLStore) TeamTemplateCandidates(ctx context.Context, keys []string, since time.Time, minCount, limit int) ([]TeamTemplateCandidate, error) {
+	teamFilter, teamArgs := teamInClause(keys)
+	if teamFilter == "" {
+		return []TeamTemplateCandidate{}, nil
+	}
+	if minCount < 2 {
+		minCount = 2
+	}
+	if limit <= 0 || limit > 100 {
+		limit = 15
+	}
+	q := `SELECT r.prompt_fingerprint,
+			COALESCE(NULLIF(MAX(r.task_type), ''), 'other') AS task_type,
+			COUNT(*) AS requests,
+			AVG(COALESCE(t.estimated_cost, 0)) AS avg_cost,
+			SUM(CASE WHEN r.status_code >= 200 AND r.status_code < 300 AND COALESCE(r.error,'') = '' AND COALESCE(r.failover,0) = 0 THEN 1 ELSE 0 END) AS successes
+		FROM request_logs r
+		LEFT JOIN token_usage t ON t.request_id = r.id
+		WHERE r.created_at >= ? AND r.endpoint LIKE '%chat/completions%' AND COALESCE(r.prompt_fingerprint,'') <> '' AND ` + teamFilter + `
+		GROUP BY r.prompt_fingerprint
+		HAVING COUNT(*) >= ?
+		ORDER BY requests DESC LIMIT ?`
+	qArgs := append([]any{since.UTC().Format(time.RFC3339Nano)}, teamArgs...)
+	qArgs = append(qArgs, minCount, limit)
+	rows, err := s.db.QueryContext(ctx, s.bind(q), qArgs...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []TeamTemplateCandidate{}
+	for rows.Next() {
+		var c TeamTemplateCandidate
+		var successes int64
+		if err := rows.Scan(&c.Fingerprint, &c.TaskType, &c.Requests, &c.AvgCostKRW, &successes); err != nil {
+			return nil, err
+		}
+		if c.Requests > 0 {
+			c.SuccessRate = float64(successes) / float64(c.Requests)
+		}
+		out = append(out, c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	// Flag clusters already promoted to a prompt product.
+	if fps, err := s.PromptProductFingerprints(ctx); err == nil {
+		for i := range out {
+			out[i].AlreadyProduct = fps[out[i].Fingerprint]
+		}
+	}
+	return out, nil
+}
+
 // teamInClause builds "(requestTeamExpr) IN (?, ?, ...)" plus the bound args for a set of
 // acceptable team identifiers (a team is stored on api_keys.team as id-or-name, so callers
 // pass both their team id and name to match either).

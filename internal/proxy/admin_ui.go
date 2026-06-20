@@ -7895,7 +7895,31 @@ const adminHTML = `<!doctype html>
             fails.map(f => '<tr><td>' + escapeHTML(f.model) + '</td><td><span class="status error">' + f.status_code + '</span></td><td>' + escapeHTML(f.task_type || '') + '</td><td class="muted">' + ago(f.created_at) + '</td></tr>').join('') + '</tbody></table>'
           : '<p class="muted">최근 실패가 없습니다. 👍</p>') + '</div>');
 
-      view.innerHTML = section('팀 대시보드 — ' + escapeHTML(resp.team_id || ''), kpis) + usersCard + modelsCard + failCard;
+      view.innerHTML = section('팀 대시보드 — ' + escapeHTML(resp.team_id || ''), kpis) + usersCard + modelsCard + failCard +
+        '<div id="team-skills"></div><div id="team-templates"></div>';
+
+      // 팀 인기 Skill + 팀 추천 템플릿 후보 (병렬 로드, 실패해도 본문은 유지).
+      const pctv = (v) => (v == null ? '-' : (v * 100).toFixed(1) + '%');
+      api('/team/skills/popular').then(s => {
+        const skills = (s && s.skills) || [];
+        const host = document.getElementById('team-skills');
+        if (!host) return;
+        host.innerHTML = card('팀 인기 Skill',
+          '<div class="card-body">' + (skills.length
+            ? '<table><thead><tr><th>Skill</th><th>실행</th><th>성공률</th><th>비용</th><th>평균지연</th></tr></thead><tbody>' +
+              skills.map(k => '<tr><td>' + escapeHTML(k.skill_name) + '</td><td>' + fmt(k.runs) + '</td><td>' + pctv(k.success_rate) + '</td><td>₩' + fmt(Math.round(k.total_cost_krw||0)) + '</td><td>' + fmt(Math.round(k.avg_latency_ms||0)) + 'ms</td></tr>').join('') + '</tbody></table>'
+            : '<p class="muted">팀 내 Skill 사용 기록이 없습니다.</p>') + '</div>');
+      }).catch(() => {});
+      api('/team/templates/candidates').then(s => {
+        const cands = (s && s.candidates) || [];
+        const host = document.getElementById('team-templates');
+        if (!host) return;
+        host.innerHTML = card('팀 추천 템플릿 후보',
+          '<div class="card-body">' + (cands.length
+            ? '<table><thead><tr><th>작업 유형</th><th>반복</th><th>성공률</th><th>평균비용</th><th>상태</th></tr></thead><tbody>' +
+              cands.map(c => '<tr><td>' + escapeHTML(c.task_type) + '<div class="muted" style="font-size:10px">' + escapeHTML((c.fingerprint||'').slice(0,12)) + '</div></td><td>' + fmt(c.requests) + '</td><td>' + pctv(c.success_rate) + '</td><td>₩' + fmt(Math.round(c.avg_cost_krw||0)) + '</td><td>' + (c.already_product ? '<span class="status">상품화됨</span>' : '<span class="status warn">후보</span>') + '</td></tr>').join('') + '</tbody></table>'
+            : '<p class="muted">반복 프롬프트 패턴이 충분하지 않습니다.</p>') + '</div>');
+      }).catch(() => {});
     }
 
     // renderMeHome is the personalized landing for non-operators: their own usage, cost,
