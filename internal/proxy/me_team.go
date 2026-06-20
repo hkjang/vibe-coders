@@ -247,6 +247,61 @@ func (s *Server) handleTeamOnboarding(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleTeamSavingsChallenge gamifies team cost discipline: month-to-date spend, a linear
+// month-end projection, last month's total, and the projected savings vs last month (the
+// "challenge"). All from real team cost — no fabricated projections. GET /team/savings-challenge
+func (s *Server) handleTeamSavingsChallenge(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
+	teamID, keys, ok := s.resolveTeamScope(w, r)
+	if !ok {
+		return
+	}
+	now := time.Now().UTC()
+	monthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
+	lastMonthStart := monthStart.AddDate(0, -1, 0)
+	daysInMonth := time.Date(now.Year(), now.Month()+1, 0, 0, 0, 0, 0, time.UTC).Day()
+	daysElapsed := now.Day()
+	ctx := r.Context()
+
+	mtd, err := s.db.TeamDashboardSince(ctx, keys, monthStart, 1)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "team_savings_failed")
+		return
+	}
+	sinceLast, err := s.db.TeamDashboardSince(ctx, keys, lastMonthStart, 1)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "team_savings_failed")
+		return
+	}
+	thisMTD := mtd.Totals.CostKRW
+	lastMonthTotal := sinceLast.Totals.CostKRW - thisMTD
+	if lastMonthTotal < 0 {
+		lastMonthTotal = 0
+	}
+	projectedMonthEnd := thisMTD
+	if daysElapsed > 0 {
+		projectedMonthEnd = thisMTD / float64(daysElapsed) * float64(daysInMonth)
+	}
+	projectedSavings := lastMonthTotal - projectedMonthEnd
+	if projectedSavings < 0 {
+		projectedSavings = 0
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"team_id":             teamID,
+		"month_to_date_krw":   thisMTD,
+		"projected_month_end_krw": projectedMonthEnd,
+		"last_month_krw":      lastMonthTotal,
+		"projected_savings_krw": projectedSavings,
+		"on_track":            projectedMonthEnd <= lastMonthTotal || lastMonthTotal == 0,
+		"days_elapsed":        daysElapsed,
+		"days_in_month":       daysInMonth,
+	})
+}
+
 func uniqueNonEmpty(values ...string) []string {
 	seen := map[string]bool{}
 	out := []string{}

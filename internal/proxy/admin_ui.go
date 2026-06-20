@@ -7896,7 +7896,22 @@ const adminHTML = `<!doctype html>
           : '<p class="muted">최근 실패가 없습니다. 👍</p>') + '</div>');
 
       view.innerHTML = section('팀 대시보드 — ' + escapeHTML(resp.team_id || ''), kpis) + usersCard + modelsCard + failCard +
-        '<div id="team-risk"></div><div id="team-skills"></div><div id="team-templates"></div><div id="team-onboarding"></div>';
+        '<div id="team-challenge"></div><div id="team-risk"></div><div id="team-skills"></div><div id="team-templates"></div><div id="team-onboarding"></div>';
+
+      // 팀 비용 절감 챌린지 (월 추세 + 예상 절감).
+      api('/team/savings-challenge').then(ch => {
+        const host = document.getElementById('team-challenge');
+        if (!host || !ch) return;
+        const won = (v) => '₩' + fmt(Math.round(v || 0));
+        const badge = ch.on_track ? '<span class="status">🟢 목표 달성 추세</span>' : '<span class="status error">🔴 전월 초과 예상</span>';
+        host.innerHTML = card('팀 비용 절감 챌린지',
+          '<div class="card-body"><div class="kpis">' +
+            kpi('이번 달 누적', won(ch.month_to_date_krw)) +
+            kpi('예상 월말', won(ch.projected_month_end_krw)) +
+            kpi('전월 총액', won(ch.last_month_krw)) +
+            kpi('예상 절감', won(ch.projected_savings_krw)) +
+          '</div><p style="margin:8px 0">' + badge + ' <span class="muted" style="font-size:12px">(' + ch.days_elapsed + '/' + ch.days_in_month + '일 경과, 선형 추정)</span></p></div>');
+      }).catch(() => {});
 
       // 팀 온보딩 팩 (추천 모델·Skill·MCP 묶음).
       api('/team/onboarding').then(ob => {
