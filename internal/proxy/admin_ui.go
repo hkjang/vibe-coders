@@ -5332,9 +5332,28 @@ const adminHTML = `<!doctype html>
             '</div>' +
           '</div>' +
         '</form>';
+      const multiPanel =
+        '<div class="ct-group">' +
+          '<div class="ct-glabel">비교 모델 <span class="ct-glabel-note">한 줄에 하나, 형식: model 또는 model:provider (최대 5개)</span></div>' +
+          '<textarea id="mm-models" class="ct-prompt" rows="4" placeholder="gpt-4.1-mini:openai\nclaude-sonnet:anthropic\ngemini-flash:google">' + escapeHTML((defaults.model && defaults.model !== 'vibe/auto') ? defaults.model : 'vibe/auto') + '</textarea>' +
+        '</div>' +
+        '<div class="ct-group">' +
+          '<div class="ct-glabel">System / User Prompt</div>' +
+          '<textarea id="mm-system" class="ct-prompt" rows="2" placeholder="공통 system 메시지 (선택)"></textarea>' +
+          '<textarea id="mm-user" class="ct-prompt" rows="5" placeholder="비교할 user 프롬프트">' + escapeHTML(defaults.prompt || '아래 코드의 문제점과 개선 방향을 알려줘.') + '</textarea>' +
+        '</div>' +
+        '<div class="ct-footer"><div class="ct-row">' +
+          '<label class="ct-field"><span>Max tokens</span><input id="mm-max-tokens" type="number" min="1" max="4096" value="' + Number(defaults.max_tokens || 1024) + '"></label>' +
+          '<label class="ct-field"><span>Temperature</span><input id="mm-temperature" type="number" step="0.1" min="0" max="2" value="' + Number(defaults.temperature || 0.2) + '"></label>' +
+          '</div><div class="ct-btns"><button type="button" id="mm-run">멀티 실행</button></div>' +
+        '</div>' +
+        '<div id="mm-results" style="margin-top:10px"></div>';
       document.getElementById('view').innerHTML =
         section('Chat Completion 테스트', kpis + form) +
+        section('멀티 모델 응답 비교', multiPanel) +
         section('대상 카탈로그', chatTestTargetTable(targets));
+
+      document.getElementById('mm-run').addEventListener('click', runMultiModelCompare);
 
       const targetSelect = document.getElementById('chat-target');
       const targetDetail = document.getElementById('chat-target-detail');
@@ -5895,6 +5914,65 @@ const adminHTML = `<!doctype html>
         row('Provider', escapeHTML(t.provider || '자동')) +
       '</div>';
     }
+    async function runMultiModelCompare() {
+      const out = document.getElementById('mm-results');
+      const btn = document.getElementById('mm-run');
+      const models = (document.getElementById('mm-models').value || '').split('\n').map(s => s.trim()).filter(Boolean).map(line => {
+        const [model, provider] = line.split(':').map(x => (x || '').trim());
+        return { model, provider: provider || '' };
+      });
+      if (!models.length) { out.innerHTML = '<span class="status error">비교할 모델을 1개 이상 입력하세요.</span>'; return; }
+      if (models.length > 5) { out.innerHTML = '<span class="status error">한 번에 최대 5개 모델까지 비교할 수 있습니다.</span>'; return; }
+      const messages = [];
+      const sys = (document.getElementById('mm-system').value || '').trim();
+      if (sys) messages.push({ role: 'system', content: sys });
+      messages.push({ role: 'user', content: (document.getElementById('mm-user').value || '').trim() });
+      const body = {
+        title: '멀티 모델 비교',
+        models,
+        messages,
+        params: {
+          temperature: parseFloat(document.getElementById('mm-temperature').value) || 0,
+          max_tokens: parseInt(document.getElementById('mm-max-tokens').value, 10) || 1024,
+          stream: false,
+        },
+        save_prompt: false,
+      };
+      btn.disabled = true; btn.textContent = '실행 중...';
+      out.innerHTML = '<div class="empty">' + models.length + '개 모델 병렬 호출 중...</div>';
+      try {
+        const r = await api('/admin/chat-test/multi-run', { method: 'POST', body: JSON.stringify(body) });
+        const results = r.results || [], sum = r.summary || {};
+        const won = (v) => '₩' + fmt(Math.round(v || 0));
+        const badge = (name, label) => name ? '<span class="status">' + label + ': ' + escapeHTML(name) + '</span> ' : '';
+        const table =
+          '<table><thead><tr><th>모델</th><th>Provider</th><th>상태</th><th>지연</th><th>입력</th><th>출력</th><th>예상비용</th></tr></thead><tbody>' +
+          results.map(x =>
+            '<tr><td><strong>' + escapeHTML(x.model) + '</strong></td>' +
+            '<td>' + escapeHTML(x.selected_provider || x.provider || '') + '</td>' +
+            '<td><span class="status ' + (x.status === 'success' ? '' : 'error') + '">' + escapeHTML(x.status) + '</span></td>' +
+            '<td data-num="' + x.latency_ms + '">' + fmt(x.latency_ms) + 'ms</td>' +
+            '<td>' + fmt(x.input_tokens) + '</td><td>' + fmt(x.output_tokens) + '</td>' +
+            '<td>' + (x.cost_krw_est ? won(x.cost_krw_est) : '-') + '</td></tr>'
+          ).join('') + '</tbody></table>';
+        const cards = results.map(x =>
+          '<div style="border:1px solid var(--border);border-radius:8px;padding:10px;margin-top:8px">' +
+          '<div style="display:flex;justify-content:space-between;align-items:center"><strong>' + escapeHTML(x.model) + '</strong>' +
+          '<span class="status ' + (x.status === 'success' ? '' : 'error') + '">' + escapeHTML(x.status) + ' · ' + fmt(x.latency_ms) + 'ms</span></div>' +
+          (x.error ? '<div class="status error" style="margin-top:6px">' + escapeHTML(x.error) + '</div>' : '') +
+          '<pre style="white-space:pre-wrap;font-size:12px;max-height:280px;overflow:auto;margin-top:6px">' + escapeHTML(x.content || '(빈 응답)') + '</pre>' +
+          '</div>').join('');
+        out.innerHTML =
+          '<div style="margin-bottom:6px">' + badge(sum.best_latency_model, '최저 지연') + badge(sum.lowest_cost_success_model, '최저 비용') +
+          '<span class="muted" style="font-size:12px">성공 ' + (sum.success||0) + ' / 실패 ' + (sum.failed||0) + '</span></div>' +
+          table + cards;
+      } catch (e) {
+        out.innerHTML = '<span class="status error">' + escapeHTML(e.message) + '</span>';
+      } finally {
+        btn.disabled = false; btn.textContent = '멀티 실행';
+      }
+    }
+
     function renderChatTestPreview(preview) {
       const complexity = preview.complexity || {};
       const risk = preview.risk || {};

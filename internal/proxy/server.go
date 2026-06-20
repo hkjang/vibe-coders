@@ -31,7 +31,7 @@ import (
 )
 
 // AppVersion is the gateway build version, surfaced in /auth/me and the admin UI.
-const AppVersion = "v0.50.40"
+const AppVersion = "v0.50.41"
 
 type Server struct {
 	cfg            config.Config
@@ -202,6 +202,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/admin/providers/", s.handleProviderByName)
 	mux.HandleFunc("/admin/chat-test/targets", s.handleChatTestTargets)
 	mux.HandleFunc("/admin/chat-test/run", s.handleChatTestRun)
+	mux.HandleFunc("/admin/chat-test/multi-run", s.handleChatTestMultiRun)
 	mux.HandleFunc("/admin/chat-test/stream", s.handleChatTestStream)
 	mux.HandleFunc("/admin/audit-logs", s.handleAuditLogs)
 	mux.HandleFunc("/admin/audit/auth-events", s.handleAuthAuditEvents)
