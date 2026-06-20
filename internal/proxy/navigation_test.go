@@ -210,6 +210,32 @@ func TestTeamManagerNavigation(t *testing.T) {
 	}
 }
 
+func TestRedactPromptDetails(t *testing.T) {
+	prompts := []store.PromptDetail{
+		{Role: "user", ContentText: "secret original text", RedactedText: "[redacted]"},
+		{Role: "system", ContentText: "same", RedactedText: "same"},
+		{Role: "user", ContentText: "", RedactedText: "x"},
+	}
+	redactPromptDetails(prompts)
+	if prompts[0].ContentText != "[redacted]" {
+		t.Errorf("raw content should be collapsed to redacted, got %q", prompts[0].ContentText)
+	}
+	if prompts[1].ContentText != "same" {
+		t.Errorf("already-equal content untouched, got %q", prompts[1].ContentText)
+	}
+	// rawPromptViewerRoles: only full admins + security_admin.
+	for _, role := range []string{"admin", "super_admin", "security_admin"} {
+		if !rawPromptViewerRoles[role] {
+			t.Errorf("%s should be allowed to view raw prompts", role)
+		}
+	}
+	for _, role := range []string{"viewer", "readonly_admin", "ops_admin", "ai_admin", "team_admin", "team_manager", "developer"} {
+		if rawPromptViewerRoles[role] {
+			t.Errorf("%s must NOT view raw prompts", role)
+		}
+	}
+}
+
 func TestMeKeysMenuGatedByFeature(t *testing.T) {
 	on := tabSet(roleScopes["developer"], map[string]bool{"self_service_keys": true})
 	if !on["mykeys"] {

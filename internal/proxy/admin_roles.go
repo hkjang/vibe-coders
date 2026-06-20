@@ -4,7 +4,46 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+
+	"vibe-coders/internal/store"
 )
+
+// rawPromptViewerRoles may view captured prompt/response ORIGINALS. Lower-privilege
+// operators (viewer, readonly_admin, ops_admin, ai_admin, team_admin) still reach the
+// request-detail surface (admin:read) but see only redacted text — data-scope masking.
+var rawPromptViewerRoles = map[string]bool{"super_admin": true, "admin": true, "security_admin": true}
+
+// canViewRawPrompts reports whether the caller may see un-redacted prompt/response text.
+// Legacy admin-token mode (auth disabled) is treated as full admin.
+func (s *Server) canViewRawPrompts(r *http.Request) bool {
+	if !s.cfg.Auth.Enabled {
+		return true
+	}
+	claims, ok := s.currentAccessClaims(r)
+	if !ok {
+		return false
+	}
+	return rawPromptViewerRoles[claims.Role]
+}
+
+// redactPromptDetails collapses each prompt's raw ContentText to its redacted form so no
+// original leaks. Idempotent; safe when ContentText already equals RedactedText.
+func redactPromptDetails(prompts []store.PromptDetail) {
+	for i := range prompts {
+		if prompts[i].ContentText != "" && prompts[i].ContentText != prompts[i].RedactedText {
+			prompts[i].ContentText = prompts[i].RedactedText
+		}
+	}
+}
+
+// maskRequestDetail redacts prompt originals in a request detail unless the caller is
+// authorized to view raw content.
+func (s *Server) maskRequestDetail(r *http.Request, d *store.RequestDetail) {
+	if d == nil || s.canViewRawPrompts(r) {
+		return
+	}
+	redactPromptDetails(d.Prompts)
+}
 
 // roleDescriptions documents each built-in role for the admin roles screen.
 var roleDescriptions = map[string]string{

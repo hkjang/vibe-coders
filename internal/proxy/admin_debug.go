@@ -104,6 +104,8 @@ func (s *Server) handleRequestDiff(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusNotFound, "right request: "+err.Error(), "invalid_request_error", "right_not_found")
 		return
 	}
+	s.maskRequestDetail(r, &left) // data-scope masking for lower-privilege admins
+	s.maskRequestDetail(r, &right)
 	writeJSON(w, http.StatusOK, map[string]any{"left": left, "right": right})
 }
 

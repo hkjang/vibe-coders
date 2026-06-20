@@ -507,6 +507,7 @@ func (s *Server) handleRequestDetail(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "request_detail_failed")
 		return
 	}
+	s.maskRequestDetail(r, &detail) // data-scope masking: hide prompt originals from lower-privilege admins
 	writeJSON(w, http.StatusOK, detail)
 }
 
