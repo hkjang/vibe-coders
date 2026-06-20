@@ -102,10 +102,14 @@ func (s *Server) handleKeycloakCallback(w http.ResponseWriter, r *http.Request) 
 		fail(err.Error())
 		return
 	}
-	pair, err := s.issueTokenPair(r.Context(), user, team, clientIP(r), r.UserAgent())
+	pair, sessionID, err := s.issueTokenPairWithSession(r.Context(), user, team, clientIP(r), r.UserAgent())
 	if err != nil {
 		fail("session issue failed")
 		return
+	}
+	// Link the Keycloak session id (sid claim) so front-/back-channel logout can target it.
+	if sid := strClaim(claims, "sid"); sid != "" {
+		_ = s.db.LinkAuthSessionKeycloakSID(r.Context(), sessionID, sid)
 	}
 	s.auditAuthEvent(r.Context(), "sso_login", user.ID, "", team, "keycloak sub="+strClaim(claims, "sub")+" role="+user.Role)
 	access, _ := pair["access_token"].(string)
@@ -286,16 +290,53 @@ func (s *Server) handleKeycloakBackchannelLogout(w http.ResponseWriter, r *http.
 		writeOpenAIError(w, http.StatusBadRequest, "logout_token missing back-channel-logout event", "invalid_request_error", "invalid_token")
 		return
 	}
+	// Per the OIDC back-channel spec the logout_token carries sub and/or sid.
 	sub := strClaim(claims, "sub")
-	if sub == "" {
-		writeOpenAIError(w, http.StatusBadRequest, "logout_token missing sub", "invalid_request_error", "invalid_token")
+	sid := strClaim(claims, "sid")
+	if sub == "" && sid == "" {
+		writeOpenAIError(w, http.StatusBadRequest, "logout_token missing sub and sid", "invalid_request_error", "invalid_token")
 		return
 	}
-	if id, found, _ := s.db.AuthIdentityBySubject(r.Context(), "keycloak", s.keycloakConfig().IssuerURL, sub); found {
+	if sid != "" {
+		// Targeted: revoke only the session(s) linked to this Keycloak sid.
+		if users, _ := s.db.RevokeAuthSessionsByKeycloakSID(r.Context(), sid); len(users) > 0 {
+			s.auditAuthEvent(r.Context(), "sso_backchannel_logout", users[0], "", "", "keycloak sid="+sid+" sub="+sub)
+		}
+	} else if id, found, _ := s.db.AuthIdentityBySubject(r.Context(), "keycloak", s.keycloakConfig().IssuerURL, sub); found {
+		// No sid → log out every session for the subject.
 		_ = s.db.RevokeAuthSessionsForUser(r.Context(), id.UserID)
 		s.auditAuthEvent(r.Context(), "sso_backchannel_logout", id.UserID, "", "", "keycloak sub="+sub)
 	}
 	w.WriteHeader(http.StatusOK)
+}
+
+// handleKeycloakFrontchannelLogout handles OIDC front-channel logout: the OP renders this URL
+// in a hidden iframe when the user logs out elsewhere. We validate the issuer and revoke the
+// internal session(s) linked to the supplied sid. No body/token is sent, so sid is the only
+// reliable handle. GET /auth/keycloak/frontchannel-logout?iss=<issuer>&sid=<session_id>
+func (s *Server) handleKeycloakFrontchannelLogout(w http.ResponseWriter, r *http.Request) {
+	if !s.keycloakConfig().Enabled {
+		writeOpenAIError(w, http.StatusNotFound, "SSO is not enabled", "invalid_request_error", "sso_disabled")
+		return
+	}
+	// Front-channel logout responses must not be cached.
+	w.Header().Set("Cache-Control", "no-store")
+	iss := r.URL.Query().Get("iss")
+	sid := strings.TrimSpace(r.URL.Query().Get("sid"))
+	// When iss is provided it must match our configured issuer (spec recommends validating it).
+	if iss != "" && iss != s.keycloakConfig().IssuerURL {
+		writeOpenAIError(w, http.StatusBadRequest, "issuer mismatch", "invalid_request_error", "bad_issuer")
+		return
+	}
+	if sid != "" {
+		if users, _ := s.db.RevokeAuthSessionsByKeycloakSID(r.Context(), sid); len(users) > 0 {
+			s.auditAuthEvent(r.Context(), "sso_frontchannel_logout", users[0], "", "", "keycloak sid="+sid)
+		}
+	}
+	// Return a minimal page (the OP loads this in an iframe).
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte("<!doctype html><title>logout</title>"))
 }
 
 // handleKeycloakLogout clears the internal session and returns the Keycloak end-session URL

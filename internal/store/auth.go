@@ -208,6 +208,51 @@ func (s *SQLStore) RevokeAuthSession(ctx context.Context, sessionID string) erro
 	return err
 }
 
+// LinkAuthSessionKeycloakSID records the Keycloak session id (sid claim) on an internal
+// session so front-/back-channel logout can target the exact browser session.
+func (s *SQLStore) LinkAuthSessionKeycloakSID(ctx context.Context, sessionID, kcSID string) error {
+	if kcSID == "" {
+		return nil
+	}
+	_, err := s.db.ExecContext(ctx, s.bind(`UPDATE auth_sessions SET kc_sid = ? WHERE id = ?`), kcSID, sessionID)
+	return err
+}
+
+// RevokeAuthSessionsByKeycloakSID revokes the internal session(s) linked to a Keycloak sid
+// and returns the affected user ids (for refresh-token cleanup + audit). Used by OIDC
+// front-channel and back-channel logout when the OP supplies a sid.
+func (s *SQLStore) RevokeAuthSessionsByKeycloakSID(ctx context.Context, kcSID string) ([]string, error) {
+	if kcSID == "" {
+		return nil, nil
+	}
+	rows, err := s.db.QueryContext(ctx, s.bind(`SELECT DISTINCT user_id FROM auth_sessions WHERE kc_sid = ? AND revoked_at IS NULL`), kcSID)
+	if err != nil {
+		return nil, err
+	}
+	users := []string{}
+	for rows.Next() {
+		var u string
+		if err := rows.Scan(&u); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		users = append(users, u)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	now := formatTime(time.Now().UTC())
+	if _, err := s.db.ExecContext(ctx, s.bind(`UPDATE auth_sessions SET revoked_at = ? WHERE kc_sid = ? AND revoked_at IS NULL`), now, kcSID); err != nil {
+		return nil, err
+	}
+	// Best-effort: revoke refresh tokens for the affected users.
+	for _, u := range users {
+		_, _ = s.db.ExecContext(ctx, s.bind(`UPDATE refresh_tokens SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL`), now, u)
+	}
+	return users, nil
+}
+
 func (s *SQLStore) AuthSessionActive(ctx context.Context, sessionID string) (bool, error) {
 	var expiresAt, revokedAt string
 	err := s.db.QueryRowContext(ctx, s.bind(`SELECT expires_at, COALESCE(revoked_at, '') FROM auth_sessions WHERE id = ?`), sessionID).Scan(&expiresAt, &revokedAt)

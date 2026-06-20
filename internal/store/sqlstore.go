@@ -151,8 +151,10 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 			user_agent TEXT,
 			revoked_at TEXT,
 			expires_at TEXT NOT NULL,
-			created_at TEXT NOT NULL
+			created_at TEXT NOT NULL,
+			kc_sid TEXT NOT NULL DEFAULT ''
 		)`,
+		`ALTER TABLE auth_sessions ADD COLUMN kc_sid TEXT NOT NULL DEFAULT ''`,
 		`CREATE TABLE IF NOT EXISTS inferred_sessions (
 			identity_hash TEXT PRIMARY KEY,
 			session_id TEXT NOT NULL,

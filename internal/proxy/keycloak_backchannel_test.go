@@ -75,3 +75,48 @@ func TestKeycloakBackchannelLogoutRevokesSessions(t *testing.T) {
 		t.Fatal("session should be revoked after back-channel logout")
 	}
 }
+
+func TestKeycloakFrontchannelLogoutBySID(t *testing.T) {
+	const issuer = "https://kc.example.com/realms/vibe"
+	db := openTestStore(t)
+	defer db.Close()
+	ctx := context.Background()
+
+	// Two sessions for one user; only the one matching the sid should be revoked.
+	if err := db.InsertAuthSession(ctx, "sess-A", "u-fc", "ip", "ua", time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.InsertAuthSession(ctx, "sess-B", "u-fc", "ip", "ua", time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.LinkAuthSessionKeycloakSID(ctx, "sess-A", "kc-sid-123"); err != nil {
+		t.Fatal(err)
+	}
+
+	s := &Server{cfg: config.Config{Keycloak: config.KeycloakConfig{Enabled: true, ClientID: "vibe-coders", IssuerURL: issuer}}, db: db}
+
+	// Wrong issuer → rejected, nothing revoked.
+	req := httptest.NewRequest(http.MethodGet, "/auth/keycloak/frontchannel-logout?iss=https://evil&sid=kc-sid-123", nil)
+	rec := httptest.NewRecorder()
+	s.handleKeycloakFrontchannelLogout(rec, req)
+	if rec.Code == http.StatusOK {
+		t.Fatal("issuer mismatch should not return 200")
+	}
+	if active, _ := db.AuthSessionActive(ctx, "sess-A"); !active {
+		t.Fatal("session must remain active on issuer mismatch")
+	}
+
+	// Correct issuer + sid → only sess-A revoked.
+	req = httptest.NewRequest(http.MethodGet, "/auth/keycloak/frontchannel-logout?iss="+issuer+"&sid=kc-sid-123", nil)
+	rec = httptest.NewRecorder()
+	s.handleKeycloakFrontchannelLogout(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("front-channel logout = %d, want 200", rec.Code)
+	}
+	if active, _ := db.AuthSessionActive(ctx, "sess-A"); active {
+		t.Fatal("sess-A (matching sid) should be revoked")
+	}
+	if active, _ := db.AuthSessionActive(ctx, "sess-B"); !active {
+		t.Fatal("sess-B (different sid) should stay active")
+	}
+}

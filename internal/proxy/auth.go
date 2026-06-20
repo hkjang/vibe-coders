@@ -86,14 +86,21 @@ func (s *Server) bootstrapAdmin(ctx context.Context) error {
 }
 
 func (s *Server) issueTokenPair(ctx context.Context, user store.AuthUser, teamID, ip, ua string) (map[string]any, error) {
+	pair, _, err := s.issueTokenPairWithSession(ctx, user, teamID, ip, ua)
+	return pair, err
+}
+
+// issueTokenPairWithSession is issueTokenPair that also returns the internal session id, so
+// SSO callers can link the Keycloak sid to the session for targeted logout.
+func (s *Server) issueTokenPairWithSession(ctx context.Context, user store.AuthUser, teamID, ip, ua string) (map[string]any, string, error) {
 	now := time.Now().UTC()
 	sessionID := newID("sess")
 	if err := s.db.InsertAuthSession(ctx, sessionID, user.ID, ip, ua, now.Add(s.cfg.Auth.RefreshTokenTTL)); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	refresh, err := randomSecret(40)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	if err := s.db.InsertRefreshToken(ctx, store.RefreshTokenRecord{
 		ID:        newID("rt"),
@@ -103,7 +110,7 @@ func (s *Server) issueTokenPair(ctx context.Context, user store.AuthUser, teamID
 		ExpiresAt: now.Add(s.cfg.Auth.RefreshTokenTTL),
 		CreatedAt: now,
 	}); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	access, err := s.signAccessToken(accessClaims{
 		Subject:   user.ID,
@@ -117,7 +124,7 @@ func (s *Server) issueTokenPair(ctx context.Context, user store.AuthUser, teamID
 		Type:      "access",
 	})
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	return map[string]any{
 		"access_token":       access,
@@ -128,7 +135,7 @@ func (s *Server) issueTokenPair(ctx context.Context, user store.AuthUser, teamID
 		"user": map[string]any{
 			"id": user.ID, "email": user.Email, "name": user.Name, "role": user.Role, "team_id": teamID,
 		},
-	}, nil
+	}, sessionID, nil
 }
 
 func (s *Server) rotateRefreshToken(ctx context.Context, raw string, ip, ua string) (map[string]any, error) {
