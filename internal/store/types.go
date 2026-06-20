@@ -597,6 +597,14 @@ type GoldenWorkflowStep struct {
 	Name     string `json:"name"`
 	Prompt   string `json:"prompt"`
 	Expected string `json:"expected"`
+	// Optional provenance/metadata captured when a step is promoted from a multi-model test,
+	// for model-change regression (omitted from JSON when empty).
+	TaskType      string  `json:"task_type,omitempty"`
+	SelectedModel string  `json:"selected_model,omitempty"`
+	BaselineScore float64 `json:"baseline_score,omitempty"`
+	ContractID    string  `json:"contract_id,omitempty"`
+	RubricID      string  `json:"rubric_id,omitempty"`
+	SourceRunID   string  `json:"source_run_id,omitempty"`
 }
 
 // GoldenWorkflow is a named, ordered suite of golden steps run together as one

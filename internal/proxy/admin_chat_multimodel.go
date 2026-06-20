@@ -368,6 +368,11 @@ func (s *Server) handleChatTestMultiRunByID(w http.ResponseWriter, r *http.Reque
 				s.handleMultiRunDiff(w, r, id)
 				return
 			}
+		case "golden":
+			if r.Method == http.MethodPost {
+				s.handleMultiRunGolden(w, r, id)
+				return
+			}
 		}
 		writeOpenAIError(w, http.StatusNotFound, "not found", "invalid_request_error", "not_found")
 		return

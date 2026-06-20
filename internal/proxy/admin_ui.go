@@ -6259,6 +6259,7 @@ const adminHTML = `<!doctype html>
             '<input id="mm-comment-' + escapeAttr(x.model) + '" placeholder="코멘트" style="font-size:11px;flex:1">' +
             '<button type="button" class="secondary" style="font-size:11px" onclick="mmSaveFeedback(\'' + escapeAttr(x.model) + '\')">평가 저장</button>' +
             (x.status === 'success' ? '<button type="button" class="secondary" style="font-size:11px" onclick="mmPromote(\'' + escapeAttr(x.model) + '\')">라우팅 후보</button>' : '') +
+            (x.status === 'success' ? '<button type="button" class="secondary" style="font-size:11px" onclick="mmGolden(\'' + escapeAttr(x.model) + '\')">Golden 저장</button>' : '') +
             '</div>' : '') +
           '</div>').join('');
         out.innerHTML =
@@ -6302,6 +6303,23 @@ const adminHTML = `<!doctype html>
         });
         alert('라우팅 후보(draft)로 저장되었습니다. 실제 라우팅에는 검토 후 반영됩니다.');
       } catch (e) { alert('후보 저장 오류: ' + e.message); }
+    };
+
+    // 멀티 모델 결과를 Golden Workflow step으로 승격 — 모델 변경 회귀 테스트용.
+    window.mmGolden = async (model) => {
+      const runId = window.__mmRunId;
+      if (!runId) return;
+      const wfName = prompt('Golden Workflow 이름을 입력하세요 (새 워크플로 생성):', 'multimodel-regression');
+      if (wfName === null || !wfName.trim()) return;
+      const taskType = prompt('task_type (선택, 예: code_review):', '') || '';
+      // 원문이 저장되지 않았을 수 있으므로 프롬프트를 직접 받는다(선택).
+      const promptText = prompt('이 step의 프롬프트(원문 미저장 시 필수). 비우면 저장된 preview 사용:', '') || '';
+      const body = { workflow_name: wfName.trim(), selected_model: model, task_type: taskType.trim() };
+      if (promptText.trim()) body.prompt = promptText.trim();
+      try {
+        const d = await api('/admin/chat-test/multi-run/runs/' + encodeURIComponent(runId) + '/golden', { method: 'POST', body: JSON.stringify(body) });
+        alert('Golden Workflow "' + (d.workflow_name || '') + '"에 step "' + (d.step_name || '') + '" 저장됨 (총 ' + (d.step_count || 0) + ' steps, baseline ' + (d.baseline_score || 0).toFixed(1) + '점).');
+      } catch (e) { alert('Golden 저장 오류: ' + e.message); }
     };
 
     window.mmExport = async (format) => {
