@@ -62,7 +62,7 @@ var childTabs = map[string][]string{
 	"safety":      {"skills", "skill-studio", "modeldeprecations"},
 	"mcp":         {"agents", "vcs"},
 	"dwdashboard": {"clickhouse"},
-	"settings":    {"runtimesettings", "errors"},
+	"settings":    {"runtimesettings", "errors", "changesets"},
 }
 
 // featureFlags reports which optional features are enabled, for both /auth/me and menu

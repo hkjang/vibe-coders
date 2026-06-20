@@ -1015,13 +1015,15 @@ const adminHTML = `<!doctype html>
           { label: 'DW 대시보드', href: '#/dwdashboard', active: !onCH },
           { label: 'ClickHouse', href: '#/dwdashboard/clickhouse', active: onCH },
         ]);
-      } else if (tab === 'settings' || tab === 'runtimesettings' || rest[0] === 'errors' || rest[0] === 'sso') {
+      } else if (tab === 'settings' || tab === 'runtimesettings' || tab === 'changesets' || rest[0] === 'errors' || rest[0] === 'sso' || rest[0] === 'changesets') {
         const onRT = tab === 'runtimesettings' || rest[0] === 'runtime';
         const onErr = rest[0] === 'errors';
         const onSSO = rest[0] === 'sso';
+        const onCS = tab === 'changesets' || rest[0] === 'changesets';
         el.innerHTML = subNav([
-          { label: '설정', href: '#/settings', active: !onRT && !onErr && !onSSO },
+          { label: '설정', href: '#/settings', active: !onRT && !onErr && !onSSO && !onCS },
           { label: '런타임 설정', href: '#/settings/runtime', active: onRT },
+          { label: '변경 세트', href: '#/changesets', active: onCS },
           { label: 'SSO', href: '#/settings/sso', active: onSSO },
           { label: '시스템 오류', href: '#/settings/errors', active: onErr },
         ]);
@@ -1070,7 +1072,7 @@ const adminHTML = `<!doctype html>
         teams: 'users', ips: 'users', quotas: 'users',
         skills: 'safety', 'skill-studio': 'safety', modeldeprecations: 'safety',
         agents: 'mcp', vcs: 'mcp',
-        clickhouse: 'dwdashboard', runtimesettings: 'settings',
+        clickhouse: 'dwdashboard', runtimesettings: 'settings', changesets: 'settings',
         'prompt-lab': 'chat-test',
       };
       const navTab = navParent[tab] || tab;
@@ -1097,6 +1099,7 @@ const adminHTML = `<!doctype html>
           case 'prompts':       await renderPromptsView(params); break;
           case 'prompt-assets': await renderPromptAssets(params); break;
           case 'apps': await renderWorkApps(params); break;
+          case 'changesets': await renderChangeSets(params); break;
           case 'users':     rest.length ? await renderUserDetail(rest.join('/')) : await renderUsers(); break;
           case 'teams':     rest.length ? await renderTeamDetail(decodeURIComponent(rest.join('/'))) : await renderTeams(); break;
           case 'ips':       rest.length ? await renderIPDetail(decodeURIComponent(rest.join('/'))) : await renderIPs(); break;
@@ -5330,6 +5333,86 @@ const adminHTML = `<!doctype html>
         openModal('Routing Review 처리 오류', '<div class="error-line">' + escapeHTML(err.message) + '</div>');
       }
     };
+
+    // ---------- 운영 변경관리 센터: Change Set (dry-run/승인/적용/롤백) ----------
+    const csStatusBadge = (st) => {
+      const cls = st === 'applied' ? '' : (st === 'rolled_back' ? 'error' : (st === 'approved' ? '' : 'warn'));
+      return '<span class="status ' + cls + '">' + escapeHTML(st || '') + '</span>';
+    };
+    async function renderChangeSets() {
+      const view = document.getElementById('view');
+      view.innerHTML = section('변경 세트', '<div class="empty">불러오는 중...</div>');
+      let d;
+      try { d = await api('/admin/change-sets'); }
+      catch (e) { view.innerHTML = section('변경 세트', '<div class="card-body" style="padding:16px"><p class="muted">' + escapeHTML(e.message) + '</p></div>'); return; }
+      const sets = d.change_sets || [];
+      const rows = sets.length ? sets.map(cs =>
+        '<tr><td><strong>' + escapeHTML(cs.title) + '</strong>' + (cs.description ? '<div class="muted" style="font-size:11px">' + escapeHTML(cs.description) + '</div>' : '') + '</td>' +
+        '<td>' + csStatusBadge(cs.status) + '</td>' +
+        '<td>' + (cs.items || []).length + '개</td>' +
+        '<td class="muted">' + escapeHTML(cs.reviewer || '-') + '</td>' +
+        '<td>' + csActions(cs) + '</td></tr>' +
+        '<tr><td colspan="5"><div id="cs-detail-' + escapeAttr(cs.id) + '"></div></td></tr>'
+      ).join('') : '<tr><td colspan="5" class="muted">변경 세트가 없습니다.</td></tr>';
+      view.innerHTML = section('변경 세트', '<p class="muted" style="font-size:12px">설정 변경을 하나의 릴리즈로 묶어 dry-run → 승인 → 적용 → 롤백합니다. (현재 버전은 setting 항목 적용, policy/routing/skill은 참고 기록)</p>') +
+        card('변경 세트 목록', '<div class="card-body"><table><thead><tr><th>제목</th><th>상태</th><th>항목</th><th>리뷰어</th><th>액션</th></tr></thead><tbody>' + rows + '</tbody></table></div>') +
+        card('새 변경 세트',
+          '<div class="card-body">' +
+          '<input id="cs-title" placeholder="제목" style="width:100%;margin-bottom:6px">' +
+          '<input id="cs-desc" placeholder="설명" style="width:100%;margin-bottom:6px">' +
+          '<input id="cs-canary" placeholder="canary 범위(팀/키, 메모용)" style="width:100%;margin-bottom:6px">' +
+          '<textarea id="cs-items" placeholder=\'항목 JSON 배열, 예: [{"kind":"setting","key":"cache.chat_enabled","value":"true"}]\' style="width:100%;height:72px"></textarea>' +
+          '<div style="margin-top:6px"><button type="button" onclick="csCreate()">변경 세트 생성</button></div>' +
+          '<div id="cs-create-out" style="margin-top:6px"></div>' +
+          '</div>');
+    }
+    function csActions(cs) {
+      const b = (label, fn) => '<button type="button" class="secondary" style="font-size:11px" onclick="' + fn + '(\'' + escapeAttr(cs.id) + '\')">' + label + '</button> ';
+      let out = b('Dry-run', 'csDryRun');
+      if (cs.status === 'draft') out += b('제출', 'csSubmit') + b('삭제', 'csDelete');
+      if (cs.status === 'pending') out += b('승인', 'csApprove');
+      if (cs.status === 'approved') out += b('적용', 'csApply');
+      if (cs.status === 'applied') out += b('롤백', 'csRollback');
+      return out;
+    }
+    window.csCreate = async () => {
+      const out = document.getElementById('cs-create-out');
+      const title = (document.getElementById('cs-title').value || '').trim();
+      if (!title) { if (out) out.innerHTML = '<span class="status error">제목 필수</span>'; return; }
+      let items = [];
+      const raw = (document.getElementById('cs-items').value || '').trim();
+      if (raw) { try { items = JSON.parse(raw); } catch (e) { if (out) out.innerHTML = '<span class="status error">항목 JSON 파싱 오류</span>'; return; } }
+      const body = { title, description: (document.getElementById('cs-desc').value || '').trim(), canary_scope: (document.getElementById('cs-canary').value || '').trim(), items };
+      try { await api('/admin/change-sets', { method: 'POST', body: JSON.stringify(body) }); await renderChangeSets(); }
+      catch (e) { if (out) out.innerHTML = '<span class="status error">' + escapeHTML(e.message) + '</span>'; }
+    };
+    window.csDryRun = async (id) => {
+      const host = document.getElementById('cs-detail-' + id);
+      if (host) host.innerHTML = '<span class="muted">dry-run...</span>';
+      try {
+        const d = await api('/admin/change-sets/' + encodeURIComponent(id) + '/dryrun', { method: 'POST', body: '{}' });
+        const rows = (d.checks || []).map(c => '<tr><td>' + escapeHTML(c.kind) + ':' + escapeHTML(c.key || '') + '</td>' +
+          '<td class="muted">' + escapeHTML(c.current != null ? String(c.current) : '-') + '</td>' +
+          '<td>' + escapeHTML(c.proposed != null ? String(c.proposed) : '-') + '</td>' +
+          '<td>' + (c.changed ? '<span class="status warn">변경</span>' : '<span class="muted">동일</span>') + (c.valid === false ? ' <span class="status error">' + escapeHTML(c.detail || '무효') + '</span>' : '') + (c.restart_required ? ' <span class="status warn" style="font-size:9px">재시작</span>' : '') + '</td></tr>').join('');
+        if (host) host.innerHTML = '<div style="border:1px solid var(--border);border-radius:6px;padding:8px;margin:4px 0">' +
+          '<div style="font-size:12px">변경 ' + (d.changed_count || 0) + ' · 무효 ' + (d.invalid_count || 0) + (d.restart_required ? ' · <span class="status warn">재시작 필요</span>' : '') + '</div>' +
+          '<table><thead><tr><th>항목</th><th>현재</th><th>제안</th><th>상태</th></tr></thead><tbody>' + rows + '</tbody></table>' +
+          '<p class="muted" style="font-size:10px;margin-top:4px">' + escapeHTML(d.note || '') + '</p></div>';
+      } catch (e) { if (host) host.innerHTML = '<span class="status error">' + escapeHTML(e.message) + '</span>'; }
+    };
+    const csDo = async (id, action, confirmMsg) => {
+      if (confirmMsg && !confirm(confirmMsg)) return;
+      let note = '';
+      if (action === 'approve' || action === 'submit') { note = prompt('메모(선택):', '') || ''; }
+      try { await api('/admin/change-sets/' + encodeURIComponent(id) + '/' + action, { method: 'POST', body: JSON.stringify({ note }) }); await renderChangeSets(); }
+      catch (e) { alert(e.message); }
+    };
+    window.csSubmit = (id) => csDo(id, 'submit');
+    window.csApprove = (id) => csDo(id, 'approve');
+    window.csApply = (id) => csDo(id, 'apply', '이 변경 세트를 적용할까요? 설정이 즉시 반영됩니다.');
+    window.csRollback = (id) => csDo(id, 'rollback', '적용 전 값으로 롤백할까요?');
+    window.csDelete = async (id) => { if (!confirm('삭제할까요?')) return; try { await api('/admin/change-sets/' + encodeURIComponent(id), { method: 'DELETE' }); await renderChangeSets(); } catch (e) { alert(e.message); } };
 
     // ---------- AI 업무 앱: Skill/Prompt Product/Text2SQL/MCP/모델 묶음 ----------
     async function renderWorkApps() {
