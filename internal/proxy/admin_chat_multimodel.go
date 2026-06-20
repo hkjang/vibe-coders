@@ -283,9 +283,22 @@ func (s *Server) handleChatTestMultiRunByID(w http.ResponseWriter, r *http.Reque
 	id := rest
 	if idx := strings.Index(rest, "/"); idx >= 0 {
 		id = rest[:idx]
-		if rest[idx+1:] == "feedback" && r.Method == http.MethodPost {
-			s.handleMultiRunFeedback(w, r, id)
-			return
+		switch rest[idx+1:] {
+		case "feedback":
+			if r.Method == http.MethodPost {
+				s.handleMultiRunFeedback(w, r, id)
+				return
+			}
+		case "promote":
+			if r.Method == http.MethodPost {
+				s.handleMultiRunPromote(w, r, id)
+				return
+			}
+		case "export":
+			if r.Method == http.MethodGet {
+				s.handleMultiRunExport(w, r, id)
+				return
+			}
 		}
 		writeOpenAIError(w, http.StatusNotFound, "not found", "invalid_request_error", "not_found")
 		return
@@ -303,7 +316,91 @@ func (s *Server) handleChatTestMultiRunByID(w http.ResponseWriter, r *http.Reque
 		writeOpenAIError(w, http.StatusNotFound, "run not found", "invalid_request_error", "not_found")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"run": run, "results": results, "feedback": feedback})
+	promotions, _ := s.db.ListMultiModelPromotions(r.Context(), id)
+	writeJSON(w, http.StatusOK, map[string]any{"run": run, "results": results, "feedback": feedback, "promotions": promotions})
+}
+
+// handleMultiRunPromote saves a "best model" as a routing-rule DRAFT candidate (never
+// auto-applied). POST /admin/chat-test/multi-run/runs/{id}/promote {model, task_type, reason}
+func (s *Server) handleMultiRunPromote(w http.ResponseWriter, r *http.Request, runID string) {
+	var p struct {
+		Model    string `json:"model"`
+		TaskType string `json:"task_type"`
+		Reason   string `json:"reason"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+		writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "invalid_body")
+		return
+	}
+	if strings.TrimSpace(p.Model) == "" {
+		writeOpenAIError(w, http.StatusBadRequest, "model is required", "invalid_request_error", "missing_model")
+		return
+	}
+	promo := store.MultiModelTestPromotion{
+		ID: newID("mmtpromo"), RunID: runID, SelectedModel: strings.TrimSpace(p.Model),
+		TaskType: strings.TrimSpace(p.TaskType), Reason: strings.TrimSpace(p.Reason), Status: "draft", CreatedBy: s.skillActor(r),
+	}
+	if err := s.db.InsertMultiModelPromotion(r.Context(), promo); err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "multi_promote_failed")
+		return
+	}
+	s.auditAdmin(r, "chat_test.multi_promote", runID, auditJSON(map[string]any{"model": promo.SelectedModel, "task_type": promo.TaskType}))
+	writeJSON(w, http.StatusOK, map[string]any{"status": "draft_saved", "promotion": promo,
+		"note": "routing rule DRAFT candidate — not applied to routing until a human reviews it"})
+}
+
+// handleMultiRunExport renders a run as markdown, csv, or json for sharing/archival.
+// GET /admin/chat-test/multi-run/runs/{id}/export?format=md|csv|json
+func (s *Server) handleMultiRunExport(w http.ResponseWriter, r *http.Request, runID string) {
+	run, results, feedback, found, err := s.db.GetMultiModelRun(r.Context(), runID)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "multi_run_failed")
+		return
+	}
+	if !found {
+		writeOpenAIError(w, http.StatusNotFound, "run not found", "invalid_request_error", "not_found")
+		return
+	}
+	format := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("format")))
+	switch format {
+	case "csv":
+		var b strings.Builder
+		b.WriteString("model,provider,status,latency_ms,input_tokens,output_tokens,cost_krw\n")
+		for _, x := range results {
+			b.WriteString(strings.Join([]string{
+				csvField(x.Model), csvField(x.Provider), csvField(x.Status),
+				strconv.FormatInt(x.LatencyMS, 10), strconv.Itoa(x.InputTokens), strconv.Itoa(x.OutputTokens),
+				strconv.FormatFloat(x.CostKRW, 'f', 2, 64),
+			}, ",") + "\n")
+		}
+		w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+		w.Header().Set("Content-Disposition", "attachment; filename=\""+runID+".csv\"")
+		_, _ = w.Write([]byte(b.String()))
+	case "json":
+		w.Header().Set("Content-Disposition", "attachment; filename=\""+runID+".json\"")
+		writeJSON(w, http.StatusOK, map[string]any{"run": run, "results": results, "feedback": feedback})
+	default: // markdown
+		var b strings.Builder
+		b.WriteString("# 멀티 모델 비교 — " + run.Title + "\n\n")
+		b.WriteString("- run: " + run.ID + "\n- 생성: " + run.CreatedAt + " (" + run.CreatedBy + ")\n- 모델 " + strconv.Itoa(run.ModelCount) + " · 성공 " + strconv.Itoa(run.Success) + " / 실패 " + strconv.Itoa(run.Failed) + "\n\n")
+		b.WriteString("| 모델 | Provider | 상태 | 지연(ms) | 입력 | 출력 | 비용(KRW) |\n|---|---|---|---:|---:|---:|---:|\n")
+		for _, x := range results {
+			b.WriteString("| " + x.Model + " | " + x.Provider + " | " + x.Status + " | " +
+				strconv.FormatInt(x.LatencyMS, 10) + " | " + strconv.Itoa(x.InputTokens) + " | " + strconv.Itoa(x.OutputTokens) + " | " +
+				strconv.FormatFloat(x.CostKRW, 'f', 2, 64) + " |\n")
+		}
+		w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+		w.Header().Set("Content-Disposition", "attachment; filename=\""+runID+".md\"")
+		_, _ = w.Write([]byte(b.String()))
+	}
+}
+
+// csvField escapes a CSV field (quote if it contains comma/quote/newline).
+func csvField(s string) string {
+	if strings.ContainsAny(s, ",\"\n") {
+		return "\"" + strings.ReplaceAll(s, "\"", "\"\"") + "\""
+	}
+	return s
 }
 
 // handleMultiRunFeedback records a human rating/comment for one model in a run.

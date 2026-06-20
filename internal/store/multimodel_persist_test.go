@@ -51,3 +51,19 @@ func TestMultiModelRunPersistence(t *testing.T) {
 		t.Fatal("missing run should not be found")
 	}
 }
+
+func TestMultiModelPromotion(t *testing.T) {
+	db := openAggTestStore(t)
+	defer db.Close()
+	ctx := context.Background()
+	if err := db.InsertMultiModelPromotion(ctx, MultiModelTestPromotion{ID: "p1", RunID: "mmt1", SelectedModel: "claude-sonnet", TaskType: "code_review", Reason: "best"}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := db.ListMultiModelPromotions(ctx, "mmt1")
+	if err != nil || len(got) != 1 || got[0].SelectedModel != "claude-sonnet" || got[0].Status != "draft" {
+		t.Fatalf("promotions = %+v err=%v (want draft claude-sonnet)", got, err)
+	}
+	if other, _ := db.ListMultiModelPromotions(ctx, "nope"); len(other) != 0 {
+		t.Fatalf("unrelated run should have no promotions, got %d", len(other))
+	}
+}

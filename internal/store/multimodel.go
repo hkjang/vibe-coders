@@ -152,6 +152,53 @@ func (s *SQLStore) GetMultiModelRun(ctx context.Context, id string) (MultiModelT
 	return run, results, feedback, true, nil
 }
 
+// MultiModelTestPromotion is a "best model" promoted from a comparison run to a routing-rule
+// DRAFT candidate (status stays "draft" — never auto-applied).
+type MultiModelTestPromotion struct {
+	ID            string `json:"id"`
+	RunID         string `json:"run_id"`
+	SelectedModel string `json:"selected_model"`
+	TaskType      string `json:"task_type"`
+	Reason        string `json:"reason"`
+	Status        string `json:"status"`
+	CreatedBy     string `json:"created_by"`
+	CreatedAt     string `json:"created_at"`
+}
+
+// InsertMultiModelPromotion records a routing-rule draft candidate from a comparison run.
+func (s *SQLStore) InsertMultiModelPromotion(ctx context.Context, p MultiModelTestPromotion) error {
+	if p.CreatedAt == "" {
+		p.CreatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	}
+	if p.Status == "" {
+		p.Status = "draft"
+	}
+	_, err := s.db.ExecContext(ctx, s.bind(`INSERT INTO multi_model_test_promotions
+		(id, run_id, selected_model, task_type, reason, status, created_by, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`),
+		p.ID, p.RunID, p.SelectedModel, p.TaskType, p.Reason, p.Status, p.CreatedBy, p.CreatedAt)
+	return err
+}
+
+// ListMultiModelPromotions returns the draft routing candidates for a run.
+func (s *SQLStore) ListMultiModelPromotions(ctx context.Context, runID string) ([]MultiModelTestPromotion, error) {
+	rows, err := s.db.QueryContext(ctx, s.bind(`SELECT id, run_id, selected_model, task_type, reason, status, created_by, created_at
+		FROM multi_model_test_promotions WHERE run_id = ? ORDER BY created_at DESC`), runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []MultiModelTestPromotion{}
+	for rows.Next() {
+		var p MultiModelTestPromotion
+		if err := rows.Scan(&p.ID, &p.RunID, &p.SelectedModel, &p.TaskType, &p.Reason, &p.Status, &p.CreatedBy, &p.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
 // InsertMultiModelFeedback records a human rating/comment for a model in a run.
 func (s *SQLStore) InsertMultiModelFeedback(ctx context.Context, f MultiModelTestFeedback) error {
 	if f.CreatedAt == "" {

@@ -1325,6 +1325,19 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 			created_at TEXT NOT NULL
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_mmt_feedback_run ON multi_model_test_feedback(run_id)`,
+		// Multi-model comparison: a "best model" promoted to a routing-rule DRAFT candidate
+		// (never auto-applied — a human reviews before it influences routing).
+		`CREATE TABLE IF NOT EXISTS multi_model_test_promotions (
+			id TEXT PRIMARY KEY,
+			run_id TEXT NOT NULL,
+			selected_model TEXT NOT NULL,
+			task_type TEXT NOT NULL DEFAULT '',
+			reason TEXT NOT NULL DEFAULT '',
+			status TEXT NOT NULL DEFAULT 'draft',
+			created_by TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_mmt_promotions_run ON multi_model_test_promotions(run_id)`,
 	}
 
 	for _, statement := range statements {

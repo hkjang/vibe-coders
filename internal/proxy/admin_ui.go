@@ -5966,12 +5966,16 @@ const adminHTML = `<!doctype html>
           (runId ? '<div style="display:flex;gap:6px;margin-top:6px;align-items:center">' +
             '<select id="mm-rate-' + escapeAttr(x.model) + '" style="font-size:11px"><option value="">평가</option>' + [5,4,3,2,1].map(n => '<option value="' + n + '">' + n + '점</option>').join('') + '</select>' +
             '<input id="mm-comment-' + escapeAttr(x.model) + '" placeholder="코멘트" style="font-size:11px;flex:1">' +
-            '<button type="button" class="secondary" style="font-size:11px" onclick="mmSaveFeedback(\'' + escapeAttr(x.model) + '\')">평가 저장</button></div>' : '') +
+            '<button type="button" class="secondary" style="font-size:11px" onclick="mmSaveFeedback(\'' + escapeAttr(x.model) + '\')">평가 저장</button>' +
+            (x.status === 'success' ? '<button type="button" class="secondary" style="font-size:11px" onclick="mmPromote(\'' + escapeAttr(x.model) + '\')">라우팅 후보</button>' : '') +
+            '</div>' : '') +
           '</div>').join('');
         out.innerHTML =
           '<div style="margin-bottom:6px">' + badge(sum.best_latency_model, '최저 지연') + badge(sum.lowest_cost_success_model, '최저 비용') +
           '<span class="muted" style="font-size:12px">성공 ' + (sum.success||0) + ' / 실패 ' + (sum.failed||0) + (runId ? ' · run ' + escapeHTML(runId) : '') + '</span> ' +
-          '<button type="button" class="secondary" style="font-size:11px" onclick="mmLoadHistory()">이력</button></div>' +
+          '<button type="button" class="secondary" style="font-size:11px" onclick="mmLoadHistory()">이력</button> ' +
+          (runId ? '<button type="button" class="secondary" style="font-size:11px" onclick="mmExport(\'md\')">MD</button> <button type="button" class="secondary" style="font-size:11px" onclick="mmExport(\'csv\')">CSV</button> <button type="button" class="secondary" style="font-size:11px" onclick="mmExport(\'json\')">JSON</button>' : '') +
+          '</div>' +
           table + cards + '<div id="mm-history"></div>';
       } catch (e) {
         out.innerHTML = '<span class="status error">' + escapeHTML(e.message) + '</span>';
@@ -5992,6 +5996,34 @@ const adminHTML = `<!doctype html>
         const sel = document.getElementById('mm-rate-' + model);
         if (sel) sel.insertAdjacentHTML('afterend', '<span class="status" style="font-size:11px">저장됨</span>');
       } catch (e) { alert('평가 저장 오류: ' + e.message); }
+    };
+
+    window.mmPromote = async (model) => {
+      const runId = window.__mmRunId;
+      if (!runId) return;
+      const taskType = prompt('이 모델을 어떤 작업 유형(task_type)의 라우팅 후보로 저장할까요? (예: code_review)', '');
+      if (taskType === null) return;
+      try {
+        await api('/admin/chat-test/multi-run/runs/' + encodeURIComponent(runId) + '/promote', {
+          method: 'POST', body: JSON.stringify({ model, task_type: taskType.trim(), reason: '멀티 비교에서 우수 모델로 선택' }),
+        });
+        alert('라우팅 후보(draft)로 저장되었습니다. 실제 라우팅에는 검토 후 반영됩니다.');
+      } catch (e) { alert('후보 저장 오류: ' + e.message); }
+    };
+
+    window.mmExport = async (format) => {
+      const runId = window.__mmRunId;
+      if (!runId) return;
+      try {
+        const res = await fetch('/admin/chat-test/multi-run/runs/' + encodeURIComponent(runId) + '/export?format=' + format, { headers: headers() });
+        if (!res.ok) { alert('내보내기 실패 (' + res.status + ')'); return; }
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = runId + '.' + format;
+        document.body.appendChild(a); a.click(); a.remove();
+        URL.revokeObjectURL(url);
+      } catch (e) { alert('내보내기 오류: ' + e.message); }
     };
 
     window.mmLoadHistory = async () => {
