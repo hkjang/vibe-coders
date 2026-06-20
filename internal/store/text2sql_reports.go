@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"time"
 )
 
@@ -21,6 +22,12 @@ type Text2SQLSavedReport struct {
 	ScheduleEnabled   bool   `json:"schedule_enabled"`
 	DeliverMattermost bool   `json:"deliver_mattermost"`
 	LastRunAt         string `json:"last_run_at"`
+	// Team sharing / approval workflow.
+	Team           string `json:"team"`
+	Visibility     string `json:"visibility"`      // private | team
+	ApprovalStatus string `json:"approval_status"` // none | pending | approved | rejected
+	ApprovedBy     string `json:"approved_by"`
+	ApprovedAt     string `json:"approved_at"`
 }
 
 // UpsertText2SQLSavedReport stores (or replaces) a saved report.
@@ -43,16 +50,72 @@ func (s *SQLStore) UpsertText2SQLSavedReport(ctx context.Context, r Text2SQLSave
 
 const savedReportColumns = `id, name, COALESCE(question,''), COALESCE(sql,''), COALESCE(schema_name,''),
 	COALESCE(kind,'report'), COALESCE(created_by,''), created_at,
-	COALESCE(schedule_interval,''), COALESCE(schedule_enabled,0), COALESCE(deliver_mattermost,0), COALESCE(last_run_at,'')`
+	COALESCE(schedule_interval,''), COALESCE(schedule_enabled,0), COALESCE(deliver_mattermost,0), COALESCE(last_run_at,''),
+	COALESCE(team,''), COALESCE(visibility,'private'), COALESCE(approval_status,'none'), COALESCE(approved_by,''), COALESCE(approved_at,'')`
 
 func scanSavedReport(rows interface{ Scan(...any) error }) (Text2SQLSavedReport, error) {
 	var r Text2SQLSavedReport
 	var schedEnabled, deliverMM int
 	err := rows.Scan(&r.ID, &r.Name, &r.Question, &r.SQL, &r.SchemaName, &r.Kind, &r.CreatedBy, &r.CreatedAt,
-		&r.ScheduleInterval, &schedEnabled, &deliverMM, &r.LastRunAt)
+		&r.ScheduleInterval, &schedEnabled, &deliverMM, &r.LastRunAt,
+		&r.Team, &r.Visibility, &r.ApprovalStatus, &r.ApprovedBy, &r.ApprovedAt)
 	r.ScheduleEnabled = schedEnabled == 1
 	r.DeliverMattermost = deliverMM == 1
 	return r, err
+}
+
+// GetText2SQLSavedReport returns one saved report by id.
+func (s *SQLStore) GetText2SQLSavedReport(ctx context.Context, id string) (Text2SQLSavedReport, bool, error) {
+	row := s.db.QueryRowContext(ctx, s.bind(`SELECT `+savedReportColumns+` FROM text2sql_saved_reports WHERE id = ?`), id)
+	r, err := scanSavedReport(row)
+	if err == sql.ErrNoRows {
+		return Text2SQLSavedReport{}, false, nil
+	}
+	if err != nil {
+		return Text2SQLSavedReport{}, false, err
+	}
+	return r, true, nil
+}
+
+// SubmitReportForTeam marks a saved report as pending team approval, tagging the owning team.
+func (s *SQLStore) SubmitReportForTeam(ctx context.Context, id, team string) error {
+	_, err := s.db.ExecContext(ctx, s.bind(`UPDATE text2sql_saved_reports
+		SET team = ?, approval_status = 'pending', visibility = 'private' WHERE id = ?`), team, id)
+	return err
+}
+
+// DecideTeamReport approves (→ visibility=team) or rejects (→ private) a pending report.
+func (s *SQLStore) DecideTeamReport(ctx context.Context, id string, approve bool, by string) error {
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	if approve {
+		_, err := s.db.ExecContext(ctx, s.bind(`UPDATE text2sql_saved_reports
+			SET approval_status = 'approved', visibility = 'team', approved_by = ?, approved_at = ? WHERE id = ?`), by, now, id)
+		return err
+	}
+	_, err := s.db.ExecContext(ctx, s.bind(`UPDATE text2sql_saved_reports
+		SET approval_status = 'rejected', visibility = 'private', approved_by = ?, approved_at = ? WHERE id = ?`), by, now, id)
+	return err
+}
+
+// ListTeamReports returns a team's shared (approved) and pending reports, newest first.
+func (s *SQLStore) ListTeamReports(ctx context.Context, team string) ([]Text2SQLSavedReport, error) {
+	rows, err := s.db.QueryContext(ctx, s.bind(`SELECT `+savedReportColumns+`
+		FROM text2sql_saved_reports
+		WHERE team = ? AND approval_status IN ('pending','approved')
+		ORDER BY CASE approval_status WHEN 'pending' THEN 0 ELSE 1 END, created_at DESC`), team)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Text2SQLSavedReport{}
+	for rows.Next() {
+		r, err := scanSavedReport(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
 }
 
 // ListText2SQLSavedReports returns saved reports, newest first.

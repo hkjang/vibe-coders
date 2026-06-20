@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"encoding/json"
 	"net/http"
 	"strings"
 	"time"
@@ -300,6 +301,106 @@ func (s *Server) handleTeamSavingsChallenge(w http.ResponseWriter, r *http.Reque
 		"days_elapsed":        daysElapsed,
 		"days_in_month":       daysInMonth,
 	})
+}
+
+// handleSubmitReportToTeam lets a saved-report owner submit it for team sharing (→ pending
+// approval, tagged with the owner's team). POST /me/reports/submit-to-team {report_id}
+func (s *Server) handleSubmitReportToTeam(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
+	userID, ok := s.meUserID(r)
+	if !ok {
+		writeOpenAIError(w, http.StatusUnauthorized, "could not identify caller", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	var p struct {
+		ReportID string `json:"report_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+		writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "invalid_body")
+		return
+	}
+	rep, found, err := s.db.GetText2SQLSavedReport(r.Context(), strings.TrimSpace(p.ReportID))
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "report_lookup_failed")
+		return
+	}
+	if !found {
+		writeOpenAIError(w, http.StatusNotFound, "report not found", "invalid_request_error", "not_found")
+		return
+	}
+	// Only the owner may submit their own report (created_by must match the caller).
+	if strings.TrimSpace(rep.CreatedBy) != "" && rep.CreatedBy != userID {
+		writeOpenAIError(w, http.StatusForbidden, "only the report owner may submit it", "invalid_request_error", "forbidden")
+		return
+	}
+	team := ""
+	if claims, ok := s.currentAccessClaims(r); ok {
+		team = claims.TeamID
+	}
+	if team == "" {
+		writeOpenAIError(w, http.StatusBadRequest, "no team associated with the caller", "invalid_request_error", "no_team")
+		return
+	}
+	if err := s.db.SubmitReportForTeam(r.Context(), rep.ID, team); err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "report_submit_failed")
+		return
+	}
+	s.notifyMattermost(r.Context(), "approval", "팀 리포트 공유 요청: '"+rep.Name+"' (team "+team+", 제출자 "+userID+")")
+	writeJSON(w, http.StatusOK, map[string]any{"report_id": rep.ID, "team": team, "approval_status": "pending"})
+}
+
+// handleTeamReports lists a team's shared + pending reports (GET) and decides a pending one
+// (POST {report_id, action: approve|reject}). team:read gated.
+// GET|POST /team/reports
+func (s *Server) handleTeamReports(w http.ResponseWriter, r *http.Request) {
+	teamID, _, ok := s.resolveTeamScope(w, r)
+	if !ok {
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		reports, err := s.db.ListTeamReports(r.Context(), teamID)
+		if err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "team_reports_failed")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"team_id": teamID, "reports": reports})
+	case http.MethodPost:
+		var p struct {
+			ReportID string `json:"report_id"`
+			Action   string `json:"action"` // approve | reject
+		}
+		if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+			writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "invalid_body")
+			return
+		}
+		rep, found, err := s.db.GetText2SQLSavedReport(r.Context(), strings.TrimSpace(p.ReportID))
+		if err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "report_lookup_failed")
+			return
+		}
+		// Can only decide a report submitted to the caller's own team.
+		if !found || rep.Team != teamID {
+			writeOpenAIError(w, http.StatusNotFound, "report not found for this team", "invalid_request_error", "not_found")
+			return
+		}
+		approve := strings.EqualFold(strings.TrimSpace(p.Action), "approve")
+		if err := s.db.DecideTeamReport(r.Context(), rep.ID, approve, s.skillActor(r)); err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "report_decision_failed")
+			return
+		}
+		status := "rejected"
+		if approve {
+			status = "approved"
+		}
+		s.auditAdmin(r, "team_report."+status, rep.ID, auditJSON(map[string]any{"team": teamID}))
+		writeJSON(w, http.StatusOK, map[string]any{"report_id": rep.ID, "approval_status": status})
+	default:
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+	}
 }
 
 func uniqueNonEmpty(values ...string) []string {

@@ -7896,7 +7896,32 @@ const adminHTML = `<!doctype html>
           : '<p class="muted">최근 실패가 없습니다. 👍</p>') + '</div>');
 
       view.innerHTML = section('팀 대시보드 — ' + escapeHTML(resp.team_id || ''), kpis) + usersCard + modelsCard + failCard +
-        '<div id="team-challenge"></div><div id="team-risk"></div><div id="team-skills"></div><div id="team-templates"></div><div id="team-onboarding"></div>';
+        '<div id="team-challenge"></div><div id="team-reports"></div><div id="team-risk"></div><div id="team-skills"></div><div id="team-templates"></div><div id="team-onboarding"></div>';
+
+      // 팀 공용 리포트 (승인됨 + 승인 대기, team:read는 승인/반려 가능).
+      window.teamReportDecide = async (id, action) => {
+        try {
+          await api('/team/reports', { method: 'POST', body: JSON.stringify({ report_id: id, action }) });
+          renderTeamHome();
+        } catch (e) { alert('처리 오류: ' + e.message); }
+      };
+      api('/team/reports').then(rp => {
+        const host = document.getElementById('team-reports');
+        if (!host || !rp) return;
+        const reports = rp.reports || [];
+        host.innerHTML = card('팀 공용 리포트',
+          '<div class="card-body">' + (reports.length
+            ? '<table><thead><tr><th>이름</th><th>상태</th><th>스키마</th><th>작성자</th><th>승인</th></tr></thead><tbody>' +
+              reports.map(r => {
+                const pending = r.approval_status === 'pending';
+                const badge = pending ? '<span class="status warn">승인 대기</span>' : '<span class="status">팀 공용</span>';
+                const actions = pending
+                  ? '<button type="button" style="font-size:11px" onclick="teamReportDecide(\'' + escapeAttr(r.id) + '\',\'approve\')">승인</button> <button type="button" class="danger" style="font-size:11px" onclick="teamReportDecide(\'' + escapeAttr(r.id) + '\',\'reject\')">반려</button>'
+                  : (r.approved_by ? '<span class="muted" style="font-size:11px">' + escapeHTML(r.approved_by) + ' · ' + ago(r.approved_at) + '</span>' : '');
+                return '<tr><td>' + escapeHTML(r.name) + '</td><td>' + badge + '</td><td>' + escapeHTML(r.schema_name || '') + '</td><td class="muted">' + escapeHTML(r.created_by || '') + '</td><td>' + actions + '</td></tr>';
+              }).join('') + '</tbody></table>'
+            : '<p class="muted">팀 공용 리포트가 없습니다. 개인 저장 리포트를 <code>POST /me/reports/submit-to-team</code>으로 제출하면 승인 후 공유됩니다.</p>') + '</div>');
+      }).catch(() => {});
 
       // 팀 비용 절감 챌린지 (월 추세 + 예상 절감).
       api('/team/savings-challenge').then(ch => {

@@ -738,6 +738,13 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 		`ALTER TABLE text2sql_saved_reports ADD COLUMN schedule_enabled INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE text2sql_saved_reports ADD COLUMN deliver_mattermost INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE text2sql_saved_reports ADD COLUMN last_run_at TEXT`,
+		// Team report approval: promote a personal saved report to a team-shared one via a
+		// lightweight approval workflow (private → pending → team).
+		`ALTER TABLE text2sql_saved_reports ADD COLUMN team TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE text2sql_saved_reports ADD COLUMN visibility TEXT NOT NULL DEFAULT 'private'`,
+		`ALTER TABLE text2sql_saved_reports ADD COLUMN approval_status TEXT NOT NULL DEFAULT 'none'`,
+		`ALTER TABLE text2sql_saved_reports ADD COLUMN approved_by TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE text2sql_saved_reports ADD COLUMN approved_at TEXT NOT NULL DEFAULT ''`,
 		`CREATE TABLE IF NOT EXISTS chat_semantic_cache (
 				id TEXT PRIMARY KEY,
 				model TEXT NOT NULL,
