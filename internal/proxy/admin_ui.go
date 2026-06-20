@@ -8086,7 +8086,8 @@ const adminHTML = `<!doctype html>
           '<div class="card-body">' + acts.map(c =>
             '<div style="display:flex;align-items:center;gap:10px;justify-content:space-between;border:1px solid var(--border);border-radius:6px;padding:8px 10px;margin-bottom:6px">' +
             '<span><span class="status ' + sev(c.severity) + '" style="font-size:11px">' + escapeHTML(c.severity) + '</span> ' + escapeHTML(c.message) + '</span>' +
-            '<a href="' + escapeAttr(c.button_href || '#/me') + '"><button type="button" style="font-size:11px">' + escapeHTML(c.button_label) + '</button></a>' +
+            '<span style="display:flex;gap:6px"><a href="' + escapeAttr(c.button_href || '#/me') + '"><button type="button" style="font-size:11px">' + escapeHTML(c.button_label) + '</button></a>' +
+            '<button type="button" class="secondary" style="font-size:11px" onclick="meSnoozeAction(\'' + escapeAttr(c.type) + '\')">나중에</button></span>' +
             '</div>').join('') + '</div>');
       }).catch(() => {});
 
@@ -8133,6 +8134,13 @@ const adminHTML = `<!doctype html>
             kpi('예상 절감', won(rp.potential_savings_krw)) +
           '</div><p style="margin:8px 0;font-size:12px"><a href="#/me" onclick="meLoadReport(\'' + (win==='monthly'?'weekly':'monthly') + '\');return false" class="muted">' + (win==='monthly'?'주간':'월간') + ' 보기</a></p></div>');
       } catch (e) { /* ignore */ }
+    };
+
+    window.meSnoozeAction = async (type) => {
+      try {
+        await api('/me/actions/snooze', { method: 'POST', body: JSON.stringify({ type, days: 7 }) });
+        renderMeHome();
+      } catch (e) { alert('보류 오류: ' + e.message); }
     };
 
     window.meLoadRecommendations = async () => {

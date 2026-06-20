@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"encoding/json"
 	"net/http"
 	"sort"
 	"strings"
@@ -36,6 +37,7 @@ func (s *Server) handleMeActions(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	now := time.Now().UTC()
 	monthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
+	snoozed, _ := s.db.SnoozedActions(ctx, userID, now)
 	actions := []actionCard{}
 
 	// Key expiry (≤7 days) / expired.
@@ -110,10 +112,57 @@ func (s *Server) handleMeActions(w http.ResponseWriter, r *http.Request) {
 			Message: "확인하지 않은 개인화 추천이 있습니다.", ButtonLabel: "추천 보기", ButtonHref: "#/me"})
 	}
 
+	// Drop snoozed action types.
+	if len(snoozed) > 0 {
+		kept := actions[:0]
+		for _, a := range actions {
+			if !snoozed[a.Type] {
+				kept = append(kept, a)
+			}
+		}
+		actions = kept
+	}
 	// Highest severity first.
 	rank := map[string]int{"high": 0, "medium": 1, "low": 2}
 	sort.SliceStable(actions, func(i, j int) bool { return rank[actions[i].Severity] < rank[actions[j].Severity] })
 	writeJSON(w, http.StatusOK, map[string]any{"user_id": userID, "actions": actions, "count": len(actions)})
+}
+
+// handleMeActionSnooze defers an action-queue card type for the caller (default 7 days), so
+// a handled action stops re-appearing. POST /me/actions/snooze {type, days}
+func (s *Server) handleMeActionSnooze(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
+	userID, ok := s.meUserID(r)
+	if !ok {
+		writeOpenAIError(w, http.StatusUnauthorized, "could not identify caller", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	var p struct {
+		Type string `json:"type"`
+		Days int    `json:"days"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+		writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "invalid_body")
+		return
+	}
+	actionType := strings.TrimSpace(p.Type)
+	if actionType == "" {
+		writeOpenAIError(w, http.StatusBadRequest, "type is required", "invalid_request_error", "missing_type")
+		return
+	}
+	days := p.Days
+	if days <= 0 || days > 90 {
+		days = 7
+	}
+	until := time.Now().UTC().Add(time.Duration(days) * 24 * time.Hour)
+	if err := s.db.SnoozeAction(r.Context(), userID, actionType, until); err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "snooze_failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"type": actionType, "snoozed_until": until.Format(time.RFC3339)})
 }
 
 // meNotification is one entry in the unified personal notification center.

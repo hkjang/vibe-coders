@@ -1275,6 +1275,15 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 			created_at TEXT NOT NULL,
 			updated_at TEXT NOT NULL
 		)`,
+		// Personal action-queue snoozes: a user can defer an action card type for a while
+		// (one row per user+type; re-snoozing overwrites).
+		`CREATE TABLE IF NOT EXISTS me_action_snoozes (
+			user_id TEXT NOT NULL,
+			action_type TEXT NOT NULL,
+			snoozed_until TEXT NOT NULL,
+			created_at TEXT NOT NULL,
+			PRIMARY KEY (user_id, action_type)
+		)`,
 	}
 
 	for _, statement := range statements {
