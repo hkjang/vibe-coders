@@ -43,6 +43,7 @@ var roleScopes = map[string][]string{
 	"ops_admin":      {"admin:read", "observability:read", "costs:read", "models:read"},
 	"ai_admin":       {"admin:read", "models:read", "routing:read", "observability:read"},
 	"security_admin": {"admin:read", "security:read"},
+	"billing_admin":  {"admin:read", "costs:read", "observability:read", "models:read"},
 	"readonly_admin": {"admin:read", "observability:read", "costs:read", "security:read"},
 }
 
@@ -255,7 +256,7 @@ func roleRank(role string) int {
 		return 4
 	case "team_admin":
 		return 3
-	case "ops_admin", "ai_admin", "security_admin":
+	case "ops_admin", "ai_admin", "security_admin", "billing_admin":
 		return 3
 	case "team_manager":
 		return 2

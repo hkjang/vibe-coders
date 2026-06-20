@@ -210,6 +210,36 @@ func TestTeamManagerNavigation(t *testing.T) {
 	}
 }
 
+func TestRoleHomeOverrides(t *testing.T) {
+	features := map[string]bool{"self_service_keys": false, "personal_home": true}
+	cases := []struct {
+		role string
+		home string
+		tab  string
+	}{
+		{"security_admin", "#/security", "security"},
+		{"billing_admin", "#/billing", "billing"},
+		{"team_manager", "#/team", "team"},
+		{"readonly_admin", "#/dashboard", "dashboard"}, // operator, no override
+		{"admin", "#/dashboard", "dashboard"},
+		{"developer", "#/me", "me"},
+	}
+	for _, c := range cases {
+		scopes := roleScopes[c.role]
+		if got := resolveHome(c.role, scopes); got != c.home {
+			t.Errorf("resolveHome(%s) = %q, want %q", c.role, got, c.home)
+		}
+		if !tabSet(scopes, features)[c.tab] {
+			t.Errorf("%s should see tab %q", c.role, c.tab)
+		}
+	}
+	// billing_admin must NOT see the security tab (no security:read); security_admin must
+	// NOT land on the plain dashboard despite holding admin:read.
+	if tabSet(roleScopes["billing_admin"], features)["security"] {
+		t.Error("billing_admin should not see security tab")
+	}
+}
+
 func TestRedactPromptDetails(t *testing.T) {
 	prompts := []store.PromptDetail{
 		{Role: "user", ContentText: "secret original text", RedactedText: "[redacted]"},

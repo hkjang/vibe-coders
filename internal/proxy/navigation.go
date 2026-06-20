@@ -44,7 +44,10 @@ var menuRegistry = []menuItem{
 	{ID: "ops.dwdashboard", Label: "DW 대시보드", Path: "#/dwdashboard", Tab: "dwdashboard", Group: "ops", Scopes: []string{"admin:read"}, DataScope: "all"},
 	{ID: "ops.personalization", Label: "개인화", Path: "#/personalization", Tab: "personalization", Group: "ops", Scopes: []string{"admin:read"}, DataScope: "all"},
 	// 보안 영역.
+	{ID: "sec.dashboard", Label: "보안 대시보드", Path: "#/security", Tab: "security", Group: "security", Scopes: []string{"security:read"}, DataScope: "all"},
 	{ID: "sec.safety", Label: "안전", Path: "#/safety", Tab: "safety", Group: "security", Scopes: []string{"security:read"}, DataScope: "all"},
+	// 비용 영역.
+	{ID: "bill.dashboard", Label: "비용 대시보드", Path: "#/billing", Tab: "billing", Group: "billing", Scopes: []string{"admin:read"}, DataScope: "all"},
 	// 설정 영역.
 	{ID: "set.settings", Label: "설정", Path: "#/settings", Tab: "settings", Group: "settings", Scopes: []string{"admin:read"}, DataScope: "all"},
 }
@@ -138,9 +141,18 @@ func allowedTabs(scopes []string, features map[string]bool) []string {
 	return tabs
 }
 
-// resolveDefaultHome picks the landing route for a caller: operators (admin:read) land on
-// the operational dashboard; team managers (team:read without admin:read) land on their
-// team dashboard; everyone else lands on their personalized home.
+// roleHomeOverride pins specific built-in roles to a role-tailored landing that scope
+// alone can't distinguish (e.g. security_admin and readonly_admin both hold admin:read +
+// security:read, but the former lands on the security dashboard).
+var roleHomeOverride = map[string]string{
+	"security_admin": "#/security",
+	"billing_admin":  "#/billing",
+	"team_manager":   "#/team",
+}
+
+// resolveDefaultHome picks the landing route from scopes alone: operators (admin:read) →
+// operational dashboard; team managers (team:read, no admin:read) → team dashboard; else
+// the personalized home.
 func resolveDefaultHome(scopes []string) string {
 	if hasScope(scopes, "admin:read") {
 		return "#/dashboard"
@@ -151,13 +163,21 @@ func resolveDefaultHome(scopes []string) string {
 	return "#/me"
 }
 
+// resolveHome is the role-aware landing: a per-role override wins, otherwise scope-based.
+func resolveHome(role string, scopes []string) string {
+	if h := roleHomeOverride[strings.TrimSpace(role)]; h != "" {
+		return h
+	}
+	return resolveDefaultHome(scopes)
+}
+
 // navigationFor builds the full navigation payload for a caller's scopes/features.
 func (s *Server) navigationFor(scopes []string, role string) map[string]any {
 	features := s.featureFlags()
 	return map[string]any{
 		"menus":        accessibleMenus(scopes, features),
 		"allowed_tabs": allowedTabs(scopes, features),
-		"default_home": resolveDefaultHome(scopes),
+		"default_home": resolveHome(role, scopes),
 		"role":         role,
 		"scopes":       scopes,
 		"features":     features,

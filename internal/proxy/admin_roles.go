@@ -57,7 +57,8 @@ var roleDescriptions = map[string]string{
 	"service_account": "서비스 계정 — 채팅/임베딩/MCP",
 	"ops_admin":       "운영 설정 관리자 — 관측/비용 + 일부 설정 쓰기",
 	"ai_admin":        "AI 설정 관리자 — 모델/라우팅 + 일부 설정 쓰기",
-	"security_admin":  "보안 관리자 — 안전/보안 surface",
+	"security_admin":  "보안 관리자 — 보안 대시보드(정책위반·Secret·위험MCP·승인대기)",
+	"billing_admin":   "비용 관리자 — 비용 대시보드(비용센터·예산소진·모델전환)",
 	"readonly_admin":  "읽기전용 관리자 — 운영 조회, 변경 불가",
 }
 
@@ -102,7 +103,7 @@ func roleCatalog() []roleInfo {
 		out = append(out, roleInfo{
 			Role:        role,
 			Scopes:      s,
-			DefaultHome: resolveDefaultHome(s),
+			DefaultHome: resolveHome(role, s),
 			IsAdmin:     hasScope(s, "admin:read"),
 			IsSystem:    true,
 			Rank:        roleRank(role),
@@ -260,7 +261,7 @@ func (s *Server) handlePermissionsEffective(w http.ResponseWriter, r *http.Reque
 		"role":         role,
 		"scopes":       scopes,
 		"features":     features,
-		"default_home": resolveDefaultHome(scopes),
+		"default_home": resolveHome(role, scopes),
 		"is_admin":     hasScope(scopes, "admin:read"),
 		"menu_version": menuVersion,
 		"menus":        menus,

@@ -312,6 +312,8 @@ const adminHTML = `<!doctype html>
     <nav id="tabs">
       <a href="#/me" data-tab="me">내 홈</a>
       <a href="#/team" data-tab="team">팀 대시보드</a>
+      <a href="#/security" data-tab="security">보안 대시보드</a>
+      <a href="#/billing" data-tab="billing">비용 대시보드</a>
       <a href="#/dashboard" data-tab="dashboard" class="active">대시보드</a>
       <a href="#/mcp" data-tab="mcp">MCP</a>
       <a href="#/routing" data-tab="routing">라우팅</a>
@@ -351,6 +353,7 @@ const adminHTML = `<!doctype html>
           <a href="/openapi.json" target="_blank" rel="noopener">openapi.json 내려받기</a>
         </div>
       </div>
+      <span id="ro-indicator" class="status warn" style="display:none" title="쓰기 권한이 없습니다 — 저장/삭제/변경은 서버에서 차단됩니다">읽기 전용</span>
       <input id="token" type="password" autocomplete="off" placeholder="관리자 토큰">
     </div>
   </header>
@@ -557,6 +560,14 @@ const adminHTML = `<!doctype html>
         const tab = a.getAttribute('data-tab');
         a.style.display = (!allowed || allowed.has(tab)) ? '' : 'none';
       });
+      // Read-only indicator: an operator (admin:read) without admin:write. Server enforces
+      // the block; this is the visible signal so write actions are clearly unavailable.
+      const ro = document.getElementById('ro-indicator');
+      if (ro) {
+        const scopes = (nav && Array.isArray(nav.scopes)) ? nav.scopes : null;
+        const readonly = !!scopes && scopes.indexOf('admin:read') >= 0 && scopes.indexOf('admin:write') < 0;
+        ro.style.display = readonly ? '' : 'none';
+      }
     }
 
     // bootAfterAuth wires navigation + default-home routing once the session is known.
@@ -1024,6 +1035,8 @@ const adminHTML = `<!doctype html>
         switch (tab) {
           case 'me':        await renderMeHome(); break;
           case 'team':      await renderTeamHome(); break;
+          case 'security':  await renderSecurityHome(); break;
+          case 'billing':   await renderBillingHome(); break;
           case 'dashboard': await renderDashboard(); break;
           case 'xview':     await renderXView(params); break;
           case 'waterfall': await renderWaterfall(params); break;
@@ -7749,6 +7762,94 @@ const adminHTML = `<!doctype html>
           '<p class="muted" style="margin-top:12px">접근이 필요하면 관리자에게 역할 변경을 요청하세요. ' +
           '<a href="#/me">내 홈으로 이동</a></p>' +
         '</div>');
+    }
+
+    // renderSecurityHome is the security_admin landing: policy violations, Secret Firewall,
+    // risky MCP tools, and pending approvals — no cost detail, no prompt originals.
+    async function renderSecurityHome() {
+      const view = document.getElementById('view');
+      view.innerHTML = section('보안 대시보드', '<div class="empty">불러오는 중...</div>');
+      let d;
+      try { d = await api('/security/dashboard'); }
+      catch (e) { view.innerHTML = section('보안 대시보드', '<div class="card-body" style="padding:16px"><p class="muted">불러올 수 없습니다(security:read 권한 필요). 상세: ' + escapeHTML(e.message) + '</p></div>'); return; }
+      const pol = d.policy || {}, sec = d.secrets || {}, mcp = d.mcp_summary || {};
+      const kpis = '<div class="kpis">' +
+        kpi('차단(정책)', fmt(pol.blocked || 0)) +
+        kpi('경고(정책)', fmt(pol.warned || 0)) +
+        kpi('Secret 탐지', fmt(sec.total || 0)) +
+        kpi('승인 대기', fmt(d.pending_count || 0)) +
+        kpi('위험 도구', fmt((d.risky_tools || []).length)) +
+        kpi('MCP 오류', fmt(mcp.total_errors || 0)) +
+      '</div>';
+
+      const recent = pol.recent || [];
+      const polCard = card('최근 정책 위반',
+        '<div class="card-body">' + (recent.length
+          ? '<table><thead><tr><th>결정</th><th>사유</th><th>규칙</th><th>위험</th><th>시각</th></tr></thead><tbody>' +
+            recent.map(x => '<tr><td><span class="status ' + (x.decision==='block'?'error':'warn') + '">' + escapeHTML(x.decision) + '</span></td><td>' + escapeHTML(x.reason||'') + '</td><td>' + escapeHTML(x.rule||'') + '</td><td>' + fmt(x.risk_score||0) + '</td><td class="muted">' + ago(x.created_at) + '</td></tr>').join('') + '</tbody></table>'
+          : '<p class="muted">최근 위반이 없습니다.</p>') + '</div>');
+
+      const byType = sec.by_type || {};
+      const secCard = card('Secret Firewall',
+        '<div class="card-body">' + (Object.keys(byType).length
+          ? '<ul style="margin:0;padding-left:18px">' + Object.keys(byType).map(k => '<li>' + escapeHTML(k) + ': <strong>' + fmt(byType[k]) + '</strong></li>').join('') + '</ul>'
+          : '<p class="muted">탐지된 Secret이 없습니다.</p>') + '</div>');
+
+      const risky = d.risky_tools || [];
+      const riskyCard = card('위험 MCP/도구',
+        '<div class="card-body">' + (risky.length
+          ? '<table><thead><tr><th>서버</th><th>도구</th><th>위험도</th><th>조치</th></tr></thead><tbody>' +
+            risky.map(t => '<tr><td>' + escapeHTML(t.server_label||'') + '</td><td>' + escapeHTML(t.tool_name||'') + '</td><td><span class="status error">' + escapeHTML(t.risk_level) + '</span></td><td>' + escapeHTML(t.action||'') + '</td></tr>').join('') + '</tbody></table>'
+          : '<p class="muted">high/critical 도구가 없습니다.</p>') + '</div>');
+
+      const pending = d.pending_approvals || [];
+      const apprCard = card('승인 대기 큐',
+        '<div class="card-body">' + (pending.length
+          ? '<table><thead><tr><th>대상</th><th>사유</th><th>위험</th><th>요청 시각</th></tr></thead><tbody>' +
+            pending.map(a => '<tr><td>' + escapeHTML((a.subject_type||'') + ' ' + (a.subject_id||'')) + '</td><td>' + escapeHTML(a.reason||'') + '</td><td>' + fmt(a.risk_score||0) + '</td><td class="muted">' + ago(a.created_at) + '</td></tr>').join('') + '</tbody></table>'
+          : '<p class="muted">대기 중인 승인이 없습니다.</p>') + '</div>');
+
+      view.innerHTML = section('보안 대시보드', kpis) + polCard + secCard + riskyCard + apprCard;
+    }
+
+    // renderBillingHome is the billing_admin landing: cost-center spend, budget burn, and
+    // model-migration savings — no prompt originals, no security policy editing.
+    async function renderBillingHome() {
+      const view = document.getElementById('view');
+      view.innerHTML = section('비용 대시보드', '<div class="empty">불러오는 중...</div>');
+      let d;
+      try { d = await api('/billing/dashboard'); }
+      catch (e) { view.innerHTML = section('비용 대시보드', '<div class="card-body" style="padding:16px"><p class="muted">불러올 수 없습니다(admin:read 권한 필요). 상세: ' + escapeHTML(e.message) + '</p></div>'); return; }
+      const won = (v) => '₩' + fmt(Math.round(v || 0));
+      const kpis = '<div class="kpis">' +
+        kpi('총 비용 (30일)', won(d.total_cost_krw)) +
+        kpi('총 요청', fmt(d.total_requests || 0)) +
+        kpi('예상 절감', won(d.estimated_savings_krw)) +
+        kpi('예산 항목', fmt((d.budgets || []).length)) +
+      '</div>';
+
+      const cc = d.by_cost_center || [];
+      const ccCard = card('비용센터별 비용',
+        '<div class="card-body">' + (cc.length
+          ? '<table><thead><tr><th>비용센터</th><th>요청</th><th>비용</th></tr></thead><tbody>' +
+            cc.map(x => '<tr><td>' + escapeHTML(x.key||'(미지정)') + '</td><td>' + fmt(x.requests) + '</td><td>' + won(x.cost_krw) + '</td></tr>').join('') + '</tbody></table>'
+          : '<p class="muted">데이터가 없습니다.</p>') + '</div>');
+
+      const budgets = d.budgets || [];
+      const budgetCard = card('예산 소진율',
+        '<div class="card-body">' + (budgets.length
+          ? '<table><thead><tr><th>범위</th><th>월 예산</th><th>소진</th><th>소진율</th><th>예상</th></tr></thead><tbody>' +
+            budgets.map(b => { const bg=b.budget||{}; const ratio=(b.burn_ratio||0)*100; const cls=ratio>=100?'error':(ratio>=80?'warn':''); return '<tr><td>' + escapeHTML((bg.scope||'')+':'+(bg.scope_value||'')) + '</td><td>' + won(bg.monthly_krw) + '</td><td>' + won(b.spent_krw) + '</td><td><span class="status '+cls+'">' + ratio.toFixed(0) + '%</span></td><td>' + won(b.projected_krw) + '</td></tr>'; }).join('') + '</tbody></table>'
+          : '<p class="muted">설정된 예산이 없습니다.</p>') + '</div>');
+
+      const mig = d.migration_candidates || [];
+      const migCard = card('모델 전환 후보',
+        '<div class="card-body">' + (mig.length
+          ? '<table><thead><tr><th>현재 모델</th><th>추천 모델</th><th>요청</th><th>예상 절감</th></tr></thead><tbody>' +
+            mig.map(m => '<tr><td>' + escapeHTML(m.current_model) + '</td><td><strong>' + escapeHTML(m.recommended_model) + '</strong></td><td>' + fmt(m.requests) + '</td><td>' + won(m.estimated_savings_krw) + '</td></tr>').join('') + '</tbody></table>'
+          : '<p class="muted">전환 후보가 없습니다.</p>') + '</div>');
+
+      view.innerHTML = section('비용 대시보드', kpis) + ccCard + budgetCard + migCard;
     }
 
     // renderTeamHome is the team_manager landing: their team's usage, cost, top members,

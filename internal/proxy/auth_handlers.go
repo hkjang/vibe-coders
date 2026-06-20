@@ -114,7 +114,7 @@ func (s *Server) handleAuthMe(w http.ResponseWriter, r *http.Request) {
 			"cost_center":  "",
 			"scopes":       claims.Scopes,
 			"features":     s.featureFlags(),
-			"default_home": resolveDefaultHome(claims.Scopes),
+			"default_home": resolveHome(claims.Role, claims.Scopes),
 		},
 	})
 }
