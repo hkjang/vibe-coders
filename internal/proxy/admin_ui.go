@@ -5345,8 +5345,9 @@ const adminHTML = `<!doctype html>
         '<div class="ct-footer"><div class="ct-row">' +
           '<label class="ct-field"><span>Max tokens</span><input id="mm-max-tokens" type="number" min="1" max="4096" value="' + Number(defaults.max_tokens || 1024) + '"></label>' +
           '<label class="ct-field"><span>Temperature</span><input id="mm-temperature" type="number" step="0.1" min="0" max="2" value="' + Number(defaults.temperature || 0.2) + '"></label>' +
-          '</div><div class="ct-btns"><button type="button" id="mm-run">멀티 실행</button></div>' +
+          '</div><div class="ct-btns"><button type="button" class="secondary" id="mm-predict">예상 비용</button><button type="button" id="mm-run">멀티 실행</button></div>' +
         '</div>' +
+        '<div id="mm-predict-out" class="muted" style="font-size:12px;margin-top:6px"></div>' +
         '<div id="mm-results" style="margin-top:10px"></div>';
       document.getElementById('view').innerHTML =
         section('Chat Completion 테스트', kpis + form) +
@@ -5354,6 +5355,7 @@ const adminHTML = `<!doctype html>
         section('대상 카탈로그', chatTestTargetTable(targets));
 
       document.getElementById('mm-run').addEventListener('click', runMultiModelCompare);
+      document.getElementById('mm-predict').addEventListener('click', predictMultiModelCost);
 
       const targetSelect = document.getElementById('chat-target');
       const targetDetail = document.getElementById('chat-target-detail');
@@ -5914,13 +5916,44 @@ const adminHTML = `<!doctype html>
         row('Provider', escapeHTML(t.provider || '자동')) +
       '</div>';
     }
-    async function runMultiModelCompare() {
-      const out = document.getElementById('mm-results');
-      const btn = document.getElementById('mm-run');
-      const models = (document.getElementById('mm-models').value || '').split('\n').map(s => s.trim()).filter(Boolean).map(line => {
+    function mmReadModels() {
+      return (document.getElementById('mm-models').value || '').split('\n').map(s => s.trim()).filter(Boolean).map(line => {
         const [model, provider] = line.split(':').map(x => (x || '').trim());
         return { model, provider: provider || '' };
       });
+    }
+    function mmReadMessages() {
+      const messages = [];
+      const sys = (document.getElementById('mm-system').value || '').trim();
+      if (sys) messages.push({ role: 'system', content: sys });
+      messages.push({ role: 'user', content: (document.getElementById('mm-user').value || '').trim() });
+      return messages;
+    }
+    function mmReadParams() {
+      return {
+        temperature: parseFloat(document.getElementById('mm-temperature').value) || 0,
+        max_tokens: parseInt(document.getElementById('mm-max-tokens').value, 10) || 1024,
+        stream: false,
+      };
+    }
+
+    async function predictMultiModelCost() {
+      const out = document.getElementById('mm-predict-out');
+      const models = mmReadModels();
+      if (!models.length) { out.innerHTML = '<span class="status error">모델을 입력하세요.</span>'; return; }
+      out.textContent = '예상 비용 계산 중...';
+      try {
+        const r = await api('/admin/chat-test/multi-run/predict', { method: 'POST', body: JSON.stringify({ models, messages: mmReadMessages(), params: mmReadParams() }) });
+        const ests = r.estimates || [];
+        out.innerHTML = '예상 입력 토큰 ~' + fmt(r.input_tokens) + ' · 합계 예상비용 <strong>₩' + fmt(Math.round(r.total_cost_krw || 0)) + '</strong> (' +
+          ests.map(e => escapeHTML(e.model) + ' ₩' + fmt(Math.round(e.cost_krw || 0)) + (e.priced ? '' : '(미가격)')).join(', ') + ')';
+      } catch (e) { out.innerHTML = '<span class="status error">' + escapeHTML(e.message) + '</span>'; }
+    }
+
+    async function runMultiModelCompare() {
+      const out = document.getElementById('mm-results');
+      const btn = document.getElementById('mm-run');
+      const models = mmReadModels();
       if (!models.length) { out.innerHTML = '<span class="status error">비교할 모델을 1개 이상 입력하세요.</span>'; return; }
       if (models.length > 5) { out.innerHTML = '<span class="status error">한 번에 최대 5개 모델까지 비교할 수 있습니다.</span>'; return; }
       const messages = [];

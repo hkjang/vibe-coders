@@ -258,6 +258,70 @@ func firstUserMessage(messages []map[string]any, prompt string) string {
 	return prompt
 }
 
+// handleChatTestMultiRunPredict estimates the total cost of a multi-run BEFORE executing,
+// so the operator sees the real spend they're about to incur (AC-004).
+// POST /admin/chat-test/multi-run/predict {models, messages, prompt, params}
+func (s *Server) handleChatTestMultiRunPredict(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	if r.Method != http.MethodPost {
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
+	var req multiRunRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "invalid_body")
+		return
+	}
+	inputTokens := estimateMessageTokens(req.Messages, req.Prompt)
+	maxTokens := req.Params.MaxTokens
+	snap := s.costSnapshotCached(r.Context())
+	pricing := s.pricingMap(r.Context())
+	estimates := make([]CostEstimate, 0, len(req.Models))
+	var total float64
+	priced := 0
+	for _, m := range req.Models {
+		model := strings.TrimSpace(m.Model)
+		if model == "" {
+			continue
+		}
+		est := predictCost(model, inputTokens, maxTokens, snap, pricing)
+		if est.Priced {
+			priced++
+		}
+		total += est.CostKRW
+		estimates = append(estimates, est)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"input_tokens":   inputTokens,
+		"estimates":      estimates,
+		"total_cost_krw": total,
+		"priced_models":  priced,
+		"note":           "예상치입니다. 출력 토큰은 모델 이력 평균 또는 max_tokens 기준으로 추정합니다.",
+	})
+}
+
+// estimateMessageTokens gives a rough input-token estimate from chat messages (≈ runes/4),
+// good enough for a pre-run cost ballpark.
+func estimateMessageTokens(messages []map[string]any, prompt string) int {
+	var runes int
+	for _, m := range messages {
+		if c, ok := m["content"].(string); ok {
+			runes += len([]rune(c))
+		}
+	}
+	if runes == 0 {
+		runes = len([]rune(prompt))
+	}
+	tokens := runes / 4
+	if tokens < 1 {
+		tokens = 1
+	}
+	return tokens
+}
+
 // handleChatTestMultiRuns lists recent multi-model runs (history). GET /admin/chat-test/multi-run/runs
 func (s *Server) handleChatTestMultiRuns(w http.ResponseWriter, r *http.Request) {
 	if !s.authorizeAdmin(r) {
