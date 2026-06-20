@@ -128,6 +128,63 @@ func TestMeNavigationLegacyModeReturnsFullMenu(t *testing.T) {
 	}
 }
 
+func TestRoleCatalog(t *testing.T) {
+	cat := roleCatalog()
+	if len(cat) != len(roleScopes) {
+		t.Fatalf("catalog should list all %d roles, got %d", len(roleScopes), len(cat))
+	}
+	byRole := map[string]roleInfo{}
+	for _, c := range cat {
+		byRole[c.Role] = c
+	}
+	if !byRole["admin"].IsAdmin || byRole["admin"].DefaultHome != "#/dashboard" {
+		t.Errorf("admin should be is_admin with dashboard home: %+v", byRole["admin"])
+	}
+	if byRole["developer"].IsAdmin || byRole["developer"].DefaultHome != "#/me" {
+		t.Errorf("developer should be non-admin with /me home: %+v", byRole["developer"])
+	}
+	// Highest rank first.
+	if cat[0].Rank < cat[len(cat)-1].Rank {
+		t.Errorf("catalog should be ranked high→low, got %d..%d", cat[0].Rank, cat[len(cat)-1].Rank)
+	}
+}
+
+func TestPermissionsEffectiveLegacyMode(t *testing.T) {
+	db := openTestStore(t)
+	defer db.Close()
+	logger := store.NewAsyncLogger(db, 8, filepath.Join(t.TempDir(), "perm.ndjson"))
+	logger.Start()
+	defer logger.Stop(context.Background())
+	server, err := NewServer(testConfig("http://upstream.invalid", "secret"), db, logger, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(server.Routes())
+	defer srv.Close()
+
+	resp, _ := http.Get(srv.URL + "/permissions/effective")
+	var eff struct {
+		Role    string `json:"role"`
+		IsAdmin bool   `json:"is_admin"`
+		Menus   []struct {
+			ID      string `json:"id"`
+			Allowed bool   `json:"allowed"`
+			Reason  string `json:"reason"`
+		} `json:"menus"`
+	}
+	json.NewDecoder(resp.Body).Decode(&eff)
+	resp.Body.Close()
+	if !eff.IsAdmin {
+		t.Errorf("legacy mode should be admin-equivalent, got role=%q", eff.Role)
+	}
+	// Every menu carries an allow/deny reason.
+	for _, m := range eff.Menus {
+		if m.Reason == "" {
+			t.Errorf("menu %q missing decision reason", m.ID)
+		}
+	}
+}
+
 func TestMeKeysMenuGatedByFeature(t *testing.T) {
 	on := tabSet(roleScopes["developer"], map[string]bool{"self_service_keys": true})
 	if !on["mykeys"] {

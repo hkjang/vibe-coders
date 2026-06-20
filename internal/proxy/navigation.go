@@ -1,6 +1,9 @@
 package proxy
 
-import "net/http"
+import (
+	"net/http"
+	"strings"
+)
 
 // menuVersion is bumped whenever the menu registry or its access rules change, so the
 // SPA can detect a stale navigation and refresh /me/navigation without a full reload.
@@ -81,6 +84,25 @@ func menuAccessible(item menuItem, scopes []string, features map[string]bool) bo
 		}
 	}
 	return false
+}
+
+// menuDecision returns whether a menu is allowed for the caller and a human reason — the
+// data behind /permissions/effective so an operator can see exactly why a menu is hidden.
+func menuDecision(item menuItem, scopes []string, features map[string]bool) (bool, string) {
+	for _, f := range item.Features {
+		if !features[f] {
+			return false, "feature '" + f + "' disabled"
+		}
+	}
+	if len(item.Scopes) == 0 {
+		return true, "any authenticated user"
+	}
+	for _, want := range item.Scopes {
+		if hasScope(scopes, want) {
+			return true, "has scope '" + want + "'"
+		}
+	}
+	return false, "missing any of scopes: " + strings.Join(item.Scopes, ", ")
 }
 
 // accessibleMenus returns the registry filtered to what the caller may see.

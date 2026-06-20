@@ -7732,6 +7732,8 @@ const adminHTML = `<!doctype html>
     // renderForbidden is shown when a user routes (or deep-links) to a tab outside their
     // permissions — never a blank screen. Surfaces role, path, and how to get access.
     function renderForbidden(tab) {
+      // Report the blocked attempt so operators can see it in the auth audit log.
+      try { api('/me/access-denied', { method: 'POST', body: JSON.stringify({ tab, path: location.hash }) }).catch(() => {}); } catch {}
       const u = authState.user || {};
       const role = u.role || (authState.enabled ? '(알 수 없음)' : '레거시 토큰');
       document.getElementById('view').innerHTML = section('접근 권한이 필요합니다',
