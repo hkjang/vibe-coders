@@ -39,6 +39,7 @@ var menuRegistry = []menuItem{
 	{ID: "ops.requests", Label: "호출 이력", Path: "#/requests", Tab: "requests", Group: "ops", Scopes: []string{"admin:read"}, DataScope: "all"},
 	{ID: "ops.prompts", Label: "프롬프트 검색", Path: "#/prompts", Tab: "prompts", Group: "ops", Scopes: []string{"admin:read"}, DataScope: "all"},
 	{ID: "ops.prompt_assets", Label: "자산 관리소", Path: "#/prompt-assets", Tab: "prompt-assets", Group: "ops", Scopes: []string{"admin:read"}, DataScope: "all"},
+	{ID: "ops.apps", Label: "AI 업무 앱", Path: "#/apps", Tab: "apps", Group: "ops", Scopes: []string{"admin:read"}, DataScope: "all"},
 	{ID: "ops.users", Label: "사용자", Path: "#/users", Tab: "users", Group: "ops", Scopes: []string{"admin:read"}, DataScope: "all"},
 	{ID: "ops.text2sql", Label: "Text2SQL", Path: "#/text2sql", Tab: "text2sql", Group: "ops", Scopes: []string{"admin:read"}, DataScope: "all"},
 	{ID: "ops.dwdashboard", Label: "DW 대시보드", Path: "#/dwdashboard", Tab: "dwdashboard", Group: "ops", Scopes: []string{"admin:read"}, DataScope: "all"},

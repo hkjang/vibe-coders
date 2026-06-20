@@ -1096,6 +1096,7 @@ const adminHTML = `<!doctype html>
           case 'requests':  await renderRequestsView(params); break;
           case 'prompts':       await renderPromptsView(params); break;
           case 'prompt-assets': await renderPromptAssets(params); break;
+          case 'apps': await renderWorkApps(params); break;
           case 'users':     rest.length ? await renderUserDetail(rest.join('/')) : await renderUsers(); break;
           case 'teams':     rest.length ? await renderTeamDetail(decodeURIComponent(rest.join('/'))) : await renderTeams(); break;
           case 'ips':       rest.length ? await renderIPDetail(decodeURIComponent(rest.join('/'))) : await renderIPs(); break;
@@ -5328,6 +5329,76 @@ const adminHTML = `<!doctype html>
       } catch (err) {
         openModal('Routing Review 처리 오류', '<div class="error-line">' + escapeHTML(err.message) + '</div>');
       }
+    };
+
+    // ---------- AI 업무 앱: Skill/Prompt Product/Text2SQL/MCP/모델 묶음 ----------
+    async function renderWorkApps() {
+      const view = document.getElementById('view');
+      view.innerHTML = section('AI 업무 앱', '<div class="empty">불러오는 중...</div>');
+      let d;
+      try { d = await api('/admin/apps'); }
+      catch (e) { view.innerHTML = section('AI 업무 앱', '<div class="card-body" style="padding:16px"><p class="muted">' + escapeHTML(e.message) + '</p></div>'); return; }
+      const apps = d.apps || [];
+      const kindLabel = { skill: 'Skill', prompt_product: '프롬프트상품', text2sql_report: 'SQL리포트', mcp_tool: 'MCP', model: '모델' };
+      const appCards = apps.length ? apps.map(a => {
+        const comps = (a.components || []).map(c => '<span class="status" style="font-size:9px">' + escapeHTML(kindLabel[c.kind] || c.kind) + ': ' + escapeHTML(c.ref) + '</span>').join(' ');
+        return '<div style="border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:8px">' +
+          '<div style="display:flex;justify-content:space-between;align-items:center"><strong>' + escapeHTML(a.icon || '🧩') + ' ' + escapeHTML(a.title) + '</strong>' +
+          '<span>' + (a.status === 'active' ? '<span class="status">active</span>' : '<span class="status warn">' + escapeHTML(a.status) + '</span>') + '</span></div>' +
+          (a.description ? '<div class="muted" style="font-size:12px;margin:4px 0">' + escapeHTML(a.description) + '</div>' : '') +
+          '<div style="margin:4px 0">' + (comps || '<span class="muted" style="font-size:11px">컴포넌트 없음</span>') + '</div>' +
+          '<div class="muted" style="font-size:11px">팀: ' + escapeHTML(a.allowed_teams || '전체') + ' · 역할: ' + escapeHTML(a.allowed_roles || '전체') + '</div>' +
+          '<div style="margin-top:6px;display:flex;gap:4px"><button type="button" class="secondary" style="font-size:11px" onclick="appValidate(\'' + escapeAttr(a.id) + '\')">검증</button>' +
+          '<button type="button" class="secondary" style="font-size:11px" onclick="appDelete(\'' + escapeAttr(a.id) + '\')">삭제</button></div>' +
+          '<div id="app-validate-' + escapeAttr(a.id) + '" style="margin-top:6px"></div>' +
+          '</div>';
+      }).join('') : '<p class="muted">앱이 없습니다. 아래에서 새 앱을 만들어 Skill·리포트·MCP·모델을 묶어보세요.</p>';
+      view.innerHTML = section('AI 업무 앱', '<p class="muted" style="font-size:12px">Skill·프롬프트 상품·Text2SQL 리포트·MCP 도구·추천 모델을 하나의 업무 앱으로 묶어 권한 있는 사용자에게 노출합니다.</p>') +
+        card('앱 목록', '<div class="card-body">' + appCards + '</div>') +
+        card('새 앱 만들기',
+          '<div class="card-body">' +
+          '<div style="display:flex;gap:6px;margin-bottom:6px"><input id="app-icon" placeholder="아이콘(이모지)" style="width:120px"><input id="app-title" placeholder="앱 제목" style="flex:1"></div>' +
+          '<input id="app-desc" placeholder="설명" style="width:100%;margin-bottom:6px">' +
+          '<div style="display:flex;gap:6px;margin-bottom:6px"><input id="app-teams" placeholder="허용 팀(쉼표, 비우면 전체)" style="flex:1"><input id="app-roles" placeholder="허용 역할(쉼표, 비우면 전체)" style="flex:1"></div>' +
+          '<textarea id="app-components" placeholder=\'컴포넌트 JSON 배열, 예: [{"kind":"skill","ref":"code-review"},{"kind":"model","ref":"claude-opus-4-8"}]\' style="width:100%;height:64px"></textarea>' +
+          '<div style="margin-top:6px"><button type="button" onclick="appCreate()">앱 생성</button></div>' +
+          '<div id="app-create-out" style="margin-top:6px"></div>' +
+          '</div>');
+    }
+    window.appCreate = async () => {
+      const out = document.getElementById('app-create-out');
+      const title = (document.getElementById('app-title').value || '').trim();
+      if (!title) { if (out) out.innerHTML = '<span class="status error">제목 필수</span>'; return; }
+      let components = [];
+      const raw = (document.getElementById('app-components').value || '').trim();
+      if (raw) { try { components = JSON.parse(raw); } catch (e) { if (out) out.innerHTML = '<span class="status error">컴포넌트 JSON 파싱 오류</span>'; return; } }
+      const body = {
+        title, icon: (document.getElementById('app-icon').value || '').trim(),
+        description: (document.getElementById('app-desc').value || '').trim(),
+        allowed_teams: (document.getElementById('app-teams').value || '').trim(),
+        allowed_roles: (document.getElementById('app-roles').value || '').trim(),
+        components,
+      };
+      try { await api('/admin/apps', { method: 'POST', body: JSON.stringify(body) }); await renderWorkApps(); }
+      catch (e) { if (out) out.innerHTML = '<span class="status error">' + escapeHTML(e.message) + '</span>'; }
+    };
+    window.appValidate = async (id) => {
+      const host = document.getElementById('app-validate-' + id);
+      if (host) host.innerHTML = '<span class="muted">검증 중...</span>';
+      try {
+        const d = await api('/admin/apps/' + encodeURIComponent(id) + '/validate', { method: 'POST', body: '{}' });
+        const checks = (d.checks || []).map(c => '<div style="font-size:11px">' + (c.resolved ? '<span class="status" style="font-size:9px">OK</span>' : '<span class="status error" style="font-size:9px">미해결</span>') + ' ' + escapeHTML(c.kind) + ':' + escapeHTML(c.ref) + ' <span class="muted">' + escapeHTML(c.detail || '') + '</span></div>').join('');
+        const warns = (d.warnings || []).map(w => '<div class="status warn" style="font-size:10px">' + escapeHTML(w) + '</div>').join('');
+        if (host) host.innerHTML = '<div style="border:1px solid var(--border);border-radius:6px;padding:6px">' +
+          '<strong style="font-size:11px">검증: ' + (d.ok ? '<span class="status">통과</span>' : '<span class="status error">실패</span>') + '</strong>' +
+          checks + (d.allowed_models && d.allowed_models.length ? '<div class="muted" style="font-size:11px">허용 모델: ' + escapeHTML(d.allowed_models.join(', ')) + '</div>' : '') + warns +
+          '</div>';
+      } catch (e) { if (host) host.innerHTML = '<span class="status error">' + escapeHTML(e.message) + '</span>'; }
+    };
+    window.appDelete = async (id) => {
+      if (!confirm('이 앱을 삭제할까요?')) return;
+      try { await api('/admin/apps/' + encodeURIComponent(id), { method: 'DELETE' }); await renderWorkApps(); }
+      catch (e) { alert(e.message); }
     };
 
     // ---------- Prompt Lab: experiments + test cases + rubrics/contracts ----------

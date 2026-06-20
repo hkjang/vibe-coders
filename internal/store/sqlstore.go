@@ -1432,6 +1432,21 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 			created_at TEXT NOT NULL
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_skill_fitness_skill ON skill_fitness_evidence(skill_name)`,
+		// AI work apps: user-facing bundles of skill / prompt product / Text2SQL report / MCP
+		// tool / recommended model, gated by team + role.
+		`CREATE TABLE IF NOT EXISTS work_apps (
+			id TEXT PRIMARY KEY,
+			title TEXT NOT NULL DEFAULT '',
+			description TEXT NOT NULL DEFAULT '',
+			icon TEXT NOT NULL DEFAULT '',
+			components TEXT NOT NULL DEFAULT '[]',
+			allowed_teams TEXT NOT NULL DEFAULT '',
+			allowed_roles TEXT NOT NULL DEFAULT '',
+			status TEXT NOT NULL DEFAULT 'active',
+			owner TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)`,
 		// SSO (Keycloak/OIDC): external identity → internal user linkage.
 		`CREATE TABLE IF NOT EXISTS auth_identities (
 			id TEXT PRIMARY KEY,
