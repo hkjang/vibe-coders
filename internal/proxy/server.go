@@ -31,7 +31,7 @@ import (
 )
 
 // AppVersion is the gateway build version, surfaced in /auth/me and the admin UI.
-const AppVersion = "v0.55.4"
+const AppVersion = "v0.55.5"
 
 type Server struct {
 	cfg            config.Config
@@ -421,6 +421,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/admin/settings/test/text2sql-twin", s.handleSettingsTestText2SQLTwin)
 	mux.HandleFunc("/admin/policies/decisions", s.handlePolicyDecisions)
 	mux.HandleFunc("/admin/policies/simulate", s.handlePolicySimulate)
+	mux.HandleFunc("/admin/policy-advisor/suggestions", s.handlePolicyAdvisorSuggestions)
+	mux.HandleFunc("/admin/policy-advisor/apply", s.handlePolicyAdvisorApply)
 	mux.HandleFunc("/admin/policies/regression/cases", s.handlePolicyRegressionCases)
 	mux.HandleFunc("/admin/policies/regression/run", s.handlePolicyRegressionRun)
 	mux.HandleFunc("/admin/policies/export", s.handlePolicyExport)

@@ -1096,6 +1096,7 @@ const adminHTML = `<!doctype html>
           case 'remediation': await renderRemediation(); break;
           case 'scorecard': await renderTeamScorecard(); break;
           case 'model-contracts': await renderModelContracts(); break;
+          case 'policy-advisor': await renderPolicyAdvisor(); break;
           case 'security':  await renderSecurityHome(); break;
           case 'billing':   await renderBillingHome(); break;
           case 'ops-home': await renderOpsHome(); break;
@@ -9511,6 +9512,40 @@ const adminHTML = `<!doctype html>
           '</form>' + list + '</div>');
       const form = document.getElementById('mcon-form');
       if (form) form.addEventListener('submit', window.mconAdd);
+    }
+
+    // renderPolicyAdvisor recommends governance rules from observed signals; applying one
+    // creates a disabled draft policy for review in the policy screen.
+    async function renderPolicyAdvisor() {
+      const view = document.getElementById('view');
+      view.innerHTML = section('정책 어드바이저', '<div class="empty">분석 중...</div>');
+      let d;
+      try { d = await api('/admin/policy-advisor/suggestions'); }
+      catch (e) { view.innerHTML = section('정책 어드바이저', '<div class="card-body" style="padding:16px"><p class="muted">' + escapeHTML(e.message) + '</p></div>'); return; }
+      window.policyAdvisorApply = async (idx) => {
+        const sug = (window._advisorSuggestions || [])[idx];
+        if (!sug) return;
+        if (!confirm('이 추천을 비활성 draft 정책으로 생성할까요?\n' + sug.title)) return;
+        try {
+          const res = await api('/admin/policy-advisor/apply', { method: 'POST', body: JSON.stringify({ title: sug.title, conditions: sug.conditions, actions: sug.actions }) });
+          openModal('draft 정책 생성됨', '<p>' + escapeHTML(res.note || '') + '</p><p class="muted" style="font-size:12px">정책 ID: ' + escapeHTML(res.policy_id || '') + '</p><div style="margin-top:8px"><a href="#/safety"><button type="button">정책 화면으로 이동</button></a></div>');
+        } catch (e) { openModal('적용 오류', '<div class="error-line">' + escapeHTML(e.message) + '</div>'); }
+      };
+      const sugs = d.suggestions || [];
+      window._advisorSuggestions = sugs;
+      const sevBadge = (s) => s === 'critical' ? '<span class="status error">심각</span>' : (s === 'warning' ? '<span class="status warn">경고</span>' : '<span class="status">정보</span>');
+      const cards = sugs.map((sug, i) =>
+        '<div style="border:1px solid var(--border);border-radius:6px;padding:10px;margin:6px 0">' +
+        '<div style="display:flex;justify-content:space-between;align-items:center"><strong>' + sevBadge(sug.severity) + ' ' + escapeHTML(sug.title) + '</strong>' +
+        '<button type="button" style="font-size:11px" onclick="policyAdvisorApply(' + i + ')">draft 정책 생성</button></div>' +
+        '<div class="muted" style="font-size:12px;margin:4px 0">' + escapeHTML(sug.rationale) + '</div>' +
+        '<div style="font-size:11px"><strong>조건:</strong> <code>' + escapeHTML(JSON.stringify(sug.conditions)) + '</code> · <strong>액션:</strong> <code>' + escapeHTML(JSON.stringify(sug.actions)) + '</code></div>' +
+        '<div class="muted" style="font-size:11px"><strong>근거:</strong> <code>' + escapeHTML(JSON.stringify(sug.evidence)) + '</code></div>' +
+        '</div>').join('');
+      view.innerHTML = section('정책 어드바이저 (Gateway Policy Advisor)', '') +
+        '<p class="muted" style="font-size:12px;padding:0 14px">' + escapeHTML(d.note || '') + '</p>' +
+        card('추천 정책 (' + sugs.length + ')',
+          '<div class="card-body">' + (cards || '<p class="muted">현재 추천할 정책이 없습니다. 운영 신호가 안정적입니다. 👍</p>') + '</div>');
     }
 
     // renderMeHome is the personalized landing for non-operators: their own usage, cost,
