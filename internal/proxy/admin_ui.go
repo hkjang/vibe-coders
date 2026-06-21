@@ -9388,13 +9388,29 @@ const adminHTML = `<!doctype html>
           '<div><strong>MCP 도구 Top</strong>' + (mcpTop.length ? '<ul style="margin:4px 0;padding-left:18px">' + mcpTop.map(x => '<li>' + escapeHTML(x.key) + ' (' + fmt(x.requests) + ')</li>').join('') + '</ul>' : '<p class="muted">-</p>') + '</div>' +
         '</div>');
 
+      // Recent policy blocks — "왜 막혔나" (원문 미노출, 규칙·사유만).
+      const blocks = d.recent_blocks || [];
+      const blockCard = card('최근 차단 사유',
+        '<div class="card-body">' + (blocks.length
+          ? '<table><thead><tr><th>규칙</th><th>사유</th><th>모델</th><th>시각</th></tr></thead><tbody>' +
+            blocks.map(b => '<tr><td>' + escapeHTML(b.rule || '') + '</td><td>' + escapeHTML(b.reason || '') + '</td><td class="muted">' + escapeHTML(b.model || '') + '</td><td class="muted">' + ago(b.created_at) + '</td></tr>').join('') + '</tbody></table>'
+          : '<p class="muted">최근 차단된 요청이 없습니다. 👍</p>') + '</div>');
+
+      // My saved Text2SQL reports (metadata only — no raw SQL).
+      const myReports = d.my_saved_reports || [];
+      const reportsCard = card('내 저장 리포트',
+        '<div class="card-body">' + (myReports.length
+          ? '<table><thead><tr><th>이름</th><th>스키마</th><th>유형</th><th>공개</th><th>승인</th><th>생성</th></tr></thead><tbody>' +
+            myReports.map(r => '<tr><td>' + escapeHTML(r.name || '') + '</td><td class="muted">' + escapeHTML(r.schema_name || '') + '</td><td>' + escapeHTML(r.kind || '') + '</td><td>' + (r.visibility === 'team' ? '<span class="status">팀</span>' : '<span class="muted">개인</span>') + '</td><td class="muted">' + escapeHTML(r.approval_status || '') + '</td><td class="muted">' + ago(r.created_at) + '</td></tr>').join('') + '</tbody></table>'
+          : '<p class="muted">저장한 리포트가 없습니다. Text2SQL 결과를 저장하면 여기 표시됩니다.</p>') + '</div>');
+
       // Recommendations (load on demand).
       const recCard = card('내 추천',
         '<div class="card-body"><div id="me-recs"><button type="button" class="secondary" onclick="meLoadRecommendations()">추천 불러오기</button></div></div>');
 
       view.innerHTML = section('내 홈', kpis) +
         '<div id="me-actions"></div><div id="me-report"></div>' +
-        profCard + usageCard + modelsCard + failCard + keyCard + recCard +
+        profCard + usageCard + modelsCard + failCard + blockCard + reportsCard + keyCard + recCard +
         '<div id="me-recmodels"></div><div id="me-skills"></div><div id="me-notifications"></div><div id="me-sessions"></div>';
 
       // 내 업무 추천 모델 — 최근 작업 유형 + 모델 용도 태그 결합.

@@ -136,6 +136,24 @@ func (s *SQLStore) ListText2SQLSavedReports(ctx context.Context) ([]Text2SQLSave
 	return out, rows.Err()
 }
 
+// ListText2SQLSavedReportsByCreatedBy returns one user's saved reports, newest first.
+func (s *SQLStore) ListText2SQLSavedReportsByCreatedBy(ctx context.Context, createdBy string) ([]Text2SQLSavedReport, error) {
+	rows, err := s.db.QueryContext(ctx, s.bind(`SELECT `+savedReportColumns+` FROM text2sql_saved_reports WHERE created_by = ? ORDER BY created_at DESC`), createdBy)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Text2SQLSavedReport{}
+	for rows.Next() {
+		r, err := scanSavedReport(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
 // SetText2SQLReportSchedule configures a report's schedule (interval like "24h"),
 // enable flag, and Mattermost delivery — without touching the report content.
 func (s *SQLStore) SetText2SQLReportSchedule(ctx context.Context, id, interval string, enabled, deliverMattermost bool) error {

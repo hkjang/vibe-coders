@@ -126,6 +126,32 @@ func (s *Server) handleMyDashboard(w http.ResponseWriter, r *http.Request) {
 		products = products[:5]
 	}
 
+	// Recent policy blocks for the caller — "왜 막혔나" without exposing raw prompt.
+	recentBlocks := []map[string]any{}
+	if blocks, err := s.db.ListPolicyDecisionEventsFiltered(ctx, store.PolicyDecisionFilter{UserID: userID, Decision: "block", Limit: 5}); err == nil {
+		for _, b := range blocks {
+			recentBlocks = append(recentBlocks, map[string]any{
+				"rule": b.RuleName, "reason": b.Reason, "model": b.Model,
+				"endpoint": b.Endpoint, "created_at": b.CreatedAt,
+			})
+		}
+	}
+
+	// The caller's own saved Text2SQL reports (metadata only — no raw SQL).
+	mySavedReports := []map[string]any{}
+	if reports, err := s.db.ListText2SQLSavedReportsByCreatedBy(ctx, userID); err == nil {
+		for i, rep := range reports {
+			if i >= 5 {
+				break
+			}
+			mySavedReports = append(mySavedReports, map[string]any{
+				"id": rep.ID, "name": rep.Name, "schema_name": rep.SchemaName,
+				"kind": rep.Kind, "visibility": rep.Visibility, "approval_status": rep.ApprovalStatus,
+				"created_at": rep.CreatedAt,
+			})
+		}
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"user_id":                 userID,
 		"today":                   today,
@@ -138,6 +164,8 @@ func (s *Server) handleMyDashboard(w http.ResponseWriter, r *http.Request) {
 		"recommended_templates":   templates,
 		"recent_prompt_products":  products,
 		"key_alerts":              keyAlerts,
+		"recent_blocks":           recentBlocks,
+		"my_saved_reports":        mySavedReports,
 	})
 }
 
