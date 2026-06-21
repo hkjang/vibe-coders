@@ -5440,9 +5440,30 @@ const adminHTML = `<!doctype html>
       const overall = badge(d.overall);
       view.innerHTML = section('운영 홈 (최근 ' + (d.window_hours || 24) + 'h)',
         '<p class="muted" style="font-size:12px">전체 상태 ' + overall + ' · 생성 ' + ago(d.generated_at) + ' — 카드를 클릭하면 상세 화면으로 이동합니다.</p>') +
+        '<div id="ops-incidents"></div>' +
         '<div style="display:flex;gap:12px;flex-wrap:wrap">' + cards + '</div>' +
         '<div id="ops-workers"></div>';
+      opsLoadIncidents();
       opsLoadWorkers();
+    }
+    // Incident Copilot — 지금 확인할 이슈(장애 후보).
+    window.opsLoadIncidents = async () => {
+      const host = document.getElementById('ops-incidents');
+      if (!host) return;
+      let d;
+      try { d = await api('/admin/incidents/candidates'); } catch (e) { host.innerHTML = ''; return; }
+      const items = d.incidents || [];
+      if (!items.length) { host.innerHTML = '<div class="card-body" style="padding:8px 0"><span class="status">지금 확인할 이슈 없음 ✅</span></div>'; return; }
+      const sevBadge = (s) => s === 'critical' ? '<span class="status error">위험</span>' : (s === 'warning' ? '<span class="status warn">경고</span>' : '<span class="status">정보</span>');
+      const rows = items.map(it =>
+        '<div style="border:1px solid var(--border);border-left:4px solid ' + (it.severity === 'critical' ? '#ef5350' : (it.severity === 'warning' ? '#ffa726' : '#6ea8fe')) + ';border-radius:8px;padding:10px;margin:6px 0">' +
+        '<div style="display:flex;gap:8px;align-items:center"><strong>' + escapeHTML(it.title) + '</strong> ' + sevBadge(it.severity) + ' <span class="muted" style="font-size:11px">' + escapeHTML(it.category) + '</span></div>' +
+        '<div class="muted" style="font-size:12px;margin:3px 0">' + escapeHTML(it.summary) + '</div>' +
+        (it.recommended_actions && it.recommended_actions.length ? '<div style="font-size:11px"><b>추천 조치</b><ul style="margin:2px 0;padding-left:18px">' + it.recommended_actions.map(a => '<li>' + escapeHTML(a) + '</li>').join('') + '</ul></div>' : '') +
+        ((it.links || []).length ? '<div style="font-size:11px">' + (it.links || []).map(l => '<a href="' + escapeAttr(l) + '">' + escapeHTML(l) + '</a>').join(' · ') + '</div>' : '') +
+        '</div>').join('');
+      host.innerHTML = card('지금 확인할 이슈 (' + (d.counts.critical || 0) + ' 위험 · ' + (d.counts.warning || 0) + ' 경고)',
+        '<div class="card-body">' + rows + '<p class="muted" style="font-size:10px;margin-top:4px">' + escapeHTML(d.note || '') + '</p></div>');
     }
     // 백그라운드 워커 상태판.
     window.opsLoadWorkers = async () => {
