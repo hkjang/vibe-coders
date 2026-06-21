@@ -31,7 +31,7 @@ import (
 )
 
 // AppVersion is the gateway build version, surfaced in /auth/me and the admin UI.
-const AppVersion = "v0.58.8"
+const AppVersion = "v0.59.0"
 
 type Server struct {
 	cfg            config.Config
@@ -497,6 +497,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/mcp", s.handleMCPGateway)
 	mux.HandleFunc("/mcp/gateway", s.handleGatewayMCP)
 	mux.HandleFunc("/admin/gateway-mcp/info", s.handleGatewayMCPInfo)
+	mux.HandleFunc("/admin/mcp/gateway/test", s.handleGatewayMCPTest)
 	mux.HandleFunc("/vcs/events", s.handleVCSWebhook)
 	mux.HandleFunc("/vcs/webhook/", s.handleVCSWebhook)
 	mux.HandleFunc("/admin/vcs/events", s.handleVCSEvents)

@@ -123,6 +123,34 @@ func (s *Server) handleGatewayMCPInfo(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleGatewayMCPTest lets an admin invoke a gateway MCP tool by name+arguments to verify it,
+// without an external MCP client. Read-only diagnostic (runs without a caller authCtx, so
+// user-scoped tools report missing identity rather than leaking data). POST /admin/mcp/gateway/test
+func (s *Server) handleGatewayMCPTest(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	if r.Method != http.MethodPost {
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
+	var p struct {
+		Name      string          `json:"name"`
+		Arguments json.RawMessage `json:"arguments"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil || strings.TrimSpace(p.Name) == "" {
+		writeOpenAIError(w, http.StatusBadRequest, "name is required", "invalid_request_error", "invalid_body")
+		return
+	}
+	result, err := s.runGatewayTool(r.Context(), r, "", nil, strings.TrimSpace(p.Name), p.Arguments)
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "result": result})
+}
+
 // --- tools ---
 
 func gatewayToolDefs() []mcpToolDef {
@@ -135,6 +163,7 @@ func gatewayToolDefs() []mcpToolDef {
 		{Name: "gateway_run_text2sql_preview", Description: "자연어 질문을 Text2SQL preview(SQL 생성, 미실행)로 처리합니다.", InputSchema: obj(`"question":{"type":"string"}`)},
 		{Name: "gateway_run_saved_report", Description: "권한 있는 저장 Text2SQL 리포트를 preview로 실행합니다.", InputSchema: obj(`"report_id":{"type":"string"}`)},
 		{Name: "gateway_create_app_run", Description: "AI 업무 앱을 실행해 구성요소 실행 플랜을 받고 실행 이력을 기록합니다.", InputSchema: obj(`"app_id":{"type":"string"}`)},
+		{Name: "gateway_run_workflow", Description: "워크플로 체인을 서버측에서 순차 실행합니다(거버넌스·정책 적용).", InputSchema: obj(`"workflow_id":{"type":"string"},"input":{"type":"string"}`)},
 		{Name: "gateway_list_models", Description: "사용 가능한 모델 목록과 가격을 조회합니다(호출자 권한 기준).", InputSchema: obj(``)},
 		{Name: "gateway_estimate_cost", Description: "모델과 토큰 수로 예상 비용(KRW)을 계산합니다.", InputSchema: obj(`"model":{"type":"string"},"input_tokens":{"type":"integer"},"output_tokens":{"type":"integer"}`)},
 		{Name: "gateway_check_quota", Description: "본인/키의 현재 한도 소진 상태를 조회합니다.", InputSchema: obj(``)},
@@ -293,6 +322,35 @@ func (s *Server) runGatewayTool(ctx context.Context, r *http.Request, apiKeyID s
 			OutputSummary: itoaProxy(len(app.Components)) + " components planned", ErrorClass: errClass,
 		})
 		return gatewayToolJSON(map[string]any{"run_id": runID, "app_id": app.ID, "title": app.Title, "plan": plan}), nil
+
+	case "gateway_run_workflow":
+		var a struct {
+			WorkflowID string `json:"workflow_id"`
+			Input      string `json:"input"`
+		}
+		_ = json.Unmarshal(args, &a)
+		wf, found, err := s.db.GetWorkflow(ctx, strings.TrimSpace(a.WorkflowID))
+		if err != nil {
+			return nil, err
+		}
+		if !found || !wf.Enabled {
+			return nil, errGateway("workflow not found")
+		}
+		claims := accessClaims{}
+		if authCtx != nil {
+			claims = accessClaims{Subject: authCtx.UserID, TeamID: authCtx.TeamID, Role: authCtx.Role, Scopes: authCtx.Scopes}
+		}
+		if teams := splitCSV(wf.AllowedTeams); len(teams) > 0 && !containsFold(teams, claims.TeamID) {
+			return nil, errGateway("workflow not allowed for your team")
+		}
+		start := time.Now()
+		results, status, stepsOK, errClass := s.executeWorkflowSteps(r, wf, a.Input, claims)
+		runID := newID("wfrun")
+		_ = s.db.RecordWorkflowRun(ctx, store.WorkflowRun{
+			ID: runID, WorkflowID: wf.ID, UserID: claims.Subject, Team: claims.TeamID, Status: status,
+			StepsTotal: len(wf.Steps), StepsOK: stepsOK, LatencyMS: time.Since(start).Milliseconds(), ErrorClass: errClass,
+		})
+		return gatewayToolJSON(map[string]any{"run_id": runID, "workflow_id": wf.ID, "status": status, "steps_ok": stepsOK, "results": results}), nil
 
 	case "gateway_list_models":
 		pricing := s.pricingMap(ctx)

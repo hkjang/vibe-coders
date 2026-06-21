@@ -219,6 +219,15 @@ func (s *Server) handleV1WorkflowRun(w http.ResponseWriter, r *http.Request) {
 // aggregate metadata is persisted.
 func (s *Server) executeWorkflowRun(w http.ResponseWriter, r *http.Request, wf store.Workflow, input string, claims accessClaims) {
 	start := time.Now()
+	results, status, stepsOK, errClass := s.executeWorkflowSteps(r, wf, input, claims)
+	s.finishWorkflowRun(w, r, wf, claims, results, status, stepsOK, errClass, start)
+}
+
+// executeWorkflowSteps runs the steps sequentially and returns the per-step results + aggregate
+// status (without writing a response or persisting), so both the HTTP handler and the Gateway MCP
+// gateway_run_workflow tool can reuse it. Returns status one of ok | error | pending_approval |
+// condition_failed.
+func (s *Server) executeWorkflowSteps(r *http.Request, wf store.Workflow, input string, claims accessClaims) ([]map[string]any, string, int, string) {
 	results := make([]map[string]any, 0, len(wf.Steps))
 	cur := input
 	status := "ok"
@@ -227,7 +236,6 @@ func (s *Server) executeWorkflowRun(w http.ResponseWriter, r *http.Request, wf s
 
 	for i, st := range wf.Steps {
 		stepRes := map[string]any{"name": firstNonEmpty(st.Name, st.Type), "type": st.Type}
-		// Per-step timeout.
 		stepReq := r
 		if st.TimeoutMS > 0 {
 			ctx, cancel := context.WithTimeout(r.Context(), time.Duration(st.TimeoutMS)*time.Millisecond)
@@ -238,26 +246,21 @@ func (s *Server) executeWorkflowRun(w http.ResponseWriter, r *http.Request, wf s
 		var err error
 		switch st.Type {
 		case "approval":
-			status = "pending_approval"
 			stepRes["status"] = "pending_approval"
 			results = append(results, stepRes)
 			s.notifyMattermost(r.Context(), "approval", "워크플로 승인 대기: "+wf.Name+" step "+itoaProxy(i)+" (사용자 "+claims.Subject+")")
-			s.finishWorkflowRun(w, r, wf, claims, results, status, stepsOK, errClass, start)
-			return
+			return results, "pending_approval", stepsOK, errClass
 		case "condition":
 			if strings.TrimSpace(cur) == "" {
-				status, errClass = "condition_failed", "condition_failed"
 				stepRes["status"] = "stopped"
 				results = append(results, stepRes)
-				s.finishWorkflowRun(w, r, wf, claims, results, status, stepsOK, errClass, start)
-				return
+				return results, "condition_failed", stepsOK, "condition_failed"
 			}
 			stepRes["status"] = "passed"
 			stepsOK++
 			results = append(results, stepRes)
 			continue
 		case "transform":
-			// Pass-through transform (no model call). Keeps the chain moving.
 			stepRes["status"] = "ok"
 			stepsOK++
 			results = append(results, stepRes)
@@ -277,12 +280,10 @@ func (s *Server) executeWorkflowRun(w http.ResponseWriter, r *http.Request, wf s
 			err = errGateway("unknown step type: " + st.Type)
 		}
 		if err != nil {
-			status, errClass = "error", "step_error"
 			stepRes["status"] = "error"
 			stepRes["error"] = err.Error()
 			results = append(results, stepRes)
-			s.finishWorkflowRun(w, r, wf, claims, results, status, stepsOK, errClass, start)
-			return
+			return results, "error", stepsOK, "step_error"
 		}
 		cur = out
 		stepsOK++
@@ -290,7 +291,7 @@ func (s *Server) executeWorkflowRun(w http.ResponseWriter, r *http.Request, wf s
 		stepRes["output"] = out
 		results = append(results, stepRes)
 	}
-	s.finishWorkflowRun(w, r, wf, claims, results, status, stepsOK, errClass, start)
+	return results, status, stepsOK, errClass
 }
 
 // workflowChatStep runs one step through the /v1 chat pipeline and returns the text output.
