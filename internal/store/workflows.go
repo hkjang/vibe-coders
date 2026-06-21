@@ -135,6 +135,21 @@ func (s *SQLStore) RecordWorkflowRun(ctx context.Context, run WorkflowRun) error
 	return err
 }
 
+// GetWorkflowRun returns one workflow run by id.
+func (s *SQLStore) GetWorkflowRun(ctx context.Context, id string) (WorkflowRun, bool, error) {
+	row := s.db.QueryRowContext(ctx, s.bind(`SELECT id, workflow_id, user_id, team, status, steps_total, steps_ok, latency_ms, cost_krw, error_class, created_at
+		FROM workflow_runs WHERE id = ?`), id)
+	var run WorkflowRun
+	err := row.Scan(&run.ID, &run.WorkflowID, &run.UserID, &run.Team, &run.Status, &run.StepsTotal, &run.StepsOK, &run.LatencyMS, &run.CostKRW, &run.ErrorClass, &run.CreatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return WorkflowRun{}, false, nil
+	}
+	if err != nil {
+		return WorkflowRun{}, false, err
+	}
+	return run, true, nil
+}
+
 func (s *SQLStore) ListWorkflowRuns(ctx context.Context, userID, workflowID string, limit int) ([]WorkflowRun, error) {
 	if limit <= 0 || limit > 200 {
 		limit = 50

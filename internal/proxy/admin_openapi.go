@@ -60,6 +60,8 @@ var apiEndpoints = []apiEndpoint{
 	{"/me/data-products/{key}/request-access", []string{"post"}, "self-service", "Request access to a data product", false},
 	{"/me/onboarding-pack", []string{"get"}, "self-service", "Client connection pack (?client=mcp|cursor|roo|cline|openai-sdk)", false},
 	{"/me/app-runs", []string{"get"}, "self-service", "Caller's AI work-app run history (?app_id=&limit=)", false},
+	{"/v1/app-runs/{run_id}/receipt", []string{"get"}, "self-service", "Safe receipt for an AI app run", false},
+	{"/v1/workflow-runs/{run_id}/receipt", []string{"get"}, "self-service", "Safe receipt for a workflow run", false},
 	{"/me/requests", []string{"get"}, "self-service", "List the caller's recent requests (safe metadata)", false},
 	{"/me/requests/{id}/receipt", []string{"get"}, "self-service", "Safe receipt for one of the caller's requests (no raw prompt/SQL)", false},
 

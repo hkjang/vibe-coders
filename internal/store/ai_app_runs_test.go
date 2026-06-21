@@ -47,4 +47,13 @@ func TestAIAppRunsRoundtrip(t *testing.T) {
 	if bob, _ := db.ListAIAppRuns(ctx, "bob", "", 50); len(bob) != 1 {
 		t.Fatalf("bob should have 1 run, got %d", len(bob))
 	}
+
+	// Single-run getter (for receipts).
+	got, found, err := db.GetAIAppRun(ctx, "r1")
+	if err != nil || !found || got.AppID != "app_a" || got.UserID != "alice" {
+		t.Fatalf("GetAIAppRun(r1) = %+v found=%v err=%v", got, found, err)
+	}
+	if _, found, _ := db.GetAIAppRun(ctx, "nope"); found {
+		t.Fatal("unknown run should not be found")
+	}
 }

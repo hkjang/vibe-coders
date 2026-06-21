@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"time"
 )
 
@@ -34,6 +35,21 @@ func (s *SQLStore) RecordAIAppRun(ctx context.Context, run AIAppRun) error {
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
 		run.ID, run.AppID, run.UserID, run.Team, run.Status, run.InputHash, run.OutputSummary, run.ErrorClass, run.LatencyMS, run.CostKRW, run.CreatedAt)
 	return err
+}
+
+// GetAIAppRun returns one app run by id.
+func (s *SQLStore) GetAIAppRun(ctx context.Context, id string) (AIAppRun, bool, error) {
+	row := s.db.QueryRowContext(ctx, s.bind(`SELECT id, app_id, user_id, team, status, input_hash, output_summary, error_class, latency_ms, cost_krw, created_at
+		FROM ai_app_runs WHERE id = ?`), id)
+	var a AIAppRun
+	err := row.Scan(&a.ID, &a.AppID, &a.UserID, &a.Team, &a.Status, &a.InputHash, &a.OutputSummary, &a.ErrorClass, &a.LatencyMS, &a.CostKRW, &a.CreatedAt)
+	if err == sql.ErrNoRows {
+		return AIAppRun{}, false, nil
+	}
+	if err != nil {
+		return AIAppRun{}, false, err
+	}
+	return a, true, nil
 }
 
 // ListAIAppRuns returns runs for a user (required), optionally filtered by app, newest first.

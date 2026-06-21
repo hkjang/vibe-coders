@@ -50,4 +50,12 @@ func TestWorkflowRoundtripAndRuns(t *testing.T) {
 	if other, _ := db.ListWorkflowRuns(ctx, "bob", "", 10); len(other) != 0 {
 		t.Fatalf("bob should have no runs, got %d", len(other))
 	}
+
+	gotRun, found, err := db.GetWorkflowRun(ctx, "run1")
+	if err != nil || !found || gotRun.WorkflowID != "wf1" || gotRun.StepsOK != 2 {
+		t.Fatalf("GetWorkflowRun(run1) = %+v found=%v err=%v", gotRun, found, err)
+	}
+	if _, found, _ := db.GetWorkflowRun(ctx, "nope"); found {
+		t.Fatal("unknown workflow run should not be found")
+	}
 }
