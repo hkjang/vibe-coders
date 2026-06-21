@@ -233,6 +233,7 @@ var apiEndpoints = []apiEndpoint{
 	{"/admin/skills/import", []string{"post"}, "skills", "Import a skill bundle (security-gated)", false},
 	{"/admin/skills/evaluate", []string{"post"}, "skills", "Dry-run a skill's policy against a model/tools", false},
 	{"/admin/skills/seed-recommended", []string{"post"}, "skills", "Seed the recommended starter skills", false},
+	{"/admin/skills/dependency-graph", []string{"get"}, "skills", "Skill→model/tool/team/policy dependency graph (?skill=)", false},
 
 	// ---- admin: data products ----
 	{"/admin/data-products", []string{"get", "post", "delete"}, "data-products", "Curate/publish the data product catalog", false},

@@ -1098,6 +1098,7 @@ const adminHTML = `<!doctype html>
           case 'model-contracts': await renderModelContracts(); break;
           case 'policy-advisor': await renderPolicyAdvisor(); break;
           case 'narrative': await renderNarrativeReport(); break;
+          case 'skill-graph': await renderSkillGraph(); break;
           case 'security':  await renderSecurityHome(); break;
           case 'billing':   await renderBillingHome(); break;
           case 'ops-home': await renderOpsHome(); break;
@@ -9578,6 +9579,33 @@ const adminHTML = `<!doctype html>
         card('월간 운영 서술 보고서',
           '<div class="card-body">' + secs +
           '<p class="muted" style="font-size:11px;margin-top:6px">' + escapeHTML(d.note || '') + '</p></div>');
+    }
+
+    // renderSkillGraph shows each production skill's model/tool/team dependencies and the
+    // policies that govern them — the change blast radius.
+    async function renderSkillGraph() {
+      const view = document.getElementById('view');
+      view.innerHTML = section('Skill 의존성', '<div class="empty">불러오는 중...</div>');
+      let d;
+      try { d = await api('/admin/skills/dependency-graph'); }
+      catch (e) { view.innerHTML = section('Skill 의존성', '<div class="card-body" style="padding:16px"><p class="muted">' + escapeHTML(e.message) + '</p></div>'); return; }
+      const skills = d.skills || [];
+      const chips = (arr, cls) => (arr && arr.length) ? arr.map(x => '<span class="pill ' + (cls || '') + '">' + escapeHTML(x) + '</span>').join(' ') : '<span class="muted">-</span>';
+      const cards = skills.map(sk => {
+        const pol = (sk.governing_policies || []).map(p => escapeHTML(p.name) + ' <span class="muted" style="font-size:10px">(' + escapeHTML(p.via) + ')</span>').join(', ') || '<span class="muted">관할 정책 없음</span>';
+        const riskBadge = sk.risk_level === 'high' ? '<span class="status error">high</span>' : (sk.risk_level === 'medium' ? '<span class="status warn">medium</span>' : '<span class="status">' + escapeHTML(sk.risk_level || 'low') + '</span>');
+        return '<div style="border:1px solid var(--border);border-radius:6px;padding:10px;margin:6px 0">' +
+          '<div style="display:flex;justify-content:space-between;align-items:center"><strong>' + escapeHTML(sk.name) + '</strong> ' + riskBadge + '</div>' +
+          '<div style="font-size:12px;margin-top:4px"><strong>모델:</strong> ' + chips(sk.models) + '</div>' +
+          '<div style="font-size:12px;margin-top:2px"><strong>도구:</strong> ' + chips(sk.tools) + '</div>' +
+          '<div style="font-size:12px;margin-top:2px"><strong>팀:</strong> ' + chips(sk.teams) + '</div>' +
+          '<div style="font-size:12px;margin-top:2px"><strong>관할 정책:</strong> ' + pol + '</div>' +
+        '</div>';
+      }).join('');
+      view.innerHTML = section('Skill 의존성 그래프 (Skill Dependency Graph)', '') +
+        '<p class="muted" style="font-size:12px;padding:0 14px">' + escapeHTML(d.note || '') + ' · 노드 ' + (d.nodes || []).length + '개 · 엣지 ' + (d.edges || []).length + '개</p>' +
+        card('production Skill 의존성 (' + skills.length + ')',
+          '<div class="card-body">' + (cards || '<p class="muted">production Skill이 없습니다.</p>') + '</div>');
     }
 
     // renderMeHome is the personalized landing for non-operators: their own usage, cost,
