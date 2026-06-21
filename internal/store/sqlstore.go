@@ -1509,6 +1509,32 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 			created_at TEXT NOT NULL,
 			updated_at TEXT NOT NULL
 		)`,
+		`CREATE TABLE IF NOT EXISTS data_products (
+			id TEXT PRIMARY KEY,
+			product_key TEXT NOT NULL UNIQUE,
+			name_ko TEXT NOT NULL DEFAULT '',
+			description TEXT NOT NULL DEFAULT '',
+			source_type TEXT NOT NULL DEFAULT 'custom',
+			source_ref TEXT NOT NULL DEFAULT '',
+			owner TEXT NOT NULL DEFAULT '',
+			allowed_teams TEXT NOT NULL DEFAULT '',
+			sensitivity TEXT NOT NULL DEFAULT 'internal',
+			status TEXT NOT NULL DEFAULT 'draft',
+			version INTEGER NOT NULL DEFAULT 1,
+			updated_by TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS data_product_access_requests (
+			id TEXT PRIMARY KEY,
+			product_key TEXT NOT NULL,
+			user_id TEXT NOT NULL DEFAULT '',
+			team TEXT NOT NULL DEFAULT '',
+			status TEXT NOT NULL DEFAULT 'pending',
+			reason TEXT NOT NULL DEFAULT '',
+			decided_by TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL
+		)`,
 		`CREATE TABLE IF NOT EXISTS model_usage_tags (
 			model TEXT PRIMARY KEY,
 			good_for TEXT NOT NULL DEFAULT '',

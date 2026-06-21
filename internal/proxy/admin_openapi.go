@@ -53,6 +53,8 @@ var apiEndpoints = []apiEndpoint{
 	{"/me/keys", []string{"get", "post"}, "self-service", "List / issue the caller's own API keys", false},
 	{"/me/keys/{id}", []string{"post", "delete"}, "self-service", "Rotate ({id}/rotate) or revoke the caller's key", false},
 	{"/team/portal", []string{"get"}, "self-service", "Team self-service portal (usage/budget/keys/skills/members)", false},
+	{"/me/data-products", []string{"get"}, "self-service", "Browse published data products visible to the caller's team", false},
+	{"/me/data-products/{key}/request-access", []string{"post"}, "self-service", "Request access to a data product", false},
 
 	// ---- admin UI ----
 	{"/admin", []string{"get"}, "admin", "Admin dashboard (HTML)", false},
@@ -220,6 +222,11 @@ var apiEndpoints = []apiEndpoint{
 	{"/admin/skills/import", []string{"post"}, "skills", "Import a skill bundle (security-gated)", false},
 	{"/admin/skills/evaluate", []string{"post"}, "skills", "Dry-run a skill's policy against a model/tools", false},
 	{"/admin/skills/seed-recommended", []string{"post"}, "skills", "Seed the recommended starter skills", false},
+
+	// ---- admin: data products ----
+	{"/admin/data-products", []string{"get", "post", "delete"}, "data-products", "Curate/publish the data product catalog", false},
+	{"/admin/data-products/candidates", []string{"get"}, "data-products", "Suggest products from recurring Text2SQL questions (no raw SQL)", false},
+	{"/admin/data-products/requests", []string{"get", "post"}, "data-products", "List / decide data product access requests", false},
 
 	// ---- admin: data warehouse (ClickHouse) ----
 	{"/admin/dw/rollups", []string{"get", "post"}, "dw", "Daily rollups / backfill", false},

@@ -46,6 +46,7 @@ var menuRegistry = []menuItem{
 	{ID: "ops.users", Label: "사용자", Path: "#/users", Tab: "users", Group: "ops", Scopes: []string{"admin:read"}, DataScope: "all"},
 	{ID: "ops.text2sql", Label: "Text2SQL", Path: "#/text2sql", Tab: "text2sql", Group: "ops", Scopes: []string{"admin:read"}, DataScope: "all"},
 	{ID: "ops.dwdashboard", Label: "DW 대시보드", Path: "#/dwdashboard", Tab: "dwdashboard", Group: "ops", Scopes: []string{"admin:read"}, DataScope: "all"},
+	{ID: "ops.data_products", Label: "데이터 상품", Path: "#/data-products", Tab: "data-products", Group: "ops", Scopes: []string{"admin:read"}, DataScope: "all"},
 	{ID: "ops.personalization", Label: "개인화", Path: "#/personalization", Tab: "personalization", Group: "ops", Scopes: []string{"admin:read"}, DataScope: "all"},
 	// 보안 영역.
 	{ID: "sec.dashboard", Label: "보안 대시보드", Path: "#/security", Tab: "security", Group: "security", Scopes: []string{"security:read"}, DataScope: "all"},

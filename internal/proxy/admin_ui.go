@@ -1092,6 +1092,7 @@ const adminHTML = `<!doctype html>
           case 'me':        await renderMeHome(); break;
           case 'team':      await renderTeamHome(); break;
           case 'team-portal': await renderTeamPortal(); break;
+          case 'data-products': await renderDataProducts(); break;
           case 'security':  await renderSecurityHome(); break;
           case 'billing':   await renderBillingHome(); break;
           case 'ops-home': await renderOpsHome(); break;
@@ -9211,6 +9212,113 @@ const adminHTML = `<!doctype html>
       view.innerHTML = section('팀 포털 — ' + escapeHTML(d.team_id || ''), kpis) +
         budgetCard + keysCard + skillsCard + reqCard + memberCard +
         '<p class="muted" style="font-size:12px;padding:8px 14px">' + escapeHTML(d.note || '') + ' <a href="#/team">팀 대시보드 →</a></p>';
+    }
+
+    // renderDataProducts is the admin Data Product Builder: curate/publish reusable data
+    // products (from miner candidates or manually), and triage access requests.
+    async function renderDataProducts() {
+      const view = document.getElementById('view');
+      view.innerHTML = section('데이터 상품', '<div class="empty">불러오는 중...</div>');
+      let prods, cands, reqs;
+      try {
+        prods = await api('/admin/data-products');
+        cands = await api('/admin/data-products/candidates').catch(() => ({ candidates: [] }));
+        reqs = await api('/admin/data-products/requests').catch(() => ({ requests: [] }));
+      } catch (e) {
+        view.innerHTML = section('데이터 상품', '<div class="card-body" style="padding:16px"><p class="muted">' + escapeHTML(e.message) + '</p></div>');
+        return;
+      }
+      window.dpRefresh = renderDataProducts;
+      window.dpPublishToggle = async (key, status) => {
+        const list = (prods.products || []).filter(p => p.product_key === key);
+        if (!list.length) return;
+        const p = list[0];
+        try {
+          await api('/admin/data-products', { method: 'POST', body: JSON.stringify({
+            product_key: p.product_key, name_ko: p.name_ko, description: p.description,
+            source_type: p.source_type, source_ref: p.source_ref, owner: p.owner,
+            allowed_teams: p.allowed_teams || [], sensitivity: p.sensitivity, status: status,
+          }) });
+          renderDataProducts();
+        } catch (e) { alert('변경 오류: ' + e.message); }
+      };
+      window.dpDelete = async (key) => {
+        if (!confirm(key + ' 상품을 삭제할까요?')) return;
+        try { await api('/admin/data-products?id=' + encodeURIComponent(key), { method: 'DELETE' }); renderDataProducts(); }
+        catch (e) { alert('삭제 오류: ' + e.message); }
+      };
+      window.dpDecide = async (id, action) => {
+        try { await api('/admin/data-products/requests', { method: 'POST', body: JSON.stringify({ id, action }) }); renderDataProducts(); }
+        catch (e) { alert('처리 오류: ' + e.message); }
+      };
+      window.dpAdd = async (event) => {
+        event.preventDefault();
+        const key = document.getElementById('dp-key').value.trim();
+        const name = document.getElementById('dp-name').value.trim();
+        if (!key || !name) return;
+        try {
+          await api('/admin/data-products', { method: 'POST', body: JSON.stringify({
+            product_key: key, name_ko: name,
+            description: document.getElementById('dp-desc').value.trim(),
+            source_type: document.getElementById('dp-source').value,
+            source_ref: document.getElementById('dp-ref').value.trim(),
+            allowed_teams: splitCSV(document.getElementById('dp-teams').value),
+            status: document.getElementById('dp-status').value,
+          }) });
+          document.getElementById('dp-form').reset();
+          renderDataProducts();
+        } catch (e) { alert('저장 오류: ' + e.message); }
+      };
+      window.dpPublishCandidate = (question, rec) => {
+        document.getElementById('dp-name').value = question.slice(0, 60);
+        document.getElementById('dp-desc').value = '추천 상품 형태: ' + rec + ' · 반복 Text2SQL 질문에서 발행';
+        document.getElementById('dp-source').value = 'saved_report';
+        document.getElementById('dp-key').focus();
+      };
+
+      const products = prods.products || [];
+      const statusBadge = (st) => st === 'published' ? '<span class="status">발행</span>' : (st === 'archived' ? '<span class="status warn">보관</span>' : '<span class="status warn">초안</span>');
+      const prodCard = card('데이터 상품 카탈로그',
+        '<div class="card-body">' +
+        '<form class="inline-form" id="dp-form" style="grid-template-columns: minmax(110px,1fr) minmax(130px,1.2fr) minmax(150px,1.5fr) 120px minmax(110px,1fr) minmax(110px,1fr) 90px 70px;">' +
+          '<input id="dp-key" placeholder="product_key" required>' +
+          '<input id="dp-name" placeholder="상품 이름(한글)" required>' +
+          '<input id="dp-desc" placeholder="설명">' +
+          '<select id="dp-source"><option value="saved_report">saved_report</option><option value="metric">metric</option><option value="golden_query">golden_query</option><option value="custom">custom</option></select>' +
+          '<input id="dp-ref" placeholder="source_ref(id/key)">' +
+          '<input id="dp-teams" placeholder="허용 팀(쉼표, 빈칸=전체)">' +
+          '<select id="dp-status"><option value="draft">draft</option><option value="published">published</option></select>' +
+          '<button type="submit">추가</button>' +
+        '</form>' +
+        '<p class="muted" style="font-size:11px;padding:0 0 6px">상품은 원본(리포트/메트릭/골든쿼리)을 참조만 합니다. 원문 SQL은 저장하지 않습니다.</p>' +
+        (products.length
+          ? '<table><thead><tr><th>키</th><th>이름</th><th>소스</th><th>허용 팀</th><th>민감도</th><th>상태</th><th>동작</th></tr></thead><tbody>' +
+            products.map(p => '<tr><td>' + escapeHTML(p.product_key) + '</td><td>' + escapeHTML(p.name_ko) + '</td><td class="muted">' + escapeHTML(p.source_type) + (p.source_ref ? ':' + escapeHTML(p.source_ref) : '') + '</td><td class="muted">' + escapeHTML((p.allowed_teams || []).join(', ') || '전체') + '</td><td>' + escapeHTML(p.sensitivity) + '</td><td>' + statusBadge(p.status) + '</td><td>' +
+              (p.status === 'published'
+                ? '<button type="button" style="font-size:11px" onclick="dpPublishToggle(\'' + escapeAttr(p.product_key) + '\',\'archived\')">보관</button>'
+                : '<button type="button" style="font-size:11px" onclick="dpPublishToggle(\'' + escapeAttr(p.product_key) + '\',\'published\')">발행</button>') +
+              ' <button type="button" class="danger" style="font-size:11px" onclick="dpDelete(\'' + escapeAttr(p.product_key) + '\')">삭제</button>' +
+            '</td></tr>').join('') + '</tbody></table>'
+          : '<p class="muted">아직 등록된 데이터 상품이 없습니다. 아래 추천 후보에서 발행하거나 위 폼으로 추가하세요.</p>') +
+        '</div>');
+
+      const candidates = cands.candidates || [];
+      const candCard = card('상품 후보 (반복 Text2SQL 질문)',
+        '<div class="card-body">' + (candidates.length
+          ? '<table><thead><tr><th>질문</th><th>반복</th><th>추천 형태</th><th>최근</th><th></th></tr></thead><tbody>' +
+            candidates.map(c => '<tr><td>' + escapeHTML((c.question || '').slice(0, 80)) + '</td><td>' + fmt(c.count) + '</td><td><span class="pill">' + escapeHTML(c.recommended_product) + '</span></td><td class="muted">' + ago(c.last_seen) + '</td><td><button type="button" style="font-size:11px" onclick="dpPublishCandidate(' + JSON.stringify(c.question).replace(/"/g, '&quot;') + ',\'' + escapeAttr(c.recommended_product) + '\')">폼 채우기</button></td></tr>').join('') + '</tbody></table>'
+          : '<p class="muted">반복 질문 후보가 충분하지 않습니다.</p>') + '</div>');
+
+      const requests = (reqs.requests || []).filter(r => r.status === 'pending');
+      const reqCard = card('데이터 상품 접근 요청 (' + requests.length + ' 대기)',
+        '<div class="card-body">' + (requests.length
+          ? '<table><thead><tr><th>상품</th><th>요청자</th><th>팀</th><th>사유</th><th>승인</th></tr></thead><tbody>' +
+            requests.map(r => '<tr><td>' + escapeHTML(r.product_key) + '</td><td class="muted">' + escapeHTML(r.user_id) + '</td><td>' + escapeHTML(r.team || '') + '</td><td>' + escapeHTML((r.reason || '').slice(0, 60)) + '</td><td><button type="button" style="font-size:11px" onclick="dpDecide(\'' + escapeAttr(r.id) + '\',\'approve\')">승인</button> <button type="button" class="danger" style="font-size:11px" onclick="dpDecide(\'' + escapeAttr(r.id) + '\',\'deny\')">거부</button></td></tr>').join('') + '</tbody></table>'
+          : '<p class="muted">대기 중인 접근 요청이 없습니다.</p>') + '</div>');
+
+      view.innerHTML = section('데이터 상품 (Data Product Builder)', '') + prodCard + candCard + reqCard;
+      const form = document.getElementById('dp-form');
+      if (form) form.addEventListener('submit', window.dpAdd);
     }
 
     // renderMeHome is the personalized landing for non-operators: their own usage, cost,
