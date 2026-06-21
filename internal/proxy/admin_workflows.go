@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -181,6 +182,18 @@ func (s *Server) handleV1WorkflowRun(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
 		return
 	}
+	var runReq struct {
+		Execute bool   `json:"execute"`
+		Input   string `json:"input"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&runReq)
+
+	// Execute mode: run the steps server-side, chaining each step's output to the next.
+	if runReq.Execute {
+		s.executeWorkflowRun(w, r, wf, runReq.Input, claims)
+		return
+	}
+
 	start := time.Now()
 	plan, issues := s.planWorkflow(r, wf)
 	errClass := ""
@@ -196,6 +209,115 @@ func (s *Server) handleV1WorkflowRun(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"run_id": runID, "workflow_id": wf.ID, "name": wf.Name, "status": "planned", "steps": plan, "issues": issues,
 		"note": "각 step을 순서대로 호출해 실행하세요. 실행 이력은 /me/workflow-runs에서 확인할 수 있습니다.",
+	})
+}
+
+// executeWorkflowRun runs a workflow's steps sequentially, chaining each step's output into the
+// next step's input. chat/skill/text2sql steps run through the real /v1 pipeline (governance,
+// quota, policy all apply); approval pauses; condition can stop; transform passes through;
+// mcp_tool is skipped (not yet executable). Live step outputs are returned to the caller; only
+// aggregate metadata is persisted.
+func (s *Server) executeWorkflowRun(w http.ResponseWriter, r *http.Request, wf store.Workflow, input string, claims accessClaims) {
+	start := time.Now()
+	results := make([]map[string]any, 0, len(wf.Steps))
+	cur := input
+	status := "ok"
+	stepsOK := 0
+	errClass := ""
+
+	for i, st := range wf.Steps {
+		stepRes := map[string]any{"name": firstNonEmpty(st.Name, st.Type), "type": st.Type}
+		// Per-step timeout.
+		stepReq := r
+		if st.TimeoutMS > 0 {
+			ctx, cancel := context.WithTimeout(r.Context(), time.Duration(st.TimeoutMS)*time.Millisecond)
+			defer cancel()
+			stepReq = r.Clone(ctx)
+		}
+		var out string
+		var err error
+		switch st.Type {
+		case "approval":
+			status = "pending_approval"
+			stepRes["status"] = "pending_approval"
+			results = append(results, stepRes)
+			s.notifyMattermost(r.Context(), "approval", "워크플로 승인 대기: "+wf.Name+" step "+itoaProxy(i)+" (사용자 "+claims.Subject+")")
+			s.finishWorkflowRun(w, r, wf, claims, results, status, stepsOK, errClass, start)
+			return
+		case "condition":
+			if strings.TrimSpace(cur) == "" {
+				status, errClass = "condition_failed", "condition_failed"
+				stepRes["status"] = "stopped"
+				results = append(results, stepRes)
+				s.finishWorkflowRun(w, r, wf, claims, results, status, stepsOK, errClass, start)
+				return
+			}
+			stepRes["status"] = "passed"
+			stepsOK++
+			results = append(results, stepRes)
+			continue
+		case "transform":
+			// Pass-through transform (no model call). Keeps the chain moving.
+			stepRes["status"] = "ok"
+			stepsOK++
+			results = append(results, stepRes)
+			continue
+		case "mcp_tool":
+			stepRes["status"] = "skipped"
+			stepRes["detail"] = "mcp_tool 실행은 후속 예정"
+			results = append(results, stepRes)
+			continue
+		case "chat":
+			out, err = s.workflowChatStep(stepReq, firstNonEmpty(st.Ref, "vibe/auto"), cur, st.MaxTokens, nil)
+		case "skill":
+			out, err = s.workflowChatStep(stepReq, "vibe/auto", cur, st.MaxTokens, map[string]string{"X-Skill": st.Ref})
+		case "text2sql":
+			out, err = s.workflowChatStep(stepReq, "vibe/text2sql-preview", cur, 0, nil)
+		default:
+			err = errGateway("unknown step type: " + st.Type)
+		}
+		if err != nil {
+			status, errClass = "error", "step_error"
+			stepRes["status"] = "error"
+			stepRes["error"] = err.Error()
+			results = append(results, stepRes)
+			s.finishWorkflowRun(w, r, wf, claims, results, status, stepsOK, errClass, start)
+			return
+		}
+		cur = out
+		stepsOK++
+		stepRes["status"] = "ok"
+		stepRes["output"] = out
+		results = append(results, stepRes)
+	}
+	s.finishWorkflowRun(w, r, wf, claims, results, status, stepsOK, errClass, start)
+}
+
+// workflowChatStep runs one step through the /v1 chat pipeline and returns the text output.
+func (s *Server) workflowChatStep(r *http.Request, model, prompt string, maxTokens int64, headers map[string]string) (string, error) {
+	if strings.TrimSpace(prompt) == "" {
+		return "", errGateway("step input is empty")
+	}
+	msg, _ := json.Marshal(map[string]string{"role": "user", "content": prompt})
+	body := map[string]any{"model": model, "messages": []json.RawMessage{msg}, "stream": false}
+	if maxTokens > 0 {
+		body["max_tokens"] = maxTokens
+	}
+	return s.runGatewayChat(r, body, headers)
+}
+
+// finishWorkflowRun persists aggregate run metadata and writes the response.
+func (s *Server) finishWorkflowRun(w http.ResponseWriter, r *http.Request, wf store.Workflow, claims accessClaims, results []map[string]any, status string, stepsOK int, errClass string, start time.Time) {
+	runID := newID("wfrun")
+	_ = s.db.RecordWorkflowRun(r.Context(), store.WorkflowRun{
+		ID: runID, WorkflowID: wf.ID, UserID: claims.Subject, Team: claims.TeamID, Status: status,
+		StepsTotal: len(wf.Steps), StepsOK: stepsOK, LatencyMS: time.Since(start).Milliseconds(), ErrorClass: errClass,
+	})
+	s.auditAuthEvent(r.Context(), "workflow_execute", claims.Subject, "", claims.TeamID, "workflow="+wf.ID+" status="+status)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"run_id": runID, "workflow_id": wf.ID, "name": wf.Name, "status": status,
+		"steps_total": len(wf.Steps), "steps_ok": stepsOK, "results": results,
+		"note": "서버측 순차 실행 결과입니다. step 출력은 호출자에게만 반환되며 저장은 집계 메타데이터만 남습니다.",
 	})
 }
 
