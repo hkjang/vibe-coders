@@ -1009,11 +1009,13 @@ const adminHTML = `<!doctype html>
           { label: 'Waterfall', href: '#/waterfall', active: tab === 'waterfall' },
           { label: 'LLM 관측', href: '#/llm', active: tab === 'llm' },
         ]);
-      } else if (tab === 'dwdashboard' || tab === 'clickhouse') {
+      } else if (tab === 'dwdashboard' || tab === 'clickhouse' || tab === 'dwmetrics') {
         const onCH = tab === 'clickhouse' || rest[0] === 'clickhouse';
+        const onMetrics = tab === 'dwmetrics' || rest[0] === 'metrics';
         el.innerHTML = subNav([
-          { label: 'DW 대시보드', href: '#/dwdashboard', active: !onCH },
+          { label: 'DW 대시보드', href: '#/dwdashboard', active: !onCH && !onMetrics },
           { label: 'ClickHouse', href: '#/dwdashboard/clickhouse', active: onCH },
+          { label: '지표 사전', href: '#/dwmetrics', active: onMetrics },
         ]);
       } else if (tab === 'settings' || tab === 'runtimesettings' || tab === 'changesets' || rest[0] === 'errors' || rest[0] === 'sso' || rest[0] === 'changesets') {
         const onRT = tab === 'runtimesettings' || rest[0] === 'runtime';
@@ -1072,7 +1074,7 @@ const adminHTML = `<!doctype html>
         teams: 'users', ips: 'users', quotas: 'users',
         skills: 'safety', 'skill-studio': 'safety', modeldeprecations: 'safety',
         agents: 'mcp', vcs: 'mcp',
-        clickhouse: 'dwdashboard', runtimesettings: 'settings', changesets: 'settings',
+        clickhouse: 'dwdashboard', dwmetrics: 'dwdashboard', runtimesettings: 'settings', changesets: 'settings',
         'prompt-lab': 'chat-test',
       };
       const navTab = navParent[tab] || tab;
@@ -1119,6 +1121,7 @@ const adminHTML = `<!doctype html>
           case 'mykeys':    await renderMyKeys(); break;
           case 'dwdashboard': rest[0] === 'clickhouse' ? await renderClickHouse() : await renderDWDashboard(); break;
           case 'clickhouse': await renderClickHouse(); break; // legacy alias for #/dwdashboard/clickhouse
+          case 'dwmetrics': await renderDWMetrics(); break;
           case 'runtimesettings': await renderRuntimeSettings(); break; // legacy alias for #/settings/runtime
           case 'settings':
             if (rest[0] === 'runtime') {
@@ -5382,6 +5385,74 @@ const adminHTML = `<!doctype html>
       } catch (err) {
         openModal('Routing Review 처리 오류', '<div class="error-line">' + escapeHTML(err.message) + '</div>');
       }
+    };
+
+    // ---------- DW Metric Catalog: 표준 지표 사전 ----------
+    async function renderDWMetrics() {
+      const view = document.getElementById('view');
+      view.innerHTML = section('지표 사전', '<div class="empty">불러오는 중...</div>');
+      let d;
+      try { d = await api('/admin/dw/metrics'); }
+      catch (e) { view.innerHTML = section('지표 사전', '<div class="card-body" style="padding:16px"><p class="muted">' + escapeHTML(e.message) + '</p></div>'); return; }
+      const ms = d.metrics || [];
+      const sens = (s) => s === 'restricted' ? '<span class="status error" style="font-size:9px">restricted</span>' : (s === 'public' ? '<span class="status" style="font-size:9px">public</span>' : '<span class="status warn" style="font-size:9px">internal</span>');
+      const rows = ms.length ? ms.map(m => '<tr><td><strong>' + escapeHTML(m.metric_key) + '</strong>' + (m.name_ko ? '<div class="muted" style="font-size:11px">' + escapeHTML(m.name_ko) + '</div>' : '') + '</td>' +
+        '<td>' + (m.enabled ? '<span class="status">on</span>' : '<span class="status warn">off</span>') + '</td>' +
+        '<td>' + sens(m.sensitivity) + '</td>' +
+        '<td class="muted" style="font-size:11px">' + escapeHTML((m.dimensions || []).join(', ')) + '</td>' +
+        '<td class="muted" style="font-size:11px">' + escapeHTML(m.owner || '-') + ' · v' + (m.version || 1) + '</td>' +
+        '<td><button type="button" class="secondary" style="font-size:11px" onclick="dwMetricValidate(\'' + escapeAttr(m.id) + '\')">검증</button> ' +
+        '<button type="button" class="secondary" style="font-size:11px" onclick="dwMetricDelete(\'' + escapeAttr(m.id) + '\')">삭제</button></td></tr>' +
+        '<tr><td colspan="6"><div id="dwm-' + escapeAttr(m.id) + '"></div></td></tr>').join('') : '<tr><td colspan="6" class="muted">표준 지표가 없습니다. ClickHouse fact 위에 표준 지표를 정의하세요.</td></tr>';
+      view.innerHTML = section('지표 사전', '<p class="muted" style="font-size:12px">ClickHouse fact를 운영자가 이해 가능한 표준 지표로 관리합니다. 쿼리는 SELECT 전용·표준 fact 테이블·집계 컬럼만 허용(민감 원문 컬럼 금지).</p>') +
+        card('표준 지표', '<div class="card-body"><table><thead><tr><th>지표</th><th>활성</th><th>민감도</th><th>차원</th><th>owner</th><th></th></tr></thead><tbody>' + rows + '</tbody></table></div>') +
+        card('새 지표 정의',
+          '<div class="card-body">' +
+          '<div style="display:flex;gap:6px;margin-bottom:6px"><input id="dwm-key" placeholder="metric_key (예: daily_cost_by_team)" style="flex:1"><input id="dwm-name" placeholder="한국어 이름" style="flex:1"></div>' +
+          '<input id="dwm-desc" placeholder="설명" style="width:100%;margin-bottom:6px">' +
+          '<div style="display:flex;gap:6px;margin-bottom:6px"><input id="dwm-dims" placeholder="차원(쉼표, 예: team,model,day)" style="flex:1"><input id="dwm-owner" placeholder="owner" style="width:140px">' +
+          '<select id="dwm-sens"><option value="internal">internal</option><option value="public">public</option><option value="restricted">restricted</option></select>' +
+          '<label style="font-size:11px"><input type="checkbox" id="dwm-enabled"> 활성</label></div>' +
+          '<textarea id="dwm-query" placeholder="query_template (SELECT ... FROM ai_request_fact ...)" style="width:100%;height:72px"></textarea>' +
+          '<div style="margin-top:6px"><button type="button" onclick="dwMetricSave()">저장</button></div>' +
+          '<div id="dwm-save-out" style="margin-top:6px"></div>' +
+          '</div>');
+    }
+    function dwRenderValidation(v) {
+      if (!v) return '';
+      const errs = (v.errors || []).map(e => '<div class="status error" style="font-size:10px">' + escapeHTML(e) + '</div>').join('');
+      const warns = (v.warnings || []).map(wn => '<div class="status warn" style="font-size:10px">' + escapeHTML(wn) + '</div>').join('');
+      return '<div style="border:1px solid var(--border);border-radius:6px;padding:6px;margin:4px 0">' +
+        '<strong style="font-size:11px">검증: ' + (v.ok ? '<span class="status">통과</span>' : '<span class="status error">실패</span>') + '</strong>' +
+        errs + warns +
+        ((v.referenced_tables || []).length ? '<div class="muted" style="font-size:10px">참조 테이블: ' + escapeHTML(v.referenced_tables.join(', ')) + '</div>' : '') +
+        '<div class="muted" style="font-size:10px">' + escapeHTML(v.note || '') + '</div></div>';
+    }
+    window.dwMetricSave = async () => {
+      const out = document.getElementById('dwm-save-out');
+      const key = (document.getElementById('dwm-key').value || '').trim();
+      if (!key) { if (out) out.innerHTML = '<span class="status error">metric_key 필수</span>'; return; }
+      const dims = (document.getElementById('dwm-dims').value || '').split(',').map(x => x.trim()).filter(Boolean);
+      const body = { metric_key: key, name_ko: (document.getElementById('dwm-name').value || '').trim(), description: (document.getElementById('dwm-desc').value || '').trim(),
+        query_template: document.getElementById('dwm-query').value, dimensions: dims, owner: (document.getElementById('dwm-owner').value || '').trim(),
+        sensitivity: document.getElementById('dwm-sens').value, enabled: document.getElementById('dwm-enabled').checked };
+      try { const r = await api('/admin/dw/metrics', { method: 'POST', body: JSON.stringify(body) }); if (out) out.innerHTML = dwRenderValidation(r.validation); await renderDWMetrics(); }
+      catch (e) {
+        let msg = e.message;
+        try { const j = JSON.parse(e.body || '{}'); if (j.validation) { if (out) out.innerHTML = dwRenderValidation(j.validation); return; } } catch (_) {}
+        if (out) out.innerHTML = '<span class="status error">' + escapeHTML(msg) + '</span>';
+      }
+    };
+    window.dwMetricValidate = async (id) => {
+      const host = document.getElementById('dwm-' + id);
+      if (host) host.innerHTML = '<span class="muted">검증 중...</span>';
+      try { const r = await api('/admin/dw/metrics/' + encodeURIComponent(id) + '/validate', { method: 'POST', body: '{}' }); if (host) host.innerHTML = dwRenderValidation(r.validation); }
+      catch (e) { if (host) host.innerHTML = '<span class="status error">' + escapeHTML(e.message) + '</span>'; }
+    };
+    window.dwMetricDelete = async (id) => {
+      if (!confirm('이 지표를 삭제할까요?')) return;
+      try { await api('/admin/dw/metrics/' + encodeURIComponent(id), { method: 'DELETE' }); await renderDWMetrics(); }
+      catch (e) { alert(e.message); }
     };
 
     // ---------- 운영 변경관리 센터: Change Set (dry-run/승인/적용/롤백) ----------

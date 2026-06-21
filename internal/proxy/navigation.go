@@ -61,7 +61,7 @@ var childTabs = map[string][]string{
 	"users":       {"teams", "ips", "quotas"},
 	"safety":      {"skills", "skill-studio", "modeldeprecations"},
 	"mcp":         {"agents", "vcs"},
-	"dwdashboard": {"clickhouse"},
+	"dwdashboard": {"clickhouse", "dwmetrics"},
 	"settings":    {"runtimesettings", "errors", "changesets"},
 }
 
