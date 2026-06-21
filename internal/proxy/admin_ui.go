@@ -1101,6 +1101,7 @@ const adminHTML = `<!doctype html>
           case 'skill-graph': await renderSkillGraph(); break;
           case 'chargeback': await renderChargeback(); break;
           case 'prompt-debt': await renderPromptDebt(); break;
+          case 'app-templates': await renderAppTemplates(); break;
           case 'security':  await renderSecurityHome(); break;
           case 'billing':   await renderBillingHome(); break;
           case 'ops-home': await renderOpsHome(); break;
@@ -9685,6 +9686,36 @@ const adminHTML = `<!doctype html>
           '<div class="card-body">' + table +
           '<p class="muted" style="font-size:11px;margin-top:6px">' + escapeHTML(d.note || '') + '</p></div>');
       makeSortable && makeSortable('#view table', 'prompt-debt');
+    }
+
+    // renderAppTemplates shows the built-in AI work-app starter catalog with one-click instantiate.
+    async function renderAppTemplates() {
+      const view = document.getElementById('view');
+      view.innerHTML = section('앱 템플릿', '<div class="empty">불러오는 중...</div>');
+      let d;
+      try { d = await api('/admin/app-templates'); }
+      catch (e) { view.innerHTML = section('앱 템플릿', '<div class="card-body" style="padding:16px"><p class="muted">' + escapeHTML(e.message) + '</p></div>'); return; }
+      window.appTemplateInstantiate = async (key) => {
+        try {
+          const res = await api('/admin/app-templates/instantiate', { method: 'POST', body: JSON.stringify({ key }) });
+          openModal('업무 앱 생성됨', '<p>' + escapeHTML(res.note || '') + '</p><div style="margin-top:8px"><a href="#/apps"><button type="button">AI 업무 앱으로 이동</button></a></div>');
+        } catch (e) { openModal('생성 오류', '<div class="error-line">' + escapeHTML(e.message) + '</div>'); }
+      };
+      const tpls = d.templates || [];
+      const cards = tpls.map(t => {
+        const comps = (t.components || []).map(c => '<span class="pill">' + escapeHTML(c.label || c.kind) + '</span>').join(' ');
+        return '<div style="border:1px solid var(--border);border-radius:6px;padding:12px;margin:6px 0">' +
+          '<div style="display:flex;justify-content:space-between;align-items:center">' +
+          '<strong style="font-size:14px">' + escapeHTML(t.icon || '') + ' ' + escapeHTML(t.title) + '</strong>' +
+          '<span><span class="muted" style="font-size:11px">' + escapeHTML(t.category || '') + '</span> ' +
+          '<button type="button" style="font-size:11px" onclick="appTemplateInstantiate(\'' + escapeAttr(t.key) + '\')">앱 생성</button></span></div>' +
+          '<div class="muted" style="font-size:12px;margin:4px 0">' + escapeHTML(t.description) + '</div>' +
+          '<div style="font-size:11px">' + comps + '</div>' +
+        '</div>';
+      }).join('');
+      view.innerHTML = section('앱 템플릿 (AI App Template Catalog)', '') +
+        '<p class="muted" style="font-size:12px;padding:0 14px">' + escapeHTML(d.note || '') + '</p>' +
+        card('업무 앱 시작 템플릿 (' + tpls.length + ')', '<div class="card-body">' + (cards || '<p class="muted">템플릿이 없습니다.</p>') + '</div>');
     }
 
     // renderMeHome is the personalized landing for non-operators: their own usage, cost,

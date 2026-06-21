@@ -238,6 +238,8 @@ var apiEndpoints = []apiEndpoint{
 	{"/admin/skills/dependency-graph", []string{"get"}, "skills", "Skill→model/tool/team/policy dependency graph (?skill=)", false},
 
 	// ---- admin: data products ----
+	{"/admin/app-templates", []string{"get"}, "data-products", "Built-in AI work-app starter templates", false},
+	{"/admin/app-templates/instantiate", []string{"post"}, "data-products", "Create a work app from a template", false},
 	{"/admin/data-products", []string{"get", "post", "delete"}, "data-products", "Curate/publish the data product catalog", false},
 	{"/admin/data-products/candidates", []string{"get"}, "data-products", "Suggest products from recurring Text2SQL questions (no raw SQL)", false},
 	{"/admin/data-products/requests", []string{"get", "post"}, "data-products", "List / decide data product access requests", false},
