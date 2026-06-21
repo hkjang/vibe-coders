@@ -75,6 +75,7 @@ var apiEndpoints = []apiEndpoint{
 	{"/admin/anomalies", []string{"get"}, "admin", "Request anomalies", false},
 	{"/admin/incidents", []string{"get"}, "admin", "Incidents", false},
 	{"/admin/incidents/candidates", []string{"get"}, "admin", "Incident candidates (Incident Copilot)", false},
+	{"/admin/sandbox/preview", []string{"post"}, "admin", "Sensitive-workflow sandbox preview (safety gates, no execution)", false},
 	{"/admin/remediation/playbooks", []string{"get"}, "admin", "Auto-remediation action candidates (dry-run/impact)", false},
 	{"/admin/remediation/apply", []string{"post"}, "admin", "Apply an approved reversible remediation action (audited, rollback)", false},
 	{"/admin/suggest", []string{"get"}, "admin", "Autocomplete suggestions", false},

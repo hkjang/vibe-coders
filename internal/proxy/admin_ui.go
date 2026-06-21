@@ -1102,6 +1102,7 @@ const adminHTML = `<!doctype html>
           case 'chargeback': await renderChargeback(); break;
           case 'prompt-debt': await renderPromptDebt(); break;
           case 'app-templates': await renderAppTemplates(); break;
+          case 'sandbox': renderSandbox(); break;
           case 'security':  await renderSecurityHome(); break;
           case 'billing':   await renderBillingHome(); break;
           case 'ops-home': await renderOpsHome(); break;
@@ -9716,6 +9717,54 @@ const adminHTML = `<!doctype html>
       view.innerHTML = section('앱 템플릿 (AI App Template Catalog)', '') +
         '<p class="muted" style="font-size:12px;padding:0 14px">' + escapeHTML(d.note || '') + '</p>' +
         card('업무 앱 시작 템플릿 (' + tpls.length + ')', '<div class="card-body">' + (cards || '<p class="muted">템플릿이 없습니다.</p>') + '</div>');
+    }
+
+    // renderSandbox previews a candidate sensitive request through safety gates without executing.
+    function renderSandbox() {
+      const view = document.getElementById('view');
+      window.sandboxRun = async () => {
+        const body = {
+          kind: document.getElementById('sb-kind').value,
+          model: document.getElementById('sb-model').value.trim(),
+          team: document.getElementById('sb-team').value.trim(),
+          content: document.getElementById('sb-content').value,
+          sql: document.getElementById('sb-sql').value.trim(),
+          server: document.getElementById('sb-server').value.trim(),
+          tool: document.getElementById('sb-tool').value.trim(),
+        };
+        const host = document.getElementById('sb-result');
+        host.innerHTML = '<div class="empty">검증 중...</div>';
+        try {
+          const r = await api('/admin/sandbox/preview', { method: 'POST', body: JSON.stringify(body) });
+          const verdict = r.would_block ? '<span class="status error">차단 예상</span>' : '<span class="status">통과 예상</span>';
+          const c = r.checks || {};
+          const lines = [];
+          if (c.prompt_injection) lines.push(row('프롬프트 인젝션', '심각도 ' + (c.prompt_injection.severity || 0) + (c.prompt_injection.families && c.prompt_injection.families.length ? ' · ' + escapeHTML(c.prompt_injection.families.join(', ')) : '')));
+          if (c.secrets) lines.push(row('Secret 탐지', (c.secrets.count || 0) + '건' + (c.secrets.types && c.secrets.types.length ? ' (' + escapeHTML(c.secrets.types.join(', ')) + ')' : '')));
+          if (c.policy) lines.push(row('정책', escapeHTML(c.policy.outcome) + (c.policy.reason ? ' — ' + escapeHTML(c.policy.reason) : '')));
+          if (c.text2sql_validation) lines.push(row('SQL 검증', (c.text2sql_validation.ok ? '통과' : '실패: ' + escapeHTML(c.text2sql_validation.reason || ''))));
+          if (c.mcp_tool_risk) lines.push(row('MCP 도구 위험', escapeHTML(c.mcp_tool_risk.risk_level) + ' / ' + escapeHTML(c.mcp_tool_risk.action)));
+          host.innerHTML = '<div style="border:1px solid var(--border);border-radius:6px;padding:10px;margin-top:8px">' +
+            '<strong>결과: ' + verdict + '</strong>' +
+            (r.reasons && r.reasons.length ? '<div class="muted" style="font-size:12px;margin:4px 0">' + escapeHTML(r.reasons.join(' · ')) + '</div>' : '') +
+            '<div class="kv" style="margin-top:6px">' + lines.join('') + '</div>' +
+            '<p class="muted" style="font-size:11px;margin-top:6px">' + escapeHTML(r.note || '') + '</p></div>';
+        } catch (e) { host.innerHTML = '<span class="status error">' + escapeHTML(e.message) + '</span>'; }
+      };
+      view.innerHTML = section('민감 워크플로 샌드박스 (Sandbox Preview)',
+        '<div class="card-body" style="padding:12px 14px">' +
+        '<p class="muted" style="font-size:12px;margin:0 0 8px">고위험 요청(chat/Text2SQL/MCP)을 실제 실행 없이 안전 게이트(정책·인젝션·secret·SQL 검증·MCP 위험)에만 통과시켜 결과를 미리 봅니다. 입력 원문은 저장되지 않습니다.</p>' +
+        '<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px">' +
+          '<label class="ct-field"><span>종류</span><select id="sb-kind"><option value="chat">chat</option><option value="text2sql">text2sql</option><option value="mcp">mcp</option></select></label>' +
+          '<label class="ct-field"><span>모델</span><input id="sb-model" placeholder="gpt-4.1"></label>' +
+          '<label class="ct-field"><span>팀</span><input id="sb-team" placeholder="team id (선택)"></label>' +
+          '<label class="ct-field"><span>MCP server</span><input id="sb-server" placeholder="server (선택)"></label>' +
+          '<label class="ct-field"><span>MCP tool</span><input id="sb-tool" placeholder="tool (선택)"></label>' +
+        '</div>' +
+        '<label class="ct-field" style="margin-top:6px"><span>프롬프트/질문 (선택)</span><textarea id="sb-content" rows="3" placeholder="검증할 프롬프트 텍스트"></textarea></label>' +
+        '<label class="ct-field"><span>SQL (text2sql, 선택)</span><textarea id="sb-sql" rows="2" placeholder="SELECT ..."></textarea></label>' +
+        '<div style="margin-top:8px"><button type="button" onclick="sandboxRun()">샌드박스 검증</button></div>' +
+        '<div id="sb-result"></div></div>');
     }
 
     // renderMeHome is the personalized landing for non-operators: their own usage, cost,

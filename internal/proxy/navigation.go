@@ -60,6 +60,7 @@ var menuRegistry = []menuItem{
 	// 보안 영역.
 	{ID: "sec.dashboard", Label: "보안 대시보드", Path: "#/security", Tab: "security", Group: "security", Scopes: []string{"security:read"}, DataScope: "all"},
 	{ID: "sec.safety", Label: "안전", Path: "#/safety", Tab: "safety", Group: "security", Scopes: []string{"security:read"}, DataScope: "all"},
+	{ID: "sec.sandbox", Label: "민감 샌드박스", Path: "#/sandbox", Tab: "sandbox", Group: "security", Scopes: []string{"admin:read"}, DataScope: "all"},
 	// 비용 영역.
 	{ID: "bill.dashboard", Label: "비용 대시보드", Path: "#/billing", Tab: "billing", Group: "billing", Scopes: []string{"admin:read"}, DataScope: "all"},
 	// 설정 영역.
