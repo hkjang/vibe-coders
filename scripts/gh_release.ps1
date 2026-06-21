@@ -1,7 +1,8 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [string]$Version,
-    [string]$PrevVersion = "v0.50.23"
+    [string]$PrevVersion = "v0.50.23",
+    [switch]$Edit  # update an existing release's notes instead of creating it (no asset upload)
 )
 
 $ErrorActionPreference = "Stop"
@@ -90,9 +91,15 @@ if (-not (Test-Path $releaseDir)) {
     New-Item -ItemType Directory -Path $releaseDir -Force | Out-Null
 }
 
-# Set content as UTF-8
-Set-Content -Path $notesPath -Value $notes -Encoding utf8
+# Write as UTF-8 WITHOUT BOM via .NET so the GitHub release body has no leading BOM
+# and is identical regardless of which PowerShell edition runs this script.
+[System.IO.File]::WriteAllText($notesPath, $notes, (New-Object System.Text.UTF8Encoding($false)))
 
-gh release create $Version "release\ai-coding-proxy-gateway-$Version.tar.gz" "release\ai-coding-proxy-gateway-$Version.tar.gz.sha256" "release\README-offline-$Version.md" "release\AI_Proxy_Gateway_Report.pdf" --repo hkjang/vibe-coders --title "$Version - AI Proxy Gateway" --notes-file $notesPath
+if ($Edit) {
+    # Re-publish corrected notes for an already-created release (no asset re-upload).
+    gh release edit $Version --repo hkjang/vibe-coders --notes-file $notesPath
+} else {
+    gh release create $Version "release\ai-coding-proxy-gateway-$Version.tar.gz" "release\ai-coding-proxy-gateway-$Version.tar.gz.sha256" "release\README-offline-$Version.md" "release\AI_Proxy_Gateway_Report.pdf" --repo hkjang/vibe-coders --title "$Version - AI Proxy Gateway" --notes-file $notesPath
+}
 
 Remove-Item $notesPath -ErrorAction SilentlyContinue
