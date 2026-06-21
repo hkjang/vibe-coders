@@ -132,6 +132,7 @@ var apiEndpoints = []apiEndpoint{
 	{"/admin/cost", []string{"get"}, "cost", "Cost guard overview", false},
 	{"/admin/cost/predict", []string{"get", "post"}, "cost", "Predict request cost", false},
 	{"/admin/cost/allocation", []string{"get"}, "cost", "Cost allocation by dimension", false},
+	{"/admin/cost/chargeback-pack", []string{"get"}, "cost", "Monthly multi-dimension chargeback pack (?month=&dimensions=&format=csv)", false},
 	{"/admin/cost/anomalies", []string{"get"}, "cost", "Cost anomaly detection", false},
 	{"/admin/budgets", []string{"get", "post"}, "cost", "List / create budgets", false},
 	{"/admin/budgets/{id}", []string{"put", "delete"}, "cost", "Update / delete a budget", false},

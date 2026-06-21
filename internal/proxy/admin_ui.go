@@ -1099,6 +1099,7 @@ const adminHTML = `<!doctype html>
           case 'policy-advisor': await renderPolicyAdvisor(); break;
           case 'narrative': await renderNarrativeReport(); break;
           case 'skill-graph': await renderSkillGraph(); break;
+          case 'chargeback': await renderChargeback(); break;
           case 'security':  await renderSecurityHome(); break;
           case 'billing':   await renderBillingHome(); break;
           case 'ops-home': await renderOpsHome(); break;
@@ -9606,6 +9607,48 @@ const adminHTML = `<!doctype html>
         '<p class="muted" style="font-size:12px;padding:0 14px">' + escapeHTML(d.note || '') + ' · 노드 ' + (d.nodes || []).length + '개 · 엣지 ' + (d.edges || []).length + '개</p>' +
         card('production Skill 의존성 (' + skills.length + ')',
           '<div class="card-body">' + (cards || '<p class="muted">production Skill이 없습니다.</p>') + '</div>');
+    }
+
+    // renderChargeback shows the monthly multi-dimension cost-allocation pack with CSV export.
+    async function renderChargeback() {
+      const view = document.getElementById('view');
+      const month = (window._chargebackMonth || '');
+      view.innerHTML = section('비용 배부 팩', '<div class="empty">불러오는 중...</div>');
+      let d;
+      try { d = await api('/admin/cost/chargeback-pack' + (month ? '?month=' + encodeURIComponent(month) : '')); }
+      catch (e) { view.innerHTML = section('비용 배부 팩', '<div class="card-body" style="padding:16px"><p class="muted">' + escapeHTML(e.message) + '</p></div>'); return; }
+      window.chargebackReload = () => {
+        const v = document.getElementById('cb-month').value.trim();
+        window._chargebackMonth = v;
+        renderChargeback();
+      };
+      window.chargebackCSV = async () => {
+        try {
+          const res = await fetch('/admin/cost/chargeback-pack?format=csv' + (d.month ? '&month=' + encodeURIComponent(d.month) : ''), { headers: headers() });
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+          const blob = await res.blob();
+          const a = document.createElement('a');
+          a.href = URL.createObjectURL(blob);
+          a.download = 'chargeback-' + (d.month || 'month') + '.csv';
+          a.click();
+          URL.revokeObjectURL(a.href);
+        } catch (e) { openModal('CSV 오류', '<div class="error-line">' + escapeHTML(e.message) + '</div>'); }
+      };
+      const won = (v) => '₩' + fmt(Math.round(v || 0));
+      const labelOf = (dim) => ({ cost_center: '비용센터', project: '프로젝트', team: '팀', repo: '레포', branch: '브랜치', service: '서비스', model: '모델', provider: '프로바이더' })[dim] || dim;
+      const dims = (d.dimensions || []).map(cd => {
+        const rows = (cd.rows || []).map(r => '<tr><td>' + escapeHTML(r.key) + '</td><td data-num="' + r.requests + '">' + fmt(r.requests) + '</td><td>' + fmt(r.tokens) + '</td><td>' + won(r.cost_krw) + '</td><td>' + fmt(r.errors) + '</td></tr>').join('');
+        return card(labelOf(cd.dimension) + ' 배부 — 합계 ' + won(cd.total_cost_krw) + ' / ' + fmt(cd.total_requests) + '건',
+          '<div class="card-body">' + (rows
+            ? '<table><thead><tr><th>' + labelOf(cd.dimension) + '</th><th>요청</th><th>토큰</th><th>비용</th><th>오류</th></tr></thead><tbody>' + rows + '</tbody></table>'
+            : '<p class="muted">데이터가 없습니다.</p>') + '</div>');
+      }).join('');
+      view.innerHTML = section('비용 배부 팩 (Chargeback Pack) — ' + escapeHTML(d.month || ''),
+        '<div style="padding:8px 14px;display:flex;gap:8px;align-items:center">' +
+        '<input id="cb-month" placeholder="YYYY-MM (비우면 이번 달)" value="' + escapeAttr(d.month || '') + '" style="width:200px">' +
+        '<button type="button" onclick="chargebackReload()">조회</button>' +
+        '<button type="button" class="secondary" onclick="chargebackCSV()">CSV 다운로드</button></div>') +
+        '<p class="muted" style="font-size:12px;padding:0 14px">' + escapeHTML(d.note || '') + '</p>' + dims;
     }
 
     // renderMeHome is the personalized landing for non-operators: their own usage, cost,

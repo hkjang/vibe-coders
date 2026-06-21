@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -270,6 +271,72 @@ func (s *SQLStore) CostAllocation(ctx context.Context, dimension string, since t
 	}
 	defer rows.Close()
 
+	out := []CostAllocationRow{}
+	for rows.Next() {
+		var row CostAllocationRow
+		if err := rows.Scan(&row.Key, &row.Requests, &row.Tokens, &row.CostKRW, &row.Errors); err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+
+// chargebackColumns extends costAllocationColumns with a team dimension (resolved via the
+// owning API key). Used by the monthly chargeback pack.
+var chargebackColumns = map[string]string{
+	"repo":        "r.repo",
+	"branch":      "r.branch",
+	"project":     "r.project",
+	"service":     "r.service",
+	"cost_center": "r.cost_center",
+	"model":       "r.model",
+	"provider":    "r.provider",
+	"team":        "k.team",
+}
+
+// ChargebackDimensions lists the dimensions CostAllocationWindow accepts.
+func ChargebackDimensions() []string {
+	return []string{"cost_center", "project", "team", "repo", "branch", "service", "model", "provider"}
+}
+
+// CostAllocationWindow attributes requests/tokens/cost/errors to buckets of `dimension` over
+// [since, until). A zero `until` means "no upper bound". Supports a team dimension (via the
+// owning API key). Mirrors CostAllocation but with a bounded window for monthly chargeback.
+func (s *SQLStore) CostAllocationWindow(ctx context.Context, dimension string, since, until time.Time, limit int) ([]CostAllocationRow, error) {
+	col, ok := chargebackColumns[dimension]
+	if !ok {
+		return nil, fmt.Errorf("unsupported allocation dimension %q", dimension)
+	}
+	if limit <= 0 || limit > 500 {
+		limit = 200
+	}
+	where := []string{"r.created_at >= ?"}
+	args := []any{since.UTC().Format(time.RFC3339Nano)}
+	if !until.IsZero() {
+		where = append(where, "r.created_at < ?")
+		args = append(args, until.UTC().Format(time.RFC3339Nano))
+	}
+	query := s.bind(fmt.Sprintf(`
+		SELECT COALESCE(NULLIF(%s, ''), '(unset)') AS key,
+			COUNT(r.id),
+			COALESCE(SUM(t.total_tokens), 0),
+			COALESCE(SUM(t.estimated_cost), 0),
+			COALESCE(SUM(CASE WHEN r.status_code >= 400 THEN 1 ELSE 0 END), 0)
+		FROM request_logs r
+		LEFT JOIN token_usage t ON t.request_id = r.id
+		LEFT JOIN api_keys k ON k.id = r.api_key_id
+		WHERE %s
+		GROUP BY COALESCE(NULLIF(%s, ''), '(unset)')
+		ORDER BY 4 DESC
+		LIMIT %d
+	`, col, strings.Join(where, " AND "), col, limit))
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
 	out := []CostAllocationRow{}
 	for rows.Next() {
 		var row CostAllocationRow
