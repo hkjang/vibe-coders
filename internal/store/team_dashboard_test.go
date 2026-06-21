@@ -80,7 +80,9 @@ func TestTeamPopularSkillsAndTemplateCandidates(t *testing.T) {
 	defer db.Close()
 	ctx := context.Background()
 	now := time.Now().UTC()
-	base := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC).Add(2 * time.Hour)
+	// Anchor the cutoff at the start of today so RecordSkillRun's now-stamped rows are always
+	// >= base (a +2h offset broke the test when run between 00:00–02:00 UTC).
+	base := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
 
 	// u1,u2 in team_platform; u3 in team_other.
 	for _, k := range []struct{ id, user, team string }{

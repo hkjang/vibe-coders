@@ -297,6 +297,17 @@ func (s *Server) handleSkillStudioReadiness(w http.ResponseWriter, r *http.Reque
 		Key: "security_scan", Label: "보안 스캔(high 0건)", Required: true, OK: scanOK,
 		Detail: "high 심각도 발견 시 프로덕션 차단",
 	})
+	// Model-fitness gate (v0.52.3): high-risk (or opt-in) skills need ≥N passing fitness
+	// evidence records. Surface it here so the wizard reflects the real promotion gate.
+	fitnessPassing := 0
+	if modelFitnessRequired(sk) {
+		fitnessPassing, _ = s.db.CountPassingSkillFitnessEvidence(r.Context(), name)
+		checks = append(checks, policyCheck{
+			Key: "model_fitness", Label: "모델 적합성 근거(" + itoaProxy(skillFitnessMinEvidence) + "건+)", Required: true,
+			OK:     fitnessPassing >= skillFitnessMinEvidence,
+			Detail: "high 위험도(또는 require_model_fitness) 스킬은 멀티모델/Golden/테스트케이스 통과 근거 " + itoaProxy(skillFitnessMinEvidence) + "건 이상 필요 (현재 " + itoaProxy(fitnessPassing) + "건)",
+		})
+	}
 
 	allReady := true
 	for _, c := range checks {
@@ -316,9 +327,12 @@ func (s *Server) handleSkillStudioReadiness(w http.ResponseWriter, r *http.Reque
 		"name":            sk.Name,
 		"status":          sk.Status,
 		"next_status":     nextStatus,
-		"checks":          checks,
-		"production_ready": allReady,
-		"scan":            scan,
+		"checks":           checks,
+		"production_ready":  allReady,
+		"scan":             scan,
+		"fitness_required": modelFitnessRequired(sk),
+		"fitness_passing":  fitnessPassing,
+		"fitness_threshold": skillFitnessMinEvidence,
 	})
 }
 
