@@ -1095,6 +1095,7 @@ const adminHTML = `<!doctype html>
           case 'data-products': await renderDataProducts(); break;
           case 'remediation': await renderRemediation(); break;
           case 'scorecard': await renderTeamScorecard(); break;
+          case 'model-contracts': await renderModelContracts(); break;
           case 'security':  await renderSecurityHome(); break;
           case 'billing':   await renderBillingHome(); break;
           case 'ops-home': await renderOpsHome(); break;
@@ -9434,6 +9435,83 @@ const adminHTML = `<!doctype html>
         URL.revokeObjectURL(a.href);
       } catch (e) { openModal('CSV 오류', '<div class="error-line">' + escapeHTML(e.message) + '</div>'); }
     };
+
+    // renderModelContracts manages per-task-type model quality contracts and runs a model
+    // against them before adoption (model swap / auto-routing / MCP agentic model).
+    async function renderModelContracts() {
+      const view = document.getElementById('view');
+      view.innerHTML = section('모델 계약', '<div class="empty">불러오는 중...</div>');
+      let d;
+      try { d = await api('/admin/models/contracts'); }
+      catch (e) { view.innerHTML = section('모델 계약', '<div class="card-body" style="padding:16px"><p class="muted">' + escapeHTML(e.message) + '</p></div>'); return; }
+      window.mconAdd = async (event) => {
+        event.preventDefault();
+        const name = document.getElementById('mcon-name').value.trim();
+        if (!name) return;
+        const num = (id) => { const v = parseFloat(document.getElementById(id).value); return isNaN(v) ? 0 : v; };
+        try {
+          await api('/admin/models/contracts', { method: 'POST', body: JSON.stringify({
+            name, task_type: document.getElementById('mcon-task').value.trim(),
+            min_quality_score: num('mcon-q'), min_golden_pass_rate: num('mcon-g'),
+            min_success_rate: num('mcon-s'), max_latency_ms: num('mcon-l'), max_avg_cost_krw: num('mcon-c'),
+          }) });
+          document.getElementById('mcon-form').reset();
+          renderModelContracts();
+        } catch (e) { alert('저장 오류: ' + e.message); }
+      };
+      window.mconDelete = async (id) => {
+        if (!confirm('계약을 삭제할까요?')) return;
+        try { await api('/admin/models/contracts?id=' + encodeURIComponent(id), { method: 'DELETE' }); renderModelContracts(); }
+        catch (e) { alert('삭제 오류: ' + e.message); }
+      };
+      window.mconRun = async () => {
+        const model = document.getElementById('mcon-run-model').value.trim();
+        if (!model) { alert('검증할 모델명을 입력하세요.'); return; }
+        const host = document.getElementById('mcon-run-result');
+        host.innerHTML = '<div class="empty">검증 중...</div>';
+        try {
+          const r = await api('/admin/models/contracts/run', { method: 'POST', body: JSON.stringify({ model }) });
+          const vBadge = (v) => v === 'pass' ? '<span class="status">PASS</span>' : (v === 'warn' ? '<span class="status warn">WARN</span>' : (v === 'fail' ? '<span class="status error">FAIL</span>' : '<span class="muted">데이터없음</span>'));
+          const results = (r.results || []).map(res => {
+            const checks = (res.checks || []).map(c => '<tr><td>' + escapeHTML(c.dimension) + '</td><td>' + vBadge(c.status) + '</td><td>' + (c.actual == null ? '-' : escapeHTML(String(c.actual))) + '</td><td class="muted">' + escapeHTML(String(c.threshold)) + '</td></tr>').join('');
+            return '<div style="border:1px solid var(--border);border-radius:6px;padding:8px;margin:4px 0">' +
+              '<strong>' + escapeHTML(res.contract_name) + '</strong> ' + vBadge(res.verdict) + (res.task_type ? ' <span class="muted">' + escapeHTML(res.task_type) + '</span>' : '') +
+              '<table style="margin-top:4px"><thead><tr><th>차원</th><th>판정</th><th>실측</th><th>임계</th></tr></thead><tbody>' + checks + '</tbody></table></div>';
+          }).join('');
+          const samples = (r.failing_samples || []).map(s => '<li><code>' + escapeHTML(s.fingerprint) + '</code> — ' + escapeHTML(s.reason) + '</li>').join('');
+          host.innerHTML = '<div style="border:1px solid var(--border);border-radius:6px;padding:8px;margin-top:6px">' +
+            '<strong>' + escapeHTML(r.model) + ' · 교체 ' + (r.replaceable ? '<span class="status">가능</span>' : '<span class="status error">보류</span>') + '</strong>' +
+            (results || '<p class="muted" style="font-size:12px">실행할 계약이 없습니다(계약을 먼저 추가하세요).</p>') +
+            (samples ? '<div style="margin-top:6px"><strong style="font-size:12px">실패 골든 샘플(원문 미노출)</strong><ul style="margin:4px 0;padding-left:18px;font-size:11px">' + samples + '</ul></div>' : '') +
+            '<p class="muted" style="font-size:11px;margin-top:4px">' + escapeHTML(r.note || '') + '</p></div>';
+        } catch (e) { host.innerHTML = '<span class="status error">' + escapeHTML(e.message) + '</span>'; }
+      };
+      const contracts = d.contracts || [];
+      const num = (v) => v > 0 ? fmt(v) : '<span class="muted">-</span>';
+      const list = contracts.length
+        ? '<table><thead><tr><th>이름</th><th>업무</th><th>최소품질</th><th>골든통과</th><th>성공률</th><th>최대지연</th><th>최대비용</th><th>사용</th><th></th></tr></thead><tbody>' +
+          contracts.map(c => '<tr><td>' + escapeHTML(c.name) + '</td><td class="muted">' + escapeHTML(c.task_type || '') + '</td><td>' + num(c.min_quality_score) + '</td><td>' + num(c.min_golden_pass_rate) + '</td><td>' + num(c.min_success_rate) + '</td><td>' + num(c.max_latency_ms) + '</td><td>' + num(c.max_avg_cost_krw) + '</td><td>' + (c.enabled ? '✓' : '-') + '</td><td><button type="button" class="danger" style="font-size:11px" onclick="mconDelete(\'' + escapeAttr(c.id) + '\')">삭제</button></td></tr>').join('') + '</tbody></table>'
+        : '<p class="muted">등록된 계약이 없습니다. 업무별 최소 품질 기준을 추가하세요.</p>';
+      view.innerHTML = section('모델 계약 (Model Contract Test)', '') +
+        card('계약 검증 실행',
+          '<div class="card-body"><div style="display:flex;gap:8px;align-items:center"><input id="mcon-run-model" placeholder="검증할 모델명 (예: gpt-4.1)" style="min-width:240px"><button type="button" onclick="mconRun()">계약 검증</button></div>' +
+          '<p class="muted" style="font-size:11px;margin-top:4px">관측된 모델 지표(최근 30일)를 활성 계약 임계값과 비교합니다. 모델 교체·자동 라우팅 변경 전에 실행하세요.</p>' +
+          '<div id="mcon-run-result"></div></div>') +
+        card('계약 목록 (임계값: 0 = 미적용)',
+          '<div class="card-body">' +
+          '<form class="inline-form" id="mcon-form" style="grid-template-columns: minmax(120px,1.2fr) minmax(100px,1fr) 90px 90px 90px 90px 90px 60px;">' +
+            '<input id="mcon-name" placeholder="계약 이름" required>' +
+            '<input id="mcon-task" placeholder="업무 유형">' +
+            '<input id="mcon-q" type="number" step="1" placeholder="품질≥">' +
+            '<input id="mcon-g" type="number" step="0.01" placeholder="골든≥(0-1)">' +
+            '<input id="mcon-s" type="number" step="0.01" placeholder="성공≥(0-1)">' +
+            '<input id="mcon-l" type="number" step="1" placeholder="지연≤ms">' +
+            '<input id="mcon-c" type="number" step="0.01" placeholder="비용≤KRW">' +
+            '<button type="submit">추가</button>' +
+          '</form>' + list + '</div>');
+      const form = document.getElementById('mcon-form');
+      if (form) form.addEventListener('submit', window.mconAdd);
+    }
 
     // renderMeHome is the personalized landing for non-operators: their own usage, cost,
     // models, failures, key alerts, risk, and recommendations — no operational metrics.

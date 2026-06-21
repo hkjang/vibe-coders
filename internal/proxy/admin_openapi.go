@@ -160,6 +160,8 @@ var apiEndpoints = []apiEndpoint{
 	{"/admin/routing/domain-review", []string{"get"}, "routing", "Domain routing review queue", false},
 	{"/admin/routing/domain-review/{id}", []string{"post"}, "routing", "Approve/reject domain routing review item", false},
 	{"/admin/models/quality", []string{"get"}, "routing", "Per-model coding quality", false},
+	{"/admin/models/contracts", []string{"get", "post", "delete"}, "routing", "Per-task-type model quality contracts", false},
+	{"/admin/models/contracts/run", []string{"post"}, "routing", "Run a model against its quality contract(s)", false},
 
 	// ---- admin: governance ----
 	{"/admin/policies", []string{"get", "post"}, "governance", "List / create governance policies", false},

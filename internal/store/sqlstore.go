@@ -1525,6 +1525,20 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 			created_at TEXT NOT NULL,
 			updated_at TEXT NOT NULL
 		)`,
+		`CREATE TABLE IF NOT EXISTS model_contracts (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL DEFAULT '',
+			task_type TEXT NOT NULL DEFAULT '',
+			min_quality_score REAL NOT NULL DEFAULT 0,
+			min_golden_pass_rate REAL NOT NULL DEFAULT 0,
+			min_success_rate REAL NOT NULL DEFAULT 0,
+			max_latency_ms INTEGER NOT NULL DEFAULT 0,
+			max_avg_cost_krw REAL NOT NULL DEFAULT 0,
+			enabled INTEGER NOT NULL DEFAULT 1,
+			created_by TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)`,
 		`CREATE TABLE IF NOT EXISTS data_product_access_requests (
 			id TEXT PRIMARY KEY,
 			product_key TEXT NOT NULL,
