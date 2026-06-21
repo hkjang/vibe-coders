@@ -133,6 +133,7 @@ func gatewayToolDefs() []mcpToolDef {
 		{Name: "gateway_chat", Description: "Gateway를 통해 chat completion을 실행합니다(기존 /v1 파이프라인·거버넌스·쿼터·라우팅 적용).", InputSchema: obj(`"model":{"type":"string"},"prompt":{"type":"string"},"messages":{"type":"array"}`)},
 		{Name: "gateway_run_skill", Description: "등록된 Skill을 적용해 chat을 실행합니다(X-Skill).", InputSchema: obj(`"skill":{"type":"string"},"prompt":{"type":"string"}`)},
 		{Name: "gateway_run_text2sql_preview", Description: "자연어 질문을 Text2SQL preview(SQL 생성, 미실행)로 처리합니다.", InputSchema: obj(`"question":{"type":"string"}`)},
+		{Name: "gateway_run_saved_report", Description: "권한 있는 저장 Text2SQL 리포트를 preview로 실행합니다.", InputSchema: obj(`"report_id":{"type":"string"}`)},
 		{Name: "gateway_list_models", Description: "사용 가능한 모델 목록과 가격을 조회합니다(호출자 권한 기준).", InputSchema: obj(``)},
 		{Name: "gateway_estimate_cost", Description: "모델과 토큰 수로 예상 비용(KRW)을 계산합니다.", InputSchema: obj(`"model":{"type":"string"},"input_tokens":{"type":"integer"},"output_tokens":{"type":"integer"}`)},
 		{Name: "gateway_check_quota", Description: "본인/키의 현재 한도 소진 상태를 조회합니다.", InputSchema: obj(``)},
@@ -220,6 +221,35 @@ func (s *Server) runGatewayTool(ctx context.Context, r *http.Request, apiKeyID s
 			return nil, err
 		}
 		return gatewayToolJSON(map[string]any{"mode": "preview", "content": content}), nil
+
+	case "gateway_run_saved_report":
+		var a struct {
+			ReportID string `json:"report_id"`
+		}
+		_ = json.Unmarshal(args, &a)
+		rep, found, err := s.db.GetText2SQLSavedReport(ctx, strings.TrimSpace(a.ReportID))
+		if err != nil {
+			return nil, err
+		}
+		if !found {
+			return nil, errGateway("saved report not found")
+		}
+		uid, team := "", ""
+		if authCtx != nil {
+			uid, team = authCtx.UserID, authCtx.TeamID
+		}
+		ownerOK := rep.CreatedBy == uid
+		teamOK := rep.Visibility == "team" && strings.EqualFold(rep.ApprovalStatus, "approved") && strings.EqualFold(rep.Team, team) && team != ""
+		if !ownerOK && !teamOK {
+			return nil, errGateway("you do not have access to this report")
+		}
+		msg, _ := json.Marshal(map[string]string{"role": "user", "content": rep.Question})
+		body := map[string]any{"model": "vibe/text2sql-preview", "messages": []json.RawMessage{msg}, "stream": false}
+		content, err := s.runGatewayChat(r, body, nil)
+		if err != nil {
+			return nil, err
+		}
+		return gatewayToolJSON(map[string]any{"report": rep.Name, "mode": "preview", "content": content}), nil
 
 	case "gateway_list_models":
 		pricing := s.pricingMap(ctx)
