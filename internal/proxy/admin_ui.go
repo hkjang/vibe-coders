@@ -1097,6 +1097,7 @@ const adminHTML = `<!doctype html>
           case 'scorecard': await renderTeamScorecard(); break;
           case 'model-contracts': await renderModelContracts(); break;
           case 'policy-advisor': await renderPolicyAdvisor(); break;
+          case 'narrative': await renderNarrativeReport(); break;
           case 'security':  await renderSecurityHome(); break;
           case 'billing':   await renderBillingHome(); break;
           case 'ops-home': await renderOpsHome(); break;
@@ -9546,6 +9547,37 @@ const adminHTML = `<!doctype html>
         '<p class="muted" style="font-size:12px;padding:0 14px">' + escapeHTML(d.note || '') + '</p>' +
         card('추천 정책 (' + sugs.length + ')',
           '<div class="card-body">' + (cards || '<p class="muted">현재 추천할 정책이 없습니다. 운영 신호가 안정적입니다. 👍</p>') + '</div>');
+    }
+
+    // renderNarrativeReport shows the auto-generated monthly operations report (prose sections).
+    async function renderNarrativeReport() {
+      const view = document.getElementById('view');
+      view.innerHTML = section('운영 보고서', '<div class="empty">생성 중...</div>');
+      let d;
+      try { d = await api('/admin/reports/narrative?window=30d'); }
+      catch (e) { view.innerHTML = section('운영 보고서', '<div class="card-body" style="padding:16px"><p class="muted">' + escapeHTML(e.message) + '</p></div>'); return; }
+      window.narrativeMD = async () => {
+        try {
+          const res = await fetch('/admin/reports/narrative?window=30d&format=md', { headers: headers() });
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+          const blob = await res.blob();
+          const a = document.createElement('a');
+          a.href = URL.createObjectURL(blob);
+          a.download = 'ai-gateway-report-' + new Date().toISOString().slice(0, 10) + '.md';
+          a.click();
+          URL.revokeObjectURL(a.href);
+        } catch (e) { openModal('다운로드 오류', '<div class="error-line">' + escapeHTML(e.message) + '</div>'); }
+      };
+      const secs = (d.sections || []).map(sec =>
+        '<div style="border:1px solid var(--border);border-radius:6px;padding:10px;margin:6px 0">' +
+        '<strong>' + escapeHTML(sec.title) + '</strong>' +
+        '<p style="margin:6px 0 0;line-height:1.6">' + escapeHTML(sec.narrative) + '</p></div>').join('');
+      const period = (d.period_start || '').slice(0, 10) + ' ~ ' + (d.period_end || '').slice(0, 10);
+      view.innerHTML = section('운영 보고서 (AI Usage Narrative) — ' + escapeHTML(period),
+        '<div style="padding:8px 14px"><button type="button" class="secondary" onclick="narrativeMD()">마크다운 다운로드</button></div>') +
+        card('월간 운영 서술 보고서',
+          '<div class="card-body">' + secs +
+          '<p class="muted" style="font-size:11px;margin-top:6px">' + escapeHTML(d.note || '') + '</p></div>');
     }
 
     // renderMeHome is the personalized landing for non-operators: their own usage, cost,

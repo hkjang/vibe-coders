@@ -86,6 +86,7 @@ var apiEndpoints = []apiEndpoint{
 	{"/admin/users/{id}", []string{"get", "patch"}, "admin", "User detail / update; {id}/report for weekly report", false},
 	{"/admin/teams", []string{"get", "post"}, "admin", "List / create teams", false},
 	{"/admin/teams/scorecard", []string{"get"}, "admin", "Per-team AI maturity scorecard (?window=&format=csv)", false},
+	{"/admin/reports/narrative", []string{"get"}, "admin", "Monthly narrative operations report (?window=&format=md)", false},
 	{"/admin/teams/{team}", []string{"get"}, "admin", "Team detail", false},
 	{"/admin/ips", []string{"get"}, "admin", "List client IPs", false},
 	{"/admin/ips/{ip}", []string{"get"}, "admin", "IP detail", false},
