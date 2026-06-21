@@ -58,6 +58,7 @@ var apiEndpoints = []apiEndpoint{
 	{"/me/data-products", []string{"get"}, "self-service", "Browse published data products visible to the caller's team", false},
 	{"/me/data-products/{key}/request-access", []string{"post"}, "self-service", "Request access to a data product", false},
 	{"/me/onboarding-pack", []string{"get"}, "self-service", "Client connection pack (?client=mcp|cursor|roo|cline|openai-sdk)", false},
+	{"/me/app-runs", []string{"get"}, "self-service", "Caller's AI work-app run history (?app_id=&limit=)", false},
 	{"/me/requests", []string{"get"}, "self-service", "List the caller's recent requests (safe metadata)", false},
 	{"/me/requests/{id}/receipt", []string{"get"}, "self-service", "Safe receipt for one of the caller's requests (no raw prompt/SQL)", false},
 

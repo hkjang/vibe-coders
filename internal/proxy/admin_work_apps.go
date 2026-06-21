@@ -2,9 +2,12 @@ package proxy
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"strings"
+	"time"
 
+	"vibe-coders/internal/audit"
 	"vibe-coders/internal/store"
 )
 
@@ -322,17 +325,59 @@ func (s *Server) handleUserAppRun(w http.ResponseWriter, r *http.Request, app st
 		writeOpenAIError(w, http.StatusUnprocessableEntity, "app has no components to run", "invalid_request_error", "empty_app")
 		return
 	}
+	start := time.Now()
+	body, _ := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 	plan := make([]map[string]any, 0, len(app.Components))
+	allResolved := true
 	for _, c := range app.Components {
 		ok, detail, _ := s.validateAppComponent(r, c)
+		if !ok {
+			allResolved = false
+		}
 		step := appComponentStep(c)
 		step["resolved"] = ok
 		step["detail"] = detail
 		plan = append(plan, step)
 	}
+	// Persist the run with safe metadata only (input hashed, no raw input/output stored).
+	status := "planned"
+	errClass := ""
+	if !allResolved {
+		errClass = "component_unresolved"
+	}
+	runID := newID("apprun")
+	inputHash := ""
+	if len(body) > 0 {
+		inputHash = audit.HashText(string(body))
+	}
+	_ = s.db.RecordAIAppRun(r.Context(), store.AIAppRun{
+		ID: runID, AppID: app.ID, UserID: claims.Subject, Team: claims.TeamID, Status: status,
+		InputHash: inputHash, OutputSummary: itoaProxy(len(app.Components)) + " components planned", ErrorClass: errClass,
+		LatencyMS: time.Since(start).Milliseconds(),
+	})
 	s.auditAuthEvent(r.Context(), "work_app_run", claims.Subject, "", claims.TeamID, "app="+app.ID)
 	writeJSON(w, http.StatusOK, map[string]any{
-		"app_id": app.ID, "title": app.Title, "plan": plan,
-		"note": "각 step의 endpoint로 호출해 앱을 실행하세요. 서버측 일괄 실행 오케스트레이션은 후속 예정.",
+		"run_id": runID, "app_id": app.ID, "title": app.Title, "status": status, "plan": plan,
+		"note": "각 step의 endpoint로 호출해 앱을 실행하세요. 실행 이력은 /me/app-runs에서 확인할 수 있습니다.",
 	})
+}
+
+// handleMyAppRuns lists the caller's own AI work-app run history (safe metadata only).
+// GET /me/app-runs[?app_id=&limit=]
+func (s *Server) handleMyAppRuns(w http.ResponseWriter, r *http.Request) {
+	userID, ok := s.meUserID(r)
+	if !ok {
+		writeOpenAIError(w, http.StatusUnauthorized, "could not identify caller", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	if r.Method != http.MethodGet {
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
+	runs, err := s.db.ListAIAppRuns(r.Context(), userID, strings.TrimSpace(r.URL.Query().Get("app_id")), intQuery(r, "limit", 50))
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "list_failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"runs": runs})
 }

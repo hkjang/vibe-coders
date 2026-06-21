@@ -1525,6 +1525,20 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 			created_at TEXT NOT NULL,
 			updated_at TEXT NOT NULL
 		)`,
+		`CREATE TABLE IF NOT EXISTS ai_app_runs (
+			id TEXT PRIMARY KEY,
+			app_id TEXT NOT NULL,
+			user_id TEXT NOT NULL DEFAULT '',
+			team TEXT NOT NULL DEFAULT '',
+			status TEXT NOT NULL DEFAULT 'planned',
+			input_hash TEXT NOT NULL DEFAULT '',
+			output_summary TEXT NOT NULL DEFAULT '',
+			error_class TEXT NOT NULL DEFAULT '',
+			latency_ms INTEGER NOT NULL DEFAULT 0,
+			cost_krw REAL NOT NULL DEFAULT 0,
+			created_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_ai_app_runs_user ON ai_app_runs(user_id, created_at)`,
 		`CREATE TABLE IF NOT EXISTS model_contracts (
 			id TEXT PRIMARY KEY,
 			name TEXT NOT NULL DEFAULT '',
