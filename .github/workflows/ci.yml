@@ -1,0 +1,100 @@
+name: CI
+
+# Code-quality gate for every PR + push to master: formatting, vet, build, unit
+# tests (incl. the race detector, which also exercises all SQL migrations via the
+# store tests), a vulnerability scan, a Docker build, and an OpenAPI sanity check.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: build · vet · test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: gofmt (must be clean)
+        run: |
+          unformatted="$(gofmt -l $(git ls-files '*.go'))"
+          if [ -n "$unformatted" ]; then
+            echo "::error::These files are not gofmt-clean:"; echo "$unformatted"
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go build
+        run: go build ./...
+
+      - name: go test
+        run: go test ./... -count=1
+
+      - name: go test -race
+        run: go test -race ./internal/... -count=1
+
+  vuln:
+    name: govulncheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+      - name: Scan
+        # Advisory: surfaces known CVEs in deps/stdlib without blocking merges on
+        # transitive stdlib advisories. Flip continue-on-error to false to harden.
+        continue-on-error: true
+        run: govulncheck ./...
+
+  docker:
+    name: docker build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -t ai-coding-proxy-gateway:ci .
+
+  openapi:
+    name: OpenAPI spec valid
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build gateway
+        run: go build -o gateway ./cmd/gateway
+      - name: Boot + fetch /openapi.json
+        env:
+          UPSTREAM_BASE_URL: http://127.0.0.1:9099
+          UPSTREAM_API_KEY: test
+          DB_DSN: ci-openapi.db
+        run: |
+          ./gateway &
+          GW=$!
+          for i in $(seq 1 30); do curl -sf http://localhost:8080/ready && break || sleep 0.5; done
+          curl -sf http://localhost:8080/openapi.json -o openapi.json
+          kill "$GW" 2>/dev/null || true
+      - name: Validate spec (valid JSON + has paths)
+        run: |
+          python3 - <<'PY'
+          import json, sys
+          spec = json.load(open('openapi.json'))
+          assert spec.get('openapi'), 'missing openapi version'
+          paths = spec.get('paths') or {}
+          assert len(paths) > 0, 'no paths in spec'
+          print(f"OpenAPI {spec['openapi']} OK — {len(paths)} paths")
+          PY
