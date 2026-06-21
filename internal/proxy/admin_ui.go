@@ -8177,6 +8177,22 @@ const adminHTML = `<!doctype html>
         section('AI Incident (프로바이더 장애 감지, 최근 7일)', incidentsTable(incidents)) +
         section('비용 가드 / 예측 (Cost Guard)', costCard) +
         section('AI 정책 엔진 (AI Policy Engine)', policyCard) +
+        section('정책 회귀 테스트 (Policy Regression)',
+          '<div class="card-body" style="padding:12px 14px">' +
+            '<p class="muted" style="font-size:12px;margin:0 0 8px">고정 입력 시나리오의 기대 결과(allow/block/require_approval)를 저장해 두고, 현재 활성 정책에 재생하여 정책 변경이 의도치 않게 판단을 뒤집는지 확인합니다. 원문 prompt/SQL은 저장하지 않습니다.</p>' +
+            '<form class="inline-form" id="preg-form" style="grid-template-columns: minmax(130px,1.2fr) minmax(110px,1fr) minmax(90px,1fr) 90px 90px 130px 70px;">' +
+              '<input id="preg-name" placeholder="시나리오 이름" required>' +
+              '<input id="preg-model" placeholder="model (예: gpt-4)">' +
+              '<input id="preg-provider" placeholder="provider">' +
+              '<input id="preg-risk" type="number" min="0" max="100" placeholder="risk">' +
+              '<label style="display:flex;align-items:center;gap:4px;font-size:12px"><input id="preg-secret" type="checkbox">secret</label>' +
+              '<select id="preg-expect"><option value="allow">allow</option><option value="block">block</option><option value="require_approval">require_approval</option></select>' +
+              '<button type="submit">추가</button>' +
+            '</form>' +
+            '<div style="margin:8px 0"><button type="button" class="secondary" onclick="runPolicyRegression()">전체 회귀 실행 (활성 정책)</button></div>' +
+            '<div id="preg-run-result"></div>' +
+            '<div id="preg-cases"></div>' +
+          '</div>') +
         section('Secret Firewall 이벤트', secretFirewallCard) +
         section('승인 큐 (Approval Workflow)', approvalCard) +
         section('정책 판단 이벤트 (Policy Decision Audit)', policyDecisionCard) +
@@ -8222,6 +8238,9 @@ const adminHTML = `<!doctype html>
       if (stopBtn) stopBtn.addEventListener('click', () => toggleKillSwitch(true));
       if (resumeBtn) resumeBtn.addEventListener('click', () => toggleKillSwitch(false));
       document.getElementById('ai-policy-form').addEventListener('submit', addAIPolicy);
+      const pregForm = document.getElementById('preg-form');
+      if (pregForm) pregForm.addEventListener('submit', addPolicyRegressionCase);
+      renderPolicyRegressionCases();
       document.getElementById('secret-event-form').addEventListener('submit', refreshSecretEvents);
       document.getElementById('approval-form').addEventListener('submit', refreshApprovals);
       document.getElementById('approval-status').addEventListener('change', refreshApprovals);
@@ -8429,6 +8448,75 @@ const adminHTML = `<!doctype html>
       } catch (err) {
         openModal('정책 변경 오류', '<div class="error-line">' + escapeHTML(err.message) + '</div>');
       }
+    };
+
+    // ---- Policy Regression Test ----
+    async function addPolicyRegressionCase(event) {
+      event.preventDefault();
+      const name = document.getElementById('preg-name').value.trim();
+      if (!name) return;
+      const riskRaw = document.getElementById('preg-risk').value.trim();
+      const payload = {
+        name: name,
+        model: document.getElementById('preg-model').value.trim(),
+        provider: document.getElementById('preg-provider').value.trim(),
+        risk_score: riskRaw ? Number(riskRaw) : 0,
+        contains_secret: document.getElementById('preg-secret').checked,
+        expect: document.getElementById('preg-expect').value,
+      };
+      try {
+        await api('/admin/policies/regression/cases', { method: 'POST', body: JSON.stringify(payload) });
+        document.getElementById('preg-form').reset();
+        renderPolicyRegressionCases();
+      } catch (err) {
+        openModal('회귀 케이스 저장 오류', '<div class="error-line">' + escapeHTML(err.message) + '</div>');
+      }
+    }
+    async function renderPolicyRegressionCases() {
+      const host = document.getElementById('preg-cases');
+      if (!host) return;
+      let d;
+      try { d = await api('/admin/policies/regression/cases'); }
+      catch (e) { host.innerHTML = '<span class="status error">' + escapeHTML(e.message) + '</span>'; return; }
+      const cases = d.cases || [];
+      if (!cases.length) { host.innerHTML = '<div class="muted" style="font-size:12px;padding:6px 0">저장된 회귀 케이스가 없습니다.</div>'; return; }
+      const expBadge = (e) => e === 'block' ? '<span class="status error">block</span>' : (e === 'require_approval' ? '<span class="status warn">approval</span>' : '<span class="status">allow</span>');
+      host.innerHTML = '<table style="margin-top:6px"><thead><tr><th>이름</th><th>model</th><th>provider</th><th>risk</th><th>secret</th><th>기대</th><th></th></tr></thead><tbody>' +
+        cases.map(c => '<tr>' +
+          '<td>' + escapeHTML(c.name) + (c.enabled ? '' : ' <span class="muted">(중지)</span>') + '</td>' +
+          '<td>' + escapeHTML(c.model || '-') + '</td>' +
+          '<td>' + escapeHTML(c.provider || '-') + '</td>' +
+          '<td data-num="' + (c.risk_score || 0) + '">' + fmt(c.risk_score) + '</td>' +
+          '<td>' + (c.contains_secret ? 'Y' : '-') + '</td>' +
+          '<td>' + expBadge(c.expect) + '</td>' +
+          '<td><button type="button" class="danger" onclick="deletePolicyRegressionCase(\'' + escapeAttr(c.id) + '\')">삭제</button></td>' +
+        '</tr>').join('') + '</tbody></table>';
+    }
+    window.deletePolicyRegressionCase = async (id) => {
+      try {
+        await api('/admin/policies/regression/cases?id=' + encodeURIComponent(id), { method: 'DELETE' });
+        renderPolicyRegressionCases();
+      } catch (e) { openModal('삭제 오류', '<div class="error-line">' + escapeHTML(e.message) + '</div>'); }
+    };
+    window.runPolicyRegression = async () => {
+      const host = document.getElementById('preg-run-result');
+      if (host) host.innerHTML = '<div class="empty">실행 중...</div>';
+      try {
+        const d = await api('/admin/policies/regression/run', { method: 'POST', body: '{}' });
+        const results = d.results || [];
+        const rows = results.map(r => '<tr>' +
+          '<td>' + (r.pass ? '<span class="status">PASS</span>' : '<span class="status error">FAIL</span>') + '</td>' +
+          '<td>' + escapeHTML(r.name) + '</td>' +
+          '<td>' + escapeHTML(r.expect) + '</td>' +
+          '<td>' + escapeHTML(r.actual) + '</td>' +
+          '<td class="muted" style="font-size:11px">' + escapeHTML(r.reason || '') + '</td>' +
+        '</tr>').join('');
+        const overall = d.failed > 0 ? '<span class="status error">' + d.failed + '건 회귀 발생</span>' : '<span class="status">전체 통과</span>';
+        if (host) host.innerHTML = '<div style="border:1px solid var(--border);border-radius:6px;padding:8px;margin:6px 0">' +
+          '<strong style="font-size:12px">결과: ' + overall + ' · ' + (d.passed || 0) + '/' + (d.total || 0) + ' 통과 · 규칙 ' + (d.rule_count || 0) + '개(' + escapeHTML(d.rule_source || '') + ')</strong>' +
+          (rows ? '<table style="margin-top:4px"><thead><tr><th>판정</th><th>이름</th><th>기대</th><th>실제</th><th>사유</th></tr></thead><tbody>' + rows + '</tbody></table>' : '<p class="muted" style="font-size:12px;margin:4px 0 0">실행할 케이스가 없습니다.</p>') +
+          '</div>';
+      } catch (e) { if (host) host.innerHTML = '<span class="status error">' + escapeHTML(e.message) + '</span>'; }
     };
 
     function secretEventQueryFromForm() {

@@ -156,6 +156,8 @@ var apiEndpoints = []apiEndpoint{
 	{"/admin/policies", []string{"get", "post"}, "governance", "List / create governance policies", false},
 	{"/admin/policies/decisions", []string{"get"}, "governance", "Policy decisions", false},
 	{"/admin/policies/simulate", []string{"post"}, "governance", "Simulate policy outcome", false},
+	{"/admin/policies/regression/cases", []string{"get", "post", "delete"}, "governance", "Policy regression test cases", false},
+	{"/admin/policies/regression/run", []string{"post"}, "governance", "Run policy regression suite", false},
 	{"/admin/policies/export", []string{"get"}, "governance", "Export policies (GitOps)", false},
 	{"/admin/policies/import", []string{"post"}, "governance", "Import policies (dry-run supported)", false},
 	{"/admin/approvals", []string{"get"}, "governance", "Approval queue", false},

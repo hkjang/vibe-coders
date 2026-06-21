@@ -1487,6 +1487,28 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 			created_at TEXT NOT NULL,
 			updated_at TEXT NOT NULL
 		)`,
+		`CREATE TABLE IF NOT EXISTS policy_regression_cases (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL DEFAULT '',
+			description TEXT NOT NULL DEFAULT '',
+			model TEXT NOT NULL DEFAULT '',
+			provider TEXT NOT NULL DEFAULT '',
+			team_id TEXT NOT NULL DEFAULT '',
+			role TEXT NOT NULL DEFAULT '',
+			endpoint TEXT NOT NULL DEFAULT '',
+			complexity_score INTEGER NOT NULL DEFAULT 0,
+			risk_score INTEGER NOT NULL DEFAULT 0,
+			contains_secret INTEGER NOT NULL DEFAULT 0,
+			secret_types TEXT NOT NULL DEFAULT '',
+			mcp_server TEXT NOT NULL DEFAULT '',
+			mcp_tool TEXT NOT NULL DEFAULT '',
+			expect TEXT NOT NULL DEFAULT 'allow',
+			expect_secret_action TEXT NOT NULL DEFAULT '',
+			enabled INTEGER NOT NULL DEFAULT 1,
+			created_by TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)`,
 		`CREATE TABLE IF NOT EXISTS model_usage_tags (
 			model TEXT PRIMARY KEY,
 			good_for TEXT NOT NULL DEFAULT '',
