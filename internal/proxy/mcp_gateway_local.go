@@ -1,9 +1,11 @@
 package proxy
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"sort"
 	"strings"
 	"time"
@@ -128,6 +130,7 @@ func gatewayToolDefs() []mcpToolDef {
 		return json.RawMessage(`{"type":"object","properties":{` + props + `}}`)
 	}
 	return []mcpToolDef{
+		{Name: "gateway_chat", Description: "Gateway를 통해 chat completion을 실행합니다(기존 /v1 파이프라인·거버넌스·쿼터·라우팅 적용).", InputSchema: obj(`"model":{"type":"string"},"prompt":{"type":"string"},"messages":{"type":"array"}`)},
 		{Name: "gateway_list_models", Description: "사용 가능한 모델 목록과 가격을 조회합니다(호출자 권한 기준).", InputSchema: obj(``)},
 		{Name: "gateway_estimate_cost", Description: "모델과 토큰 수로 예상 비용(KRW)을 계산합니다.", InputSchema: obj(`"model":{"type":"string"},"input_tokens":{"type":"integer"},"output_tokens":{"type":"integer"}`)},
 		{Name: "gateway_check_quota", Description: "본인/키의 현재 한도 소진 상태를 조회합니다.", InputSchema: obj(``)},
@@ -161,6 +164,28 @@ func (s *Server) gatewayToolsCall(r *http.Request, apiKeyID string, authCtx *sto
 // an MCP tool result. No upstream model call, no tool execution, nothing mutated.
 func (s *Server) runGatewayTool(ctx context.Context, r *http.Request, apiKeyID string, authCtx *store.AuthContext, name string, args json.RawMessage) (map[string]any, error) {
 	switch name {
+	case "gateway_chat":
+		var a struct {
+			Model    string            `json:"model"`
+			Prompt   string            `json:"prompt"`
+			Messages []json.RawMessage `json:"messages"`
+		}
+		_ = json.Unmarshal(args, &a)
+		msgs := a.Messages
+		if len(msgs) == 0 {
+			if strings.TrimSpace(a.Prompt) == "" {
+				return nil, errGateway("prompt or messages is required")
+			}
+			m, _ := json.Marshal(map[string]string{"role": "user", "content": a.Prompt})
+			msgs = []json.RawMessage{m}
+		}
+		reqBody := map[string]any{"model": firstNonEmpty(a.Model, "vibe/auto"), "messages": msgs, "stream": false}
+		content, err := s.runGatewayChat(r, reqBody)
+		if err != nil {
+			return nil, err
+		}
+		return gatewayToolJSON(map[string]any{"model": firstNonEmpty(a.Model, "vibe/auto"), "content": content}), nil
+
 	case "gateway_list_models":
 		pricing := s.pricingMap(ctx)
 		models := []map[string]any{}
@@ -280,6 +305,39 @@ func (s *Server) runGatewayTool(ctx context.Context, r *http.Request, apiKeyID s
 		return gatewayToolJSON(map[string]any{"requests": u.Requests, "tokens": u.Tokens, "cost_krw": round1(u.CostKRW), "errors": u.Errors, "since": since.UTC().Format(time.RFC3339)}), nil
 	}
 	return nil, errGateway("unknown tool: " + name)
+}
+
+// runGatewayChat executes a chat completion by replaying it through the real /v1 pipeline in
+// process (so auth, governance, quota, routing, and logging all apply identically). Returns the
+// assistant message text. Non-streaming.
+func (s *Server) runGatewayChat(r *http.Request, body map[string]any) (string, error) {
+	enc, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(enc))
+	req = req.WithContext(r.Context())
+	if auth := r.Header.Get("Authorization"); auth != "" {
+		req.Header.Set("Authorization", auth)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.RemoteAddr = r.RemoteAddr
+	rec := httptest.NewRecorder()
+	s.handleOpenAI(rec, req)
+	if rec.Code != http.StatusOK {
+		return "", errGateway("chat failed: HTTP " + itoaProxy(rec.Code))
+	}
+	var parsed struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &parsed); err != nil {
+		return "", errGateway("could not parse completion")
+	}
+	if len(parsed.Choices) == 0 {
+		return "", errGateway("no completion returned")
+	}
+	return parsed.Choices[0].Message.Content, nil
 }
 
 // --- resources ---
