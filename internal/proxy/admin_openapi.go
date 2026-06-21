@@ -37,6 +37,7 @@ var apiEndpoints = []apiEndpoint{
 	// ---- MCP / VCS ----
 	{"/mcp", []string{"post"}, "mcp", "MCP gateway (JSON-RPC passthrough)", false},
 	{"/mcp/gateway", []string{"post"}, "mcp", "AI Gateway MCP Server — vibe-coders' own features as MCP tools/resources/prompts", false},
+	{"/admin/gateway-mcp/info", []string{"get"}, "mcp", "Gateway MCP catalog (tools/resources/prompts) for the admin UI", false},
 	{"/vcs/events", []string{"post"}, "vcs", "VCS webhook ingest", true},
 	{"/vcs/webhook/{provider}", []string{"post"}, "vcs", "VCS webhook ingest (provider path)", true},
 

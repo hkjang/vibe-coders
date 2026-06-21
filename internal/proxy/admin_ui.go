@@ -1102,6 +1102,7 @@ const adminHTML = `<!doctype html>
           case 'chargeback': await renderChargeback(); break;
           case 'prompt-debt': await renderPromptDebt(); break;
           case 'app-templates': await renderAppTemplates(); break;
+          case 'gateway-mcp': await renderGatewayMCP(); break;
           case 'sandbox': renderSandbox(); break;
           case 'security':  await renderSecurityHome(); break;
           case 'billing':   await renderBillingHome(); break;
@@ -9719,6 +9720,30 @@ const adminHTML = `<!doctype html>
         card('업무 앱 시작 템플릿 (' + tpls.length + ')', '<div class="card-body">' + (cards || '<p class="muted">템플릿이 없습니다.</p>') + '</div>');
     }
 
+    // renderGatewayMCP shows the AI Gateway MCP Server catalog + a copyable client config.
+    async function renderGatewayMCP() {
+      const view = document.getElementById('view');
+      view.innerHTML = section('Gateway MCP', '<div class="empty">불러오는 중...</div>');
+      let d;
+      try { d = await api('/admin/gateway-mcp/info'); }
+      catch (e) { view.innerHTML = section('Gateway MCP', '<div class="card-body" style="padding:16px"><p class="muted">' + escapeHTML(e.message) + '</p></div>'); return; }
+      const origin = window.location.origin;
+      const cfg = JSON.stringify({ mcpServers: { 'vibe-gateway': { url: origin + (d.endpoint || '/mcp/gateway'), headers: { Authorization: 'Bearer <YOUR_API_KEY>' } } } }, null, 2);
+      window.copyMCPConfig = () => { navigator.clipboard && navigator.clipboard.writeText(cfg); };
+      const toolRows = (d.tools || []).map(t => '<tr><td><code>' + escapeHTML(t.name) + '</code></td><td class="muted">' + escapeHTML(t.description || '') + '</td></tr>').join('');
+      const resRows = (d.resources || []).map(x => '<tr><td><code>' + escapeHTML(x.uri) + '</code></td><td class="muted">' + escapeHTML(x.description || '') + '</td></tr>').join('');
+      const promptRows = (d.prompts || []).map(x => '<tr><td><code>' + escapeHTML(x.name) + '</code></td><td class="muted">' + escapeHTML(x.description || '') + '</td></tr>').join('');
+      view.innerHTML = section('Gateway MCP Server', '') +
+        card('연결 설정 (Claude / Cursor / Roo Code / Cline)',
+          '<div class="card-body"><p class="muted" style="font-size:12px">엔드포인트 <code>' + escapeHTML(origin + (d.endpoint || '')) + '</code> · 프로토콜 ' + escapeHTML(d.protocol_version || '') + ' · 인증: Proxy API Key</p>' +
+          '<pre style="background:var(--bg-alt,#f6f8fa);padding:10px;border-radius:6px;overflow:auto;font-size:11px">' + escapeHTML(cfg) + '</pre>' +
+          '<button type="button" class="secondary" onclick="copyMCPConfig()">설정 복사</button>' +
+          '<p class="muted" style="font-size:11px;margin-top:6px">' + escapeHTML(d.note || '') + '</p></div>') +
+        card('Tools (' + (d.tools || []).length + ')', '<div class="card-body"><table><thead><tr><th>tool</th><th>설명</th></tr></thead><tbody>' + toolRows + '</tbody></table></div>') +
+        card('Resources (' + (d.resources || []).length + ')', '<div class="card-body"><table><thead><tr><th>uri</th><th>설명</th></tr></thead><tbody>' + resRows + '</tbody></table></div>') +
+        card('Prompts (' + (d.prompts || []).length + ')', '<div class="card-body"><table><thead><tr><th>prompt</th><th>설명</th></tr></thead><tbody>' + promptRows + '</tbody></table></div>');
+    }
+
     // renderSandbox previews a candidate sensitive request through safety gates without executing.
     function renderSandbox() {
       const view = document.getElementById('view');
@@ -9850,13 +9875,24 @@ const adminHTML = `<!doctype html>
             myReports.map(r => '<tr><td>' + escapeHTML(r.name || '') + '</td><td class="muted">' + escapeHTML(r.schema_name || '') + '</td><td>' + escapeHTML(r.kind || '') + '</td><td>' + (r.visibility === 'team' ? '<span class="status">팀</span>' : '<span class="muted">개인</span>') + '</td><td class="muted">' + escapeHTML(r.approval_status || '') + '</td><td class="muted">' + ago(r.created_at) + '</td></tr>').join('') + '</tbody></table>'
           : '<p class="muted">저장한 리포트가 없습니다. Text2SQL 결과를 저장하면 여기 표시됩니다.</p>') + '</div>');
 
+      // MCP 연결 설정 — 내 개발도구(Claude/Cursor/Roo/Cline)에서 Gateway를 MCP로 연결.
+      window.meCopyMCP = () => {
+        const cfg = JSON.stringify({ mcpServers: { 'vibe-gateway': { url: window.location.origin + '/mcp/gateway', headers: { Authorization: 'Bearer <YOUR_API_KEY>' } } } }, null, 2);
+        navigator.clipboard && navigator.clipboard.writeText(cfg);
+      };
+      const mcpCfg = JSON.stringify({ mcpServers: { 'vibe-gateway': { url: window.location.origin + '/mcp/gateway', headers: { Authorization: 'Bearer <YOUR_API_KEY>' } } } }, null, 2);
+      const mcpCard = card('내 개발도구 연결하기 (MCP)',
+        '<div class="card-body"><p class="muted" style="font-size:12px">Claude Desktop·Cursor·Roo Code·Cline에서 아래 설정으로 Gateway를 MCP 서버로 연결하면 모델 조회·라우팅 미리보기·사용량 확인 등을 도구로 쓸 수 있습니다. <code>&lt;YOUR_API_KEY&gt;</code>는 <a href="#/mykeys">내 키</a>에서 발급하세요.</p>' +
+        '<pre style="background:var(--bg-alt,#f6f8fa);padding:10px;border-radius:6px;overflow:auto;font-size:11px">' + escapeHTML(mcpCfg) + '</pre>' +
+        '<button type="button" class="secondary" onclick="meCopyMCP()">설정 복사</button></div>');
+
       // Recommendations (load on demand).
       const recCard = card('내 추천',
         '<div class="card-body"><div id="me-recs"><button type="button" class="secondary" onclick="meLoadRecommendations()">추천 불러오기</button></div></div>');
 
       view.innerHTML = section('내 홈', kpis) +
         '<div id="me-actions"></div><div id="me-report"></div>' +
-        profCard + usageCard + modelsCard + failCard + blockCard + reportsCard + keyCard + recCard +
+        profCard + usageCard + modelsCard + failCard + blockCard + reportsCard + keyCard + mcpCard + recCard +
         '<div id="me-requests"></div><div id="me-recmodels"></div><div id="me-skills"></div><div id="me-notifications"></div><div id="me-sessions"></div>';
 
       // 최근 요청 + 영수증.

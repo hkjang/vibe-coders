@@ -37,6 +37,7 @@ var menuRegistry = []menuItem{
 	{ID: "ops.capabilities", Label: "기능 맵", Path: "#/capabilities", Tab: "capabilities", Group: "ops", Scopes: []string{"admin:read"}, DataScope: "all"},
 	{ID: "ops.dashboard", Label: "대시보드", Path: "#/dashboard", Tab: "dashboard", Group: "ops", Scopes: []string{"admin:read"}, DataScope: "all"},
 	{ID: "ops.mcp", Label: "MCP", Path: "#/mcp", Tab: "mcp", Group: "ops", Scopes: []string{"admin:read"}, DataScope: "all"},
+	{ID: "ops.gateway_mcp", Label: "Gateway MCP", Path: "#/gateway-mcp", Tab: "gateway-mcp", Group: "ops", Scopes: []string{"admin:read"}, DataScope: "all"},
 	{ID: "ops.routing", Label: "라우팅", Path: "#/routing", Tab: "routing", Group: "ops", Scopes: []string{"admin:read"}, DataScope: "all"},
 	{ID: "ops.chat_test", Label: "Chat 테스트", Path: "#/chat-test", Tab: "chat-test", Group: "ops", Scopes: []string{"admin:read"}, DataScope: "all"},
 	{ID: "ops.requests", Label: "호출 이력", Path: "#/requests", Tab: "requests", Group: "ops", Scopes: []string{"admin:read"}, DataScope: "all"},

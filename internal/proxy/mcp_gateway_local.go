@@ -103,6 +103,24 @@ func (s *Server) dispatchGatewayMCP(r *http.Request, apiKeyID string, authCtx *s
 	}
 }
 
+// handleGatewayMCPInfo returns the gateway MCP catalog (tools/resources/prompts + endpoint) for
+// the admin UI to display. Admin-gated; the live JSON-RPC endpoint is /mcp/gateway (API key).
+// GET /admin/gateway-mcp/info
+func (s *Server) handleGatewayMCPInfo(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"endpoint":         "/mcp/gateway",
+		"protocol_version": mcpProtocolVersion,
+		"tools":            gatewayToolDefs(),
+		"resources":        gatewayResourceDefs(),
+		"prompts":          gatewayPromptDefs(),
+		"note":             "외부 AI 에이전트가 Proxy API Key로 /mcp/gateway에 MCP JSON-RPC로 연결해 위 tool/resource/prompt를 사용합니다.",
+	})
+}
+
 // --- tools ---
 
 func gatewayToolDefs() []mcpToolDef {
