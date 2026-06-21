@@ -54,6 +54,7 @@ var menuRegistry = []menuItem{
 	{ID: "ops.narrative", Label: "운영 보고서", Path: "#/narrative", Tab: "narrative", Group: "ops", Scopes: []string{"admin:read"}, DataScope: "all"},
 	{ID: "ops.skill_graph", Label: "Skill 의존성", Path: "#/skill-graph", Tab: "skill-graph", Group: "ops", Scopes: []string{"admin:read"}, DataScope: "all"},
 	{ID: "bill.chargeback", Label: "비용 배부 팩", Path: "#/chargeback", Tab: "chargeback", Group: "billing", Scopes: []string{"admin:read"}, DataScope: "all"},
+	{ID: "ops.prompt_debt", Label: "프롬프트 부채", Path: "#/prompt-debt", Tab: "prompt-debt", Group: "ops", Scopes: []string{"admin:read"}, DataScope: "all"},
 	{ID: "ops.personalization", Label: "개인화", Path: "#/personalization", Tab: "personalization", Group: "ops", Scopes: []string{"admin:read"}, DataScope: "all"},
 	// 보안 영역.
 	{ID: "sec.dashboard", Label: "보안 대시보드", Path: "#/security", Tab: "security", Group: "security", Scopes: []string{"security:read"}, DataScope: "all"},

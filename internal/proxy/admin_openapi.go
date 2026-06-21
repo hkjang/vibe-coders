@@ -186,6 +186,7 @@ var apiEndpoints = []apiEndpoint{
 	{"/admin/prompt-products", []string{"get", "post", "delete"}, "governance", "Prompt products (promote/list/delete)", false},
 	{"/admin/prompt-products/candidates", []string{"get"}, "governance", "Prompt product candidates", false},
 	{"/admin/prompts/fingerprints", []string{"get"}, "governance", "Prompt fingerprints", false},
+	{"/admin/prompts/debt", []string{"get"}, "governance", "Prompt debt ranking (failing/expensive/model-waste/high-volume)", false},
 	{"/admin/prompts/promotions", []string{"get", "post"}, "governance", "Prompt version promotions", false},
 
 	// ---- admin: Text2SQL ----

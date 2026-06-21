@@ -1100,6 +1100,7 @@ const adminHTML = `<!doctype html>
           case 'narrative': await renderNarrativeReport(); break;
           case 'skill-graph': await renderSkillGraph(); break;
           case 'chargeback': await renderChargeback(); break;
+          case 'prompt-debt': await renderPromptDebt(); break;
           case 'security':  await renderSecurityHome(); break;
           case 'billing':   await renderBillingHome(); break;
           case 'ops-home': await renderOpsHome(); break;
@@ -9649,6 +9650,41 @@ const adminHTML = `<!doctype html>
         '<button type="button" onclick="chargebackReload()">조회</button>' +
         '<button type="button" class="secondary" onclick="chargebackCSV()">CSV 다운로드</button></div>') +
         '<p class="muted" style="font-size:12px;padding:0 14px">' + escapeHTML(d.note || '') + '</p>' + dims;
+    }
+
+    // renderPromptDebt ranks recurring prompt clusters by accumulated "prompt debt".
+    async function renderPromptDebt() {
+      const view = document.getElementById('view');
+      view.innerHTML = section('프롬프트 부채', '<div class="empty">분석 중...</div>');
+      let d;
+      try { d = await api('/admin/prompts/debt?window=30d'); }
+      catch (e) { view.innerHTML = section('프롬프트 부채', '<div class="card-body" style="padding:16px"><p class="muted">' + escapeHTML(e.message) + '</p></div>'); return; }
+      const items = d.items || [];
+      const won = (v) => '₩' + fmt(Math.round(v || 0));
+      const typeBadge = (t) => ({
+        failing: '<span class="status error">실패</span>', model_waste: '<span class="status warn">모델낭비</span>',
+        expensive: '<span class="status warn">고비용</span>', high_volume: '<span class="status">고볼륨</span>',
+      })[t] || '<span class="muted">' + escapeHTML(t) + '</span>';
+      const rows = items.map(it => '<tr>' +
+        '<td data-num="' + it.debt_score + '"><strong>' + fmt(Math.round(it.debt_score)) + '</strong></td>' +
+        '<td>' + typeBadge(it.debt_type) + '</td>' +
+        '<td>' + escapeHTML(it.task_type || '') + '<div class="muted" style="font-size:10px">' + escapeHTML((it.fingerprint || '').slice(0, 12)) + '</div></td>' +
+        '<td data-num="' + it.requests + '">' + fmt(it.requests) + '</td>' +
+        '<td>' + (it.success_rate).toFixed(0) + '%</td>' +
+        '<td>' + won(it.avg_cost_krw) + '</td>' +
+        '<td>' + won(it.total_cost_krw) + '</td>' +
+        '<td>' + escapeHTML(it.top_model || '') + (it.cheaper_model ? ' <span class="muted">→ ' + escapeHTML(it.cheaper_model) + '</span>' : '') + '</td>' +
+        '<td class="muted" style="font-size:11px">' + escapeHTML(it.action || '') + '</td>' +
+      '</tr>').join('');
+      const table = items.length
+        ? '<table><thead><tr><th>부채</th><th>유형</th><th>작업/지문</th><th>요청</th><th>성공률</th><th>평균비용</th><th>총비용</th><th>모델</th><th>권장 조치</th></tr></thead><tbody>' + rows + '</tbody></table>'
+        : '<p class="muted">부채로 분류된 프롬프트가 없습니다. 👍</p>';
+      view.innerHTML = section('프롬프트 부채 (Prompt Debt) — 최근 30일',
+        '<div style="padding:8px 14px"><span class="muted" style="font-size:12px">부채 대상 ' + items.length + '건 · 누적 비용 ' + won(d.total_debt_cost_krw) + '</span></div>') +
+        card('부채 우선순위 (점수 높은 순)',
+          '<div class="card-body">' + table +
+          '<p class="muted" style="font-size:11px;margin-top:6px">' + escapeHTML(d.note || '') + '</p></div>');
+      makeSortable && makeSortable('#view table', 'prompt-debt');
     }
 
     // renderMeHome is the personalized landing for non-operators: their own usage, cost,
