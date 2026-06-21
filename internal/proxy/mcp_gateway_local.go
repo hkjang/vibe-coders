@@ -131,6 +131,8 @@ func gatewayToolDefs() []mcpToolDef {
 	}
 	return []mcpToolDef{
 		{Name: "gateway_chat", Description: "Gateway를 통해 chat completion을 실행합니다(기존 /v1 파이프라인·거버넌스·쿼터·라우팅 적용).", InputSchema: obj(`"model":{"type":"string"},"prompt":{"type":"string"},"messages":{"type":"array"}`)},
+		{Name: "gateway_run_skill", Description: "등록된 Skill을 적용해 chat을 실행합니다(X-Skill).", InputSchema: obj(`"skill":{"type":"string"},"prompt":{"type":"string"}`)},
+		{Name: "gateway_run_text2sql_preview", Description: "자연어 질문을 Text2SQL preview(SQL 생성, 미실행)로 처리합니다.", InputSchema: obj(`"question":{"type":"string"}`)},
 		{Name: "gateway_list_models", Description: "사용 가능한 모델 목록과 가격을 조회합니다(호출자 권한 기준).", InputSchema: obj(``)},
 		{Name: "gateway_estimate_cost", Description: "모델과 토큰 수로 예상 비용(KRW)을 계산합니다.", InputSchema: obj(`"model":{"type":"string"},"input_tokens":{"type":"integer"},"output_tokens":{"type":"integer"}`)},
 		{Name: "gateway_check_quota", Description: "본인/키의 현재 한도 소진 상태를 조회합니다.", InputSchema: obj(``)},
@@ -180,11 +182,44 @@ func (s *Server) runGatewayTool(ctx context.Context, r *http.Request, apiKeyID s
 			msgs = []json.RawMessage{m}
 		}
 		reqBody := map[string]any{"model": firstNonEmpty(a.Model, "vibe/auto"), "messages": msgs, "stream": false}
-		content, err := s.runGatewayChat(r, reqBody)
+		content, err := s.runGatewayChat(r, reqBody, nil)
 		if err != nil {
 			return nil, err
 		}
 		return gatewayToolJSON(map[string]any{"model": firstNonEmpty(a.Model, "vibe/auto"), "content": content}), nil
+
+	case "gateway_run_skill":
+		var a struct {
+			Skill  string `json:"skill"`
+			Prompt string `json:"prompt"`
+		}
+		_ = json.Unmarshal(args, &a)
+		if strings.TrimSpace(a.Skill) == "" || strings.TrimSpace(a.Prompt) == "" {
+			return nil, errGateway("skill and prompt are required")
+		}
+		msg, _ := json.Marshal(map[string]string{"role": "user", "content": a.Prompt})
+		body := map[string]any{"model": "vibe/auto", "messages": []json.RawMessage{msg}, "stream": false}
+		content, err := s.runGatewayChat(r, body, map[string]string{"X-Skill": a.Skill})
+		if err != nil {
+			return nil, err
+		}
+		return gatewayToolJSON(map[string]any{"skill": a.Skill, "content": content}), nil
+
+	case "gateway_run_text2sql_preview":
+		var a struct {
+			Question string `json:"question"`
+		}
+		_ = json.Unmarshal(args, &a)
+		if strings.TrimSpace(a.Question) == "" {
+			return nil, errGateway("question is required")
+		}
+		msg, _ := json.Marshal(map[string]string{"role": "user", "content": a.Question})
+		body := map[string]any{"model": "vibe/text2sql-preview", "messages": []json.RawMessage{msg}, "stream": false}
+		content, err := s.runGatewayChat(r, body, nil)
+		if err != nil {
+			return nil, err
+		}
+		return gatewayToolJSON(map[string]any{"mode": "preview", "content": content}), nil
 
 	case "gateway_list_models":
 		pricing := s.pricingMap(ctx)
@@ -310,7 +345,7 @@ func (s *Server) runGatewayTool(ctx context.Context, r *http.Request, apiKeyID s
 // runGatewayChat executes a chat completion by replaying it through the real /v1 pipeline in
 // process (so auth, governance, quota, routing, and logging all apply identically). Returns the
 // assistant message text. Non-streaming.
-func (s *Server) runGatewayChat(r *http.Request, body map[string]any) (string, error) {
+func (s *Server) runGatewayChat(r *http.Request, body map[string]any, extraHeaders map[string]string) (string, error) {
 	enc, _ := json.Marshal(body)
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(enc))
 	req = req.WithContext(r.Context())
@@ -318,6 +353,9 @@ func (s *Server) runGatewayChat(r *http.Request, body map[string]any) (string, e
 		req.Header.Set("Authorization", auth)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	for k, v := range extraHeaders {
+		req.Header.Set(k, v)
+	}
 	req.RemoteAddr = r.RemoteAddr
 	rec := httptest.NewRecorder()
 	s.handleOpenAI(rec, req)
