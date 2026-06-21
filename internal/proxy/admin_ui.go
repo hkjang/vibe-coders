@@ -1103,6 +1103,7 @@ const adminHTML = `<!doctype html>
           case 'prompt-debt': await renderPromptDebt(); break;
           case 'app-templates': await renderAppTemplates(); break;
           case 'gateway-mcp': await renderGatewayMCP(); break;
+          case 'workflows': await renderWorkflows(); break;
           case 'sandbox': renderSandbox(); break;
           case 'security':  await renderSecurityHome(); break;
           case 'billing':   await renderBillingHome(); break;
@@ -9742,6 +9743,68 @@ const adminHTML = `<!doctype html>
         card('Tools (' + (d.tools || []).length + ')', '<div class="card-body"><table><thead><tr><th>tool</th><th>설명</th></tr></thead><tbody>' + toolRows + '</tbody></table></div>') +
         card('Resources (' + (d.resources || []).length + ')', '<div class="card-body"><table><thead><tr><th>uri</th><th>설명</th></tr></thead><tbody>' + resRows + '</tbody></table></div>') +
         card('Prompts (' + (d.prompts || []).length + ')', '<div class="card-body"><table><thead><tr><th>prompt</th><th>설명</th></tr></thead><tbody>' + promptRows + '</tbody></table></div>');
+    }
+
+    // renderWorkflows manages workflow chain definitions (list / create via JSON / dry-run / delete).
+    async function renderWorkflows() {
+      const view = document.getElementById('view');
+      view.innerHTML = section('워크플로', '<div class="empty">불러오는 중...</div>');
+      let d;
+      try { d = await api('/admin/workflows'); }
+      catch (e) { view.innerHTML = section('워크플로', '<div class="card-body" style="padding:16px"><p class="muted">' + escapeHTML(e.message) + '</p></div>'); return; }
+      window.wfCreate = async (event) => {
+        event.preventDefault();
+        const name = document.getElementById('wf-name').value.trim();
+        let steps;
+        try { steps = JSON.parse(document.getElementById('wf-steps').value || '[]'); }
+        catch (e) { alert('steps JSON 파싱 오류: ' + e.message); return; }
+        if (!name || !Array.isArray(steps) || !steps.length) { alert('이름과 steps 배열이 필요합니다.'); return; }
+        try {
+          await api('/admin/workflows', { method: 'POST', body: JSON.stringify({ name, steps, allowed_teams: document.getElementById('wf-teams').value.trim() }) });
+          document.getElementById('wf-form').reset();
+          renderWorkflows();
+        } catch (e) { alert('저장 오류: ' + e.message); }
+      };
+      window.wfDelete = async (id) => {
+        if (!confirm('워크플로를 삭제할까요?')) return;
+        try { await api('/admin/workflows?id=' + encodeURIComponent(id), { method: 'DELETE' }); renderWorkflows(); }
+        catch (e) { alert('삭제 오류: ' + e.message); }
+      };
+      window.wfDryRun = async (id) => {
+        try {
+          const r = await api('/admin/workflows/' + encodeURIComponent(id) + '/dry-run', { method: 'POST', body: '{}' });
+          const stepRows = (r.steps || []).map(st => '<tr><td>' + escapeHTML(st.name || '') + '</td><td>' + escapeHTML(st.type) + '</td><td>' + (st.resolved ? '<span class="status">OK</span>' : '<span class="status error">미해결</span>') + '</td><td class="muted">' + escapeHTML(st.detail || '') + '</td></tr>').join('');
+          openModal('Dry-run: ' + escapeHTML(r.name || id),
+            '<p>' + (r.ok ? '<span class="status">검증 통과</span>' : '<span class="status error">' + (r.issues || []).length + '개 이슈</span>') + '</p>' +
+            '<table><thead><tr><th>step</th><th>유형</th><th>해결</th><th>상세</th></tr></thead><tbody>' + stepRows + '</tbody></table>' +
+            ((r.issues || []).length ? '<ul style="font-size:12px;color:var(--err,#c00)">' + r.issues.map(x => '<li>' + escapeHTML(x) + '</li>').join('') + '</ul>' : ''));
+        } catch (e) { openModal('Dry-run 오류', '<div class="error-line">' + escapeHTML(e.message) + '</div>'); }
+      };
+      const wfs = d.workflows || [];
+      const rows = wfs.map(wf => '<tr>' +
+        '<td>' + escapeHTML(wf.name) + '<div class="muted" style="font-size:10px">' + escapeHTML(wf.id) + '</div></td>' +
+        '<td>' + (wf.steps || []).length + '</td>' +
+        '<td>' + (wf.enabled ? '✓' : '-') + '</td>' +
+        '<td class="muted">' + escapeHTML((wf.allowed_teams || '') || '전체') + '</td>' +
+        '<td><button type="button" class="secondary" style="font-size:11px" onclick="wfDryRun(\'' + escapeAttr(wf.id) + '\')">Dry-run</button> ' +
+        '<button type="button" class="danger" style="font-size:11px" onclick="wfDelete(\'' + escapeAttr(wf.id) + '\')">삭제</button></td>' +
+      '</tr>').join('');
+      const sample = '[{"name":"리뷰","type":"chat","ref":"vibe/auto","max_tokens":500},{"name":"승인","type":"approval"}]';
+      view.innerHTML = section('워크플로 (Workflow Chain)', '') +
+        card('워크플로 생성',
+          '<div class="card-body"><form id="wf-form" style="display:flex;flex-direction:column;gap:6px">' +
+          '<div style="display:flex;gap:8px"><input id="wf-name" placeholder="워크플로 이름" required style="flex:1"><input id="wf-teams" placeholder="허용 팀(쉼표, 빈칸=전체)" style="flex:1"></div>' +
+          '<textarea id="wf-steps" rows="4" placeholder=\'steps JSON: ' + escapeAttr(sample) + '\'></textarea>' +
+          '<div class="muted" style="font-size:11px">step 유형: chat·text2sql·mcp_tool·skill·condition·approval·transform. 한도: timeout_ms·max_cost_krw·max_tokens·allowed_tools·allowed_tables.</div>' +
+          '<div><button type="submit">추가</button></div>' +
+          '</form></div>') +
+        card('워크플로 목록 (' + wfs.length + ')',
+          '<div class="card-body">' + (wfs.length
+            ? '<table><thead><tr><th>이름</th><th>steps</th><th>사용</th><th>허용 팀</th><th>동작</th></tr></thead><tbody>' + rows + '</tbody></table>'
+            : '<p class="muted">등록된 워크플로가 없습니다.</p>') +
+          '<p class="muted" style="font-size:11px;margin-top:6px">실행: <code>POST /v1/workflows/{id}/run</code> 본문 <code>{"execute":true,"input":"..."}</code> (사용자 토큰).</p></div>');
+      const form = document.getElementById('wf-form');
+      if (form) form.addEventListener('submit', window.wfCreate);
     }
 
     // renderSandbox previews a candidate sensitive request through safety gates without executing.
