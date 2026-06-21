@@ -1094,6 +1094,7 @@ const adminHTML = `<!doctype html>
           case 'security':  await renderSecurityHome(); break;
           case 'billing':   await renderBillingHome(); break;
           case 'ops-home': await renderOpsHome(); break;
+          case 'capabilities': await renderCapabilities(); break;
           case 'dashboard': await renderDashboard(); break;
           case 'xview':     await renderXView(params); break;
           case 'waterfall': await renderWaterfall(params); break;
@@ -5387,6 +5388,37 @@ const adminHTML = `<!doctype html>
         openModal('Routing Review 처리 오류', '<div class="error-line">' + escapeHTML(err.message) + '</div>');
       }
     };
+
+    // ---------- Capability Registry: 기능 맵 ----------
+    async function renderCapabilities() {
+      const view = document.getElementById('view');
+      view.innerHTML = section('기능 맵', '<div class="empty">불러오는 중...</div>');
+      let d;
+      try { d = await api('/admin/capabilities'); }
+      catch (e) { view.innerHTML = section('기능 맵', '<div class="card-body" style="padding:16px"><p class="muted">' + escapeHTML(e.message) + '</p></div>'); return; }
+      const caps = d.capabilities || [];
+      const groupLabel = { core: '핵심', data: '데이터', security: '보안', assets: '자산', users: '사용자', ops: '운영' };
+      const byGroup = {};
+      caps.forEach(c => { (byGroup[c.group] = byGroup[c.group] || []).push(c); });
+      const chips = (arr, cls) => (arr || []).map(x => '<span class="status ' + (cls || '') + '" style="font-size:9px;margin:1px">' + escapeHTML(x) + '</span>').join('');
+      let html = section('기능 맵', '<p class="muted" style="font-size:12px">' + (d.count || 0) + '개 기능 — 각 기능의 API·UI 탭·권한·설정키·DB 테이블·워커를 한눈에. ' + escapeHTML(d.note || '') + '</p>');
+      Object.keys(byGroup).sort().forEach(g => {
+        html += '<h3 style="margin:14px 0 4px;font-size:14px">' + escapeHTML(groupLabel[g] || g) + '</h3>';
+        html += byGroup[g].map(c =>
+          '<div style="border:1px solid var(--border);border-radius:8px;padding:10px;margin:6px 0">' +
+          '<div style="display:flex;justify-content:space-between"><strong>' + escapeHTML(c.name) + ' <span class="muted" style="font-size:11px">(' + escapeHTML(c.key) + ')</span></strong></div>' +
+          '<div class="muted" style="font-size:12px;margin:3px 0">' + escapeHTML(c.description) + '</div>' +
+          (c.apis && c.apis.length ? '<div style="font-size:11px;margin-top:3px"><b>API</b> ' + (c.apis || []).map(a => '<code style="font-size:10px">' + escapeHTML(a) + '</code>').join(' · ') + '</div>' : '') +
+          (c.ui_tabs && c.ui_tabs.length ? '<div style="margin-top:3px"><b style="font-size:11px">UI</b> ' + chips(c.ui_tabs) + '</div>' : '') +
+          (c.scopes && c.scopes.length ? '<div style="margin-top:3px"><b style="font-size:11px">권한</b> ' + chips(c.scopes, 'warn') + '</div>' : '') +
+          (c.setting_keys && c.setting_keys.length ? '<div style="margin-top:3px"><b style="font-size:11px">설정</b> ' + chips(c.setting_keys) + '</div>' : '') +
+          (c.tables && c.tables.length ? '<div style="margin-top:3px"><b style="font-size:11px">테이블</b> <span class="muted" style="font-size:10px">' + (c.tables || []).map(escapeHTML).join(', ') + '</span></div>' : '') +
+          (c.workers && c.workers.length ? '<div style="margin-top:3px"><b style="font-size:11px">워커</b> ' + chips(c.workers) + '</div>' : '') +
+          '</div>'
+        ).join('');
+      });
+      view.innerHTML = html;
+    }
 
     // ---------- AI Gateway 운영 홈: 오늘 봐야 할 것 ----------
     async function renderOpsHome() {
