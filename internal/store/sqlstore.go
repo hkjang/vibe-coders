@@ -1432,6 +1432,27 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 			created_at TEXT NOT NULL
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_skill_fitness_skill ON skill_fitness_evidence(skill_name)`,
+		// Skill Marketplace: user access requests + satisfaction feedback.
+		`CREATE TABLE IF NOT EXISTS skill_access_requests (
+			id TEXT PRIMARY KEY,
+			skill_name TEXT NOT NULL,
+			user_id TEXT NOT NULL DEFAULT '',
+			team TEXT NOT NULL DEFAULT '',
+			status TEXT NOT NULL DEFAULT 'pending',
+			reason TEXT NOT NULL DEFAULT '',
+			decided_by TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_skill_access_skill ON skill_access_requests(skill_name)`,
+		`CREATE TABLE IF NOT EXISTS skill_feedback (
+			id TEXT PRIMARY KEY,
+			skill_name TEXT NOT NULL,
+			user_id TEXT NOT NULL DEFAULT '',
+			rating INTEGER NOT NULL DEFAULT 0,
+			comment TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_skill_feedback_skill ON skill_feedback(skill_name)`,
 		// AI work apps: user-facing bundles of skill / prompt product / Text2SQL report / MCP
 		// tool / recommended model, gated by team + role.
 		`CREATE TABLE IF NOT EXISTS metric_catalog (

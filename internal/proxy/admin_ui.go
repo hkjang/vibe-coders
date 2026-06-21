@@ -9097,10 +9097,12 @@ const adminHTML = `<!doctype html>
       view.innerHTML = section('내 홈', kpis) +
         '<div id="me-actions"></div><div id="me-report"></div>' +
         profCard + usageCard + modelsCard + failCard + keyCard + recCard +
-        '<div id="me-recmodels"></div><div id="me-notifications"></div><div id="me-sessions"></div>';
+        '<div id="me-recmodels"></div><div id="me-skills"></div><div id="me-notifications"></div><div id="me-sessions"></div>';
 
       // 내 업무 추천 모델 — 최근 작업 유형 + 모델 용도 태그 결합.
       meLoadRecommendedModels();
+      // Skill Marketplace — 사용 가능한/요청 가능한 Skill.
+      meLoadSkills();
       // 로그인 세션 관리 — 활성 세션 목록 + 개별/타 세션 일괄 종료.
       meLoadSessions();
 
@@ -9175,6 +9177,45 @@ const adminHTML = `<!doctype html>
         winnerRows +
         (mine ? '<div style="margin-top:6px;border-top:1px solid var(--border);padding-top:6px"><strong style="font-size:11px">내가 쓰는 모델 태그</strong>' + mine + '</div>' : '') +
         '<p class="muted" style="font-size:10px;margin-top:6px">' + escapeHTML(d.note || '') + '</p></div>');
+    };
+
+    // Skill Marketplace: 사용 가능한 Skill + 요청 가능한 Skill.
+    window.meLoadSkills = async () => {
+      const host = document.getElementById('me-skills');
+      if (!host) return;
+      let d;
+      try { d = await api('/me/skills'); } catch (e) { host.innerHTML = ''; return; }
+      const avail = d.available || [], req = d.requestable || [];
+      if (!avail.length && !req.length) { host.innerHTML = ''; return; }
+      const stars = (v) => v > 0 ? '★' + v.toFixed(1) : '평가 없음';
+      const availRows = avail.map(sk =>
+        '<div style="border:1px solid var(--border);border-radius:6px;padding:8px;margin:4px 0">' +
+        '<div style="display:flex;justify-content:space-between;align-items:center"><strong>' + escapeHTML(sk.name) + '</strong>' +
+        '<span class="muted" style="font-size:11px">' + stars(sk.satisfaction) + ' · 30일 ' + fmt(sk.runs_30d) + '회 · 성공 ' + (sk.success_rate||0).toFixed(0) + '%</span></div>' +
+        (sk.description ? '<div class="muted" style="font-size:11px;margin:2px 0">' + escapeHTML(sk.description) + '</div>' : '') +
+        '<div style="margin-top:4px"><select id="skfb-' + escapeAttr(sk.name) + '" style="font-size:11px"><option value="">평가</option>' + [5,4,3,2,1].map(n => '<option value="' + n + '">' + n + '점</option>').join('') + '</select> ' +
+        '<button type="button" class="secondary" style="font-size:11px" onclick="meSkillFeedback(\'' + escapeAttr(sk.name) + '\')">피드백</button></div>' +
+        '</div>').join('') || '<span class="muted" style="font-size:12px">사용 가능한 Skill이 없습니다.</span>';
+      const reqRows = req.length ? req.map(sk =>
+        '<div style="font-size:12px;margin:3px 0">' + escapeHTML(sk.name) + ' <span class="muted">' + stars(sk.satisfaction) + '</span> ' +
+        '<button type="button" class="secondary" style="font-size:10px" onclick="meSkillRequest(\'' + escapeAttr(sk.name) + '\')">접근 요청</button></div>').join('') : '';
+      host.innerHTML = card('내가 사용 가능한 Skill (' + avail.length + ')',
+        '<div class="card-body">' + availRows +
+        (reqRows ? '<div style="margin-top:8px;border-top:1px solid var(--border);padding-top:6px"><strong style="font-size:11px">요청 가능한 Skill (다른 팀 전용)</strong>' + reqRows + '</div>' : '') +
+        '</div>');
+    };
+    window.meSkillFeedback = async (name) => {
+      const sel = document.getElementById('skfb-' + name);
+      const rating = parseInt((sel && sel.value) || '0', 10);
+      if (!rating) { alert('평가 점수를 선택하세요.'); return; }
+      const comment = prompt('코멘트(선택):', '') || '';
+      try { await api('/me/skills/' + encodeURIComponent(name) + '/feedback', { method: 'POST', body: JSON.stringify({ rating, comment }) }); alert('피드백 감사합니다.'); await meLoadSkills(); }
+      catch (e) { alert(e.message); }
+    };
+    window.meSkillRequest = async (name) => {
+      const reason = prompt(name + ' Skill 접근을 요청합니다. 사유(선택):', '') || '';
+      try { await api('/me/skills/' + encodeURIComponent(name) + '/request-access', { method: 'POST', body: JSON.stringify({ reason }) }); alert('접근 요청이 접수되었습니다.'); }
+      catch (e) { alert(e.message); }
     };
 
     // 로그인 세션 관리: 활성 세션 목록(현재 세션 표시) + 개별/타 세션 종료.
