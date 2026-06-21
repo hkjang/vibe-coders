@@ -106,6 +106,69 @@ func (s *SQLStore) UserRecentFailures(ctx context.Context, userID string, limit 
 	return out, rows.Err()
 }
 
+// UserRequestSummary is a safe, per-request line item for the caller's own request history
+// (no raw prompt/SQL/tool args — only routing/cost/status metadata).
+type UserRequestSummary struct {
+	ID          string  `json:"id"`
+	Model       string  `json:"model"`
+	Provider    string  `json:"provider"`
+	Endpoint    string  `json:"endpoint"`
+	StatusCode  int     `json:"status_code"`
+	CostKRW     float64 `json:"cost_krw"`
+	TotalTokens int64   `json:"total_tokens"`
+	Cached      bool    `json:"cached"`
+	CreatedAt   string  `json:"created_at"`
+}
+
+// UserRecentRequests returns the caller's most recent requests (safe metadata only).
+func (s *SQLStore) UserRecentRequests(ctx context.Context, userID string, limit int) ([]UserRequestSummary, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+	rows, err := s.db.QueryContext(ctx, s.bind(`
+		SELECT r.id, COALESCE(NULLIF(r.model, ''), '(unknown)'), COALESCE(r.provider, ''), r.endpoint, r.status_code,
+			COALESCE(t.estimated_cost, 0), COALESCE(t.total_tokens, 0), COALESCE(t.cached_tokens, 0), r.created_at
+		FROM request_logs r
+		JOIN api_keys k ON k.id = r.api_key_id
+		LEFT JOIN token_usage t ON t.request_id = r.id
+		WHERE k.user_id = ?
+		ORDER BY r.created_at DESC
+		LIMIT ?`), userID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []UserRequestSummary{}
+	for rows.Next() {
+		var q UserRequestSummary
+		var cached int64
+		if err := rows.Scan(&q.ID, &q.Model, &q.Provider, &q.Endpoint, &q.StatusCode, &q.CostKRW, &q.TotalTokens, &cached, &q.CreatedAt); err != nil {
+			return nil, err
+		}
+		q.Cached = cached > 0
+		out = append(out, q)
+	}
+	return out, rows.Err()
+}
+
+// RequestUserID resolves the owning user of a request via its API key. Returns "" if the request
+// is unknown or its key has no user. Used to authorize a caller's access to their own request.
+func (s *SQLStore) RequestUserID(ctx context.Context, requestID string) (string, error) {
+	var userID string
+	err := s.db.QueryRowContext(ctx, s.bind(`
+		SELECT COALESCE(k.user_id, '')
+		FROM request_logs r
+		JOIN api_keys k ON k.id = r.api_key_id
+		WHERE r.id = ?`), requestID).Scan(&userID)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return userID, nil
+}
+
 // PersonalRecommendation is one actionable suggestion for a user (e.g. switch model,
 // adopt a template), generated from their own usage.
 type PersonalRecommendation struct {

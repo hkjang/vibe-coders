@@ -9411,8 +9411,10 @@ const adminHTML = `<!doctype html>
       view.innerHTML = section('내 홈', kpis) +
         '<div id="me-actions"></div><div id="me-report"></div>' +
         profCard + usageCard + modelsCard + failCard + blockCard + reportsCard + keyCard + recCard +
-        '<div id="me-recmodels"></div><div id="me-skills"></div><div id="me-notifications"></div><div id="me-sessions"></div>';
+        '<div id="me-requests"></div><div id="me-recmodels"></div><div id="me-skills"></div><div id="me-notifications"></div><div id="me-sessions"></div>';
 
+      // 최근 요청 + 영수증.
+      meLoadRequests();
       // 내 업무 추천 모델 — 최근 작업 유형 + 모델 용도 태그 결합.
       meLoadRecommendedModels();
       // Skill Marketplace — 사용 가능한/요청 가능한 Skill.
@@ -9494,6 +9496,63 @@ const adminHTML = `<!doctype html>
     };
 
     // Skill Marketplace: 사용 가능한 Skill + 요청 가능한 Skill.
+    window.meLoadRequests = async () => {
+      const host = document.getElementById('me-requests');
+      if (!host) return;
+      let d;
+      try { d = await api('/me/requests?limit=15'); } catch (e) { host.innerHTML = ''; return; }
+      const reqs = d.requests || [];
+      if (!reqs.length) { host.innerHTML = ''; return; }
+      const won = (v) => '₩' + fmt(Math.round(v || 0));
+      host.innerHTML = card('최근 요청 / 영수증',
+        '<div class="card-body"><table><thead><tr><th>시각</th><th>모델</th><th>상태</th><th>토큰</th><th>비용</th><th>캐시</th><th></th></tr></thead><tbody>' +
+        reqs.map(q => '<tr>' +
+          '<td class="muted">' + ago(q.created_at) + '</td>' +
+          '<td>' + escapeHTML(q.model || '') + '</td>' +
+          '<td>' + (q.status_code >= 200 && q.status_code < 300 ? '<span class="status">' + q.status_code + '</span>' : '<span class="status error">' + q.status_code + '</span>') + '</td>' +
+          '<td>' + fmt(q.total_tokens || 0) + '</td>' +
+          '<td>' + won(q.cost_krw) + '</td>' +
+          '<td>' + (q.cached ? '✓' : '-') + '</td>' +
+          '<td><button type="button" class="secondary" style="font-size:11px" onclick="meShowReceipt(\'' + escapeAttr(q.id) + '\')">영수증 보기</button></td>' +
+        '</tr>').join('') + '</tbody></table></div>');
+    };
+    window.meShowReceipt = async (id) => {
+      openModal('요청 영수증', '<div class="empty">불러오는 중...</div>');
+      let r;
+      try { r = await api('/me/requests/' + encodeURIComponent(id) + '/receipt'); }
+      catch (e) { openModal('요청 영수증', '<div class="error-line">' + escapeHTML(e.message) + '</div>'); return; }
+      const won = (v) => '₩' + fmt(Math.round(v || 0));
+      const t = r.tokens || {};
+      const rt = r.routing;
+      const rows = [
+        ['요청 ID', escapeHTML(r.request_id || '')],
+        ['시각', escapeHTML(r.created_at || '')],
+        ['엔드포인트', escapeHTML(r.endpoint || '')],
+        ['모델', escapeHTML(r.model || '') + (r.provider ? ' <span class="muted">(' + escapeHTML(r.provider) + ')</span>' : '')],
+        ['상태', (r.status_code >= 200 && r.status_code < 300 ? '<span class="status">' + r.status_code + '</span>' : '<span class="status error">' + r.status_code + '</span>') + (r.blocked ? ' <span class="status error">정책 차단</span>' : '')],
+        ['종료 사유', escapeHTML(r.finish_reason || '-')],
+        ['지연', fmt(r.latency_ms || 0) + 'ms'],
+        ['토큰', '입력 ' + fmt(t.prompt || 0) + ' · 출력 ' + fmt(t.completion || 0) + ' · 합계 ' + fmt(t.total || 0) + (t.cached ? ' · 캐시 ' + fmt(t.cached) : '')],
+        ['캐시 적중', r.cache_hit ? '예' : '아니오'],
+        ['비용', won(r.cost_krw)],
+      ];
+      if (rt) {
+        rows.push(['라우팅', '요청 ' + escapeHTML(rt.requested_model || '-') + ' → 선택 ' + escapeHTML(rt.selected_model || '-') + (rt.selected_provider ? ' @ ' + escapeHTML(rt.selected_provider) : '')]);
+        if (rt.reason) rows.push(['라우팅 이유', escapeHTML(rt.reason)]);
+        if (rt.risk_tier || rt.complexity_tier) rows.push(['위험/복잡도', escapeHTML(rt.risk_tier || '-') + ' / ' + escapeHTML(rt.complexity_tier || '-')]);
+        if ((rt.fallback_path || []).length) rows.push(['폴백 경로', escapeHTML(rt.fallback_path.join(' → '))]);
+      }
+      rows.push(['Skill 사용', r.skill_used ? escapeHTML((r.skills || []).join(', ')) : '아니오']);
+      rows.push(['MCP 사용', r.mcp_used ? (r.mcp_tools || []).map(m => escapeHTML((m.server ? m.server + '/' : '') + m.tool) + (m.error ? ' <span class="status error">오류</span>' : '')).join(', ') : '아니오']);
+      const policy = r.policy || [];
+      let html = '<div class="kv">' + rows.map(kv => row(kv[0], kv[1])).join('') + '</div>';
+      if (policy.length) {
+        html += '<div style="margin-top:8px"><strong style="font-size:12px">정책 결과</strong>' +
+          policy.map(p => '<div style="font-size:12px;margin:2px 0"><span class="status warn">' + escapeHTML(p.decision) + '</span> ' + escapeHTML(p.rule || '') + ' — ' + escapeHTML(p.reason || '') + '</div>').join('') + '</div>';
+      }
+      html += '<p class="muted" style="font-size:11px;margin-top:8px">' + escapeHTML(r.note || '') + '</p>';
+      openModal('요청 영수증', html);
+    };
     window.meLoadSkills = async () => {
       const host = document.getElementById('me-skills');
       if (!host) return;
