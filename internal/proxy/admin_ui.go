@@ -5552,6 +5552,16 @@ const adminHTML = `<!doctype html>
       ).join('') : '<tr><td colspan="5" class="muted">변경 세트가 없습니다.</td></tr>';
       view.innerHTML = section('변경 세트', '<p class="muted" style="font-size:12px">설정 변경을 하나의 릴리즈로 묶어 dry-run → 승인 → 적용 → 롤백합니다. (현재 버전은 setting 항목 적용, policy/routing/skill은 참고 기록)</p>') +
         card('변경 세트 목록', '<div class="card-body"><table><thead><tr><th>제목</th><th>상태</th><th>항목</th><th>리뷰어</th><th>액션</th></tr></thead><tbody>' + rows + '</tbody></table></div>') +
+        card('변경 영향도 시뮬레이터',
+          '<div class="card-body">' +
+          '<p class="muted" style="font-size:12px">변경을 과거 요청(모델 일별 집계)에 dry-run 적용해 영향을 추정합니다. 원문 미사용.</p>' +
+          '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:6px">' +
+          '<select id="ci-type" onchange="ciSyncParams()"><option value="block_model">모델 차단</option><option value="model_price">모델 단가 변경</option><option value="route_remap">모델 재라우팅</option></select>' +
+          '<input id="ci-days" type="number" value="7" title="기간(일)" style="width:70px">' +
+          '<span id="ci-params"></span>' +
+          '<button type="button" onclick="ciSimulate()">시뮬레이션</button></div>' +
+          '<div id="ci-out"></div>' +
+          '</div>') +
         card('새 변경 세트',
           '<div class="card-body">' +
           '<input id="cs-title" placeholder="제목" style="width:100%;margin-bottom:6px">' +
@@ -5581,6 +5591,40 @@ const adminHTML = `<!doctype html>
       const body = { title, description: (document.getElementById('cs-desc').value || '').trim(), canary_scope: (document.getElementById('cs-canary').value || '').trim(), items };
       try { await api('/admin/change-sets', { method: 'POST', body: JSON.stringify(body) }); await renderChangeSets(); }
       catch (e) { if (out) out.innerHTML = '<span class="status error">' + escapeHTML(e.message) + '</span>'; }
+    };
+    window.ciSyncParams = () => {
+      const t = document.getElementById('ci-type').value;
+      const host = document.getElementById('ci-params');
+      if (!host) return;
+      if (t === 'block_model') host.innerHTML = '<input id="ci-pattern" placeholder="모델 패턴 (예: gpt-4*,claude-*)" style="width:260px">';
+      else if (t === 'model_price') host.innerHTML = '<input id="ci-model" placeholder="모델" style="width:160px"><input id="ci-in" type="number" placeholder="입력 ₩/1M" style="width:110px"><input id="ci-out" type="number" placeholder="출력 ₩/1M" style="width:110px">';
+      else host.innerHTML = '<input id="ci-from" placeholder="원본 모델" style="width:150px"><input id="ci-to" placeholder="대상 모델" style="width:150px">';
+    };
+    window.ciSimulate = async () => {
+      const out = document.getElementById('ci-out');
+      const t = document.getElementById('ci-type').value;
+      const days = parseInt(document.getElementById('ci-days').value || '7', 10);
+      const params = {};
+      if (t === 'block_model') params.pattern = (document.getElementById('ci-pattern').value || '').trim();
+      else if (t === 'model_price') { params.model = (document.getElementById('ci-model').value || '').trim(); params.input_krw_per_1m = parseFloat(document.getElementById('ci-in').value || '0'); params.output_krw_per_1m = parseFloat(document.getElementById('ci-out').value || '0'); }
+      else { params.from = (document.getElementById('ci-from').value || '').trim(); params.to = (document.getElementById('ci-to').value || '').trim(); }
+      out.innerHTML = '<div class="empty">시뮬레이션 중...</div>';
+      try {
+        const d = await api('/admin/change-impact/simulate', { method: 'POST', body: JSON.stringify({ change_type: t, days, params }) });
+        const b = d.baseline || {}, im = d.impact || {};
+        const won = (v) => '₩' + fmt(Math.round(v || 0));
+        let rows = '<tr><td>기준(' + (d.window_days || 7) + '일)</td><td>요청 ' + fmt(b.requests || 0) + ' · ' + won(b.cost_krw) + ' · 모델 ' + (b.models || 0) + '</td></tr>';
+        Object.keys(im).forEach(k => {
+          if (k === 'matched_models') return;
+          let v = im[k];
+          if (typeof v === 'number' && /cost|krw/.test(k)) v = won(v);
+          else if (typeof v === 'object') return;
+          rows += '<tr><td>' + escapeHTML(k) + '</td><td>' + escapeHTML(String(v)) + '</td></tr>';
+        });
+        out.innerHTML = '<table>' + rows + '</table>' +
+          (im.matched_models ? '<div class="muted" style="font-size:11px;margin-top:4px">매칭 모델: ' + (im.matched_models || []).map(m => escapeHTML(m.model) + '(' + fmt(m.requests) + ')').join(', ') + '</div>' : '') +
+          '<p class="muted" style="font-size:10px;margin-top:4px">' + escapeHTML(d.note || '') + '</p>';
+      } catch (e) { out.innerHTML = '<span class="status error">' + escapeHTML(e.message) + '</span>'; }
     };
     window.csDryRun = async (id) => {
       const host = document.getElementById('cs-detail-' + id);
