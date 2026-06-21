@@ -375,6 +375,12 @@ func (s *Server) handleSwaggerUI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	// Air-gapped networks can't reach the Swagger CDN; ?offline=1 serves a fully self-contained
+	// explorer (no external CSS/JS) that renders /openapi.json inline.
+	if r.URL.Query().Get("offline") != "" {
+		_, _ = w.Write([]byte(swaggerOfflineHTML))
+		return
+	}
 	_, _ = w.Write([]byte(swaggerUIHTML))
 }
 
@@ -388,13 +394,104 @@ const swaggerUIHTML = `<!DOCTYPE html>
   <style>body{margin:0}#hint{font:13px system-ui;padding:8px 14px;background:#fff3cd;color:#664d03;border-bottom:1px solid #ffe69c}</style>
 </head>
 <body>
-  <div id="hint">오프라인(폐쇄망)에서는 Swagger UI 자산 로드가 실패할 수 있습니다. 그 경우 <a href="/openapi.json">/openapi.json</a>을 직접 내려받아 사용하세요.</div>
+  <div id="hint">오프라인(폐쇄망)에서는 Swagger UI 자산 로드가 실패할 수 있습니다. 그 경우 <a href="/swagger?offline=1">오프라인 API 탐색기</a> 또는 <a href="/openapi.json">/openapi.json</a>을 사용하세요.</div>
   <div id="swagger-ui"></div>
   <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js" crossorigin></script>
   <script>
     window.addEventListener('load', function () {
       if (!window.SwaggerUIBundle) return;
       window.ui = SwaggerUIBundle({ url: '/openapi.json', dom_id: '#swagger-ui', deepLinking: true });
+    });
+  </script>
+</body>
+</html>`
+
+// swaggerOfflineHTML is a fully self-contained API explorer (no external CSS/JS/fonts) that
+// fetches /openapi.json and renders operations grouped by tag — for air-gapped networks.
+const swaggerOfflineHTML = `<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AI Gateway API — 오프라인 탐색기</title>
+  <style>
+    :root{--bg:#0f1115;--card:#171a21;--line:#262b36;--muted:#8b94a7;--fg:#e6e9ef;--accent:#6ea8fe}
+    body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+    header{padding:14px 20px;border-bottom:1px solid var(--line)}
+    header h1{font-size:17px;margin:0}
+    header .sub{color:var(--muted);font-size:12px;margin-top:4px}
+    #q{width:100%;max-width:480px;margin-top:8px;padding:7px 10px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--fg)}
+    main{padding:16px 20px;max-width:1000px}
+    .tag{margin:18px 0 6px;font-size:13px;font-weight:800;color:var(--accent);text-transform:uppercase;letter-spacing:.04em}
+    .op{border:1px solid var(--line);border-radius:8px;margin:6px 0;background:var(--card);overflow:hidden}
+    .op>summary{cursor:pointer;padding:8px 12px;display:flex;gap:10px;align-items:center;list-style:none}
+    .op>summary::-webkit-details-marker{display:none}
+    .m{font-weight:800;font-size:11px;padding:2px 8px;border-radius:6px;min-width:48px;text-align:center}
+    .m.get{background:#163d2b;color:#7ee2a8}.m.post{background:#15314f;color:#7fb8ff}.m.put{background:#4a3a14;color:#ffd27f}
+    .m.delete{background:#4a1d1d;color:#ff9b9b}.m.patch{background:#3a2747;color:#d6a8ff}
+    .path{font-family:ui-monospace,Consolas,monospace;font-size:13px}
+    .sum{color:var(--muted);margin-left:auto;font-size:12px}
+    .body{padding:6px 14px 12px;border-top:1px solid var(--line);font-size:13px}
+    table{border-collapse:collapse;width:100%;margin-top:6px}
+    th,td{text-align:left;padding:4px 8px;border-bottom:1px solid var(--line);font-size:12px;vertical-align:top}
+    th{color:var(--muted);font-weight:600}
+    .req{color:#ff9b9b;font-size:10px}
+    .err{color:#ff9b9b;padding:20px}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>AI Gateway API — 오프라인 탐색기</h1>
+    <div class="sub">외부 자산 없이 동작합니다. <a href="/openapi.json" style="color:var(--accent)">/openapi.json</a> 원본 · <a href="/swagger" style="color:var(--accent)">Swagger UI(온라인)</a></div>
+    <input id="q" placeholder="경로/요약 필터…">
+  </header>
+  <main id="out"><div class="muted">불러오는 중…</div></main>
+  <script>
+    var METHODS = ['get','post','put','delete','patch','options','head'];
+    function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+    function paramRows(params){
+      if(!params||!params.length) return '';
+      var rows = params.map(function(p){
+        var t = (p.schema&&p.schema.type)||p.type||'';
+        return '<tr><td>'+esc(p.name)+(p.required?' <span class="req">*</span>':'')+'</td><td>'+esc(p.in||'')+'</td><td>'+esc(t)+'</td><td>'+esc(p.description||'')+'</td></tr>';
+      }).join('');
+      return '<table><thead><tr><th>파라미터</th><th>위치</th><th>타입</th><th>설명</th></tr></thead><tbody>'+rows+'</tbody></table>';
+    }
+    function render(spec){
+      var out = document.getElementById('out');
+      var paths = spec.paths||{};
+      var byTag = {};
+      Object.keys(paths).sort().forEach(function(p){
+        METHODS.forEach(function(m){
+          var op = paths[p][m];
+          if(!op) return;
+          var tag = (op.tags&&op.tags[0])||'기타';
+          (byTag[tag]=byTag[tag]||[]).push({path:p,method:m,op:op});
+        });
+      });
+      var html = '';
+      Object.keys(byTag).sort().forEach(function(tag){
+        html += '<div class="tag">'+esc(tag)+' <span class="muted">('+byTag[tag].length+')</span></div>';
+        byTag[tag].forEach(function(e){
+          var resp = Object.keys(e.op.responses||{}).join(', ');
+          html += '<details class="op" data-f="'+esc((e.path+' '+(e.op.summary||'')).toLowerCase())+'">'+
+            '<summary><span class="m '+e.method+'">'+e.method.toUpperCase()+'</span>'+
+            '<span class="path">'+esc(e.path)+'</span><span class="sum">'+esc(e.op.summary||'')+'</span></summary>'+
+            '<div class="body">'+
+              (e.op.description?'<div>'+esc(e.op.description)+'</div>':'')+
+              paramRows(e.op.parameters)+
+              (resp?'<div class="muted" style="margin-top:6px">응답: '+esc(resp)+'</div>':'')+
+            '</div></details>';
+        });
+      });
+      out.innerHTML = html || '<div class="muted">엔드포인트가 없습니다.</div>';
+      document.getElementById('q').addEventListener('input', function(ev){
+        var q = ev.target.value.toLowerCase();
+        document.querySelectorAll('.op').forEach(function(el){ el.style.display = el.getAttribute('data-f').indexOf(q)>=0 ? '' : 'none'; });
+      });
+    }
+    fetch('/openapi.json').then(function(r){return r.json();}).then(render).catch(function(e){
+      document.getElementById('out').innerHTML = '<div class="err">스펙을 불러오지 못했습니다: '+esc(e.message)+'</div>';
     });
   </script>
 </body>
