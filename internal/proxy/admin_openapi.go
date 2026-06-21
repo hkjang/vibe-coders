@@ -52,6 +52,7 @@ var apiEndpoints = []apiEndpoint{
 	{"/me/recommendations/{id}/feedback", []string{"post"}, "self-service", "Record accepted/rejected/later feedback on a recommendation", false},
 	{"/me/keys", []string{"get", "post"}, "self-service", "List / issue the caller's own API keys", false},
 	{"/me/keys/{id}", []string{"post", "delete"}, "self-service", "Rotate ({id}/rotate) or revoke the caller's key", false},
+	{"/team/portal", []string{"get"}, "self-service", "Team self-service portal (usage/budget/keys/skills/members)", false},
 
 	// ---- admin UI ----
 	{"/admin", []string{"get"}, "admin", "Admin dashboard (HTML)", false},

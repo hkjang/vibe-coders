@@ -31,6 +31,7 @@ var menuRegistry = []menuItem{
 	{ID: "me.keys", Label: "내 키", Path: "#/mykeys", Tab: "mykeys", Group: "me", Features: []string{"self_service_keys"}, DataScope: "self"},
 	// 팀 영역 — team_manager (and admins) see their team's usage/cost/failures.
 	{ID: "team.home", Label: "팀 대시보드", Path: "#/team", Tab: "team", Group: "team", Scopes: []string{"team:read"}, DataScope: "team"},
+	{ID: "team.portal", Label: "팀 포털", Path: "#/team-portal", Tab: "team-portal", Group: "team", Scopes: []string{"team:read"}, DataScope: "team"},
 	// 운영 영역 — operational surface (admin:read).
 	{ID: "ops.home", Label: "운영 홈", Path: "#/ops-home", Tab: "ops-home", Group: "ops", Scopes: []string{"admin:read"}, DataScope: "all"},
 	{ID: "ops.capabilities", Label: "기능 맵", Path: "#/capabilities", Tab: "capabilities", Group: "ops", Scopes: []string{"admin:read"}, DataScope: "all"},

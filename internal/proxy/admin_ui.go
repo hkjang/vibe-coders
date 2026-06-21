@@ -1091,6 +1091,7 @@ const adminHTML = `<!doctype html>
         switch (tab) {
           case 'me':        await renderMeHome(); break;
           case 'team':      await renderTeamHome(); break;
+          case 'team-portal': await renderTeamPortal(); break;
           case 'security':  await renderSecurityHome(); break;
           case 'billing':   await renderBillingHome(); break;
           case 'ops-home': await renderOpsHome(); break;
@@ -9148,6 +9149,68 @@ const adminHTML = `<!doctype html>
               cands.map(c => '<tr><td>' + escapeHTML(c.task_type) + '<div class="muted" style="font-size:10px">' + escapeHTML((c.fingerprint||'').slice(0,12)) + '</div></td><td>' + fmt(c.requests) + '</td><td>' + pctv(c.success_rate) + '</td><td>₩' + fmt(Math.round(c.avg_cost_krw||0)) + '</td><td>' + (c.already_product ? '<span class="status">상품화됨</span>' : '<span class="status warn">후보</span>') + '</td></tr>').join('') + '</tbody></table>'
             : '<p class="muted">반복 프롬프트 패턴이 충분하지 않습니다.</p>') + '</div>');
       }).catch(() => {});
+    }
+
+    // renderTeamPortal is the consolidated team self-service portal: usage, budget burn, the
+    // team's API keys (no secrets), accessible skills, pending skill access requests, members.
+    async function renderTeamPortal() {
+      const view = document.getElementById('view');
+      view.innerHTML = section('팀 포털', '<div class="empty">불러오는 중...</div>');
+      let d;
+      try { d = await api('/team/portal'); }
+      catch (e) {
+        view.innerHTML = section('팀 포털', '<div class="card-body" style="padding:16px"><p class="muted">팀 포털을 불러올 수 없습니다(team:read 권한 + 소속 팀 필요). 상세: ' + escapeHTML(e.message) + '</p></div>');
+        return;
+      }
+      const u = d.usage || {};
+      const won = (v) => '₩' + fmt(Math.round(v || 0));
+      const pctv = (v) => (v == null ? '-' : (v * 100).toFixed(1) + '%');
+      const kpis = '<div class="kpis">' +
+        kpi('팀 요청 (30일)', fmt(u.requests || 0)) +
+        kpi('성공률', pctv(u.success_rate)) +
+        kpi('비용', won(u.cost_krw)) +
+        kpi('API 키', fmt(d.api_key_count || 0)) +
+        kpi('팀원', fmt(d.member_count || 0)) +
+        kpi('사용가능 Skill', fmt(d.skill_count || 0)) +
+      '</div>';
+
+      const budgets = d.budgets || [];
+      const budgetCard = card('팀 예산 소진',
+        '<div class="card-body">' + (budgets.length
+          ? '<table><thead><tr><th>월 예산</th><th>사용</th><th>소진율</th><th>예상 월말</th><th>상태</th><th>소진 예정일</th></tr></thead><tbody>' +
+            budgets.map(b => '<tr><td>' + won(b.monthly_krw) + '</td><td>' + won(b.spent_krw) + '</td><td>' + pctv(b.burn_ratio) + '</td><td>' + won(b.projected_krw) + '</td><td>' + (b.on_track ? '<span class="status">정상</span>' : '<span class="status error">초과 예상</span>') + '</td><td class="muted">' + escapeHTML(b.exhaustion_date || '-') + '</td></tr>').join('') + '</tbody></table>'
+          : '<p class="muted">설정된 팀 예산이 없습니다. 관리자에게 팀 월 예산 설정을 요청하세요.</p>') + '</div>');
+
+      const keys = d.api_keys || [];
+      const keysCard = card('팀 API 키 (비밀값 비노출)',
+        '<div class="card-body">' + (keys.length
+          ? '<table><thead><tr><th>이름</th><th>소유자</th><th>역할</th><th>상태</th><th>만료</th></tr></thead><tbody>' +
+            keys.map(k => '<tr><td>' + escapeHTML(k.name || k.id) + '</td><td class="muted">' + escapeHTML(k.user_id || k.owner || '') + '</td><td>' + escapeHTML(k.role || '') + '</td><td>' + (k.status === 'active' ? '<span class="status">active</span>' : '<span class="status error">' + escapeHTML(k.status || '') + '</span>') + '</td><td class="muted">' + (k.expires_at ? escapeHTML(k.expires_at) : '-') + '</td></tr>').join('') + '</tbody></table>'
+          : '<p class="muted">팀에 등록된 API 키가 없습니다.</p>') + '</div>');
+
+      const skills = d.accessible_skills || [];
+      const skillsCard = card('사용 가능한 Skill',
+        '<div class="card-body">' + (skills.length
+          ? '<table><thead><tr><th>이름</th><th>버전</th><th>위험도</th><th>설명</th></tr></thead><tbody>' +
+            skills.map(s => '<tr><td>' + escapeHTML(s.name) + '</td><td class="muted">' + escapeHTML(s.version || '') + '</td><td>' + escapeHTML(s.risk_level || '') + '</td><td class="muted">' + escapeHTML((s.description || '').slice(0, 80)) + '</td></tr>').join('') + '</tbody></table>'
+          : '<p class="muted">사용 가능한 production Skill이 없습니다.</p>') + '</div>');
+
+      const reqs = d.pending_skill_requests || [];
+      const reqCard = card('대기 중인 Skill 접근 요청 (' + reqs.length + ')',
+        '<div class="card-body">' + (reqs.length
+          ? '<table><thead><tr><th>Skill</th><th>요청자</th><th>사유</th><th>요청 시각</th></tr></thead><tbody>' +
+            reqs.map(r => '<tr><td>' + escapeHTML(r.skill_name) + '</td><td class="muted">' + escapeHTML(r.user_id || '') + '</td><td>' + escapeHTML((r.reason || '').slice(0, 80)) + '</td><td class="muted">' + ago(r.created_at) + '</td></tr>').join('') + '</tbody></table>'
+          : '<p class="muted">대기 중인 접근 요청이 없습니다.</p>') + '</div>');
+
+      const members = d.members || [];
+      const memberCard = card('팀원 (' + members.length + ')',
+        '<div class="card-body">' + (members.length
+          ? '<div style="display:flex;flex-wrap:wrap;gap:6px">' + members.map(m => '<span class="pill">' + escapeHTML(m) + '</span>').join('') + '</div>'
+          : '<p class="muted">식별된 팀원이 없습니다.</p>') + '</div>');
+
+      view.innerHTML = section('팀 포털 — ' + escapeHTML(d.team_id || ''), kpis) +
+        budgetCard + keysCard + skillsCard + reqCard + memberCard +
+        '<p class="muted" style="font-size:12px;padding:8px 14px">' + escapeHTML(d.note || '') + ' <a href="#/team">팀 대시보드 →</a></p>';
     }
 
     // renderMeHome is the personalized landing for non-operators: their own usage, cost,
