@@ -5408,8 +5408,27 @@ const adminHTML = `<!doctype html>
       const overall = badge(d.overall);
       view.innerHTML = section('운영 홈 (최근 ' + (d.window_hours || 24) + 'h)',
         '<p class="muted" style="font-size:12px">전체 상태 ' + overall + ' · 생성 ' + ago(d.generated_at) + ' — 카드를 클릭하면 상세 화면으로 이동합니다.</p>') +
-        '<div style="display:flex;gap:12px;flex-wrap:wrap">' + cards + '</div>';
+        '<div style="display:flex;gap:12px;flex-wrap:wrap">' + cards + '</div>' +
+        '<div id="ops-workers"></div>';
+      opsLoadWorkers();
     }
+    // 백그라운드 워커 상태판.
+    window.opsLoadWorkers = async () => {
+      const host = document.getElementById('ops-workers');
+      if (!host) return;
+      let d;
+      try { d = await api('/admin/ops/workers'); } catch (e) { host.innerHTML = ''; return; }
+      const sBadge = (st) => st === 'critical' ? '<span class="status error">위험</span>' : (st === 'warn' ? '<span class="status warn">주의</span>' : (st === 'idle' ? '<span class="status">유휴</span>' : '<span class="status">정상</span>'));
+      const rows = (d.workers || []).map(wk =>
+        '<tr><td>' + escapeHTML(wk.name) + '</td><td>' + sBadge(wk.status) + '</td>' +
+        '<td>' + (wk.running ? '실행' : '중지') + '</td>' +
+        '<td>' + (wk.capacity ? (wk.queue_depth + '/' + wk.capacity) : (wk.queue_depth || 0)) + '</td>' +
+        '<td>' + (wk.dropped || 0) + '</td>' +
+        '<td class="muted" style="font-size:11px">' + (wk.last_run ? ago(wk.last_run) + ' · ' : '') + escapeHTML(wk.detail || '') + '</td></tr>'
+      ).join('');
+      host.innerHTML = card('백그라운드 워커',
+        '<div class="card-body"><table><thead><tr><th>워커</th><th>상태</th><th>실행</th><th>큐</th><th>유실</th><th>상세</th></tr></thead><tbody>' + rows + '</tbody></table></div>');
+    };
 
     // ---------- DW Metric Catalog: 표준 지표 사전 ----------
     async function renderDWMetrics() {
