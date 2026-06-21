@@ -6957,6 +6957,26 @@ const adminHTML = `<!doctype html>
     }
 
     // ---------- MCP / tool observability ----------
+    // MCP Tool Trust Score — 도구별 신뢰 점수(오류율·위험도 기반).
+    window.mcpLoadTrust = async () => {
+      const host = document.getElementById('mcp-trust');
+      if (!host) return;
+      let d;
+      try { d = await api('/admin/mcp/trust-scores?days=30'); } catch (e) { host.innerHTML = ''; return; }
+      const tools = d.tools || [];
+      if (!tools.length) { host.innerHTML = ''; return; }
+      const gradeCls = (g) => g === 'A' ? '' : (g === 'B' ? '' : (g === 'C' ? 'warn' : 'error'));
+      const rows = tools.map(t =>
+        '<tr><td>' + escapeHTML(t.ref) + (t.confidence === 'low' ? ' <span class="muted" style="font-size:9px">표본부족</span>' : '') + '</td>' +
+        '<td><span class="status ' + gradeCls(t.grade) + '">' + escapeHTML(t.grade) + ' ' + (t.trust_score||0).toFixed(0) + '</span></td>' +
+        '<td>' + escapeHTML(t.risk_level) + '</td>' +
+        '<td>' + fmt(t.calls) + '</td><td>' + (t.error_rate_pct||0).toFixed(1) + '%</td>' +
+        '<td>' + fmt(t.distinct_users) + '</td></tr>').join('');
+      host.innerHTML = section('MCP Tool 신뢰 점수 (최근 30일)', card('신뢰도 낮은 순',
+        '<div class="card-body"><table><thead><tr><th>도구</th><th>점수</th><th>위험도</th><th>호출</th><th>오류율</th><th>사용자</th></tr></thead><tbody>' + rows + '</tbody></table>' +
+        '<p class="muted" style="font-size:10px;margin-top:4px">' + escapeHTML(d.note || '') + '</p></div>'));
+    };
+
     async function renderMCP(initial) {
       const apiKeyId = initial ? (initial.get('api_key_id') || '') : '';
       const serverFilter = initial ? (initial.get('server') || '') : '';
@@ -7208,9 +7228,12 @@ const adminHTML = `<!doctype html>
         section('Topology — Gateway / Upstream / Route 관계', topologyView) +
         section('MCP 서버별', serverTable) +
         section('Tool 리더보드', toolTable) +
+        '<div id="mcp-trust"></div>' +
         section('에이전트 루프 의심 (세션별 반복 호출 ≥ 10)', loopTable) +
         section(catalogTitle, catalogTable) +
         section('MCP 서버 정책', allowlistToggle + policyForm + policyTable);
+
+      mcpLoadTrust();
 
       const wizardSelect = document.getElementById('mcp-wizard-upstream');
       if (wizardSelect) {
