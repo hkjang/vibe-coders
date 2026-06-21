@@ -109,6 +109,43 @@ func (s *SQLStore) TeamPopularSkills(ctx context.Context, keys []string, since t
 	return out, rows.Err()
 }
 
+// TeamQualityExtras carries per-team quality signals not in TeamUsageTotals: cache-hit rate
+// (cost discipline) and Text2SQL validity (data-query quality).
+type TeamQualityExtras struct {
+	CacheRate     float64 `json:"cache_rate"`
+	Text2SQLTotal int64   `json:"text2sql_total"`
+	Text2SQLOK    int64   `json:"text2sql_ok"`
+}
+
+// TeamQualityExtras computes the team's cache-hit rate and Text2SQL success counts since `since`.
+func (s *SQLStore) TeamQualityExtras(ctx context.Context, keys []string, since time.Time) (TeamQualityExtras, error) {
+	var out TeamQualityExtras
+	in, args := keyPlaceholders(keys)
+	if in == "" {
+		return out, nil
+	}
+	sinceStr := since.UTC().Format(time.RFC3339Nano)
+
+	cacheQ := `SELECT COALESCE(AVG(CASE WHEN COALESCE(t.cached_tokens, 0) > 0 THEN 1.0 ELSE 0.0 END), 0)
+		FROM request_logs r
+		JOIN api_keys k ON k.id = r.api_key_id
+		LEFT JOIN token_usage t ON t.request_id = r.id
+		WHERE k.team IN (` + in + `) AND r.created_at >= ?`
+	cacheArgs := append(append([]any{}, args...), sinceStr)
+	if err := s.db.QueryRowContext(ctx, s.bind(cacheQ), cacheArgs...).Scan(&out.CacheRate); err != nil {
+		return out, err
+	}
+
+	t2sQ := `SELECT COUNT(*), COALESCE(SUM(CASE WHEN valid = 1 THEN 1 ELSE 0 END), 0)
+		FROM text2sql_query_logs
+		WHERE team IN (` + in + `) AND created_at >= ?`
+	t2sArgs := append(append([]any{}, args...), sinceStr)
+	if err := s.db.QueryRowContext(ctx, s.bind(t2sQ), t2sArgs...).Scan(&out.Text2SQLTotal, &out.Text2SQLOK); err != nil {
+		return out, err
+	}
+	return out, nil
+}
+
 // TeamTemplateCandidate is a recurring prompt cluster within a team, proposed as a team
 // template. AlreadyProduct marks clusters already promoted to a prompt product.
 type TeamTemplateCandidate struct {

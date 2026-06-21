@@ -1094,6 +1094,7 @@ const adminHTML = `<!doctype html>
           case 'team-portal': await renderTeamPortal(); break;
           case 'data-products': await renderDataProducts(); break;
           case 'remediation': await renderRemediation(); break;
+          case 'scorecard': await renderTeamScorecard(); break;
           case 'security':  await renderSecurityHome(); break;
           case 'billing':   await renderBillingHome(); break;
           case 'ops-home': await renderOpsHome(); break;
@@ -9385,6 +9386,54 @@ const adminHTML = `<!doctype html>
     function situationLabel(s) {
       return ({ provider_degraded: '프로바이더 장애', cost_spike: '비용 급증', mcp_error_spike: 'MCP 오류 급증', text2sql_risk_spike: 'Text2SQL 위험 급증', policy_violation_spike: '정책 위반 급증', break_glass: '비상 차단' })[s] || s;
     }
+
+    // renderTeamScorecard shows per-team AI maturity scores (cost/quality/safety dimensions).
+    async function renderTeamScorecard() {
+      const view = document.getElementById('view');
+      view.innerHTML = section('팀 성숙도', '<div class="empty">불러오는 중...</div>');
+      let d;
+      try { d = await api('/admin/teams/scorecard?window=30d'); }
+      catch (e) { view.innerHTML = section('팀 성숙도', '<div class="card-body" style="padding:16px"><p class="muted">' + escapeHTML(e.message) + '</p></div>'); return; }
+      const teams = d.teams || [];
+      const cell = (v) => v < 0 ? '<span class="muted">-</span>' : fmt(Math.round(v));
+      const gradeBadge = (g) => g === 'A' ? '<span class="status">A</span>' : (g === 'B' ? '<span class="status">B</span>' : (g === 'C' ? '<span class="status warn">C</span>' : (g === 'N/A' ? '<span class="muted">N/A</span>' : '<span class="status error">D</span>')));
+      const won = (v) => '₩' + fmt(Math.round(v || 0));
+      const rows = teams.map(t => '<tr>' +
+        '<td>' + escapeHTML(t.team) + '</td>' +
+        '<td>' + gradeBadge(t.grade) + ' <strong>' + fmt(Math.round(t.overall)) + '</strong></td>' +
+        '<td data-num="' + t.requests + '">' + fmt(t.requests) + '</td>' +
+        '<td>' + won(t.cost_krw) + '</td>' +
+        '<td>' + cell(t.cost_efficiency) + '</td>' +
+        '<td>' + cell(t.success_rate) + '</td>' +
+        '<td>' + cell(t.cache_rate) + '</td>' +
+        '<td>' + cell(t.skill_reuse) + '</td>' +
+        '<td>' + cell(t.mcp_success) + '</td>' +
+        '<td>' + cell(t.text2sql_success) + '</td>' +
+        '<td>' + cell(t.policy_compliance) + '</td>' +
+        '<td>' + cell(t.satisfaction) + '</td>' +
+      '</tr>').join('');
+      const table = teams.length
+        ? '<table><thead><tr><th>팀</th><th>종합</th><th>요청</th><th>비용</th><th>비용효율</th><th>성공률</th><th>캐시율</th><th>Skill재사용</th><th>MCP성공</th><th>Text2SQL</th><th>정책준수</th><th>만족도</th></tr></thead><tbody>' + rows + '</tbody></table>'
+        : '<p class="muted">표시할 팀 데이터가 없습니다.</p>';
+      view.innerHTML = section('팀 성숙도 (AI Maturity Scorecard) — 최근 30일',
+        '<div style="padding:8px 14px"><button type="button" class="secondary" onclick="scorecardCSV()">CSV 다운로드</button></div>') +
+        card('팀별 AI 성숙도 점수 (0~100, -는 데이터 없음)',
+          '<div class="card-body">' + table +
+          '<p class="muted" style="font-size:11px;margin-top:6px">' + escapeHTML(d.note || '') + '</p></div>');
+      makeSortable && makeSortable('#view table', 'scorecard');
+    }
+    window.scorecardCSV = async () => {
+      try {
+        const res = await fetch('/admin/teams/scorecard?window=30d&format=csv', { headers: headers() });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const blob = await res.blob();
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'team-scorecard-' + new Date().toISOString().slice(0, 10) + '.csv';
+        a.click();
+        URL.revokeObjectURL(a.href);
+      } catch (e) { openModal('CSV 오류', '<div class="error-line">' + escapeHTML(e.message) + '</div>'); }
+    };
 
     // renderMeHome is the personalized landing for non-operators: their own usage, cost,
     // models, failures, key alerts, risk, and recommendations — no operational metrics.
