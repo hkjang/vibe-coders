@@ -1093,6 +1093,7 @@ const adminHTML = `<!doctype html>
           case 'team':      await renderTeamHome(); break;
           case 'team-portal': await renderTeamPortal(); break;
           case 'data-products': await renderDataProducts(); break;
+          case 'remediation': await renderRemediation(); break;
           case 'security':  await renderSecurityHome(); break;
           case 'billing':   await renderBillingHome(); break;
           case 'ops-home': await renderOpsHome(); break;
@@ -9319,6 +9320,70 @@ const adminHTML = `<!doctype html>
       view.innerHTML = section('데이터 상품 (Data Product Builder)', '') + prodCard + candCard + reqCard;
       const form = document.getElementById('dp-form');
       if (form) form.addEventListener('submit', window.dpAdd);
+    }
+
+    // renderRemediation is the Auto Remediation Playbook: situation-driven, reversible action
+    // candidates with dry-run/impact; admin can apply (approval) with audit + rollback.
+    async function renderRemediation() {
+      const view = document.getElementById('view');
+      view.innerHTML = section('자동 조치', '<div class="empty">불러오는 중...</div>');
+      let d;
+      try { d = await api('/admin/remediation/playbooks'); }
+      catch (e) { view.innerHTML = section('자동 조치', '<div class="card-body" style="padding:16px"><p class="muted">' + escapeHTML(e.message) + '</p></div>'); return; }
+      window.remApply = async (type, paramsJson, dry) => {
+        let params = {};
+        try { params = JSON.parse(paramsJson || '{}'); } catch (e) {}
+        if (!dry && !confirm('이 조치를 실제로 적용할까요?\n' + type)) return;
+        let reason = '';
+        if (!dry) { reason = prompt('적용 사유(감사 로그에 기록):', '') || ''; }
+        try {
+          const res = await api('/admin/remediation/apply', { method: 'POST', body: JSON.stringify({ action_type: type, params, dry_run: !!dry, reason }) });
+          const rb = res.rollback ? ('\n되돌리기: ' + res.rollback.action_type) : '';
+          openModal(dry ? 'Dry-run 결과' : '조치 적용됨',
+            '<div class="kv">' +
+            row('조치', escapeHTML(res.action_type)) +
+            row('적용됨', res.applied ? '예' : '아니오 (dry-run)') +
+            row('이전 상태', '<code>' + escapeHTML(JSON.stringify(res.before)) + '</code>') +
+            row('이후 상태', '<code>' + escapeHTML(JSON.stringify(res.after)) + '</code>') +
+            (res.rollback ? row('되돌리기', '<button type="button" class="secondary" onclick="remRollback(' + escapeAttr(JSON.stringify(res.rollback)) + ')">' + escapeHTML(res.rollback.action_type) + ' 실행</button>') : '') +
+            '</div><p class="muted" style="font-size:11px;margin-top:6px">' + escapeHTML(res.note || '') + '</p>');
+          if (!dry) renderRemediation();
+        } catch (e) { openModal('조치 오류', '<div class="error-line">' + escapeHTML(e.message) + '</div>'); }
+      };
+      window.remRollback = async (rb) => {
+        try {
+          const res = await api('/admin/remediation/apply', { method: 'POST', body: JSON.stringify({ action_type: rb.action_type, params: rb.params || {}, reason: 'rollback' }) });
+          closeModal();
+          renderRemediation();
+        } catch (e) { openModal('되돌리기 오류', '<div class="error-line">' + escapeHTML(e.message) + '</div>'); }
+      };
+      const sevBadge = (s) => s === 'critical' ? '<span class="status error">심각</span>' : (s === 'warning' ? '<span class="status warn">경고</span>' : '<span class="status">정보</span>');
+      const books = d.playbooks || [];
+      const cards = books.map(pb => {
+        const actions = (pb.actions || []).map(a => {
+          const params = JSON.stringify(a.params || {}).replace(/"/g, '&quot;');
+          const btns = a.executable
+            ? '<button type="button" class="secondary" style="font-size:11px" onclick="remApply(\'' + escapeAttr(a.type) + '\',\'' + params + '\',true)">Dry-run</button> ' +
+              '<button type="button" style="font-size:11px" onclick="remApply(\'' + escapeAttr(a.type) + '\',\'' + params + '\',false)">적용</button>'
+            : (a.link ? '<a href="' + escapeAttr(a.link) + '"><button type="button" class="secondary" style="font-size:11px">화면 이동</button></a>' : '<span class="muted" style="font-size:11px">수동 조치</span>');
+          return '<div style="border:1px solid var(--border);border-radius:6px;padding:8px;margin:4px 0">' +
+            '<div style="display:flex;justify-content:space-between;align-items:center"><strong>' + escapeHTML(a.title) + '</strong>' +
+            '<span>' + (a.reversible ? '<span class="pill">가역</span> ' : '') + (a.executable ? '<span class="pill">실행가능</span>' : '<span class="muted" style="font-size:10px">권고</span>') + '</span></div>' +
+            '<div class="muted" style="font-size:11px;margin:2px 0">' + escapeHTML(a.description) + '</div>' +
+            '<div style="font-size:11px"><strong>Dry-run:</strong> <code>' + escapeHTML(a.dry_run) + '</code></div>' +
+            '<div class="muted" style="font-size:11px"><strong>예상 영향:</strong> ' + escapeHTML(a.expected_impact) + '</div>' +
+            '<div style="margin-top:4px">' + btns + '</div>' +
+          '</div>';
+        }).join('');
+        return card(sevBadge(pb.severity) + ' ' + escapeHTML(situationLabel(pb.situation)),
+          '<div class="card-body"><p class="muted" style="font-size:12px">' + escapeHTML(pb.summary) + '</p>' + actions + '</div>');
+      }).join('');
+      view.innerHTML = section('자동 조치 (Auto Remediation) — 종합 ' + (d.overall_severity || 'info'), '') +
+        '<p class="muted" style="font-size:12px;padding:0 14px">' + escapeHTML(d.note || '') + '</p>' +
+        (cards || '<div class="card-body" style="padding:16px"><p class="muted">현재 조치가 필요한 상황이 없습니다. 👍</p></div>');
+    }
+    function situationLabel(s) {
+      return ({ provider_degraded: '프로바이더 장애', cost_spike: '비용 급증', mcp_error_spike: 'MCP 오류 급증', text2sql_risk_spike: 'Text2SQL 위험 급증', policy_violation_spike: '정책 위반 급증', break_glass: '비상 차단' })[s] || s;
     }
 
     // renderMeHome is the personalized landing for non-operators: their own usage, cost,
