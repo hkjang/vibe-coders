@@ -134,6 +134,7 @@ func gatewayToolDefs() []mcpToolDef {
 		{Name: "gateway_run_skill", Description: "등록된 Skill을 적용해 chat을 실행합니다(X-Skill).", InputSchema: obj(`"skill":{"type":"string"},"prompt":{"type":"string"}`)},
 		{Name: "gateway_run_text2sql_preview", Description: "자연어 질문을 Text2SQL preview(SQL 생성, 미실행)로 처리합니다.", InputSchema: obj(`"question":{"type":"string"}`)},
 		{Name: "gateway_run_saved_report", Description: "권한 있는 저장 Text2SQL 리포트를 preview로 실행합니다.", InputSchema: obj(`"report_id":{"type":"string"}`)},
+		{Name: "gateway_create_app_run", Description: "AI 업무 앱을 실행해 구성요소 실행 플랜을 받고 실행 이력을 기록합니다.", InputSchema: obj(`"app_id":{"type":"string"}`)},
 		{Name: "gateway_list_models", Description: "사용 가능한 모델 목록과 가격을 조회합니다(호출자 권한 기준).", InputSchema: obj(``)},
 		{Name: "gateway_estimate_cost", Description: "모델과 토큰 수로 예상 비용(KRW)을 계산합니다.", InputSchema: obj(`"model":{"type":"string"},"input_tokens":{"type":"integer"},"output_tokens":{"type":"integer"}`)},
 		{Name: "gateway_check_quota", Description: "본인/키의 현재 한도 소진 상태를 조회합니다.", InputSchema: obj(``)},
@@ -250,6 +251,48 @@ func (s *Server) runGatewayTool(ctx context.Context, r *http.Request, apiKeyID s
 			return nil, err
 		}
 		return gatewayToolJSON(map[string]any{"report": rep.Name, "mode": "preview", "content": content}), nil
+
+	case "gateway_create_app_run":
+		var a struct {
+			AppID string `json:"app_id"`
+		}
+		_ = json.Unmarshal(args, &a)
+		app, found, err := s.db.GetWorkApp(ctx, strings.TrimSpace(a.AppID))
+		if err != nil {
+			return nil, err
+		}
+		claims := accessClaims{}
+		if authCtx != nil {
+			claims = accessClaims{Subject: authCtx.UserID, TeamID: authCtx.TeamID, Role: authCtx.Role, Scopes: authCtx.Scopes}
+		}
+		if !found || !appVisibleTo(app, claims) {
+			return nil, errGateway("app not found")
+		}
+		if len(app.Components) == 0 {
+			return nil, errGateway("app has no components to run")
+		}
+		plan := make([]map[string]any, 0, len(app.Components))
+		allResolved := true
+		for _, c := range app.Components {
+			ok, detail, _ := s.validateAppComponent(r, c)
+			if !ok {
+				allResolved = false
+			}
+			step := appComponentStep(c)
+			step["resolved"] = ok
+			step["detail"] = detail
+			plan = append(plan, step)
+		}
+		errClass := ""
+		if !allResolved {
+			errClass = "component_unresolved"
+		}
+		runID := newID("apprun")
+		_ = s.db.RecordAIAppRun(ctx, store.AIAppRun{
+			ID: runID, AppID: app.ID, UserID: claims.Subject, Team: claims.TeamID, Status: "planned",
+			OutputSummary: itoaProxy(len(app.Components)) + " components planned", ErrorClass: errClass,
+		})
+		return gatewayToolJSON(map[string]any{"run_id": runID, "app_id": app.ID, "title": app.Title, "plan": plan}), nil
 
 	case "gateway_list_models":
 		pricing := s.pricingMap(ctx)

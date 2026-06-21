@@ -33,7 +33,7 @@ func TestGatewayMCPInitializeAndLists(t *testing.T) {
 	if tl == nil || tl.Error != nil {
 		t.Fatalf("tools/list failed: %+v", tl)
 	}
-	for _, name := range []string{"gateway_chat", "gateway_run_skill", "gateway_run_text2sql_preview", "gateway_run_saved_report", "gateway_list_models", "gateway_route_preview", "gateway_explain_request", "gateway_get_usage_summary"} {
+	for _, name := range []string{"gateway_chat", "gateway_run_skill", "gateway_run_text2sql_preview", "gateway_run_saved_report", "gateway_create_app_run", "gateway_list_models", "gateway_route_preview", "gateway_explain_request", "gateway_get_usage_summary"} {
 		if !strings.Contains(string(tl.Result), name) {
 			t.Errorf("tools/list missing %q", name)
 		}
