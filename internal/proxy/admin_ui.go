@@ -5480,7 +5480,23 @@ const adminHTML = `<!doctype html>
         '<td class="muted" style="font-size:11px">' + (wk.last_run ? ago(wk.last_run) + ' · ' : '') + escapeHTML(wk.detail || '') + '</td></tr>'
       ).join('');
       host.innerHTML = card('백그라운드 워커',
-        '<div class="card-body"><table><thead><tr><th>워커</th><th>상태</th><th>실행</th><th>큐</th><th>유실</th><th>상세</th></tr></thead><tbody>' + rows + '</tbody></table></div>');
+        '<div class="card-body"><table><thead><tr><th>워커</th><th>상태</th><th>실행</th><th>큐</th><th>유실</th><th>상세</th></tr></thead><tbody>' + rows + '</tbody></table>' +
+        '<div style="margin-top:8px"><button type="button" class="secondary" onclick="opsPreflight()">배포 프리플라이트 점검</button></div>' +
+        '<div id="ops-preflight"></div></div>');
+    };
+    // Upgrade Preflight — 배포 전/후 점검(DB·마이그레이션·OpenAPI·설정).
+    window.opsPreflight = async () => {
+      const host = document.getElementById('ops-preflight');
+      if (host) host.innerHTML = '<div class="empty">점검 중...</div>';
+      try {
+        const d = await api('/admin/ops/preflight');
+        const sBadge = (st) => st === 'fail' ? '<span class="status error">실패</span>' : (st === 'warn' ? '<span class="status warn">주의</span>' : '<span class="status">정상</span>');
+        const rows = (d.checks || []).map(c => '<tr><td>' + escapeHTML(c.name) + '</td><td>' + sBadge(c.status) + '</td><td class="muted" style="font-size:11px">' + escapeHTML(c.detail || '') + '</td></tr>').join('');
+        if (host) host.innerHTML = '<div style="border:1px solid var(--border);border-radius:6px;padding:8px;margin-top:6px">' +
+          '<strong style="font-size:12px">프리플라이트 ' + escapeHTML(d.version || '') + ' · 종합 ' + sBadge(d.overall) + '</strong>' +
+          '<table style="margin-top:4px"><thead><tr><th>점검</th><th>상태</th><th>상세</th></tr></thead><tbody>' + rows + '</tbody></table>' +
+          '<p class="muted" style="font-size:10px;margin-top:4px">' + escapeHTML(d.note || '') + '</p></div>';
+      } catch (e) { if (host) host.innerHTML = '<span class="status error">' + escapeHTML(e.message) + '</span>'; }
     };
 
     // ---------- DW Metric Catalog: 표준 지표 사전 ----------

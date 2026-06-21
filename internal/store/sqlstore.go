@@ -87,6 +87,23 @@ func (s *SQLStore) Ping(ctx context.Context) error {
 	return s.db.PingContext(ctx)
 }
 
+// TableExists reports whether a table exists (dialect-aware), for deployment preflight checks.
+func (s *SQLStore) TableExists(ctx context.Context, name string) (bool, error) {
+	q := `SELECT 1 FROM sqlite_master WHERE type='table' AND name = ?`
+	if s.dialect == "postgres" {
+		q = `SELECT 1 FROM information_schema.tables WHERE table_name = ?`
+	}
+	var one int
+	err := s.db.QueryRowContext(ctx, s.bind(q), name).Scan(&one)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 func (s *SQLStore) Migrate(ctx context.Context) error {
 	statements := []string{
 		`CREATE TABLE IF NOT EXISTS api_keys (
