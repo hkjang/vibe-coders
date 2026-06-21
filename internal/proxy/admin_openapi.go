@@ -243,6 +243,10 @@ var apiEndpoints = []apiEndpoint{
 	{"/admin/skills/dependency-graph", []string{"get"}, "skills", "Skill→model/tool/team/policy dependency graph (?skill=)", false},
 
 	// ---- admin: data products ----
+	{"/admin/workflows", []string{"get", "post", "delete"}, "data-products", "Workflow chain definitions", false},
+	{"/admin/workflows/{id}/dry-run", []string{"post"}, "data-products", "Validate a workflow's steps (no execution)", false},
+	{"/v1/workflows/{id}/run", []string{"post"}, "self-service", "Run a workflow chain (records run, returns plan)", false},
+	{"/me/workflow-runs", []string{"get"}, "self-service", "Caller's workflow run history", false},
 	{"/admin/app-templates", []string{"get"}, "data-products", "Built-in AI work-app starter templates", false},
 	{"/admin/app-templates/instantiate", []string{"post"}, "data-products", "Create a work app from a template", false},
 	{"/admin/data-products", []string{"get", "post", "delete"}, "data-products", "Curate/publish the data product catalog", false},

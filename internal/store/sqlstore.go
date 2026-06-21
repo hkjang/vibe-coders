@@ -1525,6 +1525,31 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 			created_at TEXT NOT NULL,
 			updated_at TEXT NOT NULL
 		)`,
+		`CREATE TABLE IF NOT EXISTS workflows (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL DEFAULT '',
+			description TEXT NOT NULL DEFAULT '',
+			steps TEXT NOT NULL DEFAULT '[]',
+			allowed_teams TEXT NOT NULL DEFAULT '',
+			enabled INTEGER NOT NULL DEFAULT 1,
+			created_by TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS workflow_runs (
+			id TEXT PRIMARY KEY,
+			workflow_id TEXT NOT NULL,
+			user_id TEXT NOT NULL DEFAULT '',
+			team TEXT NOT NULL DEFAULT '',
+			status TEXT NOT NULL DEFAULT 'planned',
+			steps_total INTEGER NOT NULL DEFAULT 0,
+			steps_ok INTEGER NOT NULL DEFAULT 0,
+			latency_ms INTEGER NOT NULL DEFAULT 0,
+			cost_krw REAL NOT NULL DEFAULT 0,
+			error_class TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_workflow_runs_user ON workflow_runs(user_id, created_at)`,
 		`CREATE TABLE IF NOT EXISTS ai_app_runs (
 			id TEXT PRIMARY KEY,
 			app_id TEXT NOT NULL,
