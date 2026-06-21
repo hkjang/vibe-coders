@@ -32,6 +32,7 @@ var menuRegistry = []menuItem{
 	// 팀 영역 — team_manager (and admins) see their team's usage/cost/failures.
 	{ID: "team.home", Label: "팀 대시보드", Path: "#/team", Tab: "team", Group: "team", Scopes: []string{"team:read"}, DataScope: "team"},
 	// 운영 영역 — operational surface (admin:read).
+	{ID: "ops.home", Label: "운영 홈", Path: "#/ops-home", Tab: "ops-home", Group: "ops", Scopes: []string{"admin:read"}, DataScope: "all"},
 	{ID: "ops.dashboard", Label: "대시보드", Path: "#/dashboard", Tab: "dashboard", Group: "ops", Scopes: []string{"admin:read"}, DataScope: "all"},
 	{ID: "ops.mcp", Label: "MCP", Path: "#/mcp", Tab: "mcp", Group: "ops", Scopes: []string{"admin:read"}, DataScope: "all"},
 	{ID: "ops.routing", Label: "라우팅", Path: "#/routing", Tab: "routing", Group: "ops", Scopes: []string{"admin:read"}, DataScope: "all"},

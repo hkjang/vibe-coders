@@ -1093,6 +1093,7 @@ const adminHTML = `<!doctype html>
           case 'team':      await renderTeamHome(); break;
           case 'security':  await renderSecurityHome(); break;
           case 'billing':   await renderBillingHome(); break;
+          case 'ops-home': await renderOpsHome(); break;
           case 'dashboard': await renderDashboard(); break;
           case 'xview':     await renderXView(params); break;
           case 'waterfall': await renderWaterfall(params); break;
@@ -5386,6 +5387,29 @@ const adminHTML = `<!doctype html>
         openModal('Routing Review 처리 오류', '<div class="error-line">' + escapeHTML(err.message) + '</div>');
       }
     };
+
+    // ---------- AI Gateway 운영 홈: 오늘 봐야 할 것 ----------
+    async function renderOpsHome() {
+      const view = document.getElementById('view');
+      view.innerHTML = section('운영 홈', '<div class="empty">불러오는 중...</div>');
+      let d;
+      try { d = await api('/admin/ops/home'); }
+      catch (e) { view.innerHTML = section('운영 홈', '<div class="card-body" style="padding:16px"><p class="muted">' + escapeHTML(e.message) + '</p></div>'); return; }
+      const color = (st) => st === 'critical' ? '#ef5350' : (st === 'warn' ? '#ffa726' : (st === 'unknown' ? '#9e9e9e' : '#66bb6a'));
+      const badge = (st) => st === 'critical' ? '<span class="status error">위험</span>' : (st === 'warn' ? '<span class="status warn">주의</span>' : (st === 'unknown' ? '<span class="status">미상</span>' : '<span class="status">정상</span>'));
+      const cards = (d.cards || []).map(c =>
+        '<a href="' + escapeAttr(c.link || '#/dashboard') + '" style="text-decoration:none;color:inherit">' +
+        '<div style="border:1px solid var(--border);border-left:5px solid ' + color(c.status) + ';border-radius:10px;padding:14px;min-width:200px;flex:1">' +
+        '<div style="display:flex;justify-content:space-between;align-items:center"><strong>' + escapeHTML(c.title) + '</strong>' + badge(c.status) + '</div>' +
+        '<div style="font-size:22px;font-weight:800;margin:6px 0">' + escapeHTML(c.value || '-') + '</div>' +
+        (c.detail ? '<div class="muted" style="font-size:12px">' + escapeHTML(c.detail) + '</div>' : '') +
+        '</div></a>'
+      ).join('');
+      const overall = badge(d.overall);
+      view.innerHTML = section('운영 홈 (최근 ' + (d.window_hours || 24) + 'h)',
+        '<p class="muted" style="font-size:12px">전체 상태 ' + overall + ' · 생성 ' + ago(d.generated_at) + ' — 카드를 클릭하면 상세 화면으로 이동합니다.</p>') +
+        '<div style="display:flex;gap:12px;flex-wrap:wrap">' + cards + '</div>';
+    }
 
     // ---------- DW Metric Catalog: 표준 지표 사전 ----------
     async function renderDWMetrics() {
