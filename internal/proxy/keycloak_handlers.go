@@ -186,6 +186,18 @@ func (s *Server) provisionKeycloakUser(ctx context.Context, claims map[string]an
 	}
 	team := keycloakTeamFromGroups(claimStrings(claims, kc.GroupClaim))
 
+	// effectiveTeam falls back to the user's current primary team when the IdP groups claim carries
+	// no team — otherwise an SSO login would drop a user out of their existing team ("팀 없음").
+	effectiveTeam := func(userID string) string {
+		if team != "" {
+			return team
+		}
+		if existing, err := s.db.PrimaryTeamForUser(ctx, userID); err == nil {
+			return existing
+		}
+		return ""
+	}
+
 	// 1) Existing linked identity → load + sync status. Only an explicit claim→role mapping
 	// changes the role; a default-fallback role must NOT overwrite the user's existing role
 	// (otherwise e.g. a super_admin whose IdP carries no mapped role gets demoted to the default).
@@ -197,15 +209,17 @@ func (s *Server) provisionKeycloakUser(ctx context.Context, claims map[string]an
 			}
 			_ = s.db.UpdateAuthUserRoleStatus(ctx, user.ID, newRole, "active")
 			user.Role, user.Status = newRole, "active"
+			eff := effectiveTeam(user.ID)
 			s.finishKeycloakLink(ctx, user.ID, sub, email, username, team)
-			return user, team, nil
+			return user, eff, nil
 		}
 	}
 	// 2) Existing local user with same email → merge by linking.
 	if email != "" {
 		if user, found, _ := s.db.AuthUserByEmail(ctx, email); found {
+			eff := effectiveTeam(user.ID)
 			s.finishKeycloakLink(ctx, user.ID, sub, email, username, team)
-			return user, team, nil
+			return user, eff, nil
 		}
 	}
 	// 3) New user.
