@@ -185,15 +185,19 @@ func main() {
 		fmt.Printf("  OpenAPI paths : %d\n", len(rep.OpenAPIPaths))
 		fmt.Printf("  CLI paths     : %d\n", len(rep.CLIPaths))
 		fmt.Printf("  SDK paths     : %d\n", len(rep.SDKPaths))
-		fmt.Printf("  cli_only (FAIL)        : %v\n", rep.CLIOnly)
-		fmt.Printf("  sdk_only (FAIL)        : %v\n", rep.SDKOnly)
-		fmt.Printf("  openapi_missing (warn) : %d routes not in OpenAPI catalog\n", len(rep.OpenAPIMissing))
-		fmt.Printf("  undocumented_routes(warn): %d OpenAPI entries with no server route\n", len(rep.StaleDocs))
+		fmt.Printf("  cli_only (FAIL)         : %v\n", rep.CLIOnly)
+		fmt.Printf("  sdk_only (FAIL)         : %v\n", rep.SDKOnly)
+		fmt.Printf("  openapi_missing (FAIL)  : %v\n", rep.OpenAPIMissing)
+		fmt.Printf("  undocumented_routes(FAIL): %v\n", rep.StaleDocs)
 	}
 
-	// Fail only on contract breaks: a client (CLI/SDK) path the server does not serve.
-	if len(rep.CLIOnly) > 0 || len(rep.SDKOnly) > 0 {
-		fmt.Fprintf(os.Stderr, "FAIL: client paths without a server route — cli_only=%v sdk_only=%v\n", rep.CLIOnly, rep.SDKOnly)
+	// Fail on any contract gap: a client (CLI/SDK) path the server doesn't serve, a server route
+	// absent from the OpenAPI catalog, or a documented route that no longer exists. The repo is at
+	// zero gaps, so this keeps the README/CLI/SDK/OpenAPI/server surfaces in lockstep.
+	gaps := len(rep.CLIOnly) + len(rep.SDKOnly) + len(rep.OpenAPIMissing) + len(rep.StaleDocs)
+	if gaps > 0 {
+		fmt.Fprintf(os.Stderr, "FAIL: %d API surface gap(s) — cli_only=%v sdk_only=%v openapi_missing=%v undocumented=%v\n",
+			gaps, rep.CLIOnly, rep.SDKOnly, rep.OpenAPIMissing, rep.StaleDocs)
 		os.Exit(1)
 	}
 }
