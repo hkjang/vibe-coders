@@ -2347,14 +2347,42 @@ const adminHTML = `<!doctype html>
           '<p class="muted" style="font-size:10px;margin-top:8px">' + escapeHTML(d.note || '') + '</p></div>');
       } catch (e) { openModal('오류', '<div class="error-line">' + escapeHTML(e.message) + '</div>'); }
     };
+    // traceWaterfallHTML renders the unified request waterfall (root + MCP/tool + Text2SQL spans).
+    function traceWaterfallHTML(trace) {
+      if (!trace || !Array.isArray(trace.spans) || trace.spans.length === 0) return '';
+      const total = Math.max(1, trace.total_ms || 0);
+      const kindColor = { request: 'var(--accent)', text2sql: '#6a1b9a', mcp_tool: '#1565c0', tool: '#2e7d32', cache: '#ef6c00' };
+      const rows = trace.spans.map(sp => {
+        const left = Math.min(99, (sp.start_offset_ms / total) * 100);
+        const width = Math.max(1.5, ((sp.duration_ms || 0) / total) * 100);
+        const color = kindColor[sp.kind] || 'var(--muted)';
+        const err = sp.status === 'error';
+        const meta = [];
+        if (sp.duration_ms) meta.push(msLabel(sp.duration_ms));
+        if (sp.tokens) meta.push(fmt(sp.tokens) + ' tok');
+        if (sp.cost_krw) meta.push('₩' + fmt(Math.round(sp.cost_krw)));
+        if (sp.cache_hit) meta.push('cache');
+        return '<div style="display:flex;align-items:center;gap:8px;margin:2px 0">' +
+          '<div style="width:160px;flex:none;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"' + (err ? ' class="error-line"' : '') + ' title="' + escapeAttr(sp.name) + '">' +
+          (err ? '⚠ ' : '') + escapeHTML(sp.name) + '</div>' +
+          '<div style="position:relative;flex:1;height:16px;background:var(--line);border-radius:3px">' +
+          '<div style="position:absolute;left:' + left + '%;width:' + width + '%;height:100%;background:' + (err ? 'var(--err,#c00)' : color) + ';border-radius:3px"></div></div>' +
+          '<div style="width:150px;flex:none;font-size:10px;color:var(--muted);text-align:right">' + escapeHTML(meta.join(' · ')) + '</div>' +
+        '</div>';
+      }).join('');
+      return '<section style="margin-bottom:12px"><h3 style="margin:0 0 6px;font-size:14px">Trace 타임라인 <span class="muted" style="font-weight:400;font-size:11px">' + escapeHTML(trace.trace_id || '') + ' · ' + msLabel(total) + ' · ' + trace.spans.length + ' spans</span></h3>' +
+        '<div style="border:1px solid var(--border);border-radius:6px;padding:8px">' + rows + '</div></section>';
+    }
+
     window.openRequestDetail = async (id) => {
       try {
-        const [detail, note, links] = await Promise.all([
+        const [detail, note, links, trace] = await Promise.all([
           api('/admin/requests/' + encodeURIComponent(id)),
           api('/admin/requests/' + encodeURIComponent(id) + '/note').catch(() => ({ tags: [], note: '' })),
           api('/admin/requests/' + encodeURIComponent(id) + '/links').catch(() => null),
+          api('/admin/requests/' + encodeURIComponent(id) + '/trace').catch(() => null),
         ]);
-        openModal('요청 상세 - ' + (detail.request.trace_id || id), requestDetailHTML(detail, note, links));
+        openModal('요청 상세 - ' + (detail.request.trace_id || id), traceWaterfallHTML(trace) + requestDetailHTML(detail, note, links));
         wireNoteEditor(id);
       } catch (err) {
         openModal('오류', '<div class="error-line">' + escapeHTML(err.message) + '</div>');

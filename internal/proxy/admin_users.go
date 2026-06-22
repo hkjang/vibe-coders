@@ -491,6 +491,9 @@ func (s *Server) handleRequestDetail(w http.ResponseWriter, r *http.Request) {
 		case "links":
 			s.handleRequestLinks(w, r)
 			return
+		case "trace":
+			s.handleRequestTrace(w, r)
+			return
 		}
 		writeOpenAIError(w, http.StatusNotFound, "not found", "invalid_request_error", "not_found")
 		return
