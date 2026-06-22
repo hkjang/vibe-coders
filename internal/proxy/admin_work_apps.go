@@ -118,6 +118,40 @@ func (s *Server) handleAdminAppByID(w http.ResponseWriter, r *http.Request) {
 		s.handleAppValidate(w, r, app)
 		return
 	}
+	// Lifecycle: publish (snapshot a version + make active) / deprecate (hide) / versions (history).
+	if action == "publish" && r.Method == http.MethodPost {
+		var p struct {
+			Note string `json:"note"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&p)
+		version, err := s.db.PublishWorkAppVersion(r.Context(), app, adminID(r), strings.TrimSpace(p.Note))
+		if err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "publish_failed")
+			return
+		}
+		s.auditAdmin(r, "work_app.publish", id, auditJSON(map[string]any{"version": version}))
+		writeJSON(w, http.StatusOK, map[string]any{"id": id, "version": version, "status": "active", "published": true})
+		return
+	}
+	if action == "deprecate" && r.Method == http.MethodPost {
+		app.Status = "archived"
+		if err := s.db.UpdateWorkApp(r.Context(), app); err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "deprecate_failed")
+			return
+		}
+		s.auditAdmin(r, "work_app.deprecate", id, "")
+		writeJSON(w, http.StatusOK, map[string]any{"id": id, "status": "archived", "deprecated": true})
+		return
+	}
+	if action == "versions" && r.Method == http.MethodGet {
+		versions, err := s.db.ListWorkAppVersions(r.Context(), id)
+		if err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "versions_failed")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"app_id": id, "versions": versions})
+		return
+	}
 	switch r.Method {
 	case http.MethodGet:
 		writeJSON(w, http.StatusOK, app)

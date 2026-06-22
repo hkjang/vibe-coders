@@ -1578,6 +1578,20 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 			created_at TEXT NOT NULL,
 			updated_at TEXT NOT NULL
 		)`,
+		`CREATE TABLE IF NOT EXISTS ai_app_versions (
+			id TEXT PRIMARY KEY,
+			app_id TEXT NOT NULL,
+			version INTEGER NOT NULL DEFAULT 1,
+			title TEXT NOT NULL DEFAULT '',
+			description TEXT NOT NULL DEFAULT '',
+			icon TEXT NOT NULL DEFAULT '',
+			components TEXT NOT NULL DEFAULT '[]',
+			allowed_teams TEXT NOT NULL DEFAULT '',
+			allowed_roles TEXT NOT NULL DEFAULT '',
+			published_by TEXT NOT NULL DEFAULT '',
+			published_at TEXT NOT NULL,
+			note TEXT NOT NULL DEFAULT ''
+		)`,
 		`CREATE TABLE IF NOT EXISTS oidc_flow_states (
 			state TEXT PRIMARY KEY,
 			nonce TEXT NOT NULL DEFAULT '',

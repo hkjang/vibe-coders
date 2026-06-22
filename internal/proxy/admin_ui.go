@@ -5726,8 +5726,11 @@ const adminHTML = `<!doctype html>
           (a.description ? '<div class="muted" style="font-size:12px;margin:4px 0">' + escapeHTML(a.description) + '</div>' : '') +
           '<div style="margin:4px 0">' + (comps || '<span class="muted" style="font-size:11px">컴포넌트 없음</span>') + '</div>' +
           '<div class="muted" style="font-size:11px">팀: ' + escapeHTML(a.allowed_teams || '전체') + ' · 역할: ' + escapeHTML(a.allowed_roles || '전체') + '</div>' +
-          '<div style="margin-top:6px;display:flex;gap:4px"><button type="button" class="secondary" style="font-size:11px" onclick="appValidate(\'' + escapeAttr(a.id) + '\')">검증</button>' +
+          '<div style="margin-top:6px;display:flex;gap:4px;flex-wrap:wrap"><button type="button" class="secondary" style="font-size:11px" onclick="appValidate(\'' + escapeAttr(a.id) + '\')">검증</button>' +
           '<button type="button" class="secondary" style="font-size:11px" onclick="appRun(\'' + escapeAttr(a.id) + '\')">실행(플랜)</button>' +
+          '<button type="button" class="secondary" style="font-size:11px" onclick="appPublish(\'' + escapeAttr(a.id) + '\')">발행</button>' +
+          (a.status === 'active' ? '<button type="button" class="secondary" style="font-size:11px" onclick="appDeprecate(\'' + escapeAttr(a.id) + '\')">지원중단</button>' : '') +
+          '<button type="button" class="secondary" style="font-size:11px" onclick="appVersions(\'' + escapeAttr(a.id) + '\')">버전</button>' +
           '<button type="button" class="secondary" style="font-size:11px" onclick="appDelete(\'' + escapeAttr(a.id) + '\')">삭제</button></div>' +
           '<div id="app-validate-' + escapeAttr(a.id) + '" style="margin-top:6px"></div>' +
           '</div>';
@@ -5789,6 +5792,31 @@ const adminHTML = `<!doctype html>
       if (!confirm('이 앱을 삭제할까요?')) return;
       try { await api('/admin/apps/' + encodeURIComponent(id), { method: 'DELETE' }); await renderWorkApps(); }
       catch (e) { alert(e.message); }
+    };
+    window.appPublish = async (id) => {
+      const note = prompt('발행 메모(선택). 발행하면 현재 정의가 새 버전으로 저장되고 앱이 활성화됩니다.') ;
+      if (note === null) return;
+      try {
+        const r = await api('/admin/apps/' + encodeURIComponent(id) + '/publish', { method: 'POST', body: JSON.stringify({ note: note }) });
+        alert('발행됨 — 버전 v' + r.version);
+        await renderWorkApps();
+      } catch (e) { alert('발행 실패: ' + e.message); }
+    };
+    window.appDeprecate = async (id) => {
+      if (!confirm('이 앱을 지원중단(숨김) 처리할까요? 사용자에게 더 이상 노출되지 않습니다.')) return;
+      try { await api('/admin/apps/' + encodeURIComponent(id) + '/deprecate', { method: 'POST', body: '{}' }); await renderWorkApps(); }
+      catch (e) { alert('지원중단 실패: ' + e.message); }
+    };
+    window.appVersions = async (id) => {
+      try {
+        const d = await api('/admin/apps/' + encodeURIComponent(id) + '/versions');
+        const vs = d.versions || [];
+        const rows = vs.length
+          ? vs.map(v => '<tr><td>v' + v.version + '</td><td class="muted">' + escapeHTML(v.published_by || '') + '</td><td class="muted">' + ago(v.published_at) + '</td><td>' + (v.components || []).length + '개</td><td class="muted" style="font-size:11px">' + escapeHTML(v.note || '') + '</td></tr>').join('')
+          : '<tr><td colspan="5" class="muted">발행된 버전이 없습니다.</td></tr>';
+        openModal('버전 이력',
+          '<table><thead><tr><th>버전</th><th>발행자</th><th>발행</th><th>컴포넌트</th><th>메모</th></tr></thead><tbody>' + rows + '</tbody></table>');
+      } catch (e) { openModal('버전 조회 오류', '<div class="error-line">' + escapeHTML(e.message) + '</div>'); }
     };
 
     // ---------- Prompt Lab: experiments + test cases + rubrics/contracts ----------
