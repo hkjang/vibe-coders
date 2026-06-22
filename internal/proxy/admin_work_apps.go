@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -152,6 +153,10 @@ func (s *Server) handleAdminAppByID(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"app_id": id, "versions": versions})
 		return
 	}
+	if action == "permissions" {
+		s.handleAppPermissions(w, r, id)
+		return
+	}
 	switch r.Method {
 	case http.MethodGet:
 		writeJSON(w, http.StatusOK, app)
@@ -185,6 +190,60 @@ func (s *Server) handleAdminAppByID(w http.ResponseWriter, r *http.Request) {
 		}
 		s.auditAdmin(r, "work_app.delete", id, "")
 		writeJSON(w, http.StatusOK, map[string]any{"status": "deleted"})
+	default:
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+	}
+}
+
+// handleAppPermissions manages explicit per-app grants (admin). Caller already authorized + app
+// existence checked by handleAdminAppByID.
+// GET    /admin/apps/{id}/permissions                          list grants
+// POST   /admin/apps/{id}/permissions {subject_type,subject_id} grant
+// DELETE /admin/apps/{id}/permissions?subject_type=&subject_id= revoke
+func (s *Server) handleAppPermissions(w http.ResponseWriter, r *http.Request, appID string) {
+	switch r.Method {
+	case http.MethodGet:
+		perms, err := s.db.ListAppPermissions(r.Context(), appID)
+		if err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "list_failed")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"app_id": appID, "permissions": perms})
+	case http.MethodPost:
+		var p struct {
+			SubjectType string `json:"subject_type"`
+			SubjectID   string `json:"subject_id"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+			writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "bad_request")
+			return
+		}
+		st := strings.ToLower(strings.TrimSpace(p.SubjectType))
+		sid := strings.TrimSpace(p.SubjectID)
+		if (st != "user" && st != "team") || sid == "" {
+			writeOpenAIError(w, http.StatusBadRequest, "subject_type must be user|team and subject_id is required", "invalid_request_error", "bad_subject")
+			return
+		}
+		grant := store.AppPermission{ID: newID("appperm"), AppID: appID, SubjectType: st, SubjectID: sid, GrantedBy: adminID(r)}
+		if err := s.db.GrantAppPermission(r.Context(), grant); err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "grant_failed")
+			return
+		}
+		s.auditAdmin(r, "work_app.permission_grant", appID, auditJSON(map[string]any{"subject_type": st, "subject_id": sid}))
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	case http.MethodDelete:
+		st := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("subject_type")))
+		sid := strings.TrimSpace(r.URL.Query().Get("subject_id"))
+		if st == "" || sid == "" {
+			writeOpenAIError(w, http.StatusBadRequest, "subject_type and subject_id query params required", "invalid_request_error", "bad_subject")
+			return
+		}
+		if err := s.db.RevokeAppPermission(r.Context(), appID, st, sid); err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "revoke_failed")
+			return
+		}
+		s.auditAdmin(r, "work_app.permission_revoke", appID, auditJSON(map[string]any{"subject_type": st, "subject_id": sid}))
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 	default:
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
 	}
@@ -245,6 +304,21 @@ func appVisibleTo(app store.WorkApp, claims accessClaims) bool {
 	return true
 }
 
+// appVisibleToCaller is appVisibleTo plus explicit per-app grants (ai_app_permissions): a caller
+// who fails the team/role gate may still see/run an app shared with them or their team directly.
+// Active-status and admin rules from appVisibleTo are preserved (a grant never reveals an
+// archived/deprecated app to a non-admin).
+func (s *Server) appVisibleToCaller(ctx context.Context, app store.WorkApp, claims accessClaims) bool {
+	if appVisibleTo(app, claims) {
+		return true
+	}
+	if app.Status != "active" {
+		return false // explicit grants don't resurrect a deprecated app for non-admins
+	}
+	granted, err := s.db.AppGrantsSubject(ctx, app.ID, claims.Subject, claims.TeamID)
+	return err == nil && granted
+}
+
 func splitCSV(s string) []string {
 	out := []string{}
 	for _, p := range strings.Split(s, ",") {
@@ -278,7 +352,7 @@ func (s *Server) handleUserApps(w http.ResponseWriter, r *http.Request) {
 	}
 	visible := []store.WorkApp{}
 	for _, a := range all {
-		if appVisibleTo(a, claims) {
+		if s.appVisibleToCaller(r.Context(), a, claims) {
 			visible = append(visible, a)
 		}
 	}
@@ -307,7 +381,7 @@ func (s *Server) handleUserAppByID(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "get_failed")
 		return
 	}
-	if !found || !appVisibleTo(app, claims) {
+	if !found || !s.appVisibleToCaller(r.Context(), app, claims) {
 		writeOpenAIError(w, http.StatusNotFound, "app not found", "invalid_request_error", "not_found")
 		return
 	}

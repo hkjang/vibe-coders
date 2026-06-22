@@ -1602,6 +1602,15 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 			published_at TEXT NOT NULL,
 			note TEXT NOT NULL DEFAULT ''
 		)`,
+		`CREATE TABLE IF NOT EXISTS ai_app_permissions (
+			id TEXT PRIMARY KEY,
+			app_id TEXT NOT NULL,
+			subject_type TEXT NOT NULL,
+			subject_id TEXT NOT NULL,
+			granted_by TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL,
+			UNIQUE(app_id, subject_type, subject_id)
+		)`,
 		`CREATE TABLE IF NOT EXISTS ai_app_versions (
 			id TEXT PRIMARY KEY,
 			app_id TEXT NOT NULL,

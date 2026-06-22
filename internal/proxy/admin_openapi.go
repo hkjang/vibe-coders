@@ -267,6 +267,7 @@ var apiEndpoints = []apiEndpoint{
 	{"/admin/apps/{id}/publish", []string{"post"}, "apps", "Publish a work app: snapshot a version and make it active", false},
 	{"/admin/apps/{id}/deprecate", []string{"post"}, "apps", "Deprecate (hide) a work app", false},
 	{"/admin/apps/{id}/versions", []string{"get"}, "apps", "List a work app's published version history", false},
+	{"/admin/apps/{id}/permissions", []string{"get", "post", "delete"}, "apps", "List/grant/revoke explicit per-app access (user|team)", false},
 	// ---- self-service (/me) personal surfaces ----
 	{"/me/actions", []string{"get"}, "self-service", "Personal action queue (things to act on now)", false},
 	{"/me/actions/snooze", []string{"post"}, "self-service", "Snooze an action-queue item", false},

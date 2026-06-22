@@ -5759,6 +5759,7 @@ const adminHTML = `<!doctype html>
           '<button type="button" class="secondary" style="font-size:11px" onclick="appPublish(\'' + escapeAttr(a.id) + '\')">발행</button>' +
           (a.status === 'active' ? '<button type="button" class="secondary" style="font-size:11px" onclick="appDeprecate(\'' + escapeAttr(a.id) + '\')">지원중단</button>' : '') +
           '<button type="button" class="secondary" style="font-size:11px" onclick="appVersions(\'' + escapeAttr(a.id) + '\')">버전</button>' +
+          '<button type="button" class="secondary" style="font-size:11px" onclick="appPermissions(\'' + escapeAttr(a.id) + '\')">권한</button>' +
           '<button type="button" class="secondary" style="font-size:11px" onclick="appDelete(\'' + escapeAttr(a.id) + '\')">삭제</button></div>' +
           '<div id="app-validate-' + escapeAttr(a.id) + '" style="margin-top:6px"></div>' +
           '</div>';
@@ -5845,6 +5846,33 @@ const adminHTML = `<!doctype html>
         openModal('버전 이력',
           '<table><thead><tr><th>버전</th><th>발행자</th><th>발행</th><th>컴포넌트</th><th>메모</th></tr></thead><tbody>' + rows + '</tbody></table>');
       } catch (e) { openModal('버전 조회 오류', '<div class="error-line">' + escapeHTML(e.message) + '</div>'); }
+    };
+    window.appPermissions = async (id) => {
+      const render = (perms) => {
+        const rows = (perms || []).length
+          ? perms.map(p => '<tr><td>' + escapeHTML(p.subject_type) + '</td><td><code>' + escapeHTML(p.subject_id) + '</code></td><td class="muted">' + escapeHTML(p.granted_by || '') + '</td><td><button type="button" class="danger" style="font-size:11px" onclick="appPermRevoke(\'' + escapeAttr(id) + '\',\'' + escapeAttr(p.subject_type) + '\',\'' + escapeAttr(p.subject_id) + '\')">해제</button></td></tr>').join('')
+          : '<tr><td colspan="4" class="muted">명시적 권한이 없습니다(팀/역할 규칙만 적용).</td></tr>';
+        openModal('앱 명시 권한 — 특정 사용자/팀 공유',
+          '<p class="muted" style="font-size:12px">팀/역할 규칙에 더해 특정 사용자(user) 또는 팀(team)에게 이 앱을 직접 허용합니다.</p>' +
+          '<table><thead><tr><th>유형</th><th>대상</th><th>부여자</th><th></th></tr></thead><tbody>' + rows + '</tbody></table>' +
+          '<div style="margin-top:10px;display:flex;gap:6px;align-items:center">' +
+          '<select id="app-perm-type"><option value="user">user</option><option value="team">team</option></select>' +
+          '<input id="app-perm-id" placeholder="user_id 또는 team id" style="flex:1">' +
+          '<button type="button" onclick="appPermGrant(\'' + escapeAttr(id) + '\')">추가</button></div>');
+      };
+      try { const d = await api('/admin/apps/' + encodeURIComponent(id) + '/permissions'); render(d.permissions || []); }
+      catch (e) { openModal('권한 조회 오류', '<div class="error-line">' + escapeHTML(e.message) + '</div>'); }
+    };
+    window.appPermGrant = async (id) => {
+      const t = (document.getElementById('app-perm-type') || {}).value || 'user';
+      const sid = ((document.getElementById('app-perm-id') || {}).value || '').trim();
+      if (!sid) { alert('대상 id를 입력하세요.'); return; }
+      try { await api('/admin/apps/' + encodeURIComponent(id) + '/permissions', { method: 'POST', body: JSON.stringify({ subject_type: t, subject_id: sid }) }); appPermissions(id); }
+      catch (e) { alert('권한 추가 실패: ' + e.message); }
+    };
+    window.appPermRevoke = async (id, t, sid) => {
+      try { await api('/admin/apps/' + encodeURIComponent(id) + '/permissions?subject_type=' + encodeURIComponent(t) + '&subject_id=' + encodeURIComponent(sid), { method: 'DELETE' }); appPermissions(id); }
+      catch (e) { alert('권한 해제 실패: ' + e.message); }
     };
 
     // ---------- Prompt Lab: experiments + test cases + rubrics/contracts ----------
