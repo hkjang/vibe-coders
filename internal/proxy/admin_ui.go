@@ -10067,7 +10067,7 @@ const adminHTML = `<!doctype html>
           '<div class="card-body">' + acts.map(c =>
             '<div style="display:flex;align-items:center;gap:10px;justify-content:space-between;border:1px solid var(--border);border-radius:6px;padding:8px 10px;margin-bottom:6px">' +
             '<span><span class="status ' + sev(c.severity) + '" style="font-size:11px">' + escapeHTML(c.severity) + '</span> ' + escapeHTML(c.message) + '</span>' +
-            '<span style="display:flex;gap:6px"><a href="' + escapeAttr(c.button_href || '#/me') + '"><button type="button" style="font-size:11px">' + escapeHTML(c.button_label) + '</button></a>' +
+            '<span style="display:flex;gap:6px"><button type="button" style="font-size:11px" onclick="meActionGo(\'' + escapeAttr(c.button_href || '#/me') + '\')">' + escapeHTML(c.button_label) + '</button>' +
             '<button type="button" class="secondary" style="font-size:11px" onclick="meSnoozeAction(\'' + escapeAttr(c.type) + '\')">나중에</button></span>' +
             '</div>').join('') + '</div>');
       }).catch(() => {});
@@ -10292,6 +10292,38 @@ const adminHTML = `<!doctype html>
         await api('/me/actions/snooze', { method: 'POST', body: JSON.stringify({ type, days: 7 }) });
         renderMeHome();
       } catch (e) { alert('보류 오류: ' + e.message); }
+    };
+
+    // meActionGo handles an action-queue button. "modal:<key>" opens inline guidance; a hash that
+    // equals the current route re-renders in place (so the click always gives feedback) — otherwise
+    // it navigates.
+    window.meActionGo = (href) => {
+      href = href || '#/me';
+      if (href.indexOf('modal:') === 0) { meActionModal(href.slice(6)); return; }
+      if (location.hash === href || (href === '#/me' && (location.hash === '' || location.hash === '#/me'))) {
+        renderMeHome();
+      } else {
+        location.hash = href;
+      }
+    };
+
+    // meActionModal shows inline guidance for actions that have no dedicated page.
+    window.meActionModal = (key) => {
+      if (key === 'safety') {
+        openModal('안전 가이드 — 민감정보 다루기',
+          '<div style="font-size:13px;line-height:1.7">' +
+          '<p>최근 요청에서 민감정보 포함 가능성이 감지되었습니다. 아래 수칙을 지켜 주세요.</p>' +
+          '<ul style="margin:8px 0 8px 18px">' +
+          '<li>실제 <strong>비밀번호·API 키·토큰·주민번호·카드번호</strong> 등은 프롬프트에 넣지 마세요.</li>' +
+          '<li>고객/직원 <strong>개인정보(PII)</strong>는 가명·예시값으로 대체하세요.</li>' +
+          '<li>운영 DB 자격증명이나 내부 시크릿을 붙여넣지 마세요. 게이트웨이가 시크릿을 탐지·마스킹하지만, 입력하지 않는 것이 가장 안전합니다.</li>' +
+          '<li>꼭 필요한 최소한의 맥락만 제공하고, 외부로 나가면 안 되는 자료는 사내 승인 경로를 따르세요.</li>' +
+          '</ul>' +
+          '<p class="muted" style="font-size:12px">이 게이트웨이는 Secret Firewall로 민감 패턴을 탐지/마스킹/차단하며, 위반 요청은 감사 로그에 기록됩니다.</p>' +
+          '<div style="margin-top:12px"><button type="button" class="secondary" onclick="closeModal()">확인</button></div></div>');
+        return;
+      }
+      renderMeHome();
     };
 
     window.meLoadRecommendations = async () => {

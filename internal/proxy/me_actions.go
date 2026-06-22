@@ -99,7 +99,7 @@ func (s *Server) handleMeActions(w http.ResponseWriter, r *http.Request) {
 	profile, _ := s.db.BuildPersonalProfile(ctx, userID, now.Add(-30*24*time.Hour))
 	if profile.RiskScore >= 30 {
 		actions = append(actions, actionCard{Type: "safety_warning", Severity: "high",
-			Message: "민감정보 포함 가능성이 있는 요청이 증가했습니다.", ButtonLabel: "안전 가이드", ButtonHref: "#/me"})
+			Message: "민감정보 포함 가능성이 있는 요청이 증가했습니다.", ButtonLabel: "안전 가이드", ButtonHref: "modal:safety"})
 	}
 	if len(cands) >= 2 && profile.CacheRate < 0.2 {
 		actions = append(actions, actionCard{Type: "cache_improve", Severity: "low",
