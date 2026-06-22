@@ -31,7 +31,7 @@ import (
 )
 
 // AppVersion is the gateway build version, surfaced in /auth/me and the admin UI.
-const AppVersion = "v0.61.6"
+const AppVersion = "v0.62.0"
 
 type Server struct {
 	cfg            config.Config
@@ -141,6 +141,10 @@ func NewServer(cfg config.Config, db *store.SQLStore, logger *store.AsyncLogger,
 	// Load the DB-backed Keycloak provider overlay (decrypts the stored client secret),
 	// falling back to environment config when no row exists.
 	server.reloadKeycloakConfig(context.Background())
+
+	// Multi-pod convergence: poll the admin_settings change token so a settings change made on any
+	// pod (or via direct DB edit) is applied on every pod within one interval, without a restart.
+	go server.runtimeReloadLoop(context.Background(), cfg.RuntimeReloadInterval)
 
 	// Background scheduler for due saved Text2SQL reports (self-disables without an
 	// execute DB).

@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"errors"
+	"strconv"
 	"time"
 )
 
@@ -46,6 +47,20 @@ type AdminSettingHistory struct {
 }
 
 // ListAdminSettings returns all stored admin settings.
+// AdminSettingsChangeToken returns a cheap token that changes whenever the admin_settings table
+// changes — MAX(updated_at) advances on any upsert, COUNT(*) and SUM(version) shift on deletes or
+// re-creates. A background reloader polls this so every pod converges after a change made on any
+// pod, without a restart.
+func (s *SQLStore) AdminSettingsChangeToken(ctx context.Context) (string, error) {
+	var count, versionSum int64
+	var maxUpdated string
+	row := s.db.QueryRowContext(ctx, `SELECT COUNT(*), COALESCE(SUM(version), 0), COALESCE(MAX(updated_at), '') FROM admin_settings`)
+	if err := row.Scan(&count, &versionSum, &maxUpdated); err != nil {
+		return "", err
+	}
+	return strconv.FormatInt(count, 10) + ":" + strconv.FormatInt(versionSum, 10) + ":" + maxUpdated, nil
+}
+
 func (s *SQLStore) ListAdminSettings(ctx context.Context) ([]AdminSetting, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT key, category, value_json, value_type, is_secret, source, version, COALESCE(updated_by, ''), updated_at
 		FROM admin_settings ORDER BY category, key`)

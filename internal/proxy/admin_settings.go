@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -218,6 +219,7 @@ func buildSettingRegistry() []settingDef {
 		{Key: "env.listen_addr", Category: "env", Type: stString, ReadOnly: true, envValue: func(c config.Config) string { return c.ListenAddr }},
 		{Key: "env.log_queue_size", Category: "env", Type: stInt, ReadOnly: true, envValue: func(c config.Config) string { return strconv.Itoa(c.Logging.QueueSize) }},
 		{Key: "env.log_fallback_path", Category: "env", Type: stString, ReadOnly: true, envValue: func(c config.Config) string { return c.Logging.FallbackPath }},
+		{Key: "env.settings_reload_interval", Category: "env", Type: stString, ReadOnly: true, envValue: func(c config.Config) string { return c.RuntimeReloadInterval.String() }},
 
 		// ---- SSO / Keycloak (SSO_KEYCLOAK_*; read-only view — edit via the SSO 설정 screen,
 		// which stores a DB override with the client secret encrypted at rest) ----
@@ -426,6 +428,42 @@ func (s *Server) mcpConf() config.MCPConfig {
 		return *p
 	}
 	return s.cfg.MCP
+}
+
+// runtimeReloadLoop periodically polls the admin_settings change token and, when it differs from
+// what this pod last applied, rebuilds the runtime config (and the other DB-backed overlays:
+// Text2SQL feature toggles + Keycloak provider). This is what makes a settings change on ONE
+// Kubernetes pod take effect on ALL pods within one poll interval — without a restart. The pod
+// that made the change has already reloaded inline, so it simply observes a matching token here.
+// Disabled when RuntimeReloadInterval <= 0.
+func (s *Server) runtimeReloadLoop(ctx context.Context, interval time.Duration) {
+	if interval <= 0 {
+		return
+	}
+	// Seed the baseline from the state we loaded at startup, so we don't reload immediately.
+	last, _ := s.db.AdminSettingsChangeToken(ctx)
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			token, err := s.db.AdminSettingsChangeToken(ctx)
+			if err != nil {
+				slog.Warn("runtime settings poll failed", "error", err)
+				continue
+			}
+			if token == last {
+				continue
+			}
+			slog.Info("admin settings changed on another pod; reloading runtime config")
+			s.reloadRuntimeConfig(ctx)
+			s.reloadText2SQLFeatures(ctx)
+			s.reloadKeycloakConfig(ctx)
+			last = token
+		}
+	}
 }
 
 // reloadRuntimeConfig rebuilds the Text2SQL/ClickHouse runtime snapshots from env defaults

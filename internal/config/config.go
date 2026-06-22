@@ -33,6 +33,9 @@ type Config struct {
 	Limits      LimitsConfig
 	MCP         MCPConfig
 	Keycloak    KeycloakConfig
+	// RuntimeReloadInterval is how often each pod polls the DB for admin-settings changes made on
+	// other pods (multi-replica convergence). 0 disables polling (single-pod / local dev).
+	RuntimeReloadInterval time.Duration
 }
 
 // KeycloakConfig configures OIDC SSO via Keycloak (Authorization Code + PKCE). When
@@ -319,7 +322,8 @@ type ModelPrice struct {
 
 func Load() (Config, error) {
 	cfg := Config{
-		ListenAddr: getEnv("LISTEN_ADDR", ":8080"),
+		ListenAddr:            getEnv("LISTEN_ADDR", ":8080"),
+		RuntimeReloadInterval: durationEnv("SETTINGS_RELOAD_INTERVAL", 10*time.Second),
 		Upstream: UpstreamConfig{
 			Provider:     getEnv("UPSTREAM_PROVIDER", "openai"),
 			BaseURL:      strings.TrimRight(getEnv("UPSTREAM_BASE_URL", "https://api.openai.com"), "/"),
