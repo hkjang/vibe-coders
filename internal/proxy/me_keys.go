@@ -146,6 +146,36 @@ func (s *Server) handleMyKeyByID(w http.ResponseWriter, r *http.Request) {
 			"api_key":      map[string]any{"id": rec.ID, "name": rec.Name, "user_id": rec.UserID, "role": rec.Role, "scopes": rec.Scopes, "status": rec.Status},
 			"secret":       secret,
 		})
+	case action == "" && r.Method == http.MethodPatch:
+		// Update the key's scopes, capped to the caller's own scopes (no escalation).
+		var payload struct {
+			Scopes []string `json:"scopes"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "invalid_body")
+			return
+		}
+		scopes := []string{}
+		if len(payload.Scopes) > 0 {
+			normalized, ok := normalizeScopes(payload.Scopes)
+			if !ok {
+				writeOpenAIError(w, http.StatusBadRequest, "invalid scope", "invalid_request_error", "invalid_scope")
+				return
+			}
+			if !scopesWithin(normalized, me.Scopes) {
+				s.auditAuthEvent(r.Context(), "scope_denied", me.UserID, "", me.TeamID, "self-service key scope edit exceeds caller")
+				writeOpenAIError(w, http.StatusForbidden, "cannot grant scopes beyond your own", "permission_error", "scope_denied")
+				return
+			}
+			scopes = normalized
+		}
+		existing.Scopes = scopes
+		if err := s.db.UpsertAPIKey(r.Context(), existing); err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "key_update_failed")
+			return
+		}
+		_ = s.db.InsertAuditEvent(r.Context(), store.AuthEvent{ID: newID("ae"), EventType: "api_key_scopes_updated", APIKeyID: id, ActorUserID: me.UserID, TeamID: me.TeamID, IP: clientIP(r), UserAgent: r.UserAgent(), Detail: "self-service scope edit", CreatedAt: time.Now().UTC()})
+		writeJSON(w, http.StatusOK, map[string]any{"id": id, "scopes": scopes})
 	case action == "" && r.Method == http.MethodDelete:
 		if err := s.db.RevokeAPIKey(r.Context(), id); err != nil {
 			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "key_revoke_failed")

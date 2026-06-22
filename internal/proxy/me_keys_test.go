@@ -130,6 +130,19 @@ func TestSelfServiceKeysLifecycle(t *testing.T) {
 		}
 	}
 
+	// PATCH scopes of an existing key to a valid subset → 200.
+	patchOK := patchJSON(t, ts.URL+"/me/keys/"+created.APIKey.ID, "usersecret", map[string]any{"scopes": []string{"models:read"}})
+	patchOK.Body.Close()
+	if patchOK.StatusCode != http.StatusOK {
+		t.Fatalf("scope edit to subset should 200, got %d", patchOK.StatusCode)
+	}
+	// PATCH with an escalated scope → 403.
+	patchBad := patchJSON(t, ts.URL+"/me/keys/"+created.APIKey.ID, "usersecret", map[string]any{"scopes": []string{"admin:write"}})
+	patchBad.Body.Close()
+	if patchBad.StatusCode != http.StatusForbidden {
+		t.Fatalf("scope edit escalation should 403, got %d", patchBad.StatusCode)
+	}
+
 	// Rotate the created key → new secret, old revoked.
 	rot := postJSON(t, ts.URL+"/me/keys/"+created.APIKey.ID+"/rotate", "usersecret", map[string]any{})
 	var rotated struct {

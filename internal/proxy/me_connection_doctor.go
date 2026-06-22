@@ -47,54 +47,103 @@ func (s *Server) handleConnectionDoctor(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	apiKeyID, authCtx, ok := s.authenticateProxyContext(r)
-	if !ok || authCtx == nil {
-		add(doctorCheck{"authorization", "fail", "유효한 Proxy API Key가 없습니다.", "Authorization: Bearer <API_KEY> 헤더를 설정하고 키가 활성·만료 전인지 확인하세요."})
+	// Two ways to reach this: with a Proxy API Key (a real client connection test, e.g. `vibe
+	// doctor`) → full live checks; or with a browser JWT session → diagnose against the user's
+	// issued keys (we can't replay /v1 or /mcp as a key whose secret we don't hold).
+	var (
+		scopes        []string
+		allowedModels []string
+		apiKeyID      string
+		liveReplay    bool
+		authMode      string
+	)
+	keyID, authCtx, ok := s.authenticateProxyContext(r)
+	if ok && authCtx != nil {
+		authMode, scopes, allowedModels, apiKeyID, liveReplay = "proxy_key", authCtx.Scopes, authCtx.AllowedModels, keyID, true
+		add(doctorCheck{"authorization", "pass", "Proxy API Key 인증 성공.", ""})
+	} else if claims, jok := s.currentAccessClaims(r); jok && strings.TrimSpace(claims.Subject) != "" {
+		authMode = "jwt"
+		rep, n, found := s.newestActiveUserKey(r, claims.Subject)
+		if !found {
+			scopes = claims.Scopes
+			add(doctorCheck{"authorization", "warn", "브라우저 세션(JWT)으로 로그인됨. 발급된 활성 API Key가 없습니다.", "'내 키'에서 키를 발급한 뒤 개발도구에 Authorization: Bearer 로 설정하세요."})
+		} else {
+			scopes, allowedModels, apiKeyID = rep.Scopes, rep.AllowedModels, rep.ID
+			add(doctorCheck{"authorization", "pass", "브라우저 세션(JWT) 로그인 · 활성 키 " + itoaProxy(n) + "개. 진단 기준 키: " + rep.Name + ". 개발도구에는 발급 키를 Bearer로 설정하세요.", ""})
+		}
+	} else {
+		add(doctorCheck{"authorization", "fail", "유효한 Proxy API Key 또는 로그인 세션이 없습니다.", "Authorization: Bearer <API_KEY> 헤더를 설정하고 키가 활성·만료 전인지 확인하세요."})
 		writeJSON(w, http.StatusOK, map[string]any{"client": client, "overall": "fail", "checks": checks,
 			"base_url": requestOrigin(r) + "/v1", "mcp_url": requestOrigin(r) + "/mcp/gateway"})
 		return
 	}
-	add(doctorCheck{"authorization", "pass", "API Key 인증 성공.", ""})
 
 	// Scope.
-	if len(authCtx.Scopes) == 0 {
-		add(doctorCheck{"scope", "warn", "키에 부여된 scope가 없습니다.", "필요한 scope(self, mcp:use 등)를 키에 부여하세요."})
-	} else if isMCP && !hasScope(authCtx.Scopes, "mcp:use") {
+	if len(scopes) == 0 {
+		add(doctorCheck{"scope", "warn", "부여된 scope가 없습니다.", "필요한 scope(mcp:use 등)를 키/역할에 부여하세요."})
+	} else if isMCP && !hasScope(scopes, "mcp:use") {
 		add(doctorCheck{"scope", "warn", "MCP 사용에 mcp:use scope가 권장됩니다.", "키에 mcp:use scope를 추가하세요."})
 	} else {
-		add(doctorCheck{"scope", "pass", "scope: " + strings.Join(authCtx.Scopes, ", "), ""})
+		add(doctorCheck{"scope", "pass", "scope: " + strings.Join(scopes, ", "), ""})
 	}
 
 	// Model allowlist.
-	if len(authCtx.AllowedModels) > 0 {
-		add(doctorCheck{"model_allowlist", "pass", "허용 모델: " + strings.Join(authCtx.AllowedModels, ", "), ""})
+	if len(allowedModels) > 0 {
+		add(doctorCheck{"model_allowlist", "pass", "허용 모델: " + strings.Join(allowedModels, ", "), ""})
 	} else {
 		add(doctorCheck{"model_allowlist", "pass", "모델 제한 없음(deny 목록만 적용).", ""})
 	}
 
-	// Quota.
-	if dec, err := s.checkQuotas(r.Context(), apiKeyID, ""); err == nil {
-		if dec.Allowed {
-			add(doctorCheck{"quota", "pass", "한도 내 사용 중(사용 " + ftoa(dec.CostKRW) + " KRW).", ""})
-		} else {
-			add(doctorCheck{"quota", "fail", "한도 초과: " + dec.Reason, "관리자에게 한도 상향을 요청하거나 사용량을 줄이세요."})
+	// Quota (needs a resolved key).
+	if apiKeyID != "" {
+		if dec, err := s.checkQuotas(r.Context(), apiKeyID, ""); err == nil {
+			if dec.Allowed {
+				add(doctorCheck{"quota", "pass", "한도 내 사용 중(사용 " + ftoa(dec.CostKRW) + " KRW).", ""})
+			} else {
+				add(doctorCheck{"quota", "fail", "한도 초과: " + dec.Reason, "관리자에게 한도 상향을 요청하거나 사용량을 줄이세요."})
+			}
 		}
 	}
 
-	// /v1/models reachability (in-process, carries the caller's auth).
-	add(s.doctorProbe(r, http.MethodGet, "/v1/models", "v1_models", "/v1/models 응답 정상.", "업스트림/프로바이더 설정과 네트워크를 확인하세요."))
-
-	// MCP checks for MCP clients.
-	if isMCP {
-		add(s.doctorMCP(r, apiKeyID, authCtx, "initialize", "mcp_initialize"))
-		add(s.doctorMCP(r, apiKeyID, authCtx, "tools/list", "mcp_tools_list"))
+	if liveReplay {
+		// /v1/models reachability (in-process, carries the caller's key).
+		add(s.doctorProbe(r, http.MethodGet, "/v1/models", "v1_models", "/v1/models 응답 정상.", "업스트림/프로바이더 설정과 네트워크를 확인하세요."))
+		if isMCP {
+			add(s.doctorMCP(r, apiKeyID, authCtx, "initialize", "mcp_initialize"))
+			add(s.doctorMCP(r, apiKeyID, authCtx, "tools/list", "mcp_tools_list"))
+		}
+	} else {
+		// Browser session: we can't call /v1 or /mcp as the key (no plaintext secret here).
+		add(doctorCheck{"endpoint_reachability", "skip", "브라우저 세션에서는 실엔드포인트 도달성 검사를 건너뜁니다.", "`vibe doctor --client " + client + "` 또는 발급 키로 직접 호출해 확인하세요."})
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"client": client, "overall": worst, "checks": checks,
+		"client": client, "overall": worst, "checks": checks, "auth_mode": authMode,
 		"base_url": requestOrigin(r) + "/v1", "mcp_url": requestOrigin(r) + "/mcp/gateway",
 		"note": "연결 설정 진단 결과입니다. fail 항목을 우선 수정하세요.",
 	})
+}
+
+// newestActiveUserKey returns the caller's most recently created active (non-revoked) API key,
+// the active-key count, and whether any was found. Used by the doctor in JWT/browser mode.
+func (s *Server) newestActiveUserKey(r *http.Request, userID string) (store.APIKeyPublic, int, bool) {
+	all, err := s.db.ListAPIKeys(r.Context())
+	if err != nil {
+		return store.APIKeyPublic{}, 0, false
+	}
+	var best store.APIKeyPublic
+	count := 0
+	found := false
+	for _, k := range all {
+		if k.UserID != userID || k.Status != "active" || k.RevokedAt != "" {
+			continue
+		}
+		count++
+		if !found || k.CreatedAt > best.CreatedAt {
+			best, found = k, true
+		}
+	}
+	return best, count, found
 }
 
 // doctorProbe replays an in-process request to check an endpoint is reachable under the caller's auth.
