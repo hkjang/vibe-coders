@@ -11769,9 +11769,17 @@ const adminHTML = `<!doctype html>
       const view = document.getElementById('view');
       const d = await api('/admin/settings/effective').catch(() => ({ settings: [] }));
       const settings = d.settings || [];
+      const pod = d.this_pod || {};
+      const podBanner = pod.hostname
+        ? '<div class="' + (pod.up_to_date ? 'status' : 'status warn') + '" style="padding:8px 10px;margin-bottom:10px;font-size:12px">' +
+            '이 파드(<code>' + escapeHTML(pod.hostname) + '</code>) 런타임 설정 ' + (pod.up_to_date ? '최신 ✓' : '동기화 대기…') +
+            ' · 마지막 적용 ' + (pod.last_reload_at ? ago(pod.last_reload_at) : '-') +
+            ' · 폴링 주기 ' + escapeHTML(pod.reload_interval || '-') +
+            '<span class="muted"> — 멀티 파드는 변경 후 한 주기 내 모든 파드에 자동 반영됩니다.</span></div>'
+        : '';
       const groups = {};
       settings.forEach(s => { (groups[s.category] = groups[s.category] || []).push(s); });
-      let html = '<div class="card-body"><p class="muted">환경변수 기본값 위에 관리자 설정을 오버레이합니다. 저장 시 즉시 런타임에 반영(민감값은 암호화·마스킹). 출처 계층은 env → DB → runtime flag → request override 순서로 표시합니다.</p>' +
+      let html = '<div class="card-body">' + podBanner + '<p class="muted">환경변수 기본값 위에 관리자 설정을 오버레이합니다. 저장 시 즉시 런타임에 반영(민감값은 암호화·마스킹). 출처 계층은 env → DB → runtime flag → request override 순서로 표시합니다.</p>' +
         '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">' +
           '<button class="secondary" type="button" onclick="testSettingConn(\'clickhouse\')">ClickHouse 연결 테스트</button>' +
           '<button class="secondary" type="button" onclick="testSettingConn(\'text2sql-exec\')">Text2SQL 실행 DB 테스트</button>' +

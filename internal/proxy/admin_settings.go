@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -537,6 +538,11 @@ func (s *Server) reloadRuntimeConfig(ctx context.Context) {
 	if s.chSinkStarted && (prevCH.URL != ch.URL || prevCH.SinkInterval != ch.SinkInterval) {
 		s.applyClickHouseSinkWorker()
 	}
+	// Record when/what this pod last applied, for cross-pod convergence observability.
+	s.lastReloadNano.Store(time.Now().UnixNano())
+	if tok, err := s.db.AdminSettingsChangeToken(ctx); err == nil {
+		s.lastReloadTok.Store(&tok)
+	}
 }
 
 func applyRuntimeSetting(t2s *config.Text2SQLConfig, ch *config.ClickHouseConfig, carbon *config.CarbonConfig, ins *config.InsuranceConfig, cache *config.CacheConfig, ret *config.RetentionConfig, pricing *config.PricingConfig, skills *config.SkillsConfig, limits *config.LimitsConfig, logging *config.LoggingConfig, mcp *config.MCPConfig, key, val string) {
@@ -1018,6 +1024,7 @@ func (s *Server) handleAdminSettingsEffective(w http.ResponseWriter, r *http.Req
 		"category":         category,
 		"layers":           []string{"bootstrap_env", "db_setting", "runtime_flag", "request_override"},
 		"resolution_order": []string{"request_override", "runtime_flag", "db_setting", "bootstrap_env"},
+		"this_pod":         s.runtimeReloadStatus(r.Context()),
 	})
 }
 
@@ -1047,7 +1054,32 @@ func (s *Server) handleAdminSettings(w http.ResponseWriter, r *http.Request) {
 		view["can_write"] = s.canWriteSetting(r, d)
 		items = append(items, view)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"settings": items, "category": category})
+	writeJSON(w, http.StatusOK, map[string]any{"settings": items, "category": category, "this_pod": s.runtimeReloadStatus(r.Context())})
+}
+
+// runtimeReloadStatus reports this pod's convergence state: its hostname, when it last applied the
+// runtime config, the token it applied, the current DB token, and whether it is up to date. In a
+// multi-pod deploy an operator can hit each pod (or watch the value change) to confirm a settings
+// change has propagated everywhere.
+func (s *Server) runtimeReloadStatus(ctx context.Context) map[string]any {
+	host, _ := os.Hostname()
+	applied := ""
+	if p := s.lastReloadTok.Load(); p != nil {
+		applied = *p
+	}
+	current, _ := s.db.AdminSettingsChangeToken(ctx)
+	lastReload := ""
+	if n := s.lastReloadNano.Load(); n > 0 {
+		lastReload = time.Unix(0, n).UTC().Format(time.RFC3339)
+	}
+	return map[string]any{
+		"hostname":        host,
+		"last_reload_at":  lastReload,
+		"applied_token":   applied,
+		"current_token":   current,
+		"up_to_date":      applied == current,
+		"reload_interval": s.cfg.RuntimeReloadInterval.String(),
+	}
 }
 
 // handleAdminSettingByKey serves PUT (set) and DELETE (revert to env) for one key.
