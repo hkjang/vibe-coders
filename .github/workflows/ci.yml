@@ -41,6 +41,21 @@ jobs:
       - name: go test -race
         run: go test -race ./internal/... -count=1
 
+      - name: API surface audit (CLI/SDK ↔ server route contract)
+        # Fails if the cmd/vibe CLI or the TypeScript SDK call a path the server no longer serves.
+        run: go run ./cmd/api-surface-audit
+
+  sdk-typecheck:
+    name: TypeScript SDK typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: tsc --noEmit (no deps, strict)
+        run: npx --yes --package=typescript@5 tsc --noEmit --strict --target ES2020 --lib ES2020,DOM --moduleResolution bundler sdk/typescript/vibe.ts
+
   vuln:
     name: govulncheck
     runs-on: ubuntu-latest
