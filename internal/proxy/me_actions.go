@@ -79,7 +79,7 @@ func (s *Server) handleMeActions(w http.ResponseWriter, r *http.Request) {
 	models, _ := s.db.UserModelCosts(ctx, userID, monthStart)
 	if savings, cheap := potentialSavingsKRW(month, models); savings > 0 && cheap != "" {
 		actions = append(actions, actionCard{Type: "model_switch", Severity: "low",
-			Message: "이 작업은 더 저렴한 모델로 처리 가능해 보입니다.", ButtonLabel: "전환 가이드", ButtonHref: "#/me"})
+			Message: "이 작업은 더 저렴한 모델로 처리 가능해 보입니다.", ButtonLabel: "전환 가이드", ButtonHref: "modal:model_switch"})
 	}
 
 	// Repeated Text2SQL questions → report candidate.

@@ -10323,6 +10323,20 @@ const adminHTML = `<!doctype html>
           '<div style="margin-top:12px"><button type="button" class="secondary" onclick="closeModal()">확인</button></div></div>');
         return;
       }
+      if (key === 'model_switch') {
+        openModal('전환 가이드 — 더 저렴한 모델로',
+          '<div style="font-size:13px;line-height:1.7">' +
+          '<p>최근 작업은 더 저렴한 모델로도 충분히 처리될 가능성이 높습니다. 아래 방법으로 전환해 비용을 줄일 수 있습니다.</p>' +
+          '<ul style="margin:8px 0 8px 18px">' +
+          '<li><strong>자동 라우팅 사용</strong>: 모델명을 <code>vibe/auto</code>로 지정하면 게이트웨이가 작업 난이도에 맞춰 비용·품질 균형 모델을 선택합니다.</li>' +
+          '<li><strong>직접 지정</strong>: 간단한 작업은 더 작은 모델(예: mini/lite 계열)로 <code>model</code> 값을 바꿔 호출하세요.</li>' +
+          '<li><strong>근거 확인</strong>: 주간 사용 리포트의 "절감 추천"에서 어떤 모델로 얼마나 절감되는지 확인할 수 있습니다.</li>' +
+          '<li>품질이 충분한지 비교한 뒤, 반복 작업이라면 해당 모델을 기본값으로 고정하세요.</li>' +
+          '</ul>' +
+          '<p class="muted" style="font-size:12px">전환 후에도 품질이 유지되는지 응답을 확인하세요. 복잡한 작업은 기존 모델을 유지하는 것이 안전합니다.</p>' +
+          '<div style="margin-top:12px"><button type="button" class="secondary" onclick="closeModal()">확인</button></div></div>');
+        return;
+      }
       renderMeHome();
     };
 
