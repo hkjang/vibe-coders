@@ -284,7 +284,7 @@ func (s *Server) chatTestTargetCatalog(ctx context.Context) map[string]any {
 	return map[string]any{
 		"targets":        flat,
 		"grouped":        grouped,
-		"defaults":       map[string]any{"model": "vibe/auto", "prompt": "Reply with pong in one short sentence.", "max_tokens": 1024, "temperature": 0},
+		"defaults":       map[string]any{"model": "vibe/auto", "prompt": "Reply with pong in one short sentence.", "max_tokens": 4096, "temperature": 0},
 		"mcp_fetched_at": snap.fetchedAt.UTC().Format(time.RFC3339),
 		"mcp_errors":     snap.errors,
 	}
@@ -345,8 +345,9 @@ func (s *Server) prepareChatTestRequest(w http.ResponseWriter, r *http.Request, 
 	if input.MaxTokens <= 0 {
 		input.MaxTokens = 64
 	}
-	if input.MaxTokens > 4096 {
-		input.MaxTokens = 4096
+	// Cap generously so modern large-context models (≈128K) can be exercised.
+	if input.MaxTokens > 131072 {
+		input.MaxTokens = 131072
 	}
 	messages := input.Messages
 	if len(messages) == 0 {

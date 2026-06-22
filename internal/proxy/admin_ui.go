@@ -5965,7 +5965,7 @@ const adminHTML = `<!doctype html>
             '<div class="ct-glabel">모델 파라미터</div>' +
             '<div class="ct-field-wide"><span>Model</span><input id="chat-model" value="' + escapeHTML(selectedModel) + '" placeholder="vibe/auto"></div>' +
             '<div class="ct-row">' +
-              '<label class="ct-field"><span>Max tokens</span><input id="chat-max-tokens" type="number" min="1" max="4096" value="' + Number(defaults.max_tokens || 1024) + '"></label>' +
+              '<label class="ct-field"><span>Max tokens</span><input id="chat-max-tokens" type="number" min="1" max="131072" value="' + Number(defaults.max_tokens || 4096) + '"></label>' +
               '<label class="ct-field"><span>Temperature</span><input id="chat-temperature" type="number" step="0.1" min="0" max="2" value="' + Number(defaults.temperature || 0) + '"></label>' +
             '</div>' +
           '</div>' +
@@ -6003,7 +6003,7 @@ const adminHTML = `<!doctype html>
           '<textarea id="mm-user" class="ct-prompt" rows="5" placeholder="비교할 user 프롬프트">' + escapeHTML(defaults.prompt || '아래 코드의 문제점과 개선 방향을 알려줘.') + '</textarea>' +
         '</div>' +
         '<div class="ct-footer"><div class="ct-row">' +
-          '<label class="ct-field"><span>Max tokens</span><input id="mm-max-tokens" type="number" min="1" max="4096" value="' + Number(defaults.max_tokens || 1024) + '"></label>' +
+          '<label class="ct-field"><span>Max tokens</span><input id="mm-max-tokens" type="number" min="1" max="131072" value="' + Number(defaults.max_tokens || 4096) + '"></label>' +
           '<label class="ct-field"><span>Temperature</span><input id="mm-temperature" type="number" step="0.1" min="0" max="2" value="' + Number(defaults.temperature || 0.2) + '"></label>' +
           '</div><div class="ct-btns"><button type="button" class="secondary" id="mm-predict">예상 비용</button><button type="button" class="secondary" id="mm-stream">스트리밍 비교</button><button type="button" id="mm-run">멀티 실행</button></div>' +
         '</div>' +
