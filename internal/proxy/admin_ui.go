@@ -69,6 +69,20 @@ const adminHTML = `<!doctype html>
       border-radius: 6px; font-weight: 700;
     }
     nav a.active { background: var(--ink); color: var(--bg); }
+    /* "대시보드" grouped dropdown in the top nav */
+    .nav-group { position: relative; }
+    .nav-group > .nav-group-toggle {
+      color: var(--muted); padding: 8px 12px; border-radius: 6px; font-weight: 700;
+      background: none; border: none; cursor: pointer; font: inherit;
+    }
+    .nav-group.active > .nav-group-toggle { background: var(--ink); color: var(--bg); }
+    .nav-group-menu {
+      display: none; position: absolute; top: 100%; left: 0; z-index: 5; min-width: 180px;
+      background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+      padding: 4px; margin-top: 2px; box-shadow: 0 6px 24px rgba(0,0,0,.18);
+    }
+    .nav-group:hover > .nav-group-menu, .nav-group:focus-within > .nav-group-menu { display: block; }
+    .nav-group-menu a { display: block; white-space: nowrap; }
     #subtabs:empty { display: none; }
     .subtabs {
       display: flex; gap: 4px; flex-wrap: wrap;
@@ -315,10 +329,16 @@ const adminHTML = `<!doctype html>
     <h1>AI 게이트웨이</h1>
     <nav id="tabs">
       <a href="#/me" data-tab="me">내 홈</a>
-      <a href="#/team" data-tab="team">팀 대시보드</a>
-      <a href="#/security" data-tab="security">보안 대시보드</a>
-      <a href="#/billing" data-tab="billing">비용 대시보드</a>
-      <a href="#/dashboard" data-tab="dashboard" class="active">대시보드</a>
+      <div class="nav-group" id="nav-dashboards">
+        <button type="button" class="nav-group-toggle" aria-haspopup="true">대시보드 ▾</button>
+        <div class="nav-group-menu">
+          <a href="#/dashboard" data-tab="dashboard" class="active">종합 대시보드</a>
+          <a href="#/team" data-tab="team">팀 대시보드</a>
+          <a href="#/security" data-tab="security">보안 대시보드</a>
+          <a href="#/billing" data-tab="billing">비용 대시보드</a>
+          <a href="#/dwdashboard" data-tab="dwdashboard">DW 대시보드</a>
+        </div>
+      </div>
       <a href="#/mcp" data-tab="mcp">MCP</a>
       <a href="#/routing" data-tab="routing">라우팅</a>
       <a href="#/chat-test" data-tab="chat-test">Chat 테스트</a>
@@ -328,7 +348,6 @@ const adminHTML = `<!doctype html>
       <a href="#/users" data-tab="users">사용자</a>
       <a href="#/safety" data-tab="safety">안전</a>
       <a href="#/text2sql" data-tab="text2sql">Text2SQL</a>
-      <a href="#/dwdashboard" data-tab="dwdashboard">DW 대시보드</a>
       <a href="#/settings" data-tab="settings">설정</a>
     </nav>
     <div class="header-tools">
@@ -585,6 +604,11 @@ const adminHTML = `<!doctype html>
       document.querySelectorAll('#tabs a[data-tab], #user-menu a[data-tab]').forEach(a => {
         const tab = a.getAttribute('data-tab');
         a.style.display = (!allowed || allowed.has(tab)) ? '' : 'none';
+      });
+      // Hide a grouped dropdown (e.g. 대시보드) entirely when the caller can see none of its children.
+      document.querySelectorAll('#tabs .nav-group').forEach(g => {
+        const anyVisible = Array.from(g.querySelectorAll('a[data-tab]')).some(a => a.style.display !== 'none');
+        g.style.display = anyVisible ? '' : 'none';
       });
       // Read-only indicator: an operator (admin:read) without admin:write. Server enforces
       // the block; this is the visible signal so write actions are clearly unavailable.
@@ -978,6 +1002,10 @@ const adminHTML = `<!doctype html>
     function setActiveTab(name) {
       document.querySelectorAll('#tabs a').forEach(a => {
         a.classList.toggle('active', a.dataset.tab === name);
+      });
+      // Reflect active state on grouped dropdowns (e.g. 대시보드) when one of their children is active.
+      document.querySelectorAll('#tabs .nav-group').forEach(g => {
+        g.classList.toggle('active', !!g.querySelector('a.active'));
       });
     }
     function parseHash() {
