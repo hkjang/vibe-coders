@@ -330,6 +330,29 @@ vibe-coders 는 LLM 게이트웨이이자 **MCP 게이트웨이**입니다. 여�
 
 > 현재 Streamable HTTP 업스트림을 지원합니다(JSON 및 SSE 응답 모두 처리). 라우팅은 목록에 노출된 도구·프롬프트·리소스 대상입니다(템플릿으로 동적 생성된 미등록 URI 읽기는 미지원). stdio 서브프로세스 MCP 서버 연결은 향후 과제입니다.
 
+### Gateway MCP — 게이트웨이 자체 기능 (`/mcp/gateway`)
+
+`/mcp` (업스트림 집약)과 **별개로**, 게이트웨이 자신의 기능을 MCP 도구로 노출하는 두 번째 엔드포인트입니다. 헷갈리기 쉬우니 운영자는 차이를 명확히 안내하세요.
+
+| | `/mcp` | `/mcp/gateway` |
+|---|---|---|
+| 노출 대상 | 등록된 **외부 업스트림 MCP 서버**의 도구 | **게이트웨이 자체 기능**(chat·라우팅·사용량·쿼터·Text2SQL·앱/워크플로 실행) |
+| 도구 이름 | `<업스트림ID>__<이름>` | `gateway_*` (예: `gateway_chat`, `gateway_run_workflow`) |
+| 업스트림 등록 | 필요 | **불필요**(내장 tool 집합) |
+| 실행 안전성 | 업스트림이 부수효과 수행 | 실행형 tool 은 `/v1` 파이프라인 재생(거버넌스·쿼터·정책·로깅 동일), 읽기형은 미실행 미리보기 |
+
+- **카탈로그 확인**: 어드민 MCP 탭에 Gateway MCP 카탈로그(tools/resources/prompts)와 연결 설정이 표시됩니다. API: `GET /admin/gateway-mcp/info`.
+- **무클라이언트 검증**: `POST /admin/mcp/gateway/test` 로 외부 MCP 클라이언트 없이 tool 을 name+arguments 로 직접 호출해 검증할 수 있습니다(읽기 진단).
+- **인증·귀속**: `/v1` 과 동일한 proxy key. 모든 호출은 호출자 권한·쿼터·정책·MCP 관측에 통합됩니다.
+
+### MCP Tool Contract Registry (`/mcp/gateway` tool 계약·드리프트)
+
+`/mcp/gateway` 가 노출하는 tool 의 입력/출력 스키마·위험등급(low/medium/high)·타임아웃·허용 역할·비용 정책·소유자를 **계약**으로 고정하고, 실제 노출 스키마와의 드리프트를 탐지합니다. MCP 탭 하단의 "MCP Tool Contract Registry" 섹션 또는 API로 관리합니다.
+
+- `GET|POST|DELETE /admin/mcp/contracts` — 계약 목록/등록/삭제(등록 시 스키마 JSON 유효성·risk_level 검증).
+- `POST /admin/mcp/contracts/validate` — 등록 계약과 실제 게이트웨이 tool 집합을 비교해 `missing`(tool 소실)·`drift`(입력 스키마 속성 차이: `declared_only`/`live_only`)를 보고합니다. `gateway` 외 namespace 는 자동 비교 대상이 아닙니다(`not_checkable`). 속성 키 집합 비교이며 타입 심층 비교는 아닙니다.
+- 활용: 게이트웨이 버전업으로 tool 시그니처가 바뀌면 드리프트로 조기에 드러나므로, 계약을 갱신하거나 클라이언트 영향도를 점검하는 운영 신호로 사용하세요.
+
 ### MCP Discovery 가상 모델
 
 `/v1/chat/completions` 에서 `vibe/grounded`, `vibe/research`, `vibe/all-mcp`(별칭 `vibe/all_mcp`)를 모델명으로 호출하면 MCP Discovery 경로가 동작합니다. 후보 MCP는 설명·도메인·도구명·health를 기반으로 정렬되지만, agentic 경로에서는 selector 점수가 hard gate가 아니라 **백킹 LLM에게 넘길 후보 순위 가중치**로만 사용됩니다. 백킹 LLM이 직접 tool call 여부를 결정하고, 백킹 모델을 사용할 수 없을 때만 정적 fallback이 관련성 gate를 적용합니다.

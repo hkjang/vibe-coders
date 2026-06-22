@@ -205,6 +205,24 @@ curl http://proxy-gateway.intra:8080/v1/chat/completions \
 
 업스트림 등록·정책(차단/allowlist)은 운영자가 어드민 MCP 탭에서 관리하며, 게이트웨이를 통한 모든 도구 호출은 사용량·오류·반복 호출(루프) 관측에 자동 집계됩니다.
 
+### 3.12 `/mcp` vs `/mcp/gateway` — 두 엔드포인트 구분
+
+게이트웨이에는 이름이 비슷한 **두 가지 MCP 엔드포인트**가 있습니다. 용도가 다릅니다.
+
+- **`/mcp` (업스트림 집약)**: 위 3.11 처럼 운영자가 등록한 **외부 MCP 서버**들의 도구를 한 곳에 모아 씁니다. 도구 이름은 `<업스트림ID>__<이름>`.
+- **`/mcp/gateway` (게이트웨이 자체 기능)**: 게이트웨이 **자신의 기능**(chat·라우팅 미리보기·사용량/쿼터 조회·Text2SQL 미리보기·앱/워크플로 실행 등)을 MCP 도구로 노출합니다. 도구 이름은 `gateway_chat`·`gateway_route_preview`·`gateway_get_usage_summary`·`gateway_run_workflow` 등. **업스트림 등록이 필요 없습니다.**
+
+별도 SDK 없이 Claude Desktop·Cursor·Roo·Cline 같은 MCP 클라이언트에서 게이트웨이 기능을 바로 쓰려면 `/mcp/gateway` 를 설정하세요. 두 엔드포인트 모두 같은 proxy key 로 인증하며 본인 권한·쿼터·정책이 그대로 적용됩니다.
+
+```jsonc
+{ "mcpServers": { "vibe-gateway": {
+  "url": "http://<gateway>:8080/mcp/gateway",
+  "headers": { "Authorization": "Bearer pcg_..." }
+} } }
+```
+
+연결이 잘 안 되면 **내 홈 → "내 개발도구 연결하기 (MCP)" 카드**에서 클라이언트를 고르고 **연결 진단** 버튼으로 인증·scope·모델 허용·쿼터·`/v1/models`·`/mcp/gateway` 도달성을 한 번에 점검할 수 있습니다(CLI 는 `vibe doctor --client cursor`). 설정 JSON 은 `vibe mcp config` 로도 출력됩니다.
+
 ---
 
 ## 4. provider 명시적 선택

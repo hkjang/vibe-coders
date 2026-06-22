@@ -769,6 +769,31 @@ curl.exe http://localhost:8080/admin/mcp/upstreams `
 
 클라이언트는 MCP 서버 URL 로 `http://<gateway>:8080/mcp` 하나만 설정하면 됩니다. (현재 Streamable HTTP 업스트림 지원; stdio 서브프로세스는 향후 과제)
 
+### `/mcp` 와 `/mcp/gateway` 의 차이
+
+게이트웨이는 **두 개의 서로 다른 MCP 엔드포인트**를 제공합니다. 이름이 비슷하니 용도를 구분하세요.
+
+| | `/mcp` (업스트림 집약 프록시) | `/mcp/gateway` (게이트웨이 자체 기능) |
+|---|---|---|
+| **무엇을 노출** | 등록된 **외부 업스트림 MCP 서버**들의 tools/resources/prompts 를 `<업스트림ID>__<이름>` 으로 집약 | **게이트웨이 자신의 기능**(chat·라우팅 미리보기·사용량·쿼터·Text2SQL·앱/워크플로 실행 등)을 MCP tool 로 노출 |
+| **tool 이름 예** | `github__create_issue`, `jira__search` | `gateway_chat`, `gateway_route_preview`, `gateway_get_usage_summary`, `gateway_run_workflow` |
+| **대상** | 외부 MCP 도구를 게이트웨이 정책·관측으로 감싸 쓰고 싶을 때 | 별도 SDK 없이 MCP 클라이언트(Claude/Cursor/Roo/Cline)에서 게이트웨이 기능을 직접 호출하고 싶을 때 |
+| **업스트림 등록 필요?** | 예 (`/admin/mcp/upstreams`) | 아니오 (내장 tool 집합) |
+| **인증** | Proxy API Key (호출자 권한·정책 적용) | Proxy API Key (호출자 권한·쿼터·라우팅·정책이 `/v1` 과 동일하게 적용) |
+| **실행 안전성** | 업스트림이 실제 부수효과 수행 | 실행형 tool(`gateway_chat`·`gateway_run_workflow` 등)은 기존 `/v1` 파이프라인을 그대로 재생해 거버넌스·쿼터·로깅 동일 적용. 읽기형 tool 은 미실행 미리보기 |
+
+- **두 엔드포인트 모두** 같은 Proxy API Key 로 인증하며 호출자 권한·정책·관측에 통합됩니다.
+- 게이트웨이 기능 tool 목록·연결 설정은 어드민 **MCP 탭**(`GET /admin/gateway-mcp/info`)에서 확인하고, `vibe mcp config` CLI 로 클라이언트 설정 JSON 을 출력할 수 있습니다.
+- `/mcp/gateway` tool 의 입력/출력 스키마·위험등급·허용 역할·소유자는 **MCP Tool Contract Registry**(`/admin/mcp/contracts`)로 계약화하고, `POST /admin/mcp/contracts/validate` 로 실제 노출 스키마와의 드리프트를 탐지할 수 있습니다.
+
+```jsonc
+// MCP 클라이언트(Claude Desktop/Cursor 등)에서 게이트웨이 기능을 쓰는 설정
+{ "mcpServers": { "vibe-gateway": {
+  "url": "http://<gateway>:8080/mcp/gateway",
+  "headers": { "Authorization": "Bearer <YOUR_API_KEY>" }
+} } }
+```
+
 ## VCS 상관 (Prompt → Commit → MR → Merge)
 
 단순 게이트웨이를 넘어 **프롬프트가 실제 코드/MR 로 이어졌는지** 추적합니다. 오프라인망의 **GitLab·Bitbucket(Server/Cloud)** 과 범용 수집을 모두 지원합니다(외부 의존성 0).
