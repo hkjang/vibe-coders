@@ -366,7 +366,9 @@ func (s *Server) handleAuthUserUpdate(w http.ResponseWriter, r *http.Request, id
 	role, status := "", ""
 	if p.Role != nil {
 		role = strings.TrimSpace(*p.Role)
-		if _, ok := roleScopes[role]; role != "" && !ok {
+		// Accept any built-in OR custom role (consistent with user creation), so roles like
+		// security_admin/readonly_admin and admin-defined custom roles are assignable here.
+		if role != "" && !s.effectiveValidRole(r.Context(), role) {
 			writeOpenAIError(w, http.StatusBadRequest, "invalid role", "invalid_request_error", "invalid_role")
 			return
 		}

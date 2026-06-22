@@ -12608,6 +12608,10 @@ const adminHTML = `<!doctype html>
       ]);
       const templates = await api('/admin/templates').catch(() => ({ templates: [], categories: [] }));
       const slo = await api('/admin/providers/slo').catch(() => ({ slos: [], evaluations: [] }));
+      // Role dropdown options: all built-in + custom roles (kept in sync with the server role
+      // catalog) so e.g. security_admin / readonly_admin / custom roles are assignable.
+      const rolesResp = await api('/admin/roles').catch(() => ({ roles: [] }));
+      const roleOptions = (rolesResp.roles || []).map(r => r.role).filter(Boolean);
 
       const html =
         '<div class="grid2">' +
@@ -12634,7 +12638,7 @@ const adminHTML = `<!doctype html>
             providerTable(providers.providers || [])
           ) +
         '</div>' +
-        section('로그인 계정 · 팀 (RBAC)', authAccountsPanel(usersResp.auth_users || [], teamsResp.auth_teams || [], authEvents.events || [])) +
+        section('로그인 계정 · 팀 (RBAC)', authAccountsPanel(usersResp.auth_users || [], teamsResp.auth_teams || [], authEvents.events || [], roleOptions)) +
         section('복잡도 기반 비용 최적 라우팅 규칙', routingRulesPanel(routes.rules || [])) +
         section('라우팅 학습 추천 (Routing Learning)', routingLearningPanel(learning)) +
         section('Knowledge Cache (반복 규칙·시스템 프롬프트 중앙 등록)', knowledgePanel(knowledge.snippets || [])) +
@@ -12676,8 +12680,9 @@ const adminHTML = `<!doctype html>
       });
       makeSortable('#view', 'settings');
     }
-    const authRoleOptions = ['developer', 'viewer', 'team_admin', 'admin', 'super_admin', 'service_account'];
-    function authAccountsPanel(users, teams, events) {
+    const authRoleOptionsFallback = ['developer', 'viewer', 'team_admin', 'admin', 'super_admin', 'service_account'];
+    function authAccountsPanel(users, teams, events, roleOptions) {
+      const authRoleOptions = (roleOptions && roleOptions.length) ? roleOptions : authRoleOptionsFallback;
       const note = authState.enabled
         ? ''
         : '<div class="banner warn" style="margin:0 14px 12px">현재 <code>AUTH_ENABLED=false</code> — 계정을 만들어도 로그인 모드가 꺼져 있어 사용되지 않습니다. 켜려면 <code>AUTH_ENABLED=true</code> + <code>AUTH_JWT_SECRET</code> 설정 후 재기동하세요.</div>';
