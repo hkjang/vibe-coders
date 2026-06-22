@@ -9141,7 +9141,6 @@ const adminHTML = `<!doctype html>
       }).catch(() => {});
 
       // 팀 인기 Skill + 팀 추천 템플릿 후보 (병렬 로드, 실패해도 본문은 유지).
-      const pctv = (v) => (v == null ? '-' : (v * 100).toFixed(1) + '%');
       api('/team/skills/popular').then(s => {
         const skills = (s && s.skills) || [];
         const host = document.getElementById('team-skills');
