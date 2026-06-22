@@ -1578,6 +1578,12 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 			created_at TEXT NOT NULL,
 			updated_at TEXT NOT NULL
 		)`,
+		`CREATE TABLE IF NOT EXISTS oidc_flow_states (
+			state TEXT PRIMARY KEY,
+			nonce TEXT NOT NULL DEFAULT '',
+			verifier TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL
+		)`,
 		`CREATE TABLE IF NOT EXISTS mcp_tool_contracts (
 			id TEXT PRIMARY KEY,
 			namespace TEXT NOT NULL DEFAULT 'gateway',

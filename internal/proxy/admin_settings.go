@@ -217,6 +217,19 @@ func buildSettingRegistry() []settingDef {
 		{Key: "env.listen_addr", Category: "env", Type: stString, ReadOnly: true, envValue: func(c config.Config) string { return c.ListenAddr }},
 		{Key: "env.log_queue_size", Category: "env", Type: stInt, ReadOnly: true, envValue: func(c config.Config) string { return strconv.Itoa(c.Logging.QueueSize) }},
 		{Key: "env.log_fallback_path", Category: "env", Type: stString, ReadOnly: true, envValue: func(c config.Config) string { return c.Logging.FallbackPath }},
+
+		// ---- SSO / Keycloak (SSO_KEYCLOAK_*; read-only view — edit via the SSO 설정 screen,
+		// which stores a DB override with the client secret encrypted at rest) ----
+		{Key: "env.sso_keycloak_enabled", Category: "env.sso", Type: stBool, ReadOnly: true, envValue: func(c config.Config) string { return strconv.FormatBool(c.Keycloak.Enabled) }},
+		{Key: "env.sso_keycloak_issuer_url", Category: "env.sso", Type: stString, ReadOnly: true, envValue: func(c config.Config) string { return c.Keycloak.IssuerURL }},
+		{Key: "env.sso_keycloak_client_id", Category: "env.sso", Type: stString, ReadOnly: true, envValue: func(c config.Config) string { return c.Keycloak.ClientID }},
+		{Key: "env.sso_keycloak_client_secret", Category: "env.sso", Type: stString, Secret: true, ReadOnly: true, envValue: func(c config.Config) string { return c.Keycloak.ClientSecret }},
+		{Key: "env.sso_keycloak_redirect_uri", Category: "env.sso", Type: stString, ReadOnly: true, envValue: func(c config.Config) string { return c.Keycloak.RedirectURI }},
+		{Key: "env.sso_keycloak_scopes", Category: "env.sso", Type: stCSV, ReadOnly: true, envValue: func(c config.Config) string { return strings.Join(c.Keycloak.Scopes, ",") }},
+		{Key: "env.sso_keycloak_default_role", Category: "env.sso", Type: stString, ReadOnly: true, envValue: func(c config.Config) string { return c.Keycloak.DefaultRole }},
+		{Key: "env.sso_keycloak_role_claim", Category: "env.sso", Type: stString, ReadOnly: true, envValue: func(c config.Config) string { return c.Keycloak.RoleClaim }},
+		{Key: "env.sso_keycloak_group_claim", Category: "env.sso", Type: stString, ReadOnly: true, envValue: func(c config.Config) string { return c.Keycloak.GroupClaim }},
+		{Key: "env.sso_keycloak_allow_local_login", Category: "env.sso", Type: stBool, ReadOnly: true, envValue: func(c config.Config) string { return strconv.FormatBool(c.Keycloak.AllowLocalLogin) }},
 	}
 }
 

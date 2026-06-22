@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"time"
 
 	"vibe-coders/internal/audit"
 	"vibe-coders/internal/store"
@@ -39,7 +38,7 @@ func (s *Server) handleKeycloakLogin(w http.ResponseWriter, r *http.Request) {
 	state := randomURLSafe(24)
 	nonce := randomURLSafe(24)
 	verifier := randomURLSafe(48)
-	storeFlowState(state, oidcFlowState{nonce: nonce, verifier: verifier, created: time.Now()})
+	s.saveOIDCFlow(r.Context(), state, nonce, verifier)
 
 	q := url.Values{}
 	q.Set("client_id", kc.ClientID)
@@ -77,7 +76,7 @@ func (s *Server) handleKeycloakCallback(w http.ResponseWriter, r *http.Request) 
 		fail("missing code or state")
 		return
 	}
-	fs, ok := takeFlowState(state)
+	fs, ok := s.takeOIDCFlow(r.Context(), state)
 	if !ok {
 		fail("invalid or expired state (CSRF check failed)")
 		return

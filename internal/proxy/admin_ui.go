@@ -103,6 +103,10 @@ const adminHTML = `<!doctype html>
     }
     input::placeholder, textarea::placeholder { color: var(--muted); }
     input { min-width: 140px; }
+    input[type="checkbox"], input[type="radio"] {
+      height: auto; width: auto; min-width: 0; padding: 0; margin: 0 4px 0 0;
+      vertical-align: middle; accent-color: var(--accent);
+    }
     button {
       cursor: pointer; background: var(--accent); border-color: var(--accent);
       color: #fff; font-weight: 650;

@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math/big"
 	"net/http"
 	"strings"
@@ -310,6 +311,33 @@ func takeFlowState(state string) (oidcFlowState, bool) {
 		return oidcFlowState{}, false
 	}
 	return fs, ok
+}
+
+// saveOIDCFlow persists the login-flow state in the DB (durable across restarts and shared across
+// instances) and mirrors it in the in-memory map as a fallback for the single-instance/no-DB case.
+func (s *Server) saveOIDCFlow(ctx context.Context, state, nonce, verifier string) {
+	now := time.Now()
+	storeFlowState(state, oidcFlowState{nonce: nonce, verifier: verifier, created: now})
+	if s.db != nil {
+		if err := s.db.SaveOIDCFlowState(ctx, state, nonce, verifier, now.UTC()); err != nil {
+			slog.Warn("persist oidc flow state failed; relying on in-memory state", "error", err)
+		}
+	}
+}
+
+// takeOIDCFlow consumes the login-flow state, preferring the durable DB copy and falling back to
+// the in-memory map (so a callback that lands on the originating instance still works if the DB
+// write had failed).
+func (s *Server) takeOIDCFlow(ctx context.Context, state string) (oidcFlowState, bool) {
+	if s.db != nil {
+		if nonce, verifier, found, err := s.db.TakeOIDCFlowState(ctx, state); err != nil {
+			slog.Warn("read oidc flow state failed; falling back to in-memory", "error", err)
+		} else if found {
+			_, _ = takeFlowState(state) // clear any mirrored in-memory copy
+			return oidcFlowState{nonce: nonce, verifier: verifier, created: time.Now()}, true
+		}
+	}
+	return takeFlowState(state)
 }
 
 func randomURLSafe(nbytes int) string {
