@@ -408,15 +408,20 @@ func defaultAutoModel(tier string) string {
 
 func (s *Server) defaultAutoModelForPolicy(tier string, authCtx *store.AuthContext) string {
 	candidates := []string{}
+	// When the deployment configures an upstream default model, prefer it for every tier so
+	// vibe/auto targets the actually-served model instead of the built-in OpenAI names.
+	if dm := strings.TrimSpace(s.cfg.Upstream.DefaultModel); dm != "" {
+		candidates = append(candidates, dm)
+	}
 	switch tier {
 	case "reasoning":
-		candidates = []string{"o3", "gpt-4.1", "gpt-4.1-mini"}
+		candidates = append(candidates, "o3", "gpt-4.1", "gpt-4.1-mini")
 	case "complex":
-		candidates = []string{"gpt-4.1", "o3", "gpt-4.1-mini"}
+		candidates = append(candidates, "gpt-4.1", "o3", "gpt-4.1-mini")
 	case "standard":
-		candidates = []string{"gpt-4.1", "gpt-4.1-mini", "o3"}
+		candidates = append(candidates, "gpt-4.1", "gpt-4.1-mini", "o3")
 	default:
-		candidates = []string{"gpt-4.1-mini", "gpt-4.1", "o3"}
+		candidates = append(candidates, "gpt-4.1-mini", "gpt-4.1", "o3")
 	}
 	for _, candidate := range candidates {
 		if authCtx == nil || listAllows(candidate, authCtx.AllowedModels, authCtx.DeniedModels) {

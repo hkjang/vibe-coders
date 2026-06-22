@@ -213,6 +213,7 @@ func buildSettingRegistry() []settingDef {
 		// ---- Env (read-only view of startup environment variables) ----
 		{Key: "env.upstream_base_url", Category: "env", Type: stString, ReadOnly: true, envValue: func(c config.Config) string { return c.Upstream.BaseURL }},
 		{Key: "env.upstream_provider", Category: "env", Type: stString, ReadOnly: true, envValue: func(c config.Config) string { return c.Upstream.Provider }},
+		{Key: "env.upstream_default_model", Category: "env", Type: stString, ReadOnly: true, envValue: func(c config.Config) string { return c.Upstream.DefaultModel }},
 		{Key: "env.upstream_api_key", Category: "env", Type: stString, Secret: true, ReadOnly: true, envValue: func(c config.Config) string { return c.Upstream.APIKey }},
 		{Key: "env.listen_addr", Category: "env", Type: stString, ReadOnly: true, envValue: func(c config.Config) string { return c.ListenAddr }},
 		{Key: "env.log_queue_size", Category: "env", Type: stInt, ReadOnly: true, envValue: func(c config.Config) string { return strconv.Itoa(c.Logging.QueueSize) }},

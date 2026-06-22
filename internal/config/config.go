@@ -129,6 +129,9 @@ type UpstreamConfig struct {
 	BaseURL  string
 	APIKey   string
 	Timeout  time.Duration
+	// DefaultModel is the concrete model vibe/auto resolves to when set, so deployments whose
+	// upstream is not OpenAI don't fall back to the built-in gpt-4.1* names. Empty → built-in list.
+	DefaultModel string
 }
 
 type DatabaseConfig struct {
@@ -318,10 +321,11 @@ func Load() (Config, error) {
 	cfg := Config{
 		ListenAddr: getEnv("LISTEN_ADDR", ":8080"),
 		Upstream: UpstreamConfig{
-			Provider: getEnv("UPSTREAM_PROVIDER", "openai"),
-			BaseURL:  strings.TrimRight(getEnv("UPSTREAM_BASE_URL", "https://api.openai.com"), "/"),
-			APIKey:   firstNonEmpty(os.Getenv("UPSTREAM_API_KEY"), os.Getenv("OPENAI_API_KEY")),
-			Timeout:  durationEnv("UPSTREAM_TIMEOUT", 10*time.Minute),
+			Provider:     getEnv("UPSTREAM_PROVIDER", "openai"),
+			BaseURL:      strings.TrimRight(getEnv("UPSTREAM_BASE_URL", "https://api.openai.com"), "/"),
+			APIKey:       firstNonEmpty(os.Getenv("UPSTREAM_API_KEY"), os.Getenv("OPENAI_API_KEY")),
+			Timeout:      durationEnv("UPSTREAM_TIMEOUT", 10*time.Minute),
+			DefaultModel: strings.TrimSpace(os.Getenv("UPSTREAM_DEFAULT_MODEL")),
 		},
 		Database: databaseConfig(),
 		Logging: LoggingConfig{

@@ -14,6 +14,27 @@ import (
 	"vibe-coders/internal/store"
 )
 
+func TestDefaultAutoModelPrefersUpstreamConfig(t *testing.T) {
+	// No configured default → built-in OpenAI names (unchanged behavior).
+	plain := &Server{}
+	if got := plain.defaultAutoModelForPolicy("standard", nil); got != "gpt-4.1" {
+		t.Fatalf("default standard tier = %q, want gpt-4.1", got)
+	}
+	// Configured upstream default model → preferred for every tier.
+	s := &Server{}
+	s.cfg.Upstream.DefaultModel = "local-llm-70b"
+	for _, tier := range []string{"simple", "standard", "complex", "reasoning"} {
+		if got := s.defaultAutoModelForPolicy(tier, nil); got != "local-llm-70b" {
+			t.Errorf("tier %q = %q, want local-llm-70b", tier, got)
+		}
+	}
+	// If policy denies the configured default, it falls back to an allowed built-in.
+	denied := &store.AuthContext{DeniedModels: []string{"local-llm-70b"}}
+	if got := s.defaultAutoModelForPolicy("standard", denied); got != "gpt-4.1" {
+		t.Fatalf("denied default should fall back to gpt-4.1, got %q", got)
+	}
+}
+
 func TestIntelligentScorersClassifyComplexityAndRisk(t *testing.T) {
 	simple := analyzeComplexity([]store.PromptLog{{RedactedText: "hi"}}, 0)
 	if simple.Score >= 30 || simple.Tier != "simple" {
