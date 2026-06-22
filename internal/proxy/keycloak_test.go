@@ -33,6 +33,29 @@ func TestResolveKeycloakRole(t *testing.T) {
 	}
 }
 
+// resolveKeycloakRoleExplicit must distinguish an explicit claim→role match from a default
+// fallback, so SSO login never silently demotes an existing user (e.g. super_admin) whose IdP
+// carries no mapped role.
+func TestResolveKeycloakRoleExplicit(t *testing.T) {
+	cases := []struct {
+		roles        []string
+		def          string
+		wantRole     string
+		wantExplicit bool
+	}{
+		{[]string{"vibe-admin"}, "developer", "admin", true},        // explicit match
+		{[]string{"unknown-role"}, "developer", "developer", false}, // default fallback (must not overwrite role)
+		{[]string{}, "developer", "developer", false},               // no roles → fallback
+		{[]string{"unknown-role"}, "", "", false},                   // no default → block
+	}
+	for i, c := range cases {
+		role, explicit := resolveKeycloakRoleExplicit(nil, c.roles, c.def)
+		if role != c.wantRole || explicit != c.wantExplicit {
+			t.Errorf("case %d: got (%q,%v), want (%q,%v)", i, role, explicit, c.wantRole, c.wantExplicit)
+		}
+	}
+}
+
 func TestKeycloakTeamFromGroups(t *testing.T) {
 	if got := keycloakTeamFromGroups([]string{"/other", "/teams/ai-platform"}); got != "ai-platform" {
 		t.Errorf("team = %q, want ai-platform", got)

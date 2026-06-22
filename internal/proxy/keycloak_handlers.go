@@ -180,17 +180,23 @@ func (s *Server) provisionKeycloakUser(ctx context.Context, claims map[string]an
 	if sub == "" {
 		return store.AuthUser{}, "", &keycloakError{"id_token missing sub"}
 	}
-	role := resolveKeycloakRoleWith(s.effectiveKeycloakRoleMap(), s.keycloakRolesFromClaims(claims), kc.DefaultRole)
+	role, roleExplicit := resolveKeycloakRoleExplicit(s.effectiveKeycloakRoleMap(), s.keycloakRolesFromClaims(claims), kc.DefaultRole)
 	if role == "" {
 		return store.AuthUser{}, "", &keycloakError{"no role mapping matched and no default role — login blocked"}
 	}
 	team := keycloakTeamFromGroups(claimStrings(claims, kc.GroupClaim))
 
-	// 1) Existing linked identity → load + sync role/status.
+	// 1) Existing linked identity → load + sync status. Only an explicit claim→role mapping
+	// changes the role; a default-fallback role must NOT overwrite the user's existing role
+	// (otherwise e.g. a super_admin whose IdP carries no mapped role gets demoted to the default).
 	if id, found, _ := s.db.AuthIdentityBySubject(ctx, "keycloak", kc.IssuerURL, sub); found {
 		if user, ok, _ := s.db.AuthUserByID(ctx, id.UserID); ok {
-			_ = s.db.UpdateAuthUserRoleStatus(ctx, user.ID, role, "active")
-			user.Role, user.Status = role, "active"
+			newRole := user.Role
+			if roleExplicit {
+				newRole = role
+			}
+			_ = s.db.UpdateAuthUserRoleStatus(ctx, user.ID, newRole, "active")
+			user.Role, user.Status = newRole, "active"
 			s.finishKeycloakLink(ctx, user.ID, sub, email, username, team)
 			return user, team, nil
 		}

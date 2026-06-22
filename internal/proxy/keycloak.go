@@ -369,6 +369,15 @@ func resolveKeycloakRole(roles []string, defaultRole string) string {
 
 // resolveKeycloakRoleWith is resolveKeycloakRole with an explicit (possibly admin-edited) map.
 func resolveKeycloakRoleWith(roleMap map[string]string, roles []string, defaultRole string) string {
+	role, _ := resolveKeycloakRoleExplicit(roleMap, roles, defaultRole)
+	return role
+}
+
+// resolveKeycloakRoleExplicit resolves the internal role and reports whether it came from an
+// explicit claim→role mapping (true) or the default fallback (false). A fallback role must not
+// silently overwrite an existing user's internal role — otherwise a super_admin whose IdP carries
+// no mapped role would be demoted to the default role on their next SSO login.
+func resolveKeycloakRoleExplicit(roleMap map[string]string, roles []string, defaultRole string) (string, bool) {
 	if len(roleMap) == 0 {
 		roleMap = keycloakRoleMap
 	}
@@ -383,9 +392,9 @@ func resolveKeycloakRoleWith(roleMap map[string]string, roles []string, defaultR
 		}
 	}
 	if best != "" {
-		return best
+		return best, true
 	}
-	return strings.TrimSpace(defaultRole)
+	return strings.TrimSpace(defaultRole), false
 }
 
 // keycloakTeamFromGroups extracts a team id from a "/teams/<name>[/...]" group path.
