@@ -9741,7 +9741,74 @@ const adminHTML = `<!doctype html>
           '<p class="muted" style="font-size:11px;margin-top:6px">' + escapeHTML(d.note || '') + '</p></div>') +
         card('Tools (' + (d.tools || []).length + ')', '<div class="card-body"><table><thead><tr><th>tool</th><th>설명</th></tr></thead><tbody>' + toolRows + '</tbody></table></div>') +
         card('Resources (' + (d.resources || []).length + ')', '<div class="card-body"><table><thead><tr><th>uri</th><th>설명</th></tr></thead><tbody>' + resRows + '</tbody></table></div>') +
-        card('Prompts (' + (d.prompts || []).length + ')', '<div class="card-body"><table><thead><tr><th>prompt</th><th>설명</th></tr></thead><tbody>' + promptRows + '</tbody></table></div>');
+        card('Prompts (' + (d.prompts || []).length + ')', '<div class="card-body"><table><thead><tr><th>prompt</th><th>설명</th></tr></thead><tbody>' + promptRows + '</tbody></table></div>') +
+        '<div id="mcp-contracts"></div>';
+      renderMCPContracts();
+    }
+
+    // renderMCPContracts shows the MCP Tool Contract Registry: list, create, delete, and drift validate.
+    async function renderMCPContracts() {
+      const host = document.getElementById('mcp-contracts');
+      if (!host) return;
+      let d;
+      try { d = await api('/admin/mcp/contracts'); }
+      catch (e) { host.innerHTML = card('MCP Tool Contract Registry', '<div class="card-body"><p class="muted">' + escapeHTML(e.message) + '</p></div>'); return; }
+      window.mcpContractCreate = async (event) => {
+        event.preventDefault();
+        const body = {
+          name: document.getElementById('mc-name').value.trim(),
+          namespace: document.getElementById('mc-ns').value.trim() || 'gateway',
+          risk_level: document.getElementById('mc-risk').value,
+          owner: document.getElementById('mc-owner').value.trim(),
+          allowed_roles: document.getElementById('mc-roles').value.trim(),
+          cost_policy: document.getElementById('mc-cost').value.trim(),
+          input_schema: document.getElementById('mc-schema').value.trim(),
+        };
+        if (!body.name) { alert('tool name이 필요합니다.'); return; }
+        if (body.input_schema) { try { JSON.parse(body.input_schema); } catch (e) { alert('input_schema JSON 파싱 오류: ' + e.message); return; } }
+        try { await api('/admin/mcp/contracts', { method: 'POST', body: JSON.stringify(body) }); document.getElementById('mc-form').reset(); renderMCPContracts(); }
+        catch (e) { alert('저장 오류: ' + e.message); }
+      };
+      window.mcpContractDelete = async (id) => {
+        if (!confirm('계약을 삭제할까요?')) return;
+        try { await api('/admin/mcp/contracts?id=' + encodeURIComponent(id), { method: 'DELETE' }); renderMCPContracts(); }
+        catch (e) { alert('삭제 오류: ' + e.message); }
+      };
+      window.mcpContractValidate = async () => {
+        try {
+          const r = await api('/admin/mcp/contracts/validate', { method: 'POST', body: '{}' });
+          const badge = (s) => s === 'drift' ? '<span class="status warn">DRIFT</span>' : (s === 'missing' ? '<span class="status error">MISSING</span>' : (s === 'ok' ? '<span class="status">OK</span>' : '<span class="muted">N/A</span>'));
+          const rows = (r.results || []).map(x => '<tr><td><code>' + escapeHTML(x.name) + '</code></td><td>' + badge(x.status) + '</td><td class="muted" style="font-size:11px">' + escapeHTML(x.detail || '') +
+            ((x.declared_only || []).length ? '<br>계약에만: ' + escapeHTML((x.declared_only || []).join(', ')) : '') +
+            ((x.live_only || []).length ? '<br>실제에만: ' + escapeHTML((x.live_only || []).join(', ')) : '') + '</td></tr>').join('');
+          openModal('드리프트 검증 (' + (r.drift_count || 0) + ' drift · ' + (r.missing_count || 0) + ' missing / ' + (r.checked || 0) + ' 검사)',
+            '<table><thead><tr><th>tool</th><th>상태</th><th>상세</th></tr></thead><tbody>' + rows + '</tbody></table>' +
+            '<p class="muted" style="font-size:11px;margin-top:6px">' + escapeHTML(r.note || '') + '</p>');
+        } catch (e) { openModal('검증 오류', '<div class="error-line">' + escapeHTML(e.message) + '</div>'); }
+      };
+      const cs = d.contracts || [];
+      const riskBadge = (r) => r === 'high' ? '<span class="status error">high</span>' : (r === 'medium' ? '<span class="status warn">medium</span>' : '<span class="status">low</span>');
+      const rows = cs.map(c => '<tr>' +
+        '<td><code>' + escapeHTML(c.name) + '</code><div class="muted" style="font-size:10px">' + escapeHTML(c.namespace) + '</div></td>' +
+        '<td>' + riskBadge(c.risk_level) + '</td>' +
+        '<td class="muted">' + (c.timeout_ms ? escapeHTML(String(c.timeout_ms)) + 'ms' : '-') + '</td>' +
+        '<td class="muted">' + escapeHTML(c.allowed_roles || '전체') + '</td>' +
+        '<td class="muted">' + escapeHTML(c.owner || '-') + '</td>' +
+        '<td>' + (c.enabled ? '✓' : '-') + '</td>' +
+        '<td><button type="button" class="danger" style="font-size:11px" onclick="mcpContractDelete(\'' + escapeAttr(c.id) + '\')">삭제</button></td></tr>').join('');
+      host.innerHTML = card('MCP Tool Contract Registry (' + cs.length + ')',
+        '<div class="card-body"><p class="muted" style="font-size:12px">MCP tool의 입력/출력 스키마·위험등급·타임아웃·허용 역할·비용 정책·소유자를 계약으로 고정하고, 실제 게이트웨이 tool과의 스키마 드리프트를 탐지합니다.</p>' +
+        '<button type="button" onclick="mcpContractValidate()">드리프트 검증</button>' +
+        (cs.length ? '<table style="margin-top:8px"><thead><tr><th>tool</th><th>위험</th><th>timeout</th><th>역할</th><th>소유자</th><th>활성</th><th></th></tr></thead><tbody>' + rows + '</tbody></table>' : '<p class="muted" style="margin-top:8px">등록된 계약이 없습니다.</p>') +
+        '<form id="mc-form" onsubmit="mcpContractCreate(event)" style="margin-top:12px;border-top:1px solid var(--border);padding-top:10px;display:grid;grid-template-columns:repeat(3,1fr);gap:6px">' +
+        '<input id="mc-name" placeholder="tool name (예: gateway_chat)" required>' +
+        '<input id="mc-ns" placeholder="namespace (기본 gateway)">' +
+        '<select id="mc-risk"><option value="low">low</option><option value="medium">medium</option><option value="high">high</option></select>' +
+        '<input id="mc-owner" placeholder="소유자">' +
+        '<input id="mc-roles" placeholder="허용 역할 CSV">' +
+        '<input id="mc-cost" placeholder="비용 정책">' +
+        '<textarea id="mc-schema" placeholder=\'input_schema JSON (예: {"type":"object","properties":{...}})\' style="grid-column:1/4;font-family:monospace;font-size:11px;min-height:48px"></textarea>' +
+        '<button type="submit" style="grid-column:1/4">계약 저장</button></form></div>');
     }
 
     // renderWorkflows manages workflow chain definitions (list / create via JSON / dry-run / delete).

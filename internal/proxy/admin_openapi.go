@@ -39,6 +39,8 @@ var apiEndpoints = []apiEndpoint{
 	{"/mcp/gateway", []string{"post"}, "mcp", "AI Gateway MCP Server — vibe-coders' own features as MCP tools/resources/prompts", false},
 	{"/admin/gateway-mcp/info", []string{"get"}, "mcp", "Gateway MCP catalog (tools/resources/prompts) for the admin UI", false},
 	{"/admin/mcp/gateway/test", []string{"post"}, "mcp", "Admin: invoke a Gateway MCP tool by name to verify it", false},
+	{"/admin/mcp/contracts", []string{"get", "post", "delete"}, "mcp", "MCP Tool Contract Registry: list/upsert/delete tool contracts", false},
+	{"/admin/mcp/contracts/validate", []string{"post"}, "mcp", "Detect drift between registered MCP tool contracts and live gateway tools", false},
 	{"/vcs/events", []string{"post"}, "vcs", "VCS webhook ingest", true},
 	{"/vcs/webhook/{provider}", []string{"post"}, "vcs", "VCS webhook ingest (provider path)", true},
 

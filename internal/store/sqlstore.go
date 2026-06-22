@@ -1578,6 +1578,24 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 			created_at TEXT NOT NULL,
 			updated_at TEXT NOT NULL
 		)`,
+		`CREATE TABLE IF NOT EXISTS mcp_tool_contracts (
+			id TEXT PRIMARY KEY,
+			namespace TEXT NOT NULL DEFAULT 'gateway',
+			name TEXT NOT NULL DEFAULT '',
+			title TEXT NOT NULL DEFAULT '',
+			description TEXT NOT NULL DEFAULT '',
+			input_schema TEXT NOT NULL DEFAULT '',
+			output_schema TEXT NOT NULL DEFAULT '',
+			risk_level TEXT NOT NULL DEFAULT 'low',
+			timeout_ms INTEGER NOT NULL DEFAULT 0,
+			allowed_roles TEXT NOT NULL DEFAULT '',
+			cost_policy TEXT NOT NULL DEFAULT '',
+			owner TEXT NOT NULL DEFAULT '',
+			enabled INTEGER NOT NULL DEFAULT 1,
+			created_by TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)`,
 		`CREATE TABLE IF NOT EXISTS data_product_access_requests (
 			id TEXT PRIMARY KEY,
 			product_key TEXT NOT NULL,
