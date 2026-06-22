@@ -10044,7 +10044,7 @@ const adminHTML = `<!doctype html>
 
       view.innerHTML = section('내 홈', kpis) +
         '<div id="me-actions"></div><div id="me-report"></div>' +
-        profCard + usageCard + modelsCard + failCard + blockCard + reportsCard + keyCard + mcpCard + recCard +
+        profCard + usageCard + modelsCard + '<div id="me-failures">' + failCard + '</div>' + blockCard + '<div id="me-reports">' + reportsCard + '</div>' + keyCard + mcpCard + recCard +
         '<div id="me-requests"></div><div id="me-recmodels"></div><div id="me-skills"></div><div id="me-notifications"></div><div id="me-sessions"></div>';
 
       // 최근 요청 + 영수증.
@@ -10300,11 +10300,25 @@ const adminHTML = `<!doctype html>
     window.meActionGo = (href) => {
       href = href || '#/me';
       if (href.indexOf('modal:') === 0) { meActionModal(href.slice(6)); return; }
+      if (href.indexOf('scroll:') === 0) { meScrollToSection(href.slice(7)); return; }
       if (location.hash === href || (href === '#/me' && (location.hash === '' || location.hash === '#/me'))) {
         renderMeHome();
       } else {
         location.hash = href;
       }
+    };
+
+    // meScrollToSection scrolls to and briefly highlights a section on the My Home page (loading
+    // on-demand content first where applicable), so "view"-type action buttons land on real content.
+    window.meScrollToSection = (id) => {
+      if (id === 'me-recs' && typeof meLoadRecommendations === 'function') { try { meLoadRecommendations(); } catch (e) {} }
+      const el = document.getElementById(id);
+      if (!el) { renderMeHome(); return; }
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      const prev = el.style.boxShadow;
+      el.style.transition = 'box-shadow .4s';
+      el.style.boxShadow = '0 0 0 2px var(--accent)';
+      setTimeout(() => { el.style.boxShadow = prev; }, 1400);
     };
 
     // meActionModal shows inline guidance for actions that have no dedicated page.
@@ -10334,6 +10348,32 @@ const adminHTML = `<!doctype html>
           '<li>품질이 충분한지 비교한 뒤, 반복 작업이라면 해당 모델을 기본값으로 고정하세요.</li>' +
           '</ul>' +
           '<p class="muted" style="font-size:12px">전환 후에도 품질이 유지되는지 응답을 확인하세요. 복잡한 작업은 기존 모델을 유지하는 것이 안전합니다.</p>' +
+          '<div style="margin-top:12px"><button type="button" class="secondary" onclick="closeModal()">확인</button></div></div>');
+        return;
+      }
+      if (key === 'repeat_question') {
+        openModal('리포트 만들기 — 반복 질문을 저장 리포트로',
+          '<div style="font-size:13px;line-height:1.7">' +
+          '<p>같은 질문을 반복하고 있다면 저장 리포트로 만들어 한 번에 실행·공유할 수 있습니다.</p>' +
+          '<ol style="margin:8px 0 8px 18px">' +
+          '<li>Text2SQL(자연어 질문)으로 원하는 결과를 한 번 생성합니다.</li>' +
+          '<li>결과 화면에서 <strong>"리포트로 저장"</strong>을 선택해 이름·공개 범위(개인/팀)를 지정합니다.</li>' +
+          '<li>저장한 리포트는 아래 <strong>"내 저장 리포트"</strong>에서 다시 실행하거나 팀과 공유할 수 있습니다.</li>' +
+          '</ol>' +
+          '<p class="muted" style="font-size:12px">팀 공개 리포트는 승인 절차를 거칠 수 있습니다. 민감 데이터는 마스킹·권한 정책이 그대로 적용됩니다.</p>' +
+          '<div style="margin-top:12px"><button type="button" onclick="closeModal();meScrollToSection(\'me-reports\')">내 저장 리포트 보기</button> ' +
+          '<button type="button" class="secondary" onclick="closeModal()">확인</button></div></div>');
+        return;
+      }
+      if (key === 'cache_improve') {
+        openModal('템플릿 만들기 — 유사 질문 재사용',
+          '<div style="font-size:13px;line-height:1.7">' +
+          '<p>비슷한 질문을 자주 한다면 템플릿/저장 리포트로 재사용해 응답 속도와 일관성을 높일 수 있습니다.</p>' +
+          '<ul style="margin:8px 0 8px 18px">' +
+          '<li>자주 쓰는 프롬프트를 <strong>프롬프트 템플릿</strong>으로 저장해 매번 새로 작성하지 않도록 합니다.</li>' +
+          '<li>표현이 조금씩 다른 질문은 핵심 문구를 통일하면 <strong>시맨틱 캐시</strong> 적중률이 올라가 더 빠르고 저렴하게 응답됩니다.</li>' +
+          '<li>반복 데이터 질의는 저장 리포트로 만들어 재실행하세요.</li>' +
+          '</ul>' +
           '<div style="margin-top:12px"><button type="button" class="secondary" onclick="closeModal()">확인</button></div></div>');
         return;
       }

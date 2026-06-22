@@ -62,7 +62,7 @@ func (s *Server) handleMeActions(w http.ResponseWriter, r *http.Request) {
 	lastWeekCost := twoWeek.CostKRW - thisWeek.CostKRW
 	if lastWeekCost > 0 && thisWeek.CostKRW >= lastWeekCost*1.3 {
 		actions = append(actions, actionCard{Type: "cost_increase", Severity: "medium",
-			Message: "이번 주 AI 비용이 평소보다 높습니다.", ButtonLabel: "절감 추천 보기", ButtonHref: "#/me"})
+			Message: "이번 주 AI 비용이 평소보다 높습니다.", ButtonLabel: "절감 추천 보기", ButtonHref: "scroll:me-report"})
 	}
 
 	// Failure spike: last 24h errors > prior 24h errors.
@@ -71,7 +71,7 @@ func (s *Server) handleMeActions(w http.ResponseWriter, r *http.Request) {
 	prev24Errors := last48.Errors - last24.Errors
 	if last24.Errors > 0 && last24.Errors > prev24Errors {
 		actions = append(actions, actionCard{Type: "failure_increase", Severity: "medium",
-			Message: "최근 실패 요청이 늘었습니다.", ButtonLabel: "실패 원인 보기", ButtonHref: "#/me"})
+			Message: "최근 실패 요청이 늘었습니다.", ButtonLabel: "실패 원인 보기", ButtonHref: "scroll:me-failures"})
 	}
 
 	// Model switch: a cheaper adequate model exists for this month's mix.
@@ -86,13 +86,13 @@ func (s *Server) handleMeActions(w http.ResponseWriter, r *http.Request) {
 	cands, _ := s.db.UserText2SQLReportCandidates(ctx, userID, now.Add(-30*24*time.Hour), 3, 5)
 	if len(cands) > 0 {
 		actions = append(actions, actionCard{Type: "repeat_question", Severity: "low",
-			Message: "반복되는 질문을 저장 리포트로 만들 수 있습니다.", ButtonLabel: "리포트 만들기", ButtonHref: "#/me"})
+			Message: "반복되는 질문을 저장 리포트로 만들 수 있습니다.", ButtonLabel: "리포트 만들기", ButtonHref: "modal:repeat_question"})
 	}
 
 	// MCP affinity.
 	if aff, _ := s.db.UserMCPAffinities(ctx, userID, now.Add(-30*24*time.Hour), 2, 5); len(aff) > 0 {
 		actions = append(actions, actionCard{Type: "mcp_recommend", Severity: "low",
-			Message: "자주 하는 작업에 맞는 MCP 도구가 있습니다.", ButtonLabel: "도구 보기", ButtonHref: "#/me"})
+			Message: "자주 하는 작업에 맞는 MCP 도구가 있습니다.", ButtonLabel: "도구 보기", ButtonHref: "scroll:me-recmodels"})
 	}
 
 	// Rising personal risk + cache opportunity (both from the profile).
@@ -103,13 +103,13 @@ func (s *Server) handleMeActions(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(cands) >= 2 && profile.CacheRate < 0.2 {
 		actions = append(actions, actionCard{Type: "cache_improve", Severity: "low",
-			Message: "유사 질문 재사용으로 응답 속도를 개선할 수 있습니다.", ButtonLabel: "템플릿 만들기", ButtonHref: "#/me"})
+			Message: "유사 질문 재사용으로 응답 속도를 개선할 수 있습니다.", ButtonLabel: "템플릿 만들기", ButtonHref: "modal:cache_improve"})
 	}
 
 	// Unreviewed recommendations.
 	if recs, _ := s.db.ListUserRecommendations(ctx, userID); len(recs) > 0 {
 		actions = append(actions, actionCard{Type: "unreviewed_recommendations", Severity: "low",
-			Message: "확인하지 않은 개인화 추천이 있습니다.", ButtonLabel: "추천 보기", ButtonHref: "#/me"})
+			Message: "확인하지 않은 개인화 추천이 있습니다.", ButtonLabel: "추천 보기", ButtonHref: "scroll:me-recs"})
 	}
 
 	// Drop snoozed action types.
