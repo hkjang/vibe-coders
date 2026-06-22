@@ -124,14 +124,15 @@ func (s *SQLStore) ListPromptAssets(ctx context.Context, statusFilter, tagFilter
 	}
 	// Metrics window: last 90 days
 	since90 := time.Now().UTC().Add(-90 * 24 * time.Hour).Format(time.RFC3339)
-	metricsQ := s.bind(`SELECT prompt_name,
+	metricsQ := s.bind(`SELECT r.prompt_name,
 		COUNT(*) as calls,
-		AVG(CASE WHEN status_code < 400 THEN 1.0 ELSE 0.0 END) as success_rate,
-		COALESCE(AVG(cost_krw), 0) as avg_cost_krw,
-		COALESCE(AVG(latency_ms), 0) as avg_latency_ms
-		FROM request_logs
-		WHERE prompt_name != '' AND created_at >= ?
-		GROUP BY prompt_name`)
+		AVG(CASE WHEN r.status_code < 400 THEN 1.0 ELSE 0.0 END) as success_rate,
+		COALESCE(AVG(t.estimated_cost), 0) as avg_cost_krw,
+		COALESCE(AVG(r.latency_ms), 0) as avg_latency_ms
+		FROM request_logs r
+		LEFT JOIN token_usage t ON r.id = t.request_id
+		WHERE r.prompt_name != '' AND r.created_at >= ?
+		GROUP BY r.prompt_name`)
 	mrows, err := s.db.QueryContext(ctx, metricsQ, since90)
 	if err != nil {
 		return nil, err
