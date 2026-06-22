@@ -211,6 +211,53 @@ func (s *SQLStore) GetWorkflowRun(ctx context.Context, id string) (WorkflowRun, 
 	return run, true, nil
 }
 
+// WorkflowStepRun is one step's outcome within a run — safe metadata only (no raw output/SQL/args).
+type WorkflowStepRun struct {
+	ID          string `json:"id"`
+	RunID       string `json:"run_id"`
+	StepIndex   int    `json:"step_index"`
+	Name        string `json:"name"`
+	Type        string `json:"type"`
+	Ref         string `json:"ref"`
+	Status      string `json:"status"` // ok | error | pending_approval | stopped | passed | skipped
+	OutputChars int    `json:"output_chars"`
+	ErrorClass  string `json:"error_class"`
+	CreatedAt   string `json:"created_at"`
+}
+
+// RecordWorkflowStepRuns persists per-step outcomes for a run (best-effort batch insert).
+func (s *SQLStore) RecordWorkflowStepRuns(ctx context.Context, runID string, steps []WorkflowStepRun) error {
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	for _, st := range steps {
+		if _, err := s.db.ExecContext(ctx, s.bind(`INSERT INTO workflow_step_runs
+			(id, run_id, step_index, name, type, ref, status, output_chars, error_class, created_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+			runID+"_"+itoaStore(st.StepIndex), runID, st.StepIndex, st.Name, st.Type, st.Ref, st.Status, st.OutputChars, st.ErrorClass, now); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ListWorkflowStepRuns returns a run's per-step outcomes in step order.
+func (s *SQLStore) ListWorkflowStepRuns(ctx context.Context, runID string) ([]WorkflowStepRun, error) {
+	rows, err := s.db.QueryContext(ctx, s.bind(`SELECT id, run_id, step_index, name, type, ref, status, output_chars, error_class, created_at
+		FROM workflow_step_runs WHERE run_id = ? ORDER BY step_index ASC`), runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []WorkflowStepRun{}
+	for rows.Next() {
+		var st WorkflowStepRun
+		if err := rows.Scan(&st.ID, &st.RunID, &st.StepIndex, &st.Name, &st.Type, &st.Ref, &st.Status, &st.OutputChars, &st.ErrorClass, &st.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, st)
+	}
+	return out, rows.Err()
+}
+
 func (s *SQLStore) ListWorkflowRuns(ctx context.Context, userID, workflowID string, limit int) ([]WorkflowRun, error) {
 	if limit <= 0 || limit > 200 {
 		limit = 50

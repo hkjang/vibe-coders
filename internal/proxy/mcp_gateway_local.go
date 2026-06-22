@@ -350,6 +350,7 @@ func (s *Server) runGatewayTool(ctx context.Context, r *http.Request, apiKeyID s
 			ID: runID, WorkflowID: wf.ID, UserID: claims.Subject, Team: claims.TeamID, Status: status,
 			StepsTotal: len(wf.Steps), StepsOK: stepsOK, LatencyMS: time.Since(start).Milliseconds(), ErrorClass: errClass,
 		})
+		s.recordWorkflowStepRuns(r, runID, wf, results)
 		return gatewayToolJSON(map[string]any{"run_id": runID, "workflow_id": wf.ID, "status": status, "steps_ok": stepsOK, "results": results}), nil
 
 	case "gateway_list_models":
@@ -392,7 +393,7 @@ func (s *Server) runGatewayTool(ctx context.Context, r *http.Request, apiKeyID s
 		}
 		_ = json.Unmarshal(args, &a)
 		body, _ := json.Marshal(map[string]any{
-			"model": firstNonEmpty(a.Model, "vibe/auto"),
+			"model":    firstNonEmpty(a.Model, "vibe/auto"),
 			"messages": []map[string]string{{"role": "user", "content": firstNonEmpty(a.Prompt, "preview")}},
 		})
 		plan := s.planIntelligentRouting(ctx, body, "/v1/chat/completions", false, false, authCtx)
@@ -447,7 +448,7 @@ func (s *Server) runGatewayTool(ctx context.Context, r *http.Request, apiKeyID s
 		summary := map[string]any{
 			"request_id": req.ID, "model": req.Model, "provider": req.Provider,
 			"status_code": req.StatusCode, "cost_krw": req.EstimatedCost,
-			"tokens": map[string]any{"prompt": req.PromptTokens, "completion": req.CompletionTokens, "total": req.TotalTokens, "cached": req.CachedTokens},
+			"tokens":    map[string]any{"prompt": req.PromptTokens, "completion": req.CompletionTokens, "total": req.TotalTokens, "cached": req.CachedTokens},
 			"cache_hit": req.CachedTokens > 0, "created_at": req.CreatedAt,
 		}
 		if rd, err := s.db.RoutingDecisionByID(ctx, reqID); err == nil {
@@ -578,9 +579,9 @@ func gatewayPromptDefs() []mcpPrompt {
 
 var gatewayPromptText = map[string]string{
 	"use_gateway_safely":    "vibe-coders Gateway를 사용할 때: 1) 작업에 맞는 모델을 고르고(gateway_route_preview/gateway_list_models 참고) 2) 예상 비용을 gateway_estimate_cost로 확인하고 3) 민감정보(비밀번호·키·개인정보)는 프롬프트에 넣지 마세요. 막히면 gateway_explain_request로 사유를 확인하세요.",
-	"analyze_my_usage":     "gateway_get_usage_summary로 최근 사용량과 비용을 가져와, 비용 증가 원인(모델 선택·요청량·실패 재시도)을 진단하고 절감 방안을 제안하세요.",
-	"choose_best_model":    "작업 유형(코드 리뷰/요약/SQL/긴 문서)을 입력받아, gateway_list_models의 가격과 품질을 고려해 가장 적합한 모델을 추천하세요. 비용 대비 품질을 함께 설명하세요.",
-	"run_text2sql_report":  "실행할 저장 리포트와 기간·조건·출력 형식을 입력받아, 안전한 SELECT 기반 질의로 결과를 요약하세요. 원문 SQL은 노출하지 않습니다.",
+	"analyze_my_usage":      "gateway_get_usage_summary로 최근 사용량과 비용을 가져와, 비용 증가 원인(모델 선택·요청량·실패 재시도)을 진단하고 절감 방안을 제안하세요.",
+	"choose_best_model":     "작업 유형(코드 리뷰/요약/SQL/긴 문서)을 입력받아, gateway_list_models의 가격과 품질을 고려해 가장 적합한 모델을 추천하세요. 비용 대비 품질을 함께 설명하세요.",
+	"run_text2sql_report":   "실행할 저장 리포트와 기간·조건·출력 형식을 입력받아, 안전한 SELECT 기반 질의로 결과를 요약하세요. 원문 SQL은 노출하지 않습니다.",
 	"create_ai_app_request": "반복되는 업무를 업무 앱으로 정의하기 위해 목적·입력·사용할 Skill/모델/데이터를 정리해 앱 생성 요청서를 작성하세요.",
 }
 

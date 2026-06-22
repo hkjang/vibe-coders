@@ -346,12 +346,43 @@ func (s *Server) finishWorkflowRun(w http.ResponseWriter, r *http.Request, wf st
 		ID: runID, WorkflowID: wf.ID, UserID: claims.Subject, Team: claims.TeamID, Status: status,
 		StepsTotal: len(wf.Steps), StepsOK: stepsOK, LatencyMS: time.Since(start).Milliseconds(), ErrorClass: errClass,
 	})
+	s.recordWorkflowStepRuns(r, runID, wf, results)
 	s.auditAuthEvent(r.Context(), "workflow_execute", claims.Subject, "", claims.TeamID, "workflow="+wf.ID+" status="+status)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"run_id": runID, "workflow_id": wf.ID, "name": wf.Name, "status": status,
 		"steps_total": len(wf.Steps), "steps_ok": stepsOK, "results": results,
 		"note": "서버측 순차 실행 결과입니다. step 출력은 호출자에게만 반환되며 저장은 집계 메타데이터만 남습니다.",
 	})
+}
+
+// recordWorkflowStepRuns persists safe per-step outcomes (no raw output): only the step's
+// name/type/ref/status, how many characters it produced, and an error class. Best-effort.
+func (s *Server) recordWorkflowStepRuns(r *http.Request, runID string, wf store.Workflow, results []map[string]any) {
+	if len(results) == 0 {
+		return
+	}
+	stepRuns := make([]store.WorkflowStepRun, 0, len(results))
+	for i, res := range results {
+		ref := ""
+		if i < len(wf.Steps) {
+			ref = wf.Steps[i].Ref
+		}
+		typ, _ := res["type"].(string)
+		name, _ := res["name"].(string)
+		st, _ := res["status"].(string)
+		chars := 0
+		if out, ok := res["output"].(string); ok {
+			chars = len([]rune(out))
+		}
+		errClass := ""
+		if _, hasErr := res["error"]; hasErr {
+			errClass = "step_error"
+		}
+		stepRuns = append(stepRuns, store.WorkflowStepRun{
+			StepIndex: i, Name: name, Type: typ, Ref: ref, Status: st, OutputChars: chars, ErrorClass: errClass,
+		})
+	}
+	_ = s.db.RecordWorkflowStepRuns(r.Context(), runID, stepRuns)
 }
 
 // handleMyWorkflowRuns lists the caller's own workflow run history. GET /me/workflow-runs

@@ -73,11 +73,21 @@ func (s *Server) handleWorkflowRunReceipt(w http.ResponseWriter, r *http.Request
 	if wf, ok, _ := s.db.GetWorkflow(r.Context(), run.WorkflowID); ok {
 		name = wf.Name
 	}
+	// Per-step breakdown (safe metadata only — no raw output).
+	steps := []map[string]any{}
+	if stepRuns, err := s.db.ListWorkflowStepRuns(r.Context(), run.ID); err == nil {
+		for _, st := range stepRuns {
+			steps = append(steps, map[string]any{
+				"step_index": st.StepIndex, "name": st.Name, "type": st.Type, "ref": st.Ref,
+				"status": st.Status, "output_chars": st.OutputChars, "error_class": st.ErrorClass,
+			})
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"run_id": run.ID, "kind": "workflow", "workflow_id": run.WorkflowID, "workflow_name": name,
 		"status": run.Status, "error_class": run.ErrorClass, "steps_total": run.StepsTotal, "steps_ok": run.StepsOK,
-		"latency_ms": run.LatencyMS, "cost_krw": run.CostKRW, "created_at": run.CreatedAt,
-		"note": "워크플로 실행 영수증입니다. 원문 prompt/SQL/tool args는 포함되지 않습니다.",
+		"latency_ms": run.LatencyMS, "cost_krw": run.CostKRW, "created_at": run.CreatedAt, "steps": steps,
+		"note": "워크플로 실행 영수증입니다. step별 상태/출력 길이만 표시하며 원문 prompt/SQL/tool args는 포함되지 않습니다.",
 	})
 }
 

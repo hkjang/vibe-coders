@@ -78,4 +78,25 @@ func TestWorkflowRoundtripAndRuns(t *testing.T) {
 	if versions[1].PublishedBy != "admin@x" || versions[1].Note != "first" {
 		t.Fatalf("v1 metadata wrong: %+v", versions[1])
 	}
+
+	// Per-step run records (safe metadata only).
+	if err := db.RecordWorkflowStepRuns(ctx, "run1", []WorkflowStepRun{
+		{StepIndex: 0, Name: "리뷰", Type: "skill", Ref: "code-review", Status: "ok", OutputChars: 120},
+		{StepIndex: 1, Name: "승인", Type: "approval", Status: "pending_approval"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	stepRuns, err := db.ListWorkflowStepRuns(ctx, "run1")
+	if err != nil || len(stepRuns) != 2 {
+		t.Fatalf("step runs = %+v err=%v", stepRuns, err)
+	}
+	if stepRuns[0].StepIndex != 0 || stepRuns[0].Type != "skill" || stepRuns[0].OutputChars != 120 {
+		t.Fatalf("step 0 wrong: %+v", stepRuns[0])
+	}
+	if stepRuns[1].Status != "pending_approval" {
+		t.Fatalf("step 1 status wrong: %+v", stepRuns[1])
+	}
+	if other, _ := db.ListWorkflowStepRuns(ctx, "nope"); len(other) != 0 {
+		t.Fatalf("unknown run should have no step runs, got %d", len(other))
+	}
 }
