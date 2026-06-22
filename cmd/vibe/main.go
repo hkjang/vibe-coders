@@ -84,6 +84,7 @@ Commands:
   route MODEL PROMPT      preview vibe/auto routing
   usage [WINDOW]          show your usage summary (e.g. 30d)
   app run APP_ID          run an AI work app
+  doctor [--client C]     diagnose your client connection setup
   mcp config              print MCP client config for this gateway
 
 Env: VIBE_BASE_URL, VIBE_API_KEY`)
@@ -121,6 +122,15 @@ func run(cfg cliConfig, args []string) error {
 			return cmdAppRun(cfg, rest[1])
 		}
 		return fmt.Errorf("usage: vibe app run APP_ID")
+	case "doctor":
+		client := "openai-sdk"
+		for i := 0; i < len(rest); i++ {
+			if rest[i] == "--client" && i+1 < len(rest) {
+				client = rest[i+1]
+				i++
+			}
+		}
+		return cmdDoctor(cfg, client)
 	default:
 		usage()
 		return fmt.Errorf("unknown command: %s", cmd)
@@ -224,6 +234,43 @@ func cmdAppRun(cfg cliConfig, appID string) error {
 		return fmt.Errorf("HTTP %d: %s", status, raw)
 	}
 	fmt.Println(string(raw))
+	return nil
+}
+
+// cmdDoctor runs the connection doctor for a client type and prints a per-check report.
+func cmdDoctor(cfg cliConfig, client string) error {
+	raw, status, err := cfg.do(http.MethodPost, "/me/connection-doctor", map[string]any{"client": client})
+	if err != nil {
+		return err
+	}
+	if status != http.StatusOK {
+		return fmt.Errorf("HTTP %d: %s", status, raw)
+	}
+	if !cfg.Table {
+		fmt.Println(string(raw))
+		return nil
+	}
+	var parsed struct {
+		Client  string `json:"client"`
+		Overall string `json:"overall"`
+		BaseURL string `json:"base_url"`
+		MCPURL  string `json:"mcp_url"`
+		Checks  []struct {
+			Name   string `json:"name"`
+			Status string `json:"status"`
+			Detail string `json:"detail"`
+			Fix    string `json:"fix"`
+		} `json:"checks"`
+	}
+	_ = json.Unmarshal(raw, &parsed)
+	fmt.Printf("client=%s  overall=%s\n", parsed.Client, parsed.Overall)
+	fmt.Printf("base_url=%s  mcp_url=%s\n", parsed.BaseURL, parsed.MCPURL)
+	for _, c := range parsed.Checks {
+		fmt.Printf("[%-4s] %-16s %s\n", c.Status, c.Name, c.Detail)
+		if c.Fix != "" && c.Status != "pass" {
+			fmt.Printf("         fix: %s\n", c.Fix)
+		}
+	}
 	return nil
 }
 

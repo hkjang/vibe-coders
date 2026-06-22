@@ -9943,10 +9943,29 @@ const adminHTML = `<!doctype html>
         navigator.clipboard && navigator.clipboard.writeText(cfg);
       };
       const mcpCfg = JSON.stringify({ mcpServers: { 'vibe-gateway': { url: window.location.origin + '/mcp/gateway', headers: { Authorization: 'Bearer <YOUR_API_KEY>' } } } }, null, 2);
+      window.meRunDoctor = async () => {
+        const host = document.getElementById('me-doctor-result');
+        const client = (document.getElementById('me-doctor-client') || {}).value || 'openai-sdk';
+        if (host) host.innerHTML = '<p class="muted">진단 중…</p>';
+        let d;
+        try { d = await api('/me/connection-doctor', { method: 'POST', body: JSON.stringify({ client }) }); }
+        catch (e) { if (host) host.innerHTML = '<p class="muted">진단 실패: ' + escapeHTML(String(e)) + '</p>'; return; }
+        if (!host || !d) return;
+        const badge = (s) => s === 'fail' ? '<span class="status error">FAIL</span>' : (s === 'warn' ? '<span class="status warn">WARN</span>' : '<span class="status">PASS</span>');
+        host.innerHTML = '<p style="font-size:12px;margin:6px 0">종합: ' + badge(d.overall) + ' <span class="muted">base ' + escapeHTML(d.base_url || '') + '</span></p>' +
+          '<table><thead><tr><th>항목</th><th>상태</th><th>설명</th></tr></thead><tbody>' +
+          (d.checks || []).map(c => '<tr><td>' + escapeHTML(c.name) + '</td><td>' + badge(c.status) + '</td><td class="muted" style="font-size:11px">' + escapeHTML(c.detail || '') + (c.fix && c.status !== 'pass' ? '<br><strong>조치:</strong> ' + escapeHTML(c.fix) : '') + '</td></tr>').join('') +
+          '</tbody></table>';
+      };
       const mcpCard = card('내 개발도구 연결하기 (MCP)',
         '<div class="card-body"><p class="muted" style="font-size:12px">Claude Desktop·Cursor·Roo Code·Cline에서 아래 설정으로 Gateway를 MCP 서버로 연결하면 모델 조회·라우팅 미리보기·사용량 확인 등을 도구로 쓸 수 있습니다. <code>&lt;YOUR_API_KEY&gt;</code>는 <a href="#/mykeys">내 키</a>에서 발급하세요.</p>' +
         '<pre style="background:var(--bg-alt,#f6f8fa);padding:10px;border-radius:6px;overflow:auto;font-size:11px">' + escapeHTML(mcpCfg) + '</pre>' +
-        '<button type="button" class="secondary" onclick="meCopyMCP()">설정 복사</button></div>');
+        '<button type="button" class="secondary" onclick="meCopyMCP()">설정 복사</button>' +
+        '<div style="margin-top:12px;border-top:1px solid var(--border);padding-top:10px">' +
+        '<p class="muted" style="font-size:12px">연결이 잘 안 되면 클라이언트를 고르고 진단하세요. 인증·scope·모델 허용·쿼터·<code>/v1/models</code>·<code>/mcp/gateway</code>를 점검합니다.</p>' +
+        '<select id="me-doctor-client" style="font-size:12px"><option value="openai-sdk">OpenAI SDK</option><option value="cursor">Cursor</option><option value="roo">Roo Code</option><option value="cline">Cline</option><option value="claude-desktop-mcp">Claude Desktop (MCP)</option></select> ' +
+        '<button type="button" onclick="meRunDoctor()">연결 진단</button>' +
+        '<div id="me-doctor-result" style="margin-top:8px"></div></div></div>');
 
       // Recommendations (load on demand).
       const recCard = card('내 추천',
