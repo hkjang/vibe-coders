@@ -9765,6 +9765,8 @@ const adminHTML = `<!doctype html>
       const toolRows = (d.tools || []).map(t => '<tr><td><code>' + escapeHTML(t.name) + '</code></td><td class="muted">' + escapeHTML(t.description || '') + '</td></tr>').join('');
       const resRows = (d.resources || []).map(x => '<tr><td><code>' + escapeHTML(x.uri) + '</code></td><td class="muted">' + escapeHTML(x.description || '') + '</td></tr>').join('');
       const promptRows = (d.prompts || []).map(x => '<tr><td><code>' + escapeHTML(x.name) + '</code></td><td class="muted">' + escapeHTML(x.description || '') + '</td></tr>').join('');
+      const riskBadge = (r) => r === 'high' ? '<span class="status error">high</span>' : (r === 'medium' ? '<span class="status warn">medium</span>' : '<span class="status">low</span>');
+      const contractRows = (d.contracts || []).map(c => '<tr><td><code>' + escapeHTML(c.name) + '</code></td><td>' + riskBadge(c.risk_level) + '</td><td class="muted">' + escapeHTML(c.cost_policy) + '</td><td class="muted">' + (c.timeout_ms ? Math.round(c.timeout_ms / 1000) + 's' : '-') + '</td><td>' + (c.executes ? '실행' : '읽기') + '</td><td class="muted" style="font-size:11px">' + escapeHTML(c.output_schema || '') + '</td></tr>').join('');
       view.innerHTML = section('Gateway MCP Server', '') +
         card('연결 설정 (Claude / Cursor / Roo Code / Cline)',
           '<div class="card-body"><p class="muted" style="font-size:12px">엔드포인트 <code>' + escapeHTML(origin + (d.endpoint || '')) + '</code> · 프로토콜 ' + escapeHTML(d.protocol_version || '') + ' · 인증: Proxy API Key</p>' +
@@ -9774,6 +9776,7 @@ const adminHTML = `<!doctype html>
         card('Tools (' + (d.tools || []).length + ')', '<div class="card-body"><table><thead><tr><th>tool</th><th>설명</th></tr></thead><tbody>' + toolRows + '</tbody></table></div>') +
         card('Resources (' + (d.resources || []).length + ')', '<div class="card-body"><table><thead><tr><th>uri</th><th>설명</th></tr></thead><tbody>' + resRows + '</tbody></table></div>') +
         card('Prompts (' + (d.prompts || []).length + ')', '<div class="card-body"><table><thead><tr><th>prompt</th><th>설명</th></tr></thead><tbody>' + promptRows + '</tbody></table></div>') +
+        card('Tool 계약 (Contract Pack)', '<div class="card-body"><p class="muted" style="font-size:12px">각 Gateway MCP tool의 위험도·비용 정책·timeout·실행 여부·출력 스키마 계약입니다.</p><table><thead><tr><th>tool</th><th>위험</th><th>비용</th><th>timeout</th><th>유형</th><th>출력</th></tr></thead><tbody>' + contractRows + '</tbody></table></div>') +
         '<div id="mcp-contracts"></div>';
       renderMCPContracts();
     }

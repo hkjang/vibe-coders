@@ -117,9 +117,10 @@ func (s *Server) handleGatewayMCPInfo(w http.ResponseWriter, r *http.Request) {
 		"endpoint":         "/mcp/gateway",
 		"protocol_version": mcpProtocolVersion,
 		"tools":            gatewayToolDefs(),
+		"contracts":        gatewayToolContracts(),
 		"resources":        gatewayResourceDefs(),
 		"prompts":          gatewayPromptDefs(),
-		"note":             "외부 AI 에이전트가 Proxy API Key로 /mcp/gateway에 MCP JSON-RPC로 연결해 위 tool/resource/prompt를 사용합니다.",
+		"note":             "외부 AI 에이전트가 Proxy API Key로 /mcp/gateway에 MCP JSON-RPC로 연결해 위 tool/resource/prompt를 사용합니다. contracts는 tool별 위험도·비용·timeout·출력 스키마 계약입니다.",
 	})
 }
 
