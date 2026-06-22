@@ -37,19 +37,19 @@ type multiRunRequest struct {
 }
 
 type multiRunResult struct {
-	Model        string  `json:"model"`
-	Provider     string  `json:"provider"`
-	Status       string  `json:"status"` // success | error | timeout
-	StatusCode   int     `json:"status_code"`
-	LatencyMS    int64   `json:"latency_ms"`
-	InputTokens  int     `json:"input_tokens"`
-	OutputTokens int     `json:"output_tokens"`
-	TotalTokens  int     `json:"total_tokens"`
-	CostKRWEst   float64 `json:"cost_krw_est"`
-	Content      string  `json:"content"`
-	FinishReason string  `json:"finish_reason"`
-	Error        string  `json:"error"`
-	SelectedProvider string `json:"selected_provider"`
+	Model            string  `json:"model"`
+	Provider         string  `json:"provider"`
+	Status           string  `json:"status"` // success | error | timeout
+	StatusCode       int     `json:"status_code"`
+	LatencyMS        int64   `json:"latency_ms"`
+	InputTokens      int     `json:"input_tokens"`
+	OutputTokens     int     `json:"output_tokens"`
+	TotalTokens      int     `json:"total_tokens"`
+	CostKRWEst       float64 `json:"cost_krw_est"`
+	Content          string  `json:"content"`
+	FinishReason     string  `json:"finish_reason"`
+	Error            string  `json:"error"`
+	SelectedProvider string  `json:"selected_provider"`
 }
 
 // handleChatTestMultiRun calls the SAME prompt against several models in parallel through
@@ -367,6 +367,11 @@ func (s *Server) handleChatTestMultiRunByID(w http.ResponseWriter, r *http.Reque
 		case "diff":
 			if r.Method == http.MethodGet {
 				s.handleMultiRunDiff(w, r, id)
+				return
+			}
+		case "code-verify":
+			if r.Method == http.MethodGet {
+				s.handleMultiRunCodeVerify(w, r, id)
 				return
 			}
 		case "golden":

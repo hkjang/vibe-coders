@@ -6905,10 +6905,11 @@ const adminHTML = `<!doctype html>
           '<span class="muted" style="font-size:12px">성공 ' + (sum.success||0) + ' / 실패 ' + (sum.failed||0) + (runId ? ' · run ' + escapeHTML(runId) : '') + '</span> ' +
           '<button type="button" class="secondary" style="font-size:11px" onclick="mmLoadHistory()">이력</button> ' +
           (runId ? '<button type="button" class="secondary" style="font-size:11px" onclick="mmShowDiff()">Diff 보기</button> ' : '') +
+          (runId ? '<button type="button" class="secondary" style="font-size:11px" onclick="mmCodeVerify()">코드 검증</button> ' : '') +
           (runId ? '<button type="button" class="secondary" style="font-size:11px" onclick="mmJudge(\'rule\')">자동 평가</button> ' : '') +
           (runId ? '<button type="button" class="secondary" style="font-size:11px" onclick="mmExport(\'md\')">MD</button> <button type="button" class="secondary" style="font-size:11px" onclick="mmExport(\'csv\')">CSV</button> <button type="button" class="secondary" style="font-size:11px" onclick="mmExport(\'json\')">JSON</button>' : '') +
           '</div>' +
-          table + '<div id="mm-diff"></div><div id="mm-judge"></div>' + cards + '<div id="mm-history"></div>';
+          table + '<div id="mm-diff"></div><div id="mm-codeverify"></div><div id="mm-judge"></div>' + cards + '<div id="mm-history"></div>';
       } catch (e) {
         out.innerHTML = '<span class="status error">' + escapeHTML(e.message) + '</span>';
       } finally {
@@ -7010,6 +7011,37 @@ const adminHTML = `<!doctype html>
           '<table><thead><tr><th>모델</th><th>문단</th><th>목록</th><th>코드</th><th>표</th><th>길이</th></tr></thead><tbody>' + fmtRows + '</tbody></table>' +
           commonHTML + per +
           '<p class="muted" style="font-size:10px;margin-top:6px">' + escapeHTML(d.note || '') + '</p>' +
+          '</div>');
+      } catch (e) { host.innerHTML = '<span class="status error">' + escapeHTML(e.message) + '</span>'; }
+    };
+
+    // 코드 검증 리더보드: 모델별 응답의 코드블록을 정적 점검해 위험도·테스트 가능성으로 순위.
+    window.mmCodeVerify = async () => {
+      const runId = window.__mmRunId;
+      const host = document.getElementById('mm-codeverify');
+      if (!runId || !host) return;
+      if (host.innerHTML.trim()) { host.innerHTML = ''; return; } // toggle off
+      host.innerHTML = '<div class="empty">코드 검증 중...</div>';
+      try {
+        const d = await api('/admin/chat-test/multi-run/runs/' + encodeURIComponent(runId) + '/code-verify');
+        const rcls = (r) => r === 'high' ? 'error' : (r === 'medium' ? 'warn' : '');
+        const rows = (d.leaderboard || []).map(m => {
+          if (!m.available) return '<tr><td>' + (m.rank||'') + '</td><td>' + escapeHTML(m.model) + '</td><td colspan="6" class="muted">응답 없음</td></tr>';
+          if (!m.has_code) return '<tr><td>' + m.rank + '</td><td>' + escapeHTML(m.model) + '</td><td>' + (m.score||0) + '</td><td class="muted" colspan="5">코드 없음</td></tr>';
+          const c = m.counts || {};
+          return '<tr><td>' + m.rank + '</td><td>' + escapeHTML(m.model) + '</td>' +
+            '<td><strong>' + (m.score||0) + '</strong></td>' +
+            '<td><span class="status ' + rcls(m.risk) + '">' + escapeHTML(m.risk||'') + '</span></td>' +
+            '<td>' + (m.block_count||0) + '</td>' +
+            '<td>' + escapeHTML((m.languages||[]).join(', ')) + '</td>' +
+            '<td>' + (c.high||0) + ' / ' + (c.medium||0) + '</td>' +
+            '<td>' + (c.secret||0) + ' / ' + (c.testable||0) + '</td></tr>';
+        }).join('');
+        host.innerHTML = card('코드 검증 리더보드 (코드 포함 모델 ' + (d.models_with_code||0) + ')',
+          '<div class="card-body">' +
+          '<table><thead><tr><th>#</th><th>모델</th><th>점수</th><th>위험</th><th>블록</th><th>언어</th><th>high/med</th><th>시크릿/테스트</th></tr></thead><tbody>' + rows + '</tbody></table>' +
+          '<p class="muted" style="font-size:10px;margin-top:6px">' + escapeHTML(d.scoring_breakdown || '') + '</p>' +
+          '<p class="muted" style="font-size:10px">' + escapeHTML(d.note || '') + '</p>' +
           '</div>');
       } catch (e) { host.innerHTML = '<span class="status error">' + escapeHTML(e.message) + '</span>'; }
     };

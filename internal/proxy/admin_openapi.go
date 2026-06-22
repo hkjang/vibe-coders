@@ -325,6 +325,7 @@ var apiEndpoints = []apiEndpoint{
 	{"/admin/chat-test/multi-run/leaderboard", []string{"get"}, "chat-test", "Multi-model leaderboard", false},
 	{"/admin/chat-test/multi-run/runs", []string{"get"}, "chat-test", "List multi-model test runs", false},
 	{"/admin/chat-test/multi-run/runs/{id}", []string{"get", "post"}, "chat-test", "Get a run / submit feedback", false},
+	{"/admin/chat-test/multi-run/runs/{id}/code-verify", []string{"get"}, "chat-test", "Code verification leaderboard across a run's models", false},
 	// ---- admin: DW / ClickHouse ----
 	{"/admin/dw/metrics", []string{"get", "post"}, "clickhouse", "Metric catalog: list/upsert", false},
 	{"/admin/dw/metrics/{key}", []string{"post"}, "clickhouse", "Update one metric definition", false},
