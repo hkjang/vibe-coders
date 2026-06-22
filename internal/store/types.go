@@ -726,6 +726,7 @@ type RequestFilter struct {
 	Language       string
 	APIKeyID       string
 	Team           string
+	TraceID        string
 	SessionID      string
 	PromptName     string
 	PromptVersion  string

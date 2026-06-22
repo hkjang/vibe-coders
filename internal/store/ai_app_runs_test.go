@@ -56,4 +56,13 @@ func TestAIAppRunsRoundtrip(t *testing.T) {
 	if _, found, _ := db.GetAIAppRun(ctx, "nope"); found {
 		t.Fatal("unknown run should not be found")
 	}
+
+	// trace_id stamping + AIAppRunsByTrace.
+	if err := db.RecordAIAppRun(ctx, AIAppRun{ID: "r4", AppID: "app_a", UserID: "alice", TraceID: "trace_y"}); err != nil {
+		t.Fatal(err)
+	}
+	byTrace, err := db.AIAppRunsByTrace(ctx, "trace_y")
+	if err != nil || len(byTrace) != 1 || byTrace[0].ID != "r4" || byTrace[0].TraceID != "trace_y" {
+		t.Fatalf("AIAppRunsByTrace = %+v err=%v", byTrace, err)
+	}
 }

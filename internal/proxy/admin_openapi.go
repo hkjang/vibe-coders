@@ -77,6 +77,7 @@ var apiEndpoints = []apiEndpoint{
 	{"/admin/requests/{id}", []string{"get"}, "admin", "Request detail (prompts/response/spans/evaluations)", false},
 	{"/admin/requests/{id}/links", []string{"get"}, "admin", "Request trace links across routing/MCP/Text2SQL/governance", false},
 	{"/admin/requests/{id}/trace", []string{"get"}, "admin", "Unified request waterfall (root + MCP/tool + Text2SQL spans)", false},
+	{"/admin/traces/{trace_id}", []string{"get"}, "admin", "All requests + workflow/app runs sharing a trace_id", false},
 	{"/admin/requests/diff", []string{"get"}, "admin", "Diff two requests", false},
 	{"/admin/prompts", []string{"get"}, "admin", "Search prompts", false},
 	{"/admin/timeseries", []string{"get"}, "admin", "Usage timeseries", false},

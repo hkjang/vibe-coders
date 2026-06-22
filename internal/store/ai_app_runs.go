@@ -19,6 +19,7 @@ type AIAppRun struct {
 	ErrorClass    string  `json:"error_class"`
 	LatencyMS     int64   `json:"latency_ms"`
 	CostKRW       float64 `json:"cost_krw"`
+	TraceID       string  `json:"trace_id"`
 	CreatedAt     string  `json:"created_at"`
 }
 
@@ -31,18 +32,18 @@ func (s *SQLStore) RecordAIAppRun(ctx context.Context, run AIAppRun) error {
 		run.Status = "planned"
 	}
 	_, err := s.db.ExecContext(ctx, s.bind(`INSERT INTO ai_app_runs
-		(id, app_id, user_id, team, status, input_hash, output_summary, error_class, latency_ms, cost_krw, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
-		run.ID, run.AppID, run.UserID, run.Team, run.Status, run.InputHash, run.OutputSummary, run.ErrorClass, run.LatencyMS, run.CostKRW, run.CreatedAt)
+		(id, app_id, user_id, team, status, input_hash, output_summary, error_class, latency_ms, cost_krw, trace_id, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+		run.ID, run.AppID, run.UserID, run.Team, run.Status, run.InputHash, run.OutputSummary, run.ErrorClass, run.LatencyMS, run.CostKRW, run.TraceID, run.CreatedAt)
 	return err
 }
 
 // GetAIAppRun returns one app run by id.
 func (s *SQLStore) GetAIAppRun(ctx context.Context, id string) (AIAppRun, bool, error) {
-	row := s.db.QueryRowContext(ctx, s.bind(`SELECT id, app_id, user_id, team, status, input_hash, output_summary, error_class, latency_ms, cost_krw, created_at
+	row := s.db.QueryRowContext(ctx, s.bind(`SELECT id, app_id, user_id, team, status, input_hash, output_summary, error_class, latency_ms, cost_krw, trace_id, created_at
 		FROM ai_app_runs WHERE id = ?`), id)
 	var a AIAppRun
-	err := row.Scan(&a.ID, &a.AppID, &a.UserID, &a.Team, &a.Status, &a.InputHash, &a.OutputSummary, &a.ErrorClass, &a.LatencyMS, &a.CostKRW, &a.CreatedAt)
+	err := row.Scan(&a.ID, &a.AppID, &a.UserID, &a.Team, &a.Status, &a.InputHash, &a.OutputSummary, &a.ErrorClass, &a.LatencyMS, &a.CostKRW, &a.TraceID, &a.CreatedAt)
 	if err == sql.ErrNoRows {
 		return AIAppRun{}, false, nil
 	}
@@ -57,7 +58,7 @@ func (s *SQLStore) ListAIAppRuns(ctx context.Context, userID, appID string, limi
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
-	q := `SELECT id, app_id, user_id, team, status, input_hash, output_summary, error_class, latency_ms, cost_krw, created_at
+	q := `SELECT id, app_id, user_id, team, status, input_hash, output_summary, error_class, latency_ms, cost_krw, trace_id, created_at
 		FROM ai_app_runs WHERE user_id = ?`
 	args := []any{userID}
 	if appID != "" {
@@ -74,7 +75,26 @@ func (s *SQLStore) ListAIAppRuns(ctx context.Context, userID, appID string, limi
 	out := []AIAppRun{}
 	for rows.Next() {
 		var a AIAppRun
-		if err := rows.Scan(&a.ID, &a.AppID, &a.UserID, &a.Team, &a.Status, &a.InputHash, &a.OutputSummary, &a.ErrorClass, &a.LatencyMS, &a.CostKRW, &a.CreatedAt); err != nil {
+		if err := rows.Scan(&a.ID, &a.AppID, &a.UserID, &a.Team, &a.Status, &a.InputHash, &a.OutputSummary, &a.ErrorClass, &a.LatencyMS, &a.CostKRW, &a.TraceID, &a.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
+// AIAppRunsByTrace returns app runs that belong to a trace (newest first).
+func (s *SQLStore) AIAppRunsByTrace(ctx context.Context, traceID string) ([]AIAppRun, error) {
+	rows, err := s.db.QueryContext(ctx, s.bind(`SELECT id, app_id, user_id, team, status, input_hash, output_summary, error_class, latency_ms, cost_krw, trace_id, created_at
+		FROM ai_app_runs WHERE trace_id = ? ORDER BY created_at DESC`), traceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []AIAppRun{}
+	for rows.Next() {
+		var a AIAppRun
+		if err := rows.Scan(&a.ID, &a.AppID, &a.UserID, &a.Team, &a.Status, &a.InputHash, &a.OutputSummary, &a.ErrorClass, &a.LatencyMS, &a.CostKRW, &a.TraceID, &a.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, a)

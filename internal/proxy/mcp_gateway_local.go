@@ -321,6 +321,7 @@ func (s *Server) runGatewayTool(ctx context.Context, r *http.Request, apiKeyID s
 		_ = s.db.RecordAIAppRun(ctx, store.AIAppRun{
 			ID: runID, AppID: app.ID, UserID: claims.Subject, Team: claims.TeamID, Status: "planned",
 			OutputSummary: itoaProxy(len(app.Components)) + " components planned", ErrorClass: errClass,
+			TraceID: traceIDFromRequest(r),
 		})
 		return gatewayToolJSON(map[string]any{"run_id": runID, "app_id": app.ID, "title": app.Title, "plan": plan}), nil
 
@@ -350,6 +351,7 @@ func (s *Server) runGatewayTool(ctx context.Context, r *http.Request, apiKeyID s
 		_ = s.db.RecordWorkflowRun(ctx, store.WorkflowRun{
 			ID: runID, WorkflowID: wf.ID, UserID: claims.Subject, Team: claims.TeamID, Status: status,
 			StepsTotal: len(wf.Steps), StepsOK: stepsOK, LatencyMS: time.Since(start).Milliseconds(), ErrorClass: errClass,
+			TraceID: traceIDFromRequest(r),
 		})
 		s.recordWorkflowStepRuns(r, runID, wf, results)
 		return gatewayToolJSON(map[string]any{"run_id": runID, "workflow_id": wf.ID, "status": status, "steps_ok": stepsOK, "results": results}), nil

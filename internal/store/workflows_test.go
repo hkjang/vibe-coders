@@ -99,4 +99,13 @@ func TestWorkflowRoundtripAndRuns(t *testing.T) {
 	if other, _ := db.ListWorkflowStepRuns(ctx, "nope"); len(other) != 0 {
 		t.Fatalf("unknown run should have no step runs, got %d", len(other))
 	}
+
+	// trace_id stamping + WorkflowRunsByTrace.
+	if err := db.RecordWorkflowRun(ctx, WorkflowRun{ID: "run2", WorkflowID: "wf1", UserID: "alice", TraceID: "trace_x"}); err != nil {
+		t.Fatal(err)
+	}
+	byTrace, err := db.WorkflowRunsByTrace(ctx, "trace_x")
+	if err != nil || len(byTrace) != 1 || byTrace[0].ID != "run2" || byTrace[0].TraceID != "trace_x" {
+		t.Fatalf("WorkflowRunsByTrace = %+v err=%v", byTrace, err)
+	}
 }

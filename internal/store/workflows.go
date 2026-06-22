@@ -179,6 +179,7 @@ type WorkflowRun struct {
 	LatencyMS  int64   `json:"latency_ms"`
 	CostKRW    float64 `json:"cost_krw"`
 	ErrorClass string  `json:"error_class"`
+	TraceID    string  `json:"trace_id"`
 	CreatedAt  string  `json:"created_at"`
 }
 
@@ -190,18 +191,18 @@ func (s *SQLStore) RecordWorkflowRun(ctx context.Context, run WorkflowRun) error
 		run.Status = "planned"
 	}
 	_, err := s.db.ExecContext(ctx, s.bind(`INSERT INTO workflow_runs
-		(id, workflow_id, user_id, team, status, steps_total, steps_ok, latency_ms, cost_krw, error_class, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
-		run.ID, run.WorkflowID, run.UserID, run.Team, run.Status, run.StepsTotal, run.StepsOK, run.LatencyMS, run.CostKRW, run.ErrorClass, run.CreatedAt)
+		(id, workflow_id, user_id, team, status, steps_total, steps_ok, latency_ms, cost_krw, error_class, trace_id, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+		run.ID, run.WorkflowID, run.UserID, run.Team, run.Status, run.StepsTotal, run.StepsOK, run.LatencyMS, run.CostKRW, run.ErrorClass, run.TraceID, run.CreatedAt)
 	return err
 }
 
 // GetWorkflowRun returns one workflow run by id.
 func (s *SQLStore) GetWorkflowRun(ctx context.Context, id string) (WorkflowRun, bool, error) {
-	row := s.db.QueryRowContext(ctx, s.bind(`SELECT id, workflow_id, user_id, team, status, steps_total, steps_ok, latency_ms, cost_krw, error_class, created_at
+	row := s.db.QueryRowContext(ctx, s.bind(`SELECT id, workflow_id, user_id, team, status, steps_total, steps_ok, latency_ms, cost_krw, error_class, trace_id, created_at
 		FROM workflow_runs WHERE id = ?`), id)
 	var run WorkflowRun
-	err := row.Scan(&run.ID, &run.WorkflowID, &run.UserID, &run.Team, &run.Status, &run.StepsTotal, &run.StepsOK, &run.LatencyMS, &run.CostKRW, &run.ErrorClass, &run.CreatedAt)
+	err := row.Scan(&run.ID, &run.WorkflowID, &run.UserID, &run.Team, &run.Status, &run.StepsTotal, &run.StepsOK, &run.LatencyMS, &run.CostKRW, &run.ErrorClass, &run.TraceID, &run.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return WorkflowRun{}, false, nil
 	}
@@ -262,7 +263,7 @@ func (s *SQLStore) ListWorkflowRuns(ctx context.Context, userID, workflowID stri
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
-	q := `SELECT id, workflow_id, user_id, team, status, steps_total, steps_ok, latency_ms, cost_krw, error_class, created_at
+	q := `SELECT id, workflow_id, user_id, team, status, steps_total, steps_ok, latency_ms, cost_krw, error_class, trace_id, created_at
 		FROM workflow_runs WHERE user_id = ?`
 	args := []any{userID}
 	if workflowID != "" {
@@ -279,7 +280,26 @@ func (s *SQLStore) ListWorkflowRuns(ctx context.Context, userID, workflowID stri
 	out := []WorkflowRun{}
 	for rows.Next() {
 		var run WorkflowRun
-		if err := rows.Scan(&run.ID, &run.WorkflowID, &run.UserID, &run.Team, &run.Status, &run.StepsTotal, &run.StepsOK, &run.LatencyMS, &run.CostKRW, &run.ErrorClass, &run.CreatedAt); err != nil {
+		if err := rows.Scan(&run.ID, &run.WorkflowID, &run.UserID, &run.Team, &run.Status, &run.StepsTotal, &run.StepsOK, &run.LatencyMS, &run.CostKRW, &run.ErrorClass, &run.TraceID, &run.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, run)
+	}
+	return out, rows.Err()
+}
+
+// WorkflowRunsByTrace returns workflow runs that belong to a trace (newest first).
+func (s *SQLStore) WorkflowRunsByTrace(ctx context.Context, traceID string) ([]WorkflowRun, error) {
+	rows, err := s.db.QueryContext(ctx, s.bind(`SELECT id, workflow_id, user_id, team, status, steps_total, steps_ok, latency_ms, cost_krw, error_class, trace_id, created_at
+		FROM workflow_runs WHERE trace_id = ? ORDER BY created_at DESC`), traceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []WorkflowRun{}
+	for rows.Next() {
+		var run WorkflowRun
+		if err := rows.Scan(&run.ID, &run.WorkflowID, &run.UserID, &run.Team, &run.Status, &run.StepsTotal, &run.StepsOK, &run.LatencyMS, &run.CostKRW, &run.ErrorClass, &run.TraceID, &run.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, run)

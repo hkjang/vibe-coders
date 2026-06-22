@@ -1547,6 +1547,7 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 			latency_ms INTEGER NOT NULL DEFAULT 0,
 			cost_krw REAL NOT NULL DEFAULT 0,
 			error_class TEXT NOT NULL DEFAULT '',
+			trace_id TEXT NOT NULL DEFAULT '',
 			created_at TEXT NOT NULL
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_workflow_runs_user ON workflow_runs(user_id, created_at)`,
@@ -1561,6 +1562,7 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 			error_class TEXT NOT NULL DEFAULT '',
 			latency_ms INTEGER NOT NULL DEFAULT 0,
 			cost_krw REAL NOT NULL DEFAULT 0,
+			trace_id TEXT NOT NULL DEFAULT '',
 			created_at TEXT NOT NULL
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_ai_app_runs_user ON ai_app_runs(user_id, created_at)`,
@@ -1725,6 +1727,8 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 			updated_by TEXT NOT NULL DEFAULT ''
 		)`,
 		`ALTER TABLE sso_provider_config ADD COLUMN role_map TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE workflow_runs ADD COLUMN trace_id TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE ai_app_runs ADD COLUMN trace_id TEXT NOT NULL DEFAULT ''`,
 	}
 
 	for _, statement := range statements {
@@ -2436,6 +2440,10 @@ func (s *SQLStore) RecentRequests(ctx context.Context, filter RequestFilter) ([]
 	if filter.APIKeyID != "" {
 		where = append(where, "r.api_key_id = ?")
 		args = append(args, filter.APIKeyID)
+	}
+	if filter.TraceID != "" {
+		where = append(where, "r.trace_id = ?")
+		args = append(args, filter.TraceID)
 	}
 	if filter.Team != "" {
 		where = append(where, `COALESCE(NULLIF((SELECT k.team FROM api_keys k WHERE k.id = r.api_key_id), ''), 'unassigned') = ?`)

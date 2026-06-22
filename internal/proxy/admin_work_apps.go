@@ -461,7 +461,7 @@ func (s *Server) handleUserAppRun(w http.ResponseWriter, r *http.Request, app st
 	_ = s.db.RecordAIAppRun(r.Context(), store.AIAppRun{
 		ID: runID, AppID: app.ID, UserID: claims.Subject, Team: claims.TeamID, Status: status,
 		InputHash: inputHash, OutputSummary: itoaProxy(len(app.Components)) + " components planned", ErrorClass: errClass,
-		LatencyMS: time.Since(start).Milliseconds(),
+		LatencyMS: time.Since(start).Milliseconds(), TraceID: traceIDFromRequest(r),
 	})
 	s.auditAuthEvent(r.Context(), "work_app_run", claims.Subject, "", claims.TeamID, "app="+app.ID)
 	writeJSON(w, http.StatusOK, map[string]any{

@@ -345,6 +345,7 @@ func (s *Server) finishWorkflowRun(w http.ResponseWriter, r *http.Request, wf st
 	_ = s.db.RecordWorkflowRun(r.Context(), store.WorkflowRun{
 		ID: runID, WorkflowID: wf.ID, UserID: claims.Subject, Team: claims.TeamID, Status: status,
 		StepsTotal: len(wf.Steps), StepsOK: stepsOK, LatencyMS: time.Since(start).Milliseconds(), ErrorClass: errClass,
+		TraceID: traceIDFromRequest(r),
 	})
 	s.recordWorkflowStepRuns(r, runID, wf, results)
 	s.auditAuthEvent(r.Context(), "workflow_execute", claims.Subject, "", claims.TeamID, "workflow="+wf.ID+" status="+status)
