@@ -9878,6 +9878,25 @@ const adminHTML = `<!doctype html>
             ((r.issues || []).length ? '<ul style="font-size:12px;color:var(--err,#c00)">' + r.issues.map(x => '<li>' + escapeHTML(x) + '</li>').join('') + '</ul>' : ''));
         } catch (e) { openModal('Dry-run 오류', '<div class="error-line">' + escapeHTML(e.message) + '</div>'); }
       };
+      window.wfPublish = async (id) => {
+        const note = prompt('발행 메모(선택). 발행하면 현재 정의가 새 버전으로 저장되고 워크플로가 활성화됩니다. (검증 실패 시 발행 거부)');
+        if (note === null) return;
+        try {
+          const r = await api('/admin/workflows/' + encodeURIComponent(id) + '/publish', { method: 'POST', body: JSON.stringify({ note: note }) });
+          alert('발행됨 — 버전 v' + r.version);
+          renderWorkflows();
+        } catch (e) { alert('발행 실패: ' + e.message); }
+      };
+      window.wfVersions = async (id) => {
+        try {
+          const r = await api('/admin/workflows/' + encodeURIComponent(id) + '/versions');
+          const vs = r.versions || [];
+          const rows = vs.length
+            ? vs.map(v => '<tr><td>v' + v.version + '</td><td class="muted">' + escapeHTML(v.published_by || '') + '</td><td class="muted">' + ago(v.published_at) + '</td><td>' + (v.steps || []).length + ' step</td><td class="muted" style="font-size:11px">' + escapeHTML(v.note || '') + '</td></tr>').join('')
+            : '<tr><td colspan="5" class="muted">발행된 버전이 없습니다.</td></tr>';
+          openModal('워크플로 버전 이력', '<table><thead><tr><th>버전</th><th>발행자</th><th>발행</th><th>steps</th><th>메모</th></tr></thead><tbody>' + rows + '</tbody></table>');
+        } catch (e) { openModal('버전 조회 오류', '<div class="error-line">' + escapeHTML(e.message) + '</div>'); }
+      };
       const wfs = d.workflows || [];
       const rows = wfs.map(wf => '<tr>' +
         '<td>' + escapeHTML(wf.name) + '<div class="muted" style="font-size:10px">' + escapeHTML(wf.id) + '</div></td>' +
@@ -9885,6 +9904,8 @@ const adminHTML = `<!doctype html>
         '<td>' + (wf.enabled ? '✓' : '-') + '</td>' +
         '<td class="muted">' + escapeHTML((wf.allowed_teams || '') || '전체') + '</td>' +
         '<td><button type="button" class="secondary" style="font-size:11px" onclick="wfDryRun(\'' + escapeAttr(wf.id) + '\')">Dry-run</button> ' +
+        '<button type="button" class="secondary" style="font-size:11px" onclick="wfPublish(\'' + escapeAttr(wf.id) + '\')">발행</button> ' +
+        '<button type="button" class="secondary" style="font-size:11px" onclick="wfVersions(\'' + escapeAttr(wf.id) + '\')">버전</button> ' +
         '<button type="button" class="danger" style="font-size:11px" onclick="wfDelete(\'' + escapeAttr(wf.id) + '\')">삭제</button></td>' +
       '</tr>').join('');
       const sample = '[{"name":"리뷰","type":"chat","ref":"vibe/auto","max_tokens":500},{"name":"승인","type":"approval"}]';

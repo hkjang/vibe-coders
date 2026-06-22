@@ -58,4 +58,24 @@ func TestWorkflowRoundtripAndRuns(t *testing.T) {
 	if _, found, _ := db.GetWorkflowRun(ctx, "nope"); found {
 		t.Fatal("unknown workflow run should not be found")
 	}
+
+	// Publish snapshots the definition and bumps the version.
+	v1, err := db.PublishWorkflowVersion(ctx, got, "admin@x", "first")
+	if err != nil || v1 != 1 {
+		t.Fatalf("publish v1 = %d err=%v", v1, err)
+	}
+	v2, _ := db.PublishWorkflowVersion(ctx, got, "admin@x", "second")
+	if v2 != 2 {
+		t.Fatalf("publish v2 = %d, want 2", v2)
+	}
+	versions, err := db.ListWorkflowVersions(ctx, "wf1")
+	if err != nil || len(versions) != 2 || versions[0].Version != 2 {
+		t.Fatalf("versions = %+v err=%v", versions, err)
+	}
+	if len(versions[1].Steps) != 2 || versions[1].Steps[0].Ref != "code-review" {
+		t.Fatalf("v1 snapshot lost steps: %+v", versions[1].Steps)
+	}
+	if versions[1].PublishedBy != "admin@x" || versions[1].Note != "first" {
+		t.Fatalf("v1 metadata wrong: %+v", versions[1])
+	}
 }

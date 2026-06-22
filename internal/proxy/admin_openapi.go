@@ -251,6 +251,8 @@ var apiEndpoints = []apiEndpoint{
 	// ---- admin: data products ----
 	{"/admin/workflows", []string{"get", "post", "delete"}, "data-products", "Workflow chain definitions", false},
 	{"/admin/workflows/{id}/dry-run", []string{"post"}, "data-products", "Validate a workflow's steps (no execution)", false},
+	{"/admin/workflows/{id}/publish", []string{"post"}, "data-products", "Publish a workflow: snapshot a version and enable it", false},
+	{"/admin/workflows/{id}/versions", []string{"get"}, "data-products", "List a workflow's published version history", false},
 	{"/v1/workflows/{id}/run", []string{"post"}, "self-service", "Run a workflow chain (records run, returns plan)", false},
 	{"/me/workflow-runs", []string{"get"}, "self-service", "Caller's workflow run history", false},
 	{"/admin/app-templates", []string{"get"}, "data-products", "Built-in AI work-app starter templates", false},

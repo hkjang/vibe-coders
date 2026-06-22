@@ -106,6 +106,67 @@ func (s *SQLStore) DeleteWorkflow(ctx context.Context, id string) error {
 	return err
 }
 
+// WorkflowVersion is an immutable snapshot of a workflow definition captured at publish time.
+type WorkflowVersion struct {
+	ID           string         `json:"id"`
+	WorkflowID   string         `json:"workflow_id"`
+	Version      int            `json:"version"`
+	Name         string         `json:"name"`
+	Description  string         `json:"description"`
+	Steps        []WorkflowStep `json:"steps"`
+	AllowedTeams string         `json:"allowed_teams"`
+	PublishedBy  string         `json:"published_by"`
+	PublishedAt  string         `json:"published_at"`
+	Note         string         `json:"note"`
+}
+
+// PublishWorkflowVersion snapshots the workflow's current definition as the next version and
+// enables it. Returns the new version number.
+func (s *SQLStore) PublishWorkflowVersion(ctx context.Context, wf Workflow, publishedBy, note string) (int, error) {
+	var maxVer int
+	row := s.db.QueryRowContext(ctx, s.bind(`SELECT COALESCE(MAX(version), 0) FROM workflow_versions WHERE workflow_id = ?`), wf.ID)
+	if err := row.Scan(&maxVer); err != nil {
+		return 0, err
+	}
+	version := maxVer + 1
+	steps, _ := json.Marshal(wf.Steps)
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	if _, err := s.db.ExecContext(ctx, s.bind(`INSERT INTO workflow_versions
+		(id, workflow_id, version, name, description, steps, allowed_teams, published_by, published_at, note)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+		"wfver_"+wf.ID+"_"+itoaStore(version), wf.ID, version, wf.Name, wf.Description, string(steps),
+		wf.AllowedTeams, publishedBy, now, note); err != nil {
+		return 0, err
+	}
+	if _, err := s.db.ExecContext(ctx, s.bind(`UPDATE workflows SET enabled = 1, updated_at = ? WHERE id = ?`), now, wf.ID); err != nil {
+		return 0, err
+	}
+	return version, nil
+}
+
+// ListWorkflowVersions returns a workflow's version history, newest first.
+func (s *SQLStore) ListWorkflowVersions(ctx context.Context, workflowID string) ([]WorkflowVersion, error) {
+	rows, err := s.db.QueryContext(ctx, s.bind(`SELECT id, workflow_id, version, name, description, steps, allowed_teams, published_by, published_at, note
+		FROM workflow_versions WHERE workflow_id = ? ORDER BY version DESC`), workflowID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []WorkflowVersion{}
+	for rows.Next() {
+		var v WorkflowVersion
+		var steps string
+		if err := rows.Scan(&v.ID, &v.WorkflowID, &v.Version, &v.Name, &v.Description, &steps, &v.AllowedTeams, &v.PublishedBy, &v.PublishedAt, &v.Note); err != nil {
+			return nil, err
+		}
+		if steps != "" {
+			_ = json.Unmarshal([]byte(steps), &v.Steps)
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
+}
+
 // WorkflowRun is one execution (or planned execution) of a workflow — safe metadata only.
 type WorkflowRun struct {
 	ID         string  `json:"id"`

@@ -95,7 +95,11 @@ func (s *Server) handleAdminWorkflowDryRun(w http.ResponseWriter, r *http.Reques
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
 	}
-	id := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/admin/workflows/"), "/dry-run")
+	rest := strings.TrimPrefix(r.URL.Path, "/admin/workflows/")
+	id, action := rest, ""
+	if idx := strings.Index(rest, "/"); idx >= 0 {
+		id, action = rest[:idx], rest[idx+1:]
+	}
 	wf, found, err := s.db.GetWorkflow(r.Context(), id)
 	if err != nil {
 		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "get_failed")
@@ -105,11 +109,39 @@ func (s *Server) handleAdminWorkflowDryRun(w http.ResponseWriter, r *http.Reques
 		writeOpenAIError(w, http.StatusNotFound, "workflow not found", "invalid_request_error", "not_found")
 		return
 	}
-	plan, issues := s.planWorkflow(r, wf)
-	writeJSON(w, http.StatusOK, map[string]any{
-		"workflow_id": wf.ID, "name": wf.Name, "steps": plan, "issues": issues, "ok": len(issues) == 0,
-		"note": "dry-run: 단계 검증과 안전 한도만 확인하며 실제 실행은 하지 않습니다.",
-	})
+	switch {
+	case action == "publish" && r.Method == http.MethodPost:
+		var p struct {
+			Note string `json:"note"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&p)
+		// Refuse to publish a workflow that fails validation.
+		if _, issues := s.planWorkflow(r, wf); len(issues) > 0 {
+			writeOpenAIError(w, http.StatusBadRequest, "workflow has unresolved steps: "+strings.Join(issues, "; "), "invalid_request_error", "validation_failed")
+			return
+		}
+		version, err := s.db.PublishWorkflowVersion(r.Context(), wf, adminID(r), strings.TrimSpace(p.Note))
+		if err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "publish_failed")
+			return
+		}
+		s.auditAdmin(r, "workflow.publish", id, auditJSON(map[string]any{"version": version}))
+		writeJSON(w, http.StatusOK, map[string]any{"workflow_id": id, "version": version, "enabled": true, "published": true})
+	case action == "versions" && r.Method == http.MethodGet:
+		versions, err := s.db.ListWorkflowVersions(r.Context(), id)
+		if err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "versions_failed")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"workflow_id": id, "versions": versions})
+	default:
+		// Default action is dry-run (also matches the historical /{id}/dry-run path).
+		plan, issues := s.planWorkflow(r, wf)
+		writeJSON(w, http.StatusOK, map[string]any{
+			"workflow_id": wf.ID, "name": wf.Name, "steps": plan, "issues": issues, "ok": len(issues) == 0,
+			"note": "dry-run: 단계 검증과 안전 한도만 확인하며 실제 실행은 하지 않습니다.",
+		})
+	}
 }
 
 // planWorkflow validates each step and returns the plan + a list of issues.
