@@ -10337,12 +10337,19 @@ const adminHTML = `<!doctype html>
       const secretBanner = window.mykeysSecret
         ? '<div class="status" style="padding:10px; margin-bottom:12px">새 키 시크릿 (한 번만 표시됩니다. 안전하게 보관하세요):<br><code style="user-select:all">' + escapeHTML(window.mykeysSecret) + '</code> <button class="secondary" type="button" onclick="window.mykeysSecret=null; renderMyKeys()">숨기기</button></div>'
         : '';
-      const form = '<div style="margin:8px 0 16px; display:flex; gap:8px; flex-wrap:wrap; align-items:center">' +
+      const grantable = data.grantable_scopes || [];
+      const scopePicker = grantable.length
+        ? '<div style="margin:4px 0 8px"><div class="muted" style="font-size:12px;margin-bottom:4px">스코프 (선택한 것만 부여 · 아무것도 선택하지 않으면 내 권한 전체 상속)</div>' +
+          '<div style="display:flex;gap:6px 14px;flex-wrap:wrap">' +
+          grantable.map(sc => '<label style="font-size:12px;display:inline-flex;align-items:center;gap:4px;white-space:nowrap"><input type="checkbox" class="mk-scope" value="' + escapeAttr(sc) + '"> ' + escapeHTML(mkScopeLabel(sc)) + ' <code style="font-size:10px">' + escapeHTML(sc) + '</code></label>').join('') +
+          '</div></div>'
+        : '<div class="muted" style="font-size:12px;margin:4px 0">부여 가능한 스코프가 없습니다. 발급 키는 내 권한을 그대로 상속합니다.</div>';
+      const form = '<div style="margin:8px 0 8px; display:flex; gap:8px; flex-wrap:wrap; align-items:center">' +
         '<input id="mk-name" placeholder="키 이름 (예: my-cli)" style="min-width:200px">' +
-        '<input id="mk-scopes" placeholder="스코프(쉼표, 비우면 내 권한 상속)" style="min-width:260px">' +
         '<input id="mk-expires" placeholder="만료 (RFC3339, 선택)" style="min-width:200px">' +
         '<button type="button" onclick="createMyKey()">키 발급</button>' +
-        '</div><div class="muted" style="font-size:12px; margin-bottom:8px">발급 키는 본인 권한 범위 내에서만 생성됩니다(권한 상승 불가).</div>';
+        '</div>' + scopePicker +
+        '<div class="muted" style="font-size:12px; margin-bottom:8px">내 역할: <code>' + escapeHTML(data.role || '-') + '</code> · 발급 키는 본인 권한(역할) 범위 내에서만 생성됩니다(권한 상승 불가).</div>';
       const tableRows = keys.map(k => {
         const expired = k.revoked_at || k.status !== 'active';
         return '<tr>' +
@@ -10362,13 +10369,23 @@ const adminHTML = `<!doctype html>
       view.innerHTML = card('내 키', '<div class="card-body">' + secretBanner + form + table + '</div>');
     }
 
+    // mkScopeLabel maps an API-key scope to a short Korean label for the My Keys picker.
+    function mkScopeLabel(scope) {
+      return {
+        'chat:completion': '채팅 완성', 'embeddings:create': '임베딩', 'models:read': '모델 조회',
+        'admin:read': '관리 조회', 'admin:write': '관리 변경', 'routing:read': '라우팅 조회',
+        'routing:write': '라우팅 변경', 'observability:read': '관측 조회', 'costs:read': '비용 조회',
+        'security:read': '보안 조회', 'mcp:use': 'MCP 사용', 'mcp:admin': 'MCP 관리', 'team:read': '팀 조회',
+      }[scope] || scope;
+    }
+
     async function createMyKey() {
       const name = (document.getElementById('mk-name').value || '').trim();
       if (!name) { alert('키 이름을 입력하세요.'); return; }
-      const scopesRaw = (document.getElementById('mk-scopes').value || '').trim();
+      const scopes = Array.from(document.querySelectorAll('.mk-scope:checked')).map(el => el.value);
       const expires = (document.getElementById('mk-expires').value || '').trim();
       const body = { name };
-      if (scopesRaw) body.scopes = scopesRaw.split(',').map(s => s.trim()).filter(Boolean);
+      if (scopes.length) body.scopes = scopes;
       if (expires) body.expires_at = expires;
       try {
         const res = await api('/me/keys', { method: 'POST', body: JSON.stringify(body) });

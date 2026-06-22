@@ -80,6 +80,19 @@ func TestSelfServiceKeysLifecycle(t *testing.T) {
 		t.Errorf("new key should inherit caller's 2 scopes, got %v", created.APIKey.Scopes)
 	}
 
+	// Narrowing to a valid subset of the caller's scopes is allowed (role-appropriate).
+	sub := postJSON(t, ts.URL+"/me/keys", "usersecret", map[string]any{"name": "narrow", "scopes": []string{"models:read"}})
+	var narrowed struct {
+		APIKey struct {
+			Scopes []string `json:"scopes"`
+		} `json:"api_key"`
+	}
+	json.NewDecoder(sub.Body).Decode(&narrowed)
+	sub.Body.Close()
+	if sub.StatusCode != http.StatusCreated || len(narrowed.APIKey.Scopes) != 1 || narrowed.APIKey.Scopes[0] != "models:read" {
+		t.Fatalf("narrowing to a subset should 201 with that scope, got status %d %+v", sub.StatusCode, narrowed.APIKey.Scopes)
+	}
+
 	// Scope escalation is denied.
 	esc := postJSON(t, ts.URL+"/me/keys", "usersecret", map[string]any{"name": "evil", "scopes": []string{"admin:write"}})
 	defer esc.Body.Close()
@@ -87,7 +100,7 @@ func TestSelfServiceKeysLifecycle(t *testing.T) {
 		t.Fatalf("scope escalation should 403, got %d", esc.StatusCode)
 	}
 
-	// List: returns the caller's own keys (primary + created), not others.
+	// List: returns the caller's own keys, plus the caller's role and grantable scopes for the picker.
 	listReq, _ := http.NewRequest(http.MethodGet, ts.URL+"/me/keys", nil)
 	listReq.Header.Set("Authorization", "Bearer usersecret")
 	listResp, err := http.DefaultClient.Do(listReq)
@@ -95,12 +108,21 @@ func TestSelfServiceKeysLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	var listed struct {
-		APIKeys []store.APIKeyPublic `json:"api_keys"`
+		APIKeys         []store.APIKeyPublic `json:"api_keys"`
+		Role            string               `json:"role"`
+		GrantableScopes []string             `json:"grantable_scopes"`
 	}
 	json.NewDecoder(listResp.Body).Decode(&listed)
 	listResp.Body.Close()
-	if len(listed.APIKeys) != 2 {
-		t.Errorf("expected 2 own keys, got %d", len(listed.APIKeys))
+	if listed.Role != "developer" {
+		t.Errorf("expected role developer in list response, got %q", listed.Role)
+	}
+	if len(listed.GrantableScopes) != 2 {
+		t.Errorf("expected 2 grantable scopes, got %v", listed.GrantableScopes)
+	}
+	// 3 own keys now: primary + created + narrowed.
+	if len(listed.APIKeys) != 3 {
+		t.Errorf("expected 3 own keys, got %d", len(listed.APIKeys))
 	}
 	for _, k := range listed.APIKeys {
 		if k.UserID != "u1" {

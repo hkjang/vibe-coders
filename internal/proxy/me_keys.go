@@ -68,7 +68,10 @@ func (s *Server) handleMyKeys(w http.ResponseWriter, r *http.Request) {
 				mine = append(mine, k)
 			}
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"api_keys": mine})
+		// Expose the caller's role and the scopes they may grant (their own scopes, capped by
+		// role) so the UI can render a role-appropriate scope picker instead of free-form text.
+		grantable, _ := normalizeScopes(me.Scopes)
+		writeJSON(w, http.StatusOK, map[string]any{"api_keys": mine, "role": me.Role, "grantable_scopes": grantable})
 	case http.MethodPost:
 		var payload struct {
 			Name      string   `json:"name"`
