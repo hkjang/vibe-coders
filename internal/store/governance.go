@@ -9,7 +9,7 @@ import (
 )
 
 func (s *SQLStore) ListPolicies(ctx context.Context) ([]Policy, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, name, COALESCE(description, ''), enabled, priority, created_at, updated_at
+	rows, err := s.db.QueryContext(ctx, `SELECT id, name, COALESCE(description, ''), enabled, priority, COALESCE(rollout_percent, 100), created_at, updated_at
 		FROM policies ORDER BY priority ASC, created_at DESC`)
 	if err != nil {
 		return nil, err
@@ -45,20 +45,24 @@ func (s *SQLStore) UpsertPolicyWithRules(ctx context.Context, p Policy, rules []
 	if p.Priority == 0 {
 		p.Priority = 100
 	}
+	if p.RolloutPercent <= 0 || p.RolloutPercent > 100 {
+		p.RolloutPercent = 100
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	_, err = tx.ExecContext(ctx, s.bind(`INSERT INTO policies (id, name, description, enabled, priority, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
+	_, err = tx.ExecContext(ctx, s.bind(`INSERT INTO policies (id, name, description, enabled, priority, rollout_percent, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			name = excluded.name,
 			description = excluded.description,
 			enabled = excluded.enabled,
 			priority = excluded.priority,
+			rollout_percent = excluded.rollout_percent,
 			updated_at = excluded.updated_at`),
-		p.ID, p.Name, p.Description, boolInt(p.Enabled), p.Priority, formatTime(p.CreatedAt), formatTime(p.UpdatedAt))
+		p.ID, p.Name, p.Description, boolInt(p.Enabled), p.Priority, p.RolloutPercent, formatTime(p.CreatedAt), formatTime(p.UpdatedAt))
 	if err != nil {
 		return err
 	}
@@ -93,7 +97,7 @@ func (s *SQLStore) UpsertPolicyWithRules(ctx context.Context, p Policy, rules []
 
 func (s *SQLStore) ActivePolicyRules(ctx context.Context) ([]PolicyRule, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT r.id, r.policy_id, COALESCE(r.name, ''), r.enabled, r.priority,
-			r.conditions_json, r.actions_json, r.created_at, r.updated_at
+			r.conditions_json, r.actions_json, r.created_at, r.updated_at, COALESCE(p.rollout_percent, 100)
 		FROM policy_rules r
 		JOIN policies p ON p.id = r.policy_id
 		WHERE p.enabled = 1 AND r.enabled = 1
@@ -102,7 +106,25 @@ func (s *SQLStore) ActivePolicyRules(ctx context.Context) ([]PolicyRule, error) 
 		return nil, err
 	}
 	defer rows.Close()
-	return scanPolicyRules(rows)
+	result := []PolicyRule{}
+	for rows.Next() {
+		var r PolicyRule
+		var enabled int
+		var conditions, actions, createdAt, updatedAt string
+		if err := rows.Scan(&r.ID, &r.PolicyID, &r.Name, &enabled, &r.Priority, &conditions, &actions, &createdAt, &updatedAt, &r.RolloutPercent); err != nil {
+			return nil, err
+		}
+		r.Enabled = enabled == 1
+		if r.RolloutPercent == 0 {
+			r.RolloutPercent = 100
+		}
+		r.Conditions = decodeJSONMap(conditions)
+		r.Actions = decodeJSONMap(actions)
+		r.CreatedAt = parseOptionalTime(createdAt)
+		r.UpdatedAt = parseOptionalTime(updatedAt)
+		result = append(result, r)
+	}
+	return result, rows.Err()
 }
 
 func (s *SQLStore) policyRules(ctx context.Context, policyID string, activeOnly bool) ([]PolicyRule, error) {
@@ -124,10 +146,13 @@ func scanPolicy(rows *sql.Rows) (Policy, error) {
 	var p Policy
 	var enabled int
 	var createdAt, updatedAt string
-	if err := rows.Scan(&p.ID, &p.Name, &p.Description, &enabled, &p.Priority, &createdAt, &updatedAt); err != nil {
+	if err := rows.Scan(&p.ID, &p.Name, &p.Description, &enabled, &p.Priority, &p.RolloutPercent, &createdAt, &updatedAt); err != nil {
 		return Policy{}, err
 	}
 	p.Enabled = enabled == 1
+	if p.RolloutPercent == 0 {
+		p.RolloutPercent = 100
+	}
 	p.CreatedAt = parseOptionalTime(createdAt)
 	p.UpdatedAt = parseOptionalTime(updatedAt)
 	return p, nil

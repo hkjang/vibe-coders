@@ -8447,9 +8447,10 @@ const adminHTML = `<!doctype html>
         '<div id="approval-results">' + approvalQueueTable(approvals, approvalResp) + '</div>';
 
       const policyCard =
-        '<form class="inline-form" id="ai-policy-form" style="grid-template-columns: minmax(150px,1.2fr) 110px minmax(130px,1fr) minmax(140px,1fr) minmax(140px,1fr) minmax(140px,1fr) 80px;">' +
+        '<form class="inline-form" id="ai-policy-form" style="grid-template-columns: minmax(140px,1.2fr) 90px 90px minmax(120px,1fr) minmax(130px,1fr) minmax(130px,1fr) minmax(130px,1fr) 80px;">' +
           '<input id="ai-pol-name" placeholder="정책 이름" required>' +
           '<input id="ai-pol-priority" type="number" value="100" min="1" max="999" title="낮을수록 먼저 평가">' +
+          '<input id="ai-pol-rollout" type="number" value="100" min="1" max="100" title="enforce 트래픽 비율(%) — canary 단계적 적용. 100=전체 적용">' +
           '<select id="ai-pol-condition">' +
             '<option value="contains_secret">contains_secret</option>' +
             '<option value="risk_score">risk_score</option>' +
@@ -8692,7 +8693,7 @@ const adminHTML = `<!doctype html>
     function aiPolicyTable(rows) {
       if (!rows.length) return '<div class="empty">등록된 AI 정책 없음</div>';
       return '<table><thead><tr>' +
-        '<th data-sort="num">우선순위</th><th data-sort="str">정책</th><th>Rules</th><th data-sort="str">상태</th><th>동작</th>' +
+        '<th data-sort="num">우선순위</th><th data-sort="str">정책</th><th>Rules</th><th data-sort="str">상태</th><th>적용</th><th>동작</th>' +
       '</tr></thead><tbody>' +
       rows.map((p, idx) => '<tr>' +
         '<td data-num="' + (p.priority || 100) + '">' + fmt(p.priority || 100) + '</td>' +
@@ -8700,6 +8701,7 @@ const adminHTML = `<!doctype html>
           (p.description ? '<div class="muted">' + escapeHTML(p.description) + '</div>' : '') + '</td>' +
         '<td>' + policyRuleSummary(p.rules || []) + '</td>' +
         '<td><span class="status ' + (p.enabled ? '' : 'error') + '">' + (p.enabled ? 'enabled' : 'disabled') + '</span></td>' +
+        '<td>' + ((p.rollout_percent && p.rollout_percent < 100) ? '<span class="status warn" title="canary 단계적 적용">canary ' + p.rollout_percent + '%</span>' : '<span class="muted">100%</span>') + '</td>' +
         '<td><button class="secondary" type="button" onclick="toggleAIPolicy(' + idx + ')">' + (p.enabled ? '중지' : '사용') + '</button></td>' +
       '</tr>').join('') + '</tbody></table>';
     }
@@ -8722,6 +8724,7 @@ const adminHTML = `<!doctype html>
     function aiPolicyPayloadFromForm() {
       const name = document.getElementById('ai-pol-name').value.trim();
       const priority = Number(document.getElementById('ai-pol-priority').value || 100);
+      const rollout = Math.min(100, Math.max(1, Number(document.getElementById('ai-pol-rollout').value || 100)));
       const conditionKey = document.getElementById('ai-pol-condition').value;
       const conditionValue = document.getElementById('ai-pol-condition-value').value.trim();
       const action = document.getElementById('ai-pol-action').value;
@@ -8748,6 +8751,7 @@ const adminHTML = `<!doctype html>
         description: 'created from Safety tab quick policy form',
         enabled: true,
         priority,
+        rollout_percent: rollout,
         rules: [{
           name: conditionKey + ' -> ' + action,
           enabled: true,

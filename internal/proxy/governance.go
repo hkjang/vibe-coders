@@ -3,6 +3,7 @@ package proxy
 import (
 	"context"
 	"encoding/json"
+	"hash/fnv"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -12,6 +13,14 @@ import (
 	"vibe-coders/internal/audit"
 	"vibe-coders/internal/store"
 )
+
+// canaryBucket maps a request subject to a stable 0-99 bucket so a canary policy enforces on a
+// deterministic, reproducible slice of traffic (not random per call within the same subject).
+func canaryBucket(subjectID string) int {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(subjectID))
+	return int(h.Sum32() % 100)
+}
 
 type secretPattern struct {
 	typ         string
@@ -172,6 +181,13 @@ func evaluatePolicyRules(rules []store.PolicyRule, g governanceContext) governan
 	reasons := []string{}
 	for _, rule := range rules {
 		if !governanceRuleMatches(rule.Conditions, g) {
+			continue
+		}
+		// Canary rollout: a policy at <100% enforces only on its deterministic traffic slice.
+		// Live requests carry a SubjectID; simulator contexts don't (so simulation still shows
+		// full potential impact regardless of rollout).
+		if g.SubjectID != "" && rule.RolloutPercent >= 1 && rule.RolloutPercent < 100 &&
+			canaryBucket(g.SubjectID) >= rule.RolloutPercent {
 			continue
 		}
 		actions := rule.Actions

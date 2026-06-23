@@ -418,14 +418,17 @@ type MCPPolicy struct {
 }
 
 type Policy struct {
-	ID          string       `json:"id"`
-	Name        string       `json:"name"`
-	Description string       `json:"description"`
-	Enabled     bool         `json:"enabled"`
-	Priority    int          `json:"priority"`
-	CreatedAt   time.Time    `json:"created_at"`
-	UpdatedAt   time.Time    `json:"updated_at"`
-	Rules       []PolicyRule `json:"rules,omitempty"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Enabled     bool   `json:"enabled"`
+	Priority    int    `json:"priority"`
+	// RolloutPercent gates canary enforcement: 100 = full enforce (default), 1-99 = enforce on
+	// that share of matching traffic (deterministic bucket), 0 is treated as 100.
+	RolloutPercent int          `json:"rollout_percent"`
+	CreatedAt      time.Time    `json:"created_at"`
+	UpdatedAt      time.Time    `json:"updated_at"`
+	Rules          []PolicyRule `json:"rules,omitempty"`
 }
 
 type PolicyRule struct {
@@ -436,8 +439,11 @@ type PolicyRule struct {
 	Priority   int            `json:"priority"`
 	Conditions map[string]any `json:"conditions"`
 	Actions    map[string]any `json:"actions"`
-	CreatedAt  time.Time      `json:"created_at"`
-	UpdatedAt  time.Time      `json:"updated_at"`
+	// RolloutPercent is carried from the owning policy at active-rule load time so enforcement
+	// can apply canary gating per rule. Not persisted on the rule itself.
+	RolloutPercent int       `json:"rollout_percent,omitempty"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
 }
 
 type PolicyDecisionEvent struct {

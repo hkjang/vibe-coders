@@ -392,9 +392,11 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 			description TEXT,
 			enabled INTEGER NOT NULL DEFAULT 1,
 			priority INTEGER NOT NULL DEFAULT 100,
+			rollout_percent INTEGER NOT NULL DEFAULT 100,
 			created_at TEXT NOT NULL,
 			updated_at TEXT NOT NULL
 		)`,
+		`ALTER TABLE policies ADD COLUMN rollout_percent INTEGER NOT NULL DEFAULT 100`,
 		`CREATE TABLE IF NOT EXISTS policy_rules (
 			id TEXT PRIMARY KEY,
 			policy_id TEXT NOT NULL,

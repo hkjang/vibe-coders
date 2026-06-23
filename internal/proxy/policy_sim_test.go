@@ -33,3 +33,49 @@ func TestEvaluatePolicyRulesSimulation(t *testing.T) {
 		t.Errorf("expected clean allow, got %+v", d)
 	}
 }
+
+func TestCanaryBucketStable(t *testing.T) {
+	// Deterministic and within range.
+	b := canaryBucket("subject-abc")
+	if b < 0 || b > 99 {
+		t.Fatalf("bucket out of range: %d", b)
+	}
+	if canaryBucket("subject-abc") != b {
+		t.Fatal("bucket must be stable for the same subject")
+	}
+}
+
+func TestCanaryRolloutGating(t *testing.T) {
+	denyRule := []store.PolicyRule{
+		{Name: "block model", Conditions: map[string]any{}, Actions: map[string]any{"deny_models": []any{"gpt-5*"}}, RolloutPercent: 50},
+	}
+	// Find one subject inside the 50% canary slice and one outside.
+	var inside, outside string
+	for _, s := range []string{"s0", "s1", "s2", "s3", "s4", "s5", "s6", "s7", "s8", "s9"} {
+		if canaryBucket(s) < 50 {
+			inside = s
+		} else {
+			outside = s
+		}
+	}
+	if inside == "" || outside == "" {
+		t.Skip("could not find both in/out canary subjects in sample")
+	}
+	// Inside the slice → enforced (blocked).
+	if d := evaluatePolicyRules(denyRule, governanceContext{Model: "gpt-5-x", SubjectID: inside}); !d.Blocked {
+		t.Errorf("subject %q inside canary slice should be blocked", inside)
+	}
+	// Outside the slice → not enforced.
+	if d := evaluatePolicyRules(denyRule, governanceContext{Model: "gpt-5-x", SubjectID: outside}); d.Blocked {
+		t.Errorf("subject %q outside canary slice should NOT be blocked", outside)
+	}
+	// Simulator context (no SubjectID) → full impact regardless of rollout.
+	if d := evaluatePolicyRules(denyRule, governanceContext{Model: "gpt-5-x"}); !d.Blocked {
+		t.Error("simulation (no SubjectID) should show full enforcement impact")
+	}
+	// 100% rollout always enforces.
+	full := []store.PolicyRule{{Name: "block", Conditions: map[string]any{}, Actions: map[string]any{"deny_models": []any{"gpt-5*"}}, RolloutPercent: 100}}
+	if d := evaluatePolicyRules(full, governanceContext{Model: "gpt-5-x", SubjectID: outside}); !d.Blocked {
+		t.Error("100% rollout should always enforce")
+	}
+}

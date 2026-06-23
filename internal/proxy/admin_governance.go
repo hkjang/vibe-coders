@@ -1008,12 +1008,13 @@ func decodePolicyPayload(body io.Reader) (store.Policy, []store.PolicyRule, erro
 		enabled = boolAction(v)
 	}
 	policy := store.Policy{
-		ID:          id,
-		Name:        strings.TrimSpace(toString(raw["name"])),
-		Description: strings.TrimSpace(toString(raw["description"])),
-		Enabled:     enabled,
-		Priority:    intFromAny(raw["priority"], 100),
-		CreatedAt:   time.Now().UTC(),
+		ID:             id,
+		Name:           strings.TrimSpace(toString(raw["name"])),
+		Description:    strings.TrimSpace(toString(raw["description"])),
+		Enabled:        enabled,
+		Priority:       intFromAny(raw["priority"], 100),
+		RolloutPercent: intFromAny(raw["rollout_percent"], 100),
+		CreatedAt:      time.Now().UTC(),
 	}
 	if policy.Name == "" {
 		policy.Name = policy.ID
