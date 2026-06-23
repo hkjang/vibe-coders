@@ -6417,6 +6417,8 @@ const adminHTML = `<!doctype html>
           raw: s.raw || '',
           error: s.error,
         });
+        // 코드 검증 메타: 응답에 코드블록이 있으면 서버 게이트(/admin/code-verify)로 위험도·발견을 표시.
+        if (s.answer && !s.error) renderChatCodeVerify(debug, s.answer);
       }
       // Append assistant answer to conversation history, then enable follow-up.
       const sess = s.sess || window.chatSession;
@@ -6428,6 +6430,31 @@ const adminHTML = `<!doctype html>
       const btn = document.getElementById('ct-send');
       if (ta) { ta.disabled = false; ta.focus(); }
       if (btn) btn.disabled = false;
+    }
+    // 응답 코드블록을 서버 검증 게이트로 점검해 실행 요약 패널에 위험도·발견을 덧붙인다.
+    // 원문 코드는 서버로만 전송돼 점검되고, 응답에는 규칙·줄번호 메타만 담겨 돌아온다.
+    async function renderChatCodeVerify(debug, answer) {
+      try {
+        const d = await api('/admin/code-verify', { method: 'POST', body: JSON.stringify({ text: answer }) });
+        if (!d || !d.has_code) return;
+        const rcls = d.risk === 'high' ? 'error' : (d.risk === 'medium' ? 'warn' : '');
+        const c = d.counts || {};
+        let html = '<h4>코드 검증 <span class="status ' + rcls + '">' + escapeHTML(d.risk || '') + '</span></h4><div class="kv">' +
+          row('코드블록', fmt(d.block_count || 0) + (d.languages && d.languages.length ? ' (' + escapeHTML(d.languages.join(', ')) + ')' : '')) +
+          row('위험 발견', 'high ' + (c.high || 0) + ' / med ' + (c.medium || 0)) +
+          row('시크릿/구문', (c.secret || 0) + ' / ' + (c.syntax || 0)) +
+          row('테스트 가능 블록', fmt(c.testable || 0)) +
+        '</div>';
+        const fcls = (sev) => sev === 'high' ? 'error' : (sev === 'medium' ? 'warn' : '');
+        const items = [];
+        (d.blocks || []).forEach(b => (b.findings || []).forEach(f => {
+          items.push('<div style="font-size:11px">• <span class="status ' + fcls(f.severity) + '" style="font-size:9px">' + escapeHTML(f.severity || '') + '</span> ' + escapeHTML(f.lang || '') + (f.line ? ' L' + f.line : '') + ' — ' + escapeHTML(f.detail || '') + '</div>');
+        }));
+        if (items.length) html += '<div style="margin-top:4px">' + items.slice(0, 30).join('') + '</div>';
+        const sec = document.createElement('div');
+        sec.innerHTML = html;
+        debug.appendChild(sec);
+      } catch (e) { /* 검증 실패는 무시(부가 정보) */ }
     }
     function renderChatStreamDebug(info) {
       const headers = info.headers || {};

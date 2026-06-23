@@ -512,6 +512,7 @@ func (s *Server) handleChatTestRun(w http.ResponseWriter, r *http.Request) {
 		"finish_reason": finishReason,
 		"raw":           string(respBody),
 		"preview":       preview,
+		"code_verify":   verifyCode(content),
 	})
 }
 
