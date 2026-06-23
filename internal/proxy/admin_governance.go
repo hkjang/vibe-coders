@@ -627,6 +627,12 @@ func (s *Server) handlePolicySimulate(w http.ResponseWriter, r *http.Request) {
 
 	var blocked, approval, allowed int
 	sampleBlocked := []map[string]any{}
+	// Shadow-enforcement impact: who is affected, likely false positives, and cost impact.
+	affectedKeys := map[string]bool{}
+	affectedTeams := map[string]bool{}
+	var falsePositives int  // blocked but the request historically succeeded (2xx)
+	var blockedCost float64 // cost of requests that would now be blocked
+	fpSample := []map[string]any{}
 	for _, c := range contexts {
 		gctx := governanceContext{
 			APIKeyID: c.APIKeyID, TeamID: c.TeamID, Model: c.Model, Provider: c.Provider,
@@ -636,10 +642,27 @@ func (s *Server) handlePolicySimulate(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case d.Blocked:
 			blocked++
+			blockedCost += c.CostKRW
+			if c.APIKeyID != "" {
+				affectedKeys[c.APIKeyID] = true
+			}
+			if c.TeamID != "" {
+				affectedTeams[c.TeamID] = true
+			}
+			// A historically successful request the policy would now block = false-positive candidate.
+			if c.StatusCode >= 200 && c.StatusCode < 300 {
+				falsePositives++
+				if len(fpSample) < 20 {
+					fpSample = append(fpSample, map[string]any{
+						"api_key_id": c.APIKeyID, "team_id": c.TeamID, "model": c.Model,
+						"provider": c.Provider, "status_code": c.StatusCode, "reason": d.Reason,
+					})
+				}
+			}
 			if len(sampleBlocked) < 20 {
 				sampleBlocked = append(sampleBlocked, map[string]any{
 					"api_key_id": c.APIKeyID, "model": c.Model, "provider": c.Provider,
-					"risk_score": c.RiskScore, "reason": d.Reason,
+					"risk_score": c.RiskScore, "status_code": c.StatusCode, "reason": d.Reason,
 				})
 			}
 		case d.RequireApproval:
@@ -656,8 +679,16 @@ func (s *Server) handlePolicySimulate(w http.ResponseWriter, r *http.Request) {
 		"allowed":          allowed,
 		"block_rate":       safeRate(blocked, len(contexts)),
 		"sample_blocked":   sampleBlocked,
-		"since":            since.UTC().Format(time.RFC3339),
-		"note":             "secret/PII conditions are not evaluated from historical logs; model/provider/complexity/risk/team conditions are.",
+		"shadow": map[string]any{
+			"affected_keys":             len(affectedKeys),
+			"affected_teams":            len(affectedTeams),
+			"false_positive_candidates": falsePositives,
+			"false_positive_rate":       safeRate(falsePositives, blocked),
+			"blocked_cost_krw":          blockedCost,
+			"false_positive_sample":     fpSample,
+		},
+		"since": since.UTC().Format(time.RFC3339),
+		"note":  "secret/PII conditions are not evaluated from historical logs; model/provider/complexity/risk/team conditions are. false_positive_candidates = 과거 정상(2xx)이었으나 이 규칙이 차단할 요청(오탐 후보), blocked_cost_krw = 차단될 요청들의 과거 비용 합(절감 추정).",
 	})
 }
 
