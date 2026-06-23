@@ -2401,6 +2401,12 @@ const adminHTML = `<!doctype html>
       try {
         const d = await api('/admin/sessions/' + encodeURIComponent(sessionID) + '/flight-recorder');
         const ro = d.rollup || {};
+        const sm = d.summary || {};
+        const vcls = sm.verdict === '위험' ? 'error' : (sm.verdict === '주의' ? 'warn' : '');
+        const rcaHtml = sm.verdict ? ('<div class="card" style="margin-bottom:10px"><div class="card-body">' +
+          '<div><strong>RCA 요약</strong> <span class="status ' + vcls + '">' + escapeHTML(sm.verdict) + '</span> <span class="muted">' + escapeHTML(sm.headline || '') + '</span></div>' +
+          '<ul style="margin:6px 0 0 16px;font-size:12px">' + (sm.findings || []).map(f => '<li>' + escapeHTML(f) + '</li>').join('') + '</ul>' +
+          '</div></div>') : '';
         const kindBadges = Object.entries(ro.kinds || {}).map(([k, n]) => '<span class="status" style="font-size:9px">' + escapeHTML(k) + ' ' + n + '</span>').join(' ');
         const rk = ro.risk || {};
         const riskBadges = [];
@@ -2438,7 +2444,7 @@ const adminHTML = `<!doctype html>
         '</tr>';
         }).join('') || '<tr><td colspan="10" class="muted">이벤트 없음</td></tr>';
         openModal('세션 비행기록 - ' + escapeHTML(sessionID),
-          summary +
+          rcaHtml + summary +
           '<h3 style="margin-top:14px">타임라인 (' + (d.events || []).length + ')</h3>' +
           '<table><thead><tr><th>#</th><th>시각</th><th>종류</th><th>모델</th><th>상태</th><th>지연</th><th>토큰/비용</th><th>도구</th><th>위험</th><th></th></tr></thead><tbody>' + rows + '</tbody></table>' +
           '<p class="muted" style="font-size:10px;margin-top:6px">' + escapeHTML(d.note || '') + '</p>');

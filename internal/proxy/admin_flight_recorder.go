@@ -168,9 +168,12 @@ func (s *Server) handleSessionFlightRecorder(w http.ResponseWriter, r *http.Requ
 		events = append(events, ev)
 	}
 
+	summary := sessionRCASummary(len(events), errorCount, secretReqs, policyBlockReqs, highRiskCodeReqs, len(models), totalCost)
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"session_id": sessionID,
 		"events":     events,
+		"summary":    summary,
 		"rollup": map[string]any{
 			"requests":     len(events),
 			"started_at":   startedAt,
@@ -191,6 +194,60 @@ func (s *Server) handleSessionFlightRecorder(w http.ResponseWriter, r *http.Requ
 		},
 		"note": "한 세션(session_id)의 게이트웨이 요청을 시간순으로 재구성한 비행기록입니다. 각 이벤트는 요청 상세·trace로 연결됩니다. 원문은 포함되지 않습니다(상한 500건).",
 	})
+}
+
+// sessionRCASummary produces a rule-based (air-gapped, no LLM) Korean RCA summary of a session:
+// an overall verdict plus the findings that drove it. Used so an operator can read the gist of
+// a session before scanning the timeline.
+func sessionRCASummary(requests, errors, secretReqs, policyBlocks, highRiskCode, models int, totalCost float64) map[string]any {
+	findings := []string{}
+	if errors > 0 {
+		findings = append(findings, itoaProxy(errors)+"건 요청이 오류(HTTP 4xx/5xx)로 종료됨")
+	}
+	if secretReqs > 0 {
+		findings = append(findings, itoaProxy(secretReqs)+"개 요청에서 시크릿이 탐지/마스킹됨")
+	}
+	if policyBlocks > 0 {
+		findings = append(findings, itoaProxy(policyBlocks)+"개 요청이 정책에 의해 차단됨")
+	}
+	if highRiskCode > 0 {
+		findings = append(findings, itoaProxy(highRiskCode)+"개 요청이 high 위험도 코드 응답을 포함")
+	}
+
+	verdict := "정상"
+	if secretReqs > 0 || policyBlocks > 0 || highRiskCode > 0 {
+		verdict = "위험"
+	} else if errors > 0 {
+		verdict = "주의"
+	}
+
+	headline := itoaProxy(requests) + "건 요청"
+	if models > 0 {
+		headline += " · 모델 " + itoaProxy(models) + "종"
+	}
+	if requests > 0 {
+		headline += " · 오류율 " + itoaProxy(errors*100/requests) + "%"
+	}
+	if totalCost > 0 {
+		headline += " · 비용 " + krwLabel(totalCost)
+	}
+	if len(findings) == 0 {
+		findings = append(findings, "위험 신호 없음 — 모든 요청 정상 처리")
+	}
+
+	return map[string]any{
+		"verdict":  verdict,
+		"headline": headline,
+		"findings": findings,
+	}
+}
+
+// krwLabel renders a KRW amount compactly for summary text.
+func krwLabel(v float64) string {
+	if v >= 10000 {
+		return itoaProxy(int(v/10000)) + "만원"
+	}
+	return itoaProxy(int(v+0.5)) + "원"
 }
 
 // keysOf returns the sorted keys of a set for stable output.
