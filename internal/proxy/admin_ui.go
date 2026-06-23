@@ -6066,9 +6066,17 @@ const adminHTML = `<!doctype html>
       const kindLabel = { skill: 'Skill', prompt_product: '프롬프트상품', text2sql_report: 'SQL리포트', mcp_tool: 'MCP', model: '모델' };
       const appCards = apps.length ? apps.map(a => {
         const comps = (a.components || []).map(c => '<span class="status" style="font-size:9px">' + escapeHTML(kindLabel[c.kind] || c.kind) + ': ' + escapeHTML(c.ref) + '</span>').join(' ');
+        // Onboarding readiness (mirrors the server publish gate's required items).
+        const gaps = [];
+        if (!a.title) gaps.push('title');
+        if (!a.owner) gaps.push('owner');
+        if (!(a.components || []).length) gaps.push('components');
+        const readyBadge = gaps.length
+          ? '<span class="status warn" style="font-size:9px" title="발행 필수 미충족: ' + escapeAttr(gaps.join(', ')) + '">온보딩 ' + gaps.length + '건</span>'
+          : '<span class="status" style="font-size:9px" title="발행 준비 완료">온보딩 ✓</span>';
         return '<div style="border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:8px">' +
           '<div style="display:flex;justify-content:space-between;align-items:center"><strong>' + escapeHTML(a.icon || '🧩') + ' ' + escapeHTML(a.title) + '</strong>' +
-          '<span>' + (a.status === 'active' ? '<span class="status">active</span>' : '<span class="status warn">' + escapeHTML(a.status) + '</span>') + '</span></div>' +
+          '<span>' + readyBadge + ' ' + (a.status === 'active' ? '<span class="status">active</span>' : '<span class="status warn">' + escapeHTML(a.status) + '</span>') + '</span></div>' +
           (a.description ? '<div class="muted" style="font-size:12px;margin:4px 0">' + escapeHTML(a.description) + '</div>' : '') +
           '<div style="margin:4px 0">' + (comps || '<span class="muted" style="font-size:11px">컴포넌트 없음</span>') + '</div>' +
           '<div class="muted" style="font-size:11px">팀: ' + escapeHTML(a.allowed_teams || '전체') + ' · 역할: ' + escapeHTML(a.allowed_roles || '전체') + '</div>' +
@@ -6140,14 +6148,27 @@ const adminHTML = `<!doctype html>
       try { await api('/admin/apps/' + encodeURIComponent(id), { method: 'DELETE' }); await renderWorkApps(); }
       catch (e) { alert(e.message); }
     };
-    window.appPublish = async (id) => {
-      const note = prompt('발행 메모(선택). 발행하면 현재 정의가 새 버전으로 저장되고 앱이 활성화됩니다.') ;
-      if (note === null) return;
+    window.appPublish = async (id, force) => {
+      const note = force ? '' : prompt('발행 메모(선택). 발행하면 현재 정의가 새 버전으로 저장되고 앱이 활성화됩니다.');
+      if (!force && note === null) return;
       try {
-        const r = await api('/admin/apps/' + encodeURIComponent(id) + '/publish', { method: 'POST', body: JSON.stringify({ note: note }) });
+        const path = '/admin/apps/' + encodeURIComponent(id) + '/publish' + (force ? '?force=1' : '');
+        const r = await api(path, { method: 'POST', body: JSON.stringify({ note: note || '' }) });
         alert('발행됨 — 버전 v' + r.version);
         await renderWorkApps();
-      } catch (e) { alert('발행 실패: ' + e.message); }
+      } catch (e) {
+        // Onboarding gate (HTTP 422): show the failed required items and offer a forced publish.
+        let parsed = null;
+        try { parsed = JSON.parse(e.message); } catch (_) {}
+        if (parsed && parsed.error && parsed.error.code === 'onboarding_incomplete') {
+          const items = (parsed.failed || []).map(c => '• ' + c.key + ' — ' + c.detail).join('\n');
+          if (confirm('온보딩 필수 항목 미충족으로 발행이 거부되었습니다:\n\n' + items + '\n\n그래도 강제로 발행할까요?')) {
+            await window.appPublish(id, true);
+          }
+          return;
+        }
+        alert('발행 실패: ' + e.message);
+      }
     };
     window.appDeprecate = async (id) => {
       if (!confirm('이 앱을 지원중단(숨김) 처리할까요? 사용자에게 더 이상 노출되지 않습니다.')) return;
