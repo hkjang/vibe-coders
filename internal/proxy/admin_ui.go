@@ -2394,6 +2394,44 @@ const adminHTML = `<!doctype html>
       return v + 'ms';
     }
 
+    // Agent Session Flight Recorder — 한 세션의 게이트웨이 활동을 시간순으로 재구성.
+    window.openFlightRecorder = async (sessionID) => {
+      try {
+        const d = await api('/admin/sessions/' + encodeURIComponent(sessionID) + '/flight-recorder');
+        const ro = d.rollup || {};
+        const kindBadges = Object.entries(ro.kinds || {}).map(([k, n]) => '<span class="status" style="font-size:9px">' + escapeHTML(k) + ' ' + n + '</span>').join(' ');
+        const summary = '<div class="kv">' +
+          row('세션', escapeHTML(d.session_id)) +
+          row('요청 수', fmt(ro.requests || 0) + (ro.errors ? ' · <span class="status error">오류 ' + ro.errors + '</span>' : '')) +
+          row('기간', escapeHTML((ro.started_at || '') + ' → ' + (ro.ended_at || ''))) +
+          row('종류', kindBadges || '-') +
+          row('모델', escapeHTML((ro.models || []).join(', ') || '-')) +
+          row('provider', escapeHTML((ro.providers || []).join(', ') || '-')) +
+          row('trace 수', fmt((ro.trace_ids || []).length)) +
+          row('토큰/비용', fmt(ro.total_tokens || 0) + ' tok · ' + money(ro.total_cost || 0)) +
+          row('도구 호출', fmt(ro.tool_calls || 0)) +
+        '</div>';
+        const rows = (d.events || []).map((e, i) => '<tr>' +
+          '<td>' + (i + 1) + '</td>' +
+          '<td>' + escapeHTML(e.created_at || '') + '</td>' +
+          '<td><span class="status" style="font-size:9px">' + escapeHTML(e.kind || '') + '</span></td>' +
+          '<td>' + escapeHTML(e.model || '') + '<div class="muted" style="font-size:10px">' + escapeHTML(e.provider || '') + '</div></td>' +
+          '<td><span class="status ' + (e.is_error ? 'error' : '') + '">' + (e.status_code || 0) + '</span></td>' +
+          '<td>' + fmt(e.latency_ms || 0) + ' ms</td>' +
+          '<td>' + fmt(e.total_tokens || 0) + '<div class="muted" style="font-size:10px">' + money(e.cost_krw || 0) + '</div></td>' +
+          '<td>' + fmt(e.tool_count || 0) + '</td>' +
+          '<td><a href="#" onclick="closeModal();openRequestDetail(\'' + escapeAttr(e.request_id) + '\');return false">상세</a></td>' +
+        '</tr>').join('') || '<tr><td colspan="9" class="muted">이벤트 없음</td></tr>';
+        openModal('세션 비행기록 - ' + escapeHTML(sessionID),
+          summary +
+          '<h3 style="margin-top:14px">타임라인 (' + (d.events || []).length + ')</h3>' +
+          '<table><thead><tr><th>#</th><th>시각</th><th>종류</th><th>모델</th><th>상태</th><th>지연</th><th>토큰/비용</th><th>도구</th><th></th></tr></thead><tbody>' + rows + '</tbody></table>' +
+          '<p class="muted" style="font-size:10px;margin-top:6px">' + escapeHTML(d.note || '') + '</p>');
+      } catch (err) {
+        openModal('오류', '<div class="error-line">' + escapeHTML(err.message) + '</div>');
+      }
+    };
+
     // ---------- dashboard ----------
     const dashboardState = { window: sessionStorage.getItem('dashWindow') || '24h' };
     async function renderDashboard() {
@@ -3945,7 +3983,7 @@ const adminHTML = `<!doctype html>
           row('모델', escapeHTML(r.model || '알 수 없음')) +
           row('provider', escapeHTML(r.provider || '')) +
           row('stream', r.stream ? '예' : '아니오') +
-          row('Session', escapeHTML(r.session_id || '')) +
+          row('Session', r.session_id ? (escapeHTML(r.session_id) + ' · <a href="#" onclick="openFlightRecorder(\'' + escapeAttr(r.session_id) + '\');return false">비행기록</a>') : '<span class="muted">없음</span>') +
           row('Prompt', escapeHTML((r.prompt_name || 'ad-hoc') + (r.prompt_version ? (' @ ' + r.prompt_version) : ''))) +
           row('Prompt variables hash', escapeHTML(r.prompt_variables_hash || '')) +
           row('Tool count', fmt(r.tool_count || 0)) +
