@@ -9896,11 +9896,42 @@ const adminHTML = `<!doctype html>
         '<div style="font-size:11px"><strong>조건:</strong> <code>' + escapeHTML(JSON.stringify(sug.conditions)) + '</code> · <strong>액션:</strong> <code>' + escapeHTML(JSON.stringify(sug.actions)) + '</code></div>' +
         '<div class="muted" style="font-size:11px"><strong>근거:</strong> <code>' + escapeHTML(JSON.stringify(sug.evidence)) + '</code></div>' +
         '</div>').join('');
+      // canary(rollout<100%) 정책의 실집행 vs 섀도우 현황 + 상향 추천.
+      let canaryCard = '';
+      try {
+        const cs = await api('/admin/policies/canary-status?days=7');
+        const cps = cs.policies || [];
+        if (cps.length) {
+          const crows = cps.map(c => '<tr>' +
+            '<td>' + escapeHTML(c.name || c.policy_id) + '<div class="muted" style="font-size:10px">' + escapeHTML(c.policy_id) + '</div></td>' +
+            '<td><span class="status warn">' + (c.rollout_percent || 0) + '%</span></td>' +
+            '<td>' + fmt(c.enforced_acts || 0) + '</td>' +
+            '<td>' + fmt(c.shadow_acts || 0) + '</td>' +
+            '<td><button type="button" class="secondary" style="font-size:11px" onclick="canaryBump(\'' + escapeAttr(c.policy_id) + '\',' + (c.suggested_next || 100) + ')">' + (c.suggested_next || 100) + '%로 상향</button></td>' +
+          '</tr>').join('');
+          canaryCard = card('Canary 롤아웃 현황 (최근 7일)',
+            '<div class="card-body"><table><thead><tr><th>정책</th><th>적용 비율</th><th>실집행</th><th>섀도우(미적용)</th><th>다음 단계</th></tr></thead><tbody>' + crows + '</tbody></table>' +
+            '<p class="muted" style="font-size:10px;margin-top:4px">' + escapeHTML(cs.note || '') + '</p></div>');
+        }
+      } catch (e) { /* canary 현황 없으면 생략 */ }
       view.innerHTML = section('정책 어드바이저 (Gateway Policy Advisor)', '') +
         '<p class="muted" style="font-size:12px;padding:0 14px">' + escapeHTML(d.note || '') + '</p>' +
+        canaryCard +
         card('추천 정책 (' + sugs.length + ')',
           '<div class="card-body">' + (cards || '<p class="muted">현재 추천할 정책이 없습니다. 운영 신호가 안정적입니다. 👍</p>') + '</div>');
     }
+    // canary 정책의 rollout 비율을 상향(기존 정의 유지, rollout_percent만 변경 후 재저장).
+    window.canaryBump = async (policyID, next) => {
+      if (!confirm('이 정책의 적용 비율을 ' + next + '%로 상향할까요?')) return;
+      try {
+        const list = await api('/admin/policies');
+        const p = (list.policies || []).find(x => x.id === policyID);
+        if (!p) { openModal('오류', '<div class="error-line">정책을 찾을 수 없습니다.</div>'); return; }
+        p.rollout_percent = next;
+        await api('/admin/policies', { method: 'POST', body: JSON.stringify(p) });
+        await renderPolicyAdvisor();
+      } catch (e) { openModal('상향 오류', '<div class="error-line">' + escapeHTML(e.message) + '</div>'); }
+    };
 
     // renderNarrativeReport shows the auto-generated monthly operations report (prose sections).
     async function renderNarrativeReport() {

@@ -186,6 +186,7 @@ var apiEndpoints = []apiEndpoint{
 	{"/admin/policies", []string{"get", "post"}, "governance", "List / create governance policies", false},
 	{"/admin/policies/decisions", []string{"get"}, "governance", "Policy decisions", false},
 	{"/admin/policies/simulate", []string{"post"}, "governance", "Simulate policy outcome", false},
+	{"/admin/policies/canary-status", []string{"get"}, "governance", "Canary policies: enforced vs shadow activity + suggested rollout", false},
 	{"/admin/policy-advisor/suggestions", []string{"get"}, "governance", "Recommended governance rules from observed signals", false},
 	{"/admin/policy-advisor/apply", []string{"post"}, "governance", "Create a disabled draft policy from a suggestion", false},
 	{"/admin/policies/regression/cases", []string{"get", "post", "delete"}, "governance", "Policy regression test cases", false},
