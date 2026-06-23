@@ -83,6 +83,27 @@ func (s *Server) handleMCPUpstreams(w http.ResponseWriter, r *http.Request) {
 		}
 		meta := mcpMetadataFromPayload(p.Metadata, p.Description, p.Domains, p.RiskLevel, p.AllowedModels, p.DefaultTool, p.TimeoutMS, p.MaxResults, p.RequiresApproval, p.FallbackAllowed)
 		up := store.MCPUpstream{ID: slug, Name: p.Name, URL: p.URL, EncryptedAuth: encAuth, Enabled: enabled, Metadata: meta}
+		// Onboarding gate: an enabled (active) upstream must pass the readiness checklist —
+		// notably a high/critical-risk server needs requires_approval. Disabled drafts bypass.
+		// Override with ?force=1.
+		if enabled && r.URL.Query().Get("force") != "1" {
+			if ready, checks := mcpOnboardingChecklist(up); !ready {
+				failed := []onboardingCheck{}
+				for _, c := range checks {
+					if c.Severity == "required" && !c.OK {
+						failed = append(failed, c)
+					}
+				}
+				s.auditAdmin(r, "mcp_upstream.enable_blocked", slug, auditJSON(map[string]any{"failed": failed}))
+				writeJSON(w, http.StatusUnprocessableEntity, map[string]any{
+					"error":  map[string]any{"message": "활성화 전 온보딩 필수 항목이 충족되지 않았습니다.", "type": "invalid_request_error", "code": "onboarding_incomplete"},
+					"failed": failed,
+					"checks": checks,
+					"hint":   "필수 항목(name·url, 고위험은 requires_approval)을 채우거나 enabled=false로 등록하세요. 강제하려면 ?force=1.",
+				})
+				return
+			}
+		}
 		if err := s.db.UpsertMCPUpstream(r.Context(), up); err != nil {
 			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "mcp_upstream_save_failed")
 			return
