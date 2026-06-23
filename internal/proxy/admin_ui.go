@@ -7841,8 +7841,23 @@ const adminHTML = `<!doctype html>
           auth_token: document.getElementById('mcp-up-auth').value,
         };
         if (!body.name || !body.url) { alert('이름과 URL을 입력하세요'); return; }
-        await api('/admin/mcp/upstreams', { method: 'POST', body: JSON.stringify(body) });
-        route();
+        try {
+          await api('/admin/mcp/upstreams', { method: 'POST', body: JSON.stringify(body) });
+          route();
+        } catch (err) {
+          // Onboarding activation gate (HTTP 422): show failed required items and offer force.
+          let parsed = null;
+          try { parsed = JSON.parse(err.message); } catch (_) {}
+          if (parsed && parsed.error && parsed.error.code === 'onboarding_incomplete') {
+            const items = (parsed.failed || []).map(c => '• ' + c.key + ' — ' + c.detail).join('\n');
+            if (confirm('활성화 온보딩 필수 항목 미충족:\n\n' + items + '\n\n그래도 강제로 등록·활성화할까요?')) {
+              await api('/admin/mcp/upstreams?force=1', { method: 'POST', body: JSON.stringify(body) });
+              route();
+            }
+            return;
+          }
+          alert('등록 실패: ' + err.message);
+        }
       });
 
       document.getElementById('mcp-filter').addEventListener('submit', (e) => {
