@@ -344,6 +344,7 @@ const adminHTML = `<!doctype html>
       <a href="#/chat-test" data-tab="chat-test">Chat 테스트</a>
       <a href="#/requests" data-tab="requests">호출 이력</a>
       <a href="#/sessions" data-tab="sessions">세션 비행기록</a>
+      <a href="#/sbom" data-tab="sbom">AI 자산 SBOM</a>
       <a href="#/prompts" data-tab="prompts">프롬프트 검색</a>
       <a href="#/prompt-assets" data-tab="prompt-assets">자산 관리소</a>
       <a href="#/users" data-tab="users">사용자</a>
@@ -1148,6 +1149,7 @@ const adminHTML = `<!doctype html>
           case 'llm':       await renderLLMObservability(); break;
           case 'requests':  await renderRequestsView(params); break;
           case 'sessions':  await renderSessionsView(); break;
+          case 'sbom':      await renderSBOMView(); break;
           case 'prompts':       await renderPromptsView(params); break;
           case 'prompt-assets': await renderPromptAssets(params); break;
           case 'apps': await renderWorkApps(params); break;
@@ -4076,6 +4078,45 @@ const adminHTML = `<!doctype html>
       document.getElementById('sess-reload').addEventListener('click', load);
       await load();
     }
+
+    // AI 자산 SBOM — 스킬·워크플로·앱·모델계약·프롬프트 자산의 소유권/의존성 명세 + 거버넌스 공백.
+    async function renderSBOMView() {
+      const view = document.getElementById('view');
+      view.innerHTML = section('AI 자산 SBOM', '<div class="empty">불러오는 중...</div>');
+      let d;
+      try { d = await api('/admin/sbom'); }
+      catch (e) { view.innerHTML = section('AI 자산 SBOM', '<div class="card-body" style="padding:16px"><p class="muted">' + escapeHTML(e.message) + '</p></div>'); return; }
+      const bt = d.by_type || {};
+      const typeLabel = { skill: '스킬', workflow: '워크플로', app: '앱', model_contract: '모델 계약', prompt_asset: '프롬프트 자산' };
+      const rows = (d.entries || []).map(e => '<tr' + (e.gaps && e.gaps.length ? ' class="warn-row"' : '') + '>' +
+        '<td><span class="status" style="font-size:9px">' + escapeHTML(typeLabel[e.type] || e.type) + '</span></td>' +
+        '<td>' + escapeHTML(e.name || e.id) + '<div class="muted" style="font-size:10px">' + escapeHTML(e.id) + '</div></td>' +
+        '<td>' + (e.owner === '(미지정)' ? '<span class="status warn">미지정</span>' : escapeHTML(e.owner)) + '</td>' +
+        '<td>' + escapeHTML(e.status || '') + '</td>' +
+        '<td class="muted" style="font-size:11px">' + escapeHTML(e.deps || '') + '</td>' +
+        '<td>' + ((e.gaps || []).map(g => '<span class="status error" style="font-size:9px">' + escapeHTML(g) + '</span>').join(' ') || '-') + '</td>' +
+      '</tr>').join('') || '<tr><td colspan="6" class="muted">자산 없음</td></tr>';
+      const kpis = kpi('총 자산', fmt(d.total || 0)) +
+        Object.entries(bt).map(([k, n]) => kpi(typeLabel[k] || k, fmt(n))).join('') +
+        kpi('거버넌스 공백', fmt(d.gap_count || 0));
+      view.innerHTML = section('AI 자산 SBOM (Software Bill of Materials)',
+        '<div style="padding:8px 14px"><button type="button" class="secondary" onclick="sbomExport()">JSON 내보내기</button></div>') +
+        '<div class="kpis">' + kpis + '</div>' +
+        card('자산 명세 (' + (d.total || 0) + ')',
+          '<div class="card-body"><table><thead><tr><th>유형</th><th>이름</th><th>소유자</th><th>상태</th><th>의존성</th><th>공백</th></tr></thead><tbody>' + rows + '</tbody></table>' +
+          '<p class="muted" style="font-size:10px;margin-top:6px">' + escapeHTML(d.note || '') + '</p></div>');
+    }
+    window.sbomExport = async () => {
+      try {
+        const res = await fetch('/admin/sbom', { headers: headers() });
+        const blob = await res.blob();
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'ai-asset-sbom.json';
+        a.click();
+        URL.revokeObjectURL(a.href);
+      } catch (e) { openModal('내보내기 오류', '<div class="error-line">' + escapeHTML(e.message) + '</div>'); }
+    };
 
     async function renderRequestsView(initial) {
       const view = document.getElementById('view');

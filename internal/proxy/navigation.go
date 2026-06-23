@@ -43,6 +43,7 @@ var menuRegistry = []menuItem{
 	{ID: "ops.chat_test", Label: "Chat 테스트", Path: "#/chat-test", Tab: "chat-test", Group: "ops", Scopes: []string{"admin:read"}, DataScope: "all"},
 	{ID: "ops.requests", Label: "호출 이력", Path: "#/requests", Tab: "requests", Group: "ops", Scopes: []string{"admin:read"}, DataScope: "all"},
 	{ID: "ops.sessions", Label: "세션 비행기록", Path: "#/sessions", Tab: "sessions", Group: "ops", Scopes: []string{"admin:read"}, DataScope: "all"},
+	{ID: "ops.sbom", Label: "AI 자산 SBOM", Path: "#/sbom", Tab: "sbom", Group: "ops", Scopes: []string{"admin:read"}, DataScope: "all"},
 	{ID: "ops.prompts", Label: "프롬프트 검색", Path: "#/prompts", Tab: "prompts", Group: "ops", Scopes: []string{"admin:read"}, DataScope: "all"},
 	{ID: "ops.prompt_assets", Label: "자산 관리소", Path: "#/prompt-assets", Tab: "prompt-assets", Group: "ops", Scopes: []string{"admin:read"}, DataScope: "all"},
 	{ID: "ops.apps", Label: "AI 업무 앱", Path: "#/apps", Tab: "apps", Group: "ops", Scopes: []string{"admin:read"}, DataScope: "all"},
