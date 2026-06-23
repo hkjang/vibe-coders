@@ -47,6 +47,14 @@ func (s *Server) handleSBOM(w http.ResponseWriter, r *http.Request) {
 				if sk.Status == "production" && sk.RiskLevel == "high" {
 					e.Gaps = append(e.Gaps, "high 위험 production")
 				}
+				// Verification gap: a fitness-gated skill (high-risk or opt-in) with too little
+				// passing model-fitness evidence is running under-verified.
+				if modelFitnessRequired(sk) {
+					passing, _ := s.db.CountPassingSkillFitnessEvidence(ctx, sk.Name)
+					if passing < skillFitnessMinEvidence {
+						e.Gaps = append(e.Gaps, "검증 미흡("+strconv.Itoa(passing)+"/"+strconv.Itoa(skillFitnessMinEvidence)+")")
+					}
+				}
 				entries = append(entries, e)
 			}
 		}
