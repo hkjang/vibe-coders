@@ -347,6 +347,7 @@ const adminHTML = `<!doctype html>
       <a href="#/sbom" data-tab="sbom">AI 자산 SBOM</a>
       <a href="#/journey-probe" data-tab="journey-probe">Journey Probe</a>
       <a href="#/pods" data-tab="pods">파드 운영 맵</a>
+      <a href="#/productivity" data-tab="productivity">AI 업무성과</a>
       <a href="#/prompts" data-tab="prompts">프롬프트 검색</a>
       <a href="#/prompt-assets" data-tab="prompt-assets">자산 관리소</a>
       <a href="#/users" data-tab="users">사용자</a>
@@ -1156,6 +1157,7 @@ const adminHTML = `<!doctype html>
           case 'journey-probe': await renderJourneyProbeView(); break;
           case 'pods':      await renderPodsView(); break;
           case 'privacy-ledger': await renderPrivacyLedgerView(); break;
+          case 'productivity': await renderProductivityView(); break;
           case 'prompts':       await renderPromptsView(params); break;
           case 'prompt-assets': await renderPromptAssets(params); break;
           case 'apps': await renderWorkApps(params); break;
@@ -4123,6 +4125,31 @@ const adminHTML = `<!doctype html>
         URL.revokeObjectURL(a.href);
       } catch (e) { openModal('내보내기 오류', '<div class="error-line">' + escapeHTML(e.message) + '</div>'); }
     };
+
+    // AI 업무성과 — repo별 AI 사용량 vs 개발 산출(commit/MR) 상관.
+    async function renderProductivityView() {
+      const view = document.getElementById('view');
+      view.innerHTML = section('AI 업무성과', '<div class="empty">불러오는 중...</div>');
+      let d;
+      try { d = await api('/admin/productivity?days=30'); }
+      catch (e) { view.innerHTML = section('AI 업무성과', '<div class="card-body" style="padding:16px"><p class="muted">' + escapeHTML(e.message) + '</p></div>'); return; }
+      const t = d.totals || {};
+      const rows = (d.repos || []).map(r => '<tr>' +
+        '<td>' + escapeHTML(r.repo) + '</td>' +
+        '<td>' + fmt(r.ai_requests || 0) + '</td>' +
+        '<td>' + money(r.ai_cost_krw || 0) + '</td>' +
+        '<td>' + fmt(r.commits || 0) + '</td>' +
+        '<td>' + fmt(r.merge_requests || 0) + '</td>' +
+        '<td>' + fmt(r.merged || 0) + '</td>' +
+        '<td>' + (r.merged ? money(r.cost_per_merged_krw || 0) : '<span class="muted">-</span>') + '</td>' +
+      '</tr>').join('') || '<tr><td colspan="7" class="muted">repo 귀속 데이터 없음 (X-Vibe-Repo 헤더 필요)</td></tr>';
+      view.innerHTML = section('AI 업무성과 (AI 사용 ↔ 개발 산출)',
+        '<p class="muted" style="font-size:12px;padding:0 14px">X-Vibe-Repo로 귀속된 AI 사용량과 VCS commit/merge_request를 repo별로 비교합니다. "얼마나 썼나"가 아니라 "무엇이 머지됐나"의 관점입니다.</p>') +
+        '<div class="kpis">' + kpi('AI 요청', fmt(t.ai_requests || 0)) + kpi('AI 비용', money(t.ai_cost_krw || 0)) + kpi('머지', fmt(t.merged || 0)) + '</div>' +
+        card('repo별 (최근 ' + (d.days || 30) + '일)',
+          '<div class="card-body"><table><thead><tr><th>repo</th><th>AI 요청</th><th>AI 비용</th><th>commit</th><th>MR</th><th>머지</th><th>머지당 비용</th></tr></thead><tbody>' + rows + '</tbody></table>' +
+          '<p class="muted" style="font-size:10px;margin-top:6px">' + escapeHTML(d.note || '') + '</p></div>');
+    }
 
     // 프라이버시 원장 — 민감정보 탐지/마스킹/차단 + 외부 provider 전송량(감사·PIA).
     async function renderPrivacyLedgerView() {

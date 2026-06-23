@@ -84,6 +84,7 @@ var apiEndpoints = []apiEndpoint{
 	{"/admin/journey-probe", []string{"post"}, "admin", "Per-dev-tool synthetic connection journey probe (models/MCP) with a supplied key", false},
 	{"/admin/pods", []string{"get"}, "admin", "Multi-pod operations map: per-pod heartbeat, build, settings convergence", false},
 	{"/admin/privacy-ledger", []string{"get"}, "admin", "Privacy/data-egress ledger by team/model/provider (detect/mask/block + egress); ?format=csv for export", false},
+	{"/admin/productivity", []string{"get"}, "admin", "AI usage vs delivery (VCS commits/MRs) correlation per repo", false},
 	{"/admin/sessions", []string{"get"}, "admin", "Recent coding sessions (flight-recorder index)", false},
 	{"/admin/sessions/{session_id}/flight-recorder", []string{"get"}, "admin", "Chronological flight recorder for one agent session", false},
 	{"/admin/requests/diff", []string{"get"}, "admin", "Diff two requests", false},
