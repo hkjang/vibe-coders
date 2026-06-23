@@ -125,6 +125,24 @@ func (s *Server) handleAdminAppByID(w http.ResponseWriter, r *http.Request) {
 			Note string `json:"note"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&p)
+		// Onboarding gate: a draft can exist with gaps, but publishing (making it active/visible)
+		// requires the governance basics — unless the admin explicitly overrides with ?force=1.
+		if ready, checks := appOnboardingChecklist(app); !ready && r.URL.Query().Get("force") != "1" {
+			failed := []onboardingCheck{}
+			for _, c := range checks {
+				if c.Severity == "required" && !c.OK {
+					failed = append(failed, c)
+				}
+			}
+			s.auditAdmin(r, "work_app.publish_blocked", id, auditJSON(map[string]any{"failed": failed}))
+			writeJSON(w, http.StatusUnprocessableEntity, map[string]any{
+				"error":  map[string]any{"message": "발행 전 온보딩 필수 항목이 충족되지 않았습니다.", "type": "invalid_request_error", "code": "onboarding_incomplete"},
+				"failed": failed,
+				"checks": checks,
+				"hint":   "필수 항목을 채운 뒤 다시 발행하거나, 의도적으로 강제하려면 ?force=1로 재요청하세요.",
+			})
+			return
+		}
 		version, err := s.db.PublishWorkAppVersion(r.Context(), app, adminID(r), strings.TrimSpace(p.Note))
 		if err != nil {
 			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "publish_failed")
