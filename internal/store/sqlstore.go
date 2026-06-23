@@ -868,6 +868,14 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 				PRIMARY KEY (day, dimension, dim_value)
 			)`,
 		`CREATE INDEX IF NOT EXISTS idx_analytics_daily_day ON analytics_daily(day)`,
+		`CREATE TABLE IF NOT EXISTS pod_status (
+				hostname TEXT PRIMARY KEY,
+				build_version TEXT NOT NULL DEFAULT '',
+				applied_token TEXT NOT NULL DEFAULT '',
+				current_token TEXT NOT NULL DEFAULT '',
+				reload_interval_s INTEGER NOT NULL DEFAULT 0,
+				last_seen TEXT NOT NULL
+			)`,
 		`CREATE TABLE IF NOT EXISTS prompt_promotions (
 				prompt_name TEXT NOT NULL,
 				prompt_version TEXT NOT NULL,

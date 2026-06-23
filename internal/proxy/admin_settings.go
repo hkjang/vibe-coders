@@ -438,6 +438,9 @@ func (s *Server) mcpConf() config.MCPConfig {
 // that made the change has already reloaded inline, so it simply observes a matching token here.
 // Disabled when RuntimeReloadInterval <= 0.
 func (s *Server) runtimeReloadLoop(ctx context.Context, interval time.Duration) {
+	// Always record this pod once at startup so the operations map shows it even when the
+	// settings-reload poll is disabled (single-pod / interval<=0).
+	s.heartbeatPod(ctx, interval)
 	if interval <= 0 {
 		return
 	}
@@ -453,18 +456,37 @@ func (s *Server) runtimeReloadLoop(ctx context.Context, interval time.Duration) 
 			token, err := s.db.AdminSettingsChangeToken(ctx)
 			if err != nil {
 				slog.Warn("runtime settings poll failed", "error", err)
+				s.heartbeatPod(ctx, interval)
 				continue
 			}
-			if token == last {
-				continue
+			if token != last {
+				slog.Info("admin settings changed on another pod; reloading runtime config")
+				s.reloadRuntimeConfig(ctx)
+				s.reloadText2SQLFeatures(ctx)
+				s.reloadKeycloakConfig(ctx)
+				last = token
 			}
-			slog.Info("admin settings changed on another pod; reloading runtime config")
-			s.reloadRuntimeConfig(ctx)
-			s.reloadText2SQLFeatures(ctx)
-			s.reloadKeycloakConfig(ctx)
-			last = token
+			// Heartbeat every tick so the operations map sees a live last_seen + convergence state.
+			s.heartbeatPod(ctx, interval)
 		}
 	}
+}
+
+// heartbeatPod upserts this pod's current operational state for the multi-pod operations map.
+func (s *Server) heartbeatPod(ctx context.Context, interval time.Duration) {
+	host, _ := os.Hostname()
+	applied := ""
+	if p := s.lastReloadTok.Load(); p != nil {
+		applied = *p
+	}
+	current, _ := s.db.AdminSettingsChangeToken(ctx)
+	_ = s.db.UpsertPodStatus(ctx, store.PodStatus{
+		Hostname:        host,
+		BuildVersion:    AppVersion,
+		AppliedToken:    applied,
+		CurrentToken:    current,
+		ReloadIntervalS: int(interval.Seconds()),
+	})
 }
 
 // reloadRuntimeConfig rebuilds the Text2SQL/ClickHouse runtime snapshots from env defaults

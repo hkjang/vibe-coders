@@ -82,6 +82,7 @@ var apiEndpoints = []apiEndpoint{
 	{"/admin/code-verify/stats", []string{"get"}, "admin", "Per-model code risk leaderboard from persisted verdicts", false},
 	{"/admin/sbom", []string{"get"}, "admin", "AI asset SBOM: ownership/dependency manifest across skills/workflows/apps/contracts/prompts", false},
 	{"/admin/journey-probe", []string{"post"}, "admin", "Per-dev-tool synthetic connection journey probe (models/MCP) with a supplied key", false},
+	{"/admin/pods", []string{"get"}, "admin", "Multi-pod operations map: per-pod heartbeat, build, settings convergence", false},
 	{"/admin/sessions", []string{"get"}, "admin", "Recent coding sessions (flight-recorder index)", false},
 	{"/admin/sessions/{session_id}/flight-recorder", []string{"get"}, "admin", "Chronological flight recorder for one agent session", false},
 	{"/admin/requests/diff", []string{"get"}, "admin", "Diff two requests", false},

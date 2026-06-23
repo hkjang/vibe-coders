@@ -346,6 +346,7 @@ const adminHTML = `<!doctype html>
       <a href="#/sessions" data-tab="sessions">세션 비행기록</a>
       <a href="#/sbom" data-tab="sbom">AI 자산 SBOM</a>
       <a href="#/journey-probe" data-tab="journey-probe">Journey Probe</a>
+      <a href="#/pods" data-tab="pods">파드 운영 맵</a>
       <a href="#/prompts" data-tab="prompts">프롬프트 검색</a>
       <a href="#/prompt-assets" data-tab="prompt-assets">자산 관리소</a>
       <a href="#/users" data-tab="users">사용자</a>
@@ -1152,6 +1153,7 @@ const adminHTML = `<!doctype html>
           case 'sessions':  await renderSessionsView(); break;
           case 'sbom':      await renderSBOMView(); break;
           case 'journey-probe': await renderJourneyProbeView(); break;
+          case 'pods':      await renderPodsView(); break;
           case 'prompts':       await renderPromptsView(params); break;
           case 'prompt-assets': await renderPromptAssets(params); break;
           case 'apps': await renderWorkApps(params); break;
@@ -4119,6 +4121,30 @@ const adminHTML = `<!doctype html>
         URL.revokeObjectURL(a.href);
       } catch (e) { openModal('내보내기 오류', '<div class="error-line">' + escapeHTML(e.message) + '</div>'); }
     };
+
+    // 파드 운영 맵 — 멀티 파드 하트비트·빌드·런타임 설정 수렴 상태.
+    async function renderPodsView() {
+      const view = document.getElementById('view');
+      view.innerHTML = section('파드 운영 맵', '<div class="empty">불러오는 중...</div>');
+      let d;
+      try { d = await api('/admin/pods'); }
+      catch (e) { view.innerHTML = section('파드 운영 맵', '<div class="card-body" style="padding:16px"><p class="muted">' + escapeHTML(e.message) + '</p></div>'); return; }
+      const sm = d.summary || {};
+      const rows = (d.pods || []).map(p => '<tr>' +
+        '<td>' + (p.stale ? '<span class="status error">stale</span>' : '<span class="status">live</span>') + '</td>' +
+        '<td><code>' + escapeHTML(p.hostname) + '</code></td>' +
+        '<td>' + escapeHTML(p.build_version || '') + '</td>' +
+        '<td>' + (p.up_to_date ? '<span class="status">최신</span>' : '<span class="status warn">동기화 대기</span>') + '</td>' +
+        '<td class="muted" style="font-size:11px">' + ago(p.last_seen) + '</td>' +
+        '<td class="muted" style="font-size:11px">' + (p.reload_interval_s ? (p.reload_interval_s + 's') : 'off') + '</td>' +
+      '</tr>').join('') || '<tr><td colspan="6" class="muted">기록된 파드 없음</td></tr>';
+      view.innerHTML = section('파드 운영 맵 (멀티 파드)',
+        '<div style="padding:8px 14px"><button type="button" class="secondary" onclick="renderPodsView()">새로고침</button></div>') +
+        '<div class="kpis">' + kpi('총 파드', fmt(sm.total || 0)) + kpi('live', fmt(sm.live || 0)) + kpi('stale', fmt(sm.stale || 0)) + kpi('설정 최신', fmt(sm.converged || 0)) + '</div>' +
+        card('파드 (' + (sm.total || 0) + ')',
+          '<div class="card-body"><table><thead><tr><th>상태</th><th>hostname</th><th>빌드</th><th>설정</th><th>마지막 하트비트</th><th>reload</th></tr></thead><tbody>' + rows + '</tbody></table>' +
+          '<p class="muted" style="font-size:10px;margin-top:6px">' + escapeHTML(d.note || '') + '</p></div>');
+    }
 
     // Journey Probe — 개발도구별 합성 연결 점검(모델 목록·MCP). probe key로 실행.
     async function renderJourneyProbeView() {
