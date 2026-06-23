@@ -562,6 +562,38 @@ curl -i http://<host>:8080/v1/chat/completions -H "Authorization: Bearer <발급
 | 사용자 탭 하단 "AI 활용지수" | 사용자별 Prompt 수·세션·활동일·커밋·머지 MR·도구 호출·성공률·비용·**활용지수(0~100)** | `GET /admin/benchmark/users?window=30d&limit=100` |
 | 안전 탭 "AI Incident" | 프로바이더별 **폴백/5xx 급증(시간당 ≥ 5건)** 을 장애로 추정, 연속 시간대 병합, 폴백·5xx·**영향 사용자 수**·진행 중 여부 | `GET /admin/incidents?window=7d&min_events=5` |
 
+## 12. 거버넌스 · 운영 신규 도구 (v0.64~v0.74)
+
+아래는 코드 검증·세션 관측·정책 롤아웃·자산 거버넌스 관련으로 추가된 관리자 화면/엔드포인트입니다. 모두 RBAC(`admin:read` 또는 `security:read`)이며 원문 prompt/코드는 저장·노출하지 않고 메타데이터만 다룹니다.
+
+### AI 코드 출력 검증 게이트
+- 모델 응답의 코드블록을 언어별 정적 점검(위험 API·파괴적 명령·하드코딩 시크릿·구문 균형)해 위험도/테스트 가능성을 산출. 폐쇄망·외부 컴파일러 미사용.
+- `POST /admin/code-verify {text}` — 임의 텍스트 즉시 검증(무상태). `GET /admin/code-verify/stats?days=` — 영속된 verdict의 모델별 위험 리더보드.
+- Chat 테스트 멀티런에 "코드 검증" 버튼, 단일 Chat 응답 "실행 요약"에 코드 검증 섹션, 자동 평가(rubric) safety 점수에 반영. /v1 응답 verdict는 응답 텍스트 캡처(`LOG_RESPONSE_TEXT`/캐시) 시 영속되어 요청 상세·트레이스에 노출.
+
+### Agent Session Flight Recorder (세션 비행기록)
+- "세션 비행기록" 탭: 최근 코딩 세션(클라이언트 `session_id`) 목록 → 세션별 시간순 타임라인(요청·종류·모델·지연·토큰·비용·도구) + 위험 오버레이(시크릿/정책 차단/위험 코드) + 규칙 기반 RCA 요약(정상/주의/위험).
+- `GET /admin/sessions?days=`, `GET /admin/sessions/{session_id}/flight-recorder`. 요청 상세 모달의 Session 행 "비행기록" 링크에서도 진입.
+
+### Policy Canary & Shadow Enforce
+- 정책 어드바이저의 추천 카드 "섀도우 영향" 버튼: 최근 트래픽에 시뮬레이션해 차단 예상·영향 사용자/팀·**오탐 후보(과거 2xx였으나 차단될 요청)**·차단 비용(절감 추정)을 표시(`POST /admin/policies/simulate`의 `shadow` 블록).
+- 정책에 `rollout_percent`(canary): 1~99면 결정적 트래픽 슬라이스에만 enforce, 슬라이스 밖은 `canary_shadow` 결정으로 기록만. `GET /admin/policies/canary-status` + 어드바이저 "Canary 롤아웃 현황" 카드에서 실집행 vs 섀도우 비교 후 "N%로 상향".
+
+### AI 자산 SBOM
+- "AI 자산 SBOM" 탭 / `GET /admin/sbom?type=`: 스킬·워크플로·앱·모델계약·프롬프트 자산의 소유권·의존성·상태를 통합 명세로 보여주고 거버넌스 공백("owner 없음", high 위험 production, 적합성 검증 미흡)을 표시. JSON 내보내기.
+
+### Journey Probe (개발도구 연결 합성 점검)
+- "Journey Probe" 탭 / `POST /admin/journey-probe {proxy_key, clients?}`: Cursor·Roo·Cline·OpenAI SDK 등 도구별 실제 연결 journey(모델 목록·MCP initialize/tools-list)를 supplied Proxy API Key로 합성 점검(비용 발생 chat 호출 없음). "서버는 살아있는데 Cursor만 안 됨"을 분리.
+
+### 파드 운영 맵 / 프라이버시 원장 / AI 업무성과 / 온보딩 점검
+- "파드 운영 맵" 탭 / `GET /admin/pods`: 멀티 파드 하트비트·빌드·런타임 설정 수렴(applied vs current token) 상태. live/stale·설정 최신 여부.
+- "프라이버시 원장" 탭(security) / `GET /admin/privacy-ledger?dimension=team|model|provider&days=`: 민감정보 탐지/마스킹/차단량 + 외부 provider 전송 요청·토큰을 차원별 감사 원장으로 집계. `?format=csv` 내보내기.
+- "AI 업무성과" 탭 / `GET /admin/productivity?days=`: `X-Vibe-Repo` 귀속 AI 사용량과 VCS commit/merge_request를 repo별로 상관, 머지당 비용 산출.
+- 온보딩 준비 점검: `POST /admin/apps/onboarding-check`(AI 앱), `POST /admin/mcp/onboarding-check`(MCP 업스트림) — 등록 전 owner·접근범위·문서·(고위험 MCP는)승인 게이트 등 required/recommended 체크리스트로 SBOM 공백을 생성 시점에 예방.
+
+### 개발자 오버레이
+- `GET /me/overlay`(사용자): 현재 모델·예산 사용/한도/남음·액션 항목·추천을 한 번에 폴링하는 컴팩트 상태(IDE 확장/패널용). CLI `vibe status [--table]`로도 확인.
+
 활용지수 공식(관측 기반 휴리스틱, **인사평가 지표 아님** — 도입 현황 파악용): `요청량 30% + 활동일수 20% + 커밋 20% + 머지 MR 15% + 성공률 15%` (포화 상한: 요청 300, 활동일 20, 커밋 30, MR 10 / 30일 기준). 커밋·MR 은 VCS 상관(웹훅 또는 추론)으로 사용자에 연결된 것만 집계됩니다 — VCS 연동이 없으면 해당 컬럼은 0으로 나오고 나머지 요소만으로 점수가 계산됩니다.
 
 ---
