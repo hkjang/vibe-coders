@@ -345,6 +345,7 @@ const adminHTML = `<!doctype html>
       <a href="#/requests" data-tab="requests">호출 이력</a>
       <a href="#/sessions" data-tab="sessions">세션 비행기록</a>
       <a href="#/sbom" data-tab="sbom">AI 자산 SBOM</a>
+      <a href="#/journey-probe" data-tab="journey-probe">Journey Probe</a>
       <a href="#/prompts" data-tab="prompts">프롬프트 검색</a>
       <a href="#/prompt-assets" data-tab="prompt-assets">자산 관리소</a>
       <a href="#/users" data-tab="users">사용자</a>
@@ -1150,6 +1151,7 @@ const adminHTML = `<!doctype html>
           case 'requests':  await renderRequestsView(params); break;
           case 'sessions':  await renderSessionsView(); break;
           case 'sbom':      await renderSBOMView(); break;
+          case 'journey-probe': await renderJourneyProbeView(); break;
           case 'prompts':       await renderPromptsView(params); break;
           case 'prompt-assets': await renderPromptAssets(params); break;
           case 'apps': await renderWorkApps(params); break;
@@ -4117,6 +4119,36 @@ const adminHTML = `<!doctype html>
         URL.revokeObjectURL(a.href);
       } catch (e) { openModal('내보내기 오류', '<div class="error-line">' + escapeHTML(e.message) + '</div>'); }
     };
+
+    // Journey Probe — 개발도구별 합성 연결 점검(모델 목록·MCP). probe key로 실행.
+    async function renderJourneyProbeView() {
+      const view = document.getElementById('view');
+      view.innerHTML = section('Journey Probe (개발도구 연결 합성 점검)',
+        '<div style="padding:8px 14px">' +
+        '<p class="muted" style="font-size:12px">Proxy API Key를 입력하면 Cursor·Roo·Cline 등 각 개발도구가 실제로 수행하는 연결 journey(모델 목록·MCP initialize/tools-list)를 합성 점검합니다. 실제 chat 호출(비용)은 하지 않습니다.</p>' +
+        '<div class="toolbar"><input id="jp-key" type="password" placeholder="Proxy API Key (vc_sk_...)" style="min-width:320px">' +
+        '<button type="button" id="jp-run">점검 실행</button></div>' +
+        '<div id="jp-results" style="margin-top:10px"></div></div>');
+      document.getElementById('jp-run').addEventListener('click', async () => {
+        const key = document.getElementById('jp-key').value.trim();
+        const host = document.getElementById('jp-results');
+        if (!key) { host.innerHTML = '<span class="status warn">Proxy API Key를 입력하세요.</span>'; return; }
+        host.innerHTML = '<div class="empty">점검 중...</div>';
+        try {
+          const d = await api('/admin/journey-probe', { method: 'POST', body: JSON.stringify({ proxy_key: key }) });
+          const sm = d.summary || {};
+          const scls = (s) => s === 'fail' ? 'error' : (s === 'warn' ? 'warn' : '');
+          const cards = (d.results || []).map(rs => {
+            const steps = (rs.checks || []).map(c => '<div style="font-size:11px;margin:2px 0"><span class="status ' + scls(c.status) + '" style="font-size:9px">' + escapeHTML(c.status) + '</span> ' + escapeHTML(c.name) + ' — ' + escapeHTML(c.detail) + (c.fix ? ' <span class="muted">(' + escapeHTML(c.fix) + ')</span>' : '') + '</div>').join('');
+            return '<div style="border:1px solid var(--border);border-radius:6px;padding:8px;margin:6px 0">' +
+              '<strong>' + escapeHTML(rs.client) + '</strong> <span class="status ' + scls(rs.overall) + '">' + escapeHTML(rs.overall) + '</span>' + steps + '</div>';
+          }).join('');
+          host.innerHTML = '<div style="margin-bottom:6px"><span class="status">' + (sm.passing || 0) + ' 정상</span> ' +
+            (sm.failing ? '<span class="status error">' + sm.failing + ' 실패</span>' : '') + ' / ' + (sm.clients || 0) + ' 도구</div>' +
+            cards + '<p class="muted" style="font-size:10px;margin-top:4px">' + escapeHTML(d.note || '') + '</p>';
+        } catch (e) { host.innerHTML = '<span class="status error">' + escapeHTML(e.message) + '</span>'; }
+      });
+    }
 
     async function renderRequestsView(initial) {
       const view = document.getElementById('view');
