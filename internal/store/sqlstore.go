@@ -288,6 +288,24 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 			response_text_optional TEXT,
 			created_at TEXT NOT NULL
 		)`,
+		`CREATE TABLE IF NOT EXISTS code_verify_results (
+			id TEXT PRIMARY KEY,
+			request_id TEXT NOT NULL,
+			trace_id TEXT NOT NULL DEFAULT '',
+			has_code INTEGER NOT NULL DEFAULT 0,
+			risk TEXT NOT NULL DEFAULT '',
+			block_count INTEGER NOT NULL DEFAULT 0,
+			languages TEXT NOT NULL DEFAULT '',
+			high_count INTEGER NOT NULL DEFAULT 0,
+			medium_count INTEGER NOT NULL DEFAULT 0,
+			syntax_count INTEGER NOT NULL DEFAULT 0,
+			secret_count INTEGER NOT NULL DEFAULT 0,
+			testable_count INTEGER NOT NULL DEFAULT 0,
+			findings_json TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_code_verify_request ON code_verify_results(request_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_code_verify_trace ON code_verify_results(trace_id)`,
 		`CREATE TABLE IF NOT EXISTS token_usage (
 			id TEXT PRIMARY KEY,
 			request_id TEXT NOT NULL,
@@ -2123,6 +2141,20 @@ func (s *SQLStore) InsertLogRecord(ctx context.Context, record LogRecord) error 
 			(id, request_id, status_code, finish_reason, response_hash, response_text_optional, created_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?)`),
 			cleanArgs([]any{resp.ID, resp.RequestID, resp.StatusCode, resp.FinishReason, resp.ResponseHash, resp.ResponseTextOptional, formatTime(resp.CreatedAt)})...)
+		if err != nil {
+			return err
+		}
+	}
+
+	if record.CodeVerify != nil {
+		cv := record.CodeVerify
+		if cv.CreatedAt.IsZero() {
+			cv.CreatedAt = req.CreatedAt
+		}
+		_, err = tx.ExecContext(ctx, s.bind(`INSERT INTO code_verify_results
+			(id, request_id, trace_id, has_code, risk, block_count, languages, high_count, medium_count, syntax_count, secret_count, testable_count, findings_json, created_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+			cleanArgs([]any{cv.ID, cv.RequestID, cv.TraceID, boolInt(cv.HasCode), cv.Risk, cv.BlockCount, cv.Languages, cv.HighCount, cv.MediumCount, cv.SyntaxCount, cv.SecretCount, cv.TestableCount, cv.FindingsJSON, formatTime(cv.CreatedAt)})...)
 		if err != nil {
 			return err
 		}

@@ -546,6 +546,16 @@ func (rc *requestPipeline) stepUpstream() bool {
 		ResponseTextOptional: responseText,
 		CreatedAt:            time.Now().UTC(),
 	}
+	// AI code output verification gate: when the completion text was captured (response-text
+	// logging or cache), persist a safe code verdict (risk/counts/findings) tied to this
+	// request+trace. The raw code is never stored — only metadata. No-op when there is no code.
+	if resp.StatusCode < 400 {
+		cvText := analysis.CompletionText
+		if cvText == "" {
+			cvText = analysis.Text
+		}
+		meta.CodeVerify = buildCodeVerifyLog(meta.Request.ID, traceID, cvText)
+	}
 	if analysis.HasUsage {
 		meta.Usage = &store.TokenUsage{
 			ID:               newID("usage"),

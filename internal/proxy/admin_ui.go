@@ -3876,6 +3876,27 @@ const adminHTML = `<!doctype html>
           '<div class="k">캡처된 응답</div><div class="v">' + (d.response.response_text_optional ? ('<div class="prompt-block markdown-view">' + renderMarkdown(d.response.response_text_optional) + '</div>') : '<span class="muted">없음 (LOG_RESPONSE_TEXT=false)</span>') + '</div>' +
         '</div>'
       ) : '<div class="muted">응답 메타 없음</div>';
+      const cv = d.code_verify;
+      const codeVerify = cv ? (() => {
+        const rcls = cv.risk === 'high' ? 'error' : (cv.risk === 'medium' ? 'warn' : '');
+        const fcls = (sev) => sev === 'high' ? 'error' : (sev === 'medium' ? 'warn' : '');
+        const findings = Array.isArray(cv.findings) ? cv.findings : [];
+        const list = findings.length ? ('<table><thead><tr><th>심각도</th><th>언어</th><th>줄</th><th>규칙</th><th>설명</th></tr></thead><tbody>' +
+          findings.slice(0, 50).map(f => '<tr>' +
+            '<td><span class="status ' + fcls(f.severity) + '">' + escapeHTML(f.severity || '') + '</span></td>' +
+            '<td>' + escapeHTML(f.lang || '') + '</td>' +
+            '<td>' + (f.line ? fmt(f.line) : '-') + '</td>' +
+            '<td>' + escapeHTML(f.rule || '') + '</td>' +
+            '<td>' + escapeHTML(f.detail || '') + '</td>' +
+          '</tr>').join('') + '</tbody></table>') : '<div class="muted">발견 항목 없음</div>';
+        return '<div class="kv">' +
+          row('위험도', '<span class="status ' + rcls + '">' + escapeHTML(cv.risk || '') + '</span>') +
+          row('코드블록', fmt(cv.block_count || 0) + (cv.languages ? ' (' + escapeHTML(cv.languages) + ')' : '')) +
+          row('위험 발견', 'high ' + fmt(cv.high_count || 0) + ' / med ' + fmt(cv.medium_count || 0)) +
+          row('시크릿/구문', fmt(cv.secret_count || 0) + ' / ' + fmt(cv.syntax_count || 0)) +
+          row('테스트 가능 블록', fmt(cv.testable_count || 0)) +
+        '</div>' + list;
+      })() : '<div class="muted">코드 검증 기록 없음 (응답에 코드블록이 없거나 캡처 비활성)</div>';
       const spans = (d.spans || []).length ? (
         '<table><thead><tr><th>Name</th><th>Kind</th><th>Status</th><th>지연</th><th>토큰/비용</th><th>Tools</th></tr></thead><tbody>' +
         (d.spans || []).map(s => '<tr>' +
@@ -3939,6 +3960,7 @@ const adminHTML = `<!doctype html>
         '</div>' +
         '<h3 style="margin-top:18px">프롬프트 (마스킹 적용)</h3>' + prompts +
         '<h3 style="margin-top:18px">응답</h3>' + resp +
+        '<h3 style="margin-top:18px">코드 검증</h3>' + codeVerify +
         '<h3 style="margin-top:18px">LLM Spans</h3>' + spans +
         '<h3 style="margin-top:18px">Text2SQL Timeline</h3>' + text2sqlSpans +
         '<h3 style="margin-top:18px">LLM Evaluation</h3>' + evals +

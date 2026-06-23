@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strconv"
@@ -866,6 +867,14 @@ func (s *SQLStore) RequestDetail(ctx context.Context, id string) (RequestDetail,
 	if found {
 		detail.Response = &resp
 	}
+
+	cv, cvFound, err := s.codeVerifyForRequest(ctx, item.ID)
+	if err != nil {
+		return detail, err
+	}
+	if cvFound {
+		detail.CodeVerify = &cv
+	}
 	return detail, nil
 }
 
@@ -1024,6 +1033,59 @@ func (s *SQLStore) responseDetailForRequest(ctx context.Context, requestID strin
 		return ResponseDetail{}, false, err
 	}
 	return detail, true, nil
+}
+
+func (s *SQLStore) codeVerifyForRequest(ctx context.Context, requestID string) (CodeVerifyDetail, bool, error) {
+	var d CodeVerifyDetail
+	var hasCode int
+	var findings string
+	err := s.db.QueryRowContext(ctx, s.bind(`
+		SELECT has_code, COALESCE(risk, ''), block_count, COALESCE(languages, ''),
+			high_count, medium_count, syntax_count, secret_count, testable_count,
+			COALESCE(findings_json, ''), created_at
+		FROM code_verify_results WHERE request_id = ?
+		ORDER BY created_at DESC LIMIT 1
+	`), requestID).Scan(&hasCode, &d.Risk, &d.BlockCount, &d.Languages,
+		&d.HighCount, &d.MediumCount, &d.SyntaxCount, &d.SecretCount, &d.TestableCount,
+		&findings, &d.CreatedAt)
+	if err == sql.ErrNoRows {
+		return CodeVerifyDetail{}, false, nil
+	}
+	if err != nil {
+		return CodeVerifyDetail{}, false, err
+	}
+	d.HasCode = hasCode != 0
+	if strings.TrimSpace(findings) == "" {
+		findings = "[]"
+	}
+	d.Findings = json.RawMessage(findings)
+	return d, true, nil
+}
+
+// CodeVerifyByTrace returns the persisted code verdicts for every request sharing a trace.
+func (s *SQLStore) CodeVerifyByTrace(ctx context.Context, traceID string) ([]CodeVerifyLog, error) {
+	rows, err := s.db.QueryContext(ctx, s.bind(`
+		SELECT id, request_id, trace_id, has_code, COALESCE(risk, ''), block_count, COALESCE(languages, ''),
+			high_count, medium_count, syntax_count, secret_count, testable_count, COALESCE(findings_json, ''), created_at
+		FROM code_verify_results WHERE trace_id = ? ORDER BY created_at DESC
+	`), traceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []CodeVerifyLog{}
+	for rows.Next() {
+		var c CodeVerifyLog
+		var hasCode int
+		var created string
+		if err := rows.Scan(&c.ID, &c.RequestID, &c.TraceID, &hasCode, &c.Risk, &c.BlockCount, &c.Languages,
+			&c.HighCount, &c.MediumCount, &c.SyntaxCount, &c.SecretCount, &c.TestableCount, &c.FindingsJSON, &created); err != nil {
+			return nil, err
+		}
+		c.HasCode = hasCode != 0
+		out = append(out, c)
+	}
+	return out, rows.Err()
 }
 
 func (s *SQLStore) EvaluationsForRequest(ctx context.Context, requestID string) ([]LLMEvaluation, error) {

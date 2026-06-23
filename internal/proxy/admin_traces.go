@@ -25,6 +25,7 @@ func (s *Server) handleTraceByID(w http.ResponseWriter, r *http.Request) {
 	requests, _ := s.db.RecentRequests(ctx, store.RequestFilter{TraceID: traceID, Limit: 200})
 	workflowRuns, _ := s.db.WorkflowRunsByTrace(ctx, traceID)
 	appRuns, _ := s.db.AIAppRunsByTrace(ctx, traceID)
+	codeVerdicts, _ := s.db.CodeVerifyByTrace(ctx, traceID)
 
 	// Lightweight request rows (the per-request waterfall lives at /admin/requests/{id}/trace).
 	reqRows := make([]map[string]any, 0, len(requests))
@@ -41,7 +42,8 @@ func (s *Server) handleTraceByID(w http.ResponseWriter, r *http.Request) {
 		"requests":      reqRows,
 		"workflow_runs": workflowRuns,
 		"app_runs":      appRuns,
-		"counts":        map[string]int{"requests": len(reqRows), "workflow_runs": len(workflowRuns), "app_runs": len(appRuns)},
+		"code_verdicts": codeVerdicts,
+		"counts":        map[string]int{"requests": len(reqRows), "workflow_runs": len(workflowRuns), "app_runs": len(appRuns), "code_verdicts": len(codeVerdicts)},
 		"note":          "이 trace_id로 묶인 게이트웨이 요청·워크플로·앱 실행입니다. 요청별 단계 waterfall은 request trace 링크로 확인하세요.",
 	})
 }

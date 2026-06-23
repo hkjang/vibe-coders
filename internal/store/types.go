@@ -1,6 +1,7 @@
 package store
 
 import (
+	"encoding/json"
 	"errors"
 	"time"
 )
@@ -310,6 +311,26 @@ type ResponseLog struct {
 	CreatedAt            time.Time
 }
 
+// CodeVerifyLog is the persisted verdict of the AI code output verification gate for one
+// response. It stores only safe metadata — risk, counts, and per-finding rule/line/detail —
+// never the raw code. FindingsJSON is a JSON array of {severity,category,rule,lang,line,detail}.
+type CodeVerifyLog struct {
+	ID            string
+	RequestID     string
+	TraceID       string
+	HasCode       bool
+	Risk          string
+	BlockCount    int
+	Languages     string // CSV of detected languages
+	HighCount     int
+	MediumCount   int
+	SyntaxCount   int
+	SecretCount   int
+	TestableCount int
+	FindingsJSON  string
+	CreatedAt     time.Time
+}
+
 type TokenUsage struct {
 	ID               string
 	RequestID        string
@@ -342,6 +363,7 @@ type LogRecord struct {
 	Evaluations []LLMEvaluation
 	Tools       []ToolInvocation
 	Routing     *RoutingDecisionLog
+	CodeVerify  *CodeVerifyLog
 }
 
 // ToolInvocation captures a single tool/MCP interaction observed in a request or
@@ -797,17 +819,33 @@ type ResponseDetail struct {
 	CreatedAt            string `json:"created_at"`
 }
 
+// CodeVerifyDetail is the request-detail view of a persisted code verification verdict.
+type CodeVerifyDetail struct {
+	Risk          string          `json:"risk"`
+	HasCode       bool            `json:"has_code"`
+	BlockCount    int             `json:"block_count"`
+	Languages     string          `json:"languages"`
+	HighCount     int             `json:"high_count"`
+	MediumCount   int             `json:"medium_count"`
+	SyntaxCount   int             `json:"syntax_count"`
+	SecretCount   int             `json:"secret_count"`
+	TestableCount int             `json:"testable_count"`
+	Findings      json.RawMessage `json:"findings"`
+	CreatedAt     string          `json:"created_at"`
+}
+
 type RequestDetail struct {
-	Request       RecentRequest    `json:"request"`
-	Prompts       []PromptDetail   `json:"prompts"`
-	Response      *ResponseDetail  `json:"response,omitempty"`
-	Languages     []LanguageStat   `json:"languages"`
-	Spans         []LLMSpan        `json:"spans"`
-	Text2SQLSpans []Text2SQLSpan   `json:"text2sql_spans"`
-	Evaluations   []LLMEvaluation  `json:"evaluations"`
-	Feedback      []LLMFeedback    `json:"feedback"`
-	Tools         []ToolInvocation `json:"tools"`
-	Governance    GovernanceEvents `json:"governance"`
+	Request       RecentRequest     `json:"request"`
+	Prompts       []PromptDetail    `json:"prompts"`
+	Response      *ResponseDetail   `json:"response,omitempty"`
+	Languages     []LanguageStat    `json:"languages"`
+	Spans         []LLMSpan         `json:"spans"`
+	Text2SQLSpans []Text2SQLSpan    `json:"text2sql_spans"`
+	Evaluations   []LLMEvaluation   `json:"evaluations"`
+	Feedback      []LLMFeedback     `json:"feedback"`
+	Tools         []ToolInvocation  `json:"tools"`
+	Governance    GovernanceEvents  `json:"governance"`
+	CodeVerify    *CodeVerifyDetail `json:"code_verify,omitempty"`
 }
 
 type GovernanceEvents struct {

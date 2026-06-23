@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+
+	"vibe-coders/internal/store"
 )
 
 // AI Code Output Verification Gate (1차).
@@ -369,6 +371,50 @@ func verifyCode(text string) codeVerifyReport {
 	rep.Languages = langs
 	rep.Risk = overall
 	return rep
+}
+
+// buildCodeVerifyLog runs the gate over a response's text and returns a persistable verdict,
+// or nil when there is no code to verify. Only safe metadata is stored (risk, counts, and
+// per-finding rule/line/detail) — never the raw code. Findings are capped to bound row size.
+func buildCodeVerifyLog(requestID, traceID, text string) *store.CodeVerifyLog {
+	if strings.TrimSpace(text) == "" {
+		return nil
+	}
+	rep := verifyCode(text)
+	if !rep.HasCode {
+		return nil
+	}
+	findings := []codeFinding{}
+	for _, b := range rep.Blocks {
+		for _, f := range b.Findings {
+			findings = append(findings, f)
+			if len(findings) >= 100 {
+				break
+			}
+		}
+		if len(findings) >= 100 {
+			break
+		}
+	}
+	fj, err := json.Marshal(findings)
+	if err != nil {
+		fj = []byte("[]")
+	}
+	return &store.CodeVerifyLog{
+		ID:            newID("cv"),
+		RequestID:     requestID,
+		TraceID:       traceID,
+		HasCode:       true,
+		Risk:          rep.Risk,
+		BlockCount:    rep.BlockCount,
+		Languages:     strings.Join(rep.Languages, ","),
+		HighCount:     rep.Counts["high"],
+		MediumCount:   rep.Counts["medium"],
+		SyntaxCount:   rep.Counts["syntax"],
+		SecretCount:   rep.Counts["secret"],
+		TestableCount: rep.Counts["testable"],
+		FindingsJSON:  string(fj),
+	}
 }
 
 // handleCodeVerify lets admins (and internal callers) verify arbitrary text on demand.
