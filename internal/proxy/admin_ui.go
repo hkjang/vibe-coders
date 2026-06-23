@@ -2402,9 +2402,15 @@ const adminHTML = `<!doctype html>
         const d = await api('/admin/sessions/' + encodeURIComponent(sessionID) + '/flight-recorder');
         const ro = d.rollup || {};
         const kindBadges = Object.entries(ro.kinds || {}).map(([k, n]) => '<span class="status" style="font-size:9px">' + escapeHTML(k) + ' ' + n + '</span>').join(' ');
+        const rk = ro.risk || {};
+        const riskBadges = [];
+        if (rk.secret_requests) riskBadges.push('<span class="status error" style="font-size:9px">시크릿 ' + rk.secret_requests + '</span>');
+        if (rk.policy_block_requests) riskBadges.push('<span class="status error" style="font-size:9px">정책 차단 ' + rk.policy_block_requests + '</span>');
+        if (rk.high_risk_code_requests) riskBadges.push('<span class="status warn" style="font-size:9px">위험 코드 ' + rk.high_risk_code_requests + '</span>');
         const summary = '<div class="kv">' +
           row('세션', escapeHTML(d.session_id)) +
           row('요청 수', fmt(ro.requests || 0) + (ro.errors ? ' · <span class="status error">오류 ' + ro.errors + '</span>' : '')) +
+          row('위험 신호', riskBadges.length ? riskBadges.join(' ') : '<span class="muted">없음</span>') +
           row('기간', escapeHTML((ro.started_at || '') + ' → ' + (ro.ended_at || ''))) +
           row('종류', kindBadges || '-') +
           row('모델', escapeHTML((ro.models || []).join(', ') || '-')) +
@@ -2413,7 +2419,12 @@ const adminHTML = `<!doctype html>
           row('토큰/비용', fmt(ro.total_tokens || 0) + ' tok · ' + money(ro.total_cost || 0)) +
           row('도구 호출', fmt(ro.tool_calls || 0)) +
         '</div>';
-        const rows = (d.events || []).map((e, i) => '<tr>' +
+        const rows = (d.events || []).map((e, i) => {
+          const flags = [];
+          if (e.secret_events) flags.push('<span class="status error" style="font-size:9px" title="시크릿 이벤트">🔑' + e.secret_events + '</span>');
+          if (e.policy_blocks) flags.push('<span class="status error" style="font-size:9px" title="정책 차단">⛔' + e.policy_blocks + '</span>');
+          if (e.code_risk) flags.push('<span class="status ' + (e.code_risk === 'high' ? 'error' : (e.code_risk === 'medium' ? 'warn' : '')) + '" style="font-size:9px" title="코드 위험">⚠' + escapeHTML(e.code_risk) + '</span>');
+          return '<tr>' +
           '<td>' + (i + 1) + '</td>' +
           '<td>' + escapeHTML(e.created_at || '') + '</td>' +
           '<td><span class="status" style="font-size:9px">' + escapeHTML(e.kind || '') + '</span></td>' +
@@ -2422,12 +2433,14 @@ const adminHTML = `<!doctype html>
           '<td>' + fmt(e.latency_ms || 0) + ' ms</td>' +
           '<td>' + fmt(e.total_tokens || 0) + '<div class="muted" style="font-size:10px">' + money(e.cost_krw || 0) + '</div></td>' +
           '<td>' + fmt(e.tool_count || 0) + '</td>' +
+          '<td>' + (flags.join(' ') || '-') + '</td>' +
           '<td><a href="#" onclick="closeModal();openRequestDetail(\'' + escapeAttr(e.request_id) + '\');return false">상세</a></td>' +
-        '</tr>').join('') || '<tr><td colspan="9" class="muted">이벤트 없음</td></tr>';
+        '</tr>';
+        }).join('') || '<tr><td colspan="10" class="muted">이벤트 없음</td></tr>';
         openModal('세션 비행기록 - ' + escapeHTML(sessionID),
           summary +
           '<h3 style="margin-top:14px">타임라인 (' + (d.events || []).length + ')</h3>' +
-          '<table><thead><tr><th>#</th><th>시각</th><th>종류</th><th>모델</th><th>상태</th><th>지연</th><th>토큰/비용</th><th>도구</th><th></th></tr></thead><tbody>' + rows + '</tbody></table>' +
+          '<table><thead><tr><th>#</th><th>시각</th><th>종류</th><th>모델</th><th>상태</th><th>지연</th><th>토큰/비용</th><th>도구</th><th>위험</th><th></th></tr></thead><tbody>' + rows + '</tbody></table>' +
           '<p class="muted" style="font-size:10px;margin-top:6px">' + escapeHTML(d.note || '') + '</p>');
       } catch (err) {
         openModal('오류', '<div class="error-line">' + escapeHTML(err.message) + '</div>');
