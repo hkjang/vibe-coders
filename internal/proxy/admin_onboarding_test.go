@@ -51,3 +51,45 @@ func TestAppOnboardingChecklist(t *testing.T) {
 		t.Fatalf("unscoped app should flag access_scope as a recommended gap, got %+v", checks3)
 	}
 }
+
+func TestMCPOnboardingChecklist(t *testing.T) {
+	// Complete low-risk upstream is ready.
+	ready, _ := mcpOnboardingChecklist(store.MCPUpstream{
+		Name: "fs", URL: "https://mcp.example/sse",
+		Metadata: store.MCPUpstreamMetadata{Description: "files", RiskLevel: "low"},
+	})
+	if !ready {
+		t.Fatal("complete low-risk upstream should be ready")
+	}
+
+	// Missing name+url → not ready.
+	nr, _ := mcpOnboardingChecklist(store.MCPUpstream{})
+	if nr {
+		t.Fatal("upstream without name/url must not be ready")
+	}
+
+	// High-risk WITHOUT approval gate → required check fails → not ready.
+	hr, checks := mcpOnboardingChecklist(store.MCPUpstream{
+		Name: "exec", URL: "https://x", Metadata: store.MCPUpstreamMetadata{RiskLevel: "high"},
+	})
+	if hr {
+		t.Fatal("high-risk upstream without approval gate must not be ready")
+	}
+	gate := false
+	for _, c := range checks {
+		if c.Key == "approval_gate" && c.Severity == "required" && !c.OK {
+			gate = true
+		}
+	}
+	if !gate {
+		t.Fatalf("high-risk upstream should require an approval gate, got %+v", checks)
+	}
+
+	// High-risk WITH approval gate → ready.
+	hr2, _ := mcpOnboardingChecklist(store.MCPUpstream{
+		Name: "exec", URL: "https://x", Metadata: store.MCPUpstreamMetadata{RiskLevel: "high", RequiresApproval: true},
+	})
+	if !hr2 {
+		t.Fatal("high-risk upstream with approval gate should be ready")
+	}
+}

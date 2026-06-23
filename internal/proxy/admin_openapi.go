@@ -86,6 +86,7 @@ var apiEndpoints = []apiEndpoint{
 	{"/admin/privacy-ledger", []string{"get"}, "admin", "Privacy/data-egress ledger by team/model/provider (detect/mask/block + egress); ?format=csv for export", false},
 	{"/admin/productivity", []string{"get"}, "admin", "AI usage vs delivery (VCS commits/MRs) correlation per repo", false},
 	{"/admin/apps/onboarding-check", []string{"post"}, "admin", "Pre-publish onboarding readiness checklist for an AI app draft", false},
+	{"/admin/mcp/onboarding-check", []string{"post"}, "admin", "Pre-register onboarding readiness checklist for an MCP upstream draft", false},
 	{"/admin/sessions", []string{"get"}, "admin", "Recent coding sessions (flight-recorder index)", false},
 	{"/admin/sessions/{session_id}/flight-recorder", []string{"get"}, "admin", "Chronological flight recorder for one agent session", false},
 	{"/admin/requests/diff", []string{"get"}, "admin", "Diff two requests", false},
