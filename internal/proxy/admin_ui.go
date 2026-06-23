@@ -343,6 +343,7 @@ const adminHTML = `<!doctype html>
       <a href="#/routing" data-tab="routing">라우팅</a>
       <a href="#/chat-test" data-tab="chat-test">Chat 테스트</a>
       <a href="#/requests" data-tab="requests">호출 이력</a>
+      <a href="#/sessions" data-tab="sessions">세션 비행기록</a>
       <a href="#/prompts" data-tab="prompts">프롬프트 검색</a>
       <a href="#/prompt-assets" data-tab="prompt-assets">자산 관리소</a>
       <a href="#/users" data-tab="users">사용자</a>
@@ -1146,6 +1147,7 @@ const adminHTML = `<!doctype html>
           case 'waterfall': await renderWaterfall(params); break;
           case 'llm':       await renderLLMObservability(); break;
           case 'requests':  await renderRequestsView(params); break;
+          case 'sessions':  await renderSessionsView(); break;
           case 'prompts':       await renderPromptsView(params); break;
           case 'prompt-assets': await renderPromptAssets(params); break;
           case 'apps': await renderWorkApps(params); break;
@@ -4022,6 +4024,40 @@ const adminHTML = `<!doctype html>
 
     // ---------- requests view ----------
     let diffSelection = JSON.parse(sessionStorage.getItem('diffSelection') || '[]');
+    // 세션 비행기록 인덱스 — 최근 코딩 세션 목록, 각 세션의 비행기록 모달로 드릴인.
+    async function renderSessionsView() {
+      const view = document.getElementById('view');
+      const days = sessionStorage.getItem('sessionsDays') || '7';
+      view.innerHTML = section('세션 비행기록',
+        '<div class="toolbar"><label class="muted">기간(일) <input id="sess-days" type="number" min="1" max="365" value="' + escapeAttr(days) + '" style="width:80px"></label>' +
+        '<button type="button" id="sess-reload">조회</button></div>' +
+        '<div id="sessions-results"><div class="empty">불러오는 중...</div></div>');
+      const load = async () => {
+        const d = document.getElementById('sess-days').value.trim() || '7';
+        sessionStorage.setItem('sessionsDays', d);
+        const host = document.getElementById('sessions-results');
+        try {
+          const data = await api('/admin/sessions?days=' + encodeURIComponent(d));
+          const ss = data.sessions || [];
+          if (!ss.length) { host.innerHTML = '<div class="empty">세션 없음 (클라이언트가 session_id를 보내야 집계됩니다)</div>'; return; }
+          const rows = ss.map(s => '<tr>' +
+            '<td><code>' + escapeHTML(s.session_id) + '</code></td>' +
+            '<td>' + fmt(s.requests || 0) + (s.errors ? ' · <span class="status error">' + s.errors + '</span>' : '') + '</td>' +
+            '<td>' + fmt(s.models || 0) + '</td>' +
+            '<td>' + fmt(s.total_tokens || 0) + '</td>' +
+            '<td>' + money(s.cost_krw || 0) + '</td>' +
+            '<td>' + ago(s.last_seen) + '</td>' +
+            '<td><button type="button" class="secondary" onclick="openFlightRecorder(\'' + escapeAttr(s.session_id) + '\')">비행기록</button></td>' +
+          '</tr>').join('');
+          host.innerHTML = card('최근 세션 (' + ss.length + ')',
+            '<div class="card-body"><table><thead><tr><th>세션</th><th>요청</th><th>모델</th><th>토큰</th><th>비용</th><th>마지막 활동</th><th></th></tr></thead><tbody>' + rows + '</tbody></table>' +
+            '<p class="muted" style="font-size:10px;margin-top:6px">' + escapeHTML(data.note || '') + '</p></div>');
+        } catch (e) { host.innerHTML = '<span class="status error">' + escapeHTML(e.message) + '</span>'; }
+      };
+      document.getElementById('sess-reload').addEventListener('click', load);
+      await load();
+    }
+
     async function renderRequestsView(initial) {
       const view = document.getElementById('view');
       const [models, ips, langs] = await Promise.all([

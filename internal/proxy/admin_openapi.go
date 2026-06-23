@@ -80,6 +80,7 @@ var apiEndpoints = []apiEndpoint{
 	{"/admin/traces/{trace_id}", []string{"get"}, "admin", "All requests + workflow/app runs sharing a trace_id", false},
 	{"/admin/code-verify", []string{"post"}, "admin", "Static verification gate for AI-generated code blocks (risk/secret/syntax)", false},
 	{"/admin/code-verify/stats", []string{"get"}, "admin", "Per-model code risk leaderboard from persisted verdicts", false},
+	{"/admin/sessions", []string{"get"}, "admin", "Recent coding sessions (flight-recorder index)", false},
 	{"/admin/sessions/{session_id}/flight-recorder", []string{"get"}, "admin", "Chronological flight recorder for one agent session", false},
 	{"/admin/requests/diff", []string{"get"}, "admin", "Diff two requests", false},
 	{"/admin/prompts", []string{"get"}, "admin", "Search prompts", false},

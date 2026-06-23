@@ -3,7 +3,9 @@ package proxy
 import (
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 
 	"vibe-coders/internal/store"
 )
@@ -32,6 +34,32 @@ func endpointKind(endpoint string) string {
 	default:
 		return strings.TrimPrefix(endpoint, "/v1/")
 	}
+}
+
+// handleSessionList returns recent coding sessions (rolled up) for the flight-recorder index.
+// GET /admin/sessions?days=
+func (s *Server) handleSessionList(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	days := 7
+	if d := strings.TrimSpace(r.URL.Query().Get("days")); d != "" {
+		if n, err := strconv.Atoi(d); err == nil && n > 0 && n <= 365 {
+			days = n
+		}
+	}
+	since := time.Now().UTC().AddDate(0, 0, -days)
+	sessions, err := s.db.RecentSessions(r.Context(), since, 200)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "session_list_failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"days":     days,
+		"sessions": sessions,
+		"note":     "최근 코딩 세션(클라이언트 session_id)을 활동순으로 보여줍니다. 각 세션의 비행기록으로 드릴인하세요.",
+	})
 }
 
 // handleSessionFlightRecorder assembles the chronological flight recorder for a session.

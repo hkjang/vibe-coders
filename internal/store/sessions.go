@@ -60,3 +60,57 @@ func (s *SQLStore) DeleteExpiredInferredSessions(ctx context.Context, cutoff tim
 	}
 	return res.RowsAffected()
 }
+
+// SessionSummary is a rolled-up view of one coding session (request_logs.session_id) for the
+// flight-recorder session list.
+type SessionSummary struct {
+	SessionID   string  `json:"session_id"`
+	Requests    int     `json:"requests"`
+	FirstSeen   string  `json:"first_seen"`
+	LastSeen    string  `json:"last_seen"`
+	Models      int     `json:"models"`
+	APIKeys     int     `json:"api_keys"`
+	Errors      int     `json:"errors"`
+	TotalTokens int     `json:"total_tokens"`
+	CostKRW     float64 `json:"cost_krw"`
+}
+
+// RecentSessions groups request_logs by session_id since a cutoff, newest activity first.
+// Sessions with an empty session_id (anonymous/no client session) are excluded.
+func (s *SQLStore) RecentSessions(ctx context.Context, since time.Time, limit int) ([]SessionSummary, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	query := s.bind(`
+		SELECT r.session_id,
+			COUNT(*),
+			MIN(r.created_at),
+			MAX(r.created_at),
+			COUNT(DISTINCT r.model),
+			COUNT(DISTINCT r.api_key_id),
+			COALESCE(SUM(CASE WHEN r.status_code >= 400 THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(t.total_tokens), 0),
+			COALESCE(SUM(t.estimated_cost), 0)
+		FROM request_logs r
+		LEFT JOIN token_usage t ON t.request_id = r.id
+		WHERE r.session_id <> '' AND r.created_at >= ?
+		GROUP BY r.session_id
+		ORDER BY MAX(r.created_at) DESC
+		LIMIT ?
+	`)
+	rows, err := s.db.QueryContext(ctx, query, since.UTC().Format(time.RFC3339Nano), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []SessionSummary{}
+	for rows.Next() {
+		var x SessionSummary
+		if err := rows.Scan(&x.SessionID, &x.Requests, &x.FirstSeen, &x.LastSeen,
+			&x.Models, &x.APIKeys, &x.Errors, &x.TotalTokens, &x.CostKRW); err != nil {
+			return nil, err
+		}
+		out = append(out, x)
+	}
+	return out, rows.Err()
+}

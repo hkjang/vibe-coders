@@ -14,14 +14,14 @@ const menuVersion = 1
 // rendered menu (/me/navigation) and the SPA's route guard, so hiding a menu and blocking
 // its route can never drift apart.
 type menuItem struct {
-	ID       string   `json:"id"`
-	Label    string   `json:"label"`
-	Path     string   `json:"path"`             // hash route, e.g. "#/dashboard"
-	Tab      string   `json:"tab"`              // SPA data-tab value
-	Group    string   `json:"group"`            // me | ops | security | settings
-	Scopes   []string `json:"required_scopes"`  // any-of; empty = any authenticated user
-	Features []string `json:"required_features"`
-	DataScope string  `json:"data_scope"`       // self | team | all
+	ID        string   `json:"id"`
+	Label     string   `json:"label"`
+	Path      string   `json:"path"`            // hash route, e.g. "#/dashboard"
+	Tab       string   `json:"tab"`             // SPA data-tab value
+	Group     string   `json:"group"`           // me | ops | security | settings
+	Scopes    []string `json:"required_scopes"` // any-of; empty = any authenticated user
+	Features  []string `json:"required_features"`
+	DataScope string   `json:"data_scope"` // self | team | all
 }
 
 // menuRegistry is the single source of truth for navigation. Order = display order.
@@ -42,6 +42,7 @@ var menuRegistry = []menuItem{
 	{ID: "ops.routing", Label: "라우팅", Path: "#/routing", Tab: "routing", Group: "ops", Scopes: []string{"admin:read"}, DataScope: "all"},
 	{ID: "ops.chat_test", Label: "Chat 테스트", Path: "#/chat-test", Tab: "chat-test", Group: "ops", Scopes: []string{"admin:read"}, DataScope: "all"},
 	{ID: "ops.requests", Label: "호출 이력", Path: "#/requests", Tab: "requests", Group: "ops", Scopes: []string{"admin:read"}, DataScope: "all"},
+	{ID: "ops.sessions", Label: "세션 비행기록", Path: "#/sessions", Tab: "sessions", Group: "ops", Scopes: []string{"admin:read"}, DataScope: "all"},
 	{ID: "ops.prompts", Label: "프롬프트 검색", Path: "#/prompts", Tab: "prompts", Group: "ops", Scopes: []string{"admin:read"}, DataScope: "all"},
 	{ID: "ops.prompt_assets", Label: "자산 관리소", Path: "#/prompt-assets", Tab: "prompt-assets", Group: "ops", Scopes: []string{"admin:read"}, DataScope: "all"},
 	{ID: "ops.apps", Label: "AI 업무 앱", Path: "#/apps", Tab: "apps", Group: "ops", Scopes: []string{"admin:read"}, DataScope: "all"},
