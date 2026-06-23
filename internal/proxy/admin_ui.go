@@ -4153,9 +4153,21 @@ const adminHTML = `<!doctype html>
       view.innerHTML = section('프라이버시 원장 (Data Egress Ledger)',
         '<div class="toolbar"><label class="muted">차원 <select id="pl-dim">' +
         ['team', 'model', 'provider'].map(x => '<option value="' + x + '"' + (x === dim ? ' selected' : '') + '>' + x + '</option>').join('') +
-        '</select></label></div>') +
+        '</select></label><button type="button" class="secondary" id="pl-csv">CSV 내보내기</button></div>') +
         '<div id="pl-results"></div>';
       document.getElementById('pl-dim').addEventListener('change', (e) => load(e.target.value));
+      document.getElementById('pl-csv').addEventListener('click', async () => {
+        const dimension = document.getElementById('pl-dim').value;
+        try {
+          const res = await fetch('/admin/privacy-ledger?dimension=' + dimension + '&days=30&format=csv', { headers: headers() });
+          const blob = await res.blob();
+          const a = document.createElement('a');
+          a.href = URL.createObjectURL(blob);
+          a.download = 'privacy-ledger-' + dimension + '.csv';
+          a.click();
+          URL.revokeObjectURL(a.href);
+        } catch (e) { openModal('내보내기 오류', '<div class="error-line">' + escapeHTML(e.message) + '</div>'); }
+      });
       await load(dim);
     }
 

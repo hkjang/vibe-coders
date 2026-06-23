@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"fmt"
 	"net/http"
 	"sort"
 	"strconv"
@@ -49,6 +50,19 @@ func (s *Server) handlePrivacyLedger(w http.ResponseWriter, r *http.Request) {
 		totReq += x.EgressRequests
 		totTok += x.EgressTokens
 	}
+
+	// CSV export for audit/PIA deliverables.
+	if strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("format")), "csv") {
+		w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+		w.Header().Set("Content-Disposition", "attachment; filename=privacy-ledger-"+dimension+".csv")
+		fmt.Fprintf(w, "%s,detections,masked,blocked,egress_requests,egress_tokens\n", dimension)
+		for _, x := range rows {
+			fmt.Fprintf(w, "%s,%d,%d,%d,%d,%d\n", csvField(x.DimValue), x.Detections, x.Masked, x.Blocked, x.EgressRequests, x.EgressTokens)
+		}
+		fmt.Fprintf(w, "TOTAL,%d,%d,%d,%d,%d\n", totDet, totMask, totBlock, totReq, totTok)
+		return
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"dimension": dimension,
 		"days":      days,
