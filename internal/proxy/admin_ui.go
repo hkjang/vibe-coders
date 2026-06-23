@@ -351,6 +351,7 @@ const adminHTML = `<!doctype html>
       <a href="#/prompt-assets" data-tab="prompt-assets">자산 관리소</a>
       <a href="#/users" data-tab="users">사용자</a>
       <a href="#/safety" data-tab="safety">안전</a>
+      <a href="#/privacy-ledger" data-tab="privacy-ledger">프라이버시 원장</a>
       <a href="#/text2sql" data-tab="text2sql">Text2SQL</a>
       <a href="#/settings" data-tab="settings">설정</a>
     </nav>
@@ -1154,6 +1155,7 @@ const adminHTML = `<!doctype html>
           case 'sbom':      await renderSBOMView(); break;
           case 'journey-probe': await renderJourneyProbeView(); break;
           case 'pods':      await renderPodsView(); break;
+          case 'privacy-ledger': await renderPrivacyLedgerView(); break;
           case 'prompts':       await renderPromptsView(params); break;
           case 'prompt-assets': await renderPromptAssets(params); break;
           case 'apps': await renderWorkApps(params); break;
@@ -4121,6 +4123,41 @@ const adminHTML = `<!doctype html>
         URL.revokeObjectURL(a.href);
       } catch (e) { openModal('내보내기 오류', '<div class="error-line">' + escapeHTML(e.message) + '</div>'); }
     };
+
+    // 프라이버시 원장 — 민감정보 탐지/마스킹/차단 + 외부 provider 전송량(감사·PIA).
+    async function renderPrivacyLedgerView() {
+      const view = document.getElementById('view');
+      const dim = sessionStorage.getItem('privacyDim') || 'team';
+      const render = async (d) => {
+        const t = d.totals || {};
+        const rows = (d.rows || []).map(rw => '<tr>' +
+          '<td>' + escapeHTML(rw.dim_value) + '</td>' +
+          '<td>' + fmt(rw.detections || 0) + '</td>' +
+          '<td>' + fmt(rw.masked || 0) + '</td>' +
+          '<td>' + (rw.blocked ? '<span class="status error">' + fmt(rw.blocked) + '</span>' : '0') + '</td>' +
+          '<td>' + fmt(rw.egress_requests || 0) + '</td>' +
+          '<td>' + fmt(rw.egress_tokens || 0) + '</td>' +
+        '</tr>').join('') || '<tr><td colspan="6" class="muted">데이터 없음</td></tr>';
+        return '<div class="kpis">' + kpi('탐지', fmt(t.detections || 0)) + kpi('마스킹', fmt(t.masked || 0)) + kpi('차단', fmt(t.blocked || 0)) + kpi('전송 요청', fmt(t.egress_requests || 0)) + kpi('전송 토큰', fmt(t.egress_tokens || 0)) + '</div>' +
+          card('프라이버시 원장 (최근 ' + (d.days || 30) + '일, ' + escapeHTML(d.dimension) + ')',
+            '<div class="card-body"><table><thead><tr><th>' + escapeHTML(d.dimension) + '</th><th>탐지</th><th>마스킹</th><th>차단</th><th>전송 요청</th><th>전송 토큰</th></tr></thead><tbody>' + rows + '</tbody></table>' +
+            '<p class="muted" style="font-size:10px;margin-top:6px">' + escapeHTML(d.note || '') + '</p></div>');
+      };
+      const load = async (dimension) => {
+        sessionStorage.setItem('privacyDim', dimension);
+        const host = document.getElementById('pl-results');
+        host.innerHTML = '<div class="empty">불러오는 중...</div>';
+        try { host.innerHTML = await render(await api('/admin/privacy-ledger?dimension=' + dimension + '&days=30')); }
+        catch (e) { host.innerHTML = '<span class="status error">' + escapeHTML(e.message) + '</span>'; }
+      };
+      view.innerHTML = section('프라이버시 원장 (Data Egress Ledger)',
+        '<div class="toolbar"><label class="muted">차원 <select id="pl-dim">' +
+        ['team', 'model', 'provider'].map(x => '<option value="' + x + '"' + (x === dim ? ' selected' : '') + '>' + x + '</option>').join('') +
+        '</select></label></div>') +
+        '<div id="pl-results"></div>';
+      document.getElementById('pl-dim').addEventListener('change', (e) => load(e.target.value));
+      await load(dim);
+    }
 
     // 파드 운영 맵 — 멀티 파드 하트비트·빌드·런타임 설정 수렴 상태.
     async function renderPodsView() {
