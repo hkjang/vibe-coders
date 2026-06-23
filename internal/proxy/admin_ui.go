@@ -9854,13 +9854,40 @@ const adminHTML = `<!doctype html>
           openModal('draft 정책 생성됨', '<p>' + escapeHTML(res.note || '') + '</p><p class="muted" style="font-size:12px">정책 ID: ' + escapeHTML(res.policy_id || '') + '</p><div style="margin-top:8px"><a href="#/safety"><button type="button">정책 화면으로 이동</button></a></div>');
         } catch (e) { openModal('적용 오류', '<div class="error-line">' + escapeHTML(e.message) + '</div>'); }
       };
+      // 섀도우 영향 미리보기 — 추천 규칙을 최근 트래픽에 적용했을 때의 예상 영향(차단·영향 사용자·오탐·비용).
+      window.policyAdvisorShadow = async (idx) => {
+        const sug = (window._advisorSuggestions || [])[idx];
+        if (!sug) return;
+        openModal('섀도우 영향 분석', '<div class="empty">최근 트래픽에 시뮬레이션 중...</div>');
+        try {
+          const d = await api('/admin/policies/simulate', { method: 'POST', body: JSON.stringify({ rules: [{ name: sug.title, conditions: sug.conditions, actions: sug.actions }], window: '7d' }) });
+          const sh = d.shadow || {};
+          const fpr = Math.round((sh.false_positive_rate || 0) * 100);
+          const fpcls = fpr >= 30 ? 'error' : (fpr >= 10 ? 'warn' : '');
+          const fpRows = (sh.false_positive_sample || []).slice(0, 20).map(s =>
+            '<tr><td>' + escapeHTML(s.api_key_id || '') + '</td><td>' + escapeHTML(s.team_id || '') + '</td><td>' + escapeHTML(s.model || '') + '</td><td>' + (s.status_code || 0) + '</td><td>' + escapeHTML(s.reason || '') + '</td></tr>').join('');
+          openModal('섀도우 영향 분석 — ' + escapeHTML(sug.title),
+            '<div class="kv">' +
+              row('평가 요청(최근 7일)', fmt(d.evaluated || 0)) +
+              row('차단 예상', fmt(d.blocked || 0) + ' · ' + Math.round((d.block_rate || 0) * 100) + '%') +
+              row('승인 필요', fmt(d.require_approval || 0)) +
+              row('영향 사용자/팀', fmt(sh.affected_keys || 0) + ' 키 · ' + fmt(sh.affected_teams || 0) + ' 팀') +
+              row('오탐 후보', '<span class="status ' + fpcls + '">' + fmt(sh.false_positive_candidates || 0) + ' (' + fpr + '%)</span> <span class="muted" style="font-size:11px">과거 정상(2xx)이었으나 차단될 요청</span>') +
+              row('차단 비용(절감 추정)', money(sh.blocked_cost_krw || 0)) +
+            '</div>' +
+            (fpRows ? ('<h3 style="margin-top:14px">오탐 후보 표본</h3><table><thead><tr><th>API 키</th><th>팀</th><th>모델</th><th>상태</th><th>사유</th></tr></thead><tbody>' + fpRows + '</tbody></table>') : '') +
+            '<p class="muted" style="font-size:10px;margin-top:6px">' + escapeHTML(d.note || '') + '</p>' +
+            '<div style="margin-top:8px"><button type="button" onclick="policyAdvisorApply(' + idx + ')">이 규칙으로 draft 정책 생성</button></div>');
+        } catch (e) { openModal('시뮬레이션 오류', '<div class="error-line">' + escapeHTML(e.message) + '</div>'); }
+      };
       const sugs = d.suggestions || [];
       window._advisorSuggestions = sugs;
       const sevBadge = (s) => s === 'critical' ? '<span class="status error">심각</span>' : (s === 'warning' ? '<span class="status warn">경고</span>' : '<span class="status">정보</span>');
       const cards = sugs.map((sug, i) =>
         '<div style="border:1px solid var(--border);border-radius:6px;padding:10px;margin:6px 0">' +
         '<div style="display:flex;justify-content:space-between;align-items:center"><strong>' + sevBadge(sug.severity) + ' ' + escapeHTML(sug.title) + '</strong>' +
-        '<button type="button" style="font-size:11px" onclick="policyAdvisorApply(' + i + ')">draft 정책 생성</button></div>' +
+        '<span><button type="button" class="secondary" style="font-size:11px" onclick="policyAdvisorShadow(' + i + ')">섀도우 영향</button> ' +
+        '<button type="button" style="font-size:11px" onclick="policyAdvisorApply(' + i + ')">draft 정책 생성</button></span></div>' +
         '<div class="muted" style="font-size:12px;margin:4px 0">' + escapeHTML(sug.rationale) + '</div>' +
         '<div style="font-size:11px"><strong>조건:</strong> <code>' + escapeHTML(JSON.stringify(sug.conditions)) + '</code> · <strong>액션:</strong> <code>' + escapeHTML(JSON.stringify(sug.actions)) + '</code></div>' +
         '<div class="muted" style="font-size:11px"><strong>근거:</strong> <code>' + escapeHTML(JSON.stringify(sug.evidence)) + '</code></div>' +
