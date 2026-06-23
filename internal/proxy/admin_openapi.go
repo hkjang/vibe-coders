@@ -287,6 +287,7 @@ var apiEndpoints = []apiEndpoint{
 	{"/me/navigation", []string{"get"}, "self-service", "Personalized navigation menu for the caller", false},
 	{"/me/notifications", []string{"get"}, "self-service", "Unified personal notification feed", false},
 	{"/me/recommended-models", []string{"get"}, "self-service", "Recommended models for the caller's work", false},
+	{"/me/overlay", []string{"get"}, "self-service", "Compact status snapshot (model/budget/action items) for an IDE overlay", false},
 	{"/me/report", []string{"get"}, "self-service", "Personal weekly/monthly usage report (?window=)", false},
 	{"/me/reports/submit-to-team", []string{"post"}, "self-service", "Submit a saved report for team publication", false},
 	{"/me/sessions", []string{"get"}, "self-service", "List the caller's active login sessions", false},

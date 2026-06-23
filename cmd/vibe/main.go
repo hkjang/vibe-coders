@@ -85,6 +85,7 @@ Commands:
   usage [WINDOW]          show your usage summary (e.g. 30d)
   app run APP_ID          run an AI work app
   doctor [--client C]     diagnose your client connection setup
+  status                  compact status (model/budget/action items)
   mcp config              print MCP client config for this gateway
 
 Env: VIBE_BASE_URL, VIBE_API_KEY`)
@@ -131,6 +132,8 @@ func run(cfg cliConfig, args []string) error {
 			}
 		}
 		return cmdDoctor(cfg, client)
+	case "status":
+		return cmdStatus(cfg)
 	default:
 		usage()
 		return fmt.Errorf("unknown command: %s", cmd)
@@ -270,6 +273,48 @@ func cmdDoctor(cfg cliConfig, client string) error {
 		if c.Fix != "" && c.Status != "pass" {
 			fmt.Printf("         fix: %s\n", c.Fix)
 		}
+	}
+	return nil
+}
+
+// cmdStatus prints the caller's compact gateway status (model/budget/action items) — the
+// CLI face of the IDE overlay. GET /me/overlay
+func cmdStatus(cfg cliConfig) error {
+	raw, status, err := cfg.do(http.MethodGet, "/me/overlay", nil)
+	if err != nil {
+		return err
+	}
+	if status != http.StatusOK {
+		return fmt.Errorf("HTTP %d: %s", status, raw)
+	}
+	if !cfg.Table {
+		fmt.Println(string(raw))
+		return nil
+	}
+	var p struct {
+		AuthMode           string  `json:"auth_mode"`
+		DefaultModel       string  `json:"default_model"`
+		BaseURL            string  `json:"base_url"`
+		BudgetOK           *bool   `json:"budget_ok"`
+		UsedKRW            float64 `json:"used_krw"`
+		BudgetLimitKRW     float64 `json:"budget_limit_krw"`
+		BudgetRemainingKRW float64 `json:"budget_remaining_krw"`
+		ActionItems        int     `json:"action_items"`
+		TopRecommendation  string  `json:"top_recommendation"`
+	}
+	_ = json.Unmarshal(raw, &p)
+	fmt.Printf("model=%s  base_url=%s  auth=%s\n", p.DefaultModel, p.BaseURL, p.AuthMode)
+	if p.BudgetLimitKRW > 0 {
+		fmt.Printf("budget: %.0f / %.0f KRW (남음 %.0f)\n", p.UsedKRW, p.BudgetLimitKRW, p.BudgetRemainingKRW)
+	} else if p.BudgetOK != nil {
+		fmt.Printf("budget: %.0f KRW 사용 (한도 없음)\n", p.UsedKRW)
+	}
+	if p.BudgetOK != nil && !*p.BudgetOK {
+		fmt.Println("  ⚠ 예산 한도 초과")
+	}
+	fmt.Printf("action items: %d\n", p.ActionItems)
+	if p.TopRecommendation != "" {
+		fmt.Printf("  추천: %s\n", p.TopRecommendation)
 	}
 	return nil
 }
