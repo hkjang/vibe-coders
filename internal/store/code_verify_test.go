@@ -61,3 +61,44 @@ func TestCodeVerifyPersistAndDetail(t *testing.T) {
 		t.Fatalf("request without verdict should have nil CodeVerify, got %+v", d2.CodeVerify)
 	}
 }
+
+func TestCodeVerifyModelStats(t *testing.T) {
+	db := openAggTestStore(t)
+	defer db.Close()
+	ctx := context.Background()
+	when := time.Now().UTC().Add(-time.Hour)
+
+	mk := func(id, model, risk string, high, testable int) {
+		rec := LogRecord{
+			Request: RequestLog{ID: id, Endpoint: "/v1/chat/completions", Model: model, StatusCode: 200, CreatedAt: when},
+			CodeVerify: &CodeVerifyLog{
+				ID: id + "_cv", RequestID: id, HasCode: true, Risk: risk, BlockCount: 1,
+				Languages: "go", HighCount: high, TestableCount: testable, FindingsJSON: "[]", CreatedAt: when,
+			},
+		}
+		if err := db.InsertLogRecord(ctx, rec); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mk("s1", "model-a", "high", 2, 0)
+	mk("s2", "model-a", "high", 1, 1)
+	mk("s3", "model-b", "low", 0, 1)
+
+	stats, err := db.CodeVerifyModelStats(ctx, time.Now().UTC().Add(-2*time.Hour), 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stats) != 2 {
+		t.Fatalf("want 2 models, got %d: %+v", len(stats), stats)
+	}
+	// model-a has the most high-risk verdicts → ranked first.
+	if stats[0].Model != "model-a" || stats[0].RiskHigh != 2 || stats[0].Verdicts != 2 || stats[0].HighFindings != 3 {
+		t.Fatalf("model-a stats wrong: %+v", stats[0])
+	}
+	if stats[0].HighRiskRate != 1.0 {
+		t.Fatalf("model-a high-risk rate should be 1.0, got %v", stats[0].HighRiskRate)
+	}
+	if stats[1].Model != "model-b" || stats[1].RiskHigh != 0 || stats[1].Testable != 1 {
+		t.Fatalf("model-b stats wrong: %+v", stats[1])
+	}
+}

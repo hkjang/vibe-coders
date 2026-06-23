@@ -6146,10 +6146,11 @@ const adminHTML = `<!doctype html>
       document.getElementById('view').innerHTML =
         section('Chat Completion 테스트', kpis + form) +
         section('멀티 모델 응답 비교', multiPanel) +
-        '<div id="mm-leaderboard"></div><div id="mm-tags-panel"></div>' +
+        '<div id="mm-leaderboard"></div><div id="mm-coderiskboard"></div><div id="mm-tags-panel"></div>' +
         section('대상 카탈로그', chatTestTargetTable(targets));
 
       mmLoadLeaderboard();
+      mmLoadCodeRiskBoard();
 
       mmRenderTagEditor();
       document.getElementById('mm-run').addEventListener('click', runMultiModelCompare);
@@ -6863,6 +6864,31 @@ const adminHTML = `<!doctype html>
         '<td>' + m.wins + '</td><td>' + (m.avg_score || 0).toFixed(1) + '</td><td>' + (m.pass_rate || 0).toFixed(0) + '%</td><td>' + m.appearances + '</td></tr>').join('');
       host.innerHTML = section('모델 리더보드 (최근 90일)', card('자동 평가 누적 (' + (d.runs || 0) + ' runs)',
         '<div class="card-body"><table><thead><tr><th>#</th><th>모델</th><th>우승</th><th>평균점수</th><th>통과율</th><th>출전</th></tr></thead><tbody>' + rows + '</tbody></table>' +
+        '<p class="muted" style="font-size:10px;margin-top:4px">' + escapeHTML(d.note || '') + '</p></div>'));
+    };
+
+    // 코드 위험 리더보드 — 영속된 코드 검증 verdict 기준 "어떤 모델이 위험한 코드를 내놓는지".
+    window.mmLoadCodeRiskBoard = async () => {
+      const host = document.getElementById('mm-coderiskboard');
+      if (!host) return;
+      let d;
+      try { d = await api('/admin/code-verify/stats?days=30'); } catch (e) { host.innerHTML = ''; return; }
+      const ms = d.models || [];
+      if (!ms.length) { host.innerHTML = ''; return; } // 검증 기록 없으면 숨김
+      const rows = ms.map((m, i) => {
+        const rate = Math.round((m.high_risk_rate || 0) * 100);
+        const rcls = rate >= 50 ? 'error' : (rate >= 20 ? 'warn' : '');
+        return '<tr><td>' + (i + 1) + '</td><td>' + escapeHTML(m.model) + (i === 0 && (m.risk_high || 0) > 0 ? ' <span class="status error" style="font-size:9px">최다 위험</span>' : '') + '</td>' +
+          '<td>' + fmt(m.verdicts || 0) + '</td>' +
+          '<td><span class="status ' + rcls + '">' + rate + '%</span></td>' +
+          '<td>' + fmt(m.risk_high || 0) + ' / ' + fmt(m.risk_medium || 0) + '</td>' +
+          '<td>' + fmt(m.high_findings || 0) + '</td>' +
+          '<td>' + fmt(m.secret_findings || 0) + '</td>' +
+          '<td>' + fmt(m.testable || 0) + '</td></tr>';
+      }).join('');
+      const t = d.totals || {};
+      host.innerHTML = section('코드 위험 리더보드 (최근 ' + (d.days || 30) + '일)', card('영속 코드 검증 누적 (high ' + (t.risk_high || 0) + ' · secret ' + (t.secret_findings || 0) + ')',
+        '<div class="card-body"><table><thead><tr><th>#</th><th>모델</th><th>verdict</th><th>high 비율</th><th>high/med</th><th>high 발견</th><th>시크릿</th><th>테스트가능</th></tr></thead><tbody>' + rows + '</tbody></table>' +
         '<p class="muted" style="font-size:10px;margin-top:4px">' + escapeHTML(d.note || '') + '</p></div>'));
     };
 
