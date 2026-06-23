@@ -74,6 +74,37 @@ func TestAnalyticsRollupSurvivesPurge(t *testing.T) {
 	_ = monthly // recompute zeroed it; just ensure no error and valid call path
 }
 
+func TestAnalyticsRollupIdempotent(t *testing.T) {
+	db := openAggTestStore(t)
+	defer db.Close()
+	ctx := context.Background()
+	day := "2026-06-12"
+	dayTime, _ := time.Parse("2006-01-02", day)
+
+	if err := db.InsertLogRecord(ctx, LogRecord{
+		Request: RequestLog{ID: "x1", APIKeyID: "k", Endpoint: "/v1/chat/completions", Model: "gpt-4.1",
+			Provider: "openai", StatusCode: 200, Project: "alpha", CreatedAt: dayTime},
+		Usage: &TokenUsage{ID: "xu1", RequestID: "x1", TotalTokens: 50, EstimatedCost: 7, Currency: "KRW", CreatedAt: dayTime},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Running the rollup repeatedly must not raise a unique violation (analytics_daily_pkey /
+	// 23505) and must not double-count — it converges to the recomputed totals.
+	for i := 0; i < 3; i++ {
+		if err := db.RollupDay(ctx, day); err != nil {
+			t.Fatalf("rollup run %d failed: %v", i, err)
+		}
+	}
+	all, err := db.ListDailyRollups(ctx, "all", day, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 1 || all[0].Requests != 1 || all[0].Tokens != 50 || all[0].CostKRW != 7 {
+		t.Fatalf("repeated rollup should converge (not double), got %+v", all)
+	}
+}
+
 func TestPeriodBucket(t *testing.T) {
 	if got := periodBucket("2026-06-10", "month"); got != "2026-06" {
 		t.Errorf("month bucket = %q, want 2026-06", got)

@@ -41,20 +41,16 @@ func (s *SQLStore) RollupDay(ctx context.Context, day string) error {
 }
 
 func (s *SQLStore) rollupDayDimension(ctx context.Context, day, dimension, col string) error {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	if _, err := tx.ExecContext(ctx, s.bind(`DELETE FROM analytics_daily WHERE day = ? AND dimension = ?`), day, dimension); err != nil {
-		return err
-	}
-
 	keyExpr := "'*'"
 	if col != "" {
 		keyExpr = "COALESCE(NULLIF(r." + col + ", ''), '(unset)')"
 	}
+	// Idempotent upsert keyed on (day, dimension, dim_value). This replaces an earlier
+	// DELETE-then-INSERT which (a) raced under concurrent rollups — two runs would each DELETE,
+	// then both INSERT the same PK and one failed with a unique violation (analytics_daily_pkey,
+	// SQLSTATE 23505) — and (b) could wipe a day's surviving aggregate to zero if re-run after
+	// retention had already purged that day's raw logs. ON CONFLICT makes concurrent/repeat runs
+	// converge to the recomputed totals with no error.
 	query := s.bind(fmt.Sprintf(`
 		INSERT INTO analytics_daily (day, dimension, dim_value, requests, tokens, cost_krw, errors)
 		SELECT ?, ?, %s,
@@ -65,11 +61,16 @@ func (s *SQLStore) rollupDayDimension(ctx context.Context, day, dimension, col s
 		FROM request_logs r
 		LEFT JOIN token_usage t ON t.request_id = r.id
 		WHERE substring(r.created_at, 1, 10) = ?
-		GROUP BY 3`, keyExpr))
-	if _, err := tx.ExecContext(ctx, query, day, dimension, day); err != nil {
+		GROUP BY 3
+		ON CONFLICT (day, dimension, dim_value) DO UPDATE SET
+			requests = excluded.requests,
+			tokens = excluded.tokens,
+			cost_krw = excluded.cost_krw,
+			errors = excluded.errors`, keyExpr))
+	if _, err := s.db.ExecContext(ctx, query, day, dimension, day); err != nil {
 		return err
 	}
-	return tx.Commit()
+	return nil
 }
 
 // RollupRange rolls up each day in [from, to] inclusive (by UTC date). Used to
