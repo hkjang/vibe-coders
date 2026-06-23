@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [string]$Version,
     [string]$Image = "ai-coding-proxy-gateway",
