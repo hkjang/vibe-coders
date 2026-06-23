@@ -185,9 +185,15 @@ func evaluatePolicyRules(rules []store.PolicyRule, g governanceContext) governan
 		}
 		// Canary rollout: a policy at <100% enforces only on its deterministic traffic slice.
 		// Live requests carry a SubjectID; simulator contexts don't (so simulation still shows
-		// full potential impact regardless of rollout).
+		// full potential impact regardless of rollout). For requests OUTSIDE the canary slice we
+		// don't enforce, but we record a shadow decision so operators get live "would-have-acted"
+		// data while ramping (decision="canary_shadow"). Not counted as a block/approval.
 		if g.SubjectID != "" && rule.RolloutPercent >= 1 && rule.RolloutPercent < 100 &&
 			canaryBucket(g.SubjectID) >= rule.RolloutPercent {
+			if ruleWouldAct(rule) {
+				reason := "rule " + ruleName(rule) + " canary " + strconv.Itoa(rule.RolloutPercent) + "% — shadow(미적용)"
+				decision.PolicyEvents = append(decision.PolicyEvents, policyDecisionEvent(g, rule, "canary_shadow", reason))
+			}
 			continue
 		}
 		actions := rule.Actions
@@ -261,6 +267,24 @@ func evaluatePolicyRules(rules []store.PolicyRule, g governanceContext) governan
 		decision.PolicyEvents = append(decision.PolicyEvents, defaultPolicyDecisionEvent(g))
 	}
 	return decision
+}
+
+// ruleWouldAct reports whether a rule carries any enforcing action, so canary shadow logging
+// only records rules that would actually have done something (block/approval/allow-deny/secret).
+func ruleWouldAct(rule store.PolicyRule) bool {
+	a := rule.Actions
+	if boolAction(a["block"]) || boolAction(a["require_approval"]) {
+		return true
+	}
+	if sa := lowerString(a["secret_action"]); sa == "mask" || sa == "block" {
+		return true
+	}
+	for _, k := range []string{"deny_models", "allow_models", "deny_providers", "allow_providers"} {
+		if len(valueStringList(a[k])) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func policyDecisionEvent(g governanceContext, rule store.PolicyRule, decision, reason string) store.PolicyDecisionEvent {

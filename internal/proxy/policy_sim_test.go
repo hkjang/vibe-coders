@@ -65,9 +65,19 @@ func TestCanaryRolloutGating(t *testing.T) {
 	if d := evaluatePolicyRules(denyRule, governanceContext{Model: "gpt-5-x", SubjectID: inside}); !d.Blocked {
 		t.Errorf("subject %q inside canary slice should be blocked", inside)
 	}
-	// Outside the slice → not enforced.
-	if d := evaluatePolicyRules(denyRule, governanceContext{Model: "gpt-5-x", SubjectID: outside}); d.Blocked {
+	// Outside the slice → not enforced, but a shadow decision is recorded.
+	outsideD := evaluatePolicyRules(denyRule, governanceContext{Model: "gpt-5-x", SubjectID: outside})
+	if outsideD.Blocked {
 		t.Errorf("subject %q outside canary slice should NOT be blocked", outside)
+	}
+	shadow := false
+	for _, e := range outsideD.PolicyEvents {
+		if e.Decision == "canary_shadow" {
+			shadow = true
+		}
+	}
+	if !shadow {
+		t.Errorf("outside-slice canary should record a canary_shadow event, got %+v", outsideD.PolicyEvents)
 	}
 	// Simulator context (no SubjectID) → full impact regardless of rollout.
 	if d := evaluatePolicyRules(denyRule, governanceContext{Model: "gpt-5-x"}); !d.Blocked {
