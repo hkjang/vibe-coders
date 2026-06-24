@@ -339,21 +339,36 @@ const adminHTML = `<!doctype html>
           <a href="#/dwdashboard" data-tab="dwdashboard">DW 대시보드</a>
         </div>
       </div>
-      <a href="#/mcp" data-tab="mcp">MCP</a>
-      <a href="#/routing" data-tab="routing">라우팅</a>
+      <div class="nav-group" id="nav-observe">
+        <button type="button" class="nav-group-toggle" aria-haspopup="true">관측 ▾</button>
+        <div class="nav-group-menu">
+          <a href="#/requests" data-tab="requests">호출 이력</a>
+          <a href="#/sessions" data-tab="sessions">세션 비행기록</a>
+          <a href="#/prompts" data-tab="prompts">프롬프트 검색</a>
+          <a href="#/productivity" data-tab="productivity">AI 업무성과</a>
+        </div>
+      </div>
+      <div class="nav-group" id="nav-ops">
+        <button type="button" class="nav-group-toggle" aria-haspopup="true">운영 ▾</button>
+        <div class="nav-group-menu">
+          <a href="#/mcp" data-tab="mcp">MCP</a>
+          <a href="#/routing" data-tab="routing">라우팅</a>
+          <a href="#/pods" data-tab="pods">파드 운영 맵</a>
+          <a href="#/journey-probe" data-tab="journey-probe">Journey Probe</a>
+        </div>
+      </div>
+      <div class="nav-group" id="nav-governance">
+        <button type="button" class="nav-group-toggle" aria-haspopup="true">거버넌스 ▾</button>
+        <div class="nav-group-menu">
+          <a href="#/safety" data-tab="safety">안전</a>
+          <a href="#/sbom" data-tab="sbom">AI 자산 SBOM</a>
+          <a href="#/privacy-ledger" data-tab="privacy-ledger">프라이버시 원장</a>
+          <a href="#/prompt-assets" data-tab="prompt-assets">자산 관리소</a>
+        </div>
+      </div>
       <a href="#/chat-test" data-tab="chat-test">Chat 테스트</a>
-      <a href="#/requests" data-tab="requests">호출 이력</a>
-      <a href="#/sessions" data-tab="sessions">세션 비행기록</a>
-      <a href="#/sbom" data-tab="sbom">AI 자산 SBOM</a>
-      <a href="#/journey-probe" data-tab="journey-probe">Journey Probe</a>
-      <a href="#/pods" data-tab="pods">파드 운영 맵</a>
-      <a href="#/productivity" data-tab="productivity">AI 업무성과</a>
-      <a href="#/prompts" data-tab="prompts">프롬프트 검색</a>
-      <a href="#/prompt-assets" data-tab="prompt-assets">자산 관리소</a>
-      <a href="#/users" data-tab="users">사용자</a>
-      <a href="#/safety" data-tab="safety">안전</a>
-      <a href="#/privacy-ledger" data-tab="privacy-ledger">프라이버시 원장</a>
       <a href="#/text2sql" data-tab="text2sql">Text2SQL</a>
+      <a href="#/users" data-tab="users">사용자</a>
       <a href="#/settings" data-tab="settings">설정</a>
     </nav>
     <div class="header-tools">
