@@ -1217,6 +1217,23 @@ const adminHTML = `<!doctype html>
     }
     window.addEventListener('hashchange', route);
 
+    // ---------- nav dropdown close fix ----------
+    // The dropdowns open on :hover and :focus-within. After clicking the toggle button or a
+    // child link, focus stays inside the group, so :focus-within kept the menu open even after
+    // the mouse left. Blur the focused descendant on mouseleave (and after a click) so the menu
+    // closes on mouse-out while still opening via keyboard focus.
+    (function wireNavGroupClose() {
+      document.querySelectorAll('#tabs .nav-group').forEach(g => {
+        g.addEventListener('mouseleave', () => {
+          const af = document.activeElement;
+          if (af && g.contains(af) && typeof af.blur === 'function') af.blur();
+        });
+        g.querySelectorAll('.nav-group-toggle, a[data-tab]').forEach(el => {
+          el.addEventListener('click', () => { setTimeout(() => { if (typeof el.blur === 'function') el.blur(); }, 0); });
+        });
+      });
+    })();
+
     // ---------- auto-refresh ----------
     let refreshTimer = null;
     function applyRefreshInterval(seconds) {
