@@ -315,7 +315,7 @@
                     <div class="diag-node" style="padding: 10px;">IDE / Chat Clients<br><span style="font-size: 10px; font-weight: normal; color: #64748b;">(Cursor, Roo Code, etc.)</span></div>
                     <div class="diag-arrow">&rarr;</div>
                     <div class="diag-node primary" style="background: #f0f6ff; border-color: #2563eb; color: #1d4ed8; padding: 12px 10px;">
-                        <strong>Proxy Gateway Core (v0.59.3)</strong>
+                        <strong>Proxy Gateway Core (v0.76.2)</strong>
                         <div style="font-size: 9px; font-weight: normal; color: #475569; margin-top: 6px; text-align: left; line-height: 1.3;">
                             • 3-Tier Session Inference Engine<br>
                             • Intelligent Cost/Latency Router<br>
@@ -342,8 +342,8 @@
                 <strong>작성 부서:</strong> IT AI 추진단<br>
             </div>
             <div style="text-align: right;">
-                <strong>문서 번호:</strong> SEC-APG-2026-V593<br>
-                <strong>최종 승인 버전:</strong> v0.59.3 (Production Stable)
+                <strong>문서 번호:</strong> SEC-APG-2026-V762<br>
+                <strong>최종 승인 버전:</strong> v0.76.2 (Production Stable)
             </div>
         </div>
     </div>
@@ -1231,7 +1231,7 @@ psql -h [VM_IP_OR_DNS] -p 5432 -U gateway_user -d gateway_db < backup_gateway_YY
 
     <!-- Section 7 -->
     <div class="section">
-        <h2 class="section-title">7. 부록: 전체 릴리즈 히스토리 (Full Release History v0.1.0 ~ v0.59.3)</h2>
+        <h2 class="section-title">7. 부록: 전체 릴리즈 히스토리 (Full Release History v0.1.0 ~ v0.76.2)</h2>
         <p>
             AI Proxy Gateway는 지속적으로 진화하며 고가용성, 인프라 보안, 에이전트 엔지니어링 분석 및 성능 평가 요소를 추가해 왔습니다. v0.1.0 최초 배포부터 가장 최신 버전까지의 전체 릴리즈 히스토리는 다음과 같습니다.
         </p>
@@ -1429,6 +1429,21 @@ psql -h [VM_IP_OR_DNS] -p 5432 -U gateway_user -d gateway_db < backup_gateway_YY
                     <td><strong>v0.57.0 ~ v0.59.3</strong></td>
                     <td>자체 MCP 서비스 노출, 업무 앱 및 워크플로 체인 실용화</td>
                     <td>게이트웨이 자체 기능(모델 목록, 사용량, 라우팅 프리뷰)을 외부 IDE에 연동하기 위한 자체 MCP Server(JSON-RPC 2.0) 탑재 및 클라이언트 온보딩 팩 생성기 개발. 복수 AI 연동 업무 단계를 체인화해 서버측에서 오케스트레이션하고 이력을 적재하는 AI 업무 앱 및 Workflow Chain 실행 엔진(ai_app_runs, workflow_runs) 완비. 의존성 없는 단일 파일 TypeScript SDK 배포. 어드민 UI 내 자바스크립트 중복 선언(pctv) 오류 수정 및 템플릿 프롬프트 자산 평균 비용 SQL 에러 수정 및 v0.59.3 안정화.</td>
+                </tr>
+                <tr>
+                    <td><strong>v0.60.0 ~ v0.65.1</strong></td>
+                    <td>AI 코드 출력 검증 게이트 및 관측 인프라 확장</td>
+                    <td>모델 응답의 코드블록을 실시간 정적 분석하여 위험 명령 및 하드코딩 시크릿을 탐지하고 안전 점수를 평가하는 AI 코드 출력 검증 게이트 완비. 모델별 누적 코드 위험 리더보드 구축. 단일 요청 단위의 latency/token/cost/error/cache 흐름을 시각화하는 Trace waterfall 타임라인 APM 탑재. 런타임 설정 멀티 파드 자동 반영 및 파드별 수렴 상태 관측 기능 구현.</td>
+                </tr>
+                <tr>
+                    <td><strong>v0.66.0 ~ v0.70.1</strong></td>
+                    <td>세션 비행기록(Flight Recorder) 및 점진적 정책 Canary 롤아웃</td>
+                    <td>개별 요청을 넘어 코딩 세션 전체의 게이트웨이 활동을 시간순으로 복원하고 위험 오버레이 및 한국어 원인 분석(RCA)을 제공하는 Agent Session Flight Recorder 탑재. 정책 변경 시 트래픽 비율별 점진 적용 및 섀도우 영향 분석을 제공하는 Policy Canary & Shadow Enforce 구축. 전사 AI 자산 소유권 및 검증 공백을 진단하는 AI 자산 SBOM 명세서 및 Postgres 동시성 유니크 충돌 멱등 upsert 패치 도입.</td>
+                </tr>
+                <tr>
+                    <td><strong>v0.71.0 ~ v0.76.2</strong></td>
+                    <td>프라이버시 감사 원장, 성과 상관 분석 및 온보딩 점검 마법사</td>
+                    <td>민감정보 처리 및 외부 전송량을 집계하고 CSV로 추출하는 프라이버시 원장(Data Egress Ledger) 제공. AI 사용량과 실제 VCS 머지 성과를 리포지토리별로 상관 분석해 효율성을 파악하는 AI 업무성과 커넥터 탑재. 개발자 로컬 패널용 컴팩트 상태 오버레이(/me/overlay, vibe status) 지원. AI 업무 앱 및 MCP 등록 전 거버넌스 준비를 강제하는 온보딩 게이트웨이 검증 마법사 완성. 내비게이션 드롭다운 그룹화 및 마우스아웃(mouseleave) 포커스 해제 bluring 자동 닫힘 최적화 안정화.</td>
                 </tr>
             </tbody>
         </table>
