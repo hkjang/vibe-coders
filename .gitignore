@@ -10,3 +10,7 @@ gateway.exe
 coverage.out
 .playwright-mcp/
 .gocache/
+
+# Temp test scripts and log files
+*.log
+scratch/
