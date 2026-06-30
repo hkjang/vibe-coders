@@ -69,8 +69,12 @@ const adminHTML = `<!doctype html>
       border-radius: 6px; font-weight: 700;
     }
     nav a.active { background: var(--ink); color: var(--bg); }
-    /* "대시보드" grouped dropdown in the top nav */
+    /* Grouped top-nav dropdowns. JS adds a small hover-intent delay; CSS keeps a fallback. */
     .nav-group { position: relative; }
+    .nav-group::after {
+      content: ""; display: none; position: absolute; left: -10px; right: -10px;
+      top: 100%; height: 14px; z-index: 4;
+    }
     .nav-group > .nav-group-toggle {
       color: var(--muted); padding: 8px 12px; border-radius: 6px; font-weight: 700;
       background: none; border: none; cursor: pointer; font: inherit;
@@ -79,9 +83,13 @@ const adminHTML = `<!doctype html>
     .nav-group-menu {
       display: none; position: absolute; top: 100%; left: 0; z-index: 5; min-width: 180px;
       background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
-      padding: 4px; margin-top: 2px; box-shadow: 0 6px 24px rgba(0,0,0,.18);
+      padding: 4px; margin-top: 6px; box-shadow: 0 6px 24px rgba(0,0,0,.18);
     }
-    .nav-group:hover > .nav-group-menu, .nav-group:focus-within > .nav-group-menu { display: block; }
+    .nav-group:hover::after, .nav-group:focus-within::after, .nav-group.nav-open::after, .nav-group.nav-closing::after { display: block; }
+    .nav-group:hover > .nav-group-menu,
+    .nav-group:focus-within > .nav-group-menu,
+    .nav-group.nav-open > .nav-group-menu,
+    .nav-group.nav-closing > .nav-group-menu { display: block; }
     .nav-group-menu a { display: block; white-space: nowrap; }
     #subtabs:empty { display: none; }
     .subtabs {
@@ -1217,19 +1225,72 @@ const adminHTML = `<!doctype html>
     }
     window.addEventListener('hashchange', route);
 
-    // ---------- nav dropdown close fix ----------
-    // The dropdowns open on :hover and :focus-within. After clicking the toggle button or a
-    // child link, focus stays inside the group, so :focus-within kept the menu open even after
-    // the mouse left. Blur the focused descendant on mouseleave (and after a click) so the menu
-    // closes on mouse-out while still opening via keyboard focus.
-    (function wireNavGroupClose() {
-      document.querySelectorAll('#tabs .nav-group').forEach(g => {
-        g.addEventListener('mouseleave', () => {
-          const af = document.activeElement;
-          if (af && g.contains(af) && typeof af.blur === 'function') af.blur();
+    // ---------- nav dropdown hover intent ----------
+    // Keep a grouped menu open briefly when the pointer crosses the gap between the parent
+    // button and dropdown. This avoids accidental closes while preserving keyboard focus use.
+    (function wireNavGroupHoverIntent() {
+      const closeDelayMs = 350;
+      const groups = Array.from(document.querySelectorAll('#tabs .nav-group'));
+      const closeTimers = new WeakMap();
+
+      function clearCloseTimer(g) {
+        const t = closeTimers.get(g);
+        if (t) clearTimeout(t);
+        closeTimers.delete(g);
+      }
+      function blurFocusedDescendant(g) {
+        const af = document.activeElement;
+        if (af && g.contains(af) && typeof af.blur === 'function') af.blur();
+      }
+      function openGroup(g) {
+        clearCloseTimer(g);
+        g.classList.remove('nav-closing');
+        g.classList.add('nav-open');
+      }
+      function closeGroup(g) {
+        clearCloseTimer(g);
+        g.classList.remove('nav-open', 'nav-closing');
+        blurFocusedDescendant(g);
+      }
+      function scheduleClose(g) {
+        clearCloseTimer(g);
+        g.classList.remove('nav-open');
+        g.classList.add('nav-closing');
+        closeTimers.set(g, setTimeout(() => closeGroup(g), closeDelayMs));
+      }
+      function closeOtherGroups(active) {
+        groups.forEach(g => { if (g !== active) closeGroup(g); });
+      }
+
+      groups.forEach(g => {
+        g.addEventListener('mouseenter', () => {
+          closeOtherGroups(g);
+          openGroup(g);
         });
-        g.querySelectorAll('.nav-group-toggle, a[data-tab]').forEach(el => {
-          el.addEventListener('click', () => { setTimeout(() => { if (typeof el.blur === 'function') el.blur(); }, 0); });
+        g.addEventListener('focusin', () => {
+          closeOtherGroups(g);
+          openGroup(g);
+        });
+        g.addEventListener('mouseleave', () => {
+          scheduleClose(g);
+        });
+        g.addEventListener('focusout', () => {
+          setTimeout(() => {
+            if (!g.contains(document.activeElement) && !g.matches(':hover')) scheduleClose(g);
+          }, 0);
+        });
+        g.querySelectorAll('.nav-group-toggle').forEach(btn => {
+          btn.addEventListener('click', () => {
+            if (g.classList.contains('nav-open')) {
+              closeGroup(g);
+            } else {
+              closeOtherGroups(g);
+              openGroup(g);
+            }
+          });
+        });
+        g.querySelectorAll('a[data-tab]').forEach(a => {
+          a.addEventListener('click', () => { setTimeout(() => closeGroup(g), 0); });
         });
       });
     })();
