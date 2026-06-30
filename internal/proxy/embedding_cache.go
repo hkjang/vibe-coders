@@ -104,6 +104,8 @@ func (s *Server) serveEmbeddingFromCache(ctx context.Context, w http.ResponseWri
 	meta.Request.StatusCode = http.StatusOK
 	meta.Request.LatencyMS = 0
 	meta.Request.Stream = false
+	meta.Request.ResolvedModel = firstNonEmpty(meta.Request.ResolvedModel, meta.Request.Model)
+	meta.Request.UpstreamModel = "cache"
 	meta.Response = &store.ResponseLog{
 		ID:           newID("resp"),
 		RequestID:    meta.Request.ID,
@@ -133,6 +135,8 @@ func (s *Server) serveEmbeddingFromCache(ctx context.Context, w http.ResponseWri
 		HasUsage:     meta.Usage != nil,
 	})
 	s.metrics.ObserveLLMEvaluations(meta.Evaluations)
+	applyUpstreamHeaderSummary(&meta.Request, nil, nil, w.Header())
+	refreshRoutingSummary(&meta.Request, nil)
 	_ = model
 	s.enqueue(meta)
 	return true

@@ -98,6 +98,7 @@ func (s *Server) enforceOpenAIGovernance(w http.ResponseWriter, r *http.Request,
 	if decision.Blocked && gctx.ContainsSecret {
 		action = "block"
 	}
+	refreshPolicySummary(&meta.Request, phase, decision.Blocked, decision.RequireApproval, action, decision.Reason, gctx.SecretTypes)
 	if len(findings) > 0 {
 		s.recordSecretEvents(r, meta.Request.ID, action, authCtx, findings)
 		w.Header().Set("X-Secret-Firewall", action)

@@ -777,7 +777,15 @@ func (s *SQLStore) RequestDetail(ctx context.Context, id string) (RequestDetail,
 			COALESCE(t.prompt_tokens, 0), COALESCE(t.completion_tokens, 0), COALESCE(t.total_tokens, 0),
 			COALESCE(t.cached_tokens, 0), COALESCE(t.reasoning_tokens, 0),
 			COALESCE(t.estimated_cost, 0), COALESCE(t.currency, ''), COALESCE(t.source, ''),
-			COALESCE(resp.finish_reason, ''), r.created_at
+			COALESCE(resp.finish_reason, ''), r.created_at,
+			COALESCE(r.method, ''), COALESCE(r.requested_model, ''), COALESCE(r.resolved_model, ''), COALESCE(r.upstream_model, ''),
+			COALESCE(r.route_reason, ''), COALESCE(r.route_detail, ''), COALESCE(r.failover, 0),
+			COALESCE(r.fallback_from, ''), COALESCE(r.fallback_reason, ''), COALESCE(r.complexity, 0),
+			r.temperature, r.top_p, COALESCE(r.max_tokens, 0), COALESCE(r.max_completion_tokens, 0),
+			COALESCE(r.response_format_type, ''), COALESCE(r.request_headers_json, ''),
+			COALESCE(r.upstream_headers_json, ''), COALESCE(r.response_headers_json, ''),
+			COALESCE(r.header_summary_json, ''), COALESCE(r.body_summary_json, ''),
+			COALESCE(r.routing_summary_json, ''), COALESCE(r.policy_summary_json, '')
 		FROM request_logs r
 		LEFT JOIN token_usage t ON t.request_id = r.id
 		LEFT JOIN response_logs resp ON resp.request_id = r.id
@@ -785,7 +793,9 @@ func (s *SQLStore) RequestDetail(ctx context.Context, id string) (RequestDetail,
 	`)
 	row := s.db.QueryRowContext(ctx, query, id)
 	var item RecentRequest
-	var streamInt int
+	var streamInt, failoverInt int
+	var tempValue, topPValue sql.NullFloat64
+	var requestHeadersJSON, upstreamHeadersJSON, responseHeadersJSON, headerSummaryJSON, bodySummaryJSON, routingSummaryJSON, policySummaryJSON string
 	if err := row.Scan(&item.ID, &item.TraceID, &item.APIKeyID, &item.ClientIP, &item.ForwardedFor,
 		&item.UserAgent, &item.Model, &item.Endpoint, &streamInt, &item.Provider,
 		&item.StatusCode, &item.LatencyMS, &item.FirstChunkMS,
@@ -793,13 +803,40 @@ func (s *SQLStore) RequestDetail(ctx context.Context, id string) (RequestDetail,
 		&item.PromptTokens, &item.CompletionTokens, &item.TotalTokens,
 		&item.CachedTokens, &item.ReasoningTokens,
 		&item.EstimatedCost, &item.Currency, &item.TokenSource,
-		&item.FinishReason, &item.CreatedAt); err != nil {
+		&item.FinishReason, &item.CreatedAt,
+		&item.Method, &item.RequestedModel, &item.ResolvedModel, &item.UpstreamModel,
+		&item.RouteReason, &item.RouteDetail, &failoverInt,
+		&item.FallbackFrom, &item.FallbackReason, &item.Complexity,
+		&tempValue, &topPValue, &item.MaxTokens, &item.MaxCompletionTokens,
+		&item.ResponseFormatType, &requestHeadersJSON,
+		&upstreamHeadersJSON, &responseHeadersJSON,
+		&headerSummaryJSON, &bodySummaryJSON,
+		&routingSummaryJSON, &policySummaryJSON); err != nil {
 		if err == sql.ErrNoRows {
 			return detail, ErrNotFound
 		}
 		return detail, err
 	}
 	item.Stream = streamInt == 1
+	item.Failover = failoverInt == 1
+	if tempValue.Valid {
+		item.Temperature = &tempValue.Float64
+	}
+	if topPValue.Valid {
+		item.TopP = &topPValue.Float64
+	}
+	if item.Method == "" {
+		item.Method = "POST"
+	}
+	if item.RequestedModel == "" {
+		item.RequestedModel = item.Model
+	}
+	if item.ResolvedModel == "" {
+		item.ResolvedModel = item.Model
+	}
+	if item.UpstreamModel == "" {
+		item.UpstreamModel = item.Model
+	}
 	languages, err := s.languagesForRequest(ctx, item.ID)
 	if err != nil {
 		return detail, err
@@ -875,7 +912,253 @@ func (s *SQLStore) RequestDetail(ctx context.Context, id string) (RequestDetail,
 	if cvFound {
 		detail.CodeVerify = &cv
 	}
+	detail.Readability = buildRequestReadability(item, requestHeadersJSON, upstreamHeadersJSON, responseHeadersJSON, headerSummaryJSON, bodySummaryJSON, routingSummaryJSON, policySummaryJSON, detail)
 	return detail, nil
+}
+
+func buildRequestReadability(item RecentRequest, requestHeadersJSON, upstreamHeadersJSON, responseHeadersJSON, headerSummaryJSON, bodySummaryJSON, routingSummaryJSON, policySummaryJSON string, detail RequestDetail) *RequestReadability {
+	headers := readJSONMap(headerSummaryJSON)
+	if len(headers) == 0 {
+		headers = map[string]any{}
+	}
+	if requestHeaders := readJSONMap(requestHeadersJSON); len(requestHeaders) > 0 {
+		headers["request"] = requestHeaders
+	}
+	if upstreamHeaders := readJSONMap(upstreamHeadersJSON); len(upstreamHeaders) > 0 {
+		headers["upstream_request"] = upstreamHeaders
+	}
+	if responseHeaders := readJSONMap(responseHeadersJSON); len(responseHeaders) > 0 {
+		headers["upstream_response"] = responseHeaders
+	}
+	body := readJSONMap(bodySummaryJSON)
+	routing := readJSONMap(routingSummaryJSON)
+	if len(routing) == 0 {
+		routing = map[string]any{}
+	}
+	routing["requested_model"] = item.RequestedModel
+	routing["resolved_model"] = item.ResolvedModel
+	routing["selected_provider"] = item.Provider
+	routing["selected_upstream_model"] = item.UpstreamModel
+	routing["route_reason"] = item.RouteReason
+	routing["route_rule"] = item.RouteDetail
+	routing["fallback"] = item.Failover
+	routing["fallback_from"] = item.FallbackFrom
+	routing["fallback_reason"] = item.FallbackReason
+	routing["cache"] = map[string]any{
+		"cached_tokens": item.CachedTokens,
+		"decision":      cacheDecisionLabel(item.CachedTokens, item.RouteReason),
+	}
+	policy := readJSONMap(policySummaryJSON)
+	if len(policy) == 0 {
+		policy = map[string]any{}
+	}
+	if len(detail.Governance.PolicyDecisions) > 0 {
+		last := detail.Governance.PolicyDecisions[0]
+		policy["decision"] = last.Decision
+		policy["reason"] = last.Reason
+		policy["policy_id"] = last.PolicyID
+		policy["rule_id"] = last.RuleID
+	}
+	if len(detail.Governance.SecretEvents) > 0 {
+		policy["secret_events"] = len(detail.Governance.SecretEvents)
+	}
+	parameters := map[string]any{
+		"temperature":           nullableReadFloat(item.Temperature),
+		"temperature_label":     temperatureLabel(item.Temperature),
+		"top_p":                 nullableReadFloat(item.TopP),
+		"max_tokens":            item.MaxTokens,
+		"max_completion_tokens": item.MaxCompletionTokens,
+		"stream":                item.Stream,
+		"tool_count":            item.ToolCount,
+		"response_format_type":  item.ResponseFormatType,
+	}
+	if params, ok := body["parameters"].(map[string]any); ok {
+		for k, v := range params {
+			parameters[k] = v
+		}
+	}
+	if extra, ok := body["additional_fields"]; ok {
+		parameters["additional_fields"] = extra
+	}
+	return &RequestReadability{
+		Basic: map[string]any{
+			"request_id":       item.ID,
+			"trace_id":         item.TraceID,
+			"session_id":       item.SessionID,
+			"endpoint":         item.Endpoint,
+			"method":           item.Method,
+			"status_code":      item.StatusCode,
+			"status":           requestStatusLabel(item),
+			"latency_ms":       item.LatencyMS,
+			"upstream_latency": item.LatencyMS,
+			"created_at":       item.CreatedAt,
+		},
+		Model: map[string]any{
+			"requested_model": item.RequestedModel,
+			"resolved_model":  item.ResolvedModel,
+			"upstream_model":  item.UpstreamModel,
+			"provider":        item.Provider,
+			"route_rule":      item.RouteDetail,
+			"route_reason":    item.RouteReason,
+			"fallback":        item.Failover,
+			"fallback_reason": item.FallbackReason,
+			"is_virtual":      isVirtualModelName(item.RequestedModel),
+			"is_text2sql":     strings.HasPrefix(strings.ToLower(item.RequestedModel), "vibe/text2sql"),
+		},
+		Parameters: parameters,
+		Headers:    headers,
+		Body:       body,
+		Routing:    routing,
+		Policy:     policy,
+		Badges:     diagnosticBadges(item, detail),
+		Timeline:   readabilityTimeline(item, detail),
+	}
+}
+
+func readJSONMap(raw string) map[string]any {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return map[string]any{}
+	}
+	var out map[string]any
+	if err := json.Unmarshal([]byte(raw), &out); err != nil {
+		return map[string]any{"_parse_error": err.Error()}
+	}
+	return out
+}
+
+func nullableReadFloat(value *float64) any {
+	if value == nil {
+		return nil
+	}
+	return *value
+}
+
+func temperatureLabel(value *float64) string {
+	if value == nil {
+		return "미지정"
+	}
+	switch v := *value; {
+	case v == 0:
+		return "결정적"
+	case v <= 0.3:
+		return "낮음"
+	case v <= 0.8:
+		return "보통"
+	default:
+		return "높음"
+	}
+}
+
+func requestStatusLabel(item RecentRequest) string {
+	if item.StatusCode >= 200 && item.StatusCode < 300 && item.Error == "" {
+		return "success"
+	}
+	if strings.Contains(strings.ToLower(item.Error), "policy") {
+		return "policy_blocked"
+	}
+	if strings.Contains(strings.ToLower(item.Error), "quota") {
+		return "quota_blocked"
+	}
+	if item.StatusCode >= 500 {
+		return "upstream_error"
+	}
+	return "failed"
+}
+
+func cacheDecisionLabel(cachedTokens int, routeReason string) string {
+	if cachedTokens > 0 {
+		return "hit"
+	}
+	if strings.Contains(strings.ToLower(routeReason), "cache") {
+		return routeReason
+	}
+	return "miss"
+}
+
+func isVirtualModelName(model string) bool {
+	lower := strings.ToLower(strings.TrimSpace(model))
+	return strings.HasPrefix(lower, "vibe/") || strings.HasPrefix(lower, "vibe-coders/") || lower == "auto"
+}
+
+func diagnosticBadges(item RecentRequest, detail RequestDetail) []DiagnosticBadge {
+	var badges []DiagnosticBadge
+	add := func(code, label, severity, reason string) {
+		badges = append(badges, DiagnosticBadge{Code: code, Label: label, Severity: severity, Reason: reason})
+	}
+	if strings.TrimSpace(item.SessionID) == "" {
+		add("missing_session_id", "Missing Session ID", "warn", "명시적 또는 추론된 session id가 없습니다")
+	}
+	if item.Temperature != nil && *item.Temperature > 0.8 {
+		add("high_temperature", "High Temperature", "warn", "temperature가 0.8보다 큽니다")
+	}
+	if item.Failover || (item.FallbackReason != "" && item.RequestedModel != item.UpstreamModel) {
+		add("fallback_applied", "Fallback Applied", "warn", firstNonEmptyStore(item.FallbackReason, "fallback 경로가 적용되었습니다"))
+	}
+	if len(detail.Governance.SecretEvents) > 0 {
+		add("policy_redacted", "Policy Redacted", "warn", "secret firewall 또는 정책 마스킹 이벤트가 있습니다")
+	}
+	if item.EstimatedCost > 0 && item.EstimatedCost >= 1000 {
+		add("expensive_request", "Expensive Request", "warn", "요청 비용이 1000 KRW 이상입니다")
+	}
+	if item.ToolCount > 0 || len(detail.Tools) > 0 {
+		add("tool_used", "Tool Used", "info", "tools 또는 MCP tool 호출 정보가 있습니다")
+	}
+	if item.Stream {
+		add("streaming", "Streaming", "info", "stream=true 요청입니다")
+	}
+	if item.Provider != "" && item.Provider != "local" && item.Provider != "ollama" && item.Provider != "vllm" {
+		add("external_provider", "External Provider", "info", "외부 provider로 전달되었습니다")
+	}
+	return badges
+}
+
+func readabilityTimeline(item RecentRequest, detail RequestDetail) []TimelineEvent {
+	events := []TimelineEvent{
+		{Stage: "gateway", Status: "ok", At: item.CreatedAt, Detail: map[string]any{"endpoint": item.Endpoint, "method": item.Method}},
+		{Stage: "body_parse", Status: "ok", Detail: map[string]any{"requested_model": item.RequestedModel, "stream": item.Stream, "tool_count": item.ToolCount}},
+	}
+	if len(detail.Governance.PolicyDecisions) > 0 || len(detail.Governance.SecretEvents) > 0 {
+		status := "ok"
+		if len(detail.Governance.SecretEvents) > 0 {
+			status = "warn"
+		}
+		events = append(events, TimelineEvent{Stage: "policy", Status: status, Reason: firstPolicyReason(detail.Governance), Detail: map[string]any{"policy_decisions": len(detail.Governance.PolicyDecisions), "secret_events": len(detail.Governance.SecretEvents)}})
+	}
+	events = append(events, TimelineEvent{Stage: "routing", Status: "ok", Reason: item.RouteReason, Detail: map[string]any{"resolved_model": item.ResolvedModel, "provider": item.Provider, "route_rule": item.RouteDetail}})
+	if item.Failover {
+		events = append(events, TimelineEvent{Stage: "fallback", Status: "warn", Reason: item.FallbackReason, Detail: map[string]any{"from": item.FallbackFrom, "to": item.Provider}})
+	}
+	status := "ok"
+	if item.StatusCode >= 400 || item.Error != "" {
+		status = "error"
+	}
+	events = append(events, TimelineEvent{Stage: "upstream", Status: status, LatencyMS: item.LatencyMS, Reason: item.Error, Detail: map[string]any{"status_code": item.StatusCode, "tokens": item.TotalTokens, "cost_krw": item.EstimatedCost}})
+	for _, span := range detail.Text2SQLSpans {
+		events = append(events, TimelineEvent{Stage: "text2sql." + span.Stage, Status: span.Status, LatencyMS: span.LatencyMS, Reason: span.RejectReason})
+	}
+	return events
+}
+
+func firstPolicyReason(g GovernanceEvents) string {
+	for _, decision := range g.PolicyDecisions {
+		if decision.Reason != "" {
+			return decision.Reason
+		}
+	}
+	if len(g.SecretEvents) > 0 {
+		return g.SecretEvents[0].SecretType
+	}
+	return ""
+}
+
+func firstNonEmptyStore(values ...string) string {
+	for _, v := range values {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 func (s *SQLStore) FeedbackForRequest(ctx context.Context, requestID string) ([]LLMFeedback, error) {

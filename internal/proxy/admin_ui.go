@@ -1735,7 +1735,7 @@ const adminHTML = `<!doctype html>
         }
 
         // Multiple points — open selection list in modal.
-        openModal('선택된 요청 ' + fmt(selected.length) + '개', buildXVSelectionHTML(selected, ridMap));
+        openXVSelectionModal(selected, ridMap);
       }
 
       svg.addEventListener('mousedown', e => {
@@ -1748,10 +1748,26 @@ const adminHTML = `<!doctype html>
       });
     }
 
-    function buildXVSelectionHTML(rids, ridMap) {
+    async function openXVSelectionModal(rids, ridMap) {
+      const title = '선택된 요청 ' + fmt(rids.length) + '개';
+      openModal(title, '<div class="empty">요청 미리보기를 불러오는 중...</div>');
+      let reqMap = {};
+      try {
+        const ids = rids.slice(0, 200);
+        const data = await api('/admin/requests?ids=' + encodeURIComponent(ids.join(',')) + '&limit=' + ids.length);
+        (data.requests || []).forEach(r => { reqMap[r.id] = r; });
+      } catch (err) {
+        reqMap = {};
+      }
+      openModal(title, buildXVSelectionHTML(rids, ridMap, reqMap));
+    }
+
+    function buildXVSelectionHTML(rids, ridMap, reqMap) {
       const yField = xviewYField(xviewState.metric);
       const rows = rids.slice(0, 200).map(rid => {
         const p  = ridMap[rid] || {};
+        const rq = (reqMap && reqMap[rid]) || {};
+        const lastUser = lastUserMessageSnippet(rq, 30);
         const t  = Date.parse(p.created_at);
         const ts = isNaN(t) ? '' : new Date(t).toLocaleTimeString('ko-KR');
         const sc = p.status_code || 0;
@@ -1761,6 +1777,7 @@ const adminHTML = `<!doctype html>
           ((p.policy_decision_count || 0) > 0 ? '<span class="badge"      style="margin-left:4px">거버넌스</span>' : '');
         return '<tr>' +
           '<td>' + escapeHTML(p.model || '?') + badges + '</td>' +
+          '<td title="' + escapeAttr(lastUserMessageText(rq)) + '">' + (lastUser ? escapeHTML(lastUser) : '<span class="muted">-</span>') + '</td>' +
           '<td>' + xviewFmtY(xviewState.metric, p[yField] || 0) + '</td>' +
           '<td>' + escapeHTML(p.provider || '') + '</td>' +
           '<td class="muted">' + ts + '</td>' +
@@ -1775,6 +1792,7 @@ const adminHTML = `<!doctype html>
         '<div style="overflow-x:auto">' +
         '<table style="font-size:13px"><thead><tr>' +
           '<th>모델</th>' +
+          '<th>마지막 메시지</th>' +
           '<th>' + xviewYLabel(xviewState.metric) + '</th>' +
           '<th>provider</th>' +
           '<th>시간</th>' +
@@ -3794,6 +3812,25 @@ const adminHTML = `<!doctype html>
           '<td data-num="' + (r.average_confidence || 0) + '">' + pct(r.average_confidence) + '</td></tr>').join('') +
         '</tbody></table>';
     }
+    function normalizePreviewText(value) {
+      return String(value || '').replace(/\s+/g, ' ').trim();
+    }
+    function clipPreviewText(value, maxChars) {
+      const chars = Array.from(normalizePreviewText(value));
+      if (chars.length <= maxChars) return chars.join('');
+      return chars.slice(0, maxChars).join('') + '…';
+    }
+    function lastUserMessageText(r) {
+      const prompts = (r && r.prompts) || [];
+      for (let i = prompts.length - 1; i >= 0; i--) {
+        const p = prompts[i] || {};
+        if (String(p.role || '').toLowerCase() === 'user') return normalizePreviewText(p.redacted_text || p.content_text || '');
+      }
+      return '';
+    }
+    function lastUserMessageSnippet(r, maxChars) {
+      return clipPreviewText(lastUserMessageText(r), maxChars || 30);
+    }
     function requestsTable(rows, opts) {
       if (!rows.length) return '<div class="empty">요청 없음</div>';
       const selectable = opts && opts.selectable;
@@ -3812,6 +3849,8 @@ const adminHTML = `<!doctype html>
         rows.map(r => {
           const langs = (r.languages || []).map(l => l.language).join(', ');
           const prompt = (r.prompts || []).map(p => p.role + ': ' + p.redacted_text).join('\n\n');
+          const lastUser = lastUserMessageSnippet(r, 30);
+          const lastUserLine = lastUser ? '<div class="muted" title="' + escapeAttr(lastUserMessageText(r)) + '"><strong>마지막 user</strong> ' + escapeHTML(lastUser) + '</div>' : '';
           const tags = (r.tags || []).map(t => '<span class="pill" title="태그">#' + escapeHTML(t) + '</span>').join(' ');
           const note = r.note ? '<div class="muted" title="' + escapeHTML(r.note) + '">📝 ' + escapeHTML(r.note.length > 60 ? r.note.slice(0, 60) + '…' : r.note) + '</div>' : '';
           const checkCell = selectable ? '<td><input type="checkbox" class="diff-check" value="' + escapeHTML(r.id) + '"></td>' : '';
@@ -3823,7 +3862,7 @@ const adminHTML = `<!doctype html>
             '<td>' + escapeHTML(r.model || '알 수 없음') + '<div class="muted">' + escapeHTML(langs || '') + '</div>' + (tags ? '<div style="margin-top:4px">' + tags + '</div>' : '') + '</td>' +
             '<td data-num="' + (r.first_chunk_ms || 0) + '">' + fmt(r.first_chunk_ms || 0) + ' ms<div class="muted">전체 ' + fmt(r.latency_ms || 0) + ' ms</div></td>' +
             '<td data-num="' + (r.total_tokens || 0) + '">' + fmt(r.total_tokens) + ' tok<div class="muted">' + money(r.estimated_cost) + ' · ' + escapeHTML(sourceLabel(r.token_source)) + '</div></td>' +
-            '<td><div class="prompt">' + escapeHTML(prompt) + '</div>' + note + '</td>' +
+            '<td>' + lastUserLine + '<div class="prompt">' + escapeHTML(prompt) + '</div>' + note + '</td>' +
             (mcpWaterfall ? '<td><button class="secondary" type="button" onclick="event.stopPropagation();openMCPRequestWaterfall(\'' + escapeAttr(r.id) + '\')">MCP Waterfall</button></td>' : '') +
           '</tr>';
         }).join('') + '</tbody></table>';
@@ -3929,6 +3968,145 @@ const adminHTML = `<!doctype html>
           route();
         });
       });
+    }
+    function requestReadabilityHTML(d) {
+      const r = d.request || {};
+      const rd = d.readability || {};
+      const basic = rd.basic || {};
+      const model = rd.model || {};
+      const params = rd.parameters || {};
+      const routing = rd.routing || {};
+      const policy = rd.policy || {};
+      const badges = (rd.badges || []).map(b => '<span class="status ' + badgeClass(b.severity) + '" title="' + escapeAttr(b.reason || '') + '">' + escapeHTML(b.label || b.code || '') + '</span>').join(' ');
+      const requested = model.requested_model || r.requested_model || r.model || '';
+      const resolved = model.resolved_model || r.resolved_model || r.model || '';
+      const upstream = model.upstream_model || r.upstream_model || r.model || '';
+      const provider = model.provider || r.provider || '';
+      const modelDiff = requested && upstream && requested !== upstream
+        ? '<details style="margin-top:8px"><summary>모델 변경 사유</summary><div class="kv" style="margin-top:8px">' +
+          row('Requested', '<code>' + escapeHTML(requested) + '</code>') +
+          row('Resolved', '<code>' + escapeHTML(resolved) + '</code>') +
+          row('Upstream', '<code>' + escapeHTML(upstream) + '</code>') +
+          row('Reason', escapeHTML(model.route_reason || routing.decision_reason || routing.route_reason || '')) +
+          '</div></details>' : '';
+      const summary =
+        '<div class="kpis">' +
+          kpi('상태', statusBadge(r.status_code), escapeHTML(String(basic.status || ''))) +
+          kpi('모델', '<strong>' + escapeHTML(requested || '-') + '</strong>', (requested !== upstream ? '→ ' + escapeHTML(upstream || '-') : escapeHTML(provider || '-'))) +
+          kpi('Provider', escapeHTML(provider || '-'), escapeHTML(model.route_rule || routing.route_rule || '')) +
+          kpi('Latency', fmt(r.latency_ms || basic.latency_ms || 0) + ' ms', '첫 청크 ' + fmt(r.first_chunk_ms || 0) + ' ms') +
+          kpi('Cost', money(r.estimated_cost || 0), fmt(r.total_tokens || 0) + ' tok') +
+        '</div>';
+      const pinned =
+        '<div class="kv" style="margin-top:12px">' +
+          row('Request ID', copyableText(r.id || '')) +
+          row('Session ID', r.session_id ? copyableText(r.session_id) : '<span class="muted">없음</span>') +
+          row('Endpoint', '<code>' + escapeHTML(r.method || basic.method || 'POST') + ' ' + escapeHTML(r.endpoint || '') + '</code>') +
+          row('Temperature', temperatureHTML(params.temperature, params.temperature_label)) +
+          row('Route Rule', escapeHTML(model.route_rule || routing.route_rule || '-')) +
+          row('Badges', badges || '<span class="muted">없음</span>') +
+        '</div>' + modelDiff;
+      return '<section style="margin-top:0"><h2>OpenAI Gateway 요청 요약</h2><div style="padding:14px">' + summary + pinned + '</div></section>' +
+        '<div class="split" style="grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:14px; margin-top:14px">' +
+          '<section><h2>요청 파라미터</h2><div style="padding:14px">' + parameterTable(params) + '</div></section>' +
+          '<section><h2>라우팅 · 정책</h2><div style="padding:14px">' + routingPolicyHTML(routing, policy) + '</div></section>' +
+        '</div>' +
+        '<section style="margin-top:14px"><h2>헤더</h2><div style="padding:14px">' + headerGroupsHTML((rd.headers || {})) + '</div></section>';
+    }
+    function badgeClass(sev) {
+      if (sev === 'error') return 'error';
+      if (sev === 'warn') return 'warn';
+      return '';
+    }
+    function copyableText(value) {
+      const v = String(value || '');
+      if (!v) return '<span class="muted">-</span>';
+      return '<code>' + escapeHTML(v) + '</code> <button type="button" class="secondary" style="font-size:11px;padding:3px 7px" onclick="copyDetailValue(\'' + escapeAttr(v) + '\')">복사</button>';
+    }
+    window.copyDetailValue = (value) => { if (navigator.clipboard) navigator.clipboard.writeText(value || ''); };
+    function temperatureHTML(value, label) {
+      if (value === null || value === undefined || value === '') return '<span class="muted">미지정</span>';
+      const n = Number(value);
+      const cls = n > 0.8 ? 'warn' : '';
+      return '<span class="status ' + cls + '">' + escapeHTML(String(value)) + ' ' + escapeHTML(label || temperatureLabelClient(n)) + '</span>';
+    }
+    function temperatureLabelClient(n) {
+      if (n === 0) return '결정적';
+      if (n <= 0.3) return '낮음';
+      if (n <= 0.8) return '보통';
+      return '높음';
+    }
+    function parameterTable(params) {
+      const rows = [
+        ['temperature', temperatureHTML(params.temperature, params.temperature_label)],
+        ['top_p', scalarHTML(params.top_p)],
+        ['max_tokens', scalarHTML(params.max_tokens)],
+        ['max_completion_tokens', scalarHTML(params.max_completion_tokens)],
+        ['n', scalarHTML(params.n)],
+        ['presence_penalty', scalarHTML(params.presence_penalty)],
+        ['frequency_penalty', scalarHTML(params.frequency_penalty)],
+        ['stop', jsonInline(params.stop)],
+        ['seed', scalarHTML(params.seed)],
+        ['response_format', scalarHTML(params.response_format_type)],
+        ['tools', fmt(params.tool_count || 0) + '개' + ((params.tool_names || []).length ? '<div class="muted">' + (params.tool_names || []).map(escapeHTML).join(', ') + '</div>' : '')],
+        ['tool_choice', jsonInline(params.tool_choice)],
+        ['stream', params.stream ? '<span class="status">true</span>' : '<span class="status">false</span>'],
+        ['stream_options', jsonInline(params.stream_options)],
+        ['user', scalarHTML(params.user)],
+      ];
+      const extra = params.additional_fields || [];
+      if (extra.length) rows.push(['추가 파라미터', '<details><summary>' + fmt(extra.length) + '개</summary><pre class="prompt-block">' + escapeHTML(JSON.stringify(extra, null, 2)) + '</pre></details>']);
+      return '<table><thead><tr><th>Parameter</th><th>Value</th></tr></thead><tbody>' +
+        rows.map(x => '<tr><td><code>' + escapeHTML(x[0]) + '</code></td><td>' + x[1] + '</td></tr>').join('') +
+        '</tbody></table>';
+    }
+    function routingPolicyHTML(routing, policy) {
+      return '<div class="kv">' +
+        row('Requested Model', '<code>' + escapeHTML(routing.requested_model || '-') + '</code>') +
+        row('Resolved Model', '<code>' + escapeHTML(routing.resolved_model || '-') + '</code>') +
+        row('Selected Provider', escapeHTML(routing.selected_provider || '-')) +
+        row('Upstream Model', '<code>' + escapeHTML(routing.selected_upstream_model || '-') + '</code>') +
+        row('Route Reason', escapeHTML(routing.decision_reason || routing.route_reason || '-')) +
+        row('Fallback', routing.fallback ? '<span class="status warn">applied</span> ' + escapeHTML(routing.fallback_reason || '') : '<span class="status">none</span>') +
+        row('Policy', '<span class="status ' + ((policy.decision === 'block') ? 'error' : (policy.decision === 'approval' ? 'warn' : '')) + '">' + escapeHTML(policy.decision || 'allow') + '</span>' + (policy.reason ? ' · ' + escapeHTML(policy.reason) : '')) +
+        row('Cache', jsonInline(routing.cache)) +
+        row('MCP / Text2SQL', (routing.mcp_used ? '<span class="status">MCP</span> ' : '') + (routing.text2sql_used ? '<span class="status">Text2SQL</span>' : (!routing.mcp_used ? '<span class="muted">없음</span>' : ''))) +
+      '</div>';
+    }
+    function headerGroupsHTML(headers) {
+      const order = [
+        ['primary', '주요 헤더'],
+        ['gateway', 'Gateway 헤더'],
+        ['client', 'Client 헤더'],
+        ['proxy', 'Proxy 헤더'],
+        ['upstream_request', 'Upstream 요청 헤더'],
+        ['upstream_response', 'Upstream 응답 헤더'],
+        ['gateway_response', 'Gateway 응답 헤더'],
+        ['request', '전체 원본 헤더(마스킹)']
+      ];
+      return order.map(([key, label], idx) => {
+        const group = headers[key] || {};
+        const open = idx < 2 ? ' open' : '';
+        return '<details' + open + ' style="margin-bottom:8px"><summary>' + escapeHTML(label) + ' <span class="muted">(' + fmt(Object.keys(group).filter(k => !k.startsWith('_')).length) + ')</span></summary>' +
+          headerTable(group) + '</details>';
+      }).join('');
+    }
+    function headerTable(group) {
+      const keys = Object.keys(group || {}).filter(k => !k.startsWith('_')).sort();
+      if (!keys.length) return '<div class="empty">헤더 없음</div>';
+      return '<table style="margin-top:8px"><thead><tr><th>Header</th><th>Value</th></tr></thead><tbody>' +
+        keys.map(k => '<tr><td><code>' + escapeHTML(k) + '</code></td><td style="word-break:break-all">' + escapeHTML(String(group[k] || '')) + '</td></tr>').join('') +
+        '</tbody></table>';
+    }
+    function scalarHTML(v) {
+      if (v === null || v === undefined || v === '') return '<span class="muted">-</span>';
+      if (typeof v === 'boolean') return '<span class="status">' + String(v) + '</span>';
+      return escapeHTML(String(v));
+    }
+    function jsonInline(v) {
+      if (v === null || v === undefined || v === '') return '<span class="muted">-</span>';
+      if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') return scalarHTML(v);
+      return '<details><summary>JSON</summary><pre class="prompt-block">' + escapeHTML(JSON.stringify(v, null, 2)) + '</pre></details>';
     }
     function requestDetailHTML(d, note, links) {
       const r = d.request;
@@ -4036,6 +4214,7 @@ const adminHTML = `<!doctype html>
         lastUserBlock +
         explainBtn +
         traceLinksHTML(r.id, links) +
+        requestReadabilityHTML(d) +
         '<div class="kv">' +
           row('요청 ID', escapeHTML(r.id)) +
           row('Trace ID', escapeHTML(r.trace_id)) +

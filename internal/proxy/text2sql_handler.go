@@ -232,6 +232,9 @@ func (s *Server) handleText2SQL(w http.ResponseWriter, r *http.Request, meta sto
 		meta.Request.TaskType = "text2sql"
 		meta.Request.RouteReason = "text2sql"
 		meta.Request.RouteDetail = "upstream:" + upstreamModel
+		meta.Request.ResolvedModel = meta.Request.Model
+		meta.Request.UpstreamModel = upstreamModel
+		meta.Request.Provider = firstNonEmpty(meta.Request.Provider, "text2sql")
 		meta.Request.StatusCode = http.StatusOK
 		meta.Request.LatencyMS = time.Since(start).Milliseconds()
 		if costKRW > 0 {
@@ -243,6 +246,8 @@ func (s *Server) handleText2SQL(w http.ResponseWriter, r *http.Request, meta sto
 		meta.Evaluations = buildLLMEvaluations(meta, ResponseAnalysis{})
 		meta.Evaluations = append(meta.Evaluations, text2sqlEvaluations(meta.Request.ID, meta.Request.TraceID, validation, executed, errMsg)...)
 		s.metrics.ObserveLLMEvaluations(meta.Evaluations)
+		applyUpstreamHeaderSummary(&meta.Request, nil, nil, w.Header())
+		refreshRoutingSummary(&meta.Request, nil)
 		s.enqueue(meta)
 		// Auto-candidate: a valid (and, in execute mode, successful) query is worth
 		// proposing as a golden example for later admin promotion. Best-effort, async.

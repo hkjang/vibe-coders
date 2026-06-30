@@ -494,6 +494,9 @@ func (s *Server) handleRequestDetail(w http.ResponseWriter, r *http.Request) {
 		case "trace":
 			s.handleRequestTrace(w, r)
 			return
+		case "headers", "routing", "body", "timeline", "export":
+			s.handleRequestReadableSubresource(w, r, rest)
+			return
 		}
 		writeOpenAIError(w, http.StatusNotFound, "not found", "invalid_request_error", "not_found")
 		return
@@ -510,6 +513,10 @@ func (s *Server) handleRequestDetail(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "request_detail_failed")
+		return
+	}
+	if !s.canViewRequestDetail(r, detail.Request) {
+		writeOpenAIError(w, http.StatusForbidden, "request is outside your team scope", "permission_error", "cross_team_access_denied")
 		return
 	}
 	s.maskRequestDetail(r, &detail) // data-scope masking: hide prompt originals from lower-privilege admins

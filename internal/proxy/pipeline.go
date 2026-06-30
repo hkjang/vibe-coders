@@ -155,6 +155,7 @@ func (rc *requestPipeline) stepRouting() bool {
 		}
 	}
 	rc.body = body
+	originalBody := append([]byte(nil), body...)
 
 	traceID := traceIDFromRequest(r)
 	rc.traceID = traceID
@@ -202,17 +203,23 @@ func (rc *requestPipeline) stepRouting() bool {
 	rc.body = body
 
 	meta := s.auditRequest(r.URL.Path, body, rc.apiKeyID, traceID, r)
+	applyOpenAIRequestBodySummary(&meta.Request, originalBody, r.URL.Path)
 	if routingPlan != nil {
 		meta.Request.Complexity = routingPlan.Complexity.Score
 		if routingPlan.RequestedModel != "" && routingPlan.RequestedModel != meta.Request.Model {
 			meta.Request.RequestedModel = routingPlan.RequestedModel
 		}
+		meta.Request.ResolvedModel = firstNonEmpty(routingPlan.SelectedModel, meta.Request.Model)
+		meta.Request.UpstreamModel = meta.Request.ResolvedModel
 		meta.Routing = routingPlan.toStore(meta.Request.ID, traceID, meta.Request.Provider)
 	}
 	if routeDecision.Applied {
 		meta.Request.RequestedModel = routeDecision.OriginalModel
+		meta.Request.ResolvedModel = routeDecision.TargetModel
+		meta.Request.UpstreamModel = routeDecision.TargetModel
 		s.metrics.IncRoutingOverride()
 	}
+	refreshRoutingSummary(&meta.Request, routingPlan)
 
 	rc.routeDecision = routeDecision
 	rc.routingPlan = routingPlan
@@ -420,12 +427,13 @@ func (rc *requestPipeline) stepUpstream() bool {
 	}
 
 	start := time.Now()
-	resp, resolvedName, failoverFrom, failoverReason, failoverPath, finalBody, finalModel, err := s.dialUpstream(r.Context(), r, body, provider, traceID, failoverCandidates)
+	resp, resolvedName, failoverFrom, failoverReason, failoverPath, finalBody, finalModel, upstreamHeaders, err := s.dialUpstream(r.Context(), r, body, provider, traceID, failoverCandidates)
 	if finalBody != nil {
 		body = finalBody
 	}
 	if finalModel != "" && finalModel != meta.Request.Model {
 		meta.Request.Model = finalModel
+		meta.Request.UpstreamModel = finalModel
 		if routingPlan != nil {
 			routingPlan.SelectedModel = finalModel
 		}
@@ -441,6 +449,8 @@ func (rc *requestPipeline) stepUpstream() bool {
 			routingPlan.FallbackPath = append(routingPlan.FallbackPath, failoverPath...)
 			meta.Routing = routingPlan.toStore(meta.Request.ID, traceID, meta.Request.Provider)
 		}
+		applyUpstreamHeaderSummary(&meta.Request, upstreamHeaders, nil, w.Header())
+		refreshRoutingSummary(&meta.Request, routingPlan)
 		meta.Evaluations = buildLLMEvaluations(meta, ResponseAnalysis{})
 		s.metrics.ObserveLLMEvaluations(meta.Evaluations)
 		rc.recordSkillRun(rc.skillName, rc.skillVersion, "error", meta.Request.Model, 0, meta.Request.LatencyMS)
@@ -460,6 +470,8 @@ func (rc *requestPipeline) stepUpstream() bool {
 	if resolvedName != "" {
 		meta.Request.Provider = resolvedName
 	}
+	meta.Request.ResolvedModel = firstNonEmpty(meta.Request.ResolvedModel, meta.Request.Model)
+	meta.Request.UpstreamModel = firstNonEmpty(finalModel, meta.Request.UpstreamModel, meta.Request.Model)
 	if routingPlan != nil {
 		routingPlan.SelectedProvider = meta.Request.Provider
 		if len(failoverPath) > 0 {
@@ -467,6 +479,7 @@ func (rc *requestPipeline) stepUpstream() bool {
 		}
 		meta.Routing = routingPlan.toStore(meta.Request.ID, traceID, meta.Request.Provider)
 	}
+	refreshRoutingSummary(&meta.Request, routingPlan)
 
 	stream := meta.Request.Stream || strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream")
 	s.metrics.IncRequest(stream)
@@ -474,6 +487,7 @@ func (rc *requestPipeline) stepUpstream() bool {
 	meta.Request.StatusCode = resp.StatusCode
 
 	copyDownstreamHeaders(w.Header(), resp.Header)
+	applyUpstreamHeaderSummary(&meta.Request, upstreamHeaders, resp.Header, w.Header())
 
 	var responseBody io.Reader = resp.Body
 	if resp.Header.Get("Content-Encoding") == "gzip" {
@@ -606,6 +620,8 @@ func (rc *requestPipeline) stepUpstream() bool {
 		}
 		rc.recordSkillRun(rc.skillName, rc.skillVersion, status, meta.Request.Model, cost, meta.Request.LatencyMS)
 	}
+	applyUpstreamHeaderSummary(&meta.Request, upstreamHeaders, resp.Header, w.Header())
+	refreshRoutingSummary(&meta.Request, routingPlan)
 	s.enqueue(meta)
 	return true
 }

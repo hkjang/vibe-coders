@@ -171,11 +171,14 @@ type RequestLog struct {
 	ID                  string
 	TraceID             string
 	APIKeyID            string
+	Method              string
 	ClientIP            string
 	ForwardedFor        string
 	UserAgent           string
 	Hostname            string
 	Model               string
+	ResolvedModel       string
+	UpstreamModel       string
 	Endpoint            string
 	Stream              bool
 	Provider            string
@@ -198,6 +201,18 @@ type RequestLog struct {
 	FallbackFrom        string // original provider before failover
 	FallbackReason      string // transport error that triggered failover
 	RequestedModel      string // model the client asked for (before complexity routing)
+	Temperature         *float64
+	TopP                *float64
+	MaxTokens           int
+	MaxCompletionTokens int
+	ResponseFormatType  string
+	RequestHeadersJSON  string // masked request headers
+	UpstreamHeadersJSON string // masked provider request headers
+	ResponseHeadersJSON string // masked provider response headers
+	HeaderSummaryJSON   string // grouped masked headers for UI
+	BodySummaryJSON     string // OpenAI-compatible body summary for UI
+	RoutingSummaryJSON  string // resolved route/provider/fallback summary
+	PolicySummaryJSON   string // governance/quota/cache policy summary
 	TaskType            string // heuristic task class (refactor/generate/debug/...) for routing learning
 	PromptFingerprint   string // lexical fingerprint grouping near-identical task prompts
 	Repo                string // X-Vibe-Repo / X-Repo — source repository
@@ -749,6 +764,7 @@ type LanguageGrouped struct {
 
 type RequestFilter struct {
 	Limit          int
+	IDs            []string
 	IP             string
 	Model          string
 	Language       string
@@ -768,13 +784,28 @@ type RecentRequest struct {
 	ID                  string          `json:"id"`
 	TraceID             string          `json:"trace_id"`
 	APIKeyID            string          `json:"api_key_id"`
+	Method              string          `json:"method,omitempty"`
 	ClientIP            string          `json:"client_ip"`
 	ForwardedFor        string          `json:"forwarded_for"`
 	UserAgent           string          `json:"user_agent"`
 	Model               string          `json:"model"`
+	RequestedModel      string          `json:"requested_model,omitempty"`
+	ResolvedModel       string          `json:"resolved_model,omitempty"`
+	UpstreamModel       string          `json:"upstream_model,omitempty"`
 	Endpoint            string          `json:"endpoint"`
 	Stream              bool            `json:"stream"`
 	Provider            string          `json:"provider"`
+	RouteReason         string          `json:"route_reason,omitempty"`
+	RouteDetail         string          `json:"route_detail,omitempty"`
+	Failover            bool            `json:"failover,omitempty"`
+	FallbackFrom        string          `json:"fallback_from,omitempty"`
+	FallbackReason      string          `json:"fallback_reason,omitempty"`
+	Complexity          int             `json:"complexity,omitempty"`
+	Temperature         *float64        `json:"temperature,omitempty"`
+	TopP                *float64        `json:"top_p,omitempty"`
+	MaxTokens           int             `json:"max_tokens,omitempty"`
+	MaxCompletionTokens int             `json:"max_completion_tokens,omitempty"`
+	ResponseFormatType  string          `json:"response_format_type,omitempty"`
 	StatusCode          int             `json:"status_code"`
 	LatencyMS           int64           `json:"latency_ms"`
 	FirstChunkMS        int64           `json:"first_chunk_ms"`
@@ -841,17 +872,46 @@ type CodeVerifyDetail struct {
 }
 
 type RequestDetail struct {
-	Request       RecentRequest     `json:"request"`
-	Prompts       []PromptDetail    `json:"prompts"`
-	Response      *ResponseDetail   `json:"response,omitempty"`
-	Languages     []LanguageStat    `json:"languages"`
-	Spans         []LLMSpan         `json:"spans"`
-	Text2SQLSpans []Text2SQLSpan    `json:"text2sql_spans"`
-	Evaluations   []LLMEvaluation   `json:"evaluations"`
-	Feedback      []LLMFeedback     `json:"feedback"`
-	Tools         []ToolInvocation  `json:"tools"`
-	Governance    GovernanceEvents  `json:"governance"`
-	CodeVerify    *CodeVerifyDetail `json:"code_verify,omitempty"`
+	Request       RecentRequest       `json:"request"`
+	Readability   *RequestReadability `json:"readability,omitempty"`
+	Prompts       []PromptDetail      `json:"prompts"`
+	Response      *ResponseDetail     `json:"response,omitempty"`
+	Languages     []LanguageStat      `json:"languages"`
+	Spans         []LLMSpan           `json:"spans"`
+	Text2SQLSpans []Text2SQLSpan      `json:"text2sql_spans"`
+	Evaluations   []LLMEvaluation     `json:"evaluations"`
+	Feedback      []LLMFeedback       `json:"feedback"`
+	Tools         []ToolInvocation    `json:"tools"`
+	Governance    GovernanceEvents    `json:"governance"`
+	CodeVerify    *CodeVerifyDetail   `json:"code_verify,omitempty"`
+}
+
+type RequestReadability struct {
+	Basic      map[string]any    `json:"basic"`
+	Model      map[string]any    `json:"model"`
+	Parameters map[string]any    `json:"parameters"`
+	Headers    map[string]any    `json:"headers"`
+	Body       map[string]any    `json:"body"`
+	Routing    map[string]any    `json:"routing"`
+	Policy     map[string]any    `json:"policy"`
+	Badges     []DiagnosticBadge `json:"badges"`
+	Timeline   []TimelineEvent   `json:"timeline"`
+}
+
+type DiagnosticBadge struct {
+	Code     string `json:"code"`
+	Label    string `json:"label"`
+	Severity string `json:"severity"`
+	Reason   string `json:"reason"`
+}
+
+type TimelineEvent struct {
+	Stage     string         `json:"stage"`
+	Status    string         `json:"status"`
+	LatencyMS int64          `json:"latency_ms,omitempty"`
+	Reason    string         `json:"reason,omitempty"`
+	At        string         `json:"at,omitempty"`
+	Detail    map[string]any `json:"detail,omitempty"`
 }
 
 type GovernanceEvents struct {

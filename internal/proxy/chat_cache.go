@@ -102,6 +102,8 @@ func (s *Server) serveChatFromCache(ctx context.Context, w http.ResponseWriter, 
 	meta.Request.StatusCode = http.StatusOK
 	meta.Request.LatencyMS = 0
 	meta.Request.RouteReason = "cache"
+	meta.Request.ResolvedModel = firstNonEmpty(meta.Request.ResolvedModel, meta.Request.Model)
+	meta.Request.UpstreamModel = "cache"
 	if meta.Routing != nil {
 		meta.Routing.SelectedProvider = "cache"
 		meta.Routing.HealthScore = 100
@@ -128,6 +130,8 @@ func (s *Server) serveChatFromCache(ctx context.Context, w http.ResponseWriter, 
 	}
 	meta.Evaluations = buildLLMEvaluations(meta, ResponseAnalysis{Hash: meta.Response.ResponseHash, FinishReason: "cache"})
 	s.metrics.ObserveLLMEvaluations(meta.Evaluations)
+	applyUpstreamHeaderSummary(&meta.Request, nil, nil, w.Header())
+	refreshRoutingSummary(&meta.Request, nil)
 	s.enqueue(meta)
 	return true
 }

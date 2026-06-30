@@ -74,7 +74,12 @@ var apiEndpoints = []apiEndpoint{
 	// ---- admin: core analytics ----
 	{"/admin/stats", []string{"get"}, "admin", "Summary stats", false},
 	{"/admin/requests", []string{"get"}, "admin", "List recent requests", false},
-	{"/admin/requests/{id}", []string{"get"}, "admin", "Request detail (prompts/response/spans/evaluations)", false},
+	{"/admin/requests/{id}", []string{"get"}, "admin", "Request detail with readable OpenAI-compatible model/params/header/routing projection", false},
+	{"/admin/requests/{id}/headers", []string{"get"}, "admin", "Masked and grouped request/gateway/upstream headers", false},
+	{"/admin/requests/{id}/routing", []string{"get"}, "admin", "Routing, provider, fallback, policy and model resolution summary", false},
+	{"/admin/requests/{id}/body", []string{"get"}, "admin", "Masked request body summary and raw body evidence when retained", false},
+	{"/admin/requests/{id}/timeline", []string{"get"}, "admin", "Request processing timeline with spans/tool/Text2SQL overlays", false},
+	{"/admin/requests/{id}/export", []string{"post"}, "admin", "Masked request evidence export (?format=json|markdown)", false},
 	{"/admin/requests/{id}/links", []string{"get"}, "admin", "Request trace links across routing/MCP/Text2SQL/governance", false},
 	{"/admin/requests/{id}/trace", []string{"get"}, "admin", "Unified request waterfall (root + MCP/tool + Text2SQL spans)", false},
 	{"/admin/traces/{trace_id}", []string{"get"}, "admin", "All requests + workflow/app runs sharing a trace_id", false},

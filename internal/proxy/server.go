@@ -31,7 +31,7 @@ import (
 )
 
 // AppVersion is the gateway build version, surfaced in /auth/me and the admin UI.
-const AppVersion = "v0.76.2"
+const AppVersion = "v0.76.3"
 
 type Server struct {
 	cfg            config.Config
@@ -642,11 +642,17 @@ func (s *Server) handleRequests(w http.ResponseWriter, r *http.Request) {
 			limit = parsed
 		}
 	}
+	ids := splitCSV(r.URL.Query().Get("ids"))
+	if len(ids) > 0 && limit < len(ids) {
+		limit = len(ids)
+	}
 	requests, err := s.db.RecentRequests(r.Context(), store.RequestFilter{
 		Limit:    limit,
+		IDs:      ids,
 		IP:       strings.TrimSpace(r.URL.Query().Get("ip")),
 		Model:    strings.TrimSpace(r.URL.Query().Get("model")),
 		Language: strings.TrimSpace(r.URL.Query().Get("language")),
+		Team:     requestTeamScopeForCaller(s, r),
 	})
 	if err != nil {
 		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "requests_failed")
@@ -1342,7 +1348,7 @@ type resolvedProvider struct {
 // in `failoverCandidates`, in order. Returns the live response, the name of the
 // provider that actually answered, and (if a failover occurred) the original primary's
 // name in `failoverFrom`.
-func (s *Server) dialUpstream(reqCtx context.Context, r *http.Request, body []byte, primary resolvedProvider, traceID string, failoverCandidates []string) (*http.Response, string, string, string, []string, []byte, string, error) {
+func (s *Server) dialUpstream(reqCtx context.Context, r *http.Request, body []byte, primary resolvedProvider, traceID string, failoverCandidates []string) (*http.Response, string, string, string, []string, []byte, string, http.Header, error) {
 	type attempt struct {
 		provider resolvedProvider
 	}
@@ -1364,11 +1370,12 @@ func (s *Server) dialUpstream(reqCtx context.Context, r *http.Request, body []by
 	currentBody := body
 	currentModel, _ := previewModelComplexity(currentBody, r.URL.Path)
 	usedLongContext := false
+	var lastUpstreamHeaders http.Header
 	for i := 0; i < len(attempts); {
 		att := attempts[i]
 		upstreamURL, err := s.upstreamURL(att.provider.BaseURL, r.URL)
 		if err != nil {
-			return nil, "", "", "", failoverPath, currentBody, currentModel, err
+			return nil, "", "", "", failoverPath, currentBody, currentModel, lastUpstreamHeaders, err
 		}
 		ctx := reqCtx
 		var cancel context.CancelFunc
@@ -1380,7 +1387,7 @@ func (s *Server) dialUpstream(reqCtx context.Context, r *http.Request, body []by
 			if cancel != nil {
 				cancel()
 			}
-			return nil, "", "", "", failoverPath, currentBody, currentModel, err
+			return nil, "", "", "", failoverPath, currentBody, currentModel, lastUpstreamHeaders, err
 		}
 		copyUpstreamHeaders(upstreamReq.Header, r.Header)
 		upstreamReq.Header.Set("Authorization", "Bearer "+att.provider.APIKey)
@@ -1388,6 +1395,7 @@ func (s *Server) dialUpstream(reqCtx context.Context, r *http.Request, body []by
 		if r.Method == http.MethodPost && upstreamReq.Header.Get("Content-Type") == "" {
 			upstreamReq.Header.Set("Content-Type", "application/json")
 		}
+		lastUpstreamHeaders = upstreamReq.Header.Clone()
 
 		resp, doErr := s.client.Do(upstreamReq)
 		if doErr == nil {
@@ -1431,7 +1439,7 @@ func (s *Server) dialUpstream(reqCtx context.Context, r *http.Request, body []by
 					reason = failoverPath[len(failoverPath)-1]
 				}
 			}
-			return resp, att.provider.Name, from, reason, failoverPath, currentBody, currentModel, nil
+			return resp, att.provider.Name, from, reason, failoverPath, currentBody, currentModel, lastUpstreamHeaders, nil
 		}
 		if cancel != nil {
 			cancel()
@@ -1447,7 +1455,7 @@ func (s *Server) dialUpstream(reqCtx context.Context, r *http.Request, body []by
 	if lastErr == nil {
 		lastErr = errors.New("no provider attempts made")
 	}
-	return nil, "", "", fallbackReasonForError(lastErr), failoverPath, currentBody, currentModel, lastErr
+	return nil, "", "", fallbackReasonForError(lastErr), failoverPath, currentBody, currentModel, lastUpstreamHeaders, lastErr
 }
 
 // selectProviderForced resolves a provider, optionally pinned to forceProvider
@@ -1830,11 +1838,14 @@ func (s *Server) auditRequest(endpoint string, body []byte, apiKeyID string, tra
 			ID:                  requestID,
 			TraceID:             traceID,
 			APIKeyID:            apiKeyID,
+			Method:              r.Method,
 			ClientIP:            clientIP(r),
 			ForwardedFor:        r.Header.Get("X-Forwarded-For"),
 			UserAgent:           r.UserAgent(),
 			Hostname:            hostname(),
 			Model:               model,
+			ResolvedModel:       model,
+			UpstreamModel:       model,
 			Endpoint:            endpoint,
 			Stream:              stream,
 			Provider:            s.cfg.Upstream.Provider,
@@ -1860,6 +1871,7 @@ func (s *Server) auditRequest(endpoint string, body []byte, apiKeyID string, tra
 		Languages: languageStats,
 	}
 	record.Tools = toolInvocations(record.Request, extractRequestTools(body))
+	applyReadableIngress(&record.Request, r, body)
 	return record
 }
 

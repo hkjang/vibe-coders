@@ -206,11 +206,14 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 			id TEXT PRIMARY KEY,
 			trace_id TEXT NOT NULL,
 			api_key_id TEXT,
+			method TEXT,
 			client_ip TEXT,
 			forwarded_for TEXT,
 			user_agent TEXT,
 			hostname TEXT,
 			model TEXT,
+			resolved_model TEXT,
+			upstream_model TEXT,
 			endpoint TEXT NOT NULL,
 			stream INTEGER NOT NULL,
 			provider TEXT,
@@ -232,6 +235,18 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 			complexity INTEGER NOT NULL DEFAULT 0,
 			fallback_from TEXT,
 			fallback_reason TEXT,
+			temperature REAL,
+			top_p REAL,
+			max_tokens INTEGER NOT NULL DEFAULT 0,
+			max_completion_tokens INTEGER NOT NULL DEFAULT 0,
+			response_format_type TEXT,
+			request_headers_json TEXT,
+			upstream_headers_json TEXT,
+			response_headers_json TEXT,
+			header_summary_json TEXT,
+			body_summary_json TEXT,
+			routing_summary_json TEXT,
+			policy_summary_json TEXT,
 			created_at TEXT NOT NULL
 		)`,
 		// Idempotent ALTERs for legacy installations of request_logs
@@ -243,7 +258,22 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 		`ALTER TABLE request_logs ADD COLUMN complexity INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE request_logs ADD COLUMN fallback_from TEXT`,
 		`ALTER TABLE request_logs ADD COLUMN fallback_reason TEXT`,
+		`ALTER TABLE request_logs ADD COLUMN method TEXT`,
+		`ALTER TABLE request_logs ADD COLUMN resolved_model TEXT`,
+		`ALTER TABLE request_logs ADD COLUMN upstream_model TEXT`,
 		`ALTER TABLE request_logs ADD COLUMN requested_model TEXT`,
+		`ALTER TABLE request_logs ADD COLUMN temperature REAL`,
+		`ALTER TABLE request_logs ADD COLUMN top_p REAL`,
+		`ALTER TABLE request_logs ADD COLUMN max_tokens INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE request_logs ADD COLUMN max_completion_tokens INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE request_logs ADD COLUMN response_format_type TEXT`,
+		`ALTER TABLE request_logs ADD COLUMN request_headers_json TEXT`,
+		`ALTER TABLE request_logs ADD COLUMN upstream_headers_json TEXT`,
+		`ALTER TABLE request_logs ADD COLUMN response_headers_json TEXT`,
+		`ALTER TABLE request_logs ADD COLUMN header_summary_json TEXT`,
+		`ALTER TABLE request_logs ADD COLUMN body_summary_json TEXT`,
+		`ALTER TABLE request_logs ADD COLUMN routing_summary_json TEXT`,
+		`ALTER TABLE request_logs ADD COLUMN policy_summary_json TEXT`,
 		`ALTER TABLE request_logs ADD COLUMN task_type TEXT`,
 		`ALTER TABLE request_logs ADD COLUMN prompt_fingerprint TEXT`,
 		`ALTER TABLE request_logs ADD COLUMN first_chunk_ms INTEGER NOT NULL DEFAULT 0`,
@@ -2122,9 +2152,9 @@ func (s *SQLStore) InsertLogRecord(ctx context.Context, record LogRecord) error 
 		req.CreatedAt = time.Now().UTC()
 	}
 	_, err = tx.ExecContext(ctx, s.bind(`INSERT INTO request_logs
-		(id, trace_id, api_key_id, client_ip, forwarded_for, user_agent, hostname, model, endpoint, stream, provider, status_code, latency_ms, first_chunk_ms, session_id, prompt_name, prompt_version, prompt_variables_hash, tool_count, error, request_hash, body_raw, replay_of, failover, route_reason, route_detail, complexity, fallback_from, fallback_reason, requested_model, task_type, prompt_fingerprint, repo, branch, project, service, cost_center, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
-		cleanArgs([]any{req.ID, req.TraceID, req.APIKeyID, req.ClientIP, req.ForwardedFor, req.UserAgent, req.Hostname, req.Model, req.Endpoint, boolInt(req.Stream), req.Provider, req.StatusCode, req.LatencyMS, req.FirstChunkMS, req.SessionID, req.PromptName, req.PromptVersion, req.PromptVariablesHash, req.ToolCount, req.Error, req.RequestHash, req.BodyRaw, req.ReplayOf, boolInt(req.Failover), req.RouteReason, req.RouteDetail, req.Complexity, req.FallbackFrom, req.FallbackReason, req.RequestedModel, req.TaskType, req.PromptFingerprint, req.Repo, req.Branch, req.Project, req.Service, req.CostCenter, formatTime(req.CreatedAt)})...)
+		(id, trace_id, api_key_id, method, client_ip, forwarded_for, user_agent, hostname, model, resolved_model, upstream_model, endpoint, stream, provider, status_code, latency_ms, first_chunk_ms, session_id, prompt_name, prompt_version, prompt_variables_hash, tool_count, error, request_hash, body_raw, replay_of, failover, route_reason, route_detail, complexity, fallback_from, fallback_reason, requested_model, temperature, top_p, max_tokens, max_completion_tokens, response_format_type, request_headers_json, upstream_headers_json, response_headers_json, header_summary_json, body_summary_json, routing_summary_json, policy_summary_json, task_type, prompt_fingerprint, repo, branch, project, service, cost_center, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+		cleanArgs([]any{req.ID, req.TraceID, req.APIKeyID, req.Method, req.ClientIP, req.ForwardedFor, req.UserAgent, req.Hostname, req.Model, req.ResolvedModel, req.UpstreamModel, req.Endpoint, boolInt(req.Stream), req.Provider, req.StatusCode, req.LatencyMS, req.FirstChunkMS, req.SessionID, req.PromptName, req.PromptVersion, req.PromptVariablesHash, req.ToolCount, req.Error, req.RequestHash, req.BodyRaw, req.ReplayOf, boolInt(req.Failover), req.RouteReason, req.RouteDetail, req.Complexity, req.FallbackFrom, req.FallbackReason, req.RequestedModel, nullableFloatArg(req.Temperature), nullableFloatArg(req.TopP), req.MaxTokens, req.MaxCompletionTokens, req.ResponseFormatType, req.RequestHeadersJSON, req.UpstreamHeadersJSON, req.ResponseHeadersJSON, req.HeaderSummaryJSON, req.BodySummaryJSON, req.RoutingSummaryJSON, req.PolicySummaryJSON, req.TaskType, req.PromptFingerprint, req.Repo, req.Branch, req.Project, req.Service, req.CostCenter, formatTime(req.CreatedAt)})...)
 	if err != nil {
 		return err
 	}
@@ -2467,6 +2497,16 @@ func (s *SQLStore) RecentRequests(ctx context.Context, filter RequestFilter) ([]
 
 	where := []string{"1=1"}
 	args := []any{}
+	if len(filter.IDs) > 0 {
+		ids := filter.IDs
+		if len(ids) > 200 {
+			ids = ids[:200]
+		}
+		where = append(where, "r.id IN ("+placeholders(len(ids))+")")
+		for _, id := range ids {
+			args = append(args, strings.TrimSpace(id))
+		}
+	}
 	if filter.IP != "" {
 		where = append(where, "COALESCE(NULLIF(r.client_ip, ''), 'unknown') = ?")
 		args = append(args, filter.IP)
@@ -2731,6 +2771,24 @@ func boolInt(value bool) int {
 		return 1
 	}
 	return 0
+}
+
+func placeholders(n int) string {
+	if n <= 0 {
+		return ""
+	}
+	parts := make([]string, n)
+	for i := range parts {
+		parts[i] = "?"
+	}
+	return strings.Join(parts, ",")
+}
+
+func nullableFloatArg(value *float64) any {
+	if value == nil {
+		return nil
+	}
+	return *value
 }
 
 func formatTime(value time.Time) string {
