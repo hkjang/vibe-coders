@@ -342,8 +342,10 @@ const adminHTML = `<!doctype html>
         <div class="nav-group-menu">
           <a href="#/dashboard" data-tab="dashboard" class="active">종합 대시보드</a>
           <a href="#/team" data-tab="team">팀 대시보드</a>
+          <a href="#/team-portal" data-tab="team-portal">팀 포털</a>
           <a href="#/security" data-tab="security">보안 대시보드</a>
           <a href="#/billing" data-tab="billing">비용 대시보드</a>
+          <a href="#/chargeback" data-tab="chargeback">비용 배부 팩</a>
           <a href="#/dwdashboard" data-tab="dwdashboard">DW 대시보드</a>
         </div>
       </div>
@@ -354,13 +356,21 @@ const adminHTML = `<!doctype html>
           <a href="#/sessions" data-tab="sessions">세션 비행기록</a>
           <a href="#/prompts" data-tab="prompts">프롬프트 검색</a>
           <a href="#/productivity" data-tab="productivity">AI 업무성과</a>
+          <a href="#/scorecard" data-tab="scorecard">팀 성숙도</a>
+          <a href="#/data-products" data-tab="data-products">데이터 상품</a>
         </div>
       </div>
       <div class="nav-group" id="nav-ops">
         <button type="button" class="nav-group-toggle" aria-haspopup="true">운영 ▾</button>
         <div class="nav-group-menu">
+          <a href="#/ops-home" data-tab="ops-home">운영 홈</a>
+          <a href="#/capabilities" data-tab="capabilities">기능 맵</a>
           <a href="#/mcp" data-tab="mcp">MCP</a>
+          <a href="#/gateway-mcp" data-tab="gateway-mcp">Gateway MCP</a>
           <a href="#/routing" data-tab="routing">라우팅</a>
+          <a href="#/workflows" data-tab="workflows">워크플로</a>
+          <a href="#/apps" data-tab="apps">AI 업무 앱</a>
+          <a href="#/app-templates" data-tab="app-templates">앱 템플릿</a>
           <a href="#/pods" data-tab="pods">파드 운영 맵</a>
           <a href="#/journey-probe" data-tab="journey-probe">Journey Probe</a>
         </div>
@@ -373,6 +383,9 @@ const adminHTML = `<!doctype html>
           <a href="#/sbom" data-tab="sbom">AI 자산 SBOM</a>
           <a href="#/privacy-ledger" data-tab="privacy-ledger">프라이버시 원장</a>
           <a href="#/prompt-assets" data-tab="prompt-assets">자산 관리소</a>
+          <a href="#/model-contracts" data-tab="model-contracts">모델 계약</a>
+          <a href="#/policy-advisor" data-tab="policy-advisor">정책 어드바이저</a>
+          <a href="#/remediation" data-tab="remediation">자동 조치</a>
         </div>
       </div>
       <a href="#/chat-test" data-tab="chat-test">Chat 테스트</a>
