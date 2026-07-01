@@ -95,15 +95,11 @@ func (s *Server) runScheduledRedTeamCampaign(ctx context.Context, sc store.RedTe
 	}
 	// Background fires are simulation-only: no proxy key, so redTeamActiveEligible is always false.
 	synthReq := httptest.NewRequest("POST", "/admin/redteam/scheduler", nil).WithContext(ctx)
-	res, err := s.runRedTeamCampaign(synthReq, c, "")
-	if err != nil {
+	// runRedTeamCampaign already emits the critical Mattermost alert (§27.8) for both manual and
+	// scheduled runs, so the scheduler doesn't duplicate it here.
+	if _, err := s.runRedTeamCampaign(synthReq, c, ""); err != nil {
 		slog.Warn("redteam scheduled run failed", "schedule", sc.ID, "campaign", c.ID, "error", err)
 		return
 	}
 	slog.Info("redteam scheduled run completed", "schedule", sc.ID, "campaign", c.ID)
-	if summary, ok := res["summary"].(map[string]any); ok {
-		if crit, _ := summary["critical"].(int); crit > 0 {
-			s.notifyMattermost(ctx, "redteam", "레드팀 예약 실행 '"+c.Name+"'에서 critical "+strconv.Itoa(crit)+"건 발견")
-		}
-	}
 }

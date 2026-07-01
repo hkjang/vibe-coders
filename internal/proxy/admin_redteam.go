@@ -599,6 +599,9 @@ func (s *Server) runRedTeamCampaign(r *http.Request, c store.RedTeamCampaign, pr
 	_ = s.db.UpdateRedTeamCampaignStatus(r.Context(), c.ID, finalStatus, c.ApprovedBy)
 	if criticals > 0 {
 		s.auditAdmin(r, "redteam.critical", "", auditJSON(map[string]any{"campaign_id": c.ID, "critical": criticals}))
+		// §27.8: critical → alert. Fires for both manual and scheduled runs (no-op if Mattermost
+		// is not configured). Owner action is the remediation already persisted per critical result.
+		s.notifyMattermost(r.Context(), "redteam", "레드팀 실행 '"+c.Name+"'에서 critical "+itoaProxy(criticals)+"건 발견 — remediation 확인 필요")
 	}
 	s.auditAdmin(r, "redteam.campaign.run", "", auditJSON(map[string]any{"id": c.ID, "runs": len(runs), "results": totalResults, "critical": criticals, "live_calls": liveCalls, "stopped": stopped}))
 	mode := "controlled simulation"
