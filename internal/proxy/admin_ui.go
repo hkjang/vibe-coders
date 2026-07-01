@@ -446,6 +446,7 @@ const adminHTML = `<!doctype html>
       <header>
         <h3 id="modal-title">상세</h3>
         <div style="display: flex; gap: 8px;">
+          <button id="modal-back" type="button" class="secondary" style="display: none; height: 34px;">← 뒤로</button>
           <button id="modal-analyze" type="button" class="secondary" style="display: none; background: var(--accent); color: #fff; border-color: var(--accent); height: 34px;">AI 분석</button>
           <button class="secondary" type="button" id="modal-close">닫기 (esc)</button>
         </div>
@@ -728,33 +729,63 @@ const adminHTML = `<!doctype html>
 
     // ---------- modal ----------
     document.getElementById('modal-close').addEventListener('click', () => closeModal());
+    document.getElementById('modal-back').addEventListener('click', () => modalBack());
     document.getElementById('modal-backdrop').addEventListener('click', (e) => {
       if (e.target.id === 'modal-backdrop') closeModal();
     });
-    function openModal(title, html, requestId, opts) {
-      opts = opts || {};
-      document.getElementById('modal-title').textContent = title;
-      document.getElementById('modal-body').innerHTML = html;
+    // Modal history stack: opening a modal while one is already open pushes the current
+    // (possibly mutated) content so the "← 뒤로" button can return to it. Closing clears it.
+    let modalStack = [];
+    let currentModalState = null;
 
+    function _applyModalState(state) {
+      document.getElementById('modal-title').textContent = state.title;
+      document.getElementById('modal-body').innerHTML = state.html;
       const modalEl = document.querySelector('#modal-backdrop .modal');
-      if (modalEl) modalEl.classList.toggle('modal-wide', !!opts.wide);
-
+      if (modalEl) modalEl.classList.toggle('modal-wide', !!(state.opts && state.opts.wide));
       const btn = document.getElementById('modal-analyze');
       if (btn) {
-        if (requestId) {
+        if (state.requestId) {
           btn.style.display = 'inline-block';
           const newBtn = btn.cloneNode(true);
           btn.parentNode.replaceChild(newBtn, btn);
-          newBtn.addEventListener('click', () => runAIAnalysis(requestId));
+          newBtn.addEventListener('click', () => runAIAnalysis(state.requestId));
         } else {
           btn.style.display = 'none';
         }
       }
-
-      document.getElementById('modal-backdrop').classList.add('open');
+      currentModalState = state;
+      updateModalBack();
+    }
+    function updateModalBack() {
+      const back = document.getElementById('modal-back');
+      if (back) back.style.display = modalStack.length > 0 ? 'inline-block' : 'none';
+    }
+    function openModal(title, html, requestId, opts) {
+      opts = opts || {};
+      const backdrop = document.getElementById('modal-backdrop');
+      // If a modal is already open, snapshot its live content (captures appended AI analysis, etc.)
+      // onto the stack so we can restore it via the back button.
+      if (backdrop.classList.contains('open') && currentModalState) {
+        modalStack.push({
+          title: document.getElementById('modal-title').textContent,
+          html: document.getElementById('modal-body').innerHTML,
+          requestId: currentModalState.requestId,
+          opts: currentModalState.opts,
+        });
+      }
+      _applyModalState({ title: title, html: html, requestId: requestId, opts: opts });
+      backdrop.classList.add('open');
+    }
+    function modalBack() {
+      if (modalStack.length === 0) return;
+      _applyModalState(modalStack.pop());
     }
     function closeModal() {
       document.getElementById('modal-backdrop').classList.remove('open');
+      modalStack = [];
+      currentModalState = null;
+      updateModalBack();
     }
     async function runAIAnalysis(id) {
       const areaId = 'ai-analysis-result';
