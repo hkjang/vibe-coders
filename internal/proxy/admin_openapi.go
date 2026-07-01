@@ -106,6 +106,7 @@ var apiEndpoints = []apiEndpoint{
 	{"/admin/sandbox/preview", []string{"post"}, "admin", "Sensitive-workflow sandbox preview (safety gates, no execution)", false},
 	{"/admin/remediation/playbooks", []string{"get"}, "admin", "Auto-remediation action candidates (dry-run/impact)", false},
 	{"/admin/remediation/apply", []string{"post"}, "admin", "Apply an approved reversible remediation action (audited, rollback)", false},
+	{"/admin/redteam/dashboard", []string{"get"}, "redteam", "Red Team dashboard: risk rollup, target×pack result matrix, top failing targets, baseline drift", false},
 	{"/admin/redteam/targets", []string{"get"}, "redteam", "Red Team target inventory collected from registered providers/MCP/Text2SQL/apps/workflows", false},
 	{"/admin/redteam/targets/{id}", []string{"get"}, "redteam", "Red Team target detail", false},
 	{"/admin/redteam/probe-packs", []string{"get", "post"}, "redteam", "Red Team probe pack registry", false},

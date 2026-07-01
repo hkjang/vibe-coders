@@ -711,6 +711,52 @@ func (s *SQLStore) UpsertRedTeamSchedule(ctx context.Context, sc RedTeamSchedule
 	return err
 }
 
+// RedTeamDashboardRow is one case result enriched with its target and probe-pack context,
+// the join needed to build the target × pack result matrix and risk rollups. No prompt/response
+// content is included — only decisions, categories, and scores.
+type RedTeamDashboardRow struct {
+	TargetID     string `json:"target_id"`
+	TargetType   string `json:"target_type"`
+	TargetRef    string `json:"target_ref"`
+	OwnerTeam    string `json:"owner_team"`
+	PackID       string `json:"pack_id"`
+	PackCategory string `json:"pack_category"`
+	Decision     string `json:"decision"`
+	Severity     string `json:"severity"`
+	RiskScore    int    `json:"risk_score"`
+	CreatedAt    string `json:"created_at"`
+}
+
+// RedTeamDashboardRows returns recent case results joined to target and pack context, newest first.
+func (s *SQLStore) RedTeamDashboardRows(ctx context.Context, limit int) ([]RedTeamDashboardRow, error) {
+	if limit <= 0 || limit > 5000 {
+		limit = 2000
+	}
+	rows, err := s.db.QueryContext(ctx, s.bind(`SELECT t.id, t.target_type, t.target_ref, t.owner_team,
+			COALESCE(cs.pack_id, ''), COALESCE(p.category, ''),
+			r.decision, r.severity, run.risk_score, r.created_at
+		FROM redteam_case_results r
+		JOIN redteam_runs run ON r.run_id = run.id
+		JOIN redteam_targets t ON run.target_id = t.id
+		LEFT JOIN redteam_probe_cases cs ON r.case_id = cs.id
+		LEFT JOIN redteam_probe_packs p ON cs.pack_id = p.id
+		ORDER BY r.created_at DESC LIMIT ?`), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []RedTeamDashboardRow{}
+	for rows.Next() {
+		var d RedTeamDashboardRow
+		if err := rows.Scan(&d.TargetID, &d.TargetType, &d.TargetRef, &d.OwnerTeam,
+			&d.PackID, &d.PackCategory, &d.Decision, &d.Severity, &d.RiskScore, &d.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
 func (s *SQLStore) ListRedTeamSchedules(ctx context.Context) ([]RedTeamSchedule, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT id, campaign_template_id, cron_expr, timezone, enabled, last_run_at, created_at, updated_at
 		FROM redteam_schedules ORDER BY created_at DESC`)

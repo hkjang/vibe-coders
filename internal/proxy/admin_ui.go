@@ -4365,15 +4365,16 @@ const adminHTML = `<!doctype html>
     async function renderRedTeamView() {
       const view = document.getElementById('view');
       view.innerHTML = section('Red Team Automation', '<div class="empty">불러오는 중...</div>');
-      let targets = {}, packs = {}, campaigns = {}, runs = {}, baselines = {}, rems = {};
+      let targets = {}, packs = {}, campaigns = {}, runs = {}, baselines = {}, rems = {}, dash = {};
       try {
-        [targets, packs, campaigns, runs, baselines, rems] = await Promise.all([
+        [targets, packs, campaigns, runs, baselines, rems, dash] = await Promise.all([
           api('/admin/redteam/targets'),
           api('/admin/redteam/probe-packs'),
           api('/admin/redteam/campaigns'),
           api('/admin/redteam/runs'),
           api('/admin/redteam/baselines'),
           api('/admin/redteam/remediations').catch(() => ({ remediations: [] })),
+          api('/admin/redteam/dashboard').catch(() => ({ summary: {}, matrix: [], top_failing_targets: [], drift: [] })),
         ]);
       } catch (e) {
         view.innerHTML = section('Red Team Automation', '<div class="card-body" style="padding:16px"><p class="muted">' + escapeHTML(e.message) + '</p></div>');
@@ -4433,9 +4434,39 @@ const adminHTML = `<!doctype html>
         '<tr><td><code>' + escapeHTML(b.target_id) + '</code></td><td><code>' + escapeHTML(b.pack_id) + '</code></td>' +
         '<td>' + fmt(b.baseline_score || 0) + '</td><td>' + fmt(b.drift_threshold || 0) + '</td><td class="muted" style="font-size:11px">' + ago(b.last_passed_at || b.updated_at) + '</td></tr>'
       ).join('') || '<tr><td colspan="5" class="muted">baseline 없음</td></tr>';
+      const dsum = dash.summary || {};
+      const dec = dsum.by_decision || {};
+      const matrixRows = (dash.matrix || []).map(m =>
+        '<tr><td><span class="status" style="font-size:9px">' + escapeHTML(m.target_type) + '</span></td>' +
+        '<td>' + escapeHTML(m.pack_category) + '</td>' +
+        '<td>' + fmt(m.pass || 0) + '</td>' +
+        '<td>' + (m.warning ? '<span class="status warn">' + fmt(m.warning) + '</span>' : '0') + '</td>' +
+        '<td>' + (m.fail ? '<span class="status error">' + fmt(m.fail) + '</span>' : '0') + '</td>' +
+        '<td>' + (m.critical ? '<span class="status error">' + fmt(m.critical) + '</span>' : '0') + '</td>' +
+        '<td>' + fmt(m.total || 0) + '</td></tr>'
+      ).join('') || '<tr><td colspan="7" class="muted">결과 매트릭스 데이터 없음 — campaign을 실행하면 채워집니다.</td></tr>';
+      const failingRows = (dash.top_failing_targets || []).map(t =>
+        '<tr><td><code>' + escapeHTML(t.target_ref || '') + '</code><div class="muted" style="font-size:10px">' + escapeHTML(t.target_type || '') + ' · ' + escapeHTML(t.owner_team || '-') + '</div></td>' +
+        '<td>' + (t.critical ? '<span class="status error">' + fmt(t.critical) + '</span>' : '0') + '</td>' +
+        '<td>' + (t.fail ? '<span class="status error">' + fmt(t.fail) + '</span>' : '0') + '</td>' +
+        '<td>' + (t.warning ? '<span class="status warn">' + fmt(t.warning) + '</span>' : '0') + '</td>' +
+        '<td><span class="status ' + redTeamScoreClass(t.max_risk) + '">' + fmt(t.max_risk || 0) + '</span></td></tr>'
+      ).join('') || '<tr><td colspan="5" class="muted">실패 대상 없음</td></tr>';
+      const driftRows = (dash.drift || []).map(d =>
+        '<tr><td><code>' + escapeHTML(d.target_id || '') + '</code></td><td><code>' + escapeHTML(d.pack_id || '') + '</code></td>' +
+        '<td>' + fmt(d.baseline_score || 0) + ' → ' + fmt(d.current_score || 0) + '</td>' +
+        '<td><span class="status error">+' + fmt(d.delta || 0) + '</span> (임계 ' + fmt(d.threshold || 0) + ')</td>' +
+        '<td class="muted" style="font-size:11px">' + ago(d.last_passed_at) + '</td></tr>'
+      ).join('') || '<tr><td colspan="5" class="muted">baseline drift 없음</td></tr>';
       view.innerHTML = section('Red Team Automation',
         '<p class="muted" style="font-size:12px;padding:0 14px">등록된 upstream만 대상으로 하는 허가형 AI 보안 회귀 테스트입니다. 기본은 dry-run이며, high-risk pack은 승인 없이는 active 실행되지 않습니다.</p>') +
         '<div class="kpis">' + kpi('Targets', fmt(ts.length)) + kpi('High/Critical', fmt(highTargets)) + kpi('Probe Packs', fmt(ps.length)) + kpi('최근 Run 위험', fmt(maxRisk)) + kpi('실패 Run', fmt(failedRuns)) + '</div>' +
+        '<div class="kpis">' + kpi('결과 수', fmt(dsum.total_results || 0)) + kpi('Critical', fmt(dec.critical || 0)) + kpi('Fail', fmt(dec.fail || 0)) + kpi('Warning', fmt(dec.warning || 0)) + kpi('외부 대상', fmt(dsum.external_targets || 0)) + kpi('미조치', fmt(dsum.open_remediations || 0)) + '</div>' +
+        '<div class="grid2">' +
+          card('Result Matrix (target × probe-pack)', '<div class="card-body"><table><thead><tr><th>유형</th><th>pack</th><th>pass</th><th>warn</th><th>fail</th><th>crit</th><th>계</th></tr></thead><tbody>' + matrixRows + '</tbody></table></div>') +
+          card('Top Failing Targets', '<div class="card-body"><table><thead><tr><th>대상</th><th>crit</th><th>fail</th><th>warn</th><th>max risk</th></tr></thead><tbody>' + failingRows + '</tbody></table></div>') +
+        '</div>' +
+        card('Baseline Drift (' + (dash.drift || []).length + ')', '<div class="card-body"><table><thead><tr><th>target</th><th>pack</th><th>baseline→현재</th><th>drift</th><th>last passed</th></tr></thead><tbody>' + driftRows + '</tbody></table></div>') +
         section('Campaign Builder',
           '<div class="card-body">' +
           '<div class="grid2"><label>Campaign Name<input id="rt-name" placeholder="예: weekly-provider-mcp-redteam"></label>' +
