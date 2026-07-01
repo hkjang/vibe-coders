@@ -31,7 +31,7 @@ import (
 )
 
 // AppVersion is the gateway build version, surfaced in /auth/me and the admin UI.
-const AppVersion = "v0.76.9"
+const AppVersion = "v0.76.10"
 
 type Server struct {
 	cfg            config.Config
@@ -379,6 +379,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/admin/dw/sink-retry", s.handleClickHouseSinkRetry)
 	mux.HandleFunc("/admin/dw/table-info", s.handleClickHouseTableInfo)
 	mux.HandleFunc("/admin/dw/text2sql-fact", s.handleClickHouseText2SQLFact)
+	mux.HandleFunc("/admin/dw/redteam", s.handleClickHouseRedTeamFact)
 	mux.HandleFunc("/admin/text2sql", s.handleText2SQLAdmin)
 	mux.HandleFunc("/admin/text2sql/spans", s.handleText2SQLSpans)
 	mux.HandleFunc("/admin/text2sql/schemas", s.handleText2SQLSchemas)

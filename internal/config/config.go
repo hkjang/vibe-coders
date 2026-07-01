@@ -288,6 +288,7 @@ type ClickHouseConfig struct {
 	PolicyFactTable     string        // e.g. ai_policy_fact; empty disables (one row per policy decision)
 	SkillFactTable      string        // e.g. ai_skill_fact; empty disables (one row per skill run)
 	MultiModelFactTable string        // e.g. ai_multimodel_fact; empty disables (run + per-model result rows)
+	RedTeamFactTable    string        // e.g. ai_redteam_fact; empty disables (one row per red-team case result)
 	BatchSize           int           // rows per ClickHouse insert (queue flush)
 	FlushInterval       time.Duration // max time a row waits in the queue before a flush
 	MaxQueueSize        int           // bounded in-memory queue; excess is dropped (counted)
@@ -457,6 +458,7 @@ func Load() (Config, error) {
 			SkillFactTable:      os.Getenv("CLICKHOUSE_SKILL_FACT_TABLE"),
 			MultiModelFactTable: os.Getenv("CLICKHOUSE_MULTIMODEL_FACT_TABLE"),
 			PolicyFactTable:     os.Getenv("CLICKHOUSE_POLICY_FACT_TABLE"),
+			RedTeamFactTable:    os.Getenv("CLICKHOUSE_REDTEAM_FACT_TABLE"),
 			BatchSize:           intEnv("CLICKHOUSE_BATCH_SIZE", 200),
 			FlushInterval:       durationEnv("CLICKHOUSE_FLUSH_INTERVAL", 5*time.Second),
 			MaxQueueSize:        intEnv("CLICKHOUSE_MAX_QUEUE_SIZE", 10000),

@@ -727,6 +727,39 @@ type RedTeamDashboardRow struct {
 	CreatedAt    string `json:"created_at"`
 }
 
+// ListRedTeamCaseResultsSince returns case results created strictly after the given RFC3339
+// watermark, oldest first, joined to target/pack context — the shape the ClickHouse fact sink
+// ships. Ascending order means the last row carries the new watermark.
+func (s *SQLStore) ListRedTeamCaseResultsSince(ctx context.Context, sinceRFC3339 string, limit int) ([]RedTeamDashboardRow, error) {
+	if limit <= 0 || limit > 5000 {
+		limit = 5000
+	}
+	rows, err := s.db.QueryContext(ctx, s.bind(`SELECT t.id, t.target_type, t.target_ref, t.owner_team,
+			COALESCE(cs.pack_id, ''), COALESCE(p.category, ''),
+			r.decision, r.severity, run.risk_score, r.created_at
+		FROM redteam_case_results r
+		JOIN redteam_runs run ON r.run_id = run.id
+		JOIN redteam_targets t ON run.target_id = t.id
+		LEFT JOIN redteam_probe_cases cs ON r.case_id = cs.id
+		LEFT JOIN redteam_probe_packs p ON cs.pack_id = p.id
+		WHERE r.created_at > ?
+		ORDER BY r.created_at ASC LIMIT ?`), sinceRFC3339, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []RedTeamDashboardRow{}
+	for rows.Next() {
+		var d RedTeamDashboardRow
+		if err := rows.Scan(&d.TargetID, &d.TargetType, &d.TargetRef, &d.OwnerTeam,
+			&d.PackID, &d.PackCategory, &d.Decision, &d.Severity, &d.RiskScore, &d.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
 // RedTeamDashboardRows returns recent case results joined to target and pack context, newest first.
 func (s *SQLStore) RedTeamDashboardRows(ctx context.Context, limit int) ([]RedTeamDashboardRow, error) {
 	if limit <= 0 || limit > 5000 {

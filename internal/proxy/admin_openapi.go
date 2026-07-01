@@ -424,6 +424,7 @@ var apiEndpoints = []apiEndpoint{
 	{"/admin/dw/sink-retry", []string{"post"}, "dw", "Reprocess sink retry queue", false},
 	{"/admin/dw/table-info", []string{"get"}, "dw", "Inspect target table engine/sort key", false},
 	{"/admin/dw/text2sql-fact", []string{"post"}, "dw", "Ship Text2SQL facts", false},
+	{"/admin/dw/redteam", []string{"post"}, "dw", "Ship Red Team case-result facts to ClickHouse", false},
 
 	// ---- admin: LLM observability ----
 	{"/admin/llm/traces", []string{"get"}, "llm", "LLM traces", false},

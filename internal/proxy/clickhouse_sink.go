@@ -586,6 +586,10 @@ func (s *Server) clickhouseSinkLoop(parent context.Context) {
 		if _, err := s.syncText2SQLFacts(ctx); err != nil {
 			slog.Warn("clickhouse text2sql fact sink failed", "error", err)
 		}
+		// Per-case Red Team facts (only when a fact table is configured).
+		if _, err := s.syncRedTeamFacts(ctx); err != nil {
+			slog.Warn("clickhouse redteam fact sink failed", "error", err)
+		}
 		cancel()
 	}
 }
