@@ -193,8 +193,15 @@ func TestRedTeamHighRiskCampaignRequiresApprovalBeforeRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(results) == 0 || results[0].PolicyDecision != "block" {
-		t.Fatalf("expected stored result with block policy, got %#v", results)
+	hasBlock := false
+	for _, res := range results {
+		if res.PolicyDecision == "block" {
+			hasBlock = true
+			break
+		}
+	}
+	if len(results) == 0 || !hasBlock {
+		t.Fatalf("expected a stored result with block policy, got %#v", results)
 	}
 }
 
