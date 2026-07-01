@@ -4530,7 +4530,7 @@ const adminHTML = `<!doctype html>
           '<span class="muted" style="font-size:11px">생성 후 드라이런으로 예상 호출 수와 비용을 먼저 확인하세요.</span></div>') +
         '<div class="grid2">' +
           card('대상 인벤토리 (' + ts.length + ')', '<div class="card-body"><table><thead><tr><th>유형</th><th>대상</th><th>위험</th><th>상태</th><th>프로바이더/업스트림</th></tr></thead><tbody>' + targetRows + '</tbody></table><p class="muted" style="font-size:10px;margin-top:6px">' + escapeHTML(targets.note || '') + '</p></div>') +
-          card('프로브 팩 (' + ps.length + ')', '<div class="card-body">' + ps.map(p => '<div style="border-bottom:1px solid var(--line);padding:6px 0"><strong>' + escapeHTML(p.name) + '</strong> <span class="status ' + redTeamRiskClass(p.severity) + '" style="font-size:9px">' + escapeHTML(p.severity) + '</span> ' + (p.requires_approval ? '<span class="status warn" style="font-size:9px">승인필요</span>' : '') + '<div class="muted" style="font-size:11px">' + escapeHTML(p.category) + ' · ' + escapeHTML(p.version) + ' · 케이스 ' + ((p.cases || []).length) + '</div></div>').join('') + '</div>') +
+          card('프로브 팩 (' + ps.length + ')', '<div class="card-body">' + ps.map(p => '<div style="border-bottom:1px solid var(--line);padding:6px 0"><strong>' + escapeHTML(p.name) + '</strong> <span class="status ' + redTeamRiskClass(p.severity) + '" style="font-size:9px">' + escapeHTML(p.severity) + '</span> ' + (p.requires_approval ? '<span class="status warn" style="font-size:9px">승인필요</span>' : '') + ' <button type="button" class="secondary" style="font-size:10px" onclick="redTeamShowPackCases(\'' + escapeAttr(p.id) + '\')">케이스 보기</button><div class="muted" style="font-size:11px">' + escapeHTML(p.category) + ' · ' + escapeHTML(p.version) + ' · 케이스 ' + ((p.cases || []).length) + '</div></div>').join('') + '</div>') +
         '</div>' +
         card('캠페인', '<div class="card-body"><table><thead><tr><th>이름</th><th>범위</th><th>상태</th><th>모드</th><th>예산</th><th>작업</th></tr></thead><tbody>' + campaignRows + '</tbody></table></div>') +
         card('실행 이력', '<div class="card-body"><table><thead><tr><th>실행</th><th>캠페인</th><th>대상</th><th>상태</th><th>실패/전체</th><th>위험</th><th></th></tr></thead><tbody>' + runRows + '</tbody></table></div>') +
@@ -4601,6 +4601,25 @@ const adminHTML = `<!doctype html>
         openModal('킬 스위치', '레드팀 실행 중지 상태: <strong>' + (d.enabled ? '켜짐 (모든 실제 실행 중단)' : '꺼짐') + '</strong>');
         await renderRedTeamView();
       } catch (e) { openModal('킬 스위치 오류', '<div class="error-line">' + escapeHTML(e.message) + '</div>'); }
+    };
+    window.redTeamShowPackCases = async (packId) => {
+      try {
+        const d = await api('/admin/redteam/probe-packs');
+        const pack = (d.probe_packs || []).find(p => p.id === packId);
+        if (!pack) { openModal('프로브 팩', '<p class="muted">팩을 찾을 수 없습니다.</p>'); return; }
+        const rows = (pack.cases || []).map(c =>
+          '<tr><td><code>' + escapeHTML(c.case_key || '') + '</code>' +
+          ((c.risk_tags && c.risk_tags.indexOf('ko') >= 0) ? ' <span class="status" style="font-size:9px">KR</span>' : '') + '</td>' +
+          '<td><span class="status ' + redTeamRiskClass(c.severity) + '">' + escapeHTML(c.severity || '') + '</span></td>' +
+          '<td>' + escapeHTML(c.expected_policy || '') + '</td>' +
+          '<td class="muted" style="font-size:11px">' + escapeHTML((c.target_types || []).join(', ')) + '</td>' +
+          '<td><div style="white-space:pre-wrap;font-size:12px;max-width:380px">' + escapeHTML(c.input_template || '') + '</div></td></tr>'
+        ).join('') || '<tr><td colspan="5" class="muted">케이스 없음</td></tr>';
+        openModal(escapeHTML(pack.name) + ' — 시드 케이스',
+          '<p class="muted" style="font-size:12px">각 케이스가 대상에 보내는 <b>요청 템플릿(시드)</b>과 기대 결과입니다. 실제 공격 문구가 아닌 변수형 안전 템플릿(<code>{{...}}</code>)으로 관리되며, 실행 시 <code>[REDTEAM_SAFE_TEMPLATE]</code> 표식으로 렌더링됩니다. 실제 요청/응답은 실행 후 결과의 <b>증적</b>에서 확인하세요.</p>' +
+          '<table><thead><tr><th>케이스</th><th>심각도</th><th>기대 정책</th><th>대상 유형</th><th>요청 템플릿(시드)</th></tr></thead><tbody>' + rows + '</tbody></table>',
+          null, { wide: true });
+      } catch (e) { openModal('케이스 오류', '<div class="error-line">' + escapeHTML(e.message) + '</div>'); }
     };
     window.redTeamShowRunResults = async (id) => {
       try {
