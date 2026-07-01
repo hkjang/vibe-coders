@@ -4465,7 +4465,7 @@ const adminHTML = `<!doctype html>
         '<td>' + money(c.budget_limit_krw || 0) + '</td>' +
         '<td style="white-space:nowrap"><button type="button" class="secondary" style="font-size:11px" onclick="redTeamDryRun(\'' + escapeAttr(c.id) + '\')">드라이런</button> ' +
         '<button type="button" class="secondary" style="font-size:11px" onclick="redTeamApprove(\'' + escapeAttr(c.id) + '\')">승인</button> ' +
-        '<button type="button" style="font-size:11px" onclick="redTeamRun(\'' + escapeAttr(c.id) + '\')">실행</button></td></tr>'
+        '<button type="button" style="font-size:11px" onclick="redTeamRun(\'' + escapeAttr(c.id) + '\',\'' + escapeAttr(c.execution_mode || '') + '\')">' + (c.execution_mode === 'active-controlled' ? '실제 실행' : '시뮬레이션 실행') + '</button></td></tr>'
       ).join('') || '<tr><td colspan="6" class="muted">캠페인 없음</td></tr>';
       const runRows = rs.slice(0, 30).map(r =>
         '<tr><td><code>' + escapeHTML(r.id) + '</code><div class="muted" style="font-size:10px">' + ago(r.created_at) + '</div></td>' +
@@ -4527,7 +4527,12 @@ const adminHTML = `<!doctype html>
           '<label>파괴적 도구 정책<select id="rt-destructive"><option value="dry-run">드라이런</option><option value="mock">모의(mock)</option><option value="approval">승인 필요</option><option value="block">차단</option></select></label></div>' +
           '<div style="margin-top:8px"><strong>프로브 팩</strong>' + packChecks + '</div>' +
           '<button type="button" onclick="redTeamCreateCampaign()">캠페인 생성</button> ' +
-          '<span class="muted" style="font-size:11px">생성 후 드라이런으로 예상 호출 수와 비용을 먼저 확인하세요.</span></div>') +
+          '<div class="muted" style="font-size:11px;margin-top:8px;line-height:1.7">' +
+          '<b>실제로 대상을 호출하려면(실전 실행):</b><br>' +
+          '① 위 <b>실행 모드</b>를 <b>「실제 실행(통제)」</b>로 선택해 캠페인을 생성 · ' +
+          '② (고위험 팩이면) 목록에서 <b>승인</b> · ' +
+          '③ <b>실제 실행</b> 버튼을 눌러 프롬프트에 <b>전용 레드팀 Proxy API Key</b> 입력.<br>' +
+          '그 외 모드(드라이런/섀도우 등)나 키 미입력 시에는 실제 호출 없이 <b>시뮬레이션</b>으로 안전 실행됩니다. MCP 도구·파괴적·앱/워크플로 대상은 항상 시뮬레이션입니다.</div></div>') +
         '<div class="grid2">' +
           card('대상 인벤토리 (' + ts.length + ')', '<div class="card-body"><table><thead><tr><th>유형</th><th>대상</th><th>위험</th><th>상태</th><th>프로바이더/업스트림</th></tr></thead><tbody>' + targetRows + '</tbody></table><p class="muted" style="font-size:10px;margin-top:6px">' + escapeHTML(targets.note || '') + '</p></div>') +
           card('프로브 팩 (' + ps.length + ')', '<div class="card-body">' + ps.map(p => '<div style="border-bottom:1px solid var(--line);padding:6px 0"><strong>' + escapeHTML(p.name) + '</strong> <span class="status ' + redTeamRiskClass(p.severity) + '" style="font-size:9px">' + escapeHTML(p.severity) + '</span> ' + (p.requires_approval ? '<span class="status warn" style="font-size:9px">승인필요</span>' : '') + ' <button type="button" class="secondary" style="font-size:10px" onclick="redTeamShowPackCases(\'' + escapeAttr(p.id) + '\')">케이스 보기</button><div class="muted" style="font-size:11px">' + escapeHTML(p.category) + ' · ' + escapeHTML(p.version) + ' · 케이스 ' + ((p.cases || []).length) + '</div></div>').join('') + '</div>') +
@@ -4568,28 +4573,48 @@ const adminHTML = `<!doctype html>
       if (!body.name) { alert('Campaign Name을 입력하세요.'); return; }
       try {
         const d = await api('/admin/redteam/campaigns', { method: 'POST', body: JSON.stringify(body) });
-        openModal('캠페인 생성', '<pre>' + escapeHTML(JSON.stringify(d, null, 2)) + '</pre>');
+        const cc = d.campaign || d;
+        openModal('캠페인 생성됨',
+          '<p>캠페인 <strong>' + escapeHTML(cc.name || '') + '</strong> 이(가) 생성되었습니다.</p>' +
+          '<table><tr><th style="text-align:left">ID</th><td><code>' + escapeHTML(cc.id || '') + '</code></td></tr>' +
+          '<tr><th style="text-align:left">실행 모드</th><td>' + escapeHTML(cc.execution_mode || '') + '</td></tr></table>' +
+          '<p class="muted" style="font-size:12px;margin-top:8px">다음 단계: 아래 <b>캠페인</b> 목록에서 <b>드라이런</b>으로 예상 규모·비용을 확인한 뒤, (고위험 팩이면 <b>승인</b> 후) <b>실행</b>하세요.</p>');
         await renderRedTeamView();
       } catch (e) { openModal('레드팀 오류', '<div class="error-line">' + escapeHTML(e.message) + '</div>'); }
     };
     window.redTeamDryRun = async (id) => {
       try {
         const d = await api('/admin/redteam/campaigns/' + encodeURIComponent(id) + '/dry-run', { method: 'POST' });
-        openModal('드라이런 결과', '<pre>' + escapeHTML(JSON.stringify(d, null, 2)) + '</pre>');
+        const lim = d.limits || {};
+        const html =
+          '<p class="muted" style="font-size:12px">실제 호출 없이 이번 캠페인이 대상으로 삼을 범위와 예상 규모를 계산합니다.</p>' +
+          '<div class="kpis">' + kpi('대상 수', fmt(d.targets || 0)) + kpi('프로브 팩', fmt(d.probe_packs || 0)) + kpi('실행 케이스', fmt(d.case_executions || 0)) + kpi('예상 비용(KRW)', money(d.estimated_cost_krw || 0)) + '</div>' +
+          '<table>' +
+          '<tr><th style="text-align:left">외부 provider 대상</th><td>' + fmt(d.external_targets || 0) + '건' + ((d.external_targets || 0) > 0 ? ' <span class="status warn">egress 주의</span>' : '') + '</td></tr>' +
+          '<tr><th style="text-align:left">파괴적 MCP 대상</th><td>' + fmt(d.destructive_tool_targets || 0) + '건</td></tr>' +
+          '<tr><th style="text-align:left">승인 필요</th><td>' + (d.requires_approval ? (d.approved ? '<span class="status">예 — 승인 완료</span>' : '<span class="status warn">예 — 승인 필요(미승인)</span>') : '아니오') + '</td></tr>' +
+          '<tr><th style="text-align:left">실행 가능</th><td>' + (d.can_run ? '<span class="status">예</span>' : '<span class="status error">아니오 — 승인 후 실행</span>') + '</td></tr>' +
+          '<tr><th style="text-align:left">한도</th><td class="muted" style="font-size:12px">예산 ' + money(lim.budget_limit_krw || 0) + ' · QPS ' + fmt(lim.qps_limit || 0) + ' · 동시성 ' + fmt(lim.concurrency || 0) + '</td></tr>' +
+          '</table>';
+        openModal('드라이런 결과', html);
       } catch (e) { openModal('드라이런 오류', '<div class="error-line">' + escapeHTML(e.message) + '</div>'); }
     };
     window.redTeamApprove = async (id) => {
       try {
         const d = await api('/admin/redteam/campaigns/' + encodeURIComponent(id) + '/approve', { method: 'POST' });
-        openModal('캠페인 승인', '<pre>' + escapeHTML(JSON.stringify(d, null, 2)) + '</pre>');
+        openModal('캠페인 승인됨', '<p>캠페인이 승인되었습니다. 이제 고위험 팩도 실행할 수 있습니다.</p><p class="muted" style="font-size:12px">상태: <span class="status">' + escapeHTML(d.status || 'approved') + '</span></p>');
         await renderRedTeamView();
       } catch (e) { openModal('승인 오류', '<div class="error-line">' + escapeHTML(e.message) + '</div>'); }
     };
-    window.redTeamRun = async (id) => {
+    window.redTeamRun = async (id, mode) => {
       try {
-        // active-controlled 모드는 전용 redteam Proxy API Key로만 실제 upstream을 호출합니다.
-        const proxyKey = (window.prompt('실제 실행(Active Controlled Run)용 전용 레드팀 Proxy API Key를 입력하세요.\n(비워두면 실제 호출 없이 안전한 시뮬레이션으로 실행)') || '').trim();
-        const body = proxyKey ? JSON.stringify({ proxy_key: proxyKey }) : undefined;
+        let body;
+        // 실제 호출은 캠페인 모드가 active-controlled일 때만, 전용 레드팀 Proxy API Key로 수행됩니다.
+        if (mode === 'active-controlled') {
+          const proxyKey = (window.prompt('실제 실행: 전용 레드팀 Proxy API Key를 입력하세요.\n(비워두고 확인하면 실제 호출 없이 시뮬레이션으로 실행됩니다)') || '').trim();
+          body = proxyKey ? JSON.stringify({ proxy_key: proxyKey }) : undefined;
+        }
+        // 그 외 모드는 프롬프트 없이 바로 시뮬레이션 실행.
         const d = await api('/admin/redteam/campaigns/' + encodeURIComponent(id) + '/run', { method: 'POST', body });
         const s = d.summary || {};
         const live = Number(s.live_calls || 0);
@@ -4671,7 +4696,12 @@ const adminHTML = `<!doctype html>
           method: 'POST',
           body: JSON.stringify({ action_type: 'owner_action', action_payload: { source: 'admin_ui' } }),
         });
-        openModal('조치 생성', '<pre>' + escapeHTML(JSON.stringify(d, null, 2)) + '</pre>');
+        const rm = d.remediation || d;
+        openModal('조치 생성됨',
+          '<p>이 결과에 대한 조치(remediation)가 생성되었습니다.</p>' +
+          '<table><tr><th style="text-align:left">조치 유형</th><td>' + escapeHTML(rm.action_type || 'owner_action') + '</td></tr>' +
+          '<tr><th style="text-align:left">상태</th><td><span class="status ' + redTeamStatusClass(rm.status) + '">' + escapeHTML(rm.status || 'open') + '</span></td></tr></table>' +
+          '<p class="muted" style="font-size:12px;margin-top:8px">담당자 조치 큐와 <b>조치 보드</b>에서 진행 상태를 관리하세요.</p>');
         await renderRedTeamView();
       } catch (e) { openModal('조치 오류', '<div class="error-line">' + escapeHTML(e.message) + '</div>'); }
     };
