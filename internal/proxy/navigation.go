@@ -7,7 +7,7 @@ import (
 
 // menuVersion is bumped whenever the menu registry or its access rules change, so the
 // SPA can detect a stale navigation and refresh /me/navigation without a full reload.
-const menuVersion = 1
+const menuVersion = 2
 
 // menuItem is one navigable destination in the admin SPA. Access is decided server-side
 // from the caller's scopes + enabled feature flags — the same registry drives both the
@@ -68,6 +68,7 @@ var menuRegistry = []menuItem{
 	// 보안 영역.
 	{ID: "sec.dashboard", Label: "보안 대시보드", Path: "#/security", Tab: "security", Group: "security", Scopes: []string{"security:read"}, DataScope: "all"},
 	{ID: "sec.safety", Label: "안전", Path: "#/safety", Tab: "safety", Group: "security", Scopes: []string{"security:read"}, DataScope: "all"},
+	{ID: "sec.redteam", Label: "Red Team", Path: "#/redteam", Tab: "redteam", Group: "security", Scopes: []string{"admin:read", "security:read"}, DataScope: "all"},
 	{ID: "sec.sandbox", Label: "민감 샌드박스", Path: "#/sandbox", Tab: "sandbox", Group: "security", Scopes: []string{"admin:read"}, DataScope: "all"},
 	// 비용 영역.
 	{ID: "bill.dashboard", Label: "비용 대시보드", Path: "#/billing", Tab: "billing", Group: "billing", Scopes: []string{"admin:read"}, DataScope: "all"},
