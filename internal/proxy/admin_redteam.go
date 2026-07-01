@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"sort"
@@ -226,7 +227,15 @@ func (s *Server) handleRedTeamCampaignByID(w http.ResponseWriter, r *http.Reques
 		s.auditAdmin(r, "redteam.campaign.approve", "", auditJSON(map[string]any{"id": c.ID}))
 		writeJSON(w, http.StatusOK, map[string]any{"id": c.ID, "status": "approved"})
 	case action == "run" && r.Method == http.MethodPost:
-		result, err := s.runRedTeamCampaign(r, c)
+		proxyKey := ""
+		if body, _ := io.ReadAll(io.LimitReader(r.Body, 1<<16)); len(body) > 0 {
+			var rb struct {
+				ProxyKey string `json:"proxy_key"`
+			}
+			_ = json.Unmarshal(body, &rb)
+			proxyKey = strings.TrimSpace(rb.ProxyKey)
+		}
+		result, err := s.runRedTeamCampaign(r, c, proxyKey)
 		if err != nil {
 			writeOpenAIError(w, http.StatusBadRequest, err.Error(), "invalid_request_error", "redteam_run_failed")
 			return
@@ -467,7 +476,10 @@ func (s *Server) redTeamDryRun(r *http.Request, c store.RedTeamCampaign) (map[st
 	}, nil
 }
 
-func (s *Server) runRedTeamCampaign(r *http.Request, c store.RedTeamCampaign) (map[string]any, error) {
+func (s *Server) runRedTeamCampaign(r *http.Request, c store.RedTeamCampaign, proxyKey string) (map[string]any, error) {
+	if redteamKillSwitch.Load() {
+		return nil, fmt.Errorf("redteam kill switch is engaged — runs are halted")
+	}
 	preview, err := s.redTeamDryRun(r, c)
 	if err != nil {
 		return nil, err
@@ -494,7 +506,12 @@ func (s *Server) runRedTeamCampaign(r *http.Request, c store.RedTeamCampaign) (m
 	}
 	runs := []store.RedTeamRun{}
 	totalResults, criticals, warnings, failures := 0, 0, 0, 0
+	liveCalls, liveCost := 0, 0.0
+	stopped := "" // set to a reason if budget/kill-switch aborts the run mid-flight
 	for _, t := range targets {
+		if stopped != "" {
+			break
+		}
 		run := store.RedTeamRun{ID: newID("rtrun"), CampaignID: c.ID, TargetID: t.ID, Status: "running", Mode: c.ExecutionMode}
 		_ = s.db.InsertRedTeamRun(r.Context(), run)
 		maxRisk, failed, total, cost := 0, 0, 0, 0.0
@@ -502,10 +519,29 @@ func (s *Server) runRedTeamCampaign(r *http.Request, c store.RedTeamCampaign) (m
 			if !redTeamCaseApplies(t, cs) {
 				continue
 			}
+			if redteamKillSwitch.Load() {
+				stopped = "kill_switch"
+				break
+			}
 			total++
 			totalResults++
 			pack := packByCase[cs.ID]
-			result, ev, rem := evaluateRedTeamCase(t, pack, cs, c)
+			var result store.RedTeamCaseResult
+			var ev store.RedTeamEvidence
+			var rem store.RedTeamRemediation
+			// Active Controlled Run: invoke live only for eligible LLM/Text2SQL targets within the
+			// live-call cap; everything else uses the safe simulation.
+			if redTeamActiveEligible(t, c, proxyKey) && liveCalls < redteamActiveMaxCalls {
+				if ar, aev, arem, invoked := s.evaluateRedTeamCaseActive(r, proxyKey, t, pack, cs, c); invoked {
+					result, ev, rem = ar, aev, arem
+					liveCalls++
+					liveCost += result.CostKRW
+				} else {
+					result, ev, rem = evaluateRedTeamCase(t, pack, cs, c)
+				}
+			} else {
+				result, ev, rem = evaluateRedTeamCase(t, pack, cs, c)
+			}
 			result.ID, result.RunID, result.CaseID = newID("rtr"), run.ID, cs.ID
 			result.CreatedAt = time.Now().UTC().Format(time.RFC3339Nano)
 			ev.ID, ev.ResultID = newID("rtev"), result.ID
@@ -531,6 +567,11 @@ func (s *Server) runRedTeamCampaign(r *http.Request, c store.RedTeamCampaign) (m
 			case "warning":
 				warnings++
 			}
+			// Live budget guard (§12/§22): stop as soon as accrued live cost exceeds the limit.
+			if c.BudgetLimitKRW > 0 && liveCost > c.BudgetLimitKRW {
+				stopped = "budget_exceeded"
+				break
+			}
 		}
 		run.TotalCases, run.FailedCases, run.RiskScore, run.CostKRW = total, failed, maxRisk, cost
 		run.Status = "passed"
@@ -551,16 +592,32 @@ func (s *Server) runRedTeamCampaign(r *http.Request, c store.RedTeamCampaign) (m
 			}
 		}
 	}
-	_ = s.db.UpdateRedTeamCampaignStatus(r.Context(), c.ID, "completed", c.ApprovedBy)
+	finalStatus := "completed"
+	if stopped != "" {
+		finalStatus = "stopped"
+	}
+	_ = s.db.UpdateRedTeamCampaignStatus(r.Context(), c.ID, finalStatus, c.ApprovedBy)
 	if criticals > 0 {
 		s.auditAdmin(r, "redteam.critical", "", auditJSON(map[string]any{"campaign_id": c.ID, "critical": criticals}))
 	}
-	s.auditAdmin(r, "redteam.campaign.run", "", auditJSON(map[string]any{"id": c.ID, "runs": len(runs), "results": totalResults, "critical": criticals}))
+	s.auditAdmin(r, "redteam.campaign.run", "", auditJSON(map[string]any{"id": c.ID, "runs": len(runs), "results": totalResults, "critical": criticals, "live_calls": liveCalls, "stopped": stopped}))
+	mode := "controlled simulation"
+	if liveCalls > 0 {
+		mode = "active-controlled (live) + simulation"
+	}
+	note := "MVP run은 안전한 controlled simulation입니다. 실제 upstream 호출과 destructive tool 실행은 수행하지 않고 evaluator/evidence/remediation 경로를 검증합니다."
+	if liveCalls > 0 {
+		note = "Active Controlled Run: proxy_key로 " + itoaProxy(liveCalls) + "건의 LLM/Text2SQL 대상을 실제 호출하고 Rule Evaluator로 판정했습니다. MCP tool·destructive·app/workflow 대상은 시뮬레이션으로 유지됩니다. 증적은 마스킹 저장됩니다."
+	}
+	if stopped != "" {
+		note = "실행이 " + stopped + " 사유로 중단되었습니다. " + note
+	}
 	return map[string]any{
-		"campaign_id": c.ID, "runs": runs, "summary": map[string]any{
+		"campaign_id": c.ID, "status": finalStatus, "stopped": stopped, "runs": runs, "summary": map[string]any{
 			"runs": len(runs), "results": totalResults, "warnings": warnings, "failures": failures, "critical": criticals,
+			"live_calls": liveCalls, "live_cost_krw": liveCost, "mode": mode,
 		},
-		"note": "MVP run은 안전한 controlled simulation입니다. 실제 upstream 호출과 destructive tool 실행은 수행하지 않고 evaluator/evidence/remediation 경로를 검증합니다.",
+		"note": note,
 	}, nil
 }
 

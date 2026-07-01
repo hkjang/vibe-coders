@@ -4365,9 +4365,9 @@ const adminHTML = `<!doctype html>
     async function renderRedTeamView() {
       const view = document.getElementById('view');
       view.innerHTML = section('Red Team Automation', '<div class="empty">불러오는 중...</div>');
-      let targets = {}, packs = {}, campaigns = {}, runs = {}, baselines = {}, rems = {}, dash = {};
+      let targets = {}, packs = {}, campaigns = {}, runs = {}, baselines = {}, rems = {}, dash = {}, kill = {};
       try {
-        [targets, packs, campaigns, runs, baselines, rems, dash] = await Promise.all([
+        [targets, packs, campaigns, runs, baselines, rems, dash, kill] = await Promise.all([
           api('/admin/redteam/targets'),
           api('/admin/redteam/probe-packs'),
           api('/admin/redteam/campaigns'),
@@ -4375,6 +4375,7 @@ const adminHTML = `<!doctype html>
           api('/admin/redteam/baselines'),
           api('/admin/redteam/remediations').catch(() => ({ remediations: [] })),
           api('/admin/redteam/dashboard').catch(() => ({ summary: {}, matrix: [], top_failing_targets: [], drift: [] })),
+          api('/admin/redteam/kill-switch').catch(() => ({ enabled: false })),
         ]);
       } catch (e) {
         view.innerHTML = section('Red Team Automation', '<div class="card-body" style="padding:16px"><p class="muted">' + escapeHTML(e.message) + '</p></div>');
@@ -4458,8 +4459,13 @@ const adminHTML = `<!doctype html>
         '<td><span class="status error">+' + fmt(d.delta || 0) + '</span> (임계 ' + fmt(d.threshold || 0) + ')</td>' +
         '<td class="muted" style="font-size:11px">' + ago(d.last_passed_at) + '</td></tr>'
       ).join('') || '<tr><td colspan="5" class="muted">baseline drift 없음</td></tr>';
+      const killOn = !!(kill && kill.enabled);
       view.innerHTML = section('Red Team Automation',
-        '<p class="muted" style="font-size:12px;padding:0 14px">등록된 upstream만 대상으로 하는 허가형 AI 보안 회귀 테스트입니다. 기본은 dry-run이며, high-risk pack은 승인 없이는 active 실행되지 않습니다.</p>') +
+        '<p class="muted" style="font-size:12px;padding:0 14px">등록된 upstream만 대상으로 하는 허가형 AI 보안 회귀 테스트입니다. 기본은 dry-run이며, high-risk pack은 승인 없이는 active 실행되지 않습니다. Active Controlled Run은 전용 redteam Proxy API Key로만 실제 호출됩니다.</p>' +
+        '<div style="padding:0 14px 6px"><span class="status ' + (killOn ? 'error' : '') + '">Kill Switch: ' + (killOn ? 'ON' : 'OFF') + '</span> ' +
+        (killOn
+          ? '<button type="button" class="secondary" style="font-size:11px" onclick="redTeamKillSwitch(false)">해제</button>'
+          : '<button type="button" class="secondary" style="font-size:11px" onclick="redTeamKillSwitch(true)">전체 중지</button>') + '</div>') +
         '<div class="kpis">' + kpi('Targets', fmt(ts.length)) + kpi('High/Critical', fmt(highTargets)) + kpi('Probe Packs', fmt(ps.length)) + kpi('최근 Run 위험', fmt(maxRisk)) + kpi('실패 Run', fmt(failedRuns)) + '</div>' +
         '<div class="kpis">' + kpi('결과 수', fmt(dsum.total_results || 0)) + kpi('Critical', fmt(dec.critical || 0)) + kpi('Fail', fmt(dec.fail || 0)) + kpi('Warning', fmt(dec.warning || 0)) + kpi('외부 대상', fmt(dsum.external_targets || 0)) + kpi('미조치', fmt(dsum.open_remediations || 0)) + '</div>' +
         '<div class="grid2">' +
@@ -4537,10 +4543,20 @@ const adminHTML = `<!doctype html>
     };
     window.redTeamRun = async (id) => {
       try {
-        const d = await api('/admin/redteam/campaigns/' + encodeURIComponent(id) + '/run', { method: 'POST' });
+        // active-controlled 모드는 전용 redteam Proxy API Key로만 실제 upstream을 호출합니다.
+        const proxyKey = (window.prompt('Active Controlled Run용 redteam Proxy API Key를 입력하세요.\n(비워두면 실제 호출 없이 안전한 시뮬레이션으로 실행)') || '').trim();
+        const body = proxyKey ? JSON.stringify({ proxy_key: proxyKey }) : undefined;
+        const d = await api('/admin/redteam/campaigns/' + encodeURIComponent(id) + '/run', { method: 'POST', body });
         openModal('Campaign 실행', '<pre>' + escapeHTML(JSON.stringify(d, null, 2)) + '</pre>');
         await renderRedTeamView();
       } catch (e) { openModal('실행 오류', '<div class="error-line">' + escapeHTML(e.message) + '</div>'); }
+    };
+    window.redTeamKillSwitch = async (enabled) => {
+      try {
+        const d = await api('/admin/redteam/kill-switch', { method: 'POST', body: JSON.stringify({ enabled: !!enabled }) });
+        openModal('Kill Switch', 'redteam runner 중지 상태: <strong>' + (d.enabled ? 'ON (모든 active run 중단)' : 'OFF') + '</strong>');
+        await renderRedTeamView();
+      } catch (e) { openModal('Kill Switch 오류', '<div class="error-line">' + escapeHTML(e.message) + '</div>'); }
     };
     window.redTeamShowRunResults = async (id) => {
       try {
