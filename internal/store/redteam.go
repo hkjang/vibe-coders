@@ -757,6 +757,14 @@ func (s *SQLStore) RedTeamDashboardRows(ctx context.Context, limit int) ([]RedTe
 	return out, rows.Err()
 }
 
+// MarkRedTeamScheduleRun stamps a schedule's last_run_at so the scheduler spaces out fires and a
+// failing schedule doesn't retry every tick.
+func (s *SQLStore) MarkRedTeamScheduleRun(ctx context.Context, id, at string) error {
+	_, err := s.db.ExecContext(ctx, s.bind(`UPDATE redteam_schedules SET last_run_at = ?, updated_at = ? WHERE id = ?`),
+		at, at, id)
+	return err
+}
+
 func (s *SQLStore) ListRedTeamSchedules(ctx context.Context) ([]RedTeamSchedule, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT id, campaign_template_id, cron_expr, timezone, enabled, last_run_at, created_at, updated_at
 		FROM redteam_schedules ORDER BY created_at DESC`)

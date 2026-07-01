@@ -31,7 +31,7 @@ import (
 )
 
 // AppVersion is the gateway build version, surfaced in /auth/me and the admin UI.
-const AppVersion = "v0.76.7"
+const AppVersion = "v0.76.8"
 
 type Server struct {
 	cfg            config.Config
@@ -151,6 +151,7 @@ func NewServer(cfg config.Config, db *store.SQLStore, logger *store.AsyncLogger,
 	// Background scheduler for due saved Text2SQL reports (self-disables without an
 	// execute DB).
 	go server.text2sqlReportScheduler()
+	go server.redTeamScheduler()
 
 	if cfg.Upstream.APIKey != "" {
 		encrypted, err := secrets.Encrypt(cfg.Upstream.APIKey)
