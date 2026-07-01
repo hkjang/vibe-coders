@@ -609,9 +609,9 @@ func (s *Server) runRedTeamCampaign(r *http.Request, c store.RedTeamCampaign, pr
 	if liveCalls > 0 {
 		mode = "active-controlled (live) + simulation"
 	}
-	note := "MVP run은 안전한 controlled simulation입니다. 실제 upstream 호출과 destructive tool 실행은 수행하지 않고 evaluator/evidence/remediation 경로를 검증합니다."
+	note := "이번 실행은 실제 upstream 호출 없이 시뮬레이션으로 수행되었습니다(evaluator·evidence·remediation 경로 검증). 실제로 대상을 호출하려면 실행 모드를 active-controlled로 두고 전용 레드팀 Proxy API Key를 입력해 실행하세요. MCP tool·destructive·app/workflow 대상은 항상 시뮬레이션입니다."
 	if liveCalls > 0 {
-		note = "Active Controlled Run: proxy_key로 " + itoaProxy(liveCalls) + "건의 LLM/Text2SQL 대상을 실제 호출하고 Rule Evaluator로 판정했습니다. MCP tool·destructive·app/workflow 대상은 시뮬레이션으로 유지됩니다. 증적은 마스킹 저장됩니다."
+		note = "실제 실행(Active Controlled Run): 전용 Proxy API Key로 LLM/Text2SQL 대상을 " + itoaProxy(liveCalls) + "건 실제 호출하고 Rule Evaluator로 판정했습니다. MCP tool·destructive·app/workflow 대상은 시뮬레이션으로 유지되며, 증적은 마스킹 저장됩니다."
 	}
 	if stopped != "" {
 		note = "실행이 " + stopped + " 사유로 중단되었습니다. " + note

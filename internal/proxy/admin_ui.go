@@ -4591,7 +4591,21 @@ const adminHTML = `<!doctype html>
         const proxyKey = (window.prompt('실제 실행(Active Controlled Run)용 전용 레드팀 Proxy API Key를 입력하세요.\n(비워두면 실제 호출 없이 안전한 시뮬레이션으로 실행)') || '').trim();
         const body = proxyKey ? JSON.stringify({ proxy_key: proxyKey }) : undefined;
         const d = await api('/admin/redteam/campaigns/' + encodeURIComponent(id) + '/run', { method: 'POST', body });
-        openModal('캠페인 실행', '<pre>' + escapeHTML(JSON.stringify(d, null, 2)) + '</pre>');
+        const s = d.summary || {};
+        const live = Number(s.live_calls || 0);
+        const html =
+          '<div class="kpis">' + kpi('실행 수', fmt(s.runs || 0)) + kpi('케이스 결과', fmt(s.results || 0)) + kpi('치명', fmt(s.critical || 0)) + kpi('실패', fmt(s.failures || 0)) + kpi('경고', fmt(s.warnings || 0)) + '</div>' +
+          '<table>' +
+          '<tr><th style="text-align:left">실제 upstream 호출</th><td>' + (live > 0
+            ? '<span class="status error">예 — ' + fmt(live) + '건 실제 호출됨</span>'
+            : '<span class="status">아니오 — 시뮬레이션 (upstream 호출 없음)</span>') + '</td></tr>' +
+          '<tr><th style="text-align:left">실행 모드</th><td>' + escapeHTML(s.mode || d.status || '') + '</td></tr>' +
+          '<tr><th style="text-align:left">상태</th><td>' + escapeHTML(d.status || '') + (d.stopped ? ' <span class="status warn">' + escapeHTML(d.stopped) + ' 사유로 중단</span>' : '') + '</td></tr>' +
+          (live > 0 ? '<tr><th style="text-align:left">실호출 누적 비용</th><td>' + money(s.live_cost_krw || 0) + '</td></tr>' : '') +
+          '</table>' +
+          '<p class="muted" style="font-size:12px;margin-top:8px">' + escapeHTML(d.note || '') + '</p>' +
+          '<p class="muted" style="font-size:11px">각 케이스의 실제 요청/응답은 아래 <b>실행 이력 → 결과 → 증적</b>에서 확인하세요.</p>';
+        openModal('캠페인 실행 결과', html);
         await renderRedTeamView();
       } catch (e) { openModal('실행 오류', '<div class="error-line">' + escapeHTML(e.message) + '</div>'); }
     };
