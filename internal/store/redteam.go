@@ -318,6 +318,28 @@ func (s *SQLStore) UpsertRedTeamProbePackWithCases(ctx context.Context, pack Red
 	return tx.Commit()
 }
 
+// InsertRedTeamProbeCaseIfAbsent inserts a probe case only when its ID does not already exist.
+// It never overwrites an existing case, so it is safe for backfilling new default cases into a
+// pack that already has user-defined cases.
+func (s *SQLStore) InsertRedTeamProbeCaseIfAbsent(ctx context.Context, c RedTeamProbeCase) error {
+	if c.ID == "" || c.PackID == "" {
+		return nil
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	if c.CreatedAt == "" {
+		c.CreatedAt = now
+	}
+	c.UpdatedAt = now
+	params, _ := json.Marshal(nonNilMap(c.Parameters))
+	_, err := s.db.ExecContext(ctx, s.bind(`INSERT INTO redteam_probe_cases
+		(id, pack_id, case_key, input_template, expected_policy, evaluator_type, severity, risk_tags, target_types, parameters_json, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO NOTHING`),
+		c.ID, c.PackID, c.CaseKey, c.InputTemplate, c.ExpectedPolicy, c.EvaluatorType, c.Severity,
+		encodeStringList(c.RiskTags), encodeStringList(c.TargetTypes), string(params), c.CreatedAt, c.UpdatedAt)
+	return err
+}
+
 func (s *SQLStore) ListRedTeamProbePacks(ctx context.Context, includeCases bool) ([]RedTeamProbePack, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT id, name, category, severity, version, enabled, requires_approval, created_by, created_at, updated_at
 		FROM redteam_probe_packs ORDER BY category ASC, name ASC`)
