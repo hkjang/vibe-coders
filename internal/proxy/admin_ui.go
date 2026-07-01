@@ -369,6 +369,7 @@ const adminHTML = `<!doctype html>
         <button type="button" class="nav-group-toggle" aria-haspopup="true">거버넌스 ▾</button>
         <div class="nav-group-menu">
           <a href="#/safety" data-tab="safety">안전</a>
+          <a href="#/redteam" data-tab="redteam">Red Team</a>
           <a href="#/sbom" data-tab="sbom">AI 자산 SBOM</a>
           <a href="#/privacy-ledger" data-tab="privacy-ledger">프라이버시 원장</a>
           <a href="#/prompt-assets" data-tab="prompt-assets">자산 관리소</a>
@@ -1176,6 +1177,7 @@ const adminHTML = `<!doctype html>
           case 'llm':       await renderLLMObservability(); break;
           case 'requests':  await renderRequestsView(params); break;
           case 'sessions':  await renderSessionsView(); break;
+          case 'redteam':   await renderRedTeamView(); break;
           case 'sbom':      await renderSBOMView(); break;
           case 'journey-probe': await renderJourneyProbeView(); break;
           case 'pods':      await renderPodsView(); break;
@@ -4358,6 +4360,185 @@ const adminHTML = `<!doctype html>
       document.getElementById('sess-reload').addEventListener('click', load);
       await load();
     }
+
+    // Red Team Automation — registered upstream targets only, safe probe packs, dry-run first.
+    async function renderRedTeamView() {
+      const view = document.getElementById('view');
+      view.innerHTML = section('Red Team Automation', '<div class="empty">불러오는 중...</div>');
+      let targets = {}, packs = {}, campaigns = {}, runs = {}, baselines = {}, rems = {};
+      try {
+        [targets, packs, campaigns, runs, baselines, rems] = await Promise.all([
+          api('/admin/redteam/targets'),
+          api('/admin/redteam/probe-packs'),
+          api('/admin/redteam/campaigns'),
+          api('/admin/redteam/runs'),
+          api('/admin/redteam/baselines'),
+          api('/admin/redteam/remediations').catch(() => ({ remediations: [] })),
+        ]);
+      } catch (e) {
+        view.innerHTML = section('Red Team Automation', '<div class="card-body" style="padding:16px"><p class="muted">' + escapeHTML(e.message) + '</p></div>');
+        return;
+      }
+      const ts = targets.targets || [];
+      const ps = packs.probe_packs || [];
+      const cs = campaigns.campaigns || [];
+      const rs = runs.runs || [];
+      const bs = baselines.baselines || [];
+      const remediationRows = (rems.remediations || []).slice(0, 20).map(r =>
+        '<tr><td>' + escapeHTML(r.action_type || '') + '</td><td><code>' + escapeHTML(r.result_id || '') + '</code></td>' +
+        '<td><span class="status ' + redTeamStatusClass(r.status) + '">' + escapeHTML(r.status || '') + '</span></td>' +
+        '<td>' + escapeHTML(r.owner || '-') + '</td><td class="muted" style="font-size:11px">' + ago(r.created_at) + '</td></tr>'
+      ).join('') || '<tr><td colspan="5" class="muted">조치 없음</td></tr>';
+      const byType = {};
+      ts.forEach(t => { byType[t.target_type] = (byType[t.target_type] || 0) + 1; });
+      const highTargets = ts.filter(t => ['high', 'critical'].indexOf(t.risk_level) >= 0).length;
+      const failedRuns = rs.filter(r => r.status === 'failed').length;
+      const maxRisk = rs.reduce((m, r) => Math.max(m, Number(r.risk_score || 0)), 0);
+      const targetRows = ts.slice(0, 80).map(t => {
+        const meta = t.metadata || {};
+        const label = meta.title || meta.name || meta.base_url || t.model || t.tool_name || t.target_ref;
+        return '<tr>' +
+          '<td><span class="status" style="font-size:9px">' + escapeHTML(t.target_type) + '</span></td>' +
+          '<td><code>' + escapeHTML(t.target_ref) + '</code><div class="muted" style="font-size:10px">' + escapeHTML(label || '') + '</div></td>' +
+          '<td><span class="status ' + redTeamRiskClass(t.risk_level) + '">' + escapeHTML(t.risk_level || 'low') + '</span></td>' +
+          '<td>' + (t.enabled ? '<span class="status">enabled</span>' : '<span class="status warn">disabled</span>') + '</td>' +
+          '<td>' + escapeHTML(t.provider || t.mcp_upstream || '-') + '</td>' +
+        '</tr>';
+      }).join('') || '<tr><td colspan="5" class="muted">등록 target 없음</td></tr>';
+      const packChecks = ps.map(p =>
+        '<label style="display:block;margin:4px 0"><input type="checkbox" class="rt-pack" value="' + escapeAttr(p.id) + '" checked> ' +
+        '<strong>' + escapeHTML(p.name) + '</strong> <span class="status ' + redTeamRiskClass(p.severity) + '" style="font-size:9px">' + escapeHTML(p.severity) + '</span> ' +
+        (p.requires_approval ? '<span class="status warn" style="font-size:9px">approval</span> ' : '') +
+        '<span class="muted" style="font-size:11px">' + escapeHTML(p.category) + ' · cases ' + ((p.cases || []).length) + '</span></label>'
+      ).join('') || '<p class="muted">Probe Pack 없음</p>';
+      const campaignRows = cs.map(c =>
+        '<tr><td><strong>' + escapeHTML(c.name) + '</strong><div class="muted" style="font-size:10px"><code>' + escapeHTML(c.id) + '</code></div></td>' +
+        '<td>' + escapeHTML(c.scope || 'all') + '</td>' +
+        '<td><span class="status ' + redTeamStatusClass(c.status) + '">' + escapeHTML(c.status || '') + '</span></td>' +
+        '<td>' + escapeHTML(c.execution_mode || '') + '</td>' +
+        '<td>' + money(c.budget_limit_krw || 0) + '</td>' +
+        '<td style="white-space:nowrap"><button type="button" class="secondary" style="font-size:11px" onclick="redTeamDryRun(\'' + escapeAttr(c.id) + '\')">Dry-run</button> ' +
+        '<button type="button" class="secondary" style="font-size:11px" onclick="redTeamApprove(\'' + escapeAttr(c.id) + '\')">승인</button> ' +
+        '<button type="button" style="font-size:11px" onclick="redTeamRun(\'' + escapeAttr(c.id) + '\')">실행</button></td></tr>'
+      ).join('') || '<tr><td colspan="6" class="muted">Campaign 없음</td></tr>';
+      const runRows = rs.slice(0, 30).map(r =>
+        '<tr><td><code>' + escapeHTML(r.id) + '</code><div class="muted" style="font-size:10px">' + ago(r.created_at) + '</div></td>' +
+        '<td><code>' + escapeHTML(r.campaign_id) + '</code></td><td><code>' + escapeHTML(r.target_id) + '</code></td>' +
+        '<td><span class="status ' + redTeamStatusClass(r.status) + '">' + escapeHTML(r.status) + '</span></td>' +
+        '<td>' + fmt(r.failed_cases || 0) + ' / ' + fmt(r.total_cases || 0) + '</td>' +
+        '<td><span class="status ' + redTeamScoreClass(r.risk_score) + '">' + fmt(r.risk_score || 0) + '</span></td>' +
+        '<td><button type="button" class="secondary" style="font-size:11px" onclick="redTeamShowRunResults(\'' + escapeAttr(r.id) + '\')">결과</button></td></tr>'
+      ).join('') || '<tr><td colspan="7" class="muted">실행 이력 없음</td></tr>';
+      const baselineRows = bs.slice(0, 20).map(b =>
+        '<tr><td><code>' + escapeHTML(b.target_id) + '</code></td><td><code>' + escapeHTML(b.pack_id) + '</code></td>' +
+        '<td>' + fmt(b.baseline_score || 0) + '</td><td>' + fmt(b.drift_threshold || 0) + '</td><td class="muted" style="font-size:11px">' + ago(b.last_passed_at || b.updated_at) + '</td></tr>'
+      ).join('') || '<tr><td colspan="5" class="muted">baseline 없음</td></tr>';
+      view.innerHTML = section('Red Team Automation',
+        '<p class="muted" style="font-size:12px;padding:0 14px">등록된 upstream만 대상으로 하는 허가형 AI 보안 회귀 테스트입니다. 기본은 dry-run이며, high-risk pack은 승인 없이는 active 실행되지 않습니다.</p>') +
+        '<div class="kpis">' + kpi('Targets', fmt(ts.length)) + kpi('High/Critical', fmt(highTargets)) + kpi('Probe Packs', fmt(ps.length)) + kpi('최근 Run 위험', fmt(maxRisk)) + kpi('실패 Run', fmt(failedRuns)) + '</div>' +
+        section('Campaign Builder',
+          '<div class="card-body">' +
+          '<div class="grid2"><label>Campaign Name<input id="rt-name" placeholder="예: weekly-provider-mcp-redteam"></label>' +
+          '<label>Scope<select id="rt-scope"><option value="all">all</option><option value="provider">provider/model</option><option value="mcp">mcp</option><option value="text2sql">text2sql</option><option value="ai_app">ai_app</option><option value="workflow">workflow</option></select></label>' +
+          '<label>Execution Mode<select id="rt-mode"><option value="dry-run">dry-run</option><option value="shadow">shadow</option><option value="active-controlled">active-controlled</option><option value="pre-release">pre-release</option><option value="post-change">post-change</option></select></label>' +
+          '<label>Budget Limit KRW<input id="rt-budget" type="number" min="0" value="1000"></label>' +
+          '<label>QPS Limit<input id="rt-qps" type="number" min="0" step="0.1" value="1"></label>' +
+          '<label>Destructive Tool Policy<select id="rt-destructive"><option value="dry-run">dry-run</option><option value="mock">mock</option><option value="approval">approval</option><option value="block">block</option></select></label></div>' +
+          '<div style="margin-top:8px"><strong>Probe Packs</strong>' + packChecks + '</div>' +
+          '<button type="button" onclick="redTeamCreateCampaign()">Campaign 생성</button> ' +
+          '<span class="muted" style="font-size:11px">생성 후 Dry-run으로 예상 호출 수와 비용을 먼저 확인하세요.</span></div>') +
+        '<div class="grid2">' +
+          card('Target Inventory (' + ts.length + ')', '<div class="card-body"><table><thead><tr><th>유형</th><th>대상</th><th>위험</th><th>상태</th><th>provider/upstream</th></tr></thead><tbody>' + targetRows + '</tbody></table><p class="muted" style="font-size:10px;margin-top:6px">' + escapeHTML(targets.note || '') + '</p></div>') +
+          card('Probe Packs (' + ps.length + ')', '<div class="card-body">' + ps.map(p => '<div style="border-bottom:1px solid var(--line);padding:6px 0"><strong>' + escapeHTML(p.name) + '</strong> <span class="status ' + redTeamRiskClass(p.severity) + '" style="font-size:9px">' + escapeHTML(p.severity) + '</span> ' + (p.requires_approval ? '<span class="status warn" style="font-size:9px">approval</span>' : '') + '<div class="muted" style="font-size:11px">' + escapeHTML(p.category) + ' · ' + escapeHTML(p.version) + ' · cases ' + ((p.cases || []).length) + '</div></div>').join('') + '</div>') +
+        '</div>' +
+        card('Campaigns', '<div class="card-body"><table><thead><tr><th>이름</th><th>scope</th><th>상태</th><th>mode</th><th>budget</th><th>작업</th></tr></thead><tbody>' + campaignRows + '</tbody></table></div>') +
+        card('Runs', '<div class="card-body"><table><thead><tr><th>run</th><th>campaign</th><th>target</th><th>상태</th><th>failed/total</th><th>risk</th><th></th></tr></thead><tbody>' + runRows + '</tbody></table></div>') +
+        '<div class="grid2">' +
+          card('Baseline Drift Anchors', '<div class="card-body"><table><thead><tr><th>target</th><th>pack</th><th>baseline</th><th>drift</th><th>last passed</th></tr></thead><tbody>' + baselineRows + '</tbody></table></div>') +
+          card('Remediation Board', '<div class="card-body"><table><thead><tr><th>action</th><th>result</th><th>status</th><th>owner</th><th>created</th></tr></thead><tbody>' + remediationRows + '</tbody></table></div>') +
+        '</div>';
+    }
+
+    function redTeamRiskClass(v) {
+      v = String(v || '').toLowerCase();
+      return v === 'critical' || v === 'high' ? 'error' : (v === 'medium' ? 'warn' : '');
+    }
+    function redTeamStatusClass(v) {
+      v = String(v || '').toLowerCase();
+      if (['failed', 'critical', 'rejected', 'blocked'].indexOf(v) >= 0) return 'error';
+      if (['warning', 'pending', 'draft', 'running'].indexOf(v) >= 0) return 'warn';
+      return '';
+    }
+    function redTeamScoreClass(v) {
+      const n = Number(v || 0);
+      return n >= 65 ? 'error' : (n >= 25 ? 'warn' : '');
+    }
+    window.redTeamCreateCampaign = async () => {
+      const packs = Array.from(document.querySelectorAll('.rt-pack:checked')).map(x => x.value);
+      const body = {
+        name: document.getElementById('rt-name').value.trim(),
+        scope: document.getElementById('rt-scope').value,
+        execution_mode: document.getElementById('rt-mode').value,
+        budget_limit_krw: Number(document.getElementById('rt-budget').value || 0),
+        qps_limit: Number(document.getElementById('rt-qps').value || 0),
+        destructive_tool_policy: document.getElementById('rt-destructive').value,
+        probe_pack_ids: packs,
+      };
+      if (!body.name) { alert('Campaign Name을 입력하세요.'); return; }
+      try {
+        const d = await api('/admin/redteam/campaigns', { method: 'POST', body: JSON.stringify(body) });
+        openModal('Campaign 생성', '<pre>' + escapeHTML(JSON.stringify(d, null, 2)) + '</pre>');
+        await renderRedTeamView();
+      } catch (e) { openModal('Red Team 오류', '<div class="error-line">' + escapeHTML(e.message) + '</div>'); }
+    };
+    window.redTeamDryRun = async (id) => {
+      try {
+        const d = await api('/admin/redteam/campaigns/' + encodeURIComponent(id) + '/dry-run', { method: 'POST' });
+        openModal('Red Team Dry-run', '<pre>' + escapeHTML(JSON.stringify(d, null, 2)) + '</pre>');
+      } catch (e) { openModal('Dry-run 오류', '<div class="error-line">' + escapeHTML(e.message) + '</div>'); }
+    };
+    window.redTeamApprove = async (id) => {
+      try {
+        const d = await api('/admin/redteam/campaigns/' + encodeURIComponent(id) + '/approve', { method: 'POST' });
+        openModal('Campaign 승인', '<pre>' + escapeHTML(JSON.stringify(d, null, 2)) + '</pre>');
+        await renderRedTeamView();
+      } catch (e) { openModal('승인 오류', '<div class="error-line">' + escapeHTML(e.message) + '</div>'); }
+    };
+    window.redTeamRun = async (id) => {
+      try {
+        const d = await api('/admin/redteam/campaigns/' + encodeURIComponent(id) + '/run', { method: 'POST' });
+        openModal('Campaign 실행', '<pre>' + escapeHTML(JSON.stringify(d, null, 2)) + '</pre>');
+        await renderRedTeamView();
+      } catch (e) { openModal('실행 오류', '<div class="error-line">' + escapeHTML(e.message) + '</div>'); }
+    };
+    window.redTeamShowRunResults = async (id) => {
+      try {
+        const d = await api('/admin/redteam/runs/' + encodeURIComponent(id) + '/results');
+        const rows = (d.results || []).map(r =>
+          '<tr><td><code>' + escapeHTML(r.case_id) + '</code></td><td><span class="status ' + redTeamStatusClass(r.decision) + '">' + escapeHTML(r.decision) + '</span></td>' +
+          '<td><span class="status ' + redTeamRiskClass(r.severity) + '">' + escapeHTML(r.severity) + '</span></td><td>' + escapeHTML(r.policy_decision || '') + '</td>' +
+          '<td><button type="button" class="secondary" style="font-size:11px" onclick="redTeamShowEvidence(\'' + escapeAttr(r.id) + '\')">Evidence</button> ' +
+          '<button type="button" class="secondary" style="font-size:11px" onclick="redTeamCreateRemediation(\'' + escapeAttr(r.id) + '\')">조치</button></td></tr>'
+        ).join('') || '<tr><td colspan="5" class="muted">결과 없음</td></tr>';
+        openModal('Red Team Results', '<table><thead><tr><th>case</th><th>decision</th><th>severity</th><th>policy</th><th></th></tr></thead><tbody>' + rows + '</tbody></table>');
+      } catch (e) { openModal('결과 오류', '<div class="error-line">' + escapeHTML(e.message) + '</div>'); }
+    };
+    window.redTeamShowEvidence = async (resultID) => {
+      try {
+        const d = await api('/admin/redteam/results/' + encodeURIComponent(resultID) + '/evidence');
+        openModal('Masked Evidence', '<pre style="white-space:pre-wrap;max-height:70vh;overflow:auto">' + escapeHTML(JSON.stringify(d.evidence || d, null, 2)) + '</pre>');
+      } catch (e) { openModal('Evidence 오류', '<div class="error-line">' + escapeHTML(e.message) + '</div>'); }
+    };
+    window.redTeamCreateRemediation = async (resultID) => {
+      try {
+        const d = await api('/admin/redteam/results/' + encodeURIComponent(resultID) + '/remediation', {
+          method: 'POST',
+          body: JSON.stringify({ action_type: 'owner_action', action_payload: { source: 'admin_ui' } }),
+        });
+        openModal('Remediation 생성', '<pre>' + escapeHTML(JSON.stringify(d, null, 2)) + '</pre>');
+        await renderRedTeamView();
+      } catch (e) { openModal('Remediation 오류', '<div class="error-line">' + escapeHTML(e.message) + '</div>'); }
+    };
 
     // AI 자산 SBOM — 스킬·워크플로·앱·모델계약·프롬프트 자산의 소유권/의존성 명세 + 거버넌스 공백.
     async function renderSBOMView() {
