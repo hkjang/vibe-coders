@@ -4744,18 +4744,44 @@ const adminHTML = `<!doctype html>
           if (key) body = JSON.stringify({ proxy_key: key });
         }
         const runURL = '/admin/redteam/campaigns/' + encodeURIComponent(id) + '/run';
+        // 즉시 피드백: 실행·조치 탭으로 이동 + "실행 중" 모달 + 진행 상황 실시간 폴링.
+        rtActiveTab = 'runs';
+        let polling = false, progressTimer = null;
+        const pollProgress = async () => {
+          if (!polling) return;
+          try {
+            const rr = await api('/admin/redteam/runs');
+            const mine = (rr.runs || []).filter(x => x.campaign_id === id);
+            const done = mine.filter(x => x.status !== 'running').length;
+            const maxR = mine.reduce((m, x) => Math.max(m, Number(x.risk_score || 0)), 0);
+            const failedN = mine.filter(x => x.status === 'failed').length;
+            const el = document.getElementById('rt-live');
+            if (el) el.innerHTML = '<div class="kpis">' + kpi('실행(run)', fmt(mine.length)) + kpi('완료', fmt(done)) + kpi('진행 중', fmt(mine.length - done)) + kpi('실패 run', fmt(failedN)) + kpi('최고 위험', fmt(maxR)) + '</div>';
+          } catch (e) {}
+        };
+        const startPoll = () => { polling = true; pollProgress(); progressTimer = setInterval(pollProgress, 1500); };
+        const stopPoll = () => { polling = false; if (progressTimer) { clearInterval(progressTimer); progressTimer = null; } };
+        openModal('캠페인 실행 중…', '<p class="muted" style="font-size:12px">대상에 프로브를 실행하고 있습니다. 완료되면 요약이 표시됩니다.</p><div id="rt-live"><div class="empty">집계 중…</div></div>');
+        startPoll();
         let d;
         try {
-          d = await api(runURL, { method: 'POST', body });
-        } catch (err) {
-          // 고위험 팩은 승인 필요 — 그 자리에서 승인 후 재실행을 제안.
-          if (String(err.message || '').indexOf('requires approval') >= 0) {
-            if (!window.confirm('이 캠페인은 고위험 팩을 포함해 승인이 필요합니다. 지금 승인하고 실행할까요?')) return;
-            await api('/admin/redteam/campaigns/' + encodeURIComponent(id) + '/approve', { method: 'POST' });
+          try {
             d = await api(runURL, { method: 'POST', body });
-          } else {
-            throw err;
+          } catch (err) {
+            // 고위험 팩은 승인 필요 — 그 자리에서 승인 후 재실행을 제안.
+            if (String(err.message || '').indexOf('requires approval') >= 0) {
+              stopPoll();
+              if (!window.confirm('이 캠페인은 고위험 팩을 포함해 승인이 필요합니다. 지금 승인하고 실행할까요?')) { await renderRedTeamView(); return; }
+              openModal('캠페인 실행 중…', '<p class="muted" style="font-size:12px">승인 후 실행 중…</p><div id="rt-live"><div class="empty">집계 중…</div></div>');
+              startPoll();
+              await api('/admin/redteam/campaigns/' + encodeURIComponent(id) + '/approve', { method: 'POST' });
+              d = await api(runURL, { method: 'POST', body });
+            } else {
+              throw err;
+            }
           }
+        } finally {
+          stopPoll();
         }
         const s = d.summary || {};
         const live = Number(s.live_calls || 0);
