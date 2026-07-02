@@ -213,6 +213,13 @@ func (s *Server) handleRedTeamCampaignByID(w http.ResponseWriter, r *http.Reques
 	switch {
 	case action == "" && r.Method == http.MethodGet:
 		writeJSON(w, http.StatusOK, map[string]any{"campaign": c})
+	case action == "" && r.Method == http.MethodDelete:
+		if err := s.db.DeleteRedTeamCampaign(r.Context(), c.ID); err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "redteam_delete_failed")
+			return
+		}
+		s.auditAdmin(r, "redteam.campaign.delete", "", auditJSON(map[string]any{"id": c.ID, "name": c.Name}))
+		writeJSON(w, http.StatusOK, map[string]any{"id": c.ID, "deleted": true})
 	case action == "dry-run" && r.Method == http.MethodPost:
 		preview, err := s.redTeamDryRun(r, c)
 		if err != nil {
@@ -451,10 +458,13 @@ func (s *Server) redTeamDryRun(r *http.Request, c store.RedTeamCampaign) (map[st
 		return nil, err
 	}
 	totalCases := 0
-	external, destructive := 0, 0
+	external, destructive, activeEligible := 0, 0, 0
 	for _, t := range targets {
 		if redTeamExternalTarget(t) {
 			external++
+		}
+		if _, ok := pickRedTeamModel(t); ok {
+			activeEligible++
 		}
 		if t.TargetType == "mcp_tool" && severityRank(t.RiskLevel) >= severityRank("high") {
 			destructive++
@@ -470,7 +480,8 @@ func (s *Server) redTeamDryRun(r *http.Request, c store.RedTeamCampaign) (map[st
 	return map[string]any{
 		"campaign_id": c.ID, "targets": len(targets), "probe_packs": len(packs), "case_executions": totalCases,
 		"estimated_cost_krw": estimatedCost, "external_targets": external, "destructive_tool_targets": destructive,
-		"requires_approval": requiresApproval, "approved": c.Status == "approved",
+		"active_eligible_targets": activeEligible,
+		"requires_approval":       requiresApproval, "approved": c.Status == "approved",
 		"can_run": !requiresApproval || c.Status == "approved" || c.ExecutionMode == "dry-run",
 		"limits":  map[string]any{"budget_limit_krw": c.BudgetLimitKRW, "qps_limit": c.QPSLimit, "concurrency": c.Concurrency, "timeout_ms": c.TimeoutMS},
 		"note":    "Dry-run은 실제 upstream 호출 없이 등록 target, case 수, 예상 비용, 외부 provider, destructive MCP 위험을 계산합니다.",

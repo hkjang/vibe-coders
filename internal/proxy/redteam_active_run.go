@@ -59,6 +59,20 @@ func pickRedTeamModel(t store.RedTeamTarget) (string, bool) {
 			return "", false
 		}
 		return m, true
+	case "provider":
+		// A provider target has no single model; derive one from its model patterns
+		// (first concrete, non-wildcard token) so provider-scoped campaigns can run live.
+		if t.Metadata != nil {
+			if mp, ok := t.Metadata["model_patterns"].(string); ok {
+				for _, tok := range strings.Split(mp, ",") {
+					tok = strings.TrimSpace(tok)
+					if tok != "" && !strings.Contains(tok, "*") {
+						return tok, true
+					}
+				}
+			}
+		}
+		return "", false
 	}
 	return "", false
 }

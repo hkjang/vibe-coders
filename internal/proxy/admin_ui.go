@@ -4465,7 +4465,8 @@ const adminHTML = `<!doctype html>
         '<td>' + money(c.budget_limit_krw || 0) + '</td>' +
         '<td style="white-space:nowrap"><button type="button" class="secondary" style="font-size:11px" onclick="redTeamDryRun(\'' + escapeAttr(c.id) + '\')">드라이런</button> ' +
         '<button type="button" class="secondary" style="font-size:11px" onclick="redTeamApprove(\'' + escapeAttr(c.id) + '\')">승인</button> ' +
-        '<button type="button" style="font-size:11px" onclick="redTeamRun(\'' + escapeAttr(c.id) + '\',\'' + escapeAttr(c.execution_mode || '') + '\')">' + (c.execution_mode === 'active-controlled' ? '실제 실행' : '시뮬레이션 실행') + '</button></td></tr>'
+        '<button type="button" style="font-size:11px" onclick="redTeamRun(\'' + escapeAttr(c.id) + '\',\'' + escapeAttr(c.execution_mode || '') + '\')">' + (c.execution_mode === 'active-controlled' ? '실제 실행' : '시뮬레이션 실행') + '</button> ' +
+        '<button type="button" class="secondary" style="font-size:11px" onclick="redTeamDeleteCampaign(\'' + escapeAttr(c.id) + '\',\'' + escapeAttr(c.name || '') + '\')">삭제</button></td></tr>'
       ).join('') || '<tr><td colspan="6" class="muted">아직 캠페인이 없습니다. 위 <b>캠페인 빌더</b>로 만들거나, 상단 <b>⚡ 빠른 시작</b>으로 안전 팩 드라이런을 바로 실행해 보세요.</td></tr>';
       const runRows = rs.slice(0, 30).map(r =>
         '<tr><td><code>' + escapeHTML(r.id) + '</code><div class="muted" style="font-size:10px">' + ago(r.created_at) + '</div></td>' +
@@ -4504,23 +4505,19 @@ const adminHTML = `<!doctype html>
         '<td class="muted" style="font-size:11px">' + ago(d.last_passed_at) + '</td></tr>'
       ).join('') || '<tr><td colspan="5" class="muted">기준선 드리프트 없음</td></tr>';
       const killOn = !!(kill && kill.enabled);
-      view.innerHTML = section('레드팀 자동화',
-        '<p class="muted" style="font-size:12px;padding:0 14px">게이트웨이에 등록된 업스트림만 대상으로 하는 허가형 AI 보안 회귀 테스트입니다. 기본은 드라이런이며, 고위험 팩은 승인 없이는 실제 실행되지 않습니다. 실제 호출(Active Controlled Run)은 전용 레드팀 Proxy API Key로만 수행됩니다.</p>' +
-        '<div style="padding:0 14px 6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
-        '<button type="button" style="font-size:11px" onclick="redTeamQuickStart()">⚡ 빠른 시작(안전 팩 드라이런)</button> ' +
-        '<span class="status ' + (killOn ? 'error' : '') + '">킬 스위치: ' + (killOn ? '켜짐(중지)' : '꺼짐') + '</span> ' +
-        (killOn
-          ? '<button type="button" class="secondary" style="font-size:11px" onclick="redTeamKillSwitch(false)">해제</button>'
-          : '<button type="button" class="secondary" style="font-size:11px" onclick="redTeamKillSwitch(true)">전체 중지</button>') +
-        (localStorage.getItem('rt_proxy_key') ? ' <span class="status" style="font-size:10px">실행 키 저장됨</span> <button type="button" class="secondary" style="font-size:10px" onclick="redTeamClearKey()">키 지우기</button>' : '') +
-        '</div>') +
+      const keySaved = !!localStorage.getItem('rt_proxy_key');
+
+      // 탭별 패널 콘텐츠.
+      const panelOverview =
         '<div class="kpis">' + kpi('대상', fmt(ts.length)) + kpi('고위험/치명', fmt(highTargets)) + kpi('프로브 팩', fmt(ps.length)) + kpi('최근 실행 위험', fmt(maxRisk)) + kpi('실패한 실행', fmt(failedRuns)) + '</div>' +
         '<div class="kpis">' + kpi('결과 수', fmt(dsum.total_results || 0)) + kpi('치명', fmt(dec.critical || 0)) + kpi('실패', fmt(dec.fail || 0)) + kpi('경고', fmt(dec.warning || 0)) + kpi('외부 대상', fmt(dsum.external_targets || 0)) + kpi('미조치', fmt(dsum.open_remediations || 0)) + '</div>' +
         '<div class="grid2">' +
           card('결과 매트릭스 (대상 × 프로브 팩)', '<div class="card-body"><table><thead><tr><th>유형</th><th>팩 분류</th><th>통과</th><th>경고</th><th>실패</th><th>치명</th><th>계</th></tr></thead><tbody>' + matrixRows + '</tbody></table></div>') +
           card('상위 실패 대상', '<div class="card-body"><table><thead><tr><th>대상</th><th>치명</th><th>실패</th><th>경고</th><th>최고 위험</th></tr></thead><tbody>' + failingRows + '</tbody></table></div>') +
         '</div>' +
-        card('기준선 드리프트 (' + (dash.drift || []).length + ')', '<div class="card-body"><table><thead><tr><th>대상</th><th>팩</th><th>기준→현재</th><th>드리프트</th><th>최근 통과</th></tr></thead><tbody>' + driftRows + '</tbody></table></div>') +
+        card('기준선 드리프트 (' + (dash.drift || []).length + ')', '<div class="card-body"><table><thead><tr><th>대상</th><th>팩</th><th>기준→현재</th><th>드리프트</th><th>최근 통과</th></tr></thead><tbody>' + driftRows + '</tbody></table></div>');
+
+      const panelCampaigns =
         section('캠페인 빌더',
           '<div class="card-body">' +
           '<div class="grid2"><label>캠페인 이름<input id="rt-name" placeholder="예: 주간-프로바이더-mcp-레드팀"></label>' +
@@ -4537,15 +4534,42 @@ const adminHTML = `<!doctype html>
           '② (고위험 팩이면) 목록에서 <b>승인</b> · ' +
           '③ <b>실제 실행</b> 버튼을 눌러 프롬프트에 <b>전용 레드팀 Proxy API Key</b> 입력.<br>' +
           '그 외 모드(드라이런/섀도우 등)나 키 미입력 시에는 실제 호출 없이 <b>시뮬레이션</b>으로 안전 실행됩니다. MCP 도구·파괴적·앱/워크플로 대상은 항상 시뮬레이션입니다.</div></div>') +
+        card('캠페인', '<div class="card-body"><table><thead><tr><th>이름</th><th>범위</th><th>상태</th><th>모드</th><th>예산</th><th>작업</th></tr></thead><tbody>' + campaignRows + '</tbody></table></div>');
+
+      const panelTargets =
         '<div class="grid2">' +
           card('대상 인벤토리 (' + ts.length + ')', '<div class="card-body"><table><thead><tr><th>유형</th><th>대상</th><th>위험</th><th>상태</th><th>프로바이더/업스트림</th></tr></thead><tbody>' + targetRows + '</tbody></table><p class="muted" style="font-size:10px;margin-top:6px">' + escapeHTML(targets.note || '') + '</p></div>') +
           card('프로브 팩 (' + ps.length + ')', '<div class="card-body">' + ps.map(p => '<div style="border-bottom:1px solid var(--line);padding:6px 0"><strong>' + escapeHTML(p.name) + '</strong> <span class="status ' + redTeamRiskClass(p.severity) + '" style="font-size:9px">' + escapeHTML(p.severity) + '</span> ' + (p.requires_approval ? '<span class="status warn" style="font-size:9px">승인필요</span>' : '') + ' <button type="button" class="secondary" style="font-size:10px" onclick="redTeamShowPackCases(\'' + escapeAttr(p.id) + '\')">케이스 보기</button><div class="muted" style="font-size:11px">' + escapeHTML(p.category) + ' · ' + escapeHTML(p.version) + ' · 케이스 ' + ((p.cases || []).length) + '</div></div>').join('') + '</div>') +
-        '</div>' +
-        card('캠페인', '<div class="card-body"><table><thead><tr><th>이름</th><th>범위</th><th>상태</th><th>모드</th><th>예산</th><th>작업</th></tr></thead><tbody>' + campaignRows + '</tbody></table></div>') +
+        '</div>';
+
+      const panelRuns =
         card('실행 이력', '<div class="card-body"><table><thead><tr><th>실행</th><th>캠페인</th><th>대상</th><th>상태</th><th>실패/전체</th><th>위험</th><th></th></tr></thead><tbody>' + runRows + '</tbody></table></div>') +
         '<div class="grid2">' +
           card('기준선 앵커', '<div class="card-body"><table><thead><tr><th>대상</th><th>팩</th><th>기준 점수</th><th>드리프트 임계</th><th>최근 통과</th></tr></thead><tbody>' + baselineRows + '</tbody></table></div>') +
           card('조치 보드', '<div class="card-body"><table><thead><tr><th>조치 유형</th><th>결과 ID</th><th>상태</th><th>담당</th><th>생성</th></tr></thead><tbody>' + remediationRows + '</tbody></table></div>') +
+        '</div>';
+
+      const tab = (name, label) => '<button type="button" class="rt-tabbtn' + (name === rtActiveTab ? ' active' : '') + '" data-rt="' + name + '" onclick="rtTab(\'' + name + '\')" style="font-size:12px;padding:6px 12px;border:1px solid var(--line);border-bottom:none;border-radius:6px 6px 0 0;background:' + (name === rtActiveTab ? 'var(--accent);color:#fff' : 'transparent') + '">' + label + '</button>';
+      const panel = (name, html) => '<div class="rt-panel" data-rt="' + name + '" style="display:' + (name === rtActiveTab ? 'block' : 'none') + ';border:1px solid var(--line);border-radius:0 8px 8px 8px;padding:10px">' + html + '</div>';
+
+      view.innerHTML = section('레드팀 자동화',
+        '<p class="muted" style="font-size:12px;padding:0 14px">게이트웨이에 등록된 업스트림만 대상으로 하는 허가형 AI 보안 회귀 테스트입니다. 기본은 드라이런이며, 고위험 팩은 승인 없이는 실제 실행되지 않습니다. 실제 호출(Active Controlled Run)은 전용 레드팀 Proxy API Key(사용자·키 관리에서 발급한 Proxy API Key)로만 수행됩니다.</p>' +
+        '<div style="padding:0 14px 6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
+        '<button type="button" style="font-size:11px" onclick="redTeamQuickStart()">⚡ 빠른 시작(안전 팩 드라이런)</button> ' +
+        '<span class="status ' + (killOn ? 'error' : '') + '">킬 스위치: ' + (killOn ? '켜짐(중지)' : '꺼짐') + '</span> ' +
+        (killOn
+          ? '<button type="button" class="secondary" style="font-size:11px" onclick="redTeamKillSwitch(false)">해제</button>'
+          : '<button type="button" class="secondary" style="font-size:11px" onclick="redTeamKillSwitch(true)">전체 중지</button>') +
+        (keySaved ? ' <span class="status" style="font-size:10px">실행 키 저장됨</span> <button type="button" class="secondary" style="font-size:10px" onclick="redTeamClearKey()">키 지우기</button>' : '') +
+        '</div>') +
+        '<div style="padding:0 14px">' +
+        '<div class="rt-tabbar" style="display:flex;gap:4px;flex-wrap:wrap">' +
+          tab('overview', '개요·지표') + tab('campaigns', '캠페인') + tab('targets', '대상·프로브 팩') + tab('runs', '실행·조치') +
+        '</div>' +
+        panel('overview', panelOverview) +
+        panel('campaigns', panelCampaigns) +
+        panel('targets', panelTargets) +
+        panel('runs', panelRuns) +
         '</div>';
     }
 
@@ -4563,6 +4587,25 @@ const adminHTML = `<!doctype html>
       const n = Number(v || 0);
       return n >= 65 ? 'error' : (n >= 25 ? 'warn' : '');
     }
+    // 레드팀 내부 서브탭 상태(재렌더 후에도 유지).
+    let rtActiveTab = 'overview';
+    window.rtTab = (name) => {
+      rtActiveTab = name;
+      document.querySelectorAll('.rt-panel').forEach(p => { p.style.display = (p.dataset.rt === name) ? 'block' : 'none'; });
+      document.querySelectorAll('.rt-tabbtn').forEach(b => {
+        const on = b.dataset.rt === name;
+        b.classList.toggle('active', on);
+        b.style.background = on ? 'var(--accent)' : 'transparent';
+        b.style.color = on ? '#fff' : '';
+      });
+    };
+    window.redTeamDeleteCampaign = async (id, name) => {
+      if (!window.confirm('캠페인 "' + (name || id) + '" 및 관련 실행·결과·증적을 모두 삭제할까요? 되돌릴 수 없습니다.')) return;
+      try {
+        await api('/admin/redteam/campaigns/' + encodeURIComponent(id), { method: 'DELETE' });
+        await renderRedTeamView();
+      } catch (e) { openModal('삭제 오류', '<div class="error-line">' + escapeHTML(e.message) + '</div>'); }
+    };
     window.redTeamCreateCampaign = async () => {
       const packs = Array.from(document.querySelectorAll('.rt-pack:checked')).map(x => x.value);
       const body = {
@@ -4594,6 +4637,7 @@ const adminHTML = `<!doctype html>
           '<p class="muted" style="font-size:12px">실제 호출 없이 이번 캠페인이 대상으로 삼을 범위와 예상 규모를 계산합니다.</p>' +
           '<div class="kpis">' + kpi('대상 수', fmt(d.targets || 0)) + kpi('프로브 팩', fmt(d.probe_packs || 0)) + kpi('실행 케이스', fmt(d.case_executions || 0)) + kpi('예상 비용(KRW)', money(d.estimated_cost_krw || 0)) + '</div>' +
           '<table>' +
+          '<tr><th style="text-align:left">실호출 가능 대상</th><td>' + fmt(d.active_eligible_targets || 0) + '건 ' + ((d.active_eligible_targets || 0) > 0 ? '<span class="muted" style="font-size:11px">(active-controlled + 키 입력 시 실제 호출)</span>' : '<span class="status warn">0건 — 실행해도 시뮬레이션(구체 모델 대상 없음)</span>') + '</td></tr>' +
           '<tr><th style="text-align:left">외부 provider 대상</th><td>' + fmt(d.external_targets || 0) + '건' + ((d.external_targets || 0) > 0 ? ' <span class="status warn">egress 주의</span>' : '') + '</td></tr>' +
           '<tr><th style="text-align:left">파괴적 MCP 대상</th><td>' + fmt(d.destructive_tool_targets || 0) + '건</td></tr>' +
           '<tr><th style="text-align:left">승인 필요</th><td>' + (d.requires_approval ? (d.approved ? '<span class="status">예 — 승인 완료</span>' : '<span class="status warn">예 — 승인 필요(미승인)</span>') : '아니오') + '</td></tr>' +

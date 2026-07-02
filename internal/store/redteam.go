@@ -476,6 +476,29 @@ func (s *SQLStore) ListRedTeamCampaigns(ctx context.Context, limit int) ([]RedTe
 	return out, rows.Err()
 }
 
+// DeleteRedTeamCampaign removes a campaign and all of its runs, case results, evidence, and
+// remediations in one transaction, so an operator can clean up unneeded campaigns.
+func (s *SQLStore) DeleteRedTeamCampaign(ctx context.Context, id string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	stmts := []string{
+		`DELETE FROM redteam_evidence WHERE result_id IN (SELECT id FROM redteam_case_results WHERE run_id IN (SELECT id FROM redteam_runs WHERE campaign_id = ?))`,
+		`DELETE FROM redteam_remediations WHERE result_id IN (SELECT id FROM redteam_case_results WHERE run_id IN (SELECT id FROM redteam_runs WHERE campaign_id = ?))`,
+		`DELETE FROM redteam_case_results WHERE run_id IN (SELECT id FROM redteam_runs WHERE campaign_id = ?)`,
+		`DELETE FROM redteam_runs WHERE campaign_id = ?`,
+		`DELETE FROM redteam_campaigns WHERE id = ?`,
+	}
+	for _, q := range stmts {
+		if _, err := tx.ExecContext(ctx, s.bind(q), id); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
 func (s *SQLStore) GetRedTeamCampaign(ctx context.Context, id string) (RedTeamCampaign, bool, error) {
 	row := s.db.QueryRowContext(ctx, s.bind(`SELECT id, name, scope, status, execution_mode, created_by, approved_by, schedule,
 		budget_limit_krw, qps_limit, timeout_ms, concurrency, target_filter_json, probe_pack_ids_json, evidence_retention_days,

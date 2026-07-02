@@ -112,7 +112,7 @@ var apiEndpoints = []apiEndpoint{
 	{"/admin/redteam/targets/{id}", []string{"get"}, "redteam", "Red Team target detail", false},
 	{"/admin/redteam/probe-packs", []string{"get", "post"}, "redteam", "Red Team probe pack registry", false},
 	{"/admin/redteam/campaigns", []string{"get", "post"}, "redteam", "Red Team campaign builder/list", false},
-	{"/admin/redteam/campaigns/{id}", []string{"get"}, "redteam", "Red Team campaign detail", false},
+	{"/admin/redteam/campaigns/{id}", []string{"get", "delete"}, "redteam", "Red Team campaign detail / delete", false},
 	{"/admin/redteam/campaigns/{id}/dry-run", []string{"post"}, "redteam", "Red Team dry-run preview without upstream calls", false},
 	{"/admin/redteam/campaigns/{id}/approve", []string{"post"}, "redteam", "Approve a high-risk Red Team campaign", false},
 	{"/admin/redteam/campaigns/{id}/run", []string{"post"}, "redteam", "Run a controlled Red Team campaign", false},
