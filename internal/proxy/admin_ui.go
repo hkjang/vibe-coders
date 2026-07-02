@@ -4695,14 +4695,29 @@ const adminHTML = `<!doctype html>
       try {
         let body;
         // 실제 호출은 캠페인 모드가 active-controlled일 때만, 전용 레드팀 Proxy API Key로 수행됩니다.
-        // 이전에 입력한 키는 브라우저에 저장되어 프롬프트에 자동으로 채워집니다.
+        // 저장된 키가 있으면 프롬프트 없이 바로 사용하고, 없을 때만 1회 입력받아 저장합니다.
         if (mode === 'active-controlled') {
-          const saved = localStorage.getItem('rt_proxy_key') || '';
-          const proxyKey = (window.prompt('실제 실행: 전용 레드팀 Proxy API Key를 입력하세요.\n(비워두고 확인하면 실제 호출 없이 시뮬레이션으로 실행됩니다)', saved) || '').trim();
-          if (proxyKey) { localStorage.setItem('rt_proxy_key', proxyKey); body = JSON.stringify({ proxy_key: proxyKey }); }
+          let key = (localStorage.getItem('rt_proxy_key') || '').trim();
+          if (!key) {
+            key = (window.prompt('실제 실행: 전용 레드팀 Proxy API Key를 입력하세요.\n(비워두고 확인하면 실제 호출 없이 시뮬레이션으로 실행됩니다)') || '').trim();
+            if (key) localStorage.setItem('rt_proxy_key', key);
+          }
+          if (key) body = JSON.stringify({ proxy_key: key });
         }
-        // 그 외 모드는 프롬프트 없이 바로 시뮬레이션 실행.
-        const d = await api('/admin/redteam/campaigns/' + encodeURIComponent(id) + '/run', { method: 'POST', body });
+        const runURL = '/admin/redteam/campaigns/' + encodeURIComponent(id) + '/run';
+        let d;
+        try {
+          d = await api(runURL, { method: 'POST', body });
+        } catch (err) {
+          // 고위험 팩은 승인 필요 — 그 자리에서 승인 후 재실행을 제안.
+          if (String(err.message || '').indexOf('requires approval') >= 0) {
+            if (!window.confirm('이 캠페인은 고위험 팩을 포함해 승인이 필요합니다. 지금 승인하고 실행할까요?')) return;
+            await api('/admin/redteam/campaigns/' + encodeURIComponent(id) + '/approve', { method: 'POST' });
+            d = await api(runURL, { method: 'POST', body });
+          } else {
+            throw err;
+          }
+        }
         const s = d.summary || {};
         const live = Number(s.live_calls || 0);
         const html =
