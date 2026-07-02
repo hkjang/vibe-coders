@@ -361,7 +361,8 @@ const adminHTML = `<!doctype html>
     .rt-field .rt-fieldcap { font-size: 12px; font-weight: 700; color: var(--muted); }
     .rt-field .rt-hint { font-weight: 500; color: var(--muted); font-size: 11px; }
     .rt-modelbox { max-height: 120px; overflow: auto; border: 1px solid var(--line-strong); border-radius: 6px; padding: 6px; }
-    .rt-modelbox label { display: block; font-size: 12px; font-weight: 500; color: var(--ink); margin: 2px 0; }
+    .rt-modelbox label { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 500; color: var(--ink); margin: 2px 0; }
+    .rt-modelbox input[type="checkbox"] { width: 13px; height: 13px; margin: 0; flex: 0 0 auto; }
     .rt-modelbox .muted { color: var(--muted); }
   </style>
 </head>
