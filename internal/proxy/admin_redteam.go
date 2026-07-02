@@ -463,7 +463,9 @@ func (s *Server) redTeamDryRun(r *http.Request, c store.RedTeamCampaign) (map[st
 		if redTeamExternalTarget(t) {
 			external++
 		}
-		if _, ok := pickRedTeamModel(t); ok {
+		switch t.TargetType {
+		case "provider", "model", "text2sql":
+			// active-controlled + key로 실제 호출 대상 (모델은 필요 시 /v1/models로 자동 선택).
 			activeEligible++
 		}
 		if t.TargetType == "mcp_tool" && severityRank(t.RiskLevel) >= severityRank("high") {
@@ -519,7 +521,8 @@ func (s *Server) runRedTeamCampaign(r *http.Request, c store.RedTeamCampaign, pr
 	runs := []store.RedTeamRun{}
 	totalResults, criticals, warnings, failures := 0, 0, 0, 0
 	liveCalls, liveCost := 0, 0.0
-	stopped := "" // set to a reason if budget/kill-switch aborts the run mid-flight
+	modelCache := &redTeamModelCache{} // one /v1/models auto-discovery per run, reused across targets
+	stopped := ""                      // set to a reason if budget/kill-switch aborts the run mid-flight
 	for _, t := range targets {
 		if stopped != "" {
 			break
@@ -544,7 +547,7 @@ func (s *Server) runRedTeamCampaign(r *http.Request, c store.RedTeamCampaign, pr
 			// Active Controlled Run: invoke live only for eligible LLM/Text2SQL targets within the
 			// live-call cap; everything else uses the safe simulation.
 			if redTeamActiveEligible(t, c, proxyKey) && liveCalls < redteamActiveMaxCalls {
-				if ar, aev, arem, invoked := s.evaluateRedTeamCaseActive(r, proxyKey, t, pack, cs, c); invoked {
+				if ar, aev, arem, invoked := s.evaluateRedTeamCaseActive(r, proxyKey, t, pack, cs, c, modelCache); invoked {
 					result, ev, rem = ar, aev, arem
 					liveCalls++
 					liveCost += result.CostKRW

@@ -78,8 +78,10 @@ func pickRedTeamModel(t store.RedTeamTarget) (string, bool) {
 }
 
 // redTeamActiveEligible reports whether a case against a target should be invoked live rather than
-// simulated. Live invocation requires active-controlled mode, a redteam proxy key, and a concrete
-// LLM/Text2SQL model target. MCP/tool/app/workflow targets are never invoked live in this path.
+// simulated. Live invocation requires active-controlled mode, a redteam proxy key, and an LLM-type
+// target (provider/model/text2sql). The concrete model is resolved at call time — for provider/model
+// targets without a concrete pattern it is auto-discovered from the upstream /v1/models. MCP tool,
+// app, and workflow targets are never invoked live in this path.
 func redTeamActiveEligible(t store.RedTeamTarget, c store.RedTeamCampaign, proxyKey string) bool {
 	if strings.TrimSpace(proxyKey) == "" {
 		return false
@@ -87,14 +89,97 @@ func redTeamActiveEligible(t store.RedTeamTarget, c store.RedTeamCampaign, proxy
 	if normalizeRedTeamMode(c.ExecutionMode) != "active-controlled" {
 		return false
 	}
-	_, ok := pickRedTeamModel(t)
-	return ok
+	switch t.TargetType {
+	case "provider", "model", "text2sql":
+		return true
+	}
+	return false
+}
+
+// redTeamModelCache memoizes the upstream /v1/models list for one run so auto-discovery costs at
+// most one extra call per campaign run.
+type redTeamModelCache struct {
+	loaded bool
+	models []string
+}
+
+// redTeamListModels fetches the gateway's advertised model list (/v1/models) as the redteam key.
+func (s *Server) redTeamListModels(r *http.Request, proxyKey string) []string {
+	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	req = req.WithContext(r.Context())
+	req.RemoteAddr = r.RemoteAddr
+	req.Header.Set("Authorization", "Bearer "+proxyKey)
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("X-Cost-Center", "redteam")
+	req.Header.Set("X-Redteam", "1")
+	rec := httptest.NewRecorder()
+	s.handleOpenAI(rec, req)
+	if rec.Code != http.StatusOK {
+		return nil
+	}
+	var parsed struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &parsed); err != nil {
+		return nil
+	}
+	out := []string{}
+	for _, m := range parsed.Data {
+		if strings.TrimSpace(m.ID) != "" {
+			out = append(out, m.ID)
+		}
+	}
+	return out
+}
+
+// resolveRedTeamModel returns the concrete model to invoke for a target: a concrete model pattern
+// if present, otherwise (for provider/model targets) one auto-discovered from /v1/models, preferring
+// an id that matches the provider's pattern prefix. Returns ("", "", false) if none can be resolved.
+func (s *Server) resolveRedTeamModel(r *http.Request, proxyKey string, t store.RedTeamTarget, cache *redTeamModelCache) (model, provider string, ok bool) {
+	if m, pok := pickRedTeamModel(t); pok {
+		return m, t.Provider, true
+	}
+	if t.TargetType != "provider" && t.TargetType != "model" {
+		return "", "", false
+	}
+	if cache != nil && !cache.loaded {
+		cache.models = s.redTeamListModels(r, proxyKey)
+		cache.loaded = true
+	}
+	var models []string
+	if cache != nil {
+		models = cache.models
+	} else {
+		models = s.redTeamListModels(r, proxyKey)
+	}
+	if len(models) == 0 {
+		return "", "", false
+	}
+	// Prefer a model whose id matches the provider's pattern prefix (e.g. "gpt-4o*" → "gpt-4o...").
+	if t.Metadata != nil {
+		if mp, mok := t.Metadata["model_patterns"].(string); mok {
+			for _, pat := range strings.Split(mp, ",") {
+				pat = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(pat), "*"))
+				if pat == "" {
+					continue
+				}
+				for _, m := range models {
+					if strings.HasPrefix(m, pat) {
+						return m, t.Provider, true
+					}
+				}
+			}
+		}
+	}
+	return models[0], t.Provider, true
 }
 
 // redTeamActiveInvoke sends one synthetic chat completion through the gateway as the redteam key
 // and returns the assistant text, the request id, the HTTP status, and success. It sets the
 // redteam cost-center/marker headers so the request is attributed and egress-tagged (§6).
-func (s *Server) redTeamActiveInvoke(r *http.Request, proxyKey, model, prompt string, maxTokens int) (respText, requestID string, code int, ok bool) {
+func (s *Server) redTeamActiveInvoke(r *http.Request, proxyKey, model, provider, prompt string, maxTokens int) (respText, requestID string, code int, ok bool) {
 	if maxTokens <= 0 || maxTokens > 512 {
 		maxTokens = 256
 	}
@@ -117,6 +202,10 @@ func (s *Server) redTeamActiveInvoke(r *http.Request, proxyKey, model, prompt st
 	req.Header.Set("X-Request-ID", reqID)
 	req.Header.Set("X-Cost-Center", "redteam")
 	req.Header.Set("X-Redteam", "1")
+	// Force routing to the intended provider so an auto-discovered model still hits the target.
+	if strings.TrimSpace(provider) != "" && provider != "text2sql" {
+		req.Header.Set("X-Proxy-Provider", provider)
+	}
 
 	rec := httptest.NewRecorder()
 	s.handleOpenAI(rec, req)
@@ -145,8 +234,8 @@ func (s *Server) redTeamActiveInvoke(r *http.Request, proxyKey, model, prompt st
 // evaluateRedTeamCaseActive runs one probe case live and evaluates the real response with the Rule
 // Evaluator. It mirrors evaluateRedTeamCase's return shape so the runner can treat both uniformly.
 // The returned invoked=false means the live call failed and the caller should fall back.
-func (s *Server) evaluateRedTeamCaseActive(r *http.Request, proxyKey string, t store.RedTeamTarget, pack store.RedTeamProbePack, cs store.RedTeamProbeCase, c store.RedTeamCampaign) (store.RedTeamCaseResult, store.RedTeamEvidence, store.RedTeamRemediation, bool) {
-	model, ok := pickRedTeamModel(t)
+func (s *Server) evaluateRedTeamCaseActive(r *http.Request, proxyKey string, t store.RedTeamTarget, pack store.RedTeamProbePack, cs store.RedTeamProbeCase, c store.RedTeamCampaign, cache *redTeamModelCache) (store.RedTeamCaseResult, store.RedTeamEvidence, store.RedTeamRemediation, bool) {
+	model, provider, ok := s.resolveRedTeamModel(r, proxyKey, t, cache)
 	if !ok {
 		return store.RedTeamCaseResult{}, store.RedTeamEvidence{}, store.RedTeamRemediation{}, false
 	}
@@ -157,7 +246,7 @@ func (s *Server) evaluateRedTeamCaseActive(r *http.Request, proxyKey string, t s
 			maxTokens = int(mt)
 		}
 	}
-	respText, requestID, httpCode, invoked := s.redTeamActiveInvoke(r, proxyKey, model, prompt, maxTokens)
+	respText, requestID, httpCode, invoked := s.redTeamActiveInvoke(r, proxyKey, model, provider, prompt, maxTokens)
 	if !invoked {
 		return store.RedTeamCaseResult{}, store.RedTeamEvidence{}, store.RedTeamRemediation{}, false
 	}
