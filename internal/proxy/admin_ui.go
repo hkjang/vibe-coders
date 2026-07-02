@@ -344,6 +344,14 @@ const adminHTML = `<!doctype html>
       box-shadow: 0 -2px 0 var(--accent) inset;
     }
     .rt-panel { background: var(--panel); }
+    /* Red Team form fields: label on top, full-width control below. */
+    .rt-form { gap: 12px 16px; margin-top: 12px; }
+    .rt-form label {
+      display: flex; flex-direction: column; gap: 5px;
+      font-size: 12px; font-weight: 700; color: var(--muted);
+    }
+    .rt-form label input, .rt-form label select { width: 100%; height: 36px; min-width: 0; color: var(--ink); }
+    .rt-form label .rt-hint { font-weight: 500; color: var(--muted); font-size: 11px; }
   </style>
 </head>
 <body>
@@ -4534,12 +4542,12 @@ const adminHTML = `<!doctype html>
       const panelCampaigns =
         section('캠페인 빌더',
           '<div class="card-body">' +
-          '<div class="grid2"><label>캠페인 이름<input id="rt-name" placeholder="예: 주간-프로바이더-mcp-레드팀"></label>' +
-          '<label>범위(scope)<select id="rt-scope"><option value="all">전체</option><option value="provider">프로바이더/모델</option><option value="mcp">MCP</option><option value="text2sql">Text2SQL</option><option value="ai_app">AI 앱</option><option value="workflow">워크플로</option></select></label>' +
-          '<label>실행 모드<select id="rt-mode"><option value="dry-run">드라이런(호출 없음)</option><option value="shadow">섀도우</option><option value="active-controlled">실제 실행(통제)</option><option value="pre-release">릴리즈 전</option><option value="post-change">변경 후</option></select></label>' +
-          '<label>예산 한도(KRW)<input id="rt-budget" type="number" min="0" value="1000"></label>' +
-          '<label>QPS 한도<input id="rt-qps" type="number" min="0" step="0.1" value="1"></label>' +
-          '<label>파괴적 도구 정책<select id="rt-destructive"><option value="dry-run">드라이런</option><option value="mock">모의(mock)</option><option value="approval">승인 필요</option><option value="block">차단</option></select></label></div>' +
+          '<div class="grid2 rt-form"><label>캠페인 이름<input id="rt-name" placeholder="예: 주간-프로바이더-mcp-레드팀"></label>' +
+          '<label>범위(scope)<select id="rt-scope"><option value="all">전체</option><option value="provider">프로바이더/모델</option><option value="mcp">MCP</option><option value="text2sql">Text2SQL</option><option value="ai_app">AI 앱</option><option value="workflow">워크플로</option></select><span class="rt-hint">테스트할 대상 유형</span></label>' +
+          '<label>실행 모드<select id="rt-mode"><option value="dry-run">드라이런(호출 없음)</option><option value="shadow">섀도우</option><option value="active-controlled">실제 실행(통제)</option><option value="pre-release">릴리즈 전</option><option value="post-change">변경 후</option></select><span class="rt-hint">실제 호출은 “실제 실행(통제)”에서만</span></label>' +
+          '<label>예산 한도(KRW)<input id="rt-budget" type="number" min="0" value="1000"><span class="rt-hint">초과 시 실행 자동 중단</span></label>' +
+          '<label>QPS 한도<input id="rt-qps" type="number" min="0" step="0.1" value="1"><span class="rt-hint">대상별 초당 요청 상한</span></label>' +
+          '<label>파괴적 도구 정책<select id="rt-destructive"><option value="dry-run">드라이런</option><option value="mock">모의(mock)</option><option value="approval">승인 필요</option><option value="block">차단</option></select><span class="rt-hint">삭제/배포성 MCP 도구 처리 방식</span></label></div>' +
           '<div style="margin-top:10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">' +
           '<strong>프로브 팩</strong> ' +
           '<button type="button" class="secondary" style="font-size:11px" onclick="rtPacksAll(true)">전체 선택</button> ' +
