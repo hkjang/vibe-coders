@@ -4466,7 +4466,7 @@ const adminHTML = `<!doctype html>
         '</tr>';
       }).join('') || '<tr><td colspan="5" class="muted">등록된 대상 없음</td></tr>';
       const packChecks = ps.map(p =>
-        '<label style="display:block;margin:4px 0"><input type="checkbox" class="rt-pack" value="' + escapeAttr(p.id) + '" checked> ' +
+        '<label style="display:block;margin:4px 0"><input type="checkbox" class="rt-pack" value="' + escapeAttr(p.id) + '" checked onchange="rtPackCount()"> ' +
         '<strong>' + escapeHTML(p.name) + '</strong> <span class="status ' + redTeamRiskClass(p.severity) + '" style="font-size:9px">' + escapeHTML(p.severity) + '</span> ' +
         (p.requires_approval ? '<span class="status warn" style="font-size:9px">승인필요</span> ' : '') +
         '<span class="muted" style="font-size:11px">' + escapeHTML(p.category) + ' · 케이스 ' + ((p.cases || []).length) + '</span></label>'
@@ -4540,8 +4540,14 @@ const adminHTML = `<!doctype html>
           '<label>예산 한도(KRW)<input id="rt-budget" type="number" min="0" value="1000"></label>' +
           '<label>QPS 한도<input id="rt-qps" type="number" min="0" step="0.1" value="1"></label>' +
           '<label>파괴적 도구 정책<select id="rt-destructive"><option value="dry-run">드라이런</option><option value="mock">모의(mock)</option><option value="approval">승인 필요</option><option value="block">차단</option></select></label></div>' +
-          '<div style="margin-top:8px"><strong>프로브 팩</strong>' + packChecks + '</div>' +
-          '<button type="button" onclick="redTeamCreateCampaign()">캠페인 생성</button> ' +
+          '<div style="margin-top:10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">' +
+          '<strong>프로브 팩</strong> ' +
+          '<button type="button" class="secondary" style="font-size:11px" onclick="rtPacksAll(true)">전체 선택</button> ' +
+          '<button type="button" class="secondary" style="font-size:11px" onclick="rtPacksAll(false)">전체 해제</button> ' +
+          '<button type="button" class="secondary" style="font-size:11px" onclick="rtPacksInvert()">선택 반전</button> ' +
+          '<span id="rt-pack-count" class="muted" style="font-size:11px">' + ps.length + '개 중 ' + ps.length + '개 선택</span></div>' +
+          '<div style="max-height:220px;overflow:auto;border:1px solid var(--line-strong);border-radius:6px;padding:8px;margin-top:4px">' + (ps.length ? packChecks : '<span class="muted" style="font-size:12px">프로브 팩이 없습니다.</span>') + '</div>' +
+          '<button type="button" style="margin-top:10px" onclick="redTeamCreateCampaign()">캠페인 생성</button> ' +
           '<div class="muted" style="font-size:11px;margin-top:8px;line-height:1.7">' +
           '<b>실제로 대상을 호출하려면(실전 실행):</b><br>' +
           '① 위 <b>실행 모드</b>를 <b>「실제 실행(통제)」</b>로 선택해 캠페인을 생성 · ' +
@@ -4607,6 +4613,20 @@ const adminHTML = `<!doctype html>
       rtActiveTab = name;
       document.querySelectorAll('.rt-panel').forEach(p => { p.style.display = (p.dataset.rt === name) ? 'block' : 'none'; });
       document.querySelectorAll('.rt-tabbtn').forEach(b => b.classList.toggle('active', b.dataset.rt === name));
+    };
+    window.rtPackCount = () => {
+      const boxes = Array.from(document.querySelectorAll('.rt-pack'));
+      const sel = boxes.filter(b => b.checked).length;
+      const el = document.getElementById('rt-pack-count');
+      if (el) el.textContent = boxes.length + '개 중 ' + sel + '개 선택';
+    };
+    window.rtPacksAll = (on) => {
+      document.querySelectorAll('.rt-pack').forEach(b => { b.checked = !!on; });
+      rtPackCount();
+    };
+    window.rtPacksInvert = () => {
+      document.querySelectorAll('.rt-pack').forEach(b => { b.checked = !b.checked; });
+      rtPackCount();
     };
     window.redTeamDeleteCampaign = async (id, name) => {
       if (!window.confirm('캠페인 "' + (name || id) + '" 및 관련 실행·결과·증적을 모두 삭제할까요? 되돌릴 수 없습니다.')) return;
