@@ -117,7 +117,7 @@ const adminHTML = `<!doctype html>
     }
     .toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; padding: 12px; border-bottom: 1px solid var(--line); }
     /* Indented content body for panels whose content would otherwise sit flush to the section edge. */
-    .card-body { padding: 14px; }
+    .card-body { padding: 14px; overflow-x: auto; }
     .card-body > table:first-child, .card-body > :first-child { margin-top: 0; }
     input, button, select, textarea {
       height: 34px; border: 1px solid var(--line); border-radius: 6px;
