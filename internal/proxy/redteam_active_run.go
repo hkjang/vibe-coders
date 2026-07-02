@@ -234,12 +234,13 @@ func (s *Server) redTeamActiveInvoke(r *http.Request, proxyKey, model, provider,
 // evaluateRedTeamCaseActive runs one probe case live and evaluates the real response with the Rule
 // Evaluator. It mirrors evaluateRedTeamCase's return shape so the runner can treat both uniformly.
 // The returned invoked=false means the live call failed and the caller should fall back.
-func (s *Server) evaluateRedTeamCaseActive(r *http.Request, proxyKey string, t store.RedTeamTarget, pack store.RedTeamProbePack, cs store.RedTeamProbeCase, c store.RedTeamCampaign, cache *redTeamModelCache) (store.RedTeamCaseResult, store.RedTeamEvidence, store.RedTeamRemediation, bool) {
+func (s *Server) evaluateRedTeamCaseActive(r *http.Request, proxyKey string, t store.RedTeamTarget, pack store.RedTeamProbePack, cs store.RedTeamProbeCase, c store.RedTeamCampaign, cache *redTeamModelCache, forcedModel string) (store.RedTeamCaseResult, store.RedTeamEvidence, store.RedTeamRemediation, bool) {
 	var model, provider string
 	var ok bool
-	// If the campaign pins a specific model, use it directly for provider/model targets.
-	if forced := redTeamFilterString(c.TargetFilter, "model"); forced != "" && (t.TargetType == "provider" || t.TargetType == "model") {
-		model, provider, ok = forced, t.Provider, true
+	// A forced model (from the campaign's model selection) is used directly for provider/model
+	// targets; otherwise the model is auto-resolved from the upstream /v1/models.
+	if forcedModel != "" && (t.TargetType == "provider" || t.TargetType == "model") {
+		model, provider, ok = forcedModel, t.Provider, true
 	} else {
 		model, provider, ok = s.resolveRedTeamModel(r, proxyKey, t, cache)
 	}

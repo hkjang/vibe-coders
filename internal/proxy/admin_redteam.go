@@ -530,33 +530,8 @@ func (s *Server) runRedTeamCampaign(r *http.Request, c store.RedTeamCampaign, pr
 		run := store.RedTeamRun{ID: newID("rtrun"), CampaignID: c.ID, TargetID: t.ID, Status: "running", Mode: c.ExecutionMode}
 		_ = s.db.InsertRedTeamRun(r.Context(), run)
 		maxRisk, failed, total, cost := 0, 0, 0, 0.0
-		for _, cs := range cases {
-			if !redTeamCaseApplies(t, cs) {
-				continue
-			}
-			if redteamKillSwitch.Load() {
-				stopped = "kill_switch"
-				break
-			}
-			total++
-			totalResults++
-			pack := packByCase[cs.ID]
-			var result store.RedTeamCaseResult
-			var ev store.RedTeamEvidence
-			var rem store.RedTeamRemediation
-			// Active Controlled Run: invoke live only for eligible LLM/Text2SQL targets within the
-			// live-call cap; everything else uses the safe simulation.
-			if redTeamActiveEligible(t, c, proxyKey) && liveCalls < redteamActiveMaxCalls {
-				if ar, aev, arem, invoked := s.evaluateRedTeamCaseActive(r, proxyKey, t, pack, cs, c, modelCache); invoked {
-					result, ev, rem = ar, aev, arem
-					liveCalls++
-					liveCost += result.CostKRW
-				} else {
-					result, ev, rem = evaluateRedTeamCase(t, pack, cs, c)
-				}
-			} else {
-				result, ev, rem = evaluateRedTeamCase(t, pack, cs, c)
-			}
+		// record persists one case result (+evidence/remediation) and folds it into the counters.
+		record := func(cs store.RedTeamProbeCase, result store.RedTeamCaseResult, ev store.RedTeamEvidence, rem store.RedTeamRemediation) {
 			result.ID, result.RunID, result.CaseID = newID("rtr"), run.ID, cs.ID
 			result.CreatedAt = time.Now().UTC().Format(time.RFC3339Nano)
 			ev.ID, ev.ResultID = newID("rtev"), result.ID
@@ -567,9 +542,10 @@ func (s *Server) runRedTeamCampaign(r *http.Request, c store.RedTeamCampaign, pr
 				rem.ID, rem.ResultID = newID("rtrm"), result.ID
 				_ = s.db.InsertRedTeamRemediation(r.Context(), rem)
 			}
+			total++
+			totalResults++
 			cost += result.CostKRW
-			risk := redTeamDecisionRisk(result.Decision, result.Severity)
-			if risk > maxRisk {
+			if risk := redTeamDecisionRisk(result.Decision, result.Severity); risk > maxRisk {
 				maxRisk = risk
 			}
 			switch result.Decision {
@@ -581,6 +557,44 @@ func (s *Server) runRedTeamCampaign(r *http.Request, c store.RedTeamCampaign, pr
 				failed++
 			case "warning":
 				warnings++
+			}
+		}
+		for _, cs := range cases {
+			if !redTeamCaseApplies(t, cs) {
+				continue
+			}
+			if redteamKillSwitch.Load() {
+				stopped = "kill_switch"
+				break
+			}
+			pack := packByCase[cs.ID]
+			// Active Controlled Run: invoke live only for eligible LLM/Text2SQL targets within the
+			// live-call cap. When the campaign pins multiple models, each is invoked separately;
+			// otherwise a single (auto-resolved) model is used. Everything else is simulated.
+			if redTeamActiveEligible(t, c, proxyKey) && liveCalls < redteamActiveMaxCalls {
+				invokedAny := false
+				models := redTeamCampaignModels(c)
+				if len(models) == 0 {
+					models = []string{""} // "" → auto-resolve one model
+				}
+				for _, m := range models {
+					if liveCalls >= redteamActiveMaxCalls {
+						break
+					}
+					if ar, aev, arem, invoked := s.evaluateRedTeamCaseActive(r, proxyKey, t, pack, cs, c, modelCache, m); invoked {
+						liveCalls++
+						liveCost += ar.CostKRW
+						record(cs, ar, aev, arem)
+						invokedAny = true
+					}
+				}
+				if !invokedAny {
+					sr, sev, srem := evaluateRedTeamCase(t, pack, cs, c)
+					record(cs, sr, sev, srem)
+				}
+			} else {
+				sr, sev, srem := evaluateRedTeamCase(t, pack, cs, c)
+				record(cs, sr, sev, srem)
 			}
 			// Live budget guard (§12/§22): stop as soon as accrued live cost exceeds the limit.
 			if c.BudgetLimitKRW > 0 && liveCost > c.BudgetLimitKRW {
@@ -1046,10 +1060,10 @@ func redTeamTargetMatchesCampaign(t store.RedTeamTarget, c store.RedTeamCampaign
 	if p := redTeamFilterString(c.TargetFilter, "provider"); p != "" && p != t.Provider {
 		return false
 	}
-	if m := redTeamFilterString(c.TargetFilter, "model"); m != "" {
-		// A specific model was requested: keep the matching model target, or the provider target
-		// (which will be invoked with that model via resolveRedTeamModel).
-		if !(t.Model == m || t.TargetType == "provider") {
+	if models := redTeamCampaignModels(c); len(models) > 0 {
+		// Specific model(s) requested: keep matching model targets, or provider targets (invoked
+		// once per selected model at run time).
+		if !(t.TargetType == "provider" || redTeamContains(models, t.Model)) {
 			return false
 		}
 	}
@@ -1057,6 +1071,23 @@ func redTeamTargetMatchesCampaign(t store.RedTeamTarget, c store.RedTeamCampaign
 		return false
 	}
 	return t.Enabled
+}
+
+// redTeamCampaignModels returns the explicit model list a campaign pins (target_filter.models[],
+// falling back to a single target_filter.model). Empty means "auto-resolve from /v1/models".
+func redTeamCampaignModels(c store.RedTeamCampaign) []string {
+	out := []string{}
+	for _, m := range redTeamStringSlice(c.TargetFilter["models"]) {
+		if m = strings.TrimSpace(m); m != "" {
+			out = append(out, m)
+		}
+	}
+	if len(out) == 0 {
+		if m := redTeamFilterString(c.TargetFilter, "model"); m != "" {
+			out = append(out, m)
+		}
+	}
+	return out
 }
 
 func redTeamScopeMatches(scope, targetType string) bool {
