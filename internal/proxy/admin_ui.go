@@ -330,6 +330,20 @@ const adminHTML = `<!doctype html>
       .chat-messages { padding: 0 0 8px; }
       .ct-input-row { padding: 10px 0; }
     }
+    /* Red Team sub-tabs — clear contrast in both inactive and active states. */
+    .rt-tabbar { border-bottom: 2px solid var(--line-strong); margin-bottom: -2px; }
+    .rt-tabbtn {
+      font-size: 12px; font-weight: 700; padding: 8px 16px; cursor: pointer;
+      border: 1px solid var(--line-strong); border-bottom: none;
+      border-radius: 8px 8px 0 0; background: var(--pill-bg); color: var(--muted);
+      transition: background .12s, color .12s;
+    }
+    .rt-tabbtn:hover { background: var(--row-hover); color: var(--ink); }
+    .rt-tabbtn.active {
+      background: var(--accent); color: #fff; border-color: var(--accent);
+      box-shadow: 0 -2px 0 var(--accent) inset;
+    }
+    .rt-panel { background: var(--panel); }
   </style>
 </head>
 <body>
@@ -4549,8 +4563,8 @@ const adminHTML = `<!doctype html>
           card('조치 보드', '<div class="card-body"><table><thead><tr><th>조치 유형</th><th>결과 ID</th><th>상태</th><th>담당</th><th>생성</th></tr></thead><tbody>' + remediationRows + '</tbody></table></div>') +
         '</div>';
 
-      const tab = (name, label) => '<button type="button" class="rt-tabbtn' + (name === rtActiveTab ? ' active' : '') + '" data-rt="' + name + '" onclick="rtTab(\'' + name + '\')" style="font-size:12px;padding:6px 12px;border:1px solid var(--line);border-bottom:none;border-radius:6px 6px 0 0;background:' + (name === rtActiveTab ? 'var(--accent);color:#fff' : 'transparent') + '">' + label + '</button>';
-      const panel = (name, html) => '<div class="rt-panel" data-rt="' + name + '" style="display:' + (name === rtActiveTab ? 'block' : 'none') + ';border:1px solid var(--line);border-radius:0 8px 8px 8px;padding:10px">' + html + '</div>';
+      const tab = (name, label) => '<button type="button" class="rt-tabbtn' + (name === rtActiveTab ? ' active' : '') + '" data-rt="' + name + '" onclick="rtTab(\'' + name + '\')">' + label + '</button>';
+      const panel = (name, html) => '<div class="rt-panel" data-rt="' + name + '" style="display:' + (name === rtActiveTab ? 'block' : 'none') + ';border:1px solid var(--line-strong);border-radius:0 8px 8px 8px;padding:10px">' + html + '</div>';
 
       view.innerHTML = section('레드팀 자동화',
         '<p class="muted" style="font-size:12px;padding:0 14px">게이트웨이에 등록된 업스트림만 대상으로 하는 허가형 AI 보안 회귀 테스트입니다. 기본은 드라이런이며, 고위험 팩은 승인 없이는 실제 실행되지 않습니다. 실제 호출(Active Controlled Run)은 전용 레드팀 Proxy API Key(사용자·키 관리에서 발급한 Proxy API Key)로만 수행됩니다.</p>' +
@@ -4592,12 +4606,7 @@ const adminHTML = `<!doctype html>
     window.rtTab = (name) => {
       rtActiveTab = name;
       document.querySelectorAll('.rt-panel').forEach(p => { p.style.display = (p.dataset.rt === name) ? 'block' : 'none'; });
-      document.querySelectorAll('.rt-tabbtn').forEach(b => {
-        const on = b.dataset.rt === name;
-        b.classList.toggle('active', on);
-        b.style.background = on ? 'var(--accent)' : 'transparent';
-        b.style.color = on ? '#fff' : '';
-      });
+      document.querySelectorAll('.rt-tabbtn').forEach(b => b.classList.toggle('active', b.dataset.rt === name));
     };
     window.redTeamDeleteCampaign = async (id, name) => {
       if (!window.confirm('캠페인 "' + (name || id) + '" 및 관련 실행·결과·증적을 모두 삭제할까요? 되돌릴 수 없습니다.')) return;
