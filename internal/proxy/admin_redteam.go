@@ -1046,6 +1046,13 @@ func redTeamTargetMatchesCampaign(t store.RedTeamTarget, c store.RedTeamCampaign
 	if p := redTeamFilterString(c.TargetFilter, "provider"); p != "" && p != t.Provider {
 		return false
 	}
+	if m := redTeamFilterString(c.TargetFilter, "model"); m != "" {
+		// A specific model was requested: keep the matching model target, or the provider target
+		// (which will be invoked with that model via resolveRedTeamModel).
+		if !(t.Model == m || t.TargetType == "provider") {
+			return false
+		}
+	}
 	if risk := redTeamFilterString(c.TargetFilter, "risk_level"); risk != "" && risk != t.RiskLevel {
 		return false
 	}

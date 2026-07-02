@@ -344,6 +344,11 @@ const adminHTML = `<!doctype html>
       box-shadow: 0 -2px 0 var(--accent) inset;
     }
     .rt-panel { background: var(--panel); }
+    /* Red Team tables: let content size columns sensibly — long ids/hashes wrap instead of
+       stretching a column, and the action column stays compact on one line. */
+    .rt-panel table { width: 100%; table-layout: auto; }
+    .rt-panel td code { word-break: break-all; font-size: 11px; }
+    .rt-panel th { white-space: nowrap; }
     /* Red Team form fields: label on top, full-width control below. */
     .rt-form { gap: 12px 16px; margin-top: 12px; }
     .rt-form label {
@@ -4473,6 +4478,11 @@ const adminHTML = `<!doctype html>
           '<td>' + escapeHTML(t.provider || t.mcp_upstream || '-') + '</td>' +
         '</tr>';
       }).join('') || '<tr><td colspan="5" class="muted">등록된 대상 없음</td></tr>';
+      // 캠페인 빌더의 프로바이더/모델 선택용 데이터(대상 인벤토리에서 추출).
+      const rtProviders = Array.from(new Set(ts.filter(t => t.target_type === 'provider' && t.provider).map(t => t.provider))).sort();
+      const rtModels = ts.filter(t => t.target_type === 'model' && t.model).map(t => ({ provider: t.provider || '', model: t.model }));
+      const rtProviderOpts = '<option value="">(전체 프로바이더)</option>' + rtProviders.map(p => '<option value="' + escapeAttr(p) + '">' + escapeHTML(p) + '</option>').join('');
+      const rtModelOpts = '<option value="">(자동 선택)</option>' + rtModels.map(m => '<option value="' + escapeAttr(m.model) + '">' + escapeHTML(m.model) + (m.provider ? ' (' + escapeHTML(m.provider) + ')' : '') + '</option>').join('');
       const packChecks = ps.map(p =>
         '<label style="display:block;margin:4px 0"><input type="checkbox" class="rt-pack" value="' + escapeAttr(p.id) + '" checked onchange="rtPackCount()"> ' +
         '<strong>' + escapeHTML(p.name) + '</strong> <span class="status ' + redTeamRiskClass(p.severity) + '" style="font-size:9px">' + escapeHTML(p.severity) + '</span> ' +
@@ -4545,6 +4555,8 @@ const adminHTML = `<!doctype html>
           '<div class="grid2 rt-form"><label>캠페인 이름<input id="rt-name" placeholder="예: 주간-프로바이더-mcp-레드팀"></label>' +
           '<label>범위(scope)<select id="rt-scope"><option value="all">전체</option><option value="provider">프로바이더/모델</option><option value="mcp">MCP</option><option value="text2sql">Text2SQL</option><option value="ai_app">AI 앱</option><option value="workflow">워크플로</option></select><span class="rt-hint">테스트할 대상 유형</span></label>' +
           '<label>실행 모드<select id="rt-mode"><option value="dry-run">드라이런(호출 없음)</option><option value="shadow">섀도우</option><option value="active-controlled">실제 실행(통제)</option><option value="pre-release">릴리즈 전</option><option value="post-change">변경 후</option></select><span class="rt-hint">실제 호출은 “실제 실행(통제)”에서만</span></label>' +
+          '<label>프로바이더(선택)<select id="rt-provider" onchange="rtProviderChange()">' + rtProviderOpts + '</select><span class="rt-hint">특정 업스트림만 대상으로 제한</span></label>' +
+          '<label>모델(선택)<select id="rt-model">' + rtModelOpts + '</select><span class="rt-hint">비우면 /v1/models에서 자동 선택</span></label>' +
           '<label>예산 한도(KRW)<input id="rt-budget" type="number" min="0" value="1000"><span class="rt-hint">초과 시 실행 자동 중단</span></label>' +
           '<label>QPS 한도<input id="rt-qps" type="number" min="0" step="0.1" value="1"><span class="rt-hint">대상별 초당 요청 상한</span></label>' +
           '<label>파괴적 도구 정책<select id="rt-destructive"><option value="dry-run">드라이런</option><option value="mock">모의(mock)</option><option value="approval">승인 필요</option><option value="block">차단</option></select><span class="rt-hint">삭제/배포성 MCP 도구 처리 방식</span></label></div>' +
@@ -4599,7 +4611,18 @@ const adminHTML = `<!doctype html>
         panel('targets', panelTargets) +
         panel('runs', panelRuns) +
         '</div>';
+      window.__rtModels = rtModels; // 프로바이더별 모델 필터용
     }
+    // 프로바이더 선택 시 모델 드롭다운을 해당 프로바이더 모델로 재구성.
+    window.rtProviderChange = () => {
+      const provEl = document.getElementById('rt-provider');
+      const modelEl = document.getElementById('rt-model');
+      if (!provEl || !modelEl) return;
+      const prov = provEl.value;
+      const models = (window.__rtModels || []).filter(m => !prov || m.provider === prov);
+      modelEl.innerHTML = '<option value="">(자동 선택)</option>' + models.map(m =>
+        '<option value="' + escapeAttr(m.model) + '">' + escapeHTML(m.model) + (m.provider ? ' (' + escapeHTML(m.provider) + ')' : '') + '</option>').join('');
+    };
 
     function redTeamRiskClass(v) {
       v = String(v || '').toLowerCase();
@@ -4645,6 +4668,11 @@ const adminHTML = `<!doctype html>
     };
     window.redTeamCreateCampaign = async () => {
       const packs = Array.from(document.querySelectorAll('.rt-pack:checked')).map(x => x.value);
+      const provider = (document.getElementById('rt-provider') || {}).value || '';
+      const model = (document.getElementById('rt-model') || {}).value || '';
+      const targetFilter = {};
+      if (provider) targetFilter.provider = provider;
+      if (model) targetFilter.model = model;
       const body = {
         name: document.getElementById('rt-name').value.trim(),
         scope: document.getElementById('rt-scope').value,
@@ -4653,8 +4681,9 @@ const adminHTML = `<!doctype html>
         qps_limit: Number(document.getElementById('rt-qps').value || 0),
         destructive_tool_policy: document.getElementById('rt-destructive').value,
         probe_pack_ids: packs,
+        target_filter: targetFilter,
       };
-      if (!body.name) { alert('Campaign Name을 입력하세요.'); return; }
+      if (!body.name) { alert('캠페인 이름을 입력하세요.'); return; }
       try {
         const d = await api('/admin/redteam/campaigns', { method: 'POST', body: JSON.stringify(body) });
         const cc = d.campaign || d;

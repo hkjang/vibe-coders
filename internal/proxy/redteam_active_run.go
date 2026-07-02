@@ -235,7 +235,14 @@ func (s *Server) redTeamActiveInvoke(r *http.Request, proxyKey, model, provider,
 // Evaluator. It mirrors evaluateRedTeamCase's return shape so the runner can treat both uniformly.
 // The returned invoked=false means the live call failed and the caller should fall back.
 func (s *Server) evaluateRedTeamCaseActive(r *http.Request, proxyKey string, t store.RedTeamTarget, pack store.RedTeamProbePack, cs store.RedTeamProbeCase, c store.RedTeamCampaign, cache *redTeamModelCache) (store.RedTeamCaseResult, store.RedTeamEvidence, store.RedTeamRemediation, bool) {
-	model, provider, ok := s.resolveRedTeamModel(r, proxyKey, t, cache)
+	var model, provider string
+	var ok bool
+	// If the campaign pins a specific model, use it directly for provider/model targets.
+	if forced := redTeamFilterString(c.TargetFilter, "model"); forced != "" && (t.TargetType == "provider" || t.TargetType == "model") {
+		model, provider, ok = forced, t.Provider, true
+	} else {
+		model, provider, ok = s.resolveRedTeamModel(r, proxyKey, t, cache)
+	}
 	if !ok {
 		return store.RedTeamCaseResult{}, store.RedTeamEvidence{}, store.RedTeamRemediation{}, false
 	}
