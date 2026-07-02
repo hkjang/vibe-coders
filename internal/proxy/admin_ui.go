@@ -4466,7 +4466,7 @@ const adminHTML = `<!doctype html>
         '<td style="white-space:nowrap"><button type="button" class="secondary" style="font-size:11px" onclick="redTeamDryRun(\'' + escapeAttr(c.id) + '\')">드라이런</button> ' +
         '<button type="button" class="secondary" style="font-size:11px" onclick="redTeamApprove(\'' + escapeAttr(c.id) + '\')">승인</button> ' +
         '<button type="button" style="font-size:11px" onclick="redTeamRun(\'' + escapeAttr(c.id) + '\',\'' + escapeAttr(c.execution_mode || '') + '\')">' + (c.execution_mode === 'active-controlled' ? '실제 실행' : '시뮬레이션 실행') + '</button></td></tr>'
-      ).join('') || '<tr><td colspan="6" class="muted">캠페인 없음</td></tr>';
+      ).join('') || '<tr><td colspan="6" class="muted">아직 캠페인이 없습니다. 위 <b>캠페인 빌더</b>로 만들거나, 상단 <b>⚡ 빠른 시작</b>으로 안전 팩 드라이런을 바로 실행해 보세요.</td></tr>';
       const runRows = rs.slice(0, 30).map(r =>
         '<tr><td><code>' + escapeHTML(r.id) + '</code><div class="muted" style="font-size:10px">' + ago(r.created_at) + '</div></td>' +
         '<td><code>' + escapeHTML(r.campaign_id) + '</code></td><td><code>' + escapeHTML(r.target_id) + '</code></td>' +
@@ -4506,10 +4506,14 @@ const adminHTML = `<!doctype html>
       const killOn = !!(kill && kill.enabled);
       view.innerHTML = section('레드팀 자동화',
         '<p class="muted" style="font-size:12px;padding:0 14px">게이트웨이에 등록된 업스트림만 대상으로 하는 허가형 AI 보안 회귀 테스트입니다. 기본은 드라이런이며, 고위험 팩은 승인 없이는 실제 실행되지 않습니다. 실제 호출(Active Controlled Run)은 전용 레드팀 Proxy API Key로만 수행됩니다.</p>' +
-        '<div style="padding:0 14px 6px"><span class="status ' + (killOn ? 'error' : '') + '">킬 스위치: ' + (killOn ? '켜짐(중지)' : '꺼짐') + '</span> ' +
+        '<div style="padding:0 14px 6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
+        '<button type="button" style="font-size:11px" onclick="redTeamQuickStart()">⚡ 빠른 시작(안전 팩 드라이런)</button> ' +
+        '<span class="status ' + (killOn ? 'error' : '') + '">킬 스위치: ' + (killOn ? '켜짐(중지)' : '꺼짐') + '</span> ' +
         (killOn
           ? '<button type="button" class="secondary" style="font-size:11px" onclick="redTeamKillSwitch(false)">해제</button>'
-          : '<button type="button" class="secondary" style="font-size:11px" onclick="redTeamKillSwitch(true)">전체 중지</button>') + '</div>') +
+          : '<button type="button" class="secondary" style="font-size:11px" onclick="redTeamKillSwitch(true)">전체 중지</button>') +
+        (localStorage.getItem('rt_proxy_key') ? ' <span class="status" style="font-size:10px">실행 키 저장됨</span> <button type="button" class="secondary" style="font-size:10px" onclick="redTeamClearKey()">키 지우기</button>' : '') +
+        '</div>') +
         '<div class="kpis">' + kpi('대상', fmt(ts.length)) + kpi('고위험/치명', fmt(highTargets)) + kpi('프로브 팩', fmt(ps.length)) + kpi('최근 실행 위험', fmt(maxRisk)) + kpi('실패한 실행', fmt(failedRuns)) + '</div>' +
         '<div class="kpis">' + kpi('결과 수', fmt(dsum.total_results || 0)) + kpi('치명', fmt(dec.critical || 0)) + kpi('실패', fmt(dec.fail || 0)) + kpi('경고', fmt(dec.warning || 0)) + kpi('외부 대상', fmt(dsum.external_targets || 0)) + kpi('미조치', fmt(dsum.open_remediations || 0)) + '</div>' +
         '<div class="grid2">' +
@@ -4610,9 +4614,11 @@ const adminHTML = `<!doctype html>
       try {
         let body;
         // 실제 호출은 캠페인 모드가 active-controlled일 때만, 전용 레드팀 Proxy API Key로 수행됩니다.
+        // 이전에 입력한 키는 브라우저에 저장되어 프롬프트에 자동으로 채워집니다.
         if (mode === 'active-controlled') {
-          const proxyKey = (window.prompt('실제 실행: 전용 레드팀 Proxy API Key를 입력하세요.\n(비워두고 확인하면 실제 호출 없이 시뮬레이션으로 실행됩니다)') || '').trim();
-          body = proxyKey ? JSON.stringify({ proxy_key: proxyKey }) : undefined;
+          const saved = localStorage.getItem('rt_proxy_key') || '';
+          const proxyKey = (window.prompt('실제 실행: 전용 레드팀 Proxy API Key를 입력하세요.\n(비워두고 확인하면 실제 호출 없이 시뮬레이션으로 실행됩니다)', saved) || '').trim();
+          if (proxyKey) { localStorage.setItem('rt_proxy_key', proxyKey); body = JSON.stringify({ proxy_key: proxyKey }); }
         }
         // 그 외 모드는 프롬프트 없이 바로 시뮬레이션 실행.
         const d = await api('/admin/redteam/campaigns/' + encodeURIComponent(id) + '/run', { method: 'POST', body });
@@ -4629,7 +4635,8 @@ const adminHTML = `<!doctype html>
           (live > 0 ? '<tr><th style="text-align:left">실호출 누적 비용</th><td>' + money(s.live_cost_krw || 0) + '</td></tr>' : '') +
           '</table>' +
           '<p class="muted" style="font-size:12px;margin-top:8px">' + escapeHTML(d.note || '') + '</p>' +
-          '<p class="muted" style="font-size:11px">각 케이스의 실제 요청/응답은 아래 <b>실행 이력 → 결과 → 증적</b>에서 확인하세요.</p>';
+          ((d.runs && d.runs.length) ? '<div style="margin-top:8px"><b style="font-size:12px">실행별 결과 바로 보기</b><div style="margin-top:4px">' + d.runs.map(r => '<button type="button" class="secondary" style="font-size:11px;margin:2px" onclick="redTeamShowRunResults(\'' + escapeAttr(r.id) + '\')">' + escapeHTML(r.target_id || r.id) + ' <span class="status ' + redTeamScoreClass(r.risk_score) + '">' + fmt(r.risk_score || 0) + '</span></button>').join('') + '</div></div>' : '') +
+          '<p class="muted" style="font-size:11px;margin-top:6px">각 케이스의 실제 요청/응답은 결과 목록의 <b>증적</b> 버튼에서 확인하세요.</p>';
         openModal('캠페인 실행 결과', html);
         await renderRedTeamView();
       } catch (e) { openModal('실행 오류', '<div class="error-line">' + escapeHTML(e.message) + '</div>'); }
@@ -4640,6 +4647,27 @@ const adminHTML = `<!doctype html>
         openModal('킬 스위치', '레드팀 실행 중지 상태: <strong>' + (d.enabled ? '켜짐 (모든 실제 실행 중단)' : '꺼짐') + '</strong>');
         await renderRedTeamView();
       } catch (e) { openModal('킬 스위치 오류', '<div class="error-line">' + escapeHTML(e.message) + '</div>'); }
+    };
+    window.redTeamClearKey = () => {
+      localStorage.removeItem('rt_proxy_key');
+      renderRedTeamView();
+    };
+    window.redTeamQuickStart = async () => {
+      try {
+        // 승인 불필요한 안전 팩만 골라 드라이런 캠페인을 만들고 바로 예상 규모를 보여줍니다.
+        const pk = await api('/admin/redteam/probe-packs');
+        const packIds = (pk.probe_packs || []).filter(p => !p.requires_approval).map(p => p.id);
+        if (packIds.length === 0) {
+          openModal('빠른 시작', '<p class="muted">승인 불필요한 안전 프로브 팩이 없습니다. 캠페인 빌더에서 직접 구성해 주세요.</p>');
+          return;
+        }
+        const body = { name: '빠른시작 드라이런', scope: 'all', execution_mode: 'dry-run', probe_pack_ids: packIds, budget_limit_krw: 1000, qps_limit: 1 };
+        const c = await api('/admin/redteam/campaigns', { method: 'POST', body: JSON.stringify(body) });
+        const cc = c.campaign || c;
+        await renderRedTeamView();
+        // 생성된 캠페인의 드라이런을 즉시 실행해 결과를 보여줍니다(실제 호출 없음).
+        redTeamDryRun(cc.id);
+      } catch (e) { openModal('빠른 시작 오류', '<div class="error-line">' + escapeHTML(e.message) + '</div>'); }
     };
     window.redTeamShowPackCases = async (packId) => {
       try {
