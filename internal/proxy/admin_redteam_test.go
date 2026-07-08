@@ -234,3 +234,57 @@ func TestRedTeamEvaluatorMasksEvidenceAndFlagsUnsafeToolPolicy(t *testing.T) {
 		t.Fatalf("expected MCP trust remediation, got %#v", remediation)
 	}
 }
+
+// TestRedTeamScheduleEnableDisable verifies the schedules endpoint honors an explicit enabled flag
+// (so the UI can pause a schedule) rather than forcing enabled=true on every upsert.
+func TestRedTeamScheduleEnableDisable(t *testing.T) {
+	db := openTestStore(t)
+	defer db.Close()
+	logger := store.NewAsyncLogger(db, 32, filepath.Join(t.TempDir(), "fallback.ndjson"))
+	logger.Start()
+	defer logger.Stop(context.Background())
+	server, err := NewServer(testConfig("http://upstream.local", "upstream-secret"), db, logger, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxy := httptest.NewServer(server.Routes())
+	defer proxy.Close()
+
+	// Create without enabled → defaults to enabled.
+	createResp := postJSON(t, proxy.URL+"/admin/redteam/schedules", "", map[string]any{
+		"campaign_template_id": "rtc_demo", "cron_expr": "@daily",
+	})
+	var created struct {
+		Schedule store.RedTeamSchedule `json:"schedule"`
+	}
+	if err := json.NewDecoder(createResp.Body).Decode(&created); err != nil {
+		t.Fatal(err)
+	}
+	createResp.Body.Close()
+	if !created.Schedule.Enabled {
+		t.Fatalf("new schedule should default to enabled, got %#v", created.Schedule)
+	}
+
+	// Missing campaign → 400.
+	badResp := postJSON(t, proxy.URL+"/admin/redteam/schedules", "", map[string]any{"cron_expr": "@daily"})
+	badResp.Body.Close()
+	if badResp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("missing campaign should 400, got %d", badResp.StatusCode)
+	}
+
+	// Disable via explicit enabled=false on the same id.
+	disableResp := postJSON(t, proxy.URL+"/admin/redteam/schedules", "", map[string]any{
+		"id": created.Schedule.ID, "campaign_template_id": "rtc_demo", "cron_expr": "@daily", "enabled": false,
+	})
+	disableResp.Body.Close()
+	if disableResp.StatusCode != http.StatusCreated {
+		t.Fatalf("disable upsert failed: %d", disableResp.StatusCode)
+	}
+	schedules, err := db.ListRedTeamSchedules(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(schedules) != 1 || schedules[0].Enabled {
+		t.Fatalf("schedule should be disabled after enabled=false upsert, got %#v", schedules)
+	}
+}

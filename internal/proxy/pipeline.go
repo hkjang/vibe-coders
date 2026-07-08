@@ -382,6 +382,16 @@ func (rc *requestPipeline) stepUpstream() bool {
 		return false
 	}
 
+	// Unpinned GET /v1/models: serve the union of every enabled provider's catalogue so a
+	// caller sees all reachable models, not just the default provider's. A pinned request
+	// (X-Proxy-Provider / ?provider=) keeps the classic single-provider passthrough below,
+	// and aggregation falling short (no provider reachable) also falls through to it.
+	if rc.isModelsGet && !clientPinnedProvider(r) {
+		if rc.serveAggregatedModels() {
+			return false
+		}
+	}
+
 	provider, err := s.selectProviderForced(r.Context(), r, meta.Request.Model, rc.routeDecision.TargetProvider)
 	if err != nil {
 		writeOpenAIError(w, http.StatusBadGateway, err.Error(), "server_error", "provider_unavailable")

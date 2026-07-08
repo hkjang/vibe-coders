@@ -83,6 +83,7 @@ type RedTeamCampaign struct {
 	EvidenceRetentionDays   int            `json:"evidence_retention_days"`
 	ExternalProviderAllowed bool           `json:"external_provider_allowed"`
 	DestructiveToolPolicy   string         `json:"destructive_tool_policy"`
+	RetainRawEvidence       bool           `json:"retain_raw_evidence"`
 	CreatedAt               string         `json:"created_at"`
 	UpdatedAt               string         `json:"updated_at"`
 }
@@ -121,6 +122,8 @@ type RedTeamEvidence struct {
 	ResultID       string           `json:"result_id"`
 	MaskedPrompt   string           `json:"masked_prompt"`
 	MaskedResponse string           `json:"masked_response"`
+	RawPrompt      string           `json:"raw_prompt,omitempty"`
+	RawResponse    string           `json:"raw_response,omitempty"`
 	ToolCalls      []map[string]any `json:"tool_calls"`
 	HeadersSummary map[string]any   `json:"headers_summary"`
 	ExportHash     string           `json:"export_hash"`
@@ -432,18 +435,18 @@ func (s *SQLStore) UpsertRedTeamCampaign(ctx context.Context, c RedTeamCampaign)
 	filter, _ := json.Marshal(nonNilMap(c.TargetFilter))
 	_, err := s.db.ExecContext(ctx, s.bind(`INSERT INTO redteam_campaigns
 		(id, name, scope, status, execution_mode, created_by, approved_by, schedule, budget_limit_krw, qps_limit, timeout_ms, concurrency,
-		 target_filter_json, probe_pack_ids_json, evidence_retention_days, external_provider_allowed, destructive_tool_policy, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 target_filter_json, probe_pack_ids_json, evidence_retention_days, external_provider_allowed, destructive_tool_policy, retain_raw_evidence, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET name=excluded.name, scope=excluded.scope, status=excluded.status,
 			execution_mode=excluded.execution_mode, approved_by=excluded.approved_by, schedule=excluded.schedule,
 			budget_limit_krw=excluded.budget_limit_krw, qps_limit=excluded.qps_limit, timeout_ms=excluded.timeout_ms,
 			concurrency=excluded.concurrency, target_filter_json=excluded.target_filter_json,
 			probe_pack_ids_json=excluded.probe_pack_ids_json, evidence_retention_days=excluded.evidence_retention_days,
 			external_provider_allowed=excluded.external_provider_allowed, destructive_tool_policy=excluded.destructive_tool_policy,
-			updated_at=excluded.updated_at`),
+			retain_raw_evidence=excluded.retain_raw_evidence, updated_at=excluded.updated_at`),
 		c.ID, c.Name, c.Scope, c.Status, c.ExecutionMode, c.CreatedBy, c.ApprovedBy, c.Schedule, c.BudgetLimitKRW,
 		c.QPSLimit, c.TimeoutMS, c.Concurrency, string(filter), encodeStringList(c.ProbePackIDs),
-		c.EvidenceRetentionDays, boolInt(c.ExternalProviderAllowed), c.DestructiveToolPolicy, c.CreatedAt, c.UpdatedAt)
+		c.EvidenceRetentionDays, boolInt(c.ExternalProviderAllowed), c.DestructiveToolPolicy, boolInt(c.RetainRawEvidence), c.CreatedAt, c.UpdatedAt)
 	return err
 }
 
@@ -459,7 +462,7 @@ func (s *SQLStore) ListRedTeamCampaigns(ctx context.Context, limit int) ([]RedTe
 	}
 	rows, err := s.db.QueryContext(ctx, s.bind(`SELECT id, name, scope, status, execution_mode, created_by, approved_by, schedule,
 		budget_limit_krw, qps_limit, timeout_ms, concurrency, target_filter_json, probe_pack_ids_json, evidence_retention_days,
-		external_provider_allowed, destructive_tool_policy, created_at, updated_at
+		external_provider_allowed, destructive_tool_policy, retain_raw_evidence, created_at, updated_at
 		FROM redteam_campaigns ORDER BY created_at DESC LIMIT ?`), limit)
 	if err != nil {
 		return nil, err
@@ -502,7 +505,7 @@ func (s *SQLStore) DeleteRedTeamCampaign(ctx context.Context, id string) error {
 func (s *SQLStore) GetRedTeamCampaign(ctx context.Context, id string) (RedTeamCampaign, bool, error) {
 	row := s.db.QueryRowContext(ctx, s.bind(`SELECT id, name, scope, status, execution_mode, created_by, approved_by, schedule,
 		budget_limit_krw, qps_limit, timeout_ms, concurrency, target_filter_json, probe_pack_ids_json, evidence_retention_days,
-		external_provider_allowed, destructive_tool_policy, created_at, updated_at
+		external_provider_allowed, destructive_tool_policy, retain_raw_evidence, created_at, updated_at
 		FROM redteam_campaigns WHERE id = ?`), id)
 	c, err := scanRedTeamCampaign(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -517,15 +520,16 @@ func (s *SQLStore) GetRedTeamCampaign(ctx context.Context, id string) (RedTeamCa
 func scanRedTeamCampaign(sc interface{ Scan(...any) error }) (RedTeamCampaign, error) {
 	var c RedTeamCampaign
 	var filter, packs string
-	var external int
+	var external, retainRaw int
 	if err := sc.Scan(&c.ID, &c.Name, &c.Scope, &c.Status, &c.ExecutionMode, &c.CreatedBy, &c.ApprovedBy, &c.Schedule,
 		&c.BudgetLimitKRW, &c.QPSLimit, &c.TimeoutMS, &c.Concurrency, &filter, &packs, &c.EvidenceRetentionDays,
-		&external, &c.DestructiveToolPolicy, &c.CreatedAt, &c.UpdatedAt); err != nil {
+		&external, &c.DestructiveToolPolicy, &retainRaw, &c.CreatedAt, &c.UpdatedAt); err != nil {
 		return RedTeamCampaign{}, err
 	}
 	c.TargetFilter = decodeJSONMap(filter)
 	c.ProbePackIDs = decodeStringList(packs)
 	c.ExternalProviderAllowed = external != 0
+	c.RetainRawEvidence = retainRaw != 0
 	return c, nil
 }
 
@@ -630,6 +634,46 @@ func (s *SQLStore) ListRedTeamCaseResults(ctx context.Context, runID string) ([]
 	return out, rows.Err()
 }
 
+// GetRedTeamCaseResult fetches one case result by id — the anchor for re-running a single case.
+func (s *SQLStore) GetRedTeamCaseResult(ctx context.Context, id string) (RedTeamCaseResult, bool, error) {
+	row := s.db.QueryRowContext(ctx, s.bind(`SELECT id, run_id, case_id, request_id, decision, severity, evidence_hash, policy_decision, latency_ms, cost_krw, created_at
+		FROM redteam_case_results WHERE id = ?`), id)
+	var r RedTeamCaseResult
+	err := row.Scan(&r.ID, &r.RunID, &r.CaseID, &r.RequestID, &r.Decision, &r.Severity, &r.EvidenceHash, &r.PolicyDecision, &r.LatencyMS, &r.CostKRW, &r.CreatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return RedTeamCaseResult{}, false, nil
+	}
+	if err != nil {
+		return RedTeamCaseResult{}, false, err
+	}
+	return r, true, nil
+}
+
+// UpdateRedTeamCaseResult rewrites the verdict/metrics of an existing result in place — used when
+// a case is re-run live so the same row (and its evidence) reflects the real call.
+func (s *SQLStore) UpdateRedTeamCaseResult(ctx context.Context, r RedTeamCaseResult) error {
+	_, err := s.db.ExecContext(ctx, s.bind(`UPDATE redteam_case_results
+		SET request_id = ?, decision = ?, severity = ?, evidence_hash = ?, policy_decision = ?, latency_ms = ?, cost_krw = ?
+		WHERE id = ?`),
+		r.RequestID, r.Decision, r.Severity, r.EvidenceHash, r.PolicyDecision, r.LatencyMS, r.CostKRW, r.ID)
+	return err
+}
+
+// GetRedTeamProbeCase fetches one probe case by id.
+func (s *SQLStore) GetRedTeamProbeCase(ctx context.Context, id string) (RedTeamProbeCase, bool, error) {
+	row := s.db.QueryRowContext(ctx, s.bind(`SELECT id, pack_id, case_key, input_template, expected_policy, evaluator_type,
+		severity, risk_tags, target_types, parameters_json, created_at, updated_at
+		FROM redteam_probe_cases WHERE id = ?`), id)
+	c, err := scanRedTeamProbeCase(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return RedTeamProbeCase{}, false, nil
+	}
+	if err != nil {
+		return RedTeamProbeCase{}, false, err
+	}
+	return c, true, nil
+}
+
 func (s *SQLStore) InsertRedTeamEvidence(ctx context.Context, e RedTeamEvidence) error {
 	if e.CreatedAt == "" {
 		e.CreatedAt = time.Now().UTC().Format(time.RFC3339Nano)
@@ -637,20 +681,21 @@ func (s *SQLStore) InsertRedTeamEvidence(ctx context.Context, e RedTeamEvidence)
 	tools, _ := json.Marshal(e.ToolCalls)
 	headers, _ := json.Marshal(nonNilMap(e.HeadersSummary))
 	_, err := s.db.ExecContext(ctx, s.bind(`INSERT INTO redteam_evidence
-		(id, result_id, masked_prompt, masked_response, tool_calls_json, headers_summary_json, export_hash, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		(id, result_id, masked_prompt, masked_response, raw_prompt, raw_response, tool_calls_json, headers_summary_json, export_hash, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(result_id) DO UPDATE SET masked_prompt=excluded.masked_prompt, masked_response=excluded.masked_response,
+			raw_prompt=excluded.raw_prompt, raw_response=excluded.raw_response,
 			tool_calls_json=excluded.tool_calls_json, headers_summary_json=excluded.headers_summary_json, export_hash=excluded.export_hash`),
-		e.ID, e.ResultID, e.MaskedPrompt, e.MaskedResponse, string(tools), string(headers), e.ExportHash, e.CreatedAt)
+		e.ID, e.ResultID, e.MaskedPrompt, e.MaskedResponse, e.RawPrompt, e.RawResponse, string(tools), string(headers), e.ExportHash, e.CreatedAt)
 	return err
 }
 
 func (s *SQLStore) RedTeamEvidenceByResult(ctx context.Context, resultID string) (RedTeamEvidence, bool, error) {
-	row := s.db.QueryRowContext(ctx, s.bind(`SELECT id, result_id, masked_prompt, masked_response, tool_calls_json, headers_summary_json, export_hash, created_at
+	row := s.db.QueryRowContext(ctx, s.bind(`SELECT id, result_id, masked_prompt, masked_response, raw_prompt, raw_response, tool_calls_json, headers_summary_json, export_hash, created_at
 		FROM redteam_evidence WHERE result_id = ?`), resultID)
 	var e RedTeamEvidence
 	var tools, headers string
-	err := row.Scan(&e.ID, &e.ResultID, &e.MaskedPrompt, &e.MaskedResponse, &tools, &headers, &e.ExportHash, &e.CreatedAt)
+	err := row.Scan(&e.ID, &e.ResultID, &e.MaskedPrompt, &e.MaskedResponse, &e.RawPrompt, &e.RawResponse, &tools, &headers, &e.ExportHash, &e.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return RedTeamEvidence{}, false, nil
 	}
@@ -706,6 +751,65 @@ func (s *SQLStore) ListRedTeamRemediations(ctx context.Context, limit int) ([]Re
 		out = append(out, r)
 	}
 	return out, rows.Err()
+}
+
+// GetRedTeamRemediation fetches one remediation by id.
+func (s *SQLStore) GetRedTeamRemediation(ctx context.Context, id string) (RedTeamRemediation, bool, error) {
+	row := s.db.QueryRowContext(ctx, s.bind(`SELECT id, result_id, action_type, action_payload, status, owner, due_date, created_at, updated_at
+		FROM redteam_remediations WHERE id = ?`), id)
+	var r RedTeamRemediation
+	var payload string
+	err := row.Scan(&r.ID, &r.ResultID, &r.ActionType, &payload, &r.Status, &r.Owner, &r.DueDate, &r.CreatedAt, &r.UpdatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return RedTeamRemediation{}, false, nil
+	}
+	if err != nil {
+		return RedTeamRemediation{}, false, err
+	}
+	r.ActionPayload = decodeJSONMap(payload)
+	return r, true, nil
+}
+
+// UpdateRedTeamRemediation persists status/owner/due_date AND the (possibly mutated) action
+// payload — unlike InsertRedTeamRemediation's conflict clause, which never rewrites the payload.
+// This backs the remediation lifecycle (status transitions) and "apply" outcome recording.
+func (s *SQLStore) UpdateRedTeamRemediation(ctx context.Context, r RedTeamRemediation) error {
+	payload, _ := json.Marshal(nonNilMap(r.ActionPayload))
+	_, err := s.db.ExecContext(ctx, s.bind(`UPDATE redteam_remediations
+		SET action_type = ?, action_payload = ?, status = ?, owner = ?, due_date = ?, updated_at = ?
+		WHERE id = ?`),
+		r.ActionType, string(payload), r.Status, r.Owner, r.DueDate, time.Now().UTC().Format(time.RFC3339Nano), r.ID)
+	return err
+}
+
+// UpsertRedTeamProbeCase inserts or updates a single probe case (manual/imported prompt), leaving
+// other cases in the pack untouched — the building block for UI editing and CSV import.
+func (s *SQLStore) UpsertRedTeamProbeCase(ctx context.Context, c RedTeamProbeCase) error {
+	if c.ID == "" || c.PackID == "" {
+		return nil
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	if c.CreatedAt == "" {
+		c.CreatedAt = now
+	}
+	c.UpdatedAt = now
+	params, _ := json.Marshal(nonNilMap(c.Parameters))
+	_, err := s.db.ExecContext(ctx, s.bind(`INSERT INTO redteam_probe_cases
+		(id, pack_id, case_key, input_template, expected_policy, evaluator_type, severity, risk_tags, target_types, parameters_json, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET pack_id=excluded.pack_id, case_key=excluded.case_key, input_template=excluded.input_template,
+			expected_policy=excluded.expected_policy, evaluator_type=excluded.evaluator_type, severity=excluded.severity,
+			risk_tags=excluded.risk_tags, target_types=excluded.target_types, parameters_json=excluded.parameters_json,
+			updated_at=excluded.updated_at`),
+		c.ID, c.PackID, c.CaseKey, c.InputTemplate, c.ExpectedPolicy, c.EvaluatorType, c.Severity,
+		encodeStringList(c.RiskTags), encodeStringList(c.TargetTypes), string(params), c.CreatedAt, c.UpdatedAt)
+	return err
+}
+
+// DeleteRedTeamProbeCase removes a single probe case by id.
+func (s *SQLStore) DeleteRedTeamProbeCase(ctx context.Context, id string) error {
+	_, err := s.db.ExecContext(ctx, s.bind(`DELETE FROM redteam_probe_cases WHERE id = ?`), id)
+	return err
 }
 
 func (s *SQLStore) UpsertRedTeamBaseline(ctx context.Context, b RedTeamBaseline) error {

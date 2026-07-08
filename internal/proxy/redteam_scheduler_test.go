@@ -1,9 +1,39 @@
 package proxy
 
 import (
+	"context"
 	"testing"
 	"time"
 )
+
+func TestRedTeamThrottleQPS(t *testing.T) {
+	// qps<=0 disables throttling: returns true immediately and stamps last.
+	var last time.Time
+	if !redTeamThrottleQPS(context.Background(), 0, &last) {
+		t.Fatal("qps=0 must not block")
+	}
+	if last.IsZero() {
+		t.Fatal("throttle must stamp last call time")
+	}
+
+	// A zero-value last means "first call" → no wait even with a rate limit.
+	var first time.Time
+	start := time.Now()
+	if !redTeamThrottleQPS(context.Background(), 100, &first) {
+		t.Fatal("first call must not block")
+	}
+	if time.Since(start) > 50*time.Millisecond {
+		t.Fatal("first call should not sleep")
+	}
+
+	// A cancelled context while a wait is pending returns false (caller aborts).
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	recent := time.Now()
+	if redTeamThrottleQPS(ctx, 0.5, &recent) { // 0.5 qps → 2s min interval, but ctx already done
+		t.Fatal("cancelled context must abort the throttle wait")
+	}
+}
 
 func TestRedTeamScheduleInterval(t *testing.T) {
 	cases := map[string]time.Duration{

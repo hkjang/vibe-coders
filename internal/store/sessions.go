@@ -3,8 +3,21 @@ package store
 import (
 	"context"
 	"database/sql"
+	"strings"
 	"time"
 )
+
+// collapseLastMessage normalizes a prompt snippet for compact list display: whitespace is
+// collapsed to single spaces and the text is capped to a preview-friendly length. The full
+// text is never surfaced here — callers render it as an at-a-glance "last message" column.
+func collapseLastMessage(s string) string {
+	s = strings.TrimSpace(strings.Join(strings.Fields(s), " "))
+	rs := []rune(s)
+	if len(rs) <= 160 {
+		return s
+	}
+	return string(rs[:160]) + "…"
+}
 
 type InferredSessionRecord struct {
 	IdentityHash string
@@ -73,6 +86,7 @@ type SessionSummary struct {
 	Errors      int     `json:"errors"`
 	TotalTokens int     `json:"total_tokens"`
 	CostKRW     float64 `json:"cost_krw"`
+	LastMessage string  `json:"last_message"`
 }
 
 // SessionRiskMarkers maps a session's request_ids to the governance/risk signals attached to
@@ -162,7 +176,15 @@ func (s *SQLStore) RecentSessions(ctx context.Context, since time.Time, limit in
 			COUNT(DISTINCT r.api_key_id),
 			COALESCE(SUM(CASE WHEN r.status_code >= 400 THEN 1 ELSE 0 END), 0),
 			COALESCE(SUM(t.total_tokens), 0),
-			COALESCE(SUM(t.estimated_cost), 0)
+			COALESCE(SUM(t.estimated_cost), 0),
+			COALESCE((
+				SELECT COALESCE(NULLIF(pl.redacted_text, ''), pl.content_text)
+				FROM prompt_logs pl
+				JOIN request_logs plr ON plr.id = pl.request_id
+				WHERE plr.session_id = r.session_id AND LOWER(pl.role) = 'user'
+				ORDER BY pl.created_at DESC
+				LIMIT 1
+			), '')
 		FROM request_logs r
 		LEFT JOIN token_usage t ON t.request_id = r.id
 		WHERE r.session_id <> '' AND r.created_at >= ?
@@ -179,9 +201,10 @@ func (s *SQLStore) RecentSessions(ctx context.Context, since time.Time, limit in
 	for rows.Next() {
 		var x SessionSummary
 		if err := rows.Scan(&x.SessionID, &x.Requests, &x.FirstSeen, &x.LastSeen,
-			&x.Models, &x.APIKeys, &x.Errors, &x.TotalTokens, &x.CostKRW); err != nil {
+			&x.Models, &x.APIKeys, &x.Errors, &x.TotalTokens, &x.CostKRW, &x.LastMessage); err != nil {
 			return nil, err
 		}
+		x.LastMessage = collapseLastMessage(x.LastMessage)
 		out = append(out, x)
 	}
 	return out, rows.Err()

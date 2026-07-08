@@ -12,21 +12,22 @@ func TestRecentSessionsAndRiskMarkers(t *testing.T) {
 	ctx := context.Background()
 	when := time.Now().UTC().Add(-30 * time.Minute)
 
-	mkReq := func(id, sess, model string, status int, highCode bool) {
+	mkReq := func(id, sess, model string, status int, highCode bool, userMsg string, ts time.Time) {
 		rec := LogRecord{
-			Request: RequestLog{ID: id, SessionID: sess, Endpoint: "/v1/chat/completions", Model: model, StatusCode: status, CreatedAt: when},
-			Usage:   &TokenUsage{ID: id + "_u", RequestID: id, TotalTokens: 100, EstimatedCost: 5, Currency: "KRW", CreatedAt: when},
+			Request: RequestLog{ID: id, SessionID: sess, Endpoint: "/v1/chat/completions", Model: model, StatusCode: status, CreatedAt: ts},
+			Usage:   &TokenUsage{ID: id + "_u", RequestID: id, TotalTokens: 100, EstimatedCost: 5, Currency: "KRW", CreatedAt: ts},
+			Prompts: []PromptLog{{ID: id + "_p", RequestID: id, Role: "user", RedactedText: userMsg, CreatedAt: ts}},
 		}
 		if highCode {
-			rec.CodeVerify = &CodeVerifyLog{ID: id + "_cv", RequestID: id, HasCode: true, Risk: "high", BlockCount: 1, HighCount: 1, FindingsJSON: "[]", CreatedAt: when}
+			rec.CodeVerify = &CodeVerifyLog{ID: id + "_cv", RequestID: id, HasCode: true, Risk: "high", BlockCount: 1, HighCount: 1, FindingsJSON: "[]", CreatedAt: ts}
 		}
 		if err := db.InsertLogRecord(ctx, rec); err != nil {
 			t.Fatal(err)
 		}
 	}
-	mkReq("fr1", "sessA", "gpt-4.1", 200, true)
-	mkReq("fr2", "sessA", "claude-opus-4-8", 500, false)
-	mkReq("fr3", "sessB", "gpt-4.1", 200, false)
+	mkReq("fr1", "sessA", "gpt-4.1", 200, true, "첫 질문입니다", when)
+	mkReq("fr2", "sessA", "claude-opus-4-8", 500, false, "세션A 마지막 질문", when.Add(time.Minute))
+	mkReq("fr3", "sessB", "gpt-4.1", 200, false, "세션B 질문", when)
 
 	if err := db.InsertSecretEvent(ctx, SecretEvent{ID: "se1", RequestID: "fr1", SecretType: "openai_api_key", Action: "mask", CreatedAt: when}); err != nil {
 		t.Fatal(err)
@@ -54,6 +55,9 @@ func TestRecentSessionsAndRiskMarkers(t *testing.T) {
 	}
 	if a == nil || a.Requests != 2 || a.Models != 2 || a.Errors != 1 || a.TotalTokens != 200 {
 		t.Fatalf("sessA summary wrong: %+v", a)
+	}
+	if a.LastMessage != "세션A 마지막 질문" {
+		t.Fatalf("sessA last message wrong: %q", a.LastMessage)
 	}
 
 	markers, err := db.SessionRiskMarkersFor(ctx, "sessA")

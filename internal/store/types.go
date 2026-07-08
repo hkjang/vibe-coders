@@ -1121,6 +1121,7 @@ type LLMSessionSummary struct {
 	EvaluationFailures int64   `json:"evaluation_failures"`
 	FirstSeen          string  `json:"first_seen"`
 	LastSeen           string  `json:"last_seen"`
+	LastMessage        string  `json:"last_message"`
 }
 
 type DomainRoutingDecision struct {
@@ -1188,6 +1189,7 @@ type SessionTimelinePoint struct {
 	Model             string  `json:"model"`
 	Provider          string  `json:"provider"`
 	PromptName        string  `json:"prompt_name"`
+	LastMessage       string  `json:"last_message"`
 	StatusCode        int     `json:"status_code"`
 	LatencyMS         int64   `json:"latency_ms"`
 	FirstChunkMS      int64   `json:"first_chunk_ms"`

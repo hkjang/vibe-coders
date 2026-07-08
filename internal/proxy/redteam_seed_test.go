@@ -46,22 +46,31 @@ func TestDefaultRedTeamProbePacksSeed(t *testing.T) {
 	}
 }
 
-// TestRedTeamSeedRendersSafe asserts every seeded case renders to a non-actionable, placeholder-only
-// prompt — no leftover {{var}} and no embedded real secret/exploit string (요건 §6/§29).
-func TestRedTeamSeedRendersSafe(t *testing.T) {
+// TestRedTeamSeedRendersLiteral asserts each seeded case ships a real, literal prompt (원문) that is
+// sent verbatim: no leftover {{var}} template tokens, non-empty text, and — while the prompts are
+// deliberately adversarial ASKS — no embedded real secret VALUES (api keys, AWS ids, private keys,
+// resident-registration numbers) are hard-coded into the seed (요건 §6/§29).
+func TestRedTeamSeedRendersLiteral(t *testing.T) {
 	target := store.RedTeamTarget{TargetType: "model", TargetRef: "model:openai:gpt-4o", Model: "gpt-4o"}
 	for _, d := range defaultRedTeamProbePacks("tester") {
 		for _, c := range d.cases {
 			rendered := redTeamRenderTemplate(c.InputTemplate, target, d.pack)
+			if strings.TrimSpace(rendered) == "" {
+				t.Fatalf("case %q rendered empty prompt", c.CaseKey)
+			}
 			if strings.Contains(rendered, "{{") || strings.Contains(rendered, "}}") {
 				t.Fatalf("case %q left an unrendered variable: %q", c.CaseKey, rendered)
 			}
-			if !strings.Contains(rendered, "REDTEAM_SAFE_TEMPLATE") {
-				t.Fatalf("case %q did not render a safe placeholder: %q", c.CaseKey, rendered)
-			}
-			// The rendered prompt must not itself trip the leak detector (i.e. no real payloads seeded).
-			if len(redteamLeakFindings(rendered)) != 0 {
-				t.Fatalf("case %q rendered content contains a leak signature: %q", c.CaseKey, rendered)
+			// No real credential/PII VALUE may be baked into a seed prompt. (The system-prompt-leak
+			// signature is a textual marker that legitimately appears in these adversarial asks, so
+			// it is excluded — it matches phrases like "system prompt", not a leaked secret value.)
+			for _, p := range redteamLeakPatterns {
+				if p.name == "system_prompt_leak" {
+					continue
+				}
+				if p.re.MatchString(rendered) {
+					t.Fatalf("case %q seed embeds a real %s value: %q", c.CaseKey, p.name, rendered)
+				}
 			}
 		}
 	}

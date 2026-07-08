@@ -2117,7 +2117,16 @@ func (s *SQLStore) llmSessionsFilter(ctx context.Context, whereClause string, li
 			COALESCE(SUM(CASE WHEN r.status_code >= 400 THEN 1 ELSE 0 END), 0),
 			COALESCE(ef.failures, 0),
 			COALESCE(MIN(r.created_at), ''),
-			COALESCE(MAX(r.created_at), '')
+			COALESCE(MAX(r.created_at), ''),
+			COALESCE((
+				SELECT COALESCE(NULLIF(pl.redacted_text, ''), pl.content_text)
+				FROM prompt_logs pl
+				JOIN request_logs plr ON plr.id = pl.request_id
+				WHERE COALESCE(NULLIF(plr.session_id, ''), 'no-session') = COALESCE(NULLIF(r.session_id, ''), 'no-session')
+					AND LOWER(pl.role) = 'user'
+				ORDER BY pl.created_at DESC
+				LIMIT 1
+			), '')
 		FROM request_logs r
 		LEFT JOIN token_usage t ON t.request_id = r.id
 		LEFT JOIN (
@@ -2140,9 +2149,10 @@ func (s *SQLStore) llmSessionsFilter(ctx context.Context, whereClause string, li
 	for rows.Next() {
 		var item LLMSessionSummary
 		if err := rows.Scan(&item.SessionID, &item.Requests, &item.Tokens, &item.CostKRW, &item.Errors,
-			&item.EvaluationFailures, &item.FirstSeen, &item.LastSeen); err != nil {
+			&item.EvaluationFailures, &item.FirstSeen, &item.LastSeen, &item.LastMessage); err != nil {
 			return nil, err
 		}
+		item.LastMessage = collapseLastMessage(item.LastMessage)
 		result = append(result, item)
 	}
 	return result, rows.Err()
@@ -2158,6 +2168,13 @@ func (s *SQLStore) SessionTimeline(ctx context.Context, sessionID string, limit 
 	query := s.bind(`
 		SELECT r.id, r.trace_id, COALESCE(r.model, ''), COALESCE(r.provider, ''),
 			COALESCE(NULLIF(r.prompt_name, ''), 'ad-hoc'),
+			COALESCE((
+				SELECT COALESCE(NULLIF(pl.redacted_text, ''), pl.content_text)
+				FROM prompt_logs pl
+				WHERE pl.request_id = r.id AND LOWER(pl.role) = 'user'
+				ORDER BY pl.created_at DESC
+				LIMIT 1
+			), ''),
 			r.status_code, r.latency_ms, COALESCE(r.first_chunk_ms, 0),
 			COALESCE(t.total_tokens, 0), COALESCE(t.estimated_cost, 0),
 			(SELECT COUNT(*) FROM tool_invocations ti WHERE ti.request_id = r.id AND ti.source = 'call'),
@@ -2181,10 +2198,12 @@ func (s *SQLStore) SessionTimeline(ctx context.Context, sessionID string, limit 
 	for rows.Next() {
 		var p SessionTimelinePoint
 		if err := rows.Scan(&p.RequestID, &p.TraceID, &p.Model, &p.Provider, &p.PromptName,
+			&p.LastMessage,
 			&p.StatusCode, &p.LatencyMS, &p.FirstChunkMS, &p.TotalTokens, &p.CostKRW,
 			&p.ToolCalls, &p.ToolErrors, &p.EvalFailures, &p.CreatedAt); err != nil {
 			return timeline, err
 		}
+		p.LastMessage = collapseLastMessage(p.LastMessage)
 		cumCost += p.CostKRW
 		cumTokens += p.TotalTokens
 		p.CumulativeCostKRW = cumCost

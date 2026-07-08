@@ -31,7 +31,7 @@ import (
 )
 
 // AppVersion is the gateway build version, surfaced in /auth/me and the admin UI.
-const AppVersion = "v0.76.33"
+const AppVersion = "v0.76.42"
 
 type Server struct {
 	cfg            config.Config
@@ -329,12 +329,16 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/admin/redteam/targets", s.handleRedTeamTargets)
 	mux.HandleFunc("/admin/redteam/targets/", s.handleRedTeamTargetByID)
 	mux.HandleFunc("/admin/redteam/probe-packs", s.handleRedTeamProbePacks)
+	mux.HandleFunc("/admin/redteam/probe-packs/", s.handleRedTeamProbePacksSub)
+	mux.HandleFunc("/admin/redteam/probe-cases", s.handleRedTeamProbeCases)
+	mux.HandleFunc("/admin/redteam/probe-cases/", s.handleRedTeamProbeCases)
 	mux.HandleFunc("/admin/redteam/campaigns", s.handleRedTeamCampaigns)
 	mux.HandleFunc("/admin/redteam/campaigns/", s.handleRedTeamCampaignByID)
 	mux.HandleFunc("/admin/redteam/runs", s.handleRedTeamRuns)
 	mux.HandleFunc("/admin/redteam/runs/", s.handleRedTeamRunByID)
 	mux.HandleFunc("/admin/redteam/results/", s.handleRedTeamResultByID)
 	mux.HandleFunc("/admin/redteam/remediations", s.handleRedTeamRemediations)
+	mux.HandleFunc("/admin/redteam/remediations/", s.handleRedTeamRemediationByID)
 	mux.HandleFunc("/admin/redteam/schedules", s.handleRedTeamSchedules)
 	mux.HandleFunc("/admin/redteam/baselines", s.handleRedTeamBaselines)
 	mux.HandleFunc("/admin/redteam/export", s.handleRedTeamExport)

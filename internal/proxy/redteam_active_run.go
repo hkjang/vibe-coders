@@ -2,11 +2,15 @@ package proxy
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"vibe-coders/internal/audit"
 	"vibe-coders/internal/store"
@@ -96,16 +100,22 @@ func redTeamActiveEligible(t store.RedTeamTarget, c store.RedTeamCampaign, proxy
 	return false
 }
 
-// redTeamModelCache memoizes the upstream /v1/models list for one run so auto-discovery costs at
-// most one extra call per campaign run.
+// redTeamModelCache memoizes the /v1/models list PER PROVIDER for one run, so auto-discovery costs
+// at most one extra call per provider. Keyed by provider name ("" = default/all).
 type redTeamModelCache struct {
-	loaded bool
-	models []string
+	byProvider map[string][]string
 }
 
-// redTeamListModels fetches the gateway's advertised model list (/v1/models) as the redteam key.
-func (s *Server) redTeamListModels(r *http.Request, proxyKey string) []string {
-	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+// redTeamListModels fetches the gateway's advertised model list as the redteam key, SCOPED to a
+// single provider when given (via ?provider=). Scoping matters: the gateway's /v1/models is the
+// union of every provider's catalogue, so an unscoped list could hand a provider target a model
+// that belongs to a different upstream — which then 404s when routed to the intended provider.
+func (s *Server) redTeamListModels(r *http.Request, proxyKey, provider string) []string {
+	path := "/v1/models"
+	if p := strings.TrimSpace(provider); p != "" && p != "text2sql" {
+		path += "?provider=" + url.QueryEscape(p)
+	}
+	req := httptest.NewRequest(http.MethodGet, path, nil)
 	req = req.WithContext(r.Context())
 	req.RemoteAddr = r.RemoteAddr
 	req.Header.Set("Authorization", "Bearer "+proxyKey)
@@ -135,24 +145,37 @@ func (s *Server) redTeamListModels(r *http.Request, proxyKey string) []string {
 }
 
 // resolveRedTeamModel returns the concrete model to invoke for a target: a concrete model pattern
-// if present, otherwise (for provider/model targets) one auto-discovered from /v1/models, preferring
-// an id that matches the provider's pattern prefix. Returns ("", "", false) if none can be resolved.
+// if present, otherwise (for provider/model targets) one auto-discovered from that provider's
+// /v1/models, preferring an id that matches the provider's pattern prefix. Returns ("", "", false)
+// if none can be resolved.
 func (s *Server) resolveRedTeamModel(r *http.Request, proxyKey string, t store.RedTeamTarget, cache *redTeamModelCache) (model, provider string, ok bool) {
 	if m, pok := pickRedTeamModel(t); pok {
 		return m, t.Provider, true
 	}
+	return s.redTeamCatalogModel(r, proxyKey, t, cache)
+}
+
+// redTeamCatalogModel picks a REAL model for a provider/model target from that provider's live
+// /v1/models — ignoring the target's own (possibly stale/nonexistent) model. Prefers an id matching
+// the provider's pattern prefix, else the first advertised model. Used as the 404 fallback when a
+// pinned or target model does not actually exist at the provider.
+func (s *Server) redTeamCatalogModel(r *http.Request, proxyKey string, t store.RedTeamTarget, cache *redTeamModelCache) (model, provider string, ok bool) {
 	if t.TargetType != "provider" && t.TargetType != "model" {
 		return "", "", false
 	}
-	if cache != nil && !cache.loaded {
-		cache.models = s.redTeamListModels(r, proxyKey)
-		cache.loaded = true
-	}
 	var models []string
 	if cache != nil {
-		models = cache.models
+		if cache.byProvider == nil {
+			cache.byProvider = map[string][]string{}
+		}
+		if cached, seen := cache.byProvider[t.Provider]; seen {
+			models = cached
+		} else {
+			models = s.redTeamListModels(r, proxyKey, t.Provider)
+			cache.byProvider[t.Provider] = models
+		}
 	} else {
-		models = s.redTeamListModels(r, proxyKey)
+		models = s.redTeamListModels(r, proxyKey, t.Provider)
 	}
 	if len(models) == 0 {
 		return "", "", false
@@ -176,10 +199,44 @@ func (s *Server) resolveRedTeamModel(r *http.Request, proxyKey string, t store.R
 	return models[0], t.Provider, true
 }
 
+// redTeamThrottleQPS paces live probe invocations to at most `qps` calls per second by sleeping
+// until the minimum inter-call interval has elapsed since the previous call. It updates *last to
+// the effective call time. Returns false if the context is cancelled while waiting (caller aborts).
+// qps <= 0 disables throttling. Pure timing — no external deps — so it is cheap and predictable.
+func redTeamThrottleQPS(ctx context.Context, qps float64, last *time.Time) bool {
+	if qps > 0 && !last.IsZero() {
+		minInterval := time.Duration(float64(time.Second) / qps)
+		if wait := minInterval - time.Since(*last); wait > 0 {
+			timer := time.NewTimer(wait)
+			defer timer.Stop()
+			select {
+			case <-timer.C:
+			case <-ctx.Done():
+				return false
+			}
+		}
+	}
+	*last = time.Now()
+	return true
+}
+
+// redTeamActiveCall is the result of one live probe invocation: the (unmasked) assistant text,
+// the gateway request id, HTTP status, measured wall-clock latency, and the real KRW cost derived
+// from the response's usage via the runtime pricing map. cost/latency replace the earlier hardcoded
+// placeholders so the budget guard and evidence reflect the actual spend.
+type redTeamActiveCall struct {
+	RespText  string
+	RequestID string
+	Code      int
+	LatencyMS int64
+	CostKRW   float64
+	OK        bool
+}
+
 // redTeamActiveInvoke sends one synthetic chat completion through the gateway as the redteam key
-// and returns the assistant text, the request id, the HTTP status, and success. It sets the
-// redteam cost-center/marker headers so the request is attributed and egress-tagged (§6).
-func (s *Server) redTeamActiveInvoke(r *http.Request, proxyKey, model, provider, prompt string, maxTokens int) (respText, requestID string, code int, ok bool) {
+// and returns the assistant text, request id, HTTP status, measured latency, real cost, and success.
+// It sets the redteam cost-center/marker headers so the request is attributed and egress-tagged (§6).
+func (s *Server) redTeamActiveInvoke(r *http.Request, proxyKey, model, provider, prompt, sessionID string, maxTokens int) redTeamActiveCall {
 	if maxTokens <= 0 || maxTokens > 512 {
 		maxTokens = 256
 	}
@@ -202,18 +259,32 @@ func (s *Server) redTeamActiveInvoke(r *http.Request, proxyKey, model, provider,
 	req.Header.Set("X-Request-ID", reqID)
 	req.Header.Set("X-Cost-Center", "redteam")
 	req.Header.Set("X-Redteam", "1")
+	// Tag every live probe with a stable redteam session id so the calls group into one session
+	// in the call history / flight recorder, giving the operator a direct drill-in link.
+	if strings.TrimSpace(sessionID) != "" {
+		req.Header.Set("X-Session-ID", sessionID)
+	}
 	// Force routing to the intended provider so an auto-discovered model still hits the target.
 	if strings.TrimSpace(provider) != "" && provider != "text2sql" {
 		req.Header.Set("X-Proxy-Provider", provider)
 	}
 
+	start := time.Now()
 	rec := httptest.NewRecorder()
 	s.handleOpenAI(rec, req)
+	latency := time.Since(start).Milliseconds()
 	if rid := rec.Header().Get("X-Request-ID"); rid != "" {
 		reqID = rid
 	}
 	if rec.Code != http.StatusOK {
-		return "HTTP " + itoaProxy(rec.Code), reqID, rec.Code, false
+		// The call WAS made and the gateway/upstream answered with an error (e.g. 404 model-not-found,
+		// 401 key, 5xx). Capture the error body so the operator sees the real reason in the evidence,
+		// and mark OK so the runner records it as a visible result instead of silently simulating.
+		body := strings.TrimSpace(rec.Body.String())
+		if len(body) > 2000 {
+			body = body[:2000]
+		}
+		return redTeamActiveCall{RespText: "HTTP " + itoaProxy(rec.Code) + ": " + body, RequestID: reqID, Code: rec.Code, LatencyMS: latency, OK: true}
 	}
 	var parsed struct {
 		Choices []struct {
@@ -221,14 +292,91 @@ func (s *Server) redTeamActiveInvoke(r *http.Request, proxyKey, model, provider,
 				Content string `json:"content"`
 			} `json:"message"`
 		} `json:"choices"`
+		Usage struct {
+			PromptTokens     int `json:"prompt_tokens"`
+			CompletionTokens int `json:"completion_tokens"`
+			TotalTokens      int `json:"total_tokens"`
+		} `json:"usage"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &parsed); err != nil {
-		return rec.Body.String(), reqID, rec.Code, true
+		return redTeamActiveCall{RespText: rec.Body.String(), RequestID: reqID, Code: rec.Code, LatencyMS: latency, OK: true}
 	}
+	cost := audit.EstimateCostKRW(model, audit.Usage{
+		PromptTokens:     parsed.Usage.PromptTokens,
+		CompletionTokens: parsed.Usage.CompletionTokens,
+		TotalTokens:      parsed.Usage.TotalTokens,
+	}, s.pricingMap(r.Context()))
+	text := ""
 	if len(parsed.Choices) > 0 {
-		return parsed.Choices[0].Message.Content, reqID, rec.Code, true
+		text = parsed.Choices[0].Message.Content
 	}
-	return "", reqID, rec.Code, true
+	return redTeamActiveCall{RespText: text, RequestID: reqID, Code: rec.Code, LatencyMS: latency, CostKRW: cost, OK: true}
+}
+
+// rerunRedTeamCaseLive re-executes a single stored result as a real active-controlled call with raw
+// evidence retention forced on, then rewrites that result and its evidence in place. This lets an
+// operator see the actual request/response (and the real model verdict) for a case that was first
+// produced by simulation or without raw retention — without re-running the whole campaign.
+func (s *Server) rerunRedTeamCaseLive(r *http.Request, resultID, proxyKey string) (map[string]any, error) {
+	if redteamKillSwitch.Load() {
+		return nil, fmt.Errorf("레드팀 킬 스위치가 켜져 있어 실제 재실행이 중지되어 있습니다")
+	}
+	if strings.TrimSpace(proxyKey) == "" {
+		return nil, fmt.Errorf("실제 재실행에는 전용 레드팀 Proxy API Key가 필요합니다")
+	}
+	res, found, err := s.db.GetRedTeamCaseResult(r.Context(), resultID)
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		return nil, fmt.Errorf("결과를 찾을 수 없습니다")
+	}
+	run, found, err := s.db.GetRedTeamRun(r.Context(), res.RunID)
+	if err != nil || !found {
+		return nil, fmt.Errorf("실행(run) 정보를 찾을 수 없습니다")
+	}
+	campaign, found, err := s.db.GetRedTeamCampaign(r.Context(), run.CampaignID)
+	if err != nil || !found {
+		return nil, fmt.Errorf("캠페인 정보를 찾을 수 없습니다")
+	}
+	cs, found, err := s.db.GetRedTeamProbeCase(r.Context(), res.CaseID)
+	if err != nil || !found {
+		return nil, fmt.Errorf("프로브 케이스를 찾을 수 없습니다")
+	}
+	target, found, err := s.db.GetRedTeamTarget(r.Context(), run.TargetID)
+	if err != nil || !found {
+		return nil, fmt.Errorf("대상(target)을 찾을 수 없습니다")
+	}
+	// Force a live call with raw retention for this single re-run, regardless of the campaign config.
+	campaign.ExecutionMode = "active-controlled"
+	campaign.RetainRawEvidence = true
+	if !redTeamActiveEligible(target, campaign, proxyKey) {
+		return nil, fmt.Errorf("이 대상 유형(%s)은 실제 호출 대상이 아니라 재실행할 수 없습니다(MCP 도구·앱·워크플로는 시뮬레이션 전용)", target.TargetType)
+	}
+	ar, aev, arem, invoked := s.evaluateRedTeamCaseActive(r, proxyKey, target, store.RedTeamProbePack{ID: cs.PackID}, cs, campaign, &redTeamModelCache{}, "")
+	if !invoked {
+		return nil, fmt.Errorf("실제 호출에 실패했습니다(모델 미해결 또는 upstream 오류). 대상/키를 확인하세요")
+	}
+	// Rewrite the SAME result row + its evidence so the existing UI links keep working.
+	ar.ID, ar.RunID, ar.CaseID, ar.CreatedAt = res.ID, res.RunID, res.CaseID, res.CreatedAt
+	aev.ID, aev.ResultID = newID("rtev"), res.ID
+	ar.EvidenceHash = aev.ExportHash
+	if err := s.db.UpdateRedTeamCaseResult(r.Context(), ar); err != nil {
+		return nil, err
+	}
+	if err := s.db.InsertRedTeamEvidence(r.Context(), aev); err != nil {
+		return nil, err
+	}
+	if arem.ActionType != "" {
+		arem.ID, arem.ResultID = newID("rtrm"), res.ID
+		_ = s.db.InsertRedTeamRemediation(r.Context(), arem)
+	}
+	s.auditAdmin(r, "redteam.result.rerun", "", auditJSON(map[string]any{"result_id": res.ID, "decision": ar.Decision, "model": aev.HeadersSummary["model"]}))
+	return map[string]any{
+		"result_id": res.ID, "decision": ar.Decision, "policy_decision": ar.PolicyDecision,
+		"severity": ar.Severity, "cost_krw": ar.CostKRW,
+		"note": "원문 보관으로 실제 재실행했습니다. 증적에서 실제 요청/응답을 확인하세요.",
+	}, nil
 }
 
 // evaluateRedTeamCaseActive runs one probe case live and evaluates the real response with the Rule
@@ -254,33 +402,58 @@ func (s *Server) evaluateRedTeamCaseActive(r *http.Request, proxyKey string, t s
 			maxTokens = int(mt)
 		}
 	}
-	respText, requestID, httpCode, invoked := s.redTeamActiveInvoke(r, proxyKey, model, provider, prompt, maxTokens)
-	if !invoked {
+	sessionID := "redteam:" + c.ID
+	call := s.redTeamActiveInvoke(r, proxyKey, model, provider, prompt, sessionID, maxTokens)
+	if !call.OK {
 		return store.RedTeamCaseResult{}, store.RedTeamEvidence{}, store.RedTeamRemediation{}, false
 	}
 
 	expected := redTeamExpectedDecision(cs.ExpectedPolicy)
-	findings := redteamLeakFindings(respText)
-	refused := redteamResponseRefused(respText)
-	decision, policy := redteamRuleVerdict(cs.ExpectedPolicy, findings, refused, cs.Severity)
+	var findings []string
+	var decision, policy string
+	if call.Code >= 400 {
+		// The probe could not be delivered/answered (upstream error). Record it as an explicit
+		// error outcome — NOT a pass/fail of the model's safety — so the operator can fix routing
+		// (e.g. a 404 usually means the resolved model does not exist at the target provider).
+		decision, policy = "error", "upstream_error_"+itoaProxy(call.Code)
+	} else {
+		findings = redteamLeakFindings(call.RespText)
+		refused := redteamResponseRefused(call.RespText)
+		decision, policy = redteamRuleVerdict(cs.ExpectedPolicy, findings, refused, cs.Severity)
+	}
 
 	maskedPrompt := audit.Redact(prompt)
-	maskedResponse := audit.Redact(respText)
+	maskedResponse := audit.Redact(call.RespText)
 	hash := audit.HashText(maskedPrompt + "|" + maskedResponse)
 
+	// A successful call with no usage (some providers omit it) still consumed budget; charge a
+	// nominal floor so the per-run budget guard cannot be defeated by a missing usage block.
+	costKRW := call.CostKRW
+	if costKRW <= 0 {
+		costKRW = 0.5
+	}
 	result := store.RedTeamCaseResult{
-		RequestID: requestID, Decision: decision, Severity: normalizeRedTeamSeverity(cs.Severity),
-		PolicyDecision: policy, EvidenceHash: hash, LatencyMS: 0, CostKRW: 0.5,
+		RequestID: call.RequestID, Decision: decision, Severity: normalizeRedTeamSeverity(cs.Severity),
+		PolicyDecision: policy, EvidenceHash: hash, LatencyMS: call.LatencyMS, CostKRW: costKRW,
 	}
 	ev := store.RedTeamEvidence{
 		MaskedPrompt: maskedPrompt, MaskedResponse: maskedResponse,
 		ToolCalls: []map[string]any{},
 		HeadersSummary: map[string]any{
 			"x-redteam": true, "x-cost-center": "redteam", "mode": "active-controlled",
-			"target": t.TargetRef, "pack": pack.ID, "model": model,
-			"http_status": httpCode, "expected": expected, "leak_findings": findings,
+			"target": t.TargetRef, "pack": pack.ID, "provider": provider, "model": model,
+			"http_status": call.Code, "expected": expected, "leak_findings": findings,
+			"latency_ms": call.LatencyMS, "cost_krw": costKRW,
+			"seed_template": cs.InputTemplate, "session_id": sessionID,
 		},
 		ExportHash: hash,
+	}
+	// Opt-in raw evidence (관리자 검토용): the actual rendered request and the real, unmasked model
+	// response are retained only when the campaign explicitly enables it, so an admin can judge for
+	// themselves whether a given provider/model is risky. Off by default (masked-only, §6/§29).
+	if c.RetainRawEvidence {
+		ev.RawPrompt = prompt
+		ev.RawResponse = call.RespText
 	}
 	var rem store.RedTeamRemediation
 	if decision == "warning" || decision == "fail" || decision == "critical" {

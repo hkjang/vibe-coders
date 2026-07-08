@@ -62,6 +62,17 @@ func (s *Server) handleSessionList(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// lastUserPromptPreview returns a compact, whitespace-collapsed snippet of the last user-role
+// prompt in a request (redacted text only), for the flight-recorder "last message" column.
+func lastUserPromptPreview(prompts []store.PromptPreview) string {
+	for i := len(prompts) - 1; i >= 0; i-- {
+		if strings.EqualFold(prompts[i].Role, "user") {
+			return truncateRunes(strings.Join(strings.Fields(prompts[i].RedactedText), " "), 160)
+		}
+	}
+	return ""
+}
+
 // handleSessionFlightRecorder assembles the chronological flight recorder for a session.
 // GET /admin/sessions/{session_id}/flight-recorder
 func (s *Server) handleSessionFlightRecorder(w http.ResponseWriter, r *http.Request) {
@@ -147,6 +158,7 @@ func (s *Server) handleSessionFlightRecorder(w http.ResponseWriter, r *http.Requ
 			"cost_krw":     rq.EstimatedCost,
 			"tool_count":   rq.ToolCount,
 			"created_at":   rq.CreatedAt,
+			"last_message": lastUserPromptPreview(rq.Prompts),
 			"detail":       "/admin/requests/" + rq.ID,
 			"trace":        "/admin/requests/" + rq.ID + "/trace",
 		}
