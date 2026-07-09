@@ -272,8 +272,8 @@ type redTeamActiveCall struct {
 // and returns the assistant text, request id, HTTP status, measured latency, real cost, and success.
 // It sets the redteam cost-center/marker headers so the request is attributed and egress-tagged (§6).
 func (s *Server) redTeamActiveInvoke(r *http.Request, proxyKey, model, provider, prompt, sessionID string, maxTokens int) redTeamActiveCall {
-	if maxTokens <= 0 || maxTokens > 512 {
-		maxTokens = 256
+	if maxTokens <= 0 || maxTokens > 4096 {
+		maxTokens = 2048
 	}
 	body := map[string]any{
 		"model":       model,
@@ -324,7 +324,8 @@ func (s *Server) redTeamActiveInvoke(r *http.Request, proxyKey, model, provider,
 	var parsed struct {
 		Choices []struct {
 			Message struct {
-				Content string `json:"content"`
+				Content          string `json:"content"`
+				ReasoningContent string `json:"reasoning_content"`
 			} `json:"message"`
 		} `json:"choices"`
 		Usage struct {
@@ -343,7 +344,12 @@ func (s *Server) redTeamActiveInvoke(r *http.Request, proxyKey, model, provider,
 	}, s.pricingMap(r.Context()))
 	text := ""
 	if len(parsed.Choices) > 0 {
-		text = parsed.Choices[0].Message.Content
+		msg := parsed.Choices[0].Message
+		if msg.ReasoningContent != "" {
+			text = "<thinking>\n" + msg.ReasoningContent + "\n</thinking>\n\n" + msg.Content
+		} else {
+			text = msg.Content
+		}
 	}
 	return redTeamActiveCall{RespText: text, RequestID: reqID, Code: rec.Code, LatencyMS: latency, CostKRW: cost, OK: true}
 }
