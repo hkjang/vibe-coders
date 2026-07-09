@@ -526,7 +526,8 @@ func (rc *requestPipeline) stepUpstream() bool {
 	if (captureForCache || captureForChatCache) && s.cacheConf().EmbeddingMaxBytes > captureLimit {
 		captureLimit = s.cacheConf().EmbeddingMaxBytes
 	}
-	analyzer := NewResponseAnalyzer(stream, captureForCache || captureForChatCache || lc.ResponseText, captureLimit)
+	isRedteam := r.Header.Get("X-Redteam") == "1" || meta.Request.CostCenter == "redteam" || strings.Contains(r.Header.Get("X-Session-ID"), "redteam:")
+	analyzer := NewResponseAnalyzer(stream, captureForCache || captureForChatCache || lc.ResponseText || isRedteam, captureLimit)
 	firstChunkMS, firstChunkSeen, copyErr := s.copyResponse(w, responseBody, analyzer, stream, start)
 	if firstChunkSeen {
 		meta.Request.FirstChunkMS = firstChunkMS
@@ -554,7 +555,7 @@ func (rc *requestPipeline) stepUpstream() bool {
 	// CompletionText is the clean extracted content (not raw SSE/JSON).
 	// Text (raw capture) is kept only for cache replay; never persisted to the log.
 	responseText := ""
-	if lc.ResponseText {
+	if lc.ResponseText || isRedteam {
 		if analysis.CompletionText != "" {
 			responseText = analysis.CompletionText
 		} else {
