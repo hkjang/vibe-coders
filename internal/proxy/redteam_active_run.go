@@ -199,6 +199,41 @@ func (s *Server) redTeamCatalogModel(r *http.Request, proxyKey string, t store.R
 	return models[0], t.Provider, true
 }
 
+// resolvePatternToConcreteModel takes a wildcard model pattern (like "rdtand/*") and queries the
+// target provider's live model list to find a matching concrete model. Falls back to the first
+// available model if no match succeeds.
+func (s *Server) resolvePatternToConcreteModel(r *http.Request, proxyKey string, t store.RedTeamTarget, pattern string, cache *redTeamModelCache) (string, string, bool) {
+	if t.Provider == "" {
+		return "", "", false
+	}
+	var models []string
+	if cache != nil {
+		if cache.byProvider == nil {
+			cache.byProvider = map[string][]string{}
+		}
+		if cached, seen := cache.byProvider[t.Provider]; seen {
+			models = cached
+		} else {
+			models = s.redTeamListModels(r, proxyKey, t.Provider)
+			cache.byProvider[t.Provider] = models
+		}
+	} else {
+		models = s.redTeamListModels(r, proxyKey, t.Provider)
+	}
+	if len(models) == 0 {
+		return "", "", false
+	}
+
+	patLower := strings.ToLower(strings.TrimSpace(pattern))
+	for _, m := range models {
+		if matchGlob(patLower, strings.ToLower(m)) {
+			return m, t.Provider, true
+		}
+	}
+	return models[0], t.Provider, true
+}
+
+
 // redTeamThrottleQPS paces live probe invocations to at most `qps` calls per second by sleeping
 // until the minimum inter-call interval has elapsed since the previous call. It updates *last to
 // the effective call time. Returns false if the context is cancelled while waiting (caller aborts).
@@ -388,7 +423,15 @@ func (s *Server) evaluateRedTeamCaseActive(r *http.Request, proxyKey string, t s
 	// A forced model (from the campaign's model selection) is used directly for provider/model
 	// targets; otherwise the model is auto-resolved from the upstream /v1/models.
 	if forcedModel != "" && (t.TargetType == "provider" || t.TargetType == "model") {
-		model, provider, ok = forcedModel, t.Provider, true
+		if strings.Contains(forcedModel, "*") {
+			var resolved bool
+			model, provider, resolved = s.resolvePatternToConcreteModel(r, proxyKey, t, forcedModel, cache)
+			if resolved {
+				ok = true
+			}
+		} else {
+			model, provider, ok = forcedModel, t.Provider, true
+		}
 	} else {
 		model, provider, ok = s.resolveRedTeamModel(r, proxyKey, t, cache)
 	}
