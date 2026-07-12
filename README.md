@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/images/logo_simple.png" alt="vibe-coders logo" width="200" />
+  <img src="docs/images/logo_light.png" alt="vibe-coders logo" width="200" />
 </p>
 
 # vibe-coders: AI 코딩 프록시 게이트웨이
