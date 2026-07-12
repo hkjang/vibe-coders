@@ -5,7 +5,7 @@ const adminHTML = `<!doctype html>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>AI 게이트웨이</title>
+  <title>vibe-coders AI 게이트웨이</title>
   <style>
     :root[data-theme="light"], :root {
       color-scheme: light;
@@ -368,7 +368,7 @@ const adminHTML = `<!doctype html>
 </head>
 <body>
   <header>
-    <h1>AI 게이트웨이</h1>
+    <h1 style="display: flex; align-items: center; gap: 8px;"><img src="/favicon.ico" alt="logo" style="width: 24px; height: 24px; border-radius: 4px;" />vibe-coders</h1>
     <nav id="tabs">
       <a href="#/me" data-tab="me">내 홈</a>
       <div class="nav-group" id="nav-dashboards">

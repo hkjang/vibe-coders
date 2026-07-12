@@ -1,4 +1,8 @@
-# AI 코딩 프록시 게이트웨이
+<p align="center">
+  <img src="docs/images/logo_simple.png" alt="vibe-coders logo" width="200" />
+</p>
+
+# vibe-coders: AI 코딩 프록시 게이트웨이
 
 Roo Code / Cursor / Continue 등 OpenAI 호환 API 를 호출하는 VS Code 확장 및 AI 코딩 도구를 중간에서 초저지연으로 중계하면서 사용량·프롬프트·토큰·언어·호출 IP·비용(KRW) 을 추적하는 SSE 프록시 게이트웨이입니다. 폐쇄망 운영을 위한 오프라인 도커 이미지 릴리즈 패키지를 제공합니다.
 
