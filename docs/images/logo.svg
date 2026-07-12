@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 100" width="120" height="100">
+  <defs>
+    <linearGradient id="vibeGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#A855F7" />
+      <stop offset="100%" stop-color="#06B6D4" />
+    </linearGradient>
+  </defs>
+  <!-- V Shape -->
+  <path d="M 35,25 L 60,75 L 85,25" stroke="url(#vibeGrad)" stroke-width="8" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+  <!-- Left Bracket < -->
+  <path d="M 22,35 L 10,50 L 22,65" stroke="#A855F7" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+  <!-- Right Bracket > -->
+  <path d="M 98,35 L 110,50 L 98,65" stroke="#06B6D4" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+  <!-- Wave -->
+  <path d="M 15,50 Q 37.5,15 60,50 T 105,50" stroke="#00E5FF" stroke-width="4.5" stroke-linecap="round" fill="none" />
+</svg>
