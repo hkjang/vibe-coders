@@ -1925,6 +1925,26 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 		`ALTER TABLE sso_provider_config ADD COLUMN role_map TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE workflow_runs ADD COLUMN trace_id TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE ai_app_runs ADD COLUMN trace_id TEXT NOT NULL DEFAULT ''`,
+		// Agent Routes: operator-defined virtual models that run an agentic loop over pinned
+		// providers + MCP servers.
+		`CREATE TABLE IF NOT EXISTS agent_routes (
+			id TEXT PRIMARY KEY,
+			virtual_model TEXT NOT NULL UNIQUE,
+			name TEXT NOT NULL DEFAULT '',
+			enabled INTEGER NOT NULL DEFAULT 1,
+			backing_model TEXT NOT NULL DEFAULT '',
+			provider TEXT NOT NULL DEFAULT '',
+			mcp_upstreams_json TEXT NOT NULL DEFAULT '[]',
+			allowed_tools_json TEXT NOT NULL DEFAULT '[]',
+			system_prompt TEXT NOT NULL DEFAULT '',
+			max_steps INTEGER NOT NULL DEFAULT 0,
+			max_cost_krw REAL NOT NULL DEFAULT 0,
+			created_by TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)`,
+		`ALTER TABLE agent_routes ADD COLUMN allowed_tools_json TEXT NOT NULL DEFAULT '[]'`,
+		`ALTER TABLE agent_routes ADD COLUMN max_cost_krw REAL NOT NULL DEFAULT 0`,
 		// Red Team: opt-in raw (unmasked) evidence retention for admin review, and its storage.
 		`ALTER TABLE redteam_campaigns ADD COLUMN retain_raw_evidence INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE redteam_evidence ADD COLUMN raw_prompt TEXT NOT NULL DEFAULT ''`,

@@ -29,6 +29,9 @@ type MCPDiscoveryPolicy struct {
 	AllowHighRiskTools  bool
 	RequireApproval     bool
 	AllowNoGroundAnswer bool
+	SystemPrompt        string  // operator override (agent routes); empty → built-in grounded prompt
+	MaxSteps            int     // per-route agent step cap; 0 → server default
+	MaxCostKRW          float64 // per-run KRW budget for the agentic loop; 0 → unlimited
 }
 
 // mcpSelectionDiag records why upstreams were excluded during candidate selection.

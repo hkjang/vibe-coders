@@ -167,6 +167,19 @@ func (rc *requestPipeline) serveAggregatedModels() bool {
 	if data == nil {
 		data = []map[string]any{}
 	}
+	// Advertise operator-defined agent routes as callable virtual models so clients discover them
+	// alongside real models.
+	if routes, err := s.db.ListAgentRoutes(r.Context()); err == nil {
+		for _, ar := range routes {
+			if !ar.Enabled {
+				continue
+			}
+			data = append(data, map[string]any{
+				"id": ar.VirtualModel, "object": "model", "owned_by": "agent-route",
+				"provider": "vibe", "agent_route": true,
+			})
+		}
+	}
 	buf, err := json.Marshal(map[string]any{"object": "list", "data": data})
 	if err != nil {
 		slog.Warn("aggregated models: marshal failed", "error", err)

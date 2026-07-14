@@ -77,6 +77,7 @@ func (rc *requestPipeline) steps() []PipelineStep {
 	return []PipelineStep{
 		stepFunc{"auth", (*requestPipeline).stepAuth},
 		stepFunc{"quota", (*requestPipeline).stepQuota},
+		stepFunc{"agent_route", (*requestPipeline).stepAgentRoute},
 		stepFunc{"mcp_discovery", (*requestPipeline).stepMCPDiscovery},
 		stepFunc{"routing", (*requestPipeline).stepRouting},
 		stepFunc{"skill", (*requestPipeline).stepSkill},

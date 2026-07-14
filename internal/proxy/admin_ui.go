@@ -402,6 +402,7 @@ const adminHTML = `<!doctype html>
           <a href="#/mcp" data-tab="mcp">MCP</a>
           <a href="#/gateway-mcp" data-tab="gateway-mcp">Gateway MCP</a>
           <a href="#/routing" data-tab="routing">라우팅</a>
+          <a href="#/agent-routes" data-tab="agent-routes">에이전트 라우트</a>
           <a href="#/workflows" data-tab="workflows">워크플로</a>
           <a href="#/apps" data-tab="apps">AI 업무 앱</a>
           <a href="#/app-templates" data-tab="app-templates">앱 템플릿</a>
@@ -1256,6 +1257,7 @@ const adminHTML = `<!doctype html>
           case 'requests':  await renderRequestsView(params); break;
           case 'sessions':  await renderSessionsView(); break;
           case 'redteam':   await renderRedTeamView(); break;
+          case 'agent-routes': await renderAgentRoutesView(); break;
           case 'sbom':      await renderSBOMView(); break;
           case 'journey-probe': await renderJourneyProbeView(); break;
           case 'pods':      await renderPodsView(); break;
@@ -5318,6 +5320,199 @@ const adminHTML = `<!doctype html>
     window.rtGuide = (topic) => {
       const g = rtGuides[topic] || rtGuides.start;
       openModal(g.title, '<div style="line-height:1.6;font-size:13px">' + g.body + '</div>');
+    };
+
+    // 에이전트 라우트 — 가상 모델명 → (프로바이더/백킹 모델 + 지정 MCP 서버들) 에이전틱 루프.
+    let agentEditId = '';
+    async function renderAgentRoutesView() {
+      const view = document.getElementById('view');
+      view.innerHTML = section('에이전트 라우트', '<div class="empty">불러오는 중...</div>');
+      let routes = {}, providers = {}, mcp = {}, toolsResp = {};
+      try {
+        [routes, providers, mcp, toolsResp] = await Promise.all([
+          api('/admin/agent-routes'),
+          api('/admin/providers').catch(() => ({ providers: [] })),
+          api('/admin/mcp/upstreams').catch(() => ({ upstreams: [] })),
+          api('/admin/mcp/tools').catch(() => ({ tools: [] })),
+        ]);
+      } catch (e) {
+        view.innerHTML = section('에이전트 라우트', '<div class="card-body" style="padding:16px"><p class="muted">' + escapeHTML(e.message) + '</p></div>');
+        return;
+      }
+      const rs = routes.agent_routes || [];
+      const provs = (providers.providers || []).map(p => p.name).filter(Boolean);
+      const ups = (mcp.upstreams || []).filter(u => u.enabled !== false);
+      window.__agentRoutes = rs;
+      window.__agentTools = (toolsResp.tools || []).map(t => ({ server: t.server_label, tool: t.tool_name }));
+      window.__agentToolChecked = {};
+      const provOpts = '<option value="">(자동 라우팅 — 모델 패턴으로 결정)</option>' + provs.map(p => '<option value="' + escapeAttr(p) + '">' + escapeHTML(p) + '</option>').join('');
+      const mcpChecks = ups.length
+        ? ups.map(u => '<label style="display:flex;gap:6px;align-items:center;font-size:12px;margin:2px 0"><input type="checkbox" class="ar-mcp" value="' + escapeAttr(u.id) + '" onchange="agentRenderTools()"> ' + escapeHTML(u.name || u.id) + ' <span class="muted" style="font-size:10px">' + escapeHTML(u.id) + '</span></label>').join('')
+        : '<span class="muted" style="font-size:12px">등록된 MCP 업스트림이 없습니다. (MCP 메뉴에서 먼저 등록) — 비워두면 등록된 전체 MCP를 사용합니다.</span>';
+      const rows = rs.map(a => {
+        const en = a.enabled !== false;
+        return '<tr>' +
+          '<td><code>' + escapeHTML(a.virtual_model) + '</code><div class="muted" style="font-size:10px">' + escapeHTML(a.name || '') + '</div></td>' +
+          '<td>' + escapeHTML(a.provider || '(자동)') + '</td>' +
+          '<td>' + escapeHTML(a.backing_model || '(자동)') + '</td>' +
+          '<td style="max-width:200px">' + ((a.mcp_upstreams || []).length ? escapeHTML((a.mcp_upstreams || []).join(', ')) : '<span class="muted">전체 MCP</span>') + '</td>' +
+          '<td>' + fmt(a.max_steps || 0) + '</td>' +
+          '<td>' + (en ? '<span class="status">사용</span>' : '<span class="status warn">중지</span>') + '</td>' +
+          '<td style="white-space:nowrap">' +
+            '<button type="button" style="font-size:11px" onclick="agentRouteTest(\'' + escapeAttr(a.id) + '\',\'' + escapeAttr(a.virtual_model) + '\')">테스트</button> ' +
+            '<button type="button" class="secondary" style="font-size:11px" onclick="agentRouteCall(\'' + escapeAttr(a.virtual_model) + '\')">호출 예시</button> ' +
+            '<button type="button" class="secondary" style="font-size:11px" onclick="agentRouteEdit(\'' + escapeAttr(a.id) + '\')">수정</button> ' +
+            '<button type="button" class="secondary" style="font-size:11px" onclick="agentRouteToggle(\'' + escapeAttr(a.id) + '\',' + (!en) + ')">' + (en ? '중지' : '사용') + '</button> ' +
+            '<button type="button" class="danger" style="font-size:11px" onclick="agentRouteDelete(\'' + escapeAttr(a.id) + '\',\'' + escapeAttr(a.virtual_model) + '\')">삭제</button>' +
+          '</td></tr>';
+      }).join('') || '<tr><td colspan="7" class="muted">아직 에이전트 라우트가 없습니다. 아래에서 만들어 보세요.</td></tr>';
+
+      const builder = section('에이전트 라우트 빌더',
+        '<div class="card-body">' +
+        '<p class="muted" style="font-size:12px;margin:0 0 10px">가상 모델명을 하나 정하고, 그 이름을 호출하면 실행할 <b>백킹 모델/프로바이더</b>와 <b>사용할 MCP 서버</b>를 지정하세요. 클라이언트는 <code>model</code> 값만 이 이름으로 두면, 게이트웨이가 LLM↔MCP 도구를 오가며(에이전틱) 답을 만들어 일반 chat completion으로 돌려줍니다.</p>' +
+        '<div class="grid2 rt-form">' +
+        '<label>가상 모델명<input id="ar-model" placeholder="예: vibe/agent-research"><span class="rt-hint">클라이언트가 호출할 model 값 (내장 vibe/* 와 겹치지 않게)</span></label>' +
+        '<label>표시 이름<input id="ar-name" placeholder="예: 리서치 에이전트"><span class="rt-hint">관리용 이름(선택)</span></label>' +
+        '<label>프로바이더<select id="ar-provider">' + provOpts + '</select><span class="rt-hint">백킹 LLM을 특정 업스트림으로 고정(선택)</span></label>' +
+        '<label>백킹 모델<input id="ar-backing" placeholder="예: gpt-4o (비우면 자동 선택)"><span class="rt-hint">에이전트 루프가 실제로 호출하는 모델</span></label>' +
+        '<label>최대 스텝<input id="ar-steps" type="number" min="0" max="16" value="8"><span class="rt-hint">LLM↔도구 왕복 최대 횟수(0=서버 기본)</span></label>' +
+        '<label>비용 한도(KRW)<input id="ar-cost" type="number" min="0" step="0.1" value="0"><span class="rt-hint">1회 호출 누적 비용 초과 시 자동 마무리(0=무제한)</span></label>' +
+        '<label style="display:flex;flex-direction:column;gap:5px"><span>활성</span><label style="font-weight:500;font-size:13px;display:flex;align-items:center;gap:6px"><input type="checkbox" id="ar-enabled" checked style="width:14px;height:14px"> 호출 가능</label></label>' +
+        '</div>' +
+        '<div class="grid2" style="margin-top:10px">' +
+        '<div class="rt-field"><div class="rt-fieldcap">사용할 MCP 서버(다중 선택 · 비우면 전체)</div><div id="ar-mcp-box" class="rt-modelbox" style="max-height:150px">' + mcpChecks + '</div></div>' +
+        '<div class="rt-field"><div class="rt-fieldcap">허용 도구(선택 · 비우면 서버의 전체 도구)</div><div id="ar-tool-box" class="rt-modelbox" style="max-height:150px"><span class="muted" style="font-size:12px">MCP 서버를 선택하면 그 서버의 도구가 여기 표시됩니다.</span></div></div>' +
+        '</div>' +
+        '<label style="display:block;margin-top:10px">시스템 프롬프트(페르소나·지침, 선택)<textarea id="ar-system" rows="3" style="width:100%;font-family:inherit" placeholder="예: 너는 사내 리서치 에이전트다. 반드시 도구로 근거를 조회한 뒤 한국어로 요약하라."></textarea></label>' +
+        '<div style="margin-top:10px"><button type="button" id="ar-submit" onclick="agentRouteSave()">라우트 생성</button> ' +
+        '<button type="button" id="ar-cancel" class="secondary" style="display:none" onclick="agentRouteCancel()">수정 취소</button> ' +
+        '<span id="ar-editing" class="status warn" style="font-size:10px;display:none"></span></div>' +
+        '</div>');
+      const list = card('등록된 에이전트 라우트 (' + rs.length + ')',
+        '<div class="card-body"><table><thead><tr><th>가상 모델</th><th>프로바이더</th><th>백킹 모델</th><th>MCP 서버</th><th>스텝</th><th>상태</th><th>작업</th></tr></thead><tbody>' + rows + '</tbody></table></div>');
+      view.innerHTML = section('에이전트 라우트 (가상 모델 → 프로바이더 + MCP 에이전틱)',
+        '<p class="muted" style="font-size:12px;padding:0 14px">호출 이력·비용·거버넌스에 그대로 통합되며, 실행 시 <code>X-Agent-Route</code>·<code>X-Agent-Backing-Model</code> 응답 헤더로 확인할 수 있습니다.</p>') +
+        builder + list;
+    }
+    // 선택된 MCP 서버들의 도구만 허용 도구 체크박스로 렌더(체크 상태 유지). 서버 미선택 시 전체 도구.
+    window.agentRenderTools = () => {
+      const box = document.getElementById('ar-tool-box');
+      if (!box) return;
+      const selServers = Array.from(document.querySelectorAll('.ar-mcp:checked')).map(x => x.value);
+      // 현재 체크 상태를 보존.
+      document.querySelectorAll('.ar-tool').forEach(el => { window.__agentToolChecked[el.value] = el.checked; });
+      const all = window.__agentTools || [];
+      const tools = all.filter(t => selServers.length === 0 || selServers.indexOf(t.server) >= 0);
+      if (!tools.length) {
+        box.innerHTML = '<span class="muted" style="font-size:12px">' + (selServers.length ? '선택한 서버의 도구가 아직 관측되지 않았습니다(호출 이력이 쌓이면 표시). 비우면 서버 전체 도구를 사용합니다.' : 'MCP 서버를 선택하면 그 서버의 도구가 표시됩니다.') + '</span>';
+        return;
+      }
+      const seen = {};
+      box.innerHTML = tools.filter(t => { if (seen[t.tool]) return false; seen[t.tool] = 1; return true; })
+        .map(t => '<label style="display:flex;gap:6px;align-items:center;font-size:12px;margin:2px 0"><input type="checkbox" class="ar-tool" value="' + escapeAttr(t.tool) + '"' + (window.__agentToolChecked[t.tool] ? ' checked' : '') + '> ' + escapeHTML(t.tool) + ' <span class="muted" style="font-size:10px">' + escapeHTML(t.server) + '</span></label>').join('');
+    };
+    window.agentRouteSave = async () => {
+      const mcp = Array.from(document.querySelectorAll('.ar-mcp:checked')).map(x => x.value);
+      const tools = Array.from(document.querySelectorAll('.ar-tool:checked')).map(x => x.value);
+      const body = {
+        id: agentEditId || '',
+        virtual_model: (document.getElementById('ar-model').value || '').trim(),
+        name: (document.getElementById('ar-name').value || '').trim(),
+        provider: (document.getElementById('ar-provider').value || ''),
+        backing_model: (document.getElementById('ar-backing').value || '').trim(),
+        mcp_upstreams: mcp,
+        allowed_tools: tools,
+        system_prompt: (document.getElementById('ar-system').value || '').trim(),
+        max_steps: Number(document.getElementById('ar-steps').value || 0),
+        max_cost_krw: Number(document.getElementById('ar-cost').value || 0),
+        enabled: !!document.getElementById('ar-enabled').checked,
+      };
+      if (!body.virtual_model) { alert('가상 모델명을 입력하세요.'); return; }
+      try {
+        const d = await api('/admin/agent-routes', { method: 'POST', body: JSON.stringify(body) });
+        agentEditId = '';
+        const ar = d.agent_route || d;
+        openModal('에이전트 라우트 저장됨',
+          '<p><code>' + escapeHTML(ar.virtual_model || '') + '</code> 저장 완료.</p>' +
+          '<p class="muted" style="font-size:12px">이제 클라이언트에서 <code>model: "' + escapeHTML(ar.virtual_model || '') + '"</code> 로 호출하면 지정한 프로바이더/MCP로 에이전틱하게 응답합니다.</p>');
+        await renderAgentRoutesView();
+      } catch (e) { openModal('오류', '<div class="error-line">' + escapeHTML(e.message) + '</div>'); }
+    };
+    window.agentRouteEdit = (id) => {
+      const a = (window.__agentRoutes || []).find(x => x.id === id);
+      if (!a) { alert('라우트를 찾을 수 없습니다.'); return; }
+      agentEditId = id;
+      document.getElementById('ar-model').value = a.virtual_model || '';
+      document.getElementById('ar-name').value = a.name || '';
+      document.getElementById('ar-provider').value = a.provider || '';
+      document.getElementById('ar-backing').value = a.backing_model || '';
+      document.getElementById('ar-steps').value = a.max_steps || 0;
+      document.getElementById('ar-cost').value = a.max_cost_krw || 0;
+      document.getElementById('ar-system').value = a.system_prompt || '';
+      document.getElementById('ar-enabled').checked = a.enabled !== false;
+      const want = a.mcp_upstreams || [];
+      document.querySelectorAll('.ar-mcp').forEach(el => { el.checked = want.indexOf(el.value) >= 0; });
+      window.__agentToolChecked = {};
+      (a.allowed_tools || []).forEach(t => { window.__agentToolChecked[t] = true; });
+      agentRenderTools();
+      document.getElementById('ar-submit').textContent = '수정 저장';
+      document.getElementById('ar-cancel').style.display = '';
+      const badge = document.getElementById('ar-editing');
+      badge.style.display = ''; badge.textContent = '수정 중: ' + a.virtual_model;
+      document.getElementById('ar-model').scrollIntoView({ behavior: 'smooth', block: 'center' });
+    };
+    window.agentRouteCancel = () => {
+      agentEditId = '';
+      ['ar-model', 'ar-name', 'ar-backing', 'ar-system'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+      document.getElementById('ar-submit').textContent = '라우트 생성';
+      document.getElementById('ar-cancel').style.display = 'none';
+      document.getElementById('ar-editing').style.display = 'none';
+      document.querySelectorAll('.ar-mcp').forEach(el => { el.checked = false; });
+      window.__agentToolChecked = {};
+      agentRenderTools();
+    };
+    window.agentRouteTest = async (id, model) => {
+      const p = window.prompt('테스트 프롬프트를 입력하세요.\n(이 라우트의 프로바이더/MCP로 실제 1회 호출합니다)', '사용 가능한 도구를 하나 골라 실제로 호출하고 결과를 요약해줘.');
+      if (p === null) return;
+      openModal('에이전트 테스트 — ' + escapeHTML(model), '<div class="empty">실행 중… (도구 호출이 있으면 다소 걸릴 수 있습니다)</div>');
+      try {
+        const d = await api('/admin/agent-routes/' + encodeURIComponent(id) + '/test', { method: 'POST', body: JSON.stringify({ prompt: p }) });
+        const html =
+          '<div class="kpis">' + kpi('상태', (d.ok ? 'OK' : ('HTTP ' + fmt(d.status || 0)))) + kpi('백킹 모델', escapeHTML(d.backing_model || '-')) + kpi('스텝', fmt(d.steps || 0)) + kpi('도구 호출', fmt(d.tool_calls || 0)) + kpi('노출 도구', fmt(d.tools || 0)) + '</div>' +
+          '<div style="font-weight:700;font-size:12px;margin:8px 0 4px">프롬프트</div><pre style="white-space:pre-wrap;background:rgba(127,127,127,0.08);padding:10px;border-radius:6px;font-size:12px">' + escapeHTML(d.prompt || '') + '</pre>' +
+          '<div style="font-weight:700;font-size:12px;margin:8px 0 4px">응답</div><pre style="white-space:pre-wrap;background:rgba(127,127,127,0.08);padding:10px;border-radius:6px;font-size:12px;max-height:40vh;overflow:auto">' + escapeHTML(d.content || '(빈 응답)') + '</pre>' +
+          (d.provider ? '<div class="muted" style="font-size:11px">provider: <code>' + escapeHTML(d.provider) + '</code></div>' : '');
+        openModal('에이전트 테스트 — ' + escapeHTML(model), html);
+      } catch (e) { openModal('테스트 오류', '<div class="error-line">' + escapeHTML(e.message) + '</div>'); }
+    };
+    window.agentRouteToggle = async (id, enabled) => {
+      const a = (window.__agentRoutes || []).find(x => x.id === id);
+      if (!a) return;
+      try {
+        await api('/admin/agent-routes', { method: 'POST', body: JSON.stringify({
+          id: a.id, virtual_model: a.virtual_model, name: a.name, provider: a.provider,
+          backing_model: a.backing_model, mcp_upstreams: a.mcp_upstreams || [], allowed_tools: a.allowed_tools || [],
+          system_prompt: a.system_prompt, max_steps: a.max_steps, max_cost_krw: a.max_cost_krw, enabled: !!enabled,
+        }) });
+        await renderAgentRoutesView();
+      } catch (e) { openModal('오류', '<div class="error-line">' + escapeHTML(e.message) + '</div>'); }
+    };
+    window.agentRouteDelete = async (id, name) => {
+      if (!window.confirm('에이전트 라우트 "' + (name || id) + '" 을(를) 삭제할까요?')) return;
+      try {
+        await api('/admin/agent-routes/' + encodeURIComponent(id), { method: 'DELETE' });
+        await renderAgentRoutesView();
+      } catch (e) { openModal('오류', '<div class="error-line">' + escapeHTML(e.message) + '</div>'); }
+    };
+    window.agentRouteCall = (model) => {
+      const origin = window.location.origin;
+      const curl = 'curl ' + origin + '/v1/chat/completions \\\n' +
+        '  -H "Authorization: Bearer <PROXY_API_KEY>" \\\n' +
+        '  -H "Content-Type: application/json" \\\n' +
+        '  -d \'{"model":"' + model + '","messages":[{"role":"user","content":"질문을 입력하세요"}]}\'';
+      openModal('호출 예시 — ' + escapeHTML(model),
+        '<p class="muted" style="font-size:12px">일반 OpenAI 호환 호출과 동일합니다. <code>model</code> 만 이 가상 모델명으로 지정하세요. 스트리밍(<code>"stream":true</code>)도 지원합니다.</p>' +
+        '<pre style="white-space:pre-wrap;background:rgba(127,127,127,0.08);padding:10px;border-radius:6px;font-size:12px">' + escapeHTML(curl) + '</pre>');
     };
 
     // AI 자산 SBOM — 스킬·워크플로·앱·모델계약·프롬프트 자산의 소유권/의존성 명세 + 거버넌스 공백.

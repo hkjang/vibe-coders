@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"vibe-coders/internal/audit"
 	"vibe-coders/internal/store"
 )
 
@@ -63,14 +64,15 @@ type mcpAgentToolCall struct {
 
 // mcpAgentOutcome is what the loop returns to the discovery handler for logging/response.
 type mcpAgentOutcome struct {
-	Content   string
-	Evidences []MCPEvidence
-	Usage     mcpAgentUsage
-	Provider  string
-	ToolCalls int
-	Steps     int
-	Streamed  bool
-	Err       error
+	Content        string
+	Evidences      []MCPEvidence
+	Usage          mcpAgentUsage
+	Provider       string
+	ToolCalls      int
+	Steps          int
+	Streamed       bool
+	BudgetExceeded bool
+	Err            error
 }
 
 // mcpAgenticBackingModel returns a concrete upstream model whose provider is resolvable for
@@ -221,6 +223,9 @@ func (s *Server) runMCPAgenticChat(w http.ResponseWriter, r *http.Request, model
 	// maxSteps LLM turns (each may issue several tool calls) before forcing a final answer.
 	cfg := s.mcpConf()
 	maxSteps := cfg.MaxAgentSteps
+	if policy.MaxSteps > 0 {
+		maxSteps = policy.MaxSteps // per-route override (agent routes)
+	}
 	if maxSteps <= 0 {
 		maxSteps = 8
 	}
@@ -293,6 +298,18 @@ func (s *Server) runMCPAgenticChat(w http.ResponseWriter, r *http.Request, model
 			break
 		}
 		out.Usage.add(usage)
+
+		// Per-run budget guard (agent routes): stop spinning once the accrued KRW cost of the
+		// loop's LLM turns exceeds the route's cap, then force a final synthesis from what we have.
+		if policy.MaxCostKRW > 0 {
+			if cost := audit.EstimateCostKRW(model, audit.Usage{
+				PromptTokens: out.Usage.PromptTokens, CompletionTokens: out.Usage.CompletionTokens, TotalTokens: out.Usage.TotalTokens,
+			}, s.pricingMap(r.Context())); cost > policy.MaxCostKRW {
+				out.BudgetExceeded = true
+				emitReason(fmt.Sprintf("💰 예산 한도 초과(약 %.1f KRW > %.1f KRW) — 지금까지의 근거로 답을 마무리합니다.\n", cost, policy.MaxCostKRW))
+				break
+			}
+		}
 
 		if len(toolCalls) == 0 {
 			out.Content = strings.TrimSpace(content)
@@ -427,6 +444,11 @@ func synthAssistantToolCallMsg(toolCalls []mcpAgentToolCall) map[string]any {
 
 // mcpAgentSystemPrompt builds the grounding directive injected ahead of the user messages.
 func mcpAgentSystemPrompt(policy MCPDiscoveryPolicy) string {
+	// Operator-defined agent routes supply their own persona/instructions; still append the
+	// grounding directive so tool use + no-hallucination discipline is preserved.
+	if sp := strings.TrimSpace(policy.SystemPrompt); sp != "" {
+		return sp + "\n\n제공된 MCP 도구로 사실을 직접 조회한 뒤 그 결과에 근거해 답하라. 도구 결과에 없는 내용은 추측하지 말라."
+	}
 	var b strings.Builder
 	b.WriteString("너는 사내 AI 게이트웨이의 근거 기반(grounded) 어시스턴트다. ")
 	b.WriteString("제공된 MCP 도구를 사용해 사실과 근거를 직접 조회한 뒤, 그 결과에 기반해 한국어로 답하라. ")
