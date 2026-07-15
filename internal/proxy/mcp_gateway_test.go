@@ -254,6 +254,36 @@ func TestMCPUpstreamProbe(t *testing.T) {
 	}
 }
 
+func TestAgentRouteToolCatalogUsesLiveSelectedUpstream(t *testing.T) {
+	up := fakeMCPUpstream(t)
+	defer up.Close()
+	s, db := newKnowledgeServer(t)
+	proxy := httptest.NewServer(s.Routes())
+	defer proxy.Close()
+	if err := db.UpsertMCPUpstream(context.Background(), store.MCPUpstream{ID: "fake", Name: "Fake tools", URL: up.URL, Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.Get(proxy.URL + "/admin/agent-routes/tool-catalog?upstream=fake")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var out struct {
+		Count int `json:"count"`
+		Tools []struct {
+			ServerID   string `json:"server_id"`
+			Name       string `json:"name"`
+			Namespaced string `json:"namespaced"`
+		} `json:"tools"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK || out.Count != 2 || len(out.Tools) != 2 || out.Tools[0].ServerID != "fake" || !strings.HasPrefix(out.Tools[0].Namespaced, "fake__") {
+		t.Fatalf("unexpected live agent tool catalog: status=%d out=%+v", resp.StatusCode, out)
+	}
+}
+
 func TestMCPGatewayPolicyBlocks(t *testing.T) {
 	up := fakeMCPUpstream(t)
 	defer up.Close()

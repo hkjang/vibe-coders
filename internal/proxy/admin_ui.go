@@ -5396,13 +5396,12 @@ const adminHTML = `<!doctype html>
     async function renderAgentRoutesView() {
       const view = document.getElementById('view');
       view.innerHTML = section('에이전트 라우트', '<div class="empty">불러오는 중...</div>');
-      let routes = {}, providers = {}, mcp = {}, toolsResp = {};
+      let routes = {}, providers = {}, mcp = {};
       try {
-        [routes, providers, mcp, toolsResp] = await Promise.all([
+        [routes, providers, mcp] = await Promise.all([
           api('/admin/agent-routes'),
           api('/admin/providers').catch(() => ({ providers: [] })),
           api('/admin/mcp/upstreams').catch(() => ({ upstreams: [] })),
-          api('/admin/mcp/tools').catch(() => ({ tools: [] })),
         ]);
       } catch (e) {
         view.innerHTML = section('에이전트 라우트', '<div class="card-body" style="padding:16px"><p class="muted">' + escapeHTML(e.message) + '</p></div>');
@@ -5412,8 +5411,9 @@ const adminHTML = `<!doctype html>
       const provs = (providers.providers || []).map(p => p.name).filter(Boolean);
       const ups = (mcp.upstreams || []).filter(u => u.enabled !== false);
       window.__agentRoutes = rs;
-      window.__agentTools = (toolsResp.tools || []).map(t => ({ server: t.server_label, tool: t.tool_name }));
+      window.__agentTools = [];
       window.__agentToolChecked = {};
+      window.__agentToolLoadSeq = 0;
       const provOpts = '<option value="">(자동 라우팅 — 모델 패턴으로 결정)</option>' + provs.map(p => '<option value="' + escapeAttr(p) + '">' + escapeHTML(p) + '</option>').join('');
       const mcpChecks = ups.length
         ? ups.map(u => '<label style="display:flex;gap:6px;align-items:center;font-size:12px;margin:2px 0"><input type="checkbox" class="ar-mcp" value="' + escapeAttr(u.id) + '" onchange="agentRenderTools()"> ' + escapeHTML(u.name || u.id) + ' <span class="muted" style="font-size:10px">' + escapeHTML(u.id) + '</span></label>').join('')
@@ -5439,6 +5439,7 @@ const adminHTML = `<!doctype html>
       const builder = section('에이전트 라우트 빌더',
         '<div class="card-body">' +
         '<p class="muted" style="font-size:12px;margin:0 0 10px">가상 모델명을 하나 정하고, 그 이름을 호출하면 실행할 <b>백킹 모델/프로바이더</b>와 <b>사용할 MCP 서버</b>를 지정하세요. 클라이언트는 <code>model</code> 값만 이 이름으로 두면, 게이트웨이가 LLM↔MCP 도구를 오가며(에이전틱) 답을 만들어 일반 chat completion으로 돌려줍니다.</p>' +
+        '<div class="stepper" style="grid-template-columns:repeat(3,minmax(0,1fr));margin-bottom:12px"><div class="step ready"><strong>1. 실행 모델</strong><span class="muted">프로바이더와 백킹 모델 결정</span></div><div class="step ready"><strong>2. MCP 범위</strong><span class="muted">서버를 먼저 고른 뒤 실제 노출 도구 선택</span></div><div class="step"><strong>3. 가드레일·검증</strong><span class="muted">스텝·비용 제한 후 저장하고 테스트</span></div></div>' +
         '<div class="grid2 rt-form">' +
         '<label>가상 모델명<input id="ar-model" placeholder="예: vibe/agent-research"><span class="rt-hint">클라이언트가 호출할 model 값 (내장 vibe/* 와 겹치지 않게)</span></label>' +
         '<label>표시 이름<input id="ar-name" placeholder="예: 리서치 에이전트"><span class="rt-hint">관리용 이름(선택)</span></label>' +
@@ -5449,8 +5450,8 @@ const adminHTML = `<!doctype html>
         '<label style="display:flex;flex-direction:column;gap:5px"><span>활성</span><label style="font-weight:500;font-size:13px;display:flex;align-items:center;gap:6px"><input type="checkbox" id="ar-enabled" checked style="width:14px;height:14px"> 호출 가능</label></label>' +
         '</div>' +
         '<div class="grid2" style="margin-top:10px">' +
-        '<div class="rt-field"><div class="rt-fieldcap">사용할 MCP 서버(다중 선택 · 비우면 전체)</div><div id="ar-mcp-box" class="rt-modelbox" style="max-height:150px">' + mcpChecks + '</div></div>' +
-        '<div class="rt-field"><div class="rt-fieldcap">허용 도구(선택 · 비우면 서버의 전체 도구)</div><div id="ar-tool-box" class="rt-modelbox" style="max-height:150px"><span class="muted" style="font-size:12px">MCP 서버를 선택하면 그 서버의 도구가 여기 표시됩니다.</span></div></div>' +
+        '<div class="rt-field"><div class="rt-fieldcap">① 사용할 MCP 서버 <span class="muted">(다중 선택 · 비우면 전체)</span></div><div id="ar-mcp-box" class="rt-modelbox" style="max-height:180px">' + mcpChecks + '</div></div>' +
+        '<div class="rt-field"><div class="rt-fieldcap">② 선택 서버가 현재 노출하는 도구 <span id="ar-tool-count" class="status" style="display:none"></span></div><div id="ar-tool-box" class="rt-modelbox" style="max-height:180px"><span class="muted" style="font-size:12px">왼쪽에서 MCP 서버를 선택하세요. 호출 이력이 아닌 서버의 실시간 <code>tools/list</code> 결과를 표시합니다.</span></div></div>' +
         '</div>' +
         '<label style="display:block;margin-top:10px">시스템 프롬프트(페르소나·지침, 선택)<textarea id="ar-system" rows="3" style="width:100%;font-family:inherit" placeholder="예: 너는 사내 리서치 에이전트다. 반드시 도구로 근거를 조회한 뒤 한국어로 요약하라."></textarea></label>' +
         '<div style="margin-top:10px"><button type="button" id="ar-submit" onclick="agentRouteSave()">라우트 생성</button> ' +
@@ -5459,26 +5460,43 @@ const adminHTML = `<!doctype html>
         '</div>');
       const list = card('등록된 에이전트 라우트 (' + rs.length + ')',
         '<div class="card-body"><table><thead><tr><th>가상 모델</th><th>프로바이더</th><th>백킹 모델</th><th>MCP 서버</th><th>스텝</th><th>상태</th><th>작업</th></tr></thead><tbody>' + rows + '</tbody></table></div>');
+      const enabledRoutes = rs.filter(x=>x.enabled!==false).length;
+      const guardedRoutes = rs.filter(x=>(x.allowed_tools||[]).length || Number(x.max_cost_krw||0)>0).length;
+      const routeVisual = '<div class="card-body"><div class="viz-grid" style="margin-top:0"><div class="viz-panel"><div class="viz-title">라우트 운영 상태 <small>현재 구성</small></div>' + donutVisual(rs.length ? enabledRoutes/rs.length*100 : 0, enabledRoutes+'/'+rs.length, '활성 라우트', [{label:'활성',value:enabledRoutes},{label:'중지',value:rs.length-enabledRoutes}]) + '</div><div class="viz-panel"><div class="viz-title">안전장 적용 <small>도구 제한 또는 비용 한도</small></div>' + donutVisual(rs.length ? guardedRoutes/rs.length*100 : 0, guardedRoutes+'/'+rs.length, '가드 적용', [{label:'가드 적용',value:guardedRoutes},{label:'기본값',value:rs.length-guardedRoutes}]) + '</div></div></div>';
       view.innerHTML = section('에이전트 라우트 (가상 모델 → 프로바이더 + MCP 에이전틱)',
-        '<p class="muted" style="font-size:12px;padding:0 14px">호출 이력·비용·거버넌스에 그대로 통합되며, 실행 시 <code>X-Agent-Route</code>·<code>X-Agent-Backing-Model</code> 응답 헤더로 확인할 수 있습니다.</p>') +
+        '<p class="muted" style="font-size:12px;padding:0 14px">호출 이력·비용·거버넌스에 그대로 통합되며, 실행 시 <code>X-Agent-Route</code>·<code>X-Agent-Backing-Model</code> 응답 헤더로 확인할 수 있습니다.</p>' + routeVisual) +
         builder + list;
     }
-    // 선택된 MCP 서버들의 도구만 허용 도구 체크박스로 렌더(체크 상태 유지). 서버 미선택 시 전체 도구.
-    window.agentRenderTools = () => {
+    // 선택 서버에 live tools/list를 호출해 실제 현재 노출 도구만 표시한다.
+    window.agentRenderTools = async () => {
       const box = document.getElementById('ar-tool-box');
       if (!box) return;
       const selServers = Array.from(document.querySelectorAll('.ar-mcp:checked')).map(x => x.value);
       // 현재 체크 상태를 보존.
       document.querySelectorAll('.ar-tool').forEach(el => { window.__agentToolChecked[el.value] = el.checked; });
-      const all = window.__agentTools || [];
-      const tools = all.filter(t => selServers.length === 0 || selServers.indexOf(t.server) >= 0);
-      if (!tools.length) {
-        box.innerHTML = '<span class="muted" style="font-size:12px">' + (selServers.length ? '선택한 서버의 도구가 아직 관측되지 않았습니다(호출 이력이 쌓이면 표시). 비우면 서버 전체 도구를 사용합니다.' : 'MCP 서버를 선택하면 그 서버의 도구가 표시됩니다.') + '</span>';
+      const count = document.getElementById('ar-tool-count');
+      if (!selServers.length) {
+        window.__agentTools = [];
+        if (count) count.style.display = 'none';
+        box.innerHTML = '<span class="muted" style="font-size:12px">MCP 서버를 먼저 선택하세요. 서버를 비우면 실행 시 전체 MCP가 허용되며, 개별 도구 제한은 적용하지 않습니다.</span>';
         return;
       }
-      const seen = {};
-      box.innerHTML = tools.filter(t => { if (seen[t.tool]) return false; seen[t.tool] = 1; return true; })
-        .map(t => '<label style="display:flex;gap:6px;align-items:center;font-size:12px;margin:2px 0"><input type="checkbox" class="ar-tool" value="' + escapeAttr(t.tool) + '"' + (window.__agentToolChecked[t.tool] ? ' checked' : '') + '> ' + escapeHTML(t.tool) + ' <span class="muted" style="font-size:10px">' + escapeHTML(t.server) + '</span></label>').join('');
+      const seq = ++window.__agentToolLoadSeq;
+      box.innerHTML = '<span class="muted" style="font-size:12px">선택한 서버에 연결해 <code>tools/list</code>를 확인하는 중…</span>';
+      const q = new URLSearchParams(); selServers.forEach(id=>q.append('upstream',id));
+      let data;
+      try { data = await api('/admin/agent-routes/tool-catalog?' + q.toString()); }
+      catch (e) { if (seq === window.__agentToolLoadSeq) box.innerHTML = '<span class="error-line">도구 조회 실패: ' + escapeHTML(e.message) + '</span>'; return; }
+      if (seq !== window.__agentToolLoadSeq) return;
+      const tools = data.tools || [];
+      window.__agentTools = tools;
+      if (count) { count.style.display=''; count.textContent=tools.length+'개'; }
+      if (!tools.length) {
+        const errs = Object.entries(data.errors||{}).map(x=>escapeHTML(x[0])+': '+escapeHTML(x[1])).join('<br>');
+        box.innerHTML = '<span class="muted" style="font-size:12px">선택한 서버가 노출한 도구가 없습니다.</span>' + (errs?'<div class="error-line" style="padding:8px 0">'+errs+'</div>':'');
+        return;
+      }
+      box.innerHTML = tools.map(t => '<label style="display:flex;gap:6px;align-items:flex-start;font-size:12px;margin:5px 0"><input type="checkbox" class="ar-tool" value="' + escapeAttr(t.namespaced) + '"' + (window.__agentToolChecked[t.namespaced] || window.__agentToolChecked[t.name] ? ' checked' : '') + '> <span><strong>' + escapeHTML(t.name) + '</strong> <span class="pill" style="font-size:10px">' + escapeHTML(t.server_name||t.server_id) + '</span>' + (t.description?'<div class="muted" style="font-size:10px">'+escapeHTML(t.description)+'</div>':'') + '</span></label>').join('');
     };
     window.agentRouteSave = async () => {
       const mcp = Array.from(document.querySelectorAll('.ar-mcp:checked')).map(x => x.value);
@@ -9352,23 +9370,35 @@ const adminHTML = `<!doctype html>
         '<div id="mcp-flow-list" style="margin-bottom:8px"></div>' +
         '<div id="mcp-flow-graph"></div>';
 
+      let mcpVisual = '';
+      if (tab === 'overview') {
+        const enabled = Number(ov.enabled_upstream_count||0), healthy = Number(ov.healthy_upstream_count||0);
+        mcpVisual = '<div class="viz-grid"><div class="viz-panel"><div class="viz-title">연결 준비도 <small>활성 업스트림</small></div>' + donutVisual(enabled ? healthy/enabled*100 : 0, healthy+'/'+enabled, '정상 연결', [{label:'정상',value:healthy},{label:'확인 필요',value:Math.max(0,enabled-healthy)}]) + '</div><div class="viz-panel"><div class="viz-title">노출 자산 구성 <small>Gateway catalog</small></div>' + visualBars([{label:'Tools',value:ov.total_tools||0},{label:'Prompts',value:ov.total_prompts||0},{label:'Resources',value:ov.total_resources||0}]) + '</div></div>';
+      } else if (tab === 'upstreams') {
+        mcpVisual = '<div class="viz-grid"><div class="viz-panel"><div class="viz-title">업스트림 상태 <small>등록 서버</small></div>' + visualBars([{label:'활성',value:upstreams.filter(x=>x.enabled).length},{label:'중지',value:upstreams.filter(x=>!x.enabled).length},{label:'탐색 오류',value:Object.keys(discErrors).length}], null, Object.keys(discErrors).length>0) + '</div><div class="viz-panel"><div class="viz-title">라우트 분포 <small>서버별 노출명</small></div>' + visualBars(Object.entries(routeRows.reduce((a,x)=>{const k=x.upstream_name||x.server_label||'unknown';a[k]=(a[k]||0)+1;return a;},{})).map(x=>({label:x[0],value:x[1]}))) + '</div></div>';
+      } else if (tab === 'tools') {
+        mcpVisual = '<div class="viz-grid"><div class="viz-panel"><div class="viz-title">서버별 호출량 <small>관측 데이터</small></div>' + visualBars(servers.map(x=>({label:x.server_label,value:x.calls||0}))) + '</div><div class="viz-panel"><div class="viz-title">도구 위험도 구성 <small>현재 필터</small></div>' + visualBars(['critical','high','medium','low'].map(level=>({label:level,value:toolRisk.filter(x=>x.risk_level===level).length})), null, true) + '</div></div>';
+      } else if (tab === 'policy') {
+        mcpVisual = '<div class="viz-grid"><div class="viz-panel"><div class="viz-title">정책 결정 구성 <small>' + (allowlistEnabled?'Allowlist ON':'Allowlist OFF') + '</small></div>' + visualBars(['allow','warn','block'].map(mode=>({label:mode,value:policies.filter(x=>x.mode===mode).length})), null, true) + '</div><div class="viz-panel"><div class="viz-title">운영 주의 신호 <small>최근 24시간</small></div>' + visualBars([{label:'반복 호출 의심 세션',value:loops.length},{label:'차단 서버 정책',value:policies.filter(x=>x.mode==='block').length},{label:'고오류 서버',value:servers.filter(x=>Number(x.error_rate||0)>=.1).length}], null, true) + '</div></div>';
+      }
+
       document.getElementById('view').innerHTML =
         (tab === 'overview' ? (
-          section('MCP 운영 Overview', kpis + filterBar) +
+          section('MCP 운영 Overview', kpis + '<div class="card-body">' + mcpVisual + '</div>' + filterBar) +
           section('에이전틱 실행 흐름 — 질문에서 도구 실행까지', agenticFlowPanel) +
           section('MCP 연결 상태 Wizard', wizard) +
           section('MCP Route Explain / Test Console', testConsole)
         ) : tab === 'upstreams' ? (
-          section('MCP Gateway — 업스트림 등록과 연결 진단', upstreamForm + upstreamTable + gatewayHelp) +
+          section('MCP Gateway — 업스트림 등록과 연결 진단', '<div class="card-body">' + mcpVisual + '</div>' + upstreamForm + upstreamTable + gatewayHelp) +
           section('Route Map — 클라이언트 노출명 → 업스트림 원본', routeMapTable) +
           section('Topology — Gateway / Upstream / Route 관계', topologyView)
         ) : tab === 'tools' ? (
-          section('MCP 서버별', serverTable) +
+          section('MCP 서버별', '<div class="card-body">' + mcpVisual + '</div>' + serverTable) +
           section('Tool 리더보드', toolTable) +
           '<div id="mcp-trust"></div>' +
           section(catalogTitle, catalogTable)
         ) : tab === 'policy' ? (
-          section('Effective Policy Matrix — 최종 호출 가능 여부', effectivePolicyTable) +
+          section('Effective Policy Matrix — 최종 호출 가능 여부', '<div class="card-body">' + mcpVisual + '</div>' + effectivePolicyTable) +
           section('에이전트 루프 의심 (세션별 반복 호출 ≥ 10)', loopTable) +
           section('MCP 서버 정책', allowlistToggle + policyForm + policyTable)
         ) : '');

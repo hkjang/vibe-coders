@@ -2,11 +2,14 @@ package proxy
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"time"
 
 	"vibe-coders/internal/store"
 	"vibe-coders/internal/text2sql"
@@ -121,6 +124,10 @@ func (s *Server) handleAgentRoutes(w http.ResponseWriter, r *http.Request) {
 		if a.MaxSteps > 16 {
 			a.MaxSteps = 16
 		}
+		if err := s.validateAgentRouteMCP(r, a); err != nil {
+			writeOpenAIError(w, http.StatusBadRequest, err.Error(), "invalid_request_error", "invalid_agent_route_tools")
+			return
+		}
 		a.CreatedBy = adminID(r)
 		if err := s.db.UpsertAgentRoute(r.Context(), a); err != nil {
 			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "agent_route_save_failed")
@@ -133,6 +140,46 @@ func (s *Server) handleAgentRoutes(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (s *Server) validateAgentRouteMCP(r *http.Request, a store.AgentRoute) error {
+	ups, err := s.db.ListMCPUpstreams(r.Context())
+	if err != nil {
+		return err
+	}
+	known := map[string]bool{}
+	for _, up := range ups {
+		if up.Enabled {
+			known[up.ID] = true
+		}
+	}
+	selected := map[string]bool{}
+	for _, id := range a.MCPUpstreams {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		if !known[id] {
+			return errors.New("selected MCP upstream is missing or disabled: " + id)
+		}
+		selected[id] = true
+	}
+	for _, name := range a.AllowedTools {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		if i := strings.Index(name, "__"); i > 0 {
+			serverID := name[:i]
+			if !known[serverID] {
+				return errors.New("allowed tool references a missing or disabled MCP upstream: " + name)
+			}
+			if len(selected) > 0 && !selected[serverID] {
+				return errors.New("allowed tool is outside the selected MCP upstreams: " + name)
+			}
+		}
+	}
+	return nil
+}
+
 func (s *Server) handleAgentRouteByID(w http.ResponseWriter, r *http.Request) {
 	if !s.authorizeAdmin(r) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
@@ -142,6 +189,10 @@ func (s *Server) handleAgentRouteByID(w http.ResponseWriter, r *http.Request) {
 	id := parts[0]
 	if id == "" {
 		writeOpenAIError(w, http.StatusBadRequest, "agent route id required", "invalid_request_error", "missing_id")
+		return
+	}
+	if id == "tool-catalog" && r.Method == http.MethodGet {
+		s.handleAgentRouteToolCatalog(w, r)
 		return
 	}
 	action := ""
@@ -174,4 +225,42 @@ func (s *Server) handleAgentRouteByID(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
 	}
+}
+
+// handleAgentRouteToolCatalog returns the live tools advertised by the selected upstreams.
+// It intentionally does not use tool invocation history: the route builder must show what the
+// configured servers expose now, including tools that have never been called.
+func (s *Server) handleAgentRouteToolCatalog(w http.ResponseWriter, r *http.Request) {
+	wanted := map[string]bool{}
+	for _, id := range r.URL.Query()["upstream"] {
+		if id = strings.TrimSpace(id); id != "" {
+			wanted[id] = true
+		}
+	}
+	ups, err := s.db.ListMCPUpstreams(r.Context())
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "agent_tool_catalog_failed")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+	tools := []map[string]any{}
+	errs := map[string]string{}
+	for _, up := range ups {
+		if !up.Enabled || (len(wanted) > 0 && !wanted[up.ID]) {
+			continue
+		}
+		listed, listErr := s.listUpstreamTools(ctx, up)
+		if listErr != nil {
+			errs[up.ID] = listErr.Error()
+			continue
+		}
+		for _, tool := range listed {
+			tools = append(tools, map[string]any{
+				"server_id": up.ID, "server_name": up.Name, "name": tool.Name,
+				"namespaced": up.ID + "__" + tool.Name, "description": tool.Description,
+			})
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"tools": tools, "count": len(tools), "errors": errs})
 }

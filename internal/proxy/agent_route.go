@@ -147,8 +147,16 @@ func (s *Server) handleAgentRouteChat(w http.ResponseWriter, r *http.Request, bo
 	}
 
 	candidates := s.agentRouteCandidates(r.Context(), route)
+	if len(route.MCPUpstreams) > 0 && len(candidates) == 0 {
+		writeOpenAIError(w, http.StatusBadGateway, "agent route has no enabled MCP upstream — review the route server selection", "server_error", "agent_route_no_mcp_upstream")
+		return
+	}
 	ts := s.buildMCPAgentToolset(r.Context(), candidates)
 	ts = filterAgentToolset(ts, route.AllowedTools)
+	if len(route.AllowedTools) > 0 && len(ts.tools) == 0 {
+		writeOpenAIError(w, http.StatusBadGateway, "agent route allowed_tools matched no currently exposed MCP tool — refresh the route tool selection", "server_error", "agent_route_no_allowed_tool")
+		return
+	}
 
 	messages := extractChatMessagesRaw(body)
 	if len(messages) == 0 {
