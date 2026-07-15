@@ -336,6 +336,24 @@ func TestOperationalHealthReadyMetricsAndFavicon(t *testing.T) {
 	proxy := httptest.NewServer(server.Routes())
 	defer proxy.Close()
 
+	noRedirect := &http.Client{CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }}
+	root, err := noRedirect.Get(proxy.URL + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	root.Body.Close()
+	if root.StatusCode != http.StatusFound || root.Header.Get("Location") != "/admin" || root.Header.Get("Cache-Control") != "no-store" {
+		t.Fatalf("root redirect unexpected status=%d location=%q cache=%q", root.StatusCode, root.Header.Get("Location"), root.Header.Get("Cache-Control"))
+	}
+	missing, err := noRedirect.Get(proxy.URL + "/unknown-page")
+	if err != nil {
+		t.Fatal(err)
+	}
+	missing.Body.Close()
+	if missing.StatusCode != http.StatusNotFound {
+		t.Fatalf("unknown root path should stay 404, got %d", missing.StatusCode)
+	}
+
 	for path, want := range map[string]string{"/health": `"status":"ok"`, "/ready": `"status":"ready"`} {
 		resp, err := http.Get(proxy.URL + path)
 		if err != nil {

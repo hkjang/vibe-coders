@@ -194,7 +194,10 @@ const adminHTML = `<!doctype html>
     }
     .modal-backdrop.open { display: flex; }
     .login-backdrop {
-      position: fixed; inset: 0; background: var(--bg, #f4f6fa);
+      position: fixed; inset: 0; background:
+        radial-gradient(circle at 20% 15%, color-mix(in srgb, var(--accent) 14%, transparent), transparent 34%),
+        radial-gradient(circle at 85% 80%, color-mix(in srgb, var(--accent-2) 12%, transparent), transparent 32%),
+        var(--bg, #f4f6fa);
       display: none; align-items: center; justify-content: center; z-index: 50;
     }
     .login-backdrop.open { display: flex; }
@@ -203,6 +206,11 @@ const adminHTML = `<!doctype html>
       border-radius: 12px; padding: 28px; box-shadow: 0 8px 30px rgba(15,23,42,0.12);
     }
     .login-card h2 { margin: 0 0 4px; font-size: 18px; }
+    .login-brand { display:flex;align-items:center;gap:12px;margin-bottom:22px;padding-bottom:18px;border-bottom:1px solid var(--line); }
+    .login-logo { width:52px;height:52px;border-radius:13px;box-shadow:0 8px 20px rgba(15,23,42,.14); }
+    .login-brand-copy { min-width:0; }
+    .login-brand-name { font-size:18px;font-weight:850;letter-spacing:-.02em;color:var(--ink); }
+    .login-brand-tagline { margin-top:3px;color:var(--muted);font-size:11px;line-height:1.4; }
     .login-card .sub { color: var(--muted); font-size: 13px; margin-bottom: 18px; }
     .login-card label { display: block; font-size: 12px; font-weight: 700; color: var(--muted); margin: 12px 0 4px; }
     .login-card input { width: 100%; box-sizing: border-box; }
@@ -331,6 +339,23 @@ const adminHTML = `<!doctype html>
     details.related-panel { margin-top:16px;border:1px solid var(--line);border-radius:8px;background:var(--panel);overflow:hidden; }
     details.related-panel > summary { cursor:pointer;padding:12px 14px;font-size:13px;font-weight:800;color:var(--muted);background:var(--panel-alt); }
     details.related-panel[open] > summary { border-bottom:1px solid var(--line); }
+    .home-hero { position:relative;overflow:hidden;padding:22px;border:1px solid var(--line);border-radius:14px;background:linear-gradient(135deg,var(--panel) 20%,var(--good-bg));margin-top:16px; }
+    .home-hero::after { content:"";position:absolute;width:220px;height:220px;border-radius:50%;right:-80px;top:-110px;background:var(--accent);opacity:.10; }
+    .home-hero h2 { margin:0;font-size:24px;color:var(--ink); }
+    .home-hero .home-sub { color:var(--muted);margin-top:6px;max-width:720px;line-height:1.55; }
+    .home-actions { display:flex;gap:8px;flex-wrap:wrap;margin-top:18px;position:relative;z-index:1; }
+    .home-action { display:flex;flex-direction:column;justify-content:center;gap:2px;min-width:145px;min-height:58px;padding:10px 12px;border:1px solid var(--line);border-radius:9px;text-decoration:none;color:var(--ink);background:var(--panel); }
+    button.home-action { height:auto;text-align:left;font:inherit;cursor:pointer; }
+    .home-action strong { font-size:12px; }.home-action small { color:var(--muted);font-size:10px; }
+    .home-action.primary { background:var(--accent);border-color:var(--accent);color:#fff; }.home-action.primary small { color:rgba(255,255,255,.8); }
+    .profile-gallery { display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:12px; }
+    .profile-tile { position:relative;overflow:hidden;display:block;padding:16px;border:1px solid var(--line);border-radius:12px;background:linear-gradient(145deg,var(--panel),var(--panel-alt));color:var(--ink);text-decoration:none;transition:transform .15s,border-color .15s,box-shadow .15s; }
+    .profile-tile:hover { transform:translateY(-2px);border-color:var(--accent);box-shadow:0 9px 24px rgba(15,23,42,.10); }
+    .profile-tile-head { display:flex;align-items:center;gap:11px;margin-bottom:13px; }
+    .profile-avatar { width:44px;height:44px;border-radius:13px;display:grid;place-items:center;font-size:16px;font-weight:900;color:#fff;background:linear-gradient(135deg,var(--accent),var(--accent-2));box-shadow:0 6px 16px color-mix(in srgb,var(--accent) 24%,transparent);flex:0 0 auto; }
+    .profile-name { font-weight:850;overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }.profile-meta { color:var(--muted);font-size:11px;margin-top:2px; }
+    .profile-stats { display:grid;grid-template-columns:repeat(3,1fr);gap:6px; }.profile-stat { padding:8px;border-radius:8px;background:var(--pill-bg); }.profile-stat small { display:block;color:var(--muted);font-size:9px; }.profile-stat strong { display:block;margin-top:3px;font-size:13px; }
+    .profile-hero { display:flex;align-items:center;gap:18px;padding:22px;border-radius:14px;background:linear-gradient(135deg,var(--panel),var(--good-bg));border:1px solid var(--line);margin-top:16px; }.profile-hero .profile-avatar { width:68px;height:68px;border-radius:20px;font-size:24px; }.profile-hero h2 { margin:0;font-size:22px; }.profile-hero p { margin:5px 0 0;color:var(--muted);line-height:1.5; }
     @media (max-width: 760px) { .viz-grid { grid-template-columns:1fr; } .spark-chart { height:150px; } }
 
     kbd {
@@ -357,11 +382,14 @@ const adminHTML = `<!doctype html>
     .user-menu .user-menu-sep { height: 1px; background: var(--accent); opacity: 0.3; margin: 2px 0; }
     .user-menu .user-menu-meta { font-size: 11px; color: var(--muted); padding: 2px 8px; line-height: 1.4; }
     .user-menu button { width: 100%; text-align: left; }
+    .xview-launcher { background:linear-gradient(135deg,var(--accent),var(--accent-2));border:0;color:#fff;box-shadow:0 5px 16px color-mix(in srgb,var(--accent) 25%,transparent);white-space:nowrap; }
+    .xview-launcher:hover { transform:translateY(-1px); }
 
     @media (max-width: 960px) {
       header { flex-direction: column; align-items: flex-start; gap: 8px; }
       main { padding: 14px; }
       .kpis, .grid3, .grid2 { grid-template-columns: 1fr; }
+      .stepper { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
       .chat-pop { grid-template-columns: 1fr; }
       .chat-pop > .chat-stream { border-right: none; border-bottom: 1px solid var(--line); }
       .chat-pop > .chat-debug { padding: 14px 0 0; }
@@ -418,7 +446,7 @@ const adminHTML = `<!doctype html>
           <a href="#/security" data-tab="security">보안 대시보드</a>
           <a href="#/billing" data-tab="billing">비용 대시보드</a>
           <a href="#/chargeback" data-tab="chargeback">비용 배부 팩</a>
-          <a href="#/dwdashboard" data-tab="dwdashboard">DW 대시보드</a>
+          <a href="#/dwdashboard" data-tab="dwdashboard">데이터 인사이트</a>
         </div>
       </div>
       <div class="nav-group" id="nav-observe">
@@ -466,6 +494,7 @@ const adminHTML = `<!doctype html>
       <a href="#/settings" data-tab="settings">설정</a>
     </nav>
     <div class="header-tools">
+      <button id="xview-launcher" class="xview-launcher" type="button" title="어디서나 요청의 처리 근거 탐색 (Shift+X)">✦ XView</button>
       <div class="user-menu-wrap">
         <span id="auth-user" class="user-chip" title="개인 메뉴 열기"></span>
         <div id="user-menu" class="user-menu" style="display:none">
@@ -502,8 +531,12 @@ const adminHTML = `<!doctype html>
 
   <div id="login-backdrop" class="login-backdrop">
     <form class="login-card" id="login-form" autocomplete="on">
+      <div class="login-brand">
+        <img class="login-logo" src="/favicon.ico" alt="vibe-coders 로고">
+        <div class="login-brand-copy"><div class="login-brand-name">vibe-coders</div><div class="login-brand-tagline">AI Gateway · 안전하고 관측 가능한 AI 운영</div></div>
+      </div>
       <h2>관리자 로그인</h2>
-      <div class="sub">AI 게이트웨이 어드민</div>
+      <div class="sub">계정으로 운영 콘솔에 접속하세요.</div>
       <label for="login-email">이메일</label>
       <input id="login-email" type="email" autocomplete="username" placeholder="admin@company.com" required>
       <label for="login-password">비밀번호</label>
@@ -1189,13 +1222,19 @@ const adminHTML = `<!doctype html>
           { label: 'Waterfall', href: '#/waterfall', active: tab === 'waterfall' },
           { label: 'LLM 관측', href: '#/llm', active: tab === 'llm' },
         ]);
+      } else if (tab === 'me' || tab === 'personalization' || tab === 'mykeys') {
+        el.innerHTML = subNav([
+          { label: '내 홈', href: '#/me', active: tab === 'me' },
+          { label: 'AI 사용 프로필', href: '#/personalization', active: tab === 'personalization' },
+          { label: 'API 키·연결', href: '#/mykeys', active: tab === 'mykeys' },
+        ]);
       } else if (tab === 'dwdashboard' || tab === 'clickhouse' || tab === 'dwmetrics') {
         const onCH = tab === 'clickhouse' || rest[0] === 'clickhouse';
         const onMetrics = tab === 'dwmetrics' || rest[0] === 'metrics';
         el.innerHTML = subNav([
-          { label: 'DW 대시보드', href: '#/dwdashboard', active: !onCH && !onMetrics },
-          { label: 'ClickHouse', href: '#/dwdashboard/clickhouse', active: onCH },
-          { label: '지표 사전', href: '#/dwmetrics', active: onMetrics },
+          { label: '데이터 인사이트', href: '#/dwdashboard', active: !onCH && !onMetrics },
+          { label: '데이터 파이프라인', href: '#/dwdashboard/clickhouse', active: onCH },
+          { label: '지표 카탈로그', href: '#/dwmetrics', active: onMetrics },
         ]);
       } else if (tab === 'settings' || tab === 'runtimesettings' || tab === 'changesets' || rest[0] === 'errors' || rest[0] === 'sso' || rest[0] === 'changesets') {
         const onRT = tab === 'runtimesettings' || rest[0] === 'runtime';
@@ -1216,9 +1255,19 @@ const adminHTML = `<!doctype html>
           { label: 'IP', href: '#/ips', active: tab === 'ips' },
           { label: '사용 한도', href: '#/quotas', active: tab === 'quotas' },
         ]);
-      } else if (tab === 'safety' || tab === 'skills' || tab === 'skill-studio' || tab === 'modeldeprecations') {
+      } else if (['safety','redteam','sbom','privacy-ledger','prompt-assets','model-contracts','policy-advisor','remediation'].includes(tab)) {
         el.innerHTML = subNav([
-          { label: '안전', href: '#/safety', active: tab === 'safety' },
+          { label: '안전 운영', href: '#/safety', active: tab === 'safety' },
+          { label: '공격 검증', href: '#/redteam', active: tab === 'redteam' },
+          { label: 'AI 자산', href: '#/sbom', active: tab === 'sbom' },
+          { label: '프라이버시', href: '#/privacy-ledger', active: tab === 'privacy-ledger' },
+          { label: '프롬프트 자산', href: '#/prompt-assets', active: tab === 'prompt-assets' },
+          { label: '모델 계약', href: '#/model-contracts', active: tab === 'model-contracts' },
+          { label: '정책 추천', href: '#/policy-advisor', active: tab === 'policy-advisor' },
+          { label: '자동 조치', href: '#/remediation', active: tab === 'remediation' },
+        ]);
+      } else if (tab === 'skills' || tab === 'skill-studio' || tab === 'modeldeprecations') {
+        el.innerHTML = subNav([
           { label: 'Skills', href: '#/skills', active: tab === 'skills' },
           { label: 'Skill Studio', href: '#/skill-studio', active: tab === 'skill-studio' },
           { label: '모델 일몰', href: '#/modeldeprecations', active: tab === 'modeldeprecations' },
@@ -1235,10 +1284,11 @@ const adminHTML = `<!doctype html>
           { label: '에이전트', href: '#/agents', active: tab === 'agents' },
           { label: 'VCS', href: '#/vcs', active: tab === 'vcs' },
         ], guide);
-      } else if (tab === 'chat-test' || tab === 'prompt-lab') {
+      } else if (tab === 'chat-test' || tab === 'prompt-lab' || tab === 'text2sql') {
         el.innerHTML = subNav([
           { label: 'Chat 테스트', href: '#/chat-test', active: tab === 'chat-test' },
           { label: 'Prompt Lab', href: '#/prompt-lab', active: tab === 'prompt-lab' },
+          { label: 'Text2SQL', href: '#/text2sql', active: tab === 'text2sql' },
         ]);
       } else if (tab === 'routing') {
         const onHealth = rest[0] === 'health';
@@ -1249,13 +1299,13 @@ const adminHTML = `<!doctype html>
       } else {
         el.innerHTML = '';
       }
-      const rail = relatedInfoRail(tab);
+      const rail = relatedInfoRail(tab, rest);
       if (rail) el.insertAdjacentHTML('beforeend', rail);
     }
 
     // Contextual information architecture. Strong links belong to the same operational
     // decision; weak links are useful references and stay visually secondary.
-    function relatedInfoRail(tab) {
+    function relatedInfoRail(tab, rest) {
       const relations = {
         'ops-home': [['routing/health','Provider Health',1],['pods','파드 상태',1],['journey-probe','클라이언트 점검',1],['settings/errors','시스템 오류',0]],
         capabilities: [['ops-home','운영 홈',1],['settings/runtime','런타임 설정',0]],
@@ -1271,8 +1321,30 @@ const adminHTML = `<!doctype html>
         'app-templates': [['apps','AI 업무 앱',1],['workflows','워크플로',0]],
         pods: [['ops-home','운영 홈',1],['settings/runtime','런타임 설정',1],['settings/errors','시스템 오류',0]],
         'journey-probe': [['gateway-mcp','Gateway MCP',1],['mykeys','Proxy Key',1],['pods','파드 상태',0]],
+        safety: [['remediation','자동 조치',1],['policy-advisor','정책 추천',1],['redteam','공격 검증',1],['requests','판단 원문',0]],
+        redteam: [['remediation','조치 보드',1],['safety','안전 정책',1],['sbom','대상 자산',0],['prompt-assets','프롬프트 자산',0]],
+        sbom: [['model-contracts','모델 계약',1],['privacy-ledger','데이터 사용',1],['redteam','공격 검증',0]],
+        'privacy-ledger': [['sbom','AI 자산',1],['safety','보안 이벤트',1],['requests','호출 근거',0]],
+        'prompt-assets': [['prompt-lab','Prompt Lab',1],['model-contracts','모델 계약',1],['redteam','공격 검증',0]],
+        'model-contracts': [['prompt-assets','프롬프트 자산',1],['policy-advisor','정책 추천',1],['modeldeprecations','모델 일몰',0]],
+        'policy-advisor': [['safety','현재 정책',1],['remediation','자동 조치',1],['requests','판단 근거',0]],
+        remediation: [['safety','안전 운영',1],['routing/health','Provider Health',1],['mcp-tools','MCP 도구',1],['requests','호출 이력',0]],
+        'chat-test': [['prompt-lab','반복 평가',1],['routing/health','라우팅 상태',1],['requests','실행 결과',0],['text2sql','SQL 테스트',0]],
+        'prompt-lab': [['chat-test','즉시 테스트',1],['prompt-assets','자산 승격',1],['model-contracts','출력 계약',1],['text2sql','SQL 회귀',0]],
+        text2sql: [['chat-test','질의 테스트',1],['prompt-lab','회귀 실험',1],['safety','권한·정책',1],['remediation','위험 조치',0]],
+        dwdashboard: [['dwmetrics','지표 카탈로그',1],['dwdashboard/clickhouse','데이터 파이프라인',1],['text2sql','데이터 질의',1],['requests','원본 호출',0]],
+        dwmetrics: [['dwdashboard','데이터 인사이트',1],['dwdashboard/clickhouse','데이터 파이프라인',1],['data-products','데이터 상품',0]],
+        me: [['personalization','AI 사용 프로필',1],['mykeys','API 키·연결',1],['chat-test','새 작업 테스트',1],['requests','전체 호출 이력',0]],
+        personalization: [['me','내 홈',1],['mykeys','API 키·연결',1],['chat-test','모델 테스트',0],['mcp-tools','MCP 도구',0]],
+        mykeys: [['me','내 홈',1],['chat-test','키로 호출 테스트',1],['gateway-mcp','MCP 연결',1],['personalization','사용 프로필',0]],
+        settings: [['settings/runtime','런타임 설정',1],['changesets','변경 세트',1],['settings/errors','시스템 오류',1],['ops-home','운영 상태',0]],
+        'settings/runtime': [['changesets','변경 세트로 검토',1],['settings/errors','변경 후 오류',1],['settings','기본 설정',0]],
+        'settings/changesets': [['settings/runtime','현재 런타임 값',1],['remediation','자동 조치',0],['settings/errors','적용 오류',1]],
+        'settings/sso': [['users','사용자·역할',1],['settings/runtime','인증 런타임',1],['settings/errors','로그인 오류',1]],
+        'settings/errors': [['ops-home','운영 상태',1],['pods','파드 상태',1],['settings/runtime','런타임 설정',0],['remediation','자동 조치',0]],
       };
-      const rows = relations[tab] || [];
+      const relationKey = tab === 'settings' && rest && rest[0] ? 'settings/' + rest[0] : (tab === 'changesets' ? 'settings/changesets' : tab);
+      const rows = relations[relationKey] || relations[tab] || [];
       const allowed = authState.nav && Array.isArray(authState.nav.allowed_tabs) ? new Set(authState.nav.allowed_tabs) : null;
       const parent = p => ({'routing/health':'routing','settings/runtime':'settings','settings/errors':'settings','mcp-tools':'mcp','mcp-policy':'mcp','mcp-upstreams':'mcp','agent-routes':'mcp'}[p] || p.split('/')[0]);
       const visible = rows.filter(x=>!allowed || allowed.has(parent(x[0])) || allowed.has(x[0]));
@@ -1634,9 +1706,19 @@ const adminHTML = `<!doctype html>
       // build model → index map for stable coloring
       const modelIndex = {};
       groups.forEach((g, i) => { modelIndex[g.model] = i; });
+      const categoryCounts = { error:0, governance:0, cache:0, failover:0, complex:0, normal:0 };
+      points.forEach(p => { categoryCounts[xviewCategory(p)]++; });
+      const currentY = xviewYField(xviewState.metric);
+      const metricValues = points.map(p=>Number(p[currentY]||0)).sort((a,b)=>a-b);
+      const p95Value = metricValues.length ? metricValues[Math.floor((metricValues.length-1)*.95)] : 0;
+      const attentionCount = categoryCounts.error + categoryCounts.governance + categoryCounts.failover;
 
       const view = document.getElementById('view');
-      view.innerHTML = section('XView — 모델별 호출 분석',
+      const xviewHero = '<div class="home-hero"><h2>✦ XView</h2><div class="home-sub">수천 개 요청 속에서 느림·오류·비용·정책 신호를 찾고, 한 점을 클릭해 “왜 이렇게 처리됐는가”까지 이어서 설명합니다.</div><div class="home-actions"><button type="button" class="home-action primary" onclick="openXViewLauncher()"><strong>요청 ID로 설명 찾기</strong><small>라우팅·안전·비용 근거</small></button><a class="home-action" href="#/waterfall"><strong>Waterfall</strong><small>세션 시간 흐름 분석</small></a><a class="home-action" href="#/requests"><strong>호출 이력</strong><small>원문과 응답 상세</small></a><a class="home-action" href="#/llm"><strong>LLM 관측</strong><small>평가·피드백·패턴</small></a></div></div>';
+      view.innerHTML = xviewHero + section('호출 신호 요약', '<div class="kpis">' +
+        kpi('분석 요청',fmt(points.length)) + kpi('확인 필요','<span class="status '+(attentionCount?'warn':'')+'">'+fmt(attentionCount)+'</span>') + kpi('오류', '<span style="color:var(--bad)">'+fmt(categoryCounts.error)+'</span>') + kpi('정책 신호',fmt(categoryCounts.governance)) + kpi('폴백',fmt(categoryCounts.failover)) + kpi(xviewYLabel(xviewState.metric)+' P95',xviewFmtY(xviewState.metric,p95Value)) + '</div>') +
+        card('신호 구성', '<div class="card-body"><div class="viz-grid" style="margin-top:0"><div class="viz-panel"><div class="viz-title">즉시 확인 비중 <small>오류·정책·폴백</small></div>' + donutVisual(points.length?attentionCount/points.length*100:0,points.length?Math.round(attentionCount/points.length*100)+'%':'0%','확인 필요',[{label:'확인 필요',value:fmt(attentionCount)},{label:'정상·기타',value:fmt(Math.max(0,points.length-attentionCount))}]) + '</div><div class="viz-panel"><div class="viz-title">요청 신호 분포 <small>현재 조회 범위</small></div>' + visualBars(Object.keys(categoryCounts).map(k=>({label:xviewColors[k].label,value:categoryCounts[k]})).sort((a,b)=>b.value-a.value),null,true) + '</div></div></div>') +
+        section('요청 분포 탐색',
         '<div class="toolbar">' +
           '<select id="xv-window">' +
             ['5m','15m','1h','6h','24h'].map(wd => '<option value="' + wd + '"' + (xviewState.window === wd ? ' selected' : '') + '>' + wd + '</option>').join('') +
@@ -2399,10 +2481,32 @@ const adminHTML = `<!doctype html>
     }
 
     // ---------- Explainability View (XView) ----------
+    window.openXViewLauncher = async () => {
+      openModal('✦ XView 요청 탐색',
+        '<div class="banner"><strong>어떤 요청이 왜 그렇게 처리됐는지 바로 확인하세요.</strong><div class="muted" style="font-size:11px;margin-top:4px">요청 ID를 입력하거나 최근 요청을 선택하면 라우팅·안전·비용·폴백·세션 근거를 한 화면에서 설명합니다.</div></div>' +
+        '<div style="display:flex;gap:8px;margin:14px 0"><input id="xv-quick-id" placeholder="request_id 입력" style="flex:1"><button type="button" onclick="xviewOpenFromInput()">설명 열기</button><button class="secondary" type="button" onclick="closeModal();location.hash=\'#/xview\'">전체 분석</button></div>' +
+        '<div id="xv-quick-recent"><div class="empty">최근 요청을 불러오는 중...</div></div>');
+      const input = document.getElementById('xv-quick-id');
+      if (input) { input.focus(); input.addEventListener('keydown', e => { if (e.key === 'Enter') xviewOpenFromInput(); }); }
+      try {
+        const d = await api('/admin/requests?limit=8');
+        const rows = d.requests || [];
+        const host = document.getElementById('xv-quick-recent'); if (!host) return;
+        host.innerHTML = '<div class="viz-title">최근 요청 <small>선택하면 설명을 바로 엽니다</small></div>' + (rows.length ? '<div style="display:grid;gap:6px;margin-top:8px">' + rows.map(r =>
+          '<button type="button" class="ghost" style="height:auto;padding:9px 10px;text-align:left;display:flex;justify-content:space-between;gap:10px" onclick="openExplain(\'' + escapeAttr(r.id) + '\')"><span><strong>' + escapeHTML(r.model || '-') + '</strong><small class="muted" style="display:block">' + escapeHTML(r.id || '') + '</small></span><span><span class="status ' + (Number(r.status_code||0)>=400?'error':'') + '">' + fmt(r.status_code||0) + '</span> <span class="muted">' + fmt(r.latency_ms||0) + 'ms</span></span></button>').join('') + '</div>' : '<div class="empty">최근 요청이 없습니다.</div>');
+      } catch (e) { const host=document.getElementById('xv-quick-recent'); if(host) host.innerHTML='<div class="error-line">'+escapeHTML(e.message)+'</div>'; }
+    };
+    window.xviewOpenFromInput = () => {
+      const id=((document.getElementById('xv-quick-id')||{}).value||'').trim();
+      if (!id) return;
+      openExplain(id);
+    };
     window.openExplain = async (id) => {
       if (!id) return;
       try {
         const x = await api('/admin/requests/' + encodeURIComponent(id) + '/explain');
+        const recent = JSON.parse(sessionStorage.getItem('xviewRecent') || '[]').filter(v => v !== id);
+        recent.unshift(id); sessionStorage.setItem('xviewRecent', JSON.stringify(recent.slice(0, 12)));
         openModal('XView 설명 — ' + (x.trace_id || id), explainHTML(x));
       } catch (err) {
         openModal('오류', '<div class="error-line">' + escapeHTML(err.message) + '</div>');
@@ -2479,7 +2583,13 @@ const adminHTML = `<!doctype html>
         row('요청 상세', '<a href="#" onclick="closeModal();openRequestDetail(\'' + escapeAttr(x.request_id) + '\');return false">원문/프롬프트/응답 보기</a>') +
       '</div>';
 
-      return explainPanel('🧭 라우팅 (왜 이 모델인가)', routing, 'var(--accent)') +
+      const signals = Number(gv.policy_decision_count||0) + Number(gv.approval_count||0) + Number(gv.secret_event_count||0) + Number(gv.anomaly_event_count||0);
+      const headline = sf.blocked ? '안전 정책으로 차단된 요청' : (fb.occurred ? '폴백으로 복구된 요청' : (rt.model_changed ? '라우팅 규칙이 모델을 변경한 요청' : '정상 처리 경로의 요청'));
+      const overview = '<div class="banner ' + (sf.blocked?'error':(fb.occurred?'warn':'')) + '"><strong style="font-size:15px">' + escapeHTML(headline) + '</strong><div class="muted" style="font-size:11px;margin-top:4px">요청 ' + escapeHTML(x.request_id||'') + ' · ' + escapeHTML(x.created_at||'') + '</div></div>' +
+        '<div class="kpis" style="margin-top:10px">' + kpi('선택 경로',escapeHTML((rt.chosen_provider||'-')+' / '+(rt.chosen_model||'-'))) + kpi('복잡도',fmt(rt.complexity||0)+'/100') + kpi('위험도','<span class="status '+((rt.risk_score||0)>=60?'warn':'')+'">'+fmt(rt.risk_score||0)+'/100</span>') + kpi('실제 비용',money(co.actual_krw||0)) + kpi('거버넌스 신호',fmt(signals)) + '</div>' +
+        '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px"><button class="secondary" type="button" onclick="closeModal();location.hash=\'#/xview\'">전체 분포에서 보기</button><button class="secondary" type="button" onclick="closeModal();openRequestDetail(\'' + escapeAttr(x.request_id) + '\')">요청 원문 보기</button>' + (se.session_id?'<button class="secondary" type="button" onclick="closeModal();openWaterfall(\''+escapeAttr(se.session_id)+'\')">세션 Waterfall</button>':'') + '</div>';
+
+      return overview + explainPanel('🧭 라우팅 (왜 이 모델인가)', routing, 'var(--accent)') +
         explainPanel('🔁 폴백', fallback, 'var(--warn)') +
         explainPanel('🟢 캐시', cache, '#22c55e') +
         explainPanel('🛡 안전', safety, 'var(--bad)') +
@@ -2760,9 +2870,17 @@ const adminHTML = `<!doctype html>
       const modelQuality = await api('/admin/models/quality?window=30d').catch(() => ({ models: [] }));
       const costAnomalies = await api('/admin/cost/anomalies?window=6h&min_repeats=5').catch(() => null);
       const anomalies = (anomalyResp && anomalyResp.anomalies) || [];
+      const statusRows = stats.by_status || [];
+      const successRequests = statusRows.filter(r=>r.class==='2xx').reduce((s,r)=>s+Number(r.requests||0),0);
+      const successRate = Number(stats.total_requests||0) ? successRequests / Number(stats.total_requests||0) : 0;
+      const risk = (ops && ops.risk) || {};
+      const attention = anomalies.length + statusRows.filter(r=>r.class!=='2xx').reduce((s,r)=>s+Number(r.requests||0),0);
+      const dashboardHeadline = risk.tier === 'critical' || risk.tier === 'high' ? '운영 위험 신호를 우선 확인하세요.' : (attention ? '확인이 필요한 변화가 감지됐습니다.' : '현재 서비스는 안정적으로 운영 중입니다.');
+      const dashboardHero = '<div class="home-hero"><span class="status ' + ((risk.tier==='critical'||risk.tier==='high')?'error':(attention?'warn':'')) + '">운영 상태 · ' + escapeHTML(({low:'양호',medium:'주의',high:'높음',critical:'심각'}[risk.tier]||'관측 중')) + '</span><h2 style="margin-top:10px">' + escapeHTML(dashboardHeadline) + '</h2><div class="home-sub">요청·비용·품질·운영 위험을 한곳에서 보고, 이상 신호에서 원인 분석과 조치 화면으로 바로 이어집니다.</div><div class="home-actions"><button type="button" class="home-action primary" onclick="openXViewLauncher()"><strong>✦ 요청 원인 분석</strong><small>XView로 처리 근거 확인</small></button><a class="home-action" href="#/waterfall"><strong>세션 Waterfall</strong><small>느린 구간 추적</small></a><a class="home-action" href="#/remediation"><strong>자동 조치</strong><small>영향 미리보기·복구</small></a><a class="home-action" href="#/dwdashboard"><strong>데이터 인사이트</strong><small>장기 추세·추천</small></a></div></div>';
+      const dashboardVisual = card('서비스 상태 한눈에', '<div class="card-body"><div class="viz-grid" style="margin-top:0"><div class="viz-panel"><div class="viz-title">요청 품질 <small>' + escapeHTML(windowLabel(win)) + '</small></div>' + donutVisual(successRate*100,Math.round(successRate*100)+'%','성공률',[{label:'정상 요청',value:fmt(successRequests)},{label:'오류·제한',value:fmt(Math.max(0,Number(stats.total_requests||0)-successRequests))}]) + '</div><div class="viz-panel"><div class="viz-title">모델 사용량 <small>요청 기준 상위 모델</small></div>' + visualBars((stats.by_model||[]).map(m=>({label:m.key||'-',value:Number(m.requests||0)}))) + '</div></div></div>');
 
       const html =
-        section('요약', kpiBlock(stats)) +
+        dashboardHero + section('핵심 지표 · ' + windowLabel(win), kpiBlock(stats)) + dashboardVisual +
         (ops ? section('운영 리스크 스코어 · 운영 상태', opsRiskHTML(ops.risk) + opsStatusHTML(ops.status || {})) : '') +
         '<div class="grid3" style="grid-template-columns: 2fr 1fr 1fr;">' +
           card('시계열 — ' + windowLabel(win),
@@ -7319,7 +7437,7 @@ const adminHTML = `<!doctype html>
       mcp: 'MCP', 'agent-routes': '에이전트 라우트', text2sql: 'Text2SQL', dashboard: '대시보드',
       xview: 'XView', waterfall: 'Waterfall', safety: '안전', redteam: 'Red Team', users: '사용자',
       teams: '팀', quotas: '사용 한도', settings: '설정', sbom: 'SBOM', 'privacy-ledger': '프라이버시 원장',
-      workflows: '워크플로', apps: 'AI 업무 앱', sessions: '세션 비행기록', dwdashboard: 'DW 대시보드',
+      workflows: '워크플로', apps: 'AI 업무 앱', sessions: '세션 비행기록', dwdashboard: '데이터 인사이트',
     };
     window.capGuide = () => {
       openModal('기능 맵이란?',
@@ -7550,6 +7668,9 @@ const adminHTML = `<!doctype html>
       try { d = await api('/admin/change-sets'); }
       catch (e) { view.innerHTML = section('변경 세트', '<div class="card-body" style="padding:16px"><p class="muted">' + escapeHTML(e.message) + '</p></div>'); return; }
       const sets = d.change_sets || [];
+      const pendingSets = sets.filter(cs => cs.status === 'pending').length;
+      const approvedSets = sets.filter(cs => cs.status === 'approved').length;
+      const appliedSets = sets.filter(cs => cs.status === 'applied').length;
       const rows = sets.length ? sets.map(cs =>
         '<tr><td><strong>' + escapeHTML(cs.title) + '</strong>' + (cs.description ? '<div class="muted" style="font-size:11px">' + escapeHTML(cs.description) + '</div>' : '') + '</td>' +
         '<td>' + csStatusBadge(cs.status) + '</td>' +
@@ -7558,7 +7679,8 @@ const adminHTML = `<!doctype html>
         '<td>' + csActions(cs) + '</td></tr>' +
         '<tr><td colspan="5"><div id="cs-detail-' + escapeAttr(cs.id) + '"></div></td></tr>'
       ).join('') : '<tr><td colspan="5" class="muted">변경 세트가 없습니다.</td></tr>';
-      view.innerHTML = section('변경 세트', '<p class="muted" style="font-size:12px">설정 변경을 하나의 릴리즈로 묶어 dry-run → 승인 → 적용 → 롤백합니다. (현재 버전은 setting 항목 적용, policy/routing/skill은 참고 기록)</p>') +
+      view.innerHTML = section('변경 세트', '<div class="kpis">' + kpi('전체',fmt(sets.length)) + kpi('승인 대기','<span class="status ' + (pendingSets?'warn':'') + '">' + fmt(pendingSets) + '</span>') + kpi('적용 준비',fmt(approvedSets)) + kpi('적용 완료',fmt(appliedSets)) + '</div>' +
+        '<div class="stepper" style="grid-template-columns:repeat(5,minmax(0,1fr))"><div class="step"><strong>1. 초안</strong><span class="muted">변경을 한 묶음으로</span></div><div class="step"><strong>2. Dry-run</strong><span class="muted">유효성·영향 확인</span></div><div class="step"><strong>3. 승인</strong><span class="muted">리뷰어 검토</span></div><div class="step"><strong>4. 적용</strong><span class="muted">승인된 값 반영</span></div><div class="step"><strong>5. 검증·롤백</strong><span class="muted">오류 확인 후 복구</span></div></div>') +
         card('변경 세트 목록', '<div class="card-body"><table><thead><tr><th>제목</th><th>상태</th><th>항목</th><th>리뷰어</th><th>액션</th></tr></thead><tbody>' + rows + '</tbody></table></div>') +
         card('변경 영향도 시뮬레이터',
           '<div class="card-body">' +
@@ -10924,6 +11046,11 @@ const adminHTML = `<!doctype html>
       const mcpAffinity = mcpAffinityResp.items || [];
       const text2sqlHints = text2sqlHintsResp.items || [];
       const adoption = adoptionResp.by_kind || [];
+      const totalRequests = profiles.reduce((s, p) => s + Number(p.requests || 0), 0);
+      const weightedSuccess = totalRequests ? profiles.reduce((s, p) => s + Number(p.requests || 0) * Number(p.success_rate || 0), 0) / totalRequests : 0;
+      const highRiskProfiles = profiles.filter(p => Number(p.risk_score || 0) >= 70).length;
+      const adopted = adoption.reduce((s, a) => s + Number(a.adopted || 0), 0);
+      const dismissed = adoption.reduce((s, a) => s + Number(a.dismissed || 0), 0);
       let html = '<p class="muted">사용자별 AI 사용 프로필 (최근 30일). 모델·작업·언어 선호, 비용 성향, 신뢰도를 요약합니다. 사용자를 클릭하면 상세·스냅샷을 볼 수 있습니다.</p>';
       if (!profiles.length) {
         html += '<p class="muted">표시할 프로필이 없습니다 (사용자 매핑된 API Key 활동 필요).</p>';
@@ -11046,8 +11173,21 @@ const adminHTML = `<!doctype html>
             '<td class="muted">' + escapeHTML(m.reason || '') + '</td>' +
           '</tr>').join('') + '</tbody></table>';
       }
-      view.innerHTML =
-        card('개인 AI 프로필', '<div class="card-body">' + html + '</div>') +
+      const summary = section('개인화 운영 요약', '<div class="kpis">' +
+        kpi('프로필 사용자', fmt(profiles.length)) + kpi('총 요청', fmt(totalRequests)) +
+        kpi('가중 성공률', pctText(weightedSuccess)) + kpi('고위험 사용자', '<span class="status ' + (highRiskProfiles ? 'error' : '') + '">' + fmt(highRiskProfiles) + '</span>') +
+        kpi('코칭 후보', fmt(coaching.length)) + kpi('추천 채택', fmt(adopted)) + '</div>') +
+        card('개인화 신호 한눈에', '<div class="card-body"><div class="viz-grid" style="margin-top:0">' +
+          '<div class="viz-panel"><div class="viz-title">추천 반응 <small>채택과 거절</small></div>' + donutVisual((adopted + dismissed) ? adopted / (adopted + dismissed) * 100 : 0, (adopted + dismissed) ? Math.round(adopted / (adopted + dismissed) * 100) + '%' : '-', '채택률', [{label:'채택',value:fmt(adopted)},{label:'거절',value:fmt(dismissed)}]) + '</div>' +
+          '<div class="viz-panel"><div class="viz-title">모델 적합도 상위 <small>성공률·사용량·비용 종합</small></div>' + visualBars(modelAffinity.slice().sort((a,b)=>Number(b.score||0)-Number(a.score||0)).slice(0,8).map(m=>({label:(m.user_id||'-')+' · '+(m.model||'-'),value:Number(m.score||0)})), v=>Math.round(v)+'점') + '</div>' +
+        '</div></div>');
+      const profileGallery = profiles.length ? card('주요 사용자 프로필', '<div class="card-body"><div class="profile-gallery">' + profiles.slice().sort((a,b)=>Number(b.requests||0)-Number(a.requests||0)).slice(0,8).map(p => {
+        const initials=String(p.user_id||'?').split(/[@._-]/).filter(Boolean).slice(0,2).map(v=>v[0]).join('').toUpperCase();
+        const risk=Number(p.risk_score||0), riskCls=risk>=70?'error':(risk>=35?'warn':'');
+        return '<a class="profile-tile" href="#/personalization/'+encodeURIComponent(p.user_id||'')+'"><div class="profile-tile-head"><div class="profile-avatar">'+escapeHTML(initials||'?')+'</div><div style="min-width:0"><div class="profile-name">'+escapeHTML(p.user_id||'-')+'</div><div class="profile-meta">'+escapeHTML(p.team||'소속 없음')+' · '+escapeHTML(p.role||'역할 없음')+'</div></div><span class="status '+riskCls+'" style="margin-left:auto">risk '+fmt(risk)+'</span></div><div class="profile-stats"><div class="profile-stat"><small>요청</small><strong>'+fmt(p.requests||0)+'</strong></div><div class="profile-stat"><small>성공률</small><strong>'+pctText(p.success_rate)+'</strong></div><div class="profile-stat"><small>비용</small><strong>'+money(p.total_cost_krw||0)+'</strong></div></div><p class="muted" style="font-size:11px;line-height:1.45;margin:11px 0 0">'+escapeHTML((p.summary||'사용 패턴 상세 보기').slice(0,100))+'</p></a>';
+      }).join('') + '</div></div>') : '';
+      view.innerHTML = summary + profileGallery +
+        card('사용자 AI 프로필', '<div class="card-body">' + html + '</div>') +
         card('개인화 코칭 후보', '<div class="card-body">' + coachingHtml + '</div>') +
         card('Text2SQL 개인 힌트', '<div class="card-body">' + text2sqlHintsHtml + '</div>') +
         card('추천 채택률', '<div class="card-body">' + adoptionHtml + '</div>') +
@@ -11063,6 +11203,8 @@ const adminHTML = `<!doctype html>
       const p = d.profile || {};
       const snaps = d.snapshots || [];
       const back = '<p><a href="#/personalization">← 전체 프로필</a></p>';
+      const profileInitials = String(p.user_id||userID||'?').split(/[@._-]/).filter(Boolean).slice(0,2).map(v=>v[0]).join('').toUpperCase();
+      const profileHero = '<div class="profile-hero"><div class="profile-avatar">' + escapeHTML(profileInitials||'?') + '</div><div style="min-width:0;flex:1"><h2>' + escapeHTML(p.user_id||userID) + '</h2><p>' + escapeHTML((p.team||'소속 없음')+' · '+(p.role||'역할 없음')) + '</p><p>' + escapeHTML(p.summary||'최근 30일의 AI 사용 패턴과 변화입니다.') + '</p></div><div><span class="status ' + governanceStatusClass((p.risk_score||0)>=70?'high':((p.risk_score||0)>=35?'medium':'low')) + '">risk ' + fmt(p.risk_score||0) + '</span></div></div>';
       const kv = '<div class="kv">' +
         row('사용자', escapeHTML(p.user_id || userID)) +
         row('팀 / 역할', escapeHTML((p.team || '-') + ' / ' + (p.role || '-'))) +
@@ -11102,7 +11244,7 @@ const adminHTML = `<!doctype html>
       } else {
         driftCard = '<div style="margin-top:16px"><h3>스냅샷 추세 (drift)</h3><p class="muted">추세 계산에는 스냅샷이 2개 이상 필요합니다. 시점을 두고 스냅샷 생성을 여러 번 실행하세요.</p></div>';
       }
-      const snapBtn = '<div style="margin-top:12px"><button type="button" onclick="snapshotProfile(\'' + userID.replace(/'/g, "\\'") + '\')">스냅샷 생성</button> ' +
+      const snapBtn = '<div style="margin-top:12px"><button type="button" onclick="snapshotProfile(\'' + escapeAttr(userID) + '\')">현재 상태 스냅샷</button> ' +
         '<span class="muted">현재 프로필을 시점 기록으로 저장합니다.</span></div>';
       const snapTable = snaps.length ? (
         '<h3 style="margin-top:16px">스냅샷 이력</h3><table><thead><tr><th>생성 시각</th><th>요청</th><th>총비용</th><th>성공률</th></tr></thead><tbody>' +
@@ -11113,7 +11255,8 @@ const adminHTML = `<!doctype html>
             '<td>' + fmt(Math.round(parsed.total_cost_krw || 0)) + '</td><td>' + pctText(parsed.success_rate) + '</td></tr>';
         }).join('') + '</tbody></table>'
       ) : '<p class="muted" style="margin-top:16px">스냅샷이 없습니다.</p>';
-      view.innerHTML = back + card('프로필: ' + escapeHTML(userID), '<div class="card-body">' + kv + prefs + driftCard + snapBtn + snapTable + '</div>');
+      const profileVisual = '<div class="viz-grid" style="margin-top:0"><div class="viz-panel"><div class="viz-title">품질 상태 <small>최근 30일</small></div>' + donutVisual(Number(p.success_rate||0)*100, pctText(p.success_rate), '성공률', [{label:'요청',value:fmt(p.requests||0)},{label:'오류율',value:pctText(p.error_rate)}]) + '</div><div class="viz-panel"><div class="viz-title">기능 사용 비중 <small>전체 요청 대비</small></div>' + visualBars([{label:'캐시 활용',value:Number(p.cache_rate||0)*100},{label:'Text2SQL',value:Number(p.text2sql_usage_rate||0)*100},{label:'MCP',value:Number(p.mcp_usage_rate||0)*100}], v=>v.toFixed(0)+'%') + '</div></div>';
+      view.innerHTML = back + profileHero + section('핵심 지표', '<div class="kpis">' + kpi('요청',fmt(p.requests||0)) + kpi('성공률',pctText(p.success_rate)) + kpi('총 비용',money(p.total_cost_krw||0)) + kpi('평균 지연',fmt(Math.round(p.avg_latency_ms||0))+'ms') + '</div>') + card('사용 패턴', '<div class="card-body">' + profileVisual + kv + prefs + driftCard + snapBtn + snapTable + '</div>');
     }
 
     async function snapshotProfile(userID) {
@@ -11573,11 +11716,18 @@ const adminHTML = `<!doctype html>
       const view = document.getElementById('view');
       view.innerHTML = section('자동 조치', '<div class="empty">불러오는 중...</div>');
       let d;
-      try { d = await api('/admin/remediation/playbooks'); }
+      const windowHours = Number(sessionStorage.getItem('remediationWindow') || 6);
+      try { d = await api('/admin/remediation/playbooks?window=' + encodeURIComponent(windowHours + 'h')); }
       catch (e) { view.innerHTML = section('자동 조치', '<div class="card-body" style="padding:16px"><p class="muted">' + escapeHTML(e.message) + '</p></div>'); return; }
-      window.remApply = async (type, paramsJson, dry) => {
-        let params = {};
-        try { params = JSON.parse(paramsJson || '{}'); } catch (e) {}
+      window.remediationSetWindow = (hours) => {
+        sessionStorage.setItem('remediationWindow', String(hours));
+        renderRemediation();
+      };
+      window.remApply = async (actionIndex, dry) => {
+        const action = (window._remediationActions || [])[actionIndex];
+        if (!action) { openModal('조치 오류', '<div class="error-line">조치 정보를 찾을 수 없습니다. 화면을 새로고침해 주세요.</div>'); return; }
+        const type = action.type;
+        const params = action.params || {};
         if (!dry && !confirm('이 조치를 실제로 적용할까요?\n' + type)) return;
         let reason = '';
         if (!dry) { reason = prompt('적용 사유(감사 로그에 기록):', '') || ''; }
@@ -11604,12 +11754,19 @@ const adminHTML = `<!doctype html>
       };
       const sevBadge = (s) => s === 'critical' ? '<span class="status error">심각</span>' : (s === 'warning' ? '<span class="status warn">경고</span>' : '<span class="status">정보</span>');
       const books = d.playbooks || [];
+      const allActions = books.reduce((out, pb) => out.concat(pb.actions || []), []);
+      window._remediationActions = allActions;
+      const critical = books.filter(pb => pb.severity === 'critical').length;
+      const warning = books.filter(pb => pb.severity === 'warning').length;
+      const executable = allActions.filter(a => a.executable).length;
+      const reversible = allActions.filter(a => a.reversible).length;
+      let actionIndex = 0;
       const cards = books.map(pb => {
         const actions = (pb.actions || []).map(a => {
-          const params = JSON.stringify(a.params || {}).replace(/"/g, '&quot;');
+          const idx = actionIndex++;
           const btns = a.executable
-            ? '<button type="button" class="secondary" style="font-size:11px" onclick="remApply(\'' + escapeAttr(a.type) + '\',\'' + params + '\',true)">Dry-run</button> ' +
-              '<button type="button" style="font-size:11px" onclick="remApply(\'' + escapeAttr(a.type) + '\',\'' + params + '\',false)">적용</button>'
+            ? '<button type="button" class="secondary" style="font-size:11px" onclick="remApply(' + idx + ',true)">영향 미리보기</button> ' +
+              '<button type="button" style="font-size:11px" onclick="remApply(' + idx + ',false)">승인 후 적용</button>'
             : (a.link ? '<a href="' + escapeAttr(a.link) + '"><button type="button" class="secondary" style="font-size:11px">화면 이동</button></a>' : '<span class="muted" style="font-size:11px">수동 조치</span>');
           return '<div style="border:1px solid var(--border);border-radius:6px;padding:8px;margin:4px 0">' +
             '<div style="display:flex;justify-content:space-between;align-items:center"><strong>' + escapeHTML(a.title) + '</strong>' +
@@ -11620,10 +11777,21 @@ const adminHTML = `<!doctype html>
             '<div style="margin-top:4px">' + btns + '</div>' +
           '</div>';
         }).join('');
-        return card(sevBadge(pb.severity) + ' ' + escapeHTML(situationLabel(pb.situation)),
-          '<div class="card-body"><p class="muted" style="font-size:12px">' + escapeHTML(pb.summary) + '</p>' + actions + '</div>');
+        return '<section><h2 style="display:flex;align-items:center;gap:7px">' + sevBadge(pb.severity) + '<span>' + escapeHTML(situationLabel(pb.situation)) + '</span></h2>' +
+          '<div class="card-body"><p class="muted" style="font-size:12px">' + escapeHTML(pb.summary) + '</p>' + actions + '</div></section>';
       }).join('');
-      view.innerHTML = section('자동 조치 (Auto Remediation) — 종합 ' + (d.overall_severity || 'info'), '') +
+      const overall = d.overall_severity === 'critical' ? '심각' : (d.overall_severity === 'warning' ? '경고' : '정상');
+      const controls = '<div class="toolbar" style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:12px">' +
+        '<div><strong>운영 신호 기반 조치 후보</strong><div class="muted" style="font-size:11px;margin-top:3px">먼저 영향을 확인하고, 승인 후 적용하세요. 가역 조치는 적용 결과에서 즉시 되돌릴 수 있습니다.</div></div>' +
+        '<label class="muted" style="font-size:11px">분석 범위 <select onchange="remediationSetWindow(this.value)"><option value="1"' + (windowHours === 1 ? ' selected' : '') + '>최근 1시간</option><option value="6"' + (windowHours === 6 ? ' selected' : '') + '>최근 6시간</option><option value="24"' + (windowHours === 24 ? ' selected' : '') + '>최근 24시간</option><option value="168"' + (windowHours === 168 ? ' selected' : '') + '>최근 7일</option></select></label></div>';
+      view.innerHTML = controls +
+        '<div class="kpis" style="margin-bottom:12px">' +
+          kpi('종합 상태', sevBadge(d.overall_severity) + ' ' + overall) +
+          kpi('감지 상황', fmt(books.length)) +
+          kpi('심각 / 경고', '<span style="color:var(--bad)">' + fmt(critical) + '</span> / <span style="color:var(--warn)">' + fmt(warning) + '</span>') +
+          kpi('실행 가능', fmt(executable)) +
+          kpi('되돌리기 가능', fmt(reversible) + ' / ' + fmt(allActions.length)) +
+        '</div>' + section('자동 조치 후보 · 최근 ' + fmt(d.window_hours || windowHours) + '시간', '') +
         '<p class="muted" style="font-size:12px;padding:0 14px">' + escapeHTML(d.note || '') + '</p>' +
         (cards || '<div class="card-body" style="padding:16px"><p class="muted">현재 조치가 필요한 상황이 없습니다. 👍</p></div>');
     }
@@ -12262,7 +12430,17 @@ const adminHTML = `<!doctype html>
       const today = d.today || {}, month = d.month || {}, prof = d.profile || {};
       const pctv = (v) => (v == null ? '-' : (v * 100).toFixed(1) + '%');
       const won = (v) => '₩' + fmt(Math.round(v || 0));
-      const todaySuccess = today.requests ? (1 - (today.errors || 0) / today.requests) : (prof.success_rate || 0);
+      const todaySuccess = Math.max(0, Math.min(1, today.requests ? (1 - (today.errors || 0) / today.requests) : (prof.success_rate || 0)));
+
+      const displayName = ((authState.user || {}).name || (authState.user || {}).email || d.user_id || '사용자');
+      const hour = new Date().getHours();
+      const greeting = hour < 12 ? '좋은 아침이에요' : (hour < 18 ? '좋은 오후예요' : '좋은 저녁이에요');
+      const attention = (d.key_alerts||[]).length + (d.recent_failures||[]).length + (d.recent_blocks||[]).length;
+      const homeHeadline = attention ? '확인이 필요한 항목 ' + attention + '개가 있어요. 중요한 것부터 살펴보세요.' : '현재 특별히 확인할 문제는 없습니다. 바로 작업을 시작해도 좋아요.';
+      const allowedHomeTabs = authState.nav && Array.isArray(authState.nav.allowed_tabs) ? new Set(authState.nav.allowed_tabs) : null;
+      const homeLink = (tab,label,sub,primary) => (!allowedHomeTabs || allowedHomeTabs.has(tab)) ? '<a class="home-action' + (primary?' primary':'') + '" href="#/'+tab+'"><strong>'+escapeHTML(label)+'</strong><small>'+escapeHTML(sub)+'</small></a>' : '';
+      const hero = '<div class="home-hero"><h2>' + escapeHTML(displayName) + '님, ' + greeting + '.</h2><div class="home-sub">' + escapeHTML(homeHeadline) + ' 이번 달 사용과 추천을 한곳에서 확인하고 필요한 작업으로 바로 이동할 수 있습니다.</div>' +
+        '<div class="home-actions">' + homeLink('chat-test','새 AI 작업 시작 →','모델을 골라 바로 테스트',true) + '<a class="home-action" href="#/mykeys"><strong>내 API Key</strong><small>발급·상태·scope 관리</small></a>' + homeLink('text2sql','Text2SQL','질문으로 데이터 조회') + homeLink('apps','업무 앱','승인된 AI 도구 사용') + '<button type="button" class="home-action" onclick="meScroll(\'me-recent-zone\')"><strong>최근 활동 ↓</strong><small>요청·오류·차단 확인</small></button></div></div>';
 
       const kpis = '<div class="kpis">' +
         kpi('오늘 요청', fmt(today.requests || 0)) +
@@ -12272,6 +12450,7 @@ const adminHTML = `<!doctype html>
         kpi('절감 가능', won(d.potential_savings_krw)) +
         kpi('개인 위험점수', fmt(prof.risk_score || 0)) +
       '</div>';
+      const homeVisual = '<div class="card-body"><div class="viz-grid" style="margin-top:0"><div class="viz-panel"><div class="viz-title">오늘의 요청 품질 <small>' + fmt(today.requests||0) + ' requests</small></div>' + donutVisual(todaySuccess*100, pctv(todaySuccess), '성공률', [{label:'성공',value:fmt(Math.max(0,(today.requests||0)-(today.errors||0)))},{label:'오류',value:fmt(today.errors||0)}]) + '</div><div class="viz-panel"><div class="viz-title">자주 쓰는 모델 <small>이번 달 요청</small></div>' + visualBars((d.frequent_models||[]).map(m=>({label:m.model,value:m.requests||0}))) + '</div></div></div>';
 
       // Profile rates card.
       const profCard = card('내 프로필 (최근 30일)',
@@ -12332,9 +12511,10 @@ const adminHTML = `<!doctype html>
           : '<p class="muted">저장한 리포트가 없습니다. Text2SQL 결과를 저장하면 여기 표시됩니다.</p>') + '</div>');
 
       // MCP 연결 설정 — 내 개발도구(Claude/Cursor/Roo/Cline)에서 Gateway를 MCP로 연결.
-      window.meCopyMCP = () => {
+      window.meCopyMCP = async () => {
         const cfg = JSON.stringify({ mcpServers: { 'vibe-gateway': { url: window.location.origin + '/mcp/gateway', headers: { Authorization: 'Bearer <YOUR_API_KEY>' } } } }, null, 2);
-        navigator.clipboard && navigator.clipboard.writeText(cfg);
+        try { if (!navigator.clipboard) throw new Error('clipboard API 미지원'); await navigator.clipboard.writeText(cfg); const b=document.getElementById('me-mcp-copy'); if(b){b.textContent='복사됨 ✓';setTimeout(()=>{if(b)b.textContent='설정 복사';},1400);} }
+        catch(e) { openModal('설정 복사', '<p class="muted">자동 복사가 지원되지 않아 직접 복사할 수 있도록 표시합니다.</p><pre>'+escapeHTML(cfg)+'</pre>'); }
       };
       const mcpCfg = JSON.stringify({ mcpServers: { 'vibe-gateway': { url: window.location.origin + '/mcp/gateway', headers: { Authorization: 'Bearer <YOUR_API_KEY>' } } } }, null, 2);
       window.meRunDoctor = async () => {
@@ -12354,8 +12534,8 @@ const adminHTML = `<!doctype html>
       const mcpCard = card('내 개발도구 연결하기 (MCP)',
         '<div class="card-body"><p class="muted" style="font-size:12px">Claude Desktop·Cursor·Roo Code·Cline에서 아래 설정으로 Gateway를 MCP 서버로 연결하면 모델 조회·라우팅 미리보기·사용량 확인 등을 도구로 쓸 수 있습니다. <code>&lt;YOUR_API_KEY&gt;</code>는 <a href="#/mykeys">내 키</a>에서 발급하세요.</p>' +
         '<pre style="background:var(--bg-alt,#f6f8fa);padding:10px;border-radius:6px;overflow:auto;font-size:11px">' + escapeHTML(mcpCfg) + '</pre>' +
-        '<button type="button" class="secondary" onclick="meCopyMCP()">설정 복사</button>' +
-        '<div style="margin-top:12px;border-top:1px solid var(--border);padding-top:10px">' +
+        '<button type="button" class="secondary" id="me-mcp-copy" onclick="meCopyMCP()">설정 복사</button>' +
+        '<div style="margin-top:12px;border-top:1px solid var(--line);padding-top:10px">' +
         '<p class="muted" style="font-size:12px">연결이 잘 안 되면 클라이언트를 고르고 진단하세요. 인증·scope·모델 허용·쿼터·<code>/v1/models</code>·<code>/mcp/gateway</code>를 점검합니다.</p>' +
         '<select id="me-doctor-client" style="font-size:12px"><option value="openai-sdk">OpenAI SDK</option><option value="cursor">Cursor</option><option value="roo">Roo Code</option><option value="cline">Cline</option><option value="claude-desktop-mcp">Claude Desktop (MCP)</option></select> ' +
         '<button type="button" onclick="meRunDoctor()">연결 진단</button>' +
@@ -12365,10 +12545,15 @@ const adminHTML = `<!doctype html>
       const recCard = card('내 추천',
         '<div class="card-body"><div id="me-recs"><button type="button" class="secondary" onclick="meLoadRecommendations()">추천 불러오기</button></div></div>');
 
-      view.innerHTML = section('내 홈', kpis) +
-        '<div id="me-actions"></div><div id="me-report"></div>' +
-        profCard + usageCard + modelsCard + '<div id="me-failures">' + failCard + '</div>' + blockCard + '<div id="me-reports">' + reportsCard + '</div>' + keyCard + mcpCard + recCard +
-        '<div id="me-requests"></div><div id="me-recmodels"></div><div id="me-skills"></div><div id="me-notifications"></div><div id="me-sessions"></div>';
+      window.meScroll = id => { const el=document.getElementById(id); if(el) el.scrollIntoView({behavior:'smooth',block:'start'}); };
+      const detailPanels = relatedPanel('내 사용 분석 자세히 보기', profCard + usageCard + modelsCard, false) +
+        relatedPanel('오류·차단 이력 자세히 보기', '<div id="me-failures">' + failCard + '</div>' + blockCard, attention>0) +
+        relatedPanel('저장 리포트·개발도구 연결', '<div id="me-reports">' + reportsCard + '</div>' + mcpCard, false);
+      view.innerHTML = hero + section('오늘과 이번 달', kpis + homeVisual) +
+        '<div id="me-actions"></div><div id="me-notifications"></div><div id="me-report"></div>' +
+        '<div class="grid2"><div id="me-recmodels"></div>' + recCard + '</div>' +
+        '<div id="me-recent-zone"><div id="me-requests"></div></div>' + keyCard +
+        detailPanels + '<div id="me-skills"></div><div id="me-sessions"></div>';
 
       // 최근 요청 + 영수증.
       meLoadRequests();
@@ -12747,8 +12932,11 @@ const adminHTML = `<!doctype html>
         return;
       }
       const keys = data.api_keys || [];
+      const activeKeys = keys.filter(k => !k.revoked_at && k.status === 'active');
+      const inactiveKeys = keys.length - activeKeys.length;
+      const expiringKeys = activeKeys.filter(k => { const left = new Date(k.expires_at).getTime() - Date.now(); return k.expires_at && left > 0 && left <= 30 * 86400000; }).length;
       const secretBanner = window.mykeysSecret
-        ? '<div class="status" style="padding:10px; margin-bottom:12px">새 키 시크릿 (한 번만 표시됩니다. 안전하게 보관하세요):<br><code style="user-select:all">' + escapeHTML(window.mykeysSecret) + '</code> <button class="secondary" type="button" onclick="window.mykeysSecret=null; renderMyKeys()">숨기기</button></div>'
+        ? '<div class="banner warn" style="margin-bottom:12px"><strong>새 키는 지금 한 번만 확인할 수 있습니다.</strong><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px"><code style="user-select:all;overflow-wrap:anywhere;flex:1">' + escapeHTML(window.mykeysSecret) + '</code><button type="button" id="mk-copy-secret" onclick="copyMyKeySecret()">복사</button><button class="secondary" type="button" onclick="window.mykeysSecret=null; renderMyKeys()">보관 완료</button></div></div>'
         : '';
       // Grantable scopes (caller's role scopes) shared with the scope modal; new-key selection
       // starts empty (= inherit all caller scopes).
@@ -12758,13 +12946,13 @@ const adminHTML = `<!doctype html>
       const pickerBtn = window.mkGrantable.length
         ? '<button type="button" class="secondary" onclick="openMyKeyScopeModal()">' + newScopeLabel + '</button>'
         : '';
-      const form = '<div style="margin:8px 0 8px; display:flex; gap:8px; flex-wrap:wrap; align-items:center">' +
-        '<input id="mk-name" placeholder="키 이름 (예: my-cli)" style="min-width:180px">' +
-        '<input id="mk-expires" placeholder="만료 (RFC3339, 선택)" style="min-width:180px">' +
+      const form = '<div class="inline-form" style="grid-template-columns:minmax(180px,1fr) minmax(210px,1fr) auto auto;align-items:end">' +
+        '<label class="muted" style="font-size:11px">키 이름<input id="mk-name" placeholder="용도를 알 수 있게 입력 (예: cursor-mac)" style="width:100%;margin-top:4px"></label>' +
+        '<label class="muted" style="font-size:11px">만료 시각<input id="mk-expires" type="datetime-local" style="width:100%;margin-top:4px"></label>' +
         pickerBtn +
         '<button type="button" onclick="createMyKey()">키 발급</button>' +
         '</div>' +
-        '<div class="muted" style="font-size:12px; margin-bottom:8px">내 역할: <code>' + escapeHTML(data.role || '-') + '</code> · 발급 키는 본인 권한(역할) 범위 내에서만 생성됩니다(권한 상승 불가). 스코프를 비우면 내 권한을 전체 상속합니다.</div>';
+        '<div class="toolbar" style="border-top:0"><span class="muted" style="font-size:11px">빠른 만료</span><button class="ghost" type="button" onclick="myKeyExpiry(30)">30일</button><button class="ghost" type="button" onclick="myKeyExpiry(90)">90일</button><button class="ghost" type="button" onclick="myKeyExpiry(0)">만료 없음</button><span class="muted" style="font-size:12px">역할 <code>' + escapeHTML(data.role || '-') + '</code> · 스코프 미선택 시 내 권한 전체 상속</span></div>';
       const tableRows = keys.map(k => {
         const expired = k.revoked_at || k.status !== 'active';
         const scopes = k.scopes || [];
@@ -12777,9 +12965,8 @@ const adminHTML = `<!doctype html>
           '<td><span class="status ' + (expired ? 'error' : '') + '">' + escapeHTML(k.status) + '</span></td>' +
           '<td>' + escapeHTML(k.expires_at || '-') + '</td>' +
           '<td style="white-space:nowrap">' +
-            (canEdit ? '<button class="ghost" type="button" onclick="editMyKeyScopes(\'' + k.id + '\')">스코프</button> ' : '') +
-            '<button class="secondary" type="button" onclick="rotateMyKey(\'' + k.id + '\')">회전</button> ' +
-            '<button class="danger" type="button" onclick="revokeMyKey(\'' + k.id + '\')">폐기</button>' +
+            (canEdit ? '<button class="ghost" type="button" onclick="editMyKeyScopes(\'' + escapeAttr(k.id) + '\')">스코프</button> ' : '') +
+            (!expired ? '<button class="secondary" type="button" onclick="rotateMyKey(\'' + escapeAttr(k.id) + '\')">회전</button> <button class="danger" type="button" onclick="revokeMyKey(\'' + escapeAttr(k.id) + '\')">폐기</button>' : '<span class="muted">작업 없음</span>') +
           '</td></tr>';
       }).join('');
       const table = keys.length
@@ -12788,8 +12975,24 @@ const adminHTML = `<!doctype html>
       // Cache key scopes for the edit modal.
       window.myKeysCache = {};
       keys.forEach(k => { window.myKeysCache[k.id] = k; });
-      view.innerHTML = card('내 키', '<div class="card-body">' + secretBanner + form + table + '</div>');
+      const keySummary = '<div class="kpis">' + kpi('전체 키', fmt(keys.length)) + kpi('사용 가능', fmt(activeKeys.length)) + kpi('30일 내 만료', '<span class="status ' + (expiringKeys ? 'warn' : '') + '">' + fmt(expiringKeys) + '</span>') + kpi('폐기·비활성', fmt(inactiveKeys)) + '</div>';
+      const journey = '<div class="stepper"><div class="step"><strong>1. 이름 지정</strong><span class="muted">사용처가 드러나게</span></div><div class="step"><strong>2. 최소 권한</strong><span class="muted">필요 scope만 선택</span></div><div class="step"><strong>3. 만료 설정</strong><span class="muted">30~90일 권장</span></div><div class="step"><strong>4. 한 번만 복사</strong><span class="muted">Secret 안전 보관</span></div><div class="step"><strong>5. 연결 테스트</strong><span class="muted">Chat 또는 MCP 점검</span></div><div class="step"><strong>6. 주기적 회전</strong><span class="muted">기존 키 즉시 폐기</span></div></div>';
+      view.innerHTML = section('API 키·연결', keySummary + journey) + card('새 API 키 발급', '<div class="card-body">' + secretBanner + form + '</div>') + card('내 API 키', '<div class="card-body">' + table + '<div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap"><a href="#/chat-test">Chat 호출 테스트 →</a><a href="#/gateway-mcp">MCP 연결 설정 →</a><a href="#/requests">사용 이력 확인 →</a></div></div>');
     }
+
+    window.myKeyExpiry = (days) => {
+      const el = document.getElementById('mk-expires'); if (!el) return;
+      if (!days) { el.value = ''; return; }
+      const d = new Date(Date.now() + Number(days) * 86400000);
+      el.value = new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0,16);
+    };
+    window.copyMyKeySecret = async () => {
+      try {
+        if (!window.mykeysSecret || !navigator.clipboard) throw new Error('clipboard unavailable');
+        await navigator.clipboard.writeText(window.mykeysSecret);
+        const btn = document.getElementById('mk-copy-secret'); if (btn) btn.textContent = '복사됨 ✓';
+      } catch (e) { openModal('API 키 복사', '<p class="muted">자동 복사를 지원하지 않는 환경입니다. 키를 선택해 직접 복사하세요.</p><code style="user-select:all;overflow-wrap:anywhere">' + escapeHTML(window.mykeysSecret || '') + '</code>'); }
+    };
 
     // mkScopeBoxes renders the grantable-scope checkboxes for the My Keys scope modal.
     function mkScopeBoxes(selected) {
@@ -12852,7 +13055,8 @@ const adminHTML = `<!doctype html>
       const name = (document.getElementById('mk-name').value || '').trim();
       if (!name) { alert('키 이름을 입력하세요.'); return; }
       const scopes = window.mkNewScopes || [];
-      const expires = (document.getElementById('mk-expires').value || '').trim();
+      const expiresRaw = (document.getElementById('mk-expires').value || '').trim();
+      const expires = expiresRaw ? new Date(expiresRaw).toISOString() : '';
       const body = { name };
       if (scopes.length) body.scopes = scopes;
       if (expires) body.expires_at = expires;
@@ -12995,7 +13199,7 @@ const adminHTML = `<!doctype html>
           '<button type="button" id="sso-rm-reset">기본값으로 초기화</button></div>' +
         '<div id="sso-rm-out" style="margin-top:6px"></div>' +
         '<p class="muted" style="font-size:11px;margin-top:6px">/teams/&lt;name&gt; (group) → team:&lt;name&gt; 매핑은 고정. 매핑 실패 시 기본 Role(' + escapeHTML(c.default_role || '') + ')로 폴백, 기본 Role이 비어 있으면 로그인 차단. 가장 높은 권한의 매핑이 우선합니다.</p></div>');
-      view.innerHTML = section('SSO (Keycloak)', '') + cfgCard + mapCard;
+      view.innerHTML = section('SSO·로그인 연결', '<div class="kpis">' + kpi('SSO 상태',yn(c.enabled)) + kpi('설정 소스',sourceBadge) + kpi('Client Secret',c.client_secret_set?'<span class="status">설정됨</span>':'<span class="status error">없음</span>') + kpi('역할 매핑',fmt(Object.keys(rm).length)) + '</div>') + cfgCard + mapCard;
       const saveBtn = document.getElementById('sso-save-btn');
       if (saveBtn) saveBtn.addEventListener('click', async () => {
         const out = document.getElementById('sso-save-out');
@@ -13620,11 +13824,11 @@ const adminHTML = `<!doctype html>
       ]);
 
       if (ov && ov.configured === false) {
-        view.innerHTML = card('DW 대시보드', '<div class="card-body"><div class="empty">ClickHouse DW가 설정되지 않았습니다. <a href="#/dwdashboard/clickhouse">ClickHouse</a> 탭에서 연결·테이블 생성·적재를 먼저 구성하세요.</div></div>');
+        view.innerHTML = card('데이터 인사이트', '<div class="card-body"><div class="empty">분석 저장소가 설정되지 않았습니다. <a href="#/dwdashboard/clickhouse">데이터 파이프라인</a>에서 연결·테이블 생성·적재를 먼저 구성하세요.</div></div>');
         return;
       }
       if (ov && ov._err) {
-        view.innerHTML = card('DW 대시보드', '<div class="card-body"><div class="error-line">DW 조회 실패: ' + escapeHTML(ov._err) + '</div></div>');
+        view.innerHTML = card('데이터 인사이트', '<div class="card-body"><div class="error-line">분석 데이터 조회 실패: ' + escapeHTML(ov._err) + '</div></div>');
         return;
       }
 
@@ -13646,6 +13850,19 @@ const adminHTML = `<!doctype html>
         card1('오류율', ((ov.error_rate || 0) * 100).toFixed(2) + '%') +
         card1('요청당 비용(₩)', (ov.cost_per_request_krw || 0).toFixed(2)) +
         card1('1K토큰당(₩)', (ov.cost_per_1k_tokens_krw || 0).toFixed(2)) +
+        '</div></div></section>';
+
+      // Turn aggregated signals into a short, explainable next-action queue.
+      const insights = [];
+      const retries = (health && health.retries) || [];
+      if (retries.length) insights.push({ cls:'error', title:'적재 실패 ' + fmt(retries.length) + '건', detail:'분석 결과의 최신성이 떨어질 수 있습니다.', href:'#/dwdashboard/clickhouse', action:'파이프라인 복구' });
+      if (cons && cons.dimensions && !cons.consistent) insights.push({ cls:'error', title:'운영 DB와 분석 저장소 불일치', detail:'수치 판단 전에 차원별 차이를 확인하세요.', href:'#/dwdashboard/clickhouse', action:'정합성 점검' });
+      if (Number(ov.error_rate || 0) >= 0.05) insights.push({ cls:'warn', title:'오류율 ' + (Number(ov.error_rate || 0) * 100).toFixed(1) + '%', detail:'집계 차원에서 오류가 큰 모델·프로바이더를 좁혀보세요.', href:'#/requests', action:'실패 요청 탐색' });
+      if (mig && Number(mig.count || 0) > 0) insights.push({ cls:'', title:'모델 전환 후보 ' + fmt(mig.count) + '건', detail:'품질을 유지하면서 비용을 줄일 가능성이 있습니다.', href:'#/dashboard', action:'절감안 검토' });
+      if (t2s && t2s.configured && Number(t2s.block_rate || 0) >= 0.1) insights.push({ cls:'warn', title:'Text2SQL 차단율 ' + (Number(t2s.block_rate || 0) * 100).toFixed(1) + '%', detail:'스키마·권한·질문 패턴의 병목을 확인하세요.', href:'#/text2sql', action:'위험 큐 확인' });
+      if (!insights.length) insights.push({ cls:'', title:'즉시 확인할 이상 신호 없음', detail:'추세와 상위 차원을 탐색해 개선 후보를 찾을 수 있습니다.', href:'#/dwmetrics', action:'지표 탐색' });
+      html += '<section><h2>인사이트 추천 <span class="muted" style="font-size:11px">현재 조회 범위의 신호를 규칙 기반으로 연결</span></h2><div class="card-body"><div class="grid3" style="margin-top:0">' +
+        insights.slice(0, 6).map(x => '<div class="banner ' + x.cls + '"><strong>' + escapeHTML(x.title) + '</strong><div class="muted" style="font-size:11px;margin:5px 0 9px">' + escapeHTML(x.detail) + '</div><a href="' + escapeAttr(x.href) + '">' + escapeHTML(x.action) + ' →</a></div>').join('') +
         '</div></div></section>';
 
       // 비용 추이 — 일/주 단위 inline bars (cost).
@@ -13859,7 +14076,7 @@ const adminHTML = `<!doctype html>
           '</div></section>';
       }
 
-      view.innerHTML = card('DW 대시보드', html);
+      view.innerHTML = card('데이터 인사이트 · 비용, 품질, 성능을 한 흐름으로', html);
     }
     window.dwSet = (key, val) => { sessionStorage.setItem(key, val); renderDWDashboard(); };
     window.dwRefresh = async () => {
@@ -14041,6 +14258,9 @@ const adminHTML = `<!doctype html>
       const d = await api('/admin/settings/effective').catch(() => ({ settings: [] }));
       const settings = d.settings || [];
       const pod = d.this_pod || {};
+      const overridden = settings.filter(s => s.source === 'admin').length;
+      const restartNeeded = settings.filter(s => s.restart_required).length;
+      const readOnly = settings.filter(s => s.read_only).length;
       const podBanner = pod.hostname
         ? '<div class="' + (pod.up_to_date ? 'status' : 'status warn') + '" style="padding:8px 10px;margin-bottom:10px;font-size:12px">' +
             '이 파드(<code>' + escapeHTML(pod.hostname) + '</code>) 런타임 설정 ' + (pod.up_to_date ? '최신 ✓' : '동기화 대기…') +
@@ -14085,21 +14305,21 @@ const adminHTML = `<!doctype html>
           const restart = s.restart_required ? '<span class="pill">재연결/재시작</span>' : '';
           const activeSource = s.effective_source || (s.source === 'admin' ? 'db_setting' : 'bootstrap_env');
           const revertBtns = s.source === 'admin'
-            ? '<button class="secondary" type="button" onclick="revertSetting(\'' + s.key + '\')">기본값</button> ' +
-              (s.is_secret ? '' : '<button class="secondary" type="button" onclick="rollbackSetting(\'' + s.key + '\')">롤백</button> ')
+            ? '<button class="secondary" type="button" onclick="revertSetting(\'' + escapeAttr(s.key) + '\')">기본값</button> ' +
+              (s.is_secret ? '' : '<button class="secondary" type="button" onclick="rollbackSetting(\'' + escapeAttr(s.key) + '\')">롤백</button> ')
             : '';
           html += '<tr><td><code>' + escapeHTML(s.key) + '</code>' + desc + '</td><td>' + editor + '</td>' +
             '<td><span class="status">' + escapeHTML(activeSource) + '</span>' + ver + settingLayerBadges(s) + '</td>' +
             '<td>' + restart + '</td><td>' +
-              '<button type="button" onclick="saveSetting(\'' + s.key + '\',\'' + id + '\',' + (s.is_secret ? 'true' : 'false') + ')">저장</button> ' +
+              '<button type="button" onclick="saveSetting(\'' + escapeAttr(s.key) + '\',\'' + escapeAttr(id) + '\',' + (s.is_secret ? 'true' : 'false') + ')">저장</button> ' +
               revertBtns +
-              '<button class="secondary" type="button" onclick="settingHistory(\'' + s.key + '\')">이력</button>' +
+              '<button class="secondary" type="button" onclick="settingHistory(\'' + escapeAttr(s.key) + '\')">이력</button>' +
             '</td></tr>';
         });
         html += '</tbody></table></div></section>';
       });
-      html += '<section style="margin-top:14px" id="setting-history-section" style="display:none"><h2>변경 이력</h2><div class="card-body" id="setting-history"></div></section>';
-      view.innerHTML = card('런타임 설정', html);
+      html += '<section id="setting-history-section" style="display:none;margin-top:14px"><h2>변경 이력</h2><div class="card-body" id="setting-history"></div></section>';
+      view.innerHTML = section('런타임 설정 상태', '<div class="kpis">' + kpi('설정 항목',fmt(settings.length)) + kpi('DB 오버라이드',fmt(overridden)) + kpi('재연결·재시작', '<span class="status ' + (restartNeeded?'warn':'') + '">' + fmt(restartNeeded) + '</span>') + kpi('환경변수 전용',fmt(readOnly)) + '</div>') + card('유효 설정 편집', html);
     }
 
     async function saveSetting(key, inputId, secret) {
@@ -14817,6 +15037,7 @@ const adminHTML = `<!doctype html>
     async function renderSystemErrors() {
       const resp = await api('/admin/system-errors').catch(() => ({ errors: [] }));
       const list = resp.errors || [];
+      const byComponent = list.reduce((m, e) => { const k=e.component||'unknown'; m[k]=(m[k]||0)+1; return m; }, {});
       let tableHtml = '';
       if (!list.length) {
         tableHtml = '<div class="empty">기록된 시스템 오류가 없습니다.</div>';
@@ -14841,12 +15062,13 @@ const adminHTML = `<!doctype html>
             '</tbody>' +
           '</table>';
       }
-      const html =
+      const html = section('시스템 오류', '<div class="kpis">' + kpi('기록된 오류', fmt(list.length)) + kpi('영향 컴포넌트', fmt(Object.keys(byComponent).length)) + kpi('가장 많은 컴포넌트', escapeHTML(Object.keys(byComponent).sort((a,b)=>byComponent[b]-byComponent[a])[0] || '-')) + '</div>') +
+        (list.length ? card('컴포넌트별 오류 분포', '<div class="card-body">' + visualBars(Object.keys(byComponent).map(k=>({label:k,value:byComponent[k]})).sort((a,b)=>b.value-a.value), null, true) + '</div>') : '') +
         '<div class="grid1">' +
           card('시스템 오류 로그 (System Errors)',
             '<div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px; margin-bottom:16px;">' +
               '<p class="muted" style="margin:0; padding-left:4px;">PostgreSQL/SQLite DB 적재 및 비동기 워커 실행 중 발생한 최신 시스템 오류 로그를 표시합니다.</p>' +
-              (list.length ? '<button id="clear-errors-btn" class="error" style="background:#dc2626; color:#fff; border:none; padding:6px 12px; border-radius:4px; cursor:pointer;">전체 비우기</button>' : '') +
+              (list.length ? '<button id="clear-errors-btn" class="danger">전체 비우기</button>' : '') +
             '</div>' +
             tableHtml
           ) +
@@ -14890,8 +15112,22 @@ const adminHTML = `<!doctype html>
       window.__providers = {};
       (providers.providers || []).forEach(p => { window.__providers[p.name] = p; });
 
-      const html =
-        card('프록시 API 키',
+      const providerList = providers.providers || [];
+      const enabledProviders = providerList.filter(p => p.enabled !== false).length;
+      const settingsOverview = section('설정 센터', '<div class="kpis">' +
+        kpi('프록시 키', fmt((keys.api_keys || []).length)) + kpi('프로바이더', fmt(enabledProviders) + ' / ' + fmt(providerList.length)) +
+        kpi('사용자 / 팀', fmt((usersResp.auth_users || []).length) + ' / ' + fmt((teamsResp.auth_teams || []).length)) +
+        kpi('라우팅 규칙', fmt((routes.rules || []).length)) + kpi('최근 변경', fmt((audit.audit_logs || []).length)) + '</div>') +
+        card('설정 영역 바로가기', '<div class="card-body"><div class="grid3" style="margin-top:0">' +
+          '<a class="home-action" href="#/settings/runtime"><strong>런타임 설정</strong><small>재배포 없이 유효값 변경</small></a>' +
+          '<a class="home-action" href="#/changesets"><strong>변경 세트</strong><small>Dry-run·승인·적용·롤백</small></a>' +
+          '<a class="home-action" href="#/settings/sso"><strong>SSO·역할</strong><small>인증 연결과 역할 매핑</small></a>' +
+          '<a class="home-action" href="#/settings/errors"><strong>시스템 오류</strong><small>변경 후 이상 신호 확인</small></a>' +
+          '<a class="home-action" href="#/routing/health"><strong>Provider Health</strong><small>연결 변경 영향 확인</small></a>' +
+          '<a class="home-action" href="#/remediation"><strong>자동 조치</strong><small>운영 신호 기반 복구</small></a>' +
+        '</div></div>');
+      const html = settingsOverview +
+        cardWithID('settings-api-keys', '프록시 API 키',
           '<form class="inline-form" id="key-form" autocomplete="off" style="grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));">' +
             '<input id="key-name" placeholder="이름" required>' +
             '<input id="key-owner" placeholder="소유자">' +
@@ -14902,7 +15138,7 @@ const adminHTML = `<!doctype html>
           '<div id="key-secret" class="secret-once"></div>' +
           '<div id="api-key-list">' + apiKeyTable(keys.api_keys || []) + '</div>'
         ) +
-        card('업스트림 프로바이더',
+        cardWithID('settings-providers', '업스트림 프로바이더',
           '<form class="inline-form" id="provider-form" autocomplete="off" style="grid-template-columns: 130px minmax(220px, 2fr) minmax(150px, 1fr) 110px minmax(170px, 1.5fr) auto auto;">' +
             '<input id="provider-name" placeholder="이름" required>' +
             '<input id="provider-base-url" type="url" placeholder="Base URL" required>' +
@@ -15549,6 +15785,8 @@ const adminHTML = `<!doctype html>
       if (isTyping(e.target)) return;
       if (e.ctrlKey || e.metaKey || e.altKey) return;
 
+      if (e.shiftKey && e.key.toLowerCase() === 'x') { e.preventDefault(); openXViewLauncher(); return; }
+
       if (e.key === '?') { e.preventDefault(); openHelp(); return; }
       if (e.key === '/') {
         e.preventDefault();
@@ -15585,6 +15823,7 @@ const adminHTML = `<!doctype html>
         ['<kbd>t</kbd>', '다크 모드 토글'],
         ['<kbd>r</kbd>', '현재 페이지 다시 불러오기'],
         ['<kbd>Esc</kbd>', '모달/오버레이 닫기'],
+        ['<kbd>Shift</kbd> <kbd>X</kbd>', '어디서나 XView 요청 탐색'],
         ['<kbd>g</kbd> <kbd>d</kbd>', '대시보드'],
         ['<kbd>g</kbd> <kbd>x</kbd>', 'XView (응답시간 분포)'],
         ['<kbd>g</kbd> <kbd>w</kbd>', 'Waterfall (트랜잭션 타임라인)'],
@@ -15606,6 +15845,7 @@ const adminHTML = `<!doctype html>
         '</div><p class="muted" style="margin-top:14px">표 헤더를 클릭하면 정렬할 수 있고, 시간 표시에 마우스를 올리면 절대 시각이 표시됩니다.</p>';
     }
     document.getElementById('help-toggle').addEventListener('click', openHelp);
+    document.getElementById('xview-launcher').addEventListener('click', openXViewLauncher);
 
     initAuth();
   </script>

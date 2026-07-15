@@ -31,7 +31,7 @@ import (
 )
 
 // AppVersion is the gateway build version, surfaced in /auth/me and the admin UI.
-const AppVersion = "v0.76.52"
+const AppVersion = "v0.76.53"
 
 type Server struct {
 	cfg            config.Config
@@ -593,7 +593,24 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/v1", s.handleOpenAI)
 	mux.HandleFunc("/v1/skills", s.handlePublicSkills)
 	mux.HandleFunc("/v1/skills/", s.handlePublicSkills)
+	// Keep the bare service URL useful without turning unknown paths into admin routes.
+	// The admin UI already owns authentication and the branded login experience.
+	mux.HandleFunc("/", s.handleRoot)
 	return withTrace(mux)
+}
+
+func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/" {
+		http.NotFound(w, r)
+		return
+	}
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		w.Header().Set("Allow", "GET, HEAD")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	http.Redirect(w, r, "/admin", http.StatusFound)
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
