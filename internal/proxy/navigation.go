@@ -83,7 +83,7 @@ var childTabs = map[string][]string{
 	"chat-test":   {"prompt-lab"},
 	"users":       {"teams", "ips", "quotas"},
 	"safety":      {"skills", "skill-studio", "modeldeprecations"},
-	"mcp":         {"agents", "vcs"},
+	"mcp":         {"agents", "vcs", "mcp-upstreams", "mcp-tools", "mcp-policy", "agent-routes"},
 	"dwdashboard": {"clickhouse", "dwmetrics"},
 	"settings":    {"runtimesettings", "errors", "changesets"},
 }

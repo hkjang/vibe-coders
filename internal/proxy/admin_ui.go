@@ -402,7 +402,6 @@ const adminHTML = `<!doctype html>
           <a href="#/mcp" data-tab="mcp">MCP</a>
           <a href="#/gateway-mcp" data-tab="gateway-mcp">Gateway MCP</a>
           <a href="#/routing" data-tab="routing">라우팅</a>
-          <a href="#/agent-routes" data-tab="agent-routes">에이전트 라우트</a>
           <a href="#/workflows" data-tab="workflows">워크플로</a>
           <a href="#/apps" data-tab="apps">AI 업무 앱</a>
           <a href="#/app-templates" data-tab="app-templates">앱 템플릿</a>
@@ -1133,10 +1132,12 @@ const adminHTML = `<!doctype html>
       }
     }
     // subNav renders a secondary tab bar (used for tabs that nest sub-views).
-    function subNav(items) {
+    function subNav(items, rightHTML) {
       return '<nav class="subtabs">' + items.map(it =>
         '<a href="' + it.href + '"' + (it.active ? ' class="active"' : '') + '>' + escapeHTML(it.label) + '</a>'
-      ).join('') + '</nav>';
+      ).join('') +
+        (rightHTML ? '<span style="margin-left:auto;display:flex;align-items:center;gap:8px">' + rightHTML + '</span>' : '') +
+        '</nav>';
     }
     // renderSubTabs populates the #subtabs strip for tabs that have nested sub-views, and
     // clears it otherwise. navTab maps nested routes (clickhouse, runtimesettings) to their
@@ -1184,12 +1185,18 @@ const adminHTML = `<!doctype html>
           { label: 'Skill Studio', href: '#/skill-studio', active: tab === 'skill-studio' },
           { label: '모델 일몰', href: '#/modeldeprecations', active: tab === 'modeldeprecations' },
         ]);
-      } else if (tab === 'mcp' || tab === 'agents' || tab === 'vcs') {
+      } else if (tab === 'mcp' || tab === 'agents' || tab === 'vcs' || tab === 'mcp-upstreams' || tab === 'mcp-tools' || tab === 'mcp-policy' || tab === 'agent-routes') {
+        const gt = { 'mcp': 'overview', 'mcp-upstreams': 'upstreams', 'mcp-tools': 'tools', 'mcp-policy': 'policy', 'agent-routes': 'agent-routes' }[tab];
+        const guide = gt ? '<button type="button" class="secondary" style="font-size:11px;padding:2px 8px" onclick="mcpGuide(\'' + gt + '\')">ℹ️ 가이드</button>' : '';
         el.innerHTML = subNav([
-          { label: 'MCP', href: '#/mcp', active: tab === 'mcp' },
+          { label: 'MCP 개요', href: '#/mcp', active: tab === 'mcp' },
+          { label: '업스트림·라우트', href: '#/mcp-upstreams', active: tab === 'mcp-upstreams' },
+          { label: '도구·서버', href: '#/mcp-tools', active: tab === 'mcp-tools' },
+          { label: '정책·보안', href: '#/mcp-policy', active: tab === 'mcp-policy' },
+          { label: '🤖 에이전트 라우트', href: '#/agent-routes', active: tab === 'agent-routes' },
           { label: '에이전트', href: '#/agents', active: tab === 'agents' },
           { label: 'VCS', href: '#/vcs', active: tab === 'vcs' },
-        ]);
+        ], guide);
       } else if (tab === 'chat-test' || tab === 'prompt-lab') {
         el.innerHTML = subNav([
           { label: 'Chat 테스트', href: '#/chat-test', active: tab === 'chat-test' },
@@ -1214,7 +1221,7 @@ const adminHTML = `<!doctype html>
         xview: 'dashboard', waterfall: 'dashboard', llm: 'dashboard',
         teams: 'users', ips: 'users', quotas: 'users',
         skills: 'safety', 'skill-studio': 'safety', modeldeprecations: 'safety',
-        agents: 'mcp', vcs: 'mcp',
+        agents: 'mcp', vcs: 'mcp', 'mcp-upstreams': 'mcp', 'mcp-tools': 'mcp', 'mcp-policy': 'mcp', 'agent-routes': 'mcp',
         clickhouse: 'dwdashboard', dwmetrics: 'dwdashboard', runtimesettings: 'settings', changesets: 'settings',
         'prompt-lab': 'chat-test',
       };
@@ -1271,7 +1278,10 @@ const adminHTML = `<!doctype html>
           case 'teams':     rest.length ? await renderTeamDetail(decodeURIComponent(rest.join('/'))) : await renderTeams(); break;
           case 'ips':       rest.length ? await renderIPDetail(decodeURIComponent(rest.join('/'))) : await renderIPs(); break;
           case 'quotas':    await renderQuotas(); break;
-          case 'mcp':       await renderMCP(params); break;
+          case 'mcp':       await renderMCP(params, 'overview'); break;
+          case 'mcp-upstreams': await renderMCP(params, 'upstreams'); break;
+          case 'mcp-tools': await renderMCP(params, 'tools'); break;
+          case 'mcp-policy': await renderMCP(params, 'policy'); break;
           case 'routing':   rest[0] === 'health' ? await renderRoutingHealth(params) : await renderRoutingLearning(params); break;
           case 'chat-test': await renderChatTest(params); break;
           case 'prompt-lab': await renderPromptLab(params); break;
@@ -7182,6 +7192,37 @@ const adminHTML = `<!doctype html>
     };
 
     // ---------- Capability Registry: 기능 맵 ----------
+    const capGroupLabel = { core: '핵심', data: '데이터', security: '보안', assets: '자산', users: '사용자', ops: '운영' };
+    // 기능 맵의 UI 탭 id → 사람이 읽을 라벨(클릭 시 해당 화면으로 이동).
+    const capUITabLabel = {
+      requests: '호출 이력', llm: 'LLM 관측', 'chat-test': 'Chat 테스트', routing: '라우팅',
+      mcp: 'MCP', 'agent-routes': '에이전트 라우트', text2sql: 'Text2SQL', dashboard: '대시보드',
+      xview: 'XView', waterfall: 'Waterfall', safety: '안전', redteam: 'Red Team', users: '사용자',
+      teams: '팀', quotas: '사용 한도', settings: '설정', sbom: 'SBOM', 'privacy-ledger': '프라이버시 원장',
+      workflows: '워크플로', apps: 'AI 업무 앱', sessions: '세션 비행기록', dwdashboard: 'DW 대시보드',
+    };
+    window.capGuide = () => {
+      openModal('기능 맵이란?',
+        '<div style="line-height:1.7;font-size:13px">' +
+        '<p><b>기능 맵</b>은 이 게이트웨이가 제공하는 모든 기능을 한 곳에 모아, 각 기능이 <b>무엇과 연결되는지</b>를 보여주는 색인입니다. 새 팀원 온보딩·감사·문제 추적 시 “이 기능은 어느 화면/어느 API/어느 테이블과 엮이나”를 빠르게 파악하는 용도입니다.</p>' +
+        '<ul style="margin:8px 0 0 18px">' +
+        '<li><b>UI</b> 칩을 클릭하면 그 기능의 화면으로 <b>바로 이동</b>합니다(동선).</li>' +
+        '<li><b>API</b>: 그 기능이 노출하는 엔드포인트.</li>' +
+        '<li><b>권한</b>: 접근에 필요한 스코프.</li>' +
+        '<li><b>설정</b>: 관련 런타임 설정 키.</li>' +
+        '<li><b>테이블/워커</b>: 데이터가 쌓이는 DB 테이블과 백그라운드 작업.</li></ul>' +
+        '<p class="muted" style="font-size:12px;margin-top:8px">상단 검색으로 기능·API·테이블명을 필터할 수 있습니다.</p></div>');
+    };
+    window.capFilter = () => {
+      const q = (document.getElementById('cap-search').value || '').trim().toLowerCase();
+      document.querySelectorAll('.cap-card').forEach(el => {
+        el.style.display = (!q || (el.getAttribute('data-search') || '').indexOf(q) >= 0) ? '' : 'none';
+      });
+      document.querySelectorAll('.cap-group').forEach(g => {
+        const anyVisible = Array.from(g.querySelectorAll('.cap-card')).some(el => el.style.display !== 'none');
+        g.style.display = anyVisible ? '' : 'none';
+      });
+    };
     async function renderCapabilities() {
       const view = document.getElementById('view');
       view.innerHTML = section('기능 맵', '<div class="empty">불러오는 중...</div>');
@@ -7189,25 +7230,39 @@ const adminHTML = `<!doctype html>
       try { d = await api('/admin/capabilities'); }
       catch (e) { view.innerHTML = section('기능 맵', '<div class="card-body" style="padding:16px"><p class="muted">' + escapeHTML(e.message) + '</p></div>'); return; }
       const caps = d.capabilities || [];
-      const groupLabel = { core: '핵심', data: '데이터', security: '보안', assets: '자산', users: '사용자', ops: '운영' };
       const byGroup = {};
       caps.forEach(c => { (byGroup[c.group] = byGroup[c.group] || []).push(c); });
-      const chips = (arr, cls) => (arr || []).map(x => '<span class="status ' + (cls || '') + '" style="font-size:9px;margin:1px">' + escapeHTML(x) + '</span>').join('');
-      let html = section('기능 맵', '<p class="muted" style="font-size:12px">' + (d.count || 0) + '개 기능 — 각 기능의 API·UI 탭·권한·설정키·DB 테이블·워커를 한눈에. ' + escapeHTML(d.note || '') + '</p>');
+      const chip = (x, cls) => '<span class="status ' + (cls || '') + '" style="font-size:9px;margin:1px 2px">' + escapeHTML(x) + '</span>';
+      const uiChip = (t) => '<a href="#/' + escapeAttr(t) + '" class="status" style="font-size:9px;margin:1px 2px;text-decoration:none;cursor:pointer" title="이 화면으로 이동">' + escapeHTML(capUITabLabel[t] || t) + ' →</a>';
+      // 헤더: 안내 + 가이드 + 검색 + 그룹별 개수 KPI.
+      const kpis = '<div class="kpis" style="margin-top:10px">' + kpi('전체 기능', fmt(d.count || caps.length)) +
+        Object.keys(byGroup).sort().map(g => kpi(capGroupLabel[g] || g, fmt(byGroup[g].length))).join('') + '</div>';
+      const header = section('기능 맵',
+        '<div style="padding:0 2px">' +
+        '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">' +
+        '<p class="muted" style="font-size:12px;margin:0;flex:1;min-width:240px">기능별 <b>API·UI 화면·권한·설정·테이블·워커</b> 연결을 한눈에. <b>UI 칩을 클릭하면 해당 화면으로 이동</b>합니다.</p>' +
+        '<button type="button" class="secondary" style="font-size:11px" onclick="capGuide()">ℹ️ 이 화면 가이드</button>' +
+        '</div>' +
+        '<input id="cap-search" placeholder="기능·API·테이블 검색…" oninput="capFilter()" style="width:100%;margin-top:8px;height:34px">' +
+        kpis + '</div>');
+      let html = header;
       Object.keys(byGroup).sort().forEach(g => {
-        html += '<h3 style="margin:14px 0 4px;font-size:14px">' + escapeHTML(groupLabel[g] || g) + '</h3>';
-        html += byGroup[g].map(c =>
-          '<div style="border:1px solid var(--border);border-radius:8px;padding:10px;margin:6px 0">' +
-          '<div style="display:flex;justify-content:space-between"><strong>' + escapeHTML(c.name) + ' <span class="muted" style="font-size:11px">(' + escapeHTML(c.key) + ')</span></strong></div>' +
-          '<div class="muted" style="font-size:12px;margin:3px 0">' + escapeHTML(c.description) + '</div>' +
-          (c.apis && c.apis.length ? '<div style="font-size:11px;margin-top:3px"><b>API</b> ' + (c.apis || []).map(a => '<code style="font-size:10px">' + escapeHTML(a) + '</code>').join(' · ') + '</div>' : '') +
-          (c.ui_tabs && c.ui_tabs.length ? '<div style="margin-top:3px"><b style="font-size:11px">UI</b> ' + chips(c.ui_tabs) + '</div>' : '') +
-          (c.scopes && c.scopes.length ? '<div style="margin-top:3px"><b style="font-size:11px">권한</b> ' + chips(c.scopes, 'warn') + '</div>' : '') +
-          (c.setting_keys && c.setting_keys.length ? '<div style="margin-top:3px"><b style="font-size:11px">설정</b> ' + chips(c.setting_keys) + '</div>' : '') +
-          (c.tables && c.tables.length ? '<div style="margin-top:3px"><b style="font-size:11px">테이블</b> <span class="muted" style="font-size:10px">' + (c.tables || []).map(escapeHTML).join(', ') + '</span></div>' : '') +
-          (c.workers && c.workers.length ? '<div style="margin-top:3px"><b style="font-size:11px">워커</b> ' + chips(c.workers) + '</div>' : '') +
-          '</div>'
-        ).join('');
+        const cards = byGroup[g].map(c => {
+          const search = [c.name, c.key, c.description, (c.apis || []).join(' '), (c.tables || []).join(' '), (c.ui_tabs || []).join(' ')].join(' ').toLowerCase();
+          const row = (label, inner) => inner ? '<div style="margin-top:5px;font-size:11px"><b style="color:var(--muted)">' + label + '</b> ' + inner + '</div>' : '';
+          return '<div class="cap-card" data-search="' + escapeAttr(search) + '" style="border:1px solid var(--line-strong);border-radius:10px;padding:12px;margin:8px 0;background:var(--panel)">' +
+            '<div><strong style="font-size:13px">' + escapeHTML(c.name) + '</strong> <span class="muted" style="font-size:10px">' + escapeHTML(c.key) + '</span></div>' +
+            '<div class="muted" style="font-size:12px;margin:4px 0">' + escapeHTML(c.description) + '</div>' +
+            row('UI', (c.ui_tabs || []).map(uiChip).join('')) +
+            row('API', (c.apis || []).map(a => '<code style="font-size:10px">' + escapeHTML(a) + '</code>').join(' · ')) +
+            row('권한', (c.scopes || []).map(x => chip(x, 'warn')).join('')) +
+            row('설정', (c.setting_keys || []).map(x => chip(x)).join('')) +
+            row('테이블', (c.tables || []).length ? '<span class="muted" style="font-size:10px">' + (c.tables || []).map(escapeHTML).join(', ') + '</span>' : '') +
+            row('워커', (c.workers || []).map(x => chip(x)).join('')) +
+            '</div>';
+        }).join('');
+        html += '<div class="cap-group"><h3 style="margin:16px 0 2px;font-size:14px">' + escapeHTML(capGroupLabel[g] || g) + ' <span class="muted" style="font-size:11px;font-weight:500">(' + byGroup[g].length + ')</span></h3>' +
+          '<div class="grid2">' + cards + '</div></div>';
       });
       view.innerHTML = html;
     }
@@ -8947,7 +9002,49 @@ const adminHTML = `<!doctype html>
         '<p class="muted" style="font-size:10px;margin-top:4px">' + escapeHTML(d.note || '') + '</p></div>'));
     };
 
-    async function renderMCP(initial) {
+    // 각 MCP 화면(서브탭)의 사용 가이드 모달.
+    const mcpGuides = {
+      overview: { title: 'MCP 개요·흐름·테스트', body:
+        '<p>이 화면은 MCP 운영을 한눈에 보고 <b>바로 검증</b>하는 곳입니다.</p>' +
+        '<ul style="margin:8px 0 0 18px;line-height:1.8">' +
+        '<li><b>운영 Overview</b>: 등록 서버/도구/호출/오류 지표와 필터.</li>' +
+        '<li><b>에이전틱 실행 흐름</b>: 질문 → 도구 선택 → 호출 → 응답 경로 시각화.</li>' +
+        '<li><b>연결 상태 Wizard</b>: 업스트림을 고르고 등록·Probe·Flow·로그를 단계별로 점검.</li>' +
+        '<li><b>Route Explain / Test Console</b>: 특정 도구 호출이 허용/차단되는지 실제로 시험.</li></ul>' +
+        '<p class="muted" style="font-size:12px;margin-top:8px">가상 모델 하나로 특정 프로바이더+MCP를 묶어 에이전틱 응답을 만들려면 상단 <b>🤖 에이전트 라우트</b>로 이동하세요.</p>' },
+      upstreams: { title: 'MCP 업스트림·라우트', body:
+        '<p>외부 MCP 서버(업스트림)를 게이트웨이에 연결하고, 노출되는 route와 토폴로지를 관리합니다.</p>' +
+        '<ul style="margin:8px 0 0 18px;line-height:1.8">' +
+        '<li><b>업스트림 등록/진단</b>: URL·인증으로 MCP 서버를 등록하고 연결을 확인.</li>' +
+        '<li><b>Route Map</b>: 클라이언트에 노출되는 이름 ↔ 실제 업스트림 원본 매핑.</li>' +
+        '<li><b>Topology</b>: Gateway·Upstream·Route 관계 그래프.</li></ul>' },
+      tools: { title: 'MCP 도구·서버', body:
+        '<p>서버별 사용 현황과 도구(tool) 리더보드, 새로 나타난 도구(카탈로그 드리프트)를 봅니다.</p>' +
+        '<ul style="margin:8px 0 0 18px;line-height:1.8">' +
+        '<li><b>MCP 서버별</b>: 서버 단위 호출/오류 통계.</li>' +
+        '<li><b>Tool 리더보드</b>: 도구별 호출량·오류율·위험도, 신뢰도(Trust) 점수.</li>' +
+        '<li><b>카탈로그</b>: 새로/오래된 도구 변화 추적.</li></ul>' },
+      policy: { title: 'MCP 정책·보안', body:
+        '<p>도구 호출의 최종 허용 여부와 서버 정책, 남용 신호를 관리합니다.</p>' +
+        '<ul style="margin:8px 0 0 18px;line-height:1.8">' +
+        '<li><b>Effective Policy Matrix</b>: allowlist·서버정책·도구위험을 합산한 최종 호출 가능 여부.</li>' +
+        '<li><b>에이전트 루프 의심</b>: 세션별 반복 호출(≥10) 탐지.</li>' +
+        '<li><b>서버 정책</b>: allowlist 토글, 서버별 allow/warn/block 정책.</li></ul>' },
+      'agent-routes': { title: '에이전트 라우트 (가상모델)', body:
+        '<p>가상 모델명 하나를 호출하면 <b>지정한 프로바이더/백킹 모델 + 지정한 MCP 서버</b>로 에이전틱(LLM↔도구) 응답을 만드는 기능입니다. 위 MCP 탭들에서 서버·도구·정책을 갖춘 뒤, 여기서 그것들을 묶어 하나의 모델처럼 노출합니다.</p>' +
+        '<ul style="margin:8px 0 0 18px;line-height:1.8">' +
+        '<li>클라이언트는 <code>model: "vibe/agent-&lt;이름&gt;"</code> 로만 호출하면 됩니다(스트리밍 지원).</li>' +
+        '<li>라우트별 <b>시스템 프롬프트 · 최대 스텝 · 1회 호출 KRW 예산 · 도구 allowlist</b>를 설정.</li>' +
+        '<li><b>테스트</b> 버튼으로 서버측에서 즉시 1회 실행해 응답·스텝·도구 호출을 확인.</li>' +
+        '<li>호출 이력·비용·거버넌스에 그대로 통합됩니다.</li></ul>' +
+        '<p class="muted" style="font-size:12px;margin-top:8px">MCP 서버가 없으면 순수 프로바이더 응답, MCP 서버를 지정하면 그 도구들로 근거를 조회해 답합니다.</p>' },
+    };
+    window.mcpGuide = (tab) => {
+      const g = mcpGuides[tab] || mcpGuides.overview;
+      openModal(g.title, '<div style="line-height:1.6;font-size:13px">' + g.body + '</div>');
+    };
+    async function renderMCP(initial, tab) {
+      tab = tab || 'overview';
       const apiKeyId = initial ? (initial.get('api_key_id') || '') : '';
       const serverFilter = initial ? (initial.get('server') || '') : '';
       const toolFilter = initial ? (initial.get('tool') || '') : '';
@@ -8964,16 +9061,25 @@ const adminHTML = `<!doctype html>
       if (configuredFilter) qs.set('configured', configuredFilter);
       if (mcpOnly) qs.set('mcp_only', '1');
 
+      // Each MCP sub-view fetches only the endpoints its sections need, so a tab loads fast
+      // instead of pulling the whole MCP surface at once. Skipped endpoints keep their empty shape.
+      const need = ({
+        overview:  { overview: 1, routes: 1, upstreams: 1 },
+        upstreams: { routes: 1, topology: 1, upstreams: 1 },
+        tools:     { servers: 1, tools: 1, catalog: 1 },
+        policy:    { routes: 1, servers: 1, policies: 1, loops: 1 },
+      })[tab] || { overview: 1, routes: 1, upstreams: 1 };
+      const skip = (v) => Promise.resolve(v);
       const [overviewResp, routesResp, topologyResp, serversResp, toolsResp, policiesResp, loopsResp, catalogResp, upstreamsResp] = await Promise.all([
-        api('/admin/mcp/overview').catch(() => null),
-        api('/admin/mcp/routes').catch(() => ({ routes: [], errors: {} })),
-        api('/admin/mcp/topology').catch(() => ({ nodes: [], edges: [] })),
-        api('/admin/mcp/servers' + (serverFilter || apiKeyId || mcpOnly ? '?' + new URLSearchParams([...qs].filter(([k]) => ['server','api_key_id','mcp_only'].includes(k))).toString() : '')),
-        api('/admin/mcp/tools' + (qs.toString() ? '?' + qs.toString() : '')),
-        api('/admin/mcp/policies').catch(() => ({ policies: [], allowlist_enabled: false })),
-        api('/admin/mcp/loops?window=24h&threshold=10').catch(() => ({ loops: [], threshold: 10 })),
-        api('/admin/mcp/catalog' + (serverFilter ? '?server=' + encodeURIComponent(serverFilter) : '')).catch(() => ({ catalog: [], new_count: 0 })),
-        api('/admin/mcp/upstreams').catch(() => ({ upstreams: [], discovery_errors: {} })),
+        need.overview ? api('/admin/mcp/overview').catch(() => null) : skip(null),
+        need.routes ? api('/admin/mcp/routes').catch(() => ({ routes: [], errors: {} })) : skip({ routes: [], errors: {} }),
+        need.topology ? api('/admin/mcp/topology').catch(() => ({ nodes: [], edges: [] })) : skip({ nodes: [], edges: [] }),
+        need.servers ? api('/admin/mcp/servers' + (serverFilter || apiKeyId || mcpOnly ? '?' + new URLSearchParams([...qs].filter(([k]) => ['server','api_key_id','mcp_only'].includes(k))).toString() : '')) : skip({ servers: [], summary: {} }),
+        need.tools ? api('/admin/mcp/tools' + (qs.toString() ? '?' + qs.toString() : '')) : skip({ tools: [], tool_risk: [] }),
+        need.policies ? api('/admin/mcp/policies').catch(() => ({ policies: [], allowlist_enabled: false })) : skip({ policies: [], allowlist_enabled: false }),
+        need.loops ? api('/admin/mcp/loops?window=24h&threshold=10').catch(() => ({ loops: [], threshold: 10 })) : skip({ loops: [], threshold: 10 }),
+        need.catalog ? api('/admin/mcp/catalog' + (serverFilter ? '?server=' + encodeURIComponent(serverFilter) : '')).catch(() => ({ catalog: [], new_count: 0 })) : skip({ catalog: [], new_count: 0 }),
+        need.upstreams ? api('/admin/mcp/upstreams').catch(() => ({ upstreams: [], discovery_errors: {} })) : skip({ upstreams: [], discovery_errors: {} }),
       ]);
       const servers = serversResp.servers || [];
       const summary = serversResp.summary || {};
@@ -9188,22 +9294,27 @@ const adminHTML = `<!doctype html>
         '<div id="mcp-flow-graph"></div>';
 
       document.getElementById('view').innerHTML =
-        section('MCP 운영 Overview', kpis + filterBar) +
-        section('에이전틱 실행 흐름 — 질문에서 도구 실행까지', agenticFlowPanel) +
-        section('MCP 연결 상태 Wizard', wizard) +
-        section('MCP Route Explain / Test Console', testConsole) +
-        section('MCP Gateway — 업스트림 등록과 연결 진단', upstreamForm + upstreamTable + gatewayHelp) +
-        section('Route Map — 클라이언트 노출명 → 업스트림 원본', routeMapTable) +
-        section('Effective Policy Matrix — 최종 호출 가능 여부', effectivePolicyTable) +
-        section('Topology — Gateway / Upstream / Route 관계', topologyView) +
-        section('MCP 서버별', serverTable) +
-        section('Tool 리더보드', toolTable) +
-        '<div id="mcp-trust"></div>' +
-        section('에이전트 루프 의심 (세션별 반복 호출 ≥ 10)', loopTable) +
-        section(catalogTitle, catalogTable) +
-        section('MCP 서버 정책', allowlistToggle + policyForm + policyTable);
+        (tab === 'overview' ? (
+          section('MCP 운영 Overview', kpis + filterBar) +
+          section('에이전틱 실행 흐름 — 질문에서 도구 실행까지', agenticFlowPanel) +
+          section('MCP 연결 상태 Wizard', wizard) +
+          section('MCP Route Explain / Test Console', testConsole)
+        ) : tab === 'upstreams' ? (
+          section('MCP Gateway — 업스트림 등록과 연결 진단', upstreamForm + upstreamTable + gatewayHelp) +
+          section('Route Map — 클라이언트 노출명 → 업스트림 원본', routeMapTable) +
+          section('Topology — Gateway / Upstream / Route 관계', topologyView)
+        ) : tab === 'tools' ? (
+          section('MCP 서버별', serverTable) +
+          section('Tool 리더보드', toolTable) +
+          '<div id="mcp-trust"></div>' +
+          section(catalogTitle, catalogTable)
+        ) : tab === 'policy' ? (
+          section('Effective Policy Matrix — 최종 호출 가능 여부', effectivePolicyTable) +
+          section('에이전트 루프 의심 (세션별 반복 호출 ≥ 10)', loopTable) +
+          section('MCP 서버 정책', allowlistToggle + policyForm + policyTable)
+        ) : '');
 
-      mcpLoadTrust();
+      if (tab === 'tools') mcpLoadTrust();
 
       const wizardSelect = document.getElementById('mcp-wizard-upstream');
       if (wizardSelect) {
@@ -9261,7 +9372,8 @@ const adminHTML = `<!doctype html>
         });
       }
 
-      document.getElementById('mcp-upstream-form').addEventListener('submit', async (e) => {
+      const mcpUpstreamForm = document.getElementById('mcp-upstream-form');
+      if (mcpUpstreamForm) mcpUpstreamForm.addEventListener('submit', async (e) => {
         e.preventDefault();
         const body = {
           name: document.getElementById('mcp-up-name').value.trim(),
@@ -9288,7 +9400,8 @@ const adminHTML = `<!doctype html>
         }
       });
 
-      document.getElementById('mcp-filter').addEventListener('submit', (e) => {
+      const mcpFilterForm = document.getElementById('mcp-filter');
+      if (mcpFilterForm) mcpFilterForm.addEventListener('submit', (e) => {
         e.preventDefault();
         const p = new URLSearchParams();
         const k = document.getElementById('mcp-api-key').value.trim();
@@ -9306,14 +9419,17 @@ const adminHTML = `<!doctype html>
         if (document.getElementById('mcp-only').checked) p.set('mcp_only', '1');
         location.hash = '#/mcp' + (p.toString() ? '?' + p.toString() : '');
       });
-      document.getElementById('mcp-route-explain-form').addEventListener('submit', async (e) => {
+      const mcpRouteExplainForm = document.getElementById('mcp-route-explain-form');
+      if (mcpRouteExplainForm) mcpRouteExplainForm.addEventListener('submit', async (e) => {
         e.preventDefault();
         await runMCPRouteExplain(false);
       });
-      document.getElementById('mcp-test-run').addEventListener('click', async () => {
+      const mcpTestRun = document.getElementById('mcp-test-run');
+      if (mcpTestRun) mcpTestRun.addEventListener('click', async () => {
         await runMCPRouteExplain(true);
       });
-      document.getElementById('mcp-policy-form').addEventListener('submit', async (e) => {
+      const mcpPolicyForm = document.getElementById('mcp-policy-form');
+      if (mcpPolicyForm) mcpPolicyForm.addEventListener('submit', async (e) => {
         e.preventDefault();
         await api('/admin/mcp/policies', { method: 'POST', body: JSON.stringify({
           server_label: document.getElementById('mcp-policy-server').value.trim(),
@@ -9322,7 +9438,8 @@ const adminHTML = `<!doctype html>
         }) });
         route();
       });
-      document.getElementById('mcp-allowlist').addEventListener('change', async (e) => {
+      const mcpAllowlist = document.getElementById('mcp-allowlist');
+      if (mcpAllowlist) mcpAllowlist.addEventListener('change', async (e) => {
         await api('/admin/mcp/policies', { method: 'POST', body: JSON.stringify({ allowlist_enabled: e.target.checked }) });
         route();
       });
