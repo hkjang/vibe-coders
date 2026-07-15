@@ -295,6 +295,36 @@ const adminHTML = `<!doctype html>
     .progress > span.warn { background: var(--warn); }
     .progress > span.danger { background: var(--bad); }
 
+    /* Dashboard-native visual language: dependency-free charts that inherit both themes. */
+    .viz-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-top: 16px; }
+    .viz-panel { padding: 16px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel-alt); min-width: 0; }
+    .viz-title { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:14px; font-weight:800; }
+    .viz-title small { color:var(--muted); font-weight:600; }
+    .bar-list { display:flex; flex-direction:column; gap:12px; }
+    .bar-head { display:flex; justify-content:space-between; gap:10px; margin-bottom:5px; font-size:12px; }
+    .bar-head span:first-child { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .bar-track { height:9px; overflow:hidden; border-radius:99px; background:var(--pill-bg); }
+    .bar-fill { height:100%; min-width:2px; border-radius:99px; background:linear-gradient(90deg,var(--accent),var(--accent-2)); }
+    .bar-fill.warn { background:linear-gradient(90deg,#f59e0b,var(--bad)); }
+    .donut-row { display:flex; align-items:center; justify-content:center; gap:24px; min-height:150px; flex-wrap:wrap; }
+    .donut { width:126px; height:126px; border-radius:50%; display:grid; place-items:center; position:relative; flex:0 0 auto; }
+    .donut::after { content:""; width:82px; height:82px; border-radius:50%; background:var(--panel-alt); }
+    .donut-center { position:absolute; z-index:1; text-align:center; font-size:21px; font-weight:850; }
+    .donut-center small { display:block; font-size:10px; color:var(--muted); font-weight:700; margin-top:2px; }
+    .metric-legend { display:grid; gap:8px; min-width:150px; }
+    .metric-legend > div { display:flex; align-items:center; justify-content:space-between; gap:18px; font-size:12px; }
+    .legend-dot { width:8px; height:8px; border-radius:50%; display:inline-block; margin-right:7px; background:var(--accent); }
+    .spark-chart { width:100%; height:190px; display:block; overflow:visible; }
+    .spark-chart .gridline { stroke:var(--line); stroke-width:1; }
+    .spark-chart .area { fill:var(--accent); opacity:.12; }
+    .spark-chart .line { fill:none; stroke:var(--accent); stroke-width:3; stroke-linecap:round; stroke-linejoin:round; }
+    .spark-chart .dot { fill:var(--panel); stroke:var(--accent); stroke-width:2; }
+    .spark-labels { display:flex; justify-content:space-between; color:var(--muted); font-size:10px; margin-top:4px; }
+    .health-strip { display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:8px; }
+    .health-cell { border:1px solid var(--line); border-radius:8px; padding:10px; background:var(--panel); }
+    .health-cell strong { display:block; font-size:17px; margin-top:4px; }
+    @media (max-width: 760px) { .viz-grid { grid-template-columns:1fr; } .spark-chart { height:150px; } }
+
     kbd {
       display: inline-block; padding: 1px 6px; border: 1px solid var(--line-strong);
       border-bottom-width: 2px; border-radius: 4px;
@@ -1972,8 +2002,16 @@ const adminHTML = `<!doctype html>
       const sessionID = initial ? (initial.get('session_id') || '') : '';
       const view = document.getElementById('view');
       if (!sessionID) {
-        const data = await api('/admin/llm/sessions?limit=100');
+        const page = Math.max(1, Number(initial && initial.get('page') || 1));
+        const pageSize = 25;
+        const data = await api('/admin/llm/sessions?limit=' + pageSize + '&offset=' + ((page - 1) * pageSize));
         const rows = data.sessions || [];
+        const meta = data.page || {};
+        const sessionViz = rows.length ? '<div class="viz-grid" style="margin:0 0 16px"><div class="viz-panel"><div class="viz-title">세션별 요청량 <small>현재 페이지</small></div>' + visualBars(rows.slice(0,8).map(s=>({label:s.session_id||'no-session',value:s.requests||0}))) + '</div><div class="viz-panel"><div class="viz-title">세션별 비용 <small>현재 페이지</small></div>' + visualBars(rows.slice(0,8).map(s=>({label:s.session_id||'no-session',value:s.cost_krw||0})), v=>money(v)) + '</div></div>' : '';
+        const pager = '<div style="display:flex;align-items:center;justify-content:center;gap:10px;margin-top:14px">' +
+          '<button class="secondary" type="button" ' + (page <= 1 ? 'disabled' : '') + ' onclick="location.hash=\'#/waterfall?page=' + (page-1) + '\'">← 이전</button>' +
+          '<span class="muted">' + page + ' 페이지 · 페이지당 ' + pageSize + '개</span>' +
+          '<button class="secondary" type="button" ' + (!meta.has_more ? 'disabled' : '') + ' onclick="location.hash=\'#/waterfall?page=' + (page+1) + '\'">다음 →</button></div>';
         const picker = rows.length ? (
           '<table><thead><tr><th data-sort="str">세션</th><th data-sort="str">마지막 메시지</th><th data-sort="num">요청</th><th data-sort="num">토큰</th><th data-sort="num">비용</th><th data-sort="num">오류</th><th data-sort="str">최근</th><th>워터폴</th></tr></thead><tbody>' +
           rows.map(s => '<tr>' +
@@ -1985,12 +2023,12 @@ const adminHTML = `<!doctype html>
             '<td data-num="' + (s.errors || 0) + '">' + fmt(s.errors || 0) + '</td>' +
             '<td>' + ago(s.last_seen) + '</td>' +
             '<td><button class="secondary" type="button" onclick="openWaterfall(\'' + escapeAttr(s.session_id || 'no-session') + '\')">보기</button></td>' +
-          '</tr>').join('') + '</tbody></table>'
+          '</tr>').join('') + '</tbody></table>' + pager
         ) : '<div class="empty">세션 없음</div>';
         view.innerHTML = section('Waterfall — 세션 선택',
           '<div style="padding:16px 18px 20px">' +
           '<p class="muted" style="margin:0 0 16px 2px; line-height:1.7">트랜잭션(요청)을 시간순 워터폴로 펼쳐 봅니다. 세션을 고르면 각 요청의 시작 시점 · 첫 응답 대기(TTFB) · 스트리밍 수신 구간과, 요청 사이의 대기(생각) 시간을 한 줄씩 막대로 보여줍니다.</p>' +
-          picker + '</div>');
+          sessionViz + picker + '</div>');
         makeSortable('#view', 'wf-sessions');
         return;
       }
@@ -3101,6 +3139,27 @@ const adminHTML = `<!doctype html>
     function kpi(label, value) {
       return '<div class="kpi"><div class="label">' + label + '</div><div class="value">' + value + '</div></div>';
     }
+    function visualBars(items, valueLabel, warn) {
+      items = (items || []).filter(x => Number(x.value || 0) >= 0).slice(0, 8);
+      if (!items.length) return '<div class="empty">표시할 데이터가 없습니다.</div>';
+      const max = Math.max.apply(null, items.map(x => Number(x.value || 0)).concat([1]));
+      return '<div class="bar-list">' + items.map(x => {
+        const value = Number(x.value || 0), width = value ? Math.max(3, value / max * 100) : 0;
+        return '<div><div class="bar-head"><span title="' + escapeAttr(String(x.label || '')) + '">' + escapeHTML(String(x.label || '')) + '</span><strong>' + (valueLabel ? valueLabel(value) : fmt(Math.round(value))) + '</strong></div><div class="bar-track"><div class="bar-fill' + (warn ? ' warn' : '') + '" style="width:' + width.toFixed(1) + '%"></div></div></div>';
+      }).join('') + '</div>';
+    }
+    function donutVisual(percent, center, label, parts) {
+      const p = Math.max(0, Math.min(100, Number(percent || 0)));
+      return '<div class="donut-row"><div class="donut" style="background:conic-gradient(var(--accent) 0 ' + p + '%,var(--pill-bg) ' + p + '% 100%)"><div class="donut-center">' + escapeHTML(String(center)) + '<small>' + escapeHTML(label || '') + '</small></div></div>' +
+        '<div class="metric-legend">' + (parts || []).map((x, i) => '<div><span><i class="legend-dot" style="background:' + (i ? 'var(--accent-2)' : 'var(--accent)') + '"></i>' + escapeHTML(x.label) + '</span><strong>' + escapeHTML(String(x.value)) + '</strong></div>').join('') + '</div></div>';
+    }
+    function sparkVisual(points, valueKey) {
+      points = (points || []).slice(-32); if (!points.length) return '<div class="empty">추세 데이터가 없습니다.</div>';
+      const vals = points.map(p => Number(p[valueKey] || 0)), max = Math.max.apply(null, vals.concat([1]));
+      const coords = vals.map((v,i) => (i * 600 / Math.max(1, vals.length - 1)).toFixed(1) + ',' + (170 - v / max * 145).toFixed(1));
+      const dots = coords.map((c,i) => { const xy=c.split(','); return '<circle class="dot" cx="'+xy[0]+'" cy="'+xy[1]+'" r="3"><title>'+escapeHTML(String(points[i].day||''))+' · '+fmt(Math.round(vals[i]))+'</title></circle>'; }).join('');
+      return '<svg class="spark-chart" viewBox="0 0 600 180" preserveAspectRatio="none" role="img" aria-label="기간별 추세"><line class="gridline" x1="0" y1="25" x2="600" y2="25"/><line class="gridline" x1="0" y1="97" x2="600" y2="97"/><line class="gridline" x1="0" y1="170" x2="600" y2="170"/><polygon class="area" points="0,170 '+coords.join(' ')+' 600,170"/><polyline class="line" points="'+coords.join(' ')+'"/>'+dots+'</svg><div class="spark-labels"><span>'+escapeHTML(String(points[0].day||''))+'</span><span>최대 '+fmt(Math.round(max))+'</span><span>'+escapeHTML(String(points[points.length-1].day||''))+'</span></div>';
+    }
     function section(title, inner) { return '<section><h2>' + escapeHTML(title) + '</h2>' + inner + '</section>'; }
     function card(title, inner)    { return '<section><h2>' + escapeHTML(title) + '</h2>' + inner + '</section>'; }
     function cardWithID(id, title, inner) { return '<section id="' + escapeHTML(id) + '"><h2>' + escapeHTML(title) + '</h2>' + inner + '</section>'; }
@@ -3124,7 +3183,7 @@ const adminHTML = `<!doctype html>
       const scope = llmScopeParams();
       const [traces, sessions, evals, prompts, patterns, insights, feedback, ts] = await Promise.all([
         api('/admin/llm/traces?limit=100&' + scope.toString()),
-        api('/admin/llm/sessions?limit=100&' + scope.toString()),
+        api('/admin/llm/sessions?limit=25&' + scope.toString()),
         api('/admin/llm/evaluations?limit=100&' + scope.toString()),
         api('/admin/llm/prompts?limit=100&' + scope.toString()),
         api('/admin/llm/patterns?limit=50&' + scope.toString()),
@@ -11031,6 +11090,15 @@ const adminHTML = `<!doctype html>
           : '<p class="muted">최근 위반이 없습니다.</p>') + '</div>');
 
       const byType = sec.by_type || {};
+      const totalSignals = (pol.blocked||0) + (pol.warned||0) + (sec.total||0) + (d.pending_count||0) + (mcp.total_errors||0);
+      const criticalSignals = (pol.blocked||0) + (sec.total||0) + (d.pending_count||0);
+      const securityVisual = card('보안 신호 구성', '<div class="card-body"><div class="viz-grid" style="margin-top:0">' +
+        '<div class="viz-panel"><div class="viz-title">위험 신호 비중 <small>현재 조회 구간</small></div>' + donutVisual(totalSignals ? criticalSignals/totalSignals*100 : 0, totalSignals ? Math.round(criticalSignals/totalSignals*100)+'%' : '0%', '즉시 확인', [
+          {label:'차단·Secret·승인',value:fmt(criticalSignals)}, {label:'경고·MCP 오류',value:fmt(Math.max(0,totalSignals-criticalSignals))}
+        ]) + '</div>' +
+        '<div class="viz-panel"><div class="viz-title">신호별 발생량 <small>많은 항목 우선</small></div>' + visualBars([
+          {label:'정책 차단',value:pol.blocked||0},{label:'정책 경고',value:pol.warned||0},{label:'Secret 탐지',value:sec.total||0},{label:'승인 대기',value:d.pending_count||0},{label:'위험 도구',value:(d.risky_tools||[]).length},{label:'MCP 오류',value:mcp.total_errors||0}
+        ].sort((a,b)=>b.value-a.value), null, true) + '</div></div></div>');
       const secCard = card('Secret Firewall',
         '<div class="card-body">' + (Object.keys(byType).length
           ? '<ul style="margin:0;padding-left:18px">' + Object.keys(byType).map(k => '<li>' + escapeHTML(k) + ': <strong>' + fmt(byType[k]) + '</strong></li>').join('') + '</ul>'
@@ -11050,7 +11118,7 @@ const adminHTML = `<!doctype html>
             pending.map(a => '<tr><td>' + escapeHTML((a.subject_type||'') + ' ' + (a.subject_id||'')) + '</td><td>' + escapeHTML(a.reason||'') + '</td><td>' + fmt(a.risk_score||0) + '</td><td class="muted">' + ago(a.created_at) + '</td></tr>').join('') + '</tbody></table>'
           : '<p class="muted">대기 중인 승인이 없습니다.</p>') + '</div>');
 
-      view.innerHTML = section('보안 대시보드', kpis) + polCard + secCard + riskyCard + apprCard;
+      view.innerHTML = section('보안 대시보드', kpis) + securityVisual + polCard + secCard + riskyCard + apprCard;
     }
 
     // renderBillingHome is the billing_admin landing: cost-center spend, budget burn, and
@@ -11070,6 +11138,9 @@ const adminHTML = `<!doctype html>
       '</div>';
 
       const cc = d.by_cost_center || [];
+      const costVisual = card('비용 분포와 예산 상태', '<div class="card-body"><div class="viz-grid" style="margin-top:0">' +
+        '<div class="viz-panel"><div class="viz-title">비용센터 지출 <small>30일 · 원</small></div>' + visualBars(cc.map(x=>({label:x.key||'(미지정)',value:x.cost_krw||0})), won) + '</div>' +
+        '<div class="viz-panel"><div class="viz-title">예산 소진 현황 <small>월 예산 대비</small></div>' + visualBars((d.budgets||[]).map(b=>({label:((b.budget||{}).scope||'')+':'+((b.budget||{}).scope_value||''),value:(b.burn_ratio||0)*100})), v=>v.toFixed(0)+'%', true) + '</div></div></div>');
       const ccCard = card('비용센터별 비용',
         '<div class="card-body">' + (cc.length
           ? '<table><thead><tr><th>비용센터</th><th>요청</th><th>비용</th></tr></thead><tbody>' +
@@ -11090,7 +11161,7 @@ const adminHTML = `<!doctype html>
             mig.map(m => '<tr><td>' + escapeHTML(m.current_model) + '</td><td><strong>' + escapeHTML(m.recommended_model) + '</strong></td><td>' + fmt(m.requests) + '</td><td>' + won(m.estimated_savings_krw) + '</td></tr>').join('') + '</tbody></table>'
           : '<p class="muted">전환 후보가 없습니다.</p>') + '</div>');
 
-      view.innerHTML = section('비용 대시보드', kpis) + ccCard + budgetCard + migCard;
+      view.innerHTML = section('비용 대시보드', kpis) + costVisual + ccCard + budgetCard + migCard;
     }
 
     // renderTeamHome is the team_manager landing: their team's usage, cost, top members,
@@ -11123,6 +11194,12 @@ const adminHTML = `<!doctype html>
           : '<p class="muted">데이터가 없습니다.</p>') + '</div>');
 
       const models = d.models || [];
+      const teamVisual = card('팀 활동 한눈에', '<div class="card-body"><div class="viz-grid" style="margin-top:0">' +
+        '<div class="viz-panel"><div class="viz-title">팀원별 요청량 <small>Top 사용자</small></div>' + visualBars(users.map(u=>({label:u.user_id||'(알 수 없음)',value:u.requests||0}))) + '</div>' +
+        '<div class="viz-panel"><div class="viz-title">모델 사용 구성 <small>요청 기준</small></div>' + visualBars(models.map(m=>({label:m.model||'(알 수 없음)',value:m.requests||0}))) + '</div>' +
+        '<div class="viz-panel" style="grid-column:1/-1"><div class="viz-title">팀 품질 상태 <small>최근 30일</small></div>' + donutVisual((tot.success_rate||0)*100, pctv(tot.success_rate), '성공률', [
+          {label:'성공 요청',value:fmt(Math.max(0,(tot.requests||0)-(tot.errors||0)))},{label:'오류 요청',value:fmt(tot.errors||0)},{label:'평균 지연',value:fmt(Math.round(tot.avg_latency_ms||0))+'ms'}
+        ]) + '</div></div></div>');
       const modelsCard = card('팀 모델 사용',
         '<div class="card-body">' + (models.length
           ? '<table><thead><tr><th>모델</th><th>요청</th><th>비용</th></tr></thead><tbody>' +
@@ -11136,7 +11213,7 @@ const adminHTML = `<!doctype html>
             fails.map(f => '<tr><td>' + escapeHTML(f.model) + '</td><td><span class="status error">' + f.status_code + '</span></td><td>' + escapeHTML(f.task_type || '') + '</td><td class="muted">' + ago(f.created_at) + '</td></tr>').join('') + '</tbody></table>'
           : '<p class="muted">최근 실패가 없습니다. 👍</p>') + '</div>');
 
-      view.innerHTML = section('팀 대시보드 — ' + escapeHTML(resp.team_id || ''), kpis) + usersCard + modelsCard + failCard +
+      view.innerHTML = section('팀 대시보드 — ' + escapeHTML(resp.team_id || ''), kpis) + teamVisual + usersCard + modelsCard + failCard +
         '<div id="team-challenge"></div><div id="team-reports"></div><div id="team-risk"></div><div id="team-skills"></div><div id="team-templates"></div><div id="team-onboarding"></div>';
 
       // 팀 공용 리포트 (승인됨 + 승인 대기, team:read는 승인/반려 가능).
@@ -13485,7 +13562,7 @@ const adminHTML = `<!doctype html>
       const bktLabel = bkt === 'week' ? '주' : '일';
       if (pts.length) {
         const maxCost = Math.max.apply(null, pts.map(p => p.cost_krw || 0).concat([1]));
-        html += '<section><h2>비용 추이 <label class="muted" style="font-size:12px">단위 <select onchange="dwSet(\'dwBucket\', this.value)">' + bktSel + '</select></label></h2><div class="card-body"><table><thead><tr><th>' + bktLabel + '자</th><th>요청</th><th>토큰</th><th>비용(₩)</th><th style="width:40%"></th></tr></thead><tbody>' +
+        html += '<section><h2>비용 추이 <label class="muted" style="font-size:12px">단위 <select onchange="dwSet(\'dwBucket\', this.value)">' + bktSel + '</select></label></h2><div class="card-body"><div class="viz-panel" style="margin-bottom:14px"><div class="viz-title">기간별 비용 흐름 <small>₩ · 마우스를 올려 상세 확인</small></div>' + sparkVisual(pts, 'cost_krw') + '</div><table><thead><tr><th>' + bktLabel + '자</th><th>요청</th><th>토큰</th><th>비용(₩)</th><th style="width:40%"></th></tr></thead><tbody>' +
           pts.map(p => '<tr><td>' + escapeHTML(p.day) + '</td><td data-num="' + p.requests + '">' + fmt(Math.round(p.requests)) + '</td><td data-num="' + p.tokens + '">' + fmt(Math.round(p.tokens)) + '</td><td data-num="' + p.cost_krw + '">' + fmt(Math.round(p.cost_krw)) + '</td>' +
             '<td><div class="progress"><span style="width:' + Math.round((p.cost_krw || 0) / maxCost * 100) + '%"></span></div></td></tr>').join('') +
           '</tbody></table></div></section>';
@@ -13498,7 +13575,7 @@ const adminHTML = `<!doctype html>
       html += '<section><h2>Top N</h2><div class="card-body">' +
         '<div style="display:flex;gap:8px;margin-bottom:8px"><label class="muted">차원 <select onchange="dwSet(\'dwDim\', this.value)">' + dimSel + '</select></label>' +
         '<label class="muted">정렬 <select onchange="dwSet(\'dwOrder\', this.value)">' + ordSel + '</select></label></div>' +
-        (drows.length ? '<table><thead><tr><th>' + escapeHTML(dim) + '</th><th>요청</th><th>토큰</th><th>비용(₩)</th><th>오류율</th></tr></thead><tbody>' +
+        (drows.length ? '<div class="viz-panel" style="margin-bottom:14px"><div class="viz-title">상위 ' + escapeHTML(dim) + ' 비교 <small>' + escapeHTML(order) + ' 기준</small></div>' + visualBars(drows.map(rw=>({label:String(rw.value),value:Number(rw[order === 'cost' ? 'cost_krw' : order] || 0)})), order === 'cost' ? v=>money(v) : null, order === 'errors') + '</div><table><thead><tr><th>' + escapeHTML(dim) + '</th><th>요청</th><th>토큰</th><th>비용(₩)</th><th>오류율</th></tr></thead><tbody>' +
           drows.map(rw => '<tr><td>' + escapeHTML(String(rw.value)) + '</td><td data-num="' + rw.requests + '">' + fmt(Math.round(rw.requests)) + '</td><td data-num="' + rw.tokens + '">' + fmt(Math.round(rw.tokens)) + '</td><td data-num="' + rw.cost_krw + '">' + fmt(Math.round(rw.cost_krw)) + '</td><td>' + ((rw.error_rate || 0) * 100).toFixed(1) + '%</td></tr>').join('') +
           '</tbody></table>' : '<div class="empty">데이터 없음</div>') +
         '</div></section>';

@@ -73,15 +73,25 @@ func (s *Server) handleLLMSessions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	whereClause, whereArgs := llmScopeWhere(r)
-	sessions, err := s.db.LLMSessions(r.Context(), llmLimit(r, 100, 500))
+	limit := llmLimit(r, 100, 500)
+	offset := llmOffset(r)
+	// Fetch one extra row to expose has_more without an expensive full COUNT/GROUP BY.
+	sessions, err := s.db.LLMSessionsPage(r.Context(), limit+1, offset)
 	if whereClause != "1=1" {
-		sessions, err = s.db.LLMSessionsFilter(r.Context(), whereClause, llmLimit(r, 100, 500), whereArgs...)
+		sessions, err = s.db.LLMSessionsFilterPage(r.Context(), whereClause, limit+1, offset, whereArgs...)
 	}
 	if err != nil {
 		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "llm_sessions_failed")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"sessions": sessions})
+	hasMore := len(sessions) > limit
+	if hasMore {
+		sessions = sessions[:limit]
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"sessions": sessions,
+		"page":     map[string]any{"limit": limit, "offset": offset, "has_more": hasMore},
+	})
 }
 
 func (s *Server) handleLLMSessionTimeline(w http.ResponseWriter, r *http.Request) {
@@ -544,6 +554,15 @@ func llmLimit(r *http.Request, fallback int, max int) int {
 	}
 	if parsed > max {
 		return max
+	}
+	return parsed
+}
+
+func llmOffset(r *http.Request) int {
+	value := strings.TrimSpace(r.URL.Query().Get("offset"))
+	parsed, err := strconv.Atoi(value)
+	if err != nil || parsed < 0 {
+		return 0
 	}
 	return parsed
 }

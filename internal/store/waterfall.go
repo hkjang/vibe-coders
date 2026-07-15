@@ -80,6 +80,12 @@ func (s *SQLStore) Waterfall(ctx context.Context, sessionID string, limit int, s
 	if limit <= 0 || limit > 2000 {
 		limit = 500
 	}
+	sessionPredicate := "r.session_id = ?"
+	queryArgs := []any{sessionID, limit + 1}
+	if sessionID == "no-session" {
+		sessionPredicate = "(r.session_id IS NULL OR r.session_id = '')"
+		queryArgs = []any{limit + 1}
+	}
 	query := s.bind(`
 		SELECT r.id, r.trace_id, COALESCE(r.model, ''), COALESCE(r.requested_model, ''),
 			COALESCE(r.provider, ''), r.endpoint, r.status_code,
@@ -91,10 +97,10 @@ func (s *SQLStore) Waterfall(ctx context.Context, sessionID string, limit int, s
 			r.created_at
 		FROM request_logs r
 		LEFT JOIN token_usage t ON t.request_id = r.id
-		WHERE COALESCE(NULLIF(r.session_id, ''), 'no-session') = ?
+		WHERE ` + sessionPredicate + `
 		ORDER BY r.created_at ASC
 		LIMIT ?`)
-	rows, err := s.db.QueryContext(ctx, query, sessionID, limit+1)
+	rows, err := s.db.QueryContext(ctx, query, queryArgs...)
 	if err != nil {
 		return trace, err
 	}

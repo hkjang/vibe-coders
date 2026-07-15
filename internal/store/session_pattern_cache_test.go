@@ -62,6 +62,14 @@ func TestLLMSessionTimelineWaterfallAndPatterns(t *testing.T) {
 	if findSessionSummary(filtered, "sess_llm") == nil || findSessionSummary(filtered, "sess_code") == nil {
 		t.Fatalf("filtered sessions should include both sessions, got %+v", filtered)
 	}
+	firstPage, err := db.LLMSessionsPage(ctx, 1, 0)
+	if err != nil || len(firstPage) != 1 {
+		t.Fatalf("first session page: rows=%+v err=%v", firstPage, err)
+	}
+	secondPage, err := db.LLMSessionsPage(ctx, 1, 1)
+	if err != nil || len(secondPage) != 1 || secondPage[0].SessionID == firstPage[0].SessionID {
+		t.Fatalf("second session page: first=%+v rows=%+v err=%v", firstPage, secondPage, err)
+	}
 
 	timeline, err := db.SessionTimeline(ctx, "sess_llm", 10)
 	if err != nil {

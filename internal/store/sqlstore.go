@@ -296,6 +296,7 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 		`CREATE INDEX IF NOT EXISTS idx_request_logs_client_ip ON request_logs(client_ip)`,
 		`CREATE INDEX IF NOT EXISTS idx_request_logs_model ON request_logs(model)`,
 		`CREATE INDEX IF NOT EXISTS idx_request_logs_session_id ON request_logs(session_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_request_logs_session_created ON request_logs(session_id, created_at)`,
 		`CREATE INDEX IF NOT EXISTS idx_request_logs_prompt_name ON request_logs(prompt_name)`,
 		`CREATE INDEX IF NOT EXISTS idx_request_logs_prompt_fingerprint ON request_logs(prompt_fingerprint)`,
 		`CREATE TABLE IF NOT EXISTS prompt_logs (

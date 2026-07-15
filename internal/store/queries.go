@@ -2091,25 +2091,56 @@ func promptEvalFailureRate(item LLMPromptSummary) float64 {
 }
 
 func (s *SQLStore) LLMSessions(ctx context.Context, limit int) ([]LLMSessionSummary, error) {
-	return s.llmSessionsFilter(ctx, "1=1", limit)
+	return s.llmSessionsFilter(ctx, "1=1", limit, 0)
 }
 
 func (s *SQLStore) LLMSessionsFilter(ctx context.Context, whereClause string, limit int, args ...any) ([]LLMSessionSummary, error) {
-	return s.llmSessionsFilter(ctx, whereClause, limit, args...)
+	return s.llmSessionsFilter(ctx, whereClause, limit, 0, args...)
 }
 
-func (s *SQLStore) llmSessionsFilter(ctx context.Context, whereClause string, limit int, args ...any) ([]LLMSessionSummary, error) {
+// LLMSessionsPage and LLMSessionsFilterPage provide server-side pagination for the
+// session explorer. The older methods remain as page-zero compatibility wrappers.
+func (s *SQLStore) LLMSessionsPage(ctx context.Context, limit, offset int) ([]LLMSessionSummary, error) {
+	return s.llmSessionsFilter(ctx, "1=1", limit, offset)
+}
+
+func (s *SQLStore) LLMSessionsFilterPage(ctx context.Context, whereClause string, limit, offset int, args ...any) ([]LLMSessionSummary, error) {
+	return s.llmSessionsFilter(ctx, whereClause, limit, offset, args...)
+}
+
+func (s *SQLStore) llmSessionsFilter(ctx context.Context, whereClause string, limit, offset int, args ...any) ([]LLMSessionSummary, error) {
 	if limit <= 0 {
 		limit = 100
 	}
 	if limit > 500 {
 		limit = 500
 	}
-	evalWhereClause := strings.ReplaceAll(whereClause, "r.", "r2.")
 	queryArgs := append([]any{}, args...)
-	queryArgs = append(queryArgs, args...)
-	queryArgs = append(queryArgs, limit)
+	if offset < 0 {
+		offset = 0
+	}
+	queryArgs = append(queryArgs, limit, offset)
 	rows, err := s.db.QueryContext(ctx, s.bind(fmt.Sprintf(`
+		WITH filtered_requests AS (
+			SELECT r.* FROM request_logs r WHERE %s
+		),
+		evaluation_failures AS (
+			SELECT COALESCE(NULLIF(fr.session_id, ''), 'no-session') AS session_id, COUNT(*) AS failures
+			FROM llm_evaluations e
+			JOIN filtered_requests fr ON fr.id = e.request_id
+			WHERE e.passed = 0
+			GROUP BY COALESCE(NULLIF(fr.session_id, ''), 'no-session')
+		),
+		latest_user_messages AS (
+			SELECT session_id, last_message FROM (
+				SELECT COALESCE(NULLIF(fr.session_id, ''), 'no-session') AS session_id,
+					COALESCE(NULLIF(pl.redacted_text, ''), pl.content_text) AS last_message,
+					ROW_NUMBER() OVER (PARTITION BY COALESCE(NULLIF(fr.session_id, ''), 'no-session') ORDER BY pl.created_at DESC) AS rn
+				FROM filtered_requests fr
+				JOIN prompt_logs pl ON pl.request_id = fr.id
+				WHERE LOWER(pl.role) = 'user'
+			) ranked WHERE rn = 1
+		)
 		SELECT COALESCE(NULLIF(r.session_id, ''), 'no-session') AS session_id,
 			COUNT(r.id),
 			COALESCE(SUM(t.total_tokens), 0),
@@ -2118,29 +2149,15 @@ func (s *SQLStore) llmSessionsFilter(ctx context.Context, whereClause string, li
 			COALESCE(ef.failures, 0),
 			COALESCE(MIN(r.created_at), ''),
 			COALESCE(MAX(r.created_at), ''),
-			COALESCE((
-				SELECT COALESCE(NULLIF(pl.redacted_text, ''), pl.content_text)
-				FROM prompt_logs pl
-				JOIN request_logs plr ON plr.id = pl.request_id
-				WHERE COALESCE(NULLIF(plr.session_id, ''), 'no-session') = COALESCE(NULLIF(r.session_id, ''), 'no-session')
-					AND LOWER(pl.role) = 'user'
-				ORDER BY pl.created_at DESC
-				LIMIT 1
-			), '')
-		FROM request_logs r
+			COALESCE(lum.last_message, '')
+		FROM filtered_requests r
 		LEFT JOIN token_usage t ON t.request_id = r.id
-		LEFT JOIN (
-			SELECT COALESCE(NULLIF(r2.session_id, ''), 'no-session') AS session_id, COUNT(*) AS failures
-			FROM llm_evaluations e
-			JOIN request_logs r2 ON r2.id = e.request_id
-			WHERE e.passed = 0 AND %s
-			GROUP BY COALESCE(NULLIF(r2.session_id, ''), 'no-session')
-		) ef ON ef.session_id = COALESCE(NULLIF(r.session_id, ''), 'no-session')
-		WHERE %s
-		GROUP BY COALESCE(NULLIF(r.session_id, ''), 'no-session'), ef.failures
+		LEFT JOIN evaluation_failures ef ON ef.session_id = COALESCE(NULLIF(r.session_id, ''), 'no-session')
+		LEFT JOIN latest_user_messages lum ON lum.session_id = COALESCE(NULLIF(r.session_id, ''), 'no-session')
+		GROUP BY COALESCE(NULLIF(r.session_id, ''), 'no-session'), ef.failures, lum.last_message
 		ORDER BY MAX(r.created_at) DESC
-		LIMIT ?
-	`, evalWhereClause, whereClause)), queryArgs...)
+		LIMIT ? OFFSET ?
+	`, whereClause)), queryArgs...)
 	if err != nil {
 		return nil, err
 	}
@@ -2165,6 +2182,12 @@ func (s *SQLStore) SessionTimeline(ctx context.Context, sessionID string, limit 
 	if limit <= 0 || limit > 2000 {
 		limit = 1000
 	}
+	sessionPredicate := "r.session_id = ?"
+	queryArgs := []any{sessionID, limit}
+	if sessionID == "no-session" {
+		sessionPredicate = "(r.session_id IS NULL OR r.session_id = '')"
+		queryArgs = []any{limit}
+	}
 	query := s.bind(`
 		SELECT r.id, r.trace_id, COALESCE(r.model, ''), COALESCE(r.provider, ''),
 			COALESCE(NULLIF(r.prompt_name, ''), 'ad-hoc'),
@@ -2183,10 +2206,10 @@ func (s *SQLStore) SessionTimeline(ctx context.Context, sessionID string, limit 
 			r.created_at
 		FROM request_logs r
 		LEFT JOIN token_usage t ON t.request_id = r.id
-		WHERE COALESCE(NULLIF(r.session_id, ''), 'no-session') = ?
+		WHERE ` + sessionPredicate + `
 		ORDER BY r.created_at ASC
 		LIMIT ?`)
-	rows, err := s.db.QueryContext(ctx, query, sessionID, limit)
+	rows, err := s.db.QueryContext(ctx, query, queryArgs...)
 	if err != nil {
 		return timeline, err
 	}
