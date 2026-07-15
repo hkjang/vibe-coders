@@ -323,6 +323,14 @@ const adminHTML = `<!doctype html>
     .health-strip { display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:8px; }
     .health-cell { border:1px solid var(--line); border-radius:8px; padding:10px; background:var(--panel); }
     .health-cell strong { display:block; font-size:17px; margin-top:4px; }
+    .relation-rail { display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin:8px 0 2px;padding:9px 11px;border:1px solid var(--line);border-radius:9px;background:var(--panel-alt); }
+    .relation-rail > span { color:var(--muted);font-size:11px;font-weight:800;margin-right:2px; }
+    .relation-link { text-decoration:none;border-radius:999px;padding:4px 9px;font-size:11px;font-weight:750;border:1px solid var(--line);color:var(--muted);background:var(--panel); }
+    .relation-link.strong { color:var(--good-ink);border-color:var(--accent);background:var(--good-bg); }
+    .relation-link:hover { color:var(--ink);border-color:var(--accent); }
+    details.related-panel { margin-top:16px;border:1px solid var(--line);border-radius:8px;background:var(--panel);overflow:hidden; }
+    details.related-panel > summary { cursor:pointer;padding:12px 14px;font-size:13px;font-weight:800;color:var(--muted);background:var(--panel-alt); }
+    details.related-panel[open] > summary { border-bottom:1px solid var(--line); }
     @media (max-width: 760px) { .viz-grid { grid-template-columns:1fr; } .spark-chart { height:150px; } }
 
     kbd {
@@ -1241,6 +1249,35 @@ const adminHTML = `<!doctype html>
       } else {
         el.innerHTML = '';
       }
+      const rail = relatedInfoRail(tab);
+      if (rail) el.insertAdjacentHTML('beforeend', rail);
+    }
+
+    // Contextual information architecture. Strong links belong to the same operational
+    // decision; weak links are useful references and stay visually secondary.
+    function relatedInfoRail(tab) {
+      const relations = {
+        'ops-home': [['routing/health','Provider Health',1],['pods','파드 상태',1],['journey-probe','클라이언트 점검',1],['settings/errors','시스템 오류',0]],
+        capabilities: [['ops-home','운영 홈',1],['settings/runtime','런타임 설정',0]],
+        mcp: [['agent-routes','에이전트 라우트',1],['gateway-mcp','Gateway MCP',1],['requests','호출 이력',0]],
+        'mcp-upstreams': [['mcp','MCP 개요',1],['agent-routes','에이전트 라우트',1],['journey-probe','연결 점검',0]],
+        'mcp-tools': [['mcp-policy','도구 정책',1],['agent-routes','에이전트 허용 도구',1],['requests','호출 이력',0]],
+        'mcp-policy': [['mcp-tools','도구 위험도',1],['safety','안전 정책',0],['remediation','자동 조치',0]],
+        'agent-routes': [['mcp-upstreams','MCP 서버',1],['mcp-tools','노출 도구',1],['routing/health','Provider Health',0]],
+        'gateway-mcp': [['mcp','외부 MCP 운영',1],['mykeys','연결 키',1],['journey-probe','클라이언트 점검',1]],
+        routing: [['requests','결정 원문',1],['llm','LLM 관측',1],['ops-home','운영 홈',0]],
+        workflows: [['apps','업무 앱',1],['mcp-tools','MCP 도구',1],['skills','Skills',0]],
+        apps: [['app-templates','앱 템플릿',1],['workflows','워크플로',1],['skills','Skills',0]],
+        'app-templates': [['apps','AI 업무 앱',1],['workflows','워크플로',0]],
+        pods: [['ops-home','운영 홈',1],['settings/runtime','런타임 설정',1],['settings/errors','시스템 오류',0]],
+        'journey-probe': [['gateway-mcp','Gateway MCP',1],['mykeys','Proxy Key',1],['pods','파드 상태',0]],
+      };
+      const rows = relations[tab] || [];
+      const allowed = authState.nav && Array.isArray(authState.nav.allowed_tabs) ? new Set(authState.nav.allowed_tabs) : null;
+      const parent = p => ({'routing/health':'routing','settings/runtime':'settings','settings/errors':'settings','mcp-tools':'mcp','mcp-policy':'mcp','mcp-upstreams':'mcp','agent-routes':'mcp'}[p] || p.split('/')[0]);
+      const visible = rows.filter(x=>!allowed || allowed.has(parent(x[0])) || allowed.has(x[0]));
+      if (!visible.length) return '';
+      return '<div class="relation-rail"><span>연관 정보</span>' + visible.map(x=>'<a class="relation-link '+(x[2]?'strong':'')+'" href="#/'+escapeAttr(x[0])+'">'+(x[2]?'● ':'○ ')+escapeHTML(x[1])+'</a>').join('') + '</div>';
     }
 
     async function route() {
@@ -3163,6 +3200,7 @@ const adminHTML = `<!doctype html>
     function section(title, inner) { return '<section><h2>' + escapeHTML(title) + '</h2>' + inner + '</section>'; }
     function card(title, inner)    { return '<section><h2>' + escapeHTML(title) + '</h2>' + inner + '</section>'; }
     function cardWithID(id, title, inner) { return '<section id="' + escapeHTML(id) + '"><h2>' + escapeHTML(title) + '</h2>' + inner + '</section>'; }
+    function relatedPanel(title, inner, open) { return '<details class="related-panel"' + (open ? ' open' : '') + '><summary>' + escapeHTML(title) + '</summary>' + inner + '</details>'; }
 
     // ---------- LLM observability ----------
     const llmState = {
@@ -5732,6 +5770,7 @@ const adminHTML = `<!doctype html>
       view.innerHTML = section('파드 운영 맵 (멀티 파드)',
         '<div style="padding:8px 14px"><button type="button" class="secondary" onclick="renderPodsView()">새로고침</button></div>') +
         '<div class="kpis">' + kpi('총 파드', fmt(sm.total || 0)) + kpi('live', fmt(sm.live || 0)) + kpi('stale', fmt(sm.stale || 0)) + kpi('설정 최신', fmt(sm.converged || 0)) + '</div>' +
+        '<div class="card-body"><div class="viz-grid" style="margin-top:0"><div class="viz-panel"><div class="viz-title">파드 생존 상태 <small>heartbeat</small></div>' + donutVisual(sm.total ? (sm.live||0)/sm.total*100 : 0, (sm.live||0)+'/'+(sm.total||0), 'live', [{label:'live',value:sm.live||0},{label:'stale',value:sm.stale||0}]) + '</div><div class="viz-panel"><div class="viz-title">설정 수렴도 <small>runtime config</small></div>' + donutVisual(sm.total ? (sm.converged||0)/sm.total*100 : 0, (sm.converged||0)+'/'+(sm.total||0), '최신 설정', [{label:'수렴',value:sm.converged||0},{label:'동기화 필요',value:Math.max(0,(sm.total||0)-(sm.converged||0))}]) + '</div></div></div>' +
         card('파드 (' + (sm.total || 0) + ')',
           '<div class="card-body"><table><thead><tr><th>상태</th><th>hostname</th><th>빌드</th><th>설정</th><th>마지막 하트비트</th><th>reload</th></tr></thead><tbody>' + rows + '</tbody></table>' +
           '<p class="muted" style="font-size:10px;margin-top:6px">' + escapeHTML(d.note || '') + '</p></div>');
@@ -5757,10 +5796,11 @@ const adminHTML = `<!doctype html>
           const scls = (s) => s === 'fail' ? 'error' : (s === 'warn' ? 'warn' : '');
           const cards = (d.results || []).map(rs => {
             const steps = (rs.checks || []).map(c => '<div style="font-size:11px;margin:2px 0"><span class="status ' + scls(c.status) + '" style="font-size:9px">' + escapeHTML(c.status) + '</span> ' + escapeHTML(c.name) + ' — ' + escapeHTML(c.detail) + (c.fix ? ' <span class="muted">(' + escapeHTML(c.fix) + ')</span>' : '') + '</div>').join('');
-            return '<div style="border:1px solid var(--border);border-radius:6px;padding:8px;margin:6px 0">' +
+            return '<div style="border:1px solid var(--line);border-radius:6px;padding:8px;margin:6px 0">' +
               '<strong>' + escapeHTML(rs.client) + '</strong> <span class="status ' + scls(rs.overall) + '">' + escapeHTML(rs.overall) + '</span>' + steps + '</div>';
           }).join('');
-          host.innerHTML = '<div style="margin-bottom:6px"><span class="status">' + (sm.passing || 0) + ' 정상</span> ' +
+          const journeyVisual = '<div class="viz-panel" style="margin-bottom:12px"><div class="viz-title">개발도구 연결 성공률 <small>합성 journey</small></div>' + donutVisual(sm.clients ? (sm.passing||0)/sm.clients*100 : 0, (sm.passing||0)+'/'+(sm.clients||0), '정상 client', [{label:'정상',value:sm.passing||0},{label:'실패',value:sm.failing||0}]) + '</div>';
+          host.innerHTML = journeyVisual + '<div style="margin-bottom:6px"><span class="status">' + (sm.passing || 0) + ' 정상</span> ' +
             (sm.failing ? '<span class="status error">' + sm.failing + ' 실패</span>' : '') + ' / ' + (sm.clients || 0) + ' 도구</div>' +
             cards + '<p class="muted" style="font-size:10px;margin-top:4px">' + escapeHTML(d.note || '') + '</p>';
         } catch (e) { host.innerHTML = '<span class="status error">' + escapeHTML(e.message) + '</span>'; }
@@ -7087,7 +7127,9 @@ const adminHTML = `<!doctype html>
       const qs = new URLSearchParams();
       qs.set('window', windowValue);
       qs.set('threshold', String(threshold));
-      const resp = await api('/admin/routing/health?' + qs.toString());
+      let resp;
+      try { resp = await api('/admin/routing/health?' + qs.toString()); }
+      catch (e) { document.getElementById('view').innerHTML = section('Provider Health', '<div class="card-body"><div class="banner error">Health 데이터를 불러오지 못했습니다.<div class="muted">' + escapeHTML(e.message) + '</div><button type="button" class="secondary" style="margin-top:8px" onclick="route()">다시 시도</button></div></div>'); return; }
       const providers = resp.providers || [];
       const ranking = resp.ranking || [];
       const degraded = resp.degraded || [];
@@ -7112,8 +7154,9 @@ const adminHTML = `<!doctype html>
           '<button type="button" class="secondary" onclick="route()">새로고침</button>' +
           '<span class="muted" style="margin-left:auto">since ' + escapeHTML(resp.since || '') + ' · until ' + escapeHTML(resp.until || '') + '</span>' +
         '</form>';
+      const healthVisual = '<div class="card-body"><div class="viz-grid" style="margin-top:0"><div class="viz-panel"><div class="viz-title">Provider 건전성 <small>threshold ' + threshold + '</small></div>' + donutVisual(providers.length ? (providers.length-degraded.length)/providers.length*100 : 0, (providers.length-degraded.length)+'/'+providers.length, '정상 provider', [{label:'정상',value:providers.length-degraded.length},{label:'degraded',value:degraded.length}]) + '</div><div class="viz-panel"><div class="viz-title">Health 순위 <small>점수</small></div>' + visualBars(ranking.map(x=>({label:x.provider,value:x.score||0})), v=>Math.round(v)+'점', true) + '</div></div></div>';
       document.getElementById('view').innerHTML =
-        section('Provider Health', kpis + filters) +
+        section('Provider Health', kpis + healthVisual + filters) +
         section('Provider ranking', providerHealthRankingTable(ranking, threshold)) +
         section('Degradation alerts', providerHealthAlertsTable(alerts)) +
         section('Health trend', providerHealthTrendTable(trend, threshold));
@@ -7314,6 +7357,7 @@ const adminHTML = `<!doctype html>
       // 헤더: 안내 + 가이드 + 검색 + 그룹별 개수 KPI.
       const kpis = '<div class="kpis" style="margin-top:10px">' + kpi('전체 기능', fmt(d.count || caps.length)) +
         Object.keys(byGroup).sort().map(g => kpi(capGroupLabel[g] || g, fmt(byGroup[g].length))).join('') + '</div>';
+      const groupVisual = '<div class="viz-panel" style="margin-top:12px"><div class="viz-title">기능 영역 분포 <small>클릭 가능한 UI 연결 포함</small></div>' + visualBars(Object.keys(byGroup).map(g=>({label:capGroupLabel[g]||g,value:byGroup[g].length}))) + '</div>';
       const header = section('기능 맵',
         '<div style="padding:0 2px">' +
         '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">' +
@@ -7321,7 +7365,7 @@ const adminHTML = `<!doctype html>
         '<button type="button" class="secondary" style="font-size:11px" onclick="capGuide()">ℹ️ 이 화면 가이드</button>' +
         '</div>' +
         '<input id="cap-search" placeholder="기능·API·테이블 검색…" oninput="capFilter()" style="width:100%;margin-top:8px;height:34px">' +
-        kpis + '</div>');
+        kpis + groupVisual + '</div>');
       let html = header;
       Object.keys(byGroup).sort().forEach(g => {
         const cards = byGroup[g].map(c => {
@@ -7362,8 +7406,10 @@ const adminHTML = `<!doctype html>
         '</div></a>'
       ).join('');
       const overall = badge(d.overall);
+      const statusCounts = (d.cards||[]).reduce((a,c)=>{a[c.status||'unknown']=(a[c.status||'unknown']||0)+1;return a;},{});
+      const opsVisual = '<div class="viz-grid" style="margin-top:0"><div class="viz-panel"><div class="viz-title">운영 신호 구성 <small>' + (d.window_hours||24) + '시간</small></div>' + visualBars([{label:'정상',value:statusCounts.ok||statusCounts.healthy||0},{label:'주의',value:statusCounts.warn||0},{label:'위험',value:statusCounts.critical||0},{label:'미상',value:statusCounts.unknown||0}], null, (statusCounts.critical||0)>0) + '</div><div class="viz-panel"><div class="viz-title">운영 바로가기 <small>확인 → 진단 → 조치</small></div><div class="health-strip"><a class="health-cell" href="#/routing/health" style="text-decoration:none;color:inherit">① Provider<strong>Health 확인 →</strong></a><a class="health-cell" href="#/pods" style="text-decoration:none;color:inherit">② Runtime<strong>파드 점검 →</strong></a><a class="health-cell" href="#/journey-probe" style="text-decoration:none;color:inherit">③ Client<strong>Journey 검증 →</strong></a></div></div></div>';
       view.innerHTML = section('운영 홈 (최근 ' + (d.window_hours || 24) + 'h)',
-        '<p class="muted" style="font-size:12px">전체 상태 ' + overall + ' · 생성 ' + ago(d.generated_at) + ' — 카드를 클릭하면 상세 화면으로 이동합니다.</p>') +
+        '<div class="card-body"><p class="muted" style="font-size:12px">전체 상태 ' + overall + ' · 생성 ' + ago(d.generated_at) + ' — 카드를 클릭하면 상세 화면으로 이동합니다.</p>' + opsVisual + '</div>') +
         '<div id="ops-incidents"></div>' +
         '<div style="display:flex;gap:12px;flex-wrap:wrap">' + cards + '</div>' +
         '<div id="ops-workers"></div>';
@@ -7375,7 +7421,7 @@ const adminHTML = `<!doctype html>
       const host = document.getElementById('ops-incidents');
       if (!host) return;
       let d;
-      try { d = await api('/admin/incidents/candidates'); } catch (e) { host.innerHTML = ''; return; }
+      try { d = await api('/admin/incidents/candidates'); } catch (e) { host.innerHTML = '<div class="banner warn">이슈 후보를 불러오지 못했습니다. <button type="button" class="secondary" onclick="opsLoadIncidents()">다시 시도</button><div class="muted">' + escapeHTML(e.message) + '</div></div>'; return; }
       const items = d.incidents || [];
       if (!items.length) { host.innerHTML = '<div class="card-body" style="padding:8px 0"><span class="status">지금 확인할 이슈 없음 ✅</span></div>'; return; }
       const sevBadge = (s) => s === 'critical' ? '<span class="status error">위험</span>' : (s === 'warning' ? '<span class="status warn">경고</span>' : '<span class="status">정보</span>');
@@ -7386,7 +7432,8 @@ const adminHTML = `<!doctype html>
         (it.recommended_actions && it.recommended_actions.length ? '<div style="font-size:11px"><b>추천 조치</b><ul style="margin:2px 0;padding-left:18px">' + it.recommended_actions.map(a => '<li>' + escapeHTML(a) + '</li>').join('') + '</ul></div>' : '') +
         ((it.links || []).length ? '<div style="font-size:11px">' + (it.links || []).map(l => '<a href="' + escapeAttr(l) + '">' + escapeHTML(l) + '</a>').join(' · ') + '</div>' : '') +
         '</div>').join('');
-      host.innerHTML = card('지금 확인할 이슈 (' + (d.counts.critical || 0) + ' 위험 · ' + (d.counts.warning || 0) + ' 경고)',
+      const counts = d.counts || {};
+      host.innerHTML = card('지금 확인할 이슈 (' + (counts.critical || 0) + ' 위험 · ' + (counts.warning || 0) + ' 경고)',
         '<div class="card-body">' + rows + '<p class="muted" style="font-size:10px;margin-top:4px">' + escapeHTML(d.note || '') + '</p></div>');
     }
     // 백그라운드 워커 상태판.
@@ -7394,7 +7441,7 @@ const adminHTML = `<!doctype html>
       const host = document.getElementById('ops-workers');
       if (!host) return;
       let d;
-      try { d = await api('/admin/ops/workers'); } catch (e) { host.innerHTML = ''; return; }
+      try { d = await api('/admin/ops/workers'); } catch (e) { host.innerHTML = '<div class="banner warn">워커 상태를 불러오지 못했습니다. <button type="button" class="secondary" onclick="opsLoadWorkers()">다시 시도</button><div class="muted">' + escapeHTML(e.message) + '</div></div>'; return; }
       const sBadge = (st) => st === 'critical' ? '<span class="status error">위험</span>' : (st === 'warn' ? '<span class="status warn">주의</span>' : (st === 'idle' ? '<span class="status">유휴</span>' : '<span class="status">정상</span>'));
       const rows = (d.workers || []).map(wk =>
         '<tr><td>' + escapeHTML(wk.name) + '</td><td>' + sBadge(wk.status) + '</td>' +
@@ -7624,8 +7671,9 @@ const adminHTML = `<!doctype html>
       catch (e) { view.innerHTML = section('AI 업무 앱', '<div class="card-body" style="padding:16px"><p class="muted">' + escapeHTML(e.message) + '</p></div>'); return; }
       const apps = d.apps || [];
       const kindLabel = { skill: 'Skill', prompt_product: '프롬프트상품', text2sql_report: 'SQL리포트', mcp_tool: 'MCP', model: '모델' };
+      const componentLink = { skill: 'skills', prompt_product: 'prompt-assets', text2sql_report: 'text2sql', mcp_tool: 'mcp-tools', model: 'routing' };
       const appCards = apps.length ? apps.map(a => {
-        const comps = (a.components || []).map(c => '<span class="status" style="font-size:9px">' + escapeHTML(kindLabel[c.kind] || c.kind) + ': ' + escapeHTML(c.ref) + '</span>').join(' ');
+        const comps = (a.components || []).map(c => { const href=componentLink[c.kind]; const body=escapeHTML(kindLabel[c.kind]||c.kind)+': '+escapeHTML(c.ref); return href?'<a href="#/'+href+'" class="status" style="font-size:9px;text-decoration:none" title="연결된 자산 화면 열기">'+body+' →</a>':'<span class="status" style="font-size:9px">'+body+'</span>'; }).join(' ');
         // Onboarding readiness (mirrors the server publish gate's required items).
         const gaps = [];
         if (!a.title) gaps.push('title');
@@ -7646,13 +7694,16 @@ const adminHTML = `<!doctype html>
           (a.status === 'active' ? '<button type="button" class="secondary" style="font-size:11px" onclick="appDeprecate(\'' + escapeAttr(a.id) + '\')">지원중단</button>' : '') +
           '<button type="button" class="secondary" style="font-size:11px" onclick="appVersions(\'' + escapeAttr(a.id) + '\')">버전</button>' +
           '<button type="button" class="secondary" style="font-size:11px" onclick="appPermissions(\'' + escapeAttr(a.id) + '\')">권한</button>' +
-          '<button type="button" class="secondary" style="font-size:11px" onclick="appDelete(\'' + escapeAttr(a.id) + '\')">삭제</button></div>' +
+          '<button type="button" class="danger" style="font-size:11px" onclick="appDelete(\'' + escapeAttr(a.id) + '\')">삭제</button></div>' +
           '<div id="app-validate-' + escapeAttr(a.id) + '" style="margin-top:6px"></div>' +
           '</div>';
       }).join('') : '<p class="muted">앱이 없습니다. 아래에서 새 앱을 만들어 Skill·리포트·MCP·모델을 묶어보세요.</p>';
-      view.innerHTML = section('AI 업무 앱', '<p class="muted" style="font-size:12px">Skill·프롬프트 상품·Text2SQL 리포트·MCP 도구·추천 모델을 하나의 업무 앱으로 묶어 권한 있는 사용자에게 노출합니다.</p>') +
+      const activeApps = apps.filter(x=>x.status==='active').length;
+      const readyApps = apps.filter(x=>x.title&&x.owner&&(x.components||[]).length).length;
+      const appVisual = '<div class="card-body"><div class="viz-grid" style="margin-top:0"><div class="viz-panel"><div class="viz-title">앱 운영 상태 <small>catalog</small></div>' + donutVisual(apps.length?activeApps/apps.length*100:0, activeApps+'/'+apps.length, 'active', [{label:'활성',value:activeApps},{label:'초안·중단',value:apps.length-activeApps}]) + '</div><div class="viz-panel"><div class="viz-title">발행 준비도 <small>title·owner·components</small></div>' + donutVisual(apps.length?readyApps/apps.length*100:0, readyApps+'/'+apps.length, '준비 완료', [{label:'준비 완료',value:readyApps},{label:'보완 필요',value:apps.length-readyApps}]) + '</div></div></div>';
+      view.innerHTML = section('AI 업무 앱', '<div class="card-body"><p class="muted" style="font-size:12px">Skill·프롬프트 상품·Text2SQL 리포트·MCP 도구·추천 모델을 하나의 업무 앱으로 묶어 권한 있는 사용자에게 노출합니다.</p></div>' + appVisual) +
         card('앱 목록', '<div class="card-body">' + appCards + '</div>') +
-        card('새 앱 만들기',
+        relatedPanel('새 앱 만들기 · 필요할 때 펼치기',
           '<div class="card-body">' +
           '<div style="display:flex;gap:6px;margin-bottom:6px"><input id="app-icon" placeholder="아이콘(이모지)" style="width:120px"><input id="app-title" placeholder="앱 제목" style="flex:1"></div>' +
           '<input id="app-desc" placeholder="설명" style="width:100%;margin-bottom:6px">' +
@@ -7660,7 +7711,7 @@ const adminHTML = `<!doctype html>
           '<textarea id="app-components" placeholder=\'컴포넌트 JSON 배열, 예: [{"kind":"skill","ref":"code-review"},{"kind":"model","ref":"claude-opus-4-8"}]\' style="width:100%;height:64px"></textarea>' +
           '<div style="margin-top:6px"><button type="button" onclick="appCreate()">앱 생성</button></div>' +
           '<div id="app-create-out" style="margin-top:6px"></div>' +
-          '</div>');
+          '</div>', !apps.length);
     }
     window.appCreate = async () => {
       const out = document.getElementById('app-create-out');
@@ -7669,6 +7720,7 @@ const adminHTML = `<!doctype html>
       let components = [];
       const raw = (document.getElementById('app-components').value || '').trim();
       if (raw) { try { components = JSON.parse(raw); } catch (e) { if (out) out.innerHTML = '<span class="status error">컴포넌트 JSON 파싱 오류</span>'; return; } }
+      if (!Array.isArray(components) || components.some(c=>!c || typeof c!=='object' || !String(c.kind||'').trim() || !String(c.ref||'').trim())) { if (out) out.innerHTML='<span class="status error">컴포넌트는 kind와 ref를 가진 JSON 배열이어야 합니다.</span>'; return; }
       const body = {
         title, icon: (document.getElementById('app-icon').value || '').trim(),
         description: (document.getElementById('app-desc').value || '').trim(),
@@ -11956,7 +12008,9 @@ const adminHTML = `<!doctype html>
           '<div style="font-size:11px">' + comps + '</div>' +
         '</div>';
       }).join('');
-      view.innerHTML = section('앱 템플릿 (AI App Template Catalog)', '') +
+      const categoryRows = Object.entries(tpls.reduce((a,t)=>{const k=t.category||'기타';a[k]=(a[k]||0)+1;return a;},{})).map(x=>({label:x[0],value:x[1]}));
+      const templateVisual = '<div class="card-body"><div class="viz-panel"><div class="viz-title">템플릿 카테고리 <small>업무 목적별 시작점</small></div>' + visualBars(categoryRows) + '</div></div>';
+      view.innerHTML = section('앱 템플릿 (AI App Template Catalog)', templateVisual) +
         '<p class="muted" style="font-size:12px;padding:0 14px">' + escapeHTML(d.note || '') + '</p>' +
         card('업무 앱 시작 템플릿 (' + tpls.length + ')', '<div class="card-body">' + (cards || '<p class="muted">템플릿이 없습니다.</p>') + '</div>');
     }
@@ -11970,21 +12024,24 @@ const adminHTML = `<!doctype html>
       catch (e) { view.innerHTML = section('Gateway MCP', '<div class="card-body" style="padding:16px"><p class="muted">' + escapeHTML(e.message) + '</p></div>'); return; }
       const origin = window.location.origin;
       const cfg = JSON.stringify({ mcpServers: { 'vibe-gateway': { url: origin + (d.endpoint || '/mcp/gateway'), headers: { Authorization: 'Bearer <YOUR_API_KEY>' } } } }, null, 2);
-      window.copyMCPConfig = () => { navigator.clipboard && navigator.clipboard.writeText(cfg); };
+      window.copyMCPConfig = async () => { try { if (!navigator.clipboard) throw new Error('clipboard API를 지원하지 않는 브라우저입니다'); await navigator.clipboard.writeText(cfg); const el=document.getElementById('gateway-mcp-copy'); if(el){el.textContent='복사됨 ✓';setTimeout(()=>{if(el)el.textContent='설정 복사';},1400);} } catch(e) { openModal('복사 실패','<div class="error-line">'+escapeHTML(e.message)+'</div><pre>'+escapeHTML(cfg)+'</pre>'); } };
       const toolRows = (d.tools || []).map(t => '<tr><td><code>' + escapeHTML(t.name) + '</code></td><td class="muted">' + escapeHTML(t.description || '') + '</td></tr>').join('');
       const resRows = (d.resources || []).map(x => '<tr><td><code>' + escapeHTML(x.uri) + '</code></td><td class="muted">' + escapeHTML(x.description || '') + '</td></tr>').join('');
       const promptRows = (d.prompts || []).map(x => '<tr><td><code>' + escapeHTML(x.name) + '</code></td><td class="muted">' + escapeHTML(x.description || '') + '</td></tr>').join('');
       const riskBadge = (r) => r === 'high' ? '<span class="status error">high</span>' : (r === 'medium' ? '<span class="status warn">medium</span>' : '<span class="status">low</span>');
       const contractRows = (d.contracts || []).map(c => '<tr><td><code>' + escapeHTML(c.name) + '</code></td><td>' + riskBadge(c.risk_level) + '</td><td class="muted">' + escapeHTML(c.cost_policy) + '</td><td class="muted">' + (c.timeout_ms ? Math.round(c.timeout_ms / 1000) + 's' : '-') + '</td><td>' + (c.executes ? '실행' : '읽기') + '</td><td class="muted" style="font-size:11px">' + escapeHTML(c.output_schema || '') + '</td></tr>').join('');
-      view.innerHTML = section('Gateway MCP Server', '') +
+      const assets = [{label:'Tools',value:(d.tools||[]).length},{label:'Resources',value:(d.resources||[]).length},{label:'Prompts',value:(d.prompts||[]).length},{label:'Contracts',value:(d.contracts||[]).length}];
+      const highRisk = (d.contracts||[]).filter(x=>x.risk_level==='high').length;
+      const gatewayVisual = '<div class="card-body"><div class="viz-grid" style="margin-top:0"><div class="viz-panel"><div class="viz-title">Gateway 자산 구성 <small>MCP surface</small></div>' + visualBars(assets) + '</div><div class="viz-panel"><div class="viz-title">계약 위험도 <small>Contract Pack</small></div>' + donutVisual((d.contracts||[]).length?highRisk/(d.contracts||[]).length*100:0, highRisk+'/'+(d.contracts||[]).length, 'high risk', [{label:'high',value:highRisk},{label:'low·medium',value:(d.contracts||[]).length-highRisk}]) + '</div></div></div>';
+      view.innerHTML = section('Gateway MCP Server', gatewayVisual) +
         card('연결 설정 (Claude / Cursor / Roo Code / Cline)',
           '<div class="card-body"><p class="muted" style="font-size:12px">엔드포인트 <code>' + escapeHTML(origin + (d.endpoint || '')) + '</code> · 프로토콜 ' + escapeHTML(d.protocol_version || '') + ' · 인증: Proxy API Key</p>' +
           '<pre style="background:var(--bg-alt,#f6f8fa);padding:10px;border-radius:6px;overflow:auto;font-size:11px">' + escapeHTML(cfg) + '</pre>' +
-          '<button type="button" class="secondary" onclick="copyMCPConfig()">설정 복사</button>' +
+          '<button type="button" class="secondary" id="gateway-mcp-copy" onclick="copyMCPConfig()">설정 복사</button>' +
           '<p class="muted" style="font-size:11px;margin-top:6px">' + escapeHTML(d.note || '') + '</p></div>') +
         card('Tools (' + (d.tools || []).length + ')', '<div class="card-body"><table><thead><tr><th>tool</th><th>설명</th></tr></thead><tbody>' + toolRows + '</tbody></table></div>') +
-        card('Resources (' + (d.resources || []).length + ')', '<div class="card-body"><table><thead><tr><th>uri</th><th>설명</th></tr></thead><tbody>' + resRows + '</tbody></table></div>') +
-        card('Prompts (' + (d.prompts || []).length + ')', '<div class="card-body"><table><thead><tr><th>prompt</th><th>설명</th></tr></thead><tbody>' + promptRows + '</tbody></table></div>') +
+        relatedPanel('Resources (' + (d.resources || []).length + ') · 참고 정보', '<div class="card-body"><table><thead><tr><th>uri</th><th>설명</th></tr></thead><tbody>' + resRows + '</tbody></table></div>', false) +
+        relatedPanel('Prompts (' + (d.prompts || []).length + ') · 참고 정보', '<div class="card-body"><table><thead><tr><th>prompt</th><th>설명</th></tr></thead><tbody>' + promptRows + '</tbody></table></div>', false) +
         card('Tool 계약 (Contract Pack)', '<div class="card-body"><p class="muted" style="font-size:12px">각 Gateway MCP tool의 위험도·비용 정책·timeout·실행 여부·출력 스키마 계약입니다.</p><table><thead><tr><th>tool</th><th>위험</th><th>비용</th><th>timeout</th><th>유형</th><th>출력</th></tr></thead><tbody>' + contractRows + '</tbody></table></div>') +
         '<div id="mcp-contracts"></div>';
       renderMCPContracts();
@@ -12069,6 +12126,8 @@ const adminHTML = `<!doctype html>
         try { steps = JSON.parse(document.getElementById('wf-steps').value || '[]'); }
         catch (e) { alert('steps JSON 파싱 오류: ' + e.message); return; }
         if (!name || !Array.isArray(steps) || !steps.length) { alert('이름과 steps 배열이 필요합니다.'); return; }
+        const invalidStep = steps.findIndex(st => !st || typeof st !== 'object' || !String(st.name||'').trim() || !String(st.type||'').trim());
+        if (invalidStep >= 0) { alert((invalidStep+1) + '번째 step에 name과 type이 필요합니다.'); return; }
         try {
           await api('/admin/workflows', { method: 'POST', body: JSON.stringify({ name, steps, allowed_teams: document.getElementById('wf-teams').value.trim() }) });
           document.getElementById('wf-form').reset();
@@ -12110,6 +12169,7 @@ const adminHTML = `<!doctype html>
         } catch (e) { openModal('버전 조회 오류', '<div class="error-line">' + escapeHTML(e.message) + '</div>'); }
       };
       const wfs = d.workflows || [];
+      window.wfUseSample = () => { const el=document.getElementById('wf-steps'); if(el) el.value='[{"name":"리뷰","type":"chat","ref":"vibe/auto","max_tokens":500},{"name":"승인","type":"approval"}]'; };
       const rows = wfs.map(wf => '<tr>' +
         '<td>' + escapeHTML(wf.name) + '<div class="muted" style="font-size:10px">' + escapeHTML(wf.id) + '</div></td>' +
         '<td>' + (wf.steps || []).length + '</td>' +
@@ -12121,14 +12181,16 @@ const adminHTML = `<!doctype html>
         '<button type="button" class="danger" style="font-size:11px" onclick="wfDelete(\'' + escapeAttr(wf.id) + '\')">삭제</button></td>' +
       '</tr>').join('');
       const sample = '[{"name":"리뷰","type":"chat","ref":"vibe/auto","max_tokens":500},{"name":"승인","type":"approval"}]';
-      view.innerHTML = section('워크플로 (Workflow Chain)', '') +
-        card('워크플로 생성',
+      const enabledWf = wfs.filter(x=>x.enabled).length;
+      const workflowVisual = '<div class="card-body"><div class="viz-grid" style="margin-top:0"><div class="viz-panel"><div class="viz-title">워크플로 상태 <small>등록 정의</small></div>' + donutVisual(wfs.length?enabledWf/wfs.length*100:0, enabledWf+'/'+wfs.length, '활성', [{label:'활성',value:enabledWf},{label:'초안·중지',value:wfs.length-enabledWf}]) + '</div><div class="viz-panel"><div class="viz-title">복잡도 <small>step 수</small></div>' + visualBars(wfs.map(x=>({label:x.name,value:(x.steps||[]).length}))) + '</div></div></div>';
+      view.innerHTML = section('워크플로 (Workflow Chain)', workflowVisual) +
+        relatedPanel('새 워크플로 만들기 · 필요할 때 펼치기',
           '<div class="card-body"><form id="wf-form" style="display:flex;flex-direction:column;gap:6px">' +
           '<div style="display:flex;gap:8px"><input id="wf-name" placeholder="워크플로 이름" required style="flex:1"><input id="wf-teams" placeholder="허용 팀(쉼표, 빈칸=전체)" style="flex:1"></div>' +
           '<textarea id="wf-steps" rows="4" placeholder=\'steps JSON: ' + escapeAttr(sample) + '\'></textarea>' +
           '<div class="muted" style="font-size:11px">step 유형: chat·text2sql·mcp_tool·skill·condition·approval·transform. 한도: timeout_ms·max_cost_krw·max_tokens·allowed_tools·allowed_tables.</div>' +
-          '<div><button type="submit">추가</button></div>' +
-          '</form></div>') +
+          '<div><button type="submit">추가</button> <button type="button" class="secondary" onclick="wfUseSample()">안전한 예시 채우기</button></div>' +
+          '</form></div>', !wfs.length) +
         card('워크플로 목록 (' + wfs.length + ')',
           '<div class="card-body">' + (wfs.length
             ? '<table><thead><tr><th>이름</th><th>steps</th><th>사용</th><th>허용 팀</th><th>동작</th></tr></thead><tbody>' + rows + '</tbody></table>'
