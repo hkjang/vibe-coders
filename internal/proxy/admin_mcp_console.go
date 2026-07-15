@@ -39,7 +39,7 @@ func (s *Server) handleMCPOverview(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "mcp_overview_failed")
 		return
 	}
-	snap := s.mcpToolsSnapshotCached(r.Context())
+	snap := s.mcpToolsSnapshotAdmin()
 	summary, _ := s.db.MCPSummary(r.Context())
 	tools, _ := s.db.ListMCPTools(r.Context(), store.ToolFilter{MCPOnly: true, Since: time.Now().Add(-24 * time.Hour), Limit: 500})
 	recentCalls := int64(0)
@@ -108,7 +108,7 @@ func (s *Server) handleMCPRoutes(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
 		return
 	}
-	snap := s.mcpToolsSnapshotCached(r.Context())
+	snap := s.mcpToolsSnapshotAdmin()
 	writeJSON(w, http.StatusOK, map[string]any{"routes": mcpRouteViews(snap), "fetched_at": snap.fetchedAt.UTC().Format(time.RFC3339), "errors": snap.errors})
 }
 
@@ -205,7 +205,7 @@ func (s *Server) handleMCPUpstreamFlow(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusNotFound, "upstream not found", "invalid_request_error", "upstream_not_found")
 		return
 	}
-	snap := s.mcpToolsSnapshotCached(r.Context())
+	snap := s.mcpToolsSnapshotAdmin()
 	routes := []mcpRouteView{}
 	for _, rv := range mcpRouteViews(snap) {
 		if rv.UpstreamID == up.ID {
@@ -245,7 +245,7 @@ func (s *Server) handleMCPTopology(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	upstreams, _ := s.db.ListMCPUpstreams(r.Context())
-	routes := mcpRouteViews(s.mcpToolsSnapshotCached(r.Context()))
+	routes := mcpRouteViews(s.mcpToolsSnapshotAdmin())
 	nodes := []map[string]any{{"id": "gateway", "label": "/mcp gateway", "kind": "gateway"}}
 	edges := []map[string]any{}
 	for _, up := range upstreams {

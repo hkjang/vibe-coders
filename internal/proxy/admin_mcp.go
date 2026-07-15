@@ -180,10 +180,14 @@ func (s *Server) handleMCPServers(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "mcp_servers_failed")
 		return
 	}
-	summary, err := s.db.MCPSummary(r.Context())
-	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "mcp_summary_failed")
-		return
+	summary := store.MCPSummary{}
+	for _, server := range servers {
+		summary.TotalCalls += server.Calls
+		summary.TotalErrors += server.Errors
+		summary.DistinctTools += server.Tools
+		if server.IsMCP {
+			summary.MCPServers++
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"servers": servers, "summary": summary})
 }

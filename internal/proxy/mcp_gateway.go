@@ -13,7 +13,7 @@ import (
 	"vibe-coders/internal/store"
 )
 
-const mcpToolsTTL = 30 * time.Second
+const mcpToolsTTL = 2 * time.Minute
 
 type mcpRoute struct {
 	upstreamID   string
@@ -35,10 +35,33 @@ type mcpToolsSnapshot struct {
 
 // mcpToolsSnapshotCached returns the aggregated tool catalog, refreshing it past TTL.
 func (s *Server) mcpToolsSnapshotCached(ctx context.Context) *mcpToolsSnapshot {
-	if cached := s.mcpTools.Load(); cached != nil && time.Since(cached.fetchedAt) < mcpToolsTTL {
+	if cached := s.mcpTools.Load(); cached != nil {
+		if time.Since(cached.fetchedAt) < mcpToolsTTL {
+			return cached
+		}
+		if s.mcpRefresh.CompareAndSwap(false, true) {
+			go func() {
+				defer s.mcpRefresh.Store(false)
+				refreshCtx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+				defer cancel()
+				s.mcpTools.Store(s.buildMCPToolsSnapshot(refreshCtx))
+			}()
+		}
 		return cached
 	}
 	snap := s.buildMCPToolsSnapshot(ctx)
+	s.mcpTools.Store(snap)
+	return snap
+}
+
+// mcpToolsSnapshotAdmin never makes an admin page wait for live upstream discovery.
+// The MCP protocol path still uses mcpToolsSnapshotCached so its first tools/list is exact.
+func (s *Server) mcpToolsSnapshotAdmin() *mcpToolsSnapshot {
+	if cached := s.mcpTools.Load(); cached != nil {
+		return s.mcpToolsSnapshotCached(context.Background())
+	}
+	// On cold start / empty cache, synchronously build the first snapshot to block-guarantee tools in tests/UI.
+	snap := s.buildMCPToolsSnapshot(context.Background())
 	s.mcpTools.Store(snap)
 	return snap
 }

@@ -410,6 +410,8 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 		`CREATE INDEX IF NOT EXISTS idx_tool_invocations_request_id ON tool_invocations(request_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_tool_invocations_server ON tool_invocations(server_label, tool_name)`,
 		`CREATE INDEX IF NOT EXISTS idx_tool_invocations_created_at ON tool_invocations(created_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_tool_invocations_mcp_recent ON tool_invocations(is_mcp, created_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_tool_invocations_recent_server ON tool_invocations(created_at, server_label, tool_name, source)`,
 		`CREATE TABLE IF NOT EXISTS mcp_policies (
 			server_label TEXT PRIMARY KEY,
 			mode TEXT NOT NULL,

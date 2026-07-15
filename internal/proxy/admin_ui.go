@@ -5620,6 +5620,7 @@ const adminHTML = `<!doctype html>
       const guardedRoutes = rs.filter(x=>(x.allowed_tools||[]).length || Number(x.max_cost_krw||0)>0).length;
       const routeVisual = '<div class="card-body"><div class="viz-grid" style="margin-top:0"><div class="viz-panel"><div class="viz-title">라우트 운영 상태 <small>현재 구성</small></div>' + donutVisual(rs.length ? enabledRoutes/rs.length*100 : 0, enabledRoutes+'/'+rs.length, '활성 라우트', [{label:'활성',value:enabledRoutes},{label:'중지',value:rs.length-enabledRoutes}]) + '</div><div class="viz-panel"><div class="viz-title">안전장 적용 <small>도구 제한 또는 비용 한도</small></div>' + donutVisual(rs.length ? guardedRoutes/rs.length*100 : 0, guardedRoutes+'/'+rs.length, '가드 적용', [{label:'가드 적용',value:guardedRoutes},{label:'기본값',value:rs.length-guardedRoutes}]) + '</div></div></div>';
       view.innerHTML = section('에이전트 라우트 (가상 모델 → 프로바이더 + MCP 에이전틱)',
+        '<div class="card-body"><div class="callout"><b>오케스트레이션 충돌 방지</b><br><span class="muted">일반 Chat 클라이언트는 게이트웨이가 LLM → MCP → LLM 루프를 실행합니다. Langflow처럼 요청에 <code>tools</code>를 포함하는 외부 에이전트는 자동 <b>passthrough</b> 모드가 되어, 백킹 모델만 고정하고 도구 루프는 외부 에이전트 한 곳에서 실행합니다. 응답의 <code>X-Agent-Mode</code>로 확인할 수 있습니다.</span></div></div>' +
         '<p class="muted" style="font-size:12px;padding:0 14px">호출 이력·비용·거버넌스에 그대로 통합되며, 실행 시 <code>X-Agent-Route</code>·<code>X-Agent-Backing-Model</code> 응답 헤더로 확인할 수 있습니다.</p>' + routeVisual) +
         builder + list;
     }
@@ -9303,6 +9304,7 @@ const adminHTML = `<!doctype html>
       const actionFilter = initial ? (initial.get('action') || '') : '';
       const configuredFilter = initial ? (initial.get('configured') || '') : '';
       const mcpOnly = initial ? (initial.get('mcp_only') === '1') : false;
+      const queryWindow = initial ? (initial.get('window') || '7d') : '7d';
       const qs = new URLSearchParams();
       if (apiKeyId) qs.set('api_key_id', apiKeyId);
       if (serverFilter) qs.set('server', serverFilter);
@@ -9311,6 +9313,8 @@ const adminHTML = `<!doctype html>
       if (actionFilter) qs.set('action', actionFilter);
       if (configuredFilter) qs.set('configured', configuredFilter);
       if (mcpOnly) qs.set('mcp_only', '1');
+      qs.set('window', queryWindow);
+      qs.set('limit', '250');
 
       // Each MCP sub-view fetches only the endpoints its sections need, so a tab loads fast
       // instead of pulling the whole MCP surface at once. Skipped endpoints keep their empty shape.
@@ -9325,7 +9329,7 @@ const adminHTML = `<!doctype html>
         need.overview ? api('/admin/mcp/overview').catch(() => null) : skip(null),
         need.routes ? api('/admin/mcp/routes').catch(() => ({ routes: [], errors: {} })) : skip({ routes: [], errors: {} }),
         need.topology ? api('/admin/mcp/topology').catch(() => ({ nodes: [], edges: [] })) : skip({ nodes: [], edges: [] }),
-        need.servers ? api('/admin/mcp/servers' + (serverFilter || apiKeyId || mcpOnly ? '?' + new URLSearchParams([...qs].filter(([k]) => ['server','api_key_id','mcp_only'].includes(k))).toString() : '')) : skip({ servers: [], summary: {} }),
+        need.servers ? api('/admin/mcp/servers?' + new URLSearchParams([...qs].filter(([k]) => ['server','api_key_id','mcp_only','window','limit'].includes(k))).toString()) : skip({ servers: [], summary: {} }),
         need.tools ? api('/admin/mcp/tools' + (qs.toString() ? '?' + qs.toString() : '')) : skip({ tools: [], tool_risk: [] }),
         need.policies ? api('/admin/mcp/policies').catch(() => ({ policies: [], allowlist_enabled: false })) : skip({ policies: [], allowlist_enabled: false }),
         need.loops ? api('/admin/mcp/loops?window=24h&threshold=10').catch(() => ({ loops: [], threshold: 10 })) : skip({ loops: [], threshold: 10 }),

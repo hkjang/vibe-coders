@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -48,6 +49,36 @@ func (rc *requestPipeline) stepAgentRoute() bool {
 		_ = s.db.InsertAuditEvent(r.Context(), store.AuthEvent{ID: newID("ae"), EventType: "model_denied", APIKeyID: rc.authCtx.APIKeyID, TeamID: rc.authCtx.TeamID, IP: clientIP(r), UserAgent: r.UserAgent(), Detail: model, CreatedAt: time.Now().UTC()})
 		writeOpenAIError(w, http.StatusForbidden, "model is not allowed by auth policy", "permission_error", "model_denied")
 		return false
+	}
+	payload := jsonMap(rc.body)
+	externalTools, _ := payload["tools"].([]any)
+	externalMode := strings.EqualFold(strings.TrimSpace(r.Header.Get("X-Agent-Mode")), "passthrough") || strings.EqualFold(strings.TrimSpace(r.Header.Get("X-Agent-Mode")), "external")
+	// Frameworks such as Langflow already own the LLM -> tool -> LLM loop. Avoid
+	// nesting the gateway's MCP loop inside theirs; keep this route as a pinned alias.
+	if len(externalTools) > 0 || externalMode {
+		backingModel := strings.TrimSpace(route.BackingModel)
+		if backingModel == "" {
+			backingModel = s.mcpAgenticBackingModel(r.Context(), r, MCPDiscoveryPolicy{Model: route.VirtualModel, Mode: "agent_route"}, rc.authCtx)
+		}
+		if backingModel == "" {
+			writeOpenAIError(w, http.StatusBadGateway, "agent route has no resolvable backing model", "server_error", "agent_route_no_model")
+			return false
+		}
+		payload["model"] = backingModel
+		rewritten, marshalErr := json.Marshal(payload)
+		if marshalErr != nil {
+			writeOpenAIError(w, http.StatusBadRequest, "failed to rewrite agent route request", "invalid_request_error", "invalid_body")
+			return false
+		}
+		rc.body = rewritten
+		if provider := strings.TrimSpace(route.Provider); provider != "" {
+			r.Header.Set("X-Proxy-Provider", provider)
+			w.Header().Set("X-Agent-Provider", provider)
+		}
+		w.Header().Set("X-Agent-Route", route.VirtualModel)
+		w.Header().Set("X-Agent-Backing-Model", backingModel)
+		w.Header().Set("X-Agent-Mode", "passthrough")
+		return true
 	}
 	s.handleAgentRouteChat(w, r, rc.body, route, rc.apiKeyID, rc.authCtx)
 	return false

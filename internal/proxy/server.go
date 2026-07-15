@@ -31,7 +31,7 @@ import (
 )
 
 // AppVersion is the gateway build version, surfaced in /auth/me and the admin UI.
-const AppVersion = "v0.76.53"
+const AppVersion = "v0.76.54"
 
 type Server struct {
 	cfg            config.Config
@@ -79,6 +79,7 @@ type Server struct {
 	extSeen        sync.Map // external key id -> struct{}; dedupes lazy registration
 	mcpConns       sync.Map // upstream id -> *mcpUpstreamConn (MCP gateway session state)
 	mcpTools       atomic.Pointer[mcpToolsSnapshot]
+	mcpRefresh     atomic.Bool
 	lastReloadNano atomic.Int64           // unix nanos of this pod's last runtime-config reload (convergence observability)
 	lastReloadTok  atomic.Pointer[string] // admin_settings change token this pod last applied
 }
