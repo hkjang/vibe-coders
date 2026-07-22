@@ -1,0 +1,69 @@
+{
+  "spdxVersion": "SPDX-2.3",
+  "dataLicense": "CC0-1.0",
+  "SPDXID": "SPDXRef-DOCUMENT",
+  "name": "vibe-coders-gateway-source-sbom",
+  "documentNamespace": "https://github.com/hkjang/vibe-coders/sbom/47e0a3e/2026-07-22",
+  "creationInfo": {
+    "created": "2026-07-22T00:00:00Z",
+    "creators": [
+      "Tool: go-list",
+      "Tool: OpenAI-Codex",
+      "Organization: vibe-coders contributors"
+    ],
+    "comment": "Generated from go list -deps -json ./cmd/gateway and go.sum. Covers the linked Go module closure, not container OS layers or runtime-selected external models."
+  },
+  "documentDescribes": ["SPDXRef-Package-vibe-coders"],
+  "packages": [
+    {
+      "name": "vibe-coders",
+      "SPDXID": "SPDXRef-Package-vibe-coders",
+      "versionInfo": "0.76.48+6.g47e0a3e",
+      "downloadLocation": "git+https://github.com/hkjang/vibe-coders.git@47e0a3e",
+      "filesAnalyzed": false,
+      "licenseConcluded": "AGPL-3.0-only",
+      "licenseDeclared": "AGPL-3.0-only",
+      "copyrightText": "Copyright (c) 2026 hkjang and vibe-coders contributors",
+      "externalRefs": [{"referenceCategory":"PACKAGE-MANAGER","referenceType":"purl","referenceLocator":"pkg:golang/vibe-coders@0.76.48%2B6.g47e0a3e"}]
+    },
+    {"name":"filippo.io/edwards25519","SPDXID":"SPDXRef-Package-filippo-edwards25519","versionInfo":"v1.2.0","downloadLocation":"https://proxy.golang.org/filippo.io/edwards25519/@v/v1.2.0.zip","filesAnalyzed":false,"licenseConcluded":"BSD-3-Clause","licenseDeclared":"BSD-3-Clause","copyrightText":"Copyright (c) 2009 The Go Authors","externalRefs":[{"referenceCategory":"PACKAGE-MANAGER","referenceType":"purl","referenceLocator":"pkg:golang/filippo.io/edwards25519@v1.2.0"}]},
+    {"name":"github.com/dustin/go-humanize","SPDXID":"SPDXRef-Package-dustin-go-humanize","versionInfo":"v1.0.1","downloadLocation":"https://proxy.golang.org/github.com/dustin/go-humanize/@v/v1.0.1.zip","filesAnalyzed":false,"licenseConcluded":"MIT","licenseDeclared":"MIT","copyrightText":"Copyright (c) 2005-2008 Dustin Sallings","externalRefs":[{"referenceCategory":"PACKAGE-MANAGER","referenceType":"purl","referenceLocator":"pkg:golang/github.com/dustin/go-humanize@v1.0.1"}]},
+    {"name":"github.com/go-sql-driver/mysql","SPDXID":"SPDXRef-Package-go-sql-driver-mysql","versionInfo":"v1.10.0","downloadLocation":"https://proxy.golang.org/github.com/go-sql-driver/mysql/@v/v1.10.0.zip","filesAnalyzed":false,"licenseConcluded":"MPL-2.0","licenseDeclared":"MPL-2.0","copyrightText":"NOASSERTION","externalRefs":[{"referenceCategory":"PACKAGE-MANAGER","referenceType":"purl","referenceLocator":"pkg:golang/github.com/go-sql-driver/mysql@v1.10.0"}]},
+    {"name":"github.com/google/uuid","SPDXID":"SPDXRef-Package-google-uuid","versionInfo":"v1.6.0","downloadLocation":"https://proxy.golang.org/github.com/google/uuid/@v/v1.6.0.zip","filesAnalyzed":false,"licenseConcluded":"BSD-3-Clause","licenseDeclared":"BSD-3-Clause","copyrightText":"Copyright (c) 2009,2014 Google Inc.","externalRefs":[{"referenceCategory":"PACKAGE-MANAGER","referenceType":"purl","referenceLocator":"pkg:golang/github.com/google/uuid@v1.6.0"}]},
+    {"name":"github.com/jackc/pgpassfile","SPDXID":"SPDXRef-Package-jackc-pgpassfile","versionInfo":"v1.0.0","downloadLocation":"https://proxy.golang.org/github.com/jackc/pgpassfile/@v/v1.0.0.zip","filesAnalyzed":false,"licenseConcluded":"MIT","licenseDeclared":"MIT","copyrightText":"Copyright (c) 2019 Jack Christensen","externalRefs":[{"referenceCategory":"PACKAGE-MANAGER","referenceType":"purl","referenceLocator":"pkg:golang/github.com/jackc/pgpassfile@v1.0.0"}]},
+    {"name":"github.com/jackc/pgservicefile","SPDXID":"SPDXRef-Package-jackc-pgservicefile","versionInfo":"v0.0.0-20240606120523-5a60cdf6a761","downloadLocation":"https://proxy.golang.org/github.com/jackc/pgservicefile/@v/v0.0.0-20240606120523-5a60cdf6a761.zip","filesAnalyzed":false,"licenseConcluded":"MIT","licenseDeclared":"MIT","copyrightText":"Copyright (c) 2020 Jack Christensen","externalRefs":[{"referenceCategory":"PACKAGE-MANAGER","referenceType":"purl","referenceLocator":"pkg:golang/github.com/jackc/pgservicefile@v0.0.0-20240606120523-5a60cdf6a761"}]},
+    {"name":"github.com/jackc/pgx/v5","SPDXID":"SPDXRef-Package-jackc-pgx-v5","versionInfo":"v5.7.6","downloadLocation":"https://proxy.golang.org/github.com/jackc/pgx/v5/@v/v5.7.6.zip","filesAnalyzed":false,"licenseConcluded":"MIT","licenseDeclared":"MIT","copyrightText":"Copyright (c) 2013-2021 Jack Christensen","externalRefs":[{"referenceCategory":"PACKAGE-MANAGER","referenceType":"purl","referenceLocator":"pkg:golang/github.com/jackc/pgx/v5@v5.7.6"}]},
+    {"name":"github.com/jackc/puddle/v2","SPDXID":"SPDXRef-Package-jackc-puddle-v2","versionInfo":"v2.2.2","downloadLocation":"https://proxy.golang.org/github.com/jackc/puddle/v2/@v/v2.2.2.zip","filesAnalyzed":false,"licenseConcluded":"MIT","licenseDeclared":"MIT","copyrightText":"Copyright (c) 2018 Jack Christensen","externalRefs":[{"referenceCategory":"PACKAGE-MANAGER","referenceType":"purl","referenceLocator":"pkg:golang/github.com/jackc/puddle/v2@v2.2.2"}]},
+    {"name":"github.com/remyoudompheng/bigfft","SPDXID":"SPDXRef-Package-remyoudompheng-bigfft","versionInfo":"v0.0.0-20230129092748-24d4a6f8daec","downloadLocation":"https://proxy.golang.org/github.com/remyoudompheng/bigfft/@v/v0.0.0-20230129092748-24d4a6f8daec.zip","filesAnalyzed":false,"licenseConcluded":"BSD-3-Clause","licenseDeclared":"BSD-3-Clause","copyrightText":"Copyright (c) 2012 The Go Authors","externalRefs":[{"referenceCategory":"PACKAGE-MANAGER","referenceType":"purl","referenceLocator":"pkg:golang/github.com/remyoudompheng/bigfft@v0.0.0-20230129092748-24d4a6f8daec"}]},
+    {"name":"github.com/sijms/go-ora/v2","SPDXID":"SPDXRef-Package-sijms-go-ora-v2","versionInfo":"v2.9.0","downloadLocation":"https://proxy.golang.org/github.com/sijms/go-ora/v2/@v/v2.9.0.zip","filesAnalyzed":false,"licenseConcluded":"MIT","licenseDeclared":"MIT","copyrightText":"Copyright (c) 2020 Samy Sultan","externalRefs":[{"referenceCategory":"PACKAGE-MANAGER","referenceType":"purl","referenceLocator":"pkg:golang/github.com/sijms/go-ora/v2@v2.9.0"}]},
+    {"name":"golang.org/x/crypto","SPDXID":"SPDXRef-Package-golang-x-crypto","versionInfo":"v0.37.0","downloadLocation":"https://proxy.golang.org/golang.org/x/crypto/@v/v0.37.0.zip","filesAnalyzed":false,"licenseConcluded":"BSD-3-Clause","licenseDeclared":"BSD-3-Clause","copyrightText":"Copyright 2009 The Go Authors","externalRefs":[{"referenceCategory":"PACKAGE-MANAGER","referenceType":"purl","referenceLocator":"pkg:golang/golang.org/x/crypto@v0.37.0"}]},
+    {"name":"golang.org/x/sync","SPDXID":"SPDXRef-Package-golang-x-sync","versionInfo":"v0.13.0","downloadLocation":"https://proxy.golang.org/golang.org/x/sync/@v/v0.13.0.zip","filesAnalyzed":false,"licenseConcluded":"BSD-3-Clause","licenseDeclared":"BSD-3-Clause","copyrightText":"Copyright 2009 The Go Authors","externalRefs":[{"referenceCategory":"PACKAGE-MANAGER","referenceType":"purl","referenceLocator":"pkg:golang/golang.org/x/sync@v0.13.0"}]},
+    {"name":"golang.org/x/sys","SPDXID":"SPDXRef-Package-golang-x-sys","versionInfo":"v0.42.0","downloadLocation":"https://proxy.golang.org/golang.org/x/sys/@v/v0.42.0.zip","filesAnalyzed":false,"licenseConcluded":"BSD-3-Clause","licenseDeclared":"BSD-3-Clause","copyrightText":"Copyright 2009 The Go Authors","externalRefs":[{"referenceCategory":"PACKAGE-MANAGER","referenceType":"purl","referenceLocator":"pkg:golang/golang.org/x/sys@v0.42.0"}]},
+    {"name":"golang.org/x/text","SPDXID":"SPDXRef-Package-golang-x-text","versionInfo":"v0.24.0","downloadLocation":"https://proxy.golang.org/golang.org/x/text/@v/v0.24.0.zip","filesAnalyzed":false,"licenseConcluded":"BSD-3-Clause","licenseDeclared":"BSD-3-Clause","copyrightText":"Copyright 2009 The Go Authors","externalRefs":[{"referenceCategory":"PACKAGE-MANAGER","referenceType":"purl","referenceLocator":"pkg:golang/golang.org/x/text@v0.24.0"}]},
+    {"name":"modernc.org/libc","SPDXID":"SPDXRef-Package-modernc-libc","versionInfo":"v1.55.3","downloadLocation":"https://proxy.golang.org/modernc.org/libc/@v/v1.55.3.zip","filesAnalyzed":false,"licenseConcluded":"BSD-3-Clause","licenseDeclared":"BSD-3-Clause","copyrightText":"Copyright (c) 2017 The Libc Authors and contributors","externalRefs":[{"referenceCategory":"PACKAGE-MANAGER","referenceType":"purl","referenceLocator":"pkg:golang/modernc.org/libc@v1.55.3"}]},
+    {"name":"modernc.org/mathutil","SPDXID":"SPDXRef-Package-modernc-mathutil","versionInfo":"v1.6.0","downloadLocation":"https://proxy.golang.org/modernc.org/mathutil/@v/v1.6.0.zip","filesAnalyzed":false,"licenseConcluded":"BSD-3-Clause","licenseDeclared":"BSD-3-Clause","copyrightText":"Copyright (c) 2014 The mathutil Authors","externalRefs":[{"referenceCategory":"PACKAGE-MANAGER","referenceType":"purl","referenceLocator":"pkg:golang/modernc.org/mathutil@v1.6.0"}]},
+    {"name":"modernc.org/memory","SPDXID":"SPDXRef-Package-modernc-memory","versionInfo":"v1.8.0","downloadLocation":"https://proxy.golang.org/modernc.org/memory/@v/v1.8.0.zip","filesAnalyzed":false,"licenseConcluded":"BSD-3-Clause","licenseDeclared":"BSD-3-Clause","copyrightText":"Copyright (c) 2017 The Memory Authors and contributors","externalRefs":[{"referenceCategory":"PACKAGE-MANAGER","referenceType":"purl","referenceLocator":"pkg:golang/modernc.org/memory@v1.8.0"}]},
+    {"name":"modernc.org/sqlite","SPDXID":"SPDXRef-Package-modernc-sqlite","versionInfo":"v1.34.5","downloadLocation":"https://proxy.golang.org/modernc.org/sqlite/@v/v1.34.5.zip","filesAnalyzed":false,"licenseConcluded":"BSD-3-Clause","licenseDeclared":"BSD-3-Clause","copyrightText":"Copyright (c) 2017 The Sqlite Authors","externalRefs":[{"referenceCategory":"PACKAGE-MANAGER","referenceType":"purl","referenceLocator":"pkg:golang/modernc.org/sqlite@v1.34.5"}]}
+  ],
+  "relationships": [
+    {"spdxElementId":"SPDXRef-DOCUMENT","relationshipType":"DESCRIBES","relatedSpdxElement":"SPDXRef-Package-vibe-coders"},
+    {"spdxElementId":"SPDXRef-Package-vibe-coders","relationshipType":"DEPENDS_ON","relatedSpdxElement":"SPDXRef-Package-filippo-edwards25519"},
+    {"spdxElementId":"SPDXRef-Package-vibe-coders","relationshipType":"DEPENDS_ON","relatedSpdxElement":"SPDXRef-Package-dustin-go-humanize"},
+    {"spdxElementId":"SPDXRef-Package-vibe-coders","relationshipType":"DEPENDS_ON","relatedSpdxElement":"SPDXRef-Package-go-sql-driver-mysql"},
+    {"spdxElementId":"SPDXRef-Package-vibe-coders","relationshipType":"DEPENDS_ON","relatedSpdxElement":"SPDXRef-Package-google-uuid"},
+    {"spdxElementId":"SPDXRef-Package-vibe-coders","relationshipType":"DEPENDS_ON","relatedSpdxElement":"SPDXRef-Package-jackc-pgpassfile"},
+    {"spdxElementId":"SPDXRef-Package-vibe-coders","relationshipType":"DEPENDS_ON","relatedSpdxElement":"SPDXRef-Package-jackc-pgservicefile"},
+    {"spdxElementId":"SPDXRef-Package-vibe-coders","relationshipType":"DEPENDS_ON","relatedSpdxElement":"SPDXRef-Package-jackc-pgx-v5"},
+    {"spdxElementId":"SPDXRef-Package-vibe-coders","relationshipType":"DEPENDS_ON","relatedSpdxElement":"SPDXRef-Package-jackc-puddle-v2"},
+    {"spdxElementId":"SPDXRef-Package-vibe-coders","relationshipType":"DEPENDS_ON","relatedSpdxElement":"SPDXRef-Package-remyoudompheng-bigfft"},
+    {"spdxElementId":"SPDXRef-Package-vibe-coders","relationshipType":"DEPENDS_ON","relatedSpdxElement":"SPDXRef-Package-sijms-go-ora-v2"},
+    {"spdxElementId":"SPDXRef-Package-vibe-coders","relationshipType":"DEPENDS_ON","relatedSpdxElement":"SPDXRef-Package-golang-x-crypto"},
+    {"spdxElementId":"SPDXRef-Package-vibe-coders","relationshipType":"DEPENDS_ON","relatedSpdxElement":"SPDXRef-Package-golang-x-sync"},
+    {"spdxElementId":"SPDXRef-Package-vibe-coders","relationshipType":"DEPENDS_ON","relatedSpdxElement":"SPDXRef-Package-golang-x-sys"},
+    {"spdxElementId":"SPDXRef-Package-vibe-coders","relationshipType":"DEPENDS_ON","relatedSpdxElement":"SPDXRef-Package-golang-x-text"},
+    {"spdxElementId":"SPDXRef-Package-vibe-coders","relationshipType":"DEPENDS_ON","relatedSpdxElement":"SPDXRef-Package-modernc-libc"},
+    {"spdxElementId":"SPDXRef-Package-vibe-coders","relationshipType":"DEPENDS_ON","relatedSpdxElement":"SPDXRef-Package-modernc-mathutil"},
+    {"spdxElementId":"SPDXRef-Package-vibe-coders","relationshipType":"DEPENDS_ON","relatedSpdxElement":"SPDXRef-Package-modernc-memory"},
+    {"spdxElementId":"SPDXRef-Package-vibe-coders","relationshipType":"DEPENDS_ON","relatedSpdxElement":"SPDXRef-Package-modernc-sqlite"}
+  ]
+}

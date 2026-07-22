@@ -13,6 +13,44 @@ Roo Code / Cursor / Continue 등 OpenAI 호환 API 를 호출하는 VS Code 확�
 - **[관리자 가이드](docs/ADMIN_GUIDE.md)** — 어드민 UI 탭 사용법, 일상/주간/월간 운영 체크리스트
 - **[안전 및 보안 거버넌스 가이드](docs/SAFETY_GUIDE.md)** — 정책 엔진, Secret Firewall, 승인 워크플로우 운영
 - **[릴리즈 가이드](docs/RELEASE_GUIDE.md)** — 빌드·태깅·GitHub 릴리즈·오프라인 패키지 산출·롤백 절차
+- **[모델 카드](MODEL_CARD.md)** — 외부 모델 경계, 사용 목적과 제한사항
+- **[AI 사용 공개](AI_USAGE_DISCLOSURE.md)** — 개발 보조 AI 사용 범위와 검증 책임
+- **[제3자 라이선스](THIRD_PARTY_LICENSES.md)** / **[SPDX SBOM](SBOM.spdx.json)** — 의존성·라이선스 검증 자료
+
+## 독립 실행 및 심사 재현
+
+필수 도구는 Go 1.26 이상과 Git입니다. 기본 SQLite 구성은 별도 DB 서버가
+필요하지 않습니다.
+
+```bash
+git clone https://github.com/hkjang/vibe-coders.git
+cd vibe-coders
+go mod download
+go mod verify
+go test ./...
+
+export UPSTREAM_API_KEY="sk-..."
+export GATEWAY_SECRET="운영용-긴-무작위-문자열"
+go run ./cmd/gateway
+```
+
+다른 터미널에서 `curl http://localhost:8080/health`와
+`curl http://localhost:8080/ready`로 상태를 확인하고, 관리자 UI는
+`http://localhost:8080/admin`에서 엽니다. 실제 외부 모델 호출 없이 핵심 중계를
+재현하려면 `bash tests/smoke.sh`를 실행하십시오.
+
+Docker로 독립 실행할 때는 현재 소스에서 이미지를 먼저 빌드합니다.
+
+```bash
+docker build -t ai-coding-proxy-gateway:local .
+GATEWAY_VERSION=local UPSTREAM_API_KEY="sk-..." \
+  GATEWAY_SECRET="운영용-긴-무작위-문자열" docker compose up -d
+docker compose ps
+curl http://localhost:8080/health
+```
+
+종료는 `docker compose down`이며 SQLite 데이터는 루트의 `data/`에 유지됩니다.
+공개/심사 환경에서는 실제 비밀키가 포함된 `.env`, DB와 로그를 제출하지 마십시오.
 
 ## 추적 항목
 

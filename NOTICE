@@ -1,0 +1,34 @@
+vibe-coders
+Copyright (c) 2026 hkjang and vibe-coders contributors
+
+This product is licensed under the GNU Affero General Public License v3.0
+only (AGPL-3.0-only). The complete license text is in the LICENSE file.
+
+This distribution contains third-party Go modules. Their copyright and
+license notices are retained by their respective projects. A versioned
+inventory and the applicable licenses are provided in:
+
+  * THIRD_PARTY_LICENSES.md
+  * SBOM.spdx.json
+
+The most important runtime components are:
+
+  * pgx and related modules (MIT) for PostgreSQL access
+  * modernc.org/sqlite and supporting modules (BSD-3-Clause) for SQLite
+  * go-sql-driver/mysql (MPL-2.0) for MySQL connectivity
+  * go-ora (MIT) for Oracle connectivity
+  * golang.org/x packages (BSD-3-Clause)
+
+No model weights or training/evaluation datasets are bundled with this
+repository or its gateway binary. Model services are selected and called at
+runtime by the operator. See MODEL_CARD.md for that boundary and the model
+provider license/terms obligations.
+
+The Docker build uses the official Go Alpine build image and the Google
+Distroless static nonroot runtime image. Container base-image packages are
+not Go modules and should be inventoried from the final image for each
+release (for example, with Syft). SBOM.spdx.json describes the source-built
+gateway and its linked Go module dependency closure.
+
+This NOTICE is informational and does not replace the license texts or legal
+terms of any component.
