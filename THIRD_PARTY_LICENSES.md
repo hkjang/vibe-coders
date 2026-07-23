@@ -9,7 +9,7 @@
 | --- | --- | --- | --- |
 | `filippo.io/edwards25519` | v1.2.0 | BSD-3-Clause | 암호 연산 지원 |
 | `github.com/dustin/go-humanize` | v1.0.1 | MIT | 사람이 읽기 쉬운 값 표시 |
-| `github.com/go-sql-driver/mysql` | v1.10.0 | MPL-2.0 | MySQL 드라이버 |
+| `github.com/go-sql-driver/mysql` | v1.10.0 | MPL-2.0 | 선택적 Text2SQL 실행·스키마 수집 대상용 MySQL/MariaDB 드라이버(메타데이터 DB용 아님) |
 | `github.com/google/uuid` | v1.6.0 | BSD-3-Clause | UUID 생성·처리 |
 | `github.com/jackc/pgpassfile` | v1.0.0 | MIT | PostgreSQL passfile 처리 |
 | `github.com/jackc/pgservicefile` | v0.0.0-20240606120523-5a60cdf6a761 | MIT | PostgreSQL service file 처리 |
@@ -37,6 +37,14 @@
 - 학습, 파인튜닝, 벤치마크용 외부 데이터셋은 포함되어 있지 않습니다.
   `seed.sql`은 애플리케이션 구동용 예시/초기 데이터이며 프로젝트의
   AGPL-3.0-only 적용 범위에 포함됩니다.
+
+## 데이터베이스 드라이버 적용 범위
+
+게이트웨이 자체의 사용자·정책·요청 이력 등 메타데이터 저장소는 PostgreSQL
+또는 SQLite만 지원합니다. MySQL/MariaDB와 Oracle 드라이버는 Text2SQL이 별도
+업무 데이터베이스의 스키마를 수집하거나 검증된 읽기 전용 SQL을 실행할 때
+선택적으로 사용합니다. 현재 배포가 PostgreSQL만 사용하더라도 이 드라이버들은
+gateway 패키지에서 항상 등록되므로 빌드 바이너리와 SBOM에 포함됩니다.
 
 ## 컨테이너 이미지
 
