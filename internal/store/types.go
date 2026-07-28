@@ -1237,6 +1237,7 @@ type ScatterPoint struct {
 
 type ScatterFilter struct {
 	Since    time.Time
+	Until    time.Time // upper bound on r.created_at (UTC); zero = open-ended (up to now)
 	Endpoint string
 	Model    string   // single model (backward compat); ignored when Models is non-empty
 	Models   []string // multi-model filter; empty = all models

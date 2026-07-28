@@ -11,6 +11,21 @@ import (
 	"vibe-coders/internal/store"
 )
 
+// xviewTimeRange resolves the time bounds for XView/scatter queries. When from/to are
+// supplied they take precedence and are interpreted in the caller's timezone (tz, default
+// Asia/Seoul) — an absent bound stays zero (open-ended). Otherwise the relative window is
+// used for the lower bound and the upper bound is left open. A zero lower bound is harmless:
+// ScatterPoints' "created_at >= <zero>" matches every row.
+func xviewTimeRange(r *http.Request, fallback time.Duration) (since, until time.Time) {
+	loc := searchLocation(r.URL.Query().Get("tz"))
+	from := parseRangeBound(r.URL.Query().Get("from"), loc, false)
+	to := parseRangeBound(r.URL.Query().Get("to"), loc, true)
+	if !from.IsZero() || !to.IsZero() {
+		return from, to
+	}
+	return parseWindow(r.URL.Query().Get("window"), fallback, "hour"), time.Time{}
+}
+
 // parseModelsParam splits a comma-separated ?models= query param into a deduplicated slice.
 // Returns nil when the param is absent or empty (= no filter).
 func parseModelsParam(raw string) []string {
@@ -153,7 +168,7 @@ func (s *Server) handleXViewModels(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
 	}
-	since := parseWindow(r.URL.Query().Get("window"), time.Hour, "hour")
+	since, until := xviewTimeRange(r, time.Hour)
 	top := 5
 	if v := strings.TrimSpace(r.URL.Query().Get("top")); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
@@ -162,6 +177,7 @@ func (s *Server) handleXViewModels(w http.ResponseWriter, r *http.Request) {
 	}
 	f := store.ScatterFilter{
 		Since:  since,
+		Until:  until,
 		Models: parseModelsParam(r.URL.Query().Get("models")),
 		Limit:  20000,
 	}
@@ -188,13 +204,14 @@ func (s *Server) handleXViewModelSeries(w http.ResponseWriter, r *http.Request) 
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
 	}
-	since := parseWindow(r.URL.Query().Get("window"), 24*time.Hour, "hour")
+	since, until := xviewTimeRange(r, 24*time.Hour)
 	bucket := strings.TrimSpace(strings.ToLower(r.URL.Query().Get("bucket")))
 	if bucket != "day" {
 		bucket = "hour"
 	}
 	f := store.ScatterFilter{
 		Since:  since,
+		Until:  until,
 		Models: parseModelsParam(r.URL.Query().Get("models")),
 		Limit:  20000,
 	}
@@ -290,9 +307,10 @@ func (s *Server) handleXViewModelOutliers(w http.ResponseWriter, r *http.Request
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
 	}
-	since := parseWindow(r.URL.Query().Get("window"), time.Hour, "hour")
+	since, until := xviewTimeRange(r, time.Hour)
 	f := store.ScatterFilter{
 		Since:  since,
+		Until:  until,
 		Models: parseModelsParam(r.URL.Query().Get("models")),
 		Limit:  20000,
 	}

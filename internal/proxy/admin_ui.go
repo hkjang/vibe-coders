@@ -1621,6 +1621,9 @@ const adminHTML = `<!doctype html>
       scale:    sessionStorage.getItem('xviewScale')     || 'log',
       metric:   sessionStorage.getItem('xviewMetric')    || 'latency',
       viewMode: sessionStorage.getItem('xviewViewMode')  || 'category', // 'category' | 'model'
+      from:     '',
+      to:       '',
+      tz:       sessionStorage.getItem('xviewTz')        || 'Asia/Seoul',
     };
     // per-model palette — up to 10 distinct colors
     const MODEL_PALETTE = ['#3b82f6','#f97316','#22c55e','#a855f7','#eab308','#ec4899','#06b6d4','#ef4444','#84cc16','#8b5cf6'];
@@ -1682,9 +1685,20 @@ const adminHTML = `<!doctype html>
         if (initial.get('window'))   xviewState.window   = initial.get('window');
         if (initial.get('metric'))   xviewState.metric   = initial.get('metric');
         if (initial.get('viewMode')) xviewState.viewMode = initial.get('viewMode');
+        xviewState.from = initial.get('from') || '';
+        xviewState.to   = initial.get('to')   || '';
+        if (initial.get('tz')) xviewState.tz = initial.get('tz');
       }
       const params = new URLSearchParams();
-      params.set('window', xviewState.window);
+      // Absolute from/to range takes precedence over the relative window; tz (default
+      // Asia/Seoul) tells the server which timezone to interpret the wall-clock bounds in.
+      if (xviewState.from || xviewState.to) {
+        if (xviewState.from) params.set('from', xviewState.from);
+        if (xviewState.to)   params.set('to', xviewState.to);
+        params.set('tz', xviewState.tz);
+      } else {
+        params.set('window', xviewState.window);
+      }
       // multi-model: ?models= takes precedence; fall back to legacy ?model=
       const modelsParam = initial ? (initial.get('models') || '') : '';
       const singleModel = initial ? (initial.get('model') || '') : '';
@@ -1717,8 +1731,16 @@ const adminHTML = `<!doctype html>
       const xviewHero = '<div class="home-hero"><h2>✦ XView</h2><div class="home-sub">수천 개 요청 속에서 느림·오류·비용·정책 신호를 찾고, 한 점을 클릭해 “왜 이렇게 처리됐는가”까지 이어서 설명합니다.</div><div class="home-actions"><button type="button" class="home-action primary" onclick="openXViewLauncher()"><strong>요청 ID로 설명 찾기</strong><small>라우팅·안전·비용 근거</small></button><a class="home-action" href="#/waterfall"><strong>Waterfall</strong><small>세션 시간 흐름 분석</small></a><a class="home-action" href="#/requests"><strong>호출 이력</strong><small>원문과 응답 상세</small></a><a class="home-action" href="#/llm"><strong>LLM 관측</strong><small>평가·피드백·패턴</small></a></div></div>';
       const xviewDistribution = section('요청 분포 탐색',
         '<div class="toolbar">' +
-          '<select id="xv-window">' +
+          '<select id="xv-window"' + (xviewState.from || xviewState.to ? ' disabled title="기간(from~to) 지정 시 무시됨"' : '') + '>' +
             ['5m','15m','1h','6h','24h'].map(wd => '<option value="' + wd + '"' + (xviewState.window === wd ? ' selected' : '') + '>' + wd + '</option>').join('') +
+          '</select>' +
+          '<label class="muted" style="font-size:12px" for="xv-from">기간</label>' +
+          '<input id="xv-from" type="datetime-local" title="조회 시작 일시" value="' + escapeHTML(xviewState.from) + '">' +
+          '<span class="muted" style="font-size:12px">~</span>' +
+          '<input id="xv-to" type="datetime-local" title="조회 종료 일시" value="' + escapeHTML(xviewState.to) + '">' +
+          '<select id="xv-tz" title="검색 기준 시간대">' +
+            ['Asia/Seoul|서울 (KST, UTC+9)','UTC|UTC','Asia/Tokyo|도쿄 (JST)','America/Los_Angeles|로스앤젤레스 (PT)','America/New_York|뉴욕 (ET)','Europe/London|런던 (GMT/BST)']
+              .map(o => { const [v, lbl] = o.split('|'); return '<option value="' + v + '"' + (xviewState.tz === v ? ' selected' : '') + '>' + lbl + '</option>'; }).join('') +
           '</select>' +
           '<select id="xv-metric">' +
             '<option value="latency"'     + (xviewState.metric === 'latency'      ? ' selected' : '') + '>응답시간</option>' +
@@ -1739,6 +1761,7 @@ const adminHTML = `<!doctype html>
           '<input id="xv-models" placeholder="모델 필터 (콤마 구분)" style="min-width:180px" value="' + escapeHTML(modelsParam || singleModel) + '">' +
           '<input id="xv-endpoint" placeholder="endpoint 필터" value="' + escapeHTML(endpoint) + '">' +
           '<button id="xv-apply" type="submit">적용</button>' +
+          '<button id="xv-reset-range" type="button" class="ghost" title="기간 지정을 해제하고 상대 구간(window)으로 복귀">기간 해제</button>' +
           '<span class="muted">' + fmt(points.length) + '건' + (data.truncated ? ' (최근 6000건으로 제한됨)' : '') + '</span>' +
         '</div>' +
         '<div id="xv-chart" style="padding:14px"></div>' +
@@ -1757,14 +1780,25 @@ const adminHTML = `<!doctype html>
         xviewState.metric   = document.getElementById('xv-metric').value;
         xviewState.scale    = document.getElementById('xv-scale').value;
         xviewState.viewMode = document.getElementById('xv-viewmode').value;
+        xviewState.from     = document.getElementById('xv-from').value.trim();
+        xviewState.to       = document.getElementById('xv-to').value.trim();
+        xviewState.tz       = document.getElementById('xv-tz').value;
         sessionStorage.setItem('xviewWindow',   xviewState.window);
         sessionStorage.setItem('xviewMetric',   xviewState.metric);
         sessionStorage.setItem('xviewScale',    xviewState.scale);
         sessionStorage.setItem('xviewViewMode', xviewState.viewMode);
+        sessionStorage.setItem('xviewTz',       xviewState.tz);
         const p = new URLSearchParams();
-        p.set('window',   xviewState.window);
         p.set('metric',   xviewState.metric);
         p.set('viewMode', xviewState.viewMode);
+        // Absolute range takes precedence; only fall back to the relative window when unset.
+        if (xviewState.from || xviewState.to) {
+          if (xviewState.from) p.set('from', xviewState.from);
+          if (xviewState.to)   p.set('to', xviewState.to);
+          p.set('tz', xviewState.tz);
+        } else {
+          p.set('window', xviewState.window);
+        }
         const ms = document.getElementById('xv-models').value.trim();
         const e  = document.getElementById('xv-endpoint').value.trim();
         if (ms) p.set('models', ms);
@@ -1772,7 +1806,13 @@ const adminHTML = `<!doctype html>
         location.hash = '#/xview?' + p.toString();
       };
       document.getElementById('xv-apply').addEventListener('click', apply);
-      ['xv-window', 'xv-metric', 'xv-scale', 'xv-viewmode'].forEach(id =>
+      document.getElementById('xv-reset-range').addEventListener('click', () => {
+        xviewState.from = ''; xviewState.to = '';
+        document.getElementById('xv-from').value = '';
+        document.getElementById('xv-to').value = '';
+        apply();
+      });
+      ['xv-window', 'xv-metric', 'xv-scale', 'xv-viewmode', 'xv-from', 'xv-to', 'xv-tz'].forEach(id =>
         document.getElementById(id).addEventListener('change', apply));
     }
 
