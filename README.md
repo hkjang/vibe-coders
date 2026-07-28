@@ -269,6 +269,7 @@ $env:PROXY_API_KEYS="dev:dev-proxy-key:alice:platform,team:team-proxy-key:bob:ba
 | `UPSTREAM_BASE_URL` | `https://api.openai.com` | OpenAI 호환 upstream base URL |
 | `UPSTREAM_API_KEY` / `OPENAI_API_KEY` | 없음 | upstream provider key |
 | `UPSTREAM_PROVIDER` | `openai` | 로그에 기록할 provider 이름 |
+| `UPSTREAM_MODEL_PATTERNS` | 없음 | 기본 provider로 자동 라우팅할 모델 glob(쉼표 구분, 예: `gpt-*,o3-*`) |
 | `DB_DRIVER` | `sqlite` | `sqlite` 또는 `postgres` |
 | `DB_DSN` | `data/gateway.db` | SQLite 파일 경로 |
 | `POSTGRES_DSN` / `DATABASE_URL` | 없음 | 있으면 PostgreSQL 사용 |
@@ -622,6 +623,32 @@ curl.exe http://localhost:8080/admin/providers `
 ```
 
 이후 `model=claude-3-5-sonnet` 요청은 자동으로 anthropic provider 로, `model=gpt-4.1-mini` 는 기본 openai 로 라우팅됩니다. 어드민 UI 의 설정 탭 > 업스트림 프로바이더 폼에서도 동일하게 입력할 수 있습니다.
+
+### 임베딩(`/v1/embeddings`) 프록시
+
+`/v1/embeddings` 는 `/v1/chat/completions` 와 동일한 파이프라인(인증·쿼터·라우팅·거버넌스·캐시·감사)을 그대로 통과하며, 요청 body 의 `model` 을 기준으로 위와 같은 provider 자동 라우팅이 적용됩니다. OpenAI·vLLM·Ollama 는 모두 OpenAI 호환 `/v1/embeddings` 엔드포인트를 제공하므로, provider 를 등록하고 임베딩 모델 글롭을 `model_patterns` 에 넣으면 게이트웨이를 통해 그대로 서비스됩니다. `base_url` 은 `/v1` 접미사 없이 등록합니다(게이트웨이가 `{base_url}/v1/embeddings` 로 전달).
+
+```powershell
+# vLLM (OpenAI 호환 임베딩 서버)
+curl.exe http://localhost:8080/admin/providers `
+  -H "Content-Type: application/json" `
+  -d '{ "name": "vllm", "base_url": "http://vllm:8000", "api_key": "-", "timeout_ms": 600000, "enabled": true, "model_patterns": "bge-*,e5-*" }'
+
+# Ollama (OpenAI 호환 엔드포인트는 11434 포트의 /v1)
+curl.exe http://localhost:8080/admin/providers `
+  -H "Content-Type: application/json" `
+  -d '{ "name": "ollama", "base_url": "http://ollama:11434", "api_key": "-", "timeout_ms": 600000, "enabled": true, "model_patterns": "nomic-embed-*,mxbai-embed-*" }'
+```
+
+```powershell
+# model 만으로 자동 라우팅: nomic-embed-text -> ollama, text-embedding-3-small -> 기본 openai
+curl.exe http://localhost:8080/v1/embeddings `
+  -H "Authorization: Bearer dev-proxy-key" `
+  -H "Content-Type: application/json" `
+  -d '{ "model": "nomic-embed-text", "input": "임베딩할 문장" }'
+```
+
+`X-Proxy-Provider` 헤더나 `?provider=` 쿼리로 provider 를 직접 지정할 수도 있습니다. 동일 입력의 임베딩 응답은 `CACHE_EMBEDDING_ENABLED`(기본 `true`) 캐시로 재사용됩니다. (시맨틱 캐시 전용 임베딩 호출은 `cache.embedding_*` 설정으로 별도 분리 가능 — 위 "시맨틱 캐시" 참고.)
 
 ### Intelligent Routing Engine
 

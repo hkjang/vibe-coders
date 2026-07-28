@@ -31,7 +31,7 @@ import (
 )
 
 // AppVersion is the gateway build version, surfaced in /auth/me and the admin UI.
-const AppVersion = "v0.76.54"
+const AppVersion = "v0.76.55"
 
 type Server struct {
 	cfg            config.Config
@@ -159,12 +159,24 @@ func NewServer(cfg config.Config, db *store.SQLStore, logger *store.AsyncLogger,
 		if err != nil {
 			return nil, fmt.Errorf("encrypt default provider key: %w", err)
 		}
+		// The environment bootstraps connection details on every start, while model
+		// patterns may be managed later from the admin UI. Preserve the stored value
+		// unless UPSTREAM_MODEL_PATTERNS explicitly supplies an override.
+		modelPatterns := strings.TrimSpace(cfg.Upstream.ModelPatterns)
+		if modelPatterns == "" {
+			if existing, found, getErr := db.GetProvider(context.Background(), cfg.Upstream.Provider); getErr != nil {
+				return nil, fmt.Errorf("read default provider: %w", getErr)
+			} else if found {
+				modelPatterns = existing.ModelPatterns
+			}
+		}
 		if err := db.UpsertProvider(context.Background(), store.ProviderConfig{
 			Name:            cfg.Upstream.Provider,
 			BaseURL:         cfg.Upstream.BaseURL,
 			EncryptedAPIKey: encrypted,
 			TimeoutMS:       int(cfg.Upstream.Timeout / time.Millisecond),
 			Enabled:         true,
+			ModelPatterns:   modelPatterns,
 		}); err != nil {
 			return nil, fmt.Errorf("upsert default provider: %w", err)
 		}
@@ -671,6 +683,53 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// searchLocation resolves a timezone query parameter to a *time.Location, defaulting to
+// Asia/Seoul (KST) — the operational timezone of this gateway. Asia/Seoul and UTC are
+// resolved without the OS tzdata; any other IANA name falls back to LoadLocation, and an
+// unknown/unloadable zone falls back to Seoul rather than silently using UTC.
+func searchLocation(tz string) *time.Location {
+	tz = strings.TrimSpace(tz)
+	switch {
+	case tz == "", strings.EqualFold(tz, "Asia/Seoul"), strings.EqualFold(tz, "KST"):
+		return seoulZone
+	case strings.EqualFold(tz, "UTC"):
+		return time.UTC
+	}
+	if loc, err := time.LoadLocation(tz); err == nil {
+		return loc
+	}
+	return seoulZone
+}
+
+// parseRangeBound parses a from/to filter value. Values carrying an explicit offset
+// (RFC3339) are treated as absolute; bare wall-clock values (datetime-local inputs like
+// "2006-01-02T15:04", or a plain date) are interpreted in loc. A date-only upper bound
+// (endOfDay=true) expands to the last instant of that day so a "to" date is inclusive.
+// A zero time (returned for empty/unparseable input) disables the bound.
+func parseRangeBound(value string, loc *time.Location, endOfDay bool) time.Time {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return time.Time{}
+	}
+	for _, layout := range []string{time.RFC3339Nano, time.RFC3339} {
+		if t, err := time.Parse(layout, value); err == nil {
+			return t
+		}
+	}
+	for _, layout := range []string{"2006-01-02T15:04:05", "2006-01-02T15:04", "2006-01-02 15:04:05", "2006-01-02 15:04"} {
+		if t, err := time.ParseInLocation(layout, value, loc); err == nil {
+			return t
+		}
+	}
+	if t, err := time.ParseInLocation("2006-01-02", value, loc); err == nil {
+		if endOfDay {
+			return t.AddDate(0, 0, 1).Add(-time.Nanosecond)
+		}
+		return t
+	}
+	return time.Time{}
+}
+
 func (s *Server) handleRequests(w http.ResponseWriter, r *http.Request) {
 	if !s.authorizeAdmin(r) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
@@ -686,6 +745,12 @@ func (s *Server) handleRequests(w http.ResponseWriter, r *http.Request) {
 	if len(ids) > 0 && limit < len(ids) {
 		limit = len(ids)
 	}
+	// from/to are wall-clock instants interpreted in the caller's timezone (tz), which
+	// defaults to Asia/Seoul (KST) so operators searching by local time get correct
+	// bounds without a 9-hour off-by-one against the UTC-stored created_at column.
+	loc := searchLocation(r.URL.Query().Get("tz"))
+	from := parseRangeBound(r.URL.Query().Get("from"), loc, false)
+	to := parseRangeBound(r.URL.Query().Get("to"), loc, true)
 	requests, err := s.db.RecentRequests(r.Context(), store.RequestFilter{
 		Limit:    limit,
 		IDs:      ids,
@@ -693,6 +758,8 @@ func (s *Server) handleRequests(w http.ResponseWriter, r *http.Request) {
 		Model:    strings.TrimSpace(r.URL.Query().Get("model")),
 		Language: strings.TrimSpace(r.URL.Query().Get("language")),
 		Team:     requestTeamScopeForCaller(s, r),
+		From:     from,
+		To:       to,
 	})
 	if err != nil {
 		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "requests_failed")

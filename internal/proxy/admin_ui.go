@@ -1715,10 +1715,7 @@ const adminHTML = `<!doctype html>
 
       const view = document.getElementById('view');
       const xviewHero = '<div class="home-hero"><h2>✦ XView</h2><div class="home-sub">수천 개 요청 속에서 느림·오류·비용·정책 신호를 찾고, 한 점을 클릭해 “왜 이렇게 처리됐는가”까지 이어서 설명합니다.</div><div class="home-actions"><button type="button" class="home-action primary" onclick="openXViewLauncher()"><strong>요청 ID로 설명 찾기</strong><small>라우팅·안전·비용 근거</small></button><a class="home-action" href="#/waterfall"><strong>Waterfall</strong><small>세션 시간 흐름 분석</small></a><a class="home-action" href="#/requests"><strong>호출 이력</strong><small>원문과 응답 상세</small></a><a class="home-action" href="#/llm"><strong>LLM 관측</strong><small>평가·피드백·패턴</small></a></div></div>';
-      view.innerHTML = xviewHero + section('호출 신호 요약', '<div class="kpis">' +
-        kpi('분석 요청',fmt(points.length)) + kpi('확인 필요','<span class="status '+(attentionCount?'warn':'')+'">'+fmt(attentionCount)+'</span>') + kpi('오류', '<span style="color:var(--bad)">'+fmt(categoryCounts.error)+'</span>') + kpi('정책 신호',fmt(categoryCounts.governance)) + kpi('폴백',fmt(categoryCounts.failover)) + kpi(xviewYLabel(xviewState.metric)+' P95',xviewFmtY(xviewState.metric,p95Value)) + '</div>') +
-        card('신호 구성', '<div class="card-body"><div class="viz-grid" style="margin-top:0"><div class="viz-panel"><div class="viz-title">즉시 확인 비중 <small>오류·정책·폴백</small></div>' + donutVisual(points.length?attentionCount/points.length*100:0,points.length?Math.round(attentionCount/points.length*100)+'%':'0%','확인 필요',[{label:'확인 필요',value:fmt(attentionCount)},{label:'정상·기타',value:fmt(Math.max(0,points.length-attentionCount))}]) + '</div><div class="viz-panel"><div class="viz-title">요청 신호 분포 <small>현재 조회 범위</small></div>' + visualBars(Object.keys(categoryCounts).map(k=>({label:xviewColors[k].label,value:categoryCounts[k]})).sort((a,b)=>b.value-a.value),null,true) + '</div></div></div>') +
-        section('요청 분포 탐색',
+      const xviewDistribution = section('요청 분포 탐색',
         '<div class="toolbar">' +
           '<select id="xv-window">' +
             ['5m','15m','1h','6h','24h'].map(wd => '<option value="' + wd + '"' + (xviewState.window === wd ? ' selected' : '') + '>' + wd + '</option>').join('') +
@@ -1748,6 +1745,10 @@ const adminHTML = `<!doctype html>
         '<div id="xv-legend" style="padding:0 14px 14px"></div>' +
         '<div id="xv-model-table" style="padding:0 14px 14px"></div>'
       );
+      view.innerHTML = xviewHero + xviewDistribution +
+        section('호출 신호 요약', '<div class="kpis">' +
+          kpi('분석 요청',fmt(points.length)) + kpi('확인 필요','<span class="status '+(attentionCount?'warn':'')+'">'+fmt(attentionCount)+'</span>') + kpi('오류', '<span style="color:var(--bad)">'+fmt(categoryCounts.error)+'</span>') + kpi('정책 신호',fmt(categoryCounts.governance)) + kpi('폴백',fmt(categoryCounts.failover)) + kpi(xviewYLabel(xviewState.metric)+' P95',xviewFmtY(xviewState.metric,p95Value)) + '</div>') +
+        card('신호 구성', '<div class="card-body"><div class="viz-grid" style="margin-top:0"><div class="viz-panel"><div class="viz-title">즉시 확인 비중 <small>오류·정책·폴백</small></div>' + donutVisual(points.length?attentionCount/points.length*100:0,points.length?Math.round(attentionCount/points.length*100)+'%':'0%','확인 필요',[{label:'확인 필요',value:fmt(attentionCount)},{label:'정상·기타',value:fmt(Math.max(0,points.length-attentionCount))}]) + '</div><div class="viz-panel"><div class="viz-title">요청 신호 분포 <small>현재 조회 범위</small></div>' + visualBars(Object.keys(categoryCounts).map(k=>({label:xviewColors[k].label,value:categoryCounts[k]})).sort((a,b)=>b.value-a.value),null,true) + '</div></div></div>');
       drawScatter(points, groups, modelIndex);
       renderModelGroupTable(groups);
 
@@ -5936,8 +5937,21 @@ const adminHTML = `<!doctype html>
           '<input id="f-ip" placeholder="IP 필터" list="dl-ip">' +
           '<input id="f-model" placeholder="모델 필터" list="dl-model">' +
           '<input id="f-language" placeholder="언어 필터" list="dl-lang">' +
+          '<label class="muted" style="font-size:12px" for="f-from">기간</label>' +
+          '<input id="f-from" type="datetime-local" title="조회 시작 일시">' +
+          '<span class="muted" style="font-size:12px">~</span>' +
+          '<input id="f-to" type="datetime-local" title="조회 종료 일시">' +
+          '<select id="f-tz" title="검색 기준 시간대">' +
+            '<option value="Asia/Seoul" selected>서울 (KST, UTC+9)</option>' +
+            '<option value="UTC">UTC</option>' +
+            '<option value="Asia/Tokyo">도쿄 (JST)</option>' +
+            '<option value="America/Los_Angeles">로스앤젤레스 (PT)</option>' +
+            '<option value="America/New_York">뉴욕 (ET)</option>' +
+            '<option value="Europe/London">런던 (GMT/BST)</option>' +
+          '</select>' +
           '<input id="f-limit" type="number" min="1" max="200" placeholder="개수" value="100">' +
           '<button type="submit">검색</button>' +
+          '<button type="button" id="req-reset" class="ghost" title="기간·필터 초기화">초기화</button>' +
           '<button type="button" id="diff-btn" class="ghost" title="선택한 두 요청 비교 (행 좌측 체크박스로 선택)">두 요청 비교</button>' +
           '<span id="diff-count" class="muted" style="font-size:12px"></span>' +
           datalist('dl-ip', ips) + datalist('dl-model', models) + datalist('dl-lang', langs) +
@@ -5946,7 +5960,7 @@ const adminHTML = `<!doctype html>
       );
       // restore from hash query if provided
       if (initial) {
-        const map = { ip: 'f-ip', model: 'f-model', language: 'f-language', limit: 'f-limit' };
+        const map = { ip: 'f-ip', model: 'f-model', language: 'f-language', limit: 'f-limit', from: 'f-from', to: 'f-to', tz: 'f-tz' };
         Object.entries(map).forEach(([k, id]) => {
           const v = initial.get(k);
           if (v !== null && v !== undefined) document.getElementById(id).value = v;
@@ -5954,6 +5968,12 @@ const adminHTML = `<!doctype html>
       }
       document.getElementById('req-filter').addEventListener('submit', async (e) => {
         e.preventDefault();
+        await loadRequests();
+      });
+      document.getElementById('req-reset').addEventListener('click', async () => {
+        ['f-ip', 'f-model', 'f-language', 'f-from', 'f-to'].forEach(id => { document.getElementById(id).value = ''; });
+        document.getElementById('f-limit').value = '100';
+        document.getElementById('f-tz').value = 'Asia/Seoul';
         await loadRequests();
       });
       document.getElementById('diff-btn').addEventListener('click', openDiffModal);
@@ -5965,10 +5985,18 @@ const adminHTML = `<!doctype html>
         const ip = document.getElementById('f-ip').value.trim();
         const model = document.getElementById('f-model').value.trim();
         const language = document.getElementById('f-language').value.trim();
+        const from = document.getElementById('f-from').value.trim();
+        const to = document.getElementById('f-to').value.trim();
+        const tz = document.getElementById('f-tz').value;
         const limit = document.getElementById('f-limit').value.trim() || '100';
         if (ip) params.set('ip', ip);
         if (model) params.set('model', model);
         if (language) params.set('language', language);
+        if (from) params.set('from', from);
+        if (to) params.set('to', to);
+        // Always send tz so the server interprets from/to against the operator's
+        // timezone (default Asia/Seoul) instead of UTC.
+        if (from || to) params.set('tz', tz);
         params.set('limit', limit);
         updateHashParams(params);
         const r = await api('/admin/requests?' + params.toString());

@@ -90,6 +90,140 @@ func TestModelPatternsRouteToMatchingProvider(t *testing.T) {
 	}
 }
 
+// Embedding requests (/v1/embeddings) must flow through the same provider
+// selection as chat: routed by model glob to the matching upstream (e.g. an
+// OpenAI-style default vs. a local vLLM/Ollama server), forwarded verbatim to
+// {base_url}/v1/embeddings, and the response relayed back to the caller.
+func TestEmbeddingsRouteToMatchingProviderByModel(t *testing.T) {
+	type call struct{ path string }
+
+	defaultHit := make(chan call, 1)
+	defaultUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defaultHit <- call{path: r.URL.Path}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"object":"list","data":[{"object":"embedding","index":0,"embedding":[0.1,0.2,0.3]}],"model":"text-embedding-3-small","usage":{"prompt_tokens":3,"total_tokens":3}}`))
+	}))
+	defer defaultUpstream.Close()
+
+	// Stands in for a local vLLM/Ollama server exposing OpenAI-compatible embeddings.
+	localHit := make(chan call, 1)
+	localUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		localHit <- call{path: r.URL.Path}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"object":"list","data":[{"object":"embedding","index":0,"embedding":[0.4,0.5]}],"model":"nomic-embed-text","usage":{"prompt_tokens":3,"total_tokens":3}}`))
+	}))
+	defer localUpstream.Close()
+
+	db := openTestStore(t)
+	defer db.Close()
+	logger := store.NewAsyncLogger(db, 32, filepath.Join(t.TempDir(), "fallback.ndjson"))
+	logger.Start()
+	defer logger.Stop(context.Background())
+
+	server, err := NewServer(testConfig(defaultUpstream.URL, "openai-secret"), db, logger, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxy := httptest.NewServer(server.Routes())
+	defer proxy.Close()
+
+	// Register the local embedding provider with globs for common local embed models.
+	resp := postJSON(t, proxy.URL+"/admin/providers", "", map[string]any{
+		"name":           "ollama",
+		"base_url":       localUpstream.URL,
+		"api_key":        "ollama-secret",
+		"timeout_ms":     5000,
+		"enabled":        true,
+		"model_patterns": "nomic-embed-*,bge-*,mxbai-embed-*",
+	})
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("provider upsert failed: %d %s", resp.StatusCode, body)
+	}
+	resp.Body.Close()
+
+	// A local embed model auto-routes to the ollama provider.
+	r1 := postJSON(t, proxy.URL+"/v1/embeddings", "", map[string]any{"model": "nomic-embed-text", "input": "hello"})
+	if r1.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 for nomic-embed-text, got %d", r1.StatusCode)
+	}
+	r1.Body.Close()
+	select {
+	case c := <-localHit:
+		if c.path != "/v1/embeddings" {
+			t.Fatalf("expected local upstream to receive /v1/embeddings, got %q", c.path)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("expected local (ollama) upstream to be called for nomic-embed-text")
+	}
+	select {
+	case <-defaultHit:
+		t.Fatal("default upstream should not be called for a local embed model")
+	default:
+	}
+
+	// An OpenAI embed model falls back to the default provider.
+	r2 := postJSON(t, proxy.URL+"/v1/embeddings", "", map[string]any{"model": "text-embedding-3-small", "input": "world"})
+	if r2.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 for text-embedding-3-small, got %d", r2.StatusCode)
+	}
+	r2.Body.Close()
+	select {
+	case c := <-defaultHit:
+		if c.path != "/v1/embeddings" {
+			t.Fatalf("expected default upstream to receive /v1/embeddings, got %q", c.path)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("expected default upstream to be called for text-embedding-3-small")
+	}
+}
+
+func TestDefaultProviderBootstrapPreservesAdminModelPatterns(t *testing.T) {
+	db := openTestStore(t)
+	defer db.Close()
+	logger := store.NewAsyncLogger(db, 32, filepath.Join(t.TempDir(), "fallback.ndjson"))
+	logger.Start()
+	defer logger.Stop(context.Background())
+
+	cfg := testConfig("http://upstream.invalid", "secret")
+	if _, err := NewServer(cfg, db, logger, nil); err != nil {
+		t.Fatal(err)
+	}
+	provider, found, err := db.GetProvider(context.Background(), cfg.Upstream.Provider)
+	if err != nil || !found {
+		t.Fatalf("default provider missing: found=%v err=%v", found, err)
+	}
+	provider.ModelPatterns = "admin-model-*"
+	if err := db.UpsertProvider(context.Background(), provider); err != nil {
+		t.Fatal(err)
+	}
+
+	// A restart must not erase the pattern saved through the admin provider form.
+	if _, err := NewServer(cfg, db, logger, nil); err != nil {
+		t.Fatal(err)
+	}
+	provider, found, err = db.GetProvider(context.Background(), cfg.Upstream.Provider)
+	if err != nil || !found {
+		t.Fatalf("default provider missing after restart: found=%v err=%v", found, err)
+	}
+	if provider.ModelPatterns != "admin-model-*" {
+		t.Fatalf("admin model patterns were overwritten: %q", provider.ModelPatterns)
+	}
+
+	// An explicit environment-derived value remains authoritative.
+	cfg.Upstream.ModelPatterns = "env-model-*"
+	if _, err := NewServer(cfg, db, logger, nil); err != nil {
+		t.Fatal(err)
+	}
+	provider, _, err = db.GetProvider(context.Background(), cfg.Upstream.Provider)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if provider.ModelPatterns != "env-model-*" {
+		t.Fatalf("environment model patterns were not applied: %q", provider.ModelPatterns)
+	}
+}
+
 func TestCachedAndReasoningTokensTrackedAndCostedSeparately(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

@@ -2727,6 +2727,14 @@ func (s *SQLStore) RecentRequests(ctx context.Context, filter RequestFilter) ([]
 		}
 		where = append(where, "EXISTS (SELECT 1 FROM tool_invocations ti WHERE "+strings.Join(toolClauses, " AND ")+")")
 	}
+	if !filter.From.IsZero() {
+		where = append(where, "r.created_at >= ?")
+		args = append(args, filter.From.UTC().Format(time.RFC3339Nano))
+	}
+	if !filter.To.IsZero() {
+		where = append(where, "r.created_at <= ?")
+		args = append(args, filter.To.UTC().Format(time.RFC3339Nano))
+	}
 	args = append(args, limit)
 
 	query := s.bind(`SELECT r.id, r.trace_id, COALESCE(r.api_key_id, ''), COALESCE(r.client_ip, ''), COALESCE(r.forwarded_for, ''),

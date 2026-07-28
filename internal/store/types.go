@@ -778,6 +778,11 @@ type RequestFilter struct {
 	ToolServer     string
 	ToolName       string
 	ToolErrorsOnly bool
+	// From/To bound r.created_at (UTC). Zero values disable the respective bound.
+	// The handler is responsible for converting the operator's local (e.g. Asia/Seoul)
+	// wall-clock input into these absolute instants.
+	From time.Time
+	To   time.Time
 }
 
 type RecentRequest struct {
