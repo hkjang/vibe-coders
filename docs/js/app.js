@@ -3,13 +3,20 @@
  */
 
 document.addEventListener('DOMContentLoaded', () => {
-  // Mobile Nav Toggle
+  // Mobile Nav Toggle & Close on Click
   const mobileToggle = document.getElementById('mobileToggle');
   const navMenu = document.getElementById('navMenu');
+  const navLinks = document.querySelectorAll('.nav-link');
 
   if (mobileToggle && navMenu) {
     mobileToggle.addEventListener('click', () => {
       navMenu.classList.toggle('active');
+    });
+
+    navLinks.forEach(link => {
+      link.addEventListener('click', () => {
+        navMenu.classList.remove('active');
+      });
     });
   }
 
@@ -41,21 +48,56 @@ document.addEventListener('DOMContentLoaded', () => {
     }, 3000);
   }
 
-  // Tab Switcher
+  // Tab Switcher Logic
   const tabBtns = document.querySelectorAll('.tab-btn');
   const tabContents = document.querySelectorAll('.tab-content');
+
+  function activateTab(tabId) {
+    const targetBtn = document.querySelector(`.tab-btn[data-tab="${tabId}"]`);
+    const targetContent = document.getElementById(tabId);
+
+    if (targetBtn && targetContent) {
+      tabBtns.forEach(b => b.classList.remove('active'));
+      tabContents.forEach(c => c.classList.remove('active'));
+
+      targetBtn.classList.add('active');
+      targetContent.classList.add('active');
+    }
+  }
 
   tabBtns.forEach(btn => {
     btn.addEventListener('click', () => {
       const target = btn.getAttribute('data-tab');
+      activateTab(target);
+    });
+  });
 
-      tabBtns.forEach(b => b.classList.remove('active'));
-      tabContents.forEach(c => c.classList.remove('active'));
+  // Nav Menu Anchor Smooth Scroll & Tab Synchronization
+  document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+    anchor.addEventListener('click', function(e) {
+      const targetId = this.getAttribute('href').substring(1);
+      if (!targetId) return;
 
-      btn.classList.add('active');
-      const activeContent = document.getElementById(target);
-      if (activeContent) {
-        activeContent.classList.add('active');
+      // Handle special tab anchors (#observability, #mcp, #features, #security)
+      let tabToActivate = null;
+      if (targetId === 'observability') tabToActivate = 'tab-observability';
+      if (targetId === 'mcp') tabToActivate = 'tab-mcp';
+      if (targetId === 'security') tabToActivate = 'tab-security';
+      if (targetId === 'features') tabToActivate = 'tab-proxy';
+
+      if (tabToActivate) {
+        e.preventDefault();
+        activateTab(tabToActivate);
+        const featuresSec = document.getElementById('features');
+        if (featuresSec) {
+          featuresSec.scrollIntoView({ behavior: 'smooth' });
+        }
+      } else {
+        const targetElement = document.getElementById(targetId);
+        if (targetElement) {
+          e.preventDefault();
+          targetElement.scrollIntoView({ behavior: 'smooth' });
+        }
       }
     });
   });
@@ -67,7 +109,6 @@ document.addEventListener('DOMContentLoaded', () => {
     if (question) {
       question.addEventListener('click', () => {
         const isOpen = item.classList.contains('open');
-        // Close all other items
         faqItems.forEach(i => i.classList.remove('open'));
 
         if (!isOpen) {
@@ -96,18 +137,13 @@ document.addEventListener('DOMContentLoaded', () => {
     if (devCountVal) devCountVal.textContent = `${devs} 명`;
     if (reqPerDayVal) reqPerDayVal.textContent = `${reqs} 회`;
 
-    // Estimate math
-    // Avg tokens per AI coding interaction (prompt + completion) ~ 4,000 tokens
     const tokensPerReq = 4000;
     const workingDays = 22;
     const totalRequests = devs * reqs * workingDays;
     const totalTokens = totalRequests * tokensPerReq;
 
-    // Avg cost per 1M tokens ~ $1.50 -> ₩2,000 KRW
     const costPerMillionKRW = 2000;
     const estimatedCostKRW = Math.round((totalTokens / 1000000) * costPerMillionKRW);
-
-    // vibe-coders caching, prompt optimization & quota prevention saves ~30%
     const estimatedSavingsKRW = Math.round(estimatedCostKRW * 0.30);
 
     if (calcMonthlyTokens) {
