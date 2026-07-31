@@ -1,0 +1,641 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <!-- Primary Meta Tags -->
+  <title>vibe-coders | 기업형 AI 코딩 프록시 게이트웨이 & LLM Observability</title>
+  <meta name="title" content="vibe-coders | 기업형 AI 코딩 프록시 게이트웨이 & LLM Observability">
+  <meta name="description" content="Roo Code, Cursor, Continue, OpenAI SDK 호환 초저지연 SSE 프록시 게이트웨이. 토큰·비용(KRW) 실시간 추적, 시크릿 방화벽 보안 거버넌스, Datadog 수준의 LLM Observability 및 통합 MCP Gateway를 제공합니다.">
+  <meta name="keywords" content="vibe-coders, AI 코딩 프록시, LLM 게이트웨이, Roo Code, Cursor, Continue, LLM Observability, MCP Gateway, AI 보안, 토큰 쿼터, 프롬프트 비교, 폐쇄망 AI">
+  <meta name="author" content="vibe-coders team">
+  <meta name="robots" content="index, follow">
+  <meta name="theme-color" content="#090d16">
+  
+  <!-- Canonical Link -->
+  <link rel="canonical" href="https://hkjang.github.io/vibe-coders/">
+
+  <!-- Open Graph / Facebook -->
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://hkjang.github.io/vibe-coders/">
+  <meta property="og:title" content="vibe-coders | 기업형 AI 코딩 프록시 게이트웨이 & LLM Observability">
+  <meta property="og:description" content="Roo Code, Cursor, Continue 호환 초저지연 SSE 프록시 게이트웨이. 실시간 비용(KRW) 추적, 시크릿 방화벽, LLM Observability 및 오프라인 폐쇄망 배포 지원.">
+  <meta property="og:image" content="https://hkjang.github.io/vibe-coders/images/icon_3d.png">
+
+  <!-- Twitter -->
+  <meta property="twitter:card" content="summary_large_image">
+  <meta property="twitter:url" content="https://hkjang.github.io/vibe-coders/">
+  <meta property="twitter:title" content="vibe-coders | 기업형 AI 코딩 프록시 게이트웨이">
+  <meta property="twitter:description" content="AI 코딩 도구 사용량/비용(KRW) 추적, 시크릿 방화벽, MCP 게이트웨이, LLM 관측을 제공하는 엔터프라이즈 솔루션.">
+  <meta property="twitter:image" content="https://hkjang.github.io/vibe-coders/images/icon_3d.png">
+
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet">
+
+  <!-- CSS Stylesheet -->
+  <link rel="stylesheet" href="css/style.css">
+
+  <!-- Structured Data / JSON-LD for AEO & Search Engines -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "SoftwareApplication",
+        "name": "vibe-coders",
+        "operatingSystem": "Linux, macOS, Windows (Docker Container / Go Binary)",
+        "applicationCategory": "DeveloperApplication",
+        "description": "Roo Code, Cursor, Continue 등 AI 코딩 도구를 중계하며 사용량·토큰·비용(KRW) 추적, 시크릿 방화벽, LLM Observability, MCP 게이트웨이를 제공하는 기업용 SSE 프록시 게이트웨이.",
+        "offers": {
+          "@type": "Offer",
+          "price": "0",
+          "priceCurrency": "KRW"
+        }
+      },
+      {
+        "@type": "Organization",
+        "name": "vibe-coders",
+        "url": "https://hkjang.github.io/vibe-coders/",
+        "logo": "https://hkjang.github.io/vibe-coders/images/logo_simple.png",
+        "email": "gagagiga@naver.com"
+      },
+      {
+        "@type": "FAQPage",
+        "mainEntity": [
+          {
+            "@type": "Question",
+            "name": "vibe-coders는 어떤 AI 코딩 도구들과 호환되나요?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "OpenAI API 규격을 따르는 Roo Code, Cline, Cursor, Continue 및 공식 OpenAI Python/TypeScript SDK 등 모든 AI 개발 환경과 100% 드롭인(Drop-in) 호환됩니다."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "폐쇄망(Air-gapped) 오프라인 환경에서도 작동하나요?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "네, 외부 인터넷 연결이 제한된 기업 폐쇄망 환경을 위한 오프라인 Docker 이미지 패키지와 SQLite/PostgreSQL 독립 실행형 아키텍처를 제공합니다."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "비용(KRW) 및 토큰 사용량 제어는 어떻게 이루어지나요?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "사용자, 팀, IP, API 키 단위로 일별/월별 토큰 및 원화(KRW) 사용한도(Quota)를 설정할 수 있으며, 한도 초과 시 429 Retry-After 헤더와 함께 자동으로 호출을 안전하게 차단합니다."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "MCP Gateway는 어떤 기능을 제공하나요?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "사내외 다중 업스트림 MCP(Model Context Protocol) 서버를 단일 /mcp 엔드포인트로 집약하며, 네임스페이스 자동 부여 및 도구 차단/허용 정책을 실시간 적용합니다."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "LLM Observability 및 프롬프트 버전 비교 기능이란 무엇인가요?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Datadog 수준의 Trace/Span 탐색, 세션 추적, 프롬프트 버전별 평균 지연/비용/오류율/평가 실패율 실시간 비교 분석 모달을 제공합니다."
+            }
+          }
+        ]
+      }
+    ]
+  }
+  </script>
+</head>
+<body>
+
+  <!-- Navigation Bar -->
+  <header class="header">
+    <div class="container nav-container">
+      <a href="#" class="brand-logo">
+        <img src="images/logo.svg" alt="vibe-coders Logo" width="36" height="36">
+        <span class="gradient-text">vibe-coders</span>
+      </a>
+
+      <nav>
+        <ul class="nav-menu" id="navMenu">
+          <li><a href="#features" class="nav-link">핵심 기능</a></li>
+          <li><a href="#observability" class="nav-link">LLM 관측</a></li>
+          <li><a href="#mcp" class="nav-link">MCP 게이트웨이</a></li>
+          <li><a href="#calculator" class="nav-link">비용 계산기</a></li>
+          <li><a href="#architecture" class="nav-link">아키텍처</a></li>
+          <li><a href="#faq" class="nav-link">FAQ</a></li>
+        </ul>
+      </nav>
+
+      <div class="nav-actions">
+        <a href="USER_GUIDE.md" class="btn btn-secondary">사용자 가이드</a>
+        <a href="https://github.com/hkjang/vibe-coders" target="_blank" rel="noopener" class="btn btn-primary">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+          GitHub
+        </a>
+        <button class="mobile-toggle" id="mobileToggle" aria-label="Toggle menu">☰</button>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <!-- Hero Section -->
+    <section class="hero-section">
+      <div class="container">
+        <div class="hero-badge-wrapper">
+          <div class="hero-badge">
+            <span class="dot"></span>
+            <span>v0.76.54 Enterprise Release</span>
+          </div>
+          <div class="hero-badge" style="border-color: rgba(16, 185, 129, 0.3); color: #34d399;">
+            <span>🛡️ 100% 폐쇄망 오프라인 배포 지원</span>
+          </div>
+        </div>
+
+        <h1 class="hero-title">
+          기업형 AI 코딩 프록시 게이트웨이<br>
+          <span class="gradient-text">vibe-coders</span>
+        </h1>
+
+        <p class="hero-description">
+          Roo Code, Cursor, Continue 및 OpenAI SDK 요청을 초저지연 SSE로 중계하면서<br>
+          <strong>실시간 원화(KRW) 비용·토큰 추적, 시크릿 방화벽 보안 거버넌스, Datadog 수준의 LLM Observability 및 통합 MCP Gateway</strong>를 단일 오프라인 패키지로 제공합니다.
+        </p>
+
+        <div class="hero-cta">
+          <a href="#quickstart" class="btn btn-primary" style="padding: 0.85rem 2rem; font-size: 1.05rem;">
+            🚀 독립 실행 시작하기
+          </a>
+          <a href="#calculator" class="btn btn-secondary" style="padding: 0.85rem 2rem; font-size: 1.05rem;">
+            💰 월간 ROI 계산기
+          </a>
+        </div>
+
+        <!-- Terminal Widget -->
+        <div class="hero-code-box" id="quickstart">
+          <div class="code-header">
+            <div class="code-dots">
+              <span class="code-dot red"></span>
+              <span class="code-dot yellow"></span>
+              <span class="code-dot green"></span>
+            </div>
+            <span class="code-title">Quick Run (Docker / Go Terminal)</span>
+            <button class="copy-btn" onclick="copyCommand('dockerCmd')">
+              📋 복사
+            </button>
+          </div>
+          <div class="code-body" id="dockerCmd">
+            <div class="code-line">
+              <span class="code-prompt">$</span>
+              <span>git clone https://github.com/hkjang/vibe-coders.git &amp;&amp; cd vibe-coders</span>
+            </div>
+            <div class="code-line">
+              <span class="code-prompt">$</span>
+              <span style="color: #34d399;">export UPSTREAM_API_KEY="sk-proj-..." GATEWAY_SECRET="enterprise-secret-key"</span>
+            </div>
+            <div class="code-line">
+              <span class="code-prompt">$</span>
+              <span>go run ./cmd/gateway</span>
+            </div>
+            <div class="code-line" style="color: #94a3b8; font-size: 0.825rem; margin-top: 0.5rem;">
+              <span># Gateway running at http://localhost:8080 | Admin UI at http://localhost:8080/admin</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Stats Counter -->
+        <div class="stats-grid">
+          <div class="stat-item">
+            <div class="stat-value gradient-text">&lt; 5 ms</div>
+            <div class="stat-label">SSE 중계 오버헤드</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-value gradient-text-accent">100 %</div>
+            <div class="stat-label">오프라인 폐쇄망 지원</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-value gradient-text">99.99 %</div>
+            <div class="stat-label">안전 가동률 (SSE Instant Flush)</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-value gradient-text-accent">30% +</div>
+            <div class="stat-label">AI 토큰 비용(KRW) 절감</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Why vibe-coders Section -->
+    <section class="section" style="background: rgba(15, 23, 42, 0.3);">
+      <div class="container" style="text-align: center;">
+        <span class="section-tag">Enterprise Challenge &amp; Solution</span>
+        <h2 class="section-title">왜 기업은 vibe-coders를 선택해야 하는가?</h2>
+        <p class="section-subtitle">
+          개발 생산성을 극대화하는 AI 개발 도구 도입, 하지만 비용 폭주와 소스코드 시크릿 유출 리스크는 기업의 거버넌스 과제입니다.
+        </p>
+
+        <div class="comparison-container">
+          <div class="comparison-box before">
+            <div class="comparison-header" style="color: #ef4444;">
+              <span>⚠️ 기존 AI 도구 도입 시 문제점</span>
+            </div>
+            <ul class="comparison-list">
+              <li>
+                <span>❌</span>
+                <div><strong>비용 통제 불가:</strong> 개발자별 AI 사용량 및 원화(KRW) 토큰 비용 추적 불가</div>
+              </li>
+              <li>
+                <span>❌</span>
+                <div><strong>민감 정보 유출:</strong> 소스코드 내 API 키, 시크릿, 개인정보가 외부 LLM으로 무단 전송</div>
+              </li>
+              <li>
+                <span>❌</span>
+                <div><strong>품질 &amp; 파편화:</strong> 프롬프트 버전 관리 부재 및 LLM 지연/오류 원인 파악 불가능</div>
+              </li>
+              <li>
+                <span>❌</span>
+                <div><strong>MCP 서버 파편화:</strong> 여러 MCP 도구 서버를 개별 관리하며 도구 승인 통제 불가</div>
+              </li>
+            </ul>
+          </div>
+
+          <div class="comparison-box after">
+            <div class="comparison-header" style="color: #10b981;">
+              <span>✨ vibe-coders 도입 후 변화</span>
+            </div>
+            <ul class="comparison-list">
+              <li>
+                <span>✅</span>
+                <div><strong>실시간 KRW 쿼터 제어:</strong> 사용자/팀/IP별 일별·월별 쿼터 한도 초과 시 자동 429 차단</div>
+              </li>
+              <li>
+                <span>✅</span>
+                <div><strong>Secret Firewall 거버넌스:</strong> 실시간 시크릿 마스킹, 승인 워크플로우 및 감사 로그</div>
+              </li>
+              <li>
+                <span>✅</span>
+                <div><strong>Datadog급 LLM 관측:</strong> Trace/Session 탐색 및 프롬프트 버전별 지연·오류·비용 모달 비교</div>
+              </li>
+              <li>
+                <span>✅</span>
+                <div><strong>단일 `/mcp` Gateway:</strong> 업스트림 MCP 통합 집약, 도구 네임스페이스, 차단 정책 적용</div>
+              </li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Interactive Features Tab Showcase -->
+    <section class="section" id="features">
+      <div class="container" style="text-align: center;">
+        <span class="section-tag">Core Features</span>
+        <h2 class="section-title">엔터프라이즈를 위한 4대 핵심 기능</h2>
+        <p class="section-subtitle">
+          초저지연 SSE 중계부터 Datadog 수준의 프롬프트 관측, 시크릿 보안, MCP 집약까지 단 하나의 프록시 게이트웨이로 완벽 해결합니다.
+        </p>
+
+        <!-- Tab Controls -->
+        <div class="tab-nav">
+          <button class="tab-btn active" data-tab="tab-proxy">⚡ SSE 프록시 중계</button>
+          <button class="tab-btn" data-tab="tab-security">🛡️ 시크릿 방화벽 &amp; 쿼터</button>
+          <button class="tab-btn" data-tab="tab-observability">📊 LLM Observability</button>
+          <button class="tab-btn" data-tab="tab-mcp">🔌 통합 MCP Gateway</button>
+        </div>
+
+        <!-- Tab Contents -->
+        <div class="tab-content active" id="tab-proxy">
+          <div class="grid-2" style="text-align: left;">
+            <div>
+              <div class="card-icon">⚡</div>
+              <h3 class="card-title">초저지연 SSE Streaming Instant Flush</h3>
+              <p class="card-desc">
+                Roo Code, Cursor, Continue, OpenAI Python/TS SDK 요청을 중간에서 가로채 실시간 중계합니다.<br><br>
+                • <code>stream=true</code> 첫 번째 청크부터 지연 없이 즉시 프런트엔드로 Flush<br>
+                • 프록시 오버헤드 5ms 미만으로 개발자 응답 체감 속도 극대화<br>
+                • DB 장애 시 안전한 NDJSON 비동기 롤링 감사 로그 Fallback 지원
+              </p>
+            </div>
+            <div class="card" style="background: rgba(0,0,0,0.5); font-family: var(--font-mono); font-size: 0.85rem;">
+              <div style="color: var(--primary-light); margin-bottom: 0.5rem;">// VS Code settings.json (Roo Code / Continue)</div>
+              <pre style="color: #e2e8f0; overflow-x: auto;"><code>{
+  "openAI.apiBase": "http://vibe-gateway.company.local:8080/v1",
+  "openAI.apiKey": "vbe_live_enterprise_key_98a7",
+  "model": "gpt-4o"
+}</code></pre>
+            </div>
+          </div>
+        </div>
+
+        <div class="tab-content" id="tab-security">
+          <div class="grid-2" style="text-align: left;">
+            <div>
+              <div class="card-icon">🛡️</div>
+              <h3 class="card-title">Secret Firewall &amp; 실시간 쿼터 제어</h3>
+              <p class="card-desc">
+                기업의 중요한 시크릿 유출을 원천 차단하고 예산 초과를 방지합니다.<br><br>
+                • <strong>Secret Firewall:</strong> AWS Key, DB Password, Private Token 실시간 차단 &amp; 마스킹<br>
+                • <strong>원화(KRW) 쿼터:</strong> 사용자 / 팀 / IP별 일별·월별 원화 예산 한도 설정<br>
+                • <strong>보존 정책:</strong> 24시간~90일 맞춤형 프롬프트 마스킹 보존 및 자동 Cleanup
+              </p>
+            </div>
+            <div class="card" style="background: rgba(0,0,0,0.5);">
+              <h4 style="color: var(--warning); margin-bottom: 0.75rem;">🔒 Security &amp; Quota Flow</h4>
+              <div style="font-size: 0.9rem; color: var(--text-muted); line-height: 1.8;">
+                [User Request] ➔ [Secret Inspector Engine] ➔ [Quota Check: KRW 50,000/day] ➔ [Pass / 429 Limit Exceeded Block]
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="tab-content" id="tab-observability">
+          <div class="grid-2" style="text-align: left;">
+            <div>
+              <div class="card-icon">📊</div>
+              <h3 class="card-title">Datadog 수준의 LLM Observability &amp; Prompt Compare</h3>
+              <p class="card-desc">
+                프롬프트 성능과 비용을 엔지니어링 관점에서 정밀하게 모니터링합니다.<br><br>
+                • <strong>Trace/Span Explorer:</strong> LLM 요청 단건 수명주기, 첫 청크 지연시간, 응답 토큰 추적<br>
+                • <strong>Prompt Version Compare:</strong> 프롬프트 버전별 평균 지연, 비용, 오류율, 평가 실패율 모달 비교<br>
+                • <strong>Human Alignment &amp; Feedback:</strong> 개발자 인라인 평가 및 자동 Insight 분석
+              </p>
+            </div>
+            <div class="card" style="background: rgba(0,0,0,0.5);">
+              <img src="images/developer_home.png" alt="LLM Observability Dashboard" style="width: 100%; border-radius: var(--radius-md); border: 1px solid var(--border-color);">
+            </div>
+          </div>
+        </div>
+
+        <div class="tab-content" id="tab-mcp">
+          <div class="grid-2" style="text-align: left;">
+            <div>
+              <div class="card-icon">🔌</div>
+              <h3 class="card-title">단일 `/mcp` 통합 게이트웨이</h3>
+              <p class="card-desc">
+                분산된 업스트림 MCP(Model Context Protocol) 서버를 단 하나의 엔드포인트로 집약합니다.<br><br>
+                • <strong>JSON-RPC 2.0 지원:</strong> 단일 <code>/mcp</code> 엔드포인트로 다중 MCP 라우팅<br>
+                • <strong>도구 네임스페이스:</strong> <code>&lt;upstream&gt;__&lt;tool&gt;</code> 충돌 없는 자동 접두사 부여<br>
+                • <strong>MCP Policy:</strong> 허용/차단 정책(Allowlist), 사용자 귀속 관측 통합
+              </p>
+            </div>
+            <div class="card" style="background: rgba(0,0,0,0.5); font-family: var(--font-mono); font-size: 0.85rem;">
+              <div style="color: var(--accent); margin-bottom: 0.5rem;">// Unified MCP JSON-RPC Request</div>
+              <pre style="color: #e2e8f0; overflow-x: auto;"><code>{
+  "jsonrpc": "2.0",
+  "method": "tools/call",
+  "params": {
+    "name": "github__create_pull_request",
+    "arguments": { "title": "feat: add proxy" }
+  },
+  "id": 1
+}</code></pre>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Interactive ROI & Quota Calculator Section -->
+    <section class="section" id="calculator" style="background: rgba(15, 23, 42, 0.4);">
+      <div class="container">
+        <div style="text-align: center;">
+          <span class="section-tag">Interactive Calculator</span>
+          <h2 class="section-title">우리 조직의 AI 비용 및 절감액 시뮬레이션</h2>
+          <p class="section-subtitle">
+            개발자 수와 일일 AI 프롬프트 사용량을 조절하여 예상 비용 및 vibe-coders 도입 시 절감 효과를 확인하세요.
+          </p>
+        </div>
+
+        <div class="calc-card">
+          <div class="calc-grid">
+            <div>
+              <div class="slider-group">
+                <div class="slider-label">
+                  <span>👨‍💻 AI 코딩 도구 사용 개발자 수</span>
+                  <span class="slider-val" id="devCountVal">20 명</span>
+                </div>
+                <input type="range" id="devCount" min="5" max="500" value="20" step="5">
+              </div>
+
+              <div class="slider-group">
+                <div class="slider-label">
+                  <span>💬 개발자 1인당 일일 AI 요청 수</span>
+                  <span class="slider-val" id="reqPerDayVal">40 회</span>
+                </div>
+                <input type="range" id="reqPerDay" min="10" max="200" value="40" step="5">
+              </div>
+
+              <div style="font-size: 0.85rem; color: var(--text-dim); line-height: 1.6;">
+                * 기준: 월 22일 근무, 프롬프트+응답 평균 4,000 토큰 기준 (GPT-4o/Claude 3.5 Sonnet 혼합 요율)
+              </div>
+            </div>
+
+            <div class="calc-result-box">
+              <div class="result-row">
+                <span style="color: var(--text-muted);">월간 예상 토큰 소비량</span>
+                <span class="val" id="calcMonthlyTokens" style="color: var(--accent);">70.4 M Tokens</span>
+              </div>
+              <div class="result-row">
+                <span style="color: var(--text-muted);">기존 예상 월간 비용</span>
+                <span class="val" id="calcMonthlyCost" style="color: var(--danger);">₩140,800</span>
+              </div>
+              <div class="result-row">
+                <span style="color: var(--primary-light); font-weight: 700;">vibe-coders 도입 시 절감액 (약 30%)</span>
+                <span class="val gradient-text" id="calcSavings">₩42,240 / 월</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Architecture & Enterprise Flow -->
+    <section class="section" id="architecture">
+      <div class="container" style="text-align: center;">
+        <span class="section-tag">Enterprise Architecture</span>
+        <h2 class="section-title">신뢰할 수 있는 제로 트러스트 아키텍처</h2>
+        <p class="section-subtitle">
+          개발도구와 외부 LLM 공급자 사이에 위치하여 보안 검증, 쿼터 제어, 감사 로그를 투명하게 수행합니다.
+        </p>
+
+        <div class="arch-diagram">
+          <div class="arch-node">
+            <h4 style="color: var(--primary-light); margin-bottom: 0.5rem;">👨‍💻 Client Layer</h4>
+            <p style="font-size: 0.85rem; color: var(--text-muted);">
+              VS Code / Cursor<br>Roo Code / Continue<br>OpenAI SDK / Python
+            </p>
+          </div>
+
+          <div class="arch-arrow">➔</div>
+
+          <div class="arch-node center-node">
+            <h4 style="color: #ffffff; margin-bottom: 0.5rem;">🛡️ vibe-coders Gateway</h4>
+            <p style="font-size: 0.85rem; color: #cbd5e1;">
+              • Ultra-low SSE Streaming Proxy<br>
+              • Secret Firewall &amp; KRW Quota<br>
+              • SQLite / Postgres Audit Store<br>
+              • Datadog-level LLM Observability
+            </p>
+          </div>
+
+          <div class="arch-arrow">➔</div>
+
+          <div class="arch-node">
+            <h4 style="color: var(--accent); margin-bottom: 0.5rem;">☁️ Upstream Models &amp; MCP</h4>
+            <p style="font-size: 0.85rem; color: var(--text-muted);">
+              OpenAI / Anthropic<br>Local vLLM / Ollama<br>Enterprise MCP Servers
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- AEO & SEO FAQ Section -->
+    <section class="section" id="faq" style="background: rgba(15, 23, 42, 0.3);">
+      <div class="container">
+        <div style="text-align: center;">
+          <span class="section-tag">Frequently Asked Questions</span>
+          <h2 class="section-title">자주 묻는 질문 (FAQ)</h2>
+          <p class="section-subtitle">
+            vibe-coders 도입 및 연동에 대한 궁금한 사항을 확인하세요.
+          </p>
+        </div>
+
+        <div class="faq-grid">
+          <div class="faq-item open">
+            <button class="faq-question">
+              <span>Q1. vibe-coders는 어떤 AI 코딩 도구들과 호환되나요?</span>
+              <span class="faq-icon">+</span>
+            </button>
+            <div class="faq-answer">
+              <p>OpenAI API 규격을 지원하는 Roo Code, Cline, Cursor, Continue 및 공식 OpenAI Python/TypeScript SDK 등 모든 개발 환경과 100% 호환됩니다. 기존 설정에서 API Base URL만 vibe-coders 게이트웨이 주소(예: <code>http://localhost:8080/v1</code>)로 변경하면 바로 적용됩니다.</p>
+            </div>
+          </div>
+
+          <div class="faq-item">
+            <button class="faq-question">
+              <span>Q2. 인터넷이 차단된 폐쇄망(Air-gapped) 오프라인 환경에서도 사용할 수 있나요?</span>
+              <span class="faq-icon">+</span>
+            </button>
+            <div class="faq-answer">
+              <p>네, 오프라인 폐쇄망 환경을 위해 사전 빌드된 Docker 이미지 패키지와 바이너리 릴리즈를 제공합니다. 외부 패키지 다운로드 없이 <code>docker compose up -d</code> 명령으로 즉시 가동할 수 있으며, 내장 SQLite 또는 사내 PostgreSQL DB와 연동할 수 있습니다.</p>
+            </div>
+          </div>
+
+          <div class="faq-item">
+            <button class="faq-question">
+              <span>Q3. 비용(KRW) 및 토큰 사용량 제어는 어떻게 동작하나요?</span>
+              <span class="faq-icon">+</span>
+            </button>
+            <div class="faq-answer">
+              <p>관리자는 어드민 UI에서 사용자, 팀, IP, API 키 단위로 일별/월별 원화(KRW) 한도 및 토큰 쿼터를 설정할 수 있습니다. 쿼터가 초과되면 게이트웨이가 429 Too Many Requests 응답과 <code>Retry-After</code> 헤더를 반환하여 불필요한 과금을 즉시 차단합니다.</p>
+            </div>
+          </div>
+
+          <div class="faq-item">
+            <button class="faq-question">
+              <span>Q4. MCP Gateway 기능은 무엇이며 어떻게 설정하나요?</span>
+              <span class="faq-icon">+</span>
+            </button>
+            <div class="faq-answer">
+              <p>다중 업스트림 MCP(Model Context Protocol) 서버를 단일 <code>/mcp</code> (JSON-RPC 2.0) 엔드포인트로 집약합니다. 도구 이름에 <code>&lt;upstream&gt;__&lt;tool&gt;</code> 형태의 네임스페이스를 자동 부여하여 도구 충돌을 방지하고, 허용 목록(Allowlist) 정책을 통합 관리합니다.</p>
+            </div>
+          </div>
+
+          <div class="faq-item">
+            <button class="faq-question">
+              <span>Q5. Datadog 수준의 LLM Observability 기능은 무엇인가요?</span>
+              <span class="faq-icon">+</span>
+            </button>
+            <div class="faq-answer">
+              <p>Trace/Span Explorer, Session Explorer, Prompt Version Compare 모달을 포함합니다. 프롬프트 버전별로 평균 지연 시간, 비용(KRW), 오류율, 평가 실패율을 정밀 비교 분석하여 최적의 프롬프트 버전 선택을 지원합니다.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- CTA Banner Section -->
+    <section class="container">
+      <div class="cta-banner">
+        <h2 style="font-size: 2.25rem; font-weight: 800; margin-bottom: 1rem;">
+          지금 바로 기업형 AI 코딩 거버넌스를 구축하세요
+        </h2>
+        <p style="color: var(--text-muted); max-width: 650px; margin: 0 auto 2rem auto; font-size: 1.05rem;">
+          초저지연 프록시 중계, 원화(KRW) 비용 통제, 시크릿 보안, Datadog급 관측까지 단 5분 만에 시작할 수 있습니다.
+        </p>
+        <div style="display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap;">
+          <a href="https://github.com/hkjang/vibe-coders" target="_blank" rel="noopener" class="btn btn-primary" style="padding: 0.85rem 2rem;">
+            ⭐ GitHub Star &amp; Repository
+          </a>
+          <a href="ADMIN_GUIDE.md" class="btn btn-secondary" style="padding: 0.85rem 2rem;">
+            📖 관리자 운영 가이드
+          </a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Footer -->
+  <footer class="footer">
+    <div class="container">
+      <div class="footer-grid">
+        <div>
+          <div class="brand-logo" style="margin-bottom: 1rem;">
+            <img src="images/logo.svg" alt="vibe-coders" width="30" height="30">
+            <span class="gradient-text">vibe-coders</span>
+          </div>
+          <p style="color: var(--text-muted); font-size: 0.875rem; line-height: 1.6; max-width: 320px;">
+            기업을 위한 오프라인 폐쇄망 지원 AI 코딩 프록시 게이트웨이 및 LLM Observability 플랫폼.
+          </p>
+        </div>
+
+        <div class="footer-col">
+          <h4>문서 &amp; 가이드</h4>
+          <ul class="footer-links">
+            <li><a href="USER_GUIDE.md">사용자 가이드</a></li>
+            <li><a href="ADMIN_GUIDE.md">관리자 가이드</a></li>
+            <li><a href="OPERATIONS.md">운영 런북</a></li>
+            <li><a href="SAFETY_GUIDE.md">안전 거버넌스 가이드</a></li>
+          </ul>
+        </div>
+
+        <div class="footer-col">
+          <h4>기술 &amp; 아키텍처</h4>
+          <ul class="footer-links">
+            <li><a href="POSTGRES_GUIDE.md">PostgreSQL 연동 가이드</a></li>
+            <li><a href="RELEASE_GUIDE.md">릴리즈 &amp; 패키징</a></li>
+            <li><a href="https://github.com/hkjang/vibe-coders" target="_blank" rel="noopener">GitHub Repository</a></li>
+          </ul>
+        </div>
+
+        <div class="footer-col">
+          <h4>라이선스 &amp; 보안</h4>
+          <ul class="footer-links">
+            <li><a href="https://github.com/hkjang/vibe-coders/blob/master/LICENSE" target="_blank" rel="noopener">AGPL-3.0 License</a></li>
+            <li><a href="https://github.com/hkjang/vibe-coders/blob/master/AI_USAGE_DISCLOSURE.md" target="_blank" rel="noopener">AI 사용 공개</a></li>
+            <li><a href="https://github.com/hkjang/vibe-coders/blob/master/THIRD_PARTY_LICENSES.md" target="_blank" rel="noopener">제3자 라이선스</a></li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="footer-bottom">
+        <div>
+          &copy; 2026 vibe-coders Project. All rights reserved.
+        </div>
+        <div class="footer-inquiry">
+          📧 <span>문의 요청:</span> <a href="mailto:gagagiga@naver.com">gagagiga@naver.com</a> 메일 문의
+        </div>
+      </div>
+    </div>
+  </footer>
+
+  <!-- App Script -->
+  <script src="js/app.js"></script>
+</body>
+</html>
