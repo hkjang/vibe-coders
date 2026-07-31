@@ -1,6 +1,6 @@
 /**
  * vibe-coders Official Landing Page Interactive Script
- * Rich Marketing & Interactive Simulator
+ * Rich Marketing & General API Proxy Gateway Showcase
  */
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -83,6 +83,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (targetId === 'observability') tabToActivate = 'tab-observability';
       if (targetId === 'mcp') tabToActivate = 'tab-mcp';
       if (targetId === 'security') tabToActivate = 'tab-security';
+      if (targetId === 'general') tabToActivate = 'tab-general';
       if (targetId === 'features') tabToActivate = 'tab-proxy';
 
       if (tabToActivate) {
@@ -114,12 +115,12 @@ document.addEventListener('DOMContentLoaded', () => {
       '<span style="color:#a855f7">[STREAM FLUSH]</span> First Chunk Latency: 2.1ms (Ultra-Low SSE Instant Flush active)',
       '<span style="color:#34d399">[COMPLETED]</span> Model: gpt-4o | Tokens: Prompt 840, Completion 320 | Cost: ₩2.32 | Status: 200 OK'
     ],
-    cursor: [
-      '<span style="color:#818cf8">[SSE PROXY]</span> POST /v1/chat/completions HTTP/1.1 (Client: Cursor IDE | IP: 192.168.1.102)',
-      '<span style="color:#34d399">[SECURITY]</span> Prompt Masking Active. File path masked to `[REDACTED_PATH]`',
-      '<span style="color:#38bdf8">[QUOTA CHECK]</span> Team: frontend-devs (Monthly KRW Used: ₩120,500 / ₩500,000) -> APPROVED',
-      '<span style="color:#a855f7">[STREAM FLUSH]</span> First Chunk Latency: 1.8ms | Total Stream Latency: 420ms',
-      '<span style="color:#34d399">[COMPLETED]</span> Model: claude-3-5-sonnet | Tokens: Prompt 1,420, Completion 510 | Cost: ₩3.86'
+    general: [
+      '<span style="color:#818cf8">[GENERAL API GATEWAY]</span> POST /v1/chat/completions (Header: X-Proxy-Provider: anthropic-internal)',
+      '<span style="color:#a855f7">[DYNAMIC ROUTER]</span> Routing request to Upstream Provider: `Anthropic Production Cluster`',
+      '<span style="color:#34d399">[AES-GCM DECRYPT]</span> Decrypted upstream API Key securely from Vault Store',
+      '<span style="color:#38bdf8">[RATE LIMITER]</span> IP: 10.0.4.12 | Token Bucket: 980/1000 req/min -> ALLOWED',
+      '<span style="color:#34d399">[HEALTH & AUDIT]</span> Status: 200 OK | Latency: 18ms | Audit Logged to PostgreSQL'
     ],
     secret: [
       '<span style="color:#818cf8">[SSE PROXY]</span> POST /v1/chat/completions HTTP/1.1 (Client: Continue VSCode)',
@@ -140,7 +141,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function runSimScenario(scenarioKey) {
     if (!simTerminal || !simScenarios[scenarioKey]) return;
 
-    simTerminal.innerHTML = '<div style="color:#94a3b8">// Initializing vibe-coders Proxy Gateway Inspection...</div>';
+    simTerminal.innerHTML = '<div style="color:#94a3b8">// Initializing vibe-coders General & AI Gateway Inspection...</div>';
     const lines = simScenarios[scenarioKey];
 
     lines.forEach((line, idx) => {

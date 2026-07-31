@@ -5,10 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   
   <!-- Primary Meta Tags -->
-  <title>vibe-coders | enterprise AI 코딩 프록시 게이트웨이 & LLM Observability</title>
-  <meta name="title" content="vibe-coders | 기업형 AI 코딩 프록시 게이트웨이 & LLM Observability">
-  <meta name="description" content="Roo Code, Cursor, Continue, OpenAI SDK 호환 초저지연 SSE 프록시 게이트웨이. 원화(KRW) 비용 실시간 집계, 시크릿 방화벽 보안 거버넌스, Datadog 수준의 LLM Observability 및 통합 MCP Gateway를 오프라인 폐쇄망 패키지로 완벽 제공합니다.">
-  <meta name="keywords" content="vibe-coders, AI 코딩 프록시, LLM 게이트웨이, Roo Code, Cursor, Continue, LLM Observability, MCP Gateway, AI 보안, 원화 쿼터, 프롬프트 비교, 폐쇄망 AI, 엔터프라이즈 AI 거버넌스">
+  <title>vibe-coders | 기업형 AI 코딩 &amp; 범용 API 프록시 게이트웨이</title>
+  <meta name="title" content="vibe-coders | 기업형 AI 코딩 &amp; 범용 API 프록시 게이트웨이">
+  <meta name="description" content="Roo Code, Cursor 호환 AI 코딩 프록시이자 강력한 범용 엔터프라이즈 API 게이트웨이. 다중 업스트림 동적 라우팅, AES-GCM 암호화 키 관리, 원화(KRW) 비용 추적, 시크릿 방화벽, LLM Observability 및 통합 MCP Gateway를 제공합니다.">
+  <meta name="keywords" content="vibe-coders, AI 코딩 프록시, API 게이트웨이, 범용 프록시 게이트웨이, General API Gateway, Roo Code, Cursor, LLM Observability, MCP Gateway, AI 보안, 원화 쿼터, 동적 라우팅, 폐쇄망 AI">
   <meta name="author" content="vibe-coders team">
   <meta name="robots" content="index, follow">
   <meta name="theme-color" content="#070a12">
@@ -19,15 +19,15 @@
   <!-- Open Graph / Facebook -->
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://hkjang.github.io/vibe-coders/">
-  <meta property="og:title" content="vibe-coders | 기업형 AI 코딩 프록시 게이트웨이 & LLM Observability">
-  <meta property="og:description" content="Roo Code, Cursor, Continue 호환 초저지연 SSE 프록시 게이트웨이. 실시간 원화(KRW) 비용 추적, 시크릿 방화벽, LLM Observability 및 오프라인 폐쇄망 배포 지원.">
+  <meta property="og:title" content="vibe-coders | 기업형 AI 코딩 &amp; 범용 API 프록시 게이트웨이">
+  <meta property="og:description" content="AI 코딩 도구 중계 및 범용 API 게이트웨이. 동적 라우팅(X-Proxy-Provider), AES-GCM 키 암호화, 원화(KRW) 비용 추적, 시크릿 방화벽, LLM 관측 오프라인 지원.">
   <meta property="og:image" content="https://hkjang.github.io/vibe-coders/images/icon_3d.png">
 
   <!-- Twitter -->
   <meta property="twitter:card" content="summary_large_image">
   <meta property="twitter:url" content="https://hkjang.github.io/vibe-coders/">
-  <meta property="twitter:title" content="vibe-coders | 기업형 AI 코딩 프록시 게이트웨이">
-  <meta property="twitter:description" content="AI 코딩 도구 사용량/비용(KRW) 추적, 시크릿 방화벽, MCP 게이트웨이, LLM 관측을 제공하는 엔터프라이즈 솔루션.">
+  <meta property="twitter:title" content="vibe-coders | 기업형 AI 코딩 &amp; 범용 API 게이트웨이">
+  <meta property="twitter:description" content="AI 코딩 중계 및 범용 엔터프라이즈 API 게이트웨이 솔루션.">
   <meta property="twitter:image" content="https://hkjang.github.io/vibe-coders/images/icon_3d.png">
 
   <!-- Google Fonts -->
@@ -47,8 +47,8 @@
         "@type": "SoftwareApplication",
         "name": "vibe-coders",
         "operatingSystem": "Linux, macOS, Windows (Docker Container / Go Binary)",
-        "applicationCategory": "DeveloperApplication",
-        "description": "Roo Code, Cursor, Continue 등 AI 코딩 도구를 중계하며 사용량·토큰·비용(KRW) 추적, 시크릿 방화벽, LLM Observability, MCP 게이트웨이를 제공하는 기업용 SSE 프록시 게이트웨이.",
+        "applicationCategory": "DeveloperApplication, API Gateway",
+        "description": "Roo Code, Cursor 등 AI 코딩 도구 중계 및 다중 라우팅(X-Proxy-Provider), AES-GCM 키 암호화, Rate Limit, 원화 비용(KRW) 추적, 시크릿 방화벽, LLM Observability, MCP 게이트웨이를 제공하는 강력한 범용 엔터프라이즈 API 프록시 게이트웨이.",
         "offers": {
           "@type": "Offer",
           "price": "0",
@@ -65,6 +65,14 @@
       {
         "@type": "FAQPage",
         "mainEntity": [
+          {
+            "@type": "Question",
+            "name": "vibe-coders를 AI 코딩 도구 외에 일반 API 프록시 게이트웨이로도 사용할 수 있나요?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "네! vibe-coders는 AI 코딩 전용 프록시에 국한되지 않고 다중 업스트림 동적 라우팅(X-Proxy-Provider), AES-GCM 키 암호화, IP/팀별 Rate Limit, CORS, 헬스체크(/health, /ready), DB 장애 시 NDJSON Fallback을 완벽 지원하는 강력한 범용 엔터프라이즈 API 프록시 게이트웨이입니다."
+            }
+          },
           {
             "@type": "Question",
             "name": "vibe-coders는 어떤 AI 코딩 도구들과 호환되나요?",
@@ -96,14 +104,6 @@
               "@type": "Answer",
               "text": "사내외 다중 업스트림 MCP(Model Context Protocol) 서버를 단일 /mcp 엔드포인트로 집약하며, 네임스페이스 자동 부여 및 도구 차단/허용 정책을 실시간 적용합니다."
             }
-          },
-          {
-            "@type": "Question",
-            "name": "Datadog 수준의 LLM Observability 및 프롬프트 버전 비교 기능이란 무엇인가요?",
-            "acceptedAnswer": {
-              "@type": "Answer",
-              "text": "Datadog 수준의 Trace/Span 탐색, 세션 추적, 프롬프트 버전별 평균 지연/비용/오류율/평가 실패율 실시간 비교 분석 모달을 제공합니다."
-            }
           }
         ]
       }
@@ -124,11 +124,11 @@
       <nav>
         <ul class="nav-menu" id="navMenu">
           <li><a href="#features" class="nav-link">핵심 기능</a></li>
+          <li><a href="#general" class="nav-link">범용 API 게이트웨이</a></li>
           <li><a href="#simulator" class="nav-link">실시간 시뮬레이터</a></li>
           <li><a href="#observability" class="nav-link">LLM 관측</a></li>
           <li><a href="#mcp" class="nav-link">MCP 게이트웨이</a></li>
           <li><a href="#calculator" class="nav-link">비용 계산기</a></li>
-          <li><a href="#onboarding" class="nav-link">도입 절차</a></li>
           <li><a href="#faq" class="nav-link">FAQ</a></li>
         </ul>
       </nav>
@@ -153,22 +153,22 @@
             <span class="dot"></span>
             <span>v0.76.54 Enterprise Release</span>
           </div>
-          <div class="hero-badge" style="border-color: rgba(16, 185, 129, 0.35); color: #34d399;">
-            <span>🛡️ 100% 폐쇄망 오프라인 배포 지원</span>
+          <div class="hero-badge" style="border-color: rgba(99, 102, 241, 0.4); color: #a5b4fc;">
+            <span>🌐 범용 엔터프라이즈 API 게이트웨이 지원</span>
           </div>
-          <div class="hero-badge" style="border-color: rgba(6, 182, 212, 0.35); color: #38bdf8;">
-            <span>📊 Datadog 호환 Observability</span>
+          <div class="hero-badge" style="border-color: rgba(16, 185, 129, 0.35); color: #34d399;">
+            <span>🛡️ 100% 폐쇄망 오프라인 배포</span>
           </div>
         </div>
 
         <h1 class="hero-title">
-          기업형 AI 코딩 프록시 게이트웨이<br>
+          기업형 AI 코딩 &amp; 범용 API 게이트웨이<br>
           <span class="gradient-text">vibe-coders</span>
         </h1>
 
         <p class="hero-description">
-          Roo Code, Cursor, Continue 및 OpenAI SDK 요청을 초저지연 SSE로 중계하면서<br>
-          <strong>실시간 원화(KRW) 비용·토큰 추적, 시크릿 방화벽 보안 거버넌스, Datadog 수준의 LLM Observability 및 통합 MCP Gateway</strong>를 단일 오프라인 패키지로 완벽 제공합니다.
+          Roo Code, Cursor 등 AI 코딩 도구 중계뿐만 아니라,<br>
+          <strong>다중 라우팅(`X-Proxy-Provider`), AES-GCM 키 암호화, Rate Limit &amp; KRW 쿼터, Secret Firewall, Datadog급 LLM Observability 및 통합 MCP Gateway</strong>를 지원하는 강력한 범용 엔터프라이즈 API 프록시 게이트웨이입니다.
         </p>
 
         <div class="hero-cta">
@@ -214,14 +214,15 @@
 
         <!-- Supported Tools Badges Grid -->
         <div class="tools-banner">
-          <div class="tools-title">100% Drop-in Compatible AI Coding Tools &amp; SDKs</div>
+          <div class="tools-title">Enterprise API Proxy &amp; AI Tools Ecosystem</div>
           <div class="tools-grid">
+            <div class="tool-badge">🌐 General API Gateway</div>
+            <div class="tool-badge">🔀 Dynamic Routing (X-Proxy-Provider)</div>
+            <div class="tool-badge">🔐 AES-GCM Encrypted Keys</div>
             <div class="tool-badge">🤖 Roo Code / Cline</div>
             <div class="tool-badge">⚡ Cursor IDE</div>
             <div class="tool-badge">🚀 Continue extension</div>
-            <div class="tool-badge">🐍 OpenAI Python SDK</div>
-            <div class="tool-badge">📘 TypeScript SDK</div>
-            <div class="tool-badge">⚙️ LangChain / LlamaIndex</div>
+            <div class="tool-badge">🐍 OpenAI / TS / Go SDK</div>
             <div class="tool-badge">🔌 Model Context Protocol (MCP)</div>
           </div>
         </div>
@@ -230,7 +231,7 @@
         <div class="stats-grid">
           <div class="stat-item">
             <div class="stat-value gradient-text">&lt; 5 ms</div>
-            <div class="stat-label">SSE 중계 오버헤드</div>
+            <div class="stat-label">SSE &amp; API 중계 오버헤드</div>
           </div>
           <div class="stat-item">
             <div class="stat-value gradient-text-accent">100 %</div>
@@ -254,18 +255,22 @@
         <span class="section-tag">Enterprise Challenge &amp; Solution</span>
         <h2 class="section-title">왜 기업은 vibe-coders를 선택해야 하는가?</h2>
         <p class="section-subtitle">
-          개발 생산성을 극대화하는 AI 개발 도구 도입, 하지만 비용 폭주와 소스코드 시크릿 유출 리스크는 기업의 거버넌스 과제입니다.
+          AI 코딩 도구 중계는 물론, 전체 사내 API 트래픽을 안전하게 제어하는 범용 엔터프라이즈 프록시 게이트웨이입니다.
         </p>
 
         <div class="comparison-container">
           <div class="comparison-box before">
             <div class="comparison-header" style="color: #ef4444;">
-              <span>⚠️ 기존 AI 도구 도입 시 문제점</span>
+              <span>⚠️ 기존 AI 및 API 도입 시 문제점</span>
             </div>
             <ul class="comparison-list">
               <li>
                 <span>❌</span>
-                <div><strong>비용 통제 불가:</strong> 개발자별 AI 사용량 및 원화(KRW) 토큰 비용 추적 불가</div>
+                <div><strong>비용 통제 불가:</strong> 개발자별 AI 및 API 사용량 및 원화(KRW) 토큰 비용 추적 불가</div>
+              </li>
+              <li>
+                <span>❌</span>
+                <div><strong>단일 프로바이더 종속:</strong> 다양한 외부 LLM 및 사내 API 엔드포인트 동적 라우팅 어려움</div>
               </li>
               <li>
                 <span>❌</span>
@@ -274,10 +279,6 @@
               <li>
                 <span>❌</span>
                 <div><strong>품질 &amp; 파편화:</strong> 프롬프트 버전 관리 부재 및 LLM 지연/오류 원인 파악 불가능</div>
-              </li>
-              <li>
-                <span>❌</span>
-                <div><strong>MCP 서버 파편화:</strong> 여러 MCP 도구 서버를 개별 관리하며 도구 승인 통제 불가</div>
               </li>
             </ul>
           </div>
@@ -289,7 +290,11 @@
             <ul class="comparison-list">
               <li>
                 <span>✅</span>
-                <div><strong>실시간 KRW 쿼터 제어:</strong> 사용자/팀/IP별 일별·월별 쿼터 한도 초과 시 자동 429 차단</div>
+                <div><strong>강력한 범용 API 라우팅:</strong> <code>X-Proxy-Provider</code> 기반 다중 업스트림 동적 라우팅</div>
+              </li>
+              <li>
+                <span>✅</span>
+                <div><strong>AES-GCM 암호화:</strong> 업스트림 API 키 암호화 저장 및 API Key 발급/해시 관리</div>
               </li>
               <li>
                 <span>✅</span>
@@ -299,17 +304,13 @@
                 <span>✅</span>
                 <div><strong>Datadog급 LLM 관측:</strong> Trace/Session 탐색 및 프롬프트 버전별 지연·오류·비용 모달 비교</div>
               </li>
-              <li>
-                <span>✅</span>
-                <div><strong>단일 `/mcp` Gateway:</strong> 업스트림 MCP 통합 집약, 도구 네임스페이스, 차단 정책 적용</div>
-              </li>
             </ul>
           </div>
         </div>
       </div>
     </section>
 
-    <!-- NEW: Live Interactive Proxy Terminal Simulator -->
+    <!-- Live Interactive Proxy Terminal Simulator -->
     <section class="section" id="simulator">
       <div class="container">
         <div style="text-align: center;">
@@ -323,7 +324,7 @@
         <div class="sim-container">
           <div class="sim-controls">
             <button class="sim-btn active" data-sim="roo">⚡ Roo Code 코드 생성 중계</button>
-            <button class="sim-btn" data-sim="cursor">🔍 Cursor 리팩토링 검증</button>
+            <button class="sim-btn" data-sim="general">🌐 범용 API 동적 라우팅</button>
             <button class="sim-btn" data-sim="secret">🛑 시크릿 차단 (Secret Firewall)</button>
             <button class="sim-btn" data-sim="quota">⚠️ 429 쿼터 초과 차단</button>
           </div>
@@ -343,14 +344,15 @@
     <section class="section" id="features">
       <div class="container" style="text-align: center;">
         <span class="section-tag">Core Features</span>
-        <h2 class="section-title">엔터프라이즈를 위한 4대 핵심 기능</h2>
+        <h2 class="section-title">엔터프라이즈를 위한 5대 핵심 기능</h2>
         <p class="section-subtitle">
-          초저지연 SSE 중계부터 Datadog 수준의 프롬프트 관측, 시크릿 보안, MCP 집약까지 단 하나의 프록시 게이트웨이로 완벽 해결합니다.
+          범용 API 라우팅부터 초저지연 SSE 중계, Datadog 수준 관측, 시크릿 보안, MCP 집약까지 완벽 제공합니다.
         </p>
 
         <!-- Tab Controls -->
         <div class="tab-nav">
           <button class="tab-btn active" data-tab="tab-proxy">⚡ SSE 프록시 중계</button>
+          <button class="tab-btn" data-tab="tab-general">🌐 범용 API 게이트웨이</button>
           <button class="tab-btn" data-tab="tab-security">🛡️ 시크릿 방화벽 &amp; 쿼터</button>
           <button class="tab-btn" data-tab="tab-observability">📊 LLM Observability</button>
           <button class="tab-btn" data-tab="tab-mcp">🔌 통합 MCP Gateway</button>
@@ -376,6 +378,30 @@
   "openAI.apiKey": "vbe_live_enterprise_key_98a7",
   "model": "gpt-4o"
 }</code></pre>
+            </div>
+          </div>
+        </div>
+
+        <div class="tab-content" id="tab-general">
+          <div class="grid-2" style="text-align: left;">
+            <div>
+              <div class="card-icon">🌐</div>
+              <h3 class="card-title">강력한 범용 API 프록시 게이트웨이</h3>
+              <p class="card-desc">
+                AI 전용에 국한되지 않고, 사내 전체 API 트래픽을 총괄하는 엔터프라이즈 API 게이트웨이 역할을 수행합니다.<br><br>
+                • <strong>동적 라우팅:</strong> <code>X-Proxy-Provider</code> 헤더 기반 다중 업스트림 Provider 분기 라우팅<br>
+                • <strong>AES-GCM 암호화:</strong> 업스트림 API 키 안전한 AES-256 GCM 암호화 저장<br>
+                • <strong>고가용성 &amp; Fallback:</strong> DB 장애 시 NDJSON 롤링 감사 복구(<code>/admin/fallback</code>), 헬스체크(<code>/health</code>, <code>/ready</code>)<br>
+                • <strong>API 접근 통제:</strong> Proxy API Key 해시 관리 및 IP 기반 Rate Limit
+              </p>
+            </div>
+            <div class="card" style="background: rgba(0,0,0,0.55); font-family: var(--font-mono); font-size: 0.85rem;">
+              <div style="color: var(--accent); margin-bottom: 0.5rem;">// Dynamic Upstream Provider Routing</div>
+              <pre style="color: #e2e8f0; overflow-x: auto;"><code>curl -X POST http://localhost:8080/v1/chat/completions \
+  -H "Authorization: Bearer vbe_live_key_98a7" \
+  -H "X-Proxy-Provider: anthropic-production" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"claude-3-5-sonnet","messages":[{"role":"user","content":"Hello"}]}'</code></pre>
             </div>
           </div>
         </div>
@@ -448,7 +474,7 @@
       </div>
     </section>
 
-    <!-- NEW: 3-Step Onboarding Section -->
+    <!-- 3-Step Onboarding Section -->
     <section class="section" id="onboarding" style="background: rgba(15, 23, 42, 0.4);">
       <div class="container" style="text-align: center;">
         <span class="section-tag">Fast Onboarding</span>
@@ -476,7 +502,7 @@
 
           <div class="step-card">
             <div class="step-number">3</div>
-            <h3 style="font-size: 1.2rem; font-weight: 700; margin-bottom: 0.75rem;">IDE Base URL 변경</h3>
+            <h3 style="font-size: 1.2rem; font-weight: 700; margin-bottom: 0.75rem;">IDE Base URL 지정</h3>
             <p style="font-size: 0.925rem; color: var(--text-muted); line-height: 1.6;">
               VS Code, Cursor, Roo Code 설정에서 OpenAI Base URL을 <code>http://vibe-gateway:8080/v1</code> 로 지정합니다.
             </p>
@@ -485,7 +511,7 @@
       </div>
     </section>
 
-    <!-- NEW: Testimonials & Customer Use Cases -->
+    <!-- Testimonials & Customer Use Cases -->
     <section class="section">
       <div class="container" style="text-align: center;">
         <span class="section-tag">Enterprise Value</span>
@@ -597,14 +623,14 @@
         <span class="section-tag">Enterprise Architecture</span>
         <h2 class="section-title">신뢰할 수 있는 제로 트러스트 아키텍처</h2>
         <p class="section-subtitle">
-          개발도구와 외부 LLM 공급자 사이에 위치하여 보안 검증, 쿼터 제어, 감사 로그를 투명하게 수행합니다.
+          개발도구 및 애플리케이션과 외부 LLM 공급자 사이에 위치하여 보안 검증, 쿼터 제어, 감사 로그를 투명하게 수행합니다.
         </p>
 
         <div class="arch-diagram">
           <div class="arch-node">
             <h4 style="color: var(--primary-light); margin-bottom: 0.5rem;">👨‍💻 Client Layer</h4>
             <p style="font-size: 0.85rem; color: var(--text-muted);">
-              VS Code / Cursor<br>Roo Code / Continue<br>OpenAI SDK / Python
+              VS Code / Cursor<br>Roo Code / Continue<br>OpenAI SDK / App APIs
             </p>
           </div>
 
@@ -613,7 +639,7 @@
           <div class="arch-node center-node">
             <h4 style="color: #ffffff; margin-bottom: 0.5rem;">🛡️ vibe-coders Gateway</h4>
             <p style="font-size: 0.85rem; color: #cbd5e1;">
-              • Ultra-low SSE Streaming Proxy<br>
+              • Dynamic Upstream Provider Router<br>
               • Secret Firewall &amp; KRW Quota<br>
               • SQLite / Postgres Audit Store<br>
               • Datadog-level LLM Observability
@@ -646,17 +672,27 @@
         <div class="faq-grid">
           <div class="faq-item open">
             <button class="faq-question">
-              <span>Q1. vibe-coders는 어떤 AI 코딩 도구들과 호환되나요?</span>
+              <span>Q1. vibe-coders를 AI 코딩 도구 외에 일반 API 프록시 게이트웨이로도 사용할 수 있나요?</span>
               <span class="faq-icon">+</span>
             </button>
             <div class="faq-answer">
-              <p>OpenAI API 규격을 지원하는 Roo Code, Cline, Cursor, Continue 및 공식 OpenAI Python/TypeScript SDK 등 모든 개발 환경과 100% 호환됩니다. 기존 설정에서 API Base URL만 vibe-coders 게이트웨이 주소(예: <code>http://localhost:8080/v1</code>)로 변경하면 바로 적용됩니다.</p>
+              <p>네! vibe-coders는 AI 코딩 전용 프록시에 국한되지 않고 <strong>다중 업스트림 동적 라우팅(<code>X-Proxy-Provider</code>)</strong>, <strong>AES-GCM 키 암호화</strong>, <strong>IP/팀별 Rate Limit 및 쿼터</strong>, <strong>CORS</strong>, <strong>헬스체크(<code>/health</code>, <code>/ready</code>)</strong>, <strong>DB 장애 시 NDJSON Fallback</strong>을 완벽 지원하는 강력한 범용 엔터프라이즈 API 프록시 게이트웨이입니다.</p>
             </div>
           </div>
 
           <div class="faq-item">
             <button class="faq-question">
-              <span>Q2. 인터넷이 차단된 폐쇄망(Air-gapped) 오프라인 환경에서도 사용할 수 있나요?</span>
+              <span>Q2. 어떤 AI 코딩 도구 및 SDK들과 호환되나요?</span>
+              <span class="faq-icon">+</span>
+            </button>
+            <div class="faq-answer">
+              <p>OpenAI API 규격을 지원하는 Roo Code, Cline, Cursor, Continue 및 공식 OpenAI Python/TypeScript/Go SDK 등 모든 개발 환경과 100% 호환됩니다. 기존 설정에서 API Base URL만 vibe-coders 게이트웨이 주소(예: <code>http://localhost:8080/v1</code>)로 변경하면 바로 적용됩니다.</p>
+            </div>
+          </div>
+
+          <div class="faq-item">
+            <button class="faq-question">
+              <span>Q3. 인터넷이 차단된 폐쇄망(Air-gapped) 오프라인 환경에서도 사용할 수 있나요?</span>
               <span class="faq-icon">+</span>
             </button>
             <div class="faq-answer">
@@ -666,7 +702,7 @@
 
           <div class="faq-item">
             <button class="faq-question">
-              <span>Q3. 비용(KRW) 및 토큰 사용량 제어는 어떻게 동작하나요?</span>
+              <span>Q4. 비용(KRW) 및 토큰 사용량 제어는 어떻게 동작하나요?</span>
               <span class="faq-icon">+</span>
             </button>
             <div class="faq-answer">
@@ -676,21 +712,11 @@
 
           <div class="faq-item">
             <button class="faq-question">
-              <span>Q4. MCP Gateway 기능은 무엇이며 어떻게 설정하나요?</span>
+              <span>Q5. MCP Gateway 기능은 무엇이며 어떻게 설정하나요?</span>
               <span class="faq-icon">+</span>
             </button>
             <div class="faq-answer">
               <p>다중 업스트림 MCP(Model Context Protocol) 서버를 단일 <code>/mcp</code> (JSON-RPC 2.0) 엔드포인트로 집약합니다. 도구 이름에 <code>&lt;upstream&gt;__&lt;tool&gt;</code> 형태의 네임스페이스를 자동 부여하여 도구 충돌을 방지하고, 허용 목록(Allowlist) 정책을 통합 관리합니다.</p>
-            </div>
-          </div>
-
-          <div class="faq-item">
-            <button class="faq-question">
-              <span>Q5. Datadog 수준의 LLM Observability 기능은 무엇인가요?</span>
-              <span class="faq-icon">+</span>
-            </button>
-            <div class="faq-answer">
-              <p>Trace/Span Explorer, Session Explorer, Prompt Version Compare 모달을 포함합니다. 프롬프트 버전별로 평균 지연 시간, 비용(KRW), 오류율, 평가 실패율을 정밀 비교 분석하여 최적의 프롬프트 버전 선택을 지원합니다.</p>
             </div>
           </div>
         </div>
@@ -701,10 +727,10 @@
     <section class="container">
       <div class="cta-banner">
         <h2 style="font-size: 2.35rem; font-weight: 800; margin-bottom: 1rem;">
-          지금 바로 기업형 AI 코딩 거버넌스를 구축하세요
+          지금 바로 기업형 API &amp; AI 거버넌스를 구축하세요
         </h2>
         <p style="color: var(--text-muted); max-width: 680px; margin: 0 auto 2.25rem auto; font-size: 1.075rem;">
-          초저지연 프록시 중계, 원화(KRW) 비용 통제, 시크릿 보안, Datadog급 관측까지 단 5분 만에 시작할 수 있습니다.
+          동적 라우팅, 원화(KRW) 비용 통제, 시크릿 보안, Datadog급 관측까지 단 5분 만에 시작할 수 있습니다.
         </p>
         <div style="display: flex; gap: 1.25rem; justify-content: center; flex-wrap: wrap;">
           <a href="https://github.com/hkjang/vibe-coders" target="_blank" rel="noopener" class="btn btn-primary" style="padding: 0.9rem 2.25rem; font-size: 1.05rem;">
@@ -728,7 +754,7 @@
             <span class="gradient-text">vibe-coders</span>
           </div>
           <p style="color: var(--text-muted); font-size: 0.875rem; line-height: 1.65; max-width: 320px;">
-            기업을 위한 오프라인 폐쇄망 지원 AI 코딩 프록시 게이트웨이 및 LLM Observability 플랫폼.
+            기업을 위한 오프라인 폐쇄망 지원 AI 코딩 &amp; 범용 엔터프라이즈 API 프록시 게이트웨이.
           </p>
         </div>
 
