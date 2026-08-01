@@ -8,7 +8,7 @@
   <title>vibe-coders | 기업형 AI 코딩 &amp; 범용 API 프록시 게이트웨이</title>
   <meta name="title" content="vibe-coders | 기업형 AI 코딩 &amp; 범용 API 프록시 게이트웨이">
   <meta name="description" content="Roo Code, Cursor 호환 AI 코딩 프록시이자 강력한 범용 엔터프라이즈 API 게이트웨이. 다중 업스트림 동적 라우팅, AES-GCM 암호화 키 관리, 원화(KRW) 비용 추적, 시크릿 방화벽, LLM Observability 및 통합 MCP Gateway를 제공합니다.">
-  <meta name="keywords" content="vibe-coders, AI 코딩 프록시, API 게이트웨이, 범용 프록시 게이트웨이, General API Gateway, Roo Code, Cursor, LLM Observability, MCP Gateway, AI 보안, 원화 쿼터, 동적 라우팅, 폐쇄망 AI">
+  <meta name="keywords" content="vibe-coders, AI 코딩 프록시, API 게이트웨이, Universal Proxy 게이트웨이, General API Gateway, Roo Code, Cursor, LLM Observability, MCP Gateway, AI 보안, 원화 쿼터, 동적 라우팅, 폐쇄망 AI">
   <meta name="author" content="vibe-coders team">
   <meta name="robots" content="index, follow">
   <meta name="theme-color" content="#070a12">
@@ -20,7 +20,7 @@
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://hkjang.github.io/vibe-coders/">
   <meta property="og:title" content="vibe-coders | 기업형 AI 코딩 &amp; 범용 API 프록시 게이트웨이">
-  <meta property="og:description" content="AI 코딩 도구 중계 및 범용 API 게이트웨이. 동적 라우팅(X-Proxy-Provider), AES-GCM 키 암호화, 원화(KRW) 비용 추적, 시크릿 방화벽, LLM 관측 오프라인 지원.">
+  <meta property="og:description" content="AI 코딩 도구 중계 및 범용 API 게이트웨이. 동적 라우팅(X-Proxy-Provider), AES-GCM 키 암호화, 원화(KRW) 비용 추적, 시크릿 방화벽, LLM Observability 오프라인 지원.">
   <meta property="og:image" content="https://hkjang.github.io/vibe-coders/images/icon_3d.png">
 
   <!-- Twitter -->
@@ -86,7 +86,7 @@
             "name": "폐쇄망(Air-gapped) 오프라인 환경에서도 작동하나요?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "네, 외부 인터넷 연결이 제한된 기업 폐쇄망 환경을 위한 오프라인 Docker 이미지 패키지와 SQLite/PostgreSQL 독립 실행형 아키텍처를 제공합니다."
+              "text": "네, 외부 인터넷 연결이 제한된 기업 폐쇄망 환경을 위한 오프라인 Docker 이미지 패키지와 SQLite/PostgreSQL 독립 실행형 Architecture를 제공합니다."
             }
           },
           {
@@ -190,9 +190,9 @@
       <nav>
         <ul class="nav-menu" id="navMenu">
           <li><a href="#features" class="nav-link">기능</a></li>
-          <li><a href="#general" class="nav-link">범용 프록시</a></li>
+          <li><a href="#general" class="nav-link">Universal Proxy</a></li>
           <li><a href="#simulator" class="nav-link">데모</a></li>
-          <li><a href="#observability" class="nav-link">LLM 관측</a></li>
+          <li><a href="#observability" class="nav-link">LLM Observability</a></li>
           <li><a href="#mcp" class="nav-link">MCP</a></li>
           <li><a href="#calculator" class="nav-link">계산기</a></li>
           <li><a href="#faq" class="nav-link">FAQ</a></li>
@@ -207,7 +207,7 @@
         <a href="index.html" class="lang-btn">KO</a>
         <a href="index_en.html" class="lang-btn active">EN</a>
       </div>
-        <a href="https://github.com/hkjang/vibe-coders/blob/master/docs/USER_GUIDE.md" target="_blank" rel="noopener" class="btn btn-secondary">사용자 가이드</a>
+        <a href="https://github.com/hkjang/vibe-coders/blob/master/docs/USER_GUIDE.md" target="_blank" rel="noopener" class="btn btn-secondary">User Guide</a>
         <a href="https://github.com/hkjang/vibe-coders" target="_blank" rel="noopener" class="btn btn-primary">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
           GitHub
@@ -227,10 +227,10 @@
             <span>v0.76.54 Enterprise Release</span>
           </div>
           <div class="hero-badge" style="border-color: rgba(99, 102, 241, 0.4); color: #a5b4fc;">
-            <span>🌐 범용 엔터프라이즈 API 게이트웨이 지원</span>
+            <span>🌐 Universal Enterprise API Gateway Support</span>
           </div>
           <div class="hero-badge" style="border-color: rgba(16, 185, 129, 0.35); color: #34d399;">
-            <span>🛡️ 100% 폐쇄망 오프라인 배포</span>
+            <span>🛡️ 100% Air-Gapped Offline Deployment</span>
           </div>
         </div>
 
@@ -246,7 +246,7 @@
 
         <div class="hero-cta">
           <a href="#quickstart" class="btn btn-primary" style="padding: 0.85rem 2rem; font-size: 1.05rem;">
-            🚀 독립 실행 시작하기
+            🚀 독립 실행 Get Started
           </a>
           <a href="#calculator" class="btn btn-secondary" style="padding: 0.85rem 2rem; font-size: 1.05rem;">
             💰 월간 ROI 계산기
@@ -263,7 +263,7 @@
             </div>
             <span class="code-title">Quick Run (Docker / Go Terminal)</span>
             <button class="copy-btn" onclick="copyCommand('dockerCmd')">
-              📋 복사
+              📋 Copy
             </button>
           </div>
           <div class="code-body" id="dockerCmd">
@@ -304,19 +304,19 @@
         <div class="stats-grid">
           <div class="stat-item">
             <div class="stat-value gradient-text">&lt; 5 ms</div>
-            <div class="stat-label">SSE &amp; API 중계 오버헤드</div>
+            <div class="stat-label">SSE & API Gateway Overhead</div>
           </div>
           <div class="stat-item">
             <div class="stat-value gradient-text-accent">100 %</div>
-            <div class="stat-label">오프라인 폐쇄망 지원</div>
+            <div class="stat-label">Offline Air-Gapped Support</div>
           </div>
           <div class="stat-item">
             <div class="stat-value gradient-text">99.99 %</div>
-            <div class="stat-label">안전 가동률 (Instant Flush)</div>
+            <div class="stat-label">Instant Flush Reliability</div>
           </div>
           <div class="stat-item">
             <div class="stat-value gradient-text-accent">30% +</div>
-            <div class="stat-label">AI 토큰 비용(KRW) 절감</div>
+            <div class="stat-label">AI Token Cost Reduction</div>
           </div>
         </div>
       </div>
@@ -375,7 +375,7 @@
               </li>
               <li>
                 <span>✅</span>
-                <div><strong>Datadog급 LLM 관측:</strong> Trace/Session 탐색 및 프롬프트 버전별 지연·오류·비용 모달 비교</div>
+                <div><strong>Datadog급 LLM Observability:</strong> Trace/Session 탐색 및 프롬프트 버전별 지연·오류·비용 모달 비교</div>
               </li>
             </ul>
           </div>
@@ -417,7 +417,7 @@
     <section class="section" id="features">
       <div class="container" style="text-align: center;">
         <span class="section-tag">Core Features</span>
-        <h2 class="section-title">엔터프라이즈를 위한 5대 핵심 기능</h2>
+        <h2 class="section-title">엔터프라이즈를 위한 5대 Key Features</h2>
         <p class="section-subtitle">
           범용 API 라우팅부터 초저지연 SSE 중계, Datadog 수준 관측, 시크릿 보안, MCP 집약까지 완벽 제공합니다.
         </p>
@@ -685,7 +685,7 @@
     <section class="section" id="architecture">
       <div class="container" style="text-align: center;">
         <span class="section-tag">Enterprise Architecture</span>
-        <h2 class="section-title">신뢰할 수 있는 제로 트러스트 아키텍처</h2>
+        <h2 class="section-title">신뢰할 수 있는 제로 트러스트 Architecture</h2>
         <p class="section-subtitle">
           개발도구 및 애플리케이션과 외부 LLM 공급자 사이에 위치하여 보안 검증, 쿼터 제어, 감사 로그를 투명하게 수행합니다.
         </p>
@@ -727,7 +727,7 @@
       <div class="container">
         <div style="text-align: center;">
           <span class="section-tag">Frequently Asked Questions</span>
-          <h2 class="section-title">자주 묻는 질문 (FAQ)</h2>
+          <h2 class="section-title">Frequently Asked Questions (FAQ)</h2>
           <p class="section-subtitle">
             vibe-coders 도입 및 연동에 대한 궁금한 사항을 확인하세요.
           </p>
@@ -760,7 +760,7 @@
               <span class="faq-icon">+</span>
             </button>
             <div class="faq-answer">
-              <p>네, 오프라인 폐쇄망 환경을 위해 사전 빌드된 Docker 이미지 패키지와 바이너리 릴리즈를 제공합니다. 외부 패키지 다운로드 없이 <code>docker compose up -d</code> 명령으로 즉시 가동할 수 있으며, 내장 SQLite 또는 사내 PostgreSQL DB와 연동할 수 있습니다.</p>
+              <p>네, 오프라인 폐쇄망 환경을 위해 사전 빌드된 Docker 이미지 패키지와 바이너리 릴리즈를 제공합니다. 외부 패키지 Download 없이 <code>docker compose up -d</code> 명령으로 즉시 가동할 수 있으며, 내장 SQLite 또는 사내 PostgreSQL DB와 연동할 수 있습니다.</p>
             </div>
           </div>
 
@@ -818,22 +818,22 @@
             <span class="gradient-text">vibe-coders</span>
           </div>
           <p style="color: var(--text-muted); font-size: 0.875rem; line-height: 1.65; max-width: 320px;">
-            기업을 위한 오프라인 폐쇄망 지원 AI 코딩 &amp; 범용 엔터프라이즈 API 프록시 게이트웨이.
+            기업을 위한 Offline Air-Gapped Support AI 코딩 &amp; 범용 엔터프라이즈 API 프록시 게이트웨이.
           </p>
         </div>
 
         <div class="footer-col">
           <h4>문서 &amp; 가이드</h4>
           <ul class="footer-links">
-            <li><a href="https://github.com/hkjang/vibe-coders/blob/master/docs/USER_GUIDE.md" target="_blank" rel="noopener">사용자 가이드</a></li>
-            <li><a href="https://github.com/hkjang/vibe-coders/blob/master/docs/ADMIN_GUIDE.md" target="_blank" rel="noopener">관리자 가이드</a></li>
+            <li><a href="https://github.com/hkjang/vibe-coders/blob/master/docs/USER_GUIDE.md" target="_blank" rel="noopener">User Guide</a></li>
+            <li><a href="https://github.com/hkjang/vibe-coders/blob/master/docs/ADMIN_GUIDE.md" target="_blank" rel="noopener">Administrator Guide</a></li>
             <li><a href="https://github.com/hkjang/vibe-coders/blob/master/docs/OPERATIONS.md" target="_blank" rel="noopener">운영 런북</a></li>
             <li><a href="https://github.com/hkjang/vibe-coders/blob/master/docs/SAFETY_GUIDE.md" target="_blank" rel="noopener">안전 거버넌스 가이드</a></li>
           </ul>
         </div>
 
         <div class="footer-col">
-          <h4>기술 &amp; 아키텍처</h4>
+          <h4>기술 &amp; Architecture</h4>
           <ul class="footer-links">
             <li><a href="https://github.com/hkjang/vibe-coders/blob/master/docs/POSTGRES_GUIDE.md" target="_blank" rel="noopener">PostgreSQL 연동 가이드</a></li>
             <li><a href="https://github.com/hkjang/vibe-coders/blob/master/docs/RELEASE_GUIDE.md" target="_blank" rel="noopener">릴리즈 &amp; 패키징</a></li>
