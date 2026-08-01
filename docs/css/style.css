@@ -1135,3 +1135,49 @@ input[type="range"] {
   transform: translateY(0);
   opacity: 1;
 }
+
+/* Mobile Navigation & Responsive Enhancements */
+.mobile-menu-btn {
+  display: none;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #f8fafc;
+  padding: 6px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+@media (max-width: 768px) {
+  .mobile-menu-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  header .container, nav {
+    position: relative;
+  }
+  .nav-links, .nav-menu {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background: rgba(15, 23, 42, 0.98);
+    backdrop-filter: blur(12px);
+    flex-direction: column;
+    padding: 1.25rem;
+    gap: 1rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+    z-index: 999;
+  }
+  .nav-links.active, .nav-menu.active {
+    display: flex;
+  }
+  body {
+    overflow-x: hidden;
+  }
+  .grid, .features-grid {
+    grid-template-columns: 1fr !important;
+  }
+}
