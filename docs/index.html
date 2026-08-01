@@ -142,6 +142,40 @@
   color: #ffffff;
 }
 </style>
+<script id="auto-lang-detector">
+(function() {
+  var SAVED_KEY = 'user_lang_pref';
+  var userPref = localStorage.getItem(SAVED_KEY);
+  if (!userPref) {
+    var navLang = (navigator.language || (navigator.languages && navigator.languages[0]) || '').toLowerCase();
+    var isKoBrowser = navLang.indexOf('ko') === 0;
+    var isEnPage = window.location.pathname.indexOf('index_en.html') !== -1;
+    if (!isKoBrowser && !isEnPage) {
+      var target = window.location.href.replace(/index\.html$/, 'index_en.html');
+      if (target === window.location.href) target = 'index_en.html';
+      window.location.replace(target);
+    } else if (isKoBrowser && isEnPage) {
+      var target = window.location.href.replace(/index_en\.html$/, 'index.html');
+      if (target === window.location.href) target = 'index.html';
+      window.location.replace(target);
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', function() {
+    var langBtns = document.querySelectorAll('.lang-btn, [data-lang], #btn-ko, #btn-en, #localeToggle, #btn-lang-toggle');
+    langBtns.forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        var lang = btn.getAttribute('data-lang') || (btn.textContent || '').trim().toLowerCase();
+        if (lang.indexOf('en') !== -1) {
+          localStorage.setItem(SAVED_KEY, 'en');
+        } else if (lang.indexOf('ko') !== -1 || lang.indexOf('한') !== -1) {
+          localStorage.setItem(SAVED_KEY, 'ko');
+        }
+      });
+    });
+  });
+})();
+</script>
 </head>
 <body>
 
