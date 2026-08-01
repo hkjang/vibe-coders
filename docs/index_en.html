@@ -168,7 +168,7 @@
         var lang = btn.getAttribute('data-lang') || (btn.textContent || '').trim().toLowerCase();
         if (lang.indexOf('en') !== -1) {
           localStorage.setItem(SAVED_KEY, 'en');
-        } else if (lang.indexOf('ko') !== -1 || lang.indexOf('한') !== -1) {
+        } else if (lang.indexOf('ko') !== -1) {
           localStorage.setItem(SAVED_KEY, 'ko');
         }
       });
