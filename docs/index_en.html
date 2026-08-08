@@ -176,6 +176,33 @@
   });
 })();
 </script>
+
+<style>
+/* Sponsor button styling */
+.sponsor-btn, .btn-sponsor, .button-sponsor {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(225, 29, 72, 0.35);
+  background: rgba(225, 29, 72, 0.1);
+  color: #f43f5e !important;
+  font-weight: 700;
+  font-size: 13px;
+  line-height: 1.2;
+  text-decoration: none !important;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+.sponsor-btn:hover, .btn-sponsor:hover, .button-sponsor:hover {
+  background: #e11d48 !important;
+  color: #ffffff !important;
+  border-color: #e11d48 !important;
+  box-shadow: 0 4px 14px rgba(225, 29, 72, 0.35);
+  transform: translateY(-1px);
+}
+</style>
 </head>
 <body>
 
@@ -203,6 +230,7 @@
         <svg width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path></svg>
       </button>
       <div class="nav-actions">
+        <a href="https://github.com/sponsors/hkjang" target="_blank" rel="noopener" class="sponsor-btn btn-sponsor button-sponsor">💖 Sponsor</a>
       <div class="lang-switch">
         <a href="index.html" class="lang-btn">KO</a>
         <a href="index_en.html" class="lang-btn active">EN</a>
