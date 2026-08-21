@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"vibe-coders/internal/audit"
@@ -77,18 +78,65 @@ func (s *Server) buildMCPToolsSnapshot(ctx context.Context) *mcpToolsSnapshot {
 	if err != nil {
 		return snap
 	}
-	for _, up := range ups {
+	// Discovery is network-bound and independent per upstream, but it used to run one
+	// after another with a 10s timeout each. On a cold cache that runs synchronously on
+	// the first /mcp request, so N upstreams meant up to N x 10s before any client saw a
+	// tool list — and the background refresh has a 45s budget, so past ~4 slow upstreams
+	// the tail was silently never discovered at all.
+	//
+	// Fetching concurrently makes the whole pass cost about one slow upstream instead of
+	// their sum. Results are merged afterwards in the ORIGINAL upstream order, because
+	// resource URI collisions are resolved by "first upstream wins" and that must not
+	// depend on which network call happened to return first.
+	type discovery struct {
+		tools     []mcpToolDef
+		toolsErr  error
+		resources []mcpResource
+		tpls      []json.RawMessage
+		prompts   []mcpPrompt
+	}
+	found := make([]discovery, len(ups))
+	var wg sync.WaitGroup
+	for i, up := range ups {
+		wg.Add(1)
+		go func(i int, up store.MCPUpstream) {
+			defer wg.Done()
+			d := &found[i] // each goroutine owns its own slot; no lock needed
+
+			lctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+			d.tools, d.toolsErr = s.listUpstreamTools(lctx, up)
+			cancel()
+
+			// resources and prompts are optional capabilities — an upstream that lacks
+			// them is not an error, so their failures stay unrecorded as before.
+			rctx, rcancel := context.WithTimeout(ctx, 10*time.Second)
+			if resources, err := s.listUpstreamResources(rctx, up); err == nil {
+				d.resources = resources
+			}
+			if tpls, err := s.listUpstreamResourceTemplates(rctx, up); err == nil {
+				d.tpls = tpls
+			}
+			rcancel()
+
+			pctx, pcancel := context.WithTimeout(ctx, 10*time.Second)
+			if prompts, err := s.listUpstreamPrompts(pctx, up); err == nil {
+				d.prompts = prompts
+			}
+			pcancel()
+		}(i, up)
+	}
+	wg.Wait()
+
+	for i, up := range ups {
+		d := found[i]
 		route := func(bare string) mcpRoute {
 			return mcpRoute{upstreamID: up.ID, upstreamName: up.Name, bareTool: bare}
 		}
 		// tools (the primary capability; record discovery failures here)
-		lctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-		tools, lerr := s.listUpstreamTools(lctx, up)
-		cancel()
-		if lerr != nil {
-			snap.errors[up.Name] = lerr.Error()
+		if d.toolsErr != nil {
+			snap.errors[up.Name] = d.toolsErr.Error()
 		}
-		for _, t := range tools {
+		for _, t := range d.tools {
 			namespaced := up.ID + "__" + t.Name
 			adv := t
 			adv.Name = namespaced
@@ -96,36 +144,24 @@ func (s *Server) buildMCPToolsSnapshot(ctx context.Context) *mcpToolsSnapshot {
 			snap.tools = append(snap.tools, adv)
 			snap.routes[namespaced] = route(t.Name)
 		}
-		// resources (optional capability — silently skip upstreams that lack it)
-		rctx, rcancel := context.WithTimeout(ctx, 10*time.Second)
-		if resources, rerr := s.listUpstreamResources(rctx, up); rerr == nil {
-			for _, res := range resources {
-				if _, dup := snap.resourceRoutes[res.URI]; dup || res.URI == "" {
-					continue // first upstream wins on URI collision
-				}
-				adv := res
-				adv.Description = prefixDesc(up.Name, adv.Description)
-				snap.resources = append(snap.resources, adv)
-				snap.resourceRoutes[res.URI] = route(res.URI)
+		for _, res := range d.resources {
+			if _, dup := snap.resourceRoutes[res.URI]; dup || res.URI == "" {
+				continue // first upstream wins on URI collision
 			}
+			adv := res
+			adv.Description = prefixDesc(up.Name, adv.Description)
+			snap.resources = append(snap.resources, adv)
+			snap.resourceRoutes[res.URI] = route(res.URI)
 		}
-		if tpls, terr := s.listUpstreamResourceTemplates(rctx, up); terr == nil {
-			snap.resourceTpls = append(snap.resourceTpls, tpls...)
+		snap.resourceTpls = append(snap.resourceTpls, d.tpls...)
+		for _, pr := range d.prompts {
+			namespaced := up.ID + "__" + pr.Name
+			adv := pr
+			adv.Name = namespaced
+			adv.Description = prefixDesc(up.Name, adv.Description)
+			snap.prompts = append(snap.prompts, adv)
+			snap.promptRoutes[namespaced] = route(pr.Name)
 		}
-		rcancel()
-		// prompts (optional capability)
-		pctx, pcancel := context.WithTimeout(ctx, 10*time.Second)
-		if prompts, perr := s.listUpstreamPrompts(pctx, up); perr == nil {
-			for _, pr := range prompts {
-				namespaced := up.ID + "__" + pr.Name
-				adv := pr
-				adv.Name = namespaced
-				adv.Description = prefixDesc(up.Name, adv.Description)
-				snap.prompts = append(snap.prompts, adv)
-				snap.promptRoutes[namespaced] = route(pr.Name)
-			}
-		}
-		pcancel()
 	}
 	sort.Slice(snap.tools, func(i, j int) bool { return snap.tools[i].Name < snap.tools[j].Name })
 	sort.Slice(snap.prompts, func(i, j int) bool { return snap.prompts[i].Name < snap.prompts[j].Name })
