@@ -76,6 +76,35 @@ group('toast');
   check('non-errors auto-dismiss', timers === afterErr + 1);
 }
 
+// ---------- time formatting ----------
+group('time formatting');
+{
+  // timeCell/timeExact escape their output; supply the escapers the real page has.
+  const escapers = 'function escapeHTML(s){return String(s==null?"":s);}'
+    + 'function escapeAttr(s){return String(s==null?"":s);}';
+  const F = load(['parseTS', 'fmtAbsTime', 'fmtRelTime', 'timeCell', 'timeExact'], escapers + '\n');
+  const now = Date.now();
+  const ago = (ms) => new Date(now - ms).toISOString();
+  const ahead = (ms) => new Date(now + ms).toISOString();
+
+  check('seconds read as 방금', F.fmtRelTime(ago(5e3)) === '방금');
+  check('minutes', F.fmtRelTime(ago(5 * 60e3)) === '5분 전');
+  check('hours', F.fmtRelTime(ago(3 * 3600e3)) === '3시간 전');
+  check('days', F.fmtRelTime(ago(2 * 86400e3)) === '2일 전');
+  check('future reads as 후', F.fmtRelTime(ahead(3 * 3600e3)) === '3시간 후');
+  check('imminent future', F.fmtRelTime(ahead(5e3)) === '곧');
+  const old = F.fmtRelTime(ago(200 * 86400e3));
+  check('beyond a month falls back to a date', /^\d/.test(old) && !old.includes('전'));
+  check('empty input is safe', F.fmtRelTime('') === '-' && F.fmtRelTime(null) === '-');
+  check('unparseable input is safe', F.fmtRelTime('not-a-date') === '-');
+  check('absolute form omits the current year', /^\d{2}-\d{2} \d{2}:\d{2}$/.test(F.fmtAbsTime(ago(3600e3))));
+  check('absolute form keeps another year', /^\d{4}-\d{2}-\d{2} /.test(F.fmtAbsTime('2001-03-04T05:06:07Z')));
+  const cell = F.timeCell(ago(5 * 60e3));
+  check('timeCell keeps the exact time in a title', cell.includes('title="') && cell.includes('5분 전'));
+  check('timeCell renders nothing as muted', F.timeCell('').includes('muted'));
+  check('timeExact stays absolute', /\d{2}-\d{2} \d{2}:\d{2}/.test(F.timeExact(ago(3600e3))));
+}
+
 // ---------- command palette ----------
 group('command palette');
 {

@@ -171,7 +171,21 @@ const adminHTML = `<!doctype html>
     .status.error { color: var(--bad); background: var(--bad-bg); }
     .status.warn  { color: var(--warn); background: var(--warn-bg); }
     .muted { color: var(--muted); }
-    .empty, .error-line { padding: 18px; color: var(--muted); }
+    /* Three different situations used to render identically in muted grey: "nothing
+       here", "still fetching", and "this failed". An operator staring at a blank panel
+       could not tell which, so each now reads differently at a glance. */
+    .empty { padding: 18px; color: var(--muted); }
+    .error-line {
+      padding: 14px 18px; color: var(--bad); background: var(--bad-bg);
+      border-left: 3px solid var(--bad); border-radius: 6px; margin: 8px 0;
+    }
+    .loading { padding: 18px; color: var(--muted); display: flex; align-items: center; gap: 9px; }
+    .loading::before {
+      content: ''; width: 9px; height: 9px; border-radius: 50%;
+      background: var(--accent); opacity: 0.35; animation: loading-pulse 1.1s ease-in-out infinite;
+    }
+    @keyframes loading-pulse { 0%, 100% { opacity: 0.25; transform: scale(0.8); } 50% { opacity: 0.9; transform: scale(1); } }
+    @media (prefers-reduced-motion: reduce) { .loading::before { animation: none; opacity: 0.6; } }
     .error-line { color: var(--bad); }
     .banner { padding: 12px 14px; border-radius: 8px; font-size: 13px; line-height: 1.5; border: 1px solid var(--line); color: var(--ink); }
     .banner.warn { background: var(--warn-bg); border-color: var(--warn); }
@@ -1266,6 +1280,57 @@ const adminHTML = `<!doctype html>
     }
 
     // ---------- formatting ----------
+    // ---------- time formatting ----------
+    // Timestamps arrive as UTC RFC3339 and were rendered verbatim in ~29 places, so an
+    // operator scanning a table read "2026-08-21T09:51:46.12Z" and had to convert it in
+    // their head to answer the only question they actually had: is this recent?
+    //
+    // Relative text answers that at a glance; the exact local time stays one hover away
+    // in the title attribute, because "3분 전" is useless when correlating with an
+    // external log. Rendering is browser-local, which is what an operator's clock says.
+    function parseTS(value) {
+      if (!value) return null;
+      const d = new Date(value);
+      return isNaN(d.getTime()) ? null : d;
+    }
+    function fmtAbsTime(value) {
+      const d = parseTS(value);
+      if (!d) return '-';
+      const pad = (n) => String(n).padStart(2, '0');
+      const stamp = pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+      // The year is noise for anything in the current one, and essential outside it.
+      return d.getFullYear() === new Date().getFullYear() ? stamp : d.getFullYear() + '-' + stamp;
+    }
+    function fmtRelTime(value) {
+      const d = parseTS(value);
+      if (!d) return '-';
+      const deltaMs = Date.now() - d.getTime();
+      const future = deltaMs < 0;
+      const suffix = future ? ' 후' : ' 전';
+      const secs = Math.abs(deltaMs) / 1000;
+      if (secs < 45) return future ? '곧' : '방금';
+      const mins = secs / 60;
+      if (mins < 60) return Math.round(mins) + '분' + suffix;
+      const hours = mins / 60;
+      if (hours < 24) return Math.round(hours) + '시간' + suffix;
+      const days = hours / 24;
+      if (days < 30) return Math.round(days) + '일' + suffix;
+      // Past a month the relative form stops being informative; show the date instead.
+      return fmtAbsTime(value);
+    }
+    // timeCell is the default for a timestamp in a table or list.
+    function timeCell(value) {
+      const d = parseTS(value);
+      if (!d) return '<span class="muted">-</span>';
+      return '<span title="' + escapeAttr(d.toLocaleString('ko-KR')) + '">' + escapeHTML(fmtRelTime(value)) + '</span>';
+    }
+    // timeExact is for ranges and boundaries, where "2시간 전" reads worse than the time.
+    function timeExact(value) {
+      const d = parseTS(value);
+      if (!d) return '<span class="muted">-</span>';
+      return '<span title="' + escapeAttr(d.toLocaleString('ko-KR')) + '">' + escapeHTML(fmtAbsTime(value)) + '</span>';
+    }
+
     function fmt(value) { return Number(value || 0).toLocaleString('ko-KR'); }
     function money(value) {
       const n = Number(value || 0);
@@ -2541,7 +2606,7 @@ const adminHTML = `<!doctype html>
 
     async function openXVSelectionModal(rids, ridMap) {
       const title = '선택된 요청 ' + fmt(rids.length) + '개';
-      openModal(title, '<div class="empty">요청 미리보기를 불러오는 중...</div>');
+      openModal(title, '<div class="loading">요청 미리보기를 불러오는 중...</div>');
       let reqMap = {};
       try {
         const ids = rids.slice(0, 200);
@@ -2974,7 +3039,7 @@ const adminHTML = `<!doctype html>
       openModal('✦ XView 요청 탐색',
         '<div class="banner"><strong>어떤 요청이 왜 그렇게 처리됐는지 바로 확인하세요.</strong><div class="muted" style="font-size:11px;margin-top:4px">요청 ID를 입력하거나 최근 요청을 선택하면 라우팅·안전·비용·폴백·세션 근거를 한 화면에서 설명합니다.</div></div>' +
         '<div style="display:flex;gap:8px;margin:14px 0"><input id="xv-quick-id" placeholder="request_id 입력" style="flex:1"><button type="button" onclick="xviewOpenFromInput()">설명 열기</button><button class="secondary" type="button" onclick="closeModal();location.hash=\'#/xview\'">전체 분석</button></div>' +
-        '<div id="xv-quick-recent"><div class="empty">최근 요청을 불러오는 중...</div></div>');
+        '<div id="xv-quick-recent"><div class="loading">최근 요청을 불러오는 중...</div></div>');
       const input = document.getElementById('xv-quick-id');
       if (input) { input.focus(); input.addEventListener('keydown', e => { if (e.key === 'Enter') xviewOpenFromInput(); }); }
       try {
@@ -3074,7 +3139,7 @@ const adminHTML = `<!doctype html>
 
       const signals = Number(gv.policy_decision_count||0) + Number(gv.approval_count||0) + Number(gv.secret_event_count||0) + Number(gv.anomaly_event_count||0);
       const headline = sf.blocked ? '안전 정책으로 차단된 요청' : (fb.occurred ? '폴백으로 복구된 요청' : (rt.model_changed ? '라우팅 규칙이 모델을 변경한 요청' : '정상 처리 경로의 요청'));
-      const overview = '<div class="banner ' + (sf.blocked?'error':(fb.occurred?'warn':'')) + '"><strong style="font-size:15px">' + escapeHTML(headline) + '</strong><div class="muted" style="font-size:11px;margin-top:4px">요청 ' + escapeHTML(x.request_id||'') + ' · ' + escapeHTML(x.created_at||'') + '</div></div>' +
+      const overview = '<div class="banner ' + (sf.blocked?'error':(fb.occurred?'warn':'')) + '"><strong style="font-size:15px">' + escapeHTML(headline) + '</strong><div class="muted" style="font-size:11px;margin-top:4px">요청 ' + escapeHTML(x.request_id||'') + ' · ' + timeCell(x.created_at||'') + '</div></div>' +
         '<div class="kpis" style="margin-top:10px">' + kpi('선택 경로',escapeHTML((rt.chosen_provider||'-')+' / '+(rt.chosen_model||'-'))) + kpi('복잡도',fmt(rt.complexity||0)+'/100') + kpi('위험도','<span class="status '+((rt.risk_score||0)>=60?'warn':'')+'">'+fmt(rt.risk_score||0)+'/100</span>') + kpi('실제 비용',money(co.actual_krw||0)) + kpi('거버넌스 신호',fmt(signals)) + '</div>' +
         '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px"><button class="secondary" type="button" onclick="closeModal();location.hash=\'#/xview\'">전체 분포에서 보기</button><button class="secondary" type="button" onclick="closeModal();openRequestDetail(\'' + escapeAttr(x.request_id) + '\')">요청 원문 보기</button>' + (se.session_id?'<button class="secondary" type="button" onclick="closeModal();openWaterfall(\''+escapeAttr(se.session_id)+'\')">세션 Waterfall</button>':'') + '</div>';
 
@@ -3320,7 +3385,7 @@ const adminHTML = `<!doctype html>
           if (e.code_risk) flags.push('<span class="status ' + (e.code_risk === 'high' ? 'error' : (e.code_risk === 'medium' ? 'warn' : '')) + '" style="font-size:9px" title="코드 위험">⚠' + escapeHTML(e.code_risk) + '</span>');
           return '<tr>' +
           '<td>' + (i + 1) + '</td>' +
-          '<td>' + escapeHTML(e.created_at || '') + '</td>' +
+          '<td>' + timeCell(e.created_at || '') + '</td>' +
           '<td><span class="status" style="font-size:9px">' + escapeHTML(e.kind || '') + '</span></td>' +
           '<td>' + escapeHTML(e.model || '') + '<div class="muted" style="font-size:10px">' + escapeHTML(e.provider || '') + '</div></td>' +
           '<td style="max-width:220px;font-size:11px">' + sessionLastMessageCell(e.last_message) + '</td>' +
@@ -3411,7 +3476,7 @@ const adminHTML = `<!doctype html>
     function costAllocationPanel() {
       const dims = [['project', '프로젝트'], ['repo', '저장소'], ['branch', '브랜치'], ['cost_center', '예산코드'], ['service', '서비스'], ['model', '모델']];
       const btns = dims.map(d => '<button type="button" class="' + (d[0] === allocDim ? '' : 'secondary') + '" data-alloc="' + d[0] + '">' + d[1] + '</button>').join('');
-      return '<div class="toolbar">' + btns + '</div><div id="allocBody"><div class="empty">불러오는 중…</div></div>';
+      return '<div class="toolbar">' + btns + '</div><div id="allocBody"><div class="loading">불러오는 중…</div></div>';
     }
     function allocationTable(rows) {
       if (!rows.length) return '<div class="empty">데이터 없음 — 클라이언트가 X-Vibe-Repo / X-Vibe-Project / X-Vibe-Cost-Center 헤더를 보내면 집계됩니다.</div>';
@@ -4541,7 +4606,7 @@ const adminHTML = `<!doctype html>
         row('오류율', pct(errorRate || 0)) +
         row('평가 실패율', pct(evalRate || 0)) +
         row('첫 시각', escapeHTML(item.first_seen || '')) +
-        row('최근 시각', escapeHTML(item.last_seen || '')) +
+        row('최근 시각', timeCell(item.last_seen || '')) +
       '</div></div>';
     }
 
@@ -4770,7 +4835,7 @@ const adminHTML = `<!doctype html>
           '<button id="note-save" type="button" data-id="' + escapeHTML(id) + '">저장</button>' +
           '<button id="note-clear" type="button" class="ghost" data-id="' + escapeHTML(id) + '">태그·메모 삭제</button>' +
           '<button id="note-replay" type="button" class="secondary" data-id="' + escapeHTML(id) + '" title="원본 body 가 보관된 경우 동일한 요청을 다시 실행합니다 (LOG_RAW_BODIES=true 필요)">동일 요청 재실행</button>' +
-          (note.updated_at ? '<span class="muted" style="margin-left:auto; align-self:center">최근 변경 ' + escapeHTML(note.updated_at) + ' by ' + escapeHTML(note.created_by || '') + '</span>' : '') +
+          (note.updated_at ? '<span class="muted" style="margin-left:auto; align-self:center">최근 변경 ' + timeCell(note.updated_at) + ' by ' + escapeHTML(note.created_by || '') + '</span>' : '') +
         '</div>' +
         '<pre id="replay-output" class="prompt-block" style="display:none; margin-top:10px; max-height:240px; overflow:auto"></pre>' +
       '</div></section>';
@@ -5089,7 +5154,7 @@ const adminHTML = `<!doctype html>
         '<div class="kv">' +
           row('요청 ID', escapeHTML(r.id)) +
           row('Trace ID', escapeHTML(r.trace_id)) +
-          row('생성 시각', escapeHTML(r.created_at) + ' · ' + ago(r.created_at)) +
+          row('생성 시각', timeCell(r.created_at) + ' · ' + ago(r.created_at)) +
           row('상태', statusBadge(r.status_code)) +
           row('지연', escapeHTML(latencyLabel(r))) +
           row('endpoint', escapeHTML(r.endpoint)) +
@@ -5142,7 +5207,7 @@ const adminHTML = `<!doctype html>
       view.innerHTML = section('세션 비행기록',
         '<div class="toolbar"><label class="muted">기간(일) <input id="sess-days" type="number" min="1" max="365" value="' + escapeAttr(days) + '" style="width:80px"></label>' +
         '<button type="button" id="sess-reload">조회</button></div>' +
-        '<div id="sessions-results"><div class="empty">불러오는 중...</div></div>');
+        '<div id="sessions-results"><div class="loading">불러오는 중...</div></div>');
       const load = async () => {
         const d = document.getElementById('sess-days').value.trim() || '7';
         sessionStorage.setItem('sessionsDays', d);
@@ -5173,7 +5238,7 @@ const adminHTML = `<!doctype html>
     // Red Team Automation — registered upstream targets only, safe probe packs, dry-run first.
     async function renderRedTeamView() {
       const view = document.getElementById('view');
-      view.innerHTML = section('레드팀 자동화', '<div class="empty">불러오는 중...</div>');
+      view.innerHTML = section('레드팀 자동화', '<div class="loading">불러오는 중...</div>');
       let targets = {}, packs = {}, campaigns = {}, runs = {}, baselines = {}, rems = {}, dash = {}, kill = {}, schedules = {};
       try {
         [targets, packs, campaigns, runs, baselines, rems, dash, kill, schedules] = await Promise.all([
@@ -5630,7 +5695,7 @@ const adminHTML = `<!doctype html>
         };
         const startPoll = () => { polling = true; pollProgress(); progressTimer = setInterval(pollProgress, 1500); };
         const stopPoll = () => { polling = false; if (progressTimer) { clearInterval(progressTimer); progressTimer = null; } };
-        openModal('캠페인 실행 중…', '<p class="muted" style="font-size:12px">대상에 프로브를 실행하고 있습니다. 완료되면 요약이 표시됩니다.</p><div id="rt-live"><div class="empty">집계 중…</div></div>');
+        openModal('캠페인 실행 중…', '<p class="muted" style="font-size:12px">대상에 프로브를 실행하고 있습니다. 완료되면 요약이 표시됩니다.</p><div id="rt-live"><div class="loading">집계 중…</div></div>');
         startPoll();
         let d;
         try {
@@ -5641,7 +5706,7 @@ const adminHTML = `<!doctype html>
             if (String(err.message || '').indexOf('requires approval') >= 0) {
               stopPoll();
               if (!window.confirm('이 캠페인은 고위험 팩을 포함해 승인이 필요합니다. 지금 승인하고 실행할까요?')) { await renderRedTeamView(); return; }
-              openModal('캠페인 실행 중…', '<p class="muted" style="font-size:12px">승인 후 실행 중…</p><div id="rt-live"><div class="empty">집계 중…</div></div>');
+              openModal('캠페인 실행 중…', '<p class="muted" style="font-size:12px">승인 후 실행 중…</p><div id="rt-live"><div class="loading">집계 중…</div></div>');
               startPoll();
               await api('/admin/redteam/campaigns/' + encodeURIComponent(id) + '/approve', { method: 'POST' });
               d = await api(runURL, { method: 'POST', body });
@@ -6051,7 +6116,7 @@ const adminHTML = `<!doctype html>
     let agentEditId = '';
     async function renderAgentRoutesView() {
       const view = document.getElementById('view');
-      view.innerHTML = section('에이전트 라우트', '<div class="empty">불러오는 중...</div>');
+      view.innerHTML = section('에이전트 라우트', '<div class="loading">불러오는 중...</div>');
       let routes = {}, providers = {}, mcp = {};
       try {
         [routes, providers, mcp] = await Promise.all([
@@ -6218,7 +6283,7 @@ const adminHTML = `<!doctype html>
     window.agentRouteTest = async (id, model) => {
       const p = window.prompt('테스트 프롬프트를 입력하세요.\n(이 라우트의 프로바이더/MCP로 실제 1회 호출합니다)', '사용 가능한 도구를 하나 골라 실제로 호출하고 결과를 요약해줘.');
       if (p === null) return;
-      openModal('에이전트 테스트 — ' + escapeHTML(model), '<div class="empty">실행 중… (도구 호출이 있으면 다소 걸릴 수 있습니다)</div>');
+      openModal('에이전트 테스트 — ' + escapeHTML(model), '<div class="loading">실행 중… (도구 호출이 있으면 다소 걸릴 수 있습니다)</div>');
       try {
         const d = await api('/admin/agent-routes/' + encodeURIComponent(id) + '/test', { method: 'POST', body: JSON.stringify({ prompt: p }) });
         const html =
@@ -6262,7 +6327,7 @@ const adminHTML = `<!doctype html>
     // AI 자산 SBOM — 스킬·워크플로·앱·모델계약·프롬프트 자산의 소유권/의존성 명세 + 거버넌스 공백.
     async function renderSBOMView() {
       const view = document.getElementById('view');
-      view.innerHTML = section('AI 자산 SBOM', '<div class="empty">불러오는 중...</div>');
+      view.innerHTML = section('AI 자산 SBOM', '<div class="loading">불러오는 중...</div>');
       let d;
       try { d = await api('/admin/sbom'); }
       catch (e) { view.innerHTML = section('AI 자산 SBOM', '<div class="card-body" style="padding:16px"><p class="muted">' + escapeHTML(e.message) + '</p></div>'); return; }
@@ -6301,7 +6366,7 @@ const adminHTML = `<!doctype html>
     // AI 업무성과 — repo별 AI 사용량 vs 개발 산출(commit/MR) 상관.
     async function renderProductivityView() {
       const view = document.getElementById('view');
-      view.innerHTML = section('AI 업무성과', '<div class="empty">불러오는 중...</div>');
+      view.innerHTML = section('AI 업무성과', '<div class="loading">불러오는 중...</div>');
       let d;
       try { d = await api('/admin/productivity?days=30'); }
       catch (e) { view.innerHTML = section('AI 업무성과', '<div class="card-body" style="padding:16px"><p class="muted">' + escapeHTML(e.message) + '</p></div>'); return; }
@@ -6345,7 +6410,7 @@ const adminHTML = `<!doctype html>
       const load = async (dimension) => {
         sessionStorage.setItem('privacyDim', dimension);
         const host = document.getElementById('pl-results');
-        host.innerHTML = '<div class="empty">불러오는 중...</div>';
+        host.innerHTML = '<div class="loading">불러오는 중...</div>';
         try { host.innerHTML = await render(await api('/admin/privacy-ledger?dimension=' + dimension + '&days=30')); }
         catch (e) { host.innerHTML = '<span class="status error">' + escapeHTML(e.message) + '</span>'; }
       };
@@ -6373,7 +6438,7 @@ const adminHTML = `<!doctype html>
     // 파드 운영 맵 — 멀티 파드 하트비트·빌드·런타임 설정 수렴 상태.
     async function renderPodsView() {
       const view = document.getElementById('view');
-      view.innerHTML = section('파드 운영 맵', '<div class="empty">불러오는 중...</div>');
+      view.innerHTML = section('파드 운영 맵', '<div class="loading">불러오는 중...</div>');
       let d;
       try { d = await api('/admin/pods'); }
       catch (e) { view.innerHTML = section('파드 운영 맵', '<div class="card-body" style="padding:16px"><p class="muted">' + escapeHTML(e.message) + '</p></div>'); return; }
@@ -6408,7 +6473,7 @@ const adminHTML = `<!doctype html>
         const key = document.getElementById('jp-key').value.trim();
         const host = document.getElementById('jp-results');
         if (!key) { host.innerHTML = '<span class="status warn">Proxy API Key를 입력하세요.</span>'; return; }
-        host.innerHTML = '<div class="empty">점검 중...</div>';
+        host.innerHTML = '<div class="loading">점검 중...</div>';
         try {
           const d = await api('/admin/journey-probe', { method: 'POST', body: JSON.stringify({ proxy_key: key }) });
           const sm = d.summary || {};
@@ -6549,7 +6614,7 @@ const adminHTML = `<!doctype html>
         const prompts = (x.prompts || []).map(p => '<div class="prompt-block"><div class="prompt-role">' + escapeHTML(p.role) + '</div>' + escapeHTML(p.redacted_text || p.content_text || '') + '</div>').join('<div style="height:6px"></div>') || '<div class="empty">프롬프트 없음</div>';
         return '<div><h3 style="margin-top:0">' + label + '</h3><div class="kv">' +
           row('요청 ID', escapeHTML(r.id)) +
-          row('생성', escapeHTML(r.created_at)) +
+          row('생성', timeCell(r.created_at)) +
           row('모델', escapeHTML(r.model || '')) +
           row('상태', statusBadge(r.status_code)) +
           row('지연', escapeHTML(latencyLabel(r))) +
@@ -6892,7 +6957,7 @@ const adminHTML = `<!doctype html>
     };
 
     window.openAssetDetail = async (id) => {
-      openModal('자산 상세 — ' + id, '<div class="empty">불러오는 중...</div>');
+      openModal('자산 상세 — ' + id, '<div class="loading">불러오는 중...</div>');
       try {
         const [resp, histResp, usageResp] = await Promise.all([
           api('/admin/prompt-assets?q=' + encodeURIComponent(id)),
@@ -7092,7 +7157,7 @@ const adminHTML = `<!doctype html>
 
     // A/B 성과 비교: pick two assets, show success rate / cost / latency side-by-side.
     window.openAssetCompare = async () => {
-      openModal('A/B 성과 비교', '<div class="empty">불러오는 중...</div>');
+      openModal('A/B 성과 비교', '<div class="loading">불러오는 중...</div>');
       const resp = await api('/admin/prompt-assets');
       const assets = (resp.assets || []).slice().sort((x,y)=> (x.name||'').localeCompare(y.name||''));
       if (assets.length < 2) { openModal('A/B 성과 비교', '<div class="empty">비교하려면 자산이 2개 이상 필요합니다.</div>'); return; }
@@ -7800,7 +7865,7 @@ const adminHTML = `<!doctype html>
           '<label class="muted" style="display:flex; align-items:center; gap:6px">threshold <input id="routing-health-threshold" type="number" min="0" max="100" value="' + threshold + '" style="width:86px"></label>' +
           '<button type="submit">적용</button>' +
           '<button type="button" class="secondary" onclick="route()">새로고침</button>' +
-          '<span class="muted" style="margin-left:auto">since ' + escapeHTML(resp.since || '') + ' · until ' + escapeHTML(resp.until || '') + '</span>' +
+          '<span class="muted" style="margin-left:auto">since ' + timeExact(resp.since || '') + ' · until ' + timeExact(resp.until || '') + '</span>' +
         '</form>';
       const healthVisual = '<div class="card-body"><div class="viz-grid" style="margin-top:0"><div class="viz-panel"><div class="viz-title">Provider 건전성 <small>threshold ' + threshold + '</small></div>' + donutVisual(providers.length ? (providers.length-degraded.length)/providers.length*100 : 0, (providers.length-degraded.length)+'/'+providers.length, '정상 provider', [{label:'정상',value:providers.length-degraded.length},{label:'degraded',value:degraded.length}]) + '</div><div class="viz-panel"><div class="viz-title">Health 순위 <small>점수</small></div>' + visualBars(ranking.map(x=>({label:x.provider,value:x.score||0})), v=>Math.round(v)+'점', true) + '</div></div></div>';
       document.getElementById('view').innerHTML =
@@ -7997,7 +8062,7 @@ const adminHTML = `<!doctype html>
           const cells = providers.length ? providers.map(p =>
             '<span class="pill" style="margin:0 6px 6px 0">' + escapeHTML(p.provider || '') + ' <span class="status ' + healthStatusClass(p.score || 0, threshold) + '" style="margin-left:4px">' + fmt(p.score || 0) + '</span></span>'
           ).join('') : '<span class="muted">no traffic</span>';
-          return '<tr><td><strong>' + escapeHTML(bucketLabel(b.since, b.until)) + '</strong><div class="muted">' + escapeHTML((b.since || '').replace('T',' ').replace('Z','')) + ' ~ ' + escapeHTML((b.until || '').replace('T',' ').replace('Z','')) + '</div></td><td>' + cells + '</td></tr>';
+          return '<tr><td><strong>' + escapeHTML(bucketLabel(b.since, b.until)) + '</strong><div class="muted">' + timeExact(b.since) + ' ~ ' + timeExact(b.until) + '</div></td><td>' + cells + '</td></tr>';
         }).join('') + '</tbody></table>';
     }
     function bucketLabel(since, until) {
@@ -8129,7 +8194,7 @@ const adminHTML = `<!doctype html>
     };
     async function renderCapabilities() {
       const view = document.getElementById('view');
-      view.innerHTML = section('기능 맵', '<div class="empty">불러오는 중...</div>');
+      view.innerHTML = section('기능 맵', '<div class="loading">불러오는 중...</div>');
       let d;
       try { d = await api('/admin/capabilities'); }
       catch (e) { view.innerHTML = section('기능 맵', '<div class="card-body" style="padding:16px"><p class="muted">' + escapeHTML(e.message) + '</p></div>'); return; }
@@ -8175,7 +8240,7 @@ const adminHTML = `<!doctype html>
     // ---------- AI Gateway 운영 홈: 오늘 봐야 할 것 ----------
     async function renderOpsHome() {
       const view = document.getElementById('view');
-      view.innerHTML = section('운영 홈', '<div class="empty">불러오는 중...</div>');
+      view.innerHTML = section('운영 홈', '<div class="loading">불러오는 중...</div>');
       let d;
       try { d = await api('/admin/ops/home'); }
       catch (e) { view.innerHTML = section('운영 홈', '<div class="card-body" style="padding:16px"><p class="muted">' + escapeHTML(e.message) + '</p></div>'); return; }
@@ -8242,7 +8307,7 @@ const adminHTML = `<!doctype html>
     // Upgrade Preflight — 배포 전/후 점검(DB·마이그레이션·OpenAPI·설정).
     window.opsPreflight = async () => {
       const host = document.getElementById('ops-preflight');
-      if (host) host.innerHTML = '<div class="empty">점검 중...</div>';
+      if (host) host.innerHTML = '<div class="loading">점검 중...</div>';
       try {
         const d = await api('/admin/ops/preflight');
         const sBadge = (st) => st === 'fail' ? '<span class="status error">실패</span>' : (st === 'warn' ? '<span class="status warn">주의</span>' : '<span class="status">정상</span>');
@@ -8257,7 +8322,7 @@ const adminHTML = `<!doctype html>
     // ---------- DW Metric Catalog: 표준 지표 사전 ----------
     async function renderDWMetrics() {
       const view = document.getElementById('view');
-      view.innerHTML = section('지표 사전', '<div class="empty">불러오는 중...</div>');
+      view.innerHTML = section('지표 사전', '<div class="loading">불러오는 중...</div>');
       let d;
       try { d = await api('/admin/dw/metrics'); }
       catch (e) { view.innerHTML = section('지표 사전', '<div class="card-body" style="padding:16px"><p class="muted">' + escapeHTML(e.message) + '</p></div>'); return; }
@@ -8329,7 +8394,7 @@ const adminHTML = `<!doctype html>
     };
     async function renderChangeSets() {
       const view = document.getElementById('view');
-      view.innerHTML = section('변경 세트', '<div class="empty">불러오는 중...</div>');
+      view.innerHTML = section('변경 세트', '<div class="loading">불러오는 중...</div>');
       let d;
       try { d = await api('/admin/change-sets'); }
       catch (e) { view.innerHTML = section('변경 세트', '<div class="card-body" style="padding:16px"><p class="muted">' + escapeHTML(e.message) + '</p></div>'); return; }
@@ -8453,7 +8518,7 @@ const adminHTML = `<!doctype html>
     // ---------- AI 업무 앱: Skill/Prompt Product/Text2SQL/MCP/모델 묶음 ----------
     async function renderWorkApps() {
       const view = document.getElementById('view');
-      view.innerHTML = section('AI 업무 앱', '<div class="empty">불러오는 중...</div>');
+      view.innerHTML = section('AI 업무 앱', '<div class="loading">불러오는 중...</div>');
       let d;
       try { d = await api('/admin/apps'); }
       catch (e) { view.innerHTML = section('AI 업무 앱', '<div class="card-body" style="padding:16px"><p class="muted">' + escapeHTML(e.message) + '</p></div>'); return; }
@@ -8617,7 +8682,7 @@ const adminHTML = `<!doctype html>
     // ---------- Prompt Lab: experiments + test cases + rubrics/contracts ----------
     async function renderPromptLab(params) {
       const view = document.getElementById('view');
-      view.innerHTML = section('Prompt Lab', '<div class="empty">불러오는 중...</div>');
+      view.innerHTML = section('Prompt Lab', '<div class="loading">불러오는 중...</div>');
       const expId = (params && params.get && params.get('exp')) || '';
       if (expId) { await plRenderExperiment(expId); return; }
       let d, contracts, rubrics;
@@ -8739,7 +8804,7 @@ const adminHTML = `<!doctype html>
     };
     window.plRunCase = async (id) => {
       const host = document.getElementById('pl-run-' + id);
-      if (host) host.innerHTML = '<div class="empty">실행 중...</div>';
+      if (host) host.innerHTML = '<div class="loading">실행 중...</div>';
       try {
         const d = await api('/admin/prompt-lab/test-cases/' + encodeURIComponent(id) + '/run', { method: 'POST', body: '{}' });
         const won = (v) => '₩' + fmt(Math.round(v || 0));
@@ -9746,7 +9811,7 @@ const adminHTML = `<!doctype html>
       const host = document.getElementById('mm-diff');
       if (!runId || !host) return;
       if (host.innerHTML.trim()) { host.innerHTML = ''; return; } // toggle off
-      host.innerHTML = '<div class="empty">Diff 계산 중...</div>';
+      host.innerHTML = '<div class="loading">Diff 계산 중...</div>';
       try {
         const d = await api('/admin/chat-test/multi-run/runs/' + encodeURIComponent(runId) + '/diff');
         const blk = (b) => '<div style="font-size:11px;margin:2px 0"><span class="status" style="font-size:9px">' + escapeHTML(b.type) + '</span> ' + escapeHTML(b.preview) + '</div>';
@@ -9785,7 +9850,7 @@ const adminHTML = `<!doctype html>
       const host = document.getElementById('mm-codeverify');
       if (!runId || !host) return;
       if (host.innerHTML.trim()) { host.innerHTML = ''; return; } // toggle off
-      host.innerHTML = '<div class="empty">코드 검증 중...</div>';
+      host.innerHTML = '<div class="loading">코드 검증 중...</div>';
       try {
         const d = await api('/admin/chat-test/multi-run/runs/' + encodeURIComponent(runId) + '/code-verify');
         const rcls = (r) => r === 'high' ? 'error' : (r === 'medium' ? 'warn' : '');
@@ -9850,7 +9915,7 @@ const adminHTML = `<!doctype html>
     window.mmLoadHistory = async () => {
       const host = document.getElementById('mm-history');
       if (!host) return;
-      host.innerHTML = '<div class="empty">불러오는 중...</div>';
+      host.innerHTML = '<div class="loading">불러오는 중...</div>';
       try {
         const r = await api('/admin/chat-test/multi-run/runs?limit=20');
         const runs = r.runs || [];
@@ -10728,7 +10793,7 @@ const adminHTML = `<!doctype html>
     async function runMCPRouteExplain(runTest) {
       const host = document.getElementById('mcp-route-explain-result');
       const payload = mcpExplainPayloadFromForm();
-      host.innerHTML = '<div class="empty">확인 중...</div>';
+      host.innerHTML = '<div class="loading">확인 중...</div>';
       try {
         const explain = await api('/admin/mcp/route/explain', { method: 'POST', body: JSON.stringify(payload) });
         let html = mcpExplainHTML(explain);
@@ -10774,7 +10839,7 @@ const adminHTML = `<!doctype html>
       }
     };
     window.showMCPUpstreamFlow = async (id) => {
-      openModal('MCP Upstream Flow — ' + id, '<div class="empty">조회 중...</div>');
+      openModal('MCP Upstream Flow — ' + id, '<div class="loading">조회 중...</div>');
       try {
         const d = await api('/admin/mcp/upstreams/' + encodeURIComponent(id) + '/flow');
         const steps = d.steps || [];
@@ -10891,7 +10956,7 @@ const adminHTML = `<!doctype html>
       }
     };
     window.openMCPRequestWaterfall = async (id) => {
-      openModal('MCP Waterfall — ' + id, '<div class="empty">조회 중...</div>');
+      openModal('MCP Waterfall — ' + id, '<div class="loading">조회 중...</div>');
       try {
         const d = await api('/admin/mcp/requests/' + encodeURIComponent(id) + '/waterfall');
         const steps = d.steps || [];
@@ -10957,7 +11022,7 @@ const adminHTML = `<!doctype html>
     window.showMCPFlowForRequest = async (id) => {
       const graph = document.getElementById('mcp-flow-graph');
       if (!graph) { await window.openMCPRequestWaterfall(id); return; }
-      graph.innerHTML = '<div class="empty">흐름 분석 중...</div>';
+      graph.innerHTML = '<div class="loading">흐름 분석 중...</div>';
       try {
         const d = await api('/admin/mcp/requests/' + encodeURIComponent(id) + '/waterfall');
         graph.innerHTML =
@@ -11014,7 +11079,7 @@ const adminHTML = `<!doctype html>
           ? '<span class="status error">정지 중</span>'
           : '<span class="status">정상 운영</span>') +
         row('사유', escapeHTML(kill.reason || '')) +
-        row('변경 시각', kill.updated_at ? (ago(kill.updated_at) + ' <span class="muted">(' + escapeHTML(kill.updated_at) + ')</span>') : '<span class="muted">-</span>') +
+        row('변경 시각', kill.updated_at ? (ago(kill.updated_at) + ' <span class="muted">(' + timeCell(kill.updated_at) + ')</span>') : '<span class="muted">-</span>') +
         row('변경자', escapeHTML(kill.updated_by || '')) +
         '</div>' +
         '<div style="margin-top:12px; display:flex; gap:8px; align-items:center">' +
@@ -11315,7 +11380,7 @@ const adminHTML = `<!doctype html>
     async function refreshApprovals(event) {
       if (event && event.preventDefault) event.preventDefault();
       const host = document.getElementById('approval-results');
-      host.innerHTML = '<div class="empty">조회 중...</div>';
+      host.innerHTML = '<div class="loading">조회 중...</div>';
       try {
         const data = await api('/admin/approvals?' + approvalQueryFromForm().toString());
         host.innerHTML = approvalQueueTable(data.approvals || [], data);
@@ -11329,7 +11394,7 @@ const adminHTML = `<!doctype html>
       const filters = (payload || {}).filters || {};
       const since = filters.since || '';
       const meta = '<div class="muted" style="padding:10px 12px; font-size:12px">' +
-        '조회 결과 ' + fmt(count) + '건' + (since ? ' · since ' + escapeHTML(since) : '') +
+        '조회 결과 ' + fmt(count) + '건' + (since ? ' · since ' + timeExact(since) : '') +
         ' · 승인 ID나 요청 ID로 좁힌 뒤 XView를 열 수 있습니다.' +
       '</div>';
       if (!rows.length) return meta + '<div class="empty">승인 항목 없음</div>';
@@ -11347,7 +11412,7 @@ const adminHTML = `<!doctype html>
           '</td>' +
           '<td data-num="' + (a.risk_score || 0) + '">risk ' + fmt(a.risk_score || 0) + '<div class="muted">' + money(a.cost_krw || 0) + '</div></td>' +
           '<td>' + escapeHTML(a.reason || '') + (payload.detail ? '<div class="muted">' + escapeHTML(payload.detail) + '</div>' : '') + '</td>' +
-          '<td>' + (a.expires_at ? ago(a.expires_at) + '<div class="muted">' + escapeHTML(a.expires_at) + '</div>' : '<span class="muted">-</span>') + '</td>' +
+          '<td>' + (a.expires_at ? ago(a.expires_at) + '<div class="muted">' + timeExact(a.expires_at) + '</div>' : '<span class="muted">-</span>') + '</td>' +
           '<td>' + (a.status === 'pending'
             ? '<button type="button" onclick="decideApproval(\'' + escapeAttr(a.id) + '\',\'approve\')">승인</button> ' +
               '<button class="danger" type="button" onclick="decideApproval(\'' + escapeAttr(a.id) + '\',\'reject\')">거절</button>'
@@ -11524,7 +11589,7 @@ const adminHTML = `<!doctype html>
     };
     window.runPolicyRegression = async () => {
       const host = document.getElementById('preg-run-result');
-      if (host) host.innerHTML = '<div class="empty">실행 중...</div>';
+      if (host) host.innerHTML = '<div class="loading">실행 중...</div>';
       try {
         const d = await api('/admin/policies/regression/run', { method: 'POST', body: '{}' });
         const results = d.results || [];
@@ -11563,7 +11628,7 @@ const adminHTML = `<!doctype html>
     async function refreshSecretEvents(event) {
       event.preventDefault();
       const host = document.getElementById('secret-event-results');
-      host.innerHTML = '<div class="empty">조회 중...</div>';
+      host.innerHTML = '<div class="loading">조회 중...</div>';
       try {
         const data = await api('/admin/security/secrets?' + secretEventQueryFromForm().toString());
         host.innerHTML = secretEventTable(data.secret_events || [], data);
@@ -11577,7 +11642,7 @@ const adminHTML = `<!doctype html>
       const filters = (payload || {}).filters || {};
       const since = filters.since || '';
       const meta = '<div class="muted" style="padding:10px 12px; font-size:12px">' +
-        '조회 결과 ' + fmt(count) + '건' + (since ? ' · since ' + escapeHTML(since) : '') +
+        '조회 결과 ' + fmt(count) + '건' + (since ? ' · since ' + timeExact(since) : '') +
         ' · Secret 값은 저장하지 않고 hash와 유형만 기록합니다.' +
       '</div>';
       if (!rows.length) return meta + '<div class="empty">Secret Firewall 이벤트 없음</div>';
@@ -11620,7 +11685,7 @@ const adminHTML = `<!doctype html>
     async function refreshPolicyDecisionEvents(event) {
       event.preventDefault();
       const host = document.getElementById('policy-decision-results');
-      host.innerHTML = '<div class="empty">조회 중...</div>';
+      host.innerHTML = '<div class="loading">조회 중...</div>';
       try {
         const data = await api('/admin/policies/decisions?' + policyDecisionQueryFromForm().toString());
         host.innerHTML = policyDecisionTable(data.policy_decisions || [], data);
@@ -11633,7 +11698,7 @@ const adminHTML = `<!doctype html>
       const count = Number((payload || {}).count ?? rows.length);
       const since = ((payload || {}).filters || {}).since || '';
       const meta = '<div class="muted" style="padding:10px 12px; font-size:12px">' +
-        '조회 결과 ' + fmt(count) + '건' + (since ? ' · since ' + escapeHTML(since) : '') +
+        '조회 결과 ' + fmt(count) + '건' + (since ? ' · since ' + timeExact(since) : '') +
         ' · 행의 요청 링크를 열면 XView 설명으로 이동합니다.' +
       '</div>';
       if (!rows.length) return meta + '<div class="empty">정책 판단 이벤트 없음</div>';
@@ -11922,7 +11987,7 @@ const adminHTML = `<!doctype html>
         snaps.map(s => {
           let parsed = {};
           try { parsed = JSON.parse(s.profile || '{}'); } catch (e) { parsed = {}; }
-          return '<tr><td>' + escapeHTML(s.created_at) + '</td><td>' + fmt(parsed.requests || 0) + '</td>' +
+          return '<tr><td>' + timeCell(s.created_at) + '</td><td>' + fmt(parsed.requests || 0) + '</td>' +
             '<td>' + fmt(Math.round(parsed.total_cost_krw || 0)) + '</td><td>' + pctText(parsed.success_rate) + '</td></tr>';
         }).join('') + '</tbody></table>'
       ) : '<p class="muted" style="margin-top:16px">스냅샷이 없습니다.</p>';
@@ -11964,7 +12029,7 @@ const adminHTML = `<!doctype html>
     // risky MCP tools, and pending approvals — no cost detail, no prompt originals.
     async function renderSecurityHome() {
       const view = document.getElementById('view');
-      view.innerHTML = section('보안 대시보드', '<div class="empty">불러오는 중...</div>');
+      view.innerHTML = section('보안 대시보드', '<div class="loading">불러오는 중...</div>');
       let d;
       try { d = await api('/security/dashboard'); }
       catch (e) { view.innerHTML = section('보안 대시보드', '<div class="card-body" style="padding:16px"><p class="muted">불러올 수 없습니다(security:read 권한 필요). 상세: ' + escapeHTML(e.message) + '</p></div>'); return; }
@@ -12021,7 +12086,7 @@ const adminHTML = `<!doctype html>
     // model-migration savings — no prompt originals, no security policy editing.
     async function renderBillingHome() {
       const view = document.getElementById('view');
-      view.innerHTML = section('비용 대시보드', '<div class="empty">불러오는 중...</div>');
+      view.innerHTML = section('비용 대시보드', '<div class="loading">불러오는 중...</div>');
       let d;
       try { d = await api('/billing/dashboard'); }
       catch (e) { view.innerHTML = section('비용 대시보드', '<div class="card-body" style="padding:16px"><p class="muted">불러올 수 없습니다(admin:read 권한 필요). 상세: ' + escapeHTML(e.message) + '</p></div>'); return; }
@@ -12064,7 +12129,7 @@ const adminHTML = `<!doctype html>
     // model mix, and recent failures — scoped to their team only.
     async function renderTeamHome() {
       const view = document.getElementById('view');
-      view.innerHTML = section('팀 대시보드', '<div class="empty">불러오는 중...</div>');
+      view.innerHTML = section('팀 대시보드', '<div class="loading">불러오는 중...</div>');
       let resp;
       try { resp = await api('/team/dashboard'); }
       catch (e) {
@@ -12216,7 +12281,7 @@ const adminHTML = `<!doctype html>
     // team's API keys (no secrets), accessible skills, pending skill access requests, members.
     async function renderTeamPortal() {
       const view = document.getElementById('view');
-      view.innerHTML = section('팀 포털', '<div class="empty">불러오는 중...</div>');
+      view.innerHTML = section('팀 포털', '<div class="loading">불러오는 중...</div>');
       let d;
       try { d = await api('/team/portal'); }
       catch (e) {
@@ -12246,7 +12311,7 @@ const adminHTML = `<!doctype html>
       const keysCard = card('팀 API 키 (비밀값 비노출)',
         '<div class="card-body">' + (keys.length
           ? '<table><thead><tr><th>이름</th><th>소유자</th><th>역할</th><th>상태</th><th>만료</th></tr></thead><tbody>' +
-            keys.map(k => '<tr><td>' + escapeHTML(k.name || k.id) + '</td><td class="muted">' + escapeHTML(k.user_id || k.owner || '') + '</td><td>' + escapeHTML(k.role || '') + '</td><td>' + (k.status === 'active' ? '<span class="status">active</span>' : '<span class="status error">' + escapeHTML(k.status || '') + '</span>') + '</td><td class="muted">' + (k.expires_at ? escapeHTML(k.expires_at) : '-') + '</td></tr>').join('') + '</tbody></table>'
+            keys.map(k => '<tr><td>' + escapeHTML(k.name || k.id) + '</td><td class="muted">' + escapeHTML(k.user_id || k.owner || '') + '</td><td>' + escapeHTML(k.role || '') + '</td><td>' + (k.status === 'active' ? '<span class="status">active</span>' : '<span class="status error">' + escapeHTML(k.status || '') + '</span>') + '</td><td class="muted">' + (k.expires_at ? timeExact(k.expires_at) : '-') + '</td></tr>').join('') + '</tbody></table>'
           : '<p class="muted">팀에 등록된 API 키가 없습니다.</p>') + '</div>');
 
       const skills = d.accessible_skills || [];
@@ -12278,7 +12343,7 @@ const adminHTML = `<!doctype html>
     // products (from miner candidates or manually), and triage access requests.
     async function renderDataProducts() {
       const view = document.getElementById('view');
-      view.innerHTML = section('데이터 상품', '<div class="empty">불러오는 중...</div>');
+      view.innerHTML = section('데이터 상품', '<div class="loading">불러오는 중...</div>');
       let prods, cands, reqs;
       try {
         prods = await api('/admin/data-products');
@@ -12385,7 +12450,7 @@ const adminHTML = `<!doctype html>
     // candidates with dry-run/impact; admin can apply (approval) with audit + rollback.
     async function renderRemediation() {
       const view = document.getElementById('view');
-      view.innerHTML = section('자동 조치', '<div class="empty">불러오는 중...</div>');
+      view.innerHTML = section('자동 조치', '<div class="loading">불러오는 중...</div>');
       let d;
       const windowHours = Number(sessionStorage.getItem('remediationWindow') || 6);
       try { d = await api('/admin/remediation/playbooks?window=' + encodeURIComponent(windowHours + 'h')); }
@@ -12473,7 +12538,7 @@ const adminHTML = `<!doctype html>
     // renderTeamScorecard shows per-team AI maturity scores (cost/quality/safety dimensions).
     async function renderTeamScorecard() {
       const view = document.getElementById('view');
-      view.innerHTML = section('팀 성숙도', '<div class="empty">불러오는 중...</div>');
+      view.innerHTML = section('팀 성숙도', '<div class="loading">불러오는 중...</div>');
       let d;
       try { d = await api('/admin/teams/scorecard?window=30d'); }
       catch (e) { view.innerHTML = section('팀 성숙도', '<div class="card-body" style="padding:16px"><p class="muted">' + escapeHTML(e.message) + '</p></div>'); return; }
@@ -12522,7 +12587,7 @@ const adminHTML = `<!doctype html>
     // against them before adoption (model swap / auto-routing / MCP agentic model).
     async function renderModelContracts() {
       const view = document.getElementById('view');
-      view.innerHTML = section('모델 계약', '<div class="empty">불러오는 중...</div>');
+      view.innerHTML = section('모델 계약', '<div class="loading">불러오는 중...</div>');
       let d;
       try { d = await api('/admin/models/contracts'); }
       catch (e) { view.innerHTML = section('모델 계약', '<div class="card-body" style="padding:16px"><p class="muted">' + escapeHTML(e.message) + '</p></div>'); return; }
@@ -12550,7 +12615,7 @@ const adminHTML = `<!doctype html>
         const model = document.getElementById('mcon-run-model').value.trim();
         if (!model) { toast('검증할 모델명을 입력하세요.'); return; }
         const host = document.getElementById('mcon-run-result');
-        host.innerHTML = '<div class="empty">검증 중...</div>';
+        host.innerHTML = '<div class="loading">검증 중...</div>';
         try {
           const r = await api('/admin/models/contracts/run', { method: 'POST', body: JSON.stringify({ model }) });
           const vBadge = (v) => v === 'pass' ? '<span class="status">PASS</span>' : (v === 'warn' ? '<span class="status warn">WARN</span>' : (v === 'fail' ? '<span class="status error">FAIL</span>' : '<span class="muted">데이터없음</span>'));
@@ -12599,7 +12664,7 @@ const adminHTML = `<!doctype html>
     // creates a disabled draft policy for review in the policy screen.
     async function renderPolicyAdvisor() {
       const view = document.getElementById('view');
-      view.innerHTML = section('정책 어드바이저', '<div class="empty">분석 중...</div>');
+      view.innerHTML = section('정책 어드바이저', '<div class="loading">분석 중...</div>');
       let d;
       try { d = await api('/admin/policy-advisor/suggestions'); }
       catch (e) { view.innerHTML = section('정책 어드바이저', '<div class="card-body" style="padding:16px"><p class="muted">' + escapeHTML(e.message) + '</p></div>'); return; }
@@ -12690,7 +12755,7 @@ const adminHTML = `<!doctype html>
     // renderNarrativeReport shows the auto-generated monthly operations report (prose sections).
     async function renderNarrativeReport() {
       const view = document.getElementById('view');
-      view.innerHTML = section('운영 보고서', '<div class="empty">생성 중...</div>');
+      view.innerHTML = section('운영 보고서', '<div class="loading">생성 중...</div>');
       let d;
       try { d = await api('/admin/reports/narrative?window=30d'); }
       catch (e) { view.innerHTML = section('운영 보고서', '<div class="card-body" style="padding:16px"><p class="muted">' + escapeHTML(e.message) + '</p></div>'); return; }
@@ -12722,7 +12787,7 @@ const adminHTML = `<!doctype html>
     // policies that govern them — the change blast radius.
     async function renderSkillGraph() {
       const view = document.getElementById('view');
-      view.innerHTML = section('Skill 의존성', '<div class="empty">불러오는 중...</div>');
+      view.innerHTML = section('Skill 의존성', '<div class="loading">불러오는 중...</div>');
       let d;
       try { d = await api('/admin/skills/dependency-graph'); }
       catch (e) { view.innerHTML = section('Skill 의존성', '<div class="card-body" style="padding:16px"><p class="muted">' + escapeHTML(e.message) + '</p></div>'); return; }
@@ -12749,7 +12814,7 @@ const adminHTML = `<!doctype html>
     async function renderChargeback() {
       const view = document.getElementById('view');
       const month = (window._chargebackMonth || '');
-      view.innerHTML = section('비용 배부 팩', '<div class="empty">불러오는 중...</div>');
+      view.innerHTML = section('비용 배부 팩', '<div class="loading">불러오는 중...</div>');
       let d;
       try { d = await api('/admin/cost/chargeback-pack' + (month ? '?month=' + encodeURIComponent(month) : '')); }
       catch (e) { view.innerHTML = section('비용 배부 팩', '<div class="card-body" style="padding:16px"><p class="muted">' + escapeHTML(e.message) + '</p></div>'); return; }
@@ -12790,7 +12855,7 @@ const adminHTML = `<!doctype html>
     // renderPromptDebt ranks recurring prompt clusters by accumulated "prompt debt".
     async function renderPromptDebt() {
       const view = document.getElementById('view');
-      view.innerHTML = section('프롬프트 부채', '<div class="empty">분석 중...</div>');
+      view.innerHTML = section('프롬프트 부채', '<div class="loading">분석 중...</div>');
       let d;
       try { d = await api('/admin/prompts/debt?window=30d'); }
       catch (e) { view.innerHTML = section('프롬프트 부채', '<div class="card-body" style="padding:16px"><p class="muted">' + escapeHTML(e.message) + '</p></div>'); return; }
@@ -12825,7 +12890,7 @@ const adminHTML = `<!doctype html>
     // renderAppTemplates shows the built-in AI work-app starter catalog with one-click instantiate.
     async function renderAppTemplates() {
       const view = document.getElementById('view');
-      view.innerHTML = section('앱 템플릿', '<div class="empty">불러오는 중...</div>');
+      view.innerHTML = section('앱 템플릿', '<div class="loading">불러오는 중...</div>');
       let d;
       try { d = await api('/admin/app-templates'); }
       catch (e) { view.innerHTML = section('앱 템플릿', '<div class="card-body" style="padding:16px"><p class="muted">' + escapeHTML(e.message) + '</p></div>'); return; }
@@ -12857,7 +12922,7 @@ const adminHTML = `<!doctype html>
     // renderGatewayMCP shows the AI Gateway MCP Server catalog + a copyable client config.
     async function renderGatewayMCP() {
       const view = document.getElementById('view');
-      view.innerHTML = section('Gateway MCP', '<div class="empty">불러오는 중...</div>');
+      view.innerHTML = section('Gateway MCP', '<div class="loading">불러오는 중...</div>');
       let d;
       try { d = await api('/admin/gateway-mcp/info'); }
       catch (e) { view.innerHTML = section('Gateway MCP', '<div class="card-body" style="padding:16px"><p class="muted">' + escapeHTML(e.message) + '</p></div>'); return; }
@@ -12954,7 +13019,7 @@ const adminHTML = `<!doctype html>
     // renderWorkflows manages workflow chain definitions (list / create via JSON / dry-run / delete).
     async function renderWorkflows() {
       const view = document.getElementById('view');
-      view.innerHTML = section('워크플로', '<div class="empty">불러오는 중...</div>');
+      view.innerHTML = section('워크플로', '<div class="loading">불러오는 중...</div>');
       let d;
       try { d = await api('/admin/workflows'); }
       catch (e) { view.innerHTML = section('워크플로', '<div class="card-body" style="padding:16px"><p class="muted">' + escapeHTML(e.message) + '</p></div>'); return; }
@@ -13053,7 +13118,7 @@ const adminHTML = `<!doctype html>
           tool: document.getElementById('sb-tool').value.trim(),
         };
         const host = document.getElementById('sb-result');
-        host.innerHTML = '<div class="empty">검증 중...</div>';
+        host.innerHTML = '<div class="loading">검증 중...</div>';
         try {
           const r = await api('/admin/sandbox/preview', { method: 'POST', body: JSON.stringify(body) });
           const verdict = r.would_block ? '<span class="status error">차단 예상</span>' : '<span class="status">통과 예상</span>';
@@ -13091,7 +13156,7 @@ const adminHTML = `<!doctype html>
     // models, failures, key alerts, risk, and recommendations — no operational metrics.
     async function renderMeHome() {
       const view = document.getElementById('view');
-      view.innerHTML = section('내 홈', '<div class="empty">불러오는 중...</div>');
+      view.innerHTML = section('내 홈', '<div class="loading">불러오는 중...</div>');
       let d;
       try { d = await api('/me/dashboard'); }
       catch (e) {
@@ -13330,7 +13395,7 @@ const adminHTML = `<!doctype html>
         '</tr>').join('') + '</tbody></table></div>');
     };
     window.meShowReceipt = async (id) => {
-      openModal('요청 영수증', '<div class="empty">불러오는 중...</div>');
+      openModal('요청 영수증', '<div class="loading">불러오는 중...</div>');
       let r;
       try { r = await api('/me/requests/' + encodeURIComponent(id) + '/receipt'); }
       catch (e) { openModal('요청 영수증', '<div class="error-line">' + escapeHTML(e.message) + '</div>'); return; }
@@ -13339,7 +13404,7 @@ const adminHTML = `<!doctype html>
       const rt = r.routing;
       const rows = [
         ['요청 ID', escapeHTML(r.request_id || '')],
-        ['시각', escapeHTML(r.created_at || '')],
+        ['시각', timeCell(r.created_at || '')],
         ['엔드포인트', escapeHTML(r.endpoint || '')],
         ['모델', escapeHTML(r.model || '') + (r.provider ? ' <span class="muted">(' + escapeHTML(r.provider) + ')</span>' : '')],
         ['상태', (r.status_code >= 200 && r.status_code < 300 ? '<span class="status">' + r.status_code + '</span>' : '<span class="status error">' + r.status_code + '</span>') + (r.blocked ? ' <span class="status error">정책 차단</span>' : '')],
@@ -13634,7 +13699,7 @@ const adminHTML = `<!doctype html>
           '<td>' + escapeHTML(k.role || '') + '</td>' +
           '<td class="muted" style="max-width:260px">' + scopeText + '</td>' +
           '<td><span class="status ' + (expired ? 'error' : '') + '">' + escapeHTML(k.status) + '</span></td>' +
-          '<td>' + escapeHTML(k.expires_at || '-') + '</td>' +
+          '<td>' + timeExact(k.expires_at || '-') + '</td>' +
           '<td style="white-space:nowrap">' +
             (canEdit ? '<button class="ghost" type="button" onclick="editMyKeyScopes(\'' + escapeAttr(k.id) + '\')">스코프</button> ' : '') +
             (!expired ? '<button class="secondary" type="button" onclick="rotateMyKey(\'' + escapeAttr(k.id) + '\')">회전</button> <button class="danger" type="button" onclick="revokeMyKey(\'' + escapeAttr(k.id) + '\')">폐기</button>' : '<span class="muted">작업 없음</span>') +
@@ -13819,7 +13884,7 @@ const adminHTML = `<!doctype html>
     // ── SSO (Keycloak) 설정/진단 ──────────────────────────────────────────
     async function renderSSOSettings() {
       const view = document.getElementById('view');
-      view.innerHTML = section('SSO (Keycloak)', '<div class="empty">불러오는 중...</div>');
+      view.innerHTML = section('SSO (Keycloak)', '<div class="loading">불러오는 중...</div>');
       let c;
       try { c = await api('/admin/sso/keycloak/config'); }
       catch (e) { view.innerHTML = section('SSO (Keycloak)', '<div class="card-body" style="padding:16px"><p class="muted">설정을 불러올 수 없습니다: ' + escapeHTML(e.message) + '</p></div>'); return; }
@@ -13960,7 +14025,7 @@ const adminHTML = `<!doctype html>
 
     async function renderSkillStudio() {
       const view = document.getElementById('view');
-      view.innerHTML = section('Skill Studio', '<div class="empty">불러오는 중...</div>');
+      view.innerHTML = section('Skill Studio', '<div class="loading">불러오는 중...</div>');
       const [cand, sk] = await Promise.all([
         api('/admin/skill-studio/candidates').catch(e => ({ candidates: [], _err: e.message })),
         api('/admin/skills').catch(() => ({ skills: [] })),
@@ -14055,7 +14120,7 @@ const adminHTML = `<!doctype html>
       if (!host) return;
       const name = window.__studioWizardName;
       if (!name) { host.innerHTML = ''; return; }
-      host.innerHTML = '<div class="empty">불러오는 중...</div>';
+      host.innerHTML = '<div class="loading">불러오는 중...</div>';
       let rd, sk;
       try {
         [rd, sk] = await Promise.all([
@@ -14507,7 +14572,7 @@ const adminHTML = `<!doctype html>
       let html = '<div class="card-body"><p class="muted">ClickHouse 일별 rollup 기준 장기 추세·비용 분석. 모델/팀/비용센터 단위로 요청·토큰·비용·오류를 집계합니다. 요청 단위 실시간 상세는 <a href="#/requests">호출 이력</a>을 사용하세요.</p>' +
         '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
           '<label class="muted">기간 <select onchange="dwSet(\'dwWindow\', this.value)">' + winSel + '</select></label>' +
-          '<span class="muted">since ' + escapeHTML(ov.since || '') + '</span>' +
+          '<span class="muted">since ' + timeExact(ov.since || '') + '</span>' +
           '<button class="secondary" type="button" onclick="dwExportCSV()">CSV 내보내기</button>' +
           '<button class="secondary" type="button" onclick="dwRefresh()" title="대시보드 쿼리 캐시(약 45초)를 비우고 ClickHouse에서 최신 값을 다시 조회합니다">새로고침</button>' +
           '<span id="dw-action-result" class="muted"></span>' +
@@ -15373,7 +15438,7 @@ const adminHTML = `<!doctype html>
         openModal('Text2SQL Timeline', '<div class="empty">request_id가 없는 오래된 로그입니다.</div>');
         return;
       }
-      openModal('Text2SQL Timeline — ' + requestID, '<div class="empty">조회 중...</div>');
+      openModal('Text2SQL Timeline — ' + requestID, '<div class="loading">조회 중...</div>');
       try {
         const d = await api('/admin/text2sql/spans?request_id=' + encodeURIComponent(requestID));
         const spans = d.spans || [];
@@ -15725,7 +15790,7 @@ const adminHTML = `<!doctype html>
             '<tbody>' +
               list.map(err =>
                 '<tr>' +
-                  '<td class="muted">' + escapeHTML(err.created_at) + '</td>' +
+                  '<td class="muted">' + timeCell(err.created_at) + '</td>' +
                   '<td><span class="badge" style="background:var(--pill-bg); padding:2px 6px; border-radius:4px; font-size:11px;">' + escapeHTML(err.component) + '</span></td>' +
                   '<td><pre style="white-space:pre-wrap; margin:0; font-family:ui-monospace,SFMono-Regular,Consolas,monospace; font-size:12px; color:var(--ink);">' + escapeHTML(err.error_message) + '</pre></td>' +
                 '</tr>'

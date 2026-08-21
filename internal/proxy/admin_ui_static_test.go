@@ -124,3 +124,38 @@ func TestAdminUIOverlaysDeclareDialogSemantics(t *testing.T) {
 		}
 	}
 }
+
+// "nothing here", "still fetching" and "this failed" are three different situations. They
+// were once one muted grey line each, indistinguishable from a blank panel, so the
+// classes must keep separate styling and loading must not borrow the empty style.
+func TestAdminUIDistinguishesEmptyLoadingAndError(t *testing.T) {
+	_, payload := adminUISource(t)
+	if strings.Contains(payload, ".empty, .error-line {") {
+		t.Error("empty and error share one rule again; a failure would read as no data")
+	}
+	for _, class := range []string{".empty {", ".error-line {", ".loading {"} {
+		if !strings.Contains(payload, class) {
+			t.Errorf("missing style rule for %q", class)
+		}
+	}
+	// A placeholder that says it is still working must not be styled as emptiness.
+	working := regexp.MustCompile(`class="empty"[^<]{0,200}?>[^<]*(불러오는 중|조회 중|집계 중|분석 중)`)
+	if m := working.FindString(payload); m != "" {
+		t.Errorf("loading placeholder still uses the empty style: %s", m)
+	}
+}
+
+// Timestamps arrive as UTC RFC3339. Rendering one verbatim makes the reader convert it
+// in their head to answer "is this recent?", which is the whole point of the column.
+func TestAdminUIFormatsTimestamps(t *testing.T) {
+	_, payload := adminUISource(t)
+	for _, fn := range []string{"function fmtRelTime(", "function fmtAbsTime(", "function timeCell(", "function timeExact("} {
+		if !strings.Contains(payload, fn) {
+			t.Errorf("time helper %q is missing", fn)
+		}
+	}
+	raw := regexp.MustCompile(`escapeHTML\([^()]*?\b(created_at|updated_at|opened_at|last_failure_at|fired_at|started_at|last_seen|expires_at|revoked_at)\b[^()]*?\)`)
+	for _, m := range raw.FindAllString(payload, -1) {
+		t.Errorf("raw timestamp rendered without formatting: %s — use timeCell()/timeExact()", m)
+	}
+}
