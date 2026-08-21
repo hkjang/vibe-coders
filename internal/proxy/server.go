@@ -31,16 +31,19 @@ import (
 )
 
 // AppVersion is the gateway build version, surfaced in /auth/me and the admin UI.
-const AppVersion = "v0.76.63"
+const AppVersion = "v0.76.64"
 
 type Server struct {
-	cfg            config.Config
-	db             *store.SQLStore
-	logger         *store.AsyncLogger
-	client         *http.Client
-	metrics        *Metrics
-	breakers       *providerBreakers
-	balancer       *providerBalancer
+	cfg      config.Config
+	db       *store.SQLStore
+	logger   *store.AsyncLogger
+	client   *http.Client
+	metrics  *Metrics
+	breakers *providerBreakers
+	balancer *providerBalancer
+	// instanceID identifies this process in shared breaker rows, so an operator can see
+	// which instance reported an outage.
+	instanceID     string
 	secrets        atomic.Pointer[secret.Cipher]
 	secretsMu      sync.Mutex // guards concurrent rotation
 	retention      *store.RetentionWorker
@@ -120,12 +123,13 @@ func NewServer(cfg config.Config, db *store.SQLStore, logger *store.AsyncLogger,
 			Timeout:   cfg.Upstream.Timeout,
 			Transport: transport,
 		},
-		metrics:   newMetrics(),
-		breakers:  newProviderBreakers(),
-		balancer:  newProviderBalancer(),
-		retention: retention,
-		sessions:  newSessionInferer(cfg.Session.IdleTimeout),
-		dwCache:   newDWQueryCache(0),
+		metrics:    newMetrics(),
+		breakers:   newProviderBreakers(),
+		balancer:   newProviderBalancer(),
+		instanceID: instanceIdentity(),
+		retention:  retention,
+		sessions:   newSessionInferer(cfg.Session.IdleTimeout),
+		dwCache:    newDWQueryCache(0),
 	}
 	server.secrets.Store(secrets)
 
@@ -136,6 +140,7 @@ func NewServer(cfg config.Config, db *store.SQLStore, logger *store.AsyncLogger,
 	// Background ClickHouse auto-sink, managed so it can be (re)started/stopped when
 	// settings change (only runs when URL + interval are configured).
 	server.applyClickHouseSinkWorker()
+	server.startBreakerSync()
 
 	// Async per-request fact ingest queue + batch worker (ships ai_request_fact rows off
 	// the hot path). The queue is always allocated; the worker no-ops until configured.
@@ -1557,7 +1562,7 @@ func (s *Server) dialUpstream(reqCtx context.Context, r *http.Request, body []by
 				if breakerCountsAsFailure(resp.StatusCode) {
 					s.noteBreakerFailure(att.provider.Name, fallbackReasonForStatus(resp.StatusCode), breakerThreshold, traceID)
 				} else {
-					s.breakers.recordSuccess(att.provider.Name)
+					s.noteBreakerSuccess(att.provider.Name)
 				}
 			}
 			if statusFallbackAllowed(resp.StatusCode) && i+1 < len(attempts) && !budgetSpent() {

@@ -3,9 +3,13 @@ package proxy
 import (
 	"context"
 	"log/slog"
+	"os"
 	"sort"
+	"strings"
 	"sync"
 	"time"
+
+	"vibe-coders/internal/store"
 )
 
 // Provider circuit breaker.
@@ -105,6 +109,22 @@ func (b *providerBreakers) allow(name string, threshold int, cooldown time.Durat
 
 // recordSuccess closes the breaker. Any success — including the half-open probe —
 // clears the failure streak, because the streak is about consecutive failures.
+// recordSuccessAfterOpen closes the breaker and reports whether it had been open or
+// probing, which is the only case where peers need to hear about the recovery.
+func (b *providerBreakers) recordSuccessAfterOpen(name string) bool {
+	if b == nil || name == "" {
+		return false
+	}
+	b.mu.Lock()
+	wasOpen := false
+	if st, ok := b.states[name]; ok {
+		wasOpen = st.phase != breakerClosed
+	}
+	b.mu.Unlock()
+	b.recordSuccess(name)
+	return wasOpen
+}
+
 func (b *providerBreakers) recordSuccess(name string) {
 	if b == nil || name == "" {
 		return
@@ -263,11 +283,23 @@ func (s *Server) filterOpenBreakers(attempts []providerAttempt, threshold int, c
 // noteBreakerFailure records a failed dial and logs the transition when the breaker
 // opens, so an operator can see in the log exactly when a provider was taken out.
 func (s *Server) noteBreakerFailure(name, reason string, threshold int, traceID string) {
-	if s.breakers.recordFailure(name, reason, threshold, time.Now()) {
+	now := time.Now()
+	if s.breakers.recordFailure(name, reason, threshold, now) {
 		_, _, cooldown := s.breakerConfig()
 		slog.Warn("provider breaker opened", "provider", name, "reason", reason, "cooldown", cooldown.String(), "trace_id", traceID)
+		// Tell the other instances now, so they skip this provider instead of each
+		// spending their own threshold of failures rediscovering it.
+		s.publishBreakerState(name, reason, now)
 		s.notifyMattermost(context.Background(), "provider",
 			"Provider 회로 차단: "+name+" ("+reason+") — "+cooldown.String()+" 동안 폴백 후보에서 제외됩니다")
+	}
+}
+
+// noteBreakerSuccess closes the breaker locally and, when it had been open, announces
+// the recovery so peers stop skipping the provider.
+func (s *Server) noteBreakerSuccess(name string) {
+	if s.breakers.recordSuccessAfterOpen(name) {
+		s.clearSharedBreakerState(name)
 	}
 }
 
@@ -351,4 +383,126 @@ func (s *Server) demoteUnhealthyCandidates(ctx context.Context, candidates []str
 		return candidates, nil
 	}
 	return append(healthy, demoted...), demoted
+}
+
+// Cross-instance breaker sharing.
+//
+// Each instance otherwise rediscovers a dead provider independently, paying its own
+// BreakerThreshold failures for something a peer already established. Publishing
+// transitions through the shared store lets the others skip ahead.
+//
+// The design deliberately ADOPTS a peer's open state rather than special-casing it in
+// allow()/peek(): once adopted, the existing cooldown, half-open probe and recovery
+// logic all apply unchanged, so a remotely-reported outage recovers by exactly the same
+// path as a locally-observed one.
+//
+// That also bounds the blast radius of a wrong verdict. An instance with, say, a bad
+// network path to one provider can make its peers skip that provider — but only until
+// the cooldown elapses, at which point each peer runs its own probe, and a successful
+// probe clears the shared row for everyone. A stale row from an instance that died is
+// ignored outright via its updated_at.
+func (s *Server) breakerSharingEnabled() bool {
+	return s.cfg.Upstream.BreakerShared && s.db != nil
+}
+
+// publishBreakerState reports a local transition. Failures are logged and dropped: the
+// shared row is an optimisation, and losing it must never affect serving traffic.
+func (s *Server) publishBreakerState(provider, reason string, openedAt time.Time) {
+	if !s.breakerSharingEnabled() {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err := s.db.PublishProviderBreaker(ctx, store.ProviderBreakerState{
+		Provider: provider, Phase: string(breakerOpen), Reason: reason,
+		Instance: s.instanceID, OpenedAt: openedAt, UpdatedAt: time.Now().UTC(),
+	}); err != nil {
+		slog.Warn("publish breaker state failed", "provider", provider, "error", err)
+	}
+}
+
+func (s *Server) clearSharedBreakerState(provider string) {
+	if !s.breakerSharingEnabled() {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err := s.db.ClearProviderBreaker(ctx, provider); err != nil {
+		slog.Warn("clear shared breaker state failed", "provider", provider, "error", err)
+	}
+}
+
+// adoptRemoteBreakers copies peers' open breakers into local state. Only rows fresher
+// than one cooldown are honoured, and only for providers this instance currently
+// considers healthy — a local verdict is first-hand evidence and outranks a peer's.
+func (b *providerBreakers) adoptRemote(states []store.ProviderBreakerState, cooldown time.Time) []string {
+	if b == nil || len(states) == 0 {
+		return nil
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	adopted := []string{}
+	for _, remote := range states {
+		st := b.state(remote.Provider)
+		if st.phase != breakerClosed {
+			continue // already open or probing locally
+		}
+		if remote.OpenedAt.Before(cooldown) {
+			continue // the peer's report has already aged out
+		}
+		st.phase = breakerOpen
+		st.openedAt = remote.OpenedAt
+		st.lastReason = remote.Reason + " (peer " + remote.Instance + ")"
+		st.probing = false
+		adopted = append(adopted, remote.Provider)
+	}
+	return adopted
+}
+
+// breakerSyncLoop polls peers' breaker state. Only transitions are written, so this
+// read is the entire ongoing cost of sharing.
+func (s *Server) breakerSyncLoop(ctx context.Context, interval time.Duration) {
+	t := time.NewTicker(interval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			_, _, cooldown := s.breakerConfig()
+			queryCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			states, err := s.db.ListOpenProviderBreakers(queryCtx, time.Now().UTC().Add(-2*cooldown))
+			cancel()
+			if err != nil {
+				slog.Warn("breaker sync failed", "error", err)
+				continue
+			}
+			if adopted := s.breakers.adoptRemote(states, time.Now().Add(-cooldown)); len(adopted) > 0 {
+				slog.Info("adopted peer breaker state", "providers", adopted, "instance", s.instanceID)
+			}
+		}
+	}
+}
+
+func (s *Server) startBreakerSync() {
+	if !s.breakerSharingEnabled() {
+		return
+	}
+	interval := s.cfg.Upstream.BreakerSyncInterval
+	if interval <= 0 {
+		interval = 3 * time.Second
+	}
+	go s.breakerSyncLoop(context.Background(), interval)
+	slog.Info("provider breaker sharing enabled", "instance", s.instanceID, "interval", interval.String())
+}
+
+// instanceIdentity labels this process in shared breaker rows. Hostname alone collides
+// when several instances share a host (containers, local testing), so a short random
+// suffix is appended; it only has to be distinguishable, not durable.
+func instanceIdentity() string {
+	host, err := os.Hostname()
+	if err != nil || strings.TrimSpace(host) == "" {
+		host = "gateway"
+	}
+	return host + "/" + newID("i")[len("i_"):][:6]
 }

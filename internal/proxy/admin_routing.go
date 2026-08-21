@@ -195,6 +195,10 @@ func (s *Server) handleRoutingHealth(w http.ResponseWriter, r *http.Request) {
 			"threshold":        breakerThreshold,
 			"cooldown_seconds": int(breakerCooldown.Seconds()),
 			"states":           s.breakers.snapshot(breakerCooldown, time.Now()),
+			// With sharing on, a state may have come from a peer rather than from this
+			// instance's own traffic; the operator needs to know which they are looking at.
+			"shared":      s.breakerSharingEnabled(),
+			"instance_id": s.instanceID,
 		},
 	})
 }
@@ -217,7 +221,21 @@ func (s *Server) handleRoutingBreakerReset(w http.ResponseWriter, r *http.Reques
 		_ = json.NewDecoder(r.Body).Decode(&payload)
 	}
 	name := strings.TrimSpace(payload.Provider)
+	// Collect the names BEFORE resetting: a reset-all empties local state, after which
+	// there would be nothing left to tell us which shared rows to clear.
+	shared := []string{name}
+	if name == "" {
+		shared = shared[:0]
+		for _, st := range s.breakers.snapshot(time.Hour, time.Now()) {
+			shared = append(shared, st.Provider)
+		}
+	}
 	s.breakers.reset(name)
+	// Clear the shared rows too: resetting only locally would leave peers skipping a
+	// provider the operator has just declared healthy.
+	for _, provider := range shared {
+		s.clearSharedBreakerState(provider)
+	}
 	s.auditAdmin(r, "routing.breaker.reset", firstNonEmpty(name, "*"), "")
 	_, _, cooldown := s.breakerConfig()
 	writeJSON(w, http.StatusOK, map[string]any{

@@ -275,6 +275,8 @@ $env:PROXY_API_KEYS="dev:dev-proxy-key:alice:platform,team:team-proxy-key:bob:ba
 | `UPSTREAM_BREAKER_ENABLED` | `true` | Provider 회로 차단기. 연속 실패한 provider를 폴백 후보에서 자동 제외 |
 | `UPSTREAM_BREAKER_THRESHOLD` | `5` | 차단까지 필요한 연속 실패 횟수(429·5xx·타임아웃·연결 실패. 4xx 제외) |
 | `UPSTREAM_BREAKER_COOLDOWN` | `30s` | 차단 유지 시간. 경과 후 요청 1건으로 복구 확인 |
+| `UPSTREAM_BREAKER_SHARED` | `false` | 차단 전환을 DB로 공유해 다른 인스턴스가 자기 임계값만큼 실패해보지 않고 반영. **공유 DB(Postgres 등) 전제** |
+| `UPSTREAM_BREAKER_SYNC_INTERVAL` | `3s` | 다른 인스턴스의 차단 상태를 읽는 주기 |
 | `UPSTREAM_LOAD_BALANCE` | `first` | 같은 모델에 여러 provider가 매칭될 때 `first`(이름순 첫 번째) · `round_robin`(단일 인스턴스) · `session_hash`(다중 인스턴스 권장 — 세션 키에서 provider를 계산해 공유 저장소 없이 모든 인스턴스가 같은 답) |
 | `UPSTREAM_STICKY_SESSIONS` | `true` | 세션을 처음 처리한 provider에 고정(에이전트 대화의 prefix/KV 캐시 보존) |
 | `UPSTREAM_STICKY_TTL` | `30m` | 세션 고정 유지 시간 |

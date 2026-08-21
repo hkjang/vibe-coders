@@ -1218,6 +1218,16 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 			priority INTEGER NOT NULL DEFAULT 100,
 			created_at TEXT NOT NULL
 		)`,
+		// Circuit-breaker state shared between gateway instances. Rows are advisory and
+		// carry updated_at so a consumer can ignore ones left by an instance that died.
+		`CREATE TABLE IF NOT EXISTS provider_breaker_state (
+			provider TEXT PRIMARY KEY,
+			phase TEXT NOT NULL,
+			reason TEXT,
+			instance TEXT,
+			opened_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)`,
 		// Idempotent ALTERs for legacy installations of provider_configs
 		`ALTER TABLE provider_configs ADD COLUMN model_patterns TEXT`,
 		// failover_group makes redundancy an explicit declaration. Until now the only way

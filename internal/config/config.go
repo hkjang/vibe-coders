@@ -169,6 +169,12 @@ type UpstreamConfig struct {
 	// candidate list. It never removes one — health is a lagging average, and a
 	// recovered provider has to be tried to be observed recovering. Zero disables.
 	HealthDemoteThreshold int
+	// BreakerShared publishes breaker transitions through the database so sibling
+	// instances can skip a provider a peer already found dead, instead of each paying
+	// its own threshold of failures. Requires a shared database, so it is off by default
+	// — with per-instance SQLite there is nothing to share.
+	BreakerShared       bool
+	BreakerSyncInterval time.Duration
 	// DefaultModel is the concrete model vibe/auto resolves to when set, so deployments whose
 	// upstream is not OpenAI don't fall back to the built-in gpt-4.1* names. Empty → built-in list.
 	DefaultModel string
@@ -378,6 +384,8 @@ func Load() (Config, error) {
 			StickySessions:        boolEnv("UPSTREAM_STICKY_SESSIONS", true),
 			StickyTTL:             durationEnv("UPSTREAM_STICKY_TTL", 30*time.Minute),
 			HealthDemoteThreshold: intEnv("UPSTREAM_HEALTH_DEMOTE_THRESHOLD", 50),
+			BreakerShared:         boolEnv("UPSTREAM_BREAKER_SHARED", false),
+			BreakerSyncInterval:   durationEnv("UPSTREAM_BREAKER_SYNC_INTERVAL", 3*time.Second),
 			DefaultModel:          strings.TrimSpace(os.Getenv("UPSTREAM_DEFAULT_MODEL")),
 		},
 		Database: databaseConfig(),

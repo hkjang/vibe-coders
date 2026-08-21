@@ -7912,6 +7912,9 @@ const adminHTML = `<!doctype html>
           fmt(states.filter(x => x.phase === 'open').length) + '</span>' +
         '<span class="status">연속 실패 임계 ' + fmt(breakers.threshold || 0) + '회</span>' +
         '<span class="status">차단 유지 ' + fmt(breakers.cooldown_seconds || 0) + '초</span>' +
+        (breakers.shared
+          ? '<span class="status">인스턴스 간 공유 켜짐 <span class="muted">(' + escapeHTML(breakers.instance_id || '') + ')</span></span>'
+          : '<span class="status muted">공유 꺼짐 — 인스턴스별 독립 감지</span>') +
         '<span style="flex:1"></span>' +
         '<button type="button" class="secondary" onclick="resetProviderBreaker(\'\')">전체 해제</button>' +
       '</div>';
@@ -7935,6 +7938,7 @@ const adminHTML = `<!doctype html>
           '<th data-sort="num">차단 횟수</th><th>최근 원인</th><th>복구 예정</th><th>동작</th>' +
         '</tr></thead><tbody>' + rows + '</tbody></table></div>' +
         '<div class="muted" style="font-size:12px; padding:10px 14px 0">' +
+          (breakers.shared ? '최근 원인에 <code>(peer ...)</code> 가 붙은 항목은 <strong>다른 인스턴스가 감지</strong>해 이 인스턴스가 받아들인 것입니다. ' : '') +
           '<strong>차단됨</strong> = 폴백 후보에서 제외 중. 유지 시간이 지나면 <strong>복구 확인 중</strong>으로 바뀌어 요청 1건만 흘려보내고, 성공하면 정상으로 돌아갑니다. ' +
           '모든 provider가 차단되면 안전을 위해 최초 provider는 그래도 시도합니다.' +
         '</div></div>';
@@ -16090,6 +16094,7 @@ const adminHTML = `<!doctype html>
 
       const resilience =
         '<table><thead><tr><th>장치</th><th>하는 일</th><th>설정</th></tr></thead><tbody>' +
+        '<tr><td><strong>차단기 공유</strong></td><td>한 인스턴스가 감지한 차단을 다른 인스턴스가 <strong>자기 임계값만큼 실패해보지 않고</strong> 반영합니다. 전환 시점에만 DB에 기록하므로 요청당 쓰기가 없습니다. 로컬 증거가 우선하고, 오래된 보고는 무시되며, 각자 복구 탐침을 돌려 성공하면 공유 행을 지웁니다</td><td><code>UPSTREAM_BREAKER_SHARED</code>(기본 꺼짐 — 공유 DB 전제)</td></tr>' +
         '<tr><td><strong>health 강등</strong></td><td>health score가 임계 미만인 provider를 후보 <strong>맨 뒤로</strong> 밀되 제외하지는 않습니다(후행 지표라 시도해야 회복을 알 수 있음). 강등되면 응답에 <code>X-Health-Demoted</code>가 실립니다</td><td><code>UPSTREAM_HEALTH_DEMOTE_THRESHOLD</code>(기본 50, 0이면 끔)</td></tr>' +
         '<tr><td><strong>폴백 리허설</strong></td><td>장애 <strong>전에</strong> 이중화를 확인합니다. 실제 후보 목록을 걸으며 지정한 provider를 실패 처리하고 누가 요청을 받는지 보고 — 업스트림 호출 없음</td><td>프로바이더 화면의 <code>폴백 리허설</code> 버튼 · <code>POST /admin/routing/failover-drill</code></td></tr>' +
         '<tr><td><strong>회로 차단기</strong></td><td>연속 실패한 provider를 폴백 후보에서 <strong>자동 제외</strong>. 유지 시간이 지나면 요청 1건만 흘려 복구를 확인합니다. 없으면 죽은 provider를 매 요청 재호출하며 타임아웃을 전부 태웁니다</td><td><code>UPSTREAM_BREAKER_ENABLED</code>(기본 on)<br><code>UPSTREAM_BREAKER_THRESHOLD</code>(5회)<br><code>UPSTREAM_BREAKER_COOLDOWN</code>(30초)</td></tr>' +
