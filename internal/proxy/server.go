@@ -31,7 +31,7 @@ import (
 )
 
 // AppVersion is the gateway build version, surfaced in /auth/me and the admin UI.
-const AppVersion = "v0.76.67"
+const AppVersion = "v0.76.68"
 
 type Server struct {
 	cfg      config.Config
@@ -2005,8 +2005,7 @@ func (s *Server) handleAdminUI(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = w.Write([]byte(strings.ReplaceAll(adminHTML, "__APP_VERSION__", AppVersion)))
+	servePage(w, r, adminUIPage())
 }
 
 func (s *Server) auditRequest(endpoint string, body []byte, apiKeyID string, traceID string, r *http.Request) store.LogRecord {
