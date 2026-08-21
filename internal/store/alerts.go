@@ -183,12 +183,13 @@ func (s *SQLStore) MetricSince(ctx context.Context, scope, scopeValue string, si
 		return snapshot, fmt.Errorf("unsupported alert scope %q", scope)
 	}
 	query := s.bind(`SELECT COUNT(r.id), COALESCE(SUM(CASE WHEN r.status_code >= 400 THEN 1 ELSE 0 END), 0),
-			COALESCE(SUM(t.estimated_cost), 0), COALESCE(SUM(t.total_tokens), 0)
+			COALESCE(SUM(t.estimated_cost), 0), COALESCE(SUM(t.total_tokens), 0),
+			COALESCE(SUM(CASE WHEN r.failover <> 0 THEN 1 ELSE 0 END), 0)
 		FROM request_logs r
 		LEFT JOIN token_usage t ON t.request_id = r.id
 		WHERE ` + strings.Join(where, " AND "))
 	row := s.db.QueryRowContext(ctx, query, args...)
-	if err := row.Scan(&snapshot.Requests, &snapshot.Errors, &snapshot.CostKRW, &snapshot.Tokens); err != nil {
+	if err := row.Scan(&snapshot.Requests, &snapshot.Errors, &snapshot.CostKRW, &snapshot.Tokens, &snapshot.Failovers); err != nil {
 		return snapshot, err
 	}
 

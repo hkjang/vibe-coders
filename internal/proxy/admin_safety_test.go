@@ -314,3 +314,63 @@ func TestAlertWorkerFiresOnLLMEvaluationFailureRate(t *testing.T) {
 		t.Fatalf("expected llm eval failure alert event, got %#v", events)
 	}
 }
+
+// A successful failover returns a normal 200 to the caller, so a degrading primary
+// is invisible unless the failover rate itself alerts.
+func TestFailoverRateAlertFires(t *testing.T) {
+	db := openTestStore(t)
+	defer db.Close()
+	now := time.Now().UTC()
+
+	// Three requests, one of which was rescued by an alternate provider.
+	for i, rec := range []struct {
+		id       string
+		failover bool
+	}{{"fr-1", false}, {"fr-2", true}, {"fr-3", false}} {
+		if err := db.InsertLogRecord(context.Background(), store.LogRecord{Request: store.RequestLog{
+			ID: rec.id, TraceID: rec.id, Endpoint: "/v1/chat/completions",
+			Model: "gpt-4.1-mini", Provider: "b-backup", StatusCode: 200, LatencyMS: int64(100 + i),
+			Failover: rec.failover, FallbackFrom: "a-primary", FallbackReason: "5xx",
+			CreatedAt: now.Add(-time.Duration(i) * time.Minute),
+		}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	snapshot, err := db.MetricSince(context.Background(), "global", "*", now.Add(-5*time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.Requests != 3 || snapshot.Failovers != 1 {
+		t.Fatalf("unexpected failover snapshot: requests=%d failovers=%d", snapshot.Requests, snapshot.Failovers)
+	}
+	if got := metricValue("failover_rate", snapshot); got < 0.33 || got > 0.34 {
+		t.Fatalf("failover_rate=%v, want ~0.333", got)
+	}
+	if got := metricValue("failovers", snapshot); got != 1 {
+		t.Fatalf("failovers=%v, want 1", got)
+	}
+	// A rate metric must not divide by zero on an empty window.
+	if got := metricValue("failover_rate", store.AlertMetricSnapshot{}); got != 0 {
+		t.Fatalf("empty-window failover_rate=%v, want 0", got)
+	}
+
+	if err := db.UpsertAlertRule(context.Background(), store.AlertRule{
+		ID: "alert-failover-rate", Name: "failover rate",
+		Metric: "failover_rate", WindowSeconds: 300, Threshold: 0.2,
+		Scope: "global", ScopeValue: "*", Enabled: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	worker := NewAlertWorker(db, &Metrics{}, time.Second)
+	worker.evaluate()
+
+	events, err := db.ListAlertEvents(context.Background(), 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) == 0 || events[0].Metric != "failover_rate" {
+		t.Fatalf("expected failover_rate alert event, got %#v", events)
+	}
+}

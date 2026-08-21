@@ -31,7 +31,7 @@ import (
 )
 
 // AppVersion is the gateway build version, surfaced in /auth/me and the admin UI.
-const AppVersion = "v0.76.57"
+const AppVersion = "v0.76.58"
 
 type Server struct {
 	cfg            config.Config
@@ -39,6 +39,7 @@ type Server struct {
 	logger         *store.AsyncLogger
 	client         *http.Client
 	metrics        *Metrics
+	breakers       *providerBreakers
 	secrets        atomic.Pointer[secret.Cipher]
 	secretsMu      sync.Mutex // guards concurrent rotation
 	retention      *store.RetentionWorker
@@ -99,6 +100,13 @@ type killSnapshot struct {
 func NewServer(cfg config.Config, db *store.SQLStore, logger *store.AsyncLogger, retention *store.RetentionWorker) (*Server, error) {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.DisableCompression = false
+	// Client.Timeout covers the whole exchange including a long stream body, so it
+	// cannot be lowered to make failover snappy. ResponseHeaderTimeout bounds only
+	// the wait for response headers, which is exactly the phase where a dead
+	// provider stalls a request.
+	if cfg.Upstream.ResponseHeaderTimeout > 0 {
+		transport.ResponseHeaderTimeout = cfg.Upstream.ResponseHeaderTimeout
+	}
 	secrets, err := secret.New(cfg.Secret.GatewaySecret)
 	if err != nil {
 		return nil, fmt.Errorf("create secret cipher: %w", err)
@@ -112,6 +120,7 @@ func NewServer(cfg config.Config, db *store.SQLStore, logger *store.AsyncLogger,
 			Transport: transport,
 		},
 		metrics:   newMetrics(),
+		breakers:  newProviderBreakers(),
 		retention: retention,
 		sessions:  newSessionInferer(cfg.Session.IdleTimeout),
 		dwCache:   newDWQueryCache(0),
@@ -531,6 +540,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/admin/routing/decisions", s.handleRoutingDecisions)
 	mux.HandleFunc("/admin/routing/decisions/", s.handleRoutingDecisionByID)
 	mux.HandleFunc("/admin/routing/health", s.handleRoutingHealth)
+	mux.HandleFunc("/admin/routing/breaker-reset", s.handleRoutingBreakerReset)
 	mux.HandleFunc("/admin/providers/slo", s.handleProviderSLOs)
 	mux.HandleFunc("/admin/agents", s.handleAgents)
 	mux.HandleFunc("/admin/models/quality", s.handleModelQuality)
@@ -1457,10 +1467,7 @@ type resolvedProvider struct {
 // provider that actually answered, and (if a failover occurred) the original primary's
 // name in `failoverFrom`.
 func (s *Server) dialUpstream(reqCtx context.Context, r *http.Request, body []byte, primary resolvedProvider, traceID string, failoverCandidates []string) (*http.Response, string, string, string, []string, []byte, string, http.Header, error) {
-	type attempt struct {
-		provider resolvedProvider
-	}
-	attempts := []attempt{{provider: primary}}
+	attempts := []providerAttempt{{provider: primary}}
 	for _, name := range failoverCandidates {
 		// Re-resolve each candidate so we get its decrypted key and timeout.
 		fakeReq := r.Clone(reqCtx)
@@ -1470,7 +1477,29 @@ func (s *Server) dialUpstream(reqCtx context.Context, r *http.Request, body []by
 			slog.Warn("failover candidate unavailable", "name", name, "error", err)
 			continue
 		}
-		attempts = append(attempts, attempt{provider: cand})
+		attempts = append(attempts, providerAttempt{provider: cand})
+	}
+
+	breakerEnabled, breakerThreshold, breakerCooldown := s.breakerConfig()
+	if breakerEnabled {
+		attempts = s.filterOpenBreakers(attempts, breakerThreshold, breakerCooldown, traceID)
+	}
+
+	// Failover budget: how long the gateway may keep trying alternates. Checked
+	// between attempts so an in-flight response is never cut short; a request that
+	// has already spent the budget returns the last error instead of walking the
+	// remaining candidates.
+	failoverDeadline := time.Time{}
+	if budget := s.cfg.Upstream.FailoverBudget; budget > 0 {
+		failoverDeadline = time.Now().Add(budget)
+	}
+	if raw := strings.TrimSpace(r.Header.Get("X-Failover-Budget-MS")); raw != "" {
+		if ms, convErr := strconv.Atoi(raw); convErr == nil && ms > 0 {
+			failoverDeadline = time.Now().Add(time.Duration(ms) * time.Millisecond)
+		}
+	}
+	budgetSpent := func() bool {
+		return !failoverDeadline.IsZero() && !time.Now().Before(failoverDeadline)
 	}
 
 	var lastErr error
@@ -1507,7 +1536,14 @@ func (s *Server) dialUpstream(reqCtx context.Context, r *http.Request, body []by
 
 		resp, doErr := s.client.Do(upstreamReq)
 		if doErr == nil {
-			if statusFallbackAllowed(resp.StatusCode) && i+1 < len(attempts) {
+			if breakerEnabled {
+				if breakerCountsAsFailure(resp.StatusCode) {
+					s.noteBreakerFailure(att.provider.Name, fallbackReasonForStatus(resp.StatusCode), breakerThreshold, traceID)
+				} else {
+					s.breakers.recordSuccess(att.provider.Name)
+				}
+			}
+			if statusFallbackAllowed(resp.StatusCode) && i+1 < len(attempts) && !budgetSpent() {
 				reason := fallbackReasonForStatus(resp.StatusCode)
 				_, _ = io.Copy(io.Discard, resp.Body)
 				_ = resp.Body.Close()
@@ -1518,6 +1554,10 @@ func (s *Server) dialUpstream(reqCtx context.Context, r *http.Request, body []by
 				slog.Warn("upstream status fallback", "provider", att.provider.Name, "status", resp.StatusCode, "next", attempts[i+1].provider.Name)
 				i++
 				continue
+			}
+			if statusFallbackAllowed(resp.StatusCode) && i+1 < len(attempts) && budgetSpent() {
+				failoverPath = append(failoverPath, "failover_budget_exhausted:"+att.provider.Name)
+				slog.Warn("failover budget exhausted", "provider", att.provider.Name, "status", resp.StatusCode, "trace_id", traceID)
 			}
 			if resp.StatusCode == http.StatusBadRequest && !usedLongContext {
 				sniff, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
@@ -1554,8 +1594,16 @@ func (s *Server) dialUpstream(reqCtx context.Context, r *http.Request, body []by
 		}
 		lastErr = doErr
 		reason := fallbackReasonForError(doErr)
+		if breakerEnabled {
+			s.noteBreakerFailure(att.provider.Name, reason, breakerThreshold, traceID)
+		}
 		slog.Warn("upstream call failed", "provider", att.provider.Name, "attempt", i, "error", doErr)
 		if i+1 < len(attempts) {
+			if budgetSpent() {
+				failoverPath = append(failoverPath, "failover_budget_exhausted:"+att.provider.Name)
+				slog.Warn("failover budget exhausted", "provider", att.provider.Name, "trace_id", traceID)
+				break
+			}
 			failoverPath = append(failoverPath, reason+":"+att.provider.Name+"->"+attempts[i+1].provider.Name)
 		}
 		i++

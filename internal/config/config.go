@@ -142,6 +142,21 @@ type UpstreamConfig struct {
 	APIKey        string
 	Timeout       time.Duration
 	ModelPatterns string // comma-separated model globs routed to the default provider
+	// ResponseHeaderTimeout bounds how long the gateway waits for an upstream's
+	// response headers. Timeout covers the whole exchange (a long stream included),
+	// so without this a hung provider holds a request for the full Timeout before
+	// failover can start. Bounding only the header wait fails fast without
+	// truncating legitimate long streams.
+	ResponseHeaderTimeout time.Duration
+	// FailoverBudget caps the total time spent trying alternate providers. Once the
+	// budget is spent the gateway stops failing over and returns the last error
+	// instead of walking the whole candidate list. Zero disables the cap.
+	FailoverBudget time.Duration
+	// Circuit breaker: after BreakerThreshold consecutive failures a provider is
+	// skipped as a candidate for BreakerCooldown, then probed once.
+	BreakerEnabled   bool
+	BreakerThreshold int
+	BreakerCooldown  time.Duration
 	// DefaultModel is the concrete model vibe/auto resolves to when set, so deployments whose
 	// upstream is not OpenAI don't fall back to the built-in gpt-4.1* names. Empty → built-in list.
 	DefaultModel string
@@ -341,7 +356,13 @@ func Load() (Config, error) {
 			APIKey:        firstNonEmpty(os.Getenv("UPSTREAM_API_KEY"), os.Getenv("OPENAI_API_KEY")),
 			Timeout:       durationEnv("UPSTREAM_TIMEOUT", 10*time.Minute),
 			ModelPatterns: strings.TrimSpace(os.Getenv("UPSTREAM_MODEL_PATTERNS")),
-			DefaultModel:  strings.TrimSpace(os.Getenv("UPSTREAM_DEFAULT_MODEL")),
+
+			ResponseHeaderTimeout: durationEnv("UPSTREAM_RESPONSE_HEADER_TIMEOUT", 60*time.Second),
+			FailoverBudget:        durationEnv("UPSTREAM_FAILOVER_BUDGET", 0),
+			BreakerEnabled:        boolEnv("UPSTREAM_BREAKER_ENABLED", true),
+			BreakerThreshold:      intEnv("UPSTREAM_BREAKER_THRESHOLD", 5),
+			BreakerCooldown:       durationEnv("UPSTREAM_BREAKER_COOLDOWN", 30*time.Second),
+			DefaultModel:          strings.TrimSpace(os.Getenv("UPSTREAM_DEFAULT_MODEL")),
 		},
 		Database: databaseConfig(),
 		Logging: LoggingConfig{

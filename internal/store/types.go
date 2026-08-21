@@ -1505,6 +1505,10 @@ type AlertMetricSnapshot struct {
 	NewCatalogTools    int64
 	MaxAnomalyZ        float64
 	MaxBudgetRatio     float64
+	// Failovers counts requests that were served by an alternate provider after the
+	// originally selected one failed. A rising rate means the primary is degrading
+	// while callers still see success, so it needs to alert on its own.
+	Failovers int64
 }
 
 type AlertEvent struct {

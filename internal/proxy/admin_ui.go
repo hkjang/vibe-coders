@@ -7443,6 +7443,7 @@ const adminHTML = `<!doctype html>
       const healthVisual = '<div class="card-body"><div class="viz-grid" style="margin-top:0"><div class="viz-panel"><div class="viz-title">Provider 건전성 <small>threshold ' + threshold + '</small></div>' + donutVisual(providers.length ? (providers.length-degraded.length)/providers.length*100 : 0, (providers.length-degraded.length)+'/'+providers.length, '정상 provider', [{label:'정상',value:providers.length-degraded.length},{label:'degraded',value:degraded.length}]) + '</div><div class="viz-panel"><div class="viz-title">Health 순위 <small>점수</small></div>' + visualBars(ranking.map(x=>({label:x.provider,value:x.score||0})), v=>Math.round(v)+'점', true) + '</div></div></div>';
       document.getElementById('view').innerHTML =
         section('Provider Health', kpis + healthVisual + filters) +
+        section('회로 차단기 (Circuit Breaker)', providerBreakerPanel(resp.breakers)) +
         section('Provider ranking', providerHealthRankingTable(ranking, threshold)) +
         section('Degradation alerts', providerHealthAlertsTable(alerts)) +
         section('Health trend', providerHealthTrendTable(trend, threshold));
@@ -7455,6 +7456,55 @@ const adminHTML = `<!doctype html>
       });
       makeSortable('#view', 'routing-health');
     }
+    // Health score는 과거 집계이고, 회로 차단기는 지금 이 순간 어떤 provider가 폴백
+    // 후보에서 빠져 있는지를 보여줍니다. 운영자는 이 둘을 함께 봐야 판단할 수 있습니다.
+    function providerBreakerPanel(breakers) {
+      breakers = breakers || {};
+      if (!breakers.enabled) {
+        return '<div class="card-body"><div class="banner warn">회로 차단기가 꺼져 있습니다 <span class="muted">(UPSTREAM_BREAKER_ENABLED=false)</span>' +
+          '<div class="muted" style="margin-top:4px">장애가 난 provider도 매 요청마다 재시도하므로, 타임아웃만큼 응답이 지연됩니다.</div></div></div>';
+      }
+      const states = breakers.states || [];
+      const phaseLabel = { open: '차단됨', half_open: '복구 확인 중', closed: '정상' };
+      const phaseClass = { open: 'error', half_open: 'warn', closed: '' };
+      const head = '<div class="toolbar" style="border:0; flex-wrap:wrap">' +
+        '<span class="status ' + (states.some(x => x.phase === 'open') ? 'error' : '') + '">차단 ' +
+          fmt(states.filter(x => x.phase === 'open').length) + '</span>' +
+        '<span class="status">연속 실패 임계 ' + fmt(breakers.threshold || 0) + '회</span>' +
+        '<span class="status">차단 유지 ' + fmt(breakers.cooldown_seconds || 0) + '초</span>' +
+        '<span style="flex:1"></span>' +
+        '<button type="button" class="secondary" onclick="resetProviderBreaker(\'\')">전체 해제</button>' +
+      '</div>';
+      if (!states.length) {
+        return '<div class="card-body">' + head +
+          '<div class="empty" style="padding:16px">차단된 provider 없음 — 모든 업스트림이 정상 응답 중입니다.</div></div>';
+      }
+      const rows = states.map(st =>
+        '<tr>' +
+          '<td><strong>' + escapeHTML(st.provider) + '</strong></td>' +
+          '<td><span class="status ' + (phaseClass[st.phase] || '') + '">' + escapeHTML(phaseLabel[st.phase] || st.phase) + '</span></td>' +
+          '<td data-num="' + (st.failures || 0) + '">' + fmt(st.failures || 0) + '</td>' +
+          '<td data-num="' + (st.opens || 0) + '">' + fmt(st.opens || 0) + '</td>' +
+          '<td>' + (st.last_reason ? '<code>' + escapeHTML(st.last_reason) + '</code>' : '<span class="muted">-</span>') + '</td>' +
+          '<td>' + (st.retry_in_seconds ? fmt(st.retry_in_seconds) + '초 후 재시도' : '<span class="muted">-</span>') + '</td>' +
+          '<td><button type="button" class="secondary" onclick="resetProviderBreaker(\'' + escapeAttr(st.provider) + '\')">해제</button></td>' +
+        '</tr>').join('');
+      return '<div class="card-body">' + head +
+        '<div style="overflow:auto"><table><thead><tr>' +
+          '<th data-sort="str">Provider</th><th data-sort="str">상태</th><th data-sort="num">연속 실패</th>' +
+          '<th data-sort="num">차단 횟수</th><th>최근 원인</th><th>복구 예정</th><th>동작</th>' +
+        '</tr></thead><tbody>' + rows + '</tbody></table></div>' +
+        '<div class="muted" style="font-size:12px; padding:10px 14px 0">' +
+          '<strong>차단됨</strong> = 폴백 후보에서 제외 중. 유지 시간이 지나면 <strong>복구 확인 중</strong>으로 바뀌어 요청 1건만 흘려보내고, 성공하면 정상으로 돌아갑니다. ' +
+          '모든 provider가 차단되면 안전을 위해 최초 provider는 그래도 시도합니다.' +
+        '</div></div>';
+    }
+    window.resetProviderBreaker = async (provider) => {
+      try {
+        await api('/admin/routing/breaker-reset', { method: 'POST', body: JSON.stringify({ provider: provider || '' }) });
+        route();
+      } catch (e) { alert('차단 해제 실패: ' + e.message); }
+    };
     function healthStatusClass(score, threshold) {
       const n = Number(score || 0);
       if (n < 40) return 'error';
@@ -10735,6 +10785,8 @@ const adminHTML = `<!doctype html>
               '<option value="mcp_new_tools">MCP 신규 도구 수(드리프트)</option>' +
               '<option value="anomaly_zmax">이상 징후 z-score(최대)</option>' +
               '<option value="budget_burn_ratio">예산 소진 예측 비율(최대)</option>' +
+              '<option value="failover_rate">폴백 발생률</option>' +
+              '<option value="failovers">폴백 발생 건수</option>' +
             '</select>' +
             '<select id="alert-scope">' +
               '<option value="global">전체</option>' +
@@ -11161,7 +11213,7 @@ const adminHTML = `<!doctype html>
     }
 
     function metricLabel(metric) {
-      return { requests: '요청 수', errors: '오류율', krw: 'KRW 비용', tokens: '토큰', latency_p95_ms: '전체 지연 P95', first_chunk_p95_ms: '첫 청크 P95', llm_eval_failures: 'LLM 평가 실패 수', llm_eval_failure_rate: 'LLM 평가 실패율', tool_errors: 'tool 오류 수', tool_error_rate: 'tool 오류율', tool_loop: '에이전트 루프', mcp_new_tools: 'MCP 신규 도구 수', anomaly_zmax: '이상 징후 z-score', budget_burn_ratio: '예산 소진 예측 비율' }[metric] || metric;
+      return { requests: '요청 수', errors: '오류율', krw: 'KRW 비용', tokens: '토큰', latency_p95_ms: '전체 지연 P95', first_chunk_p95_ms: '첫 청크 P95', llm_eval_failures: 'LLM 평가 실패 수', llm_eval_failure_rate: 'LLM 평가 실패율', tool_errors: 'tool 오류 수', tool_error_rate: 'tool 오류율', tool_loop: '에이전트 루프', mcp_new_tools: 'MCP 신규 도구 수', anomaly_zmax: '이상 징후 z-score', budget_burn_ratio: '예산 소진 예측 비율', failovers: '폴백 발생 건수', failover_rate: '폴백 발생률' }[metric] || metric;
     }
     function formatThreshold(metric, value) {
       if (metric === 'krw') return money(value);
@@ -15590,6 +15642,17 @@ const adminHTML = `<!doctype html>
         '<div class="banner" style="margin-bottom:0"><strong>④ 로컬 + 클라우드 (vLLM/Ollama)</strong>' +
         '<div class="muted" style="margin-top:4px">로컬 서버를 <code>base_url</code>에 <code>/v1</code> 없이 등록합니다(게이트웨이가 <code>{base_url}/v1/...</code>로 전달). 임베딩(<code>/v1/embeddings</code>)도 채팅과 동일한 규칙으로 라우팅·폴백됩니다.</div></div>';
 
+      const resilience =
+        '<table><thead><tr><th>장치</th><th>하는 일</th><th>설정</th></tr></thead><tbody>' +
+        '<tr><td><strong>회로 차단기</strong></td><td>연속 실패한 provider를 폴백 후보에서 <strong>자동 제외</strong>. 유지 시간이 지나면 요청 1건만 흘려 복구를 확인합니다. 없으면 죽은 provider를 매 요청 재호출하며 타임아웃을 전부 태웁니다</td><td><code>UPSTREAM_BREAKER_ENABLED</code>(기본 on)<br><code>UPSTREAM_BREAKER_THRESHOLD</code>(5회)<br><code>UPSTREAM_BREAKER_COOLDOWN</code>(30초)</td></tr>' +
+        '<tr><td><strong>헤더 대기 상한</strong></td><td>업스트림 <strong>응답 헤더</strong>를 기다리는 시간만 제한. 긴 스트리밍을 자르지 않으면서 먹통 provider를 빨리 끊어 폴백을 앞당깁니다</td><td><code>UPSTREAM_RESPONSE_HEADER_TIMEOUT</code>(60초)</td></tr>' +
+        '<tr><td><strong>폴백 예산</strong></td><td>대체 provider 시도에 쓸 <strong>총 시간</strong> 상한. 소진되면 남은 후보를 돌지 않고 마지막 결과를 반환합니다(<code>failover_budget_exhausted</code>)</td><td><code>UPSTREAM_FAILOVER_BUDGET</code>(기본 무제한)<br>요청별 <code>X-Failover-Budget-MS</code></td></tr>' +
+        '</tbody></table>' +
+        '<div class="banner" style="margin-top:10px"><strong>차단 판정은 4xx를 세지 않습니다.</strong>' +
+        '<div class="muted" style="margin-top:4px">키 오류·모델 없음은 어느 provider로 가도 같은 결과라, 그걸로 차단하면 멀쩡한 provider를 내리게 됩니다. 429·5xx·타임아웃·연결 실패만 셉니다. 또한 <strong>모든 provider가 차단되면 최초 provider는 그래도 시도</strong>합니다 — 아무도 호출하지 않으면 복구를 감지할 수 없기 때문입니다.</div></div>' +
+        '<div class="banner warn" style="margin-top:8px"><strong>폴백은 장애를 감춥니다.</strong>' +
+        '<div class="muted" style="margin-top:4px">폴백이 성공하면 호출자는 정상 응답을 받으므로 primary가 죽은 사실을 아무도 모른 채 이중화 여유분만 소모됩니다. 안전 탭 알림 규칙에서 <code>failover_rate</code>(폴백 발생률) 지표로 임계 알림을 걸어두세요.</div></div>';
+
       const extras =
         '<div style="margin-bottom:10px"><strong>컨텍스트 초과 자동 승급</strong>' +
         '<div class="muted" style="font-size:12px;margin-top:3px">업스트림이 400 + context length 초과를 반환하면 provider를 바꾸는 대신 <strong>더 큰 컨텍스트 모델로 한 번</strong> 재시도합니다(<code>context_overflow:</code>). provider 폴백 조건과 무관하게 동작합니다.</div></div>' +
@@ -15604,6 +15667,7 @@ const adminHTML = `<!doctype html>
         routingGuideSection('2단계 · 폴백 발동 조건', '아래 네 가지를 모두 만족할 때만 다른 provider로 재시도합니다.', conditions) +
         routingGuideSection('폴백이 안 되는 흔한 이유', '대부분 설정 문제이며, 위의 폴백 커버리지 표시로 바로 확인할 수 있습니다.', pitfalls) +
         routingGuideSection('응답 헤더로 확인하기', '어드민을 열지 않고 클라이언트에서 바로 라우팅 결과를 볼 수 있습니다.', headers) +
+        routingGuideSection('장애 대응 장치', '폴백이 "되기는 하는데 느리다"를 막는 세 가지 장치입니다.', resilience) +
         routingGuideSection('구성 레시피', '목적에 맞는 패턴 설계를 고르세요.', recipes) +
         routingGuideSection('추가로 알아둘 것', '', extras) +
         '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px">' +

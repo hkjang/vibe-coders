@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/csv"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -487,4 +488,236 @@ func TestRoutingHeadersExposeProviderAndFailover(t *testing.T) {
 			t.Fatalf("X-Failover-Path=%q, want empty when nothing failed over", got)
 		}
 	})
+}
+
+// End-to-end proof that the breaker takes a dead provider out of the dial path.
+// Before it, a broken primary was re-dialled on every single request, paying its
+// full timeout each time before failover even began.
+func TestProviderBreakerStopsDiallingDeadPrimary(t *testing.T) {
+	var primaryHits, backupHits atomic.Int32
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		primaryHits.Add(1)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer primary.Close()
+	backup := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		backupHits.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`))
+	}))
+	defer backup.Close()
+
+	db := openTestStore(t)
+	defer db.Close()
+	logger := store.NewAsyncLogger(db, 32, filepath.Join(t.TempDir(), "fallback.ndjson"))
+	logger.Start()
+	defer logger.Stop(context.Background())
+
+	cfg := testConfig(backup.URL, "default-secret")
+	cfg.Upstream.BreakerEnabled = true
+	cfg.Upstream.BreakerThreshold = 2
+	cfg.Upstream.BreakerCooldown = time.Hour // long enough that it cannot reopen mid-test
+	server, err := NewServer(cfg, db, logger, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxy := httptest.NewServer(server.Routes())
+	defer proxy.Close()
+
+	for _, p := range []struct{ name, url string }{{"a-primary", primary.URL}, {"b-backup", backup.URL}} {
+		resp := postJSON(t, proxy.URL+"/admin/providers", "", map[string]any{
+			"name": p.name, "base_url": p.url, "api_key": "secret",
+			"timeout_ms": 5000, "enabled": true, "model_patterns": "shared-*",
+		})
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			t.Fatalf("provider %s upsert failed: %d %s", p.name, resp.StatusCode, body)
+		}
+		resp.Body.Close()
+	}
+
+	call := func() *http.Response {
+		t.Helper()
+		resp := postJSON(t, proxy.URL+"/v1/chat/completions", "", chatBody("shared-model", false))
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("expected 200, got %d", resp.StatusCode)
+		}
+		return resp
+	}
+
+	// Two requests trip the threshold; both fail over and are served by the backup.
+	for i := 0; i < 2; i++ {
+		resp := call()
+		if got := resp.Header.Get("X-Provider"); got != "b-backup" {
+			t.Fatalf("request %d: X-Provider=%q, want b-backup", i, got)
+		}
+		if got := resp.Header.Get("X-Failover-From"); got != "a-primary" {
+			t.Fatalf("request %d: expected failover from a-primary, got %q", i, got)
+		}
+		resp.Body.Close()
+	}
+	if primaryHits.Load() != 2 {
+		t.Fatalf("expected the primary to be dialled twice before opening, got %d", primaryHits.Load())
+	}
+
+	// Breaker is now open: further requests must skip the primary entirely and go
+	// straight to the backup, with no failover hop to report.
+	for i := 0; i < 3; i++ {
+		resp := call()
+		if got := resp.Header.Get("X-Provider"); got != "b-backup" {
+			t.Fatalf("post-open request %d: X-Provider=%q, want b-backup", i, got)
+		}
+		if got := resp.Header.Get("X-Failover-From"); got != "" {
+			t.Fatalf("post-open request %d: expected no failover hop, got X-Failover-From=%q", i, got)
+		}
+		resp.Body.Close()
+	}
+	if primaryHits.Load() != 2 {
+		t.Fatalf("breaker did not stop dialling the dead primary: %d hits", primaryHits.Load())
+	}
+	if backupHits.Load() != 5 {
+		t.Fatalf("expected all 5 requests served by backup, got %d", backupHits.Load())
+	}
+
+	// The admin health view exposes the tripped breaker...
+	health, err := http.Get(proxy.URL + "/admin/routing/health")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer health.Body.Close()
+	var out struct {
+		Breakers struct {
+			Enabled bool `json:"enabled"`
+			States  []struct {
+				Provider string `json:"provider"`
+				Phase    string `json:"phase"`
+			} `json:"states"`
+		} `json:"breakers"`
+	}
+	if err := json.NewDecoder(health.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	if !out.Breakers.Enabled {
+		t.Fatal("breakers reported as disabled")
+	}
+	found := false
+	for _, st := range out.Breakers.States {
+		if st.Provider == "a-primary" && st.Phase == "open" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("tripped breaker not surfaced in /admin/routing/health: %+v", out.Breakers.States)
+	}
+
+	// ...and a manual reset puts the primary back in the dial path immediately.
+	reset := postJSON(t, proxy.URL+"/admin/routing/breaker-reset", "", map[string]any{"provider": "a-primary"})
+	if reset.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(reset.Body)
+		t.Fatalf("breaker reset failed: %d %s", reset.StatusCode, body)
+	}
+	reset.Body.Close()
+
+	resp := call()
+	resp.Body.Close()
+	if primaryHits.Load() != 3 {
+		t.Fatalf("reset did not put the primary back in rotation: %d hits", primaryHits.Load())
+	}
+}
+
+// A failover budget bounds how long the gateway keeps trying alternates. Without it
+// a slow primary plus a full candidate list multiplies the caller's wait; with it the
+// gateway stops and returns what it has.
+func TestFailoverBudgetStopsWalkingCandidates(t *testing.T) {
+	var primaryHits, backupHits atomic.Int32
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		primaryHits.Add(1)
+		time.Sleep(40 * time.Millisecond) // outlives the tiny budget below
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer primary.Close()
+	backup := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		backupHits.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`))
+	}))
+	defer backup.Close()
+
+	db := openTestStore(t)
+	defer db.Close()
+	logger := store.NewAsyncLogger(db, 32, filepath.Join(t.TempDir(), "fallback.ndjson"))
+	logger.Start()
+	defer logger.Stop(context.Background())
+
+	cfg := testConfig(backup.URL, "default-secret")
+	cfg.Upstream.BreakerEnabled = false // isolate budget behaviour from the breaker
+	server, err := NewServer(cfg, db, logger, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxy := httptest.NewServer(server.Routes())
+	defer proxy.Close()
+
+	for _, p := range []struct{ name, url string }{{"a-primary", primary.URL}, {"b-backup", backup.URL}} {
+		resp := postJSON(t, proxy.URL+"/admin/providers", "", map[string]any{
+			"name": p.name, "base_url": p.url, "api_key": "secret",
+			"timeout_ms": 5000, "enabled": true, "model_patterns": "shared-*",
+		})
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			t.Fatalf("provider %s upsert failed: %d %s", p.name, resp.StatusCode, body)
+		}
+		resp.Body.Close()
+	}
+
+	send := func(budgetMS string) *http.Response {
+		t.Helper()
+		req, err := http.NewRequest(http.MethodPost, proxy.URL+"/v1/chat/completions",
+			bytes.NewReader([]byte(mustJSON(chatBody("shared-model", false)))))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		if budgetMS != "" {
+			req.Header.Set("X-Failover-Budget-MS", budgetMS)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return resp
+	}
+
+	// No budget: the gateway walks the candidate list and the backup rescues the call.
+	noBudget := send("")
+	if noBudget.StatusCode != http.StatusOK {
+		t.Fatalf("without a budget expected the backup to serve 200, got %d", noBudget.StatusCode)
+	}
+	if got := noBudget.Header.Get("X-Provider"); got != "b-backup" {
+		t.Fatalf("without a budget X-Provider=%q, want b-backup", got)
+	}
+	noBudget.Body.Close()
+	if backupHits.Load() != 1 {
+		t.Fatalf("expected the backup to be tried once, got %d", backupHits.Load())
+	}
+
+	// Tiny budget: the primary's own latency already exhausts it, so no alternate is
+	// dialled and the caller gets the primary's failure instead of a longer wait.
+	tight := send("5")
+	if tight.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("with an exhausted budget expected the primary's 500, got %d", tight.StatusCode)
+	}
+	if got := tight.Header.Get("X-Provider"); got != "a-primary" {
+		t.Fatalf("with an exhausted budget X-Provider=%q, want a-primary", got)
+	}
+	if got := tight.Header.Get("X-Failover-Path"); !strings.Contains(got, "failover_budget_exhausted") {
+		t.Fatalf("X-Failover-Path=%q, want it to record the exhausted budget", got)
+	}
+	tight.Body.Close()
+	if backupHits.Load() != 1 {
+		t.Fatalf("budget was exhausted but the backup was dialled anyway: %d hits", backupHits.Load())
+	}
+	if primaryHits.Load() != 2 {
+		t.Fatalf("expected the primary to be dialled on both requests, got %d", primaryHits.Load())
+	}
 }

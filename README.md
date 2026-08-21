@@ -270,6 +270,11 @@ $env:PROXY_API_KEYS="dev:dev-proxy-key:alice:platform,team:team-proxy-key:bob:ba
 | `UPSTREAM_API_KEY` / `OPENAI_API_KEY` | 없음 | upstream provider key |
 | `UPSTREAM_PROVIDER` | `openai` | 로그에 기록할 provider 이름 |
 | `UPSTREAM_MODEL_PATTERNS` | 없음 | 기본 provider로 자동 라우팅할 모델 glob(쉼표 구분, 예: `gpt-*,o3-*`) |
+| `UPSTREAM_RESPONSE_HEADER_TIMEOUT` | `60s` | 업스트림 응답 헤더 대기 상한. `UPSTREAM_TIMEOUT`(전체)과 달리 스트리밍 본문을 자르지 않고 먹통 provider만 빨리 끊어 폴백을 앞당김 |
+| `UPSTREAM_FAILOVER_BUDGET` | `0`(무제한) | 대체 provider 시도에 쓸 총 시간 상한. 소진되면 남은 후보를 돌지 않고 마지막 결과 반환. 요청별 `X-Failover-Budget-MS` 로 덮어쓰기 |
+| `UPSTREAM_BREAKER_ENABLED` | `true` | Provider 회로 차단기. 연속 실패한 provider를 폴백 후보에서 자동 제외 |
+| `UPSTREAM_BREAKER_THRESHOLD` | `5` | 차단까지 필요한 연속 실패 횟수(429·5xx·타임아웃·연결 실패. 4xx 제외) |
+| `UPSTREAM_BREAKER_COOLDOWN` | `30s` | 차단 유지 시간. 경과 후 요청 1건으로 복구 확인 |
 | `DB_DRIVER` | `sqlite` | `sqlite` 또는 `postgres` |
 | `DB_DSN` | `data/gateway.db` | SQLite 파일 경로 |
 | `POSTGRES_DSN` / `DATABASE_URL` | 없음 | 있으면 PostgreSQL 사용 |
@@ -644,6 +649,8 @@ curl.exe http://localhost:8080/admin/providers `
 4. 실패가 429 · 5xx · 타임아웃 · 연결 실패 (4xx 는 폴백하지 않음)
 
 응답 헤더로 결과를 바로 확인할 수 있습니다 — `X-Provider`(실제 응답 provider), `X-Route-Reason`, `X-Route-Detail`, 그리고 폴백이 일어났을 때만 나오는 `X-Failover-From` · `X-Failover-Reason` · `X-Failover-Path`.
+
+장애 provider는 **회로 차단기**가 폴백 후보에서 자동으로 빼줍니다(연속 실패 5회 → 30초 차단 → 1건 탐침 복구). 라우팅 탭 → Provider Health → 회로 차단기 패널에서 상태 확인·수동 해제가 가능합니다. 폴백이 성공하면 호출자는 정상 응답을 받아 **장애가 감춰지므로**, 안전 탭 알림 규칙에서 `failover_rate` 지표로 폴백률 알림을 걸어두는 것을 권장합니다.
 
 > 전체 규칙·구성 레시피·트러블슈팅은 **[docs/ROUTING_GUIDE.md](docs/ROUTING_GUIDE.md)** 를 참고하세요. 어드민에서는 설정 탭 → 업스트림 프로바이더 → `📖 라우팅 · 폴백 동작 설명 열기` 버튼으로 같은 내용을 볼 수 있고, 같은 화면의 **폴백 커버리지** 표시가 provider 별로 폴백 상대가 있는지 알려줍니다.
 

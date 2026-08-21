@@ -200,6 +200,7 @@ var apiEndpoints = []apiEndpoint{
 	{"/admin/routing-rules", []string{"get", "post"}, "routing", "List / create routing rules", false},
 	{"/admin/routing-rules/{id}", []string{"put", "delete"}, "routing", "Update / delete a routing rule", false},
 	{"/admin/routing/pattern-conflicts", []string{"get", "post"}, "routing", "Analyze provider model-pattern conflicts and preview routing", false},
+	{"/admin/routing/breaker-reset", []string{"post"}, "routing", "Reset a tripped provider circuit breaker", false},
 	{"/admin/routing/preview", []string{"get", "post"}, "routing", "Preview routing decision", false},
 	{"/admin/routing/decisions", []string{"get"}, "routing", "Routing decisions", false},
 	{"/admin/routing/decisions/{id}", []string{"get"}, "routing", "Routing decision detail", false},

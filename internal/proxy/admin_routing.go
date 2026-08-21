@@ -178,6 +178,7 @@ func (s *Server) handleRoutingHealth(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "routing_health_trend_failed")
 		return
 	}
+	breakerEnabled, breakerThreshold, breakerCooldown := s.breakerConfig()
 	writeJSON(w, http.StatusOK, map[string]any{
 		"since":     since.UTC().Format(time.RFC3339),
 		"until":     until.Format(time.RFC3339),
@@ -187,6 +188,42 @@ func (s *Server) handleRoutingHealth(w http.ResponseWriter, r *http.Request) {
 		"degraded":  providerHealthDegraded(scores, threshold),
 		"alerts":    providerHealthAlerts(scores, threshold),
 		"trend":     trend,
+		// Live circuit breaker state. Health scores are a backward-looking average;
+		// this is the switch that is actually removing providers from failover right now.
+		"breakers": map[string]any{
+			"enabled":          breakerEnabled,
+			"threshold":        breakerThreshold,
+			"cooldown_seconds": int(breakerCooldown.Seconds()),
+			"states":           s.breakers.snapshot(breakerCooldown, time.Now()),
+		},
+	})
+}
+
+// handleRoutingBreakerReset clears a tripped breaker on request. After fixing a
+// provider an operator should not have to wait out the cooldown to confirm it.
+func (s *Server) handleRoutingBreakerReset(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	if r.Method != http.MethodPost {
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
+	var payload struct {
+		Provider string `json:"provider"`
+	}
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&payload)
+	}
+	name := strings.TrimSpace(payload.Provider)
+	s.breakers.reset(name)
+	s.auditAdmin(r, "routing.breaker.reset", firstNonEmpty(name, "*"), "")
+	_, _, cooldown := s.breakerConfig()
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":   "reset",
+		"provider": firstNonEmpty(name, "*"),
+		"states":   s.breakers.snapshot(cooldown, time.Now()),
 	})
 }
 

@@ -70,6 +70,48 @@
 
 ---
 
+## 3-1. 회로 차단기 · 폴백 예산 (v0.76.58)
+
+폴백이 "되기는 하는데 느리다"는 문제를 다루는 두 장치입니다.
+
+### 회로 차단기 (Circuit Breaker)
+
+기본 활성(`UPSTREAM_BREAKER_ENABLED=true`). 장애가 난 provider를 **폴백 후보에서 자동으로 제외**합니다. 이것이 없으면 죽은 provider를 매 요청마다 다시 호출하고, 매번 타임아웃을 전부 소모한 뒤에야 폴백이 시작됩니다.
+
+| 상태 | 의미 |
+|---|---|
+| `closed` (정상) | 연속 실패를 세는 중 |
+| `open` (차단됨) | 후보에서 제외. `UPSTREAM_BREAKER_COOLDOWN`(기본 30초) 동안 유지 |
+| `half_open` (복구 확인 중) | 유지 시간 경과. **요청 1건만** 흘려보내 확인 — 성공하면 정상, 실패하면 즉시 재차단 |
+
+- 차단 조건: **연속 실패 `UPSTREAM_BREAKER_THRESHOLD`회**(기본 5). 실패로 세는 것은 폴백 트리거와 동일하게 429 · 5xx · 타임아웃 · 연결 실패입니다. **4xx는 세지 않습니다** — 키 오류나 모델 없음은 어느 provider로 가도 같은 결과라, 이걸로 차단하면 멀쩡한 provider를 내리게 됩니다.
+- **모든 provider가 차단되면 최초 provider는 그래도 시도합니다.** 아무도 호출하지 않으면 복구를 감지할 방법이 없고, 복구 가능한 장애가 스스로 만든 전면 장애가 되기 때문입니다.
+- 상태는 **메모리에만** 있습니다(인스턴스별). 재시작하면 과거 판정을 물려받지 않고 다시 탐침합니다.
+- 확인·해제: 라우팅 탭 → `Provider Health` → **회로 차단기** 패널. 개별/전체 해제 버튼이 있고, API는 `POST /admin/routing/breaker-reset` (`{"provider":"이름"}`, 비우면 전체)입니다. 차단이 발생하면 Mattermost `provider` 카테고리로 알립니다.
+
+### 응답 헤더 대기 상한
+
+`UPSTREAM_RESPONSE_HEADER_TIMEOUT`(기본 60초)은 업스트림 **응답 헤더**를 기다리는 시간만 제한합니다. `UPSTREAM_TIMEOUT`(기본 10분)은 스트리밍 본문까지 포함한 전체 시간이라 낮출 수 없는데, 먹통 provider가 요청을 붙잡는 구간은 바로 헤더 대기입니다. 이 값만 조이면 **긴 스트리밍을 자르지 않으면서** 폴백이 빨리 시작됩니다.
+
+### 폴백 예산
+
+`UPSTREAM_FAILOVER_BUDGET`(기본 `0` = 무제한)은 **대체 provider를 시도하는 데 쓸 총 시간**의 상한입니다. 예산이 소진되면 남은 후보를 더 돌지 않고 마지막 결과를 그대로 반환하며, `fallback_path`에 `failover_budget_exhausted:<provider>`가 남습니다.
+
+요청 단위로는 `X-Failover-Budget-MS` 헤더로 덮어쓸 수 있습니다.
+
+```bash
+# 이 요청은 폴백에 최대 2초까지만 쓴다
+curl http://localhost:8080/v1/chat/completions \
+  -H "Authorization: Bearer dev-proxy-key" \
+  -H "X-Failover-Budget-MS: 2000" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"gpt-4.1-mini","messages":[{"role":"user","content":"hi"}]}'
+```
+
+예산은 **시도와 시도 사이**에만 검사하므로, 이미 응답이 오고 있는 요청을 중간에 끊지 않습니다.
+
+---
+
 ## 4. 응답 헤더로 확인하기
 
 어드민을 열지 않고 클라이언트에서 바로 라우팅 결과를 확인할 수 있습니다.
@@ -147,6 +189,10 @@ ollama   base_url = http://ollama:11434    model_patterns = nomic-embed-*,mxbai-
 
 둘은 서로 다른 값이며 섞이지 않습니다.
 
+### 폴백률 알림
+
+폴백이 성공하면 호출자는 정상 응답을 받으므로 **장애가 감춰집니다.** primary가 죽은 채로 이중화 여유분만 소모되는 상태를 놓치지 않으려면, 안전 탭 → 알림 규칙에서 지표 **`폴백 발생률`(`failover_rate`)** 또는 **`폴백 발생 건수`(`failovers`)** 로 규칙을 만드세요. 예: scope `global`, 지표 `failover_rate`, 임계 `0.05`(5%), 윈도우 300초.
+
 ### 이름 주의 — `/admin/fallback`
 
 설정 탭 아래의 **`Fallback 로그 재처리`(`/admin/fallback`)** 는 provider 폴백과 **무관합니다**. DB 장애 때 NDJSON으로 빠진 **감사 로그**를 다시 넣는 기능입니다.
@@ -163,5 +209,6 @@ ollama   base_url = http://ollama:11434    model_patterns = nomic-embed-*,mxbai-
 | `GET/POST /admin/routing/pattern-conflicts` | 패턴 충돌 · 폴백 커버리지 · 경로 시뮬레이션 |
 | `POST /admin/routing/preview` | auto 모델 라우팅 미리보기 (`fallback_plan` 포함) |
 | `GET /admin/routing/decisions` | 요청별 실제 라우팅 결정 · `fallback_path` |
-| `GET /admin/routing/health` | provider health · fallback rate · degradation |
+| `GET /admin/routing/health` | provider health · fallback rate · degradation · **회로 차단기 상태** |
+| `POST /admin/routing/breaker-reset` | 차단된 provider 수동 해제 |
 | `GET /admin/requests/{id}/explain` | 개별 요청이 왜 그렇게 처리됐는지 |

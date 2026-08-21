@@ -81,6 +81,8 @@ var validAlertMetrics = map[string]bool{
 	"mcp_new_tools":         true,
 	"anomaly_zmax":          true,
 	"budget_burn_ratio":     true,
+	"failovers":             true,
+	"failover_rate":         true,
 }
 var validAlertScopes = map[string]bool{"global": true, "api_key": true, "team": true, "ip": true, "model": true}
 
@@ -134,7 +136,7 @@ func (s *Server) handleAlertRules(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if !validAlertMetrics[payload.Metric] {
-			writeOpenAIError(w, http.StatusBadRequest, "metric must be one of requests/errors/krw/tokens/latency_p95_ms/first_chunk_p95_ms/llm_eval_failures/llm_eval_failure_rate/tool_errors/tool_error_rate", "invalid_request_error", "invalid_metric")
+			writeOpenAIError(w, http.StatusBadRequest, "metric must be one of requests/errors/krw/tokens/latency_p95_ms/first_chunk_p95_ms/llm_eval_failures/llm_eval_failure_rate/tool_errors/tool_error_rate/tool_loop/mcp_new_tools/anomaly_zmax/budget_burn_ratio/failovers/failover_rate", "invalid_request_error", "invalid_metric")
 			return
 		}
 		if !validAlertScopes[payload.Scope] {

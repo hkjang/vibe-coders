@@ -159,7 +159,7 @@ Intelligent Routing Engine API:
 - `POST /admin/routing/preview` — 실제 upstream 호출 없이 `auto` / `vibe/auto` / `vibe-coders/auto` 라우팅 결과 미리보기. 응답에는 자동화·필터링용 `route_reason` 과 사람이 읽는 `decision_reason` 이 함께 포함됩니다. body에 `api_key_id` 를 넣으면 해당 API 키의 allowed/denied model/provider 정책까지 반영합니다(team_admin은 자기 팀 키만 가능)
 - `GET|POST /admin/routing/pattern-conflicts` — 활성 provider의 `model_patterns` 교차·중복·catch-all 충돌 분석. GET은 현재 설정과 선택적 `model` 경로를 조회하고, POST는 `provider_name`, `model_patterns`, 선택적 `model`을 받아 저장 없이 변경 영향을 미리 계산합니다. 응답에는 **폴백 커버리지**(`coverage`, `summary.failover_ready_provider_count`/`failover_uncovered_provider_count`)와 기본 provider 패턴 유무(`default_provider_has_patterns`)가 함께 포함되고, `model` 을 넘기면 시뮬레이션에 실제 폴백 후보 체인(`simulation.failover_candidates`)과 폴백 불가 사유(`failover_blocked_reason`)가 들어갑니다. 폴백 후보는 `model_patterns` 매칭으로만 만들어지므로, 패턴이 겹치지 않는 provider끼리는 서로 폴백되지 않습니다.
 - `GET /admin/routing/decisions` / `GET /admin/routing/decisions/{id}` — 요청별 selected model/provider, complexity/risk/health, fallback path, decision reason 조회
-- `GET /admin/routing/health` — 최근 latency/p95/timeout/429/5xx/fallback rate 기반 provider health score 조회. 응답에는 provider 원본 점수와 함께 `ranking`, `degraded`, `alerts`, `trend` 가 포함됩니다. 관리자 화면은 라우팅 탭의 `Provider Health` 하위 화면(`#/routing/health`)에서 같은 데이터를 표시합니다.
+- `GET /admin/routing/health` — 최근 latency/p95/timeout/429/5xx/fallback rate 기반 provider health score 조회. 응답에는 provider 원본 점수와 함께 `ranking`, `degraded`, `alerts`, `trend`, 그리고 **회로 차단기 상태**(`breakers.enabled`/`threshold`/`cooldown_seconds`/`states`)가 포함됩니다. 회로 차단기는 연속 실패한 provider를 폴백 후보에서 자동 제외하며(기본 5회 → 30초 차단 → 1건 탐침 복구), 관리자 화면의 `회로 차단기` 패널에서 상태 확인과 수동 해제가 가능합니다. 수동 해제 API는 `POST /admin/routing/breaker-reset`(`{"provider":"이름"}`, 비우면 전체)입니다. 폴백이 성공하면 호출자에게는 정상 응답이 가서 장애가 감춰지므로, 안전 탭 알림 규칙의 `failover_rate` 지표로 폴백률 알림을 함께 걸어두는 것을 권장합니다. 관리자 화면은 라우팅 탭의 `Provider Health` 하위 화면(`#/routing/health`)에서 같은 데이터를 표시합니다.
 
 `auto` 계열 모델 별칭은 일반 라우팅 규칙보다 우선합니다. `X-Proxy-Provider` 또는 `?provider=` 로 provider 를 고정해도 auto 모델 rewrite 는 계속 수행되고, provider 선택만 클라이언트 지정값을 따릅니다. Provider `model_patterns` 가 `vibe/*` 처럼 alias 기준으로 등록되어 있으면, 선택된 실제 모델 패턴이 없을 때 요청 alias 기준 provider도 후보로 사용합니다. `GET /v1/models` 는 SDK 호환성을 위해 인증 모드에서도 공개 조회로 처리합니다.
 
@@ -705,6 +705,8 @@ curl -i http://<host>:8080/v1/chat/completions -H "Authorization: Bearer <발급
 | `first_chunk_p95_ms` | 윈도우 안 upstream 첫 응답 청크 지연 P95(ms) | 1500 |
 | `llm_eval_failures` | 윈도우 안 실패한 LLM evaluation 수 | 10 |
 | `llm_eval_failure_rate` | 윈도우 안 LLM evaluation 실패율 (0~1) | 0.2 |
+| `failovers` | 윈도우 안 폴백으로 처리된 요청 수 | 10 |
+| `failover_rate` | 윈도우 안 폴백 발생률 (0~1) | 0.05 |
 
 - **윈도우(초)**: 평가 기간. 알림 평가는 1분 주기로 돌고, 발화 후에는 같은 윈도우 동안 디바운스 됩니다.
 - **대상**: 전체 / API 키 / 팀 / IP / 모델 중 선택.
