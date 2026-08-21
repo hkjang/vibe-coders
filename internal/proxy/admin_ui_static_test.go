@@ -180,3 +180,22 @@ func TestAdminUIValidatedFieldsExist(t *testing.T) {
 		t.Error("no validated fields found; requireFields is no longer wired up")
 	}
 }
+
+// An empty configuration screen is the first thing a new operator sees, and "팀 없음"
+// tells them nothing about how to change it. The screens that own a creation form must
+// point at it. Several already did; this keeps the rest from regressing to a bare label.
+func TestAdminUIConfigEmptyStatesAreActionable(t *testing.T) {
+	_, payload := adminUISource(t)
+	bare := []string{
+		`class="empty">팀 없음`,
+		`class="empty">설정된 한도 없음`,
+		`class="empty">설정된 예산 없음`,
+		`class="empty">설정된 알림 규칙 없음`,
+		`class="empty">등록된 템플릿 없음.`,
+	}
+	for _, b := range bare {
+		if strings.Contains(payload, b) {
+			t.Errorf("configuration empty state is back to a bare label: %s — say what creates one", b)
+		}
+	}
+}

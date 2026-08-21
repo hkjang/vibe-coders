@@ -7439,7 +7439,7 @@ const adminHTML = `<!doctype html>
               '<td>' + ago(t.last_seen) + '</td>' +
             '</tr>'
           ).join('') + '</tbody></table>'
-        ) : '<div class="empty">팀 없음</div>'
+        ) : '<div class="empty">등록된 팀이 없습니다. 위 <strong>팀 추가</strong> 폼에서 만들면 API 키·사용량·비용을 팀 단위로 묶어 볼 수 있습니다.</div>'
       );
       document.getElementById('view').innerHTML = html;
       makeSortable('#view', 'teams');
@@ -7637,7 +7637,7 @@ const adminHTML = `<!doctype html>
       const table = usage.length ? (
         '<table><thead><tr><th>대상</th><th>주기</th><th>토큰</th><th>비용</th><th>상태</th><th>메모</th><th>동작</th></tr></thead><tbody>' +
         usage.map(quotaRow).join('') + '</tbody></table>'
-      ) : '<div class="empty">설정된 한도 없음</div>';
+      ) : '<div class="empty">설정된 사용 한도가 없습니다. 한도를 만들기 전까지 API 키·팀·IP별 토큰과 비용에 제한이 없습니다. 위 폼에서 추가하세요.</div>';
 
       const budgets = br.budgets || [];
       const budgetRow = (b) => {
@@ -7665,7 +7665,7 @@ const adminHTML = `<!doctype html>
       const budgetTable = budgets.length ? (
         '<table><thead><tr><th>대상</th><th>이번 달 누적 / 월 예산</th><th>월말 예상 지출</th><th>소진 예측</th><th>메모</th><th>동작</th></tr></thead><tbody>' +
         budgets.map(budgetRow).join('') + '</tbody></table>'
-      ) : '<div class="empty">설정된 예산 없음</div>';
+      ) : '<div class="empty">설정된 예산이 없습니다. 예산을 만들면 월말 초과가 예상될 때 미리 경고받을 수 있습니다. 위 폼에서 추가하세요.</div>';
 
       const html = section('사용 한도 (Quota)',
         '<div class="card-body">' +
@@ -11155,7 +11155,7 @@ const adminHTML = `<!doctype html>
             '<button class="secondary" type="button" onclick="toggleAlert(\'' + r.id + '\', ' + (!r.enabled) + ')">' + (r.enabled ? '중지' : '사용') + '</button> ' +
             '<button class="danger" type="button" onclick="deleteAlert(\'' + r.id + '\')">삭제</button>' +
           '</td></tr>').join('') + '</tbody></table>'
-      ) : '<div class="empty">설정된 알림 규칙 없음</div>';
+      ) : '<div class="empty">설정된 알림 규칙이 없습니다. 오류율·비용·지연·폴백률이 임계값을 넘을 때 통보받으려면 위 폼에서 규칙을 추가하세요.</div>';
 
       const eventTable = events.length ? (
         '<table><thead><tr><th>시각</th><th>규칙</th><th>지표</th><th>값</th><th>임계값</th><th>전송</th></tr></thead><tbody>' +
@@ -16596,7 +16596,7 @@ const adminHTML = `<!doctype html>
           '<td><button class="secondary" type="button" onclick="toggleTemplate(\'' + escapeAttr(t.id) + '\',' + (!t.enabled) + ')">' + (t.enabled ? '중지' : '사용') + '</button> ' +
           '<button class="danger" type="button" onclick="deleteTemplate(\'' + escapeAttr(t.id) + '\')">삭제</button></td>' +
         '</tr>').join('') + '</tbody></table>'
-        : '<div class="empty">등록된 템플릿 없음.</div>';
+        : '<div class="empty">등록된 작업 템플릿이 없습니다. 자주 쓰는 리팩터링·테스트·보안 점검 프롬프트를 위 폼에 등록해두면 팀이 공유해 사용합니다.</div>';
       return form + table +
         '<div class="muted" style="font-size:12px; padding:0 14px 12px">리팩터링·테스트 생성·보안 점검·문서화 등 표준 프롬프트를 중앙에서 관리합니다. <code>GET /admin/templates</code> 로 조회해 코딩 도구·스니펫에 배포하세요.</div>';
     }
