@@ -199,6 +199,7 @@ var apiEndpoints = []apiEndpoint{
 	// ---- admin: routing ----
 	{"/admin/routing-rules", []string{"get", "post"}, "routing", "List / create routing rules", false},
 	{"/admin/routing-rules/{id}", []string{"put", "delete"}, "routing", "Update / delete a routing rule", false},
+	{"/admin/routing/pattern-conflicts", []string{"get", "post"}, "routing", "Analyze provider model-pattern conflicts and preview routing", false},
 	{"/admin/routing/preview", []string{"get", "post"}, "routing", "Preview routing decision", false},
 	{"/admin/routing/decisions", []string{"get"}, "routing", "Routing decisions", false},
 	{"/admin/routing/decisions/{id}", []string{"get"}, "routing", "Routing decision detail", false},
@@ -479,7 +480,7 @@ var apiEndpoints = []apiEndpoint{
 	{"/admin/alerts", []string{"get", "post"}, "admin", "Alert rules", false},
 	{"/admin/alerts/{id}", []string{"put", "delete"}, "admin", "Alert rule by id", false},
 	{"/admin/saved-filters", []string{"get", "post"}, "admin", "Saved filters", false},
-	{"/admin/saved-filters/{id}", []string{"put", "delete"}, "admin", "Saved filter by id", false},
+	{"/admin/saved-filters/{id}", []string{"get", "put", "patch", "delete"}, "admin", "Saved filter by id", false},
 	{"/admin/notifications/mattermost", []string{"get", "post"}, "notifications", "Mattermost config", false},
 	{"/admin/notifications/mattermost/test", []string{"post"}, "notifications", "Send a test Mattermost message", false},
 }

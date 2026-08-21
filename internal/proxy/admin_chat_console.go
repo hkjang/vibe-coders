@@ -430,7 +430,7 @@ func (s *Server) chatTestRoutingPreview(r *http.Request, prep chatTestPrep, inpu
 		"complexity":        plan.Complexity,
 		"risk":              plan.Risk,
 		"health_score":      plan.HealthScore,
-		"fallback_path":     plan.FallbackPath,
+		"fallback_plan":     plan.FallbackPlan,
 		"route_reason":      plan.RouteReason,
 		"decision_reason":   plan.DecisionReason,
 		"would_rewrite":     plan.RequestedModel != "" && plan.SelectedModel != "" && plan.RequestedModel != plan.SelectedModel,

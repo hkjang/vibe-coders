@@ -1460,7 +1460,7 @@ type RequestNote struct {
 type SavedFilter struct {
 	ID        string    `json:"id"`
 	Name      string    `json:"name"`
-	View      string    `json:"view"`   // requests | prompts
+	View      string    `json:"view"`   // requests | prompts | xview
 	Params    string    `json:"params"` // raw URL query string
 	CreatedBy string    `json:"created_by"`
 	CreatedAt time.Time `json:"created_at"`

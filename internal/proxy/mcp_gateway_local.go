@@ -403,7 +403,7 @@ func (s *Server) runGatewayTool(ctx context.Context, r *http.Request, apiKeyID s
 		return gatewayToolJSON(map[string]any{
 			"requested_model": plan.RequestedModel, "selected_model": plan.SelectedModel,
 			"selected_provider": plan.SelectedProvider, "reason": firstNonEmpty(plan.DecisionReason, plan.RouteReason),
-			"complexity_tier": plan.Complexity.Tier, "risk_tier": plan.Risk.Tier, "fallback_path": plan.FallbackPath,
+			"complexity_tier": plan.Complexity.Tier, "risk_tier": plan.Risk.Tier, "fallback_plan": plan.FallbackPlan,
 		}), nil
 
 	case "gateway_list_skills":

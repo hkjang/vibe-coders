@@ -127,10 +127,13 @@ MCP Security Center는 MCP 탭 또는 `GET/POST /admin/mcp/tools` 에서 tool별
   - 🔴 오류 (status ≥ 400, kill switch·정책 차단 포함)
   - 🟣 고비용/복잡 (토큰이 상위 10% 또는 4000 이상)
 - **창**: 5m / 15m / 1h / 6h / 24h. **필터**: 모델, endpoint.
+- **조사 보기**: 현재 기간·시간대·지표·스케일·색상 모드·모델·endpoint 조건을 이름으로 저장하고 다시 실행하거나 덮어쓰기·삭제할 수 있습니다. 공유 링크는 현재 조건을 직접 포함해 저장 항목 수명과 무관하게 재현됩니다.
 - **드릴다운**: 점에 마우스를 올리면 모델·provider·지연·토큰·비용·상태 툴팁, 클릭하면 요청 상세 모달.
 - 점이 6000건을 넘으면 최근 6000건으로 제한(범례 옆에 표시).
 
 API: `GET /admin/scatter?window=1h&metric=latency&model=&endpoint=&limit=6000` — 점 배열(`request_id, created_at, latency_ms, first_chunk_ms, status_code, provider, model, total_tokens, cost_krw, stream, tool_count, failover`)과 `truncated` 플래그를 반환합니다.
+
+저장 API는 `GET /admin/saved-filters?view=xview`, `POST /admin/saved-filters`, `GET|PATCH|DELETE /admin/saved-filters/{id}`를 사용합니다. XView 저장 파라미터는 allowlist와 enum·기간·시간대 검증을 통과해야 하며 `window`와 `from/to`는 함께 저장할 수 없습니다.
 
 ### eXplainability View (점 클릭 → "왜 이렇게 처리됐나")
 
@@ -147,11 +150,14 @@ API: `GET /admin/scatter?window=1h&metric=latency&model=&endpoint=&limit=6000` �
 
 복잡도 점수는 프롬프트 토큰·대화 깊이·도구 수 기반 휴리스틱 추정치이며(모델 산출값 아님) UI에 그 사실이 명시됩니다.
 
-API: `GET /admin/requests/{id}/explain` → `{routing, fallback, cache, safety, cost, session}`. `routing` 에는 `chosen_model`, `chosen_provider`, `complexity`, `risk_score`, `health_score`, `fallback_path`, `route_reason`, `decision_reason` 이 포함됩니다. `GET /admin/requests/{id}/links` 는 요청 상세·XView·Waterfall·MCP Waterfall·Text2SQL Timeline·라우팅 결정 연결 정보와 카운트를 한 번에 반환합니다. 이때 `policy_decision_count` 는 `decision=default` 를 제외한 실질 거버넌스 판단 수이고, `policy_decision_total` 은 원시 감사 이벤트 수입니다.
+API: `GET /admin/requests/{id}/explain` → `{routing, fallback, cache, safety, cost, session}`. `routing` 에는 `chosen_model`, `chosen_provider`, `complexity`, `risk_score`, `health_score`, `fallback_path`, `route_reason`, `decision_reason` 이 포함됩니다. 이때 `fallback_path` 는 **실제로 일어난** 폴백 경로만 담으며, 폴백이 없었다면 비어 있습니다(사전 예측 경로는 `/admin/routing/preview` 의 `fallback_plan`). `GET /admin/requests/{id}/links` 는 요청 상세·XView·Waterfall·MCP Waterfall·Text2SQL Timeline·라우팅 결정 연결 정보와 카운트를 한 번에 반환합니다. 이때 `policy_decision_count` 는 `decision=default` 를 제외한 실질 거버넌스 판단 수이고, `policy_decision_total` 은 원시 감사 이벤트 수입니다.
+
+> **provider 라우팅과 폴백의 전체 규칙은 [ROUTING_GUIDE.md](ROUTING_GUIDE.md) 를 참고하세요.** 선택 순서, 폴백 4조건, 폴백이 안 되는 흔한 이유, 구성 레시피를 한 곳에 모았습니다. 어드민에서는 설정 탭 → 업스트림 프로바이더 → `📖 라우팅 · 폴백 동작 설명 열기` 버튼으로 같은 내용을 모달로 볼 수 있습니다.
 
 Intelligent Routing Engine API:
 
 - `POST /admin/routing/preview` — 실제 upstream 호출 없이 `auto` / `vibe/auto` / `vibe-coders/auto` 라우팅 결과 미리보기. 응답에는 자동화·필터링용 `route_reason` 과 사람이 읽는 `decision_reason` 이 함께 포함됩니다. body에 `api_key_id` 를 넣으면 해당 API 키의 allowed/denied model/provider 정책까지 반영합니다(team_admin은 자기 팀 키만 가능)
+- `GET|POST /admin/routing/pattern-conflicts` — 활성 provider의 `model_patterns` 교차·중복·catch-all 충돌 분석. GET은 현재 설정과 선택적 `model` 경로를 조회하고, POST는 `provider_name`, `model_patterns`, 선택적 `model`을 받아 저장 없이 변경 영향을 미리 계산합니다. 응답에는 **폴백 커버리지**(`coverage`, `summary.failover_ready_provider_count`/`failover_uncovered_provider_count`)와 기본 provider 패턴 유무(`default_provider_has_patterns`)가 함께 포함되고, `model` 을 넘기면 시뮬레이션에 실제 폴백 후보 체인(`simulation.failover_candidates`)과 폴백 불가 사유(`failover_blocked_reason`)가 들어갑니다. 폴백 후보는 `model_patterns` 매칭으로만 만들어지므로, 패턴이 겹치지 않는 provider끼리는 서로 폴백되지 않습니다.
 - `GET /admin/routing/decisions` / `GET /admin/routing/decisions/{id}` — 요청별 selected model/provider, complexity/risk/health, fallback path, decision reason 조회
 - `GET /admin/routing/health` — 최근 latency/p95/timeout/429/5xx/fallback rate 기반 provider health score 조회. 응답에는 provider 원본 점수와 함께 `ranking`, `degraded`, `alerts`, `trend` 가 포함됩니다. 관리자 화면은 라우팅 탭의 `Provider Health` 하위 화면(`#/routing/health`)에서 같은 데이터를 표시합니다.
 
@@ -584,6 +590,13 @@ curl -i http://<host>:8080/v1/chat/completions -H "Authorization: Bearer <발급
 
 ### Journey Probe (개발도구 연결 합성 점검)
 - "Journey Probe" 탭 / `POST /admin/journey-probe {proxy_key, clients?}`: Cursor·Roo·Cline·OpenAI SDK 등 도구별 실제 연결 journey(모델 목록·MCP initialize/tools-list)를 supplied Proxy API Key로 합성 점검(비용 발생 chat 호출 없음). "서버는 살아있는데 Cursor만 안 됨"을 분리.
+
+### 변경 후 자동 Red Team 회귀 점검
+- Provider, 라우팅 규칙, MCP upstream·도구 정책, Governance 정책, Text2SQL 스키마·권한, AI App·Workflow가 변경되면 관련 등록 대상만 골라 Red Team 캠페인을 자동 생성합니다.
+- 자동 캠페인은 항상 `dry-run` 시뮬레이션으로 실행되며 provider나 MCP upstream을 실제 호출하지 않습니다.
+- Red Team 화면의 **변경 후 자동 점검** 상태에서 활성 여부·중복 억제 시간·변경당 최대 대상 수를 확인하고, 캠페인 **생성 경로**에서 원인이 된 audit action과 대상 참조를 확인합니다.
+- 동일한 변경 상태는 기본 10분 동안 한 번만 실행됩니다. 전체 범위 변경은 대상 유형을 순환 선택해 기본 20개 대상까지만 검사합니다.
+- Red Team Kill Switch가 켜져 있으면 자동 캠페인도 생성·실행하지 않습니다. `REDTEAM_POST_CHANGE_ENABLED`, `REDTEAM_POST_CHANGE_COOLDOWN`, `REDTEAM_POST_CHANGE_MAX_TARGETS`로 운영값을 조정합니다.
 
 ### 파드 운영 맵 / 프라이버시 원장 / AI 업무성과 / 온보딩 점검
 - "파드 운영 맵" 탭 / `GET /admin/pods`: 멀티 파드 하트비트·빌드·런타임 설정 수렴(applied vs current token) 상태. live/stale·설정 최신 여부.

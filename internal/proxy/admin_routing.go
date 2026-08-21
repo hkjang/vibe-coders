@@ -74,10 +74,13 @@ func (s *Server) handleRoutingPreview(w http.ResponseWriter, r *http.Request) {
 		"complexity":        plan.Complexity,
 		"risk":              plan.Risk,
 		"health_score":      plan.HealthScore,
-		"fallback_path":     plan.FallbackPath,
-		"route_reason":      plan.RouteReason,
-		"decision_reason":   plan.DecisionReason,
-		"would_rewrite":     plan.RequestedModel != "" && plan.SelectedModel != "" && plan.RequestedModel != plan.SelectedModel,
+		// A preview never dials upstream, so it can only report the plan. The actual
+		// hop list (fallback_path) is populated on real requests and read back from
+		// /admin/routing/decisions or the request explain view.
+		"fallback_plan":   plan.FallbackPlan,
+		"route_reason":    plan.RouteReason,
+		"decision_reason": plan.DecisionReason,
+		"would_rewrite":   plan.RequestedModel != "" && plan.SelectedModel != "" && plan.RequestedModel != plan.SelectedModel,
 	})
 }
 

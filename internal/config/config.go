@@ -32,6 +32,7 @@ type Config struct {
 	Skills      SkillsConfig
 	Limits      LimitsConfig
 	MCP         MCPConfig
+	RedTeam     RedTeamConfig
 	Keycloak    KeycloakConfig
 	// RuntimeReloadInterval is how often each pod polls the DB for admin-settings changes made on
 	// other pods (multi-replica convergence). 0 disables polling (single-pod / local dev).
@@ -80,6 +81,14 @@ type MCPConfig struct {
 	// accuracy and inflate token cost; the highest-ranked candidates' tools are kept.
 	// Default 32.
 	MaxTools int
+}
+
+// RedTeamConfig controls the bounded, simulation-only security regression campaign
+// automatically created after security-sensitive admin changes.
+type RedTeamConfig struct {
+	PostChangeEnabled    bool
+	PostChangeCooldown   time.Duration
+	PostChangeMaxTargets int
 }
 
 // InsuranceConfig parameterizes the AI Request Insurance view: an SLA-claims ledger
@@ -484,6 +493,11 @@ func Load() (Config, error) {
 			MaxTokens:      intEnv("MCP_MAX_TOKENS", 2048),
 			ForceToolFirst: boolEnv("MCP_FORCE_TOOL_FIRST", true),
 			MaxTools:       intEnv("MCP_MAX_TOOLS", 32),
+		},
+		RedTeam: RedTeamConfig{
+			PostChangeEnabled:    boolEnv("REDTEAM_POST_CHANGE_ENABLED", true),
+			PostChangeCooldown:   durationEnv("REDTEAM_POST_CHANGE_COOLDOWN", 10*time.Minute),
+			PostChangeMaxTargets: intEnv("REDTEAM_POST_CHANGE_MAX_TARGETS", 20),
 		},
 	}
 

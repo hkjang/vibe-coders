@@ -461,6 +461,7 @@ func (rc *requestPipeline) stepUpstream() bool {
 			meta.Routing = routingPlan.toStore(meta.Request.ID, traceID, meta.Request.Provider)
 		}
 		applyUpstreamHeaderSummary(&meta.Request, upstreamHeaders, nil, w.Header())
+		setRoutingHeaders(w, provider, meta.Request.Provider, failoverFrom, failoverReason, failoverPath)
 		refreshRoutingSummary(&meta.Request, routingPlan)
 		meta.Evaluations = buildLLMEvaluations(meta, ResponseAnalysis{})
 		s.metrics.ObserveLLMEvaluations(meta.Evaluations)
@@ -473,7 +474,6 @@ func (rc *requestPipeline) stepUpstream() bool {
 	defer resp.Body.Close()
 	if failoverFrom != "" {
 		s.metrics.IncFailover()
-		w.Header().Set("X-Failover-From", failoverFrom)
 		meta.Request.Failover = true
 		meta.Request.FallbackFrom = failoverFrom
 		meta.Request.FallbackReason = failoverReason
@@ -517,6 +517,7 @@ func (rc *requestPipeline) stepUpstream() bool {
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Header().Set("X-Accel-Buffering", "no")
 	}
+	setRoutingHeaders(w, provider, meta.Request.Provider, failoverFrom, failoverReason, failoverPath)
 	w.Header().Set("X-Request-ID", traceID)
 	w.WriteHeader(resp.StatusCode)
 
@@ -636,4 +637,36 @@ func (rc *requestPipeline) stepUpstream() bool {
 	refreshRoutingSummary(&meta.Request, routingPlan)
 	s.enqueue(meta)
 	return true
+}
+
+// setRoutingHeaders tells the caller which upstream actually served the request and
+// why it was chosen, so provider routing is observable from the client without
+// opening the admin UI. Previously only X-Failover-From was exposed, which left the
+// far more common "which provider handled this?" question unanswerable.
+//
+//	X-Provider          resolved provider that produced the response
+//	X-Route-Reason      how it was picked: header | query | model_pattern | rule_provider | default
+//	X-Route-Detail      the matched glob / header name / env var behind that reason
+//	X-Failover-From     original provider, only when a failover occurred
+//	X-Failover-Reason   what triggered it: 429 | 5xx | timeout | transport_error | context_overflow
+//	X-Failover-Path     full chain of actual failover hops (comma separated)
+func setRoutingHeaders(w http.ResponseWriter, selected resolvedProvider, servedBy, failoverFrom, failoverReason string, failoverPath []string) {
+	if name := firstNonEmpty(servedBy, selected.Name); name != "" {
+		w.Header().Set("X-Provider", name)
+	}
+	if selected.Reason != "" {
+		w.Header().Set("X-Route-Reason", selected.Reason)
+	}
+	if selected.Detail != "" {
+		w.Header().Set("X-Route-Detail", selected.Detail)
+	}
+	if failoverFrom != "" {
+		w.Header().Set("X-Failover-From", failoverFrom)
+	}
+	if failoverReason != "" {
+		w.Header().Set("X-Failover-Reason", failoverReason)
+	}
+	if len(failoverPath) > 0 {
+		w.Header().Set("X-Failover-Path", strings.Join(failoverPath, ","))
+	}
 }

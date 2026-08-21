@@ -31,7 +31,7 @@ import (
 )
 
 // AppVersion is the gateway build version, surfaced in /auth/me and the admin UI.
-const AppVersion = "v0.76.56"
+const AppVersion = "v0.76.57"
 
 type Server struct {
 	cfg            config.Config
@@ -526,6 +526,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/admin/routing/domain-examples", s.handleDomainExamples)
 	mux.HandleFunc("/admin/routing/domain-review", s.handleDomainReviewQueue)
 	mux.HandleFunc("/admin/routing/domain-review/", s.handleDomainReviewAction)
+	mux.HandleFunc("/admin/routing/pattern-conflicts", s.handleProviderPatternConflicts)
 	mux.HandleFunc("/admin/routing/preview", s.handleRoutingPreview)
 	mux.HandleFunc("/admin/routing/decisions", s.handleRoutingDecisions)
 	mux.HandleFunc("/admin/routing/decisions/", s.handleRoutingDecisionByID)
@@ -1744,6 +1745,11 @@ func (s *Server) auditAdmin(r *http.Request, action string, before string, after
 	}); err != nil {
 		slog.Warn("write admin audit failed", "action", action, "error", err)
 	}
+	if err := s.maybeRunPostChangeRedTeam(r, action, before, after); err != nil {
+		// The admin mutation has already succeeded. Surface the regression trigger failure
+		// operationally without turning a successful configuration write into an HTTP error.
+		slog.Warn("post-change redteam trigger failed", "action", action, "error", err)
+	}
 }
 
 func adminID(r *http.Request) string {
@@ -1840,7 +1846,9 @@ func (s *Server) currentAccessClaims(r *http.Request) (accessClaims, bool) {
 
 func adminRequiredScope(r *http.Request) string {
 	if strings.HasPrefix(r.URL.Path, "/admin/routing") {
-		if r.Method == http.MethodGet || r.Method == http.MethodHead || r.URL.Path == "/admin/routing/preview" {
+		if r.Method == http.MethodGet || r.Method == http.MethodHead ||
+			r.URL.Path == "/admin/routing/preview" ||
+			r.URL.Path == "/admin/routing/pattern-conflicts" {
 			return "routing:read"
 		}
 		return "routing:write"

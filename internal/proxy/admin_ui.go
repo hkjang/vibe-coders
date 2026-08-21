@@ -1681,9 +1681,22 @@ const adminHTML = `<!doctype html>
     }
 
     async function renderXView(initial) {
+      const savedResponse = await api('/admin/saved-filters?view=xview').catch(() => ({ filters: [] }));
+      const savedViews = savedResponse.filters || [];
+      const requestedSavedID = initial ? (initial.get('saved') || '') : '';
+      const activeSavedView = savedViews.find(view => view.id === requestedSavedID) || null;
+      if (activeSavedView) {
+        const merged = new URLSearchParams(activeSavedView.params || '');
+        initial.forEach((value, key) => {
+          if (key !== 'saved') merged.set(key, value);
+        });
+        merged.set('saved', requestedSavedID);
+        initial = merged;
+      }
       if (initial) {
         if (initial.get('window'))   xviewState.window   = initial.get('window');
         if (initial.get('metric'))   xviewState.metric   = initial.get('metric');
+        if (initial.get('scale'))    xviewState.scale    = initial.get('scale');
         if (initial.get('viewMode')) xviewState.viewMode = initial.get('viewMode');
         xviewState.from = initial.get('from') || '';
         xviewState.to   = initial.get('to')   || '';
@@ -1729,7 +1742,26 @@ const adminHTML = `<!doctype html>
 
       const view = document.getElementById('view');
       const xviewHero = '<div class="home-hero"><h2>✦ XView</h2><div class="home-sub">수천 개 요청 속에서 느림·오류·비용·정책 신호를 찾고, 한 점을 클릭해 “왜 이렇게 처리됐는가”까지 이어서 설명합니다.</div><div class="home-actions"><button type="button" class="home-action primary" onclick="openXViewLauncher()"><strong>요청 ID로 설명 찾기</strong><small>라우팅·안전·비용 근거</small></button><a class="home-action" href="#/waterfall"><strong>Waterfall</strong><small>세션 시간 흐름 분석</small></a><a class="home-action" href="#/requests"><strong>호출 이력</strong><small>원문과 응답 상세</small></a><a class="home-action" href="#/llm"><strong>LLM 관측</strong><small>평가·피드백·패턴</small></a></div></div>';
+      const savedOptions = '<option value="">저장된 조사 보기</option>' + savedViews.map(saved =>
+        '<option value="' + escapeAttr(saved.id) + '"' + (saved.id === requestedSavedID ? ' selected' : '') +
+          ' title="' + escapeAttr(saved.created_by || '') + '">' + escapeHTML(saved.name) + '</option>'
+      ).join('');
+      const savedState = activeSavedView
+        ? '<span class="status">활성: ' + escapeHTML(activeSavedView.name) + '</span>'
+        : (requestedSavedID ? '<span class="status error">저장된 보기를 찾을 수 없음</span>' : '');
+      const investigationBar =
+        '<div class="toolbar" style="border-bottom:1px solid var(--line); flex-wrap:wrap">' +
+          '<strong>조사 보기</strong>' +
+          '<select id="xv-saved" aria-label="저장된 XView 조사 보기">' + savedOptions + '</select>' +
+          '<button id="xv-save" type="button" class="secondary">새로 저장</button>' +
+          '<button id="xv-overwrite" type="button" class="secondary"' + (activeSavedView ? '' : ' disabled') + '>덮어쓰기</button>' +
+          '<button id="xv-delete-saved" type="button" class="' + (activeSavedView ? 'danger' : 'secondary') + '"' + (activeSavedView ? '' : ' disabled') + '>삭제</button>' +
+          '<button id="xv-copy-link" type="button" class="ghost">링크 복사</button>' +
+          savedState +
+          '<span class="muted" style="margin-left:auto">저장 ' + fmt(savedViews.length) + '개</span>' +
+        '</div>';
       const xviewDistribution = section('요청 분포 탐색',
+        investigationBar +
         '<div class="toolbar">' +
           '<select id="xv-window"' + (xviewState.from || xviewState.to ? ' disabled title="기간(from~to) 지정 시 무시됨"' : '') + '>' +
             ['5m','15m','1h','6h','24h'].map(wd => '<option value="' + wd + '"' + (xviewState.window === wd ? ' selected' : '') + '>' + wd + '</option>').join('') +
@@ -1775,7 +1807,7 @@ const adminHTML = `<!doctype html>
       drawScatter(points, groups, modelIndex);
       renderModelGroupTable(groups);
 
-      const apply = () => {
+      const collectXViewParams = () => {
         xviewState.window   = document.getElementById('xv-window').value;
         xviewState.metric   = document.getElementById('xv-metric').value;
         xviewState.scale    = document.getElementById('xv-scale').value;
@@ -1790,6 +1822,7 @@ const adminHTML = `<!doctype html>
         sessionStorage.setItem('xviewTz',       xviewState.tz);
         const p = new URLSearchParams();
         p.set('metric',   xviewState.metric);
+        p.set('scale',    xviewState.scale);
         p.set('viewMode', xviewState.viewMode);
         // Absolute range takes precedence; only fall back to the relative window when unset.
         if (xviewState.from || xviewState.to) {
@@ -1803,6 +1836,11 @@ const adminHTML = `<!doctype html>
         const e  = document.getElementById('xv-endpoint').value.trim();
         if (ms) p.set('models', ms);
         if (e)  p.set('endpoint', e);
+        return p;
+      };
+      const apply = () => {
+        const p = collectXViewParams();
+        if (activeSavedView) p.set('saved', activeSavedView.id);
         location.hash = '#/xview?' + p.toString();
       };
       document.getElementById('xv-apply').addEventListener('click', apply);
@@ -1814,6 +1852,56 @@ const adminHTML = `<!doctype html>
       });
       ['xv-window', 'xv-metric', 'xv-scale', 'xv-viewmode', 'xv-from', 'xv-to', 'xv-tz'].forEach(id =>
         document.getElementById(id).addEventListener('change', apply));
+
+      document.getElementById('xv-saved').addEventListener('change', (event) => {
+        const id = event.target.value;
+        if (id) {
+          location.hash = '#/xview?saved=' + encodeURIComponent(id);
+          return;
+        }
+        const params = collectXViewParams();
+        location.hash = '#/xview?' + params.toString();
+      });
+      document.getElementById('xv-save').addEventListener('click', async () => {
+        const name = prompt('조사 보기 이름을 입력하세요');
+        if (!name || !name.trim()) return;
+        const created = await api('/admin/saved-filters', {
+          method: 'POST',
+          body: JSON.stringify({ name: name.trim(), view: 'xview', params: collectXViewParams().toString() })
+        });
+        location.hash = '#/xview?saved=' + encodeURIComponent(created.filter.id);
+      });
+      document.getElementById('xv-overwrite').addEventListener('click', async () => {
+        if (!activeSavedView) return;
+        await api('/admin/saved-filters/' + encodeURIComponent(activeSavedView.id), {
+          method: 'PATCH',
+          body: JSON.stringify({ params: collectXViewParams().toString() })
+        });
+        const targetHash = '#/xview?saved=' + encodeURIComponent(activeSavedView.id);
+        if (location.hash === targetHash) await route();
+        else location.hash = targetHash;
+      });
+      document.getElementById('xv-delete-saved').addEventListener('click', async () => {
+        if (!activeSavedView) return;
+        if (!confirm('"' + activeSavedView.name + '" 조사 보기를 삭제하시겠습니까?')) return;
+        const current = collectXViewParams();
+        await api('/admin/saved-filters/' + encodeURIComponent(activeSavedView.id), { method: 'DELETE' });
+        location.hash = '#/xview?' + current.toString();
+      });
+      document.getElementById('xv-copy-link').addEventListener('click', async () => {
+        const shareURL = location.href.split('#')[0] + '#/xview?' + collectXViewParams().toString();
+        try {
+          if (!navigator.clipboard) throw new Error('clipboard API를 지원하지 않는 브라우저입니다');
+          await navigator.clipboard.writeText(shareURL);
+          const button = document.getElementById('xv-copy-link');
+          if (button) {
+            button.textContent = '복사됨';
+            setTimeout(() => { if (button) button.textContent = '링크 복사'; }, 1400);
+          }
+        } catch (err) {
+          openModal('XView 조사 링크', '<input value="' + escapeAttr(shareURL) + '" readonly style="width:100%">');
+        }
+      });
     }
 
     function drawScatter(points, groups, modelIndex) {
@@ -4746,6 +4834,7 @@ const adminHTML = `<!doctype html>
       const ts = targets.targets || [];
       const ps = packs.probe_packs || [];
       const cs = campaigns.campaigns || [];
+      const postChange = campaigns.post_change || {};
       const rs = runs.runs || [];
       const bs = baselines.baselines || [];
       const remediationRows = (rems.remediations || []).slice(0, 20).map(r => {
@@ -4766,6 +4855,7 @@ const adminHTML = `<!doctype html>
       const highTargets = ts.filter(t => ['high', 'critical'].indexOf(t.risk_level) >= 0).length;
       const failedRuns = rs.filter(r => r.status === 'failed').length;
       const maxRisk = rs.reduce((m, r) => Math.max(m, Number(r.risk_score || 0)), 0);
+      const autoCampaigns = cs.filter(c => c.trigger_source === 'post-change');
       const targetRows = ts.slice(0, 80).map(t => {
         const meta = t.metadata || {};
         const label = meta.title || meta.name || meta.base_url || t.model || t.tool_name || t.target_ref;
@@ -4791,20 +4881,27 @@ const adminHTML = `<!doctype html>
         '<span class="muted" style="font-size:11px">' + escapeHTML(p.category) + ' · 케이스 ' + ((p.cases || []).length) + '</span></label>'
       ).join('') || '<p class="muted">프로브 팩 없음</p>';
       window.__rtCampaigns = cs; // 수정/복제 시 캠페인 원본 참조
-      const campaignRows = cs.map(c =>
-        '<tr><td><strong>' + escapeHTML(c.name) + '</strong><div class="muted" style="font-size:10px"><code>' + escapeHTML(c.id) + '</code></div></td>' +
+      const campaignRows = cs.map(c => {
+        const automatic = c.trigger_source === 'post-change';
+        const source = automatic
+          ? '<span class="status" title="' + escapeAttr(c.trigger_reason || '') + '">변경 후 자동</span>' +
+            '<div class="muted" style="font-size:10px;margin-top:3px"><code>' + escapeHTML(c.trigger_action || '') + '</code>' +
+            (c.trigger_ref ? '<br>' + escapeHTML(c.trigger_ref) : '') + '</div>'
+          : '<span class="muted" style="font-size:11px">수동</span>';
+        return '<tr><td><strong>' + escapeHTML(c.name) + '</strong><div class="muted" style="font-size:10px"><code>' + escapeHTML(c.id) + '</code></div></td>' +
+        '<td>' + source + '</td>' +
         '<td>' + escapeHTML(c.scope || 'all') + '</td>' +
         '<td><span class="status ' + redTeamStatusClass(c.status) + '">' + escapeHTML(c.status || '') + '</span></td>' +
         '<td>' + escapeHTML(c.execution_mode || '') + '</td>' +
         '<td>' + money(c.budget_limit_krw || 0) + '</td>' +
         '<td>' + (c.retain_raw_evidence ? '<span class="status warn" style="font-size:9px">원문보관</span>' : '<span class="muted" style="font-size:11px">마스킹</span>') + '</td>' +
         '<td style="white-space:nowrap"><button type="button" class="secondary" style="font-size:11px" onclick="redTeamDryRun(\'' + escapeAttr(c.id) + '\')">드라이런</button> ' +
-        '<button type="button" class="secondary" style="font-size:11px" onclick="redTeamApprove(\'' + escapeAttr(c.id) + '\')">승인</button> ' +
+        (automatic ? '' : '<button type="button" class="secondary" style="font-size:11px" onclick="redTeamApprove(\'' + escapeAttr(c.id) + '\')">승인</button> ') +
         '<button type="button" style="font-size:11px" onclick="redTeamRun(\'' + escapeAttr(c.id) + '\',\'' + escapeAttr(c.execution_mode || '') + '\')">' + (c.execution_mode === 'active-controlled' ? '실제 실행' : '시뮬레이션 실행') + '</button> ' +
-        '<button type="button" class="secondary" style="font-size:11px" onclick="redTeamEditCampaign(\'' + escapeAttr(c.id) + '\')">수정</button> ' +
+        (automatic ? '' : '<button type="button" class="secondary" style="font-size:11px" onclick="redTeamEditCampaign(\'' + escapeAttr(c.id) + '\')">수정</button> ') +
         '<button type="button" class="secondary" style="font-size:11px" onclick="redTeamCloneCampaign(\'' + escapeAttr(c.id) + '\')">복제</button> ' +
-        '<button type="button" class="secondary" style="font-size:11px" onclick="redTeamDeleteCampaign(\'' + escapeAttr(c.id) + '\',\'' + escapeAttr(c.name || '') + '\')">삭제</button></td></tr>'
-      ).join('') || '<tr><td colspan="7" class="muted">아직 캠페인이 없습니다. 위 <b>캠페인 빌더</b>로 만들거나, 상단 <b>⚡ 빠른 시작</b>으로 안전 팩 드라이런을 바로 실행해 보세요.</td></tr>';
+        '<button type="button" class="secondary" style="font-size:11px" onclick="redTeamDeleteCampaign(\'' + escapeAttr(c.id) + '\',\'' + escapeAttr(c.name || '') + '\')">삭제</button></td></tr>';
+      }).join('') || '<tr><td colspan="8" class="muted">아직 캠페인이 없습니다. 캠페인 빌더로 만들거나 상단 빠른 시작으로 안전 팩 드라이런을 실행해 보세요.</td></tr>';
       const runRows = rs.slice(0, 30).map(r =>
         '<tr><td><code>' + escapeHTML(r.id) + '</code><div class="muted" style="font-size:10px">' + ago(r.created_at) + '</div></td>' +
         '<td><code>' + escapeHTML(r.campaign_id) + '</code></td><td><code>' + escapeHTML(r.target_id) + '</code></td>' +
@@ -4846,7 +4943,7 @@ const adminHTML = `<!doctype html>
 
       // 탭별 패널 콘텐츠.
       const panelOverview =
-        '<div class="kpis">' + kpi('대상', fmt(ts.length)) + kpi('고위험/치명', fmt(highTargets)) + kpi('프로브 팩', fmt(ps.length)) + kpi('최근 실행 위험', fmt(maxRisk)) + kpi('실패한 실행', fmt(failedRuns)) + '</div>' +
+        '<div class="kpis">' + kpi('대상', fmt(ts.length)) + kpi('고위험/치명', fmt(highTargets)) + kpi('프로브 팩', fmt(ps.length)) + kpi('자동 회귀 점검', fmt(autoCampaigns.length)) + kpi('최근 실행 위험', fmt(maxRisk)) + kpi('실패한 실행', fmt(failedRuns)) + '</div>' +
         '<div class="kpis">' + kpi('결과 수', fmt(dsum.total_results || 0)) + kpi('치명', fmt(dec.critical || 0)) + kpi('실패', fmt(dec.fail || 0)) + kpi('경고', fmt(dec.warning || 0)) + kpi('외부 대상', fmt(dsum.external_targets || 0)) + kpi('미조치', fmt(dsum.open_remediations || 0)) + '</div>' +
         '<div class="grid2">' +
           card('결과 매트릭스 (대상 × 프로브 팩)', '<div class="card-body"><table><thead><tr><th>유형</th><th>팩 분류</th><th>통과</th><th>경고</th><th>실패</th><th>치명</th><th>계</th></tr></thead><tbody>' + matrixRows + '</tbody></table></div>') +
@@ -4882,7 +4979,7 @@ const adminHTML = `<!doctype html>
           '② (고위험 팩이면) 목록에서 <b>승인</b> · ' +
           '③ <b>실제 실행</b> 버튼을 눌러 프롬프트에 <b>전용 레드팀 Proxy API Key</b> 입력.<br>' +
           '그 외 모드(드라이런/섀도우 등)나 키 미입력 시에는 실제 호출 없이 <b>시뮬레이션</b>으로 안전 실행됩니다. MCP 도구·파괴적·앱/워크플로 대상은 항상 시뮬레이션입니다.</div></div>') +
-        card('캠페인', '<div class="card-body"><table><thead><tr><th>이름</th><th>범위</th><th>상태</th><th>모드</th><th>예산</th><th>증적</th><th>작업</th></tr></thead><tbody>' + campaignRows + '</tbody></table></div>');
+        card('캠페인', '<div class="card-body"><table><thead><tr><th>이름</th><th>생성 경로</th><th>범위</th><th>상태</th><th>모드</th><th>예산</th><th>증적</th><th>작업</th></tr></thead><tbody>' + campaignRows + '</tbody></table></div>');
 
       const panelTargets =
         '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px">' +
@@ -4940,6 +5037,8 @@ const adminHTML = `<!doctype html>
         '<div style="padding:0 14px 6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
         '<button type="button" style="font-size:11px" onclick="redTeamQuickStart()">⚡ 빠른 시작(안전 팩 드라이런)</button> ' +
         '<button type="button" class="secondary" style="font-size:11px" onclick="rtGuide(\'start\')">📖 시작 가이드</button> ' +
+        '<span class="status ' + (postChange.enabled ? '' : 'warn') + '" title="민감한 관리자 변경 뒤 실제 upstream 호출 없이 자동 보안 회귀 점검을 실행합니다.">변경 후 자동 점검: ' + (postChange.enabled ? '켜짐' : '꺼짐') + '</span> ' +
+        (postChange.enabled ? '<span class="muted" style="font-size:10px">중복 억제 ' + escapeHTML(postChange.cooldown || '-') + ' · 최대 ' + fmt(postChange.max_targets || 0) + '개 대상</span> ' : '') +
         '<span class="status ' + (killOn ? 'error' : '') + '">킬 스위치: ' + (killOn ? '켜짐(중지)' : '꺼짐') + '</span> ' +
         '<button type="button" class="secondary" style="font-size:10px" onclick="rtGuide(\'safety\')">ℹ️ 안전장치</button> ' +
         (killOn
@@ -9276,7 +9375,7 @@ const adminHTML = `<!doctype html>
       '<table><tbody>' +
         '<tr><th>Route reason</th><td>' + escapeHTML(preview.route_reason || '') + '</td></tr>' +
         '<tr><th>Decision reason</th><td>' + escapeHTML(preview.decision_reason || '') + '</td></tr>' +
-        '<tr><th>Fallback path</th><td>' + escapeHTML((preview.fallback_path || []).join(' -> ') || '-') + '</td></tr>' +
+        '<tr><th>폴백 계획(예상)</th><td>' + escapeHTML((preview.fallback_plan || []).join(' -> ') || '-') + '</td></tr>' +
       '</tbody></table>';
     }
     // Narrow-rail variant of the routing preview (kv rows, no wide kpi grid) for the debug pane.
@@ -9290,7 +9389,7 @@ const adminHTML = `<!doctype html>
         row('Rewrite', preview.would_rewrite ? '<span class="status warn">yes</span>' : '<span class="status">no</span>') +
         row('Route reason', escapeHTML(preview.route_reason || '-')) +
         row('Decision reason', escapeHTML(preview.decision_reason || '-')) +
-        row('Fallback', escapeHTML((preview.fallback_path || []).join(' → ') || '-')) +
+        row('폴백 계획(예상)', escapeHTML((preview.fallback_plan || []).join(' → ') || '-')) +
       '</div>';
     }
     function chatTestHeadersTable(headers) {
@@ -15158,9 +15257,10 @@ const adminHTML = `<!doctype html>
     }
 
     async function renderSettings() {
-      const [keys, providers, retention, fallback, audit, routes, learning, knowledge, usersResp, teamsResp, authEvents] = await Promise.all([
+      const [keys, providers, patternAnalysis, retention, fallback, audit, routes, learning, knowledge, usersResp, teamsResp, authEvents] = await Promise.all([
         api('/admin/api-keys'),
         api('/admin/providers'),
+        api('/admin/routing/pattern-conflicts').catch(() => ({ summary: {}, conflicts: [], redundancies: [], resolution_policy: {} })),
         api('/admin/retention'),
         api('/admin/fallback'),
         api('/admin/audit-logs?limit=50'),
@@ -15222,7 +15322,10 @@ const adminHTML = `<!doctype html>
             '<div id="provider-edit-hint" class="muted" style="grid-column:1/-1;font-size:12px;margin-top:2px"></div>' +
           '</form>' +
           '<div class="muted" style="padding:0 12px 10px;font-size:12px">행의 <strong>수정</strong>을 누르면 이 폼에 값이 채워집니다. 이름은 고정되고, API 키를 비워두면 기존 키가 유지됩니다. <strong>사용/중지</strong>로 라우팅 대상 여부를 바로 바꿀 수 있습니다.</div>' +
-          providerTable(providers.providers || [])
+          '<div style="padding:0 12px 12px"><button type="button" class="secondary" onclick="openRoutingGuide()">📖 라우팅 · 폴백 동작 설명 열기</button>' +
+            '<span class="muted" style="margin-left:8px;font-size:12px">어떤 provider로 가는지, 폴백은 언제 되는지 전체 규칙을 봅니다.</span></div>' +
+          '<div id="provider-pattern-diagnostics">' + providerPatternDiagnostics(patternAnalysis) + '</div>' +
+          providerTable(providers.providers || [], patternAnalysis)
         ) +
         section('로그인 계정 · 팀 (RBAC)', authAccountsPanel(usersResp.auth_users || [], teamsResp.auth_teams || [], authEvents.events || [], roleOptions)) +
         section('복잡도 기반 비용 최적 라우팅 규칙', routingRulesPanel(routes.rules || [])) +
@@ -15237,6 +15340,10 @@ const adminHTML = `<!doctype html>
       document.getElementById('view').innerHTML = html;
       document.getElementById('key-form').addEventListener('submit', createProxyKey);
       document.getElementById('provider-form').addEventListener('submit', saveProvider);
+      ['provider-name', 'provider-patterns'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.addEventListener('input', scheduleProviderPatternPreview);
+      });
       const auForm = document.getElementById('auth-user-form');
       if (auForm) auForm.addEventListener('submit', createAuthUser);
       const atForm = document.getElementById('auth-team-form');
@@ -15427,8 +15534,200 @@ const adminHTML = `<!doctype html>
       closeModal();
       route();
     };
-    function providerTable(rows) {
+    // Routing/failover is decided across several files (provider selection, the
+    // pipeline's candidate build, and dialUpstream's retry rules). This modal is the
+    // one place an operator can read all of it as a single set of rules.
+    function routingGuideSection(title, subtitle, body) {
+      return '<div style="margin:0 0 18px">' +
+        '<div style="font-weight:600;font-size:14px;margin-bottom:2px">' + title + '</div>' +
+        (subtitle ? '<div class="muted" style="font-size:12px;margin-bottom:8px">' + subtitle + '</div>' : '') +
+        body + '</div>';
+    }
+    function openRoutingGuide() {
+      const selection = '<table><thead><tr><th style="width:52px">순위</th><th>선택 방법</th><th>조건</th><th><code>route_reason</code></th></tr></thead><tbody>' +
+        '<tr><td>1</td><td><code>X-Proxy-Provider</code> 헤더</td><td>클라이언트가 헤더로 provider 이름을 직접 지정</td><td><code>header</code></td></tr>' +
+        '<tr><td>2</td><td><code>?provider=</code> 쿼리</td><td>URL 쿼리로 지정</td><td><code>query</code></td></tr>' +
+        '<tr><td>3</td><td>라우팅 규칙</td><td>복잡도 기반 규칙이 provider를 지정</td><td><code>rule_provider</code></td></tr>' +
+        '<tr><td>4</td><td><strong>모델 패턴 자동 매칭</strong></td><td>요청 body의 <code>model</code>이 provider의 <code>model_patterns</code> 글롭에 매칭. <strong>여러 개가 매칭되면 이름 알파벳순으로 첫 번째</strong></td><td><code>model_pattern</code></td></tr>' +
+        '<tr><td>5</td><td>기본 provider</td><td>위 어디에도 걸리지 않으면 <code>UPSTREAM_PROVIDER</code></td><td><code>default</code></td></tr>' +
+        '</tbody></table>' +
+        '<div class="muted" style="font-size:12px;margin-top:6px">모델이 <code>auto</code> / <code>vibe/auto</code> 계열이면 그 앞에 Intelligent Routing이 <em>모델</em>을 먼저 고르고(<code>auto_router</code>), 그 결과 모델로 위 순서를 탑니다.</div>';
+
+      const conditions = '<table><thead><tr><th>조건</th><th>내용</th><th>어긋나면</th></tr></thead><tbody>' +
+        '<tr><td>provider 미고정</td><td><code>X-Proxy-Provider</code>·<code>?provider=</code>를 <strong>쓰지 않아야</strong> 함</td><td>고정한 곳으로만 보내고 폴백 안 함</td></tr>' +
+        '<tr><td>민감정보 아님</td><td>프롬프트에서 PII·secret 위험이 탐지되지 않아야 함</td><td>데이터 보호를 위해 폴백 차단(<code>fallback_disabled:sensitive_data</code>)</td></tr>' +
+        '<tr><td><strong>매칭 provider 2개 이상</strong></td><td>같은 모델명에 <code>model_patterns</code>가 매칭되는 provider가 <strong>둘 이상</strong></td><td><strong>폴백 후보가 0개</strong> — 가장 흔한 원인</td></tr>' +
+        '<tr><td>실패 유형이 해당</td><td>429 · 5xx · 타임아웃 · 연결 실패</td><td>401/403/404 같은 <strong>4xx는 폴백하지 않음</strong></td></tr>' +
+        '</tbody></table>' +
+        '<div class="banner warn" style="margin-top:10px"><strong>네 조건을 모두 만족해야 폴백이 일어납니다.</strong>' +
+        '<div class="muted" style="margin-top:4px">폴백 시도 순서는 provider <strong>이름 알파벳 오름차순</strong>입니다(지연시간·health 순이 아닙니다). 순서를 바꾸려면 provider 이름을 조정하세요.</div></div>';
+
+      const pitfalls = '<table><thead><tr><th>증상</th><th>원인</th><th>해결</th></tr></thead><tbody>' +
+        '<tr><td>폴백이 전혀 안 됨</td><td>기본 provider에 <code>model_patterns</code>가 비어 있음. 폴백 후보는 <strong>패턴 매칭으로만</strong> 만들어짐</td><td>기본 provider에도 패턴을 넣고, 대체 provider와 <strong>겹치게</strong> 등록</td></tr>' +
+        '<tr><td>provider가 2개인데 폴백 안 됨</td><td>패턴이 서로 <strong>겹치지 않음</strong>(예: <code>gpt-*</code> / <code>claude-*</code>). 한 모델에는 항상 1개만 매칭</td><td>같은 모델을 양쪽에서 처리하려면 동일·중첩 패턴을 등록</td></tr>' +
+        '<tr><td>401/404인데 폴백 안 됨</td><td>키 오류·모델 없음은 다른 곳으로 보내도 같은 결과라 폴백 대상이 아님</td><td>키와 모델명을 직접 수정</td></tr>' +
+        '<tr><td>SDK에서 고정했더니 폴백 사라짐</td><td>클라이언트가 <code>X-Proxy-Provider</code>를 보내는 중</td><td>헤더를 빼고 모델 패턴 자동 라우팅에 맡기기</td></tr>' +
+        '<tr><td>민감한 요청만 폴백 안 됨</td><td>PII·secret 탐지로 의도적으로 차단됨</td><td>정상 동작. 필요하면 프롬프트에서 민감정보 제거</td></tr>' +
+        '</tbody></table>';
+
+      const headers = '<table><thead><tr><th>헤더</th><th>의미</th></tr></thead><tbody>' +
+        '<tr><td><code>X-Provider</code></td><td><strong>실제로 응답한 provider</strong></td></tr>' +
+        '<tr><td><code>X-Route-Reason</code></td><td>어떻게 골랐는지: <code>header</code>·<code>query</code>·<code>model_pattern</code>·<code>rule_provider</code>·<code>default</code></td></tr>' +
+        '<tr><td><code>X-Route-Detail</code></td><td>매칭된 글롭 패턴이나 근거(헤더명·환경변수명)</td></tr>' +
+        '<tr><td><code>X-Failover-From</code></td><td>폴백이 일어났을 때 <strong>원래</strong> 선택됐던 provider</td></tr>' +
+        '<tr><td><code>X-Failover-Reason</code></td><td>폴백 유발 원인: <code>429</code>·<code>5xx</code>·<code>timeout</code>·<code>transport_error</code>·<code>context_overflow</code></td></tr>' +
+        '<tr><td><code>X-Failover-Path</code></td><td>실제 폴백 경로 전체(<code>429:a-&gt;b</code> 형태, 쉼표 구분)</td></tr>' +
+        '</tbody></table>' +
+        '<div class="muted" style="font-size:12px;margin-top:6px">폴백이 없었으면 <code>X-Failover-*</code>는 아예 나오지 않습니다. 즉 <strong>헤더 유무 자체가 폴백 발생 여부</strong>입니다.</div>';
+
+      const recipes =
+        '<div class="banner" style="margin-bottom:8px"><strong>① 단일 벤더 (폴백 불필요)</strong>' +
+        '<div class="muted" style="margin-top:4px">기본 provider 하나만 등록하고 패턴은 비웁니다. 모든 모델이 기본으로 갑니다. 폴백은 없습니다.</div></div>' +
+        '<div class="banner" style="margin-bottom:8px"><strong>② 벤더별 분리 라우팅 (폴백 없음)</strong>' +
+        '<div class="muted" style="margin-top:4px"><code>openai: gpt-*,o3-*</code> / <code>anthropic: claude-*</code> — 모델별로 정확히 나뉘지만, 한 모델에 1개만 매칭되므로 <strong>폴백은 발생하지 않습니다</strong>.</div></div>' +
+        '<div class="banner" style="margin-bottom:8px"><strong>③ 이중화 (폴백 동작)</strong>' +
+        '<div class="muted" style="margin-top:4px">같은 모델을 두 곳이 받도록 <strong>패턴을 겹칩니다</strong>. 예: <code>openai-primary: gpt-*</code> + <code>openai-backup: gpt-*</code>. 429/5xx/타임아웃 시 알파벳순 다음 provider로 넘어갑니다. 이름이 곧 우선순위이므로 <code>a-primary</code>/<code>b-backup</code>처럼 정렬을 의식해 지으면 좋습니다.</div></div>' +
+        '<div class="banner" style="margin-bottom:0"><strong>④ 로컬 + 클라우드 (vLLM/Ollama)</strong>' +
+        '<div class="muted" style="margin-top:4px">로컬 서버를 <code>base_url</code>에 <code>/v1</code> 없이 등록합니다(게이트웨이가 <code>{base_url}/v1/...</code>로 전달). 임베딩(<code>/v1/embeddings</code>)도 채팅과 동일한 규칙으로 라우팅·폴백됩니다.</div></div>';
+
+      const extras =
+        '<div style="margin-bottom:10px"><strong>컨텍스트 초과 자동 승급</strong>' +
+        '<div class="muted" style="font-size:12px;margin-top:3px">업스트림이 400 + context length 초과를 반환하면 provider를 바꾸는 대신 <strong>더 큰 컨텍스트 모델로 한 번</strong> 재시도합니다(<code>context_overflow:</code>). provider 폴백 조건과 무관하게 동작합니다.</div></div>' +
+        '<div style="margin-bottom:10px"><strong>계획(plan)과 실제(path)</strong>' +
+        '<div class="muted" style="font-size:12px;margin-top:3px"><code>fallback_plan</code>은 <em>실패하면 이렇게 될 것</em>이라는 사전 예측이고, <code>fallback_path</code>는 <em>실제로 일어난</em> 폴백 경로입니다. 폴백이 없었다면 <code>fallback_path</code>는 비어 있습니다.</div></div>' +
+        '<div class="banner warn" style="margin-bottom:0"><strong>이름 주의:</strong> 설정 탭 아래의 <code>Fallback 로그 재처리</code>(<code>/admin/fallback</code>)는 provider 폴백과 <strong>무관합니다</strong>. DB 장애 때 NDJSON으로 빠진 <em>감사 로그</em>를 다시 넣는 기능입니다.</div>';
+
+      const html =
+        '<div class="banner" style="margin-bottom:16px"><strong>요청 하나가 처리되는 순서</strong>' +
+          '<div style="margin-top:6px">① 어느 provider로 보낼지 <strong>선택</strong> → ② 호출 → ③ 실패하면 조건을 만족할 때만 <strong>폴백</strong></div></div>' +
+        routingGuideSection('1단계 · provider 선택 순서', '위에서부터 먼저 걸리는 규칙이 이깁니다.', selection) +
+        routingGuideSection('2단계 · 폴백 발동 조건', '아래 네 가지를 모두 만족할 때만 다른 provider로 재시도합니다.', conditions) +
+        routingGuideSection('폴백이 안 되는 흔한 이유', '대부분 설정 문제이며, 위의 폴백 커버리지 표시로 바로 확인할 수 있습니다.', pitfalls) +
+        routingGuideSection('응답 헤더로 확인하기', '어드민을 열지 않고 클라이언트에서 바로 라우팅 결과를 볼 수 있습니다.', headers) +
+        routingGuideSection('구성 레시피', '목적에 맞는 패턴 설계를 고르세요.', recipes) +
+        routingGuideSection('추가로 알아둘 것', '', extras) +
+        '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px">' +
+          '<button class="secondary" type="button" onclick="closeModal();location.hash=\'#/routing/health\'">Provider Health 보기</button>' +
+          '<button class="secondary" type="button" onclick="closeModal();document.getElementById(\'settings-providers\').scrollIntoView({behavior:\'smooth\'})">프로바이더 설정으로</button>' +
+        '</div>';
+      openModal('업스트림 프로바이더 라우팅 · 폴백 동작 설명', html);
+    }
+    function providerPatternDiagnostics(report) {
+      report = report || {};
+      const summary = report.summary || {};
+      const conflicts = report.conflicts || [];
+      const redundancies = report.redundancies || [];
+      const resolution = report.resolution_policy || {};
+      const simulation = report.simulation;
+      const severityLabel = { high: '높음', medium: '주의' };
+      const typeLabel = {
+        duplicate_pattern: '동일 패턴',
+        catch_all_overlap: '전체 패턴',
+        overlapping_pattern: '교차 패턴'
+      };
+      const focus = report.focus_provider
+        ? '<span class="status ' + ((summary.focus_conflict_count || 0) ? 'error' : '') + '">저장 전 ' +
+            escapeHTML(report.focus_provider) + ': 충돌 ' + fmt(summary.focus_conflict_count || 0) + '</span>'
+        : '';
+      const conflictRows = conflicts.slice(0, 30).map(c => {
+        const candidates = (c.candidates || []).map(x =>
+          '<strong>' + escapeHTML(x.provider) + '</strong> <code>' + escapeHTML(x.pattern) + '</code>'
+        ).join(' <span class="muted">↔</span> ');
+        return '<tr>' +
+          '<td><span class="status ' + (c.severity === 'high' ? 'error' : 'warn') + '">' + escapeHTML(severityLabel[c.severity] || c.severity) + '</span></td>' +
+          '<td>' + escapeHTML(typeLabel[c.type] || c.type) + '</td>' +
+          '<td>' + candidates + '</td>' +
+          '<td><code>' + escapeHTML(c.witness_model || '') + '</code></td>' +
+          '<td><strong>' + escapeHTML(c.selected_provider || '') + '</strong><div class="muted"><code>' + escapeHTML(c.selected_pattern || '') + '</code></div></td>' +
+        '</tr>';
+      }).join('');
+      const conflictTable = conflicts.length
+        ? '<div style="overflow:auto"><table><thead><tr><th>등급</th><th>유형</th><th>충돌 후보</th><th>재현 모델</th><th>현재 승자</th></tr></thead><tbody>' +
+            conflictRows + '</tbody></table></div>' +
+            (conflicts.length > 30 ? '<div class="muted" style="padding:8px 14px">상위 30건 표시 · 전체 ' + fmt(conflicts.length) + '건</div>' : '')
+        : '<div class="empty" style="padding:16px">활성 provider 간 모델 패턴 충돌 없음</div>';
+      let simulationHTML = '';
+      if (simulation) {
+        const matched = (simulation.matches || []).map(m =>
+          '<span class="pill">' + escapeHTML(m.provider) + ': ' + escapeHTML((m.patterns || []).join(', ')) + '</span>'
+        ).join(' ');
+        const blockedLabel = {
+          single_matching_provider: '이 모델에 매칭되는 provider가 1개뿐입니다',
+          no_pattern_match_default_provider_only: '매칭 패턴이 없어 기본 provider로만 갑니다'
+        };
+        const failoverLine = simulation.failover_available
+          ? '<div style="margin-top:7px"><span class="status">폴백 가능</span> ' +
+              (simulation.failover_candidates || []).map((n, i) =>
+                '<code>' + (i + 1) + '. ' + escapeHTML(n) + '</code>').join(' ') + '</div>'
+          : '<div style="margin-top:7px"><span class="status warn">폴백 없음</span> <span class="muted">' +
+              escapeHTML(blockedLabel[simulation.failover_blocked_reason] || simulation.failover_blocked_reason || '') +
+              ' — 429/5xx/타임아웃이 나면 그대로 오류를 반환합니다.</span></div>';
+        simulationHTML =
+          '<div class="banner ' + (simulation.ambiguous ? 'warn' : '') + '" style="margin:10px 14px">' +
+            '<strong>' + escapeHTML(simulation.model) + '</strong> → ' +
+            '<strong>' + escapeHTML(simulation.selected_provider || '-') + '</strong> ' +
+            '<span class="muted">(' + escapeHTML(simulation.route_reason || '') + ')</span>' +
+            (simulation.ambiguous ? ' <span class="status error">다중 매칭</span>' : '') +
+            (matched ? '<div style="margin-top:7px">' + matched + '</div>' : '') +
+            failoverLine +
+          '</div>';
+      }
+      // Failover coverage: a provider can only fail over to a peer whose patterns
+      // overlap its own, so providers with patterns but no peer are a silent SPOF.
+      const coverage = report.coverage || [];
+      const uncovered = coverage.filter(c => !c.failover_ready);
+      const defaultWarning = (report.default_provider && !report.default_provider_has_patterns)
+        ? '<div class="banner warn" style="margin:10px 14px"><strong>기본 provider <code>' +
+            escapeHTML(report.default_provider) + '</code>에 모델 패턴이 없습니다.</strong>' +
+            '<div class="muted" style="margin-top:4px">패턴에 매칭되지 않는 모든 모델을 처리하지만, 폴백 후보는 <em>패턴 매칭으로만</em> 만들어지므로 이 provider는 폴백 대상이 될 수도, 폴백을 받을 수도 없습니다. 폴백이 필요하면 다른 provider와 <strong>겹치는 패턴</strong>을 등록하세요.</div></div>'
+        : '';
+      const coverageHTML = coverage.length
+        ? '<div style="padding:0 14px 10px">' +
+            '<div class="muted" style="font-size:12px;margin-bottom:6px">폴백 커버리지 — 패턴이 겹치는 provider끼리만 서로 폴백됩니다.</div>' +
+            coverage.map(c =>
+              '<span class="pill" style="margin:0 4px 4px 0">' +
+                (c.failover_ready ? '✅ ' : '⚠️ ') + escapeHTML(c.provider) +
+                (c.failover_ready
+                  ? ' <span class="muted">→ ' + escapeHTML((c.failover_peers || []).join(', ')) + '</span>'
+                  : ' <span class="muted">폴백 상대 없음</span>') +
+              '</span>').join('') +
+          '</div>'
+        : '';
+      const uncoveredBadge = uncovered.length
+        ? '<span class="status warn">폴백 미보장 ' + fmt(uncovered.length) + '</span>'
+        : '<span class="status">폴백 보장 ' + fmt(coverage.length) + '</span>';
+      const order = (resolution.order || []).slice(0, 12);
+      const orderHTML = order.length
+        ? '<span class="muted">선택 순서</span> ' + order.map((name, i) => '<code>' + (i + 1) + '. ' + escapeHTML(name) + '</code>').join(' ')
+        : '<span class="muted">선택 순서 없음</span>';
+      return '<div style="border-top:1px solid var(--line); border-bottom:1px solid var(--line); margin-bottom:10px">' +
+        '<div class="toolbar" style="border:0; flex-wrap:wrap">' +
+          '<strong>모델 패턴 충돌 진단</strong>' +
+          '<span class="status ' + ((summary.high_conflict_count || 0) ? 'error' : '') + '">높음 ' + fmt(summary.high_conflict_count || 0) + '</span>' +
+          '<span class="status ' + ((summary.medium_conflict_count || 0) ? 'warn' : '') + '">주의 ' + fmt(summary.medium_conflict_count || 0) + '</span>' +
+          '<span class="status">영향 provider ' + fmt(summary.affected_provider_count || 0) + '</span>' +
+          (redundancies.length ? '<span class="status warn">내부 중복 ' + fmt(redundancies.length) + '</span>' : '') +
+          uncoveredBadge +
+          focus +
+          '<span style="flex:1"></span>' +
+          '<input id="provider-pattern-model" aria-label="모델 경로 확인" placeholder="모델명 경로 확인" value="' + escapeAttr(simulation ? simulation.model : '') + '" style="width:210px">' +
+          '<button type="button" class="secondary" onclick="runProviderPatternSimulation()">경로 확인</button>' +
+        '</div>' +
+        '<div style="padding:0 14px 10px; display:flex; gap:8px; flex-wrap:wrap; align-items:center">' + orderHTML + '</div>' +
+        defaultWarning +
+        simulationHTML +
+        coverageHTML +
+        conflictTable +
+      '</div>';
+    }
+    function providerTable(rows, patternAnalysis) {
       if (!rows.length) return '<div class="empty">등록된 프로바이더 없음</div>';
+      const conflictCounts = {};
+      (((patternAnalysis || {}).conflicts) || []).forEach(c => {
+        (c.candidates || []).forEach(candidate => {
+          conflictCounts[candidate.provider] = (conflictCounts[candidate.provider] || 0) + 1;
+        });
+      });
       return '<table><thead><tr>' +
         '<th data-sort="str">이름</th>' +
         '<th data-sort="str">Base URL</th>' +
@@ -15440,7 +15739,8 @@ const adminHTML = `<!doctype html>
         rows.map(r => '<tr><td>' + escapeHTML(r.name) + '</td><td>' + escapeHTML(r.base_url) + '</td>' +
           '<td>' + (r.api_key_configured ? '설정됨' : '미설정') + '</td>' +
           '<td data-num="' + (r.timeout_ms || 0) + '">' + fmt(r.timeout_ms) + ' ms</td>' +
-          '<td>' + (r.model_patterns ? '<span class="pill">' + escapeHTML(r.model_patterns) + '</span>' : '<span class="muted">자동 라우팅 없음</span>') + '</td>' +
+          '<td>' + (r.model_patterns ? '<span class="pill">' + escapeHTML(r.model_patterns) + '</span>' : '<span class="muted">자동 라우팅 없음</span>') +
+            (conflictCounts[r.name] ? ' <span class="status error">충돌 ' + fmt(conflictCounts[r.name]) + '</span>' : '') + '</td>' +
           '<td><span class="status ' + (r.enabled ? '' : 'error') + '">' + (r.enabled ? '사용' : '중지') + '</span></td>' +
           '<td style="white-space:nowrap">' +
             '<button class="secondary" type="button" onclick="editProvider(\'' + escapeAttr(r.name) + '\')">수정</button> ' +
@@ -15750,6 +16050,70 @@ const adminHTML = `<!doctype html>
       await api('/admin/api-keys/' + encodeURIComponent(id), { method: 'PATCH', body: JSON.stringify({ status }) });
       route();
     };
+    let providerPatternPreviewTimer = null;
+    let providerPatternPreviewSequence = 0;
+    function providerPatternPreviewPayload(model) {
+      const nameEl = document.getElementById('provider-name');
+      const patternsEl = document.getElementById('provider-patterns');
+      if (!nameEl || !patternsEl || !nameEl.value.trim()) return null;
+      const name = nameEl.value.trim();
+      const existing = (window.__providers || {})[name];
+      return {
+        provider_name: name,
+        model_patterns: patternsEl.value.trim(),
+        enabled: existing ? existing.enabled !== false : true,
+        model: String(model || '').trim()
+      };
+    }
+    async function refreshProviderPatternDiagnostics(model) {
+      const target = document.getElementById('provider-pattern-diagnostics');
+      if (!target) return null;
+      const sequence = ++providerPatternPreviewSequence;
+      const payload = providerPatternPreviewPayload(model);
+      try {
+        const report = payload
+          ? await api('/admin/routing/pattern-conflicts', { method: 'POST', body: JSON.stringify(payload) })
+          : await api('/admin/routing/pattern-conflicts' + (model ? '?model=' + encodeURIComponent(model) : ''));
+        if (sequence === providerPatternPreviewSequence && document.getElementById('provider-pattern-diagnostics')) {
+          document.getElementById('provider-pattern-diagnostics').innerHTML = providerPatternDiagnostics(report);
+        }
+        return report;
+      } catch (err) {
+        if (sequence === providerPatternPreviewSequence && document.getElementById('provider-pattern-diagnostics')) {
+          document.getElementById('provider-pattern-diagnostics').innerHTML =
+            '<div class="banner warn" style="margin:10px 14px">패턴 진단 실패: ' + escapeHTML(err.message) + '</div>';
+        }
+        return null;
+      }
+    }
+    function scheduleProviderPatternPreview() {
+      clearTimeout(providerPatternPreviewTimer);
+      providerPatternPreviewTimer = setTimeout(() => {
+        const modelEl = document.getElementById('provider-pattern-model');
+        refreshProviderPatternDiagnostics(modelEl ? modelEl.value.trim() : '');
+      }, 280);
+    }
+    window.runProviderPatternSimulation = async () => {
+      const modelEl = document.getElementById('provider-pattern-model');
+      const model = modelEl ? modelEl.value.trim() : '';
+      if (!model) {
+        if (modelEl) modelEl.focus();
+        return;
+      }
+      await refreshProviderPatternDiagnostics(model);
+    };
+    function confirmProviderPatternConflicts(name, diagnostics) {
+      const focusedConflicts = ((diagnostics && diagnostics.conflicts) || []).filter(c =>
+        (c.candidates || []).some(candidate => candidate.provider === name)
+      );
+      if (!focusedConflicts.length) return true;
+      const high = focusedConflicts.filter(c => c.severity === 'high').length;
+      return confirm(
+        '"' + name + '" 패턴이 활성 provider와 ' + focusedConflicts.length +
+        '건 충돌합니다' + (high ? ' (높음 ' + high + '건)' : '') +
+        '. 현재 이름 정렬 순서에 따라 provider가 선택됩니다. 계속하시겠습니까?'
+      );
+    }
     async function saveProvider(event) {
       event.preventDefault();
       const timeout = Number(document.getElementById('provider-timeout').value || 0);
@@ -15765,6 +16129,19 @@ const adminHTML = `<!doctype html>
         enabled: existing ? existing.enabled !== false : true
       };
       try {
+        const diagnostics = await api('/admin/routing/pattern-conflicts', {
+          method: 'POST',
+          body: JSON.stringify({
+            provider_name: body.name,
+            model_patterns: body.model_patterns,
+            enabled: body.enabled
+          })
+        }).catch(() => null);
+        if (!confirmProviderPatternConflicts(body.name, diagnostics)) {
+          const target = document.getElementById('provider-pattern-diagnostics');
+          if (target) target.innerHTML = providerPatternDiagnostics(diagnostics);
+          return;
+        }
         await api('/admin/providers', { method: 'POST', body: JSON.stringify(body) });
         providerFormReset();
         route();
@@ -15784,6 +16161,7 @@ const adminHTML = `<!doctype html>
       if (submit) submit.textContent = '저장';
       const hint = document.getElementById('provider-edit-hint');
       if (hint) hint.textContent = '';
+      scheduleProviderPatternPreview();
     };
     // editProvider loads a registered provider's fields into the form for an in-place update.
     // Name is locked (upsert is keyed by name) and the API key is left blank to preserve the stored key.
@@ -15801,6 +16179,7 @@ const adminHTML = `<!doctype html>
       document.getElementById('provider-submit').textContent = '수정 저장';
       const hint = document.getElementById('provider-edit-hint');
       if (hint) hint.textContent = '"' + p.name + '" 수정 중 — 이름은 고정입니다. 새로 등록하려면 [취소]를 누르세요.';
+      scheduleProviderPatternPreview();
       document.getElementById('provider-form').scrollIntoView({ behavior: 'smooth', block: 'center' });
       document.getElementById('provider-base-url').focus();
     };
@@ -15809,6 +16188,17 @@ const adminHTML = `<!doctype html>
       const p = (window.__providers || {})[name];
       if (!p) { alert('프로바이더 정보를 찾을 수 없습니다: ' + name); return; }
       try {
+        if (p.enabled === false && p.model_patterns) {
+          const diagnostics = await api('/admin/routing/pattern-conflicts', {
+            method: 'POST',
+            body: JSON.stringify({
+              provider_name: p.name,
+              model_patterns: p.model_patterns,
+              enabled: true
+            })
+          }).catch(() => null);
+          if (!confirmProviderPatternConflicts(p.name, diagnostics)) return;
+        }
         await api('/admin/providers', { method: 'POST', body: JSON.stringify({
           name: p.name,
           base_url: p.base_url,

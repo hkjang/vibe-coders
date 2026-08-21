@@ -1774,6 +1774,12 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 			evidence_retention_days INTEGER NOT NULL DEFAULT 30,
 			external_provider_allowed INTEGER NOT NULL DEFAULT 0,
 			destructive_tool_policy TEXT NOT NULL DEFAULT 'dry-run',
+			retain_raw_evidence INTEGER NOT NULL DEFAULT 0,
+			trigger_source TEXT NOT NULL DEFAULT 'manual',
+			trigger_action TEXT NOT NULL DEFAULT '',
+			trigger_ref TEXT NOT NULL DEFAULT '',
+			trigger_reason TEXT NOT NULL DEFAULT '',
+			trigger_fingerprint TEXT NOT NULL DEFAULT '',
 			created_at TEXT NOT NULL,
 			updated_at TEXT NOT NULL
 		)`,
@@ -1950,6 +1956,13 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 		`ALTER TABLE agent_routes ADD COLUMN max_cost_krw REAL NOT NULL DEFAULT 0`,
 		// Red Team: opt-in raw (unmasked) evidence retention for admin review, and its storage.
 		`ALTER TABLE redteam_campaigns ADD COLUMN retain_raw_evidence INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE redteam_campaigns ADD COLUMN trigger_source TEXT NOT NULL DEFAULT 'manual'`,
+		`ALTER TABLE redteam_campaigns ADD COLUMN trigger_action TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE redteam_campaigns ADD COLUMN trigger_ref TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE redteam_campaigns ADD COLUMN trigger_reason TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE redteam_campaigns ADD COLUMN trigger_fingerprint TEXT NOT NULL DEFAULT ''`,
+		`CREATE INDEX IF NOT EXISTS idx_redteam_campaigns_trigger ON redteam_campaigns(trigger_source, created_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_redteam_campaigns_fingerprint ON redteam_campaigns(trigger_fingerprint, created_at)`,
 		`ALTER TABLE redteam_evidence ADD COLUMN raw_prompt TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE redteam_evidence ADD COLUMN raw_response TEXT NOT NULL DEFAULT ''`,
 	}

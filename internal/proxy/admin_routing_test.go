@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"bytes"
 	"context"
 	"encoding/csv"
 	"io"
@@ -8,6 +9,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -380,4 +382,109 @@ func TestExportCSVReturnsAuditRows(t *testing.T) {
 	if rows[0][0] != "created_at" {
 		t.Fatalf("expected first column to be created_at, got %q", rows[0][0])
 	}
+}
+
+// The response must say which upstream actually answered and why it was picked.
+// Before these headers the only routing signal a client ever saw was X-Failover-From,
+// so "which provider served this?" could not be answered without the admin UI.
+func TestRoutingHeadersExposeProviderAndFailover(t *testing.T) {
+	var primaryHits, backupHits atomic.Int32
+	// Alphabetically first, so it is the primary; always rate-limits.
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		primaryHits.Add(1)
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	defer primary.Close()
+	backup := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		backupHits.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`))
+	}))
+	defer backup.Close()
+
+	db := openTestStore(t)
+	defer db.Close()
+	logger := store.NewAsyncLogger(db, 32, filepath.Join(t.TempDir(), "fallback.ndjson"))
+	logger.Start()
+	defer logger.Stop(context.Background())
+
+	server, err := NewServer(testConfig(backup.URL, "default-secret"), db, logger, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxy := httptest.NewServer(server.Routes())
+	defer proxy.Close()
+
+	// Two providers matching the same glob — the only configuration in which the
+	// gateway builds failover candidates at all.
+	for _, p := range []struct{ name, url string }{{"a-primary", primary.URL}, {"b-backup", backup.URL}} {
+		resp := postJSON(t, proxy.URL+"/admin/providers", "", map[string]any{
+			"name": p.name, "base_url": p.url, "api_key": "secret",
+			"timeout_ms": 5000, "enabled": true, "model_patterns": "shared-*",
+		})
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			t.Fatalf("provider %s upsert failed: %d %s", p.name, resp.StatusCode, body)
+		}
+		resp.Body.Close()
+	}
+
+	t.Run("failover exposes origin and cause", func(t *testing.T) {
+		resp := postJSON(t, proxy.URL+"/v1/chat/completions", "", chatBody("shared-model", false))
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("expected 200 after failover, got %d", resp.StatusCode)
+		}
+		if primaryHits.Load() != 1 || backupHits.Load() != 1 {
+			t.Fatalf("expected one hit each, got primary=%d backup=%d", primaryHits.Load(), backupHits.Load())
+		}
+		if got := resp.Header.Get("X-Provider"); got != "b-backup" {
+			t.Fatalf("X-Provider=%q, want b-backup (the provider that actually answered)", got)
+		}
+		if got := resp.Header.Get("X-Route-Reason"); got != "model_pattern" {
+			t.Fatalf("X-Route-Reason=%q, want model_pattern", got)
+		}
+		if got := resp.Header.Get("X-Route-Detail"); got != "shared-*" {
+			t.Fatalf("X-Route-Detail=%q, want the matched glob shared-*", got)
+		}
+		if got := resp.Header.Get("X-Failover-From"); got != "a-primary" {
+			t.Fatalf("X-Failover-From=%q, want a-primary", got)
+		}
+		if got := resp.Header.Get("X-Failover-Reason"); !strings.Contains(got, "429") {
+			t.Fatalf("X-Failover-Reason=%q, want it to name the 429 that triggered failover", got)
+		}
+		if got := resp.Header.Get("X-Failover-Path"); !strings.Contains(got, "a-primary->b-backup") {
+			t.Fatalf("X-Failover-Path=%q, want the a-primary->b-backup hop", got)
+		}
+	})
+
+	t.Run("no failover means no failover headers", func(t *testing.T) {
+		// Pinning a provider disables failover entirely, so only selection headers appear.
+		req, err := http.NewRequest(http.MethodPost, proxy.URL+"/v1/chat/completions", bytes.NewReader([]byte(mustJSON(chatBody("shared-model", false)))))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Proxy-Provider", "b-backup")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("expected 200, got %d", resp.StatusCode)
+		}
+		if got := resp.Header.Get("X-Provider"); got != "b-backup" {
+			t.Fatalf("X-Provider=%q, want b-backup", got)
+		}
+		if got := resp.Header.Get("X-Route-Reason"); got != "header" {
+			t.Fatalf("X-Route-Reason=%q, want header", got)
+		}
+		if got := resp.Header.Get("X-Failover-From"); got != "" {
+			t.Fatalf("X-Failover-From=%q, want empty when nothing failed over", got)
+		}
+		if got := resp.Header.Get("X-Failover-Path"); got != "" {
+			t.Fatalf("X-Failover-Path=%q, want empty when nothing failed over", got)
+		}
+	})
 }

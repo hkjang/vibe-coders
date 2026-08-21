@@ -294,6 +294,9 @@ $env:PROXY_API_KEYS="dev:dev-proxy-key:alice:platform,team:team-proxy-key:bob:ba
 | `LOG_RESPONSE_MAX_BYTES` | `1048576` | 응답 분석/저장 최대 byte |
 | `MODEL_PRICING_KRW_PER_1M` | `{}` | 모델별 100만 토큰 KRW 가격 JSON |
 | `MCP_AGENTIC_MODEL` | 없음 | `vibe/grounded`·`vibe/research`·`vibe/all-mcp` agentic MCP Discovery 백킹 Chat 모델. 비우면 auto-router가 선택하며, 런타임 설정 `mcp.agentic_model`로 재배포 없이 변경 가능 |
+| `REDTEAM_POST_CHANGE_ENABLED` | `true` | Provider, MCP, Governance, Text2SQL, AI App/Workflow의 보안 관련 관리자 변경 뒤 자동 Red Team 시뮬레이션 실행. 실제 upstream은 호출하지 않음 |
+| `REDTEAM_POST_CHANGE_COOLDOWN` | `10m` | 동일 변경 상태의 자동 회귀 캠페인을 다시 만들지 않는 중복 억제 시간 |
+| `REDTEAM_POST_CHANGE_MAX_TARGETS` | `20` | 변경 1건당 자동 회귀 점검 대상 상한. 전체 범위는 대상 유형을 순환 선택 |
 | `RETENTION_REQUEST_DAYS` | `90` | 요청 로그 보존 일수 (0 이면 보존 안 함) |
 | `RETENTION_PROMPT_DAYS` | `30` | 프롬프트 로그 보존 일수 |
 | `RETENTION_RESPONSE_DAYS` | `30` | 응답 로그 보존 일수 |
@@ -543,12 +546,17 @@ curl.exe "http://localhost:8080/admin/prompts?q=%23%EC%9D%98%EC%8B%AC"
 
 #### 저장된 필터 (북마크)
 
-프롬프트 검색 화면의 "현재 필터 저장" 버튼으로 현재 검색 조건(키워드, IP, 키, 언어, 기간 등)을 이름과 함께 저장하고, 드롭다운에서 다시 불러올 수 있습니다.
+프롬프트 검색 화면의 "현재 필터 저장" 버튼으로 현재 검색 조건(키워드, IP, 키, 언어, 기간 등)을 이름과 함께 저장하고, 드롭다운에서 다시 불러올 수 있습니다. XView의 "조사 보기" 바도 기간·시간대·지표·스케일·색상 모드·모델·endpoint 조건을 저장, 덮어쓰기, 삭제할 수 있습니다. "링크 복사"는 저장 ID가 아닌 현재 조건을 URL에 직렬화하므로 저장 항목이 삭제되어도 같은 조회를 재현할 수 있습니다.
 
 ```powershell
 curl.exe http://localhost:8080/admin/saved-filters `
   -H "Content-Type: application/json" `
   -d '{ "name": "이번 주 Go 호출", "view": "prompts", "params": "language=Go&since=2026-06-01T00:00:00Z&limit=500" }'
+
+# XView 조사 보기
+curl.exe http://localhost:8080/admin/saved-filters `
+  -H "Content-Type: application/json" `
+  -d '{ "name": "최근 6시간 모델 오류 조사", "view": "xview", "params": "window=6h&metric=latency&scale=log&viewMode=model&models=gpt-4.1%2Cgpt-4.1-mini" }'
 ```
 
 #### 감사 로그 CSV
@@ -624,6 +632,21 @@ curl.exe http://localhost:8080/admin/providers `
 
 이후 `model=claude-3-5-sonnet` 요청은 자동으로 anthropic provider 로, `model=gpt-4.1-mini` 는 기본 openai 로 라우팅됩니다. 어드민 UI 의 설정 탭 > 업스트림 프로바이더 폼에서도 동일하게 입력할 수 있습니다.
 
+여러 활성 provider 패턴이 같은 모델에 매칭되면 provider 이름 오름차순의 첫 항목이 선택됩니다. `GET /admin/routing/pattern-conflicts?model=gpt-4.1-mini` 는 현재 패턴 충돌, 재현 가능한 모델명, 실제 승자와 경로 simulation을 반환합니다. `POST /admin/routing/pattern-conflicts` 에 `provider_name`, `model_patterns`, 선택적 `model`을 보내면 DB를 변경하지 않고 저장 전 충돌을 미리 확인할 수 있습니다. 설정 화면도 같은 분석 결과를 표시하고 충돌 저장 전에 확인을 요구합니다.
+
+### 폴백(failover)
+
+업스트림 실패 시 다른 provider 로 재시도하려면 아래 **네 조건을 모두** 만족해야 합니다.
+
+1. 클라이언트가 `X-Proxy-Provider` · `?provider=` 로 provider 를 **고정하지 않음**
+2. 프롬프트에서 PII·secret 위험이 탐지되지 않음
+3. **같은 모델에 매칭되는 provider 가 2개 이상** — 폴백 후보는 `model_patterns` 매칭으로만 만들어지므로, 패턴이 비었거나 서로 겹치지 않으면 폴백 후보가 0개입니다
+4. 실패가 429 · 5xx · 타임아웃 · 연결 실패 (4xx 는 폴백하지 않음)
+
+응답 헤더로 결과를 바로 확인할 수 있습니다 — `X-Provider`(실제 응답 provider), `X-Route-Reason`, `X-Route-Detail`, 그리고 폴백이 일어났을 때만 나오는 `X-Failover-From` · `X-Failover-Reason` · `X-Failover-Path`.
+
+> 전체 규칙·구성 레시피·트러블슈팅은 **[docs/ROUTING_GUIDE.md](docs/ROUTING_GUIDE.md)** 를 참고하세요. 어드민에서는 설정 탭 → 업스트림 프로바이더 → `📖 라우팅 · 폴백 동작 설명 열기` 버튼으로 같은 내용을 볼 수 있고, 같은 화면의 **폴백 커버리지** 표시가 provider 별로 폴백 상대가 있는지 알려줍니다.
+
 ### 임베딩(`/v1/embeddings`) 프록시
 
 `/v1/embeddings` 는 `/v1/chat/completions` 와 동일한 파이프라인(인증·쿼터·라우팅·거버넌스·캐시·감사)을 그대로 통과하며, 요청 body 의 `model` 을 기준으로 위와 같은 provider 자동 라우팅이 적용됩니다. OpenAI·vLLM·Ollama 는 모두 OpenAI 호환 `/v1/embeddings` 엔드포인트를 제공하므로, provider 를 등록하고 임베딩 모델 글롭을 `model_patterns` 에 넣으면 게이트웨이를 통해 그대로 서비스됩니다. `base_url` 은 `/v1` 접미사 없이 등록합니다(게이트웨이가 `{base_url}/v1/embeddings` 로 전달).
@@ -671,7 +694,7 @@ Routing Explain 예시:
   "complexity": { "score": 63, "tier": "complex" },
   "risk": { "score": 38, "tier": "medium", "categories": ["authentication", "deployment_command"] },
   "health_score": 96,
-  "fallback_path": ["429:backup", "5xx:backup", "timeout:lowest-latency-provider"],
+  "fallback_plan": ["429|5xx|timeout:backup", "context_overflow:o3"],
   "route_reason": "auto_router",
   "decision_reason": "client requested vibe/auto; auto alias mapped complex tier to gpt-4.1; provider health selected openai(96)"
 }
