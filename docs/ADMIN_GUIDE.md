@@ -48,6 +48,19 @@
 
 이전에는 성공 시 화면만 새로고침되어 **작업이 실제로 됐는지 알 수 없었고**, 실패 시에만 경고창이 떴습니다. 이제 프로바이더·API 키·라우팅 규칙·예산·사용 한도·알림 규칙·AI 정책·계정/팀·Knowledge·SLO·템플릿·모델 일몰 저장과 키 폐기/회전·Kill Switch 전환·회로 차단기 해제·세션 고정 해제가 모두 완료 알림을 표시합니다.
 
+### 관리자 UI 회귀 테스트 (개발자용)
+
+어드민 화면은 Go raw string 하나(`internal/proxy/admin_ui.go`) 안에 들어 있어 `go test` 가 그 JavaScript를 실행하지 않습니다. 두 종류의 테스트로 보완합니다.
+
+| 파일 | 검사 | 의존성 |
+|---|---|---|
+| `admin_ui_static_test.go` | raw string 무결성(내부 백틱), `alert()` 잔존, 읽기 전용 엔드포인트의 성공 알림, 토스트의 `innerHTML` 사용, 오버레이 dialog 시맨틱·포커스 헬퍼 존재 | 없음 (항상 실행) |
+| `admin_ui_behavior_test.go` + `testdata/admin_ui_behavior.js` | 토스트 동작, 명령 팔레트 매칭·인덱스, 포커스 가둠·복원, 표 래핑 멱등성 — 스텁 DOM에서 실제 함수를 실행 | node (없으면 skip) |
+
+동작 검사는 단독 실행도 됩니다: `cd internal/proxy && node testdata/admin_ui_behavior.js`
+
+CSS 주석에 백틱을 넣어 raw string을 끊거나, 일괄 치환으로 `alert()` 가 되살아나거나, 표 래퍼가 재렌더마다 중첩되는 실수가 실제로 있었고 모두 이 테스트가 잡습니다.
+
 ### 화면 찾기 (명령 팔레트)
 
 상단의 **🔎 화면 찾기** 버튼 또는 <kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>K</kbd>(입력 중이 아닐 때는 <kbd>k</kbd>)로 엽니다. 화면 이름이나 경로 일부를 입력해 바로 이동합니다.
