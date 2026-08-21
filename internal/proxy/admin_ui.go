@@ -187,6 +187,84 @@ const adminHTML = `<!doctype html>
     .prompt { max-height: 80px; overflow: hidden; color: var(--ink); white-space: pre-wrap; }
     .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; background: var(--pill-bg); color: var(--ink); font-size: 12px; }
 
+    /* Command palette. The admin has ~35 permission-filtered destinations spread across
+       grouped nav menus; reaching one meant remembering which group it lives under. The
+       list is built from the rendered nav at open time, so it shows exactly the screens
+       this operator is allowed to see and can never drift from the menu. */
+    .palette-backdrop {
+      position: fixed; inset: 0; background: rgba(15,23,42,0.45);
+      display: none; align-items: flex-start; justify-content: center;
+      z-index: 70; padding: 12vh 16px 16px;
+    }
+    .palette-backdrop.open { display: flex; }
+    .palette {
+      width: min(560px, 100%); background: var(--panel); color: var(--ink);
+      border: 1px solid var(--line-strong); border-radius: 12px; overflow: hidden;
+      box-shadow: 0 24px 64px rgba(15,23,42,0.32); display: flex; flex-direction: column;
+      max-height: min(60vh, 520px);
+    }
+    .palette input {
+      border: 0; border-bottom: 1px solid var(--line); border-radius: 0;
+      padding: 14px 16px; font-size: 15px; background: transparent; color: var(--ink); width: 100%;
+    }
+    .palette input:focus { outline: none; }
+    .palette-list { overflow-y: auto; padding: 6px; margin: 0; list-style: none; }
+    .palette-item {
+      display: flex; align-items: center; gap: 10px; padding: 9px 10px;
+      border-radius: 8px; cursor: pointer; font-size: 13px;
+    }
+    .palette-item[aria-selected="true"] { background: var(--row-hover); }
+    .palette-item .pi-kind {
+      flex: 0 0 auto; font-size: 11px; color: var(--muted);
+      border: 1px solid var(--line); border-radius: 5px; padding: 1px 6px;
+    }
+    .palette-item .pi-label { flex: 1 1 auto; }
+    .palette-item .pi-hash { flex: 0 0 auto; color: var(--muted); font-size: 11px; }
+    .palette-empty { padding: 18px 16px; color: var(--muted); font-size: 13px; }
+    .palette-foot {
+      border-top: 1px solid var(--line); padding: 7px 12px;
+      color: var(--muted); font-size: 11px; display: flex; gap: 12px; flex-wrap: wrap;
+    }
+
+    /* Route progress. route() awaits a screen's data before painting, so a slow screen
+       used to leave the PREVIOUS one on display with no sign the click had registered. */
+    #route-progress {
+      position: fixed; top: 0; left: 0; height: 2px; width: 0;
+      background: var(--accent); z-index: 80; opacity: 0;
+      transition: width 180ms ease-out, opacity 180ms ease-out;
+    }
+    #route-progress.active { opacity: 1; width: 70%; }
+    #route-progress.done { width: 100%; opacity: 0; }
+    @media (prefers-reduced-motion: reduce) { #route-progress { transition: none; } }
+
+    /* Toasts. Every admin action used to report through a blocking window.alert(),
+       which interrupts the operator and — worse — said nothing at all on success, so
+       there was no way to tell a completed save from a silent failure. */
+    #toasts {
+      position: fixed; right: 18px; bottom: 18px; z-index: 60;
+      display: flex; flex-direction: column-reverse; gap: 8px;
+      max-width: min(420px, calc(100vw - 36px)); pointer-events: none;
+    }
+    .toast {
+      pointer-events: auto; display: flex; align-items: flex-start; gap: 10px;
+      padding: 11px 12px; border-radius: 10px; border: 1px solid var(--line-strong);
+      background: var(--panel); color: var(--ink); font-size: 13px; line-height: 1.45;
+      box-shadow: 0 8px 24px rgba(15,23,42,0.18);
+      animation: toast-in 140ms ease-out;
+    }
+    @media (prefers-reduced-motion: reduce) { .toast { animation: none; } }
+    @keyframes toast-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+    .toast.ok { border-left: 3px solid var(--accent); }
+    .toast.error { border-left: 3px solid var(--bad); background: var(--bad-bg); }
+    .toast.info { border-left: 3px solid var(--accent-2); }
+    .toast .toast-icon { flex: 0 0 auto; font-size: 14px; line-height: 1.35; }
+    .toast .toast-msg { flex: 1 1 auto; word-break: break-word; white-space: pre-wrap; }
+    .toast .toast-close {
+      flex: 0 0 auto; background: none; border: 0; color: var(--muted);
+      cursor: pointer; font-size: 15px; line-height: 1; padding: 0 2px; height: auto;
+    }
+    .toast .toast-close:hover { color: var(--ink); }
+
     .modal-backdrop {
       position: fixed; inset: 0; background: rgba(15,23,42,0.55);
       display: none; align-items: flex-start; justify-content: center;
@@ -385,6 +463,20 @@ const adminHTML = `<!doctype html>
     .xview-launcher { background:linear-gradient(135deg,var(--accent),var(--accent-2));border:0;color:#fff;box-shadow:0 5px 16px color-mix(in srgb,var(--accent) 25%,transparent);white-space:nowrap; }
     .xview-launcher:hover { transform:translateY(-1px); }
 
+    /* Wide tables scroll inside their own box instead of being crushed. Because tables
+       are table-layout:fixed with overflow-wrap:anywhere, a seven-column table does not
+       overflow the page — it squeezes every column and breaks words mid-syllable, which
+       reads worse. The wrapper is added after render (wrapViewTables) because section
+       sets overflow:hidden, so a bare min-width would clip instead of scroll. */
+    .table-scroll { overflow-x: auto; }
+
+    @media (max-width: 860px) {
+      /* Forms declare their column template inline, and an inline style wins over any
+         stylesheet rule — media query or not — unless it is forced. 31 forms hardcode
+         fixed pixel columns that do not fit a narrow viewport. */
+      .inline-form { grid-template-columns: 1fr !important; }
+      .table-scroll > table { min-width: 680px; }
+    }
     @media (max-width: 960px) {
       header { flex-direction: column; align-items: flex-start; gap: 8px; }
       main { padding: 14px; }
@@ -512,6 +604,7 @@ const adminHTML = `<!doctype html>
               <option value="60">60초</option>
             </select>
           </label>
+          <button id="palette-toggle" class="ghost" type="button" title="화면 검색·이동 (Ctrl/⌘ K)">🔎 화면 찾기</button>
           <button id="theme-toggle" class="ghost" type="button" title="라이트/다크 전환 (t)">🌓 테마 전환</button>
           <button id="help-toggle" class="ghost" type="button" title="단축키 도움말 (?)">? 단축키 도움말</button>
           <div id="app-version" class="user-menu-meta">앱 버전 __APP_VERSION__</div>
@@ -546,7 +639,18 @@ const adminHTML = `<!doctype html>
     </form>
   </div>
 
-  <div id="modal-backdrop" class="modal-backdrop">
+  <div id="route-progress"></div>
+  <div id="palette-backdrop" class="palette-backdrop" role="dialog" aria-modal="true" aria-label="명령 팔레트">
+    <div class="palette">
+      <input id="palette-input" type="text" autocomplete="off" spellcheck="false"
+             placeholder="화면 이름이나 경로로 이동… (예: 라우팅, settings)" aria-label="화면 검색"
+             role="combobox" aria-expanded="true" aria-controls="palette-list" aria-autocomplete="list">
+      <ul class="palette-list" id="palette-list" role="listbox" aria-label="검색 결과"></ul>
+      <div class="palette-foot"><span><kbd>&#8593;</kbd><kbd>&#8595;</kbd> 이동</span><span><kbd>Enter</kbd> 열기</span><span><kbd>Esc</kbd> 닫기</span></div>
+    </div>
+  </div>
+  <div id="toasts" role="status" aria-live="polite" aria-atomic="false"></div>
+  <div id="modal-backdrop" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="modal-title">
     <div class="modal">
       <header>
         <h3 id="modal-title">상세</h3>
@@ -861,11 +965,201 @@ const adminHTML = `<!doctype html>
       }
       currentModalState = state;
       updateModalBack();
+      wrapViewTables(document.getElementById('modal-body'));
     }
     function updateModalBack() {
       const back = document.getElementById('modal-back');
       if (back) back.style.display = modalStack.length > 0 ? 'inline-block' : 'none';
     }
+    // toast reports the outcome of an action without blocking the page.
+    //
+    // Defaults to 'error' on purpose: this replaces ~118 window.alert() calls that were
+    // almost all failures or validation messages, so an unmarked call keeps exactly the
+    // meaning it had. Successes must opt in with 'ok', which is the point — an action
+    // that previously said nothing on success now has somewhere to say it.
+    //
+    // Errors stay until dismissed; an operator who looked away should not lose the only
+    // report that a save failed.
+    function toast(message, kind) {
+      const host = document.getElementById('toasts');
+      const text = String(message == null ? '' : message);
+      if (!host) { console.error(text); return; }
+      kind = kind || 'error';
+      const el = document.createElement('div');
+      el.className = 'toast ' + kind;
+      const icon = document.createElement('span');
+      icon.className = 'toast-icon';
+      icon.textContent = kind === 'ok' ? '\u2713' : (kind === 'info' ? '\u2139' : '\u26a0');
+      const body = document.createElement('span');
+      body.className = 'toast-msg';
+      body.textContent = text;             // textContent, never innerHTML: messages carry server strings
+      const close = document.createElement('button');
+      close.type = 'button';
+      close.className = 'toast-close';
+      close.setAttribute('aria-label', '알림 닫기');
+      close.textContent = '\u00d7';
+      let timer = null;
+      const dismiss = () => { clearTimeout(timer); el.remove(); };
+      close.addEventListener('click', dismiss);
+      el.append(icon, body, close);
+      host.appendChild(el);
+      // Keep the stack shallow so a burst of failures cannot cover the page.
+      while (host.children.length > 4) host.removeChild(host.firstChild);
+      if (kind !== 'error') timer = setTimeout(dismiss, 4000);
+      return el;
+    }
+    window.toast = toast;
+
+    // ---------- overlay focus management ----------
+    // Both overlays declare aria-modal, which promises the rest of the page is inert.
+    // Without a trap that promise is false: Tab walks straight out into the page behind,
+    // and on close the keyboard lands back at the top of the document instead of where
+    // the operator was. Screen-reader and keyboard users pay for both.
+    const focusableSelector = [
+      'a[href]', 'button:not([disabled])', 'input:not([disabled])',
+      'select:not([disabled])', 'textarea:not([disabled])', '[tabindex]:not([tabindex="-1"])',
+    ].join(',');
+    let focusReturn = null;
+
+    function focusablesIn(container) {
+      return Array.from(container.querySelectorAll(focusableSelector))
+        .filter((el) => el.offsetParent !== null || el === document.activeElement);
+    }
+    // Remember where focus came from so closing can put it back.
+    function captureFocusOrigin() {
+      focusReturn = document.activeElement;
+    }
+    function restoreFocusOrigin() {
+      const target = focusReturn;
+      focusReturn = null;
+      if (target && typeof target.focus === 'function' && document.contains(target)) {
+        target.focus();
+      }
+    }
+    // Called from the global keydown handler for whichever overlay is open.
+    function trapFocusInside(container, e) {
+      if (e.key !== 'Tab') return;
+      const items = focusablesIn(container);
+      if (!items.length) { e.preventDefault(); return; }
+      const first = items[0];
+      const last = items[items.length - 1];
+      const active = document.activeElement;
+      if (e.shiftKey && (active === first || !container.contains(active))) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && (active === last || !container.contains(active))) {
+        e.preventDefault();
+        first.focus();
+      }
+    }
+
+    // ---------- command palette ----------
+    // Entries come from the live nav, which the server already filtered by the caller's
+    // allowed_tabs. Reading it at open time means the palette inherits those permissions
+    // for free and stays correct when the menu changes, instead of duplicating a route
+    // table that would quietly rot.
+    let paletteItems = [];
+    let paletteIndex = 0;
+
+    function buildCommandIndex() {
+      const seen = new Set();
+      const items = [];
+      document.querySelectorAll('#tabs a[data-tab]').forEach((a) => {
+        const hash = a.getAttribute('href') || '';
+        const label = (a.textContent || '').trim();
+        if (!hash || !label || seen.has(hash)) return;
+        seen.add(hash);
+        // Show the owning menu so duplicate-sounding screens stay distinguishable.
+        // The toggle reads like "대시보드 ▾"; drop the chevron the CSS-less text carries.
+        const group = a.closest('.nav-group');
+        const toggle = group && group.querySelector('.nav-group-toggle');
+        const groupLabel = toggle ? toggle.textContent.replace(/[\u25be\u25bc]/g, '').trim() : '';
+        items.push({ kind: groupLabel || '화면', label, hash, run: () => { location.hash = hash; } });
+      });
+      items.push(
+        { kind: '동작', label: '현재 화면 다시 불러오기', hash: 'r', run: () => route() },
+        { kind: '동작', label: '다크 모드 전환', hash: 't', run: () => document.getElementById('theme-toggle').click() },
+        { kind: '동작', label: '단축키 도움말', hash: '?', run: () => openHelp() },
+        { kind: '동작', label: 'XView 요청 탐색', hash: 'shift+X', run: () => openXViewLauncher() }
+      );
+      return items;
+    }
+
+    // Subsequence match, so "라헬" finds "라우팅 · 헬스" and "prov" finds "/providers".
+    function paletteMatches(query, entry) {
+      const q = query.trim().toLowerCase();
+      if (!q) return true;
+      const hay = (entry.label + ' ' + entry.hash + ' ' + entry.kind).toLowerCase();
+      if (hay.includes(q)) return true;
+      let i = 0;
+      for (const ch of hay) {
+        if (ch === q[i]) i++;
+        if (i === q.length) return true;
+      }
+      return false;
+    }
+
+    function renderPaletteList(query) {
+      const list = document.getElementById('palette-list');
+      const matches = paletteItems.filter((e) => paletteMatches(query, e)).slice(0, 40);
+      paletteIndex = 0;
+      if (!matches.length) {
+        list.innerHTML = '<li class="palette-empty">일치하는 화면이 없습니다.</li>';
+        paletteVisible = [];
+        return;
+      }
+      paletteVisible = matches;
+      list.innerHTML = matches.map((e, i) =>
+        '<li class="palette-item" role="option" data-i="' + i + '" aria-selected="' + (i === 0) + '">' +
+          '<span class="pi-kind">' + escapeHTML(e.kind) + '</span>' +
+          '<span class="pi-label">' + escapeHTML(e.label) + '</span>' +
+          '<span class="pi-hash">' + escapeHTML(e.hash) + '</span>' +
+        '</li>').join('');
+      Array.from(list.children).forEach((li) => {
+        li.addEventListener('mouseenter', () => setPaletteIndex(Number(li.dataset.i)));
+        li.addEventListener('click', () => runPaletteItem(Number(li.dataset.i)));
+      });
+    }
+    let paletteVisible = [];
+
+    function setPaletteIndex(next) {
+      const list = document.getElementById('palette-list');
+      if (!paletteVisible.length) return;
+      paletteIndex = (next + paletteVisible.length) % paletteVisible.length;
+      Array.from(list.children).forEach((li, i) => {
+        li.setAttribute('aria-selected', String(i === paletteIndex));
+        if (i === paletteIndex) li.scrollIntoView({ block: 'nearest' });
+      });
+    }
+
+    function runPaletteItem(i) {
+      const entry = paletteVisible[typeof i === 'number' ? i : paletteIndex];
+      if (!entry) return;
+      closeCommandPalette();
+      entry.run();
+    }
+
+    function openCommandPalette() {
+      if (!paletteIsOpen()) captureFocusOrigin();
+      paletteItems = buildCommandIndex();
+      const backdrop = document.getElementById('palette-backdrop');
+      const input = document.getElementById('palette-input');
+      backdrop.classList.add('open');
+      input.value = '';
+      renderPaletteList('');
+      input.focus();
+    }
+    function closeCommandPalette() {
+      const wasOpen = paletteIsOpen();
+      document.getElementById('palette-backdrop').classList.remove('open');
+      // Navigating away re-renders the page, so only restore when we are staying put.
+      if (wasOpen) restoreFocusOrigin();
+    }
+    function paletteIsOpen() {
+      return document.getElementById('palette-backdrop').classList.contains('open');
+    }
+    window.openCommandPalette = openCommandPalette;
+
     function openModal(title, html, requestId, opts) {
       opts = opts || {};
       const backdrop = document.getElementById('modal-backdrop');
@@ -878,19 +1172,27 @@ const adminHTML = `<!doctype html>
           requestId: currentModalState.requestId,
           opts: currentModalState.opts,
         });
+      } else {
+        // First overlay in the stack: remember where the keyboard was.
+        captureFocusOrigin();
       }
       _applyModalState({ title: title, html: html, requestId: requestId, opts: opts });
       backdrop.classList.add('open');
+      const close = document.getElementById('modal-close');
+      if (close) close.focus();
     }
     function modalBack() {
       if (modalStack.length === 0) return;
       _applyModalState(modalStack.pop());
     }
     function closeModal() {
-      document.getElementById('modal-backdrop').classList.remove('open');
+      const backdrop = document.getElementById('modal-backdrop');
+      const wasOpen = backdrop.classList.contains('open');
+      backdrop.classList.remove('open');
       modalStack = [];
       currentModalState = null;
       updateModalBack();
+      if (wasOpen) restoreFocusOrigin();
     }
     async function runAIAnalysis(id) {
       const areaId = 'ai-analysis-result';
@@ -931,11 +1233,17 @@ const adminHTML = `<!doctype html>
       if (token) h.Authorization = 'Bearer ' + token;
       return h;
     }
+    // options.success: message to toast when the call succeeds. Opt-in rather than
+    // automatic, because several read-only screens query over POST (routing preview,
+    // pattern conflicts, chat test) and would otherwise announce a save that never
+    // happened.
     async function api(path, options = {}) {
+      const successMessage = options.success;
       const doFetch = () => {
         const requestHeaders = headers();
         if (options.body) requestHeaders['Content-Type'] = 'application/json';
-        return fetch(path, { ...options, headers: requestHeaders });
+        const { success, ...init } = options;
+        return fetch(path, { ...init, headers: requestHeaders });
       };
       let res = await doFetch();
       // JWT 모드: access 만료 시 refresh 회전 후 1회 재시도, 실패하면 재로그인 유도
@@ -952,6 +1260,7 @@ const adminHTML = `<!doctype html>
         const text = await res.text();
         throw new Error(text || res.statusText);
       }
+      if (successMessage) toast(successMessage, 'ok');
       if (res.status === 204) return null;
       return res.json();
     }
@@ -1374,6 +1683,7 @@ const adminHTML = `<!doctype html>
         renderForbidden(tab);
         return;
       }
+      routeProgress(true);
       try {
         switch (tab) {
           case 'me':        await renderMeHome(); break;
@@ -1451,8 +1761,58 @@ const adminHTML = `<!doctype html>
           default: await renderDashboard();
         }
       } catch (err) {
-        document.getElementById('view').innerHTML = '<div class="error-line">' + escapeHTML(err.message) + '</div>';
+        // A bare message with no context left the operator with nowhere to go: which
+        // screen failed, and how to retry. Name the screen, keep the detail, and offer
+        // both a retry and a way out.
+        const label = tabLabelFor(tab);
+        document.getElementById('view').innerHTML =
+          '<div class="banner error" style="margin:14px">' +
+            '<strong>' + escapeHTML(label) + ' 화면을 불러오지 못했습니다.</strong>' +
+            '<div class="muted" style="margin-top:6px; white-space:pre-wrap">' + escapeHTML(err.message || String(err)) + '</div>' +
+            '<div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:10px">' +
+              '<button type="button" onclick="route()">다시 시도</button>' +
+              '<button type="button" class="secondary" onclick="openCommandPalette()">다른 화면 열기</button>' +
+            '</div>' +
+          '</div>';
+      } finally {
+        wrapViewTables();
+        routeProgress(false);
       }
+    }
+    // tabLabelFor reads the nav so the error names the screen exactly as the menu does.
+    function tabLabelFor(tab) {
+      const link = document.querySelector('#tabs a[data-tab="' + (tab || '') + '"]');
+      return (link && link.textContent.trim()) || tab || '요청한';
+    }
+    // wrapViewTables gives every rendered table its own horizontal scroll box.
+    // Done after render rather than at ~181 call sites, and idempotent so repeated
+    // renders (or a modal reusing markup) never nest wrappers.
+    function wrapViewTables(root) {
+      const host = root || document.getElementById('view');
+      if (!host) return;
+      host.querySelectorAll('table').forEach((table) => {
+        const parent = table.parentElement;
+        if (!parent || parent.classList.contains('table-scroll')) return;
+        const box = document.createElement('div');
+        box.className = 'table-scroll';
+        parent.insertBefore(box, table);
+        box.appendChild(table);
+      });
+    }
+
+    let routeProgressTimer = null;
+    function routeProgress(active) {
+      const bar = document.getElementById('route-progress');
+      if (!bar) return;
+      clearTimeout(routeProgressTimer);
+      if (active) {
+        bar.classList.remove('done');
+        bar.classList.add('active');
+        return;
+      }
+      bar.classList.remove('active');
+      bar.classList.add('done');
+      routeProgressTimer = setTimeout(() => bar.classList.remove('done'), 220);
     }
     window.addEventListener('hashchange', route);
 
@@ -5141,7 +5501,7 @@ const adminHTML = `<!doctype html>
         probe_pack_ids: packs,
         target_filter: targetFilter,
       };
-      if (!body.name) { alert('캠페인 이름을 입력하세요.'); return; }
+      if (!body.name) { toast('캠페인 이름을 입력하세요.'); return; }
       const editing = !!rtEditCampaignId;
       if (editing) body.id = rtEditCampaignId;
       try {
@@ -5190,7 +5550,7 @@ const adminHTML = `<!doctype html>
     }
     window.redTeamEditCampaign = (id) => {
       const c = (window.__rtCampaigns || []).find(x => x.id === id);
-      if (!c) { alert('캠페인 정보를 찾을 수 없습니다.'); return; }
+      if (!c) { toast('캠페인 정보를 찾을 수 없습니다.'); return; }
       rtActiveTab = 'campaigns';
       rtTab('campaigns');
       rtEditCampaignId = id;
@@ -5198,7 +5558,7 @@ const adminHTML = `<!doctype html>
     };
     window.redTeamCloneCampaign = (id) => {
       const c = (window.__rtCampaigns || []).find(x => x.id === id);
-      if (!c) { alert('캠페인 정보를 찾을 수 없습니다.'); return; }
+      if (!c) { toast('캠페인 정보를 찾을 수 없습니다.'); return; }
       rtActiveTab = 'campaigns';
       rtTab('campaigns');
       rtEditCampaignId = ''; // 복제는 새 캠페인으로 생성
@@ -5459,7 +5819,7 @@ const adminHTML = `<!doctype html>
         key = (window.prompt('실제 재실행: 전용 레드팀 Proxy API Key를 입력하세요.\n(실제 대상 provider·model을 1회 호출합니다)') || '').trim();
         if (key) localStorage.setItem('rt_proxy_key', key);
       }
-      if (!key) { alert('실제 재실행에는 전용 레드팀 Proxy API Key가 필요합니다.'); return; }
+      if (!key) { toast('실제 재실행에는 전용 레드팀 Proxy API Key가 필요합니다.'); return; }
       try {
         openModal('재실행 중…', '<p class="muted" style="font-size:12px">대상 모델을 실제 호출하고 있습니다…</p>');
         const d = await api('/admin/redteam/results/' + encodeURIComponent(resultID) + '/rerun', { method: 'POST', body: JSON.stringify({ proxy_key: key }) });
@@ -5485,7 +5845,7 @@ const adminHTML = `<!doctype html>
     window.redTeamCreateSchedule = async () => {
       const campaign = (document.getElementById('rt-sched-campaign') || {}).value || '';
       const cron = (document.getElementById('rt-sched-cron') || {}).value || '@daily';
-      if (!campaign) { alert('먼저 캠페인을 만든 뒤 일정을 추가하세요.'); return; }
+      if (!campaign) { toast('먼저 캠페인을 만든 뒤 일정을 추가하세요.'); return; }
       try {
         await api('/admin/redteam/schedules', { method: 'POST', body: JSON.stringify({ campaign_template_id: campaign, cron_expr: cron, enabled: true }) });
         await renderRedTeamView();
@@ -5497,7 +5857,7 @@ const adminHTML = `<!doctype html>
       try {
         const d = await api('/admin/redteam/schedules');
         const sc = (d.schedules || []).find(x => x.id === id);
-        if (!sc) { alert('일정을 찾을 수 없습니다.'); return; }
+        if (!sc) { toast('일정을 찾을 수 없습니다.'); return; }
         await api('/admin/redteam/schedules', { method: 'POST', body: JSON.stringify({
           id: sc.id, campaign_template_id: sc.campaign_template_id, cron_expr: sc.cron_expr,
           timezone: sc.timezone, enabled: !!enabled,
@@ -5609,7 +5969,7 @@ const adminHTML = `<!doctype html>
       };
       if (packSel === '__new__') { body.pack_name = (document.getElementById('rtc-newpack').value || '').trim() || '사용자 정의 프롬프트'; }
       else { body.pack_id = packSel; }
-      if (!body.case_key || !body.input_template) { alert('케이스 키와 요청 프롬프트를 입력하세요.'); return; }
+      if (!body.case_key || !body.input_template) { toast('케이스 키와 요청 프롬프트를 입력하세요.'); return; }
       try {
         await api('/admin/redteam/probe-cases', { method: 'POST', body: JSON.stringify(body) });
         closeModal();
@@ -5618,7 +5978,7 @@ const adminHTML = `<!doctype html>
       } catch (e) { openModal('프롬프트 오류', '<div class="error-line">' + escapeHTML(e.message) + '</div>'); }
     };
     window.redTeamDeleteCase = async (caseId, packId) => {
-      if (!caseId) { alert('케이스 ID가 없습니다.'); return; }
+      if (!caseId) { toast('케이스 ID가 없습니다.'); return; }
       if (!window.confirm('이 프롬프트(케이스)를 삭제할까요?')) return;
       try {
         await api('/admin/redteam/probe-cases/' + encodeURIComponent(caseId), { method: 'DELETE' });
@@ -5811,7 +6171,7 @@ const adminHTML = `<!doctype html>
         max_cost_krw: Number(document.getElementById('ar-cost').value || 0),
         enabled: !!document.getElementById('ar-enabled').checked,
       };
-      if (!body.virtual_model) { alert('가상 모델명을 입력하세요.'); return; }
+      if (!body.virtual_model) { toast('가상 모델명을 입력하세요.'); return; }
       try {
         const d = await api('/admin/agent-routes', { method: 'POST', body: JSON.stringify(body) });
         agentEditId = '';
@@ -5824,7 +6184,7 @@ const adminHTML = `<!doctype html>
     };
     window.agentRouteEdit = (id) => {
       const a = (window.__agentRoutes || []).find(x => x.id === id);
-      if (!a) { alert('라우트를 찾을 수 없습니다.'); return; }
+      if (!a) { toast('라우트를 찾을 수 없습니다.'); return; }
       agentEditId = id;
       document.getElementById('ar-model').value = a.virtual_model || '';
       document.getElementById('ar-name').value = a.name || '';
@@ -6178,7 +6538,7 @@ const adminHTML = `<!doctype html>
       if (el) el.textContent = '선택된 항목 ' + diffSelection.length + '/2';
     }
     async function openDiffModal() {
-      if (diffSelection.length !== 2) { alert('두 행을 체크박스로 선택해주세요'); return; }
+      if (diffSelection.length !== 2) { toast('두 행을 체크박스로 선택해주세요'); return; }
       const [a, b] = diffSelection;
       const diff = await api('/admin/requests/diff?a=' + encodeURIComponent(a) + '&b=' + encodeURIComponent(b));
       openModal('요청 비교', diffHTML(diff));
@@ -6264,7 +6624,7 @@ const adminHTML = `<!doctype html>
       document.getElementById('p-export').addEventListener('click', async () => {
         const params = collectParams();
         const res = await fetch('/admin/export.csv?' + params.toString(), { headers: headers() });
-        if (!res.ok) { alert('CSV 다운로드 실패: ' + (await res.text())); return; }
+        if (!res.ok) { toast('CSV 다운로드 실패: ' + (await res.text())); return; }
         const blob = await res.blob();
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -6293,7 +6653,7 @@ const adminHTML = `<!doctype html>
       document.getElementById('p-delete-saved').addEventListener('click', async () => {
         const selected = savedSel.options[savedSel.selectedIndex];
         const id = selected && selected.dataset.id;
-        if (!id) { alert('삭제할 저장된 필터를 먼저 선택하세요'); return; }
+        if (!id) { toast('삭제할 저장된 필터를 먼저 선택하세요'); return; }
         if (!confirm('"' + selected.text + '" 저장된 필터를 삭제하시겠습니까?')) return;
         await api('/admin/saved-filters/' + encodeURIComponent(id), { method: 'DELETE' });
         route();
@@ -6513,12 +6873,12 @@ const adminHTML = `<!doctype html>
             status: isDraft ? 'draft' : 'pending',
             enabled: true,
           };
-          if (!body.name || !body.body) { alert('이름과 본문은 필수입니다.'); btn.disabled=false; btn.textContent='저장'; return; }
+          if (!body.name || !body.body) { toast('이름과 본문은 필수입니다.'); btn.disabled=false; btn.textContent='저장'; return; }
           await api('/admin/templates', { method: 'POST', body: JSON.stringify(body) });
           closeModal();
           route();
         } catch(err) {
-          alert('오류: ' + err.message);
+          toast('오류: ' + err.message);
           btn.disabled=false; btn.textContent='저장';
         }
       });
@@ -6675,14 +7035,14 @@ const adminHTML = `<!doctype html>
         });
         closeModal();
         route();
-      } catch(err) { alert('저장 오류: ' + err.message); }
+      } catch(err) { toast('저장 오류: ' + err.message); }
     };
 
     window.submitAsset = async (id) => {
       try {
         await api('/admin/templates/' + encodeURIComponent(id) + '/submit', { method: 'POST', body: '{}' });
         route();
-      } catch(err) { alert('제출 오류: ' + err.message); }
+      } catch(err) { toast('제출 오류: ' + err.message); }
     };
 
     window.approveAsset = async (id, status) => {
@@ -6696,7 +7056,7 @@ const adminHTML = `<!doctype html>
         });
         closeModal();
         route();
-      } catch(err) { alert('처리 오류: ' + err.message); }
+      } catch(err) { toast('처리 오류: ' + err.message); }
     };
 
     window.deleteAsset = async (id) => {
@@ -6704,7 +7064,7 @@ const adminHTML = `<!doctype html>
       try {
         await api('/admin/templates/' + encodeURIComponent(id), { method: 'DELETE' });
         route();
-      } catch(err) { alert('삭제 오류: ' + err.message); }
+      } catch(err) { toast('삭제 오류: ' + err.message); }
     };
 
     // Simple line-based diff between two snapshot versions, rendered into #pa-diff.
@@ -6786,7 +7146,7 @@ const adminHTML = `<!doctype html>
           body: JSON.stringify({ version }),
         });
         openAssetDetail(id);
-      } catch(err) { alert('복원 오류: ' + err.message); }
+      } catch(err) { toast('복원 오류: ' + err.message); }
     };
     // ── 프롬프트 자산 관리소 끝 ──────────────────────────────────────────
 
@@ -7246,7 +7606,7 @@ const adminHTML = `<!doctype html>
         monthly_krw: Number(document.getElementById('b-krw').value || 0),
         note: document.getElementById('b-note').value.trim()
       };
-      await api('/admin/budgets', { method: 'POST', body: JSON.stringify(body) });
+      await api('/admin/budgets', { method: 'POST', success: '예산이 저장되었습니다', body: JSON.stringify(body) });
       route();
     }
     window.deleteBudget = async (id) => {
@@ -7282,7 +7642,7 @@ const adminHTML = `<!doctype html>
         note: document.getElementById('q-note').value.trim(),
         enabled: true
       };
-      await api('/admin/quotas', { method: 'POST', body: JSON.stringify(body) });
+      await api('/admin/quotas', { method: 'POST', success: '사용 한도가 저장되었습니다', body: JSON.stringify(body) });
       route();
     }
     window.toggleQuota = async (id, enabled) => {
@@ -7532,9 +7892,11 @@ const adminHTML = `<!doctype html>
     }
     window.releaseStickySessions = async (provider) => {
       try {
-        await api('/admin/routing/balancer', { method: 'POST', body: JSON.stringify({ provider: provider || '' }) });
+        const res = await api('/admin/routing/balancer', { method: 'POST', body: JSON.stringify({ provider: provider || '' }) });
+        const n = (res && res.released_sessions) || 0;
+        toast((provider ? provider + ' ' : '') + '세션 고정 ' + n + '건 해제됨 — 다음 요청부터 재배정됩니다', 'ok');
         route();
-      } catch (e) { alert('세션 고정 해제 실패: ' + e.message); }
+      } catch (e) { toast('세션 고정 해제 실패: ' + e.message); }
     };
     function providerBreakerPanel(breakers) {
       breakers = breakers || {};
@@ -7579,9 +7941,13 @@ const adminHTML = `<!doctype html>
     }
     window.resetProviderBreaker = async (provider) => {
       try {
-        await api('/admin/routing/breaker-reset', { method: 'POST', body: JSON.stringify({ provider: provider || '' }) });
+        await api('/admin/routing/breaker-reset', {
+          method: 'POST',
+          success: provider ? (provider + ' 차단이 해제되었습니다') : '모든 provider 차단이 해제되었습니다',
+          body: JSON.stringify({ provider: provider || '' }),
+        });
         route();
-      } catch (e) { alert('차단 해제 실패: ' + e.message); }
+      } catch (e) { toast('차단 해제 실패: ' + e.message); }
     };
     function healthStatusClass(score, threshold) {
       const n = Number(score || 0);
@@ -7949,7 +8315,7 @@ const adminHTML = `<!doctype html>
     window.dwMetricDelete = async (id) => {
       if (!confirm('이 지표를 삭제할까요?')) return;
       try { await api('/admin/dw/metrics/' + encodeURIComponent(id), { method: 'DELETE' }); await renderDWMetrics(); }
-      catch (e) { alert(e.message); }
+      catch (e) { toast(e.message); }
     };
 
     // ---------- 운영 변경관리 센터: Change Set (dry-run/승인/적용/롤백) ----------
@@ -8072,13 +8438,13 @@ const adminHTML = `<!doctype html>
       let note = '';
       if (action === 'approve' || action === 'submit') { note = prompt('메모(선택):', '') || ''; }
       try { await api('/admin/change-sets/' + encodeURIComponent(id) + '/' + action, { method: 'POST', body: JSON.stringify({ note }) }); await renderChangeSets(); }
-      catch (e) { alert(e.message); }
+      catch (e) { toast(e.message); }
     };
     window.csSubmit = (id) => csDo(id, 'submit');
     window.csApprove = (id) => csDo(id, 'approve');
     window.csApply = (id) => csDo(id, 'apply', '이 변경 세트를 적용할까요? 설정이 즉시 반영됩니다.');
     window.csRollback = (id) => csDo(id, 'rollback', '적용 전 값으로 롤백할까요?');
-    window.csDelete = async (id) => { if (!confirm('삭제할까요?')) return; try { await api('/admin/change-sets/' + encodeURIComponent(id), { method: 'DELETE' }); await renderChangeSets(); } catch (e) { alert(e.message); } };
+    window.csDelete = async (id) => { if (!confirm('삭제할까요?')) return; try { await api('/admin/change-sets/' + encodeURIComponent(id), { method: 'DELETE' }); await renderChangeSets(); } catch (e) { toast(e.message); } };
 
     // ---------- AI 업무 앱: Skill/Prompt Product/Text2SQL/MCP/모델 묶음 ----------
     async function renderWorkApps() {
@@ -8176,7 +8542,7 @@ const adminHTML = `<!doctype html>
     window.appDelete = async (id) => {
       if (!confirm('이 앱을 삭제할까요?')) return;
       try { await api('/admin/apps/' + encodeURIComponent(id), { method: 'DELETE' }); await renderWorkApps(); }
-      catch (e) { alert(e.message); }
+      catch (e) { toast(e.message); }
     };
     window.appPublish = async (id, force) => {
       const note = force ? '' : prompt('발행 메모(선택). 발행하면 현재 정의가 새 버전으로 저장되고 앱이 활성화됩니다.');
@@ -8184,7 +8550,7 @@ const adminHTML = `<!doctype html>
       try {
         const path = '/admin/apps/' + encodeURIComponent(id) + '/publish' + (force ? '?force=1' : '');
         const r = await api(path, { method: 'POST', body: JSON.stringify({ note: note || '' }) });
-        alert('발행됨 — 버전 v' + r.version);
+        toast('발행됨 — 버전 v' + r.version, 'ok');
         await renderWorkApps();
       } catch (e) {
         // Onboarding gate (HTTP 422): show the failed required items and offer a forced publish.
@@ -8197,13 +8563,13 @@ const adminHTML = `<!doctype html>
           }
           return;
         }
-        alert('발행 실패: ' + e.message);
+        toast('발행 실패: ' + e.message);
       }
     };
     window.appDeprecate = async (id) => {
       if (!confirm('이 앱을 지원중단(숨김) 처리할까요? 사용자에게 더 이상 노출되지 않습니다.')) return;
       try { await api('/admin/apps/' + encodeURIComponent(id) + '/deprecate', { method: 'POST', body: '{}' }); await renderWorkApps(); }
-      catch (e) { alert('지원중단 실패: ' + e.message); }
+      catch (e) { toast('지원중단 실패: ' + e.message); }
     };
     window.appVersions = async (id) => {
       try {
@@ -8235,13 +8601,13 @@ const adminHTML = `<!doctype html>
     window.appPermGrant = async (id) => {
       const t = (document.getElementById('app-perm-type') || {}).value || 'user';
       const sid = ((document.getElementById('app-perm-id') || {}).value || '').trim();
-      if (!sid) { alert('대상 id를 입력하세요.'); return; }
+      if (!sid) { toast('대상 id를 입력하세요.'); return; }
       try { await api('/admin/apps/' + encodeURIComponent(id) + '/permissions', { method: 'POST', body: JSON.stringify({ subject_type: t, subject_id: sid }) }); appPermissions(id); }
-      catch (e) { alert('권한 추가 실패: ' + e.message); }
+      catch (e) { toast('권한 추가 실패: ' + e.message); }
     };
     window.appPermRevoke = async (id, t, sid) => {
       try { await api('/admin/apps/' + encodeURIComponent(id) + '/permissions?subject_type=' + encodeURIComponent(t) + '&subject_id=' + encodeURIComponent(sid), { method: 'DELETE' }); appPermissions(id); }
-      catch (e) { alert('권한 해제 실패: ' + e.message); }
+      catch (e) { toast('권한 해제 실패: ' + e.message); }
     };
 
     // ---------- Prompt Lab: experiments + test cases + rubrics/contracts ----------
@@ -8303,20 +8669,20 @@ const adminHTML = `<!doctype html>
       if (!title) return;
       const team = (document.getElementById('pl-exp-team').value || '').trim();
       try { await api('/admin/prompt-lab/experiments', { method: 'POST', body: JSON.stringify({ title, team }) }); await renderPromptLab(); }
-      catch (e) { alert(e.message); }
+      catch (e) { toast(e.message); }
     };
     window.plCreateContract = async () => {
       const name = (document.getElementById('pl-ctr-name').value || '').trim();
       if (!name) return;
       const body = { name, type: document.getElementById('pl-ctr-type').value, schema_json: document.getElementById('pl-ctr-schema').value, strict: document.getElementById('pl-ctr-strict').checked };
       try { await api('/admin/prompt-lab/contracts', { method: 'POST', body: JSON.stringify(body) }); await renderPromptLab(); }
-      catch (e) { alert(e.message); }
+      catch (e) { toast(e.message); }
     };
     window.plCreateRubric = async () => {
       const name = (document.getElementById('pl-rub-name').value || '').trim();
       if (!name) return;
       try { await api('/admin/prompt-lab/rubrics', { method: 'POST', body: JSON.stringify({ name, criteria: {} }) }); await renderPromptLab(); }
-      catch (e) { alert(e.message); }
+      catch (e) { toast(e.message); }
     };
 
     async function plRenderExperiment(expId) {
@@ -8352,7 +8718,7 @@ const adminHTML = `<!doctype html>
     window.plCreateCase = async (expId) => {
       const name = (document.getElementById('pl-tc-name').value || '').trim();
       const user = (document.getElementById('pl-tc-user').value || '').trim();
-      if (!name || !user) { alert('이름과 user 프롬프트는 필수입니다.'); return; }
+      if (!name || !user) { toast('이름과 user 프롬프트는 필수입니다.'); return; }
       const sys = (document.getElementById('pl-tc-system').value || '').trim();
       const messages = [];
       if (sys) messages.push({ role: 'system', content: sys });
@@ -8360,12 +8726,12 @@ const adminHTML = `<!doctype html>
       const models = (document.getElementById('pl-tc-models').value || '').split(',').map(x => x.trim()).filter(Boolean);
       const body = { experiment_id: expId, name, messages, models, contract_id: document.getElementById('pl-tc-contract').value };
       try { await api('/admin/prompt-lab/test-cases', { method: 'POST', body: JSON.stringify(body) }); await plRenderExperiment(expId); }
-      catch (e) { alert(e.message); }
+      catch (e) { toast(e.message); }
     };
     window.plDeleteCase = async (id, expId) => {
       if (!confirm('이 테스트케이스를 삭제할까요?')) return;
       try { await api('/admin/prompt-lab/test-cases/' + encodeURIComponent(id), { method: 'DELETE' }); await plRenderExperiment(expId); }
-      catch (e) { alert(e.message); }
+      catch (e) { toast(e.message); }
     };
     window.plRunCase = async (id) => {
       const host = document.getElementById('pl-run-' + id);
@@ -9232,12 +9598,12 @@ const adminHTML = `<!doctype html>
       if (!model) return;
       const body = { model, good_for: (document.getElementById('mt-good').value || '').trim(), avoid_for: (document.getElementById('mt-avoid').value || '').trim(), risk_note: (document.getElementById('mt-risk').value || '').trim() };
       try { await api('/admin/model-tags', { method: 'POST', body: JSON.stringify(body) }); await mmRenderTagEditor(); }
-      catch (e) { alert(e.message); }
+      catch (e) { toast(e.message); }
     };
     window.mmDeleteTag = async (model) => {
       if (!confirm(model + ' 태그를 삭제할까요?')) return;
       try { await api('/admin/model-tags/' + encodeURIComponent(model), { method: 'DELETE' }); await mmRenderTagEditor(); }
-      catch (e) { alert(e.message); }
+      catch (e) { toast(e.message); }
     };
     async function runMultiModelCompare() {
       const out = document.getElementById('mm-results');
@@ -9322,7 +9688,7 @@ const adminHTML = `<!doctype html>
         });
         const sel = document.getElementById('mm-rate-' + model);
         if (sel) sel.insertAdjacentHTML('afterend', '<span class="status" style="font-size:11px">저장됨</span>');
-      } catch (e) { alert('평가 저장 오류: ' + e.message); }
+      } catch (e) { toast('평가 저장 오류: ' + e.message); }
     };
 
     window.mmPromote = async (model) => {
@@ -9334,8 +9700,8 @@ const adminHTML = `<!doctype html>
         await api('/admin/chat-test/multi-run/runs/' + encodeURIComponent(runId) + '/promote', {
           method: 'POST', body: JSON.stringify({ model, task_type: taskType.trim(), reason: '멀티 비교에서 우수 모델로 선택' }),
         });
-        alert('라우팅 후보(draft)로 저장되었습니다. 실제 라우팅에는 검토 후 반영됩니다.');
-      } catch (e) { alert('후보 저장 오류: ' + e.message); }
+        toast('라우팅 후보(draft)로 저장되었습니다. 실제 라우팅에는 검토 후 반영됩니다.', 'ok');
+      } catch (e) { toast('후보 저장 오류: ' + e.message); }
     };
 
     // 멀티 모델 결과를 Golden Workflow step으로 승격 — 모델 변경 회귀 테스트용.
@@ -9351,8 +9717,8 @@ const adminHTML = `<!doctype html>
       if (promptText.trim()) body.prompt = promptText.trim();
       try {
         const d = await api('/admin/chat-test/multi-run/runs/' + encodeURIComponent(runId) + '/golden', { method: 'POST', body: JSON.stringify(body) });
-        alert('Golden Workflow "' + (d.workflow_name || '') + '"에 step "' + (d.step_name || '') + '" 저장됨 (총 ' + (d.step_count || 0) + ' steps, baseline ' + (d.baseline_score || 0).toFixed(1) + '점).');
-      } catch (e) { alert('Golden 저장 오류: ' + e.message); }
+        toast('Golden Workflow "' + (d.workflow_name || '') + '"에 step "' + (d.step_name || '') + '" 저장됨 (총 ' + (d.step_count || 0) + ' steps, baseline ' + (d.baseline_score || 0).toFixed(1) + '점).', 'info');
+      } catch (e) { toast('Golden 저장 오류: ' + e.message); }
     };
 
     window.mmExport = async (format) => {
@@ -9360,14 +9726,14 @@ const adminHTML = `<!doctype html>
       if (!runId) return;
       try {
         const res = await fetch('/admin/chat-test/multi-run/runs/' + encodeURIComponent(runId) + '/export?format=' + format, { headers: headers() });
-        if (!res.ok) { alert('내보내기 실패 (' + res.status + ')'); return; }
+        if (!res.ok) { toast('내보내기 실패 (' + res.status + ')'); return; }
         const blob = await res.blob();
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url; a.download = runId + '.' + format;
         document.body.appendChild(a); a.click(); a.remove();
         URL.revokeObjectURL(url);
-      } catch (e) { alert('내보내기 오류: ' + e.message); }
+      } catch (e) { toast('내보내기 오류: ' + e.message); }
     };
 
     // 모델별 응답 Diff: 공통 블록 / 모델별 누락·추가 블록 / 형식 차이.
@@ -9891,7 +10257,7 @@ const adminHTML = `<!doctype html>
           const name = document.getElementById('mcp-wizard-name').value.trim();
           const url = document.getElementById('mcp-wizard-url').value.trim();
           const auth = document.getElementById('mcp-wizard-auth').value;
-          if (!name || !url) { alert('Wizard 등록에는 이름과 URL이 필요합니다.'); return; }
+          if (!name || !url) { toast('Wizard 등록에는 이름과 URL이 필요합니다.'); return; }
           const created = await api('/admin/mcp/upstreams', { method: 'POST', body: JSON.stringify({ name, url, auth_token: auth }) });
           const up = (created && created.upstream) || {};
           window.mcpWizardSelected = up.id || name;
@@ -9921,7 +10287,7 @@ const adminHTML = `<!doctype html>
           const id = document.getElementById('mcp-wizard-upstream').value;
           const routeRows = window.mcpRouteRows || [];
           const routeRow = routeRows.find(r => (r.upstream_id || r.upstream_name) === id && r.kind === 'tool') || routeRows.find(r => r.upstream_id === id || r.upstream_name === id);
-          if (!routeRow) { alert('이 업스트림의 노출 route가 아직 없습니다. 먼저 Probe를 실행하세요.'); return; }
+          if (!routeRow) { toast('이 업스트림의 노출 route가 아직 없습니다. 먼저 Probe를 실행하세요.'); return; }
           await window.explainMCPRouteFromRow(routeRow.kind || 'tool', routeRow.uri || routeRow.exposed_name || '');
         });
       }
@@ -9942,7 +10308,7 @@ const adminHTML = `<!doctype html>
           url: document.getElementById('mcp-up-url').value.trim(),
           auth_token: document.getElementById('mcp-up-auth').value,
         };
-        if (!body.name || !body.url) { alert('이름과 URL을 입력하세요'); return; }
+        if (!body.name || !body.url) { toast('이름과 URL을 입력하세요'); return; }
         try {
           await api('/admin/mcp/upstreams', { method: 'POST', body: JSON.stringify(body) });
           route();
@@ -9958,7 +10324,7 @@ const adminHTML = `<!doctype html>
             }
             return;
           }
-          alert('등록 실패: ' + err.message);
+          toast('등록 실패: ' + err.message);
         }
       });
 
@@ -11086,7 +11452,7 @@ const adminHTML = `<!doctype html>
       const payload = aiPolicyPayloadFromForm();
       if (!payload.name) return;
       try {
-        await api('/admin/policies', { method: 'POST', body: JSON.stringify(payload) });
+        await api('/admin/policies', { method: 'POST', success: 'AI 정책이 저장되었습니다', body: JSON.stringify(payload) });
         route();
       } catch (err) {
         openModal('정책 저장 오류', '<div class="error-line">' + escapeHTML(err.message) + '</div>');
@@ -11286,7 +11652,7 @@ const adminHTML = `<!doctype html>
     async function toggleKillSwitch(disable) {
       const reason = (document.getElementById('kill-reason') || {}).value || '';
       if (disable && !confirm('정말로 모든 /v1 호출을 즉시 차단하시겠습니까?')) return;
-      await api('/admin/kill-switch', { method: 'POST', body: JSON.stringify({ disabled: disable, reason }) });
+      await api('/admin/kill-switch', { method: 'POST', success: 'Kill Switch 상태가 변경되었습니다', body: JSON.stringify({ disabled: disable, reason }) });
       route();
     }
 
@@ -11312,7 +11678,7 @@ const adminHTML = `<!doctype html>
         webhook_url: document.getElementById('alert-webhook').value.trim(),
         enabled: true,
       };
-      await api('/admin/alerts', { method: 'POST', body: JSON.stringify(body) });
+      await api('/admin/alerts', { method: 'POST', success: '알림 규칙이 저장되었습니다', body: JSON.stringify(body) });
       route();
     }
     window.toggleAlert = async (id, enabled) => {
@@ -11565,7 +11931,7 @@ const adminHTML = `<!doctype html>
         await api('/admin/personalization/profiles/' + encodeURIComponent(userID) + '?window=30d&snapshot=1');
         await renderPersonalProfileDetail(userID);
       } catch (err) {
-        alert('스냅샷 생성 실패: ' + err.message);
+        toast('스냅샷 생성 실패: ' + err.message);
       }
     }
 
@@ -11747,7 +12113,7 @@ const adminHTML = `<!doctype html>
         try {
           await api('/team/reports', { method: 'POST', body: JSON.stringify({ report_id: id, action }) });
           renderTeamHome();
-        } catch (e) { alert('처리 오류: ' + e.message); }
+        } catch (e) { toast('처리 오류: ' + e.message); }
       };
       api('/team/reports').then(rp => {
         const host = document.getElementById('team-reports');
@@ -11930,16 +12296,16 @@ const adminHTML = `<!doctype html>
             allowed_teams: p.allowed_teams || [], sensitivity: p.sensitivity, status: status,
           }) });
           renderDataProducts();
-        } catch (e) { alert('변경 오류: ' + e.message); }
+        } catch (e) { toast('변경 오류: ' + e.message); }
       };
       window.dpDelete = async (key) => {
         if (!confirm(key + ' 상품을 삭제할까요?')) return;
         try { await api('/admin/data-products?id=' + encodeURIComponent(key), { method: 'DELETE' }); renderDataProducts(); }
-        catch (e) { alert('삭제 오류: ' + e.message); }
+        catch (e) { toast('삭제 오류: ' + e.message); }
       };
       window.dpDecide = async (id, action) => {
         try { await api('/admin/data-products/requests', { method: 'POST', body: JSON.stringify({ id, action }) }); renderDataProducts(); }
-        catch (e) { alert('처리 오류: ' + e.message); }
+        catch (e) { toast('처리 오류: ' + e.message); }
       };
       window.dpAdd = async (event) => {
         event.preventDefault();
@@ -11957,7 +12323,7 @@ const adminHTML = `<!doctype html>
           }) });
           document.getElementById('dp-form').reset();
           renderDataProducts();
-        } catch (e) { alert('저장 오류: ' + e.message); }
+        } catch (e) { toast('저장 오류: ' + e.message); }
       };
       window.dpPublishCandidate = (question, rec) => {
         document.getElementById('dp-name').value = question.slice(0, 60);
@@ -12169,16 +12535,16 @@ const adminHTML = `<!doctype html>
           }) });
           document.getElementById('mcon-form').reset();
           renderModelContracts();
-        } catch (e) { alert('저장 오류: ' + e.message); }
+        } catch (e) { toast('저장 오류: ' + e.message); }
       };
       window.mconDelete = async (id) => {
         if (!confirm('계약을 삭제할까요?')) return;
         try { await api('/admin/models/contracts?id=' + encodeURIComponent(id), { method: 'DELETE' }); renderModelContracts(); }
-        catch (e) { alert('삭제 오류: ' + e.message); }
+        catch (e) { toast('삭제 오류: ' + e.message); }
       };
       window.mconRun = async () => {
         const model = document.getElementById('mcon-run-model').value.trim();
-        if (!model) { alert('검증할 모델명을 입력하세요.'); return; }
+        if (!model) { toast('검증할 모델명을 입력하세요.'); return; }
         const host = document.getElementById('mcon-run-result');
         host.innerHTML = '<div class="empty">검증 중...</div>';
         try {
@@ -12534,15 +12900,15 @@ const adminHTML = `<!doctype html>
           cost_policy: document.getElementById('mc-cost').value.trim(),
           input_schema: document.getElementById('mc-schema').value.trim(),
         };
-        if (!body.name) { alert('tool name이 필요합니다.'); return; }
-        if (body.input_schema) { try { JSON.parse(body.input_schema); } catch (e) { alert('input_schema JSON 파싱 오류: ' + e.message); return; } }
+        if (!body.name) { toast('tool name이 필요합니다.'); return; }
+        if (body.input_schema) { try { JSON.parse(body.input_schema); } catch (e) { toast('input_schema JSON 파싱 오류: ' + e.message); return; } }
         try { await api('/admin/mcp/contracts', { method: 'POST', body: JSON.stringify(body) }); document.getElementById('mc-form').reset(); renderMCPContracts(); }
-        catch (e) { alert('저장 오류: ' + e.message); }
+        catch (e) { toast('저장 오류: ' + e.message); }
       };
       window.mcpContractDelete = async (id) => {
         if (!confirm('계약을 삭제할까요?')) return;
         try { await api('/admin/mcp/contracts?id=' + encodeURIComponent(id), { method: 'DELETE' }); renderMCPContracts(); }
-        catch (e) { alert('삭제 오류: ' + e.message); }
+        catch (e) { toast('삭제 오류: ' + e.message); }
       };
       window.mcpContractValidate = async () => {
         try {
@@ -12593,20 +12959,20 @@ const adminHTML = `<!doctype html>
         const name = document.getElementById('wf-name').value.trim();
         let steps;
         try { steps = JSON.parse(document.getElementById('wf-steps').value || '[]'); }
-        catch (e) { alert('steps JSON 파싱 오류: ' + e.message); return; }
-        if (!name || !Array.isArray(steps) || !steps.length) { alert('이름과 steps 배열이 필요합니다.'); return; }
+        catch (e) { toast('steps JSON 파싱 오류: ' + e.message); return; }
+        if (!name || !Array.isArray(steps) || !steps.length) { toast('이름과 steps 배열이 필요합니다.'); return; }
         const invalidStep = steps.findIndex(st => !st || typeof st !== 'object' || !String(st.name||'').trim() || !String(st.type||'').trim());
-        if (invalidStep >= 0) { alert((invalidStep+1) + '번째 step에 name과 type이 필요합니다.'); return; }
+        if (invalidStep >= 0) { toast((invalidStep+1) + '번째 step에 name과 type이 필요합니다.'); return; }
         try {
           await api('/admin/workflows', { method: 'POST', body: JSON.stringify({ name, steps, allowed_teams: document.getElementById('wf-teams').value.trim() }) });
           document.getElementById('wf-form').reset();
           renderWorkflows();
-        } catch (e) { alert('저장 오류: ' + e.message); }
+        } catch (e) { toast('저장 오류: ' + e.message); }
       };
       window.wfDelete = async (id) => {
         if (!confirm('워크플로를 삭제할까요?')) return;
         try { await api('/admin/workflows?id=' + encodeURIComponent(id), { method: 'DELETE' }); renderWorkflows(); }
-        catch (e) { alert('삭제 오류: ' + e.message); }
+        catch (e) { toast('삭제 오류: ' + e.message); }
       };
       window.wfDryRun = async (id) => {
         try {
@@ -12623,9 +12989,9 @@ const adminHTML = `<!doctype html>
         if (note === null) return;
         try {
           const r = await api('/admin/workflows/' + encodeURIComponent(id) + '/publish', { method: 'POST', body: JSON.stringify({ note: note }) });
-          alert('발행됨 — 버전 v' + r.version);
+          toast('발행됨 — 버전 v' + r.version, 'ok');
           renderWorkflows();
-        } catch (e) { alert('발행 실패: ' + e.message); }
+        } catch (e) { toast('발행 실패: ' + e.message); }
       };
       window.wfVersions = async (id) => {
         try {
@@ -13023,15 +13389,15 @@ const adminHTML = `<!doctype html>
     window.meSkillFeedback = async (name) => {
       const sel = document.getElementById('skfb-' + name);
       const rating = parseInt((sel && sel.value) || '0', 10);
-      if (!rating) { alert('평가 점수를 선택하세요.'); return; }
+      if (!rating) { toast('평가 점수를 선택하세요.'); return; }
       const comment = prompt('코멘트(선택):', '') || '';
-      try { await api('/me/skills/' + encodeURIComponent(name) + '/feedback', { method: 'POST', body: JSON.stringify({ rating, comment }) }); alert('피드백 감사합니다.'); await meLoadSkills(); }
-      catch (e) { alert(e.message); }
+      try { await api('/me/skills/' + encodeURIComponent(name) + '/feedback', { method: 'POST', body: JSON.stringify({ rating, comment }) }); toast('피드백 감사합니다.', 'ok'); await meLoadSkills(); }
+      catch (e) { toast(e.message); }
     };
     window.meSkillRequest = async (name) => {
       const reason = prompt(name + ' Skill 접근을 요청합니다. 사유(선택):', '') || '';
-      try { await api('/me/skills/' + encodeURIComponent(name) + '/request-access', { method: 'POST', body: JSON.stringify({ reason }) }); alert('접근 요청이 접수되었습니다.'); }
-      catch (e) { alert(e.message); }
+      try { await api('/me/skills/' + encodeURIComponent(name) + '/request-access', { method: 'POST', body: JSON.stringify({ reason }) }); toast('접근 요청이 접수되었습니다.', 'ok'); }
+      catch (e) { toast(e.message); }
     };
 
     // 로그인 세션 관리: 활성 세션 목록(현재 세션 표시) + 개별/타 세션 종료.
@@ -13100,7 +13466,7 @@ const adminHTML = `<!doctype html>
       try {
         await api('/me/actions/snooze', { method: 'POST', body: JSON.stringify({ type, days: 7 }) });
         renderMeHome();
-      } catch (e) { alert('보류 오류: ' + e.message); }
+      } catch (e) { toast('보류 오류: ' + e.message); }
     };
 
     // meActionGo handles an action-queue button. "modal:<key>" opens inline guidance; a hash that
@@ -13215,7 +13581,7 @@ const adminHTML = `<!doctype html>
       try {
         await api('/me/recommendations/' + encodeURIComponent(id) + '/feedback', { method: 'POST', body: JSON.stringify({ action }) });
         meLoadRecommendations();
-      } catch (e) { alert('피드백 오류: ' + e.message); }
+      } catch (e) { toast('피드백 오류: ' + e.message); }
     };
 
     async function renderMyKeys() {
@@ -13339,7 +13705,7 @@ const adminHTML = `<!doctype html>
         await api('/me/keys/' + encodeURIComponent(id), { method: 'PATCH', body: JSON.stringify({ scopes }) });
         closeModal();
         await renderMyKeys();
-      } catch (err) { alert('스코프 저장 실패: ' + err.message); }
+      } catch (err) { toast('스코프 저장 실패: ' + err.message); }
     };
 
     // mkScopeLabel maps an API-key scope to a short Korean label for the My Keys picker.
@@ -13354,7 +13720,7 @@ const adminHTML = `<!doctype html>
 
     async function createMyKey() {
       const name = (document.getElementById('mk-name').value || '').trim();
-      if (!name) { alert('키 이름을 입력하세요.'); return; }
+      if (!name) { toast('키 이름을 입력하세요.'); return; }
       const scopes = window.mkNewScopes || [];
       const expiresRaw = (document.getElementById('mk-expires').value || '').trim();
       const expires = expiresRaw ? new Date(expiresRaw).toISOString() : '';
@@ -13366,24 +13732,24 @@ const adminHTML = `<!doctype html>
         window.mykeysSecret = res.secret || null;
         window.mkNewScopes = [];
         await renderMyKeys();
-      } catch (err) { alert('발급 실패: ' + err.message); }
+      } catch (err) { toast('발급 실패: ' + err.message); }
     }
 
     async function rotateMyKey(id) {
       if (!confirm('이 키를 회전하시겠습니까? 기존 키는 즉시 폐기됩니다.')) return;
       try {
-        const res = await api('/me/keys/' + encodeURIComponent(id) + '/rotate', { method: 'POST', body: '{}' });
+        const res = await api('/me/keys/' + encodeURIComponent(id) + '/rotate', { method: 'POST', success: 'API 키가 회전되었습니다 — 새 키를 안전한 곳에 보관하세요', body: '{}' });
         window.mykeysSecret = res.secret || null;
         await renderMyKeys();
-      } catch (err) { alert('회전 실패: ' + err.message); }
+      } catch (err) { toast('회전 실패: ' + err.message); }
     }
 
     async function revokeMyKey(id) {
       if (!confirm('이 키를 폐기하시겠습니까?')) return;
       try {
-        await api('/me/keys/' + encodeURIComponent(id), { method: 'DELETE' });
+        await api('/me/keys/' + encodeURIComponent(id), { method: 'DELETE', success: 'API 키가 폐기되었습니다' });
         await renderMyKeys();
-      } catch (err) { alert('폐기 실패: ' + err.message); }
+      } catch (err) { toast('폐기 실패: ' + err.message); }
     }
 
     // ---------- ClickHouse DW (setup + monitoring) ----------
@@ -13435,7 +13801,7 @@ const adminHTML = `<!doctype html>
       };
       if (!body.model_glob) { if (out) out.innerHTML = '<span class="status error">model_glob 필수</span>'; return; }
       try {
-        await api('/admin/model-deprecations', { method: 'POST', body: JSON.stringify(body) });
+        await api('/admin/model-deprecations', { method: 'POST', success: '모델 일몰 설정이 저장되었습니다', body: JSON.stringify(body) });
         await renderModelDeprecations();
       } catch (e) {
         if (out) out.innerHTML = '<span class="status error">' + escapeHTML(e.message) + '</span>';
@@ -13838,7 +14204,7 @@ const adminHTML = `<!doctype html>
         passed: (document.getElementById('studio-fit-pass-' + name) || {}).checked !== false,
       };
       try { await api('/admin/skills/fitness', { method: 'POST', body: JSON.stringify(body) }); await studioLoadFitness(name); }
-      catch (e) { alert('근거 추가 오류: ' + e.message); }
+      catch (e) { toast('근거 추가 오류: ' + e.message); }
     };
 
     window.studioPromote = async (name, to) => {
@@ -13851,7 +14217,7 @@ const adminHTML = `<!doctype html>
         studioOpenWizard(name);
       } catch (e) {
         if (out) out.innerHTML = '<span class="status error">' + escapeHTML(e.message) + '</span>';
-        else alert('승격 오류: ' + e.message);
+        else toast('승격 오류: ' + e.message);
       }
     };
     // ── Skill Studio 끝 ──────────────────────────────────────────────────
@@ -14626,20 +14992,20 @@ const adminHTML = `<!doctype html>
     async function saveSetting(key, inputId, secret) {
       const el = document.getElementById(inputId);
       const v = (el.value || '').trim();
-      if (secret && v === '') { alert('변경할 값을 입력하세요(빈 값은 변경하지 않음).'); return; }
+      if (secret && v === '') { toast('변경할 값을 입력하세요(빈 값은 변경하지 않음).'); return; }
       try {
         await api('/admin/settings/by-key/' + encodeURIComponent(key), { method: 'PUT', body: JSON.stringify({ value: v }) });
         await renderRuntimeSettings();
-      } catch (e) { alert('저장 실패: ' + e.message); }
+      } catch (e) { toast('저장 실패: ' + e.message); }
     }
     async function revertSetting(key) {
       if (!confirm('이 설정을 환경변수 기본값으로 되돌릴까요?')) return;
       try { await api('/admin/settings/by-key/' + encodeURIComponent(key), { method: 'DELETE' }); await renderRuntimeSettings(); }
-      catch (e) { alert('되돌리기 실패: ' + e.message); }
+      catch (e) { toast('되돌리기 실패: ' + e.message); }
     }
     async function rollbackSetting(key) {
       try { await api('/admin/settings/rollback', { method: 'POST', body: JSON.stringify({ key }) }); await renderRuntimeSettings(); }
-      catch (e) { alert('롤백 실패: ' + e.message); }
+      catch (e) { toast('롤백 실패: ' + e.message); }
     }
     async function settingHistory(key) {
       const sec = document.getElementById('setting-history-section');
@@ -14990,7 +15356,7 @@ const adminHTML = `<!doctype html>
       if (!name) return;
       try {
         await api('/admin/text2sql/promote', { method: 'POST', body: JSON.stringify({ target: 'report', name, question, sql }) });
-      } catch (err) { alert('승격 실패: ' + err.message); }
+      } catch (err) { toast('승격 실패: ' + err.message); }
       route();
     };
     window.deleteT2SReport = async (id) => {
@@ -15037,14 +15403,14 @@ const adminHTML = `<!doctype html>
     window.toggleT2SFeature = async (name, enabled) => {
       try {
         await api('/admin/text2sql/features', { method: 'POST', body: JSON.stringify({ name, enabled }) });
-      } catch (err) { alert('토글 실패: ' + err.message); }
+      } catch (err) { toast('토글 실패: ' + err.message); }
       route();
     };
     window.toggleT2SKill = async (disabled) => {
       if (disabled && !confirm('Text2SQL 전체를 중지하시겠습니까? 모든 vibe/text2sql-* 요청이 안전 메시지를 반환합니다.')) { route(); return; }
       try {
         await api('/admin/text2sql/kill-switch', { method: 'POST', body: JSON.stringify({ disabled }) });
-      } catch (err) { alert('변경 실패: ' + err.message); }
+      } catch (err) { toast('변경 실패: ' + err.message); }
       route();
     };
     async function addT2SGloss(e) {
@@ -15055,7 +15421,7 @@ const adminHTML = `<!doctype html>
         mapping: document.getElementById('tgl-mapping').value.trim(),
         description: document.getElementById('tgl-desc').value.trim(),
       };
-      if (!body.term || !body.mapping) { alert('용어와 매핑을 입력하세요'); return; }
+      if (!body.term || !body.mapping) { toast('용어와 매핑을 입력하세요'); return; }
       await api('/admin/text2sql/glossary', { method: 'POST', body: JSON.stringify(body) });
       route();
     }
@@ -15101,7 +15467,7 @@ const adminHTML = `<!doctype html>
     async function loadT2SRegistry() {
       const schema = t2sRegSchema();
       const body = document.getElementById('t2s-registry-body');
-      if (!schema) { alert('스키마명을 입력하세요'); return; }
+      if (!schema) { toast('스키마명을 입력하세요'); return; }
       const d = await api('/admin/text2sql/tables?schema=' + encodeURIComponent(schema)).catch(() => ({ tables: [], columns: [] }));
       const colsByTable = {};
       (d.columns || []).forEach(c => { (colsByTable[c.table_name] = colsByTable[c.table_name] || []).push(c); });
@@ -15120,7 +15486,7 @@ const adminHTML = `<!doctype html>
       const el = document.getElementById('t2s-collect-result');
       const connEl = document.getElementById('t2s-collect-conn');
       const connID = connEl ? connEl.value : '';
-      if (!schema) { alert('스키마명을 입력하세요'); return; }
+      if (!schema) { toast('스키마명을 입력하세요'); return; }
       if (el) el.textContent = ' 수집 중…';
       try {
         const payload = { schema_name: schema };
@@ -15173,14 +15539,14 @@ const adminHTML = `<!doctype html>
     async function addT2STable(e) {
       e.preventDefault();
       const schema = t2sRegSchema();
-      if (!schema) { alert('스키마명을 먼저 입력하세요'); return; }
+      if (!schema) { toast('스키마명을 먼저 입력하세요'); return; }
       await api('/admin/text2sql/tables', { method: 'POST', body: JSON.stringify({ schema_name: schema, table_name: document.getElementById('rt-table').value.trim(), description: document.getElementById('rt-desc').value.trim() }) });
       loadT2SRegistry();
     }
     async function addT2SColumn(e) {
       e.preventDefault();
       const schema = t2sRegSchema();
-      if (!schema) { alert('스키마명을 먼저 입력하세요'); return; }
+      if (!schema) { toast('스키마명을 먼저 입력하세요'); return; }
       await api('/admin/text2sql/columns', { method: 'POST', body: JSON.stringify({ schema_name: schema, table_name: document.getElementById('rc-table').value.trim(), column_name: document.getElementById('rc-column').value.trim(), data_type: document.getElementById('rc-type').value.trim(), description: document.getElementById('rc-desc').value.trim(), sensitivity: document.getElementById('rc-sens').value }) });
       loadT2SRegistry();
     }
@@ -15199,7 +15565,7 @@ const adminHTML = `<!doctype html>
         column_name: document.getElementById('tpm-column').value.trim(),
         action: document.getElementById('tpm-action').value,
       };
-      if (body.subject_type !== '*' && !body.subject_id) { alert('subject id를 입력하세요'); return; }
+      if (body.subject_type !== '*' && !body.subject_id) { toast('subject id를 입력하세요'); return; }
       await api('/admin/text2sql/permissions', { method: 'POST', body: JSON.stringify(body) });
       route();
     }
@@ -15218,7 +15584,7 @@ const adminHTML = `<!doctype html>
         schema_name: document.getElementById('tp-schema').value.trim(),
         exec_connection_id: document.getElementById('tp-conn').value,
       };
-      if (!body.virtual_model) { alert('가상 모델명을 입력하세요'); return; }
+      if (!body.virtual_model) { toast('가상 모델명을 입력하세요'); return; }
       await api('/admin/text2sql/profiles', { method: 'POST', body: JSON.stringify(body) });
       route();
     }
@@ -15248,11 +15614,11 @@ const adminHTML = `<!doctype html>
         description: document.getElementById('tc-desc').value.trim(),
         enabled: true,
       };
-      if (!body.id || !body.name) { alert('ID와 이름을 입력하세요'); return; }
+      if (!body.id || !body.name) { toast('ID와 이름을 입력하세요'); return; }
       try {
         await api('/admin/text2sql/connections', { method: 'POST', body: JSON.stringify(body) });
         route();
-      } catch (err) { alert('저장 실패: ' + err.message); }
+      } catch (err) { toast('저장 실패: ' + err.message); }
     }
     window.deleteT2SConn = async (id) => {
       if (!confirm(id + ' 연결을 삭제하시겠습니까?')) return;
@@ -15263,8 +15629,8 @@ const adminHTML = `<!doctype html>
       const qs = connID ? '?connection_id=' + encodeURIComponent(connID) : '';
       try {
         const res = await api('/admin/text2sql/healthcheck' + qs);
-        alert('헬스체크 결과 (' + escapeHTML(connID || '기본') + '):\n상태: ' + (res.status || '-') + '\n' + (res.detail || ''));
-      } catch (err) { alert('헬스체크 실패: ' + err.message); }
+        toast('헬스체크 결과 (' + (connID || '기본') + '):\n상태: ' + (res.status || '-') + '\n' + (res.detail || ''), 'info');
+      } catch (err) { toast('헬스체크 실패: ' + err.message); }
     };
     function downloadT2SSample() {
       const sample = {
@@ -15296,7 +15662,7 @@ const adminHTML = `<!doctype html>
         expected_sql: document.getElementById('tg-sql').value,
         schema_name: document.getElementById('tg-schema').value.trim(),
       };
-      if (!body.name || !body.question.trim() || !body.expected_sql.trim()) { alert('이름·질문·기대 SQL을 입력하세요'); return; }
+      if (!body.name || !body.question.trim() || !body.expected_sql.trim()) { toast('이름·질문·기대 SQL을 입력하세요'); return; }
       await api('/admin/text2sql/golden', { method: 'POST', body: JSON.stringify(body) });
       route();
     }
@@ -15325,7 +15691,7 @@ const adminHTML = `<!doctype html>
         schema_text: document.getElementById('t2s-schema').value,
         allowed_tables: tables,
       };
-      if (!body.name || !body.schema_text.trim()) { alert('이름과 스키마를 입력하세요'); return; }
+      if (!body.name || !body.schema_text.trim()) { toast('이름과 스키마를 입력하세요'); return; }
       await api('/admin/text2sql/schemas', { method: 'POST', body: JSON.stringify(body) });
       route();
     }
@@ -15493,7 +15859,7 @@ const adminHTML = `<!doctype html>
       const auditCsv = document.getElementById('audit-csv');
       if (auditCsv) auditCsv.addEventListener('click', async () => {
         const res = await fetch('/admin/audit-logs.csv?limit=5000', { headers: headers() });
-        if (!res.ok) { alert('감사 CSV 다운로드 실패: ' + (await res.text())); return; }
+        if (!res.ok) { toast('감사 CSV 다운로드 실패: ' + (await res.text())); return; }
         const blob = await res.blob();
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -15572,8 +15938,8 @@ const adminHTML = `<!doctype html>
         role: document.getElementById('au-role').value,
         team_id: document.getElementById('au-team').value,
       };
-      if (!body.email || !body.password) { alert('이메일과 초기 비밀번호를 입력하세요'); return; }
-      await api('/admin/users', { method: 'POST', body: JSON.stringify(body) });
+      if (!body.email || !body.password) { toast('이메일과 초기 비밀번호를 입력하세요'); return; }
+      await api('/admin/users', { method: 'POST', success: '계정이 생성되었습니다', body: JSON.stringify(body) });
       route();
     }
     window.applyAuthUserRole = async (id, role) => {
@@ -15599,7 +15965,7 @@ const adminHTML = `<!doctype html>
       e.preventDefault();
       const name = document.getElementById('at-name').value.trim();
       if (!name) return;
-      await api('/admin/teams', { method: 'POST', body: JSON.stringify({ name }) });
+      await api('/admin/teams', { method: 'POST', success: '팀이 생성되었습니다', body: JSON.stringify({ name }) });
       route();
     }
     const allApiScopes = ['chat:completion', 'embeddings:create', 'models:read', 'admin:read', 'admin:write', 'routing:read', 'routing:write', 'observability:read', 'costs:read', 'security:read', 'mcp:use', 'mcp:admin'];
@@ -16012,8 +16378,8 @@ const adminHTML = `<!doctype html>
         id: document.getElementById('kb-id').value.trim(),
         content: document.getElementById('kb-content').value,
       };
-      if (!body.name || !body.content.trim()) { alert('이름과 본문을 입력하세요'); return; }
-      await api('/admin/knowledge', { method: 'POST', body: JSON.stringify(body) });
+      if (!body.name || !body.content.trim()) { toast('이름과 본문을 입력하세요'); return; }
+      await api('/admin/knowledge', { method: 'POST', success: 'Knowledge 항목이 저장되었습니다', body: JSON.stringify(body) });
       route();
     }
     window.toggleKnowledge = async (id, enabled) => {
@@ -16095,8 +16461,8 @@ const adminHTML = `<!doctype html>
         error_rate_target: Number(document.getElementById('slo-error').value || 0),
         fallback_rate_target: Number(document.getElementById('slo-fallback').value || 0),
       };
-      if (!body.provider) { alert('provider를 입력하세요'); return; }
-      await api('/admin/providers/slo', { method: 'POST', body: JSON.stringify(body) });
+      if (!body.provider) { toast('provider를 입력하세요'); return; }
+      await api('/admin/providers/slo', { method: 'POST', success: 'Provider SLO가 저장되었습니다', body: JSON.stringify(body) });
       route();
     }
     window.deleteProviderSLO = async (provider) => {
@@ -16111,8 +16477,8 @@ const adminHTML = `<!doctype html>
         category: document.getElementById('tpl-category').value,
         body: document.getElementById('tpl-body').value,
       };
-      if (!body.name || !body.body.trim()) { alert('이름과 본문을 입력하세요'); return; }
-      await api('/admin/templates', { method: 'POST', body: JSON.stringify(body) });
+      if (!body.name || !body.body.trim()) { toast('이름과 본문을 입력하세요'); return; }
+      await api('/admin/templates', { method: 'POST', success: '작업 템플릿이 저장되었습니다', body: JSON.stringify(body) });
       route();
     }
     window.toggleTemplate = async (id, enabled) => {
@@ -16136,7 +16502,7 @@ const adminHTML = `<!doctype html>
         note: document.getElementById('rr-note').value.trim(),
         enabled: true,
       };
-      await api('/admin/routing-rules', { method: 'POST', body: JSON.stringify(body) });
+      await api('/admin/routing-rules', { method: 'POST', success: '라우팅 규칙이 추가되었습니다', body: JSON.stringify(body) });
       route();
     }
     window.toggleRoutingRule = async (id, enabled) => {
@@ -16190,7 +16556,7 @@ const adminHTML = `<!doctype html>
         team: document.getElementById('key-team').value.trim(),
         key: document.getElementById('key-secret-input').value.trim()
       };
-      const result = await api('/admin/api-keys', { method: 'POST', body: JSON.stringify(body) });
+      const result = await api('/admin/api-keys', { method: 'POST', success: 'API 키가 발급되었습니다', body: JSON.stringify(body) });
       const secret = document.getElementById('key-secret');
       secret.style.display = 'block';
       secret.textContent = '발급된 시크릿(한 번만 표시): ' + result.secret;
@@ -16298,11 +16664,11 @@ const adminHTML = `<!doctype html>
           if (target) target.innerHTML = providerPatternDiagnostics(diagnostics);
           return;
         }
-        await api('/admin/providers', { method: 'POST', body: JSON.stringify(body) });
+        await api('/admin/providers', { method: 'POST', success: '프로바이더가 저장되었습니다', body: JSON.stringify(body) });
         providerFormReset();
         route();
       } catch (err) {
-        alert('저장 실패: ' + err.message);
+        toast('저장 실패: ' + err.message);
       }
     }
     // providerFormReset returns the shared add/edit form to "add new" mode.
@@ -16323,7 +16689,7 @@ const adminHTML = `<!doctype html>
     // Name is locked (upsert is keyed by name) and the API key is left blank to preserve the stored key.
     window.editProvider = (name) => {
       const p = (window.__providers || {})[name];
-      if (!p) { alert('프로바이더 정보를 찾을 수 없습니다: ' + name); return; }
+      if (!p) { toast('프로바이더 정보를 찾을 수 없습니다: ' + name); return; }
       document.getElementById('provider-name').value = p.name;
       document.getElementById('provider-name').readOnly = true;
       document.getElementById('provider-base-url').value = p.base_url || '';
@@ -16342,7 +16708,7 @@ const adminHTML = `<!doctype html>
     // toggleProvider flips a provider's enabled state without touching its stored key/config.
     window.toggleProvider = async (name) => {
       const p = (window.__providers || {})[name];
-      if (!p) { alert('프로바이더 정보를 찾을 수 없습니다: ' + name); return; }
+      if (!p) { toast('프로바이더 정보를 찾을 수 없습니다: ' + name); return; }
       try {
         if (p.enabled === false && p.model_patterns) {
           const diagnostics = await api('/admin/routing/pattern-conflicts', {
@@ -16364,7 +16730,7 @@ const adminHTML = `<!doctype html>
         }) });
         route();
       } catch (err) {
-        alert('상태 변경 실패: ' + err.message);
+        toast('상태 변경 실패: ' + err.message);
       }
     };
     window.deleteProvider = async (name) => {
@@ -16373,7 +16739,7 @@ const adminHTML = `<!doctype html>
         await api('/admin/providers/' + encodeURIComponent(name), { method: 'DELETE' });
         route();
       } catch (err) {
-        alert('삭제 실패: ' + err.message);
+        toast('삭제 실패: ' + err.message);
       }
     };
     async function runRetention() {
@@ -16382,7 +16748,7 @@ const adminHTML = `<!doctype html>
     }
     async function replayFallback() {
       const result = await api('/admin/fallback', { method: 'POST' });
-      alert('재처리 완료: imported=' + fmt(result.imported) + ', duplicates=' + fmt(result.duplicates) + ', failed=' + fmt(result.failed));
+      toast('재처리 완료: imported=' + fmt(result.imported) + ', duplicates=' + fmt(result.duplicates) + ', failed=' + fmt(result.failed), 'ok');
       route();
     }
 
@@ -16394,14 +16760,49 @@ const adminHTML = `<!doctype html>
       const t = (target && target.tagName) || '';
       return t === 'INPUT' || t === 'TEXTAREA' || t === 'SELECT' || (target && target.isContentEditable);
     }
+    // Wire the palette's own input before the global handler, so typing inside it is
+    // never treated as a nav shortcut.
+    (function wireCommandPalette() {
+      const backdrop = document.getElementById('palette-backdrop');
+      const input = document.getElementById('palette-input');
+      if (!backdrop || !input) return;
+      input.addEventListener('input', () => renderPaletteList(input.value));
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'ArrowDown') { e.preventDefault(); setPaletteIndex(paletteIndex + 1); }
+        else if (e.key === 'ArrowUp') { e.preventDefault(); setPaletteIndex(paletteIndex - 1); }
+        else if (e.key === 'Enter') { e.preventDefault(); runPaletteItem(); }
+        else if (e.key === 'Escape') { e.preventDefault(); closeCommandPalette(); }
+      });
+      backdrop.addEventListener('click', (e) => { if (e.target === backdrop) closeCommandPalette(); });
+      // A keyboard-only entry point is undiscoverable; give the header a visible one.
+      const button = document.getElementById('palette-toggle');
+      if (button) button.addEventListener('click', openCommandPalette);
+    })();
+
     document.addEventListener('keydown', (e) => {
+      // Ctrl/Cmd+K is checked before the modifier guard below, since that guard exists to
+      // let browser shortcuts through and would otherwise swallow this one.
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        paletteIsOpen() ? closeCommandPalette() : openCommandPalette();
+        return;
+      }
+      if (e.key === 'Tab') {
+        const palette = document.getElementById('palette-backdrop');
+        const modal = document.getElementById('modal-backdrop');
+        if (palette && palette.classList.contains('open')) { trapFocusInside(palette, e); return; }
+        if (modal && modal.classList.contains('open')) { trapFocusInside(modal, e); return; }
+      }
       if (e.key === 'Escape') {
+        if (paletteIsOpen()) { closeCommandPalette(); return; }
         closeModal();
         gPending = false;
         return;
       }
       if (isTyping(e.target)) return;
       if (e.ctrlKey || e.metaKey || e.altKey) return;
+
+      if (e.key === 'k') { e.preventDefault(); openCommandPalette(); return; }
 
       if (e.shiftKey && e.key.toLowerCase() === 'x') { e.preventDefault(); openXViewLauncher(); return; }
 
@@ -16436,6 +16837,7 @@ const adminHTML = `<!doctype html>
     }
     function helpHTML() {
       const pairs = [
+        ['<kbd>Ctrl</kbd>/<kbd>⌘</kbd> <kbd>K</kbd> 또는 <kbd>k</kbd>', '명령 팔레트 — 모든 화면 검색·이동'],
         ['<kbd>?</kbd>', '단축키 도움말 열기'],
         ['<kbd>/</kbd>', '검색 입력 포커스'],
         ['<kbd>t</kbd>', '다크 모드 토글'],
