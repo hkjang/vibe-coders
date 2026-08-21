@@ -31,7 +31,7 @@ import (
 )
 
 // AppVersion is the gateway build version, surfaced in /auth/me and the admin UI.
-const AppVersion = "v0.76.58"
+const AppVersion = "v0.76.60"
 
 type Server struct {
 	cfg            config.Config
@@ -40,6 +40,7 @@ type Server struct {
 	client         *http.Client
 	metrics        *Metrics
 	breakers       *providerBreakers
+	balancer       *providerBalancer
 	secrets        atomic.Pointer[secret.Cipher]
 	secretsMu      sync.Mutex // guards concurrent rotation
 	retention      *store.RetentionWorker
@@ -121,6 +122,7 @@ func NewServer(cfg config.Config, db *store.SQLStore, logger *store.AsyncLogger,
 		},
 		metrics:   newMetrics(),
 		breakers:  newProviderBreakers(),
+		balancer:  newProviderBalancer(),
 		retention: retention,
 		sessions:  newSessionInferer(cfg.Session.IdleTimeout),
 		dwCache:   newDWQueryCache(0),
@@ -541,6 +543,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/admin/routing/decisions/", s.handleRoutingDecisionByID)
 	mux.HandleFunc("/admin/routing/health", s.handleRoutingHealth)
 	mux.HandleFunc("/admin/routing/breaker-reset", s.handleRoutingBreakerReset)
+	mux.HandleFunc("/admin/routing/balancer", s.handleRoutingBalancer)
 	mux.HandleFunc("/admin/providers/slo", s.handleProviderSLOs)
 	mux.HandleFunc("/admin/agents", s.handleAgents)
 	mux.HandleFunc("/admin/models/quality", s.handleModelQuality)

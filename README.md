@@ -275,6 +275,9 @@ $env:PROXY_API_KEYS="dev:dev-proxy-key:alice:platform,team:team-proxy-key:bob:ba
 | `UPSTREAM_BREAKER_ENABLED` | `true` | Provider 회로 차단기. 연속 실패한 provider를 폴백 후보에서 자동 제외 |
 | `UPSTREAM_BREAKER_THRESHOLD` | `5` | 차단까지 필요한 연속 실패 횟수(429·5xx·타임아웃·연결 실패. 4xx 제외) |
 | `UPSTREAM_BREAKER_COOLDOWN` | `30s` | 차단 유지 시간. 경과 후 요청 1건으로 복구 확인 |
+| `UPSTREAM_LOAD_BALANCE` | `first` | 같은 모델에 여러 provider가 매칭될 때 `first`(이름순 첫 번째) · `round_robin`(단일 인스턴스) · `session_hash`(다중 인스턴스 권장 — 세션 키에서 provider를 계산해 공유 저장소 없이 모든 인스턴스가 같은 답) |
+| `UPSTREAM_STICKY_SESSIONS` | `true` | 세션을 처음 처리한 provider에 고정(에이전트 대화의 prefix/KV 캐시 보존) |
+| `UPSTREAM_STICKY_TTL` | `30m` | 세션 고정 유지 시간 |
 | `DB_DRIVER` | `sqlite` | `sqlite` 또는 `postgres` |
 | `DB_DSN` | `data/gateway.db` | SQLite 파일 경로 |
 | `POSTGRES_DSN` / `DATABASE_URL` | 없음 | 있으면 PostgreSQL 사용 |
@@ -651,6 +654,10 @@ curl.exe http://localhost:8080/admin/providers `
 응답 헤더로 결과를 바로 확인할 수 있습니다 — `X-Provider`(실제 응답 provider), `X-Route-Reason`, `X-Route-Detail`, 그리고 폴백이 일어났을 때만 나오는 `X-Failover-From` · `X-Failover-Reason` · `X-Failover-Path`.
 
 장애 provider는 **회로 차단기**가 폴백 후보에서 자동으로 빼줍니다(연속 실패 5회 → 30초 차단 → 1건 탐침 복구). 라우팅 탭 → Provider Health → 회로 차단기 패널에서 상태 확인·수동 해제가 가능합니다. 폴백이 성공하면 호출자는 정상 응답을 받아 **장애가 감춰지므로**, 안전 탭 알림 규칙에서 `failover_rate` 지표로 폴백률 알림을 걸어두는 것을 권장합니다.
+
+같은 모델을 여러 provider가 서비스한다면 `UPSTREAM_LOAD_BALANCE=round_robin` 으로 **세션 단위 분산**이 됩니다. 세션은 세션 헤더 → body 필드 → **대화 프리픽스 해시** → 추론 세션 순으로 식별하며, qwen code 처럼 세션 식별자를 보내지 않는 에이전트도 대화별로 구분돼 분산되고 대화 안에서는 같은 provider로 고정됩니다. 분산이 실제로 됐는지는 응답 헤더(`X-Route-Reason`·`X-Session-Affinity`)와 라우팅 탭의 `로드밸런싱 · 세션 고정` 패널(균형도·intent vs actual), `GET /admin/routing/balancer` 로 확인합니다.
+
+게이트웨이를 **2대 이상** 운영한다면 `session_hash` 를 쓰세요. `round_robin` 은 회전 커서가 프로세스 메모리에 있어 인스턴스마다 독립적으로 돌기 때문에 같은 대화가 다른 인스턴스로 들어가면 세션 고정이 깨집니다. `session_hash` 는 rendezvous 해시로 provider를 계산하므로 조율 없이 모든 인스턴스가 일치하고, provider가 빠질 때 그 provider의 세션만 이동합니다.
 
 > 전체 규칙·구성 레시피·트러블슈팅은 **[docs/ROUTING_GUIDE.md](docs/ROUTING_GUIDE.md)** 를 참고하세요. 어드민에서는 설정 탭 → 업스트림 프로바이더 → `📖 라우팅 · 폴백 동작 설명 열기` 버튼으로 같은 내용을 볼 수 있고, 같은 화면의 **폴백 커버리지** 표시가 provider 별로 폴백 상대가 있는지 알려줍니다.
 

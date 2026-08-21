@@ -275,3 +275,27 @@ func (s *Server) noteBreakerFailure(name, reason string, threshold int, traceID 
 type providerAttempt struct {
 	provider resolvedProvider
 }
+
+// peek reports whether a provider is currently dialable WITHOUT consuming the
+// half-open probe slot. The load balancer uses it to avoid steering traffic at a
+// tripped provider; allow() stays reserved for the dial path, which is what should
+// actually spend the single probe.
+func (b *providerBreakers) peek(name string, threshold int, cooldown time.Duration, now time.Time) bool {
+	if b == nil || name == "" {
+		return true
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	st, ok := b.states[name]
+	if !ok {
+		return true
+	}
+	switch st.phase {
+	case breakerOpen:
+		return now.Sub(st.openedAt) >= cooldown
+	case breakerHalfOpen:
+		return !st.probing || now.Sub(st.probeAt) >= cooldown
+	default:
+		return true
+	}
+}

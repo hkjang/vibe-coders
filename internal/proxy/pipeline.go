@@ -67,6 +67,10 @@ type requestPipeline struct {
 	skillName    string
 	skillVersion string
 	skillTools   string
+
+	// affinity identifies the conversation for provider stickiness (see
+	// resolveSessionAffinity). Empty when balancing does not apply.
+	affinity sessionAffinity
 }
 
 // pipelineSteps returns the ordered request pipeline. The order is the contract:
@@ -393,10 +397,28 @@ func (rc *requestPipeline) stepUpstream() bool {
 		}
 	}
 
-	provider, err := s.selectProviderForced(r.Context(), r, meta.Request.Model, rc.routeDecision.TargetProvider)
+	// Load balancing: when several providers serve the same model, spread sessions
+	// across them instead of always taking the first match by name. A routing rule's
+	// target (rc.routeDecision.TargetProvider) is an explicit decision and outranks
+	// the pool, so the balancer only runs when nothing has been forced already.
+	forcedProvider := rc.routeDecision.TargetProvider
+	balanced := balancerDecision{}
+	if strings.TrimSpace(forcedProvider) == "" {
+		rc.affinity = resolveSessionAffinity(r, body, rc.apiKeyID, meta.Request.SessionID)
+		if decision, ok := s.balanceProvider(r.Context(), r, meta.Request.Model, rc.affinity.Key, rc.authCtx); ok {
+			forcedProvider, balanced = decision.Provider, decision
+		}
+	}
+
+	provider, err := s.selectProviderForced(r.Context(), r, meta.Request.Model, forcedProvider)
 	if err != nil {
 		writeOpenAIError(w, http.StatusBadGateway, err.Error(), "server_error", "provider_unavailable")
 		return false
+	}
+	if balanced.Provider != "" {
+		// selectProviderForced labels any forced choice "rule_provider"; restore the
+		// real reason so route_reason distinguishes rotation from stickiness.
+		provider.Reason, provider.Detail = balanced.Reason, balanced.Detail
 	}
 	if rc.authCtx != nil && !listAllows(provider.Name, rc.authCtx.AllowedProviders, rc.authCtx.DeniedProviders) {
 		_ = s.db.InsertAuditEvent(r.Context(), store.AuthEvent{ID: newID("ae"), EventType: "model_denied", APIKeyID: rc.authCtx.APIKeyID, TeamID: rc.authCtx.TeamID, IP: clientIP(r), UserAgent: r.UserAgent(), Detail: "provider:" + provider.Name, CreatedAt: time.Now().UTC()})
@@ -481,6 +503,11 @@ func (rc *requestPipeline) stepUpstream() bool {
 	if resolvedName != "" {
 		meta.Request.Provider = resolvedName
 	}
+	// A failover means the bound provider did not serve this turn. Move the binding to
+	// the one that did, otherwise every later turn would retry the bad node first.
+	if rc.affinity.Key != "" && meta.Request.Provider != "" {
+		s.balancer.rebind(meta.Request.Model, rc.affinity.Key, meta.Request.Provider, time.Now())
+	}
 	meta.Request.ResolvedModel = firstNonEmpty(meta.Request.ResolvedModel, meta.Request.Model)
 	meta.Request.UpstreamModel = firstNonEmpty(finalModel, meta.Request.UpstreamModel, meta.Request.Model)
 	if routingPlan != nil {
@@ -518,6 +545,12 @@ func (rc *requestPipeline) stepUpstream() bool {
 		w.Header().Set("X-Accel-Buffering", "no")
 	}
 	setRoutingHeaders(w, provider, meta.Request.Provider, failoverFrom, failoverReason, failoverPath)
+	if rc.affinity.Key != "" {
+		// Echo how the conversation was identified so a client can confirm that its
+		// turns really are landing on one provider — and see why if they are not.
+		w.Header().Set("X-Session-Affinity", rc.affinity.Source)
+		w.Header().Set("X-Session-Affinity-Key", shortSession(rc.affinity.Key))
+	}
 	w.Header().Set("X-Request-ID", traceID)
 	w.WriteHeader(resp.StatusCode)
 

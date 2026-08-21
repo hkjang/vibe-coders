@@ -157,6 +157,14 @@ type UpstreamConfig struct {
 	BreakerEnabled   bool
 	BreakerThreshold int
 	BreakerCooldown  time.Duration
+	// LoadBalance selects how a model with several matching providers is served:
+	// "first" (default, historical: always the first match by name) or "round_robin"
+	// (spread across the matching providers).
+	LoadBalance string
+	// StickySessions keeps a session on the provider that first served it, so an
+	// agentic client's turns do not bounce between nodes and lose their prefix cache.
+	StickySessions bool
+	StickyTTL      time.Duration
 	// DefaultModel is the concrete model vibe/auto resolves to when set, so deployments whose
 	// upstream is not OpenAI don't fall back to the built-in gpt-4.1* names. Empty → built-in list.
 	DefaultModel string
@@ -362,6 +370,9 @@ func Load() (Config, error) {
 			BreakerEnabled:        boolEnv("UPSTREAM_BREAKER_ENABLED", true),
 			BreakerThreshold:      intEnv("UPSTREAM_BREAKER_THRESHOLD", 5),
 			BreakerCooldown:       durationEnv("UPSTREAM_BREAKER_COOLDOWN", 30*time.Second),
+			LoadBalance:           strings.ToLower(strings.TrimSpace(getEnv("UPSTREAM_LOAD_BALANCE", "first"))),
+			StickySessions:        boolEnv("UPSTREAM_STICKY_SESSIONS", true),
+			StickyTTL:             durationEnv("UPSTREAM_STICKY_TTL", 30*time.Minute),
 			DefaultModel:          strings.TrimSpace(os.Getenv("UPSTREAM_DEFAULT_MODEL")),
 		},
 		Database: databaseConfig(),

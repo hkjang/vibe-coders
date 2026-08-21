@@ -368,3 +368,115 @@ func (s *Server) providerHealthTrend(ctx context.Context, since, until time.Time
 	}
 	return trend, nil
 }
+
+// handleRoutingBalancer answers "did round robin actually work?".
+//
+// It reports two independent views on purpose. `intent` is the balancer's own pick
+// counters — what it decided. `actual` is grouped from request_logs — what really
+// happened, which can differ because failover, cache hits and pinned requests never
+// pass through the balancer. Agreement between the two is the signal an operator wants;
+// a gap points at the reason.
+//
+// POST releases sticky bindings (all, or one provider's) so a node can be drained
+// without waiting for every conversation's TTL to expire.
+func (s *Server) handleRoutingBalancer(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	mode, sticky, ttl := s.balancerConfig()
+	now := time.Now()
+
+	if r.Method == http.MethodPost {
+		var payload struct {
+			Provider string `json:"provider"`
+		}
+		if r.Body != nil {
+			_ = json.NewDecoder(r.Body).Decode(&payload)
+		}
+		name := strings.TrimSpace(payload.Provider)
+		released := s.balancer.release(name)
+		s.auditAdmin(r, "routing.balancer.release", firstNonEmpty(name, "*"), auditJSON(map[string]any{"released": released}))
+		writeJSON(w, http.StatusOK, map[string]any{"status": "released", "provider": firstNonEmpty(name, "*"), "released_sessions": released})
+		return
+	}
+	if r.Method != http.MethodGet {
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
+
+	model := strings.TrimSpace(r.URL.Query().Get("model"))
+	since := parseWindow(r.URL.Query().Get("window"), time.Hour, "hour")
+	activeSessions, intent := s.balancer.stats(ttl, now)
+	actual, err := s.db.ProviderModelDistribution(r.Context(), model, since)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "balancer_distribution_failed")
+		return
+	}
+
+	// Pools are the sets the balancer can actually spread over: a model glob served by
+	// two or more enabled providers. Anything with a single provider is shown too, so
+	// "why is this not balancing?" has a visible answer.
+	pools := []map[string]any{}
+	if providers, listErr := s.db.ListProviderConfigs(r.Context()); listErr == nil {
+		byPattern := map[string][]string{}
+		for _, p := range providers {
+			if !p.Enabled {
+				continue
+			}
+			for _, raw := range splitProviderPatterns(p.ModelPatterns) {
+				byPattern[raw] = append(byPattern[raw], p.Name)
+			}
+		}
+		for pattern, names := range byPattern {
+			sort.Strings(names)
+			pools = append(pools, map[string]any{
+				"pattern": pattern, "providers": names, "size": len(names), "balanced": len(names) > 1,
+			})
+		}
+		sort.Slice(pools, func(i, j int) bool { return pools[i]["pattern"].(string) < pools[j]["pattern"].(string) })
+	}
+
+	// round_robin keeps its rotation cursor in process memory, so N gateway instances
+	// rotate independently and the same conversation can land on a different provider
+	// per instance. session_hash derives the provider from the session key and needs no
+	// shared state, so it is the only mode whose stickiness survives a multi-instance
+	// deployment. Say so here rather than letting an operator discover it in production.
+	multiInstanceSafe := mode == balanceSessionHash || mode == balanceFirst
+	writeJSON(w, http.StatusOK, map[string]any{
+		"mode":                string(mode),
+		"multi_instance_safe": multiInstanceSafe,
+		"sticky_sessions":     sticky,
+		"sticky_ttl":          ttl.String(),
+		"active_sessions":     activeSessions,
+		"window_since":        since.UTC().Format(time.RFC3339),
+		"model":               model,
+		"pools":               pools,
+		"intent":              intent,
+		"actual":              actual,
+		"balance_index":       balanceIndex(actual),
+	})
+}
+
+// balanceIndex scores how evenly traffic landed, 1.0 being a perfect split and 0
+// meaning one provider took everything. It is the ratio of the least-used to the
+// most-used provider, which is blunt but reads correctly at a glance and needs no
+// explanation of variance to an operator.
+func balanceIndex(shares []store.ProviderModelShare) float64 {
+	if len(shares) < 2 {
+		return 1
+	}
+	minReq, maxReq := shares[0].Requests, shares[0].Requests
+	for _, sh := range shares {
+		if sh.Requests < minReq {
+			minReq = sh.Requests
+		}
+		if sh.Requests > maxReq {
+			maxReq = sh.Requests
+		}
+	}
+	if maxReq <= 0 {
+		return 1
+	}
+	return float64(minReq) / float64(maxReq)
+}

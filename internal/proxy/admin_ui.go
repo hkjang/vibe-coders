@@ -7414,8 +7414,10 @@ const adminHTML = `<!doctype html>
       qs.set('window', windowValue);
       qs.set('threshold', String(threshold));
       let resp;
+      let balancerResp = null;
       try { resp = await api('/admin/routing/health?' + qs.toString()); }
       catch (e) { document.getElementById('view').innerHTML = section('Provider Health', '<div class="card-body"><div class="banner error">Health 데이터를 불러오지 못했습니다.<div class="muted">' + escapeHTML(e.message) + '</div><button type="button" class="secondary" style="margin-top:8px" onclick="route()">다시 시도</button></div></div>'); return; }
+      try { balancerResp = await api('/admin/routing/balancer?window=' + encodeURIComponent(windowValue)); } catch (e) { balancerResp = null; }
       const providers = resp.providers || [];
       const ranking = resp.ranking || [];
       const degraded = resp.degraded || [];
@@ -7444,6 +7446,7 @@ const adminHTML = `<!doctype html>
       document.getElementById('view').innerHTML =
         section('Provider Health', kpis + healthVisual + filters) +
         section('회로 차단기 (Circuit Breaker)', providerBreakerPanel(resp.breakers)) +
+        section('로드밸런싱 · 세션 고정', providerBalancerPanel(balancerResp)) +
         section('Provider ranking', providerHealthRankingTable(ranking, threshold)) +
         section('Degradation alerts', providerHealthAlertsTable(alerts)) +
         section('Health trend', providerHealthTrendTable(trend, threshold));
@@ -7458,6 +7461,81 @@ const adminHTML = `<!doctype html>
     }
     // Health score는 과거 집계이고, 회로 차단기는 지금 이 순간 어떤 provider가 폴백
     // 후보에서 빠져 있는지를 보여줍니다. 운영자는 이 둘을 함께 봐야 판단할 수 있습니다.
+    // "라운드로빈이 실제로 됐는가"에 답하는 패널. intent(밸런서가 고른 횟수)와
+    // actual(요청 로그 집계)을 나란히 두는 이유는, 폴백·캐시·provider 고정 요청은
+    // 밸런서를 거치지 않아 둘이 갈라질 수 있고 그 차이가 곧 원인이기 때문입니다.
+    function providerBalancerPanel(b) {
+      if (!b) return '<div class="card-body"><div class="empty" style="padding:16px">밸런서 상태를 불러오지 못했습니다.</div></div>';
+      if (b.mode !== 'round_robin' && b.mode !== 'session_hash') {
+        return '<div class="card-body"><div class="banner">로드밸런싱 <strong>꺼짐</strong> <span class="muted">(mode=' + escapeHTML(b.mode || 'first') + ')</span>' +
+          '<div class="muted" style="margin-top:4px">같은 모델에 여러 provider가 매칭돼도 <strong>이름순 첫 번째</strong>로만 갑니다. 나머지는 폴백 예비로만 쓰입니다. ' +
+          '분산하려면 <code>UPSTREAM_LOAD_BALANCE=round_robin</code> 으로 기동하세요.</div></div></div>';
+      }
+      const idx = Number(b.balance_index || 0);
+      const idxClass = idx >= 0.8 ? '' : (idx >= 0.5 ? 'warn' : 'error');
+      const idxLabel = idx >= 0.8 ? '고르게 분산' : (idx >= 0.5 ? '치우침' : '심하게 치우침');
+      const actual = b.actual || [];
+      const intent = b.intent || {};
+      const intentBy = {};
+      (Array.isArray(intent) ? intent : []).forEach(x => { intentBy[x.provider] = x; });
+      const totalActual = actual.reduce((sum, x) => sum + Number(x.requests || 0), 0);
+
+      const modeWarning = (b.multi_instance_safe === false)
+        ? '<div class="banner warn" style="margin:0 14px 10px"><strong>다중 인스턴스에서는 세션 고정이 깨집니다.</strong>' +
+            '<div class="muted" style="margin-top:4px"><code>round_robin</code> 은 회전 커서를 프로세스 메모리에 두므로 게이트웨이를 여러 대 띄우면 각자 독립적으로 회전합니다. ' +
+            '같은 대화가 다른 인스턴스로 들어가면 다른 provider로 갈 수 있습니다. 인스턴스가 2대 이상이면 <code>UPSTREAM_LOAD_BALANCE=session_hash</code> 를 쓰세요 — ' +
+            '세션 키에서 provider를 계산하므로 공유 저장소 없이 모든 인스턴스가 같은 답을 냅니다.</div></div>'
+        : '';
+      const head = '<div class="toolbar" style="border:0; flex-wrap:wrap">' +
+        '<span class="status">모드 ' + escapeHTML(b.mode) + (b.multi_instance_safe === false ? ' <span class="status warn">단일 인스턴스용</span>' : '') + '</span>' +
+        '<span class="status ' + idxClass + '">균형도 ' + (idx * 100).toFixed(0) + '% · ' + idxLabel + '</span>' +
+        '<span class="status">세션 고정 ' + (b.sticky_sessions ? '켜짐 (' + escapeHTML(b.sticky_ttl || '') + ')' : '꺼짐') + '</span>' +
+        '<span class="status">활성 세션 ' + fmt(b.active_sessions || 0) + '</span>' +
+        '<span style="flex:1"></span>' +
+        '<button type="button" class="secondary" onclick="releaseStickySessions(\'\')">세션 고정 전체 해제</button>' +
+      '</div>';
+
+      const poolRows = (b.pools || []).map(p =>
+        '<tr><td><code>' + escapeHTML(p.pattern) + '</code></td>' +
+        '<td>' + escapeHTML((p.providers || []).join(', ')) + '</td>' +
+        '<td><span class="status ' + (p.balanced ? '' : 'warn') + '">' + (p.balanced ? '분산 대상 ' + fmt(p.size) + '개' : 'provider 1개 — 분산 안 됨') + '</span></td></tr>').join('');
+      const poolTable = poolRows
+        ? '<div style="overflow:auto"><table><thead><tr><th>모델 패턴</th><th>Provider 풀</th><th>상태</th></tr></thead><tbody>' + poolRows + '</tbody></table></div>'
+        : '<div class="empty" style="padding:16px">모델 패턴이 등록된 활성 provider가 없습니다.</div>';
+
+      const distRows = actual.map(x => {
+        const share = totalActual ? Number(x.requests || 0) / totalActual : 0;
+        const iv = intentBy[x.provider] || {};
+        return '<tr>' +
+          '<td><strong>' + escapeHTML(x.provider) + '</strong></td>' +
+          '<td data-num="' + (x.requests || 0) + '">' + fmt(x.requests || 0) + ' <span class="muted">(' + (share * 100).toFixed(1) + '%)</span></td>' +
+          '<td data-num="' + (iv.picks || 0) + '">' + fmt(iv.picks || 0) + '</td>' +
+          '<td data-num="' + (iv.sessions || 0) + '">' + fmt(iv.sessions || 0) + '</td>' +
+          '<td data-num="' + (x.failovers || 0) + '">' + fmt(x.failovers || 0) + '</td>' +
+          '<td data-num="' + (x.avg_latency_ms || 0) + '">' + fmt(x.avg_latency_ms || 0) + ' ms</td>' +
+          '<td><button type="button" class="secondary" onclick="releaseStickySessions(\'' + escapeAttr(x.provider) + '\')">이 provider 비우기</button></td>' +
+        '</tr>';
+      }).join('');
+      const distTable = distRows
+        ? '<div style="overflow:auto"><table><thead><tr>' +
+            '<th data-sort="str">Provider</th><th data-sort="num">실제 처리(로그)</th><th data-sort="num">밸런서 선택</th>' +
+            '<th data-sort="num">고정 세션</th><th data-sort="num">폴백 유입</th><th data-sort="num">평균 지연</th><th>동작</th>' +
+          '</tr></thead><tbody>' + distRows + '</tbody></table></div>' +
+          visualBars(actual.map(x => ({ label: x.provider, value: Number(x.requests || 0) })), v => fmt(v) + '건', true)
+        : '<div class="empty" style="padding:16px">이 구간에 처리된 요청이 없습니다.</div>';
+
+      return '<div class="card-body">' + head + modeWarning + poolTable +
+        '<div class="muted" style="font-size:12px; padding:10px 14px 6px">' +
+          '<strong>실제 처리</strong>는 요청 로그 집계, <strong>밸런서 선택</strong>은 밸런서가 고른 횟수입니다. ' +
+          '폴백·캐시 적중·provider 고정 요청은 밸런서를 거치지 않으므로 두 값이 다를 수 있고, 그 차이가 곧 원인입니다.' +
+        '</div>' + distTable + '</div>';
+    }
+    window.releaseStickySessions = async (provider) => {
+      try {
+        await api('/admin/routing/balancer', { method: 'POST', body: JSON.stringify({ provider: provider || '' }) });
+        route();
+      } catch (e) { alert('세션 고정 해제 실패: ' + e.message); }
+    };
     function providerBreakerPanel(breakers) {
       breakers = breakers || {};
       if (!breakers.enabled) {
@@ -15653,6 +15731,19 @@ const adminHTML = `<!doctype html>
         '<div class="banner warn" style="margin-top:8px"><strong>폴백은 장애를 감춥니다.</strong>' +
         '<div class="muted" style="margin-top:4px">폴백이 성공하면 호출자는 정상 응답을 받으므로 primary가 죽은 사실을 아무도 모른 채 이중화 여유분만 소모됩니다. 안전 탭 알림 규칙에서 <code>failover_rate</code>(폴백 발생률) 지표로 임계 알림을 걸어두세요.</div></div>';
 
+      const balancing =
+        '<table><thead><tr><th>항목</th><th>내용</th></tr></thead><tbody>' +
+        '<tr><td><strong>기본 동작</strong></td><td>같은 모델에 여러 provider가 매칭되면 <strong>이름순 첫 번째</strong>로만 갑니다(active-passive). 나머지는 폴백 예비입니다</td></tr>' +
+        '<tr><td><strong>분산 켜기</strong></td><td><code>UPSTREAM_LOAD_BALANCE</code> — <code>round_robin</code>(단일 인스턴스) 또는 <strong><code>session_hash</code>(다중 인스턴스 권장)</strong></td></tr>' +
+        '<tr><td><strong>인스턴스 2대 이상</strong></td><td><code>session_hash</code> 를 쓰세요. <code>round_robin</code> 은 회전 커서가 프로세스 메모리라 인스턴스마다 독립적으로 돌고, 같은 대화가 다른 인스턴스로 들어가면 고정이 깨집니다. <code>session_hash</code> 는 세션 키에서 provider를 계산(rendezvous 해시)하므로 공유 저장소 없이 모든 인스턴스가 일치하고, provider가 빠질 때 그 provider의 세션만 이동합니다</td></tr>' +
+        '<tr><td><strong>세션 고정</strong></td><td><code>UPSTREAM_STICKY_SESSIONS</code>(기본 on) · <code>UPSTREAM_STICKY_TTL</code>(30분). 에이전트는 매 턴 대화 전체를 재전송하므로, 턴마다 노드가 바뀌면 prefix/KV 캐시가 매번 버려집니다</td></tr>' +
+        '<tr><td><strong>세션 식별</strong></td><td>세션 헤더 → body <code>session_id</code>류 → <strong>대화 프리픽스 해시</strong> → 추론 세션 순. qwen code 등은 세션 식별자를 보내지 않으므로 3번이 실제 경로입니다</td></tr>' +
+        '<tr><td><strong>고정 해제</strong></td><td>TTL 경과 · 해당 provider가 후보에서 빠짐(차단·비활성) · 폴백 발생 시 실제 처리한 곳으로 이동 · 운영자 수동 해제</td></tr>' +
+        '</tbody></table>' +
+        '<div class="banner" style="margin-top:10px"><strong>분산은 세션 단위, 세션 안에서는 고정.</strong>' +
+        '<div class="muted" style="margin-top:4px">응답 헤더 <code>X-Route-Reason</code>(<code>round_robin</code>/<code>sticky_session</code>)과 <code>X-Session-Affinity</code>(<code>header</code>/<code>body</code>/<code>conversation</code>/<code>inferred</code>)로 바로 확인할 수 있습니다. ' +
+        '<code>inferred</code>가 보이면 대화 구분이 안 되는 상태라 한 provider로 몰립니다. 운영자 확인은 라우팅 탭 → Provider Health → <strong>로드밸런싱 · 세션 고정</strong> 패널(균형도·intent vs actual).</div></div>';
+
       const extras =
         '<div style="margin-bottom:10px"><strong>컨텍스트 초과 자동 승급</strong>' +
         '<div class="muted" style="font-size:12px;margin-top:3px">업스트림이 400 + context length 초과를 반환하면 provider를 바꾸는 대신 <strong>더 큰 컨텍스트 모델로 한 번</strong> 재시도합니다(<code>context_overflow:</code>). provider 폴백 조건과 무관하게 동작합니다.</div></div>' +
@@ -15668,6 +15759,7 @@ const adminHTML = `<!doctype html>
         routingGuideSection('폴백이 안 되는 흔한 이유', '대부분 설정 문제이며, 위의 폴백 커버리지 표시로 바로 확인할 수 있습니다.', pitfalls) +
         routingGuideSection('응답 헤더로 확인하기', '어드민을 열지 않고 클라이언트에서 바로 라우팅 결과를 볼 수 있습니다.', headers) +
         routingGuideSection('장애 대응 장치', '폴백이 "되기는 하는데 느리다"를 막는 세 가지 장치입니다.', resilience) +
+        routingGuideSection('로드밸런싱 · 세션 고정', '같은 모델을 여러 provider가 서비스할 때 세션 단위로 분산합니다.', balancing) +
         routingGuideSection('구성 레시피', '목적에 맞는 패턴 설계를 고르세요.', recipes) +
         routingGuideSection('추가로 알아둘 것', '', extras) +
         '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px">' +

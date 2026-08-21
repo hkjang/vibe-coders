@@ -217,3 +217,49 @@ func providerHealthScoreValue(h ProviderHealthScore) int {
 	}
 	return int(score + 0.5)
 }
+
+// ProviderModelDistribution counts requests per provider for one model over a window.
+// The balancer's in-memory counters only describe what it intended; this is what the
+// request log actually recorded, so an operator can verify that round robin really
+// spread the traffic (and see the effect of failover, which the balancer never sees).
+// An empty model counts every model.
+type ProviderModelShare struct {
+	Provider   string `json:"provider"`
+	Requests   int64  `json:"requests"`
+	Failovers  int64  `json:"failovers"`
+	Errors     int64  `json:"errors"`
+	AvgLatency int64  `json:"avg_latency_ms"`
+}
+
+func (s *SQLStore) ProviderModelDistribution(ctx context.Context, model string, since time.Time) ([]ProviderModelShare, error) {
+	where := []string{"created_at >= ?", "COALESCE(provider, '') <> ''"}
+	args := []any{since.UTC().Format(time.RFC3339Nano)}
+	if m := strings.TrimSpace(model); m != "" {
+		where = append(where, "LOWER(COALESCE(model, '')) = ?")
+		args = append(args, strings.ToLower(m))
+	}
+	rows, err := s.db.QueryContext(ctx, s.bind(`
+		SELECT COALESCE(provider, ''), COUNT(*),
+			COALESCE(SUM(CASE WHEN failover <> 0 THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END), 0),
+			COALESCE(AVG(latency_ms), 0)
+		FROM request_logs
+		WHERE `+strings.Join(where, " AND ")+`
+		GROUP BY COALESCE(provider, '')
+		ORDER BY COUNT(*) DESC`), args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []ProviderModelShare{}
+	for rows.Next() {
+		var item ProviderModelShare
+		var avg float64
+		if err := rows.Scan(&item.Provider, &item.Requests, &item.Failovers, &item.Errors, &avg); err != nil {
+			return nil, err
+		}
+		item.AvgLatency = int64(avg + 0.5)
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
