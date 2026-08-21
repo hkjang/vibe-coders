@@ -201,6 +201,14 @@ const adminHTML = `<!doctype html>
     .prompt { max-height: 80px; overflow: hidden; color: var(--ink); white-space: pre-wrap; }
     .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; background: var(--pill-bg); color: var(--ink); font-size: 12px; }
 
+    /* Invalid field marking. Validation failures reported only as a toast ("이름과 URL을
+       입력하세요") leave the operator to work out WHICH of a nine-column form is empty. */
+    .field-invalid {
+      border-color: var(--bad) !important;
+      box-shadow: 0 0 0 2px color-mix(in srgb, var(--bad) 22%, transparent);
+    }
+    .field-invalid:focus { outline-color: var(--bad); }
+
     /* Command palette. The admin has ~35 permission-filtered destinations spread across
        grouped nav menus; reaching one meant remembering which group it lives under. The
        list is built from the rendered nav at open time, so it shows exactly the screens
@@ -1280,6 +1288,44 @@ const adminHTML = `<!doctype html>
     }
 
     // ---------- formatting ----------
+    // ---------- form validation ----------
+    // requireFields checks a set of inputs, marks every empty one, focuses the first and
+    // names them in a single toast. Previously a failure produced only the toast, so on a
+    // wide form the operator had to hunt for the field the message meant.
+    //
+    // Returns true when everything is filled, so callers read:
+    //   if (!requireFields([...])) return;
+    function clearFieldErrors(ids) {
+      ids.forEach((id) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.classList.remove('field-invalid');
+        el.removeAttribute('aria-invalid');
+      });
+    }
+    function requireFields(fields) {
+      const ids = fields.map((f) => f.id);
+      clearFieldErrors(ids);
+      const missing = fields.filter((f) => {
+        const el = document.getElementById(f.id);
+        return !el || !String(el.value || '').trim();
+      });
+      if (missing.length === 0) return true;
+      missing.forEach((f) => {
+        const el = document.getElementById(f.id);
+        if (!el) return;
+        el.classList.add('field-invalid');
+        el.setAttribute('aria-invalid', 'true');
+        // Clear the mark as soon as the operator starts fixing it, so the form does not
+        // keep accusing a field they have already filled in.
+        el.addEventListener('input', () => clearFieldErrors([f.id]), { once: true });
+      });
+      const first = document.getElementById(missing[0].id);
+      if (first) first.focus();
+      toast(missing.map((f) => f.label).join(', ') + ' 을(를) 입력하세요');
+      return false;
+    }
+
     // ---------- time formatting ----------
     // Timestamps arrive as UTC RFC3339 and were rendered verbatim in ~29 places, so an
     // operator scanning a table read "2026-08-21T09:51:46.12Z" and had to convert it in
@@ -5566,7 +5612,7 @@ const adminHTML = `<!doctype html>
         probe_pack_ids: packs,
         target_filter: targetFilter,
       };
-      if (!body.name) { toast('캠페인 이름을 입력하세요.'); return; }
+      if (!requireFields([{ id: 'rt-name', label: '캠페인 이름' }])) return;
       const editing = !!rtEditCampaignId;
       if (editing) body.id = rtEditCampaignId;
       try {
@@ -6236,7 +6282,7 @@ const adminHTML = `<!doctype html>
         max_cost_krw: Number(document.getElementById('ar-cost').value || 0),
         enabled: !!document.getElementById('ar-enabled').checked,
       };
-      if (!body.virtual_model) { toast('가상 모델명을 입력하세요.'); return; }
+      if (!requireFields([{ id: 'ar-model', label: '가상 모델명' }])) return;
       try {
         const d = await api('/admin/agent-routes', { method: 'POST', body: JSON.stringify(body) });
         agentEditId = '';
@@ -8513,7 +8559,7 @@ const adminHTML = `<!doctype html>
     window.csApprove = (id) => csDo(id, 'approve');
     window.csApply = (id) => csDo(id, 'apply', '이 변경 세트를 적용할까요? 설정이 즉시 반영됩니다.');
     window.csRollback = (id) => csDo(id, 'rollback', '적용 전 값으로 롤백할까요?');
-    window.csDelete = async (id) => { if (!confirm('삭제할까요?')) return; try { await api('/admin/change-sets/' + encodeURIComponent(id), { method: 'DELETE' }); await renderChangeSets(); } catch (e) { toast(e.message); } };
+    window.csDelete = async (id) => { if (!confirm('이 변경 세트를 삭제할까요? 되돌릴 수 없습니다.')) return; try { await api('/admin/change-sets/' + encodeURIComponent(id), { method: 'DELETE' }); await renderChangeSets(); } catch (e) { toast(e.message); } };
 
     // ---------- AI 업무 앱: Skill/Prompt Product/Text2SQL/MCP/모델 묶음 ----------
     async function renderWorkApps() {
@@ -10377,7 +10423,7 @@ const adminHTML = `<!doctype html>
           url: document.getElementById('mcp-up-url').value.trim(),
           auth_token: document.getElementById('mcp-up-auth').value,
         };
-        if (!body.name || !body.url) { toast('이름과 URL을 입력하세요'); return; }
+        if (!requireFields([{ id: 'mcp-up-name', label: '이름' }, { id: 'mcp-up-url', label: 'URL' }])) return;
         try {
           await api('/admin/mcp/upstreams', { method: 'POST', body: JSON.stringify(body) });
           route();

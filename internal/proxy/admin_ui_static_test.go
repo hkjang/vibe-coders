@@ -159,3 +159,24 @@ func TestAdminUIFormatsTimestamps(t *testing.T) {
 		t.Errorf("raw timestamp rendered without formatting: %s — use timeCell()/timeExact()", m)
 	}
 }
+
+// requireFields marks a field by element id. A typo there fails silently in the worst
+// possible way: the field is reported as empty forever, so the form can never be
+// submitted. Every referenced id must exist in the markup.
+func TestAdminUIValidatedFieldsExist(t *testing.T) {
+	_, payload := adminUISource(t)
+	group := regexp.MustCompile(`requireFields\(\[([^\]]+)\]`)
+	field := regexp.MustCompile(`id: '([^']+)'`)
+	checked := 0
+	for _, g := range group.FindAllStringSubmatch(payload, -1) {
+		for _, f := range field.FindAllStringSubmatch(g[1], -1) {
+			checked++
+			if !strings.Contains(payload, `id="`+f[1]+`"`) {
+				t.Errorf("requireFields references element id %q, which does not exist in the markup", f[1])
+			}
+		}
+	}
+	if checked == 0 {
+		t.Error("no validated fields found; requireFields is no longer wired up")
+	}
+}

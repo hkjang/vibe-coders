@@ -76,6 +76,50 @@ group('toast');
   check('non-errors auto-dismiss', timers === afterErr + 1);
 }
 
+// ---------- form validation ----------
+group('form validation');
+{
+  const fields = {};
+  const mk = (id, value) => {
+    const el = { id, value, className: '', attrs: {}, focused: 0, listeners: [],
+      classList: { s: new Set(), add(c) { this.s.add(c); }, remove(c) { this.s.delete(c); }, contains(c) { return this.s.has(c); } },
+      setAttribute(k, v) { this.attrs[k] = v; }, removeAttribute(k) { delete this.attrs[k]; },
+      focus() { this.focused++; },
+      addEventListener(_, fn) { this.listeners.push(fn); } };
+    fields[id] = el;
+    return el;
+  };
+  mk('a', ''); mk('b', 'filled'); mk('c', '   ');
+  // load() evaluates via new Function, which cannot close over locals here — the stub
+  // has to reach the collector through the global scope.
+  const toasted = [];
+  global.__toasted = toasted;
+  global.document = { getElementById: (id) => fields[id] || null };
+  const F = load(['clearFieldErrors', 'requireFields'], 'function toast(m){ globalThis.__toasted.push(m); }\n');
+
+  check('a fully filled form passes', F.requireFields([{ id: 'b', label: 'B' }]) === true);
+  check('nothing is marked when valid', !fields.b.classList.contains('field-invalid'));
+
+  toasted.length = 0;
+  const ok = F.requireFields([{ id: 'b', label: 'B' }, { id: 'a', label: '이름' }, { id: 'c', label: 'URL' }]);
+  check('an incomplete form fails', ok === false);
+  check('the empty field is marked', fields.a.classList.contains('field-invalid'));
+  check('whitespace counts as empty', fields.c.classList.contains('field-invalid'));
+  check('the filled field is left alone', !fields.b.classList.contains('field-invalid'));
+  check('marked fields are flagged for assistive tech', fields.a.attrs['aria-invalid'] === 'true');
+  check('focus lands on the first offender', fields.a.focused === 1 && fields.c.focused === 0);
+  check('one toast names every missing field', toasted.length === 1 && toasted[0].includes('이름') && toasted[0].includes('URL'));
+  check('the filled field is not named', !toasted[0].includes('B'));
+
+  // Typing into a marked field must clear the accusation.
+  fields.a.listeners.forEach((fn) => fn());
+  check('editing clears the mark', !fields.a.classList.contains('field-invalid'));
+
+  // A field id that does not exist must fail loudly rather than pass silently.
+  toasted.length = 0;
+  check('a missing element is treated as empty', F.requireFields([{ id: 'nope', label: 'X' }]) === false);
+}
+
 // ---------- time formatting ----------
 group('time formatting');
 {
