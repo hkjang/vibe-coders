@@ -31,7 +31,7 @@ import (
 )
 
 // AppVersion is the gateway build version, surfaced in /auth/me and the admin UI.
-const AppVersion = "v0.76.62"
+const AppVersion = "v0.76.63"
 
 type Server struct {
 	cfg            config.Config
@@ -544,6 +544,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/admin/routing/health", s.handleRoutingHealth)
 	mux.HandleFunc("/admin/routing/breaker-reset", s.handleRoutingBreakerReset)
 	mux.HandleFunc("/admin/routing/balancer", s.handleRoutingBalancer)
+	mux.HandleFunc("/admin/routing/failover-drill", s.handleRoutingFailoverDrill)
 	mux.HandleFunc("/admin/providers/slo", s.handleProviderSLOs)
 	mux.HandleFunc("/admin/agents", s.handleAgents)
 	mux.HandleFunc("/admin/models/quality", s.handleModelQuality)
@@ -1104,6 +1105,8 @@ func (s *Server) handleProviders(w http.ResponseWriter, r *http.Request) {
 			TimeoutMS     int    `json:"timeout_ms"`
 			Enabled       *bool  `json:"enabled"`
 			ModelPatterns string `json:"model_patterns"`
+			FailoverGroup string `json:"failover_group"`
+			Priority      *int   `json:"priority"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 			writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "invalid_body")
@@ -1144,6 +1147,15 @@ func (s *Server) handleProviders(w http.ResponseWriter, r *http.Request) {
 			TimeoutMS:       payload.TimeoutMS,
 			Enabled:         enabled,
 			ModelPatterns:   strings.TrimSpace(payload.ModelPatterns),
+			FailoverGroup:   strings.TrimSpace(payload.FailoverGroup),
+			Priority:        store.DefaultProviderPriority,
+		}
+		if payload.Priority != nil && *payload.Priority > 0 {
+			provider.Priority = *payload.Priority
+		} else if before.Priority > 0 && payload.Priority == nil {
+			// Editing a provider without sending priority keeps the stored value, so a
+			// form that omits the field cannot silently reset a deliberate ordering.
+			provider.Priority = before.Priority
 		}
 		if err := s.db.UpsertProvider(r.Context(), provider); err != nil {
 			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "provider_save_failed")
@@ -1158,6 +1170,8 @@ func (s *Server) handleProviders(w http.ResponseWriter, r *http.Request) {
 				"timeout_ms":         provider.TimeoutMS,
 				"enabled":            provider.Enabled,
 				"model_patterns":     provider.ModelPatterns,
+				"failover_group":     provider.FailoverGroup,
+				"priority":           provider.Priority,
 			},
 		})
 	default:
@@ -1725,22 +1739,50 @@ func (s *Server) providersForModel(ctx context.Context, model string) ([]string,
 	}
 	normalized := strings.ToLower(strings.TrimSpace(model))
 	matches := []string{}
+	groups := map[string]bool{}
 	for _, p := range providers {
-		if p.ModelPatterns == "" {
+		if !providerServesModel(p, normalized) {
 			continue
 		}
-		for _, raw := range strings.Split(p.ModelPatterns, ",") {
-			pattern := strings.ToLower(strings.TrimSpace(raw))
-			if pattern == "" {
+		matches = append(matches, p.Name)
+		if g := strings.TrimSpace(p.FailoverGroup); g != "" {
+			groups[g] = true
+		}
+	}
+	// Anything in the same failover group is a candidate too, even if its patterns do
+	// not match this model. That is the point of the group: an operator declaring
+	// "these three serve the same traffic" should not also have to keep their globs
+	// identical for redundancy to exist. Group members are appended after the pattern
+	// matches, so an exact match is still preferred, and the list stays priority-ordered
+	// within each half because ListProviderConfigs already sorted it.
+	if len(groups) > 0 {
+		seen := map[string]bool{}
+		for _, name := range matches {
+			seen[name] = true
+		}
+		for _, p := range providers {
+			if seen[p.Name] || !groups[strings.TrimSpace(p.FailoverGroup)] {
 				continue
 			}
-			if matchGlob(pattern, normalized) {
-				matches = append(matches, p.Name)
-				break
-			}
+			matches = append(matches, p.Name)
+			seen[p.Name] = true
 		}
 	}
 	return matches, nil
+}
+
+// providerServesModel reports whether any of a provider's model globs match.
+func providerServesModel(p store.ProviderConfig, normalizedModel string) bool {
+	if p.ModelPatterns == "" {
+		return false
+	}
+	for _, raw := range strings.Split(p.ModelPatterns, ",") {
+		pattern := strings.ToLower(strings.TrimSpace(raw))
+		if pattern != "" && matchGlob(pattern, normalizedModel) {
+			return true
+		}
+	}
+	return false
 }
 
 // matchGlob implements a tiny case-insensitive glob with `*` as the wildcard.
@@ -1830,6 +1872,8 @@ func providerAuditJSON(provider store.ProviderConfig) string {
 		"timeout_ms":         provider.TimeoutMS,
 		"enabled":            provider.Enabled,
 		"model_patterns":     provider.ModelPatterns,
+		"failover_group":     provider.FailoverGroup,
+		"priority":           provider.Priority,
 	})
 }
 

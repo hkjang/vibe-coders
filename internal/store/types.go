@@ -136,8 +136,20 @@ type ProviderConfig struct {
 	TimeoutMS       int
 	Enabled         bool
 	ModelPatterns   string // comma-separated globs e.g. "claude-*,anthropic/*"
-	CreatedAt       time.Time
+	// FailoverGroup names a redundancy pool. Providers sharing a group fail over to one
+	// another regardless of whether their model_patterns overlap, which is what makes
+	// redundancy an explicit choice instead of a side effect of pattern collisions.
+	FailoverGroup string
+	// Priority orders attempts within a group, lowest first. Equal priorities fall back
+	// to provider name so the order stays deterministic across instances.
+	Priority  int
+	CreatedAt time.Time
 }
+
+// DefaultProviderPriority is the value given to a provider that does not set one, so
+// an unconfigured provider sorts after anything explicitly promoted and before anything
+// explicitly demoted.
+const DefaultProviderPriority = 100
 
 type ProviderPublic struct {
 	Name             string `json:"name"`
@@ -146,6 +158,8 @@ type ProviderPublic struct {
 	TimeoutMS        int    `json:"timeout_ms"`
 	Enabled          bool   `json:"enabled"`
 	ModelPatterns    string `json:"model_patterns"`
+	FailoverGroup    string `json:"failover_group"`
+	Priority         int    `json:"priority"`
 	CreatedAt        string `json:"created_at"`
 }
 

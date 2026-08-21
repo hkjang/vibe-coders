@@ -202,6 +202,7 @@ var apiEndpoints = []apiEndpoint{
 	{"/admin/routing/pattern-conflicts", []string{"get", "post"}, "routing", "Analyze provider model-pattern conflicts and preview routing", false},
 	{"/admin/routing/breaker-reset", []string{"post"}, "routing", "Reset a tripped provider circuit breaker", false},
 	{"/admin/routing/balancer", []string{"get", "post"}, "routing", "Provider load-balancer distribution (intent vs actual) and sticky session release", false},
+	{"/admin/routing/failover-drill", []string{"post"}, "routing", "Simulate provider failures and report who would serve the request", false},
 	{"/admin/routing/preview", []string{"get", "post"}, "routing", "Preview routing decision", false},
 	{"/admin/routing/decisions", []string{"get"}, "routing", "Routing decisions", false},
 	{"/admin/routing/decisions/{id}", []string{"get"}, "routing", "Routing decision detail", false},

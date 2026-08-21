@@ -17,6 +17,7 @@ type providerPatternSource struct {
 	Name          string
 	Enabled       bool
 	ModelPatterns string
+	FailoverGroup string
 }
 
 type providerPatternSummary struct {
@@ -42,8 +43,13 @@ type providerPatternSummary struct {
 type providerPatternCoverage struct {
 	Provider      string   `json:"provider"`
 	Patterns      []string `json:"patterns"`
+	FailoverGroup string   `json:"failover_group,omitempty"`
 	FailoverPeers []string `json:"failover_peers"`
 	FailoverReady bool     `json:"failover_ready"`
+	// PeerSource says how redundancy was established: an explicit failover_group, or an
+	// incidental pattern overlap. The distinction matters because the second kind can
+	// disappear the moment someone edits an unrelated glob.
+	PeerSource string `json:"peer_source,omitempty"`
 }
 
 type providerPatternCandidate struct {
@@ -161,6 +167,7 @@ func providerPatternSources(providers []store.ProviderPublic) []providerPatternS
 			Name:          provider.Name,
 			Enabled:       provider.Enabled,
 			ModelPatterns: provider.ModelPatterns,
+			FailoverGroup: provider.FailoverGroup,
 		})
 	}
 	return result
@@ -291,6 +298,19 @@ func analyzeProviderPatterns(sources []providerPatternSource, defaultProvider, m
 		}
 	}
 
+	// An explicit failover_group is redundancy the operator declared; a pattern overlap
+	// is redundancy that merely happens to exist. Group membership is collected first so
+	// it can be reported as the stronger of the two.
+	groupMembers := map[string][]string{}
+	for _, source := range sortedSources {
+		if !source.Enabled {
+			continue
+		}
+		if g := strings.TrimSpace(source.FailoverGroup); g != "" {
+			groupMembers[g] = append(groupMembers[g], source.Name)
+		}
+	}
+
 	coverage := make([]providerPatternCoverage, 0, len(sortedSources))
 	failoverReadyCount, failoverUncoveredCount := 0, 0
 	defaultProviderHasPatterns := false
@@ -302,11 +322,32 @@ func analyzeProviderPatterns(sources []providerPatternSource, defaultProvider, m
 		if source.Name == defaultProvider && len(patterns) > 0 {
 			defaultProviderHasPatterns = true
 		}
-		if len(patterns) == 0 {
+		group := strings.TrimSpace(source.FailoverGroup)
+		// A provider with no patterns is normally invisible to routing, but one that
+		// joined a group is reachable through its peers and belongs in the report.
+		if len(patterns) == 0 && group == "" {
 			continue
 		}
-		peers := make([]string, 0, len(failoverPeers[source.Name]))
+
+		peerSet := map[string]struct{}{}
+		peerSource := ""
+		for _, member := range groupMembers[group] {
+			if group == "" || member == source.Name {
+				continue
+			}
+			peerSet[member] = struct{}{}
+			peerSource = "failover_group"
+		}
 		for peer := range failoverPeers[source.Name] {
+			if _, exists := peerSet[peer]; !exists {
+				peerSet[peer] = struct{}{}
+				if peerSource == "" {
+					peerSource = "pattern_overlap"
+				}
+			}
+		}
+		peers := make([]string, 0, len(peerSet))
+		for peer := range peerSet {
 			peers = append(peers, peer)
 		}
 		sort.Strings(peers)
@@ -318,8 +359,10 @@ func analyzeProviderPatterns(sources []providerPatternSource, defaultProvider, m
 		coverage = append(coverage, providerPatternCoverage{
 			Provider:      source.Name,
 			Patterns:      patterns,
+			FailoverGroup: group,
 			FailoverPeers: peers,
 			FailoverReady: len(peers) > 0,
+			PeerSource:    peerSource,
 		})
 	}
 

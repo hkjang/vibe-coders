@@ -15807,12 +15807,14 @@ const adminHTML = `<!doctype html>
           '<div id="api-key-list">' + apiKeyTable(keys.api_keys || []) + '</div>'
         ) +
         cardWithID('settings-providers', '업스트림 프로바이더',
-          '<form class="inline-form" id="provider-form" autocomplete="off" style="grid-template-columns: 130px minmax(220px, 2fr) minmax(150px, 1fr) 110px minmax(170px, 1.5fr) auto auto;">' +
+          '<form class="inline-form" id="provider-form" autocomplete="off" style="grid-template-columns: 130px minmax(200px, 2fr) minmax(130px, 1fr) 100px minmax(150px, 1.5fr) minmax(120px, 1fr) 110px auto auto;">' +
             '<input id="provider-name" placeholder="이름" required>' +
             '<input id="provider-base-url" type="url" placeholder="Base URL" required>' +
             '<input id="provider-api-key" type="password" autocomplete="new-password" placeholder="API 키">' +
             '<input id="provider-timeout" type="number" min="1" placeholder="타임아웃 ms">' +
             '<input id="provider-patterns" placeholder="모델 패턴 (예: claude-*,anthropic/*)">' +
+            '<input id="provider-group" placeholder="폴백 그룹 (예: h200-pool)">' +
+            '<input id="provider-priority" type="number" min="1" placeholder="우선순위 (낮을수록 먼저)">' +
             '<button type="submit" id="provider-submit">저장</button>' +
             '<button type="button" id="provider-cancel" class="secondary" onclick="providerFormReset()">취소</button>' +
             '<div id="provider-edit-hint" class="muted" style="grid-column:1/-1;font-size:12px;margin-top:2px"></div>' +
@@ -16044,7 +16046,7 @@ const adminHTML = `<!doctype html>
         '<tr><td>1</td><td><code>X-Proxy-Provider</code> 헤더</td><td>클라이언트가 헤더로 provider 이름을 직접 지정</td><td><code>header</code></td></tr>' +
         '<tr><td>2</td><td><code>?provider=</code> 쿼리</td><td>URL 쿼리로 지정</td><td><code>query</code></td></tr>' +
         '<tr><td>3</td><td>라우팅 규칙</td><td>복잡도 기반 규칙이 provider를 지정</td><td><code>rule_provider</code></td></tr>' +
-        '<tr><td>4</td><td><strong>모델 패턴 자동 매칭</strong></td><td>요청 body의 <code>model</code>이 provider의 <code>model_patterns</code> 글롭에 매칭. <strong>여러 개가 매칭되면 이름 알파벳순으로 첫 번째</strong></td><td><code>model_pattern</code></td></tr>' +
+        '<tr><td>4</td><td><strong>모델 패턴 자동 매칭</strong></td><td>요청 body의 <code>model</code>이 provider의 <code>model_patterns</code> 글롭에 매칭. <strong>여러 개가 매칭되면 <code>priority</code> 오름차순</strong>(같으면 이름순)</strong></td><td><code>model_pattern</code></td></tr>' +
         '<tr><td>5</td><td>기본 provider</td><td>위 어디에도 걸리지 않으면 <code>UPSTREAM_PROVIDER</code></td><td><code>default</code></td></tr>' +
         '</tbody></table>' +
         '<div class="muted" style="font-size:12px;margin-top:6px">모델이 <code>auto</code> / <code>vibe/auto</code> 계열이면 그 앞에 Intelligent Routing이 <em>모델</em>을 먼저 고르고(<code>auto_router</code>), 그 결과 모델로 위 순서를 탑니다.</div>';
@@ -16052,15 +16054,15 @@ const adminHTML = `<!doctype html>
       const conditions = '<table><thead><tr><th>조건</th><th>내용</th><th>어긋나면</th></tr></thead><tbody>' +
         '<tr><td>provider 미고정</td><td><code>X-Proxy-Provider</code>·<code>?provider=</code>를 <strong>쓰지 않아야</strong> 함</td><td>고정한 곳으로만 보내고 폴백 안 함</td></tr>' +
         '<tr><td>민감정보 아님</td><td>프롬프트에서 PII·secret 위험이 탐지되지 않아야 함</td><td>데이터 보호를 위해 폴백 차단(<code>fallback_disabled:sensitive_data</code>)</td></tr>' +
-        '<tr><td><strong>매칭 provider 2개 이상</strong></td><td>같은 모델명에 <code>model_patterns</code>가 매칭되는 provider가 <strong>둘 이상</strong></td><td><strong>폴백 후보가 0개</strong> — 가장 흔한 원인</td></tr>' +
+        '<tr><td><strong>후보 2개 이상</strong></td><td>같은 <code>failover_group</code>에 속하거나, 같은 모델명에 <code>model_patterns</code>가 매칭되는 provider가 <strong>둘 이상</strong></td><td><strong>폴백 후보가 0개</strong> — 가장 흔한 원인</td></tr>' +
         '<tr><td>실패 유형이 해당</td><td>429 · 5xx · 타임아웃 · 연결 실패</td><td>401/403/404 같은 <strong>4xx는 폴백하지 않음</strong></td></tr>' +
         '</tbody></table>' +
         '<div class="banner warn" style="margin-top:10px"><strong>네 조건을 모두 만족해야 폴백이 일어납니다.</strong>' +
-        '<div class="muted" style="margin-top:4px">폴백 시도 순서는 provider <strong>이름 알파벳 오름차순</strong>입니다(지연시간·health 순이 아닙니다). 순서를 바꾸려면 provider 이름을 조정하세요.</div></div>';
+        '<div class="muted" style="margin-top:4px">시도 순서는 <code>priority</code> 오름차순(낮을수록 먼저, 기본 100), 같으면 이름순입니다 — 지연시간·health 순이 아닙니다. 이중화가 필요하면 provider들에 같은 <code>failover_group</code> 이름을 지정하세요. 그러면 <strong>모델 패턴이 겹치지 않아도</strong> 서로 폴백합니다.</div></div>';
 
       const pitfalls = '<table><thead><tr><th>증상</th><th>원인</th><th>해결</th></tr></thead><tbody>' +
-        '<tr><td>폴백이 전혀 안 됨</td><td>기본 provider에 <code>model_patterns</code>가 비어 있음. 폴백 후보는 <strong>패턴 매칭으로만</strong> 만들어짐</td><td>기본 provider에도 패턴을 넣고, 대체 provider와 <strong>겹치게</strong> 등록</td></tr>' +
-        '<tr><td>provider가 2개인데 폴백 안 됨</td><td>패턴이 서로 <strong>겹치지 않음</strong>(예: <code>gpt-*</code> / <code>claude-*</code>). 한 모델에는 항상 1개만 매칭</td><td>같은 모델을 양쪽에서 처리하려면 동일·중첩 패턴을 등록</td></tr>' +
+        '<tr><td>폴백이 전혀 안 됨</td><td>어느 provider에도 <code>failover_group</code>이 없고 패턴도 겹치지 않음</td><td>이중화할 provider들에 <strong>같은 <code>failover_group</code></strong>을 지정</td></tr>' +
+        '<tr><td>provider가 2개인데 폴백 안 됨</td><td>패턴이 서로 겹치지 않고(예: <code>gpt-*</code> / <code>claude-*</code>) 그룹도 없음</td><td>같은 <code>failover_group</code>으로 묶으면 패턴이 달라도 폴백됩니다</td></tr>' +
         '<tr><td>401/404인데 폴백 안 됨</td><td>키 오류·모델 없음은 다른 곳으로 보내도 같은 결과라 폴백 대상이 아님</td><td>키와 모델명을 직접 수정</td></tr>' +
         '<tr><td>SDK에서 고정했더니 폴백 사라짐</td><td>클라이언트가 <code>X-Proxy-Provider</code>를 보내는 중</td><td>헤더를 빼고 모델 패턴 자동 라우팅에 맡기기</td></tr>' +
         '<tr><td>민감한 요청만 폴백 안 됨</td><td>PII·secret 탐지로 의도적으로 차단됨</td><td>정상 동작. 필요하면 프롬프트에서 민감정보 제거</td></tr>' +
@@ -16088,6 +16090,8 @@ const adminHTML = `<!doctype html>
 
       const resilience =
         '<table><thead><tr><th>장치</th><th>하는 일</th><th>설정</th></tr></thead><tbody>' +
+        '<tr><td><strong>health 강등</strong></td><td>health score가 임계 미만인 provider를 후보 <strong>맨 뒤로</strong> 밀되 제외하지는 않습니다(후행 지표라 시도해야 회복을 알 수 있음). 강등되면 응답에 <code>X-Health-Demoted</code>가 실립니다</td><td><code>UPSTREAM_HEALTH_DEMOTE_THRESHOLD</code>(기본 50, 0이면 끔)</td></tr>' +
+        '<tr><td><strong>폴백 리허설</strong></td><td>장애 <strong>전에</strong> 이중화를 확인합니다. 실제 후보 목록을 걸으며 지정한 provider를 실패 처리하고 누가 요청을 받는지 보고 — 업스트림 호출 없음</td><td>프로바이더 화면의 <code>폴백 리허설</code> 버튼 · <code>POST /admin/routing/failover-drill</code></td></tr>' +
         '<tr><td><strong>회로 차단기</strong></td><td>연속 실패한 provider를 폴백 후보에서 <strong>자동 제외</strong>. 유지 시간이 지나면 요청 1건만 흘려 복구를 확인합니다. 없으면 죽은 provider를 매 요청 재호출하며 타임아웃을 전부 태웁니다</td><td><code>UPSTREAM_BREAKER_ENABLED</code>(기본 on)<br><code>UPSTREAM_BREAKER_THRESHOLD</code>(5회)<br><code>UPSTREAM_BREAKER_COOLDOWN</code>(30초)</td></tr>' +
         '<tr><td><strong>헤더 대기 상한</strong></td><td>업스트림 <strong>응답 헤더</strong>를 기다리는 시간만 제한. 긴 스트리밍을 자르지 않으면서 먹통 provider를 빨리 끊어 폴백을 앞당깁니다</td><td><code>UPSTREAM_RESPONSE_HEADER_TIMEOUT</code>(60초)</td></tr>' +
         '<tr><td><strong>폴백 예산</strong></td><td>대체 provider 시도에 쓸 <strong>총 시간</strong> 상한. 소진되면 남은 후보를 돌지 않고 마지막 결과를 반환합니다(<code>failover_budget_exhausted</code>)</td><td><code>UPSTREAM_FAILOVER_BUDGET</code>(기본 무제한)<br>요청별 <code>X-Failover-Budget-MS</code></td></tr>' +
@@ -16133,6 +16137,59 @@ const adminHTML = `<!doctype html>
           '<button class="secondary" type="button" onclick="closeModal();document.getElementById(\'settings-providers\').scrollIntoView({behavior:\'smooth\'})">프로바이더 설정으로</button>' +
         '</div>';
       openModal('업스트림 프로바이더 라우팅 · 폴백 동작 설명', html);
+    }
+    // A drill answers "if this provider dies, what happens?" before it dies. It walks
+    // the same candidate list the proxy would, marks the chosen providers as failed and
+    // reports who ends up serving — without sending a single upstream request.
+    window.runFailoverDrill = async () => {
+      const model = (document.getElementById('provider-pattern-model') || {}).value || '';
+      if (!model.trim()) { toast('리허설할 모델명을 먼저 입력하세요.'); return; }
+      let report;
+      try { report = await api('/admin/routing/failover-drill', { method: 'POST', body: JSON.stringify({ model: model.trim(), fail: [] }) }); }
+      catch (e) { toast('폴백 리허설 실패: ' + e.message); return; }
+      openModal('폴백 리허설 — ' + model.trim(), failoverDrillHTML(report, model.trim()));
+    };
+    window.runFailoverDrillWith = async (model, fail) => {
+      let report;
+      try { report = await api('/admin/routing/failover-drill', { method: 'POST', body: JSON.stringify({ model, fail }) }); }
+      catch (e) { toast('폴백 리허설 실패: ' + e.message); return; }
+      document.getElementById('modal-body').innerHTML = failoverDrillHTML(report, model);
+    };
+    function failoverDrillHTML(report, model) {
+      report = report || {};
+      const outcomeLabel = { served: '정상 처리됨', exhausted: '모든 후보 소진 — 요청 실패', no_redundancy: '이중화 없음' };
+      const outcomeClass = { served: '', exhausted: 'error', no_redundancy: 'warn' };
+      const stepLabel = {
+        served: '✅ 처리',
+        simulated_failure: '💥 실패(리허설 지정)',
+        skipped_breaker_open: '⛔ 건너뜀 — 회로 차단기 열림',
+      };
+      const candidates = report.candidates || [];
+      const failed = report.failed_input || [];
+      const steps = (report.steps || []).map(st =>
+        '<tr><td><strong>' + escapeHTML(st.provider) + '</strong></td>' +
+        '<td>' + escapeHTML(stepLabel[st.outcome] || st.outcome) + '</td>' +
+        '<td class="muted">' + escapeHTML(st.detail || '') + '</td></tr>').join('');
+      // One button per candidate: the common question is "what if THIS one dies?".
+      const scenarios = candidates.map(name => {
+        const next = failed.includes(name) ? failed.filter(x => x !== name) : failed.concat([name]);
+        return '<button type="button" class="secondary" style="margin:0 6px 6px 0" ' +
+          'onclick="runFailoverDrillWith(\'' + escapeAttr(model) + '\', ' + escapeAttr(JSON.stringify(next)) + ')">' +
+          (failed.includes(name) ? '↩︎ ' + escapeHTML(name) + ' 복구' : '💥 ' + escapeHTML(name) + ' 중단') + '</button>';
+      }).join('');
+
+      return '<div class="banner ' + (outcomeClass[report.outcome] || '') + '">' +
+          '<strong>' + escapeHTML(outcomeLabel[report.outcome] || report.outcome || '') + '</strong>' +
+          (report.served_by ? ' <span class="muted">— ' + escapeHTML(report.served_by) + ' 가 처리합니다</span>' : '') +
+          (report.advice ? '<div class="muted" style="margin-top:6px">' + escapeHTML(report.advice) + '</div>' : '') +
+        '</div>' +
+        '<div style="margin:14px 0 6px"><strong>시도 순서</strong> <span class="muted" style="font-size:12px">priority 오름차순 · health 저조 provider는 뒤로 밀림</span></div>' +
+        '<table><thead><tr><th>Provider</th><th>결과</th><th>사유</th></tr></thead><tbody>' + steps + '</tbody></table>' +
+        ((report.health_demoted || []).length
+          ? '<div class="muted" style="font-size:12px;margin-top:8px">health 강등: <code>' + escapeHTML(report.health_demoted.join(', ')) + '</code></div>' : '') +
+        '<div style="margin-top:16px"><strong>시나리오 바꾸기</strong>' +
+          '<div class="muted" style="font-size:12px;margin:4px 0 8px">provider를 중단시켜 실제 장애 상황을 재현합니다. 업스트림 호출은 발생하지 않습니다.</div>' +
+          scenarios + '</div>';
     }
     function providerPatternDiagnostics(report) {
       report = report || {};
@@ -16205,14 +16262,19 @@ const adminHTML = `<!doctype html>
         : '';
       const coverageHTML = coverage.length
         ? '<div style="padding:0 14px 10px">' +
-            '<div class="muted" style="font-size:12px;margin-bottom:6px">폴백 커버리지 — 패턴이 겹치는 provider끼리만 서로 폴백됩니다.</div>' +
-            coverage.map(c =>
-              '<span class="pill" style="margin:0 4px 4px 0">' +
-                (c.failover_ready ? '✅ ' : '⚠️ ') + escapeHTML(c.provider) +
+            '<div class="muted" style="font-size:12px;margin-bottom:6px">폴백 커버리지 — ✅ <strong>폴백 그룹</strong>으로 명시 선언 · 🟡 패턴이 우연히 겹쳐 생긴 것 · ⚠️ 폴백 상대 없음. 이중화가 필요하면 같은 <code>폴백 그룹</code> 이름을 지정하세요.</div>' +
+            coverage.map(c => {
+              const declared = c.peer_source === 'failover_group';
+              const via = declared
+                ? ' <span class="muted">(그룹 ' + escapeHTML(c.failover_group || '') + ')</span>'
+                : ' <span class="muted">(패턴 겹침 — 글롭을 고치면 사라질 수 있음)</span>';
+              return '<span class="pill" style="margin:0 4px 4px 0">' +
+                (c.failover_ready ? (declared ? '✅ ' : '🟡 ') : '⚠️ ') + escapeHTML(c.provider) +
                 (c.failover_ready
-                  ? ' <span class="muted">→ ' + escapeHTML((c.failover_peers || []).join(', ')) + '</span>'
+                  ? ' <span class="muted">→ ' + escapeHTML((c.failover_peers || []).join(', ')) + '</span>' + via
                   : ' <span class="muted">폴백 상대 없음</span>') +
-              '</span>').join('') +
+              '</span>';
+            }).join('') +
           '</div>'
         : '';
       const uncoveredBadge = uncovered.length
@@ -16234,6 +16296,7 @@ const adminHTML = `<!doctype html>
           '<span style="flex:1"></span>' +
           '<input id="provider-pattern-model" aria-label="모델 경로 확인" placeholder="모델명 경로 확인" value="' + escapeAttr(simulation ? simulation.model : '') + '" style="width:210px">' +
           '<button type="button" class="secondary" onclick="runProviderPatternSimulation()">경로 확인</button>' +
+          '<button type="button" class="secondary" onclick="runFailoverDrill()">폴백 리허설</button>' +
         '</div>' +
         '<div style="padding:0 14px 10px; display:flex; gap:8px; flex-wrap:wrap; align-items:center">' + orderHTML + '</div>' +
         defaultWarning +
@@ -16256,6 +16319,8 @@ const adminHTML = `<!doctype html>
         '<th data-sort="str">키</th>' +
         '<th data-sort="num">타임아웃</th>' +
         '<th>모델 패턴</th>' +
+        '<th data-sort="str">폴백 그룹</th>' +
+        '<th data-sort="num">우선순위</th>' +
         '<th data-sort="str">상태</th>' +
         '<th>동작</th></tr></thead><tbody>' +
         rows.map(r => '<tr><td>' + escapeHTML(r.name) + '</td><td>' + escapeHTML(r.base_url) + '</td>' +
@@ -16263,6 +16328,8 @@ const adminHTML = `<!doctype html>
           '<td data-num="' + (r.timeout_ms || 0) + '">' + fmt(r.timeout_ms) + ' ms</td>' +
           '<td>' + (r.model_patterns ? '<span class="pill">' + escapeHTML(r.model_patterns) + '</span>' : '<span class="muted">자동 라우팅 없음</span>') +
             (conflictCounts[r.name] ? ' <span class="status error">충돌 ' + fmt(conflictCounts[r.name]) + '</span>' : '') + '</td>' +
+          '<td>' + (r.failover_group ? '<span class="pill">' + escapeHTML(r.failover_group) + '</span>' : '<span class="muted">없음</span>') + '</td>' +
+          '<td data-num="' + (r.priority || 100) + '">' + fmt(r.priority || 100) + '</td>' +
           '<td><span class="status ' + (r.enabled ? '' : 'error') + '">' + (r.enabled ? '사용' : '중지') + '</span></td>' +
           '<td style="white-space:nowrap">' +
             '<button class="secondary" type="button" onclick="editProvider(\'' + escapeAttr(r.name) + '\')">수정</button> ' +
@@ -16647,6 +16714,8 @@ const adminHTML = `<!doctype html>
         api_key: document.getElementById('provider-api-key').value.trim(),
         timeout_ms: timeout,
         model_patterns: document.getElementById('provider-patterns').value.trim(),
+        failover_group: document.getElementById('provider-group').value.trim(),
+        priority: Number(document.getElementById('provider-priority').value || 0) || null,
         // Editing an existing provider keeps its current on/off state; a brand-new one starts enabled.
         enabled: existing ? existing.enabled !== false : true
       };
@@ -16683,6 +16752,12 @@ const adminHTML = `<!doctype html>
       if (submit) submit.textContent = '저장';
       const hint = document.getElementById('provider-edit-hint');
       if (hint) hint.textContent = '';
+      // form.reset() restores initial values, not blanks, so clear explicitly — a
+      // leftover group or priority would silently attach to the next new provider.
+      ['provider-group', 'provider-priority'].forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) el.value = '';
+      });
       scheduleProviderPatternPreview();
     };
     // editProvider loads a registered provider's fields into the form for an in-place update.
@@ -16698,6 +16773,8 @@ const adminHTML = `<!doctype html>
       keyEl.placeholder = '비워두면 기존 키 유지' + (p.api_key_configured ? '' : ' (현재 미설정)');
       document.getElementById('provider-timeout').value = p.timeout_ms || '';
       document.getElementById('provider-patterns').value = p.model_patterns || '';
+      document.getElementById('provider-group').value = p.failover_group || '';
+      document.getElementById('provider-priority').value = p.priority || '';
       document.getElementById('provider-submit').textContent = '수정 저장';
       const hint = document.getElementById('provider-edit-hint');
       if (hint) hint.textContent = '"' + p.name + '" 수정 중 — 이름은 고정입니다. 새로 등록하려면 [취소]를 누르세요.';

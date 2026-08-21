@@ -165,6 +165,10 @@ type UpstreamConfig struct {
 	// agentic client's turns do not bounce between nodes and lose their prefix cache.
 	StickySessions bool
 	StickyTTL      time.Duration
+	// HealthDemoteThreshold moves a provider scoring below it to the back of the
+	// candidate list. It never removes one — health is a lagging average, and a
+	// recovered provider has to be tried to be observed recovering. Zero disables.
+	HealthDemoteThreshold int
 	// DefaultModel is the concrete model vibe/auto resolves to when set, so deployments whose
 	// upstream is not OpenAI don't fall back to the built-in gpt-4.1* names. Empty → built-in list.
 	DefaultModel string
@@ -373,6 +377,7 @@ func Load() (Config, error) {
 			LoadBalance:           strings.ToLower(strings.TrimSpace(getEnv("UPSTREAM_LOAD_BALANCE", "first"))),
 			StickySessions:        boolEnv("UPSTREAM_STICKY_SESSIONS", true),
 			StickyTTL:             durationEnv("UPSTREAM_STICKY_TTL", 30*time.Minute),
+			HealthDemoteThreshold: intEnv("UPSTREAM_HEALTH_DEMOTE_THRESHOLD", 50),
 			DefaultModel:          strings.TrimSpace(os.Getenv("UPSTREAM_DEFAULT_MODEL")),
 		},
 		Database: databaseConfig(),

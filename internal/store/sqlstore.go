@@ -1214,10 +1214,18 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 			timeout_ms INTEGER NOT NULL,
 			enabled INTEGER NOT NULL,
 			model_patterns TEXT,
+			failover_group TEXT,
+			priority INTEGER NOT NULL DEFAULT 100,
 			created_at TEXT NOT NULL
 		)`,
 		// Idempotent ALTERs for legacy installations of provider_configs
 		`ALTER TABLE provider_configs ADD COLUMN model_patterns TEXT`,
+		// failover_group makes redundancy an explicit declaration. Until now the only way
+		// to get failover was for two providers' model_patterns to happen to overlap, so
+		// the most common setup (a default provider plus one vendor-specific one) silently
+		// had none. priority orders the group; ties fall back to name for determinism.
+		`ALTER TABLE provider_configs ADD COLUMN failover_group TEXT`,
+		`ALTER TABLE provider_configs ADD COLUMN priority INTEGER NOT NULL DEFAULT 100`,
 		`CREATE TABLE IF NOT EXISTS admin_audit_logs (
 			id TEXT PRIMARY KEY,
 			admin_id TEXT,
@@ -2180,15 +2188,20 @@ func (s *SQLStore) UpsertProvider(ctx context.Context, provider ProviderConfig) 
 	if provider.CreatedAt.IsZero() {
 		provider.CreatedAt = time.Now().UTC()
 	}
-	query := s.bind(`INSERT INTO provider_configs (name, base_url, encrypted_api_key, timeout_ms, enabled, model_patterns, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
+	if provider.Priority <= 0 {
+		provider.Priority = DefaultProviderPriority
+	}
+	query := s.bind(`INSERT INTO provider_configs (name, base_url, encrypted_api_key, timeout_ms, enabled, model_patterns, failover_group, priority, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(name) DO UPDATE SET
 			base_url = excluded.base_url,
 			encrypted_api_key = excluded.encrypted_api_key,
 			timeout_ms = excluded.timeout_ms,
 			enabled = excluded.enabled,
-			model_patterns = excluded.model_patterns`)
-	_, err := s.db.ExecContext(ctx, query, provider.Name, provider.BaseURL, provider.EncryptedAPIKey, provider.TimeoutMS, boolInt(provider.Enabled), provider.ModelPatterns, formatTime(provider.CreatedAt))
+			model_patterns = excluded.model_patterns,
+			failover_group = excluded.failover_group,
+			priority = excluded.priority`)
+	_, err := s.db.ExecContext(ctx, query, provider.Name, provider.BaseURL, provider.EncryptedAPIKey, provider.TimeoutMS, boolInt(provider.Enabled), provider.ModelPatterns, provider.FailoverGroup, provider.Priority, formatTime(provider.CreatedAt))
 	return err
 }
 
@@ -2196,10 +2209,10 @@ func (s *SQLStore) GetProvider(ctx context.Context, name string) (ProviderConfig
 	var provider ProviderConfig
 	var enabled int
 	var createdAt string
-	var modelPatterns sql.NullString
-	err := s.db.QueryRowContext(ctx, s.bind(`SELECT name, base_url, COALESCE(encrypted_api_key, ''), timeout_ms, enabled, model_patterns, created_at
+	var modelPatterns, failoverGroup sql.NullString
+	err := s.db.QueryRowContext(ctx, s.bind(`SELECT name, base_url, COALESCE(encrypted_api_key, ''), timeout_ms, enabled, model_patterns, COALESCE(failover_group, ''), COALESCE(priority, ?), created_at
 		FROM provider_configs
-		WHERE name = ?`), name).Scan(&provider.Name, &provider.BaseURL, &provider.EncryptedAPIKey, &provider.TimeoutMS, &enabled, &modelPatterns, &createdAt)
+		WHERE name = ?`), DefaultProviderPriority, name).Scan(&provider.Name, &provider.BaseURL, &provider.EncryptedAPIKey, &provider.TimeoutMS, &enabled, &modelPatterns, &failoverGroup, &provider.Priority, &createdAt)
 	if err == sql.ErrNoRows {
 		return ProviderConfig{}, false, nil
 	}
@@ -2208,6 +2221,10 @@ func (s *SQLStore) GetProvider(ctx context.Context, name string) (ProviderConfig
 	}
 	provider.Enabled = enabled == 1
 	provider.ModelPatterns = modelPatterns.String
+	provider.FailoverGroup = failoverGroup.String
+	if provider.Priority <= 0 {
+		provider.Priority = DefaultProviderPriority
+	}
 	if parsed, err := time.Parse(time.RFC3339Nano, createdAt); err == nil {
 		provider.CreatedAt = parsed
 	}
@@ -2215,7 +2232,7 @@ func (s *SQLStore) GetProvider(ctx context.Context, name string) (ProviderConfig
 }
 
 func (s *SQLStore) ListProviders(ctx context.Context) ([]ProviderPublic, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT name, base_url, COALESCE(encrypted_api_key, ''), timeout_ms, enabled, COALESCE(model_patterns, ''), created_at
+	rows, err := s.db.QueryContext(ctx, `SELECT name, base_url, COALESCE(encrypted_api_key, ''), timeout_ms, enabled, COALESCE(model_patterns, ''), COALESCE(failover_group, ''), COALESCE(priority, 100), created_at
 		FROM provider_configs
 		ORDER BY name ASC`)
 	if err != nil {
@@ -2228,11 +2245,14 @@ func (s *SQLStore) ListProviders(ctx context.Context) ([]ProviderPublic, error) 
 		var provider ProviderPublic
 		var encryptedAPIKey string
 		var enabled int
-		if err := rows.Scan(&provider.Name, &provider.BaseURL, &encryptedAPIKey, &provider.TimeoutMS, &enabled, &provider.ModelPatterns, &provider.CreatedAt); err != nil {
+		if err := rows.Scan(&provider.Name, &provider.BaseURL, &encryptedAPIKey, &provider.TimeoutMS, &enabled, &provider.ModelPatterns, &provider.FailoverGroup, &provider.Priority, &provider.CreatedAt); err != nil {
 			return nil, err
 		}
 		provider.APIKeyConfigured = encryptedAPIKey != ""
 		provider.Enabled = enabled == 1
+		if provider.Priority <= 0 {
+			provider.Priority = DefaultProviderPriority
+		}
 		result = append(result, provider)
 	}
 	if result == nil {
@@ -2244,10 +2264,13 @@ func (s *SQLStore) ListProviders(ctx context.Context) ([]ProviderPublic, error) 
 // ListProviderConfigs returns the full provider rows (with model_patterns) used by the
 // routing layer. Caller is responsible for decrypting api keys via the secret cipher.
 func (s *SQLStore) ListProviderConfigs(ctx context.Context) ([]ProviderConfig, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT name, base_url, COALESCE(encrypted_api_key, ''), timeout_ms, enabled, COALESCE(model_patterns, ''), created_at
+	// Ordered by priority first: dialUpstream walks this list in order, so the operator's
+	// declared preference has to be the list order rather than something re-sorted later.
+	// Name breaks ties, keeping the sequence identical on every instance.
+	rows, err := s.db.QueryContext(ctx, `SELECT name, base_url, COALESCE(encrypted_api_key, ''), timeout_ms, enabled, COALESCE(model_patterns, ''), COALESCE(failover_group, ''), COALESCE(priority, 100), created_at
 		FROM provider_configs
 		WHERE enabled = 1
-		ORDER BY name ASC`)
+		ORDER BY COALESCE(priority, 100) ASC, name ASC`)
 	if err != nil {
 		return nil, err
 	}
@@ -2257,10 +2280,13 @@ func (s *SQLStore) ListProviderConfigs(ctx context.Context) ([]ProviderConfig, e
 		var p ProviderConfig
 		var enabled int
 		var createdAt string
-		if err := rows.Scan(&p.Name, &p.BaseURL, &p.EncryptedAPIKey, &p.TimeoutMS, &enabled, &p.ModelPatterns, &createdAt); err != nil {
+		if err := rows.Scan(&p.Name, &p.BaseURL, &p.EncryptedAPIKey, &p.TimeoutMS, &enabled, &p.ModelPatterns, &p.FailoverGroup, &p.Priority, &createdAt); err != nil {
 			return nil, err
 		}
 		p.Enabled = enabled == 1
+		if p.Priority <= 0 {
+			p.Priority = DefaultProviderPriority
+		}
 		if parsed, err := time.Parse(time.RFC3339Nano, createdAt); err == nil {
 			p.CreatedAt = parsed
 		}

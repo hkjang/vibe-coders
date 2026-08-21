@@ -480,3 +480,103 @@ func balanceIndex(shares []store.ProviderModelShare) float64 {
 	}
 	return float64(minReq) / float64(maxReq)
 }
+
+// handleRoutingFailoverDrill answers "if this provider dies right now, what happens?"
+// without waiting for it to actually die.
+//
+// Every other diagnostic here describes configuration; this one walks the same
+// candidate list dialUpstream would walk, marks the providers the operator names as
+// failed, and reports who ends up serving the request. It sends no upstream traffic
+// and mutates nothing — a drill that could take down production would never be run.
+func (s *Server) handleRoutingFailoverDrill(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	if r.Method != http.MethodPost {
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
+	var payload struct {
+		Model string   `json:"model"`
+		Fail  []string `json:"fail"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "invalid_body")
+		return
+	}
+	model := strings.TrimSpace(payload.Model)
+	if model == "" {
+		writeOpenAIError(w, http.StatusBadRequest, "model is required", "invalid_request_error", "missing_model")
+		return
+	}
+
+	candidates, err := s.providersForModel(r.Context(), model)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "drill_failed")
+		return
+	}
+	if len(candidates) == 0 {
+		// No pattern match: the request would land on the default provider, which is
+		// never a failover candidate. That is the answer, and it is usually the problem.
+		candidates = []string{s.cfg.Upstream.Provider}
+	}
+
+	demoted := []string{}
+	if len(candidates) > 1 {
+		candidates, demoted = s.demoteUnhealthyCandidates(r.Context(), candidates)
+	}
+
+	breakerEnabled, threshold, cooldown := s.breakerConfig()
+	now := time.Now()
+	failed := map[string]bool{}
+	for _, name := range payload.Fail {
+		failed[strings.TrimSpace(name)] = true
+	}
+
+	type step struct {
+		Provider string `json:"provider"`
+		Outcome  string `json:"outcome"` // served | simulated_failure | skipped_breaker_open | skipped_health
+		Detail   string `json:"detail,omitempty"`
+	}
+	steps := make([]step, 0, len(candidates))
+	servedBy := ""
+	for _, name := range candidates {
+		switch {
+		case breakerEnabled && !s.breakers.peek(name, threshold, cooldown, now):
+			steps = append(steps, step{Provider: name, Outcome: "skipped_breaker_open",
+				Detail: "회로 차단기가 열려 있어 시도하지 않습니다"})
+		case failed[name]:
+			steps = append(steps, step{Provider: name, Outcome: "simulated_failure",
+				Detail: "드릴에서 실패로 지정됨"})
+		default:
+			steps = append(steps, step{Provider: name, Outcome: "served"})
+			servedBy = name
+		}
+		if servedBy != "" {
+			break
+		}
+	}
+
+	outcome := "served"
+	advice := ""
+	if servedBy == "" {
+		outcome = "exhausted"
+		advice = "모든 후보가 실패했습니다. 같은 failover_group 에 provider 를 더 넣으면 이 시나리오를 견딥니다."
+	} else if len(steps) == 1 && len(candidates) == 1 {
+		outcome = "no_redundancy"
+		advice = "후보가 1개뿐이라 이 provider 가 죽으면 폴백이 없습니다. failover_group 을 지정하세요."
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"model":           model,
+		"candidates":      candidates,
+		"failed_input":    payload.Fail,
+		"health_demoted":  demoted,
+		"steps":           steps,
+		"served_by":       servedBy,
+		"outcome":         outcome,
+		"advice":          advice,
+		"breaker_enabled": breakerEnabled,
+	})
+}

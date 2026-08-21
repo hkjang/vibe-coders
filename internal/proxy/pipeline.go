@@ -456,6 +456,17 @@ func (rc *requestPipeline) stepUpstream() bool {
 					failoverCandidates = append(failoverCandidates, name)
 				}
 			}
+			// A degraded-but-answering provider still costs a full request and its
+			// latency before failover. Push it to the back rather than dropping it.
+			var demoted []string
+			failoverCandidates, demoted = s.demoteUnhealthyCandidates(r.Context(), failoverCandidates)
+			if len(demoted) > 0 {
+				// Say so: reordering that cannot be seen is exactly the opacity this
+				// gateway's routing work has been undoing.
+				w.Header().Set("X-Health-Demoted", strings.Join(demoted, ","))
+				slog.Info("health demoted failover candidates",
+					"demoted", demoted, "threshold", s.healthDemoteThreshold(), "trace_id", traceID)
+			}
 		}
 	}
 

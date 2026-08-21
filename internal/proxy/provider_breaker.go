@@ -299,3 +299,56 @@ func (b *providerBreakers) peek(name string, threshold int, cooldown time.Durati
 		return true
 	}
 }
+
+// Health-based demotion.
+//
+// The circuit breaker removes a provider that is failing outright. It says nothing
+// about one that is merely degraded — slow, or returning the occasional 5xx — which
+// still answers and so keeps its place at the front of the queue, spending a real
+// request and its latency before failing over.
+//
+// Provider health scores already measure exactly that, but until now they were
+// computed and displayed without influencing a single routing decision.
+//
+// Demotion, not re-sorting: priority is the operator's declared intent and must keep
+// deciding the order. A provider below the threshold is moved to the BACK of the
+// candidate list, preserving relative order within the healthy and demoted halves. It
+// is never dropped — health is a lagging average, and a provider that has recovered
+// has to be tried to be seen recovering.
+func (s *Server) healthDemoteThreshold() int {
+	t := s.cfg.Upstream.HealthDemoteThreshold
+	if t < 0 {
+		return 0
+	}
+	if t > 100 {
+		return 100
+	}
+	return t
+}
+
+// demoteUnhealthyCandidates returns the candidates reordered so that any provider
+// scoring below the threshold is tried last, along with the names it demoted so the
+// decision can be reported rather than silently applied.
+func (s *Server) demoteUnhealthyCandidates(ctx context.Context, candidates []string) ([]string, []string) {
+	threshold := s.healthDemoteThreshold()
+	if threshold <= 0 || len(candidates) < 2 {
+		return candidates, nil
+	}
+	health := s.providerHealthMap(ctx)
+	healthy := make([]string, 0, len(candidates))
+	demoted := make([]string, 0, len(candidates))
+	for _, name := range candidates {
+		score, seen := health[name]
+		// No traffic in the window means no evidence of degradation; treat as healthy
+		// so a fresh or idle provider is not demoted for lack of a track record.
+		if seen && score.Score < threshold {
+			demoted = append(demoted, name)
+			continue
+		}
+		healthy = append(healthy, name)
+	}
+	if len(demoted) == 0 {
+		return candidates, nil
+	}
+	return append(healthy, demoted...), demoted
+}

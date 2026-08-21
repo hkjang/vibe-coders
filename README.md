@@ -278,6 +278,7 @@ $env:PROXY_API_KEYS="dev:dev-proxy-key:alice:platform,team:team-proxy-key:bob:ba
 | `UPSTREAM_LOAD_BALANCE` | `first` | 같은 모델에 여러 provider가 매칭될 때 `first`(이름순 첫 번째) · `round_robin`(단일 인스턴스) · `session_hash`(다중 인스턴스 권장 — 세션 키에서 provider를 계산해 공유 저장소 없이 모든 인스턴스가 같은 답) |
 | `UPSTREAM_STICKY_SESSIONS` | `true` | 세션을 처음 처리한 provider에 고정(에이전트 대화의 prefix/KV 캐시 보존) |
 | `UPSTREAM_STICKY_TTL` | `30m` | 세션 고정 유지 시간 |
+| `UPSTREAM_HEALTH_DEMOTE_THRESHOLD` | `50` | health score가 이 값 미만인 provider를 폴백 후보 **맨 뒤로** 강등(제외하지는 않음). `0`이면 비활성 |
 | `DB_DRIVER` | `sqlite` | `sqlite` 또는 `postgres` |
 | `DB_DSN` | `data/gateway.db` | SQLite 파일 경로 |
 | `POSTGRES_DSN` / `DATABASE_URL` | 없음 | 있으면 PostgreSQL 사용 |
@@ -648,7 +649,7 @@ curl.exe http://localhost:8080/admin/providers `
 
 1. 클라이언트가 `X-Proxy-Provider` · `?provider=` 로 provider 를 **고정하지 않음**
 2. 프롬프트에서 PII·secret 위험이 탐지되지 않음
-3. **같은 모델에 매칭되는 provider 가 2개 이상** — 폴백 후보는 `model_patterns` 매칭으로만 만들어지므로, 패턴이 비었거나 서로 겹치지 않으면 폴백 후보가 0개입니다
+3. **폴백 후보가 2개 이상** — 같은 `failover_group` 에 속하거나, 같은 모델명에 `model_patterns` 가 매칭되는 provider 가 둘 이상. `failover_group` 을 지정하면 패턴이 겹치지 않아도 서로 폴백하며, 시도 순서는 `priority`(낮을수록 먼저, 기본 100)로 정합니다
 4. 실패가 429 · 5xx · 타임아웃 · 연결 실패 (4xx 는 폴백하지 않음)
 
 응답 헤더로 결과를 바로 확인할 수 있습니다 — `X-Provider`(실제 응답 provider), `X-Route-Reason`, `X-Route-Detail`, 그리고 폴백이 일어났을 때만 나오는 `X-Failover-From` · `X-Failover-Reason` · `X-Failover-Path`.
@@ -658,6 +659,8 @@ curl.exe http://localhost:8080/admin/providers `
 같은 모델을 여러 provider가 서비스한다면 `UPSTREAM_LOAD_BALANCE=round_robin` 으로 **세션 단위 분산**이 됩니다. 세션은 세션 헤더 → body 필드 → **대화 프리픽스 해시** → 추론 세션 순으로 식별하며, qwen code 처럼 세션 식별자를 보내지 않는 에이전트도 대화별로 구분돼 분산되고 대화 안에서는 같은 provider로 고정됩니다. 분산이 실제로 됐는지는 응답 헤더(`X-Route-Reason`·`X-Session-Affinity`)와 라우팅 탭의 `로드밸런싱 · 세션 고정` 패널(균형도·intent vs actual), `GET /admin/routing/balancer` 로 확인합니다.
 
 게이트웨이를 **2대 이상** 운영한다면 `session_hash` 를 쓰세요. `round_robin` 은 회전 커서가 프로세스 메모리에 있어 인스턴스마다 독립적으로 돌기 때문에 같은 대화가 다른 인스턴스로 들어가면 세션 고정이 깨집니다. `session_hash` 는 rendezvous 해시로 provider를 계산하므로 조율 없이 모든 인스턴스가 일치하고, provider가 빠질 때 그 provider의 세션만 이동합니다.
+
+장애 전에 이중화를 확인하려면 `POST /admin/routing/failover-drill` (또는 프로바이더 화면의 `폴백 리허설` 버튼)으로 특정 provider를 가상 중단시켜 누가 요청을 처리하는지 시뮬레이션할 수 있습니다 — 업스트림 호출 없이 동작합니다.
 
 > 전체 규칙·구성 레시피·트러블슈팅은 **[docs/ROUTING_GUIDE.md](docs/ROUTING_GUIDE.md)** 를 참고하세요. 어드민에서는 설정 탭 → 업스트림 프로바이더 → `📖 라우팅 · 폴백 동작 설명 열기` 버튼으로 같은 내용을 볼 수 있고, 같은 화면의 **폴백 커버리지** 표시가 provider 별로 폴백 상대가 있는지 알려줍니다.
 

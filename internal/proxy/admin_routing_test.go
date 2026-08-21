@@ -721,3 +721,309 @@ func TestFailoverBudgetStopsWalkingCandidates(t *testing.T) {
 		t.Fatalf("expected the primary to be dialled on both requests, got %d", primaryHits.Load())
 	}
 }
+
+// The failover_group is the fix for this gateway's oldest trap: candidates used to come
+// only from model_patterns overlap, so the most common setup — a default provider plus
+// one vendor-specific provider — silently had no failover at all. Declaring a group must
+// create redundancy without forcing the operator to keep their globs identical.
+func TestFailoverGroupCreatesRedundancyWithoutOverlappingPatterns(t *testing.T) {
+	var primaryHits, backupHits atomic.Int32
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		primaryHits.Add(1)
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer primary.Close()
+	backup := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		backupHits.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`))
+	}))
+	defer backup.Close()
+
+	db := openTestStore(t)
+	defer db.Close()
+	logger := store.NewAsyncLogger(db, 32, filepath.Join(t.TempDir(), "fallback.ndjson"))
+	logger.Start()
+	defer logger.Stop(context.Background())
+
+	cfg := testConfig("http://unused.invalid", "s")
+	cfg.Upstream.BreakerEnabled = false
+	server, err := NewServer(cfg, db, logger, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxy := httptest.NewServer(server.Routes())
+	defer proxy.Close()
+
+	// Deliberately DISJOINT patterns — the old pattern-overlap rule would find no peer.
+	// Priority, not name order, decides who is tried first: "z-primary" sorts last.
+	upsert := func(name, url, patterns, group string, priority int) {
+		t.Helper()
+		resp := postJSON(t, proxy.URL+"/admin/providers", "", map[string]any{
+			"name": name, "base_url": url, "api_key": "k", "timeout_ms": 5000, "enabled": true,
+			"model_patterns": patterns, "failover_group": group, "priority": priority,
+		})
+		if resp.StatusCode != http.StatusOK {
+			b, _ := io.ReadAll(resp.Body)
+			t.Fatalf("upsert %s: %d %s", name, resp.StatusCode, b)
+		}
+		resp.Body.Close()
+	}
+	upsert("z-primary", primary.URL, "core-h200", "h200-pool", 10)
+	upsert("a-backup", backup.URL, "spare-model", "h200-pool", 20)
+
+	resp := postJSON(t, proxy.URL+"/v1/chat/completions", "", chatBody("core-h200", false))
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected the group peer to rescue the call, got %d", resp.StatusCode)
+	}
+	if got := resp.Header.Get("X-Provider"); got != "a-backup" {
+		t.Fatalf("X-Provider=%q, want a-backup (reached only via the failover group)", got)
+	}
+	if got := resp.Header.Get("X-Failover-From"); got != "z-primary" {
+		t.Fatalf("X-Failover-From=%q, want z-primary", got)
+	}
+	if primaryHits.Load() != 1 || backupHits.Load() != 1 {
+		t.Fatalf("hits primary=%d backup=%d, want 1 each", primaryHits.Load(), backupHits.Load())
+	}
+
+	// Priority, not alphabetical order, chose the primary.
+	if got := resp.Header.Get("X-Route-Reason"); got != "model_pattern" {
+		t.Fatalf("X-Route-Reason=%q, want model_pattern", got)
+	}
+
+	// The coverage report must call this out as declared redundancy, not a lucky overlap.
+	diag, err := http.Get(proxy.URL + "/admin/routing/pattern-conflicts?model=core-h200")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer diag.Body.Close()
+	var out struct {
+		Summary struct {
+			FailoverReady     int `json:"failover_ready_provider_count"`
+			FailoverUncovered int `json:"failover_uncovered_provider_count"`
+		} `json:"summary"`
+		Coverage []struct {
+			Provider      string   `json:"provider"`
+			FailoverGroup string   `json:"failover_group"`
+			FailoverPeers []string `json:"failover_peers"`
+			FailoverReady bool     `json:"failover_ready"`
+			PeerSource    string   `json:"peer_source"`
+		} `json:"coverage"`
+	}
+	if err := json.NewDecoder(diag.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Summary.FailoverUncovered != 0 || out.Summary.FailoverReady != 2 {
+		t.Fatalf("coverage counts ready=%d uncovered=%d, want 2/0",
+			out.Summary.FailoverReady, out.Summary.FailoverUncovered)
+	}
+	for _, c := range out.Coverage {
+		if !c.FailoverReady || c.FailoverGroup != "h200-pool" || c.PeerSource != "failover_group" {
+			t.Fatalf("provider %s not reported as group-covered: %+v", c.Provider, c)
+		}
+		if len(c.FailoverPeers) != 1 {
+			t.Fatalf("provider %s peers=%v, want exactly one", c.Provider, c.FailoverPeers)
+		}
+	}
+}
+
+// Priority is the declared attempt order and must beat the historical name ordering.
+func TestProviderPriorityOrdersCandidates(t *testing.T) {
+	db := openTestStore(t)
+	defer db.Close()
+	ctx := context.Background()
+	for _, p := range []struct {
+		name     string
+		priority int
+	}{{"a-third", 30}, {"m-first", 10}, {"z-second", 20}} {
+		if err := db.UpsertProvider(ctx, store.ProviderConfig{
+			Name: p.name, BaseURL: "http://x.invalid", EncryptedAPIKey: "k",
+			TimeoutMS: 1000, Enabled: true, ModelPatterns: "shared-*", Priority: p.priority,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := db.ListProviderConfigs(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"m-first", "z-second", "a-third"}
+	for i, name := range want {
+		if got[i].Name != name {
+			t.Fatalf("position %d is %q, want %q (priority must outrank name order)", i, got[i].Name, name)
+		}
+	}
+
+	// A provider stored before this feature existed has no priority; it must default
+	// rather than sort to the front as a zero.
+	if err := db.UpsertProvider(ctx, store.ProviderConfig{
+		Name: "legacy", BaseURL: "http://x.invalid", EncryptedAPIKey: "k",
+		TimeoutMS: 1000, Enabled: true, ModelPatterns: "shared-*",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	legacy, found, err := db.GetProvider(ctx, "legacy")
+	if err != nil || !found {
+		t.Fatalf("legacy provider missing: %v", err)
+	}
+	if legacy.Priority != store.DefaultProviderPriority {
+		t.Fatalf("legacy priority=%d, want the default %d", legacy.Priority, store.DefaultProviderPriority)
+	}
+	got, err = db.ListProviderConfigs(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got[len(got)-1].Name != "legacy" {
+		t.Fatalf("unprioritised provider sorted to %q, expected last", got[len(got)-1].Name)
+	}
+}
+
+// Provider health scores were computed and shown for a long time without influencing a
+// single routing decision. Demotion is the narrowest useful use of them: a degraded
+// provider still answers, so the breaker leaves it alone, yet trying it first costs a
+// whole request and its latency. It must move to the back — never be dropped, because a
+// lagging average cannot show recovery for a provider that is no longer tried.
+func TestHealthDemotesDegradedCandidatesWithoutDroppingThem(t *testing.T) {
+	db := openTestStore(t)
+	defer db.Close()
+	logger := store.NewAsyncLogger(db, 32, filepath.Join(t.TempDir(), "fallback.ndjson"))
+	logger.Start()
+	defer logger.Stop(context.Background())
+
+	cfg := testConfig("http://unused.invalid", "s")
+	cfg.Upstream.HealthDemoteThreshold = 50
+	server, err := NewServer(cfg, db, logger, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	// "sick" earns a poor score: slow, erroring, timing out.
+	for i := 0; i < 6; i++ {
+		if err := db.InsertLogRecord(ctx, store.LogRecord{Request: store.RequestLog{
+			ID: "sick-" + itoaProxy(i), TraceID: "sick-" + itoaProxy(i), Endpoint: "/v1/chat/completions",
+			Model: "m", Provider: "sick", StatusCode: 504, LatencyMS: 9000, Error: "timeout",
+			CreatedAt: now.Add(-time.Duration(i) * time.Minute),
+		}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i := 0; i < 6; i++ {
+		if err := db.InsertLogRecord(ctx, store.LogRecord{Request: store.RequestLog{
+			ID: "well-" + itoaProxy(i), TraceID: "well-" + itoaProxy(i), Endpoint: "/v1/chat/completions",
+			Model: "m", Provider: "well", StatusCode: 200, LatencyMS: 90,
+			CreatedAt: now.Add(-time.Duration(i) * time.Minute),
+		}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// "sick" is first by declared priority; health must move it behind "well".
+	got, demoted := server.demoteUnhealthyCandidates(ctx, []string{"sick", "well"})
+	if len(demoted) != 1 || demoted[0] != "sick" {
+		t.Fatalf("demoted=%v, want [sick]", demoted)
+	}
+	if len(got) != 2 || got[0] != "well" || got[1] != "sick" {
+		t.Fatalf("order=%v, want [well sick] — degraded last, never removed", got)
+	}
+
+	// A provider with no traffic has no evidence against it and must not be demoted.
+	got, demoted = server.demoteUnhealthyCandidates(ctx, []string{"well", "brand-new"})
+	if len(demoted) != 0 {
+		t.Fatalf("a provider with no history was demoted: %v", demoted)
+	}
+	if len(got) != 2 || got[0] != "well" {
+		t.Fatalf("order changed with nothing to demote: %v", got)
+	}
+
+	// Threshold 0 disables the feature outright, leaving priority order untouched.
+	server.cfg.Upstream.HealthDemoteThreshold = 0
+	got, demoted = server.demoteUnhealthyCandidates(ctx, []string{"sick", "well"})
+	if len(demoted) != 0 || got[0] != "sick" {
+		t.Fatalf("threshold 0 should disable demotion, got order=%v demoted=%v", got, demoted)
+	}
+}
+
+// The drill exists so redundancy can be proven before an outage, not during one.
+func TestFailoverDrillReportsWhoWouldServe(t *testing.T) {
+	db := openTestStore(t)
+	defer db.Close()
+	logger := store.NewAsyncLogger(db, 32, filepath.Join(t.TempDir(), "fallback.ndjson"))
+	logger.Start()
+	defer logger.Stop(context.Background())
+
+	server, err := NewServer(testConfig("http://unused.invalid", "s"), db, logger, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxy := httptest.NewServer(server.Routes())
+	defer proxy.Close()
+
+	for _, p := range []struct {
+		name     string
+		priority int
+	}{{"pool-a", 10}, {"pool-b", 20}} {
+		resp := postJSON(t, proxy.URL+"/admin/providers", "", map[string]any{
+			"name": p.name, "base_url": "http://" + p.name + ".invalid", "api_key": "k",
+			"timeout_ms": 5000, "enabled": true, "model_patterns": "core-h200",
+			"failover_group": "h200-pool", "priority": p.priority,
+		})
+		if resp.StatusCode != http.StatusOK {
+			b, _ := io.ReadAll(resp.Body)
+			t.Fatalf("upsert %s: %d %s", p.name, resp.StatusCode, b)
+		}
+		resp.Body.Close()
+	}
+
+	drill := func(model string, fail []string) map[string]any {
+		t.Helper()
+		resp := postJSON(t, proxy.URL+"/admin/routing/failover-drill", "", map[string]any{"model": model, "fail": fail})
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			b, _ := io.ReadAll(resp.Body)
+			t.Fatalf("drill failed: %d %s", resp.StatusCode, b)
+		}
+		var out map[string]any
+		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+
+	// Nothing failed: the highest-priority provider serves.
+	out := drill("core-h200", nil)
+	if out["served_by"] != "pool-a" || out["outcome"] != "served" {
+		t.Fatalf("baseline drill: served_by=%v outcome=%v, want pool-a/served", out["served_by"], out["outcome"])
+	}
+
+	// Kill the primary: the group peer must take over.
+	out = drill("core-h200", []string{"pool-a"})
+	if out["served_by"] != "pool-b" || out["outcome"] != "served" {
+		t.Fatalf("with pool-a down: served_by=%v outcome=%v, want pool-b/served", out["served_by"], out["outcome"])
+	}
+	steps, _ := out["steps"].([]any)
+	if len(steps) != 2 {
+		t.Fatalf("expected two steps, got %v", out["steps"])
+	}
+	if first, _ := steps[0].(map[string]any); first["outcome"] != "simulated_failure" {
+		t.Fatalf("first step should be the simulated failure, got %v", steps[0])
+	}
+
+	// Kill both: the drill must say the pool is exhausted and suggest the fix.
+	out = drill("core-h200", []string{"pool-a", "pool-b"})
+	if out["outcome"] != "exhausted" || out["served_by"] != "" {
+		t.Fatalf("with both down: outcome=%v served_by=%v, want exhausted/empty", out["outcome"], out["served_by"])
+	}
+	if advice, _ := out["advice"].(string); !strings.Contains(advice, "failover_group") {
+		t.Fatalf("advice should point at failover_group, got %q", advice)
+	}
+
+	// A model no pattern matches falls through to the default provider, which is never
+	// a failover candidate — the drill has to surface that as a lack of redundancy.
+	out = drill("unmatched-model", nil)
+	if out["outcome"] != "no_redundancy" {
+		t.Fatalf("unmatched model: outcome=%v, want no_redundancy (%v)", out["outcome"], out["advice"])
+	}
+}

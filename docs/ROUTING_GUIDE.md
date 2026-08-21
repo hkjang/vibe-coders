@@ -40,7 +40,7 @@
 |---|---|---|
 | provider 미고정 | `X-Proxy-Provider` · `?provider=` 를 **쓰지 않아야** 함 | 고정한 곳으로만 보내고 폴백 안 함 |
 | 민감정보 아님 | 프롬프트에서 PII·secret 위험이 탐지되지 않아야 함 | 데이터 보호를 위해 폴백 차단 (`fallback_disabled:sensitive_data`) |
-| **매칭 provider 2개 이상** | 같은 모델명에 `model_patterns` 가 매칭되는 provider가 **둘 이상** | **폴백 후보 0개** — 가장 흔한 원인 |
+| **후보가 2개 이상** | 같은 `failover_group` 에 속하거나, 같은 모델명에 `model_patterns` 가 매칭되는 provider가 **둘 이상** (3-0절) | **폴백 후보 0개** — 가장 흔한 원인 |
 | 실패 유형 해당 | 429 · 5xx · 타임아웃 · 연결 실패 | 401/403/404 같은 **4xx는 폴백하지 않음** |
 
 폴백 시도 순서 역시 **provider 이름 알파벳 오름차순**입니다.
@@ -67,6 +67,50 @@
 | 민감한 요청만 폴백 안 됨 | PII·secret 탐지로 의도적 차단 | 정상 동작. 필요하면 프롬프트에서 민감정보 제거 |
 
 어드민 프로바이더 화면의 **폴백 커버리지** 표시가 provider별로 폴백 상대가 있는지(`✅` / `⚠️ 폴백 상대 없음`)를 바로 보여줍니다.
+
+---
+
+## 3-0. 폴백 그룹 · 우선순위 (v0.76.63)
+
+2절의 세 번째 조건("같은 모델에 매칭되는 provider가 2개 이상")은 **패턴이 우연히 겹쳐야만** 이중화가 생긴다는 뜻이었습니다. 가장 흔한 구성 — 기본 provider + 벤더별 provider 하나 — 은 패턴이 겹치지 않아 조용히 폴백이 0이었습니다.
+
+이제 **폴백 그룹**으로 이중화를 명시 선언합니다.
+
+| 필드 | 의미 |
+|---|---|
+| `failover_group` | 같은 이름을 가진 provider끼리 서로 폴백합니다. **패턴이 겹치지 않아도** 됩니다 |
+| `priority` | 그룹 안 시도 순서. **낮을수록 먼저**. 기본 `100`. 같으면 이름순(모든 인스턴스에서 동일) |
+
+```powershell
+curl.exe http://localhost:8080/admin/providers `
+  -H "Content-Type: application/json" `
+  -d '{ "name": "h200-a", "base_url": "http://h200-1:8000", "api_key": "-", "enabled": true, "model_patterns": "core-h200", "failover_group": "h200-pool", "priority": 10 }'
+
+curl.exe http://localhost:8080/admin/providers `
+  -H "Content-Type: application/json" `
+  -d '{ "name": "h200-b", "base_url": "http://h200-2:8000", "api_key": "-", "enabled": true, "model_patterns": "core-h200", "failover_group": "h200-pool", "priority": 20 }'
+```
+
+### 후보가 만들어지는 순서
+
+1. 요청 모델에 `model_patterns` 가 매칭되는 provider (priority 오름차순)
+2. 그중 하나라도 `failover_group` 에 속해 있으면, **같은 그룹의 나머지 provider** 도 후보에 추가
+
+패턴 매칭이 먼저이므로 정확히 그 모델을 서비스하는 provider가 항상 우선하고, 그룹 동료는 그 뒤를 받칩니다. 그룹 덕분에 **각 provider의 글롭을 똑같이 유지할 필요가 없습니다** — 예: 평소엔 `core-h200` 만 받는 노드와 `spare-model` 도 받는 예비 노드를 한 그룹에 묶을 수 있습니다.
+
+> **priority가 이름순을 대체합니다.** 이전에는 provider 이름 알파벳순이 곧 시도 순서라 `a-primary`/`b-backup` 처럼 정렬을 의식해 이름을 지어야 했습니다. 이제 이름과 무관하게 `priority` 로 지정하면 됩니다. 지정하지 않은 provider는 기본값 `100` 이므로, 명시적으로 앞당긴 것 뒤·뒤로 미룬 것 앞에 놓입니다.
+
+### 커버리지 진단에서 구분됩니다
+
+프로바이더 화면의 폴백 커버리지 표시가 세 가지를 구분합니다.
+
+| 표시 | 의미 |
+|---|---|
+| ✅ | **폴백 그룹**으로 명시 선언된 이중화 |
+| 🟡 | 패턴이 우연히 겹쳐 생긴 이중화 — **글롭을 고치면 사라질 수 있음** |
+| ⚠️ | 폴백 상대 없음 |
+
+🟡 는 동작은 하지만 의도한 구성이 아닙니다. 이중화가 필요하다면 같은 `failover_group` 을 지정해 ✅ 로 만드세요.
 
 ---
 
@@ -109,6 +153,43 @@ curl http://localhost:8080/v1/chat/completions \
 ```
 
 예산은 **시도와 시도 사이**에만 검사하므로, 이미 응답이 오고 있는 요청을 중간에 끊지 않습니다.
+
+---
+
+## 3-1-1. Health 기반 강등 (v0.76.63)
+
+회로 차단기는 **완전히 실패하는** provider를 뺍니다. 느리거나 가끔 5xx를 내는 **저하 상태**는 응답을 하므로 차단기가 건드리지 않고, 그래서 순서 맨 앞에 남아 매번 요청 하나와 그 지연을 낭비합니다.
+
+`UPSTREAM_HEALTH_DEMOTE_THRESHOLD`(기본 `50`, `0`이면 비활성) 미만인 provider는 후보 목록의 **맨 뒤로 밀립니다.**
+
+- **재정렬이 아니라 강등입니다.** `priority` 는 운영자가 선언한 의도이므로 순서 결정권을 유지하고, 정상/강등 두 그룹 **안에서는 priority 순서가 그대로** 보존됩니다.
+- **제외하지 않습니다.** health는 후행 지표라, 시도하지 않는 provider는 회복해도 회복한 것을 알 수 없습니다.
+- **이력이 없으면 강등하지 않습니다.** 윈도우 안에 트래픽이 없는 provider는 저하 증거가 없는 것이지 나쁜 것이 아닙니다.
+- 강등이 일어나면 응답 헤더 `X-Health-Demoted` 에 이름이 실립니다. 보이지 않는 재정렬은 이 게이트웨이가 걷어내 온 불투명함 그 자체이기 때문입니다.
+
+> health score 자체는 오래전부터 계산·표시되고 있었지만 **어떤 라우팅 결정에도 반영되지 않았습니다.** 이 강등이 그 첫 사용처입니다.
+
+---
+
+## 3-1-2. 폴백 리허설 (v0.76.63)
+
+"우리 폴백 진짜 되나"를 **장애 전에** 확인합니다. 프록시가 실제로 걷는 후보 목록을 그대로 걸으면서 지정한 provider를 실패로 처리하고, 최종적으로 누가 요청을 처리하는지 보고합니다. **업스트림 호출은 발생하지 않고 아무것도 변경하지 않습니다.**
+
+설정 탭 → 업스트림 프로바이더 → 모델명 입력 후 `폴백 리허설` 버튼. 결과 화면에서 provider별 `중단`/`복구` 버튼으로 시나리오를 바꿔가며 확인할 수 있습니다.
+
+```bash
+curl -X POST http://localhost:8080/admin/routing/failover-drill \
+  -H "Content-Type: application/json" \
+  -d '{"model":"core-h200","fail":["h200-a"]}'
+```
+
+| `outcome` | 의미 |
+|---|---|
+| `served` | 지정한 장애를 견디고 누군가 처리함 (`served_by`) |
+| `exhausted` | 후보를 모두 소진 — 이 시나리오에서 요청이 실패합니다 |
+| `no_redundancy` | 후보가 1개뿐 — 이 provider가 죽으면 폴백이 없습니다 |
+
+`steps` 에는 시도 순서와 각 provider의 결과(`served` · `simulated_failure` · `skipped_breaker_open`)가, `health_demoted` 에는 health로 뒤로 밀린 provider가 담깁니다.
 
 ---
 
@@ -334,5 +415,6 @@ ollama   base_url = http://ollama:11434    model_patterns = nomic-embed-*,mxbai-
 | `GET /admin/routing/decisions` | 요청별 실제 라우팅 결정 · `fallback_path` |
 | `GET /admin/routing/health` | provider health · fallback rate · degradation · **회로 차단기 상태** |
 | `POST /admin/routing/breaker-reset` | 차단된 provider 수동 해제 |
+| `POST /admin/routing/failover-drill` | 폴백 리허설 — 지정한 provider 장애 시 누가 처리하는지 시뮬레이션 |
 | `GET/POST /admin/routing/balancer` | 라운드로빈 분산 검증(균형도·풀·intent vs actual) · 세션 고정 해제 |
 | `GET /admin/requests/{id}/explain` | 개별 요청이 왜 그렇게 처리됐는지 |
