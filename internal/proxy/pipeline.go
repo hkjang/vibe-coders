@@ -140,6 +140,19 @@ func (rc *requestPipeline) stepQuota() bool {
 		w.Header().Set("X-Quota-Scope", quotaHeaderTag(decision))
 		w.Header().Set("X-Quota-Tokens", strconv.FormatInt(decision.Tokens, 10))
 		w.Header().Set("X-Quota-Cost-KRW", formatKRW(decision.CostKRW))
+		// Without the limit the totals above mean nothing, and without the reserved
+		// split a caller sees a number larger than the usage their own dashboard
+		// shows, with no way to account for the difference.
+		if decision.Quota.TokenLimit > 0 {
+			w.Header().Set("X-Quota-Token-Limit", strconv.FormatInt(decision.Quota.TokenLimit, 10))
+		}
+		if decision.Quota.KRWLimit > 0 {
+			w.Header().Set("X-Quota-Cost-Limit-KRW", formatKRW(decision.Quota.KRWLimit))
+		}
+		if decision.ReservedTokens > 0 || decision.ReservedCostKRW > 0 {
+			w.Header().Set("X-Quota-Reserved-Tokens", strconv.FormatInt(decision.ReservedTokens, 10))
+			w.Header().Set("X-Quota-Reserved-Cost-KRW", formatKRW(decision.ReservedCostKRW))
+		}
 		w.Header().Set("X-Quota-Period-Start", decision.PeriodStart.Format(time.RFC3339))
 		w.Header().Set("X-Quota-Period-End", decision.PeriodEnd.Format(time.RFC3339))
 		s.metrics.IncQuotaBlock()

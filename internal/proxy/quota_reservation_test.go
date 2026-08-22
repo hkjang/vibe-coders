@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -268,4 +269,105 @@ func TestQuotaReservationsCanBeDisabled(t *testing.T) {
 	if tokens != 0 {
 		t.Fatalf("a reservation was written with the feature disabled: %d tokens", tokens)
 	}
+}
+
+// A 429 whose numbers cannot be reconciled with the operator's own dashboard is a
+// support ticket. The refusal has to carry the limit it hit and how much of the total
+// came from work still running, and /admin/quotas has to report the same total that
+// enforcement compared.
+func TestQuotaRefusalAndAdminViewExplainReservations(t *testing.T) {
+	release := make(chan struct{})
+	var inFlight atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		inFlight.Add(1)
+		select {
+		case <-release:
+		case <-time.After(5 * time.Second):
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":10,"total_tokens":20}}`))
+	}))
+	defer upstream.Close()
+
+	db := openTestStore(t)
+	defer db.Close()
+	logger := store.NewAsyncLogger(db, 16, filepath.Join(t.TempDir(), "fallback.ndjson"))
+	logger.Start()
+	defer logger.Stop(context.Background())
+
+	cfg := testConfig(upstream.URL, "secret")
+	cfg.Quota.ReservationsEnabled = true
+	server, err := NewServer(cfg, db, logger, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxy := httptest.NewServer(server.Routes())
+	defer proxy.Close()
+
+	ctx := context.Background()
+	if err := db.UpsertQuota(ctx, store.QuotaRecord{
+		ID: "q1", Scope: "global", ScopeValue: "*", Period: "daily",
+		TokenLimit: 1, Enabled: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	go func() {
+		resp := postJSON(t, proxy.URL+"/v1/chat/completions", "", chatBody("test-model", false))
+		resp.Body.Close()
+	}()
+	deadline := time.Now().Add(5 * time.Second)
+	for inFlight.Load() == 0 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if inFlight.Load() == 0 {
+		t.Fatal("the first request never reached the upstream")
+	}
+
+	// The refusal must be self-explanatory.
+	refused := postJSON(t, proxy.URL+"/v1/chat/completions", "", chatBody("test-model", false))
+	defer refused.Body.Close()
+	if refused.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("expected 429 while a request holds the quota, got %d", refused.StatusCode)
+	}
+	if got := refused.Header.Get("X-Quota-Token-Limit"); got != "1" {
+		t.Fatalf("X-Quota-Token-Limit=%q — without the limit the reported totals mean nothing", got)
+	}
+	reserved := refused.Header.Get("X-Quota-Reserved-Tokens")
+	if reserved == "" || reserved == "0" {
+		t.Fatalf("X-Quota-Reserved-Tokens=%q — the caller cannot tell the refusal came from in-flight work", reserved)
+	}
+
+	// The admin view must report the same total, not just what has completed.
+	adminResp, err := http.Get(proxy.URL + "/admin/quotas")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer adminResp.Body.Close()
+	var out struct {
+		Usage []struct {
+			Tokens          int64   `json:"tokens"`
+			ReservedTokens  int64   `json:"reserved_tokens"`
+			ReservedCostKRW float64 `json:"reserved_cost_krw"`
+			TokenRemain     float64 `json:"token_remain_ratio"`
+		} `json:"usage"`
+	}
+	if err := json.NewDecoder(adminResp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Usage) != 1 {
+		t.Fatalf("expected one quota in the admin view, got %d", len(out.Usage))
+	}
+	u := out.Usage[0]
+	if u.Tokens != 0 {
+		t.Fatalf("committed usage is %d while the only request is still running", u.Tokens)
+	}
+	if u.ReservedTokens <= 0 {
+		t.Fatal("the admin view reports no in-flight usage, so a full quota would look empty")
+	}
+	if u.TokenRemain != 0 {
+		t.Fatalf("token_remain_ratio=%v — the quota is exhausted by in-flight work and must not read as having room", u.TokenRemain)
+	}
+
+	close(release)
 }

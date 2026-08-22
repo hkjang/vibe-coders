@@ -14,13 +14,19 @@ import (
 var seoulZone = time.FixedZone("KST", 9*3600)
 
 type quotaDecision struct {
-	Allowed     bool
-	Reason      string
-	Quota       store.QuotaRecord
-	Tokens      int64
-	CostKRW     float64
-	PeriodStart time.Time
-	PeriodEnd   time.Time
+	Allowed bool
+	Reason  string
+	Quota   store.QuotaRecord
+	// Tokens and CostKRW are the totals enforcement compared against the limit, i.e.
+	// committed usage plus in-flight reservations. The reserved half is broken out
+	// separately because a caller refused while committed usage sits below the limit
+	// has no way to explain the refusal otherwise.
+	Tokens          int64
+	CostKRW         float64
+	ReservedTokens  int64
+	ReservedCostKRW float64
+	PeriodStart     time.Time
+	PeriodEnd       time.Time
 }
 
 func periodBounds(period string, now time.Time) (time.Time, time.Time) {
@@ -76,6 +82,7 @@ func (s *Server) checkQuotas(ctx context.Context, apiKeyID string, clientIP stri
 			// cannot see anything currently in flight. Add the outstanding reservations
 			// so concurrent requests count against each other instead of each being
 			// measured against a total that excludes all the others.
+			reservedTokens, reservedCost := int64(0), 0.0
 			if s.quotaReservationsEnabled() {
 				rTokens, rCost, rerr := s.db.ReservedUsage(ctx, q.Scope, q.ScopeValue, now)
 				if rerr != nil {
@@ -84,6 +91,7 @@ func (s *Server) checkQuotas(ctx context.Context, apiKeyID string, clientIP stri
 					// request or letting it through unchecked.
 					slog.Warn("read quota reservations failed", "scope", q.Scope, "error", rerr)
 				} else {
+					reservedTokens, reservedCost = rTokens, rCost
 					tokens += rTokens
 					costKRW += rCost
 				}
@@ -92,6 +100,7 @@ func (s *Server) checkQuotas(ctx context.Context, apiKeyID string, clientIP stri
 				return quotaDecision{
 					Allowed: false, Reason: "token_limit_exceeded",
 					Quota: q, Tokens: tokens, CostKRW: costKRW,
+					ReservedTokens: reservedTokens, ReservedCostKRW: reservedCost,
 					PeriodStart: start, PeriodEnd: end,
 				}, nil
 			}
@@ -99,6 +108,7 @@ func (s *Server) checkQuotas(ctx context.Context, apiKeyID string, clientIP stri
 				return quotaDecision{
 					Allowed: false, Reason: "krw_limit_exceeded",
 					Quota: q, Tokens: tokens, CostKRW: costKRW,
+					ReservedTokens: reservedTokens, ReservedCostKRW: reservedCost,
 					PeriodStart: start, PeriodEnd: end,
 				}, nil
 			}

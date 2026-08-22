@@ -7622,11 +7622,19 @@ const adminHTML = `<!doctype html>
         const q = u.quota;
         const tokenBar = q.token_limit > 0 ? progressBar(1 - u.token_remain_ratio) : '<span class="muted">미설정</span>';
         const krwBar = q.krw_limit > 0 ? progressBar(1 - u.krw_remain_ratio) : '<span class="muted">미설정</span>';
+        // Enforcement compares committed usage PLUS in-flight reservations against the
+        // limit, so the totals shown here have to include them — otherwise a quota reads
+        // as having room while callers are already getting 429.
+        const usedTokens = (u.tokens || 0) + (u.reserved_tokens || 0);
+        const usedCost = (u.cost_krw || 0) + (u.reserved_cost_krw || 0);
+        const inFlight = (u.reserved_tokens || 0) > 0 || (u.reserved_cost_krw || 0) > 0
+          ? '<div class="muted" style="font-size:11px">진행 중 ' + fmt(u.reserved_tokens || 0) + ' 토큰 · ' + money(u.reserved_cost_krw || 0) + ' 포함</div>'
+          : '';
         return '<tr>' +
           '<td>' + scopeLabel(q.scope) + '<div class="muted">' + escapeHTML(q.scope_value) + '</div></td>' +
           '<td>' + periodLabel(q.period) + '</td>' +
-          '<td>' + (q.token_limit > 0 ? fmt(u.tokens) + ' / ' + fmt(q.token_limit) : '<span class="muted">-</span>') + tokenBar + '</td>' +
-          '<td>' + (q.krw_limit > 0 ? money(u.cost_krw) + ' / ' + money(q.krw_limit) : '<span class="muted">-</span>') + krwBar + '</td>' +
+          '<td>' + (q.token_limit > 0 ? fmt(usedTokens) + ' / ' + fmt(q.token_limit) : '<span class="muted">-</span>') + tokenBar + inFlight + '</td>' +
+          '<td>' + (q.krw_limit > 0 ? money(usedCost) + ' / ' + money(q.krw_limit) : '<span class="muted">-</span>') + krwBar + '</td>' +
           '<td><span class="status ' + (q.enabled ? '' : 'error') + '">' + (q.enabled ? '사용' : '중지') + '</span></td>' +
           '<td>' + escapeHTML(q.note || '') + '</td>' +
           '<td>' +

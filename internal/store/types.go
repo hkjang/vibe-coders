@@ -1453,14 +1453,19 @@ type QuotaPublic struct {
 }
 
 type QuotaUsage struct {
-	Quota            QuotaPublic `json:"quota"`
-	Tokens           int64       `json:"tokens"`
-	CostKRW          float64     `json:"cost_krw"`
-	Requests         int64       `json:"requests"`
-	PeriodStart      string      `json:"period_start"`
-	PeriodEnd        string      `json:"period_end"`
-	TokenRemainRatio float64     `json:"token_remain_ratio"`
-	KRWRemainRatio   float64     `json:"krw_remain_ratio"`
+	Quota    QuotaPublic `json:"quota"`
+	Tokens   int64       `json:"tokens"`
+	CostKRW  float64     `json:"cost_krw"`
+	Requests int64       `json:"requests"`
+	// Reserved is what in-flight requests are expected to consume. Enforcement counts
+	// it, so a screen that showed only committed usage would report a quota as having
+	// room while callers were already being refused.
+	ReservedTokens   int64   `json:"reserved_tokens"`
+	ReservedCostKRW  float64 `json:"reserved_cost_krw"`
+	PeriodStart      string  `json:"period_start"`
+	PeriodEnd        string  `json:"period_end"`
+	TokenRemainRatio float64 `json:"token_remain_ratio"`
+	KRWRemainRatio   float64 `json:"krw_remain_ratio"`
 }
 
 type RequestNote struct {
