@@ -33,6 +33,7 @@ type Config struct {
 	Limits      LimitsConfig
 	MCP         MCPConfig
 	RedTeam     RedTeamConfig
+	Quota       QuotaConfig
 	Keycloak    KeycloakConfig
 	// RuntimeReloadInterval is how often each pod polls the DB for admin-settings changes made on
 	// other pods (multi-replica convergence). 0 disables polling (single-pod / local dev).
@@ -134,6 +135,19 @@ type CarbonConfig struct {
 type VCSConfig struct {
 	WebhookSecret    string
 	InferFromContent bool
+}
+
+// QuotaConfig controls how quotas account for work that has not finished yet.
+type QuotaConfig struct {
+	// ReservationsEnabled makes in-flight requests count toward a quota. Committed
+	// usage is only written once a request completes, so without this a burst of
+	// concurrent requests each measure themselves against a total that excludes all the
+	// others and can collectively overshoot the limit. Costs one insert and one delete
+	// per request, so a deployment that does not use quotas can turn it off.
+	ReservationsEnabled bool
+	// ReservationSweepInterval is how often expired rows are deleted. Reads already
+	// ignore expired reservations, so this only keeps the table small.
+	ReservationSweepInterval time.Duration
 }
 
 type UpstreamConfig struct {
@@ -387,6 +401,10 @@ func Load() (Config, error) {
 			BreakerShared:         boolEnv("UPSTREAM_BREAKER_SHARED", false),
 			BreakerSyncInterval:   durationEnv("UPSTREAM_BREAKER_SYNC_INTERVAL", 3*time.Second),
 			DefaultModel:          strings.TrimSpace(os.Getenv("UPSTREAM_DEFAULT_MODEL")),
+		},
+		Quota: QuotaConfig{
+			ReservationsEnabled:      boolEnv("QUOTA_RESERVATIONS_ENABLED", true),
+			ReservationSweepInterval: durationEnv("QUOTA_RESERVATION_SWEEP_INTERVAL", 5*time.Minute),
 		},
 		Database: databaseConfig(),
 		Logging: LoggingConfig{

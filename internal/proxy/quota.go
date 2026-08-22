@@ -3,6 +3,7 @@ package proxy
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"time"
 
@@ -71,6 +72,22 @@ func (s *Server) checkQuotas(ctx context.Context, apiKeyID string, clientIP stri
 			if err != nil {
 				return quotaDecision{Allowed: true}, err
 			}
+			// Committed usage only exists once a request has finished, so on its own it
+			// cannot see anything currently in flight. Add the outstanding reservations
+			// so concurrent requests count against each other instead of each being
+			// measured against a total that excludes all the others.
+			if s.quotaReservationsEnabled() {
+				rTokens, rCost, rerr := s.db.ReservedUsage(ctx, q.Scope, q.ScopeValue, now)
+				if rerr != nil {
+					// Reservations are an accuracy improvement, not an authority: if they
+					// cannot be read, fall back to committed usage rather than failing the
+					// request or letting it through unchecked.
+					slog.Warn("read quota reservations failed", "scope", q.Scope, "error", rerr)
+				} else {
+					tokens += rTokens
+					costKRW += rCost
+				}
+			}
 			if q.TokenLimit > 0 && tokens >= q.TokenLimit {
 				return quotaDecision{
 					Allowed: false, Reason: "token_limit_exceeded",
@@ -104,4 +121,75 @@ func formatKRW(v float64) string {
 
 func quotaHeaderTag(d quotaDecision) string {
 	return fmt.Sprintf("%s:%s:%s", d.Quota.Scope, d.Quota.ScopeValue, d.Quota.Period)
+}
+
+// quotaReservationsEnabled reports whether in-flight usage counts toward quotas.
+// Reservations add one insert and one delete per request, so a deployment that does not
+// use quotas at all can turn the whole mechanism off.
+func (s *Server) quotaReservationsEnabled() bool {
+	return s.cfg.Quota.ReservationsEnabled && s.db != nil
+}
+
+// reserveQuota records what this request is expected to consume, so requests running
+// alongside it can see it. The expiry is the upstream timeout plus a margin: long
+// enough that a slow but healthy request is never released early, short enough that a
+// gateway killed mid-request stops holding the quota soon after.
+func (s *Server) reserveQuota(ctx context.Context, requestID, apiKeyID, clientIP string, tokens int64, costKRW float64) {
+	if !s.quotaReservationsEnabled() || requestID == "" {
+		return
+	}
+	ttl := s.cfg.Upstream.Timeout + time.Minute
+	if ttl <= 0 {
+		ttl = 11 * time.Minute
+	}
+	if err := s.db.ReserveQuota(ctx, store.QuotaReservation{
+		RequestID: requestID, APIKeyID: apiKeyID, ClientIP: clientIP,
+		Tokens: tokens, CostKRW: costKRW, ExpiresAt: time.Now().UTC().Add(ttl),
+	}); err != nil {
+		slog.Warn("reserve quota failed", "request_id", requestID, "error", err)
+	}
+}
+
+// releaseQuota drops the reservation once the request is done and its real usage is on
+// its way to the log. It must run on every exit path, including failures: a reservation
+// left behind would count against the quota until it expired.
+func (s *Server) releaseQuota(requestID string) {
+	if !s.quotaReservationsEnabled() || requestID == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := s.db.ReleaseQuota(ctx, requestID); err != nil {
+		slog.Warn("release quota reservation failed", "request_id", requestID, "error", err)
+	}
+}
+
+// startQuotaReservationSweeper deletes rows left by requests that never completed —
+// a gateway killed mid-flight, for instance. Reads already exclude expired rows, so
+// this is only housekeeping and its failure is never load-bearing.
+func (s *Server) startQuotaReservationSweeper() {
+	if !s.quotaReservationsEnabled() {
+		return
+	}
+	interval := s.cfg.Quota.ReservationSweepInterval
+	if interval <= 0 {
+		interval = 5 * time.Minute
+	}
+	go func() {
+		t := time.NewTicker(interval)
+		defer t.Stop()
+		for range t.C {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			n, err := s.db.SweepExpiredQuotaReservations(ctx, time.Now())
+			cancel()
+			if err != nil {
+				slog.Warn("sweep quota reservations failed", "error", err)
+				continue
+			}
+			if n > 0 {
+				// A non-zero sweep means requests died without releasing; worth seeing.
+				slog.Info("swept expired quota reservations", "removed", n)
+			}
+		}
+	}()
 }

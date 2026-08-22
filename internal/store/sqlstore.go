@@ -1218,6 +1218,20 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 			priority INTEGER NOT NULL DEFAULT 100,
 			created_at TEXT NOT NULL
 		)`,
+		// In-flight quota reservations. Committed usage only exists once a request has
+		// finished, so without these a burst of concurrent requests all see a stale total
+		// and can collectively blow past a limit. Rows carry expires_at so a gateway that
+		// dies mid-request cannot pin a quota forever.
+		`CREATE TABLE IF NOT EXISTS quota_reservations (
+			request_id TEXT PRIMARY KEY,
+			api_key_id TEXT,
+			client_ip TEXT,
+			tokens INTEGER NOT NULL DEFAULT 0,
+			cost_krw REAL NOT NULL DEFAULT 0,
+			created_at TEXT NOT NULL,
+			expires_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_quota_reservations_expiry ON quota_reservations(expires_at)`,
 		// Circuit-breaker state shared between gateway instances. Rows are advisory and
 		// carry updated_at so a consumer can ignore ones left by an instance that died.
 		`CREATE TABLE IF NOT EXISTS provider_breaker_state (

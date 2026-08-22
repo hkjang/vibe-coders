@@ -277,6 +277,8 @@ $env:PROXY_API_KEYS="dev:dev-proxy-key:alice:platform,team:team-proxy-key:bob:ba
 | `UPSTREAM_BREAKER_COOLDOWN` | `30s` | 차단 유지 시간. 경과 후 요청 1건으로 복구 확인 |
 | `UPSTREAM_BREAKER_SHARED` | `false` | 차단 전환을 DB로 공유해 다른 인스턴스가 자기 임계값만큼 실패해보지 않고 반영. **공유 DB(Postgres 등) 전제** |
 | `UPSTREAM_BREAKER_SYNC_INTERVAL` | `3s` | 다른 인스턴스의 차단 상태를 읽는 주기 |
+| `QUOTA_RESERVATIONS_ENABLED` | `true` | 진행 중 요청의 예상 사용량을 한도에 포함. 사용량은 요청 완료 후 기록되므로, 없으면 동시 요청들이 서로를 못 보고 한도를 초과할 수 있음 |
+| `QUOTA_RESERVATION_SWEEP_INTERVAL` | `5m` | 만료된 예약 정리 주기 |
 | `UPSTREAM_LOAD_BALANCE` | `first` | 같은 모델에 여러 provider가 매칭될 때 `first`(이름순 첫 번째) · `round_robin`(단일 인스턴스) · `session_hash`(다중 인스턴스 권장 — 세션 키에서 provider를 계산해 공유 저장소 없이 모든 인스턴스가 같은 답) |
 | `UPSTREAM_STICKY_SESSIONS` | `true` | 세션을 처음 처리한 provider에 고정(에이전트 대화의 prefix/KV 캐시 보존) |
 | `UPSTREAM_STICKY_TTL` | `30m` | 세션 고정 유지 시간 |

@@ -68,6 +68,11 @@ type requestPipeline struct {
 	skillVersion string
 	skillTools   string
 
+	// quotaReserved is the request id holding an in-flight quota reservation, if any.
+	// It must be released on every exit path or the reservation counts against the
+	// quota until it expires.
+	quotaReserved string
+
 	// affinity identifies the conversation for provider stickiness (see
 	// resolveSessionAffinity). Empty when balancing does not apply.
 	affinity sessionAffinity
@@ -330,6 +335,12 @@ func (rc *requestPipeline) stepCost() bool {
 		snap := s.costSnapshotCached(r.Context())
 		est := predictCost(rc.meta.Request.Model, promptTokenEstimate(rc.meta.Prompts), parseMaxTokens(rc.body), snap, s.pricingMap(r.Context()))
 		rc.estimatedCostKRW = est.CostKRW
+		// Record what this request is expected to consume while it runs, so requests
+		// starting alongside it count it. stepQuota cannot do this — it runs before the
+		// body is read, so no estimate exists yet.
+		s.reserveQuota(r.Context(), rc.meta.Request.ID, rc.apiKeyID, clientIP(r),
+			int64(est.InputTokens+est.OutputTokens), est.CostKRW)
+		rc.quotaReserved = rc.meta.Request.ID
 		w.Header().Set("X-Estimated-Input-Tokens", strconv.Itoa(est.InputTokens))
 		w.Header().Set("X-Estimated-Output-Tokens", strconv.Itoa(est.OutputTokens))
 		if est.Priced {

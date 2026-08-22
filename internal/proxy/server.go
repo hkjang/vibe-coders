@@ -31,7 +31,7 @@ import (
 )
 
 // AppVersion is the gateway build version, surfaced in /auth/me and the admin UI.
-const AppVersion = "v0.76.69"
+const AppVersion = "v0.76.70"
 
 type Server struct {
 	cfg      config.Config
@@ -141,6 +141,7 @@ func NewServer(cfg config.Config, db *store.SQLStore, logger *store.AsyncLogger,
 	// settings change (only runs when URL + interval are configured).
 	server.applyClickHouseSinkWorker()
 	server.startBreakerSync()
+	server.startQuotaReservationSweeper()
 
 	// Async per-request fact ingest queue + batch worker (ships ai_request_fact rows off
 	// the hot path). The queue is always allocated; the worker no-ops until configured.
@@ -1264,6 +1265,12 @@ func (s *Server) handleOpenAI(w http.ResponseWriter, r *http.Request) {
 	rc := &requestPipeline{s: s, w: sw, r: r}
 
 	defer func() {
+		// The single exit point for every path through the pipeline, including the ones
+		// that halt early and an unwinding panic. A reservation released anywhere else
+		// would be missed by whichever branch was overlooked, and would then count
+		// against the quota until it expired.
+		s.releaseQuota(rc.quotaReserved)
+
 		if r.Method == http.MethodGet && r.URL.Path == "/v1/models" && sw.statusCode == http.StatusOK {
 			return
 		}
