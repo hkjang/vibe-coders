@@ -2,22 +2,13 @@ package store
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
-
-	"vibe-coders/internal/config"
 )
 
 func TestDataProductRoundtripAndRequests(t *testing.T) {
 	ctx := context.Background()
-	db, err := Open(ctx, config.DatabaseConfig{Driver: "sqlite", DSN: filepath.Join(t.TempDir(), "dp.db")})
-	if err != nil {
-		t.Fatal(err)
-	}
+	db := openStoreForTest(t)
 	defer db.Close()
-	if err := db.Migrate(ctx); err != nil {
-		t.Fatal(err)
-	}
 
 	p := DataProduct{
 		ProductKey: "team-cost-daily", NameKO: "팀 일별 비용", Description: "daily team cost",

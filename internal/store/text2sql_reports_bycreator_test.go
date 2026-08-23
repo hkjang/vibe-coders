@@ -2,22 +2,13 @@ package store
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
-
-	"vibe-coders/internal/config"
 )
 
 func TestListText2SQLSavedReportsByCreatedBy(t *testing.T) {
 	ctx := context.Background()
-	db, err := Open(ctx, config.DatabaseConfig{Driver: "sqlite", DSN: filepath.Join(t.TempDir(), "rep.db")})
-	if err != nil {
-		t.Fatal(err)
-	}
+	db := openStoreForTest(t)
 	defer db.Close()
-	if err := db.Migrate(ctx); err != nil {
-		t.Fatal(err)
-	}
 
 	for _, r := range []Text2SQLSavedReport{
 		{ID: "r1", Name: "mine A", CreatedBy: "alice", SchemaName: "dw"},

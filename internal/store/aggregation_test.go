@@ -2,26 +2,14 @@ package store
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 	"time"
-
-	"vibe-coders/internal/config"
 )
 
 // openAggTestStore spins up a fresh migrated SQLite store in a temp dir.
 func openAggTestStore(t *testing.T) *SQLStore {
 	t.Helper()
-	db, err := Open(context.Background(), config.DatabaseConfig{
-		Driver: "sqlite",
-		DSN:    filepath.Join(t.TempDir(), "agg.db"),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := db.Migrate(context.Background()); err != nil {
-		t.Fatal(err)
-	}
+	db := openStoreForTest(t)
 	return db
 }
 

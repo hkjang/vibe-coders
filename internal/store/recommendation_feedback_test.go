@@ -45,7 +45,7 @@ func TestRecommendationFeedbackAndAdoption(t *testing.T) {
 		t.Fatal(err)
 	}
 	var reason string
-	if err := db.db.QueryRowContext(ctx, `SELECT COALESCE(reason, '') FROM recommendation_feedback WHERE id = ?`, "model_switch_u4_later").Scan(&reason); err != nil {
+	if err := db.db.QueryRowContext(ctx, db.bind(`SELECT COALESCE(reason, '') FROM recommendation_feedback WHERE id = ?`), "model_switch_u4_later").Scan(&reason); err != nil {
 		t.Fatal(err)
 	}
 	if reason != "decide after team review" {

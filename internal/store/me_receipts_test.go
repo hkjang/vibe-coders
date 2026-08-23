@@ -13,7 +13,7 @@ func TestRequestUserIDAndRecentRequests(t *testing.T) {
 	now := time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC)
 
 	if _, err := db.db.ExecContext(ctx,
-		`INSERT INTO api_keys (id, name, key_hash, status, created_at, user_id) VALUES (?,?,?,?,?,?)`,
+		db.bind(`INSERT INTO api_keys (id, name, key_hash, status, created_at, user_id) VALUES (?,?,?,?,?,?)`),
 		"k1", "alice key", "h1", "active", now.AddDate(0, 0, -10).Format(time.RFC3339Nano), "alice"); err != nil {
 		t.Fatal(err)
 	}

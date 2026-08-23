@@ -13,7 +13,7 @@ func TestCostAllocationWindowTeamAndBounds(t *testing.T) {
 	base := time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC)
 
 	if _, err := db.db.ExecContext(ctx,
-		`INSERT INTO api_keys (id, name, key_hash, status, created_at, team) VALUES (?,?,?,?,?,?)`,
+		db.bind(`INSERT INTO api_keys (id, name, key_hash, status, created_at, team) VALUES (?,?,?,?,?,?)`),
 		"k1", "alpha key", "h1", "active", base.Format(time.RFC3339Nano), "alpha"); err != nil {
 		t.Fatal(err)
 	}

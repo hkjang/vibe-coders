@@ -13,7 +13,7 @@ func TestMyHomeQueries(t *testing.T) {
 	now := time.Now().UTC()
 
 	if _, err := db.db.ExecContext(ctx,
-		`INSERT INTO api_keys (id, name, key_hash, status, created_at, user_id, team, role) VALUES (?,?,?,?,?,?,?,?)`,
+		db.bind(`INSERT INTO api_keys (id, name, key_hash, status, created_at, user_id, team, role) VALUES (?,?,?,?,?,?,?,?)`),
 		"k1", "key one", "hash-k1", "active", now.Format(time.RFC3339Nano), "u1", "platform", "developer"); err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +104,7 @@ func TestPersonalRecommendationCandidates(t *testing.T) {
 		{"k2", "u2"},
 	} {
 		if _, err := db.db.ExecContext(ctx,
-			`INSERT INTO api_keys (id, name, key_hash, status, created_at, user_id, team, role) VALUES (?,?,?,?,?,?,?,?)`,
+			db.bind(`INSERT INTO api_keys (id, name, key_hash, status, created_at, user_id, team, role) VALUES (?,?,?,?,?,?,?,?)`),
 			row.id, row.id, "hash-"+row.id, "active", now.Format(time.RFC3339Nano), row.user, "platform", "developer"); err != nil {
 			t.Fatal(err)
 		}

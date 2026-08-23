@@ -21,7 +21,7 @@ func TestTeamDashboardSince(t *testing.T) {
 	}
 	for _, k := range keys {
 		if _, err := db.db.ExecContext(ctx,
-			`INSERT INTO api_keys (id, name, key_hash, status, created_at, user_id, team, role) VALUES (?,?,?,?,?,?,?,?)`,
+			db.bind(`INSERT INTO api_keys (id, name, key_hash, status, created_at, user_id, team, role) VALUES (?,?,?,?,?,?,?,?)`),
 			k.id, k.id, "hash-"+k.id, "active", now.Format(time.RFC3339Nano), k.user, k.team, "developer"); err != nil {
 			t.Fatal(err)
 		}
@@ -89,7 +89,7 @@ func TestTeamPopularSkillsAndTemplateCandidates(t *testing.T) {
 		{"k1", "u1", "team_platform"}, {"k2", "u2", "team_platform"}, {"k3", "u3", "team_other"},
 	} {
 		if _, err := db.db.ExecContext(ctx,
-			`INSERT INTO api_keys (id, name, key_hash, status, created_at, user_id, team, role) VALUES (?,?,?,?,?,?,?,?)`,
+			db.bind(`INSERT INTO api_keys (id, name, key_hash, status, created_at, user_id, team, role) VALUES (?,?,?,?,?,?,?,?)`),
 			k.id, k.id, "h-"+k.id, "active", now.Format(time.RFC3339Nano), k.user, k.team, "developer"); err != nil {
 			t.Fatal(err)
 		}

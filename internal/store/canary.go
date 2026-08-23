@@ -28,7 +28,13 @@ func (s *SQLStore) CanaryPolicyStats(ctx context.Context, since time.Time) ([]Ca
 		LEFT JOIN policy_decision_events e ON e.policy_id = p.id AND e.created_at >= ?
 		WHERE p.enabled = 1 AND COALESCE(p.rollout_percent, 100) < 100
 		GROUP BY p.id, p.name, p.rollout_percent
-		ORDER BY (shadow_acts + enforced_acts) DESC, p.name ASC`),
+		-- The ordering repeats both aggregates rather than naming the aliases above:
+		-- SQLite resolves a select alias inside an ORDER BY expression, PostgreSQL only
+		-- accepts a bare alias and reports the column as not existing otherwise.
+		ORDER BY COALESCE(SUM(CASE WHEN e.decision = 'canary_shadow' THEN 1 ELSE 0 END), 0)
+			+ COALESCE(SUM(CASE WHEN e.decision IN ('block', 'require_approval')
+				OR e.decision LIKE 'deny_%' OR e.decision = 'secret_block' THEN 1 ELSE 0 END), 0) DESC,
+			p.name ASC`),
 		since.UTC().Format(time.RFC3339Nano))
 	if err != nil {
 		return nil, err

@@ -2,22 +2,13 @@ package store
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
-
-	"vibe-coders/internal/config"
 )
 
 func TestMCPToolContractsRoundtrip(t *testing.T) {
 	ctx := context.Background()
-	db, err := Open(ctx, config.DatabaseConfig{Driver: "sqlite", DSN: filepath.Join(t.TempDir(), "mtc.db")})
-	if err != nil {
-		t.Fatal(err)
-	}
+	db := openStoreForTest(t)
 	defer db.Close()
-	if err := db.Migrate(ctx); err != nil {
-		t.Fatal(err)
-	}
 
 	c := MCPToolContract{
 		ID: "mtc1", Namespace: "gateway", Name: "gateway_chat", Title: "Chat",

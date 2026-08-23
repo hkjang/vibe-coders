@@ -21,6 +21,20 @@ import (
 
 var blobRegex = regexp.MustCompile(`(?i)\bblob\b`)
 
+// REAL means different things to the two drivers. SQLite stores every REAL as an
+// 8-byte IEEE float; PostgreSQL REAL is float4, roughly seven significant decimal
+// digits. The schema declares 65 REAL columns and 13 of them are cost_krw, alongside
+// budget_limit_krw, krw_limit, monthly_krw and the per-million price columns.
+//
+// On PostgreSQL that silently rounds money: 12,345,678.9 KRW comes back as 12,345,679,
+// and a SUM over such a column loses the fractional part of the total. Nothing errors,
+// the number is simply wrong, and no test ever saw it because tests ran on SQLite, where
+// REAL is already double precision.
+//
+// So REAL becomes DOUBLE PRECISION on PostgreSQL, which is what SQLite was giving all
+// along. Databases created before this are widened by widenPostgresRealColumns below.
+var realRegex = regexp.MustCompile(`(?i)\bREAL\b`)
+
 type SQLStore struct {
 	db      *sql.DB
 	dialect string
@@ -2005,6 +2019,7 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 			// PostgreSQL does not support BLOB; it uses BYTEA instead.
 			// Using regex guarantees that any variation of case or spacing is handled properly.
 			execQuery = blobRegex.ReplaceAllString(execQuery, "BYTEA")
+			execQuery = realRegex.ReplaceAllString(execQuery, "DOUBLE PRECISION")
 		}
 		if _, err := s.db.ExecContext(ctx, execQuery); err != nil {
 			if isAlreadyExistsErr(err) {
@@ -2013,7 +2028,62 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 			return err
 		}
 	}
+	if s.dialect == "postgres" {
+		if err := s.widenPostgresRealColumns(ctx); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+// widenPostgresRealColumns promotes any float4 column to float8.
+//
+// New databases get DOUBLE PRECISION from the rewrite above, but a database created by
+// an earlier version already holds REAL columns, and CREATE TABLE IF NOT EXISTS will not
+// revisit them. Widening is lossless and idempotent: values already stored at single
+// precision keep whatever they were rounded to, which cannot be undone, but every write
+// afterwards is exact.
+//
+// It reads the catalogue rather than naming columns, so a REAL added later is covered
+// without anyone remembering this function exists.
+func (s *SQLStore) widenPostgresRealColumns(ctx context.Context) error {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT table_name, column_name
+		FROM information_schema.columns
+		WHERE table_schema = current_schema() AND data_type = 'real'
+		ORDER BY table_name, column_name`)
+	if err != nil {
+		return err
+	}
+	type col struct{ table, name string }
+	var cols []col
+	for rows.Next() {
+		var c col
+		if err := rows.Scan(&c.table, &c.name); err != nil {
+			rows.Close()
+			return err
+		}
+		cols = append(cols, c)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, c := range cols {
+		stmt := fmt.Sprintf(`ALTER TABLE %s ALTER COLUMN %s TYPE DOUBLE PRECISION`,
+			quotePGIdentifier(c.table), quotePGIdentifier(c.name))
+		if _, err := s.db.ExecContext(ctx, stmt); err != nil {
+			return fmt.Errorf("widen %s.%s to double precision: %w", c.table, c.name, err)
+		}
+	}
+	return nil
+}
+
+// quotePGIdentifier wraps a catalogue-sourced name so a table called "user" or one with
+// a capital letter still parses. The names come from information_schema, not from user
+// input, but quoting is what makes that irrelevant.
+func quotePGIdentifier(name string) string {
+	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
 }
 
 // isAlreadyExistsErr swallows the "duplicate column name" / "column already exists"

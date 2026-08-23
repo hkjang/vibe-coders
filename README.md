@@ -286,6 +286,15 @@ $env:PROXY_API_KEYS="dev:dev-proxy-key:alice:platform,team:team-proxy-key:bob:ba
 | `DB_DRIVER` | `sqlite` | `sqlite` 또는 `postgres` |
 | `DB_DSN` | `data/gateway.db` | SQLite 파일 경로 |
 | `POSTGRES_DSN` / `DATABASE_URL` | 없음 | 있으면 PostgreSQL 사용 |
+
+> **PostgreSQL로 테스트 돌리기.** store 패키지 테스트는 기본적으로 SQLite로 돕니다. `TEST_POSTGRES_DSN` 을 주면 같은 테스트가 PostgreSQL에서 실행되며, 테스트마다 별도 스키마를 씁니다.
+>
+> ```bash
+> docker run -d --name pg-test -e POSTGRES_PASSWORD=test -e POSTGRES_DB=vibe -p 55433:5432 postgres:17-alpine
+> TEST_POSTGRES_DSN="postgres://postgres:test@127.0.0.1:55433/vibe?sslmode=disable" go test ./internal/store/
+> ```
+>
+> 두 드라이버는 SQL 방언이 다릅니다. SQLite는 REAL을 8바이트 부동소수로 저장하지만 PostgreSQL의 REAL은 float4(유효숫자 약 7자리)라 **금액이 조용히 반올림됩니다** — 그래서 스키마의 REAL은 PostgreSQL에서 DOUBLE PRECISION으로 변환되고, 이전 버전이 만든 DB의 float4 컬럼은 기동 시 자동으로 넓혀집니다.
 | `PROXY_API_KEYS` | 없음 | `name:key:owner:team` CSV |
 | `ATTRIBUTE_EXTERNAL_KEYS` | `true` | 미등록 키를 키 지문(`key_…`, 상태 external)으로 사용자별 귀속. `false`면 단일 `passthrough` |
 | `VCS_WEBHOOK_SECRET` | 없음 | 설정 시 `/vcs/*` 수집 엔드포인트 활성화(GitLab/Bitbucket/범용 → Prompt↔Commit↔MR 상관). 미설정 시 비활성 |

@@ -111,9 +111,14 @@ func (s *SQLStore) UpsertDomainExample(ctx context.Context, e DomainExample) err
 		(id, route, text, text_hash, source, confidence, approved, auto_promoted, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(route, text_hash) DO UPDATE SET
-			confidence = CASE WHEN excluded.confidence > confidence THEN excluded.confidence ELSE confidence END,
-			approved = CASE WHEN excluded.approved = 1 THEN 1 ELSE approved END,
-			auto_promoted = CASE WHEN excluded.auto_promoted = 1 THEN 1 ELSE auto_promoted END`),
+			-- The existing row's columns are named with the table, not bare. A bare name here
+			-- is ambiguous to PostgreSQL, which sees both the target row and excluded and
+			-- refuses the statement; SQLite silently resolves it to the target. Every other
+			-- upsert in this package that reads its own row already qualifies it this way.
+			confidence = CASE WHEN excluded.confidence > domain_examples.confidence
+				THEN excluded.confidence ELSE domain_examples.confidence END,
+			approved = CASE WHEN excluded.approved = 1 THEN 1 ELSE domain_examples.approved END,
+			auto_promoted = CASE WHEN excluded.auto_promoted = 1 THEN 1 ELSE domain_examples.auto_promoted END`),
 		e.ID, e.Route, e.Text, e.TextHash, e.Source, e.Confidence, boolInt(e.Approved), boolInt(e.AutoPromoted), e.CreatedAt)
 	return err
 }

@@ -2,22 +2,13 @@ package store
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
-
-	"vibe-coders/internal/config"
 )
 
 func TestAIAppRunsRoundtrip(t *testing.T) {
 	ctx := context.Background()
-	db, err := Open(ctx, config.DatabaseConfig{Driver: "sqlite", DSN: filepath.Join(t.TempDir(), "ar.db")})
-	if err != nil {
-		t.Fatal(err)
-	}
+	db := openStoreForTest(t)
 	defer db.Close()
-	if err := db.Migrate(ctx); err != nil {
-		t.Fatal(err)
-	}
 
 	mk := func(id, app, user string) {
 		if err := db.RecordAIAppRun(ctx, AIAppRun{ID: id, AppID: app, UserID: user, Team: "t1", InputHash: "h", LatencyMS: 5}); err != nil {

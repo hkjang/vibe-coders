@@ -15,7 +15,7 @@ func TestPersonalProfile(t *testing.T) {
 
 	// Seed an api key mapped to user u1 (team platform, role developer).
 	if _, err := db.db.ExecContext(ctx,
-		`INSERT INTO api_keys (id, name, key_hash, status, created_at, user_id, team, role) VALUES (?,?,?,?,?,?,?,?)`,
+		db.bind(`INSERT INTO api_keys (id, name, key_hash, status, created_at, user_id, team, role) VALUES (?,?,?,?,?,?,?,?)`),
 		"k1", "key one", "hash-k1", "active", now.Format(time.RFC3339Nano), "u1", "platform", "developer"); err != nil {
 		t.Fatal(err)
 	}

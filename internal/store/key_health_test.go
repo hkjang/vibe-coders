@@ -14,7 +14,7 @@ func TestKeyHealthAlerts(t *testing.T) {
 
 	mkKey := func(id, userID, expiresAt string) {
 		if _, err := db.db.ExecContext(ctx,
-			`INSERT INTO api_keys (id, name, key_hash, status, created_at, user_id, expires_at) VALUES (?,?,?,?,?,?,?)`,
+			db.bind(`INSERT INTO api_keys (id, name, key_hash, status, created_at, user_id, expires_at) VALUES (?,?,?,?,?,?,?)`),
 			id, id+" key", "hash-"+id, "active", now.AddDate(0, 0, -90).Format(time.RFC3339Nano), userID, expiresAt); err != nil {
 			t.Fatal(err)
 		}
