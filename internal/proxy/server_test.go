@@ -4,11 +4,14 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -385,8 +388,14 @@ func TestOperationalHealthReadyMetricsAndFavicon(t *testing.T) {
 	}
 }
 
+// openTestStore gives a test its own database. TEST_POSTGRES_DSN runs the package
+// against PostgreSQL instead, each test in its own schema — the store package found three
+// PostgreSQL-only defects that way, and the handlers here issue queries of their own.
 func openTestStore(t *testing.T) *store.SQLStore {
 	t.Helper()
+	if dsn := os.Getenv("TEST_POSTGRES_DSN"); dsn != "" {
+		return openPostgresTestStore(t, dsn)
+	}
 	db, err := store.Open(context.Background(), config.DatabaseConfig{
 		Driver: "sqlite",
 		DSN:    filepath.Join(t.TempDir(), "gateway.db"),
@@ -396,6 +405,37 @@ func openTestStore(t *testing.T) *store.SQLStore {
 	}
 	if err := db.Migrate(context.Background()); err != nil {
 		t.Fatal(err)
+	}
+	return db
+}
+
+func openPostgresTestStore(t *testing.T, dsn string) *store.SQLStore {
+	t.Helper()
+	schema := "t" + strings.ToLower(regexp.MustCompile(`[^A-Za-z0-9]`).ReplaceAllString(t.Name(), "_"))
+	if len(schema) > 55 {
+		schema = schema[:55]
+	}
+	admin, err := sql.Open("pgx", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := admin.Exec("DROP SCHEMA IF EXISTS " + schema + " CASCADE"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := admin.Exec("CREATE SCHEMA " + schema); err != nil {
+		t.Fatal(err)
+	}
+	admin.Close()
+	sep := "?"
+	if strings.Contains(dsn, "?") {
+		sep = "&"
+	}
+	db, err := store.Open(context.Background(), config.DatabaseConfig{Driver: "postgres", DSN: dsn + sep + "search_path=" + schema})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Migrate(context.Background()); err != nil {
+		t.Fatalf("migrate on postgres: %v", err)
 	}
 	return db
 }

@@ -343,9 +343,45 @@ func TestQwenCodeShapedSessionsRoundRobinAndStick(t *testing.T) {
 	}
 
 	// The verification endpoint must agree that the split was even.
-	resp, err := http.Get(proxy.URL + "/admin/routing/balancer?model=core-h200&window=1h")
-	if err != nil {
-		t.Fatal(err)
+	//
+	// Poll until every request has been persisted. The endpoint reads request_logs, which
+	// the async logger writes off the request path, so the last few writes can still be in
+	// flight when the turns above return. Against SQLite they always landed in time and
+	// this read looked synchronous; against PostgreSQL the final write reliably lost the
+	// race and the endpoint reported 17 of 18 requests — the rows were correct a moment
+	// later. Waiting for the count is what the test meant to assert all along.
+	var resp *http.Response
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		r, err := http.Get(proxy.URL + "/admin/routing/balancer?model=core-h200&window=1h")
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, err := io.ReadAll(r.Body)
+		r.Body.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		var counted struct {
+			Actual []struct {
+				Requests int64 `json:"requests"`
+			} `json:"actual"`
+		}
+		if err := json.Unmarshal(body, &counted); err != nil {
+			t.Fatal(err)
+		}
+		total := int64(0)
+		for _, a := range counted.Actual {
+			total += a.Requests
+		}
+		if total >= 18 || time.Now().After(deadline) {
+			if total < 18 {
+				t.Fatalf("only %d of 18 requests were persisted within the deadline; the audit log is losing writes", total)
+			}
+			resp = &http.Response{Body: io.NopCloser(bytes.NewReader(body))}
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 	defer resp.Body.Close()
 	var out struct {
