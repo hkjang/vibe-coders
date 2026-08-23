@@ -48,7 +48,12 @@ var (
 	// Captures the table reference after FROM/JOIN, allowing double-quoted and
 	// schema-qualified identifiers (e.g. FROM "Sales"."Orders" o). A leading "(" is
 	// not matched, so subquery sources are skipped.
-	fromJoin     = regexp.MustCompile(`(?is)\b(?:from|join)\s+("?[a-zA-Z_][a-zA-Z0-9_]*"?(?:\."?[a-zA-Z_][a-zA-Z0-9_]*"?)*)`)
+	fromJoin = regexp.MustCompile(`(?is)\b(?:from|join)\s+("?[a-zA-Z_][a-zA-Z0-9_]*"?(?:\."?[a-zA-Z_][a-zA-Z0-9_]*"?)*)`)
+	// The FROM clause runs until the next clause keyword. Everything between is a
+	// comma-separated list of table references, which is why matching only the first
+	// name after FROM is not enough.
+	fromClause   = regexp.MustCompile(`(?is)\bfrom\s+(.*?)(?:\bwhere\b|\bgroup\s+by\b|\bhaving\b|\border\s+by\b|\blimit\b|\boffset\b|\bunion\b|\bintersect\b|\bexcept\b|\bwindow\b|\bfetch\b|$)`)
+	tableRef     = regexp.MustCompile(`^\s*("?[a-zA-Z_][a-zA-Z0-9_]*"?(?:\."?[a-zA-Z_][a-zA-Z0-9_]*"?)*)`)
 	lineComment  = regexp.MustCompile(`--[^\n]*`)
 	blockComment = regexp.MustCompile(`(?s)/\*.*?\*/`)
 	// aggFuncRe matches an aggregate function name immediately followed by its opening
@@ -59,6 +64,9 @@ var (
 	// A star used as a projection: directly after SELECT or a comma, optionally
 	// qualified by a table alias. Multiplication never matches, because it has an
 	// operand in front of the star.
+	// A qualified star anywhere, including inside a call like ROW(c.*), where the
+	// projection form above does not reach.
+	qualifiedStar  = regexp.MustCompile(`(?is)("?[a-zA-Z_][a-zA-Z0-9_]*"?)\s*\.\s*\*`)
 	starProjection = regexp.MustCompile(`(?is)(?:\bselect\b|,)\s*(?:"?[a-zA-Z_][a-zA-Z0-9_]*"?\s*\.\s*)?\*`)
 
 	// Names introduced by a WITH clause. A CTE is not a table: it is defined inline and
@@ -157,6 +165,10 @@ func ValidateSQL(raw string, opts ValidateOptions) ValidationResult {
 	// bodies first is what separates the two cases. So is multiplication: a projection
 	// star follows SELECT or a comma, while "price * qty" has an operand before it.
 	if len(opts.BlockedColumns) > 0 || len(opts.AggregateOnlyColumns) > 0 {
+		if alias := wholeRowReference(lower, cteNames(lower)); alias != "" {
+			return ValidationResult{Reason: "whole-row reference is not allowed when column policies apply: " + alias}
+		}
+
 		if wildcardOverRealTable(lower) {
 			return ValidationResult{Reason: "select * is not allowed when column policies apply; name the columns"}
 		}
@@ -299,19 +311,61 @@ func ReferencedTables(sql string) []string {
 	return referencedTables(strings.TrimRight(strings.TrimSpace(scrubSQL(sql)), ";"))
 }
 
+// referencedTables lists the tables a statement reads.
+//
+// A FROM clause is a comma-separated list, and matching only the name directly after
+// FROM saw just the first of them: "FROM orders o, secrets s" reported [orders] and the
+// allowlist never heard about secrets. A comma join is not an exotic construct -- it is
+// ordinary SQL that a model writes without prompting -- so the whole clause is scanned.
 func referencedTables(sql string) []string {
 	seen := map[string]bool{}
 	out := []string{}
-	for _, m := range fromJoin.FindAllStringSubmatch(sql, -1) {
-		t := strings.ToLower(strings.TrimSpace(m[1]))
+	add := func(raw string) {
+		t := strings.ToLower(strings.TrimSpace(raw))
 		t = strings.ReplaceAll(t, `"`, "") // normalize quoted identifiers
 		if t == "" || seen[t] {
-			continue
+			return
 		}
 		seen[t] = true
 		out = append(out, t)
 	}
+	for _, m := range fromJoin.FindAllStringSubmatch(sql, -1) {
+		add(m[1])
+	}
+	for _, m := range fromClause.FindAllStringSubmatch(sql, -1) {
+		for _, entry := range splitTopLevel(m[1]) {
+			// A parenthesised entry is a subquery or a function call; its own FROM is
+			// picked up by the scan above, and a function is not a table to allowlist.
+			if strings.HasPrefix(strings.TrimSpace(entry), "(") || strings.Contains(entry, "(") {
+				continue
+			}
+			if ref := tableRef.FindStringSubmatch(entry); ref != nil {
+				add(ref[1])
+			}
+		}
+	}
 	return out
+}
+
+// splitTopLevel splits a FROM clause on commas that are not inside parentheses, so a
+// subquery or function argument list stays in one piece.
+func splitTopLevel(clause string) []string {
+	var out []string
+	depth, start := 0, 0
+	for i := 0; i < len(clause); i++ {
+		switch clause[i] {
+		case '(':
+			depth++
+		case ')':
+			depth--
+		case ',':
+			if depth == 0 {
+				out = append(out, clause[start:i])
+				start = i + 1
+			}
+		}
+	}
+	return append(out, clause[start:])
 }
 
 // cteNames returns the names a WITH clause introduces, lowercased and unquoted.
@@ -408,12 +462,94 @@ func wildcardOverRealTable(lower string) bool {
 		cteName[cte.name] = true
 		outer = strings.Replace(outer, cte.body, " ", 1)
 	}
+	// A qualified star can sit anywhere, including inside a call like ROW(c.*) where
+	// the projection form never matches. Its qualifier says what it expands: a CTE
+	// exposes only what the CTE selected, a table alias exposes the table.
+	for _, m := range qualifiedStar.FindAllStringSubmatch(lower, -1) {
+		qualifier := strings.Trim(strings.TrimSpace(m[1]), `"`)
+		if !cteName[qualifier] && !aliasOfCTE(lower, qualifier, cteName) {
+			return true
+		}
+	}
 	if !starProjection.MatchString(stripAggregateBodies(outer)) {
 		return false
 	}
 	for _, t := range referencedTables(outer) {
 		if !cteName[t] {
 			return true // the outer star covers a real table too
+		}
+	}
+	return false
+}
+
+// aliasDecl matches a table reference followed by its alias: "customers c" or
+// "customers AS c". The alias is what a whole-row reference uses.
+var aliasDecl = regexp.MustCompile(`(?is)\b([a-zA-Z_][a-zA-Z0-9_]*)\s+(?:as\s+)?("?[a-zA-Z_][a-zA-Z0-9_]*"?)\s*(?:,|\)|$|\bon\b|\bwhere\b|\bjoin\b|\bgroup\b|\border\b|\blimit\b)`)
+
+// wholeRowReference finds a bare table alias used as a value, and returns it.
+//
+// PostgreSQL lets a query name the row itself: "SELECT c FROM customers c" returns
+// every column as a composite, and to_jsonb(c) turns it into readable JSON. Neither
+// writes a single column name, so every check that looks for one -- blocked columns,
+// aggregate-only columns -- sees nothing to object to. It is the same hole the wildcard
+// had, reached by a different construct.
+//
+// The alias appears once where it is declared, so a reference is an occurrence beyond
+// that which is not followed by a dot. "SELECT c.id FROM customers c" names a column
+// and is left alone.
+func wholeRowReference(lower string, ctes map[string]bool) string {
+	for _, clause := range fromClause.FindAllStringSubmatch(lower, -1) {
+		for _, entry := range splitTopLevel(clause[1]) {
+			m := aliasDecl.FindStringSubmatch(entry + ",")
+			if m == nil {
+				continue
+			}
+			table := strings.ToLower(strings.TrimSpace(m[1]))
+			alias := strings.Trim(strings.TrimSpace(m[2]), `"`)
+			// The word before the alias has to be a table name. When the clause span runs
+			// past its own query -- which it does when there is no trailing keyword -- a
+			// pair like "from recent" otherwise reads as table "from", alias "recent".
+			if alias == "" || sqlNoiseWord[alias] || sqlNoiseWord[table] {
+				continue
+			}
+			// A whole-row reference to a CTE exposes only what the CTE selected, and that
+			// body was checked by these same rules. Same reasoning as the wildcard.
+			if ctes[alias] || ctes[table] {
+				continue
+			}
+			bare := regexp.MustCompile(`(?is)\b` + regexp.QuoteMeta(alias) + `\b\s*(?:[^.a-zA-Z0-9_]|$)`)
+			if len(bare.FindAllString(lower, -1)) > 1 {
+				return alias
+			}
+		}
+	}
+	return ""
+}
+
+// sqlNoiseWord lists words the alias matcher can pick up that are not aliases.
+var sqlNoiseWord = map[string]bool{
+	"as": true, "on": true, "and": true, "or": true, "join": true, "inner": true,
+	"left": true, "right": true, "full": true, "outer": true, "cross": true,
+	"lateral": true, "natural": true, "using": true, "only": true,
+	// Clause keywords, so a span that overshoots its own query does not invent a table.
+	"from": true, "select": true, "with": true, "by": true, "order": true, "group": true,
+	"where": true, "having": true, "limit": true, "offset": true, "union": true,
+}
+
+// aliasOfCTE reports whether qualifier is an alias given to a CTE, as in
+// "FROM recent r" where recent is a CTE: r.* then expands to the CTE's columns.
+func aliasOfCTE(lower, qualifier string, ctes map[string]bool) bool {
+	for _, clause := range fromClause.FindAllStringSubmatch(lower, -1) {
+		for _, entry := range splitTopLevel(clause[1]) {
+			m := aliasDecl.FindStringSubmatch(entry + ",")
+			if m == nil {
+				continue
+			}
+			table := strings.ToLower(strings.TrimSpace(m[1]))
+			alias := strings.Trim(strings.TrimSpace(m[2]), `"`)
+			if alias == qualifier && ctes[table] {
+				return true
+			}
 		}
 	}
 	return false
