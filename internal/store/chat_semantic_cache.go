@@ -17,22 +17,22 @@ type ChatSemanticHit struct {
 // PutChatSemanticEntry stores a prompt embedding + the response it produced, for
 // embedding-similarity reuse. Best-effort; oversized vectors/bodies are the caller's
 // concern.
-func (s *SQLStore) PutChatSemanticEntry(ctx context.Context, id, model string, embedding []float64, contentType string, body []byte, ttl time.Duration) error {
+func (s *SQLStore) PutChatSemanticEntry(ctx context.Context, id, model, scope string, embedding []float64, contentType string, body []byte, ttl time.Duration) error {
 	vec, err := json.Marshal(embedding)
 	if err != nil {
 		return err
 	}
 	now := time.Now().UTC()
-	_, err = s.db.ExecContext(ctx, s.bind(`INSERT INTO chat_semantic_cache (id, model, embedding, content_type, body, created_at, expires_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
+	_, err = s.db.ExecContext(ctx, s.bind(`INSERT INTO chat_semantic_cache (id, model, scope, embedding, content_type, body, created_at, expires_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET embedding = excluded.embedding, content_type = excluded.content_type, body = excluded.body, expires_at = excluded.expires_at`),
-		id, model, string(vec), contentType, body, now.Format(time.RFC3339Nano), now.Add(ttl).Format(time.RFC3339Nano))
+		id, model, scope, string(vec), contentType, body, now.Format(time.RFC3339Nano), now.Add(ttl).Format(time.RFC3339Nano))
 	return err
 }
 
 // SearchChatSemantic scans up to maxCandidates recent non-expired entries for the model
 // and returns the most similar response whose cosine similarity meets the threshold.
-func (s *SQLStore) SearchChatSemantic(ctx context.Context, model string, query []float64, threshold float64, maxCandidates int) (ChatSemanticHit, bool, error) {
+func (s *SQLStore) SearchChatSemantic(ctx context.Context, model, scope string, query []float64, threshold float64, maxCandidates int) (ChatSemanticHit, bool, error) {
 	if len(query) == 0 {
 		return ChatSemanticHit{}, false, nil
 	}
@@ -40,7 +40,7 @@ func (s *SQLStore) SearchChatSemantic(ctx context.Context, model string, query [
 		maxCandidates = 200
 	}
 	rows, err := s.db.QueryContext(ctx, s.bind(`SELECT embedding, content_type, body, expires_at FROM chat_semantic_cache
-		WHERE model = ? ORDER BY created_at DESC LIMIT ?`), model, maxCandidates)
+		WHERE model = ? AND COALESCE(scope, '') = ? ORDER BY created_at DESC LIMIT ?`), model, scope, maxCandidates)
 	if err != nil {
 		return ChatSemanticHit{}, false, err
 	}

@@ -62,6 +62,7 @@ type requestPipeline struct {
 
 	chatCacheKey    string
 	chatCacheable   bool
+	chatCacheScope  string
 	chatSemanticVec []float64
 
 	skillName    string
@@ -331,6 +332,7 @@ func (rc *requestPipeline) stepCache() bool {
 	}
 
 	// Chat response cache — opt-in, only for deterministic (temp 0 / seed) requests.
+	rc.chatCacheScope = chatCacheScopeValue(s.cacheConf().ChatScope, rc.authCtx, rc.apiKeyID)
 	rc.chatCacheKey, rc.chatCacheable = s.chatCacheEligible(r, rc.body, rc.authCtx, rc.apiKeyID)
 	if rc.chatCacheable {
 		if served := s.serveChatFromCache(r.Context(), w, rc.chatCacheKey, rc.meta, rc.traceID); served {
@@ -338,7 +340,7 @@ func (rc *requestPipeline) stepCache() bool {
 		}
 		// Exact miss → try the embedding-based semantic cache (opt-in). The query vector
 		// is kept on rc so a fresh upstream response is stored under it.
-		if vec, served := s.serveChatSemantic(r.Context(), w, r, rc.body, rc.meta, rc.traceID); served {
+		if vec, served := s.serveChatSemantic(r.Context(), w, r, rc.body, rc.chatCacheScope, rc.meta, rc.traceID); served {
 			return false
 		} else {
 			rc.chatSemanticVec = vec
@@ -646,7 +648,7 @@ func (rc *requestPipeline) stepUpstream() bool {
 	}
 	if captureForChatCache && analysis.Text != "" {
 		s.maybeStoreChatCache(r.Context(), rc.chatCacheKey, resp.StatusCode, resp.Header.Get("Content-Type"), []byte(analysis.Text))
-		s.maybeStoreChatSemantic(r.Context(), rc.body, rc.chatSemanticVec, resp.StatusCode, resp.Header.Get("Content-Type"), []byte(analysis.Text))
+		s.maybeStoreChatSemantic(r.Context(), rc.body, rc.chatCacheScope, rc.chatSemanticVec, resp.StatusCode, resp.Header.Get("Content-Type"), []byte(analysis.Text))
 	}
 	if captureForCache || captureForChatCache {
 		s.metrics.IncCacheMiss()

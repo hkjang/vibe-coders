@@ -143,7 +143,7 @@ func (e *cacheEmbedError) Error() string { return "embedding upstream failed" }
 // served=true. It always returns the computed query vector (when available) so the
 // caller can store the eventual response under it. Any failure → (nil, false): the
 // request proceeds normally.
-func (s *Server) serveChatSemantic(ctx context.Context, w http.ResponseWriter, r *http.Request, body []byte, meta store.LogRecord, traceID string) ([]float64, bool) {
+func (s *Server) serveChatSemantic(ctx context.Context, w http.ResponseWriter, r *http.Request, body []byte, scope string, meta store.LogRecord, traceID string) ([]float64, bool) {
 	cfg := s.cacheConf()
 	if !cfg.ChatSemanticEnabled || strings.TrimSpace(cfg.ChatSemanticModel) == "" {
 		return nil, false
@@ -163,7 +163,7 @@ func (s *Server) serveChatSemantic(ctx context.Context, w http.ResponseWriter, r
 		return nil, false
 	}
 	_, model, _ := chatCacheKey(body)
-	hit, found, err := s.db.SearchChatSemantic(ctx, model, vec, cfg.ChatSemanticThreshold, cfg.ChatSemanticMaxCandidates)
+	hit, found, err := s.db.SearchChatSemantic(ctx, model, scope, vec, cfg.ChatSemanticThreshold, cfg.ChatSemanticMaxCandidates)
 	if err != nil || !found {
 		return vec, false
 	}
@@ -194,9 +194,13 @@ func (s *Server) serveChatSemantic(ctx context.Context, w http.ResponseWriter, r
 	return vec, true
 }
 
+// The scope is the same one the exact cache uses, and it matters more here: a semantic
+// hit does not need the prompt to match, only to be close. Without it CACHE_CHAT_SCOPE
+// would isolate exact entries while leaving the looser path open, which is assurance
+// that reads as protection and is not.
 // maybeStoreChatSemantic stores a successful chat response under the query embedding for
 // future semantic reuse.
-func (s *Server) maybeStoreChatSemantic(ctx context.Context, body []byte, vec []float64, statusCode int, contentType string, responseBody []byte) {
+func (s *Server) maybeStoreChatSemantic(ctx context.Context, body []byte, scope string, vec []float64, statusCode int, contentType string, responseBody []byte) {
 	if !s.cacheConf().ChatSemanticEnabled || len(vec) == 0 || statusCode != http.StatusOK || len(responseBody) == 0 {
 		return
 	}
@@ -207,7 +211,7 @@ func (s *Server) maybeStoreChatSemantic(ctx context.Context, body []byte, vec []
 	if model == "" {
 		return
 	}
-	if err := s.db.PutChatSemanticEntry(ctx, newID("sem"), model, vec, contentType, responseBody, s.cacheConf().ChatTTL); err != nil {
+	if err := s.db.PutChatSemanticEntry(ctx, newID("sem"), model, scope, vec, contentType, responseBody, s.cacheConf().ChatTTL); err != nil {
 		slog.Warn("semantic cache store failed", "error", err)
 	}
 }

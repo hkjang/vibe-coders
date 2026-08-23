@@ -840,6 +840,10 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 				created_at TEXT NOT NULL,
 				expires_at TEXT
 			)`,
+		// Scope isolates a cached answer to the caller that produced it. Empty means
+		// shared, which is what every row written before this column existed was, and
+		// what CACHE_CHAT_SCOPE=global still writes.
+		`ALTER TABLE chat_semantic_cache ADD COLUMN scope TEXT NOT NULL DEFAULT ''`,
 		`CREATE INDEX IF NOT EXISTS idx_chat_semantic_model ON chat_semantic_cache(model, created_at)`,
 		`CREATE TABLE IF NOT EXISTS model_pricing_versions (
 				id TEXT PRIMARY KEY,
