@@ -113,9 +113,19 @@ func (rc *requestPipeline) stepAuth() bool {
 		rc.apiKeyID = injected.APIKeyID
 		rc.authCtx = injected.AuthCtx
 	} else {
-		var ok bool
-		rc.apiKeyID, rc.authCtx, ok = s.authenticateProxyContext(r)
-		if !ok {
+		var outcome authOutcome
+		rc.apiKeyID, rc.authCtx, outcome = s.authenticateProxyContextWithOutcome(r)
+		switch outcome {
+		case authUnavailable:
+			// The credential could not be checked, so the request is refused — but this is
+			// an outage, not a bad key. 503 is retryable where 401 is not, and the message
+			// points at the store so nobody spends an incident reissuing keys.
+			w.Header().Set("Retry-After", "5")
+			writeOpenAIError(w, http.StatusServiceUnavailable,
+				"cannot verify credentials right now: the gateway database is unreachable. The request was refused rather than allowed unverified; retry shortly.",
+				"server_error", "auth_backend_unavailable")
+			return false
+		case authDenied:
 			writeOpenAIError(w, http.StatusUnauthorized, "invalid proxy API key", "invalid_request_error", "invalid_api_key")
 			return false
 		}

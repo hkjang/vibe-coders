@@ -31,7 +31,7 @@ import (
 )
 
 // AppVersion is the gateway build version, surfaced in /auth/me and the admin UI.
-const AppVersion = "v0.76.84"
+const AppVersion = "v0.76.85"
 
 type Server struct {
 	cfg      config.Config
@@ -1389,63 +1389,86 @@ func (s *Server) authenticateProxy(r *http.Request) (string, bool) {
 	return id, ok
 }
 
+// authOutcome distinguishes "this caller is not allowed" from "we could not find out".
+//
+// Both refuse the request — failing closed when credentials cannot be verified is the
+// only safe choice — but they are different events and deserve different answers. A
+// database outage used to be reported to the client as 401 "invalid proxy API key",
+// which is wrong twice over: it tells an operator their key is bad while the real
+// problem is the store, and 401 tells clients and SDKs the request is not worth
+// retrying, so a transient outage reads as a permanent credential failure.
+type authOutcome int
+
+const (
+	authDenied      authOutcome = iota // the caller is genuinely not allowed
+	authOK                             // the caller is identified and allowed
+	authUnavailable                    // the store could not be consulted; unknown, so refused
+)
+
+// authenticateProxyContext keeps the boolean shape used by the handlers that only need
+// to know whether a caller was identified.
 func (s *Server) authenticateProxyContext(r *http.Request) (string, *store.AuthContext, bool) {
+	id, ctx, outcome := s.authenticateProxyContextWithOutcome(r)
+	return id, ctx, outcome == authOK
+}
+
+func (s *Server) authenticateProxyContextWithOutcome(r *http.Request) (string, *store.AuthContext, authOutcome) {
 	token := bearerToken(r.Header.Get("Authorization"))
 	if token == "" {
 		hasKeys, err := s.db.HasActiveAPIKeys(r.Context())
 		if err != nil {
 			slog.Warn("check active proxy keys failed", "error", err)
-			return "", nil, false
+			return "", nil, authUnavailable
 		}
 		if !hasKeys && !s.cfg.Auth.Enabled {
-			return "anonymous", nil, true
+			return "anonymous", nil, authOK
 		}
 		_ = s.db.InsertAuditEvent(r.Context(), store.AuthEvent{ID: newID("ae"), EventType: "api_key_denied", IP: clientIP(r), UserAgent: r.UserAgent(), Detail: "missing bearer token", CreatedAt: time.Now().UTC()})
-		return "", nil, false
+		return "", nil, authDenied
 	}
 	keyHash := hashProxyKey(token)
 	key, found, err := s.db.FindActiveAPIKeyByHash(r.Context(), keyHash)
 	if err != nil {
 		slog.Warn("lookup proxy api key failed", "error", err)
-		return "", nil, false
+		return "", nil, authUnavailable
 	}
 	if found {
 		authCtx := authContextFromAPIKey(key)
 		s.enrichAuthContextTeam(r.Context(), &authCtx)
 		if !key.RevokedAt.IsZero() || key.Status != "active" {
 			_ = s.db.InsertAuditEvent(r.Context(), store.AuthEvent{ID: newID("ae"), EventType: "api_key_denied", APIKeyID: key.ID, IP: clientIP(r), UserAgent: r.UserAgent(), Detail: "revoked_or_inactive", CreatedAt: time.Now().UTC()})
-			return "", nil, false
+			return "", nil, authDenied
 		}
 		if !key.ExpiresAt.IsZero() && key.ExpiresAt.Before(time.Now().UTC()) {
 			_ = s.db.InsertAuditEvent(r.Context(), store.AuthEvent{ID: newID("ae"), EventType: "api_key_denied", APIKeyID: key.ID, IP: clientIP(r), UserAgent: r.UserAgent(), Detail: "expired", CreatedAt: time.Now().UTC()})
-			return "", nil, false
+			return "", nil, authDenied
 		}
 		if !ipAllowed(clientIP(r), key.AllowedIPs) {
 			_ = s.db.InsertAuditEvent(r.Context(), store.AuthEvent{ID: newID("ae"), EventType: "ip_denied", APIKeyID: key.ID, IP: clientIP(r), UserAgent: r.UserAgent(), Detail: strings.Join(key.AllowedIPs, ","), CreatedAt: time.Now().UTC()})
-			return "", nil, false
+			return "", nil, authDenied
 		}
 		scope := apiScopeForRequest(r)
 		if s.cfg.Auth.Enabled && scope != "" && !hasScope(key.Scopes, scope) {
 			_ = s.db.InsertAuditEvent(r.Context(), store.AuthEvent{ID: newID("ae"), EventType: "scope_denied", APIKeyID: key.ID, TeamID: key.Team, IP: clientIP(r), UserAgent: r.UserAgent(), Detail: scope, CreatedAt: time.Now().UTC()})
-			return "", nil, false
+			return "", nil, authDenied
 		}
-		return key.ID, &authCtx, true
+		return key.ID, &authCtx, authOK
 	}
 	// 토큰이 proxy key(pcg_ 접두사)가 아니면 upstream API key passthrough 로 허용
 	// 이를 통해 Roo Code / Cursor 등이 upstream key 를 직접 보내도 프록시가 작동함
 	if !s.cfg.Auth.Enabled && !strings.HasPrefix(token, "pcg_") {
-		return s.attributeExternalKey(r, keyHash), nil, true
+		return s.attributeExternalKey(r, keyHash), nil, authOK
 	}
 	hasKeys, err := s.db.HasActiveAPIKeys(r.Context())
 	if err != nil {
 		slog.Warn("check active proxy keys failed", "error", err)
-		return "", nil, false
+		return "", nil, authUnavailable
 	}
 	if !hasKeys && !s.cfg.Auth.Enabled {
-		return "anonymous", nil, true
+		return "anonymous", nil, authOK
 	}
 	_ = s.db.InsertAuditEvent(r.Context(), store.AuthEvent{ID: newID("ae"), EventType: "api_key_denied", IP: clientIP(r), UserAgent: r.UserAgent(), Detail: "unknown key", CreatedAt: time.Now().UTC()})
-	return "", nil, false
+	return "", nil, authDenied
 }
 
 // attributeExternalKey maps an unregistered (non-proxy) bearer key to a stable
