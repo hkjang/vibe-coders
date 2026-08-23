@@ -205,6 +205,8 @@ func (s *Server) handleXViewModelSeries(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	since, until := xviewTimeRange(r, 24*time.Hour)
+	// Same timezone the range was parsed in, so the buckets line up with the filter.
+	loc := searchLocation(r.URL.Query().Get("tz"))
 	bucket := strings.TrimSpace(strings.ToLower(r.URL.Query().Get("bucket")))
 	if bucket != "day" {
 		bucket = "hour"
@@ -235,7 +237,7 @@ func (s *Server) handleXViewModelSeries(w http.ResponseWriter, r *http.Request) 
 		if m == "" {
 			m = "(unknown)"
 		}
-		ts := bucketTimestamp(p.CreatedAt, bucket)
+		ts := bucketTimestamp(p.CreatedAt, bucket, loc)
 		key := bucketKey{model: m, ts: ts}
 		b, ok := data[key]
 		if !ok {
@@ -279,8 +281,20 @@ func (s *Server) handleXViewModelSeries(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
-// bucketTimestamp truncates a created_at string to hour or day precision.
-func bucketTimestamp(createdAt, bucket string) string {
+// bucketTimestamp truncates a created_at string to hour or day precision, in the same
+// timezone the request filtered by.
+//
+// The day bucket has to follow the filter. XView's from/to range is parsed in Asia/Seoul
+// unless the caller passes ?tz=, so a search for one Seoul day was being answered with
+// buckets labelled by UTC day: three requests sent at 01:30, 08:00 and 20:00 on a Seoul
+// Monday came back as two days, with the morning filed under Sunday. A bare "2026-08-23"
+// carries no offset, so a client cannot correct it afterwards either.
+//
+// The hour bucket is left as a UTC instant on purpose. Seoul is a whole-hour offset, so
+// hour boundaries coincide and the label already names the right moment in a form any
+// client can convert — 2026-08-23T23:00:00Z is 08:00 in Seoul. Rewriting it would change
+// the text an existing API consumer parses without making it any more correct.
+func bucketTimestamp(createdAt, bucket string, loc *time.Location) string {
 	// createdAt is RFC3339Nano from the store; truncate to bucket granularity.
 	t, err := time.Parse(time.RFC3339Nano, createdAt)
 	if err != nil {
@@ -294,7 +308,7 @@ func bucketTimestamp(createdAt, bucket string) string {
 		}
 	}
 	if bucket == "day" {
-		return t.UTC().Format("2006-01-02")
+		return t.In(loc).Format("2006-01-02")
 	}
 	return t.UTC().Format("2006-01-02T15:00:00Z")
 }

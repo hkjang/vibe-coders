@@ -198,6 +198,13 @@ func (s *Server) emitPolicyFacts(events []store.PolicyDecisionEvent) {
 		if strings.TrimSpace(e.Decision) == "" {
 			continue
 		}
+		// event_date stays UTC while the gateway's own charts bucket by Seoul day, and that
+		// is deliberate. It is a partition key here (PARTITION BY toYYYYMM(event_date)) on an
+		// append-only export, so switching conventions would leave old rows dated one way and
+		// new rows the other inside a single table, with no way to rewrite the history - the
+		// same discontinuity that made the analytics_daily rollup worth fixing, except this
+		// one could not be repaired afterwards. event_time carries the full instant, so a
+		// warehouse query that needs Seoul days can derive them from it.
 		ts := e.CreatedAt.UTC()
 		if ts.IsZero() {
 			ts = time.Now().UTC()
