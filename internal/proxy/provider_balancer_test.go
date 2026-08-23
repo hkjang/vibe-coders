@@ -81,9 +81,15 @@ func TestResolveSessionAffinityPrefersExplicitIdentity(t *testing.T) {
 	if got := resolveSessionAffinity(bare, body, "key_1", "inferred-1"); got.Source != affinitySourceConv {
 		t.Fatalf("expected conversation affinity, got %+v", got)
 	}
-	// Only a shape with no conversation at all falls through to the inferred session.
-	noConv, _ := json.Marshal(map[string]any{"model": "m", "input": "embed me"})
-	if got := resolveSessionAffinity(bare, noConv, "key_1", "inferred-1"); got.Source != affinitySourceInferred {
+	// An embedding has no conversation but does have content of its own, which is what
+	// lets a batch spread across the pool instead of collapsing onto one key.
+	embedBody, _ := json.Marshal(map[string]any{"model": "m", "input": "embed me"})
+	if got := resolveSessionAffinity(bare, embedBody, "key_1", "inferred-1"); got.Source != affinitySourceContent {
+		t.Fatalf("expected content affinity for an embedding, got %+v", got)
+	}
+	// Only a body offering neither falls through to the coarse inferred session.
+	noContent, _ := json.Marshal(map[string]any{"model": "m"})
+	if got := resolveSessionAffinity(bare, noContent, "key_1", "inferred-1"); got.Source != affinitySourceInferred {
 		t.Fatalf("expected inferred fallback, got %+v", got)
 	}
 }
@@ -638,5 +644,69 @@ func TestSessionHashStickyAcrossTwoGatewayInstances(t *testing.T) {
 	total := hits[0].Load() + hits[1].Load() + hits[2].Load()
 	if total != conversations*5 {
 		t.Fatalf("expected %d upstream calls, got %d", conversations*5, total)
+	}
+}
+
+// Embeddings carry no conversation, so they used to fall through to the inferred
+// session — one key for an entire client. Under session_hash that pins a whole batch
+// job to a single provider while the rest of the pool idles, which defeats load
+// balancing for the most parallelisable workload the gateway serves.
+func TestEmbeddingRequestsSpreadAcrossThePool(t *testing.T) {
+	embedBody := func(input string) []byte {
+		b, _ := json.Marshal(map[string]any{"model": "core-h200", "input": input})
+		return b
+	}
+	req := httptest.NewRequest(http.MethodPost, "/v1/embeddings", nil)
+
+	// Identity now comes from the request's own content, not from the client.
+	first := resolveSessionAffinity(req, embedBody("chunk one"), "key_1", "inferred-1")
+	second := resolveSessionAffinity(req, embedBody("chunk two"), "key_1", "inferred-1")
+	if first.Source != affinitySourceContent || second.Source != affinitySourceContent {
+		t.Fatalf("embeddings did not use content affinity: %+v %+v", first, second)
+	}
+	if first.Key == second.Key {
+		t.Fatal("two different inputs share one affinity key; a batch job cannot spread")
+	}
+	// Identical input keeps landing on the same node, where an upstream cache can help.
+	if repeat := resolveSessionAffinity(req, embedBody("chunk one"), "key_1", "inferred-1"); repeat.Key != first.Key {
+		t.Fatal("the same input produced a different key; cache affinity is lost")
+	}
+	// Scoped per caller, like conversation affinity.
+	if other := resolveSessionAffinity(req, embedBody("chunk one"), "key_2", "inferred-1"); other.Key == first.Key {
+		t.Fatal("content affinity is not scoped per api key")
+	}
+
+	// The point of all this: a batch actually uses the whole pool.
+	pool := []string{"gpu-a", "gpu-b", "gpu-c"}
+	b := newProviderBalancer()
+	now := time.Unix(1_700_000_000, 0).UTC()
+	counts := map[string]int{}
+	for i := 0; i < 120; i++ {
+		aff := resolveSessionAffinity(req, embedBody("chunk "+itoaProxy(i)), "key_1", "inferred-1")
+		d, ok := b.pick("core-h200", aff.Key, pool, balanceSessionHash, true, time.Hour, now)
+		if !ok {
+			t.Fatalf("no pick for chunk %d", i)
+		}
+		counts[d.Provider]++
+	}
+	if len(counts) != 3 {
+		t.Fatalf("a 120-request batch reached only %d of 3 providers: %+v", len(counts), counts)
+	}
+	for name, n := range counts {
+		if n < 20 || n > 70 {
+			t.Fatalf("provider %s took %d of 120 embeddings, outside the expected band: %+v", name, n, counts)
+		}
+	}
+
+	// An explicit session id still wins — a client that declares one knows better.
+	withHeader := httptest.NewRequest(http.MethodPost, "/v1/embeddings", nil)
+	withHeader.Header.Set("X-Session-ID", "explicit-1")
+	if got := resolveSessionAffinity(withHeader, embedBody("chunk one"), "key_1", ""); got.Source != affinitySourceHeader {
+		t.Fatalf("an explicit session header was ignored for embeddings: %+v", got)
+	}
+	// A body with neither conversation nor input still falls back to the inferred session.
+	bare, _ := json.Marshal(map[string]any{"model": "core-h200"})
+	if got := resolveSessionAffinity(req, bare, "key_1", "inferred-1"); got.Source != affinitySourceInferred {
+		t.Fatalf("expected the inferred fallback for a body with no content: %+v", got)
 	}
 }

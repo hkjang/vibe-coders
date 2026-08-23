@@ -362,6 +362,7 @@ const (
 	affinitySourceHeader   = "header"
 	affinitySourceBody     = "body"
 	affinitySourceConv     = "conversation"
+	affinitySourceContent  = "content"
 	affinitySourceInferred = "inferred"
 )
 
@@ -411,6 +412,29 @@ func conversationAffinity(body []byte, apiKeyID string) string {
 	return audit.HashText(apiKeyID + "\x00" + strings.Join(parts, "\x00"))
 }
 
+// embeddingAffinity derives an identity from an embedding request's own content.
+//
+// Embeddings carry no conversation, so conversationAffinity finds nothing and every
+// request from one client falls through to the inferred session — a single key. Under
+// session_hash that sends an entire batch job to one provider while the rest of the
+// pool idles, which defeats load balancing for the most parallel workload there is.
+//
+// Hashing the input instead spreads distinct inputs across the pool and still sends
+// identical ones to the same node, where an upstream embedding cache can serve them.
+// There is no conversation to keep warm here, so nothing is lost by not pinning.
+func embeddingAffinity(body []byte, apiKeyID string) string {
+	root := jsonMap(body)
+	if root == nil {
+		return ""
+	}
+	content := flattenContent(root["input"])
+	if strings.TrimSpace(content) == "" {
+		return ""
+	}
+	model, _ := root["model"].(string)
+	return audit.HashText(apiKeyID + "\x00" + model + "\x00" + content)
+}
+
 // resolveSessionAffinity picks the most specific identity available, most
 // authoritative first. An explicit id from the client always wins: a caller that
 // declares its session knows better than anything the gateway can infer.
@@ -425,6 +449,9 @@ func resolveSessionAffinity(r *http.Request, body []byte, apiKeyID, inferredSess
 	}
 	if v := conversationAffinity(body, apiKeyID); v != "" {
 		return sessionAffinity{Key: affinitySourceConv + ":" + v, Source: affinitySourceConv}
+	}
+	if v := embeddingAffinity(body, apiKeyID); v != "" {
+		return sessionAffinity{Key: affinitySourceContent + ":" + v, Source: affinitySourceContent}
 	}
 	if inferredSession != "" {
 		// Coarse last resort: groups every concurrent conversation from one client

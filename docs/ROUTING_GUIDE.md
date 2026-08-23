@@ -264,11 +264,18 @@ gpu-c   base_url = http://h200-3:8000   model_patterns = core-h200
 | 1 | 세션 헤더 (`X-Session-ID`, `X-LLM-Session-ID`, `X-Conversation-ID`, `X-Qwen-Code-Session-Id` 등) | `header` |
 | 2 | body의 `session_id`·`chat_id`·`conversation_id`·`thread_id`(`metadata` 안 포함) | `body` |
 | 3 | **대화 프리픽스 해시** — (시스템 프롬프트 + 첫 사용자 메시지 + API 키) | `conversation` |
+| 3-1 | **요청 내용 해시** — 임베딩처럼 대화가 없는 요청에 (모델 + `input` + API 키) | `content` |
 | 4 | 추론 세션(키+IP+UA+repo+branch) | `inferred` |
 
 **3번이 qwen code 같은 에이전트의 실질 경로입니다.** qwen code는 일반 OpenAI 호환 엔드포인트에 세션 식별자를 보내지 않습니다 — 기본 provider가 붙이는 것은 `User-Agent: QwenCode/...` 와 사용자가 설정한 `customHeaders` 뿐이고, `metadata.sessionId` 를 body에 넣는 경로는 DashScope 전용입니다. 계획된 `X-Qwen-Code-Session-Id` 헤더도 Alibaba 1st-party 호스트로 범위가 좁혀져 있어 서드파티 게이트웨이에는 오지 않습니다.
 
 추론 세션(4번)에 의존하면 같은 PC·같은 키에서 띄운 **동시 대화가 전부 하나로 뭉개져** 한 provider에 몰립니다. 대화 프리픽스 해시는 클라이언트 협조 없이 대화를 구분하며, 동시에 **같은 프리픽스를 같은 노드로 보내 vLLM 캐시 적중을 최대화**합니다.
+
+**임베딩(`/v1/embeddings`)** 은 대화가 없어 3번이 걸리지 않습니다. 그대로 두면 한 클라이언트의 모든 임베딩이 4번(추론 세션)으로 **하나의 키에 뭉개져**, 배치 작업 전체가 프로바이더 한 대로만 갑니다 — 가장 병렬화하기 좋은 워크로드에서 로드밸런싱이 무력화됩니다. 그래서 요청 자신의 내용으로 키를 만듭니다(3-1).
+
+- 서로 다른 입력은 풀 전체로 **분산**됩니다.
+- 동일한 입력은 **같은 노드로** 가므로 업스트림 임베딩 캐시가 활용됩니다.
+- 임베딩에는 유지할 대화가 없으므로 고정하지 않아 잃는 것이 없습니다.
 
 > 클라이언트가 세션 헤더를 보낼 수 있다면 그게 가장 정확합니다. qwen code는 설정의 `customHeaders` 로 정적 헤더만 넣을 수 있어 대화별 값에는 쓸 수 없습니다.
 
@@ -303,7 +310,7 @@ gpu-c   base_url = http://h200-3:8000   model_patterns = core-h200
 | `X-Provider` | 실제 처리한 provider |
 | `X-Route-Reason` | `sticky_hash`(해시로 결정, 모든 인스턴스 동일) / `round_robin`(회전 배정) / `sticky_session`(로컬 고정 — 폴백 후 재고정된 경우) |
 | `X-Route-Detail` | `2/3` 같은 회전 위치, 또는 고정된 세션 표시 |
-| `X-Session-Affinity` | 세션 식별 출처 — `header`/`body`/`conversation`/`inferred` |
+| `X-Session-Affinity` | 세션 식별 출처 — `header`/`body`/`conversation`/`content`(임베딩)/`inferred` |
 | `X-Session-Affinity-Key` | 식별 키(앞 12자) |
 
 같은 대화의 턴마다 `X-Provider` 가 유지되면 정상입니다(`session_hash` 모드면 계속 `sticky_hash`, 폴백을 겪은 세션은 `sticky_session`). 매 턴 `round_robin` 이면 세션 식별이 실패하는 것이므로 `X-Session-Affinity` 를 확인하세요.
