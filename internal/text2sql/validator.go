@@ -55,6 +55,11 @@ var (
 	// paren; stripAggregateBodies then removes the balanced parenthesized body so nested
 	// calls (e.g. sum(coalesce(col,0))) are fully accounted for.
 	aggFuncRe = regexp.MustCompile(`(?is)\b(?:count|sum|avg|min|max|stddev|variance|var_pop|var_samp)\s*\(`)
+
+	// Names introduced by a WITH clause. A CTE is not a table: it is defined inline and
+	// resolves to whatever its body selects from, which the allowlist checks separately.
+	// Matching "WITH x AS (", "WITH RECURSIVE x AS (" and each ", y AS (" that follows.
+	cteNameRe = regexp.MustCompile(`(?is)(?:\bwith\s+(?:recursive\s+)?|,\s*)("?[a-zA-Z_][a-zA-Z0-9_]*"?)\s*(?:\([^)]*\)\s*)?as\s*\(`)
 )
 
 // stripAggregateBodies blanks out the (balanced-parenthesis) argument list of every
@@ -158,15 +163,33 @@ func ValidateSQL(raw string, opts ValidateOptions) ValidationResult {
 
 	tables := referencedTables(stripped)
 	if len(opts.AllowedTables) > 0 {
+		// A CTE name is not a table: it is defined inline and resolves to whatever its
+		// body selects from. Without allowing for that, an allowlist rejects every query
+		// using WITH -- which an LLM writes for anything non-trivial -- and reports
+		// "table not allowed: recent" about a name the user never wrote.
+		//
+		// Scope matters, and getting it wrong is worse than the over-blocking it fixes.
+		// Exempting the name everywhere lets "WITH secrets AS (SELECT * FROM secrets)"
+		// through: the same name covers both the CTE and the real table read inside its
+		// own body. A CTE is only visible to what comes after its definition, so each
+		// body is checked against the CTEs declared before it, and only the outer query
+		// sees them all.
 		allowed := map[string]bool{}
 		for _, t := range opts.AllowedTables {
 			allowed[strings.ToLower(strings.TrimSpace(t))] = true
 		}
+		if reason := checkCTEScopes(stripped, allowed); reason != "" {
+			return ValidationResult{Reason: reason, Tables: tables}
+		}
+		ctes := cteNames(stripped)
 		for _, t := range tables {
 			// compare on the unqualified table name and the full reference
 			base := t
 			if i := strings.LastIndex(t, "."); i >= 0 {
 				base = t[i+1:]
+			}
+			if ctes[t] {
+				continue
 			}
 			if !allowed[t] && !allowed[base] {
 				return ValidationResult{Reason: "table not allowed: " + t, Tables: tables}
@@ -229,7 +252,7 @@ func stripComments(sql string) string {
 	return sql
 }
 
-// stringLiteral matches a single-quoted SQL string, including doubled-quote ('')
+// stringLiteral matches a single-quoted SQL string, including doubled-quote (”)
 // escapes inside it.
 var stringLiteral = regexp.MustCompile(`'(?:[^']|'')*'`)
 
@@ -268,4 +291,80 @@ func referencedTables(sql string) []string {
 		out = append(out, t)
 	}
 	return out
+}
+
+// cteNames returns the names a WITH clause introduces, lowercased and unquoted.
+func cteNames(sql string) map[string]bool {
+	out := map[string]bool{}
+	for _, m := range cteNameRe.FindAllStringSubmatch(sql, -1) {
+		name := strings.ToLower(strings.TrimSpace(m[1]))
+		name = strings.ReplaceAll(name, `"`, "")
+		if name != "" {
+			out[name] = true
+		}
+	}
+	return out
+}
+
+// cteSpan is one WITH entry: its name and the source text of its body.
+type cteSpan struct {
+	name string
+	body string
+}
+
+// cteSpans returns the WITH entries in declaration order, each with the text between
+// its "AS (" and the matching ")".
+func cteSpans(sql string) []cteSpan {
+	var out []cteSpan
+	for _, loc := range cteNameRe.FindAllStringSubmatchIndex(sql, -1) {
+		name := strings.ToLower(strings.TrimSpace(sql[loc[2]:loc[3]]))
+		name = strings.ReplaceAll(name, `"`, "")
+		if name == "" {
+			continue
+		}
+		// loc[1]-1 is the opening paren of the body; walk to its match.
+		open := loc[1] - 1
+		depth, end := 0, -1
+		for i := open; i < len(sql); i++ {
+			switch sql[i] {
+			case '(':
+				depth++
+			case ')':
+				depth--
+			}
+			if depth == 0 {
+				end = i
+				break
+			}
+		}
+		if end < 0 {
+			continue
+		}
+		out = append(out, cteSpan{name: name, body: sql[open+1 : end]})
+	}
+	return out
+}
+
+// checkCTEScopes verifies every table referenced inside a CTE body, allowing a body to
+// reference CTEs declared before it. Returns "" when everything checks out.
+func checkCTEScopes(sql string, allowed map[string]bool) string {
+	visible := map[string]bool{}
+	for _, cte := range cteSpans(sql) {
+		for _, t := range referencedTables(cte.body) {
+			if visible[t] {
+				continue
+			}
+			base := t
+			if i := strings.LastIndex(t, "."); i >= 0 {
+				base = t[i+1:]
+			}
+			if !allowed[t] && !allowed[base] {
+				return "table not allowed: " + t
+			}
+		}
+		// Only now does the name become visible, so a CTE cannot cover a table of the
+		// same name that its own body reads.
+		visible[cte.name] = true
+	}
+	return ""
 }
