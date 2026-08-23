@@ -671,18 +671,19 @@ func (s *SQLStore) GetIPDetail(ctx context.Context, ip string, recent int) (IPDe
 }
 
 func (s *SQLStore) dailyTimeseries(ctx context.Context, whereClause string, args ...any) ([]TimeseriesPoint, error) {
+	day := s.seoulDayExpr("r.created_at")
 	query := s.bind(fmt.Sprintf(`
-		SELECT substr(r.created_at, 1, 10) AS day,
+		SELECT %s AS day,
 			COUNT(r.id),
 			COALESCE(SUM(t.total_tokens), 0),
 			COALESCE(SUM(t.estimated_cost), 0)
 		FROM request_logs r
 		LEFT JOIN token_usage t ON t.request_id = r.id
 		WHERE %s
-		GROUP BY substr(r.created_at, 1, 10)
+		GROUP BY %s
 		ORDER BY day DESC
 		LIMIT 60
-	`, whereClause))
+	`, day, whereClause, day))
 
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -1732,9 +1733,9 @@ func (s *SQLStore) llmTimeseriesFilter(ctx context.Context, bucket string, since
 	if bucket != "day" {
 		bucket = "hour"
 	}
-	bucketExpr := "substr(r.created_at, 1, 13)"
+	bucketExpr := s.seoulHourExpr("r.created_at")
 	if bucket == "day" {
-		bucketExpr = "substr(r.created_at, 1, 10)"
+		bucketExpr = s.seoulDayExpr("r.created_at")
 	}
 	sinceText := since.UTC().Format(time.RFC3339Nano)
 	queryArgs := append([]any{sinceText}, args...)
@@ -3075,10 +3076,11 @@ func (s *SQLStore) Timeseries(ctx context.Context, q TimeseriesQuery) ([]Timeser
 		return nil, fmt.Errorf("unsupported timeseries scope %q", q.Scope)
 	}
 
-	bucketExpr := "substr(r.created_at, 1, 13)" // YYYY-MM-DDTHH (UTC hour bucket)
+	// Seoul buckets, matching quota resets, budgets, chargeback and the heatmap.
+	bucketExpr := s.seoulHourExpr("r.created_at") // YYYY-MM-DDTHH
 	bucketLabel := "hour"
 	if q.Bucket == "day" {
-		bucketExpr = "substr(r.created_at, 1, 10)" // YYYY-MM-DD
+		bucketExpr = s.seoulDayExpr("r.created_at") // YYYY-MM-DD
 		bucketLabel = "day"
 	}
 

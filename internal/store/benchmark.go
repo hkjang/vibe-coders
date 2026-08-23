@@ -89,7 +89,7 @@ func (s *SQLStore) UserProductivity(ctx context.Context, since time.Time, limit 
 			SELECT COALESCE(NULLIF(r.api_key_id, ''), 'anonymous') AS akid,
 				COUNT(*) AS requests,
 				COUNT(DISTINCT COALESCE(NULLIF(r.session_id, ''), r.id)) AS sessions,
-				COUNT(DISTINCT substr(r.created_at, 1, 10)) AS active_days,
+				COUNT(DISTINCT `+s.seoulDayExpr("r.created_at")+`) AS active_days,
 				SUM(CASE WHEN r.status_code >= 200 AND r.status_code < 300 AND COALESCE(r.error, '') = '' THEN 1 ELSE 0 END) AS successes,
 				COALESCE(SUM(t.estimated_cost), 0) AS cost
 			FROM request_logs r
