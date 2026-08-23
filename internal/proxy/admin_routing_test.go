@@ -939,7 +939,11 @@ func TestHealthDemotesDegradedCandidatesWithoutDroppingThem(t *testing.T) {
 	}
 
 	// Threshold 0 disables the feature outright, leaving priority order untouched.
-	server.cfg.Upstream.HealthDemoteThreshold = 0
+	// Set through the runtime overlay, which is what healthDemoteThreshold() reads —
+	// an operator turns this off from the settings screen, not by restarting.
+	off := server.cfg.Upstream
+	off.HealthDemoteThreshold = 0
+	server.upstreamRuntime.Store(&off)
 	got, demoted = server.demoteUnhealthyCandidates(ctx, []string{"sick", "well"})
 	if len(demoted) != 0 || got[0] != "sick" {
 		t.Fatalf("threshold 0 should disable demotion, got order=%v demoted=%v", got, demoted)

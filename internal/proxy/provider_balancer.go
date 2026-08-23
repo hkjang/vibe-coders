@@ -285,7 +285,7 @@ func shortSession(id string) string {
 }
 
 func (s *Server) balancerConfig() (mode balancerMode, sticky bool, ttl time.Duration) {
-	up := s.cfg.Upstream
+	up := s.upstreamConf()
 	mode = balancerMode(strings.ToLower(strings.TrimSpace(up.LoadBalance)))
 	if mode != balanceRoundRobin && mode != balanceSessionHash {
 		mode = balanceFirst

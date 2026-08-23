@@ -438,6 +438,28 @@ ollama   base_url = http://ollama:11434    model_patterns = nomic-embed-*,mxbai-
 
 ---
 
+## 6-1. 재시작 없이 바꾸기 — 장애 중에 필요한 노브
+
+이 문서의 환경변수 중 **장애 대응용 노브**는 기동 후에도 바꿀 수 있습니다.
+**설정 → 런타임 설정** 화면의 `upstream` · `quota` 그룹에서 저장하면 재시작·재배포 없이 즉시 적용되고,
+다중 파드에서는 각 파드가 다음 폴링 주기(`SETTINGS_RELOAD_INTERVAL`) 안에 따라옵니다.
+
+| 키 | 대응 환경변수 | 언제 만지게 되는가 |
+|---|---|---|
+| `upstream.breaker_enabled` | `UPSTREAM_BREAKER_ENABLED` | 차단기가 멀쩡한 provider를 빼고 있을 때 임시로 끔 |
+| `upstream.breaker_threshold` | `UPSTREAM_BREAKER_THRESHOLD` | 장애 provider를 더 빨리 빼고 싶을 때 낮춤 |
+| `upstream.breaker_cooldown` | `UPSTREAM_BREAKER_COOLDOWN` | 회복이 느린 provider에 탐침 간격을 늘림 |
+| `upstream.failover_budget` | `UPSTREAM_FAILOVER_BUDGET` | 재시도가 길어져 클라이언트가 먼저 끊길 때 조임 |
+| `upstream.health_demote_threshold` | `UPSTREAM_HEALTH_DEMOTE_THRESHOLD` | 느려진 provider를 뒤로 미룸 |
+| `upstream.load_balance` | `UPSTREAM_LOAD_BALANCE` | 분산을 켜거나(`session_hash`) 한 대로 몰 때(`first`) |
+| `upstream.sticky_sessions` · `upstream.sticky_ttl` | `UPSTREAM_STICKY_SESSIONS` · `UPSTREAM_STICKY_TTL` | 고정 때문에 특정 provider에 쏠릴 때 |
+| `quota.reservations_enabled` | `QUOTA_RESERVATIONS_ENABLED` | 쿼터 확인 부하를 줄이거나, 동시 요청 초과를 막을 때 |
+
+**런타임에서 바꿀 수 없는 것 — 의도적입니다.** `UPSTREAM_BASE_URL` · `UPSTREAM_API_KEY` · `UPSTREAM_PROVIDER`
+같은 **접속 정보**는 트래픽이 어디로 갈지를 정하고 기동 시 만들어진 클라이언트에 물려 있습니다.
+임계값을 조정하는 것과 목적지를 바꾸는 것은 다른 종류의 변경이라, 접속 정보는 기동 설정으로 남겨 두었습니다.
+provider를 추가·수정하려면 **설정 → 업스트림 프로바이더** 화면을 쓰세요(이쪽은 원래부터 런타임 반영입니다).
+
 ## 7. 관련 화면 · API
 
 | 대상 | 위치 |

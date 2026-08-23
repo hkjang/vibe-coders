@@ -31,7 +31,7 @@ import (
 )
 
 // AppVersion is the gateway build version, surfaced in /auth/me and the admin UI.
-const AppVersion = "v0.76.77"
+const AppVersion = "v0.76.78"
 
 type Server struct {
 	cfg      config.Config
@@ -43,50 +43,52 @@ type Server struct {
 	balancer *providerBalancer
 	// instanceID identifies this process in shared breaker rows, so an operator can see
 	// which instance reported an outage.
-	instanceID     string
-	secrets        atomic.Pointer[secret.Cipher]
-	secretsMu      sync.Mutex // guards concurrent rotation
-	retention      *store.RetentionWorker
-	killState      atomicKillState
-	loggedRequests sync.Map
-	mcpPolicy      atomic.Pointer[mcpPolicySnapshot]
-	routingRules   atomic.Pointer[routingRulesSnapshot]
-	knowledge      atomic.Pointer[knowledgeSnapshot]
-	deprecations   atomic.Pointer[deprecationSnapshot]
-	costCache      atomic.Pointer[costSnapshot]
-	learnCache     atomic.Pointer[routingLearnSnapshot]
-	priceCache     atomic.Pointer[pricingSnapshot]
-	mmCache        atomic.Pointer[mattermostSnapshot]
-	t2sExec        atomic.Pointer[sql.DB]                  // lazily-opened read-only DB for Text2SQL execute mode (default / env)
-	t2sExecConns   sync.Map                                // named exec connections: connID → *sql.DB
-	t2sTwin        atomic.Pointer[sql.DB]                  // lazily-opened SQL Digital Twin DB (masked/sample) for safe validation
-	t2sKilled      atomic.Bool                             // runtime kill switch: when set, Text2SQL is disabled regardless of config
-	t2sFeatures    atomic.Pointer[map[string]bool]         // runtime Text2SQL feature toggles (admin-managed)
-	t2sRuntime     atomic.Pointer[config.Text2SQLConfig]   // admin-settings overlay over cfg.Text2SQL (runtime snapshot)
-	chRuntime      atomic.Pointer[config.ClickHouseConfig] // admin-settings overlay over cfg.ClickHouse (runtime snapshot)
-	chSinkMu       sync.Mutex                              // guards the managed ClickHouse sink worker lifecycle
-	chSinkStop     context.CancelFunc                      // cancels the running sink worker (nil when stopped)
-	chSinkStarted  bool                                    // true once the startup worker apply has run (gates reload-time restarts)
-	carbonRuntime  atomic.Pointer[config.CarbonConfig]     // admin-settings overlay over cfg.Carbon
-	insRuntime     atomic.Pointer[config.InsuranceConfig]  // admin-settings overlay over cfg.Insurance
-	cacheRuntime   atomic.Pointer[config.CacheConfig]      // admin-settings overlay over cfg.Cache
-	pricingRuntime atomic.Pointer[config.PricingConfig]    // admin-settings overlay over cfg.PricingConf
-	skillsRuntime  atomic.Pointer[config.SkillsConfig]     // admin-settings overlay over cfg.Skills
-	limitsRuntime  atomic.Pointer[config.LimitsConfig]     // admin-settings overlay over cfg.Limits
-	loggingRuntime atomic.Pointer[config.LoggingConfig]    // admin-settings overlay over cfg.Logging
-	mcpRuntime     atomic.Pointer[config.MCPConfig]        // admin-settings overlay over cfg.MCP
-	keycloakCfg    atomic.Pointer[config.KeycloakConfig]   // DB-backed Keycloak provider overlay over cfg.Keycloak (secret decrypted)
-	chFactQueue    chan store.LogRecord                    // async per-request fact ingest queue (bounded)
-	chFactDropped  atomic.Int64                            // requests dropped when the fact queue was full
-	dwCache        *dwQueryCache                           // short-TTL cache for DW dashboard ClickHouse reads
-	sessions       *sessionInferer
-	sessionGCAt    atomic.Int64
-	extSeen        sync.Map // external key id -> struct{}; dedupes lazy registration
-	mcpConns       sync.Map // upstream id -> *mcpUpstreamConn (MCP gateway session state)
-	mcpTools       atomic.Pointer[mcpToolsSnapshot]
-	mcpRefresh     atomic.Bool
-	lastReloadNano atomic.Int64           // unix nanos of this pod's last runtime-config reload (convergence observability)
-	lastReloadTok  atomic.Pointer[string] // admin_settings change token this pod last applied
+	instanceID      string
+	secrets         atomic.Pointer[secret.Cipher]
+	secretsMu       sync.Mutex // guards concurrent rotation
+	retention       *store.RetentionWorker
+	killState       atomicKillState
+	loggedRequests  sync.Map
+	mcpPolicy       atomic.Pointer[mcpPolicySnapshot]
+	routingRules    atomic.Pointer[routingRulesSnapshot]
+	knowledge       atomic.Pointer[knowledgeSnapshot]
+	deprecations    atomic.Pointer[deprecationSnapshot]
+	costCache       atomic.Pointer[costSnapshot]
+	learnCache      atomic.Pointer[routingLearnSnapshot]
+	priceCache      atomic.Pointer[pricingSnapshot]
+	mmCache         atomic.Pointer[mattermostSnapshot]
+	t2sExec         atomic.Pointer[sql.DB]                  // lazily-opened read-only DB for Text2SQL execute mode (default / env)
+	t2sExecConns    sync.Map                                // named exec connections: connID → *sql.DB
+	t2sTwin         atomic.Pointer[sql.DB]                  // lazily-opened SQL Digital Twin DB (masked/sample) for safe validation
+	t2sKilled       atomic.Bool                             // runtime kill switch: when set, Text2SQL is disabled regardless of config
+	t2sFeatures     atomic.Pointer[map[string]bool]         // runtime Text2SQL feature toggles (admin-managed)
+	t2sRuntime      atomic.Pointer[config.Text2SQLConfig]   // admin-settings overlay over cfg.Text2SQL (runtime snapshot)
+	chRuntime       atomic.Pointer[config.ClickHouseConfig] // admin-settings overlay over cfg.ClickHouse (runtime snapshot)
+	chSinkMu        sync.Mutex                              // guards the managed ClickHouse sink worker lifecycle
+	chSinkStop      context.CancelFunc                      // cancels the running sink worker (nil when stopped)
+	chSinkStarted   bool                                    // true once the startup worker apply has run (gates reload-time restarts)
+	carbonRuntime   atomic.Pointer[config.CarbonConfig]     // admin-settings overlay over cfg.Carbon
+	insRuntime      atomic.Pointer[config.InsuranceConfig]  // admin-settings overlay over cfg.Insurance
+	cacheRuntime    atomic.Pointer[config.CacheConfig]      // admin-settings overlay over cfg.Cache
+	pricingRuntime  atomic.Pointer[config.PricingConfig]    // admin-settings overlay over cfg.PricingConf
+	skillsRuntime   atomic.Pointer[config.SkillsConfig]     // admin-settings overlay over cfg.Skills
+	limitsRuntime   atomic.Pointer[config.LimitsConfig]     // admin-settings overlay over cfg.Limits
+	loggingRuntime  atomic.Pointer[config.LoggingConfig]    // admin-settings overlay over cfg.Logging
+	mcpRuntime      atomic.Pointer[config.MCPConfig]        // admin-settings overlay over cfg.MCP
+	upstreamRuntime atomic.Pointer[config.UpstreamConfig]   // admin-settings overlay over cfg.Upstream (operational knobs only)
+	quotaRuntime    atomic.Pointer[config.QuotaConfig]      // admin-settings overlay over cfg.Quota
+	keycloakCfg     atomic.Pointer[config.KeycloakConfig]   // DB-backed Keycloak provider overlay over cfg.Keycloak (secret decrypted)
+	chFactQueue     chan store.LogRecord                    // async per-request fact ingest queue (bounded)
+	chFactDropped   atomic.Int64                            // requests dropped when the fact queue was full
+	dwCache         *dwQueryCache                           // short-TTL cache for DW dashboard ClickHouse reads
+	sessions        *sessionInferer
+	sessionGCAt     atomic.Int64
+	extSeen         sync.Map // external key id -> struct{}; dedupes lazy registration
+	mcpConns        sync.Map // upstream id -> *mcpUpstreamConn (MCP gateway session state)
+	mcpTools        atomic.Pointer[mcpToolsSnapshot]
+	mcpRefresh      atomic.Bool
+	lastReloadNano  atomic.Int64           // unix nanos of this pod's last runtime-config reload (convergence observability)
+	lastReloadTok   atomic.Pointer[string] // admin_settings change token this pod last applied
 }
 
 type atomicKillState struct {
@@ -1519,7 +1521,7 @@ func (s *Server) dialUpstream(reqCtx context.Context, r *http.Request, body []by
 	// has already spent the budget returns the last error instead of walking the
 	// remaining candidates.
 	failoverDeadline := time.Time{}
-	if budget := s.cfg.Upstream.FailoverBudget; budget > 0 {
+	if budget := s.upstreamConf().FailoverBudget; budget > 0 {
 		failoverDeadline = time.Now().Add(budget)
 	}
 	if raw := strings.TrimSpace(r.Header.Get("X-Failover-Budget-MS")); raw != "" {

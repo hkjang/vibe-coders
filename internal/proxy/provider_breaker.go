@@ -230,7 +230,7 @@ func (b *providerBreakers) snapshot(cooldown time.Duration, now time.Time) []bre
 }
 
 func (s *Server) breakerConfig() (enabled bool, threshold int, cooldown time.Duration) {
-	up := s.cfg.Upstream
+	up := s.upstreamConf()
 	threshold = up.BreakerThreshold
 	if threshold <= 0 {
 		threshold = defaultBreakerThreshold
@@ -348,7 +348,7 @@ func (b *providerBreakers) peek(name string, threshold int, cooldown time.Durati
 // is never dropped — health is a lagging average, and a provider that has recovered
 // has to be tried to be seen recovering.
 func (s *Server) healthDemoteThreshold() int {
-	t := s.cfg.Upstream.HealthDemoteThreshold
+	t := s.upstreamConf().HealthDemoteThreshold
 	if t < 0 {
 		return 0
 	}

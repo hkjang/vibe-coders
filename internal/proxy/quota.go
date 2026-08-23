@@ -137,7 +137,7 @@ func quotaHeaderTag(d quotaDecision) string {
 // Reservations add one insert and one delete per request, so a deployment that does not
 // use quotas at all can turn the whole mechanism off.
 func (s *Server) quotaReservationsEnabled() bool {
-	return s.cfg.Quota.ReservationsEnabled && s.db != nil
+	return s.quotaConf().ReservationsEnabled && s.db != nil
 }
 
 // reserveQuota records what this request is expected to consume, so requests running
@@ -178,7 +178,12 @@ func (s *Server) releaseQuota(requestID string) {
 // a gateway killed mid-flight, for instance. Reads already exclude expired rows, so
 // this is only housekeeping and its failure is never load-bearing.
 func (s *Server) startQuotaReservationSweeper() {
-	if !s.quotaReservationsEnabled() {
+	// Gated on the database rather than on the feature flag: reservations can now be
+	// switched on at runtime, and a sweeper that only exists when the flag was set at
+	// boot would leave orphaned holds accumulating for a feature enabled later. The
+	// sweep deletes expired rows and nothing else, so running it while the feature is
+	// off is a no-op against an empty table.
+	if s.db == nil {
 		return
 	}
 	interval := s.cfg.Quota.ReservationSweepInterval
