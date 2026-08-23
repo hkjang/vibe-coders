@@ -15,10 +15,11 @@ import (
 	"vibe-coders/internal/store"
 )
 
-// Admin authorization coverage.
+// Authorization coverage.
 //
-// There is no middleware in front of the admin surface: each of the 300-plus handlers
-// calls s.authorizeAdmin(r) itself as its first statement. That works right up until one
+// There is no middleware in front of any of this: each of the 390-plus handlers checks
+// the caller itself as its first statement — s.authorizeAdmin for /admin, s.meUserID or
+// s.resolveTeamScope or s.authorizeScope for the user-facing routes. That works right up until one
 // handler doesn't — and one didn't. /admin/llm/prompts/compare answered unauthenticated
 // callers with 200 and real data (prompt names and versions, call volumes, cost, latency,
 // error and eval-failure rates) while its ten siblings under /admin/llm all returned 401.
@@ -28,6 +29,10 @@ import (
 // registers and requires the server to refuse. It reads the route list out of the
 // registration source, so a route added tomorrow is covered without anyone remembering
 // to add it here.
+//
+// It runs with AUTH_ENABLED on. Several /me and /team handlers deliberately serve
+// everyone when authentication is switched off (single-user mode); probing with it off
+// would measure that mode instead of the one this is about.
 //
 // The assertion is deliberately "not 2xx" rather than "401". A handler that rejects the
 // method first (405), or the path (404 from a prefix router), has also disclosed nothing,
@@ -41,13 +46,42 @@ import (
 // parameter out of reach. A test that cannot fail on its founding defect is not evidence
 // of anything.
 
-// Routes that are meant to answer an unauthenticated caller, with the reason.
-var unauthenticatedAdminRoutes = map[string]string{
-	"/admin":  "the console shell itself — it has to load before anyone can log in, and it carries no data; every panel in it fetches from the guarded APIs below",
+// Routes that are meant to answer an unauthenticated caller, with the reason each one
+// is safe to serve. Everything else the server registers must refuse.
+//
+// The list is short on purpose: adding to it is how a route stops being checked, so each
+// entry has to say why the response carries nothing worth protecting.
+var publicRoutes = map[string]string{
+	"/admin":  "the console shell itself — it has to load before anyone can log in, and it carries no data; every panel in it fetches from the guarded APIs",
 	"/admin/": "same shell, trailing-slash form",
+
+	"/":             "landing page, static HTML",
+	"/favicon.ico":  "static icon",
+	"/health":       "liveness probe — a fixed {\"status\":\"ok\"}, and it has to answer before anything is configured",
+	"/ready":        "readiness probe, same reasoning",
+	"/metrics":      "Prometheus scrape endpoint; exposed by convention and expected to be restricted at the network layer rather than by a token",
+	"/openapi.json": "the published API description — it documents the endpoints, it does not read from them",
+	"/swagger":      "the viewer for the spec above",
+
+	"/auth/login":                        "issues credentials; it cannot require them",
+	"/auth/refresh":                      "exchanges a refresh token, which is itself the credential",
+	"/auth/logout":                       "idempotent, returns only {\"status\":\"logged_out\"}",
+	"/auth/me":                           "reports who the caller is; with no token it answers accordingly",
+	"/auth/sso/status":                   "public login configuration — which provider to use and whether local login is allowed; the browser needs it to render the login screen",
+	"/auth/keycloak/login":               "starts the OIDC redirect",
+	"/auth/keycloak/callback":            "receives the OIDC redirect; the authorization code is the credential",
+	"/auth/keycloak/logout":              "idempotent logout",
+	"/auth/keycloak/frontchannel-logout": "OIDC front-channel logout, called by the identity provider",
+	"/auth/keycloak/backchannel-logout":  "OIDC back-channel logout, authenticated by the logout token in the body",
+
+	"/vcs/events":   "webhook receiver, authenticated by the sender's signature rather than a gateway token",
+	"/vcs/webhook/": "same receiver, path-prefixed form",
+
+	"/me/access-denied":     "a telemetry sink for the client's own denied-request notice; it stores nothing and answers {\"status\":\"ignored\"}",
+	"/me/connection-doctor": "diagnoses why a caller's credentials are not working, so requiring working credentials would defeat it; it reports the gateway's own base URL and the outcome of its checks, nothing about other users",
 }
 
-var adminRouteRe = regexp.MustCompile(`mux\.HandleFunc\("(/admin[^"]*)"`)
+var routeRe = regexp.MustCompile(`mux\.HandleFunc\("([^"]+)"`)
 
 // Query strings tried against every route, one parameter at a time.
 //
@@ -80,19 +114,19 @@ var adminProbeQueries = []string{
 	"?q=a",
 }
 
-func TestEveryAdminRouteRefusesUnauthenticatedRequests(t *testing.T) {
+func TestEveryRouteRefusesUnauthenticatedRequests(t *testing.T) {
 	raw := readProxyFile(t, "server.go")
 	seen := map[string]bool{}
 	var routes []string
-	for _, m := range adminRouteRe.FindAllStringSubmatch(raw, -1) {
+	for _, m := range routeRe.FindAllStringSubmatch(raw, -1) {
 		if !seen[m[1]] {
 			seen[m[1]] = true
 			routes = append(routes, m[1])
 		}
 	}
 	sort.Strings(routes)
-	if len(routes) < 300 {
-		t.Fatalf("only %d admin routes were extracted from server.go; the extractor has stopped matching", len(routes))
+	if len(routes) < 380 {
+		t.Fatalf("only %d routes were extracted from server.go; the extractor has stopped matching", len(routes))
 	}
 
 	db := openTestStore(t)
@@ -103,6 +137,11 @@ func TestEveryAdminRouteRefusesUnauthenticatedRequests(t *testing.T) {
 
 	cfg := testConfig("http://example.invalid", "secret")
 	cfg.Auth.AdminToken = "rw-secret"
+	// Auth on, because that is the posture this test is about. Several /me and /team
+	// handlers deliberately open up when AUTH_ENABLED is false (single-user mode), and
+	// probing with it off would measure that mode rather than the deployed one.
+	cfg.Auth.Enabled = true
+	cfg.Auth.SelfServiceKeys = true
 	server, err := NewServer(cfg, db, logger, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -122,7 +161,7 @@ func TestEveryAdminRouteRefusesUnauthenticatedRequests(t *testing.T) {
 
 	client := &http.Client{}
 	for _, route := range routes {
-		if _, ok := unauthenticatedAdminRoutes[route]; ok {
+		if _, ok := publicRoutes[route]; ok {
 			continue
 		}
 		for _, probe := range adminProbeQueries {
@@ -170,8 +209,8 @@ func probeUnauthenticated(t *testing.T, client *http.Client, method, url, base, 
 	payload, _ := io.ReadAll(io.LimitReader(resp.Body, 400))
 	resp.Body.Close()
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		t.Errorf("%s %s with no credentials returned %d — this endpoint is reachable by anyone who can reach the admin port.\n"+
-			"Add the authorizeAdmin check, or record it in unauthenticatedAdminRoutes with the reason it is public.\nbody: %s",
+		t.Errorf("%s %s with no credentials returned %d — this endpoint is reachable by anyone who can reach the gateway.\n"+
+			"Add the authorizeAdmin check, or record it in publicRoutes with the reason it is public.\nbody: %s",
 			method, strings.TrimPrefix(url, base), resp.StatusCode, strings.TrimSpace(string(payload)))
 	}
 }
@@ -179,15 +218,15 @@ func probeUnauthenticated(t *testing.T, client *http.Client, method, url, base, 
 // The exemption list is the one place a route can be declared public, so it must not
 // name routes that no longer exist — a stale entry silently exempts nothing today and
 // could match a future route with the same path tomorrow.
-func TestUnauthenticatedAdminRouteExemptionsAreAllRegistered(t *testing.T) {
+func TestPublicRouteExemptionsAreAllRegistered(t *testing.T) {
 	raw := readProxyFile(t, "server.go")
 	registered := map[string]bool{}
-	for _, m := range adminRouteRe.FindAllStringSubmatch(raw, -1) {
+	for _, m := range routeRe.FindAllStringSubmatch(raw, -1) {
 		registered[m[1]] = true
 	}
-	for route, why := range unauthenticatedAdminRoutes {
+	for route, why := range publicRoutes {
 		if !registered[route] {
-			t.Errorf("unauthenticatedAdminRoutes exempts %q (%s) but no such route is registered", route, why)
+			t.Errorf("publicRoutes exempts %q (%s) but no such route is registered", route, why)
 		}
 	}
 }
@@ -205,12 +244,18 @@ func TestUnauthenticatedAdminRouteExemptionsAreAllRegistered(t *testing.T) {
 // So this test asks the flat question instead: does every handler bound to an /admin
 // route contain an authorization call? It follows one level of delegation, because two
 // handlers are one-line wrappers around a shared implementation that holds the check.
+//
+// Scoped to /admin deliberately. Those handlers share one guard, authorizeAdmin, which
+// makes the source question answerable; the user-facing routes reach for whichever of
+// half a dozen helpers fits, and a name-matching test over those would report absences
+// that are not real. Those routes all return data on a GET, so the live probe above
+// already fails on them when a guard goes missing — verified by removing one.
 func TestEveryAdminHandlerCallsAuthorize(t *testing.T) {
 	bodies := serverHandlerBodies(t)
 	routes := map[string]string{} // handler name -> first route that binds it
 	for _, m := range regexp.MustCompile(`mux\.HandleFunc\("(/admin[^"]*)",\s*s\.(\w+)\)`).
 		FindAllStringSubmatch(readProxyFile(t, "server.go"), -1) {
-		if _, ok := unauthenticatedAdminRoutes[m[1]]; ok {
+		if _, ok := publicRoutes[m[1]]; ok {
 			continue
 		}
 		if _, seen := routes[m[2]]; !seen {
@@ -248,7 +293,7 @@ func TestEveryAdminHandlerCallsAuthorize(t *testing.T) {
 	sort.Strings(unguarded)
 	if len(unguarded) > 0 {
 		t.Errorf("%d admin handler(s) never call authorizeAdmin/authorizeScope:\n  %s\n"+
-			"Add the check, or record the route in unauthenticatedAdminRoutes with the reason it is public.",
+			"Add the check, or record the route in publicRoutes with the reason it is public.",
 			len(unguarded), strings.Join(unguarded, "\n  "))
 	}
 }
