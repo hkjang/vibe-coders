@@ -124,3 +124,122 @@ func TestHourBucketsAreSeoulHoursInTheExpectedShape(t *testing.T) {
 			"YYYY-MM-DDTHH shape callers parse", points[0].Date)
 	}
 }
+
+// The rollup has to agree with the live chart, because it replaces it.
+//
+// analytics_daily rows outlive the raw logs they were built from: retention rolls up the
+// last few days and then deletes the detail. Once that has happened the rollup is the only
+// source a chart has for that day. If it bucketed by UTC while the live path buckets by
+// Seoul, a trend line would change its definition of a day partway along, at the retention
+// boundary, with nothing on the chart to mark it. That is worse than being uniformly
+// wrong: uniformly wrong is at least comparable with itself.
+func TestRollupAgreesWithTheLiveChartOnWhichDayIsWhich(t *testing.T) {
+	db := openStoreForTest(t)
+	defer db.Close()
+	ctx := context.Background()
+	kst := time.FixedZone("KST", 9*3600)
+
+	// The same Seoul day that straddles UTC midnight.
+	moments := []time.Time{
+		time.Date(2026, 8, 24, 1, 30, 0, 0, kst),
+		time.Date(2026, 8, 24, 8, 0, 0, 0, kst),
+		time.Date(2026, 8, 24, 20, 0, 0, 0, kst),
+	}
+	for i, m := range moments {
+		id := "rl-" + string(rune('a'+i))
+		if err := db.InsertLogRecord(ctx, LogRecord{
+			Request: RequestLog{
+				ID: id, TraceID: id, Endpoint: "/v1/chat/completions",
+				Model: "m", Provider: "up", StatusCode: 200, LatencyMS: 10, CreatedAt: m.UTC(),
+			},
+			Usage: &TokenUsage{ID: "u-" + id, RequestID: id, TotalTokens: 100,
+				EstimatedCost: 1000, Currency: "KRW", Source: "test"},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if _, err := db.RollupRange(ctx,
+		time.Date(2026, 8, 23, 0, 0, 0, 0, time.UTC),
+		time.Date(2026, 8, 25, 0, 0, 0, 0, time.UTC)); err != nil {
+		t.Fatalf("rollup: %v", err)
+	}
+
+	rows, err := db.ListDailyRollups(ctx, "all", "2026-08-01", 100)
+	if err != nil {
+		t.Fatalf("list rollups: %v", err)
+	}
+	byDay := map[string]AnalyticsRollupRow{}
+	for _, r := range rows {
+		if r.Requests > 0 {
+			byDay[r.Day] = r
+		}
+	}
+	if len(byDay) != 1 {
+		t.Fatalf("one Seoul day of traffic produced %d rollup days (%v); the rollup and the "+
+			"live chart disagree about which day these requests belong to", len(byDay), byDay)
+	}
+	row, ok := byDay["2026-08-24"]
+	if !ok {
+		t.Fatalf("the rollup filed the traffic under %v, not 2026-08-24", byDay)
+	}
+	if row.Requests != 3 || row.CostKRW != 3000 {
+		t.Errorf("rollup for 2026-08-24 has %d requests / %v KRW, want 3 / 3000",
+			row.Requests, row.CostKRW)
+	}
+
+	// And the same numbers as the live path, which is the assertion that actually
+	// protects the trend line across the retention boundary.
+	points, err := db.Timeseries(ctx, TimeseriesQuery{
+		Bucket: "day", Since: time.Date(2026, 8, 20, 0, 0, 0, 0, time.UTC)})
+	if err != nil {
+		t.Fatalf("timeseries: %v", err)
+	}
+	if len(points) != 1 || points[0].Date != row.Day ||
+		points[0].Requests != row.Requests || points[0].CostKRW != row.CostKRW {
+		t.Errorf("live chart says %+v, rollup says %+v; a chart reading one before retention "+
+			"and the other after would step", points, row)
+	}
+}
+
+// RollupRange converts its endpoints to Seoul. A request just before UTC midnight belongs
+// to the next Seoul day, so this checks that day is still covered rather than falling off
+// the end of the loop — the failure would be a permanently missing aggregate, visible only
+// after retention had removed the rows it could have been rebuilt from.
+func TestRollupRangeCoversTheSeoulDayAtTheBoundary(t *testing.T) {
+	db := openStoreForTest(t)
+	defer db.Close()
+	ctx := context.Background()
+
+	// 2026-08-24 23:00 UTC is 2026-08-25 08:00 in Seoul.
+	sent := time.Date(2026, 8, 24, 23, 0, 0, 0, time.UTC)
+	if err := db.InsertLogRecord(ctx, LogRecord{
+		Request: RequestLog{
+			ID: "edge-1", TraceID: "edge-1", Endpoint: "/v1/chat/completions",
+			Model: "m", Provider: "up", StatusCode: 200, LatencyMS: 10, CreatedAt: sent,
+		},
+		Usage: &TokenUsage{ID: "u-edge-1", RequestID: "edge-1", TotalTokens: 10,
+			EstimatedCost: 100, Currency: "KRW", Source: "test"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// A UTC range that ends on the 24th; the request's Seoul day is the 25th.
+	if _, err := db.RollupRange(ctx,
+		time.Date(2026, 8, 22, 0, 0, 0, 0, time.UTC),
+		time.Date(2026, 8, 24, 23, 59, 0, 0, time.UTC)); err != nil {
+		t.Fatalf("rollup: %v", err)
+	}
+
+	rows, err := db.ListDailyRollups(ctx, "all", "2026-08-01", 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range rows {
+		if r.Day == "2026-08-25" && r.Requests == 1 {
+			return
+		}
+	}
+	t.Errorf("the request at 23:00 UTC belongs to Seoul day 2026-08-25, which the rollup "+
+		"did not cover: %+v\nOnce retention removes the raw row that day's aggregate is gone.", rows)
+}

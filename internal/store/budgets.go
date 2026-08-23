@@ -5,7 +5,8 @@ import (
 	"time"
 )
 
-var budgetKST = time.FixedZone("KST", 9*3600)
+// budgetKST is seoulZone under the name the budget code has always used.
+var budgetKST = seoulZone
 
 // kstMonthBounds returns the start of the current month and the number of days in it,
 // in Asia/Seoul (the same zone quotas reset on).

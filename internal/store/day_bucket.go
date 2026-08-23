@@ -1,6 +1,9 @@
 package store
 
-import "fmt"
+import (
+	"fmt"
+	"time"
+)
 
 // Which day a request belongs to.
 //
@@ -16,6 +19,10 @@ import "fmt"
 // — was charted against the day before. Nothing errored; the numbers were just attributed
 // to the wrong day, and they disagreed with the quota that had already reset.
 //
+// seoulZone is the one Seoul offset this package works in. Korea has no daylight saving,
+// so a fixed +09:00 is exact rather than an approximation.
+var seoulZone = time.FixedZone("KST", 9*3600)
+
 // seoulDayExpr returns SQL that buckets a UTC timestamp column into a Seoul calendar day.
 // The two drivers need different syntax for it, which is why this is a function and not a
 // constant: SQLite has datetime() modifiers, PostgreSQL has interval arithmetic.
