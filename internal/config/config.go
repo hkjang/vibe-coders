@@ -222,6 +222,19 @@ type CacheConfig struct {
 	EmbeddingMaxBytes int
 	ChatEnabled       bool
 	ChatTTL           time.Duration
+	// ChatScope decides who a cached chat response may be served to.
+	//
+	// The cache key is built from the request body alone, so by default an identical
+	// prompt from any caller hits the same entry — including one stored by a different
+	// team. For a deterministic request that is mostly the answer the model would have
+	// returned anyway, but the X-Cache: HIT header also tells the second caller that
+	// somebody already asked that exact question, which for a templated prompt
+	// ("summarise record 1234") is a fact about another team's work.
+	//
+	// "global" keeps that behaviour and stays the default, because narrowing the scope
+	// costs hit rate and that is the operator's trade-off to make, not ours. "team" and
+	// "api_key" mix the caller into the key so entries are never shared beyond it.
+	ChatScope string
 	// Semantic (embedding-based near-duplicate) chat cache. Opt-in: requires both
 	// ChatSemanticEnabled and an embedding model. On an exact-cache miss, the prompt is
 	// embedded and matched against recent entries by cosine similarity.
@@ -428,6 +441,7 @@ func Load() (Config, error) {
 			EmbeddingMaxBytes:         intEnv("CACHE_EMBEDDING_MAX_BYTES", 1<<20), // 1 MB per entry
 			ChatEnabled:               boolEnv("CACHE_CHAT_ENABLED", false),       // opt-in: chat responses are non-deterministic
 			ChatTTL:                   durationEnv("CACHE_CHAT_TTL", time.Hour),
+			ChatScope:                 strings.ToLower(strings.TrimSpace(getEnv("CACHE_CHAT_SCOPE", "global"))),
 			ChatSemanticEnabled:       boolEnv("CACHE_CHAT_SEMANTIC_ENABLED", false),
 			ChatSemanticModel:         os.Getenv("CACHE_CHAT_SEMANTIC_MODEL"),
 			ChatSemanticThreshold:     floatEnv("CACHE_CHAT_SEMANTIC_THRESHOLD", 0.95),

@@ -60,13 +60,20 @@ func chatCacheKey(body []byte) (string, string, bool) {
 
 // chatCacheEligible reports whether this request may be served/stored from the chat
 // cache: feature on, deterministic body (temp 0 / seed) OR explicit opt-in header.
-func (s *Server) chatCacheEligible(r *http.Request, body []byte) (string, bool) {
-	if !s.cacheConf().ChatEnabled || r.Method != http.MethodPost || r.URL.Path != "/v1/chat/completions" {
+func (s *Server) chatCacheEligible(r *http.Request, body []byte, authCtx *store.AuthContext, apiKeyID string) (string, bool) {
+	cache := s.cacheConf()
+	if !cache.ChatEnabled || r.Method != http.MethodPost || r.URL.Path != "/v1/chat/completions" {
 		return "", false
 	}
 	key, _, deterministic := chatCacheKey(body)
 	if key == "" {
 		return "", false
+	}
+	if scope := chatCacheScopeValue(cache.ChatScope, authCtx, apiKeyID); scope != "" {
+		// Mixing the caller in makes the entry unreachable from outside its scope,
+		// rather than relying on a lookup-time check that a later caller could miss.
+		sum := sha256.Sum256([]byte(key + "|" + scope))
+		key = hex.EncodeToString(sum[:])
 	}
 	optIn := strings.EqualFold(strings.TrimSpace(r.Header.Get("X-Proxy-Cache")), "1")
 	if !deterministic && !optIn {
@@ -146,5 +153,24 @@ func (s *Server) maybeStoreChatCache(ctx context.Context, key string, statusCode
 	}
 	if err := s.db.PutEmbeddingCache(ctx, key, "chat", contentType, responseBody, s.cacheConf().ChatTTL); err != nil {
 		slog.Warn("chat cache store failed", "error", err)
+	}
+}
+
+// chatCacheScopeValue returns what to mix into the cache key, or "" to leave entries
+// shared. An unknown value is treated as "global" rather than failing the request: a
+// typo in a cache setting should not stop traffic.
+func chatCacheScopeValue(scope string, authCtx *store.AuthContext, apiKeyID string) string {
+	switch strings.ToLower(strings.TrimSpace(scope)) {
+	case "team":
+		if authCtx != nil && strings.TrimSpace(authCtx.TeamID) != "" {
+			return "team:" + authCtx.TeamID
+		}
+		// No team on the caller: fall back to the narrower scope rather than the wider
+		// one, so "team" never silently means "global" for unassigned keys.
+		return "key:" + apiKeyID
+	case "api_key":
+		return "key:" + apiKeyID
+	default:
+		return ""
 	}
 }

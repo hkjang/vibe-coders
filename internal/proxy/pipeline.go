@@ -331,7 +331,7 @@ func (rc *requestPipeline) stepCache() bool {
 	}
 
 	// Chat response cache — opt-in, only for deterministic (temp 0 / seed) requests.
-	rc.chatCacheKey, rc.chatCacheable = s.chatCacheEligible(r, rc.body)
+	rc.chatCacheKey, rc.chatCacheable = s.chatCacheEligible(r, rc.body, rc.authCtx, rc.apiKeyID)
 	if rc.chatCacheable {
 		if served := s.serveChatFromCache(r.Context(), w, rc.chatCacheKey, rc.meta, rc.traceID); served {
 			return false

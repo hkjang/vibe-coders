@@ -367,9 +367,12 @@ curl.exe -X POST http://localhost:8080/admin/api-keys `
 | `CACHE_EMBEDDING_TTL` | `24h` | 임베딩 캐시 TTL |
 | `CACHE_CHAT_ENABLED` | `false` | `/v1/chat/completions` 응답 캐시 (opt-in) |
 | `CACHE_CHAT_TTL` | `1h` | chat 캐시 TTL |
+| `CACHE_CHAT_SCOPE` | `global` | 캐시 공유 범위: `global` · `team` · `api_key` |
 | `CACHE_EMBEDDING_MAX_BYTES` | `1048576` | 캐시 항목 최대 byte (chat 공용) |
 
 chat 응답은 비결정적이라 기본 비활성화입니다. 활성화해도 **재현 가능한 요청만** 캐시합니다: `temperature=0` 또는 `seed` 가 설정된 요청, 혹은 클라이언트가 `X-Proxy-Cache: 1` 헤더로 명시 동의한 경우. 캐시 적중 시 `X-Cache: HIT` 헤더로 응답하고 upstream 호출 없이 비용 0으로 처리되며, XView 캐시 패널에 절감액이 표시됩니다. 캐시 키는 model·messages·tools·temperature·top_p·max_tokens·seed·response_format 기준이며 `stream` 등 휘발성 필드는 제외합니다.
+
+**캐시 공유 범위(`CACHE_CHAT_SCOPE`).** 캐시 키에는 호출자가 들어가지 않으므로 기본값 `global` 에서는 **프롬프트가 같으면 팀이 달라도 같은 항목을 재사용**합니다. 결정적 요청이라면 모델이 어차피 돌려줬을 답이지만, `X-Cache: HIT` 는 동시에 **"누군가 이미 이 질문을 했다"** 는 사실도 알려줍니다 — `요약해줘: 고객 1234번` 같은 템플릿 프롬프트라면 다른 팀의 작업 내용에 대한 정보가 됩니다. 적중률과 맞바꿀 수 있도록 `team`(같은 팀 안에서만 공유) 과 `api_key`(키별 격리) 를 제공합니다. 기본값은 바뀌지 않았습니다.
 
 ### 세션 그룹화 (명시적 + 추론)
 
