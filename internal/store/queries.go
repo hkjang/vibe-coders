@@ -3024,6 +3024,16 @@ func (s *SQLStore) PurgeOlderThan(ctx context.Context, table string, days int) (
 			`DELETE FROM llm_evaluations WHERE request_id IN (SELECT id FROM request_logs WHERE created_at < ?)`,
 			`DELETE FROM llm_feedback WHERE request_id IN (SELECT id FROM request_logs WHERE created_at < ?)`,
 			`DELETE FROM tool_invocations WHERE request_id IN (SELECT id FROM request_logs WHERE created_at < ?)`,
+			// Per-request telemetry that outlived its request. These rows carry the
+			// request id alongside an api key, user or team, so leaving them behind keeps
+			// "this caller made this request" — and, in routing_decisions, the PII/secret
+			// categories detected in its prompt — after the request itself was purged for
+			// retention. They also grow one row per request forever while request_logs
+			// shrinks, which makes them the largest tables in a long-lived deployment.
+			`DELETE FROM routing_decisions WHERE request_id IN (SELECT id FROM request_logs WHERE created_at < ?)`,
+			`DELETE FROM mcp_route_decisions WHERE request_id IN (SELECT id FROM request_logs WHERE created_at < ?)`,
+			`DELETE FROM domain_routing_decisions WHERE request_id IN (SELECT id FROM request_logs WHERE created_at < ?)`,
+			`DELETE FROM code_verify_results WHERE request_id IN (SELECT id FROM request_logs WHERE created_at < ?)`,
 			`DELETE FROM request_logs WHERE created_at < ?`,
 		}
 		for _, q := range queries {

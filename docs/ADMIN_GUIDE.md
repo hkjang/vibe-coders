@@ -947,6 +947,33 @@ API: `GET /admin/knowledge`, `POST /admin/knowledge`(`{name, id?, content, enabl
 
 현재 적용 중인 보존 일수와 누적 삭제 행 수를 표시합니다. "지금 정리 실행" 으로 워커를 즉시 1회 트리거할 수 있습니다(디스크가 가득 찼을 때 임시 조치).
 
+#### 무엇이 함께 삭제되는가
+
+`RETENTION_REQUEST_DAYS` 로 요청 로그를 삭제할 때, **그 요청에 딸린 기록도 함께** 삭제됩니다.
+
+| 함께 삭제 | 이유 |
+|---|---|
+| `prompt_logs` · `response_logs` · `token_usage` · `language_stats` | 요청 본문·응답·사용량 |
+| `llm_evaluations` · `llm_feedback` · `tool_invocations` | 요청 단위 평가·도구 호출 |
+| `routing_decisions` · `mcp_route_decisions` · `domain_routing_decisions` · `code_verify_results` | 요청 단위 라우팅·검증 텔레메트리 |
+
+이 표의 **세 번째 줄은 이전까지 삭제되지 않았습니다.** 각 행은 `request_id` 옆에 API 키·사용자·팀을 함께 담고 있어, 요청이 보존 기간 만료로 지워진 뒤에도 **"어떤 키가 그 요청을 했다"는 기록이 남았습니다.** 특히 `routing_decisions` 는 그 프롬프트에서 탐지된 **PII·시크릿 분류(`risk_categories`)** 까지 보관하고 있었습니다. 부수적으로, 요청당 1행씩 영구히 쌓이는 동안 `request_logs` 만 줄어들어 오래 운영한 배포에서는 이 테이블들이 가장 커집니다.
+
+#### 삭제하지 않는 것
+
+다음은 요청에 연결돼 있어도 **의도적으로 남깁니다** — 요청 텔레메트리가 아니라 운영자가 만든 기록이거나, 자체 수명 주기를 갖습니다.
+
+| 남기는 것 | 이유 |
+|---|---|
+| `request_notes` · `approvals` | 운영자가 직접 남긴 메모·승인 |
+| `secret_events` | 보안 감사 추적 — 보통 더 긴 보존이 요구됩니다 |
+| `policy_decision_events` | 거버넌스 판단 이력. 감사 목적이 있을 수 있어 임의로 지우지 않습니다 |
+| `redteam_case_results` | 캠페인 결과 |
+| `text2sql_replay_bundles` · `text2sql_query_logs` | Text2SQL 자체 보존 설정·분석 대상 |
+| `quota_reservations` | 자체 만료·정리 주기 보유 |
+
+> `policy_decision_events` 를 함께 지울지는 판단이 갈립니다. 거버넌스 판단이 감사 자료로 요구되는 환경이 있어 **자동 삭제 대상에 넣지 않았습니다.** 조직 정책상 함께 정리해야 한다면 알려주세요.
+
 ### 9.4 Fallback 로그 재처리
 
 DB 장애 중 fallback NDJSON 로 빠진 감사 로그를 DB 에 다시 적재합니다. 성공한 라인은 파일에서 제거되고, 깨진 JSON 이나 아직 삽입할 수 없는 라인은 남습니다. 재처리 실행은 `fallback.replay` 감사 로그로 기록됩니다.
