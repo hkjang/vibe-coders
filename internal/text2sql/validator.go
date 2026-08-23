@@ -56,6 +56,11 @@ var (
 	// calls (e.g. sum(coalesce(col,0))) are fully accounted for.
 	aggFuncRe = regexp.MustCompile(`(?is)\b(?:count|sum|avg|min|max|stddev|variance|var_pop|var_samp)\s*\(`)
 
+	// A star used as a projection: directly after SELECT or a comma, optionally
+	// qualified by a table alias. Multiplication never matches, because it has an
+	// operand in front of the star.
+	starProjection = regexp.MustCompile(`(?is)(?:\bselect\b|,)\s*(?:"?[a-zA-Z_][a-zA-Z0-9_]*"?\s*\.\s*)?\*`)
+
 	// Names introduced by a WITH clause. A CTE is not a table: it is defined inline and
 	// resolves to whatever its body selects from, which the allowlist checks separately.
 	// Matching "WITH x AS (", "WITH RECURSIVE x AS (" and each ", y AS (" that follows.
@@ -138,6 +143,22 @@ func ValidateSQL(raw string, opts ValidateOptions) ValidationResult {
 	for _, fn := range dangerousFunctions {
 		if strings.Contains(lower, fn) {
 			return ValidationResult{Reason: "dangerous function: " + fn}
+		}
+	}
+	// A wildcard projection defeats every column policy at once. The checks below look
+	// for the column by name, and "SELECT *" never names it: a column marked exclude or
+	// approval_required comes back in full, and an aggregate-only column arrives raw.
+	// The validator cannot know what * expands to -- it has no schema -- so when column
+	// policies exist the only safe answer is to require the columns be named. The schema
+	// context handed to the model already lists the readable columns, so naming them is
+	// what it does anyway once told.
+	//
+	// COUNT(*) is left alone. It returns no column values, and stripping aggregate call
+	// bodies first is what separates the two cases. So is multiplication: a projection
+	// star follows SELECT or a comma, while "price * qty" has an operand before it.
+	if len(opts.BlockedColumns) > 0 || len(opts.AggregateOnlyColumns) > 0 {
+		if wildcardOverRealTable(lower) {
+			return ValidationResult{Reason: "select * is not allowed when column policies apply; name the columns"}
 		}
 	}
 	for _, col := range opts.BlockedColumns {
@@ -367,4 +388,33 @@ func checkCTEScopes(sql string, allowed map[string]bool) string {
 		visible[cte.name] = true
 	}
 	return ""
+}
+
+// wildcardOverRealTable reports whether a star projects the columns of an actual table.
+//
+// "SELECT * FROM some_cte" is not a problem: a CTE exposes only what its own body
+// selected, and that body was checked by the rules above. Refusing it would reinstate
+// the over-block that made allowlists and CTEs unusable together, so the star is judged
+// per scope -- inside each CTE body, and again over the outer query, where it is only
+// refused if the outer query reads something that is not a CTE.
+func wildcardOverRealTable(lower string) bool {
+	spans := cteSpans(lower)
+	outer := lower
+	cteName := map[string]bool{}
+	for _, cte := range spans {
+		if starProjection.MatchString(stripAggregateBodies(cte.body)) {
+			return true // a star inside a CTE body reads a real table
+		}
+		cteName[cte.name] = true
+		outer = strings.Replace(outer, cte.body, " ", 1)
+	}
+	if !starProjection.MatchString(stripAggregateBodies(outer)) {
+		return false
+	}
+	for _, t := range referencedTables(outer) {
+		if !cteName[t] {
+			return true // the outer star covers a real table too
+		}
+	}
+	return false
 }
