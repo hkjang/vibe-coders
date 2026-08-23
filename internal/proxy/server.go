@@ -31,7 +31,7 @@ import (
 )
 
 // AppVersion is the gateway build version, surfaced in /auth/me and the admin UI.
-const AppVersion = "v0.76.90"
+const AppVersion = "v0.76.91"
 
 type Server struct {
 	cfg      config.Config
@@ -2064,6 +2064,12 @@ func (s *Server) auditRequest(endpoint string, body []byte, apiKeyID string, tra
 		})
 	}
 
+	// The raw body is stored unredacted, and it has to be: replay resends these exact
+	// bytes, and a masked body is not a request. Everything else on this path is
+	// redacted before storage, so this is the one place a secret in a prompt survives
+	// verbatim - measured, not assumed: with the flag on, every one of the redactor's
+	// thirteen rule types is recoverable from body_raw. The settings screen says so,
+	// and docs/OPERATIONS.md requires disk encryption before enabling it.
 	rawBody := ""
 	if lc.RawBodies {
 		rawBody = string(body)

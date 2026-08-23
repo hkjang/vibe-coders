@@ -366,7 +366,7 @@ var settingDescriptions = map[string]string{
 	// Logging
 	"logging.response_text":      "AI 응답 본문 캡처 여부(LOG_RESPONSE_TEXT). true면 response_text_optional에 전체 응답 텍스트를 저장, 요청 상세에서 조회 가능. 저장 공간 증가 주의.",
 	"logging.raw_prompts":        "프롬프트 원문 캡처 여부(LOG_RAW_PROMPTS). true면 content_text(원문)도 별도 저장. false면 redacted_text(리덕션)만 보관.",
-	"logging.raw_bodies":         "요청·응답 원시 바디 캡처 여부(LOG_RAW_BODIES). true면 raw_request/raw_response 컬럼에 전체 바이트 저장. 디버그 목적. 저장 공간 주의.",
+	"logging.raw_bodies":         "요청·응답 원시 바디 캡처 여부(LOG_RAW_BODIES). ⚠️ 켜면 프롬프트가 **마스킹 없이 그대로** 저장됩니다 — API 키·주민번호·카드번호가 본문에 있으면 평문으로 남고 retention 기간까지 유지됩니다. 재실행(replay)에는 원본 바이트가 필요하므로 마스킹할 수 없습니다. 디스크 암호화와 접근 제한을 먼저 확보하세요(docs/OPERATIONS.md). 저장 공간도 늘어납니다.",
 	"logging.response_max_bytes": "응답 캡처 최대 바이트(LOG_RESPONSE_MAX_BYTES). 초과 분 잘림. 기본 1MB.",
 	// Env (read-only)
 	"env.upstream_base_url":        "업스트림 엔드포인트 URL(UPSTREAM_BASE_URL). 변경하려면 컨테이너 환경변수를 수정 후 재시작.",
