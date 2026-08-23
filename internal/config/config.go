@@ -220,8 +220,14 @@ type CacheConfig struct {
 	EmbeddingEnabled  bool
 	EmbeddingTTL      time.Duration
 	EmbeddingMaxBytes int
-	ChatEnabled       bool
-	ChatTTL           time.Duration
+	// EmbeddingScope mirrors ChatScope for /v1/embeddings. The exposure is smaller: an
+	// embedding is a pure function of (model, input), so a caller who hits a shared entry
+	// receives exactly what they would have been given anyway. What sharing still reveals
+	// is that somebody embedded this exact text before, which for a document-indexing
+	// pipeline is a fact about another team's corpus. Default "global", unchanged.
+	EmbeddingScope string
+	ChatEnabled    bool
+	ChatTTL        time.Duration
 	// ChatScope decides who a cached chat response may be served to.
 	//
 	// The cache key is built from the request body alone, so by default an identical
@@ -439,7 +445,8 @@ func Load() (Config, error) {
 			EmbeddingEnabled:          boolEnv("CACHE_EMBEDDING_ENABLED", true),
 			EmbeddingTTL:              durationEnv("CACHE_EMBEDDING_TTL", 24*time.Hour),
 			EmbeddingMaxBytes:         intEnv("CACHE_EMBEDDING_MAX_BYTES", 1<<20), // 1 MB per entry
-			ChatEnabled:               boolEnv("CACHE_CHAT_ENABLED", false),       // opt-in: chat responses are non-deterministic
+			EmbeddingScope:            strings.ToLower(strings.TrimSpace(getEnv("CACHE_EMBEDDING_SCOPE", "global"))),
+			ChatEnabled:               boolEnv("CACHE_CHAT_ENABLED", false), // opt-in: chat responses are non-deterministic
 			ChatTTL:                   durationEnv("CACHE_CHAT_TTL", time.Hour),
 			ChatScope:                 strings.ToLower(strings.TrimSpace(getEnv("CACHE_CHAT_SCOPE", "global"))),
 			ChatSemanticEnabled:       boolEnv("CACHE_CHAT_SEMANTIC_ENABLED", false),

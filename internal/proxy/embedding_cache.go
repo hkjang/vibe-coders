@@ -71,8 +71,8 @@ func intToString(v int) string {
 // serveEmbeddingFromCache returns true if the request was served from the cache.
 // When it serves a cached response it also enqueues an audit record with provider="cache"
 // so the call still shows up in usage dashboards.
-func (s *Server) serveEmbeddingFromCache(ctx context.Context, w http.ResponseWriter, r *http.Request, body []byte, meta store.LogRecord, traceID string) bool {
-	key, model, ok := embeddingCacheKey(body)
+func (s *Server) serveEmbeddingFromCache(ctx context.Context, w http.ResponseWriter, r *http.Request, body []byte, scope string, meta store.LogRecord, traceID string) bool {
+	key, model, ok := scopedEmbeddingCacheKey(body, scope)
 	if !ok {
 		return false
 	}
@@ -142,7 +142,7 @@ func (s *Server) serveEmbeddingFromCache(ctx context.Context, w http.ResponseWri
 	return true
 }
 
-func (s *Server) maybeStoreEmbeddingCache(ctx context.Context, requestBody []byte, statusCode int, contentType string, responseBody []byte) {
+func (s *Server) maybeStoreEmbeddingCache(ctx context.Context, requestBody []byte, scope string, statusCode int, contentType string, responseBody []byte) {
 	if !s.cacheConf().EmbeddingEnabled {
 		return
 	}
@@ -152,11 +152,23 @@ func (s *Server) maybeStoreEmbeddingCache(ctx context.Context, requestBody []byt
 	if len(responseBody) == 0 || len(responseBody) > s.cacheConf().EmbeddingMaxBytes {
 		return
 	}
-	key, model, ok := embeddingCacheKey(requestBody)
+	key, model, ok := scopedEmbeddingCacheKey(requestBody, scope)
 	if !ok {
 		return
 	}
 	if err := s.db.PutEmbeddingCache(ctx, key, model, contentType, responseBody, s.cacheConf().EmbeddingTTL); err != nil {
 		slog.Warn("embedding cache store failed", "error", err)
 	}
+}
+
+// scopedEmbeddingCacheKey mixes the caller into the key when CACHE_EMBEDDING_SCOPE
+// narrows it, using the same scope strings as the chat cache so an operator sets both
+// the same way. An empty scope leaves the key exactly as it was.
+func scopedEmbeddingCacheKey(body []byte, scope string) (string, string, bool) {
+	key, model, ok := embeddingCacheKey(body)
+	if !ok || scope == "" {
+		return key, model, ok
+	}
+	sum := sha256.Sum256([]byte(key + "|" + scope))
+	return hex.EncodeToString(sum[:]), model, true
 }

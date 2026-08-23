@@ -185,6 +185,7 @@ func buildSettingRegistry() []settingDef {
 		{Key: "cache.chat_enabled", Category: "cache", Type: stBool, envValue: func(c config.Config) string { return strconv.FormatBool(c.Cache.ChatEnabled) }},
 		{Key: "cache.chat_ttl", Category: "cache", Type: stDuration, validate: dur, envValue: func(c config.Config) string { return c.Cache.ChatTTL.String() }},
 		{Key: "cache.chat_scope", Category: "cache", Type: stString, envValue: func(c config.Config) string { return c.Cache.ChatScope }},
+		{Key: "cache.embedding_scope", Category: "cache", Type: stString, envValue: func(c config.Config) string { return c.Cache.EmbeddingScope }},
 		{Key: "cache.chat_semantic_enabled", Category: "cache", Type: stBool, envValue: func(c config.Config) string { return strconv.FormatBool(c.Cache.ChatSemanticEnabled) }},
 		{Key: "cache.chat_semantic_model", Category: "cache", Type: stString, envValue: func(c config.Config) string { return c.Cache.ChatSemanticModel }},
 		{Key: "cache.chat_semantic_threshold", Category: "cache", Type: stFloat, validate: rate01, envValue: func(c config.Config) string { return strconv.FormatFloat(c.Cache.ChatSemanticThreshold, 'f', -1, 64) }},
@@ -336,6 +337,7 @@ var settingDescriptions = map[string]string{
 	"cache.chat_enabled":                 "chat 정확 캐시(temperature 0/seed 고정) on/off.",
 	"cache.chat_ttl":                     "chat 캐시 보존 시간.",
 	"cache.chat_scope":                   "chat 캐시를 누구와 공유할지: global(기본, 동일 프롬프트면 팀이 달라도 재사용) · team · api_key. ⚠️ global에서는 다른 팀이 저장한 응답이 X-Cache: HIT로 반환되고, HIT 자체가 누군가 이 질문을 이미 했다는 사실을 알려줍니다. 좁힐수록 적중률은 떨어집니다.",
+	"cache.embedding_scope":              "임베딩 캐시 공유 범위: global(기본) · team · api_key. 임베딩은 (모델, 입력)의 순수 함수라 공유해도 남의 내용이 오지는 않지만, X-Cache: HIT 자체가 누군가 같은 텍스트를 이미 임베딩했다는 사실을 알려줍니다.",
 	"cache.chat_semantic_enabled":        "의미(임베딩) 유사도 기반 chat 근사 캐시 on/off.",
 	"cache.chat_semantic_model":          "시맨틱 캐시용 임베딩 모델.",
 	"cache.chat_semantic_threshold":      "시맨틱 캐시 적중 코사인 유사도 임계값(0~1).",
@@ -781,6 +783,8 @@ func applyRuntimeSetting(t2s *config.Text2SQLConfig, ch *config.ClickHouseConfig
 		cache.EmbeddingMaxBytes = atoi()
 	case "cache.chat_enabled":
 		cache.ChatEnabled = atob()
+	case "cache.embedding_scope":
+		cache.EmbeddingScope = val
 	case "cache.chat_scope":
 		cache.ChatScope = val
 	case "cache.chat_ttl":

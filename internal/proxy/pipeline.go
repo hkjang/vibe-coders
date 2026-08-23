@@ -326,7 +326,8 @@ func (rc *requestPipeline) stepCache() bool {
 
 	// Embedding cache (idempotent) — only applies to /v1/embeddings + POST.
 	if r.URL.Path == "/v1/embeddings" && r.Method == http.MethodPost && s.cacheConf().EmbeddingEnabled {
-		if served := s.serveEmbeddingFromCache(r.Context(), w, r, rc.body, rc.meta, rc.traceID); served {
+		if served := s.serveEmbeddingFromCache(r.Context(), w, r, rc.body,
+			chatCacheScopeValue(s.cacheConf().EmbeddingScope, rc.authCtx, rc.apiKeyID), rc.meta, rc.traceID); served {
 			return false
 		}
 	}
@@ -644,7 +645,8 @@ func (rc *requestPipeline) stepUpstream() bool {
 
 	analysis := analyzer.Finalize()
 	if captureForCache && analysis.Text != "" {
-		s.maybeStoreEmbeddingCache(r.Context(), body, resp.StatusCode, resp.Header.Get("Content-Type"), []byte(analysis.Text))
+		s.maybeStoreEmbeddingCache(r.Context(), body,
+			chatCacheScopeValue(s.cacheConf().EmbeddingScope, rc.authCtx, rc.apiKeyID), resp.StatusCode, resp.Header.Get("Content-Type"), []byte(analysis.Text))
 	}
 	if captureForChatCache && analysis.Text != "" {
 		s.maybeStoreChatCache(r.Context(), rc.chatCacheKey, resp.StatusCode, resp.Header.Get("Content-Type"), []byte(analysis.Text))
