@@ -383,6 +383,26 @@ func (rc *requestPipeline) stepCost() bool {
 			return false
 		}
 	}
+	// Embeddings consume quota too, and a batch job fires them by the thousand
+	// concurrently — exactly the shape that overshoots a limit. They were reserving
+	// nothing, so they counted only after finishing, which is the very gap reservations
+	// exist to close.
+	//
+	// predictCost is not reused here: it always predicts a completion, and an embedding
+	// has none, so every call would be over-reserved by the default output estimate and
+	// legitimate traffic would start being refused.
+	if r.URL.Path == "/v1/embeddings" && r.Method == http.MethodPost && s.quotaReservationsEnabled() {
+		inputTokens := promptTokenEstimate(rc.meta.Prompts)
+		cost := 0.0
+		if audit.ModelPriced(rc.meta.Request.Model, s.pricingMap(r.Context())) {
+			cost = audit.EstimateCostKRW(rc.meta.Request.Model, audit.Usage{
+				PromptTokens: inputTokens,
+			}, s.pricingMap(r.Context()))
+		}
+		s.reserveQuota(r.Context(), rc.meta.Request.ID, rc.apiKeyID, clientIP(r), int64(inputTokens), cost)
+		rc.quotaReserved = rc.meta.Request.ID
+	}
+
 	return true
 }
 

@@ -371,3 +371,89 @@ func TestQuotaRefusalAndAdminViewExplainReservations(t *testing.T) {
 
 	close(release)
 }
+
+// Embeddings consume quota and a batch job issues them by the thousand concurrently,
+// which is exactly the shape that overshoots a limit. They must reserve while in flight
+// like chat does, and must not be over-reserved for a completion they never produce.
+func TestEmbeddingsReserveQuotaWhileInFlight(t *testing.T) {
+	release := make(chan struct{})
+	var inFlight atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		inFlight.Add(1)
+		select {
+		case <-release:
+		case <-time.After(5 * time.Second):
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"object":"list","data":[{"object":"embedding","index":0,"embedding":[0.1,0.2]}],"model":"test-model","usage":{"prompt_tokens":8,"total_tokens":8}}`))
+	}))
+	defer upstream.Close()
+
+	db := openTestStore(t)
+	defer db.Close()
+	logger := store.NewAsyncLogger(db, 16, filepath.Join(t.TempDir(), "fallback.ndjson"))
+	logger.Start()
+	defer logger.Stop(context.Background())
+
+	cfg := testConfig(upstream.URL, "secret")
+	cfg.Quota.ReservationsEnabled = true
+	cfg.Cache.EmbeddingEnabled = false // a cache hit would never reach the upstream
+	server, err := NewServer(cfg, db, logger, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxy := httptest.NewServer(server.Routes())
+	defer proxy.Close()
+
+	ctx := context.Background()
+	if err := db.UpsertQuota(ctx, store.QuotaRecord{
+		ID: "q1", Scope: "global", ScopeValue: "*", Period: "daily",
+		TokenLimit: 1, Enabled: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	body := map[string]any{"model": "test-model", "input": "embed this sentence"}
+	go func() {
+		resp := postJSON(t, proxy.URL+"/v1/embeddings", "", body)
+		resp.Body.Close()
+	}()
+	deadline := time.Now().Add(5 * time.Second)
+	for inFlight.Load() == 0 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if inFlight.Load() == 0 {
+		t.Fatal("the embedding request never reached the upstream")
+	}
+
+	reserved, _, err := db.ReservedUsage(ctx, "global", "*", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reserved <= 0 {
+		t.Fatal("an in-flight embedding reserved nothing; a concurrent batch cannot see itself")
+	}
+	// An embedding produces no completion. Reserving a predicted output would inflate
+	// every call by the default completion estimate and start refusing valid traffic.
+	if reserved >= int64(defaultExpectedOutputTokens) {
+		t.Fatalf("reserved %d tokens for an embedding — a completion estimate is being "+
+			"counted for a request that produces none", reserved)
+	}
+
+	// A second request must see the first one's reservation.
+	second := postJSON(t, proxy.URL+"/v1/embeddings", "", body)
+	defer second.Body.Close()
+	if second.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("a concurrent embedding was admitted past a full quota: %d", second.StatusCode)
+	}
+
+	close(release)
+	deadline = time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if tokens, _, rerr := db.ReservedUsage(ctx, "global", "*", time.Now()); rerr == nil && tokens == 0 {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("the embedding reservation outlived its request")
+}
