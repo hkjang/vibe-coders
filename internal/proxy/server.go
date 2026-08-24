@@ -2182,6 +2182,26 @@ func (s *Server) persistInferredSession(ctx context.Context, identityHash, sessi
 	}
 }
 
+// extractModel reads just the model name from a request body.
+//
+// extractAudit returns it too, but on the way it flattens every message and redacts
+// each one -- work a caller that only wants the model then throws away. Redaction runs
+// the pattern table over the whole prompt, so on a 1 MB body that is not a rounding
+// error: the request path was redacting five times its own size, and one of those five
+// passes existed only to find a string near the top of the JSON.
+func extractModel(body []byte) string {
+	if len(body) == 0 {
+		return ""
+	}
+	var root struct {
+		Model string `json:"model"`
+	}
+	if err := json.Unmarshal(body, &root); err != nil {
+		return ""
+	}
+	return root.Model
+}
+
 func extractAudit(body []byte, endpoint string, rawPrompts bool) (string, bool, []store.PromptLog, []audit.LanguageSignal) {
 	if len(body) == 0 {
 		return "", false, nil, nil

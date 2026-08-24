@@ -33,7 +33,7 @@ func (rc *requestPipeline) stepAgentRoute() bool {
 		}
 		rc.body = body
 	}
-	model, _, _, _ := extractAudit(rc.body, r.URL.Path, false)
+	model := extractModel(rc.body)
 	model = strings.TrimSpace(model)
 	if model == "" {
 		return true
