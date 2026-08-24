@@ -51,6 +51,10 @@ type SQLStore struct {
 	// See quota_cache.go — usage counters are deliberately not cached.
 	quotas quotaCache
 
+	// agentRoutes memoises the agent route table, consulted once per /v1 request.
+	// See agent_route_cache.go.
+	agentRoutes agentRouteCache
+
 	// providerHealth memoises the routing layer's health scores. Unlike the caches above
 	// it has no invalidation: it holds a statistic derived from traffic, not an operator's
 	// edit. See provider_health_cache.go.

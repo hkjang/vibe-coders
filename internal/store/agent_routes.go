@@ -46,7 +46,11 @@ func (s *SQLStore) UpsertAgentRoute(ctx context.Context, a AgentRoute) error {
 			updated_at=excluded.updated_at`),
 		a.ID, a.VirtualModel, a.Name, boolInt(a.Enabled), a.BackingModel, a.Provider,
 		encodeStringList(a.MCPUpstreams), encodeStringList(a.AllowedTools), a.SystemPrompt, a.MaxSteps, a.MaxCostKRW, a.CreatedBy, a.CreatedAt, a.UpdatedAt)
-	return err
+	if err != nil {
+		return err
+	}
+	s.agentRoutes.invalidate()
+	return nil
 }
 
 // ListAgentRoutes returns all agent routes, newest first.
@@ -69,21 +73,6 @@ func (s *SQLStore) ListAgentRoutes(ctx context.Context) ([]AgentRoute, error) {
 	return out, rows.Err()
 }
 
-// GetAgentRouteByModel resolves an enabled-or-not route by its virtual model name.
-func (s *SQLStore) GetAgentRouteByModel(ctx context.Context, virtualModel string) (AgentRoute, bool, error) {
-	row := s.db.QueryRowContext(ctx, s.bind(`SELECT id, virtual_model, name, enabled, backing_model, provider,
-		mcp_upstreams_json, allowed_tools_json, system_prompt, max_steps, max_cost_krw, created_by, created_at, updated_at
-		FROM agent_routes WHERE virtual_model = ?`), virtualModel)
-	a, err := scanAgentRoute(row)
-	if errors.Is(err, sql.ErrNoRows) {
-		return AgentRoute{}, false, nil
-	}
-	if err != nil {
-		return AgentRoute{}, false, err
-	}
-	return a, true, nil
-}
-
 // GetAgentRoute fetches one route by id.
 func (s *SQLStore) GetAgentRoute(ctx context.Context, id string) (AgentRoute, bool, error) {
 	row := s.db.QueryRowContext(ctx, s.bind(`SELECT id, virtual_model, name, enabled, backing_model, provider,
@@ -101,8 +90,11 @@ func (s *SQLStore) GetAgentRoute(ctx context.Context, id string) (AgentRoute, bo
 
 // DeleteAgentRoute removes an agent route by id.
 func (s *SQLStore) DeleteAgentRoute(ctx context.Context, id string) error {
-	_, err := s.db.ExecContext(ctx, s.bind(`DELETE FROM agent_routes WHERE id = ?`), id)
-	return err
+	if _, err := s.db.ExecContext(ctx, s.bind(`DELETE FROM agent_routes WHERE id = ?`), id); err != nil {
+		return err
+	}
+	s.agentRoutes.invalidate()
+	return nil
 }
 
 func scanAgentRoute(sc interface{ Scan(...any) error }) (AgentRoute, error) {
