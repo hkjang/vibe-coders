@@ -1,9 +1,6 @@
 package store
 
-import (
-	"sync"
-	"time"
-)
+import "time"
 
 // Caching the provider table.
 //
@@ -15,90 +12,69 @@ import (
 // Postgres showed five provider reads out of nineteen synchronous queries — the largest
 // single group, and all of them returning identical rows.
 //
-// The rows change only when an operator edits a provider, so they are held in memory.
-// Writes through this store drop the cache immediately, which makes the single-instance
-// case exact: an admin edit is visible to the very next request. The TTL exists only for
-// the case this store cannot observe — a *different* gateway process editing the same
-// database. Without it, that edit would never be picked up; with it, the window is
-// bounded by providerCacheTTL.
+// See ttl_cache.go for how invalidation and the TTL divide the work.
 //
-// Reads hand back a copy. The cached slice outlives the call, so returning it directly
-// would let one caller's edit change what every later caller sees.
-const providerCacheTTL = 3 * time.Second
-
+// Reads hand back a copy of the slice. The cached slice outlives the call, so returning it
+// directly would let one caller's edit change what every later caller sees. ProviderConfig
+// is all scalars, so copying the slice is enough — there is nothing underneath to share.
 type providerCache struct {
-	mu sync.Mutex
-
-	configs   []ProviderConfig
-	configsAt time.Time
-
-	public   []ProviderPublic
-	publicAt time.Time
-
+	configs cachedValue[[]ProviderConfig]
+	public  cachedValue[[]ProviderPublic]
 	// byName holds every row, disabled ones included, because GetProvider is asked about
 	// providers the routing list deliberately leaves out.
-	byName   map[string]ProviderConfig
-	byNameAt time.Time
+	byName cachedValue[map[string]ProviderConfig]
 }
 
-// invalidate drops the cached rows so the next read goes to the database. Every write
-// path that touches provider_configs must call it — including the ones that bypass
-// UpsertProvider, such as secret rotation rewriting encrypted_api_key in place.
+// invalidate drops the cached rows so the next read reloads them. Every write path that
+// touches provider_configs must call it — including the ones that bypass UpsertProvider,
+// such as secret rotation rewriting encrypted_api_key in place.
 func (c *providerCache) invalidate() {
-	c.mu.Lock()
-	c.configs, c.public, c.byName = nil, nil, nil
-	c.configsAt, c.publicAt, c.byNameAt = time.Time{}, time.Time{}, time.Time{}
-	c.mu.Unlock()
+	c.configs.clear()
+	c.public.clear()
+	c.byName.clear()
 }
 
 func (c *providerCache) freshConfigs(now time.Time) ([]ProviderConfig, bool) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.configsAt.IsZero() || now.Sub(c.configsAt) >= providerCacheTTL {
+	rows, ok := c.configs.get(now)
+	if !ok {
 		return nil, false
 	}
-	return append([]ProviderConfig(nil), c.configs...), true
+	return append([]ProviderConfig(nil), rows...), true
 }
 
-func (c *providerCache) storeConfigs(rows []ProviderConfig, now time.Time) {
-	c.mu.Lock()
-	c.configs = append([]ProviderConfig(nil), rows...)
-	c.configsAt = now
-	c.mu.Unlock()
+func (c *providerCache) beginConfigs() uint64 { return c.configs.begin() }
+
+func (c *providerCache) storeConfigs(rows []ProviderConfig, gen uint64, now time.Time) {
+	c.configs.putIfCurrent(append([]ProviderConfig(nil), rows...), gen, now)
 }
 
 func (c *providerCache) freshPublic(now time.Time) ([]ProviderPublic, bool) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.publicAt.IsZero() || now.Sub(c.publicAt) >= providerCacheTTL {
+	rows, ok := c.public.get(now)
+	if !ok {
 		return nil, false
 	}
-	return append([]ProviderPublic(nil), c.public...), true
+	return append([]ProviderPublic(nil), rows...), true
 }
 
-func (c *providerCache) storePublic(rows []ProviderPublic, now time.Time) {
-	c.mu.Lock()
-	c.public = append([]ProviderPublic(nil), rows...)
-	c.publicAt = now
-	c.mu.Unlock()
+func (c *providerCache) beginPublic() uint64 { return c.public.begin() }
+
+func (c *providerCache) storePublic(rows []ProviderPublic, gen uint64, now time.Time) {
+	c.public.putIfCurrent(append([]ProviderPublic(nil), rows...), gen, now)
 }
 
 // lookup answers a single-provider query from the cached table. ProviderConfig is all
-// scalars, so the returned value shares nothing with the map and the map never escapes
-// the lock.
+// scalars, so the returned value shares nothing with the map.
 func (c *providerCache) lookup(name string, now time.Time) (ProviderConfig, bool, bool) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.byNameAt.IsZero() || now.Sub(c.byNameAt) >= providerCacheTTL {
+	byName, ok := c.byName.get(now)
+	if !ok {
 		return ProviderConfig{}, false, false
 	}
-	p, found := c.byName[name]
+	p, found := byName[name]
 	return p, found, true
 }
 
-func (c *providerCache) storeByName(rows map[string]ProviderConfig, now time.Time) {
-	c.mu.Lock()
-	c.byName = rows
-	c.byNameAt = now
-	c.mu.Unlock()
+func (c *providerCache) beginByName() uint64 { return c.byName.begin() }
+
+func (c *providerCache) storeByName(rows map[string]ProviderConfig, gen uint64, now time.Time) {
+	c.byName.putIfCurrent(rows, gen, now)
 }

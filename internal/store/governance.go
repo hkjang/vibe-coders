@@ -92,10 +92,30 @@ func (s *SQLStore) UpsertPolicyWithRules(ctx context.Context, p Policy, rules []
 			}
 		}
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	// The rules the request path evaluates just changed; an operator editing a policy has
+	// to see it enforced on the very next request, not once a TTL lapses.
+	s.policies.invalidate()
+	return nil
 }
 
 func (s *SQLStore) ActivePolicyRules(ctx context.Context) ([]PolicyRule, error) {
+	now := time.Now()
+	if cached, ok := s.policies.freshActiveRules(now); ok {
+		return cached, nil
+	}
+	gen := s.policies.beginLoad()
+	rules, err := s.loadActivePolicyRules(ctx)
+	if err != nil {
+		return nil, err
+	}
+	s.policies.storeActiveRules(rules, gen, now)
+	return rules, nil
+}
+
+func (s *SQLStore) loadActivePolicyRules(ctx context.Context) ([]PolicyRule, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT r.id, r.policy_id, COALESCE(r.name, ''), r.enabled, r.priority,
 			r.conditions_json, r.actions_json, r.created_at, r.updated_at, COALESCE(p.rollout_percent, 100)
 		FROM policy_rules r

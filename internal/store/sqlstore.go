@@ -42,6 +42,10 @@ type SQLStore struct {
 	// providers memoises provider_configs, which the hot path reads several times per
 	// request. See provider_cache.go.
 	providers providerCache
+
+	// policies memoises the active governance rules, read once per governance phase.
+	// See policy_cache.go.
+	policies policyCache
 }
 
 func Open(ctx context.Context, cfg config.DatabaseConfig) (*SQLStore, error) {
@@ -2344,11 +2348,12 @@ func (s *SQLStore) GetProvider(ctx context.Context, name string) (ProviderConfig
 	if provider, found, ok := s.providers.lookup(name, now); ok {
 		return provider, found, nil
 	}
+	gen := s.providers.beginByName()
 	byName, err := s.loadProvidersByName(ctx)
 	if err != nil {
 		return ProviderConfig{}, false, err
 	}
-	s.providers.storeByName(byName, now)
+	s.providers.storeByName(byName, gen, now)
 	provider, found := byName[name]
 	return provider, found, nil
 }
@@ -2390,11 +2395,12 @@ func (s *SQLStore) ListProviders(ctx context.Context) ([]ProviderPublic, error) 
 		}
 		return cached, nil
 	}
+	gen := s.providers.beginPublic()
 	result, err := s.loadProviders(ctx)
 	if err != nil {
 		return nil, err
 	}
-	s.providers.storePublic(result, now)
+	s.providers.storePublic(result, gen, now)
 	return result, nil
 }
 
@@ -2435,11 +2441,12 @@ func (s *SQLStore) ListProviderConfigs(ctx context.Context) ([]ProviderConfig, e
 	if cached, ok := s.providers.freshConfigs(now); ok {
 		return cached, nil
 	}
+	gen := s.providers.beginConfigs()
 	result, err := s.loadProviderConfigs(ctx)
 	if err != nil {
 		return nil, err
 	}
-	s.providers.storeConfigs(result, now)
+	s.providers.storeConfigs(result, gen, now)
 	return result, nil
 }
 
