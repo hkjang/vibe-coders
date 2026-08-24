@@ -13,7 +13,9 @@ import (
 // extractAudit parses the request body, flattens every message and redacts each one. It
 // is called from several steps, and each call repeats all of that: a 1 MB request was
 // redacting 5 MB — five passes over the same prompt — before one of them turned out to
-// want nothing but the model name and was replaced with extractModel.
+// want nothing but the model name and was replaced with extractModel. A second did the
+// same through previewModelComplexity, which computed a complexity score its only caller
+// discarded, so that function is gone as well.
 //
 // Redaction is the expensive half. It runs a table of patterns over the whole prompt, and
 // profiling put it at more than half of the request path. So the number of callers is a
@@ -30,7 +32,6 @@ var extractAuditCallers = map[string]string{
 	"server.go":              "the audit record itself — the one caller that has to have the prompts",
 	"intelligent_routing.go": "complexity and risk scoring for auto model selection",
 	"mcp_model_router.go":    "picking MCP servers from the question",
-	"tooling.go":             "tool and skill matching",
 }
 
 func TestExtractAuditCallersAreAccountedFor(t *testing.T) {

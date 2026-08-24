@@ -1559,7 +1559,11 @@ func (s *Server) dialUpstream(reqCtx context.Context, r *http.Request, body []by
 	var lastErr error
 	failoverPath := []string{}
 	currentBody := body
-	currentModel, _ := previewModelComplexity(currentBody, r.URL.Path)
+	// Only the model name is wanted here. Reading it used to go through
+	// previewModelComplexity, which extracted and redacted every prompt to compute a
+	// complexity score this caller discarded -- and it was the only caller, so the score
+	// was never used at all.
+	currentModel := extractModel(currentBody)
 	usedLongContext := false
 	var lastUpstreamHeaders http.Header
 	for i := 0; i < len(attempts); {
