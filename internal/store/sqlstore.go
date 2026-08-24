@@ -165,6 +165,9 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 		if err := s.widenPostgresRealColumns(ctx); err != nil {
 			return err
 		}
+		if err := s.widenPostgresCounterColumns(ctx); err != nil {
+			return err
+		}
 	}
 	// Recorded after the schema exists and only on the first run, so an existing database
 	// does not claim its day totals cover traffic from before they were being kept.
@@ -2075,12 +2078,15 @@ func migrationStatements() []string {
 
 		// Per-day usage totals, so a quota does not have to aggregate its whole period on
 		// every request. See usage_rollup.go for how it is kept in step with request_logs.
+		// BIGINT, not INTEGER: these accumulate a whole day of traffic, and INTEGER is
+		// four bytes on PostgreSQL. At a few thousand tokens a request a busy gateway
+		// passes two billion in a day, and the overflow would land in a quota total.
 		`CREATE TABLE IF NOT EXISTS usage_rollup (
 			scope TEXT NOT NULL,
 			scope_value TEXT NOT NULL,
 			day TEXT NOT NULL,
-			requests INTEGER NOT NULL DEFAULT 0,
-			tokens INTEGER NOT NULL DEFAULT 0,
+			requests BIGINT NOT NULL DEFAULT 0,
+			tokens BIGINT NOT NULL DEFAULT 0,
 			cost REAL NOT NULL DEFAULT 0,
 			PRIMARY KEY (scope, scope_value, day)
 		)`,
@@ -2152,6 +2158,49 @@ func (s *SQLStore) widenPostgresRealColumns(ctx context.Context) error {
 			quotePGIdentifier(c.table), quotePGIdentifier(c.name))
 		if _, err := s.db.ExecContext(ctx, stmt); err != nil {
 			return fmt.Errorf("widen %s.%s to double precision: %w", c.table, c.name, err)
+		}
+	}
+	return nil
+}
+
+// pgCounterColumns are columns whose Go type is int64 but whose declared type is INTEGER,
+// which PostgreSQL reads as four bytes with a ceiling of about 2.1 billion. SQLite stores
+// them at 64 bits either way, so the limit is invisible until production.
+//
+// Only columns that can genuinely reach that ceiling are listed. A per-request count
+// cannot; a running total or an operator-set limit can.
+var pgCounterColumns = []struct{ table, column, why string }{
+	{"usage_rollup", "requests", "accumulates a whole day of requests"},
+	{"usage_rollup", "tokens", "accumulates a whole day of tokens, which passes two billion at a few thousand per request"},
+	{"quotas", "token_limit", "an operator-set ceiling; a monthly token budget is routinely larger than two billion"},
+}
+
+// widenPostgresCounterColumns promotes those columns to bigint.
+//
+// New databases get BIGINT from the schema, but one created by an earlier version already
+// has integer and CREATE TABLE IF NOT EXISTS will not revisit it. Widening is lossless and
+// idempotent: a value that already fits keeps its value, and every write afterwards has
+// room. Columns already bigint are skipped, so this is a no-op after the first run.
+func (s *SQLStore) widenPostgresCounterColumns(ctx context.Context) error {
+	for _, c := range pgCounterColumns {
+		var dataType string
+		err := s.db.QueryRowContext(ctx, `
+			SELECT data_type FROM information_schema.columns
+			WHERE table_schema = current_schema() AND table_name = $1 AND column_name = $2`,
+			c.table, c.column).Scan(&dataType)
+		if err == sql.ErrNoRows {
+			continue // the table is not in this schema yet
+		}
+		if err != nil {
+			return err
+		}
+		if dataType != "integer" && dataType != "smallint" {
+			continue
+		}
+		stmt := fmt.Sprintf(`ALTER TABLE %s ALTER COLUMN %s TYPE BIGINT`,
+			quotePGIdentifier(c.table), quotePGIdentifier(c.column))
+		if _, err := s.db.ExecContext(ctx, stmt); err != nil {
+			return fmt.Errorf("widen %s.%s to bigint (%s): %w", c.table, c.column, c.why, err)
 		}
 	}
 	return nil
@@ -2589,17 +2638,18 @@ func (s *SQLStore) InsertLogRecord(ctx context.Context, record LogRecord) error 
 		return err
 	}
 
+	promptArgs := make([]any, 0, len(record.Prompts)*8)
 	for _, prompt := range record.Prompts {
 		if prompt.CreatedAt.IsZero() {
 			prompt.CreatedAt = req.CreatedAt
 		}
-		_, err = tx.ExecContext(ctx, s.bind(`INSERT INTO prompt_logs
-			(id, request_id, role, content_hash, content_text, redacted_text, language_hint, created_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`),
-			cleanArgs([]any{prompt.ID, prompt.RequestID, prompt.Role, prompt.ContentHash, prompt.ContentText, prompt.RedactedText, prompt.LanguageHint, formatTime(prompt.CreatedAt)})...)
-		if err != nil {
-			return err
-		}
+		promptArgs = append(promptArgs, prompt.ID, prompt.RequestID, prompt.Role, prompt.ContentHash,
+			prompt.ContentText, prompt.RedactedText, prompt.LanguageHint, formatTime(prompt.CreatedAt))
+	}
+	if err := batchInsert(ctx, tx, s.bind, `INSERT INTO prompt_logs
+			(id, request_id, role, content_hash, content_text, redacted_text, language_hint, created_at)`,
+		"(?, ?, ?, ?, ?, ?, ?, ?)", 8, cleanArgs(promptArgs)); err != nil {
+		return err
 	}
 
 	if record.Response != nil {
@@ -2644,45 +2694,44 @@ func (s *SQLStore) InsertLogRecord(ctx context.Context, record LogRecord) error 
 		}
 	}
 
+	languageArgs := make([]any, 0, len(record.Languages)*6)
 	for _, language := range record.Languages {
 		if language.CreatedAt.IsZero() {
 			language.CreatedAt = req.CreatedAt
 		}
-		_, err = tx.ExecContext(ctx, s.bind(`INSERT INTO language_stats
-			(id, request_id, language, confidence, evidence, created_at)
-			VALUES (?, ?, ?, ?, ?, ?)`),
-			cleanArgs([]any{language.ID, language.RequestID, language.Language, language.Confidence, language.Evidence, formatTime(language.CreatedAt)})...)
-		if err != nil {
-			return err
-		}
+		languageArgs = append(languageArgs, language.ID, language.RequestID, language.Language,
+			language.Confidence, language.Evidence, formatTime(language.CreatedAt))
+	}
+	if err := batchInsert(ctx, tx, s.bind, `INSERT INTO language_stats
+			(id, request_id, language, confidence, evidence, created_at)`,
+		"(?, ?, ?, ?, ?, ?)", 6, cleanArgs(languageArgs)); err != nil {
+		return err
 	}
 
+	evaluationArgs := make([]any, 0, len(record.Evaluations)*12)
 	for _, evaluation := range record.Evaluations {
 		if evaluation.CreatedAt.IsZero() {
 			evaluation.CreatedAt = req.CreatedAt
 		}
-		_, err = tx.ExecContext(ctx, s.bind(`INSERT INTO llm_evaluations
-			(id, request_id, trace_id, name, category, evaluator, score, label, passed, reason, metadata, created_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
-			cleanArgs([]any{evaluation.ID, evaluation.RequestID, evaluation.TraceID, evaluation.Name, evaluation.Category, evaluation.Evaluator, evaluation.Score,
-				evaluation.Label, boolInt(evaluation.Passed), evaluation.Reason, evaluation.Metadata, formatTime(evaluation.CreatedAt)})...)
-		if err != nil {
-			return err
-		}
+		evaluationArgs = append(evaluationArgs, evaluation.ID, evaluation.RequestID, evaluation.TraceID,
+			evaluation.Name, evaluation.Category, evaluation.Evaluator, evaluation.Score, evaluation.Label,
+			boolInt(evaluation.Passed), evaluation.Reason, evaluation.Metadata, formatTime(evaluation.CreatedAt))
+	}
+	if err := batchInsert(ctx, tx, s.bind, `INSERT INTO llm_evaluations
+			(id, request_id, trace_id, name, category, evaluator, score, label, passed, reason, metadata, created_at)`,
+		"(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", 12, cleanArgs(evaluationArgs)); err != nil {
+		return err
 	}
 
+	toolArgs := make([]any, 0, len(record.Tools)*12)
+	catalogArgs := make([]any, 0, len(record.Tools)*5)
 	for _, tool := range record.Tools {
 		if tool.CreatedAt.IsZero() {
 			tool.CreatedAt = req.CreatedAt
 		}
-		_, err = tx.ExecContext(ctx, s.bind(`INSERT INTO tool_invocations
-			(id, request_id, trace_id, api_key_id, server_label, tool_name, source, is_mcp, is_error, arg_sensitive, arg_hash, created_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
-			cleanArgs([]any{tool.ID, tool.RequestID, tool.TraceID, tool.APIKeyID, tool.ServerLabel, tool.ToolName, tool.Source,
-				boolInt(tool.IsMCP), boolInt(tool.IsError), boolInt(tool.ArgSensitive), tool.ArgHash, formatTime(tool.CreatedAt)})...)
-		if err != nil {
-			return err
-		}
+		toolArgs = append(toolArgs, tool.ID, tool.RequestID, tool.TraceID, tool.APIKeyID, tool.ServerLabel,
+			tool.ToolName, tool.Source, boolInt(tool.IsMCP), boolInt(tool.IsError), boolInt(tool.ArgSensitive),
+			tool.ArgHash, formatTime(tool.CreatedAt))
 		// Maintain the per-server tool catalog from declared definitions.
 		if tool.Source == "definition" && tool.ToolName != "" {
 			server := tool.ServerLabel
@@ -2690,13 +2739,23 @@ func (s *SQLStore) InsertLogRecord(ctx context.Context, record LogRecord) error 
 				server = "(none)"
 			}
 			ts := formatTime(tool.CreatedAt)
-			_, err = tx.ExecContext(ctx, s.bind(`INSERT INTO mcp_tool_catalog (server_label, tool_name, is_mcp, first_seen, last_seen)
-				VALUES (?, ?, ?, ?, ?)
-				ON CONFLICT(server_label, tool_name) DO UPDATE SET last_seen = excluded.last_seen, is_mcp = excluded.is_mcp`),
-				cleanArgs([]any{server, tool.ToolName, boolInt(tool.IsMCP), ts, ts})...)
-			if err != nil {
-				return err
-			}
+			catalogArgs = append(catalogArgs, server, tool.ToolName, boolInt(tool.IsMCP), ts, ts)
+		}
+	}
+	if err := batchInsert(ctx, tx, s.bind, `INSERT INTO tool_invocations
+			(id, request_id, trace_id, api_key_id, server_label, tool_name, source, is_mcp, is_error, arg_sensitive, arg_hash, created_at)`,
+		"(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", 12, cleanArgs(toolArgs)); err != nil {
+		return err
+	}
+	// The catalog is an upsert, so it keeps its own statement rather than sharing the one
+	// above. A request that declares the same tool twice would make one statement update a
+	// row it also inserts, which PostgreSQL refuses.
+	for i := 0; i < len(catalogArgs); i += 5 {
+		if _, err := tx.ExecContext(ctx, s.bind(`INSERT INTO mcp_tool_catalog (server_label, tool_name, is_mcp, first_seen, last_seen)
+			VALUES (?, ?, ?, ?, ?)
+			ON CONFLICT(server_label, tool_name) DO UPDATE SET last_seen = excluded.last_seen, is_mcp = excluded.is_mcp`),
+			cleanArgs(catalogArgs[i:i+5])...); err != nil {
+			return err
 		}
 	}
 
