@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -178,5 +179,60 @@ func TestSessionHeaderInjectionCanBeDisabled(t *testing.T) {
 
 	if len(seen) != 1 || seen[0] != "" {
 		t.Errorf("with injection disabled the upstream still received a session id %q", seen)
+	}
+}
+
+// The injected id must not be recorded as something the client sent.
+//
+// The header is added to the inbound request so copyUpstreamHeaders forwards it, which
+// means anything reading r.Header after that point sees a header the caller never sent.
+// The audit capture happens before the pipeline runs, so the request log shows what
+// actually arrived — but that is an ordering accident waiting to be undone, and the
+// symptom would be quiet: an operator debugging a client would see X-Session-ID in the
+// recorded request and conclude the client is sending one.
+func TestTheInjectedSessionIDIsNotRecordedAsClientSent(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}],"usage":{"total_tokens":3}}`))
+	}))
+	defer upstream.Close()
+
+	db := openTestStore(t)
+	defer db.Close()
+	logger := store.NewAsyncLogger(db, 64, filepath.Join(t.TempDir(), "fallback.ndjson"))
+	logger.Start()
+	defer logger.Stop(context.Background())
+
+	cfg := testConfig(upstream.URL, "s")
+	cfg.Session.InjectHeader = true
+	server, err := NewServer(cfg, db, logger, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// auditRequest is what captures the client's headers; call it the way the request
+	// path does and check the pipeline has not already written into r.Header.
+	body, _ := json.Marshal(map[string]any{"model": "test-model",
+		"messages": []map[string]string{{"role": "user", "content": "hi"}}})
+	req, err := http.NewRequest(http.MethodPost, "http://gateway/v1/chat/completions", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "QwenCode/0.2.1")
+
+	record := server.auditRequest("/v1/chat/completions", body, "anonymous", "trace-1", req)
+	if strings.Contains(strings.ToLower(record.Request.RequestHeadersJSON), "session-id") {
+		t.Errorf("the request log records a session id the caller never sent:\n  %s\n"+
+			"The header is added for the upstream only; recording it makes a client look "+
+			"like it is sending one when it is not.", record.Request.RequestHeadersJSON)
+	}
+
+	// And the end-to-end path still attaches it upstream, so this is not passing because
+	// injection stopped working.
+	proxyURL, seen := sessionHeaderFixture(t)
+	turnAs(t, proxyURL, "You are a coding agent.", "refactor auth.go", 0, "")
+	if len(*seen) != 1 || (*seen)[0] == "" {
+		t.Fatalf("the upstream received no session id, so the check above proves nothing: %v", *seen)
 	}
 }
