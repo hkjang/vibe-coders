@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -18,6 +19,22 @@ import (
 // fields (stream, user, n) are excluded. Returns (key, model, cacheable).
 // cacheable is true only when the request is reproducible: temperature == 0 (explicit)
 // or a seed is set. Callers may also force caching via the X-Proxy-Cache header.
+// hasJSONArrayElements reports whether a raw JSON value is an array with something in it.
+//
+// The field is kept raw so the key can hash the bytes as they arrived, which means its
+// length is the length of the JSON text: "[]" is two bytes, not zero. Checking that
+// length only catches a missing field, so a request carrying an empty conversation was
+// given a cache key, and every such request would share it. Nothing is stored under that
+// key today, because only successful responses are cached and an empty conversation does
+// not produce one, but the guard should mean what it says.
+func hasJSONArrayElements(raw json.RawMessage) bool {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) < 2 || trimmed[0] != '[' {
+		return false
+	}
+	return len(bytes.TrimSpace(trimmed[1:len(trimmed)-1])) > 0
+}
+
 func chatCacheKey(body []byte) (string, string, bool) {
 	var root struct {
 		Model          string          `json:"model"`
@@ -33,7 +50,7 @@ func chatCacheKey(body []byte) (string, string, bool) {
 		return "", "", false
 	}
 	model := strings.TrimSpace(root.Model)
-	if model == "" || len(root.Messages) == 0 {
+	if model == "" || !hasJSONArrayElements(root.Messages) {
 		return "", "", false
 	}
 	deterministic := (root.Temperature != nil && *root.Temperature == 0) || root.Seed != nil
