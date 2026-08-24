@@ -31,7 +31,7 @@ import (
 )
 
 // AppVersion is the gateway build version, surfaced in /auth/me and the admin UI.
-const AppVersion = "v0.77.9"
+const AppVersion = "v0.78.0"
 
 type Server struct {
 	cfg      config.Config
@@ -1273,6 +1273,11 @@ func (s *Server) handleOpenAI(w http.ResponseWriter, r *http.Request) {
 		// would be missed by whichever branch was overlooked, and would then count
 		// against the quota until it expired.
 		s.releaseQuota(rc.quotaReserved)
+
+		// The governance decisions of every phase, written once. Detached from the
+		// request context on purpose: enforcement has already happened, and an audit
+		// record that disappears because the client hung up is the one worth keeping.
+		s.writePolicyDecisionEvents(context.WithoutCancel(r.Context()), rc.policyEvents)
 
 		if r.Method == http.MethodGet && r.URL.Path == "/v1/models" && sw.statusCode == http.StatusOK {
 			return

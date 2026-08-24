@@ -178,6 +178,33 @@ func scanPolicy(rows *sql.Rows) (Policy, error) {
 	return p, nil
 }
 
+// InsertPolicyDecisionEvents writes a request's governance decisions in one statement.
+//
+// A request is evaluated at three phases, and each used to write its own rows as it went —
+// three round trips for what is one request's audit record. Writing them together costs
+// one, and the rows are identical either way.
+func (s *SQLStore) InsertPolicyDecisionEvents(ctx context.Context, events []PolicyDecisionEvent) error {
+	if len(events) == 0 {
+		return nil
+	}
+	placeholders := make([]string, 0, len(events))
+	args := make([]any, 0, len(events)*18)
+	for _, e := range events {
+		if e.CreatedAt.IsZero() {
+			e.CreatedAt = time.Now().UTC()
+		}
+		placeholders = append(placeholders, "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+		args = append(args, e.ID, e.RequestID, e.APIKeyID, e.UserID, e.TeamID, e.Endpoint, e.Phase,
+			e.PolicyID, e.RuleID, e.RuleName, e.Decision, e.Reason, e.Model, e.Provider,
+			e.RiskScore, e.ComplexityScore, e.CostKRW, formatTime(e.CreatedAt))
+	}
+	_, err := s.db.ExecContext(ctx, s.bind(`INSERT INTO policy_decision_events
+		(id, request_id, api_key_id, user_id, team_id, endpoint, phase, policy_id, rule_id, rule_name,
+		 decision, reason, model, provider, risk_score, complexity_score, cost_krw, created_at)
+		VALUES `+strings.Join(placeholders, ", ")), args...)
+	return err
+}
+
 func scanPolicyRules(rows *sql.Rows) ([]PolicyRule, error) {
 	result := []PolicyRule{}
 	for rows.Next() {

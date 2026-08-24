@@ -69,6 +69,10 @@ type requestPipeline struct {
 	skillVersion string
 	skillTools   string
 
+	// policyEvents collects the governance decisions of every phase, written once at the
+	// end of the request. See the deferred flush in handleOpenAI.
+	policyEvents []store.PolicyDecisionEvent
+
 	// quotaReserved is the request id holding an in-flight quota reservation, if any.
 	// It must be released on every exit path or the reservation counts against the
 	// quota until it expires.
@@ -273,7 +277,7 @@ func (rc *requestPipeline) stepGovernance() bool {
 
 	if r.Method == http.MethodPost {
 		var blocked bool
-		rc.body, blocked = s.enforceOpenAIGovernance(w, r, &rc.meta, rc.body, rc.authCtx, rc.routingPlan, 0, true, "request")
+		rc.body, blocked = s.enforceOpenAIGovernance(w, r, &rc.meta, rc.body, rc.authCtx, rc.routingPlan, 0, true, "request", &rc.policyEvents)
 		if blocked {
 			return false
 		}
@@ -385,7 +389,7 @@ func (rc *requestPipeline) stepCost() bool {
 			return false
 		}
 		var blocked bool
-		rc.body, blocked = s.enforceOpenAIGovernance(w, r, &rc.meta, rc.body, rc.authCtx, rc.routingPlan, rc.estimatedCostKRW, false, "cost")
+		rc.body, blocked = s.enforceOpenAIGovernance(w, r, &rc.meta, rc.body, rc.authCtx, rc.routingPlan, rc.estimatedCostKRW, false, "cost", &rc.policyEvents)
 		if blocked {
 			return false
 		}
@@ -505,7 +509,7 @@ func (rc *requestPipeline) stepUpstream() bool {
 	}
 	if r.Method == http.MethodPost {
 		var blocked bool
-		body, blocked = s.enforceOpenAIGovernance(w, r, &meta, body, rc.authCtx, routingPlan, rc.estimatedCostKRW, false, "provider")
+		body, blocked = s.enforceOpenAIGovernance(w, r, &meta, body, rc.authCtx, routingPlan, rc.estimatedCostKRW, false, "provider", &rc.policyEvents)
 		if blocked {
 			return false
 		}
