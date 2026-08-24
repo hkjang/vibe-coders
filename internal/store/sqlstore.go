@@ -59,6 +59,10 @@ type SQLStore struct {
 	// See usage_rollup.go.
 	rollupStart rollupStart
 
+	// teams memoises the teams table, resolved once per request by authentication.
+	// See team_cache.go.
+	teams teamCache
+
 	// providerHealth memoises the routing layer's health scores. Unlike the caches above
 	// it has no invalidation: it holds a statistic derived from traffic, not an operator's
 	// edit. See provider_health_cache.go.

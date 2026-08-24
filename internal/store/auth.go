@@ -119,7 +119,11 @@ func (s *SQLStore) UpsertAuthTeam(ctx context.Context, team AuthTeam) error {
 		VALUES (?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET name = excluded.name, updated_at = excluded.updated_at`),
 		team.ID, team.Name, formatTime(team.CreatedAt), formatTime(team.UpdatedAt))
-	return err
+	if err != nil {
+		return err
+	}
+	s.teams.invalidate()
+	return nil
 }
 
 func (s *SQLStore) ListAuthTeams(ctx context.Context) ([]AuthTeam, error) {
@@ -140,28 +144,6 @@ func (s *SQLStore) ListAuthTeams(ctx context.Context) ([]AuthTeam, error) {
 		out = append(out, team)
 	}
 	return out, rows.Err()
-}
-
-func (s *SQLStore) AuthTeamByIDOrName(ctx context.Context, value string) (AuthTeam, bool, error) {
-	if value == "" {
-		return AuthTeam{}, false, nil
-	}
-	var team AuthTeam
-	var createdAt, updatedAt string
-	err := s.db.QueryRowContext(ctx, s.bind(`SELECT id, name, created_at, updated_at
-		FROM teams
-		WHERE id = ? OR LOWER(name) = LOWER(?)
-		ORDER BY CASE WHEN id = ? THEN 0 ELSE 1 END
-		LIMIT 1`), value, value, value).Scan(&team.ID, &team.Name, &createdAt, &updatedAt)
-	if err == sql.ErrNoRows {
-		return AuthTeam{}, false, nil
-	}
-	if err != nil {
-		return AuthTeam{}, false, err
-	}
-	team.CreatedAt = parseOptionalTime(createdAt)
-	team.UpdatedAt = parseOptionalTime(updatedAt)
-	return team, true, nil
 }
 
 func (s *SQLStore) UpsertMembership(ctx context.Context, m UserTeamMembership) error {
