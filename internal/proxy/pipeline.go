@@ -148,7 +148,18 @@ func (rc *requestPipeline) stepQuota() bool {
 	s, r, w := rc.s, rc.r, rc.w
 
 	clientAddr := clientIP(r)
-	if decision, err := s.checkQuotas(r.Context(), rc.apiKeyID, clientAddr); err != nil {
+	// Authentication already read this key's row, so its team is in hand. Looking it up
+	// again is a round trip for a value the request is holding.
+	//
+	// The id comparison is a guard, not a case that arises today: every branch of stepAuth
+	// sets apiKeyID and authCtx from the same lookup. It is here because the cost of being
+	// wrong is charging a request to another team's quota, and a future auth path that
+	// sets one without the other would do exactly that in silence.
+	var knownTeam *string
+	if rc.authCtx != nil && rc.authCtx.APIKeyID == rc.apiKeyID {
+		knownTeam = &rc.authCtx.KeyTeam
+	}
+	if decision, err := s.checkQuotas(r.Context(), rc.apiKeyID, clientAddr, knownTeam); err != nil {
 		slog.Warn("quota check failed", "error", err)
 	} else if !decision.Allowed {
 		w.Header().Set("Retry-After", strconv.Itoa(quotaRetryAfterSeconds(decision.PeriodEnd)))

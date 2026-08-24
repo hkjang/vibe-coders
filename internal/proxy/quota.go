@@ -43,12 +43,24 @@ func periodBounds(period string, now time.Time) (time.Time, time.Time) {
 	}
 }
 
-func (s *Server) checkQuotas(ctx context.Context, apiKeyID string, clientIP string) (quotaDecision, error) {
+// checkQuotas decides whether a request may proceed.
+//
+// knownTeam is the api key's team when the caller already has it — authentication reads the
+// whole key row, so the request path does — and nil when it does not, in which case it is
+// looked up. It is the raw api_keys.team value, which is what quota rows are scoped by, and
+// not the canonical team id authentication resolves for display.
+func (s *Server) checkQuotas(ctx context.Context, apiKeyID string, clientIP string, knownTeam *string) (quotaDecision, error) {
 	now := time.Now()
 
-	team, err := s.db.GetTeamForAPIKey(ctx, apiKeyID)
-	if err != nil {
-		return quotaDecision{Allowed: true}, err
+	var team string
+	if knownTeam != nil {
+		team = *knownTeam
+	} else {
+		var err error
+		team, err = s.db.GetTeamForAPIKey(ctx, apiKeyID)
+		if err != nil {
+			return quotaDecision{Allowed: true}, err
+		}
 	}
 
 	scopes := []struct{ scope, value string }{

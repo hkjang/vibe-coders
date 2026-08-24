@@ -92,9 +92,16 @@ type UserTeamMembership struct {
 }
 
 type AuthContext struct {
-	UserID           string   `json:"user_id"`
-	TeamID           string   `json:"team_id"`
-	TeamName         string   `json:"team_name"`
+	UserID string `json:"user_id"`
+	// TeamID and TeamName are the canonical team, resolved from the teams table. TeamID
+	// starts as the raw api_keys.team value and is then overwritten with the team's id.
+	TeamID   string `json:"team_id"`
+	TeamName string `json:"team_name"`
+	// KeyTeam is api_keys.team exactly as stored, kept because that is what quota rows
+	// are scoped by. It is deliberately not the same field as TeamID: a key whose team
+	// column holds a name resolves to a different id, and charging the request to the
+	// wrong one would apply the wrong limit.
+	KeyTeam          string   `json:"key_team,omitempty"`
 	Role             string   `json:"role"`
 	Scopes           []string `json:"scopes"`
 	AllowedModels    []string `json:"allowed_models"`

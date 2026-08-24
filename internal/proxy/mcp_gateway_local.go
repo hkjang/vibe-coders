@@ -383,7 +383,7 @@ func (s *Server) runGatewayTool(ctx context.Context, r *http.Request, apiKeyID s
 		return gatewayToolJSON(map[string]any{"model": a.Model, "input_tokens": a.InputTokens, "output_tokens": a.OutputTokens, "estimated_cost_krw": round1(cost)}), nil
 
 	case "gateway_check_quota":
-		dec, err := s.checkQuotas(ctx, apiKeyID, "")
+		dec, err := s.checkQuotas(ctx, apiKeyID, "", nil)
 		if err != nil {
 			return nil, err
 		}

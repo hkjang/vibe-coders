@@ -389,7 +389,7 @@ func authContextFromAPIKey(key store.APIKeyRecord) store.AuthContext {
 		}
 	}
 	return store.AuthContext{
-		UserID: key.UserID, TeamID: key.Team, Role: role, Scopes: key.Scopes,
+		UserID: key.UserID, TeamID: key.Team, KeyTeam: key.Team, Role: role, Scopes: key.Scopes,
 		AllowedModels: key.AllowedModels, DeniedModels: key.DeniedModels,
 		AllowedProviders: key.AllowedProviders, DeniedProviders: key.DeniedProviders,
 		BudgetLimitKRW: key.BudgetLimitKRW, AllowedIPs: key.AllowedIPs, APIKeyID: key.ID,
