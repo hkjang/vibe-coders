@@ -296,7 +296,10 @@ curl -X POST http://localhost:8080/admin/fallback
 | `RETENTION_REQUEST_DAYS` | 90 | request_logs + prompt/response/token/language/llm_evaluations/llm_feedback 자식 테이블 |
 | `RETENTION_PROMPT_DAYS` | 30 | prompt_logs |
 | `RETENTION_RESPONSE_DAYS` | 30 | response_logs |
+| `RETENTION_DOMAIN_EXAMPLE_DAYS` | 365 | domain_examples — 라우팅 예시로 적립된 리닥션 프롬프트 텍스트 |
 | `RETENTION_INTERVAL` | 1h | cleanup 워커 주기 |
+
+`domain_examples` 는 프롬프트와 **다른 시계**로 정리됩니다. 이 표는 도메인 라우팅이 근거로 삼는 말뭉치라, 프롬프트 보존 창에 맞춰 같이 비우면 그 주기마다 라우팅 품질이 떨어집니다. 반대로 정리하지 않으면 원본 프롬프트가 삭제된 뒤에도 텍스트가 무기한 남습니다. 그래서 프롬프트보다는 길고 무한하지는 않은 별도 값을 씁니다.
 
 값을 `0` 으로 두면 해당 항목은 정리하지 않습니다. 변경 후에는 게이트웨이 재기동이 필요합니다. 어드민 UI 설정 탭에서 "지금 정리 실행" 으로 수동 트리거할 수도 있습니다.
 

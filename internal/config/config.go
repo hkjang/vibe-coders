@@ -213,7 +213,14 @@ type RetentionConfig struct {
 	PromptDays         int
 	ResponseDays       int
 	Text2SQLReplayDays int // retention for Text2SQL replay bundles (audit artifacts)
-	Interval           time.Duration
+	// DomainExampleDays bounds how long redacted prompt text promoted as a routing
+	// example is kept. It is deliberately its own setting rather than following
+	// PromptDays: the corpus is what makes domain routing work, so tying it to the
+	// prompt window would degrade routing every time the window came round, while
+	// leaving it unbounded means text outlives the prompt it came from for good.
+	// 0 keeps it indefinitely, which is what installs before this setting did.
+	DomainExampleDays int
+	Interval          time.Duration
 }
 
 type CacheConfig struct {
@@ -446,6 +453,7 @@ func Load() (Config, error) {
 			PromptDays:         intEnv("RETENTION_PROMPT_DAYS", 30),
 			ResponseDays:       intEnv("RETENTION_RESPONSE_DAYS", 30),
 			Text2SQLReplayDays: intEnv("RETENTION_TEXT2SQL_REPLAY_DAYS", 30),
+			DomainExampleDays:  intEnv("RETENTION_DOMAIN_EXAMPLE_DAYS", 365),
 			Interval:           durationEnv("RETENTION_INTERVAL", time.Hour),
 		},
 		Cache: CacheConfig{
@@ -576,7 +584,12 @@ func Load() (Config, error) {
 		},
 		Limits: LimitsConfig{
 			MaxOutputTokens: intEnv("LIMITS_MAX_OUTPUT_TOKENS", 0),
-			MaxRequestBytes: intEnv("LIMITS_MAX_REQUEST_BYTES", 0),
+			// A bound, not a policy: without one io.ReadAll grows to whatever a client
+			// sends, so a single request can take the gateway's memory with it. Set high
+			// enough that no realistic agent turn reaches it — a request near this size
+			// is still expensive to redact, so an operator handling large bodies should
+			// lower it rather than rely on this as a budget.
+			MaxRequestBytes: intEnv("LIMITS_MAX_REQUEST_BYTES", 64<<20),
 			MaxMessages:     intEnv("LIMITS_MAX_MESSAGES", 0),
 		},
 		MCP: MCPConfig{

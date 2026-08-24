@@ -200,6 +200,7 @@ func buildSettingRegistry() []settingDef {
 		{Key: "retention.prompt_days", Category: "retention", Type: stInt, validate: posInt, envValue: func(c config.Config) string { return strconv.Itoa(c.Retention.PromptDays) }},
 		{Key: "retention.response_days", Category: "retention", Type: stInt, validate: posInt, envValue: func(c config.Config) string { return strconv.Itoa(c.Retention.ResponseDays) }},
 		{Key: "retention.text2sql_replay_days", Category: "retention", Type: stInt, validate: posInt, envValue: func(c config.Config) string { return strconv.Itoa(c.Retention.Text2SQLReplayDays) }},
+		{Key: "retention.domain_example_days", Category: "retention", Type: stInt, validate: posInt, envValue: func(c config.Config) string { return strconv.Itoa(c.Retention.DomainExampleDays) }},
 		{Key: "retention.interval", Category: "retention", Type: stDuration, Restart: true, validate: dur, envValue: func(c config.Config) string { return c.Retention.Interval.String() }},
 
 		// ---- Pricing ----
@@ -351,6 +352,7 @@ var settingDescriptions = map[string]string{
 	"retention.prompt_days":          "프롬프트 본문 보존 일수.",
 	"retention.response_days":        "응답 본문 보존 일수.",
 	"retention.text2sql_replay_days": "Text2SQL Replay Bundle 보존 일수.",
+	"retention.domain_example_days":  "라우팅 예시로 적립된 리닥션 프롬프트 텍스트의 보존 일수. 0이면 무기한 보관. 프롬프트 보존 기간과 별개입니다.",
 	"retention.interval":             "보존 정리 워커 실행 주기(예: 6h). 변경 시 ticker 재생성.",
 	// Pricing
 	"pricing.fallback_model": "가격표에 매칭되지 않는 모델의 비용을 계산할 기준 모델(기본 qwen-plus). 해당 모델이 가격표에 있어야 적용, 없으면 0 처리.",
@@ -813,6 +815,8 @@ func applyRuntimeSetting(t2s *config.Text2SQLConfig, ch *config.ClickHouseConfig
 		ret.ResponseDays = atoi()
 	case "retention.text2sql_replay_days":
 		ret.Text2SQLReplayDays = atoi()
+	case "retention.domain_example_days":
+		ret.DomainExampleDays = atoi()
 	case "retention.interval":
 		ret.Interval = adur(ret.Interval)
 	case "pricing.fallback_model":

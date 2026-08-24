@@ -3029,7 +3029,7 @@ func (s *SQLStore) PurgeOlderThan(ctx context.Context, table string, days int) (
 	if days <= 0 {
 		return 0, nil
 	}
-	allowed := map[string]bool{"request_logs": true, "prompt_logs": true, "response_logs": true, "token_usage": true, "language_stats": true, "llm_evaluations": true, "llm_feedback": true}
+	allowed := map[string]bool{"request_logs": true, "prompt_logs": true, "response_logs": true, "token_usage": true, "language_stats": true, "llm_evaluations": true, "llm_feedback": true, "domain_examples": true}
 	if !allowed[table] {
 		return 0, fmt.Errorf("unsupported table %q for purge", table)
 	}

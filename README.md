@@ -319,9 +319,11 @@ $env:PROXY_API_KEYS="dev:dev-proxy-key:alice:platform,team:team-proxy-key:bob:ba
 | `REDTEAM_POST_CHANGE_ENABLED` | `true` | Provider, MCP, Governance, Text2SQL, AI App/Workflow의 보안 관련 관리자 변경 뒤 자동 Red Team 시뮬레이션 실행. 실제 upstream은 호출하지 않음 |
 | `REDTEAM_POST_CHANGE_COOLDOWN` | `10m` | 동일 변경 상태의 자동 회귀 캠페인을 다시 만들지 않는 중복 억제 시간 |
 | `REDTEAM_POST_CHANGE_MAX_TARGETS` | `20` | 변경 1건당 자동 회귀 점검 대상 상한. 전체 범위는 대상 유형을 순환 선택 |
+| `LIMITS_MAX_REQUEST_BYTES` | `67108864` | 요청 본문 크기 상한(바이트). 넘으면 413. 본문은 읽는 즉시 메모리에 올라가므로 상한이 없으면 요청 하나가 게이트웨이 메모리를 다 쓸 수 있습니다. `0` 이면 무제한 |
 | `RETENTION_REQUEST_DAYS` | `90` | 요청 로그 보존 일수 (0 이면 보존 안 함) |
 | `RETENTION_PROMPT_DAYS` | `30` | 프롬프트 로그 보존 일수 |
 | `RETENTION_RESPONSE_DAYS` | `30` | 응답 로그 보존 일수 |
+| `RETENTION_DOMAIN_EXAMPLE_DAYS` | `365` | 라우팅 예시로 적립된 리닥션 프롬프트 텍스트 보존 일수 (0 이면 무기한) |
 | `RETENTION_INTERVAL` | `1h` | 보존 정책 cleanup 워커 주기 |
 | `CARBON_WH_PER_1K_TOKENS` | `0.4` | Prompt Carbon Score 기본 에너지 계수(1K 토큰당 Wh) |
 | `CARBON_MODEL_WH_PER_1K` | 없음 | 모델별 에너지 계수 오버라이드(`gpt-4.1=0.8,gpt-4.1-mini=0.2`) |

@@ -125,6 +125,17 @@ func (w *RetentionWorker) runOnceWith(ctx context.Context) int64 {
 		}
 		totalDeleted += n
 	}
+	// Redacted prompt text promoted as a routing example. It is kept on its own clock
+	// rather than the prompt one: the corpus is what makes domain routing work, so
+	// clearing it with every prompt window would degrade routing on a cycle, and
+	// leaving it unbounded means the text outlives the prompt it came from for good.
+	if cfg.DomainExampleDays > 0 {
+		n, err := w.store.PurgeOlderThan(ctx, "domain_examples", cfg.DomainExampleDays)
+		if err != nil {
+			slog.Warn("retention purge domain_examples failed", "error", err)
+		}
+		totalDeleted += n
+	}
 	if cfg.Text2SQLReplayDays > 0 {
 		n, err := w.store.PurgeText2SQLReplayBundles(ctx, cfg.Text2SQLReplayDays)
 		if err != nil {
