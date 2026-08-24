@@ -2044,10 +2044,41 @@ func (s *Server) handleAdminUI(w http.ResponseWriter, r *http.Request) {
 	servePage(w, r, adminUIPage())
 }
 
+// auditRequest builds the audit record for a request, extracting and redacting its
+// prompts on the way.
 func (s *Server) auditRequest(endpoint string, body []byte, apiKeyID string, traceID string, r *http.Request) store.LogRecord {
+	return s.auditRequestWithPrompts(endpoint, body, apiKeyID, traceID, r, nil)
+}
+
+// auditRequestWithPrompts is auditRequest with the prompt extraction already done.
+//
+// stepRouting scores the request and then audits it a few lines later, and both were
+// extracting the same body -- which means redacting every message twice, and redaction
+// is most of what extraction costs. The routing plan already carries what it extracted,
+// so the audit reuses it.
+//
+// Two conditions make that sound. The model may have been rewritten in between, so it is
+// always re-read from the current body rather than taken from the reused set; the rewrite
+// only replaces the model field, so the prompts themselves are unchanged. And the reused
+// prompts were extracted with raw prompt storage off, so the caller must not pass them
+// when it is on -- the record would then be missing the raw text it is meant to keep.
+func (s *Server) auditRequestWithPrompts(endpoint string, body []byte, apiKeyID string, traceID string, r *http.Request, pre []store.PromptLog) store.LogRecord {
 	requestID := newID("req")
 	lc := s.loggingConf()
-	model, stream, prompts, languages := extractAudit(body, endpoint, lc.RawPrompts)
+	var model string
+	var stream bool
+	var prompts []store.PromptLog
+	var languages []audit.LanguageSignal
+	if len(pre) > 0 && !lc.RawPrompts {
+		// Reuse the routing pass. The model is re-read because it may have been rewritten
+		// since; stream and the language signals are cheap and derived, not redacted.
+		prompts = pre
+		model = extractModel(body)
+		stream = streamRequested(body)
+		languages = languagesFromPrompts(prompts)
+	} else {
+		model, stream, prompts, languages = extractAudit(body, endpoint, lc.RawPrompts)
+	}
 	now := time.Now().UTC()
 
 	for i := range prompts {
@@ -2204,6 +2235,39 @@ func extractModel(body []byte) string {
 		return ""
 	}
 	return root.Model
+}
+
+// streamRequested reads just the stream flag, for the same reason extractModel exists.
+func streamRequested(body []byte) bool {
+	if len(body) == 0 {
+		return false
+	}
+	var root struct {
+		Stream bool `json:"stream"`
+	}
+	if err := json.Unmarshal(body, &root); err != nil {
+		return false
+	}
+	return root.Stream
+}
+
+// languagesFromPrompts derives the language signals from prompts that were already
+// extracted, which is what extractAudit does with them internally.
+func languagesFromPrompts(prompts []store.PromptLog) []audit.LanguageSignal {
+	if len(prompts) == 0 {
+		return nil
+	}
+	texts := make([]string, 0, len(prompts))
+	for _, p := range prompts {
+		text := p.RedactedText
+		if text == "" {
+			text = p.ContentText
+		}
+		if text != "" {
+			texts = append(texts, text)
+		}
+	}
+	return audit.InferLanguages(texts)
 }
 
 func extractAudit(body []byte, endpoint string, rawPrompts bool) (string, bool, []store.PromptLog, []audit.LanguageSignal) {

@@ -234,7 +234,13 @@ func (rc *requestPipeline) stepRouting() bool {
 	}
 	rc.body = body
 
-	meta := s.auditRequest(r.URL.Path, body, rc.apiKeyID, traceID, r)
+	// The routing plan above already extracted and redacted these prompts from the same
+	// body; reuse them rather than paying for it twice a few lines apart.
+	var prePrompts []store.PromptLog
+	if routingPlan != nil {
+		prePrompts = routingPlan.Prompts
+	}
+	meta := s.auditRequestWithPrompts(r.URL.Path, body, rc.apiKeyID, traceID, r, prePrompts)
 	applyOpenAIRequestBodySummary(&meta.Request, originalBody, r.URL.Path)
 	if routingPlan != nil {
 		meta.Request.Complexity = routingPlan.Complexity.Score

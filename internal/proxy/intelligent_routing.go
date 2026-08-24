@@ -18,6 +18,12 @@ const providerHealthWindow = 15 * time.Minute
 var fileMentionRe = regexp.MustCompile(`(?i)\b[\w./\\-]+\.(go|ts|tsx|js|jsx|py|java|kt|rs|rb|php|cs|cpp|c|h|sql|yaml|yml|json|toml|md)\b`)
 
 type intelligentRoutingPlan struct {
+	// Prompts is what this plan was scored from. It is carried so the audit record can
+	// reuse it instead of extracting and redacting the same body a second time -- the
+	// two calls sit a few lines apart in stepRouting and redaction is the expensive half
+	// of extraction. Only valid when RawPrompts was off; see auditRequestWithPrompts.
+	Prompts []store.PromptLog
+
 	RequestedModel   string
 	SelectedModel    string
 	SelectedProvider string
@@ -116,6 +122,7 @@ func (s *Server) planIntelligentRouting(ctx context.Context, body []byte, endpoi
 	}
 
 	return intelligentRoutingPlan{
+		Prompts:          prompts,
 		RequestedModel:   model,
 		SelectedModel:    selectedModel,
 		SelectedProvider: selectedProvider,
