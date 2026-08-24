@@ -2956,8 +2956,22 @@ func (s *SQLStore) ListQuotas(ctx context.Context) ([]QuotaPublic, error) {
 }
 
 func (s *SQLStore) ActiveQuotasFor(ctx context.Context, scope string, scopeValue string) ([]QuotaRecord, error) {
-	rows, err := s.db.QueryContext(ctx, s.bind(`SELECT id, scope, scope_value, period, token_limit, krw_limit, enabled, COALESCE(note, ''), created_at
-		FROM quotas WHERE enabled = 1 AND scope = ? AND scope_value = ?`), scope, scopeValue)
+	now := time.Now()
+	if cached, ok := s.quotas.filter(scope, scopeValue, now); ok {
+		return cached, nil
+	}
+	gen := s.quotas.beginLoad()
+	all, err := s.loadActiveQuotas(ctx)
+	if err != nil {
+		return nil, err
+	}
+	s.quotas.storeActive(all, gen, now)
+	return filterQuotas(all, scope, scopeValue), nil
+}
+
+func (s *SQLStore) loadActiveQuotas(ctx context.Context) ([]QuotaRecord, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id, scope, scope_value, period, token_limit, krw_limit, enabled, COALESCE(note, ''), created_at
+		FROM quotas WHERE enabled = 1`)
 	if err != nil {
 		return nil, err
 	}
@@ -2994,12 +3008,19 @@ func (s *SQLStore) UpsertQuota(ctx context.Context, q QuotaRecord) error {
 			enabled = excluded.enabled,
 			note = excluded.note`)
 	_, err := s.db.ExecContext(ctx, query, q.ID, q.Scope, q.ScopeValue, q.Period, q.TokenLimit, q.KRWLimit, boolInt(q.Enabled), q.Note, formatTime(q.CreatedAt))
-	return err
+	if err != nil {
+		return err
+	}
+	s.quotas.invalidate()
+	return nil
 }
 
 func (s *SQLStore) DeleteQuota(ctx context.Context, id string) error {
-	_, err := s.db.ExecContext(ctx, s.bind(`DELETE FROM quotas WHERE id = ?`), id)
-	return err
+	if _, err := s.db.ExecContext(ctx, s.bind(`DELETE FROM quotas WHERE id = ?`), id); err != nil {
+		return err
+	}
+	s.quotas.invalidate()
+	return nil
 }
 
 // retention ------------------------------------------------------------------

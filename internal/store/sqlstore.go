@@ -46,6 +46,10 @@ type SQLStore struct {
 	// policies memoises the active governance rules, read once per governance phase.
 	// See policy_cache.go.
 	policies policyCache
+
+	// quotas memoises the quota definitions, read once per scope a request falls under.
+	// See quota_cache.go — usage counters are deliberately not cached.
+	quotas quotaCache
 }
 
 func Open(ctx context.Context, cfg config.DatabaseConfig) (*SQLStore, error) {
