@@ -55,6 +55,10 @@ type SQLStore struct {
 	// See agent_route_cache.go.
 	agentRoutes agentRouteCache
 
+	// rollupStart caches when this database started keeping per-day usage totals.
+	// See usage_rollup.go.
+	rollupStart rollupStart
+
 	// providerHealth memoises the routing layer's health scores. Unlike the caches above
 	// it has no invalidation: it holds a statistic derived from traffic, not an operator's
 	// edit. See provider_health_cache.go.
@@ -162,7 +166,9 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 			return err
 		}
 	}
-	return nil
+	// Recorded after the schema exists and only on the first run, so an existing database
+	// does not claim its day totals cover traffic from before they were being kept.
+	return s.markUsageRollupStarted(ctx)
 }
 
 // migrationStatements is the schema the gateway declares. It is a function rather than a
@@ -2067,6 +2073,25 @@ func migrationStatements() []string {
 		`ALTER TABLE redteam_evidence ADD COLUMN raw_prompt TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE redteam_evidence ADD COLUMN raw_response TEXT NOT NULL DEFAULT ''`,
 
+		// Per-day usage totals, so a quota does not have to aggregate its whole period on
+		// every request. See usage_rollup.go for how it is kept in step with request_logs.
+		`CREATE TABLE IF NOT EXISTS usage_rollup (
+			scope TEXT NOT NULL,
+			scope_value TEXT NOT NULL,
+			day TEXT NOT NULL,
+			requests INTEGER NOT NULL DEFAULT 0,
+			tokens INTEGER NOT NULL DEFAULT 0,
+			cost REAL NOT NULL DEFAULT 0,
+			PRIMARY KEY (scope, scope_value, day)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_usage_rollup_day ON usage_rollup(day)`,
+		// One row, recording when this database started keeping the totals above. A period
+		// that began before then is not covered by them and is answered the old way.
+		`CREATE TABLE IF NOT EXISTS usage_rollup_state (
+			id TEXT PRIMARY KEY,
+			started_at TEXT NOT NULL
+		)`,
+
 		// Request-scoped children the retention purge deletes with
 		// `WHERE request_id IN (SELECT id FROM request_logs WHERE created_at < ?)`.
 		// Nine of the eleven tables in that purge had this index; these three did not,
@@ -2706,6 +2731,13 @@ func (s *SQLStore) InsertLogRecord(ctx context.Context, record LogRecord) error 
 		if err != nil {
 			return err
 		}
+	}
+
+	// The per-day usage totals a quota is enforced against, added in the same transaction
+	// as the request they describe so the two cannot disagree. See usage_rollup.go.
+	rollupQuery, rollupArgs := s.rollupUpsert(req, record.Usage)
+	if _, err := tx.ExecContext(ctx, rollupQuery, rollupArgs...); err != nil {
+		return err
 	}
 
 	return tx.Commit()

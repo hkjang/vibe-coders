@@ -58,7 +58,7 @@ func (s *SQLStore) DeleteBudget(ctx context.Context, id string) error {
 // budgetStatus computes burn-down / forecast for one budget at time `now`.
 func (s *SQLStore) budgetStatus(ctx context.Context, b Budget, now time.Time) (BudgetStatus, error) {
 	start, daysInMonth := kstMonthBounds(now)
-	_, spent, _, err := s.UsageSince(ctx, UsageFilter{Scope: b.Scope, ScopeValue: b.ScopeValue, Since: start})
+	_, spent, _, err := s.UsageForPeriod(ctx, UsageFilter{Scope: b.Scope, ScopeValue: b.ScopeValue, Since: start})
 	if err != nil {
 		return BudgetStatus{}, err
 	}

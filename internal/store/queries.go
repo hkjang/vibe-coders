@@ -3033,7 +3033,8 @@ func (s *SQLStore) PurgeOlderThan(ctx context.Context, table string, days int) (
 	if !allowed[table] {
 		return 0, fmt.Errorf("unsupported table %q for purge", table)
 	}
-	cutoff := time.Now().UTC().AddDate(0, 0, -days).Format(time.RFC3339Nano)
+	cutoffAt := time.Now().UTC().AddDate(0, 0, -days)
+	cutoff := cutoffAt.Format(time.RFC3339Nano)
 
 	if table == "request_logs" {
 		// must also delete children
@@ -3067,6 +3068,9 @@ func (s *SQLStore) PurgeOlderThan(ctx context.Context, table string, days int) (
 				total += n
 			}
 		}
+		if err := s.reconcileUsageRollupAfterPurge(ctx, cutoffAt); err != nil {
+			return total, err
+		}
 		return total, nil
 	}
 
@@ -3075,6 +3079,13 @@ func (s *SQLStore) PurgeOlderThan(ctx context.Context, table string, days int) (
 		return 0, err
 	}
 	n, err := res.RowsAffected()
+	if err == nil && table == "token_usage" {
+		// The day totals include the tokens and cost this table holds, so removing rows
+		// from it changes what a quota should count.
+		if rerr := s.reconcileUsageRollupAfterPurge(ctx, cutoffAt); rerr != nil {
+			return n, rerr
+		}
+	}
 	return n, err
 }
 

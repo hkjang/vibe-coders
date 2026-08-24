@@ -70,7 +70,7 @@ func (s *Server) checkQuotas(ctx context.Context, apiKeyID string, clientIP stri
 		}
 		for _, q := range quotas {
 			start, end := periodBounds(q.Period, now)
-			_, costKRW, tokens, err := s.db.UsageSince(ctx, store.UsageFilter{
+			_, costKRW, tokens, err := s.db.UsageForPeriod(ctx, store.UsageFilter{
 				Scope:      q.Scope,
 				ScopeValue: q.ScopeValue,
 				Since:      start,

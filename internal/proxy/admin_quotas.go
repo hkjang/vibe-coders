@@ -28,7 +28,7 @@ func (s *Server) handleQuotas(w http.ResponseWriter, r *http.Request) {
 		now := time.Now()
 		for _, q := range quotas {
 			start, end := periodBounds(q.Period, now)
-			_, cost, tokens, err := s.db.UsageSince(r.Context(), store.UsageFilter{Scope: q.Scope, ScopeValue: q.ScopeValue, Since: start})
+			_, cost, tokens, err := s.db.UsageForPeriod(r.Context(), store.UsageFilter{Scope: q.Scope, ScopeValue: q.ScopeValue, Since: start})
 			if err != nil {
 				continue
 			}
