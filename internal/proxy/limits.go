@@ -2,6 +2,8 @@ package proxy
 
 import (
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"strconv"
 )
@@ -76,6 +78,11 @@ func (rc *requestPipeline) stepLimits() bool {
 	}
 	lim := s.limitsConf()
 
+	// Input guard. readRequestBody already stops the read at the ceiling, so an oversized
+	// client body never reaches here. This still matters because rc.body is rewritten
+	// after that read -- an agent route swaps the model in, knowledge expansion splices
+	// text in -- and a body that grew past the limit on the way through should not be
+	// sent upstream either.
 	// Input guard: reject oversized request bodies before any upstream work.
 	if lim.MaxRequestBytes > 0 && len(rc.body) > lim.MaxRequestBytes {
 		s.metrics.IncLimitsRejected()
@@ -114,4 +121,47 @@ func (rc *requestPipeline) stepLimits() bool {
 		w.Header().Set("X-Max-Tokens-Clamped", strconv.Itoa(from)+"->"+strconv.Itoa(to))
 	}
 	return true
+}
+
+// readRequestBody reads the request body under the configured size ceiling.
+//
+// limits.max_request_bytes used to be checked only after the body had been read in
+// full, which rejected the request without protecting anything: a 5 MB body against a
+// 1 KB limit was read entirely -- the 413 reported X-Request-Bytes: 5242944, a number it
+// could only know by reading every byte -- and refused afterwards. The upstream was
+// spared; the gateway was not, and enough concurrent callers could exhaust it while the
+// operator believed the setting covered exactly that.
+//
+// Wrapping the reader stops the read at the ceiling instead. The boundary is unchanged:
+// MaxBytesReader permits n bytes and fails on the next one, so a body of exactly the
+// limit still passes.
+//
+// The size is no longer reported back, because it is no longer measured. X-Request-Bytes
+// is replaced by X-Request-Bytes-Limit, which says what the ceiling was -- the useful
+// half for a caller deciding what to send instead.
+func (rc *requestPipeline) readRequestBody() ([]byte, bool) {
+	r, w := rc.r, rc.w
+	if r.Body == nil {
+		return nil, true
+	}
+	reader := io.Reader(r.Body)
+	limit := rc.s.limitsConf().MaxRequestBytes
+	if limit > 0 {
+		reader = http.MaxBytesReader(w, r.Body, int64(limit))
+	}
+	body, err := io.ReadAll(reader)
+	if err == nil {
+		return body, true
+	}
+	var tooLarge *http.MaxBytesError
+	if errors.As(err, &tooLarge) {
+		rc.s.metrics.IncLimitsRejected()
+		w.Header().Set("X-Request-Bytes-Limit", strconv.Itoa(limit))
+		writeOpenAIError(w, http.StatusRequestEntityTooLarge,
+			"request body exceeds the configured limit of "+strconv.Itoa(limit)+" bytes",
+			"invalid_request_error", "payload_too_large")
+		return nil, false
+	}
+	writeOpenAIError(w, http.StatusBadRequest, "failed to read request body", "invalid_request_error", "invalid_body")
+	return nil, false
 }

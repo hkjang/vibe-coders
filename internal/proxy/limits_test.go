@@ -75,8 +75,11 @@ func TestLimitsMaxRequestBytes(t *testing.T) {
 	if resp.StatusCode != http.StatusRequestEntityTooLarge {
 		t.Fatalf("oversized request = %d, want 413", resp.StatusCode)
 	}
-	if resp.Header.Get("X-Request-Bytes") == "" {
-		t.Fatal("expected X-Request-Bytes header")
+	// The body size is no longer reported, because it is no longer measured: the read
+	// stops at the ceiling rather than running to the end and then checking. What the
+	// caller gets instead is the ceiling itself, which is the half they can act on.
+	if resp.Header.Get("X-Request-Bytes-Limit") != "200" {
+		t.Fatalf("expected X-Request-Bytes-Limit=200, got %q", resp.Header.Get("X-Request-Bytes-Limit"))
 	}
 }
 

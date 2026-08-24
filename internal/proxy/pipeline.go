@@ -180,11 +180,9 @@ func (rc *requestPipeline) stepRouting() bool {
 	s, r, w := rc.s, rc.r, rc.w
 
 	body := rc.body
-	var err error
 	if body == nil && r.Body != nil {
-		body, err = io.ReadAll(r.Body)
-		if err != nil {
-			writeOpenAIError(w, http.StatusBadRequest, "failed to read request body", "invalid_request_error", "invalid_body")
+		var ok bool
+		if body, ok = rc.readRequestBody(); !ok {
 			return false
 		}
 	}

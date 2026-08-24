@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -28,9 +27,8 @@ func (rc *requestPipeline) stepAgentRoute() bool {
 		return true
 	}
 	if rc.body == nil {
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			writeOpenAIError(w, http.StatusBadRequest, "failed to read request body", "invalid_request_error", "invalid_body")
+		body, ok := rc.readRequestBody()
+		if !ok {
 			return false
 		}
 		rc.body = body
