@@ -104,3 +104,44 @@ func TestExtractModelDoesNotTouchThePrompts(t *testing.T) {
 		}
 	}
 }
+
+// A step that may not apply must decide that before doing the expensive part.
+//
+// MCP discovery runs for a handful of virtual model names. The check for that used to
+// come after extracting and redacting every prompt in the body, so an ordinary chat
+// request — nearly all of them — paid for a full pass and then returned having thrown it
+// away. The gate now reads only the model name.
+//
+// This is checked in the source rather than by timing, because the failure is not a
+// wrong answer: the step still behaves correctly either way, it just costs a pass over
+// every request that will never use it.
+func TestMCPDiscoveryGatesBeforeExtracting(t *testing.T) {
+	raw, err := os.ReadFile("mcp_model_router.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(raw)
+	start := strings.Index(src, "func (rc *requestPipeline) stepMCPDiscovery()")
+	if start < 0 {
+		t.Fatal("stepMCPDiscovery is gone")
+	}
+	body := src[start:]
+	if end := strings.Index(body[1:], "\nfunc "); end >= 0 {
+		body = body[:end]
+	}
+
+	gate := strings.Index(body, "isMCPDiscoveryModel(")
+	extract := strings.Index(body, "extractAudit(")
+	if gate < 0 {
+		t.Fatal("the discovery-model gate is gone")
+	}
+	if extract < 0 {
+		return // no extraction at all is even better
+	}
+	if extract < gate {
+		t.Errorf("stepMCPDiscovery calls extractAudit before it decides whether discovery " +
+			"applies, so every ordinary chat request pays for extracting and redacting its " +
+			"whole body and then discards it.\nUse extractModel for the gate and extract " +
+			"afterwards.")
+	}
+}
