@@ -28,7 +28,9 @@ import (
 // For a profile, add -cpuprofile and read it with `go tool pprof -top -cum`; note that
 // listing is flat, not a call tree, so two entries with the same cumulative time are not
 // evidence that one calls the other.
-func benchmarkChatRequest(b *testing.B, sizeMB int) {
+func benchmarkChatRequest(b *testing.B, sizeMB int) { benchmarkChatRequestBytes(b, sizeMB<<20) }
+
+func benchmarkChatRequestBytes(b *testing.B, size int) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		io.Copy(io.Discard, r.Body)
 		w.Header().Set("Content-Type", "application/json")
@@ -57,7 +59,7 @@ func benchmarkChatRequest(b *testing.B, sizeMB int) {
 	defer ts.Close()
 
 	body, err := json.Marshal(map[string]any{"model": "test-model",
-		"messages": []map[string]string{{"role": "user", "content": strings.Repeat("A", sizeMB<<20)}}})
+		"messages": []map[string]string{{"role": "user", "content": strings.Repeat("A", size)}}})
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -80,3 +82,8 @@ func benchmarkChatRequest(b *testing.B, sizeMB int) {
 }
 
 func BenchmarkChatRequest1MB(b *testing.B) { benchmarkChatRequest(b, 1) }
+
+// A load-test shaped request: a couple of kilobytes, which is what a real agent turn
+// looks like. The per-byte work barely registers at this size, so what this measures is
+// the fixed cost every request pays regardless of how small it is.
+func BenchmarkChatRequestSmall(b *testing.B) { benchmarkChatRequestBytes(b, 2<<10) }

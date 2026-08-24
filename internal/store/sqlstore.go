@@ -38,6 +38,10 @@ var realRegex = regexp.MustCompile(`(?i)\bREAL\b`)
 type SQLStore struct {
 	db      *sql.DB
 	dialect string
+
+	// providers memoises provider_configs, which the hot path reads several times per
+	// request. See provider_cache.go.
+	providers providerCache
 }
 
 func Open(ctx context.Context, cfg config.DatabaseConfig) (*SQLStore, error) {
@@ -2300,36 +2304,73 @@ func (s *SQLStore) UpsertProvider(ctx context.Context, provider ProviderConfig) 
 			failover_group = excluded.failover_group,
 			priority = excluded.priority`)
 	_, err := s.db.ExecContext(ctx, query, provider.Name, provider.BaseURL, provider.EncryptedAPIKey, provider.TimeoutMS, boolInt(provider.Enabled), provider.ModelPatterns, provider.FailoverGroup, provider.Priority, formatTime(provider.CreatedAt))
-	return err
+	if err != nil {
+		return err
+	}
+	s.providers.invalidate()
+	return nil
 }
 
 func (s *SQLStore) GetProvider(ctx context.Context, name string) (ProviderConfig, bool, error) {
-	var provider ProviderConfig
-	var enabled int
-	var createdAt string
-	var modelPatterns, failoverGroup sql.NullString
-	err := s.db.QueryRowContext(ctx, s.bind(`SELECT name, base_url, COALESCE(encrypted_api_key, ''), timeout_ms, enabled, model_patterns, COALESCE(failover_group, ''), COALESCE(priority, ?), created_at
-		FROM provider_configs
-		WHERE name = ?`), DefaultProviderPriority, name).Scan(&provider.Name, &provider.BaseURL, &provider.EncryptedAPIKey, &provider.TimeoutMS, &enabled, &modelPatterns, &failoverGroup, &provider.Priority, &createdAt)
-	if err == sql.ErrNoRows {
-		return ProviderConfig{}, false, nil
+	now := time.Now()
+	if provider, found, ok := s.providers.lookup(name, now); ok {
+		return provider, found, nil
 	}
+	byName, err := s.loadProvidersByName(ctx)
 	if err != nil {
 		return ProviderConfig{}, false, err
 	}
-	provider.Enabled = enabled == 1
-	provider.ModelPatterns = modelPatterns.String
-	provider.FailoverGroup = failoverGroup.String
-	if provider.Priority <= 0 {
-		provider.Priority = DefaultProviderPriority
+	s.providers.storeByName(byName, now)
+	provider, found := byName[name]
+	return provider, found, nil
+}
+
+// loadProvidersByName reads the whole provider table at once. It is a handful of rows and
+// the alternative is a round trip per lookup, which is what this replaced.
+func (s *SQLStore) loadProvidersByName(ctx context.Context) (map[string]ProviderConfig, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT name, base_url, COALESCE(encrypted_api_key, ''), timeout_ms, enabled, COALESCE(model_patterns, ''), COALESCE(failover_group, ''), COALESCE(priority, 100), created_at
+		FROM provider_configs`)
+	if err != nil {
+		return nil, err
 	}
-	if parsed, err := time.Parse(time.RFC3339Nano, createdAt); err == nil {
-		provider.CreatedAt = parsed
+	defer rows.Close()
+	result := map[string]ProviderConfig{}
+	for rows.Next() {
+		var p ProviderConfig
+		var enabled int
+		var createdAt string
+		if err := rows.Scan(&p.Name, &p.BaseURL, &p.EncryptedAPIKey, &p.TimeoutMS, &enabled, &p.ModelPatterns, &p.FailoverGroup, &p.Priority, &createdAt); err != nil {
+			return nil, err
+		}
+		p.Enabled = enabled == 1
+		if p.Priority <= 0 {
+			p.Priority = DefaultProviderPriority
+		}
+		if parsed, err := time.Parse(time.RFC3339Nano, createdAt); err == nil {
+			p.CreatedAt = parsed
+		}
+		result[p.Name] = p
 	}
-	return provider, true, nil
+	return result, rows.Err()
 }
 
 func (s *SQLStore) ListProviders(ctx context.Context) ([]ProviderPublic, error) {
+	now := time.Now()
+	if cached, ok := s.providers.freshPublic(now); ok {
+		if cached == nil {
+			cached = []ProviderPublic{}
+		}
+		return cached, nil
+	}
+	result, err := s.loadProviders(ctx)
+	if err != nil {
+		return nil, err
+	}
+	s.providers.storePublic(result, now)
+	return result, nil
+}
+
+func (s *SQLStore) loadProviders(ctx context.Context) ([]ProviderPublic, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT name, base_url, COALESCE(encrypted_api_key, ''), timeout_ms, enabled, COALESCE(model_patterns, ''), COALESCE(failover_group, ''), COALESCE(priority, 100), created_at
 		FROM provider_configs
 		ORDER BY name ASC`)
@@ -2362,6 +2403,19 @@ func (s *SQLStore) ListProviders(ctx context.Context) ([]ProviderPublic, error) 
 // ListProviderConfigs returns the full provider rows (with model_patterns) used by the
 // routing layer. Caller is responsible for decrypting api keys via the secret cipher.
 func (s *SQLStore) ListProviderConfigs(ctx context.Context) ([]ProviderConfig, error) {
+	now := time.Now()
+	if cached, ok := s.providers.freshConfigs(now); ok {
+		return cached, nil
+	}
+	result, err := s.loadProviderConfigs(ctx)
+	if err != nil {
+		return nil, err
+	}
+	s.providers.storeConfigs(result, now)
+	return result, nil
+}
+
+func (s *SQLStore) loadProviderConfigs(ctx context.Context) ([]ProviderConfig, error) {
 	// Ordered by priority first: dialUpstream walks this list in order, so the operator's
 	// declared preference has to be the list order rather than something re-sorted later.
 	// Name breaks ties, keeping the sequence identical on every instance.
@@ -2399,6 +2453,7 @@ func (s *SQLStore) DeleteProvider(ctx context.Context, name string) (bool, error
 	if err != nil {
 		return false, err
 	}
+	s.providers.invalidate()
 	n, _ := res.RowsAffected()
 	return n > 0, nil
 }
