@@ -501,7 +501,10 @@ func providerCandidates(ctx context.Context, s *Server, model string) []string {
 }
 
 func (s *Server) providerHealthMap(ctx context.Context) map[string]store.ProviderHealthScore {
-	scores, err := s.db.ProviderHealthScores(ctx, time.Now().Add(-providerHealthWindow))
+	// The windowed form is cached. This runs two or three times per request and its cost
+	// grows with how much traffic the window holds, so recomputing it per call made the
+	// gateway slower the busier it got. See provider_health_cache.go.
+	scores, err := s.db.ProviderHealthWindow(ctx, providerHealthWindow)
 	if err != nil {
 		return map[string]store.ProviderHealthScore{}
 	}

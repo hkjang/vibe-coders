@@ -50,6 +50,11 @@ type SQLStore struct {
 	// quotas memoises the quota definitions, read once per scope a request falls under.
 	// See quota_cache.go — usage counters are deliberately not cached.
 	quotas quotaCache
+
+	// providerHealth memoises the routing layer's health scores. Unlike the caches above
+	// it has no invalidation: it holds a statistic derived from traffic, not an operator's
+	// edit. See provider_health_cache.go.
+	providerHealth providerHealthCache
 }
 
 func Open(ctx context.Context, cfg config.DatabaseConfig) (*SQLStore, error) {
