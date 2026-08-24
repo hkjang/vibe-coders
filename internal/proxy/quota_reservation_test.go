@@ -457,3 +457,87 @@ func TestEmbeddingsReserveQuotaWhileInFlight(t *testing.T) {
 	}
 	t.Fatal("the embedding reservation outlived its request")
 }
+
+// An in-flight request must count against its own key's quota, not somebody else's.
+//
+// Every other reservation test uses a global quota, where scope value is "*" and any
+// mix-up looks identical. This one gives two keys their own limits: if reservations are
+// attributed by the wrong scope value, the second key is refused for traffic it never sent.
+func TestReservationsCountAgainstTheirOwnKey(t *testing.T) {
+	release := make(chan struct{})
+	var inFlight atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		inFlight.Add(1)
+		select {
+		case <-release:
+		case <-time.After(5 * time.Second):
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":100,"completion_tokens":100,"total_tokens":200}}`))
+	}))
+	defer upstream.Close()
+
+	db := openTestStore(t)
+	defer db.Close()
+	logger := store.NewAsyncLogger(db, 32, filepath.Join(t.TempDir(), "fallback.ndjson"))
+	logger.Start()
+	defer logger.Stop(context.Background())
+
+	cfg := testConfig(upstream.URL, "secret")
+	cfg.Quota.ReservationsEnabled = true
+	server, err := NewServer(cfg, db, logger, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxy := httptest.NewServer(server.Routes())
+	defer proxy.Close()
+
+	ctx := context.Background()
+	busy, quiet := "sk-busy", "sk-quiet"
+	for _, k := range []struct{ id, secret string }{{"k-busy", busy}, {"k-quiet", quiet}} {
+		if err := db.UpsertAPIKey(ctx, store.APIKeyRecord{
+			ID: k.id, Name: k.id, KeyHash: hashProxyKey(k.secret), Owner: "o", UserID: "u",
+			Role: "member", Status: "active", CreatedAt: time.Now().UTC()}); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.UpsertQuota(ctx, store.QuotaRecord{
+			ID: "q-" + k.id, Scope: "api_key", ScopeValue: k.id, Period: "daily",
+			TokenLimit: 1, Enabled: true, CreatedAt: time.Now().UTC()}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	send := func(secret string) int {
+		resp := postJSON(t, proxy.URL+"/v1/chat/completions", secret, chatBody("test-model", false))
+		defer resp.Body.Close()
+		return resp.StatusCode
+	}
+
+	busyDone := make(chan int, 1)
+	go func() { busyDone <- send(busy) }()
+
+	deadline := time.Now().Add(5 * time.Second)
+	for inFlight.Load() == 0 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if inFlight.Load() == 0 {
+		t.Fatal("the first request never reached the upstream")
+	}
+
+	// The busy key's own limit is now held by its reservation.
+	if got := send(busy); got != http.StatusTooManyRequests {
+		t.Errorf("a second request on the busy key got %d, want %d — its own reservation is not counting",
+			got, http.StatusTooManyRequests)
+	}
+	// The quiet key has sent nothing and must be unaffected.
+	quietDone := make(chan int, 1)
+	go func() { quietDone <- send(quiet) }()
+
+	close(release)
+	if got := <-busyDone; got != http.StatusOK {
+		t.Errorf("the first request on the busy key got %d, want 200", got)
+	}
+	if got := <-quietDone; got != http.StatusOK {
+		t.Errorf("the quiet key got %d, want 200 — it was refused for another key's in-flight request", got)
+	}
+}

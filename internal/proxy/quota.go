@@ -60,6 +60,21 @@ func (s *Server) checkQuotas(ctx context.Context, apiKeyID string, clientIP stri
 		scopes = append(scopes, struct{ scope, value string }{"team", team})
 	}
 
+	// Every quota's in-flight total comes from the same handful of rows, so they are read
+	// once here rather than once per quota.
+	var reserved map[string]map[string]store.ReservedTotals
+	if s.quotaReservationsEnabled() {
+		live, err := s.db.LiveReservations(ctx, now)
+		if err != nil {
+			// Reservations are an accuracy improvement, not an authority: if they cannot
+			// be read, fall back to committed usage rather than failing the request or
+			// letting it through unchecked.
+			slog.Warn("read quota reservations failed", "error", err)
+		} else {
+			reserved = live
+		}
+	}
+
 	for _, scope := range scopes {
 		if scope.value == "" {
 			continue
@@ -83,17 +98,11 @@ func (s *Server) checkQuotas(ctx context.Context, apiKeyID string, clientIP stri
 			// so concurrent requests count against each other instead of each being
 			// measured against a total that excludes all the others.
 			reservedTokens, reservedCost := int64(0), 0.0
-			if s.quotaReservationsEnabled() {
-				rTokens, rCost, rerr := s.db.ReservedUsage(ctx, q.Scope, q.ScopeValue, now)
-				if rerr != nil {
-					// Reservations are an accuracy improvement, not an authority: if they
-					// cannot be read, fall back to committed usage rather than failing the
-					// request or letting it through unchecked.
-					slog.Warn("read quota reservations failed", "scope", q.Scope, "error", rerr)
-				} else {
-					reservedTokens, reservedCost = rTokens, rCost
-					tokens += rTokens
-					costKRW += rCost
+			if byValue, ok := reserved[q.Scope]; ok {
+				if r, found := byValue[q.ScopeValue]; found {
+					reservedTokens, reservedCost = r.Tokens, r.CostKRW
+					tokens += r.Tokens
+					costKRW += r.CostKRW
 				}
 			}
 			if q.TokenLimit > 0 && tokens >= q.TokenLimit {

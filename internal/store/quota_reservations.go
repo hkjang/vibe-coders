@@ -110,3 +110,57 @@ func (s *SQLStore) SweepExpiredQuotaReservations(ctx context.Context, now time.T
 	n, _ := res.RowsAffected()
 	return n, nil
 }
+
+// ReservedTotals is the in-flight usage of one scope value.
+type ReservedTotals struct {
+	Tokens  int64
+	CostKRW float64
+}
+
+// LiveReservations sums the outstanding reservations for every scope at once.
+//
+// checkQuotas asks about each quota's scope separately, which is a round trip per quota
+// even though every answer comes from the same handful of rows — the table holds only what
+// is in flight. Reading them once and adding them up here costs one round trip whatever
+// the operator has configured.
+//
+// The keys mirror what UsageForPeriod is asked for: "global" under "*", api keys by id,
+// client IPs with blank mapped to "unknown", and teams by the same expression committed
+// usage resolves them with. Divergence between the two would silently mis-count, because
+// the two sums are added together.
+func (s *SQLStore) LiveReservations(ctx context.Context, now time.Time) (map[string]map[string]ReservedTotals, error) {
+	rows, err := s.db.QueryContext(ctx, s.bind(`SELECT
+			COALESCE(api_key_id, ''),
+			COALESCE(NULLIF(client_ip, ''), 'unknown'),
+			COALESCE(NULLIF((SELECT k.team FROM api_keys k WHERE k.id = quota_reservations.api_key_id), ''), 'unassigned'),
+			COALESCE(tokens, 0), COALESCE(cost_krw, 0)
+		FROM quota_reservations
+		WHERE expires_at > ?`), formatTime(now.UTC()))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	totals := map[string]map[string]ReservedTotals{
+		"global": {}, "api_key": {}, "ip": {}, "team": {},
+	}
+	add := func(scope, value string, tokens int64, cost float64) {
+		t := totals[scope][value]
+		t.Tokens += tokens
+		t.CostKRW += cost
+		totals[scope][value] = t
+	}
+	for rows.Next() {
+		var apiKeyID, clientIP, team string
+		var tokens int64
+		var cost float64
+		if err := rows.Scan(&apiKeyID, &clientIP, &team, &tokens, &cost); err != nil {
+			return nil, err
+		}
+		add("global", "*", tokens, cost)
+		add("api_key", apiKeyID, tokens, cost)
+		add("ip", clientIP, tokens, cost)
+		add("team", team, tokens, cost)
+	}
+	return totals, rows.Err()
+}
