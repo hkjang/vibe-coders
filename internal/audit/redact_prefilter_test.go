@@ -125,3 +125,135 @@ func TestKeyValueRulesAreSkippedWhenNoKeywordIsPresent(t *testing.T) {
 		t.Errorf("text with no credential keyword was modified:\n  in:  %q\n  out: %q", in, got)
 	}
 }
+
+// The fold covers exactly A-Z and nothing next to it.
+//
+// A prefilter literal is compared against text one byte at a time with the uppercase range
+// folded down. Getting either end of that range wrong makes the check miss a literal that
+// is present, the pattern is skipped, and whatever it was meant to redact is stored as it
+// arrived. '@' and '[' sit either side of the range in ASCII and must not be folded into
+// letters.
+func TestTheASCIIFoldCoversTheWholeUppercaseRangeAndNoMore(t *testing.T) {
+	for c := byte('A'); c <= 'Z'; c++ {
+		upper := string([]byte{c})
+		lower := strings.ToLower(upper)
+		if !containsFoldASCII("xx"+upper+"yy", lower) {
+			t.Errorf("%q is not folded to %q; a literal containing it would be missed", upper, lower)
+		}
+	}
+	// The bytes on either side of A-Z. Folding them would turn '@' into '`' and '[' into
+	// '{', so a literal containing those characters would match text that does not have it.
+	for _, c := range []byte{'@', '[', '`', '{'} {
+		s := string([]byte{c})
+		if containsFoldASCII(s, strings.ToLower(s)) != (strings.ToLower(s) == s) {
+			t.Errorf("%q is treated as a letter by the fold", s)
+		}
+	}
+	if containsFoldASCII("@", "`") {
+		t.Error("'@' folded to '`'; the range starts below 'A'")
+	}
+	if containsFoldASCII("[", "{") {
+		t.Error("'[' folded to '{'; the range ends above 'Z'")
+	}
+}
+
+// Every keyword a prefiltered rule can match has to contain one of the literals that rule
+// is screened by.
+//
+// The screen skips a pattern when none of its literals is in the text, which is only sound
+// if the pattern could not have matched. TestEveryKeyValueKeywordStillRedacts checks that
+// by exercising each keyword it knows about; this checks it against the pattern source, so
+// a keyword added to the alternation later cannot slip past the screen unnoticed. Adding
+// `credential` to the rule without adding a literal for it would let every
+// `credential=...` through, silently, with the table still looking correct.
+func TestEveryPrefilteredAlternativeContainsARequiredLiteral(t *testing.T) {
+	checked := 0
+	for _, pattern := range redactPatterns {
+		if len(pattern.mustContainAny) == 0 {
+			continue
+		}
+		for _, alternative := range topLevelAlternatives(pattern.re.String()) {
+			plain := strings.ToLower(stripRegexSyntax(alternative))
+			ok := false
+			for _, literal := range pattern.mustContainAny {
+				if strings.Contains(plain, literal) {
+					ok = true
+					break
+				}
+			}
+			checked++
+			if !ok {
+				t.Errorf("rule %s is skipped unless the text contains one of %v, but it can match "+
+					"%q, which contains none of them — anything that alternative matches would be "+
+					"stored unredacted",
+					pattern.re.String(), pattern.mustContainAny, alternative)
+			}
+		}
+	}
+	if checked < 10 {
+		t.Fatalf("only %d alternatives were checked; the extractor has stopped matching", checked)
+	}
+}
+
+// topLevelAlternatives returns the branches of the first parenthesised group in a pattern,
+// or the whole pattern when it has none. It is deliberately simple: these rules are one
+// flat alternation of keywords, and anything more elaborate should fail loudly here rather
+// than be parsed approximately.
+func topLevelAlternatives(source string) []string {
+	// Skip the non-capturing and flag groups a pattern opens with, e.g. "(?i)", so the
+	// keyword alternation itself is the group that gets split.
+	open := -1
+	for i := 0; i < len(source); i++ {
+		if source[i] == '(' && (i+1 >= len(source) || source[i+1] != '?') {
+			open = i
+			break
+		}
+	}
+	if open < 0 {
+		return []string{source}
+	}
+	depth, close := 0, -1
+	for i := open; i < len(source); i++ {
+		switch source[i] {
+		case '(':
+			depth++
+		case ')':
+			depth--
+			if depth == 0 {
+				close = i
+			}
+		}
+		if close >= 0 {
+			break
+		}
+	}
+	if close < 0 {
+		return []string{source}
+	}
+	group := source[open+1 : close]
+	if !strings.Contains(group, "|") {
+		// A single-branch group carries no alternation; the whole pattern is the thing
+		// that has to contain a literal.
+		return []string{source}
+	}
+	return strings.Split(group, "|")
+}
+
+// stripRegexSyntax removes the character classes and quantifiers these keyword
+// alternations use, leaving the letters a match must contain.
+func stripRegexSyntax(s string) string {
+	var out strings.Builder
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case '[':
+			for i < len(s) && s[i] != ']' {
+				i++
+			}
+		case '?', '*', '+', '\\':
+			// quantifier or escape: the character it applies to is optional or literal
+		default:
+			out.WriteByte(s[i])
+		}
+	}
+	return out.String()
+}
