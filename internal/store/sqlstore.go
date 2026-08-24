@@ -123,7 +123,37 @@ func (s *SQLStore) TableExists(ctx context.Context, name string) (bool, error) {
 }
 
 func (s *SQLStore) Migrate(ctx context.Context) error {
-	statements := []string{
+	statements := migrationStatements()
+
+	for _, statement := range statements {
+		execQuery := statement
+		if s.dialect == "postgres" {
+			// PostgreSQL does not support BLOB; it uses BYTEA instead.
+			// Using regex guarantees that any variation of case or spacing is handled properly.
+			execQuery = blobRegex.ReplaceAllString(execQuery, "BYTEA")
+			execQuery = realRegex.ReplaceAllString(execQuery, "DOUBLE PRECISION")
+		}
+		if _, err := s.db.ExecContext(ctx, execQuery); err != nil {
+			if isAlreadyExistsErr(err) {
+				continue
+			}
+			return err
+		}
+	}
+	if s.dialect == "postgres" {
+		if err := s.widenPostgresRealColumns(ctx); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// migrationStatements is the schema the gateway declares. It is a function rather than a
+// literal inside Migrate so that the drift checker can read the same list Migrate applies
+// — the alternative is a second copy of every index name, which is a list somebody has to
+// remember to update and therefore a list that goes stale.
+func migrationStatements() []string {
+	return []string{
 		`CREATE TABLE IF NOT EXISTS api_keys (
 			id TEXT PRIMARY KEY,
 			name TEXT NOT NULL,
@@ -2019,29 +2049,27 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 		`CREATE INDEX IF NOT EXISTS idx_redteam_campaigns_fingerprint ON redteam_campaigns(trigger_fingerprint, created_at)`,
 		`ALTER TABLE redteam_evidence ADD COLUMN raw_prompt TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE redteam_evidence ADD COLUMN raw_response TEXT NOT NULL DEFAULT ''`,
-	}
 
-	for _, statement := range statements {
-		execQuery := statement
-		if s.dialect == "postgres" {
-			// PostgreSQL does not support BLOB; it uses BYTEA instead.
-			// Using regex guarantees that any variation of case or spacing is handled properly.
-			execQuery = blobRegex.ReplaceAllString(execQuery, "BYTEA")
-			execQuery = realRegex.ReplaceAllString(execQuery, "DOUBLE PRECISION")
-		}
-		if _, err := s.db.ExecContext(ctx, execQuery); err != nil {
-			if isAlreadyExistsErr(err) {
-				continue
-			}
-			return err
-		}
+		// Request-scoped children the retention purge deletes with
+		// `WHERE request_id IN (SELECT id FROM request_logs WHERE created_at < ?)`.
+		// Nine of the eleven tables in that purge had this index; these three did not,
+		// so every purge run scanned them end to end — on tables that gain a row per
+		// request and are among the largest in a long-lived deployment.
+		`CREATE INDEX IF NOT EXISTS idx_response_logs_request_id ON response_logs(request_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_language_stats_request_id ON language_stats(request_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_domain_routing_decisions_request_id ON domain_routing_decisions(request_id)`,
+
+		// auth_sessions had no index at all beyond its primary key, while sessions are
+		// listed and revoked per user, and looked up by the upstream session id when a
+		// provider sends a back-channel logout.
+		`CREATE INDEX IF NOT EXISTS idx_auth_sessions_user ON auth_sessions(user_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_auth_sessions_kc_sid ON auth_sessions(kc_sid)`,
+
+		// refresh_tokens was indexed for redemption (token_hash) but not for the two
+		// paths that revoke in bulk: every token of a user, and every token of a session.
+		`CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user ON refresh_tokens(user_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_refresh_tokens_session ON refresh_tokens(session_id)`,
 	}
-	if s.dialect == "postgres" {
-		if err := s.widenPostgresRealColumns(ctx); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 // widenPostgresRealColumns promotes any float4 column to float8.

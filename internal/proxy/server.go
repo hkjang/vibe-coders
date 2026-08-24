@@ -31,7 +31,7 @@ import (
 )
 
 // AppVersion is the gateway build version, surfaced in /auth/me and the admin UI.
-const AppVersion = "v0.77.4"
+const AppVersion = "v0.77.5"
 
 type Server struct {
 	cfg      config.Config
@@ -378,6 +378,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/admin/redteam/export", s.handleRedTeamExport)
 	mux.HandleFunc("/admin/ops/home", s.handleOpsHome)
 	mux.HandleFunc("/admin/ops/workers", s.handleOpsWorkers)
+	mux.HandleFunc("/admin/index-health", s.handleIndexHealth)
 	mux.HandleFunc("/admin/ops/preflight", s.handleOpsPreflight)
 	mux.HandleFunc("/admin/flow-map", s.handleFlowMap)
 	mux.HandleFunc("/admin/mcp/agentic-runs", s.handleMCPAgenticRuns)

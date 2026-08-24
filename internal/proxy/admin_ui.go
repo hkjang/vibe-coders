@@ -8315,9 +8315,11 @@ const adminHTML = `<!doctype html>
         '<div class="card-body"><p class="muted" style="font-size:12px">전체 상태 ' + overall + ' · 생성 ' + ago(d.generated_at) + ' — 카드를 클릭하면 상세 화면으로 이동합니다.</p>' + opsVisual + '</div>') +
         '<div id="ops-incidents"></div>' +
         '<div style="display:flex;gap:12px;flex-wrap:wrap">' + cards + '</div>' +
-        '<div id="ops-workers"></div>';
+        '<div id="ops-workers"></div>' +
+        '<div id="ops-index-health"></div>';
       opsLoadIncidents();
       opsLoadWorkers();
+      opsLoadIndexHealth();
     }
     // Incident Copilot — 지금 확인할 이슈(장애 후보).
     window.opsLoadIncidents = async () => {
@@ -8357,6 +8359,53 @@ const adminHTML = `<!doctype html>
         '<div class="card-body"><table><thead><tr><th>워커</th><th>상태</th><th>실행</th><th>큐</th><th>유실</th><th>상세</th></tr></thead><tbody>' + rows + '</tbody></table>' +
         '<div style="margin-top:8px"><button type="button" class="secondary" onclick="opsPreflight()">배포 프리플라이트 점검</button></div>' +
         '<div id="ops-preflight"></div></div>');
+    };
+    // 인덱스 상태 — 선언한 스키마와 실제 DB의 차이, 그리고 접근 통계가 말해주는 추가/삭제 후보.
+    // 어떤 DDL도 실행하지 않습니다. 각 항목은 운영자가 검토할 SQL만 보여줍니다.
+    window.opsLoadIndexHealth = async () => {
+      const host = document.getElementById('ops-index-health');
+      if (!host) return;
+      let d;
+      try { d = await api('/admin/index-health'); }
+      catch (e) { host.innerHTML = '<div class="banner warn">인덱스 상태를 불러오지 못했습니다. <button type="button" class="secondary" onclick="opsLoadIndexHealth()">다시 시도</button><div class="muted">' + escapeHTML(e.message) + '</div></div>'; return; }
+      const sum = d.summary || {}, drift = d.drift || {}, advice = d.advice || {};
+      const kindBadge = (k) => k === 'mismatched' ? '<span class="status error">정의 불일치</span>'
+        : (k === 'missing' ? '<span class="status warn">DB에 없음</span>' : '<span class="status">선언에 없음</span>');
+      const sevBadge = (sv) => sv === 'high' ? '<span class="status error">높음</span>'
+        : (sv === 'medium' ? '<span class="status warn">보통</span>' : '<span class="status">낮음</span>');
+      const cols = (c) => (c && c.length) ? '(' + c.map(escapeHTML).join(', ') + ')' : '';
+
+      const driftRows = (drift.items || []).map(it =>
+        '<tr><td>' + kindBadge(it.kind) + '</td>' +
+        '<td><strong>' + escapeHTML(it.name) + '</strong><div class="muted" style="font-size:11px">' + escapeHTML(it.table) + '</div></td>' +
+        '<td class="muted" style="font-size:11px">' + escapeHTML(it.detail || '') + '</td>' +
+        '<td><code style="font-size:10px;word-break:break-all">' + escapeHTML(it.fix || '') + '</code></td></tr>').join('');
+      const driftBody = driftRows
+        ? '<table><thead><tr><th>구분</th><th>인덱스</th><th>내용</th><th>검토할 SQL</th></tr></thead><tbody>' + driftRows + '</tbody></table>'
+        : '<p class="muted" style="font-size:12px">선언한 인덱스 ' + (drift.declared_count || 0) + '개가 모두 이 DB에 그대로 있습니다 ✅</p>';
+
+      const adviceRows = (advice.items || []).map(a =>
+        '<tr><td>' + sevBadge(a.severity) + '</td>' +
+        '<td>' + (a.kind === 'drop' ? '삭제 후보' : '추가 후보') + '</td>' +
+        '<td><strong>' + escapeHTML(a.table) + '</strong>' + escapeHTML(cols(a.columns)) +
+        (a.index ? '<div class="muted" style="font-size:11px">' + escapeHTML(a.index) + '</div>' : '') + '</td>' +
+        '<td class="muted" style="font-size:11px">' + escapeHTML(a.reason || '') + '<div style="font-size:10px">' + escapeHTML(a.evidence || '') + '</div></td>' +
+        '<td><code style="font-size:10px;word-break:break-all">' + escapeHTML(a.sql || '') + '</code></td></tr>').join('');
+      const adviceBody = (adviceRows
+        ? '<table><thead><tr><th>중요도</th><th>구분</th><th>대상</th><th>근거</th><th>검토할 SQL</th></tr></thead><tbody>' + adviceRows + '</tbody></table>'
+        : '<p class="muted" style="font-size:12px">접근 통계에서 눈에 띄는 항목이 없습니다.</p>')
+        + ((advice.limitations || []).length
+          ? '<p class="muted" style="font-size:10px;margin-top:6px">※ ' + (advice.limitations || []).map(escapeHTML).join(' ') + '</p>' : '');
+
+      host.innerHTML = card('인덱스 상태',
+        '<div class="card-body"><p class="muted" style="font-size:12px">' +
+        (sum.in_sync ? '<span class="status">스키마 일치</span>' : '<span class="status error">스키마 불일치</span>') +
+        ' · 정의 불일치 ' + (sum.mismatched || 0) + ' · DB에 없음 ' + (sum.missing || 0) + ' · 선언에 없음 ' + (sum.undeclared || 0) +
+        ' · 추천 ' + (sum.advice_total || 0) + '건(중요 ' + (sum.advice_high || 0) + ') · ' + escapeHTML(drift.dialect || '') +
+        '</p><p style="font-size:12px;margin:4px 0">' + escapeHTML(sum.headline || '') + '</p>' +
+        driftBody + '<div style="margin-top:10px"><strong style="font-size:12px">추가·삭제 후보</strong></div>' + adviceBody +
+        '<p class="muted" style="font-size:10px;margin-top:6px">이 화면은 읽기 전용입니다. 인덱스는 쓰기 비용과 저장 비용을 만들기 때문에, 적용 여부는 운영자가 판단합니다.</p>' +
+        '</div>');
     };
     // Upgrade Preflight — 배포 전/후 점검(DB·마이그레이션·OpenAPI·설정).
     window.opsPreflight = async () => {
