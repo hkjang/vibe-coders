@@ -194,6 +194,36 @@ func sanitizeAgentToolName(name string) string {
 	return truncateText(out, 64)
 }
 
+// Ceilings on the agentic loop.
+//
+// Each step is an LLM turn that may issue several tool calls, so the count is what a run
+// costs. Three things decide it and the order matters: the gateway setting, an agent
+// route's own override, and a hard cap no configuration can raise.
+//
+// The cap is the one that is not a preference. Without it a route with maxSteps set to a
+// few hundred runs that many turns against a provider, and the only sign is the bill.
+const (
+	agenticDefaultSteps = 8
+	agenticMaxSteps     = 16
+)
+
+// agenticStepCeiling resolves how many turns a run may take. routeSteps of zero or less
+// means the route sets no override and the gateway setting stands; the same for configured
+// when it too is unset, which falls back to the default rather than to no steps at all.
+func agenticStepCeiling(configured, routeSteps int) int {
+	steps := configured
+	if routeSteps > 0 {
+		steps = routeSteps
+	}
+	if steps <= 0 {
+		steps = agenticDefaultSteps
+	}
+	if steps > agenticMaxSteps {
+		steps = agenticMaxSteps
+	}
+	return steps
+}
+
 // runMCPAgenticChat runs the tool-calling loop. When streaming, it writes the OpenAI SSE
 // chunks (reasoning_content for the loop narration, content for the final answer) directly
 // to w and sets Streamed=true. The caller must have written all response headers (including
@@ -222,16 +252,7 @@ func (s *Server) runMCPAgenticChat(w http.ResponseWriter, r *http.Request, model
 	// Step count and per-turn token budget are configurable; the loop runs at most
 	// maxSteps LLM turns (each may issue several tool calls) before forcing a final answer.
 	cfg := s.mcpConf()
-	maxSteps := cfg.MaxAgentSteps
-	if policy.MaxSteps > 0 {
-		maxSteps = policy.MaxSteps // per-route override (agent routes)
-	}
-	if maxSteps <= 0 {
-		maxSteps = 8
-	}
-	if maxSteps > 16 {
-		maxSteps = 16
-	}
+	maxSteps := agenticStepCeiling(cfg.MaxAgentSteps, policy.MaxSteps)
 	maxTokens := cfg.MaxTokens
 	if maxTokens <= 0 {
 		maxTokens = mcpAgentMaxTokens
