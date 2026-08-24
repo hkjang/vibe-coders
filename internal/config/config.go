@@ -379,8 +379,15 @@ const DefaultGatewaySecret = "dev-local-insecure-secret-change-me"
 // the gateway infers one from client identity + a sliding inactivity window when
 // no explicit id (header or body) is present.
 type SessionConfig struct {
-	InferenceEnabled bool          // infer a session when the client sends none
-	IdleTimeout      time.Duration // gap of inactivity that starts a new inferred session
+	InferenceEnabled bool // infer a session when the client sends none
+	// InjectHeader forwards a stable X-Session-ID upstream when the caller sent none.
+	// Agent clients such as qwen code send no session identifier to a generic
+	// OpenAI-compatible endpoint, so the provider sees unrelated requests. The gateway
+	// already derives a per-conversation identity for sticky routing; this passes the
+	// same value on, so an upstream that groups by session (vLLM prefix cache, a
+	// provider dashboard) sees the conversation the way the gateway does.
+	InjectHeader bool
+	IdleTimeout  time.Duration // gap of inactivity that starts a new inferred session
 }
 
 type ProxyAPIKey struct {
@@ -490,6 +497,7 @@ func Load() (Config, error) {
 		},
 		Session: SessionConfig{
 			InferenceEnabled: boolEnv("SESSION_INFERENCE_ENABLED", true),
+			InjectHeader:     boolEnv("SESSION_INJECT_HEADER", true),
 			IdleTimeout:      durationEnv("SESSION_IDLE_TIMEOUT", 30*time.Minute),
 		},
 		VCS: VCSConfig{

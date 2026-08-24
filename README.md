@@ -394,6 +394,7 @@ chat 응답은 비결정적이라 기본 비활성화입니다. 활성화해도 
 | --- | --- | --- |
 | `SESSION_INFERENCE_ENABLED` | `true` | 명시적 세션이 없을 때 자동 추론. `false`면 요청별(`trace:<id>`)로 분리(레거시 동작) |
 | `SESSION_IDLE_TIMEOUT` | `30m` | 이 시간 이상 비활성이면 새 추론 세션 시작 |
+| `SESSION_INJECT_HEADER` | `true` | 세션 헤더가 없는 클라이언트(qwen code 등)의 요청에 대화 단위로 안정적인 `X-Session-ID` 를 붙여 업스트림에 전달 |
 
 > 더 정확한 그룹화가 필요하면 클라이언트(플러그인)에서 `X-Vibe-Session-ID` 헤더를 직접 보내는 것이 가장 좋습니다. repo/branch 단위로 나누려면 `X-Vibe-Repo`·`X-Vibe-Branch` 헤더를 추가하세요.
 

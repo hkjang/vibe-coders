@@ -460,3 +460,52 @@ func resolveSessionAffinity(r *http.Request, body []byte, apiKeyID, inferredSess
 	}
 	return sessionAffinity{}
 }
+
+// upstreamSessionHeader is the header the gateway adds when the caller sent none.
+const upstreamSessionHeader = "X-Session-ID"
+
+// injectUpstreamSessionHeader gives the upstream a stable session id for callers that do
+// not send one.
+//
+// qwen code and clients like it send nothing to identify a conversation on a generic
+// OpenAI-compatible endpoint, so every turn arrives at the provider looking unrelated to
+// the last. The gateway already works out which conversation a request belongs to in
+// order to keep it on one provider; this passes that same identity on, so an upstream
+// that groups by session sees what the gateway sees.
+//
+// Three things it deliberately does not do. It never replaces a session id the caller
+// sent — if the client is already identifying its conversations, that is the better
+// answer and it flows through untouched. It derives the value from the affinity key, so
+// the same conversation carries the same id across turns without any state being kept.
+// And it echoes the value downstream, so a client that wants to take over can read the id
+// the gateway chose and start sending it itself.
+func (s *Server) injectUpstreamSessionHeader(w http.ResponseWriter, r *http.Request, affinity sessionAffinity) {
+	if !s.cfg.Session.InjectHeader || affinity.Key == "" {
+		return
+	}
+	if affinity.Source == affinitySourceHeader {
+		// The caller already sent one; copyUpstreamHeaders forwards it as-is.
+		return
+	}
+	id := derivedSessionID(affinity.Key)
+	if id == "" {
+		return
+	}
+	r.Header.Set(upstreamSessionHeader, id)
+	w.Header().Set(upstreamSessionHeader, id)
+	w.Header().Set("X-Session-ID-Source", "gateway:"+affinity.Source)
+}
+
+// derivedSessionID turns an affinity key into a stable, readable session id. The key is
+// already a hash of what identifies the conversation, so this only needs to shorten and
+// label it — the same conversation yields the same id on every turn, with nothing stored.
+func derivedSessionID(affinityKey string) string {
+	if affinityKey == "" {
+		return ""
+	}
+	sum := audit.HashText(affinityKey)
+	if len(sum) < 24 {
+		return ""
+	}
+	return "sess_" + sum[:24]
+}

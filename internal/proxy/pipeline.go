@@ -460,8 +460,12 @@ func (rc *requestPipeline) stepUpstream() bool {
 	// the pool, so the balancer only runs when nothing has been forced already.
 	forcedProvider := rc.routeDecision.TargetProvider
 	balanced := balancerDecision{}
+	// Resolve the conversation identity before the balancer, not inside it: it is also
+	// what the upstream session header is derived from, and that has to happen even when
+	// a rule or a header has already pinned the provider.
+	rc.affinity = resolveSessionAffinity(r, body, rc.apiKeyID, meta.Request.SessionID)
+	s.injectUpstreamSessionHeader(w, r, rc.affinity)
 	if strings.TrimSpace(forcedProvider) == "" {
-		rc.affinity = resolveSessionAffinity(r, body, rc.apiKeyID, meta.Request.SessionID)
 		if decision, ok := s.balanceProvider(r.Context(), r, meta.Request.Model, rc.affinity.Key, rc.authCtx); ok {
 			forcedProvider, balanced = decision.Provider, decision
 		}
