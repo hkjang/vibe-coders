@@ -1,10 +1,12 @@
 package store
 
 import (
+	"context"
 	"os"
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 )
 
 // Retention completeness.
@@ -62,6 +64,13 @@ var retentionDecisions = map[string]retentionDecision{
 	"chat_semantic_cache": {sweptByExpiry, "cache entries that already miss on read"},
 	"embedding_cache":     {sweptByExpiry, "cache entries that already miss on read"},
 	"quota_reservations":  {sweptByExpiry, "in-flight quota holds, swept by their own worker"},
+
+	// Auto-captured from live traffic. Not discovered by the column scan below — this
+	// table carries neither request_id nor expires_at — so it is listed by hand, which is
+	// the point: a table can hold request-derived text without either marker.
+	"domain_examples": {retained, "redacted prompt text auto-promoted as a routing example; " +
+		"kept as the routing corpus, but it outlives the prompt it came from — see " +
+		"TestDomainExamplesOutliveThePromptsTheyCameFrom"},
 
 	// Kept on purpose.
 	"request_notes":           {retained, "operator-authored annotations, not telemetry"},
@@ -148,4 +157,63 @@ func storeSourceText(t *testing.T) string {
 		b.WriteByte('\n')
 	}
 	return b.String()
+}
+
+// A copy of a prompt that outlives the prompt.
+//
+// When MCP routing is confident about a request, the query is auto-promoted into
+// domain_examples as a routing example. The text is redacted — promptsPlainText prefers
+// RedactedText — so this is not a secrets leak. What it is, is a second copy of what a
+// user asked, written without a human step and never deleted: there is no DELETE against
+// this table anywhere, and it carries neither request_id nor expires_at, so neither the
+// per-request purge nor the expiry sweep touches it.
+//
+// The consequence is concrete. An operator who sets RETENTION_PROMPT_DAYS=30 for
+// compliance still has the text a year later, in a table they were not thinking about.
+//
+// This test asserts the current behaviour rather than changing it. Whether these should
+// be purged is a trade against routing quality — the examples are the corpus that makes
+// the routing work — and deleting data is not a decision to take on someone's behalf. It
+// exists so the behaviour is a recorded choice, and so it fails loudly if someone adds a
+// purge without also updating the reasoning above.
+func TestDomainExamplesOutliveThePromptsTheyCameFrom(t *testing.T) {
+	db := openStoreForTest(t)
+	defer db.Close()
+	ctx := context.Background()
+	old := time.Now().UTC().AddDate(0, 0, -400)
+	const text = "what is our vacation policy for contractors"
+
+	if err := db.InsertLogRecord(ctx, LogRecord{
+		Request: RequestLog{ID: "r1", TraceID: "r1", Endpoint: "/v1/chat/completions",
+			Model: "m", Provider: "up", StatusCode: 200, CreatedAt: old},
+		Prompts: []PromptLog{{ID: "p1", RequestID: "r1", Role: "user",
+			RedactedText: text, CreatedAt: old}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.UpsertDomainExample(ctx, DomainExample{
+		ID: "dex1", Route: "company_policy", Text: text, TextHash: "h1",
+		Source: "mcp_evidence", Confidence: 0.9, Approved: true, AutoPromoted: true,
+		CreatedAt: old.Format(time.RFC3339Nano),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	purged, err := db.PurgeOlderThan(ctx, "prompt_logs", 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if purged == 0 {
+		t.Fatal("retention removed no prompt rows, so this proves nothing about what survives it")
+	}
+
+	examples, err := db.ListDomainExamples(ctx, "company_policy", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(examples) != 1 || examples[0].Text != text {
+		t.Fatalf("domain_examples no longer holds the promoted text after retention (%d rows). "+
+			"If that is now purged on purpose, update the retentionDecisions entry for "+
+			"domain_examples to say so.", len(examples))
+	}
 }
