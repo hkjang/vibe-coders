@@ -137,6 +137,44 @@ func TestDuplicateTeamNamesResolveStably(t *testing.T) {
 	}
 }
 
+func TestAuthTeamScopeIdentitiesRejectCrossTeamIDAliases(t *testing.T) {
+	db := openStoreForTest(t)
+	defer db.Close()
+	ctx := context.Background()
+
+	seedTeam(t, db, "team-a", "team-b")
+	seedTeam(t, db, "team-b", "bravo")
+	seedTeam(t, db, "team-c", "charlie")
+
+	identities, found, err := db.AuthTeamScopeIdentities(ctx, "team-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !found || len(identities) != 1 || identities[0] != "team-a" {
+		t.Fatalf("team-a identities = %v found=%v, want only its unambiguous id", identities, found)
+	}
+	if identities, found, err = db.AuthTeamScopeIdentities(ctx, "team-b"); err != nil || found || len(identities) != 0 {
+		t.Fatalf("ambiguous caller identity must fail closed: identities=%v found=%v err=%v", identities, found, err)
+	}
+	identities, found, err = db.AuthTeamScopeIdentities(ctx, "bravo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !found || len(identities) != 1 || identities[0] != "bravo" {
+		t.Fatalf("team-b name scope = %v found=%v, want only its unambiguous name", identities, found)
+	}
+	identities, found, err = db.AuthTeamScopeIdentities(ctx, "team-c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !found || len(identities) != 2 || identities[0] != "team-c" || identities[1] != "charlie" {
+		t.Fatalf("unambiguous team identities = %v found=%v", identities, found)
+	}
+	if identities, found, err = db.AuthTeamScopeIdentities(ctx, "missing"); err != nil || found || len(identities) != 0 {
+		t.Fatalf("unknown caller identity must fail closed: identities=%v found=%v err=%v", identities, found, err)
+	}
+}
+
 func TestAuthTeamLookupWithManyTeams(t *testing.T) {
 	db := openStoreForTest(t)
 	defer db.Close()

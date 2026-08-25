@@ -55,9 +55,19 @@ func TestXViewTeamAdminCannotSeeOtherTeamPointsOrCursor(t *testing.T) {
 	t.Cleanup(func() { _ = db.Close() })
 	ctx := context.Background()
 	now := time.Now().UTC()
+	for _, team := range []store.AuthTeam{
+		{ID: "team-alpha-id", Name: "team-alpha-name"},
+		{ID: "team-beta-id", Name: "team-beta-name"},
+	} {
+		if err := db.UpsertAuthTeam(ctx, team); err != nil {
+			t.Fatal(err)
+		}
+	}
 	for _, key := range []store.APIKeyRecord{
-		{ID: "xv-key-alpha", Name: "alpha", KeyHash: "xv-hash-alpha", Team: "team-alpha", Status: "active"},
-		{ID: "xv-key-beta", Name: "beta", KeyHash: "xv-hash-beta", Team: "team-beta", Status: "active"},
+		// API keys may persist a team display name while the access token carries its
+		// canonical id. XView must match both forms without crossing the team boundary.
+		{ID: "xv-key-alpha", Name: "alpha", KeyHash: "xv-hash-alpha", Team: "team-alpha-name", Status: "active"},
+		{ID: "xv-key-beta", Name: "beta", KeyHash: "xv-hash-beta", Team: "team-beta-name", Status: "active"},
 	} {
 		if err := db.UpsertAPIKey(ctx, key); err != nil {
 			t.Fatal(err)
@@ -82,7 +92,7 @@ func TestXViewTeamAdminCannotSeeOtherTeamPointsOrCursor(t *testing.T) {
 		t.Fatal(err)
 	}
 	token, err := server.signAccessToken(accessClaims{
-		Subject: "xv-team-admin", Role: "team_admin", TeamID: "team-alpha", Scopes: []string{"admin:read"},
+		Subject: "xv-team-admin", Role: "team_admin", TeamID: "team-alpha-id", Scopes: []string{"admin:read"},
 		SessionID: "xv-team-session", Type: "access", IssuedAt: now.Unix(), ExpiresAt: now.Add(time.Hour).Unix(),
 	})
 	if err != nil {
@@ -118,6 +128,10 @@ func TestXViewTeamAdminCannotSeeOtherTeamPointsOrCursor(t *testing.T) {
 	}
 	if len(snapshot.Points) != 1 || snapshot.Points[0].RequestID != "alpha-snapshot" || snapshot.Cursor.RequestID != "alpha-snapshot" {
 		t.Fatalf("team-scoped snapshot leaked another team: %+v", snapshot)
+	}
+	var ownDetail map[string]any
+	if status := get(token, "/admin/requests/alpha-snapshot", &ownDetail); status != http.StatusOK {
+		t.Fatalf("team admin could not open a request stored under its team name: status=%d", status)
 	}
 
 	seedXViewReqForKey(t, db, "alpha-delta", "xv-key-alpha", "alpha-model", "openai", 200, false, 110, 11, 1.1, now)
@@ -198,6 +212,207 @@ func TestXViewTeamAdminCannotSeeOtherTeamPointsOrCursor(t *testing.T) {
 	}
 	if len(emptyRequests.Requests) != 0 {
 		t.Fatalf("empty-team admin leaked request rows: %+v", emptyRequests.Requests)
+	}
+}
+
+func TestXViewTeamScopeRejectsAmbiguousAliasesAndSyntheticUnassigned(t *testing.T) {
+	db := openTestStore(t)
+	t.Cleanup(func() { _ = db.Close() })
+	ctx := context.Background()
+	now := time.Now().UTC()
+	for _, team := range []store.AuthTeam{
+		// team-a's name collides with team-b's canonical id. The raw value
+		// "team-b" cannot safely be attributed to either team.
+		{ID: "team-a", Name: "team-b"},
+		{ID: "team-b", Name: "bravo"},
+		{ID: "team-c", Name: "unassigned"},
+	} {
+		if err := db.UpsertAuthTeam(ctx, team); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, key := range []store.APIKeyRecord{
+		{ID: "scope-key-a", Name: "a", KeyHash: "scope-hash-a", Team: "team-a", Status: "active"},
+		{ID: "scope-key-ambiguous", Name: "ambiguous", KeyHash: "scope-hash-ambiguous", Team: "team-b", Status: "active"},
+		{ID: "scope-key-b-name", Name: "b-name", KeyHash: "scope-hash-b-name", Team: "bravo", Status: "active"},
+		{ID: "scope-key-c-id", Name: "c-id", KeyHash: "scope-hash-c-id", Team: "team-c", Status: "active"},
+		{ID: "scope-key-c-name", Name: "c-name", KeyHash: "scope-hash-c-name", Team: "unassigned", Status: "active"},
+	} {
+		if err := db.UpsertAPIKey(ctx, key); err != nil {
+			t.Fatal(err)
+		}
+	}
+	seedXViewReqForKey(t, db, "scope-a-snapshot", "scope-key-a", "a-model", "openai", 200, false, 100, 10, 1, now)
+	seedXViewReqForKey(t, db, "scope-ambiguous-snapshot", "scope-key-ambiguous", "ambiguous-model", "openai", 200, false, 200, 20, 2, now)
+	seedXViewReqForKey(t, db, "scope-b-name-snapshot", "scope-key-b-name", "b-model", "openai", 200, false, 300, 30, 3, now)
+	seedXViewReqForKey(t, db, "scope-c-id-snapshot", "scope-key-c-id", "c-model", "openai", 200, false, 400, 40, 4, now)
+	seedXViewReqForKey(t, db, "scope-c-name-snapshot", "scope-key-c-name", "c-model", "openai", 200, false, 410, 41, 4.1, now)
+	seedXViewReqForKey(t, db, "scope-synthetic-unassigned", "missing-key", "synthetic-model", "openai", 200, false, 500, 50, 5, now)
+
+	logger := store.NewAsyncLogger(db, 16, filepath.Join(t.TempDir(), "xview-team-collision.ndjson"))
+	logger.Start()
+	t.Cleanup(func() { logger.Stop(context.Background()) })
+	cfg := testConfig("http://upstream.invalid", "secret")
+	cfg.Auth.Enabled = true
+	cfg.Auth.JWTSecret = "xview-team-collision-jwt-secret"
+	cfg.Auth.AccessTokenTTL = time.Hour
+	server, err := NewServer(cfg, db, logger, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	issueToken := func(subject, teamID string) string {
+		t.Helper()
+		sessionID := subject + "-session"
+		if err := db.InsertAuthSession(ctx, sessionID, subject, "127.0.0.1", "test", now.Add(time.Hour)); err != nil {
+			t.Fatal(err)
+		}
+		token, err := server.signAccessToken(accessClaims{
+			Subject: subject, Role: "team_admin", TeamID: teamID, Scopes: []string{"admin:read"},
+			SessionID: sessionID, Type: "access", IssuedAt: now.Unix(), ExpiresAt: now.Add(time.Hour).Unix(),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return token
+	}
+	srv := httptest.NewServer(server.Routes())
+	t.Cleanup(srv.Close)
+	get := func(token, path string, out any) int {
+		t.Helper()
+		req, err := http.NewRequest(http.MethodGet, srv.URL+path, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if out != nil {
+			if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return resp.StatusCode
+	}
+	pointIDs := func(points []store.ScatterPoint) map[string]bool {
+		ids := make(map[string]bool, len(points))
+		for _, point := range points {
+			ids[point.RequestID] = true
+		}
+		return ids
+	}
+	requestIDs := func(requests []store.RecentRequest) map[string]bool {
+		ids := make(map[string]bool, len(requests))
+		for _, request := range requests {
+			ids[request.ID] = true
+		}
+		return ids
+	}
+
+	aToken := issueToken("scope-admin-a", "team-a")
+	var aSnapshot struct {
+		Points []store.ScatterPoint `json:"points"`
+		Cursor store.ScatterCursor  `json:"cursor"`
+	}
+	if status := get(aToken, "/admin/scatter?window=1h&limit=20", &aSnapshot); status != http.StatusOK {
+		t.Fatalf("team-a snapshot status = %d", status)
+	}
+	if ids := pointIDs(aSnapshot.Points); len(ids) != 1 || !ids["scope-a-snapshot"] || aSnapshot.Cursor.RequestID != "scope-a-snapshot" {
+		t.Fatalf("team-a snapshot used an ambiguous alias: points=%v cursor=%+v", ids, aSnapshot.Cursor)
+	}
+	seedXViewReqForKey(t, db, "scope-ambiguous-delta", "scope-key-ambiguous", "ambiguous-model", "openai", 200, false, 220, 22, 2.2, now)
+	seedXViewReqForKey(t, db, "scope-a-delta", "scope-key-a", "a-model", "openai", 200, false, 120, 12, 1.2, now)
+	query := url.Values{
+		"window":            {"1h"},
+		"after_ingested_at": {aSnapshot.Cursor.IngestedAt},
+		"after_request_id":  {aSnapshot.Cursor.RequestID},
+		"limit":             {"20"},
+	}
+	var aDelta struct {
+		Points []store.ScatterPoint `json:"points"`
+		Cursor store.ScatterCursor  `json:"cursor"`
+	}
+	if status := get(aToken, "/admin/xview/delta?"+query.Encode(), &aDelta); status != http.StatusOK {
+		t.Fatalf("team-a delta status = %d", status)
+	}
+	if ids := pointIDs(aDelta.Points); len(ids) != 1 || !ids["scope-a-delta"] || aDelta.Cursor.RequestID != "scope-a-delta" {
+		t.Fatalf("team-a delta used an ambiguous alias: points=%v cursor=%+v", ids, aDelta.Cursor)
+	}
+	var aModels struct {
+		Models []store.ScatterModelGroup `json:"models"`
+	}
+	if status := get(aToken, "/admin/xview/models?window=1h&top=10", &aModels); status != http.StatusOK {
+		t.Fatalf("team-a models status = %d", status)
+	}
+	if len(aModels.Models) != 1 || aModels.Models[0].Model != "a-model" {
+		t.Fatalf("team-a model analytics used an ambiguous alias: %+v", aModels.Models)
+	}
+	var aRequests struct {
+		Requests []store.RecentRequest `json:"requests"`
+	}
+	if status := get(aToken, "/admin/requests?limit=20", &aRequests); status != http.StatusOK {
+		t.Fatalf("team-a requests status = %d", status)
+	}
+	if ids := requestIDs(aRequests.Requests); len(ids) != 2 || !ids["scope-a-snapshot"] || !ids["scope-a-delta"] {
+		t.Fatalf("team-a request list used an ambiguous alias: %v", ids)
+	}
+	if status := get(aToken, "/admin/requests/scope-ambiguous-snapshot", &map[string]any{}); status != http.StatusForbidden {
+		t.Fatalf("team-a ambiguous request detail status = %d, want 403", status)
+	}
+
+	// The ambiguous literal cannot be used as a caller identity either. Team B remains
+	// reachable through its unambiguous display name, but only its unambiguous key alias.
+	ambiguousToken := issueToken("scope-admin-ambiguous", "team-b")
+	var ambiguousSnapshot struct {
+		Points []store.ScatterPoint `json:"points"`
+		Cursor store.ScatterCursor  `json:"cursor"`
+	}
+	if status := get(ambiguousToken, "/admin/scatter?window=1h&limit=20", &ambiguousSnapshot); status != http.StatusOK {
+		t.Fatalf("ambiguous caller snapshot status = %d", status)
+	}
+	if len(ambiguousSnapshot.Points) != 0 || ambiguousSnapshot.Cursor != (store.ScatterCursor{}) {
+		t.Fatalf("ambiguous caller identity must fail closed: %+v", ambiguousSnapshot)
+	}
+	bToken := issueToken("scope-admin-b-name", "bravo")
+	var bSnapshot struct {
+		Points []store.ScatterPoint `json:"points"`
+	}
+	if status := get(bToken, "/admin/scatter?window=1h&limit=20", &bSnapshot); status != http.StatusOK {
+		t.Fatalf("team-b name snapshot status = %d", status)
+	}
+	if ids := pointIDs(bSnapshot.Points); len(ids) != 1 || !ids["scope-b-name-snapshot"] {
+		t.Fatalf("team-b name scope included an ambiguous key alias: %v", ids)
+	}
+
+	// A real team display name may be the literal "unassigned". Scoped queries must
+	// still use the api-key semi-join and never absorb missing-key synthetic traffic.
+	cToken := issueToken("scope-admin-c", "team-c")
+	var cSnapshot struct {
+		Points []store.ScatterPoint `json:"points"`
+		Cursor store.ScatterCursor  `json:"cursor"`
+	}
+	if status := get(cToken, "/admin/scatter?window=1h&limit=20", &cSnapshot); status != http.StatusOK {
+		t.Fatalf("team-c snapshot status = %d", status)
+	}
+	if ids := pointIDs(cSnapshot.Points); len(ids) != 2 || !ids["scope-c-id-snapshot"] || !ids["scope-c-name-snapshot"] || ids["scope-synthetic-unassigned"] {
+		t.Fatalf("literal unassigned team scope leaked synthetic traffic: points=%v cursor=%+v", ids, cSnapshot.Cursor)
+	}
+	var cRequests struct {
+		Requests []store.RecentRequest `json:"requests"`
+	}
+	if status := get(cToken, "/admin/requests?limit=20", &cRequests); status != http.StatusOK {
+		t.Fatalf("team-c requests status = %d", status)
+	}
+	if ids := requestIDs(cRequests.Requests); len(ids) != 2 || !ids["scope-c-id-snapshot"] || !ids["scope-c-name-snapshot"] || ids["scope-synthetic-unassigned"] {
+		t.Fatalf("literal unassigned request scope leaked synthetic traffic: %v", ids)
+	}
+	if status := get(cToken, "/admin/requests/scope-c-name-snapshot", &map[string]any{}); status != http.StatusOK {
+		t.Fatalf("team-c could not open its literal unassigned alias request: status=%d", status)
+	}
+	if status := get(cToken, "/admin/requests/scope-synthetic-unassigned", &map[string]any{}); status != http.StatusForbidden {
+		t.Fatalf("team-c synthetic request detail status = %d, want 403", status)
 	}
 }
 

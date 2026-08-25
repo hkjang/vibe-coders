@@ -3205,12 +3205,7 @@ func (s *SQLStore) RecentRequests(ctx context.Context, filter RequestFilter) ([]
 		where = append(where, "r.trace_id = ?")
 		args = append(args, filter.TraceID)
 	}
-	if filter.TeamScoped && strings.TrimSpace(filter.Team) == "" {
-		where = append(where, "1 = 0")
-	} else if filter.Team != "" {
-		where = append(where, `COALESCE(NULLIF((SELECT k.team FROM api_keys k WHERE k.id = r.api_key_id), ''), 'unassigned') = ?`)
-		args = append(args, filter.Team)
-	}
+	where, args = appendRequestTeamCondition(where, args, filter.Team, filter.Teams, filter.TeamScoped)
 	if filter.SessionID != "" {
 		where = append(where, "COALESCE(NULLIF(r.session_id, ''), 'no-session') = ?")
 		args = append(args, filter.SessionID)

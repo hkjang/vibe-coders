@@ -97,26 +97,50 @@ func scatterConditions(f ScatterFilter) ([]string, []any) {
 		where = append(where, "r.api_key_id = ?")
 		args = append(args, f.APIKeyID)
 	}
-	where, args = appendScatterTeamCondition(where, args, f.Team, f.TeamScoped)
+	where, args = appendRequestTeamCondition(where, args, f.Team, f.Teams, f.TeamScoped)
 	return where, args
 }
 
-// appendScatterTeamCondition keeps XView's team boundary in SQL. Named teams use a
-// semi-join so the request-log team cursor can use its composite index instead of walking
-// the global ingestion index and evaluating a correlated lookup for every tenant row.
-func appendScatterTeamCondition(where []string, args []any, team string, scoped bool) ([]string, []any) {
-	if scoped && strings.TrimSpace(team) == "" {
+// appendRequestTeamCondition keeps request queries inside the caller's team boundary.
+// Authentication uses a canonical team id while api_keys.team supports either that id or
+// a validated display name, so callers pass both identities. Scoped identities always use
+// a semi-join: the literal "unassigned" can be a real team id/name and must not include
+// synthetic traffic whose API key is missing. The semi-join also lets XView use its
+// composite request-log index instead of walking every tenant row.
+func appendRequestTeamCondition(where []string, args []any, team string, teams []string, scoped bool) ([]string, []any) {
+	keys := make([]string, 0, len(teams)+1)
+	seen := make(map[string]struct{}, len(teams)+1)
+	candidates := teams
+	if !scoped {
+		candidates = append([]string{team}, teams...)
+	}
+	for _, key := range candidates {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		keys = append(keys, key)
+	}
+	if scoped && len(keys) == 0 {
 		return append(where, "1 = 0"), args
 	}
-	if team == "" {
+	if len(keys) == 0 {
 		return where, args
 	}
-	if team == "unassigned" {
-		where = append(where, "COALESCE(NULLIF((SELECT k.team FROM api_keys k WHERE k.id = r.api_key_id), ''), 'unassigned') = ?")
+	placeholders := strings.Repeat(",?", len(keys))[1:]
+	if !scoped && len(teams) == 0 && strings.TrimSpace(team) == "unassigned" {
+		where = append(where, requestTeamExpr+" IN ("+placeholders+")")
 	} else {
-		where = append(where, "r.api_key_id IN (SELECT k.id FROM api_keys k WHERE k.team = ?)")
+		where = append(where, "r.api_key_id IN (SELECT k.id FROM api_keys k WHERE k.team IN ("+placeholders+"))")
 	}
-	return where, append(args, team)
+	for _, key := range keys {
+		args = append(args, key)
+	}
+	return where, args
 }
 
 // ScatterPoints returns individual request points for a response-time scatter plot
@@ -139,7 +163,7 @@ func (s *SQLStore) LatestScatterCursor(ctx context.Context, f ScatterFilter) (Sc
 	var cursor ScatterCursor
 	where := []string{"r.ingested_at <> ''"}
 	args := []any{}
-	if f.TeamScoped || f.Team != "" {
+	if f.TeamScoped || f.Team != "" || len(f.Teams) > 0 {
 		// A team-scoped high-water query must not scan every other tenant's history on each
 		// 1.5-second poll. Bound it to the visible time range and use the team cursor index.
 		where = append(where, "r.created_at >= ?")
@@ -148,7 +172,7 @@ func (s *SQLStore) LatestScatterCursor(ctx context.Context, f ScatterFilter) (Sc
 			where = append(where, "r.created_at <= ?")
 			args = append(args, f.Until.UTC().Format(time.RFC3339Nano))
 		}
-		where, args = appendScatterTeamCondition(where, args, f.Team, f.TeamScoped)
+		where, args = appendRequestTeamCondition(where, args, f.Team, f.Teams, f.TeamScoped)
 	}
 	err := s.db.QueryRowContext(ctx, s.bind(`
 		SELECT ingested_at, id

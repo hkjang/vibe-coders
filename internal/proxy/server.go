@@ -777,14 +777,14 @@ func (s *Server) handleRequests(w http.ResponseWriter, r *http.Request) {
 	loc := searchLocation(r.URL.Query().Get("tz"))
 	from := parseRangeBound(r.URL.Query().Get("from"), loc, false)
 	to := parseRangeBound(r.URL.Query().Get("to"), loc, true)
-	team, teamScoped := requestTeamScopeForCaller(s, r)
+	teams, teamScoped := requestTeamScopeForCaller(s, r)
 	requests, err := s.db.RecentRequests(r.Context(), store.RequestFilter{
 		Limit:      limit,
 		IDs:        ids,
 		IP:         strings.TrimSpace(r.URL.Query().Get("ip")),
 		Model:      strings.TrimSpace(r.URL.Query().Get("model")),
 		Language:   strings.TrimSpace(r.URL.Query().Get("language")),
-		Team:       team,
+		Teams:      teams,
 		TeamScoped: teamScoped,
 		From:       from,
 		To:         to,

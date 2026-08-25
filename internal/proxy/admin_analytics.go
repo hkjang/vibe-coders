@@ -89,14 +89,14 @@ func (s *Server) scatterFilterFromRequest(r *http.Request, defaultLimit int) sto
 	// Multi-model filter: ?models=gpt-4.1,gpt-4.1-mini takes precedence over ?model=
 	models := parseModelsParam(r.URL.Query().Get("models"))
 	singleModel := strings.TrimSpace(r.URL.Query().Get("model"))
-	team, teamScoped := requestTeamScopeForCaller(s, r)
+	teams, teamScoped := requestTeamScopeForCaller(s, r)
 
 	f := store.ScatterFilter{
 		Since:      since,
 		Until:      until,
 		Endpoint:   strings.TrimSpace(r.URL.Query().Get("endpoint")),
 		APIKeyID:   strings.TrimSpace(r.URL.Query().Get("api_key_id")),
-		Team:       team,
+		Teams:      teams,
 		TeamScoped: teamScoped,
 		Limit:      limit,
 	}

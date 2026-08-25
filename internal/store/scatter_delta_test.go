@@ -315,6 +315,68 @@ func TestScatterDeltaReusesSnapshotFilters(t *testing.T) {
 	}
 }
 
+func TestScopedUnassignedIdentityDoesNotIncludeSyntheticTraffic(t *testing.T) {
+	db := openStoreForTest(t)
+	t.Cleanup(func() { _ = db.Close() })
+	ctx := context.Background()
+	now := time.Now().UTC()
+	if err := db.UpsertAPIKey(ctx, APIKeyRecord{
+		ID: "literal-unassigned-key", Name: "literal", KeyHash: "literal-unassigned-hash",
+		Team: "unassigned", Status: "active",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, request := range []RequestLog{
+		{ID: "literal-team-request", TraceID: "literal-team-request", APIKeyID: "literal-unassigned-key"},
+		{ID: "synthetic-unassigned-request", TraceID: "synthetic-unassigned-request", APIKeyID: "missing-key"},
+	} {
+		request.Model = "wanted"
+		request.Endpoint = "/v1/chat/completions"
+		request.Provider = "test"
+		request.StatusCode = 200
+		request.CreatedAt = now
+		if err := db.InsertLogRecord(ctx, LogRecord{Request: request}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	scoped := ScatterFilter{
+		Since: now.Add(-time.Hour), Teams: []string{"unassigned"}, TeamScoped: true, Limit: 10,
+	}
+	points, _, err := db.ScatterPoints(ctx, scoped)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(points) != 1 || points[0].RequestID != "literal-team-request" {
+		t.Fatalf("scoped literal unassigned team leaked synthetic traffic: %+v", points)
+	}
+	cursor, err := db.LatestScatterCursor(ctx, scoped)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cursor.RequestID != "literal-team-request" {
+		t.Fatalf("scoped cursor crossed into synthetic traffic: %+v", cursor)
+	}
+	recent, err := db.RecentRequests(ctx, RequestFilter{
+		Teams: []string{"unassigned"}, TeamScoped: true, Limit: 10,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(recent) != 1 || recent[0].ID != "literal-team-request" {
+		t.Fatalf("scoped request list leaked synthetic traffic: %+v", recent)
+	}
+
+	// The operator-facing unscoped filter retains its historical synthetic meaning.
+	unscoped, err := db.RecentRequests(ctx, RequestFilter{Team: "unassigned", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(unscoped) != 2 {
+		t.Fatalf("unscoped unassigned filter returned %d rows, want both literal and synthetic", len(unscoped))
+	}
+}
+
 func TestScatterDeltaAdvancesPastNonMatchingRows(t *testing.T) {
 	db := openStoreForTest(t)
 	t.Cleanup(func() { _ = db.Close() })
@@ -460,8 +522,8 @@ func TestRequestLogIngestionUsesFixedWidthMonotonicClockAndIndexes(t *testing.T)
 	teamPlan, err := db.db.QueryContext(context.Background(), `EXPLAIN QUERY PLAN
 		SELECT ingested_at, id FROM request_logs r
 		WHERE r.ingested_at <> '' AND r.created_at >= ?
-		  AND r.api_key_id IN (SELECT k.id FROM api_keys k WHERE k.team = ?)
-		ORDER BY r.ingested_at DESC, r.id DESC LIMIT 1`, formatTime(time.Now().Add(-time.Hour)), "team-plan")
+		  AND r.api_key_id IN (SELECT k.id FROM api_keys k WHERE k.team IN (?, ?))
+		ORDER BY r.ingested_at DESC, r.id DESC LIMIT 1`, formatTime(time.Now().Add(-time.Hour)), "team-plan-id", "team-plan-name")
 	if err != nil {
 		t.Fatal(err)
 	}

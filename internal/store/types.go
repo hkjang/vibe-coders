@@ -791,7 +791,8 @@ type RequestFilter struct {
 	Language       string
 	APIKeyID       string
 	Team           string
-	TeamScoped     bool // true means team isolation is required; an empty Team must return no rows
+	Teams          []string // accepted api_keys.team identities (canonical id and display name)
+	TeamScoped     bool     // true means team isolation is required; no team identities must return no rows
 	TraceID        string
 	SessionID      string
 	PromptName     string
@@ -1266,7 +1267,8 @@ type ScatterFilter struct {
 	Models     []string // multi-model filter; empty = all models
 	APIKeyID   string
 	Team       string
-	TeamScoped bool // true means team isolation is required; an empty Team must return no rows
+	Teams      []string // accepted api_keys.team identities (canonical id and display name)
+	TeamScoped bool     // true means team isolation is required; no team identities must return no rows
 	Limit      int
 }
 

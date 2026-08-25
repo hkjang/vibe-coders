@@ -236,7 +236,7 @@ func (s *Server) handleXViewModels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	since, until := xviewTimeRange(r, time.Hour)
-	team, teamScoped := requestTeamScopeForCaller(s, r)
+	teams, teamScoped := requestTeamScopeForCaller(s, r)
 	top := 5
 	if v := strings.TrimSpace(r.URL.Query().Get("top")); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
@@ -247,7 +247,7 @@ func (s *Server) handleXViewModels(w http.ResponseWriter, r *http.Request) {
 		Since:      since,
 		Until:      until,
 		Models:     parseModelsParam(r.URL.Query().Get("models")),
-		Team:       team,
+		Teams:      teams,
 		TeamScoped: teamScoped,
 		Limit:      20000,
 	}
@@ -275,7 +275,7 @@ func (s *Server) handleXViewModelSeries(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	since, until := xviewTimeRange(r, 24*time.Hour)
-	team, teamScoped := requestTeamScopeForCaller(s, r)
+	teams, teamScoped := requestTeamScopeForCaller(s, r)
 	// Same timezone the range was parsed in, so the buckets line up with the filter.
 	loc := searchLocation(r.URL.Query().Get("tz"))
 	bucket := strings.TrimSpace(strings.ToLower(r.URL.Query().Get("bucket")))
@@ -286,7 +286,7 @@ func (s *Server) handleXViewModelSeries(w http.ResponseWriter, r *http.Request) 
 		Since:      since,
 		Until:      until,
 		Models:     parseModelsParam(r.URL.Query().Get("models")),
-		Team:       team,
+		Teams:      teams,
 		TeamScoped: teamScoped,
 		Limit:      20000,
 	}
@@ -395,12 +395,12 @@ func (s *Server) handleXViewModelOutliers(w http.ResponseWriter, r *http.Request
 		return
 	}
 	since, until := xviewTimeRange(r, time.Hour)
-	team, teamScoped := requestTeamScopeForCaller(s, r)
+	teams, teamScoped := requestTeamScopeForCaller(s, r)
 	f := store.ScatterFilter{
 		Since:      since,
 		Until:      until,
 		Models:     parseModelsParam(r.URL.Query().Get("models")),
-		Team:       team,
+		Teams:      teams,
 		TeamScoped: teamScoped,
 		Limit:      20000,
 	}
