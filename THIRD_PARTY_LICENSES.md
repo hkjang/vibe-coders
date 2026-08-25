@@ -3,7 +3,7 @@
 이 문서는 `go list -deps ./cmd/gateway`가 보고한 **게이트웨이 실행 바이너리의
 빌드 의존성**을 `go.mod`/`go.sum`의 고정 버전과 대조해 작성했습니다. 전체
 라이선스 원문과 저작권 표시는 각 모듈 배포본의 `LICENSE*` 파일을 따릅니다.
-검토 기준일은 2026-07-22입니다.
+검토 기준일은 2026-08-25입니다.
 
 | 구성요소 | 버전 | 라이선스 | 용도 |
 | --- | --- | --- | --- |
@@ -13,14 +13,14 @@
 | `github.com/google/uuid` | v1.6.0 | BSD-3-Clause | UUID 생성·처리 |
 | `github.com/jackc/pgpassfile` | v1.0.0 | MIT | PostgreSQL passfile 처리 |
 | `github.com/jackc/pgservicefile` | v0.0.0-20240606120523-5a60cdf6a761 | MIT | PostgreSQL service file 처리 |
-| `github.com/jackc/pgx/v5` | v5.7.6 | MIT | PostgreSQL 드라이버 |
+| `github.com/jackc/pgx/v5` | v5.9.2 | MIT | PostgreSQL 드라이버 |
 | `github.com/jackc/puddle/v2` | v2.2.2 | MIT | 연결 풀 |
 | `github.com/remyoudompheng/bigfft` | v0.0.0-20230129092748-24d4a6f8daec | BSD-3-Clause | SQLite 수치 연산 지원 |
 | `github.com/sijms/go-ora/v2` | v2.9.0 | MIT | Oracle 드라이버 |
 | `golang.org/x/crypto` | v0.37.0 | BSD-3-Clause | 암호 기능 |
-| `golang.org/x/sync` | v0.13.0 | BSD-3-Clause | 동시성 유틸리티 |
+| `golang.org/x/sync` | v0.21.0 | BSD-3-Clause | 동시성 유틸리티 |
 | `golang.org/x/sys` | v0.42.0 | BSD-3-Clause | 운영체제 인터페이스 |
-| `golang.org/x/text` | v0.24.0 | BSD-3-Clause | 텍스트·문자 인코딩 |
+| `golang.org/x/text` | v0.39.0 | BSD-3-Clause | 텍스트·문자 인코딩 |
 | `modernc.org/libc` | v1.55.3 | BSD-3-Clause | 순수 Go libc 호환 계층 |
 | `modernc.org/mathutil` | v1.6.0 | BSD-3-Clause | 수학 유틸리티 |
 | `modernc.org/memory` | v1.8.0 | BSD-3-Clause | 메모리 관리 지원 |
