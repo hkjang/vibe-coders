@@ -77,7 +77,6 @@ var indexCoverageDecisions = map[string]string{
 	"request_logs.first_chunk_ms": "an analytics threshold over an already time-bounded window",
 
 	// Tables whose access is already indexed by a different column in the same query.
-	"secret_events.request_id":    "written per secret event, not per request; read by created_at for the audit view",
 	"text2sql_cache.schema_name":  "bounded by the number of registered schemas",
 	"tool_invocations.api_key_id": "analytics; the request_id index carries the request path and the purge",
 }

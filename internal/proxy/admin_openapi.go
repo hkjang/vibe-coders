@@ -406,6 +406,7 @@ var apiEndpoints = []apiEndpoint{
 	{"/admin/text2sql/registry/import", []string{"post"}, "text2sql", "Import a Text2SQL schema registry", false},
 	// ---- admin: XView model analytics ----
 	{"/admin/xview/models", []string{"get"}, "observability", "Model comparison (XView)", false},
+	{"/admin/xview/delta", []string{"get"}, "observability", "Incremental committed request points (XView; reconcile=true covers compatibility rows, refresh=true reprojects mutable metadata)", false},
 	{"/admin/xview/model-series", []string{"get"}, "observability", "Model time series (XView)", false},
 	{"/admin/xview/model-outliers", []string{"get"}, "observability", "Model outliers (XView)", false},
 	{"/admin/data-products", []string{"get", "post", "delete"}, "data-products", "Curate/publish the data product catalog", false},

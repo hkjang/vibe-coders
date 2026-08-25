@@ -1775,6 +1775,9 @@ const adminHTML = `<!doctype html>
     async function route() {
       const { parts, params } = parseHash();
       const [tab, ...rest] = parts;
+      // XView owns a short-lived delta poller while its tab is active. Tear it down before
+      // another screen renders so an old response can never paint into the new screen.
+      if (tab !== 'xview') stopXViewLive(true);
       // Nested sub-views keep their parent's top-level nav tab highlighted.
       const navParent = {
         xview: 'dashboard', waterfall: 'dashboard', llm: 'dashboard',
@@ -2003,7 +2006,12 @@ const adminHTML = `<!doctype html>
       sessionStorage.setItem('adminRefresh', String(seconds));
       if (refreshTimer) clearInterval(refreshTimer);
       if (seconds > 0) {
-        refreshTimer = setInterval(() => { route(); }, seconds * 1000);
+        refreshTimer = setInterval(() => {
+          // The XView live poller updates only the chart data and preserves the operator's
+          // filters/selection. Do not let the legacy whole-page refresher fight it.
+          if (xviewLiveOwnsRefresh()) return;
+          route();
+        }, seconds * 1000);
       }
     }
     const refreshSelect = document.getElementById('refresh-interval');
@@ -2095,7 +2103,410 @@ const adminHTML = `<!doctype html>
       from:     '',
       to:       '',
       tz:       sessionStorage.getItem('xviewTz')        || 'Asia/Seoul',
+      live:     sessionStorage.getItem('xviewLive') !== '0',
+      modelSortKey: 'count',
+      modelSortDir: -1,
     };
+    const XVIEW_LIVE_INTERVAL_MS = 1500;
+    const XVIEW_PRUNE_INTERVAL_MS = 15000;
+    const XVIEW_RECONCILE_INTERVAL_MS = 15000;
+    const XVIEW_REFRESH_INTERVAL_MS = 300000;
+    const XVIEW_POINT_LIMIT = 6000;
+    const xviewLiveState = {
+      timer: null,
+      controller: null,
+      inFlight: false,
+      generation: 0,
+      renderFrame: null,
+      renderPending: false,
+      dragging: false,
+      pointsByID: new Map(),
+      cursor: null,
+      filterParams: new URLSearchParams(),
+      truncated: false,
+      modelOrder: [],
+      lastPruneAt: 0,
+      lastReconcileAt: 0,
+      lastRefreshAt: 0,
+      catchingUp: false,
+      snapshotReady: false,
+      serverClockOffsetMs: 0,
+      serverClockReady: false,
+      dragCleanup: null,
+    };
+
+    function xviewLiveOwnsRefresh() {
+      const current = parseHash().parts[0];
+      return current === 'xview' && xviewState.live && !xviewState.to;
+    }
+
+    function stopXViewLive(reset) {
+      xviewLiveState.generation++;
+      if (xviewLiveState.timer) clearTimeout(xviewLiveState.timer);
+      if (xviewLiveState.controller) xviewLiveState.controller.abort();
+      if (xviewLiveState.renderFrame != null) cancelAnimationFrame(xviewLiveState.renderFrame);
+      if (xviewLiveState.dragCleanup) xviewLiveState.dragCleanup();
+      xviewLiveState.timer = null;
+      xviewLiveState.controller = null;
+      xviewLiveState.inFlight = false;
+      xviewLiveState.renderFrame = null;
+      xviewLiveState.renderPending = false;
+      xviewLiveState.dragging = false;
+      xviewLiveState.dragCleanup = null;
+      if (reset) {
+        xviewLiveState.pointsByID = new Map();
+        xviewLiveState.cursor = null;
+        xviewLiveState.filterParams = new URLSearchParams();
+        xviewLiveState.truncated = false;
+        xviewLiveState.modelOrder = [];
+        xviewLiveState.lastPruneAt = 0;
+        xviewLiveState.lastReconcileAt = 0;
+        xviewLiveState.lastRefreshAt = 0;
+        xviewLiveState.catchingUp = false;
+        xviewLiveState.snapshotReady = false;
+        xviewLiveState.serverClockOffsetMs = 0;
+        xviewLiveState.serverClockReady = false;
+      }
+    }
+
+    function setXViewLiveStatus(text, kind) {
+      const el = document.getElementById('xv-live-status');
+      if (!el) return;
+      el.className = 'status' + (kind ? ' ' + kind : '');
+      el.textContent = text;
+    }
+
+    function xviewCursor(value) {
+      if (!value || !value.ingested_at || !value.request_id) return null;
+      return { ingested_at: String(value.ingested_at), request_id: String(value.request_id) };
+    }
+
+    function xviewCursorEqual(a, b) {
+      return !!a && !!b && a.ingested_at === b.ingested_at && a.request_id === b.request_id;
+    }
+
+    function xviewWindowMillis(value) {
+      return { '5m': 5 * 60000, '15m': 15 * 60000, '1h': 3600000, '6h': 6 * 3600000, '24h': 24 * 3600000 }[value] || 3600000;
+    }
+
+    function syncXViewServerClock(value) {
+      const serverTime = Date.parse(value || '');
+      if (isNaN(serverTime)) return;
+      xviewLiveState.serverClockOffsetMs = serverTime - Date.now();
+      xviewLiveState.serverClockReady = true;
+    }
+
+    function xviewNowMillis() {
+      return Date.now() + (xviewLiveState.serverClockReady ? xviewLiveState.serverClockOffsetMs : 0);
+    }
+
+    function xviewPointTime(point) {
+      const value = Date.parse(point && point.created_at);
+      return isNaN(value) ? 0 : value;
+    }
+
+    function mergeXViewPoints(incoming) {
+      let added = 0;
+      let mutationCount = 0;
+      (incoming || []).forEach(point => {
+        const id = point && point.request_id;
+        if (!id) return;
+        const previous = xviewLiveState.pointsByID.get(id);
+        if (!previous) {
+          added++;
+          mutationCount++;
+          xviewLiveState.pointsByID.set(id, point);
+          return;
+        }
+        // Reconciliation intentionally repeats recent rows. Compare the flat point payload
+        // before replacing it so an identical retry updates only connection status, not a
+        // 6000-dot SVG. A repeated row with newly committed governance/token fields still
+        // counts as a mutation and is repainted.
+        const changed = Object.keys(point).some(key => previous[key] !== point[key]);
+        if (!changed) return;
+        mutationCount++;
+        // A later delta may contain governance/token fields that were not visible in the
+        // first snapshot. Merge rather than discard the newer representation.
+        xviewLiveState.pointsByID.set(id, { ...previous, ...point });
+      });
+      return { added, mutationCount };
+    }
+
+    function evictExpiredXViewPoints() {
+      if (xviewState.from || xviewState.to) return 0;
+      const cutoff = xviewNowMillis() - xviewWindowMillis(xviewState.window);
+      let removed = 0;
+      xviewLiveState.pointsByID.forEach((point, id) => {
+        if (xviewPointTime(point) < cutoff) {
+          xviewLiveState.pointsByID.delete(id);
+          removed++;
+        }
+      });
+      return removed;
+    }
+
+    function currentXViewPoints() {
+      evictExpiredXViewPoints();
+      xviewLiveState.lastPruneAt = Date.now();
+      let points = Array.from(xviewLiveState.pointsByID.values());
+      points.sort((a, b) => {
+        const byTime = xviewPointTime(b) - xviewPointTime(a);
+        return byTime || String(b.request_id || '').localeCompare(String(a.request_id || ''));
+      });
+      if (points.length > XVIEW_POINT_LIMIT) {
+        points = points.slice(0, XVIEW_POINT_LIMIT);
+        xviewLiveState.truncated = true;
+      }
+      xviewLiveState.pointsByID = new Map(points.map(point => [point.request_id, point]));
+      return points;
+    }
+
+    function xviewPercentile(values, percentile) {
+      if (!values.length) return 0;
+      const sorted = [...values].sort((a, b) => a - b);
+      const index = Math.max(0, Math.min(sorted.length - 1, Math.ceil(percentile / 100 * sorted.length) - 1));
+      return sorted[index];
+    }
+
+    function computeXViewModelGroups(points) {
+      const buckets = new Map();
+      points.forEach(point => {
+        const model = point.model || '(unknown)';
+        if (!buckets.has(model)) {
+          buckets.set(model, { model, count: 0, errors: 0, failovers: 0, governance: 0, latencies: [], firstChunks: [], risks: [], health: [], total_tokens: 0, total_cost_krw: 0 });
+        }
+        const bucket = buckets.get(model);
+        bucket.count++;
+        bucket.latencies.push(Number(point.latency_ms || 0));
+        bucket.firstChunks.push(Number(point.first_chunk_ms || 0));
+        bucket.risks.push(Number(point.risk_score || 0));
+        bucket.health.push(Number(point.health_score || 0));
+        bucket.total_tokens += Number(point.total_tokens || 0);
+        bucket.total_cost_krw += Number(point.cost_krw || 0);
+        if (Number(point.status_code || 0) >= 400) bucket.errors++;
+        if (point.failover) bucket.failovers++;
+        if (Number(point.policy_decision_count || 0) > 0) bucket.governance++;
+      });
+      return Array.from(buckets.values()).map(bucket => ({
+        model: bucket.model,
+        count: bucket.count,
+        error_rate: bucket.count ? bucket.errors / bucket.count : 0,
+        p50: xviewPercentile(bucket.latencies, 50),
+        p95: xviewPercentile(bucket.latencies, 95),
+        p99: xviewPercentile(bucket.latencies, 99),
+        avg_first_chunk_ms: bucket.count ? bucket.firstChunks.reduce((sum, value) => sum + value, 0) / bucket.count : 0,
+        total_tokens: bucket.total_tokens,
+        total_cost_krw: bucket.total_cost_krw,
+        avg_cost_krw: bucket.count ? bucket.total_cost_krw / bucket.count : 0,
+        failover_count: bucket.failovers,
+        governance_count: bucket.governance,
+        risk_p95: xviewPercentile(bucket.risks, 95),
+        health_avg: bucket.count ? bucket.health.reduce((sum, value) => sum + value, 0) / bucket.count : 0,
+      })).sort((a, b) => b.count - a.count || a.model.localeCompare(b.model));
+    }
+
+    function xviewSnapshotStats(points) {
+      const tokenVals = points.map(point => Number(point.total_tokens || 0)).filter(value => value > 0).sort((a, b) => a - b);
+      xviewState.complexityTokens = Math.max(4000, tokenVals.length ? tokenVals[Math.floor(tokenVals.length * 0.9)] : 4000);
+      const categoryCounts = { error: 0, governance: 0, cache: 0, failover: 0, complex: 0, normal: 0 };
+      points.forEach(point => { categoryCounts[xviewCategory(point)]++; });
+      const yField = xviewYField(xviewState.metric);
+      const values = points.map(point => Number(point[yField] || 0));
+      return {
+        categoryCounts,
+        p95Value: xviewPercentile(values, 95),
+        attentionCount: categoryCounts.error + categoryCounts.governance + categoryCounts.failover,
+      };
+    }
+
+    function xviewSummaryHTML(points, stats) {
+      const counts = stats.categoryCounts;
+      return '<div class="kpis">' +
+        kpi('분석 요청', fmt(points.length)) +
+        kpi('확인 필요', '<span class="status ' + (stats.attentionCount ? 'warn' : '') + '">' + fmt(stats.attentionCount) + '</span>') +
+        kpi('오류', '<span style="color:var(--bad)">' + fmt(counts.error) + '</span>') +
+        kpi('정책 신호', fmt(counts.governance)) +
+        kpi('폴백', fmt(counts.failover)) +
+        kpi(xviewYLabel(xviewState.metric) + ' P95', xviewFmtY(xviewState.metric, stats.p95Value)) +
+        '</div>' +
+        card('신호 구성', '<div class="card-body"><div class="viz-grid" style="margin-top:0"><div class="viz-panel"><div class="viz-title">즉시 확인 비중 <small>오류·정책·폴백</small></div>' +
+          donutVisual(points.length ? stats.attentionCount / points.length * 100 : 0, points.length ? Math.round(stats.attentionCount / points.length * 100) + '%' : '0%', '확인 필요', [{ label: '확인 필요', value: fmt(stats.attentionCount) }, { label: '정상·기타', value: fmt(Math.max(0, points.length - stats.attentionCount)) }]) +
+          '</div><div class="viz-panel"><div class="viz-title">요청 신호 분포 <small>현재 조회 범위</small></div>' +
+          visualBars(Object.keys(counts).map(key => ({ label: xviewColors[key].label, value: counts[key] })).sort((a, b) => b.value - a.value), null, true) +
+          '</div></div></div>');
+    }
+
+    function renderXViewLiveSnapshot() {
+      if (parseHash().parts[0] !== 'xview' || !document.getElementById('xv-chart')) return;
+      const points = currentXViewPoints();
+      const groups = computeXViewModelGroups(points);
+      groups.forEach(group => {
+        if (!xviewLiveState.modelOrder.includes(group.model)) xviewLiveState.modelOrder.push(group.model);
+      });
+      const modelIndex = {};
+      xviewLiveState.modelOrder.forEach((model, index) => { modelIndex[model] = index; });
+      const stats = xviewSnapshotStats(points);
+      const count = document.getElementById('xv-count');
+      if (count) count.textContent = fmt(points.length) + '건' + (xviewLiveState.truncated ? ' (최근 6000건으로 제한됨)' : '');
+      const summary = document.getElementById('xv-live-summary');
+      if (summary) summary.innerHTML = xviewSummaryHTML(points, stats);
+      drawScatter(points, groups, modelIndex);
+      renderModelGroupTable(groups, modelIndex);
+      wrapViewTables();
+    }
+
+    function queueXViewLiveRender() {
+      xviewLiveState.renderPending = true;
+      if (xviewLiveState.dragging || xviewLiveState.renderFrame != null) return;
+      const generation = xviewLiveState.generation;
+      xviewLiveState.renderFrame = requestAnimationFrame(() => {
+        xviewLiveState.renderFrame = null;
+        if (generation !== xviewLiveState.generation || !xviewLiveState.renderPending) return;
+        xviewLiveState.renderPending = false;
+        renderXViewLiveSnapshot();
+      });
+    }
+
+    function scheduleXViewLive(delay) {
+      if (!xviewState.live || xviewState.to || document.hidden || parseHash().parts[0] !== 'xview') return;
+      if (xviewLiveState.timer) clearTimeout(xviewLiveState.timer);
+      const generation = xviewLiveState.generation;
+      xviewLiveState.timer = setTimeout(() => {
+        xviewLiveState.timer = null;
+        pollXViewDelta(generation);
+      }, Math.max(0, delay));
+    }
+
+    async function pollXViewDelta(generation) {
+      if (generation !== xviewLiveState.generation || xviewLiveState.inFlight || !xviewState.live || xviewState.to || document.hidden || parseHash().parts[0] !== 'xview') return;
+      xviewLiveState.inFlight = true;
+      const controller = new AbortController();
+      xviewLiveState.controller = controller;
+      let nextDelay = XVIEW_LIVE_INTERVAL_MS;
+      try {
+        const params = new URLSearchParams(xviewLiveState.filterParams.toString());
+        const previousCursor = xviewLiveState.cursor;
+        if (previousCursor) {
+          params.set('after_ingested_at', previousCursor.ingested_at);
+          params.set('after_request_id', previousCursor.request_id);
+        }
+        // Forward polling stays cheap. A short compatibility reconciliation and a much less
+        // frequent full-window reprojection keep rolling-upgrade rows and mutable approval
+        // metadata current. Never mix either operation into a has_more drain.
+        const shouldRefresh = !xviewLiveState.catchingUp && Date.now() - xviewLiveState.lastRefreshAt >= XVIEW_REFRESH_INTERVAL_MS;
+        const shouldReconcile = !shouldRefresh && !xviewLiveState.catchingUp && Date.now() - xviewLiveState.lastReconcileAt >= XVIEW_RECONCILE_INTERVAL_MS;
+        if (shouldRefresh) {
+          params.set('refresh', 'true');
+        } else if (shouldReconcile) {
+          params.set('reconcile', 'true');
+        }
+        const response = await api('/admin/xview/delta?' + params.toString(), { signal: controller.signal });
+        if (generation !== xviewLiveState.generation) return;
+        syncXViewServerClock(response.server_time);
+        if (shouldRefresh) {
+          xviewLiveState.lastRefreshAt = Date.now();
+          xviewLiveState.lastReconcileAt = xviewLiveState.lastRefreshAt;
+        } else if (shouldReconcile) {
+          xviewLiveState.lastReconcileAt = Date.now();
+        }
+        const incoming = response.points || [];
+        const merged = mergeXViewPoints(incoming);
+        const added = merged.added;
+        let expired = 0;
+        if (merged.mutationCount || Date.now() - xviewLiveState.lastPruneAt >= XVIEW_PRUNE_INTERVAL_MS) {
+          expired = evictExpiredXViewPoints();
+          xviewLiveState.lastPruneAt = Date.now();
+        }
+        const nextCursor = xviewCursor(response.cursor);
+        if (nextCursor) xviewLiveState.cursor = nextCursor;
+        const cursorMoved = !!xviewLiveState.cursor && (!previousCursor || !xviewCursorEqual(previousCursor, xviewLiveState.cursor));
+        const continuesCatchUp = !!response.has_more && cursorMoved;
+        xviewLiveState.catchingUp = continuesCatchUp;
+        if (xviewLiveState.pointsByID.size > XVIEW_POINT_LIMIT) {
+          xviewLiveState.truncated = true;
+          // Catch-up pages arrive oldest-first. Bound the in-memory buffer without paying
+          // the much larger SVG/listener rebuild cost on every 25ms page.
+          if (xviewLiveState.pointsByID.size > XVIEW_POINT_LIMIT + 1000) currentXViewPoints();
+        }
+        // Status still advances on an empty/duplicate reconciliation delta, but avoid
+        // rebuilding a 6000-dot SVG unless a point changed or the window evicted one. During
+        // catch-up, accumulate pages and paint once the forward cursor is drained.
+        if (merged.mutationCount || expired) {
+          if (continuesCatchUp) xviewLiveState.renderPending = true;
+          else queueXViewLiveRender();
+        } else if (!continuesCatchUp && xviewLiveState.renderPending) {
+          queueXViewLiveRender();
+        }
+        const now = new Date().toLocaleTimeString('ko-KR');
+        if (continuesCatchUp) {
+          setXViewLiveStatus('따라잡는 중 · +' + fmt(added) + '건', 'warn');
+          nextDelay = 25;
+        } else {
+          setXViewLiveStatus('실시간 · ' + now + (added ? ' · +' + fmt(added) + '건' : ''), '');
+        }
+      } catch (err) {
+        if (err && err.name === 'AbortError') return;
+        if (Date.now() - xviewLiveState.lastPruneAt >= XVIEW_PRUNE_INTERVAL_MS) {
+          const expired = evictExpiredXViewPoints();
+          xviewLiveState.lastPruneAt = Date.now();
+          if (expired || xviewLiveState.renderPending) queueXViewLiveRender();
+        } else if (xviewLiveState.renderPending) {
+          queueXViewLiveRender();
+        }
+        setXViewLiveStatus('재연결 대기 · ' + ((err && err.message) || '조회 실패'), 'error');
+        nextDelay = 3000;
+      } finally {
+        if (generation !== xviewLiveState.generation) return;
+        xviewLiveState.inFlight = false;
+        xviewLiveState.controller = null;
+        scheduleXViewLive(nextDelay);
+      }
+    }
+
+    function startXViewLive() {
+      if (parseHash().parts[0] !== 'xview') return;
+      if (xviewState.to) {
+        setXViewLiveStatus('고정 종료 시각 · 실시간 사용 불가', 'warn');
+        return;
+      }
+      if (!xviewState.live) {
+        setXViewLiveStatus('실시간 꺼짐', '');
+        return;
+      }
+      if (document.hidden) {
+        setXViewLiveStatus('탭 비활성 · 일시정지', 'warn');
+        return;
+      }
+      setXViewLiveStatus('실시간 연결 중…', '');
+      scheduleXViewLive(0);
+    }
+
+    document.addEventListener('visibilitychange', () => {
+      if (parseHash().parts[0] !== 'xview') return;
+      if (document.hidden) {
+        stopXViewLive(false);
+        setXViewLiveStatus('탭 비활성 · 일시정지', 'warn');
+        return;
+      }
+      // Hidden state aborts snapshots even when live mode is off or the range has a fixed
+      // end. An incomplete snapshot must always restart; otherwise the old controls remain
+      // on screen permanently with no request capable of completing them.
+      if (!xviewLiveState.snapshotReady) {
+        route();
+        return;
+      }
+      if (xviewState.live && !xviewState.to) {
+        // The tab may have been hidden while the initial snapshot was still loading. That
+        // render was deliberately invalidated; rebuild it before attempting delta updates.
+        if (!document.getElementById('xv-chart')) {
+          route();
+          return;
+        }
+        queueXViewLiveRender();
+        setXViewLiveStatus('실시간 다시 연결 중…', '');
+        scheduleXViewLive(0);
+      }
+    });
     // per-model palette — up to 10 distinct colors
     const MODEL_PALETTE = ['#3b82f6','#f97316','#22c55e','#a855f7','#eab308','#ec4899','#06b6d4','#ef4444','#84cc16','#8b5cf6'];
     function modelColor(model, modelIndex) {
@@ -2152,7 +2563,21 @@ const adminHTML = `<!doctype html>
     }
 
     async function renderXView(initial) {
-      const savedResponse = await api('/admin/saved-filters?view=xview').catch(() => ({ filters: [] }));
+      stopXViewLive(true);
+      const renderGeneration = xviewLiveState.generation;
+      const snapshotController = new AbortController();
+      xviewLiveState.controller = snapshotController;
+      const snapshotIsStale = () => renderGeneration !== xviewLiveState.generation || parseHash().parts[0] !== 'xview';
+      const savedResponse = await api('/admin/saved-filters?view=xview', { signal: snapshotController.signal }).catch(err => {
+        if (snapshotIsStale() || (err && err.name === 'AbortError')) return null;
+        return { filters: [] };
+      });
+      if (!savedResponse || snapshotIsStale()) {
+        if (renderGeneration === xviewLiveState.generation && xviewLiveState.controller === snapshotController) {
+          xviewLiveState.controller = null;
+        }
+        return;
+      }
       const savedViews = savedResponse.filters || [];
       const requestedSavedID = initial ? (initial.get('saved') || '') : '';
       const activeSavedView = savedViews.find(view => view.id === requestedSavedID) || null;
@@ -2190,26 +2615,36 @@ const adminHTML = `<!doctype html>
       if (modelsParam)    params.set('models', modelsParam);
       else if (singleModel) params.set('model', singleModel);
       if (endpoint) params.set('endpoint', endpoint);
+      // Keep exactly the filters that selected the initial snapshot. Delta requests reuse
+      // this immutable copy, so a live update cannot silently drift from the visible URL.
+      xviewLiveState.filterParams = new URLSearchParams(params.toString());
       params.set('include_summary', 'true');
       params.set('group_by', 'model');
       params.set('limit', '6000');
 
-      const data = await api('/admin/scatter?' + params.toString());
+      let data;
+      try {
+        data = await api('/admin/scatter?' + params.toString(), { signal: snapshotController.signal });
+      } catch (err) {
+        // Navigation and visibility changes abort the old snapshot. Treat every stale failure
+        // as cancellation so the route-level error boundary cannot overwrite the new screen.
+        if (snapshotIsStale() || (err && err.name === 'AbortError')) return;
+        throw err;
+      } finally {
+        if (renderGeneration === xviewLiveState.generation && xviewLiveState.controller === snapshotController) {
+          xviewLiveState.controller = null;
+        }
+      }
+      if (snapshotIsStale()) return;
       const points = data.points || [];
       const groups = data.groups || [];
-      // complexity threshold = 90th percentile of tokens (so "high" is relative), min 4000
-      const tokenVals = points.map(p => p.total_tokens || 0).filter(v => v > 0).sort((a, b) => a - b);
-      xviewState.complexityTokens = Math.max(4000, tokenVals.length ? tokenVals[Math.floor(tokenVals.length * 0.9)] : 4000);
-
-      // build model → index map for stable coloring
-      const modelIndex = {};
-      groups.forEach((g, i) => { modelIndex[g.model] = i; });
-      const categoryCounts = { error:0, governance:0, cache:0, failover:0, complex:0, normal:0 };
-      points.forEach(p => { categoryCounts[xviewCategory(p)]++; });
-      const currentY = xviewYField(xviewState.metric);
-      const metricValues = points.map(p=>Number(p[currentY]||0)).sort((a,b)=>a-b);
-      const p95Value = metricValues.length ? metricValues[Math.floor((metricValues.length-1)*.95)] : 0;
-      const attentionCount = categoryCounts.error + categoryCounts.governance + categoryCounts.failover;
+      syncXViewServerClock(data.server_time);
+      mergeXViewPoints(points);
+      xviewLiveState.cursor = xviewCursor(data.cursor);
+      xviewLiveState.truncated = !!data.truncated;
+      xviewLiveState.modelOrder = groups.map(group => group.model);
+      xviewLiveState.lastReconcileAt = Date.now();
+      xviewLiveState.lastRefreshAt = xviewLiveState.lastReconcileAt;
 
       const view = document.getElementById('view');
       const xviewHero = '<div class="home-hero"><h2>✦ XView</h2><div class="home-sub">수천 개 요청 속에서 느림·오류·비용·정책 신호를 찾고, 한 점을 클릭해 “왜 이렇게 처리됐는가”까지 이어서 설명합니다.</div><div class="home-actions"><button type="button" class="home-action primary" onclick="openXViewLauncher()"><strong>요청 ID로 설명 찾기</strong><small>라우팅·안전·비용 근거</small></button><a class="home-action" href="#/waterfall"><strong>Waterfall</strong><small>세션 시간 흐름 분석</small></a><a class="home-action" href="#/requests"><strong>호출 이력</strong><small>원문과 응답 상세</small></a><a class="home-action" href="#/llm"><strong>LLM 관측</strong><small>평가·피드백·패턴</small></a></div></div>';
@@ -2265,18 +2700,18 @@ const adminHTML = `<!doctype html>
           '<input id="xv-endpoint" placeholder="endpoint 필터" value="' + escapeHTML(endpoint) + '">' +
           '<button id="xv-apply" type="submit">적용</button>' +
           '<button id="xv-reset-range" type="button" class="ghost" title="기간 지정을 해제하고 상대 구간(window)으로 복귀">기간 해제</button>' +
-          '<span class="muted">' + fmt(points.length) + '건' + (data.truncated ? ' (최근 6000건으로 제한됨)' : '') + '</span>' +
+          '<label class="status" for="xv-live" title="현재 필터로 새 요청을 1.5초마다 반영"><input id="xv-live" type="checkbox"' + (xviewState.live ? ' checked' : '') + (xviewState.to ? ' disabled' : '') + '> 실시간</label>' +
+          '<span id="xv-live-status" class="status' + (xviewState.to ? ' warn' : '') + '">' + (xviewState.to ? '고정 종료 시각 · 실시간 사용 불가' : (xviewState.live ? '실시간 준비 중…' : '실시간 꺼짐')) + '</span>' +
+          '<span id="xv-count" class="muted">' + fmt(points.length) + '건' + (data.truncated ? ' (최근 6000건으로 제한됨)' : '') + '</span>' +
         '</div>' +
         '<div id="xv-chart" style="padding:14px"></div>' +
         '<div id="xv-legend" style="padding:0 14px 14px"></div>' +
         '<div id="xv-model-table" style="padding:0 14px 14px"></div>'
       );
       view.innerHTML = xviewHero + xviewDistribution +
-        section('호출 신호 요약', '<div class="kpis">' +
-          kpi('분석 요청',fmt(points.length)) + kpi('확인 필요','<span class="status '+(attentionCount?'warn':'')+'">'+fmt(attentionCount)+'</span>') + kpi('오류', '<span style="color:var(--bad)">'+fmt(categoryCounts.error)+'</span>') + kpi('정책 신호',fmt(categoryCounts.governance)) + kpi('폴백',fmt(categoryCounts.failover)) + kpi(xviewYLabel(xviewState.metric)+' P95',xviewFmtY(xviewState.metric,p95Value)) + '</div>') +
-        card('신호 구성', '<div class="card-body"><div class="viz-grid" style="margin-top:0"><div class="viz-panel"><div class="viz-title">즉시 확인 비중 <small>오류·정책·폴백</small></div>' + donutVisual(points.length?attentionCount/points.length*100:0,points.length?Math.round(attentionCount/points.length*100)+'%':'0%','확인 필요',[{label:'확인 필요',value:fmt(attentionCount)},{label:'정상·기타',value:fmt(Math.max(0,points.length-attentionCount))}]) + '</div><div class="viz-panel"><div class="viz-title">요청 신호 분포 <small>현재 조회 범위</small></div>' + visualBars(Object.keys(categoryCounts).map(k=>({label:xviewColors[k].label,value:categoryCounts[k]})).sort((a,b)=>b.value-a.value),null,true) + '</div></div></div>');
-      drawScatter(points, groups, modelIndex);
-      renderModelGroupTable(groups);
+        section('호출 신호 요약', '<div id="xv-live-summary"></div>');
+      renderXViewLiveSnapshot();
+      xviewLiveState.snapshotReady = true;
 
       const collectXViewParams = () => {
         xviewState.window   = document.getElementById('xv-window').value;
@@ -2309,10 +2744,14 @@ const adminHTML = `<!doctype html>
         if (e)  p.set('endpoint', e);
         return p;
       };
-      const apply = () => {
+      const apply = async () => {
         const p = collectXViewParams();
         if (activeSavedView) p.set('saved', activeSavedView.id);
-        location.hash = '#/xview?' + p.toString();
+        const targetHash = '#/xview?' + p.toString();
+        // Assigning the current hash does not fire hashchange. Explicitly re-run the route
+        // so "적용" also works as a manual refresh when no filter value changed.
+        if (location.hash === targetHash) await route();
+        else location.hash = targetHash;
       };
       document.getElementById('xv-apply').addEventListener('click', apply);
       document.getElementById('xv-reset-range').addEventListener('click', () => {
@@ -2323,6 +2762,13 @@ const adminHTML = `<!doctype html>
       });
       ['xv-window', 'xv-metric', 'xv-scale', 'xv-viewmode', 'xv-from', 'xv-to', 'xv-tz'].forEach(id =>
         document.getElementById(id).addEventListener('change', apply));
+      document.getElementById('xv-live').addEventListener('change', event => {
+        xviewState.live = !!event.target.checked;
+        sessionStorage.setItem('xviewLive', xviewState.live ? '1' : '0');
+        stopXViewLive(false);
+        if (xviewState.live) startXViewLive();
+        else setXViewLiveStatus('실시간 꺼짐', '');
+      });
 
       document.getElementById('xv-saved').addEventListener('change', (event) => {
         const id = event.target.value;
@@ -2373,11 +2819,17 @@ const adminHTML = `<!doctype html>
           openModal('XView 조사 링크', '<input value="' + escapeAttr(shareURL) + '" readonly style="width:100%">');
         }
       });
+      startXViewLive();
     }
 
     function drawScatter(points, groups, modelIndex) {
       const host = document.getElementById('xv-chart');
-      if (!points.length) { host.innerHTML = '<div class="empty">해당 구간에 요청 없음</div>'; return; }
+      if (!points.length) {
+        host.innerHTML = '<div class="empty">해당 구간에 요청 없음</div>';
+        const legend = document.getElementById('xv-legend');
+        if (legend) legend.innerHTML = '';
+        return;
+      }
       const yField   = xviewYField(xviewState.metric);
       const useModelColor = xviewState.viewMode === 'model';
       const W = 1000, H = 420, padL = 64, padR = 16, padT = 14, padB = 34;
@@ -2433,7 +2885,8 @@ const adminHTML = `<!doctype html>
         const cat = xviewCategory(p);
         let col;
         if (useModelColor) {
-          const idx = modelIndex != null ? (modelIndex[p.model] !== undefined ? modelIndex[p.model] : Object.keys(modelIndex).length) : 0;
+          const modelKey = p.model || '(unknown)';
+          const idx = modelIndex != null ? (modelIndex[modelKey] !== undefined ? modelIndex[modelKey] : Object.keys(modelIndex).length) : 0;
           col = MODEL_PALETTE[idx % MODEL_PALETTE.length];
         } else {
           col = xviewColors[cat].c;
@@ -2474,7 +2927,7 @@ const adminHTML = `<!doctype html>
           '<div style="display:flex; gap:14px; flex-wrap:wrap; align-items:center">' +
           groups.map((g, i) =>
             '<span style="display:inline-flex; align-items:center; gap:5px">' +
-            '<span style="width:10px;height:10px;border-radius:50%;background:' + MODEL_PALETTE[i % MODEL_PALETTE.length] + '"></span>' +
+            '<span style="width:10px;height:10px;border-radius:50%;background:' + MODEL_PALETTE[((modelIndex && modelIndex[g.model] !== undefined) ? modelIndex[g.model] : i) % MODEL_PALETTE.length] + '"></span>' +
             escapeHTML(g.model) + ' <span class="muted">' + fmt(g.count) + '건</span></span>'
           ).join('') +
           '<span class="muted" style="margin-left:auto">점을 클릭하면 요청 상세 · 가로=시간 / 세로=' + xviewYLabel(xviewState.metric) + ' · ○링=이상 항목</span>' +
@@ -2505,15 +2958,14 @@ const adminHTML = `<!doctype html>
     }
 
     // Per-model summary table (sortable) below scatter
-    function renderModelGroupTable(groups) {
+    function renderModelGroupTable(groups, modelIndex) {
       const el = document.getElementById('xv-model-table');
       if (!groups || !groups.length) { el.innerHTML = ''; return; }
-      let sortKey = 'count', sortDir = -1;
       const render = () => {
         const sorted = [...groups].sort((a, b) => {
-          const va = a[sortKey] !== undefined ? a[sortKey] : 0;
-          const vb = b[sortKey] !== undefined ? b[sortKey] : 0;
-          return sortDir * (va < vb ? -1 : va > vb ? 1 : 0);
+          const va = a[xviewState.modelSortKey] !== undefined ? a[xviewState.modelSortKey] : 0;
+          const vb = b[xviewState.modelSortKey] !== undefined ? b[xviewState.modelSortKey] : 0;
+          return xviewState.modelSortDir * (va < vb ? -1 : va > vb ? 1 : 0);
         });
         const cols = [
           { key: 'model',            label: '모델' },
@@ -2534,10 +2986,10 @@ const adminHTML = `<!doctype html>
         const thStyle = 'cursor:pointer; user-select:none; white-space:nowrap;';
         el.innerHTML = '<h3 style="margin:12px 0 8px">모델별 요약</h3>' +
           '<table id="xv-gtable"><thead><tr>' +
-          cols.map(c => '<th style="' + thStyle + '" data-k="' + c.key + '">' + c.label + (sortKey === c.key ? (sortDir > 0 ? ' ▲' : ' ▼') : '') + '</th>').join('') +
+          cols.map(c => '<th style="' + thStyle + '" data-k="' + c.key + '">' + c.label + (xviewState.modelSortKey === c.key ? (xviewState.modelSortDir > 0 ? ' ▲' : ' ▼') : '') + '</th>').join('') +
           '</tr></thead><tbody>' +
           sorted.map((g, gi) => {
-            const idx = groups.findIndex(x => x.model === g.model);
+            const idx = modelIndex && modelIndex[g.model] !== undefined ? modelIndex[g.model] : groups.findIndex(x => x.model === g.model);
             const dot = '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + MODEL_PALETTE[(idx >= 0 ? idx : gi) % MODEL_PALETTE.length] + ';margin-right:6px"></span>';
             return '<tr>' +
               '<td>' + dot + escapeHTML(g.model) + '</td>' +
@@ -2560,7 +3012,8 @@ const adminHTML = `<!doctype html>
         el.querySelectorAll('#xv-gtable th').forEach(th => {
           th.addEventListener('click', () => {
             const k = th.getAttribute('data-k');
-            if (sortKey === k) sortDir *= -1; else { sortKey = k; sortDir = -1; }
+            if (xviewState.modelSortKey === k) xviewState.modelSortDir *= -1;
+            else { xviewState.modelSortKey = k; xviewState.modelSortDir = -1; }
             render();
           });
         });
@@ -2573,6 +3026,7 @@ const adminHTML = `<!doctype html>
     let xvDragJustFired = false;
 
     function bindXVDragSelect(points) {
+      if (xviewLiveState.dragCleanup) xviewLiveState.dragCleanup();
       const svg = document.getElementById('xv-svg');
       if (!svg) return;
 
@@ -2581,6 +3035,25 @@ const adminHTML = `<!doctype html>
 
       let dragStart = null, isDragging = false;
       const selRect = document.getElementById('xv-sel-rect');
+
+      function removeWindowListeners() {
+        window.removeEventListener('mousemove', onMove);
+        window.removeEventListener('mouseup', onUp);
+        window.removeEventListener('blur', onCancel);
+      }
+
+      function finishDrag() {
+        removeWindowListeners();
+        dragStart = null;
+        isDragging = false;
+        xviewLiveState.dragging = false;
+        if (selRect && selRect.isConnected) selRect.style.display = 'none';
+        if (xviewLiveState.renderPending) queueXViewLiveRender();
+      }
+
+      function onCancel() {
+        finishDrag();
+      }
 
       function toSVG(e) {
         const pt = svg.createSVGPoint();
@@ -2592,6 +3065,12 @@ const adminHTML = `<!doctype html>
 
       function onMove(e) {
         if (!dragStart) return;
+        // A mouseup outside the browser may not reach window. The next move (or blur below)
+        // must still release the live-render gate.
+        if (typeof e.buttons === 'number' && (e.buttons & 1) === 0) {
+          finishDrag();
+          return;
+        }
         const cur = toSVG(e);
         if (!isDragging && Math.hypot(cur.x - dragStart.x, cur.y - dragStart.y) < 4) return;
         isDragging = true;
@@ -2604,14 +3083,11 @@ const adminHTML = `<!doctype html>
       }
 
       function onUp(e) {
-        window.removeEventListener('mousemove', onMove);
-        window.removeEventListener('mouseup',   onUp);
         const end   = toSVG(e);
         const start = dragStart;
-        dragStart = null;
-        selRect.style.display = 'none';
-        if (!isDragging) return;
-        isDragging = false;
+        const completedDrag = isDragging;
+        finishDrag();
+        if (!completedDrag || !start) return;
 
         const x1 = Math.min(start.x, end.x), x2 = Math.max(start.x, end.x);
         const y1 = Math.min(start.y, end.y), y2 = Math.max(start.y, end.y);
@@ -2640,14 +3116,26 @@ const adminHTML = `<!doctype html>
         openXVSelectionModal(selected, ridMap);
       }
 
-      svg.addEventListener('mousedown', e => {
+      function onDown(e) {
         if (e.button !== 0) return;
         if (e.target.classList.contains('xv-dot')) return;
         dragStart  = toSVG(e);
         isDragging = false;
+        xviewLiveState.dragging = true;
         window.addEventListener('mousemove', onMove);
         window.addEventListener('mouseup',   onUp);
-      });
+        window.addEventListener('blur', onCancel);
+      }
+      svg.addEventListener('mousedown', onDown);
+      xviewLiveState.dragCleanup = () => {
+        removeWindowListeners();
+        svg.removeEventListener('mousedown', onDown);
+        dragStart = null;
+        isDragging = false;
+        xviewLiveState.dragging = false;
+        if (selRect && selRect.isConnected) selRect.style.display = 'none';
+        xviewLiveState.dragCleanup = null;
+      };
     }
 
     async function openXVSelectionModal(rids, ridMap) {

@@ -265,5 +265,74 @@ group('table wrapping');
   check('a screen with no tables is safe', true);
 }
 
+// ---------- XView live point buffer ----------
+group('XView live point buffer');
+{
+  const prelude = 'const XVIEW_POINT_LIMIT=3;'
+    + 'const xviewState={from:"",to:"",window:"1h"};'
+    + 'const xviewLiveState=globalThis.__xviewLiveState={pointsByID:new Map(),truncated:false,serverClockOffsetMs:0,serverClockReady:false};';
+  const F = load(['xviewWindowMillis', 'xviewPointTime', 'xviewCursor', 'xviewCursorEqual',
+    'syncXViewServerClock', 'xviewNowMillis', 'mergeXViewPoints', 'evictExpiredXViewPoints', 'currentXViewPoints'], prelude + '\n');
+  const now = Date.now();
+  const point = (id, ageMinutes, latency) => ({ request_id: id,
+    created_at: new Date(now - ageMinutes * 60000).toISOString(), latency_ms: latency });
+
+  check('live mode defaults to the expected one-hour rolling conversion', F.xviewWindowMillis('1h') === 3600000);
+  check('a complete cursor is accepted', F.xviewCursor({ ingested_at: '2026-01-01T00:00:00Z', request_id: 'r1' }).request_id === 'r1');
+  check('a partial cursor is rejected', F.xviewCursor({ ingested_at: 'x' }) === null);
+  check('cursor equality uses both tuple fields', F.xviewCursorEqual(
+    { ingested_at: 'x', request_id: 'a' }, { ingested_at: 'x', request_id: 'a' })
+    && !F.xviewCursorEqual({ ingested_at: 'x', request_id: 'a' }, { ingested_at: 'x', request_id: 'b' }));
+  F.syncXViewServerClock(new Date(Date.now() + 60000).toISOString());
+  check('rolling eviction follows server time instead of a skewed browser clock',
+    global.__xviewLiveState.serverClockReady && Math.abs(F.xviewNowMillis() - Date.now() - 60000) < 1000);
+
+  const firstMerge = F.mergeXViewPoints([point('a', 1, 10)]);
+  check('the first point is counted as new', firstMerge.added === 1 && firstMerge.mutationCount === 1);
+  const changedPoint = point('a', 1, 99);
+  const changedMerge = F.mergeXViewPoints([changedPoint]);
+  check('an updated request id is merged rather than appended', changedMerge.added === 0 && changedMerge.mutationCount === 1
+    && global.__xviewLiveState.pointsByID.size === 1 && global.__xviewLiveState.pointsByID.get('a').latency_ms === 99);
+  check('an identical reconciliation row causes no render mutation', F.mergeXViewPoints([changedPoint]).mutationCount === 0);
+  F.mergeXViewPoints([point('old', 70, 1), point('b', 2, 20), point('c', 3, 30), point('d', 4, 40)]);
+  const visible = F.currentXViewPoints();
+  check('points outside the rolling window are evicted', !visible.some((p) => p.request_id === 'old'));
+  check('the live buffer keeps only the newest cap', visible.length === 3 && visible.map((p) => p.request_id).join(',') === 'a,b,c');
+  check('hitting the cap marks the snapshot truncated', global.__xviewLiveState.truncated === true);
+}
+
+// ---------- XView live lifecycle ----------
+group('XView live lifecycle');
+{
+  let aborted = 0, timersCleared = 0, framesCancelled = 0;
+  global.clearTimeout = () => { timersCleared++; };
+  global.cancelAnimationFrame = () => { framesCancelled++; };
+  const prelude = 'const xviewLiveState=globalThis.__xviewLifecycle={'
+    + 'generation:4,timer:11,controller:{abort(){globalThis.__xviewAborted();}},'
+    + 'renderFrame:12,inFlight:true,renderPending:true,dragging:true,'
+    + 'pointsByID:new Map([["a",{}]]),cursor:{ingested_at:"x",request_id:"a"},'
+    + 'filterParams:new URLSearchParams("window=1h"),truncated:true,modelOrder:["m"],'
+    + 'lastPruneAt:1,lastReconcileAt:2,lastRefreshAt:3,catchingUp:true,snapshotReady:true,'
+    + 'serverClockOffsetMs:4,serverClockReady:true,dragCleanup:null};';
+  global.__xviewAborted = () => { aborted++; };
+  const { stopXViewLive } = load(['stopXViewLive'], prelude + '\n');
+
+  stopXViewLive(false);
+  check('pausing aborts the in-flight request and clears scheduled work',
+    aborted === 1 && timersCleared === 1 && framesCancelled === 1
+      && global.__xviewLifecycle.timer === null && global.__xviewLifecycle.controller === null
+      && global.__xviewLifecycle.inFlight === false);
+  check('a visibility pause preserves the current point buffer and cursor',
+    global.__xviewLifecycle.pointsByID.size === 1 && global.__xviewLifecycle.cursor.request_id === 'a'
+      && global.__xviewLifecycle.snapshotReady === true);
+  stopXViewLive(true);
+  check('leaving the route resets live data and filters', global.__xviewLifecycle.pointsByID.size === 0
+    && global.__xviewLifecycle.cursor === null && global.__xviewLifecycle.filterParams.toString() === ''
+    && global.__xviewLifecycle.modelOrder.length === 0 && global.__xviewLifecycle.lastReconcileAt === 0
+    && global.__xviewLifecycle.lastRefreshAt === 0 && global.__xviewLifecycle.catchingUp === false
+    && global.__xviewLifecycle.snapshotReady === false && global.__xviewLifecycle.serverClockReady === false);
+  check('each stop invalidates late responses with a new generation', global.__xviewLifecycle.generation === 6);
+}
+
 console.log(failures === 0 ? '\nall admin UI behaviour checks passed' : '\n' + failures + ' check(s) failed');
 process.exit(failures === 0 ? 0 : 1);

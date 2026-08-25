@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"path/filepath"
 	"testing"
 	"time"
@@ -29,10 +30,14 @@ func xviewTestServer(t *testing.T) (*store.SQLStore, *httptest.Server) {
 }
 
 func seedXViewReq(t *testing.T, db *store.SQLStore, id, model, provider string, status int, failover bool, latency, tokens int64, cost float64, when time.Time) {
+	seedXViewReqForKey(t, db, id, "k", model, provider, status, failover, latency, tokens, cost, when)
+}
+
+func seedXViewReqForKey(t *testing.T, db *store.SQLStore, id, apiKeyID, model, provider string, status int, failover bool, latency, tokens int64, cost float64, when time.Time) {
 	t.Helper()
 	if err := db.InsertLogRecord(context.Background(), store.LogRecord{
 		Request: store.RequestLog{
-			ID: id, TraceID: id, APIKeyID: "k", Endpoint: "/v1/chat/completions",
+			ID: id, TraceID: id, APIKeyID: apiKeyID, Endpoint: "/v1/chat/completions",
 			Model: model, Provider: provider, StatusCode: status, Failover: failover,
 			LatencyMS: latency, FirstChunkMS: latency / 2, CreatedAt: when,
 		},
@@ -42,6 +47,157 @@ func seedXViewReq(t *testing.T, db *store.SQLStore, id, model, provider string, 
 		},
 	}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestXViewTeamAdminCannotSeeOtherTeamPointsOrCursor(t *testing.T) {
+	db := openTestStore(t)
+	t.Cleanup(func() { _ = db.Close() })
+	ctx := context.Background()
+	now := time.Now().UTC()
+	for _, key := range []store.APIKeyRecord{
+		{ID: "xv-key-alpha", Name: "alpha", KeyHash: "xv-hash-alpha", Team: "team-alpha", Status: "active"},
+		{ID: "xv-key-beta", Name: "beta", KeyHash: "xv-hash-beta", Team: "team-beta", Status: "active"},
+	} {
+		if err := db.UpsertAPIKey(ctx, key); err != nil {
+			t.Fatal(err)
+		}
+	}
+	seedXViewReqForKey(t, db, "alpha-snapshot", "xv-key-alpha", "alpha-model", "openai", 200, false, 100, 10, 1, now)
+	// Insert beta last so an unscoped high-water cursor would leak this request id.
+	seedXViewReqForKey(t, db, "beta-snapshot", "xv-key-beta", "beta-model", "openai", 200, false, 200, 20, 2, now)
+
+	logger := store.NewAsyncLogger(db, 16, filepath.Join(t.TempDir(), "xview-team.ndjson"))
+	logger.Start()
+	t.Cleanup(func() { logger.Stop(context.Background()) })
+	cfg := testConfig("http://upstream.invalid", "secret")
+	cfg.Auth.Enabled = true
+	cfg.Auth.JWTSecret = "xview-team-jwt-secret"
+	cfg.Auth.AccessTokenTTL = time.Hour
+	server, err := NewServer(cfg, db, logger, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.InsertAuthSession(ctx, "xv-team-session", "xv-team-admin", "127.0.0.1", "test", now.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	token, err := server.signAccessToken(accessClaims{
+		Subject: "xv-team-admin", Role: "team_admin", TeamID: "team-alpha", Scopes: []string{"admin:read"},
+		SessionID: "xv-team-session", Type: "access", IssuedAt: now.Unix(), ExpiresAt: now.Add(time.Hour).Unix(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(server.Routes())
+	t.Cleanup(srv.Close)
+	get := func(authToken, path string, out any) int {
+		req, err := http.NewRequest(http.MethodGet, srv.URL+path, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Authorization", "Bearer "+authToken)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if out != nil {
+			if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return resp.StatusCode
+	}
+
+	var snapshot struct {
+		Points []store.ScatterPoint `json:"points"`
+		Cursor store.ScatterCursor  `json:"cursor"`
+	}
+	if status := get(token, "/admin/scatter?window=1h&limit=10", &snapshot); status != http.StatusOK {
+		t.Fatalf("snapshot status = %d", status)
+	}
+	if len(snapshot.Points) != 1 || snapshot.Points[0].RequestID != "alpha-snapshot" || snapshot.Cursor.RequestID != "alpha-snapshot" {
+		t.Fatalf("team-scoped snapshot leaked another team: %+v", snapshot)
+	}
+
+	seedXViewReqForKey(t, db, "alpha-delta", "xv-key-alpha", "alpha-model", "openai", 200, false, 110, 11, 1.1, now)
+	seedXViewReqForKey(t, db, "beta-delta", "xv-key-beta", "beta-model", "openai", 200, false, 210, 21, 2.1, now)
+	query := url.Values{
+		"window":            {"1h"},
+		"after_ingested_at": {snapshot.Cursor.IngestedAt},
+		"after_request_id":  {snapshot.Cursor.RequestID},
+		"limit":             {"10"},
+	}
+	var delta struct {
+		Points []store.ScatterPoint `json:"points"`
+		Cursor store.ScatterCursor  `json:"cursor"`
+	}
+	if status := get(token, "/admin/xview/delta?"+query.Encode(), &delta); status != http.StatusOK {
+		t.Fatalf("delta status = %d", status)
+	}
+	if len(delta.Points) != 1 || delta.Points[0].RequestID != "alpha-delta" || delta.Cursor.RequestID != "alpha-delta" {
+		t.Fatalf("team-scoped delta leaked another team: %+v", delta)
+	}
+
+	var models struct {
+		Models []store.ScatterModelGroup `json:"models"`
+	}
+	if status := get(token, "/admin/xview/models?window=1h&top=10", &models); status != http.StatusOK {
+		t.Fatalf("models status = %d", status)
+	}
+	if len(models.Models) != 1 || models.Models[0].Model != "alpha-model" {
+		t.Fatalf("team-scoped model analytics leaked another team: %+v", models.Models)
+	}
+
+	// A malformed or legacy team_admin account without a team must fail closed. Empty Team
+	// cannot retain its old meaning of "no filter", because that would expose every tenant.
+	if err := db.InsertAuthSession(ctx, "xv-empty-team-session", "xv-empty-team-admin", "127.0.0.1", "test", now.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	emptyTeamToken, err := server.signAccessToken(accessClaims{
+		Subject: "xv-empty-team-admin", Role: "team_admin", Scopes: []string{"admin:read"},
+		SessionID: "xv-empty-team-session", Type: "access", IssuedAt: now.Unix(), ExpiresAt: now.Add(time.Hour).Unix(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var emptySnapshot struct {
+		Points []store.ScatterPoint `json:"points"`
+		Cursor store.ScatterCursor  `json:"cursor"`
+	}
+	if status := get(emptyTeamToken, "/admin/scatter?window=1h&limit=10", &emptySnapshot); status != http.StatusOK {
+		t.Fatalf("empty-team snapshot status = %d", status)
+	}
+	if len(emptySnapshot.Points) != 0 || emptySnapshot.Cursor != (store.ScatterCursor{}) {
+		t.Fatalf("empty-team admin must see no snapshot rows or cursor: %+v", emptySnapshot)
+	}
+	var emptyDelta struct {
+		Points []store.ScatterPoint `json:"points"`
+		Cursor store.ScatterCursor  `json:"cursor"`
+	}
+	if status := get(emptyTeamToken, "/admin/xview/delta?window=1h&refresh=true", &emptyDelta); status != http.StatusOK {
+		t.Fatalf("empty-team delta status = %d", status)
+	}
+	if len(emptyDelta.Points) != 0 || emptyDelta.Cursor != (store.ScatterCursor{}) {
+		t.Fatalf("empty-team admin must see no delta rows or cursor: %+v", emptyDelta)
+	}
+	var emptyModels struct {
+		Models []store.ScatterModelGroup `json:"models"`
+	}
+	if status := get(emptyTeamToken, "/admin/xview/models?window=1h&top=10", &emptyModels); status != http.StatusOK {
+		t.Fatalf("empty-team models status = %d", status)
+	}
+	if len(emptyModels.Models) != 0 {
+		t.Fatalf("empty-team admin leaked model analytics: %+v", emptyModels.Models)
+	}
+	var emptyRequests struct {
+		Requests []store.RecentRequest `json:"requests"`
+	}
+	if status := get(emptyTeamToken, "/admin/requests?limit=10", &emptyRequests); status != http.StatusOK {
+		t.Fatalf("empty-team requests status = %d", status)
+	}
+	if len(emptyRequests.Requests) != 0 {
+		t.Fatalf("empty-team admin leaked request rows: %+v", emptyRequests.Requests)
 	}
 }
 
@@ -143,6 +299,133 @@ func TestScatterFromToDateRange(t *testing.T) {
 	got = ids(get("from=2026-07-10"))
 	if got["d-old"] || !got["d-mid"] || !got["d-new"] {
 		t.Errorf("from-only range = %v, want mid+new", got)
+	}
+}
+
+func TestXViewDeltaEndpointTracksLateCommitsFromSnapshotCursor(t *testing.T) {
+	db, srv := xviewTestServer(t)
+	now := time.Now().UTC()
+	seedXViewReq(t, db, "delta-fast", "gpt-4.1", "openai", 200, false, 100, 10, 1, now)
+
+	resp, err := http.Get(srv.URL + "/admin/scatter?window=1h&limit=10")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var snapshot struct {
+		Points []store.ScatterPoint `json:"points"`
+		Cursor store.ScatterCursor  `json:"cursor"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&snapshot); err != nil {
+		resp.Body.Close()
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if len(snapshot.Points) != 1 || snapshot.Points[0].IngestedAt == "" {
+		t.Fatalf("snapshot missing ingestion metadata: %+v", snapshot)
+	}
+	if snapshot.Cursor.IngestedAt == "" || snapshot.Cursor.RequestID == "" {
+		t.Fatalf("snapshot missing delta cursor: %+v", snapshot.Cursor)
+	}
+
+	// It started before the snapshot row but commits after the snapshot cursor.
+	seedXViewReq(t, db, "delta-slow", "gpt-4.1", "openai", 200, false, 300, 20, 2, now.Add(-30*time.Minute))
+	query := url.Values{
+		"window":            {"1h"},
+		"models":            {"gpt-4.1"},
+		"after_ingested_at": {snapshot.Cursor.IngestedAt},
+		"after_request_id":  {snapshot.Cursor.RequestID},
+		"limit":             {"10"},
+	}
+	resp, err = http.Get(srv.URL + "/admin/xview/delta?" + query.Encode())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var delta struct {
+		Points  []store.ScatterPoint `json:"points"`
+		Cursor  store.ScatterCursor  `json:"cursor"`
+		HasMore bool                 `json:"has_more"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&delta); err != nil {
+		resp.Body.Close()
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || delta.HasMore || len(delta.Points) != 1 || delta.Points[0].RequestID != "delta-slow" {
+		t.Fatalf("delta response status=%d payload=%+v", resp.StatusCode, delta)
+	}
+	if delta.Cursor.RequestID != "delta-slow" || delta.Cursor.IngestedAt != delta.Points[0].IngestedAt {
+		t.Fatalf("delta cursor did not advance: %+v", delta)
+	}
+}
+
+func TestXViewDeltaEndpointValidatesCursorAndMethod(t *testing.T) {
+	_, srv := xviewTestServer(t)
+	cases := []string{
+		"after_ingested_at=2026-08-25T00%3A00%3A00Z",
+		"after_request_id=req-only",
+		"after_ingested_at=not-a-time&after_request_id=req-bad",
+		"reconcile=eventually",
+		"refresh=eventually",
+	}
+	for _, query := range cases {
+		resp, err := http.Get(srv.URL + "/admin/xview/delta?" + query)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("query %q status = %d, want 400", query, resp.StatusCode)
+		}
+	}
+
+	req, err := http.NewRequest(http.MethodPost, srv.URL+"/admin/xview/delta", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusMethodNotAllowed {
+		t.Fatalf("POST status = %d, want 405", resp.StatusCode)
+	}
+}
+
+func TestXViewDeltaEndpointRequiresAdminToken(t *testing.T) {
+	db := openTestStore(t)
+	logger := store.NewAsyncLogger(db, 16, filepath.Join(t.TempDir(), "xview-auth.ndjson"))
+	logger.Start()
+	t.Cleanup(func() { logger.Stop(context.Background()) })
+	cfg := testConfig("http://upstream.invalid", "secret")
+	cfg.Auth.AdminToken = "xview-admin"
+	server, err := NewServer(cfg, db, logger, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(server.Routes())
+	t.Cleanup(srv.Close)
+
+	resp, err := http.Get(srv.URL + "/admin/xview/delta")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated status = %d, want 401", resp.StatusCode)
+	}
+	req, err := http.NewRequest(http.MethodGet, srv.URL+"/admin/xview/delta", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer xview-admin")
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("authenticated status = %d, want 200", resp.StatusCode)
 	}
 }
 

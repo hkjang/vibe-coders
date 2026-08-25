@@ -161,6 +161,73 @@ func safeDivF(num, den float64) float64 {
 	return num / den
 }
 
+// handleXViewDelta returns request points around a persistence cursor. Unlike request
+// created_at, ingested_at is serialized by the database immediately before the completed log
+// commits. Clients periodically request reconcile=true for rolling-upgrade compatibility and
+// refresh=true to reproject mutable metadata, then deduplicate request_id.
+// GET /admin/xview/delta?after_ingested_at=<RFC3339>&after_request_id=<id>&window=1h&reconcile=true
+func (s *Server) handleXViewDelta(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	if r.Method != http.MethodGet {
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
+
+	rawIngestedAt := strings.TrimSpace(r.URL.Query().Get("after_ingested_at"))
+	afterRequestID := strings.TrimSpace(r.URL.Query().Get("after_request_id"))
+	if (rawIngestedAt == "") != (afterRequestID == "") {
+		writeOpenAIError(w, http.StatusBadRequest, "after_ingested_at and after_request_id must be provided together", "invalid_request_error", "invalid_xview_cursor")
+		return
+	}
+	if len(afterRequestID) > 256 {
+		writeOpenAIError(w, http.StatusBadRequest, "after_request_id is too long", "invalid_request_error", "invalid_xview_cursor")
+		return
+	}
+	var after time.Time
+	if rawIngestedAt != "" {
+		parsed, err := time.Parse(time.RFC3339Nano, rawIngestedAt)
+		if err != nil {
+			writeOpenAIError(w, http.StatusBadRequest, "after_ingested_at must be RFC3339", "invalid_request_error", "invalid_xview_cursor")
+			return
+		}
+		after = parsed
+	}
+	reconcile := false
+	if raw := strings.TrimSpace(r.URL.Query().Get("reconcile")); raw != "" {
+		parsed, err := strconv.ParseBool(raw)
+		if err != nil {
+			writeOpenAIError(w, http.StatusBadRequest, "reconcile must be true or false", "invalid_request_error", "invalid_xview_reconcile")
+			return
+		}
+		reconcile = parsed
+	}
+	refresh := false
+	if raw := strings.TrimSpace(r.URL.Query().Get("refresh")); raw != "" {
+		parsed, err := strconv.ParseBool(raw)
+		if err != nil {
+			writeOpenAIError(w, http.StatusBadRequest, "refresh must be true or false", "invalid_request_error", "invalid_xview_refresh")
+			return
+		}
+		refresh = parsed
+	}
+
+	f := s.scatterFilterFromRequest(r, 200)
+	points, cursor, hasMore, err := s.db.ScatterDelta(r.Context(), f, after, afterRequestID, reconcile, refresh)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "xview_delta_failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"points":      points,
+		"cursor":      cursor,
+		"has_more":    hasMore,
+		"server_time": time.Now().UTC().Format(time.RFC3339Nano),
+	})
+}
+
 // handleXViewModels returns per-model summary for the top N models by call volume.
 // GET /admin/xview/models?window=1h&top=10&models=gpt-4.1,gpt-4.1-mini
 func (s *Server) handleXViewModels(w http.ResponseWriter, r *http.Request) {
@@ -169,6 +236,7 @@ func (s *Server) handleXViewModels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	since, until := xviewTimeRange(r, time.Hour)
+	team, teamScoped := requestTeamScopeForCaller(s, r)
 	top := 5
 	if v := strings.TrimSpace(r.URL.Query().Get("top")); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
@@ -176,10 +244,12 @@ func (s *Server) handleXViewModels(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	f := store.ScatterFilter{
-		Since:  since,
-		Until:  until,
-		Models: parseModelsParam(r.URL.Query().Get("models")),
-		Limit:  20000,
+		Since:      since,
+		Until:      until,
+		Models:     parseModelsParam(r.URL.Query().Get("models")),
+		Team:       team,
+		TeamScoped: teamScoped,
+		Limit:      20000,
 	}
 	points, _, err := s.db.ScatterPoints(r.Context(), f)
 	if err != nil {
@@ -205,6 +275,7 @@ func (s *Server) handleXViewModelSeries(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	since, until := xviewTimeRange(r, 24*time.Hour)
+	team, teamScoped := requestTeamScopeForCaller(s, r)
 	// Same timezone the range was parsed in, so the buckets line up with the filter.
 	loc := searchLocation(r.URL.Query().Get("tz"))
 	bucket := strings.TrimSpace(strings.ToLower(r.URL.Query().Get("bucket")))
@@ -212,10 +283,12 @@ func (s *Server) handleXViewModelSeries(w http.ResponseWriter, r *http.Request) 
 		bucket = "hour"
 	}
 	f := store.ScatterFilter{
-		Since:  since,
-		Until:  until,
-		Models: parseModelsParam(r.URL.Query().Get("models")),
-		Limit:  20000,
+		Since:      since,
+		Until:      until,
+		Models:     parseModelsParam(r.URL.Query().Get("models")),
+		Team:       team,
+		TeamScoped: teamScoped,
+		Limit:      20000,
 	}
 	points, _, err := s.db.ScatterPoints(r.Context(), f)
 	if err != nil {
@@ -322,11 +395,14 @@ func (s *Server) handleXViewModelOutliers(w http.ResponseWriter, r *http.Request
 		return
 	}
 	since, until := xviewTimeRange(r, time.Hour)
+	team, teamScoped := requestTeamScopeForCaller(s, r)
 	f := store.ScatterFilter{
-		Since:  since,
-		Until:  until,
-		Models: parseModelsParam(r.URL.Query().Get("models")),
-		Limit:  20000,
+		Since:      since,
+		Until:      until,
+		Models:     parseModelsParam(r.URL.Query().Get("models")),
+		Team:       team,
+		TeamScoped: teamScoped,
+		Limit:      20000,
 	}
 	points, truncated, err := s.db.ScatterPoints(r.Context(), f)
 	if err != nil {

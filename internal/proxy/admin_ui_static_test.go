@@ -181,6 +181,71 @@ func TestAdminUIValidatedFieldsExist(t *testing.T) {
 	}
 }
 
+// XView's live mode must be a delta update, not the global route() refresh under a
+// shorter timer. The latter replaces the whole page, loses interaction state and can
+// let a late response paint over the screen the operator navigated to.
+func TestAdminUIXViewLivePollingHasLifecycleGuards(t *testing.T) {
+	_, payload := adminUISource(t)
+	required := []string{
+		"/admin/xview/delta?",
+		"after_ingested_at",
+		"after_request_id",
+		"pointsByID: new Map()",
+		"new AbortController()",
+		"requestAnimationFrame(",
+		"document.addEventListener('visibilitychange'",
+		"if (tab !== 'xview') stopXViewLive(true)",
+		"XVIEW_POINT_LIMIT = 6000",
+		"XVIEW_PRUNE_INTERVAL_MS = 15000",
+		"XVIEW_RECONCILE_INTERVAL_MS = 15000",
+		"XVIEW_REFRESH_INTERVAL_MS = 300000",
+		"xviewLiveState.inFlight",
+		"if (continuesCatchUp) xviewLiveState.renderPending = true",
+		"return { added, mutationCount }",
+		"params.set('reconcile', 'true')",
+		"params.set('refresh', 'true')",
+		"syncXViewServerClock(response.server_time)",
+		"!xviewLiveState.catchingUp",
+		"signal: snapshotController.signal",
+		"if (!xviewLiveState.snapshotReady) {",
+		"if (snapshotIsStale() || (err && err.name === 'AbortError')) return",
+	}
+	for _, want := range required {
+		if !strings.Contains(payload, want) {
+			t.Errorf("XView live polling is missing %q", want)
+		}
+	}
+	if !strings.Contains(payload, "setTimeout(() => {\n        xviewLiveState.timer = null;\n        pollXViewDelta(generation);") {
+		t.Error("XView delta polling is not scheduled with the non-overlapping setTimeout loop")
+	}
+}
+
+func TestAdminUIXViewLiveModeHandlesFixedRangeAndSameHash(t *testing.T) {
+	_, payload := adminUISource(t)
+	for _, want := range []string{
+		"(xviewState.to ? ' disabled' : '')",
+		"고정 종료 시각 · 실시간 사용 불가",
+		"if (!xviewState.live || xviewState.to || document.hidden",
+	} {
+		if !strings.Contains(payload, want) {
+			t.Errorf("XView fixed-range live guard is missing %q", want)
+		}
+	}
+
+	start := strings.Index(payload, "const apply = async () => {")
+	if start < 0 {
+		t.Fatal("XView apply handler not found")
+	}
+	end := strings.Index(payload[start:], "document.getElementById('xv-apply')")
+	if end < 0 {
+		t.Fatal("end of XView apply handler not found")
+	}
+	apply := payload[start : start+end]
+	if !strings.Contains(apply, "if (location.hash === targetHash) await route()") {
+		t.Error("applying an unchanged XView hash does not explicitly refresh the route")
+	}
+}
+
 // An empty configuration screen is the first thing a new operator sees, and "팀 없음"
 // tells them nothing about how to change it. The screens that own a creation form must
 // point at it. Several already did; this keeps the rest from regressing to a bare label.

@@ -229,11 +229,12 @@ MCP Security Center는 MCP 탭 또는 `GET/POST /admin/mcp/tools` 에서 tool별
   - 🔴 오류 (status ≥ 400, kill switch·정책 차단 포함)
   - 🟣 고비용/복잡 (토큰이 상위 10% 또는 4000 이상)
 - **창**: 5m / 15m / 1h / 6h / 24h. **필터**: 모델, endpoint.
+- **실시간 흐름**: 상대 구간에서는 기본으로 켜지며, 새 요청을 약 1.5초마다 현재 필터에 추가합니다. 승인 결과처럼 나중에 바뀌는 메타데이터도 5분마다 현재 창을 다시 투영해 새로고침 없이 반영합니다. 브라우저 탭을 벗어나면 일시정지하고 돌아오면 이어서 조회합니다. `to`로 종료 시각을 고정한 과거 조회는 재현성을 위해 실시간 모드를 사용할 수 없습니다.
 - **조사 보기**: 현재 기간·시간대·지표·스케일·색상 모드·모델·endpoint 조건을 이름으로 저장하고 다시 실행하거나 덮어쓰기·삭제할 수 있습니다. 공유 링크는 현재 조건을 직접 포함해 저장 항목 수명과 무관하게 재현됩니다.
 - **드릴다운**: 점에 마우스를 올리면 모델·provider·지연·토큰·비용·상태 툴팁, 클릭하면 요청 상세 모달.
 - 점이 6000건을 넘으면 최근 6000건으로 제한(범례 옆에 표시).
 
-API: `GET /admin/scatter?window=1h&metric=latency&model=&endpoint=&limit=6000` — 점 배열(`request_id, created_at, latency_ms, first_chunk_ms, status_code, provider, model, total_tokens, cost_krw, stream, tool_count, failover`)과 `truncated` 플래그를 반환합니다.
+API: `GET /admin/scatter?window=1h&metric=latency&model=&endpoint=&limit=6000` — 점 배열(`request_id, created_at, ingested_at, latency_ms, first_chunk_ms, status_code, provider, model, total_tokens, cost_krw, stream, tool_count, failover`)과 `truncated`, 증분 조회용 `cursor`를 반환합니다. 이후 `GET /admin/xview/delta?after_ingested_at=...&after_request_id=...`로 새 점과 다음 `cursor`, `has_more`를 조회합니다. 호환 구간 갱신은 `reconcile=true`, 승인 상태 등 현재 창의 변경 가능한 메타데이터 재투영은 `refresh=true`를 사용하며, 클라이언트는 `request_id`로 중복을 제거해야 합니다. 새 버전의 로그 트랜잭션은 DB에서 커밋 직전 단조 커서를 배정받아 다중 인스턴스에서도 순서를 보존합니다.
 
 저장 API는 `GET /admin/saved-filters?view=xview`, `POST /admin/saved-filters`, `GET|PATCH|DELETE /admin/saved-filters/{id}`를 사용합니다. XView 저장 파라미터는 allowlist와 enum·기간·시간대 검증을 통과해야 하며 `window`와 `from/to`는 함께 저장할 수 없습니다.
 

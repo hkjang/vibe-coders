@@ -256,7 +256,8 @@ func (s *SQLStore) livePostgresIndexes(ctx context.Context) ([]IndexInfo, error)
 	// Joined on oid throughout. Joining pg_indexes to pg_class by *name* looks equivalent
 	// and is not: index names are unique per schema, not per database, so an install that
 	// shares a database with other schemas matches every one of their same-named indexes
-	// and multiplies the result.
+	// and multiplies the result. Invalid concurrent-build shells are deliberately omitted:
+	// a declared one is therefore reported as missing, and Migrate removes/rebuilds it.
 	rows, err := s.db.QueryContext(ctx, `SELECT ic.relname, tc.relname,
 			pg_get_indexdef(i.indexrelid), COALESCE(con.contype::text, '')
 		FROM pg_index i
@@ -264,7 +265,7 @@ func (s *SQLStore) livePostgresIndexes(ctx context.Context) ([]IndexInfo, error)
 		JOIN pg_class tc ON tc.oid = i.indrelid
 		JOIN pg_namespace n ON n.oid = ic.relnamespace
 		LEFT JOIN pg_constraint con ON con.conindid = i.indexrelid
-		WHERE n.nspname = current_schema()`)
+		WHERE n.nspname = current_schema() AND i.indisvalid`)
 	if err != nil {
 		return nil, err
 	}

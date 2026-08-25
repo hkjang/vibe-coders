@@ -77,17 +77,20 @@ func (s *Server) handleRequestReadableSubresource(w http.ResponseWriter, r *http
 	}
 }
 
-func requestTeamScopeForCaller(s *Server, r *http.Request) string {
+func requestTeamScopeForCaller(s *Server, r *http.Request) (string, bool) {
 	if claims, ok := s.currentAccessClaims(r); ok && claims.Role == "team_admin" {
-		return claims.TeamID
+		return strings.TrimSpace(claims.TeamID), true
 	}
-	return ""
+	return "", false
 }
 
 func (s *Server) canViewRequestDetail(r *http.Request, request store.RecentRequest) bool {
 	claims, ok := s.currentAccessClaims(r)
 	if !ok || claims.Role != "team_admin" {
 		return true
+	}
+	if strings.TrimSpace(claims.TeamID) == "" {
+		return false
 	}
 	team, err := s.db.GetTeamForAPIKey(r.Context(), request.APIKeyID)
 	if err != nil {
