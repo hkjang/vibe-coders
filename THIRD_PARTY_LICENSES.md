@@ -17,9 +17,9 @@
 | `github.com/jackc/puddle/v2` | v2.2.2 | MIT | 연결 풀 |
 | `github.com/remyoudompheng/bigfft` | v0.0.0-20230129092748-24d4a6f8daec | BSD-3-Clause | SQLite 수치 연산 지원 |
 | `github.com/sijms/go-ora/v2` | v2.9.0 | MIT | Oracle 드라이버 |
-| `golang.org/x/crypto` | v0.37.0 | BSD-3-Clause | 암호 기능 |
+| `golang.org/x/crypto` | v0.52.0 | BSD-3-Clause | 암호 기능 |
 | `golang.org/x/sync` | v0.21.0 | BSD-3-Clause | 동시성 유틸리티 |
-| `golang.org/x/sys` | v0.42.0 | BSD-3-Clause | 운영체제 인터페이스 |
+| `golang.org/x/sys` | v0.45.0 | BSD-3-Clause | 운영체제 인터페이스 |
 | `golang.org/x/text` | v0.39.0 | BSD-3-Clause | 텍스트·문자 인코딩 |
 | `modernc.org/libc` | v1.55.3 | BSD-3-Clause | 순수 Go libc 호환 계층 |
 | `modernc.org/mathutil` | v1.6.0 | BSD-3-Clause | 수학 유틸리티 |

@@ -3,7 +3,7 @@
   "dataLicense": "CC0-1.0",
   "SPDXID": "SPDXRef-DOCUMENT",
   "name": "vibe-coders-gateway-source-sbom",
-  "documentNamespace": "https://github.com/hkjang/vibe-coders/sbom/f1f555d/2026-08-25",
+  "documentNamespace": "https://github.com/hkjang/vibe-coders/sbom/770d6f3/2026-08-25",
   "creationInfo": {
     "created": "2026-08-25T00:00:00Z",
     "creators": [
@@ -18,13 +18,13 @@
     {
       "name": "vibe-coders",
       "SPDXID": "SPDXRef-Package-vibe-coders",
-      "versionInfo": "0.79.5+23.gf1f555d",
-      "downloadLocation": "git+https://github.com/hkjang/vibe-coders.git@f1f555d46bec6b77c2a28ccef06dc10b2494fa9c",
+      "versionInfo": "0.79.5+25.g770d6f3",
+      "downloadLocation": "git+https://github.com/hkjang/vibe-coders.git@770d6f3310696b9328bc5067a244b9f6226c10c4",
       "filesAnalyzed": false,
       "licenseConcluded": "AGPL-3.0-only",
       "licenseDeclared": "AGPL-3.0-only",
       "copyrightText": "Copyright (c) 2026 hkjang and vibe-coders contributors",
-      "externalRefs": [{"referenceCategory":"PACKAGE-MANAGER","referenceType":"purl","referenceLocator":"pkg:golang/vibe-coders@0.79.5%2B23.gf1f555d"}]
+      "externalRefs": [{"referenceCategory":"PACKAGE-MANAGER","referenceType":"purl","referenceLocator":"pkg:golang/vibe-coders@0.79.5%2B25.g770d6f3"}]
     },
     {"name":"filippo.io/edwards25519","SPDXID":"SPDXRef-Package-filippo-edwards25519","versionInfo":"v1.2.0","downloadLocation":"https://proxy.golang.org/filippo.io/edwards25519/@v/v1.2.0.zip","filesAnalyzed":false,"licenseConcluded":"BSD-3-Clause","licenseDeclared":"BSD-3-Clause","copyrightText":"Copyright (c) 2009 The Go Authors","externalRefs":[{"referenceCategory":"PACKAGE-MANAGER","referenceType":"purl","referenceLocator":"pkg:golang/filippo.io/edwards25519@v1.2.0"}]},
     {"name":"github.com/dustin/go-humanize","SPDXID":"SPDXRef-Package-dustin-go-humanize","versionInfo":"v1.0.1","downloadLocation":"https://proxy.golang.org/github.com/dustin/go-humanize/@v/v1.0.1.zip","filesAnalyzed":false,"licenseConcluded":"MIT","licenseDeclared":"MIT","copyrightText":"Copyright (c) 2005-2008 Dustin Sallings","externalRefs":[{"referenceCategory":"PACKAGE-MANAGER","referenceType":"purl","referenceLocator":"pkg:golang/github.com/dustin/go-humanize@v1.0.1"}]},
@@ -36,9 +36,9 @@
     {"name":"github.com/jackc/puddle/v2","SPDXID":"SPDXRef-Package-jackc-puddle-v2","versionInfo":"v2.2.2","downloadLocation":"https://proxy.golang.org/github.com/jackc/puddle/v2/@v/v2.2.2.zip","filesAnalyzed":false,"licenseConcluded":"MIT","licenseDeclared":"MIT","copyrightText":"Copyright (c) 2018 Jack Christensen","externalRefs":[{"referenceCategory":"PACKAGE-MANAGER","referenceType":"purl","referenceLocator":"pkg:golang/github.com/jackc/puddle/v2@v2.2.2"}]},
     {"name":"github.com/remyoudompheng/bigfft","SPDXID":"SPDXRef-Package-remyoudompheng-bigfft","versionInfo":"v0.0.0-20230129092748-24d4a6f8daec","downloadLocation":"https://proxy.golang.org/github.com/remyoudompheng/bigfft/@v/v0.0.0-20230129092748-24d4a6f8daec.zip","filesAnalyzed":false,"licenseConcluded":"BSD-3-Clause","licenseDeclared":"BSD-3-Clause","copyrightText":"Copyright (c) 2012 The Go Authors","externalRefs":[{"referenceCategory":"PACKAGE-MANAGER","referenceType":"purl","referenceLocator":"pkg:golang/github.com/remyoudompheng/bigfft@v0.0.0-20230129092748-24d4a6f8daec"}]},
     {"name":"github.com/sijms/go-ora/v2","SPDXID":"SPDXRef-Package-sijms-go-ora-v2","versionInfo":"v2.9.0","downloadLocation":"https://proxy.golang.org/github.com/sijms/go-ora/v2/@v/v2.9.0.zip","filesAnalyzed":false,"licenseConcluded":"MIT","licenseDeclared":"MIT","copyrightText":"Copyright (c) 2020 Samy Sultan","externalRefs":[{"referenceCategory":"PACKAGE-MANAGER","referenceType":"purl","referenceLocator":"pkg:golang/github.com/sijms/go-ora/v2@v2.9.0"}]},
-    {"name":"golang.org/x/crypto","SPDXID":"SPDXRef-Package-golang-x-crypto","versionInfo":"v0.37.0","downloadLocation":"https://proxy.golang.org/golang.org/x/crypto/@v/v0.37.0.zip","filesAnalyzed":false,"licenseConcluded":"BSD-3-Clause","licenseDeclared":"BSD-3-Clause","copyrightText":"Copyright 2009 The Go Authors","externalRefs":[{"referenceCategory":"PACKAGE-MANAGER","referenceType":"purl","referenceLocator":"pkg:golang/golang.org/x/crypto@v0.37.0"}]},
+    {"name":"golang.org/x/crypto","SPDXID":"SPDXRef-Package-golang-x-crypto","versionInfo":"v0.52.0","downloadLocation":"https://proxy.golang.org/golang.org/x/crypto/@v/v0.52.0.zip","filesAnalyzed":false,"licenseConcluded":"BSD-3-Clause","licenseDeclared":"BSD-3-Clause","copyrightText":"Copyright 2009 The Go Authors","externalRefs":[{"referenceCategory":"PACKAGE-MANAGER","referenceType":"purl","referenceLocator":"pkg:golang/golang.org/x/crypto@v0.52.0"}]},
     {"name":"golang.org/x/sync","SPDXID":"SPDXRef-Package-golang-x-sync","versionInfo":"v0.21.0","downloadLocation":"https://proxy.golang.org/golang.org/x/sync/@v/v0.21.0.zip","filesAnalyzed":false,"licenseConcluded":"BSD-3-Clause","licenseDeclared":"BSD-3-Clause","copyrightText":"Copyright 2009 The Go Authors","externalRefs":[{"referenceCategory":"PACKAGE-MANAGER","referenceType":"purl","referenceLocator":"pkg:golang/golang.org/x/sync@v0.21.0"}]},
-    {"name":"golang.org/x/sys","SPDXID":"SPDXRef-Package-golang-x-sys","versionInfo":"v0.42.0","downloadLocation":"https://proxy.golang.org/golang.org/x/sys/@v/v0.42.0.zip","filesAnalyzed":false,"licenseConcluded":"BSD-3-Clause","licenseDeclared":"BSD-3-Clause","copyrightText":"Copyright 2009 The Go Authors","externalRefs":[{"referenceCategory":"PACKAGE-MANAGER","referenceType":"purl","referenceLocator":"pkg:golang/golang.org/x/sys@v0.42.0"}]},
+    {"name":"golang.org/x/sys","SPDXID":"SPDXRef-Package-golang-x-sys","versionInfo":"v0.45.0","downloadLocation":"https://proxy.golang.org/golang.org/x/sys/@v/v0.45.0.zip","filesAnalyzed":false,"licenseConcluded":"BSD-3-Clause","licenseDeclared":"BSD-3-Clause","copyrightText":"Copyright 2009 The Go Authors","externalRefs":[{"referenceCategory":"PACKAGE-MANAGER","referenceType":"purl","referenceLocator":"pkg:golang/golang.org/x/sys@v0.45.0"}]},
     {"name":"golang.org/x/text","SPDXID":"SPDXRef-Package-golang-x-text","versionInfo":"v0.39.0","downloadLocation":"https://proxy.golang.org/golang.org/x/text/@v/v0.39.0.zip","filesAnalyzed":false,"licenseConcluded":"BSD-3-Clause","licenseDeclared":"BSD-3-Clause","copyrightText":"Copyright 2009 The Go Authors","externalRefs":[{"referenceCategory":"PACKAGE-MANAGER","referenceType":"purl","referenceLocator":"pkg:golang/golang.org/x/text@v0.39.0"}]},
     {"name":"modernc.org/libc","SPDXID":"SPDXRef-Package-modernc-libc","versionInfo":"v1.55.3","downloadLocation":"https://proxy.golang.org/modernc.org/libc/@v/v1.55.3.zip","filesAnalyzed":false,"licenseConcluded":"BSD-3-Clause","licenseDeclared":"BSD-3-Clause","copyrightText":"Copyright (c) 2017 The Libc Authors and contributors","externalRefs":[{"referenceCategory":"PACKAGE-MANAGER","referenceType":"purl","referenceLocator":"pkg:golang/modernc.org/libc@v1.55.3"}]},
     {"name":"modernc.org/mathutil","SPDXID":"SPDXRef-Package-modernc-mathutil","versionInfo":"v1.6.0","downloadLocation":"https://proxy.golang.org/modernc.org/mathutil/@v/v1.6.0.zip","filesAnalyzed":false,"licenseConcluded":"BSD-3-Clause","licenseDeclared":"BSD-3-Clause","copyrightText":"Copyright (c) 2014 The mathutil Authors","externalRefs":[{"referenceCategory":"PACKAGE-MANAGER","referenceType":"purl","referenceLocator":"pkg:golang/modernc.org/mathutil@v1.6.0"}]},
