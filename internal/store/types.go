@@ -791,6 +791,8 @@ type RequestFilter struct {
 	Language       string
 	APIKeyID       string
 	Team           string
+	Teams          []string // accepted api_keys.team identities (canonical id and display name)
+	TeamScoped     bool     // true means team isolation is required; no team identities must return no rows
 	TraceID        string
 	SessionID      string
 	PromptName     string
@@ -1233,6 +1235,7 @@ type ScatterPoint struct {
 	RequestID           string  `json:"request_id"`
 	TraceID             string  `json:"trace_id"`
 	CreatedAt           string  `json:"created_at"`
+	IngestedAt          string  `json:"ingested_at"`
 	LatencyMS           int64   `json:"latency_ms"`
 	FirstChunkMS        int64   `json:"first_chunk_ms"`
 	StatusCode          int     `json:"status_code"`
@@ -1257,13 +1260,25 @@ type ScatterPoint struct {
 }
 
 type ScatterFilter struct {
-	Since    time.Time
-	Until    time.Time // upper bound on r.created_at (UTC); zero = open-ended (up to now)
-	Endpoint string
-	Model    string   // single model (backward compat); ignored when Models is non-empty
-	Models   []string // multi-model filter; empty = all models
-	APIKeyID string
-	Limit    int
+	Since      time.Time
+	Until      time.Time // upper bound on r.created_at (UTC); zero = open-ended (up to now)
+	Endpoint   string
+	Model      string   // single model (backward compat); ignored when Models is non-empty
+	Models     []string // multi-model filter; empty = all models
+	APIKeyID   string
+	Team       string
+	Teams      []string // accepted api_keys.team identities (canonical id and display name)
+	TeamScoped bool     // true means team isolation is required; no team identities must return no rows
+	Limit      int
+}
+
+// ScatterCursor identifies one committed request-log high-water mark by a database-serialized
+// ingestion time and request id. CreatedAt is deliberately not used here: it is assigned before
+// the upstream call. Periodic overlap reads refresh mutable metadata and cover older binaries
+// that write the empty compatibility default during a rolling upgrade.
+type ScatterCursor struct {
+	IngestedAt string `json:"ingested_at"`
+	RequestID  string `json:"request_id"`
 }
 
 // ScatterModelGroup holds per-model aggregate statistics computed from scatter points.

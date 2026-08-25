@@ -48,30 +48,12 @@ func (s *Server) handleScatter(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
 	}
-	since, until := xviewTimeRange(r, time.Hour)
-	limit := 5000
-	if v := strings.TrimSpace(r.URL.Query().Get("limit")); v != "" {
-		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 {
-			limit = parsed
-		}
+	f := s.scatterFilterFromRequest(r, 5000)
+	cursor, err := s.db.LatestScatterCursor(r.Context(), f)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "scatter_cursor_failed")
+		return
 	}
-	// Multi-model filter: ?models=gpt-4.1,gpt-4.1-mini takes precedence over ?model=
-	models := parseModelsParam(r.URL.Query().Get("models"))
-	singleModel := strings.TrimSpace(r.URL.Query().Get("model"))
-
-	f := store.ScatterFilter{
-		Since:    since,
-		Until:    until,
-		Endpoint: strings.TrimSpace(r.URL.Query().Get("endpoint")),
-		APIKeyID: strings.TrimSpace(r.URL.Query().Get("api_key_id")),
-		Limit:    limit,
-	}
-	if len(models) > 0 {
-		f.Models = models
-	} else {
-		f.Model = singleModel
-	}
-
 	points, truncated, err := s.db.ScatterPoints(r.Context(), f)
 	if err != nil {
 		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "scatter_failed")
@@ -79,9 +61,11 @@ func (s *Server) handleScatter(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := map[string]any{
-		"points":    points,
-		"truncated": truncated,
-		"since":     since.UTC().Format(time.RFC3339),
+		"points":      points,
+		"truncated":   truncated,
+		"since":       f.Since.UTC().Format(time.RFC3339),
+		"cursor":      cursor,
+		"server_time": time.Now().UTC().Format(time.RFC3339Nano),
 	}
 
 	// include per-model summary when requested
@@ -92,6 +76,36 @@ func (s *Server) handleScatter(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, resp)
+}
+
+func (s *Server) scatterFilterFromRequest(r *http.Request, defaultLimit int) store.ScatterFilter {
+	since, until := xviewTimeRange(r, time.Hour)
+	limit := defaultLimit
+	if v := strings.TrimSpace(r.URL.Query().Get("limit")); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 {
+			limit = parsed
+		}
+	}
+	// Multi-model filter: ?models=gpt-4.1,gpt-4.1-mini takes precedence over ?model=
+	models := parseModelsParam(r.URL.Query().Get("models"))
+	singleModel := strings.TrimSpace(r.URL.Query().Get("model"))
+	teams, teamScoped := requestTeamScopeForCaller(s, r)
+
+	f := store.ScatterFilter{
+		Since:      since,
+		Until:      until,
+		Endpoint:   strings.TrimSpace(r.URL.Query().Get("endpoint")),
+		APIKeyID:   strings.TrimSpace(r.URL.Query().Get("api_key_id")),
+		Teams:      teams,
+		TeamScoped: teamScoped,
+		Limit:      limit,
+	}
+	if len(models) > 0 {
+		f.Models = models
+	} else {
+		f.Model = singleModel
+	}
+	return f
 }
 
 func (s *Server) handleAnomalies(w http.ResponseWriter, r *http.Request) {

@@ -77,11 +77,19 @@ func (s *Server) handleRequestReadableSubresource(w http.ResponseWriter, r *http
 	}
 }
 
-func requestTeamScopeForCaller(s *Server, r *http.Request) string {
+func requestTeamScopeForCaller(s *Server, r *http.Request) ([]string, bool) {
 	if claims, ok := s.currentAccessClaims(r); ok && claims.Role == "team_admin" {
-		return claims.TeamID
+		teamID := strings.TrimSpace(claims.TeamID)
+		if teamID == "" {
+			return nil, true
+		}
+		keys, found, err := s.db.AuthTeamScopeIdentities(r.Context(), teamID)
+		if err != nil || !found {
+			return nil, true
+		}
+		return keys, true
 	}
-	return ""
+	return nil, false
 }
 
 func (s *Server) canViewRequestDetail(r *http.Request, request store.RecentRequest) bool {
@@ -89,11 +97,28 @@ func (s *Server) canViewRequestDetail(r *http.Request, request store.RecentReque
 	if !ok || claims.Role != "team_admin" {
 		return true
 	}
-	team, err := s.db.GetTeamForAPIKey(r.Context(), request.APIKeyID)
+	if strings.TrimSpace(claims.TeamID) == "" {
+		return false
+	}
+	keyTeam, err := s.db.GetTeamForAPIKey(r.Context(), request.APIKeyID)
 	if err != nil {
 		return false
 	}
-	return strings.TrimSpace(team) == strings.TrimSpace(claims.TeamID)
+	claimTeamID := strings.TrimSpace(claims.TeamID)
+	keyTeam = strings.TrimSpace(keyTeam)
+	if keyTeam == "" {
+		return false
+	}
+	keys, found, err := s.db.AuthTeamScopeIdentities(r.Context(), claimTeamID)
+	if err != nil || !found {
+		return false
+	}
+	for _, key := range keys {
+		if keyTeam == key {
+			return true
+		}
+	}
+	return false
 }
 
 func requestBodyEvidence(ctx context.Context, s *Server, id string, detail store.RequestDetail) map[string]any {

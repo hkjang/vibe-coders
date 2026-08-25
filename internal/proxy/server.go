@@ -31,7 +31,7 @@ import (
 )
 
 // AppVersion is the gateway build version, surfaced in /auth/me and the admin UI.
-const AppVersion = "v0.79.5"
+const AppVersion = "v0.79.6"
 
 type Server struct {
 	cfg      config.Config
@@ -531,6 +531,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/admin/prompt-products/candidates", s.handlePromptProductCandidates)
 	mux.HandleFunc("/admin/contexts", s.handleContexts)
 	mux.HandleFunc("/admin/scatter", s.handleScatter)
+	mux.HandleFunc("/admin/xview/delta", s.handleXViewDelta)
 	mux.HandleFunc("/admin/xview/models", s.handleXViewModels)
 	mux.HandleFunc("/admin/xview/model-series", s.handleXViewModelSeries)
 	mux.HandleFunc("/admin/xview/model-outliers", s.handleXViewModelOutliers)
@@ -776,15 +777,17 @@ func (s *Server) handleRequests(w http.ResponseWriter, r *http.Request) {
 	loc := searchLocation(r.URL.Query().Get("tz"))
 	from := parseRangeBound(r.URL.Query().Get("from"), loc, false)
 	to := parseRangeBound(r.URL.Query().Get("to"), loc, true)
+	teams, teamScoped := requestTeamScopeForCaller(s, r)
 	requests, err := s.db.RecentRequests(r.Context(), store.RequestFilter{
-		Limit:    limit,
-		IDs:      ids,
-		IP:       strings.TrimSpace(r.URL.Query().Get("ip")),
-		Model:    strings.TrimSpace(r.URL.Query().Get("model")),
-		Language: strings.TrimSpace(r.URL.Query().Get("language")),
-		Team:     requestTeamScopeForCaller(s, r),
-		From:     from,
-		To:       to,
+		Limit:      limit,
+		IDs:        ids,
+		IP:         strings.TrimSpace(r.URL.Query().Get("ip")),
+		Model:      strings.TrimSpace(r.URL.Query().Get("model")),
+		Language:   strings.TrimSpace(r.URL.Query().Get("language")),
+		Teams:      teams,
+		TeamScoped: teamScoped,
+		From:       from,
+		To:         to,
 	})
 	if err != nil {
 		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "requests_failed")

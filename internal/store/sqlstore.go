@@ -170,16 +170,30 @@ func (s *SQLStore) TableExists(ctx context.Context, name string) (bool, error) {
 }
 
 func (s *SQLStore) Migrate(ctx context.Context) error {
+	releaseMigrationLock, err := s.acquireMigrationLock(ctx)
+	if err != nil {
+		return err
+	}
+	defer releaseMigrationLock()
+
 	statements := migrationStatements()
 
 	for _, statement := range statements {
 		execQuery := renderForDialect(statement, s.dialect)
+		if s.dialect == "postgres" && strings.Contains(execQuery, "CREATE INDEX CONCURRENTLY") {
+			if err := s.dropInvalidPostgresIndex(ctx, execQuery); err != nil {
+				return err
+			}
+		}
 		if _, err := s.db.ExecContext(ctx, execQuery); err != nil {
 			if isAlreadyExistsErr(err) {
 				continue
 			}
 			return err
 		}
+	}
+	if err := s.syncXViewIngestClock(ctx); err != nil {
+		return err
 	}
 	if s.dialect == "postgres" {
 		if err := s.widenPostgresRealColumns(ctx); err != nil {
@@ -194,6 +208,58 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 	return s.markUsageRollupStarted(ctx)
 }
 
+// A cancelled or crashed CREATE INDEX CONCURRENTLY can leave an index with the requested
+// name but indisvalid=false. PostgreSQL's IF NOT EXISTS treats that shell as existing, so
+// every later startup would otherwise skip the build forever. The advisory migration lock
+// makes it safe for the next pod to remove the invalid shell and retry the declared index.
+func (s *SQLStore) dropInvalidPostgresIndex(ctx context.Context, statement string) error {
+	index, ok := parseCreateIndex(statement)
+	if !ok {
+		return fmt.Errorf("parse concurrent PostgreSQL index statement: %s", statement)
+	}
+	var valid bool
+	err := s.db.QueryRowContext(ctx, `SELECT i.indisvalid
+		FROM pg_index i
+		JOIN pg_class c ON c.oid = i.indexrelid
+		JOIN pg_namespace n ON n.oid = c.relnamespace
+		WHERE n.nspname = current_schema() AND c.relname = $1`, index.Name).Scan(&valid)
+	if err == sql.ErrNoRows || valid {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("inspect PostgreSQL index %s: %w", index.Name, err)
+	}
+	quoted := `"` + strings.ReplaceAll(index.Name, `"`, `""`) + `"`
+	if _, err := s.db.ExecContext(ctx, `DROP INDEX CONCURRENTLY IF EXISTS `+quoted); err != nil {
+		return fmt.Errorf("drop invalid PostgreSQL index %s: %w", index.Name, err)
+	}
+	return nil
+}
+
+// acquireMigrationLock serializes PostgreSQL startup migrations across pods. It is session
+// scoped (and deliberately not a transaction), so CREATE INDEX CONCURRENTLY remains legal.
+// SQLite already serializes schema changes through its single configured connection.
+func (s *SQLStore) acquireMigrationLock(ctx context.Context) (func(), error) {
+	if s.dialect != "postgres" {
+		return func() {}, nil
+	}
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("open PostgreSQL migration lock connection: %w", err)
+	}
+	const migrationLockID int64 = 864260796
+	if _, err := conn.ExecContext(ctx, `SELECT pg_advisory_lock($1)`, migrationLockID); err != nil {
+		_ = conn.Close()
+		return nil, fmt.Errorf("acquire PostgreSQL migration lock: %w", err)
+	}
+	return func() {
+		releaseCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_, _ = conn.ExecContext(releaseCtx, `SELECT pg_advisory_unlock($1)`, migrationLockID)
+		_ = conn.Close()
+	}, nil
+}
+
 // renderForDialect turns a declared statement into the one this dialect actually runs.
 // Migrate applies it and the admin SQL view displays it, so what an operator reads is what
 // executed rather than a second rendering that can disagree with it.
@@ -204,7 +270,14 @@ func renderForDialect(statement, dialect string) string {
 	// PostgreSQL does not support BLOB; it uses BYTEA instead.
 	// Using regex guarantees that any variation of case or spacing is handled properly.
 	out := blobRegex.ReplaceAllString(statement, "BYTEA")
-	return realRegex.ReplaceAllString(out, "DOUBLE PRECISION")
+	out = realRegex.ReplaceAllString(out, "DOUBLE PRECISION")
+	// These indexes are introduced on high-write observability tables. PostgreSQL's
+	// ordinary CREATE INDEX blocks writers for the duration of the build; each migration
+	// statement runs outside an explicit transaction, so the concurrent form is safe here.
+	if strings.Contains(out, "idx_request_logs_ingested_cursor") || strings.Contains(out, "idx_request_logs_xview_legacy") || strings.Contains(out, "idx_request_logs_xview_team_cursor") || strings.Contains(out, "idx_secret_events_request") {
+		out = strings.Replace(out, "CREATE INDEX IF NOT EXISTS", "CREATE INDEX CONCURRENTLY IF NOT EXISTS", 1)
+	}
+	return out
 }
 
 // migrationStatements is the schema the gateway declares. It is a function rather than a
@@ -354,7 +427,8 @@ func migrationStatements() []string {
 			body_summary_json TEXT,
 			routing_summary_json TEXT,
 			policy_summary_json TEXT,
-			created_at TEXT NOT NULL
+			created_at TEXT NOT NULL,
+			ingested_at TEXT NOT NULL DEFAULT ''
 		)`,
 		// Idempotent ALTERs for legacy installations of request_logs
 		`ALTER TABLE request_logs ADD COLUMN body_raw TEXT`,
@@ -396,10 +470,23 @@ func migrationStatements() []string {
 		`ALTER TABLE request_logs ADD COLUMN project TEXT`,
 		`ALTER TABLE request_logs ADD COLUMN service TEXT`,
 		`ALTER TABLE request_logs ADD COLUMN cost_center TEXT`,
+		// Commit-serialized cursor for incremental XView reads. Legacy binaries use the empty
+		// default during a rolling upgrade; periodic reconciliation surfaces those rows.
+		`ALTER TABLE request_logs ADD COLUMN ingested_at TEXT NOT NULL DEFAULT ''`,
 		`CREATE INDEX IF NOT EXISTS idx_request_logs_repo ON request_logs(repo)`,
 		`CREATE INDEX IF NOT EXISTS idx_request_logs_project ON request_logs(project)`,
 		`CREATE INDEX IF NOT EXISTS idx_request_logs_cost_center ON request_logs(cost_center)`,
 		`CREATE INDEX IF NOT EXISTS idx_request_logs_created_at ON request_logs(created_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_request_logs_ingested_cursor ON request_logs(ingested_at, id)`,
+		`CREATE INDEX IF NOT EXISTS idx_request_logs_xview_legacy ON request_logs(ingested_at, created_at DESC, id DESC) WHERE ingested_at = ''`,
+		`CREATE INDEX IF NOT EXISTS idx_request_logs_xview_team_cursor ON request_logs(api_key_id, created_at, ingested_at, id)`,
+		`CREATE TABLE IF NOT EXISTS xview_ingest_clock (
+			id INTEGER PRIMARY KEY,
+			tick BIGINT NOT NULL
+		)`,
+		`INSERT INTO xview_ingest_clock (id, tick)
+			VALUES (1, 0)
+			ON CONFLICT(id) DO NOTHING`,
 		`CREATE INDEX IF NOT EXISTS idx_request_logs_client_ip ON request_logs(client_ip)`,
 		`CREATE INDEX IF NOT EXISTS idx_request_logs_model ON request_logs(model)`,
 		`CREATE INDEX IF NOT EXISTS idx_request_logs_session_id ON request_logs(session_id)`,
@@ -604,6 +691,7 @@ func migrationStatements() []string {
 			created_at TEXT NOT NULL
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_secret_events_created_at ON secret_events(created_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_secret_events_request ON secret_events(request_id)`,
 		`CREATE TABLE IF NOT EXISTS tool_risk_profiles (
 			id TEXT PRIMARY KEY,
 			server_label TEXT NOT NULL,
@@ -2153,6 +2241,32 @@ func migrationStatements() []string {
 	}
 }
 
+// syncXViewIngestClock moves the serialized clock up to the greatest existing cursor without
+// ever moving it backwards. The conditional UPDATE remains safe during concurrent pod startup.
+func (s *SQLStore) syncXViewIngestClock(ctx context.Context) error {
+	var raw string
+	err := s.db.QueryRowContext(ctx, `SELECT COALESCE(MAX(ingested_at), '') FROM request_logs WHERE ingested_at <> ''`).Scan(&raw)
+	if err != nil {
+		return fmt.Errorf("read greatest XView ingestion cursor: %w", err)
+	}
+	var candidate int64
+	if raw != "" {
+		parsed, ok := parseStoredTime(raw)
+		if !ok {
+			return fmt.Errorf("parse greatest XView ingestion cursor %q", raw)
+		}
+		candidate = parsed.UnixNano()
+	}
+	_, err = s.db.ExecContext(ctx, s.bind(`
+		UPDATE xview_ingest_clock
+		SET tick = CASE WHEN tick < ? THEN ? ELSE tick END
+		WHERE id = 1`), candidate, candidate)
+	if err != nil {
+		return fmt.Errorf("sync XView ingestion clock: %w", err)
+	}
+	return nil
+}
+
 // widenPostgresRealColumns promotes any float4 column to float8.
 //
 // New databases get DOUBLE PRECISION from the rewrite above, but a database created by
@@ -2663,10 +2777,12 @@ func (s *SQLStore) InsertLogRecord(ctx context.Context, record LogRecord) error 
 	if req.CreatedAt.IsZero() {
 		req.CreatedAt = time.Now().UTC()
 	}
+	// The final ingestion timestamp is assigned immediately before commit, after this
+	// transaction obtains the shared XView clock row. Keep the uncommitted placeholder empty.
 	_, err = tx.ExecContext(ctx, s.bind(`INSERT INTO request_logs
-		(id, trace_id, api_key_id, method, client_ip, forwarded_for, user_agent, hostname, model, resolved_model, upstream_model, endpoint, stream, provider, status_code, latency_ms, first_chunk_ms, session_id, prompt_name, prompt_version, prompt_variables_hash, tool_count, error, request_hash, body_raw, replay_of, failover, route_reason, route_detail, complexity, fallback_from, fallback_reason, requested_model, temperature, top_p, max_tokens, max_completion_tokens, response_format_type, request_headers_json, upstream_headers_json, response_headers_json, header_summary_json, body_summary_json, routing_summary_json, policy_summary_json, task_type, prompt_fingerprint, repo, branch, project, service, cost_center, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
-		cleanArgs([]any{req.ID, req.TraceID, req.APIKeyID, req.Method, req.ClientIP, req.ForwardedFor, req.UserAgent, req.Hostname, req.Model, req.ResolvedModel, req.UpstreamModel, req.Endpoint, boolInt(req.Stream), req.Provider, req.StatusCode, req.LatencyMS, req.FirstChunkMS, req.SessionID, req.PromptName, req.PromptVersion, req.PromptVariablesHash, req.ToolCount, req.Error, req.RequestHash, req.BodyRaw, req.ReplayOf, boolInt(req.Failover), req.RouteReason, req.RouteDetail, req.Complexity, req.FallbackFrom, req.FallbackReason, req.RequestedModel, nullableFloatArg(req.Temperature), nullableFloatArg(req.TopP), req.MaxTokens, req.MaxCompletionTokens, req.ResponseFormatType, req.RequestHeadersJSON, req.UpstreamHeadersJSON, req.ResponseHeadersJSON, req.HeaderSummaryJSON, req.BodySummaryJSON, req.RoutingSummaryJSON, req.PolicySummaryJSON, req.TaskType, req.PromptFingerprint, req.Repo, req.Branch, req.Project, req.Service, req.CostCenter, formatTime(req.CreatedAt)})...)
+		(id, trace_id, api_key_id, method, client_ip, forwarded_for, user_agent, hostname, model, resolved_model, upstream_model, endpoint, stream, provider, status_code, latency_ms, first_chunk_ms, session_id, prompt_name, prompt_version, prompt_variables_hash, tool_count, error, request_hash, body_raw, replay_of, failover, route_reason, route_detail, complexity, fallback_from, fallback_reason, requested_model, temperature, top_p, max_tokens, max_completion_tokens, response_format_type, request_headers_json, upstream_headers_json, response_headers_json, header_summary_json, body_summary_json, routing_summary_json, policy_summary_json, task_type, prompt_fingerprint, repo, branch, project, service, cost_center, created_at, ingested_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+		cleanArgs([]any{req.ID, req.TraceID, req.APIKeyID, req.Method, req.ClientIP, req.ForwardedFor, req.UserAgent, req.Hostname, req.Model, req.ResolvedModel, req.UpstreamModel, req.Endpoint, boolInt(req.Stream), req.Provider, req.StatusCode, req.LatencyMS, req.FirstChunkMS, req.SessionID, req.PromptName, req.PromptVersion, req.PromptVariablesHash, req.ToolCount, req.Error, req.RequestHash, req.BodyRaw, req.ReplayOf, boolInt(req.Failover), req.RouteReason, req.RouteDetail, req.Complexity, req.FallbackFrom, req.FallbackReason, req.RequestedModel, nullableFloatArg(req.Temperature), nullableFloatArg(req.TopP), req.MaxTokens, req.MaxCompletionTokens, req.ResponseFormatType, req.RequestHeadersJSON, req.UpstreamHeadersJSON, req.ResponseHeadersJSON, req.HeaderSummaryJSON, req.BodySummaryJSON, req.RoutingSummaryJSON, req.PolicySummaryJSON, req.TaskType, req.PromptFingerprint, req.Repo, req.Branch, req.Project, req.Service, req.CostCenter, formatTime(req.CreatedAt), ""})...)
 	if err != nil {
 		return err
 	}
@@ -2831,8 +2947,41 @@ func (s *SQLStore) InsertLogRecord(ctx context.Context, record LogRecord) error 
 	if _, err := tx.ExecContext(ctx, rollupQuery, rollupArgs...); err != nil {
 		return err
 	}
+	ingestedAt, err := s.nextXViewIngestedAt(ctx, tx)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, s.bind(`UPDATE request_logs SET ingested_at = ? WHERE id = ?`), ingestedAt, req.ID); err != nil {
+		return fmt.Errorf("assign XView ingestion cursor: %w", err)
+	}
 
 	return tx.Commit()
+}
+
+// nextXViewIngestedAt serializes completed log transactions across processes. Updating the
+// singleton row obtains a database write/row lock which remains held until the caller commits;
+// the next transaction cannot receive a later cursor until this one is visible. Taking the max
+// with wall time keeps the value useful for bounded compatibility reconciliation, while the
+// +1ns branch preserves strict ordering across clock skew and timestamp ties.
+func (s *SQLStore) nextXViewIngestedAt(ctx context.Context, tx *sql.Tx) (string, error) {
+	candidate := time.Now().UTC().UnixNano()
+	result, err := tx.ExecContext(ctx, s.bind(`
+		UPDATE xview_ingest_clock
+		SET tick = CASE WHEN tick >= ? THEN tick + 1 ELSE ? END
+		WHERE id = 1`), candidate, candidate)
+	if err != nil {
+		return "", fmt.Errorf("advance XView ingestion clock: %w", err)
+	}
+	if affected, err := result.RowsAffected(); err != nil {
+		return "", fmt.Errorf("read XView ingestion clock lock result: %w", err)
+	} else if affected != 1 {
+		return "", fmt.Errorf("XView ingestion clock row missing")
+	}
+	var tick int64
+	if err := tx.QueryRowContext(ctx, `SELECT tick FROM xview_ingest_clock WHERE id = 1`).Scan(&tick); err != nil {
+		return "", fmt.Errorf("read XView ingestion clock: %w", err)
+	}
+	return formatXViewIngestedAt(time.Unix(0, tick)), nil
 }
 
 func (s *SQLStore) InsertLLMEvaluations(ctx context.Context, evaluations []LLMEvaluation) error {
@@ -3056,10 +3205,7 @@ func (s *SQLStore) RecentRequests(ctx context.Context, filter RequestFilter) ([]
 		where = append(where, "r.trace_id = ?")
 		args = append(args, filter.TraceID)
 	}
-	if filter.Team != "" {
-		where = append(where, `COALESCE(NULLIF((SELECT k.team FROM api_keys k WHERE k.id = r.api_key_id), ''), 'unassigned') = ?`)
-		args = append(args, filter.Team)
-	}
+	where, args = appendRequestTeamCondition(where, args, filter.Team, filter.Teams, filter.TeamScoped)
 	if filter.SessionID != "" {
 		where = append(where, "COALESCE(NULLIF(r.session_id, ''), 'no-session') = ?")
 		args = append(args, filter.SessionID)
@@ -3330,6 +3476,15 @@ func nullableFloatArg(value *float64) any {
 
 func formatTime(value time.Time) string {
 	return value.UTC().Format(time.RFC3339Nano)
+}
+
+// XView cursors are compared as TEXT by both SQLite and PostgreSQL. A fixed-width UTC
+// representation preserves chronological ordering lexicographically, unlike RFC3339Nano's
+// variable-width fractional seconds around exact second boundaries.
+const xviewIngestedAtLayout = "2006-01-02T15:04:05.000000000Z"
+
+func formatXViewIngestedAt(value time.Time) string {
+	return value.UTC().Format(xviewIngestedAtLayout)
 }
 
 func cleanArgs(args []any) []any {
