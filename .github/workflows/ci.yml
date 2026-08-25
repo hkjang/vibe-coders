@@ -71,9 +71,6 @@ jobs:
       - name: Install govulncheck
         run: go install golang.org/x/vuln/cmd/govulncheck@latest
       - name: Scan
-        # Advisory: surfaces known CVEs in deps/stdlib without blocking merges on
-        # transitive stdlib advisories. Flip continue-on-error to false to harden.
-        continue-on-error: true
         run: govulncheck ./...
 
   docker:

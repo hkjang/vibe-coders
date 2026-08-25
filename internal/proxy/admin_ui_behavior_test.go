@@ -2,6 +2,8 @@ package proxy
 
 import (
 	"os/exec"
+	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -17,7 +19,14 @@ func TestAdminUIBehaviour(t *testing.T) {
 	if err != nil {
 		t.Skip("node not installed; skipping admin UI behaviour checks")
 	}
-	out, err := exec.Command(node, "testdata/admin_ui_behavior.js").CombinedOutput()
+	_, testFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("resolve admin UI behaviour test path")
+	}
+	packageDir := filepath.Dir(testFile)
+	cmd := exec.Command(node, filepath.Join(packageDir, "testdata", "admin_ui_behavior.js"))
+	cmd.Dir = packageDir
+	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("admin UI behaviour checks failed: %v\n%s", err, out)
 	}
