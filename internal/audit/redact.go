@@ -22,8 +22,8 @@ import (
 // Getting one of these wrong does not fail loudly, it lets a secret through, so a rule
 // whose literal is not obviously mandatory leaves the field nil and always runs.
 var redactPatterns = []struct {
-	re          *regexp.Regexp
-	replacement string
+	re             *regexp.Regexp
+	replacement    string
 	mustContainAny []string // lowercase literals, any one of which the pattern requires; nil = always run
 }{
 	// Generic key=value, must come before specific token rules so the value is wiped together

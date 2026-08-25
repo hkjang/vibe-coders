@@ -13,15 +13,15 @@ import (
 // When a row exists, it takes precedence over environment defaults at runtime. The client
 // secret is stored encrypted (ClientSecretEnc holds the AES-GCM ciphertext, never plaintext).
 type SSOProviderConfig struct {
-	Provider        string   `json:"provider"`
-	Enabled         bool     `json:"enabled"`
-	IssuerURL       string   `json:"issuer_url"`
-	ClientID        string   `json:"client_id"`
-	ClientSecretEnc string   `json:"-"` // ciphertext; never serialized to clients
-	RedirectURI     string   `json:"redirect_uri"`
-	Scopes          []string `json:"scopes"`
-	DefaultRole     string   `json:"default_role"`
-	RoleClaim       string   `json:"role_claim"`
+	Provider        string            `json:"provider"`
+	Enabled         bool              `json:"enabled"`
+	IssuerURL       string            `json:"issuer_url"`
+	ClientID        string            `json:"client_id"`
+	ClientSecretEnc string            `json:"-"` // ciphertext; never serialized to clients
+	RedirectURI     string            `json:"redirect_uri"`
+	Scopes          []string          `json:"scopes"`
+	DefaultRole     string            `json:"default_role"`
+	RoleClaim       string            `json:"role_claim"`
 	GroupClaim      string            `json:"group_claim"`
 	AllowLocalLogin bool              `json:"allow_local_login"`
 	RoleMap         map[string]string `json:"role_map"` // Keycloak role → internal role (overrides defaults)

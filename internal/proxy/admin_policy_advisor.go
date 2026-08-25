@@ -51,9 +51,9 @@ func (s *Server) handlePolicyAdvisorSuggestions(w http.ResponseWriter, r *http.R
 			}
 			suggestions = append(suggestions, policySuggestion{
 				ID: newID("psug"), Title: "모델 " + a.ScopeValue + " 비용 급증 — 승인 요구",
-				Severity:  sev,
-				Rationale: "모델 " + a.ScopeValue + "의 비용이 평소 대비 급증(z=" + ftoa(a.ZScore) + ")했습니다. 승인 게이트로 오남용을 차단하세요.",
-				Evidence:  map[string]any{"scope": "model", "z_score": round1(a.ZScore), "recent": round1(a.RecentValue), "baseline": round1(a.BaselineMean)},
+				Severity:   sev,
+				Rationale:  "모델 " + a.ScopeValue + "의 비용이 평소 대비 급증(z=" + ftoa(a.ZScore) + ")했습니다. 승인 게이트로 오남용을 차단하세요.",
+				Evidence:   map[string]any{"scope": "model", "z_score": round1(a.ZScore), "recent": round1(a.RecentValue), "baseline": round1(a.BaselineMean)},
 				Conditions: map[string]any{"model": a.ScopeValue},
 				Actions:    map[string]any{"require_approval": true},
 			})
@@ -71,9 +71,9 @@ func (s *Server) handlePolicyAdvisorSuggestions(w http.ResponseWriter, r *http.R
 		if detectOnly >= 10 && !ruleHasSecretBlock(active) {
 			suggestions = append(suggestions, policySuggestion{
 				ID: newID("psug"), Title: "민감정보 차단 정책 추가",
-				Severity:  "critical",
-				Rationale: "최근 " + itoaProxy(detectOnly) + "건의 secret이 탐지(detect)만 되고 차단되지 않았습니다. secret_action=block으로 유출을 막으세요.",
-				Evidence:  map[string]any{"detect_only_events": detectOnly},
+				Severity:   "critical",
+				Rationale:  "최근 " + itoaProxy(detectOnly) + "건의 secret이 탐지(detect)만 되고 차단되지 않았습니다. secret_action=block으로 유출을 막으세요.",
+				Evidence:   map[string]any{"detect_only_events": detectOnly},
 				Conditions: map[string]any{"contains_secret": true},
 				Actions:    map[string]any{"secret_action": "block"},
 			})
@@ -91,9 +91,9 @@ func (s *Server) handlePolicyAdvisorSuggestions(w http.ResponseWriter, r *http.R
 			}
 			suggestions = append(suggestions, policySuggestion{
 				ID: newID("psug"), Title: "MCP 도구 " + t.ToolName + " 오류 급증 — 승인 요구",
-				Severity:  "warning",
-				Rationale: "MCP 도구 " + t.ToolName + " 오류율이 " + ftoa(t.ErrorRate*100) + "%입니다. 승인 게이트로 위험 호출을 검토하세요.",
-				Evidence:  map[string]any{"calls": t.Calls, "error_rate": round1(t.ErrorRate * 100), "server": t.ServerLabel},
+				Severity:   "warning",
+				Rationale:  "MCP 도구 " + t.ToolName + " 오류율이 " + ftoa(t.ErrorRate*100) + "%입니다. 승인 게이트로 위험 호출을 검토하세요.",
+				Evidence:   map[string]any{"calls": t.Calls, "error_rate": round1(t.ErrorRate * 100), "server": t.ServerLabel},
 				Conditions: map[string]any{"mcp_tool": t.ToolName},
 				Actions:    map[string]any{"require_approval": true},
 			})

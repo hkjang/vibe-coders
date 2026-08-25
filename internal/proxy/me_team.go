@@ -197,10 +197,10 @@ func (s *Server) handleTeamRisk(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"team_id": teamID,
-		"since":   window.UTC().Format(time.RFC3339),
-		"blocked": curBlocked,
-		"warned":  curWarned,
+		"team_id":              teamID,
+		"since":                window.UTC().Format(time.RFC3339),
+		"blocked":              curBlocked,
+		"warned":               curWarned,
 		"blocked_prior_window": priorBlocked,
 		"blocked_trend":        curBlocked - priorBlocked, // >0 = rising risk
 		"secrets_total":        len(secrets),
@@ -239,12 +239,12 @@ func (s *Server) handleTeamOnboarding(w http.ResponseWriter, r *http.Request) {
 	tools, _ := s.db.TeamMCPTools(ctx, keys, since, 5)
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"team_id":             teamID,
-		"since":               since.UTC().Format(time.RFC3339),
-		"recommended_models":  models,
-		"recommended_skills":  skills,
-		"recommended_mcp":     tools,
-		"note":                "팀이 실제로 사용하는 모델·Skill·MCP 도구 묶음입니다. 신규 팀원의 시작 키트로 활용하세요.",
+		"team_id":            teamID,
+		"since":              since.UTC().Format(time.RFC3339),
+		"recommended_models": models,
+		"recommended_skills": skills,
+		"recommended_mcp":    tools,
+		"note":               "팀이 실제로 사용하는 모델·Skill·MCP 도구 묶음입니다. 신규 팀원의 시작 키트로 활용하세요.",
 	})
 }
 
@@ -292,14 +292,14 @@ func (s *Server) handleTeamSavingsChallenge(w http.ResponseWriter, r *http.Reque
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"team_id":             teamID,
-		"month_to_date_krw":   thisMTD,
+		"team_id":                 teamID,
+		"month_to_date_krw":       thisMTD,
 		"projected_month_end_krw": projectedMonthEnd,
-		"last_month_krw":      lastMonthTotal,
-		"projected_savings_krw": projectedSavings,
-		"on_track":            projectedMonthEnd <= lastMonthTotal || lastMonthTotal == 0,
-		"days_elapsed":        daysElapsed,
-		"days_in_month":       daysInMonth,
+		"last_month_krw":          lastMonthTotal,
+		"projected_savings_krw":   projectedSavings,
+		"on_track":                projectedMonthEnd <= lastMonthTotal || lastMonthTotal == 0,
+		"days_elapsed":            daysElapsed,
+		"days_in_month":           daysInMonth,
 	})
 }
 

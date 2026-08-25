@@ -233,7 +233,6 @@ func (s *Server) resolvePatternToConcreteModel(r *http.Request, proxyKey string,
 	return models[0], t.Provider, true
 }
 
-
 // redTeamThrottleQPS paces live probe invocations to at most `qps` calls per second by sleeping
 // until the minimum inter-call interval has elapsed since the previous call. It updates *last to
 // the effective call time. Returns false if the context is cancelled while waiting (caller aborts).

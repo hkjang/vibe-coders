@@ -8,14 +8,14 @@ import (
 
 // incident is a ranked root-cause candidate the operator should look at first.
 type incident struct {
-	ID          string         `json:"id"`
-	Severity    string         `json:"severity"` // critical | warning | info
-	Category    string         `json:"category"`
-	Title       string         `json:"title"`
-	Summary     string         `json:"summary"`
-	Evidence    map[string]any `json:"evidence,omitempty"`
-	Actions     []string       `json:"recommended_actions"`
-	Links       []string       `json:"links,omitempty"`
+	ID       string         `json:"id"`
+	Severity string         `json:"severity"` // critical | warning | info
+	Category string         `json:"category"`
+	Title    string         `json:"title"`
+	Summary  string         `json:"summary"`
+	Evidence map[string]any `json:"evidence,omitempty"`
+	Actions  []string       `json:"recommended_actions"`
+	Links    []string       `json:"links,omitempty"`
 }
 
 func severityRank(s string) int {

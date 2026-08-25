@@ -126,9 +126,9 @@ func TestClickHouseFactFanout(t *testing.T) {
 
 	now := time.Now().UTC()
 	server.enqueue(store.LogRecord{
-		Request: store.RequestLog{ID: "rq1", TraceID: "tr1", Model: "gpt-4.1", Provider: "openai", StatusCode: 200, CreatedAt: now},
-		Tools:   []store.ToolInvocation{{RequestID: "rq1", TraceID: "tr1", ServerLabel: "github", ToolName: "create_pr", Source: "call", IsMCP: true, CreatedAt: now}},
-		Routing: &store.RoutingDecisionLog{RequestID: "rq1", TraceID: "tr1", RequestedModel: "auto", SelectedModel: "gpt-4.1", SelectedProvider: "openai", DecisionReason: "complexity", CreatedAt: now},
+		Request:     store.RequestLog{ID: "rq1", TraceID: "tr1", Model: "gpt-4.1", Provider: "openai", StatusCode: 200, CreatedAt: now},
+		Tools:       []store.ToolInvocation{{RequestID: "rq1", TraceID: "tr1", ServerLabel: "github", ToolName: "create_pr", Source: "call", IsMCP: true, CreatedAt: now}},
+		Routing:     &store.RoutingDecisionLog{RequestID: "rq1", TraceID: "tr1", RequestedModel: "auto", SelectedModel: "gpt-4.1", SelectedProvider: "openai", DecisionReason: "complexity", CreatedAt: now},
 		Evaluations: []store.LLMEvaluation{{RequestID: "rq1", TraceID: "tr1", Name: "injection", Category: "security", Score: 0.9, Label: "clean", Passed: true, CreatedAt: now}},
 	})
 

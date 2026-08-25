@@ -32,11 +32,11 @@ func (s *Server) handleMultiModelLeaderboard(w http.ResponseWriter, r *http.Requ
 	}
 
 	type agg struct {
-		model      string
-		appear     int
-		sum        float64
-		passes     int
-		wins       int
+		model  string
+		appear int
+		sum    float64
+		passes int
+		wins   int
 	}
 	stats := map[string]*agg{}
 	get := func(m string) *agg {

@@ -15,15 +15,15 @@ import (
 
 func TestResolveKeycloakRole(t *testing.T) {
 	cases := []struct {
-		roles   []string
-		def     string
-		want    string
+		roles []string
+		def   string
+		want  string
 	}{
 		{[]string{"vibe-developer"}, "developer", "developer"},
-		{[]string{"vibe-admin", "vibe-developer"}, "developer", "admin"},   // highest rank wins
+		{[]string{"vibe-admin", "vibe-developer"}, "developer", "admin"}, // highest rank wins
 		{[]string{"vibe-team-admin", "vibe-auditor"}, "developer", "team_admin"},
-		{[]string{"unknown-role"}, "developer", "developer"},               // fallback default
-		{[]string{"unknown-role"}, "", ""},                                 // no default → block
+		{[]string{"unknown-role"}, "developer", "developer"}, // fallback default
+		{[]string{"unknown-role"}, "", ""},                   // no default → block
 		{[]string{"vibe-auditor"}, "developer", "readonly_admin"},
 	}
 	for i, c := range cases {

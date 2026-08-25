@@ -224,7 +224,7 @@ func (s *Server) provisionKeycloakUser(ctx context.Context, claims map[string]an
 	}
 	// 3) New user.
 	user := store.AuthUser{
-		ID:           "usr_" + audit.HashText("keycloak|"+kc.IssuerURL+"|"+sub)[:16],
+		ID:           "usr_" + audit.HashText("keycloak|" + kc.IssuerURL + "|" + sub)[:16],
 		Email:        firstNonEmpty(email, sub+"@sso.local"),
 		PasswordHash: "", // SSO-only account (no local password)
 		Name:         name,
@@ -450,14 +450,14 @@ func (s *Server) handleKeycloakConfigSave(w http.ResponseWriter, r *http.Request
 		return
 	}
 	var p struct {
-		Enabled         bool     `json:"enabled"`
-		IssuerURL       string   `json:"issuer_url"`
-		ClientID        string   `json:"client_id"`
-		ClientSecret    *string  `json:"client_secret"` // nil/omitted = keep existing; "" = clear
-		RedirectURI     string   `json:"redirect_uri"`
-		Scopes          []string `json:"scopes"`
-		DefaultRole     string   `json:"default_role"`
-		RoleClaim       string   `json:"role_claim"`
+		Enabled         bool              `json:"enabled"`
+		IssuerURL       string            `json:"issuer_url"`
+		ClientID        string            `json:"client_id"`
+		ClientSecret    *string           `json:"client_secret"` // nil/omitted = keep existing; "" = clear
+		RedirectURI     string            `json:"redirect_uri"`
+		Scopes          []string          `json:"scopes"`
+		DefaultRole     string            `json:"default_role"`
+		RoleClaim       string            `json:"role_claim"`
 		GroupClaim      string            `json:"group_claim"`
 		AllowLocalLogin bool              `json:"allow_local_login"`
 		RoleMap         map[string]string `json:"role_map"` // nil/omitted = keep existing; {} = reset to defaults
@@ -590,4 +590,3 @@ func strClaim(claims map[string]any, key string) string {
 	}
 	return ""
 }
-

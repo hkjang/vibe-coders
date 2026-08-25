@@ -15,9 +15,9 @@ type KeyAlert struct {
 	Team       string   `json:"team"`
 	ExpiresAt  string   `json:"expires_at"`
 	LastUsedAt string   `json:"last_used_at"`
-	DaysIdle   int      `json:"days_idle"`   // since last use (or since creation if never used)
-	Flags      []string `json:"flags"`       // expired | expiring_soon | never_used | stale_unused
-	Severity   string   `json:"severity"`    // high | medium
+	DaysIdle   int      `json:"days_idle"` // since last use (or since creation if never used)
+	Flags      []string `json:"flags"`     // expired | expiring_soon | never_used | stale_unused
+	Severity   string   `json:"severity"`  // high | medium
 }
 
 // KeyHealthAlerts returns active keys that need attention as of `now`: expiring within

@@ -226,13 +226,13 @@ func (s *Server) handleSkillEvaluate(w http.ResponseWriter, r *http.Request) {
 	}
 	violations := evaluateSkillPolicy(sk, strings.TrimSpace(p.Model), p.Tools, strings.TrimSpace(p.Team))
 	writeJSON(w, http.StatusOK, map[string]any{
-		"name":          sk.Name,
-		"status":        sk.Status,
-		"enforcement":   s.skillsConf().Enforcement,
-		"production":    sk.Status == "production",
-		"allowed":       len(violations) == 0,
-		"violations":    violations,
-		"would_block":   len(violations) > 0 && strings.EqualFold(s.skillsConf().Enforcement, "enforce"),
+		"name":        sk.Name,
+		"status":      sk.Status,
+		"enforcement": s.skillsConf().Enforcement,
+		"production":  sk.Status == "production",
+		"allowed":     len(violations) == 0,
+		"violations":  violations,
+		"would_block": len(violations) > 0 && strings.EqualFold(s.skillsConf().Enforcement, "enforce"),
 	})
 }
 

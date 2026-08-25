@@ -25,9 +25,9 @@ func TestInsuranceClaims(t *testing.T) {
 	for i := 0; i < 7; i++ {
 		rec("s"+itoaStore(i), "shaky", 200, false, "")
 	}
-	rec("s7", "shaky", 500, false, "boom")  // 5xx (also error → still one claim)
-	rec("s8", "shaky", 404, false, "")      // 4xx
-	rec("s9", "shaky", 200, true, "")       // failover-only
+	rec("s7", "shaky", 500, false, "boom") // 5xx (also error → still one claim)
+	rec("s8", "shaky", 404, false, "")     // 4xx
+	rec("s9", "shaky", 200, true, "")      // failover-only
 	// Project "solid": 5 requests all clean.
 	for i := 0; i < 5; i++ {
 		rec("o"+itoaStore(i), "solid", 200, false, "")

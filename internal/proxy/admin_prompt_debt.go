@@ -84,11 +84,11 @@ func (s *Server) handlePromptDebt(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"since":           since.UTC().Format(time.RFC3339),
-		"items":           items,
-		"count":           len(items),
+		"since":               since.UTC().Format(time.RFC3339),
+		"items":               items,
+		"count":               len(items),
 		"total_debt_cost_krw": round1(totalDebtCost),
-		"note":            "반복 프롬프트 클러스터를 품질·비용·모델낭비·볼륨 기준으로 부채화한 목록입니다. 점수가 높을수록 우선 개선 대상입니다. 원문은 마스킹된 샘플만 제공합니다.",
+		"note":                "반복 프롬프트 클러스터를 품질·비용·모델낭비·볼륨 기준으로 부채화한 목록입니다. 점수가 높을수록 우선 개선 대상입니다. 원문은 마스킹된 샘플만 제공합니다.",
 	})
 }
 

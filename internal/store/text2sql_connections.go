@@ -10,10 +10,10 @@ import (
 // execution target for Text2SQL profiles. The DSN is stored encrypted; callers
 // that need to open a real *sql.DB must decrypt it first via the secrets service.
 type Text2SQLExecConnection struct {
-	ID           string `json:"id"`           // slug, e.g. "default", "analytics_db"
-	Name         string `json:"name"`         // human-readable label
-	Driver       string `json:"driver"`       // "sqlite" | "postgres"
-	EncryptedDSN string `json:"-"`            // AES-GCM encrypted; never serialised to JSON
+	ID           string `json:"id"`     // slug, e.g. "default", "analytics_db"
+	Name         string `json:"name"`   // human-readable label
+	Driver       string `json:"driver"` // "sqlite" | "postgres"
+	EncryptedDSN string `json:"-"`      // AES-GCM encrypted; never serialised to JSON
 	Description  string `json:"description"`
 	Enabled      bool   `json:"enabled"`
 	CreatedAt    string `json:"created_at"`

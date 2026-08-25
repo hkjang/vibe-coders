@@ -14,7 +14,7 @@ func TestAdminAuditAnomalies(t *testing.T) {
 
 	ins := func(admin, action string, when time.Time) {
 		if err := db.InsertAdminAudit(ctx, AdminAuditLog{
-			ID: action + "_" + admin + "_" + when.Format("150405.000000000"),
+			ID:      action + "_" + admin + "_" + when.Format("150405.000000000"),
 			AdminID: admin, Action: action, CreatedAt: when,
 		}); err != nil {
 			t.Fatal(err)

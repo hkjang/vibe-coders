@@ -26,10 +26,10 @@ func TestResolveDefaultHome(t *testing.T) {
 		want   string
 	}{
 		{"admin", roleScopes["admin"], "#/dashboard"},
-		{"viewer", roleScopes["viewer"], "#/dashboard"},          // has admin:read
+		{"viewer", roleScopes["viewer"], "#/dashboard"}, // has admin:read
 		{"readonly_admin", roleScopes["readonly_admin"], "#/dashboard"},
 		{"security_admin", roleScopes["security_admin"], "#/dashboard"},
-		{"developer", roleScopes["developer"], "#/me"},           // no admin:read
+		{"developer", roleScopes["developer"], "#/me"}, // no admin:read
 		{"service_account", roleScopes["service_account"], "#/me"},
 	}
 	for _, c := range cases {

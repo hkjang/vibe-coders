@@ -20,7 +20,10 @@ func TestScorecardOverallSkipsMissingDims(t *testing.T) {
 }
 
 func TestScorecardGradeBoundaries(t *testing.T) {
-	mk := func(v float64) string { _, g := scorecardOverall(teamScore{SuccessRate: v, CostEfficiency: -1, CacheRate: -1, SkillReuse: -1, MCPSuccess: -1, Text2SQLSuccess: -1, PolicyComply: -1, Satisfaction: -1}); return g }
+	mk := func(v float64) string {
+		_, g := scorecardOverall(teamScore{SuccessRate: v, CostEfficiency: -1, CacheRate: -1, SkillReuse: -1, MCPSuccess: -1, Text2SQLSuccess: -1, PolicyComply: -1, Satisfaction: -1})
+		return g
+	}
 	cases := map[float64]string{85: "A", 84.9: "B", 70: "B", 69.9: "C", 55: "C", 54.9: "D"}
 	for v, want := range cases {
 		if got := mk(v); got != want {

@@ -28,9 +28,9 @@ var allScopes = []string{
 }
 
 var roleScopes = map[string][]string{
-	"super_admin":     allScopes,
-	"admin":           allScopes,
-	"team_admin":      {"chat:completion", "embeddings:create", "models:read", "admin:read", "routing:read", "observability:read", "costs:read", "security:read", "mcp:use", "team:read"},
+	"super_admin": allScopes,
+	"admin":       allScopes,
+	"team_admin":  {"chat:completion", "embeddings:create", "models:read", "admin:read", "routing:read", "observability:read", "costs:read", "security:read", "mcp:use", "team:read"},
 	// team_manager sees only their team's surface (team:read) — NOT the full operator
 	// dashboard (no admin:read), so they land on /team rather than /admin.
 	"team_manager":    {"chat:completion", "embeddings:create", "models:read", "observability:read", "costs:read", "mcp:use", "team:read"},

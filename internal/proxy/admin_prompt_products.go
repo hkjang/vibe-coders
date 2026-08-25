@@ -32,17 +32,17 @@ func (s *Server) handlePromptProductCandidates(w http.ResponseWriter, r *http.Re
 	candidates := make([]map[string]any, 0, len(clusters))
 	for _, c := range clusters {
 		candidates = append(candidates, map[string]any{
-			"fingerprint":     c.Fingerprint,
-			"task_type":       c.TaskType,
-			"requests":        c.Requests,
-			"avg_cost_krw":    c.AvgCostKRW,
-			"total_cost_krw":  c.TotalCostKRW,
-			"success_rate":    c.SuccessRate,
-			"top_model":       c.TopModel,
-			"cheapest_model":  c.CheapestModel,
-			"sample_prompt":   c.SamplePrompt,
-			"last_seen":       c.LastSeen,
-			"productized":     productized[c.Fingerprint],
+			"fingerprint":    c.Fingerprint,
+			"task_type":      c.TaskType,
+			"requests":       c.Requests,
+			"avg_cost_krw":   c.AvgCostKRW,
+			"total_cost_krw": c.TotalCostKRW,
+			"success_rate":   c.SuccessRate,
+			"top_model":      c.TopModel,
+			"cheapest_model": c.CheapestModel,
+			"sample_prompt":  c.SamplePrompt,
+			"last_seen":      c.LastSeen,
+			"productized":    productized[c.Fingerprint],
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"candidates": candidates})

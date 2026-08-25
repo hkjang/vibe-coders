@@ -29,7 +29,7 @@ func TestCostAllocationWindowTeamAndBounds(t *testing.T) {
 	mkReq("r_in1", base, 10)
 	mkReq("r_in2", base.Add(time.Hour), 5)
 	mkReq("r_before", base.AddDate(0, -1, 0), 99) // before window
-	mkReq("r_after", base.AddDate(0, 1, 0), 77)    // after window
+	mkReq("r_after", base.AddDate(0, 1, 0), 77)   // after window
 
 	monthStart := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
 	monthEnd := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)

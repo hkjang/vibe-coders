@@ -55,7 +55,7 @@ func TestTeamPortalAggregates(t *testing.T) {
 		Budgets []struct {
 			MonthlyKRW float64 `json:"monthly_krw"`
 		} `json:"budgets"`
-		APIKeys []any `json:"api_keys"`
+		APIKeys []any  `json:"api_keys"`
 		Note    string `json:"note"`
 	}
 	if err := json.Unmarshal(body, &out); err != nil {

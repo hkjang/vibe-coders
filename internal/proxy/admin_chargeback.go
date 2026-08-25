@@ -11,10 +11,10 @@ var chargebackKST = time.FixedZone("KST", 9*3600)
 
 // chargebackDimension is one dimension's allocation within the pack.
 type chargebackDimension struct {
-	Dimension    string         `json:"dimension"`
+	Dimension    string          `json:"dimension"`
 	Rows         []chargebackRow `json:"rows"`
-	TotalCostKRW float64        `json:"total_cost_krw"`
-	TotalReqs    int64          `json:"total_requests"`
+	TotalCostKRW float64         `json:"total_cost_krw"`
+	TotalReqs    int64           `json:"total_requests"`
 }
 
 type chargebackRow struct {

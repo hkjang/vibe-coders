@@ -185,8 +185,8 @@ func (s *Server) handleMultiRunDiff(w http.ResponseWriter, r *http.Request, runI
 			perModel = append(perModel, map[string]any{"model": md.Model, "available": false})
 			continue
 		}
-		missing := []segBlock{}  // present in some other model, absent here
-		extra := []segBlock{}    // present only in this model
+		missing := []segBlock{} // present in some other model, absent here
+		extra := []segBlock{}   // present only in this model
 		for k, b := range keyBlock {
 			if _, ok := md.keys[k]; !ok && keyCount[k] > 0 {
 				missing = append(missing, b)
