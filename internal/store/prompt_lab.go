@@ -58,17 +58,17 @@ type PromptTestCase struct {
 // PromptTestCaseRun records one execution of a test case (linked to a multi-model run) with
 // summary metrics, for regression history.
 type PromptTestCaseRun struct {
-	ID               string  `json:"id"`
-	TestCaseID       string  `json:"test_case_id"`
-	RunID            string  `json:"run_id"` // multi_model_test_runs.id
-	BestModel        string  `json:"best_model"`
-	AvgScore         float64 `json:"avg_score"`
-	ContractPass     int     `json:"contract_pass"`
-	ModelCount       int     `json:"model_count"`
-	AvgCostKRW       float64 `json:"avg_cost_krw"`
-	AvgLatencyMS     float64 `json:"avg_latency_ms"`
-	CreatedBy        string  `json:"created_by"`
-	CreatedAt        string  `json:"created_at"`
+	ID           string  `json:"id"`
+	TestCaseID   string  `json:"test_case_id"`
+	RunID        string  `json:"run_id"` // multi_model_test_runs.id
+	BestModel    string  `json:"best_model"`
+	AvgScore     float64 `json:"avg_score"`
+	ContractPass int     `json:"contract_pass"`
+	ModelCount   int     `json:"model_count"`
+	AvgCostKRW   float64 `json:"avg_cost_krw"`
+	AvgLatencyMS float64 `json:"avg_latency_ms"`
+	CreatedBy    string  `json:"created_by"`
+	CreatedAt    string  `json:"created_at"`
 }
 
 func nowRFC() string { return time.Now().UTC().Format(time.RFC3339Nano) }

@@ -356,3 +356,12 @@ curl -fsS http://localhost:8080/ready
 - [운영 가이드](./OPERATIONS.md) — 기동/종료, 헬스체크, 백업·복구, 장애 대응 런북
 - [관리자 가이드](./ADMIN_GUIDE.md) — 어드민 UI 탭 사용법, 일상/주간/월간 운영 체크리스트
 - [사용자 가이드](./USER_GUIDE.md) — Roo Code / Cline / Cursor / OpenAI SDK 연결
+
+## 릴리즈 후 확인
+
+```bash
+./scripts/verify_release.sh vX.Y.Z      # 방금 낸 한 개
+./scripts/verify_release.sh --all       # 전체 감사
+```
+
+릴리즈 노트만 올리고 오프라인 패키지 3종을 빠뜨리기 쉽습니다 — 실제로 23개 릴리즈가 자산 없이 나갔고, 아무것도 실패하지 않아 지적받을 때까지 드러나지 않았습니다. 위 스크립트가 자산 3종과 annotated 태그를 확인합니다.

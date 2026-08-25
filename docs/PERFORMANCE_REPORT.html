@@ -1,0 +1,683 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>부하가 늘수록 느려지던 이유</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Noto+Sans+KR:wght@400;500;700&family=Noto+Serif+KR:wght@400;600&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap">
+
+<style>
+  :root {
+    --ground: #F4F6F8;
+    --surface: #FFFFFF;
+    --surface-2: #EDF1F5;
+    --ink: #151A21;
+    --muted: #5A6675;
+    --line: #DBE2E9;
+    --line-soft: #E8EDF2;
+    --before: #A8481F;
+    --before-soft: #F2E0D6;
+    --after: #12695E;
+    --after-soft: #D8ECE7;
+    --accent: #2C4A7C;
+
+    --display: "Instrument Sans", "Noto Sans KR", "Malgun Gothic", "Apple SD Gothic Neo", sans-serif;
+    --body: "Source Serif 4", "Noto Serif KR", Georgia, "Apple SD Gothic Neo", serif;
+    --data: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, "Noto Sans KR", monospace;
+
+    --measure: 66ch;
+    --wide: 940px;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #0E1218;
+      --surface: #151B23;
+      --surface-2: #1B222C;
+      --ink: #E7ECF2;
+      --muted: #93A0B0;
+      --line: #262F3B;
+      --line-soft: #1E262F;
+      --before: #E0854F;
+      --before-soft: #3A2418;
+      --after: #4FC0AE;
+      --after-soft: #12302C;
+      --accent: #8FB0E0;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --ground: #0E1218;
+    --surface: #151B23;
+    --surface-2: #1B222C;
+    --ink: #E7ECF2;
+    --muted: #93A0B0;
+    --line: #262F3B;
+    --line-soft: #1E262F;
+    --before: #E0854F;
+    --before-soft: #3A2418;
+    --after: #4FC0AE;
+    --after-soft: #12302C;
+    --accent: #8FB0E0;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--body);
+    font-size: 17px;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .page {
+    max-width: var(--wide);
+    margin: 0 auto;
+    padding: 0 24px 96px;
+  }
+
+  /* ---- header ---------------------------------------------------------- */
+
+  header.masthead {
+    padding: 64px 0 40px;
+    border-bottom: 1px solid var(--line);
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+
+  .eyebrow {
+    font-family: var(--display);
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .eyebrow::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: var(--line);
+  }
+
+  h1 {
+    font-family: var(--display);
+    font-weight: 700;
+    font-size: clamp(34px, 5.4vw, 54px);
+    line-height: 1.08;
+    letter-spacing: -0.02em;
+    margin: 0;
+    text-wrap: balance;
+  }
+
+  .lead {
+    max-width: var(--measure);
+    font-size: 19px;
+    color: var(--muted);
+    margin: 0;
+  }
+
+  .headline-stat {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 12px 24px;
+    margin-top: 8px;
+    padding: 20px 24px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--after);
+    border-radius: 3px;
+  }
+  .headline-stat .big {
+    font-family: var(--display);
+    font-weight: 700;
+    font-size: 46px;
+    line-height: 1;
+    letter-spacing: -0.03em;
+    color: var(--after);
+    font-variant-numeric: tabular-nums;
+  }
+  .headline-stat .detail {
+    font-family: var(--data);
+    font-size: 14px;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+  }
+  .headline-stat .detail strong { color: var(--ink); font-weight: 500; }
+
+  /* ---- sections -------------------------------------------------------- */
+
+  section { padding-top: 56px; }
+
+  h2 {
+    font-family: var(--display);
+    font-weight: 600;
+    font-size: 27px;
+    letter-spacing: -0.015em;
+    line-height: 1.2;
+    margin: 0 0 8px;
+    text-wrap: balance;
+  }
+
+  h3 {
+    font-family: var(--display);
+    font-weight: 600;
+    font-size: 18px;
+    letter-spacing: -0.005em;
+    margin: 36px 0 6px;
+  }
+
+  p { max-width: var(--measure); margin: 0 0 16px; }
+  p:last-child { margin-bottom: 0; }
+
+  .sub {
+    color: var(--muted);
+    max-width: var(--measure);
+    margin: 0 0 24px;
+  }
+
+  code {
+    font-family: var(--data);
+    font-size: 0.86em;
+    background: var(--surface-2);
+    padding: 0.12em 0.36em;
+    border-radius: 3px;
+  }
+
+  strong { font-weight: 600; }
+
+  /* ---- tables ---------------------------------------------------------- */
+
+  .table-wrap {
+    overflow-x: auto;
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    background: var(--surface);
+    margin: 24px 0;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: var(--data);
+    font-size: 14px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  th {
+    text-align: left;
+    font-weight: 500;
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--line);
+    white-space: nowrap;
+  }
+
+  td {
+    padding: 11px 16px;
+    border-bottom: 1px solid var(--line-soft);
+    white-space: nowrap;
+  }
+  tbody tr:last-child td { border-bottom: none; }
+
+  td.label { font-family: var(--body); font-size: 16px; white-space: normal; }
+  td.num { text-align: right; }
+  td.before { color: var(--before); }
+  td.after { color: var(--after); font-weight: 500; }
+  td.gain { text-align: right; font-weight: 700; color: var(--after); }
+
+  /* ---- scaling chart --------------------------------------------------- */
+
+  .chart {
+    margin: 28px 0 8px;
+    padding: 24px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }
+
+  .chart-row {
+    display: grid;
+    grid-template-columns: 120px 1fr 108px;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .chart-row .rowlabel {
+    font-family: var(--data);
+    font-size: 13px;
+    color: var(--muted);
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .bar-track {
+    height: 22px;
+    background: var(--surface-2);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  .bar {
+    height: 100%;
+    background: var(--before);
+    border-radius: 2px 0 0 2px;
+  }
+  .bar.resolved { background: var(--after); }
+
+  .chart-row .rowvalue {
+    font-family: var(--data);
+    font-size: 14px;
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+  }
+  .rowvalue.before { color: var(--before); }
+  .rowvalue.after { color: var(--after); }
+
+  .chart-caption {
+    font-family: var(--display);
+    font-size: 12px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--muted);
+    border-top: 1px solid var(--line-soft);
+    padding-top: 14px;
+  }
+
+  /* ---- callout --------------------------------------------------------- */
+
+  .callout {
+    margin: 28px 0;
+    padding: 20px 24px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--accent);
+    border-radius: 3px;
+  }
+  .callout p { max-width: none; }
+  .callout .k {
+    font-family: var(--display);
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--accent);
+    display: block;
+    margin-bottom: 8px;
+  }
+
+  ul { max-width: var(--measure); padding-left: 20px; margin: 0 0 16px; }
+  li { margin-bottom: 8px; }
+
+  footer {
+    margin-top: 72px;
+    padding-top: 24px;
+    border-top: 1px solid var(--line);
+    font-family: var(--data);
+    font-size: 12.5px;
+    color: var(--muted);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 20px;
+  }
+
+  @media (max-width: 640px) {
+    body { font-size: 16px; }
+    .chart-row { grid-template-columns: 92px 1fr; }
+    .chart-row .rowvalue { grid-column: 2; text-align: right; }
+    .headline-stat .big { font-size: 38px; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; transition: none !important; }
+  }
+</style>
+<style>
+  /* Print / PDF. The PDF is a fixed artefact, so it commits to the light palette rather
+     than following whatever theme the machine generating it happens to be set to. */
+  @page { size: A4; margin: 16mm 14mm 18mm; }
+
+  @media print {
+    :root, :root[data-theme="dark"], :root:not([data-theme="light"]) {
+      --ground: #FFFFFF;
+      --surface: #FFFFFF;
+      --surface-2: #F1F4F7;
+      --ink: #12161C;
+      --muted: #4E5A69;
+      --line: #C9D2DB;
+      --line-soft: #E2E8EE;
+      --before: #93401B;
+      --before-soft: #F2E0D6;
+      --after: #0E5A50;
+      --after-soft: #D8ECE7;
+      --accent: #24406E;
+    }
+    body { font-size: 10.5pt; line-height: 1.5; background: #FFFFFF; }
+    .page { max-width: none; padding: 0; }
+    header.masthead { padding-top: 0; }
+    h1 { font-size: 26pt; }
+    h2 { font-size: 15pt; }
+    h3 { font-size: 11.5pt; }
+    .lead { font-size: 11.5pt; }
+    .headline-stat .big { font-size: 30pt; }
+    section { padding-top: 22pt; }
+    h2, h3 { break-after: avoid; }
+    .table-wrap, .chart, .callout, .headline-stat, table tr { break-inside: avoid; }
+    .table-wrap { overflow-x: visible; }
+    footer { break-inside: avoid; }
+    a { color: inherit; text-decoration: none; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <header class="masthead">
+    <div class="eyebrow">부하 테스트 리포트 · 원인 규명</div>
+    <h1>부하가 늘수록 느려지던 이유</h1>
+    <p class="lead">
+      게이트웨이는 그냥 느린 것이 아니라, <strong>바빠질수록</strong> 느려지고 있었습니다.
+      요청 하나의 비용이 "최근 처리한 요청 수"에 비례했기 때문입니다.
+      하드웨어를 늘려도 풀리지 않는 종류였습니다.
+    </p>
+    <div class="headline-stat">
+      <div class="big">20×</div>
+      <div class="detail">
+        15분 창에 20,000행이 쌓인 상태 · 요청당 <strong>81.9ms → 4.1ms</strong> ·
+        단일 고루틴 처리량 <strong>12 → 246 req/s</strong>
+      </div>
+    </div>
+  </header>
+
+  <section>
+    <h2>무엇이 잘못돼 있었나</h2>
+    <p class="sub">
+      라우팅은 provider 건강도를 보고 대상을 고릅니다. 그 건강도를 계산하려면
+      <code>request_logs</code>에서 <strong>최근 15분 안의 행을 전부 읽어</strong> Go에서 집계해야 했고,
+      그 계산을 <strong>요청마다 2~3번</strong> 했습니다.
+    </p>
+    <p>
+      즉 요청 하나의 비용이 <strong>"최근 15분간 처리한 요청 수"</strong>에 비례했습니다.
+      그런데 그 수는 처리량에 비례합니다. 그래서 초당 작업량이 <strong>요청률의 제곱</strong>으로 늘고,
+      부하를 올릴수록 게이트웨이가 느려졌습니다.
+    </p>
+
+    <div class="chart">
+      <div class="chart-row">
+        <div class="rowlabel">1,000행</div>
+        <div class="bar-track"><div class="bar" style="width:2.4%"></div></div>
+        <div class="rowvalue before">4.5ms</div>
+      </div>
+      <div class="chart-row">
+        <div class="rowlabel">10,000행</div>
+        <div class="bar-track"><div class="bar" style="width:19.4%"></div></div>
+        <div class="rowvalue before">37.0ms</div>
+      </div>
+      <div class="chart-row">
+        <div class="rowlabel">50,000행</div>
+        <div class="bar-track"><div class="bar" style="width:100%"></div></div>
+        <div class="rowvalue before">190.4ms</div>
+      </div>
+      <div class="chart-caption">
+        15분 창 안의 request_logs 행 수에 따른 요청당 provider 건강도 비용 (수정 전)
+      </div>
+    </div>
+
+    <p>
+      50,000행은 초당 약 56요청으로 15분을 돌린 상태입니다. 그 지점에서 요청 하나가
+      <strong>다른 일을 시작하기도 전에 190ms</strong>를 건강도 계산에만 썼습니다.
+    </p>
+
+    <div class="callout">
+      <span class="k">왜 그동안 안 보였나</span>
+      <p>
+        이 결함은 <strong>데이터가 없는 환경에서는 원리적으로 보이지 않습니다.</strong>
+        앞선 측정들이 이걸 놓친 이유가 그것입니다 — 테스트 DB에 행이 20개뿐이었고,
+        그때는 이 계산이 거의 공짜였습니다.
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <h2>고친 방식과 실측</h2>
+    <p class="sub">
+      건강도를 캐시했습니다. 15분 창에서 3초는 데이터의 0.3%이므로 라우팅 결정을 바꾸지 못합니다.
+      부하와 무관하게 <strong>3초에 한 번만</strong> 계산합니다.
+    </p>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>15분 창에 20,000행</th>
+            <th class="num">요청당</th>
+            <th class="num">처리량</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="label">수정 전</td>
+            <td class="num before">81.9 ms</td>
+            <td class="num before">12 req/s</td>
+          </tr>
+          <tr>
+            <td class="label">수정 후</td>
+            <td class="num after">4.1 ms</td>
+            <td class="num after">246 req/s</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>
+      <strong>수정 전 수치는 트래픽이 늘수록 계속 나빠지지만, 수정 후 수치는 그렇지 않습니다.</strong>
+      숫자보다 이 성질이 중요합니다.
+    </p>
+
+    <div class="callout">
+      <span class="k">이 캐시에는 무효화가 없습니다</span>
+      <p>
+        다른 캐시들은 <em>운영자가 쓴 값</em>을 담기에 쓰기 시점에 지울 수 있습니다.
+        이건 <em>트래픽에서 파생된 통계</em>라 걸어둘 수정 시점이 없습니다.
+        TTL이 메커니즘 전부이고, 그래서 앞으로도 무효화를 붙이면 안 됩니다.
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <h2>같은 부류의 두 번째 — 쿼터 사용량</h2>
+    <p class="sub">
+      쿼터는 "기간 사용량 vs 한도"로 집행되는데, 그 사용량을 <strong>요청마다</strong>
+      <code>request_logs</code>와 <code>token_usage</code>를 조인해 기간 전체에 걸쳐 집계했습니다.
+      월 단위 쿼터면 <strong>한 달치를 매 요청 다시</strong> 읽는 셈입니다.
+    </p>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>스코프 (100,000행 · 월 기간)</th>
+            <th class="num">기존 집계</th>
+            <th class="num">일 단위 롤업</th>
+            <th class="num">배수</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td class="label">global</td><td class="num before">63.1 ms</td><td class="num after">63 µs</td><td class="gain">1000×</td></tr>
+          <tr><td class="label">team</td><td class="num before">106.8 ms</td><td class="num after">78 µs</td><td class="gain">1370×</td></tr>
+          <tr><td class="label">ip</td><td class="num before">21.9 ms</td><td class="num after">46 µs</td><td class="gain">475×</td></tr>
+          <tr><td class="label">api_key</td><td class="num before">11.9 ms</td><td class="num after">51 µs</td><td class="gain">233×</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>
+      <code>team</code>이 가장 나빴던 것은 행마다 <code>api_keys</code> 상관 서브쿼리로 팀을 구했기 때문입니다.
+      인덱스로는 풀리지 않았습니다 — 복합 인덱스를 넣어도 <code>api_key</code>는 12.1ms → 11.9ms로 그대로였고,
+      비용의 주범이 조인 자체였습니다.
+    </p>
+    <p>
+      해법은 요청을 기록하는 <strong>같은 트랜잭션</strong>에서 그날의 총계를 갱신하는 것입니다.
+      둘이 어긋날 수 없고, 기록에 실패한 요청은 사용량도 남기지 않습니다.
+      보존 정책으로 지워진 트래픽이 쿼터에서 빠지는 <strong>기존 동작은 그대로</strong>입니다.
+    </p>
+  </section>
+
+  <section>
+    <h2>나머지 — 왕복 줄이기</h2>
+    <p class="sub">
+      위 둘이 구조적 문제였다면, 나머지는 같은 값을 한 요청 안에서 반복해서 읽던 것들입니다.
+      Postgres에서는 읽기 한 번이 네트워크 왕복 한 번입니다.
+    </p>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>중복 읽기</th>
+            <th class="num">1회 비용</th>
+            <th class="num">요청당 횟수</th>
+            <th class="num">절감</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td class="label">provider 설정</td><td class="num">381 µs</td><td class="num">5</td><td class="num after">1.90 ms</td></tr>
+          <tr><td class="label">거버넌스 규칙</td><td class="num">519 µs</td><td class="num">3</td><td class="num after">1.56 ms</td></tr>
+          <tr><td class="label">쿼터 정의</td><td class="num">386 µs</td><td class="num">3</td><td class="num after">1.16 ms</td></tr>
+          <tr><td class="label">teams (인증)</td><td class="num">~485 µs</td><td class="num">1</td><td class="num after">0.49 ms</td></tr>
+          <tr><td class="label">agent route</td><td class="num">~400 µs</td><td class="num">1</td><td class="num after">0.40 ms</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>
+      쓰기 쪽도 줄였습니다. 한 요청이 여러 개 가질 수 있는 것들(프롬프트, 평가, 언어 통계, 도구 호출)이
+      <strong>행마다 따로</strong> 쓰이고 있었습니다. 20턴 대화면 프롬프트만으로 왕복 20회입니다.
+      컬럼이 같으니 한 문장으로 묶었습니다 — <code>llm_evaluations</code>는 요청당 6.55회에서 1.05회가 됐습니다.
+    </p>
+
+    <h3>요청당 Postgres 문장 수</h3>
+    <div class="chart">
+      <div class="chart-row">
+        <div class="rowlabel">시작 시점</div>
+        <div class="bar-track"><div class="bar" style="width:100%"></div></div>
+        <div class="rowvalue before">32.4</div>
+      </div>
+      <div class="chart-row">
+        <div class="rowlabel">캐시 3종 후</div>
+        <div class="bar-track"><div class="bar" style="width:66%"></div></div>
+        <div class="rowvalue before">21.4</div>
+      </div>
+      <div class="chart-row">
+        <div class="rowlabel">쿼터 롤업 후</div>
+        <div class="bar-track"><div class="bar" style="width:59%"></div></div>
+        <div class="rowvalue before">19.1</div>
+      </div>
+      <div class="chart-row">
+        <div class="rowlabel">현재</div>
+        <div class="bar-track"><div class="bar resolved" style="width:38%"></div></div>
+        <div class="rowvalue after">12.3</div>
+      </div>
+      <div class="chart-caption">
+        2 KB 채팅 요청 1건 · 시작 시점은 쿼터를 설정하지 <em>않은</em> 상태, 현재는 설정한 상태
+      </div>
+    </div>
+
+    <p>
+      비교 조건이 현재 쪽에 불리하다는 점을 짚어둡니다. 32.4는 쿼터를 <strong>설정하지 않은</strong> 상태였고,
+      12.3은 <strong>설정한</strong> 상태입니다. 예전이라면 쿼터를 켜는 순간 훨씬 나빠졌을 조건입니다.
+    </p>
+    <p>
+      정상 상태에서 요청 경로가 DB에서 읽는 것은 이제 <strong>세 가지</strong>뿐입니다 —
+      API 키, 그리고 설정된 쿼터별 사용량 총계. 나머지는 비동기 로거의 쓰기입니다.
+    </p>
+  </section>
+
+  <section>
+    <h2>요청 본문 처리도 함께 줄였습니다</h2>
+    <p class="sub">
+      큰 요청 하나를 처리하는 비용 자체도 손봤습니다. 1 MB 요청 기준입니다.
+    </p>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>1 MB 요청</th><th class="num">수정 전</th><th class="num">수정 후</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="label">처리 시간</td><td class="num before">2.6 s</td><td class="num after">0.52 s</td></tr>
+          <tr><td class="label">리닥션 대상 바이트</td><td class="num before">5.2 MB</td><td class="num after">1.04 MB</td></tr>
+          <tr><td class="label">본문 대비 할당량</td><td class="num before">292×</td><td class="num after">99×</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>
+      본문을 여러 번 리닥션하던 것을 한 번으로 줄이고, 모델명 하나 읽으려고 전체를 리닥션하던 경로를 없앤 결과입니다.
+      함께 <strong>요청 본문 크기 상한</strong>도 기본값을 넣었습니다(64 MiB) — 이전에는 상한이 없어
+      요청 하나가 게이트웨이 메모리를 다 쓸 수 있었습니다.
+    </p>
+  </section>
+
+  <section>
+    <h2>운영 환경에서 확인하는 법</h2>
+    <ul>
+      <li>
+        <strong>인덱스 상태</strong> — 관리자 콘솔 → <em>운영 홈</em> 탭 맨 아래 카드,
+        또는 <code>GET /admin/index-health</code>. 선언한 스키마와 실제 DB의 차이,
+        그리고 접근 통계가 말해주는 추가·삭제 후보를 보여줍니다. 읽기 전용입니다.
+      </li>
+      <li>
+        <strong>부하 테스트 재현</strong> — 이번 개선은 <em>이미 쌓인 트래픽</em>이 있어야 드러납니다.
+        빈 DB로 재면 개선 전후가 거의 같게 나옵니다. 15분 이상 부하를 걸어 창을 채운 뒤 비교하세요.
+      </li>
+      <li>
+        <strong>쿼터를 쓰신다면</strong> 그쪽 개선폭이 가장 큽니다.
+        업그레이드 직후 진행 중인 기간(일/월)은 예전 방식으로 계산되고, 다음 기간부터 빨라집니다.
+      </li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>측정에 대해 정직하게</h2>
+    <p class="sub">어떤 수치를 믿어도 되고 어떤 수치는 참고만 해야 하는지 적어둡니다.</p>
+    <ul>
+      <li>
+        <strong>믿어도 되는 것</strong> — 요청당 쿼리 수(로그로 직접 셈), 격리 측정한 함수별 비용,
+        그리고 20× 전후 비교(같은 박스·같은 실행에서 코드만 바꿔 측정).
+      </li>
+      <li>
+        <strong>참고만</strong> — 개별 실행의 절대 wall-clock. 측정 박스(WSL2 + Docker Postgres)에서
+        같은 코드가 회당 11~26ms로 튀었습니다. 그래서 작은 개선은 end-to-end로 분해되지 않아,
+        해당 부분만 격리해 측정했습니다.
+      </li>
+      <li>
+        <strong>실제 환경 수치는 다릅니다</strong> — 위 배수는 이 측정 조건에서의 값입니다.
+        방향과 성질(부하에 따라 나빠지던 것이 그러지 않게 됨)은 같지만, 배수는 데이터 양과
+        DB 성능에 따라 달라집니다.
+      </li>
+    </ul>
+  </section>
+
+  <footer>
+    <span>v0.77.4 – v0.79.4</span>
+    <span>측정: SQLite / PostgreSQL 16 (Docker, WSL2)</span>
+    <span>요청 형태: 2 KB 채팅 완성 · 단일 고루틴</span>
+  </footer>
+
+</div>
+</body>
+</html>

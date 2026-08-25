@@ -2,22 +2,13 @@ package store
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
-
-	"vibe-coders/internal/config"
 )
 
 func TestAppPermissions(t *testing.T) {
 	ctx := context.Background()
-	db, err := Open(ctx, config.DatabaseConfig{Driver: "sqlite", DSN: filepath.Join(t.TempDir(), "perm.db")})
-	if err != nil {
-		t.Fatal(err)
-	}
+	db := openStoreForTest(t)
 	defer db.Close()
-	if err := db.Migrate(ctx); err != nil {
-		t.Fatal(err)
-	}
 
 	if err := db.GrantAppPermission(ctx, AppPermission{ID: "p1", AppID: "app1", SubjectType: "user", SubjectID: "alice", GrantedBy: "admin"}); err != nil {
 		t.Fatal(err)

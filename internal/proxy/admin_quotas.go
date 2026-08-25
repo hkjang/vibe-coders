@@ -28,20 +28,30 @@ func (s *Server) handleQuotas(w http.ResponseWriter, r *http.Request) {
 		now := time.Now()
 		for _, q := range quotas {
 			start, end := periodBounds(q.Period, now)
-			_, cost, tokens, err := s.db.UsageSince(r.Context(), store.UsageFilter{Scope: q.Scope, ScopeValue: q.ScopeValue, Since: start})
+			_, cost, tokens, err := s.db.UsageForPeriod(r.Context(), store.UsageFilter{Scope: q.Scope, ScopeValue: q.ScopeValue, Since: start})
 			if err != nil {
 				continue
 			}
+			// Report against the same total enforcement uses. Showing committed usage
+			// alone would tell an operator a quota has room while requests are being
+			// refused, which is the first thing they would check.
+			reservedTokens, reservedCost := int64(0), 0.0
+			if s.quotaReservationsEnabled() {
+				reservedTokens, reservedCost, _ = s.db.ReservedUsage(r.Context(), q.Scope, q.ScopeValue, now)
+			}
+			effectiveTokens := tokens + reservedTokens
+			effectiveCost := cost + reservedCost
+
 			tokenRatio := -1.0
 			if q.TokenLimit > 0 {
-				tokenRatio = 1 - float64(tokens)/float64(q.TokenLimit)
+				tokenRatio = 1 - float64(effectiveTokens)/float64(q.TokenLimit)
 				if tokenRatio < 0 {
 					tokenRatio = 0
 				}
 			}
 			krwRatio := -1.0
 			if q.KRWLimit > 0 {
-				krwRatio = 1 - cost/q.KRWLimit
+				krwRatio = 1 - effectiveCost/q.KRWLimit
 				if krwRatio < 0 {
 					krwRatio = 0
 				}
@@ -50,6 +60,8 @@ func (s *Server) handleQuotas(w http.ResponseWriter, r *http.Request) {
 				Quota:            q,
 				Tokens:           tokens,
 				CostKRW:          cost,
+				ReservedTokens:   reservedTokens,
+				ReservedCostKRW:  reservedCost,
 				PeriodStart:      start.UTC().Format(time.RFC3339Nano),
 				PeriodEnd:        end.UTC().Format(time.RFC3339Nano),
 				TokenRemainRatio: tokenRatio,

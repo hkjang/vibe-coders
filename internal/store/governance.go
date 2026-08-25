@@ -92,10 +92,30 @@ func (s *SQLStore) UpsertPolicyWithRules(ctx context.Context, p Policy, rules []
 			}
 		}
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	// The rules the request path evaluates just changed; an operator editing a policy has
+	// to see it enforced on the very next request, not once a TTL lapses.
+	s.policies.invalidate()
+	return nil
 }
 
 func (s *SQLStore) ActivePolicyRules(ctx context.Context) ([]PolicyRule, error) {
+	now := time.Now()
+	if cached, ok := s.policies.freshActiveRules(now); ok {
+		return cached, nil
+	}
+	gen := s.policies.beginLoad()
+	rules, err := s.loadActivePolicyRules(ctx)
+	if err != nil {
+		return nil, err
+	}
+	s.policies.storeActiveRules(rules, gen, now)
+	return rules, nil
+}
+
+func (s *SQLStore) loadActivePolicyRules(ctx context.Context) ([]PolicyRule, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT r.id, r.policy_id, COALESCE(r.name, ''), r.enabled, r.priority,
 			r.conditions_json, r.actions_json, r.created_at, r.updated_at, COALESCE(p.rollout_percent, 100)
 		FROM policy_rules r
@@ -156,6 +176,33 @@ func scanPolicy(rows *sql.Rows) (Policy, error) {
 	p.CreatedAt = parseOptionalTime(createdAt)
 	p.UpdatedAt = parseOptionalTime(updatedAt)
 	return p, nil
+}
+
+// InsertPolicyDecisionEvents writes a request's governance decisions in one statement.
+//
+// A request is evaluated at three phases, and each used to write its own rows as it went —
+// three round trips for what is one request's audit record. Writing them together costs
+// one, and the rows are identical either way.
+func (s *SQLStore) InsertPolicyDecisionEvents(ctx context.Context, events []PolicyDecisionEvent) error {
+	if len(events) == 0 {
+		return nil
+	}
+	placeholders := make([]string, 0, len(events))
+	args := make([]any, 0, len(events)*18)
+	for _, e := range events {
+		if e.CreatedAt.IsZero() {
+			e.CreatedAt = time.Now().UTC()
+		}
+		placeholders = append(placeholders, "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+		args = append(args, e.ID, e.RequestID, e.APIKeyID, e.UserID, e.TeamID, e.Endpoint, e.Phase,
+			e.PolicyID, e.RuleID, e.RuleName, e.Decision, e.Reason, e.Model, e.Provider,
+			e.RiskScore, e.ComplexityScore, e.CostKRW, formatTime(e.CreatedAt))
+	}
+	_, err := s.db.ExecContext(ctx, s.bind(`INSERT INTO policy_decision_events
+		(id, request_id, api_key_id, user_id, team_id, endpoint, phase, policy_id, rule_id, rule_name,
+		 decision, reason, model, provider, risk_score, complexity_score, cost_krw, created_at)
+		VALUES `+strings.Join(placeholders, ", ")), args...)
+	return err
 }
 
 func scanPolicyRules(rows *sql.Rows) ([]PolicyRule, error) {

@@ -34,6 +34,108 @@
 | 사용자 칩 · 로그아웃 | (로그인 모드) 현재 로그인한 이메일·역할 표시, 로그아웃 시 세션/refresh token 폐기 후 로그인 화면으로. |
 | 관리자 토큰 | (레거시 모드에만 표시) 입력값은 sessionStorage 에만 저장되고, 다른 탭/세션에는 공유되지 않습니다. |
 
+### 작업 결과 알림 (토스트)
+
+저장·삭제·발급 같은 작업의 결과는 화면 우측 하단에 **토스트**로 표시됩니다. 브라우저 기본 경고창(`alert`)을 쓰지 않으므로 작업 흐름이 끊기지 않습니다.
+
+| 종류 | 표시 | 동작 |
+|---|---|---|
+| 성공 | ✓ (강조색 테두리) | 4초 후 자동 사라짐 |
+| 정보 | ℹ | 4초 후 자동 사라짐 |
+| 오류·검증 실패 | ⚠ (빨간 배경) | **자동으로 사라지지 않음** — 닫기(×)를 눌러야 사라집니다 |
+
+오류가 자동으로 사라지지 않는 것은 의도된 동작입니다. 잠시 화면을 보지 않는 사이 저장 실패 알림이 사라지면 실패 사실을 놓치게 되기 때문입니다. 토스트는 최대 4개까지만 쌓이며, 오래된 것부터 밀려납니다. 스크린리더 사용자를 위해 `aria-live` 영역으로 읽힙니다.
+
+이전에는 성공 시 화면만 새로고침되어 **작업이 실제로 됐는지 알 수 없었고**, 실패 시에만 경고창이 떴습니다. 이제 프로바이더·API 키·라우팅 규칙·예산·사용 한도·알림 규칙·AI 정책·계정/팀·Knowledge·SLO·템플릿·모델 일몰 저장과 키 폐기/회전·Kill Switch 전환·회로 차단기 해제·세션 고정 해제가 모두 완료 알림을 표시합니다.
+
+### 콘솔 로딩 속도
+
+관리자 콘솔은 단일 HTML 문서(약 1.2 MB)입니다. 다음이 적용되어 있습니다.
+
+| 항목 | 효과 |
+|---|---|
+| gzip 압축 | 전송량 **1218 KB → 284 KB** (약 77% 감소) |
+| ETag 재검증 | 두 번째 로드부터는 **304 · 본문 0바이트** |
+| 1회 렌더링 | 요청마다 1.2 MB 문자열을 새로 만들지 않고 기동 시 한 번만 준비 |
+
+`Cache-Control: no-cache` 이므로 브라우저는 **매번 재검증**합니다. 게이트웨이를 업그레이드하면 ETag가 바뀌어 곧바로 새 콘솔을 받습니다 — 캐시에 남은 이전 버전이 보이는 일은 없습니다.
+
+VPN이나 폐쇄망처럼 대역폭이 제한된 환경에서 체감 차이가 큽니다.
+
+### 비어 있는 설정 화면
+
+팀·사용 한도·예산·알림 규칙·작업 템플릿 화면은 **아직 아무것도 없을 때** 무엇을 만들면 되는지, 만들지 않으면 어떤 상태인지 안내합니다. 예를 들어 사용 한도가 비어 있으면 *"한도를 만들기 전까지 API 키·팀·IP별 토큰과 비용에 제한이 없습니다"* 라고 알려줍니다.
+
+> 대시보드·분석 패널의 `데이터 없음` 은 여러 화면이 공유하는 공용 컴포넌트가 출력하는 것이라, 의도적으로 일반적인 문구를 유지합니다.
+
+### 입력 오류 표시
+
+필수 항목을 비운 채 저장하면 **비어 있는 입력칸이 빨갛게 표시되고 첫 번째 칸으로 포커스가 이동**하며, 어떤 항목이 빠졌는지 토스트로 한 번 안내합니다. 값을 입력하기 시작하면 표시가 사라집니다.
+
+이전에는 `이름과 URL을 입력하세요` 같은 토스트만 떠서, 항목이 여러 개인 폼에서는 **어느 칸을 말하는지 직접 찾아야** 했습니다. 스크린리더에는 `aria-invalid` 로 전달됩니다.
+
+### 시간 표시
+
+목록·표의 시각은 **상대 시간**으로 표시됩니다 — `방금`, `5분 전`, `3시간 전`, `2일 전`. 한 달이 넘으면 날짜로 바뀝니다. 마우스를 올리면 **정확한 로컬 시각**이 툴팁으로 나옵니다(외부 로그와 대조할 때 필요).
+
+기간·경계값(조회 구간, 만료 예정 등)은 상대 시간이 오히려 읽기 나쁘므로 `08-21 18:51` 형태의 절대 시각으로 표시하며, 올해가 아니면 연도가 붙습니다. 모든 시각은 **브라우저 로컬 시간대** 기준입니다.
+
+이전에는 서버가 주는 UTC 원문(`2026-08-21T09:51:46Z`)이 29곳에서 그대로 노출돼, 표를 훑는 사람이 머릿속에서 시차를 계산해야 "이게 최근인가"를 판단할 수 있었습니다.
+
+### 비어 있음 · 불러오는 중 · 오류 구분
+
+세 상황이 모두 같은 회색 한 줄로 보여 구분이 되지 않던 문제를 정리했습니다.
+
+| 상태 | 표시 |
+|---|---|
+| 데이터 없음 | 회색 안내 문구 |
+| 불러오는 중 | 맥동하는 점 + 문구 (`prefers-reduced-motion` 존중) |
+| 오류 | 빨간 배경 + 좌측 강조선 |
+
+특히 오류가 "데이터 없음"과 같아 보이던 것이 문제였습니다 — 실패한 화면을 빈 화면으로 오해하게 됩니다.
+
+### 관리자 UI 회귀 테스트 (개발자용)
+
+어드민 화면은 Go raw string 하나(`internal/proxy/admin_ui.go`) 안에 들어 있어 `go test` 가 그 JavaScript를 실행하지 않습니다. 두 종류의 테스트로 보완합니다.
+
+| 파일 | 검사 | 의존성 |
+|---|---|---|
+| `admin_ui_static_test.go` | raw string 무결성(내부 백틱), `alert()` 잔존, 읽기 전용 엔드포인트의 성공 알림, 토스트의 `innerHTML` 사용, 오버레이 dialog 시맨틱·포커스 헬퍼, 빈/로딩/오류 스타일 분리, 원시 타임스탬프 노출, **검증 대상 필드 id 실재 여부** | 없음 (항상 실행) |
+| `admin_ui_behavior_test.go` + `testdata/admin_ui_behavior.js` | 토스트 동작, **입력 검증 표시**, 시간 포맷팅, 명령 팔레트 매칭·인덱스, 포커스 가둠·복원, 표 래핑 멱등성 — 스텁 DOM에서 실제 함수를 실행 | node (없으면 skip) |
+
+동작 검사는 단독 실행도 됩니다: `cd internal/proxy && node testdata/admin_ui_behavior.js`
+
+CSS 주석에 백틱을 넣어 raw string을 끊거나, 일괄 치환으로 `alert()` 가 되살아나거나, 표 래퍼가 재렌더마다 중첩되는 실수가 실제로 있었고 모두 이 테스트가 잡습니다.
+
+### 화면 찾기 (명령 팔레트)
+
+상단의 **🔎 화면 찾기** 버튼 또는 <kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>K</kbd>(입력 중이 아닐 때는 <kbd>k</kbd>)로 엽니다. 화면 이름이나 경로 일부를 입력해 바로 이동합니다.
+
+- 그룹 메뉴 9개에 흩어진 35개 화면을 **어느 그룹에 있는지 몰라도** 찾을 수 있습니다
+- 한글 이름(`라우팅`)과 경로(`routing`) 양쪽으로 검색되며, 연속되지 않은 글자도 매칭됩니다(`rtn` → `#/routing`)
+- 화면 이동 외에 `다시 불러오기`·`다크 모드 전환`·`단축키 도움말`·`XView 요청 탐색` 동작도 포함됩니다
+- 목록은 **열 때 상단 메뉴에서 생성**하므로, 권한(`allowed_tabs`)으로 가려진 화면은 팔레트에도 나오지 않습니다
+- <kbd>↑</kbd><kbd>↓</kbd> 이동, <kbd>Enter</kbd> 열기, <kbd>Esc</kbd> 닫기
+
+### 화면 로딩·오류 표시
+
+화면 전환 시 상단에 얇은 진행 표시줄이 나타납니다. 이전에는 데이터를 받아오는 동안 **이전 화면이 그대로 보여** 클릭이 먹었는지 알 수 없었습니다.
+
+화면을 불러오지 못하면 **어느 화면이 실패했는지**와 오류 내용, 그리고 `다시 시도`·`다른 화면 열기` 버튼이 표시됩니다. 이전에는 오류 메시지 한 줄만 나와 다음 행동을 알 수 없었습니다.
+
+### 좁은 화면 · 노트북 대응
+
+- **등록/편집 폼**이 좁은 화면에서 한 줄 배치로 바뀝니다. 각 폼은 컬럼 배치를 인라인 스타일로 지정하는데, 인라인 스타일은 미디어쿼리로 덮이지 않아 이전에는 노트북·분할 화면에서 입력칸이 뭉개졌습니다(31개 폼).
+- **표는 각자 가로 스크롤 박스** 안에서 표시됩니다. 표가 페이지를 넘치지는 않았지만 컬럼이 많으면 모든 컬럼이 눌리면서 단어가 중간에서 잘려 읽기 어려웠습니다. 이제 좁은 화면에서는 표만 좌우로 스크롤됩니다.
+
+### 키보드 접근성 (모달·팔레트)
+
+모달과 명령 팔레트는 `role="dialog"` · `aria-modal` 로 선언되고, 그 약속대로 동작합니다.
+
+- **포커스 가둠**: <kbd>Tab</kbd>/<kbd>Shift</kbd>+<kbd>Tab</kbd> 이 오버레이 안에서만 순환합니다. 이전에는 뒤쪽 페이지로 빠져나가 화면에 보이지도 않는 요소에 포커스가 갔습니다
+- **포커스 복원**: 닫으면 열기 전에 있던 위치로 포커스가 돌아갑니다. 이전에는 문서 맨 위로 되돌아가 목록에서 여러 항목을 연속으로 확인할 때 매번 처음부터 탐색해야 했습니다
+- **초기 포커스**: 모달은 닫기 버튼, 팔레트는 검색 입력에 자동으로 잡힙니다
+
 ### 키보드 단축키
 
 - `?` 도움말, `/` 검색 입력 포커스, `t` 테마, `r` 새로고침, `Esc` 모달 닫기
@@ -127,10 +229,13 @@ MCP Security Center는 MCP 탭 또는 `GET/POST /admin/mcp/tools` 에서 tool별
   - 🔴 오류 (status ≥ 400, kill switch·정책 차단 포함)
   - 🟣 고비용/복잡 (토큰이 상위 10% 또는 4000 이상)
 - **창**: 5m / 15m / 1h / 6h / 24h. **필터**: 모델, endpoint.
+- **조사 보기**: 현재 기간·시간대·지표·스케일·색상 모드·모델·endpoint 조건을 이름으로 저장하고 다시 실행하거나 덮어쓰기·삭제할 수 있습니다. 공유 링크는 현재 조건을 직접 포함해 저장 항목 수명과 무관하게 재현됩니다.
 - **드릴다운**: 점에 마우스를 올리면 모델·provider·지연·토큰·비용·상태 툴팁, 클릭하면 요청 상세 모달.
 - 점이 6000건을 넘으면 최근 6000건으로 제한(범례 옆에 표시).
 
 API: `GET /admin/scatter?window=1h&metric=latency&model=&endpoint=&limit=6000` — 점 배열(`request_id, created_at, latency_ms, first_chunk_ms, status_code, provider, model, total_tokens, cost_krw, stream, tool_count, failover`)과 `truncated` 플래그를 반환합니다.
+
+저장 API는 `GET /admin/saved-filters?view=xview`, `POST /admin/saved-filters`, `GET|PATCH|DELETE /admin/saved-filters/{id}`를 사용합니다. XView 저장 파라미터는 allowlist와 enum·기간·시간대 검증을 통과해야 하며 `window`와 `from/to`는 함께 저장할 수 없습니다.
 
 ### eXplainability View (점 클릭 → "왜 이렇게 처리됐나")
 
@@ -147,13 +252,16 @@ API: `GET /admin/scatter?window=1h&metric=latency&model=&endpoint=&limit=6000` �
 
 복잡도 점수는 프롬프트 토큰·대화 깊이·도구 수 기반 휴리스틱 추정치이며(모델 산출값 아님) UI에 그 사실이 명시됩니다.
 
-API: `GET /admin/requests/{id}/explain` → `{routing, fallback, cache, safety, cost, session}`. `routing` 에는 `chosen_model`, `chosen_provider`, `complexity`, `risk_score`, `health_score`, `fallback_path`, `route_reason`, `decision_reason` 이 포함됩니다. `GET /admin/requests/{id}/links` 는 요청 상세·XView·Waterfall·MCP Waterfall·Text2SQL Timeline·라우팅 결정 연결 정보와 카운트를 한 번에 반환합니다. 이때 `policy_decision_count` 는 `decision=default` 를 제외한 실질 거버넌스 판단 수이고, `policy_decision_total` 은 원시 감사 이벤트 수입니다.
+API: `GET /admin/requests/{id}/explain` → `{routing, fallback, cache, safety, cost, session}`. `routing` 에는 `chosen_model`, `chosen_provider`, `complexity`, `risk_score`, `health_score`, `fallback_path`, `route_reason`, `decision_reason` 이 포함됩니다. 이때 `fallback_path` 는 **실제로 일어난** 폴백 경로만 담으며, 폴백이 없었다면 비어 있습니다(사전 예측 경로는 `/admin/routing/preview` 의 `fallback_plan`). `GET /admin/requests/{id}/links` 는 요청 상세·XView·Waterfall·MCP Waterfall·Text2SQL Timeline·라우팅 결정 연결 정보와 카운트를 한 번에 반환합니다. 이때 `policy_decision_count` 는 `decision=default` 를 제외한 실질 거버넌스 판단 수이고, `policy_decision_total` 은 원시 감사 이벤트 수입니다.
+
+> **provider 라우팅과 폴백의 전체 규칙은 [ROUTING_GUIDE.md](ROUTING_GUIDE.md) 를 참고하세요.** 선택 순서, 폴백 4조건, 폴백이 안 되는 흔한 이유, 구성 레시피를 한 곳에 모았습니다. 어드민에서는 설정 탭 → 업스트림 프로바이더 → `📖 라우팅 · 폴백 동작 설명 열기` 버튼으로 같은 내용을 모달로 볼 수 있습니다.
 
 Intelligent Routing Engine API:
 
 - `POST /admin/routing/preview` — 실제 upstream 호출 없이 `auto` / `vibe/auto` / `vibe-coders/auto` 라우팅 결과 미리보기. 응답에는 자동화·필터링용 `route_reason` 과 사람이 읽는 `decision_reason` 이 함께 포함됩니다. body에 `api_key_id` 를 넣으면 해당 API 키의 allowed/denied model/provider 정책까지 반영합니다(team_admin은 자기 팀 키만 가능)
+- `GET|POST /admin/routing/pattern-conflicts` — 활성 provider의 `model_patterns` 교차·중복·catch-all 충돌 분석. GET은 현재 설정과 선택적 `model` 경로를 조회하고, POST는 `provider_name`, `model_patterns`, 선택적 `model`을 받아 저장 없이 변경 영향을 미리 계산합니다. 응답에는 **폴백 커버리지**(`coverage`, `summary.failover_ready_provider_count`/`failover_uncovered_provider_count`)와 기본 provider 패턴 유무(`default_provider_has_patterns`)가 함께 포함되고, `model` 을 넘기면 시뮬레이션에 실제 폴백 후보 체인(`simulation.failover_candidates`)과 폴백 불가 사유(`failover_blocked_reason`)가 들어갑니다. 폴백 후보는 `model_patterns` 매칭으로만 만들어지므로, 패턴이 겹치지 않는 provider끼리는 서로 폴백되지 않습니다.
 - `GET /admin/routing/decisions` / `GET /admin/routing/decisions/{id}` — 요청별 selected model/provider, complexity/risk/health, fallback path, decision reason 조회
-- `GET /admin/routing/health` — 최근 latency/p95/timeout/429/5xx/fallback rate 기반 provider health score 조회. 응답에는 provider 원본 점수와 함께 `ranking`, `degraded`, `alerts`, `trend` 가 포함됩니다. 관리자 화면은 라우팅 탭의 `Provider Health` 하위 화면(`#/routing/health`)에서 같은 데이터를 표시합니다.
+- `GET /admin/routing/health` — 최근 latency/p95/timeout/429/5xx/fallback rate 기반 provider health score 조회. 응답에는 provider 원본 점수와 함께 `ranking`, `degraded`, `alerts`, `trend`, 그리고 **회로 차단기 상태**(`breakers.enabled`/`threshold`/`cooldown_seconds`/`states`)가 포함됩니다. 회로 차단기는 연속 실패한 provider를 폴백 후보에서 자동 제외하며(기본 5회 → 30초 차단 → 1건 탐침 복구), 관리자 화면의 `회로 차단기` 패널에서 상태 확인과 수동 해제가 가능합니다. 수동 해제 API는 `POST /admin/routing/breaker-reset`(`{"provider":"이름"}`, 비우면 전체)입니다. 같은 모델을 여러 provider가 서비스할 때는 `UPSTREAM_LOAD_BALANCE=round_robin` 으로 **세션 단위 라운드로빈**이 가능하며, 세션은 세션 헤더 → body 필드 → 대화 프리픽스 해시 → 추론 세션 순으로 식별합니다(qwen code 등 세션 식별자를 보내지 않는 에이전트도 대화별로 구분). 분산 검증은 `GET /admin/routing/balancer?model=&window=`(균형도 `balance_index`, provider 풀, 밸런서 intent vs 요청 로그 actual)과 라우팅 탭의 `로드밸런싱 · 세션 고정` 패널에서 하고, `POST` 로 세션 고정을 해제(노드 드레인)합니다. 자세한 내용은 [ROUTING_GUIDE.md](ROUTING_GUIDE.md) 3-2·3-3 절 참고. 폴백이 성공하면 호출자에게는 정상 응답이 가서 장애가 감춰지므로, 안전 탭 알림 규칙의 `failover_rate` 지표로 폴백률 알림을 함께 걸어두는 것을 권장합니다. 관리자 화면은 라우팅 탭의 `Provider Health` 하위 화면(`#/routing/health`)에서 같은 데이터를 표시합니다.
 
 `auto` 계열 모델 별칭은 일반 라우팅 규칙보다 우선합니다. `X-Proxy-Provider` 또는 `?provider=` 로 provider 를 고정해도 auto 모델 rewrite 는 계속 수행되고, provider 선택만 클라이언트 지정값을 따릅니다. Provider `model_patterns` 가 `vibe/*` 처럼 alias 기준으로 등록되어 있으면, 선택된 실제 모델 패턴이 없을 때 요청 alias 기준 provider도 후보로 사용합니다. `GET /v1/models` 는 SDK 호환성을 위해 인증 모드에서도 공개 조회로 처리합니다.
 
@@ -301,6 +409,15 @@ AI 코딩 도구(Roo Code·Cline·Cursor·Claude Desktop)가 MCP 서버나 함�
 6. **도구 카탈로그 / 드리프트**: 서버별로 관측된 도구 목록과 최초/최근 관측 시각. 최근 24시간 내 처음 나타난 도구는 `신규` 배지로 강조(공급망 변조·권한 확대 탐지), 30일간 안 보이면 `미사용` 배지. 섹션 제목에 신규 도구 수 표시.
 7. **MCP Gateway 업스트림**: 아래 게이트웨이 절 참고
 8. **MCP 서버 정책**: 아래 보안 절 참고
+
+### MCP 업스트림 탐색 성능
+
+등록된 업스트림의 도구·리소스·프롬프트 목록은 **동시에** 조회합니다. 따라서 전체 탐색 시간은 **가장 느린 업스트림 하나** 수준이며, 업스트림 수에 비례해 늘어나지 않습니다.
+
+이전에는 순차 조회여서 업스트림당 최대 10초가 **합산**됐습니다. 캐시가 비어 있는 첫 `/mcp` 요청은 이 작업을 동기로 수행하므로 업스트림이 많으면 클라이언트가 그만큼 기다렸고, 백그라운드 갱신 예산이 45초라 **느린 업스트림이 5개를 넘으면 뒤쪽은 아예 탐색되지 못했습니다.**
+
+- 응답이 돌아온 순서와 무관하게 **등록 순서대로 병합**하므로, 리소스 URI가 충돌할 때 "먼저 등록된 업스트림이 이긴다"는 규칙이 그대로 유지됩니다.
+- 업스트림 하나가 실패해도 나머지 카탈로그는 정상 제공되며, 실패는 업스트림별로 기록되어 MCP 화면에서 확인할 수 있습니다.
 
 ### MCP Gateway — 업스트림 서버 집약 (단일 /mcp)
 
@@ -585,6 +702,13 @@ curl -i http://<host>:8080/v1/chat/completions -H "Authorization: Bearer <발급
 ### Journey Probe (개발도구 연결 합성 점검)
 - "Journey Probe" 탭 / `POST /admin/journey-probe {proxy_key, clients?}`: Cursor·Roo·Cline·OpenAI SDK 등 도구별 실제 연결 journey(모델 목록·MCP initialize/tools-list)를 supplied Proxy API Key로 합성 점검(비용 발생 chat 호출 없음). "서버는 살아있는데 Cursor만 안 됨"을 분리.
 
+### 변경 후 자동 Red Team 회귀 점검
+- Provider, 라우팅 규칙, MCP upstream·도구 정책, Governance 정책, Text2SQL 스키마·권한, AI App·Workflow가 변경되면 관련 등록 대상만 골라 Red Team 캠페인을 자동 생성합니다.
+- 자동 캠페인은 항상 `dry-run` 시뮬레이션으로 실행되며 provider나 MCP upstream을 실제 호출하지 않습니다.
+- Red Team 화면의 **변경 후 자동 점검** 상태에서 활성 여부·중복 억제 시간·변경당 최대 대상 수를 확인하고, 캠페인 **생성 경로**에서 원인이 된 audit action과 대상 참조를 확인합니다.
+- 동일한 변경 상태는 기본 10분 동안 한 번만 실행됩니다. 전체 범위 변경은 대상 유형을 순환 선택해 기본 20개 대상까지만 검사합니다.
+- Red Team Kill Switch가 켜져 있으면 자동 캠페인도 생성·실행하지 않습니다. `REDTEAM_POST_CHANGE_ENABLED`, `REDTEAM_POST_CHANGE_COOLDOWN`, `REDTEAM_POST_CHANGE_MAX_TARGETS`로 운영값을 조정합니다.
+
 ### 파드 운영 맵 / 프라이버시 원장 / AI 업무성과 / 온보딩 점검
 - "파드 운영 맵" 탭 / `GET /admin/pods`: 멀티 파드 하트비트·빌드·런타임 설정 수렴(applied vs current token) 상태. live/stale·설정 최신 여부.
 - "프라이버시 원장" 탭(security) / `GET /admin/privacy-ledger?dimension=team|model|provider&days=`: 민감정보 탐지/마스킹/차단량 + 외부 provider 전송 요청·토큰을 차원별 감사 원장으로 집계. `?format=csv` 내보내기.
@@ -598,7 +722,90 @@ curl -i http://<host>:8080/v1/chat/completions -H "Authorization: Bearer <발급
 
 ---
 
+### 인덱스 상태 (드리프트 · 추가/삭제 후보)
+
+운영 홈 하단의 **인덱스 상태** 카드 / `GET /admin/index-health`. 읽기 전용이며, 어떤 DDL도 실행하지 않습니다 — 각 항목은 운영자가 검토할 SQL만 보여줍니다.
+
+두 가지를 나눠서 답합니다.
+
+**1) 선언한 스키마와 실제 DB의 차이.** 마이그레이션이 만드는 인덱스 목록을 그대로 읽어 실제 DB와 대조합니다. 별도 목록을 관리하지 않으므로 어긋날 곳이 없습니다.
+
+| 구분 | 뜻 | 왜 위험한가 |
+| --- | --- | --- |
+| 정의 불일치 | 이름은 같은데 컬럼·유니크 여부가 다름 | `CREATE INDEX IF NOT EXISTS`는 **이름만** 봅니다. 예전 정의가 남아 있으면 마이그레이션은 성공했다고 보고하면서 인덱스는 잘못된 채로 남습니다. 이것만은 다른 어떤 것도 잡아주지 않습니다 |
+| DB에 없음 | 선언했는데 실제로는 없음 | 아무것도 실패하지 않고 쿼리만 느려집니다 |
+| 선언에 없음 | 손으로 추가한 인덱스 | 지금 DB에서는 동작하지만, 새로 설치하는 환경과 다른 환경에는 없습니다 |
+
+**2) 접근 통계가 말해주는 추가·삭제 후보.** Postgres는 테이블별 순차 스캔 수와 인덱스 스캔 수, 인덱스별 사용 횟수를 셉니다. 스캔으로 읽히는 큰 테이블은 인덱스가 없다는 뜻이고, 한 번도 읽히지 않은 인덱스는 쓰기 비용만 내고 있다는 뜻입니다. 각 항목에는 판단 근거(행 수·스캔 횟수·디스크 크기)가 함께 표시되므로 그대로 받아들이지 말고 따져볼 수 있습니다.
+
+SQLite에는 이런 카운터가 없습니다. 그래서 숫자를 지어내는 대신 "이 드라이버로는 볼 수 없다"고 표시하고, 스키마만으로 알 수 있는 것(기본키 외에 인덱스가 하나도 없는 테이블)만 보고합니다. **목록이 비어 있는 것과 볼 수 없는 것은 다릅니다.**
+
+빌드 쪽에도 같은 질문이 걸려 있습니다. `internal/store`의 테스트가 저장소의 SQL을 직접 읽어, 트래픽에 따라 무한히 커지는 테이블(`request_id`를 가진 테이블과 만료로 청소되는 테이블)에서 필터·정렬에 쓰이는 컬럼에 인덱스가 있는지 확인합니다. 없으면 `migrationStatements()`에 인덱스를 추가하거나 `indexCoverageDecisions`에 "왜 스캔해도 괜찮은지"를 적어야 빌드가 통과합니다.
+
+이 검사가 처음 돌았을 때 찾은 것: 보존 정책이 `WHERE request_id IN (...)`으로 지우는 요청 단위 자식 테이블 11개 중 9개에는 `request_id` 인덱스가 있고 3개(`response_logs`, `language_stats`, `domain_routing_decisions`)에는 없었습니다. 같은 쿼리, 같은 증가 속도인데 인덱스만 빠져 있어 청소할 때마다 전체 스캔이 일어났습니다. `auth_sessions`는 기본키 외에 인덱스가 아예 없었습니다. 지금은 모두 추가돼 있습니다.
+
+### 마이그레이션 SQL 전문 보기
+
+인덱스 상태 카드의 **📜 마이그레이션 SQL 전체 보기** 버튼 / `GET /admin/migration-sql`.
+
+드리프트 표는 **어긋난 것만** 보여줍니다. 그런데 손으로 인덱스를 여러 개 추가한 뒤에 실제로 하게 되는 질문은 "이건 내가 만든 건가, 빌드가 만든 건가"이고, 그 답이 필요한 인덱스는 대부분 **어긋나지 않은 쪽**입니다. 드리프트 표에는 나오지 않으니 소스를 열어보는 수밖에 없었습니다.
+
+이 모달은 `Migrate` 가 적용하는 문장 **전부**를 적용 순서대로 보여주고, 선언된 인덱스마다 이 DB 의 상태를 함께 표시합니다.
+
+| 표시 | 뜻 |
+| --- | --- |
+| `DB에 있음` | 빌드가 선언했고 이 DB 에도 그대로 있습니다 |
+| `DB에 없음` | 빌드가 선언했는데 이 DB 에는 없습니다 (게이트웨이를 재시작하면 다시 만들어집니다) |
+| `정의 불일치` | 이름은 같은데 정의가 다릅니다 — 재시작해도 고쳐지지 않습니다 |
+| 상단 노란 블록 | **이 DB 에만 있는 인덱스.** 목록에 없으므로 손으로 추가한 것이고, 새로 설치한 DB 에는 생기지 않습니다 |
+
+- 번호는 적용 순서입니다. `ALTER TABLE` 은 해당 `CREATE TABLE` 뒤에 옵니다.
+- 검색창과 구분 필터(테이블 / 인덱스 / 컬럼 추가 / 기타), **불일치만** 체크박스로 좁혀 볼 수 있습니다.
+- **PostgreSQL 에서는 실제로 실행된 문장**을 보여줍니다. 저장소에는 `BLOB`·`REAL` 로 적혀 있지만 Postgres 에는 `BYTEA`·`DOUBLE PRECISION` 으로 나갑니다. 바뀐 문장은 "선언 원문"을 펼쳐 원래 형태를 확인할 수 있습니다. 이걸 구분하지 않으면 드라이버 차이를 드리프트로 오해하게 됩니다.
+- 목록 실행 후 Postgres 에서 추가로 일어나는 컬럼 타입 확장(`REAL`→`DOUBLE PRECISION`, 카운터→`BIGINT`)은 목록에 없으므로 하단에 따로 적어둡니다.
+- **전체 복사** 버튼은 전체 문장을 세미콜론으로 구분해 클립보드에 넣습니다.
+
+읽기 전용입니다. 이 화면은 SQL 을 보여줄 뿐 실행하지 않습니다.
+
 ## 7. 사용 한도 (쿼터)
+
+### 진행 중 요청도 한도에 포함됩니다
+
+사용량은 요청이 **끝난 뒤에** 기록됩니다. 따라서 완료된 사용량만 본다면 한도 검사의 사각지대는 로깅 지연 정도가 아니라 **진행 중인 모든 요청의 전체 지속시간**입니다 — LLM 호출이면 수십 초에서 수 분입니다. 그 사이 들어온 요청들은 서로를 전혀 보지 못하므로, 바쁜 키는 첫 요청이 끝나기 전에 시작할 수 있는 만큼 한도를 **초과**할 수 있었습니다.
+
+이를 막기 위해 요청이 시작될 때 **예상 사용량을 예약**해 두고, 끝나면 해제합니다. 한도 검사는 `완료된 사용량 + 진행 중 예약`을 합산하므로 동시 요청이 서로를 셉니다.
+
+| 환경변수 | 기본값 | 설명 |
+|---|---|---|
+| `QUOTA_RESERVATIONS_ENABLED` | `true` | 진행 중 요청을 한도에 포함. 요청당 INSERT·DELETE 1회씩 추가되므로 쿼터를 안 쓰면 끄면 됩니다 |
+| `QUOTA_RESERVATION_SWEEP_INTERVAL` | `5m` | 만료된 예약 정리 주기 |
+
+- **`/v1/chat/completions` 와 `/v1/embeddings` 모두 예약합니다.** 임베딩은 배치 작업이 수천 건을 동시에 던지는 워크로드라 한도를 넘기기 가장 쉬운 형태입니다. 다만 임베딩은 완성(completion)이 없으므로 **입력 토큰만** 예약합니다 — 채팅과 같은 출력 예측을 적용하면 매 호출을 부풀려 정상 트래픽을 막게 됩니다.
+- **예약은 자동 만료됩니다.** 게이트웨이가 요청 도중 죽어도 한도를 영구히 점유하지 못합니다. 조회 자체가 만료 행을 제외하므로 정리 작업이 밀려도 과다 집계되지 않습니다.
+- **예약은 다중 인스턴스에서 공유됩니다**(DB 기반). 인스턴스가 여러 대여도 서로의 진행 중 요청을 봅니다.
+- **예약 조회가 실패하면 완료된 사용량만으로 판정**합니다. 예약은 정확도를 높이는 장치일 뿐 통과·차단의 권한이 아니므로, 읽지 못한다고 요청을 막지 않습니다.
+- 팀 범위 판정은 완료된 사용량과 **동일한 식**을 사용합니다. 두 값을 더하는 이상 "팀"의 정의가 갈리면 한쪽이 조용히 잘못 세어집니다.
+
+> 이 기능을 켜면 이전보다 **더 일찍 429가 발생할 수 있습니다.** 그것이 의도입니다 — 한도가 실제로 한도로 동작합니다.
+
+### 왜 막혔는지 확인하기
+
+한도 판정은 `완료된 사용량 + 진행 중 예약` 으로 하므로, **완료된 사용량만 보면 "한도 아래인데 왜 429?"** 라는 상황이 생깁니다. 그래서 양쪽 모두 내역을 함께 보여줍니다.
+
+**429 응답 헤더**
+
+| 헤더 | 의미 |
+|---|---|
+| `X-Quota-Scope` | 어떤 한도에 걸렸는지 (`범위:값:주기`) |
+| `X-Quota-Tokens` · `X-Quota-Cost-KRW` | 판정에 사용된 **합계**(완료 + 진행 중) |
+| `X-Quota-Reserved-Tokens` · `X-Quota-Reserved-Cost-KRW` | 그중 **진행 중 요청** 몫 |
+| `X-Quota-Token-Limit` · `X-Quota-Cost-Limit-KRW` | 걸린 한도값 |
+| `Retry-After` | 다음 주기까지 남은 초 |
+
+합계에서 예약분을 빼면 완료된 사용량이 나오므로, 호출자가 자기 대시보드 숫자와 대조해 차이를 설명할 수 있습니다.
+
+**관리자 화면** — 사용 한도 탭의 토큰·비용 열은 **판정과 동일한 합계**를 표시하고, 진행 중 요청이 있으면 그 몫을 아래에 따로 적습니다(`진행 중 N 토큰 · ₩M 포함`). 화면이 여유 있다고 보이는데 실제로는 429가 나가는 불일치가 생기지 않습니다.
+
 
 폭주를 방지하고 부서별 예산을 강제하는 핵심 도구.
 
@@ -692,6 +899,8 @@ curl -i http://<host>:8080/v1/chat/completions -H "Authorization: Bearer <발급
 | `first_chunk_p95_ms` | 윈도우 안 upstream 첫 응답 청크 지연 P95(ms) | 1500 |
 | `llm_eval_failures` | 윈도우 안 실패한 LLM evaluation 수 | 10 |
 | `llm_eval_failure_rate` | 윈도우 안 LLM evaluation 실패율 (0~1) | 0.2 |
+| `failovers` | 윈도우 안 폴백으로 처리된 요청 수 | 10 |
+| `failover_rate` | 윈도우 안 폴백 발생률 (0~1) | 0.05 |
 
 - **윈도우(초)**: 평가 기간. 알림 평가는 1분 주기로 돌고, 발화 후에는 같은 윈도우 동안 디바운스 됩니다.
 - **대상**: 전체 / API 키 / 팀 / IP / 모델 중 선택.
@@ -782,6 +991,70 @@ API: `GET /admin/knowledge`, `POST /admin/knowledge`(`{name, id?, content, enabl
 ### 9.3 데이터 보존 정책
 
 현재 적용 중인 보존 일수와 누적 삭제 행 수를 표시합니다. "지금 정리 실행" 으로 워커를 즉시 1회 트리거할 수 있습니다(디스크가 가득 찼을 때 임시 조치).
+
+#### 무엇이 함께 삭제되는가
+
+`RETENTION_REQUEST_DAYS` 로 요청 로그를 삭제할 때, **그 요청에 딸린 기록도 함께** 삭제됩니다.
+
+| 함께 삭제 | 이유 |
+|---|---|
+| `prompt_logs` · `response_logs` · `token_usage` · `language_stats` | 요청 본문·응답·사용량 |
+| `llm_evaluations` · `llm_feedback` · `tool_invocations` | 요청 단위 평가·도구 호출 |
+| `routing_decisions` · `mcp_route_decisions` · `domain_routing_decisions` · `code_verify_results` | 요청 단위 라우팅·검증 텔레메트리 |
+
+이 표의 **세 번째 줄은 이전까지 삭제되지 않았습니다.** 각 행은 `request_id` 옆에 API 키·사용자·팀을 함께 담고 있어, 요청이 보존 기간 만료로 지워진 뒤에도 **"어떤 키가 그 요청을 했다"는 기록이 남았습니다.** 특히 `routing_decisions` 는 그 프롬프트에서 탐지된 **PII·시크릿 분류(`risk_categories`)** 까지 보관하고 있었습니다. 부수적으로, 요청당 1행씩 영구히 쌓이는 동안 `request_logs` 만 줄어들어 오래 운영한 배포에서는 이 테이블들이 가장 커집니다.
+
+#### API 명세는 어떻게 유지되는가 (개발자용)
+
+`/openapi.json` 과 `/swagger` 가 노출하는 명세는 **손으로 관리하는 표**이고, 라우트는 별도로 등록됩니다. 둘을 연결하는 장치가 없어서 **서비스되지만 명세에 없는 엔드포인트가 생길 수 있었고**, 실제로 두 개가 그 상태였습니다.
+
+`internal/proxy/openapi_completeness_test.go` 가 양방향으로 검사합니다.
+
+- **누락**: `/admin` 라우트를 등록하고 명세 항목을 빼면 실패합니다. 공개 API가 아니라면 사유와 함께 예외 목록에 등록해야 합니다.
+- **잔존**: 명세에는 있는데 아무도 서비스하지 않으면 실패합니다 — **문서화된 엔드포인트가 404를 내는 것**이 문서에 없는 것보다 나쁘기 때문입니다.
+
+#### 보존 정책은 어떻게 유지되는가 (개발자용)
+
+요청 로그와 함께 삭제할 테이블 목록은 코드 안의 고정 목록입니다. 그래서 나중에 추가된 테이블은 **추가한 사람이 기억해야** 했고, 실제로 요청 단위 테이블 4개와 만료 컬럼을 가진 테이블 3개가 오랫동안 누락됐습니다.
+
+`internal/store/retention_completeness_test.go` 가 이를 **빌드 단계에서 강제**합니다.
+
+- `request_id` 나 `expires_at` 을 가진 테이블은 **반드시 판단이 등록**돼야 합니다 — 요청과 함께 삭제 / 만료로 정리 / 의도적 보존(사유 포함) 중 하나.
+- 판단 없이 그런 테이블을 추가하면 테스트가 **어느 테이블인지와 무엇을 결정해야 하는지** 알려주며 실패합니다.
+- "삭제한다"고 등록해놓고 실제 삭제문이 없으면 그것도 실패합니다 — 등록은 의도이고, 테스트가 현실과 대조합니다.
+
+즉 보존 판단이 코드 리뷰에서 눈에 띄지 않고 지나가는 대신, 테스트가 결정을 요구합니다.
+
+#### 만료된 행 정리
+
+만료 시각(`expires_at`)을 가진 일부 테이블은 **읽을 때는 만료로 처리되지만 행이 삭제되지 않아** 계속 쌓이고 있었습니다. 이제 보존 워커가 함께 정리합니다.
+
+| 테이블 | 내용 |
+|---|---|
+| `refresh_tokens` | 만료된 토큰 + 폐기 후 24시간 지난 토큰 |
+| `auth_sessions` | 만료된 세션 + 폐기 후 24시간 지난 세션 |
+| `text2sql_cache` | 만료된 캐시 항목 |
+
+`refresh_tokens` 가 특히 빨리 쌓입니다 — 토큰은 **로그인당 1행이 아니라 갱신(rotation)마다 1행**이 생기고, 직전 토큰은 즉시 폐기되지만 삭제되지는 않았습니다.
+
+**폐기 직후 24시간은 남깁니다.** 재시도가 폐기된 토큰을 다시 제시했을 때 "이미 사용됨"으로 인식돼야지, 행이 사라져 "알 수 없는 토큰"으로 보이면 안 되기 때문입니다.
+
+> `login_attempts` 는 앱이 읽지 않는 **보안 감사 로그**라 `secret_events` 와 같은 원칙으로 남깁니다.
+
+#### 삭제하지 않는 것
+
+다음은 요청에 연결돼 있어도 **의도적으로 남깁니다** — 요청 텔레메트리가 아니라 운영자가 만든 기록이거나, 자체 수명 주기를 갖습니다.
+
+| 남기는 것 | 이유 |
+|---|---|
+| `request_notes` · `approvals` | 운영자가 직접 남긴 메모·승인 |
+| `secret_events` | 보안 감사 추적 — 보통 더 긴 보존이 요구됩니다 |
+| `policy_decision_events` | 거버넌스 판단 이력. 감사 목적이 있을 수 있어 임의로 지우지 않습니다 |
+| `redteam_case_results` | 캠페인 결과 |
+| `text2sql_replay_bundles` · `text2sql_query_logs` | Text2SQL 자체 보존 설정·분석 대상 |
+| `quota_reservations` | 자체 만료·정리 주기 보유 |
+
+> `policy_decision_events` 를 함께 지울지는 판단이 갈립니다. 거버넌스 판단이 감사 자료로 요구되는 환경이 있어 **자동 삭제 대상에 넣지 않았습니다.** 조직 정책상 함께 정리해야 한다면 알려주세요.
 
 ### 9.4 Fallback 로그 재처리
 

@@ -3,27 +3,14 @@ package store
 import (
 	"context"
 	"math"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
-
-	"vibe-coders/internal/config"
 )
 
 func TestCleanArgsCleansing(t *testing.T) {
-	db, err := Open(context.Background(), config.DatabaseConfig{
-		Driver: "sqlite",
-		DSN:    filepath.Join(t.TempDir(), "gateway_clean.db"),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	db := openStoreForTest(t)
 	defer db.Close()
-
-	if err := db.Migrate(context.Background()); err != nil {
-		t.Fatal(err)
-	}
 
 	record := LogRecord{
 		Request: RequestLog{
@@ -31,7 +18,7 @@ func TestCleanArgsCleansing(t *testing.T) {
 			TraceID:   "trace_clean_1",
 			Endpoint:  "chat",
 			BodyRaw:   "hello\x00world", // Contains NULL byte
-			Error:     "some\x00error",   // Contains NULL byte
+			Error:     "some\x00error",  // Contains NULL byte
 			CreatedAt: time.Now().UTC(),
 		},
 		Prompts: []PromptLog{
@@ -58,7 +45,7 @@ func TestCleanArgsCleansing(t *testing.T) {
 
 	// Verify request_logs fields have null bytes stripped.
 	var bodyRaw, errStr string
-	err = db.db.QueryRow(`SELECT body_raw, error FROM request_logs WHERE id = 'req_clean_1'`).Scan(&bodyRaw, &errStr)
+	err := db.db.QueryRow(`SELECT body_raw, error FROM request_logs WHERE id = 'req_clean_1'`).Scan(&bodyRaw, &errStr)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,18 +95,8 @@ func TestCleanArgsInvalidUTF8(t *testing.T) {
 }
 
 func TestSystemErrorsStore(t *testing.T) {
-	db, err := Open(context.Background(), config.DatabaseConfig{
-		Driver: "sqlite",
-		DSN:    filepath.Join(t.TempDir(), "gateway_errors.db"),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	db := openStoreForTest(t)
 	defer db.Close()
-
-	if err := db.Migrate(context.Background()); err != nil {
-		t.Fatal(err)
-	}
 
 	ctx := context.Background()
 	// Insert system error

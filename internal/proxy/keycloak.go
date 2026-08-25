@@ -33,9 +33,9 @@ type oidcDiscovery struct {
 var (
 	oidcHTTP = &http.Client{Timeout: 8 * time.Second}
 
-	discMu     sync.Mutex
-	discCache  oidcDiscovery
-	discFetch  time.Time
+	discMu    sync.Mutex
+	discCache oidcDiscovery
+	discFetch time.Time
 
 	jwksMu    sync.Mutex
 	jwksKeys  map[string]*rsa.PublicKey
@@ -213,7 +213,9 @@ func (s *Server) verifyKeycloakAccessToken(ctx context.Context, token string) (a
 		return accessClaims{}, false
 	}
 	if hb, err := base64.RawURLEncoding.DecodeString(parts[0]); err == nil {
-		var h struct{ Alg string `json:"alg"` }
+		var h struct {
+			Alg string `json:"alg"`
+		}
 		if json.Unmarshal(hb, &h) == nil && h.Alg != "RS256" {
 			return accessClaims{}, false
 		}

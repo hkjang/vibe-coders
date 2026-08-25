@@ -321,7 +321,7 @@ func (s *Server) handleSavings(w http.ResponseWriter, r *http.Request) {
 		out = out[:limit]
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"dimension":                 dimension,
+		"dimension":                   dimension,
 		"total_downshift_savings_krw": totalDownshift,
 		"total_cache_savings_krw":     totalCache,
 		"total_savings_krw":           totalDownshift + totalCache,

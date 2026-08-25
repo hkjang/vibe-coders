@@ -2,23 +2,14 @@ package store
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 	"time"
-
-	"vibe-coders/internal/config"
 )
 
 func TestOIDCFlowStateRoundtrip(t *testing.T) {
 	ctx := context.Background()
-	db, err := Open(ctx, config.DatabaseConfig{Driver: "sqlite", DSN: filepath.Join(t.TempDir(), "oidc.db")})
-	if err != nil {
-		t.Fatal(err)
-	}
+	db := openStoreForTest(t)
 	defer db.Close()
-	if err := db.Migrate(ctx); err != nil {
-		t.Fatal(err)
-	}
 
 	now := time.Now()
 	if err := db.SaveOIDCFlowState(ctx, "state1", "nonce1", "verifier1", now); err != nil {

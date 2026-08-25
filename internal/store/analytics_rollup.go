@@ -29,8 +29,15 @@ type AnalyticsRollupRow struct {
 	Errors    int64   `json:"errors"`
 }
 
-// RollupDay (re)computes the daily aggregates for the given KST/UTC day string
+// RollupDay (re)computes the daily aggregates for the given Seoul day string
 // ("2006-01-02") across all dimensions and upserts them, so it is safe to re-run.
+//
+// Seoul, not UTC, and the distinction is load-bearing. These rows outlive the raw logs
+// they were built from, so once retention has run they are the only source a chart has
+// for that day. The live charts bucket by Seoul day (see seoulDayExpr); if the rollup
+// used UTC the same series would change its definition of a day at the retention
+// boundary, which is worse than being uniformly wrong — the discontinuity would sit in
+// the middle of a trend line with nothing to mark it.
 func (s *SQLStore) RollupDay(ctx context.Context, day string) error {
 	for dim, col := range rollupDimensions {
 		if err := s.rollupDayDimension(ctx, day, dim, col); err != nil {
@@ -60,24 +67,31 @@ func (s *SQLStore) rollupDayDimension(ctx context.Context, day, dimension, col s
 			COALESCE(SUM(CASE WHEN r.status_code >= 400 THEN 1 ELSE 0 END), 0)
 		FROM request_logs r
 		LEFT JOIN token_usage t ON t.request_id = r.id
-		WHERE substring(r.created_at, 1, 10) = ?
+		WHERE %s = ?
 		GROUP BY 3
 		ON CONFLICT (day, dimension, dim_value) DO UPDATE SET
 			requests = excluded.requests,
 			tokens = excluded.tokens,
 			cost_krw = excluded.cost_krw,
-			errors = excluded.errors`, keyExpr))
+			errors = excluded.errors`, keyExpr, s.seoulDayExpr("r.created_at")))
 	if _, err := s.db.ExecContext(ctx, query, day, dimension, day); err != nil {
 		return err
 	}
 	return nil
 }
 
-// RollupRange rolls up each day in [from, to] inclusive (by UTC date). Used to
-// backfill or to capture recent days before retention purges the raw rows.
+// RollupRange rolls up each day in [from, to] inclusive, by Seoul date. Used to backfill
+// or to capture recent days before retention purges the raw rows.
+//
+// Converting both endpoints to Seoul is enough to cover the boundary: an instant near
+// UTC midnight lands on the Seoul day the loop then starts from, so no extra margin is
+// needed. Re-rolling a day would be harmless anyway — the upsert recomputes it — but a
+// margin nothing requires is just code that has to be explained later.
 func (s *SQLStore) RollupRange(ctx context.Context, from, to time.Time) (int, error) {
 	days := 0
-	for d := from.UTC().Truncate(24 * time.Hour); !d.After(to.UTC()); d = d.AddDate(0, 0, 1) {
+	first := from.In(seoulZone)
+	last := to.In(seoulZone)
+	for d := time.Date(first.Year(), first.Month(), first.Day(), 0, 0, 0, 0, seoulZone); !d.After(last); d = d.AddDate(0, 0, 1) {
 		if err := s.RollupDay(ctx, d.Format("2006-01-02")); err != nil {
 			return days, err
 		}

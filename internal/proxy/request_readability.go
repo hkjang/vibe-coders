@@ -123,6 +123,7 @@ func refreshRoutingSummary(req *store.RequestLog, plan *intelligentRoutingPlan) 
 		summary["risk"] = plan.Risk
 		summary["health_score"] = plan.HealthScore
 		summary["decision_reason"] = plan.DecisionReason
+		summary["fallback_plan"] = plan.FallbackPlan
 		summary["fallback_path"] = plan.FallbackPath
 		if plan.RouteReason != "" {
 			summary["route_reason"] = plan.RouteReason

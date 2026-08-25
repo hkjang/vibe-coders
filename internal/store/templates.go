@@ -11,19 +11,19 @@ import (
 // PromptTemplate is a centrally-managed standard prompt (e.g. 리팩터링, 테스트 생성,
 // 보안 점검, 문서화) that teams reuse instead of re-inventing prompts per request.
 type PromptTemplate struct {
-	ID          string   `json:"id"` // slug
-	Name        string   `json:"name"`
-	Category    string   `json:"category"`
-	Description string   `json:"description"`
-	Body        string   `json:"body"`
-	Enabled     bool     `json:"enabled"`
-	UseCount    int64    `json:"use_count"`
-	LastUsedAt  string   `json:"last_used_at"`
-	CreatedAt   string   `json:"created_at"`
-	UpdatedAt   string   `json:"updated_at"`
+	ID          string `json:"id"` // slug
+	Name        string `json:"name"`
+	Category    string `json:"category"`
+	Description string `json:"description"`
+	Body        string `json:"body"`
+	Enabled     bool   `json:"enabled"`
+	UseCount    int64  `json:"use_count"`
+	LastUsedAt  string `json:"last_used_at"`
+	CreatedAt   string `json:"created_at"`
+	UpdatedAt   string `json:"updated_at"`
 	// Asset library v2
 	Tags       []string `json:"tags"`
-	Status     string   `json:"status"`      // draft | pending | approved | standard
+	Status     string   `json:"status"` // draft | pending | approved | standard
 	ApprovedBy string   `json:"approved_by"`
 	ApprovedAt string   `json:"approved_at"`
 	Note       string   `json:"note"`

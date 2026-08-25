@@ -166,11 +166,26 @@ func buildSettingRegistry() []settingDef {
 		{Key: "insurance.slow_burn", Category: "insurance", Type: stFloat, validate: posFloat, envValue: func(c config.Config) string { return strconv.FormatFloat(c.Insurance.SlowBurnThreshold, 'f', -1, 64) }},
 
 		// ---- Cache ----
+		// Upstream resilience knobs. These are incident-response controls — the moment
+		// you need to change a breaker threshold or turn off balancing is during an
+		// outage, which is the worst time to require a redeploy. Connection details
+		// (base URL, api key, provider name) stay bootstrap-only on purpose.
+		{Key: "quota.reservations_enabled", Category: "quota", Type: stBool, envValue: func(c config.Config) string { return strconv.FormatBool(c.Quota.ReservationsEnabled) }},
+		{Key: "upstream.breaker_enabled", Category: "upstream", Type: stBool, envValue: func(c config.Config) string { return strconv.FormatBool(c.Upstream.BreakerEnabled) }},
+		{Key: "upstream.breaker_threshold", Category: "upstream", Type: stInt, validate: posInt, envValue: func(c config.Config) string { return strconv.Itoa(c.Upstream.BreakerThreshold) }},
+		{Key: "upstream.breaker_cooldown", Category: "upstream", Type: stDuration, validate: dur, envValue: func(c config.Config) string { return c.Upstream.BreakerCooldown.String() }},
+		{Key: "upstream.failover_budget", Category: "upstream", Type: stDuration, validate: dur, envValue: func(c config.Config) string { return c.Upstream.FailoverBudget.String() }},
+		{Key: "upstream.health_demote_threshold", Category: "upstream", Type: stInt, envValue: func(c config.Config) string { return strconv.Itoa(c.Upstream.HealthDemoteThreshold) }},
+		{Key: "upstream.load_balance", Category: "upstream", Type: stString, envValue: func(c config.Config) string { return c.Upstream.LoadBalance }},
+		{Key: "upstream.sticky_sessions", Category: "upstream", Type: stBool, envValue: func(c config.Config) string { return strconv.FormatBool(c.Upstream.StickySessions) }},
+		{Key: "upstream.sticky_ttl", Category: "upstream", Type: stDuration, validate: dur, envValue: func(c config.Config) string { return c.Upstream.StickyTTL.String() }},
 		{Key: "cache.embedding_enabled", Category: "cache", Type: stBool, envValue: func(c config.Config) string { return strconv.FormatBool(c.Cache.EmbeddingEnabled) }},
 		{Key: "cache.embedding_ttl", Category: "cache", Type: stDuration, validate: dur, envValue: func(c config.Config) string { return c.Cache.EmbeddingTTL.String() }},
 		{Key: "cache.embedding_max_bytes", Category: "cache", Type: stInt, validate: posInt, envValue: func(c config.Config) string { return strconv.Itoa(c.Cache.EmbeddingMaxBytes) }},
 		{Key: "cache.chat_enabled", Category: "cache", Type: stBool, envValue: func(c config.Config) string { return strconv.FormatBool(c.Cache.ChatEnabled) }},
 		{Key: "cache.chat_ttl", Category: "cache", Type: stDuration, validate: dur, envValue: func(c config.Config) string { return c.Cache.ChatTTL.String() }},
+		{Key: "cache.chat_scope", Category: "cache", Type: stString, envValue: func(c config.Config) string { return c.Cache.ChatScope }},
+		{Key: "cache.embedding_scope", Category: "cache", Type: stString, envValue: func(c config.Config) string { return c.Cache.EmbeddingScope }},
 		{Key: "cache.chat_semantic_enabled", Category: "cache", Type: stBool, envValue: func(c config.Config) string { return strconv.FormatBool(c.Cache.ChatSemanticEnabled) }},
 		{Key: "cache.chat_semantic_model", Category: "cache", Type: stString, envValue: func(c config.Config) string { return c.Cache.ChatSemanticModel }},
 		{Key: "cache.chat_semantic_threshold", Category: "cache", Type: stFloat, validate: rate01, envValue: func(c config.Config) string { return strconv.FormatFloat(c.Cache.ChatSemanticThreshold, 'f', -1, 64) }},
@@ -185,6 +200,7 @@ func buildSettingRegistry() []settingDef {
 		{Key: "retention.prompt_days", Category: "retention", Type: stInt, validate: posInt, envValue: func(c config.Config) string { return strconv.Itoa(c.Retention.PromptDays) }},
 		{Key: "retention.response_days", Category: "retention", Type: stInt, validate: posInt, envValue: func(c config.Config) string { return strconv.Itoa(c.Retention.ResponseDays) }},
 		{Key: "retention.text2sql_replay_days", Category: "retention", Type: stInt, validate: posInt, envValue: func(c config.Config) string { return strconv.Itoa(c.Retention.Text2SQLReplayDays) }},
+		{Key: "retention.domain_example_days", Category: "retention", Type: stInt, validate: posInt, envValue: func(c config.Config) string { return strconv.Itoa(c.Retention.DomainExampleDays) }},
 		{Key: "retention.interval", Category: "retention", Type: stDuration, Restart: true, validate: dur, envValue: func(c config.Config) string { return c.Retention.Interval.String() }},
 
 		// ---- Pricing ----
@@ -303,11 +319,26 @@ var settingDescriptions = map[string]string{
 	"insurance.fast_burn":  "fast burn 임계 배수(즉시 page 경보 기준).",
 	"insurance.slow_burn":  "slow burn 임계 배수(ticket 경보 기준).",
 	// Cache
-	"cache.embedding_enabled":            "임베딩 응답 캐시 on/off.",
+	"cache.embedding_enabled": "임베딩 응답 캐시 on/off.",
+
+	// Upstream (장애 대응)
+	"upstream.breaker_enabled":         "차단기 on/off. 끄면 연속 실패한 provider도 계속 후보로 남습니다.",
+	"upstream.breaker_threshold":       "연속 실패 몇 회에 provider를 차단할지. 낮추면 빨리 빼고, 높이면 잔실패를 견딥니다.",
+	"upstream.breaker_cooldown":        "차단 유지 시간(예: 30s). 지나면 1건만 시험 전송(half-open)해 회복을 확인합니다.",
+	"upstream.failover_budget":         "요청 1건이 폴백에 쓸 수 있는 총 시간(예: 20s). 0이면 무제한 — 재시도가 길어져 클라이언트가 먼저 끊길 수 있습니다.",
+	"upstream.health_demote_threshold": "health 점수가 이 값 미만인 provider를 후보 뒤로 미룹니다(제외 아님). 0이면 강등 없음.",
+	"upstream.load_balance":            "같은 모델을 여러 provider가 제공할 때 분배 방식: first(우선순위 1순위 고정) · round_robin · session_hash.",
+	"upstream.sticky_sessions":         "세션 고정 on/off. 켜면 한 대화는 처음 붙은 provider로 계속 갑니다(vLLM prefix 캐시 적중률 유지).",
+	"upstream.sticky_ttl":              "세션 고정 유지 시간(예: 30m). 이 시간 동안 요청이 없으면 고정이 풀립니다.",
+
+	// Quota
+	"quota.reservations_enabled":         "동시 요청의 예상 사용량을 예약해 쿼터에 합산합니다. 끄면 in-flight 요청이 서로 안 보여 한도를 넘길 수 있고, 켜면 쿼터 확인 비용이 늡니다.",
 	"cache.embedding_ttl":                "임베딩 캐시 보존 시간.",
 	"cache.embedding_max_bytes":          "임베딩 캐시 항목 최대 바이트.",
 	"cache.chat_enabled":                 "chat 정확 캐시(temperature 0/seed 고정) on/off.",
 	"cache.chat_ttl":                     "chat 캐시 보존 시간.",
+	"cache.chat_scope":                   "chat 캐시를 누구와 공유할지: global(기본, 동일 프롬프트면 팀이 달라도 재사용) · team · api_key. ⚠️ global에서는 다른 팀이 저장한 응답이 X-Cache: HIT로 반환되고, HIT 자체가 누군가 이 질문을 이미 했다는 사실을 알려줍니다. 좁힐수록 적중률은 떨어집니다.",
+	"cache.embedding_scope":              "임베딩 캐시 공유 범위: global(기본) · team · api_key. 임베딩은 (모델, 입력)의 순수 함수라 공유해도 남의 내용이 오지는 않지만, X-Cache: HIT 자체가 누군가 같은 텍스트를 이미 임베딩했다는 사실을 알려줍니다.",
 	"cache.chat_semantic_enabled":        "의미(임베딩) 유사도 기반 chat 근사 캐시 on/off.",
 	"cache.chat_semantic_model":          "시맨틱 캐시용 임베딩 모델.",
 	"cache.chat_semantic_threshold":      "시맨틱 캐시 적중 코사인 유사도 임계값(0~1).",
@@ -321,6 +352,7 @@ var settingDescriptions = map[string]string{
 	"retention.prompt_days":          "프롬프트 본문 보존 일수.",
 	"retention.response_days":        "응답 본문 보존 일수.",
 	"retention.text2sql_replay_days": "Text2SQL Replay Bundle 보존 일수.",
+	"retention.domain_example_days":  "라우팅 예시로 적립된 리닥션 프롬프트 텍스트의 보존 일수. 0이면 무기한 보관. 프롬프트 보존 기간과 별개입니다.",
 	"retention.interval":             "보존 정리 워커 실행 주기(예: 6h). 변경 시 ticker 재생성.",
 	// Pricing
 	"pricing.fallback_model": "가격표에 매칭되지 않는 모델의 비용을 계산할 기준 모델(기본 qwen-plus). 해당 모델이 가격표에 있어야 적용, 없으면 0 처리.",
@@ -340,15 +372,28 @@ var settingDescriptions = map[string]string{
 	// Logging
 	"logging.response_text":      "AI 응답 본문 캡처 여부(LOG_RESPONSE_TEXT). true면 response_text_optional에 전체 응답 텍스트를 저장, 요청 상세에서 조회 가능. 저장 공간 증가 주의.",
 	"logging.raw_prompts":        "프롬프트 원문 캡처 여부(LOG_RAW_PROMPTS). true면 content_text(원문)도 별도 저장. false면 redacted_text(리덕션)만 보관.",
-	"logging.raw_bodies":         "요청·응답 원시 바디 캡처 여부(LOG_RAW_BODIES). true면 raw_request/raw_response 컬럼에 전체 바이트 저장. 디버그 목적. 저장 공간 주의.",
+	"logging.raw_bodies":         "요청·응답 원시 바디 캡처 여부(LOG_RAW_BODIES). ⚠️ 켜면 프롬프트가 **마스킹 없이 그대로** 저장됩니다 — API 키·주민번호·카드번호가 본문에 있으면 평문으로 남고 retention 기간까지 유지됩니다. 재실행(replay)에는 원본 바이트가 필요하므로 마스킹할 수 없습니다. 디스크 암호화와 접근 제한을 먼저 확보하세요(docs/OPERATIONS.md). 저장 공간도 늘어납니다.",
 	"logging.response_max_bytes": "응답 캡처 최대 바이트(LOG_RESPONSE_MAX_BYTES). 초과 분 잘림. 기본 1MB.",
 	// Env (read-only)
-	"env.upstream_base_url": "업스트림 엔드포인트 URL(UPSTREAM_BASE_URL). 변경하려면 컨테이너 환경변수를 수정 후 재시작.",
-	"env.upstream_provider": "업스트림 프로바이더 이름(UPSTREAM_PROVIDER). 변경하려면 환경변수 수정 후 재시작.",
-	"env.upstream_api_key":  "업스트림 API 키(UPSTREAM_API_KEY). 마스킹 표시. 변경하려면 환경변수 수정 후 재시작.",
-	"env.listen_addr":       "게이트웨이 수신 주소/포트(PORT or LISTEN_ADDR). 변경하려면 환경변수 수정 후 재시작.",
-	"env.log_queue_size":    "비동기 로그 큐 크기(LOG_QUEUE_SIZE). 변경하려면 환경변수 수정 후 재시작.",
-	"env.log_fallback_path": "로그 큐 오버플로 시 fallback NDJSON 파일 경로(LOG_FALLBACK_PATH).",
+	"env.upstream_base_url":        "업스트림 엔드포인트 URL(UPSTREAM_BASE_URL). 변경하려면 컨테이너 환경변수를 수정 후 재시작.",
+	"env.upstream_provider":        "업스트림 프로바이더 이름(UPSTREAM_PROVIDER). 변경하려면 환경변수 수정 후 재시작.",
+	"env.upstream_api_key":         "업스트림 API 키(UPSTREAM_API_KEY). 마스킹 표시. 변경하려면 환경변수 수정 후 재시작.",
+	"env.listen_addr":              "게이트웨이 수신 주소/포트(PORT or LISTEN_ADDR). 변경하려면 환경변수 수정 후 재시작.",
+	"env.log_queue_size":           "비동기 로그 큐 크기(LOG_QUEUE_SIZE). 변경하려면 환경변수 수정 후 재시작.",
+	"env.log_fallback_path":        "로그 큐 오버플로 시 fallback NDJSON 파일 경로(LOG_FALLBACK_PATH).",
+	"env.upstream_default_model":   "모델을 지정하지 않은 요청에 쓰이는 기본 모델(UPSTREAM_DEFAULT_MODEL). 변경하려면 환경변수 수정 후 재시작.",
+	"env.settings_reload_interval": "각 파드가 런타임 설정을 DB에서 다시 읽는 주기(SETTINGS_RELOAD_INTERVAL). 다중 파드 반영 지연의 상한입니다.",
+	// Env · SSO (read-only)
+	"env.sso_keycloak_enabled":           "Keycloak SSO 사용 여부(KEYCLOAK_ENABLED). DB 기반 SSO 설정 화면이 이 값을 덮어쓸 수 있습니다.",
+	"env.sso_keycloak_issuer_url":        "Keycloak realm issuer URL(KEYCLOAK_ISSUER_URL). OIDC discovery 기준점.",
+	"env.sso_keycloak_client_id":         "이 게이트웨이에 발급된 Keycloak client id(KEYCLOAK_CLIENT_ID).",
+	"env.sso_keycloak_client_secret":     "Keycloak client secret(KEYCLOAK_CLIENT_SECRET). 마스킹 표시.",
+	"env.sso_keycloak_redirect_uri":      "로그인 후 돌아올 콜백 URI(KEYCLOAK_REDIRECT_URI). Keycloak 클라이언트에 등록된 값과 정확히 같아야 합니다.",
+	"env.sso_keycloak_scopes":            "인가 요청에 포함할 OIDC scope 목록(KEYCLOAK_SCOPES).",
+	"env.sso_keycloak_default_role":      "역할 클레임이 매핑되지 않은 신규 SSO 사용자에게 부여할 역할(KEYCLOAK_DEFAULT_ROLE).",
+	"env.sso_keycloak_role_claim":        "역할을 읽어올 토큰 클레임 이름(KEYCLOAK_ROLE_CLAIM).",
+	"env.sso_keycloak_group_claim":       "그룹/팀을 읽어올 토큰 클레임 이름(KEYCLOAK_GROUP_CLAIM).",
+	"env.sso_keycloak_allow_local_login": "SSO와 함께 로컬 ID/PW 로그인도 허용할지(KEYCLOAK_ALLOW_LOCAL_LOGIN). 끄면 SSO 장애 시 관리자도 로그인할 수 없습니다.",
 }
 
 // t2sConf returns the effective Text2SQL config (admin-settings overlay over env/default).
@@ -381,6 +426,28 @@ func (s *Server) insuranceConf() config.InsuranceConfig {
 		return *p
 	}
 	return s.cfg.Insurance
+}
+
+// quotaConf returns the effective Quota config (admin-settings overlay over env/default).
+func (s *Server) quotaConf() config.QuotaConfig {
+	if p := s.quotaRuntime.Load(); p != nil {
+		return *p
+	}
+	return s.cfg.Quota
+}
+
+// upstreamConf returns the effective Upstream config (admin-settings overlay over env/default).
+//
+// Only the resilience knobs are overlaid — the breaker, the balancer, sticky sessions,
+// the failover budget and the health demotion threshold. Connection identity (BaseURL,
+// APIKey, Provider, Providers) is deliberately left to startup: those decide where
+// traffic goes and are wired into clients built once at boot, so changing them under a
+// live request would be a different kind of change than tuning a threshold.
+func (s *Server) upstreamConf() config.UpstreamConfig {
+	if p := s.upstreamRuntime.Load(); p != nil {
+		return *p
+	}
+	return s.cfg.Upstream
 }
 
 // cacheConf returns the effective Cache config (admin-settings overlay over env/default).
@@ -515,6 +582,8 @@ func (s *Server) reloadRuntimeConfig(ctx context.Context) {
 	limits := s.cfg.Limits
 	logging := s.cfg.Logging
 	mcp := s.cfg.MCP
+	up := s.cfg.Upstream
+	quota := s.cfg.Quota
 	for _, d := range settingRegistry {
 		if d.ReadOnly {
 			continue
@@ -526,7 +595,7 @@ func (s *Server) reloadRuntimeConfig(ctx context.Context) {
 		if source != "admin" {
 			continue
 		}
-		applyRuntimeSetting(&t2s, &ch, &carbon, &ins, &cache, &ret, &pricing, &skills, &limits, &logging, &mcp, d.Key, val)
+		applyRuntimeSetting(&t2s, &ch, &carbon, &ins, &cache, &ret, &pricing, &skills, &limits, &logging, &mcp, &up, &quota, d.Key, val)
 	}
 	s.t2sRuntime.Store(&t2s)
 	s.chRuntime.Store(&ch)
@@ -538,6 +607,8 @@ func (s *Server) reloadRuntimeConfig(ctx context.Context) {
 	s.limitsRuntime.Store(&limits)
 	s.loggingRuntime.Store(&logging)
 	s.mcpRuntime.Store(&mcp)
+	s.upstreamRuntime.Store(&up)
+	s.quotaRuntime.Store(&quota)
 	audit.SetFallbackPriceModel(pricing.FallbackModel) // apply the runtime fallback model
 	// Apply retention changes to the running worker (day thresholds next run; interval recreates the ticker).
 	if s.retention != nil && prevRet != ret {
@@ -567,7 +638,7 @@ func (s *Server) reloadRuntimeConfig(ctx context.Context) {
 	}
 }
 
-func applyRuntimeSetting(t2s *config.Text2SQLConfig, ch *config.ClickHouseConfig, carbon *config.CarbonConfig, ins *config.InsuranceConfig, cache *config.CacheConfig, ret *config.RetentionConfig, pricing *config.PricingConfig, skills *config.SkillsConfig, limits *config.LimitsConfig, logging *config.LoggingConfig, mcp *config.MCPConfig, key, val string) {
+func applyRuntimeSetting(t2s *config.Text2SQLConfig, ch *config.ClickHouseConfig, carbon *config.CarbonConfig, ins *config.InsuranceConfig, cache *config.CacheConfig, ret *config.RetentionConfig, pricing *config.PricingConfig, skills *config.SkillsConfig, limits *config.LimitsConfig, logging *config.LoggingConfig, mcp *config.MCPConfig, up *config.UpstreamConfig, quota *config.QuotaConfig, key, val string) {
 	val = strings.TrimSpace(val)
 	atoi := func() int { n, _ := strconv.Atoi(val); return n }
 	atof := func() float64 { f, _ := strconv.ParseFloat(val, 64); return f }
@@ -688,6 +759,24 @@ func applyRuntimeSetting(t2s *config.Text2SQLConfig, ch *config.ClickHouseConfig
 		ins.FastBurnThreshold = atof()
 	case "insurance.slow_burn":
 		ins.SlowBurnThreshold = atof()
+	case "quota.reservations_enabled":
+		quota.ReservationsEnabled = atob()
+	case "upstream.breaker_enabled":
+		up.BreakerEnabled = atob()
+	case "upstream.breaker_threshold":
+		up.BreakerThreshold = atoi()
+	case "upstream.breaker_cooldown":
+		up.BreakerCooldown = adur(up.BreakerCooldown)
+	case "upstream.failover_budget":
+		up.FailoverBudget = adur(up.FailoverBudget)
+	case "upstream.health_demote_threshold":
+		up.HealthDemoteThreshold = atoi()
+	case "upstream.load_balance":
+		up.LoadBalance = val
+	case "upstream.sticky_sessions":
+		up.StickySessions = atob()
+	case "upstream.sticky_ttl":
+		up.StickyTTL = adur(up.StickyTTL)
 	case "cache.embedding_enabled":
 		cache.EmbeddingEnabled = atob()
 	case "cache.embedding_ttl":
@@ -696,6 +785,10 @@ func applyRuntimeSetting(t2s *config.Text2SQLConfig, ch *config.ClickHouseConfig
 		cache.EmbeddingMaxBytes = atoi()
 	case "cache.chat_enabled":
 		cache.ChatEnabled = atob()
+	case "cache.embedding_scope":
+		cache.EmbeddingScope = val
+	case "cache.chat_scope":
+		cache.ChatScope = val
 	case "cache.chat_ttl":
 		cache.ChatTTL = adur(cache.ChatTTL)
 	case "cache.chat_semantic_enabled":
@@ -722,6 +815,8 @@ func applyRuntimeSetting(t2s *config.Text2SQLConfig, ch *config.ClickHouseConfig
 		ret.ResponseDays = atoi()
 	case "retention.text2sql_replay_days":
 		ret.Text2SQLReplayDays = atoi()
+	case "retention.domain_example_days":
+		ret.DomainExampleDays = atoi()
 	case "retention.interval":
 		ret.Interval = adur(ret.Interval)
 	case "pricing.fallback_model":

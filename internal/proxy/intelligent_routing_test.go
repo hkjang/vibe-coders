@@ -346,7 +346,7 @@ func TestRoutingPreviewAndHealthAPIs(t *testing.T) {
 		RequestedModel string             `json:"requested_model"`
 		SelectedModel  string             `json:"selected_model"`
 		Risk           store.RiskAnalysis `json:"risk"`
-		FallbackPath   []string           `json:"fallback_path"`
+		FallbackPlan   []string           `json:"fallback_plan"`
 		RouteReason    string             `json:"route_reason"`
 		WouldRewrite   bool               `json:"would_rewrite"`
 	}
@@ -359,8 +359,8 @@ func TestRoutingPreviewAndHealthAPIs(t *testing.T) {
 	if out.RouteReason != "auto_router" {
 		t.Fatalf("expected auto router route reason, got %q", out.RouteReason)
 	}
-	if len(out.FallbackPath) != 1 || out.FallbackPath[0] != "fallback_disabled:sensitive_data" {
-		t.Fatalf("expected sensitive fallback disabled, got %#v", out.FallbackPath)
+	if len(out.FallbackPlan) != 1 || out.FallbackPlan[0] != "fallback_disabled:sensitive_data" {
+		t.Fatalf("expected sensitive fallback disabled, got %#v", out.FallbackPlan)
 	}
 
 	now := time.Now().UTC()

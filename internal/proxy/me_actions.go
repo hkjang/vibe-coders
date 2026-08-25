@@ -297,24 +297,24 @@ func (s *Server) handleMeReport(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"user_id":              userID,
-		"window":               window,
-		"since":                since.UTC().Format(time.RFC3339),
-		"requests":             cur.Requests,
-		"tokens":               cur.Tokens,
-		"cost_krw":             cur.CostKRW,
-		"errors":               cur.Errors,
-		"success_rate":         successRate,
-		"prior_cost_krw":       priorCost,
-		"prior_requests":       priorReq,
-		"cost_delta_ratio":     costDelta, // vs prior equal window
-		"avg_latency_ms":       profile.AvgLatencyMS,
-		"cache_rate":           profile.CacheRate,
-		"risk_score":           profile.RiskScore,
-		"top_models":           models,
-		"top_task_types":       profile.TopTaskTypes,
-		"potential_savings_krw": savings,
+		"user_id":                 userID,
+		"window":                  window,
+		"since":                   since.UTC().Format(time.RFC3339),
+		"requests":                cur.Requests,
+		"tokens":                  cur.Tokens,
+		"cost_krw":                cur.CostKRW,
+		"errors":                  cur.Errors,
+		"success_rate":            successRate,
+		"prior_cost_krw":          priorCost,
+		"prior_requests":          priorReq,
+		"cost_delta_ratio":        costDelta, // vs prior equal window
+		"avg_latency_ms":          profile.AvgLatencyMS,
+		"cache_rate":              profile.CacheRate,
+		"risk_score":              profile.RiskScore,
+		"top_models":              models,
+		"top_task_types":          profile.TopTaskTypes,
+		"potential_savings_krw":   savings,
 		"potential_savings_model": cheap,
-		"recommendation_count": recCount,
+		"recommendation_count":    recCount,
 	})
 }

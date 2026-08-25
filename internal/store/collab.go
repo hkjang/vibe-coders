@@ -156,6 +156,31 @@ func (s *SQLStore) ListSavedFilters(ctx context.Context) ([]SavedFilter, error) 
 	return result, rows.Err()
 }
 
+func (s *SQLStore) GetSavedFilter(ctx context.Context, id string) (SavedFilter, bool, error) {
+	var filter SavedFilter
+	var createdAt string
+	err := s.db.QueryRowContext(ctx, s.bind(`SELECT id, name, view, params, COALESCE(created_by, ''), created_at
+		FROM saved_filters
+		WHERE id = ?`), id).Scan(
+		&filter.ID,
+		&filter.Name,
+		&filter.View,
+		&filter.Params,
+		&filter.CreatedBy,
+		&createdAt,
+	)
+	if err == sql.ErrNoRows {
+		return SavedFilter{}, false, nil
+	}
+	if err != nil {
+		return SavedFilter{}, false, err
+	}
+	if parsed, err := time.Parse(time.RFC3339Nano, createdAt); err == nil {
+		filter.CreatedAt = parsed
+	}
+	return filter, true, nil
+}
+
 func (s *SQLStore) UpsertSavedFilter(ctx context.Context, f SavedFilter) error {
 	if f.CreatedAt.IsZero() {
 		f.CreatedAt = time.Now().UTC()

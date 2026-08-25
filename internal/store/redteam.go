@@ -84,6 +84,11 @@ type RedTeamCampaign struct {
 	ExternalProviderAllowed bool           `json:"external_provider_allowed"`
 	DestructiveToolPolicy   string         `json:"destructive_tool_policy"`
 	RetainRawEvidence       bool           `json:"retain_raw_evidence"`
+	TriggerSource           string         `json:"trigger_source"`
+	TriggerAction           string         `json:"trigger_action"`
+	TriggerRef              string         `json:"trigger_ref"`
+	TriggerReason           string         `json:"trigger_reason"`
+	TriggerFingerprint      string         `json:"-"`
 	CreatedAt               string         `json:"created_at"`
 	UpdatedAt               string         `json:"updated_at"`
 }
@@ -435,18 +440,22 @@ func (s *SQLStore) UpsertRedTeamCampaign(ctx context.Context, c RedTeamCampaign)
 	filter, _ := json.Marshal(nonNilMap(c.TargetFilter))
 	_, err := s.db.ExecContext(ctx, s.bind(`INSERT INTO redteam_campaigns
 		(id, name, scope, status, execution_mode, created_by, approved_by, schedule, budget_limit_krw, qps_limit, timeout_ms, concurrency,
-		 target_filter_json, probe_pack_ids_json, evidence_retention_days, external_provider_allowed, destructive_tool_policy, retain_raw_evidence, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 target_filter_json, probe_pack_ids_json, evidence_retention_days, external_provider_allowed, destructive_tool_policy, retain_raw_evidence,
+		 trigger_source, trigger_action, trigger_ref, trigger_reason, trigger_fingerprint, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET name=excluded.name, scope=excluded.scope, status=excluded.status,
 			execution_mode=excluded.execution_mode, approved_by=excluded.approved_by, schedule=excluded.schedule,
 			budget_limit_krw=excluded.budget_limit_krw, qps_limit=excluded.qps_limit, timeout_ms=excluded.timeout_ms,
 			concurrency=excluded.concurrency, target_filter_json=excluded.target_filter_json,
 			probe_pack_ids_json=excluded.probe_pack_ids_json, evidence_retention_days=excluded.evidence_retention_days,
 			external_provider_allowed=excluded.external_provider_allowed, destructive_tool_policy=excluded.destructive_tool_policy,
-			retain_raw_evidence=excluded.retain_raw_evidence, updated_at=excluded.updated_at`),
+			retain_raw_evidence=excluded.retain_raw_evidence, trigger_source=excluded.trigger_source,
+			trigger_action=excluded.trigger_action, trigger_ref=excluded.trigger_ref, trigger_reason=excluded.trigger_reason,
+			trigger_fingerprint=excluded.trigger_fingerprint, updated_at=excluded.updated_at`),
 		c.ID, c.Name, c.Scope, c.Status, c.ExecutionMode, c.CreatedBy, c.ApprovedBy, c.Schedule, c.BudgetLimitKRW,
 		c.QPSLimit, c.TimeoutMS, c.Concurrency, string(filter), encodeStringList(c.ProbePackIDs),
-		c.EvidenceRetentionDays, boolInt(c.ExternalProviderAllowed), c.DestructiveToolPolicy, boolInt(c.RetainRawEvidence), c.CreatedAt, c.UpdatedAt)
+		c.EvidenceRetentionDays, boolInt(c.ExternalProviderAllowed), c.DestructiveToolPolicy, boolInt(c.RetainRawEvidence),
+		c.TriggerSource, c.TriggerAction, c.TriggerRef, c.TriggerReason, c.TriggerFingerprint, c.CreatedAt, c.UpdatedAt)
 	return err
 }
 
@@ -462,7 +471,8 @@ func (s *SQLStore) ListRedTeamCampaigns(ctx context.Context, limit int) ([]RedTe
 	}
 	rows, err := s.db.QueryContext(ctx, s.bind(`SELECT id, name, scope, status, execution_mode, created_by, approved_by, schedule,
 		budget_limit_krw, qps_limit, timeout_ms, concurrency, target_filter_json, probe_pack_ids_json, evidence_retention_days,
-		external_provider_allowed, destructive_tool_policy, retain_raw_evidence, created_at, updated_at
+		external_provider_allowed, destructive_tool_policy, retain_raw_evidence, trigger_source, trigger_action, trigger_ref,
+		trigger_reason, trigger_fingerprint, created_at, updated_at
 		FROM redteam_campaigns ORDER BY created_at DESC LIMIT ?`), limit)
 	if err != nil {
 		return nil, err
@@ -505,7 +515,8 @@ func (s *SQLStore) DeleteRedTeamCampaign(ctx context.Context, id string) error {
 func (s *SQLStore) GetRedTeamCampaign(ctx context.Context, id string) (RedTeamCampaign, bool, error) {
 	row := s.db.QueryRowContext(ctx, s.bind(`SELECT id, name, scope, status, execution_mode, created_by, approved_by, schedule,
 		budget_limit_krw, qps_limit, timeout_ms, concurrency, target_filter_json, probe_pack_ids_json, evidence_retention_days,
-		external_provider_allowed, destructive_tool_policy, retain_raw_evidence, created_at, updated_at
+		external_provider_allowed, destructive_tool_policy, retain_raw_evidence, trigger_source, trigger_action, trigger_ref,
+		trigger_reason, trigger_fingerprint, created_at, updated_at
 		FROM redteam_campaigns WHERE id = ?`), id)
 	c, err := scanRedTeamCampaign(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -523,7 +534,8 @@ func scanRedTeamCampaign(sc interface{ Scan(...any) error }) (RedTeamCampaign, e
 	var external, retainRaw int
 	if err := sc.Scan(&c.ID, &c.Name, &c.Scope, &c.Status, &c.ExecutionMode, &c.CreatedBy, &c.ApprovedBy, &c.Schedule,
 		&c.BudgetLimitKRW, &c.QPSLimit, &c.TimeoutMS, &c.Concurrency, &filter, &packs, &c.EvidenceRetentionDays,
-		&external, &c.DestructiveToolPolicy, &retainRaw, &c.CreatedAt, &c.UpdatedAt); err != nil {
+		&external, &c.DestructiveToolPolicy, &retainRaw, &c.TriggerSource, &c.TriggerAction, &c.TriggerRef,
+		&c.TriggerReason, &c.TriggerFingerprint, &c.CreatedAt, &c.UpdatedAt); err != nil {
 		return RedTeamCampaign{}, err
 	}
 	c.TargetFilter = decodeJSONMap(filter)
@@ -531,6 +543,28 @@ func scanRedTeamCampaign(sc interface{ Scan(...any) error }) (RedTeamCampaign, e
 	c.ExternalProviderAllowed = external != 0
 	c.RetainRawEvidence = retainRaw != 0
 	return c, nil
+}
+
+// FindRecentRedTeamCampaignByFingerprint provides restart-safe post-change deduplication.
+// Fingerprints are hashes only; the changed setting or policy body is never persisted here.
+func (s *SQLStore) FindRecentRedTeamCampaignByFingerprint(ctx context.Context, fingerprint string, since time.Time) (RedTeamCampaign, bool, error) {
+	if strings.TrimSpace(fingerprint) == "" {
+		return RedTeamCampaign{}, false, nil
+	}
+	row := s.db.QueryRowContext(ctx, s.bind(`SELECT id, name, scope, status, execution_mode, created_by, approved_by, schedule,
+		budget_limit_krw, qps_limit, timeout_ms, concurrency, target_filter_json, probe_pack_ids_json, evidence_retention_days,
+		external_provider_allowed, destructive_tool_policy, retain_raw_evidence, trigger_source, trigger_action, trigger_ref,
+		trigger_reason, trigger_fingerprint, created_at, updated_at
+		FROM redteam_campaigns WHERE trigger_fingerprint = ? AND created_at >= ? ORDER BY created_at DESC LIMIT 1`),
+		fingerprint, since.UTC().Format(time.RFC3339Nano))
+	c, err := scanRedTeamCampaign(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return RedTeamCampaign{}, false, nil
+	}
+	if err != nil {
+		return RedTeamCampaign{}, false, err
+	}
+	return c, true, nil
 }
 
 func (s *SQLStore) InsertRedTeamRun(ctx context.Context, r RedTeamRun) error {

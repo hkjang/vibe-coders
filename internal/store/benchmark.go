@@ -73,21 +73,38 @@ func (s *SQLStore) UserProductivity(ctx context.Context, since time.Time, limit 
 		limit = 100
 	}
 	sinceStr := since.UTC().Format(time.RFC3339Nano)
+	// The per-key lookups (name, team, tool calls) are joined onto the aggregate rather
+	// than run as correlated subqueries inside it. They read r.api_key_id, which is not
+	// what the query groups by — it groups by the COALESCE'd akid — and PostgreSQL
+	// rejects that with "subquery uses ungrouped column". SQLite answers it by picking an
+	// arbitrary row from the group, which happens to be right only because every row in a
+	// group shares the same api_key_id.
 	rows, err := s.db.QueryContext(ctx, s.bind(`
-		SELECT COALESCE(NULLIF(r.api_key_id, ''), 'anonymous') AS akid,
-			COALESCE(NULLIF((SELECT k.name FROM api_keys k WHERE k.id = r.api_key_id), ''), COALESCE(NULLIF(r.api_key_id, ''), 'anonymous')) AS name,
-			`+requestTeamExpr+` AS team,
-			COUNT(*) AS requests,
-			COUNT(DISTINCT COALESCE(NULLIF(r.session_id, ''), r.id)) AS sessions,
-			COUNT(DISTINCT substr(r.created_at, 1, 10)) AS active_days,
-			SUM(CASE WHEN r.status_code >= 200 AND r.status_code < 300 AND COALESCE(r.error, '') = '' THEN 1 ELSE 0 END) AS successes,
-			COALESCE(SUM(t.estimated_cost), 0) AS cost,
-			(SELECT COUNT(*) FROM tool_invocations ti WHERE ti.api_key_id = r.api_key_id AND ti.source = 'call' AND ti.created_at >= ?) AS tool_calls
-		FROM request_logs r
-		LEFT JOIN token_usage t ON t.request_id = r.id
-		WHERE r.created_at >= ? AND r.endpoint LIKE '%chat/completions%'
-		GROUP BY akid
-		ORDER BY requests DESC
+		SELECT g.akid,
+			COALESCE(NULLIF(k.name, ''), g.akid) AS name,
+			COALESCE(NULLIF(k.team, ''), 'unassigned') AS team,
+			g.requests, g.sessions, g.active_days, g.successes, g.cost,
+			COALESCE(tc.tool_calls, 0) AS tool_calls
+		FROM (
+			SELECT COALESCE(NULLIF(r.api_key_id, ''), 'anonymous') AS akid,
+				COUNT(*) AS requests,
+				COUNT(DISTINCT COALESCE(NULLIF(r.session_id, ''), r.id)) AS sessions,
+				COUNT(DISTINCT `+s.seoulDayExpr("r.created_at")+`) AS active_days,
+				SUM(CASE WHEN r.status_code >= 200 AND r.status_code < 300 AND COALESCE(r.error, '') = '' THEN 1 ELSE 0 END) AS successes,
+				COALESCE(SUM(t.estimated_cost), 0) AS cost
+			FROM request_logs r
+			LEFT JOIN token_usage t ON t.request_id = r.id
+			WHERE r.created_at >= ? AND r.endpoint LIKE '%chat/completions%'
+			GROUP BY COALESCE(NULLIF(r.api_key_id, ''), 'anonymous')
+		) g
+		LEFT JOIN api_keys k ON k.id = g.akid
+		LEFT JOIN (
+			SELECT ti.api_key_id AS akid, COUNT(*) AS tool_calls
+			FROM tool_invocations ti
+			WHERE ti.source = 'call' AND ti.created_at >= ?
+			GROUP BY ti.api_key_id
+		) tc ON tc.akid = g.akid
+		ORDER BY g.requests DESC
 		LIMIT ?`), sinceStr, sinceStr, limit)
 	if err != nil {
 		return nil, err

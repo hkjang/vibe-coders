@@ -96,7 +96,7 @@ func (s *Server) handleConnectionDoctor(w http.ResponseWriter, r *http.Request) 
 
 	// Quota (needs a resolved key).
 	if apiKeyID != "" {
-		if dec, err := s.checkQuotas(r.Context(), apiKeyID, ""); err == nil {
+		if dec, err := s.checkQuotas(r.Context(), apiKeyID, "", nil); err == nil {
 			if dec.Allowed {
 				add(doctorCheck{"quota", "pass", "한도 내 사용 중(사용 " + ftoa(dec.CostKRW) + " KRW).", ""})
 			} else {

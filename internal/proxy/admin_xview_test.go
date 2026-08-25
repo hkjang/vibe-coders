@@ -91,6 +91,61 @@ func TestScatterMultiModelFilter(t *testing.T) {
 	}
 }
 
+func TestScatterFromToDateRange(t *testing.T) {
+	db, srv := xviewTestServer(t)
+	// Three requests on distinct UTC days. "new" is at 03:00Z on Jul 28 == 12:00 KST Jul 28.
+	seedXViewReq(t, db, "d-old", "gpt-4.1", "openai", 200, false, 300, 100, 10, time.Date(2026, 7, 1, 3, 0, 0, 0, time.UTC))
+	seedXViewReq(t, db, "d-mid", "gpt-4.1", "openai", 200, false, 300, 100, 10, time.Date(2026, 7, 15, 3, 0, 0, 0, time.UTC))
+	seedXViewReq(t, db, "d-new", "gpt-4.1", "openai", 200, false, 300, 100, 10, time.Date(2026, 7, 28, 3, 0, 0, 0, time.UTC))
+
+	get := func(query string) []store.ScatterPoint {
+		resp, err := http.Get(srv.URL + "/admin/scatter?" + query)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out struct {
+			Points []store.ScatterPoint `json:"points"`
+		}
+		json.NewDecoder(resp.Body).Decode(&out)
+		resp.Body.Close()
+		return out.Points
+	}
+	ids := func(pts []store.ScatterPoint) map[string]bool {
+		m := map[string]bool{}
+		for _, p := range pts {
+			m[p.RequestID] = true
+		}
+		return m
+	}
+
+	// from+to (default tz Asia/Seoul): only the mid request falls inside [Jul 10, Jul 20].
+	got := ids(get("from=2026-07-10&to=2026-07-20"))
+	if len(got) != 1 || !got["d-mid"] {
+		t.Fatalf("from+to KST range = %v, want only d-mid", got)
+	}
+
+	// KST boundary: searching up to end of Jul 27 (KST) must exclude d-new (12:00 KST Jul 28).
+	got = ids(get("to=2026-07-27"))
+	if got["d-new"] {
+		t.Errorf("to=2026-07-27 (KST) should exclude d-new; got %v", got)
+	}
+	if !got["d-old"] || !got["d-mid"] {
+		t.Errorf("to=2026-07-27 should include d-old and d-mid; got %v", got)
+	}
+
+	// Same "to" interpreted in UTC still excludes d-new (03:00Z Jul 28 > end of Jul 27 UTC).
+	got = ids(get("to=2026-07-27&tz=UTC"))
+	if got["d-new"] || !got["d-mid"] {
+		t.Errorf("to=2026-07-27 UTC unexpected: %v", got)
+	}
+
+	// from only leaves the upper bound open → mid + new.
+	got = ids(get("from=2026-07-10"))
+	if got["d-old"] || !got["d-mid"] || !got["d-new"] {
+		t.Errorf("from-only range = %v, want mid+new", got)
+	}
+}
+
 func TestXViewModelsEndpoint(t *testing.T) {
 	db, srv := xviewTestServer(t)
 	now := time.Now().UTC()

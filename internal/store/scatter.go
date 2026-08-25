@@ -16,6 +16,10 @@ func (s *SQLStore) ScatterPoints(ctx context.Context, f ScatterFilter) ([]Scatte
 	}
 	where := []string{"r.created_at >= ?"}
 	args := []any{f.Since.UTC().Format(time.RFC3339Nano)}
+	if !f.Until.IsZero() {
+		where = append(where, "r.created_at <= ?")
+		args = append(args, f.Until.UTC().Format(time.RFC3339Nano))
+	}
 	if f.Endpoint != "" {
 		where = append(where, "r.endpoint = ?")
 		args = append(args, f.Endpoint)

@@ -143,12 +143,27 @@ func (s *Server) handleRedTeamCampaigns(w http.ResponseWriter, r *http.Request) 
 			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "redteam_campaigns_failed")
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"campaigns": campaigns, "count": len(campaigns)})
+		writeJSON(w, http.StatusOK, map[string]any{
+			"campaigns": campaigns,
+			"count":     len(campaigns),
+			"post_change": map[string]any{
+				"enabled":     s.cfg.RedTeam.PostChangeEnabled,
+				"cooldown":    s.redTeamPostChangeCooldown().String(),
+				"max_targets": s.redTeamPostChangeMaxTargets(),
+				"mode":        "simulation-only",
+			},
+		})
 	case http.MethodPost:
 		var c store.RedTeamCampaign
 		if err := json.NewDecoder(r.Body).Decode(&c); err != nil {
 			writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "invalid_body")
 			return
+		}
+		existingTrigger := store.RedTeamCampaign{}
+		if strings.TrimSpace(c.ID) != "" {
+			if existing, found, _ := s.db.GetRedTeamCampaign(r.Context(), c.ID); found {
+				existingTrigger = existing
+			}
 		}
 		if strings.TrimSpace(c.ID) == "" {
 			c.ID = newID("rtc")
@@ -168,6 +183,19 @@ func (s *Server) handleRedTeamCampaigns(w http.ResponseWriter, r *http.Request) 
 			c.Concurrency = 1
 		}
 		c.DestructiveToolPolicy = normalizeDestructiveToolPolicy(c.DestructiveToolPolicy)
+		if existingTrigger.TriggerSource != "" {
+			c.TriggerSource = existingTrigger.TriggerSource
+			c.TriggerAction = existingTrigger.TriggerAction
+			c.TriggerRef = existingTrigger.TriggerRef
+			c.TriggerReason = existingTrigger.TriggerReason
+			c.TriggerFingerprint = existingTrigger.TriggerFingerprint
+		} else {
+			c.TriggerSource = "manual"
+			c.TriggerAction = ""
+			c.TriggerRef = ""
+			c.TriggerReason = ""
+			c.TriggerFingerprint = ""
+		}
 		if len(c.ProbePackIDs) == 0 {
 			packs, _ := s.db.ListRedTeamProbePacks(r.Context(), false)
 			for _, p := range packs {
@@ -818,8 +846,9 @@ func (s *Server) collectRedTeamTargets(r *http.Request) []store.RedTeamTarget {
 			add(store.RedTeamTarget{TargetType: "mcp_tool", TargetRef: ref, MCPUpstream: c.Namespace, ToolName: c.Name, OwnerTeam: c.Owner, RiskLevel: normalizeRedTeamSeverity(c.RiskLevel), Enabled: true, Metadata: map[string]any{"contract_id": c.ID, "title": c.Title}})
 		}
 	}
-	if s.cfg.Text2SQL.Enabled {
-		add(store.RedTeamTarget{TargetType: "text2sql", TargetRef: "text2sql:vibe/text2sql-*", Model: "vibe/text2sql-*", Provider: "text2sql", RiskLevel: "high", Enabled: true, Metadata: map[string]any{"preview_model": s.cfg.Text2SQL.PreviewModel, "execute_model": s.cfg.Text2SQL.ExecuteModel}})
+	t2sCfg := s.t2sConf()
+	if t2sCfg.Enabled {
+		add(store.RedTeamTarget{TargetType: "text2sql", TargetRef: "text2sql:vibe/text2sql-*", Model: "vibe/text2sql-*", Provider: "text2sql", RiskLevel: "high", Enabled: true, Metadata: map[string]any{"preview_model": t2sCfg.PreviewModel, "execute_model": t2sCfg.ExecuteModel}})
 	}
 	if profiles, err := s.db.ListText2SQLProfiles(ctx); err == nil {
 		for _, p := range profiles {

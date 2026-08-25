@@ -2,25 +2,13 @@ package store
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
-
-	"vibe-coders/internal/config"
 )
 
 func TestPolicyRegressionCaseRoundtrip(t *testing.T) {
 	ctx := context.Background()
-	db, err := Open(ctx, config.DatabaseConfig{
-		Driver: "sqlite",
-		DSN:    filepath.Join(t.TempDir(), "gateway_preg.db"),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	db := openStoreForTest(t)
 	defer db.Close()
-	if err := db.Migrate(ctx); err != nil {
-		t.Fatal(err)
-	}
 
 	c := PolicyRegressionCase{
 		ID: "preg_1", Name: "block gpt-4 high risk", Model: "gpt-4", Provider: "openai",

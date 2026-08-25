@@ -10,8 +10,8 @@ import (
 // than crowning one global winner.
 type ModelUsageTag struct {
 	Model     string `json:"model"`
-	GoodFor   string `json:"good_for"`   // comma-separated task types
-	AvoidFor  string `json:"avoid_for"`  // comma-separated task types
+	GoodFor   string `json:"good_for"`  // comma-separated task types
+	AvoidFor  string `json:"avoid_for"` // comma-separated task types
 	RiskNote  string `json:"risk_note"`
 	UpdatedBy string `json:"updated_by"`
 	UpdatedAt string `json:"updated_at"`

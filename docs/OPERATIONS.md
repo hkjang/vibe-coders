@@ -188,7 +188,7 @@ test -s data/fallback.ndjson || true   # 비정상 종료 시 fallback 에 잔�
 
 ### 5.2 어드민 알림
 
-`/admin/alerts` 에서 게이트웨이 자체 알림 규칙을 설정하면 외부 모니터링 없이도 Slack/Teams/사내 웹훅으로 즉시 통보합니다. 자체 알림 지표에는 `requests/errors/krw/tokens`, 지연 기반 `latency_p95_ms/first_chunk_p95_ms`, LLM 평가 기반 `llm_eval_failures/llm_eval_failure_rate`, MCP/도구 기반 `tool_errors/tool_error_rate/tool_loop/mcp_new_tools`, 이상 탐지 `anomaly_zmax`, 예산 소진 예측 `budget_burn_ratio`(등록된 예산 중 최대 *월말 예상/월 예산* 비율) 가 포함됩니다. 자세한 사용법은 [관리자 가이드](./ADMIN_GUIDE.md) 참조.
+`/admin/alerts` 에서 게이트웨이 자체 알림 규칙을 설정하면 외부 모니터링 없이도 Slack/Teams/사내 웹훅으로 즉시 통보합니다. 자체 알림 지표에는 `requests/errors/krw/tokens`, 지연 기반 `latency_p95_ms/first_chunk_p95_ms`, LLM 평가 기반 `llm_eval_failures/llm_eval_failure_rate`, MCP/도구 기반 `tool_errors/tool_error_rate/tool_loop/mcp_new_tools`, 이상 탐지 `anomaly_zmax`, 예산 소진 예측 `budget_burn_ratio`(등록된 예산 중 최대 *월말 예상/월 예산* 비율), 업스트림 폴백 `failovers`/`failover_rate`(폴백은 성공하면 호출자에게 정상 응답이 가므로 장애가 감춰집니다 — 폴백률 알림을 권장) 가 포함됩니다. 자세한 사용법은 [관리자 가이드](./ADMIN_GUIDE.md) 참조.
 
 ### 5.2.1 이상 탐지 (Anomaly Detection)
 
@@ -296,7 +296,10 @@ curl -X POST http://localhost:8080/admin/fallback
 | `RETENTION_REQUEST_DAYS` | 90 | request_logs + prompt/response/token/language/llm_evaluations/llm_feedback 자식 테이블 |
 | `RETENTION_PROMPT_DAYS` | 30 | prompt_logs |
 | `RETENTION_RESPONSE_DAYS` | 30 | response_logs |
+| `RETENTION_DOMAIN_EXAMPLE_DAYS` | 365 | domain_examples — 라우팅 예시로 적립된 리닥션 프롬프트 텍스트 |
 | `RETENTION_INTERVAL` | 1h | cleanup 워커 주기 |
+
+`domain_examples` 는 프롬프트와 **다른 시계**로 정리됩니다. 이 표는 도메인 라우팅이 근거로 삼는 말뭉치라, 프롬프트 보존 창에 맞춰 같이 비우면 그 주기마다 라우팅 품질이 떨어집니다. 반대로 정리하지 않으면 원본 프롬프트가 삭제된 뒤에도 텍스트가 무기한 남습니다. 그래서 프롬프트보다는 길고 무한하지는 않은 별도 값을 씁니다.
 
 값을 `0` 으로 두면 해당 항목은 정리하지 않습니다. 변경 후에는 게이트웨이 재기동이 필요합니다. 어드민 UI 설정 탭에서 "지금 정리 실행" 으로 수동 트리거할 수도 있습니다.
 

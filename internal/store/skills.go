@@ -15,8 +15,8 @@ type Skill struct {
 	Description   string `json:"description"`
 	Version       string `json:"version"`
 	Owner         string `json:"owner"`
-	Status        string `json:"status"`      // draft|staging|production|deprecated
-	RiskLevel     string `json:"risk_level"`  // low|medium|high
+	Status        string `json:"status"`         // draft|staging|production|deprecated
+	RiskLevel     string `json:"risk_level"`     // low|medium|high
 	AllowedModels string `json:"allowed_models"` // comma-separated globs; empty = no restriction
 	AllowedTools  string `json:"allowed_tools"`  // comma-separated tool/server names; empty = no restriction
 	AllowedTeams  string `json:"allowed_teams"`  // comma-separated team globs; empty = any team

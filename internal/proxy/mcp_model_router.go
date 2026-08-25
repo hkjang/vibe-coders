@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"math"
 	"net/http"
 	"sort"
@@ -85,19 +84,23 @@ func (rc *requestPipeline) stepMCPDiscovery() bool {
 		return true
 	}
 	if rc.body == nil {
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			writeOpenAIError(w, http.StatusBadRequest, "failed to read request body", "invalid_request_error", "invalid_body")
+		body, ok := rc.readRequestBody()
+		if !ok {
 			return false
 		}
 		rc.body = body
 	}
 
-	model, _, prompts, _ := extractAudit(rc.body, r.URL.Path, false)
+	// Decide whether this step applies before paying for it. Discovery only runs for a
+	// handful of virtual model names, but the check used to come after extracting and
+	// redacting every prompt in the body -- so an ordinary chat request, which is nearly
+	// all of them, did that work and then returned here having thrown it away.
+	model := extractModel(rc.body)
 	policyModel := canonicalMCPDiscoveryModel(model)
 	if !isMCPDiscoveryModel(policyModel) {
 		return true
 	}
+	_, _, prompts, _ := extractAudit(rc.body, r.URL.Path, false)
 	if rc.authCtx != nil && !hasScope(rc.authCtx.Scopes, "mcp:use") {
 		_ = s.db.InsertAuditEvent(r.Context(), store.AuthEvent{ID: newID("ae"), EventType: "scope_denied", APIKeyID: rc.authCtx.APIKeyID, TeamID: rc.authCtx.TeamID, IP: clientIP(r), UserAgent: r.UserAgent(), Detail: "mcp:use", CreatedAt: time.Now().UTC()})
 		writeOpenAIError(w, http.StatusForbidden, "mcp:use scope is required for MCP discovery models", "permission_error", "scope_denied")

@@ -671,18 +671,19 @@ func (s *SQLStore) GetIPDetail(ctx context.Context, ip string, recent int) (IPDe
 }
 
 func (s *SQLStore) dailyTimeseries(ctx context.Context, whereClause string, args ...any) ([]TimeseriesPoint, error) {
+	day := s.seoulDayExpr("r.created_at")
 	query := s.bind(fmt.Sprintf(`
-		SELECT substr(r.created_at, 1, 10) AS day,
+		SELECT %s AS day,
 			COUNT(r.id),
 			COALESCE(SUM(t.total_tokens), 0),
 			COALESCE(SUM(t.estimated_cost), 0)
 		FROM request_logs r
 		LEFT JOIN token_usage t ON t.request_id = r.id
 		WHERE %s
-		GROUP BY substr(r.created_at, 1, 10)
+		GROUP BY %s
 		ORDER BY day DESC
 		LIMIT 60
-	`, whereClause))
+	`, day, whereClause, day))
 
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -1732,9 +1733,9 @@ func (s *SQLStore) llmTimeseriesFilter(ctx context.Context, bucket string, since
 	if bucket != "day" {
 		bucket = "hour"
 	}
-	bucketExpr := "substr(r.created_at, 1, 13)"
+	bucketExpr := s.seoulHourExpr("r.created_at")
 	if bucket == "day" {
-		bucketExpr = "substr(r.created_at, 1, 10)"
+		bucketExpr = s.seoulDayExpr("r.created_at")
 	}
 	sinceText := since.UTC().Format(time.RFC3339Nano)
 	queryArgs := append([]any{sinceText}, args...)
@@ -2955,8 +2956,22 @@ func (s *SQLStore) ListQuotas(ctx context.Context) ([]QuotaPublic, error) {
 }
 
 func (s *SQLStore) ActiveQuotasFor(ctx context.Context, scope string, scopeValue string) ([]QuotaRecord, error) {
-	rows, err := s.db.QueryContext(ctx, s.bind(`SELECT id, scope, scope_value, period, token_limit, krw_limit, enabled, COALESCE(note, ''), created_at
-		FROM quotas WHERE enabled = 1 AND scope = ? AND scope_value = ?`), scope, scopeValue)
+	now := time.Now()
+	if cached, ok := s.quotas.filter(scope, scopeValue, now); ok {
+		return cached, nil
+	}
+	gen := s.quotas.beginLoad()
+	all, err := s.loadActiveQuotas(ctx)
+	if err != nil {
+		return nil, err
+	}
+	s.quotas.storeActive(all, gen, now)
+	return filterQuotas(all, scope, scopeValue), nil
+}
+
+func (s *SQLStore) loadActiveQuotas(ctx context.Context) ([]QuotaRecord, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id, scope, scope_value, period, token_limit, krw_limit, enabled, COALESCE(note, ''), created_at
+		FROM quotas WHERE enabled = 1`)
 	if err != nil {
 		return nil, err
 	}
@@ -2993,12 +3008,19 @@ func (s *SQLStore) UpsertQuota(ctx context.Context, q QuotaRecord) error {
 			enabled = excluded.enabled,
 			note = excluded.note`)
 	_, err := s.db.ExecContext(ctx, query, q.ID, q.Scope, q.ScopeValue, q.Period, q.TokenLimit, q.KRWLimit, boolInt(q.Enabled), q.Note, formatTime(q.CreatedAt))
-	return err
+	if err != nil {
+		return err
+	}
+	s.quotas.invalidate()
+	return nil
 }
 
 func (s *SQLStore) DeleteQuota(ctx context.Context, id string) error {
-	_, err := s.db.ExecContext(ctx, s.bind(`DELETE FROM quotas WHERE id = ?`), id)
-	return err
+	if _, err := s.db.ExecContext(ctx, s.bind(`DELETE FROM quotas WHERE id = ?`), id); err != nil {
+		return err
+	}
+	s.quotas.invalidate()
+	return nil
 }
 
 // retention ------------------------------------------------------------------
@@ -3007,11 +3029,12 @@ func (s *SQLStore) PurgeOlderThan(ctx context.Context, table string, days int) (
 	if days <= 0 {
 		return 0, nil
 	}
-	allowed := map[string]bool{"request_logs": true, "prompt_logs": true, "response_logs": true, "token_usage": true, "language_stats": true, "llm_evaluations": true, "llm_feedback": true}
+	allowed := map[string]bool{"request_logs": true, "prompt_logs": true, "response_logs": true, "token_usage": true, "language_stats": true, "llm_evaluations": true, "llm_feedback": true, "domain_examples": true}
 	if !allowed[table] {
 		return 0, fmt.Errorf("unsupported table %q for purge", table)
 	}
-	cutoff := time.Now().UTC().AddDate(0, 0, -days).Format(time.RFC3339Nano)
+	cutoffAt := time.Now().UTC().AddDate(0, 0, -days)
+	cutoff := cutoffAt.Format(time.RFC3339Nano)
 
 	if table == "request_logs" {
 		// must also delete children
@@ -3024,6 +3047,16 @@ func (s *SQLStore) PurgeOlderThan(ctx context.Context, table string, days int) (
 			`DELETE FROM llm_evaluations WHERE request_id IN (SELECT id FROM request_logs WHERE created_at < ?)`,
 			`DELETE FROM llm_feedback WHERE request_id IN (SELECT id FROM request_logs WHERE created_at < ?)`,
 			`DELETE FROM tool_invocations WHERE request_id IN (SELECT id FROM request_logs WHERE created_at < ?)`,
+			// Per-request telemetry that outlived its request. These rows carry the
+			// request id alongside an api key, user or team, so leaving them behind keeps
+			// "this caller made this request" — and, in routing_decisions, the PII/secret
+			// categories detected in its prompt — after the request itself was purged for
+			// retention. They also grow one row per request forever while request_logs
+			// shrinks, which makes them the largest tables in a long-lived deployment.
+			`DELETE FROM routing_decisions WHERE request_id IN (SELECT id FROM request_logs WHERE created_at < ?)`,
+			`DELETE FROM mcp_route_decisions WHERE request_id IN (SELECT id FROM request_logs WHERE created_at < ?)`,
+			`DELETE FROM domain_routing_decisions WHERE request_id IN (SELECT id FROM request_logs WHERE created_at < ?)`,
+			`DELETE FROM code_verify_results WHERE request_id IN (SELECT id FROM request_logs WHERE created_at < ?)`,
 			`DELETE FROM request_logs WHERE created_at < ?`,
 		}
 		for _, q := range queries {
@@ -3035,6 +3068,9 @@ func (s *SQLStore) PurgeOlderThan(ctx context.Context, table string, days int) (
 				total += n
 			}
 		}
+		if err := s.reconcileUsageRollupAfterPurge(ctx, cutoffAt); err != nil {
+			return total, err
+		}
 		return total, nil
 	}
 
@@ -3043,6 +3079,13 @@ func (s *SQLStore) PurgeOlderThan(ctx context.Context, table string, days int) (
 		return 0, err
 	}
 	n, err := res.RowsAffected()
+	if err == nil && table == "token_usage" {
+		// The day totals include the tokens and cost this table holds, so removing rows
+		// from it changes what a quota should count.
+		if rerr := s.reconcileUsageRollupAfterPurge(ctx, cutoffAt); rerr != nil {
+			return n, rerr
+		}
+	}
 	return n, err
 }
 
@@ -3065,10 +3108,11 @@ func (s *SQLStore) Timeseries(ctx context.Context, q TimeseriesQuery) ([]Timeser
 		return nil, fmt.Errorf("unsupported timeseries scope %q", q.Scope)
 	}
 
-	bucketExpr := "substr(r.created_at, 1, 13)" // YYYY-MM-DDTHH (UTC hour bucket)
+	// Seoul buckets, matching quota resets, budgets, chargeback and the heatmap.
+	bucketExpr := s.seoulHourExpr("r.created_at") // YYYY-MM-DDTHH
 	bucketLabel := "hour"
 	if q.Bucket == "day" {
-		bucketExpr = "substr(r.created_at, 1, 10)" // YYYY-MM-DD
+		bucketExpr = s.seoulDayExpr("r.created_at") // YYYY-MM-DD
 		bucketLabel = "day"
 	}
 

@@ -13,7 +13,7 @@ func TestCostAllocationWindowTeamAndBounds(t *testing.T) {
 	base := time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC)
 
 	if _, err := db.db.ExecContext(ctx,
-		`INSERT INTO api_keys (id, name, key_hash, status, created_at, team) VALUES (?,?,?,?,?,?)`,
+		db.bind(`INSERT INTO api_keys (id, name, key_hash, status, created_at, team) VALUES (?,?,?,?,?,?)`),
 		"k1", "alpha key", "h1", "active", base.Format(time.RFC3339Nano), "alpha"); err != nil {
 		t.Fatal(err)
 	}
@@ -29,7 +29,7 @@ func TestCostAllocationWindowTeamAndBounds(t *testing.T) {
 	mkReq("r_in1", base, 10)
 	mkReq("r_in2", base.Add(time.Hour), 5)
 	mkReq("r_before", base.AddDate(0, -1, 0), 99) // before window
-	mkReq("r_after", base.AddDate(0, 1, 0), 77)    // after window
+	mkReq("r_after", base.AddDate(0, 1, 0), 77)   // after window
 
 	monthStart := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
 	monthEnd := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)

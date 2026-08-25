@@ -31,57 +31,64 @@ import (
 )
 
 // AppVersion is the gateway build version, surfaced in /auth/me and the admin UI.
-const AppVersion = "v0.76.54"
+const AppVersion = "v0.79.5"
 
 type Server struct {
-	cfg            config.Config
-	db             *store.SQLStore
-	logger         *store.AsyncLogger
-	client         *http.Client
-	metrics        *Metrics
-	secrets        atomic.Pointer[secret.Cipher]
-	secretsMu      sync.Mutex // guards concurrent rotation
-	retention      *store.RetentionWorker
-	killState      atomicKillState
-	loggedRequests sync.Map
-	mcpPolicy      atomic.Pointer[mcpPolicySnapshot]
-	routingRules   atomic.Pointer[routingRulesSnapshot]
-	knowledge      atomic.Pointer[knowledgeSnapshot]
-	deprecations   atomic.Pointer[deprecationSnapshot]
-	costCache      atomic.Pointer[costSnapshot]
-	learnCache     atomic.Pointer[routingLearnSnapshot]
-	priceCache     atomic.Pointer[pricingSnapshot]
-	mmCache        atomic.Pointer[mattermostSnapshot]
-	t2sExec        atomic.Pointer[sql.DB]                  // lazily-opened read-only DB for Text2SQL execute mode (default / env)
-	t2sExecConns   sync.Map                                // named exec connections: connID → *sql.DB
-	t2sTwin        atomic.Pointer[sql.DB]                  // lazily-opened SQL Digital Twin DB (masked/sample) for safe validation
-	t2sKilled      atomic.Bool                             // runtime kill switch: when set, Text2SQL is disabled regardless of config
-	t2sFeatures    atomic.Pointer[map[string]bool]         // runtime Text2SQL feature toggles (admin-managed)
-	t2sRuntime     atomic.Pointer[config.Text2SQLConfig]   // admin-settings overlay over cfg.Text2SQL (runtime snapshot)
-	chRuntime      atomic.Pointer[config.ClickHouseConfig] // admin-settings overlay over cfg.ClickHouse (runtime snapshot)
-	chSinkMu       sync.Mutex                              // guards the managed ClickHouse sink worker lifecycle
-	chSinkStop     context.CancelFunc                      // cancels the running sink worker (nil when stopped)
-	chSinkStarted  bool                                    // true once the startup worker apply has run (gates reload-time restarts)
-	carbonRuntime  atomic.Pointer[config.CarbonConfig]     // admin-settings overlay over cfg.Carbon
-	insRuntime     atomic.Pointer[config.InsuranceConfig]  // admin-settings overlay over cfg.Insurance
-	cacheRuntime   atomic.Pointer[config.CacheConfig]      // admin-settings overlay over cfg.Cache
-	pricingRuntime atomic.Pointer[config.PricingConfig]    // admin-settings overlay over cfg.PricingConf
-	skillsRuntime  atomic.Pointer[config.SkillsConfig]     // admin-settings overlay over cfg.Skills
-	limitsRuntime  atomic.Pointer[config.LimitsConfig]     // admin-settings overlay over cfg.Limits
-	loggingRuntime atomic.Pointer[config.LoggingConfig]    // admin-settings overlay over cfg.Logging
-	mcpRuntime     atomic.Pointer[config.MCPConfig]        // admin-settings overlay over cfg.MCP
-	keycloakCfg    atomic.Pointer[config.KeycloakConfig]   // DB-backed Keycloak provider overlay over cfg.Keycloak (secret decrypted)
-	chFactQueue    chan store.LogRecord                    // async per-request fact ingest queue (bounded)
-	chFactDropped  atomic.Int64                            // requests dropped when the fact queue was full
-	dwCache        *dwQueryCache                           // short-TTL cache for DW dashboard ClickHouse reads
-	sessions       *sessionInferer
-	sessionGCAt    atomic.Int64
-	extSeen        sync.Map // external key id -> struct{}; dedupes lazy registration
-	mcpConns       sync.Map // upstream id -> *mcpUpstreamConn (MCP gateway session state)
-	mcpTools       atomic.Pointer[mcpToolsSnapshot]
-	mcpRefresh     atomic.Bool
-	lastReloadNano atomic.Int64           // unix nanos of this pod's last runtime-config reload (convergence observability)
-	lastReloadTok  atomic.Pointer[string] // admin_settings change token this pod last applied
+	cfg      config.Config
+	db       *store.SQLStore
+	logger   *store.AsyncLogger
+	client   *http.Client
+	metrics  *Metrics
+	breakers *providerBreakers
+	balancer *providerBalancer
+	// instanceID identifies this process in shared breaker rows, so an operator can see
+	// which instance reported an outage.
+	instanceID      string
+	secrets         atomic.Pointer[secret.Cipher]
+	secretsMu       sync.Mutex // guards concurrent rotation
+	retention       *store.RetentionWorker
+	killState       atomicKillState
+	loggedRequests  sync.Map
+	mcpPolicy       atomic.Pointer[mcpPolicySnapshot]
+	routingRules    atomic.Pointer[routingRulesSnapshot]
+	knowledge       atomic.Pointer[knowledgeSnapshot]
+	deprecations    atomic.Pointer[deprecationSnapshot]
+	costCache       atomic.Pointer[costSnapshot]
+	learnCache      atomic.Pointer[routingLearnSnapshot]
+	priceCache      atomic.Pointer[pricingSnapshot]
+	mmCache         atomic.Pointer[mattermostSnapshot]
+	t2sExec         atomic.Pointer[sql.DB]                  // lazily-opened read-only DB for Text2SQL execute mode (default / env)
+	t2sExecConns    sync.Map                                // named exec connections: connID → *sql.DB
+	t2sTwin         atomic.Pointer[sql.DB]                  // lazily-opened SQL Digital Twin DB (masked/sample) for safe validation
+	t2sKilled       atomic.Bool                             // runtime kill switch: when set, Text2SQL is disabled regardless of config
+	t2sFeatures     atomic.Pointer[map[string]bool]         // runtime Text2SQL feature toggles (admin-managed)
+	t2sRuntime      atomic.Pointer[config.Text2SQLConfig]   // admin-settings overlay over cfg.Text2SQL (runtime snapshot)
+	chRuntime       atomic.Pointer[config.ClickHouseConfig] // admin-settings overlay over cfg.ClickHouse (runtime snapshot)
+	chSinkMu        sync.Mutex                              // guards the managed ClickHouse sink worker lifecycle
+	chSinkStop      context.CancelFunc                      // cancels the running sink worker (nil when stopped)
+	chSinkStarted   bool                                    // true once the startup worker apply has run (gates reload-time restarts)
+	carbonRuntime   atomic.Pointer[config.CarbonConfig]     // admin-settings overlay over cfg.Carbon
+	insRuntime      atomic.Pointer[config.InsuranceConfig]  // admin-settings overlay over cfg.Insurance
+	cacheRuntime    atomic.Pointer[config.CacheConfig]      // admin-settings overlay over cfg.Cache
+	pricingRuntime  atomic.Pointer[config.PricingConfig]    // admin-settings overlay over cfg.PricingConf
+	skillsRuntime   atomic.Pointer[config.SkillsConfig]     // admin-settings overlay over cfg.Skills
+	limitsRuntime   atomic.Pointer[config.LimitsConfig]     // admin-settings overlay over cfg.Limits
+	loggingRuntime  atomic.Pointer[config.LoggingConfig]    // admin-settings overlay over cfg.Logging
+	mcpRuntime      atomic.Pointer[config.MCPConfig]        // admin-settings overlay over cfg.MCP
+	upstreamRuntime atomic.Pointer[config.UpstreamConfig]   // admin-settings overlay over cfg.Upstream (operational knobs only)
+	quotaRuntime    atomic.Pointer[config.QuotaConfig]      // admin-settings overlay over cfg.Quota
+	keycloakCfg     atomic.Pointer[config.KeycloakConfig]   // DB-backed Keycloak provider overlay over cfg.Keycloak (secret decrypted)
+	chFactQueue     chan store.LogRecord                    // async per-request fact ingest queue (bounded)
+	chFactDropped   atomic.Int64                            // requests dropped when the fact queue was full
+	dwCache         *dwQueryCache                           // short-TTL cache for DW dashboard ClickHouse reads
+	sessions        *sessionInferer
+	sessionGCAt     atomic.Int64
+	extSeen         sync.Map // external key id -> struct{}; dedupes lazy registration
+	mcpConns        sync.Map // upstream id -> *mcpUpstreamConn (MCP gateway session state)
+	mcpTools        atomic.Pointer[mcpToolsSnapshot]
+	mcpRefresh      atomic.Bool
+	lastReloadNano  atomic.Int64           // unix nanos of this pod's last runtime-config reload (convergence observability)
+	lastReloadTok   atomic.Pointer[string] // admin_settings change token this pod last applied
 }
 
 type atomicKillState struct {
@@ -99,6 +106,13 @@ type killSnapshot struct {
 func NewServer(cfg config.Config, db *store.SQLStore, logger *store.AsyncLogger, retention *store.RetentionWorker) (*Server, error) {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.DisableCompression = false
+	// Client.Timeout covers the whole exchange including a long stream body, so it
+	// cannot be lowered to make failover snappy. ResponseHeaderTimeout bounds only
+	// the wait for response headers, which is exactly the phase where a dead
+	// provider stalls a request.
+	if cfg.Upstream.ResponseHeaderTimeout > 0 {
+		transport.ResponseHeaderTimeout = cfg.Upstream.ResponseHeaderTimeout
+	}
 	secrets, err := secret.New(cfg.Secret.GatewaySecret)
 	if err != nil {
 		return nil, fmt.Errorf("create secret cipher: %w", err)
@@ -111,10 +125,13 @@ func NewServer(cfg config.Config, db *store.SQLStore, logger *store.AsyncLogger,
 			Timeout:   cfg.Upstream.Timeout,
 			Transport: transport,
 		},
-		metrics:   newMetrics(),
-		retention: retention,
-		sessions:  newSessionInferer(cfg.Session.IdleTimeout),
-		dwCache:   newDWQueryCache(0),
+		metrics:    newMetrics(),
+		breakers:   newProviderBreakers(),
+		balancer:   newProviderBalancer(),
+		instanceID: instanceIdentity(),
+		retention:  retention,
+		sessions:   newSessionInferer(cfg.Session.IdleTimeout),
+		dwCache:    newDWQueryCache(0),
 	}
 	server.secrets.Store(secrets)
 
@@ -125,6 +142,8 @@ func NewServer(cfg config.Config, db *store.SQLStore, logger *store.AsyncLogger,
 	// Background ClickHouse auto-sink, managed so it can be (re)started/stopped when
 	// settings change (only runs when URL + interval are configured).
 	server.applyClickHouseSinkWorker()
+	server.startBreakerSync()
+	server.startQuotaReservationSweeper()
 
 	// Async per-request fact ingest queue + batch worker (ships ai_request_fact rows off
 	// the hot path). The queue is always allocated; the worker no-ops until configured.
@@ -133,7 +152,7 @@ func NewServer(cfg config.Config, db *store.SQLStore, logger *store.AsyncLogger,
 		qsize = 10000
 	}
 	server.chFactQueue = make(chan store.LogRecord, qsize)
-	go server.clickhouseFactLoop(context.Background())
+	go server.clickhouseFactLoop(db.LifecycleContext())
 
 	// Pre-apply current model prices when the pricing table is empty (first boot).
 	server.seedPricingIfEmpty(context.Background())
@@ -147,17 +166,28 @@ func NewServer(cfg config.Config, db *store.SQLStore, logger *store.AsyncLogger,
 
 	// Multi-pod convergence: poll the admin_settings change token so a settings change made on any
 	// pod (or via direct DB edit) is applied on every pod within one interval, without a restart.
-	go server.runtimeReloadLoop(context.Background(), cfg.RuntimeReloadInterval)
+	go server.runtimeReloadLoop(db.LifecycleContext(), cfg.RuntimeReloadInterval)
 
 	// Background scheduler for due saved Text2SQL reports (self-disables without an
 	// execute DB).
-	go server.text2sqlReportScheduler()
-	go server.redTeamScheduler()
+	go server.text2sqlReportScheduler(db.LifecycleContext())
+	go server.redTeamScheduler(db.LifecycleContext())
 
 	if cfg.Upstream.APIKey != "" {
 		encrypted, err := secrets.Encrypt(cfg.Upstream.APIKey)
 		if err != nil {
 			return nil, fmt.Errorf("encrypt default provider key: %w", err)
+		}
+		// The environment bootstraps connection details on every start, while model
+		// patterns may be managed later from the admin UI. Preserve the stored value
+		// unless UPSTREAM_MODEL_PATTERNS explicitly supplies an override.
+		modelPatterns := strings.TrimSpace(cfg.Upstream.ModelPatterns)
+		if modelPatterns == "" {
+			if existing, found, getErr := db.GetProvider(context.Background(), cfg.Upstream.Provider); getErr != nil {
+				return nil, fmt.Errorf("read default provider: %w", getErr)
+			} else if found {
+				modelPatterns = existing.ModelPatterns
+			}
 		}
 		if err := db.UpsertProvider(context.Background(), store.ProviderConfig{
 			Name:            cfg.Upstream.Provider,
@@ -165,6 +195,7 @@ func NewServer(cfg config.Config, db *store.SQLStore, logger *store.AsyncLogger,
 			EncryptedAPIKey: encrypted,
 			TimeoutMS:       int(cfg.Upstream.Timeout / time.Millisecond),
 			Enabled:         true,
+			ModelPatterns:   modelPatterns,
 		}); err != nil {
 			return nil, fmt.Errorf("upsert default provider: %w", err)
 		}
@@ -347,6 +378,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/admin/redteam/export", s.handleRedTeamExport)
 	mux.HandleFunc("/admin/ops/home", s.handleOpsHome)
 	mux.HandleFunc("/admin/ops/workers", s.handleOpsWorkers)
+	mux.HandleFunc("/admin/index-health", s.handleIndexHealth)
+	mux.HandleFunc("/admin/migration-sql", s.handleMigrationSQL)
 	mux.HandleFunc("/admin/ops/preflight", s.handleOpsPreflight)
 	mux.HandleFunc("/admin/flow-map", s.handleFlowMap)
 	mux.HandleFunc("/admin/mcp/agentic-runs", s.handleMCPAgenticRuns)
@@ -514,10 +547,14 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/admin/routing/domain-examples", s.handleDomainExamples)
 	mux.HandleFunc("/admin/routing/domain-review", s.handleDomainReviewQueue)
 	mux.HandleFunc("/admin/routing/domain-review/", s.handleDomainReviewAction)
+	mux.HandleFunc("/admin/routing/pattern-conflicts", s.handleProviderPatternConflicts)
 	mux.HandleFunc("/admin/routing/preview", s.handleRoutingPreview)
 	mux.HandleFunc("/admin/routing/decisions", s.handleRoutingDecisions)
 	mux.HandleFunc("/admin/routing/decisions/", s.handleRoutingDecisionByID)
 	mux.HandleFunc("/admin/routing/health", s.handleRoutingHealth)
+	mux.HandleFunc("/admin/routing/breaker-reset", s.handleRoutingBreakerReset)
+	mux.HandleFunc("/admin/routing/balancer", s.handleRoutingBalancer)
+	mux.HandleFunc("/admin/routing/failover-drill", s.handleRoutingFailoverDrill)
 	mux.HandleFunc("/admin/providers/slo", s.handleProviderSLOs)
 	mux.HandleFunc("/admin/agents", s.handleAgents)
 	mux.HandleFunc("/admin/models/quality", s.handleModelQuality)
@@ -671,6 +708,53 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// searchLocation resolves a timezone query parameter to a *time.Location, defaulting to
+// Asia/Seoul (KST) — the operational timezone of this gateway. Asia/Seoul and UTC are
+// resolved without the OS tzdata; any other IANA name falls back to LoadLocation, and an
+// unknown/unloadable zone falls back to Seoul rather than silently using UTC.
+func searchLocation(tz string) *time.Location {
+	tz = strings.TrimSpace(tz)
+	switch {
+	case tz == "", strings.EqualFold(tz, "Asia/Seoul"), strings.EqualFold(tz, "KST"):
+		return seoulZone
+	case strings.EqualFold(tz, "UTC"):
+		return time.UTC
+	}
+	if loc, err := time.LoadLocation(tz); err == nil {
+		return loc
+	}
+	return seoulZone
+}
+
+// parseRangeBound parses a from/to filter value. Values carrying an explicit offset
+// (RFC3339) are treated as absolute; bare wall-clock values (datetime-local inputs like
+// "2006-01-02T15:04", or a plain date) are interpreted in loc. A date-only upper bound
+// (endOfDay=true) expands to the last instant of that day so a "to" date is inclusive.
+// A zero time (returned for empty/unparseable input) disables the bound.
+func parseRangeBound(value string, loc *time.Location, endOfDay bool) time.Time {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return time.Time{}
+	}
+	for _, layout := range []string{time.RFC3339Nano, time.RFC3339} {
+		if t, err := time.Parse(layout, value); err == nil {
+			return t
+		}
+	}
+	for _, layout := range []string{"2006-01-02T15:04:05", "2006-01-02T15:04", "2006-01-02 15:04:05", "2006-01-02 15:04"} {
+		if t, err := time.ParseInLocation(layout, value, loc); err == nil {
+			return t
+		}
+	}
+	if t, err := time.ParseInLocation("2006-01-02", value, loc); err == nil {
+		if endOfDay {
+			return t.AddDate(0, 0, 1).Add(-time.Nanosecond)
+		}
+		return t
+	}
+	return time.Time{}
+}
+
 func (s *Server) handleRequests(w http.ResponseWriter, r *http.Request) {
 	if !s.authorizeAdmin(r) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
@@ -686,6 +770,12 @@ func (s *Server) handleRequests(w http.ResponseWriter, r *http.Request) {
 	if len(ids) > 0 && limit < len(ids) {
 		limit = len(ids)
 	}
+	// from/to are wall-clock instants interpreted in the caller's timezone (tz), which
+	// defaults to Asia/Seoul (KST) so operators searching by local time get correct
+	// bounds without a 9-hour off-by-one against the UTC-stored created_at column.
+	loc := searchLocation(r.URL.Query().Get("tz"))
+	from := parseRangeBound(r.URL.Query().Get("from"), loc, false)
+	to := parseRangeBound(r.URL.Query().Get("to"), loc, true)
 	requests, err := s.db.RecentRequests(r.Context(), store.RequestFilter{
 		Limit:    limit,
 		IDs:      ids,
@@ -693,6 +783,8 @@ func (s *Server) handleRequests(w http.ResponseWriter, r *http.Request) {
 		Model:    strings.TrimSpace(r.URL.Query().Get("model")),
 		Language: strings.TrimSpace(r.URL.Query().Get("language")),
 		Team:     requestTeamScopeForCaller(s, r),
+		From:     from,
+		To:       to,
 	})
 	if err != nil {
 		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "requests_failed")
@@ -1023,6 +1115,8 @@ func (s *Server) handleProviders(w http.ResponseWriter, r *http.Request) {
 			TimeoutMS     int    `json:"timeout_ms"`
 			Enabled       *bool  `json:"enabled"`
 			ModelPatterns string `json:"model_patterns"`
+			FailoverGroup string `json:"failover_group"`
+			Priority      *int   `json:"priority"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 			writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "invalid_body")
@@ -1063,6 +1157,15 @@ func (s *Server) handleProviders(w http.ResponseWriter, r *http.Request) {
 			TimeoutMS:       payload.TimeoutMS,
 			Enabled:         enabled,
 			ModelPatterns:   strings.TrimSpace(payload.ModelPatterns),
+			FailoverGroup:   strings.TrimSpace(payload.FailoverGroup),
+			Priority:        store.DefaultProviderPriority,
+		}
+		if payload.Priority != nil && *payload.Priority > 0 {
+			provider.Priority = *payload.Priority
+		} else if before.Priority > 0 && payload.Priority == nil {
+			// Editing a provider without sending priority keeps the stored value, so a
+			// form that omits the field cannot silently reset a deliberate ordering.
+			provider.Priority = before.Priority
 		}
 		if err := s.db.UpsertProvider(r.Context(), provider); err != nil {
 			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "provider_save_failed")
@@ -1077,6 +1180,8 @@ func (s *Server) handleProviders(w http.ResponseWriter, r *http.Request) {
 				"timeout_ms":         provider.TimeoutMS,
 				"enabled":            provider.Enabled,
 				"model_patterns":     provider.ModelPatterns,
+				"failover_group":     provider.FailoverGroup,
+				"priority":           provider.Priority,
 			},
 		})
 	default:
@@ -1164,6 +1269,17 @@ func (s *Server) handleOpenAI(w http.ResponseWriter, r *http.Request) {
 	rc := &requestPipeline{s: s, w: sw, r: r}
 
 	defer func() {
+		// The single exit point for every path through the pipeline, including the ones
+		// that halt early and an unwinding panic. A reservation released anywhere else
+		// would be missed by whichever branch was overlooked, and would then count
+		// against the quota until it expired.
+		s.releaseQuota(rc.quotaReserved)
+
+		// The governance decisions of every phase, written once. Detached from the
+		// request context on purpose: enforcement has already happened, and an audit
+		// record that disappears because the client hung up is the one worth keeping.
+		s.writePolicyDecisionEvents(context.WithoutCancel(r.Context()), rc.policyEvents)
+
 		if r.Method == http.MethodGet && r.URL.Path == "/v1/models" && sw.statusCode == http.StatusOK {
 			return
 		}
@@ -1280,63 +1396,86 @@ func (s *Server) authenticateProxy(r *http.Request) (string, bool) {
 	return id, ok
 }
 
+// authOutcome distinguishes "this caller is not allowed" from "we could not find out".
+//
+// Both refuse the request — failing closed when credentials cannot be verified is the
+// only safe choice — but they are different events and deserve different answers. A
+// database outage used to be reported to the client as 401 "invalid proxy API key",
+// which is wrong twice over: it tells an operator their key is bad while the real
+// problem is the store, and 401 tells clients and SDKs the request is not worth
+// retrying, so a transient outage reads as a permanent credential failure.
+type authOutcome int
+
+const (
+	authDenied      authOutcome = iota // the caller is genuinely not allowed
+	authOK                             // the caller is identified and allowed
+	authUnavailable                    // the store could not be consulted; unknown, so refused
+)
+
+// authenticateProxyContext keeps the boolean shape used by the handlers that only need
+// to know whether a caller was identified.
 func (s *Server) authenticateProxyContext(r *http.Request) (string, *store.AuthContext, bool) {
+	id, ctx, outcome := s.authenticateProxyContextWithOutcome(r)
+	return id, ctx, outcome == authOK
+}
+
+func (s *Server) authenticateProxyContextWithOutcome(r *http.Request) (string, *store.AuthContext, authOutcome) {
 	token := bearerToken(r.Header.Get("Authorization"))
 	if token == "" {
 		hasKeys, err := s.db.HasActiveAPIKeys(r.Context())
 		if err != nil {
 			slog.Warn("check active proxy keys failed", "error", err)
-			return "", nil, false
+			return "", nil, authUnavailable
 		}
 		if !hasKeys && !s.cfg.Auth.Enabled {
-			return "anonymous", nil, true
+			return "anonymous", nil, authOK
 		}
 		_ = s.db.InsertAuditEvent(r.Context(), store.AuthEvent{ID: newID("ae"), EventType: "api_key_denied", IP: clientIP(r), UserAgent: r.UserAgent(), Detail: "missing bearer token", CreatedAt: time.Now().UTC()})
-		return "", nil, false
+		return "", nil, authDenied
 	}
 	keyHash := hashProxyKey(token)
 	key, found, err := s.db.FindActiveAPIKeyByHash(r.Context(), keyHash)
 	if err != nil {
 		slog.Warn("lookup proxy api key failed", "error", err)
-		return "", nil, false
+		return "", nil, authUnavailable
 	}
 	if found {
 		authCtx := authContextFromAPIKey(key)
 		s.enrichAuthContextTeam(r.Context(), &authCtx)
 		if !key.RevokedAt.IsZero() || key.Status != "active" {
 			_ = s.db.InsertAuditEvent(r.Context(), store.AuthEvent{ID: newID("ae"), EventType: "api_key_denied", APIKeyID: key.ID, IP: clientIP(r), UserAgent: r.UserAgent(), Detail: "revoked_or_inactive", CreatedAt: time.Now().UTC()})
-			return "", nil, false
+			return "", nil, authDenied
 		}
 		if !key.ExpiresAt.IsZero() && key.ExpiresAt.Before(time.Now().UTC()) {
 			_ = s.db.InsertAuditEvent(r.Context(), store.AuthEvent{ID: newID("ae"), EventType: "api_key_denied", APIKeyID: key.ID, IP: clientIP(r), UserAgent: r.UserAgent(), Detail: "expired", CreatedAt: time.Now().UTC()})
-			return "", nil, false
+			return "", nil, authDenied
 		}
 		if !ipAllowed(clientIP(r), key.AllowedIPs) {
 			_ = s.db.InsertAuditEvent(r.Context(), store.AuthEvent{ID: newID("ae"), EventType: "ip_denied", APIKeyID: key.ID, IP: clientIP(r), UserAgent: r.UserAgent(), Detail: strings.Join(key.AllowedIPs, ","), CreatedAt: time.Now().UTC()})
-			return "", nil, false
+			return "", nil, authDenied
 		}
 		scope := apiScopeForRequest(r)
 		if s.cfg.Auth.Enabled && scope != "" && !hasScope(key.Scopes, scope) {
 			_ = s.db.InsertAuditEvent(r.Context(), store.AuthEvent{ID: newID("ae"), EventType: "scope_denied", APIKeyID: key.ID, TeamID: key.Team, IP: clientIP(r), UserAgent: r.UserAgent(), Detail: scope, CreatedAt: time.Now().UTC()})
-			return "", nil, false
+			return "", nil, authDenied
 		}
-		return key.ID, &authCtx, true
+		return key.ID, &authCtx, authOK
 	}
 	// 토큰이 proxy key(pcg_ 접두사)가 아니면 upstream API key passthrough 로 허용
 	// 이를 통해 Roo Code / Cursor 등이 upstream key 를 직접 보내도 프록시가 작동함
 	if !s.cfg.Auth.Enabled && !strings.HasPrefix(token, "pcg_") {
-		return s.attributeExternalKey(r, keyHash), nil, true
+		return s.attributeExternalKey(r, keyHash), nil, authOK
 	}
 	hasKeys, err := s.db.HasActiveAPIKeys(r.Context())
 	if err != nil {
 		slog.Warn("check active proxy keys failed", "error", err)
-		return "", nil, false
+		return "", nil, authUnavailable
 	}
 	if !hasKeys && !s.cfg.Auth.Enabled {
-		return "anonymous", nil, true
+		return "anonymous", nil, authOK
 	}
 	_ = s.db.InsertAuditEvent(r.Context(), store.AuthEvent{ID: newID("ae"), EventType: "api_key_denied", IP: clientIP(r), UserAgent: r.UserAgent(), Detail: "unknown key", CreatedAt: time.Now().UTC()})
-	return "", nil, false
+	return "", nil, authDenied
 }
 
 // attributeExternalKey maps an unregistered (non-proxy) bearer key to a stable
@@ -1389,10 +1528,7 @@ type resolvedProvider struct {
 // provider that actually answered, and (if a failover occurred) the original primary's
 // name in `failoverFrom`.
 func (s *Server) dialUpstream(reqCtx context.Context, r *http.Request, body []byte, primary resolvedProvider, traceID string, failoverCandidates []string) (*http.Response, string, string, string, []string, []byte, string, http.Header, error) {
-	type attempt struct {
-		provider resolvedProvider
-	}
-	attempts := []attempt{{provider: primary}}
+	attempts := []providerAttempt{{provider: primary}}
 	for _, name := range failoverCandidates {
 		// Re-resolve each candidate so we get its decrypted key and timeout.
 		fakeReq := r.Clone(reqCtx)
@@ -1402,13 +1538,39 @@ func (s *Server) dialUpstream(reqCtx context.Context, r *http.Request, body []by
 			slog.Warn("failover candidate unavailable", "name", name, "error", err)
 			continue
 		}
-		attempts = append(attempts, attempt{provider: cand})
+		attempts = append(attempts, providerAttempt{provider: cand})
+	}
+
+	breakerEnabled, breakerThreshold, breakerCooldown := s.breakerConfig()
+	if breakerEnabled {
+		attempts = s.filterOpenBreakers(attempts, breakerThreshold, breakerCooldown, traceID)
+	}
+
+	// Failover budget: how long the gateway may keep trying alternates. Checked
+	// between attempts so an in-flight response is never cut short; a request that
+	// has already spent the budget returns the last error instead of walking the
+	// remaining candidates.
+	failoverDeadline := time.Time{}
+	if budget := s.upstreamConf().FailoverBudget; budget > 0 {
+		failoverDeadline = time.Now().Add(budget)
+	}
+	if raw := strings.TrimSpace(r.Header.Get("X-Failover-Budget-MS")); raw != "" {
+		if ms, convErr := strconv.Atoi(raw); convErr == nil && ms > 0 {
+			failoverDeadline = time.Now().Add(time.Duration(ms) * time.Millisecond)
+		}
+	}
+	budgetSpent := func() bool {
+		return !failoverDeadline.IsZero() && !time.Now().Before(failoverDeadline)
 	}
 
 	var lastErr error
 	failoverPath := []string{}
 	currentBody := body
-	currentModel, _ := previewModelComplexity(currentBody, r.URL.Path)
+	// Only the model name is wanted here. Reading it used to go through
+	// previewModelComplexity, which extracted and redacted every prompt to compute a
+	// complexity score this caller discarded -- and it was the only caller, so the score
+	// was never used at all.
+	currentModel := extractModel(currentBody)
 	usedLongContext := false
 	var lastUpstreamHeaders http.Header
 	for i := 0; i < len(attempts); {
@@ -1439,7 +1601,14 @@ func (s *Server) dialUpstream(reqCtx context.Context, r *http.Request, body []by
 
 		resp, doErr := s.client.Do(upstreamReq)
 		if doErr == nil {
-			if statusFallbackAllowed(resp.StatusCode) && i+1 < len(attempts) {
+			if breakerEnabled {
+				if breakerCountsAsFailure(resp.StatusCode) {
+					s.noteBreakerFailure(att.provider.Name, fallbackReasonForStatus(resp.StatusCode), breakerThreshold, traceID)
+				} else {
+					s.noteBreakerSuccess(att.provider.Name)
+				}
+			}
+			if statusFallbackAllowed(resp.StatusCode) && i+1 < len(attempts) && !budgetSpent() {
 				reason := fallbackReasonForStatus(resp.StatusCode)
 				_, _ = io.Copy(io.Discard, resp.Body)
 				_ = resp.Body.Close()
@@ -1450,6 +1619,10 @@ func (s *Server) dialUpstream(reqCtx context.Context, r *http.Request, body []by
 				slog.Warn("upstream status fallback", "provider", att.provider.Name, "status", resp.StatusCode, "next", attempts[i+1].provider.Name)
 				i++
 				continue
+			}
+			if statusFallbackAllowed(resp.StatusCode) && i+1 < len(attempts) && budgetSpent() {
+				failoverPath = append(failoverPath, "failover_budget_exhausted:"+att.provider.Name)
+				slog.Warn("failover budget exhausted", "provider", att.provider.Name, "status", resp.StatusCode, "trace_id", traceID)
 			}
 			if resp.StatusCode == http.StatusBadRequest && !usedLongContext {
 				sniff, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
@@ -1486,8 +1659,16 @@ func (s *Server) dialUpstream(reqCtx context.Context, r *http.Request, body []by
 		}
 		lastErr = doErr
 		reason := fallbackReasonForError(doErr)
+		if breakerEnabled {
+			s.noteBreakerFailure(att.provider.Name, reason, breakerThreshold, traceID)
+		}
 		slog.Warn("upstream call failed", "provider", att.provider.Name, "attempt", i, "error", doErr)
 		if i+1 < len(attempts) {
+			if budgetSpent() {
+				failoverPath = append(failoverPath, "failover_budget_exhausted:"+att.provider.Name)
+				slog.Warn("failover budget exhausted", "provider", att.provider.Name, "trace_id", traceID)
+				break
+			}
 			failoverPath = append(failoverPath, reason+":"+att.provider.Name+"->"+attempts[i+1].provider.Name)
 		}
 		i++
@@ -1606,22 +1787,50 @@ func (s *Server) providersForModel(ctx context.Context, model string) ([]string,
 	}
 	normalized := strings.ToLower(strings.TrimSpace(model))
 	matches := []string{}
+	groups := map[string]bool{}
 	for _, p := range providers {
-		if p.ModelPatterns == "" {
+		if !providerServesModel(p, normalized) {
 			continue
 		}
-		for _, raw := range strings.Split(p.ModelPatterns, ",") {
-			pattern := strings.ToLower(strings.TrimSpace(raw))
-			if pattern == "" {
+		matches = append(matches, p.Name)
+		if g := strings.TrimSpace(p.FailoverGroup); g != "" {
+			groups[g] = true
+		}
+	}
+	// Anything in the same failover group is a candidate too, even if its patterns do
+	// not match this model. That is the point of the group: an operator declaring
+	// "these three serve the same traffic" should not also have to keep their globs
+	// identical for redundancy to exist. Group members are appended after the pattern
+	// matches, so an exact match is still preferred, and the list stays priority-ordered
+	// within each half because ListProviderConfigs already sorted it.
+	if len(groups) > 0 {
+		seen := map[string]bool{}
+		for _, name := range matches {
+			seen[name] = true
+		}
+		for _, p := range providers {
+			if seen[p.Name] || !groups[strings.TrimSpace(p.FailoverGroup)] {
 				continue
 			}
-			if matchGlob(pattern, normalized) {
-				matches = append(matches, p.Name)
-				break
-			}
+			matches = append(matches, p.Name)
+			seen[p.Name] = true
 		}
 	}
 	return matches, nil
+}
+
+// providerServesModel reports whether any of a provider's model globs match.
+func providerServesModel(p store.ProviderConfig, normalizedModel string) bool {
+	if p.ModelPatterns == "" {
+		return false
+	}
+	for _, raw := range strings.Split(p.ModelPatterns, ",") {
+		pattern := strings.ToLower(strings.TrimSpace(raw))
+		if pattern != "" && matchGlob(pattern, normalizedModel) {
+			return true
+		}
+	}
+	return false
 }
 
 // matchGlob implements a tiny case-insensitive glob with `*` as the wildcard.
@@ -1677,6 +1886,11 @@ func (s *Server) auditAdmin(r *http.Request, action string, before string, after
 	}); err != nil {
 		slog.Warn("write admin audit failed", "action", action, "error", err)
 	}
+	if err := s.maybeRunPostChangeRedTeam(r, action, before, after); err != nil {
+		// The admin mutation has already succeeded. Surface the regression trigger failure
+		// operationally without turning a successful configuration write into an HTTP error.
+		slog.Warn("post-change redteam trigger failed", "action", action, "error", err)
+	}
 }
 
 func adminID(r *http.Request) string {
@@ -1706,6 +1920,8 @@ func providerAuditJSON(provider store.ProviderConfig) string {
 		"timeout_ms":         provider.TimeoutMS,
 		"enabled":            provider.Enabled,
 		"model_patterns":     provider.ModelPatterns,
+		"failover_group":     provider.FailoverGroup,
+		"priority":           provider.Priority,
 	})
 }
 
@@ -1773,7 +1989,9 @@ func (s *Server) currentAccessClaims(r *http.Request) (accessClaims, bool) {
 
 func adminRequiredScope(r *http.Request) string {
 	if strings.HasPrefix(r.URL.Path, "/admin/routing") {
-		if r.Method == http.MethodGet || r.Method == http.MethodHead || r.URL.Path == "/admin/routing/preview" {
+		if r.Method == http.MethodGet || r.Method == http.MethodHead ||
+			r.URL.Path == "/admin/routing/preview" ||
+			r.URL.Path == "/admin/routing/pattern-conflicts" {
 			return "routing:read"
 		}
 		return "routing:write"
@@ -1830,14 +2048,44 @@ func (s *Server) handleAdminUI(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = w.Write([]byte(strings.ReplaceAll(adminHTML, "__APP_VERSION__", AppVersion)))
+	servePage(w, r, adminUIPage())
 }
 
+// auditRequest builds the audit record for a request, extracting and redacting its
+// prompts on the way.
 func (s *Server) auditRequest(endpoint string, body []byte, apiKeyID string, traceID string, r *http.Request) store.LogRecord {
+	return s.auditRequestWithPrompts(endpoint, body, apiKeyID, traceID, r, nil)
+}
+
+// auditRequestWithPrompts is auditRequest with the prompt extraction already done.
+//
+// stepRouting scores the request and then audits it a few lines later, and both were
+// extracting the same body -- which means redacting every message twice, and redaction
+// is most of what extraction costs. The routing plan already carries what it extracted,
+// so the audit reuses it.
+//
+// Two conditions make that sound. The model may have been rewritten in between, so it is
+// always re-read from the current body rather than taken from the reused set; the rewrite
+// only replaces the model field, so the prompts themselves are unchanged. And the reused
+// prompts were extracted with raw prompt storage off, so the caller must not pass them
+// when it is on -- the record would then be missing the raw text it is meant to keep.
+func (s *Server) auditRequestWithPrompts(endpoint string, body []byte, apiKeyID string, traceID string, r *http.Request, pre []store.PromptLog) store.LogRecord {
 	requestID := newID("req")
 	lc := s.loggingConf()
-	model, stream, prompts, languages := extractAudit(body, endpoint, lc.RawPrompts)
+	var model string
+	var stream bool
+	var prompts []store.PromptLog
+	var languages []audit.LanguageSignal
+	if len(pre) > 0 && !lc.RawPrompts {
+		// Reuse the routing pass. The model is re-read because it may have been rewritten
+		// since; stream and the language signals are cheap and derived, not redacted.
+		prompts = pre
+		model = extractModel(body)
+		stream = streamRequested(body)
+		languages = languagesFromPrompts(prompts)
+	} else {
+		model, stream, prompts, languages = extractAudit(body, endpoint, lc.RawPrompts)
+	}
 	now := time.Now().UTC()
 
 	for i := range prompts {
@@ -1858,6 +2106,12 @@ func (s *Server) auditRequest(endpoint string, body []byte, apiKeyID string, tra
 		})
 	}
 
+	// The raw body is stored unredacted, and it has to be: replay resends these exact
+	// bytes, and a masked body is not a request. Everything else on this path is
+	// redacted before storage, so this is the one place a secret in a prompt survives
+	// verbatim - measured, not assumed: with the flag on, every one of the redactor's
+	// thirteen rule types is recoverable from body_raw. The settings screen says so,
+	// and docs/OPERATIONS.md requires disk encryption before enabling it.
 	rawBody := ""
 	if lc.RawBodies {
 		rawBody = string(body)
@@ -1968,6 +2222,59 @@ func (s *Server) persistInferredSession(ctx context.Context, identityHash, sessi
 	if s.sessionGCAt.CompareAndSwap(lastUnix, now.Unix()) {
 		_, _ = s.db.DeleteExpiredInferredSessions(ctx, now.Add(-idle))
 	}
+}
+
+// extractModel reads just the model name from a request body.
+//
+// extractAudit returns it too, but on the way it flattens every message and redacts
+// each one -- work a caller that only wants the model then throws away. Redaction runs
+// the pattern table over the whole prompt, so on a 1 MB body that is not a rounding
+// error: the request path was redacting five times its own size, and one of those five
+// passes existed only to find a string near the top of the JSON.
+func extractModel(body []byte) string {
+	if len(body) == 0 {
+		return ""
+	}
+	var root struct {
+		Model string `json:"model"`
+	}
+	if err := json.Unmarshal(body, &root); err != nil {
+		return ""
+	}
+	return root.Model
+}
+
+// streamRequested reads just the stream flag, for the same reason extractModel exists.
+func streamRequested(body []byte) bool {
+	if len(body) == 0 {
+		return false
+	}
+	var root struct {
+		Stream bool `json:"stream"`
+	}
+	if err := json.Unmarshal(body, &root); err != nil {
+		return false
+	}
+	return root.Stream
+}
+
+// languagesFromPrompts derives the language signals from prompts that were already
+// extracted, which is what extractAudit does with them internally.
+func languagesFromPrompts(prompts []store.PromptLog) []audit.LanguageSignal {
+	if len(prompts) == 0 {
+		return nil
+	}
+	texts := make([]string, 0, len(prompts))
+	for _, p := range prompts {
+		text := p.RedactedText
+		if text == "" {
+			text = p.ContentText
+		}
+		if text != "" {
+			texts = append(texts, text)
+		}
+	}
+	return audit.InferLanguages(texts)
 }
 
 func extractAudit(body []byte, endpoint string, rawPrompts bool) (string, bool, []store.PromptLog, []audit.LanguageSignal) {

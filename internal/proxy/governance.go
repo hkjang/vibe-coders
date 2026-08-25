@@ -78,7 +78,10 @@ type governanceDecision struct {
 	PolicyEvents    []store.PolicyDecisionEvent
 }
 
-func (s *Server) enforceOpenAIGovernance(w http.ResponseWriter, r *http.Request, meta *store.LogRecord, body []byte, authCtx *store.AuthContext, routingPlan *intelligentRoutingPlan, costKRW float64, detectSecrets bool, phase string) ([]byte, bool) {
+// enforceOpenAIGovernance evaluates one phase of a request. When sink is non-nil the
+// decisions are collected there instead of written immediately, so the three phases of a
+// /v1 request become one write at the end rather than three as it goes.
+func (s *Server) enforceOpenAIGovernance(w http.ResponseWriter, r *http.Request, meta *store.LogRecord, body []byte, authCtx *store.AuthContext, routingPlan *intelligentRoutingPlan, costKRW float64, detectSecrets bool, phase string, sink *[]store.PolicyDecisionEvent) ([]byte, bool) {
 	gctx := s.openAIGovernanceContext(r, meta, body, authCtx, routingPlan, costKRW, phase)
 	findings := []secretFinding{}
 	if detectSecrets {
@@ -90,7 +93,11 @@ func (s *Server) enforceOpenAIGovernance(w http.ResponseWriter, r *http.Request,
 	}
 
 	decision := s.evaluateGovernance(r, gctx)
-	s.recordPolicyDecisionEvents(r.Context(), decision.PolicyEvents)
+	if sink != nil {
+		*sink = append(*sink, stampPolicyDecisionEvents(decision.PolicyEvents)...)
+	} else {
+		s.recordPolicyDecisionEvents(r.Context(), decision.PolicyEvents)
+	}
 	action := strings.ToLower(strings.TrimSpace(decision.SecretAction))
 	if action == "" {
 		action = "detect"
@@ -264,7 +271,11 @@ func evaluatePolicyRules(rules []store.PolicyRule, g governanceContext) governan
 	if len(reasons) > 0 {
 		decision.Reason = strings.Join(reasons, "; ")
 	}
-	if len(decision.PolicyEvents) == 0 {
+	// A "no policy matched" row is worth recording when policies exist and none applied —
+	// that is a decision. With no active rules at all there is nothing to decide, and the
+	// row said so on every request of every gateway that has not configured governance,
+	// three times over, into a table retention never purges.
+	if len(decision.PolicyEvents) == 0 && len(rules) > 0 {
 		decision.PolicyEvents = append(decision.PolicyEvents, defaultPolicyDecisionEvent(g))
 	}
 	return decision
@@ -341,8 +352,15 @@ func secretActionDecision(action string) string {
 	}
 }
 
-func (s *Server) recordPolicyDecisionEvents(ctx context.Context, events []store.PolicyDecisionEvent) {
-	stored := events[:0]
+// stampPolicyDecisionEvents drops the entries that decided nothing and gives the rest an
+// id and a timestamp. It is separate from writing them because a /v1 request evaluates
+// governance three times and writes once, at the end: stamping has to happen when the
+// decision is made, or every phase would carry the request's finishing time.
+func stampPolicyDecisionEvents(events []store.PolicyDecisionEvent) []store.PolicyDecisionEvent {
+	if len(events) == 0 {
+		return nil
+	}
+	stamped := make([]store.PolicyDecisionEvent, 0, len(events))
 	for _, event := range events {
 		if strings.TrimSpace(event.Decision) == "" {
 			continue
@@ -353,10 +371,26 @@ func (s *Server) recordPolicyDecisionEvents(ctx context.Context, events []store.
 		if event.CreatedAt.IsZero() {
 			event.CreatedAt = time.Now().UTC()
 		}
-		_ = s.db.InsertPolicyDecisionEvent(ctx, event)
-		stored = append(stored, event)
+		stamped = append(stamped, event)
 	}
-	s.emitPolicyFacts(stored) // best-effort DW fact (no-op unless configured)
+	return stamped
+}
+
+// writePolicyDecisionEvents persists an already-stamped batch. Best effort, as before:
+// governance has already been enforced by the time this runs, so failing to record it must
+// not fail the request.
+func (s *Server) writePolicyDecisionEvents(ctx context.Context, events []store.PolicyDecisionEvent) {
+	if len(events) == 0 {
+		return
+	}
+	_ = s.db.InsertPolicyDecisionEvents(ctx, events)
+	s.emitPolicyFacts(events) // best-effort DW fact (no-op unless configured)
+}
+
+// recordPolicyDecisionEvents stamps and writes in one go, for the callers that are not the
+// /v1 pipeline and have no later point to flush at.
+func (s *Server) recordPolicyDecisionEvents(ctx context.Context, events []store.PolicyDecisionEvent) {
+	s.writePolicyDecisionEvents(ctx, stampPolicyDecisionEvents(events))
 }
 
 func governanceRuleMatches(conditions map[string]any, g governanceContext) bool {

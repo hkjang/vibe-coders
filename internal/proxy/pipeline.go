@@ -62,11 +62,25 @@ type requestPipeline struct {
 
 	chatCacheKey    string
 	chatCacheable   bool
+	chatCacheScope  string
 	chatSemanticVec []float64
 
 	skillName    string
 	skillVersion string
 	skillTools   string
+
+	// policyEvents collects the governance decisions of every phase, written once at the
+	// end of the request. See the deferred flush in handleOpenAI.
+	policyEvents []store.PolicyDecisionEvent
+
+	// quotaReserved is the request id holding an in-flight quota reservation, if any.
+	// It must be released on every exit path or the reservation counts against the
+	// quota until it expires.
+	quotaReserved string
+
+	// affinity identifies the conversation for provider stickiness (see
+	// resolveSessionAffinity). Empty when balancing does not apply.
+	affinity sessionAffinity
 }
 
 // pipelineSteps returns the ordered request pipeline. The order is the contract:
@@ -104,9 +118,19 @@ func (rc *requestPipeline) stepAuth() bool {
 		rc.apiKeyID = injected.APIKeyID
 		rc.authCtx = injected.AuthCtx
 	} else {
-		var ok bool
-		rc.apiKeyID, rc.authCtx, ok = s.authenticateProxyContext(r)
-		if !ok {
+		var outcome authOutcome
+		rc.apiKeyID, rc.authCtx, outcome = s.authenticateProxyContextWithOutcome(r)
+		switch outcome {
+		case authUnavailable:
+			// The credential could not be checked, so the request is refused — but this is
+			// an outage, not a bad key. 503 is retryable where 401 is not, and the message
+			// points at the store so nobody spends an incident reissuing keys.
+			w.Header().Set("Retry-After", "5")
+			writeOpenAIError(w, http.StatusServiceUnavailable,
+				"cannot verify credentials right now: the gateway database is unreachable. The request was refused rather than allowed unverified; retry shortly.",
+				"server_error", "auth_backend_unavailable")
+			return false
+		case authDenied:
 			writeOpenAIError(w, http.StatusUnauthorized, "invalid proxy API key", "invalid_request_error", "invalid_api_key")
 			return false
 		}
@@ -124,13 +148,37 @@ func (rc *requestPipeline) stepQuota() bool {
 	s, r, w := rc.s, rc.r, rc.w
 
 	clientAddr := clientIP(r)
-	if decision, err := s.checkQuotas(r.Context(), rc.apiKeyID, clientAddr); err != nil {
+	// Authentication already read this key's row, so its team is in hand. Looking it up
+	// again is a round trip for a value the request is holding.
+	//
+	// The id comparison is a guard, not a case that arises today: every branch of stepAuth
+	// sets apiKeyID and authCtx from the same lookup. It is here because the cost of being
+	// wrong is charging a request to another team's quota, and a future auth path that
+	// sets one without the other would do exactly that in silence.
+	var knownTeam *string
+	if rc.authCtx != nil && rc.authCtx.APIKeyID == rc.apiKeyID {
+		knownTeam = &rc.authCtx.KeyTeam
+	}
+	if decision, err := s.checkQuotas(r.Context(), rc.apiKeyID, clientAddr, knownTeam); err != nil {
 		slog.Warn("quota check failed", "error", err)
 	} else if !decision.Allowed {
 		w.Header().Set("Retry-After", strconv.Itoa(quotaRetryAfterSeconds(decision.PeriodEnd)))
 		w.Header().Set("X-Quota-Scope", quotaHeaderTag(decision))
 		w.Header().Set("X-Quota-Tokens", strconv.FormatInt(decision.Tokens, 10))
 		w.Header().Set("X-Quota-Cost-KRW", formatKRW(decision.CostKRW))
+		// Without the limit the totals above mean nothing, and without the reserved
+		// split a caller sees a number larger than the usage their own dashboard
+		// shows, with no way to account for the difference.
+		if decision.Quota.TokenLimit > 0 {
+			w.Header().Set("X-Quota-Token-Limit", strconv.FormatInt(decision.Quota.TokenLimit, 10))
+		}
+		if decision.Quota.KRWLimit > 0 {
+			w.Header().Set("X-Quota-Cost-Limit-KRW", formatKRW(decision.Quota.KRWLimit))
+		}
+		if decision.ReservedTokens > 0 || decision.ReservedCostKRW > 0 {
+			w.Header().Set("X-Quota-Reserved-Tokens", strconv.FormatInt(decision.ReservedTokens, 10))
+			w.Header().Set("X-Quota-Reserved-Cost-KRW", formatKRW(decision.ReservedCostKRW))
+		}
 		w.Header().Set("X-Quota-Period-Start", decision.PeriodStart.Format(time.RFC3339))
 		w.Header().Set("X-Quota-Period-End", decision.PeriodEnd.Format(time.RFC3339))
 		s.metrics.IncQuotaBlock()
@@ -147,11 +195,9 @@ func (rc *requestPipeline) stepRouting() bool {
 	s, r, w := rc.s, rc.r, rc.w
 
 	body := rc.body
-	var err error
 	if body == nil && r.Body != nil {
-		body, err = io.ReadAll(r.Body)
-		if err != nil {
-			writeOpenAIError(w, http.StatusBadRequest, "failed to read request body", "invalid_request_error", "invalid_body")
+		var ok bool
+		if body, ok = rc.readRequestBody(); !ok {
 			return false
 		}
 	}
@@ -203,7 +249,13 @@ func (rc *requestPipeline) stepRouting() bool {
 	}
 	rc.body = body
 
-	meta := s.auditRequest(r.URL.Path, body, rc.apiKeyID, traceID, r)
+	// The routing plan above already extracted and redacted these prompts from the same
+	// body; reuse them rather than paying for it twice a few lines apart.
+	var prePrompts []store.PromptLog
+	if routingPlan != nil {
+		prePrompts = routingPlan.Prompts
+	}
+	meta := s.auditRequestWithPrompts(r.URL.Path, body, rc.apiKeyID, traceID, r, prePrompts)
 	applyOpenAIRequestBodySummary(&meta.Request, originalBody, r.URL.Path)
 	if routingPlan != nil {
 		meta.Request.Complexity = routingPlan.Complexity.Score
@@ -236,7 +288,7 @@ func (rc *requestPipeline) stepGovernance() bool {
 
 	if r.Method == http.MethodPost {
 		var blocked bool
-		rc.body, blocked = s.enforceOpenAIGovernance(w, r, &rc.meta, rc.body, rc.authCtx, rc.routingPlan, 0, true, "request")
+		rc.body, blocked = s.enforceOpenAIGovernance(w, r, &rc.meta, rc.body, rc.authCtx, rc.routingPlan, 0, true, "request", &rc.policyEvents)
 		if blocked {
 			return false
 		}
@@ -293,20 +345,22 @@ func (rc *requestPipeline) stepCache() bool {
 
 	// Embedding cache (idempotent) — only applies to /v1/embeddings + POST.
 	if r.URL.Path == "/v1/embeddings" && r.Method == http.MethodPost && s.cacheConf().EmbeddingEnabled {
-		if served := s.serveEmbeddingFromCache(r.Context(), w, r, rc.body, rc.meta, rc.traceID); served {
+		if served := s.serveEmbeddingFromCache(r.Context(), w, r, rc.body,
+			chatCacheScopeValue(s.cacheConf().EmbeddingScope, rc.authCtx, rc.apiKeyID), rc.meta, rc.traceID); served {
 			return false
 		}
 	}
 
 	// Chat response cache — opt-in, only for deterministic (temp 0 / seed) requests.
-	rc.chatCacheKey, rc.chatCacheable = s.chatCacheEligible(r, rc.body)
+	rc.chatCacheScope = chatCacheScopeValue(s.cacheConf().ChatScope, rc.authCtx, rc.apiKeyID)
+	rc.chatCacheKey, rc.chatCacheable = s.chatCacheEligible(r, rc.body, rc.authCtx, rc.apiKeyID)
 	if rc.chatCacheable {
 		if served := s.serveChatFromCache(r.Context(), w, rc.chatCacheKey, rc.meta, rc.traceID); served {
 			return false
 		}
 		// Exact miss → try the embedding-based semantic cache (opt-in). The query vector
 		// is kept on rc so a fresh upstream response is stored under it.
-		if vec, served := s.serveChatSemantic(r.Context(), w, r, rc.body, rc.meta, rc.traceID); served {
+		if vec, served := s.serveChatSemantic(r.Context(), w, r, rc.body, rc.chatCacheScope, rc.meta, rc.traceID); served {
 			return false
 		} else {
 			rc.chatSemanticVec = vec
@@ -326,6 +380,12 @@ func (rc *requestPipeline) stepCost() bool {
 		snap := s.costSnapshotCached(r.Context())
 		est := predictCost(rc.meta.Request.Model, promptTokenEstimate(rc.meta.Prompts), parseMaxTokens(rc.body), snap, s.pricingMap(r.Context()))
 		rc.estimatedCostKRW = est.CostKRW
+		// Record what this request is expected to consume while it runs, so requests
+		// starting alongside it count it. stepQuota cannot do this — it runs before the
+		// body is read, so no estimate exists yet.
+		s.reserveQuota(r.Context(), rc.meta.Request.ID, rc.apiKeyID, clientIP(r),
+			int64(est.InputTokens+est.OutputTokens), est.CostKRW)
+		rc.quotaReserved = rc.meta.Request.ID
 		w.Header().Set("X-Estimated-Input-Tokens", strconv.Itoa(est.InputTokens))
 		w.Header().Set("X-Estimated-Output-Tokens", strconv.Itoa(est.OutputTokens))
 		if est.Priced {
@@ -340,7 +400,7 @@ func (rc *requestPipeline) stepCost() bool {
 			return false
 		}
 		var blocked bool
-		rc.body, blocked = s.enforceOpenAIGovernance(w, r, &rc.meta, rc.body, rc.authCtx, rc.routingPlan, rc.estimatedCostKRW, false, "cost")
+		rc.body, blocked = s.enforceOpenAIGovernance(w, r, &rc.meta, rc.body, rc.authCtx, rc.routingPlan, rc.estimatedCostKRW, false, "cost", &rc.policyEvents)
 		if blocked {
 			return false
 		}
@@ -355,6 +415,26 @@ func (rc *requestPipeline) stepCost() bool {
 			return false
 		}
 	}
+	// Embeddings consume quota too, and a batch job fires them by the thousand
+	// concurrently — exactly the shape that overshoots a limit. They were reserving
+	// nothing, so they counted only after finishing, which is the very gap reservations
+	// exist to close.
+	//
+	// predictCost is not reused here: it always predicts a completion, and an embedding
+	// has none, so every call would be over-reserved by the default output estimate and
+	// legitimate traffic would start being refused.
+	if r.URL.Path == "/v1/embeddings" && r.Method == http.MethodPost && s.quotaReservationsEnabled() {
+		inputTokens := promptTokenEstimate(rc.meta.Prompts)
+		cost := 0.0
+		if audit.ModelPriced(rc.meta.Request.Model, s.pricingMap(r.Context())) {
+			cost = audit.EstimateCostKRW(rc.meta.Request.Model, audit.Usage{
+				PromptTokens: inputTokens,
+			}, s.pricingMap(r.Context()))
+		}
+		s.reserveQuota(r.Context(), rc.meta.Request.ID, rc.apiKeyID, clientIP(r), int64(inputTokens), cost)
+		rc.quotaReserved = rc.meta.Request.ID
+	}
+
 	return true
 }
 
@@ -393,10 +473,32 @@ func (rc *requestPipeline) stepUpstream() bool {
 		}
 	}
 
-	provider, err := s.selectProviderForced(r.Context(), r, meta.Request.Model, rc.routeDecision.TargetProvider)
+	// Load balancing: when several providers serve the same model, spread sessions
+	// across them instead of always taking the first match by name. A routing rule's
+	// target (rc.routeDecision.TargetProvider) is an explicit decision and outranks
+	// the pool, so the balancer only runs when nothing has been forced already.
+	forcedProvider := rc.routeDecision.TargetProvider
+	balanced := balancerDecision{}
+	// Resolve the conversation identity before the balancer, not inside it: it is also
+	// what the upstream session header is derived from, and that has to happen even when
+	// a rule or a header has already pinned the provider.
+	rc.affinity = resolveSessionAffinity(r, body, rc.apiKeyID, meta.Request.SessionID)
+	s.injectUpstreamSessionHeader(w, r, rc.affinity)
+	if strings.TrimSpace(forcedProvider) == "" {
+		if decision, ok := s.balanceProvider(r.Context(), r, meta.Request.Model, rc.affinity.Key, rc.authCtx); ok {
+			forcedProvider, balanced = decision.Provider, decision
+		}
+	}
+
+	provider, err := s.selectProviderForced(r.Context(), r, meta.Request.Model, forcedProvider)
 	if err != nil {
 		writeOpenAIError(w, http.StatusBadGateway, err.Error(), "server_error", "provider_unavailable")
 		return false
+	}
+	if balanced.Provider != "" {
+		// selectProviderForced labels any forced choice "rule_provider"; restore the
+		// real reason so route_reason distinguishes rotation from stickiness.
+		provider.Reason, provider.Detail = balanced.Reason, balanced.Detail
 	}
 	if rc.authCtx != nil && !listAllows(provider.Name, rc.authCtx.AllowedProviders, rc.authCtx.DeniedProviders) {
 		_ = s.db.InsertAuditEvent(r.Context(), store.AuthEvent{ID: newID("ae"), EventType: "model_denied", APIKeyID: rc.authCtx.APIKeyID, TeamID: rc.authCtx.TeamID, IP: clientIP(r), UserAgent: r.UserAgent(), Detail: "provider:" + provider.Name, CreatedAt: time.Now().UTC()})
@@ -418,7 +520,7 @@ func (rc *requestPipeline) stepUpstream() bool {
 	}
 	if r.Method == http.MethodPost {
 		var blocked bool
-		body, blocked = s.enforceOpenAIGovernance(w, r, &meta, body, rc.authCtx, routingPlan, rc.estimatedCostKRW, false, "provider")
+		body, blocked = s.enforceOpenAIGovernance(w, r, &meta, body, rc.authCtx, routingPlan, rc.estimatedCostKRW, false, "provider", &rc.policyEvents)
 		if blocked {
 			return false
 		}
@@ -433,6 +535,17 @@ func (rc *requestPipeline) stepUpstream() bool {
 				if name != provider.Name {
 					failoverCandidates = append(failoverCandidates, name)
 				}
+			}
+			// A degraded-but-answering provider still costs a full request and its
+			// latency before failover. Push it to the back rather than dropping it.
+			var demoted []string
+			failoverCandidates, demoted = s.demoteUnhealthyCandidates(r.Context(), failoverCandidates)
+			if len(demoted) > 0 {
+				// Say so: reordering that cannot be seen is exactly the opacity this
+				// gateway's routing work has been undoing.
+				w.Header().Set("X-Health-Demoted", strings.Join(demoted, ","))
+				slog.Info("health demoted failover candidates",
+					"demoted", demoted, "threshold", s.healthDemoteThreshold(), "trace_id", traceID)
 			}
 		}
 	}
@@ -461,6 +574,7 @@ func (rc *requestPipeline) stepUpstream() bool {
 			meta.Routing = routingPlan.toStore(meta.Request.ID, traceID, meta.Request.Provider)
 		}
 		applyUpstreamHeaderSummary(&meta.Request, upstreamHeaders, nil, w.Header())
+		setRoutingHeaders(w, provider, meta.Request.Provider, failoverFrom, failoverReason, failoverPath)
 		refreshRoutingSummary(&meta.Request, routingPlan)
 		meta.Evaluations = buildLLMEvaluations(meta, ResponseAnalysis{})
 		s.metrics.ObserveLLMEvaluations(meta.Evaluations)
@@ -473,13 +587,17 @@ func (rc *requestPipeline) stepUpstream() bool {
 	defer resp.Body.Close()
 	if failoverFrom != "" {
 		s.metrics.IncFailover()
-		w.Header().Set("X-Failover-From", failoverFrom)
 		meta.Request.Failover = true
 		meta.Request.FallbackFrom = failoverFrom
 		meta.Request.FallbackReason = failoverReason
 	}
 	if resolvedName != "" {
 		meta.Request.Provider = resolvedName
+	}
+	// A failover means the bound provider did not serve this turn. Move the binding to
+	// the one that did, otherwise every later turn would retry the bad node first.
+	if rc.affinity.Key != "" && meta.Request.Provider != "" {
+		s.balancer.rebind(meta.Request.Model, rc.affinity.Key, meta.Request.Provider, time.Now())
 	}
 	meta.Request.ResolvedModel = firstNonEmpty(meta.Request.ResolvedModel, meta.Request.Model)
 	meta.Request.UpstreamModel = firstNonEmpty(finalModel, meta.Request.UpstreamModel, meta.Request.Model)
@@ -517,6 +635,13 @@ func (rc *requestPipeline) stepUpstream() bool {
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Header().Set("X-Accel-Buffering", "no")
 	}
+	setRoutingHeaders(w, provider, meta.Request.Provider, failoverFrom, failoverReason, failoverPath)
+	if rc.affinity.Key != "" {
+		// Echo how the conversation was identified so a client can confirm that its
+		// turns really are landing on one provider — and see why if they are not.
+		w.Header().Set("X-Session-Affinity", rc.affinity.Source)
+		w.Header().Set("X-Session-Affinity-Key", shortSession(rc.affinity.Key))
+	}
 	w.Header().Set("X-Request-ID", traceID)
 	w.WriteHeader(resp.StatusCode)
 
@@ -543,11 +668,12 @@ func (rc *requestPipeline) stepUpstream() bool {
 
 	analysis := analyzer.Finalize()
 	if captureForCache && analysis.Text != "" {
-		s.maybeStoreEmbeddingCache(r.Context(), body, resp.StatusCode, resp.Header.Get("Content-Type"), []byte(analysis.Text))
+		s.maybeStoreEmbeddingCache(r.Context(), body,
+			chatCacheScopeValue(s.cacheConf().EmbeddingScope, rc.authCtx, rc.apiKeyID), resp.StatusCode, resp.Header.Get("Content-Type"), []byte(analysis.Text))
 	}
 	if captureForChatCache && analysis.Text != "" {
 		s.maybeStoreChatCache(r.Context(), rc.chatCacheKey, resp.StatusCode, resp.Header.Get("Content-Type"), []byte(analysis.Text))
-		s.maybeStoreChatSemantic(r.Context(), rc.body, rc.chatSemanticVec, resp.StatusCode, resp.Header.Get("Content-Type"), []byte(analysis.Text))
+		s.maybeStoreChatSemantic(r.Context(), rc.body, rc.chatCacheScope, rc.chatSemanticVec, resp.StatusCode, resp.Header.Get("Content-Type"), []byte(analysis.Text))
 	}
 	if captureForCache || captureForChatCache {
 		s.metrics.IncCacheMiss()
@@ -636,4 +762,36 @@ func (rc *requestPipeline) stepUpstream() bool {
 	refreshRoutingSummary(&meta.Request, routingPlan)
 	s.enqueue(meta)
 	return true
+}
+
+// setRoutingHeaders tells the caller which upstream actually served the request and
+// why it was chosen, so provider routing is observable from the client without
+// opening the admin UI. Previously only X-Failover-From was exposed, which left the
+// far more common "which provider handled this?" question unanswerable.
+//
+//	X-Provider          resolved provider that produced the response
+//	X-Route-Reason      how it was picked: header | query | model_pattern | rule_provider | default
+//	X-Route-Detail      the matched glob / header name / env var behind that reason
+//	X-Failover-From     original provider, only when a failover occurred
+//	X-Failover-Reason   what triggered it: 429 | 5xx | timeout | transport_error | context_overflow
+//	X-Failover-Path     full chain of actual failover hops (comma separated)
+func setRoutingHeaders(w http.ResponseWriter, selected resolvedProvider, servedBy, failoverFrom, failoverReason string, failoverPath []string) {
+	if name := firstNonEmpty(servedBy, selected.Name); name != "" {
+		w.Header().Set("X-Provider", name)
+	}
+	if selected.Reason != "" {
+		w.Header().Set("X-Route-Reason", selected.Reason)
+	}
+	if selected.Detail != "" {
+		w.Header().Set("X-Route-Detail", selected.Detail)
+	}
+	if failoverFrom != "" {
+		w.Header().Set("X-Failover-From", failoverFrom)
+	}
+	if failoverReason != "" {
+		w.Header().Set("X-Failover-Reason", failoverReason)
+	}
+	if len(failoverPath) > 0 {
+		w.Header().Set("X-Failover-Path", strings.Join(failoverPath, ","))
+	}
 }

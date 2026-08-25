@@ -13,6 +13,7 @@ Roo Code / Cursor / Continue 등 OpenAI 호환 API 를 호출하는 VS Code 확�
 - **[관리자 가이드](docs/ADMIN_GUIDE.md)** — 어드민 UI 탭 사용법, 일상/주간/월간 운영 체크리스트
 - **[안전 및 보안 거버넌스 가이드](docs/SAFETY_GUIDE.md)** — 정책 엔진, Secret Firewall, 승인 워크플로우 운영
 - **[릴리즈 가이드](docs/RELEASE_GUIDE.md)** — 빌드·태깅·GitHub 릴리즈·오프라인 패키지 산출·롤백 절차
+- **[부하 성능 개선 보고서](docs/PERFORMANCE_REPORT.md)** — 부하에서 느려지던 원인과 개선 전후 실측 ([HTML](docs/PERFORMANCE_REPORT.html) · [PDF](docs/PERFORMANCE_REPORT.pdf))
 - **[모델 카드](MODEL_CARD.md)** — 외부 모델 경계, 사용 목적과 제한사항
 - **[AI 사용 공개](AI_USAGE_DISCLOSURE.md)** — 개발 보조 AI 사용 범위와 검증 책임
 - **[제3자 라이선스](THIRD_PARTY_LICENSES.md)** / **[SPDX SBOM](SBOM.spdx.json)** — 의존성·라이선스 검증 자료
@@ -269,9 +270,32 @@ $env:PROXY_API_KEYS="dev:dev-proxy-key:alice:platform,team:team-proxy-key:bob:ba
 | `UPSTREAM_BASE_URL` | `https://api.openai.com` | OpenAI 호환 upstream base URL |
 | `UPSTREAM_API_KEY` / `OPENAI_API_KEY` | 없음 | upstream provider key |
 | `UPSTREAM_PROVIDER` | `openai` | 로그에 기록할 provider 이름 |
+| `UPSTREAM_MODEL_PATTERNS` | 없음 | 기본 provider로 자동 라우팅할 모델 glob(쉼표 구분, 예: `gpt-*,o3-*`) |
+| `UPSTREAM_RESPONSE_HEADER_TIMEOUT` | `60s` | 업스트림 응답 헤더 대기 상한. `UPSTREAM_TIMEOUT`(전체)과 달리 스트리밍 본문을 자르지 않고 먹통 provider만 빨리 끊어 폴백을 앞당김 |
+| `UPSTREAM_FAILOVER_BUDGET` | `0`(무제한) | 대체 provider 시도에 쓸 총 시간 상한. 소진되면 남은 후보를 돌지 않고 마지막 결과 반환. 요청별 `X-Failover-Budget-MS` 로 덮어쓰기 |
+| `UPSTREAM_BREAKER_ENABLED` | `true` | Provider 회로 차단기. 연속 실패한 provider를 폴백 후보에서 자동 제외 |
+| `UPSTREAM_BREAKER_THRESHOLD` | `5` | 차단까지 필요한 연속 실패 횟수(429·5xx·타임아웃·연결 실패. 4xx 제외) |
+| `UPSTREAM_BREAKER_COOLDOWN` | `30s` | 차단 유지 시간. 경과 후 요청 1건으로 복구 확인 |
+| `UPSTREAM_BREAKER_SHARED` | `false` | 차단 전환을 DB로 공유해 다른 인스턴스가 자기 임계값만큼 실패해보지 않고 반영. **공유 DB(Postgres 등) 전제** |
+| `UPSTREAM_BREAKER_SYNC_INTERVAL` | `3s` | 다른 인스턴스의 차단 상태를 읽는 주기 |
+| `QUOTA_RESERVATIONS_ENABLED` | `true` | 진행 중 요청의 예상 사용량을 한도에 포함. 사용량은 요청 완료 후 기록되므로, 없으면 동시 요청들이 서로를 못 보고 한도를 초과할 수 있음 |
+| `QUOTA_RESERVATION_SWEEP_INTERVAL` | `5m` | 만료된 예약 정리 주기 |
+| `UPSTREAM_LOAD_BALANCE` | `first` | 같은 모델에 여러 provider가 매칭될 때 `first`(이름순 첫 번째) · `round_robin`(단일 인스턴스) · `session_hash`(다중 인스턴스 권장 — 세션 키에서 provider를 계산해 공유 저장소 없이 모든 인스턴스가 같은 답) |
+| `UPSTREAM_STICKY_SESSIONS` | `true` | 세션을 처음 처리한 provider에 고정(에이전트 대화의 prefix/KV 캐시 보존) |
+| `UPSTREAM_STICKY_TTL` | `30m` | 세션 고정 유지 시간 |
+| `UPSTREAM_HEALTH_DEMOTE_THRESHOLD` | `50` | health score가 이 값 미만인 provider를 폴백 후보 **맨 뒤로** 강등(제외하지는 않음). `0`이면 비활성 |
 | `DB_DRIVER` | `sqlite` | `sqlite` 또는 `postgres` |
 | `DB_DSN` | `data/gateway.db` | SQLite 파일 경로 |
 | `POSTGRES_DSN` / `DATABASE_URL` | 없음 | 있으면 PostgreSQL 사용 |
+
+> **PostgreSQL로 테스트 돌리기.** store · proxy 패키지 테스트는 기본적으로 SQLite로 돕니다. `TEST_POSTGRES_DSN` 을 주면 같은 테스트가 PostgreSQL에서 실행되며, 테스트마다 별도 스키마를 씁니다.
+>
+> ```bash
+> docker run -d --name pg-test -e POSTGRES_PASSWORD=test -e POSTGRES_DB=vibe -p 55433:5432 postgres:17-alpine
+> TEST_POSTGRES_DSN="postgres://postgres:test@127.0.0.1:55433/vibe?sslmode=disable" go test ./internal/store/ ./internal/proxy/
+> ```
+>
+> 두 드라이버는 SQL 방언이 다릅니다. SQLite는 REAL을 8바이트 부동소수로 저장하지만 PostgreSQL의 REAL은 float4(유효숫자 약 7자리)라 **금액이 조용히 반올림됩니다** — 그래서 스키마의 REAL은 PostgreSQL에서 DOUBLE PRECISION으로 변환되고, 이전 버전이 만든 DB의 float4 컬럼은 기동 시 자동으로 넓혀집니다.
 | `PROXY_API_KEYS` | 없음 | `name:key:owner:team` CSV |
 | `ATTRIBUTE_EXTERNAL_KEYS` | `true` | 미등록 키를 키 지문(`key_…`, 상태 external)으로 사용자별 귀속. `false`면 단일 `passthrough` |
 | `VCS_WEBHOOK_SECRET` | 없음 | 설정 시 `/vcs/*` 수집 엔드포인트 활성화(GitLab/Bitbucket/범용 → Prompt↔Commit↔MR 상관). 미설정 시 비활성 |
@@ -293,9 +317,14 @@ $env:PROXY_API_KEYS="dev:dev-proxy-key:alice:platform,team:team-proxy-key:bob:ba
 | `LOG_RESPONSE_MAX_BYTES` | `1048576` | 응답 분석/저장 최대 byte |
 | `MODEL_PRICING_KRW_PER_1M` | `{}` | 모델별 100만 토큰 KRW 가격 JSON |
 | `MCP_AGENTIC_MODEL` | 없음 | `vibe/grounded`·`vibe/research`·`vibe/all-mcp` agentic MCP Discovery 백킹 Chat 모델. 비우면 auto-router가 선택하며, 런타임 설정 `mcp.agentic_model`로 재배포 없이 변경 가능 |
+| `REDTEAM_POST_CHANGE_ENABLED` | `true` | Provider, MCP, Governance, Text2SQL, AI App/Workflow의 보안 관련 관리자 변경 뒤 자동 Red Team 시뮬레이션 실행. 실제 upstream은 호출하지 않음 |
+| `REDTEAM_POST_CHANGE_COOLDOWN` | `10m` | 동일 변경 상태의 자동 회귀 캠페인을 다시 만들지 않는 중복 억제 시간 |
+| `REDTEAM_POST_CHANGE_MAX_TARGETS` | `20` | 변경 1건당 자동 회귀 점검 대상 상한. 전체 범위는 대상 유형을 순환 선택 |
+| `LIMITS_MAX_REQUEST_BYTES` | `67108864` | 요청 본문 크기 상한(바이트). 넘으면 413. 본문은 읽는 즉시 메모리에 올라가므로 상한이 없으면 요청 하나가 게이트웨이 메모리를 다 쓸 수 있습니다. `0` 이면 무제한 |
 | `RETENTION_REQUEST_DAYS` | `90` | 요청 로그 보존 일수 (0 이면 보존 안 함) |
 | `RETENTION_PROMPT_DAYS` | `30` | 프롬프트 로그 보존 일수 |
 | `RETENTION_RESPONSE_DAYS` | `30` | 응답 로그 보존 일수 |
+| `RETENTION_DOMAIN_EXAMPLE_DAYS` | `365` | 라우팅 예시로 적립된 리닥션 프롬프트 텍스트 보존 일수 (0 이면 무기한) |
 | `RETENTION_INTERVAL` | `1h` | 보존 정책 cleanup 워커 주기 |
 | `CARBON_WH_PER_1K_TOKENS` | `0.4` | Prompt Carbon Score 기본 에너지 계수(1K 토큰당 Wh) |
 | `CARBON_MODEL_WH_PER_1K` | 없음 | 모델별 에너지 계수 오버라이드(`gpt-4.1=0.8,gpt-4.1-mini=0.2`) |
@@ -341,9 +370,13 @@ curl.exe -X POST http://localhost:8080/admin/api-keys `
 | `CACHE_EMBEDDING_TTL` | `24h` | 임베딩 캐시 TTL |
 | `CACHE_CHAT_ENABLED` | `false` | `/v1/chat/completions` 응답 캐시 (opt-in) |
 | `CACHE_CHAT_TTL` | `1h` | chat 캐시 TTL |
+| `CACHE_CHAT_SCOPE` | `global` | 캐시 공유 범위: `global` · `team` · `api_key` |
+| `CACHE_EMBEDDING_SCOPE` | `global` | 임베딩 캐시 공유 범위(같은 값 사용) |
 | `CACHE_EMBEDDING_MAX_BYTES` | `1048576` | 캐시 항목 최대 byte (chat 공용) |
 
 chat 응답은 비결정적이라 기본 비활성화입니다. 활성화해도 **재현 가능한 요청만** 캐시합니다: `temperature=0` 또는 `seed` 가 설정된 요청, 혹은 클라이언트가 `X-Proxy-Cache: 1` 헤더로 명시 동의한 경우. 캐시 적중 시 `X-Cache: HIT` 헤더로 응답하고 upstream 호출 없이 비용 0으로 처리되며, XView 캐시 패널에 절감액이 표시됩니다. 캐시 키는 model·messages·tools·temperature·top_p·max_tokens·seed·response_format 기준이며 `stream` 등 휘발성 필드는 제외합니다.
+
+**캐시 공유 범위(`CACHE_CHAT_SCOPE`).** 캐시 키에는 호출자가 들어가지 않으므로 기본값 `global` 에서는 **프롬프트가 같으면 팀이 달라도 같은 항목을 재사용**합니다. 결정적 요청이라면 모델이 어차피 돌려줬을 답이지만, `X-Cache: HIT` 는 동시에 **"누군가 이미 이 질문을 했다"** 는 사실도 알려줍니다 — `요약해줘: 고객 1234번` 같은 템플릿 프롬프트라면 다른 팀의 작업 내용에 대한 정보가 됩니다. 적중률과 맞바꿀 수 있도록 `team`(같은 팀 안에서만 공유) 과 `api_key`(키별 격리) 를 제공합니다. 기본값은 바뀌지 않았습니다. 이 설정은 **정확 캐시와 시맨틱 캐시 양쪽에 함께 적용**됩니다 — 시맨틱 쪽은 프롬프트가 똑같지 않고 비슷하기만 해도 적중하므로 오히려 더 중요합니다. 임베딩 캐시는 **기본 활성**이며 별도 설정 `CACHE_EMBEDDING_SCOPE` 를 씁니다 — 임베딩은 (모델·입력)의 순수 함수라 공유해도 **남의 내용이 오지는 않지만**, `X-Cache: HIT` 는 누군가 같은 텍스트를 이미 임베딩했다는 사실을 알려줍니다.
 
 ### 세션 그룹화 (명시적 + 추론)
 
@@ -364,6 +397,7 @@ chat 응답은 비결정적이라 기본 비활성화입니다. 활성화해도 
 | --- | --- | --- |
 | `SESSION_INFERENCE_ENABLED` | `true` | 명시적 세션이 없을 때 자동 추론. `false`면 요청별(`trace:<id>`)로 분리(레거시 동작) |
 | `SESSION_IDLE_TIMEOUT` | `30m` | 이 시간 이상 비활성이면 새 추론 세션 시작 |
+| `SESSION_INJECT_HEADER` | `true` | 세션 헤더가 없는 클라이언트(qwen code 등)의 요청에 대화 단위로 안정적인 `X-Session-ID` 를 붙여 업스트림에 전달 |
 
 > 더 정확한 그룹화가 필요하면 클라이언트(플러그인)에서 `X-Vibe-Session-ID` 헤더를 직접 보내는 것이 가장 좋습니다. repo/branch 단위로 나누려면 `X-Vibe-Repo`·`X-Vibe-Branch` 헤더를 추가하세요.
 
@@ -542,12 +576,17 @@ curl.exe "http://localhost:8080/admin/prompts?q=%23%EC%9D%98%EC%8B%AC"
 
 #### 저장된 필터 (북마크)
 
-프롬프트 검색 화면의 "현재 필터 저장" 버튼으로 현재 검색 조건(키워드, IP, 키, 언어, 기간 등)을 이름과 함께 저장하고, 드롭다운에서 다시 불러올 수 있습니다.
+프롬프트 검색 화면의 "현재 필터 저장" 버튼으로 현재 검색 조건(키워드, IP, 키, 언어, 기간 등)을 이름과 함께 저장하고, 드롭다운에서 다시 불러올 수 있습니다. XView의 "조사 보기" 바도 기간·시간대·지표·스케일·색상 모드·모델·endpoint 조건을 저장, 덮어쓰기, 삭제할 수 있습니다. "링크 복사"는 저장 ID가 아닌 현재 조건을 URL에 직렬화하므로 저장 항목이 삭제되어도 같은 조회를 재현할 수 있습니다.
 
 ```powershell
 curl.exe http://localhost:8080/admin/saved-filters `
   -H "Content-Type: application/json" `
   -d '{ "name": "이번 주 Go 호출", "view": "prompts", "params": "language=Go&since=2026-06-01T00:00:00Z&limit=500" }'
+
+# XView 조사 보기
+curl.exe http://localhost:8080/admin/saved-filters `
+  -H "Content-Type: application/json" `
+  -d '{ "name": "최근 6시간 모델 오류 조사", "view": "xview", "params": "window=6h&metric=latency&scale=log&viewMode=model&models=gpt-4.1%2Cgpt-4.1-mini" }'
 ```
 
 #### 감사 로그 CSV
@@ -623,6 +662,55 @@ curl.exe http://localhost:8080/admin/providers `
 
 이후 `model=claude-3-5-sonnet` 요청은 자동으로 anthropic provider 로, `model=gpt-4.1-mini` 는 기본 openai 로 라우팅됩니다. 어드민 UI 의 설정 탭 > 업스트림 프로바이더 폼에서도 동일하게 입력할 수 있습니다.
 
+여러 활성 provider 패턴이 같은 모델에 매칭되면 provider 이름 오름차순의 첫 항목이 선택됩니다. `GET /admin/routing/pattern-conflicts?model=gpt-4.1-mini` 는 현재 패턴 충돌, 재현 가능한 모델명, 실제 승자와 경로 simulation을 반환합니다. `POST /admin/routing/pattern-conflicts` 에 `provider_name`, `model_patterns`, 선택적 `model`을 보내면 DB를 변경하지 않고 저장 전 충돌을 미리 확인할 수 있습니다. 설정 화면도 같은 분석 결과를 표시하고 충돌 저장 전에 확인을 요구합니다.
+
+### 폴백(failover)
+
+업스트림 실패 시 다른 provider 로 재시도하려면 아래 **네 조건을 모두** 만족해야 합니다.
+
+1. 클라이언트가 `X-Proxy-Provider` · `?provider=` 로 provider 를 **고정하지 않음**
+2. 프롬프트에서 PII·secret 위험이 탐지되지 않음
+3. **폴백 후보가 2개 이상** — 같은 `failover_group` 에 속하거나, 같은 모델명에 `model_patterns` 가 매칭되는 provider 가 둘 이상. `failover_group` 을 지정하면 패턴이 겹치지 않아도 서로 폴백하며, 시도 순서는 `priority`(낮을수록 먼저, 기본 100)로 정합니다
+4. 실패가 429 · 5xx · 타임아웃 · 연결 실패 (4xx 는 폴백하지 않음)
+
+응답 헤더로 결과를 바로 확인할 수 있습니다 — `X-Provider`(실제 응답 provider), `X-Route-Reason`, `X-Route-Detail`, 그리고 폴백이 일어났을 때만 나오는 `X-Failover-From` · `X-Failover-Reason` · `X-Failover-Path`.
+
+장애 provider는 **회로 차단기**가 폴백 후보에서 자동으로 빼줍니다(연속 실패 5회 → 30초 차단 → 1건 탐침 복구). 라우팅 탭 → Provider Health → 회로 차단기 패널에서 상태 확인·수동 해제가 가능합니다. 폴백이 성공하면 호출자는 정상 응답을 받아 **장애가 감춰지므로**, 안전 탭 알림 규칙에서 `failover_rate` 지표로 폴백률 알림을 걸어두는 것을 권장합니다.
+
+같은 모델을 여러 provider가 서비스한다면 `UPSTREAM_LOAD_BALANCE=round_robin` 으로 **세션 단위 분산**이 됩니다. 세션은 세션 헤더 → body 필드 → **대화 프리픽스 해시** → 추론 세션 순으로 식별하며, qwen code 처럼 세션 식별자를 보내지 않는 에이전트도 대화별로 구분돼 분산되고 대화 안에서는 같은 provider로 고정됩니다. 분산이 실제로 됐는지는 응답 헤더(`X-Route-Reason`·`X-Session-Affinity`)와 라우팅 탭의 `로드밸런싱 · 세션 고정` 패널(균형도·intent vs actual), `GET /admin/routing/balancer` 로 확인합니다.
+
+게이트웨이를 **2대 이상** 운영한다면 `session_hash` 를 쓰세요. `round_robin` 은 회전 커서가 프로세스 메모리에 있어 인스턴스마다 독립적으로 돌기 때문에 같은 대화가 다른 인스턴스로 들어가면 세션 고정이 깨집니다. `session_hash` 는 rendezvous 해시로 provider를 계산하므로 조율 없이 모든 인스턴스가 일치하고, provider가 빠질 때 그 provider의 세션만 이동합니다.
+
+장애 전에 이중화를 확인하려면 `POST /admin/routing/failover-drill` (또는 프로바이더 화면의 `폴백 리허설` 버튼)으로 특정 provider를 가상 중단시켜 누가 요청을 처리하는지 시뮬레이션할 수 있습니다 — 업스트림 호출 없이 동작합니다.
+
+> 전체 규칙·구성 레시피·트러블슈팅은 **[docs/ROUTING_GUIDE.md](docs/ROUTING_GUIDE.md)** 를 참고하세요. 어드민에서는 설정 탭 → 업스트림 프로바이더 → `📖 라우팅 · 폴백 동작 설명 열기` 버튼으로 같은 내용을 볼 수 있고, 같은 화면의 **폴백 커버리지** 표시가 provider 별로 폴백 상대가 있는지 알려줍니다.
+
+### 임베딩(`/v1/embeddings`) 프록시
+
+`/v1/embeddings` 는 `/v1/chat/completions` 와 동일한 파이프라인(인증·쿼터·라우팅·거버넌스·캐시·감사)을 그대로 통과하며, 요청 body 의 `model` 을 기준으로 위와 같은 provider 자동 라우팅이 적용됩니다. OpenAI·vLLM·Ollama 는 모두 OpenAI 호환 `/v1/embeddings` 엔드포인트를 제공하므로, provider 를 등록하고 임베딩 모델 글롭을 `model_patterns` 에 넣으면 게이트웨이를 통해 그대로 서비스됩니다. `base_url` 은 `/v1` 접미사 없이 등록합니다(게이트웨이가 `{base_url}/v1/embeddings` 로 전달).
+
+```powershell
+# vLLM (OpenAI 호환 임베딩 서버)
+curl.exe http://localhost:8080/admin/providers `
+  -H "Content-Type: application/json" `
+  -d '{ "name": "vllm", "base_url": "http://vllm:8000", "api_key": "-", "timeout_ms": 600000, "enabled": true, "model_patterns": "bge-*,e5-*" }'
+
+# Ollama (OpenAI 호환 엔드포인트는 11434 포트의 /v1)
+curl.exe http://localhost:8080/admin/providers `
+  -H "Content-Type: application/json" `
+  -d '{ "name": "ollama", "base_url": "http://ollama:11434", "api_key": "-", "timeout_ms": 600000, "enabled": true, "model_patterns": "nomic-embed-*,mxbai-embed-*" }'
+```
+
+```powershell
+# model 만으로 자동 라우팅: nomic-embed-text -> ollama, text-embedding-3-small -> 기본 openai
+curl.exe http://localhost:8080/v1/embeddings `
+  -H "Authorization: Bearer dev-proxy-key" `
+  -H "Content-Type: application/json" `
+  -d '{ "model": "nomic-embed-text", "input": "임베딩할 문장" }'
+```
+
+`X-Proxy-Provider` 헤더나 `?provider=` 쿼리로 provider 를 직접 지정할 수도 있습니다. 동일 입력의 임베딩 응답은 `CACHE_EMBEDDING_ENABLED`(기본 `true`) 캐시로 재사용됩니다. (시맨틱 캐시 전용 임베딩 호출은 `cache.embedding_*` 설정으로 별도 분리 가능 — 위 "시맨틱 캐시" 참고.)
+
 ### Intelligent Routing Engine
 
 `model` 에 `auto`, `vibe/auto`, `vibe-coders/auto` 를 넣으면 게이트웨이가 요청 complexity, risk, provider health 를 계산해 모델과 provider 를 자동 선택합니다. 기본 매핑은 simple→`gpt-4.1-mini`, standard/complex→`gpt-4.1`, reasoning→`o3` 입니다. auto alias 는 명시적 자동 라우팅 요청이므로 일반 `/admin/routing-rules` 보다 우선합니다. `X-Proxy-Provider` 로 provider 를 고정해도 auto 모델 선택은 계속 동작하며, provider 만 고정됩니다. Provider `model_patterns` 가 `vibe/*` 처럼 alias 기준으로 등록되어 있으면, 선택된 실제 모델 패턴이 없을 때 요청 alias 기준 provider도 후보로 사용합니다.
@@ -644,7 +732,7 @@ Routing Explain 예시:
   "complexity": { "score": 63, "tier": "complex" },
   "risk": { "score": 38, "tier": "medium", "categories": ["authentication", "deployment_command"] },
   "health_score": 96,
-  "fallback_path": ["429:backup", "5xx:backup", "timeout:lowest-latency-provider"],
+  "fallback_plan": ["429|5xx|timeout:backup", "context_overflow:o3"],
   "route_reason": "auto_router",
   "decision_reason": "client requested vibe/auto; auto alias mapped complex tier to gpt-4.1; provider health selected openai(96)"
 }

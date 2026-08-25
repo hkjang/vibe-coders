@@ -142,6 +142,10 @@ func (s *Server) handleLLMPrompts(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleLLMPromptCompare(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
 	promptName := strings.TrimSpace(r.URL.Query().Get("prompt_name"))
 	if promptName == "" {
 		writeOpenAIError(w, http.StatusBadRequest, "prompt_name is required", "invalid_request_error", "missing_prompt_name")

@@ -16,7 +16,7 @@ func TestProfileDriftForUser(t *testing.T) {
 	insertSnap := func(id string, when time.Time, p PersonalProfile) {
 		encoded, _ := json.Marshal(p)
 		if _, err := db.db.ExecContext(ctx,
-			`INSERT INTO personal_profile_snapshots (id, user_id, profile, created_at) VALUES (?,?,?,?)`,
+			db.bind(`INSERT INTO personal_profile_snapshots (id, user_id, profile, created_at) VALUES (?,?,?,?)`),
 			id, "u1", string(encoded), when.Format(time.RFC3339Nano)); err != nil {
 			t.Fatal(err)
 		}

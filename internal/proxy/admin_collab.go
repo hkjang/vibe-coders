@@ -93,7 +93,7 @@ func cleanTags(input []string) []string {
 
 // ---------- saved filters ----------
 
-var validSavedViews = map[string]bool{"requests": true, "prompts": true}
+var validSavedViews = map[string]bool{"requests": true, "prompts": true, "xview": true}
 
 func (s *Server) handleSavedFilters(w http.ResponseWriter, r *http.Request) {
 	if !s.authorizeAdmin(r) {
@@ -106,6 +106,19 @@ func (s *Server) handleSavedFilters(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "saved_filters_failed")
 			return
+		}
+		if view := strings.TrimSpace(r.URL.Query().Get("view")); view != "" {
+			if !validSavedViews[view] {
+				writeOpenAIError(w, http.StatusBadRequest, "invalid saved filter view", "invalid_request_error", "invalid_view")
+				return
+			}
+			filtered := make([]store.SavedFilter, 0)
+			for _, filter := range filters {
+				if filter.View == view {
+					filtered = append(filtered, filter)
+				}
+			}
+			filters = filtered
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"filters": filters})
 	case http.MethodPost:
@@ -126,11 +139,11 @@ func (s *Server) handleSavedFilters(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if !validSavedViews[payload.View] {
-			writeOpenAIError(w, http.StatusBadRequest, "view must be requests or prompts", "invalid_request_error", "invalid_view")
+			writeOpenAIError(w, http.StatusBadRequest, "view must be requests, prompts, or xview", "invalid_request_error", "invalid_view")
 			return
 		}
-		if _, err := url.ParseQuery(payload.Params); err != nil {
-			writeOpenAIError(w, http.StatusBadRequest, "params must be a URL-encoded query string", "invalid_request_error", "invalid_params")
+		if err := validateSavedFilterParams(payload.View, payload.Params); err != nil {
+			writeOpenAIError(w, http.StatusBadRequest, err.Error(), "invalid_request_error", "invalid_params")
 			return
 		}
 		f := store.SavedFilter{
@@ -161,16 +174,158 @@ func (s *Server) handleSavedFilterByID(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusBadRequest, "invalid filter id", "invalid_request_error", "invalid_filter_id")
 		return
 	}
-	if r.Method != http.MethodDelete {
+
+	existing, found, err := s.db.GetSavedFilter(r.Context(), id)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "saved_filter_failed")
+		return
+	}
+	if !found {
+		writeOpenAIError(w, http.StatusNotFound, "saved filter not found", "invalid_request_error", "saved_filter_not_found")
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		writeJSON(w, http.StatusOK, map[string]any{"filter": existing})
+	case http.MethodPut, http.MethodPatch:
+		var payload struct {
+			Name   *string `json:"name"`
+			View   string  `json:"view"`
+			Params *string `json:"params"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "invalid_body")
+			return
+		}
+		if payload.View != "" && strings.TrimSpace(payload.View) != existing.View {
+			writeOpenAIError(w, http.StatusBadRequest, "saved filter view cannot be changed", "invalid_request_error", "immutable_view")
+			return
+		}
+		updated := existing
+		if payload.Name != nil {
+			updated.Name = strings.TrimSpace(*payload.Name)
+			if updated.Name == "" {
+				writeOpenAIError(w, http.StatusBadRequest, "name is required", "invalid_request_error", "missing_name")
+				return
+			}
+		}
+		if payload.Params != nil {
+			updated.Params = strings.TrimSpace(*payload.Params)
+		}
+		if err := validateSavedFilterParams(updated.View, updated.Params); err != nil {
+			writeOpenAIError(w, http.StatusBadRequest, err.Error(), "invalid_request_error", "invalid_params")
+			return
+		}
+		if err := s.db.UpsertSavedFilter(r.Context(), updated); err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "saved_filter_save_failed")
+			return
+		}
+		s.auditAdmin(r, "saved_filter.update", auditJSON(existing), auditJSON(updated))
+		writeJSON(w, http.StatusOK, map[string]any{"filter": updated})
+	case http.MethodDelete:
+		if err := s.db.DeleteSavedFilter(r.Context(), id); err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "saved_filter_delete_failed")
+			return
+		}
+		s.auditAdmin(r, "saved_filter.delete", auditJSON(existing), "")
+		writeJSON(w, http.StatusOK, map[string]string{"id": id, "status": "deleted"})
+	default:
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
-		return
 	}
-	if err := s.db.DeleteSavedFilter(r.Context(), id); err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "saved_filter_delete_failed")
-		return
+}
+
+func validateSavedFilterParams(view, raw string) error {
+	if len(raw) > 4096 {
+		return errors.New("params exceed 4096 bytes")
 	}
-	s.auditAdmin(r, "saved_filter.delete", auditJSON(map[string]string{"id": id}), "")
-	writeJSON(w, http.StatusOK, map[string]string{"id": id, "status": "deleted"})
+	params, err := url.ParseQuery(raw)
+	if err != nil {
+		return errors.New("params must be a URL-encoded query string")
+	}
+	if view != "xview" {
+		return nil
+	}
+
+	allowed := map[string]bool{
+		"window": true, "metric": true, "scale": true, "viewMode": true,
+		"from": true, "to": true, "tz": true,
+		"model": true, "models": true, "endpoint": true,
+	}
+	for key, values := range params {
+		if !allowed[key] {
+			return fmt.Errorf("unsupported xview parameter %q", key)
+		}
+		if len(values) > 1 {
+			return fmt.Errorf("xview parameter %q must appear once", key)
+		}
+	}
+	if err := validateSavedEnum(params.Get("window"), "window", "5m", "15m", "1h", "6h", "24h"); err != nil {
+		return err
+	}
+	if err := validateSavedEnum(params.Get("metric"), "metric", "latency", "first_chunk", "tokens", "cost", "risk", "health"); err != nil {
+		return err
+	}
+	if err := validateSavedEnum(params.Get("scale"), "scale", "log", "linear"); err != nil {
+		return err
+	}
+	if err := validateSavedEnum(params.Get("viewMode"), "viewMode", "category", "model"); err != nil {
+		return err
+	}
+	if params.Get("model") != "" && params.Get("models") != "" {
+		return errors.New("xview model and models cannot be combined")
+	}
+	if len(params.Get("models")) > 2048 || len(params.Get("model")) > 512 {
+		return errors.New("xview model filter is too long")
+	}
+	if len(params.Get("endpoint")) > 512 {
+		return errors.New("xview endpoint filter is too long")
+	}
+
+	hasAbsoluteRange := params.Get("from") != "" || params.Get("to") != ""
+	if hasAbsoluteRange && params.Get("window") != "" {
+		return errors.New("xview window cannot be combined with from/to")
+	}
+	tz := strings.TrimSpace(params.Get("tz"))
+	if tz != "" && !validSavedTimezone(tz) {
+		return errors.New("invalid xview timezone")
+	}
+	loc := searchLocation(tz)
+	from := parseRangeBound(params.Get("from"), loc, false)
+	to := parseRangeBound(params.Get("to"), loc, true)
+	if params.Get("from") != "" && from.IsZero() {
+		return errors.New("invalid xview from value")
+	}
+	if params.Get("to") != "" && to.IsZero() {
+		return errors.New("invalid xview to value")
+	}
+	if !from.IsZero() && !to.IsZero() && from.After(to) {
+		return errors.New("xview from must not be after to")
+	}
+	return nil
+}
+
+func validateSavedEnum(value, field string, allowed ...string) error {
+	if value == "" {
+		return nil
+	}
+	for _, candidate := range allowed {
+		if value == candidate {
+			return nil
+		}
+	}
+	return fmt.Errorf("invalid xview %s", field)
+}
+
+func validSavedTimezone(value string) bool {
+	switch {
+	case strings.EqualFold(value, "UTC"),
+		strings.EqualFold(value, "KST"),
+		strings.EqualFold(value, "Asia/Seoul"):
+		return true
+	}
+	_, err := time.LoadLocation(value)
+	return err == nil
 }
 
 // ---------- audit CSV ----------

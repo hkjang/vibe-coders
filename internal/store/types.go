@@ -92,9 +92,16 @@ type UserTeamMembership struct {
 }
 
 type AuthContext struct {
-	UserID           string   `json:"user_id"`
-	TeamID           string   `json:"team_id"`
-	TeamName         string   `json:"team_name"`
+	UserID string `json:"user_id"`
+	// TeamID and TeamName are the canonical team, resolved from the teams table. TeamID
+	// starts as the raw api_keys.team value and is then overwritten with the team's id.
+	TeamID   string `json:"team_id"`
+	TeamName string `json:"team_name"`
+	// KeyTeam is api_keys.team exactly as stored, kept because that is what quota rows
+	// are scoped by. It is deliberately not the same field as TeamID: a key whose team
+	// column holds a name resolves to a different id, and charging the request to the
+	// wrong one would apply the wrong limit.
+	KeyTeam          string   `json:"key_team,omitempty"`
 	Role             string   `json:"role"`
 	Scopes           []string `json:"scopes"`
 	AllowedModels    []string `json:"allowed_models"`
@@ -136,8 +143,20 @@ type ProviderConfig struct {
 	TimeoutMS       int
 	Enabled         bool
 	ModelPatterns   string // comma-separated globs e.g. "claude-*,anthropic/*"
-	CreatedAt       time.Time
+	// FailoverGroup names a redundancy pool. Providers sharing a group fail over to one
+	// another regardless of whether their model_patterns overlap, which is what makes
+	// redundancy an explicit choice instead of a side effect of pattern collisions.
+	FailoverGroup string
+	// Priority orders attempts within a group, lowest first. Equal priorities fall back
+	// to provider name so the order stays deterministic across instances.
+	Priority  int
+	CreatedAt time.Time
 }
+
+// DefaultProviderPriority is the value given to a provider that does not set one, so
+// an unconfigured provider sorts after anything explicitly promoted and before anything
+// explicitly demoted.
+const DefaultProviderPriority = 100
 
 type ProviderPublic struct {
 	Name             string `json:"name"`
@@ -146,6 +165,8 @@ type ProviderPublic struct {
 	TimeoutMS        int    `json:"timeout_ms"`
 	Enabled          bool   `json:"enabled"`
 	ModelPatterns    string `json:"model_patterns"`
+	FailoverGroup    string `json:"failover_group"`
+	Priority         int    `json:"priority"`
 	CreatedAt        string `json:"created_at"`
 }
 
@@ -778,6 +799,11 @@ type RequestFilter struct {
 	ToolServer     string
 	ToolName       string
 	ToolErrorsOnly bool
+	// From/To bound r.created_at (UTC). Zero values disable the respective bound.
+	// The handler is responsible for converting the operator's local (e.g. Asia/Seoul)
+	// wall-clock input into these absolute instants.
+	From time.Time
+	To   time.Time
 }
 
 type RecentRequest struct {
@@ -1232,6 +1258,7 @@ type ScatterPoint struct {
 
 type ScatterFilter struct {
 	Since    time.Time
+	Until    time.Time // upper bound on r.created_at (UTC); zero = open-ended (up to now)
 	Endpoint string
 	Model    string   // single model (backward compat); ignored when Models is non-empty
 	Models   []string // multi-model filter; empty = all models
@@ -1433,14 +1460,19 @@ type QuotaPublic struct {
 }
 
 type QuotaUsage struct {
-	Quota            QuotaPublic `json:"quota"`
-	Tokens           int64       `json:"tokens"`
-	CostKRW          float64     `json:"cost_krw"`
-	Requests         int64       `json:"requests"`
-	PeriodStart      string      `json:"period_start"`
-	PeriodEnd        string      `json:"period_end"`
-	TokenRemainRatio float64     `json:"token_remain_ratio"`
-	KRWRemainRatio   float64     `json:"krw_remain_ratio"`
+	Quota    QuotaPublic `json:"quota"`
+	Tokens   int64       `json:"tokens"`
+	CostKRW  float64     `json:"cost_krw"`
+	Requests int64       `json:"requests"`
+	// Reserved is what in-flight requests are expected to consume. Enforcement counts
+	// it, so a screen that showed only committed usage would report a quota as having
+	// room while callers were already being refused.
+	ReservedTokens   int64   `json:"reserved_tokens"`
+	ReservedCostKRW  float64 `json:"reserved_cost_krw"`
+	PeriodStart      string  `json:"period_start"`
+	PeriodEnd        string  `json:"period_end"`
+	TokenRemainRatio float64 `json:"token_remain_ratio"`
+	KRWRemainRatio   float64 `json:"krw_remain_ratio"`
 }
 
 type RequestNote struct {
@@ -1454,7 +1486,7 @@ type RequestNote struct {
 type SavedFilter struct {
 	ID        string    `json:"id"`
 	Name      string    `json:"name"`
-	View      string    `json:"view"`   // requests | prompts
+	View      string    `json:"view"`   // requests | prompts | xview
 	Params    string    `json:"params"` // raw URL query string
 	CreatedBy string    `json:"created_by"`
 	CreatedAt time.Time `json:"created_at"`
@@ -1499,6 +1531,10 @@ type AlertMetricSnapshot struct {
 	NewCatalogTools    int64
 	MaxAnomalyZ        float64
 	MaxBudgetRatio     float64
+	// Failovers counts requests that were served by an alternate provider after the
+	// originally selected one failed. A rising rate means the primary is degrading
+	// while callers still see success, so it needs to alert on its own.
+	Failovers int64
 }
 
 type AlertEvent struct {

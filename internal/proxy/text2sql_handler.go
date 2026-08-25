@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -467,24 +468,8 @@ func (s *Server) handleText2SQL(w http.ResponseWriter, r *http.Request, meta sto
 		// Column-policy masking: when the schema marks specific columns as
 		// sensitivity=mask, mask only those result columns (matched by name). With no
 		// such columns declared, fall back to masking every cell (the prior behavior).
-		maskByName := map[string]bool{}
-		for _, c := range maskColumns {
-			maskByName[strings.ToLower(c)] = true
-		}
-		if len(maskByName) > 0 {
-			maskCol := make([]bool, len(cols))
-			for j, name := range cols {
-				if maskByName[strings.ToLower(name)] {
-					maskCol[j] = true
-				}
-			}
-			for i := range rows {
-				for j := range rows[i] {
-					if j < len(maskCol) && maskCol[j] {
-						rows[i][j] = maskText2SQLCell(rows[i][j])
-					}
-				}
-			}
+		if len(maskColumns) > 0 {
+			maskResultColumns(cols, rows, maskColumns, validation.SQL)
 		} else {
 			for i := range rows {
 				for j := range rows[i] {
@@ -1270,3 +1255,84 @@ func cellToString(v any) string {
 		return fmt.Sprintf("%v", t)
 	}
 }
+
+// maskResultColumns masks the cells of every result column that a schema policy marks
+// sensitivity=mask.
+//
+// Matching on the result column name alone is not enough. The result name is whatever the
+// query called it, so "SELECT email AS customer_email" produces a column named
+// customer_email and the mask misses — and an alias is not an attack, it is what
+// generated SQL does by default, especially across a join. The protection would be
+// present in the policy, reported in the audit footer, and absent from the output.
+//
+// So the SQL is consulted as well: an alias whose expression mentions a masked column is
+// masked too. That errs towards masking, which is the right direction for a control whose
+// purpose is to keep a value out of a result set.
+func maskResultColumns(cols []string, rows [][]string, maskColumns []string, sqlText string) {
+	if len(cols) == 0 || len(maskColumns) == 0 {
+		return
+	}
+	byName := make(map[string]bool, len(maskColumns))
+	for _, c := range maskColumns {
+		if n := strings.ToLower(strings.TrimSpace(c)); n != "" {
+			byName[n] = true
+		}
+	}
+	aliased := aliasesOfMaskedColumns(sqlText, byName)
+
+	mask := make([]bool, len(cols))
+	for j, name := range cols {
+		n := strings.ToLower(strings.TrimSpace(name))
+		mask[j] = byName[n] || aliased[n]
+	}
+	for i := range rows {
+		for j := range rows[i] {
+			if j < len(mask) && mask[j] {
+				rows[i][j] = maskText2SQLCell(rows[i][j])
+			}
+		}
+	}
+}
+
+// aliasMaskRe finds "<expression> AS <alias>" in a select list. The expression is
+// captured loosely because it may be qualified (c.email), wrapped (lower(email)) or
+// concatenated — any of which still exposes the value.
+var aliasMaskRe = regexp.MustCompile(`(?is)([a-zA-Z0-9_."'\(\)\|\+\s,]{1,200}?)\s+as\s+("?[a-zA-Z_][a-zA-Z0-9_]*"?)`)
+
+// aliasesOfMaskedColumns returns the lowercased aliases whose source expression mentions
+// one of the masked columns.
+func aliasesOfMaskedColumns(sqlText string, masked map[string]bool) map[string]bool {
+	out := map[string]bool{}
+	if sqlText == "" {
+		return out
+	}
+	for _, m := range aliasMaskRe.FindAllStringSubmatch(sqlText, -1) {
+		expr := strings.ToLower(m[1])
+		alias := strings.ToLower(strings.Trim(strings.TrimSpace(m[2]), `"`))
+		if alias == "" {
+			continue
+		}
+		for _, word := range wordsInExpr(expr) {
+			if masked[word] {
+				out[alias] = true
+				break
+			}
+		}
+	}
+	return out
+}
+
+// wordsInExpr splits an expression into bare identifiers, dropping any table qualifier so
+// "c.email" contributes "email".
+func wordsInExpr(expr string) []string {
+	var out []string
+	for _, w := range identifierRe.FindAllString(expr, -1) {
+		if i := strings.LastIndex(w, "."); i >= 0 {
+			w = w[i+1:]
+		}
+		out = append(out, w)
+	}
+	return out
+}
+
+var identifierRe = regexp.MustCompile(`[a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)*`)

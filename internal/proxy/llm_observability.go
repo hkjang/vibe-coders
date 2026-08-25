@@ -24,11 +24,15 @@ type llmMetadata struct {
 var sessionHeaderNames = []string{
 	"X-LLM-Session-ID", "X-Datadog-Session-ID", "X-Session-ID",
 	"X-Vibe-Session-ID", "X-Conversation-ID", "X-Vibe-Conversation-ID", "X-Chat-ID",
+	// qwen code's planned correlation header. It is scoped to first-party Alibaba
+	// hosts today, so a third-party gateway rarely sees it — recognised anyway so
+	// stickiness upgrades automatically if a client is configured to forward it.
+	"X-Qwen-Code-Session-Id",
 }
 
 // explicit session id fields inside the JSON body / its metadata object, in
 // priority order. Langflow uses session_id, OpenWebUI uses chat_id, others vary.
-var sessionBodyFields = []string{"session_id", "chat_id", "conversation_id", "thread_id"}
+var sessionBodyFields = []string{"session_id", "chat_id", "conversation_id", "thread_id", "sessionId", "chatId", "conversationId", "threadId"}
 
 // llmRequestMetadata extracts only the EXPLICIT session id (header or body). When
 // the client sent none, SessionID is left empty and the caller falls back to an

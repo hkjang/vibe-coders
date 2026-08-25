@@ -74,10 +74,13 @@ func (s *Server) handleRoutingPreview(w http.ResponseWriter, r *http.Request) {
 		"complexity":        plan.Complexity,
 		"risk":              plan.Risk,
 		"health_score":      plan.HealthScore,
-		"fallback_path":     plan.FallbackPath,
-		"route_reason":      plan.RouteReason,
-		"decision_reason":   plan.DecisionReason,
-		"would_rewrite":     plan.RequestedModel != "" && plan.SelectedModel != "" && plan.RequestedModel != plan.SelectedModel,
+		// A preview never dials upstream, so it can only report the plan. The actual
+		// hop list (fallback_path) is populated on real requests and read back from
+		// /admin/routing/decisions or the request explain view.
+		"fallback_plan":   plan.FallbackPlan,
+		"route_reason":    plan.RouteReason,
+		"decision_reason": plan.DecisionReason,
+		"would_rewrite":   plan.RequestedModel != "" && plan.SelectedModel != "" && plan.RequestedModel != plan.SelectedModel,
 	})
 }
 
@@ -175,6 +178,7 @@ func (s *Server) handleRoutingHealth(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "routing_health_trend_failed")
 		return
 	}
+	breakerEnabled, breakerThreshold, breakerCooldown := s.breakerConfig()
 	writeJSON(w, http.StatusOK, map[string]any{
 		"since":     since.UTC().Format(time.RFC3339),
 		"until":     until.Format(time.RFC3339),
@@ -184,6 +188,60 @@ func (s *Server) handleRoutingHealth(w http.ResponseWriter, r *http.Request) {
 		"degraded":  providerHealthDegraded(scores, threshold),
 		"alerts":    providerHealthAlerts(scores, threshold),
 		"trend":     trend,
+		// Live circuit breaker state. Health scores are a backward-looking average;
+		// this is the switch that is actually removing providers from failover right now.
+		"breakers": map[string]any{
+			"enabled":          breakerEnabled,
+			"threshold":        breakerThreshold,
+			"cooldown_seconds": int(breakerCooldown.Seconds()),
+			"states":           s.breakers.snapshot(breakerCooldown, time.Now()),
+			// With sharing on, a state may have come from a peer rather than from this
+			// instance's own traffic; the operator needs to know which they are looking at.
+			"shared":      s.breakerSharingEnabled(),
+			"instance_id": s.instanceID,
+		},
+	})
+}
+
+// handleRoutingBreakerReset clears a tripped breaker on request. After fixing a
+// provider an operator should not have to wait out the cooldown to confirm it.
+func (s *Server) handleRoutingBreakerReset(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	if r.Method != http.MethodPost {
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
+	var payload struct {
+		Provider string `json:"provider"`
+	}
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&payload)
+	}
+	name := strings.TrimSpace(payload.Provider)
+	// Collect the names BEFORE resetting: a reset-all empties local state, after which
+	// there would be nothing left to tell us which shared rows to clear.
+	shared := []string{name}
+	if name == "" {
+		shared = shared[:0]
+		for _, st := range s.breakers.snapshot(time.Hour, time.Now()) {
+			shared = append(shared, st.Provider)
+		}
+	}
+	s.breakers.reset(name)
+	// Clear the shared rows too: resetting only locally would leave peers skipping a
+	// provider the operator has just declared healthy.
+	for _, provider := range shared {
+		s.clearSharedBreakerState(provider)
+	}
+	s.auditAdmin(r, "routing.breaker.reset", firstNonEmpty(name, "*"), "")
+	_, _, cooldown := s.breakerConfig()
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":   "reset",
+		"provider": firstNonEmpty(name, "*"),
+		"states":   s.breakers.snapshot(cooldown, time.Now()),
 	})
 }
 
@@ -327,4 +385,216 @@ func (s *Server) providerHealthTrend(ctx context.Context, since, until time.Time
 		start = end
 	}
 	return trend, nil
+}
+
+// handleRoutingBalancer answers "did round robin actually work?".
+//
+// It reports two independent views on purpose. `intent` is the balancer's own pick
+// counters — what it decided. `actual` is grouped from request_logs — what really
+// happened, which can differ because failover, cache hits and pinned requests never
+// pass through the balancer. Agreement between the two is the signal an operator wants;
+// a gap points at the reason.
+//
+// POST releases sticky bindings (all, or one provider's) so a node can be drained
+// without waiting for every conversation's TTL to expire.
+func (s *Server) handleRoutingBalancer(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	mode, sticky, ttl := s.balancerConfig()
+	now := time.Now()
+
+	if r.Method == http.MethodPost {
+		var payload struct {
+			Provider string `json:"provider"`
+		}
+		if r.Body != nil {
+			_ = json.NewDecoder(r.Body).Decode(&payload)
+		}
+		name := strings.TrimSpace(payload.Provider)
+		released := s.balancer.release(name)
+		s.auditAdmin(r, "routing.balancer.release", firstNonEmpty(name, "*"), auditJSON(map[string]any{"released": released}))
+		writeJSON(w, http.StatusOK, map[string]any{"status": "released", "provider": firstNonEmpty(name, "*"), "released_sessions": released})
+		return
+	}
+	if r.Method != http.MethodGet {
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
+
+	model := strings.TrimSpace(r.URL.Query().Get("model"))
+	since := parseWindow(r.URL.Query().Get("window"), time.Hour, "hour")
+	activeSessions, intent := s.balancer.stats(ttl, now)
+	actual, err := s.db.ProviderModelDistribution(r.Context(), model, since)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "balancer_distribution_failed")
+		return
+	}
+
+	// Pools are the sets the balancer can actually spread over: a model glob served by
+	// two or more enabled providers. Anything with a single provider is shown too, so
+	// "why is this not balancing?" has a visible answer.
+	pools := []map[string]any{}
+	if providers, listErr := s.db.ListProviderConfigs(r.Context()); listErr == nil {
+		byPattern := map[string][]string{}
+		for _, p := range providers {
+			if !p.Enabled {
+				continue
+			}
+			for _, raw := range splitProviderPatterns(p.ModelPatterns) {
+				byPattern[raw] = append(byPattern[raw], p.Name)
+			}
+		}
+		for pattern, names := range byPattern {
+			sort.Strings(names)
+			pools = append(pools, map[string]any{
+				"pattern": pattern, "providers": names, "size": len(names), "balanced": len(names) > 1,
+			})
+		}
+		sort.Slice(pools, func(i, j int) bool { return pools[i]["pattern"].(string) < pools[j]["pattern"].(string) })
+	}
+
+	// round_robin keeps its rotation cursor in process memory, so N gateway instances
+	// rotate independently and the same conversation can land on a different provider
+	// per instance. session_hash derives the provider from the session key and needs no
+	// shared state, so it is the only mode whose stickiness survives a multi-instance
+	// deployment. Say so here rather than letting an operator discover it in production.
+	multiInstanceSafe := mode == balanceSessionHash || mode == balanceFirst
+	writeJSON(w, http.StatusOK, map[string]any{
+		"mode":                string(mode),
+		"multi_instance_safe": multiInstanceSafe,
+		"sticky_sessions":     sticky,
+		"sticky_ttl":          ttl.String(),
+		"active_sessions":     activeSessions,
+		"window_since":        since.UTC().Format(time.RFC3339),
+		"model":               model,
+		"pools":               pools,
+		"intent":              intent,
+		"actual":              actual,
+		"balance_index":       balanceIndex(actual),
+	})
+}
+
+// balanceIndex scores how evenly traffic landed, 1.0 being a perfect split and 0
+// meaning one provider took everything. It is the ratio of the least-used to the
+// most-used provider, which is blunt but reads correctly at a glance and needs no
+// explanation of variance to an operator.
+func balanceIndex(shares []store.ProviderModelShare) float64 {
+	if len(shares) < 2 {
+		return 1
+	}
+	minReq, maxReq := shares[0].Requests, shares[0].Requests
+	for _, sh := range shares {
+		if sh.Requests < minReq {
+			minReq = sh.Requests
+		}
+		if sh.Requests > maxReq {
+			maxReq = sh.Requests
+		}
+	}
+	if maxReq <= 0 {
+		return 1
+	}
+	return float64(minReq) / float64(maxReq)
+}
+
+// handleRoutingFailoverDrill answers "if this provider dies right now, what happens?"
+// without waiting for it to actually die.
+//
+// Every other diagnostic here describes configuration; this one walks the same
+// candidate list dialUpstream would walk, marks the providers the operator names as
+// failed, and reports who ends up serving the request. It sends no upstream traffic
+// and mutates nothing — a drill that could take down production would never be run.
+func (s *Server) handleRoutingFailoverDrill(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeAdmin(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	if r.Method != http.MethodPost {
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
+	var payload struct {
+		Model string   `json:"model"`
+		Fail  []string `json:"fail"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "invalid_body")
+		return
+	}
+	model := strings.TrimSpace(payload.Model)
+	if model == "" {
+		writeOpenAIError(w, http.StatusBadRequest, "model is required", "invalid_request_error", "missing_model")
+		return
+	}
+
+	candidates, err := s.providersForModel(r.Context(), model)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "drill_failed")
+		return
+	}
+	if len(candidates) == 0 {
+		// No pattern match: the request would land on the default provider, which is
+		// never a failover candidate. That is the answer, and it is usually the problem.
+		candidates = []string{s.cfg.Upstream.Provider}
+	}
+
+	demoted := []string{}
+	if len(candidates) > 1 {
+		candidates, demoted = s.demoteUnhealthyCandidates(r.Context(), candidates)
+	}
+
+	breakerEnabled, threshold, cooldown := s.breakerConfig()
+	now := time.Now()
+	failed := map[string]bool{}
+	for _, name := range payload.Fail {
+		failed[strings.TrimSpace(name)] = true
+	}
+
+	type step struct {
+		Provider string `json:"provider"`
+		Outcome  string `json:"outcome"` // served | simulated_failure | skipped_breaker_open | skipped_health
+		Detail   string `json:"detail,omitempty"`
+	}
+	steps := make([]step, 0, len(candidates))
+	servedBy := ""
+	for _, name := range candidates {
+		switch {
+		case breakerEnabled && !s.breakers.peek(name, threshold, cooldown, now):
+			steps = append(steps, step{Provider: name, Outcome: "skipped_breaker_open",
+				Detail: "회로 차단기가 열려 있어 시도하지 않습니다"})
+		case failed[name]:
+			steps = append(steps, step{Provider: name, Outcome: "simulated_failure",
+				Detail: "드릴에서 실패로 지정됨"})
+		default:
+			steps = append(steps, step{Provider: name, Outcome: "served"})
+			servedBy = name
+		}
+		if servedBy != "" {
+			break
+		}
+	}
+
+	outcome := "served"
+	advice := ""
+	if servedBy == "" {
+		outcome = "exhausted"
+		advice = "모든 후보가 실패했습니다. 같은 failover_group 에 provider 를 더 넣으면 이 시나리오를 견딥니다."
+	} else if len(steps) == 1 && len(candidates) == 1 {
+		outcome = "no_redundancy"
+		advice = "후보가 1개뿐이라 이 provider 가 죽으면 폴백이 없습니다. failover_group 을 지정하세요."
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"model":           model,
+		"candidates":      candidates,
+		"failed_input":    payload.Fail,
+		"health_demoted":  demoted,
+		"steps":           steps,
+		"served_by":       servedBy,
+		"outcome":         outcome,
+		"advice":          advice,
+		"breaker_enabled": breakerEnabled,
+	})
 }

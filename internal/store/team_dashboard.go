@@ -34,11 +34,11 @@ type TeamModelUsage struct {
 // TeamDashboardData is the team_manager landing payload: team totals, top members, model
 // mix, and recent failures — all scoped to the caller's team, no operational internals.
 type TeamDashboardData struct {
-	TeamKeys       []string        `json:"team_keys"`
-	Totals         TeamUsageTotals `json:"totals"`
-	TopUsers       []TeamUserUsage `json:"top_users"`
+	TeamKeys       []string         `json:"team_keys"`
+	Totals         TeamUsageTotals  `json:"totals"`
+	TopUsers       []TeamUserUsage  `json:"top_users"`
 	Models         []TeamModelUsage `json:"models"`
-	RecentFailures []UserFailure   `json:"recent_failures"`
+	RecentFailures []UserFailure    `json:"recent_failures"`
 }
 
 // teamErrorExpr classifies a failed request consistently across the team queries.
@@ -149,12 +149,12 @@ func (s *SQLStore) TeamQualityExtras(ctx context.Context, keys []string, since t
 // TeamTemplateCandidate is a recurring prompt cluster within a team, proposed as a team
 // template. AlreadyProduct marks clusters already promoted to a prompt product.
 type TeamTemplateCandidate struct {
-	Fingerprint   string  `json:"fingerprint"`
-	TaskType      string  `json:"task_type"`
-	Requests      int64   `json:"requests"`
-	AvgCostKRW    float64 `json:"avg_cost_krw"`
-	SuccessRate   float64 `json:"success_rate"`
-	AlreadyProduct bool   `json:"already_product"`
+	Fingerprint    string  `json:"fingerprint"`
+	TaskType       string  `json:"task_type"`
+	Requests       int64   `json:"requests"`
+	AvgCostKRW     float64 `json:"avg_cost_krw"`
+	SuccessRate    float64 `json:"success_rate"`
+	AlreadyProduct bool    `json:"already_product"`
 }
 
 // TeamTemplateCandidates returns the most frequent prompt clusters for a team (≥minCount),

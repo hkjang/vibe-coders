@@ -18,16 +18,28 @@ const providerHealthWindow = 15 * time.Minute
 var fileMentionRe = regexp.MustCompile(`(?i)\b[\w./\\-]+\.(go|ts|tsx|js|jsx|py|java|kt|rs|rb|php|cs|cpp|c|h|sql|yaml|yml|json|toml|md)\b`)
 
 type intelligentRoutingPlan struct {
+	// Prompts is what this plan was scored from. It is carried so the audit record can
+	// reuse it instead of extracting and redacting the same body a second time -- the
+	// two calls sit a few lines apart in stepRouting and redaction is the expensive half
+	// of extraction. Only valid when RawPrompts was off; see auditRequestWithPrompts.
+	Prompts []store.PromptLog
+
 	RequestedModel   string
 	SelectedModel    string
 	SelectedProvider string
 	Complexity       store.ComplexityAnalysis
 	Risk             store.RiskAnalysis
 	HealthScore      int
-	FallbackPath     []string
-	DecisionReason   string
-	RouteReason      string
-	ForceProvider    bool
+	// FallbackPlan is what *would* happen on failure, computed before the call.
+	// FallbackPath is what *actually* happened, appended as real hops occur — it
+	// stays empty when no failover took place. Keeping the two apart matters: they
+	// used to share one slice, so every request rendered a "fallback chain" in the
+	// admin UI even when nothing had failed over.
+	FallbackPlan   []string
+	FallbackPath   []string
+	DecisionReason string
+	RouteReason    string
+	ForceProvider  bool
 }
 
 func (s *Server) planIntelligentRouting(ctx context.Context, body []byte, endpoint string, pinned, noRoute bool, authCtx *store.AuthContext) intelligentRoutingPlan {
@@ -103,20 +115,21 @@ func (s *Server) planIntelligentRouting(ctx context.Context, body []byte, endpoi
 	if selectedModel == "" {
 		selectedModel = model
 	}
-	fallbackPath := s.routingFallbackPath(ctx, selectedModel, selectedProvider)
+	fallbackPlan := s.routingFallbackPlan(ctx, selectedModel, selectedProvider)
 	if riskDisablesFallback(risk) {
-		fallbackPath = []string{"fallback_disabled:sensitive_data"}
+		fallbackPlan = []string{"fallback_disabled:sensitive_data"}
 		reasons = append(reasons, "safe fallback disabled for sensitive data risk")
 	}
 
 	return intelligentRoutingPlan{
+		Prompts:          prompts,
 		RequestedModel:   model,
 		SelectedModel:    selectedModel,
 		SelectedProvider: selectedProvider,
 		Complexity:       complexity,
 		Risk:             risk,
 		HealthScore:      health,
-		FallbackPath:     fallbackPath,
+		FallbackPlan:     fallbackPlan,
 		DecisionReason:   strings.Join(reasons, "; "),
 		RouteReason:      routeReason,
 		ForceProvider:    forceProvider,
@@ -488,7 +501,10 @@ func providerCandidates(ctx context.Context, s *Server, model string) []string {
 }
 
 func (s *Server) providerHealthMap(ctx context.Context) map[string]store.ProviderHealthScore {
-	scores, err := s.db.ProviderHealthScores(ctx, time.Now().Add(-providerHealthWindow))
+	// The windowed form is cached. This runs two or three times per request and its cost
+	// grows with how much traffic the window holds, so recomputing it per call made the
+	// gateway slower the busier it got. See provider_health_cache.go.
+	scores, err := s.db.ProviderHealthWindow(ctx, providerHealthWindow)
 	if err != nil {
 		return map[string]store.ProviderHealthScore{}
 	}
@@ -509,17 +525,36 @@ func (s *Server) healthScoreForProvider(ctx context.Context, provider string) in
 	return 100
 }
 
-func (s *Server) routingFallbackPath(ctx context.Context, model, selectedProvider string) []string {
-	path := []string{}
+// routingFallbackPlan describes, before the call is made, what the gateway would do
+// if the selected provider fails. It names the concrete providers that would be tried
+// and in which order — dialUpstream walks providersForModel in list order (which is
+// ORDER BY name ASC), so the plan must reflect that rather than implying a latency- or
+// health-based choice.
+//
+// When only one provider matches the model there is no failover at all. That is the
+// single most common surprise in this gateway — a default provider with no
+// model_patterns never becomes a candidate — so the plan says so explicitly instead of
+// returning a chain that cannot happen.
+func (s *Server) routingFallbackPlan(ctx context.Context, model, selectedProvider string) []string {
+	plan := []string{}
 	candidates, _ := s.providersForModel(ctx, model)
+	peers := make([]string, 0, len(candidates))
 	for _, candidate := range candidates {
 		if candidate != selectedProvider {
-			path = append(path, "429:"+candidate, "5xx:"+candidate)
-			break
+			peers = append(peers, candidate)
 		}
 	}
-	path = append(path, "timeout:lowest-latency-provider", "context_overflow:"+defaultAutoModel("reasoning"))
-	return path
+	if len(peers) == 0 {
+		plan = append(plan, "no_provider_failover:single_matching_provider")
+	} else {
+		for _, peer := range peers {
+			plan = append(plan, "429|5xx|timeout:"+peer)
+		}
+	}
+	if longModel := defaultAutoModel("reasoning"); longModel != "" && longModel != model {
+		plan = append(plan, "context_overflow:"+longModel)
+	}
+	return plan
 }
 
 func statusFallbackAllowed(status int) bool {

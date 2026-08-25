@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5/stdlib"
@@ -21,9 +22,56 @@ import (
 
 var blobRegex = regexp.MustCompile(`(?i)\bblob\b`)
 
+// REAL means different things to the two drivers. SQLite stores every REAL as an
+// 8-byte IEEE float; PostgreSQL REAL is float4, roughly seven significant decimal
+// digits. The schema declares 65 REAL columns and 13 of them are cost_krw, alongside
+// budget_limit_krw, krw_limit, monthly_krw and the per-million price columns.
+//
+// On PostgreSQL that silently rounds money: 12,345,678.9 KRW comes back as 12,345,679,
+// and a SUM over such a column loses the fractional part of the total. Nothing errors,
+// the number is simply wrong, and no test ever saw it because tests ran on SQLite, where
+// REAL is already double precision.
+//
+// So REAL becomes DOUBLE PRECISION on PostgreSQL, which is what SQLite was giving all
+// along. Databases created before this are widened by widenPostgresRealColumns below.
+var realRegex = regexp.MustCompile(`(?i)\bREAL\b`)
+
 type SQLStore struct {
-	db      *sql.DB
-	dialect string
+	db              *sql.DB
+	dialect         string
+	lifecycleCtx    context.Context
+	lifecycleCancel context.CancelFunc
+	closeOnce       sync.Once
+	closeErr        error
+
+	// providers memoises provider_configs, which the hot path reads several times per
+	// request. See provider_cache.go.
+	providers providerCache
+
+	// policies memoises the active governance rules, read once per governance phase.
+	// See policy_cache.go.
+	policies policyCache
+
+	// quotas memoises the quota definitions, read once per scope a request falls under.
+	// See quota_cache.go — usage counters are deliberately not cached.
+	quotas quotaCache
+
+	// agentRoutes memoises the agent route table, consulted once per /v1 request.
+	// See agent_route_cache.go.
+	agentRoutes agentRouteCache
+
+	// rollupStart caches when this database started keeping per-day usage totals.
+	// See usage_rollup.go.
+	rollupStart rollupStart
+
+	// teams memoises the teams table, resolved once per request by authentication.
+	// See team_cache.go.
+	teams teamCache
+
+	// providerHealth memoises the routing layer's health scores. Unlike the caches above
+	// it has no invalidation: it holds a statistic derived from traffic, not an operator's
+	// edit. See provider_health_cache.go.
+	providerHealth providerHealthCache
 }
 
 func Open(ctx context.Context, cfg config.DatabaseConfig) (*SQLStore, error) {
@@ -76,11 +124,28 @@ func Open(ctx context.Context, cfg config.DatabaseConfig) (*SQLStore, error) {
 		return nil, err
 	}
 
-	return &SQLStore{db: db, dialect: driver}, nil
+	lifecycleCtx, lifecycleCancel := context.WithCancel(context.Background())
+	return &SQLStore{
+		db:              db,
+		dialect:         driver,
+		lifecycleCtx:    lifecycleCtx,
+		lifecycleCancel: lifecycleCancel,
+	}, nil
 }
 
 func (s *SQLStore) Close() error {
-	return s.db.Close()
+	s.closeOnce.Do(func() {
+		s.lifecycleCancel()
+		s.closeErr = s.db.Close()
+	})
+	return s.closeErr
+}
+
+// LifecycleContext is cancelled immediately before the underlying connection pool is
+// closed. Long-running workers should derive their operation contexts from it so a
+// shutdown cannot leave them polling a closed database.
+func (s *SQLStore) LifecycleContext() context.Context {
+	return s.lifecycleCtx
 }
 
 func (s *SQLStore) Ping(ctx context.Context) error {
@@ -105,7 +170,49 @@ func (s *SQLStore) TableExists(ctx context.Context, name string) (bool, error) {
 }
 
 func (s *SQLStore) Migrate(ctx context.Context) error {
-	statements := []string{
+	statements := migrationStatements()
+
+	for _, statement := range statements {
+		execQuery := renderForDialect(statement, s.dialect)
+		if _, err := s.db.ExecContext(ctx, execQuery); err != nil {
+			if isAlreadyExistsErr(err) {
+				continue
+			}
+			return err
+		}
+	}
+	if s.dialect == "postgres" {
+		if err := s.widenPostgresRealColumns(ctx); err != nil {
+			return err
+		}
+		if err := s.widenPostgresCounterColumns(ctx); err != nil {
+			return err
+		}
+	}
+	// Recorded after the schema exists and only on the first run, so an existing database
+	// does not claim its day totals cover traffic from before they were being kept.
+	return s.markUsageRollupStarted(ctx)
+}
+
+// renderForDialect turns a declared statement into the one this dialect actually runs.
+// Migrate applies it and the admin SQL view displays it, so what an operator reads is what
+// executed rather than a second rendering that can disagree with it.
+func renderForDialect(statement, dialect string) string {
+	if dialect != "postgres" {
+		return statement
+	}
+	// PostgreSQL does not support BLOB; it uses BYTEA instead.
+	// Using regex guarantees that any variation of case or spacing is handled properly.
+	out := blobRegex.ReplaceAllString(statement, "BYTEA")
+	return realRegex.ReplaceAllString(out, "DOUBLE PRECISION")
+}
+
+// migrationStatements is the schema the gateway declares. It is a function rather than a
+// literal inside Migrate so that the drift checker can read the same list Migrate applies
+// — the alternative is a second copy of every index name, which is a list somebody has to
+// remember to update and therefore a list that goes stale.
+func migrationStatements() []string {
+	return []string{
 		`CREATE TABLE IF NOT EXISTS api_keys (
 			id TEXT PRIMARY KEY,
 			name TEXT NOT NULL,
@@ -826,6 +933,10 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 				created_at TEXT NOT NULL,
 				expires_at TEXT
 			)`,
+		// Scope isolates a cached answer to the caller that produced it. Empty means
+		// shared, which is what every row written before this column existed was, and
+		// what CACHE_CHAT_SCOPE=global still writes.
+		`ALTER TABLE chat_semantic_cache ADD COLUMN scope TEXT NOT NULL DEFAULT ''`,
 		`CREATE INDEX IF NOT EXISTS idx_chat_semantic_model ON chat_semantic_cache(model, created_at)`,
 		`CREATE TABLE IF NOT EXISTS model_pricing_versions (
 				id TEXT PRIMARY KEY,
@@ -1214,10 +1325,42 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 			timeout_ms INTEGER NOT NULL,
 			enabled INTEGER NOT NULL,
 			model_patterns TEXT,
+			failover_group TEXT,
+			priority INTEGER NOT NULL DEFAULT 100,
 			created_at TEXT NOT NULL
+		)`,
+		// In-flight quota reservations. Committed usage only exists once a request has
+		// finished, so without these a burst of concurrent requests all see a stale total
+		// and can collectively blow past a limit. Rows carry expires_at so a gateway that
+		// dies mid-request cannot pin a quota forever.
+		`CREATE TABLE IF NOT EXISTS quota_reservations (
+			request_id TEXT PRIMARY KEY,
+			api_key_id TEXT,
+			client_ip TEXT,
+			tokens INTEGER NOT NULL DEFAULT 0,
+			cost_krw REAL NOT NULL DEFAULT 0,
+			created_at TEXT NOT NULL,
+			expires_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_quota_reservations_expiry ON quota_reservations(expires_at)`,
+		// Circuit-breaker state shared between gateway instances. Rows are advisory and
+		// carry updated_at so a consumer can ignore ones left by an instance that died.
+		`CREATE TABLE IF NOT EXISTS provider_breaker_state (
+			provider TEXT PRIMARY KEY,
+			phase TEXT NOT NULL,
+			reason TEXT,
+			instance TEXT,
+			opened_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
 		)`,
 		// Idempotent ALTERs for legacy installations of provider_configs
 		`ALTER TABLE provider_configs ADD COLUMN model_patterns TEXT`,
+		// failover_group makes redundancy an explicit declaration. Until now the only way
+		// to get failover was for two providers' model_patterns to happen to overlap, so
+		// the most common setup (a default provider plus one vendor-specific one) silently
+		// had none. priority orders the group; ties fall back to name for determinism.
+		`ALTER TABLE provider_configs ADD COLUMN failover_group TEXT`,
+		`ALTER TABLE provider_configs ADD COLUMN priority INTEGER NOT NULL DEFAULT 100`,
 		`CREATE TABLE IF NOT EXISTS admin_audit_logs (
 			id TEXT PRIMARY KEY,
 			admin_id TEXT,
@@ -1774,6 +1917,12 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 			evidence_retention_days INTEGER NOT NULL DEFAULT 30,
 			external_provider_allowed INTEGER NOT NULL DEFAULT 0,
 			destructive_tool_policy TEXT NOT NULL DEFAULT 'dry-run',
+			retain_raw_evidence INTEGER NOT NULL DEFAULT 0,
+			trigger_source TEXT NOT NULL DEFAULT 'manual',
+			trigger_action TEXT NOT NULL DEFAULT '',
+			trigger_ref TEXT NOT NULL DEFAULT '',
+			trigger_reason TEXT NOT NULL DEFAULT '',
+			trigger_fingerprint TEXT NOT NULL DEFAULT '',
 			created_at TEXT NOT NULL,
 			updated_at TEXT NOT NULL
 		)`,
@@ -1950,25 +2099,151 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 		`ALTER TABLE agent_routes ADD COLUMN max_cost_krw REAL NOT NULL DEFAULT 0`,
 		// Red Team: opt-in raw (unmasked) evidence retention for admin review, and its storage.
 		`ALTER TABLE redteam_campaigns ADD COLUMN retain_raw_evidence INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE redteam_campaigns ADD COLUMN trigger_source TEXT NOT NULL DEFAULT 'manual'`,
+		`ALTER TABLE redteam_campaigns ADD COLUMN trigger_action TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE redteam_campaigns ADD COLUMN trigger_ref TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE redteam_campaigns ADD COLUMN trigger_reason TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE redteam_campaigns ADD COLUMN trigger_fingerprint TEXT NOT NULL DEFAULT ''`,
+		`CREATE INDEX IF NOT EXISTS idx_redteam_campaigns_trigger ON redteam_campaigns(trigger_source, created_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_redteam_campaigns_fingerprint ON redteam_campaigns(trigger_fingerprint, created_at)`,
 		`ALTER TABLE redteam_evidence ADD COLUMN raw_prompt TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE redteam_evidence ADD COLUMN raw_response TEXT NOT NULL DEFAULT ''`,
-	}
 
-	for _, statement := range statements {
-		execQuery := statement
-		if s.dialect == "postgres" {
-			// PostgreSQL does not support BLOB; it uses BYTEA instead.
-			// Using regex guarantees that any variation of case or spacing is handled properly.
-			execQuery = blobRegex.ReplaceAllString(execQuery, "BYTEA")
-		}
-		if _, err := s.db.ExecContext(ctx, execQuery); err != nil {
-			if isAlreadyExistsErr(err) {
-				continue
-			}
+		// Per-day usage totals, so a quota does not have to aggregate its whole period on
+		// every request. See usage_rollup.go for how it is kept in step with request_logs.
+		// BIGINT, not INTEGER: these accumulate a whole day of traffic, and INTEGER is
+		// four bytes on PostgreSQL. At a few thousand tokens a request a busy gateway
+		// passes two billion in a day, and the overflow would land in a quota total.
+		`CREATE TABLE IF NOT EXISTS usage_rollup (
+			scope TEXT NOT NULL,
+			scope_value TEXT NOT NULL,
+			day TEXT NOT NULL,
+			requests BIGINT NOT NULL DEFAULT 0,
+			tokens BIGINT NOT NULL DEFAULT 0,
+			cost REAL NOT NULL DEFAULT 0,
+			PRIMARY KEY (scope, scope_value, day)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_usage_rollup_day ON usage_rollup(day)`,
+		// One row, recording when this database started keeping the totals above. A period
+		// that began before then is not covered by them and is answered the old way.
+		`CREATE TABLE IF NOT EXISTS usage_rollup_state (
+			id TEXT PRIMARY KEY,
+			started_at TEXT NOT NULL
+		)`,
+
+		// Request-scoped children the retention purge deletes with
+		// `WHERE request_id IN (SELECT id FROM request_logs WHERE created_at < ?)`.
+		// Nine of the eleven tables in that purge had this index; these three did not,
+		// so every purge run scanned them end to end — on tables that gain a row per
+		// request and are among the largest in a long-lived deployment.
+		`CREATE INDEX IF NOT EXISTS idx_response_logs_request_id ON response_logs(request_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_language_stats_request_id ON language_stats(request_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_domain_routing_decisions_request_id ON domain_routing_decisions(request_id)`,
+
+		// auth_sessions had no index at all beyond its primary key, while sessions are
+		// listed and revoked per user, and looked up by the upstream session id when a
+		// provider sends a back-channel logout.
+		`CREATE INDEX IF NOT EXISTS idx_auth_sessions_user ON auth_sessions(user_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_auth_sessions_kc_sid ON auth_sessions(kc_sid)`,
+
+		// refresh_tokens was indexed for redemption (token_hash) but not for the two
+		// paths that revoke in bulk: every token of a user, and every token of a session.
+		`CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user ON refresh_tokens(user_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_refresh_tokens_session ON refresh_tokens(session_id)`,
+	}
+}
+
+// widenPostgresRealColumns promotes any float4 column to float8.
+//
+// New databases get DOUBLE PRECISION from the rewrite above, but a database created by
+// an earlier version already holds REAL columns, and CREATE TABLE IF NOT EXISTS will not
+// revisit them. Widening is lossless and idempotent: values already stored at single
+// precision keep whatever they were rounded to, which cannot be undone, but every write
+// afterwards is exact.
+//
+// It reads the catalogue rather than naming columns, so a REAL added later is covered
+// without anyone remembering this function exists.
+func (s *SQLStore) widenPostgresRealColumns(ctx context.Context) error {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT table_name, column_name
+		FROM information_schema.columns
+		WHERE table_schema = current_schema() AND data_type = 'real'
+		ORDER BY table_name, column_name`)
+	if err != nil {
+		return err
+	}
+	type col struct{ table, name string }
+	var cols []col
+	for rows.Next() {
+		var c col
+		if err := rows.Scan(&c.table, &c.name); err != nil {
+			rows.Close()
 			return err
+		}
+		cols = append(cols, c)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, c := range cols {
+		stmt := fmt.Sprintf(`ALTER TABLE %s ALTER COLUMN %s TYPE DOUBLE PRECISION`,
+			quotePGIdentifier(c.table), quotePGIdentifier(c.name))
+		if _, err := s.db.ExecContext(ctx, stmt); err != nil {
+			return fmt.Errorf("widen %s.%s to double precision: %w", c.table, c.name, err)
 		}
 	}
 	return nil
+}
+
+// pgCounterColumns are columns whose Go type is int64 but whose declared type is INTEGER,
+// which PostgreSQL reads as four bytes with a ceiling of about 2.1 billion. SQLite stores
+// them at 64 bits either way, so the limit is invisible until production.
+//
+// Only columns that can genuinely reach that ceiling are listed. A per-request count
+// cannot; a running total or an operator-set limit can.
+var pgCounterColumns = []struct{ table, column, why string }{
+	{"usage_rollup", "requests", "accumulates a whole day of requests"},
+	{"usage_rollup", "tokens", "accumulates a whole day of tokens, which passes two billion at a few thousand per request"},
+	{"quotas", "token_limit", "an operator-set ceiling; a monthly token budget is routinely larger than two billion"},
+}
+
+// widenPostgresCounterColumns promotes those columns to bigint.
+//
+// New databases get BIGINT from the schema, but one created by an earlier version already
+// has integer and CREATE TABLE IF NOT EXISTS will not revisit it. Widening is lossless and
+// idempotent: a value that already fits keeps its value, and every write afterwards has
+// room. Columns already bigint are skipped, so this is a no-op after the first run.
+func (s *SQLStore) widenPostgresCounterColumns(ctx context.Context) error {
+	for _, c := range pgCounterColumns {
+		var dataType string
+		err := s.db.QueryRowContext(ctx, `
+			SELECT data_type FROM information_schema.columns
+			WHERE table_schema = current_schema() AND table_name = $1 AND column_name = $2`,
+			c.table, c.column).Scan(&dataType)
+		if err == sql.ErrNoRows {
+			continue // the table is not in this schema yet
+		}
+		if err != nil {
+			return err
+		}
+		if dataType != "integer" && dataType != "smallint" {
+			continue
+		}
+		stmt := fmt.Sprintf(`ALTER TABLE %s ALTER COLUMN %s TYPE BIGINT`,
+			quotePGIdentifier(c.table), quotePGIdentifier(c.column))
+		if _, err := s.db.ExecContext(ctx, stmt); err != nil {
+			return fmt.Errorf("widen %s.%s to bigint (%s): %w", c.table, c.column, c.why, err)
+		}
+	}
+	return nil
+}
+
+// quotePGIdentifier wraps a catalogue-sourced name so a table called "user" or one with
+// a capital letter still parses. The names come from information_schema, not from user
+// input, but quoting is what makes that irrelevant.
+func quotePGIdentifier(name string) string {
+	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
 }
 
 // isAlreadyExistsErr swallows the "duplicate column name" / "column already exists"
@@ -2167,42 +2442,90 @@ func (s *SQLStore) UpsertProvider(ctx context.Context, provider ProviderConfig) 
 	if provider.CreatedAt.IsZero() {
 		provider.CreatedAt = time.Now().UTC()
 	}
-	query := s.bind(`INSERT INTO provider_configs (name, base_url, encrypted_api_key, timeout_ms, enabled, model_patterns, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
+	if provider.Priority <= 0 {
+		provider.Priority = DefaultProviderPriority
+	}
+	query := s.bind(`INSERT INTO provider_configs (name, base_url, encrypted_api_key, timeout_ms, enabled, model_patterns, failover_group, priority, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(name) DO UPDATE SET
 			base_url = excluded.base_url,
 			encrypted_api_key = excluded.encrypted_api_key,
 			timeout_ms = excluded.timeout_ms,
 			enabled = excluded.enabled,
-			model_patterns = excluded.model_patterns`)
-	_, err := s.db.ExecContext(ctx, query, provider.Name, provider.BaseURL, provider.EncryptedAPIKey, provider.TimeoutMS, boolInt(provider.Enabled), provider.ModelPatterns, formatTime(provider.CreatedAt))
-	return err
+			model_patterns = excluded.model_patterns,
+			failover_group = excluded.failover_group,
+			priority = excluded.priority`)
+	_, err := s.db.ExecContext(ctx, query, provider.Name, provider.BaseURL, provider.EncryptedAPIKey, provider.TimeoutMS, boolInt(provider.Enabled), provider.ModelPatterns, provider.FailoverGroup, provider.Priority, formatTime(provider.CreatedAt))
+	if err != nil {
+		return err
+	}
+	s.providers.invalidate()
+	return nil
 }
 
 func (s *SQLStore) GetProvider(ctx context.Context, name string) (ProviderConfig, bool, error) {
-	var provider ProviderConfig
-	var enabled int
-	var createdAt string
-	var modelPatterns sql.NullString
-	err := s.db.QueryRowContext(ctx, s.bind(`SELECT name, base_url, COALESCE(encrypted_api_key, ''), timeout_ms, enabled, model_patterns, created_at
-		FROM provider_configs
-		WHERE name = ?`), name).Scan(&provider.Name, &provider.BaseURL, &provider.EncryptedAPIKey, &provider.TimeoutMS, &enabled, &modelPatterns, &createdAt)
-	if err == sql.ErrNoRows {
-		return ProviderConfig{}, false, nil
+	now := time.Now()
+	if provider, found, ok := s.providers.lookup(name, now); ok {
+		return provider, found, nil
 	}
+	gen := s.providers.beginByName()
+	byName, err := s.loadProvidersByName(ctx)
 	if err != nil {
 		return ProviderConfig{}, false, err
 	}
-	provider.Enabled = enabled == 1
-	provider.ModelPatterns = modelPatterns.String
-	if parsed, err := time.Parse(time.RFC3339Nano, createdAt); err == nil {
-		provider.CreatedAt = parsed
+	s.providers.storeByName(byName, gen, now)
+	provider, found := byName[name]
+	return provider, found, nil
+}
+
+// loadProvidersByName reads the whole provider table at once. It is a handful of rows and
+// the alternative is a round trip per lookup, which is what this replaced.
+func (s *SQLStore) loadProvidersByName(ctx context.Context) (map[string]ProviderConfig, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT name, base_url, COALESCE(encrypted_api_key, ''), timeout_ms, enabled, COALESCE(model_patterns, ''), COALESCE(failover_group, ''), COALESCE(priority, 100), created_at
+		FROM provider_configs`)
+	if err != nil {
+		return nil, err
 	}
-	return provider, true, nil
+	defer rows.Close()
+	result := map[string]ProviderConfig{}
+	for rows.Next() {
+		var p ProviderConfig
+		var enabled int
+		var createdAt string
+		if err := rows.Scan(&p.Name, &p.BaseURL, &p.EncryptedAPIKey, &p.TimeoutMS, &enabled, &p.ModelPatterns, &p.FailoverGroup, &p.Priority, &createdAt); err != nil {
+			return nil, err
+		}
+		p.Enabled = enabled == 1
+		if p.Priority <= 0 {
+			p.Priority = DefaultProviderPriority
+		}
+		if parsed, err := time.Parse(time.RFC3339Nano, createdAt); err == nil {
+			p.CreatedAt = parsed
+		}
+		result[p.Name] = p
+	}
+	return result, rows.Err()
 }
 
 func (s *SQLStore) ListProviders(ctx context.Context) ([]ProviderPublic, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT name, base_url, COALESCE(encrypted_api_key, ''), timeout_ms, enabled, COALESCE(model_patterns, ''), created_at
+	now := time.Now()
+	if cached, ok := s.providers.freshPublic(now); ok {
+		if cached == nil {
+			cached = []ProviderPublic{}
+		}
+		return cached, nil
+	}
+	gen := s.providers.beginPublic()
+	result, err := s.loadProviders(ctx)
+	if err != nil {
+		return nil, err
+	}
+	s.providers.storePublic(result, gen, now)
+	return result, nil
+}
+
+func (s *SQLStore) loadProviders(ctx context.Context) ([]ProviderPublic, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT name, base_url, COALESCE(encrypted_api_key, ''), timeout_ms, enabled, COALESCE(model_patterns, ''), COALESCE(failover_group, ''), COALESCE(priority, 100), created_at
 		FROM provider_configs
 		ORDER BY name ASC`)
 	if err != nil {
@@ -2215,11 +2538,14 @@ func (s *SQLStore) ListProviders(ctx context.Context) ([]ProviderPublic, error) 
 		var provider ProviderPublic
 		var encryptedAPIKey string
 		var enabled int
-		if err := rows.Scan(&provider.Name, &provider.BaseURL, &encryptedAPIKey, &provider.TimeoutMS, &enabled, &provider.ModelPatterns, &provider.CreatedAt); err != nil {
+		if err := rows.Scan(&provider.Name, &provider.BaseURL, &encryptedAPIKey, &provider.TimeoutMS, &enabled, &provider.ModelPatterns, &provider.FailoverGroup, &provider.Priority, &provider.CreatedAt); err != nil {
 			return nil, err
 		}
 		provider.APIKeyConfigured = encryptedAPIKey != ""
 		provider.Enabled = enabled == 1
+		if provider.Priority <= 0 {
+			provider.Priority = DefaultProviderPriority
+		}
 		result = append(result, provider)
 	}
 	if result == nil {
@@ -2231,10 +2557,27 @@ func (s *SQLStore) ListProviders(ctx context.Context) ([]ProviderPublic, error) 
 // ListProviderConfigs returns the full provider rows (with model_patterns) used by the
 // routing layer. Caller is responsible for decrypting api keys via the secret cipher.
 func (s *SQLStore) ListProviderConfigs(ctx context.Context) ([]ProviderConfig, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT name, base_url, COALESCE(encrypted_api_key, ''), timeout_ms, enabled, COALESCE(model_patterns, ''), created_at
+	now := time.Now()
+	if cached, ok := s.providers.freshConfigs(now); ok {
+		return cached, nil
+	}
+	gen := s.providers.beginConfigs()
+	result, err := s.loadProviderConfigs(ctx)
+	if err != nil {
+		return nil, err
+	}
+	s.providers.storeConfigs(result, gen, now)
+	return result, nil
+}
+
+func (s *SQLStore) loadProviderConfigs(ctx context.Context) ([]ProviderConfig, error) {
+	// Ordered by priority first: dialUpstream walks this list in order, so the operator's
+	// declared preference has to be the list order rather than something re-sorted later.
+	// Name breaks ties, keeping the sequence identical on every instance.
+	rows, err := s.db.QueryContext(ctx, `SELECT name, base_url, COALESCE(encrypted_api_key, ''), timeout_ms, enabled, COALESCE(model_patterns, ''), COALESCE(failover_group, ''), COALESCE(priority, 100), created_at
 		FROM provider_configs
 		WHERE enabled = 1
-		ORDER BY name ASC`)
+		ORDER BY COALESCE(priority, 100) ASC, name ASC`)
 	if err != nil {
 		return nil, err
 	}
@@ -2244,10 +2587,13 @@ func (s *SQLStore) ListProviderConfigs(ctx context.Context) ([]ProviderConfig, e
 		var p ProviderConfig
 		var enabled int
 		var createdAt string
-		if err := rows.Scan(&p.Name, &p.BaseURL, &p.EncryptedAPIKey, &p.TimeoutMS, &enabled, &p.ModelPatterns, &createdAt); err != nil {
+		if err := rows.Scan(&p.Name, &p.BaseURL, &p.EncryptedAPIKey, &p.TimeoutMS, &enabled, &p.ModelPatterns, &p.FailoverGroup, &p.Priority, &createdAt); err != nil {
 			return nil, err
 		}
 		p.Enabled = enabled == 1
+		if p.Priority <= 0 {
+			p.Priority = DefaultProviderPriority
+		}
 		if parsed, err := time.Parse(time.RFC3339Nano, createdAt); err == nil {
 			p.CreatedAt = parsed
 		}
@@ -2262,6 +2608,7 @@ func (s *SQLStore) DeleteProvider(ctx context.Context, name string) (bool, error
 	if err != nil {
 		return false, err
 	}
+	s.providers.invalidate()
 	n, _ := res.RowsAffected()
 	return n > 0, nil
 }
@@ -2324,17 +2671,18 @@ func (s *SQLStore) InsertLogRecord(ctx context.Context, record LogRecord) error 
 		return err
 	}
 
+	promptArgs := make([]any, 0, len(record.Prompts)*8)
 	for _, prompt := range record.Prompts {
 		if prompt.CreatedAt.IsZero() {
 			prompt.CreatedAt = req.CreatedAt
 		}
-		_, err = tx.ExecContext(ctx, s.bind(`INSERT INTO prompt_logs
-			(id, request_id, role, content_hash, content_text, redacted_text, language_hint, created_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`),
-			cleanArgs([]any{prompt.ID, prompt.RequestID, prompt.Role, prompt.ContentHash, prompt.ContentText, prompt.RedactedText, prompt.LanguageHint, formatTime(prompt.CreatedAt)})...)
-		if err != nil {
-			return err
-		}
+		promptArgs = append(promptArgs, prompt.ID, prompt.RequestID, prompt.Role, prompt.ContentHash,
+			prompt.ContentText, prompt.RedactedText, prompt.LanguageHint, formatTime(prompt.CreatedAt))
+	}
+	if err := batchInsert(ctx, tx, s.bind, `INSERT INTO prompt_logs
+			(id, request_id, role, content_hash, content_text, redacted_text, language_hint, created_at)`,
+		"(?, ?, ?, ?, ?, ?, ?, ?)", 8, cleanArgs(promptArgs)); err != nil {
+		return err
 	}
 
 	if record.Response != nil {
@@ -2379,45 +2727,44 @@ func (s *SQLStore) InsertLogRecord(ctx context.Context, record LogRecord) error 
 		}
 	}
 
+	languageArgs := make([]any, 0, len(record.Languages)*6)
 	for _, language := range record.Languages {
 		if language.CreatedAt.IsZero() {
 			language.CreatedAt = req.CreatedAt
 		}
-		_, err = tx.ExecContext(ctx, s.bind(`INSERT INTO language_stats
-			(id, request_id, language, confidence, evidence, created_at)
-			VALUES (?, ?, ?, ?, ?, ?)`),
-			cleanArgs([]any{language.ID, language.RequestID, language.Language, language.Confidence, language.Evidence, formatTime(language.CreatedAt)})...)
-		if err != nil {
-			return err
-		}
+		languageArgs = append(languageArgs, language.ID, language.RequestID, language.Language,
+			language.Confidence, language.Evidence, formatTime(language.CreatedAt))
+	}
+	if err := batchInsert(ctx, tx, s.bind, `INSERT INTO language_stats
+			(id, request_id, language, confidence, evidence, created_at)`,
+		"(?, ?, ?, ?, ?, ?)", 6, cleanArgs(languageArgs)); err != nil {
+		return err
 	}
 
+	evaluationArgs := make([]any, 0, len(record.Evaluations)*12)
 	for _, evaluation := range record.Evaluations {
 		if evaluation.CreatedAt.IsZero() {
 			evaluation.CreatedAt = req.CreatedAt
 		}
-		_, err = tx.ExecContext(ctx, s.bind(`INSERT INTO llm_evaluations
-			(id, request_id, trace_id, name, category, evaluator, score, label, passed, reason, metadata, created_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
-			cleanArgs([]any{evaluation.ID, evaluation.RequestID, evaluation.TraceID, evaluation.Name, evaluation.Category, evaluation.Evaluator, evaluation.Score,
-				evaluation.Label, boolInt(evaluation.Passed), evaluation.Reason, evaluation.Metadata, formatTime(evaluation.CreatedAt)})...)
-		if err != nil {
-			return err
-		}
+		evaluationArgs = append(evaluationArgs, evaluation.ID, evaluation.RequestID, evaluation.TraceID,
+			evaluation.Name, evaluation.Category, evaluation.Evaluator, evaluation.Score, evaluation.Label,
+			boolInt(evaluation.Passed), evaluation.Reason, evaluation.Metadata, formatTime(evaluation.CreatedAt))
+	}
+	if err := batchInsert(ctx, tx, s.bind, `INSERT INTO llm_evaluations
+			(id, request_id, trace_id, name, category, evaluator, score, label, passed, reason, metadata, created_at)`,
+		"(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", 12, cleanArgs(evaluationArgs)); err != nil {
+		return err
 	}
 
+	toolArgs := make([]any, 0, len(record.Tools)*12)
+	catalogArgs := make([]any, 0, len(record.Tools)*5)
 	for _, tool := range record.Tools {
 		if tool.CreatedAt.IsZero() {
 			tool.CreatedAt = req.CreatedAt
 		}
-		_, err = tx.ExecContext(ctx, s.bind(`INSERT INTO tool_invocations
-			(id, request_id, trace_id, api_key_id, server_label, tool_name, source, is_mcp, is_error, arg_sensitive, arg_hash, created_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
-			cleanArgs([]any{tool.ID, tool.RequestID, tool.TraceID, tool.APIKeyID, tool.ServerLabel, tool.ToolName, tool.Source,
-				boolInt(tool.IsMCP), boolInt(tool.IsError), boolInt(tool.ArgSensitive), tool.ArgHash, formatTime(tool.CreatedAt)})...)
-		if err != nil {
-			return err
-		}
+		toolArgs = append(toolArgs, tool.ID, tool.RequestID, tool.TraceID, tool.APIKeyID, tool.ServerLabel,
+			tool.ToolName, tool.Source, boolInt(tool.IsMCP), boolInt(tool.IsError), boolInt(tool.ArgSensitive),
+			tool.ArgHash, formatTime(tool.CreatedAt))
 		// Maintain the per-server tool catalog from declared definitions.
 		if tool.Source == "definition" && tool.ToolName != "" {
 			server := tool.ServerLabel
@@ -2425,13 +2772,23 @@ func (s *SQLStore) InsertLogRecord(ctx context.Context, record LogRecord) error 
 				server = "(none)"
 			}
 			ts := formatTime(tool.CreatedAt)
-			_, err = tx.ExecContext(ctx, s.bind(`INSERT INTO mcp_tool_catalog (server_label, tool_name, is_mcp, first_seen, last_seen)
-				VALUES (?, ?, ?, ?, ?)
-				ON CONFLICT(server_label, tool_name) DO UPDATE SET last_seen = excluded.last_seen, is_mcp = excluded.is_mcp`),
-				cleanArgs([]any{server, tool.ToolName, boolInt(tool.IsMCP), ts, ts})...)
-			if err != nil {
-				return err
-			}
+			catalogArgs = append(catalogArgs, server, tool.ToolName, boolInt(tool.IsMCP), ts, ts)
+		}
+	}
+	if err := batchInsert(ctx, tx, s.bind, `INSERT INTO tool_invocations
+			(id, request_id, trace_id, api_key_id, server_label, tool_name, source, is_mcp, is_error, arg_sensitive, arg_hash, created_at)`,
+		"(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", 12, cleanArgs(toolArgs)); err != nil {
+		return err
+	}
+	// The catalog is an upsert, so it keeps its own statement rather than sharing the one
+	// above. A request that declares the same tool twice would make one statement update a
+	// row it also inserts, which PostgreSQL refuses.
+	for i := 0; i < len(catalogArgs); i += 5 {
+		if _, err := tx.ExecContext(ctx, s.bind(`INSERT INTO mcp_tool_catalog (server_label, tool_name, is_mcp, first_seen, last_seen)
+			VALUES (?, ?, ?, ?, ?)
+			ON CONFLICT(server_label, tool_name) DO UPDATE SET last_seen = excluded.last_seen, is_mcp = excluded.is_mcp`),
+			cleanArgs(catalogArgs[i:i+5])...); err != nil {
+			return err
 		}
 	}
 
@@ -2466,6 +2823,13 @@ func (s *SQLStore) InsertLogRecord(ctx context.Context, record LogRecord) error 
 		if err != nil {
 			return err
 		}
+	}
+
+	// The per-day usage totals a quota is enforced against, added in the same transaction
+	// as the request they describe so the two cannot disagree. See usage_rollup.go.
+	rollupQuery, rollupArgs := s.rollupUpsert(req, record.Usage)
+	if _, err := tx.ExecContext(ctx, rollupQuery, rollupArgs...); err != nil {
+		return err
 	}
 
 	return tx.Commit()
@@ -2726,6 +3090,14 @@ func (s *SQLStore) RecentRequests(ctx context.Context, filter RequestFilter) ([]
 			toolClauses = append(toolClauses, "ti.is_error = 1")
 		}
 		where = append(where, "EXISTS (SELECT 1 FROM tool_invocations ti WHERE "+strings.Join(toolClauses, " AND ")+")")
+	}
+	if !filter.From.IsZero() {
+		where = append(where, "r.created_at >= ?")
+		args = append(args, filter.From.UTC().Format(time.RFC3339Nano))
+	}
+	if !filter.To.IsZero() {
+		where = append(where, "r.created_at <= ?")
+		args = append(args, filter.To.UTC().Format(time.RFC3339Nano))
 	}
 	args = append(args, limit)
 

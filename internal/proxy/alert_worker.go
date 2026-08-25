@@ -129,6 +129,13 @@ func metricValue(metric string, snapshot store.AlertMetricSnapshot) float64 {
 		return snapshot.MaxAnomalyZ
 	case "budget_burn_ratio":
 		return snapshot.MaxBudgetRatio
+	case "failovers":
+		return float64(snapshot.Failovers)
+	case "failover_rate":
+		if snapshot.Requests == 0 {
+			return 0
+		}
+		return float64(snapshot.Failovers) / float64(snapshot.Requests)
 	}
 	return 0
 }

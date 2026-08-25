@@ -32,6 +32,8 @@ type Config struct {
 	Skills      SkillsConfig
 	Limits      LimitsConfig
 	MCP         MCPConfig
+	RedTeam     RedTeamConfig
+	Quota       QuotaConfig
 	Keycloak    KeycloakConfig
 	// RuntimeReloadInterval is how often each pod polls the DB for admin-settings changes made on
 	// other pods (multi-replica convergence). 0 disables polling (single-pod / local dev).
@@ -82,6 +84,14 @@ type MCPConfig struct {
 	MaxTools int
 }
 
+// RedTeamConfig controls the bounded, simulation-only security regression campaign
+// automatically created after security-sensitive admin changes.
+type RedTeamConfig struct {
+	PostChangeEnabled    bool
+	PostChangeCooldown   time.Duration
+	PostChangeMaxTargets int
+}
+
 // InsuranceConfig parameterizes the AI Request Insurance view: an SLA-claims ledger
 // that treats degraded outcomes (4xx/5xx/failover/error) as "claims" against the
 // "covered" requests of an insured scope and compares the claim rate to an SLA target.
@@ -127,11 +137,58 @@ type VCSConfig struct {
 	InferFromContent bool
 }
 
+// QuotaConfig controls how quotas account for work that has not finished yet.
+type QuotaConfig struct {
+	// ReservationsEnabled makes in-flight requests count toward a quota. Committed
+	// usage is only written once a request completes, so without this a burst of
+	// concurrent requests each measure themselves against a total that excludes all the
+	// others and can collectively overshoot the limit. Costs one insert and one delete
+	// per request, so a deployment that does not use quotas can turn it off.
+	ReservationsEnabled bool
+	// ReservationSweepInterval is how often expired rows are deleted. Reads already
+	// ignore expired reservations, so this only keeps the table small.
+	ReservationSweepInterval time.Duration
+}
+
 type UpstreamConfig struct {
-	Provider string
-	BaseURL  string
-	APIKey   string
-	Timeout  time.Duration
+	Provider      string
+	BaseURL       string
+	APIKey        string
+	Timeout       time.Duration
+	ModelPatterns string // comma-separated model globs routed to the default provider
+	// ResponseHeaderTimeout bounds how long the gateway waits for an upstream's
+	// response headers. Timeout covers the whole exchange (a long stream included),
+	// so without this a hung provider holds a request for the full Timeout before
+	// failover can start. Bounding only the header wait fails fast without
+	// truncating legitimate long streams.
+	ResponseHeaderTimeout time.Duration
+	// FailoverBudget caps the total time spent trying alternate providers. Once the
+	// budget is spent the gateway stops failing over and returns the last error
+	// instead of walking the whole candidate list. Zero disables the cap.
+	FailoverBudget time.Duration
+	// Circuit breaker: after BreakerThreshold consecutive failures a provider is
+	// skipped as a candidate for BreakerCooldown, then probed once.
+	BreakerEnabled   bool
+	BreakerThreshold int
+	BreakerCooldown  time.Duration
+	// LoadBalance selects how a model with several matching providers is served:
+	// "first" (default, historical: always the first match by name) or "round_robin"
+	// (spread across the matching providers).
+	LoadBalance string
+	// StickySessions keeps a session on the provider that first served it, so an
+	// agentic client's turns do not bounce between nodes and lose their prefix cache.
+	StickySessions bool
+	StickyTTL      time.Duration
+	// HealthDemoteThreshold moves a provider scoring below it to the back of the
+	// candidate list. It never removes one — health is a lagging average, and a
+	// recovered provider has to be tried to be observed recovering. Zero disables.
+	HealthDemoteThreshold int
+	// BreakerShared publishes breaker transitions through the database so sibling
+	// instances can skip a provider a peer already found dead, instead of each paying
+	// its own threshold of failures. Requires a shared database, so it is off by default
+	// — with per-instance SQLite there is nothing to share.
+	BreakerShared       bool
+	BreakerSyncInterval time.Duration
 	// DefaultModel is the concrete model vibe/auto resolves to when set, so deployments whose
 	// upstream is not OpenAI don't fall back to the built-in gpt-4.1* names. Empty → built-in list.
 	DefaultModel string
@@ -156,15 +213,41 @@ type RetentionConfig struct {
 	PromptDays         int
 	ResponseDays       int
 	Text2SQLReplayDays int // retention for Text2SQL replay bundles (audit artifacts)
-	Interval           time.Duration
+	// DomainExampleDays bounds how long redacted prompt text promoted as a routing
+	// example is kept. It is deliberately its own setting rather than following
+	// PromptDays: the corpus is what makes domain routing work, so tying it to the
+	// prompt window would degrade routing every time the window came round, while
+	// leaving it unbounded means text outlives the prompt it came from for good.
+	// 0 keeps it indefinitely, which is what installs before this setting did.
+	DomainExampleDays int
+	Interval          time.Duration
 }
 
 type CacheConfig struct {
 	EmbeddingEnabled  bool
 	EmbeddingTTL      time.Duration
 	EmbeddingMaxBytes int
-	ChatEnabled       bool
-	ChatTTL           time.Duration
+	// EmbeddingScope mirrors ChatScope for /v1/embeddings. The exposure is smaller: an
+	// embedding is a pure function of (model, input), so a caller who hits a shared entry
+	// receives exactly what they would have been given anyway. What sharing still reveals
+	// is that somebody embedded this exact text before, which for a document-indexing
+	// pipeline is a fact about another team's corpus. Default "global", unchanged.
+	EmbeddingScope string
+	ChatEnabled    bool
+	ChatTTL        time.Duration
+	// ChatScope decides who a cached chat response may be served to.
+	//
+	// The cache key is built from the request body alone, so by default an identical
+	// prompt from any caller hits the same entry — including one stored by a different
+	// team. For a deterministic request that is mostly the answer the model would have
+	// returned anyway, but the X-Cache: HIT header also tells the second caller that
+	// somebody already asked that exact question, which for a templated prompt
+	// ("summarise record 1234") is a fact about another team's work.
+	//
+	// "global" keeps that behaviour and stays the default, because narrowing the scope
+	// costs hit rate and that is the operator's trade-off to make, not ours. "team" and
+	// "api_key" mix the caller into the key so entries are never shared beyond it.
+	ChatScope string
 	// Semantic (embedding-based near-duplicate) chat cache. Opt-in: requires both
 	// ChatSemanticEnabled and an embedding model. On an exact-cache miss, the prompt is
 	// embedded and matched against recent entries by cosine similarity.
@@ -303,8 +386,15 @@ const DefaultGatewaySecret = "dev-local-insecure-secret-change-me"
 // the gateway infers one from client identity + a sliding inactivity window when
 // no explicit id (header or body) is present.
 type SessionConfig struct {
-	InferenceEnabled bool          // infer a session when the client sends none
-	IdleTimeout      time.Duration // gap of inactivity that starts a new inferred session
+	InferenceEnabled bool // infer a session when the client sends none
+	// InjectHeader forwards a stable X-Session-ID upstream when the caller sent none.
+	// Agent clients such as qwen code send no session identifier to a generic
+	// OpenAI-compatible endpoint, so the provider sees unrelated requests. The gateway
+	// already derives a per-conversation identity for sticky routing; this passes the
+	// same value on, so an upstream that groups by session (vLLM prefix cache, a
+	// provider dashboard) sees the conversation the way the gateway does.
+	InjectHeader bool
+	IdleTimeout  time.Duration // gap of inactivity that starts a new inferred session
 }
 
 type ProxyAPIKey struct {
@@ -326,11 +416,28 @@ func Load() (Config, error) {
 		ListenAddr:            getEnv("LISTEN_ADDR", ":8080"),
 		RuntimeReloadInterval: durationEnv("SETTINGS_RELOAD_INTERVAL", 10*time.Second),
 		Upstream: UpstreamConfig{
-			Provider:     getEnv("UPSTREAM_PROVIDER", "openai"),
-			BaseURL:      strings.TrimRight(getEnv("UPSTREAM_BASE_URL", "https://api.openai.com"), "/"),
-			APIKey:       firstNonEmpty(os.Getenv("UPSTREAM_API_KEY"), os.Getenv("OPENAI_API_KEY")),
-			Timeout:      durationEnv("UPSTREAM_TIMEOUT", 10*time.Minute),
-			DefaultModel: strings.TrimSpace(os.Getenv("UPSTREAM_DEFAULT_MODEL")),
+			Provider:      getEnv("UPSTREAM_PROVIDER", "openai"),
+			BaseURL:       strings.TrimRight(getEnv("UPSTREAM_BASE_URL", "https://api.openai.com"), "/"),
+			APIKey:        firstNonEmpty(os.Getenv("UPSTREAM_API_KEY"), os.Getenv("OPENAI_API_KEY")),
+			Timeout:       durationEnv("UPSTREAM_TIMEOUT", 10*time.Minute),
+			ModelPatterns: strings.TrimSpace(os.Getenv("UPSTREAM_MODEL_PATTERNS")),
+
+			ResponseHeaderTimeout: durationEnv("UPSTREAM_RESPONSE_HEADER_TIMEOUT", 60*time.Second),
+			FailoverBudget:        durationEnv("UPSTREAM_FAILOVER_BUDGET", 0),
+			BreakerEnabled:        boolEnv("UPSTREAM_BREAKER_ENABLED", true),
+			BreakerThreshold:      intEnv("UPSTREAM_BREAKER_THRESHOLD", 5),
+			BreakerCooldown:       durationEnv("UPSTREAM_BREAKER_COOLDOWN", 30*time.Second),
+			LoadBalance:           strings.ToLower(strings.TrimSpace(getEnv("UPSTREAM_LOAD_BALANCE", "first"))),
+			StickySessions:        boolEnv("UPSTREAM_STICKY_SESSIONS", true),
+			StickyTTL:             durationEnv("UPSTREAM_STICKY_TTL", 30*time.Minute),
+			HealthDemoteThreshold: intEnv("UPSTREAM_HEALTH_DEMOTE_THRESHOLD", 50),
+			BreakerShared:         boolEnv("UPSTREAM_BREAKER_SHARED", false),
+			BreakerSyncInterval:   durationEnv("UPSTREAM_BREAKER_SYNC_INTERVAL", 3*time.Second),
+			DefaultModel:          strings.TrimSpace(os.Getenv("UPSTREAM_DEFAULT_MODEL")),
+		},
+		Quota: QuotaConfig{
+			ReservationsEnabled:      boolEnv("QUOTA_RESERVATIONS_ENABLED", true),
+			ReservationSweepInterval: durationEnv("QUOTA_RESERVATION_SWEEP_INTERVAL", 5*time.Minute),
 		},
 		Database: databaseConfig(),
 		Logging: LoggingConfig{
@@ -346,14 +453,17 @@ func Load() (Config, error) {
 			PromptDays:         intEnv("RETENTION_PROMPT_DAYS", 30),
 			ResponseDays:       intEnv("RETENTION_RESPONSE_DAYS", 30),
 			Text2SQLReplayDays: intEnv("RETENTION_TEXT2SQL_REPLAY_DAYS", 30),
+			DomainExampleDays:  intEnv("RETENTION_DOMAIN_EXAMPLE_DAYS", 365),
 			Interval:           durationEnv("RETENTION_INTERVAL", time.Hour),
 		},
 		Cache: CacheConfig{
 			EmbeddingEnabled:          boolEnv("CACHE_EMBEDDING_ENABLED", true),
 			EmbeddingTTL:              durationEnv("CACHE_EMBEDDING_TTL", 24*time.Hour),
 			EmbeddingMaxBytes:         intEnv("CACHE_EMBEDDING_MAX_BYTES", 1<<20), // 1 MB per entry
-			ChatEnabled:               boolEnv("CACHE_CHAT_ENABLED", false),       // opt-in: chat responses are non-deterministic
+			EmbeddingScope:            strings.ToLower(strings.TrimSpace(getEnv("CACHE_EMBEDDING_SCOPE", "global"))),
+			ChatEnabled:               boolEnv("CACHE_CHAT_ENABLED", false), // opt-in: chat responses are non-deterministic
 			ChatTTL:                   durationEnv("CACHE_CHAT_TTL", time.Hour),
+			ChatScope:                 strings.ToLower(strings.TrimSpace(getEnv("CACHE_CHAT_SCOPE", "global"))),
 			ChatSemanticEnabled:       boolEnv("CACHE_CHAT_SEMANTIC_ENABLED", false),
 			ChatSemanticModel:         os.Getenv("CACHE_CHAT_SEMANTIC_MODEL"),
 			ChatSemanticThreshold:     floatEnv("CACHE_CHAT_SEMANTIC_THRESHOLD", 0.95),
@@ -395,6 +505,7 @@ func Load() (Config, error) {
 		},
 		Session: SessionConfig{
 			InferenceEnabled: boolEnv("SESSION_INFERENCE_ENABLED", true),
+			InjectHeader:     boolEnv("SESSION_INJECT_HEADER", true),
 			IdleTimeout:      durationEnv("SESSION_IDLE_TIMEOUT", 30*time.Minute),
 		},
 		VCS: VCSConfig{
@@ -473,7 +584,12 @@ func Load() (Config, error) {
 		},
 		Limits: LimitsConfig{
 			MaxOutputTokens: intEnv("LIMITS_MAX_OUTPUT_TOKENS", 0),
-			MaxRequestBytes: intEnv("LIMITS_MAX_REQUEST_BYTES", 0),
+			// A bound, not a policy: without one io.ReadAll grows to whatever a client
+			// sends, so a single request can take the gateway's memory with it. Set high
+			// enough that no realistic agent turn reaches it — a request near this size
+			// is still expensive to redact, so an operator handling large bodies should
+			// lower it rather than rely on this as a budget.
+			MaxRequestBytes: intEnv("LIMITS_MAX_REQUEST_BYTES", 64<<20),
 			MaxMessages:     intEnv("LIMITS_MAX_MESSAGES", 0),
 		},
 		MCP: MCPConfig{
@@ -482,6 +598,11 @@ func Load() (Config, error) {
 			MaxTokens:      intEnv("MCP_MAX_TOKENS", 2048),
 			ForceToolFirst: boolEnv("MCP_FORCE_TOOL_FIRST", true),
 			MaxTools:       intEnv("MCP_MAX_TOOLS", 32),
+		},
+		RedTeam: RedTeamConfig{
+			PostChangeEnabled:    boolEnv("REDTEAM_POST_CHANGE_ENABLED", true),
+			PostChangeCooldown:   durationEnv("REDTEAM_POST_CHANGE_COOLDOWN", 10*time.Minute),
+			PostChangeMaxTargets: intEnv("REDTEAM_POST_CHANGE_MAX_TARGETS", 20),
 		},
 	}
 

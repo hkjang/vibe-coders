@@ -82,10 +82,10 @@ func (s *Server) handleModelContracts(w http.ResponseWriter, r *http.Request) {
 }
 
 type contractCheck struct {
-	Dimension string  `json:"dimension"`
-	Threshold any     `json:"threshold"`
-	Actual    any     `json:"actual"`
-	Status    string  `json:"status"` // pass | warn | fail | no_data | skip
+	Dimension string `json:"dimension"`
+	Threshold any    `json:"threshold"`
+	Actual    any    `json:"actual"`
+	Status    string `json:"status"` // pass | warn | fail | no_data | skip
 }
 
 // handleModelContractsRun evaluates a candidate model against one or all enabled contracts using
@@ -211,13 +211,13 @@ func (s *Server) handleModelContractsRun(w http.ResponseWriter, r *http.Request)
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"model":             model,
-		"window":            since.UTC().Format(time.RFC3339),
-		"have_metrics":      map[string]any{"quality": haveQuality, "latency": haveLatency, "cost": haveCost},
-		"results":           results,
-		"replaceable":       overallReplaceable && len(contracts) > 0,
-		"failing_samples":   samples,
-		"note":              "관측된 모델 지표를 계약 임계값과 비교합니다. 실패 샘플은 원문 없이 fingerprint와 사유만 표시합니다. 계약이 없거나 지표가 부족하면 교체 안전을 보장하지 않습니다.",
+		"model":           model,
+		"window":          since.UTC().Format(time.RFC3339),
+		"have_metrics":    map[string]any{"quality": haveQuality, "latency": haveLatency, "cost": haveCost},
+		"results":         results,
+		"replaceable":     overallReplaceable && len(contracts) > 0,
+		"failing_samples": samples,
+		"note":            "관측된 모델 지표를 계약 임계값과 비교합니다. 실패 샘플은 원문 없이 fingerprint와 사유만 표시합니다. 계약이 없거나 지표가 부족하면 교체 안전을 보장하지 않습니다.",
 	})
 }
 

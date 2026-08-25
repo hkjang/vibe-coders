@@ -13,14 +13,19 @@ import (
 // text2sqlReportScheduler periodically runs due saved reports (read-only) and delivers
 // a short result summary to Mattermost when configured. It self-disables when no
 // execute DB is set — scheduled reports need a place to run.
-func (s *Server) text2sqlReportScheduler() {
+func (s *Server) text2sqlReportScheduler(parent context.Context) {
 	if s.t2sConf().ExecDSN == "" {
 		return
 	}
 	t := time.NewTicker(time.Minute)
 	defer t.Stop()
-	for range t.C {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	for {
+		select {
+		case <-parent.Done():
+			return
+		case <-t.C:
+		}
+		ctx, cancel := context.WithTimeout(parent, 2*time.Minute)
 		due, err := s.db.DueText2SQLReports(ctx, time.Now().UTC())
 		if err != nil {
 			slog.Warn("due reports query failed", "error", err)

@@ -125,6 +125,17 @@ func (w *RetentionWorker) runOnceWith(ctx context.Context) int64 {
 		}
 		totalDeleted += n
 	}
+	// Redacted prompt text promoted as a routing example. It is kept on its own clock
+	// rather than the prompt one: the corpus is what makes domain routing work, so
+	// clearing it with every prompt window would degrade routing on a cycle, and
+	// leaving it unbounded means the text outlives the prompt it came from for good.
+	if cfg.DomainExampleDays > 0 {
+		n, err := w.store.PurgeOlderThan(ctx, "domain_examples", cfg.DomainExampleDays)
+		if err != nil {
+			slog.Warn("retention purge domain_examples failed", "error", err)
+		}
+		totalDeleted += n
+	}
 	if cfg.Text2SQLReplayDays > 0 {
 		n, err := w.store.PurgeText2SQLReplayBundles(ctx, cfg.Text2SQLReplayDays)
 		if err != nil {
@@ -134,6 +145,25 @@ func (w *RetentionWorker) runOnceWith(ctx context.Context) int64 {
 	}
 	if n, err := w.store.PurgeChatSemanticExpired(ctx); err != nil {
 		slog.Warn("retention purge chat_semantic_cache failed", "error", err)
+	} else {
+		totalDeleted += n
+	}
+	// Rows that are already treated as expired on read but were never deleted. These
+	// grow with authentication traffic — refresh_tokens gains a row per rotation, not
+	// per login — so left alone they outgrow the request logs beside them.
+	const revokedGrace = 24 * time.Hour
+	if n, err := w.store.PurgeExpiredRefreshTokens(ctx, revokedGrace); err != nil {
+		slog.Warn("retention purge refresh_tokens failed", "error", err)
+	} else {
+		totalDeleted += n
+	}
+	if n, err := w.store.PurgeExpiredAuthSessions(ctx, revokedGrace); err != nil {
+		slog.Warn("retention purge auth_sessions failed", "error", err)
+	} else {
+		totalDeleted += n
+	}
+	if n, err := w.store.PurgeExpiredText2SQLCache(ctx); err != nil {
+		slog.Warn("retention purge text2sql_cache failed", "error", err)
 	} else {
 		totalDeleted += n
 	}

@@ -37,7 +37,7 @@ func (s *Server) handleMeOverlay(w http.ResponseWriter, r *http.Request) {
 
 	// Budget/quota (needs a resolved key).
 	if keyOK && keyID != "" && keyID != "anonymous" {
-		if dec, err := s.checkQuotas(r.Context(), keyID, ""); err == nil {
+		if dec, err := s.checkQuotas(r.Context(), keyID, "", nil); err == nil {
 			out["budget_ok"] = dec.Allowed
 			out["used_krw"] = dec.CostKRW
 			if dec.Quota.KRWLimit > 0 {

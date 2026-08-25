@@ -176,5 +176,9 @@ func (s *SQLStore) RotateEncryptedColumns(
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("commit: %w", err)
 	}
+	// Rotation rewrites provider_configs.encrypted_api_key without going through
+	// UpsertProvider, so the cached rows still hold keys encrypted under the old
+	// cipher and would fail to decrypt on the next upstream call.
+	s.providers.invalidate()
 	return counts, nil
 }

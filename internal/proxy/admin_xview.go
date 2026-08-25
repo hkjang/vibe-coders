@@ -11,6 +11,21 @@ import (
 	"vibe-coders/internal/store"
 )
 
+// xviewTimeRange resolves the time bounds for XView/scatter queries. When from/to are
+// supplied they take precedence and are interpreted in the caller's timezone (tz, default
+// Asia/Seoul) — an absent bound stays zero (open-ended). Otherwise the relative window is
+// used for the lower bound and the upper bound is left open. A zero lower bound is harmless:
+// ScatterPoints' "created_at >= <zero>" matches every row.
+func xviewTimeRange(r *http.Request, fallback time.Duration) (since, until time.Time) {
+	loc := searchLocation(r.URL.Query().Get("tz"))
+	from := parseRangeBound(r.URL.Query().Get("from"), loc, false)
+	to := parseRangeBound(r.URL.Query().Get("to"), loc, true)
+	if !from.IsZero() || !to.IsZero() {
+		return from, to
+	}
+	return parseWindow(r.URL.Query().Get("window"), fallback, "hour"), time.Time{}
+}
+
 // parseModelsParam splits a comma-separated ?models= query param into a deduplicated slice.
 // Returns nil when the param is absent or empty (= no filter).
 func parseModelsParam(raw string) []string {
@@ -153,7 +168,7 @@ func (s *Server) handleXViewModels(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
 	}
-	since := parseWindow(r.URL.Query().Get("window"), time.Hour, "hour")
+	since, until := xviewTimeRange(r, time.Hour)
 	top := 5
 	if v := strings.TrimSpace(r.URL.Query().Get("top")); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
@@ -162,6 +177,7 @@ func (s *Server) handleXViewModels(w http.ResponseWriter, r *http.Request) {
 	}
 	f := store.ScatterFilter{
 		Since:  since,
+		Until:  until,
 		Models: parseModelsParam(r.URL.Query().Get("models")),
 		Limit:  20000,
 	}
@@ -188,13 +204,16 @@ func (s *Server) handleXViewModelSeries(w http.ResponseWriter, r *http.Request) 
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
 	}
-	since := parseWindow(r.URL.Query().Get("window"), 24*time.Hour, "hour")
+	since, until := xviewTimeRange(r, 24*time.Hour)
+	// Same timezone the range was parsed in, so the buckets line up with the filter.
+	loc := searchLocation(r.URL.Query().Get("tz"))
 	bucket := strings.TrimSpace(strings.ToLower(r.URL.Query().Get("bucket")))
 	if bucket != "day" {
 		bucket = "hour"
 	}
 	f := store.ScatterFilter{
 		Since:  since,
+		Until:  until,
 		Models: parseModelsParam(r.URL.Query().Get("models")),
 		Limit:  20000,
 	}
@@ -218,7 +237,7 @@ func (s *Server) handleXViewModelSeries(w http.ResponseWriter, r *http.Request) 
 		if m == "" {
 			m = "(unknown)"
 		}
-		ts := bucketTimestamp(p.CreatedAt, bucket)
+		ts := bucketTimestamp(p.CreatedAt, bucket, loc)
 		key := bucketKey{model: m, ts: ts}
 		b, ok := data[key]
 		if !ok {
@@ -262,8 +281,20 @@ func (s *Server) handleXViewModelSeries(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
-// bucketTimestamp truncates a created_at string to hour or day precision.
-func bucketTimestamp(createdAt, bucket string) string {
+// bucketTimestamp truncates a created_at string to hour or day precision, in the same
+// timezone the request filtered by.
+//
+// The day bucket has to follow the filter. XView's from/to range is parsed in Asia/Seoul
+// unless the caller passes ?tz=, so a search for one Seoul day was being answered with
+// buckets labelled by UTC day: three requests sent at 01:30, 08:00 and 20:00 on a Seoul
+// Monday came back as two days, with the morning filed under Sunday. A bare "2026-08-23"
+// carries no offset, so a client cannot correct it afterwards either.
+//
+// The hour bucket is left as a UTC instant on purpose. Seoul is a whole-hour offset, so
+// hour boundaries coincide and the label already names the right moment in a form any
+// client can convert — 2026-08-23T23:00:00Z is 08:00 in Seoul. Rewriting it would change
+// the text an existing API consumer parses without making it any more correct.
+func bucketTimestamp(createdAt, bucket string, loc *time.Location) string {
 	// createdAt is RFC3339Nano from the store; truncate to bucket granularity.
 	t, err := time.Parse(time.RFC3339Nano, createdAt)
 	if err != nil {
@@ -277,7 +308,7 @@ func bucketTimestamp(createdAt, bucket string) string {
 		}
 	}
 	if bucket == "day" {
-		return t.UTC().Format("2006-01-02")
+		return t.In(loc).Format("2006-01-02")
 	}
 	return t.UTC().Format("2006-01-02T15:00:00Z")
 }
@@ -290,9 +321,10 @@ func (s *Server) handleXViewModelOutliers(w http.ResponseWriter, r *http.Request
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
 	}
-	since := parseWindow(r.URL.Query().Get("window"), time.Hour, "hour")
+	since, until := xviewTimeRange(r, time.Hour)
 	f := store.ScatterFilter{
 		Since:  since,
+		Until:  until,
 		Models: parseModelsParam(r.URL.Query().Get("models")),
 		Limit:  20000,
 	}

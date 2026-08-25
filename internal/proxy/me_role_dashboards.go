@@ -80,10 +80,10 @@ func (s *Server) handleSecurityDashboard(w http.ResponseWriter, r *http.Request)
 			"total":   len(secrets),
 			"by_type": secretByType,
 		},
-		"risky_tools":      risky,
-		"mcp_summary":      mcp,
+		"risky_tools":       risky,
+		"mcp_summary":       mcp,
 		"pending_approvals": pending,
-		"pending_count":    len(pending),
+		"pending_count":     len(pending),
 	})
 }
 
@@ -123,13 +123,13 @@ func (s *Server) handleBillingDashboard(w http.ResponseWriter, r *http.Request) 
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"since":              since.UTC().Format(time.RFC3339),
-		"total_cost_krw":     total,
-		"total_requests":     totalReq,
-		"by_cost_center":     byCostCenter,
-		"by_model":           byModel,
-		"budgets":            budgets,
-		"migration_candidates": migration,
+		"since":                 since.UTC().Format(time.RFC3339),
+		"total_cost_krw":        total,
+		"total_requests":        totalReq,
+		"by_cost_center":        byCostCenter,
+		"by_model":              byModel,
+		"budgets":               budgets,
+		"migration_candidates":  migration,
 		"estimated_savings_krw": estSavings,
 	})
 }

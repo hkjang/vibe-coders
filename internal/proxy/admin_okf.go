@@ -180,7 +180,7 @@ func (s *Server) handleOKFGraphSync(w http.ResponseWriter, r *http.Request) {
 		for _, k := range keys {
 			if _, err := s.db.UpsertOKFDocument(ctx, store.OKFDocument{
 				Kind: "entity", Subject: "api_key:" + k.ID, Title: firstNonEmpty(k.Name, k.ID),
-				Body: "role=" + k.Role + (map[bool]string{true: ", status=" + k.Status, false: ""})[k.Status != ""],
+				Body:   "role=" + k.Role + (map[bool]string{true: ", status=" + k.Status, false: ""})[k.Status != ""],
 				Source: "derived:graph", Status: "active",
 			}, actor); err == nil {
 				docs++

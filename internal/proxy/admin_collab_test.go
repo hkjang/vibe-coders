@@ -179,3 +179,117 @@ func TestSavedFiltersCRUDAndAuditCSV(t *testing.T) {
 		t.Fatalf("delete failed: %d", delResp.StatusCode)
 	}
 }
+
+func TestXViewSavedInvestigationLifecycleAndValidation(t *testing.T) {
+	db := openTestStore(t)
+	defer db.Close()
+	logger := store.NewAsyncLogger(db, 32, filepath.Join(t.TempDir(), "fallback.ndjson"))
+	logger.Start()
+	defer logger.Stop(context.Background())
+
+	server, err := NewServer(testConfig("http://example.invalid", "secret"), db, logger, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxy := httptest.NewServer(server.Routes())
+	defer proxy.Close()
+
+	promptResp := postJSON(t, proxy.URL+"/admin/saved-filters", "", map[string]any{
+		"name": "prompt filter", "view": "prompts", "params": "q=timeout&limit=20",
+	})
+	promptResp.Body.Close()
+	if promptResp.StatusCode != http.StatusCreated {
+		t.Fatalf("prompt filter create status=%d", promptResp.StatusCode)
+	}
+
+	create := postJSON(t, proxy.URL+"/admin/saved-filters", "", map[string]any{
+		"name":   "XView provider incident",
+		"view":   "xview",
+		"params": "window=6h&metric=latency&scale=log&viewMode=category&models=gpt-4.1%2Cgpt-4.1-mini&endpoint=%2Fv1%2Fchat%2Fcompletions",
+	})
+	if create.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(create.Body)
+		create.Body.Close()
+		t.Fatalf("xview filter create failed: %d %s", create.StatusCode, body)
+	}
+	var created struct {
+		Filter store.SavedFilter `json:"filter"`
+	}
+	if err := json.NewDecoder(create.Body).Decode(&created); err != nil {
+		t.Fatal(err)
+	}
+	create.Body.Close()
+
+	for name, params := range map[string]string{
+		"unknown parameter": "window=1h&limit=999999",
+		"mixed ranges":      "window=1h&from=2026-07-01T00%3A00",
+		"invalid metric":    "window=1h&metric=quality",
+	} {
+		t.Run(name, func(t *testing.T) {
+			resp := postJSON(t, proxy.URL+"/admin/saved-filters", "", map[string]any{
+				"name": name, "view": "xview", "params": params,
+			})
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusBadRequest {
+				body, _ := io.ReadAll(resp.Body)
+				t.Fatalf("status=%d, want 400: %s", resp.StatusCode, body)
+			}
+		})
+	}
+
+	listResp, err := http.Get(proxy.URL + "/admin/saved-filters?view=xview")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var listed struct {
+		Filters []store.SavedFilter `json:"filters"`
+	}
+	if err := json.NewDecoder(listResp.Body).Decode(&listed); err != nil {
+		t.Fatal(err)
+	}
+	listResp.Body.Close()
+	if len(listed.Filters) != 1 || listed.Filters[0].ID != created.Filter.ID {
+		t.Fatalf("filtered list=%+v, want only %s", listed.Filters, created.Filter.ID)
+	}
+
+	getResp, err := http.Get(proxy.URL + "/admin/saved-filters/" + created.Filter.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var detail struct {
+		Filter store.SavedFilter `json:"filter"`
+	}
+	if err := json.NewDecoder(getResp.Body).Decode(&detail); err != nil {
+		t.Fatal(err)
+	}
+	getResp.Body.Close()
+	if detail.Filter.Name != "XView provider incident" {
+		t.Fatalf("detail=%+v", detail.Filter)
+	}
+
+	update := patchJSON(t, proxy.URL+"/admin/saved-filters/"+created.Filter.ID, "", map[string]any{
+		"name":   "XView cost incident",
+		"params": "from=2026-07-01T00%3A00&to=2026-07-02T00%3A00&tz=Asia%2FSeoul&metric=cost&scale=linear&viewMode=model",
+	})
+	if update.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(update.Body)
+		update.Body.Close()
+		t.Fatalf("update failed: %d %s", update.StatusCode, body)
+	}
+	var updated struct {
+		Filter store.SavedFilter `json:"filter"`
+	}
+	if err := json.NewDecoder(update.Body).Decode(&updated); err != nil {
+		t.Fatal(err)
+	}
+	update.Body.Close()
+	if updated.Filter.Name != "XView cost incident" || !strings.Contains(updated.Filter.Params, "metric=cost") {
+		t.Fatalf("updated=%+v", updated.Filter)
+	}
+
+	immutable := patchJSON(t, proxy.URL+"/admin/saved-filters/"+created.Filter.ID, "", map[string]any{"view": "prompts"})
+	immutable.Body.Close()
+	if immutable.StatusCode != http.StatusBadRequest {
+		t.Fatalf("immutable view status=%d, want 400", immutable.StatusCode)
+	}
+}

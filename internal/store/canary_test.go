@@ -2,23 +2,14 @@ package store
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 	"time"
-
-	"vibe-coders/internal/config"
 )
 
 func TestCanaryPolicyStats(t *testing.T) {
 	ctx := context.Background()
-	db, err := Open(ctx, config.DatabaseConfig{Driver: "sqlite", DSN: filepath.Join(t.TempDir(), "canary.db")})
-	if err != nil {
-		t.Fatal(err)
-	}
+	db := openStoreForTest(t)
 	defer db.Close()
-	if err := db.Migrate(ctx); err != nil {
-		t.Fatal(err)
-	}
 	when := time.Now().UTC().Add(-1 * time.Hour)
 
 	// One canary policy (50%) and one fully-rolled-out policy (should be excluded).

@@ -198,6 +198,13 @@ func (s *Server) emitPolicyFacts(events []store.PolicyDecisionEvent) {
 		if strings.TrimSpace(e.Decision) == "" {
 			continue
 		}
+		// event_date stays UTC while the gateway's own charts bucket by Seoul day, and that
+		// is deliberate. It is a partition key here (PARTITION BY toYYYYMM(event_date)) on an
+		// append-only export, so switching conventions would leave old rows dated one way and
+		// new rows the other inside a single table, with no way to rewrite the history - the
+		// same discontinuity that made the analytics_daily rollup worth fixing, except this
+		// one could not be repaired afterwards. event_time carries the full instant, so a
+		// warehouse query that needs Seoul days can derive them from it.
 		ts := e.CreatedAt.UTC()
 		if ts.IsZero() {
 			ts = time.Now().UTC()
@@ -520,49 +527,49 @@ func requestFactRow(rec store.LogRecord) map[string]any {
 		ipHash = audit.HashText(r.ClientIP)[:16]
 	}
 	return map[string]any{
-		"event_date":        ts.Format("2006-01-02"),
-		"event_time":        ts.Format(time.RFC3339Nano),
-		"request_id":        r.ID,
-		"trace_id":          r.TraceID,
-		"session_id":        r.SessionID,
-		"api_key_id":        r.APIKeyID,
-		"team":              "", // resolved at query time via api_key; kept blank to avoid a join here
-		"endpoint":          r.Endpoint,
-		"provider":          r.Provider,
-		"model":             r.Model,
-		"requested_model":   r.RequestedModel,
-		"stream":            b2i(r.Stream),
-		"status_code":       r.StatusCode,
-		"error_category":    errorCategory(r.StatusCode, r.Error),
-		"latency_ms":        r.LatencyMS,
-		"first_chunk_ms":    r.FirstChunkMS,
-		"prompt_tokens":     promptTokens,
-		"completion_tokens": completionTokens,
-		"cached_tokens":     cachedTokens,
-		"reasoning_tokens":  reasoningTokens,
-		"total_tokens":      totalTokens,
-		"cost_krw":          cost,
-		"currency":          currency,
-		"repo":              r.Repo,
-		"branch":            r.Branch,
-		"project":           r.Project,
-		"service":           r.Service,
-		"cost_center":       r.CostCenter,
-		"task_type":         r.TaskType,
-		"prompt_name":       r.PromptName,
-		"prompt_version":    r.PromptVersion,
+		"event_date":         ts.Format("2006-01-02"),
+		"event_time":         ts.Format(time.RFC3339Nano),
+		"request_id":         r.ID,
+		"trace_id":           r.TraceID,
+		"session_id":         r.SessionID,
+		"api_key_id":         r.APIKeyID,
+		"team":               "", // resolved at query time via api_key; kept blank to avoid a join here
+		"endpoint":           r.Endpoint,
+		"provider":           r.Provider,
+		"model":              r.Model,
+		"requested_model":    r.RequestedModel,
+		"stream":             b2i(r.Stream),
+		"status_code":        r.StatusCode,
+		"error_category":     errorCategory(r.StatusCode, r.Error),
+		"latency_ms":         r.LatencyMS,
+		"first_chunk_ms":     r.FirstChunkMS,
+		"prompt_tokens":      promptTokens,
+		"completion_tokens":  completionTokens,
+		"cached_tokens":      cachedTokens,
+		"reasoning_tokens":   reasoningTokens,
+		"total_tokens":       totalTokens,
+		"cost_krw":           cost,
+		"currency":           currency,
+		"repo":               r.Repo,
+		"branch":             r.Branch,
+		"project":            r.Project,
+		"service":            r.Service,
+		"cost_center":        r.CostCenter,
+		"task_type":          r.TaskType,
+		"prompt_name":        r.PromptName,
+		"prompt_version":     r.PromptVersion,
 		"prompt_fingerprint": r.PromptFingerprint,
-		"tool_count":        r.ToolCount,
-		"failover":          b2i(r.Failover),
-		"fallback_from":     r.FallbackFrom,
-		"fallback_reason":   r.FallbackReason,
-		"route_reason":      r.RouteReason,
-		"route_detail":      r.RouteDetail,
-		"complexity_score":  r.Complexity,
-		"language_top":      langTop,
-		"client_ip_hash":    ipHash,
-		"request_hash":      r.RequestHash,
-		"ingested_at":       time.Now().UTC().Format(time.RFC3339Nano),
+		"tool_count":         r.ToolCount,
+		"failover":           b2i(r.Failover),
+		"fallback_from":      r.FallbackFrom,
+		"fallback_reason":    r.FallbackReason,
+		"route_reason":       r.RouteReason,
+		"route_detail":       r.RouteDetail,
+		"complexity_score":   r.Complexity,
+		"language_top":       langTop,
+		"client_ip_hash":     ipHash,
+		"request_hash":       r.RequestHash,
+		"ingested_at":        time.Now().UTC().Format(time.RFC3339Nano),
 	}
 }
 

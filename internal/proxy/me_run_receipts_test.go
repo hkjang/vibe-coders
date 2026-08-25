@@ -9,9 +9,9 @@ func TestRunReceiptID(t *testing.T) {
 	}{
 		{"/v1/app-runs/apprun_1/receipt", "/v1/app-runs/", "apprun_1", true},
 		{"/v1/workflow-runs/wfrun_9/receipt", "/v1/workflow-runs/", "wfrun_9", true},
-		{"/v1/app-runs/apprun_1", "/v1/app-runs/", "", false},        // no /receipt
-		{"/v1/app-runs//receipt", "/v1/app-runs/", "", false},         // empty id
-		{"/v1/app-runs/apprun_1/run", "/v1/app-runs/", "", false},     // wrong action
+		{"/v1/app-runs/apprun_1", "/v1/app-runs/", "", false},     // no /receipt
+		{"/v1/app-runs//receipt", "/v1/app-runs/", "", false},     // empty id
+		{"/v1/app-runs/apprun_1/run", "/v1/app-runs/", "", false}, // wrong action
 	}
 	for _, c := range cases {
 		got, ok := runReceiptID(c.path, c.prefix)

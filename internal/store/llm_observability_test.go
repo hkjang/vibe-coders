@@ -129,14 +129,16 @@ func TestLLMTimeseriesPromptsAndComparisonQueries(t *testing.T) {
 	if len(hourly) != 2 {
 		t.Fatalf("expected 2 hourly points, got %+v", hourly)
 	}
+	// Hour labels are Seoul hours, matching the daily buckets, quota resets and the
+	// heatmap. The fixture writes 09:00 UTC, which is 18:00 in Seoul.
 	first := hourly[0]
-	if first.Date != "2026-06-13T09" || first.Requests != 2 || first.Tokens != 150 || first.CostKRW != 15 || first.Errors != 1 ||
+	if first.Date != "2026-06-13T18" || first.Requests != 2 || first.Tokens != 150 || first.CostKRW != 15 || first.Errors != 1 ||
 		!floatClose(first.AverageFirstChunkMS, 30) || first.EvaluationFailures != 1 || first.FeedbackTotal != 2 ||
 		first.NegativeFeedback != 1 || first.AlignmentSamples != 2 || !floatClose(first.AlignmentRate, 1) {
 		t.Fatalf("hourly first point mismatch: %+v", first)
 	}
 	second := hourly[1]
-	if second.Date != "2026-06-13T10" || second.Requests != 1 || second.EvaluationFailures != 1 || second.AlignmentSamples != 1 || second.AlignmentRate != 0 {
+	if second.Date != "2026-06-13T19" || second.Requests != 1 || second.EvaluationFailures != 1 || second.AlignmentSamples != 1 || second.AlignmentRate != 0 {
 		t.Fatalf("hourly second point mismatch: %+v", second)
 	}
 	daily, err := db.LLMTimeseries(ctx, "day", base.Add(-time.Hour))

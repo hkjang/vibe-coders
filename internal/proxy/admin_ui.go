@@ -171,7 +171,21 @@ const adminHTML = `<!doctype html>
     .status.error { color: var(--bad); background: var(--bad-bg); }
     .status.warn  { color: var(--warn); background: var(--warn-bg); }
     .muted { color: var(--muted); }
-    .empty, .error-line { padding: 18px; color: var(--muted); }
+    /* Three different situations used to render identically in muted grey: "nothing
+       here", "still fetching", and "this failed". An operator staring at a blank panel
+       could not tell which, so each now reads differently at a glance. */
+    .empty { padding: 18px; color: var(--muted); }
+    .error-line {
+      padding: 14px 18px; color: var(--bad); background: var(--bad-bg);
+      border-left: 3px solid var(--bad); border-radius: 6px; margin: 8px 0;
+    }
+    .loading { padding: 18px; color: var(--muted); display: flex; align-items: center; gap: 9px; }
+    .loading::before {
+      content: ''; width: 9px; height: 9px; border-radius: 50%;
+      background: var(--accent); opacity: 0.35; animation: loading-pulse 1.1s ease-in-out infinite;
+    }
+    @keyframes loading-pulse { 0%, 100% { opacity: 0.25; transform: scale(0.8); } 50% { opacity: 0.9; transform: scale(1); } }
+    @media (prefers-reduced-motion: reduce) { .loading::before { animation: none; opacity: 0.6; } }
     .error-line { color: var(--bad); }
     .banner { padding: 12px 14px; border-radius: 8px; font-size: 13px; line-height: 1.5; border: 1px solid var(--line); color: var(--ink); }
     .banner.warn { background: var(--warn-bg); border-color: var(--warn); }
@@ -186,6 +200,92 @@ const adminHTML = `<!doctype html>
     .stepper .step.blocked { border-color: var(--bad); background: var(--bad-bg); }
     .prompt { max-height: 80px; overflow: hidden; color: var(--ink); white-space: pre-wrap; }
     .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; background: var(--pill-bg); color: var(--ink); font-size: 12px; }
+
+    /* Invalid field marking. Validation failures reported only as a toast ("이름과 URL을
+       입력하세요") leave the operator to work out WHICH of a nine-column form is empty. */
+    .field-invalid {
+      border-color: var(--bad) !important;
+      box-shadow: 0 0 0 2px color-mix(in srgb, var(--bad) 22%, transparent);
+    }
+    .field-invalid:focus { outline-color: var(--bad); }
+
+    /* Command palette. The admin has ~35 permission-filtered destinations spread across
+       grouped nav menus; reaching one meant remembering which group it lives under. The
+       list is built from the rendered nav at open time, so it shows exactly the screens
+       this operator is allowed to see and can never drift from the menu. */
+    .palette-backdrop {
+      position: fixed; inset: 0; background: rgba(15,23,42,0.45);
+      display: none; align-items: flex-start; justify-content: center;
+      z-index: 70; padding: 12vh 16px 16px;
+    }
+    .palette-backdrop.open { display: flex; }
+    .palette {
+      width: min(560px, 100%); background: var(--panel); color: var(--ink);
+      border: 1px solid var(--line-strong); border-radius: 12px; overflow: hidden;
+      box-shadow: 0 24px 64px rgba(15,23,42,0.32); display: flex; flex-direction: column;
+      max-height: min(60vh, 520px);
+    }
+    .palette input {
+      border: 0; border-bottom: 1px solid var(--line); border-radius: 0;
+      padding: 14px 16px; font-size: 15px; background: transparent; color: var(--ink); width: 100%;
+    }
+    .palette input:focus { outline: none; }
+    .palette-list { overflow-y: auto; padding: 6px; margin: 0; list-style: none; }
+    .palette-item {
+      display: flex; align-items: center; gap: 10px; padding: 9px 10px;
+      border-radius: 8px; cursor: pointer; font-size: 13px;
+    }
+    .palette-item[aria-selected="true"] { background: var(--row-hover); }
+    .palette-item .pi-kind {
+      flex: 0 0 auto; font-size: 11px; color: var(--muted);
+      border: 1px solid var(--line); border-radius: 5px; padding: 1px 6px;
+    }
+    .palette-item .pi-label { flex: 1 1 auto; }
+    .palette-item .pi-hash { flex: 0 0 auto; color: var(--muted); font-size: 11px; }
+    .palette-empty { padding: 18px 16px; color: var(--muted); font-size: 13px; }
+    .palette-foot {
+      border-top: 1px solid var(--line); padding: 7px 12px;
+      color: var(--muted); font-size: 11px; display: flex; gap: 12px; flex-wrap: wrap;
+    }
+
+    /* Route progress. route() awaits a screen's data before painting, so a slow screen
+       used to leave the PREVIOUS one on display with no sign the click had registered. */
+    #route-progress {
+      position: fixed; top: 0; left: 0; height: 2px; width: 0;
+      background: var(--accent); z-index: 80; opacity: 0;
+      transition: width 180ms ease-out, opacity 180ms ease-out;
+    }
+    #route-progress.active { opacity: 1; width: 70%; }
+    #route-progress.done { width: 100%; opacity: 0; }
+    @media (prefers-reduced-motion: reduce) { #route-progress { transition: none; } }
+
+    /* Toasts. Every admin action used to report through a blocking window.alert(),
+       which interrupts the operator and — worse — said nothing at all on success, so
+       there was no way to tell a completed save from a silent failure. */
+    #toasts {
+      position: fixed; right: 18px; bottom: 18px; z-index: 60;
+      display: flex; flex-direction: column-reverse; gap: 8px;
+      max-width: min(420px, calc(100vw - 36px)); pointer-events: none;
+    }
+    .toast {
+      pointer-events: auto; display: flex; align-items: flex-start; gap: 10px;
+      padding: 11px 12px; border-radius: 10px; border: 1px solid var(--line-strong);
+      background: var(--panel); color: var(--ink); font-size: 13px; line-height: 1.45;
+      box-shadow: 0 8px 24px rgba(15,23,42,0.18);
+      animation: toast-in 140ms ease-out;
+    }
+    @media (prefers-reduced-motion: reduce) { .toast { animation: none; } }
+    @keyframes toast-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+    .toast.ok { border-left: 3px solid var(--accent); }
+    .toast.error { border-left: 3px solid var(--bad); background: var(--bad-bg); }
+    .toast.info { border-left: 3px solid var(--accent-2); }
+    .toast .toast-icon { flex: 0 0 auto; font-size: 14px; line-height: 1.35; }
+    .toast .toast-msg { flex: 1 1 auto; word-break: break-word; white-space: pre-wrap; }
+    .toast .toast-close {
+      flex: 0 0 auto; background: none; border: 0; color: var(--muted);
+      cursor: pointer; font-size: 15px; line-height: 1; padding: 0 2px; height: auto;
+    }
+    .toast .toast-close:hover { color: var(--ink); }
 
     .modal-backdrop {
       position: fixed; inset: 0; background: rgba(15,23,42,0.55);
@@ -385,6 +485,20 @@ const adminHTML = `<!doctype html>
     .xview-launcher { background:linear-gradient(135deg,var(--accent),var(--accent-2));border:0;color:#fff;box-shadow:0 5px 16px color-mix(in srgb,var(--accent) 25%,transparent);white-space:nowrap; }
     .xview-launcher:hover { transform:translateY(-1px); }
 
+    /* Wide tables scroll inside their own box instead of being crushed. Because tables
+       are table-layout:fixed with overflow-wrap:anywhere, a seven-column table does not
+       overflow the page — it squeezes every column and breaks words mid-syllable, which
+       reads worse. The wrapper is added after render (wrapViewTables) because section
+       sets overflow:hidden, so a bare min-width would clip instead of scroll. */
+    .table-scroll { overflow-x: auto; }
+
+    @media (max-width: 860px) {
+      /* Forms declare their column template inline, and an inline style wins over any
+         stylesheet rule — media query or not — unless it is forced. 31 forms hardcode
+         fixed pixel columns that do not fit a narrow viewport. */
+      .inline-form { grid-template-columns: 1fr !important; }
+      .table-scroll > table { min-width: 680px; }
+    }
     @media (max-width: 960px) {
       header { flex-direction: column; align-items: flex-start; gap: 8px; }
       main { padding: 14px; }
@@ -512,6 +626,7 @@ const adminHTML = `<!doctype html>
               <option value="60">60초</option>
             </select>
           </label>
+          <button id="palette-toggle" class="ghost" type="button" title="화면 검색·이동 (Ctrl/⌘ K)">🔎 화면 찾기</button>
           <button id="theme-toggle" class="ghost" type="button" title="라이트/다크 전환 (t)">🌓 테마 전환</button>
           <button id="help-toggle" class="ghost" type="button" title="단축키 도움말 (?)">? 단축키 도움말</button>
           <div id="app-version" class="user-menu-meta">앱 버전 __APP_VERSION__</div>
@@ -546,7 +661,18 @@ const adminHTML = `<!doctype html>
     </form>
   </div>
 
-  <div id="modal-backdrop" class="modal-backdrop">
+  <div id="route-progress"></div>
+  <div id="palette-backdrop" class="palette-backdrop" role="dialog" aria-modal="true" aria-label="명령 팔레트">
+    <div class="palette">
+      <input id="palette-input" type="text" autocomplete="off" spellcheck="false"
+             placeholder="화면 이름이나 경로로 이동… (예: 라우팅, settings)" aria-label="화면 검색"
+             role="combobox" aria-expanded="true" aria-controls="palette-list" aria-autocomplete="list">
+      <ul class="palette-list" id="palette-list" role="listbox" aria-label="검색 결과"></ul>
+      <div class="palette-foot"><span><kbd>&#8593;</kbd><kbd>&#8595;</kbd> 이동</span><span><kbd>Enter</kbd> 열기</span><span><kbd>Esc</kbd> 닫기</span></div>
+    </div>
+  </div>
+  <div id="toasts" role="status" aria-live="polite" aria-atomic="false"></div>
+  <div id="modal-backdrop" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="modal-title">
     <div class="modal">
       <header>
         <h3 id="modal-title">상세</h3>
@@ -861,11 +987,201 @@ const adminHTML = `<!doctype html>
       }
       currentModalState = state;
       updateModalBack();
+      wrapViewTables(document.getElementById('modal-body'));
     }
     function updateModalBack() {
       const back = document.getElementById('modal-back');
       if (back) back.style.display = modalStack.length > 0 ? 'inline-block' : 'none';
     }
+    // toast reports the outcome of an action without blocking the page.
+    //
+    // Defaults to 'error' on purpose: this replaces ~118 window.alert() calls that were
+    // almost all failures or validation messages, so an unmarked call keeps exactly the
+    // meaning it had. Successes must opt in with 'ok', which is the point — an action
+    // that previously said nothing on success now has somewhere to say it.
+    //
+    // Errors stay until dismissed; an operator who looked away should not lose the only
+    // report that a save failed.
+    function toast(message, kind) {
+      const host = document.getElementById('toasts');
+      const text = String(message == null ? '' : message);
+      if (!host) { console.error(text); return; }
+      kind = kind || 'error';
+      const el = document.createElement('div');
+      el.className = 'toast ' + kind;
+      const icon = document.createElement('span');
+      icon.className = 'toast-icon';
+      icon.textContent = kind === 'ok' ? '\u2713' : (kind === 'info' ? '\u2139' : '\u26a0');
+      const body = document.createElement('span');
+      body.className = 'toast-msg';
+      body.textContent = text;             // textContent, never innerHTML: messages carry server strings
+      const close = document.createElement('button');
+      close.type = 'button';
+      close.className = 'toast-close';
+      close.setAttribute('aria-label', '알림 닫기');
+      close.textContent = '\u00d7';
+      let timer = null;
+      const dismiss = () => { clearTimeout(timer); el.remove(); };
+      close.addEventListener('click', dismiss);
+      el.append(icon, body, close);
+      host.appendChild(el);
+      // Keep the stack shallow so a burst of failures cannot cover the page.
+      while (host.children.length > 4) host.removeChild(host.firstChild);
+      if (kind !== 'error') timer = setTimeout(dismiss, 4000);
+      return el;
+    }
+    window.toast = toast;
+
+    // ---------- overlay focus management ----------
+    // Both overlays declare aria-modal, which promises the rest of the page is inert.
+    // Without a trap that promise is false: Tab walks straight out into the page behind,
+    // and on close the keyboard lands back at the top of the document instead of where
+    // the operator was. Screen-reader and keyboard users pay for both.
+    const focusableSelector = [
+      'a[href]', 'button:not([disabled])', 'input:not([disabled])',
+      'select:not([disabled])', 'textarea:not([disabled])', '[tabindex]:not([tabindex="-1"])',
+    ].join(',');
+    let focusReturn = null;
+
+    function focusablesIn(container) {
+      return Array.from(container.querySelectorAll(focusableSelector))
+        .filter((el) => el.offsetParent !== null || el === document.activeElement);
+    }
+    // Remember where focus came from so closing can put it back.
+    function captureFocusOrigin() {
+      focusReturn = document.activeElement;
+    }
+    function restoreFocusOrigin() {
+      const target = focusReturn;
+      focusReturn = null;
+      if (target && typeof target.focus === 'function' && document.contains(target)) {
+        target.focus();
+      }
+    }
+    // Called from the global keydown handler for whichever overlay is open.
+    function trapFocusInside(container, e) {
+      if (e.key !== 'Tab') return;
+      const items = focusablesIn(container);
+      if (!items.length) { e.preventDefault(); return; }
+      const first = items[0];
+      const last = items[items.length - 1];
+      const active = document.activeElement;
+      if (e.shiftKey && (active === first || !container.contains(active))) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && (active === last || !container.contains(active))) {
+        e.preventDefault();
+        first.focus();
+      }
+    }
+
+    // ---------- command palette ----------
+    // Entries come from the live nav, which the server already filtered by the caller's
+    // allowed_tabs. Reading it at open time means the palette inherits those permissions
+    // for free and stays correct when the menu changes, instead of duplicating a route
+    // table that would quietly rot.
+    let paletteItems = [];
+    let paletteIndex = 0;
+
+    function buildCommandIndex() {
+      const seen = new Set();
+      const items = [];
+      document.querySelectorAll('#tabs a[data-tab]').forEach((a) => {
+        const hash = a.getAttribute('href') || '';
+        const label = (a.textContent || '').trim();
+        if (!hash || !label || seen.has(hash)) return;
+        seen.add(hash);
+        // Show the owning menu so duplicate-sounding screens stay distinguishable.
+        // The toggle reads like "대시보드 ▾"; drop the chevron the CSS-less text carries.
+        const group = a.closest('.nav-group');
+        const toggle = group && group.querySelector('.nav-group-toggle');
+        const groupLabel = toggle ? toggle.textContent.replace(/[\u25be\u25bc]/g, '').trim() : '';
+        items.push({ kind: groupLabel || '화면', label, hash, run: () => { location.hash = hash; } });
+      });
+      items.push(
+        { kind: '동작', label: '현재 화면 다시 불러오기', hash: 'r', run: () => route() },
+        { kind: '동작', label: '다크 모드 전환', hash: 't', run: () => document.getElementById('theme-toggle').click() },
+        { kind: '동작', label: '단축키 도움말', hash: '?', run: () => openHelp() },
+        { kind: '동작', label: 'XView 요청 탐색', hash: 'shift+X', run: () => openXViewLauncher() }
+      );
+      return items;
+    }
+
+    // Subsequence match, so "라헬" finds "라우팅 · 헬스" and "prov" finds "/providers".
+    function paletteMatches(query, entry) {
+      const q = query.trim().toLowerCase();
+      if (!q) return true;
+      const hay = (entry.label + ' ' + entry.hash + ' ' + entry.kind).toLowerCase();
+      if (hay.includes(q)) return true;
+      let i = 0;
+      for (const ch of hay) {
+        if (ch === q[i]) i++;
+        if (i === q.length) return true;
+      }
+      return false;
+    }
+
+    function renderPaletteList(query) {
+      const list = document.getElementById('palette-list');
+      const matches = paletteItems.filter((e) => paletteMatches(query, e)).slice(0, 40);
+      paletteIndex = 0;
+      if (!matches.length) {
+        list.innerHTML = '<li class="palette-empty">일치하는 화면이 없습니다.</li>';
+        paletteVisible = [];
+        return;
+      }
+      paletteVisible = matches;
+      list.innerHTML = matches.map((e, i) =>
+        '<li class="palette-item" role="option" data-i="' + i + '" aria-selected="' + (i === 0) + '">' +
+          '<span class="pi-kind">' + escapeHTML(e.kind) + '</span>' +
+          '<span class="pi-label">' + escapeHTML(e.label) + '</span>' +
+          '<span class="pi-hash">' + escapeHTML(e.hash) + '</span>' +
+        '</li>').join('');
+      Array.from(list.children).forEach((li) => {
+        li.addEventListener('mouseenter', () => setPaletteIndex(Number(li.dataset.i)));
+        li.addEventListener('click', () => runPaletteItem(Number(li.dataset.i)));
+      });
+    }
+    let paletteVisible = [];
+
+    function setPaletteIndex(next) {
+      const list = document.getElementById('palette-list');
+      if (!paletteVisible.length) return;
+      paletteIndex = (next + paletteVisible.length) % paletteVisible.length;
+      Array.from(list.children).forEach((li, i) => {
+        li.setAttribute('aria-selected', String(i === paletteIndex));
+        if (i === paletteIndex) li.scrollIntoView({ block: 'nearest' });
+      });
+    }
+
+    function runPaletteItem(i) {
+      const entry = paletteVisible[typeof i === 'number' ? i : paletteIndex];
+      if (!entry) return;
+      closeCommandPalette();
+      entry.run();
+    }
+
+    function openCommandPalette() {
+      if (!paletteIsOpen()) captureFocusOrigin();
+      paletteItems = buildCommandIndex();
+      const backdrop = document.getElementById('palette-backdrop');
+      const input = document.getElementById('palette-input');
+      backdrop.classList.add('open');
+      input.value = '';
+      renderPaletteList('');
+      input.focus();
+    }
+    function closeCommandPalette() {
+      const wasOpen = paletteIsOpen();
+      document.getElementById('palette-backdrop').classList.remove('open');
+      // Navigating away re-renders the page, so only restore when we are staying put.
+      if (wasOpen) restoreFocusOrigin();
+    }
+    function paletteIsOpen() {
+      return document.getElementById('palette-backdrop').classList.contains('open');
+    }
+    window.openCommandPalette = openCommandPalette;
+
     function openModal(title, html, requestId, opts) {
       opts = opts || {};
       const backdrop = document.getElementById('modal-backdrop');
@@ -878,19 +1194,27 @@ const adminHTML = `<!doctype html>
           requestId: currentModalState.requestId,
           opts: currentModalState.opts,
         });
+      } else {
+        // First overlay in the stack: remember where the keyboard was.
+        captureFocusOrigin();
       }
       _applyModalState({ title: title, html: html, requestId: requestId, opts: opts });
       backdrop.classList.add('open');
+      const close = document.getElementById('modal-close');
+      if (close) close.focus();
     }
     function modalBack() {
       if (modalStack.length === 0) return;
       _applyModalState(modalStack.pop());
     }
     function closeModal() {
-      document.getElementById('modal-backdrop').classList.remove('open');
+      const backdrop = document.getElementById('modal-backdrop');
+      const wasOpen = backdrop.classList.contains('open');
+      backdrop.classList.remove('open');
       modalStack = [];
       currentModalState = null;
       updateModalBack();
+      if (wasOpen) restoreFocusOrigin();
     }
     async function runAIAnalysis(id) {
       const areaId = 'ai-analysis-result';
@@ -931,11 +1255,17 @@ const adminHTML = `<!doctype html>
       if (token) h.Authorization = 'Bearer ' + token;
       return h;
     }
+    // options.success: message to toast when the call succeeds. Opt-in rather than
+    // automatic, because several read-only screens query over POST (routing preview,
+    // pattern conflicts, chat test) and would otherwise announce a save that never
+    // happened.
     async function api(path, options = {}) {
+      const successMessage = options.success;
       const doFetch = () => {
         const requestHeaders = headers();
         if (options.body) requestHeaders['Content-Type'] = 'application/json';
-        return fetch(path, { ...options, headers: requestHeaders });
+        const { success, ...init } = options;
+        return fetch(path, { ...init, headers: requestHeaders });
       };
       let res = await doFetch();
       // JWT 모드: access 만료 시 refresh 회전 후 1회 재시도, 실패하면 재로그인 유도
@@ -952,11 +1282,101 @@ const adminHTML = `<!doctype html>
         const text = await res.text();
         throw new Error(text || res.statusText);
       }
+      if (successMessage) toast(successMessage, 'ok');
       if (res.status === 204) return null;
       return res.json();
     }
 
     // ---------- formatting ----------
+    // ---------- form validation ----------
+    // requireFields checks a set of inputs, marks every empty one, focuses the first and
+    // names them in a single toast. Previously a failure produced only the toast, so on a
+    // wide form the operator had to hunt for the field the message meant.
+    //
+    // Returns true when everything is filled, so callers read:
+    //   if (!requireFields([...])) return;
+    function clearFieldErrors(ids) {
+      ids.forEach((id) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.classList.remove('field-invalid');
+        el.removeAttribute('aria-invalid');
+      });
+    }
+    function requireFields(fields) {
+      const ids = fields.map((f) => f.id);
+      clearFieldErrors(ids);
+      const missing = fields.filter((f) => {
+        const el = document.getElementById(f.id);
+        return !el || !String(el.value || '').trim();
+      });
+      if (missing.length === 0) return true;
+      missing.forEach((f) => {
+        const el = document.getElementById(f.id);
+        if (!el) return;
+        el.classList.add('field-invalid');
+        el.setAttribute('aria-invalid', 'true');
+        // Clear the mark as soon as the operator starts fixing it, so the form does not
+        // keep accusing a field they have already filled in.
+        el.addEventListener('input', () => clearFieldErrors([f.id]), { once: true });
+      });
+      const first = document.getElementById(missing[0].id);
+      if (first) first.focus();
+      toast(missing.map((f) => f.label).join(', ') + ' 을(를) 입력하세요');
+      return false;
+    }
+
+    // ---------- time formatting ----------
+    // Timestamps arrive as UTC RFC3339 and were rendered verbatim in ~29 places, so an
+    // operator scanning a table read "2026-08-21T09:51:46.12Z" and had to convert it in
+    // their head to answer the only question they actually had: is this recent?
+    //
+    // Relative text answers that at a glance; the exact local time stays one hover away
+    // in the title attribute, because "3분 전" is useless when correlating with an
+    // external log. Rendering is browser-local, which is what an operator's clock says.
+    function parseTS(value) {
+      if (!value) return null;
+      const d = new Date(value);
+      return isNaN(d.getTime()) ? null : d;
+    }
+    function fmtAbsTime(value) {
+      const d = parseTS(value);
+      if (!d) return '-';
+      const pad = (n) => String(n).padStart(2, '0');
+      const stamp = pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+      // The year is noise for anything in the current one, and essential outside it.
+      return d.getFullYear() === new Date().getFullYear() ? stamp : d.getFullYear() + '-' + stamp;
+    }
+    function fmtRelTime(value) {
+      const d = parseTS(value);
+      if (!d) return '-';
+      const deltaMs = Date.now() - d.getTime();
+      const future = deltaMs < 0;
+      const suffix = future ? ' 후' : ' 전';
+      const secs = Math.abs(deltaMs) / 1000;
+      if (secs < 45) return future ? '곧' : '방금';
+      const mins = secs / 60;
+      if (mins < 60) return Math.round(mins) + '분' + suffix;
+      const hours = mins / 60;
+      if (hours < 24) return Math.round(hours) + '시간' + suffix;
+      const days = hours / 24;
+      if (days < 30) return Math.round(days) + '일' + suffix;
+      // Past a month the relative form stops being informative; show the date instead.
+      return fmtAbsTime(value);
+    }
+    // timeCell is the default for a timestamp in a table or list.
+    function timeCell(value) {
+      const d = parseTS(value);
+      if (!d) return '<span class="muted">-</span>';
+      return '<span title="' + escapeAttr(d.toLocaleString('ko-KR')) + '">' + escapeHTML(fmtRelTime(value)) + '</span>';
+    }
+    // timeExact is for ranges and boundaries, where "2시간 전" reads worse than the time.
+    function timeExact(value) {
+      const d = parseTS(value);
+      if (!d) return '<span class="muted">-</span>';
+      return '<span title="' + escapeAttr(d.toLocaleString('ko-KR')) + '">' + escapeHTML(fmtAbsTime(value)) + '</span>';
+    }
+
     function fmt(value) { return Number(value || 0).toLocaleString('ko-KR'); }
     function money(value) {
       const n = Number(value || 0);
@@ -1374,6 +1794,7 @@ const adminHTML = `<!doctype html>
         renderForbidden(tab);
         return;
       }
+      routeProgress(true);
       try {
         switch (tab) {
           case 'me':        await renderMeHome(); break;
@@ -1451,8 +1872,58 @@ const adminHTML = `<!doctype html>
           default: await renderDashboard();
         }
       } catch (err) {
-        document.getElementById('view').innerHTML = '<div class="error-line">' + escapeHTML(err.message) + '</div>';
+        // A bare message with no context left the operator with nowhere to go: which
+        // screen failed, and how to retry. Name the screen, keep the detail, and offer
+        // both a retry and a way out.
+        const label = tabLabelFor(tab);
+        document.getElementById('view').innerHTML =
+          '<div class="banner error" style="margin:14px">' +
+            '<strong>' + escapeHTML(label) + ' 화면을 불러오지 못했습니다.</strong>' +
+            '<div class="muted" style="margin-top:6px; white-space:pre-wrap">' + escapeHTML(err.message || String(err)) + '</div>' +
+            '<div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:10px">' +
+              '<button type="button" onclick="route()">다시 시도</button>' +
+              '<button type="button" class="secondary" onclick="openCommandPalette()">다른 화면 열기</button>' +
+            '</div>' +
+          '</div>';
+      } finally {
+        wrapViewTables();
+        routeProgress(false);
       }
+    }
+    // tabLabelFor reads the nav so the error names the screen exactly as the menu does.
+    function tabLabelFor(tab) {
+      const link = document.querySelector('#tabs a[data-tab="' + (tab || '') + '"]');
+      return (link && link.textContent.trim()) || tab || '요청한';
+    }
+    // wrapViewTables gives every rendered table its own horizontal scroll box.
+    // Done after render rather than at ~181 call sites, and idempotent so repeated
+    // renders (or a modal reusing markup) never nest wrappers.
+    function wrapViewTables(root) {
+      const host = root || document.getElementById('view');
+      if (!host) return;
+      host.querySelectorAll('table').forEach((table) => {
+        const parent = table.parentElement;
+        if (!parent || parent.classList.contains('table-scroll')) return;
+        const box = document.createElement('div');
+        box.className = 'table-scroll';
+        parent.insertBefore(box, table);
+        box.appendChild(table);
+      });
+    }
+
+    let routeProgressTimer = null;
+    function routeProgress(active) {
+      const bar = document.getElementById('route-progress');
+      if (!bar) return;
+      clearTimeout(routeProgressTimer);
+      if (active) {
+        bar.classList.remove('done');
+        bar.classList.add('active');
+        return;
+      }
+      bar.classList.remove('active');
+      bar.classList.add('done');
+      routeProgressTimer = setTimeout(() => bar.classList.remove('done'), 220);
     }
     window.addEventListener('hashchange', route);
 
@@ -1621,6 +2092,9 @@ const adminHTML = `<!doctype html>
       scale:    sessionStorage.getItem('xviewScale')     || 'log',
       metric:   sessionStorage.getItem('xviewMetric')    || 'latency',
       viewMode: sessionStorage.getItem('xviewViewMode')  || 'category', // 'category' | 'model'
+      from:     '',
+      to:       '',
+      tz:       sessionStorage.getItem('xviewTz')        || 'Asia/Seoul',
     };
     // per-model palette — up to 10 distinct colors
     const MODEL_PALETTE = ['#3b82f6','#f97316','#22c55e','#a855f7','#eab308','#ec4899','#06b6d4','#ef4444','#84cc16','#8b5cf6'];
@@ -1678,13 +2152,37 @@ const adminHTML = `<!doctype html>
     }
 
     async function renderXView(initial) {
+      const savedResponse = await api('/admin/saved-filters?view=xview').catch(() => ({ filters: [] }));
+      const savedViews = savedResponse.filters || [];
+      const requestedSavedID = initial ? (initial.get('saved') || '') : '';
+      const activeSavedView = savedViews.find(view => view.id === requestedSavedID) || null;
+      if (activeSavedView) {
+        const merged = new URLSearchParams(activeSavedView.params || '');
+        initial.forEach((value, key) => {
+          if (key !== 'saved') merged.set(key, value);
+        });
+        merged.set('saved', requestedSavedID);
+        initial = merged;
+      }
       if (initial) {
         if (initial.get('window'))   xviewState.window   = initial.get('window');
         if (initial.get('metric'))   xviewState.metric   = initial.get('metric');
+        if (initial.get('scale'))    xviewState.scale    = initial.get('scale');
         if (initial.get('viewMode')) xviewState.viewMode = initial.get('viewMode');
+        xviewState.from = initial.get('from') || '';
+        xviewState.to   = initial.get('to')   || '';
+        if (initial.get('tz')) xviewState.tz = initial.get('tz');
       }
       const params = new URLSearchParams();
-      params.set('window', xviewState.window);
+      // Absolute from/to range takes precedence over the relative window; tz (default
+      // Asia/Seoul) tells the server which timezone to interpret the wall-clock bounds in.
+      if (xviewState.from || xviewState.to) {
+        if (xviewState.from) params.set('from', xviewState.from);
+        if (xviewState.to)   params.set('to', xviewState.to);
+        params.set('tz', xviewState.tz);
+      } else {
+        params.set('window', xviewState.window);
+      }
       // multi-model: ?models= takes precedence; fall back to legacy ?model=
       const modelsParam = initial ? (initial.get('models') || '') : '';
       const singleModel = initial ? (initial.get('model') || '') : '';
@@ -1715,13 +2213,37 @@ const adminHTML = `<!doctype html>
 
       const view = document.getElementById('view');
       const xviewHero = '<div class="home-hero"><h2>✦ XView</h2><div class="home-sub">수천 개 요청 속에서 느림·오류·비용·정책 신호를 찾고, 한 점을 클릭해 “왜 이렇게 처리됐는가”까지 이어서 설명합니다.</div><div class="home-actions"><button type="button" class="home-action primary" onclick="openXViewLauncher()"><strong>요청 ID로 설명 찾기</strong><small>라우팅·안전·비용 근거</small></button><a class="home-action" href="#/waterfall"><strong>Waterfall</strong><small>세션 시간 흐름 분석</small></a><a class="home-action" href="#/requests"><strong>호출 이력</strong><small>원문과 응답 상세</small></a><a class="home-action" href="#/llm"><strong>LLM 관측</strong><small>평가·피드백·패턴</small></a></div></div>';
-      view.innerHTML = xviewHero + section('호출 신호 요약', '<div class="kpis">' +
-        kpi('분석 요청',fmt(points.length)) + kpi('확인 필요','<span class="status '+(attentionCount?'warn':'')+'">'+fmt(attentionCount)+'</span>') + kpi('오류', '<span style="color:var(--bad)">'+fmt(categoryCounts.error)+'</span>') + kpi('정책 신호',fmt(categoryCounts.governance)) + kpi('폴백',fmt(categoryCounts.failover)) + kpi(xviewYLabel(xviewState.metric)+' P95',xviewFmtY(xviewState.metric,p95Value)) + '</div>') +
-        card('신호 구성', '<div class="card-body"><div class="viz-grid" style="margin-top:0"><div class="viz-panel"><div class="viz-title">즉시 확인 비중 <small>오류·정책·폴백</small></div>' + donutVisual(points.length?attentionCount/points.length*100:0,points.length?Math.round(attentionCount/points.length*100)+'%':'0%','확인 필요',[{label:'확인 필요',value:fmt(attentionCount)},{label:'정상·기타',value:fmt(Math.max(0,points.length-attentionCount))}]) + '</div><div class="viz-panel"><div class="viz-title">요청 신호 분포 <small>현재 조회 범위</small></div>' + visualBars(Object.keys(categoryCounts).map(k=>({label:xviewColors[k].label,value:categoryCounts[k]})).sort((a,b)=>b.value-a.value),null,true) + '</div></div></div>') +
-        section('요청 분포 탐색',
+      const savedOptions = '<option value="">저장된 조사 보기</option>' + savedViews.map(saved =>
+        '<option value="' + escapeAttr(saved.id) + '"' + (saved.id === requestedSavedID ? ' selected' : '') +
+          ' title="' + escapeAttr(saved.created_by || '') + '">' + escapeHTML(saved.name) + '</option>'
+      ).join('');
+      const savedState = activeSavedView
+        ? '<span class="status">활성: ' + escapeHTML(activeSavedView.name) + '</span>'
+        : (requestedSavedID ? '<span class="status error">저장된 보기를 찾을 수 없음</span>' : '');
+      const investigationBar =
+        '<div class="toolbar" style="border-bottom:1px solid var(--line); flex-wrap:wrap">' +
+          '<strong>조사 보기</strong>' +
+          '<select id="xv-saved" aria-label="저장된 XView 조사 보기">' + savedOptions + '</select>' +
+          '<button id="xv-save" type="button" class="secondary">새로 저장</button>' +
+          '<button id="xv-overwrite" type="button" class="secondary"' + (activeSavedView ? '' : ' disabled') + '>덮어쓰기</button>' +
+          '<button id="xv-delete-saved" type="button" class="' + (activeSavedView ? 'danger' : 'secondary') + '"' + (activeSavedView ? '' : ' disabled') + '>삭제</button>' +
+          '<button id="xv-copy-link" type="button" class="ghost">링크 복사</button>' +
+          savedState +
+          '<span class="muted" style="margin-left:auto">저장 ' + fmt(savedViews.length) + '개</span>' +
+        '</div>';
+      const xviewDistribution = section('요청 분포 탐색',
+        investigationBar +
         '<div class="toolbar">' +
-          '<select id="xv-window">' +
+          '<select id="xv-window"' + (xviewState.from || xviewState.to ? ' disabled title="기간(from~to) 지정 시 무시됨"' : '') + '>' +
             ['5m','15m','1h','6h','24h'].map(wd => '<option value="' + wd + '"' + (xviewState.window === wd ? ' selected' : '') + '>' + wd + '</option>').join('') +
+          '</select>' +
+          '<label class="muted" style="font-size:12px" for="xv-from">기간</label>' +
+          '<input id="xv-from" type="datetime-local" title="조회 시작 일시" value="' + escapeHTML(xviewState.from) + '">' +
+          '<span class="muted" style="font-size:12px">~</span>' +
+          '<input id="xv-to" type="datetime-local" title="조회 종료 일시" value="' + escapeHTML(xviewState.to) + '">' +
+          '<select id="xv-tz" title="검색 기준 시간대">' +
+            ['Asia/Seoul|서울 (KST, UTC+9)','UTC|UTC','Asia/Tokyo|도쿄 (JST)','America/Los_Angeles|로스앤젤레스 (PT)','America/New_York|뉴욕 (ET)','Europe/London|런던 (GMT/BST)']
+              .map(o => { const [v, lbl] = o.split('|'); return '<option value="' + v + '"' + (xviewState.tz === v ? ' selected' : '') + '>' + lbl + '</option>'; }).join('') +
           '</select>' +
           '<select id="xv-metric">' +
             '<option value="latency"'     + (xviewState.metric === 'latency'      ? ' selected' : '') + '>응답시간</option>' +
@@ -1742,37 +2264,115 @@ const adminHTML = `<!doctype html>
           '<input id="xv-models" placeholder="모델 필터 (콤마 구분)" style="min-width:180px" value="' + escapeHTML(modelsParam || singleModel) + '">' +
           '<input id="xv-endpoint" placeholder="endpoint 필터" value="' + escapeHTML(endpoint) + '">' +
           '<button id="xv-apply" type="submit">적용</button>' +
+          '<button id="xv-reset-range" type="button" class="ghost" title="기간 지정을 해제하고 상대 구간(window)으로 복귀">기간 해제</button>' +
           '<span class="muted">' + fmt(points.length) + '건' + (data.truncated ? ' (최근 6000건으로 제한됨)' : '') + '</span>' +
         '</div>' +
         '<div id="xv-chart" style="padding:14px"></div>' +
         '<div id="xv-legend" style="padding:0 14px 14px"></div>' +
         '<div id="xv-model-table" style="padding:0 14px 14px"></div>'
       );
+      view.innerHTML = xviewHero + xviewDistribution +
+        section('호출 신호 요약', '<div class="kpis">' +
+          kpi('분석 요청',fmt(points.length)) + kpi('확인 필요','<span class="status '+(attentionCount?'warn':'')+'">'+fmt(attentionCount)+'</span>') + kpi('오류', '<span style="color:var(--bad)">'+fmt(categoryCounts.error)+'</span>') + kpi('정책 신호',fmt(categoryCounts.governance)) + kpi('폴백',fmt(categoryCounts.failover)) + kpi(xviewYLabel(xviewState.metric)+' P95',xviewFmtY(xviewState.metric,p95Value)) + '</div>') +
+        card('신호 구성', '<div class="card-body"><div class="viz-grid" style="margin-top:0"><div class="viz-panel"><div class="viz-title">즉시 확인 비중 <small>오류·정책·폴백</small></div>' + donutVisual(points.length?attentionCount/points.length*100:0,points.length?Math.round(attentionCount/points.length*100)+'%':'0%','확인 필요',[{label:'확인 필요',value:fmt(attentionCount)},{label:'정상·기타',value:fmt(Math.max(0,points.length-attentionCount))}]) + '</div><div class="viz-panel"><div class="viz-title">요청 신호 분포 <small>현재 조회 범위</small></div>' + visualBars(Object.keys(categoryCounts).map(k=>({label:xviewColors[k].label,value:categoryCounts[k]})).sort((a,b)=>b.value-a.value),null,true) + '</div></div></div>');
       drawScatter(points, groups, modelIndex);
       renderModelGroupTable(groups);
 
-      const apply = () => {
+      const collectXViewParams = () => {
         xviewState.window   = document.getElementById('xv-window').value;
         xviewState.metric   = document.getElementById('xv-metric').value;
         xviewState.scale    = document.getElementById('xv-scale').value;
         xviewState.viewMode = document.getElementById('xv-viewmode').value;
+        xviewState.from     = document.getElementById('xv-from').value.trim();
+        xviewState.to       = document.getElementById('xv-to').value.trim();
+        xviewState.tz       = document.getElementById('xv-tz').value;
         sessionStorage.setItem('xviewWindow',   xviewState.window);
         sessionStorage.setItem('xviewMetric',   xviewState.metric);
         sessionStorage.setItem('xviewScale',    xviewState.scale);
         sessionStorage.setItem('xviewViewMode', xviewState.viewMode);
+        sessionStorage.setItem('xviewTz',       xviewState.tz);
         const p = new URLSearchParams();
-        p.set('window',   xviewState.window);
         p.set('metric',   xviewState.metric);
+        p.set('scale',    xviewState.scale);
         p.set('viewMode', xviewState.viewMode);
+        // Absolute range takes precedence; only fall back to the relative window when unset.
+        if (xviewState.from || xviewState.to) {
+          if (xviewState.from) p.set('from', xviewState.from);
+          if (xviewState.to)   p.set('to', xviewState.to);
+          p.set('tz', xviewState.tz);
+        } else {
+          p.set('window', xviewState.window);
+        }
         const ms = document.getElementById('xv-models').value.trim();
         const e  = document.getElementById('xv-endpoint').value.trim();
         if (ms) p.set('models', ms);
         if (e)  p.set('endpoint', e);
+        return p;
+      };
+      const apply = () => {
+        const p = collectXViewParams();
+        if (activeSavedView) p.set('saved', activeSavedView.id);
         location.hash = '#/xview?' + p.toString();
       };
       document.getElementById('xv-apply').addEventListener('click', apply);
-      ['xv-window', 'xv-metric', 'xv-scale', 'xv-viewmode'].forEach(id =>
+      document.getElementById('xv-reset-range').addEventListener('click', () => {
+        xviewState.from = ''; xviewState.to = '';
+        document.getElementById('xv-from').value = '';
+        document.getElementById('xv-to').value = '';
+        apply();
+      });
+      ['xv-window', 'xv-metric', 'xv-scale', 'xv-viewmode', 'xv-from', 'xv-to', 'xv-tz'].forEach(id =>
         document.getElementById(id).addEventListener('change', apply));
+
+      document.getElementById('xv-saved').addEventListener('change', (event) => {
+        const id = event.target.value;
+        if (id) {
+          location.hash = '#/xview?saved=' + encodeURIComponent(id);
+          return;
+        }
+        const params = collectXViewParams();
+        location.hash = '#/xview?' + params.toString();
+      });
+      document.getElementById('xv-save').addEventListener('click', async () => {
+        const name = prompt('조사 보기 이름을 입력하세요');
+        if (!name || !name.trim()) return;
+        const created = await api('/admin/saved-filters', {
+          method: 'POST',
+          body: JSON.stringify({ name: name.trim(), view: 'xview', params: collectXViewParams().toString() })
+        });
+        location.hash = '#/xview?saved=' + encodeURIComponent(created.filter.id);
+      });
+      document.getElementById('xv-overwrite').addEventListener('click', async () => {
+        if (!activeSavedView) return;
+        await api('/admin/saved-filters/' + encodeURIComponent(activeSavedView.id), {
+          method: 'PATCH',
+          body: JSON.stringify({ params: collectXViewParams().toString() })
+        });
+        const targetHash = '#/xview?saved=' + encodeURIComponent(activeSavedView.id);
+        if (location.hash === targetHash) await route();
+        else location.hash = targetHash;
+      });
+      document.getElementById('xv-delete-saved').addEventListener('click', async () => {
+        if (!activeSavedView) return;
+        if (!confirm('"' + activeSavedView.name + '" 조사 보기를 삭제하시겠습니까?')) return;
+        const current = collectXViewParams();
+        await api('/admin/saved-filters/' + encodeURIComponent(activeSavedView.id), { method: 'DELETE' });
+        location.hash = '#/xview?' + current.toString();
+      });
+      document.getElementById('xv-copy-link').addEventListener('click', async () => {
+        const shareURL = location.href.split('#')[0] + '#/xview?' + collectXViewParams().toString();
+        try {
+          if (!navigator.clipboard) throw new Error('clipboard API를 지원하지 않는 브라우저입니다');
+          await navigator.clipboard.writeText(shareURL);
+          const button = document.getElementById('xv-copy-link');
+          if (button) {
+            button.textContent = '복사됨';
+            setTimeout(() => { if (button) button.textContent = '링크 복사'; }, 1400);
+          }
+        } catch (err) {
+          openModal('XView 조사 링크', '<input value="' + escapeAttr(shareURL) + '" readonly style="width:100%">');
+        }
+      });
     }
 
     function drawScatter(points, groups, modelIndex) {
@@ -2052,7 +2652,7 @@ const adminHTML = `<!doctype html>
 
     async function openXVSelectionModal(rids, ridMap) {
       const title = '선택된 요청 ' + fmt(rids.length) + '개';
-      openModal(title, '<div class="empty">요청 미리보기를 불러오는 중...</div>');
+      openModal(title, '<div class="loading">요청 미리보기를 불러오는 중...</div>');
       let reqMap = {};
       try {
         const ids = rids.slice(0, 200);
@@ -2485,7 +3085,7 @@ const adminHTML = `<!doctype html>
       openModal('✦ XView 요청 탐색',
         '<div class="banner"><strong>어떤 요청이 왜 그렇게 처리됐는지 바로 확인하세요.</strong><div class="muted" style="font-size:11px;margin-top:4px">요청 ID를 입력하거나 최근 요청을 선택하면 라우팅·안전·비용·폴백·세션 근거를 한 화면에서 설명합니다.</div></div>' +
         '<div style="display:flex;gap:8px;margin:14px 0"><input id="xv-quick-id" placeholder="request_id 입력" style="flex:1"><button type="button" onclick="xviewOpenFromInput()">설명 열기</button><button class="secondary" type="button" onclick="closeModal();location.hash=\'#/xview\'">전체 분석</button></div>' +
-        '<div id="xv-quick-recent"><div class="empty">최근 요청을 불러오는 중...</div></div>');
+        '<div id="xv-quick-recent"><div class="loading">최근 요청을 불러오는 중...</div></div>');
       const input = document.getElementById('xv-quick-id');
       if (input) { input.focus(); input.addEventListener('keydown', e => { if (e.key === 'Enter') xviewOpenFromInput(); }); }
       try {
@@ -2585,7 +3185,7 @@ const adminHTML = `<!doctype html>
 
       const signals = Number(gv.policy_decision_count||0) + Number(gv.approval_count||0) + Number(gv.secret_event_count||0) + Number(gv.anomaly_event_count||0);
       const headline = sf.blocked ? '안전 정책으로 차단된 요청' : (fb.occurred ? '폴백으로 복구된 요청' : (rt.model_changed ? '라우팅 규칙이 모델을 변경한 요청' : '정상 처리 경로의 요청'));
-      const overview = '<div class="banner ' + (sf.blocked?'error':(fb.occurred?'warn':'')) + '"><strong style="font-size:15px">' + escapeHTML(headline) + '</strong><div class="muted" style="font-size:11px;margin-top:4px">요청 ' + escapeHTML(x.request_id||'') + ' · ' + escapeHTML(x.created_at||'') + '</div></div>' +
+      const overview = '<div class="banner ' + (sf.blocked?'error':(fb.occurred?'warn':'')) + '"><strong style="font-size:15px">' + escapeHTML(headline) + '</strong><div class="muted" style="font-size:11px;margin-top:4px">요청 ' + escapeHTML(x.request_id||'') + ' · ' + timeCell(x.created_at||'') + '</div></div>' +
         '<div class="kpis" style="margin-top:10px">' + kpi('선택 경로',escapeHTML((rt.chosen_provider||'-')+' / '+(rt.chosen_model||'-'))) + kpi('복잡도',fmt(rt.complexity||0)+'/100') + kpi('위험도','<span class="status '+((rt.risk_score||0)>=60?'warn':'')+'">'+fmt(rt.risk_score||0)+'/100</span>') + kpi('실제 비용',money(co.actual_krw||0)) + kpi('거버넌스 신호',fmt(signals)) + '</div>' +
         '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px"><button class="secondary" type="button" onclick="closeModal();location.hash=\'#/xview\'">전체 분포에서 보기</button><button class="secondary" type="button" onclick="closeModal();openRequestDetail(\'' + escapeAttr(x.request_id) + '\')">요청 원문 보기</button>' + (se.session_id?'<button class="secondary" type="button" onclick="closeModal();openWaterfall(\''+escapeAttr(se.session_id)+'\')">세션 Waterfall</button>':'') + '</div>';
 
@@ -2831,7 +3431,7 @@ const adminHTML = `<!doctype html>
           if (e.code_risk) flags.push('<span class="status ' + (e.code_risk === 'high' ? 'error' : (e.code_risk === 'medium' ? 'warn' : '')) + '" style="font-size:9px" title="코드 위험">⚠' + escapeHTML(e.code_risk) + '</span>');
           return '<tr>' +
           '<td>' + (i + 1) + '</td>' +
-          '<td>' + escapeHTML(e.created_at || '') + '</td>' +
+          '<td>' + timeCell(e.created_at || '') + '</td>' +
           '<td><span class="status" style="font-size:9px">' + escapeHTML(e.kind || '') + '</span></td>' +
           '<td>' + escapeHTML(e.model || '') + '<div class="muted" style="font-size:10px">' + escapeHTML(e.provider || '') + '</div></td>' +
           '<td style="max-width:220px;font-size:11px">' + sessionLastMessageCell(e.last_message) + '</td>' +
@@ -2922,7 +3522,7 @@ const adminHTML = `<!doctype html>
     function costAllocationPanel() {
       const dims = [['project', '프로젝트'], ['repo', '저장소'], ['branch', '브랜치'], ['cost_center', '예산코드'], ['service', '서비스'], ['model', '모델']];
       const btns = dims.map(d => '<button type="button" class="' + (d[0] === allocDim ? '' : 'secondary') + '" data-alloc="' + d[0] + '">' + d[1] + '</button>').join('');
-      return '<div class="toolbar">' + btns + '</div><div id="allocBody"><div class="empty">불러오는 중…</div></div>';
+      return '<div class="toolbar">' + btns + '</div><div id="allocBody"><div class="loading">불러오는 중…</div></div>';
     }
     function allocationTable(rows) {
       if (!rows.length) return '<div class="empty">데이터 없음 — 클라이언트가 X-Vibe-Repo / X-Vibe-Project / X-Vibe-Cost-Center 헤더를 보내면 집계됩니다.</div>';
@@ -4052,7 +4652,7 @@ const adminHTML = `<!doctype html>
         row('오류율', pct(errorRate || 0)) +
         row('평가 실패율', pct(evalRate || 0)) +
         row('첫 시각', escapeHTML(item.first_seen || '')) +
-        row('최근 시각', escapeHTML(item.last_seen || '')) +
+        row('최근 시각', timeCell(item.last_seen || '')) +
       '</div></div>';
     }
 
@@ -4281,7 +4881,7 @@ const adminHTML = `<!doctype html>
           '<button id="note-save" type="button" data-id="' + escapeHTML(id) + '">저장</button>' +
           '<button id="note-clear" type="button" class="ghost" data-id="' + escapeHTML(id) + '">태그·메모 삭제</button>' +
           '<button id="note-replay" type="button" class="secondary" data-id="' + escapeHTML(id) + '" title="원본 body 가 보관된 경우 동일한 요청을 다시 실행합니다 (LOG_RAW_BODIES=true 필요)">동일 요청 재실행</button>' +
-          (note.updated_at ? '<span class="muted" style="margin-left:auto; align-self:center">최근 변경 ' + escapeHTML(note.updated_at) + ' by ' + escapeHTML(note.created_by || '') + '</span>' : '') +
+          (note.updated_at ? '<span class="muted" style="margin-left:auto; align-self:center">최근 변경 ' + timeCell(note.updated_at) + ' by ' + escapeHTML(note.created_by || '') + '</span>' : '') +
         '</div>' +
         '<pre id="replay-output" class="prompt-block" style="display:none; margin-top:10px; max-height:240px; overflow:auto"></pre>' +
       '</div></section>';
@@ -4600,7 +5200,7 @@ const adminHTML = `<!doctype html>
         '<div class="kv">' +
           row('요청 ID', escapeHTML(r.id)) +
           row('Trace ID', escapeHTML(r.trace_id)) +
-          row('생성 시각', escapeHTML(r.created_at) + ' · ' + ago(r.created_at)) +
+          row('생성 시각', timeCell(r.created_at) + ' · ' + ago(r.created_at)) +
           row('상태', statusBadge(r.status_code)) +
           row('지연', escapeHTML(latencyLabel(r))) +
           row('endpoint', escapeHTML(r.endpoint)) +
@@ -4653,7 +5253,7 @@ const adminHTML = `<!doctype html>
       view.innerHTML = section('세션 비행기록',
         '<div class="toolbar"><label class="muted">기간(일) <input id="sess-days" type="number" min="1" max="365" value="' + escapeAttr(days) + '" style="width:80px"></label>' +
         '<button type="button" id="sess-reload">조회</button></div>' +
-        '<div id="sessions-results"><div class="empty">불러오는 중...</div></div>');
+        '<div id="sessions-results"><div class="loading">불러오는 중...</div></div>');
       const load = async () => {
         const d = document.getElementById('sess-days').value.trim() || '7';
         sessionStorage.setItem('sessionsDays', d);
@@ -4684,7 +5284,7 @@ const adminHTML = `<!doctype html>
     // Red Team Automation — registered upstream targets only, safe probe packs, dry-run first.
     async function renderRedTeamView() {
       const view = document.getElementById('view');
-      view.innerHTML = section('레드팀 자동화', '<div class="empty">불러오는 중...</div>');
+      view.innerHTML = section('레드팀 자동화', '<div class="loading">불러오는 중...</div>');
       let targets = {}, packs = {}, campaigns = {}, runs = {}, baselines = {}, rems = {}, dash = {}, kill = {}, schedules = {};
       try {
         [targets, packs, campaigns, runs, baselines, rems, dash, kill, schedules] = await Promise.all([
@@ -4705,6 +5305,7 @@ const adminHTML = `<!doctype html>
       const ts = targets.targets || [];
       const ps = packs.probe_packs || [];
       const cs = campaigns.campaigns || [];
+      const postChange = campaigns.post_change || {};
       const rs = runs.runs || [];
       const bs = baselines.baselines || [];
       const remediationRows = (rems.remediations || []).slice(0, 20).map(r => {
@@ -4725,6 +5326,7 @@ const adminHTML = `<!doctype html>
       const highTargets = ts.filter(t => ['high', 'critical'].indexOf(t.risk_level) >= 0).length;
       const failedRuns = rs.filter(r => r.status === 'failed').length;
       const maxRisk = rs.reduce((m, r) => Math.max(m, Number(r.risk_score || 0)), 0);
+      const autoCampaigns = cs.filter(c => c.trigger_source === 'post-change');
       const targetRows = ts.slice(0, 80).map(t => {
         const meta = t.metadata || {};
         const label = meta.title || meta.name || meta.base_url || t.model || t.tool_name || t.target_ref;
@@ -4750,20 +5352,27 @@ const adminHTML = `<!doctype html>
         '<span class="muted" style="font-size:11px">' + escapeHTML(p.category) + ' · 케이스 ' + ((p.cases || []).length) + '</span></label>'
       ).join('') || '<p class="muted">프로브 팩 없음</p>';
       window.__rtCampaigns = cs; // 수정/복제 시 캠페인 원본 참조
-      const campaignRows = cs.map(c =>
-        '<tr><td><strong>' + escapeHTML(c.name) + '</strong><div class="muted" style="font-size:10px"><code>' + escapeHTML(c.id) + '</code></div></td>' +
+      const campaignRows = cs.map(c => {
+        const automatic = c.trigger_source === 'post-change';
+        const source = automatic
+          ? '<span class="status" title="' + escapeAttr(c.trigger_reason || '') + '">변경 후 자동</span>' +
+            '<div class="muted" style="font-size:10px;margin-top:3px"><code>' + escapeHTML(c.trigger_action || '') + '</code>' +
+            (c.trigger_ref ? '<br>' + escapeHTML(c.trigger_ref) : '') + '</div>'
+          : '<span class="muted" style="font-size:11px">수동</span>';
+        return '<tr><td><strong>' + escapeHTML(c.name) + '</strong><div class="muted" style="font-size:10px"><code>' + escapeHTML(c.id) + '</code></div></td>' +
+        '<td>' + source + '</td>' +
         '<td>' + escapeHTML(c.scope || 'all') + '</td>' +
         '<td><span class="status ' + redTeamStatusClass(c.status) + '">' + escapeHTML(c.status || '') + '</span></td>' +
         '<td>' + escapeHTML(c.execution_mode || '') + '</td>' +
         '<td>' + money(c.budget_limit_krw || 0) + '</td>' +
         '<td>' + (c.retain_raw_evidence ? '<span class="status warn" style="font-size:9px">원문보관</span>' : '<span class="muted" style="font-size:11px">마스킹</span>') + '</td>' +
         '<td style="white-space:nowrap"><button type="button" class="secondary" style="font-size:11px" onclick="redTeamDryRun(\'' + escapeAttr(c.id) + '\')">드라이런</button> ' +
-        '<button type="button" class="secondary" style="font-size:11px" onclick="redTeamApprove(\'' + escapeAttr(c.id) + '\')">승인</button> ' +
+        (automatic ? '' : '<button type="button" class="secondary" style="font-size:11px" onclick="redTeamApprove(\'' + escapeAttr(c.id) + '\')">승인</button> ') +
         '<button type="button" style="font-size:11px" onclick="redTeamRun(\'' + escapeAttr(c.id) + '\',\'' + escapeAttr(c.execution_mode || '') + '\')">' + (c.execution_mode === 'active-controlled' ? '실제 실행' : '시뮬레이션 실행') + '</button> ' +
-        '<button type="button" class="secondary" style="font-size:11px" onclick="redTeamEditCampaign(\'' + escapeAttr(c.id) + '\')">수정</button> ' +
+        (automatic ? '' : '<button type="button" class="secondary" style="font-size:11px" onclick="redTeamEditCampaign(\'' + escapeAttr(c.id) + '\')">수정</button> ') +
         '<button type="button" class="secondary" style="font-size:11px" onclick="redTeamCloneCampaign(\'' + escapeAttr(c.id) + '\')">복제</button> ' +
-        '<button type="button" class="secondary" style="font-size:11px" onclick="redTeamDeleteCampaign(\'' + escapeAttr(c.id) + '\',\'' + escapeAttr(c.name || '') + '\')">삭제</button></td></tr>'
-      ).join('') || '<tr><td colspan="7" class="muted">아직 캠페인이 없습니다. 위 <b>캠페인 빌더</b>로 만들거나, 상단 <b>⚡ 빠른 시작</b>으로 안전 팩 드라이런을 바로 실행해 보세요.</td></tr>';
+        '<button type="button" class="secondary" style="font-size:11px" onclick="redTeamDeleteCampaign(\'' + escapeAttr(c.id) + '\',\'' + escapeAttr(c.name || '') + '\')">삭제</button></td></tr>';
+      }).join('') || '<tr><td colspan="8" class="muted">아직 캠페인이 없습니다. 캠페인 빌더로 만들거나 상단 빠른 시작으로 안전 팩 드라이런을 실행해 보세요.</td></tr>';
       const runRows = rs.slice(0, 30).map(r =>
         '<tr><td><code>' + escapeHTML(r.id) + '</code><div class="muted" style="font-size:10px">' + ago(r.created_at) + '</div></td>' +
         '<td><code>' + escapeHTML(r.campaign_id) + '</code></td><td><code>' + escapeHTML(r.target_id) + '</code></td>' +
@@ -4805,7 +5414,7 @@ const adminHTML = `<!doctype html>
 
       // 탭별 패널 콘텐츠.
       const panelOverview =
-        '<div class="kpis">' + kpi('대상', fmt(ts.length)) + kpi('고위험/치명', fmt(highTargets)) + kpi('프로브 팩', fmt(ps.length)) + kpi('최근 실행 위험', fmt(maxRisk)) + kpi('실패한 실행', fmt(failedRuns)) + '</div>' +
+        '<div class="kpis">' + kpi('대상', fmt(ts.length)) + kpi('고위험/치명', fmt(highTargets)) + kpi('프로브 팩', fmt(ps.length)) + kpi('자동 회귀 점검', fmt(autoCampaigns.length)) + kpi('최근 실행 위험', fmt(maxRisk)) + kpi('실패한 실행', fmt(failedRuns)) + '</div>' +
         '<div class="kpis">' + kpi('결과 수', fmt(dsum.total_results || 0)) + kpi('치명', fmt(dec.critical || 0)) + kpi('실패', fmt(dec.fail || 0)) + kpi('경고', fmt(dec.warning || 0)) + kpi('외부 대상', fmt(dsum.external_targets || 0)) + kpi('미조치', fmt(dsum.open_remediations || 0)) + '</div>' +
         '<div class="grid2">' +
           card('결과 매트릭스 (대상 × 프로브 팩)', '<div class="card-body"><table><thead><tr><th>유형</th><th>팩 분류</th><th>통과</th><th>경고</th><th>실패</th><th>치명</th><th>계</th></tr></thead><tbody>' + matrixRows + '</tbody></table></div>') +
@@ -4841,7 +5450,7 @@ const adminHTML = `<!doctype html>
           '② (고위험 팩이면) 목록에서 <b>승인</b> · ' +
           '③ <b>실제 실행</b> 버튼을 눌러 프롬프트에 <b>전용 레드팀 Proxy API Key</b> 입력.<br>' +
           '그 외 모드(드라이런/섀도우 등)나 키 미입력 시에는 실제 호출 없이 <b>시뮬레이션</b>으로 안전 실행됩니다. MCP 도구·파괴적·앱/워크플로 대상은 항상 시뮬레이션입니다.</div></div>') +
-        card('캠페인', '<div class="card-body"><table><thead><tr><th>이름</th><th>범위</th><th>상태</th><th>모드</th><th>예산</th><th>증적</th><th>작업</th></tr></thead><tbody>' + campaignRows + '</tbody></table></div>');
+        card('캠페인', '<div class="card-body"><table><thead><tr><th>이름</th><th>생성 경로</th><th>범위</th><th>상태</th><th>모드</th><th>예산</th><th>증적</th><th>작업</th></tr></thead><tbody>' + campaignRows + '</tbody></table></div>');
 
       const panelTargets =
         '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px">' +
@@ -4899,6 +5508,8 @@ const adminHTML = `<!doctype html>
         '<div style="padding:0 14px 6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
         '<button type="button" style="font-size:11px" onclick="redTeamQuickStart()">⚡ 빠른 시작(안전 팩 드라이런)</button> ' +
         '<button type="button" class="secondary" style="font-size:11px" onclick="rtGuide(\'start\')">📖 시작 가이드</button> ' +
+        '<span class="status ' + (postChange.enabled ? '' : 'warn') + '" title="민감한 관리자 변경 뒤 실제 upstream 호출 없이 자동 보안 회귀 점검을 실행합니다.">변경 후 자동 점검: ' + (postChange.enabled ? '켜짐' : '꺼짐') + '</span> ' +
+        (postChange.enabled ? '<span class="muted" style="font-size:10px">중복 억제 ' + escapeHTML(postChange.cooldown || '-') + ' · 최대 ' + fmt(postChange.max_targets || 0) + '개 대상</span> ' : '') +
         '<span class="status ' + (killOn ? 'error' : '') + '">킬 스위치: ' + (killOn ? '켜짐(중지)' : '꺼짐') + '</span> ' +
         '<button type="button" class="secondary" style="font-size:10px" onclick="rtGuide(\'safety\')">ℹ️ 안전장치</button> ' +
         (killOn
@@ -5001,7 +5612,7 @@ const adminHTML = `<!doctype html>
         probe_pack_ids: packs,
         target_filter: targetFilter,
       };
-      if (!body.name) { alert('캠페인 이름을 입력하세요.'); return; }
+      if (!requireFields([{ id: 'rt-name', label: '캠페인 이름' }])) return;
       const editing = !!rtEditCampaignId;
       if (editing) body.id = rtEditCampaignId;
       try {
@@ -5050,7 +5661,7 @@ const adminHTML = `<!doctype html>
     }
     window.redTeamEditCampaign = (id) => {
       const c = (window.__rtCampaigns || []).find(x => x.id === id);
-      if (!c) { alert('캠페인 정보를 찾을 수 없습니다.'); return; }
+      if (!c) { toast('캠페인 정보를 찾을 수 없습니다.'); return; }
       rtActiveTab = 'campaigns';
       rtTab('campaigns');
       rtEditCampaignId = id;
@@ -5058,7 +5669,7 @@ const adminHTML = `<!doctype html>
     };
     window.redTeamCloneCampaign = (id) => {
       const c = (window.__rtCampaigns || []).find(x => x.id === id);
-      if (!c) { alert('캠페인 정보를 찾을 수 없습니다.'); return; }
+      if (!c) { toast('캠페인 정보를 찾을 수 없습니다.'); return; }
       rtActiveTab = 'campaigns';
       rtTab('campaigns');
       rtEditCampaignId = ''; // 복제는 새 캠페인으로 생성
@@ -5130,7 +5741,7 @@ const adminHTML = `<!doctype html>
         };
         const startPoll = () => { polling = true; pollProgress(); progressTimer = setInterval(pollProgress, 1500); };
         const stopPoll = () => { polling = false; if (progressTimer) { clearInterval(progressTimer); progressTimer = null; } };
-        openModal('캠페인 실행 중…', '<p class="muted" style="font-size:12px">대상에 프로브를 실행하고 있습니다. 완료되면 요약이 표시됩니다.</p><div id="rt-live"><div class="empty">집계 중…</div></div>');
+        openModal('캠페인 실행 중…', '<p class="muted" style="font-size:12px">대상에 프로브를 실행하고 있습니다. 완료되면 요약이 표시됩니다.</p><div id="rt-live"><div class="loading">집계 중…</div></div>');
         startPoll();
         let d;
         try {
@@ -5141,7 +5752,7 @@ const adminHTML = `<!doctype html>
             if (String(err.message || '').indexOf('requires approval') >= 0) {
               stopPoll();
               if (!window.confirm('이 캠페인은 고위험 팩을 포함해 승인이 필요합니다. 지금 승인하고 실행할까요?')) { await renderRedTeamView(); return; }
-              openModal('캠페인 실행 중…', '<p class="muted" style="font-size:12px">승인 후 실행 중…</p><div id="rt-live"><div class="empty">집계 중…</div></div>');
+              openModal('캠페인 실행 중…', '<p class="muted" style="font-size:12px">승인 후 실행 중…</p><div id="rt-live"><div class="loading">집계 중…</div></div>');
               startPoll();
               await api('/admin/redteam/campaigns/' + encodeURIComponent(id) + '/approve', { method: 'POST' });
               d = await api(runURL, { method: 'POST', body });
@@ -5319,7 +5930,7 @@ const adminHTML = `<!doctype html>
         key = (window.prompt('실제 재실행: 전용 레드팀 Proxy API Key를 입력하세요.\n(실제 대상 provider·model을 1회 호출합니다)') || '').trim();
         if (key) localStorage.setItem('rt_proxy_key', key);
       }
-      if (!key) { alert('실제 재실행에는 전용 레드팀 Proxy API Key가 필요합니다.'); return; }
+      if (!key) { toast('실제 재실행에는 전용 레드팀 Proxy API Key가 필요합니다.'); return; }
       try {
         openModal('재실행 중…', '<p class="muted" style="font-size:12px">대상 모델을 실제 호출하고 있습니다…</p>');
         const d = await api('/admin/redteam/results/' + encodeURIComponent(resultID) + '/rerun', { method: 'POST', body: JSON.stringify({ proxy_key: key }) });
@@ -5345,7 +5956,7 @@ const adminHTML = `<!doctype html>
     window.redTeamCreateSchedule = async () => {
       const campaign = (document.getElementById('rt-sched-campaign') || {}).value || '';
       const cron = (document.getElementById('rt-sched-cron') || {}).value || '@daily';
-      if (!campaign) { alert('먼저 캠페인을 만든 뒤 일정을 추가하세요.'); return; }
+      if (!campaign) { toast('먼저 캠페인을 만든 뒤 일정을 추가하세요.'); return; }
       try {
         await api('/admin/redteam/schedules', { method: 'POST', body: JSON.stringify({ campaign_template_id: campaign, cron_expr: cron, enabled: true }) });
         await renderRedTeamView();
@@ -5357,7 +5968,7 @@ const adminHTML = `<!doctype html>
       try {
         const d = await api('/admin/redteam/schedules');
         const sc = (d.schedules || []).find(x => x.id === id);
-        if (!sc) { alert('일정을 찾을 수 없습니다.'); return; }
+        if (!sc) { toast('일정을 찾을 수 없습니다.'); return; }
         await api('/admin/redteam/schedules', { method: 'POST', body: JSON.stringify({
           id: sc.id, campaign_template_id: sc.campaign_template_id, cron_expr: sc.cron_expr,
           timezone: sc.timezone, enabled: !!enabled,
@@ -5469,7 +6080,7 @@ const adminHTML = `<!doctype html>
       };
       if (packSel === '__new__') { body.pack_name = (document.getElementById('rtc-newpack').value || '').trim() || '사용자 정의 프롬프트'; }
       else { body.pack_id = packSel; }
-      if (!body.case_key || !body.input_template) { alert('케이스 키와 요청 프롬프트를 입력하세요.'); return; }
+      if (!body.case_key || !body.input_template) { toast('케이스 키와 요청 프롬프트를 입력하세요.'); return; }
       try {
         await api('/admin/redteam/probe-cases', { method: 'POST', body: JSON.stringify(body) });
         closeModal();
@@ -5478,7 +6089,7 @@ const adminHTML = `<!doctype html>
       } catch (e) { openModal('프롬프트 오류', '<div class="error-line">' + escapeHTML(e.message) + '</div>'); }
     };
     window.redTeamDeleteCase = async (caseId, packId) => {
-      if (!caseId) { alert('케이스 ID가 없습니다.'); return; }
+      if (!caseId) { toast('케이스 ID가 없습니다.'); return; }
       if (!window.confirm('이 프롬프트(케이스)를 삭제할까요?')) return;
       try {
         await api('/admin/redteam/probe-cases/' + encodeURIComponent(caseId), { method: 'DELETE' });
@@ -5551,7 +6162,7 @@ const adminHTML = `<!doctype html>
     let agentEditId = '';
     async function renderAgentRoutesView() {
       const view = document.getElementById('view');
-      view.innerHTML = section('에이전트 라우트', '<div class="empty">불러오는 중...</div>');
+      view.innerHTML = section('에이전트 라우트', '<div class="loading">불러오는 중...</div>');
       let routes = {}, providers = {}, mcp = {};
       try {
         [routes, providers, mcp] = await Promise.all([
@@ -5671,7 +6282,7 @@ const adminHTML = `<!doctype html>
         max_cost_krw: Number(document.getElementById('ar-cost').value || 0),
         enabled: !!document.getElementById('ar-enabled').checked,
       };
-      if (!body.virtual_model) { alert('가상 모델명을 입력하세요.'); return; }
+      if (!requireFields([{ id: 'ar-model', label: '가상 모델명' }])) return;
       try {
         const d = await api('/admin/agent-routes', { method: 'POST', body: JSON.stringify(body) });
         agentEditId = '';
@@ -5684,7 +6295,7 @@ const adminHTML = `<!doctype html>
     };
     window.agentRouteEdit = (id) => {
       const a = (window.__agentRoutes || []).find(x => x.id === id);
-      if (!a) { alert('라우트를 찾을 수 없습니다.'); return; }
+      if (!a) { toast('라우트를 찾을 수 없습니다.'); return; }
       agentEditId = id;
       document.getElementById('ar-model').value = a.virtual_model || '';
       document.getElementById('ar-name').value = a.name || '';
@@ -5718,7 +6329,7 @@ const adminHTML = `<!doctype html>
     window.agentRouteTest = async (id, model) => {
       const p = window.prompt('테스트 프롬프트를 입력하세요.\n(이 라우트의 프로바이더/MCP로 실제 1회 호출합니다)', '사용 가능한 도구를 하나 골라 실제로 호출하고 결과를 요약해줘.');
       if (p === null) return;
-      openModal('에이전트 테스트 — ' + escapeHTML(model), '<div class="empty">실행 중… (도구 호출이 있으면 다소 걸릴 수 있습니다)</div>');
+      openModal('에이전트 테스트 — ' + escapeHTML(model), '<div class="loading">실행 중… (도구 호출이 있으면 다소 걸릴 수 있습니다)</div>');
       try {
         const d = await api('/admin/agent-routes/' + encodeURIComponent(id) + '/test', { method: 'POST', body: JSON.stringify({ prompt: p }) });
         const html =
@@ -5762,7 +6373,7 @@ const adminHTML = `<!doctype html>
     // AI 자산 SBOM — 스킬·워크플로·앱·모델계약·프롬프트 자산의 소유권/의존성 명세 + 거버넌스 공백.
     async function renderSBOMView() {
       const view = document.getElementById('view');
-      view.innerHTML = section('AI 자산 SBOM', '<div class="empty">불러오는 중...</div>');
+      view.innerHTML = section('AI 자산 SBOM', '<div class="loading">불러오는 중...</div>');
       let d;
       try { d = await api('/admin/sbom'); }
       catch (e) { view.innerHTML = section('AI 자산 SBOM', '<div class="card-body" style="padding:16px"><p class="muted">' + escapeHTML(e.message) + '</p></div>'); return; }
@@ -5801,7 +6412,7 @@ const adminHTML = `<!doctype html>
     // AI 업무성과 — repo별 AI 사용량 vs 개발 산출(commit/MR) 상관.
     async function renderProductivityView() {
       const view = document.getElementById('view');
-      view.innerHTML = section('AI 업무성과', '<div class="empty">불러오는 중...</div>');
+      view.innerHTML = section('AI 업무성과', '<div class="loading">불러오는 중...</div>');
       let d;
       try { d = await api('/admin/productivity?days=30'); }
       catch (e) { view.innerHTML = section('AI 업무성과', '<div class="card-body" style="padding:16px"><p class="muted">' + escapeHTML(e.message) + '</p></div>'); return; }
@@ -5845,7 +6456,7 @@ const adminHTML = `<!doctype html>
       const load = async (dimension) => {
         sessionStorage.setItem('privacyDim', dimension);
         const host = document.getElementById('pl-results');
-        host.innerHTML = '<div class="empty">불러오는 중...</div>';
+        host.innerHTML = '<div class="loading">불러오는 중...</div>';
         try { host.innerHTML = await render(await api('/admin/privacy-ledger?dimension=' + dimension + '&days=30')); }
         catch (e) { host.innerHTML = '<span class="status error">' + escapeHTML(e.message) + '</span>'; }
       };
@@ -5873,7 +6484,7 @@ const adminHTML = `<!doctype html>
     // 파드 운영 맵 — 멀티 파드 하트비트·빌드·런타임 설정 수렴 상태.
     async function renderPodsView() {
       const view = document.getElementById('view');
-      view.innerHTML = section('파드 운영 맵', '<div class="empty">불러오는 중...</div>');
+      view.innerHTML = section('파드 운영 맵', '<div class="loading">불러오는 중...</div>');
       let d;
       try { d = await api('/admin/pods'); }
       catch (e) { view.innerHTML = section('파드 운영 맵', '<div class="card-body" style="padding:16px"><p class="muted">' + escapeHTML(e.message) + '</p></div>'); return; }
@@ -5908,7 +6519,7 @@ const adminHTML = `<!doctype html>
         const key = document.getElementById('jp-key').value.trim();
         const host = document.getElementById('jp-results');
         if (!key) { host.innerHTML = '<span class="status warn">Proxy API Key를 입력하세요.</span>'; return; }
-        host.innerHTML = '<div class="empty">점검 중...</div>';
+        host.innerHTML = '<div class="loading">점검 중...</div>';
         try {
           const d = await api('/admin/journey-probe', { method: 'POST', body: JSON.stringify({ proxy_key: key }) });
           const sm = d.summary || {};
@@ -5936,8 +6547,21 @@ const adminHTML = `<!doctype html>
           '<input id="f-ip" placeholder="IP 필터" list="dl-ip">' +
           '<input id="f-model" placeholder="모델 필터" list="dl-model">' +
           '<input id="f-language" placeholder="언어 필터" list="dl-lang">' +
+          '<label class="muted" style="font-size:12px" for="f-from">기간</label>' +
+          '<input id="f-from" type="datetime-local" title="조회 시작 일시">' +
+          '<span class="muted" style="font-size:12px">~</span>' +
+          '<input id="f-to" type="datetime-local" title="조회 종료 일시">' +
+          '<select id="f-tz" title="검색 기준 시간대">' +
+            '<option value="Asia/Seoul" selected>서울 (KST, UTC+9)</option>' +
+            '<option value="UTC">UTC</option>' +
+            '<option value="Asia/Tokyo">도쿄 (JST)</option>' +
+            '<option value="America/Los_Angeles">로스앤젤레스 (PT)</option>' +
+            '<option value="America/New_York">뉴욕 (ET)</option>' +
+            '<option value="Europe/London">런던 (GMT/BST)</option>' +
+          '</select>' +
           '<input id="f-limit" type="number" min="1" max="200" placeholder="개수" value="100">' +
           '<button type="submit">검색</button>' +
+          '<button type="button" id="req-reset" class="ghost" title="기간·필터 초기화">초기화</button>' +
           '<button type="button" id="diff-btn" class="ghost" title="선택한 두 요청 비교 (행 좌측 체크박스로 선택)">두 요청 비교</button>' +
           '<span id="diff-count" class="muted" style="font-size:12px"></span>' +
           datalist('dl-ip', ips) + datalist('dl-model', models) + datalist('dl-lang', langs) +
@@ -5946,7 +6570,7 @@ const adminHTML = `<!doctype html>
       );
       // restore from hash query if provided
       if (initial) {
-        const map = { ip: 'f-ip', model: 'f-model', language: 'f-language', limit: 'f-limit' };
+        const map = { ip: 'f-ip', model: 'f-model', language: 'f-language', limit: 'f-limit', from: 'f-from', to: 'f-to', tz: 'f-tz' };
         Object.entries(map).forEach(([k, id]) => {
           const v = initial.get(k);
           if (v !== null && v !== undefined) document.getElementById(id).value = v;
@@ -5954,6 +6578,12 @@ const adminHTML = `<!doctype html>
       }
       document.getElementById('req-filter').addEventListener('submit', async (e) => {
         e.preventDefault();
+        await loadRequests();
+      });
+      document.getElementById('req-reset').addEventListener('click', async () => {
+        ['f-ip', 'f-model', 'f-language', 'f-from', 'f-to'].forEach(id => { document.getElementById(id).value = ''; });
+        document.getElementById('f-limit').value = '100';
+        document.getElementById('f-tz').value = 'Asia/Seoul';
         await loadRequests();
       });
       document.getElementById('diff-btn').addEventListener('click', openDiffModal);
@@ -5965,10 +6595,18 @@ const adminHTML = `<!doctype html>
         const ip = document.getElementById('f-ip').value.trim();
         const model = document.getElementById('f-model').value.trim();
         const language = document.getElementById('f-language').value.trim();
+        const from = document.getElementById('f-from').value.trim();
+        const to = document.getElementById('f-to').value.trim();
+        const tz = document.getElementById('f-tz').value;
         const limit = document.getElementById('f-limit').value.trim() || '100';
         if (ip) params.set('ip', ip);
         if (model) params.set('model', model);
         if (language) params.set('language', language);
+        if (from) params.set('from', from);
+        if (to) params.set('to', to);
+        // Always send tz so the server interprets from/to against the operator's
+        // timezone (default Asia/Seoul) instead of UTC.
+        if (from || to) params.set('tz', tz);
         params.set('limit', limit);
         updateHashParams(params);
         const r = await api('/admin/requests?' + params.toString());
@@ -6011,7 +6649,7 @@ const adminHTML = `<!doctype html>
       if (el) el.textContent = '선택된 항목 ' + diffSelection.length + '/2';
     }
     async function openDiffModal() {
-      if (diffSelection.length !== 2) { alert('두 행을 체크박스로 선택해주세요'); return; }
+      if (diffSelection.length !== 2) { toast('두 행을 체크박스로 선택해주세요'); return; }
       const [a, b] = diffSelection;
       const diff = await api('/admin/requests/diff?a=' + encodeURIComponent(a) + '&b=' + encodeURIComponent(b));
       openModal('요청 비교', diffHTML(diff));
@@ -6022,7 +6660,7 @@ const adminHTML = `<!doctype html>
         const prompts = (x.prompts || []).map(p => '<div class="prompt-block"><div class="prompt-role">' + escapeHTML(p.role) + '</div>' + escapeHTML(p.redacted_text || p.content_text || '') + '</div>').join('<div style="height:6px"></div>') || '<div class="empty">프롬프트 없음</div>';
         return '<div><h3 style="margin-top:0">' + label + '</h3><div class="kv">' +
           row('요청 ID', escapeHTML(r.id)) +
-          row('생성', escapeHTML(r.created_at)) +
+          row('생성', timeCell(r.created_at)) +
           row('모델', escapeHTML(r.model || '')) +
           row('상태', statusBadge(r.status_code)) +
           row('지연', escapeHTML(latencyLabel(r))) +
@@ -6097,7 +6735,7 @@ const adminHTML = `<!doctype html>
       document.getElementById('p-export').addEventListener('click', async () => {
         const params = collectParams();
         const res = await fetch('/admin/export.csv?' + params.toString(), { headers: headers() });
-        if (!res.ok) { alert('CSV 다운로드 실패: ' + (await res.text())); return; }
+        if (!res.ok) { toast('CSV 다운로드 실패: ' + (await res.text())); return; }
         const blob = await res.blob();
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -6126,7 +6764,7 @@ const adminHTML = `<!doctype html>
       document.getElementById('p-delete-saved').addEventListener('click', async () => {
         const selected = savedSel.options[savedSel.selectedIndex];
         const id = selected && selected.dataset.id;
-        if (!id) { alert('삭제할 저장된 필터를 먼저 선택하세요'); return; }
+        if (!id) { toast('삭제할 저장된 필터를 먼저 선택하세요'); return; }
         if (!confirm('"' + selected.text + '" 저장된 필터를 삭제하시겠습니까?')) return;
         await api('/admin/saved-filters/' + encodeURIComponent(id), { method: 'DELETE' });
         route();
@@ -6346,12 +6984,12 @@ const adminHTML = `<!doctype html>
             status: isDraft ? 'draft' : 'pending',
             enabled: true,
           };
-          if (!body.name || !body.body) { alert('이름과 본문은 필수입니다.'); btn.disabled=false; btn.textContent='저장'; return; }
+          if (!body.name || !body.body) { toast('이름과 본문은 필수입니다.'); btn.disabled=false; btn.textContent='저장'; return; }
           await api('/admin/templates', { method: 'POST', body: JSON.stringify(body) });
           closeModal();
           route();
         } catch(err) {
-          alert('오류: ' + err.message);
+          toast('오류: ' + err.message);
           btn.disabled=false; btn.textContent='저장';
         }
       });
@@ -6365,7 +7003,7 @@ const adminHTML = `<!doctype html>
     };
 
     window.openAssetDetail = async (id) => {
-      openModal('자산 상세 — ' + id, '<div class="empty">불러오는 중...</div>');
+      openModal('자산 상세 — ' + id, '<div class="loading">불러오는 중...</div>');
       try {
         const [resp, histResp, usageResp] = await Promise.all([
           api('/admin/prompt-assets?q=' + encodeURIComponent(id)),
@@ -6508,14 +7146,14 @@ const adminHTML = `<!doctype html>
         });
         closeModal();
         route();
-      } catch(err) { alert('저장 오류: ' + err.message); }
+      } catch(err) { toast('저장 오류: ' + err.message); }
     };
 
     window.submitAsset = async (id) => {
       try {
         await api('/admin/templates/' + encodeURIComponent(id) + '/submit', { method: 'POST', body: '{}' });
         route();
-      } catch(err) { alert('제출 오류: ' + err.message); }
+      } catch(err) { toast('제출 오류: ' + err.message); }
     };
 
     window.approveAsset = async (id, status) => {
@@ -6529,7 +7167,7 @@ const adminHTML = `<!doctype html>
         });
         closeModal();
         route();
-      } catch(err) { alert('처리 오류: ' + err.message); }
+      } catch(err) { toast('처리 오류: ' + err.message); }
     };
 
     window.deleteAsset = async (id) => {
@@ -6537,7 +7175,7 @@ const adminHTML = `<!doctype html>
       try {
         await api('/admin/templates/' + encodeURIComponent(id), { method: 'DELETE' });
         route();
-      } catch(err) { alert('삭제 오류: ' + err.message); }
+      } catch(err) { toast('삭제 오류: ' + err.message); }
     };
 
     // Simple line-based diff between two snapshot versions, rendered into #pa-diff.
@@ -6565,7 +7203,7 @@ const adminHTML = `<!doctype html>
 
     // A/B 성과 비교: pick two assets, show success rate / cost / latency side-by-side.
     window.openAssetCompare = async () => {
-      openModal('A/B 성과 비교', '<div class="empty">불러오는 중...</div>');
+      openModal('A/B 성과 비교', '<div class="loading">불러오는 중...</div>');
       const resp = await api('/admin/prompt-assets');
       const assets = (resp.assets || []).slice().sort((x,y)=> (x.name||'').localeCompare(y.name||''));
       if (assets.length < 2) { openModal('A/B 성과 비교', '<div class="empty">비교하려면 자산이 2개 이상 필요합니다.</div>'); return; }
@@ -6619,7 +7257,7 @@ const adminHTML = `<!doctype html>
           body: JSON.stringify({ version }),
         });
         openAssetDetail(id);
-      } catch(err) { alert('복원 오류: ' + err.message); }
+      } catch(err) { toast('복원 오류: ' + err.message); }
     };
     // ── 프롬프트 자산 관리소 끝 ──────────────────────────────────────────
 
@@ -6801,7 +7439,7 @@ const adminHTML = `<!doctype html>
               '<td>' + ago(t.last_seen) + '</td>' +
             '</tr>'
           ).join('') + '</tbody></table>'
-        ) : '<div class="empty">팀 없음</div>'
+        ) : '<div class="empty">등록된 팀이 없습니다. 위 <strong>팀 추가</strong> 폼에서 만들면 API 키·사용량·비용을 팀 단위로 묶어 볼 수 있습니다.</div>'
       );
       document.getElementById('view').innerHTML = html;
       makeSortable('#view', 'teams');
@@ -6984,11 +7622,19 @@ const adminHTML = `<!doctype html>
         const q = u.quota;
         const tokenBar = q.token_limit > 0 ? progressBar(1 - u.token_remain_ratio) : '<span class="muted">미설정</span>';
         const krwBar = q.krw_limit > 0 ? progressBar(1 - u.krw_remain_ratio) : '<span class="muted">미설정</span>';
+        // Enforcement compares committed usage PLUS in-flight reservations against the
+        // limit, so the totals shown here have to include them — otherwise a quota reads
+        // as having room while callers are already getting 429.
+        const usedTokens = (u.tokens || 0) + (u.reserved_tokens || 0);
+        const usedCost = (u.cost_krw || 0) + (u.reserved_cost_krw || 0);
+        const inFlight = (u.reserved_tokens || 0) > 0 || (u.reserved_cost_krw || 0) > 0
+          ? '<div class="muted" style="font-size:11px">진행 중 ' + fmt(u.reserved_tokens || 0) + ' 토큰 · ' + money(u.reserved_cost_krw || 0) + ' 포함</div>'
+          : '';
         return '<tr>' +
           '<td>' + scopeLabel(q.scope) + '<div class="muted">' + escapeHTML(q.scope_value) + '</div></td>' +
           '<td>' + periodLabel(q.period) + '</td>' +
-          '<td>' + (q.token_limit > 0 ? fmt(u.tokens) + ' / ' + fmt(q.token_limit) : '<span class="muted">-</span>') + tokenBar + '</td>' +
-          '<td>' + (q.krw_limit > 0 ? money(u.cost_krw) + ' / ' + money(q.krw_limit) : '<span class="muted">-</span>') + krwBar + '</td>' +
+          '<td>' + (q.token_limit > 0 ? fmt(usedTokens) + ' / ' + fmt(q.token_limit) : '<span class="muted">-</span>') + tokenBar + inFlight + '</td>' +
+          '<td>' + (q.krw_limit > 0 ? money(usedCost) + ' / ' + money(q.krw_limit) : '<span class="muted">-</span>') + krwBar + '</td>' +
           '<td><span class="status ' + (q.enabled ? '' : 'error') + '">' + (q.enabled ? '사용' : '중지') + '</span></td>' +
           '<td>' + escapeHTML(q.note || '') + '</td>' +
           '<td>' +
@@ -6999,7 +7645,7 @@ const adminHTML = `<!doctype html>
       const table = usage.length ? (
         '<table><thead><tr><th>대상</th><th>주기</th><th>토큰</th><th>비용</th><th>상태</th><th>메모</th><th>동작</th></tr></thead><tbody>' +
         usage.map(quotaRow).join('') + '</tbody></table>'
-      ) : '<div class="empty">설정된 한도 없음</div>';
+      ) : '<div class="empty">설정된 사용 한도가 없습니다. 한도를 만들기 전까지 API 키·팀·IP별 토큰과 비용에 제한이 없습니다. 위 폼에서 추가하세요.</div>';
 
       const budgets = br.budgets || [];
       const budgetRow = (b) => {
@@ -7027,7 +7673,7 @@ const adminHTML = `<!doctype html>
       const budgetTable = budgets.length ? (
         '<table><thead><tr><th>대상</th><th>이번 달 누적 / 월 예산</th><th>월말 예상 지출</th><th>소진 예측</th><th>메모</th><th>동작</th></tr></thead><tbody>' +
         budgets.map(budgetRow).join('') + '</tbody></table>'
-      ) : '<div class="empty">설정된 예산 없음</div>';
+      ) : '<div class="empty">설정된 예산이 없습니다. 예산을 만들면 월말 초과가 예상될 때 미리 경고받을 수 있습니다. 위 폼에서 추가하세요.</div>';
 
       const html = section('사용 한도 (Quota)',
         '<div class="card-body">' +
@@ -7079,7 +7725,7 @@ const adminHTML = `<!doctype html>
         monthly_krw: Number(document.getElementById('b-krw').value || 0),
         note: document.getElementById('b-note').value.trim()
       };
-      await api('/admin/budgets', { method: 'POST', body: JSON.stringify(body) });
+      await api('/admin/budgets', { method: 'POST', success: '예산이 저장되었습니다', body: JSON.stringify(body) });
       route();
     }
     window.deleteBudget = async (id) => {
@@ -7115,7 +7761,7 @@ const adminHTML = `<!doctype html>
         note: document.getElementById('q-note').value.trim(),
         enabled: true
       };
-      await api('/admin/quotas', { method: 'POST', body: JSON.stringify(body) });
+      await api('/admin/quotas', { method: 'POST', success: '사용 한도가 저장되었습니다', body: JSON.stringify(body) });
       route();
     }
     window.toggleQuota = async (id, enabled) => {
@@ -7247,8 +7893,10 @@ const adminHTML = `<!doctype html>
       qs.set('window', windowValue);
       qs.set('threshold', String(threshold));
       let resp;
+      let balancerResp = null;
       try { resp = await api('/admin/routing/health?' + qs.toString()); }
       catch (e) { document.getElementById('view').innerHTML = section('Provider Health', '<div class="card-body"><div class="banner error">Health 데이터를 불러오지 못했습니다.<div class="muted">' + escapeHTML(e.message) + '</div><button type="button" class="secondary" style="margin-top:8px" onclick="route()">다시 시도</button></div></div>'); return; }
+      try { balancerResp = await api('/admin/routing/balancer?window=' + encodeURIComponent(windowValue)); } catch (e) { balancerResp = null; }
       const providers = resp.providers || [];
       const ranking = resp.ranking || [];
       const degraded = resp.degraded || [];
@@ -7271,11 +7919,13 @@ const adminHTML = `<!doctype html>
           '<label class="muted" style="display:flex; align-items:center; gap:6px">threshold <input id="routing-health-threshold" type="number" min="0" max="100" value="' + threshold + '" style="width:86px"></label>' +
           '<button type="submit">적용</button>' +
           '<button type="button" class="secondary" onclick="route()">새로고침</button>' +
-          '<span class="muted" style="margin-left:auto">since ' + escapeHTML(resp.since || '') + ' · until ' + escapeHTML(resp.until || '') + '</span>' +
+          '<span class="muted" style="margin-left:auto">since ' + timeExact(resp.since || '') + ' · until ' + timeExact(resp.until || '') + '</span>' +
         '</form>';
       const healthVisual = '<div class="card-body"><div class="viz-grid" style="margin-top:0"><div class="viz-panel"><div class="viz-title">Provider 건전성 <small>threshold ' + threshold + '</small></div>' + donutVisual(providers.length ? (providers.length-degraded.length)/providers.length*100 : 0, (providers.length-degraded.length)+'/'+providers.length, '정상 provider', [{label:'정상',value:providers.length-degraded.length},{label:'degraded',value:degraded.length}]) + '</div><div class="viz-panel"><div class="viz-title">Health 순위 <small>점수</small></div>' + visualBars(ranking.map(x=>({label:x.provider,value:x.score||0})), v=>Math.round(v)+'점', true) + '</div></div></div>';
       document.getElementById('view').innerHTML =
         section('Provider Health', kpis + healthVisual + filters) +
+        section('회로 차단기 (Circuit Breaker)', providerBreakerPanel(resp.breakers)) +
+        section('로드밸런싱 · 세션 고정', providerBalancerPanel(balancerResp)) +
         section('Provider ranking', providerHealthRankingTable(ranking, threshold)) +
         section('Degradation alerts', providerHealthAlertsTable(alerts)) +
         section('Health trend', providerHealthTrendTable(trend, threshold));
@@ -7288,6 +7938,140 @@ const adminHTML = `<!doctype html>
       });
       makeSortable('#view', 'routing-health');
     }
+    // Health score는 과거 집계이고, 회로 차단기는 지금 이 순간 어떤 provider가 폴백
+    // 후보에서 빠져 있는지를 보여줍니다. 운영자는 이 둘을 함께 봐야 판단할 수 있습니다.
+    // "라운드로빈이 실제로 됐는가"에 답하는 패널. intent(밸런서가 고른 횟수)와
+    // actual(요청 로그 집계)을 나란히 두는 이유는, 폴백·캐시·provider 고정 요청은
+    // 밸런서를 거치지 않아 둘이 갈라질 수 있고 그 차이가 곧 원인이기 때문입니다.
+    function providerBalancerPanel(b) {
+      if (!b) return '<div class="card-body"><div class="empty" style="padding:16px">밸런서 상태를 불러오지 못했습니다.</div></div>';
+      if (b.mode !== 'round_robin' && b.mode !== 'session_hash') {
+        return '<div class="card-body"><div class="banner">로드밸런싱 <strong>꺼짐</strong> <span class="muted">(mode=' + escapeHTML(b.mode || 'first') + ')</span>' +
+          '<div class="muted" style="margin-top:4px">같은 모델에 여러 provider가 매칭돼도 <strong>이름순 첫 번째</strong>로만 갑니다. 나머지는 폴백 예비로만 쓰입니다. ' +
+          '분산하려면 <code>UPSTREAM_LOAD_BALANCE=round_robin</code> 으로 기동하세요.</div></div></div>';
+      }
+      const idx = Number(b.balance_index || 0);
+      const idxClass = idx >= 0.8 ? '' : (idx >= 0.5 ? 'warn' : 'error');
+      const idxLabel = idx >= 0.8 ? '고르게 분산' : (idx >= 0.5 ? '치우침' : '심하게 치우침');
+      const actual = b.actual || [];
+      const intent = b.intent || {};
+      const intentBy = {};
+      (Array.isArray(intent) ? intent : []).forEach(x => { intentBy[x.provider] = x; });
+      const totalActual = actual.reduce((sum, x) => sum + Number(x.requests || 0), 0);
+
+      const modeWarning = (b.multi_instance_safe === false)
+        ? '<div class="banner warn" style="margin:0 14px 10px"><strong>다중 인스턴스에서는 세션 고정이 깨집니다.</strong>' +
+            '<div class="muted" style="margin-top:4px"><code>round_robin</code> 은 회전 커서를 프로세스 메모리에 두므로 게이트웨이를 여러 대 띄우면 각자 독립적으로 회전합니다. ' +
+            '같은 대화가 다른 인스턴스로 들어가면 다른 provider로 갈 수 있습니다. 인스턴스가 2대 이상이면 <code>UPSTREAM_LOAD_BALANCE=session_hash</code> 를 쓰세요 — ' +
+            '세션 키에서 provider를 계산하므로 공유 저장소 없이 모든 인스턴스가 같은 답을 냅니다.</div></div>'
+        : '';
+      const head = '<div class="toolbar" style="border:0; flex-wrap:wrap">' +
+        '<span class="status">모드 ' + escapeHTML(b.mode) + (b.multi_instance_safe === false ? ' <span class="status warn">단일 인스턴스용</span>' : '') + '</span>' +
+        '<span class="status ' + idxClass + '">균형도 ' + (idx * 100).toFixed(0) + '% · ' + idxLabel + '</span>' +
+        '<span class="status">세션 고정 ' + (b.sticky_sessions ? '켜짐 (' + escapeHTML(b.sticky_ttl || '') + ')' : '꺼짐') + '</span>' +
+        '<span class="status">활성 세션 ' + fmt(b.active_sessions || 0) + '</span>' +
+        '<span style="flex:1"></span>' +
+        '<button type="button" class="secondary" onclick="releaseStickySessions(\'\')">세션 고정 전체 해제</button>' +
+      '</div>';
+
+      const poolRows = (b.pools || []).map(p =>
+        '<tr><td><code>' + escapeHTML(p.pattern) + '</code></td>' +
+        '<td>' + escapeHTML((p.providers || []).join(', ')) + '</td>' +
+        '<td><span class="status ' + (p.balanced ? '' : 'warn') + '">' + (p.balanced ? '분산 대상 ' + fmt(p.size) + '개' : 'provider 1개 — 분산 안 됨') + '</span></td></tr>').join('');
+      const poolTable = poolRows
+        ? '<div style="overflow:auto"><table><thead><tr><th>모델 패턴</th><th>Provider 풀</th><th>상태</th></tr></thead><tbody>' + poolRows + '</tbody></table></div>'
+        : '<div class="empty" style="padding:16px">모델 패턴이 등록된 활성 provider가 없습니다.</div>';
+
+      const distRows = actual.map(x => {
+        const share = totalActual ? Number(x.requests || 0) / totalActual : 0;
+        const iv = intentBy[x.provider] || {};
+        return '<tr>' +
+          '<td><strong>' + escapeHTML(x.provider) + '</strong></td>' +
+          '<td data-num="' + (x.requests || 0) + '">' + fmt(x.requests || 0) + ' <span class="muted">(' + (share * 100).toFixed(1) + '%)</span></td>' +
+          '<td data-num="' + (iv.picks || 0) + '">' + fmt(iv.picks || 0) + '</td>' +
+          '<td data-num="' + (iv.sessions || 0) + '">' + fmt(iv.sessions || 0) + '</td>' +
+          '<td data-num="' + (x.failovers || 0) + '">' + fmt(x.failovers || 0) + '</td>' +
+          '<td data-num="' + (x.avg_latency_ms || 0) + '">' + fmt(x.avg_latency_ms || 0) + ' ms</td>' +
+          '<td><button type="button" class="secondary" onclick="releaseStickySessions(\'' + escapeAttr(x.provider) + '\')">이 provider 비우기</button></td>' +
+        '</tr>';
+      }).join('');
+      const distTable = distRows
+        ? '<div style="overflow:auto"><table><thead><tr>' +
+            '<th data-sort="str">Provider</th><th data-sort="num">실제 처리(로그)</th><th data-sort="num">밸런서 선택</th>' +
+            '<th data-sort="num">고정 세션</th><th data-sort="num">폴백 유입</th><th data-sort="num">평균 지연</th><th>동작</th>' +
+          '</tr></thead><tbody>' + distRows + '</tbody></table></div>' +
+          visualBars(actual.map(x => ({ label: x.provider, value: Number(x.requests || 0) })), v => fmt(v) + '건', true)
+        : '<div class="empty" style="padding:16px">이 구간에 처리된 요청이 없습니다.</div>';
+
+      return '<div class="card-body">' + head + modeWarning + poolTable +
+        '<div class="muted" style="font-size:12px; padding:10px 14px 6px">' +
+          '<strong>실제 처리</strong>는 요청 로그 집계, <strong>밸런서 선택</strong>은 밸런서가 고른 횟수입니다. ' +
+          '폴백·캐시 적중·provider 고정 요청은 밸런서를 거치지 않으므로 두 값이 다를 수 있고, 그 차이가 곧 원인입니다.' +
+        '</div>' + distTable + '</div>';
+    }
+    window.releaseStickySessions = async (provider) => {
+      try {
+        const res = await api('/admin/routing/balancer', { method: 'POST', body: JSON.stringify({ provider: provider || '' }) });
+        const n = (res && res.released_sessions) || 0;
+        toast((provider ? provider + ' ' : '') + '세션 고정 ' + n + '건 해제됨 — 다음 요청부터 재배정됩니다', 'ok');
+        route();
+      } catch (e) { toast('세션 고정 해제 실패: ' + e.message); }
+    };
+    function providerBreakerPanel(breakers) {
+      breakers = breakers || {};
+      if (!breakers.enabled) {
+        return '<div class="card-body"><div class="banner warn">회로 차단기가 꺼져 있습니다 <span class="muted">(UPSTREAM_BREAKER_ENABLED=false)</span>' +
+          '<div class="muted" style="margin-top:4px">장애가 난 provider도 매 요청마다 재시도하므로, 타임아웃만큼 응답이 지연됩니다.</div></div></div>';
+      }
+      const states = breakers.states || [];
+      const phaseLabel = { open: '차단됨', half_open: '복구 확인 중', closed: '정상' };
+      const phaseClass = { open: 'error', half_open: 'warn', closed: '' };
+      const head = '<div class="toolbar" style="border:0; flex-wrap:wrap">' +
+        '<span class="status ' + (states.some(x => x.phase === 'open') ? 'error' : '') + '">차단 ' +
+          fmt(states.filter(x => x.phase === 'open').length) + '</span>' +
+        '<span class="status">연속 실패 임계 ' + fmt(breakers.threshold || 0) + '회</span>' +
+        '<span class="status">차단 유지 ' + fmt(breakers.cooldown_seconds || 0) + '초</span>' +
+        (breakers.shared
+          ? '<span class="status">인스턴스 간 공유 켜짐 <span class="muted">(' + escapeHTML(breakers.instance_id || '') + ')</span></span>'
+          : '<span class="status muted">공유 꺼짐 — 인스턴스별 독립 감지</span>') +
+        '<span style="flex:1"></span>' +
+        '<button type="button" class="secondary" onclick="resetProviderBreaker(\'\')">전체 해제</button>' +
+      '</div>';
+      if (!states.length) {
+        return '<div class="card-body">' + head +
+          '<div class="empty" style="padding:16px">차단된 provider 없음 — 모든 업스트림이 정상 응답 중입니다.</div></div>';
+      }
+      const rows = states.map(st =>
+        '<tr>' +
+          '<td><strong>' + escapeHTML(st.provider) + '</strong></td>' +
+          '<td><span class="status ' + (phaseClass[st.phase] || '') + '">' + escapeHTML(phaseLabel[st.phase] || st.phase) + '</span></td>' +
+          '<td data-num="' + (st.failures || 0) + '">' + fmt(st.failures || 0) + '</td>' +
+          '<td data-num="' + (st.opens || 0) + '">' + fmt(st.opens || 0) + '</td>' +
+          '<td>' + (st.last_reason ? '<code>' + escapeHTML(st.last_reason) + '</code>' : '<span class="muted">-</span>') + '</td>' +
+          '<td>' + (st.retry_in_seconds ? fmt(st.retry_in_seconds) + '초 후 재시도' : '<span class="muted">-</span>') + '</td>' +
+          '<td><button type="button" class="secondary" onclick="resetProviderBreaker(\'' + escapeAttr(st.provider) + '\')">해제</button></td>' +
+        '</tr>').join('');
+      return '<div class="card-body">' + head +
+        '<div style="overflow:auto"><table><thead><tr>' +
+          '<th data-sort="str">Provider</th><th data-sort="str">상태</th><th data-sort="num">연속 실패</th>' +
+          '<th data-sort="num">차단 횟수</th><th>최근 원인</th><th>복구 예정</th><th>동작</th>' +
+        '</tr></thead><tbody>' + rows + '</tbody></table></div>' +
+        '<div class="muted" style="font-size:12px; padding:10px 14px 0">' +
+          (breakers.shared ? '최근 원인에 <code>(peer ...)</code> 가 붙은 항목은 <strong>다른 인스턴스가 감지</strong>해 이 인스턴스가 받아들인 것입니다. ' : '') +
+          '<strong>차단됨</strong> = 폴백 후보에서 제외 중. 유지 시간이 지나면 <strong>복구 확인 중</strong>으로 바뀌어 요청 1건만 흘려보내고, 성공하면 정상으로 돌아갑니다. ' +
+          '모든 provider가 차단되면 안전을 위해 최초 provider는 그래도 시도합니다.' +
+        '</div></div>';
+    }
+    window.resetProviderBreaker = async (provider) => {
+      try {
+        await api('/admin/routing/breaker-reset', {
+          method: 'POST',
+          success: provider ? (provider + ' 차단이 해제되었습니다') : '모든 provider 차단이 해제되었습니다',
+          body: JSON.stringify({ provider: provider || '' }),
+        });
+        route();
+      } catch (e) { toast('차단 해제 실패: ' + e.message); }
+    };
     function healthStatusClass(score, threshold) {
       const n = Number(score || 0);
       if (n < 40) return 'error';
@@ -7332,7 +8116,7 @@ const adminHTML = `<!doctype html>
           const cells = providers.length ? providers.map(p =>
             '<span class="pill" style="margin:0 6px 6px 0">' + escapeHTML(p.provider || '') + ' <span class="status ' + healthStatusClass(p.score || 0, threshold) + '" style="margin-left:4px">' + fmt(p.score || 0) + '</span></span>'
           ).join('') : '<span class="muted">no traffic</span>';
-          return '<tr><td><strong>' + escapeHTML(bucketLabel(b.since, b.until)) + '</strong><div class="muted">' + escapeHTML((b.since || '').replace('T',' ').replace('Z','')) + ' ~ ' + escapeHTML((b.until || '').replace('T',' ').replace('Z','')) + '</div></td><td>' + cells + '</td></tr>';
+          return '<tr><td><strong>' + escapeHTML(bucketLabel(b.since, b.until)) + '</strong><div class="muted">' + timeExact(b.since) + ' ~ ' + timeExact(b.until) + '</div></td><td>' + cells + '</td></tr>';
         }).join('') + '</tbody></table>';
     }
     function bucketLabel(since, until) {
@@ -7464,7 +8248,7 @@ const adminHTML = `<!doctype html>
     };
     async function renderCapabilities() {
       const view = document.getElementById('view');
-      view.innerHTML = section('기능 맵', '<div class="empty">불러오는 중...</div>');
+      view.innerHTML = section('기능 맵', '<div class="loading">불러오는 중...</div>');
       let d;
       try { d = await api('/admin/capabilities'); }
       catch (e) { view.innerHTML = section('기능 맵', '<div class="card-body" style="padding:16px"><p class="muted">' + escapeHTML(e.message) + '</p></div>'); return; }
@@ -7510,7 +8294,7 @@ const adminHTML = `<!doctype html>
     // ---------- AI Gateway 운영 홈: 오늘 봐야 할 것 ----------
     async function renderOpsHome() {
       const view = document.getElementById('view');
-      view.innerHTML = section('운영 홈', '<div class="empty">불러오는 중...</div>');
+      view.innerHTML = section('운영 홈', '<div class="loading">불러오는 중...</div>');
       let d;
       try { d = await api('/admin/ops/home'); }
       catch (e) { view.innerHTML = section('운영 홈', '<div class="card-body" style="padding:16px"><p class="muted">' + escapeHTML(e.message) + '</p></div>'); return; }
@@ -7531,9 +8315,11 @@ const adminHTML = `<!doctype html>
         '<div class="card-body"><p class="muted" style="font-size:12px">전체 상태 ' + overall + ' · 생성 ' + ago(d.generated_at) + ' — 카드를 클릭하면 상세 화면으로 이동합니다.</p>' + opsVisual + '</div>') +
         '<div id="ops-incidents"></div>' +
         '<div style="display:flex;gap:12px;flex-wrap:wrap">' + cards + '</div>' +
-        '<div id="ops-workers"></div>';
+        '<div id="ops-workers"></div>' +
+        '<div id="ops-index-health"></div>';
       opsLoadIncidents();
       opsLoadWorkers();
+      opsLoadIndexHealth();
     }
     // Incident Copilot — 지금 확인할 이슈(장애 후보).
     window.opsLoadIncidents = async () => {
@@ -7574,10 +8360,180 @@ const adminHTML = `<!doctype html>
         '<div style="margin-top:8px"><button type="button" class="secondary" onclick="opsPreflight()">배포 프리플라이트 점검</button></div>' +
         '<div id="ops-preflight"></div></div>');
     };
+    // 인덱스 상태 — 선언한 스키마와 실제 DB의 차이, 그리고 접근 통계가 말해주는 추가/삭제 후보.
+    // 어떤 DDL도 실행하지 않습니다. 각 항목은 운영자가 검토할 SQL만 보여줍니다.
+    window.opsLoadIndexHealth = async () => {
+      const host = document.getElementById('ops-index-health');
+      if (!host) return;
+      let d;
+      try { d = await api('/admin/index-health'); }
+      catch (e) { host.innerHTML = '<div class="banner warn">인덱스 상태를 불러오지 못했습니다. <button type="button" class="secondary" onclick="opsLoadIndexHealth()">다시 시도</button><div class="muted">' + escapeHTML(e.message) + '</div></div>'; return; }
+      const sum = d.summary || {}, drift = d.drift || {}, advice = d.advice || {};
+      const kindBadge = (k) => k === 'mismatched' ? '<span class="status error">정의 불일치</span>'
+        : (k === 'missing' ? '<span class="status warn">DB에 없음</span>' : '<span class="status">선언에 없음</span>');
+      const sevBadge = (sv) => sv === 'high' ? '<span class="status error">높음</span>'
+        : (sv === 'medium' ? '<span class="status warn">보통</span>' : '<span class="status">낮음</span>');
+      const cols = (c) => (c && c.length) ? '(' + c.map(escapeHTML).join(', ') + ')' : '';
+
+      const driftRows = (drift.items || []).map(it =>
+        '<tr><td>' + kindBadge(it.kind) + '</td>' +
+        '<td><strong>' + escapeHTML(it.name) + '</strong><div class="muted" style="font-size:11px">' + escapeHTML(it.table) + '</div></td>' +
+        '<td class="muted" style="font-size:11px">' + escapeHTML(it.detail || '') + '</td>' +
+        '<td><code style="font-size:10px;word-break:break-all">' + escapeHTML(it.fix || '') + '</code></td></tr>').join('');
+      const driftBody = driftRows
+        ? '<table><thead><tr><th>구분</th><th>인덱스</th><th>내용</th><th>검토할 SQL</th></tr></thead><tbody>' + driftRows + '</tbody></table>'
+        : '<p class="muted" style="font-size:12px">선언한 인덱스 ' + (drift.declared_count || 0) + '개가 모두 이 DB에 그대로 있습니다 ✅</p>';
+
+      const adviceRows = (advice.items || []).map(a =>
+        '<tr><td>' + sevBadge(a.severity) + '</td>' +
+        '<td>' + (a.kind === 'drop' ? '삭제 후보' : '추가 후보') + '</td>' +
+        '<td><strong>' + escapeHTML(a.table) + '</strong>' + escapeHTML(cols(a.columns)) +
+        (a.index ? '<div class="muted" style="font-size:11px">' + escapeHTML(a.index) + '</div>' : '') + '</td>' +
+        '<td class="muted" style="font-size:11px">' + escapeHTML(a.reason || '') + '<div style="font-size:10px">' + escapeHTML(a.evidence || '') + '</div></td>' +
+        '<td><code style="font-size:10px;word-break:break-all">' + escapeHTML(a.sql || '') + '</code></td></tr>').join('');
+      const adviceBody = (adviceRows
+        ? '<table><thead><tr><th>중요도</th><th>구분</th><th>대상</th><th>근거</th><th>검토할 SQL</th></tr></thead><tbody>' + adviceRows + '</tbody></table>'
+        : '<p class="muted" style="font-size:12px">접근 통계에서 눈에 띄는 항목이 없습니다.</p>')
+        + ((advice.limitations || []).length
+          ? '<p class="muted" style="font-size:10px;margin-top:6px">※ ' + (advice.limitations || []).map(escapeHTML).join(' ') + '</p>' : '');
+
+      host.innerHTML = card('인덱스 상태',
+        '<div class="card-body"><p class="muted" style="font-size:12px">' +
+        (sum.in_sync ? '<span class="status">스키마 일치</span>' : '<span class="status error">스키마 불일치</span>') +
+        ' · 정의 불일치 ' + (sum.mismatched || 0) + ' · DB에 없음 ' + (sum.missing || 0) + ' · 선언에 없음 ' + (sum.undeclared || 0) +
+        ' · 추천 ' + (sum.advice_total || 0) + '건(중요 ' + (sum.advice_high || 0) + ') · ' + escapeHTML(drift.dialect || '') +
+        '</p><p style="font-size:12px;margin:4px 0">' + escapeHTML(sum.headline || '') + '</p>' +
+        '<div style="margin:6px 0"><button type="button" class="secondary" onclick="opsOpenMigrationSQL()">\uD83D\uDCDC 마이그레이션 SQL 전체 보기</button>' +
+        '<span class="muted" style="font-size:11px;margin-left:6px">빌드가 선언한 문장 전부 — 손으로 추가한 인덱스와 구분할 때</span></div>' +
+        driftBody + '<div style="margin-top:10px"><strong style="font-size:12px">추가·삭제 후보</strong></div>' + adviceBody +
+        '<p class="muted" style="font-size:10px;margin-top:6px">이 화면은 읽기 전용입니다. 인덱스는 쓰기 비용과 저장 비용을 만들기 때문에, 적용 여부는 운영자가 판단합니다.</p>' +
+        '</div>');
+    };
+    // 마이그레이션 SQL 전문 — Migrate 가 적용하는 문장 목록을 적용 순서 그대로 보여줍니다.
+    // 손으로 추가한 인덱스와 빌드가 선언한 인덱스를 구분하려면 이 목록이 기준입니다.
+    // 읽기 전용: 어떤 DDL 도 실행하지 않습니다.
+    let opsMigrationSQL = null;
+    const msqlState = { q: '', kind: 'all', driftOnly: false };
+    window.opsOpenMigrationSQL = async () => {
+      openModal('마이그레이션 SQL', '<div id="msql-host"><div class="loading">불러오는 중...</div></div>');
+      let d;
+      try { d = await api('/admin/migration-sql'); }
+      catch (e) {
+        const h = document.getElementById('msql-host');
+        if (h) h.innerHTML = '<div class="banner warn">마이그레이션 SQL 을 불러오지 못했습니다.<div class="muted">' + escapeHTML(e.message) + '</div></div>';
+        return;
+      }
+      opsMigrationSQL = d;
+      msqlState.q = ''; msqlState.kind = 'all'; msqlState.driftOnly = false;
+      msqlRenderShell();
+    };
+    function msqlKindLabel(k) {
+      return k === 'create_table' ? '테이블' : k === 'create_index' ? '인덱스' : k === 'add_column' ? '컬럼 추가' : '기타';
+    }
+    function msqlStatusBadge(st) {
+      if (st === 'mismatched') return '<span class="status error">정의 불일치</span>';
+      if (st === 'missing') return '<span class="status warn">DB에 없음</span>';
+      if (st === 'present') return '<span class="status">DB에 있음</span>';
+      return '';
+    }
+    function msqlRenderShell() {
+      const d = opsMigrationSQL, host = document.getElementById('msql-host');
+      if (!d || !host) return;
+      const c = d.counts || {}, status = d.index_status || {}, liveOnly = d.live_only_indexes || [];
+      let present = 0, mismatched = 0, missing = 0;
+      Object.keys(status).forEach(n => {
+        if (status[n] === 'present') present++;
+        else if (status[n] === 'mismatched') mismatched++;
+        else if (status[n] === 'missing') missing++;
+      });
+
+      // 손으로 추가한 인덱스 — 이 목록에 없는 것이 곧 "빌드가 모르는 인덱스"입니다.
+      const liveOnlyBlock = liveOnly.length
+        ? '<div class="banner warn" style="margin-bottom:10px"><strong>이 DB에만 있는 인덱스 ' + liveOnly.length + '개</strong>' +
+          '<div class="muted" style="font-size:11px;margin:2px 0 6px">마이그레이션에 없으므로 새로 설치한 DB 에는 생기지 않습니다. 계속 쓸 것이라면 migrationStatements() 에 넣어야 합니다.</div>' +
+          '<table><thead><tr><th>인덱스</th><th>테이블</th><th>현재 정의</th></tr></thead><tbody>' +
+          liveOnly.map(ix => '<tr><td><strong>' + escapeHTML(ix.name) + '</strong></td><td>' + escapeHTML(ix.table) + '</td>' +
+            '<td><code style="font-size:10px;overflow-wrap:anywhere">' + escapeHTML(ix.definition || ((ix.unique ? 'UNIQUE ' : '') + '(' + (ix.columns || []).join(', ') + ')')) + '</code></td></tr>').join('') +
+          '</tbody></table></div>'
+        : '';
+
+      const liveNote = d.live_error
+        ? '<div class="banner warn" style="margin-bottom:10px">DB 인덱스와 대조하지 못했습니다 — 아래는 빌드가 선언한 내용입니다.<div class="muted">' + escapeHTML(d.live_error) + '</div></div>'
+        : '';
+
+      const postNote = (d.post_migration || []).length
+        ? '<p class="muted" style="font-size:10px;margin:6px 0 0">※ 아래 목록 실행 후 추가로 일어나는 변경: ' + (d.post_migration || []).map(escapeHTML).join(' ') + '</p>'
+        : '';
+
+      host.innerHTML =
+        '<p class="muted" style="font-size:12px;margin:0 0 8px">' + escapeHTML(d.dialect || '') + ' 기준 · 문장 ' + (c.total || 0) +
+        '개 (테이블 ' + (c.create_table || 0) + ' · 인덱스 ' + (c.create_index || 0) + ' · 컬럼 추가 ' + (c.add_column || 0) + ' · 기타 ' + (c.other || 0) + ')' +
+        (c.rewritten ? ' · 이 드라이버용으로 바뀐 문장 ' + c.rewritten + '개' : '') + '</p>' +
+        (d.live_error ? '' : '<p style="font-size:12px;margin:0 0 8px">선언한 인덱스 대조 — <span class="status">DB에 있음 ' + present + '</span> ' +
+          (missing ? '<span class="status warn">DB에 없음 ' + missing + '</span> ' : '') +
+          (mismatched ? '<span class="status error">정의 불일치 ' + mismatched + '</span> ' : '') +
+          (liveOnly.length ? '<span class="status warn">DB에만 있음 ' + liveOnly.length + '</span>' : '') + '</p>') +
+        liveNote + liveOnlyBlock +
+        '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:8px">' +
+        '<input id="msql-q" placeholder="테이블·인덱스·SQL 검색" style="flex:1;min-width:180px" oninput="msqlState.q=this.value;msqlRenderList()">' +
+        '<select id="msql-kind" onchange="msqlState.kind=this.value;msqlRenderList()">' +
+        '<option value="all">전체</option><option value="create_index">인덱스</option><option value="create_table">테이블</option>' +
+        '<option value="add_column">컬럼 추가</option><option value="other">기타</option></select>' +
+        '<label style="font-size:11px;display:flex;align-items:center;gap:4px"><input type="checkbox" id="msql-drift" onchange="msqlState.driftOnly=this.checked;msqlRenderList()">불일치만</label>' +
+        '<button type="button" class="secondary" onclick="msqlCopyAll()">전체 복사</button></div>' +
+        '<div id="msql-list"></div>' + postNote +
+        '<p class="muted" style="font-size:10px;margin-top:6px">읽기 전용입니다. 이 화면은 SQL 을 보여줄 뿐 실행하지 않습니다.</p>';
+      msqlRenderList();
+    }
+    window.msqlRenderList = () => {
+      const d = opsMigrationSQL, list = document.getElementById('msql-list');
+      if (!d || !list) return;
+      const status = d.index_status || {}, detail = d.index_detail || {};
+      const q = (msqlState.q || '').trim().toLowerCase();
+      const rows = (d.statements || []).filter(st => {
+        if (msqlState.kind !== 'all' && st.kind !== msqlState.kind) return false;
+        if (msqlState.driftOnly) {
+          const s = st.kind === 'create_index' ? status[st.name] : '';
+          if (s !== 'missing' && s !== 'mismatched') return false;
+        }
+        if (!q) return true;
+        return ((st.table || '') + ' ' + (st.name || '') + ' ' + (st.column || '') + ' ' + (st.sql || '')).toLowerCase().indexOf(q) >= 0;
+      });
+      if (!rows.length) { list.innerHTML = '<p class="muted" style="font-size:12px">조건에 맞는 문장이 없습니다.</p>'; return; }
+      list.innerHTML = '<table><thead><tr><th style="width:44px">#</th><th style="width:92px">구분</th><th>대상</th><th>SQL</th></tr></thead><tbody>' +
+        rows.map(st => {
+          const s = st.kind === 'create_index' ? (status[st.name] || '') : '';
+          const target = st.kind === 'create_index'
+            ? '<strong>' + escapeHTML(st.name) + '</strong><div class="muted" style="font-size:11px">' + escapeHTML(st.table || '') + '</div>' +
+              (s ? '<div style="margin-top:2px">' + msqlStatusBadge(s) + '</div>' : '') +
+              (detail[st.name] ? '<div class="muted" style="font-size:10px">' + escapeHTML(detail[st.name]) + '</div>' : '')
+            : '<strong>' + escapeHTML(st.table || '-') + '</strong>' +
+              (st.column ? '<div class="muted" style="font-size:11px">' + escapeHTML(st.column) + '</div>' : '');
+          return '<tr><td class="muted" style="font-size:11px">' + st.seq + '</td>' +
+            '<td><span class="status" style="white-space:nowrap">' + escapeHTML(msqlKindLabel(st.kind)) + '</span></td>' +
+            '<td>' + target + '</td>' +
+            '<td><pre style="font-size:10px;margin:0;white-space:pre-wrap;overflow-wrap:anywhere">' + escapeHTML(st.sql || '') + '</pre>' +
+            (st.declared_sql ? '<details style="margin-top:2px"><summary class="muted" style="font-size:10px">선언 원문 (이 드라이버용으로 바뀜)</summary>' +
+              '<pre style="font-size:10px;margin:2px 0 0;white-space:pre-wrap;overflow-wrap:anywhere">' + escapeHTML(st.declared_sql) + '</pre></details>' : '') +
+            '</td></tr>';
+        }).join('') + '</tbody></table>' +
+        '<p class="muted" style="font-size:10px;margin-top:4px">' + rows.length + ' / ' + (d.statements || []).length + '개 표시 · 번호는 적용 순서입니다.</p>';
+    };
+    window.msqlCopyAll = async () => {
+      const d = opsMigrationSQL;
+      if (!d) return;
+      const text = (d.statements || []).map(st => st.sql + ';').join('\n\n');
+      try {
+        if (!navigator.clipboard) throw new Error('clipboard API를 지원하지 않는 브라우저입니다');
+        await navigator.clipboard.writeText(text);
+        toast('마이그레이션 SQL ' + (d.statements || []).length + '개 문장을 복사했습니다', 'ok');
+      } catch (e) { toast('복사 실패: ' + e.message, 'error'); }
+    };
+
     // Upgrade Preflight — 배포 전/후 점검(DB·마이그레이션·OpenAPI·설정).
     window.opsPreflight = async () => {
       const host = document.getElementById('ops-preflight');
-      if (host) host.innerHTML = '<div class="empty">점검 중...</div>';
+      if (host) host.innerHTML = '<div class="loading">점검 중...</div>';
       try {
         const d = await api('/admin/ops/preflight');
         const sBadge = (st) => st === 'fail' ? '<span class="status error">실패</span>' : (st === 'warn' ? '<span class="status warn">주의</span>' : '<span class="status">정상</span>');
@@ -7592,7 +8548,7 @@ const adminHTML = `<!doctype html>
     // ---------- DW Metric Catalog: 표준 지표 사전 ----------
     async function renderDWMetrics() {
       const view = document.getElementById('view');
-      view.innerHTML = section('지표 사전', '<div class="empty">불러오는 중...</div>');
+      view.innerHTML = section('지표 사전', '<div class="loading">불러오는 중...</div>');
       let d;
       try { d = await api('/admin/dw/metrics'); }
       catch (e) { view.innerHTML = section('지표 사전', '<div class="card-body" style="padding:16px"><p class="muted">' + escapeHTML(e.message) + '</p></div>'); return; }
@@ -7654,7 +8610,7 @@ const adminHTML = `<!doctype html>
     window.dwMetricDelete = async (id) => {
       if (!confirm('이 지표를 삭제할까요?')) return;
       try { await api('/admin/dw/metrics/' + encodeURIComponent(id), { method: 'DELETE' }); await renderDWMetrics(); }
-      catch (e) { alert(e.message); }
+      catch (e) { toast(e.message); }
     };
 
     // ---------- 운영 변경관리 센터: Change Set (dry-run/승인/적용/롤백) ----------
@@ -7664,7 +8620,7 @@ const adminHTML = `<!doctype html>
     };
     async function renderChangeSets() {
       const view = document.getElementById('view');
-      view.innerHTML = section('변경 세트', '<div class="empty">불러오는 중...</div>');
+      view.innerHTML = section('변경 세트', '<div class="loading">불러오는 중...</div>');
       let d;
       try { d = await api('/admin/change-sets'); }
       catch (e) { view.innerHTML = section('변경 세트', '<div class="card-body" style="padding:16px"><p class="muted">' + escapeHTML(e.message) + '</p></div>'); return; }
@@ -7777,18 +8733,18 @@ const adminHTML = `<!doctype html>
       let note = '';
       if (action === 'approve' || action === 'submit') { note = prompt('메모(선택):', '') || ''; }
       try { await api('/admin/change-sets/' + encodeURIComponent(id) + '/' + action, { method: 'POST', body: JSON.stringify({ note }) }); await renderChangeSets(); }
-      catch (e) { alert(e.message); }
+      catch (e) { toast(e.message); }
     };
     window.csSubmit = (id) => csDo(id, 'submit');
     window.csApprove = (id) => csDo(id, 'approve');
     window.csApply = (id) => csDo(id, 'apply', '이 변경 세트를 적용할까요? 설정이 즉시 반영됩니다.');
     window.csRollback = (id) => csDo(id, 'rollback', '적용 전 값으로 롤백할까요?');
-    window.csDelete = async (id) => { if (!confirm('삭제할까요?')) return; try { await api('/admin/change-sets/' + encodeURIComponent(id), { method: 'DELETE' }); await renderChangeSets(); } catch (e) { alert(e.message); } };
+    window.csDelete = async (id) => { if (!confirm('이 변경 세트를 삭제할까요? 되돌릴 수 없습니다.')) return; try { await api('/admin/change-sets/' + encodeURIComponent(id), { method: 'DELETE' }); await renderChangeSets(); } catch (e) { toast(e.message); } };
 
     // ---------- AI 업무 앱: Skill/Prompt Product/Text2SQL/MCP/모델 묶음 ----------
     async function renderWorkApps() {
       const view = document.getElementById('view');
-      view.innerHTML = section('AI 업무 앱', '<div class="empty">불러오는 중...</div>');
+      view.innerHTML = section('AI 업무 앱', '<div class="loading">불러오는 중...</div>');
       let d;
       try { d = await api('/admin/apps'); }
       catch (e) { view.innerHTML = section('AI 업무 앱', '<div class="card-body" style="padding:16px"><p class="muted">' + escapeHTML(e.message) + '</p></div>'); return; }
@@ -7881,7 +8837,7 @@ const adminHTML = `<!doctype html>
     window.appDelete = async (id) => {
       if (!confirm('이 앱을 삭제할까요?')) return;
       try { await api('/admin/apps/' + encodeURIComponent(id), { method: 'DELETE' }); await renderWorkApps(); }
-      catch (e) { alert(e.message); }
+      catch (e) { toast(e.message); }
     };
     window.appPublish = async (id, force) => {
       const note = force ? '' : prompt('발행 메모(선택). 발행하면 현재 정의가 새 버전으로 저장되고 앱이 활성화됩니다.');
@@ -7889,7 +8845,7 @@ const adminHTML = `<!doctype html>
       try {
         const path = '/admin/apps/' + encodeURIComponent(id) + '/publish' + (force ? '?force=1' : '');
         const r = await api(path, { method: 'POST', body: JSON.stringify({ note: note || '' }) });
-        alert('발행됨 — 버전 v' + r.version);
+        toast('발행됨 — 버전 v' + r.version, 'ok');
         await renderWorkApps();
       } catch (e) {
         // Onboarding gate (HTTP 422): show the failed required items and offer a forced publish.
@@ -7902,13 +8858,13 @@ const adminHTML = `<!doctype html>
           }
           return;
         }
-        alert('발행 실패: ' + e.message);
+        toast('발행 실패: ' + e.message);
       }
     };
     window.appDeprecate = async (id) => {
       if (!confirm('이 앱을 지원중단(숨김) 처리할까요? 사용자에게 더 이상 노출되지 않습니다.')) return;
       try { await api('/admin/apps/' + encodeURIComponent(id) + '/deprecate', { method: 'POST', body: '{}' }); await renderWorkApps(); }
-      catch (e) { alert('지원중단 실패: ' + e.message); }
+      catch (e) { toast('지원중단 실패: ' + e.message); }
     };
     window.appVersions = async (id) => {
       try {
@@ -7940,19 +8896,19 @@ const adminHTML = `<!doctype html>
     window.appPermGrant = async (id) => {
       const t = (document.getElementById('app-perm-type') || {}).value || 'user';
       const sid = ((document.getElementById('app-perm-id') || {}).value || '').trim();
-      if (!sid) { alert('대상 id를 입력하세요.'); return; }
+      if (!sid) { toast('대상 id를 입력하세요.'); return; }
       try { await api('/admin/apps/' + encodeURIComponent(id) + '/permissions', { method: 'POST', body: JSON.stringify({ subject_type: t, subject_id: sid }) }); appPermissions(id); }
-      catch (e) { alert('권한 추가 실패: ' + e.message); }
+      catch (e) { toast('권한 추가 실패: ' + e.message); }
     };
     window.appPermRevoke = async (id, t, sid) => {
       try { await api('/admin/apps/' + encodeURIComponent(id) + '/permissions?subject_type=' + encodeURIComponent(t) + '&subject_id=' + encodeURIComponent(sid), { method: 'DELETE' }); appPermissions(id); }
-      catch (e) { alert('권한 해제 실패: ' + e.message); }
+      catch (e) { toast('권한 해제 실패: ' + e.message); }
     };
 
     // ---------- Prompt Lab: experiments + test cases + rubrics/contracts ----------
     async function renderPromptLab(params) {
       const view = document.getElementById('view');
-      view.innerHTML = section('Prompt Lab', '<div class="empty">불러오는 중...</div>');
+      view.innerHTML = section('Prompt Lab', '<div class="loading">불러오는 중...</div>');
       const expId = (params && params.get && params.get('exp')) || '';
       if (expId) { await plRenderExperiment(expId); return; }
       let d, contracts, rubrics;
@@ -8008,20 +8964,20 @@ const adminHTML = `<!doctype html>
       if (!title) return;
       const team = (document.getElementById('pl-exp-team').value || '').trim();
       try { await api('/admin/prompt-lab/experiments', { method: 'POST', body: JSON.stringify({ title, team }) }); await renderPromptLab(); }
-      catch (e) { alert(e.message); }
+      catch (e) { toast(e.message); }
     };
     window.plCreateContract = async () => {
       const name = (document.getElementById('pl-ctr-name').value || '').trim();
       if (!name) return;
       const body = { name, type: document.getElementById('pl-ctr-type').value, schema_json: document.getElementById('pl-ctr-schema').value, strict: document.getElementById('pl-ctr-strict').checked };
       try { await api('/admin/prompt-lab/contracts', { method: 'POST', body: JSON.stringify(body) }); await renderPromptLab(); }
-      catch (e) { alert(e.message); }
+      catch (e) { toast(e.message); }
     };
     window.plCreateRubric = async () => {
       const name = (document.getElementById('pl-rub-name').value || '').trim();
       if (!name) return;
       try { await api('/admin/prompt-lab/rubrics', { method: 'POST', body: JSON.stringify({ name, criteria: {} }) }); await renderPromptLab(); }
-      catch (e) { alert(e.message); }
+      catch (e) { toast(e.message); }
     };
 
     async function plRenderExperiment(expId) {
@@ -8057,7 +9013,7 @@ const adminHTML = `<!doctype html>
     window.plCreateCase = async (expId) => {
       const name = (document.getElementById('pl-tc-name').value || '').trim();
       const user = (document.getElementById('pl-tc-user').value || '').trim();
-      if (!name || !user) { alert('이름과 user 프롬프트는 필수입니다.'); return; }
+      if (!name || !user) { toast('이름과 user 프롬프트는 필수입니다.'); return; }
       const sys = (document.getElementById('pl-tc-system').value || '').trim();
       const messages = [];
       if (sys) messages.push({ role: 'system', content: sys });
@@ -8065,16 +9021,16 @@ const adminHTML = `<!doctype html>
       const models = (document.getElementById('pl-tc-models').value || '').split(',').map(x => x.trim()).filter(Boolean);
       const body = { experiment_id: expId, name, messages, models, contract_id: document.getElementById('pl-tc-contract').value };
       try { await api('/admin/prompt-lab/test-cases', { method: 'POST', body: JSON.stringify(body) }); await plRenderExperiment(expId); }
-      catch (e) { alert(e.message); }
+      catch (e) { toast(e.message); }
     };
     window.plDeleteCase = async (id, expId) => {
       if (!confirm('이 테스트케이스를 삭제할까요?')) return;
       try { await api('/admin/prompt-lab/test-cases/' + encodeURIComponent(id), { method: 'DELETE' }); await plRenderExperiment(expId); }
-      catch (e) { alert(e.message); }
+      catch (e) { toast(e.message); }
     };
     window.plRunCase = async (id) => {
       const host = document.getElementById('pl-run-' + id);
-      if (host) host.innerHTML = '<div class="empty">실행 중...</div>';
+      if (host) host.innerHTML = '<div class="loading">실행 중...</div>';
       try {
         const d = await api('/admin/prompt-lab/test-cases/' + encodeURIComponent(id) + '/run', { method: 'POST', body: '{}' });
         const won = (v) => '₩' + fmt(Math.round(v || 0));
@@ -8937,12 +9893,12 @@ const adminHTML = `<!doctype html>
       if (!model) return;
       const body = { model, good_for: (document.getElementById('mt-good').value || '').trim(), avoid_for: (document.getElementById('mt-avoid').value || '').trim(), risk_note: (document.getElementById('mt-risk').value || '').trim() };
       try { await api('/admin/model-tags', { method: 'POST', body: JSON.stringify(body) }); await mmRenderTagEditor(); }
-      catch (e) { alert(e.message); }
+      catch (e) { toast(e.message); }
     };
     window.mmDeleteTag = async (model) => {
       if (!confirm(model + ' 태그를 삭제할까요?')) return;
       try { await api('/admin/model-tags/' + encodeURIComponent(model), { method: 'DELETE' }); await mmRenderTagEditor(); }
-      catch (e) { alert(e.message); }
+      catch (e) { toast(e.message); }
     };
     async function runMultiModelCompare() {
       const out = document.getElementById('mm-results');
@@ -9027,7 +9983,7 @@ const adminHTML = `<!doctype html>
         });
         const sel = document.getElementById('mm-rate-' + model);
         if (sel) sel.insertAdjacentHTML('afterend', '<span class="status" style="font-size:11px">저장됨</span>');
-      } catch (e) { alert('평가 저장 오류: ' + e.message); }
+      } catch (e) { toast('평가 저장 오류: ' + e.message); }
     };
 
     window.mmPromote = async (model) => {
@@ -9039,8 +9995,8 @@ const adminHTML = `<!doctype html>
         await api('/admin/chat-test/multi-run/runs/' + encodeURIComponent(runId) + '/promote', {
           method: 'POST', body: JSON.stringify({ model, task_type: taskType.trim(), reason: '멀티 비교에서 우수 모델로 선택' }),
         });
-        alert('라우팅 후보(draft)로 저장되었습니다. 실제 라우팅에는 검토 후 반영됩니다.');
-      } catch (e) { alert('후보 저장 오류: ' + e.message); }
+        toast('라우팅 후보(draft)로 저장되었습니다. 실제 라우팅에는 검토 후 반영됩니다.', 'ok');
+      } catch (e) { toast('후보 저장 오류: ' + e.message); }
     };
 
     // 멀티 모델 결과를 Golden Workflow step으로 승격 — 모델 변경 회귀 테스트용.
@@ -9056,8 +10012,8 @@ const adminHTML = `<!doctype html>
       if (promptText.trim()) body.prompt = promptText.trim();
       try {
         const d = await api('/admin/chat-test/multi-run/runs/' + encodeURIComponent(runId) + '/golden', { method: 'POST', body: JSON.stringify(body) });
-        alert('Golden Workflow "' + (d.workflow_name || '') + '"에 step "' + (d.step_name || '') + '" 저장됨 (총 ' + (d.step_count || 0) + ' steps, baseline ' + (d.baseline_score || 0).toFixed(1) + '점).');
-      } catch (e) { alert('Golden 저장 오류: ' + e.message); }
+        toast('Golden Workflow "' + (d.workflow_name || '') + '"에 step "' + (d.step_name || '') + '" 저장됨 (총 ' + (d.step_count || 0) + ' steps, baseline ' + (d.baseline_score || 0).toFixed(1) + '점).', 'info');
+      } catch (e) { toast('Golden 저장 오류: ' + e.message); }
     };
 
     window.mmExport = async (format) => {
@@ -9065,14 +10021,14 @@ const adminHTML = `<!doctype html>
       if (!runId) return;
       try {
         const res = await fetch('/admin/chat-test/multi-run/runs/' + encodeURIComponent(runId) + '/export?format=' + format, { headers: headers() });
-        if (!res.ok) { alert('내보내기 실패 (' + res.status + ')'); return; }
+        if (!res.ok) { toast('내보내기 실패 (' + res.status + ')'); return; }
         const blob = await res.blob();
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url; a.download = runId + '.' + format;
         document.body.appendChild(a); a.click(); a.remove();
         URL.revokeObjectURL(url);
-      } catch (e) { alert('내보내기 오류: ' + e.message); }
+      } catch (e) { toast('내보내기 오류: ' + e.message); }
     };
 
     // 모델별 응답 Diff: 공통 블록 / 모델별 누락·추가 블록 / 형식 차이.
@@ -9081,7 +10037,7 @@ const adminHTML = `<!doctype html>
       const host = document.getElementById('mm-diff');
       if (!runId || !host) return;
       if (host.innerHTML.trim()) { host.innerHTML = ''; return; } // toggle off
-      host.innerHTML = '<div class="empty">Diff 계산 중...</div>';
+      host.innerHTML = '<div class="loading">Diff 계산 중...</div>';
       try {
         const d = await api('/admin/chat-test/multi-run/runs/' + encodeURIComponent(runId) + '/diff');
         const blk = (b) => '<div style="font-size:11px;margin:2px 0"><span class="status" style="font-size:9px">' + escapeHTML(b.type) + '</span> ' + escapeHTML(b.preview) + '</div>';
@@ -9120,7 +10076,7 @@ const adminHTML = `<!doctype html>
       const host = document.getElementById('mm-codeverify');
       if (!runId || !host) return;
       if (host.innerHTML.trim()) { host.innerHTML = ''; return; } // toggle off
-      host.innerHTML = '<div class="empty">코드 검증 중...</div>';
+      host.innerHTML = '<div class="loading">코드 검증 중...</div>';
       try {
         const d = await api('/admin/chat-test/multi-run/runs/' + encodeURIComponent(runId) + '/code-verify');
         const rcls = (r) => r === 'high' ? 'error' : (r === 'medium' ? 'warn' : '');
@@ -9185,7 +10141,7 @@ const adminHTML = `<!doctype html>
     window.mmLoadHistory = async () => {
       const host = document.getElementById('mm-history');
       if (!host) return;
-      host.innerHTML = '<div class="empty">불러오는 중...</div>';
+      host.innerHTML = '<div class="loading">불러오는 중...</div>';
       try {
         const r = await api('/admin/chat-test/multi-run/runs?limit=20');
         const runs = r.runs || [];
@@ -9208,7 +10164,7 @@ const adminHTML = `<!doctype html>
       '<table><tbody>' +
         '<tr><th>Route reason</th><td>' + escapeHTML(preview.route_reason || '') + '</td></tr>' +
         '<tr><th>Decision reason</th><td>' + escapeHTML(preview.decision_reason || '') + '</td></tr>' +
-        '<tr><th>Fallback path</th><td>' + escapeHTML((preview.fallback_path || []).join(' -> ') || '-') + '</td></tr>' +
+        '<tr><th>폴백 계획(예상)</th><td>' + escapeHTML((preview.fallback_plan || []).join(' -> ') || '-') + '</td></tr>' +
       '</tbody></table>';
     }
     // Narrow-rail variant of the routing preview (kv rows, no wide kpi grid) for the debug pane.
@@ -9222,7 +10178,7 @@ const adminHTML = `<!doctype html>
         row('Rewrite', preview.would_rewrite ? '<span class="status warn">yes</span>' : '<span class="status">no</span>') +
         row('Route reason', escapeHTML(preview.route_reason || '-')) +
         row('Decision reason', escapeHTML(preview.decision_reason || '-')) +
-        row('Fallback', escapeHTML((preview.fallback_path || []).join(' → ') || '-')) +
+        row('폴백 계획(예상)', escapeHTML((preview.fallback_plan || []).join(' → ') || '-')) +
       '</div>';
     }
     function chatTestHeadersTable(headers) {
@@ -9596,7 +10552,7 @@ const adminHTML = `<!doctype html>
           const name = document.getElementById('mcp-wizard-name').value.trim();
           const url = document.getElementById('mcp-wizard-url').value.trim();
           const auth = document.getElementById('mcp-wizard-auth').value;
-          if (!name || !url) { alert('Wizard 등록에는 이름과 URL이 필요합니다.'); return; }
+          if (!name || !url) { toast('Wizard 등록에는 이름과 URL이 필요합니다.'); return; }
           const created = await api('/admin/mcp/upstreams', { method: 'POST', body: JSON.stringify({ name, url, auth_token: auth }) });
           const up = (created && created.upstream) || {};
           window.mcpWizardSelected = up.id || name;
@@ -9626,7 +10582,7 @@ const adminHTML = `<!doctype html>
           const id = document.getElementById('mcp-wizard-upstream').value;
           const routeRows = window.mcpRouteRows || [];
           const routeRow = routeRows.find(r => (r.upstream_id || r.upstream_name) === id && r.kind === 'tool') || routeRows.find(r => r.upstream_id === id || r.upstream_name === id);
-          if (!routeRow) { alert('이 업스트림의 노출 route가 아직 없습니다. 먼저 Probe를 실행하세요.'); return; }
+          if (!routeRow) { toast('이 업스트림의 노출 route가 아직 없습니다. 먼저 Probe를 실행하세요.'); return; }
           await window.explainMCPRouteFromRow(routeRow.kind || 'tool', routeRow.uri || routeRow.exposed_name || '');
         });
       }
@@ -9647,7 +10603,7 @@ const adminHTML = `<!doctype html>
           url: document.getElementById('mcp-up-url').value.trim(),
           auth_token: document.getElementById('mcp-up-auth').value,
         };
-        if (!body.name || !body.url) { alert('이름과 URL을 입력하세요'); return; }
+        if (!requireFields([{ id: 'mcp-up-name', label: '이름' }, { id: 'mcp-up-url', label: 'URL' }])) return;
         try {
           await api('/admin/mcp/upstreams', { method: 'POST', body: JSON.stringify(body) });
           route();
@@ -9663,7 +10619,7 @@ const adminHTML = `<!doctype html>
             }
             return;
           }
-          alert('등록 실패: ' + err.message);
+          toast('등록 실패: ' + err.message);
         }
       });
 
@@ -10063,7 +11019,7 @@ const adminHTML = `<!doctype html>
     async function runMCPRouteExplain(runTest) {
       const host = document.getElementById('mcp-route-explain-result');
       const payload = mcpExplainPayloadFromForm();
-      host.innerHTML = '<div class="empty">확인 중...</div>';
+      host.innerHTML = '<div class="loading">확인 중...</div>';
       try {
         const explain = await api('/admin/mcp/route/explain', { method: 'POST', body: JSON.stringify(payload) });
         let html = mcpExplainHTML(explain);
@@ -10109,7 +11065,7 @@ const adminHTML = `<!doctype html>
       }
     };
     window.showMCPUpstreamFlow = async (id) => {
-      openModal('MCP Upstream Flow — ' + id, '<div class="empty">조회 중...</div>');
+      openModal('MCP Upstream Flow — ' + id, '<div class="loading">조회 중...</div>');
       try {
         const d = await api('/admin/mcp/upstreams/' + encodeURIComponent(id) + '/flow');
         const steps = d.steps || [];
@@ -10226,7 +11182,7 @@ const adminHTML = `<!doctype html>
       }
     };
     window.openMCPRequestWaterfall = async (id) => {
-      openModal('MCP Waterfall — ' + id, '<div class="empty">조회 중...</div>');
+      openModal('MCP Waterfall — ' + id, '<div class="loading">조회 중...</div>');
       try {
         const d = await api('/admin/mcp/requests/' + encodeURIComponent(id) + '/waterfall');
         const steps = d.steps || [];
@@ -10292,7 +11248,7 @@ const adminHTML = `<!doctype html>
     window.showMCPFlowForRequest = async (id) => {
       const graph = document.getElementById('mcp-flow-graph');
       if (!graph) { await window.openMCPRequestWaterfall(id); return; }
-      graph.innerHTML = '<div class="empty">흐름 분석 중...</div>';
+      graph.innerHTML = '<div class="loading">흐름 분석 중...</div>';
       try {
         const d = await api('/admin/mcp/requests/' + encodeURIComponent(id) + '/waterfall');
         graph.innerHTML =
@@ -10349,7 +11305,7 @@ const adminHTML = `<!doctype html>
           ? '<span class="status error">정지 중</span>'
           : '<span class="status">정상 운영</span>') +
         row('사유', escapeHTML(kill.reason || '')) +
-        row('변경 시각', kill.updated_at ? (ago(kill.updated_at) + ' <span class="muted">(' + escapeHTML(kill.updated_at) + ')</span>') : '<span class="muted">-</span>') +
+        row('변경 시각', kill.updated_at ? (ago(kill.updated_at) + ' <span class="muted">(' + timeCell(kill.updated_at) + ')</span>') : '<span class="muted">-</span>') +
         row('변경자', escapeHTML(kill.updated_by || '')) +
         '</div>' +
         '<div style="margin-top:12px; display:flex; gap:8px; align-items:center">' +
@@ -10379,7 +11335,7 @@ const adminHTML = `<!doctype html>
             '<button class="secondary" type="button" onclick="toggleAlert(\'' + r.id + '\', ' + (!r.enabled) + ')">' + (r.enabled ? '중지' : '사용') + '</button> ' +
             '<button class="danger" type="button" onclick="deleteAlert(\'' + r.id + '\')">삭제</button>' +
           '</td></tr>').join('') + '</tbody></table>'
-      ) : '<div class="empty">설정된 알림 규칙 없음</div>';
+      ) : '<div class="empty">설정된 알림 규칙이 없습니다. 오류율·비용·지연·폴백률이 임계값을 넘을 때 통보받으려면 위 폼에서 규칙을 추가하세요.</div>';
 
       const eventTable = events.length ? (
         '<table><thead><tr><th>시각</th><th>규칙</th><th>지표</th><th>값</th><th>임계값</th><th>전송</th></tr></thead><tbody>' +
@@ -10568,6 +11524,8 @@ const adminHTML = `<!doctype html>
               '<option value="mcp_new_tools">MCP 신규 도구 수(드리프트)</option>' +
               '<option value="anomaly_zmax">이상 징후 z-score(최대)</option>' +
               '<option value="budget_burn_ratio">예산 소진 예측 비율(최대)</option>' +
+              '<option value="failover_rate">폴백 발생률</option>' +
+              '<option value="failovers">폴백 발생 건수</option>' +
             '</select>' +
             '<select id="alert-scope">' +
               '<option value="global">전체</option>' +
@@ -10648,7 +11606,7 @@ const adminHTML = `<!doctype html>
     async function refreshApprovals(event) {
       if (event && event.preventDefault) event.preventDefault();
       const host = document.getElementById('approval-results');
-      host.innerHTML = '<div class="empty">조회 중...</div>';
+      host.innerHTML = '<div class="loading">조회 중...</div>';
       try {
         const data = await api('/admin/approvals?' + approvalQueryFromForm().toString());
         host.innerHTML = approvalQueueTable(data.approvals || [], data);
@@ -10662,7 +11620,7 @@ const adminHTML = `<!doctype html>
       const filters = (payload || {}).filters || {};
       const since = filters.since || '';
       const meta = '<div class="muted" style="padding:10px 12px; font-size:12px">' +
-        '조회 결과 ' + fmt(count) + '건' + (since ? ' · since ' + escapeHTML(since) : '') +
+        '조회 결과 ' + fmt(count) + '건' + (since ? ' · since ' + timeExact(since) : '') +
         ' · 승인 ID나 요청 ID로 좁힌 뒤 XView를 열 수 있습니다.' +
       '</div>';
       if (!rows.length) return meta + '<div class="empty">승인 항목 없음</div>';
@@ -10680,7 +11638,7 @@ const adminHTML = `<!doctype html>
           '</td>' +
           '<td data-num="' + (a.risk_score || 0) + '">risk ' + fmt(a.risk_score || 0) + '<div class="muted">' + money(a.cost_krw || 0) + '</div></td>' +
           '<td>' + escapeHTML(a.reason || '') + (payload.detail ? '<div class="muted">' + escapeHTML(payload.detail) + '</div>' : '') + '</td>' +
-          '<td>' + (a.expires_at ? ago(a.expires_at) + '<div class="muted">' + escapeHTML(a.expires_at) + '</div>' : '<span class="muted">-</span>') + '</td>' +
+          '<td>' + (a.expires_at ? ago(a.expires_at) + '<div class="muted">' + timeExact(a.expires_at) + '</div>' : '<span class="muted">-</span>') + '</td>' +
           '<td>' + (a.status === 'pending'
             ? '<button type="button" onclick="decideApproval(\'' + escapeAttr(a.id) + '\',\'approve\')">승인</button> ' +
               '<button class="danger" type="button" onclick="decideApproval(\'' + escapeAttr(a.id) + '\',\'reject\')">거절</button>'
@@ -10789,7 +11747,7 @@ const adminHTML = `<!doctype html>
       const payload = aiPolicyPayloadFromForm();
       if (!payload.name) return;
       try {
-        await api('/admin/policies', { method: 'POST', body: JSON.stringify(payload) });
+        await api('/admin/policies', { method: 'POST', success: 'AI 정책이 저장되었습니다', body: JSON.stringify(payload) });
         route();
       } catch (err) {
         openModal('정책 저장 오류', '<div class="error-line">' + escapeHTML(err.message) + '</div>');
@@ -10857,7 +11815,7 @@ const adminHTML = `<!doctype html>
     };
     window.runPolicyRegression = async () => {
       const host = document.getElementById('preg-run-result');
-      if (host) host.innerHTML = '<div class="empty">실행 중...</div>';
+      if (host) host.innerHTML = '<div class="loading">실행 중...</div>';
       try {
         const d = await api('/admin/policies/regression/run', { method: 'POST', body: '{}' });
         const results = d.results || [];
@@ -10896,7 +11854,7 @@ const adminHTML = `<!doctype html>
     async function refreshSecretEvents(event) {
       event.preventDefault();
       const host = document.getElementById('secret-event-results');
-      host.innerHTML = '<div class="empty">조회 중...</div>';
+      host.innerHTML = '<div class="loading">조회 중...</div>';
       try {
         const data = await api('/admin/security/secrets?' + secretEventQueryFromForm().toString());
         host.innerHTML = secretEventTable(data.secret_events || [], data);
@@ -10910,7 +11868,7 @@ const adminHTML = `<!doctype html>
       const filters = (payload || {}).filters || {};
       const since = filters.since || '';
       const meta = '<div class="muted" style="padding:10px 12px; font-size:12px">' +
-        '조회 결과 ' + fmt(count) + '건' + (since ? ' · since ' + escapeHTML(since) : '') +
+        '조회 결과 ' + fmt(count) + '건' + (since ? ' · since ' + timeExact(since) : '') +
         ' · Secret 값은 저장하지 않고 hash와 유형만 기록합니다.' +
       '</div>';
       if (!rows.length) return meta + '<div class="empty">Secret Firewall 이벤트 없음</div>';
@@ -10953,7 +11911,7 @@ const adminHTML = `<!doctype html>
     async function refreshPolicyDecisionEvents(event) {
       event.preventDefault();
       const host = document.getElementById('policy-decision-results');
-      host.innerHTML = '<div class="empty">조회 중...</div>';
+      host.innerHTML = '<div class="loading">조회 중...</div>';
       try {
         const data = await api('/admin/policies/decisions?' + policyDecisionQueryFromForm().toString());
         host.innerHTML = policyDecisionTable(data.policy_decisions || [], data);
@@ -10966,7 +11924,7 @@ const adminHTML = `<!doctype html>
       const count = Number((payload || {}).count ?? rows.length);
       const since = ((payload || {}).filters || {}).since || '';
       const meta = '<div class="muted" style="padding:10px 12px; font-size:12px">' +
-        '조회 결과 ' + fmt(count) + '건' + (since ? ' · since ' + escapeHTML(since) : '') +
+        '조회 결과 ' + fmt(count) + '건' + (since ? ' · since ' + timeExact(since) : '') +
         ' · 행의 요청 링크를 열면 XView 설명으로 이동합니다.' +
       '</div>';
       if (!rows.length) return meta + '<div class="empty">정책 판단 이벤트 없음</div>';
@@ -10989,12 +11947,12 @@ const adminHTML = `<!doctype html>
     async function toggleKillSwitch(disable) {
       const reason = (document.getElementById('kill-reason') || {}).value || '';
       if (disable && !confirm('정말로 모든 /v1 호출을 즉시 차단하시겠습니까?')) return;
-      await api('/admin/kill-switch', { method: 'POST', body: JSON.stringify({ disabled: disable, reason }) });
+      await api('/admin/kill-switch', { method: 'POST', success: 'Kill Switch 상태가 변경되었습니다', body: JSON.stringify({ disabled: disable, reason }) });
       route();
     }
 
     function metricLabel(metric) {
-      return { requests: '요청 수', errors: '오류율', krw: 'KRW 비용', tokens: '토큰', latency_p95_ms: '전체 지연 P95', first_chunk_p95_ms: '첫 청크 P95', llm_eval_failures: 'LLM 평가 실패 수', llm_eval_failure_rate: 'LLM 평가 실패율', tool_errors: 'tool 오류 수', tool_error_rate: 'tool 오류율', tool_loop: '에이전트 루프', mcp_new_tools: 'MCP 신규 도구 수', anomaly_zmax: '이상 징후 z-score', budget_burn_ratio: '예산 소진 예측 비율' }[metric] || metric;
+      return { requests: '요청 수', errors: '오류율', krw: 'KRW 비용', tokens: '토큰', latency_p95_ms: '전체 지연 P95', first_chunk_p95_ms: '첫 청크 P95', llm_eval_failures: 'LLM 평가 실패 수', llm_eval_failure_rate: 'LLM 평가 실패율', tool_errors: 'tool 오류 수', tool_error_rate: 'tool 오류율', tool_loop: '에이전트 루프', mcp_new_tools: 'MCP 신규 도구 수', anomaly_zmax: '이상 징후 z-score', budget_burn_ratio: '예산 소진 예측 비율', failovers: '폴백 발생 건수', failover_rate: '폴백 발생률' }[metric] || metric;
     }
     function formatThreshold(metric, value) {
       if (metric === 'krw') return money(value);
@@ -11015,7 +11973,7 @@ const adminHTML = `<!doctype html>
         webhook_url: document.getElementById('alert-webhook').value.trim(),
         enabled: true,
       };
-      await api('/admin/alerts', { method: 'POST', body: JSON.stringify(body) });
+      await api('/admin/alerts', { method: 'POST', success: '알림 규칙이 저장되었습니다', body: JSON.stringify(body) });
       route();
     }
     window.toggleAlert = async (id, enabled) => {
@@ -11255,7 +12213,7 @@ const adminHTML = `<!doctype html>
         snaps.map(s => {
           let parsed = {};
           try { parsed = JSON.parse(s.profile || '{}'); } catch (e) { parsed = {}; }
-          return '<tr><td>' + escapeHTML(s.created_at) + '</td><td>' + fmt(parsed.requests || 0) + '</td>' +
+          return '<tr><td>' + timeCell(s.created_at) + '</td><td>' + fmt(parsed.requests || 0) + '</td>' +
             '<td>' + fmt(Math.round(parsed.total_cost_krw || 0)) + '</td><td>' + pctText(parsed.success_rate) + '</td></tr>';
         }).join('') + '</tbody></table>'
       ) : '<p class="muted" style="margin-top:16px">스냅샷이 없습니다.</p>';
@@ -11268,7 +12226,7 @@ const adminHTML = `<!doctype html>
         await api('/admin/personalization/profiles/' + encodeURIComponent(userID) + '?window=30d&snapshot=1');
         await renderPersonalProfileDetail(userID);
       } catch (err) {
-        alert('스냅샷 생성 실패: ' + err.message);
+        toast('스냅샷 생성 실패: ' + err.message);
       }
     }
 
@@ -11297,7 +12255,7 @@ const adminHTML = `<!doctype html>
     // risky MCP tools, and pending approvals — no cost detail, no prompt originals.
     async function renderSecurityHome() {
       const view = document.getElementById('view');
-      view.innerHTML = section('보안 대시보드', '<div class="empty">불러오는 중...</div>');
+      view.innerHTML = section('보안 대시보드', '<div class="loading">불러오는 중...</div>');
       let d;
       try { d = await api('/security/dashboard'); }
       catch (e) { view.innerHTML = section('보안 대시보드', '<div class="card-body" style="padding:16px"><p class="muted">불러올 수 없습니다(security:read 권한 필요). 상세: ' + escapeHTML(e.message) + '</p></div>'); return; }
@@ -11354,7 +12312,7 @@ const adminHTML = `<!doctype html>
     // model-migration savings — no prompt originals, no security policy editing.
     async function renderBillingHome() {
       const view = document.getElementById('view');
-      view.innerHTML = section('비용 대시보드', '<div class="empty">불러오는 중...</div>');
+      view.innerHTML = section('비용 대시보드', '<div class="loading">불러오는 중...</div>');
       let d;
       try { d = await api('/billing/dashboard'); }
       catch (e) { view.innerHTML = section('비용 대시보드', '<div class="card-body" style="padding:16px"><p class="muted">불러올 수 없습니다(admin:read 권한 필요). 상세: ' + escapeHTML(e.message) + '</p></div>'); return; }
@@ -11397,7 +12355,7 @@ const adminHTML = `<!doctype html>
     // model mix, and recent failures — scoped to their team only.
     async function renderTeamHome() {
       const view = document.getElementById('view');
-      view.innerHTML = section('팀 대시보드', '<div class="empty">불러오는 중...</div>');
+      view.innerHTML = section('팀 대시보드', '<div class="loading">불러오는 중...</div>');
       let resp;
       try { resp = await api('/team/dashboard'); }
       catch (e) {
@@ -11450,7 +12408,7 @@ const adminHTML = `<!doctype html>
         try {
           await api('/team/reports', { method: 'POST', body: JSON.stringify({ report_id: id, action }) });
           renderTeamHome();
-        } catch (e) { alert('처리 오류: ' + e.message); }
+        } catch (e) { toast('처리 오류: ' + e.message); }
       };
       api('/team/reports').then(rp => {
         const host = document.getElementById('team-reports');
@@ -11549,7 +12507,7 @@ const adminHTML = `<!doctype html>
     // team's API keys (no secrets), accessible skills, pending skill access requests, members.
     async function renderTeamPortal() {
       const view = document.getElementById('view');
-      view.innerHTML = section('팀 포털', '<div class="empty">불러오는 중...</div>');
+      view.innerHTML = section('팀 포털', '<div class="loading">불러오는 중...</div>');
       let d;
       try { d = await api('/team/portal'); }
       catch (e) {
@@ -11579,7 +12537,7 @@ const adminHTML = `<!doctype html>
       const keysCard = card('팀 API 키 (비밀값 비노출)',
         '<div class="card-body">' + (keys.length
           ? '<table><thead><tr><th>이름</th><th>소유자</th><th>역할</th><th>상태</th><th>만료</th></tr></thead><tbody>' +
-            keys.map(k => '<tr><td>' + escapeHTML(k.name || k.id) + '</td><td class="muted">' + escapeHTML(k.user_id || k.owner || '') + '</td><td>' + escapeHTML(k.role || '') + '</td><td>' + (k.status === 'active' ? '<span class="status">active</span>' : '<span class="status error">' + escapeHTML(k.status || '') + '</span>') + '</td><td class="muted">' + (k.expires_at ? escapeHTML(k.expires_at) : '-') + '</td></tr>').join('') + '</tbody></table>'
+            keys.map(k => '<tr><td>' + escapeHTML(k.name || k.id) + '</td><td class="muted">' + escapeHTML(k.user_id || k.owner || '') + '</td><td>' + escapeHTML(k.role || '') + '</td><td>' + (k.status === 'active' ? '<span class="status">active</span>' : '<span class="status error">' + escapeHTML(k.status || '') + '</span>') + '</td><td class="muted">' + (k.expires_at ? timeExact(k.expires_at) : '-') + '</td></tr>').join('') + '</tbody></table>'
           : '<p class="muted">팀에 등록된 API 키가 없습니다.</p>') + '</div>');
 
       const skills = d.accessible_skills || [];
@@ -11611,7 +12569,7 @@ const adminHTML = `<!doctype html>
     // products (from miner candidates or manually), and triage access requests.
     async function renderDataProducts() {
       const view = document.getElementById('view');
-      view.innerHTML = section('데이터 상품', '<div class="empty">불러오는 중...</div>');
+      view.innerHTML = section('데이터 상품', '<div class="loading">불러오는 중...</div>');
       let prods, cands, reqs;
       try {
         prods = await api('/admin/data-products');
@@ -11633,16 +12591,16 @@ const adminHTML = `<!doctype html>
             allowed_teams: p.allowed_teams || [], sensitivity: p.sensitivity, status: status,
           }) });
           renderDataProducts();
-        } catch (e) { alert('변경 오류: ' + e.message); }
+        } catch (e) { toast('변경 오류: ' + e.message); }
       };
       window.dpDelete = async (key) => {
         if (!confirm(key + ' 상품을 삭제할까요?')) return;
         try { await api('/admin/data-products?id=' + encodeURIComponent(key), { method: 'DELETE' }); renderDataProducts(); }
-        catch (e) { alert('삭제 오류: ' + e.message); }
+        catch (e) { toast('삭제 오류: ' + e.message); }
       };
       window.dpDecide = async (id, action) => {
         try { await api('/admin/data-products/requests', { method: 'POST', body: JSON.stringify({ id, action }) }); renderDataProducts(); }
-        catch (e) { alert('처리 오류: ' + e.message); }
+        catch (e) { toast('처리 오류: ' + e.message); }
       };
       window.dpAdd = async (event) => {
         event.preventDefault();
@@ -11660,7 +12618,7 @@ const adminHTML = `<!doctype html>
           }) });
           document.getElementById('dp-form').reset();
           renderDataProducts();
-        } catch (e) { alert('저장 오류: ' + e.message); }
+        } catch (e) { toast('저장 오류: ' + e.message); }
       };
       window.dpPublishCandidate = (question, rec) => {
         document.getElementById('dp-name').value = question.slice(0, 60);
@@ -11718,7 +12676,7 @@ const adminHTML = `<!doctype html>
     // candidates with dry-run/impact; admin can apply (approval) with audit + rollback.
     async function renderRemediation() {
       const view = document.getElementById('view');
-      view.innerHTML = section('자동 조치', '<div class="empty">불러오는 중...</div>');
+      view.innerHTML = section('자동 조치', '<div class="loading">불러오는 중...</div>');
       let d;
       const windowHours = Number(sessionStorage.getItem('remediationWindow') || 6);
       try { d = await api('/admin/remediation/playbooks?window=' + encodeURIComponent(windowHours + 'h')); }
@@ -11806,7 +12764,7 @@ const adminHTML = `<!doctype html>
     // renderTeamScorecard shows per-team AI maturity scores (cost/quality/safety dimensions).
     async function renderTeamScorecard() {
       const view = document.getElementById('view');
-      view.innerHTML = section('팀 성숙도', '<div class="empty">불러오는 중...</div>');
+      view.innerHTML = section('팀 성숙도', '<div class="loading">불러오는 중...</div>');
       let d;
       try { d = await api('/admin/teams/scorecard?window=30d'); }
       catch (e) { view.innerHTML = section('팀 성숙도', '<div class="card-body" style="padding:16px"><p class="muted">' + escapeHTML(e.message) + '</p></div>'); return; }
@@ -11855,7 +12813,7 @@ const adminHTML = `<!doctype html>
     // against them before adoption (model swap / auto-routing / MCP agentic model).
     async function renderModelContracts() {
       const view = document.getElementById('view');
-      view.innerHTML = section('모델 계약', '<div class="empty">불러오는 중...</div>');
+      view.innerHTML = section('모델 계약', '<div class="loading">불러오는 중...</div>');
       let d;
       try { d = await api('/admin/models/contracts'); }
       catch (e) { view.innerHTML = section('모델 계약', '<div class="card-body" style="padding:16px"><p class="muted">' + escapeHTML(e.message) + '</p></div>'); return; }
@@ -11872,18 +12830,18 @@ const adminHTML = `<!doctype html>
           }) });
           document.getElementById('mcon-form').reset();
           renderModelContracts();
-        } catch (e) { alert('저장 오류: ' + e.message); }
+        } catch (e) { toast('저장 오류: ' + e.message); }
       };
       window.mconDelete = async (id) => {
         if (!confirm('계약을 삭제할까요?')) return;
         try { await api('/admin/models/contracts?id=' + encodeURIComponent(id), { method: 'DELETE' }); renderModelContracts(); }
-        catch (e) { alert('삭제 오류: ' + e.message); }
+        catch (e) { toast('삭제 오류: ' + e.message); }
       };
       window.mconRun = async () => {
         const model = document.getElementById('mcon-run-model').value.trim();
-        if (!model) { alert('검증할 모델명을 입력하세요.'); return; }
+        if (!model) { toast('검증할 모델명을 입력하세요.'); return; }
         const host = document.getElementById('mcon-run-result');
-        host.innerHTML = '<div class="empty">검증 중...</div>';
+        host.innerHTML = '<div class="loading">검증 중...</div>';
         try {
           const r = await api('/admin/models/contracts/run', { method: 'POST', body: JSON.stringify({ model }) });
           const vBadge = (v) => v === 'pass' ? '<span class="status">PASS</span>' : (v === 'warn' ? '<span class="status warn">WARN</span>' : (v === 'fail' ? '<span class="status error">FAIL</span>' : '<span class="muted">데이터없음</span>'));
@@ -11932,7 +12890,7 @@ const adminHTML = `<!doctype html>
     // creates a disabled draft policy for review in the policy screen.
     async function renderPolicyAdvisor() {
       const view = document.getElementById('view');
-      view.innerHTML = section('정책 어드바이저', '<div class="empty">분석 중...</div>');
+      view.innerHTML = section('정책 어드바이저', '<div class="loading">분석 중...</div>');
       let d;
       try { d = await api('/admin/policy-advisor/suggestions'); }
       catch (e) { view.innerHTML = section('정책 어드바이저', '<div class="card-body" style="padding:16px"><p class="muted">' + escapeHTML(e.message) + '</p></div>'); return; }
@@ -12023,7 +12981,7 @@ const adminHTML = `<!doctype html>
     // renderNarrativeReport shows the auto-generated monthly operations report (prose sections).
     async function renderNarrativeReport() {
       const view = document.getElementById('view');
-      view.innerHTML = section('운영 보고서', '<div class="empty">생성 중...</div>');
+      view.innerHTML = section('운영 보고서', '<div class="loading">생성 중...</div>');
       let d;
       try { d = await api('/admin/reports/narrative?window=30d'); }
       catch (e) { view.innerHTML = section('운영 보고서', '<div class="card-body" style="padding:16px"><p class="muted">' + escapeHTML(e.message) + '</p></div>'); return; }
@@ -12055,7 +13013,7 @@ const adminHTML = `<!doctype html>
     // policies that govern them — the change blast radius.
     async function renderSkillGraph() {
       const view = document.getElementById('view');
-      view.innerHTML = section('Skill 의존성', '<div class="empty">불러오는 중...</div>');
+      view.innerHTML = section('Skill 의존성', '<div class="loading">불러오는 중...</div>');
       let d;
       try { d = await api('/admin/skills/dependency-graph'); }
       catch (e) { view.innerHTML = section('Skill 의존성', '<div class="card-body" style="padding:16px"><p class="muted">' + escapeHTML(e.message) + '</p></div>'); return; }
@@ -12082,7 +13040,7 @@ const adminHTML = `<!doctype html>
     async function renderChargeback() {
       const view = document.getElementById('view');
       const month = (window._chargebackMonth || '');
-      view.innerHTML = section('비용 배부 팩', '<div class="empty">불러오는 중...</div>');
+      view.innerHTML = section('비용 배부 팩', '<div class="loading">불러오는 중...</div>');
       let d;
       try { d = await api('/admin/cost/chargeback-pack' + (month ? '?month=' + encodeURIComponent(month) : '')); }
       catch (e) { view.innerHTML = section('비용 배부 팩', '<div class="card-body" style="padding:16px"><p class="muted">' + escapeHTML(e.message) + '</p></div>'); return; }
@@ -12123,7 +13081,7 @@ const adminHTML = `<!doctype html>
     // renderPromptDebt ranks recurring prompt clusters by accumulated "prompt debt".
     async function renderPromptDebt() {
       const view = document.getElementById('view');
-      view.innerHTML = section('프롬프트 부채', '<div class="empty">분석 중...</div>');
+      view.innerHTML = section('프롬프트 부채', '<div class="loading">분석 중...</div>');
       let d;
       try { d = await api('/admin/prompts/debt?window=30d'); }
       catch (e) { view.innerHTML = section('프롬프트 부채', '<div class="card-body" style="padding:16px"><p class="muted">' + escapeHTML(e.message) + '</p></div>'); return; }
@@ -12158,7 +13116,7 @@ const adminHTML = `<!doctype html>
     // renderAppTemplates shows the built-in AI work-app starter catalog with one-click instantiate.
     async function renderAppTemplates() {
       const view = document.getElementById('view');
-      view.innerHTML = section('앱 템플릿', '<div class="empty">불러오는 중...</div>');
+      view.innerHTML = section('앱 템플릿', '<div class="loading">불러오는 중...</div>');
       let d;
       try { d = await api('/admin/app-templates'); }
       catch (e) { view.innerHTML = section('앱 템플릿', '<div class="card-body" style="padding:16px"><p class="muted">' + escapeHTML(e.message) + '</p></div>'); return; }
@@ -12190,7 +13148,7 @@ const adminHTML = `<!doctype html>
     // renderGatewayMCP shows the AI Gateway MCP Server catalog + a copyable client config.
     async function renderGatewayMCP() {
       const view = document.getElementById('view');
-      view.innerHTML = section('Gateway MCP', '<div class="empty">불러오는 중...</div>');
+      view.innerHTML = section('Gateway MCP', '<div class="loading">불러오는 중...</div>');
       let d;
       try { d = await api('/admin/gateway-mcp/info'); }
       catch (e) { view.innerHTML = section('Gateway MCP', '<div class="card-body" style="padding:16px"><p class="muted">' + escapeHTML(e.message) + '</p></div>'); return; }
@@ -12237,15 +13195,15 @@ const adminHTML = `<!doctype html>
           cost_policy: document.getElementById('mc-cost').value.trim(),
           input_schema: document.getElementById('mc-schema').value.trim(),
         };
-        if (!body.name) { alert('tool name이 필요합니다.'); return; }
-        if (body.input_schema) { try { JSON.parse(body.input_schema); } catch (e) { alert('input_schema JSON 파싱 오류: ' + e.message); return; } }
+        if (!body.name) { toast('tool name이 필요합니다.'); return; }
+        if (body.input_schema) { try { JSON.parse(body.input_schema); } catch (e) { toast('input_schema JSON 파싱 오류: ' + e.message); return; } }
         try { await api('/admin/mcp/contracts', { method: 'POST', body: JSON.stringify(body) }); document.getElementById('mc-form').reset(); renderMCPContracts(); }
-        catch (e) { alert('저장 오류: ' + e.message); }
+        catch (e) { toast('저장 오류: ' + e.message); }
       };
       window.mcpContractDelete = async (id) => {
         if (!confirm('계약을 삭제할까요?')) return;
         try { await api('/admin/mcp/contracts?id=' + encodeURIComponent(id), { method: 'DELETE' }); renderMCPContracts(); }
-        catch (e) { alert('삭제 오류: ' + e.message); }
+        catch (e) { toast('삭제 오류: ' + e.message); }
       };
       window.mcpContractValidate = async () => {
         try {
@@ -12287,7 +13245,7 @@ const adminHTML = `<!doctype html>
     // renderWorkflows manages workflow chain definitions (list / create via JSON / dry-run / delete).
     async function renderWorkflows() {
       const view = document.getElementById('view');
-      view.innerHTML = section('워크플로', '<div class="empty">불러오는 중...</div>');
+      view.innerHTML = section('워크플로', '<div class="loading">불러오는 중...</div>');
       let d;
       try { d = await api('/admin/workflows'); }
       catch (e) { view.innerHTML = section('워크플로', '<div class="card-body" style="padding:16px"><p class="muted">' + escapeHTML(e.message) + '</p></div>'); return; }
@@ -12296,20 +13254,20 @@ const adminHTML = `<!doctype html>
         const name = document.getElementById('wf-name').value.trim();
         let steps;
         try { steps = JSON.parse(document.getElementById('wf-steps').value || '[]'); }
-        catch (e) { alert('steps JSON 파싱 오류: ' + e.message); return; }
-        if (!name || !Array.isArray(steps) || !steps.length) { alert('이름과 steps 배열이 필요합니다.'); return; }
+        catch (e) { toast('steps JSON 파싱 오류: ' + e.message); return; }
+        if (!name || !Array.isArray(steps) || !steps.length) { toast('이름과 steps 배열이 필요합니다.'); return; }
         const invalidStep = steps.findIndex(st => !st || typeof st !== 'object' || !String(st.name||'').trim() || !String(st.type||'').trim());
-        if (invalidStep >= 0) { alert((invalidStep+1) + '번째 step에 name과 type이 필요합니다.'); return; }
+        if (invalidStep >= 0) { toast((invalidStep+1) + '번째 step에 name과 type이 필요합니다.'); return; }
         try {
           await api('/admin/workflows', { method: 'POST', body: JSON.stringify({ name, steps, allowed_teams: document.getElementById('wf-teams').value.trim() }) });
           document.getElementById('wf-form').reset();
           renderWorkflows();
-        } catch (e) { alert('저장 오류: ' + e.message); }
+        } catch (e) { toast('저장 오류: ' + e.message); }
       };
       window.wfDelete = async (id) => {
         if (!confirm('워크플로를 삭제할까요?')) return;
         try { await api('/admin/workflows?id=' + encodeURIComponent(id), { method: 'DELETE' }); renderWorkflows(); }
-        catch (e) { alert('삭제 오류: ' + e.message); }
+        catch (e) { toast('삭제 오류: ' + e.message); }
       };
       window.wfDryRun = async (id) => {
         try {
@@ -12326,9 +13284,9 @@ const adminHTML = `<!doctype html>
         if (note === null) return;
         try {
           const r = await api('/admin/workflows/' + encodeURIComponent(id) + '/publish', { method: 'POST', body: JSON.stringify({ note: note }) });
-          alert('발행됨 — 버전 v' + r.version);
+          toast('발행됨 — 버전 v' + r.version, 'ok');
           renderWorkflows();
-        } catch (e) { alert('발행 실패: ' + e.message); }
+        } catch (e) { toast('발행 실패: ' + e.message); }
       };
       window.wfVersions = async (id) => {
         try {
@@ -12386,7 +13344,7 @@ const adminHTML = `<!doctype html>
           tool: document.getElementById('sb-tool').value.trim(),
         };
         const host = document.getElementById('sb-result');
-        host.innerHTML = '<div class="empty">검증 중...</div>';
+        host.innerHTML = '<div class="loading">검증 중...</div>';
         try {
           const r = await api('/admin/sandbox/preview', { method: 'POST', body: JSON.stringify(body) });
           const verdict = r.would_block ? '<span class="status error">차단 예상</span>' : '<span class="status">통과 예상</span>';
@@ -12424,7 +13382,7 @@ const adminHTML = `<!doctype html>
     // models, failures, key alerts, risk, and recommendations — no operational metrics.
     async function renderMeHome() {
       const view = document.getElementById('view');
-      view.innerHTML = section('내 홈', '<div class="empty">불러오는 중...</div>');
+      view.innerHTML = section('내 홈', '<div class="loading">불러오는 중...</div>');
       let d;
       try { d = await api('/me/dashboard'); }
       catch (e) {
@@ -12663,7 +13621,7 @@ const adminHTML = `<!doctype html>
         '</tr>').join('') + '</tbody></table></div>');
     };
     window.meShowReceipt = async (id) => {
-      openModal('요청 영수증', '<div class="empty">불러오는 중...</div>');
+      openModal('요청 영수증', '<div class="loading">불러오는 중...</div>');
       let r;
       try { r = await api('/me/requests/' + encodeURIComponent(id) + '/receipt'); }
       catch (e) { openModal('요청 영수증', '<div class="error-line">' + escapeHTML(e.message) + '</div>'); return; }
@@ -12672,7 +13630,7 @@ const adminHTML = `<!doctype html>
       const rt = r.routing;
       const rows = [
         ['요청 ID', escapeHTML(r.request_id || '')],
-        ['시각', escapeHTML(r.created_at || '')],
+        ['시각', timeCell(r.created_at || '')],
         ['엔드포인트', escapeHTML(r.endpoint || '')],
         ['모델', escapeHTML(r.model || '') + (r.provider ? ' <span class="muted">(' + escapeHTML(r.provider) + ')</span>' : '')],
         ['상태', (r.status_code >= 200 && r.status_code < 300 ? '<span class="status">' + r.status_code + '</span>' : '<span class="status error">' + r.status_code + '</span>') + (r.blocked ? ' <span class="status error">정책 차단</span>' : '')],
@@ -12726,15 +13684,15 @@ const adminHTML = `<!doctype html>
     window.meSkillFeedback = async (name) => {
       const sel = document.getElementById('skfb-' + name);
       const rating = parseInt((sel && sel.value) || '0', 10);
-      if (!rating) { alert('평가 점수를 선택하세요.'); return; }
+      if (!rating) { toast('평가 점수를 선택하세요.'); return; }
       const comment = prompt('코멘트(선택):', '') || '';
-      try { await api('/me/skills/' + encodeURIComponent(name) + '/feedback', { method: 'POST', body: JSON.stringify({ rating, comment }) }); alert('피드백 감사합니다.'); await meLoadSkills(); }
-      catch (e) { alert(e.message); }
+      try { await api('/me/skills/' + encodeURIComponent(name) + '/feedback', { method: 'POST', body: JSON.stringify({ rating, comment }) }); toast('피드백 감사합니다.', 'ok'); await meLoadSkills(); }
+      catch (e) { toast(e.message); }
     };
     window.meSkillRequest = async (name) => {
       const reason = prompt(name + ' Skill 접근을 요청합니다. 사유(선택):', '') || '';
-      try { await api('/me/skills/' + encodeURIComponent(name) + '/request-access', { method: 'POST', body: JSON.stringify({ reason }) }); alert('접근 요청이 접수되었습니다.'); }
-      catch (e) { alert(e.message); }
+      try { await api('/me/skills/' + encodeURIComponent(name) + '/request-access', { method: 'POST', body: JSON.stringify({ reason }) }); toast('접근 요청이 접수되었습니다.', 'ok'); }
+      catch (e) { toast(e.message); }
     };
 
     // 로그인 세션 관리: 활성 세션 목록(현재 세션 표시) + 개별/타 세션 종료.
@@ -12803,7 +13761,7 @@ const adminHTML = `<!doctype html>
       try {
         await api('/me/actions/snooze', { method: 'POST', body: JSON.stringify({ type, days: 7 }) });
         renderMeHome();
-      } catch (e) { alert('보류 오류: ' + e.message); }
+      } catch (e) { toast('보류 오류: ' + e.message); }
     };
 
     // meActionGo handles an action-queue button. "modal:<key>" opens inline guidance; a hash that
@@ -12918,7 +13876,7 @@ const adminHTML = `<!doctype html>
       try {
         await api('/me/recommendations/' + encodeURIComponent(id) + '/feedback', { method: 'POST', body: JSON.stringify({ action }) });
         meLoadRecommendations();
-      } catch (e) { alert('피드백 오류: ' + e.message); }
+      } catch (e) { toast('피드백 오류: ' + e.message); }
     };
 
     async function renderMyKeys() {
@@ -12967,7 +13925,7 @@ const adminHTML = `<!doctype html>
           '<td>' + escapeHTML(k.role || '') + '</td>' +
           '<td class="muted" style="max-width:260px">' + scopeText + '</td>' +
           '<td><span class="status ' + (expired ? 'error' : '') + '">' + escapeHTML(k.status) + '</span></td>' +
-          '<td>' + escapeHTML(k.expires_at || '-') + '</td>' +
+          '<td>' + timeExact(k.expires_at || '-') + '</td>' +
           '<td style="white-space:nowrap">' +
             (canEdit ? '<button class="ghost" type="button" onclick="editMyKeyScopes(\'' + escapeAttr(k.id) + '\')">스코프</button> ' : '') +
             (!expired ? '<button class="secondary" type="button" onclick="rotateMyKey(\'' + escapeAttr(k.id) + '\')">회전</button> <button class="danger" type="button" onclick="revokeMyKey(\'' + escapeAttr(k.id) + '\')">폐기</button>' : '<span class="muted">작업 없음</span>') +
@@ -13042,7 +14000,7 @@ const adminHTML = `<!doctype html>
         await api('/me/keys/' + encodeURIComponent(id), { method: 'PATCH', body: JSON.stringify({ scopes }) });
         closeModal();
         await renderMyKeys();
-      } catch (err) { alert('스코프 저장 실패: ' + err.message); }
+      } catch (err) { toast('스코프 저장 실패: ' + err.message); }
     };
 
     // mkScopeLabel maps an API-key scope to a short Korean label for the My Keys picker.
@@ -13057,7 +14015,7 @@ const adminHTML = `<!doctype html>
 
     async function createMyKey() {
       const name = (document.getElementById('mk-name').value || '').trim();
-      if (!name) { alert('키 이름을 입력하세요.'); return; }
+      if (!name) { toast('키 이름을 입력하세요.'); return; }
       const scopes = window.mkNewScopes || [];
       const expiresRaw = (document.getElementById('mk-expires').value || '').trim();
       const expires = expiresRaw ? new Date(expiresRaw).toISOString() : '';
@@ -13069,24 +14027,24 @@ const adminHTML = `<!doctype html>
         window.mykeysSecret = res.secret || null;
         window.mkNewScopes = [];
         await renderMyKeys();
-      } catch (err) { alert('발급 실패: ' + err.message); }
+      } catch (err) { toast('발급 실패: ' + err.message); }
     }
 
     async function rotateMyKey(id) {
       if (!confirm('이 키를 회전하시겠습니까? 기존 키는 즉시 폐기됩니다.')) return;
       try {
-        const res = await api('/me/keys/' + encodeURIComponent(id) + '/rotate', { method: 'POST', body: '{}' });
+        const res = await api('/me/keys/' + encodeURIComponent(id) + '/rotate', { method: 'POST', success: 'API 키가 회전되었습니다 — 새 키를 안전한 곳에 보관하세요', body: '{}' });
         window.mykeysSecret = res.secret || null;
         await renderMyKeys();
-      } catch (err) { alert('회전 실패: ' + err.message); }
+      } catch (err) { toast('회전 실패: ' + err.message); }
     }
 
     async function revokeMyKey(id) {
       if (!confirm('이 키를 폐기하시겠습니까?')) return;
       try {
-        await api('/me/keys/' + encodeURIComponent(id), { method: 'DELETE' });
+        await api('/me/keys/' + encodeURIComponent(id), { method: 'DELETE', success: 'API 키가 폐기되었습니다' });
         await renderMyKeys();
-      } catch (err) { alert('폐기 실패: ' + err.message); }
+      } catch (err) { toast('폐기 실패: ' + err.message); }
     }
 
     // ---------- ClickHouse DW (setup + monitoring) ----------
@@ -13138,7 +14096,7 @@ const adminHTML = `<!doctype html>
       };
       if (!body.model_glob) { if (out) out.innerHTML = '<span class="status error">model_glob 필수</span>'; return; }
       try {
-        await api('/admin/model-deprecations', { method: 'POST', body: JSON.stringify(body) });
+        await api('/admin/model-deprecations', { method: 'POST', success: '모델 일몰 설정이 저장되었습니다', body: JSON.stringify(body) });
         await renderModelDeprecations();
       } catch (e) {
         if (out) out.innerHTML = '<span class="status error">' + escapeHTML(e.message) + '</span>';
@@ -13152,7 +14110,7 @@ const adminHTML = `<!doctype html>
     // ── SSO (Keycloak) 설정/진단 ──────────────────────────────────────────
     async function renderSSOSettings() {
       const view = document.getElementById('view');
-      view.innerHTML = section('SSO (Keycloak)', '<div class="empty">불러오는 중...</div>');
+      view.innerHTML = section('SSO (Keycloak)', '<div class="loading">불러오는 중...</div>');
       let c;
       try { c = await api('/admin/sso/keycloak/config'); }
       catch (e) { view.innerHTML = section('SSO (Keycloak)', '<div class="card-body" style="padding:16px"><p class="muted">설정을 불러올 수 없습니다: ' + escapeHTML(e.message) + '</p></div>'); return; }
@@ -13293,7 +14251,7 @@ const adminHTML = `<!doctype html>
 
     async function renderSkillStudio() {
       const view = document.getElementById('view');
-      view.innerHTML = section('Skill Studio', '<div class="empty">불러오는 중...</div>');
+      view.innerHTML = section('Skill Studio', '<div class="loading">불러오는 중...</div>');
       const [cand, sk] = await Promise.all([
         api('/admin/skill-studio/candidates').catch(e => ({ candidates: [], _err: e.message })),
         api('/admin/skills').catch(() => ({ skills: [] })),
@@ -13388,7 +14346,7 @@ const adminHTML = `<!doctype html>
       if (!host) return;
       const name = window.__studioWizardName;
       if (!name) { host.innerHTML = ''; return; }
-      host.innerHTML = '<div class="empty">불러오는 중...</div>';
+      host.innerHTML = '<div class="loading">불러오는 중...</div>';
       let rd, sk;
       try {
         [rd, sk] = await Promise.all([
@@ -13541,7 +14499,7 @@ const adminHTML = `<!doctype html>
         passed: (document.getElementById('studio-fit-pass-' + name) || {}).checked !== false,
       };
       try { await api('/admin/skills/fitness', { method: 'POST', body: JSON.stringify(body) }); await studioLoadFitness(name); }
-      catch (e) { alert('근거 추가 오류: ' + e.message); }
+      catch (e) { toast('근거 추가 오류: ' + e.message); }
     };
 
     window.studioPromote = async (name, to) => {
@@ -13554,7 +14512,7 @@ const adminHTML = `<!doctype html>
         studioOpenWizard(name);
       } catch (e) {
         if (out) out.innerHTML = '<span class="status error">' + escapeHTML(e.message) + '</span>';
-        else alert('승격 오류: ' + e.message);
+        else toast('승격 오류: ' + e.message);
       }
     };
     // ── Skill Studio 끝 ──────────────────────────────────────────────────
@@ -13840,7 +14798,7 @@ const adminHTML = `<!doctype html>
       let html = '<div class="card-body"><p class="muted">ClickHouse 일별 rollup 기준 장기 추세·비용 분석. 모델/팀/비용센터 단위로 요청·토큰·비용·오류를 집계합니다. 요청 단위 실시간 상세는 <a href="#/requests">호출 이력</a>을 사용하세요.</p>' +
         '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
           '<label class="muted">기간 <select onchange="dwSet(\'dwWindow\', this.value)">' + winSel + '</select></label>' +
-          '<span class="muted">since ' + escapeHTML(ov.since || '') + '</span>' +
+          '<span class="muted">since ' + timeExact(ov.since || '') + '</span>' +
           '<button class="secondary" type="button" onclick="dwExportCSV()">CSV 내보내기</button>' +
           '<button class="secondary" type="button" onclick="dwRefresh()" title="대시보드 쿼리 캐시(약 45초)를 비우고 ClickHouse에서 최신 값을 다시 조회합니다">새로고침</button>' +
           '<span id="dw-action-result" class="muted"></span>' +
@@ -14329,20 +15287,20 @@ const adminHTML = `<!doctype html>
     async function saveSetting(key, inputId, secret) {
       const el = document.getElementById(inputId);
       const v = (el.value || '').trim();
-      if (secret && v === '') { alert('변경할 값을 입력하세요(빈 값은 변경하지 않음).'); return; }
+      if (secret && v === '') { toast('변경할 값을 입력하세요(빈 값은 변경하지 않음).'); return; }
       try {
         await api('/admin/settings/by-key/' + encodeURIComponent(key), { method: 'PUT', body: JSON.stringify({ value: v }) });
         await renderRuntimeSettings();
-      } catch (e) { alert('저장 실패: ' + e.message); }
+      } catch (e) { toast('저장 실패: ' + e.message); }
     }
     async function revertSetting(key) {
       if (!confirm('이 설정을 환경변수 기본값으로 되돌릴까요?')) return;
       try { await api('/admin/settings/by-key/' + encodeURIComponent(key), { method: 'DELETE' }); await renderRuntimeSettings(); }
-      catch (e) { alert('되돌리기 실패: ' + e.message); }
+      catch (e) { toast('되돌리기 실패: ' + e.message); }
     }
     async function rollbackSetting(key) {
       try { await api('/admin/settings/rollback', { method: 'POST', body: JSON.stringify({ key }) }); await renderRuntimeSettings(); }
-      catch (e) { alert('롤백 실패: ' + e.message); }
+      catch (e) { toast('롤백 실패: ' + e.message); }
     }
     async function settingHistory(key) {
       const sec = document.getElementById('setting-history-section');
@@ -14693,7 +15651,7 @@ const adminHTML = `<!doctype html>
       if (!name) return;
       try {
         await api('/admin/text2sql/promote', { method: 'POST', body: JSON.stringify({ target: 'report', name, question, sql }) });
-      } catch (err) { alert('승격 실패: ' + err.message); }
+      } catch (err) { toast('승격 실패: ' + err.message); }
       route();
     };
     window.deleteT2SReport = async (id) => {
@@ -14706,7 +15664,7 @@ const adminHTML = `<!doctype html>
         openModal('Text2SQL Timeline', '<div class="empty">request_id가 없는 오래된 로그입니다.</div>');
         return;
       }
-      openModal('Text2SQL Timeline — ' + requestID, '<div class="empty">조회 중...</div>');
+      openModal('Text2SQL Timeline — ' + requestID, '<div class="loading">조회 중...</div>');
       try {
         const d = await api('/admin/text2sql/spans?request_id=' + encodeURIComponent(requestID));
         const spans = d.spans || [];
@@ -14740,14 +15698,14 @@ const adminHTML = `<!doctype html>
     window.toggleT2SFeature = async (name, enabled) => {
       try {
         await api('/admin/text2sql/features', { method: 'POST', body: JSON.stringify({ name, enabled }) });
-      } catch (err) { alert('토글 실패: ' + err.message); }
+      } catch (err) { toast('토글 실패: ' + err.message); }
       route();
     };
     window.toggleT2SKill = async (disabled) => {
       if (disabled && !confirm('Text2SQL 전체를 중지하시겠습니까? 모든 vibe/text2sql-* 요청이 안전 메시지를 반환합니다.')) { route(); return; }
       try {
         await api('/admin/text2sql/kill-switch', { method: 'POST', body: JSON.stringify({ disabled }) });
-      } catch (err) { alert('변경 실패: ' + err.message); }
+      } catch (err) { toast('변경 실패: ' + err.message); }
       route();
     };
     async function addT2SGloss(e) {
@@ -14758,7 +15716,7 @@ const adminHTML = `<!doctype html>
         mapping: document.getElementById('tgl-mapping').value.trim(),
         description: document.getElementById('tgl-desc').value.trim(),
       };
-      if (!body.term || !body.mapping) { alert('용어와 매핑을 입력하세요'); return; }
+      if (!body.term || !body.mapping) { toast('용어와 매핑을 입력하세요'); return; }
       await api('/admin/text2sql/glossary', { method: 'POST', body: JSON.stringify(body) });
       route();
     }
@@ -14804,7 +15762,7 @@ const adminHTML = `<!doctype html>
     async function loadT2SRegistry() {
       const schema = t2sRegSchema();
       const body = document.getElementById('t2s-registry-body');
-      if (!schema) { alert('스키마명을 입력하세요'); return; }
+      if (!schema) { toast('스키마명을 입력하세요'); return; }
       const d = await api('/admin/text2sql/tables?schema=' + encodeURIComponent(schema)).catch(() => ({ tables: [], columns: [] }));
       const colsByTable = {};
       (d.columns || []).forEach(c => { (colsByTable[c.table_name] = colsByTable[c.table_name] || []).push(c); });
@@ -14823,7 +15781,7 @@ const adminHTML = `<!doctype html>
       const el = document.getElementById('t2s-collect-result');
       const connEl = document.getElementById('t2s-collect-conn');
       const connID = connEl ? connEl.value : '';
-      if (!schema) { alert('스키마명을 입력하세요'); return; }
+      if (!schema) { toast('스키마명을 입력하세요'); return; }
       if (el) el.textContent = ' 수집 중…';
       try {
         const payload = { schema_name: schema };
@@ -14876,14 +15834,14 @@ const adminHTML = `<!doctype html>
     async function addT2STable(e) {
       e.preventDefault();
       const schema = t2sRegSchema();
-      if (!schema) { alert('스키마명을 먼저 입력하세요'); return; }
+      if (!schema) { toast('스키마명을 먼저 입력하세요'); return; }
       await api('/admin/text2sql/tables', { method: 'POST', body: JSON.stringify({ schema_name: schema, table_name: document.getElementById('rt-table').value.trim(), description: document.getElementById('rt-desc').value.trim() }) });
       loadT2SRegistry();
     }
     async function addT2SColumn(e) {
       e.preventDefault();
       const schema = t2sRegSchema();
-      if (!schema) { alert('스키마명을 먼저 입력하세요'); return; }
+      if (!schema) { toast('스키마명을 먼저 입력하세요'); return; }
       await api('/admin/text2sql/columns', { method: 'POST', body: JSON.stringify({ schema_name: schema, table_name: document.getElementById('rc-table').value.trim(), column_name: document.getElementById('rc-column').value.trim(), data_type: document.getElementById('rc-type').value.trim(), description: document.getElementById('rc-desc').value.trim(), sensitivity: document.getElementById('rc-sens').value }) });
       loadT2SRegistry();
     }
@@ -14902,7 +15860,7 @@ const adminHTML = `<!doctype html>
         column_name: document.getElementById('tpm-column').value.trim(),
         action: document.getElementById('tpm-action').value,
       };
-      if (body.subject_type !== '*' && !body.subject_id) { alert('subject id를 입력하세요'); return; }
+      if (body.subject_type !== '*' && !body.subject_id) { toast('subject id를 입력하세요'); return; }
       await api('/admin/text2sql/permissions', { method: 'POST', body: JSON.stringify(body) });
       route();
     }
@@ -14921,7 +15879,7 @@ const adminHTML = `<!doctype html>
         schema_name: document.getElementById('tp-schema').value.trim(),
         exec_connection_id: document.getElementById('tp-conn').value,
       };
-      if (!body.virtual_model) { alert('가상 모델명을 입력하세요'); return; }
+      if (!body.virtual_model) { toast('가상 모델명을 입력하세요'); return; }
       await api('/admin/text2sql/profiles', { method: 'POST', body: JSON.stringify(body) });
       route();
     }
@@ -14951,11 +15909,11 @@ const adminHTML = `<!doctype html>
         description: document.getElementById('tc-desc').value.trim(),
         enabled: true,
       };
-      if (!body.id || !body.name) { alert('ID와 이름을 입력하세요'); return; }
+      if (!body.id || !body.name) { toast('ID와 이름을 입력하세요'); return; }
       try {
         await api('/admin/text2sql/connections', { method: 'POST', body: JSON.stringify(body) });
         route();
-      } catch (err) { alert('저장 실패: ' + err.message); }
+      } catch (err) { toast('저장 실패: ' + err.message); }
     }
     window.deleteT2SConn = async (id) => {
       if (!confirm(id + ' 연결을 삭제하시겠습니까?')) return;
@@ -14966,8 +15924,8 @@ const adminHTML = `<!doctype html>
       const qs = connID ? '?connection_id=' + encodeURIComponent(connID) : '';
       try {
         const res = await api('/admin/text2sql/healthcheck' + qs);
-        alert('헬스체크 결과 (' + escapeHTML(connID || '기본') + '):\n상태: ' + (res.status || '-') + '\n' + (res.detail || ''));
-      } catch (err) { alert('헬스체크 실패: ' + err.message); }
+        toast('헬스체크 결과 (' + (connID || '기본') + '):\n상태: ' + (res.status || '-') + '\n' + (res.detail || ''), 'info');
+      } catch (err) { toast('헬스체크 실패: ' + err.message); }
     };
     function downloadT2SSample() {
       const sample = {
@@ -14999,7 +15957,7 @@ const adminHTML = `<!doctype html>
         expected_sql: document.getElementById('tg-sql').value,
         schema_name: document.getElementById('tg-schema').value.trim(),
       };
-      if (!body.name || !body.question.trim() || !body.expected_sql.trim()) { alert('이름·질문·기대 SQL을 입력하세요'); return; }
+      if (!body.name || !body.question.trim() || !body.expected_sql.trim()) { toast('이름·질문·기대 SQL을 입력하세요'); return; }
       await api('/admin/text2sql/golden', { method: 'POST', body: JSON.stringify(body) });
       route();
     }
@@ -15028,7 +15986,7 @@ const adminHTML = `<!doctype html>
         schema_text: document.getElementById('t2s-schema').value,
         allowed_tables: tables,
       };
-      if (!body.name || !body.schema_text.trim()) { alert('이름과 스키마를 입력하세요'); return; }
+      if (!body.name || !body.schema_text.trim()) { toast('이름과 스키마를 입력하세요'); return; }
       await api('/admin/text2sql/schemas', { method: 'POST', body: JSON.stringify(body) });
       route();
     }
@@ -15058,7 +16016,7 @@ const adminHTML = `<!doctype html>
             '<tbody>' +
               list.map(err =>
                 '<tr>' +
-                  '<td class="muted">' + escapeHTML(err.created_at) + '</td>' +
+                  '<td class="muted">' + timeCell(err.created_at) + '</td>' +
                   '<td><span class="badge" style="background:var(--pill-bg); padding:2px 6px; border-radius:4px; font-size:11px;">' + escapeHTML(err.component) + '</span></td>' +
                   '<td><pre style="white-space:pre-wrap; margin:0; font-family:ui-monospace,SFMono-Regular,Consolas,monospace; font-size:12px; color:var(--ink);">' + escapeHTML(err.error_message) + '</pre></td>' +
                 '</tr>'
@@ -15090,9 +16048,10 @@ const adminHTML = `<!doctype html>
     }
 
     async function renderSettings() {
-      const [keys, providers, retention, fallback, audit, routes, learning, knowledge, usersResp, teamsResp, authEvents] = await Promise.all([
+      const [keys, providers, patternAnalysis, retention, fallback, audit, routes, learning, knowledge, usersResp, teamsResp, authEvents] = await Promise.all([
         api('/admin/api-keys'),
         api('/admin/providers'),
+        api('/admin/routing/pattern-conflicts').catch(() => ({ summary: {}, conflicts: [], redundancies: [], resolution_policy: {} })),
         api('/admin/retention'),
         api('/admin/fallback'),
         api('/admin/audit-logs?limit=50'),
@@ -15143,18 +16102,23 @@ const adminHTML = `<!doctype html>
           '<div id="api-key-list">' + apiKeyTable(keys.api_keys || []) + '</div>'
         ) +
         cardWithID('settings-providers', '업스트림 프로바이더',
-          '<form class="inline-form" id="provider-form" autocomplete="off" style="grid-template-columns: 130px minmax(220px, 2fr) minmax(150px, 1fr) 110px minmax(170px, 1.5fr) auto auto;">' +
+          '<form class="inline-form" id="provider-form" autocomplete="off" style="grid-template-columns: 130px minmax(200px, 2fr) minmax(130px, 1fr) 100px minmax(150px, 1.5fr) minmax(120px, 1fr) 110px auto auto;">' +
             '<input id="provider-name" placeholder="이름" required>' +
             '<input id="provider-base-url" type="url" placeholder="Base URL" required>' +
             '<input id="provider-api-key" type="password" autocomplete="new-password" placeholder="API 키">' +
             '<input id="provider-timeout" type="number" min="1" placeholder="타임아웃 ms">' +
             '<input id="provider-patterns" placeholder="모델 패턴 (예: claude-*,anthropic/*)">' +
+            '<input id="provider-group" placeholder="폴백 그룹 (예: h200-pool)">' +
+            '<input id="provider-priority" type="number" min="1" placeholder="우선순위 (낮을수록 먼저)">' +
             '<button type="submit" id="provider-submit">저장</button>' +
             '<button type="button" id="provider-cancel" class="secondary" onclick="providerFormReset()">취소</button>' +
             '<div id="provider-edit-hint" class="muted" style="grid-column:1/-1;font-size:12px;margin-top:2px"></div>' +
           '</form>' +
           '<div class="muted" style="padding:0 12px 10px;font-size:12px">행의 <strong>수정</strong>을 누르면 이 폼에 값이 채워집니다. 이름은 고정되고, API 키를 비워두면 기존 키가 유지됩니다. <strong>사용/중지</strong>로 라우팅 대상 여부를 바로 바꿀 수 있습니다.</div>' +
-          providerTable(providers.providers || [])
+          '<div style="padding:0 12px 12px"><button type="button" class="secondary" onclick="openRoutingGuide()">📖 라우팅 · 폴백 동작 설명 열기</button>' +
+            '<span class="muted" style="margin-left:8px;font-size:12px">어떤 provider로 가는지, 폴백은 언제 되는지 전체 규칙을 봅니다.</span></div>' +
+          '<div id="provider-pattern-diagnostics">' + providerPatternDiagnostics(patternAnalysis) + '</div>' +
+          providerTable(providers.providers || [], patternAnalysis)
         ) +
         section('로그인 계정 · 팀 (RBAC)', authAccountsPanel(usersResp.auth_users || [], teamsResp.auth_teams || [], authEvents.events || [], roleOptions)) +
         section('복잡도 기반 비용 최적 라우팅 규칙', routingRulesPanel(routes.rules || [])) +
@@ -15169,6 +16133,10 @@ const adminHTML = `<!doctype html>
       document.getElementById('view').innerHTML = html;
       document.getElementById('key-form').addEventListener('submit', createProxyKey);
       document.getElementById('provider-form').addEventListener('submit', saveProvider);
+      ['provider-name', 'provider-patterns'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.addEventListener('input', scheduleProviderPatternPreview);
+      });
       const auForm = document.getElementById('auth-user-form');
       if (auForm) auForm.addEventListener('submit', createAuthUser);
       const atForm = document.getElementById('auth-team-form');
@@ -15188,7 +16156,7 @@ const adminHTML = `<!doctype html>
       const auditCsv = document.getElementById('audit-csv');
       if (auditCsv) auditCsv.addEventListener('click', async () => {
         const res = await fetch('/admin/audit-logs.csv?limit=5000', { headers: headers() });
-        if (!res.ok) { alert('감사 CSV 다운로드 실패: ' + (await res.text())); return; }
+        if (!res.ok) { toast('감사 CSV 다운로드 실패: ' + (await res.text())); return; }
         const blob = await res.blob();
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -15267,8 +16235,8 @@ const adminHTML = `<!doctype html>
         role: document.getElementById('au-role').value,
         team_id: document.getElementById('au-team').value,
       };
-      if (!body.email || !body.password) { alert('이메일과 초기 비밀번호를 입력하세요'); return; }
-      await api('/admin/users', { method: 'POST', body: JSON.stringify(body) });
+      if (!body.email || !body.password) { toast('이메일과 초기 비밀번호를 입력하세요'); return; }
+      await api('/admin/users', { method: 'POST', success: '계정이 생성되었습니다', body: JSON.stringify(body) });
       route();
     }
     window.applyAuthUserRole = async (id, role) => {
@@ -15294,7 +16262,7 @@ const adminHTML = `<!doctype html>
       e.preventDefault();
       const name = document.getElementById('at-name').value.trim();
       if (!name) return;
-      await api('/admin/teams', { method: 'POST', body: JSON.stringify({ name }) });
+      await api('/admin/teams', { method: 'POST', success: '팀이 생성되었습니다', body: JSON.stringify({ name }) });
       route();
     }
     const allApiScopes = ['chat:completion', 'embeddings:create', 'models:read', 'admin:read', 'admin:write', 'routing:read', 'routing:write', 'observability:read', 'costs:read', 'security:read', 'mcp:use', 'mcp:admin'];
@@ -15359,20 +16327,305 @@ const adminHTML = `<!doctype html>
       closeModal();
       route();
     };
-    function providerTable(rows) {
+    // Routing/failover is decided across several files (provider selection, the
+    // pipeline's candidate build, and dialUpstream's retry rules). This modal is the
+    // one place an operator can read all of it as a single set of rules.
+    function routingGuideSection(title, subtitle, body) {
+      return '<div style="margin:0 0 18px">' +
+        '<div style="font-weight:600;font-size:14px;margin-bottom:2px">' + title + '</div>' +
+        (subtitle ? '<div class="muted" style="font-size:12px;margin-bottom:8px">' + subtitle + '</div>' : '') +
+        body + '</div>';
+    }
+    function openRoutingGuide() {
+      const selection = '<table><thead><tr><th style="width:52px">순위</th><th>선택 방법</th><th>조건</th><th><code>route_reason</code></th></tr></thead><tbody>' +
+        '<tr><td>1</td><td><code>X-Proxy-Provider</code> 헤더</td><td>클라이언트가 헤더로 provider 이름을 직접 지정</td><td><code>header</code></td></tr>' +
+        '<tr><td>2</td><td><code>?provider=</code> 쿼리</td><td>URL 쿼리로 지정</td><td><code>query</code></td></tr>' +
+        '<tr><td>3</td><td>라우팅 규칙</td><td>복잡도 기반 규칙이 provider를 지정</td><td><code>rule_provider</code></td></tr>' +
+        '<tr><td>4</td><td><strong>모델 패턴 자동 매칭</strong></td><td>요청 body의 <code>model</code>이 provider의 <code>model_patterns</code> 글롭에 매칭. <strong>여러 개가 매칭되면 <code>priority</code> 오름차순</strong>(같으면 이름순)</strong></td><td><code>model_pattern</code></td></tr>' +
+        '<tr><td>5</td><td>기본 provider</td><td>위 어디에도 걸리지 않으면 <code>UPSTREAM_PROVIDER</code></td><td><code>default</code></td></tr>' +
+        '</tbody></table>' +
+        '<div class="muted" style="font-size:12px;margin-top:6px">모델이 <code>auto</code> / <code>vibe/auto</code> 계열이면 그 앞에 Intelligent Routing이 <em>모델</em>을 먼저 고르고(<code>auto_router</code>), 그 결과 모델로 위 순서를 탑니다.</div>';
+
+      const conditions = '<table><thead><tr><th>조건</th><th>내용</th><th>어긋나면</th></tr></thead><tbody>' +
+        '<tr><td>provider 미고정</td><td><code>X-Proxy-Provider</code>·<code>?provider=</code>를 <strong>쓰지 않아야</strong> 함</td><td>고정한 곳으로만 보내고 폴백 안 함</td></tr>' +
+        '<tr><td>민감정보 아님</td><td>프롬프트에서 PII·secret 위험이 탐지되지 않아야 함</td><td>데이터 보호를 위해 폴백 차단(<code>fallback_disabled:sensitive_data</code>)</td></tr>' +
+        '<tr><td><strong>후보 2개 이상</strong></td><td>같은 <code>failover_group</code>에 속하거나, 같은 모델명에 <code>model_patterns</code>가 매칭되는 provider가 <strong>둘 이상</strong></td><td><strong>폴백 후보가 0개</strong> — 가장 흔한 원인</td></tr>' +
+        '<tr><td>실패 유형이 해당</td><td>429 · 5xx · 타임아웃 · 연결 실패</td><td>401/403/404 같은 <strong>4xx는 폴백하지 않음</strong></td></tr>' +
+        '</tbody></table>' +
+        '<div class="banner warn" style="margin-top:10px"><strong>네 조건을 모두 만족해야 폴백이 일어납니다.</strong>' +
+        '<div class="muted" style="margin-top:4px">시도 순서는 <code>priority</code> 오름차순(낮을수록 먼저, 기본 100), 같으면 이름순입니다 — 지연시간·health 순이 아닙니다. 이중화가 필요하면 provider들에 같은 <code>failover_group</code> 이름을 지정하세요. 그러면 <strong>모델 패턴이 겹치지 않아도</strong> 서로 폴백합니다.</div></div>';
+
+      const pitfalls = '<table><thead><tr><th>증상</th><th>원인</th><th>해결</th></tr></thead><tbody>' +
+        '<tr><td>폴백이 전혀 안 됨</td><td>어느 provider에도 <code>failover_group</code>이 없고 패턴도 겹치지 않음</td><td>이중화할 provider들에 <strong>같은 <code>failover_group</code></strong>을 지정</td></tr>' +
+        '<tr><td>provider가 2개인데 폴백 안 됨</td><td>패턴이 서로 겹치지 않고(예: <code>gpt-*</code> / <code>claude-*</code>) 그룹도 없음</td><td>같은 <code>failover_group</code>으로 묶으면 패턴이 달라도 폴백됩니다</td></tr>' +
+        '<tr><td>401/404인데 폴백 안 됨</td><td>키 오류·모델 없음은 다른 곳으로 보내도 같은 결과라 폴백 대상이 아님</td><td>키와 모델명을 직접 수정</td></tr>' +
+        '<tr><td>SDK에서 고정했더니 폴백 사라짐</td><td>클라이언트가 <code>X-Proxy-Provider</code>를 보내는 중</td><td>헤더를 빼고 모델 패턴 자동 라우팅에 맡기기</td></tr>' +
+        '<tr><td>민감한 요청만 폴백 안 됨</td><td>PII·secret 탐지로 의도적으로 차단됨</td><td>정상 동작. 필요하면 프롬프트에서 민감정보 제거</td></tr>' +
+        '</tbody></table>';
+
+      const headers = '<table><thead><tr><th>헤더</th><th>의미</th></tr></thead><tbody>' +
+        '<tr><td><code>X-Provider</code></td><td><strong>실제로 응답한 provider</strong></td></tr>' +
+        '<tr><td><code>X-Route-Reason</code></td><td>어떻게 골랐는지: <code>header</code>·<code>query</code>·<code>model_pattern</code>·<code>rule_provider</code>·<code>default</code></td></tr>' +
+        '<tr><td><code>X-Route-Detail</code></td><td>매칭된 글롭 패턴이나 근거(헤더명·환경변수명)</td></tr>' +
+        '<tr><td><code>X-Failover-From</code></td><td>폴백이 일어났을 때 <strong>원래</strong> 선택됐던 provider</td></tr>' +
+        '<tr><td><code>X-Failover-Reason</code></td><td>폴백 유발 원인: <code>429</code>·<code>5xx</code>·<code>timeout</code>·<code>transport_error</code>·<code>context_overflow</code></td></tr>' +
+        '<tr><td><code>X-Failover-Path</code></td><td>실제 폴백 경로 전체(<code>429:a-&gt;b</code> 형태, 쉼표 구분)</td></tr>' +
+        '</tbody></table>' +
+        '<div class="muted" style="font-size:12px;margin-top:6px">폴백이 없었으면 <code>X-Failover-*</code>는 아예 나오지 않습니다. 즉 <strong>헤더 유무 자체가 폴백 발생 여부</strong>입니다.</div>';
+
+      const recipes =
+        '<div class="banner" style="margin-bottom:8px"><strong>① 단일 벤더 (폴백 불필요)</strong>' +
+        '<div class="muted" style="margin-top:4px">기본 provider 하나만 등록하고 패턴은 비웁니다. 모든 모델이 기본으로 갑니다. 폴백은 없습니다.</div></div>' +
+        '<div class="banner" style="margin-bottom:8px"><strong>② 벤더별 분리 라우팅 (폴백 없음)</strong>' +
+        '<div class="muted" style="margin-top:4px"><code>openai: gpt-*,o3-*</code> / <code>anthropic: claude-*</code> — 모델별로 정확히 나뉘지만, 한 모델에 1개만 매칭되므로 <strong>폴백은 발생하지 않습니다</strong>.</div></div>' +
+        '<div class="banner" style="margin-bottom:8px"><strong>③ 이중화 (폴백 동작)</strong>' +
+        '<div class="muted" style="margin-top:4px">같은 모델을 두 곳이 받도록 <strong>패턴을 겹칩니다</strong>. 예: <code>openai-primary: gpt-*</code> + <code>openai-backup: gpt-*</code>. 429/5xx/타임아웃 시 알파벳순 다음 provider로 넘어갑니다. 이름이 곧 우선순위이므로 <code>a-primary</code>/<code>b-backup</code>처럼 정렬을 의식해 지으면 좋습니다.</div></div>' +
+        '<div class="banner" style="margin-bottom:0"><strong>④ 로컬 + 클라우드 (vLLM/Ollama)</strong>' +
+        '<div class="muted" style="margin-top:4px">로컬 서버를 <code>base_url</code>에 <code>/v1</code> 없이 등록합니다(게이트웨이가 <code>{base_url}/v1/...</code>로 전달). 임베딩(<code>/v1/embeddings</code>)도 채팅과 동일한 규칙으로 라우팅·폴백됩니다.</div></div>';
+
+      const resilience =
+        '<table><thead><tr><th>장치</th><th>하는 일</th><th>설정</th></tr></thead><tbody>' +
+        '<tr><td><strong>차단기 공유</strong></td><td>한 인스턴스가 감지한 차단을 다른 인스턴스가 <strong>자기 임계값만큼 실패해보지 않고</strong> 반영합니다. 전환 시점에만 DB에 기록하므로 요청당 쓰기가 없습니다. 로컬 증거가 우선하고, 오래된 보고는 무시되며, 각자 복구 탐침을 돌려 성공하면 공유 행을 지웁니다</td><td><code>UPSTREAM_BREAKER_SHARED</code>(기본 꺼짐 — 공유 DB 전제)</td></tr>' +
+        '<tr><td><strong>health 강등</strong></td><td>health score가 임계 미만인 provider를 후보 <strong>맨 뒤로</strong> 밀되 제외하지는 않습니다(후행 지표라 시도해야 회복을 알 수 있음). 강등되면 응답에 <code>X-Health-Demoted</code>가 실립니다</td><td><code>UPSTREAM_HEALTH_DEMOTE_THRESHOLD</code>(기본 50, 0이면 끔)</td></tr>' +
+        '<tr><td><strong>폴백 리허설</strong></td><td>장애 <strong>전에</strong> 이중화를 확인합니다. 실제 후보 목록을 걸으며 지정한 provider를 실패 처리하고 누가 요청을 받는지 보고 — 업스트림 호출 없음</td><td>프로바이더 화면의 <code>폴백 리허설</code> 버튼 · <code>POST /admin/routing/failover-drill</code></td></tr>' +
+        '<tr><td><strong>회로 차단기</strong></td><td>연속 실패한 provider를 폴백 후보에서 <strong>자동 제외</strong>. 유지 시간이 지나면 요청 1건만 흘려 복구를 확인합니다. 없으면 죽은 provider를 매 요청 재호출하며 타임아웃을 전부 태웁니다</td><td><code>UPSTREAM_BREAKER_ENABLED</code>(기본 on)<br><code>UPSTREAM_BREAKER_THRESHOLD</code>(5회)<br><code>UPSTREAM_BREAKER_COOLDOWN</code>(30초)</td></tr>' +
+        '<tr><td><strong>헤더 대기 상한</strong></td><td>업스트림 <strong>응답 헤더</strong>를 기다리는 시간만 제한. 긴 스트리밍을 자르지 않으면서 먹통 provider를 빨리 끊어 폴백을 앞당깁니다</td><td><code>UPSTREAM_RESPONSE_HEADER_TIMEOUT</code>(60초)</td></tr>' +
+        '<tr><td><strong>폴백 예산</strong></td><td>대체 provider 시도에 쓸 <strong>총 시간</strong> 상한. 소진되면 남은 후보를 돌지 않고 마지막 결과를 반환합니다(<code>failover_budget_exhausted</code>)</td><td><code>UPSTREAM_FAILOVER_BUDGET</code>(기본 무제한)<br>요청별 <code>X-Failover-Budget-MS</code></td></tr>' +
+        '</tbody></table>' +
+        '<div class="banner" style="margin-top:10px"><strong>차단 판정은 4xx를 세지 않습니다.</strong>' +
+        '<div class="muted" style="margin-top:4px">키 오류·모델 없음은 어느 provider로 가도 같은 결과라, 그걸로 차단하면 멀쩡한 provider를 내리게 됩니다. 429·5xx·타임아웃·연결 실패만 셉니다. 또한 <strong>모든 provider가 차단되면 최초 provider는 그래도 시도</strong>합니다 — 아무도 호출하지 않으면 복구를 감지할 수 없기 때문입니다.</div></div>' +
+        '<div class="banner warn" style="margin-top:8px"><strong>폴백은 장애를 감춥니다.</strong>' +
+        '<div class="muted" style="margin-top:4px">폴백이 성공하면 호출자는 정상 응답을 받으므로 primary가 죽은 사실을 아무도 모른 채 이중화 여유분만 소모됩니다. 안전 탭 알림 규칙에서 <code>failover_rate</code>(폴백 발생률) 지표로 임계 알림을 걸어두세요.</div></div>';
+
+      const balancing =
+        '<table><thead><tr><th>항목</th><th>내용</th></tr></thead><tbody>' +
+        '<tr><td><strong>기본 동작</strong></td><td>같은 모델에 여러 provider가 매칭되면 <strong>이름순 첫 번째</strong>로만 갑니다(active-passive). 나머지는 폴백 예비입니다</td></tr>' +
+        '<tr><td><strong>분산 켜기</strong></td><td><code>UPSTREAM_LOAD_BALANCE</code> — <code>round_robin</code>(단일 인스턴스) 또는 <strong><code>session_hash</code>(다중 인스턴스 권장)</strong></td></tr>' +
+        '<tr><td><strong>인스턴스 2대 이상</strong></td><td><code>session_hash</code> 를 쓰세요. <code>round_robin</code> 은 회전 커서가 프로세스 메모리라 인스턴스마다 독립적으로 돌고, 같은 대화가 다른 인스턴스로 들어가면 고정이 깨집니다. <code>session_hash</code> 는 세션 키에서 provider를 계산(rendezvous 해시)하므로 공유 저장소 없이 모든 인스턴스가 일치하고, provider가 빠질 때 그 provider의 세션만 이동합니다</td></tr>' +
+        '<tr><td><strong>세션 고정</strong></td><td><code>UPSTREAM_STICKY_SESSIONS</code>(기본 on) · <code>UPSTREAM_STICKY_TTL</code>(30분). 에이전트는 매 턴 대화 전체를 재전송하므로, 턴마다 노드가 바뀌면 prefix/KV 캐시가 매번 버려집니다</td></tr>' +
+        '<tr><td><strong>세션 식별</strong></td><td>세션 헤더 → body <code>session_id</code>류 → <strong>대화 프리픽스 해시</strong> → 추론 세션 순. qwen code 등은 세션 식별자를 보내지 않으므로 3번이 실제 경로입니다</td></tr>' +
+        '<tr><td><strong>고정 해제</strong></td><td>TTL 경과 · 해당 provider가 후보에서 빠짐(차단·비활성) · 폴백 발생 시 실제 처리한 곳으로 이동 · 운영자 수동 해제</td></tr>' +
+        '</tbody></table>' +
+        '<div class="banner" style="margin-top:10px"><strong>분산은 세션 단위, 세션 안에서는 고정.</strong>' +
+        '<div class="muted" style="margin-top:4px">응답 헤더 <code>X-Route-Reason</code>(<code>round_robin</code>/<code>sticky_session</code>)과 <code>X-Session-Affinity</code>(<code>header</code>/<code>body</code>/<code>conversation</code>/<code>inferred</code>)로 바로 확인할 수 있습니다. ' +
+        '<code>inferred</code>가 보이면 대화 구분이 안 되는 상태라 한 provider로 몰립니다. 운영자 확인은 라우팅 탭 → Provider Health → <strong>로드밸런싱 · 세션 고정</strong> 패널(균형도·intent vs actual).</div></div>';
+
+      const extras =
+        '<div style="margin-bottom:10px"><strong>컨텍스트 초과 자동 승급</strong>' +
+        '<div class="muted" style="font-size:12px;margin-top:3px">업스트림이 400 + context length 초과를 반환하면 provider를 바꾸는 대신 <strong>더 큰 컨텍스트 모델로 한 번</strong> 재시도합니다(<code>context_overflow:</code>). provider 폴백 조건과 무관하게 동작합니다.</div></div>' +
+        '<div style="margin-bottom:10px"><strong>계획(plan)과 실제(path)</strong>' +
+        '<div class="muted" style="font-size:12px;margin-top:3px"><code>fallback_plan</code>은 <em>실패하면 이렇게 될 것</em>이라는 사전 예측이고, <code>fallback_path</code>는 <em>실제로 일어난</em> 폴백 경로입니다. 폴백이 없었다면 <code>fallback_path</code>는 비어 있습니다.</div></div>' +
+        '<div class="banner warn" style="margin-bottom:0"><strong>이름 주의:</strong> 설정 탭 아래의 <code>Fallback 로그 재처리</code>(<code>/admin/fallback</code>)는 provider 폴백과 <strong>무관합니다</strong>. DB 장애 때 NDJSON으로 빠진 <em>감사 로그</em>를 다시 넣는 기능입니다.</div>';
+
+      const html =
+        '<div class="banner" style="margin-bottom:16px"><strong>요청 하나가 처리되는 순서</strong>' +
+          '<div style="margin-top:6px">① 어느 provider로 보낼지 <strong>선택</strong> → ② 호출 → ③ 실패하면 조건을 만족할 때만 <strong>폴백</strong></div></div>' +
+        routingGuideSection('1단계 · provider 선택 순서', '위에서부터 먼저 걸리는 규칙이 이깁니다.', selection) +
+        routingGuideSection('2단계 · 폴백 발동 조건', '아래 네 가지를 모두 만족할 때만 다른 provider로 재시도합니다.', conditions) +
+        routingGuideSection('폴백이 안 되는 흔한 이유', '대부분 설정 문제이며, 위의 폴백 커버리지 표시로 바로 확인할 수 있습니다.', pitfalls) +
+        routingGuideSection('응답 헤더로 확인하기', '어드민을 열지 않고 클라이언트에서 바로 라우팅 결과를 볼 수 있습니다.', headers) +
+        routingGuideSection('장애 대응 장치', '폴백이 "되기는 하는데 느리다"를 막는 세 가지 장치입니다.', resilience) +
+        routingGuideSection('로드밸런싱 · 세션 고정', '같은 모델을 여러 provider가 서비스할 때 세션 단위로 분산합니다.', balancing) +
+        routingGuideSection('구성 레시피', '목적에 맞는 패턴 설계를 고르세요.', recipes) +
+        routingGuideSection('추가로 알아둘 것', '', extras) +
+        '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px">' +
+          '<button class="secondary" type="button" onclick="closeModal();location.hash=\'#/routing/health\'">Provider Health 보기</button>' +
+          '<button class="secondary" type="button" onclick="closeModal();document.getElementById(\'settings-providers\').scrollIntoView({behavior:\'smooth\'})">프로바이더 설정으로</button>' +
+        '</div>';
+      openModal('업스트림 프로바이더 라우팅 · 폴백 동작 설명', html);
+    }
+    // A drill answers "if this provider dies, what happens?" before it dies. It walks
+    // the same candidate list the proxy would, marks the chosen providers as failed and
+    // reports who ends up serving — without sending a single upstream request.
+    window.runFailoverDrill = async () => {
+      const model = (document.getElementById('provider-pattern-model') || {}).value || '';
+      if (!model.trim()) { toast('리허설할 모델명을 먼저 입력하세요.'); return; }
+      let report;
+      try { report = await api('/admin/routing/failover-drill', { method: 'POST', body: JSON.stringify({ model: model.trim(), fail: [] }) }); }
+      catch (e) { toast('폴백 리허설 실패: ' + e.message); return; }
+      openModal('폴백 리허설 — ' + model.trim(), failoverDrillHTML(report, model.trim()));
+    };
+    window.runFailoverDrillWith = async (model, fail) => {
+      let report;
+      try { report = await api('/admin/routing/failover-drill', { method: 'POST', body: JSON.stringify({ model, fail }) }); }
+      catch (e) { toast('폴백 리허설 실패: ' + e.message); return; }
+      document.getElementById('modal-body').innerHTML = failoverDrillHTML(report, model);
+    };
+    function failoverDrillHTML(report, model) {
+      report = report || {};
+      const outcomeLabel = { served: '정상 처리됨', exhausted: '모든 후보 소진 — 요청 실패', no_redundancy: '이중화 없음' };
+      const outcomeClass = { served: '', exhausted: 'error', no_redundancy: 'warn' };
+      const stepLabel = {
+        served: '✅ 처리',
+        simulated_failure: '💥 실패(리허설 지정)',
+        skipped_breaker_open: '⛔ 건너뜀 — 회로 차단기 열림',
+      };
+      const candidates = report.candidates || [];
+      const failed = report.failed_input || [];
+      const steps = (report.steps || []).map(st =>
+        '<tr><td><strong>' + escapeHTML(st.provider) + '</strong></td>' +
+        '<td>' + escapeHTML(stepLabel[st.outcome] || st.outcome) + '</td>' +
+        '<td class="muted">' + escapeHTML(st.detail || '') + '</td></tr>').join('');
+      // One button per candidate: the common question is "what if THIS one dies?".
+      const scenarios = candidates.map(name => {
+        const next = failed.includes(name) ? failed.filter(x => x !== name) : failed.concat([name]);
+        return '<button type="button" class="secondary" style="margin:0 6px 6px 0" ' +
+          'onclick="runFailoverDrillWith(\'' + escapeAttr(model) + '\', ' + escapeAttr(JSON.stringify(next)) + ')">' +
+          (failed.includes(name) ? '↩︎ ' + escapeHTML(name) + ' 복구' : '💥 ' + escapeHTML(name) + ' 중단') + '</button>';
+      }).join('');
+
+      return '<div class="banner ' + (outcomeClass[report.outcome] || '') + '">' +
+          '<strong>' + escapeHTML(outcomeLabel[report.outcome] || report.outcome || '') + '</strong>' +
+          (report.served_by ? ' <span class="muted">— ' + escapeHTML(report.served_by) + ' 가 처리합니다</span>' : '') +
+          (report.advice ? '<div class="muted" style="margin-top:6px">' + escapeHTML(report.advice) + '</div>' : '') +
+        '</div>' +
+        '<div style="margin:14px 0 6px"><strong>시도 순서</strong> <span class="muted" style="font-size:12px">priority 오름차순 · health 저조 provider는 뒤로 밀림</span></div>' +
+        '<table><thead><tr><th>Provider</th><th>결과</th><th>사유</th></tr></thead><tbody>' + steps + '</tbody></table>' +
+        ((report.health_demoted || []).length
+          ? '<div class="muted" style="font-size:12px;margin-top:8px">health 강등: <code>' + escapeHTML(report.health_demoted.join(', ')) + '</code></div>' : '') +
+        '<div style="margin-top:16px"><strong>시나리오 바꾸기</strong>' +
+          '<div class="muted" style="font-size:12px;margin:4px 0 8px">provider를 중단시켜 실제 장애 상황을 재현합니다. 업스트림 호출은 발생하지 않습니다.</div>' +
+          scenarios + '</div>';
+    }
+    function providerPatternDiagnostics(report) {
+      report = report || {};
+      const summary = report.summary || {};
+      const conflicts = report.conflicts || [];
+      const redundancies = report.redundancies || [];
+      const resolution = report.resolution_policy || {};
+      const simulation = report.simulation;
+      const severityLabel = { high: '높음', medium: '주의' };
+      const typeLabel = {
+        duplicate_pattern: '동일 패턴',
+        catch_all_overlap: '전체 패턴',
+        overlapping_pattern: '교차 패턴'
+      };
+      const focus = report.focus_provider
+        ? '<span class="status ' + ((summary.focus_conflict_count || 0) ? 'error' : '') + '">저장 전 ' +
+            escapeHTML(report.focus_provider) + ': 충돌 ' + fmt(summary.focus_conflict_count || 0) + '</span>'
+        : '';
+      const conflictRows = conflicts.slice(0, 30).map(c => {
+        const candidates = (c.candidates || []).map(x =>
+          '<strong>' + escapeHTML(x.provider) + '</strong> <code>' + escapeHTML(x.pattern) + '</code>'
+        ).join(' <span class="muted">↔</span> ');
+        return '<tr>' +
+          '<td><span class="status ' + (c.severity === 'high' ? 'error' : 'warn') + '">' + escapeHTML(severityLabel[c.severity] || c.severity) + '</span></td>' +
+          '<td>' + escapeHTML(typeLabel[c.type] || c.type) + '</td>' +
+          '<td>' + candidates + '</td>' +
+          '<td><code>' + escapeHTML(c.witness_model || '') + '</code></td>' +
+          '<td><strong>' + escapeHTML(c.selected_provider || '') + '</strong><div class="muted"><code>' + escapeHTML(c.selected_pattern || '') + '</code></div></td>' +
+        '</tr>';
+      }).join('');
+      const conflictTable = conflicts.length
+        ? '<div style="overflow:auto"><table><thead><tr><th>등급</th><th>유형</th><th>충돌 후보</th><th>재현 모델</th><th>현재 승자</th></tr></thead><tbody>' +
+            conflictRows + '</tbody></table></div>' +
+            (conflicts.length > 30 ? '<div class="muted" style="padding:8px 14px">상위 30건 표시 · 전체 ' + fmt(conflicts.length) + '건</div>' : '')
+        : '<div class="empty" style="padding:16px">활성 provider 간 모델 패턴 충돌 없음</div>';
+      let simulationHTML = '';
+      if (simulation) {
+        const matched = (simulation.matches || []).map(m =>
+          '<span class="pill">' + escapeHTML(m.provider) + ': ' + escapeHTML((m.patterns || []).join(', ')) + '</span>'
+        ).join(' ');
+        const blockedLabel = {
+          single_matching_provider: '이 모델에 매칭되는 provider가 1개뿐입니다',
+          no_pattern_match_default_provider_only: '매칭 패턴이 없어 기본 provider로만 갑니다'
+        };
+        const failoverLine = simulation.failover_available
+          ? '<div style="margin-top:7px"><span class="status">폴백 가능</span> ' +
+              (simulation.failover_candidates || []).map((n, i) =>
+                '<code>' + (i + 1) + '. ' + escapeHTML(n) + '</code>').join(' ') + '</div>'
+          : '<div style="margin-top:7px"><span class="status warn">폴백 없음</span> <span class="muted">' +
+              escapeHTML(blockedLabel[simulation.failover_blocked_reason] || simulation.failover_blocked_reason || '') +
+              ' — 429/5xx/타임아웃이 나면 그대로 오류를 반환합니다.</span></div>';
+        simulationHTML =
+          '<div class="banner ' + (simulation.ambiguous ? 'warn' : '') + '" style="margin:10px 14px">' +
+            '<strong>' + escapeHTML(simulation.model) + '</strong> → ' +
+            '<strong>' + escapeHTML(simulation.selected_provider || '-') + '</strong> ' +
+            '<span class="muted">(' + escapeHTML(simulation.route_reason || '') + ')</span>' +
+            (simulation.ambiguous ? ' <span class="status error">다중 매칭</span>' : '') +
+            (matched ? '<div style="margin-top:7px">' + matched + '</div>' : '') +
+            failoverLine +
+          '</div>';
+      }
+      // Failover coverage: a provider can only fail over to a peer whose patterns
+      // overlap its own, so providers with patterns but no peer are a silent SPOF.
+      const coverage = report.coverage || [];
+      const uncovered = coverage.filter(c => !c.failover_ready);
+      const defaultWarning = (report.default_provider && !report.default_provider_has_patterns)
+        ? '<div class="banner warn" style="margin:10px 14px"><strong>기본 provider <code>' +
+            escapeHTML(report.default_provider) + '</code>에 모델 패턴이 없습니다.</strong>' +
+            '<div class="muted" style="margin-top:4px">패턴에 매칭되지 않는 모든 모델을 처리하지만, 폴백 후보는 <em>패턴 매칭으로만</em> 만들어지므로 이 provider는 폴백 대상이 될 수도, 폴백을 받을 수도 없습니다. 폴백이 필요하면 다른 provider와 <strong>겹치는 패턴</strong>을 등록하세요.</div></div>'
+        : '';
+      const coverageHTML = coverage.length
+        ? '<div style="padding:0 14px 10px">' +
+            '<div class="muted" style="font-size:12px;margin-bottom:6px">폴백 커버리지 — ✅ <strong>폴백 그룹</strong>으로 명시 선언 · 🟡 패턴이 우연히 겹쳐 생긴 것 · ⚠️ 폴백 상대 없음. 이중화가 필요하면 같은 <code>폴백 그룹</code> 이름을 지정하세요.</div>' +
+            coverage.map(c => {
+              const declared = c.peer_source === 'failover_group';
+              const via = declared
+                ? ' <span class="muted">(그룹 ' + escapeHTML(c.failover_group || '') + ')</span>'
+                : ' <span class="muted">(패턴 겹침 — 글롭을 고치면 사라질 수 있음)</span>';
+              return '<span class="pill" style="margin:0 4px 4px 0">' +
+                (c.failover_ready ? (declared ? '✅ ' : '🟡 ') : '⚠️ ') + escapeHTML(c.provider) +
+                (c.failover_ready
+                  ? ' <span class="muted">→ ' + escapeHTML((c.failover_peers || []).join(', ')) + '</span>' + via
+                  : ' <span class="muted">폴백 상대 없음</span>') +
+              '</span>';
+            }).join('') +
+          '</div>'
+        : '';
+      const uncoveredBadge = uncovered.length
+        ? '<span class="status warn">폴백 미보장 ' + fmt(uncovered.length) + '</span>'
+        : '<span class="status">폴백 보장 ' + fmt(coverage.length) + '</span>';
+      const order = (resolution.order || []).slice(0, 12);
+      const orderHTML = order.length
+        ? '<span class="muted">선택 순서</span> ' + order.map((name, i) => '<code>' + (i + 1) + '. ' + escapeHTML(name) + '</code>').join(' ')
+        : '<span class="muted">선택 순서 없음</span>';
+      return '<div style="border-top:1px solid var(--line); border-bottom:1px solid var(--line); margin-bottom:10px">' +
+        '<div class="toolbar" style="border:0; flex-wrap:wrap">' +
+          '<strong>모델 패턴 충돌 진단</strong>' +
+          '<span class="status ' + ((summary.high_conflict_count || 0) ? 'error' : '') + '">높음 ' + fmt(summary.high_conflict_count || 0) + '</span>' +
+          '<span class="status ' + ((summary.medium_conflict_count || 0) ? 'warn' : '') + '">주의 ' + fmt(summary.medium_conflict_count || 0) + '</span>' +
+          '<span class="status">영향 provider ' + fmt(summary.affected_provider_count || 0) + '</span>' +
+          (redundancies.length ? '<span class="status warn">내부 중복 ' + fmt(redundancies.length) + '</span>' : '') +
+          uncoveredBadge +
+          focus +
+          '<span style="flex:1"></span>' +
+          '<input id="provider-pattern-model" aria-label="모델 경로 확인" placeholder="모델명 경로 확인" value="' + escapeAttr(simulation ? simulation.model : '') + '" style="width:210px">' +
+          '<button type="button" class="secondary" onclick="runProviderPatternSimulation()">경로 확인</button>' +
+          '<button type="button" class="secondary" onclick="runFailoverDrill()">폴백 리허설</button>' +
+        '</div>' +
+        '<div style="padding:0 14px 10px; display:flex; gap:8px; flex-wrap:wrap; align-items:center">' + orderHTML + '</div>' +
+        defaultWarning +
+        simulationHTML +
+        coverageHTML +
+        conflictTable +
+      '</div>';
+    }
+    function providerTable(rows, patternAnalysis) {
       if (!rows.length) return '<div class="empty">등록된 프로바이더 없음</div>';
+      const conflictCounts = {};
+      (((patternAnalysis || {}).conflicts) || []).forEach(c => {
+        (c.candidates || []).forEach(candidate => {
+          conflictCounts[candidate.provider] = (conflictCounts[candidate.provider] || 0) + 1;
+        });
+      });
       return '<table><thead><tr>' +
         '<th data-sort="str">이름</th>' +
         '<th data-sort="str">Base URL</th>' +
         '<th data-sort="str">키</th>' +
         '<th data-sort="num">타임아웃</th>' +
         '<th>모델 패턴</th>' +
+        '<th data-sort="str">폴백 그룹</th>' +
+        '<th data-sort="num">우선순위</th>' +
         '<th data-sort="str">상태</th>' +
         '<th>동작</th></tr></thead><tbody>' +
         rows.map(r => '<tr><td>' + escapeHTML(r.name) + '</td><td>' + escapeHTML(r.base_url) + '</td>' +
           '<td>' + (r.api_key_configured ? '설정됨' : '미설정') + '</td>' +
           '<td data-num="' + (r.timeout_ms || 0) + '">' + fmt(r.timeout_ms) + ' ms</td>' +
-          '<td>' + (r.model_patterns ? '<span class="pill">' + escapeHTML(r.model_patterns) + '</span>' : '<span class="muted">자동 라우팅 없음</span>') + '</td>' +
+          '<td>' + (r.model_patterns ? '<span class="pill">' + escapeHTML(r.model_patterns) + '</span>' : '<span class="muted">자동 라우팅 없음</span>') +
+            (conflictCounts[r.name] ? ' <span class="status error">충돌 ' + fmt(conflictCounts[r.name]) + '</span>' : '') + '</td>' +
+          '<td>' + (r.failover_group ? '<span class="pill">' + escapeHTML(r.failover_group) + '</span>' : '<span class="muted">없음</span>') + '</td>' +
+          '<td data-num="' + (r.priority || 100) + '">' + fmt(r.priority || 100) + '</td>' +
           '<td><span class="status ' + (r.enabled ? '' : 'error') + '">' + (r.enabled ? '사용' : '중지') + '</span></td>' +
           '<td style="white-space:nowrap">' +
             '<button class="secondary" type="button" onclick="editProvider(\'' + escapeAttr(r.name) + '\')">수정</button> ' +
@@ -15488,8 +16741,8 @@ const adminHTML = `<!doctype html>
         id: document.getElementById('kb-id').value.trim(),
         content: document.getElementById('kb-content').value,
       };
-      if (!body.name || !body.content.trim()) { alert('이름과 본문을 입력하세요'); return; }
-      await api('/admin/knowledge', { method: 'POST', body: JSON.stringify(body) });
+      if (!body.name || !body.content.trim()) { toast('이름과 본문을 입력하세요'); return; }
+      await api('/admin/knowledge', { method: 'POST', success: 'Knowledge 항목이 저장되었습니다', body: JSON.stringify(body) });
       route();
     }
     window.toggleKnowledge = async (id, enabled) => {
@@ -15523,7 +16776,7 @@ const adminHTML = `<!doctype html>
           '<td><button class="secondary" type="button" onclick="toggleTemplate(\'' + escapeAttr(t.id) + '\',' + (!t.enabled) + ')">' + (t.enabled ? '중지' : '사용') + '</button> ' +
           '<button class="danger" type="button" onclick="deleteTemplate(\'' + escapeAttr(t.id) + '\')">삭제</button></td>' +
         '</tr>').join('') + '</tbody></table>'
-        : '<div class="empty">등록된 템플릿 없음.</div>';
+        : '<div class="empty">등록된 작업 템플릿이 없습니다. 자주 쓰는 리팩터링·테스트·보안 점검 프롬프트를 위 폼에 등록해두면 팀이 공유해 사용합니다.</div>';
       return form + table +
         '<div class="muted" style="font-size:12px; padding:0 14px 12px">리팩터링·테스트 생성·보안 점검·문서화 등 표준 프롬프트를 중앙에서 관리합니다. <code>GET /admin/templates</code> 로 조회해 코딩 도구·스니펫에 배포하세요.</div>';
     }
@@ -15571,8 +16824,8 @@ const adminHTML = `<!doctype html>
         error_rate_target: Number(document.getElementById('slo-error').value || 0),
         fallback_rate_target: Number(document.getElementById('slo-fallback').value || 0),
       };
-      if (!body.provider) { alert('provider를 입력하세요'); return; }
-      await api('/admin/providers/slo', { method: 'POST', body: JSON.stringify(body) });
+      if (!body.provider) { toast('provider를 입력하세요'); return; }
+      await api('/admin/providers/slo', { method: 'POST', success: 'Provider SLO가 저장되었습니다', body: JSON.stringify(body) });
       route();
     }
     window.deleteProviderSLO = async (provider) => {
@@ -15587,8 +16840,8 @@ const adminHTML = `<!doctype html>
         category: document.getElementById('tpl-category').value,
         body: document.getElementById('tpl-body').value,
       };
-      if (!body.name || !body.body.trim()) { alert('이름과 본문을 입력하세요'); return; }
-      await api('/admin/templates', { method: 'POST', body: JSON.stringify(body) });
+      if (!body.name || !body.body.trim()) { toast('이름과 본문을 입력하세요'); return; }
+      await api('/admin/templates', { method: 'POST', success: '작업 템플릿이 저장되었습니다', body: JSON.stringify(body) });
       route();
     }
     window.toggleTemplate = async (id, enabled) => {
@@ -15612,7 +16865,7 @@ const adminHTML = `<!doctype html>
         note: document.getElementById('rr-note').value.trim(),
         enabled: true,
       };
-      await api('/admin/routing-rules', { method: 'POST', body: JSON.stringify(body) });
+      await api('/admin/routing-rules', { method: 'POST', success: '라우팅 규칙이 추가되었습니다', body: JSON.stringify(body) });
       route();
     }
     window.toggleRoutingRule = async (id, enabled) => {
@@ -15666,7 +16919,7 @@ const adminHTML = `<!doctype html>
         team: document.getElementById('key-team').value.trim(),
         key: document.getElementById('key-secret-input').value.trim()
       };
-      const result = await api('/admin/api-keys', { method: 'POST', body: JSON.stringify(body) });
+      const result = await api('/admin/api-keys', { method: 'POST', success: 'API 키가 발급되었습니다', body: JSON.stringify(body) });
       const secret = document.getElementById('key-secret');
       secret.style.display = 'block';
       secret.textContent = '발급된 시크릿(한 번만 표시): ' + result.secret;
@@ -15682,6 +16935,70 @@ const adminHTML = `<!doctype html>
       await api('/admin/api-keys/' + encodeURIComponent(id), { method: 'PATCH', body: JSON.stringify({ status }) });
       route();
     };
+    let providerPatternPreviewTimer = null;
+    let providerPatternPreviewSequence = 0;
+    function providerPatternPreviewPayload(model) {
+      const nameEl = document.getElementById('provider-name');
+      const patternsEl = document.getElementById('provider-patterns');
+      if (!nameEl || !patternsEl || !nameEl.value.trim()) return null;
+      const name = nameEl.value.trim();
+      const existing = (window.__providers || {})[name];
+      return {
+        provider_name: name,
+        model_patterns: patternsEl.value.trim(),
+        enabled: existing ? existing.enabled !== false : true,
+        model: String(model || '').trim()
+      };
+    }
+    async function refreshProviderPatternDiagnostics(model) {
+      const target = document.getElementById('provider-pattern-diagnostics');
+      if (!target) return null;
+      const sequence = ++providerPatternPreviewSequence;
+      const payload = providerPatternPreviewPayload(model);
+      try {
+        const report = payload
+          ? await api('/admin/routing/pattern-conflicts', { method: 'POST', body: JSON.stringify(payload) })
+          : await api('/admin/routing/pattern-conflicts' + (model ? '?model=' + encodeURIComponent(model) : ''));
+        if (sequence === providerPatternPreviewSequence && document.getElementById('provider-pattern-diagnostics')) {
+          document.getElementById('provider-pattern-diagnostics').innerHTML = providerPatternDiagnostics(report);
+        }
+        return report;
+      } catch (err) {
+        if (sequence === providerPatternPreviewSequence && document.getElementById('provider-pattern-diagnostics')) {
+          document.getElementById('provider-pattern-diagnostics').innerHTML =
+            '<div class="banner warn" style="margin:10px 14px">패턴 진단 실패: ' + escapeHTML(err.message) + '</div>';
+        }
+        return null;
+      }
+    }
+    function scheduleProviderPatternPreview() {
+      clearTimeout(providerPatternPreviewTimer);
+      providerPatternPreviewTimer = setTimeout(() => {
+        const modelEl = document.getElementById('provider-pattern-model');
+        refreshProviderPatternDiagnostics(modelEl ? modelEl.value.trim() : '');
+      }, 280);
+    }
+    window.runProviderPatternSimulation = async () => {
+      const modelEl = document.getElementById('provider-pattern-model');
+      const model = modelEl ? modelEl.value.trim() : '';
+      if (!model) {
+        if (modelEl) modelEl.focus();
+        return;
+      }
+      await refreshProviderPatternDiagnostics(model);
+    };
+    function confirmProviderPatternConflicts(name, diagnostics) {
+      const focusedConflicts = ((diagnostics && diagnostics.conflicts) || []).filter(c =>
+        (c.candidates || []).some(candidate => candidate.provider === name)
+      );
+      if (!focusedConflicts.length) return true;
+      const high = focusedConflicts.filter(c => c.severity === 'high').length;
+      return confirm(
+        '"' + name + '" 패턴이 활성 provider와 ' + focusedConflicts.length +
+        '건 충돌합니다' + (high ? ' (높음 ' + high + '건)' : '') +
+        '. 현재 이름 정렬 순서에 따라 provider가 선택됩니다. 계속하시겠습니까?'
+      );
+    }
     async function saveProvider(event) {
       event.preventDefault();
       const timeout = Number(document.getElementById('provider-timeout').value || 0);
@@ -15693,15 +17010,30 @@ const adminHTML = `<!doctype html>
         api_key: document.getElementById('provider-api-key').value.trim(),
         timeout_ms: timeout,
         model_patterns: document.getElementById('provider-patterns').value.trim(),
+        failover_group: document.getElementById('provider-group').value.trim(),
+        priority: Number(document.getElementById('provider-priority').value || 0) || null,
         // Editing an existing provider keeps its current on/off state; a brand-new one starts enabled.
         enabled: existing ? existing.enabled !== false : true
       };
       try {
-        await api('/admin/providers', { method: 'POST', body: JSON.stringify(body) });
+        const diagnostics = await api('/admin/routing/pattern-conflicts', {
+          method: 'POST',
+          body: JSON.stringify({
+            provider_name: body.name,
+            model_patterns: body.model_patterns,
+            enabled: body.enabled
+          })
+        }).catch(() => null);
+        if (!confirmProviderPatternConflicts(body.name, diagnostics)) {
+          const target = document.getElementById('provider-pattern-diagnostics');
+          if (target) target.innerHTML = providerPatternDiagnostics(diagnostics);
+          return;
+        }
+        await api('/admin/providers', { method: 'POST', success: '프로바이더가 저장되었습니다', body: JSON.stringify(body) });
         providerFormReset();
         route();
       } catch (err) {
-        alert('저장 실패: ' + err.message);
+        toast('저장 실패: ' + err.message);
       }
     }
     // providerFormReset returns the shared add/edit form to "add new" mode.
@@ -15716,12 +17048,19 @@ const adminHTML = `<!doctype html>
       if (submit) submit.textContent = '저장';
       const hint = document.getElementById('provider-edit-hint');
       if (hint) hint.textContent = '';
+      // form.reset() restores initial values, not blanks, so clear explicitly — a
+      // leftover group or priority would silently attach to the next new provider.
+      ['provider-group', 'provider-priority'].forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) el.value = '';
+      });
+      scheduleProviderPatternPreview();
     };
     // editProvider loads a registered provider's fields into the form for an in-place update.
     // Name is locked (upsert is keyed by name) and the API key is left blank to preserve the stored key.
     window.editProvider = (name) => {
       const p = (window.__providers || {})[name];
-      if (!p) { alert('프로바이더 정보를 찾을 수 없습니다: ' + name); return; }
+      if (!p) { toast('프로바이더 정보를 찾을 수 없습니다: ' + name); return; }
       document.getElementById('provider-name').value = p.name;
       document.getElementById('provider-name').readOnly = true;
       document.getElementById('provider-base-url').value = p.base_url || '';
@@ -15730,17 +17069,31 @@ const adminHTML = `<!doctype html>
       keyEl.placeholder = '비워두면 기존 키 유지' + (p.api_key_configured ? '' : ' (현재 미설정)');
       document.getElementById('provider-timeout').value = p.timeout_ms || '';
       document.getElementById('provider-patterns').value = p.model_patterns || '';
+      document.getElementById('provider-group').value = p.failover_group || '';
+      document.getElementById('provider-priority').value = p.priority || '';
       document.getElementById('provider-submit').textContent = '수정 저장';
       const hint = document.getElementById('provider-edit-hint');
       if (hint) hint.textContent = '"' + p.name + '" 수정 중 — 이름은 고정입니다. 새로 등록하려면 [취소]를 누르세요.';
+      scheduleProviderPatternPreview();
       document.getElementById('provider-form').scrollIntoView({ behavior: 'smooth', block: 'center' });
       document.getElementById('provider-base-url').focus();
     };
     // toggleProvider flips a provider's enabled state without touching its stored key/config.
     window.toggleProvider = async (name) => {
       const p = (window.__providers || {})[name];
-      if (!p) { alert('프로바이더 정보를 찾을 수 없습니다: ' + name); return; }
+      if (!p) { toast('프로바이더 정보를 찾을 수 없습니다: ' + name); return; }
       try {
+        if (p.enabled === false && p.model_patterns) {
+          const diagnostics = await api('/admin/routing/pattern-conflicts', {
+            method: 'POST',
+            body: JSON.stringify({
+              provider_name: p.name,
+              model_patterns: p.model_patterns,
+              enabled: true
+            })
+          }).catch(() => null);
+          if (!confirmProviderPatternConflicts(p.name, diagnostics)) return;
+        }
         await api('/admin/providers', { method: 'POST', body: JSON.stringify({
           name: p.name,
           base_url: p.base_url,
@@ -15750,7 +17103,7 @@ const adminHTML = `<!doctype html>
         }) });
         route();
       } catch (err) {
-        alert('상태 변경 실패: ' + err.message);
+        toast('상태 변경 실패: ' + err.message);
       }
     };
     window.deleteProvider = async (name) => {
@@ -15759,7 +17112,7 @@ const adminHTML = `<!doctype html>
         await api('/admin/providers/' + encodeURIComponent(name), { method: 'DELETE' });
         route();
       } catch (err) {
-        alert('삭제 실패: ' + err.message);
+        toast('삭제 실패: ' + err.message);
       }
     };
     async function runRetention() {
@@ -15768,7 +17121,7 @@ const adminHTML = `<!doctype html>
     }
     async function replayFallback() {
       const result = await api('/admin/fallback', { method: 'POST' });
-      alert('재처리 완료: imported=' + fmt(result.imported) + ', duplicates=' + fmt(result.duplicates) + ', failed=' + fmt(result.failed));
+      toast('재처리 완료: imported=' + fmt(result.imported) + ', duplicates=' + fmt(result.duplicates) + ', failed=' + fmt(result.failed), 'ok');
       route();
     }
 
@@ -15780,14 +17133,49 @@ const adminHTML = `<!doctype html>
       const t = (target && target.tagName) || '';
       return t === 'INPUT' || t === 'TEXTAREA' || t === 'SELECT' || (target && target.isContentEditable);
     }
+    // Wire the palette's own input before the global handler, so typing inside it is
+    // never treated as a nav shortcut.
+    (function wireCommandPalette() {
+      const backdrop = document.getElementById('palette-backdrop');
+      const input = document.getElementById('palette-input');
+      if (!backdrop || !input) return;
+      input.addEventListener('input', () => renderPaletteList(input.value));
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'ArrowDown') { e.preventDefault(); setPaletteIndex(paletteIndex + 1); }
+        else if (e.key === 'ArrowUp') { e.preventDefault(); setPaletteIndex(paletteIndex - 1); }
+        else if (e.key === 'Enter') { e.preventDefault(); runPaletteItem(); }
+        else if (e.key === 'Escape') { e.preventDefault(); closeCommandPalette(); }
+      });
+      backdrop.addEventListener('click', (e) => { if (e.target === backdrop) closeCommandPalette(); });
+      // A keyboard-only entry point is undiscoverable; give the header a visible one.
+      const button = document.getElementById('palette-toggle');
+      if (button) button.addEventListener('click', openCommandPalette);
+    })();
+
     document.addEventListener('keydown', (e) => {
+      // Ctrl/Cmd+K is checked before the modifier guard below, since that guard exists to
+      // let browser shortcuts through and would otherwise swallow this one.
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        paletteIsOpen() ? closeCommandPalette() : openCommandPalette();
+        return;
+      }
+      if (e.key === 'Tab') {
+        const palette = document.getElementById('palette-backdrop');
+        const modal = document.getElementById('modal-backdrop');
+        if (palette && palette.classList.contains('open')) { trapFocusInside(palette, e); return; }
+        if (modal && modal.classList.contains('open')) { trapFocusInside(modal, e); return; }
+      }
       if (e.key === 'Escape') {
+        if (paletteIsOpen()) { closeCommandPalette(); return; }
         closeModal();
         gPending = false;
         return;
       }
       if (isTyping(e.target)) return;
       if (e.ctrlKey || e.metaKey || e.altKey) return;
+
+      if (e.key === 'k') { e.preventDefault(); openCommandPalette(); return; }
 
       if (e.shiftKey && e.key.toLowerCase() === 'x') { e.preventDefault(); openXViewLauncher(); return; }
 
@@ -15822,6 +17210,7 @@ const adminHTML = `<!doctype html>
     }
     function helpHTML() {
       const pairs = [
+        ['<kbd>Ctrl</kbd>/<kbd>⌘</kbd> <kbd>K</kbd> 또는 <kbd>k</kbd>', '명령 팔레트 — 모든 화면 검색·이동'],
         ['<kbd>?</kbd>', '단축키 도움말 열기'],
         ['<kbd>/</kbd>', '검색 입력 포커스'],
         ['<kbd>t</kbd>', '다크 모드 토글'],

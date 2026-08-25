@@ -232,46 +232,49 @@ func TestGovernanceSecretPolicyBlocksBeforeUpstream(t *testing.T) {
 	}
 }
 
-func TestGovernanceDefaultAllowIsAuditedWithoutXViewNoise(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`))
-	}))
-	defer upstream.Close()
+// A gateway with no governance policies has nothing to decide, so it records nothing.
+//
+// It used to record "no governance policy matched; default allow" three times per request
+// — once per evaluation phase — into a table retention never purges. Three rows per
+// request, forever, on every gateway that has not configured governance, all saying the
+// feature was not in use.
+func TestNoPoliciesMeansNoPolicyDecisionEvents(t *testing.T) {
+	db, proxy := governanceAuditServer(t)
+	reqID := driveOneAllowedRequest(t, db, proxy)
 
-	db := openTestStore(t)
-	defer db.Close()
-	logger := store.NewAsyncLogger(db, 32, filepath.Join(t.TempDir(), "fallback.ndjson"))
-	logger.Start()
-	defer logger.Stop(context.Background())
-	server, err := NewServer(testConfig(upstream.URL, "secret"), db, logger, nil)
+	events, err := db.PolicyDecisionEventsForRequest(context.Background(), reqID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	proxy := httptest.NewServer(server.Routes())
-	defer proxy.Close()
-
-	resp := postJSON(t, proxy.URL+"/v1/chat/completions", "", map[string]any{
-		"model": "gpt-4.1-mini",
-		"messages": []any{
-			map[string]any{"role": "user", "content": "hello"},
-		},
-	})
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		t.Fatalf("expected default allow request to pass, got %d: %s", resp.StatusCode, body)
+	if len(events) != 0 {
+		t.Fatalf("a gateway with no policies recorded %d governance decisions: %+v", len(events), events)
 	}
 
-	var reqID string
-	waitFor(t, time.Second, func() bool {
-		recent, _ := db.RecentRequests(context.Background(), store.RequestFilter{Limit: 1})
-		if len(recent) == 0 {
-			return false
-		}
-		reqID = recent[0].ID
-		return reqID != ""
-	})
+	count, total := explainPolicyCounts(t, proxy, reqID)
+	if count != 0 || total != 0 {
+		t.Fatalf("explain reports governance activity for a gateway with none: count=%v total=%v", count, total)
+	}
+}
+
+// With policies configured and none matching, "nothing matched" is a decision and is
+// recorded — once per phase. The admin views must still treat those rows as background:
+// they are a total, not a governance event worth flagging on a request.
+func TestUnmatchedPoliciesAreAuditedWithoutXViewNoise(t *testing.T) {
+	db, proxy := governanceAuditServer(t)
+
+	// A policy that cannot match this request, so evaluation runs and decides nothing.
+	if err := db.UpsertPolicyWithRules(context.Background(),
+		store.Policy{ID: "p-never", Name: "never matches", Enabled: true, Priority: 100, RolloutPercent: 100},
+		[]store.PolicyRule{{
+			ID: "r-never", PolicyID: "p-never", Name: "never", Enabled: true, Priority: 10,
+			Conditions: map[string]any{"model": "a-model-nobody-calls"},
+			Actions:    map[string]any{"secret_action": "block"},
+		}}); err != nil {
+		t.Fatal(err)
+	}
+
+	reqID := driveOneAllowedRequest(t, db, proxy)
+
 	events, err := db.PolicyDecisionEventsForRequest(context.Background(), reqID)
 	if err != nil {
 		t.Fatal(err)
@@ -283,25 +286,14 @@ func TestGovernanceDefaultAllowIsAuditedWithoutXViewNoise(t *testing.T) {
 		}
 	}
 	if !defaultPhases["request"] || !defaultPhases["provider"] || !defaultPhases["cost"] {
-		t.Fatalf("expected default policy decision event, got %+v", events)
+		t.Fatalf("expected a default decision for each phase, got %+v", events)
 	}
-	explainResp, err := http.Get(proxy.URL + "/admin/requests/" + reqID + "/explain")
-	if err != nil {
-		t.Fatal(err)
+
+	count, total := explainPolicyCounts(t, proxy, reqID)
+	if count != 0 || total == 0 {
+		t.Fatalf("default-only policy events should be total-only in explain: count=%v total=%v", count, total)
 	}
-	defer explainResp.Body.Close()
-	var explainOut struct {
-		Governance struct {
-			PolicyDecisionCount float64 `json:"policy_decision_count"`
-			PolicyDecisionTotal float64 `json:"policy_decision_total"`
-		} `json:"governance"`
-	}
-	if err := json.NewDecoder(explainResp.Body).Decode(&explainOut); err != nil {
-		t.Fatal(err)
-	}
-	if explainOut.Governance.PolicyDecisionCount != 0 || explainOut.Governance.PolicyDecisionTotal == 0 {
-		t.Fatalf("default-only policy events should be total-only in explain: %+v", explainOut.Governance)
-	}
+
 	linksResp, err := http.Get(proxy.URL + "/admin/requests/" + reqID + "/links")
 	if err != nil {
 		t.Fatal(err)
@@ -316,6 +308,7 @@ func TestGovernanceDefaultAllowIsAuditedWithoutXViewNoise(t *testing.T) {
 	if linksOut.Counts["policy_decisions"] != 0 || linksOut.Counts["policy_decision_total"] == 0 {
 		t.Fatalf("default-only policy events should be total-only in trace links: %+v", linksOut.Counts)
 	}
+
 	points, _, err := db.ScatterPoints(context.Background(), store.ScatterFilter{Since: time.Now().Add(-time.Hour), Limit: 10})
 	if err != nil {
 		t.Fatal(err)
@@ -333,6 +326,76 @@ func TestGovernanceDefaultAllowIsAuditedWithoutXViewNoise(t *testing.T) {
 	if !found {
 		t.Fatalf("request %s not found in scatter points: %+v", reqID, points)
 	}
+}
+
+func governanceAuditServer(t *testing.T) (*store.SQLStore, *httptest.Server) {
+	t.Helper()
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`))
+	}))
+	t.Cleanup(upstream.Close)
+
+	db := openTestStore(t)
+	logger := store.NewAsyncLogger(db, 32, filepath.Join(t.TempDir(), "fallback.ndjson"))
+	logger.Start()
+	t.Cleanup(func() { logger.Stop(context.Background()); db.Close() })
+
+	server, err := NewServer(testConfig(upstream.URL, "secret"), db, logger, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxy := httptest.NewServer(server.Routes())
+	t.Cleanup(proxy.Close)
+	return db, proxy
+}
+
+func driveOneAllowedRequest(t *testing.T, db *store.SQLStore, proxy *httptest.Server) string {
+	t.Helper()
+	resp := postJSON(t, proxy.URL+"/v1/chat/completions", "", map[string]any{
+		"model": "gpt-4.1-mini",
+		"messages": []any{
+			map[string]any{"role": "user", "content": "hello"},
+		},
+	})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected the request to pass, got %d: %s", resp.StatusCode, body)
+	}
+
+	var reqID string
+	waitFor(t, time.Second, func() bool {
+		recent, _ := db.RecentRequests(context.Background(), store.RequestFilter{Limit: 1})
+		if len(recent) == 0 {
+			return false
+		}
+		reqID = recent[0].ID
+		return reqID != ""
+	})
+	if reqID == "" {
+		t.Fatal("the request was never logged")
+	}
+	return reqID
+}
+
+func explainPolicyCounts(t *testing.T, proxy *httptest.Server, reqID string) (float64, float64) {
+	t.Helper()
+	resp, err := http.Get(proxy.URL + "/admin/requests/" + reqID + "/explain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var out struct {
+		Governance struct {
+			PolicyDecisionCount float64 `json:"policy_decision_count"`
+			PolicyDecisionTotal float64 `json:"policy_decision_total"`
+		} `json:"governance"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	return out.Governance.PolicyDecisionCount, out.Governance.PolicyDecisionTotal
 }
 
 func TestGovernanceApprovalWorkflowAllowsApprovedRequest(t *testing.T) {
@@ -1011,5 +1074,54 @@ func TestGoldenPromptRunStoresScore(t *testing.T) {
 	}
 	if len(results) != 1 || !results[0].Passed {
 		t.Fatalf("expected stored passing result, got %+v", results)
+	}
+}
+
+// A blocked request never reaches the end of the pipeline the way an allowed one does, and
+// its decisions are exactly the ones worth having. They are flushed from the same deferred
+// exit point that releases the quota reservation, so every halting path is covered by
+// construction rather than by remembering.
+func TestABlockedRequestStillRecordsItsDecision(t *testing.T) {
+	db, proxy := governanceAuditServer(t)
+
+	if err := db.UpsertPolicyWithRules(context.Background(),
+		store.Policy{ID: "p-block", Name: "block everything", Enabled: true, Priority: 100, RolloutPercent: 100},
+		[]store.PolicyRule{{
+			ID: "r-block", PolicyID: "p-block", Name: "block", Enabled: true, Priority: 10,
+			Conditions: map[string]any{},
+			Actions:    map[string]any{"block": true},
+		}}); err != nil {
+		t.Fatal(err)
+	}
+
+	resp := postJSON(t, proxy.URL+"/v1/chat/completions", "", map[string]any{
+		"model":    "gpt-4.1-mini",
+		"messages": []any{map[string]any{"role": "user", "content": "hello"}},
+	})
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusOK {
+		t.Fatalf("the blocking policy did not block: %d", resp.StatusCode)
+	}
+
+	var events []store.PolicyDecisionEvent
+	waitFor(t, 2*time.Second, func() bool {
+		all, err := db.ListPolicyDecisionEvents(context.Background(), 50)
+		if err != nil {
+			return false
+		}
+		events = all
+		return len(all) > 0
+	})
+	if len(events) == 0 {
+		t.Fatal("a blocked request recorded no governance decision at all")
+	}
+	blocked := false
+	for _, event := range events {
+		if event.Decision == "block" && event.RuleID == "r-block" {
+			blocked = true
+		}
+	}
+	if !blocked {
+		t.Fatalf("the block decision was not recorded: %+v", events)
 	}
 }

@@ -5,7 +5,8 @@ import (
 	"time"
 )
 
-var budgetKST = time.FixedZone("KST", 9*3600)
+// budgetKST is seoulZone under the name the budget code has always used.
+var budgetKST = seoulZone
 
 // kstMonthBounds returns the start of the current month and the number of days in it,
 // in Asia/Seoul (the same zone quotas reset on).
@@ -57,7 +58,7 @@ func (s *SQLStore) DeleteBudget(ctx context.Context, id string) error {
 // budgetStatus computes burn-down / forecast for one budget at time `now`.
 func (s *SQLStore) budgetStatus(ctx context.Context, b Budget, now time.Time) (BudgetStatus, error) {
 	start, daysInMonth := kstMonthBounds(now)
-	_, spent, _, err := s.UsageSince(ctx, UsageFilter{Scope: b.Scope, ScopeValue: b.ScopeValue, Since: start})
+	_, spent, _, err := s.UsageForPeriod(ctx, UsageFilter{Scope: b.Scope, ScopeValue: b.ScopeValue, Since: start})
 	if err != nil {
 		return BudgetStatus{}, err
 	}

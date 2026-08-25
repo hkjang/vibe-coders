@@ -134,7 +134,7 @@ func TestAuthStoreUserTeamTokenAuditAndAPIKeyLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	var loginAttempts int
-	if err := db.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM login_attempts WHERE email = ? AND success = 0`, "dev@example.com").Scan(&loginAttempts); err != nil {
+	if err := db.db.QueryRowContext(ctx, db.bind(`SELECT COUNT(*) FROM login_attempts WHERE email = ? AND success = 0`), "dev@example.com").Scan(&loginAttempts); err != nil {
 		t.Fatal(err)
 	}
 	if loginAttempts != 1 {

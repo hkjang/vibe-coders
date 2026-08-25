@@ -2,9 +2,12 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -89,6 +92,9 @@ func TestReplayFallbackDropsDuplicateImportedRecords(t *testing.T) {
 }
 
 func openStoreForTest(t *testing.T) *SQLStore {
+	if dsn := os.Getenv("TEST_POSTGRES_DSN"); dsn != "" {
+		return openPostgresStoreForTest(t, dsn)
+	}
 	t.Helper()
 	db, err := Open(context.Background(), config.DatabaseConfig{
 		Driver: "sqlite",
@@ -138,4 +144,38 @@ func fallbackRecord(id string) LogRecord {
 			CreatedAt:        now,
 		},
 	}
+}
+
+// openPostgresStoreForTest gives each test its own schema in one Postgres database, so
+// the suite can run against the driver the product ships for production without tests
+// seeing one another's rows.
+func openPostgresStoreForTest(t *testing.T, dsn string) *SQLStore {
+	t.Helper()
+	schema := "t" + strings.ToLower(regexp.MustCompile(`[^A-Za-z0-9]`).ReplaceAllString(t.Name(), "_"))
+	if len(schema) > 55 {
+		schema = schema[:55]
+	}
+	admin, err := sql.Open("pgx", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := admin.Exec("DROP SCHEMA IF EXISTS " + schema + " CASCADE"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := admin.Exec("CREATE SCHEMA " + schema); err != nil {
+		t.Fatal(err)
+	}
+	admin.Close()
+	sep := "?"
+	if strings.Contains(dsn, "?") {
+		sep = "&"
+	}
+	db, err := Open(context.Background(), config.DatabaseConfig{Driver: "postgres", DSN: dsn + sep + "search_path=" + schema})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Migrate(context.Background()); err != nil {
+		t.Fatalf("migrate on postgres: %v", err)
+	}
+	return db
 }

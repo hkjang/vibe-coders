@@ -64,8 +64,8 @@ func (s *SQLStore) AdminAuditAnomalies(ctx context.Context, since time.Time, des
 	defer rows.Close()
 
 	type acc struct {
-		anomaly  AdminAuditAnomaly
-		actions  map[string]bool
+		anomaly AdminAuditAnomaly
+		actions map[string]bool
 	}
 	agg := map[string]*acc{}
 	for rows.Next() {

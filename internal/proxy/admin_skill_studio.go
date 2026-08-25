@@ -17,17 +17,17 @@ import (
 // adopts one as a draft skill, then drives it through the evaluate → chat-test →
 // staging → production wizard.
 type skillCandidate struct {
-	ID           string         `json:"id"`            // stable slug used as the suggested skill name
-	Source       string         `json:"source"`        // fingerprint | product | text2sql | recommendation | skill_gap
-	SuggestedName string        `json:"suggested_name"`
-	Title        string         `json:"title"`
-	Description  string         `json:"description"`
-	Sample       string         `json:"sample"`
-	Rationale    string         `json:"rationale"`
-	Signal       map[string]any `json:"signal"`
-	Suggested    skillDefaults  `json:"suggested"`
-	AlreadySkill bool           `json:"already_skill"` // a skill with this name already exists
-	Score        float64        `json:"score"`         // ranking weight (higher = stronger candidate)
+	ID            string         `json:"id"`     // stable slug used as the suggested skill name
+	Source        string         `json:"source"` // fingerprint | product | text2sql | recommendation | skill_gap
+	SuggestedName string         `json:"suggested_name"`
+	Title         string         `json:"title"`
+	Description   string         `json:"description"`
+	Sample        string         `json:"sample"`
+	Rationale     string         `json:"rationale"`
+	Signal        map[string]any `json:"signal"`
+	Suggested     skillDefaults  `json:"suggested"`
+	AlreadySkill  bool           `json:"already_skill"` // a skill with this name already exists
+	Score         float64        `json:"score"`         // ranking weight (higher = stronger candidate)
 }
 
 // skillDefaults are the seed values pre-filled into the adopt form / draft skill.
@@ -134,14 +134,14 @@ func (s *Server) handleSkillStudioCandidates(w http.ResponseWriter, r *http.Requ
 			}
 			cands = append(cands, skillCandidate{
 				ID: name, Source: "text2sql", SuggestedName: name,
-				Title:       q,
-				Description: "반복 Text2SQL 질문 (" + itoa64(c.Count) + "회)",
-				Sample:      c.SampleSQL,
-				Rationale:   itoa64(c.Count) + "회 질의 · 추천 상품 " + c.RecommendedProduct,
-				Signal:      map[string]any{"count": c.Count, "recommended_product": c.RecommendedProduct},
-				Suggested:   skillDefaults{RiskLevel: "medium", AllowedTools: "sql-runner", Instructions: instr},
+				Title:        q,
+				Description:  "반복 Text2SQL 질문 (" + itoa64(c.Count) + "회)",
+				Sample:       c.SampleSQL,
+				Rationale:    itoa64(c.Count) + "회 질의 · 추천 상품 " + c.RecommendedProduct,
+				Signal:       map[string]any{"count": c.Count, "recommended_product": c.RecommendedProduct},
+				Suggested:    skillDefaults{RiskLevel: "medium", AllowedTools: "sql-runner", Instructions: instr},
 				AlreadySkill: have[name],
-				Score:       float64(c.Count) + 10,
+				Score:        float64(c.Count) + 10,
 			})
 		}
 	}
@@ -166,11 +166,11 @@ func (s *Server) handleSkillStudioCandidates(w http.ResponseWriter, r *http.Requ
 			}
 			cands = append(cands, skillCandidate{
 				ID: name, Source: "recommendation", SuggestedName: name,
-				Title:       label,
-				Description: a.Kind + " 추천이 " + itoa64(a.Users) + "명에게 제안됨",
-				Rationale:   "사용자 " + itoa64(a.Users) + "명 · 누적 " + itoa64(a.Count) + "회 · 예상 절감 ₩" + ftoa(a.TotalSavingsKRW),
-				Signal:      map[string]any{"users": a.Users, "count": a.Count, "kind": a.Kind, "ref": a.Ref, "savings_krw": a.TotalSavingsKRW},
-				Suggested:   def,
+				Title:        label,
+				Description:  a.Kind + " 추천이 " + itoa64(a.Users) + "명에게 제안됨",
+				Rationale:    "사용자 " + itoa64(a.Users) + "명 · 누적 " + itoa64(a.Count) + "회 · 예상 절감 ₩" + ftoa(a.TotalSavingsKRW),
+				Signal:       map[string]any{"users": a.Users, "count": a.Count, "kind": a.Kind, "ref": a.Ref, "savings_krw": a.TotalSavingsKRW},
+				Suggested:    def,
 				AlreadySkill: have[name],
 				Score:        float64(a.Users)*5 + float64(a.Count),
 			})
@@ -203,8 +203,9 @@ func (s *Server) handleSkillStudioCandidates(w http.ResponseWriter, r *http.Requ
 // handleSkillStudioAdopt promotes a candidate into a draft skill (always draft — the
 // wizard then drives it through the gated lifecycle). Idempotent by name.
 // POST /admin/skill-studio/adopt {name, description, instructions, risk_level,
-//                                 allowed_models, allowed_tools, allowed_teams, daily_limit,
-//                                 source, signal}
+//
+//	allowed_models, allowed_tools, allowed_teams, daily_limit,
+//	source, signal}
 func (s *Server) handleSkillStudioAdopt(w http.ResponseWriter, r *http.Request) {
 	if !s.authorizeAdmin(r) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
@@ -324,14 +325,14 @@ func (s *Server) handleSkillStudioReadiness(w http.ResponseWriter, r *http.Reque
 		nextStatus = "production"
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"name":            sk.Name,
-		"status":          sk.Status,
-		"next_status":     nextStatus,
-		"checks":           checks,
+		"name":              sk.Name,
+		"status":            sk.Status,
+		"next_status":       nextStatus,
+		"checks":            checks,
 		"production_ready":  allReady,
-		"scan":             scan,
-		"fitness_required": modelFitnessRequired(sk),
-		"fitness_passing":  fitnessPassing,
+		"scan":              scan,
+		"fitness_required":  modelFitnessRequired(sk),
+		"fitness_passing":   fitnessPassing,
 		"fitness_threshold": skillFitnessMinEvidence,
 	})
 }

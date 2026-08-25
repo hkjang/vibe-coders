@@ -48,7 +48,7 @@ func (s *Server) handleScatter(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
 	}
-	since := parseWindow(r.URL.Query().Get("window"), time.Hour, "hour")
+	since, until := xviewTimeRange(r, time.Hour)
 	limit := 5000
 	if v := strings.TrimSpace(r.URL.Query().Get("limit")); v != "" {
 		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 {
@@ -61,6 +61,7 @@ func (s *Server) handleScatter(w http.ResponseWriter, r *http.Request) {
 
 	f := store.ScatterFilter{
 		Since:    since,
+		Until:    until,
 		Endpoint: strings.TrimSpace(r.URL.Query().Get("endpoint")),
 		APIKeyID: strings.TrimSpace(r.URL.Query().Get("api_key_id")),
 		Limit:    limit,
