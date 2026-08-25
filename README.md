@@ -13,6 +13,7 @@ Roo Code / Cursor / Continue 등 OpenAI 호환 API 를 호출하는 VS Code 확�
 - **[관리자 가이드](docs/ADMIN_GUIDE.md)** — 어드민 UI 탭 사용법, 일상/주간/월간 운영 체크리스트
 - **[안전 및 보안 거버넌스 가이드](docs/SAFETY_GUIDE.md)** — 정책 엔진, Secret Firewall, 승인 워크플로우 운영
 - **[릴리즈 가이드](docs/RELEASE_GUIDE.md)** — 빌드·태깅·GitHub 릴리즈·오프라인 패키지 산출·롤백 절차
+- **[부하 성능 개선 보고서](docs/PERFORMANCE_REPORT.md)** — 부하에서 느려지던 원인과 개선 전후 실측 ([HTML](docs/PERFORMANCE_REPORT.html) · [PDF](docs/PERFORMANCE_REPORT.pdf))
 - **[모델 카드](MODEL_CARD.md)** — 외부 모델 경계, 사용 목적과 제한사항
 - **[AI 사용 공개](AI_USAGE_DISCLOSURE.md)** — 개발 보조 AI 사용 범위와 검증 책임
 - **[제3자 라이선스](THIRD_PARTY_LICENSES.md)** / **[SPDX SBOM](SBOM.spdx.json)** — 의존성·라이선스 검증 자료
