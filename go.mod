@@ -6,7 +6,7 @@ require (
 	github.com/go-sql-driver/mysql v1.10.0
 	github.com/jackc/pgx/v5 v5.9.2
 	github.com/sijms/go-ora/v2 v2.9.0
-	golang.org/x/crypto v0.37.0
+	golang.org/x/crypto v0.52.0
 	modernc.org/sqlite v1.34.5
 )
 
@@ -21,7 +21,7 @@ require (
 	github.com/ncruces/go-strftime v0.1.9 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	golang.org/x/sync v0.21.0 // indirect
-	golang.org/x/sys v0.42.0 // indirect
+	golang.org/x/sys v0.45.0 // indirect
 	golang.org/x/text v0.39.0 // indirect
 	modernc.org/libc v1.55.3 // indirect
 	modernc.org/mathutil v1.6.0 // indirect
