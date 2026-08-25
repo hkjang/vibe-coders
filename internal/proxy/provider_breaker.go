@@ -492,7 +492,7 @@ func (s *Server) startBreakerSync() {
 	if interval <= 0 {
 		interval = 3 * time.Second
 	}
-	go s.breakerSyncLoop(context.Background(), interval)
+	go s.breakerSyncLoop(s.db.LifecycleContext(), interval)
 	slog.Info("provider breaker sharing enabled", "instance", s.instanceID, "interval", interval.String())
 }
 

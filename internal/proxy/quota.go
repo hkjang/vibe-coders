@@ -211,11 +211,17 @@ func (s *Server) startQuotaReservationSweeper() {
 	if interval <= 0 {
 		interval = 5 * time.Minute
 	}
+	parent := s.db.LifecycleContext()
 	go func() {
 		t := time.NewTicker(interval)
 		defer t.Stop()
-		for range t.C {
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		for {
+			select {
+			case <-parent.Done():
+				return
+			case <-t.C:
+			}
+			ctx, cancel := context.WithTimeout(parent, 10*time.Second)
 			n, err := s.db.SweepExpiredQuotaReservations(ctx, time.Now())
 			cancel()
 			if err != nil {

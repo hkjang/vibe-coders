@@ -548,7 +548,7 @@ func (s *Server) applyClickHouseSinkWorker() {
 	if ch.URL == "" || ch.SinkInterval <= 0 {
 		return // disabled
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(s.db.LifecycleContext())
 	s.chSinkStop = cancel
 	go s.clickhouseSinkLoop(ctx)
 }

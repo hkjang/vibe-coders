@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5/stdlib"
@@ -36,8 +37,12 @@ var blobRegex = regexp.MustCompile(`(?i)\bblob\b`)
 var realRegex = regexp.MustCompile(`(?i)\bREAL\b`)
 
 type SQLStore struct {
-	db      *sql.DB
-	dialect string
+	db              *sql.DB
+	dialect         string
+	lifecycleCtx    context.Context
+	lifecycleCancel context.CancelFunc
+	closeOnce       sync.Once
+	closeErr        error
 
 	// providers memoises provider_configs, which the hot path reads several times per
 	// request. See provider_cache.go.
@@ -119,11 +124,28 @@ func Open(ctx context.Context, cfg config.DatabaseConfig) (*SQLStore, error) {
 		return nil, err
 	}
 
-	return &SQLStore{db: db, dialect: driver}, nil
+	lifecycleCtx, lifecycleCancel := context.WithCancel(context.Background())
+	return &SQLStore{
+		db:              db,
+		dialect:         driver,
+		lifecycleCtx:    lifecycleCtx,
+		lifecycleCancel: lifecycleCancel,
+	}, nil
 }
 
 func (s *SQLStore) Close() error {
-	return s.db.Close()
+	s.closeOnce.Do(func() {
+		s.lifecycleCancel()
+		s.closeErr = s.db.Close()
+	})
+	return s.closeErr
+}
+
+// LifecycleContext is cancelled immediately before the underlying connection pool is
+// closed. Long-running workers should derive their operation contexts from it so a
+// shutdown cannot leave them polling a closed database.
+func (s *SQLStore) LifecycleContext() context.Context {
+	return s.lifecycleCtx
 }
 
 func (s *SQLStore) Ping(ctx context.Context) error {

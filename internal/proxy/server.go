@@ -152,7 +152,7 @@ func NewServer(cfg config.Config, db *store.SQLStore, logger *store.AsyncLogger,
 		qsize = 10000
 	}
 	server.chFactQueue = make(chan store.LogRecord, qsize)
-	go server.clickhouseFactLoop(context.Background())
+	go server.clickhouseFactLoop(db.LifecycleContext())
 
 	// Pre-apply current model prices when the pricing table is empty (first boot).
 	server.seedPricingIfEmpty(context.Background())
@@ -166,12 +166,12 @@ func NewServer(cfg config.Config, db *store.SQLStore, logger *store.AsyncLogger,
 
 	// Multi-pod convergence: poll the admin_settings change token so a settings change made on any
 	// pod (or via direct DB edit) is applied on every pod within one interval, without a restart.
-	go server.runtimeReloadLoop(context.Background(), cfg.RuntimeReloadInterval)
+	go server.runtimeReloadLoop(db.LifecycleContext(), cfg.RuntimeReloadInterval)
 
 	// Background scheduler for due saved Text2SQL reports (self-disables without an
 	// execute DB).
-	go server.text2sqlReportScheduler()
-	go server.redTeamScheduler()
+	go server.text2sqlReportScheduler(db.LifecycleContext())
+	go server.redTeamScheduler(db.LifecycleContext())
 
 	if cfg.Upstream.APIKey != "" {
 		encrypted, err := secrets.Encrypt(cfg.Upstream.APIKey)

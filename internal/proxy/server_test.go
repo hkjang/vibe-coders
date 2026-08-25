@@ -406,6 +406,7 @@ func openTestStore(t *testing.T) *store.SQLStore {
 	if err := db.Migrate(context.Background()); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = db.Close() })
 	return db
 }
 
@@ -437,6 +438,7 @@ func openPostgresTestStore(t *testing.T, dsn string) *store.SQLStore {
 	if err := db.Migrate(context.Background()); err != nil {
 		t.Fatalf("migrate on postgres: %v", err)
 	}
+	t.Cleanup(func() { _ = db.Close() })
 	return db
 }
 

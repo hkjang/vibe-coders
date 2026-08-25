@@ -59,14 +59,19 @@ func redTeamScheduleDue(cronExpr, lastRunAt string, now time.Time) bool {
 }
 
 // redTeamScheduler runs due red-team schedules once per minute.
-func (s *Server) redTeamScheduler() {
+func (s *Server) redTeamScheduler(parent context.Context) {
 	t := time.NewTicker(time.Minute)
 	defer t.Stop()
-	for range t.C {
+	for {
+		select {
+		case <-parent.Done():
+			return
+		case <-t.C:
+		}
 		if redteamKillSwitch.Load() {
 			continue
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		ctx, cancel := context.WithTimeout(parent, 5*time.Minute)
 		schedules, err := s.db.ListRedTeamSchedules(ctx)
 		if err != nil {
 			slog.Warn("redteam schedules query failed", "error", err)
