@@ -352,6 +352,7 @@ var apiEndpoints = []apiEndpoint{
 	{"/admin/ops/home", []string{"get"}, "ops", "Operations home overview", false},
 	{"/admin/ops/workers", []string{"get"}, "ops", "Background worker status board", false},
 	{"/admin/index-health", []string{"get"}, "ops", "Index drift against the declared schema, plus what the access counters suggest indexing", false},
+	{"/admin/migration-sql", []string{"get"}, "ops", "Every statement the migrations apply, annotated with what this database has", false},
 	{"/admin/ops/preflight", []string{"get"}, "ops", "Pre-deploy readiness checks", false},
 	{"/admin/flow-map", []string{"get"}, "ops", "Request flow map", false},
 	{"/admin/system-errors", []string{"get"}, "ops", "Recent system errors", false},

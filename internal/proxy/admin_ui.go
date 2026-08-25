@@ -8403,10 +8403,133 @@ const adminHTML = `<!doctype html>
         ' · 정의 불일치 ' + (sum.mismatched || 0) + ' · DB에 없음 ' + (sum.missing || 0) + ' · 선언에 없음 ' + (sum.undeclared || 0) +
         ' · 추천 ' + (sum.advice_total || 0) + '건(중요 ' + (sum.advice_high || 0) + ') · ' + escapeHTML(drift.dialect || '') +
         '</p><p style="font-size:12px;margin:4px 0">' + escapeHTML(sum.headline || '') + '</p>' +
+        '<div style="margin:6px 0"><button type="button" class="secondary" onclick="opsOpenMigrationSQL()">\uD83D\uDCDC 마이그레이션 SQL 전체 보기</button>' +
+        '<span class="muted" style="font-size:11px;margin-left:6px">빌드가 선언한 문장 전부 — 손으로 추가한 인덱스와 구분할 때</span></div>' +
         driftBody + '<div style="margin-top:10px"><strong style="font-size:12px">추가·삭제 후보</strong></div>' + adviceBody +
         '<p class="muted" style="font-size:10px;margin-top:6px">이 화면은 읽기 전용입니다. 인덱스는 쓰기 비용과 저장 비용을 만들기 때문에, 적용 여부는 운영자가 판단합니다.</p>' +
         '</div>');
     };
+    // 마이그레이션 SQL 전문 — Migrate 가 적용하는 문장 목록을 적용 순서 그대로 보여줍니다.
+    // 손으로 추가한 인덱스와 빌드가 선언한 인덱스를 구분하려면 이 목록이 기준입니다.
+    // 읽기 전용: 어떤 DDL 도 실행하지 않습니다.
+    let opsMigrationSQL = null;
+    const msqlState = { q: '', kind: 'all', driftOnly: false };
+    window.opsOpenMigrationSQL = async () => {
+      openModal('마이그레이션 SQL', '<div id="msql-host"><div class="loading">불러오는 중...</div></div>');
+      let d;
+      try { d = await api('/admin/migration-sql'); }
+      catch (e) {
+        const h = document.getElementById('msql-host');
+        if (h) h.innerHTML = '<div class="banner warn">마이그레이션 SQL 을 불러오지 못했습니다.<div class="muted">' + escapeHTML(e.message) + '</div></div>';
+        return;
+      }
+      opsMigrationSQL = d;
+      msqlState.q = ''; msqlState.kind = 'all'; msqlState.driftOnly = false;
+      msqlRenderShell();
+    };
+    function msqlKindLabel(k) {
+      return k === 'create_table' ? '테이블' : k === 'create_index' ? '인덱스' : k === 'add_column' ? '컬럼 추가' : '기타';
+    }
+    function msqlStatusBadge(st) {
+      if (st === 'mismatched') return '<span class="status error">정의 불일치</span>';
+      if (st === 'missing') return '<span class="status warn">DB에 없음</span>';
+      if (st === 'present') return '<span class="status">DB에 있음</span>';
+      return '';
+    }
+    function msqlRenderShell() {
+      const d = opsMigrationSQL, host = document.getElementById('msql-host');
+      if (!d || !host) return;
+      const c = d.counts || {}, status = d.index_status || {}, liveOnly = d.live_only_indexes || [];
+      let present = 0, mismatched = 0, missing = 0;
+      Object.keys(status).forEach(n => {
+        if (status[n] === 'present') present++;
+        else if (status[n] === 'mismatched') mismatched++;
+        else if (status[n] === 'missing') missing++;
+      });
+
+      // 손으로 추가한 인덱스 — 이 목록에 없는 것이 곧 "빌드가 모르는 인덱스"입니다.
+      const liveOnlyBlock = liveOnly.length
+        ? '<div class="banner warn" style="margin-bottom:10px"><strong>이 DB에만 있는 인덱스 ' + liveOnly.length + '개</strong>' +
+          '<div class="muted" style="font-size:11px;margin:2px 0 6px">마이그레이션에 없으므로 새로 설치한 DB 에는 생기지 않습니다. 계속 쓸 것이라면 migrationStatements() 에 넣어야 합니다.</div>' +
+          '<table><thead><tr><th>인덱스</th><th>테이블</th><th>현재 정의</th></tr></thead><tbody>' +
+          liveOnly.map(ix => '<tr><td><strong>' + escapeHTML(ix.name) + '</strong></td><td>' + escapeHTML(ix.table) + '</td>' +
+            '<td><code style="font-size:10px;overflow-wrap:anywhere">' + escapeHTML(ix.definition || ((ix.unique ? 'UNIQUE ' : '') + '(' + (ix.columns || []).join(', ') + ')')) + '</code></td></tr>').join('') +
+          '</tbody></table></div>'
+        : '';
+
+      const liveNote = d.live_error
+        ? '<div class="banner warn" style="margin-bottom:10px">DB 인덱스와 대조하지 못했습니다 — 아래는 빌드가 선언한 내용입니다.<div class="muted">' + escapeHTML(d.live_error) + '</div></div>'
+        : '';
+
+      const postNote = (d.post_migration || []).length
+        ? '<p class="muted" style="font-size:10px;margin:6px 0 0">※ 아래 목록 실행 후 추가로 일어나는 변경: ' + (d.post_migration || []).map(escapeHTML).join(' ') + '</p>'
+        : '';
+
+      host.innerHTML =
+        '<p class="muted" style="font-size:12px;margin:0 0 8px">' + escapeHTML(d.dialect || '') + ' 기준 · 문장 ' + (c.total || 0) +
+        '개 (테이블 ' + (c.create_table || 0) + ' · 인덱스 ' + (c.create_index || 0) + ' · 컬럼 추가 ' + (c.add_column || 0) + ' · 기타 ' + (c.other || 0) + ')' +
+        (c.rewritten ? ' · 이 드라이버용으로 바뀐 문장 ' + c.rewritten + '개' : '') + '</p>' +
+        (d.live_error ? '' : '<p style="font-size:12px;margin:0 0 8px">선언한 인덱스 대조 — <span class="status">DB에 있음 ' + present + '</span> ' +
+          (missing ? '<span class="status warn">DB에 없음 ' + missing + '</span> ' : '') +
+          (mismatched ? '<span class="status error">정의 불일치 ' + mismatched + '</span> ' : '') +
+          (liveOnly.length ? '<span class="status warn">DB에만 있음 ' + liveOnly.length + '</span>' : '') + '</p>') +
+        liveNote + liveOnlyBlock +
+        '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:8px">' +
+        '<input id="msql-q" placeholder="테이블·인덱스·SQL 검색" style="flex:1;min-width:180px" oninput="msqlState.q=this.value;msqlRenderList()">' +
+        '<select id="msql-kind" onchange="msqlState.kind=this.value;msqlRenderList()">' +
+        '<option value="all">전체</option><option value="create_index">인덱스</option><option value="create_table">테이블</option>' +
+        '<option value="add_column">컬럼 추가</option><option value="other">기타</option></select>' +
+        '<label style="font-size:11px;display:flex;align-items:center;gap:4px"><input type="checkbox" id="msql-drift" onchange="msqlState.driftOnly=this.checked;msqlRenderList()">불일치만</label>' +
+        '<button type="button" class="secondary" onclick="msqlCopyAll()">전체 복사</button></div>' +
+        '<div id="msql-list"></div>' + postNote +
+        '<p class="muted" style="font-size:10px;margin-top:6px">읽기 전용입니다. 이 화면은 SQL 을 보여줄 뿐 실행하지 않습니다.</p>';
+      msqlRenderList();
+    }
+    window.msqlRenderList = () => {
+      const d = opsMigrationSQL, list = document.getElementById('msql-list');
+      if (!d || !list) return;
+      const status = d.index_status || {}, detail = d.index_detail || {};
+      const q = (msqlState.q || '').trim().toLowerCase();
+      const rows = (d.statements || []).filter(st => {
+        if (msqlState.kind !== 'all' && st.kind !== msqlState.kind) return false;
+        if (msqlState.driftOnly) {
+          const s = st.kind === 'create_index' ? status[st.name] : '';
+          if (s !== 'missing' && s !== 'mismatched') return false;
+        }
+        if (!q) return true;
+        return ((st.table || '') + ' ' + (st.name || '') + ' ' + (st.column || '') + ' ' + (st.sql || '')).toLowerCase().indexOf(q) >= 0;
+      });
+      if (!rows.length) { list.innerHTML = '<p class="muted" style="font-size:12px">조건에 맞는 문장이 없습니다.</p>'; return; }
+      list.innerHTML = '<table><thead><tr><th style="width:44px">#</th><th style="width:92px">구분</th><th>대상</th><th>SQL</th></tr></thead><tbody>' +
+        rows.map(st => {
+          const s = st.kind === 'create_index' ? (status[st.name] || '') : '';
+          const target = st.kind === 'create_index'
+            ? '<strong>' + escapeHTML(st.name) + '</strong><div class="muted" style="font-size:11px">' + escapeHTML(st.table || '') + '</div>' +
+              (s ? '<div style="margin-top:2px">' + msqlStatusBadge(s) + '</div>' : '') +
+              (detail[st.name] ? '<div class="muted" style="font-size:10px">' + escapeHTML(detail[st.name]) + '</div>' : '')
+            : '<strong>' + escapeHTML(st.table || '-') + '</strong>' +
+              (st.column ? '<div class="muted" style="font-size:11px">' + escapeHTML(st.column) + '</div>' : '');
+          return '<tr><td class="muted" style="font-size:11px">' + st.seq + '</td>' +
+            '<td><span class="status" style="white-space:nowrap">' + escapeHTML(msqlKindLabel(st.kind)) + '</span></td>' +
+            '<td>' + target + '</td>' +
+            '<td><pre style="font-size:10px;margin:0;white-space:pre-wrap;overflow-wrap:anywhere">' + escapeHTML(st.sql || '') + '</pre>' +
+            (st.declared_sql ? '<details style="margin-top:2px"><summary class="muted" style="font-size:10px">선언 원문 (이 드라이버용으로 바뀜)</summary>' +
+              '<pre style="font-size:10px;margin:2px 0 0;white-space:pre-wrap;overflow-wrap:anywhere">' + escapeHTML(st.declared_sql) + '</pre></details>' : '') +
+            '</td></tr>';
+        }).join('') + '</tbody></table>' +
+        '<p class="muted" style="font-size:10px;margin-top:4px">' + rows.length + ' / ' + (d.statements || []).length + '개 표시 · 번호는 적용 순서입니다.</p>';
+    };
+    window.msqlCopyAll = async () => {
+      const d = opsMigrationSQL;
+      if (!d) return;
+      const text = (d.statements || []).map(st => st.sql + ';').join('\n\n');
+      try {
+        if (!navigator.clipboard) throw new Error('clipboard API를 지원하지 않는 브라우저입니다');
+        await navigator.clipboard.writeText(text);
+        toast('마이그레이션 SQL ' + (d.statements || []).length + '개 문장을 복사했습니다', 'ok');
+      } catch (e) { toast('복사 실패: ' + e.message, 'error'); }
+    };
+
     // Upgrade Preflight — 배포 전/후 점검(DB·마이그레이션·OpenAPI·설정).
     window.opsPreflight = async () => {
       const host = document.getElementById('ops-preflight');

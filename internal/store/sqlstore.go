@@ -151,13 +151,7 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 	statements := migrationStatements()
 
 	for _, statement := range statements {
-		execQuery := statement
-		if s.dialect == "postgres" {
-			// PostgreSQL does not support BLOB; it uses BYTEA instead.
-			// Using regex guarantees that any variation of case or spacing is handled properly.
-			execQuery = blobRegex.ReplaceAllString(execQuery, "BYTEA")
-			execQuery = realRegex.ReplaceAllString(execQuery, "DOUBLE PRECISION")
-		}
+		execQuery := renderForDialect(statement, s.dialect)
 		if _, err := s.db.ExecContext(ctx, execQuery); err != nil {
 			if isAlreadyExistsErr(err) {
 				continue
@@ -176,6 +170,19 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 	// Recorded after the schema exists and only on the first run, so an existing database
 	// does not claim its day totals cover traffic from before they were being kept.
 	return s.markUsageRollupStarted(ctx)
+}
+
+// renderForDialect turns a declared statement into the one this dialect actually runs.
+// Migrate applies it and the admin SQL view displays it, so what an operator reads is what
+// executed rather than a second rendering that can disagree with it.
+func renderForDialect(statement, dialect string) string {
+	if dialect != "postgres" {
+		return statement
+	}
+	// PostgreSQL does not support BLOB; it uses BYTEA instead.
+	// Using regex guarantees that any variation of case or spacing is handled properly.
+	out := blobRegex.ReplaceAllString(statement, "BYTEA")
+	return realRegex.ReplaceAllString(out, "DOUBLE PRECISION")
 }
 
 // migrationStatements is the schema the gateway declares. It is a function rather than a
