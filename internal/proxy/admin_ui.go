@@ -69,6 +69,7 @@ const adminHTML = `<!doctype html>
       border-radius: 6px; font-weight: 700;
     }
     nav a.active { background: var(--ink); color: var(--bg); }
+    .mobile-nav-toggle { display:none; }
     /* Grouped top-nav dropdowns. JS adds a small hover-intent delay; CSS keeps a fallback. */
     .nav-group { position: relative; }
     .nav-group::after {
@@ -90,6 +91,7 @@ const adminHTML = `<!doctype html>
     .nav-group:focus-within > .nav-group-menu,
     .nav-group.nav-open > .nav-group-menu,
     .nav-group.nav-closing > .nav-group-menu { display: block; }
+    .nav-group.nav-manual-closed > .nav-group-menu { display:none; }
     .nav-group-menu a { display: block; white-space: nowrap; }
     #subtabs:empty { display: none; }
     .subtabs {
@@ -123,6 +125,10 @@ const adminHTML = `<!doctype html>
       height: 34px; border: 1px solid var(--line); border-radius: 6px;
       background: var(--panel); color: var(--ink); padding: 0 10px; font: inherit;
     }
+    :where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+      outline: 3px solid color-mix(in srgb, var(--accent) 64%, transparent);
+      outline-offset: 2px;
+    }
     input::placeholder, textarea::placeholder { color: var(--muted); }
     input { min-width: 140px; }
     input[type="checkbox"], input[type="radio"] {
@@ -136,6 +142,9 @@ const adminHTML = `<!doctype html>
     button.secondary { background: var(--panel); color: var(--ink); border-color: var(--line); }
     button.ghost { background: transparent; color: var(--ink); border-color: var(--line); }
     button.danger { background: var(--bad); border-color: var(--bad); color: #fff; }
+    button:disabled, input:disabled, select:disabled {
+      cursor: not-allowed; opacity: .58;
+    }
     .kpis {
       display: grid; grid-template-columns: repeat(4, minmax(160px, 1fr));
       gap: 1px; background: var(--line);
@@ -448,6 +457,80 @@ const adminHTML = `<!doctype html>
     button.home-action { height:auto;text-align:left;font:inherit;cursor:pointer; }
     .home-action strong { font-size:12px; }.home-action small { color:var(--muted);font-size:10px; }
     .home-action.primary { background:var(--accent);border-color:var(--accent);color:#fff; }.home-action.primary small { color:rgba(255,255,255,.8); }
+
+    /* XView is an operational workspace: connection health and urgent signals lead,
+       while filters stay explicit and the dense visualization remains usable on touch. */
+    .xv-hero {
+      display:grid;grid-template-columns:minmax(0,1.35fr) minmax(300px,.65fr);gap:16px;
+      align-items:stretch;margin-top:16px;padding:18px;border:1px solid var(--line);
+      border-radius:14px;background:linear-gradient(135deg,var(--panel) 20%,var(--good-bg));
+      position:relative;overflow:hidden;
+    }
+    .xv-hero::after { content:"";position:absolute;width:220px;height:220px;border-radius:50%;right:-90px;top:-120px;background:var(--accent);opacity:.1;pointer-events:none; }
+    .xv-hero-copy,.xv-live-panel { position:relative;z-index:1; }
+    .xv-eyebrow { color:var(--accent);font-size:10px;font-weight:900;letter-spacing:.12em;text-transform:uppercase; }
+    .xv-hero h2 { margin:5px 0 0;font-size:25px;letter-spacing:-.03em; }
+    .xv-hero-copy > p { color:var(--muted);margin:6px 0 0;max-width:760px;line-height:1.55; }
+    .xv-quick-actions { display:flex;gap:7px;flex-wrap:wrap;margin-top:13px; }
+    .xv-quick-actions a,.xv-quick-actions button { min-height:36px;height:auto;text-decoration:none;display:inline-flex;align-items:center;justify-content:center;border-radius:8px;padding:7px 11px;font-size:12px;font-weight:750; }
+    .xv-quick-actions a { color:var(--ink);border:1px solid var(--line);background:var(--panel); }
+    .xv-live-panel { display:flex;flex-direction:column;justify-content:center;gap:10px;padding:14px;border:1px solid color-mix(in srgb,var(--accent) 32%,var(--line));border-radius:11px;background:color-mix(in srgb,var(--panel) 88%,transparent); }
+    .xv-switch { display:flex;align-items:center;gap:10px;cursor:pointer; }
+    .xv-switch input { position:absolute;opacity:0;pointer-events:none; }
+    .xv-switch-track { width:42px;height:24px;padding:3px;border-radius:999px;background:var(--line-strong);transition:background .16s;flex:0 0 auto; }
+    .xv-switch-track::after { content:"";display:block;width:18px;height:18px;border-radius:50%;background:var(--panel);box-shadow:0 1px 4px rgba(15,23,42,.28);transition:transform .16s; }
+    .xv-switch input:checked + .xv-switch-track { background:var(--accent); }
+    .xv-switch input:checked + .xv-switch-track::after { transform:translateX(18px); }
+    .xv-switch input:focus-visible + .xv-switch-track { outline:3px solid color-mix(in srgb,var(--accent) 64%,transparent);outline-offset:2px; }
+    .xv-switch input:disabled + .xv-switch-track { opacity:.5;cursor:not-allowed; }
+    .xv-switch-copy { display:flex;flex-direction:column;gap:2px; }
+    .xv-switch-copy strong { font-size:13px; }
+    .xv-switch-copy small { color:var(--muted);font-size:10px;line-height:1.4; }
+    .xv-connection-row { display:flex;align-items:center;gap:8px;flex-wrap:wrap; }
+    .xv-live-status { display:inline-flex;align-items:center;gap:7px;font-size:12px;font-weight:850;color:var(--muted); }
+    .xv-live-status::before { content:"";width:8px;height:8px;border-radius:50%;background:var(--muted);box-shadow:0 0 0 3px color-mix(in srgb,var(--muted) 14%,transparent); }
+    .xv-live-status.ok { color:var(--good-ink); }
+    .xv-live-status.ok::before { background:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 18%,transparent); }
+    .xv-live-status.warn { color:var(--warn); }
+    .xv-live-status.warn::before { background:var(--warn);box-shadow:0 0 0 3px color-mix(in srgb,var(--warn) 16%,transparent); }
+    .xv-live-status.error { color:var(--bad); }
+    .xv-live-status.error::before { background:var(--bad);box-shadow:0 0 0 3px color-mix(in srgb,var(--bad) 16%,transparent); }
+    .xv-retry { height:28px;padding:0 8px;font-size:11px; }
+    .xv-freshness { color:var(--muted);font-size:11px;line-height:1.4; }
+    .xv-live-batch { color:var(--muted);font-size:11px;line-height:1.4; }
+    .kpis.xv-kpis { grid-template-columns:repeat(6,minmax(120px,1fr)); }
+    .kpis.xv-kpis .kpi { min-height:72px;padding:12px; }
+    .kpis.xv-kpis .kpi .value { font-size:20px; }
+    .xv-signal-details { border-top:1px solid var(--line); }
+    .xv-signal-details > summary { cursor:pointer;padding:11px 14px;color:var(--muted);font-size:12px;font-weight:800;background:var(--panel-alt); }
+    .xv-signal-details[open] > summary { border-bottom:1px solid var(--line); }
+    .xv-filter-form { padding:14px;border-bottom:1px solid var(--line);background:var(--panel-alt); }
+    .xv-filter-grid { display:grid;grid-template-columns:repeat(4,minmax(150px,1fr));gap:11px; }
+    .xv-field { display:flex;flex-direction:column;gap:5px;min-width:0;color:var(--muted);font-size:11px;font-weight:800; }
+    .xv-field input,.xv-field select { width:100%;min-width:0;background:var(--panel); }
+    .xv-filter-actions { display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:12px; }
+    .xv-filter-dirty { color:var(--warn);font-size:11px;font-weight:800; }
+    .xv-filter-count { margin-left:auto; }
+    #xv-chart { padding:14px;overflow-x:auto;overscroll-behavior-inline:contain; }
+    #xv-svg { min-width:760px;display:block;touch-action:pan-x pan-y; }
+    .xv-dot { cursor:pointer; }
+    .xv-dot:focus { outline:none; }
+    .xv-dot:focus-visible { filter:drop-shadow(0 0 2px var(--ink)); }
+    .xv-point-new { transform-box:fill-box;transform-origin:center;animation:xv-point-arrive .7s ease-out; }
+    @keyframes xv-point-arrive { 0% { opacity:.2;transform:scale(2.3); } 100% { opacity:1;transform:scale(1); } }
+    .xv-legend { padding:0 14px 14px; }
+    .xv-legend-row { display:flex;gap:14px;flex-wrap:wrap;align-items:center; }
+    .xv-legend-item { display:inline-flex;align-items:center;gap:6px;font-size:12px; }
+    .xv-legend-shape { width:11px;height:11px;display:inline-grid;place-items:center;color:var(--ink);font-size:11px;font-weight:900; }
+    .xv-legend-help { margin-left:auto;color:var(--muted);font-size:11px; }
+    .xv-recent-strip { display:flex;align-items:center;gap:7px;margin-top:11px;padding-top:10px;border-top:1px solid var(--line);overflow-x:auto; }
+    .xv-recent-label { flex:0 0 auto;color:var(--muted);font-size:11px;font-weight:850; }
+    .xv-recent-request { flex:0 0 auto;height:44px;max-width:230px;display:inline-flex;align-items:center;gap:6px;background:var(--panel);color:var(--ink);border-color:var(--line);font-size:11px; }
+    .xv-recent-request strong { overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:105px; }
+    .xv-empty { display:grid;place-items:center;text-align:center;gap:10px;min-height:250px;padding:24px;color:var(--muted); }
+    .xv-empty strong { color:var(--ink);font-size:15px; }
+    .xv-empty p { margin:0;max-width:420px;line-height:1.5; }
+    .xv-model-table { padding:0 14px 14px; }
     .profile-gallery { display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:12px; }
     .profile-tile { position:relative;overflow:hidden;display:block;padding:16px;border:1px solid var(--line);border-radius:12px;background:linear-gradient(145deg,var(--panel),var(--panel-alt));color:var(--ink);text-decoration:none;transition:transform .15s,border-color .15s,box-shadow .15s; }
     .profile-tile:hover { transform:translateY(-2px);border-color:var(--accent);box-shadow:0 9px 24px rgba(15,23,42,.10); }
@@ -456,7 +539,39 @@ const adminHTML = `<!doctype html>
     .profile-name { font-weight:850;overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }.profile-meta { color:var(--muted);font-size:11px;margin-top:2px; }
     .profile-stats { display:grid;grid-template-columns:repeat(3,1fr);gap:6px; }.profile-stat { padding:8px;border-radius:8px;background:var(--pill-bg); }.profile-stat small { display:block;color:var(--muted);font-size:9px; }.profile-stat strong { display:block;margin-top:3px;font-size:13px; }
     .profile-hero { display:flex;align-items:center;gap:18px;padding:22px;border-radius:14px;background:linear-gradient(135deg,var(--panel),var(--good-bg));border:1px solid var(--line);margin-top:16px; }.profile-hero .profile-avatar { width:68px;height:68px;border-radius:20px;font-size:24px; }.profile-hero h2 { margin:0;font-size:22px; }.profile-hero p { margin:5px 0 0;color:var(--muted);line-height:1.5; }
-    @media (max-width: 760px) { .viz-grid { grid-template-columns:1fr; } .spark-chart { height:150px; } }
+    @media (prefers-reduced-motion: reduce) {
+      .xv-switch-track,.xv-switch-track::after { transition:none; }
+      .xv-point-new { animation:none; }
+    }
+    @media (max-width: 1100px) {
+      .xv-filter-grid { grid-template-columns:repeat(2,minmax(150px,1fr)); }
+      .kpis.xv-kpis { grid-template-columns:repeat(3,minmax(120px,1fr)); }
+    }
+    @media (max-width: 760px) {
+      .viz-grid { grid-template-columns:1fr; }
+      .spark-chart { height:150px; }
+      header { display:grid;grid-template-columns:minmax(0,1fr) auto;padding:10px 14px;align-items:center; }
+      header > h1 { grid-column:1; }
+      .mobile-nav-toggle { display:inline-flex;grid-column:2;align-items:center;gap:5px;background:var(--panel);color:var(--ink);border-color:var(--line); }
+      #tabs { display:none;width:100%;grid-column:1/-1;grid-template-columns:repeat(2,minmax(0,1fr));gap:5px;overflow:visible;padding:8px 0 2px; }
+      #tabs.mobile-open { display:grid; }
+      #tabs > a,.nav-group > .nav-group-toggle { width:100%;text-align:left;padding:8px 10px; }
+      .nav-group-menu { position:static;min-width:0;margin-top:4px;box-shadow:none;max-height:45vh;overflow-y:auto; }
+      .nav-group:not(.nav-open):not(.nav-closing) > .nav-group-menu { display:none; }
+      .nav-group-menu a { padding:7px 9px;font-size:12px; }
+      .header-tools { width:100%;grid-column:1/-1; }
+      .header-tools #token { flex:1 1 150px;min-width:120px; }
+      .subtabs { flex-wrap:nowrap;overflow-x:auto;overscroll-behavior-inline:contain; }
+      .subtabs a { flex:0 0 auto; }
+      .xv-hero { grid-template-columns:1fr;padding:14px; }
+      .xv-filter-grid { grid-template-columns:1fr; }
+      .kpis.xv-kpis { grid-template-columns:repeat(2,minmax(0,1fr)); }
+      .xv-filter-count { width:100%;margin-left:0; }
+      #xv-chart { padding:10px; }
+      #xv-svg { min-width:720px;height:340px; }
+      .xv-legend { padding:0 10px 12px; }
+      .xv-legend-help { width:100%;margin-left:0; }
+    }
 
     kbd {
       display: inline-block; padding: 1px 6px; border: 1px solid var(--line-strong);
@@ -549,10 +664,11 @@ const adminHTML = `<!doctype html>
 <body>
   <header>
     <h1 style="display: flex; align-items: center; gap: 8px;"><img src="/favicon.ico" alt="logo" style="width: 24px; height: 24px; border-radius: 4px;" />vibe-coders</h1>
+    <button id="mobile-nav-toggle" class="mobile-nav-toggle" type="button" aria-controls="tabs" aria-expanded="false">☰ 탐색</button>
     <nav id="tabs">
       <a href="#/me" data-tab="me">내 홈</a>
       <div class="nav-group" id="nav-dashboards">
-        <button type="button" class="nav-group-toggle" aria-haspopup="true">대시보드 ▾</button>
+        <button type="button" class="nav-group-toggle" aria-haspopup="true" aria-expanded="false">대시보드 ▾</button>
         <div class="nav-group-menu">
           <a href="#/dashboard" data-tab="dashboard" class="active">종합 대시보드</a>
           <a href="#/team" data-tab="team">팀 대시보드</a>
@@ -564,7 +680,7 @@ const adminHTML = `<!doctype html>
         </div>
       </div>
       <div class="nav-group" id="nav-observe">
-        <button type="button" class="nav-group-toggle" aria-haspopup="true">관측 ▾</button>
+        <button type="button" class="nav-group-toggle" aria-haspopup="true" aria-expanded="false">관측 ▾</button>
         <div class="nav-group-menu">
           <a href="#/requests" data-tab="requests">호출 이력</a>
           <a href="#/sessions" data-tab="sessions">세션 비행기록</a>
@@ -575,7 +691,7 @@ const adminHTML = `<!doctype html>
         </div>
       </div>
       <div class="nav-group" id="nav-ops">
-        <button type="button" class="nav-group-toggle" aria-haspopup="true">운영 ▾</button>
+        <button type="button" class="nav-group-toggle" aria-haspopup="true" aria-expanded="false">운영 ▾</button>
         <div class="nav-group-menu">
           <a href="#/ops-home" data-tab="ops-home">운영 홈</a>
           <a href="#/capabilities" data-tab="capabilities">기능 맵</a>
@@ -590,7 +706,7 @@ const adminHTML = `<!doctype html>
         </div>
       </div>
       <div class="nav-group" id="nav-governance">
-        <button type="button" class="nav-group-toggle" aria-haspopup="true">거버넌스 ▾</button>
+        <button type="button" class="nav-group-toggle" aria-haspopup="true" aria-expanded="false">거버넌스 ▾</button>
         <div class="nav-group-menu">
           <a href="#/safety" data-tab="safety">안전</a>
           <a href="#/redteam" data-tab="redteam">Red Team</a>
@@ -1595,6 +1711,7 @@ const adminHTML = `<!doctype html>
       document.querySelectorAll('.ago[data-ts]').forEach(el => {
         el.textContent = relativeTime(el.dataset.ts);
       });
+      updateXViewLiveFreshness();
     }, 15000);
 
     // ---------- routing ----------
@@ -1937,6 +2054,16 @@ const adminHTML = `<!doctype html>
       const closeDelayMs = 350;
       const groups = Array.from(document.querySelectorAll('#tabs .nav-group'));
       const closeTimers = new WeakMap();
+      const tabs = document.getElementById('tabs');
+      const mobileToggle = document.getElementById('mobile-nav-toggle');
+      const mobileNavMatches = () => !!(window.matchMedia && window.matchMedia('(max-width: 760px)').matches);
+
+      function setMobileNavOpen(open) {
+        if (!tabs || !mobileToggle) return;
+        tabs.classList.toggle('mobile-open', open);
+        mobileToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+        mobileToggle.textContent = open ? '✕ 닫기' : '☰ 탐색';
+      }
 
       function clearCloseTimer(g) {
         const t = closeTimers.get(g);
@@ -1949,13 +2076,18 @@ const adminHTML = `<!doctype html>
       }
       function openGroup(g) {
         clearCloseTimer(g);
-        g.classList.remove('nav-closing');
+        g.classList.remove('nav-closing', 'nav-manual-closed');
         g.classList.add('nav-open');
+        const button = g.querySelector('.nav-group-toggle');
+        if (button) button.setAttribute('aria-expanded', 'true');
       }
-      function closeGroup(g) {
+      function closeGroup(g, preserveToggleFocus) {
         clearCloseTimer(g);
         g.classList.remove('nav-open', 'nav-closing');
-        blurFocusedDescendant(g);
+        g.classList.toggle('nav-manual-closed', !!preserveToggleFocus);
+        const button = g.querySelector('.nav-group-toggle');
+        if (button) button.setAttribute('aria-expanded', 'false');
+        if (!preserveToggleFocus) blurFocusedDescendant(g);
       }
       function scheduleClose(g) {
         clearCloseTimer(g);
@@ -1967,19 +2099,38 @@ const adminHTML = `<!doctype html>
         groups.forEach(g => { if (g !== active) closeGroup(g); });
       }
 
+      if (mobileToggle) {
+        mobileToggle.addEventListener('click', () => setMobileNavOpen(!tabs.classList.contains('mobile-open')));
+      }
+      if (tabs) {
+        tabs.querySelectorAll('a[data-tab]').forEach(link => link.addEventListener('click', () => setMobileNavOpen(false)));
+      }
+      document.addEventListener('keydown', event => {
+        if (event.key !== 'Escape' || !tabs || !tabs.classList.contains('mobile-open')) return;
+        setMobileNavOpen(false);
+        mobileToggle.focus();
+      });
+
       groups.forEach(g => {
         g.addEventListener('mouseenter', () => {
+          if (mobileNavMatches()) return;
           closeOtherGroups(g);
           openGroup(g);
         });
         g.addEventListener('focusin', () => {
+          // A touch tap focuses the toggle before dispatching click. Opening here would
+          // make that same click immediately close the menu, so mobile uses click-only
+          // disclosure while desktop keeps hover and keyboard focus behaviour.
+          if (mobileNavMatches()) return;
           closeOtherGroups(g);
           openGroup(g);
         });
         g.addEventListener('mouseleave', () => {
+          if (mobileNavMatches()) return;
           scheduleClose(g);
         });
         g.addEventListener('focusout', () => {
+          if (mobileNavMatches()) return;
           setTimeout(() => {
             if (!g.contains(document.activeElement) && !g.matches(':hover')) scheduleClose(g);
           }, 0);
@@ -1987,7 +2138,7 @@ const adminHTML = `<!doctype html>
         g.querySelectorAll('.nav-group-toggle').forEach(btn => {
           btn.addEventListener('click', () => {
             if (g.classList.contains('nav-open')) {
-              closeGroup(g);
+              closeGroup(g, true);
             } else {
               closeOtherGroups(g);
               openGroup(g);
@@ -2132,12 +2283,17 @@ const adminHTML = `<!doctype html>
       snapshotReady: false,
       serverClockOffsetMs: 0,
       serverClockReady: false,
+      lastSuccessAt: 0,
+      retryCount: 0,
+      newPointIDs: new Map(),
+      filterDirty: false,
+      dragCancel: null,
       dragCleanup: null,
     };
 
     function xviewLiveOwnsRefresh() {
       const current = parseHash().parts[0];
-      return current === 'xview' && xviewState.live && !xviewState.to;
+      return current === 'xview' && (xviewLiveState.filterDirty || (xviewState.live && !xviewState.to));
     }
 
     function stopXViewLive(reset) {
@@ -2145,15 +2301,20 @@ const adminHTML = `<!doctype html>
       if (xviewLiveState.timer) clearTimeout(xviewLiveState.timer);
       if (xviewLiveState.controller) xviewLiveState.controller.abort();
       if (xviewLiveState.renderFrame != null) cancelAnimationFrame(xviewLiveState.renderFrame);
-      if (xviewLiveState.dragCleanup) xviewLiveState.dragCleanup();
+      // Pausing the network stream must only cancel an in-progress drag. The SVG's
+      // pointerdown binding remains useful while live mode is off and across retries.
+      // A full route/render reset owns permanent listener teardown.
+      if (reset && xviewLiveState.dragCleanup) xviewLiveState.dragCleanup();
+      else if (xviewLiveState.dragCancel) xviewLiveState.dragCancel();
       xviewLiveState.timer = null;
       xviewLiveState.controller = null;
       xviewLiveState.inFlight = false;
       xviewLiveState.renderFrame = null;
       xviewLiveState.renderPending = false;
       xviewLiveState.dragging = false;
-      xviewLiveState.dragCleanup = null;
       if (reset) {
+        xviewLiveState.dragCancel = null;
+        xviewLiveState.dragCleanup = null;
         xviewLiveState.pointsByID = new Map();
         xviewLiveState.cursor = null;
         xviewLiveState.filterParams = new URLSearchParams();
@@ -2166,14 +2327,43 @@ const adminHTML = `<!doctype html>
         xviewLiveState.snapshotReady = false;
         xviewLiveState.serverClockOffsetMs = 0;
         xviewLiveState.serverClockReady = false;
+        xviewLiveState.lastSuccessAt = 0;
+        xviewLiveState.retryCount = 0;
+        xviewLiveState.newPointIDs = new Map();
+        xviewLiveState.filterDirty = false;
       }
     }
 
-    function setXViewLiveStatus(text, kind) {
+    function updateXViewLiveFreshness() {
+      const el = document.getElementById('xv-live-freshness');
+      if (!el) return;
+      if (!xviewLiveState.lastSuccessAt) {
+        el.textContent = xviewState.live ? '첫 동기화를 준비 중입니다.' : '실시간 스트림이 꺼져 있습니다.';
+        return;
+      }
+      const ageSeconds = Math.max(0, Math.floor((Date.now() - xviewLiveState.lastSuccessAt) / 1000));
+      let age = '방금';
+      if (ageSeconds >= 60) age = Math.floor(ageSeconds / 60) + '분 전';
+      else if (ageSeconds >= 5) age = ageSeconds + '초 전';
+      el.textContent = '마지막 동기화 ' + age + (xviewLiveState.retryCount ? ' · 재시도 ' + fmt(xviewLiveState.retryCount) + '회' : '');
+    }
+
+    function setXViewLiveStatus(text, kind, detail) {
       const el = document.getElementById('xv-live-status');
       if (!el) return;
-      el.className = 'status' + (kind ? ' ' + kind : '');
-      el.textContent = text;
+      const nextClass = 'xv-live-status' + (kind ? ' ' + kind : '');
+      if (el.className !== nextClass) el.className = nextClass;
+      if (el.textContent !== text) el.textContent = text;
+      if (detail && el.getAttribute('title') !== detail) el.setAttribute('title', detail);
+      else if (!detail && el.hasAttribute('title')) el.removeAttribute('title');
+      const retry = document.getElementById('xv-retry');
+      if (retry) retry.hidden = kind !== 'error';
+      updateXViewLiveFreshness();
+    }
+
+    function setXViewLiveBatch(text) {
+      const el = document.getElementById('xv-live-batch');
+      if (el && el.textContent !== text) el.textContent = text;
     }
 
     function xviewCursor(value) {
@@ -2216,6 +2406,7 @@ const adminHTML = `<!doctype html>
           added++;
           mutationCount++;
           xviewLiveState.pointsByID.set(id, point);
+          if (xviewLiveState.snapshotReady) xviewLiveState.newPointIDs.set(id, Date.now());
           return;
         }
         // Reconciliation intentionally repeats recent rows. Compare the flat point payload
@@ -2239,6 +2430,7 @@ const adminHTML = `<!doctype html>
       xviewLiveState.pointsByID.forEach((point, id) => {
         if (xviewPointTime(point) < cutoff) {
           xviewLiveState.pointsByID.delete(id);
+          xviewLiveState.newPointIDs.delete(id);
           removed++;
         }
       });
@@ -2257,6 +2449,10 @@ const adminHTML = `<!doctype html>
         points = points.slice(0, XVIEW_POINT_LIMIT);
         xviewLiveState.truncated = true;
       }
+      const visibleIDs = new Set(points.map(point => point.request_id));
+      xviewLiveState.newPointIDs.forEach((_, id) => {
+        if (!visibleIDs.has(id)) xviewLiveState.newPointIDs.delete(id);
+      });
       xviewLiveState.pointsByID = new Map(points.map(point => [point.request_id, point]));
       return points;
     }
@@ -2321,7 +2517,7 @@ const adminHTML = `<!doctype html>
 
     function xviewSummaryHTML(points, stats) {
       const counts = stats.categoryCounts;
-      return '<div class="kpis">' +
+      return '<div class="kpis xv-kpis">' +
         kpi('분석 요청', fmt(points.length)) +
         kpi('확인 필요', '<span class="status ' + (stats.attentionCount ? 'warn' : '') + '">' + fmt(stats.attentionCount) + '</span>') +
         kpi('오류', '<span style="color:var(--bad)">' + fmt(counts.error) + '</span>') +
@@ -2329,11 +2525,11 @@ const adminHTML = `<!doctype html>
         kpi('폴백', fmt(counts.failover)) +
         kpi(xviewYLabel(xviewState.metric) + ' P95', xviewFmtY(xviewState.metric, stats.p95Value)) +
         '</div>' +
-        card('신호 구성', '<div class="card-body"><div class="viz-grid" style="margin-top:0"><div class="viz-panel"><div class="viz-title">즉시 확인 비중 <small>오류·정책·폴백</small></div>' +
+        '<details class="xv-signal-details"><summary>신호 구성 자세히 보기 · 오류·정책·폴백 비중</summary><div class="card-body"><div class="viz-grid" style="margin-top:0"><div class="viz-panel"><div class="viz-title">즉시 확인 비중 <small>오류·정책·폴백</small></div>' +
           donutVisual(points.length ? stats.attentionCount / points.length * 100 : 0, points.length ? Math.round(stats.attentionCount / points.length * 100) + '%' : '0%', '확인 필요', [{ label: '확인 필요', value: fmt(stats.attentionCount) }, { label: '정상·기타', value: fmt(Math.max(0, points.length - stats.attentionCount)) }]) +
           '</div><div class="viz-panel"><div class="viz-title">요청 신호 분포 <small>현재 조회 범위</small></div>' +
           visualBars(Object.keys(counts).map(key => ({ label: xviewColors[key].label, value: counts[key] })).sort((a, b) => b.value - a.value), null, true) +
-          '</div></div></div>');
+          '</div></div></div></details>';
     }
 
     function renderXViewLiveSnapshot() {
@@ -2349,7 +2545,17 @@ const adminHTML = `<!doctype html>
       const count = document.getElementById('xv-count');
       if (count) count.textContent = fmt(points.length) + '건' + (xviewLiveState.truncated ? ' (최근 6000건으로 제한됨)' : '');
       const summary = document.getElementById('xv-live-summary');
-      if (summary) summary.innerHTML = xviewSummaryHTML(points, stats);
+      if (summary) {
+        const previousDetails = summary.querySelector('.xv-signal-details');
+        const detailsWasOpen = !!(previousDetails && previousDetails.open);
+        const detailsHadFocus = !!(previousDetails && previousDetails.querySelector('summary') === document.activeElement);
+        summary.innerHTML = xviewSummaryHTML(points, stats);
+        const nextDetails = summary.querySelector('.xv-signal-details');
+        if (nextDetails) {
+          nextDetails.open = detailsWasOpen;
+          if (detailsHadFocus) nextDetails.querySelector('summary').focus({ preventScroll: true });
+        }
+      }
       drawScatter(points, groups, modelIndex);
       renderModelGroupTable(groups, modelIndex);
       wrapViewTables();
@@ -2403,6 +2609,8 @@ const adminHTML = `<!doctype html>
         const response = await api('/admin/xview/delta?' + params.toString(), { signal: controller.signal });
         if (generation !== xviewLiveState.generation) return;
         syncXViewServerClock(response.server_time);
+        xviewLiveState.lastSuccessAt = Date.now();
+        xviewLiveState.retryCount = 0;
         if (shouldRefresh) {
           xviewLiveState.lastRefreshAt = Date.now();
           xviewLiveState.lastReconcileAt = xviewLiveState.lastRefreshAt;
@@ -2437,12 +2645,13 @@ const adminHTML = `<!doctype html>
         } else if (!continuesCatchUp && xviewLiveState.renderPending) {
           queueXViewLiveRender();
         }
-        const now = new Date().toLocaleTimeString('ko-KR');
         if (continuesCatchUp) {
-          setXViewLiveStatus('따라잡는 중 · +' + fmt(added) + '건', 'warn');
+          setXViewLiveStatus('과거 요청 따라잡는 중', 'warn', added ? '이번 동기화에서 ' + fmt(added) + '건 추가' : '남은 요청을 이어서 불러오는 중');
+          setXViewLiveBatch(added ? '이번 동기화 +' + fmt(added) + '건' : '남은 요청을 이어서 불러오는 중');
           nextDelay = 25;
         } else {
-          setXViewLiveStatus('실시간 · ' + now + (added ? ' · +' + fmt(added) + '건' : ''), '');
+          setXViewLiveStatus('실시간 연결됨', 'ok');
+          setXViewLiveBatch(added ? '이번 동기화 +' + fmt(added) + '건' : '새 요청 대기 중');
         }
       } catch (err) {
         if (err && err.name === 'AbortError') return;
@@ -2453,7 +2662,9 @@ const adminHTML = `<!doctype html>
         } else if (xviewLiveState.renderPending) {
           queueXViewLiveRender();
         }
-        setXViewLiveStatus('재연결 대기 · ' + ((err && err.message) || '조회 실패'), 'error');
+        xviewLiveState.retryCount++;
+        setXViewLiveStatus('연결 끊김 · 3초 후 재시도', 'error', (err && err.message) || '조회 실패');
+        setXViewLiveBatch('자동 재연결을 준비합니다.');
         nextDelay = 3000;
       } finally {
         if (generation !== xviewLiveState.generation) return;
@@ -2467,17 +2678,21 @@ const adminHTML = `<!doctype html>
       if (parseHash().parts[0] !== 'xview') return;
       if (xviewState.to) {
         setXViewLiveStatus('고정 종료 시각 · 실시간 사용 불가', 'warn');
+        setXViewLiveBatch('고정된 조회 결과를 표시합니다.');
         return;
       }
       if (!xviewState.live) {
-        setXViewLiveStatus('실시간 꺼짐', '');
+        setXViewLiveStatus('실시간 꺼짐', 'idle');
+        setXViewLiveBatch('수동 조회 결과를 표시합니다.');
         return;
       }
       if (document.hidden) {
         setXViewLiveStatus('탭 비활성 · 일시정지', 'warn');
+        setXViewLiveBatch('탭으로 돌아오면 자동으로 다시 연결합니다.');
         return;
       }
-      setXViewLiveStatus('실시간 연결 중…', '');
+      setXViewLiveStatus('실시간 연결 중…', 'idle');
+      setXViewLiveBatch('새 요청 스트림에 연결하고 있습니다.');
       scheduleXViewLive(0);
     }
 
@@ -2486,6 +2701,7 @@ const adminHTML = `<!doctype html>
       if (document.hidden) {
         stopXViewLive(false);
         setXViewLiveStatus('탭 비활성 · 일시정지', 'warn');
+        setXViewLiveBatch('탭으로 돌아오면 자동으로 다시 연결합니다.');
         return;
       }
       // Hidden state aborts snapshots even when live mode is off or the range has a fixed
@@ -2503,7 +2719,8 @@ const adminHTML = `<!doctype html>
           return;
         }
         queueXViewLiveRender();
-        setXViewLiveStatus('실시간 다시 연결 중…', '');
+        setXViewLiveStatus('실시간 다시 연결 중…', 'idle');
+        setXViewLiveBatch('놓친 요청을 확인하고 있습니다.');
         scheduleXViewLive(0);
       }
     });
@@ -2530,6 +2747,79 @@ const adminHTML = `<!doctype html>
       complex:    { c: '#a855f7', label: '고비용/복잡' },
       normal:     { c: '#3b82f6', label: '정상' },
     };
+    function xviewNeedsAttention(point) {
+      const category = xviewCategory(point);
+      return category === 'error' || category === 'governance' || category === 'failover';
+    }
+    function xviewRecentPoints(points, limit) {
+      const selected = [];
+      const seen = new Set();
+      const add = point => {
+        if (!point || !point.request_id || seen.has(point.request_id) || selected.length >= limit) return;
+        seen.add(point.request_id);
+        selected.push(point);
+      };
+      points.filter(xviewNeedsAttention).forEach(add);
+      points.forEach(add);
+      return selected;
+    }
+    function xviewPercentileBands(values) {
+      const grouped = new Map();
+      [
+        { label: 'P50', value: xviewPercentile(values, 50), color: 'var(--muted)' },
+        { label: 'P95', value: xviewPercentile(values, 95), color: 'var(--warn)' },
+        { label: 'P99', value: xviewPercentile(values, 99), color: 'var(--bad)' },
+      ].forEach(band => {
+        const key = String(band.value);
+        if (!grouped.has(key)) grouped.set(key, { value: band.value, labels: [], color: band.color });
+        const current = grouped.get(key);
+        current.labels.push(band.label);
+        current.color = band.color;
+      });
+      return Array.from(grouped.values()).map(band => ({ value: band.value, label: band.labels.join('/'), color: band.color }));
+    }
+    function xviewCategoryGlyph(category) {
+      return { error: '×', governance: '◆', cache: '■', failover: '◌', complex: '▲', normal: '●' }[category] || '●';
+    }
+    function xviewPointShape(category, cx, cy, color, isNew, attributes, title) {
+      const cls = 'xv-dot xv-point-marker' + (isNew ? ' xv-point-new' : '');
+      const common = ' class="' + cls + '" data-cx="' + cx + '" data-cy="' + cy + '"' + (attributes || '');
+      const titleHTML = '<title>' + (title || '') + '</title>';
+      if (category === 'error') {
+        return '<path' + common + ' d="M ' + (cx - 4) + ' ' + (cy - 4) + ' L ' + (cx + 4) + ' ' + (cy + 4) + ' M ' + (cx + 4) + ' ' + (cy - 4) + ' L ' + (cx - 4) + ' ' + (cy + 4) + '" fill="none" stroke="' + color + '" stroke-width="2.6" stroke-linecap="round">' + titleHTML + '</path>';
+      }
+      if (category === 'governance') {
+        return '<rect' + common + ' x="' + (cx - 4) + '" y="' + (cy - 4) + '" width="8" height="8" rx="1" fill="' + color + '" fill-opacity=".76" stroke="' + color + '" transform="rotate(45 ' + cx + ' ' + cy + ')">' + titleHTML + '</rect>';
+      }
+      if (category === 'cache') {
+        return '<rect' + common + ' x="' + (cx - 4) + '" y="' + (cy - 4) + '" width="8" height="8" rx="1.5" fill="' + color + '" fill-opacity=".76" stroke="' + color + '">' + titleHTML + '</rect>';
+      }
+      if (category === 'failover') {
+        return '<circle' + common + ' cx="' + cx + '" cy="' + cy + '" r="5" fill="' + color + '" fill-opacity=".18" stroke="' + color + '" stroke-width="2" stroke-dasharray="2 1.5">' + titleHTML + '</circle>';
+      }
+      if (category === 'complex') {
+        return '<path' + common + ' d="M ' + cx + ' ' + (cy - 5) + ' L ' + (cx + 5) + ' ' + (cy + 4) + ' L ' + (cx - 5) + ' ' + (cy + 4) + ' Z" fill="' + color + '" fill-opacity=".76" stroke="' + color + '">' + titleHTML + '</path>';
+      }
+      return '<circle' + common + ' cx="' + cx + '" cy="' + cy + '" r="3.8" fill="' + color + '" fill-opacity=".76" stroke="' + color + '">' + titleHTML + '</circle>';
+    }
+    function xviewNearestDot(host, clientX, clientY, maxDistance) {
+      if (!host || !Number.isFinite(clientX) || !Number.isFinite(clientY)) return null;
+      const radius = Math.max(0, Number(maxDistance) || 0);
+      let nearest = null;
+      let bestDistanceSquared = radius * radius;
+      Array.from(host.querySelectorAll('.xv-dot')).forEach(dot => {
+        if (typeof dot.getBoundingClientRect !== 'function') return;
+        const rect = dot.getBoundingClientRect();
+        const cx = rect.left + rect.width / 2;
+        const cy = rect.top + rect.height / 2;
+        const distanceSquared = Math.pow(cx - clientX, 2) + Math.pow(cy - clientY, 2);
+        if (distanceSquared <= bestDistanceSquared) {
+          nearest = dot;
+          bestDistanceSquared = distanceSquared;
+        }
+      });
+      return nearest;
+    }
     // yField helper for metric switch (latency/first_chunk/tokens/cost/risk/health)
     function xviewYField(metric) {
       switch (metric) {
@@ -2639,6 +2929,8 @@ const adminHTML = `<!doctype html>
       const points = data.points || [];
       const groups = data.groups || [];
       syncXViewServerClock(data.server_time);
+      xviewLiveState.lastSuccessAt = Date.now();
+      xviewLiveState.retryCount = 0;
       mergeXViewPoints(points);
       xviewLiveState.cursor = xviewCursor(data.cursor);
       xviewLiveState.truncated = !!data.truncated;
@@ -2647,7 +2939,22 @@ const adminHTML = `<!doctype html>
       xviewLiveState.lastRefreshAt = xviewLiveState.lastReconcileAt;
 
       const view = document.getElementById('view');
-      const xviewHero = '<div class="home-hero"><h2>✦ XView</h2><div class="home-sub">수천 개 요청 속에서 느림·오류·비용·정책 신호를 찾고, 한 점을 클릭해 “왜 이렇게 처리됐는가”까지 이어서 설명합니다.</div><div class="home-actions"><button type="button" class="home-action primary" onclick="openXViewLauncher()"><strong>요청 ID로 설명 찾기</strong><small>라우팅·안전·비용 근거</small></button><a class="home-action" href="#/waterfall"><strong>Waterfall</strong><small>세션 시간 흐름 분석</small></a><a class="home-action" href="#/requests"><strong>호출 이력</strong><small>원문과 응답 상세</small></a><a class="home-action" href="#/llm"><strong>LLM 관측</strong><small>평가·피드백·패턴</small></a></div></div>';
+      const liveInitialText = xviewState.to ? '고정 종료 시각 · 실시간 사용 불가' : (xviewState.live ? '실시간 준비 중…' : '실시간 꺼짐');
+      const liveInitialKind = xviewState.to ? ' warn' : '';
+      const xviewHero = '<div class="xv-hero">' +
+        '<div class="xv-hero-copy"><div class="xv-eyebrow">Live request explorer</div><h2>✦ XView</h2>' +
+          '<p>새 요청이 들어오는 흐름을 놓치지 않고, 느림·오류·비용·정책 신호에서 처리 근거까지 바로 확인합니다.</p>' +
+          '<div class="xv-quick-actions"><button type="button" onclick="openXViewLauncher()">요청 ID로 원인 찾기</button><a href="#/waterfall">Waterfall</a><a href="#/requests">호출 이력</a><a href="#/llm">LLM 관측</a></div>' +
+        '</div>' +
+        '<div class="xv-live-panel" aria-label="XView 실시간 연결 제어">' +
+          '<label class="xv-switch" for="xv-live"><input id="xv-live" type="checkbox"' + (xviewState.live ? ' checked' : '') + (xviewState.to ? ' disabled' : '') + '>' +
+            '<span class="xv-switch-track" aria-hidden="true"></span><span class="xv-switch-copy"><strong>실시간 스트림</strong><small>현재 필터로 1.5초마다 새 요청 반영</small></span></label>' +
+          '<div class="xv-connection-row"><span id="xv-live-status" class="xv-live-status' + liveInitialKind + '" role="status" aria-live="polite" aria-atomic="true">' + liveInitialText + '</span>' +
+            '<button id="xv-retry" type="button" class="ghost xv-retry" hidden>지금 재시도</button></div>' +
+          '<div id="xv-live-freshness" class="xv-freshness">마지막 동기화 방금</div>' +
+          '<div id="xv-live-batch" class="xv-live-batch" aria-live="off">새 요청 대기 중</div>' +
+        '</div>' +
+      '</div>';
       const savedOptions = '<option value="">저장된 조사 보기</option>' + savedViews.map(saved =>
         '<option value="' + escapeAttr(saved.id) + '"' + (saved.id === requestedSavedID ? ' selected' : '') +
           ' title="' + escapeAttr(saved.created_by || '') + '">' + escapeHTML(saved.name) + '</option>'
@@ -2668,75 +2975,87 @@ const adminHTML = `<!doctype html>
         '</div>';
       const xviewDistribution = section('요청 분포 탐색',
         investigationBar +
-        '<div class="toolbar">' +
-          '<select id="xv-window"' + (xviewState.from || xviewState.to ? ' disabled title="기간(from~to) 지정 시 무시됨"' : '') + '>' +
-            ['5m','15m','1h','6h','24h'].map(wd => '<option value="' + wd + '"' + (xviewState.window === wd ? ' selected' : '') + '>' + wd + '</option>').join('') +
-          '</select>' +
-          '<label class="muted" style="font-size:12px" for="xv-from">기간</label>' +
-          '<input id="xv-from" type="datetime-local" title="조회 시작 일시" value="' + escapeHTML(xviewState.from) + '">' +
-          '<span class="muted" style="font-size:12px">~</span>' +
-          '<input id="xv-to" type="datetime-local" title="조회 종료 일시" value="' + escapeHTML(xviewState.to) + '">' +
-          '<select id="xv-tz" title="검색 기준 시간대">' +
-            ['Asia/Seoul|서울 (KST, UTC+9)','UTC|UTC','Asia/Tokyo|도쿄 (JST)','America/Los_Angeles|로스앤젤레스 (PT)','America/New_York|뉴욕 (ET)','Europe/London|런던 (GMT/BST)']
-              .map(o => { const [v, lbl] = o.split('|'); return '<option value="' + v + '"' + (xviewState.tz === v ? ' selected' : '') + '>' + lbl + '</option>'; }).join('') +
-          '</select>' +
-          '<select id="xv-metric">' +
-            '<option value="latency"'     + (xviewState.metric === 'latency'      ? ' selected' : '') + '>응답시간</option>' +
-            '<option value="first_chunk"' + (xviewState.metric === 'first_chunk'  ? ' selected' : '') + '>첫 청크 지연</option>' +
-            '<option value="tokens"'      + (xviewState.metric === 'tokens'       ? ' selected' : '') + '>토큰 수</option>' +
-            '<option value="cost"'        + (xviewState.metric === 'cost'         ? ' selected' : '') + '>비용</option>' +
-            '<option value="risk"'        + (xviewState.metric === 'risk'         ? ' selected' : '') + '>위험 점수</option>' +
-            '<option value="health"'      + (xviewState.metric === 'health'       ? ' selected' : '') + '>헬스 점수</option>' +
-          '</select>' +
-          '<select id="xv-scale">' +
-            '<option value="log"'    + (xviewState.scale === 'log'    ? ' selected' : '') + '>로그 스케일</option>' +
-            '<option value="linear"' + (xviewState.scale === 'linear' ? ' selected' : '') + '>선형 스케일</option>' +
-          '</select>' +
-          '<select id="xv-viewmode">' +
-            '<option value="category"' + (xviewState.viewMode === 'category' ? ' selected' : '') + '>카테고리별 색상</option>' +
-            '<option value="model"'    + (xviewState.viewMode === 'model'    ? ' selected' : '') + '>모델별 색상</option>' +
-          '</select>' +
-          '<input id="xv-models" placeholder="모델 필터 (콤마 구분)" style="min-width:180px" value="' + escapeHTML(modelsParam || singleModel) + '">' +
-          '<input id="xv-endpoint" placeholder="endpoint 필터" value="' + escapeHTML(endpoint) + '">' +
-          '<button id="xv-apply" type="submit">적용</button>' +
-          '<button id="xv-reset-range" type="button" class="ghost" title="기간 지정을 해제하고 상대 구간(window)으로 복귀">기간 해제</button>' +
-          '<label class="status" for="xv-live" title="현재 필터로 새 요청을 1.5초마다 반영"><input id="xv-live" type="checkbox"' + (xviewState.live ? ' checked' : '') + (xviewState.to ? ' disabled' : '') + '> 실시간</label>' +
-          '<span id="xv-live-status" class="status' + (xviewState.to ? ' warn' : '') + '">' + (xviewState.to ? '고정 종료 시각 · 실시간 사용 불가' : (xviewState.live ? '실시간 준비 중…' : '실시간 꺼짐')) + '</span>' +
-          '<span id="xv-count" class="muted">' + fmt(points.length) + '건' + (data.truncated ? ' (최근 6000건으로 제한됨)' : '') + '</span>' +
-        '</div>' +
-        '<div id="xv-chart" style="padding:14px"></div>' +
-        '<div id="xv-legend" style="padding:0 14px 14px"></div>' +
-        '<div id="xv-model-table" style="padding:0 14px 14px"></div>'
+        '<form id="xv-filter-form" class="xv-filter-form">' +
+          '<div class="xv-filter-grid">' +
+            '<label class="xv-field" for="xv-window"><span>상대 조회 구간</span><select id="xv-window"' + (xviewState.from || xviewState.to ? ' disabled title="절대 기간 지정 시 상대 구간은 사용하지 않습니다"' : '') + '>' +
+              ['5m','15m','1h','6h','24h'].map(wd => '<option value="' + wd + '"' + (xviewState.window === wd ? ' selected' : '') + '>' + wd + '</option>').join('') +
+            '</select></label>' +
+            '<label class="xv-field" for="xv-from"><span>시작 일시</span><input id="xv-from" type="datetime-local" value="' + escapeHTML(xviewState.from) + '"></label>' +
+            '<label class="xv-field" for="xv-to"><span>종료 일시</span><input id="xv-to" type="datetime-local" value="' + escapeHTML(xviewState.to) + '"></label>' +
+            '<label class="xv-field" for="xv-tz"><span>검색 시간대</span><select id="xv-tz">' +
+              ['Asia/Seoul|서울 (KST, UTC+9)','UTC|UTC','Asia/Tokyo|도쿄 (JST)','America/Los_Angeles|로스앤젤레스 (PT)','America/New_York|뉴욕 (ET)','Europe/London|런던 (GMT/BST)']
+                .map(o => { const [v, lbl] = o.split('|'); return '<option value="' + v + '"' + (xviewState.tz === v ? ' selected' : '') + '>' + lbl + '</option>'; }).join('') +
+            '</select></label>' +
+            '<label class="xv-field" for="xv-metric"><span>세로축 지표</span><select id="xv-metric">' +
+              '<option value="latency"'     + (xviewState.metric === 'latency'      ? ' selected' : '') + '>응답시간</option>' +
+              '<option value="first_chunk"' + (xviewState.metric === 'first_chunk'  ? ' selected' : '') + '>첫 청크 지연</option>' +
+              '<option value="tokens"'      + (xviewState.metric === 'tokens'       ? ' selected' : '') + '>토큰 수</option>' +
+              '<option value="cost"'        + (xviewState.metric === 'cost'         ? ' selected' : '') + '>비용</option>' +
+              '<option value="risk"'        + (xviewState.metric === 'risk'         ? ' selected' : '') + '>위험 점수</option>' +
+              '<option value="health"'      + (xviewState.metric === 'health'       ? ' selected' : '') + '>헬스 점수</option>' +
+            '</select></label>' +
+            '<label class="xv-field" for="xv-scale"><span>축 스케일</span><select id="xv-scale">' +
+              '<option value="log"'    + (xviewState.scale === 'log'    ? ' selected' : '') + '>로그 스케일</option>' +
+              '<option value="linear"' + (xviewState.scale === 'linear' ? ' selected' : '') + '>선형 스케일</option>' +
+            '</select></label>' +
+            '<label class="xv-field" for="xv-viewmode"><span>점 구분 방식</span><select id="xv-viewmode">' +
+              '<option value="category"' + (xviewState.viewMode === 'category' ? ' selected' : '') + '>신호별 색상·형태</option>' +
+              '<option value="model"'    + (xviewState.viewMode === 'model'    ? ' selected' : '') + '>모델별 색상</option>' +
+            '</select></label>' +
+            '<label class="xv-field" for="xv-models"><span>모델</span><input id="xv-models" placeholder="여러 모델은 콤마로 구분" value="' + escapeHTML(modelsParam || singleModel) + '"></label>' +
+            '<label class="xv-field" for="xv-endpoint"><span>엔드포인트</span><input id="xv-endpoint" placeholder="예: /v1/chat/completions" value="' + escapeHTML(endpoint) + '"></label>' +
+          '</div>' +
+          '<div class="xv-filter-actions"><button id="xv-apply" type="submit">필터 적용</button>' +
+            '<button id="xv-reset-range" type="button" class="ghost" title="시작·종료 일시를 지우고 상대 구간을 사용합니다">상대 구간 사용</button>' +
+            '<button id="xv-reset-filters" type="button" class="secondary">필터 초기화</button>' +
+            '<span id="xv-filter-dirty" class="xv-filter-dirty" role="status" aria-live="polite" hidden>● 변경사항 미적용</span>' +
+            '<span id="xv-count" class="muted xv-filter-count">' + fmt(points.length) + '건' + (data.truncated ? ' (최근 6000건으로 제한됨)' : '') + '</span>' +
+          '</div>' +
+        '</form>' +
+        '<div id="xv-chart"></div>' +
+        '<div id="xv-legend" class="xv-legend"></div>' +
+        '<div id="xv-model-table" class="xv-model-table"></div>'
       );
-      view.innerHTML = xviewHero + xviewDistribution +
-        section('호출 신호 요약', '<div id="xv-live-summary"></div>');
+      view.innerHTML = xviewHero + section('지금 확인할 신호', '<div id="xv-live-summary"></div>') + xviewDistribution;
       renderXViewLiveSnapshot();
+      updateXViewLiveFreshness();
       xviewLiveState.snapshotReady = true;
 
-      const collectXViewParams = () => {
-        xviewState.window   = document.getElementById('xv-window').value;
-        xviewState.metric   = document.getElementById('xv-metric').value;
-        xviewState.scale    = document.getElementById('xv-scale').value;
-        xviewState.viewMode = document.getElementById('xv-viewmode').value;
-        xviewState.from     = document.getElementById('xv-from').value.trim();
-        xviewState.to       = document.getElementById('xv-to').value.trim();
-        xviewState.tz       = document.getElementById('xv-tz').value;
-        sessionStorage.setItem('xviewWindow',   xviewState.window);
-        sessionStorage.setItem('xviewMetric',   xviewState.metric);
-        sessionStorage.setItem('xviewScale',    xviewState.scale);
-        sessionStorage.setItem('xviewViewMode', xviewState.viewMode);
-        sessionStorage.setItem('xviewTz',       xviewState.tz);
+      const collectXViewParams = (commitState) => {
+        const draft = {
+          window: document.getElementById('xv-window').value,
+          metric: document.getElementById('xv-metric').value,
+          scale: document.getElementById('xv-scale').value,
+          viewMode: document.getElementById('xv-viewmode').value,
+          from: document.getElementById('xv-from').value.trim(),
+          to: document.getElementById('xv-to').value.trim(),
+          tz: document.getElementById('xv-tz').value,
+        };
+        if (commitState) {
+          xviewState.window = draft.window;
+          xviewState.metric = draft.metric;
+          xviewState.scale = draft.scale;
+          xviewState.viewMode = draft.viewMode;
+          xviewState.from = draft.from;
+          xviewState.to = draft.to;
+          xviewState.tz = draft.tz;
+          sessionStorage.setItem('xviewWindow', draft.window);
+          sessionStorage.setItem('xviewMetric', draft.metric);
+          sessionStorage.setItem('xviewScale', draft.scale);
+          sessionStorage.setItem('xviewViewMode', draft.viewMode);
+          sessionStorage.setItem('xviewTz', draft.tz);
+        }
         const p = new URLSearchParams();
-        p.set('metric',   xviewState.metric);
-        p.set('scale',    xviewState.scale);
-        p.set('viewMode', xviewState.viewMode);
+        p.set('metric', draft.metric);
+        p.set('scale', draft.scale);
+        p.set('viewMode', draft.viewMode);
         // Absolute range takes precedence; only fall back to the relative window when unset.
-        if (xviewState.from || xviewState.to) {
-          if (xviewState.from) p.set('from', xviewState.from);
-          if (xviewState.to)   p.set('to', xviewState.to);
-          p.set('tz', xviewState.tz);
+        if (draft.from || draft.to) {
+          if (draft.from) p.set('from', draft.from);
+          if (draft.to)   p.set('to', draft.to);
+          p.set('tz', draft.tz);
         } else {
-          p.set('window', xviewState.window);
+          p.set('window', draft.window);
         }
         const ms = document.getElementById('xv-models').value.trim();
         const e  = document.getElementById('xv-endpoint').value.trim();
@@ -2744,30 +3063,97 @@ const adminHTML = `<!doctype html>
         if (e)  p.set('endpoint', e);
         return p;
       };
+      const validateXViewDraft = () => {
+        const fromInput = document.getElementById('xv-from');
+        const toInput = document.getElementById('xv-to');
+        clearFieldErrors(['xv-from', 'xv-to']);
+        if (fromInput.value && toInput.value && fromInput.value > toInput.value) {
+          fromInput.classList.add('field-invalid');
+          toInput.classList.add('field-invalid');
+          fromInput.setAttribute('aria-invalid', 'true');
+          toInput.setAttribute('aria-invalid', 'true');
+          fromInput.focus();
+          toast('시작 일시는 종료 일시보다 빨라야 합니다.');
+          return false;
+        }
+        return true;
+      };
       const apply = async () => {
-        const p = collectXViewParams();
-        if (activeSavedView) p.set('saved', activeSavedView.id);
+        if (!validateXViewDraft()) return;
+        const wasDirty = xviewLiveState.filterDirty;
+        const p = collectXViewParams(true);
+        // Editing an active saved view creates a custom investigation. Keeping saved=<id>
+        // would merge omitted empty fields from the old view and resurrect cleared filters.
+        if (activeSavedView && !wasDirty) p.set('saved', activeSavedView.id);
         const targetHash = '#/xview?' + p.toString();
         // Assigning the current hash does not fire hashchange. Explicitly re-run the route
         // so "적용" also works as a manual refresh when no filter value changed.
         if (location.hash === targetHash) await route();
         else location.hash = targetHash;
       };
-      document.getElementById('xv-apply').addEventListener('click', apply);
-      document.getElementById('xv-reset-range').addEventListener('click', () => {
-        xviewState.from = ''; xviewState.to = '';
-        document.getElementById('xv-from').value = '';
-        document.getElementById('xv-to').value = '';
+      const filterForm = document.getElementById('xv-filter-form');
+      const applyButton = document.getElementById('xv-apply');
+      const dirtyStatus = document.getElementById('xv-filter-dirty');
+      const setFilterDirty = (dirty) => {
+        xviewLiveState.filterDirty = dirty;
+        dirtyStatus.hidden = !dirty;
+        applyButton.textContent = dirty ? '변경사항 적용' : '필터 적용';
+      };
+      const updateDraftRangeMode = () => {
+        const absolute = !!(document.getElementById('xv-from').value || document.getElementById('xv-to').value);
+        const windowSelect = document.getElementById('xv-window');
+        windowSelect.disabled = absolute;
+        windowSelect.title = absolute ? '절대 기간 지정 시 상대 구간은 사용하지 않습니다' : '';
+      };
+      filterForm.addEventListener('submit', event => {
+        event.preventDefault();
         apply();
       });
-      ['xv-window', 'xv-metric', 'xv-scale', 'xv-viewmode', 'xv-from', 'xv-to', 'xv-tz'].forEach(id =>
-        document.getElementById(id).addEventListener('change', apply));
+      filterForm.querySelectorAll('input, select').forEach(control => {
+        const changed = () => {
+          clearFieldErrors(['xv-from', 'xv-to']);
+          updateDraftRangeMode();
+          setFilterDirty(true);
+        };
+        control.addEventListener('input', changed);
+        control.addEventListener('change', changed);
+      });
+      document.getElementById('xv-reset-range').addEventListener('click', () => {
+        document.getElementById('xv-from').value = '';
+        document.getElementById('xv-to').value = '';
+        updateDraftRangeMode();
+        setFilterDirty(true);
+      });
+      document.getElementById('xv-reset-filters').addEventListener('click', () => {
+        document.getElementById('xv-window').value = '1h';
+        document.getElementById('xv-from').value = '';
+        document.getElementById('xv-to').value = '';
+        document.getElementById('xv-tz').value = 'Asia/Seoul';
+        document.getElementById('xv-metric').value = 'latency';
+        document.getElementById('xv-scale').value = 'log';
+        document.getElementById('xv-viewmode').value = 'category';
+        document.getElementById('xv-models').value = '';
+        document.getElementById('xv-endpoint').value = '';
+        updateDraftRangeMode();
+        setFilterDirty(true);
+        document.getElementById('xv-window').focus();
+      });
       document.getElementById('xv-live').addEventListener('change', event => {
         xviewState.live = !!event.target.checked;
         sessionStorage.setItem('xviewLive', xviewState.live ? '1' : '0');
         stopXViewLive(false);
         if (xviewState.live) startXViewLive();
-        else setXViewLiveStatus('실시간 꺼짐', '');
+        else {
+          setXViewLiveStatus('실시간 꺼짐', 'idle');
+          setXViewLiveBatch('수동 조회 결과를 표시합니다.');
+        }
+      });
+      document.getElementById('xv-retry').addEventListener('click', () => {
+        if (!xviewState.live || xviewState.to) return;
+        stopXViewLive(false);
+        setXViewLiveStatus('지금 다시 연결 중…', 'idle');
+        setXViewLiveBatch('새 요청 스트림에 연결하고 있습니다.');
+        scheduleXViewLive(0);
       });
 
       document.getElementById('xv-saved').addEventListener('change', (event) => {
@@ -2776,10 +3162,12 @@ const adminHTML = `<!doctype html>
           location.hash = '#/xview?saved=' + encodeURIComponent(id);
           return;
         }
+        if (!validateXViewDraft()) return;
         const params = collectXViewParams();
         location.hash = '#/xview?' + params.toString();
       });
       document.getElementById('xv-save').addEventListener('click', async () => {
+        if (!validateXViewDraft()) return;
         const name = prompt('조사 보기 이름을 입력하세요');
         if (!name || !name.trim()) return;
         const created = await api('/admin/saved-filters', {
@@ -2790,6 +3178,7 @@ const adminHTML = `<!doctype html>
       });
       document.getElementById('xv-overwrite').addEventListener('click', async () => {
         if (!activeSavedView) return;
+        if (!validateXViewDraft()) return;
         await api('/admin/saved-filters/' + encodeURIComponent(activeSavedView.id), {
           method: 'PATCH',
           body: JSON.stringify({ params: collectXViewParams().toString() })
@@ -2800,12 +3189,14 @@ const adminHTML = `<!doctype html>
       });
       document.getElementById('xv-delete-saved').addEventListener('click', async () => {
         if (!activeSavedView) return;
+        if (!validateXViewDraft()) return;
         if (!confirm('"' + activeSavedView.name + '" 조사 보기를 삭제하시겠습니까?')) return;
         const current = collectXViewParams();
         await api('/admin/saved-filters/' + encodeURIComponent(activeSavedView.id), { method: 'DELETE' });
         location.hash = '#/xview?' + current.toString();
       });
       document.getElementById('xv-copy-link').addEventListener('click', async () => {
+        if (!validateXViewDraft()) return;
         const shareURL = location.href.split('#')[0] + '#/xview?' + collectXViewParams().toString();
         try {
           if (!navigator.clipboard) throw new Error('clipboard API를 지원하지 않는 브라우저입니다');
@@ -2824,12 +3215,26 @@ const adminHTML = `<!doctype html>
 
     function drawScatter(points, groups, modelIndex) {
       const host = document.getElementById('xv-chart');
+      if (xviewLiveState.dragCleanup) xviewLiveState.dragCleanup();
       if (!points.length) {
-        host.innerHTML = '<div class="empty">해당 구간에 요청 없음</div>';
+        host.innerHTML = '<div class="xv-empty"><div><strong>이 조건에 맞는 요청이 없습니다.</strong><p>조회 구간을 넓히거나 모델·엔드포인트 필터를 초기화해 보세요.</p></div><button id="xv-empty-reset" type="button" class="secondary">기본 필터로 다시 보기</button></div>';
+        document.getElementById('xv-empty-reset').addEventListener('click', () => {
+          const targetHash = '#/xview?metric=latency&scale=log&viewMode=category&window=1h';
+          if (location.hash === targetHash) route();
+          else location.hash = targetHash;
+        });
         const legend = document.getElementById('xv-legend');
         if (legend) legend.innerHTML = '';
         return;
       }
+      const activeElement = document.activeElement;
+      const focusedKind = activeElement && activeElement.classList && activeElement.classList.contains('xv-dot')
+        ? 'dot' : (activeElement && activeElement.classList && activeElement.classList.contains('xv-recent-request') ? 'recent' : '');
+      const focusedRequestID = focusedKind ? activeElement.getAttribute('data-rid') : '';
+      const previousLegend = document.getElementById('xv-legend');
+      const previousRecentStrip = previousLegend && previousLegend.querySelector('.xv-recent-strip');
+      const recentScrollLeft = previousRecentStrip ? previousRecentStrip.scrollLeft : 0;
+      const chartScrollLeft = host.scrollLeft;
       const yField   = xviewYField(xviewState.metric);
       const useModelColor = xviewState.viewMode === 'model';
       const W = 1000, H = 420, padL = 64, padR = 16, padT = 14, padB = 34;
@@ -2838,11 +3243,15 @@ const adminHTML = `<!doctype html>
       const times = points.map(p => Date.parse(p.created_at)).filter(t => !isNaN(t));
       const tMin = Math.min(...times), tMax = Math.max(...times);
       const tSpan = Math.max(1, tMax - tMin);
-      const yMaxRaw = Math.max(1, ...points.map(p => p[yField] || 0));
+      const yValues = points.map(p => Number(p[yField] || 0));
+      const yDataMin = Math.min(...yValues), yDataMax = Math.max(...yValues);
+      const flatSeries = yDataMin === yDataMax;
+      const yMaxRaw = Math.max(1, yDataMax);
       const logScale = xviewState.scale === 'log';
       const yMin = logScale ? 1 : 0;
       const yMax = yMaxRaw;
       const yPos = v => {
+        if (flatSeries) return padT + innerH * 0.55;
         v = Math.max(yMin, v || 0);
         if (logScale) {
           const lo = Math.log10(Math.max(1, yMin)), hi = Math.log10(Math.max(10, yMax));
@@ -2853,7 +3262,9 @@ const adminHTML = `<!doctype html>
       const xPos = t => padL + ((t - tMin) / tSpan) * innerW;
 
       // y gridlines
-      const yTicks = logScale
+      const yTicks = flatSeries
+        ? [yDataMax]
+        : logScale
         ? [1, 10, 100, 500, 1000, 2000, 5000, 10000, 30000].filter(v => v <= yMax * 1.2)
         : [0, yMax * 0.25, yMax * 0.5, yMax * 0.75, yMax];
       const grid = yTicks.map(v => {
@@ -2867,20 +3278,28 @@ const adminHTML = `<!doctype html>
         const t = tMin + tSpan * f, x = xPos(t);
         const d = new Date(t);
         const hh = String(d.getHours()).padStart(2, '0'), mm = String(d.getMinutes()).padStart(2, '0'), ss = String(d.getSeconds()).padStart(2, '0');
-        return '<text x="' + x.toFixed(1) + '" y="' + (H - 10) + '" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.6">' + hh + ':' + mm + ':' + ss + '</text>';
+        const anchor = f === 0 ? 'start' : (f === 1 ? 'end' : 'middle');
+        return '<text x="' + x.toFixed(1) + '" y="' + (H - 10) + '" text-anchor="' + anchor + '" font-size="10" fill="currentColor" opacity="0.6">' + hh + ':' + mm + ':' + ss + '</text>';
       }).join('');
 
       // percentile reference lines
-      const sorted = points.map(p => p[yField] || 0).sort((a, b) => a - b);
-      const pctAt = q => sorted[Math.min(sorted.length - 1, Math.floor((sorted.length - 1) * q))];
-      const p50 = pctAt(0.5), p95 = pctAt(0.95), p99 = pctAt(0.99);
       const pctLine = (v, label, color) => {
         const y = yPos(v);
         return '<line x1="' + padL + '" y1="' + y.toFixed(1) + '" x2="' + (W - padR) + '" y2="' + y.toFixed(1) + '" stroke="' + color + '" stroke-width="1" stroke-opacity="0.7"/>' +
           '<text x="' + (W - padR) + '" y="' + (y - 3).toFixed(1) + '" text-anchor="end" font-size="10" fill="' + color + '">' + label + ' ' + xviewFmtY(xviewState.metric, v) + '</text>';
       };
+      const percentileLines = xviewPercentileBands(points.map(p => Number(p[yField] || 0)))
+        .map(band => pctLine(band.value, band.label, band.color)).join('');
 
-      // dots — colored by model or category, with outlier ring
+      // Points keep color as a fast cue, while category-specific shapes make the same
+      // information available to people who cannot distinguish the palette.
+      const keyboardPoints = xviewRecentPoints(points, 24);
+      const focusableRequestIDs = new Set(keyboardPoints.map(point => point.request_id));
+      if (focusedKind === 'dot' && points.some(point => point.request_id === focusedRequestID)) {
+        focusableRequestIDs.add(focusedRequestID);
+      }
+      const rovingRequestID = focusedKind === 'dot' && focusableRequestIDs.has(focusedRequestID)
+        ? focusedRequestID : (keyboardPoints[0] ? keyboardPoints[0].request_id : '');
       const dots = points.map(p => {
         const cat = xviewCategory(p);
         let col;
@@ -2893,8 +3312,7 @@ const adminHTML = `<!doctype html>
         }
         const t = Date.parse(p.created_at);
         if (isNaN(t)) return '';
-        const cx = xPos(t).toFixed(1), cy = yPos(p[yField] || 0).toFixed(1);
-        const isAnomaly = cat === 'error' || cat === 'failover' || p.policy_decision_count > 0;
+        const cx = Number(xPos(t).toFixed(1)), cy = Number(yPos(p[yField] || 0).toFixed(1));
         const gov = (p.policy_decision_count || p.approval_count || p.secret_event_count)
           ? ' · policy ' + fmt(p.policy_decision_count || 0) + (p.policy_decision ? '(' + p.policy_decision + ')' : '') +
             ' · approval ' + fmt(p.approval_count || 0) + (p.approval_status ? '(' + p.approval_status + ')' : '') +
@@ -2904,55 +3322,120 @@ const adminHTML = `<!doctype html>
           ' · complexity ' + fmt(p.complexity || 0) + ' · risk ' + fmt(p.risk_score || 0) +
           ' · health ' + fmt(p.health_score || 0) + ' · ' + fmt(p.total_tokens) + 'tok · ' + money(p.cost_krw) + ' · HTTP ' + (p.status_code) +
           gov + ' · ' + new Date(t).toLocaleTimeString('ko-KR');
-        // anomaly outer ring for errors/failovers/governance
-        const ring = isAnomaly
-          ? '<circle cx="' + cx + '" cy="' + cy + '" r="5.5" fill="none" stroke="' + col + '" stroke-width="1.5" stroke-opacity="0.55"/>'
-          : '';
-        return ring + '<circle class="xv-dot" data-rid="' + escapeHTML(p.request_id) + '" cx="' + cx + '" cy="' + cy + '" r="3.2" fill="' + col + '" fill-opacity="0.72" stroke="' + col + '" stroke-opacity="0.9"><title>' + escapeHTML(tip) + '</title></circle>';
+        const ariaLabel = xviewColors[cat].label + ' 요청 · 모델 ' + (p.model || '알 수 없음') + ' · ' + xviewYLabel(xviewState.metric) + ' ' + xviewFmtY(xviewState.metric, p[yField] || 0) + ' · HTTP ' + (p.status_code || 0) + ' · 상세 열기';
+        const isNew = xviewLiveState.newPointIDs.has(p.request_id);
+        if (isNew) xviewLiveState.newPointIDs.delete(p.request_id);
+        const accessible = focusableRequestIDs.has(p.request_id);
+        const attributes = ' data-rid="' + escapeAttr(p.request_id) + '"' + (accessible
+          ? ' role="button" tabindex="' + (p.request_id === rovingRequestID ? '0' : '-1') + '" aria-label="' + escapeAttr(ariaLabel) + '"'
+          : ' aria-hidden="true"');
+        return xviewPointShape(cat, cx, cy, col, isNew, attributes, escapeHTML(tip));
       }).join('');
 
-      host.innerHTML = '<svg id="xv-svg" viewBox="0 0 ' + W + ' ' + H + '" width="100%" height="' + H + '" style="color:var(--ink); cursor:crosshair; user-select:none">' +
+      host.innerHTML = '<svg id="xv-svg" viewBox="0 0 ' + W + ' ' + H + '" width="100%" height="380" preserveAspectRatio="none" role="group" aria-roledescription="대화형 요청 분포 차트" aria-labelledby="xv-svg-title xv-svg-desc" style="color:var(--ink); cursor:crosshair; user-select:none">' +
+        '<title id="xv-svg-title">XView 요청 분포</title><desc id="xv-svg-desc">가로축은 요청 시각, 세로축은 ' + escapeHTML(xviewYLabel(xviewState.metric)) + '입니다. Tab 키로 차트에 진입하고 화살표 키로 요청 사이를 이동하며 Enter 또는 Space 키로 상세를 엽니다.</desc>' +
         grid +
         '<line x1="' + padL + '" y1="' + (padT + innerH) + '" x2="' + (W - padR) + '" y2="' + (padT + innerH) + '" stroke="var(--line-strong)"/>' +
         '<line x1="' + padL + '" y1="' + padT + '" x2="' + padL + '" y2="' + (padT + innerH) + '" stroke="var(--line-strong)"/>' +
-        pctLine(p99, 'P99', 'var(--bad)') + pctLine(p95, 'P95', 'var(--warn)') + pctLine(p50, 'P50', 'var(--muted)') +
+        percentileLines +
         dots + xLabels +
         '<rect id="xv-sel-rect" x="0" y="0" width="0" height="0" fill="var(--accent)" fill-opacity="0.1" stroke="var(--accent)" stroke-width="1" stroke-dasharray="4 2" style="display:none" pointer-events="none"/>' +
         '</svg>';
+      host.scrollLeft = chartScrollLeft;
 
       // legend — model-color mode or category mode
       const legendEl = document.getElementById('xv-legend');
       if (useModelColor && groups && groups.length) {
         legendEl.innerHTML =
-          '<div style="display:flex; gap:14px; flex-wrap:wrap; align-items:center">' +
+          '<div class="xv-legend-row">' +
           groups.map((g, i) =>
-            '<span style="display:inline-flex; align-items:center; gap:5px">' +
+            '<span class="xv-legend-item">' +
             '<span style="width:10px;height:10px;border-radius:50%;background:' + MODEL_PALETTE[((modelIndex && modelIndex[g.model] !== undefined) ? modelIndex[g.model] : i) % MODEL_PALETTE.length] + '"></span>' +
             escapeHTML(g.model) + ' <span class="muted">' + fmt(g.count) + '건</span></span>'
           ).join('') +
-          '<span class="muted" style="margin-left:auto">점을 클릭하면 요청 상세 · 가로=시간 / 세로=' + xviewYLabel(xviewState.metric) + ' · ○링=이상 항목</span>' +
+          '<span class="xv-legend-help">색상=모델 · 형태=요청 신호 · 세로=' + xviewYLabel(xviewState.metric) + '</span>' +
           '</div>';
       } else {
         const counts = { error: 0, governance: 0, cache: 0, failover: 0, complex: 0, normal: 0 };
         points.forEach(p => counts[xviewCategory(p)]++);
         legendEl.innerHTML =
-          '<div style="display:flex; gap:16px; flex-wrap:wrap; align-items:center">' +
+          '<div class="xv-legend-row">' +
           Object.keys(xviewColors).map(k =>
-            '<span style="display:inline-flex; align-items:center; gap:6px">' +
-            '<span style="width:10px;height:10px;border-radius:50%;background:' + xviewColors[k].c + '"></span>' +
+            '<span class="xv-legend-item">' +
+            '<span class="xv-legend-shape" style="color:' + xviewColors[k].c + '" aria-hidden="true">' + xviewCategoryGlyph(k) + '</span>' +
             xviewColors[k].label + ' <span class="muted">' + fmt(counts[k]) + '</span></span>'
           ).join('') +
-          '<span class="muted" style="margin-left:auto">점을 클릭하면 요청 상세 · 가로=시간 / 세로=' + xviewYLabel(xviewState.metric) + ' · ○링=이상 항목</span>' +
+          '<span class="xv-legend-help">가로=시간 · 세로=' + xviewYLabel(xviewState.metric) + ' · 빈 공간을 드래그해 여러 요청 선택</span>' +
           '</div>';
       }
+      if (useModelColor) {
+        legendEl.insertAdjacentHTML('beforeend', '<div class="xv-legend-row" style="margin-top:8px"><span class="xv-recent-label">형태</span>' +
+          Object.keys(xviewColors).map(category => '<span class="xv-legend-item"><span class="xv-legend-shape" style="color:' + xviewColors[category].c + '" aria-hidden="true">' + xviewCategoryGlyph(category) + '</span>' + xviewColors[category].label + '</span>').join('') + '</div>');
+      }
+      const recentPoints = xviewRecentPoints(points, 8);
+      legendEl.insertAdjacentHTML('beforeend', '<div class="xv-recent-strip" aria-label="빠르게 확인할 요청"><span class="xv-recent-label">빠른 확인</span>' +
+        recentPoints.map(point => {
+          const category = xviewCategory(point);
+          const time = new Date(point.created_at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
+          const label = xviewColors[category].label + ' · ' + (point.model || '모델 미상') + ' · ' + time;
+          return '<button type="button" class="xv-recent-request" data-rid="' + escapeAttr(point.request_id) + '" aria-label="' + escapeAttr(label + ' 요청 상세 열기') + '"><span aria-hidden="true" style="color:' + xviewColors[category].c + '">' + xviewCategoryGlyph(category) + '</span><strong>' + escapeHTML(point.model || '모델 미상') + '</strong><span class="muted">' + escapeHTML(time) + '</span></button>';
+        }).join('') + '</div>');
 
-      // single-dot click → explainability panel
-      host.querySelectorAll('.xv-dot').forEach(dot => {
-        dot.addEventListener('click', () => {
-          if (xvDragJustFired) return; // drag just ended on this dot — skip click
+      // Delegate point events once. A 6000-point live redraw must not allocate 12,000
+      // fresh listener closures, and roving tabindex keeps the chart to one Tab stop.
+      if (!host.dataset.xviewPointEvents) {
+        host.dataset.xviewPointEvents = '1';
+        host.addEventListener('click', event => {
+          let dot = event.target.closest && event.target.closest('.xv-dot');
+          const chartTarget = event.target.closest && event.target.closest('#xv-svg');
+          const coarsePointing = !!(window.matchMedia && window.matchMedia('(pointer: coarse), (max-width: 760px)').matches);
+          // Keep the SVG light even for thousands of points, but make taps forgiving:
+          // on small/coarse screens a tap within 24 display pixels selects the nearest
+          // request marker without adding a large invisible element per point.
+          if (!dot && chartTarget && coarsePointing) {
+            dot = xviewNearestDot(host, event.clientX, event.clientY, 24);
+          }
+          if (!dot || !host.contains(dot) || xvDragJustFired) return;
           openExplain(dot.getAttribute('data-rid'));
         });
-      });
+        host.addEventListener('keydown', event => {
+          const dot = event.target.closest && event.target.closest('.xv-dot[role="button"]');
+          if (!dot || !host.contains(dot)) return;
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            openExplain(dot.getAttribute('data-rid'));
+            return;
+          }
+          const keys = ['ArrowRight', 'ArrowDown', 'ArrowLeft', 'ArrowUp', 'Home', 'End'];
+          if (!keys.includes(event.key)) return;
+          const available = Array.from(host.querySelectorAll('.xv-dot[role="button"]'));
+          const index = Math.max(0, available.indexOf(dot));
+          let nextIndex = index;
+          if (event.key === 'ArrowRight' || event.key === 'ArrowDown') nextIndex = (index + 1) % available.length;
+          if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') nextIndex = (index - 1 + available.length) % available.length;
+          if (event.key === 'Home') nextIndex = 0;
+          if (event.key === 'End') nextIndex = available.length - 1;
+          event.preventDefault();
+          dot.setAttribute('tabindex', '-1');
+          available[nextIndex].setAttribute('tabindex', '0');
+          available[nextIndex].focus({ preventScroll: true });
+        });
+      }
+      if (!legendEl.dataset.xviewRecentEvents) {
+        legendEl.dataset.xviewRecentEvents = '1';
+        legendEl.addEventListener('click', event => {
+          const button = event.target.closest && event.target.closest('.xv-recent-request');
+          if (button && legendEl.contains(button)) openExplain(button.getAttribute('data-rid'));
+        });
+      }
+      const nextRecentStrip = legendEl.querySelector('.xv-recent-strip');
+      if (nextRecentStrip) nextRecentStrip.scrollLeft = recentScrollLeft;
+      if (focusedRequestID) {
+        const focusHost = focusedKind === 'recent' ? legendEl : host;
+        const selector = focusedKind === 'recent' ? '.xv-recent-request' : '.xv-dot[role="button"]';
+        const replacement = Array.from(focusHost.querySelectorAll(selector)).find(element => element.getAttribute('data-rid') === focusedRequestID);
+        if (replacement) replacement.focus({ preventScroll: true });
+      }
       // drag-to-select: starts on empty canvas space, not on a dot
       bindXVDragSelect(points);
     }
@@ -3033,12 +3516,13 @@ const adminHTML = `<!doctype html>
       const ridMap = {};
       points.forEach(p => { ridMap[p.request_id] = p; });
 
-      let dragStart = null, isDragging = false;
+      let dragStart = null, isDragging = false, activePointerID = null;
       const selRect = document.getElementById('xv-sel-rect');
 
       function removeWindowListeners() {
-        window.removeEventListener('mousemove', onMove);
-        window.removeEventListener('mouseup', onUp);
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', onUp);
+        window.removeEventListener('pointercancel', onCancel);
         window.removeEventListener('blur', onCancel);
       }
 
@@ -3046,6 +3530,7 @@ const adminHTML = `<!doctype html>
         removeWindowListeners();
         dragStart = null;
         isDragging = false;
+        activePointerID = null;
         xviewLiveState.dragging = false;
         if (selRect && selRect.isConnected) selRect.style.display = 'none';
         if (xviewLiveState.renderPending) queueXViewLiveRender();
@@ -3064,8 +3549,8 @@ const adminHTML = `<!doctype html>
       }
 
       function onMove(e) {
-        if (!dragStart) return;
-        // A mouseup outside the browser may not reach window. The next move (or blur below)
+        if (!dragStart || e.pointerId !== activePointerID) return;
+        // A pointer release outside the browser may not reach window. The next move (or blur below)
         // must still release the live-render gate.
         if (typeof e.buttons === 'number' && (e.buttons & 1) === 0) {
           finishDrag();
@@ -3074,6 +3559,7 @@ const adminHTML = `<!doctype html>
         const cur = toSVG(e);
         if (!isDragging && Math.hypot(cur.x - dragStart.x, cur.y - dragStart.y) < 4) return;
         isDragging = true;
+        e.preventDefault();
         const rx = Math.min(dragStart.x, cur.x), ry = Math.min(dragStart.y, cur.y);
         selRect.setAttribute('x', rx);
         selRect.setAttribute('y', ry);
@@ -3083,6 +3569,7 @@ const adminHTML = `<!doctype html>
       }
 
       function onUp(e) {
+        if (!dragStart || e.pointerId !== activePointerID) return;
         const end   = toSVG(e);
         const start = dragStart;
         const completedDrag = isDragging;
@@ -3095,8 +3582,8 @@ const adminHTML = `<!doctype html>
 
         const selected = [];
         svg.querySelectorAll('.xv-dot').forEach(dot => {
-          const cx = parseFloat(dot.getAttribute('cx'));
-          const cy = parseFloat(dot.getAttribute('cy'));
+          const cx = parseFloat(dot.getAttribute('data-cx'));
+          const cy = parseFloat(dot.getAttribute('data-cy'));
           if (cx >= x1 && cx <= x2 && cy >= y1 && cy <= y2) {
             selected.push(dot.getAttribute('data-rid'));
           }
@@ -3117,23 +3604,26 @@ const adminHTML = `<!doctype html>
       }
 
       function onDown(e) {
+        // Touch users scroll the responsive chart and use the large point targets or the
+        // quick-inspection strip. Drag selection is reserved for precise mouse/pen input.
+        if (e.pointerType === 'touch') return;
         if (e.button !== 0) return;
-        if (e.target.classList.contains('xv-dot')) return;
+        if (e.target.closest && e.target.closest('.xv-dot')) return;
         dragStart  = toSVG(e);
         isDragging = false;
+        activePointerID = e.pointerId;
         xviewLiveState.dragging = true;
-        window.addEventListener('mousemove', onMove);
-        window.addEventListener('mouseup',   onUp);
+        window.addEventListener('pointermove', onMove);
+        window.addEventListener('pointerup', onUp);
+        window.addEventListener('pointercancel', onCancel);
         window.addEventListener('blur', onCancel);
       }
-      svg.addEventListener('mousedown', onDown);
+      svg.addEventListener('pointerdown', onDown);
+      xviewLiveState.dragCancel = finishDrag;
       xviewLiveState.dragCleanup = () => {
-        removeWindowListeners();
-        svg.removeEventListener('mousedown', onDown);
-        dragStart = null;
-        isDragging = false;
-        xviewLiveState.dragging = false;
-        if (selRect && selRect.isConnected) selRect.style.display = 'none';
+        finishDrag();
+        svg.removeEventListener('pointerdown', onDown);
+        xviewLiveState.dragCancel = null;
         xviewLiveState.dragCleanup = null;
       };
     }

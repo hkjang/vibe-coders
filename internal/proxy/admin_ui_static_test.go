@@ -246,6 +246,73 @@ func TestAdminUIXViewLiveModeHandlesFixedRangeAndSameHash(t *testing.T) {
 	}
 }
 
+func TestAdminUIXViewOperationalUXIsAccessibleAndExplicit(t *testing.T) {
+	_, payload := adminUISource(t)
+	required := []string{
+		`:focus-visible`,
+		`id="xv-filter-form"`,
+		`filterForm.addEventListener('submit'`,
+		`● 변경사항 미적용`,
+		`role="status" aria-live="polite" aria-atomic="true"`,
+		`id="xv-live-freshness"`,
+		`id="xv-live-batch" class="xv-live-batch" aria-live="off"`,
+		`id="xv-retry"`,
+		`role="group" aria-roledescription="대화형 요청 분포 차트" aria-labelledby="xv-svg-title xv-svg-desc"`,
+		`const cls = 'xv-dot xv-point-marker'`,
+		`role="button" tabindex="`,
+		`aria-label="' + escapeAttr(ariaLabel)`,
+		`host.addEventListener('keydown'`,
+		`event.key === 'Enter' || event.key === ' '`,
+		`available[nextIndex].focus({ preventScroll: true })`,
+		`class="xv-recent-strip"`,
+		`function xviewPercentileBands(`,
+		`function xviewNearestDot(`,
+		`window.matchMedia('(pointer: coarse), (max-width: 760px)')`,
+		`window.addEventListener('pointermove'`,
+		`svg.addEventListener('pointerdown'`,
+		`if (e.pointerType === 'touch') return`,
+		`if (reset && xviewLiveState.dragCleanup) xviewLiveState.dragCleanup()`,
+		`else if (xviewLiveState.dragCancel) xviewLiveState.dragCancel()`,
+		`xviewLiveState.filterDirty || (xviewState.live && !xviewState.to)`,
+		`const detailsWasOpen = !!(previousDetails && previousDetails.open)`,
+		`focusedKind === 'recent' ? legendEl : host`,
+		`if (el.textContent !== text) el.textContent = text`,
+		`if (activeSavedView && !wasDirty) p.set('saved', activeSavedView.id)`,
+		`id="mobile-nav-toggle"`,
+		`if (mobileNavMatches()) return`,
+		`button.setAttribute('aria-expanded', 'true')`,
+	}
+	for _, want := range required {
+		if !strings.Contains(payload, want) {
+			t.Errorf("XView operational UX is missing %q", want)
+		}
+	}
+	if strings.Contains(payload, "document.getElementById(id).addEventListener('change', apply)") {
+		t.Error("XView filter edits apply immediately again; draft fields must wait for form submission")
+	}
+	if strings.Contains(payload, "host.querySelectorAll('.xv-dot').forEach(dot => {") {
+		t.Error("XView points allocate per-dot listeners again; use delegated chart events")
+	}
+	if got := strings.Count(payload, "if (!validateXViewDraft()) return;"); got < 5 {
+		t.Errorf("only %d XView draft consumers validate date order; apply/save/share paths must all validate", got)
+	}
+
+	start := strings.Index(payload, "function bindXVDragSelect(")
+	if start < 0 {
+		t.Fatal("XView drag selection implementation not found")
+	}
+	end := strings.Index(payload[start:], "async function openXVSelectionModal(")
+	if end < 0 {
+		t.Fatal("XView drag selection end not found")
+	}
+	drag := payload[start : start+end]
+	for _, legacy := range []string{"'mousedown'", "'mousemove'", "'mouseup'"} {
+		if strings.Contains(drag, legacy) {
+			t.Errorf("XView drag selection still uses mouse-only event %s", legacy)
+		}
+	}
+}
+
 // An empty configuration screen is the first thing a new operator sees, and "팀 없음"
 // tells them nothing about how to change it. The screens that own a creation form must
 // point at it. Several already did; this keeps the rest from regressing to a bare label.
