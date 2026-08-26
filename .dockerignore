@@ -10,6 +10,9 @@ release/
 *.sqlite3
 coverage.out
 .playwright-mcp/
+.gitframe/
+output/
+seed.sql
 *.tar
 *.tar.gz
 README.md

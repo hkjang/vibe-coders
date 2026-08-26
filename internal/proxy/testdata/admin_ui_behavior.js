@@ -270,7 +270,7 @@ group('XView live point buffer');
 {
   const prelude = 'const XVIEW_POINT_LIMIT=3;'
     + 'const xviewState={from:"",to:"",window:"1h"};'
-    + 'const xviewLiveState=globalThis.__xviewLiveState={pointsByID:new Map(),truncated:false,serverClockOffsetMs:0,serverClockReady:false};';
+    + 'const xviewLiveState=globalThis.__xviewLiveState={pointsByID:new Map(),newPointIDs:new Map(),snapshotReady:true,truncated:false,serverClockOffsetMs:0,serverClockReady:false};';
   const F = load(['xviewWindowMillis', 'xviewPointTime', 'xviewCursor', 'xviewCursorEqual',
     'syncXViewServerClock', 'xviewNowMillis', 'mergeXViewPoints', 'evictExpiredXViewPoints', 'currentXViewPoints'], prelude + '\n');
   const now = Date.now();
@@ -299,12 +299,84 @@ group('XView live point buffer');
   check('points outside the rolling window are evicted', !visible.some((p) => p.request_id === 'old'));
   check('the live buffer keeps only the newest cap', visible.length === 3 && visible.map((p) => p.request_id).join(',') === 'a,b,c');
   check('hitting the cap marks the snapshot truncated', global.__xviewLiveState.truncated === true);
+  check('eviction and the point cap also prune one-shot marker state',
+    Array.from(global.__xviewLiveState.newPointIDs.keys()).every((id) => global.__xviewLiveState.pointsByID.has(id)));
+}
+
+// ---------- XView operational cues ----------
+group('XView operational cues');
+{
+  const visualPrelude = 'const xviewState={complexityTokens:4000};';
+  const V = load(['xviewCategory', 'xviewNeedsAttention', 'xviewRecentPoints',
+    'xviewPercentile', 'xviewPercentileBands', 'xviewCategoryGlyph', 'xviewPointShape', 'xviewNearestDot'], visualPrelude + '\n');
+  const normal = { request_id: 'normal', status_code: 200, model: 'm1' };
+  const error = { request_id: 'error', status_code: 500, model: 'm2' };
+  const governance = { request_id: 'policy', status_code: 200, policy_decision_count: 1, model: 'm3' };
+  const failover = { request_id: 'fallback', status_code: 200, failover: true, model: 'm4' };
+  const quick = V.xviewRecentPoints([normal, error, governance, failover], 3);
+  check('quick inspection puts attention signals before normal traffic',
+    quick.map((p) => p.request_id).join(',') === 'error,policy,fallback');
+  check('quick inspection obeys its keyboard/touch target limit', quick.length === 3);
+
+  const same = V.xviewPercentileBands([7, 7, 7]);
+  check('overlapping percentile labels collapse into one readable band',
+    same.length === 1 && same[0].label === 'P50/P95/P99' && same[0].value === 7);
+  const spread = V.xviewPercentileBands([1, 2, 3, 4, 5]);
+  check('distinct percentile values remain visible', spread.length === 2
+    && spread[0].label === 'P50' && spread[1].label === 'P95/P99');
+  check('signal categories use distinct non-colour glyphs',
+    new Set(['error', 'governance', 'cache', 'failover', 'complex', 'normal'].map(V.xviewCategoryGlyph)).size === 6);
+  check('a newly arrived marker carries the one-shot motion class',
+    V.xviewPointShape('error', 10, 20, '#f00', true).includes('xv-point-new'));
+  const dot = (id, left, top, width = 8, height = 8) => ({ id,
+    getBoundingClientRect: () => ({ left, top, width, height }) });
+  const dotA = dot('a', 96, 96), dotB = dot('b', 196, 196);
+  const chartHost = { querySelectorAll: () => [dotA, dotB] };
+  check('coarse pointer hit testing selects the nearest visible marker within 24px',
+    V.xviewNearestDot(chartHost, 119, 100, 24) === dotA);
+  check('coarse pointer hit testing does not select a distant request',
+    V.xviewNearestDot(chartHost, 150, 150, 24) === null);
+
+  let statusText = '', statusTextWrites = 0;
+  const status = { className: '', attrs: {},
+    get textContent() { return statusText; }, set textContent(v) { statusText = v; statusTextWrites++; },
+    getAttribute(k) { return this.attrs[k]; }, hasAttribute(k) { return k in this.attrs; },
+    setAttribute(k, v) { this.attrs[k] = v; }, removeAttribute(k) { delete this.attrs[k]; } };
+  const freshness = { textContent: '' };
+  const retry = { hidden: true };
+  global.document = { getElementById: (id) => ({
+    'xv-live-status': status, 'xv-live-freshness': freshness, 'xv-retry': retry,
+  }[id] || null) };
+  const statusPrelude = 'const xviewState=globalThis.__xvStatusState={live:true};'
+    + 'const xviewLiveState=globalThis.__xvStatusLive={lastSuccessAt:Date.now()-7000,retryCount:2};'
+    + 'function fmt(v){return String(v);}';
+  const S = load(['updateXViewLiveFreshness', 'setXViewLiveStatus'], statusPrelude + '\n');
+  S.setXViewLiveStatus('연결 끊김', 'error', 'network down');
+  check('connection failure exposes a retry action', status.className === 'xv-live-status error' && retry.hidden === false);
+  check('connection failure keeps diagnostic detail without flooding the label', status.attrs.title === 'network down');
+  check('freshness reports the last success and retry count', freshness.textContent.includes('초 전') && freshness.textContent.includes('재시도 2회'));
+  S.setXViewLiveStatus('실시간 연결됨', 'ok');
+  check('a healthy connection hides retry and clears stale detail', retry.hidden === true && !('title' in status.attrs));
+  const healthyWrites = statusTextWrites;
+  S.setXViewLiveStatus('실시간 연결됨', 'ok');
+  check('an unchanged live status is not rewritten into the aria-live region', statusTextWrites === healthyWrites);
+  global.__xvStatusLive.lastSuccessAt = 0;
+  global.__xvStatusState.live = false;
+  S.updateXViewLiveFreshness();
+  check('disabled live mode is described explicitly', freshness.textContent.includes('꺼져'));
+
+  const R = load(['xviewLiveOwnsRefresh'], 'const xviewState=globalThis.__xvRefreshState={live:false,to:""};'
+    + 'const xviewLiveState=globalThis.__xvRefreshLive={filterDirty:true};'
+    + 'function parseHash(){return {parts:["xview"]};}\n');
+  check('global refresh cannot discard an unapplied XView filter draft', R.xviewLiveOwnsRefresh() === true);
+  global.__xvRefreshLive.filterDirty = false;
+  check('global refresh resumes when XView is idle and clean', R.xviewLiveOwnsRefresh() === false);
 }
 
 // ---------- XView live lifecycle ----------
 group('XView live lifecycle');
 {
-  let aborted = 0, timersCleared = 0, framesCancelled = 0;
+  let aborted = 0, timersCleared = 0, framesCancelled = 0, dragsCancelled = 0, dragBindingsRemoved = 0;
   global.clearTimeout = () => { timersCleared++; };
   global.cancelAnimationFrame = () => { framesCancelled++; };
   const prelude = 'const xviewLiveState=globalThis.__xviewLifecycle={'
@@ -313,8 +385,12 @@ group('XView live lifecycle');
     + 'pointsByID:new Map([["a",{}]]),cursor:{ingested_at:"x",request_id:"a"},'
     + 'filterParams:new URLSearchParams("window=1h"),truncated:true,modelOrder:["m"],'
     + 'lastPruneAt:1,lastReconcileAt:2,lastRefreshAt:3,catchingUp:true,snapshotReady:true,'
-    + 'serverClockOffsetMs:4,serverClockReady:true,dragCleanup:null};';
+    + 'serverClockOffsetMs:4,serverClockReady:true,lastSuccessAt:5,retryCount:2,'
+    + 'newPointIDs:new Map([["new",1]]),filterDirty:true,'
+    + 'dragCancel(){globalThis.__xviewDragCancelled();},dragCleanup(){globalThis.__xviewDragBindingRemoved();}};';
   global.__xviewAborted = () => { aborted++; };
+  global.__xviewDragCancelled = () => { dragsCancelled++; };
+  global.__xviewDragBindingRemoved = () => { dragBindingsRemoved++; };
   const { stopXViewLive } = load(['stopXViewLive'], prelude + '\n');
 
   stopXViewLive(false);
@@ -322,15 +398,21 @@ group('XView live lifecycle');
     aborted === 1 && timersCleared === 1 && framesCancelled === 1
       && global.__xviewLifecycle.timer === null && global.__xviewLifecycle.controller === null
       && global.__xviewLifecycle.inFlight === false);
+  check('pausing cancels only an active drag and preserves the chart binding',
+    dragsCancelled === 1 && dragBindingsRemoved === 0 && typeof global.__xviewLifecycle.dragCleanup === 'function');
   check('a visibility pause preserves the current point buffer and cursor',
     global.__xviewLifecycle.pointsByID.size === 1 && global.__xviewLifecycle.cursor.request_id === 'a'
-      && global.__xviewLifecycle.snapshotReady === true);
+      && global.__xviewLifecycle.snapshotReady === true && global.__xviewLifecycle.filterDirty === true);
   stopXViewLive(true);
+  check('leaving the route removes the chart drag binding',
+    dragBindingsRemoved === 1 && global.__xviewLifecycle.dragCancel === null && global.__xviewLifecycle.dragCleanup === null);
   check('leaving the route resets live data and filters', global.__xviewLifecycle.pointsByID.size === 0
     && global.__xviewLifecycle.cursor === null && global.__xviewLifecycle.filterParams.toString() === ''
     && global.__xviewLifecycle.modelOrder.length === 0 && global.__xviewLifecycle.lastReconcileAt === 0
     && global.__xviewLifecycle.lastRefreshAt === 0 && global.__xviewLifecycle.catchingUp === false
-    && global.__xviewLifecycle.snapshotReady === false && global.__xviewLifecycle.serverClockReady === false);
+    && global.__xviewLifecycle.snapshotReady === false && global.__xviewLifecycle.serverClockReady === false
+    && global.__xviewLifecycle.lastSuccessAt === 0 && global.__xviewLifecycle.retryCount === 0
+    && global.__xviewLifecycle.newPointIDs.size === 0 && global.__xviewLifecycle.filterDirty === false);
   check('each stop invalidates late responses with a new generation', global.__xviewLifecycle.generation === 6);
 }
 
