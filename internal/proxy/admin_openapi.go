@@ -405,10 +405,10 @@ var apiEndpoints = []apiEndpoint{
 	{"/admin/text2sql/registry/export", []string{"get"}, "text2sql", "Export the Text2SQL schema registry", false},
 	{"/admin/text2sql/registry/import", []string{"post"}, "text2sql", "Import a Text2SQL schema registry", false},
 	// ---- admin: XView model analytics ----
-	{"/admin/xview/models", []string{"get"}, "observability", "Model comparison (XView)", false},
+	{"/admin/xview/models", []string{"get"}, "observability", "Model comparison (XView); response discloses truncated/sample_size/covered_since", false},
 	{"/admin/xview/delta", []string{"get"}, "observability", "Incremental committed request points (XView; reconcile=true covers compatibility rows, refresh=true reprojects mutable metadata)", false},
-	{"/admin/xview/model-series", []string{"get"}, "observability", "Model time series (XView)", false},
-	{"/admin/xview/model-outliers", []string{"get"}, "observability", "Model outliers (XView)", false},
+	{"/admin/xview/model-series", []string{"get"}, "observability", "Model time series (XView); response discloses truncated/sample_size/covered_since", false},
+	{"/admin/xview/model-outliers", []string{"get"}, "observability", "Model outliers (XView); response discloses truncated/sample_size/covered_since", false},
 	{"/admin/data-products", []string{"get", "post", "delete"}, "data-products", "Curate/publish the data product catalog", false},
 	{"/admin/data-products/candidates", []string{"get"}, "data-products", "Suggest products from recurring Text2SQL questions (no raw SQL)", false},
 	{"/admin/data-products/requests", []string{"get", "post"}, "data-products", "List / decide data product access requests", false},

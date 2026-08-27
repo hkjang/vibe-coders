@@ -161,6 +161,51 @@ func safeDivF(num, den float64) float64 {
 	return num / den
 }
 
+// xviewAggregateLimit caps how many request rows the XView aggregate endpoints
+// (models, model-series, model-outliers) pull before summarizing them in Go. Tests lower
+// it so the truncation disclosure can be exercised without seeding twenty thousand rows.
+var xviewAggregateLimit = 20000
+
+// xviewAggregatePoints loads the rows an XView aggregate endpoint summarizes and reports
+// what the summary actually covers. Rows arrive newest-first and are capped, so a window
+// busier than the cap is answered from its most recent slice alone. Every aggregate
+// response carries the coverage back: a per-model P95, an hourly series or an outlier set
+// computed from part of the requested window is wrong in a way the numbers cannot show.
+func (s *Server) xviewAggregatePoints(r *http.Request, since, until time.Time) ([]store.ScatterPoint, map[string]any, error) {
+	teams, teamScoped := requestTeamScopeForCaller(s, r)
+	points, truncated, err := s.db.ScatterPoints(r.Context(), store.ScatterFilter{
+		Since:      since,
+		Until:      until,
+		Models:     parseModelsParam(r.URL.Query().Get("models")),
+		Teams:      teams,
+		TeamScoped: teamScoped,
+		Limit:      xviewAggregateLimit,
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	coverage := map[string]any{
+		"truncated":       truncated,
+		"sample_size":     len(points),
+		"aggregate_limit": xviewAggregateLimit,
+	}
+	if truncated && len(points) > 0 {
+		// Newest-first ordering puts the oldest row the summary saw at the end. Traffic
+		// requested before that moment is absent from these numbers, so name the moment
+		// rather than leaving the caller to assume the whole window was counted.
+		coverage["covered_since"] = points[len(points)-1].CreatedAt
+	}
+	return points, coverage, nil
+}
+
+// withXViewCoverage merges the coverage disclosure into an aggregate response body.
+func withXViewCoverage(body, coverage map[string]any) map[string]any {
+	for k, v := range coverage {
+		body[k] = v
+	}
+	return body
+}
+
 // handleXViewDelta returns request points around a persistence cursor. Unlike request
 // created_at, ingested_at is serialized by the database immediately before the completed log
 // commits. Clients periodically request reconcile=true for rolling-upgrade compatibility and
@@ -236,22 +281,13 @@ func (s *Server) handleXViewModels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	since, until := xviewTimeRange(r, time.Hour)
-	teams, teamScoped := requestTeamScopeForCaller(s, r)
 	top := 5
 	if v := strings.TrimSpace(r.URL.Query().Get("top")); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			top = n
 		}
 	}
-	f := store.ScatterFilter{
-		Since:      since,
-		Until:      until,
-		Models:     parseModelsParam(r.URL.Query().Get("models")),
-		Teams:      teams,
-		TeamScoped: teamScoped,
-		Limit:      20000,
-	}
-	points, _, err := s.db.ScatterPoints(r.Context(), f)
+	points, coverage, err := s.xviewAggregatePoints(r, since, until)
 	if err != nil {
 		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "xview_models_failed")
 		return
@@ -260,11 +296,11 @@ func (s *Server) handleXViewModels(w http.ResponseWriter, r *http.Request) {
 	if len(groups) > top {
 		groups = groups[:top]
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	writeJSON(w, http.StatusOK, withXViewCoverage(map[string]any{
 		"since":  since.UTC().Format(time.RFC3339),
 		"top":    top,
 		"models": groups,
-	})
+	}, coverage))
 }
 
 // handleXViewModelSeries returns an hourly timeseries per model.
@@ -275,22 +311,13 @@ func (s *Server) handleXViewModelSeries(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	since, until := xviewTimeRange(r, 24*time.Hour)
-	teams, teamScoped := requestTeamScopeForCaller(s, r)
 	// Same timezone the range was parsed in, so the buckets line up with the filter.
 	loc := searchLocation(r.URL.Query().Get("tz"))
 	bucket := strings.TrimSpace(strings.ToLower(r.URL.Query().Get("bucket")))
 	if bucket != "day" {
 		bucket = "hour"
 	}
-	f := store.ScatterFilter{
-		Since:      since,
-		Until:      until,
-		Models:     parseModelsParam(r.URL.Query().Get("models")),
-		Teams:      teams,
-		TeamScoped: teamScoped,
-		Limit:      20000,
-	}
-	points, _, err := s.db.ScatterPoints(r.Context(), f)
+	points, coverage, err := s.xviewAggregatePoints(r, since, until)
 	if err != nil {
 		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "xview_series_failed")
 		return
@@ -347,11 +374,11 @@ func (s *Server) handleXViewModelSeries(w http.ResponseWriter, r *http.Request) 
 			return modelSeries[m][i].Timestamp < modelSeries[m][j].Timestamp
 		})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	writeJSON(w, http.StatusOK, withXViewCoverage(map[string]any{
 		"since":  since.UTC().Format(time.RFC3339),
 		"bucket": bucket,
 		"series": modelSeries,
-	})
+	}, coverage))
 }
 
 // bucketTimestamp truncates a created_at string to hour or day precision, in the same
@@ -395,16 +422,7 @@ func (s *Server) handleXViewModelOutliers(w http.ResponseWriter, r *http.Request
 		return
 	}
 	since, until := xviewTimeRange(r, time.Hour)
-	teams, teamScoped := requestTeamScopeForCaller(s, r)
-	f := store.ScatterFilter{
-		Since:      since,
-		Until:      until,
-		Models:     parseModelsParam(r.URL.Query().Get("models")),
-		Teams:      teams,
-		TeamScoped: teamScoped,
-		Limit:      20000,
-	}
-	points, truncated, err := s.db.ScatterPoints(r.Context(), f)
+	points, coverage, err := s.xviewAggregatePoints(r, since, until)
 	if err != nil {
 		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "xview_outliers_failed")
 		return
@@ -453,9 +471,8 @@ func (s *Server) handleXViewModelOutliers(w http.ResponseWriter, r *http.Request
 			})
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"since":     since.UTC().Format(time.RFC3339),
-		"outliers":  outliers,
-		"truncated": truncated,
-	})
+	writeJSON(w, http.StatusOK, withXViewCoverage(map[string]any{
+		"since":    since.UTC().Format(time.RFC3339),
+		"outliers": outliers,
+	}, coverage))
 }

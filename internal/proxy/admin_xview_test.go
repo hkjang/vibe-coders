@@ -777,3 +777,166 @@ func TestXViewModelOutliersEndpoint(t *testing.T) {
 		t.Errorf("fo1 should have failover tag, got %v", tagsByID["fo1"])
 	}
 }
+
+// withXViewAggregateLimit shrinks the aggregate row cap for one test. The endpoints
+// summarize at most that many rows, and twenty thousand seeded requests would make the
+// truncation path untestable in practice.
+func withXViewAggregateLimit(t *testing.T, limit int) {
+	t.Helper()
+	previous := xviewAggregateLimit
+	xviewAggregateLimit = limit
+	t.Cleanup(func() { xviewAggregateLimit = previous })
+}
+
+type xviewCoverage struct {
+	Truncated      bool   `json:"truncated"`
+	SampleSize     int    `json:"sample_size"`
+	AggregateLimit int    `json:"aggregate_limit"`
+	CoveredSince   string `json:"covered_since"`
+}
+
+// A summary built from the newest slice of a busier window is not the summary that was
+// asked for. The counts, percentiles and totals look ordinary either way, so the response
+// has to say which requests it actually saw.
+func TestXViewModelsSaysWhenItSummarizedOnlyPartOfTheWindow(t *testing.T) {
+	db, srv := xviewTestServer(t)
+	withXViewAggregateLimit(t, 3)
+	now := time.Now().UTC()
+	for i := 0; i < 5; i++ {
+		seedXViewReq(t, db, "m"+itoaT(i), "gpt-4.1", "openai", 200, false, 100, 100, 10, now.Add(-time.Duration(i)*time.Minute))
+	}
+
+	resp, err := http.Get(srv.URL + "/admin/xview/models?window=1h")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out struct {
+		Models []store.ScatterModelGroup `json:"models"`
+		xviewCoverage
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+
+	if len(out.Models) != 1 || out.Models[0].Count != 3 {
+		t.Fatalf("expected the summary to cover only the 3 newest requests, got %+v", out.Models)
+	}
+	if !out.Truncated {
+		t.Error("truncated = false, but two of the five requests were never counted")
+	}
+	if out.SampleSize != 3 || out.AggregateLimit != 3 {
+		t.Errorf("sample_size/aggregate_limit = %d/%d, want 3/3", out.SampleSize, out.AggregateLimit)
+	}
+	covered, err := time.Parse(time.RFC3339Nano, out.CoveredSince)
+	if err != nil {
+		t.Fatalf("covered_since %q is not a timestamp: %v", out.CoveredSince, err)
+	}
+	// The third-newest request is the oldest one counted; the fourth is not.
+	if covered.Before(now.Add(-3*time.Minute)) || covered.After(now.Add(-2*time.Minute).Add(time.Second)) {
+		t.Errorf("covered_since = %s, want the third-newest request at ~%s", covered, now.Add(-2*time.Minute))
+	}
+}
+
+func TestXViewModelsReportsFullCoverageWhenNothingWasDropped(t *testing.T) {
+	db, srv := xviewTestServer(t)
+	now := time.Now().UTC()
+	for i := 0; i < 3; i++ {
+		seedXViewReq(t, db, "f"+itoaT(i), "gpt-4.1", "openai", 200, false, 100, 100, 10, now)
+	}
+
+	resp, err := http.Get(srv.URL + "/admin/xview/models?window=1h")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out xviewCoverage
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+
+	if out.Truncated {
+		t.Error("truncated = true for a window that fit entirely under the cap")
+	}
+	if out.SampleSize != 3 {
+		t.Errorf("sample_size = %d, want 3", out.SampleSize)
+	}
+	if out.AggregateLimit != 20000 {
+		t.Errorf("aggregate_limit = %d, want the production cap 20000", out.AggregateLimit)
+	}
+	if out.CoveredSince != "" {
+		t.Errorf("covered_since = %q, want it omitted when the whole window was counted", out.CoveredSince)
+	}
+}
+
+// A truncated series drops whole buckets off the old end of the chart. Without the
+// disclosure that reads as a quiet hour rather than as data the endpoint never loaded.
+func TestXViewModelSeriesSaysWhenOldBucketsWereNeverLoaded(t *testing.T) {
+	db, srv := xviewTestServer(t)
+	withXViewAggregateLimit(t, 2)
+	now := time.Now().UTC().Truncate(time.Hour).Add(30 * time.Minute)
+	seedXViewReq(t, db, "recent1", "gpt-4.1", "openai", 200, false, 100, 100, 10, now)
+	seedXViewReq(t, db, "recent2", "gpt-4.1", "openai", 200, false, 100, 100, 10, now.Add(-time.Minute))
+	seedXViewReq(t, db, "older1", "gpt-4.1", "openai", 200, false, 100, 100, 10, now.Add(-2*time.Hour))
+
+	resp, err := http.Get(srv.URL + "/admin/xview/model-series?window=24h&bucket=hour")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out struct {
+		Series map[string][]struct {
+			Ts    string `json:"ts"`
+			Count int64  `json:"count"`
+		} `json:"series"`
+		xviewCoverage
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+
+	if len(out.Series["gpt-4.1"]) != 1 {
+		t.Fatalf("expected the older bucket to be missing from a capped series, got %+v", out.Series["gpt-4.1"])
+	}
+	if !out.Truncated {
+		t.Error("truncated = false, but an entire hour is absent from the series")
+	}
+	covered, err := time.Parse(time.RFC3339Nano, out.CoveredSince)
+	if err != nil {
+		t.Fatalf("covered_since %q is not a timestamp: %v", out.CoveredSince, err)
+	}
+	if covered.Before(now.Add(-time.Hour)) {
+		t.Errorf("covered_since = %s, want it inside the only hour the series actually loaded", covered)
+	}
+}
+
+func TestXViewModelOutliersStillReportsCoverage(t *testing.T) {
+	db, srv := xviewTestServer(t)
+	withXViewAggregateLimit(t, 2)
+	now := time.Now().UTC()
+	for i := 0; i < 4; i++ {
+		seedXViewReq(t, db, "o"+itoaT(i), "gpt-4.1", "openai", 500, false, 100, 100, 10, now.Add(-time.Duration(i)*time.Minute))
+	}
+
+	resp, err := http.Get(srv.URL + "/admin/xview/model-outliers?window=1h")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out struct {
+		Outliers []struct {
+			RequestID string `json:"request_id"`
+		} `json:"outliers"`
+		xviewCoverage
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+
+	if len(out.Outliers) != 2 {
+		t.Fatalf("expected outliers from the 2 loaded requests, got %d", len(out.Outliers))
+	}
+	if !out.Truncated || out.SampleSize != 2 || out.CoveredSince == "" {
+		t.Errorf("coverage = %+v, want truncated with a sample size and a covered_since", out.xviewCoverage)
+	}
+}

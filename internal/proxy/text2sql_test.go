@@ -133,6 +133,18 @@ func TestText2SQLPreviewFlow(t *testing.T) {
 		b, _ := io.ReadAll(spanResp.Body)
 		t.Fatalf("spans API status %d: %s", spanResp.StatusCode, b)
 	}
+	// The Text2SQL audit row waited on above is written synchronously inside the handler,
+	// while this request's request_logs row goes through the async logger after the
+	// response is sent. Reading the detail endpoint as soon as the audit row lands races
+	// that second write and intermittently returned 404 under load.
+	waitFor(t, 5*time.Second, func() bool {
+		resp, err := http.Get(proxy.URL + "/admin/requests/" + log.RequestID)
+		if err != nil {
+			return false
+		}
+		resp.Body.Close()
+		return resp.StatusCode == http.StatusOK
+	})
 	detailResp, err := http.Get(proxy.URL + "/admin/requests/" + log.RequestID)
 	if err != nil {
 		t.Fatal(err)

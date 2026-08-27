@@ -238,6 +238,17 @@ API: `GET /admin/scatter?window=1h&metric=latency&model=&endpoint=&limit=6000` �
 
 저장 API는 `GET /admin/saved-filters?view=xview`, `POST /admin/saved-filters`, `GET|PATCH|DELETE /admin/saved-filters/{id}`를 사용합니다. XView 저장 파라미터는 allowlist와 enum·기간·시간대 검증을 통과해야 하며 `window`와 `from/to`는 함께 저장할 수 없습니다.
 
+모델 집계 API는 `GET /admin/xview/models?window=1h&top=5&models=...`(모델별 건수·오류율·P50/P95/P99·토큰·비용·폴백·거버넌스), `GET /admin/xview/model-series?window=24h&bucket=hour|day`(모델별 시계열), `GET /admin/xview/model-outliers?window=1h`(P95 초과·오류·폴백·거버넌스 태그)입니다. 세 엔드포인트는 조회 창의 요청을 최신순으로 최대 20,000건까지만 읽어 집계하므로, 그보다 붐비는 창은 **최근 일부만으로 계산된 요약**이 나옵니다. 숫자만 봐서는 구분되지 않기 때문에 응답이 실제 집계 범위를 함께 알려줍니다.
+
+| 필드 | 의미 |
+| --- | --- |
+| `truncated` | 창의 요청을 전부 읽지 못했으면 `true` |
+| `sample_size` | 실제로 집계에 사용한 요청 건수 |
+| `aggregate_limit` | 이번 집계의 상한(기본 20,000) |
+| `covered_since` | 잘린 경우에만 존재. 이 시각 **이후** 요청만 집계에 포함됨 |
+
+`truncated=true`인데 `covered_since`가 조회 시작 시각보다 한참 뒤라면, 그 사이 구간은 트래픽이 없었던 것이 아니라 읽지 않은 것입니다. 창을 좁히거나 `models=`로 모델을 좁혀 다시 조회하세요. 특히 시계열은 잘린 구간의 버킷이 통째로 빠지므로 조용한 시간대처럼 보일 수 있습니다.
+
 ### eXplainability View (점 클릭 → "왜 이렇게 처리됐나")
 
 스캐터의 점(또는 호출 이력/상세 모달의 "🧭 XView 설명" 버튼)을 클릭하면 그 요청 1건의 처리 근거를 6개 패널로 설명합니다. 감사·보안·비용 통제 근거가 요청별로 남으므로 금융권 등 규제 환경에 적합합니다.
