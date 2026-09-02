@@ -456,14 +456,32 @@ func (s *Server) handleRoutingBalancer(w http.ResponseWriter, r *http.Request) {
 
 	if r.Method == http.MethodPost {
 		var payload struct {
-			Provider string `json:"provider"`
+			Provider *string `json:"provider"`
 		}
-		if r.Body != nil {
-			_ = json.NewDecoder(r.Body).Decode(&payload)
+		if r.Body == nil || json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&payload) != nil || payload.Provider == nil {
+			writeOpenAIError(w, http.StatusBadRequest, "provider must be an explicit string", "invalid_request_error", "invalid_body")
+			return
 		}
-		name := strings.TrimSpace(payload.Provider)
+		name := strings.TrimSpace(*payload.Provider)
+		if name != "" {
+			if modelsProviderNameReserved(name) {
+				writeOpenAIError(w, http.StatusBadRequest, "provider name is reserved", "invalid_request_error", "balancer_provider_reserved")
+				return
+			}
+			if !modelsProviderLabelSafe(name) {
+				writeOpenAIError(w, http.StatusBadRequest, "provider name contains unsafe metadata", "invalid_request_error", "balancer_provider_invalid")
+				return
+			}
+			if _, found, err := s.db.GetProvider(r.Context(), name); err != nil {
+				writeOpenAIError(w, http.StatusServiceUnavailable, "provider validation is temporarily unavailable", "server_error", "balancer_provider_lookup_failed")
+				return
+			} else if !found {
+				writeOpenAIError(w, http.StatusBadRequest, "provider is not configured", "invalid_request_error", "balancer_provider_not_found")
+				return
+			}
+		}
 		released := s.balancer.release(name)
-		s.auditAdmin(r, "routing.balancer.release", firstNonEmpty(name, "*"), auditJSON(map[string]any{"released": released}))
+		s.auditAdmin(r, "routing.balancer.release", boundedModelsProviderLabel(firstNonEmpty(name, "*")), auditJSON(map[string]any{"released": released}))
 		writeJSON(w, http.StatusOK, map[string]any{"status": "released", "provider": firstNonEmpty(name, "*"), "released_sessions": released})
 		return
 	}

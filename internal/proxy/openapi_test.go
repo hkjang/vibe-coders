@@ -132,6 +132,7 @@ func assertOpenAPIContract(t *testing.T, spec map[string]any) {
 		"SettingBatchItem", "SettingsBatchRequest", "SettingsBatchResponse", "AdminSettingView",
 		"ReadyResponse", "ReadinessFailureResponse", "AdminStatsResponse", "OpsStatus", "OpsStatusPartialFailure", "OpsRiskResponse", "ProviderHealthScore",
 		"RoutingHealthResponse", "RoutingBreakerSummary", "ProviderPublic", "ProviderListResponse",
+		"AgentRoute", "AgentRouteWriteRequest", "AgentRouteListResponse", "AgentRouteWriteResponse",
 		"AdminModel", "AdminModelDeprecation", "AdminModelProvider", "AdminModelPartialFailure", "AdminModelsResponse",
 		"ProviderSLO", "ProviderSLOMetric", "ProviderSLOEvaluation", "ProviderSLOResponse", "ProviderSLOWriteRequest", "ProviderSLOWriteResponse", "ProviderSLODeleteResponse",
 		"ModelQualityScore", "ModelQualityResponse", "ModelPrice", "ModelPricingVersion", "PricingResponse", "PricingWriteRequest", "PricingWriteResponse",
@@ -191,7 +192,7 @@ func assertOpenAPIContract(t *testing.T, spec map[string]any) {
 	if created["type"] != "integer" || created["format"] != "int64" || created["nullable"] != true || created["minimum"] != float64(0) {
 		t.Errorf("AdminModel.created schema = %v, want nullable non-negative int64", created)
 	}
-	for _, schemaName := range []string{"ProviderPublic", "ProviderSLO", "ProviderSLOEvaluation", "ProviderSLODeleteResponse", "ProviderHealthScore", "ProviderHealthRankingItem", "ProviderHealthAlert", "RoutingBreakerState", "AdminModel", "AdminModelProvider", "AdminModelPartialFailure"} {
+	for _, schemaName := range []string{"ProviderPublic", "ProviderSLO", "ProviderSLOEvaluation", "ProviderSLODeleteResponse", "ProviderHealthScore", "ProviderHealthRankingItem", "ProviderHealthAlert", "RoutingBreakerState", "AgentRoute", "AdminModel", "AdminModelProvider", "AdminModelPartialFailure"} {
 		schema, _ := schemas[schemaName].(map[string]any)
 		properties, _ := schema["properties"].(map[string]any)
 		providerRef, _ := properties["provider_ref"].(map[string]any)
@@ -207,6 +208,11 @@ func assertOpenAPIContract(t *testing.T, spec map[string]any) {
 		if providerRefRequired != wantRequired || providerRef["type"] != "string" || providerRef["minLength"] != float64(providerRefLength) || providerRef["maxLength"] != float64(providerRefLength) || providerRef["pattern"] != `^prv_[A-Za-z0-9_-]{43}$` {
 			t.Errorf("%s.provider_ref schema = %v required=%v wantRequired=%v", schemaName, providerRef, providerRefRequired, wantRequired)
 		}
+	}
+	agentRouteWrite, _ := schemas["AgentRouteWriteRequest"].(map[string]any)
+	agentRouteWriteProperties, _ := agentRouteWrite["properties"].(map[string]any)
+	if _, acceptsProviderRef := agentRouteWriteProperties["provider_ref"]; acceptsProviderRef {
+		t.Error("AgentRouteWriteRequest.provider_ref must be output-only")
 	}
 	providerSLOEvaluation, _ := schemas["ProviderSLOEvaluation"].(map[string]any)
 	providerSLOEvaluationProperties, _ := providerSLOEvaluation["properties"].(map[string]any)
@@ -274,6 +280,9 @@ func assertOpenAPIContract(t *testing.T, spec map[string]any) {
 	assertJSONOperationSchema(t, paths, "/admin/providers/slo", "post", "201", "ProviderSLOWriteResponse")
 	assertOpenAPIParameterSchema(t, paths, "/admin/providers/slo", "delete", "query", "provider", "string", true)
 	assertJSONOperationSchema(t, paths, "/admin/providers/slo", "delete", "200", "ProviderSLODeleteResponse")
+	assertJSONOperationSchema(t, paths, "/admin/agent-routes", "get", "200", "AgentRouteListResponse")
+	assertJSONRequestSchema(t, paths, "/admin/agent-routes", "post", "AgentRouteWriteRequest")
+	assertJSONOperationSchema(t, paths, "/admin/agent-routes", "post", "201", "AgentRouteWriteResponse")
 	assertJSONOperationSchema(t, paths, "/admin/models/quality", "get", "200", "ModelQualityResponse")
 	assertOpenAPIParameterSchema(t, paths, "/admin/models/quality", "get", "query", "window", "string", false)
 	assertJSONOperationSchema(t, paths, "/admin/pricing", "get", "200", "PricingResponse")

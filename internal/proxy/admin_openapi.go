@@ -673,6 +673,11 @@ func enrichOpenAPIOperation(route, method string, op map[string]any) {
 			"name": "provider", "in": "query", "required": true, "schema": map[string]any{"type": "string", "minLength": 1},
 		}}
 		responses["200"] = successResponse("ProviderSLODeleteResponse")
+	case "get /admin/agent-routes":
+		responses["200"] = successResponse("AgentRouteListResponse")
+	case "post /admin/agent-routes":
+		op["requestBody"] = requestBody("AgentRouteWriteRequest")
+		responses["201"] = map[string]any{"description": "Created", "content": jsonContent(schemaRef("AgentRouteWriteResponse"))}
 	case "get /admin/stats":
 		responses["200"] = successResponse("AdminStatsResponse")
 	case "get /admin/ops/status":
@@ -787,6 +792,7 @@ func appUIOpenAPISchemas() map[string]any {
 func modelCatalogOpenAPISchemas() map[string]any {
 	modelSource := map[string]any{"type": "string", "enum": []string{"live", "cache", "agent_route"}}
 	providerRef := map[string]any{"type": "string", "minLength": providerRefLength, "maxLength": providerRefLength, "pattern": `^prv_[A-Za-z0-9_-]{43}$`}
+	stringArray := map[string]any{"type": "array", "items": map[string]any{"type": "string"}}
 	return map[string]any{
 		"ProviderPublic": map[string]any{
 			"type": "object", "additionalProperties": false,
@@ -802,6 +808,35 @@ func modelCatalogOpenAPISchemas() map[string]any {
 		"ProviderListResponse": map[string]any{
 			"type": "object", "additionalProperties": false, "required": []string{"providers"},
 			"properties": map[string]any{"providers": map[string]any{"type": "array", "items": schemaRef("ProviderPublic")}},
+		},
+		"AgentRoute": map[string]any{
+			"type": "object", "additionalProperties": false,
+			"required": []string{"id", "virtual_model", "name", "enabled", "backing_model", "provider", "mcp_upstreams", "allowed_tools", "system_prompt", "max_steps", "max_cost_krw", "created_by", "created_at", "updated_at"},
+			"properties": map[string]any{
+				"id": map[string]any{"type": "string"}, "virtual_model": map[string]any{"type": "string"}, "name": map[string]any{"type": "string"},
+				"enabled": map[string]any{"type": "boolean"}, "backing_model": map[string]any{"type": "string"},
+				"provider": map[string]any{"type": "string"}, "provider_ref": providerRef,
+				"mcp_upstreams": stringArray, "allowed_tools": stringArray, "system_prompt": map[string]any{"type": "string"},
+				"max_steps": map[string]any{"type": "integer", "minimum": 0, "maximum": 16}, "max_cost_krw": map[string]any{"type": "number", "minimum": 0},
+				"created_by": map[string]any{"type": "string"}, "created_at": map[string]any{"type": "string"}, "updated_at": map[string]any{"type": "string"},
+			},
+		},
+		"AgentRouteWriteRequest": map[string]any{
+			"type": "object", "additionalProperties": false, "required": []string{"virtual_model"},
+			"properties": map[string]any{
+				"id": map[string]any{"type": "string"}, "virtual_model": map[string]any{"type": "string", "minLength": 1}, "name": map[string]any{"type": "string"},
+				"enabled": map[string]any{"type": "boolean"}, "backing_model": map[string]any{"type": "string"}, "provider": map[string]any{"type": "string"},
+				"mcp_upstreams": stringArray, "allowed_tools": stringArray, "system_prompt": map[string]any{"type": "string"},
+				"max_steps": map[string]any{"type": "integer", "minimum": 0, "maximum": 16}, "max_cost_krw": map[string]any{"type": "number", "minimum": 0},
+			},
+		},
+		"AgentRouteListResponse": map[string]any{
+			"type": "object", "additionalProperties": false, "required": []string{"agent_routes", "count", "note"},
+			"properties": map[string]any{"agent_routes": map[string]any{"type": "array", "items": schemaRef("AgentRoute")}, "count": map[string]any{"type": "integer", "minimum": 0}, "note": map[string]any{"type": "string"}},
+		},
+		"AgentRouteWriteResponse": map[string]any{
+			"type": "object", "additionalProperties": false, "required": []string{"agent_route"},
+			"properties": map[string]any{"agent_route": schemaRef("AgentRoute")},
 		},
 		"AdminModelDeprecation": map[string]any{
 			"type": "object", "additionalProperties": false,

@@ -89,6 +89,10 @@ func (s *Server) dataDir(fallbackPath string) string {
 
 // opsStatusSnapshot assembles the current operational status.
 func (s *Server) opsStatusSnapshot(ctx context.Context) OpsStatus {
+	return s.opsStatusSnapshotWithProviderRef(ctx, nil)
+}
+
+func (s *Server) opsStatusSnapshotWithProviderRef(ctx context.Context, providerRef providerReferenceFunc) OpsStatus {
 	var partialFailures []OpsStatusPartialFailure
 	scores, err := s.db.ProviderHealthScores(ctx, time.Now().Add(-opsStatusWindow))
 	if err != nil {
@@ -101,7 +105,7 @@ func (s *Server) opsStatusSnapshot(ctx context.Context) OpsStatus {
 	if scores == nil {
 		scores = []store.ProviderHealthScore{}
 	}
-	scores = boundedProviderHealthScores(scores, nil)
+	scores = boundedProviderHealthScores(scores, providerRef)
 
 	fb, err := s.logger.FallbackStats()
 	if err != nil {
@@ -270,7 +274,11 @@ func (s *Server) handleOpsRisk(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
 		return
 	}
-	status := s.opsStatusSnapshot(r.Context())
+	var providerRef providerReferenceFunc
+	if r.Header.Get("X-Vibe-UI") == "app" {
+		providerRef = s.providerRefSnapshot()
+	}
+	status := s.opsStatusSnapshotWithProviderRef(r.Context(), providerRef)
 	writeJSON(w, http.StatusOK, buildOpsRiskResponse(status))
 }
 
@@ -283,5 +291,9 @@ func (s *Server) handleOpsStatus(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
 		return
 	}
-	writeJSON(w, http.StatusOK, s.opsStatusSnapshot(r.Context()))
+	var providerRef providerReferenceFunc
+	if r.Header.Get("X-Vibe-UI") == "app" {
+		providerRef = s.providerRefSnapshot()
+	}
+	writeJSON(w, http.StatusOK, s.opsStatusSnapshotWithProviderRef(r.Context(), providerRef))
 }

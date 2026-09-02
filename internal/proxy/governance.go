@@ -93,6 +93,7 @@ func (s *Server) enforceOpenAIGovernance(w http.ResponseWriter, r *http.Request,
 	}
 
 	decision := s.evaluateGovernance(r, gctx)
+	decision.Reason = boundedProviderMetadataText(decision.Reason, gctx.Provider)
 	if sink != nil {
 		*sink = append(*sink, stampPolicyDecisionEvents(decision.PolicyEvents)...)
 	} else {
@@ -300,6 +301,8 @@ func ruleWouldAct(rule store.PolicyRule) bool {
 }
 
 func policyDecisionEvent(g governanceContext, rule store.PolicyRule, decision, reason string) store.PolicyDecisionEvent {
+	providerLabel := boundedModelsProviderLabelOrEmpty(g.Provider)
+	reason = boundedProviderMetadataText(reason, g.Provider)
 	return store.PolicyDecisionEvent{
 		RequestID:       g.RequestID,
 		APIKeyID:        g.APIKeyID,
@@ -313,7 +316,7 @@ func policyDecisionEvent(g governanceContext, rule store.PolicyRule, decision, r
 		Decision:        decision,
 		Reason:          reason,
 		Model:           g.Model,
-		Provider:        g.Provider,
+		Provider:        providerLabel,
 		RiskScore:       g.RiskScore,
 		ComplexityScore: g.ComplexityScore,
 		CostKRW:         g.CostKRW,
@@ -334,7 +337,7 @@ func defaultPolicyDecisionEvent(g governanceContext) store.PolicyDecisionEvent {
 		Decision:        "default",
 		Reason:          "no governance policy matched; default allow",
 		Model:           g.Model,
-		Provider:        g.Provider,
+		Provider:        boundedModelsProviderLabelOrEmpty(g.Provider),
 		RiskScore:       g.RiskScore,
 		ComplexityScore: g.ComplexityScore,
 		CostKRW:         g.CostKRW,
@@ -536,7 +539,10 @@ func (s *Server) recordSecretEvents(r *http.Request, requestID, action string, a
 
 func (s *Server) writeGovernanceOpenAIBlock(w http.ResponseWriter, meta *store.LogRecord, status int, typ, code, message string) {
 	meta.Request.StatusCode = status
-	meta.Request.Provider = firstNonEmpty(meta.Request.Provider, "blocked")
+	meta.Request.Provider = boundedModelsProviderLabel(firstNonEmpty(meta.Request.Provider, "blocked"))
+	if meta.Routing != nil {
+		meta.Routing.SelectedProvider = boundedModelsProviderLabel(meta.Routing.SelectedProvider)
+	}
 	meta.Request.Error = message
 	s.enqueue(*meta)
 	writeOpenAIError(w, status, message, typ, code)

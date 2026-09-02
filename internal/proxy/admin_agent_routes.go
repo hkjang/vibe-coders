@@ -20,6 +20,11 @@ import (
 // The backing LLM is called with the provider's own credentials (not the caller's), so no proxy
 // key is needed; RBAC is skipped because the caller is already an authorized admin.
 func (s *Server) handleAgentRouteTest(w http.ResponseWriter, r *http.Request, route store.AgentRoute) {
+	appProjection := r.Header.Get("X-Vibe-UI") == "app"
+	var providerRef providerReferenceFunc
+	if appProjection {
+		providerRef = s.providerRefSnapshot()
+	}
 	var body struct {
 		Prompt string `json:"prompt"`
 	}
@@ -59,7 +64,7 @@ func (s *Server) handleAgentRouteTest(w http.ResponseWriter, r *http.Request, ro
 	steps, _ := strconv.Atoi(rec.Header().Get("X-Agent-Steps"))
 	toolCalls, _ := strconv.Atoi(rec.Header().Get("X-Agent-Tool-Calls"))
 	tools, _ := strconv.Atoi(rec.Header().Get("X-Agent-Tools"))
-	writeJSON(w, http.StatusOK, map[string]any{
+	response := map[string]any{
 		"status":        rec.Code,
 		"ok":            rec.Code == http.StatusOK,
 		"prompt":        prompt,
@@ -69,7 +74,58 @@ func (s *Server) handleAgentRouteTest(w http.ResponseWriter, r *http.Request, ro
 		"tools":         tools,
 		"steps":         steps,
 		"tool_calls":    toolCalls,
+	}
+	if appProjection && strings.TrimSpace(route.Provider) != "" {
+		response["provider_ref"] = providerRef(route.Provider)
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
+func projectAgentRouteForApp(route store.AgentRoute, providerRef providerReferenceFunc) store.AgentRoute {
+	rawProvider := route.Provider
+	route.ProviderRef = ""
+	if strings.TrimSpace(rawProvider) != "" {
+		route.Provider = boundedModelsProviderLabel(rawProvider)
+		route.ProviderRef = providerRef(rawProvider)
+	}
+	return route
+}
+
+func agentRouteAuditJSON(route store.AgentRoute) string {
+	return auditJSON(map[string]any{
+		"id": route.ID, "virtual_model": route.VirtualModel,
+		"provider":      boundedModelsProviderLabel(route.Provider),
+		"backing_model": route.BackingModel, "mcp": route.MCPUpstreams, "enabled": route.Enabled,
 	})
+}
+
+func (s *Server) validateAgentRouteProvider(ctx context.Context, provider string, existing store.AgentRoute, existingFound bool) (string, string) {
+	provider = strings.TrimSpace(provider)
+	if provider == "" {
+		return "", ""
+	}
+	// Rows created before provider-label validation may contain an unsafe or reserved
+	// name. Preserve an exact unchanged binding so operators can edit unrelated route
+	// fields; never permit a new route or changed binding to introduce one.
+	legacyExact := existingFound && provider == strings.TrimSpace(existing.Provider) &&
+		(!modelsProviderLabelSafe(provider) || modelsProviderNameReserved(provider))
+	if legacyExact {
+		return "", ""
+	}
+	if modelsProviderNameReserved(provider) {
+		return "agent_route_provider_reserved", "provider name is reserved"
+	}
+	if !modelsProviderLabelSafe(provider) {
+		return "agent_route_provider_invalid", "provider name contains unsafe metadata"
+	}
+	_, found, err := s.db.GetProvider(ctx, provider)
+	if err != nil {
+		return "agent_route_provider_lookup_failed", "provider validation is temporarily unavailable"
+	}
+	if !found {
+		return "agent_route_provider_not_found", "provider is not configured"
+	}
+	return "", ""
 }
 
 // Admin CRUD for Agent Routes (operator-defined agentic virtual models).
@@ -81,10 +137,17 @@ func (s *Server) handleAgentRoutes(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.Method {
 	case http.MethodGet:
+		appProjection := r.Header.Get("X-Vibe-UI") == "app"
 		routes, err := s.db.ListAgentRoutes(r.Context())
 		if err != nil {
 			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "agent_routes_failed")
 			return
+		}
+		if appProjection {
+			providerRef := s.providerRefSnapshot()
+			for index := range routes {
+				routes[index] = projectAgentRouteForApp(routes[index], providerRef)
+			}
 		}
 		writeJSON(w, http.StatusOK, map[string]any{
 			"agent_routes": routes, "count": len(routes),
@@ -97,6 +160,9 @@ func (s *Server) handleAgentRoutes(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		a.VirtualModel = strings.TrimSpace(a.VirtualModel)
+		a.Provider = strings.TrimSpace(a.Provider)
+		// provider_ref is output-only. Never trust or echo a client-supplied value.
+		a.ProviderRef = ""
 		if a.VirtualModel == "" {
 			writeOpenAIError(w, http.StatusBadRequest, "virtual_model is required", "invalid_request_error", "missing_virtual_model")
 			return
@@ -106,14 +172,40 @@ func (s *Server) handleAgentRoutes(w http.ResponseWriter, r *http.Request) {
 			writeOpenAIError(w, http.StatusBadRequest, "virtual_model collides with a built-in model name — choose another (e.g. vibe/agent-<name>)", "invalid_request_error", "reserved_model")
 			return
 		}
+		var existing store.AgentRoute
+		existingFound := false
+		if a.ID != "" {
+			var lookupErr error
+			existing, existingFound, lookupErr = s.db.GetAgentRoute(r.Context(), a.ID)
+			if lookupErr != nil {
+				writeOpenAIError(w, http.StatusServiceUnavailable, "agent route validation is temporarily unavailable", "server_error", "agent_route_lookup_failed")
+				return
+			}
+		}
 		if a.ID == "" {
 			// Keep updates keyed by the (unique) virtual model when the client omits an id.
-			if existing, ok, _ := s.db.GetAgentRouteByModel(r.Context(), a.VirtualModel); ok {
+			foundRoute, ok, lookupErr := s.db.GetAgentRouteByModel(r.Context(), a.VirtualModel)
+			if lookupErr != nil {
+				writeOpenAIError(w, http.StatusServiceUnavailable, "agent route validation is temporarily unavailable", "server_error", "agent_route_lookup_failed")
+				return
+			}
+			if ok {
+				existing, existingFound = foundRoute, true
 				a.ID = existing.ID
 				a.CreatedAt = existing.CreatedAt
 			} else {
 				a.ID = newID("agr")
 			}
+		}
+		if code, message := s.validateAgentRouteProvider(r.Context(), a.Provider, existing, existingFound); code != "" {
+			status := http.StatusBadRequest
+			typ := "invalid_request_error"
+			if code == "agent_route_provider_lookup_failed" {
+				status = http.StatusServiceUnavailable
+				typ = "server_error"
+			}
+			writeOpenAIError(w, status, message, typ, code)
+			return
 		}
 		if a.Name == "" {
 			a.Name = a.VirtualModel
@@ -133,8 +225,12 @@ func (s *Server) handleAgentRoutes(w http.ResponseWriter, r *http.Request) {
 			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "agent_route_save_failed")
 			return
 		}
-		s.auditAdmin(r, "agent_route.upsert", "", auditJSON(map[string]any{"id": a.ID, "virtual_model": a.VirtualModel, "provider": a.Provider, "backing_model": a.BackingModel, "mcp": a.MCPUpstreams, "enabled": a.Enabled}))
-		writeJSON(w, http.StatusCreated, map[string]any{"agent_route": a})
+		s.auditAdmin(r, "agent_route.upsert", "", agentRouteAuditJSON(a))
+		responseRoute := a
+		if r.Header.Get("X-Vibe-UI") == "app" {
+			responseRoute = projectAgentRouteForApp(a, s.providerRefSnapshot())
+		}
+		writeJSON(w, http.StatusCreated, map[string]any{"agent_route": responseRoute})
 	default:
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
 	}
@@ -214,6 +310,9 @@ func (s *Server) handleAgentRouteByID(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.Method {
 	case http.MethodGet:
+		if r.Header.Get("X-Vibe-UI") == "app" {
+			route = projectAgentRouteForApp(route, s.providerRefSnapshot())
+		}
 		writeJSON(w, http.StatusOK, map[string]any{"agent_route": route})
 	case http.MethodDelete:
 		if err := s.db.DeleteAgentRoute(r.Context(), id); err != nil {

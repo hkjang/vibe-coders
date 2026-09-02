@@ -90,7 +90,9 @@ func TestAgentRouteEndToEnd(t *testing.T) {
 	if gotModel != "gpt-4o" {
 		t.Fatalf("backing call used wrong model: %q", gotModel)
 	}
-	_ = gotProvider // X-Proxy-Provider is consumed by the gateway, not forwarded upstream
+	if gotProvider != "" {
+		t.Fatalf("internal X-Proxy-Provider leaked upstream: %q", gotProvider)
+	}
 }
 
 func TestAgentRouteLookupFailureFailsClosed(t *testing.T) {

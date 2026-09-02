@@ -19,6 +19,7 @@ type AgentRoute struct {
 	Enabled      bool     `json:"enabled"`
 	BackingModel string   `json:"backing_model"` // concrete model the loop calls; "" → auto-select
 	Provider     string   `json:"provider"`      // pin the backing LLM to this provider; "" → normal routing
+	ProviderRef  string   `json:"provider_ref,omitempty"`
 	MCPUpstreams []string `json:"mcp_upstreams"` // MCP upstream IDs exposed as tools; empty → all registered
 	AllowedTools []string `json:"allowed_tools"` // namespaced or bare tool names to expose; empty → all tools of the servers
 	SystemPrompt string   `json:"system_prompt"`

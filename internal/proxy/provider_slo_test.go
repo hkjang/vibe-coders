@@ -14,7 +14,10 @@ import (
 )
 
 func TestProviderSLOWriteReturnsPersistedTimestamp(t *testing.T) {
-	_, _, gateway := newAdminModelsTestServer(t, "")
+	_, db, gateway := newAdminModelsTestServer(t, "")
+	if err := db.UpsertProvider(t.Context(), store.ProviderConfig{Name: "openai", BaseURL: "https://example.invalid", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
 	createdResponse := postJSON(t, gateway.URL+"/admin/providers/slo", "", map[string]any{
 		"provider": "openai", "availability_target": 0.99, "enabled": true,
 	})
@@ -56,6 +59,11 @@ func TestProviderSLOWriteReturnsPersistedTimestamp(t *testing.T) {
 func TestProviderSLOAppProjectionUsesOpaqueProviderRefsWithoutChangingLegacyShape(t *testing.T) {
 	server, db, gateway := newAdminModelsTestServer(t, "")
 	unsafeProvider := "sk-ant-legacy-slo-provider-secret"
+	for _, provider := range []string{unsafeProvider, "safe-provider"} {
+		if err := db.UpsertProvider(t.Context(), store.ProviderConfig{Name: provider, BaseURL: "https://example.invalid", Enabled: true}); err != nil {
+			t.Fatal(err)
+		}
+	}
 	for _, slo := range []store.ProviderSLO{
 		{Provider: unsafeProvider, AvailabilityTarget: 0.99, Enabled: true},
 		{Provider: "safe-provider", AvailabilityTarget: 0.95, Enabled: true},
@@ -137,6 +145,31 @@ func TestProviderSLOAppProjectionUsesOpaqueProviderRefsWithoutChangingLegacyShap
 		values := audit.BeforeValue + audit.AfterValue
 		if strings.Contains(values, unsafeProvider) || strings.Contains(values, "provider_ref") {
 			t.Fatalf("SLO audit persisted unsafe or rotating identity: %+v", audit)
+		}
+	}
+}
+
+func TestProviderSLORejectsUnknownAndNewUnsafeProvider(t *testing.T) {
+	_, db, gateway := newAdminModelsTestServer(t, "")
+	unsafeProvider := "sk-ant-new-slo-secret"
+	if err := db.UpsertProvider(t.Context(), store.ProviderConfig{Name: unsafeProvider, BaseURL: "https://example.invalid", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		provider string
+		code     string
+	}{
+		{provider: "unknown-provider", code: "provider_slo_provider_not_found"},
+		{provider: unsafeProvider, code: "provider_slo_provider_invalid"},
+		{provider: "vibe", code: "provider_slo_provider_reserved"},
+	} {
+		response := postJSON(t, gateway.URL+"/admin/providers/slo", "", map[string]any{
+			"provider": tc.provider, "availability_target": 0.99,
+		})
+		body, _ := io.ReadAll(response.Body)
+		response.Body.Close()
+		if response.StatusCode != http.StatusBadRequest || !strings.Contains(string(body), tc.code) || strings.Contains(string(body), tc.provider) {
+			t.Fatalf("provider=%q status=%d body=%s", tc.provider, response.StatusCode, body)
 		}
 	}
 }

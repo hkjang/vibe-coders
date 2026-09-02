@@ -583,6 +583,21 @@ func boundedModelsProviderLabel(name string) string {
 	return name
 }
 
+func boundedModelsProviderLabelOrEmpty(name string) string {
+	if strings.TrimSpace(name) == "" {
+		return ""
+	}
+	return boundedModelsProviderLabel(name)
+}
+
+func boundedProviderMetadataText(value, rawProvider string) string {
+	label := boundedModelsProviderLabelOrEmpty(rawProvider)
+	if rawProvider != "" && label != rawProvider {
+		return strings.ReplaceAll(value, rawProvider, label)
+	}
+	return value
+}
+
 func modelsProviderLabelSafe(name string) bool {
 	if name == "" || len(name) > maxModelsProviderNameBytes || !utf8.ValidString(name) || strings.TrimSpace(name) != name || strings.ContainsRune(name, ',') {
 		return false
@@ -594,7 +609,7 @@ func modelsProviderLabelSafe(name string) bool {
 }
 
 func modelsProviderNameReserved(name string) bool {
-	switch name {
+	switch strings.ToLower(strings.TrimSpace(name)) {
 	case "*", "vibe", "aggregate", "[provider-name-omitted]":
 		return true
 	default:

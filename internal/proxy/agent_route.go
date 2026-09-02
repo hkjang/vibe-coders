@@ -101,7 +101,7 @@ func (rc *requestPipeline) stepAgentRoute() bool {
 		rc.body = rewritten
 		if provider := strings.TrimSpace(route.Provider); provider != "" {
 			r.Header.Set("X-Proxy-Provider", provider)
-			w.Header().Set("X-Agent-Provider", provider)
+			w.Header().Set("X-Agent-Provider", boundedModelsProviderLabel(provider))
 		}
 		w.Header().Set("X-Agent-Route", route.VirtualModel)
 		w.Header().Set("X-Agent-Backing-Model", backingModel)
@@ -202,7 +202,7 @@ func (s *Server) handleAgentRouteChatWithRequestedModel(w http.ResponseWriter, r
 		meta.Request.RequestedModel = requestedModel
 	}
 	meta.Request.ResolvedModel = route.VirtualModel
-	meta.Request.Provider = firstNonEmpty(route.Provider, "agent_route")
+	meta.Request.Provider = boundedModelsProviderLabel(firstNonEmpty(route.Provider, "agent_route"))
 	meta.Request.RouteReason = "agent_route"
 	meta.Request.RouteDetail = route.VirtualModel
 
@@ -255,7 +255,7 @@ func (s *Server) handleAgentRouteChatWithRequestedModel(w http.ResponseWriter, r
 	w.Header().Set("X-Agent-Route", route.VirtualModel)
 	w.Header().Set("X-Agent-Backing-Model", backingModel)
 	if route.Provider != "" {
-		w.Header().Set("X-Agent-Provider", route.Provider)
+		w.Header().Set("X-Agent-Provider", boundedModelsProviderLabel(route.Provider))
 	}
 	w.Header().Set("X-Agent-Tools", strconv.Itoa(len(ts.tools)))
 
@@ -274,7 +274,8 @@ func (s *Server) handleAgentRouteChatWithRequestedModel(w http.ResponseWriter, r
 	// The loop produced no content (e.g. backing model error). Surface it rather than hang.
 	msg := "agent route produced no answer"
 	if outcome.Err != nil {
-		msg = "agent route failed: " + outcome.Err.Error()
+		msg = "agent route request failed"
+		meta.Request.Error = "agent_route_upstream_failed"
 	}
 	writeOpenAIError(w, http.StatusBadGateway, msg, "server_error", "agent_route_failed")
 	return meta

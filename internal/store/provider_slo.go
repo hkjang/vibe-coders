@@ -2,6 +2,8 @@ package store
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"time"
 )
 
@@ -43,6 +45,21 @@ func (s *SQLStore) ListProviderSLOs(ctx context.Context) ([]ProviderSLO, error) 
 		out = append(out, slo)
 	}
 	return out, rows.Err()
+}
+
+func (s *SQLStore) GetProviderSLO(ctx context.Context, provider string) (ProviderSLO, bool, error) {
+	row := s.db.QueryRowContext(ctx, s.bind(`SELECT provider, availability_target, p95_latency_target_ms, error_rate_target, fallback_rate_target, enabled, COALESCE(note, ''), updated_at
+		FROM provider_slos WHERE provider = ?`), provider)
+	var slo ProviderSLO
+	var enabled int
+	if err := row.Scan(&slo.Provider, &slo.AvailabilityTarget, &slo.P95LatencyTargetMS, &slo.ErrorRateTarget, &slo.FallbackRateTarget, &enabled, &slo.Note, &slo.UpdatedAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ProviderSLO{}, false, nil
+		}
+		return ProviderSLO{}, false, err
+	}
+	slo.Enabled = enabled == 1
+	return slo, true, nil
 }
 
 func (s *SQLStore) UpsertProviderSLO(ctx context.Context, slo *ProviderSLO) error {

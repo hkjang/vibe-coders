@@ -91,6 +91,28 @@ func (s *Server) handleProviderSLOs(w http.ResponseWriter, r *http.Request) {
 			writeOpenAIError(w, http.StatusBadRequest, "provider is required", "invalid_request_error", "missing_provider")
 			return
 		}
+		_, existingLegacySLO, sloLookupErr := s.db.GetProviderSLO(r.Context(), p.Provider)
+		if sloLookupErr != nil {
+			writeOpenAIError(w, http.StatusServiceUnavailable, "provider SLO validation is temporarily unavailable", "server_error", "provider_slo_lookup_failed")
+			return
+		}
+		if modelsProviderNameReserved(p.Provider) && !existingLegacySLO {
+			writeOpenAIError(w, http.StatusBadRequest, "provider name is reserved", "invalid_request_error", "provider_slo_provider_reserved")
+			return
+		}
+		if !modelsProviderLabelSafe(p.Provider) && !existingLegacySLO {
+			writeOpenAIError(w, http.StatusBadRequest, "provider name contains unsafe metadata", "invalid_request_error", "provider_slo_provider_invalid")
+			return
+		}
+		_, providerFound, lookupErr := s.db.GetProvider(r.Context(), p.Provider)
+		if lookupErr != nil {
+			writeOpenAIError(w, http.StatusServiceUnavailable, "provider validation is temporarily unavailable", "server_error", "provider_slo_provider_lookup_failed")
+			return
+		}
+		if !providerFound {
+			writeOpenAIError(w, http.StatusBadRequest, "provider is not configured", "invalid_request_error", "provider_slo_provider_not_found")
+			return
+		}
 		enabled := true
 		if p.Enabled != nil {
 			enabled = *p.Enabled
@@ -103,7 +125,7 @@ func (s *Server) handleProviderSLOs(w http.ResponseWriter, r *http.Request) {
 			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "provider_slo_save_failed")
 			return
 		}
-		s.auditAdmin(r, "provider_slo.upsert", "", providerSLOAuditJSON(slo))
+		s.auditAdminWithProviderTarget(r, "provider_slo.upsert", "", providerSLOAuditJSON(slo), slo.Provider)
 		responseSLO := slo
 		if appProjection {
 			responseSLO.ProviderRef = providerRef(slo.Provider)
@@ -125,7 +147,7 @@ func (s *Server) handleProviderSLOs(w http.ResponseWriter, r *http.Request) {
 			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "provider_slo_delete_failed")
 			return
 		}
-		s.auditAdmin(r, "provider_slo.delete", auditJSON(map[string]string{"provider": boundedModelsProviderLabel(provider)}), "")
+		s.auditAdminWithProviderTarget(r, "provider_slo.delete", auditJSON(map[string]string{"provider": boundedModelsProviderLabel(provider)}), "", provider)
 		response := map[string]string{"provider": provider, "status": "deleted"}
 		if appProjection {
 			response["provider"] = boundedModelsProviderLabel(provider)

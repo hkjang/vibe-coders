@@ -534,7 +534,7 @@ func (rc *requestPipeline) stepUpstream() bool {
 			rc.writeModelsFallbackError(&meta, status, code, time.Now())
 			return false
 		}
-		writeOpenAIError(w, http.StatusBadGateway, err.Error(), "server_error", "provider_unavailable")
+		writeOpenAIError(w, http.StatusBadGateway, "provider is unavailable", "server_error", "provider_unavailable")
 		return false
 	}
 	if balanced.Provider != "" {
@@ -543,10 +543,7 @@ func (rc *requestPipeline) stepUpstream() bool {
 		provider.Reason, provider.Detail = balanced.Reason, balanced.Detail
 	}
 	if rc.authCtx != nil && !listAllows(provider.Name, rc.authCtx.AllowedProviders, rc.authCtx.DeniedProviders) {
-		providerLabel := provider.Name
-		if rc.modelsAggregateFallback {
-			providerLabel = boundedModelsProviderLabel(provider.Name)
-		}
+		providerLabel := boundedModelsProviderLabel(provider.Name)
 		_ = s.db.InsertAuditEvent(r.Context(), store.AuthEvent{ID: newID("ae"), EventType: "model_denied", APIKeyID: rc.authCtx.APIKeyID, TeamID: rc.authCtx.TeamID, IP: clientIP(r), UserAgent: r.UserAgent(), Detail: "provider:" + providerLabel, CreatedAt: time.Now().UTC()})
 		writeOpenAIError(w, http.StatusForbidden, "provider is not allowed by auth policy", "permission_error", "provider_denied")
 		return false
@@ -576,6 +573,15 @@ func (rc *requestPipeline) stepUpstream() bool {
 			return false
 		}
 	}
+	// Provider names remain raw only while routing and governance need the configured
+	// identity. From this point onward request/routing logs and client metadata use a
+	// bounded label, including legacy rows created before validation existed.
+	selectedProviderRaw := provider.Name
+	meta.Request.Provider = boundedModelsProviderLabel(provider.Name)
+	if routingPlan != nil {
+		routingPlan.SelectedProvider = meta.Request.Provider
+		meta.Routing = routingPlan.toStore(meta.Request.ID, traceID, meta.Request.Provider)
+	}
 
 	// Identify failover candidates: only when the client did NOT explicitly pin a provider.
 	failoverCandidates := []string{}
@@ -592,11 +598,15 @@ func (rc *requestPipeline) stepUpstream() bool {
 			var demoted []string
 			failoverCandidates, demoted = s.demoteUnhealthyCandidates(r.Context(), failoverCandidates)
 			if len(demoted) > 0 {
+				safeDemoted := make([]string, 0, len(demoted))
+				for _, name := range demoted {
+					safeDemoted = append(safeDemoted, boundedModelsProviderLabel(name))
+				}
 				// Say so: reordering that cannot be seen is exactly the opacity this
 				// gateway's routing work has been undoing.
-				w.Header().Set("X-Health-Demoted", strings.Join(demoted, ","))
+				w.Header().Set("X-Health-Demoted", strings.Join(safeDemoted, ","))
 				slog.Info("health demoted failover candidates",
-					"demoted", demoted, "threshold", s.healthDemoteThreshold(), "trace_id", traceID)
+					"demoted", safeDemoted, "threshold", s.healthDemoteThreshold(), "trace_id", traceID)
 			}
 		}
 	}
@@ -638,8 +648,9 @@ func (rc *requestPipeline) stepUpstream() bool {
 		status := statusForUpstreamError(err)
 		meta.Request.StatusCode = status
 		meta.Request.LatencyMS = time.Since(start).Milliseconds()
-		meta.Request.Error = err.Error()
-		meta.Request.FallbackReason = err.Error()
+		reason := fallbackReasonForError(err)
+		meta.Request.Error = "upstream_" + reason
+		meta.Request.FallbackReason = reason
 		if routingPlan != nil {
 			routingPlan.FallbackPath = append(routingPlan.FallbackPath, failoverPath...)
 			meta.Routing = routingPlan.toStore(meta.Request.ID, traceID, meta.Request.Provider)
@@ -651,8 +662,12 @@ func (rc *requestPipeline) stepUpstream() bool {
 		s.metrics.ObserveLLMEvaluations(meta.Evaluations)
 		rc.recordSkillRun(rc.skillName, rc.skillVersion, "error", meta.Request.Model, 0, meta.Request.LatencyMS)
 		s.enqueue(meta)
-		s.notifyMattermost(r.Context(), "provider", "Provider 장애: "+meta.Request.Provider+" 요청 실패 ("+err.Error()+")")
-		writeOpenAIError(w, status, "upstream request failed: "+err.Error(), "server_error", "upstream_request_failed")
+		s.notifyMattermost(r.Context(), "provider", "Provider 장애: "+meta.Request.Provider+" 요청 실패 ("+reason+")")
+		message := "upstream request failed"
+		if reason == "timeout" {
+			message = "upstream request timed out"
+		}
+		writeOpenAIError(w, status, message, "server_error", "upstream_request_failed")
 		return false
 	}
 	defer resp.Body.Close()
@@ -663,7 +678,7 @@ func (rc *requestPipeline) stepUpstream() bool {
 			meta.Request.FallbackFrom = boundedModelsProviderLabel(failoverFrom)
 			meta.Request.FallbackReason = "models_fallback"
 		} else {
-			meta.Request.FallbackFrom = failoverFrom
+			meta.Request.FallbackFrom = boundedModelsProviderLabel(failoverFrom)
 			meta.Request.FallbackReason = failoverReason
 		}
 	}
@@ -671,16 +686,13 @@ func (rc *requestPipeline) stepUpstream() bool {
 		if rc.modelsAggregateFallback {
 			meta.Request.Provider = boundedModelsProviderLabel(resolvedName)
 		} else {
-			meta.Request.Provider = resolvedName
+			meta.Request.Provider = boundedModelsProviderLabel(resolvedName)
 		}
 	}
 	// A failover means the bound provider did not serve this turn. Move the binding to
 	// the one that did, otherwise every later turn would retry the bad node first.
 	if rc.affinity.Key != "" && meta.Request.Provider != "" {
-		rebindProvider := meta.Request.Provider
-		if rc.modelsAggregateFallback {
-			rebindProvider = firstNonEmpty(resolvedName, provider.Name)
-		}
+		rebindProvider := firstNonEmpty(resolvedName, selectedProviderRaw)
 		s.balancer.rebind(meta.Request.Model, rc.affinity.Key, rebindProvider, time.Now())
 	}
 	meta.Request.ResolvedModel = firstNonEmpty(meta.Request.ResolvedModel, meta.Request.Model)
@@ -889,7 +901,7 @@ func (rc *requestPipeline) stepUpstream() bool {
 //	X-Failover-Path     full chain of actual failover hops (comma separated)
 func setRoutingHeaders(w http.ResponseWriter, selected resolvedProvider, servedBy, failoverFrom, failoverReason string, failoverPath []string) {
 	if name := firstNonEmpty(servedBy, selected.Name); name != "" {
-		w.Header().Set("X-Provider", name)
+		w.Header().Set("X-Provider", boundedModelsProviderLabel(name))
 	}
 	if selected.Reason != "" {
 		w.Header().Set("X-Route-Reason", selected.Reason)
@@ -898,7 +910,7 @@ func setRoutingHeaders(w http.ResponseWriter, selected resolvedProvider, servedB
 		w.Header().Set("X-Route-Detail", selected.Detail)
 	}
 	if failoverFrom != "" {
-		w.Header().Set("X-Failover-From", failoverFrom)
+		w.Header().Set("X-Failover-From", boundedModelsProviderLabel(failoverFrom))
 	}
 	if failoverReason != "" {
 		w.Header().Set("X-Failover-Reason", failoverReason)

@@ -133,7 +133,7 @@ func (b *providerBalancer) pick(model, sessionID string, candidates []string, mo
 			return balancerDecision{
 				Provider: chosen,
 				Reason:   "sticky_hash",
-				Detail:   "session " + shortSession(sessionID) + " → " + chosen + " (결정적)",
+				Detail:   "session " + shortSession(sessionID) + " → " + boundedModelsProviderLabel(chosen) + " (결정적)",
 			}, true
 		}
 	}

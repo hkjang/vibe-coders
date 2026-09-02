@@ -1272,7 +1272,7 @@ func (s *Server) handleProviders(w http.ResponseWriter, r *http.Request) {
 			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "provider_save_failed")
 			return
 		}
-		s.auditAdmin(r, "provider.upsert", providerAuditJSON(before), providerAuditJSON(provider))
+		s.auditAdminWithProviderTarget(r, "provider.upsert", providerAuditJSON(before), providerAuditJSON(provider), provider.Name)
 		responseName := provider.Name
 		if appProjection {
 			responseName = boundedModelsProviderLabel(responseName)
@@ -1308,9 +1308,10 @@ func (s *Server) handleProviderByName(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.Method {
 	case http.MethodDelete:
+		displayName := boundedModelsProviderLabel(name)
 		before, found, _ := s.db.GetProvider(r.Context(), name)
 		if !found {
-			writeOpenAIError(w, http.StatusNotFound, "provider not found: "+name, "invalid_request_error", "provider_not_found")
+			writeOpenAIError(w, http.StatusNotFound, "provider not found: "+displayName, "invalid_request_error", "provider_not_found")
 			return
 		}
 		deleted, err := s.db.DeleteProvider(r.Context(), name)
@@ -1319,11 +1320,11 @@ func (s *Server) handleProviderByName(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if !deleted {
-			writeOpenAIError(w, http.StatusNotFound, "provider not found: "+name, "invalid_request_error", "provider_not_found")
+			writeOpenAIError(w, http.StatusNotFound, "provider not found: "+displayName, "invalid_request_error", "provider_not_found")
 			return
 		}
-		s.auditAdmin(r, "provider.delete", providerAuditJSON(before), "")
-		writeJSON(w, http.StatusOK, map[string]string{"deleted": name})
+		s.auditAdminWithProviderTarget(r, "provider.delete", providerAuditJSON(before), "", before.Name)
+		writeJSON(w, http.StatusOK, map[string]string{"deleted": displayName})
 	default:
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
 	}
@@ -1637,10 +1638,7 @@ type resolvedProvider struct {
 func (s *Server) dialUpstream(reqCtx context.Context, r *http.Request, body []byte, primary resolvedProvider, traceID string, failoverCandidates []string) (*http.Response, string, string, string, []string, []byte, string, http.Header, error) {
 	boundModelsMetadata := r.Method == http.MethodGet && r.URL.Path == "/v1/models" && !clientPinnedProvider(r)
 	providerLabel := func(name string) string {
-		if boundModelsMetadata {
-			return boundedModelsProviderLabel(name)
-		}
-		return name
+		return boundedModelsProviderLabel(name)
 	}
 	attempts := []providerAttempt{{provider: primary}}
 	for _, name := range failoverCandidates {
@@ -1649,11 +1647,11 @@ func (s *Server) dialUpstream(reqCtx context.Context, r *http.Request, body []by
 		fakeReq.Header.Set("X-Proxy-Provider", name)
 		cand, err := s.selectProvider(reqCtx, fakeReq, "")
 		if err != nil {
+			code := "provider_candidate_unavailable"
 			if boundModelsMetadata {
-				slog.Warn("failover candidate unavailable", "name", providerLabel(name), "code", "models_fallback_candidate_unavailable")
-			} else {
-				slog.Warn("failover candidate unavailable", "name", name, "error", err)
+				code = "models_fallback_candidate_unavailable"
 			}
+			slog.Warn("failover candidate unavailable", "name", providerLabel(name), "code", code)
 			continue
 		}
 		attempts = append(attempts, providerAttempt{provider: cand})
@@ -1798,11 +1796,11 @@ func (s *Server) dialUpstream(reqCtx context.Context, r *http.Request, body []by
 		if breakerEnabled {
 			s.noteBreakerFailure(att.provider.Name, reason, breakerThreshold, traceID)
 		}
+		code := "upstream_transport_failed"
 		if boundModelsMetadata {
-			slog.Warn("upstream call failed", "provider", providerLabel(att.provider.Name), "attempt", i, "code", "models_fallback_transport_failed")
-		} else {
-			slog.Warn("upstream call failed", "provider", att.provider.Name, "attempt", i, "error", doErr)
+			code = "models_fallback_transport_failed"
 		}
+		slog.Warn("upstream call failed", "provider", providerLabel(att.provider.Name), "attempt", i, "code", code, "reason", reason)
 		if i+1 < len(attempts) {
 			if budgetSpent() {
 				failoverPath = append(failoverPath, "failover_budget_exhausted:"+providerLabel(att.provider.Name))
@@ -1828,7 +1826,7 @@ func (s *Server) selectProviderForced(ctx context.Context, r *http.Request, mode
 		clone.Header.Set("X-Proxy-Provider", forceProvider)
 		rp, err := s.selectProvider(ctx, clone, model)
 		if err == nil {
-			rp.Reason, rp.Detail = "rule_provider", forceProvider
+			rp.Reason, rp.Detail = "rule_provider", boundedModelsProviderLabel(forceProvider)
 		}
 		return rp, err
 	}
@@ -1863,17 +1861,17 @@ func (s *Server) selectProvider(ctx context.Context, r *http.Request, model stri
 		return resolvedProvider{}, err
 	}
 	if !found {
-		return resolvedProvider{}, fmt.Errorf("provider %q is not configured", name)
+		return resolvedProvider{}, errors.New("provider is not configured")
 	}
 	if !provider.Enabled {
-		return resolvedProvider{}, fmt.Errorf("provider %q is disabled", name)
+		return resolvedProvider{}, errors.New("provider is disabled")
 	}
 	apiKey, err := s.secrets.Load().Decrypt(provider.EncryptedAPIKey)
 	if err != nil {
-		return resolvedProvider{}, fmt.Errorf("provider %q API key cannot be decrypted", name)
+		return resolvedProvider{}, errors.New("provider credentials cannot be decrypted")
 	}
 	if apiKey == "" {
-		return resolvedProvider{}, fmt.Errorf("provider %q API key is not configured", name)
+		return resolvedProvider{}, errors.New("provider credentials are not configured")
 	}
 	timeout := time.Duration(provider.TimeoutMS) * time.Millisecond
 	if timeout <= 0 {
@@ -2017,6 +2015,13 @@ func generateProxyKey() (string, error) {
 }
 
 func (s *Server) auditAdmin(r *http.Request, action string, before string, after string) {
+	s.auditAdminWithProviderTarget(r, action, before, after, "")
+}
+
+// auditAdminWithProviderTarget keeps an exact raw provider only in request-local
+// memory for post-change target selection. The persisted audit remains the bounded
+// before/after payload supplied by the caller.
+func (s *Server) auditAdminWithProviderTarget(r *http.Request, action string, before string, after string, provider string) {
 	if err := s.db.InsertAdminAudit(r.Context(), store.AdminAuditLog{
 		ID:          newID("audit"),
 		AdminID:     adminID(r),
@@ -2026,7 +2031,7 @@ func (s *Server) auditAdmin(r *http.Request, action string, before string, after
 	}); err != nil {
 		slog.Warn("write admin audit failed", "action", action, "error", err)
 	}
-	if err := s.maybeRunPostChangeRedTeam(r, action, before, after); err != nil {
+	if err := s.maybeRunPostChangeRedTeam(r, action, before, after, provider); err != nil {
 		// The admin mutation has already succeeded. Surface the regression trigger failure
 		// operationally without turning a successful configuration write into an HTTP error.
 		slog.Warn("post-change redteam trigger failed", "action", action, "error", err)
@@ -2561,7 +2566,8 @@ func hostname() string {
 func copyUpstreamHeaders(dst http.Header, src http.Header) {
 	for key, values := range src {
 		canonical := http.CanonicalHeaderKey(key)
-		if hopByHopHeader(canonical) || canonical == "Authorization" || canonical == "Host" || canonical == "Content-Length" {
+		if hopByHopHeader(canonical) || canonical == "Authorization" || canonical == "Host" || canonical == "Content-Length" ||
+			canonical == "X-Proxy-Provider" || canonical == "X-Proxy-No-Route" {
 			continue
 		}
 		for _, value := range values {
@@ -2573,12 +2579,21 @@ func copyUpstreamHeaders(dst http.Header, src http.Header) {
 func copyDownstreamHeaders(dst http.Header, src http.Header) {
 	for key, values := range src {
 		canonical := http.CanonicalHeaderKey(key)
-		if hopByHopHeader(canonical) || canonical == "Content-Length" {
+		if hopByHopHeader(canonical) || canonical == "Content-Length" || gatewayOwnedRoutingHeader(canonical) {
 			continue
 		}
 		for _, value := range values {
 			dst.Add(canonical, value)
 		}
+	}
+}
+
+func gatewayOwnedRoutingHeader(key string) bool {
+	switch http.CanonicalHeaderKey(key) {
+	case "X-Provider", "X-Route-Reason", "X-Route-Detail", "X-Failover-From", "X-Failover-Reason", "X-Failover-Path", "X-Health-Demoted", "X-Agent-Provider", "X-Request-Id":
+		return true
+	default:
+		return false
 	}
 }
 
