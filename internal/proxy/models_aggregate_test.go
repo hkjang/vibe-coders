@@ -504,8 +504,8 @@ func TestUnpinnedModelsFallbackUsesStrictRequestAndResponseHeaders(t *testing.T)
 	var calls atomic.Int32
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		call := calls.Add(1)
-		if r.URL.RawQuery != "" {
-			t.Errorf("fallback path forwarded caller query %q", r.URL.RawQuery)
+		if r.URL.RawQuery != "api-version=2026-01-01&region=koreacentral" {
+			t.Errorf("models request query = %q, want only provider fixed query", r.URL.RawQuery)
 		}
 		for _, header := range []string{"Cookie", "X-Api-Key", "X-Admin-Token", "X-Vendor-Auth"} {
 			if value := r.Header.Get(header); value != "" {
@@ -531,7 +531,7 @@ func TestUnpinnedModelsFallbackUsesStrictRequestAndResponseHeaders(t *testing.T)
 	server, db, gateway := newAdminModelsTestServer(t, "")
 	server.cfg.Upstream.Provider = "fallback"
 	addAdminModelsProvider(t, server, db, store.ProviderConfig{
-		Name: "fallback", BaseURL: upstream.URL, TimeoutMS: 5_000, Enabled: true,
+		Name: "fallback", BaseURL: upstream.URL + "?api-version=2026-01-01&region=koreacentral", TimeoutMS: 5_000, Enabled: true,
 	}, "catalog-key")
 	request, err := http.NewRequest(http.MethodGet, gateway.URL+"/v1/models?vendor_hint=full&api_key="+callerSecret, nil)
 	if err != nil {

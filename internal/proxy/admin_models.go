@@ -399,7 +399,7 @@ func (s *Server) fetchAdminProviderModels(ctx context.Context, configs []store.P
 			message = "Provider model catalog exceeds the supported limit."
 		}
 		if result.failureCode == "provider_models_unavailable" || result.failureCode == "provider_models_limit_exceeded" {
-			slog.Warn("admin model catalogue fetch failed", "provider", result.config.Name, "code", result.failureCode, "stale", result.stale)
+			slog.Warn("admin model catalogue fetch failed", "provider", boundedModelsProviderLabel(result.config.Name), "code", result.failureCode, "stale", result.stale)
 		}
 		response.PartialFailures = append(response.PartialFailures, adminModelPartialFailure{
 			Provider: result.config.Name,
@@ -427,6 +427,19 @@ func adminModelsProviderTimeout(provider store.ProviderConfig, fallback time.Dur
 }
 
 func writeAdminModelsResponse(w http.ResponseWriter, response adminModelsResponse) {
+	// Provider names remain raw while selecting, filtering, caching, and deduplicating.
+	// Sanitize only at the response boundary so multiple unsafe legacy names cannot
+	// collide as internal identities while none can escape through an admin DTO.
+	for index := range response.Models {
+		response.Models[index].Provider = boundedModelsProviderLabel(response.Models[index].Provider)
+		response.Models[index].OwnedBy = boundedModelsProviderLabel(response.Models[index].OwnedBy)
+	}
+	for index := range response.Providers {
+		response.Providers[index].Provider = boundedModelsProviderLabel(response.Providers[index].Provider)
+	}
+	for index := range response.PartialFailures {
+		response.PartialFailures[index].Provider = boundedModelsProviderLabel(response.PartialFailures[index].Provider)
+	}
 	encoded, err := json.Marshal(response)
 	if err != nil {
 		writeOpenAIError(w, http.StatusServiceUnavailable, "model catalog response is unavailable", "server_error", "models_response_encode_failed")

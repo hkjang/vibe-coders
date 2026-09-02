@@ -1670,10 +1670,11 @@ func (s *Server) dialUpstream(reqCtx context.Context, r *http.Request, body []by
 		att := attempts[i]
 		upstreamRequestURL := r.URL
 		if boundModelsMetadata {
-			withoutQuery := *r.URL
-			withoutQuery.RawQuery = ""
-			withoutQuery.ForceQuery = false
-			upstreamRequestURL = &withoutQuery
+			var modelsURLErr error
+			upstreamRequestURL, modelsURLErr = modelsCatalogRequestURL(att.provider.BaseURL, r.URL.Path)
+			if modelsURLErr != nil {
+				return nil, "", "", "", failoverPath, currentBody, currentModel, lastUpstreamHeaders, modelsURLErr
+			}
 		}
 		upstreamURL, err := s.upstreamURL(att.provider.BaseURL, upstreamRequestURL)
 		if err != nil {

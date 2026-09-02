@@ -1,12 +1,15 @@
 package proxy
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -90,8 +93,12 @@ func TestAdminModelsNormalizesConcurrentProviderInventory(t *testing.T) {
 			if provider == "zeta" {
 				wantPath = "/gateway/v1/models"
 			}
-			if r.URL.Path != wantPath || r.URL.RawQuery != "" {
-				t.Errorf("%s upstream request = %s?%s, want %s without query", provider, r.URL.Path, r.URL.RawQuery, wantPath)
+			wantQuery := ""
+			if provider == "zeta" {
+				wantQuery = "api-version=2026-01-01&region=koreacentral"
+			}
+			if r.URL.Path != wantPath || r.URL.RawQuery != wantQuery {
+				t.Errorf("%s upstream request = %s?%s, want %s?%s", provider, r.URL.Path, r.URL.RawQuery, wantPath, wantQuery)
 				w.WriteHeader(http.StatusBadRequest)
 				return
 			}
@@ -118,7 +125,7 @@ func TestAdminModelsNormalizesConcurrentProviderInventory(t *testing.T) {
 
 	server, db, gateway := newAdminModelsTestServer(t, "")
 	addAdminModelsProvider(t, server, db, store.ProviderConfig{
-		Name: "zeta", BaseURL: zeta.URL + "/gateway", TimeoutMS: 2_000, Enabled: true,
+		Name: "zeta", BaseURL: zeta.URL + "/gateway?api-version=2026-01-01&region=koreacentral", TimeoutMS: 2_000, Enabled: true,
 	}, "key-zeta")
 	addAdminModelsProvider(t, server, db, store.ProviderConfig{
 		Name: "alpha", BaseURL: alpha.URL, TimeoutMS: 2_000, Enabled: true,
@@ -394,6 +401,148 @@ func TestAdminModelsReturnsSanitizedPartialFailuresEvenWhenAllProvidersFail(t *t
 	}
 	if body.PartialFailures[0].Code != "provider_models_unavailable" || body.PartialFailures[1].Code != "provider_credentials_unavailable" {
 		t.Fatalf("sanitized failures = %+v", body.PartialFailures)
+	}
+}
+
+func TestAdminModelsBoundsLegacyProviderLabelsAcrossLiveStaleAndFailures(t *testing.T) {
+	const (
+		unsafeA    = "sk-ant-first-provider-secret"
+		unsafeB    = "Bearer second-provider-secret"
+		unsafeFail = "token=failed-provider-secret"
+		safeName   = "safe-provider"
+	)
+	var failLive atomic.Bool
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		key := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		if failLive.Load() || key == "key-fail" {
+			w.WriteHeader(http.StatusBadGateway)
+			_, _ = io.WriteString(w, "private upstream failure")
+			return
+		}
+		id := "shared"
+		if key == "key-safe" {
+			id = "safe-model"
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": []map[string]any{{"id": id}}})
+	}))
+	defer upstream.Close()
+
+	server, db, gateway := newAdminModelsTestServer(t, "")
+	for _, provider := range []struct {
+		name string
+		key  string
+	}{
+		{unsafeA, "key-a"}, {unsafeB, "key-b"}, {unsafeFail, "key-fail"}, {safeName, "key-safe"},
+	} {
+		addAdminModelsProvider(t, server, db, store.ProviderConfig{
+			Name: provider.name, BaseURL: upstream.URL, TimeoutMS: 1_000, Enabled: true,
+		}, provider.key)
+	}
+	if err := db.UpsertAgentRoute(t.Context(), store.AgentRoute{
+		ID: "agent-shadow", VirtualModel: "shared", Name: "Shadow", Enabled: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	baseTime := time.Date(2026, 9, 3, 1, 0, 0, 0, time.UTC)
+	var clock atomic.Int64
+	clock.Store(baseTime.UnixNano())
+	server.adminModels.now = func() time.Time { return time.Unix(0, clock.Load()).UTC() }
+	server.adminModels.freshTTL = time.Second
+	server.adminModels.staleTTL = time.Minute
+
+	var logs bytes.Buffer
+	previousLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	defer slog.SetDefault(previousLogger)
+
+	assertNoRawNames := func(label string, response *http.Response, body adminModelsResponse) {
+		t.Helper()
+		encoded, err := json.Marshal(body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		observed := string(encoded) + logs.String()
+		for key, values := range response.Header {
+			observed += key + strings.Join(values, "")
+		}
+		for _, raw := range []string{unsafeA, unsafeB, unsafeFail} {
+			if strings.Contains(observed, raw) {
+				t.Fatalf("%s leaked legacy provider name %q: %s", label, raw, observed)
+			}
+		}
+	}
+
+	response, live := getAdminModels(t, gateway.URL+"/admin/models", "")
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("live status = %d", response.StatusCode)
+	}
+	assertNoRawNames("live", response, live)
+	placeholderProviders := 0
+	for _, provider := range live.Providers {
+		if provider.Provider == "[provider-name-omitted]" {
+			placeholderProviders++
+		}
+	}
+	if placeholderProviders != 3 {
+		t.Fatalf("unsafe provider summaries = %+v", live.Providers)
+	}
+	physicalShared := 0
+	for _, model := range live.Models {
+		switch {
+		case model.Source == adminModelSourceLive && model.ID == "shared":
+			physicalShared++
+			if model.Provider != "[provider-name-omitted]" || model.OwnedBy != "[provider-name-omitted]" || !model.Shadowed {
+				t.Fatalf("unsafe live model was not bounded: %+v", model)
+			}
+		case model.ID == "safe-model":
+			if model.Provider != safeName || model.OwnedBy != safeName {
+				t.Fatalf("safe provider label changed: %+v", model)
+			}
+		}
+	}
+	if physicalShared != 2 {
+		t.Fatalf("colliding display labels merged raw provider identities: %+v", live.Models)
+	}
+	if len(live.PartialFailures) != 1 || live.PartialFailures[0].Provider != "[provider-name-omitted]" {
+		t.Fatalf("unsafe failure provider was not bounded: %+v", live.PartialFailures)
+	}
+	server.adminModels.mu.Lock()
+	_, cachedA := server.adminModels.entries[unsafeA]
+	_, cachedB := server.adminModels.entries[unsafeB]
+	server.adminModels.mu.Unlock()
+	if !cachedA || !cachedB {
+		t.Fatal("unsafe providers collided as internal cache identities")
+	}
+
+	filteredResponse, filtered := getAdminModels(t, gateway.URL+"/admin/models?provider="+url.QueryEscape(unsafeA), "")
+	assertNoRawNames("filtered", filteredResponse, filtered)
+	if len(filtered.Models) != 1 || filtered.Models[0].Provider != "[provider-name-omitted]" || filtered.Models[0].ID != "shared" {
+		t.Fatalf("raw provider filter did not preserve internal identity: %+v", filtered.Models)
+	}
+
+	failLive.Store(true)
+	clock.Store(baseTime.Add(2 * time.Second).UnixNano())
+	logs.Reset()
+	staleResponse, stale := getAdminModels(t, gateway.URL+"/admin/models", "")
+	assertNoRawNames("stale", staleResponse, stale)
+	if len(stale.PartialFailures) != 4 {
+		t.Fatalf("stale/failure summaries = %+v", stale.PartialFailures)
+	}
+	for _, failure := range stale.PartialFailures {
+		if failure.Provider != "[provider-name-omitted]" && failure.Provider != safeName {
+			t.Fatalf("stale failure leaked or changed provider label: %+v", failure)
+		}
+	}
+	audits, err := db.ListAdminAudit(t.Context(), 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encodedAudits, _ := json.Marshal(audits)
+	for _, raw := range []string{unsafeA, unsafeB, unsafeFail} {
+		if strings.Contains(string(encodedAudits), raw) {
+			t.Fatalf("admin models audit leaked legacy provider name %q: %s", raw, encodedAudits)
+		}
 	}
 }
 

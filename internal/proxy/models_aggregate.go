@@ -395,7 +395,11 @@ func requireJSONEOF(decoder *json.Decoder) error {
 // parameters are deliberately absent: aggregate/admin discovery must never fan credentials
 // or vendor-specific options out to multiple providers.
 func (s *Server) fetchProviderModels(ctx context.Context, name, baseURL, apiKey string, timeout time.Duration) ([]map[string]any, error) {
-	target, err := s.upstreamURL(baseURL, &url.URL{Path: "/v1/models"})
+	requestURL, err := modelsCatalogRequestURL(baseURL, "/v1/models")
+	if err != nil {
+		return nil, err
+	}
+	target, err := s.upstreamURL(baseURL, requestURL)
 	if err != nil {
 		return nil, err
 	}
@@ -427,6 +431,20 @@ func (s *Server) fetchProviderModels(ctx context.Context, name, baseURL, apiKey 
 		return nil, fmt.Errorf("provider %q returned status %d", name, resp.StatusCode)
 	}
 	return decodeProviderModels(raw)
+}
+
+// modelsCatalogRequestURL keeps only a provider's validated fixed query. Caller query
+// parameters are intentionally absent, while deployments such as Azure may still need
+// a configured api-version on both aggregate discovery and bounded fallback requests.
+func modelsCatalogRequestURL(baseURL, requestPath string) (*url.URL, error) {
+	if err := validateProviderBaseURL(baseURL); err != nil {
+		return nil, errors.New("provider base URL is invalid")
+	}
+	configured, err := url.Parse(baseURL)
+	if err != nil {
+		return nil, errors.New("provider base URL is invalid")
+	}
+	return &url.URL{Path: requestPath, RawQuery: configured.RawQuery}, nil
 }
 
 // serveAggregatedModels writes the merged multi-provider model list for an unpinned GET
