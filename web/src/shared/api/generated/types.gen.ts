@@ -91,6 +91,48 @@ export type AdminStatsResponse = {
     total_tokens: number;
 };
 
+export type AgentRoute = {
+    allowed_tools: Array<string>;
+    backing_model: string;
+    created_at: string;
+    created_by: string;
+    enabled: boolean;
+    id: string;
+    max_cost_krw: number;
+    max_steps: number;
+    mcp_upstreams: Array<string>;
+    name: string;
+    provider: string;
+    provider_ref?: string;
+    system_prompt: string;
+    updated_at: string;
+    virtual_model: string;
+};
+
+export type AgentRouteListResponse = {
+    agent_routes: Array<AgentRoute>;
+    count: number;
+    note: string;
+};
+
+export type AgentRouteWriteRequest = {
+    allowed_tools?: Array<string>;
+    backing_model?: string;
+    enabled?: boolean;
+    id?: string;
+    max_cost_krw?: number;
+    max_steps?: number;
+    mcp_upstreams?: Array<string>;
+    name?: string;
+    provider?: string;
+    system_prompt?: string;
+    virtual_model: string;
+};
+
+export type AgentRouteWriteResponse = {
+    agent_route: AgentRoute;
+};
+
 export type AppError = {
     error: {
         code: string;
@@ -633,26 +675,48 @@ export type GetAdminAgentRoutesData = {
     url: '/admin/agent-routes';
 };
 
+export type GetAdminAgentRoutesErrors = {
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminAgentRoutesError = GetAdminAgentRoutesErrors[keyof GetAdminAgentRoutesErrors];
+
 export type GetAdminAgentRoutesResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: AgentRouteListResponse;
 };
 
+export type GetAdminAgentRoutesResponse = GetAdminAgentRoutesResponses[keyof GetAdminAgentRoutesResponses];
+
 export type PostAdminAgentRoutesData = {
-    body?: never;
+    body: AgentRouteWriteRequest;
     path?: never;
     query?: never;
     url: '/admin/agent-routes';
 };
 
+export type PostAdminAgentRoutesErrors = {
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostAdminAgentRoutesError = PostAdminAgentRoutesErrors[keyof PostAdminAgentRoutesErrors];
+
 export type PostAdminAgentRoutesResponses = {
     /**
-     * OK
+     * Created
      */
-    200: unknown;
+    201: AgentRouteWriteResponse;
 };
+
+export type PostAdminAgentRoutesResponse = PostAdminAgentRoutesResponses[keyof PostAdminAgentRoutesResponses];
 
 export type GetAdminAgentsData = {
     body?: never;

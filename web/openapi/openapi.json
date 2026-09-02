@@ -390,6 +390,173 @@
         ],
         "type": "object"
       },
+      "AgentRoute": {
+        "additionalProperties": false,
+        "properties": {
+          "allowed_tools": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "backing_model": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "created_by": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          },
+          "max_cost_krw": {
+            "minimum": 0,
+            "type": "number"
+          },
+          "max_steps": {
+            "maximum": 16,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "mcp_upstreams": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "name": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "provider_ref": {
+            "maxLength": 47,
+            "minLength": 47,
+            "pattern": "^prv_[A-Za-z0-9_-]{43}$",
+            "type": "string"
+          },
+          "system_prompt": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "virtual_model": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "virtual_model",
+          "name",
+          "enabled",
+          "backing_model",
+          "provider",
+          "mcp_upstreams",
+          "allowed_tools",
+          "system_prompt",
+          "max_steps",
+          "max_cost_krw",
+          "created_by",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "AgentRouteListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_routes": {
+            "items": {
+              "$ref": "#/components/schemas/AgentRoute"
+            },
+            "type": "array"
+          },
+          "count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "note": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "agent_routes",
+          "count",
+          "note"
+        ],
+        "type": "object"
+      },
+      "AgentRouteWriteRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "allowed_tools": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "backing_model": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          },
+          "max_cost_krw": {
+            "minimum": 0,
+            "type": "number"
+          },
+          "max_steps": {
+            "maximum": 16,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "mcp_upstreams": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "name": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "system_prompt": {
+            "type": "string"
+          },
+          "virtual_model": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "virtual_model"
+        ],
+        "type": "object"
+      },
+      "AgentRouteWriteResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_route": {
+            "$ref": "#/components/schemas/AgentRoute"
+          }
+        },
+        "required": [
+          "agent_route"
+        ],
+        "type": "object"
+      },
       "AppError": {
         "properties": {
           "error": {
@@ -2452,7 +2619,24 @@
         "operationId": "get__admin_agent_routes",
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentRouteListResponse"
+                }
+              }
+            },
             "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -2467,9 +2651,36 @@
       },
       "post": {
         "operationId": "post__admin_agent_routes",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentRouteWriteRequest"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
-          "200": {
-            "description": "OK"
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentRouteWriteResponse"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
