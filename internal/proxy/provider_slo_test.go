@@ -1,9 +1,12 @@
 package proxy
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -47,6 +50,94 @@ func TestProviderSLOWriteReturnsPersistedTimestamp(t *testing.T) {
 	}
 	if len(listed.SLOs) != 1 || listed.SLOs[0].UpdatedAt != created.SLO.UpdatedAt {
 		t.Fatalf("listed SLOs = %+v, want created updated_at %q", listed.SLOs, created.SLO.UpdatedAt)
+	}
+}
+
+func TestProviderSLOAppProjectionUsesOpaqueProviderRefsWithoutChangingLegacyShape(t *testing.T) {
+	server, db, gateway := newAdminModelsTestServer(t, "")
+	unsafeProvider := "sk-ant-legacy-slo-provider-secret"
+	for _, slo := range []store.ProviderSLO{
+		{Provider: unsafeProvider, AvailabilityTarget: 0.99, Enabled: true},
+		{Provider: "safe-provider", AvailabilityTarget: 0.95, Enabled: true},
+	} {
+		candidate := slo
+		if err := db.UpsertProviderSLO(t.Context(), &candidate); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	legacy, err := http.Get(gateway.URL + "/admin/providers/slo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyBody, _ := io.ReadAll(legacy.Body)
+	legacy.Body.Close()
+	if legacy.StatusCode != http.StatusOK || !strings.Contains(string(legacyBody), unsafeProvider) || strings.Contains(string(legacyBody), `"provider_ref"`) {
+		t.Fatalf("legacy SLO response shape changed: status=%d body=%s", legacy.StatusCode, legacyBody)
+	}
+
+	app := providerAppRequest(t, http.MethodGet, gateway.URL+"/admin/providers/slo", nil)
+	appBody, _ := io.ReadAll(app.Body)
+	app.Body.Close()
+	if app.StatusCode != http.StatusOK || strings.Contains(string(appBody), unsafeProvider) {
+		t.Fatalf("app SLO response leaked unsafe provider: status=%d body=%s", app.StatusCode, appBody)
+	}
+	var appPayload struct {
+		SLOs        []store.ProviderSLO     `json:"slos"`
+		Evaluations []providerSLOEvaluation `json:"evaluations"`
+	}
+	if err := json.Unmarshal(appBody, &appPayload); err != nil {
+		t.Fatal(err)
+	}
+	wantUnsafeRef := server.providerRef(unsafeProvider)
+	assertProjection := func(provider, providerRef string) {
+		t.Helper()
+		switch providerRef {
+		case wantUnsafeRef:
+			if provider != "[provider-name-omitted]" {
+				t.Fatalf("unsafe SLO label = %q", provider)
+			}
+		case server.providerRef("safe-provider"):
+			if provider != "safe-provider" {
+				t.Fatalf("safe SLO label = %q", provider)
+			}
+		default:
+			t.Fatalf("unexpected SLO provider_ref = %q", providerRef)
+		}
+	}
+	for _, slo := range appPayload.SLOs {
+		assertProjection(slo.Provider, slo.ProviderRef)
+	}
+	for _, evaluation := range appPayload.Evaluations {
+		assertProjection(evaluation.Provider, evaluation.ProviderRef)
+	}
+	if len(appPayload.SLOs) != 2 || len(appPayload.Evaluations) != 2 {
+		t.Fatalf("app SLO projection = %+v / %+v", appPayload.SLOs, appPayload.Evaluations)
+	}
+
+	updated := providerAppRequest(t, http.MethodPost, gateway.URL+"/admin/providers/slo", map[string]any{
+		"provider": unsafeProvider, "availability_target": 0.98, "enabled": true,
+	})
+	updatedBody, _ := io.ReadAll(updated.Body)
+	updated.Body.Close()
+	if updated.StatusCode != http.StatusCreated || strings.Contains(string(updatedBody), unsafeProvider) || !strings.Contains(string(updatedBody), wantUnsafeRef) {
+		t.Fatalf("app SLO update projection: status=%d body=%s", updated.StatusCode, updatedBody)
+	}
+	deleted := providerAppRequest(t, http.MethodDelete, gateway.URL+"/admin/providers/slo?provider="+url.QueryEscape(unsafeProvider), nil)
+	deletedBody, _ := io.ReadAll(deleted.Body)
+	deleted.Body.Close()
+	if deleted.StatusCode != http.StatusOK || strings.Contains(string(deletedBody), unsafeProvider) || !strings.Contains(string(deletedBody), wantUnsafeRef) {
+		t.Fatalf("app SLO delete projection: status=%d body=%s", deleted.StatusCode, deletedBody)
+	}
+	audits, err := db.ListAdminAudit(context.Background(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, audit := range audits {
+		values := audit.BeforeValue + audit.AfterValue
+		if strings.Contains(values, unsafeProvider) || strings.Contains(values, "provider_ref") {
+			t.Fatalf("SLO audit persisted unsafe or rotating identity: %+v", audit)
+		}
 	}
 }
 

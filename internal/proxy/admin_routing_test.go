@@ -584,7 +584,11 @@ func TestProviderBreakerStopsDiallingDeadPrimary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer health.Body.Close()
+	healthBody, _ := io.ReadAll(health.Body)
+	health.Body.Close()
+	if strings.Contains(string(healthBody), `"provider_ref"`) {
+		t.Fatalf("legacy routing health response gained app-only provider_ref: %s", healthBody)
+	}
 	var out struct {
 		Breakers struct {
 			Enabled bool `json:"enabled"`
@@ -594,7 +598,7 @@ func TestProviderBreakerStopsDiallingDeadPrimary(t *testing.T) {
 			} `json:"states"`
 		} `json:"breakers"`
 	}
-	if err := json.NewDecoder(health.Body).Decode(&out); err != nil {
+	if err := json.Unmarshal(healthBody, &out); err != nil {
 		t.Fatal(err)
 	}
 	if !out.Breakers.Enabled {
@@ -666,7 +670,12 @@ func TestRoutingBreakerResetAllUsesRawKeysWithoutLeakingLegacyName(t *testing.T)
 
 	gateway := httptest.NewServer(server.Routes())
 	defer gateway.Close()
-	health, err := http.Get(gateway.URL + "/admin/routing/health")
+	healthRequest, err := http.NewRequest(http.MethodGet, gateway.URL+"/admin/routing/health", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	healthRequest.Header.Set("X-Vibe-UI", "app")
+	health, err := http.DefaultClient.Do(healthRequest)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -681,6 +690,9 @@ func TestRoutingBreakerResetAllUsesRawKeysWithoutLeakingLegacyName(t *testing.T)
 		Degraded  []store.ProviderHealthScore `json:"degraded"`
 		Alerts    []providerHealthAlert       `json:"alerts"`
 		Trend     []providerHealthTrendBucket `json:"trend"`
+		Breakers  struct {
+			States []breakerSnapshot `json:"states"`
+		} `json:"breakers"`
 	}
 	if err := json.Unmarshal(healthBody, &healthOut); err != nil {
 		t.Fatal(err)
@@ -691,21 +703,21 @@ func TestRoutingBreakerResetAllUsesRawKeysWithoutLeakingLegacyName(t *testing.T)
 			t.Fatalf("%s did not include the unsafe provider health score", section)
 		}
 		for _, score := range scores {
-			if score.Provider != "[provider-name-omitted]" {
+			if score.Provider != "[provider-name-omitted]" || score.ProviderRef != server.providerRef(unsafeName) {
 				t.Fatalf("%s leaked provider label: %+v", section, scores)
 			}
 		}
 	}
 	assertBoundedScores("providers", healthOut.Providers)
 	assertBoundedScores("degraded", healthOut.Degraded)
-	if len(healthOut.Ranking) != 1 || healthOut.Ranking[0].Provider != "[provider-name-omitted]" {
+	if len(healthOut.Ranking) != 1 || healthOut.Ranking[0].Provider != "[provider-name-omitted]" || healthOut.Ranking[0].ProviderRef != server.providerRef(unsafeName) {
 		t.Fatalf("ranking leaked provider label: %+v", healthOut.Ranking)
 	}
 	if len(healthOut.Alerts) == 0 {
 		t.Fatal("alerts did not include the failing provider")
 	}
 	for _, alert := range healthOut.Alerts {
-		if alert.Provider != "[provider-name-omitted]" || strings.Contains(alert.Message, unsafeName) {
+		if alert.Provider != "[provider-name-omitted]" || alert.ProviderRef != server.providerRef(unsafeName) || strings.Contains(alert.Message, unsafeName) {
 			t.Fatalf("alert leaked provider label: %+v", alert)
 		}
 	}
@@ -713,13 +725,16 @@ func TestRoutingBreakerResetAllUsesRawKeysWithoutLeakingLegacyName(t *testing.T)
 	for _, bucket := range healthOut.Trend {
 		for _, score := range bucket.Providers {
 			trendFound = true
-			if score.Provider != "[provider-name-omitted]" {
+			if score.Provider != "[provider-name-omitted]" || score.ProviderRef != server.providerRef(unsafeName) {
 				t.Fatalf("trend leaked provider label: %+v", healthOut.Trend)
 			}
 		}
 	}
 	if !trendFound {
 		t.Fatal("trend did not include the unsafe provider health score")
+	}
+	if len(healthOut.Breakers.States) != 1 || healthOut.Breakers.States[0].Provider != "[provider-name-omitted]" || healthOut.Breakers.States[0].ProviderRef != server.providerRef(unsafeName) {
+		t.Fatalf("breaker state did not preserve opaque provider identity: %+v", healthOut.Breakers.States)
 	}
 
 	for _, body := range []string{`{"provider":`, `null`, `{}`, `{"provider":null}`} {

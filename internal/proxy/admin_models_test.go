@@ -81,6 +81,7 @@ func getAdminModels(t *testing.T, url, token string) (*http.Response, adminModel
 }
 
 func TestAdminModelsNormalizesConcurrentProviderInventory(t *testing.T) {
+	const adminCallerSecret = "ADMIN-CALLER-MODELS-SECRET"
 	var arrivals atomic.Int32
 	var alphaCalls atomic.Int32
 	var zetaCalls atomic.Int32
@@ -104,6 +105,14 @@ func TestAdminModelsNormalizesConcurrentProviderInventory(t *testing.T) {
 			}
 			if got := r.Header.Get("Authorization"); got != "Bearer key-"+provider {
 				t.Errorf("%s Authorization = %q", provider, got)
+			}
+			for _, header := range []string{"Cookie", "X-Api-Key", "X-Admin-Token", "X-Vendor-Auth"} {
+				if got := r.Header.Get(header); got != "" {
+					t.Errorf("%s forwarded admin caller %s=%q", provider, header, got)
+				}
+			}
+			if strings.Contains(r.Header.Get("Authorization"), adminCallerSecret) {
+				t.Errorf("%s forwarded admin caller authorization", provider)
 			}
 			if arrivals.Add(1) == 2 {
 				releaseOnce.Do(func() { close(release) })
@@ -155,7 +164,24 @@ func TestAdminModelsNormalizesConcurrentProviderInventory(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	resp, body := getAdminModels(t, gateway.URL+"/admin/models", "")
+	request, err := http.NewRequest(http.MethodGet, gateway.URL+"/admin/models?api_key="+adminCallerSecret+"&vendor_hint=private", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Authorization", "Bearer "+adminCallerSecret)
+	request.Header.Set("Cookie", "session="+adminCallerSecret)
+	request.Header.Set("X-Api-Key", adminCallerSecret)
+	request.Header.Set("X-Admin-Token", adminCallerSecret)
+	request.Header.Set("X-Vendor-Auth", adminCallerSecret)
+	resp, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var body adminModelsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
@@ -330,7 +356,7 @@ func TestAdminModelsKeepsPhysicalRowsWhenAgentRouteCatalogFails(t *testing.T) {
 		t.Fatalf("physical provider was blocked by the route failure: %+v", body.Providers)
 	}
 	if len(body.PartialFailures) != 1 || body.PartialFailures[0] != (adminModelPartialFailure{
-		Provider: "vibe", Code: "agent_routes_unavailable", Message: "Virtual model catalog is unavailable.",
+		Provider: "vibe", ProviderRef: server.systemProviderRef("vibe"), Code: "agent_routes_unavailable", Message: "Virtual model catalog is unavailable.",
 	}) {
 		t.Fatalf("agent route failure was not sanitized: %+v", body.PartialFailures)
 	}
@@ -479,32 +505,43 @@ func TestAdminModelsBoundsLegacyProviderLabelsAcrossLiveStaleAndFailures(t *test
 	}
 	assertNoRawNames("live", response, live)
 	placeholderProviders := 0
+	placeholderRefs := map[string]bool{}
 	for _, provider := range live.Providers {
 		if provider.Provider == "[provider-name-omitted]" {
 			placeholderProviders++
+			placeholderRefs[provider.ProviderRef] = true
+		}
+		if provider.Provider == safeName && provider.ProviderRef != server.providerRef(safeName) {
+			t.Fatalf("safe provider_ref = %q", provider.ProviderRef)
 		}
 	}
-	if placeholderProviders != 3 {
+	if placeholderProviders != 3 || len(placeholderRefs) != 3 {
 		t.Fatalf("unsafe provider summaries = %+v", live.Providers)
 	}
 	physicalShared := 0
+	physicalRefs := map[string]bool{}
 	for _, model := range live.Models {
 		switch {
 		case model.Source == adminModelSourceLive && model.ID == "shared":
 			physicalShared++
+			physicalRefs[model.ProviderRef] = true
 			if model.Provider != "[provider-name-omitted]" || model.OwnedBy != "[provider-name-omitted]" || !model.Shadowed {
 				t.Fatalf("unsafe live model was not bounded: %+v", model)
 			}
 		case model.ID == "safe-model":
-			if model.Provider != safeName || model.OwnedBy != safeName {
+			if model.Provider != safeName || model.OwnedBy != safeName || model.ProviderRef != server.providerRef(safeName) {
 				t.Fatalf("safe provider label changed: %+v", model)
+			}
+		case model.Source == adminModelSourceAgentRoute:
+			if model.ProviderRef != server.systemProviderRef("vibe") {
+				t.Fatalf("agent route provider_ref = %q", model.ProviderRef)
 			}
 		}
 	}
-	if physicalShared != 2 {
+	if physicalShared != 2 || len(physicalRefs) != 2 {
 		t.Fatalf("colliding display labels merged raw provider identities: %+v", live.Models)
 	}
-	if len(live.PartialFailures) != 1 || live.PartialFailures[0].Provider != "[provider-name-omitted]" {
+	if len(live.PartialFailures) != 1 || live.PartialFailures[0].Provider != "[provider-name-omitted]" || live.PartialFailures[0].ProviderRef != server.providerRef(unsafeFail) {
 		t.Fatalf("unsafe failure provider was not bounded: %+v", live.PartialFailures)
 	}
 	server.adminModels.mu.Lock()
@@ -517,7 +554,7 @@ func TestAdminModelsBoundsLegacyProviderLabelsAcrossLiveStaleAndFailures(t *test
 
 	filteredResponse, filtered := getAdminModels(t, gateway.URL+"/admin/models?provider="+url.QueryEscape(unsafeA), "")
 	assertNoRawNames("filtered", filteredResponse, filtered)
-	if len(filtered.Models) != 1 || filtered.Models[0].Provider != "[provider-name-omitted]" || filtered.Models[0].ID != "shared" {
+	if len(filtered.Models) != 1 || filtered.Models[0].Provider != "[provider-name-omitted]" || filtered.Models[0].ProviderRef != server.providerRef(unsafeA) || filtered.Models[0].ID != "shared" {
 		t.Fatalf("raw provider filter did not preserve internal identity: %+v", filtered.Models)
 	}
 
@@ -532,6 +569,9 @@ func TestAdminModelsBoundsLegacyProviderLabelsAcrossLiveStaleAndFailures(t *test
 	for _, failure := range stale.PartialFailures {
 		if failure.Provider != "[provider-name-omitted]" && failure.Provider != safeName {
 			t.Fatalf("stale failure leaked or changed provider label: %+v", failure)
+		}
+		if len(failure.ProviderRef) != providerRefLength {
+			t.Fatalf("stale failure has invalid provider_ref: %+v", failure)
 		}
 	}
 	audits, err := db.ListAdminAudit(t.Context(), 50)
@@ -728,8 +768,9 @@ func TestAdminModelsReportsProviderDecodeLimitWithStableFailure(t *testing.T) {
 }
 
 func TestAdminModelsResponseLimiterCapsRowsAndEncodedBytes(t *testing.T) {
+	providerRef := func(string) string { return providerRefPrefix + strings.Repeat("a", 43) }
 	response := adminModelsResponse{Models: []adminModel{}}
-	limiter := adminModelsResponseLimiter{}
+	limiter := newAdminModelsResponseLimiter(providerRef)
 	for index := range maxAdminModelsResponseRows + 1 {
 		limiter.append(&response, adminModel{
 			ID: "model-" + strconv.Itoa(index), Provider: "provider", Object: "model", OwnedBy: "provider", Source: adminModelSourceLive,
@@ -747,9 +788,51 @@ func TestAdminModelsResponseLimiterCapsRowsAndEncodedBytes(t *testing.T) {
 		PartialFailures: []adminModelPartialFailure{{Provider: "*", Code: "oversized", Message: strings.Repeat("x", maxAdminModelsResponseBytes)}},
 	}
 	recorder := httptest.NewRecorder()
-	writeAdminModelsResponse(recorder, oversized)
+	writeAdminModelsResponse(recorder, oversized, providerRef)
 	if recorder.Code != http.StatusServiceUnavailable || recorder.Body.Len() >= maxAdminModelsResponseBytes {
 		t.Fatalf("oversized response status=%d bytes=%d", recorder.Code, recorder.Body.Len())
+	}
+}
+
+func TestAdminModelsResponseLimiterUsesFinalSanitizedModelSize(t *testing.T) {
+	providerRef := func(string) string { return providerRefPrefix + strings.Repeat("r", 43) }
+	unsafeName := "sk-ant-shortsecret"
+	base := adminModel{
+		Provider: unsafeName, Object: "model", OwnedBy: unsafeName, Source: adminModelSourceLive,
+	}
+	finalBase, err := json.Marshal(finalizeAdminModelForResponse(base, providerRef))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// This candidate fits if raw DTO bytes are counted, but exceeds the model budget
+	// once provider_ref and the longer redacted display labels are serialized.
+	candidate := base
+	candidate.ID = strings.Repeat("x", maxAdminModelsResponseModelBytes-len(finalBase)+1)
+	raw, _ := json.Marshal(candidate)
+	if len(raw)+1 > maxAdminModelsResponseModelBytes {
+		t.Fatalf("test candidate raw bytes=%d do not demonstrate pre-sanitize fit", len(raw)+1)
+	}
+	response := adminModelsResponse{Models: []adminModel{}}
+	limiter := newAdminModelsResponseLimiter(providerRef)
+	if limiter.append(&response, candidate) || !limiter.limited || len(response.Models) != 0 {
+		t.Fatalf("final-size overflow was admitted: bytes=%d limited=%v rows=%d", limiter.modelBytes, limiter.limited, len(response.Models))
+	}
+
+	// One byte less than the final boundary is admitted and the complete response stays
+	// within the outer response reserve instead of becoming a late 503.
+	candidate.ID = candidate.ID[:len(candidate.ID)-2]
+	response = adminModelsResponse{
+		RequestID: "request", GeneratedAt: time.Now().UTC().Format(time.RFC3339Nano),
+		Models: []adminModel{}, Providers: []adminModelProvider{}, PartialFailures: []adminModelPartialFailure{},
+	}
+	limiter = newAdminModelsResponseLimiter(providerRef)
+	if !limiter.append(&response, candidate) {
+		t.Fatal("final-size boundary model was rejected")
+	}
+	recorder := httptest.NewRecorder()
+	writeAdminModelsResponse(recorder, response, providerRef)
+	if recorder.Code != http.StatusOK || recorder.Body.Len() > maxAdminModelsResponseBytes {
+		t.Fatalf("bounded final response status=%d bytes=%d", recorder.Code, recorder.Body.Len())
 	}
 }
 
@@ -1085,7 +1168,7 @@ func TestAdminModelsWorkerPoolConvergesAfterCancellation(t *testing.T) {
 	finished := make(chan fetchResult, 1)
 	go func() {
 		response := adminModelsResponse{}
-		models := server.fetchAdminProviderModels(ctx, configs, "", "", &response)
+		models := server.fetchAdminProviderModels(ctx, configs, "", "", server.providerRefsSnapshot().system, &response)
 		finished <- fetchResult{models: models, response: response}
 	}()
 	for range 2 {
@@ -1166,7 +1249,7 @@ func TestAdminModelsRefreshDeadlineCancelsSemaphoreWaitersAndServesStale(t *test
 	defer cancel()
 	response := adminModelsResponse{}
 	startedAt := time.Now()
-	results := server.fetchAdminProviderModels(callerCtx, configs, "", "", &response)
+	results := server.fetchAdminProviderModels(callerCtx, configs, "", "", server.providerRefsSnapshot().system, &response)
 	elapsed := time.Since(startedAt)
 	if callerCtx.Err() != nil {
 		t.Fatalf("caller deadline fired before the catalogue deadline: %v", callerCtx.Err())

@@ -60,14 +60,14 @@ func TestClientPinnedProviderRecognizesDocumentedQuery(t *testing.T) {
 func TestPinnedModelsRetainsClassicQueryCompatibility(t *testing.T) {
 	seen := make(chan string, 1)
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		seen <- r.URL.RawQuery + "|" + r.Header.Get("X-Vendor-Hint")
+		seen <- r.URL.Path + "?" + r.URL.RawQuery + "|" + r.Header.Get("X-Vendor-Hint")
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, `{"data":[{"id":"pinned-model"}]}`)
 	}))
 	defer upstream.Close()
 	server, db, gateway := newAdminModelsTestServer(t, "")
 	addAdminModelsProvider(t, server, db, store.ProviderConfig{
-		Name: "pinned", BaseURL: upstream.URL, TimeoutMS: 1_000, Enabled: true,
+		Name: "pinned", BaseURL: upstream.URL + "/gateway?api-version=2026-01-01", TimeoutMS: 1_000, Enabled: true,
 	}, "pinned-key")
 
 	request, err := http.NewRequest(http.MethodGet, gateway.URL+"/v1/models?provider=pinned&vendor_hint=full", nil)
@@ -83,7 +83,7 @@ func TestPinnedModelsRetainsClassicQueryCompatibility(t *testing.T) {
 	if response.StatusCode != http.StatusOK {
 		t.Fatalf("pinned status = %d", response.StatusCode)
 	}
-	if got := <-seen; got != "provider=pinned&vendor_hint=full|classic" {
+	if got := <-seen; got != "/gateway/v1/models?api-version=2026-01-01&provider=pinned&vendor_hint=full|classic" {
 		t.Fatalf("pinned upstream metadata = %q", got)
 	}
 }

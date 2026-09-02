@@ -15,6 +15,7 @@ import (
 // A zero target means "not enforced" for that metric.
 type ProviderSLO struct {
 	Provider           string  `json:"provider"`
+	ProviderRef        string  `json:"provider_ref,omitempty"`
 	AvailabilityTarget float64 `json:"availability_target"`
 	P95LatencyTargetMS int64   `json:"p95_latency_target_ms"`
 	ErrorRateTarget    float64 `json:"error_rate_target"`

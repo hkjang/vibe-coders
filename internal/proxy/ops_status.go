@@ -101,6 +101,7 @@ func (s *Server) opsStatusSnapshot(ctx context.Context) OpsStatus {
 	if scores == nil {
 		scores = []store.ProviderHealthScore{}
 	}
+	scores = boundedProviderHealthScores(scores, nil)
 
 	fb, err := s.logger.FallbackStats()
 	if err != nil {

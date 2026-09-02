@@ -19,11 +19,12 @@ type sloMetric struct {
 }
 
 type providerSLOEvaluation struct {
-	Provider string               `json:"provider"`
-	Requests int64                `json:"requests"`
-	Enabled  bool                 `json:"enabled"`
-	Breached bool                 `json:"breached"`
-	Metrics  map[string]sloMetric `json:"metrics"`
+	Provider    string               `json:"provider"`
+	ProviderRef string               `json:"provider_ref,omitempty"`
+	Requests    int64                `json:"requests"`
+	Enabled     bool                 `json:"enabled"`
+	Breached    bool                 `json:"breached"`
+	Metrics     map[string]sloMetric `json:"metrics"`
 }
 
 // handleProviderSLOs manages provider SLO targets and evaluates current health
@@ -36,6 +37,11 @@ func (s *Server) handleProviderSLOs(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.Method {
 	case http.MethodGet:
+		appProjection := r.Header.Get("X-Vibe-UI") == "app"
+		var providerRef providerReferenceFunc
+		if appProjection {
+			providerRef = s.providerRefSnapshot()
+		}
 		slos, err := s.db.ListProviderSLOs(r.Context())
 		if err != nil {
 			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "provider_slo_failed")
@@ -43,12 +49,30 @@ func (s *Server) handleProviderSLOs(w http.ResponseWriter, r *http.Request) {
 		}
 		since := parseWindow(r.URL.Query().Get("window"), time.Hour, "hour")
 		scores, _ := s.db.ProviderHealthScores(r.Context(), since)
+		evaluations := evaluateProviderSLOs(slos, scores)
+		if appProjection {
+			for index := range slos {
+				rawProvider := slos[index].Provider
+				slos[index].ProviderRef = providerRef(rawProvider)
+				slos[index].Provider = boundedModelsProviderLabel(rawProvider)
+			}
+			for index := range evaluations {
+				rawProvider := evaluations[index].Provider
+				evaluations[index].ProviderRef = providerRef(rawProvider)
+				evaluations[index].Provider = boundedModelsProviderLabel(rawProvider)
+			}
+		}
 		writeJSON(w, http.StatusOK, map[string]any{
 			"slos":        slos,
-			"evaluations": evaluateProviderSLOs(slos, scores),
+			"evaluations": evaluations,
 			"since":       since.UTC().Format(time.RFC3339),
 		})
 	case http.MethodPost:
+		appProjection := r.Header.Get("X-Vibe-UI") == "app"
+		var providerRef providerReferenceFunc
+		if appProjection {
+			providerRef = s.providerRefSnapshot()
+		}
 		var p struct {
 			Provider           string  `json:"provider"`
 			AvailabilityTarget float64 `json:"availability_target"`
@@ -79,9 +103,19 @@ func (s *Server) handleProviderSLOs(w http.ResponseWriter, r *http.Request) {
 			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "provider_slo_save_failed")
 			return
 		}
-		s.auditAdmin(r, "provider_slo.upsert", "", auditJSON(slo))
-		writeJSON(w, http.StatusCreated, map[string]any{"slo": slo})
+		s.auditAdmin(r, "provider_slo.upsert", "", providerSLOAuditJSON(slo))
+		responseSLO := slo
+		if appProjection {
+			responseSLO.ProviderRef = providerRef(slo.Provider)
+			responseSLO.Provider = boundedModelsProviderLabel(slo.Provider)
+		}
+		writeJSON(w, http.StatusCreated, map[string]any{"slo": responseSLO})
 	case http.MethodDelete:
+		appProjection := r.Header.Get("X-Vibe-UI") == "app"
+		var providerRef providerReferenceFunc
+		if appProjection {
+			providerRef = s.providerRefSnapshot()
+		}
 		provider := strings.TrimSpace(r.URL.Query().Get("provider"))
 		if provider == "" {
 			writeOpenAIError(w, http.StatusBadRequest, "provider query param is required", "invalid_request_error", "missing_provider")
@@ -91,11 +125,22 @@ func (s *Server) handleProviderSLOs(w http.ResponseWriter, r *http.Request) {
 			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "provider_slo_delete_failed")
 			return
 		}
-		s.auditAdmin(r, "provider_slo.delete", auditJSON(map[string]string{"provider": provider}), "")
-		writeJSON(w, http.StatusOK, map[string]string{"provider": provider, "status": "deleted"})
+		s.auditAdmin(r, "provider_slo.delete", auditJSON(map[string]string{"provider": boundedModelsProviderLabel(provider)}), "")
+		response := map[string]string{"provider": provider, "status": "deleted"}
+		if appProjection {
+			response["provider"] = boundedModelsProviderLabel(provider)
+			response["provider_ref"] = providerRef(provider)
+		}
+		writeJSON(w, http.StatusOK, response)
 	default:
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
 	}
+}
+
+func providerSLOAuditJSON(slo store.ProviderSLO) string {
+	slo.Provider = boundedModelsProviderLabel(slo.Provider)
+	slo.ProviderRef = ""
+	return auditJSON(slo)
 }
 
 // evaluateProviderSLOs compares each SLO's targets against the current health

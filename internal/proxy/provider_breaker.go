@@ -226,6 +226,7 @@ func (b *providerBreakers) rawNames() []string {
 
 type breakerSnapshot struct {
 	Provider       string `json:"provider"`
+	ProviderRef    string `json:"provider_ref,omitempty"`
 	Phase          string `json:"phase"`
 	Failures       int    `json:"failures"`
 	Opens          int    `json:"opens"`
@@ -239,6 +240,10 @@ type breakerSnapshot struct {
 // actually seen fail appear here; a healthy provider that has never failed has no
 // entry, which reads as "nothing to report".
 func (b *providerBreakers) snapshot(cooldown time.Duration, now time.Time) []breakerSnapshot {
+	return b.snapshotWithRefs(cooldown, now, nil)
+}
+
+func (b *providerBreakers) snapshotWithRefs(cooldown time.Duration, now time.Time, providerRef providerReferenceFunc) []breakerSnapshot {
 	if b == nil {
 		return []breakerSnapshot{}
 	}
@@ -256,6 +261,9 @@ func (b *providerBreakers) snapshot(cooldown time.Duration, now time.Time) []bre
 			Opens:      st.opens,
 			LastReason: st.lastReason,
 		}
+		if providerRef != nil {
+			snap.ProviderRef = providerRef(name)
+		}
 		if !st.lastFailure.IsZero() {
 			snap.LastFailureAt = st.lastFailure.UTC().Format(time.RFC3339)
 		}
@@ -267,7 +275,12 @@ func (b *providerBreakers) snapshot(cooldown time.Duration, now time.Time) []bre
 		}
 		out = append(out, snap)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Provider < out[j].Provider })
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Provider != out[j].Provider {
+			return out[i].Provider < out[j].Provider
+		}
+		return out[i].ProviderRef < out[j].ProviderRef
+	})
 	return out
 }
 

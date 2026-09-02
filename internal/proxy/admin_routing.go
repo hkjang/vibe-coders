@@ -22,6 +22,7 @@ const (
 type providerHealthRankingItem struct {
 	Rank             int     `json:"rank"`
 	Provider         string  `json:"provider"`
+	ProviderRef      string  `json:"provider_ref,omitempty"`
 	Score            int     `json:"score"`
 	Requests         int64   `json:"requests"`
 	FallbackRate     float64 `json:"fallback_rate"`
@@ -30,10 +31,11 @@ type providerHealthRankingItem struct {
 }
 
 type providerHealthAlert struct {
-	Provider string `json:"provider"`
-	Code     string `json:"code"`
-	Severity string `json:"severity"`
-	Message  string `json:"message"`
+	Provider    string `json:"provider"`
+	ProviderRef string `json:"provider_ref,omitempty"`
+	Code        string `json:"code"`
+	Severity    string `json:"severity"`
+	Message     string `json:"message"`
 }
 
 type providerHealthTrendBucket struct {
@@ -165,6 +167,10 @@ func (s *Server) handleRoutingHealth(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
 		return
 	}
+	var providerRef providerReferenceFunc
+	if r.Header.Get("X-Vibe-UI") == "app" {
+		providerRef = s.providerRefSnapshot()
+	}
 	since := parseWindow(r.URL.Query().Get("window"), providerHealthWindow, "hour")
 	until := time.Now().UTC()
 	threshold := parseProviderHealthThreshold(r.URL.Query().Get("threshold"))
@@ -173,8 +179,8 @@ func (s *Server) handleRoutingHealth(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "routing_health_failed")
 		return
 	}
-	scores = boundedProviderHealthScores(scores)
-	trend, err := s.providerHealthTrend(r.Context(), since, until, providerHealthTrendBuckets)
+	scores = boundedProviderHealthScores(scores, providerRef)
+	trend, err := s.providerHealthTrend(r.Context(), since, until, providerHealthTrendBuckets, providerRef)
 	if err != nil {
 		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "routing_health_trend_failed")
 		return
@@ -195,7 +201,7 @@ func (s *Server) handleRoutingHealth(w http.ResponseWriter, r *http.Request) {
 			"enabled":          breakerEnabled,
 			"threshold":        breakerThreshold,
 			"cooldown_seconds": int(breakerCooldown.Seconds()),
-			"states":           s.breakers.snapshot(breakerCooldown, time.Now()),
+			"states":           s.breakers.snapshotWithRefs(breakerCooldown, time.Now(), providerRef),
 			// With sharing on, a state may have come from a peer rather than from this
 			// instance's own traffic; the operator needs to know which they are looking at.
 			"shared":      s.breakerSharingEnabled(),
@@ -214,6 +220,10 @@ func (s *Server) handleRoutingBreakerReset(w http.ResponseWriter, r *http.Reques
 	if r.Method != http.MethodPost {
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
 		return
+	}
+	var providerRef providerReferenceFunc
+	if r.Header.Get("X-Vibe-UI") == "app" {
+		providerRef = s.providerRefSnapshot()
 	}
 	var payload *struct {
 		Provider *string `json:"provider"`
@@ -266,7 +276,7 @@ func (s *Server) handleRoutingBreakerReset(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status":   "reset",
 		"provider": firstNonEmpty(name, "*"),
-		"states":   s.breakers.snapshot(cooldown, time.Now()),
+		"states":   s.breakers.snapshotWithRefs(cooldown, time.Now(), providerRef),
 	})
 }
 
@@ -284,10 +294,13 @@ func parseProviderHealthThreshold(raw string) int {
 	return threshold
 }
 
-func boundedProviderHealthScores(scores []store.ProviderHealthScore) []store.ProviderHealthScore {
+func boundedProviderHealthScores(scores []store.ProviderHealthScore, providerRef providerReferenceFunc) []store.ProviderHealthScore {
 	out := make([]store.ProviderHealthScore, len(scores))
 	copy(out, scores)
 	for i := range out {
+		if providerRef != nil {
+			out[i].ProviderRef = providerRef(out[i].Provider)
+		}
 		out[i].Provider = boundedModelsProviderLabel(out[i].Provider)
 	}
 	return out
@@ -306,6 +319,7 @@ func providerHealthRanking(scores []store.ProviderHealthScore) []providerHealthR
 		out = append(out, providerHealthRankingItem{
 			Rank:             i + 1,
 			Provider:         score.Provider,
+			ProviderRef:      score.ProviderRef,
 			Score:            score.Score,
 			Requests:         score.Requests,
 			FallbackRate:     score.FallbackRate,
@@ -334,7 +348,7 @@ func providerHealthAlerts(scores []store.ProviderHealthScore, threshold int) []p
 		}
 		if score.Score < threshold {
 			alerts = append(alerts, providerHealthAlert{
-				Provider: score.Provider,
+				Provider: score.Provider, ProviderRef: score.ProviderRef,
 				Code:     "provider_degraded",
 				Severity: providerHealthSeverity(score.Score, threshold),
 				Message:  "provider health score is below threshold",
@@ -342,7 +356,7 @@ func providerHealthAlerts(scores []store.ProviderHealthScore, threshold int) []p
 		}
 		if score.Timeouts > 0 {
 			alerts = append(alerts, providerHealthAlert{
-				Provider: score.Provider,
+				Provider: score.Provider, ProviderRef: score.ProviderRef,
 				Code:     "timeouts_detected",
 				Severity: providerHealthSeverity(score.Score, threshold),
 				Message:  "timeout signals were observed in the selected window",
@@ -350,7 +364,7 @@ func providerHealthAlerts(scores []store.ProviderHealthScore, threshold int) []p
 		}
 		if score.Rate429 > 0 {
 			alerts = append(alerts, providerHealthAlert{
-				Provider: score.Provider,
+				Provider: score.Provider, ProviderRef: score.ProviderRef,
 				Code:     "rate_limit_detected",
 				Severity: "warning",
 				Message:  "429 rate limit responses were observed in the selected window",
@@ -358,7 +372,7 @@ func providerHealthAlerts(scores []store.ProviderHealthScore, threshold int) []p
 		}
 		if score.Rate5xx > 0 {
 			alerts = append(alerts, providerHealthAlert{
-				Provider: score.Provider,
+				Provider: score.Provider, ProviderRef: score.ProviderRef,
 				Code:     "server_error_detected",
 				Severity: providerHealthSeverity(score.Score, threshold),
 				Message:  "5xx provider responses were observed in the selected window",
@@ -366,7 +380,7 @@ func providerHealthAlerts(scores []store.ProviderHealthScore, threshold int) []p
 		}
 		if score.FallbackRate >= 0.1 {
 			alerts = append(alerts, providerHealthAlert{
-				Provider: score.Provider,
+				Provider: score.Provider, ProviderRef: score.ProviderRef,
 				Code:     "fallback_rate_high",
 				Severity: providerHealthSeverity(score.Score, threshold),
 				Message:  "fallback rate is elevated for the selected window",
@@ -387,7 +401,7 @@ func providerHealthSeverity(score, threshold int) string {
 	}
 }
 
-func (s *Server) providerHealthTrend(ctx context.Context, since, until time.Time, buckets int) ([]providerHealthTrendBucket, error) {
+func (s *Server) providerHealthTrend(ctx context.Context, since, until time.Time, buckets int, providerRef providerReferenceFunc) ([]providerHealthTrendBucket, error) {
 	if buckets <= 0 || !until.After(since) {
 		return []providerHealthTrendBucket{}, nil
 	}
@@ -411,7 +425,7 @@ func (s *Server) providerHealthTrend(ctx context.Context, since, until time.Time
 		if err != nil {
 			return nil, err
 		}
-		scores = boundedProviderHealthScores(scores)
+		scores = boundedProviderHealthScores(scores, providerRef)
 		trend = append(trend, providerHealthTrendBucket{
 			Since:     start.Format(time.RFC3339),
 			Until:     end.Format(time.RFC3339),

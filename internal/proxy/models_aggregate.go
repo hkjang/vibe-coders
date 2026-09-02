@@ -447,6 +447,22 @@ func modelsCatalogRequestURL(baseURL, requestPath string) (*url.URL, error) {
 	return &url.URL{Path: requestPath, RawQuery: configured.RawQuery}, nil
 }
 
+func pinnedModelsRequestURL(baseURL string, incoming *url.URL) (*url.URL, error) {
+	requestURL, err := modelsCatalogRequestURL(baseURL, incoming.Path)
+	if err != nil {
+		return nil, err
+	}
+	if incoming.RawQuery != "" {
+		if requestURL.RawQuery != "" {
+			requestURL.RawQuery += "&"
+		}
+		// Pinned models calls deliberately retain the caller's raw query compatibility;
+		// unlike aggregate discovery, the query is sent to only the selected provider.
+		requestURL.RawQuery += incoming.RawQuery
+	}
+	return requestURL, nil
+}
+
 // serveAggregatedModels writes the merged multi-provider model list for an unpinned GET
 // /v1/models and enqueues a lightweight audit record. It returns false (without writing) when
 // no provider could be aggregated, so the caller can fall back to classic single-provider proxying.
@@ -575,6 +591,15 @@ func modelsProviderLabelSafe(name string) bool {
 		return false
 	}
 	return true
+}
+
+func modelsProviderNameReserved(name string) bool {
+	switch name {
+	case "*", "vibe", "aggregate", "[provider-name-omitted]":
+		return true
+	default:
+		return false
+	}
 }
 
 func appendBoundedModelsProviderNames(dst []string, names []string, used *int) ([]string, int) {

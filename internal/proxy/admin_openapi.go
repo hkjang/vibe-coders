@@ -786,12 +786,13 @@ func appUIOpenAPISchemas() map[string]any {
 // infer unknown response bodies for the core read APIs.
 func modelCatalogOpenAPISchemas() map[string]any {
 	modelSource := map[string]any{"type": "string", "enum": []string{"live", "cache", "agent_route"}}
+	providerRef := map[string]any{"type": "string", "minLength": providerRefLength, "maxLength": providerRefLength, "pattern": `^prv_[A-Za-z0-9_-]{43}$`}
 	return map[string]any{
 		"ProviderPublic": map[string]any{
 			"type": "object", "additionalProperties": false,
 			"required": []string{"name", "base_url", "api_key_configured", "timeout_ms", "enabled", "model_patterns", "failover_group", "priority", "created_at"},
 			"properties": map[string]any{
-				"name": map[string]any{"type": "string"}, "base_url": map[string]any{"type": "string"},
+				"name": map[string]any{"type": "string"}, "provider_ref": providerRef, "base_url": map[string]any{"type": "string"},
 				"api_key_configured": map[string]any{"type": "boolean"}, "timeout_ms": map[string]any{"type": "integer"},
 				"enabled": map[string]any{"type": "boolean"}, "model_patterns": map[string]any{"type": "string"},
 				"failover_group": map[string]any{"type": "string"}, "priority": map[string]any{"type": "integer", "minimum": 1},
@@ -814,9 +815,9 @@ func modelCatalogOpenAPISchemas() map[string]any {
 		},
 		"AdminModel": map[string]any{
 			"type": "object", "additionalProperties": false,
-			"required": []string{"id", "provider", "object", "owned_by", "created", "source", "virtual", "shadowed", "shadowed_by", "stale", "fetched_at", "deprecation"},
+			"required": []string{"id", "provider", "provider_ref", "object", "owned_by", "created", "source", "virtual", "shadowed", "shadowed_by", "stale", "fetched_at", "deprecation"},
 			"properties": map[string]any{
-				"id": map[string]any{"type": "string"}, "provider": map[string]any{"type": "string"},
+				"id": map[string]any{"type": "string"}, "provider": map[string]any{"type": "string"}, "provider_ref": providerRef,
 				"object": map[string]any{"type": "string"}, "owned_by": map[string]any{"type": "string"},
 				"created": map[string]any{"type": "integer", "format": "int64", "minimum": 0, "nullable": true}, "source": modelSource,
 				"virtual": map[string]any{"type": "boolean"}, "shadowed": map[string]any{"type": "boolean"},
@@ -827,17 +828,17 @@ func modelCatalogOpenAPISchemas() map[string]any {
 		},
 		"AdminModelProvider": map[string]any{
 			"type": "object", "additionalProperties": false,
-			"required": []string{"provider", "status", "source", "model_count", "stale"},
+			"required": []string{"provider", "provider_ref", "status", "source", "model_count", "stale"},
 			"properties": map[string]any{
-				"provider": map[string]any{"type": "string"}, "status": map[string]any{"type": "string", "enum": []string{"ok", "failed", "skipped"}},
+				"provider": map[string]any{"type": "string"}, "provider_ref": providerRef, "status": map[string]any{"type": "string", "enum": []string{"ok", "failed", "skipped"}},
 				"source": modelSource, "model_count": map[string]any{"type": "integer", "minimum": 0},
 				"fetched_at": map[string]any{"type": "string", "format": "date-time"}, "stale": map[string]any{"type": "boolean"},
 			},
 		},
 		"AdminModelPartialFailure": map[string]any{
-			"type": "object", "additionalProperties": false, "required": []string{"provider", "code", "message"},
+			"type": "object", "additionalProperties": false, "required": []string{"provider", "provider_ref", "code", "message"},
 			"properties": map[string]any{
-				"provider": map[string]any{"type": "string"}, "code": map[string]any{"type": "string"}, "message": map[string]any{"type": "string"},
+				"provider": map[string]any{"type": "string"}, "provider_ref": providerRef, "code": map[string]any{"type": "string"}, "message": map[string]any{"type": "string"},
 			},
 		},
 		"AdminModelsResponse": map[string]any{
@@ -854,7 +855,7 @@ func modelCatalogOpenAPISchemas() map[string]any {
 			"type": "object", "additionalProperties": false,
 			"required": []string{"provider", "availability_target", "p95_latency_target_ms", "error_rate_target", "fallback_rate_target", "enabled", "note", "updated_at"},
 			"properties": map[string]any{
-				"provider": map[string]any{"type": "string"}, "availability_target": map[string]any{"type": "number"},
+				"provider": map[string]any{"type": "string"}, "provider_ref": providerRef, "availability_target": map[string]any{"type": "number"},
 				"p95_latency_target_ms": map[string]any{"type": "integer", "format": "int64"},
 				"error_rate_target":     map[string]any{"type": "number"},
 				"fallback_rate_target":  map[string]any{"type": "number"},
@@ -873,7 +874,7 @@ func modelCatalogOpenAPISchemas() map[string]any {
 			"type": "object", "additionalProperties": false,
 			"required": []string{"provider", "requests", "enabled", "breached", "metrics"},
 			"properties": map[string]any{
-				"provider": map[string]any{"type": "string"}, "requests": map[string]any{"type": "integer", "format": "int64", "minimum": 0},
+				"provider": map[string]any{"type": "string"}, "provider_ref": providerRef, "requests": map[string]any{"type": "integer", "format": "int64", "minimum": 0},
 				"enabled": map[string]any{"type": "boolean"}, "breached": map[string]any{"type": "boolean"},
 				"metrics": map[string]any{
 					"type": "object", "additionalProperties": false,
@@ -913,7 +914,7 @@ func modelCatalogOpenAPISchemas() map[string]any {
 		"ProviderSLODeleteResponse": map[string]any{
 			"type": "object", "additionalProperties": false, "required": []string{"provider", "status"},
 			"properties": map[string]any{
-				"provider": map[string]any{"type": "string"}, "status": map[string]any{"type": "string", "enum": []string{"deleted"}},
+				"provider": map[string]any{"type": "string"}, "provider_ref": providerRef, "status": map[string]any{"type": "string", "enum": []string{"deleted"}},
 			},
 		},
 		"CategoryScore": map[string]any{
@@ -1010,6 +1011,7 @@ func modelCatalogOpenAPISchemas() map[string]any {
 // and maps in server.go, ops_status.go, admin_routing.go, and the store package.
 func operationalHealthOpenAPISchemas() map[string]any {
 	providerHealthArray := map[string]any{"type": "array", "items": schemaRef("ProviderHealthScore")}
+	providerRef := map[string]any{"type": "string", "minLength": providerRefLength, "maxLength": providerRefLength, "pattern": `^prv_[A-Za-z0-9_-]{43}$`}
 	return map[string]any{
 		"ReadyResponse": map[string]any{
 			"type": "object", "additionalProperties": false, "required": []string{"status"},
@@ -1100,7 +1102,7 @@ func operationalHealthOpenAPISchemas() map[string]any {
 			"type": "object", "additionalProperties": false,
 			"required": []string{"provider", "score", "requests", "average_latency_ms", "p95_latency_ms", "timeouts", "rate_429", "rate_5xx", "fallbacks", "fallback_rate"},
 			"properties": map[string]any{
-				"provider": map[string]any{"type": "string"}, "score": map[string]any{"type": "integer", "minimum": 0, "maximum": 100},
+				"provider": map[string]any{"type": "string"}, "provider_ref": providerRef, "score": map[string]any{"type": "integer", "minimum": 0, "maximum": 100},
 				"requests": map[string]any{"type": "integer", "minimum": 0}, "average_latency_ms": map[string]any{"type": "number", "minimum": 0},
 				"p95_latency_ms": map[string]any{"type": "integer", "minimum": 0}, "timeouts": map[string]any{"type": "integer", "minimum": 0},
 				"rate_429": map[string]any{"type": "integer", "minimum": 0}, "rate_5xx": map[string]any{"type": "integer", "minimum": 0},
@@ -1185,7 +1187,7 @@ func operationalHealthOpenAPISchemas() map[string]any {
 			"type": "object", "additionalProperties": false,
 			"required": []string{"rank", "provider", "score", "requests", "fallback_rate", "p95_latency_ms", "average_latency_ms"},
 			"properties": map[string]any{
-				"rank": map[string]any{"type": "integer", "minimum": 1}, "provider": map[string]any{"type": "string"},
+				"rank": map[string]any{"type": "integer", "minimum": 1}, "provider": map[string]any{"type": "string"}, "provider_ref": providerRef,
 				"score": map[string]any{"type": "integer", "minimum": 0, "maximum": 100}, "requests": map[string]any{"type": "integer", "minimum": 0},
 				"fallback_rate": map[string]any{"type": "number", "minimum": 0}, "p95_latency_ms": map[string]any{"type": "integer", "minimum": 0},
 				"average_latency_ms": map[string]any{"type": "number", "minimum": 0},
@@ -1194,7 +1196,7 @@ func operationalHealthOpenAPISchemas() map[string]any {
 		"ProviderHealthAlert": map[string]any{
 			"type": "object", "additionalProperties": false, "required": []string{"provider", "code", "severity", "message"},
 			"properties": map[string]any{
-				"provider": map[string]any{"type": "string"}, "code": map[string]any{"type": "string"},
+				"provider": map[string]any{"type": "string"}, "provider_ref": providerRef, "code": map[string]any{"type": "string"},
 				"severity": map[string]any{"type": "string", "enum": []string{"info", "warning", "critical"}}, "message": map[string]any{"type": "string"},
 			},
 		},
@@ -1208,7 +1210,7 @@ func operationalHealthOpenAPISchemas() map[string]any {
 		"RoutingBreakerState": map[string]any{
 			"type": "object", "additionalProperties": false, "required": []string{"provider", "phase", "failures", "opens"},
 			"properties": map[string]any{
-				"provider": map[string]any{"type": "string"}, "phase": map[string]any{"type": "string", "enum": []string{"closed", "open", "half_open"}},
+				"provider": map[string]any{"type": "string"}, "provider_ref": providerRef, "phase": map[string]any{"type": "string", "enum": []string{"closed", "open", "half_open"}},
 				"failures": map[string]any{"type": "integer", "minimum": 0}, "opens": map[string]any{"type": "integer", "minimum": 0},
 				"last_reason": map[string]any{"type": "string"}, "last_failure_at": map[string]any{"type": "string", "format": "date-time"},
 				"opened_at": map[string]any{"type": "string", "format": "date-time"}, "retry_in_seconds": map[string]any{"type": "integer", "minimum": 0},

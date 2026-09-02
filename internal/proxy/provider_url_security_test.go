@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -12,6 +13,31 @@ import (
 
 	"vibe-coders/internal/store"
 )
+
+func providerAppRequest(t *testing.T, method, requestURL string, body any) *http.Response {
+	t.Helper()
+	var reader io.Reader
+	if body != nil {
+		encoded, err := json.Marshal(body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		reader = bytes.NewReader(encoded)
+	}
+	req, err := http.NewRequest(method, requestURL, reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("X-Vibe-UI", "app")
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	response, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return response
+}
 
 func TestProviderBaseURLValidationAndSanitization(t *testing.T) {
 	tests := []struct {
@@ -123,7 +149,30 @@ func TestProviderAPIRejectsCredentialURLsAndSanitizesLegacyRows(t *testing.T) {
 			t.Fatalf("unsafe provider name %q returned %d: %s", unsafeName, unsafeCreate.StatusCode, unsafeBody)
 		}
 	}
-	legacyUnsafeName := "legacy,control\tname"
+	for _, reservedName := range []string{"*", "vibe", "aggregate", "[provider-name-omitted]"} {
+		reservedCreate := postJSON(t, proxy.URL+"/admin/providers", "", map[string]any{
+			"name": reservedName, "base_url": "https://new.example", "enabled": true,
+		})
+		reservedBody, _ := io.ReadAll(reservedCreate.Body)
+		reservedCreate.Body.Close()
+		if reservedCreate.StatusCode != http.StatusBadRequest || !strings.Contains(string(reservedBody), "provider_name_reserved") {
+			t.Fatalf("reserved provider name %q returned %d: %s", reservedName, reservedCreate.StatusCode, reservedBody)
+		}
+	}
+	if err := db.UpsertProvider(context.Background(), store.ProviderConfig{
+		Name: "vibe", BaseURL: "https://legacy-reserved.example", TimeoutMS: 1_000, Enabled: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	legacyReservedEdit := postJSON(t, proxy.URL+"/admin/providers", "", map[string]any{
+		"name": "vibe", "base_url": "https://legacy-reserved.example", "timeout_ms": 2_000, "enabled": false,
+	})
+	legacyReservedBody, _ := io.ReadAll(legacyReservedEdit.Body)
+	legacyReservedEdit.Body.Close()
+	if legacyReservedEdit.StatusCode != http.StatusOK {
+		t.Fatalf("legacy reserved provider edit returned %d: %s", legacyReservedEdit.StatusCode, legacyReservedBody)
+	}
+	legacyUnsafeName := "sk-ant-legacy-provider-secret"
 	if err := db.UpsertProvider(context.Background(), store.ProviderConfig{
 		Name: legacyUnsafeName, BaseURL: "https://legacy-unsafe.example", TimeoutMS: 1_000, Enabled: true,
 	}); err != nil {
@@ -136,6 +185,23 @@ func TestProviderAPIRejectsCredentialURLsAndSanitizesLegacyRows(t *testing.T) {
 	legacyUnsafeEdit.Body.Close()
 	if legacyUnsafeEdit.StatusCode != http.StatusOK {
 		t.Fatalf("legacy unsafe provider edit returned %d: %s", legacyUnsafeEdit.StatusCode, legacyUnsafeBody)
+	}
+	appUnsafeEdit := providerAppRequest(t, http.MethodPost, proxy.URL+"/admin/providers", map[string]any{
+		"name": legacyUnsafeName, "base_url": "https://legacy-unsafe.example", "timeout_ms": 3_000, "enabled": false,
+	})
+	appUnsafeEditBody, _ := io.ReadAll(appUnsafeEdit.Body)
+	appUnsafeEdit.Body.Close()
+	if appUnsafeEdit.StatusCode != http.StatusOK || strings.Contains(string(appUnsafeEditBody), legacyUnsafeName) {
+		t.Fatalf("app provider edit did not redact unsafe name: status=%d body=%s", appUnsafeEdit.StatusCode, appUnsafeEditBody)
+	}
+	var appUnsafeEditPayload struct {
+		Provider store.ProviderPublic `json:"provider"`
+	}
+	if err := json.Unmarshal(appUnsafeEditBody, &appUnsafeEditPayload); err != nil {
+		t.Fatal(err)
+	}
+	if appUnsafeEditPayload.Provider.Name != "[provider-name-omitted]" || appUnsafeEditPayload.Provider.ProviderRef != server.providerRef(legacyUnsafeName) {
+		t.Fatalf("app provider edit projection = %+v", appUnsafeEditPayload.Provider)
 	}
 
 	for _, raw := range []string{
@@ -195,13 +261,52 @@ func TestProviderAPIRejectsCredentialURLsAndSanitizesLegacyRows(t *testing.T) {
 		t.Fatal(err)
 	}
 	var legacyPublic store.ProviderPublic
+	legacyUnsafeFound := false
 	for _, provider := range payload.Providers {
 		if provider.Name == "legacy" {
 			legacyPublic = provider
 		}
+		if provider.Name == legacyUnsafeName {
+			legacyUnsafeFound = true
+		}
+	}
+	if !legacyUnsafeFound {
+		t.Fatal("legacy provider list no longer preserves the raw name needed by the legacy editor")
+	}
+
+	appListed := providerAppRequest(t, http.MethodGet, proxy.URL+"/admin/providers", nil)
+	appListedBody, _ := io.ReadAll(appListed.Body)
+	appListed.Body.Close()
+	if appListed.StatusCode != http.StatusOK || strings.Contains(string(appListedBody), legacyUnsafeName) {
+		t.Fatalf("app provider list did not redact unsafe name: status=%d body=%s", appListed.StatusCode, appListedBody)
+	}
+	var appPayload struct {
+		Providers []store.ProviderPublic `json:"providers"`
+	}
+	if err := json.Unmarshal(appListedBody, &appPayload); err != nil {
+		t.Fatal(err)
+	}
+	appUnsafeFound := false
+	appSafeFound := false
+	appLegacyReservedFound := false
+	for _, provider := range appPayload.Providers {
+		switch provider.ProviderRef {
+		case server.providerRef(legacyUnsafeName):
+			appUnsafeFound = provider.Name == "[provider-name-omitted]"
+		case server.providerRef("azure"):
+			appSafeFound = provider.Name == "azure"
+		case server.providerRef("vibe"):
+			appLegacyReservedFound = provider.Name == "vibe" && provider.ProviderRef != server.systemProviderRef("vibe")
+		}
+	}
+	if !appUnsafeFound || !appSafeFound || !appLegacyReservedFound {
+		t.Fatalf("app provider projections did not preserve safe labels and opaque identity: %+v", appPayload.Providers)
 	}
 	if legacyPublic.BaseURL != invalidProviderURLDisplay {
 		t.Fatalf("legacy provider was not returned safely: %+v", legacyPublic)
+	}
+	if legacyPublic.ProviderRef != "" || strings.Contains(string(listedBody), `"provider_ref"`) {
+		t.Fatalf("legacy provider response gained app-only provider_ref: %s", listedBody)
 	}
 
 	// An unrelated update from the Legacy UI sends the redacted representation
@@ -221,12 +326,18 @@ func TestProviderAPIRejectsCredentialURLsAndSanitizesLegacyRows(t *testing.T) {
 	if err != nil || !found || stored.BaseURL != legacyRaw || stored.TimeoutMS != 7_000 || stored.Enabled {
 		t.Fatalf("redacted legacy update corrupted provider: found=%v err=%v provider=%+v", found, err, stored)
 	}
-	audits, err := db.ListAdminAudit(context.Background(), 10)
+	audits, err := db.ListAdminAudit(context.Background(), 50)
 	if err != nil {
 		t.Fatal(err)
 	}
 	foundLegacyAudit := false
 	for _, audit := range audits {
+		if strings.Contains(audit.BeforeValue+audit.AfterValue, `"provider_ref"`) {
+			t.Fatalf("provider audit must not persist a rotating provider_ref: %+v", audit)
+		}
+		if strings.Contains(audit.BeforeValue+audit.AfterValue, legacyUnsafeName) {
+			t.Fatalf("provider audit leaked unsafe legacy name: %+v", audit)
+		}
 		if strings.Contains(audit.BeforeValue+audit.AfterValue, "legacy-path-secret") || strings.Contains(audit.BeforeValue+audit.AfterValue, "query-secret") {
 			t.Fatalf("provider audit leaked legacy credentials: %+v", audit)
 		}
@@ -234,6 +345,11 @@ func TestProviderAPIRejectsCredentialURLsAndSanitizesLegacyRows(t *testing.T) {
 			foundLegacyAudit = true
 			if !strings.Contains(audit.BeforeValue, invalidProviderURLDisplay) || !strings.Contains(audit.AfterValue, invalidProviderURLDisplay) {
 				t.Fatalf("provider audit did not replace unsafe URL in full: %+v", audit)
+			}
+		}
+		if strings.Contains(audit.BeforeValue+audit.AfterValue, `"name":"[provider-name-omitted]"`) {
+			if strings.Contains(audit.BeforeValue+audit.AfterValue, legacyUnsafeName) {
+				t.Fatalf("unsafe provider audit label leaked its raw identity: %+v", audit)
 			}
 		}
 	}

@@ -48,6 +48,7 @@ type adminModelDeprecation struct {
 type adminModel struct {
 	ID          string                 `json:"id"`
 	Provider    string                 `json:"provider"`
+	ProviderRef string                 `json:"provider_ref"`
 	Object      string                 `json:"object"`
 	OwnedBy     string                 `json:"owned_by"`
 	Created     *int64                 `json:"created"`
@@ -61,18 +62,20 @@ type adminModel struct {
 }
 
 type adminModelProvider struct {
-	Provider   string           `json:"provider"`
-	Status     string           `json:"status"`
-	Source     adminModelSource `json:"source"`
-	ModelCount int              `json:"model_count"`
-	FetchedAt  *string          `json:"fetched_at,omitempty"`
-	Stale      bool             `json:"stale"`
+	Provider    string           `json:"provider"`
+	ProviderRef string           `json:"provider_ref"`
+	Status      string           `json:"status"`
+	Source      adminModelSource `json:"source"`
+	ModelCount  int              `json:"model_count"`
+	FetchedAt   *string          `json:"fetched_at,omitempty"`
+	Stale       bool             `json:"stale"`
 }
 
 type adminModelPartialFailure struct {
-	Provider string `json:"provider"`
-	Code     string `json:"code"`
-	Message  string `json:"message"`
+	Provider    string `json:"provider"`
+	ProviderRef string `json:"provider_ref"`
+	Code        string `json:"code"`
+	Message     string `json:"message"`
 }
 
 type adminModelsResponse struct {
@@ -84,8 +87,13 @@ type adminModelsResponse struct {
 }
 
 type adminModelsResponseLimiter struct {
-	modelBytes int
-	limited    bool
+	modelBytes  int
+	limited     bool
+	providerRef func(string) string
+}
+
+func newAdminModelsResponseLimiter(providerRef func(string) string) adminModelsResponseLimiter {
+	return adminModelsResponseLimiter{providerRef: providerRef}
 }
 
 func (limiter *adminModelsResponseLimiter) append(response *adminModelsResponse, model adminModel) bool {
@@ -93,6 +101,7 @@ func (limiter *adminModelsResponseLimiter) append(response *adminModelsResponse,
 		limiter.limited = true
 		return false
 	}
+	model = finalizeAdminModelForResponse(model, limiter.providerRef)
 	encoded, err := json.Marshal(model)
 	if err != nil {
 		limiter.limited = true
@@ -142,6 +151,9 @@ func (s *Server) handleAdminModels(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
 		return
 	}
+	providerRefs := s.providerRefsSnapshot()
+	providerRef := providerRefs.physical
+	systemProviderRef := providerRefs.system
 
 	configs, err := s.db.ListProviderConfigs(r.Context())
 	if err != nil {
@@ -174,7 +186,7 @@ func (s *Server) handleAdminModels(w http.ResponseWriter, r *http.Request) {
 		agentRoutes, agentRoutesErr = s.db.ListAgentRoutes(r.Context())
 		if agentRoutesErr != nil {
 			response.PartialFailures = append(response.PartialFailures, adminModelPartialFailure{
-				Provider: "vibe", Code: "agent_routes_unavailable", Message: "Virtual model catalog is unavailable.",
+				Provider: "vibe", ProviderRef: systemProviderRef("vibe"), Code: "agent_routes_unavailable", Message: "Virtual model catalog is unavailable.",
 			})
 		} else {
 			agentRoutesFetchedAt = time.Now().UTC().Format(time.RFC3339Nano)
@@ -182,11 +194,11 @@ func (s *Server) handleAdminModels(w http.ResponseWriter, r *http.Request) {
 	}
 	agentRouteShadows := enabledAdminAgentRouteShadows(agentRoutes)
 
-	results := s.fetchAdminProviderModels(r.Context(), configs, providerFilter, modelFilter, &response)
+	results := s.fetchAdminProviderModels(r.Context(), configs, providerFilter, modelFilter, systemProviderRef, &response)
 	now := time.Now().UTC()
 	response.GeneratedAt = now.Format(time.RFC3339Nano)
 	seenModels := make(map[string]struct{})
-	limiter := adminModelsResponseLimiter{}
+	limiter := newAdminModelsResponseLimiter(providerRef)
 	for _, result := range results {
 		provider := adminModelProvider{
 			Provider: result.config.Name,
@@ -225,15 +237,15 @@ func (s *Server) handleAdminModels(w http.ResponseWriter, r *http.Request) {
 	if includeAgentRoutes {
 		if agentRoutesErr != nil {
 			response.Providers = append(response.Providers, adminModelProvider{
-				Provider: "vibe", Status: "failed", Source: adminModelSourceAgentRoute, Stale: false,
+				Provider: "vibe", ProviderRef: systemProviderRef("vibe"), Status: "failed", Source: adminModelSourceAgentRoute, Stale: false,
 			})
 		} else {
-			s.appendAdminAgentRouteModels(r.Context(), agentRoutes, agentRoutesFetchedAt, modelFilter, now, seenModels, &response, &limiter)
+			s.appendAdminAgentRouteModels(r.Context(), agentRoutes, agentRoutesFetchedAt, modelFilter, now, seenModels, &response, systemProviderRef("vibe"), &limiter)
 		}
 	}
 	if limiter.limited {
 		appendAdminModelsPartialFailureOnce(&response, adminModelPartialFailure{
-			Provider: "*", Code: "models_response_limit_exceeded", Message: "Model catalog response was truncated at the supported limit.",
+			Provider: "*", ProviderRef: systemProviderRef("*"), Code: "models_response_limit_exceeded", Message: "Model catalog response was truncated at the supported limit.",
 		})
 	}
 
@@ -258,10 +270,10 @@ func (s *Server) handleAdminModels(w http.ResponseWriter, r *http.Request) {
 		}
 		return response.PartialFailures[i].Code < response.PartialFailures[j].Code
 	})
-	writeAdminModelsResponse(w, response)
+	writeAdminModelsResponse(w, response, providerRef)
 }
 
-func (s *Server) fetchAdminProviderModels(ctx context.Context, configs []store.ProviderConfig, providerFilter, modelFilter string, response *adminModelsResponse) []adminProviderModelsResult {
+func (s *Server) fetchAdminProviderModels(ctx context.Context, configs []store.ProviderConfig, providerFilter, modelFilter string, systemProviderRef providerReferenceFunc, response *adminModelsResponse) []adminProviderModelsResult {
 	fallbackTimeout := s.upstreamConf().Timeout
 	s.adminModels.prune(configs, fallbackTimeout)
 	selectedCapacity := len(configs)
@@ -282,7 +294,7 @@ func (s *Server) fetchAdminProviderModels(ctx context.Context, configs []store.P
 	}
 	if skippedProviders > 0 {
 		appendAdminModelsPartialFailureOnce(response, adminModelPartialFailure{
-			Provider: "*", Code: "models_provider_limit_exceeded", Message: "Some providers were skipped at the supported provider limit.",
+			Provider: "*", ProviderRef: systemProviderRef("*"), Code: "models_provider_limit_exceeded", Message: "Some providers were skipped at the supported provider limit.",
 		})
 	}
 
@@ -409,7 +421,7 @@ func (s *Server) fetchAdminProviderModels(ctx context.Context, configs []store.P
 	}
 	if responseLimited {
 		appendAdminModelsPartialFailureOnce(response, adminModelPartialFailure{
-			Provider: "*", Code: "models_response_limit_exceeded", Message: "Model catalog response was truncated at the supported limit.",
+			Provider: "*", ProviderRef: systemProviderRef("*"), Code: "models_response_limit_exceeded", Message: "Model catalog response was truncated at the supported limit.",
 		})
 	}
 	return results
@@ -426,19 +438,36 @@ func adminModelsProviderTimeout(provider store.ProviderConfig, fallback time.Dur
 	return timeout
 }
 
-func writeAdminModelsResponse(w http.ResponseWriter, response adminModelsResponse) {
+func finalizeAdminModelForResponse(model adminModel, providerRef func(string) string) adminModel {
+	rawProvider := model.Provider
+	if model.ProviderRef == "" {
+		model.ProviderRef = providerRef(rawProvider)
+	}
+	model.Provider = boundedModelsProviderLabel(rawProvider)
+	model.OwnedBy = boundedModelsProviderLabel(model.OwnedBy)
+	return model
+}
+
+func writeAdminModelsResponse(w http.ResponseWriter, response adminModelsResponse, providerRef func(string) string) {
 	// Provider names remain raw while selecting, filtering, caching, and deduplicating.
 	// Sanitize only at the response boundary so multiple unsafe legacy names cannot
 	// collide as internal identities while none can escape through an admin DTO.
 	for index := range response.Models {
-		response.Models[index].Provider = boundedModelsProviderLabel(response.Models[index].Provider)
-		response.Models[index].OwnedBy = boundedModelsProviderLabel(response.Models[index].OwnedBy)
+		response.Models[index] = finalizeAdminModelForResponse(response.Models[index], providerRef)
 	}
 	for index := range response.Providers {
-		response.Providers[index].Provider = boundedModelsProviderLabel(response.Providers[index].Provider)
+		rawProvider := response.Providers[index].Provider
+		if response.Providers[index].ProviderRef == "" {
+			response.Providers[index].ProviderRef = providerRef(rawProvider)
+		}
+		response.Providers[index].Provider = boundedModelsProviderLabel(rawProvider)
 	}
 	for index := range response.PartialFailures {
-		response.PartialFailures[index].Provider = boundedModelsProviderLabel(response.PartialFailures[index].Provider)
+		rawProvider := response.PartialFailures[index].Provider
+		if response.PartialFailures[index].ProviderRef == "" {
+			response.PartialFailures[index].ProviderRef = providerRef(rawProvider)
+		}
+		response.PartialFailures[index].Provider = boundedModelsProviderLabel(rawProvider)
 	}
 	encoded, err := json.Marshal(response)
 	if err != nil {
@@ -532,9 +561,9 @@ func enabledAdminAgentRouteShadows(routes []store.AgentRoute) map[string]string 
 	return shadows
 }
 
-func (s *Server) appendAdminAgentRouteModels(ctx context.Context, routes []store.AgentRoute, fetchedAt, modelFilter string, now time.Time, seen map[string]struct{}, response *adminModelsResponse, limiter *adminModelsResponseLimiter) {
+func (s *Server) appendAdminAgentRouteModels(ctx context.Context, routes []store.AgentRoute, fetchedAt, modelFilter string, now time.Time, seen map[string]struct{}, response *adminModelsResponse, providerRef string, limiter *adminModelsResponseLimiter) {
 	provider := adminModelProvider{
-		Provider: "vibe", Status: "ok", Source: adminModelSourceAgentRoute, FetchedAt: &fetchedAt, Stale: false,
+		Provider: "vibe", ProviderRef: providerRef, Status: "ok", Source: adminModelSourceAgentRoute, FetchedAt: &fetchedAt, Stale: false,
 	}
 	hasEnabledRoute := false
 	for _, route := range routes {
@@ -547,7 +576,7 @@ func (s *Server) appendAdminAgentRouteModels(ctx context.Context, routes []store
 			continue
 		}
 		model := adminModel{
-			ID: id, Provider: "vibe", Object: "model", OwnedBy: "agent-route", Created: nil,
+			ID: id, Provider: "vibe", ProviderRef: providerRef, Object: "model", OwnedBy: "agent-route", Created: nil,
 			Source: adminModelSourceAgentRoute, Virtual: true, Stale: false, FetchedAt: fetchedAt,
 			Deprecation: s.adminModelDeprecation(ctx, id, now),
 		}

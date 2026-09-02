@@ -160,6 +160,7 @@ const DefaultProviderPriority = 100
 
 type ProviderPublic struct {
 	Name             string `json:"name"`
+	ProviderRef      string `json:"provider_ref,omitempty"`
 	BaseURL          string `json:"base_url"`
 	APIKeyConfigured bool   `json:"api_key_configured"`
 	TimeoutMS        int    `json:"timeout_ms"`
@@ -281,6 +282,7 @@ type RoutingDecisionLog struct {
 
 type ProviderHealthScore struct {
 	Provider         string  `json:"provider"`
+	ProviderRef      string  `json:"provider_ref,omitempty"`
 	Score            int     `json:"score"`
 	Requests         int64   `json:"requests"`
 	AverageLatencyMS float64 `json:"average_latency_ms"`

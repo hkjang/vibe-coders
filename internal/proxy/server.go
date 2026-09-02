@@ -1160,16 +1160,31 @@ func (s *Server) handleProviders(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.Method {
 	case http.MethodGet:
+		appProjection := r.Header.Get("X-Vibe-UI") == "app"
+		var providerRef providerReferenceFunc
+		if appProjection {
+			providerRef = s.providerRefSnapshot()
+		}
 		providers, err := s.db.ListProviders(r.Context())
 		if err != nil {
 			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "providers_failed")
 			return
 		}
 		for i := range providers {
+			rawName := providers[i].Name
+			if appProjection {
+				providers[i].ProviderRef = providerRef(rawName)
+				providers[i].Name = boundedModelsProviderLabel(rawName)
+			}
 			providers[i].BaseURL = sanitizeProviderBaseURL(providers[i].BaseURL)
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"providers": providers})
 	case http.MethodPost:
+		appProjection := r.Header.Get("X-Vibe-UI") == "app"
+		var providerRef providerReferenceFunc
+		if appProjection {
+			providerRef = s.providerRefSnapshot()
+		}
 		var payload struct {
 			Name          string `json:"name"`
 			BaseURL       string `json:"base_url"`
@@ -1193,6 +1208,10 @@ func (s *Server) handleProviders(w http.ResponseWriter, r *http.Request) {
 		before, found, err := s.db.GetProvider(r.Context(), payload.Name)
 		if err != nil {
 			writeOpenAIError(w, http.StatusInternalServerError, "failed to load provider", "server_error", "provider_load_failed")
+			return
+		}
+		if !found && modelsProviderNameReserved(payload.Name) {
+			writeOpenAIError(w, http.StatusBadRequest, "provider name is reserved", "invalid_request_error", "provider_name_reserved")
 			return
 		}
 		if !found && !modelsProviderLabelSafe(payload.Name) {
@@ -1254,18 +1273,24 @@ func (s *Server) handleProviders(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.auditAdmin(r, "provider.upsert", providerAuditJSON(before), providerAuditJSON(provider))
-		writeJSON(w, http.StatusOK, map[string]any{
-			"provider": map[string]any{
-				"name":               provider.Name,
-				"base_url":           sanitizeProviderBaseURL(provider.BaseURL),
-				"api_key_configured": provider.EncryptedAPIKey != "",
-				"timeout_ms":         provider.TimeoutMS,
-				"enabled":            provider.Enabled,
-				"model_patterns":     provider.ModelPatterns,
-				"failover_group":     provider.FailoverGroup,
-				"priority":           provider.Priority,
-			},
-		})
+		responseName := provider.Name
+		if appProjection {
+			responseName = boundedModelsProviderLabel(responseName)
+		}
+		responseProvider := map[string]any{
+			"name":               responseName,
+			"base_url":           sanitizeProviderBaseURL(provider.BaseURL),
+			"api_key_configured": provider.EncryptedAPIKey != "",
+			"timeout_ms":         provider.TimeoutMS,
+			"enabled":            provider.Enabled,
+			"model_patterns":     provider.ModelPatterns,
+			"failover_group":     provider.FailoverGroup,
+			"priority":           provider.Priority,
+		}
+		if appProjection {
+			responseProvider["provider_ref"] = providerRef(provider.Name)
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"provider": responseProvider})
 	default:
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
 	}
@@ -1675,6 +1700,12 @@ func (s *Server) dialUpstream(reqCtx context.Context, r *http.Request, body []by
 			if modelsURLErr != nil {
 				return nil, "", "", "", failoverPath, currentBody, currentModel, lastUpstreamHeaders, modelsURLErr
 			}
+		} else if r.Method == http.MethodGet && r.URL.Path == "/v1/models" && clientPinnedProvider(r) {
+			var modelsURLErr error
+			upstreamRequestURL, modelsURLErr = pinnedModelsRequestURL(att.provider.BaseURL, r.URL)
+			if modelsURLErr != nil {
+				return nil, "", "", "", failoverPath, currentBody, currentModel, lastUpstreamHeaders, modelsURLErr
+			}
 		}
 		upstreamURL, err := s.upstreamURL(att.provider.BaseURL, upstreamRequestURL)
 		if err != nil {
@@ -2023,7 +2054,7 @@ func providerAuditJSON(provider store.ProviderConfig) string {
 		return ""
 	}
 	return auditJSON(map[string]any{
-		"name":               provider.Name,
+		"name":               boundedModelsProviderLabel(provider.Name),
 		"base_url":           sanitizeProviderBaseURL(provider.BaseURL),
 		"api_key_configured": provider.EncryptedAPIKey != "",
 		"timeout_ms":         provider.TimeoutMS,

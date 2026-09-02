@@ -191,6 +191,23 @@ func assertOpenAPIContract(t *testing.T, spec map[string]any) {
 	if created["type"] != "integer" || created["format"] != "int64" || created["nullable"] != true || created["minimum"] != float64(0) {
 		t.Errorf("AdminModel.created schema = %v, want nullable non-negative int64", created)
 	}
+	for _, schemaName := range []string{"ProviderPublic", "ProviderSLO", "ProviderSLOEvaluation", "ProviderSLODeleteResponse", "ProviderHealthScore", "ProviderHealthRankingItem", "ProviderHealthAlert", "RoutingBreakerState", "AdminModel", "AdminModelProvider", "AdminModelPartialFailure"} {
+		schema, _ := schemas[schemaName].(map[string]any)
+		properties, _ := schema["properties"].(map[string]any)
+		providerRef, _ := properties["provider_ref"].(map[string]any)
+		requiredFields, _ := schema["required"].([]any)
+		providerRefRequired := false
+		for _, field := range requiredFields {
+			if field == "provider_ref" {
+				providerRefRequired = true
+				break
+			}
+		}
+		wantRequired := strings.HasPrefix(schemaName, "AdminModel")
+		if providerRefRequired != wantRequired || providerRef["type"] != "string" || providerRef["minLength"] != float64(providerRefLength) || providerRef["maxLength"] != float64(providerRefLength) || providerRef["pattern"] != `^prv_[A-Za-z0-9_-]{43}$` {
+			t.Errorf("%s.provider_ref schema = %v required=%v wantRequired=%v", schemaName, providerRef, providerRefRequired, wantRequired)
+		}
+	}
 	providerSLOEvaluation, _ := schemas["ProviderSLOEvaluation"].(map[string]any)
 	providerSLOEvaluationProperties, _ := providerSLOEvaluation["properties"].(map[string]any)
 	providerSLOMetrics, _ := providerSLOEvaluationProperties["metrics"].(map[string]any)
