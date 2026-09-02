@@ -86,14 +86,44 @@ describe("app route query security", () => {
     const state = locationStateWithSensitiveRejections(
       {
         appSensitiveQueryKeys: ["q", "token", "private-value"],
+        providerDetailRejected: true,
+        providerSearchRejected: true,
+        ignoredFalseMarker: false,
         from: "test",
         nested: { api_key: "private-value" },
       },
       ["q", "token"],
     );
     expect(rejectedSensitiveQuery(state, "q")).toBe(true);
-    expect(state).toEqual({ appSensitiveQueryKeys: ["q"] });
+    expect(state).toEqual({
+      appSensitiveQueryKeys: ["q"],
+      providerDetailRejected: true,
+      providerSearchRejected: true,
+    });
     expect(JSON.stringify(state)).not.toContain("private-value");
+  });
+
+  it("preserves rejection markers only as an exact true boolean", () => {
+    expect(
+      locationStateWithSensitiveRejections(
+        {
+          providerDetailRejected: "true",
+          providerSearchRejected: { rawProvider: "legacy,unsafe" },
+          rawProvider: "legacy,unsafe",
+        },
+        [],
+      ),
+    ).toBeNull();
+    expect(
+      locationStateWithSensitiveRejections(
+        {
+          providerDetailRejected: true,
+          providerSearchRejected: true,
+          rawProvider: "legacy,unsafe",
+        },
+        [],
+      ),
+    ).toEqual({ providerDetailRejected: true, providerSearchRejected: true });
   });
 
   it("replaces the browser URL before bootstrap without retaining a secret", () => {

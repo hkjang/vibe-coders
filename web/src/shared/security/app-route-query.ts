@@ -23,6 +23,7 @@ const routeQueryAllowlist: Readonly<Record<string, ReadonlySet<string>>> = {
 
 export const sensitiveQueryRejectionStateKey = "appSensitiveQueryKeys";
 const preservedRejectionKeys = new Set(["q"]);
+const preservedBooleanStateKeys = ["providerDetailRejected", "providerSearchRejected"] as const;
 
 export interface SanitizedAppRouteSearch {
   rejectedKeys: readonly string[];
@@ -103,10 +104,9 @@ export function locationStateWithSensitiveRejections(
   state: unknown,
   keys: readonly string[],
 ): Record<string, unknown> | null {
-  const existing =
-    typeof state === "object" && state !== null
-      ? (state as Record<string, unknown>)[sensitiveQueryRejectionStateKey]
-      : undefined;
+  const stateRecord =
+    typeof state === "object" && state !== null ? (state as Record<string, unknown>) : undefined;
+  const existing = stateRecord === undefined ? undefined : stateRecord[sensitiveQueryRejectionStateKey];
   const safeKeys = new Set<string>();
   if (Array.isArray(existing)) {
     for (const key of existing) {
@@ -116,7 +116,12 @@ export function locationStateWithSensitiveRejections(
   for (const key of keys) {
     if (preservedRejectionKeys.has(key)) safeKeys.add(key);
   }
-  return safeKeys.size > 0 ? { [sensitiveQueryRejectionStateKey]: [...safeKeys] } : null;
+  const safeState: Record<string, unknown> = {};
+  if (safeKeys.size > 0) safeState[sensitiveQueryRejectionStateKey] = [...safeKeys];
+  for (const key of preservedBooleanStateKeys) {
+    if (stateRecord?.[key] === true) safeState[key] = true;
+  }
+  return Object.keys(safeState).length > 0 ? safeState : null;
 }
 
 export function rejectedSensitiveQuery(locationState: unknown, key: string): boolean {
@@ -131,16 +136,19 @@ export function isSanitizedAppLocationState(
 ): boolean {
   if (safeState === null) return state === null || state === undefined;
   if (typeof state !== "object" || state === null) return false;
-  const entries = Object.entries(state);
-  if (entries.length !== 1 || entries[0]?.[0] !== sensitiveQueryRejectionStateKey) return false;
-  const actual = entries[0][1];
-  const expected = safeState[sensitiveQueryRejectionStateKey];
-  return (
-    Array.isArray(actual) &&
-    Array.isArray(expected) &&
-    actual.length === expected.length &&
-    actual.every((value, index) => value === expected[index])
-  );
+  const stateRecord = state as Record<string, unknown>;
+  const entries = Object.entries(stateRecord);
+  const expectedEntries = Object.entries(safeState);
+  if (entries.length !== expectedEntries.length) return false;
+  return expectedEntries.every(([key, expected]) => {
+    const actual = stateRecord[key];
+    if (!Array.isArray(expected)) return actual === expected;
+    return (
+      Array.isArray(actual) &&
+      actual.length === expected.length &&
+      actual.every((value, index) => value === expected[index])
+    );
+  });
 }
 
 export function sanitizeWindowAppLocationBeforeBootstrap(): void {

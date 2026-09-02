@@ -5,6 +5,7 @@ import axe from "axe-core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router";
 
+import { RouteQueryGuard } from "@/app/guards/RouteQueryGuard";
 import { ProviderPage } from "@/features/gateway/providers/ProviderPage";
 import { apiClient } from "@/shared/api/client";
 import { endpoints } from "@/shared/api/endpoints";
@@ -227,6 +228,31 @@ function renderPage(
               </>
             }
           />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+}
+
+function renderGuardedPage(
+  initialEntry: string,
+  client = new QueryClient({ defaultOptions: { queries: { retry: false } } }),
+): ReturnType<typeof render> {
+  return render(
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={[initialEntry]}>
+        <Routes>
+          <Route element={<RouteQueryGuard />}>
+            <Route
+              path="/gateway/providers"
+              element={
+                <>
+                  <ProviderPage />
+                  <LocationProbe />
+                </>
+              }
+            />
+          </Route>
         </Routes>
       </MemoryRouter>
     </QueryClientProvider>,
@@ -524,6 +550,17 @@ describe("ProviderPage", () => {
     const dialog = await screen.findByRole("dialog", { name: "Provider 상세" });
     expect(within(dialog).getByText("현재 목록에 요청한 Provider가 없습니다.")).toBeVisible();
     expect(dialog).not.toHaveTextContent(secretName);
+  });
+
+  it("keeps the generic rejection dialog after the route guard scrubs an invalid Provider identity", async () => {
+    mockApi();
+    const unsafeName = "legacy,unsafe-provider";
+    renderGuardedPage(`/gateway/providers?provider=${encodeURIComponent(unsafeName)}`);
+
+    await waitFor(() => expect(screen.getByTestId("location")).not.toHaveTextContent("provider="));
+    const dialog = await screen.findByRole("dialog", { name: "Provider 상세" });
+    expect(within(dialog).getByText("현재 목록에 요청한 Provider가 없습니다.")).toBeVisible();
+    expect(document.body).not.toHaveTextContent(unsafeName);
   });
 
   it("renders a generic not-found state for an unknown opaque Provider reference", async () => {

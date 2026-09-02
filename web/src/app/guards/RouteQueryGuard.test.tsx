@@ -46,6 +46,8 @@ describe("RouteQueryGuard", () => {
               nested: { clientSecret: "state-private" },
               token: "state-private",
               appSensitiveQueryKeys: ["q", "state-private"],
+              providerDetailRejected: true,
+              providerSearchRejected: true,
             },
           },
         ]}
@@ -59,8 +61,44 @@ describe("RouteQueryGuard", () => {
     );
 
     const output = await screen.findByRole("status");
-    expect(output).toHaveAttribute("data-state", JSON.stringify({ appSensitiveQueryKeys: ["q"] }));
+    expect(output).toHaveAttribute(
+      "data-state",
+      JSON.stringify({
+        appSensitiveQueryKeys: ["q"],
+        providerDetailRejected: true,
+        providerSearchRejected: true,
+      }),
+    );
     expect(output.outerHTML).not.toContain("state-private");
+    expect(rendered).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves a boolean Provider rejection marker without retaining raw state", async () => {
+    const rendered = vi.fn();
+    render(
+      <MemoryRouter
+        initialEntries={[
+          {
+            pathname: "/gateway/providers",
+            state: {
+              providerDetailRejected: true,
+              requestedProvider: "legacy,unsafe-provider",
+              nested: { provider: "legacy,unsafe-provider" },
+            },
+          },
+        ]}
+      >
+        <Routes>
+          <Route element={<RouteQueryGuard />}>
+            <Route path="gateway/providers" element={<Probe rendered={rendered} />} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    const output = await screen.findByRole("status");
+    expect(output).toHaveAttribute("data-state", JSON.stringify({ providerDetailRejected: true }));
+    expect(output.outerHTML).not.toContain("legacy,unsafe-provider");
     expect(rendered).toHaveBeenCalledTimes(1);
   });
 
