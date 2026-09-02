@@ -813,7 +813,7 @@ func (s *Server) collectRedTeamTargets(r *http.Request) []store.RedTeamTarget {
 	}
 	if providers, err := s.db.ListProviderConfigs(ctx); err == nil {
 		for _, p := range providers {
-			meta := map[string]any{"base_url": p.BaseURL, "model_patterns": p.ModelPatterns, "external": redTeamExternalURL(p.BaseURL)}
+			meta := map[string]any{"base_url": sanitizeProviderBaseURL(p.BaseURL), "model_patterns": p.ModelPatterns, "external": redTeamExternalURL(p.BaseURL)}
 			risk := "low"
 			if redTeamExternalURL(p.BaseURL) {
 				risk = "medium"

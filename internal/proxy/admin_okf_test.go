@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"vibe-coders/internal/store"
@@ -29,7 +30,7 @@ func TestOKFGraphSync(t *testing.T) {
 	if err := db.UpsertAPIKey(ctx, store.APIKeyRecord{ID: "key_a", Name: "svc", KeyHash: "h", Team: "team_pay", UserID: "user_1", Role: "developer", Status: "active"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.UpsertProvider(ctx, store.ProviderConfig{Name: "openai", BaseURL: "http://oai.local", ModelPatterns: "gpt-*", Enabled: true}); err != nil {
+	if err := db.UpsertProvider(ctx, store.ProviderConfig{Name: "openai", BaseURL: "https://operator:password@oai.local?api-version=2026-01-01&secretKey=private#token", ModelPatterns: "gpt-*", Enabled: true}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -58,6 +59,18 @@ func TestOKFGraphSync(t *testing.T) {
 	served, err := db.ListOKFLinks(ctx, "model:gpt-*", "", "served_by", 50)
 	if err != nil || len(served) != 1 || served[0].ToSubject != "upstream:openai" {
 		t.Fatalf("expected model→upstream edge, got %v %+v", err, served)
+	}
+	documents, err := db.ListOKFDocuments(ctx, store.OKFFilter{Subject: "upstream:openai", Limit: 10})
+	if err != nil || len(documents) != 1 {
+		t.Fatalf("expected upstream document, got %v %+v", err, documents)
+	}
+	for _, secret := range []string{"operator", "password", "private", "#token"} {
+		if strings.Contains(documents[0].Body, secret) {
+			t.Fatalf("upstream document leaked %q: %s", secret, documents[0].Body)
+		}
+	}
+	if !strings.Contains(documents[0].Body, "api-version=2026-01-01") {
+		t.Fatalf("upstream document lost its non-sensitive query: %s", documents[0].Body)
 	}
 }
 

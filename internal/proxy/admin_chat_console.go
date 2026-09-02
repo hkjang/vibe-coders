@@ -654,7 +654,7 @@ func chatTestModelFromPattern(pattern string) string {
 
 func providerMetadata(provider store.ProviderPublic) map[string]any {
 	return map[string]any{
-		"base_url":           provider.BaseURL,
+		"base_url":           sanitizeProviderBaseURL(provider.BaseURL),
 		"api_key_configured": provider.APIKeyConfigured,
 		"timeout_ms":         provider.TimeoutMS,
 		"created_at":         provider.CreatedAt,

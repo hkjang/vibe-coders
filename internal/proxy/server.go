@@ -1153,6 +1153,7 @@ func (s *Server) handleAPIKeyByID(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleProviders(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	if !s.authorizeAdmin(r) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
@@ -1163,6 +1164,9 @@ func (s *Server) handleProviders(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "providers_failed")
 			return
+		}
+		for i := range providers {
+			providers[i].BaseURL = sanitizeProviderBaseURL(providers[i].BaseURL)
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"providers": providers})
 	case http.MethodPost:
@@ -1186,8 +1190,21 @@ func (s *Server) handleProviders(w http.ResponseWriter, r *http.Request) {
 			writeOpenAIError(w, http.StatusBadRequest, "name and base_url are required", "invalid_request_error", "missing_provider_fields")
 			return
 		}
-		if _, err := url.ParseRequestURI(payload.BaseURL); err != nil {
-			writeOpenAIError(w, http.StatusBadRequest, "base_url must be an absolute URL", "invalid_request_error", "invalid_base_url")
+		before, found, err := s.db.GetProvider(r.Context(), payload.Name)
+		if err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, "failed to load provider", "server_error", "provider_load_failed")
+			return
+		}
+		// Legacy rows may contain credentials from before this validation existed.
+		// Their public URL is redacted; accepting that exact redacted representation
+		// preserves the stored URL while an operator changes an unrelated field.
+		legacyURLIsUnsafe := found && validateProviderBaseURL(before.BaseURL) != nil
+		publicLegacyURL := strings.TrimRight(sanitizeProviderBaseURL(before.BaseURL), "/")
+		preserveRedactedURL := legacyURLIsUnsafe && payload.BaseURL == publicLegacyURL
+		if preserveRedactedURL {
+			payload.BaseURL = before.BaseURL
+		} else if err := validateProviderBaseURL(payload.BaseURL); err != nil {
+			writeOpenAIError(w, http.StatusBadRequest, err.Error(), "invalid_request_error", "invalid_base_url")
 			return
 		}
 		if payload.TimeoutMS <= 0 {
@@ -1198,7 +1215,6 @@ func (s *Server) handleProviders(w http.ResponseWriter, r *http.Request) {
 			enabled = *payload.Enabled
 		}
 
-		before, _, _ := s.db.GetProvider(r.Context(), payload.Name)
 		encryptedKey := before.EncryptedAPIKey
 		if strings.TrimSpace(payload.APIKey) != "" {
 			var err error
@@ -1233,7 +1249,7 @@ func (s *Server) handleProviders(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"provider": map[string]any{
 				"name":               provider.Name,
-				"base_url":           provider.BaseURL,
+				"base_url":           sanitizeProviderBaseURL(provider.BaseURL),
 				"api_key_configured": provider.EncryptedAPIKey != "",
 				"timeout_ms":         provider.TimeoutMS,
 				"enabled":            provider.Enabled,
@@ -1973,7 +1989,7 @@ func providerAuditJSON(provider store.ProviderConfig) string {
 	}
 	return auditJSON(map[string]any{
 		"name":               provider.Name,
-		"base_url":           provider.BaseURL,
+		"base_url":           sanitizeProviderBaseURL(provider.BaseURL),
 		"api_key_configured": provider.EncryptedAPIKey != "",
 		"timeout_ms":         provider.TimeoutMS,
 		"enabled":            provider.Enabled,

@@ -201,7 +201,7 @@ func (s *Server) handleOKFGraphSync(w http.ResponseWriter, r *http.Request) {
 	if provs, err := s.db.ListProviderConfigs(ctx); err == nil {
 		for _, p := range provs {
 			if _, err := s.db.UpsertOKFDocument(ctx, store.OKFDocument{
-				Kind: "entity", Subject: "upstream:" + p.Name, Title: p.Name, Body: p.BaseURL,
+				Kind: "entity", Subject: "upstream:" + p.Name, Title: p.Name, Body: sanitizeProviderBaseURL(p.BaseURL),
 				Source: "derived:graph", Status: "active",
 			}, actor); err == nil {
 				docs++
