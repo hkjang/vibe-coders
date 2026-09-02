@@ -172,6 +172,21 @@ func assertOpenAPIContract(t *testing.T, spec map[string]any) {
 	if partialFailureItems["$ref"] != "#/components/schemas/OpsStatusPartialFailure" {
 		t.Errorf("OpsStatus.partial_failures schema = %v, want OpsStatusPartialFailure array", partialFailures)
 	}
+	adminModel, _ := schemas["AdminModel"].(map[string]any)
+	adminModelProperties, _ := adminModel["properties"].(map[string]any)
+	adminModelRequired, _ := adminModel["required"].([]any)
+	requiredAdminModelFields := make(map[string]bool, len(adminModelRequired))
+	for _, field := range adminModelRequired {
+		if name, ok := field.(string); ok {
+			requiredAdminModelFields[name] = true
+		}
+	}
+	for field, wantType := range map[string]string{"shadowed": "boolean", "shadowed_by": "string"} {
+		property, _ := adminModelProperties[field].(map[string]any)
+		if property["type"] != wantType || !requiredAdminModelFields[field] {
+			t.Errorf("AdminModel.%s schema = %v required=%v, want required %s", field, property, requiredAdminModelFields[field], wantType)
+		}
+	}
 
 	assertJSONOperationSchema(t, paths, "/health", "get", "200", "HealthResponse")
 	assertJSONOperationSchema(t, paths, "/ready", "get", "200", "ReadyResponse")

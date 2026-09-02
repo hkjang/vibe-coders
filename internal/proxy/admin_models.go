@@ -42,6 +42,8 @@ type adminModel struct {
 	Created     *int64                 `json:"created"`
 	Source      adminModelSource       `json:"source"`
 	Virtual     bool                   `json:"virtual"`
+	Shadowed    bool                   `json:"shadowed"`
+	ShadowedBy  string                 `json:"shadowed_by"`
 	Stale       bool                   `json:"stale"`
 	FetchedAt   string                 `json:"fetched_at"`
 	Deprecation *adminModelDeprecation `json:"deprecation"`
@@ -116,6 +118,30 @@ func (s *Server) handleAdminModels(w http.ResponseWriter, r *http.Request) {
 		Providers:       []adminModelProvider{},
 		PartialFailures: []adminModelPartialFailure{},
 	}
+	includeAgentRoutes := providerFilter == "" || providerFilter == "vibe"
+	needsAgentRoutes := includeAgentRoutes
+	if !needsAgentRoutes {
+		for _, provider := range configs {
+			if provider.Enabled && provider.Name == providerFilter {
+				needsAgentRoutes = true
+				break
+			}
+		}
+	}
+	var agentRoutes []store.AgentRoute
+	var agentRoutesErr error
+	var agentRoutesFetchedAt string
+	if needsAgentRoutes {
+		agentRoutes, agentRoutesErr = s.db.ListAgentRoutes(r.Context())
+		if agentRoutesErr != nil {
+			response.PartialFailures = append(response.PartialFailures, adminModelPartialFailure{
+				Provider: "vibe", Code: "agent_routes_unavailable", Message: "Virtual model catalog is unavailable.",
+			})
+		} else {
+			agentRoutesFetchedAt = time.Now().UTC().Format(time.RFC3339Nano)
+		}
+	}
+	agentRouteShadows := enabledAdminAgentRouteShadows(agentRoutes)
 
 	results := s.fetchAdminProviderModels(r.Context(), configs, providerFilter, &response)
 	now := time.Now().UTC()
@@ -135,6 +161,10 @@ func (s *Server) handleAdminModels(w http.ResponseWriter, r *http.Request) {
 		if result.status == "ok" {
 			for _, catalogModel := range result.models {
 				model := s.adminModelFromCatalog(r.Context(), catalogModel, result, now)
+				if routeID, shadowed := agentRouteShadows[model.ID]; shadowed {
+					model.Shadowed = true
+					model.ShadowedBy = routeID
+				}
 				if modelFilter != "" && model.ID != modelFilter {
 					continue
 				}
@@ -150,8 +180,14 @@ func (s *Server) handleAdminModels(w http.ResponseWriter, r *http.Request) {
 		response.Providers = append(response.Providers, provider)
 	}
 
-	if providerFilter == "" || providerFilter == "vibe" {
-		s.appendAdminAgentRouteModels(r.Context(), modelFilter, now, seenModels, &response)
+	if includeAgentRoutes {
+		if agentRoutesErr != nil {
+			response.Providers = append(response.Providers, adminModelProvider{
+				Provider: "vibe", Status: "failed", Source: adminModelSourceAgentRoute, Stale: false,
+			})
+		} else {
+			s.appendAdminAgentRouteModels(r.Context(), agentRoutes, agentRoutesFetchedAt, modelFilter, now, seenModels, &response)
+		}
 	}
 
 	sort.Slice(response.Models, func(i, j int) bool {
@@ -346,18 +382,19 @@ func (s *Server) adminModelDeprecation(ctx context.Context, model string, now ti
 	}
 }
 
-func (s *Server) appendAdminAgentRouteModels(ctx context.Context, modelFilter string, now time.Time, seen map[string]struct{}, response *adminModelsResponse) {
-	routes, err := s.db.ListAgentRoutes(ctx)
-	if err != nil {
-		response.Providers = append(response.Providers, adminModelProvider{
-			Provider: "vibe", Status: "failed", Source: adminModelSourceAgentRoute, Stale: false,
-		})
-		response.PartialFailures = append(response.PartialFailures, adminModelPartialFailure{
-			Provider: "vibe", Code: "agent_routes_unavailable", Message: "Virtual model catalog is unavailable.",
-		})
-		return
+func enabledAdminAgentRouteShadows(routes []store.AgentRoute) map[string]string {
+	shadows := make(map[string]string, len(routes))
+	for _, route := range routes {
+		// Runtime dispatch uses an exact lookup by the persisted virtual model. Do not
+		// normalize here or the catalog could report a collision that runtime would not.
+		if route.Enabled && route.VirtualModel != "" {
+			shadows[route.VirtualModel] = route.ID
+		}
 	}
-	fetchedAt := time.Now().UTC().Format(time.RFC3339Nano)
+	return shadows
+}
+
+func (s *Server) appendAdminAgentRouteModels(ctx context.Context, routes []store.AgentRoute, fetchedAt, modelFilter string, now time.Time, seen map[string]struct{}, response *adminModelsResponse) {
 	provider := adminModelProvider{
 		Provider: "vibe", Status: "ok", Source: adminModelSourceAgentRoute, FetchedAt: &fetchedAt, Stale: false,
 	}

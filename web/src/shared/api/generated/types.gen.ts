@@ -12,6 +12,8 @@ export type AdminModel = {
     object: string;
     owned_by: string;
     provider: string;
+    shadowed: boolean;
+    shadowed_by: string;
     source: 'live' | 'cache' | 'agent_route';
     stale: boolean;
     virtual: boolean;

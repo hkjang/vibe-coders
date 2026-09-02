@@ -805,12 +805,13 @@ func modelCatalogOpenAPISchemas() map[string]any {
 		},
 		"AdminModel": map[string]any{
 			"type": "object", "additionalProperties": false,
-			"required": []string{"id", "provider", "object", "owned_by", "created", "source", "virtual", "stale", "fetched_at", "deprecation"},
+			"required": []string{"id", "provider", "object", "owned_by", "created", "source", "virtual", "shadowed", "shadowed_by", "stale", "fetched_at", "deprecation"},
 			"properties": map[string]any{
 				"id": map[string]any{"type": "string"}, "provider": map[string]any{"type": "string"},
 				"object": map[string]any{"type": "string"}, "owned_by": map[string]any{"type": "string"},
 				"created": map[string]any{"type": "integer", "format": "int64", "nullable": true}, "source": modelSource,
-				"virtual": map[string]any{"type": "boolean"}, "stale": map[string]any{"type": "boolean"},
+				"virtual": map[string]any{"type": "boolean"}, "shadowed": map[string]any{"type": "boolean"},
+				"shadowed_by": map[string]any{"type": "string"}, "stale": map[string]any{"type": "boolean"},
 				"fetched_at":  map[string]any{"type": "string", "format": "date-time"},
 				"deprecation": map[string]any{"allOf": []any{schemaRef("AdminModelDeprecation")}, "nullable": true},
 			},

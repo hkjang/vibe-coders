@@ -33,6 +33,12 @@
           "provider": {
             "type": "string"
           },
+          "shadowed": {
+            "type": "boolean"
+          },
+          "shadowed_by": {
+            "type": "string"
+          },
           "source": {
             "enum": [
               "live",
@@ -56,6 +62,8 @@
           "created",
           "source",
           "virtual",
+          "shadowed",
+          "shadowed_by",
           "stale",
           "fetched_at",
           "deprecation"

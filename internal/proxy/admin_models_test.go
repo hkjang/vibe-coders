@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -14,12 +15,19 @@ import (
 	"testing"
 	"time"
 
+	"vibe-coders/internal/config"
 	"vibe-coders/internal/store"
 )
 
 func newAdminModelsTestServer(t *testing.T, adminToken string) (*Server, *store.SQLStore, *httptest.Server) {
 	t.Helper()
 	db := openTestStore(t)
+	server, testServer := serveAdminModelsTestStore(t, adminToken, db)
+	return server, db, testServer
+}
+
+func serveAdminModelsTestStore(t *testing.T, adminToken string, db *store.SQLStore) (*Server, *httptest.Server) {
+	t.Helper()
 	logger := store.NewAsyncLogger(db, 32, filepath.Join(t.TempDir(), "admin-models.ndjson"))
 	logger.Start()
 	t.Cleanup(func() { logger.Stop(context.Background()) })
@@ -31,7 +39,7 @@ func newAdminModelsTestServer(t *testing.T, adminToken string) (*Server, *store.
 	}
 	testServer := httptest.NewServer(server.Routes())
 	t.Cleanup(testServer.Close)
-	return server, db, testServer
+	return server, testServer
 }
 
 func addAdminModelsProvider(t *testing.T, server *Server, db *store.SQLStore, provider store.ProviderConfig, apiKey string) {
@@ -130,7 +138,12 @@ func TestAdminModelsNormalizesConcurrentProviderInventory(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := db.UpsertAgentRoute(t.Context(), store.AgentRoute{
-		ID: "agent-disabled", VirtualModel: "vibe/hidden", Name: "Hidden", Enabled: false,
+		ID: "agent-shadow", VirtualModel: "shared", Name: "Shadow", Enabled: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.UpsertAgentRoute(t.Context(), store.AgentRoute{
+		ID: "agent-disabled", VirtualModel: "old-model", Name: "Disabled", Enabled: false,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -148,11 +161,11 @@ func TestAdminModelsNormalizesConcurrentProviderInventory(t *testing.T) {
 	if _, err := time.Parse(time.RFC3339Nano, body.GeneratedAt); err != nil {
 		t.Fatalf("generated_at = %q: %v", body.GeneratedAt, err)
 	}
-	if len(body.Models) != 6 {
-		t.Fatalf("models = %+v, want 6 distinct source/provider/id rows", body.Models)
+	if len(body.Models) != 7 {
+		t.Fatalf("models = %+v, want 7 distinct source/provider/id rows", body.Models)
 	}
 	wantOrder := []string{
-		"alpha/dead-model/live", "alpha/shared/live", "vibe/vibe/research/agent_route",
+		"alpha/dead-model/live", "alpha/shared/live", "vibe/shared/agent_route", "vibe/vibe/research/agent_route",
 		"zeta/future-model/live", "zeta/old-model/live", "zeta/shared/live",
 	}
 	gotOrder := make([]string, 0, len(body.Models))
@@ -182,16 +195,23 @@ func TestAdminModelsNormalizesConcurrentProviderInventory(t *testing.T) {
 		return adminModel{}
 	}
 	alphaShared := findModel("alpha", "shared")
-	if alphaShared.Created == nil || *alphaShared.Created != 123 || alphaShared.OwnedBy != "owner-alpha" || alphaShared.Virtual {
+	if alphaShared.Created == nil || *alphaShared.Created != 123 || alphaShared.OwnedBy != "owner-alpha" || alphaShared.Virtual || !alphaShared.Shadowed || alphaShared.ShadowedBy != "agent-shadow" {
 		t.Fatalf("normalized alpha/shared = %+v", alphaShared)
 	}
 	zetaShared := findModel("zeta", "shared")
-	if zetaShared.Created != nil || zetaShared.OwnedBy != "zeta" {
+	if zetaShared.Created != nil || zetaShared.OwnedBy != "zeta" || !zetaShared.Shadowed || zetaShared.ShadowedBy != "agent-shadow" {
 		t.Fatalf("normalized zeta/shared = %+v", zetaShared)
 	}
 	virtual := findModel("vibe", "vibe/research")
-	if !virtual.Virtual || virtual.Source != adminModelSourceAgentRoute || virtual.Created != nil {
+	if !virtual.Virtual || virtual.Source != adminModelSourceAgentRoute || virtual.Created != nil || virtual.Shadowed || virtual.ShadowedBy != "" {
 		t.Fatalf("virtual model = %+v", virtual)
+	}
+	shadowingRoute := findModel("vibe", "shared")
+	if !shadowingRoute.Virtual || shadowingRoute.Shadowed || shadowingRoute.ShadowedBy != "" {
+		t.Fatalf("shadowing agent model = %+v", shadowingRoute)
+	}
+	if physical := findModel("zeta", "old-model"); physical.Shadowed || physical.ShadowedBy != "" {
+		t.Fatalf("disabled agent route shadowed a physical model: %+v", physical)
 	}
 	if got := findModel("zeta", "future-model").Deprecation; got == nil || got.Action != "warn" || got.SunsetReached || got.Retired {
 		t.Fatalf("future deprecation = %+v", got)
@@ -210,7 +230,7 @@ func TestAdminModelsNormalizesConcurrentProviderInventory(t *testing.T) {
 	}
 
 	_, filtered := getAdminModels(t, gateway.URL+"/admin/models?provider=alpha&model=shared", "")
-	if len(filtered.Models) != 1 || filtered.Models[0].Provider != "alpha" || filtered.Models[0].ID != "shared" {
+	if len(filtered.Models) != 1 || filtered.Models[0].Provider != "alpha" || filtered.Models[0].ID != "shared" || !filtered.Models[0].Shadowed || filtered.Models[0].ShadowedBy != "agent-shadow" {
 		t.Fatalf("exact filters returned %+v", filtered.Models)
 	}
 	if len(filtered.Providers) != 1 || filtered.Providers[0].Provider != "alpha" || filtered.Providers[0].ModelCount != 1 {
@@ -219,10 +239,30 @@ func TestAdminModelsNormalizesConcurrentProviderInventory(t *testing.T) {
 	if alphaCalls.Load() != 1 || zetaCalls.Load() != 1 {
 		t.Fatalf("provider filter calls alpha=%d zeta=%d", alphaCalls.Load(), zetaCalls.Load())
 	}
+	if err := db.UpsertAgentRoute(t.Context(), store.AgentRoute{
+		ID: "agent-shadow", VirtualModel: "shared", Name: "Shadow", Enabled: false,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_, noLongerShadowed := getAdminModels(t, gateway.URL+"/admin/models?provider=alpha&model=shared", "")
+	if len(noLongerShadowed.Models) != 1 || noLongerShadowed.Models[0].Shadowed || noLongerShadowed.Models[0].ShadowedBy != "" {
+		t.Fatalf("disabled route left a cached physical model shadowed: %+v", noLongerShadowed.Models)
+	}
+	if alphaCalls.Load() != 1 {
+		t.Fatalf("route-only change unexpectedly refetched the provider %d times", alphaCalls.Load())
+	}
+	if err := db.UpsertAgentRoute(t.Context(), store.AgentRoute{
+		ID: "agent-shadow", VirtualModel: "shared", Name: "Shadow", Enabled: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	_, duplicated := getAdminModels(t, gateway.URL+"/admin/models?model=shared", "")
-	if len(duplicated.Models) != 2 || duplicated.Models[0].Provider != "alpha" || duplicated.Models[1].Provider != "zeta" {
+	if len(duplicated.Models) != 3 || duplicated.Models[0].Provider != "alpha" || duplicated.Models[1].Provider != "vibe" || duplicated.Models[2].Provider != "zeta" {
 		t.Fatalf("model filter must preserve provider/model pairs: %+v", duplicated.Models)
+	}
+	if duplicated.Models[1].Shadowed || duplicated.Models[1].ShadowedBy != "" {
+		t.Fatalf("agent route row must not shadow itself: %+v", duplicated.Models[1])
 	}
 
 	beforeAlpha, beforeZeta := alphaCalls.Load(), zetaCalls.Load()
@@ -236,6 +276,78 @@ func TestAdminModelsNormalizesConcurrentProviderInventory(t *testing.T) {
 	}
 	if alphaCalls.Load() != beforeAlpha || zetaCalls.Load() != beforeZeta {
 		t.Fatal("non-exact admin models path reached providers")
+	}
+}
+
+func TestAdminModelsKeepsPhysicalRowsWhenAgentRouteCatalogFails(t *testing.T) {
+	databasePath := filepath.Join(t.TempDir(), "agent-route-unavailable.db")
+	db, err := store.Open(t.Context(), config.DatabaseConfig{Driver: "sqlite", DSN: databasePath})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if err := db.Migrate(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"data":[{"id":"physical-model"}]}`)
+	}))
+	t.Cleanup(upstream.Close)
+	server, gateway := serveAdminModelsTestStore(t, "", db)
+	addAdminModelsProvider(t, server, db, store.ProviderConfig{
+		Name: "alpha", BaseURL: upstream.URL, TimeoutMS: 1_000, Enabled: true,
+	}, "alpha-secret")
+
+	rawDB, err := sql.Open("sqlite", databasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rawDB.ExecContext(t.Context(), "DROP TABLE agent_routes"); err != nil {
+		_ = rawDB.Close()
+		t.Fatal(err)
+	}
+	if err := rawDB.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	resp, body := getAdminModels(t, gateway.URL+"/admin/models?provider=alpha&model=physical-model", "")
+	if resp.StatusCode != http.StatusOK || len(body.Models) != 1 {
+		t.Fatalf("status=%d body=%+v, want the physical model", resp.StatusCode, body)
+	}
+	if body.Models[0].Shadowed || body.Models[0].ShadowedBy != "" {
+		t.Fatalf("unknown shadow state must retain safe zero values: %+v", body.Models[0])
+	}
+	if len(body.Providers) != 1 || body.Providers[0].Provider != "alpha" || body.Providers[0].Status != "ok" {
+		t.Fatalf("physical provider was blocked by the route failure: %+v", body.Providers)
+	}
+	if len(body.PartialFailures) != 1 || body.PartialFailures[0] != (adminModelPartialFailure{
+		Provider: "vibe", Code: "agent_routes_unavailable", Message: "Virtual model catalog is unavailable.",
+	}) {
+		t.Fatalf("agent route failure was not sanitized: %+v", body.PartialFailures)
+	}
+
+	_, unfiltered := getAdminModels(t, gateway.URL+"/admin/models", "")
+	if len(unfiltered.Models) != 1 || len(unfiltered.Providers) != 2 || len(unfiltered.PartialFailures) != 1 {
+		t.Fatalf("unfiltered partial result = %+v", unfiltered)
+	}
+	if unfiltered.Providers[1].Provider != "vibe" || unfiltered.Providers[1].Status != "failed" {
+		t.Fatalf("virtual provider failure summary = %+v", unfiltered.Providers)
+	}
+}
+
+func TestAdminModelShadowFieldsAreAlwaysEncoded(t *testing.T) {
+	encoded, err := json.Marshal(adminModel{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(encoded, &fields); err != nil {
+		t.Fatal(err)
+	}
+	if string(fields["shadowed"]) != "false" || string(fields["shadowed_by"]) != `""` {
+		t.Fatalf("required zero-value shadow fields missing from %s", encoded)
 	}
 }
 
