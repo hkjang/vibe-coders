@@ -468,6 +468,16 @@ func (s *Server) clearSharedBreakerState(provider string) error {
 	if !s.breakerSharingEnabled() {
 		return nil
 	}
+	return s.clearSharedBreakerStateForAdmin(provider)
+}
+
+// clearSharedBreakerStateForAdmin removes persisted state regardless of the current
+// sharing toggle. An operator reset must also clear stale rows left before sharing was
+// disabled, while normal request success remains opt-in through clearSharedBreakerState.
+func (s *Server) clearSharedBreakerStateForAdmin(provider string) error {
+	if s.db == nil {
+		return nil
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	if err := s.db.ClearProviderBreaker(ctx, provider); err != nil {
@@ -478,7 +488,7 @@ func (s *Server) clearSharedBreakerState(provider string) error {
 }
 
 func (s *Server) clearAllSharedBreakerStates() error {
-	if !s.breakerSharingEnabled() {
+	if s.db == nil {
 		return nil
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)

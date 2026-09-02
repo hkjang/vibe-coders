@@ -789,6 +789,61 @@ func TestRoutingBreakerResetAllUsesRawKeysWithoutLeakingLegacyName(t *testing.T)
 	}
 }
 
+func TestRoutingBreakerResetClearsStaleRowsWhenSharingDisabled(t *testing.T) {
+	db := openTestStore(t)
+	logger := store.NewAsyncLogger(db, 16, filepath.Join(t.TempDir(), "breaker-disabled-reset.ndjson"))
+	logger.Start()
+	t.Cleanup(func() { logger.Stop(context.Background()) })
+
+	cfg := testConfig("http://unused.invalid", "secret")
+	cfg.Upstream.BreakerEnabled = true
+	cfg.Upstream.BreakerShared = false
+	server, err := NewServer(cfg, db, logger, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gateway := httptest.NewServer(server.Routes())
+	defer gateway.Close()
+	now := time.Now().UTC()
+	publish := func(provider string) {
+		t.Helper()
+		if err := db.PublishProviderBreaker(t.Context(), store.ProviderBreakerState{
+			Provider: provider, Phase: "open", Reason: "5xx", Instance: "stale-peer",
+			OpenedAt: now, UpdatedAt: now,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	assertNoSharedRows := func() {
+		t.Helper()
+		rows, err := db.ListOpenProviderBreakers(t.Context(), now.Add(-time.Hour))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(rows) != 0 {
+			t.Fatalf("sharing-disabled admin reset left stale rows: %+v", rows)
+		}
+	}
+
+	const individual = "stale-individual"
+	server.breakers.recordFailure(individual, "5xx", 1, now)
+	publish(individual)
+	response := postJSON(t, gateway.URL+"/admin/routing/breaker-reset", "", map[string]any{"provider": individual})
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("sharing-disabled individual reset status = %d", response.StatusCode)
+	}
+	assertNoSharedRows()
+
+	publish("stale-peer-only")
+	response = postJSON(t, gateway.URL+"/admin/routing/breaker-reset", "", map[string]any{"provider": ""})
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("sharing-disabled reset-all status = %d", response.StatusCode)
+	}
+	assertNoSharedRows()
+}
+
 // A failover budget bounds how long the gateway keeps trying alternates. Without it
 // a slow primary plus a full candidate list multiplies the caller's wait; with it the
 // gateway stops and returns what it has.

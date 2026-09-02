@@ -255,7 +255,7 @@ func (s *Server) handleRoutingBreakerReset(w http.ResponseWriter, r *http.Reques
 		}
 		// Clear the shared row too: resetting only locally would leave peers skipping a
 		// provider the operator has just declared healthy.
-		if err := s.clearSharedBreakerState(name); err != nil {
+		if err := s.clearSharedBreakerStateForAdmin(name); err != nil {
 			writeOpenAIError(w, http.StatusInternalServerError, "failed to reset shared breaker state", "server_error", "breaker_reset_failed")
 			return
 		}
