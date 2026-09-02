@@ -368,6 +368,46 @@ func TestOperationalHealthReadyMetricsAndFavicon(t *testing.T) {
 			t.Fatalf("%s returned status=%d body=%s", path, resp.StatusCode, body)
 		}
 	}
+	for _, path := range []string{"/health", "/ready"} {
+		req, err := http.NewRequest(http.MethodHead, proxy.URL+path, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, readErr := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		if resp.StatusCode != http.StatusOK || len(body) != 0 {
+			t.Fatalf("HEAD %s returned status=%d body=%q, want 200 with an empty body", path, resp.StatusCode, body)
+		}
+	}
+	for _, request := range []struct {
+		method string
+		path   string
+		allow  string
+	}{
+		{method: http.MethodPost, path: "/health", allow: http.MethodGet + ", " + http.MethodHead},
+		{method: http.MethodDelete, path: "/ready", allow: http.MethodGet + ", " + http.MethodHead},
+		{method: http.MethodPost, path: "/admin/stats", allow: http.MethodGet},
+	} {
+		req, err := http.NewRequest(request.method, proxy.URL+request.path, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusMethodNotAllowed || resp.Header.Get("Allow") != request.allow {
+			t.Errorf("%s %s returned status=%d allow=%q, want 405 Allow=%s", request.method, request.path, resp.StatusCode, resp.Header.Get("Allow"), request.allow)
+		}
+	}
 	metrics, err := http.Get(proxy.URL + "/metrics")
 	if err != nil {
 		t.Fatal(err)

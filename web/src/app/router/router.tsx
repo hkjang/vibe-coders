@@ -24,6 +24,36 @@ const featureRoutes: RouteObject[] = migrationRegistry.map((feature) => {
       },
     };
   }
+  if (feature.featureId === "gateway.health") {
+    return {
+      path,
+      lazy: async () => {
+        const { GatewayHealthPage } = await import("@/features/gateway/health/GatewayHealthPage");
+        return {
+          Component: () => (
+            <FeatureRoute feature={feature}>
+              <GatewayHealthPage />
+            </FeatureRoute>
+          ),
+        };
+      },
+    };
+  }
+  if (feature.featureId === "system.health") {
+    return {
+      path,
+      lazy: async () => {
+        const { SystemHealthPage } = await import("@/features/system/health/SystemHealthPage");
+        return {
+          Component: () => (
+            <FeatureRoute feature={feature}>
+              <SystemHealthPage />
+            </FeatureRoute>
+          ),
+        };
+      },
+    };
+  }
   return { path, element: <FeatureRoute feature={feature} /> };
 });
 

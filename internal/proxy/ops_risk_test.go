@@ -50,4 +50,31 @@ func TestOpsRiskScore(t *testing.T) {
 	if r := opsRiskScore(degraded); r.Score == 0 {
 		t.Error("expected non-zero score for a degraded provider")
 	}
+
+	// The System Health score colors 50-69 as warning, so the aggregate risk
+	// must not claim a healthy/low-risk snapshot for the same provider.
+	warningProvider := OpsStatus{
+		Security:  OpsSecurityStatus{AuthEnabled: true, PricingConfigured: true},
+		Disk:      OpsDiskStatus{Available: true, UsedPercent: 10},
+		Providers: []store.ProviderHealthScore{{Provider: "openai", Requests: 100, Score: 60}},
+	}
+	warningProviderRisk := opsRiskScore(warningProvider)
+	if warningProviderRisk.Score < 15 || warningProviderRisk.Tier != "medium" {
+		t.Errorf("warning provider score = %d tier %s, want at least 15/medium", warningProviderRisk.Score, warningProviderRisk.Tier)
+	}
+	if len(warningProviderRisk.Factors) != 1 || warningProviderRisk.Factors[0].Key != "provider_degraded" {
+		t.Errorf("warning provider factors = %+v, want provider_degraded", warningProviderRisk.Factors)
+	}
+
+	diskUnknown := OpsStatus{
+		Security: OpsSecurityStatus{AuthEnabled: true, PricingConfigured: true},
+		Disk:     OpsDiskStatus{Available: false},
+	}
+	diskUnknownRisk := opsRiskScore(diskUnknown)
+	if diskUnknownRisk.Score < 15 || diskUnknownRisk.Tier != "medium" {
+		t.Errorf("unknown disk usage score = %d tier %s, want at least 15/medium", diskUnknownRisk.Score, diskUnknownRisk.Tier)
+	}
+	if len(diskUnknownRisk.Factors) != 1 || diskUnknownRisk.Factors[0].Key != "disk_usage_unavailable" {
+		t.Errorf("unknown disk usage factors = %+v, want disk_usage_unavailable", diskUnknownRisk.Factors)
+	}
 }

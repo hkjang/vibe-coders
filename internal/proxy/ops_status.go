@@ -17,12 +17,23 @@ const opsStatusWindow = time.Hour
 // "운영 상태" panel: provider status, audit-log drop/backlog pressure, fallback
 // adequacy, security configuration risk, and disk headroom.
 type OpsStatus struct {
-	GeneratedAt string                      `json:"generated_at"`
-	Providers   []store.ProviderHealthScore `json:"providers"`
-	Logging     OpsLoggingStatus            `json:"logging"`
-	Fallback    OpsFallbackStatus           `json:"fallback"`
-	Security    OpsSecurityStatus           `json:"security"`
-	Disk        OpsDiskStatus               `json:"disk"`
+	GeneratedAt     string                      `json:"generated_at"`
+	Providers       []store.ProviderHealthScore `json:"providers"`
+	Logging         OpsLoggingStatus            `json:"logging"`
+	Fallback        OpsFallbackStatus           `json:"fallback"`
+	Security        OpsSecurityStatus           `json:"security"`
+	Disk            OpsDiskStatus               `json:"disk"`
+	PartialFailures []OpsStatusPartialFailure   `json:"partial_failures,omitempty"`
+}
+
+// OpsStatusPartialFailure distinguishes unavailable operational data from a
+// valid empty result. Messages intentionally omit internal database/filesystem
+// errors; operators can act on the stable component and code without exposing
+// sensitive implementation details in the API response.
+type OpsStatusPartialFailure struct {
+	Component string `json:"component"`
+	Code      string `json:"code"`
+	Message   string `json:"message"`
 }
 
 // OpsLoggingStatus surfaces async audit-log queue pressure. Dropped > 0 means the
@@ -78,16 +89,32 @@ func (s *Server) dataDir(fallbackPath string) string {
 
 // opsStatusSnapshot assembles the current operational status.
 func (s *Server) opsStatusSnapshot(ctx context.Context) OpsStatus {
+	var partialFailures []OpsStatusPartialFailure
 	scores, err := s.db.ProviderHealthScores(ctx, time.Now().Add(-opsStatusWindow))
-	if err != nil || scores == nil {
+	if err != nil {
+		partialFailures = append(partialFailures, OpsStatusPartialFailure{
+			Component: "providers",
+			Code:      "provider_health_unavailable",
+			Message:   "Provider health data is temporarily unavailable.",
+		})
+	}
+	if scores == nil {
 		scores = []store.ProviderHealthScore{}
 	}
 
-	fb, _ := s.logger.FallbackStats()
+	fb, err := s.logger.FallbackStats()
+	if err != nil {
+		partialFailures = append(partialFailures, OpsStatusPartialFailure{
+			Component: "fallback",
+			Code:      "fallback_stats_unavailable",
+			Message:   "Fallback log statistics are temporarily unavailable.",
+		})
+	}
 
 	status := OpsStatus{
-		GeneratedAt: time.Now().UTC().Format(time.RFC3339),
-		Providers:   scores,
+		GeneratedAt:     time.Now().UTC().Format(time.RFC3339),
+		Providers:       scores,
+		PartialFailures: partialFailures,
 		Logging: OpsLoggingStatus{
 			QueueDepth: s.logger.QueueDepth(),
 			Written:    s.logger.Written(),
@@ -175,15 +202,25 @@ func opsRiskScore(status OpsStatus) OpsRisk {
 		}
 		add("fallback_backlog", "warning", "Fallback NDJSON에 "+itoaProxy(int(status.Fallback.Lines))+"줄이 미처리 상태입니다.", pts)
 	}
-	if status.Disk.Available && status.Disk.UsedPercent >= 90 {
+	if !status.Disk.Available {
+		add("disk_usage_unavailable", "warning", "데이터 디스크 사용량을 확인할 수 없습니다.", 15)
+	} else if status.Disk.UsedPercent >= 90 {
 		add("disk_low", "critical", "데이터 디스크 사용률이 90%를 넘었습니다.", 20)
-	} else if status.Disk.Available && status.Disk.UsedPercent >= 80 {
+	} else if status.Disk.UsedPercent >= 80 {
 		add("disk_warning", "warning", "데이터 디스크 사용률이 80%를 넘었습니다.", 10)
 	}
 	for _, p := range status.Providers {
-		if p.Requests > 0 && p.Score < 50 {
-			add("provider_degraded", "warning", "Provider "+p.Provider+"의 health 점수가 낮습니다("+itoaProxy(p.Score)+").", 10)
+		if p.Requests > 0 && p.Score < providerHealthDefaultThreshold {
+			add("provider_degraded", "warning", "Provider "+p.Provider+"의 health 점수가 임계값보다 낮습니다("+itoaProxy(p.Score)+").", 15)
 			break
+		}
+	}
+	for _, failure := range status.PartialFailures {
+		switch failure.Code {
+		case "provider_health_unavailable":
+			add("provider_health_unavailable", "warning", "Provider 상태 데이터를 조회할 수 없습니다.", 15)
+		case "fallback_stats_unavailable":
+			add("fallback_stats_unavailable", "warning", "Fallback 로그 통계를 조회할 수 없습니다.", 10)
 		}
 	}
 
@@ -211,6 +248,18 @@ func fmtCount(n uint64) string {
 	return itoaProxy(int(n))
 }
 
+// OpsRiskResponse embeds the exact status snapshot used to calculate Risk. API
+// clients can consume this response alone instead of issuing a duplicate
+// /admin/ops/status request for the same render.
+type OpsRiskResponse struct {
+	Risk   OpsRisk   `json:"risk"`
+	Status OpsStatus `json:"status"`
+}
+
+func buildOpsRiskResponse(status OpsStatus) OpsRiskResponse {
+	return OpsRiskResponse{Risk: opsRiskScore(status), Status: status}
+}
+
 func (s *Server) handleOpsRisk(w http.ResponseWriter, r *http.Request) {
 	if !s.authorizeAdmin(r) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
@@ -221,7 +270,7 @@ func (s *Server) handleOpsRisk(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	status := s.opsStatusSnapshot(r.Context())
-	writeJSON(w, http.StatusOK, map[string]any{"risk": opsRiskScore(status), "status": status})
+	writeJSON(w, http.StatusOK, buildOpsRiskResponse(status))
 }
 
 func (s *Server) handleOpsStatus(w http.ResponseWriter, r *http.Request) {

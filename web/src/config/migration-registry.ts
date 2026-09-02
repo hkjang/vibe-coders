@@ -38,10 +38,36 @@ export const migrationRegistry = [
     riskLevel: "low",
     requiredPermission: "admin:read",
     readOnly: true,
-    enabledRoles: [],
+    enabledRoles: [
+      "super_admin",
+      "admin",
+      "ops_admin",
+      "ai_admin",
+      "security_admin",
+      "billing_admin",
+      "readonly_admin",
+      "viewer",
+    ],
     rolloutPercent: 100,
     fallbackEnabled: true,
-    minimumApiVersion: "v0.79.8",
+    minimumApiVersion: "v0.80.0",
+  },
+  {
+    featureId: "gateway.health",
+    title: "Gateway Health",
+    description: "Provider 상태, 지연, Fallback과 Circuit Breaker를 조회합니다.",
+    group: "AI Gateway",
+    keywords: ["gateway", "provider", "health", "breaker", "게이트웨이", "상태"],
+    appPath: "/app/gateway/health",
+    legacyPath: "/admin#/routing/health",
+    status: "preview_read_only",
+    riskLevel: "low",
+    requiredPermission: "routing:read",
+    readOnly: true,
+    enabledRoles: ["super_admin", "admin", "ai_admin"],
+    rolloutPercent: 100,
+    fallbackEnabled: true,
+    minimumApiVersion: "v0.81.0",
   },
   {
     featureId: "gateway.providers",
@@ -248,6 +274,31 @@ export const migrationRegistry = [
     minimumApiVersion: "v0.80.0",
   },
   {
+    featureId: "system.health",
+    title: "System Health",
+    description: "로그, 저장소, 보안 설정과 운영 위험 신호를 조회합니다.",
+    group: "System",
+    keywords: ["system", "health", "risk", "logging", "disk", "시스템", "운영"],
+    appPath: "/app/system/health",
+    legacyPath: "/admin#/ops-home",
+    status: "preview_read_only",
+    riskLevel: "low",
+    requiredPermission: "admin:read",
+    readOnly: true,
+    enabledRoles: [
+      "super_admin",
+      "admin",
+      "ops_admin",
+      "ai_admin",
+      "security_admin",
+      "billing_admin",
+      "readonly_admin",
+    ],
+    rolloutPercent: 100,
+    fallbackEnabled: true,
+    minimumApiVersion: "v0.81.0",
+  },
+  {
     featureId: "system.settings",
     title: "System",
     description: "Gateway 설정과 UI 전환 상태를 관리합니다.",
@@ -283,7 +334,11 @@ export interface ResolveFeatureOptions {
 // This list is a build-time capability boundary. Runtime migration settings may
 // expose an implemented feature, but must never promote a route whose React
 // screen is not present in this UI build.
-const appImplementedFeatureIds: ReadonlySet<string> = new Set(["overview"]);
+const appImplementedFeatureIds: ReadonlySet<string> = new Set([
+  "overview",
+  "gateway.health",
+  "system.health",
+]);
 
 export function isAppFeatureImplemented(featureId: string): boolean {
   return appImplementedFeatureIds.has(featureId);

@@ -129,6 +129,8 @@ func assertOpenAPIContract(t *testing.T, spec map[string]any) {
 		"KeycloakLogoutRequest", "KeycloakLogoutResponse", "MigrationFeature", "UIRuntimeConfig",
 		"UIAuthentication", "UISystemStatus", "UIBootstrapResponse", "SettingWriteRequest",
 		"SettingBatchItem", "SettingsBatchRequest", "SettingsBatchResponse", "AdminSettingView",
+		"ReadyResponse", "ReadinessFailureResponse", "AdminStatsResponse", "OpsStatus", "OpsStatusPartialFailure", "OpsRiskResponse", "ProviderHealthScore",
+		"RoutingHealthResponse", "RoutingBreakerSummary",
 	} {
 		if _, ok := schemas[required]; !ok {
 			t.Errorf("components.schemas missing %s", required)
@@ -158,8 +160,23 @@ func assertOpenAPIContract(t *testing.T, spec map[string]any) {
 	if menuVersion["type"] != "integer" {
 		t.Errorf("AuthMeResponse.menu_version type = %v, want integer", menuVersion["type"])
 	}
+	opsStatus, _ := schemas["OpsStatus"].(map[string]any)
+	opsStatusProperties, _ := opsStatus["properties"].(map[string]any)
+	partialFailures, _ := opsStatusProperties["partial_failures"].(map[string]any)
+	partialFailureItems, _ := partialFailures["items"].(map[string]any)
+	if partialFailureItems["$ref"] != "#/components/schemas/OpsStatusPartialFailure" {
+		t.Errorf("OpsStatus.partial_failures schema = %v, want OpsStatusPartialFailure array", partialFailures)
+	}
 
 	assertJSONOperationSchema(t, paths, "/health", "get", "200", "HealthResponse")
+	assertJSONOperationSchema(t, paths, "/ready", "get", "200", "ReadyResponse")
+	assertJSONOperationSchema(t, paths, "/ready", "get", "503", "ReadinessFailureResponse")
+	assertJSONOperationSchema(t, paths, "/admin/stats", "get", "200", "AdminStatsResponse")
+	assertJSONOperationSchema(t, paths, "/admin/ops/status", "get", "200", "OpsStatus")
+	assertJSONOperationSchema(t, paths, "/admin/ops/risk", "get", "200", "OpsRiskResponse")
+	assertJSONOperationSchema(t, paths, "/admin/routing/health", "get", "200", "RoutingHealthResponse")
+	assertOpenAPIParameter(t, paths, "/admin/routing/health", "get", "query", "window")
+	assertOpenAPIParameter(t, paths, "/admin/routing/health", "get", "query", "threshold")
 	assertJSONOperationSchema(t, paths, "/auth/sso/exchange", "post", "200", "AuthTokenResponse")
 	assertJSONRequestSchema(t, paths, "/auth/sso/exchange", "post", "SSOExchangeRequest")
 	assertJSONOperationSchema(t, paths, "/auth/keycloak/logout", "post", "200", "KeycloakLogoutResponse")

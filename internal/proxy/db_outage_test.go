@@ -122,9 +122,21 @@ func TestDatabaseOutageIsReportedAsAnOutageNotABadKey(t *testing.T) {
 		if err != nil {
 			t.Fatalf("GET %s: %v", tc.path, err)
 		}
+		probeBody, readErr := io.ReadAll(r.Body)
 		r.Body.Close()
+		if readErr != nil {
+			t.Fatalf("read GET %s response: %v", tc.path, readErr)
+		}
 		if r.StatusCode != tc.want {
 			t.Errorf("GET %s during the outage returned %d, want %d", tc.path, r.StatusCode, tc.want)
+		}
+		if tc.path == "/ready" {
+			if strings.Contains(string(probeBody), "sql:") || strings.Contains(string(probeBody), "database is closed") {
+				t.Errorf("public readiness response leaked internal database details: %s", probeBody)
+			}
+			if !strings.Contains(string(probeBody), `"error":"database unavailable"`) {
+				t.Errorf("public readiness response lacks a safe operator message: %s", probeBody)
+			}
 		}
 	}
 

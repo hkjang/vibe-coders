@@ -48,10 +48,11 @@ type appUIFeature struct {
 	AvailabilityReason string   `json:"availability_reason,omitempty"`
 }
 
-// appUIFeatures is deliberately conservative. Only Overview is exposed as a React
-// preview in the foundation release; every other domain keeps its proven /admin path.
+// appUIFeatures is deliberately conservative. New React screens enter as read-only
+// previews for a narrow role cohort; every other domain keeps its proven /admin path.
 var appUIFeatures = []appUIFeature{
 	{FeatureID: "overview", Title: "Overview", AppPath: "/app/overview", LegacyPath: "/admin#/dashboard", Status: "preview_read_only", RiskLevel: "low", RequiredPermission: "admin:read", ReadOnly: true, EnabledRoles: []string{"super_admin", "admin", "ops_admin", "ai_admin", "security_admin", "billing_admin", "readonly_admin", "viewer"}, RolloutPercent: 100, FallbackEnabled: true, MinimumAPIVersion: "v0.80.0"},
+	{FeatureID: "gateway.health", Title: "Gateway Health", AppPath: "/app/gateway/health", LegacyPath: "/admin#/routing/health", Status: "preview_read_only", RiskLevel: "low", RequiredPermission: "routing:read", ReadOnly: true, EnabledRoles: []string{"super_admin", "admin", "ai_admin"}, RolloutPercent: 100, FallbackEnabled: true, MinimumAPIVersion: "v0.81.0"},
 	{FeatureID: "gateway.providers", Title: "Providers", AppPath: "/app/gateway/providers", LegacyPath: "/admin#/routing/health", Status: "legacy", RiskLevel: "medium", RequiredPermission: "admin:read", ReadOnly: true, RolloutPercent: 100, FallbackEnabled: true, MinimumAPIVersion: "v0.80.0"},
 	{FeatureID: "gateway.models", Title: "Models", AppPath: "/app/gateway/models", LegacyPath: "/admin#/model-contracts", Status: "legacy", RiskLevel: "medium", RequiredPermission: "admin:read", ReadOnly: true, RolloutPercent: 100, FallbackEnabled: true, MinimumAPIVersion: "v0.80.0"},
 	{FeatureID: "routing.rules", Title: "Routing", AppPath: "/app/routing/rules", LegacyPath: "/admin#/routing", Status: "legacy", RiskLevel: "high", RequiredPermission: "routing:read", ReadOnly: true, RolloutPercent: 100, FallbackEnabled: true, MinimumAPIVersion: "v0.80.0"},
@@ -64,11 +65,14 @@ var appUIFeatures = []appUIFeature{
 	{FeatureID: "text2sql.overview", Title: "Text2SQL & Data", AppPath: "/app/text2sql", LegacyPath: "/admin#/text2sql", Status: "legacy", RiskLevel: "high", RequiredPermission: "admin:read", ReadOnly: true, RolloutPercent: 100, FallbackEnabled: true, MinimumAPIVersion: "v0.80.0"},
 	{FeatureID: "finops.overview", Title: "FinOps", AppPath: "/app/finops", LegacyPath: "/admin#/billing", Status: "legacy", RiskLevel: "medium", RequiredPermission: "costs:read", ReadOnly: true, RolloutPercent: 100, FallbackEnabled: true, MinimumAPIVersion: "v0.80.0"},
 	{FeatureID: "security.overview", Title: "Security", AppPath: "/app/security", LegacyPath: "/admin#/security", Status: "legacy", RiskLevel: "high", RequiredPermission: "security:read", ReadOnly: true, RolloutPercent: 100, FallbackEnabled: true, MinimumAPIVersion: "v0.80.0"},
+	{FeatureID: "system.health", Title: "System Health", AppPath: "/app/system/health", LegacyPath: "/admin#/ops-home", Status: "preview_read_only", RiskLevel: "low", RequiredPermission: "admin:read", ReadOnly: true, EnabledRoles: []string{"super_admin", "admin", "ops_admin", "ai_admin", "security_admin", "billing_admin", "readonly_admin"}, RolloutPercent: 100, FallbackEnabled: true, MinimumAPIVersion: "v0.81.0"},
 	{FeatureID: "system.settings", Title: "System", AppPath: "/app/system/settings", LegacyPath: "/admin#/settings", Status: "legacy", RiskLevel: "critical", RequiredPermission: "admin:read", ReadOnly: true, RolloutPercent: 100, FallbackEnabled: true, MinimumAPIVersion: "v0.80.0"},
 }
 
 var appUIImplementedFeatureIDs = map[string]struct{}{
-	"overview": {},
+	"overview":       {},
+	"gateway.health": {},
+	"system.health":  {},
 }
 
 func appUIEnv(name, fallback string) string {

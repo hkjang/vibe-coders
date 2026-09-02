@@ -7,8 +7,8 @@ import type { AuthUser } from "@/shared/api/schemas";
 const user: AuthUser = {
   id: "operator-1",
   email: "operator@example.test",
-  role: "operator",
-  roles: ["operator"],
+  role: "viewer",
+  roles: ["viewer"],
   team_id: "ops",
   scopes: ["admin:read"],
   features: {},

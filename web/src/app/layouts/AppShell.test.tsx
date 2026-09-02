@@ -8,6 +8,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AppShell } from "@/app/layouts/AppShell";
 import { migrationRegistry } from "@/config/migration-registry";
 import { apiClient } from "@/shared/api/client";
+import { AppError } from "@/shared/api/error";
 import { usePreferences } from "@/shared/stores/preferences";
 
 const authRuntime = vi.hoisted(() => ({
@@ -29,7 +30,7 @@ vi.mock("@/app/auth/AuthProvider", () => ({
       scopes: authRuntime.scopes,
       features: {},
     },
-    backendVersion: "v0.80.0",
+    backendVersion: "v0.81.0",
     uiVersion: "test",
     apiVersion: "v1",
     authenticationMode: "session",
@@ -45,8 +46,9 @@ vi.mock("@/app/auth/AuthProvider", () => ({
   }),
 }));
 
-function renderShell(): ReturnType<typeof render> {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+function renderShell(
+  client = new QueryClient({ defaultOptions: { queries: { retry: false } } }),
+): ReturnType<typeof render> {
   return render(
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={["/overview"]}>
@@ -84,6 +86,8 @@ describe("AppShell", () => {
     expect(await screen.findByRole("dialog", { name: "명령 팔레트" })).toBeVisible();
     const search = screen.getByRole("combobox", { name: "메뉴 검색" });
     expect(screen.getByRole("option", { name: /Overview/ })).toHaveAttribute("aria-selected", "true");
+    await user.type(search, "AI Gateway");
+    expect(screen.getByRole("option", { name: /Gateway Health/ })).toHaveAttribute("aria-selected", "true");
     await user.type(search, "{ArrowDown}");
     expect(screen.getByRole("option", { name: /Provider/ })).toHaveAttribute("aria-selected", "true");
     await user.type(search, "{Enter}");
@@ -134,8 +138,22 @@ describe("AppShell", () => {
   it("has no automated axe accessibility violations in the application shell", async () => {
     const { container } = renderShell();
     await waitFor(() => expect(screen.getByText("Healthy")).toBeVisible());
-    const result = await axe.run(container, { rules: { "color-contrast": { enabled: false } } });
+    const result = await axe.run(container);
     expect(result.violations).toEqual([]);
+  });
+
+  it("marks a cached health response as degraded when its refresh fails", async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    client.setQueryData(["gateway", "health"], { status: "ok" }, { updatedAt: Date.now() - 20_000 });
+    vi.mocked(apiClient.request).mockRejectedValueOnce(
+      new AppError("Gateway 상태를 갱신할 수 없습니다.", { kind: "network" }),
+    );
+
+    renderShell(client);
+
+    expect(await screen.findByText("Degraded")).toBeVisible();
+    expect(screen.queryByText("Healthy")).not.toBeInTheDocument();
+    expect(screen.queryByText("Disconnected")).not.toBeInTheDocument();
   });
 
   it("does not repeat the page title when the breadcrumb group has the same name", () => {

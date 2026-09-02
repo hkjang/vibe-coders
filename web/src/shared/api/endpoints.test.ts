@@ -34,4 +34,24 @@ describe("endpoints", () => {
     expect(configuredOperations.length).toBeGreaterThan(0);
     expect(configuredOperations.filter((operation) => !declaredOperations.has(operation))).toEqual([]);
   });
+
+  it("registers Phase 1 operations without page-owned URL strings", () => {
+    expect([
+      endpoints.health.path,
+      endpoints.ready.path,
+      endpoints.admin.stats.path,
+      endpoints.admin.ops.status.path,
+      endpoints.admin.ops.risk.path,
+      endpoints.admin.routing.health.path,
+    ]).toEqual([
+      "/health",
+      "/ready",
+      "/admin/stats",
+      "/admin/ops/status",
+      "/admin/ops/risk",
+      "/admin/routing/health",
+    ]);
+    expect(endpoints.health.querySchema).toBeUndefined();
+    expect(endpoints.admin.routing.health.querySchema).toBeDefined();
+  });
 });

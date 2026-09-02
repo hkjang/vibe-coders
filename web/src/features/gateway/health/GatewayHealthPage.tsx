@@ -1,0 +1,345 @@
+import { useQuery } from "@tanstack/react-query";
+import {
+  Activity,
+  CheckCircle2,
+  ExternalLink,
+  Gauge,
+  HeartPulse,
+  RefreshCw,
+  Route,
+  ShieldAlert,
+} from "lucide-react";
+
+import { useAuth } from "@/app/auth/AuthProvider";
+import {
+  formatInteger,
+  formatMilliseconds,
+  formatPercent,
+  refreshIntervalMs,
+} from "@/features/health/health-utils";
+import { HealthWidget, TimeRangePicker } from "@/features/health/health-ui";
+import { useHealthRange } from "@/features/health/use-health-range";
+import { apiClient } from "@/shared/api/client";
+import { endpoints } from "@/shared/api/endpoints";
+import type { RoutingHealth } from "@/shared/api/schemas";
+import { Badge, type BadgeProps } from "@/shared/components/ui/Badge";
+import { Button } from "@/shared/components/ui/Button";
+import { canOpenLegacyAdmin } from "@/shared/permissions/legacy-admin";
+import { usePreferences } from "@/shared/stores/preferences";
+
+const routeId = "gateway.health";
+const scoreThreshold = 70;
+
+function scoreTier(score: number): "danger" | "success" | "warning" {
+  if (score < 50) return "danger";
+  if (score < scoreThreshold) return "warning";
+  return "success";
+}
+
+function phaseLabel(phase: RoutingHealth["breakers"]["states"][number]["phase"]): string {
+  switch (phase) {
+    case "closed":
+      return "정상(Closed)";
+    case "half_open":
+      return "복구 확인(Half Open)";
+    case "open":
+      return "차단(Open)";
+  }
+}
+
+function severityTone(severity: RoutingHealth["alerts"][number]["severity"]): BadgeProps["tone"] {
+  if (severity === "critical") return "danger";
+  if (severity === "warning") return "warning";
+  return "info";
+}
+
+function severityLabel(severity: RoutingHealth["alerts"][number]["severity"]): string {
+  if (severity === "critical") return "Critical";
+  if (severity === "warning") return "Warning";
+  return "Info";
+}
+
+function hasOpenBreaker(data: RoutingHealth | undefined): boolean {
+  return data?.breakers.states.some((state) => state.phase !== "closed") ?? false;
+}
+
+export function GatewayHealthPage(): React.JSX.Element {
+  const auth = useAuth();
+  const showLegacyAdmin = canOpenLegacyAdmin(auth);
+  const refreshInterval = usePreferences((state) => state.refreshInterval);
+  const interval = refreshIntervalMs(refreshInterval);
+  const [range, setRange] = useHealthRange();
+
+  const gateway = useQuery({
+    queryKey: ["gateway", "health"],
+    queryFn: ({ signal }) => apiClient.request(endpoints.health, { signal, routeId }),
+    staleTime: 10_000,
+    refetchInterval: interval,
+    refetchIntervalInBackground: false,
+  });
+  const readiness = useQuery({
+    queryKey: ["gateway", "readiness"],
+    queryFn: ({ signal }) => apiClient.request(endpoints.ready, { signal, routeId }),
+    staleTime: 10_000,
+    refetchInterval: interval,
+    refetchIntervalInBackground: false,
+  });
+  const routing = useQuery({
+    queryKey: ["admin", "routing", "health", range],
+    queryFn: ({ signal }) =>
+      apiClient.request(endpoints.admin.routing.health, {
+        query: { window: range, threshold: scoreThreshold },
+        signal,
+        routeId,
+      }),
+    refetchInterval: interval,
+    refetchIntervalInBackground: false,
+  });
+
+  const gatewayHealthy = gateway.data?.status === "ok";
+  const ready = readiness.data?.status === "ready";
+  const routingDegraded =
+    (routing.data?.degraded.length ?? 0) > 0 ||
+    (routing.data?.alerts.some((alert) => alert.severity !== "info") ?? false) ||
+    hasOpenBreaker(routing.data);
+  const checking = gateway.isPending || readiness.isPending || routing.isPending;
+  const disconnected = gateway.isError && !gateway.data;
+  const degraded = gateway.isError || readiness.isError || routing.isError || routingDegraded;
+  const pageStatus = disconnected
+    ? "Disconnected"
+    : checking
+      ? "Checking"
+      : degraded
+        ? "Degraded"
+        : "Healthy";
+  const pageStatusTone: BadgeProps["tone"] = disconnected
+    ? "danger"
+    : checking
+      ? "muted"
+      : degraded
+        ? "warning"
+        : "success";
+  const refreshing = gateway.isFetching || readiness.isFetching || routing.isFetching;
+
+  const refreshAll = (): void => {
+    void Promise.all([gateway.refetch(), readiness.refetch(), routing.refetch()]);
+  };
+
+  return (
+    <div className="page-stack">
+      <header className="page-header">
+        <div>
+          <div className="eyebrow">Preview Read Only</div>
+          <h1>Gateway Health</h1>
+          <p>Gateway 연결, 요청 준비 상태와 Provider 라우팅 상태를 안전하게 조회합니다.</p>
+        </div>
+        <div className="page-actions">
+          <Badge tone="info">Read Only</Badge>
+          <Badge tone={pageStatusTone}>{pageStatus}</Badge>
+          {showLegacyAdmin ? (
+            <a className="button button-secondary button-default" href="/admin#/routing/health">
+              Legacy 상태 열기 <ExternalLink aria-hidden="true" />
+            </a>
+          ) : null}
+          <Button onClick={refreshAll} disabled={refreshing}>
+            <RefreshCw aria-hidden="true" /> {refreshing ? "갱신 중" : "새로고침"}
+          </Button>
+        </div>
+      </header>
+
+      <div className="health-page-toolbar">
+        <TimeRangePicker value={range} onChange={setRange} />
+        <p className="metric-note">
+          선택 기간은 Provider 점수, 순위와 라우팅 알림에 적용됩니다. 자동 갱신은 비활성 탭에서 중단됩니다.
+        </p>
+      </div>
+
+      <section className="health-grid" aria-label="Gateway 기본 상태">
+        <HealthWidget
+          title="Gateway 연결"
+          description="GET /health"
+          icon={Activity}
+          loading={gateway.isPending}
+          error={gateway.error}
+          onRetry={() => void gateway.refetch()}
+          updatedAt={gateway.dataUpdatedAt || undefined}
+          status={gatewayHealthy ? "Healthy" : undefined}
+          statusTone={gatewayHealthy ? "success" : "muted"}
+        >
+          <div className="metric-value">
+            <strong>{gatewayHealthy ? "정상" : "확인 필요"}</strong>
+            <span>{gatewayHealthy ? "API 연결 가능" : "응답 상태 확인 필요"}</span>
+          </div>
+          <p className="metric-note">Gateway 프로세스가 상태 확인 요청에 정상 응답하는지 확인합니다.</p>
+        </HealthWidget>
+
+        <HealthWidget
+          title="요청 준비 상태"
+          description="GET /ready"
+          icon={HeartPulse}
+          loading={readiness.isPending}
+          error={readiness.error}
+          onRetry={() => void readiness.refetch()}
+          updatedAt={readiness.dataUpdatedAt || undefined}
+          status={ready ? "Ready" : undefined}
+          statusTone={ready ? "success" : "muted"}
+        >
+          <div className="metric-value">
+            <strong>{ready ? "준비 완료" : "확인 필요"}</strong>
+            <span>{ready ? "요청 수신 가능" : "의존성 상태 확인 필요"}</span>
+          </div>
+          <p className="metric-note">
+            Gateway가 필요한 의존성을 확인하고 실제 요청을 받을 준비가 되었는지 표시합니다.
+          </p>
+        </HealthWidget>
+      </section>
+
+      <HealthWidget
+        title="Provider 라우팅 상태"
+        description={`최근 ${range} · 점수 ${scoreThreshold} 미만을 저하로 판단`}
+        icon={Route}
+        loading={routing.isPending}
+        error={routing.error}
+        onRetry={() => void routing.refetch()}
+        updatedAt={routing.dataUpdatedAt || undefined}
+        status={routing.data ? (routingDegraded ? "Degraded" : "Healthy") : undefined}
+        statusTone={routingDegraded ? "warning" : "success"}
+      >
+        {routing.data ? <RoutingHealthDetails data={routing.data} /> : null}
+      </HealthWidget>
+    </div>
+  );
+}
+
+function RoutingHealthDetails({ data }: { data: RoutingHealth }): React.JSX.Element {
+  return (
+    <div className="page-stack">
+      <section aria-labelledby="provider-ranking-title">
+        <h3 id="provider-ranking-title">Provider 순위</h3>
+        {data.ranking.length > 0 ? (
+          <div className="health-table-wrap">
+            <table className="health-table">
+              <caption className="sr-only">선택 기간의 Provider 상태 점수 순위</caption>
+              <thead>
+                <tr>
+                  <th scope="col">순위</th>
+                  <th scope="col">Provider</th>
+                  <th scope="col">점수</th>
+                  <th scope="col">요청</th>
+                  <th scope="col">P95 지연</th>
+                  <th scope="col">Fallback</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.ranking.map((provider) => (
+                  <tr key={`${provider.rank}-${provider.provider}`}>
+                    <td>{formatInteger(provider.rank)}</td>
+                    <td>{provider.provider}</td>
+                    <td>
+                      <span className="score-cell">
+                        <span
+                          className="score-dot"
+                          data-tier={scoreTier(provider.score)}
+                          aria-hidden="true"
+                        />
+                        {formatInteger(provider.score)}점
+                      </span>
+                    </td>
+                    <td>{formatInteger(provider.requests)}</td>
+                    <td>{formatMilliseconds(provider.p95_latency_ms)}</td>
+                    <td>{formatPercent(provider.fallback_rate)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="health-empty">
+            <Gauge aria-hidden="true" />
+            <p>선택 기간에 Provider 요청 데이터가 없습니다.</p>
+          </div>
+        )}
+      </section>
+
+      <section aria-labelledby="breaker-state-title">
+        <h3 id="breaker-state-title">Circuit Breaker</h3>
+        <dl className="metric-pairs">
+          <div>
+            <dt>기능 상태</dt>
+            <dd>{data.breakers.enabled ? "활성" : "비활성"}</dd>
+          </div>
+          <div>
+            <dt>공유 상태</dt>
+            <dd>{data.breakers.shared ? "인스턴스 간 공유" : "현재 인스턴스 전용"}</dd>
+          </div>
+          <div>
+            <dt>실패 임계값</dt>
+            <dd>{formatInteger(data.breakers.threshold)}회</dd>
+          </div>
+          <div>
+            <dt>복구 대기</dt>
+            <dd>{formatInteger(data.breakers.cooldown_seconds)}초</dd>
+          </div>
+        </dl>
+        {data.breakers.states.length > 0 ? (
+          <div className="health-table-wrap">
+            <table className="health-table">
+              <caption className="sr-only">Provider별 Circuit Breaker 상태</caption>
+              <thead>
+                <tr>
+                  <th scope="col">Provider</th>
+                  <th scope="col">상태</th>
+                  <th scope="col">연속 실패</th>
+                  <th scope="col">차단 횟수</th>
+                  <th scope="col">재시도까지</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.breakers.states.map((breaker) => (
+                  <tr key={breaker.provider}>
+                    <td>{breaker.provider}</td>
+                    <td>{phaseLabel(breaker.phase)}</td>
+                    <td>{formatInteger(breaker.failures)}</td>
+                    <td>{formatInteger(breaker.opens)}</td>
+                    <td>
+                      {breaker.retry_in_seconds === undefined
+                        ? "-"
+                        : `${formatInteger(breaker.retry_in_seconds)}초`}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p className="metric-note">Provider별 Circuit Breaker 상태가 아직 없습니다.</p>
+        )}
+      </section>
+
+      <section aria-labelledby="routing-alert-title">
+        <h3 id="routing-alert-title">라우팅 알림</h3>
+        {data.alerts.length > 0 ? (
+          <ul className="health-alert-list">
+            {data.alerts.map((alert, index) => (
+              <li key={`${alert.provider}-${alert.code}-${index}`}>
+                <ShieldAlert aria-hidden="true" />
+                <div>
+                  <p>{alert.message}</p>
+                  <small>
+                    {alert.provider} · {alert.code}
+                  </small>
+                </div>
+                <Badge tone={severityTone(alert.severity)}>{severityLabel(alert.severity)}</Badge>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <div className="health-empty">
+            <CheckCircle2 aria-hidden="true" />
+            <p>활성 라우팅 알림이 없습니다.</p>
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
