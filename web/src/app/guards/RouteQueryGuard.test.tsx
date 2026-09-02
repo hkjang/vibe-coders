@@ -1,0 +1,72 @@
+import { render, screen } from "@testing-library/react";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router";
+import { describe, expect, it, vi } from "vitest";
+
+import { RouteQueryGuard } from "@/app/guards/RouteQueryGuard";
+import { rejectedSensitiveQuery } from "@/shared/security/app-route-query";
+
+function Probe({ rendered }: { rendered: () => void }): React.JSX.Element {
+  const location = useLocation();
+  rendered();
+  return (
+    <output>
+      {location.pathname}
+      {location.search}
+      {rejectedSensitiveQuery(location.state, "q") ? ":rejected" : ""}
+    </output>
+  );
+}
+
+describe("RouteQueryGuard", () => {
+  it("sanitizes route queries before rendering its guarded child", async () => {
+    const rendered = vi.fn();
+    render(
+      <MemoryRouter initialEntries={["/gateway/providers?q=Bearer%20private&status=enabled&token=private"]}>
+        <Routes>
+          <Route element={<RouteQueryGuard />}>
+            <Route path="gateway/providers" element={<Probe rendered={rendered} />} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByRole("status")).toHaveTextContent("/gateway/providers?status=enabled:rejected");
+    expect(rendered).toHaveBeenCalledTimes(1);
+  });
+
+  it("drops an unsafe nested return_to before rendering login", async () => {
+    const rendered = vi.fn();
+    render(
+      <MemoryRouter initialEntries={["/login?return_to=%2Fapp%2Fgateway%2Fmodels%3Ftoken%3Dprivate"]}>
+        <Routes>
+          <Route element={<RouteQueryGuard />}>
+            <Route path="login" element={<Probe rendered={rendered} />} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByRole("status")).toHaveTextContent("/login");
+    expect(screen.getByRole("status")).not.toHaveTextContent("private");
+    expect(rendered).toHaveBeenCalledTimes(1);
+  });
+
+  it("drops a double-encoded secret nested inside return_to", async () => {
+    const rendered = vi.fn();
+    render(
+      <MemoryRouter
+        initialEntries={["/login?return_to=%2Fapp%2Fgateway%2Fproviders%3Fq%3D%252561pi_key%25253Dprivate"]}
+      >
+        <Routes>
+          <Route element={<RouteQueryGuard />}>
+            <Route path="login" element={<Probe rendered={rendered} />} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByRole("status")).toHaveTextContent("/login");
+    expect(screen.getByRole("status")).not.toHaveTextContent("return_to");
+    expect(rendered).toHaveBeenCalledTimes(1);
+  });
+});

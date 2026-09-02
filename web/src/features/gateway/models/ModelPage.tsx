@@ -1,10 +1,10 @@
-import { Search } from "lucide-react";
 import { useCallback, useEffect, useMemo } from "react";
 import { useSearchParams } from "react-router";
 
 import { useAuth } from "@/app/auth/AuthProvider";
 import { ModelDetailDialog } from "@/features/gateway/models/ModelDetailDialog";
 import { ModelPageHeader } from "@/features/gateway/models/ModelPageHeader";
+import { ModelToolbar } from "@/features/gateway/models/ModelToolbar";
 import {
   buildModelRows,
   filterModelRows,
@@ -13,29 +13,17 @@ import {
   modelRowKey,
   uniqueModelProviders,
   type ModelCatalogRow,
-  type ModelStatusFilter,
 } from "@/features/gateway/models/model-catalog";
 import { ModelPartialFailureNotice, ModelTable } from "@/features/gateway/models/ModelTableParts";
 import { useModelCatalogQueries } from "@/features/gateway/models/use-model-catalog";
 import { useModelDialogFocus } from "@/features/gateway/models/use-model-dialog-focus";
 import { QueryFailureNotice } from "@/features/gateway/providers/ProviderTableParts";
 import { isHealthRange, maxUpdatedAt, type HealthRange } from "@/features/health/health-utils";
-import { TimeRangePicker } from "@/features/health/health-ui";
-import { Button } from "@/shared/components/ui/Button";
 import { canOpenLegacyAdmin } from "@/shared/permissions/legacy-admin";
+import { containsPotentialSecret } from "@/shared/security/secrets";
 
 const pageSize = 10;
 const defaultRange: HealthRange = "24h";
-
-const statusLabels: Record<ModelStatusFilter, string> = {
-  all: "전체 상태",
-  available: "Available",
-  virtual: "Virtual",
-  deprecated: "Deprecated",
-  retired: "Retired",
-  stale: "Stale",
-  shadowed: "Shadowed",
-};
 
 function positivePage(value: string | null): number {
   const parsed = Number(value);
@@ -50,9 +38,11 @@ export function ModelPage(): React.JSX.Element {
   const requestedPage = searchParams.get("page");
   const requestedModelProvider = searchParams.get("model_provider");
   const requestedSource = searchParams.get("source");
+  const requestedQuery = searchParams.get("q") ?? "";
   const range = isHealthRange(requestedRange) ? requestedRange : defaultRange;
   const status = isModelStatusFilter(requestedStatus) ? requestedStatus : "all";
-  const query = searchParams.get("q") ?? "";
+  const unsafeStoredQuery = containsPotentialSecret(requestedQuery);
+  const query = unsafeStoredQuery ? "" : requestedQuery;
   const providerFilter = searchParams.get("provider")?.trim() ?? "";
   const selectedModel = searchParams.get("model")?.trim() ?? "";
   const selectedProvider = requestedModelProvider?.trim() || (selectedModel !== "" ? providerFilter : "");
@@ -78,6 +68,7 @@ export function ModelPage(): React.JSX.Element {
     if (requestedRange !== null && !isHealthRange(requestedRange)) updates.range = defaultRange;
     if (requestedStatus !== null && !isModelStatusFilter(requestedStatus)) updates.status = undefined;
     if (requestedSource !== null && !isModelSource(requestedSource)) updates.source = undefined;
+    if (unsafeStoredQuery) updates.q = undefined;
     if (requestedModelProvider !== null && (selectedModel === "" || requestedModelProvider.trim() === "")) {
       updates.model_provider = undefined;
     }
@@ -92,6 +83,7 @@ export function ModelPage(): React.JSX.Element {
     requestedSource,
     requestedStatus,
     selectedModel,
+    unsafeStoredQuery,
     updateSearch,
   ]);
 
@@ -190,102 +182,15 @@ export function ModelPage(): React.JSX.Element {
         virtualCount={virtualCount}
       />
 
-      <div className="model-toolbar">
-        <form
-          className="model-search"
-          role="search"
-          onSubmit={(event) => {
-            event.preventDefault();
-            const submittedQuery = new FormData(event.currentTarget).get("q");
-            updateSearch({
-              q: typeof submittedQuery === "string" ? submittedQuery.trim() || undefined : undefined,
-              page: undefined,
-            });
-          }}
-        >
-          <label htmlFor="model-search">Model 검색</label>
-          <div>
-            <Search aria-hidden="true" />
-            <input
-              key={query}
-              id="model-search"
-              name="q"
-              defaultValue={query}
-              placeholder="Model ID, Provider, 소유자, 사용 지침"
-            />
-            <Button size="small" type="submit">
-              검색
-            </Button>
-          </div>
-        </form>
-        <label className="model-filter">
-          <span>Provider</span>
-          <select
-            value={providerFilter}
-            onChange={(event) =>
-              updateSearch({
-                provider: event.target.value || undefined,
-                model: undefined,
-                model_provider: undefined,
-                page: undefined,
-                source: undefined,
-              })
-            }
-          >
-            <option value="">전체 Provider</option>
-            {providers.map((provider) => (
-              <option key={provider} value={provider}>
-                {provider}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="model-filter">
-          <span>상태</span>
-          <select
-            value={status}
-            onChange={(event) =>
-              updateSearch({
-                status: event.target.value === "all" ? undefined : event.target.value,
-                model: undefined,
-                model_provider: undefined,
-                page: undefined,
-                source: undefined,
-              })
-            }
-          >
-            {Object.entries(statusLabels).map(([value, label]) => (
-              <option key={value} value={value}>
-                {label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <div className="model-range">
-          <span>품질 기간</span>
-          <TimeRangePicker
-            value={range}
-            onChange={(nextRange) => updateSearch({ range: nextRange, page: undefined })}
-          />
-        </div>
-        <Button
-          size="small"
-          variant="ghost"
-          onClick={() =>
-            updateSearch({
-              model: undefined,
-              model_provider: undefined,
-              page: undefined,
-              provider: undefined,
-              q: undefined,
-              status: undefined,
-              source: undefined,
-            })
-          }
-        >
-          필터 초기화
-        </Button>
-      </div>
+      <ModelToolbar
+        onUpdate={updateSearch}
+        provider={providerFilter}
+        providers={providers}
+        query={query}
+        range={range}
+        status={status}
+        unsafeStoredQuery={unsafeStoredQuery}
+      />
 
       {models.isError ? (
         <QueryFailureNotice
@@ -353,7 +258,9 @@ export function ModelPage(): React.JSX.Element {
           error: models.error,
           fetching: models.isFetching,
           hasResponse: models.data !== undefined,
+          partialFailures: models.data?.partial_failures ?? [],
           pending: models.isPending,
+          requestId: models.data?.request_id ?? "",
           retry: () => void models.refetch(),
         }}
         enrichment={{

@@ -583,6 +583,7 @@ export type AdminStats = z.output<typeof adminStatsSchema>;
 export type AdminModel = z.output<typeof adminModelSchema>;
 export type AdminModelsResponse = z.output<typeof adminModelsResponseSchema>;
 export type AdminModelsQuery = z.input<typeof adminModelsQuerySchema>;
+export type AdminModelPartialFailure = z.output<typeof adminModelPartialFailureSchema>;
 export type GatewayHealth = z.output<typeof gatewayHealthSchema>;
 export type OpsRisk = z.output<typeof opsRiskSchema>;
 export type OpsRiskResponse = z.output<typeof opsRiskResponseSchema>;

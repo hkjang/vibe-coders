@@ -2,6 +2,7 @@ import { createBrowserRouter, type RouteObject } from "react-router";
 
 import { FeatureRoute } from "@/app/guards/FeatureRoute";
 import { ProtectedRoute } from "@/app/guards/ProtectedRoute";
+import { RouteQueryGuard } from "@/app/guards/RouteQueryGuard";
 import { AppShell } from "@/app/layouts/AppShell";
 import { CompatibilityRedirect } from "@/app/router/CompatibilityRedirect";
 import { DefaultEntryRedirect } from "@/app/router/DefaultEntryRedirect";
@@ -88,32 +89,39 @@ const featureRoutes: RouteObject[] = migrationRegistry.map((feature) => {
   return { path, element: <FeatureRoute feature={feature} /> };
 });
 
-export const router = createBrowserRouter(
-  [
-    {
-      path: "login",
-      lazy: async () => {
-        const { LoginPage } = await import("@/app/auth/LoginPage");
-        return { Component: LoginPage };
+export function createAppRouter(): ReturnType<typeof createBrowserRouter> {
+  return createBrowserRouter(
+    [
+      {
+        element: <RouteQueryGuard />,
+        children: [
+          {
+            path: "login",
+            lazy: async () => {
+              const { LoginPage } = await import("@/app/auth/LoginPage");
+              return { Component: LoginPage };
+            },
+            errorElement: <RouteErrorPage />,
+          },
+          {
+            element: <ProtectedRoute />,
+            errorElement: <RouteErrorPage />,
+            children: [
+              {
+                element: <AppShell />,
+                children: [
+                  { index: true, element: <DefaultEntryRedirect /> },
+                  { path: "providers", element: <CompatibilityRedirect to="/gateway/providers" /> },
+                  { path: "models", element: <CompatibilityRedirect to="/gateway/models" /> },
+                  ...featureRoutes,
+                  { path: "*", element: <NotFoundPage /> },
+                ],
+              },
+            ],
+          },
+        ],
       },
-      errorElement: <RouteErrorPage />,
-    },
-    {
-      element: <ProtectedRoute />,
-      errorElement: <RouteErrorPage />,
-      children: [
-        {
-          element: <AppShell />,
-          children: [
-            { index: true, element: <DefaultEntryRedirect /> },
-            { path: "providers", element: <CompatibilityRedirect to="/gateway/providers" /> },
-            { path: "models", element: <CompatibilityRedirect to="/gateway/models" /> },
-            ...featureRoutes,
-            { path: "*", element: <NotFoundPage /> },
-          ],
-        },
-      ],
-    },
-  ],
-  { basename: "/app" },
-);
+    ],
+    { basename: "/app" },
+  );
+}

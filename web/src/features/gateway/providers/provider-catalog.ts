@@ -1,4 +1,5 @@
 import type { Provider, ProviderSLO, ProviderSLOEvaluation, RoutingHealth } from "@/shared/api/schemas";
+import { containsPotentialSecret, isSensitiveCredentialKey } from "@/shared/security/secrets";
 
 export const providerStatusFilters = [
   "all",
@@ -26,42 +27,6 @@ export function isProviderStatusFilter(value: string | null): value is ProviderS
 
 export const invalidProviderURLDisplay = "Provider URL을 안전하게 표시할 수 없습니다.";
 
-function providerURLQueryKeyIsSensitive(key: string): boolean {
-  const parts = key
-    .replace(/([a-z\d])([A-Z])/g, "$1 $2")
-    .toLocaleLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim()
-    .split(/\s+/)
-    .filter(Boolean);
-  const sensitiveTerms = [
-    "authorization",
-    "credentials",
-    "credential",
-    "password",
-    "passwd",
-    "signature",
-    "secret",
-    "token",
-    "auth",
-    "sig",
-    "key",
-  ];
-  const containedTerms = ["authorization", "credential", "password", "signature", "secret", "token"];
-  if (
-    parts.some(
-      (part) =>
-        sensitiveTerms.some((term) => part.startsWith(term) || part.endsWith(term)) ||
-        containedTerms.some((term) => part.includes(term)),
-    )
-  ) {
-    return true;
-  }
-  return ["apikey", "accesstoken", "authtoken", "bearertoken", "clientsecret", "subscriptionkey"].includes(
-    parts.join(""),
-  );
-}
-
 function parseProviderURL(value: string): URL | undefined {
   const trimmed = value.trim();
   if (
@@ -87,29 +52,13 @@ export function displayProviderBaseURL(value: string): string {
   url.password = "";
   url.hash = "";
   for (const key of [...url.searchParams.keys()]) {
-    if (providerURLQueryKeyIsSensitive(key)) url.searchParams.set(key, "***");
+    if (isSensitiveCredentialKey(key)) url.searchParams.set(key, "***");
   }
   return url.toString();
 }
 
 export function providerSearchContainsSensitiveValue(value: string): boolean {
-  const trimmed = value.trim();
-  if (trimmed === "") return false;
-  const parsedURL = parseProviderURL(trimmed);
-  if (parsedURL) {
-    if (parsedURL.username !== "" || parsedURL.password !== "" || parsedURL.hash !== "") return true;
-    if ([...parsedURL.searchParams.keys()].some(providerURLQueryKeyIsSensitive)) return true;
-  } else {
-    const assignments = trimmed.matchAll(/(?:^|[?&#;\s])([a-z0-9_.-]+)\s*[=:]/gi);
-    for (const assignment of assignments) {
-      if (providerURLQueryKeyIsSensitive(assignment[1] ?? "")) return true;
-    }
-  }
-  return (
-    /\bbearer\s+\S+/i.test(trimmed) ||
-    /\bsk-[a-z0-9_-]{8,}/i.test(trimmed) ||
-    /\beyJ[a-z0-9_-]+\.[a-z0-9_-]+\.[a-z0-9_-]+\b/i.test(trimmed)
-  );
+  return containsPotentialSecret(value);
 }
 
 export function buildProviderRows(
@@ -164,7 +113,6 @@ export function filterProviderRows(
     if (status === "all") return true;
     if (status === "enabled") return row.provider.enabled;
     if (status === "disabled") return !row.provider.enabled;
-    if (row.health === "checking") return true;
     return row.health === status;
   });
 }

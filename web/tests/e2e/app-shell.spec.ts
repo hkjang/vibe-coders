@@ -601,11 +601,11 @@ test("never fetches routing health for Provider without routing:read", async ({ 
   expect(routingRequests).toBe(0);
 });
 
-test("replaces legacy short Gateway paths without dropping query or hash", async ({ page }) => {
+test("replaces legacy short Gateway paths with only allowed query and safe hash", async ({ page }) => {
   await mockGateway(page);
 
   await page.goto("providers?team=platform#connections");
-  await expect(page).toHaveURL(/\/app\/gateway\/providers\?team=platform#connections$/);
+  await expect(page).toHaveURL(/\/app\/gateway\/providers#connections$/);
   await expect(page.getByRole("heading", { name: "Provider", exact: true })).toBeVisible();
   await expect(page.getByRole("link", { name: /Legacy에서 열기/ })).toHaveAttribute(
     "href",
@@ -619,6 +619,27 @@ test("replaces legacy short Gateway paths without dropping query or hash", async
     "href",
     "/admin#/model-contracts",
   );
+});
+
+test("removes secret and arbitrary route query state before rendering the Provider page", async ({
+  page,
+}) => {
+  await mockGateway(page);
+
+  await page.goto(
+    "gateway/providers?q=sk-proj-private12345678&status=enabled&token=private&team=platform#token=private",
+  );
+  await expect(page.getByRole("heading", { name: "Provider", exact: true })).toBeVisible();
+  await expect(page).toHaveURL(/\/app\/gateway\/providers\?status=enabled$/);
+  const search = page.getByRole("textbox", { name: "Provider 검색" });
+  await expect(search).toBeFocused();
+  await expect(search).toHaveAttribute("aria-invalid", "true");
+  await expect(page.getByRole("alert")).toContainText("인증정보로 보이는 검색어");
+
+  await search.fill("Bearer another-private-value");
+  await page.getByRole("button", { name: "검색", exact: true }).click();
+  await expect(search).toBeFocused();
+  await expect(page).toHaveURL(/\/app\/gateway\/providers\?status=enabled$/);
 });
 
 test("opens and reloads the read-only System Health deep link", async ({ page }) => {

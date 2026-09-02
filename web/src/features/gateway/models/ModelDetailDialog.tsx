@@ -2,9 +2,11 @@ import { AlertTriangle, ExternalLink, RefreshCw } from "lucide-react";
 import type { ReactNode, RefObject } from "react";
 
 import type { ModelCatalogRow } from "@/features/gateway/models/model-catalog";
+import { ModelCatalogueFailure } from "@/features/gateway/models/ModelCatalogueFailure";
 import { modelStatusPresentation } from "@/features/gateway/models/model-presentation";
 import { formatInteger, formatKRW, formatPercent } from "@/features/health/health-utils";
 import { isAppError } from "@/shared/api/error";
+import type { AdminModelPartialFailure } from "@/shared/api/schemas";
 import { Badge } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
 import { Dialog } from "@/shared/components/ui/Dialog";
@@ -17,6 +19,11 @@ export interface ModelDetailResourceState {
   retry: () => void;
 }
 
+interface ModelCatalogueState extends ModelDetailResourceState {
+  partialFailures: readonly AdminModelPartialFailure[];
+  requestId: string;
+}
+
 export interface ModelDetailEnrichment {
   pricing: ModelDetailResourceState;
   quality: ModelDetailResourceState;
@@ -24,7 +31,7 @@ export interface ModelDetailEnrichment {
 }
 
 interface ModelDetailDialogProps {
-  catalogue: ModelDetailResourceState;
+  catalogue: ModelCatalogueState;
   enrichment: ModelDetailEnrichment;
   onOpenChange: (open: boolean) => void;
   open: boolean;
@@ -64,8 +71,14 @@ function DetailResourceState({
             <p>{isAppError(state.error) ? state.error.message : "잠시 후 다시 시도해 주세요."}</p>
             {requestId ? <code>Request ID: {requestId}</code> : null}
           </div>
-          <Button size="small" variant="secondary" onClick={state.retry} aria-label={`${label} 상세 재시도`}>
-            <RefreshCw aria-hidden="true" /> 재시도
+          <Button
+            size="small"
+            variant="secondary"
+            onClick={state.retry}
+            disabled={state.fetching}
+            aria-label={`${label} 상세 재시도`}
+          >
+            <RefreshCw aria-hidden="true" /> {state.fetching ? "갱신 중" : "재시도"}
           </Button>
         </div>
       ) : null}
@@ -199,6 +212,11 @@ export function ModelDetailDialog({
   showLegacyAdmin,
 }: ModelDetailDialogProps): React.JSX.Element {
   const requestId = isAppError(catalogue.error) ? catalogue.error.requestId : undefined;
+  const catalogueRequestId = catalogue.requestId || requestId || "";
+  const failureProvider = row?.model.provider ?? requestedProvider;
+  const relevantFailures = catalogue.partialFailures.filter(
+    (failure) => failure.provider === "" || failure.provider === failureProvider,
+  );
   const footer = showLegacyAdmin ? (
     <a className="button button-secondary button-default" href="/admin#/model-contracts">
       Legacy Model 계약 열기 <ExternalLink aria-hidden="true" />
@@ -231,10 +249,18 @@ export function ModelDetailDialog({
             <p>{isAppError(catalogue.error) ? catalogue.error.message : "잠시 후 다시 시도해 주세요."}</p>
             {requestId ? <code>Request ID: {requestId}</code> : null}
           </div>
-          <Button size="small" variant="secondary" onClick={catalogue.retry}>
-            <RefreshCw aria-hidden="true" /> 재시도
+          <Button size="small" variant="secondary" onClick={catalogue.retry} disabled={catalogue.fetching}>
+            <RefreshCw aria-hidden="true" /> {catalogue.fetching ? "갱신 중" : "재시도"}
           </Button>
         </div>
+      ) : !row && relevantFailures.length > 0 ? (
+        <ModelCatalogueFailure
+          failures={relevantFailures}
+          fetching={catalogue.fetching}
+          onRetry={catalogue.retry}
+          requestId={catalogueRequestId}
+          stale={false}
+        />
       ) : !row ? (
         <div className="model-detail-error" role="alert">
           <AlertTriangle aria-hidden="true" />
@@ -259,6 +285,16 @@ export function ModelDetailDialog({
                 {row.model.source.replace("_", " ")}
               </Badge>
             </div>
+
+            {row.model.stale ? (
+              <ModelCatalogueFailure
+                failures={relevantFailures}
+                fetching={catalogue.fetching}
+                onRetry={catalogue.retry}
+                requestId={catalogueRequestId}
+                stale
+              />
+            ) : null}
 
             <section className="model-detail-section" aria-labelledby="model-identity-title">
               <h3 id="model-identity-title">Catalogue</h3>

@@ -8,7 +8,6 @@ import {
   buildProviderRows,
   filterProviderRows,
   isProviderStatusFilter,
-  providerSearchContainsSensitiveValue,
   type ProviderCatalogRow,
   type ProviderStatusFilter,
 } from "@/features/gateway/providers/provider-catalog";
@@ -20,12 +19,11 @@ import { TimeRangePicker } from "@/features/health/health-ui";
 import { Badge } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
 import { canOpenLegacyAdmin } from "@/shared/permissions/legacy-admin";
+import { rejectedSensitiveQuery } from "@/shared/security/app-route-query";
+import { containsPotentialSecret, secretSearchMessage } from "@/shared/security/secrets";
 
 const pageSize = 10;
 const defaultRange: HealthRange = "24h";
-const sensitiveSearchMessage =
-  "인증정보로 보이는 검색어는 주소에 저장하지 않습니다. Secret을 제거한 뒤 검색하세요.";
-
 const statusLabels: Record<ProviderStatusFilter, string> = {
   all: "전체 상태",
   enabled: "활성",
@@ -50,7 +48,7 @@ export function ProviderPage(): React.JSX.Element {
   const requestedQuery = searchParams.get("q") ?? "";
   const range = isHealthRange(requestedRange) ? requestedRange : defaultRange;
   const status = isProviderStatusFilter(requestedStatus) ? requestedStatus : "all";
-  const unsafeStoredQuery = providerSearchContainsSensitiveValue(requestedQuery);
+  const unsafeStoredQuery = containsPotentialSecret(requestedQuery);
   const query = unsafeStoredQuery ? "" : requestedQuery;
   const selectedName = searchParams.get("provider")?.trim() ?? "";
   const currentPage = positivePage(requestedPage);
@@ -60,17 +58,18 @@ export function ProviderPage(): React.JSX.Element {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const [searchError, setSearchError] = useState<string | undefined>();
   const rejectedSearchNavigation =
-    typeof location.state === "object" &&
-    location.state !== null &&
-    "providerSearchRejected" in location.state &&
-    location.state.providerSearchRejected === true;
+    rejectedSensitiveQuery(location.state, "q") ||
+    (typeof location.state === "object" &&
+      location.state !== null &&
+      "providerSearchRejected" in location.state &&
+      location.state.providerSearchRejected === true);
   const visibleSearchError =
-    searchError ?? (unsafeStoredQuery || rejectedSearchNavigation ? sensitiveSearchMessage : undefined);
+    searchError ?? (unsafeStoredQuery || rejectedSearchNavigation ? secretSearchMessage : undefined);
 
   const updateSearch = useCallback(
     (updates: Readonly<Record<string, string | undefined>>, replace = true, state?: unknown): void => {
       const next = new URLSearchParams(searchParams);
-      if (providerSearchContainsSensitiveValue(next.get("q") ?? "")) next.delete("q");
+      if (containsPotentialSecret(next.get("q") ?? "")) next.delete("q");
       for (const [key, value] of Object.entries(updates)) {
         if (value === undefined || value === "") next.delete(key);
         else next.set(key, value);
@@ -92,6 +91,10 @@ export function ProviderPage(): React.JSX.Element {
       updateSearch(updates, true, unsafeStoredQuery ? { providerSearchRejected: true } : undefined);
     }
   }, [requestedPage, requestedRange, requestedStatus, unsafeStoredQuery, updateSearch]);
+
+  useEffect(() => {
+    if (visibleSearchError) searchInputRef.current?.focus();
+  }, [visibleSearchError]);
 
   const healthPending =
     Boolean(providers.data) &&
@@ -145,7 +148,7 @@ export function ProviderPage(): React.JSX.Element {
   const detailSearch = useCallback(
     (provider: string): string => {
       const next = new URLSearchParams(searchParams);
-      if (providerSearchContainsSensitiveValue(next.get("q") ?? "")) next.delete("q");
+      if (containsPotentialSecret(next.get("q") ?? "")) next.delete("q");
       next.set("provider", provider);
       return `?${next.toString()}`;
     },
@@ -215,8 +218,8 @@ export function ProviderPage(): React.JSX.Element {
             event.preventDefault();
             const submittedQuery = new FormData(event.currentTarget).get("q");
             const nextQuery = typeof submittedQuery === "string" ? submittedQuery.trim() : "";
-            if (providerSearchContainsSensitiveValue(nextQuery)) {
-              setSearchError(sensitiveSearchMessage);
+            if (containsPotentialSecret(nextQuery)) {
+              setSearchError(secretSearchMessage);
               searchInputRef.current?.focus();
               return;
             }

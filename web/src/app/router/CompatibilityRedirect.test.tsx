@@ -20,18 +20,35 @@ describe("CompatibilityRedirect", () => {
   it.each([
     ["providers", "/gateway/providers"],
     ["models", "/gateway/models"],
-  ] as const)("replaces /app/%s while preserving its query and hash", async (source, target) => {
+  ] as const)(
+    "replaces /app/%s while preserving only its allowed query and safe hash",
+    async (source, target) => {
+      render(
+        <MemoryRouter initialEntries={[`/${source}?team=platform&status=enabled#details`]}>
+          <Routes>
+            <Route path={source} element={<CompatibilityRedirect to={target} />} />
+            <Route path={target} element={<LocationProbe />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+
+      const location = await screen.findByRole("status");
+      expect(location).toHaveTextContent(`${target}?status=enabled#details`);
+      expect(location).toHaveAttribute("data-navigation-type", "REPLACE");
+    },
+  );
+
+  it("does not forward credential query parameters or credential-like hashes", async () => {
     render(
-      <MemoryRouter initialEntries={[`/${source}?team=platform&status=enabled#details`]}>
+      <MemoryRouter initialEntries={["/models?q=gpt&api_key=private#token=private"]}>
         <Routes>
-          <Route path={source} element={<CompatibilityRedirect to={target} />} />
-          <Route path={target} element={<LocationProbe />} />
+          <Route path="models" element={<CompatibilityRedirect to="/gateway/models" />} />
+          <Route path="gateway/models" element={<LocationProbe />} />
         </Routes>
       </MemoryRouter>,
     );
 
-    const location = await screen.findByRole("status");
-    expect(location).toHaveTextContent(`${target}?team=platform&status=enabled#details`);
-    expect(location).toHaveAttribute("data-navigation-type", "REPLACE");
+    expect(await screen.findByRole("status")).toHaveTextContent("/gateway/models?q=gpt");
+    expect(screen.getByRole("status")).not.toHaveTextContent("private");
   });
 });

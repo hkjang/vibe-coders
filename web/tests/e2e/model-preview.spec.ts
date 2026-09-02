@@ -269,3 +269,15 @@ test("keeps an exact model deep link across reload, restores focus, retries deta
   await expect(page.getByText("Request ID: req-models-e2e")).toBeVisible();
   expect(await axeViolations(page)).toEqual([]);
 });
+
+test("distinguishes a provider partial failure from a missing deep-linked model", async ({ page }) => {
+  await mockModelGateway(page);
+  await page.goto("gateway/models?model=claude-4&model_provider=anthropic&source=live");
+
+  const dialog = page.getByRole("dialog", { name: "claude-4" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByText("Provider Model 카탈로그를 확인할 수 없습니다.")).toBeVisible();
+  await expect(dialog.getByText(/provider_models_unavailable/)).toBeVisible();
+  await expect(dialog.getByText("Request ID: req-models-e2e")).toBeVisible();
+  await expect(dialog.getByText("Model을 찾을 수 없습니다.")).toBeHidden();
+});

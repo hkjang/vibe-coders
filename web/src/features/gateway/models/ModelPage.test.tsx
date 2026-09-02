@@ -491,6 +491,119 @@ describe("ModelPage", () => {
     expect(screen.getByRole("table", { name: "Provider별 Model 상태, 품질과 가격" })).toBeVisible();
   });
 
+  it("distinguishes a provider partial failure from a genuinely missing deep-linked model", async () => {
+    const user = userEvent.setup();
+    const request = mockApi({
+      models: {
+        ...modelResponse,
+        partial_failures: [
+          {
+            code: "provider_models_unavailable",
+            message: "Provider model catalog is unavailable.",
+            provider: "anthropic",
+          },
+        ],
+        request_id: "req-provider-partial",
+      },
+    });
+    renderPage("/gateway/models?model=claude-4&model_provider=anthropic&source=live");
+
+    const dialog = await screen.findByRole("dialog", { name: "claude-4" });
+    expect(await within(dialog).findByText("Provider Model 카탈로그를 확인할 수 없습니다.")).toBeVisible();
+    expect(within(dialog).getByText(/provider_models_unavailable/)).toBeVisible();
+    expect(within(dialog).getByText("Request ID: req-provider-partial")).toBeVisible();
+    expect(within(dialog).queryByText("Model을 찾을 수 없습니다.")).not.toBeInTheDocument();
+
+    await user.click(within(dialog).getByRole("button", { name: "Model 카탈로그 상세 재시도" }));
+    await waitFor(() => expect(request).toHaveBeenCalledTimes(5));
+  });
+
+  it("shows the related partial failure alongside a stale model row", async () => {
+    mockApi({
+      models: {
+        ...modelResponse,
+        partial_failures: [
+          {
+            code: "provider_models_stale",
+            message: "Provider refresh failed.",
+            provider: "anthropic",
+          },
+        ],
+        request_id: "req-provider-stale",
+      },
+    });
+    renderPage("/gateway/models?model=shared-model&model_provider=anthropic&source=live&provider=anthropic");
+
+    const dialog = await screen.findByRole("dialog", { name: "shared-model" });
+    expect(
+      await within(dialog).findByText("Provider 갱신에 실패해 마지막 정상 Model을 표시합니다."),
+    ).toBeVisible();
+    expect(within(dialog).getByText(/provider_models_stale/)).toBeVisible();
+    expect(within(dialog).getByText("Request ID: req-provider-stale")).toBeVisible();
+  });
+
+  it("disables a model detail retry while the catalogue refresh is running", async () => {
+    const user = userEvent.setup();
+    let modelCalls = 0;
+    let resolveRetry: ((value: AdminModelsResponse) => void) | undefined;
+    const retryResult = new Promise<AdminModelsResponse>((resolve) => {
+      resolveRetry = resolve;
+    });
+    vi.spyOn(apiClient, "request").mockImplementation(async (endpoint) => {
+      if (endpoint.path === endpoints.admin.models.list.path) {
+        modelCalls += 1;
+        return (
+          modelCalls === 1
+            ? {
+                ...modelResponse,
+                partial_failures: [
+                  {
+                    code: "provider_models_unavailable",
+                    message: "Provider model catalog is unavailable.",
+                    provider: "missing-provider",
+                  },
+                ],
+                request_id: "req-retry-disabled",
+              }
+            : await retryResult
+        ) as never;
+      }
+      if (endpoint.path === endpoints.admin.models.quality.path) return qualityResponse as never;
+      if (endpoint.path === endpoints.admin.models.pricing.path) return pricingResponse as never;
+      if (endpoint.path === endpoints.admin.models.tags.path) return tagsResponse as never;
+      throw new Error(`Unexpected endpoint: ${endpoint.path}`);
+    });
+    renderPage("/gateway/models?model=missing&model_provider=missing-provider&source=live");
+
+    const dialog = await screen.findByRole("dialog", { name: "missing" });
+    const retry = await within(dialog).findByRole("button", { name: "Model 카탈로그 상세 재시도" });
+    await user.click(retry);
+    await waitFor(() => expect(retry).toBeDisabled());
+    expect(within(dialog).getByText("갱신 중")).toBeVisible();
+
+    resolveRetry?.(modelResponse);
+    await waitFor(() => expect(within(dialog).queryByText("갱신 중")).not.toBeInTheDocument());
+  });
+
+  it("removes credential searches from deep links and rejects submitted secrets", async () => {
+    const user = userEvent.setup();
+    mockApi();
+    renderPage("/gateway/models?q=eyJheader.eyJpayload.signature&provider=openai");
+
+    const input = screen.getByRole("textbox", { name: "Model 검색" });
+    await waitFor(() => expect(screen.getByTestId("location")).toHaveTextContent("?provider=openai"));
+    expect(screen.getByTestId("location")).not.toHaveTextContent("eyJpayload");
+    expect(screen.getByRole("alert")).toHaveTextContent("인증정보로 보이는 검색어");
+    expect(input).toHaveFocus();
+
+    await user.clear(input);
+    await user.type(input, "api_key=private");
+    await user.click(screen.getByRole("button", { name: "검색" }));
+    expect(input).toHaveFocus();
+    expect(input).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByTestId("location")).not.toHaveTextContent("private");
+  });
+
   it("shows last-known-good rows after catalogue refresh failure", async () => {
     const user = userEvent.setup();
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });

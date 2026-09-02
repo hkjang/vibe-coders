@@ -55,7 +55,9 @@ describe("provider catalog", () => {
     );
 
     expect(rows.map(({ health }) => health)).toEqual(["checking", "unknown"]);
-    expect(filterProviderRows(rows, "", "healthy").map((row) => row.provider.name)).toEqual(["enabled"]);
+    expect(filterProviderRows(rows, "", "healthy")).toEqual([]);
+    expect(filterProviderRows(rows, "", "degraded")).toEqual([]);
+    expect(filterProviderRows(rows, "", "unknown").map((row) => row.provider.name)).toEqual(["disabled"]);
   });
 
   it("filters normalized text and configuration or health states", () => {
