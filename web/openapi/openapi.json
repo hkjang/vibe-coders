@@ -6,6 +6,7 @@
         "properties": {
           "created": {
             "format": "int64",
+            "minimum": 0,
             "nullable": true,
             "type": "integer"
           },
@@ -1681,9 +1682,27 @@
             "type": "boolean"
           },
           "metrics": {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/ProviderSLOMetric"
+            "additionalProperties": false,
+            "properties": {
+              "availability": {
+                "$ref": "#/components/schemas/ProviderSLOMetric"
+              },
+              "error_rate": {
+                "$ref": "#/components/schemas/ProviderSLOMetric"
+              },
+              "fallback_rate": {
+                "$ref": "#/components/schemas/ProviderSLOMetric"
+              },
+              "p95_latency_ms": {
+                "$ref": "#/components/schemas/ProviderSLOMetric"
+              }
             },
+            "required": [
+              "availability",
+              "p95_latency_ms",
+              "error_rate",
+              "fallback_rate"
+            ],
             "type": "object"
           },
           "provider": {

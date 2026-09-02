@@ -432,7 +432,10 @@ export type ProviderSloEvaluation = {
     breached: boolean;
     enabled: boolean;
     metrics: {
-        [key: string]: ProviderSloMetric;
+        availability: ProviderSloMetric;
+        error_rate: ProviderSloMetric;
+        fallback_rate: ProviderSloMetric;
+        p95_latency_ms: ProviderSloMetric;
     };
     provider: string;
     requests: number;
