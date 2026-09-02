@@ -370,6 +370,52 @@ func TestAdminModelsKeepsPhysicalRowsWhenAgentRouteCatalogFails(t *testing.T) {
 	}
 }
 
+func TestAdminModelsUsesBoundedAgentRouteProjection(t *testing.T) {
+	_, db, gateway := newAdminModelsTestServer(t, "")
+	largePrompt := "private-system-prompt:" + strings.Repeat("x", 2<<20)
+	for _, route := range []store.AgentRoute{
+		{
+			ID: "agent-bounded", VirtualModel: "vibe/bounded-agent", Name: "Bounded", Enabled: true,
+			SystemPrompt: largePrompt, MCPUpstreams: []string{"private-upstream"}, AllowedTools: []string{"private-tool"},
+		},
+		{
+			ID: "agent-disabled-large", VirtualModel: "vibe/disabled-agent", Name: "Disabled", Enabled: false,
+			SystemPrompt: largePrompt, AllowedTools: []string{strings.Repeat("private-tool", 10_000)},
+		},
+		{
+			ID: "agent-oversized-model", VirtualModel: strings.Repeat("v", 513), Name: "Oversized", Enabled: true,
+			SystemPrompt: largePrompt,
+		},
+	} {
+		if err := db.UpsertAgentRoute(t.Context(), route); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	response, body := getAdminModels(t, gateway.URL+"/admin/models?provider=vibe", "")
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d body=%+v", response.StatusCode, body)
+	}
+	if len(body.Models) != 1 || body.Models[0].ID != "vibe/bounded-agent" || !body.Models[0].Virtual {
+		t.Fatalf("bounded agent route models = %+v", body.Models)
+	}
+	if len(body.Providers) != 1 || body.Providers[0].Provider != "vibe" || body.Providers[0].ModelCount != 1 {
+		t.Fatalf("bounded agent route provider = %+v", body.Providers)
+	}
+	if len(body.PartialFailures) != 1 || body.PartialFailures[0].Code != "models_response_limit_exceeded" {
+		t.Fatalf("agent route projection truncation was not reported: %+v", body.PartialFailures)
+	}
+	encoded, err := json.Marshal(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{"private-system-prompt", "private-upstream", "private-tool", "vibe/disabled-agent", strings.Repeat("v", 513)} {
+		if strings.Contains(string(encoded), forbidden) {
+			t.Fatalf("agent route catalogue materialized private/disabled/oversized data %q: %s", forbidden, encoded)
+		}
+	}
+}
+
 func TestAdminModelShadowFieldsAreAlwaysEncoded(t *testing.T) {
 	encoded, err := json.Marshal(adminModel{})
 	if err != nil {

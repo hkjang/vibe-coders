@@ -180,11 +180,14 @@ func (s *Server) handleAdminModels(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	var agentRoutes []store.AgentRoute
+	var agentRoutes []store.AgentRouteModel
 	var agentRoutesErr error
+	var agentRoutesProjectionTruncated bool
 	var agentRoutesFetchedAt string
 	if needsAgentRoutes {
-		agentRoutes, agentRoutesErr = s.db.ListAgentRoutes(r.Context())
+		var truncated, overflow bool
+		agentRoutes, truncated, overflow, agentRoutesErr = s.db.ListEnabledAgentRouteModelsBounded(r.Context(), maxAdminModelsResponseRows)
+		agentRoutesProjectionTruncated = truncated || overflow
 		if agentRoutesErr != nil {
 			response.PartialFailures = append(response.PartialFailures, adminModelPartialFailure{
 				Provider: "vibe", ProviderRef: systemProviderRef("vibe"), Code: "agent_routes_unavailable", Message: "Virtual model catalog is unavailable.",
@@ -200,6 +203,7 @@ func (s *Server) handleAdminModels(w http.ResponseWriter, r *http.Request) {
 	response.GeneratedAt = now.Format(time.RFC3339Nano)
 	seenModels := make(map[string]struct{})
 	limiter := newAdminModelsResponseLimiter(providerRef)
+	limiter.limited = agentRoutesProjectionTruncated
 	for _, result := range results {
 		provider := adminModelProvider{
 			Provider: result.config.Name,
@@ -241,7 +245,7 @@ func (s *Server) handleAdminModels(w http.ResponseWriter, r *http.Request) {
 				Provider: "vibe", ProviderRef: systemProviderRef("vibe"), Status: "failed", Source: adminModelSourceAgentRoute, Stale: false,
 			})
 		} else {
-			s.appendAdminAgentRouteModels(r.Context(), agentRoutes, agentRoutesFetchedAt, modelFilter, now, seenModels, &response, systemProviderRef("vibe"), &limiter)
+			s.appendAdminAgentRouteModels(r.Context(), agentRoutes, agentRoutesProjectionTruncated, agentRoutesFetchedAt, modelFilter, now, seenModels, &response, systemProviderRef("vibe"), &limiter)
 		}
 	}
 	if limiter.limited {
@@ -550,27 +554,24 @@ func (s *Server) adminModelDeprecation(ctx context.Context, model string, now ti
 	}
 }
 
-func enabledAdminAgentRouteShadows(routes []store.AgentRoute) map[string]string {
+func enabledAdminAgentRouteShadows(routes []store.AgentRouteModel) map[string]string {
 	shadows := make(map[string]string, len(routes))
 	for _, route := range routes {
 		// Runtime dispatch uses an exact lookup by the persisted virtual model. Do not
 		// normalize here or the catalog could report a collision that runtime would not.
-		if route.Enabled && route.VirtualModel != "" {
+		if route.VirtualModel != "" {
 			shadows[route.VirtualModel] = route.ID
 		}
 	}
 	return shadows
 }
 
-func (s *Server) appendAdminAgentRouteModels(ctx context.Context, routes []store.AgentRoute, fetchedAt, modelFilter string, now time.Time, seen map[string]struct{}, response *adminModelsResponse, providerRef string, limiter *adminModelsResponseLimiter) {
+func (s *Server) appendAdminAgentRouteModels(ctx context.Context, routes []store.AgentRouteModel, projectionTruncated bool, fetchedAt, modelFilter string, now time.Time, seen map[string]struct{}, response *adminModelsResponse, providerRef string, limiter *adminModelsResponseLimiter) {
 	provider := adminModelProvider{
 		Provider: "vibe", ProviderRef: providerRef, Status: "ok", Source: adminModelSourceAgentRoute, FetchedAt: &fetchedAt, Stale: false,
 	}
-	hasEnabledRoute := false
+	hasEnabledRoute := projectionTruncated
 	for _, route := range routes {
-		if !route.Enabled {
-			continue
-		}
 		hasEnabledRoute = true
 		id := strings.TrimSpace(route.VirtualModel)
 		if id == "" || (modelFilter != "" && id != modelFilter) {

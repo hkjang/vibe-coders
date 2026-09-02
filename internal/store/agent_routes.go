@@ -30,9 +30,9 @@ type AgentRoute struct {
 	UpdatedAt    string   `json:"updated_at"`
 }
 
-// AgentRouteModel is the non-sensitive projection used by the anonymous public
-// model catalogue. AgentRoute contains prompts, tool allowlists, and ownership
-// metadata that must not be materialized merely to advertise a virtual model.
+// AgentRouteModel is the non-sensitive projection used by public and admin model
+// catalogues. AgentRoute contains prompts, tool allowlists, and ownership metadata
+// that must not be materialized merely to advertise a virtual model.
 type AgentRouteModel struct {
 	ID           string
 	VirtualModel string
@@ -88,8 +88,8 @@ func (s *SQLStore) ListAgentRoutes(ctx context.Context) ([]AgentRoute, error) {
 	return out, rows.Err()
 }
 
-// ListEnabledAgentRouteModelsBounded returns only the two fields required by the
-// anonymous /v1/models response. LIMIT cap+1 detects truncation, while SUBSTR
+// ListEnabledAgentRouteModelsBounded returns only the two fields required by model
+// catalogue responses. LIMIT cap+1 detects truncation, while SUBSTR
 // prevents a legacy oversized field from being scanned into application memory.
 // The second boolean distinguishes row overflow from invalid projected fields so
 // callers can conservatively handle route shadows that were not inspected.
