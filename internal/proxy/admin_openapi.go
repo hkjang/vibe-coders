@@ -626,6 +626,13 @@ func enrichOpenAPIOperation(route, method string, op map[string]any) {
 		responses["200"] = successResponse("NavigationResponse")
 	case "get /admin/ui-bootstrap":
 		responses["200"] = successResponse("UIBootstrapResponse")
+	case "get /v1/models":
+		op["parameters"] = []any{map[string]any{
+			"name": "provider", "in": "query", "required": false,
+			"description": "Exact configured provider name. When set, the gateway uses the pinned-provider model catalogue instead of aggregating all providers.",
+			"schema":      map[string]any{"type": "string"},
+		}}
+		responses["200"] = map[string]any{"description": "OK"}
 	case "get /admin/providers":
 		responses["200"] = successResponse("ProviderListResponse")
 	case "get /admin/models":
@@ -690,6 +697,9 @@ func enrichOpenAPIOperation(route, method string, op map[string]any) {
 			map[string]any{"name": "limit", "in": "query", "required": false, "schema": map[string]any{"type": "integer", "minimum": 1, "maximum": 200, "default": 50}},
 		}
 		responses["200"] = successResponse("PricingResponse")
+	case "post /admin/pricing":
+		op["requestBody"] = requestBody("PricingWriteRequest")
+		responses["201"] = map[string]any{"description": "Created", "content": jsonContent(schemaRef("PricingWriteResponse"))}
 	case "get /admin/model-tags", "get /v1/model-tags":
 		responses["200"] = successResponse("ModelUsageTagsResponse")
 	default:
@@ -839,7 +849,7 @@ func modelCatalogOpenAPISchemas() map[string]any {
 				"error_rate_target":     map[string]any{"type": "number"},
 				"fallback_rate_target":  map[string]any{"type": "number"},
 				"enabled":               map[string]any{"type": "boolean"}, "note": map[string]any{"type": "string"},
-				"updated_at": map[string]any{"type": "string"},
+				"updated_at": map[string]any{"type": "string", "format": "date-time"},
 			},
 		},
 		"ProviderSLOMetric": map[string]any{
@@ -943,6 +953,22 @@ func modelCatalogOpenAPISchemas() map[string]any {
 				"effective": map[string]any{"type": "object", "additionalProperties": schemaRef("ModelPrice")},
 				"versions":  map[string]any{"type": "array", "items": schemaRef("ModelPricingVersion")},
 			},
+		},
+		"PricingWriteRequest": map[string]any{
+			"type": "object", "additionalProperties": false,
+			"required": []string{"model", "input_krw_per_1m", "output_krw_per_1m"},
+			"properties": map[string]any{
+				"model":                   map[string]any{"type": "string", "minLength": 1},
+				"input_krw_per_1m":        map[string]any{"type": "number"},
+				"output_krw_per_1m":       map[string]any{"type": "number"},
+				"cached_input_krw_per_1m": map[string]any{"type": "number"},
+				"source":                  map[string]any{"type": "string"},
+				"note":                    map[string]any{"type": "string"},
+			},
+		},
+		"PricingWriteResponse": map[string]any{
+			"type": "object", "additionalProperties": false, "required": []string{"version"},
+			"properties": map[string]any{"version": schemaRef("ModelPricingVersion")},
 		},
 		"ModelUsageTag": map[string]any{
 			"type": "object", "additionalProperties": false,

@@ -75,7 +75,7 @@ func (s *Server) handleProviderSLOs(w http.ResponseWriter, r *http.Request) {
 			Provider: p.Provider, AvailabilityTarget: p.AvailabilityTarget, P95LatencyTargetMS: p.P95LatencyTargetMS,
 			ErrorRateTarget: p.ErrorRateTarget, FallbackRateTarget: p.FallbackRateTarget, Enabled: enabled, Note: strings.TrimSpace(p.Note),
 		}
-		if err := s.db.UpsertProviderSLO(r.Context(), slo); err != nil {
+		if err := s.db.UpsertProviderSLO(r.Context(), &slo); err != nil {
 			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "provider_slo_save_failed")
 			return
 		}

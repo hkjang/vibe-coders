@@ -1,10 +1,54 @@
 package proxy
 
 import (
+	"encoding/json"
+	"io"
+	"net/http"
 	"testing"
+	"time"
 
 	"vibe-coders/internal/store"
 )
+
+func TestProviderSLOWriteReturnsPersistedTimestamp(t *testing.T) {
+	_, _, gateway := newAdminModelsTestServer(t, "")
+	createdResponse := postJSON(t, gateway.URL+"/admin/providers/slo", "", map[string]any{
+		"provider": "openai", "availability_target": 0.99, "enabled": true,
+	})
+	defer createdResponse.Body.Close()
+	if createdResponse.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(createdResponse.Body)
+		t.Fatalf("create provider SLO status = %d body=%s", createdResponse.StatusCode, body)
+	}
+	var created struct {
+		SLO store.ProviderSLO `json:"slo"`
+	}
+	if err := json.NewDecoder(createdResponse.Body).Decode(&created); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := time.Parse(time.RFC3339Nano, created.SLO.UpdatedAt); err != nil {
+		t.Fatalf("created updated_at = %q: %v", created.SLO.UpdatedAt, err)
+	}
+
+	listedResponse, err := http.Get(gateway.URL + "/admin/providers/slo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listedResponse.Body.Close()
+	if listedResponse.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(listedResponse.Body)
+		t.Fatalf("list provider SLOs status = %d body=%s", listedResponse.StatusCode, body)
+	}
+	var listed struct {
+		SLOs []store.ProviderSLO `json:"slos"`
+	}
+	if err := json.NewDecoder(listedResponse.Body).Decode(&listed); err != nil {
+		t.Fatal(err)
+	}
+	if len(listed.SLOs) != 1 || listed.SLOs[0].UpdatedAt != created.SLO.UpdatedAt {
+		t.Fatalf("listed SLOs = %+v, want created updated_at %q", listed.SLOs, created.SLO.UpdatedAt)
+	}
+}
 
 func TestEvaluateProviderSLOs(t *testing.T) {
 	slos := []store.ProviderSLO{

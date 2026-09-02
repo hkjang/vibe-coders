@@ -31,7 +31,7 @@ func (s *Server) handleAdminModelTags(w http.ResponseWriter, r *http.Request) {
 		}
 		p.Model = strings.TrimSpace(p.Model)
 		p.UpdatedBy = s.skillActor(r)
-		if err := s.db.UpsertModelUsageTag(r.Context(), p); err != nil {
+		if err := s.db.UpsertModelUsageTag(r.Context(), &p); err != nil {
 			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "save_failed")
 			return
 		}
@@ -69,6 +69,10 @@ func (s *Server) handleAdminModelTagByID(w http.ResponseWriter, r *http.Request)
 func (s *Server) handleModelTags(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.currentAccessClaims(r); !ok && !s.authorizeAdmin(r) {
 		writeOpenAIError(w, http.StatusUnauthorized, "could not identify caller", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	if r.Method != http.MethodGet {
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
 		return
 	}
 	tags, err := s.db.ListModelUsageTags(r.Context())

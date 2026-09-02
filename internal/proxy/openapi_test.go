@@ -134,7 +134,7 @@ func assertOpenAPIContract(t *testing.T, spec map[string]any) {
 		"RoutingHealthResponse", "RoutingBreakerSummary", "ProviderPublic", "ProviderListResponse",
 		"AdminModel", "AdminModelDeprecation", "AdminModelProvider", "AdminModelPartialFailure", "AdminModelsResponse",
 		"ProviderSLO", "ProviderSLOResponse", "ProviderSLOWriteRequest", "ProviderSLOWriteResponse", "ProviderSLODeleteResponse",
-		"ModelQualityScore", "ModelQualityResponse", "ModelPrice", "ModelPricingVersion", "PricingResponse",
+		"ModelQualityScore", "ModelQualityResponse", "ModelPrice", "ModelPricingVersion", "PricingResponse", "PricingWriteRequest", "PricingWriteResponse",
 		"ModelUsageTag", "ModelUsageTagsResponse",
 	} {
 		if _, ok := schemas[required]; !ok {
@@ -182,26 +182,32 @@ func assertOpenAPIContract(t *testing.T, spec map[string]any) {
 	assertJSONOperationSchema(t, paths, "/admin/routing/health", "get", "200", "RoutingHealthResponse")
 	assertOpenAPIParameter(t, paths, "/admin/routing/health", "get", "query", "window")
 	assertOpenAPIParameter(t, paths, "/admin/routing/health", "get", "query", "threshold")
+	assertOpenAPIParameterSchema(t, paths, "/v1/models", "get", "query", "provider", "string", false)
 	assertJSONOperationSchema(t, paths, "/admin/providers", "get", "200", "ProviderListResponse")
 	assertJSONOperationSchema(t, paths, "/admin/models", "get", "200", "AdminModelsResponse")
-	assertOpenAPIParameter(t, paths, "/admin/models", "get", "query", "provider")
-	assertOpenAPIParameter(t, paths, "/admin/models", "get", "query", "model")
+	assertOpenAPIParameterSchema(t, paths, "/admin/models", "get", "query", "provider", "string", false)
+	assertOpenAPIParameterSchema(t, paths, "/admin/models", "get", "query", "model", "string", false)
 	assertJSONOperationSchema(t, paths, "/admin/providers/slo", "get", "200", "ProviderSLOResponse")
-	assertOpenAPIParameter(t, paths, "/admin/providers/slo", "get", "query", "window")
+	assertOpenAPIParameterSchema(t, paths, "/admin/providers/slo", "get", "query", "window", "string", false)
 	assertJSONRequestSchema(t, paths, "/admin/providers/slo", "post", "ProviderSLOWriteRequest")
 	assertJSONOperationSchema(t, paths, "/admin/providers/slo", "post", "201", "ProviderSLOWriteResponse")
-	assertOpenAPIParameter(t, paths, "/admin/providers/slo", "delete", "query", "provider")
+	assertOpenAPIParameterSchema(t, paths, "/admin/providers/slo", "delete", "query", "provider", "string", true)
 	assertJSONOperationSchema(t, paths, "/admin/providers/slo", "delete", "200", "ProviderSLODeleteResponse")
 	assertJSONOperationSchema(t, paths, "/admin/models/quality", "get", "200", "ModelQualityResponse")
-	assertOpenAPIParameter(t, paths, "/admin/models/quality", "get", "query", "window")
+	assertOpenAPIParameterSchema(t, paths, "/admin/models/quality", "get", "query", "window", "string", false)
 	assertJSONOperationSchema(t, paths, "/admin/pricing", "get", "200", "PricingResponse")
-	assertOpenAPIParameter(t, paths, "/admin/pricing", "get", "query", "model")
-	assertOpenAPIParameter(t, paths, "/admin/pricing", "get", "query", "limit")
+	assertOpenAPIParameterSchema(t, paths, "/admin/pricing", "get", "query", "model", "string", false)
+	assertOpenAPIParameterSchema(t, paths, "/admin/pricing", "get", "query", "limit", "integer", false)
+	assertJSONRequestSchema(t, paths, "/admin/pricing", "post", "PricingWriteRequest")
+	assertJSONOperationSchema(t, paths, "/admin/pricing", "post", "201", "PricingWriteResponse")
 	assertJSONOperationSchema(t, paths, "/admin/model-tags", "get", "200", "ModelUsageTagsResponse")
 	assertJSONOperationSchema(t, paths, "/v1/model-tags", "get", "200", "ModelUsageTagsResponse")
 	assertOpenAPIMethods(t, paths, "/admin/providers/{name}", "delete")
 	assertOpenAPIMethods(t, paths, "/admin/providers/slo", "delete", "get", "post")
 	assertOpenAPIPublic(t, paths, "/v1/models", "get")
+	assertOpenAPIPropertyFormat(t, schemas, "ProviderSLO", "updated_at", "date-time")
+	assertOpenAPIPropertyFormat(t, schemas, "ModelPricingVersion", "created_at", "date-time")
+	assertOpenAPIPropertyFormat(t, schemas, "ModelUsageTag", "updated_at", "date-time")
 	assertJSONOperationSchema(t, paths, "/auth/sso/exchange", "post", "200", "AuthTokenResponse")
 	assertJSONRequestSchema(t, paths, "/auth/sso/exchange", "post", "SSOExchangeRequest")
 	assertJSONOperationSchema(t, paths, "/auth/keycloak/logout", "post", "200", "KeycloakLogoutResponse")
@@ -257,6 +263,38 @@ func assertOpenAPIParameter(t *testing.T, paths map[string]any, route, method, l
 		}
 	}
 	t.Errorf("%s %s missing %s parameter %q", method, route, location, name)
+}
+
+func assertOpenAPIParameterSchema(t *testing.T, paths map[string]any, route, method, location, name, schemaType string, required bool) {
+	t.Helper()
+	pathItem, _ := paths[route].(map[string]any)
+	op, _ := pathItem[method].(map[string]any)
+	parameters, _ := op["parameters"].([]any)
+	for _, raw := range parameters {
+		parameter, _ := raw.(map[string]any)
+		if parameter["in"] != location || parameter["name"] != name {
+			continue
+		}
+		if parameter["required"] != required {
+			t.Errorf("%s %s %s parameter %q required = %v, want %v", method, route, location, name, parameter["required"], required)
+		}
+		schema, _ := parameter["schema"].(map[string]any)
+		if schema["type"] != schemaType {
+			t.Errorf("%s %s %s parameter %q type = %v, want %s", method, route, location, name, schema["type"], schemaType)
+		}
+		return
+	}
+	t.Errorf("%s %s missing %s parameter %q", method, route, location, name)
+}
+
+func assertOpenAPIPropertyFormat(t *testing.T, schemas map[string]any, schemaName, propertyName, format string) {
+	t.Helper()
+	schema, _ := schemas[schemaName].(map[string]any)
+	properties, _ := schema["properties"].(map[string]any)
+	property, _ := properties[propertyName].(map[string]any)
+	if property["format"] != format {
+		t.Errorf("%s.%s format = %v, want %s", schemaName, propertyName, property["format"], format)
+	}
 }
 
 func assertJSONOperationSchema(t *testing.T, paths map[string]any, route, method, status, schema string) {

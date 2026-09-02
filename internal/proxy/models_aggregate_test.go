@@ -13,6 +13,17 @@ import (
 	"vibe-coders/internal/store"
 )
 
+func TestClientPinnedProviderRecognizesDocumentedQuery(t *testing.T) {
+	unpinned := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	if clientPinnedProvider(unpinned) {
+		t.Fatal("request without a provider selector must remain aggregated")
+	}
+	pinned := httptest.NewRequest(http.MethodGet, "/v1/models?provider=anthropic", nil)
+	if !clientPinnedProvider(pinned) {
+		t.Fatal("documented provider query must select the pinned-provider path")
+	}
+}
+
 // TestAggregatedModelsMergesAllProviders verifies that an unpinned GET /v1/models returns the
 // union of every enabled provider's catalogue (tagged with its source), instead of only the
 // default provider's list.

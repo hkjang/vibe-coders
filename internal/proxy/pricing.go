@@ -149,7 +149,7 @@ func (s *Server) handlePricing(w http.ResponseWriter, r *http.Request) {
 			ID: newID("price"), Model: p.Model, InputKRWPer1M: *p.InputKRWPer1M, OutputKRWPer1M: *p.OutputKRWPer1M,
 			CachedInputKRWPer1M: p.CachedInputKRWPer1M, Source: firstNonEmpty(strings.TrimSpace(p.Source), "manual"), Note: strings.TrimSpace(p.Note),
 		}
-		if err := s.db.InsertPricingVersion(r.Context(), v); err != nil {
+		if err := s.db.InsertPricingVersion(r.Context(), &v); err != nil {
 			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "pricing_save_failed")
 			return
 		}
@@ -188,7 +188,7 @@ func (s *Server) handlePricingSeed(w http.ResponseWriter, r *http.Request) {
 			CachedInputKRWPer1M: round2(e.cachedUSD * rate), Source: e.source,
 			Note: "seeded from research catalog (USD×" + formatKRW(rate) + ")",
 		}
-		if err := s.db.InsertPricingVersion(r.Context(), v); err == nil {
+		if err := s.db.InsertPricingVersion(r.Context(), &v); err == nil {
 			added++
 		}
 	}
@@ -217,7 +217,7 @@ func (s *Server) seedPricingIfEmpty(ctx context.Context) {
 			CachedInputKRWPer1M: round2(e.cachedUSD * rate), Source: e.source,
 			Note: "auto-seeded at startup from research catalog (USD×" + formatKRW(rate) + ")",
 		}
-		if err := s.db.InsertPricingVersion(ctx, v); err == nil {
+		if err := s.db.InsertPricingVersion(ctx, &v); err == nil {
 			seeded++
 		}
 	}

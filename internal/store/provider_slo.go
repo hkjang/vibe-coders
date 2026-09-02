@@ -44,7 +44,8 @@ func (s *SQLStore) ListProviderSLOs(ctx context.Context) ([]ProviderSLO, error) 
 	return out, rows.Err()
 }
 
-func (s *SQLStore) UpsertProviderSLO(ctx context.Context, slo ProviderSLO) error {
+func (s *SQLStore) UpsertProviderSLO(ctx context.Context, slo *ProviderSLO) error {
+	slo.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	enabled := 0
 	if slo.Enabled {
 		enabled = 1
@@ -57,7 +58,7 @@ func (s *SQLStore) UpsertProviderSLO(ctx context.Context, slo ProviderSLO) error
 			fallback_rate_target = excluded.fallback_rate_target, enabled = excluded.enabled, note = excluded.note,
 			updated_at = excluded.updated_at`),
 		slo.Provider, slo.AvailabilityTarget, slo.P95LatencyTargetMS, slo.ErrorRateTarget, slo.FallbackRateTarget,
-		enabled, slo.Note, time.Now().UTC().Format(time.RFC3339Nano))
+		enabled, slo.Note, slo.UpdatedAt)
 	return err
 }
 

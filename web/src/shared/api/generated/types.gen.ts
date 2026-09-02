@@ -345,6 +345,19 @@ export type PricingResponse = {
     versions: Array<ModelPricingVersion>;
 };
 
+export type PricingWriteRequest = {
+    cached_input_krw_per_1m?: number;
+    input_krw_per_1m: number;
+    model: string;
+    note?: string;
+    output_krw_per_1m: number;
+    source?: string;
+};
+
+export type PricingWriteResponse = {
+    version: ModelPricingVersion;
+};
+
 export type ProviderHealthAlert = {
     code: string;
     message: string;
@@ -3991,18 +4004,29 @@ export type GetAdminPricingResponses = {
 export type GetAdminPricingResponse = GetAdminPricingResponses[keyof GetAdminPricingResponses];
 
 export type PostAdminPricingData = {
-    body?: never;
+    body: PricingWriteRequest;
     path?: never;
     query?: never;
     url: '/admin/pricing';
 };
 
+export type PostAdminPricingErrors = {
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostAdminPricingError = PostAdminPricingErrors[keyof PostAdminPricingErrors];
+
 export type PostAdminPricingResponses = {
     /**
-     * OK
+     * Created
      */
-    200: unknown;
+    201: PricingWriteResponse;
 };
+
+export type PostAdminPricingResponse = PostAdminPricingResponses[keyof PostAdminPricingResponses];
 
 export type PostAdminPricingSeedData = {
     body?: never;
@@ -8585,9 +8609,23 @@ export type GetV1ModelTagsResponse = GetV1ModelTagsResponses[keyof GetV1ModelTag
 export type GetV1ModelsData = {
     body?: never;
     path?: never;
-    query?: never;
+    query?: {
+        /**
+         * Exact configured provider name. When set, the gateway uses the pinned-provider model catalogue instead of aggregating all providers.
+         */
+        provider?: string;
+    };
     url: '/v1/models';
 };
+
+export type GetV1ModelsErrors = {
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetV1ModelsError = GetV1ModelsErrors[keyof GetV1ModelsErrors];
 
 export type GetV1ModelsResponses = {
     /**

@@ -1341,6 +1341,48 @@
         ],
         "type": "object"
       },
+      "PricingWriteRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "cached_input_krw_per_1m": {
+            "type": "number"
+          },
+          "input_krw_per_1m": {
+            "type": "number"
+          },
+          "model": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          },
+          "output_krw_per_1m": {
+            "type": "number"
+          },
+          "source": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "model",
+          "input_krw_per_1m",
+          "output_krw_per_1m"
+        ],
+        "type": "object"
+      },
+      "PricingWriteResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "version": {
+            "$ref": "#/components/schemas/ModelPricingVersion"
+          }
+        },
+        "required": [
+          "version"
+        ],
+        "type": "object"
+      },
       "ProviderHealthAlert": {
         "additionalProperties": false,
         "properties": {
@@ -1583,6 +1625,7 @@
             "type": "string"
           },
           "updated_at": {
+            "format": "date-time",
             "type": "string"
           }
         },
@@ -7179,9 +7222,36 @@
       },
       "post": {
         "operationId": "post__admin_pricing",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PricingWriteRequest"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
-          "200": {
-            "description": "OK"
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PricingWriteResponse"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -13801,9 +13871,30 @@
     "/v1/models": {
       "get": {
         "operationId": "get__v1_models",
+        "parameters": [
+          {
+            "description": "Exact configured provider name. When set, the gateway uses the pinned-provider model catalogue instead of aggregating all providers.",
+            "in": "query",
+            "name": "provider",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "summary": "List models",
