@@ -100,13 +100,14 @@ const bootstrap = {
     features: {
       overview: true,
       "gateway.health": true,
+      "gateway.models": true,
       "gateway.providers": true,
       "system.health": true,
     },
   },
   roles: ["super_admin"],
   permissions: ["admin:read", "routing:read"],
-  allowed_features: ["overview", "gateway.health", "gateway.providers", "system.health"],
+  allowed_features: ["overview", "gateway.health", "gateway.models", "gateway.providers", "system.health"],
   migration_registry: [
     {
       feature_id: "overview",
@@ -154,6 +155,21 @@ const bootstrap = {
       available: true,
     },
     {
+      feature_id: "gateway.models",
+      title: "Models",
+      app_path: "/app/gateway/models",
+      legacy_path: "/admin#/model-contracts",
+      status: "preview_read_only",
+      risk_level: "medium",
+      required_permission: "admin:read",
+      read_only: true,
+      enabled_roles: ["super_admin", "admin", "ai_admin"],
+      rollout_percent: 100,
+      fallback_enabled: true,
+      minimum_api_version: "v0.82.0",
+      available: true,
+    },
+    {
       feature_id: "system.health",
       title: "System Health",
       app_path: "/app/system/health",
@@ -173,6 +189,7 @@ const bootstrap = {
   legacy_route_map: {
     "/app/overview": "/admin#/dashboard",
     "/app/gateway/health": "/admin#/routing/health",
+    "/app/gateway/models": "/admin#/model-contracts",
     "/app/gateway/providers": "/admin#/settings",
     "/app/system/health": "/admin#/ops-home",
   },
@@ -402,6 +419,20 @@ async function mockGateway(page: Page, options: MockGatewayOptions = {}): Promis
         return json(providers);
       case "/admin/providers/slo":
         return json(providerSLO);
+      case "/admin/models":
+        return json({
+          request_id: "req-models-shell",
+          generated_at: "2026-09-02T04:00:00Z",
+          models: [],
+          providers: [],
+          partial_failures: [],
+        });
+      case "/admin/models/quality":
+        return json({ since: "2026-09-01T04:00:00Z", categories: [], models: [] });
+      case "/admin/pricing":
+        return json({ effective: {}, versions: [] });
+      case "/admin/model-tags":
+        return json({ tags: [] });
       default:
         break;
     }
@@ -584,7 +615,7 @@ test("replaces legacy short Gateway paths without dropping query or hash", async
   await page.goto("models?status=deprecated#pricing");
   await expect(page).toHaveURL(/\/app\/gateway\/models\?status=deprecated#pricing$/);
   await expect(page.getByRole("heading", { name: "Models", exact: true })).toBeVisible();
-  await expect(page.getByRole("link", { name: /Legacy에서 Models 열기/ })).toHaveAttribute(
+  await expect(page.getByRole("link", { name: /Legacy에서 열기/ })).toHaveAttribute(
     "href",
     "/admin#/model-contracts",
   );
