@@ -18,6 +18,10 @@ jobs:
   frontend:
     name: frontend · lint · typecheck · test · build
     runs-on: ubuntu-latest
+    # Keep Chromium, FreeType, fontconfig, and the Korean fallback fonts identical
+    # to the committed visual baselines. The digest also prevents image drift.
+    container:
+      image: mcr.microsoft.com/playwright:v1.62.1-noble@sha256:dcc5531e97840b9b5e794f2814476b21571c5124a3fca2267d73041f56e7580e
     defaults:
       run:
         working-directory: web
@@ -60,8 +64,6 @@ jobs:
         env:
           VITE_UI_VERSION: ci-${{ github.sha }}
         run: pnpm build
-      - name: Install Chromium for React E2E
-        run: pnpm exec playwright install --with-deps chromium
       - name: React deep-link, CSP, and visual E2E
         run: pnpm test:e2e
       - name: Upload React E2E diagnostics on failure
