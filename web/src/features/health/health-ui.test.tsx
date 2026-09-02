@@ -4,10 +4,11 @@ import { Activity } from "lucide-react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import { describe, expect, it, vi } from "vitest";
 
-import { formatBytes, isHealthRange } from "@/features/health/health-utils";
+import { exactTime, formatBytes, isHealthRange } from "@/features/health/health-utils";
 import { HealthWidget, TimeRangePicker, UpdatedTime } from "@/features/health/health-ui";
 import { useHealthRange } from "@/features/health/use-health-range";
 import { AppError } from "@/shared/api/error";
+import { usePreferences } from "@/shared/stores/preferences";
 
 function RangeHarness(): React.JSX.Element {
   const [range, setRange] = useHealthRange();
@@ -70,20 +71,26 @@ describe("health UI primitives", () => {
     expect(screen.getByText(/마지막 정상 갱신/)).toBeVisible();
   });
 
-  it("updates a relative timestamp while the page remains open", () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-09-02T09:00:00Z"));
-    const timestamp = Date.now();
-    const view = render(<UpdatedTime timestamp={timestamp} />);
-    const initialLabel = screen.getByText(/마지막 갱신/).textContent;
+  it("shows an exact timestamp while automatic refresh is paused", () => {
+    usePreferences.setState({ refreshInterval: 0 });
+    const timestamp = new Date("2026-09-02T09:00:00Z").getTime();
+
+    render(<UpdatedTime timestamp={timestamp} />);
+
+    expect(screen.getByText(/마지막 갱신/)).toHaveTextContent(exactTime(timestamp));
+  });
+
+  it("uses relative time only when the user enables automatic refresh", () => {
+    usePreferences.setState({ refreshInterval: 60 });
+    const timestamp = new Date("2026-09-02T09:00:00Z").getTime();
+    const now = vi.spyOn(Date, "now").mockReturnValue(timestamp + 120_000);
 
     try {
-      act(() => vi.advanceTimersByTime(120_000));
+      render(<UpdatedTime timestamp={timestamp} />);
       expect(screen.getByText(/마지막 갱신/)).toHaveTextContent("2분 전");
-      expect(screen.getByText(/마지막 갱신/).textContent).not.toBe(initialLabel);
     } finally {
-      view.unmount();
-      vi.useRealTimers();
+      now.mockRestore();
+      act(() => usePreferences.setState({ refreshInterval: 0 }));
     }
   });
 
