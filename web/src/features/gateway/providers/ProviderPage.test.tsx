@@ -3,7 +3,7 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import axe from "axe-core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { MemoryRouter, Route, Routes, useLocation } from "react-router";
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router";
 
 import { ProviderPage } from "@/features/gateway/providers/ProviderPage";
 import { apiClient } from "@/shared/api/client";
@@ -182,7 +182,15 @@ const routingHealth = {
 
 function LocationProbe(): React.JSX.Element {
   const location = useLocation();
-  return <output data-testid="location">{`${location.pathname}${location.search}`}</output>;
+  const navigate = useNavigate();
+  return (
+    <>
+      <output data-testid="location">{`${location.pathname}${location.search}`}</output>
+      <button type="button" onClick={() => void navigate("/gateway/providers?q=authToken%3Dprivate")}>
+        Unsafe search navigation
+      </button>
+    </>
+  );
 }
 
 function renderPage(
@@ -210,10 +218,11 @@ function renderPage(
 
 interface ApiScenario {
   providerError?: AppError;
+  routingError?: AppError;
   sloError?: AppError;
 }
 
-function mockApi({ providerError, sloError }: ApiScenario = {}) {
+function mockApi({ providerError, routingError, sloError }: ApiScenario = {}) {
   return vi.spyOn(apiClient, "request").mockImplementation(async (endpoint) => {
     if (endpoint.path === endpoints.admin.providers.list.path) {
       if (providerError) throw providerError;
@@ -223,7 +232,10 @@ function mockApi({ providerError, sloError }: ApiScenario = {}) {
       if (sloError) throw sloError;
       return sloResponse as never;
     }
-    if (endpoint.path === endpoints.admin.routing.health.path) return routingHealth as never;
+    if (endpoint.path === endpoints.admin.routing.health.path) {
+      if (routingError) throw routingError;
+      return routingHealth as never;
+    }
     throw new Error(`Unexpected endpoint: ${endpoint.path}`);
   });
 }
@@ -275,6 +287,64 @@ describe("ProviderPage", () => {
     );
   });
 
+  it("does not mix the previous range into a newly selected range while enrichment is pending", async () => {
+    authRuntime.scopes = ["admin:read", "routing:read"];
+    let resolveSevenDays: ((value: RoutingHealth) => void) | undefined;
+    const sevenDays = new Promise<RoutingHealth>((resolve) => {
+      resolveSevenDays = resolve;
+    });
+    vi.spyOn(apiClient, "request").mockImplementation(async (endpoint, options) => {
+      if (endpoint.path === endpoints.admin.providers.list.path) return providerList as never;
+      if (endpoint.path === endpoints.admin.providers.slo.path) return sloResponse as never;
+      if (endpoint.path === endpoints.admin.routing.health.path) {
+        const window = (options as { query?: { window?: string } }).query?.window;
+        if (window === "7d") return (await sevenDays) as never;
+        return routingHealth as never;
+      }
+      throw new Error(`Unexpected endpoint: ${endpoint.path}`);
+    });
+    const user = userEvent.setup();
+    renderPage("/gateway/providers?range=24h");
+
+    const table = screen.getByRole("table", { name: "Provider 연결 설정과 운영 상태" });
+    expect(await within(table).findByText("810 ms")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "7일" }));
+
+    expect(await within(table).findAllByText("Checking")).not.toHaveLength(0);
+    expect(within(table).queryByText("810 ms")).not.toBeInTheDocument();
+    expect(screen.getByText(/선택 기간의 Provider 운영 상태를 확인하는 중/)).toBeVisible();
+    const summary = screen.getByRole("region", { name: "Provider 요약" });
+    expect(within(summary).getAllByText("—")).toHaveLength(2);
+
+    resolveSevenDays?.(routingHealth);
+    expect(await within(table).findByText("810 ms")).toBeVisible();
+  });
+
+  it("shows unavailable summary values instead of real zeroes during initial loading", async () => {
+    let resolveProviders: ((value: ProviderList) => void) | undefined;
+    let resolveSLO: ((value: ProviderSLOResponse) => void) | undefined;
+    const providerResponse = new Promise<ProviderList>((resolve) => {
+      resolveProviders = resolve;
+    });
+    const sloResult = new Promise<ProviderSLOResponse>((resolve) => {
+      resolveSLO = resolve;
+    });
+    vi.spyOn(apiClient, "request").mockImplementation(async (endpoint) => {
+      if (endpoint.path === endpoints.admin.providers.list.path) return (await providerResponse) as never;
+      if (endpoint.path === endpoints.admin.providers.slo.path) return (await sloResult) as never;
+      throw new Error(`Unexpected endpoint: ${endpoint.path}`);
+    });
+    renderPage();
+
+    const summary = screen.getByRole("region", { name: "Provider 요약" });
+    expect(within(summary).getAllByText("—")).toHaveLength(4);
+    expect(within(summary).queryByText("0")).not.toBeInTheDocument();
+
+    resolveProviders?.(providerList);
+    resolveSLO?.(sloResponse);
+    expect(await screen.findByRole("link", { name: "openai" })).toBeVisible();
+  });
+
   it("keeps the provider list usable when SLO enrichment fails and exposes the exact request ID", async () => {
     const user = userEvent.setup();
     mockApi({
@@ -315,6 +385,88 @@ describe("ProviderPage", () => {
       await screen.findByText(/Provider 목록 갱신에 실패해 마지막 정상 데이터를 표시합니다/),
     ).toBeVisible();
     expect(screen.getByText("Request ID: req-provider-lkg")).toBeVisible();
+  });
+
+  it("shows source-specific SLO and routing failures inside a deep-linked dialog", async () => {
+    authRuntime.scopes = ["admin:read", "routing:read"];
+    mockApi({
+      sloError: new AppError("SLO unavailable", {
+        kind: "http",
+        requestId: "req-dialog-slo",
+        status: 503,
+      }),
+      routingError: new AppError("Routing unavailable", {
+        kind: "http",
+        requestId: "req-dialog-routing",
+        status: 503,
+      }),
+    });
+    renderPage("/gateway/providers?provider=openai");
+
+    const dialog = await screen.findByRole("dialog", { name: "openai" });
+    expect(await within(dialog).findByText(/Provider SLO 조회에 실패했습니다/)).toBeVisible();
+    expect(within(dialog).getByText("Request ID: req-dialog-slo")).toBeVisible();
+    expect(within(dialog).getByRole("button", { name: "Provider SLO 재시도" })).toBeVisible();
+    expect(within(dialog).getByText(/Provider 라우팅 상태 조회에 실패했습니다/)).toBeVisible();
+    expect(within(dialog).getByText("Request ID: req-dialog-routing")).toBeVisible();
+    expect(within(dialog).getByRole("button", { name: "Provider 라우팅 상태 재시도" })).toBeVisible();
+    expect(within(dialog).queryByText(/SLO가 설정되지 않았습니다/)).not.toBeInTheDocument();
+    expect(within(dialog).queryByText(/라우팅 상태 데이터가 없습니다/)).not.toBeInTheDocument();
+  });
+
+  it("shows provider last-known-good and request ID inside the dialog", async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    client.setQueryData(["admin", "providers"], providerList, { updatedAt: Date.now() - 30_000 });
+    mockApi({
+      providerError: new AppError("Provider refresh failed", {
+        kind: "network",
+        requestId: "req-dialog-provider-lkg",
+      }),
+    });
+    renderPage("/gateway/providers?provider=openai", client);
+
+    const dialog = await screen.findByRole("dialog", { name: "openai" });
+    expect(
+      await within(dialog).findByText(/Provider 설정 갱신에 실패해 마지막 정상 데이터를 표시합니다/),
+    ).toBeVisible();
+    expect(within(dialog).getByText("Request ID: req-dialog-provider-lkg")).toBeVisible();
+    expect(within(dialog).getByRole("button", { name: "Provider 설정 재시도" })).toBeVisible();
+    expect(within(dialog).getByText("https://api.openai.example/v1")).toBeVisible();
+  });
+
+  it("removes credential searches from deep links and never writes submitted secrets to the URL", async () => {
+    const user = userEvent.setup();
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    client.setQueryData(["admin", "providers"], providerList);
+    mockApi();
+    renderPage("/gateway/providers?q=api_key%3Dprivate&status=enabled", client);
+
+    const providerLink = screen.getByRole("link", { name: "openai" });
+    expect(providerLink.getAttribute("href")).not.toContain("private");
+    expect(screen.getByTestId("location")).toHaveTextContent("?status=enabled");
+    expect(screen.getByTestId("location")).not.toHaveTextContent("private");
+    expect(screen.getByRole("alert")).toHaveTextContent("인증정보로 보이는 검색어");
+
+    const input = screen.getByRole("textbox", { name: "Provider 검색" });
+    await user.clear(input);
+    await user.type(input, "https://operator:password@provider.example/v1");
+    await user.click(screen.getByRole("button", { name: "검색" }));
+    expect(input).toHaveFocus();
+    expect(input).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByTestId("location")).not.toHaveTextContent("operator");
+    expect(screen.getByTestId("location")).not.toHaveTextContent("password");
+  });
+
+  it("keeps the rejection notice when unsafe q arrives after the page has mounted", async () => {
+    const user = userEvent.setup();
+    mockApi();
+    renderPage();
+    await screen.findByRole("link", { name: "openai" });
+
+    await user.click(screen.getByRole("button", { name: "Unsafe search navigation" }));
+    await waitFor(() => expect(screen.getByTestId("location")).not.toHaveTextContent("private"));
+    expect(screen.getByRole("alert")).toHaveTextContent("인증정보로 보이는 검색어");
+    expect(screen.getByRole("textbox", { name: "Provider 검색" })).toHaveAttribute("aria-invalid", "true");
   });
 
   it("deep-links provider details, closes with Escape, and restores trigger focus", async () => {

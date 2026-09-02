@@ -16,6 +16,7 @@ import { createDataTableColumnHelper, type DataTableColumn } from "@/shared/data
 import { DataTable } from "@/shared/data-table/DataTable";
 
 const healthPresentation: Record<ProviderHealthState, { label: string; tone: BadgeProps["tone"] }> = {
+  checking: { label: "Checking", tone: "info" },
   healthy: { label: "Healthy", tone: "success" },
   degraded: { label: "Degraded", tone: "warning" },
   unknown: { label: "Unknown", tone: "muted" },
@@ -95,6 +96,7 @@ function createProviderColumns(
       header: "P95 지연",
       cell: ({ getValue, row }) => {
         const value = getValue() ?? row.original.evaluation?.metrics.p95_latency_ms.actual;
+        if (row.original.health === "checking") return "확인 중";
         return value === undefined || row.original.health === "unknown" ? "-" : formatMilliseconds(value);
       },
     }),

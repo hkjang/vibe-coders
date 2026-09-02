@@ -23,12 +23,18 @@ export function useProviderDialogFocus(
   useEffect(() => {
     if (selectedName !== "" || !restoreFocusPendingRef.current) return;
     restoreFocusPendingRef.current = false;
-    const returnProvider = returnFocusProviderRef.current;
-    const currentProviderTrigger = Array.from(
-      document.querySelectorAll<HTMLElement>("[data-provider-trigger]"),
-    ).find((candidate) => candidate.dataset.providerTrigger === returnProvider);
-    const returnTarget = currentProviderTrigger ?? returnFocusRef.current;
-    if (returnTarget?.isConnected && !returnTarget.matches(":disabled")) returnTarget.focus();
+    // Radix and the router both finish their close/navigation work after this
+    // effect begins. Restore after that teardown so a late focus guard cleanup
+    // cannot move focus back to document.body under a busy browser.
+    const timer = setTimeout(() => {
+      const returnProvider = returnFocusProviderRef.current;
+      const currentProviderTrigger = Array.from(
+        document.querySelectorAll<HTMLElement>("[data-provider-trigger]"),
+      ).find((candidate) => candidate.dataset.providerTrigger === returnProvider);
+      const returnTarget = currentProviderTrigger ?? returnFocusRef.current;
+      if (returnTarget?.isConnected && !returnTarget.matches(":disabled")) returnTarget.focus();
+    }, 50);
+    return () => clearTimeout(timer);
   }, [selectedName]);
 
   const rememberTrigger = useCallback((trigger: HTMLElement, provider: string): void => {

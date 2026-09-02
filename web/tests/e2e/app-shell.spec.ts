@@ -71,8 +71,8 @@ const opsStatus = {
 };
 
 const bootstrap = {
-  backend_version: "v0.81.0",
-  ui_version: "e2e-v0.81.0",
+  backend_version: "v0.82.0",
+  ui_version: "e2e-v0.82.0",
   api_version: "v1",
   ui: {
     enabled: true,
@@ -100,12 +100,13 @@ const bootstrap = {
     features: {
       overview: true,
       "gateway.health": true,
+      "gateway.providers": true,
       "system.health": true,
     },
   },
   roles: ["super_admin"],
   permissions: ["admin:read", "routing:read"],
-  allowed_features: ["overview", "gateway.health", "system.health"],
+  allowed_features: ["overview", "gateway.health", "gateway.providers", "system.health"],
   migration_registry: [
     {
       feature_id: "overview",
@@ -138,6 +139,21 @@ const bootstrap = {
       available: true,
     },
     {
+      feature_id: "gateway.providers",
+      title: "Provider",
+      app_path: "/app/gateway/providers",
+      legacy_path: "/admin#/settings",
+      status: "preview_read_only",
+      risk_level: "medium",
+      required_permission: "admin:read",
+      read_only: true,
+      enabled_roles: ["super_admin", "admin", "ai_admin"],
+      rollout_percent: 100,
+      fallback_enabled: true,
+      minimum_api_version: "v0.82.0",
+      available: true,
+    },
+    {
       feature_id: "system.health",
       title: "System Health",
       app_path: "/app/system/health",
@@ -160,6 +176,78 @@ const bootstrap = {
     "/app/gateway/providers": "/admin#/settings",
     "/app/system/health": "/admin#/ops-home",
   },
+};
+
+const providers = {
+  providers: [
+    {
+      name: "openai-primary",
+      base_url: "https://openai.example/v1?api-version=2026-01-01",
+      api_key_configured: true,
+      timeout_ms: 30_000,
+      enabled: true,
+      model_patterns: "gpt-*",
+      failover_group: "premium",
+      priority: 10,
+      created_at: "2026-08-01T09:00:00Z",
+    },
+    {
+      name: "anthropic-fallback",
+      base_url: "https://anthropic.example/v1",
+      api_key_configured: true,
+      timeout_ms: 30_000,
+      enabled: true,
+      model_patterns: "claude-*",
+      failover_group: "premium",
+      priority: 20,
+      created_at: "2026-08-02T09:00:00Z",
+    },
+    ...Array.from({ length: 9 }, (_, index) => {
+      const ordinal = index + 3;
+      const suffix = String(ordinal).padStart(2, "0");
+      return {
+        name: `provider-${suffix}`,
+        base_url: `https://provider-${suffix}.example/v1`,
+        api_key_configured: true,
+        timeout_ms: 15_000,
+        enabled: true,
+        model_patterns: `model-${suffix}-*`,
+        failover_group: "standard",
+        priority: ordinal * 10,
+        created_at: "2026-08-03T09:00:00Z",
+      };
+    }),
+  ],
+};
+
+const providerSLO = {
+  slos: [
+    {
+      provider: "openai-primary",
+      availability_target: 0.99,
+      p95_latency_target_ms: 1_500,
+      error_rate_target: 0.02,
+      fallback_rate_target: 0.05,
+      enabled: true,
+      note: "production objective",
+      updated_at: "2026-09-02T03:58:00Z",
+    },
+  ],
+  evaluations: [
+    {
+      provider: "openai-primary",
+      requests: 9_640,
+      enabled: true,
+      breached: false,
+      metrics: {
+        availability: { target: 0.99, actual: 0.999, breached: false, enforced: true },
+        p95_latency_ms: { target: 1_500, actual: 1_280, breached: false, enforced: true },
+        error_rate: { target: 0.02, actual: 0.001, breached: false, enforced: true },
+        fallback_rate: { target: 0.05, actual: 0.0039, breached: false, enforced: true },
+      },
+    },
+  ],
+  since: "2026-09-01T04:00:00Z",
 };
 
 const stats = {
@@ -283,6 +371,7 @@ const routingHealth = {
 };
 
 interface MockGatewayOptions {
+  bootstrapPayload?: unknown;
   onRoutingRequest?: (request: Request) => void;
 }
 
@@ -295,7 +384,7 @@ async function mockGateway(page: Page, options: MockGatewayOptions = {}): Promis
 
     switch (url.pathname) {
       case "/admin/ui-bootstrap":
-        return json(bootstrap);
+        return json(options.bootstrapPayload ?? bootstrap);
       case "/health":
         return json({ status: "ok" });
       case "/ready":
@@ -309,6 +398,10 @@ async function mockGateway(page: Page, options: MockGatewayOptions = {}): Promis
       case "/admin/routing/health":
         options.onRoutingRequest?.(request);
         return json(routingHealth);
+      case "/admin/providers":
+        return json(providers);
+      case "/admin/providers/slo":
+        return json(providerSLO);
       default:
         break;
     }
@@ -399,13 +492,91 @@ test("opens and reloads Gateway Health at a URL-backed range", async ({ page }) 
   await expect(page.getByRole("button", { name: "7일" })).toHaveAttribute("aria-pressed", "true");
 });
 
+test("restores Provider list filters, pagination, and a deep-linked dialog across reload", async ({
+  page,
+}) => {
+  const routingWindows: string[] = [];
+  await mockGateway(page, {
+    onRoutingRequest: (request) => {
+      routingWindows.push(new URL(request.url()).searchParams.get("window") ?? "");
+    },
+  });
+
+  await page.goto("gateway/providers?q=example&status=enabled&range=7d&page=2");
+  await expect(page.getByRole("heading", { name: "Provider", exact: true })).toBeVisible();
+  const table = page.getByRole("table", { name: "Provider 연결 설정과 운영 상태" });
+  await expect(table.getByRole("link", { name: "provider-11" })).toBeVisible();
+  await expect(table.getByRole("columnheader", { name: "Provider" })).toBeVisible();
+  await expect(table.getByRole("columnheader", { name: "운영 상태" })).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "Provider 연결 설정과 운영 상태 페이지" })).toBeVisible();
+  await expect(page.getByText("2 / 2", { exact: true })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Provider 검색" })).toHaveValue("example");
+  await expect(page.getByRole("combobox", { name: "상태", exact: true })).toHaveValue("enabled");
+  await expect(page.getByRole("button", { name: "7일" })).toHaveAttribute("aria-pressed", "true");
+  await table.getByRole("link", { name: "provider-11" }).click();
+  const dialog = page.getByRole("dialog", { name: "provider-11" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByText("https://provider-11.example/v1")).toBeVisible();
+  await expect.poll(() => routingWindows).toContain("7d");
+  await expect(page).toHaveURL(
+    /\/app\/gateway\/providers\?q=example&status=enabled&range=7d&page=2&provider=provider-11$/,
+  );
+
+  await page.reload();
+  await expect(page).toHaveURL(
+    /\/app\/gateway\/providers\?q=example&status=enabled&range=7d&page=2&provider=provider-11$/,
+  );
+  await expect(page.getByRole("dialog", { name: "provider-11" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog", { name: "provider-11" })).toBeHidden();
+  await expect(page).toHaveURL(/\?q=example&status=enabled&range=7d&page=2$/);
+  await expect(page.locator("#main-content")).toBeFocused();
+});
+
+test("restores focus to the Provider row trigger after Escape", async ({ page }) => {
+  await mockGateway(page);
+  await page.goto("gateway/providers");
+
+  const trigger = page.getByRole("link", { name: "openai-primary" });
+  await expect(trigger).toBeVisible();
+  await trigger.click();
+  await expect(page.getByRole("dialog", { name: "openai-primary" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog", { name: "openai-primary" })).toBeHidden();
+  await expect
+    .poll(() => page.evaluate(() => document.activeElement?.getAttribute("data-provider-trigger") ?? ""))
+    .toBe("openai-primary");
+});
+
+test("never fetches routing health for Provider without routing:read", async ({ page }) => {
+  let routingRequests = 0;
+  const bootstrapWithoutRouting = {
+    ...bootstrap,
+    user: { ...bootstrap.user, scopes: ["admin:read"] },
+    permissions: ["admin:read"],
+  };
+  await mockGateway(page, {
+    bootstrapPayload: bootstrapWithoutRouting,
+    onRoutingRequest: () => {
+      routingRequests += 1;
+    },
+  });
+
+  await page.goto("gateway/providers?range=30d");
+  const table = page.getByRole("table", { name: "Provider 연결 설정과 운영 상태" });
+  await expect(table).toBeVisible();
+  await expect(table.getByText("Healthy", { exact: true })).toBeVisible();
+  await expect(page.getByText(/SLO 평가만 표시합니다/)).toBeVisible();
+  expect(routingRequests).toBe(0);
+});
+
 test("replaces legacy short Gateway paths without dropping query or hash", async ({ page }) => {
   await mockGateway(page);
 
   await page.goto("providers?team=platform#connections");
   await expect(page).toHaveURL(/\/app\/gateway\/providers\?team=platform#connections$/);
   await expect(page.getByRole("heading", { name: "Provider", exact: true })).toBeVisible();
-  await expect(page.getByRole("link", { name: /Legacy에서 Provider 열기/ })).toHaveAttribute(
+  await expect(page.getByRole("link", { name: /Legacy에서 열기/ })).toHaveAttribute(
     "href",
     "/admin#/settings",
   );
@@ -439,7 +610,7 @@ test("opens and reloads the read-only System Health deep link", async ({ page })
   await expect(page.getByText("LOW", { exact: true })).toBeVisible();
 });
 
-test("meets automated browser accessibility checks on every Phase 1 health screen", async ({ page }) => {
+test("meets automated browser accessibility checks on every Phase 1 screen", async ({ page }) => {
   await page.addInitScript({ path: "node_modules/axe-core/axe.min.js" });
   await openOverview(page);
   expect(await axeViolations(page)).toEqual([]);
@@ -450,6 +621,13 @@ test("meets automated browser accessibility checks on every Phase 1 health scree
 
   await page.goto("system/health");
   await expect(page.getByRole("heading", { name: "System Health", exact: true })).toBeVisible();
+  expect(await axeViolations(page)).toEqual([]);
+
+  await page.goto("gateway/providers");
+  await expect(page.getByRole("table", { name: "Provider 연결 설정과 운영 상태" })).toBeVisible();
+  expect(await axeViolations(page)).toEqual([]);
+  await page.getByRole("link", { name: "openai-primary" }).click();
+  await expect(page.getByRole("dialog", { name: "openai-primary" })).toBeVisible();
   expect(await axeViolations(page)).toEqual([]);
 });
 

@@ -1,4 +1,4 @@
-import { AlertTriangle, ExternalLink } from "lucide-react";
+import { AlertTriangle, ExternalLink, RefreshCw } from "lucide-react";
 import type { RefObject } from "react";
 
 import {
@@ -8,21 +8,32 @@ import {
 import { formatInteger, formatMilliseconds, formatPercent } from "@/features/health/health-utils";
 import { isAppError } from "@/shared/api/error";
 import { Badge } from "@/shared/components/ui/Badge";
+import { Button } from "@/shared/components/ui/Button";
 import { Dialog } from "@/shared/components/ui/Dialog";
+
+export interface ProviderDetailSourceState {
+  error?: unknown;
+  hasData: boolean;
+  onRetry: () => void;
+  pending: boolean;
+  refreshing: boolean;
+}
 
 interface ProviderDetailDialogProps {
   canReadRouting: boolean;
-  error?: unknown;
-  loading: boolean;
   onOpenChange: (open: boolean) => void;
   open: boolean;
+  providerState: ProviderDetailSourceState;
   requestedName: string;
   returnFocusRef: RefObject<HTMLElement | null>;
+  routingState: ProviderDetailSourceState;
   row?: ProviderCatalogRow;
   showLegacyAdmin: boolean;
+  sloState: ProviderDetailSourceState;
 }
 
 const healthLabels = {
+  checking: "Checking",
   healthy: "Healthy",
   degraded: "Degraded",
   unknown: "Unknown",
@@ -32,6 +43,58 @@ function formatDate(value: string): string {
   const timestamp = Date.parse(value);
   if (Number.isNaN(timestamp)) return value;
   return new Intl.DateTimeFormat("ko-KR", { dateStyle: "medium", timeStyle: "medium" }).format(timestamp);
+}
+
+function DetailQueryState({
+  label,
+  state,
+}: {
+  label: string;
+  state: ProviderDetailSourceState;
+}): React.JSX.Element | null {
+  if (state.error) {
+    const requestId = isAppError(state.error) ? state.error.requestId : undefined;
+    return (
+      <div className="provider-detail-query-state provider-detail-query-error" role="alert">
+        <AlertTriangle aria-hidden="true" />
+        <div>
+          <strong>
+            {label}{" "}
+            {state.hasData ? "갱신에 실패해 마지막 정상 데이터를 표시합니다." : "조회에 실패했습니다."}
+          </strong>
+          <p>{isAppError(state.error) ? state.error.message : "잠시 후 다시 시도해 주세요."}</p>
+          {requestId ? <code>Request ID: {requestId}</code> : null}
+          {state.refreshing ? <span>다시 갱신하는 중입니다.</span> : null}
+        </div>
+        <Button
+          aria-label={`${label} 재시도`}
+          disabled={state.refreshing}
+          onClick={state.onRetry}
+          size="small"
+          variant="secondary"
+        >
+          <RefreshCw aria-hidden="true" /> {state.refreshing ? "갱신 중" : "재시도"}
+        </Button>
+      </div>
+    );
+  }
+  if (state.pending && !state.hasData) {
+    return (
+      <div className="provider-detail-query-state" role="status">
+        <RefreshCw aria-hidden="true" />
+        <span>{label} 확인 중입니다.</span>
+      </div>
+    );
+  }
+  if (state.refreshing) {
+    return (
+      <div className="provider-detail-query-state" role="status">
+        <RefreshCw aria-hidden="true" />
+        <span>{label} 갱신 중입니다. 마지막 정상 데이터를 계속 표시합니다.</span>
+      </div>
+    );
+  }
+  return null;
 }
 
 function SLODetails({ row }: { row: ProviderCatalogRow }): React.JSX.Element {
@@ -116,16 +179,16 @@ function RoutingDetails({ row }: { row: ProviderCatalogRow }): React.JSX.Element
 
 export function ProviderDetailDialog({
   canReadRouting,
-  error,
-  loading,
   onOpenChange,
   open,
+  providerState,
   requestedName,
   returnFocusRef,
+  routingState,
   row,
   showLegacyAdmin,
+  sloState,
 }: ProviderDetailDialogProps): React.JSX.Element {
-  const requestId = isAppError(error) ? error.requestId : undefined;
   const footer = showLegacyAdmin ? (
     <a className="button button-secondary button-default" href="/admin#/settings">
       Legacy 설정 열기 <ExternalLink aria-hidden="true" />
@@ -141,19 +204,12 @@ export function ProviderDetailDialog({
       returnFocusRef={returnFocusRef}
       title={row?.provider.name ?? (requestedName || "Provider 상세")}
     >
-      {loading ? (
+      {providerState.pending && !row ? (
         <div className="provider-detail-loading" role="status">
           상세 정보를 불러오는 중입니다.
         </div>
-      ) : error && !row ? (
-        <div className="provider-detail-error" role="alert">
-          <AlertTriangle aria-hidden="true" />
-          <div>
-            <strong>Provider 상세를 불러오지 못했습니다.</strong>
-            <p>{isAppError(error) ? error.message : "잠시 후 다시 시도해 주세요."}</p>
-            {requestId ? <code>Request ID: {requestId}</code> : null}
-          </div>
-        </div>
+      ) : providerState.error && !row ? (
+        <DetailQueryState label="Provider 설정" state={providerState} />
       ) : !row ? (
         <div className="provider-detail-error" role="alert">
           <AlertTriangle aria-hidden="true" />
@@ -164,13 +220,22 @@ export function ProviderDetailDialog({
         </div>
       ) : (
         <div className="provider-detail-stack">
+          <DetailQueryState label="Provider 설정" state={providerState} />
           <div className="provider-detail-heading">
             <div className="provider-detail-badges">
               <Badge tone={row.provider.enabled ? "success" : "muted"}>
                 {row.provider.enabled ? "활성" : "비활성"}
               </Badge>
               <Badge
-                tone={row.health === "healthy" ? "success" : row.health === "degraded" ? "warning" : "muted"}
+                tone={
+                  row.health === "healthy"
+                    ? "success"
+                    : row.health === "degraded"
+                      ? "warning"
+                      : row.health === "checking"
+                        ? "info"
+                        : "muted"
+                }
               >
                 {healthLabels[row.health]}
               </Badge>
@@ -214,17 +279,23 @@ export function ProviderDetailDialog({
             </dl>
           </section>
 
-          <section aria-labelledby="provider-slo-title">
+          <section className="provider-detail-section" aria-labelledby="provider-slo-title">
             <h3 id="provider-slo-title" className="sr-only">
               Provider SLO
             </h3>
-            <SLODetails row={row} />
+            <DetailQueryState label="Provider SLO" state={sloState} />
+            {!sloState.pending && (!sloState.error || sloState.hasData) ? <SLODetails row={row} /> : null}
           </section>
 
           <section className="provider-detail-section" aria-labelledby="provider-routing-title">
             <h3 id="provider-routing-title">라우팅 상태</h3>
             {canReadRouting ? (
-              <RoutingDetails row={row} />
+              <>
+                <DetailQueryState label="Provider 라우팅 상태" state={routingState} />
+                {!routingState.pending && (!routingState.error || routingState.hasData) ? (
+                  <RoutingDetails row={row} />
+                ) : null}
+              </>
             ) : (
               <p className="provider-detail-empty">routing:read 권한이 없어 상세 신호를 표시하지 않습니다.</p>
             )}

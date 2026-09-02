@@ -1,4 +1,4 @@
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 
 import type { HealthRange } from "@/features/health/health-utils";
 import { refreshIntervalMs } from "@/features/health/health-utils";
@@ -29,7 +29,6 @@ export function useProviderCatalogQueries(range: HealthRange, canReadRouting: bo
         signal,
         routeId,
       }),
-    placeholderData: keepPreviousData,
     refetchInterval: interval,
     refetchIntervalInBackground: false,
   });
@@ -42,7 +41,6 @@ export function useProviderCatalogQueries(range: HealthRange, canReadRouting: bo
         routeId,
       }),
     enabled: canReadRouting,
-    placeholderData: keepPreviousData,
     refetchInterval: interval,
     refetchIntervalInBackground: false,
   });
