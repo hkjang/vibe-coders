@@ -14,6 +14,7 @@ import (
 const (
 	adminModelsCatalogFreshTTL       = 20 * time.Second
 	adminModelsCatalogStaleTTL       = 10 * time.Minute
+	adminModelsCatalogRefreshTimeout = 10 * time.Second
 	adminModelsCatalogMaxConcurrency = 4
 )
 
@@ -49,18 +50,35 @@ type adminModelCatalogCache struct {
 	semaphore chan struct{}
 	freshTTL  time.Duration
 	staleTTL  time.Duration
-	now       func() time.Time
+	// refreshTimeout bounds the whole provider-catalogue fan-out, including time spent
+	// waiting for a worker or the process-wide outbound semaphore.
+	refreshTimeout time.Duration
+	workerLimit    int
+	now            func() time.Time
+
+	// testAfterFreshMiss lets cache tests stop a caller in the otherwise tiny window
+	// between its optimistic cache lookup and the atomic cache/flight decision below.
+	testAfterFreshMiss func()
 }
 
 func newAdminModelCatalogCache() *adminModelCatalogCache {
 	return &adminModelCatalogCache{
-		entries:   make(map[string]adminModelCatalogCacheEntry),
-		flights:   make(map[string]*adminModelCatalogFlight),
-		semaphore: make(chan struct{}, adminModelsCatalogMaxConcurrency),
-		freshTTL:  adminModelsCatalogFreshTTL,
-		staleTTL:  adminModelsCatalogStaleTTL,
-		now:       time.Now,
+		entries:        make(map[string]adminModelCatalogCacheEntry),
+		flights:        make(map[string]*adminModelCatalogFlight),
+		semaphore:      make(chan struct{}, adminModelsCatalogMaxConcurrency),
+		freshTTL:       adminModelsCatalogFreshTTL,
+		staleTTL:       adminModelsCatalogStaleTTL,
+		refreshTimeout: adminModelsCatalogRefreshTimeout,
+		workerLimit:    adminModelsCatalogMaxConcurrency,
+		now:            time.Now,
 	}
+}
+
+func boundedAdminModelsCatalogRefreshTimeout(configured time.Duration) time.Duration {
+	if configured <= 0 || configured > adminModelsCatalogRefreshTimeout {
+		return adminModelsCatalogRefreshTimeout
+	}
+	return configured
 }
 
 func adminModelProviderFingerprint(provider store.ProviderConfig, fallbackTimeout time.Duration) string {
@@ -122,26 +140,49 @@ func (cache *adminModelCatalogCache) cached(
 	fingerprint := adminModelProviderFingerprint(provider, fallbackTimeout)
 	now := cache.now()
 	cache.mu.Lock()
-	entry, ok := cache.entries[provider.Name]
+	entry, stale, ok := cache.cachedLocked(provider.Name, fingerprint, now, allowStale)
 	cache.mu.Unlock()
-	if !ok || entry.fingerprint != fingerprint {
+	if !ok {
 		return adminProviderModelsResult{}, false
+	}
+	return adminProviderModelsResultFromEntry(provider, entry, stale), true
+}
+
+// cachedLocked performs a cache lookup while cache.mu is held. load uses it immediately before
+// creating a flight, making the fresh-cache decision and flight registration one atomic step.
+func (cache *adminModelCatalogCache) cachedLocked(
+	providerName string,
+	fingerprint string,
+	now time.Time,
+	allowStale bool,
+) (adminModelCatalogCacheEntry, bool, bool) {
+	entry, ok := cache.entries[providerName]
+	if !ok || entry.fingerprint != fingerprint {
+		return adminModelCatalogCacheEntry{}, false, false
 	}
 	age := now.Sub(entry.fetchedAt)
 	if age < 0 {
 		age = 0
 	}
 	if age > cache.freshTTL && (!allowStale || age > cache.staleTTL) {
-		return adminProviderModelsResult{}, false
+		return adminModelCatalogCacheEntry{}, false, false
 	}
+	return entry, age > cache.freshTTL, true
+}
+
+func adminProviderModelsResultFromEntry(
+	provider store.ProviderConfig,
+	entry adminModelCatalogCacheEntry,
+	stale bool,
+) adminProviderModelsResult {
 	return adminProviderModelsResult{
 		config:    provider,
 		models:    cloneAdminModelCatalogRows(entry.models),
 		status:    "ok",
 		source:    adminModelSourceCache,
 		fetchedAt: entry.fetchedAt.UTC().Format(time.RFC3339Nano),
-		stale:     age > cache.freshTTL,
-	}, true
+		stale:     stale,
+	}
 }
 
 func (cache *adminModelCatalogCache) staleAfterFailure(
@@ -168,11 +209,18 @@ func (cache *adminModelCatalogCache) load(
 	if result, ok := cache.cached(provider, fallbackTimeout, false); ok {
 		return result
 	}
+	if cache.testAfterFreshMiss != nil {
+		cache.testAfterFreshMiss()
+	}
 
 	fingerprint := adminModelProviderFingerprint(provider, fallbackTimeout)
 	flightKey := provider.Name + "\x00" + fingerprint
 	for attempt := 0; attempt < 2; attempt++ {
 		cache.mu.Lock()
+		if entry, stale, ok := cache.cachedLocked(provider.Name, fingerprint, cache.now(), false); ok {
+			cache.mu.Unlock()
+			return adminProviderModelsResultFromEntry(provider, entry, stale)
+		}
 		if flight, ok := cache.flights[flightKey]; ok {
 			cache.mu.Unlock()
 			select {

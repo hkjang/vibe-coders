@@ -413,6 +413,24 @@ func TestAdminModelsProviderTimeoutIsBounded(t *testing.T) {
 	}
 }
 
+func TestAdminModelsCatalogRefreshTimeoutIsBounded(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		configured time.Duration
+		want       time.Duration
+	}{
+		{name: "smaller timeout", configured: 3 * time.Second, want: 3 * time.Second},
+		{name: "zero uses cap", configured: 0, want: adminModelsCatalogRefreshTimeout},
+		{name: "larger uses cap", configured: time.Minute, want: adminModelsCatalogRefreshTimeout},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := boundedAdminModelsCatalogRefreshTimeout(test.configured); got != test.want {
+				t.Fatalf("refresh timeout = %s, want %s", got, test.want)
+			}
+		})
+	}
+}
+
 func TestNormalizedModelCreatedRejectsNonIntegralAndOverflowValues(t *testing.T) {
 	if got := normalizedModelCreated(float64(123)); got == nil || *got != 123 {
 		t.Fatalf("created = %v, want 123", got)
@@ -574,5 +592,200 @@ func TestAdminModelCatalogCacheBoundsGlobalProviderConcurrency(t *testing.T) {
 	wg.Wait()
 	if got := maximum.Load(); got != 2 {
 		t.Fatalf("maximum provider concurrency = %d, want 2", got)
+	}
+}
+
+func TestAdminModelCatalogCacheRechecksFreshEntryBeforeCreatingFlight(t *testing.T) {
+	cache := newAdminModelCatalogCache()
+	provider := store.ProviderConfig{
+		Name: "atomic", BaseURL: "https://models.example", EncryptedAPIKey: "encrypted", Enabled: true,
+	}
+	pausedAfterMiss := make(chan struct{})
+	resume := make(chan struct{})
+	var resumeOnce sync.Once
+	defer resumeOnce.Do(func() { close(resume) })
+	var misses atomic.Int32
+	cache.testAfterFreshMiss = func() {
+		if misses.Add(1) == 1 {
+			close(pausedAfterMiss)
+			<-resume
+		}
+	}
+
+	var fetches atomic.Int32
+	fetch := func(context.Context) ([]adminModelCatalogRow, error) {
+		fetches.Add(1)
+		return []adminModelCatalogRow{{ID: "only-once"}}, nil
+	}
+	firstResult := make(chan adminProviderModelsResult, 1)
+	go func() {
+		firstResult <- cache.load(t.Context(), provider, time.Second, fetch)
+	}()
+	select {
+	case <-pausedAfterMiss:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first cache miss did not reach the race window")
+	}
+
+	second := cache.load(t.Context(), provider, time.Second, fetch)
+	resumeOnce.Do(func() { close(resume) })
+	var first adminProviderModelsResult
+	select {
+	case first = <-firstResult:
+	case <-time.After(2 * time.Second):
+		t.Fatal("paused cache load did not finish")
+	}
+
+	if got := fetches.Load(); got != 1 {
+		t.Fatalf("race-window cache loads made %d fetches, want 1", got)
+	}
+	if second.status != "ok" || second.source != adminModelSourceLive {
+		t.Fatalf("refresh leader result = %+v", second)
+	}
+	if first.status != "ok" || first.source != adminModelSourceCache || first.stale {
+		t.Fatalf("resumed cache load did not use the fresh entry: %+v", first)
+	}
+}
+
+func TestAdminModelsWorkerPoolConvergesAfterCancellation(t *testing.T) {
+	const providerCount = 20
+	started := make(chan struct{}, providerCount)
+	exited := make(chan struct{}, providerCount)
+	var calls atomic.Int32
+	var active atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		active.Add(1)
+		started <- struct{}{}
+		<-r.Context().Done()
+		active.Add(-1)
+		exited <- struct{}{}
+	}))
+	defer upstream.Close()
+
+	server, _, _ := newAdminModelsTestServer(t, "")
+	server.adminModels.workerLimit = 2
+	server.adminModels.semaphore = make(chan struct{}, providerCount)
+	server.adminModels.refreshTimeout = 5 * time.Second
+	encrypted, err := server.secrets.Load().Encrypt("worker-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	configs := make([]store.ProviderConfig, 0, providerCount)
+	for index := range providerCount {
+		configs = append(configs, store.ProviderConfig{
+			Name: "worker-" + strconv.Itoa(index), BaseURL: upstream.URL,
+			EncryptedAPIKey: encrypted, TimeoutMS: 5_000, Enabled: true,
+		})
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	type fetchResult struct {
+		models   []adminProviderModelsResult
+		response adminModelsResponse
+	}
+	finished := make(chan fetchResult, 1)
+	go func() {
+		response := adminModelsResponse{}
+		models := server.fetchAdminProviderModels(ctx, configs, "", &response)
+		finished <- fetchResult{models: models, response: response}
+	}()
+	for range 2 {
+		select {
+		case <-started:
+		case <-time.After(2 * time.Second):
+			t.Fatal("bounded model worker did not start")
+		}
+	}
+	select {
+	case <-started:
+		t.Fatal("more provider requests started than the configured worker count")
+	case <-time.After(25 * time.Millisecond):
+	}
+
+	cancel()
+	var result fetchResult
+	select {
+	case result = <-finished:
+	case <-time.After(2 * time.Second):
+		t.Fatal("model workers did not converge after cancellation")
+	}
+	for range 2 {
+		select {
+		case <-exited:
+		case <-time.After(2 * time.Second):
+			t.Fatal("active upstream request did not observe cancellation")
+		}
+	}
+	if got := calls.Load(); got != 2 {
+		t.Fatalf("provider calls after cancellation = %d, want 2", got)
+	}
+	if got := active.Load(); got != 0 {
+		t.Fatalf("active provider calls after cancellation = %d, want 0", got)
+	}
+	if len(result.models) != providerCount || len(result.response.PartialFailures) != providerCount {
+		t.Fatalf("cancelled result models=%d failures=%d, want %d each", len(result.models), len(result.response.PartialFailures), providerCount)
+	}
+}
+
+func TestAdminModelsRefreshDeadlineCancelsSemaphoreWaitersAndServesStale(t *testing.T) {
+	var calls atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"data":[{"id":"unexpected-live-model"}]}`)
+	}))
+	defer upstream.Close()
+
+	server, _, _ := newAdminModelsTestServer(t, "")
+	server.adminModels.workerLimit = 2
+	server.adminModels.semaphore = make(chan struct{}, 1)
+	server.adminModels.semaphore <- struct{}{}
+	defer func() { <-server.adminModels.semaphore }()
+	server.adminModels.refreshTimeout = 40 * time.Millisecond
+	server.adminModels.freshTTL = time.Second
+	server.adminModels.staleTTL = time.Minute
+	now := time.Date(2026, 9, 2, 15, 0, 0, 0, time.UTC)
+	server.adminModels.now = func() time.Time { return now }
+	encrypted, err := server.secrets.Load().Encrypt("deadline-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	configs := []store.ProviderConfig{
+		{Name: "deadline-a", BaseURL: upstream.URL, EncryptedAPIKey: encrypted, TimeoutMS: 5_000, Enabled: true},
+		{Name: "deadline-b", BaseURL: upstream.URL, EncryptedAPIKey: encrypted, TimeoutMS: 5_000, Enabled: true},
+	}
+	fallbackTimeout := server.upstreamConf().Timeout
+	for _, provider := range configs {
+		server.adminModels.entries[provider.Name] = adminModelCatalogCacheEntry{
+			fingerprint: adminModelProviderFingerprint(provider, fallbackTimeout),
+			models:      []adminModelCatalogRow{{ID: provider.Name + "-cached"}},
+			fetchedAt:   now.Add(-2 * time.Second),
+		}
+	}
+
+	callerCtx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	response := adminModelsResponse{}
+	startedAt := time.Now()
+	results := server.fetchAdminProviderModels(callerCtx, configs, "", &response)
+	elapsed := time.Since(startedAt)
+	if callerCtx.Err() != nil {
+		t.Fatalf("caller deadline fired before the catalogue deadline: %v", callerCtx.Err())
+	}
+	if elapsed >= 500*time.Millisecond {
+		t.Fatalf("catalogue deadline returned after %s, want under 500ms", elapsed)
+	}
+	if got := calls.Load(); got != 0 {
+		t.Fatalf("semaphore waiters reached the upstream %d times, want 0", got)
+	}
+	if len(results) != 2 || len(response.PartialFailures) != 2 {
+		t.Fatalf("deadline results=%+v failures=%+v", results, response.PartialFailures)
+	}
+	for _, result := range results {
+		if result.status != "ok" || !result.stale || result.source != adminModelSourceCache || result.failureCode != "provider_models_unavailable" {
+			t.Fatalf("deadline did not return stale last-known-good data: %+v", result)
+		}
 	}
 }

@@ -80,6 +80,12 @@ type adminProviderModelsResult struct {
 	failureCode string
 }
 
+type adminProviderModelsJob struct {
+	index    int
+	provider store.ProviderConfig
+	apiKey   string
+}
+
 // handleAdminModels returns the authenticated, normalized model inventory used by the
 // Next Admin console. Unlike the OpenAI-compatible /v1/models route, this response keeps
 // duplicate model IDs when separate providers serve them and makes partial provider failures
@@ -184,7 +190,12 @@ func (s *Server) fetchAdminProviderModels(ctx context.Context, configs []store.P
 	}
 
 	results := make([]adminProviderModelsResult, len(selected))
-	var wg sync.WaitGroup
+	refreshTimeout := boundedAdminModelsCatalogRefreshTimeout(s.adminModels.refreshTimeout)
+	refreshCtx, cancelRefresh := context.WithTimeout(ctx, refreshTimeout)
+	defer cancelRefresh()
+
+	jobs := make(chan adminProviderModelsJob, len(selected))
+	jobCount := 0
 	dec := s.secrets.Load()
 	for i, provider := range selected {
 		results[i] = adminProviderModelsResult{
@@ -201,27 +212,43 @@ func (s *Server) fetchAdminProviderModels(ctx context.Context, configs []store.P
 			}
 			continue
 		}
+		jobs <- adminProviderModelsJob{index: i, provider: provider, apiKey: apiKey}
+		jobCount++
+	}
+	close(jobs)
 
-		wg.Add(1)
-		go func(index int, p store.ProviderConfig, key string) {
+	workerCount := s.adminModels.workerLimit
+	if workerCount <= 0 || workerCount > adminModelsCatalogMaxConcurrency {
+		workerCount = adminModelsCatalogMaxConcurrency
+	}
+	if workerCount > jobCount {
+		workerCount = jobCount
+	}
+	var wg sync.WaitGroup
+	wg.Add(workerCount)
+	for range workerCount {
+		go func() {
 			defer wg.Done()
-			results[index] = s.adminModels.load(ctx, p, fallbackTimeout, func(fetchCtx context.Context) ([]adminModelCatalogRow, error) {
-				models, fetchErr := s.fetchProviderModels(fetchCtx, p.Name, p.BaseURL, key, adminModelsProviderTimeout(p, fallbackTimeout), "")
-				if fetchErr != nil {
-					return nil, fetchErr
-				}
-				catalog := make([]adminModelCatalogRow, 0, len(models))
-				for _, raw := range models {
-					if model, ok := normalizeAdminModelCatalogRow(raw, p.Name); ok {
-						catalog = append(catalog, model)
+			for job := range jobs {
+				p, key := job.provider, job.apiKey
+				results[job.index] = s.adminModels.load(refreshCtx, p, fallbackTimeout, func(fetchCtx context.Context) ([]adminModelCatalogRow, error) {
+					models, fetchErr := s.fetchProviderModels(fetchCtx, p.Name, p.BaseURL, key, adminModelsProviderTimeout(p, fallbackTimeout), "")
+					if fetchErr != nil {
+						return nil, fetchErr
 					}
+					catalog := make([]adminModelCatalogRow, 0, len(models))
+					for _, raw := range models {
+						if model, ok := normalizeAdminModelCatalogRow(raw, p.Name); ok {
+							catalog = append(catalog, model)
+						}
+					}
+					return catalog, nil
+				})
+				if results[job.index].failureCode == "provider_models_unavailable" {
+					slog.Warn("admin model catalogue fetch failed", "provider", p.Name, "stale", results[job.index].stale)
 				}
-				return catalog, nil
-			})
-			if results[index].failureCode == "provider_models_unavailable" {
-				slog.Warn("admin model catalogue fetch failed", "provider", p.Name, "stale", results[index].stale)
 			}
-		}(i, provider, apiKey)
+		}()
 	}
 	wg.Wait()
 
