@@ -659,8 +659,14 @@ func parseProxyKeys(raw string) []ProxyAPIKey {
 	parts := strings.Split(raw, ",")
 	keys := make([]ProxyAPIKey, 0, len(parts))
 	for i, part := range parts {
-		fields := strings.Split(strings.TrimSpace(part), ":")
-		if len(fields) == 0 || strings.TrimSpace(fields[0]) == "" {
+		fields := strings.Split(part, ":")
+		// Trim every field, not just the entry: the bearer path hashes a trimmed
+		// token, so a secret stored with stray whitespace (e.g. "dev: dev-key")
+		// would never match a real request.
+		for j := range fields {
+			fields[j] = strings.TrimSpace(fields[j])
+		}
+		if len(fields) == 0 || fields[0] == "" {
 			continue
 		}
 
@@ -677,6 +683,12 @@ func parseProxyKeys(raw string) []ProxyAPIKey {
 		}
 		if len(fields) >= 4 {
 			team = fields[3]
+		}
+		// A blank secret ("dev:") would otherwise register sha256("") as an active
+		// key hash, flipping the gateway into key-required mode over an entry no
+		// caller can ever present.
+		if key == "" {
+			continue
 		}
 		sum := sha256.Sum256([]byte(key))
 		keyHash := hex.EncodeToString(sum[:])
