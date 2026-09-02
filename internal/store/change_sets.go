@@ -5,8 +5,11 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 )
+
+var ErrChangeSetConflict = errors.New("change set changed concurrently")
 
 // ChangeSetItem is one proposed change inside a change set. Kind "setting" is applied by the
 // gateway; other kinds (policy/routing/skill) are recorded as advisory in this version.
@@ -22,7 +25,7 @@ type ChangeSet struct {
 	ID          string          `json:"id"`
 	Title       string          `json:"title"`
 	Description string          `json:"description"`
-	Status      string          `json:"status"` // draft | pending | approved | applied | rolled_back
+	Status      string          `json:"status"` // draft | pending | approved | apply_pending | applied | rollback_pending | rolled_back
 	Items       []ChangeSetItem `json:"items"`
 	Prior       []ChangeSetItem `json:"prior"` // captured at apply time, for rollback
 	CanaryScope string          `json:"canary_scope"`
@@ -108,6 +111,81 @@ func (s *SQLStore) UpdateChangeSet(ctx context.Context, cs ChangeSet) error {
 		applied_at = ?, updated_at = ? WHERE id = ?`),
 		cs.Status, cs.Reviewer, cs.Note, string(prior), cs.AppliedAt, time.Now().UTC().Format(time.RFC3339Nano), cs.ID)
 	return err
+}
+
+// StageChangeSetSettings writes every setting and moves the change set to its durable pending
+// marker in one transaction. The marker makes the operation resumable: once this commits, callers
+// only need to reload the runtime and finalize the status; they must not write the settings again.
+func (s *SQLStore) StageChangeSetSettings(ctx context.Context, cs ChangeSet, expectedStatus, changedBy, reason string, settings []AdminSetting) error {
+	if cs.ID == "" || expectedStatus == "" || cs.Status == "" {
+		return fmt.Errorf("change set id, expected status, and pending status are required")
+	}
+	prior, err := json.Marshal(cs.Prior)
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	seen := make(map[string]struct{}, len(settings))
+	for _, setting := range settings {
+		if setting.Key == "" {
+			return fmt.Errorf("admin setting key is required")
+		}
+		if _, exists := seen[setting.Key]; exists {
+			return fmt.Errorf("duplicate admin setting key %q", setting.Key)
+		}
+		seen[setting.Key] = struct{}{}
+		if err := s.upsertAdminSettingTx(ctx, tx, setting, changedBy, reason, now); err != nil {
+			return err
+		}
+	}
+
+	result, err := tx.ExecContext(ctx, s.bind(`UPDATE change_sets SET status = ?, reviewer = ?, note = ?, prior = ?,
+		applied_at = ?, updated_at = ? WHERE id = ? AND status = ?`),
+		cs.Status, cs.Reviewer, cs.Note, string(prior), cs.AppliedAt, now, cs.ID, expectedStatus)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected != 1 {
+		return fmt.Errorf("%w: %s expected status %s", ErrChangeSetConflict, cs.ID, expectedStatus)
+	}
+	return tx.Commit()
+}
+
+// FinalizeChangeSetStatus completes a pending transition after the runtime snapshot was reloaded.
+// It is idempotent for an already-finalized status, which makes recovery safe after a response or
+// database acknowledgment is lost.
+func (s *SQLStore) FinalizeChangeSetStatus(ctx context.Context, id, expectedStatus, finalStatus string) error {
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	result, err := s.db.ExecContext(ctx, s.bind(`UPDATE change_sets SET status = ?, updated_at = ?
+		WHERE id = ? AND status = ?`), finalStatus, now, id, expectedStatus)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 1 {
+		return nil
+	}
+	var current string
+	if err := s.db.QueryRowContext(ctx, s.bind(`SELECT status FROM change_sets WHERE id = ?`), id).Scan(&current); err != nil {
+		return err
+	}
+	if current == finalStatus {
+		return nil
+	}
+	return fmt.Errorf("%w: %s expected status %s, current status %s", ErrChangeSetConflict, id, expectedStatus, current)
 }
 
 func (s *SQLStore) DeleteChangeSet(ctx context.Context, id string) error {

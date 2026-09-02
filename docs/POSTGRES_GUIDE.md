@@ -115,8 +115,8 @@ services:
     environment:
       - UPSTREAM_BASE_URL=https://api.openai.com
       - UPSTREAM_API_KEY=sk-...
-      - ADMIN_TOKEN=change-me-to-secure-token
-      - GATEWAY_SECRET=encryption-key-must-be-32-bytes-long! # API 키 암호화용 32바이트 키
+      - ADMIN_TOKEN=${ADMIN_TOKEN:?generate once and persist securely}
+      - GATEWAY_SECRET=${GATEWAY_SECRET:?generate once and persist securely} # API 키 암호화 키
       # Postgres 연결 설정 (서비스 이름 'postgres-db'를 호스트명으로 사용)
       - POSTGRES_DSN=postgres://gateway_user:gateway_password_123@postgres-db:5432/gateway_db?sslmode=disable
     volumes:
@@ -194,8 +194,8 @@ services:
     environment:
       - UPSTREAM_BASE_URL=https://api.openai.com
       - UPSTREAM_API_KEY=sk-...
-      - ADMIN_TOKEN=change-me-to-secure-token
-      - GATEWAY_SECRET=encryption-key-must-be-32-bytes-long!
+      - ADMIN_TOKEN=${ADMIN_TOKEN:?generate once and persist securely}
+      - GATEWAY_SECRET=${GATEWAY_SECRET:?generate once and persist securely}
       # 기존 외부 Postgres VM DB 연결 정보 지정 (192.168.10.20 VM 서버 예시)
       - POSTGRES_DSN=postgres://gateway_user:gateway_password_123@192.168.10.20:5432/gateway_db?sslmode=disable
     volumes:

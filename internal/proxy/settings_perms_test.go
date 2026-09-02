@@ -33,14 +33,16 @@ func TestRoleCanWriteGroup(t *testing.T) {
 	groups := []string{"ops", "ai", "security", "admin"}
 	// want[role] = set of groups the role may write.
 	want := map[string]map[string]bool{
-		"":               {"ops": true, "ai": true, "security": true, "admin": true},
-		"super_admin":    {"ops": true, "ai": true, "security": true, "admin": true},
-		"admin":          {"ops": true, "ai": true, "security": true, "admin": true},
-		"ops_admin":      {"ops": true},
-		"ai_admin":       {"ai": true},
-		"security_admin": {"security": true},
-		"readonly_admin": {},
-		"user":           {},
+		"":                {},
+		"legacy_admin":    {"ops": true, "ai": true, "security": true, "admin": true},
+		"legacy_readonly": {},
+		"super_admin":     {"ops": true, "ai": true, "security": true, "admin": true},
+		"admin":           {"ops": true, "ai": true, "security": true, "admin": true},
+		"ops_admin":       {"ops": true},
+		"ai_admin":        {"ai": true},
+		"security_admin":  {"security": true},
+		"readonly_admin":  {},
+		"user":            {},
 	}
 	for role, allowed := range want {
 		for _, g := range groups {

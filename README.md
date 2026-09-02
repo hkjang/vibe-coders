@@ -16,12 +16,15 @@ Roo Code / Cursor / Continue 등 OpenAI 호환 API 를 호출하는 VS Code 확�
 - **[부하 성능 개선 보고서](docs/PERFORMANCE_REPORT.md)** — 부하에서 느려지던 원인과 개선 전후 실측 ([HTML](docs/PERFORMANCE_REPORT.html) · [PDF](docs/PERFORMANCE_REPORT.pdf))
 - **[모델 카드](MODEL_CARD.md)** — 외부 모델 경계, 사용 목적과 제한사항
 - **[AI 사용 공개](AI_USAGE_DISCLOSURE.md)** — 개발 보조 AI 사용 범위와 검증 책임
-- **[제3자 라이선스](THIRD_PARTY_LICENSES.md)** / **[SPDX SBOM](SBOM.spdx.json)** — 의존성·라이선스 검증 자료
+- **[제3자 라이선스](THIRD_PARTY_LICENSES.md)** / **[SPDX SBOM](SBOM.spdx.json)** — Go·Frontend 의존성 및 라이선스 검증 자료
 
 ## 독립 실행 및 심사 재현
 
-필수 도구는 Go 1.26 이상과 Git입니다. 기본 SQLite 구성은 별도 DB 서버가
-필요하지 않습니다.
+백엔드와 기존 `/admin`만 재현할 때는 Go 1.26.8 이상과 Git이 필요합니다. embedded
+React `/app`까지 소스에서 직접 빌드하려면 Node.js 24와 저장소가 고정한 pnpm 11도
+필요합니다. Docker 빌드는 이 도구를 builder stage에 포함하므로 호스트에 Node.js가
+없어도 되며, 운영 이미지는 Go 바이너리 하나만 담습니다. 기본 SQLite 구성은 별도 DB
+서버가 필요하지 않습니다.
 
 ```bash
 git clone https://github.com/hkjang/vibe-coders.git
@@ -30,27 +33,40 @@ go mod download
 go mod verify
 go test ./...
 
+corepack enable
+pnpm --dir web install --frozen-lockfile
+VITE_UI_VERSION=dev pnpm --dir web build
+find internal/appui/dist -mindepth 1 ! -name '.gitkeep' -delete
+cp -R web/dist/. internal/appui/dist/
+test -s internal/appui/dist/index.html
+test -n "$(find internal/appui/dist/assets -type f -print -quit)"
+
 export UPSTREAM_API_KEY="sk-..."
 export GATEWAY_SECRET="운영용-긴-무작위-문자열"
-go run ./cmd/gateway
+export UI_APP_ENABLED=true
+go run -ldflags "-X vibe-coders/internal/proxy.AppVersion=dev" ./cmd/gateway
 ```
 
 다른 터미널에서 `curl http://localhost:8080/health`와
-`curl http://localhost:8080/ready`로 상태를 확인하고, 관리자 UI는
-`http://localhost:8080/admin`에서 엽니다. 실제 외부 모델 호출 없이 핵심 중계를
-재현하려면 `bash tests/smoke.sh`를 실행하십시오.
+`curl http://localhost:8080/ready`로 상태를 확인합니다. Legacy Stable Console은
+`http://localhost:8080/admin`, Next Console Preview는
+`http://localhost:8080/app/`에서 엽니다. `/app`은 기본 OFF이며
+`UI_APP_ENABLED=true`로 활성화합니다. 실제 외부 모델 호출 없이 핵심 중계를 재현하려면
+`bash tests/smoke.sh`를 실행하십시오.
 
 Docker로 독립 실행할 때는 현재 소스에서 이미지를 먼저 빌드합니다.
 
 ```bash
-docker build -t ai-coding-proxy-gateway:local .
-GATEWAY_VERSION=local UPSTREAM_API_KEY="sk-..." \
-  GATEWAY_SECRET="운영용-긴-무작위-문자열" docker compose up -d
-docker compose ps
+docker build --build-arg VERSION=v0.80.0 -t ai-coding-proxy-gateway:v0.80.0 .
+UI_APP_ENABLED=true GATEWAY_VERSION=v0.80.0 ./scripts/init-deployment-env.sh .env
+docker compose --env-file .env up -d
+docker compose --env-file .env ps
 curl http://localhost:8080/health
 ```
 
-종료는 `docker compose down`이며 SQLite 데이터는 루트의 `data/`에 유지됩니다.
+초기화 helper가 upstream key를 숨김 입력받고 `ADMIN_TOKEN`과 `GATEWAY_SECRET`을 원자
+생성합니다. 종료는 `docker compose --env-file .env down`이며 SQLite 데이터는 Docker
+named volume `proxy-gateway-data`에 유지됩니다. `down -v`는 사용하지 마십시오.
 공개/심사 환경에서는 실제 비밀키가 포함된 `.env`, DB와 로그를 제출하지 마십시오.
 
 ## 추적 항목
@@ -79,7 +95,7 @@ curl http://localhost:8080/health
 - 호출 단건 상세 + 첫 청크/전체 지연 + 프롬프트 전문(마스킹) + 응답 메타 조회
 - API 키 / 팀 / IP / 전체 단위 일별·월별 쿼터 (토큰·KRW). 한도 초과 시 429 + Retry-After + X-Quota-*
 - 보존 정책 (RETENTION_REQUEST_DAYS / RETENTION_PROMPT_DAYS / RETENTION_RESPONSE_DAYS) 기반 백그라운드 cleanup
-- 한국어 어드민 UI 다중 탭 (대시보드 / LLM 관측 / 호출 이력 / 프롬프트 검색 / 사용자 / IP / 사용 한도 / 안전 / 설정), 비용 KRW 표기
+- `/admin` Legacy Stable Console과 기본 OFF인 `/app` React Next Console Preview. 기존 한국어 어드민 다중 탭과 비용 KRW 표기는 그대로 유지
 - Datadog LLM Observability 대응 기능: Trace/Span Explorer, Session Explorer, Prompt Tracking, Patterns, Insights, trend timeseries, human feedback(label/prompt/alignment summary), managed evaluation, external evaluation submit API
 - 사용자 상세 화면에 API 키별 LLM 요청/eval failure/feedback/alignment trend drill-down 제공
 - prompt name/version 비교 API와 UI 모달로 버전별 지연·비용·오류율·평가 실패율 비교 제공
@@ -1045,25 +1061,40 @@ pwsh -File scripts/backup.ps1 -DataDir data -OutDir backups -KeepDays 14
 
 `scripts/release.ps1` (Windows / PowerShell) 또는 `scripts/release.sh` (Linux / macOS) 가 다음을 한 번에 수행합니다.
 
-1. 멀티스테이지 `Dockerfile` 로 distroless 런타임 이미지 빌드
-2. `docker save` 로 OCI tar 추출 후 `gzip -9` 압축
-3. `release/<image>-<version>.tar.gz`, `.sha256`, `README-offline-<version>.md` 산출
+릴리스 빌드 호스트에는 Docker, Bash, curl, Python 3가 필요합니다. Python 3는 SPDX
+JSON과 container smoke의 `/auth/me` 버전을 검증하는 데 사용합니다. 호스트 Node.js와
+jq는 필요하지 않습니다.
+
+1. Node 24+pnpm frozen frontend build → Go 1.26.8 embed build → distroless nonroot의 3-stage 이미지 빌드
+2. 최종 이미지에서 `/admin`, `/app` redirect/deep link, hashed asset, `/auth/me` build version smoke 검증
+3. `docker save` 로 OCI tar 추출 후 `gzip -9` 압축
+4. 기존 이미지·체크섬·가이드 산출. v0.80.0부터 versioned SPDX SBOM·제3자 라이선스도 산출
+
+React 산출물은 Go 바이너리에 embed되므로 운영 컨테이너에 Node.js나 외부 CDN이
+필요하지 않습니다. 릴리스 스크립트는 v0.80.0부터 루트 SBOM이 해당 버전이고 Go·npm
+패키지를 모두 포함하는지 확인한 뒤 자산을 복사합니다. `VERSION` build arg는
+`VITE_UI_VERSION`과 `vibe-coders/internal/proxy.AppVersion` ldflag 양쪽에 동일하게
+주입됩니다.
 
 ```powershell
-pwsh -File scripts/release.ps1 -Version v0.1.0
+pwsh -File scripts/release.ps1 -Version v0.80.0
 ```
 
 ```bash
-./scripts/release.sh -v v0.1.0 -p linux/amd64
+./scripts/release.sh -v v0.80.0 -p linux/amd64
 ```
 
 산출물 예시:
 
 ```
 release/
-  ai-coding-proxy-gateway-v0.1.0.tar.gz
-  ai-coding-proxy-gateway-v0.1.0.tar.gz.sha256
-  README-offline-v0.1.0.md
+  ai-coding-proxy-gateway-v0.80.0.tar.gz
+  ai-coding-proxy-gateway-v0.80.0.tar.gz.sha256
+  README-offline-v0.80.0.md
+  SBOM-v0.80.0.spdx.json
+  THIRD_PARTY_LICENSES-v0.80.0.md
+  init-deployment-env-v0.80.0.sh
+  backup-volume-v0.80.0.sh
 ```
 
 ### 폐쇄망 적재
@@ -1072,38 +1103,46 @@ release/
 2. 체크섬 확인
 
    ```bash
-   sha256sum -c ai-coding-proxy-gateway-v0.1.0.tar.gz.sha256
+   sha256sum -c ai-coding-proxy-gateway-v0.80.0.tar.gz.sha256
    ```
 
 3. 이미지 적재
 
    ```bash
-   gunzip -c ai-coding-proxy-gateway-v0.1.0.tar.gz | docker load
+   gunzip -c ai-coding-proxy-gateway-v0.80.0.tar.gz | docker load
    ```
 
-4. 실행 (단일 컨테이너)
+4. 최초 1회 비밀값 파일과 데이터 볼륨을 만든 뒤 실행
 
    ```bash
+   chmod 0700 init-deployment-env-v0.80.0.sh backup-volume-v0.80.0.sh
+   sudo env GATEWAY_VERSION=v0.80.0 \
+     ./init-deployment-env-v0.80.0.sh /opt/proxy-gateway/gateway.env
+   docker volume create proxy-gateway-data >/dev/null
    docker run -d --name proxy-gateway --restart=always \
        -p 8080:8080 \
-       -v /opt/proxy-gateway/data:/data \
-       -e UPSTREAM_BASE_URL=https://api.openai.com \
-       -e UPSTREAM_API_KEY=sk-... \
-       -e ADMIN_TOKEN=change-me \
-       -e GATEWAY_SECRET=$(openssl rand -hex 32) \
-       -e MODEL_PRICING_KRW_PER_1M='{"gpt-4.1-mini":{"input_krw_per_1m":540,"output_krw_per_1m":2160}}' \
-       ai-coding-proxy-gateway:v0.1.0
+       --mount source=proxy-gateway-data,target=/data \
+       --env-file /opt/proxy-gateway/gateway.env \
+       ai-coding-proxy-gateway:v0.80.0
    ```
 
-5. 또는 `docker-compose.yml` 과 함께 운영
+   초기화 스크립트는 `openssl`과 생성 결과를 검증한 뒤 임시 파일을 원자적으로 설치하며 API Key를 숨김 입력받습니다.
+   env 파일과 데이터 볼륨을 함께 백업합니다.
+   컨테이너를 재생성할 때도 같은 `GATEWAY_SECRET`을 사용해야 기존 Provider Secret을 복호화할 수 있습니다.
+
+5. 또는 저장소에서 별도로 검토·전달한 `docker-compose.yml` 과 함께 운영
 
    ```bash
-   export GATEWAY_VERSION=v0.1.0
-   export UPSTREAM_API_KEY=sk-...
-   export ADMIN_TOKEN=change-me
-   export GATEWAY_SECRET=$(openssl rand -hex 32)
-   export MODEL_PRICING_KRW_PER_1M='{"gpt-4.1-mini":{"input_krw_per_1m":540,"output_krw_per_1m":2160}}'
+   GATEWAY_VERSION=v0.80.0 ./init-deployment-env-v0.80.0.sh .env
    docker compose up -d
    ```
 
 데이터는 `/data` 볼륨에 SQLite 파일과 fallback NDJSON 로 보관되므로 컨테이너를 재기동해도 누적 통계가 유지됩니다.
+
+`/app`은 Preview이므로 기본값은 OFF입니다. 활성화하지 않은 환경과 신규 UI 장애 시에도
+`/admin` Legacy Stable Console은 계속 사용할 수 있습니다. 릴리스 이미지 자체는 다음과
+같이 다시 검증할 수 있습니다.
+
+```bash
+bash scripts/container-smoke.sh ai-coding-proxy-gateway:v0.80.0 v0.80.0
+```

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"time"
 )
 
@@ -100,11 +101,18 @@ func (s *SQLStore) UpdateAuthUserRoleStatus(ctx context.Context, id, role, statu
 // an account is deactivated so its access tokens stop working immediately.
 func (s *SQLStore) RevokeAuthSessionsForUser(ctx context.Context, userID string) error {
 	now := formatTime(time.Now().UTC())
-	if _, err := s.db.ExecContext(ctx, s.bind(`UPDATE auth_sessions SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL`), now, userID); err != nil {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
 		return err
 	}
-	_, err := s.db.ExecContext(ctx, s.bind(`UPDATE refresh_tokens SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL`), now, userID)
-	return err
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, s.bind(`UPDATE auth_sessions SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL`), now, userID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, s.bind(`UPDATE refresh_tokens SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL`), now, userID); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *SQLStore) UpsertAuthTeam(ctx context.Context, team AuthTeam) error {
@@ -186,8 +194,18 @@ func (s *SQLStore) InsertAuthSession(ctx context.Context, sessionID, userID, ip,
 
 func (s *SQLStore) RevokeAuthSession(ctx context.Context, sessionID string) error {
 	now := formatTime(time.Now().UTC())
-	_, err := s.db.ExecContext(ctx, s.bind(`UPDATE auth_sessions SET revoked_at = ? WHERE id = ?`), now, sessionID)
-	return err
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, s.bind(`UPDATE auth_sessions SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL`), now, sessionID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, s.bind(`UPDATE refresh_tokens SET revoked_at = ? WHERE session_id = ? AND revoked_at IS NULL`), now, sessionID); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // AuthSessionInfo is a user-facing view of an active session for the session-management UI.
@@ -269,7 +287,12 @@ func (s *SQLStore) RevokeAuthSessionsByKeycloakSID(ctx context.Context, kcSID st
 	if kcSID == "" {
 		return nil, nil
 	}
-	rows, err := s.db.QueryContext(ctx, s.bind(`SELECT DISTINCT user_id FROM auth_sessions WHERE kc_sid = ? AND revoked_at IS NULL`), kcSID)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	rows, err := tx.QueryContext(ctx, s.bind(`SELECT DISTINCT user_id FROM auth_sessions WHERE kc_sid = ? AND revoked_at IS NULL`), kcSID)
 	if err != nil {
 		return nil, err
 	}
@@ -287,12 +310,18 @@ func (s *SQLStore) RevokeAuthSessionsByKeycloakSID(ctx context.Context, kcSID st
 		return nil, err
 	}
 	now := formatTime(time.Now().UTC())
-	if _, err := s.db.ExecContext(ctx, s.bind(`UPDATE auth_sessions SET revoked_at = ? WHERE kc_sid = ? AND revoked_at IS NULL`), now, kcSID); err != nil {
+	if _, err := tx.ExecContext(ctx, s.bind(`UPDATE auth_sessions SET revoked_at = ? WHERE kc_sid = ? AND revoked_at IS NULL`), now, kcSID); err != nil {
 		return nil, err
 	}
-	// Best-effort: revoke refresh tokens for the affected users.
+	// Revoke refresh tokens in the same transaction so a successful logout response
+	// never leaves a renewable internal session behind.
 	for _, u := range users {
-		_, _ = s.db.ExecContext(ctx, s.bind(`UPDATE refresh_tokens SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL`), now, u)
+		if _, err := tx.ExecContext(ctx, s.bind(`UPDATE refresh_tokens SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL`), now, u); err != nil {
+			return nil, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
 	}
 	return users, nil
 }
@@ -339,6 +368,48 @@ func (s *SQLStore) RefreshTokenByHash(ctx context.Context, hash string) (Refresh
 func (s *SQLStore) RevokeRefreshToken(ctx context.Context, id string) error {
 	_, err := s.db.ExecContext(ctx, s.bind(`UPDATE refresh_tokens SET revoked_at = ? WHERE id = ?`), formatTime(time.Now().UTC()), id)
 	return err
+}
+
+// RotateRefreshToken atomically marks oldID used and inserts its replacement. The
+// conditional update is the single-winner guard across gateway pods; a failed insert
+// rolls the revocation back so the client is not stranded without a usable token.
+func (s *SQLStore) RotateRefreshToken(ctx context.Context, oldID string, replacement RefreshTokenRecord) (bool, error) {
+	if replacement.CreatedAt.IsZero() {
+		replacement.CreatedAt = time.Now().UTC()
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+	now := time.Now().UTC()
+	result, err := tx.ExecContext(ctx, s.bind(`UPDATE refresh_tokens SET revoked_at = ?
+		WHERE id = ? AND revoked_at IS NULL AND expires_at > ?`), formatTime(now), oldID, formatTime(now))
+	if err != nil {
+		return false, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	if affected == 0 {
+		return false, nil
+	}
+	if affected != 1 {
+		return false, fmt.Errorf("rotate refresh token: updated %d rows", affected)
+	}
+	_, err = tx.ExecContext(ctx, s.bind(`INSERT INTO refresh_tokens
+		(id, user_id, session_id, token_hash, expires_at, created_at, rotated_from)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`),
+		replacement.ID, replacement.UserID, replacement.SessionID, replacement.TokenHash,
+		formatTime(replacement.ExpiresAt), formatTime(replacement.CreatedAt), oldID)
+	if err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func (s *SQLStore) InsertAuditEvent(ctx context.Context, e AuthEvent) error {

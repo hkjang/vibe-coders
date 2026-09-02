@@ -1,25 +1,30 @@
 # 오프라인망에서 docker load 한 이미지를 그대로 사용한다.
-# 실제 환경에서는 .env 파일에 UPSTREAM_API_KEY 등 비밀값을 두고 docker compose up -d 로 실행.
+# 운영에서는 mode 0600 gateway.env를 만들고 docker compose --env-file gateway.env up -d 로 실행.
 services:
   gateway:
-    image: ai-coding-proxy-gateway:${GATEWAY_VERSION:-latest}
+    image: ai-coding-proxy-gateway:${GATEWAY_VERSION:?set an exact release version}
     container_name: ai-coding-proxy-gateway
     restart: always
     ports:
       - "8080:8080"
     volumes:
-      - ./data:/data
+      - gateway_data:/data
     environment:
       LISTEN_ADDR: ":8080"
       UPSTREAM_PROVIDER: ${UPSTREAM_PROVIDER:-openai}
       UPSTREAM_BASE_URL: ${UPSTREAM_BASE_URL:-https://api.openai.com}
       UPSTREAM_API_KEY: ${UPSTREAM_API_KEY:-}
       UPSTREAM_MODEL_PATTERNS: ${UPSTREAM_MODEL_PATTERNS:-}
-      ADMIN_TOKEN: ${ADMIN_TOKEN:-}
+      ADMIN_TOKEN: ${ADMIN_TOKEN:?generate once and persist securely}
       AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-}
-      GATEWAY_SECRET: ${GATEWAY_SECRET:-change-me-please}
+      GATEWAY_SECRET: ${GATEWAY_SECRET:?generate once and persist securely}
+      UI_APP_ENABLED: ${UI_APP_ENABLED:-false}
       MODEL_PRICING_KRW_PER_1M: ${MODEL_PRICING_KRW_PER_1M:-{}}
       LOG_RAW_PROMPTS: ${LOG_RAW_PROMPTS:-false}
       DB_DRIVER: sqlite
       DB_DSN: /data/gateway.db
       LOG_FALLBACK_PATH: /data/fallback.ndjson
+
+volumes:
+  gateway_data:
+    name: proxy-gateway-data

@@ -16,6 +16,10 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
 		return
 	}
+	if kc := s.keycloakConfig(); kc.Enabled && !kc.AllowLocalLogin {
+		writeOpenAIError(w, http.StatusForbidden, "local login is disabled; use Keycloak SSO", "invalid_request_error", "local_login_disabled")
+		return
+	}
 	var p struct {
 		Email    string `json:"email"`
 		Password string `json:"password"`

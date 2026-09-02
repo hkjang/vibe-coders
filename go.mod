@@ -1,6 +1,6 @@
 module vibe-coders
 
-go 1.26
+go 1.26.8
 
 require (
 	github.com/go-sql-driver/mysql v1.10.0

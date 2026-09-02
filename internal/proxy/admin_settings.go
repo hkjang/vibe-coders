@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -47,6 +48,14 @@ const (
 	stDuration settingType = "duration"
 	stCSV      settingType = "csv"
 )
+
+var errSettingReloadPending = errors.New("runtime setting reload pending")
+
+type settingWriteInput struct {
+	Key             string `json:"key"`
+	Value           string `json:"value"`
+	ExpectedVersion *int   `json:"expected_version,omitempty"`
+}
 
 // settingDef is a registry entry: the env/default source, type, category, and whether the
 // value is a secret (encrypted at rest, masked in responses). validate is optional.
@@ -107,7 +116,7 @@ func buildSettingRegistry() []settingDef {
 		}
 		return nil
 	}
-	return []settingDef{
+	registry := []settingDef{
 		// ---- ClickHouse ----
 		{Key: "clickhouse.url", Category: "clickhouse", Type: stString, Restart: true, envValue: func(c config.Config) string { return c.ClickHouse.URL }},
 		{Key: "clickhouse.database", Category: "clickhouse", Type: stString, validate: chIdent, envValue: func(c config.Config) string { return c.ClickHouse.Database }},
@@ -228,6 +237,13 @@ func buildSettingRegistry() []settingDef {
 		{Key: "logging.raw_bodies", Category: "logging", Type: stBool, envValue: func(c config.Config) string { return strconv.FormatBool(c.Logging.RawBodies) }},
 		{Key: "logging.response_max_bytes", Category: "logging", Type: stInt, validate: posInt, envValue: func(c config.Config) string { return strconv.Itoa(c.Logging.ResponseMaxBytes) }},
 
+		// ---- Next Admin UI (/app) ----
+		{Key: appUIEnabledKey, Category: "ui.app", Type: stBool, envValue: func(config.Config) string { return appUIEnv("UI_APP_ENABLED", "false") }},
+		{Key: appUIDefaultEntryKey, Category: "ui.app", Type: stString, validate: validateAppUIPath, envValue: func(config.Config) string { return appUIEnv("UI_APP_DEFAULT_ENTRY", "/app/overview") }},
+		{Key: appUILegacyFallbackKey, Category: "ui.app", Type: stBool, envValue: func(config.Config) string { return appUIEnv("UI_APP_LEGACY_FALLBACK", "true") }},
+		{Key: appUIFeedbackEnabledKey, Category: "ui.app", Type: stBool, envValue: func(config.Config) string { return appUIEnv("UI_APP_FEEDBACK_ENABLED", "false") }},
+		{Key: appUITelemetryEnabledKey, Category: "ui.app", Type: stBool, envValue: func(config.Config) string { return appUIEnv("UI_APP_TELEMETRY_ENABLED", "false") }},
+
 		// ---- Env (read-only view of startup environment variables) ----
 		{Key: "env.upstream_base_url", Category: "env", Type: stString, ReadOnly: true, envValue: func(c config.Config) string { return c.Upstream.BaseURL }},
 		{Key: "env.upstream_provider", Category: "env", Type: stString, ReadOnly: true, envValue: func(c config.Config) string { return c.Upstream.Provider }},
@@ -251,6 +267,7 @@ func buildSettingRegistry() []settingDef {
 		{Key: "env.sso_keycloak_group_claim", Category: "env.sso", Type: stString, ReadOnly: true, envValue: func(c config.Config) string { return c.Keycloak.GroupClaim }},
 		{Key: "env.sso_keycloak_allow_local_login", Category: "env.sso", Type: stBool, ReadOnly: true, envValue: func(c config.Config) string { return strconv.FormatBool(c.Keycloak.AllowLocalLogin) }},
 	}
+	return append(registry, appUIFeatureSettingDefs()...)
 }
 
 // skillEnforceMode validates the Skill enforcement mode setting.
@@ -265,6 +282,12 @@ func skillEnforceMode(v string) error {
 // settingDescriptions maps each setting key to a short Korean help string shown under the key
 // in the admin UI. Kept separate from the registry so the registry stays terse.
 var settingDescriptions = map[string]string{
+	// Next Admin UI
+	appUIEnabledKey:          "React 기반 Next Admin Console(/app) 활성화. 비활성 시 Legacy Admin 안내 화면만 제공합니다.",
+	appUIDefaultEntryKey:     "Next Admin Console의 기본 진입 경로. 외부 URL이 아닌 /app/ 내부 경로만 허용합니다.",
+	appUILegacyFallbackKey:   "신규 화면에서 동일 기능의 Legacy Admin(/admin) 이동 링크 제공 여부.",
+	appUIFeedbackEnabledKey:  "신규 UI의 사용자 피드백 진입점 활성화 여부.",
+	appUITelemetryEnabledKey: "민감 원문을 제외한 신규 UI 사용성 텔레메트리 활성화 여부.",
 	// ClickHouse
 	"clickhouse.url":                 "ClickHouse HTTP 엔드포인트 URL. 비우면 DW 적재 비활성. 변경 시 sink 워커 재시작.",
 	"clickhouse.database":            "적재 대상 데이터베이스 이름.",
@@ -511,8 +534,12 @@ func (s *Server) runtimeReloadLoop(ctx context.Context, interval time.Duration) 
 	if interval <= 0 {
 		return
 	}
-	// Seed the baseline from the state we loaded at startup, so we don't reload immediately.
-	last, _ := s.db.AdminSettingsChangeToken(ctx)
+	// Start from the token actually applied during startup. Reading a fresh token here can miss a
+	// change committed after the startup reload but before this goroutine begins polling.
+	last := ""
+	if applied := s.lastReloadTok.Load(); applied != nil {
+		last = *applied
+	}
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
@@ -528,10 +555,35 @@ func (s *Server) runtimeReloadLoop(ctx context.Context, interval time.Duration) 
 			}
 			if token != last {
 				slog.Info("admin settings changed on another pod; reloading runtime config")
-				s.reloadRuntimeConfig(ctx)
-				s.reloadText2SQLFeatures(ctx)
-				s.reloadKeycloakConfig(ctx)
-				last = token
+				if err := s.reloadRuntimeConfig(ctx); err != nil {
+					slog.Warn("runtime config reload failed; retaining last-known-good settings", "error", err)
+					s.heartbeatPod(ctx, interval)
+					continue
+				}
+				if err := s.reloadText2SQLFeatures(ctx); err != nil {
+					slog.Warn("Text2SQL feature reload failed; retaining last-known-good flags", "error", err)
+					s.heartbeatPod(ctx, interval)
+					continue
+				}
+				if err := s.reloadKeycloakConfig(ctx); err != nil {
+					slog.Warn("Keycloak config reload failed; retaining last-known-good SSO settings", "error", err)
+					s.heartbeatPod(ctx, interval)
+					continue
+				}
+				applied, err := s.db.AdminSettingsChangeToken(ctx)
+				if err != nil {
+					slog.Warn("runtime config reload token read failed; reload will be retried", "error", err)
+					s.heartbeatPod(ctx, interval)
+					continue
+				}
+				if applied != token {
+					slog.Info("runtime settings changed during reload; retrying the newer snapshot on the next poll")
+					s.heartbeatPod(ctx, interval)
+					continue
+				}
+				last = applied
+				s.lastReloadTok.Store(&applied)
+				s.lastReloadNano.Store(time.Now().UnixNano())
 			}
 			// Heartbeat every tick so the operations map sees a live last_seen + convergence state.
 			s.heartbeatPod(ctx, interval)
@@ -558,12 +610,14 @@ func (s *Server) heartbeatPod(ctx context.Context, interval time.Duration) {
 
 // reloadRuntimeConfig rebuilds the Text2SQL/ClickHouse runtime snapshots from env defaults
 // overlaid with admin-managed settings. Called at startup and after every settings change.
-func (s *Server) reloadRuntimeConfig(ctx context.Context) {
-	stored := map[string]store.AdminSetting{}
-	if list, err := s.db.ListAdminSettings(ctx); err == nil {
-		for _, a := range list {
-			stored[a.Key] = a
-		}
+func (s *Server) reloadRuntimeConfig(ctx context.Context) error {
+	list, err := s.db.ListAdminSettings(ctx)
+	if err != nil {
+		return fmt.Errorf("list admin settings: %w", err)
+	}
+	stored := make(map[string]store.AdminSetting, len(list))
+	for _, a := range list {
+		stored[a.Key] = a
 	}
 	prevT2S := s.t2sConf()
 	prevCH := s.chConf()
@@ -591,7 +645,10 @@ func (s *Server) reloadRuntimeConfig(ctx context.Context) {
 		if _, ok := stored[d.Key]; !ok {
 			continue
 		}
-		val, source := s.effectiveSettingValue(stored, d)
+		val, source, err := s.effectiveSettingValue(stored, d)
+		if err != nil {
+			return fmt.Errorf("load runtime setting %s: %w", d.Key, err)
+		}
 		if source != "admin" {
 			continue
 		}
@@ -609,6 +666,7 @@ func (s *Server) reloadRuntimeConfig(ctx context.Context) {
 	s.mcpRuntime.Store(&mcp)
 	s.upstreamRuntime.Store(&up)
 	s.quotaRuntime.Store(&quota)
+	s.reloadAppUIRuntime(stored)
 	audit.SetFallbackPriceModel(pricing.FallbackModel) // apply the runtime fallback model
 	// Apply retention changes to the running worker (day thresholds next run; interval recreates the ticker).
 	if s.retention != nil && prevRet != ret {
@@ -631,11 +689,7 @@ func (s *Server) reloadRuntimeConfig(ctx context.Context) {
 	if s.chSinkStarted && (prevCH.URL != ch.URL || prevCH.SinkInterval != ch.SinkInterval) {
 		s.applyClickHouseSinkWorker()
 	}
-	// Record when/what this pod last applied, for cross-pod convergence observability.
-	s.lastReloadNano.Store(time.Now().UnixNano())
-	if tok, err := s.db.AdminSettingsChangeToken(ctx); err == nil {
-		s.lastReloadTok.Store(&tok)
-	}
+	return nil
 }
 
 func applyRuntimeSetting(t2s *config.Text2SQLConfig, ch *config.ClickHouseConfig, carbon *config.CarbonConfig, ins *config.InsuranceConfig, cache *config.CacheConfig, ret *config.RetentionConfig, pricing *config.PricingConfig, skills *config.SkillsConfig, limits *config.LimitsConfig, logging *config.LoggingConfig, mcp *config.MCPConfig, up *config.UpstreamConfig, quota *config.QuotaConfig, key, val string) {
@@ -891,8 +945,8 @@ func settingsSubAdminRole(role string) bool {
 // roleCanWriteGroup reports whether a role may write settings in a permission group.
 func roleCanWriteGroup(role, group string) bool {
 	switch role {
-	case "super_admin", "admin", "":
-		return true // full admins (and legacy ADMIN_TOKEN mode → empty role) write anything
+	case "super_admin", "admin", "legacy_admin":
+		return true
 	case "ops_admin":
 		return group == "ops"
 	case "ai_admin":
@@ -904,13 +958,29 @@ func roleCanWriteGroup(role, group string) bool {
 	}
 }
 
-// callerSettingsRole returns the caller's role for settings authorization. In ADMIN_TOKEN
-// mode (no JWT) it returns "" which roleCanWriteGroup treats as full admin.
+// callerSettingsRole returns the caller's role for settings authorization. Legacy-token
+// mode uses an explicit sentinel; a failed JWT re-verification is always denied and can
+// never be confused with a full administrator.
 func (s *Server) callerSettingsRole(r *http.Request) string {
+	if !s.cfg.Auth.Enabled {
+		token := bearerToken(r.Header.Get("Authorization"))
+		// Match authorizeAdmin's ordering when the two legacy tokens are accidentally
+		// configured to the same value: the full admin credential takes precedence.
+		if s.cfg.Auth.AdminToken != "" && secureTokenEqual(token, s.cfg.Auth.AdminToken) {
+			return "legacy_admin"
+		}
+		if s.cfg.Auth.AdminReadonlyToken != "" && secureTokenEqual(token, s.cfg.Auth.AdminReadonlyToken) {
+			return "legacy_readonly"
+		}
+		if s.cfg.Auth.AdminToken == "" && s.cfg.Auth.AdminReadonlyToken == "" {
+			return "legacy_admin"
+		}
+		return "invalid"
+	}
 	if claims, ok := s.currentAccessClaims(r); ok {
 		return claims.Role
 	}
-	return ""
+	return "invalid"
 }
 
 // canWriteSetting reports whether the caller may modify a specific setting.
@@ -956,7 +1026,7 @@ func validateSettingValue(d settingDef, value string) error {
 // effectiveSettingValue returns the current effective string value for a key: the stored
 // admin override (decrypted for secrets) if present, else the env/default. The second
 // return reports the source ("admin" or "env").
-func (s *Server) effectiveSettingValue(stored map[string]store.AdminSetting, d settingDef) (string, string) {
+func (s *Server) effectiveSettingValue(stored map[string]store.AdminSetting, d settingDef) (string, string, error) {
 	if a, ok := stored[d.Key]; ok {
 		raw := a.ValueJSON
 		var decoded string
@@ -965,18 +1035,19 @@ func (s *Server) effectiveSettingValue(stored map[string]store.AdminSetting, d s
 		}
 		if d.Secret {
 			if plain, err := s.secrets.Load().Decrypt(decoded); err == nil {
-				return plain, "admin"
+				return plain, "admin", nil
+			} else {
+				return "", "admin", fmt.Errorf("stored secret cannot be decrypted: %w", err)
 			}
-			return "", "admin"
 		}
-		return decoded, "admin"
+		return decoded, "admin", nil
 	}
-	return d.envValue(s.cfg), "env"
+	return d.envValue(s.cfg), "env", nil
 }
 
 // settingView is the API representation of one setting (secret-masked).
 func (s *Server) settingView(stored map[string]store.AdminSetting, d settingDef) map[string]any {
-	eff, source := s.effectiveSettingValue(stored, d)
+	eff, source, valueErr := s.effectiveSettingValue(stored, d)
 	view := map[string]any{
 		"key": d.Key, "category": d.Category, "type": string(d.Type),
 		"is_secret": d.Secret, "restart_required": d.Restart, "source": source,
@@ -988,6 +1059,12 @@ func (s *Server) settingView(stored map[string]store.AdminSetting, d settingDef)
 		view["updated_at"] = a.UpdatedAt
 	}
 	value, isSet := settingMaskedValue(eff, d.Secret)
+	if valueErr != nil {
+		view["value_error"] = "stored secret is unavailable; runtime kept the last-known-good value"
+		if d.Secret {
+			value, isSet = "********", true
+		}
+	}
 	view["value"] = value
 	if d.Secret {
 		view["is_set"] = isSet
@@ -1007,12 +1084,15 @@ func settingMaskedValue(value string, secret bool) (string, bool) {
 }
 
 func (s *Server) effectiveSettingView(stored map[string]store.AdminSetting, d settingDef, r *http.Request) map[string]any {
-	eff, source := s.effectiveSettingValue(stored, d)
+	eff, source, valueErr := s.effectiveSettingValue(stored, d)
 	effectiveSource := "bootstrap_env"
 	if source == "admin" {
 		effectiveSource = "db_setting"
 	}
 	value, isSet := settingMaskedValue(eff, d.Secret)
+	if valueErr != nil && d.Secret {
+		value, isSet = "********", true
+	}
 	envRaw := d.envValue(s.cfg)
 	envValue, envSet := settingMaskedValue(envRaw, d.Secret)
 
@@ -1028,8 +1108,11 @@ func (s *Server) effectiveSettingView(stored map[string]store.AdminSetting, d se
 		},
 	}
 	if a, ok := stored[d.Key]; ok {
-		adminRaw, _ := s.effectiveSettingValue(map[string]store.AdminSetting{d.Key: a}, d)
+		adminRaw, _, adminErr := s.effectiveSettingValue(map[string]store.AdminSetting{d.Key: a}, d)
 		adminValue, adminSet := settingMaskedValue(adminRaw, d.Secret)
+		if adminErr != nil && d.Secret {
+			adminValue, adminSet = "********", true
+		}
 		layers = append(layers, map[string]any{
 			"name":       "db_setting",
 			"source":     "admin",
@@ -1041,6 +1124,7 @@ func (s *Server) effectiveSettingView(stored map[string]store.AdminSetting, d se
 			"version":    a.Version,
 			"updated_by": a.UpdatedBy,
 			"updated_at": a.UpdatedAt,
+			"error":      adminErr != nil,
 		})
 	} else {
 		layers = append(layers, map[string]any{
@@ -1222,26 +1306,55 @@ func (s *Server) handleAdminSettingByKey(w http.ResponseWriter, r *http.Request)
 	switch r.Method {
 	case http.MethodPut:
 		var payload struct {
-			Value  string `json:"value"`
-			Reason string `json:"reason"`
+			Value           string `json:"value"`
+			Reason          string `json:"reason"`
+			ExpectedVersion *int   `json:"expected_version,omitempty"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 			writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "invalid_body")
 			return
 		}
-		if err := s.applySettingWrite(r, d, payload.Value, payload.Reason); err != nil {
-			writeOpenAIError(w, http.StatusBadRequest, err.Error(), "invalid_request_error", "setting_invalid")
+		if err := s.applySettingWriteExpected(r, d, payload.Value, payload.Reason, payload.ExpectedVersion); err != nil {
+			if errors.Is(err, store.ErrAdminSettingConflict) {
+				writeOpenAIError(w, http.StatusConflict, "setting changed concurrently; reload and review the latest value", "conflict_error", "setting_conflict")
+			} else if errors.Is(err, errSettingReloadPending) {
+				writeOpenAIError(w, http.StatusServiceUnavailable, "setting was stored but runtime reload is pending", "server_error", "setting_reload_pending")
+			} else {
+				writeOpenAIError(w, http.StatusBadRequest, err.Error(), "invalid_request_error", "setting_invalid")
+			}
 			return
 		}
 		s.auditAdmin(r, "setting.update", key, auditJSON(map[string]any{"key": key, "secret": d.Secret}))
 		stored, _ := s.loadStoredSettings(r)
 		writeJSON(w, http.StatusOK, s.settingView(stored, d))
 	case http.MethodDelete:
-		if err := s.db.DeleteAdminSetting(r.Context(), key, adminID(r), strings.TrimSpace(r.URL.Query().Get("reason"))); err != nil {
-			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "setting_delete_failed")
+		var expectedVersion *int
+		if raw := strings.TrimSpace(r.URL.Query().Get("expected_version")); raw != "" {
+			parsed, err := strconv.Atoi(raw)
+			if err != nil || parsed < 0 {
+				writeOpenAIError(w, http.StatusBadRequest, "expected_version must be a non-negative integer", "invalid_request_error", "bad_expected_version")
+				return
+			}
+			expectedVersion = &parsed
+		}
+		var err error
+		if expectedVersion == nil {
+			err = s.db.DeleteAdminSetting(r.Context(), key, adminID(r), strings.TrimSpace(r.URL.Query().Get("reason")))
+		} else {
+			err = s.db.DeleteAdminSetting(r.Context(), key, adminID(r), strings.TrimSpace(r.URL.Query().Get("reason")), *expectedVersion)
+		}
+		if err != nil {
+			if errors.Is(err, store.ErrAdminSettingConflict) {
+				writeOpenAIError(w, http.StatusConflict, "setting changed concurrently; reload and review the latest value", "conflict_error", "setting_conflict")
+			} else {
+				writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "setting_delete_failed")
+			}
 			return
 		}
-		s.reloadRuntimeConfig(r.Context())
+		if err := s.reloadRuntimeConfig(r.Context()); err != nil {
+			writeOpenAIError(w, http.StatusServiceUnavailable, "setting was reverted but runtime reload is pending", "server_error", "setting_reload_pending")
+			return
+		}
 		s.auditAdmin(r, "setting.revert", key, "")
 		stored, _ := s.loadStoredSettings(r)
 		writeJSON(w, http.StatusOK, s.settingView(stored, d))
@@ -1252,56 +1365,102 @@ func (s *Server) handleAdminSettingByKey(w http.ResponseWriter, r *http.Request)
 
 // applySettingWrite persists one setting value and reloads the runtime snapshot.
 func (s *Server) applySettingWrite(r *http.Request, d settingDef, value, reason string) error {
-	if err := s.persistSettingValue(r, d, value, reason); err != nil {
+	return s.applySettingWriteExpected(r, d, value, reason, nil)
+}
+
+func (s *Server) applySettingWriteExpected(r *http.Request, d settingDef, value, reason string, expectedVersion *int) error {
+	if err := s.persistSettingValueExpected(r, d, value, reason, expectedVersion); err != nil {
 		return err
 	}
-	s.reloadRuntimeConfig(r.Context())
+	if err := s.reloadRuntimeConfig(r.Context()); err != nil {
+		return fmt.Errorf("%w: %v", errSettingReloadPending, err)
+	}
 	return nil
 }
 
 // persistSettingValue validates, encrypts (if secret), and writes a setting WITHOUT
 // reloading the runtime snapshot (callers reload once after a batch).
 func (s *Server) persistSettingValue(r *http.Request, d settingDef, value, reason string) error {
+	return s.persistSettingValueExpected(r, d, value, reason, nil)
+}
+
+func (s *Server) persistSettingValueExpected(r *http.Request, d settingDef, value, reason string, expectedVersion *int) error {
+	record, err := s.prepareSettingValue(d, value)
+	if err != nil {
+		return err
+	}
+	current, found, err := s.db.GetAdminSetting(r.Context(), d.Key)
+	if err != nil {
+		return err
+	}
+	if err := setSettingExpectedVersion(&record, current, found, expectedVersion); err != nil {
+		return err
+	}
+	return s.db.UpsertAdminSetting(r.Context(), record, adminID(r), reason)
+}
+
+func setSettingExpectedVersion(record *store.AdminSetting, current store.AdminSetting, found bool, requested *int) error {
+	version := 0
+	if found {
+		version = current.Version
+	}
+	if requested != nil {
+		if *requested < 0 {
+			return fmt.Errorf("expected_version must be a non-negative integer")
+		}
+		version = *requested
+	}
+	record.Version = version
+	record.ExpectedVersion = &version
+	return nil
+}
+
+func (s *Server) prepareSettingValue(d settingDef, value string) (store.AdminSetting, error) {
 	value = strings.TrimSpace(value)
 	if !d.Secret && value == "" && d.Type != stString && d.Type != stCSV {
-		return fmt.Errorf("value is required")
+		return store.AdminSetting{}, fmt.Errorf("value is required")
 	}
 	if !d.Secret || value != "" {
 		if err := validateSettingValue(d, value); err != nil {
-			return err
+			return store.AdminSetting{}, err
 		}
 	}
 	// Secret with empty value = leave unchanged (don't overwrite with blank).
 	if d.Secret && value == "" {
-		return fmt.Errorf("secret value is empty; provide a value to change it or use DELETE to revert")
+		return store.AdminSetting{}, fmt.Errorf("secret value is empty; provide a value to change it or use DELETE to revert")
 	}
 	storeValue := value
 	if d.Secret {
 		enc, err := s.secrets.Load().Encrypt(value)
 		if err != nil {
-			return fmt.Errorf("encrypt secret: %w", err)
+			return store.AdminSetting{}, fmt.Errorf("encrypt secret: %w", err)
 		}
 		storeValue = enc
 	}
 	encoded, err := json.Marshal(storeValue)
 	if err != nil {
-		return err
+		return store.AdminSetting{}, err
 	}
-	return s.db.UpsertAdminSetting(r.Context(), store.AdminSetting{
+	return store.AdminSetting{
 		Key: d.Key, Category: d.Category, ValueJSON: string(encoded), ValueType: string(d.Type), IsSecret: d.Secret, Source: "admin",
-	}, adminID(r), reason)
+	}, nil
 }
 
 // handleAdminSettingsBulk applies many settings atomically: validate all first, then write
-// all and reload once. POST /admin/settings/bulk {settings:[{key,value}], reason}
+// all and reload once. PUT/POST /admin/settings/bulk {settings:[{key,value}], reason}
 func (s *Server) handleAdminSettingsBulk(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut && r.Method != http.MethodPost {
+		w.Header().Set("Allow", "PUT, POST")
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
 	if !s.authorizeAdmin(r) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
 	}
 	var payload struct {
-		Settings []struct{ Key, Value string } `json:"settings"`
-		Reason   string                        `json:"reason"`
+		Settings []settingWriteInput `json:"settings"`
+		Reason   string              `json:"reason"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 		writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "invalid_body")
@@ -1313,13 +1472,18 @@ func (s *Server) handleAdminSettingsBulk(w http.ResponseWriter, r *http.Request)
 // handleAdminSettingsImport imports non-secret settings (the export format). Secret keys
 // are rejected (they must be set individually). POST /admin/settings/import
 func (s *Server) handleAdminSettingsImport(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
 	if !s.authorizeAdmin(r) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
 	}
 	var payload struct {
-		Settings []struct{ Key, Value string } `json:"settings"`
-		Reason   string                        `json:"reason"`
+		Settings []settingWriteInput `json:"settings"`
+		Reason   string              `json:"reason"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 		writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "invalid_body")
@@ -1331,14 +1495,20 @@ func (s *Server) handleAdminSettingsImport(w http.ResponseWriter, r *http.Reques
 // applySettingsBatch validates every item (rejecting the whole batch on any error, so a
 // partial apply can't break the gateway), then persists all and reloads once. When
 // rejectSecret is set (import), secret keys are refused.
-func (s *Server) applySettingsBatch(w http.ResponseWriter, r *http.Request, items []struct{ Key, Value string }, reason string, rejectSecret bool) {
+func (s *Server) applySettingsBatch(w http.ResponseWriter, r *http.Request, items []settingWriteInput, reason string, rejectSecret bool) {
 	if len(items) == 0 {
 		writeOpenAIError(w, http.StatusBadRequest, "no settings provided", "invalid_request_error", "empty_batch")
 		return
 	}
 	type resolved struct {
-		def   settingDef
-		value string
+		def             settingDef
+		value           string
+		expectedVersion *int
+	}
+	stored, err := s.loadStoredSettings(r)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "settings_failed")
+		return
 	}
 	out := make([]resolved, 0, len(items))
 	errs := map[string]string{}
@@ -1354,8 +1524,16 @@ func (s *Server) applySettingsBatch(w http.ResponseWriter, r *http.Request, item
 			errs[key] = "secret keys cannot be imported; set them individually"
 			continue
 		}
+		if d.ReadOnly {
+			errs[key] = "this setting is read-only and must be changed through the environment"
+			continue
+		}
 		if !s.canWriteSetting(r, d) {
 			errs[key] = "your role cannot modify this setting category"
+			continue
+		}
+		if it.ExpectedVersion != nil && *it.ExpectedVersion < 0 {
+			errs[key] = "expected_version must be a non-negative integer"
 			continue
 		}
 		val := strings.TrimSpace(it.Value)
@@ -1366,18 +1544,17 @@ func (s *Server) applySettingsBatch(w http.ResponseWriter, r *http.Request, item
 			}
 		}
 		proposed[key] = val
-		out = append(out, resolved{def: d, value: val})
+		out = append(out, resolved{def: d, value: val, expectedVersion: it.ExpectedVersion})
 	}
 	// Cross-key: default_limit <= max_limit after the batch is applied.
 	if errs["text2sql.default_limit"] == "" && errs["text2sql.max_limit"] == "" {
-		stored, _ := s.loadStoredSettings(r)
 		get := func(key string) int {
 			if v, ok := proposed[key]; ok {
 				n, _ := strconv.Atoi(v)
 				return n
 			}
 			d, _ := settingDefByKey(key)
-			eff, _ := s.effectiveSettingValue(stored, d)
+			eff, _, _ := s.effectiveSettingValue(stored, d)
 			n, _ := strconv.Atoi(eff)
 			return n
 		}
@@ -1389,14 +1566,32 @@ func (s *Server) applySettingsBatch(w http.ResponseWriter, r *http.Request, item
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"ok": false, "errors": errs})
 		return
 	}
+	records := make([]store.AdminSetting, 0, len(out))
 	for _, rsv := range out {
-		if err := s.persistSettingValue(r, rsv.def, rsv.value, reason); err != nil {
-			// Validation already passed; a write error here is a server fault.
-			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "bulk_write_failed")
+		record, err := s.prepareSettingValue(rsv.def, rsv.value)
+		if err != nil {
+			writeOpenAIError(w, http.StatusUnprocessableEntity, err.Error(), "invalid_request_error", "bulk_value_invalid")
 			return
 		}
+		current, found := stored[rsv.def.Key]
+		if err := setSettingExpectedVersion(&record, current, found, rsv.expectedVersion); err != nil {
+			writeOpenAIError(w, http.StatusUnprocessableEntity, err.Error(), "invalid_request_error", "bad_expected_version")
+			return
+		}
+		records = append(records, record)
 	}
-	s.reloadRuntimeConfig(r.Context())
+	if err := s.db.UpsertAdminSettings(r.Context(), records, adminID(r), reason); err != nil {
+		status, code := http.StatusInternalServerError, "bulk_write_failed"
+		if errors.Is(err, store.ErrAdminSettingConflict) {
+			status, code = http.StatusConflict, "setting_conflict"
+		}
+		writeOpenAIError(w, status, err.Error(), "server_error", code)
+		return
+	}
+	if err := s.reloadRuntimeConfig(r.Context()); err != nil {
+		writeOpenAIError(w, http.StatusServiceUnavailable, "settings were stored atomically but runtime reload is pending", "server_error", "setting_reload_pending")
+		return
+	}
 	s.auditAdmin(r, "setting.bulk", "", auditJSON(map[string]any{"count": len(out), "import": rejectSecret}))
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "applied": len(out)})
 }
@@ -1404,6 +1599,11 @@ func (s *Server) applySettingsBatch(w http.ResponseWriter, r *http.Request, item
 // handleAdminSettingsExport returns admin-overridden, non-secret settings (the importable
 // format). Secrets are excluded. GET /admin/settings/export
 func (s *Server) handleAdminSettingsExport(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
 	if !s.authorizeAdmin(r) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
@@ -1421,7 +1621,7 @@ func (s *Server) handleAdminSettingsExport(w http.ResponseWriter, r *http.Reques
 		if _, ok := stored[d.Key]; !ok {
 			continue // only export admin overrides
 		}
-		val, _ := s.effectiveSettingValue(stored, d)
+		val, _, _ := s.effectiveSettingValue(stored, d)
 		items = append(items, map[string]string{"key": d.Key, "value": val})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"settings": items, "note": "secrets excluded; set them individually after import"})
@@ -1430,6 +1630,11 @@ func (s *Server) handleAdminSettingsExport(w http.ResponseWriter, r *http.Reques
 // handleAdminSettingsValidate validates a proposed value without persisting it.
 // POST /admin/settings/validate {key, value}
 func (s *Server) handleAdminSettingsValidate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
 	if !s.authorizeAdmin(r) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
@@ -1463,7 +1668,7 @@ func (s *Server) handleAdminSettingsValidate(w http.ResponseWriter, r *http.Requ
 func (s *Server) crossLimit(stored map[string]store.AdminSetting, changingKey, newValue string) (int, int) {
 	get := func(key string) int {
 		d, _ := settingDefByKey(key)
-		eff, _ := s.effectiveSettingValue(stored, d)
+		eff, _, _ := s.effectiveSettingValue(stored, d)
 		n, _ := strconv.Atoi(eff)
 		return n
 	}
@@ -1481,8 +1686,18 @@ func (s *Server) crossLimit(stored map[string]store.AdminSetting, changingKey, n
 // table exists, using provided overrides or the current effective config.
 // POST /admin/settings/test/clickhouse {url?,user?,password?,database?,table?}
 func (s *Server) handleSettingsTestClickHouse(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
 	if !s.authorizeAdmin(r) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	permissionDef, _ := settingDefByKey("clickhouse.url")
+	if !s.canWriteSetting(r, permissionDef) {
+		writeOpenAIError(w, http.StatusForbidden, "your role cannot test this setting category", "permission_error", "settings_role_denied")
 		return
 	}
 	var p struct{ URL, User, Password, Database, Table string }
@@ -1549,8 +1764,22 @@ func (s *Server) handleSettingsTestClickHouse(w http.ResponseWriter, r *http.Req
 // handleSettingsTestText2SQLDB opens a Text2SQL execute/twin DB (provided override or
 // effective config) and runs SELECT 1. dbKind is "exec" or "twin".
 func (s *Server) handleSettingsTestText2SQLDB(w http.ResponseWriter, r *http.Request, dbKind string) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
 	if !s.authorizeAdmin(r) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	permissionKey := "text2sql.exec_dsn"
+	if dbKind == "twin" {
+		permissionKey = "text2sql.twin_dsn"
+	}
+	permissionDef, _ := settingDefByKey(permissionKey)
+	if !s.canWriteSetting(r, permissionDef) {
+		writeOpenAIError(w, http.StatusForbidden, "your role cannot test this setting category", "permission_error", "settings_role_denied")
 		return
 	}
 	var p struct{ DSN, Driver string }
@@ -1599,6 +1828,11 @@ func (s *Server) handleSettingsTestText2SQLTwin(w http.ResponseWriter, r *http.R
 
 // handleAdminSettingsHistory serves GET /admin/settings/history?key=.
 func (s *Server) handleAdminSettingsHistory(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
 	if !s.authorizeAdmin(r) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
@@ -1614,6 +1848,11 @@ func (s *Server) handleAdminSettingsHistory(w http.ResponseWriter, r *http.Reque
 // handleAdminSettingsRollback reverts a (non-secret) key to its previous value from history.
 // POST /admin/settings/rollback {key, reason}
 func (s *Server) handleAdminSettingsRollback(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
 	if !s.authorizeAdmin(r) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
@@ -1627,6 +1866,10 @@ func (s *Server) handleAdminSettingsRollback(w http.ResponseWriter, r *http.Requ
 	d, ok := settingDefByKey(key)
 	if !ok {
 		writeOpenAIError(w, http.StatusNotFound, "unknown setting key", "invalid_request_error", "unknown_key")
+		return
+	}
+	if d.ReadOnly {
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "this setting is read-only and must be changed through the environment", "invalid_request_error", "setting_read_only")
 		return
 	}
 	if !s.canWriteSetting(r, d) {

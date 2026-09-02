@@ -1027,18 +1027,29 @@ const adminHTML = `<!doctype html>
       route();
     }
 
-    // captureSSOFragment reads tokens (or an error) left in the URL fragment by the Keycloak
-    // callback redirect (#kc_access=…&kc_refresh=… or #kc_error=…), stores them, and cleans
-    // the URL so tokens never linger in history.
-    function captureSSOFragment() {
+    // captureSSOFragment consumes the short, browser-bound one-time code left by the
+    // Keycloak callback. Access/refresh tokens are returned only in this POST response
+    // and never appear in a URL, redirect header, or browser history.
+    async function captureSSOFragment() {
       const hash = location.hash || '';
-      const m = hash.match(/[#&]kc_access=([^&]+).*?[#&]kc_refresh=([^&]+)/);
+      const codeM = hash.match(/[#&]kc_code=([^&]+)/);
       const errM = hash.match(/[#&]kc_error=([^&]+)/);
-      if (m) {
-        saveAuth({ access_token: decodeURIComponent(m[1]), refresh_token: decodeURIComponent(m[2]) });
-        authState.enabled = true;
+      if (codeM) {
+        const code = decodeURIComponent(codeM[1]);
         history.replaceState(null, '', location.pathname + location.search);
-        return { ok: true };
+        try {
+          const res = await fetch('/auth/sso/exchange', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ code })
+          });
+          if (!res.ok) return { error: 'SSO 일회용 코드가 만료되었거나 다른 브라우저에서 시작되었습니다.' };
+          saveAuth(await res.json());
+          authState.enabled = true;
+          return { ok: true };
+        } catch (_) {
+          return { error: 'SSO 세션 교환에 실패했습니다.' };
+        }
       }
       if (errM) {
         history.replaceState(null, '', location.pathname + location.search);
@@ -1048,7 +1059,7 @@ const adminHTML = `<!doctype html>
     }
 
     async function initAuth() {
-      const sso = captureSSOFragment();
+      const sso = await captureSSOFragment();
       if (sso.error) { authState.enabled = true; renderAuthHeader(); showLogin('SSO 로그인 실패: ' + sso.error); return; }
       try {
         const h = authState.access ? { Authorization: 'Bearer ' + authState.access } : {};

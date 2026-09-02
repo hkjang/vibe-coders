@@ -52,8 +52,9 @@ import (
 // The list is short on purpose: adding to it is how a route stops being checked, so each
 // entry has to say why the response carries nothing worth protecting.
 var publicRoutes = map[string]string{
-	"/admin":  "the console shell itself — it has to load before anyone can log in, and it carries no data; every panel in it fetches from the guarded APIs",
-	"/admin/": "same shell, trailing-slash form",
+	"/admin":              "the console shell itself — it has to load before anyone can log in, and it carries no data; every panel in it fetches from the guarded APIs",
+	"/admin/":             "same shell, trailing-slash form",
+	"/admin/ui-bootstrap": "public login/bootstrap metadata only; authenticated identity and permissions are included only after a valid credential",
 
 	"/":             "landing page, static HTML",
 	"/favicon.ico":  "static icon",

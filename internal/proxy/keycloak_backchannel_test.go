@@ -28,6 +28,28 @@ func TestBackchannelLogoutEventCheck(t *testing.T) {
 	}
 }
 
+func TestKeycloakBackchannelLogoutRejectsOversizedBodies(t *testing.T) {
+	s := &Server{cfg: config.Config{Keycloak: config.KeycloakConfig{Enabled: true}}}
+	for _, test := range []struct {
+		name        string
+		contentType string
+		body        string
+	}{
+		{name: "form", contentType: "application/x-www-form-urlencoded", body: "logout_token=" + strings.Repeat("x", (64<<10)+1)},
+		{name: "json", contentType: "application/json", body: `{"logout_token":"` + strings.Repeat("x", (64<<10)+1) + `"}`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/auth/keycloak/backchannel-logout", strings.NewReader(test.body))
+			req.Header.Set("Content-Type", test.contentType)
+			rec := httptest.NewRecorder()
+			s.handleKeycloakBackchannelLogout(rec, req)
+			if rec.Code != http.StatusRequestEntityTooLarge {
+				t.Fatalf("oversized %s body status = %d, want 413; body=%s", test.name, rec.Code, rec.Body.String())
+			}
+		})
+	}
+}
+
 func TestKeycloakBackchannelLogoutRevokesSessions(t *testing.T) {
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
@@ -35,8 +57,9 @@ func TestKeycloakBackchannelLogoutRevokesSessions(t *testing.T) {
 	}
 	const issuer = "https://kc.example.com/realms/vibe"
 	jwksMu.Lock()
-	jwksKeys = map[string]*rsa.PublicKey{"bc-kid": &key.PublicKey}
-	jwksFetch = time.Now()
+	jwksCache = map[string]jwksCacheEntry{
+		issuer + "\x00http://unused": {keys: map[string]*rsa.PublicKey{"bc-kid": &key.PublicKey}, fetched: time.Now()},
+	}
 	jwksMu.Unlock()
 	discMu.Lock()
 	discCache = oidcDiscovery{Issuer: issuer, JWKSURI: "http://unused", AuthorizationEndpoint: "x", TokenEndpoint: "y"}
@@ -58,6 +81,23 @@ func TestKeycloakBackchannelLogoutRevokesSessions(t *testing.T) {
 	}
 
 	s := &Server{cfg: config.Config{Keycloak: config.KeycloakConfig{Enabled: true, ClientID: "vibe-coders", IssuerURL: issuer}}, db: db}
+	wrongAudience := signRS256(t, key, "bc-kid", map[string]any{
+		"iss": issuer, "aud": "other-client", "azp": "vibe-coders", "sub": "sub-1",
+		"events": map[string]any{"http://schemas.openid.net/event/backchannel-logout": map[string]any{}},
+		"exp":    float64(time.Now().Add(time.Hour).Unix()),
+	})
+	wrongForm := url.Values{"logout_token": {wrongAudience}}
+	wrongReq := httptest.NewRequest(http.MethodPost, "/auth/keycloak/backchannel-logout", strings.NewReader(wrongForm.Encode()))
+	wrongReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	wrongRec := httptest.NewRecorder()
+	s.handleKeycloakBackchannelLogout(wrongRec, wrongReq)
+	if wrongRec.Code != http.StatusBadRequest {
+		t.Fatalf("wrong-audience backchannel logout = %d, want 400", wrongRec.Code)
+	}
+	if active, _ := db.AuthSessionActive(ctx, "sess-1"); !active {
+		t.Fatal("azp must not substitute for logout-token audience")
+	}
+
 	logoutToken := signRS256(t, key, "bc-kid", map[string]any{
 		"iss": issuer, "aud": "vibe-coders", "sub": "sub-1",
 		"events": map[string]any{"http://schemas.openid.net/event/backchannel-logout": map[string]any{}},
