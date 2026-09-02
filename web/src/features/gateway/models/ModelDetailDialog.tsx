@@ -4,6 +4,7 @@ import type { ReactNode, RefObject } from "react";
 import type { ModelCatalogRow } from "@/features/gateway/models/model-catalog";
 import { ModelCandidateSelection } from "@/features/gateway/models/ModelCandidateSelection";
 import { ModelCatalogueFailure } from "@/features/gateway/models/ModelCatalogueFailure";
+import { formatModelDate } from "@/features/gateway/models/model-date";
 import { modelStatusPresentation } from "@/features/gateway/models/model-presentation";
 import { formatInteger, formatKRW, formatPercent } from "@/features/health/health-utils";
 import { isAppError } from "@/shared/api/error";
@@ -93,13 +94,6 @@ function DetailResourceState({
       {showBody ? children : null}
     </div>
   );
-}
-
-function formatDate(value: string | number | null): string {
-  if (value === null) return "정보 없음";
-  const timestamp = typeof value === "number" ? value * 1_000 : Date.parse(value);
-  if (Number.isNaN(timestamp)) return String(value);
-  return new Intl.DateTimeFormat("ko-KR", { dateStyle: "medium", timeStyle: "medium" }).format(timestamp);
 }
 
 function QualityDetails({ row }: { row: ModelCatalogRow }): React.JSX.Element {
@@ -325,16 +319,16 @@ export function ModelDetailDialog({
                 </div>
                 <div>
                   <dt>Created</dt>
-                  <dd>{formatDate(row.model.created)}</dd>
+                  <dd>{formatModelDate(row.model.created)}</dd>
                 </div>
                 <div>
                   <dt>Fetched</dt>
-                  <dd>{formatDate(row.model.fetched_at)}</dd>
+                  <dd>{formatModelDate(row.model.fetched_at)}</dd>
                 </div>
               </dl>
               {row.model.stale ? (
                 <p className="model-detail-note">
-                  마지막 정상 카탈로그 데이터입니다. Fetched {formatDate(row.model.fetched_at)}
+                  마지막 정상 카탈로그 데이터입니다. Fetched {formatModelDate(row.model.fetched_at)}
                 </p>
               ) : null}
             </section>

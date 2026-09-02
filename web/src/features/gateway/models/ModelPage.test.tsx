@@ -317,6 +317,21 @@ describe("ModelPage", () => {
     await waitFor(() => expect(restoredTrigger).toHaveFocus());
   });
 
+  it("keeps the detail dialog usable when created exceeds the JavaScript Date range", async () => {
+    const outOfRangeCreated = 8_640_000_000_001;
+    mockApi({
+      models: {
+        ...modelResponse,
+        models: [{ ...baseModel, created: outOfRangeCreated }],
+      },
+    });
+    renderPage(`/gateway/models?model_provider=${providerRef("openai")}&model=gpt-5&source=live`);
+
+    const dialog = await screen.findByRole("dialog", { name: "gpt-5" });
+    expect(await within(dialog).findByText(String(outOfRangeCreated))).toBeVisible();
+    expect(within(dialog).getByText("Catalogue")).toBeVisible();
+  });
+
   it("deep-links, filters, and restores focus for duplicate masked Providers by provider_ref", async () => {
     const user = userEvent.setup();
     const firstRef = `prv_${"A".repeat(43)}`;
