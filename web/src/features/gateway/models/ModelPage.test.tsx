@@ -304,6 +304,21 @@ describe("ModelPage", () => {
     await waitFor(() => expect(restoredTrigger).toHaveFocus());
   });
 
+  it("asks for an exact Provider and source when a model deep link is ambiguous", async () => {
+    const user = userEvent.setup();
+    mockApi();
+    renderPage("/gateway/models?model=shared-model");
+
+    const dialog = await screen.findByRole("dialog", { name: "shared-model" });
+    expect(await within(dialog).findByText("Provider와 source를 선택해 주세요.")).toBeVisible();
+    expect(within(dialog).queryByText("Model을 찾을 수 없습니다.")).not.toBeInTheDocument();
+    await user.click(within(dialog).getByRole("link", { name: "openai · agent route" }));
+
+    expect(await within(dialog).findByText("Virtual")).toBeVisible();
+    expect(screen.getByTestId("location")).toHaveTextContent("model_provider=openai");
+    expect(screen.getByTestId("location")).toHaveTextContent("source=agent_route");
+  });
+
   it("shows the required shadow status and prioritizing Agent Route in the detail dialog", async () => {
     const user = userEvent.setup();
     mockApi({ models: { ...modelResponse, models: [...modelResponse.models, shadowedModel] } });
@@ -518,6 +533,29 @@ describe("ModelPage", () => {
     await waitFor(() => expect(request).toHaveBeenCalledTimes(5));
   });
 
+  it("treats global and provider-unspecified partial failures as relevant to a deep link", async () => {
+    mockApi({
+      models: {
+        ...modelResponse,
+        partial_failures: [
+          {
+            code: "model_response_limit_exceeded",
+            message: "Model response limit exceeded.",
+            provider: "*",
+          },
+        ],
+        request_id: "req-global-partial",
+      },
+    });
+    renderPage("/gateway/models?model=not-in-truncated-response");
+
+    const dialog = await screen.findByRole("dialog", { name: "not-in-truncated-response" });
+    expect(await within(dialog).findByText("Provider Model 카탈로그를 확인할 수 없습니다.")).toBeVisible();
+    expect(within(dialog).getByText(/model_response_limit_exceeded/)).toBeVisible();
+    expect(within(dialog).getByText("Request ID: req-global-partial")).toBeVisible();
+    expect(within(dialog).queryByText("Model을 찾을 수 없습니다.")).not.toBeInTheDocument();
+  });
+
   it("shows the related partial failure alongside a stale model row", async () => {
     mockApi({
       models: {
@@ -607,7 +645,21 @@ describe("ModelPage", () => {
   it("shows last-known-good rows after catalogue refresh failure", async () => {
     const user = userEvent.setup();
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    client.setQueryData(["admin", "models"], modelResponse, { updatedAt: Date.now() - 30_000 });
+    client.setQueryData(
+      ["admin", "models"],
+      {
+        ...modelResponse,
+        partial_failures: [
+          {
+            code: "provider_models_stale",
+            message: "Cached provider failure.",
+            provider: "anthropic",
+          },
+        ],
+        request_id: "req-model-cached-response",
+      },
+      { updatedAt: Date.now() - 30_000 },
+    );
     const request = mockApi({
       modelError: new AppError("Model 목록 갱신 실패", {
         kind: "network",
@@ -615,13 +667,16 @@ describe("ModelPage", () => {
         retryable: true,
       }),
     });
-    renderPage("/gateway/models?model=gpt-5&model_provider=openai&source=live", client);
+    renderPage("/gateway/models?model=shared-model&model_provider=anthropic&source=live", client);
 
-    const dialog = await screen.findByRole("dialog", { name: "gpt-5" });
+    const dialog = await screen.findByRole("dialog", { name: "shared-model" });
     expect(
       await within(dialog).findByText("Model 카탈로그 갱신에 실패해 마지막 정상 데이터를 표시합니다."),
     ).toBeVisible();
     expect(within(dialog).getByText("Request ID: req-model-lkg")).toBeVisible();
+    expect(within(dialog).queryByText("Request ID: req-model-cached-response")).not.toBeInTheDocument();
+    expect(within(dialog).queryByText(/Cached provider failure/)).not.toBeInTheDocument();
+    expect(within(dialog).getAllByRole("alert")).toHaveLength(1);
     expect(within(dialog).getByText("Catalogue")).toBeVisible();
     await user.click(within(dialog).getByRole("button", { name: "Model 카탈로그 상세 재시도" }));
     await waitFor(() => expect(request).toHaveBeenCalledTimes(5));

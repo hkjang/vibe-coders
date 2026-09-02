@@ -2,6 +2,7 @@ import { AlertTriangle, ExternalLink, RefreshCw } from "lucide-react";
 import type { ReactNode, RefObject } from "react";
 
 import type { ModelCatalogRow } from "@/features/gateway/models/model-catalog";
+import { ModelCandidateSelection } from "@/features/gateway/models/ModelCandidateSelection";
 import { ModelCatalogueFailure } from "@/features/gateway/models/ModelCatalogueFailure";
 import { modelStatusPresentation } from "@/features/gateway/models/model-presentation";
 import { formatInteger, formatKRW, formatPercent } from "@/features/health/health-utils";
@@ -31,7 +32,9 @@ export interface ModelDetailEnrichment {
 }
 
 interface ModelDetailDialogProps {
+  candidates: readonly ModelCatalogRow[];
   catalogue: ModelCatalogueState;
+  detailSearch: (row: ModelCatalogRow) => string;
   enrichment: ModelDetailEnrichment;
   onOpenChange: (open: boolean) => void;
   open: boolean;
@@ -201,7 +204,9 @@ function DeprecationDetails({ row }: { row: ModelCatalogRow }): React.JSX.Elemen
 }
 
 export function ModelDetailDialog({
+  candidates,
   catalogue,
+  detailSearch,
   enrichment,
   onOpenChange,
   open,
@@ -212,10 +217,14 @@ export function ModelDetailDialog({
   showLegacyAdmin,
 }: ModelDetailDialogProps): React.JSX.Element {
   const requestId = isAppError(catalogue.error) ? catalogue.error.requestId : undefined;
-  const catalogueRequestId = catalogue.requestId || requestId || "";
+  const catalogueRequestId = requestId || catalogue.requestId;
   const failureProvider = row?.model.provider ?? requestedProvider;
   const relevantFailures = catalogue.partialFailures.filter(
-    (failure) => failure.provider === "" || failure.provider === failureProvider,
+    (failure) =>
+      failure.provider === "" ||
+      failure.provider === "*" ||
+      failureProvider === "" ||
+      failure.provider === failureProvider,
   );
   const footer = showLegacyAdmin ? (
     <a className="button button-secondary button-default" href="/admin#/model-contracts">
@@ -253,6 +262,8 @@ export function ModelDetailDialog({
             <RefreshCw aria-hidden="true" /> {catalogue.fetching ? "갱신 중" : "재시도"}
           </Button>
         </div>
+      ) : !row && candidates.length > 1 ? (
+        <ModelCandidateSelection candidates={candidates} detailSearch={detailSearch} />
       ) : !row && relevantFailures.length > 0 ? (
         <ModelCatalogueFailure
           failures={relevantFailures}
@@ -286,7 +297,7 @@ export function ModelDetailDialog({
               </Badge>
             </div>
 
-            {row.model.stale ? (
+            {row.model.stale && !catalogue.error ? (
               <ModelCatalogueFailure
                 failures={relevantFailures}
                 fetching={catalogue.fetching}

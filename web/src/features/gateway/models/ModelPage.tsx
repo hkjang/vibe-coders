@@ -254,6 +254,7 @@ export function ModelPage(): React.JSX.Element {
       />
 
       <ModelDetailDialog
+        candidates={selectedMatches}
         catalogue={{
           error: models.error,
           fetching: models.isFetching,
@@ -263,6 +264,7 @@ export function ModelPage(): React.JSX.Element {
           requestId: models.data?.request_id ?? "",
           retry: () => void models.refetch(),
         }}
+        detailSearch={detailSearch}
         enrichment={{
           pricing: {
             error: pricing.error,

@@ -13,7 +13,7 @@ export function safeReturnTo(raw: string | null | undefined, fallback = "/overvi
     if (parsed.pathname !== appBase && !parsed.pathname.startsWith(`${appBase}/`)) return fallback;
     const relativePath = parsed.pathname.slice(appBase.length) || "/";
     const search = sanitizeAppRouteSearch(relativePath, parsed.search).search;
-    const hash = sanitizeAppRouteHash(parsed.hash);
+    const hash = sanitizeAppRouteHash(parsed.hash, relativePath);
     return `${relativePath}${search}${hash}`;
   } catch {
     return fallback;
@@ -23,7 +23,7 @@ export function safeReturnTo(raw: string | null | undefined, fallback = "/overvi
 export function appReturnTo(pathname: string, search = "", hash = ""): string {
   const safePath = pathname.startsWith("/") ? pathname : `/${pathname}`;
   const safeSearch = sanitizeAppRouteSearch(safePath, search).search;
-  const safeHash = sanitizeAppRouteHash(hash);
+  const safeHash = sanitizeAppRouteHash(hash, safePath);
   return `${appBase}${safePath}${safeSearch}${safeHash}`;
 }
 

@@ -33,18 +33,32 @@ const exactCredentialParts = new Set(["auth", "key", "sig"]);
 export const secretSearchMessage =
   "인증정보로 보이는 검색어는 주소에 저장하지 않습니다. Secret을 제거한 뒤 검색하세요.";
 
-function decoded(value: string): string {
+const maxSecretCandidateLength = 16_384;
+const maxDecodePasses = 8;
+
+interface DecodedCandidate {
+  exceededLimit: boolean;
+  value: string;
+}
+
+function decoded(value: string): DecodedCandidate {
+  if (value.length > maxSecretCandidateLength) return { exceededLimit: true, value: "" };
   let current = value;
-  for (let attempt = 0; attempt < 3; attempt += 1) {
+  for (let attempt = 0; attempt < maxDecodePasses; attempt += 1) {
+    if (!/%[\da-f]{2}/i.test(current)) return { exceededLimit: false, value: current };
     try {
       const next = decodeURIComponent(current);
-      if (next === current) return current;
+      if (next === current) return { exceededLimit: false, value: current };
       current = next;
     } catch {
-      return current;
+      try {
+        current = decodeURIComponent(current.replace(/%(?![\da-f]{2})/gi, "%25"));
+      } catch {
+        return { exceededLimit: /%[\da-f]{2}/i.test(current), value: current };
+      }
     }
   }
-  return current;
+  return { exceededLimit: /%[\da-f]{2}/i.test(current), value: current };
 }
 
 export function isSensitiveCredentialKey(key: string): boolean {
@@ -62,13 +76,16 @@ export function isSensitiveCredentialKey(key: string): boolean {
 }
 
 export function containsPotentialSecret(value: string): boolean {
-  const candidate = decoded(value.trim());
+  const decodedCandidate = decoded(value.trim());
+  if (decodedCandidate.exceededLimit) return true;
+  const candidate = decodedCandidate.value;
   if (candidate === "") return false;
 
   if (
     /\bbearer(?:\s|\+)+[^\s,;]+/i.test(candidate) ||
     /\bsk-(?:proj-|ant-|svcacct-)?[a-z0-9_-]{8,}\b/i.test(candidate) ||
-    /\beyJ[a-z0-9_-]{4,}\.[a-z0-9_-]{4,}\.[a-z0-9_-]{4,}\b/i.test(candidate)
+    /\beyJ[a-z0-9_-]{4,}\.[a-z0-9_-]{4,}\.[a-z0-9_-]{4,}\b/i.test(candidate) ||
+    /(?:^|[?&#=;,\s/])[^\s/@:]+:[^\s/@]+@(?:\[[^\]]+\]|[^\s/:?#]+)(?::\d+)?(?:[/?#]|$)/i.test(candidate)
   ) {
     return true;
   }

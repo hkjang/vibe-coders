@@ -270,9 +270,11 @@ test("keeps an exact model deep link across reload, restores focus, retries deta
   expect(await axeViolations(page)).toEqual([]);
 });
 
-test("distinguishes a provider partial failure from a missing deep-linked model", async ({ page }) => {
+test("distinguishes a partial failure from a missing model when the provider is unspecified", async ({
+  page,
+}) => {
   await mockModelGateway(page);
-  await page.goto("gateway/models?model=claude-4&model_provider=anthropic&source=live");
+  await page.goto("gateway/models?model=claude-4");
 
   const dialog = page.getByRole("dialog", { name: "claude-4" });
   await expect(dialog).toBeVisible();
@@ -280,4 +282,15 @@ test("distinguishes a provider partial failure from a missing deep-linked model"
   await expect(dialog.getByText(/provider_models_unavailable/)).toBeVisible();
   await expect(dialog.getByText("Request ID: req-models-e2e")).toBeVisible();
   await expect(dialog.getByText("Model을 찾을 수 없습니다.")).toBeHidden();
+});
+
+test("requires an exact Provider and source for an ambiguous model deep link", async ({ page }) => {
+  await mockModelGateway(page);
+  await page.goto("gateway/models?model=shared-model");
+
+  const dialog = page.getByRole("dialog", { name: "shared-model" });
+  await expect(dialog.getByText("Provider와 source를 선택해 주세요.")).toBeVisible();
+  await dialog.getByRole("link", { name: "openai · agent route" }).click();
+  await expect(dialog.getByText("Virtual", { exact: true })).toBeVisible();
+  await expect(page).toHaveURL(/model_provider=openai&source=agent_route/);
 });

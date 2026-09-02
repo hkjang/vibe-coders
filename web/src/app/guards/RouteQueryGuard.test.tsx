@@ -9,7 +9,7 @@ function Probe({ rendered }: { rendered: () => void }): React.JSX.Element {
   const location = useLocation();
   rendered();
   return (
-    <output>
+    <output data-state={JSON.stringify(location.state)}>
       {location.pathname}
       {location.search}
       {rejectedSensitiveQuery(location.state, "q") ? ":rejected" : ""}
@@ -31,6 +31,36 @@ describe("RouteQueryGuard", () => {
     );
 
     expect(await screen.findByRole("status")).toHaveTextContent("/gateway/providers?status=enabled:rejected");
+    expect(rendered).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not copy arbitrary or nested user state into the sanitized location", async () => {
+    const rendered = vi.fn();
+    render(
+      <MemoryRouter
+        initialEntries={[
+          {
+            pathname: "/gateway/models",
+            search: "?provider=openai",
+            state: {
+              nested: { clientSecret: "state-private" },
+              token: "state-private",
+              appSensitiveQueryKeys: ["q", "state-private"],
+            },
+          },
+        ]}
+      >
+        <Routes>
+          <Route element={<RouteQueryGuard />}>
+            <Route path="gateway/models" element={<Probe rendered={rendered} />} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    const output = await screen.findByRole("status");
+    expect(output).toHaveAttribute("data-state", JSON.stringify({ appSensitiveQueryKeys: ["q"] }));
+    expect(output.outerHTML).not.toContain("state-private");
     expect(rendered).toHaveBeenCalledTimes(1);
   });
 
