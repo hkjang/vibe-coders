@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -215,7 +216,7 @@ func TestAdminModelsNormalizesConcurrentProviderInventory(t *testing.T) {
 	if len(filtered.Providers) != 1 || filtered.Providers[0].Provider != "alpha" || filtered.Providers[0].ModelCount != 1 {
 		t.Fatalf("filtered providers = %+v", filtered.Providers)
 	}
-	if alphaCalls.Load() != 2 || zetaCalls.Load() != 1 {
+	if alphaCalls.Load() != 1 || zetaCalls.Load() != 1 {
 		t.Fatalf("provider filter calls alpha=%d zeta=%d", alphaCalls.Load(), zetaCalls.Load())
 	}
 
@@ -420,5 +421,158 @@ func TestNormalizedModelCreatedRejectsNonIntegralAndOverflowValues(t *testing.T)
 		if got := normalizedModelCreated(value); got != nil {
 			t.Errorf("normalizedModelCreated(%v) = %d, want nil", value, *got)
 		}
+	}
+}
+
+func TestAdminModelsCoalescesRefreshesAndServesLastKnownGood(t *testing.T) {
+	var calls atomic.Int32
+	started := make(chan struct{})
+	release := make(chan struct{})
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		call := calls.Add(1)
+		if call == 1 {
+			close(started)
+			<-release
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"data":[{"id":"cached-model","owned_by":"catalog"}]}`)
+			return
+		}
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = io.WriteString(w, "private upstream failure")
+	}))
+	defer upstream.Close()
+
+	server, db, gateway := newAdminModelsTestServer(t, "")
+	addAdminModelsProvider(t, server, db, store.ProviderConfig{
+		Name: "cached", BaseURL: upstream.URL, TimeoutMS: 2_000, Enabled: true,
+	}, "cached-key")
+	baseTime := time.Date(2026, 9, 2, 12, 0, 0, 0, time.UTC)
+	var clock atomic.Int64
+	clock.Store(baseTime.UnixNano())
+	server.adminModels.now = func() time.Time { return time.Unix(0, clock.Load()).UTC() }
+	server.adminModels.freshTTL = time.Second
+	server.adminModels.staleTTL = time.Minute
+
+	type responseResult struct {
+		status int
+		body   adminModelsResponse
+		err    error
+	}
+	const concurrentRequests = 8
+	results := make(chan responseResult, concurrentRequests)
+	startRequests := make(chan struct{})
+	for range concurrentRequests {
+		go func() {
+			<-startRequests
+			resp, err := http.Get(gateway.URL + "/admin/models")
+			if err != nil {
+				results <- responseResult{err: err}
+				return
+			}
+			defer resp.Body.Close()
+			var body adminModelsResponse
+			err = json.NewDecoder(resp.Body).Decode(&body)
+			results <- responseResult{status: resp.StatusCode, body: body, err: err}
+		}()
+	}
+	close(startRequests)
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("provider refresh did not start")
+	}
+	// Give the concurrent handlers time to join the in-flight refresh before it completes.
+	time.Sleep(25 * time.Millisecond)
+	close(release)
+	for range concurrentRequests {
+		result := <-results
+		if result.err != nil || result.status != http.StatusOK {
+			t.Fatalf("concurrent response status=%d err=%v", result.status, result.err)
+		}
+		if len(result.body.Models) != 1 || result.body.Models[0].ID != "cached-model" {
+			t.Fatalf("concurrent response models = %+v", result.body.Models)
+		}
+	}
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("concurrent requests made %d provider calls, want 1", got)
+	}
+
+	clock.Store(baseTime.Add(2 * time.Second).UnixNano())
+	resp, body := getAdminModels(t, gateway.URL+"/admin/models", "")
+	if resp.StatusCode != http.StatusOK || len(body.Models) != 1 {
+		t.Fatalf("stale response status=%d body=%+v", resp.StatusCode, body)
+	}
+	if !body.Models[0].Stale || body.Models[0].Source != adminModelSourceCache {
+		t.Fatalf("last-known-good model not marked stale cache: %+v", body.Models[0])
+	}
+	if len(body.Providers) != 1 || !body.Providers[0].Stale || body.Providers[0].Status != "ok" {
+		t.Fatalf("last-known-good provider = %+v", body.Providers)
+	}
+	if len(body.PartialFailures) != 1 || body.PartialFailures[0].Code != "provider_models_unavailable" {
+		t.Fatalf("stale refresh failure = %+v", body.PartialFailures)
+	}
+	encoded, err := json.Marshal(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "private upstream failure") || strings.Contains(string(encoded), "cached-key") {
+		t.Fatalf("stale response exposed provider details: %s", encoded)
+	}
+	if got := calls.Load(); got != 2 {
+		t.Fatalf("expired catalogue made %d provider calls, want 2", got)
+	}
+}
+
+func TestAdminModelCatalogCacheBoundsGlobalProviderConcurrency(t *testing.T) {
+	cache := newAdminModelCatalogCache()
+	cache.semaphore = make(chan struct{}, 2)
+	started := make(chan struct{}, 6)
+	release := make(chan struct{})
+	var active atomic.Int32
+	var maximum atomic.Int32
+	var wg sync.WaitGroup
+
+	for index := range 6 {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			provider := store.ProviderConfig{
+				Name: "provider-" + strconv.Itoa(index), BaseURL: "https://models.example", Enabled: true,
+			}
+			result := cache.load(t.Context(), provider, time.Second, func(context.Context) ([]adminModelCatalogRow, error) {
+				current := active.Add(1)
+				for {
+					observed := maximum.Load()
+					if current <= observed || maximum.CompareAndSwap(observed, current) {
+						break
+					}
+				}
+				started <- struct{}{}
+				<-release
+				active.Add(-1)
+				return []adminModelCatalogRow{{ID: "model"}}, nil
+			})
+			if result.status != "ok" {
+				t.Errorf("provider %d result = %+v", index, result)
+			}
+		}(index)
+	}
+
+	for range 2 {
+		select {
+		case <-started:
+		case <-time.After(2 * time.Second):
+			t.Fatal("bounded provider fetch did not start")
+		}
+	}
+	select {
+	case <-started:
+		t.Fatal("more provider fetches started than the global semaphore permits")
+	case <-time.After(25 * time.Millisecond):
+	}
+	close(release)
+	wg.Wait()
+	if got := maximum.Load(); got != 2 {
+		t.Fatalf("maximum provider concurrency = %d, want 2", got)
 	}
 }

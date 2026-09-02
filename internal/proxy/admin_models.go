@@ -71,10 +71,13 @@ type adminModelsResponse struct {
 }
 
 type adminProviderModelsResult struct {
-	config    store.ProviderConfig
-	models    []map[string]any
-	status    string
-	fetchedAt string
+	config      store.ProviderConfig
+	models      []adminModelCatalogRow
+	status      string
+	source      adminModelSource
+	fetchedAt   string
+	stale       bool
+	failureCode string
 }
 
 // handleAdminModels returns the authenticated, normalized model inventory used by the
@@ -116,17 +119,17 @@ func (s *Server) handleAdminModels(w http.ResponseWriter, r *http.Request) {
 		provider := adminModelProvider{
 			Provider: result.config.Name,
 			Status:   result.status,
-			Source:   adminModelSourceLive,
-			Stale:    false,
+			Source:   result.source,
+			Stale:    result.stale,
 		}
 		if result.fetchedAt != "" {
 			fetchedAt := result.fetchedAt
 			provider.FetchedAt = &fetchedAt
 		}
 		if result.status == "ok" {
-			for _, raw := range result.models {
-				model, ok := s.normalizeAdminModel(r.Context(), raw, result.config.Name, result.fetchedAt, now)
-				if !ok || (modelFilter != "" && model.ID != modelFilter) {
+			for _, catalogModel := range result.models {
+				model := s.adminModelFromCatalog(r.Context(), catalogModel, result, now)
+				if modelFilter != "" && model.ID != modelFilter {
 					continue
 				}
 				key := adminModelKey(model)
@@ -170,6 +173,8 @@ func (s *Server) handleAdminModels(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) fetchAdminProviderModels(ctx context.Context, configs []store.ProviderConfig, providerFilter string, response *adminModelsResponse) []adminProviderModelsResult {
+	fallbackTimeout := s.upstreamConf().Timeout
+	s.adminModels.prune(configs, fallbackTimeout)
 	selected := make([]store.ProviderConfig, 0, len(configs))
 	for _, provider := range configs {
 		if !provider.Enabled || (providerFilter != "" && provider.Name != providerFilter) {
@@ -182,41 +187,56 @@ func (s *Server) fetchAdminProviderModels(ctx context.Context, configs []store.P
 	var wg sync.WaitGroup
 	dec := s.secrets.Load()
 	for i, provider := range selected {
-		results[i] = adminProviderModelsResult{config: provider, status: "skipped"}
+		results[i] = adminProviderModelsResult{
+			config: provider, status: "skipped", source: adminModelSourceLive,
+		}
 		apiKey, err := dec.Decrypt(provider.EncryptedAPIKey)
 		if err != nil || strings.TrimSpace(apiKey) == "" {
-			response.PartialFailures = append(response.PartialFailures, adminModelPartialFailure{
-				Provider: provider.Name,
-				Code:     "provider_credentials_unavailable",
-				Message:  "Provider credentials are unavailable.",
-			})
+			if cached, ok := s.adminModels.cached(provider, fallbackTimeout, true); ok {
+				cached.stale = true
+				cached.failureCode = "provider_credentials_unavailable"
+				results[i] = cached
+			} else {
+				results[i].failureCode = "provider_credentials_unavailable"
+			}
 			continue
 		}
 
 		wg.Add(1)
 		go func(index int, p store.ProviderConfig, key string) {
 			defer wg.Done()
-			models, fetchErr := s.fetchProviderModels(ctx, p.Name, p.BaseURL, key, adminModelsProviderTimeout(p, s.cfg.Upstream.Timeout), "")
-			if fetchErr != nil {
-				results[index].status = "failed"
-				slog.Warn("admin model catalogue fetch failed", "provider", p.Name)
-				return
+			results[index] = s.adminModels.load(ctx, p, fallbackTimeout, func(fetchCtx context.Context) ([]adminModelCatalogRow, error) {
+				models, fetchErr := s.fetchProviderModels(fetchCtx, p.Name, p.BaseURL, key, adminModelsProviderTimeout(p, fallbackTimeout), "")
+				if fetchErr != nil {
+					return nil, fetchErr
+				}
+				catalog := make([]adminModelCatalogRow, 0, len(models))
+				for _, raw := range models {
+					if model, ok := normalizeAdminModelCatalogRow(raw, p.Name); ok {
+						catalog = append(catalog, model)
+					}
+				}
+				return catalog, nil
+			})
+			if results[index].failureCode == "provider_models_unavailable" {
+				slog.Warn("admin model catalogue fetch failed", "provider", p.Name, "stale", results[index].stale)
 			}
-			results[index].models = models
-			results[index].status = "ok"
-			results[index].fetchedAt = time.Now().UTC().Format(time.RFC3339Nano)
 		}(i, provider, apiKey)
 	}
 	wg.Wait()
 
 	for _, result := range results {
-		if result.status != "failed" {
+		if result.failureCode == "" {
 			continue
+		}
+		message := "Provider model catalog is unavailable."
+		if result.failureCode == "provider_credentials_unavailable" {
+			message = "Provider credentials are unavailable."
 		}
 		response.PartialFailures = append(response.PartialFailures, adminModelPartialFailure{
 			Provider: result.config.Name,
-			Code:     "provider_models_unavailable",
-			Message:  "Provider model catalog is unavailable.",
+			Code:     result.failureCode,
+			Message:  message,
 		})
 	}
 	return results
@@ -233,11 +253,11 @@ func adminModelsProviderTimeout(provider store.ProviderConfig, fallback time.Dur
 	return timeout
 }
 
-func (s *Server) normalizeAdminModel(ctx context.Context, raw map[string]any, provider, fetchedAt string, now time.Time) (adminModel, bool) {
+func normalizeAdminModelCatalogRow(raw map[string]any, provider string) (adminModelCatalogRow, bool) {
 	id, _ := raw["id"].(string)
 	id = strings.TrimSpace(id)
 	if id == "" {
-		return adminModel{}, false
+		return adminModelCatalogRow{}, false
 	}
 	object, _ := raw["object"].(string)
 	object = strings.TrimSpace(object)
@@ -249,19 +269,18 @@ func (s *Server) normalizeAdminModel(ctx context.Context, raw map[string]any, pr
 	if ownedBy == "" {
 		ownedBy = provider
 	}
+	return adminModelCatalogRow{
+		ID: id, Object: object, OwnedBy: ownedBy, Created: normalizedModelCreated(raw["created"]),
+	}, true
+}
+
+func (s *Server) adminModelFromCatalog(ctx context.Context, catalog adminModelCatalogRow, result adminProviderModelsResult, now time.Time) adminModel {
 	model := adminModel{
-		ID:        id,
-		Provider:  provider,
-		Object:    object,
-		OwnedBy:   ownedBy,
-		Created:   normalizedModelCreated(raw["created"]),
-		Source:    adminModelSourceLive,
-		Virtual:   false,
-		Stale:     false,
-		FetchedAt: fetchedAt,
+		ID: catalog.ID, Provider: result.config.Name, Object: catalog.Object, OwnedBy: catalog.OwnedBy,
+		Created: catalog.Created, Source: result.source, Virtual: false, Stale: result.stale, FetchedAt: result.fetchedAt,
 	}
-	model.Deprecation = s.adminModelDeprecation(ctx, id, now)
-	return model, true
+	model.Deprecation = s.adminModelDeprecation(ctx, catalog.ID, now)
+	return model
 }
 
 func normalizedModelCreated(value any) *int64 {

@@ -92,6 +92,7 @@ type Server struct {
 	lastReloadNano  atomic.Int64           // unix nanos of this pod's last runtime-config reload (convergence observability)
 	lastReloadTok   atomic.Pointer[string] // admin_settings change token this pod last applied
 	appUIRuntime    atomic.Pointer[appUIRuntimeConfig]
+	adminModels     *adminModelCatalogCache
 }
 
 type atomicKillState struct {
@@ -128,13 +129,14 @@ func NewServer(cfg config.Config, db *store.SQLStore, logger *store.AsyncLogger,
 			Timeout:   cfg.Upstream.Timeout,
 			Transport: transport,
 		},
-		metrics:    newMetrics(),
-		breakers:   newProviderBreakers(),
-		balancer:   newProviderBalancer(),
-		instanceID: instanceIdentity(),
-		retention:  retention,
-		sessions:   newSessionInferer(cfg.Session.IdleTimeout),
-		dwCache:    newDWQueryCache(0),
+		metrics:     newMetrics(),
+		breakers:    newProviderBreakers(),
+		balancer:    newProviderBalancer(),
+		instanceID:  instanceIdentity(),
+		retention:   retention,
+		sessions:    newSessionInferer(cfg.Session.IdleTimeout),
+		dwCache:     newDWQueryCache(0),
+		adminModels: newAdminModelCatalogCache(),
 	}
 	server.secrets.Store(secrets)
 
