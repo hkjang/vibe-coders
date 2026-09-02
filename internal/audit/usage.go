@@ -41,6 +41,14 @@ func EstimateCostKRW(model string, usage Usage, pricing map[string]config.ModelP
 	return input + output
 }
 
+// LookupPrice resolves the price used to cost a model: exact match first, then the
+// longest matching catalog prefix, then the configured fallback model. Exported so
+// callers outside this package price a model exactly the way cost estimation does
+// instead of keeping their own copy of the rules.
+func LookupPrice(model string, pricing map[string]config.ModelPrice) (config.ModelPrice, bool) {
+	return lookupPrice(model, pricing)
+}
+
 // ModelPriced reports whether the model (exact or prefix) has a price entry.
 func ModelPriced(model string, pricing map[string]config.ModelPrice) bool {
 	_, ok := lookupPrice(model, pricing)
@@ -96,11 +104,23 @@ func lookupPrice(model string, pricing map[string]config.ModelPrice) (config.Mod
 	if price, ok := pricing[normalized]; ok {
 		return price, true
 	}
+	// Several catalog entries are prefixes of the same versioned model name --
+	// "gpt-4o-mini-2026-06" starts with both "gpt-4o" and "gpt-4o-mini", whose input
+	// rates differ by ~17x. Ranging over the map would pick either one at random, so
+	// the same request could be costed differently on every call. Keep the longest
+	// (most specific) match, which is both deterministic and the intended price.
+	best, bestLen := config.ModelPrice{}, -1
 	for key, price := range pricing {
 		key = strings.ToLower(strings.TrimSpace(key))
-		if key != "" && strings.HasPrefix(normalized, key) {
-			return price, true
+		if key == "" || !strings.HasPrefix(normalized, key) {
+			continue
 		}
+		if len(key) > bestLen {
+			best, bestLen = price, len(key)
+		}
+	}
+	if bestLen >= 0 {
+		return best, true
 	}
 	// Last resort: cost unmatched models at the fallback model's price (when present).
 	if fb, ok := pricing[FallbackPriceModel()]; ok {

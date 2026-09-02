@@ -314,23 +314,9 @@ func (s *Server) explainCost(d store.ExplainData) map[string]any {
 	return out
 }
 
-// lookupModelPrice mirrors audit.lookupPrice (prefix match) for explain savings math.
+// lookupModelPrice resolves a model price for explain savings math. It delegates to the
+// costing path rather than restating the exact/prefix/fallback rules, so explain can't
+// report a saving against a rate the request was never billed at.
 func lookupModelPrice(model string, pricing map[string]config.ModelPrice) (config.ModelPrice, bool) {
-	normalized := strings.ToLower(strings.TrimSpace(model))
-	if normalized == "" {
-		return config.ModelPrice{}, false
-	}
-	if p, ok := pricing[normalized]; ok {
-		return p, true
-	}
-	for key, p := range pricing {
-		key = strings.ToLower(strings.TrimSpace(key))
-		if key != "" && strings.HasPrefix(normalized, key) {
-			return p, true
-		}
-	}
-	if fb, ok := pricing[audit.FallbackPriceModel()]; ok {
-		return fb, true
-	}
-	return config.ModelPrice{}, false
+	return audit.LookupPrice(model, pricing)
 }
