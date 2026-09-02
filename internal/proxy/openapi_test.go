@@ -189,8 +189,8 @@ func assertOpenAPIContract(t *testing.T, spec map[string]any) {
 		}
 	}
 	created, _ := adminModelProperties["created"].(map[string]any)
-	if created["type"] != "integer" || created["format"] != "int64" || created["nullable"] != true || created["minimum"] != float64(0) {
-		t.Errorf("AdminModel.created schema = %v, want nullable non-negative int64", created)
+	if created["type"] != "integer" || created["format"] != "int64" || created["nullable"] != true || created["minimum"] != float64(0) || created["maximum"] != float64(maxAdminModelCreated) {
+		t.Errorf("AdminModel.created schema = %v, want nullable JavaScript-safe non-negative int64", created)
 	}
 	for _, schemaName := range []string{"ProviderPublic", "ProviderSLO", "ProviderSLOEvaluation", "ProviderSLODeleteResponse", "ProviderHealthScore", "ProviderHealthRankingItem", "ProviderHealthAlert", "RoutingBreakerState", "AgentRoute", "AdminModel", "AdminModelProvider", "AdminModelPartialFailure"} {
 		schema, _ := schemas[schemaName].(map[string]any)

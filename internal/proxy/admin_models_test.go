@@ -915,7 +915,10 @@ func TestNormalizedModelCreatedRejectsNonIntegralAndOverflowValues(t *testing.T)
 	if got := normalizedModelCreated(float64(123)); got == nil || *got != 123 {
 		t.Fatalf("created = %v, want 123", got)
 	}
-	for _, value := range []any{nil, "123", float64(-1), float64(1.5), float64(9_223_372_036_854_775_808)} {
+	if got := normalizedModelCreated(float64(maxAdminModelCreated)); got == nil || *got != maxAdminModelCreated {
+		t.Fatalf("created = %v, want JavaScript maximum safe integer %d", got, maxAdminModelCreated)
+	}
+	for _, value := range []any{nil, "123", float64(-1), float64(1.5), float64(maxAdminModelCreated + 1), float64(9_223_372_036_854_775_808)} {
 		if got := normalizedModelCreated(value); got != nil {
 			t.Errorf("normalizedModelCreated(%v) = %d, want nil", value, *got)
 		}

@@ -854,7 +854,7 @@ func modelCatalogOpenAPISchemas() map[string]any {
 			"properties": map[string]any{
 				"id": map[string]any{"type": "string"}, "provider": map[string]any{"type": "string"}, "provider_ref": providerRef,
 				"object": map[string]any{"type": "string"}, "owned_by": map[string]any{"type": "string"},
-				"created": map[string]any{"type": "integer", "format": "int64", "minimum": 0, "nullable": true}, "source": modelSource,
+				"created": map[string]any{"type": "integer", "format": "int64", "minimum": 0, "maximum": maxAdminModelCreated, "nullable": true}, "source": modelSource,
 				"virtual": map[string]any{"type": "boolean"}, "shadowed": map[string]any{"type": "boolean"},
 				"shadowed_by": map[string]any{"type": "string"}, "stale": map[string]any{"type": "boolean"},
 				"fetched_at":  map[string]any{"type": "string", "format": "date-time"},

@@ -6,6 +6,7 @@
         "properties": {
           "created": {
             "format": "int64",
+            "maximum": 9007199254740991,
             "minimum": 0,
             "nullable": true,
             "type": "integer"

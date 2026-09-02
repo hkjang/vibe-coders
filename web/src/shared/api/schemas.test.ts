@@ -294,6 +294,18 @@ describe("OpenAPI runtime schemas", () => {
     expect(
       adminModelsResponseSchema.safeParse({
         ...response,
+        models: [{ ...response.models[0], created: Number.MAX_SAFE_INTEGER }],
+      }).success,
+    ).toBe(true);
+    expect(
+      adminModelsResponseSchema.safeParse({
+        ...response,
+        models: [{ ...response.models[0], created: Number.MAX_SAFE_INTEGER + 1 }],
+      }).success,
+    ).toBe(false);
+    expect(
+      adminModelsResponseSchema.safeParse({
+        ...response,
         models: [{ ...response.models[0], provider_ref: "openai" }],
       }).success,
     ).toBe(false);

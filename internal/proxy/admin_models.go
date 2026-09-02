@@ -24,6 +24,7 @@ const (
 	maxAdminModelsResponseBytes        = 16 << 20
 	maxAdminModelsResponseModelBytes   = maxAdminModelsResponseBytes - (512 << 10)
 	maxAdminModelsRetainedCatalogBytes = 16 << 20
+	maxAdminModelCreated               = int64(1<<53 - 1)
 )
 
 type adminModelSource string
@@ -515,9 +516,9 @@ func (s *Server) adminModelFromCatalog(ctx context.Context, catalog adminModelCa
 
 func normalizedModelCreated(value any) *int64 {
 	number, ok := value.(float64)
-	// float64(math.MaxInt64) rounds to 2^63. Treat that exclusive bound as invalid;
-	// converting it directly would wrap to MinInt64.
-	if !ok || math.IsNaN(number) || math.IsInf(number, 0) || math.Trunc(number) != number || number < 0 || number >= math.MaxInt64 {
+	// The React contract represents this OpenAPI integer as a JavaScript number.
+	// Reject larger integral values before they lose precision in the browser.
+	if !ok || math.IsNaN(number) || math.IsInf(number, 0) || math.Trunc(number) != number || number < 0 || number > float64(maxAdminModelCreated) {
 		return nil
 	}
 	created := int64(number)
