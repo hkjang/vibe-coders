@@ -1,11 +1,11 @@
 import { AlertTriangle, Clock3, RefreshCw, type LucideIcon } from "lucide-react";
-import type { ReactNode } from "react";
+import { useEffect, useReducer, type ReactNode } from "react";
 
 import { exactTime, healthRanges, relativeTime, type HealthRange } from "@/features/health/health-utils";
 import { isAppError } from "@/shared/api/error";
 import { Badge, type BadgeProps } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
-import { usePreferences } from "@/shared/stores/preferences";
+import { usePreferences, type RefreshInterval } from "@/shared/stores/preferences";
 
 const rangeLabels: Record<HealthRange, string> = {
   "1h": "1시간",
@@ -13,6 +13,24 @@ const rangeLabels: Record<HealthRange, string> = {
   "7d": "7일",
   "30d": "30일",
 };
+
+function useControlledRelativeClock(refreshInterval: RefreshInterval): void {
+  const [, advanceClock] = useReducer((tick: number) => tick + 1, 0);
+
+  useEffect(() => {
+    if (refreshInterval === 0) return undefined;
+
+    const updateWhileVisible = (): void => {
+      if (document.visibilityState === "visible") advanceClock();
+    };
+    const interval = window.setInterval(updateWhileVisible, refreshInterval * 1_000);
+    document.addEventListener("visibilitychange", updateWhileVisible);
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", updateWhileVisible);
+    };
+  }, [refreshInterval]);
+}
 
 export function TimeRangePicker({
   value,
@@ -39,11 +57,12 @@ export function UpdatedTime({
   timestamp: number;
   label?: string;
 }): React.JSX.Element {
-  const showRelativeTime = usePreferences((state) => state.refreshInterval > 0);
+  const refreshInterval = usePreferences((state) => state.refreshInterval);
+  useControlledRelativeClock(refreshInterval);
   const exact = exactTime(timestamp);
   return (
     <time dateTime={new Date(timestamp).toISOString()} title={exact}>
-      <Clock3 aria-hidden="true" /> {label} {showRelativeTime ? relativeTime(timestamp) : exact}
+      <Clock3 aria-hidden="true" /> {label} {refreshInterval > 0 ? relativeTime(timestamp) : exact}
     </time>
   );
 }

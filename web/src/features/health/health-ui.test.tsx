@@ -74,22 +74,63 @@ describe("health UI primitives", () => {
   it("shows an exact timestamp while automatic refresh is paused", () => {
     usePreferences.setState({ refreshInterval: 0 });
     const timestamp = new Date("2026-09-02T09:00:00Z").getTime();
-
-    render(<UpdatedTime timestamp={timestamp} />);
-
-    expect(screen.getByText(/마지막 갱신/)).toHaveTextContent(exactTime(timestamp));
-  });
-
-  it("uses relative time only when the user enables automatic refresh", () => {
-    usePreferences.setState({ refreshInterval: 60 });
-    const timestamp = new Date("2026-09-02T09:00:00Z").getTime();
-    const now = vi.spyOn(Date, "now").mockReturnValue(timestamp + 120_000);
+    const interval = vi.spyOn(window, "setInterval");
 
     try {
       render(<UpdatedTime timestamp={timestamp} />);
-      expect(screen.getByText(/마지막 갱신/)).toHaveTextContent("2분 전");
+
+      expect(screen.getByText(/마지막 갱신/)).toHaveTextContent(exactTime(timestamp));
+      expect(interval).not.toHaveBeenCalled();
     } finally {
-      now.mockRestore();
+      interval.mockRestore();
+    }
+  });
+
+  it("updates relative time at the selected frequency and pauses while hidden", () => {
+    const timestamp = new Date("2026-09-02T09:00:00Z").getTime();
+    const originalVisibility = Object.getOwnPropertyDescriptor(document, "visibilityState");
+    let visibility: DocumentVisibilityState = "visible";
+    let unmount: (() => void) | undefined;
+
+    try {
+      vi.useFakeTimers();
+      vi.setSystemTime(timestamp);
+      Object.defineProperty(document, "visibilityState", {
+        configurable: true,
+        get: () => visibility,
+      });
+      const interval = vi.spyOn(window, "setInterval");
+      const removeListener = vi.spyOn(document, "removeEventListener");
+      usePreferences.setState({ refreshInterval: 60 });
+
+      const view = render(<UpdatedTime timestamp={timestamp} />);
+      unmount = view.unmount;
+      expect(interval).toHaveBeenCalledWith(expect.any(Function), 60_000);
+      expect(screen.getByText(/마지막 갱신/)).toHaveTextContent("지금");
+
+      visibility = "hidden";
+      act(() => vi.advanceTimersByTime(120_000));
+      expect(screen.getByText(/마지막 갱신/)).toHaveTextContent("지금");
+
+      visibility = "visible";
+      act(() => {
+        document.dispatchEvent(new Event("visibilitychange"));
+      });
+      expect(screen.getByText(/마지막 갱신/)).toHaveTextContent("2분 전");
+
+      unmount();
+      unmount = undefined;
+      expect(vi.getTimerCount()).toBe(0);
+      expect(removeListener).toHaveBeenCalledWith("visibilitychange", expect.any(Function));
+    } finally {
+      unmount?.();
+      if (originalVisibility) {
+        Object.defineProperty(document, "visibilityState", originalVisibility);
+      } else {
+        Reflect.deleteProperty(document, "visibilityState");
+      }
+      vi.restoreAllMocks();
+      vi.useRealTimers();
       act(() => usePreferences.setState({ refreshInterval: 0 }));
     }
   });
