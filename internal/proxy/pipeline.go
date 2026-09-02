@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"bytes"
 	"compress/gzip"
 	"context"
 	"errors"
@@ -53,6 +54,11 @@ type requestPipeline struct {
 	authCtx     *store.AuthContext
 	body        []byte
 	traceID     string
+
+	// When an unpinned model aggregation cannot return any provider, the classic
+	// compatibility path remains available but must retain the aggregate bounds.
+	modelsAggregateFallback bool
+	modelsAggregateResult   aggregatedModelsResult
 
 	routeDecision routingDecision
 	routingPlan   *intelligentRoutingPlan
@@ -504,14 +510,30 @@ func (rc *requestPipeline) stepUpstream() bool {
 	// a rule or a header has already pinned the provider.
 	rc.affinity = resolveSessionAffinity(r, body, rc.apiKeyID, meta.Request.SessionID)
 	s.injectUpstreamSessionHeader(w, r, rc.affinity)
-	if strings.TrimSpace(forcedProvider) == "" {
+	if !rc.modelsAggregateFallback && strings.TrimSpace(forcedProvider) == "" {
 		if decision, ok := s.balanceProvider(r.Context(), r, meta.Request.Model, rc.affinity.Key, rc.authCtx); ok {
 			forcedProvider, balanced = decision.Provider, decision
 		}
 	}
 
-	provider, err := s.selectProviderForced(r.Context(), r, meta.Request.Model, forcedProvider)
+	var provider resolvedProvider
+	var err error
+	if rc.modelsAggregateFallback {
+		provider, err = s.modelsFallbackProvider(r.Context())
+	} else {
+		provider, err = s.selectProviderForced(r.Context(), r, meta.Request.Model, forcedProvider)
+	}
 	if err != nil {
+		if rc.modelsAggregateFallback {
+			status := http.StatusBadGateway
+			code := "models_fallback_provider_unavailable"
+			if errors.Is(err, context.DeadlineExceeded) || errors.Is(r.Context().Err(), context.DeadlineExceeded) {
+				status = http.StatusGatewayTimeout
+				code = "models_fallback_deadline_exceeded"
+			}
+			rc.writeModelsFallbackError(&meta, status, code, time.Now())
+			return false
+		}
 		writeOpenAIError(w, http.StatusBadGateway, err.Error(), "server_error", "provider_unavailable")
 		return false
 	}
@@ -521,7 +543,11 @@ func (rc *requestPipeline) stepUpstream() bool {
 		provider.Reason, provider.Detail = balanced.Reason, balanced.Detail
 	}
 	if rc.authCtx != nil && !listAllows(provider.Name, rc.authCtx.AllowedProviders, rc.authCtx.DeniedProviders) {
-		_ = s.db.InsertAuditEvent(r.Context(), store.AuthEvent{ID: newID("ae"), EventType: "model_denied", APIKeyID: rc.authCtx.APIKeyID, TeamID: rc.authCtx.TeamID, IP: clientIP(r), UserAgent: r.UserAgent(), Detail: "provider:" + provider.Name, CreatedAt: time.Now().UTC()})
+		providerLabel := provider.Name
+		if rc.modelsAggregateFallback {
+			providerLabel = boundedModelsProviderLabel(provider.Name)
+		}
+		_ = s.db.InsertAuditEvent(r.Context(), store.AuthEvent{ID: newID("ae"), EventType: "model_denied", APIKeyID: rc.authCtx.APIKeyID, TeamID: rc.authCtx.TeamID, IP: clientIP(r), UserAgent: r.UserAgent(), Detail: "provider:" + providerLabel, CreatedAt: time.Now().UTC()})
 		writeOpenAIError(w, http.StatusForbidden, "provider is not allowed by auth policy", "permission_error", "provider_denied")
 		return false
 	}
@@ -538,6 +564,11 @@ func (rc *requestPipeline) stepUpstream() bool {
 		routingPlan.HealthScore = s.healthScoreForProvider(r.Context(), provider.Name)
 		meta.Routing = routingPlan.toStore(meta.Request.ID, traceID, provider.Name)
 	}
+	if rc.modelsAggregateFallback {
+		meta.Request.Provider = boundedModelsProviderLabel(provider.Name)
+		meta.Request.RouteReason = "models_fallback"
+		meta.Request.RouteDetail = aggregatedModelsAuditDetail(rc.modelsAggregateResult)
+	}
 	if r.Method == http.MethodPost {
 		var blocked bool
 		body, blocked = s.enforceOpenAIGovernance(w, r, &meta, body, rc.authCtx, routingPlan, rc.estimatedCostKRW, false, "provider", &rc.policyEvents)
@@ -549,7 +580,7 @@ func (rc *requestPipeline) stepUpstream() bool {
 	// Identify failover candidates: only when the client did NOT explicitly pin a provider.
 	failoverCandidates := []string{}
 	fallbackAllowed := routingPlan == nil || !riskDisablesFallback(routingPlan.Risk)
-	if fallbackAllowed && strings.TrimSpace(r.Header.Get("X-Proxy-Provider")) == "" && strings.TrimSpace(r.URL.Query().Get("provider")) == "" {
+	if !rc.modelsAggregateFallback && fallbackAllowed && strings.TrimSpace(r.Header.Get("X-Proxy-Provider")) == "" && strings.TrimSpace(r.URL.Query().Get("provider")) == "" {
 		if cands, _ := s.providersForModel(r.Context(), meta.Request.Model); len(cands) > 1 {
 			for _, name := range cands {
 				if name != provider.Name {
@@ -571,6 +602,15 @@ func (rc *requestPipeline) stepUpstream() bool {
 	}
 
 	start := time.Now()
+	releaseModelsSlot := func() {}
+	if rc.modelsAggregateFallback {
+		var slotErr error
+		releaseModelsSlot, slotErr = s.acquireModelsCatalogSlot(r.Context())
+		if slotErr != nil {
+			rc.writeModelsFallbackError(&meta, http.StatusGatewayTimeout, "models_fallback_deadline_exceeded", start)
+			return false
+		}
+	}
 	resp, resolvedName, failoverFrom, failoverReason, failoverPath, finalBody, finalModel, upstreamHeaders, err := s.dialUpstream(r.Context(), r, body, provider, traceID, failoverCandidates)
 	if finalBody != nil {
 		body = finalBody
@@ -583,6 +623,17 @@ func (rc *requestPipeline) stepUpstream() bool {
 		}
 	}
 	if err != nil {
+		releaseModelsSlot()
+		if rc.modelsAggregateFallback {
+			status := http.StatusBadGateway
+			code := "models_fallback_upstream_unavailable"
+			if errors.Is(err, context.DeadlineExceeded) || errors.Is(r.Context().Err(), context.DeadlineExceeded) {
+				status = http.StatusGatewayTimeout
+				code = "models_fallback_deadline_exceeded"
+			}
+			rc.writeModelsFallbackError(&meta, status, code, start)
+			return false
+		}
 		s.metrics.IncUpstreamError()
 		status := statusForUpstreamError(err)
 		meta.Request.StatusCode = status
@@ -608,16 +659,29 @@ func (rc *requestPipeline) stepUpstream() bool {
 	if failoverFrom != "" {
 		s.metrics.IncFailover()
 		meta.Request.Failover = true
-		meta.Request.FallbackFrom = failoverFrom
-		meta.Request.FallbackReason = failoverReason
+		if rc.modelsAggregateFallback {
+			meta.Request.FallbackFrom = boundedModelsProviderLabel(failoverFrom)
+			meta.Request.FallbackReason = "models_fallback"
+		} else {
+			meta.Request.FallbackFrom = failoverFrom
+			meta.Request.FallbackReason = failoverReason
+		}
 	}
 	if resolvedName != "" {
-		meta.Request.Provider = resolvedName
+		if rc.modelsAggregateFallback {
+			meta.Request.Provider = boundedModelsProviderLabel(resolvedName)
+		} else {
+			meta.Request.Provider = resolvedName
+		}
 	}
 	// A failover means the bound provider did not serve this turn. Move the binding to
 	// the one that did, otherwise every later turn would retry the bad node first.
 	if rc.affinity.Key != "" && meta.Request.Provider != "" {
-		s.balancer.rebind(meta.Request.Model, rc.affinity.Key, meta.Request.Provider, time.Now())
+		rebindProvider := meta.Request.Provider
+		if rc.modelsAggregateFallback {
+			rebindProvider = firstNonEmpty(resolvedName, provider.Name)
+		}
+		s.balancer.rebind(meta.Request.Model, rc.affinity.Key, rebindProvider, time.Now())
 	}
 	meta.Request.ResolvedModel = firstNonEmpty(meta.Request.ResolvedModel, meta.Request.Model)
 	meta.Request.UpstreamModel = firstNonEmpty(finalModel, meta.Request.UpstreamModel, meta.Request.Model)
@@ -630,12 +694,35 @@ func (rc *requestPipeline) stepUpstream() bool {
 	}
 	refreshRoutingSummary(&meta.Request, routingPlan)
 
+	if rc.modelsAggregateFallback {
+		boundedBody, validationErr := readBoundedModelsFallbackBody(resp)
+		releaseModelsSlot()
+		if validationErr != nil {
+			code := providerModelsFailureCode(validationErr)
+			if isProviderModelsLimitError(validationErr) {
+				rc.modelsAggregateResult.truncated = true
+			}
+			rc.writeModelsFallbackError(&meta, http.StatusBadGateway, code, start)
+			return false
+		}
+		resp.Body = io.NopCloser(bytes.NewReader(boundedBody))
+		// A model catalogue has no response metadata that must be trusted from the
+		// fallback provider. Replace the entire header map so cookies, redirects,
+		// auth values, and vendor diagnostics cannot cross the public boundary.
+		resp.Header = http.Header{"Content-Type": []string{"application/json"}}
+	}
+
 	stream := meta.Request.Stream || strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream")
 	s.metrics.IncRequest(stream)
 	meta.Request.Stream = stream
 	meta.Request.StatusCode = resp.StatusCode
 
-	copyDownstreamHeaders(w.Header(), resp.Header)
+	if rc.modelsAggregateFallback {
+		w.Header().Set("Content-Type", "application/json")
+		setAggregatedModelsHeaders(w, rc.modelsAggregateResult)
+	} else {
+		copyDownstreamHeaders(w.Header(), resp.Header)
+	}
 	applyUpstreamHeaderSummary(&meta.Request, upstreamHeaders, resp.Header, w.Header())
 
 	var responseBody io.Reader = resp.Body
@@ -655,7 +742,12 @@ func (rc *requestPipeline) stepUpstream() bool {
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Header().Set("X-Accel-Buffering", "no")
 	}
-	setRoutingHeaders(w, provider, meta.Request.Provider, failoverFrom, failoverReason, failoverPath)
+	if rc.modelsAggregateFallback {
+		w.Header().Set("X-Provider", boundedModelsProviderLabel(firstNonEmpty(resolvedName, provider.Name)))
+		w.Header().Set("X-Route-Reason", "models_fallback")
+	} else {
+		setRoutingHeaders(w, provider, meta.Request.Provider, failoverFrom, failoverReason, failoverPath)
+	}
 	if rc.affinity.Key != "" {
 		// Echo how the conversation was identified so a client can confirm that its
 		// turns really are landing on one provider — and see why if they are not.

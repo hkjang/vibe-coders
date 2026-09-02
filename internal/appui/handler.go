@@ -61,8 +61,10 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if r.URL.Path == appPrefix {
 		w.Header().Set("Cache-Control", appCacheControl)
-		redirectURL := (&url.URL{Path: appPrefix + "/", RawQuery: r.URL.RawQuery}).RequestURI()
-		w.Header().Set("Location", redirectURL)
+		// ROUTE-003 does not require query preservation. Dropping it prevents an
+		// accidental credential in /app?... from being reflected into Location and
+		// persisted a second time by browser or intermediary redirect logs.
+		w.Header().Set("Location", appPrefix+"/")
 		w.WriteHeader(http.StatusPermanentRedirect)
 		return
 	}

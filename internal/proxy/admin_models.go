@@ -342,7 +342,7 @@ func (s *Server) fetchAdminProviderModels(ctx context.Context, configs []store.P
 					return
 				}
 				results[index] = s.adminModels.load(refreshCtx, provider, fallbackTimeout, func(fetchCtx context.Context) ([]adminModelCatalogRow, error) {
-					models, fetchErr := s.fetchProviderModels(fetchCtx, provider.Name, provider.BaseURL, apiKey, adminModelsProviderTimeout(provider, fallbackTimeout), "")
+					models, fetchErr := s.fetchProviderModels(fetchCtx, provider.Name, provider.BaseURL, apiKey, adminModelsProviderTimeout(provider, fallbackTimeout))
 					if fetchErr != nil {
 						return nil, fetchErr
 					}

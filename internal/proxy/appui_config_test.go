@@ -126,7 +126,7 @@ func TestAppUIRoutesRemainIsolatedWhenDisabled(t *testing.T) {
 		t.Fatal(err)
 	}
 	redirect.Body.Close()
-	if redirect.StatusCode != http.StatusPermanentRedirect || redirect.Header.Get("Location") != "/app/?from=test" {
+	if redirect.StatusCode != http.StatusPermanentRedirect || redirect.Header.Get("Location") != "/app/" {
 		t.Fatalf("/app redirect = %d %q", redirect.StatusCode, redirect.Header.Get("Location"))
 	}
 

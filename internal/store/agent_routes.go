@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 	"time"
 )
 
@@ -27,6 +28,19 @@ type AgentRoute struct {
 	CreatedAt    string   `json:"created_at"`
 	UpdatedAt    string   `json:"updated_at"`
 }
+
+// AgentRouteModel is the non-sensitive projection used by the anonymous public
+// model catalogue. AgentRoute contains prompts, tool allowlists, and ownership
+// metadata that must not be materialized merely to advertise a virtual model.
+type AgentRouteModel struct {
+	ID           string
+	VirtualModel string
+}
+
+const (
+	maxBoundedAgentRouteModels          = 20_000
+	maxBoundedAgentRouteModelFieldBytes = 512
+)
 
 // UpsertAgentRoute inserts or updates an agent route (keyed by id).
 func (s *SQLStore) UpsertAgentRoute(ctx context.Context, a AgentRoute) error {
@@ -71,6 +85,56 @@ func (s *SQLStore) ListAgentRoutes(ctx context.Context) ([]AgentRoute, error) {
 		out = append(out, a)
 	}
 	return out, rows.Err()
+}
+
+// ListEnabledAgentRouteModelsBounded returns only the two fields required by the
+// anonymous /v1/models response. LIMIT cap+1 detects truncation, while SUBSTR
+// prevents a legacy oversized field from being scanned into application memory.
+// The second boolean distinguishes row overflow from invalid projected fields so
+// callers can conservatively handle route shadows that were not inspected.
+func (s *SQLStore) ListEnabledAgentRouteModelsBounded(ctx context.Context, limit int) ([]AgentRouteModel, bool, bool, error) {
+	if limit <= 0 {
+		return []AgentRouteModel{}, false, false, nil
+	}
+	if limit > maxBoundedAgentRouteModels {
+		limit = maxBoundedAgentRouteModels
+	}
+	rows, err := s.db.QueryContext(ctx, s.bind(`SELECT
+		SUBSTR(id, 1, ?), SUBSTR(virtual_model, 1, ?),
+		CASE WHEN LENGTH(id) > ? OR LENGTH(virtual_model) > ? THEN 1 ELSE 0 END
+		FROM agent_routes WHERE enabled = 1 ORDER BY created_at DESC, id ASC LIMIT ?`),
+		maxBoundedAgentRouteModelFieldBytes+1, maxBoundedAgentRouteModelFieldBytes+1,
+		maxBoundedAgentRouteModelFieldBytes, maxBoundedAgentRouteModelFieldBytes, limit+1)
+	if err != nil {
+		return nil, false, false, err
+	}
+	defer rows.Close()
+	models := make([]AgentRouteModel, 0, limit)
+	truncated := false
+	overflow := false
+	rowsSeen := 0
+	for rows.Next() {
+		rowsSeen++
+		var model AgentRouteModel
+		var oversized int
+		if err := rows.Scan(&model.ID, &model.VirtualModel, &oversized); err != nil {
+			return nil, false, false, err
+		}
+		if rowsSeen > limit {
+			overflow = true
+			truncated = true
+			continue
+		}
+		if oversized != 0 || len(model.ID) > maxBoundedAgentRouteModelFieldBytes || len(model.VirtualModel) > maxBoundedAgentRouteModelFieldBytes || strings.TrimSpace(model.VirtualModel) != model.VirtualModel || model.VirtualModel == "" {
+			truncated = true
+			continue
+		}
+		models = append(models, model)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, false, false, err
+	}
+	return models, truncated, overflow, nil
 }
 
 // GetAgentRoute fetches one route by id.

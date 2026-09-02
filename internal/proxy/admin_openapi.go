@@ -637,7 +637,8 @@ func enrichOpenAPIOperation(route, method string, op map[string]any) {
 			"headers": map[string]any{
 				"X-Models-Providers":         map[string]any{"description": "Successfully aggregated providers in deterministic priority order.", "schema": map[string]any{"type": "string"}},
 				"X-Models-Providers-Failed":  map[string]any{"description": "Providers whose catalogues were unavailable.", "schema": map[string]any{"type": "string"}},
-				"X-Models-Providers-Skipped": map[string]any{"description": "Provider count skipped by the bounded aggregation budget.", "schema": map[string]any{"type": "integer", "minimum": 0}},
+				"X-Models-Providers-Skipped": map[string]any{"description": "Minimum provider count known to be skipped by the bounded aggregation budget.", "schema": map[string]any{"type": "integer", "minimum": 0}},
+				"X-Models-Metadata-Omitted":  map[string]any{"description": "Provider names omitted from bounded response metadata.", "schema": map[string]any{"type": "integer", "minimum": 0}},
 				"X-Models-Truncated":         map[string]any{"description": "True when provider, row, or encoded-response limits truncated aggregation.", "schema": map[string]any{"type": "boolean"}},
 			},
 		}

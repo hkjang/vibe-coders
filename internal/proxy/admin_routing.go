@@ -173,6 +173,7 @@ func (s *Server) handleRoutingHealth(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "routing_health_failed")
 		return
 	}
+	scores = boundedProviderHealthScores(scores)
 	trend, err := s.providerHealthTrend(r.Context(), since, until, providerHealthTrendBuckets)
 	if err != nil {
 		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "routing_health_trend_failed")
@@ -214,27 +215,51 @@ func (s *Server) handleRoutingBreakerReset(w http.ResponseWriter, r *http.Reques
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
 		return
 	}
-	var payload struct {
-		Provider string `json:"provider"`
+	var payload *struct {
+		Provider *string `json:"provider"`
 	}
-	if r.Body != nil {
-		_ = json.NewDecoder(r.Body).Decode(&payload)
+	if r.Body == nil {
+		writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "invalid_body")
+		return
 	}
-	name := strings.TrimSpace(payload.Provider)
-	// Collect the names BEFORE resetting: a reset-all empties local state, after which
-	// there would be nothing left to tell us which shared rows to clear.
-	shared := []string{name}
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10))
+	if err := decoder.Decode(&payload); err != nil || payload == nil || payload.Provider == nil {
+		writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "invalid_body")
+		return
+	}
+	if err := requireJSONEOF(decoder); err != nil {
+		writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "invalid_body")
+		return
+	}
+	if *payload.Provider != "" && strings.TrimSpace(*payload.Provider) == "" {
+		writeOpenAIError(w, http.StatusBadRequest, "provider must not contain only whitespace", "invalid_request_error", "breaker_provider_invalid")
+		return
+	}
+	name := strings.TrimSpace(*payload.Provider)
+	if name != "" && (name == "[provider-name-omitted]" || !modelsProviderLabelSafe(name)) {
+		writeOpenAIError(w, http.StatusBadRequest, "redacted provider names cannot be reset individually; reset all breakers", "invalid_request_error", "breaker_provider_ambiguous")
+		return
+	}
 	if name == "" {
-		shared = shared[:0]
-		for _, st := range s.breakers.snapshot(time.Hour, time.Now()) {
-			shared = append(shared, st.Provider)
+		// Clear shared state first. If the atomic DB delete fails, keep the local
+		// breakers intact instead of reporting a reset that the next sync can undo.
+		if err := s.clearAllSharedBreakerStates(); err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, "failed to reset shared breaker state", "server_error", "breaker_reset_failed")
+			return
 		}
-	}
-	s.breakers.reset(name)
-	// Clear the shared rows too: resetting only locally would leave peers skipping a
-	// provider the operator has just declared healthy.
-	for _, provider := range shared {
-		s.clearSharedBreakerState(provider)
+		s.breakers.reset("")
+	} else {
+		if !s.breakers.has(name) {
+			writeOpenAIError(w, http.StatusNotFound, "breaker state not found", "invalid_request_error", "breaker_not_found")
+			return
+		}
+		// Clear the shared row too: resetting only locally would leave peers skipping a
+		// provider the operator has just declared healthy.
+		if err := s.clearSharedBreakerState(name); err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, "failed to reset shared breaker state", "server_error", "breaker_reset_failed")
+			return
+		}
+		s.breakers.resetExisting(name)
 	}
 	s.auditAdmin(r, "routing.breaker.reset", firstNonEmpty(name, "*"), "")
 	_, _, cooldown := s.breakerConfig()
@@ -257,6 +282,15 @@ func parseProviderHealthThreshold(raw string) int {
 		return 100
 	}
 	return threshold
+}
+
+func boundedProviderHealthScores(scores []store.ProviderHealthScore) []store.ProviderHealthScore {
+	out := make([]store.ProviderHealthScore, len(scores))
+	copy(out, scores)
+	for i := range out {
+		out[i].Provider = boundedModelsProviderLabel(out[i].Provider)
+	}
+	return out
 }
 
 func providerHealthRanking(scores []store.ProviderHealthScore) []providerHealthRankingItem {
@@ -377,6 +411,7 @@ func (s *Server) providerHealthTrend(ctx context.Context, since, until time.Time
 		if err != nil {
 			return nil, err
 		}
+		scores = boundedProviderHealthScores(scores)
 		trend = append(trend, providerHealthTrendBucket{
 			Since:     start.Format(time.RFC3339),
 			Until:     end.Format(time.RFC3339),

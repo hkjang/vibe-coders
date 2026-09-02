@@ -2,7 +2,9 @@ package store
 
 import (
 	"context"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestAgentRouteCRUD(t *testing.T) {
@@ -52,5 +54,38 @@ func TestAgentRouteCRUD(t *testing.T) {
 	}
 	if _, found, _ := db.GetAgentRouteByModel(ctx, "vibe/agent-research"); found {
 		t.Fatal("route should be deleted")
+	}
+}
+
+func TestListEnabledAgentRouteModelsBoundedProjectsAndSignalsTruncation(t *testing.T) {
+	db := openAggTestStore(t)
+	defer db.Close()
+	ctx := context.Background()
+	for index, route := range []AgentRoute{
+		{ID: "a1", VirtualModel: "vibe/agent-one", Enabled: true, SystemPrompt: strings.Repeat("sensitive", 1_000)},
+		{ID: "a2", VirtualModel: "vibe/agent-two", Enabled: true, AllowedTools: []string{"private-tool"}},
+		{ID: "a3", VirtualModel: "vibe/agent-disabled", Enabled: false},
+		{ID: "a4", VirtualModel: "   ", Enabled: true},
+	} {
+		route.CreatedAt = time.Unix(int64(index+1), 0).UTC().Format(time.RFC3339Nano)
+		if err := db.UpsertAgentRoute(ctx, route); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	models, truncated, overflow, err := db.ListEnabledAgentRouteModelsBounded(ctx, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !truncated || !overflow || len(models) != 0 {
+		t.Fatalf("bounded model projection = %#v truncated=%v overflow=%v", models, truncated, overflow)
+	}
+
+	models, truncated, overflow, err = db.ListEnabledAgentRouteModelsBounded(ctx, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !truncated || overflow || len(models) != 2 {
+		t.Fatalf("full enabled model projection = %#v truncated=%v overflow=%v", models, truncated, overflow)
 	}
 }

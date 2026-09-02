@@ -1195,6 +1195,14 @@ func (s *Server) handleProviders(w http.ResponseWriter, r *http.Request) {
 			writeOpenAIError(w, http.StatusInternalServerError, "failed to load provider", "server_error", "provider_load_failed")
 			return
 		}
+		if !found && !modelsProviderLabelSafe(payload.Name) {
+			if len(payload.Name) > maxModelsProviderNameBytes {
+				writeOpenAIError(w, http.StatusBadRequest, "provider name exceeds the supported limit", "invalid_request_error", "provider_name_too_long")
+			} else {
+				writeOpenAIError(w, http.StatusBadRequest, "provider name contains unsafe metadata", "invalid_request_error", "provider_name_invalid")
+			}
+			return
+		}
 		// Legacy rows may contain credentials from before this validation existed.
 		// Their public URL is redacted; accepting that exact redacted representation
 		// preserves the stored URL while an operator changes an unrelated field.
@@ -1602,6 +1610,13 @@ type resolvedProvider struct {
 // provider that actually answered, and (if a failover occurred) the original primary's
 // name in `failoverFrom`.
 func (s *Server) dialUpstream(reqCtx context.Context, r *http.Request, body []byte, primary resolvedProvider, traceID string, failoverCandidates []string) (*http.Response, string, string, string, []string, []byte, string, http.Header, error) {
+	boundModelsMetadata := r.Method == http.MethodGet && r.URL.Path == "/v1/models" && !clientPinnedProvider(r)
+	providerLabel := func(name string) string {
+		if boundModelsMetadata {
+			return boundedModelsProviderLabel(name)
+		}
+		return name
+	}
 	attempts := []providerAttempt{{provider: primary}}
 	for _, name := range failoverCandidates {
 		// Re-resolve each candidate so we get its decrypted key and timeout.
@@ -1609,7 +1624,11 @@ func (s *Server) dialUpstream(reqCtx context.Context, r *http.Request, body []by
 		fakeReq.Header.Set("X-Proxy-Provider", name)
 		cand, err := s.selectProvider(reqCtx, fakeReq, "")
 		if err != nil {
-			slog.Warn("failover candidate unavailable", "name", name, "error", err)
+			if boundModelsMetadata {
+				slog.Warn("failover candidate unavailable", "name", providerLabel(name), "code", "models_fallback_candidate_unavailable")
+			} else {
+				slog.Warn("failover candidate unavailable", "name", name, "error", err)
+			}
 			continue
 		}
 		attempts = append(attempts, providerAttempt{provider: cand})
@@ -1649,7 +1668,14 @@ func (s *Server) dialUpstream(reqCtx context.Context, r *http.Request, body []by
 	var lastUpstreamHeaders http.Header
 	for i := 0; i < len(attempts); {
 		att := attempts[i]
-		upstreamURL, err := s.upstreamURL(att.provider.BaseURL, r.URL)
+		upstreamRequestURL := r.URL
+		if boundModelsMetadata {
+			withoutQuery := *r.URL
+			withoutQuery.RawQuery = ""
+			withoutQuery.ForceQuery = false
+			upstreamRequestURL = &withoutQuery
+		}
+		upstreamURL, err := s.upstreamURL(att.provider.BaseURL, upstreamRequestURL)
 		if err != nil {
 			return nil, "", "", "", failoverPath, currentBody, currentModel, lastUpstreamHeaders, err
 		}
@@ -1665,7 +1691,11 @@ func (s *Server) dialUpstream(reqCtx context.Context, r *http.Request, body []by
 			}
 			return nil, "", "", "", failoverPath, currentBody, currentModel, lastUpstreamHeaders, err
 		}
-		copyUpstreamHeaders(upstreamReq.Header, r.Header)
+		if boundModelsMetadata {
+			upstreamReq.Header.Set("Accept", "application/json")
+		} else {
+			copyUpstreamHeaders(upstreamReq.Header, r.Header)
+		}
 		upstreamReq.Header.Set("Authorization", "Bearer "+att.provider.APIKey)
 		upstreamReq.Header.Set("X-Request-ID", traceID)
 		if r.Method == http.MethodPost && upstreamReq.Header.Get("Content-Type") == "" {
@@ -1689,14 +1719,14 @@ func (s *Server) dialUpstream(reqCtx context.Context, r *http.Request, body []by
 				if cancel != nil {
 					cancel()
 				}
-				failoverPath = append(failoverPath, reason+":"+att.provider.Name+"->"+attempts[i+1].provider.Name)
-				slog.Warn("upstream status fallback", "provider", att.provider.Name, "status", resp.StatusCode, "next", attempts[i+1].provider.Name)
+				failoverPath = append(failoverPath, reason+":"+providerLabel(att.provider.Name)+"->"+providerLabel(attempts[i+1].provider.Name))
+				slog.Warn("upstream status fallback", "provider", providerLabel(att.provider.Name), "status", resp.StatusCode, "next", providerLabel(attempts[i+1].provider.Name))
 				i++
 				continue
 			}
 			if statusFallbackAllowed(resp.StatusCode) && i+1 < len(attempts) && budgetSpent() {
-				failoverPath = append(failoverPath, "failover_budget_exhausted:"+att.provider.Name)
-				slog.Warn("failover budget exhausted", "provider", att.provider.Name, "status", resp.StatusCode, "trace_id", traceID)
+				failoverPath = append(failoverPath, "failover_budget_exhausted:"+providerLabel(att.provider.Name))
+				slog.Warn("failover budget exhausted", "provider", providerLabel(att.provider.Name), "status", resp.StatusCode, "trace_id", traceID)
 			}
 			if resp.StatusCode == http.StatusBadRequest && !usedLongContext {
 				sniff, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
@@ -1736,14 +1766,18 @@ func (s *Server) dialUpstream(reqCtx context.Context, r *http.Request, body []by
 		if breakerEnabled {
 			s.noteBreakerFailure(att.provider.Name, reason, breakerThreshold, traceID)
 		}
-		slog.Warn("upstream call failed", "provider", att.provider.Name, "attempt", i, "error", doErr)
+		if boundModelsMetadata {
+			slog.Warn("upstream call failed", "provider", providerLabel(att.provider.Name), "attempt", i, "code", "models_fallback_transport_failed")
+		} else {
+			slog.Warn("upstream call failed", "provider", att.provider.Name, "attempt", i, "error", doErr)
+		}
 		if i+1 < len(attempts) {
 			if budgetSpent() {
-				failoverPath = append(failoverPath, "failover_budget_exhausted:"+att.provider.Name)
-				slog.Warn("failover budget exhausted", "provider", att.provider.Name, "trace_id", traceID)
+				failoverPath = append(failoverPath, "failover_budget_exhausted:"+providerLabel(att.provider.Name))
+				slog.Warn("failover budget exhausted", "provider", providerLabel(att.provider.Name), "trace_id", traceID)
 				break
 			}
-			failoverPath = append(failoverPath, reason+":"+att.provider.Name+"->"+attempts[i+1].provider.Name)
+			failoverPath = append(failoverPath, reason+":"+providerLabel(att.provider.Name)+"->"+providerLabel(attempts[i+1].provider.Name))
 		}
 		i++
 	}

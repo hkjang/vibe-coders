@@ -182,6 +182,48 @@ func (b *providerBreakers) reset(name string) {
 	delete(b.states, name)
 }
 
+// resetExisting clears one provider only when it is a real internal breaker key.
+// Admin callers use this instead of echoing and "resetting" arbitrary input that was
+// never present in the breaker map.
+func (b *providerBreakers) resetExisting(name string) bool {
+	if b == nil || name == "" {
+		return false
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if _, ok := b.states[name]; !ok {
+		return false
+	}
+	delete(b.states, name)
+	return true
+}
+
+func (b *providerBreakers) has(name string) bool {
+	if b == nil || name == "" {
+		return false
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	_, ok := b.states[name]
+	return ok
+}
+
+// rawNames is an internal-only diagnostic view. The public snapshot deliberately
+// redacts unsafe legacy provider names and must never replace raw internal keys.
+func (b *providerBreakers) rawNames() []string {
+	if b == nil {
+		return []string{}
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	names := make([]string, 0, len(b.states))
+	for name := range b.states {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
 type breakerSnapshot struct {
 	Provider       string `json:"provider"`
 	Phase          string `json:"phase"`
@@ -208,7 +250,7 @@ func (b *providerBreakers) snapshot(cooldown time.Duration, now time.Time) []bre
 			continue
 		}
 		snap := breakerSnapshot{
-			Provider:   name,
+			Provider:   boundedModelsProviderLabel(name),
 			Phase:      string(st.phase),
 			Failures:   st.failures,
 			Opens:      st.opens,
@@ -268,13 +310,13 @@ func (s *Server) filterOpenBreakers(attempts []providerAttempt, threshold int, c
 			kept = append(kept, att)
 			continue
 		}
-		skipped = append(skipped, att.provider.Name)
+		skipped = append(skipped, boundedModelsProviderLabel(att.provider.Name))
 	}
 	if len(skipped) > 0 {
 		slog.Info("provider breaker skipped candidates", "skipped", skipped, "remaining", len(kept), "trace_id", traceID)
 	}
 	if len(kept) == 0 {
-		slog.Warn("all provider breakers open; probing primary anyway", "provider", attempts[0].provider.Name, "trace_id", traceID)
+		slog.Warn("all provider breakers open; probing primary anyway", "provider", boundedModelsProviderLabel(attempts[0].provider.Name), "trace_id", traceID)
 		return attempts[:1]
 	}
 	return kept
@@ -286,12 +328,13 @@ func (s *Server) noteBreakerFailure(name, reason string, threshold int, traceID 
 	now := time.Now()
 	if s.breakers.recordFailure(name, reason, threshold, now) {
 		_, _, cooldown := s.breakerConfig()
-		slog.Warn("provider breaker opened", "provider", name, "reason", reason, "cooldown", cooldown.String(), "trace_id", traceID)
+		providerLabel := boundedModelsProviderLabel(name)
+		slog.Warn("provider breaker opened", "provider", providerLabel, "reason", reason, "cooldown", cooldown.String(), "trace_id", traceID)
 		// Tell the other instances now, so they skip this provider instead of each
 		// spending their own threshold of failures rediscovering it.
 		s.publishBreakerState(name, reason, now)
 		s.notifyMattermost(context.Background(), "provider",
-			"Provider 회로 차단: "+name+" ("+reason+") — "+cooldown.String()+" 동안 폴백 후보에서 제외됩니다")
+			"Provider 회로 차단: "+providerLabel+" ("+reason+") — "+cooldown.String()+" 동안 폴백 후보에서 제외됩니다")
 	}
 }
 
@@ -417,19 +460,34 @@ func (s *Server) publishBreakerState(provider, reason string, openedAt time.Time
 		Provider: provider, Phase: string(breakerOpen), Reason: reason,
 		Instance: s.instanceID, OpenedAt: openedAt, UpdatedAt: time.Now().UTC(),
 	}); err != nil {
-		slog.Warn("publish breaker state failed", "provider", provider, "error", err)
+		slog.Warn("publish breaker state failed", "provider", boundedModelsProviderLabel(provider), "code", "breaker_state_publish_failed")
 	}
 }
 
-func (s *Server) clearSharedBreakerState(provider string) {
+func (s *Server) clearSharedBreakerState(provider string) error {
 	if !s.breakerSharingEnabled() {
-		return
+		return nil
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	if err := s.db.ClearProviderBreaker(ctx, provider); err != nil {
-		slog.Warn("clear shared breaker state failed", "provider", provider, "error", err)
+		slog.Warn("clear shared breaker state failed", "provider", boundedModelsProviderLabel(provider), "code", "breaker_state_clear_failed")
+		return err
 	}
+	return nil
+}
+
+func (s *Server) clearAllSharedBreakerStates() error {
+	if !s.breakerSharingEnabled() {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err := s.db.ClearAllProviderBreakers(ctx); err != nil {
+		slog.Warn("clear all shared breaker states failed", "code", "breaker_state_clear_all_failed")
+		return err
+	}
+	return nil
 }
 
 // adoptRemoteBreakers copies peers' open breakers into local state. Only rows fresher
@@ -478,7 +536,11 @@ func (s *Server) breakerSyncLoop(ctx context.Context, interval time.Duration) {
 				continue
 			}
 			if adopted := s.breakers.adoptRemote(states, time.Now().Add(-cooldown)); len(adopted) > 0 {
-				slog.Info("adopted peer breaker state", "providers", adopted, "instance", s.instanceID)
+				labels := make([]string, 0, len(adopted))
+				for _, provider := range adopted {
+					labels = append(labels, boundedModelsProviderLabel(provider))
+				}
+				slog.Info("adopted peer breaker state", "providers", labels, "instance", s.instanceID)
 			}
 		}
 	}

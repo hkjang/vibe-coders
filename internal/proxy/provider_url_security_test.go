@@ -91,6 +91,53 @@ func TestProviderAPIRejectsCredentialURLsAndSanitizesLegacyRows(t *testing.T) {
 	proxy := httptest.NewServer(server.Routes())
 	t.Cleanup(proxy.Close)
 
+	legacyLongName := strings.Repeat("p", maxModelsProviderNameBytes+1)
+	tooLong := postJSON(t, proxy.URL+"/admin/providers", "", map[string]any{
+		"name": legacyLongName, "base_url": "https://new.example", "api_key": "separate-secret", "enabled": true,
+	})
+	tooLongBody, _ := io.ReadAll(tooLong.Body)
+	tooLong.Body.Close()
+	if tooLong.StatusCode != http.StatusBadRequest || !strings.Contains(string(tooLongBody), "provider_name_too_long") {
+		t.Fatalf("new oversized provider name returned %d: %s", tooLong.StatusCode, tooLongBody)
+	}
+	if err := db.UpsertProvider(context.Background(), store.ProviderConfig{
+		Name: legacyLongName, BaseURL: "https://legacy-long.example", TimeoutMS: 1_000, Enabled: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	legacyEdit := postJSON(t, proxy.URL+"/admin/providers", "", map[string]any{
+		"name": legacyLongName, "base_url": "https://legacy-long.example", "timeout_ms": 2_000, "enabled": false,
+	})
+	legacyEditBody, _ := io.ReadAll(legacyEdit.Body)
+	legacyEdit.Body.Close()
+	if legacyEdit.StatusCode != http.StatusOK {
+		t.Fatalf("legacy oversized provider edit returned %d: %s", legacyEdit.StatusCode, legacyEditBody)
+	}
+	for _, unsafeName := range []string{"comma,name", "line\r\nbreak", "sk-ant-provider-secret-value"} {
+		unsafeCreate := postJSON(t, proxy.URL+"/admin/providers", "", map[string]any{
+			"name": unsafeName, "base_url": "https://new.example", "api_key": "separate-secret", "enabled": true,
+		})
+		unsafeBody, _ := io.ReadAll(unsafeCreate.Body)
+		unsafeCreate.Body.Close()
+		if unsafeCreate.StatusCode != http.StatusBadRequest || !strings.Contains(string(unsafeBody), "provider_name_invalid") {
+			t.Fatalf("unsafe provider name %q returned %d: %s", unsafeName, unsafeCreate.StatusCode, unsafeBody)
+		}
+	}
+	legacyUnsafeName := "legacy,control\tname"
+	if err := db.UpsertProvider(context.Background(), store.ProviderConfig{
+		Name: legacyUnsafeName, BaseURL: "https://legacy-unsafe.example", TimeoutMS: 1_000, Enabled: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	legacyUnsafeEdit := postJSON(t, proxy.URL+"/admin/providers", "", map[string]any{
+		"name": legacyUnsafeName, "base_url": "https://legacy-unsafe.example", "timeout_ms": 2_000, "enabled": false,
+	})
+	legacyUnsafeBody, _ := io.ReadAll(legacyUnsafeEdit.Body)
+	legacyUnsafeEdit.Body.Close()
+	if legacyUnsafeEdit.StatusCode != http.StatusOK {
+		t.Fatalf("legacy unsafe provider edit returned %d: %s", legacyUnsafeEdit.StatusCode, legacyUnsafeBody)
+	}
+
 	for _, raw := range []string{
 		"https://operator:password@provider.example/v1",
 		"https://provider.example/v1?subscription-key=private",

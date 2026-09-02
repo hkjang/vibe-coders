@@ -63,6 +63,13 @@ func (s *SQLStore) ClearProviderBreaker(ctx context.Context, provider string) er
 	return err
 }
 
+// ClearAllProviderBreakers atomically clears the shared breaker registry. A reset-all
+// must include rows reported by peers that this process has not adopted locally yet.
+func (s *SQLStore) ClearAllProviderBreakers(ctx context.Context) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM provider_breaker_state`)
+	return err
+}
+
 // ListOpenProviderBreakers returns providers reported open by any instance since the
 // given time. The caller supplies the cutoff so the freshness policy stays with the
 // routing layer that knows the cooldown.

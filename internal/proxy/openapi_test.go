@@ -231,7 +231,7 @@ func assertOpenAPIContract(t *testing.T, spec map[string]any) {
 	modelsResponses, _ := modelsGet["responses"].(map[string]any)
 	modelsOK, _ := modelsResponses["200"].(map[string]any)
 	modelsHeaders, _ := modelsOK["headers"].(map[string]any)
-	for _, header := range []string{"X-Models-Providers", "X-Models-Providers-Failed", "X-Models-Providers-Skipped", "X-Models-Truncated"} {
+	for _, header := range []string{"X-Models-Providers", "X-Models-Providers-Failed", "X-Models-Providers-Skipped", "X-Models-Metadata-Omitted", "X-Models-Truncated"} {
 		if _, ok := modelsHeaders[header]; !ok {
 			t.Errorf("GET /v1/models 200 response missing %s header contract", header)
 		}
