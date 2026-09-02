@@ -119,6 +119,7 @@ func TestClickHouseFactFanout(t *testing.T) {
 	cfg.ClickHouse.RoutingFactTable = "ai_routing_fact"
 	cfg.ClickHouse.EvalFactTable = "ai_eval_fact"
 	cfg.ClickHouse.PolicyFactTable = "ai_policy_fact"
+	cfg.ClickHouse.MultiModelFactTable = "ai_multimodel_fact"
 	cfg.ClickHouse.BatchSize = 1
 	cfg.ClickHouse.FlushInterval = 200 * time.Millisecond
 	server, err := NewServer(cfg, db, logger, nil)
@@ -129,11 +130,15 @@ func TestClickHouseFactFanout(t *testing.T) {
 	now := time.Now().UTC()
 	server.enqueue(store.LogRecord{
 		Request: store.RequestLog{
-			ID: "rq1", TraceID: "tr1", Model: "gpt-4.1", Provider: unsafeProvider,
+			ID: "rq1", TraceID: "tr1", Model: "mcp:" + unsafeProvider, Provider: unsafeProvider,
 			FallbackFrom: unsafeProvider, FallbackReason: "token=clickhouse-secret",
 			RouteDetail: unsafeProvider, StatusCode: 200, CreatedAt: now,
 		},
-		Tools: []store.ToolInvocation{{RequestID: "rq1", TraceID: "tr1", ServerLabel: "github", ToolName: "create_pr", Source: "call", IsMCP: true, CreatedAt: now}},
+		Tools: []store.ToolInvocation{{
+			RequestID: "rq1", TraceID: "tr1", ServerLabel: unsafeProvider,
+			ToolName: "create_pr:" + unsafeProvider, Source: "call " + unsafeProvider,
+			IsMCP: true, CreatedAt: now,
+		}},
 		Routing: &store.RoutingDecisionLog{
 			RequestID: "rq1", TraceID: "tr1", RequestedModel: "auto", SelectedModel: "gpt-4.1",
 			SelectedProvider: unsafeProvider, FallbackPath: []string{unsafeProvider},
@@ -143,19 +148,27 @@ func TestClickHouseFactFanout(t *testing.T) {
 	})
 	server.emitPolicyFacts([]store.PolicyDecisionEvent{{
 		RequestID: "rq1", Decision: "block", Reason: "blocked " + unsafeProvider,
-		Provider: unsafeProvider, CreatedAt: now,
+		RuleID: "mcp:" + unsafeProvider, RuleName: "rule " + unsafeProvider,
+		Model: "mcp:" + unsafeProvider, Provider: unsafeProvider, CreatedAt: now,
 	}})
+	server.emitMultiModelFacts(store.MultiModelTestRun{
+		ID: "mm1", ModelCount: 1, Success: 1, CreatedAt: now.Format(time.RFC3339Nano),
+	}, []store.MultiModelTestResult{{
+		RunID: "mm1", Model: "mcp:" + unsafeProvider, Provider: unsafeProvider, Status: "ok",
+	}}, nil)
 
 	waitFor(t, 3*time.Second, func() bool {
 		mu.Lock()
 		defer mu.Unlock()
 		return byTable["ai_request_fact"] != "" && byTable["ai_tool_fact"] != "" &&
-			byTable["ai_routing_fact"] != "" && byTable["ai_eval_fact"] != "" && byTable["ai_policy_fact"] != ""
+			byTable["ai_routing_fact"] != "" && byTable["ai_eval_fact"] != "" &&
+			byTable["ai_policy_fact"] != "" && byTable["ai_multimodel_fact"] != ""
 	})
 
 	mu.Lock()
 	defer mu.Unlock()
-	if !strings.Contains(byTable["ai_tool_fact"], `"tool_name":"create_pr"`) {
+	if !strings.Contains(byTable["ai_tool_fact"], `"tool_name":"create_pr:[provider-name-omitted]"`) ||
+		!strings.Contains(byTable["ai_tool_fact"], `"source":"call [provider-name-omitted]"`) {
 		t.Errorf("tool fact wrong: %s", byTable["ai_tool_fact"])
 	}
 	if !strings.Contains(byTable["ai_routing_fact"], `"selected_model":"gpt-4.1"`) {
@@ -164,13 +177,25 @@ func TestClickHouseFactFanout(t *testing.T) {
 	if !strings.Contains(byTable["ai_eval_fact"], `"name":"injection"`) {
 		t.Errorf("eval fact wrong: %s", byTable["ai_eval_fact"])
 	}
-	for _, table := range []string{"ai_request_fact", "ai_routing_fact", "ai_policy_fact"} {
+	for _, table := range []string{"ai_request_fact", "ai_routing_fact", "ai_policy_fact", "ai_tool_fact", "ai_multimodel_fact"} {
 		body := byTable[table]
 		if strings.Contains(body, unsafeProvider) || strings.Contains(body, "clickhouse-secret") {
 			t.Fatalf("%s leaked provider metadata: %s", table, body)
 		}
 		if !strings.Contains(body, boundedModelsProviderLabel(unsafeProvider)) {
 			t.Fatalf("%s lost bounded provider label: %s", table, body)
+		}
+	}
+	if !strings.Contains(byTable["ai_request_fact"], `"model":"mcp:[provider-name-omitted]"`) {
+		t.Fatalf("request model was not projected with its provider: %s", byTable["ai_request_fact"])
+	}
+	for _, field := range []string{
+		`"rule_id":"mcp:[provider-name-omitted]"`,
+		`"rule_name":"rule [provider-name-omitted]"`,
+		`"model":"mcp:[provider-name-omitted]"`,
+	} {
+		if !strings.Contains(byTable["ai_policy_fact"], field) {
+			t.Fatalf("policy metadata %s was not projected: %s", field, byTable["ai_policy_fact"])
 		}
 	}
 }
@@ -196,6 +221,196 @@ func TestClickHouseProviderRollupBoundsLegacyName(t *testing.T) {
 	}
 	if strings.Contains(body, unsafeProvider) || !strings.Contains(body, boundedModelsProviderLabel(unsafeProvider)) {
 		t.Fatalf("provider rollup was not bounded: %s", body)
+	}
+}
+
+func TestClickHouseFactRetryReprojectsHistoricalProviderMetadata(t *testing.T) {
+	const (
+		unsafeProvider = "sk-ant-legacy-retry-secret"
+		unsafeFallback = "client_secret=legacy-retry-fallback"
+		querySecret    = "historical-query-secret"
+	)
+	byTable := map[string]string{}
+	totalRequests := 0
+	ch := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		totalRequests++
+		fields := strings.Fields(r.URL.Query().Get("query"))
+		if len(fields) >= 3 {
+			table := fields[2]
+			if index := strings.IndexByte(table, '.'); index >= 0 {
+				table = table[index+1:]
+			}
+			payload, _ := io.ReadAll(r.Body)
+			byTable[table] = string(payload)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ch.Close()
+
+	db := openTestStore(t)
+	logger := store.NewAsyncLogger(db, 8, filepath.Join(t.TempDir(), "fallback.ndjson"))
+	logger.Start()
+	t.Cleanup(func() { logger.Stop(context.Background()); db.Close() })
+	cfg := testConfig("http://upstream.invalid", "secret")
+	cfg.ClickHouse.URL = ch.URL
+	cfg.ClickHouse.Database = "ai_gateway"
+	cfg.ClickHouse.RequestFactTable = "ai_request_fact"
+	cfg.ClickHouse.ToolFactTable = "ai_tool_fact"
+	cfg.ClickHouse.RoutingFactTable = "ai_routing_fact"
+	cfg.ClickHouse.EvalFactTable = "ai_eval_fact"
+	cfg.ClickHouse.PolicyFactTable = "ai_policy_fact"
+	cfg.ClickHouse.MultiModelFactTable = "ai_multimodel_fact"
+	server, err := NewServer(cfg, db, logger, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gateway := httptest.NewServer(server.Routes())
+	defer gateway.Close()
+
+	retries := []struct {
+		table   string
+		payload string
+		rows    int
+	}{
+		{
+			table: "ai_request_fact",
+			payload: `{"request_id":"legacy-request","provider":"` + unsafeProvider +
+				`","fallback_from":"` + unsafeFallback + `","fallback_reason":"dial https://provider.invalid/v1?api_key=` + querySecret +
+				`","route_detail":"` + unsafeProvider + `","model":"mcp:` + unsafeProvider + `","total_tokens":12}` + "\n",
+		},
+		{
+			table: "ai_tool_fact",
+			payload: `{"request_id":"legacy-request","server_label":"` + unsafeProvider + `","tool_name":"lookup:` + unsafeProvider +
+				`","source":"call ` + unsafeProvider + `"}` + "\n",
+		},
+		{
+			table: "ai_routing_fact",
+			payload: `{"request_id":"legacy-request","selected_provider":"` + unsafeProvider +
+				`","fallback_path":"` + unsafeProvider + `>` + unsafeFallback + `","decision_reason":"selected ` + unsafeProvider + `"}` + "\n",
+		},
+		{
+			table: "ai_policy_fact",
+			payload: `{"request_id":"legacy-request","provider":"` + unsafeProvider +
+				`","rule_id":"mcp:` + unsafeProvider + `","rule_name":"rule ` + unsafeProvider +
+				`","model":"mcp:` + unsafeProvider + `","reason":"blocked ` + unsafeProvider + ` token=` + querySecret + `"}` + "\n",
+		},
+		{
+			table: "ai_multimodel_fact",
+			payload: `{"run_id":"legacy-run","row_type":"result","provider":"` + unsafeProvider +
+				`","model":"mcp:` + unsafeProvider + `","status":"ok"}` + "\n",
+		},
+		{table: "ai_eval_fact", payload: `{"request_id":"safe-request","name":"quality","score":0.9,"diagnostic":"https://provider.invalid/v1?client_secret=` + querySecret + `"}` + "\n"},
+		{table: "ai_request_fact", payload: "{not-json}\n"},
+		{table: "unknown_fact", payload: `{"provider":"` + unsafeProvider + `"}` + "\n"},
+		{table: "ai_eval_fact", payload: `{"request_id":"row-count-mismatch","score":1}` + "\n", rows: 2},
+	}
+	for _, retry := range retries {
+		rows := retry.rows
+		if rows == 0 {
+			rows = 1
+		}
+		if err := db.RecordClickHouseFactRetry(t.Context(), retry.table, retry.payload, rows, "historical failure"); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	response := postJSON(t, gateway.URL+"/admin/dw/clickhouse/fact-retry", "", map[string]any{})
+	body, _ := io.ReadAll(response.Body)
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("retry status=%d body=%s", response.StatusCode, body)
+	}
+	var result struct {
+		Recovered   int `json:"recovered_batches"`
+		Rows        int `json:"rows"`
+		Failing     int `json:"still_failing"`
+		Quarantined int `json:"quarantined_batches"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Recovered != 6 || result.Rows != 6 || result.Failing != 3 || result.Quarantined != 3 {
+		t.Fatalf("unexpected retry result: %+v body=%s", result, body)
+	}
+	for table, payload := range byTable {
+		for _, secret := range []string{unsafeProvider, unsafeFallback, querySecret, "api_key"} {
+			if strings.Contains(payload, secret) {
+				t.Fatalf("%s historical retry leaked %q: %s", table, secret, payload)
+			}
+		}
+	}
+	if !strings.Contains(byTable["ai_request_fact"], `"request_id":"legacy-request"`) ||
+		!strings.Contains(byTable["ai_request_fact"], `"total_tokens":12`) ||
+		!strings.Contains(byTable["ai_request_fact"], boundedModelsProviderLabel(unsafeProvider)) ||
+		!strings.Contains(byTable["ai_request_fact"], `"model":"mcp:[provider-name-omitted]"`) {
+		t.Fatalf("request fact lost safe fields or projection: %s", byTable["ai_request_fact"])
+	}
+	if !strings.Contains(byTable["ai_tool_fact"], boundedModelsProviderLabel(unsafeProvider)) {
+		t.Fatalf("tool fact server label was not projected: %s", byTable["ai_tool_fact"])
+	}
+	if !strings.Contains(byTable["ai_tool_fact"], `"tool_name":"lookup:[provider-name-omitted]"`) ||
+		!strings.Contains(byTable["ai_tool_fact"], `"source":"call [provider-name-omitted]"`) {
+		t.Fatalf("tool fact descriptive metadata was not projected: %s", byTable["ai_tool_fact"])
+	}
+	if !strings.Contains(byTable["ai_policy_fact"], boundedModelsProviderLabel(unsafeProvider)) {
+		t.Fatalf("policy fact provider was not projected: %s", byTable["ai_policy_fact"])
+	}
+	for _, field := range []string{
+		`"rule_id":"mcp:[provider-name-omitted]"`,
+		`"rule_name":"rule [provider-name-omitted]"`,
+		`"model":"mcp:[provider-name-omitted]"`,
+	} {
+		if !strings.Contains(byTable["ai_policy_fact"], field) {
+			t.Fatalf("historical policy metadata %s was not projected: %s", field, byTable["ai_policy_fact"])
+		}
+	}
+	if !strings.Contains(byTable["ai_multimodel_fact"], boundedModelsProviderLabel(unsafeProvider)) ||
+		!strings.Contains(byTable["ai_multimodel_fact"], `"model":"mcp:[provider-name-omitted]"`) {
+		t.Fatalf("multi-model fact provider metadata was not projected: %s", byTable["ai_multimodel_fact"])
+	}
+	if !strings.Contains(byTable["ai_eval_fact"], `"score":0.9`) {
+		t.Fatalf("safe eval fact was not preserved: %s", byTable["ai_eval_fact"])
+	}
+	remaining, err := db.ListClickHouseFactRetries(t.Context(), "", 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(remaining) != 3 {
+		t.Fatalf("quarantined retry rows=%d, want 3: %+v", len(remaining), remaining)
+	}
+	retainedMalformed, retainedUnknown, retainedMismatch := false, false, false
+	for _, retry := range remaining {
+		retainedMalformed = retainedMalformed || strings.Contains(retry.Payload, "not-json")
+		retainedUnknown = retainedUnknown || retry.TableName == "unknown_fact"
+		retainedMismatch = retainedMismatch || strings.Contains(retry.Payload, "row-count-mismatch")
+		if !strings.HasPrefix(retry.Error, "quarantined:") {
+			t.Fatalf("rejected retry was not marked quarantined: %+v", retry)
+		}
+	}
+	if !retainedMalformed || !retainedUnknown || !retainedMismatch {
+		t.Fatalf("quarantine did not preserve every rejected batch: %+v", remaining)
+	}
+	replayable, err := db.ListReplayableClickHouseFactRetries(t.Context(), "", 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(replayable) != 0 {
+		t.Fatalf("quarantined rows remained replayable: %+v", replayable)
+	}
+	sentBefore := totalRequests
+	second := postJSON(t, gateway.URL+"/admin/dw/clickhouse/fact-retry", "", map[string]any{})
+	secondBody, _ := io.ReadAll(second.Body)
+	second.Body.Close()
+	if second.StatusCode != http.StatusOK || totalRequests != sentBefore ||
+		!strings.Contains(string(secondBody), `"recovered_batches":0`) {
+		t.Fatalf("quarantined rows were retried: status=%d requests=%d/%d body=%s", second.StatusCode, totalRequests, sentBefore, secondBody)
+	}
+
+	badTable := postJSON(t, gateway.URL+"/admin/dw/clickhouse/fact-retry?table=unknown_fact", "", map[string]any{})
+	badBody, _ := io.ReadAll(badTable.Body)
+	badTable.Body.Close()
+	if badTable.StatusCode != http.StatusBadRequest || !strings.Contains(string(badBody), "bad_table") {
+		t.Fatalf("unknown table filter did not fail closed: status=%d body=%s", badTable.StatusCode, badBody)
 	}
 }
 

@@ -2,11 +2,15 @@ package store
 
 import (
 	"context"
+	"strings"
 	"time"
 )
 
+const clickHouseFactRetryQuarantinePrefix = "quarantined:"
+
 // ClickHouseFactRetry is one failed fact-insert batch awaiting replay. The payload is the
-// raw JSONEachRow body so reprocessing is a straight re-POST.
+// original JSONEachRow body; the proxy re-parses and re-projects it before every replay so
+// historical rows cannot bypass newer outbound-data boundaries.
 type ClickHouseFactRetry struct {
 	ID        string `json:"id"`
 	TableName string `json:"table_name"`
@@ -30,14 +34,33 @@ func (s *SQLStore) RecordClickHouseFactRetry(ctx context.Context, tableName, pay
 // ListClickHouseFactRetries returns pending fact retry batches (oldest first), optionally
 // filtered by table.
 func (s *SQLStore) ListClickHouseFactRetries(ctx context.Context, tableName string, limit int) ([]ClickHouseFactRetry, error) {
+	return s.listClickHouseFactRetries(ctx, tableName, limit, false)
+}
+
+// ListReplayableClickHouseFactRetries excludes rows that failed structural validation.
+// Quarantined rows remain available through ListClickHouseFactRetries for inspection, but
+// cannot starve later valid work at the bounded replay window.
+func (s *SQLStore) ListReplayableClickHouseFactRetries(ctx context.Context, tableName string, limit int) ([]ClickHouseFactRetry, error) {
+	return s.listClickHouseFactRetries(ctx, tableName, limit, true)
+}
+
+func (s *SQLStore) listClickHouseFactRetries(ctx context.Context, tableName string, limit int, replayableOnly bool) ([]ClickHouseFactRetry, error) {
 	if limit <= 0 || limit > 1000 {
 		limit = 200
 	}
 	q := `SELECT id, table_name, payload, rows, COALESCE(error, ''), attempts, created_at, updated_at FROM clickhouse_fact_retry`
 	args := []any{}
+	conditions := []string{}
 	if tableName != "" {
-		q += " WHERE table_name = ?"
+		conditions = append(conditions, "table_name = ?")
 		args = append(args, tableName)
+	}
+	if replayableOnly {
+		conditions = append(conditions, "COALESCE(error, '') NOT LIKE ?")
+		args = append(args, clickHouseFactRetryQuarantinePrefix+"%")
+	}
+	if len(conditions) > 0 {
+		q += " WHERE " + strings.Join(conditions, " AND ")
 	}
 	q += " ORDER BY created_at ASC LIMIT ?"
 	args = append(args, limit)
@@ -55,6 +78,19 @@ func (s *SQLStore) ListClickHouseFactRetries(ctx context.Context, tableName stri
 		out = append(out, r)
 	}
 	return out, rows.Err()
+}
+
+// QuarantineClickHouseFactRetry records a stable validation reason without deleting the
+// original payload. The row stays inspectable but is excluded from automatic replay.
+func (s *SQLStore) QuarantineClickHouseFactRetry(ctx context.Context, id, reason string) error {
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		reason = "invalid_payload"
+	}
+	_, err := s.db.ExecContext(ctx, s.bind(`UPDATE clickhouse_fact_retry
+		SET error = ?, attempts = attempts + 1, updated_at = ? WHERE id = ?`),
+		clickHouseFactRetryQuarantinePrefix+reason, time.Now().UTC().Format(time.RFC3339Nano), id)
+	return err
 }
 
 // DeleteClickHouseFactRetry removes a batch (after a successful replay).
