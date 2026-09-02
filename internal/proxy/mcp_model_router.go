@@ -203,7 +203,7 @@ func (s *Server) handleMCPDiscoveryChat(w http.ResponseWriter, r *http.Request, 
 	selectorGate := backingModel == ""
 	candidates, diag, err := s.selectMCPCandidates(r.Context(), query, policy, authCtx, selectorGate)
 	if err != nil {
-		writeOpenAIError(w, http.StatusBadGateway, "mcp discovery failed: "+err.Error(), "mcp_error", "mcp_discovery_failed")
+		writeOpenAIError(w, http.StatusBadGateway, "MCP discovery is unavailable", "mcp_error", "mcp_discovery_failed")
 		return
 	}
 	w.Header().Set("X-MCP-Discovery-Model", policy.Model)

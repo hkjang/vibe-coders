@@ -407,3 +407,30 @@ func TestMCPUpstreamNameAdmissionPreservesExactLegacyEdit(t *testing.T) {
 		t.Fatalf("exact reserved legacy edit changed /admin shape: status=%d body=%s", reservedLegacyEdit.StatusCode, reservedLegacyBody)
 	}
 }
+
+func TestMCPGroundedDatabaseFailureIsStable(t *testing.T) {
+	server, db := newKnowledgeServer(t)
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	recorder := httptest.NewRecorder()
+	body := []byte(`{
+		"model":"vibe/grounded",
+		"messages":[{"role":"user","content":"lookup evidence"}]
+	}`)
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	server.handleMCPDiscoveryChat(recorder, request, body, "lookup evidence", mcpDiscoveryPolicyForModel("vibe/grounded"), "test-key", nil)
+
+	visible := recorder.Body.String()
+	if recorder.Code != http.StatusBadGateway || !strings.Contains(visible, `"code":"mcp_discovery_failed"`) ||
+		!strings.Contains(visible, "MCP discovery is unavailable") {
+		t.Fatalf("unexpected grounded database failure: status=%d body=%s", recorder.Code, visible)
+	}
+	for _, internal := range []string{"database is closed", "sql:", "SELECT", "mcp_upstreams"} {
+		if strings.Contains(visible, internal) {
+			t.Fatalf("grounded database failure leaked %q: %s", internal, visible)
+		}
+	}
+}
