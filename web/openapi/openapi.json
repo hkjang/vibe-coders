@@ -13916,6 +13916,13 @@
           "200": {
             "description": "OK",
             "headers": {
+              "X-Models-Metadata-Omitted": {
+                "description": "Provider names omitted from bounded response metadata.",
+                "schema": {
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
               "X-Models-Providers": {
                 "description": "Successfully aggregated providers in deterministic priority order.",
                 "schema": {
@@ -13929,7 +13936,7 @@
                 }
               },
               "X-Models-Providers-Skipped": {
-                "description": "Provider count skipped by the bounded aggregation budget.",
+                "description": "Minimum provider count known to be skipped by the bounded aggregation budget.",
                 "schema": {
                   "minimum": 0,
                   "type": "integer"
