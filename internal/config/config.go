@@ -412,6 +412,7 @@ type ModelPrice struct {
 }
 
 func Load() (Config, error) {
+	proxyAPIKeysRaw := os.Getenv("PROXY_API_KEYS")
 	cfg := Config{
 		ListenAddr:            getEnv("LISTEN_ADDR", ":8080"),
 		RuntimeReloadInterval: durationEnv("SETTINGS_RELOAD_INTERVAL", 10*time.Second),
@@ -474,7 +475,7 @@ func Load() (Config, error) {
 			EmbeddingAPIKey:           os.Getenv("CACHE_EMBEDDING_API_KEY"),
 		},
 		Auth: AuthConfig{
-			ProxyAPIKeys:          parseProxyKeys(os.Getenv("PROXY_API_KEYS")),
+			ProxyAPIKeys:          parseProxyKeys(proxyAPIKeysRaw),
 			AdminToken:            os.Getenv("ADMIN_TOKEN"),
 			AdminReadonlyToken:    os.Getenv("ADMIN_READONLY_TOKEN"),
 			AttributeExternalKeys: boolEnv("ATTRIBUTE_EXTERNAL_KEYS", true),
@@ -614,6 +615,9 @@ func Load() (Config, error) {
 	}
 	if cfg.Logging.QueueSize <= 0 {
 		return Config{}, fmt.Errorf("LOG_QUEUE_SIZE must be positive")
+	}
+	if strings.TrimSpace(proxyAPIKeysRaw) != "" && len(cfg.Auth.ProxyAPIKeys) == 0 {
+		return Config{}, fmt.Errorf("PROXY_API_KEYS must contain at least one non-empty key")
 	}
 	if err := json.Unmarshal([]byte(getEnv("MODEL_PRICING_KRW_PER_1M", "{}")), &cfg.Pricing); err != nil {
 		return Config{}, fmt.Errorf("parse MODEL_PRICING_KRW_PER_1M: %w", err)

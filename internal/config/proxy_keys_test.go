@@ -3,6 +3,7 @@ package config
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"strings"
 	"testing"
 )
 
@@ -77,4 +78,40 @@ func TestParseProxyKeysSkipsEmptyEntries(t *testing.T) {
 	if keys[0].Name != "a" || keys[1].Name != "b" {
 		t.Errorf("names = %q/%q, want a/b", keys[0].Name, keys[1].Name)
 	}
+}
+
+func TestLoadRejectsNonBlankProxyKeysWithoutValidSecret(t *testing.T) {
+	for _, raw := range []string{"private-name:", "private-name:   ", "private-name::owner:team", ",,private-name:,"} {
+		t.Run(hashOf(raw)[:8], func(t *testing.T) {
+			t.Setenv("PROXY_API_KEYS", raw)
+			_, err := Load()
+			if err == nil || !strings.Contains(err.Error(), "PROXY_API_KEYS must contain at least one non-empty key") {
+				t.Fatalf("Load() error = %v, want stable invalid PROXY_API_KEYS error", err)
+			}
+			if strings.Contains(err.Error(), "private-name") || strings.Contains(err.Error(), raw) {
+				t.Fatalf("Load() error leaked configured metadata: %q", err)
+			}
+		})
+	}
+}
+
+func TestLoadProxyKeysBlankAndMixedCompatibility(t *testing.T) {
+	t.Run("blank remains disabled", func(t *testing.T) {
+		t.Setenv("PROXY_API_KEYS", "   ")
+		cfg, err := Load()
+		if err != nil || cfg.Auth.ProxyAPIKeys != nil {
+			t.Fatalf("Load() proxy keys = %+v, %v; want nil without error", cfg.Auth.ProxyAPIKeys, err)
+		}
+	})
+	t.Run("valid entry survives invalid slots", func(t *testing.T) {
+		t.Setenv("PROXY_API_KEYS", "broken: , valid : valid-secret : owner : team , :orphan")
+		cfg, err := Load()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(cfg.Auth.ProxyAPIKeys) != 1 || cfg.Auth.ProxyAPIKeys[0].Name != "valid" ||
+			cfg.Auth.ProxyAPIKeys[0].KeyHash != hashOf("valid-secret") {
+			t.Fatalf("Load() proxy keys = %+v, want the single valid entry", cfg.Auth.ProxyAPIKeys)
+		}
+	})
 }
