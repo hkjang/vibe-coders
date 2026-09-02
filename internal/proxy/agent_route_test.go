@@ -90,7 +90,45 @@ func TestAgentRouteEndToEnd(t *testing.T) {
 	if gotModel != "gpt-4o" {
 		t.Fatalf("backing call used wrong model: %q", gotModel)
 	}
-	_ = gotProvider // X-Proxy-Provider is consumed by the gateway, not forwarded upstream
+	if gotProvider != "" {
+		t.Fatalf("internal X-Proxy-Provider leaked upstream: %q", gotProvider)
+	}
+}
+
+func TestAgentRouteLookupFailureFailsClosed(t *testing.T) {
+	db := openTestStore(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil).WithContext(ctx)
+	pipeline := requestPipeline{
+		s:    &Server{db: db},
+		w:    recorder,
+		r:    request,
+		body: []byte(`{"model":"vibe/agent-lookup","messages":[]}`),
+	}
+	if pipeline.stepAgentRoute() {
+		t.Fatal("agent route lookup failure continued to the physical-provider pipeline")
+	}
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want %d: %s", recorder.Code, http.StatusServiceUnavailable, recorder.Body.String())
+	}
+	var response struct {
+		Error struct {
+			Message string `json:"message"`
+			Code    string `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.Error.Code != "agent_route_lookup_failed" {
+		t.Fatalf("error code = %q, want agent_route_lookup_failed", response.Error.Code)
+	}
+	if response.Error.Message != "agent route lookup is unavailable" || strings.Contains(strings.ToLower(recorder.Body.String()), "context canceled") {
+		t.Fatalf("agent route lookup error was not sanitized: %s", recorder.Body.String())
+	}
 }
 
 // TestAgentRouteAdminTest verifies the admin in-app test endpoint runs the route server-side

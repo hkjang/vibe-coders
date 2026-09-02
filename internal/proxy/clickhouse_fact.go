@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -398,10 +399,6 @@ func routingFactRow(rec store.LogRecord) (map[string]any, bool) {
 	}
 	r := rec.Routing
 	ts := factEventTime(rec.Request.CreatedAt, r.CreatedAt)
-	fallback := ""
-	if len(r.FallbackPath) > 0 {
-		fallback = strings.Join(r.FallbackPath, ">")
-	}
 	return map[string]any{
 		"event_date":        ts.Format("2006-01-02"),
 		"event_time":        ts.Format(time.RFC3339Nano),
@@ -415,7 +412,7 @@ func routingFactRow(rec store.LogRecord) (map[string]any, bool) {
 		"risk_score":        r.Risk.Score,
 		"risk_tier":         r.Risk.Tier,
 		"health_score":      r.HealthScore,
-		"fallback_path":     fallback,
+		"fallback_path":     strings.Join(r.FallbackPath, ">"),
 		"decision_reason":   r.DecisionReason,
 		"ingested_at":       time.Now().UTC().Format(time.RFC3339Nano),
 	}, true
@@ -455,11 +452,15 @@ func anyFactTableConfigured(ch config.ClickHouseConfig) bool {
 
 // insertJSONEachRow ships rows to a ClickHouse table via the HTTP interface as JSONEachRow.
 // best_effort lets RFC3339 timestamps parse into DateTime columns; skip_unknown_fields keeps
-// older table schemas accepting payloads after new columns are added. Returns the raw body
-// that was sent (for retry persistence) and the row count.
+// older table schemas accepting payloads after new columns are added. Returns the projected
+// body that was sent (for retry persistence) and the row count.
 func insertJSONEachRow(ctx context.Context, client *http.Client, cfg config.ClickHouseConfig, table string, rows []map[string]any) (string, int, error) {
 	if cfg.URL == "" || table == "" || len(rows) == 0 {
 		return "", 0, nil
+	}
+	projection, allowed := clickhouseRetryProjectionForTable(cfg, table)
+	if !allowed {
+		return "", 0, fmt.Errorf("clickhouse fact table is not configured")
 	}
 	ref := table
 	if cfg.Database != "" && !strings.Contains(table, ".") {
@@ -467,7 +468,11 @@ func insertJSONEachRow(ctx context.Context, client *http.Client, cfg config.Clic
 	}
 	var body bytes.Buffer
 	for _, row := range rows {
-		line, err := json.Marshal(row)
+		projected, err := projectClickHouseOutboundRow(row, projection)
+		if err != nil {
+			return "", 0, fmt.Errorf("clickhouse fact row projection failed")
+		}
+		line, err := json.Marshal(projected)
 		if err != nil {
 			return "", 0, err
 		}
@@ -573,8 +578,248 @@ func requestFactRow(rec store.LogRecord) map[string]any {
 	}
 }
 
-// handleClickHouseFactRetry replays persisted failed fact batches by re-POSTing the stored
-// JSONEachRow payload; rows that land are cleared from the retry queue.
+type clickhouseRetryProjection uint8
+
+const (
+	retryProjectRequest clickhouseRetryProjection = 1 << iota
+	retryProjectRouting
+	retryProjectPolicy
+	retryProjectTool
+	retryProjectProvider
+)
+
+const (
+	maxClickHouseRetryPayloadBytes = 32 << 20
+	maxClickHouseRetryRows         = 10_000
+	maxClickHouseRetryRowBytes     = 4 << 20
+)
+
+func clickhouseRetryProjectionForTable(cfg config.ClickHouseConfig, table string) (clickhouseRetryProjection, bool) {
+	table = strings.TrimSpace(table)
+	if table == "" || !validCHIdentifier(table) {
+		return 0, false
+	}
+	configured := map[string]clickhouseRetryProjection{}
+	add := func(name string, projection clickhouseRetryProjection) {
+		name = strings.TrimSpace(name)
+		if name != "" && validCHIdentifier(name) {
+			configured[name] |= projection
+		}
+	}
+	add(cfg.RequestFactTable, retryProjectRequest|retryProjectProvider)
+	add(cfg.RoutingFactTable, retryProjectRouting)
+	add(cfg.PolicyFactTable, retryProjectPolicy|retryProjectProvider)
+	add(cfg.ToolFactTable, retryProjectTool)
+	add(cfg.MultiModelFactTable, retryProjectProvider)
+	add(cfg.EvalFactTable, 0)
+	add(cfg.FeedbackFactTable, 0)
+	add(cfg.SkillFactTable, 0)
+	add(cfg.Text2SQLFactTable, 0)
+	add(cfg.RedTeamFactTable, 0)
+	projection, ok := configured[table]
+	return projection, ok
+}
+
+func clickhouseRetryString(row map[string]any, key string) (string, error) {
+	value, exists := row[key]
+	if !exists || value == nil {
+		return "", nil
+	}
+	text, ok := value.(string)
+	if !ok {
+		return "", fmt.Errorf("%s must be a string", key)
+	}
+	return text, nil
+}
+
+func sanitizeClickHouseRetryValue(value any) any {
+	switch typed := value.(type) {
+	case string:
+		return boundedExternalProviderText(typed)
+	case []any:
+		out := make([]any, len(typed))
+		for index := range typed {
+			out[index] = sanitizeClickHouseRetryValue(typed[index])
+		}
+		return out
+	case map[string]any:
+		out := make(map[string]any, len(typed))
+		for key, item := range typed {
+			out[key] = sanitizeClickHouseRetryValue(item)
+		}
+		return out
+	default:
+		return value
+	}
+}
+
+func sanitizeClickHouseRetryRow(row map[string]any, projection clickhouseRetryProjection) error {
+	providerKey := ""
+	switch {
+	case projection&retryProjectRequest != 0:
+		providerKey = "provider"
+	case projection&retryProjectRouting != 0:
+		providerKey = "selected_provider"
+	case projection&retryProjectProvider != 0:
+		providerKey = "provider"
+	}
+	rawProvider := ""
+	if providerKey != "" {
+		var err error
+		rawProvider, err = clickhouseRetryString(row, providerKey)
+		if err != nil {
+			return err
+		}
+		if _, exists := row[providerKey]; exists {
+			row[providerKey] = boundedModelsProviderLabelOrEmpty(rawProvider)
+		}
+	}
+
+	if projection&retryProjectRequest != 0 {
+		rawFallback, err := clickhouseRetryString(row, "fallback_from")
+		if err != nil {
+			return err
+		}
+		if _, exists := row["fallback_from"]; exists {
+			row["fallback_from"] = boundedModelsProviderLabelOrEmpty(rawFallback)
+		}
+		for _, key := range []string{"model", "requested_model", "fallback_reason", "route_reason", "route_detail"} {
+			value, err := clickhouseRetryString(row, key)
+			if err != nil {
+				return err
+			}
+			if _, exists := row[key]; exists {
+				row[key] = boundedExternalProviderText(value, rawProvider, rawFallback)
+			}
+		}
+	}
+	if projection&retryProjectRouting != 0 {
+		fallbackPath, err := clickhouseRetryString(row, "fallback_path")
+		if err != nil {
+			return err
+		}
+		if _, exists := row["fallback_path"]; exists {
+			row["fallback_path"] = strings.Join(boundedExternalFallbackPath(strings.Split(fallbackPath, ">"), rawProvider), ">")
+		}
+		for _, key := range []string{"requested_model", "selected_model", "decision_reason"} {
+			value, err := clickhouseRetryString(row, key)
+			if err != nil {
+				return err
+			}
+			if _, exists := row[key]; exists {
+				row[key] = boundedExternalProviderText(value, rawProvider)
+			}
+		}
+	}
+	if projection&retryProjectPolicy != 0 {
+		for _, key := range []string{"policy_id", "rule_id", "rule_name", "reason", "model"} {
+			value, err := clickhouseRetryString(row, key)
+			if err != nil {
+				return err
+			}
+			if _, exists := row[key]; exists {
+				row[key] = boundedExternalProviderText(value, rawProvider)
+			}
+		}
+	}
+	if projection&retryProjectTool != 0 {
+		serverLabel, err := clickhouseRetryString(row, "server_label")
+		if err != nil {
+			return err
+		}
+		if _, exists := row["server_label"]; exists {
+			row["server_label"] = boundedModelsProviderLabelOrEmpty(serverLabel)
+		}
+		for _, key := range []string{"tool_name", "source"} {
+			value, err := clickhouseRetryString(row, key)
+			if err != nil {
+				return err
+			}
+			if _, exists := row[key]; exists {
+				row[key] = boundedExternalProviderText(value, serverLabel)
+			}
+		}
+	}
+	if projection&retryProjectProvider != 0 {
+		for _, key := range []string{"model", "selected_model", "reason", "verdict"} {
+			value, err := clickhouseRetryString(row, key)
+			if err != nil {
+				return err
+			}
+			if _, exists := row[key]; exists {
+				row[key] = boundedExternalProviderText(value, rawProvider)
+			}
+		}
+	}
+	for key, value := range row {
+		row[key] = sanitizeClickHouseRetryValue(value)
+	}
+	return nil
+}
+
+// projectClickHouseOutboundRow applies the same table-specific projection to live
+// facts and historical retries. It clones the top-level map so async exporters do
+// not mutate request-owned data while replacing legacy credential-shaped labels.
+func projectClickHouseOutboundRow(row map[string]any, projection clickhouseRetryProjection) (map[string]any, error) {
+	projected := make(map[string]any, len(row))
+	for key, value := range row {
+		projected[key] = value
+	}
+	if err := sanitizeClickHouseRetryRow(projected, projection); err != nil {
+		return nil, err
+	}
+	return projected, nil
+}
+
+// sanitizeClickHouseRetryPayload upgrades historical JSONEachRow batches at the
+// retry boundary. The primary database retains raw legacy provider identities,
+// but an old retry record must not bypass today's outbound projections.
+func sanitizeClickHouseRetryPayload(payload string, projection clickhouseRetryProjection) (string, int, error) {
+	if payload == "" || len(payload) > maxClickHouseRetryPayloadBytes {
+		return "", 0, fmt.Errorf("retry payload size is invalid")
+	}
+	lines := strings.Split(payload, "\n")
+	var out bytes.Buffer
+	rows := 0
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		rows++
+		if rows > maxClickHouseRetryRows || len(line) > maxClickHouseRetryRowBytes {
+			return "", 0, fmt.Errorf("retry payload bounds exceeded")
+		}
+		decoder := json.NewDecoder(strings.NewReader(line))
+		decoder.UseNumber()
+		var row map[string]any
+		if err := decoder.Decode(&row); err != nil || row == nil {
+			return "", 0, fmt.Errorf("retry payload contains invalid JSON object")
+		}
+		var extra any
+		if err := decoder.Decode(&extra); err != io.EOF {
+			return "", 0, fmt.Errorf("retry payload contains trailing JSON")
+		}
+		if err := sanitizeClickHouseRetryRow(row, projection); err != nil {
+			return "", 0, fmt.Errorf("retry payload schema is invalid")
+		}
+		encoded, err := json.Marshal(row)
+		if err != nil {
+			return "", 0, fmt.Errorf("retry payload encoding failed")
+		}
+		if len(encoded) > maxClickHouseRetryRowBytes || out.Len()+len(encoded)+1 > maxClickHouseRetryPayloadBytes {
+			return "", 0, fmt.Errorf("projected retry payload bounds exceeded")
+		}
+		out.Write(encoded)
+		out.WriteByte('\n')
+	}
+	if rows == 0 {
+		return "", 0, fmt.Errorf("retry payload has no rows")
+	}
+	return out.String(), rows, nil
+}
+
+// handleClickHouseFactRetry replays persisted failed fact batches after validating and
+// re-projecting their JSONEachRow payload; rows that land are cleared from the retry queue.
 // POST /admin/dw/clickhouse/fact-retry[?table=ai_request_fact]
 func (s *Server) handleClickHouseFactRetry(w http.ResponseWriter, r *http.Request) {
 	if !s.authorizeAdmin(r) {
@@ -591,14 +836,50 @@ func (s *Server) handleClickHouseFactRetry(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	table := strings.TrimSpace(r.URL.Query().Get("table"))
-	batches, err := s.db.ListClickHouseFactRetries(r.Context(), table, 500)
+	if table != "" {
+		if _, allowed := clickhouseRetryProjectionForTable(cfg, table); !allowed {
+			writeOpenAIError(w, http.StatusBadRequest, "table must be a configured fact table", "invalid_request_error", "bad_table")
+			return
+		}
+	}
+	batches, err := s.db.ListReplayableClickHouseFactRetries(r.Context(), table, 500)
 	if err != nil {
 		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "fact_retry_failed")
 		return
 	}
 	recovered, rows := 0, 0
 	failed := 0
+	quarantined := 0
+	quarantine := func(id, reason string) bool {
+		if err := s.db.QuarantineClickHouseFactRetry(r.Context(), id, reason); err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, "failed to quarantine ClickHouse fact retry", "server_error", "fact_retry_quarantine_failed")
+			return false
+		}
+		failed++
+		quarantined++
+		return true
+	}
 	for _, b := range batches {
+		projection, allowed := clickhouseRetryProjectionForTable(cfg, b.TableName)
+		if !allowed {
+			if !quarantine(b.ID, "table_not_configured") {
+				return
+			}
+			continue
+		}
+		payload, payloadRows, projectionErr := sanitizeClickHouseRetryPayload(b.Payload, projection)
+		if projectionErr != nil {
+			if !quarantine(b.ID, "payload_invalid") {
+				return
+			}
+			continue
+		}
+		if payloadRows != b.Rows {
+			if !quarantine(b.ID, "row_count_mismatch") {
+				return
+			}
+			continue
+		}
 		ref := b.TableName
 		if cfg.Database != "" && !strings.Contains(ref, ".") {
 			ref = cfg.Database + "." + ref
@@ -606,7 +887,12 @@ func (s *Server) handleClickHouseFactRetry(w http.ResponseWriter, r *http.Reques
 		q := "INSERT INTO " + ref + " FORMAT JSONEachRow"
 		endpoint := cfg.URL + "/?query=" + url.QueryEscape(q) + "&date_time_input_format=best_effort&input_format_skip_unknown_fields=1"
 		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
-		req, _ := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(b.Payload))
+		req, requestErr := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(payload))
+		if requestErr != nil {
+			cancel()
+			failed++
+			continue
+		}
 		req.Header.Set("Content-Type", "application/x-ndjson")
 		if cfg.User != "" {
 			req.Header.Set("X-ClickHouse-User", cfg.User)
@@ -614,7 +900,7 @@ func (s *Server) handleClickHouseFactRetry(w http.ResponseWriter, r *http.Reques
 		}
 		resp, derr := s.client.Do(req)
 		cancel()
-		if derr != nil || resp.StatusCode >= 300 {
+		if derr != nil || resp == nil || resp.StatusCode >= 300 {
 			failed++
 			if resp != nil {
 				resp.Body.Close()
@@ -624,10 +910,10 @@ func (s *Server) handleClickHouseFactRetry(w http.ResponseWriter, r *http.Reques
 		resp.Body.Close()
 		_ = s.db.DeleteClickHouseFactRetry(r.Context(), b.ID)
 		recovered++
-		rows += b.Rows
+		rows += payloadRows
 	}
-	s.auditAdmin(r, "dw.clickhouse.fact_retry", table, auditJSON(map[string]any{"recovered": recovered, "rows": rows, "failed": failed}))
-	writeJSON(w, http.StatusOK, map[string]any{"recovered_batches": recovered, "rows": rows, "still_failing": failed})
+	s.auditAdmin(r, "dw.clickhouse.fact_retry", table, auditJSON(map[string]any{"recovered": recovered, "rows": rows, "failed": failed, "quarantined": quarantined}))
+	writeJSON(w, http.StatusOK, map[string]any{"recovered_batches": recovered, "rows": rows, "still_failing": failed, "quarantined_batches": quarantined})
 }
 
 // text2sqlSQLHash returns a stable hash of generated SQL (the raw SQL is never shipped to

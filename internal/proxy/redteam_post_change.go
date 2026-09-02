@@ -13,23 +13,27 @@ import (
 )
 
 // postChangeRedTeamSpec is a safe routing plan from one successful admin mutation to
-// a bounded Red Team simulation. It never carries secrets or raw changed values.
+// a bounded Red Team simulation. Provider may temporarily carry an exact raw registry
+// key for target selection, but no spec is serialized or persisted.
 type postChangeRedTeamSpec struct {
-	Scope       string
-	Ref         string
-	Reason      string
-	Provider    string
-	MCPUpstream string
-	ToolName    string
-	TargetType  string
-	TargetRef   string
-	ProbePacks  []string
+	Scope    string
+	Ref      string
+	Reason   string
+	Provider string
+	// ProviderExact is request-local routing metadata. It is never serialized or
+	// persisted; it prevents a redacted provider audit from widening to every target.
+	ProviderExact bool
+	MCPUpstream   string
+	ToolName      string
+	TargetType    string
+	TargetRef     string
+	ProbePacks    []string
 }
 
 // maybeRunPostChangeRedTeam turns security-sensitive admin changes into a restart-safe,
 // deduplicated simulation campaign. It runs synchronously after the audit row is written so
 // the original change still succeeds even when the regression check itself cannot be created.
-func (s *Server) maybeRunPostChangeRedTeam(r *http.Request, action, before, after string) error {
+func (s *Server) maybeRunPostChangeRedTeam(r *http.Request, action, before, after, exactProvider string) error {
 	if !s.cfg.RedTeam.PostChangeEnabled || r == nil || redteamKillSwitch.Load() {
 		return nil
 	}
@@ -37,11 +41,15 @@ func (s *Server) maybeRunPostChangeRedTeam(r *http.Request, action, before, afte
 	if !ok {
 		return nil
 	}
+	if rawProvider := strings.TrimSpace(exactProvider); rawProvider != "" && spec.Scope == "provider" {
+		spec.Provider = rawProvider
+		spec.ProviderExact = true
+	}
 
 	cooldown := s.redTeamPostChangeCooldown()
 	// before/after are already the masked, intentionally bounded audit representations.
 	// Persist only their digest, never the values themselves.
-	fingerprint := audit.HashText(action + "|" + spec.Ref + "|" + before + "|" + after)
+	fingerprint := audit.HashText(action + "|" + spec.Ref + "|" + audit.HashText(spec.Provider) + "|" + before + "|" + after)
 	if _, found, err := s.db.FindRecentRedTeamCampaignByFingerprint(r.Context(), fingerprint, time.Now().UTC().Add(-cooldown)); err != nil {
 		return err
 	} else if found {
@@ -291,7 +299,7 @@ func selectPostChangeRedTeamTargets(targets []store.RedTeamTarget, spec postChan
 	}
 	// A deleted target no longer exists after inventory sync. In that case, test the remaining
 	// targets in the same scope so fallback and policy behavior still receive a regression check.
-	if len(eligible) == 0 && (spec.Provider != "" || spec.MCPUpstream != "" || spec.TargetRef != "") {
+	if len(eligible) == 0 && !spec.ProviderExact && (spec.Provider != "" || spec.MCPUpstream != "" || spec.TargetRef != "") {
 		fallback := spec
 		fallback.Provider, fallback.MCPUpstream, fallback.ToolName, fallback.TargetRef = "", "", "", ""
 		return selectPostChangeRedTeamTargets(targets, fallback, limit)

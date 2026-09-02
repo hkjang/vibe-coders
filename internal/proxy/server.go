@@ -33,7 +33,7 @@ import (
 
 // AppVersion is the gateway build version, surfaced in /auth/me and both admin UIs.
 // Release builds override it with -X vibe-coders/internal/proxy.AppVersion=<tag>.
-var AppVersion = "v0.81.0"
+var AppVersion = "v0.82.0"
 
 type Server struct {
 	cfg      config.Config
@@ -92,6 +92,7 @@ type Server struct {
 	lastReloadNano  atomic.Int64           // unix nanos of this pod's last runtime-config reload (convergence observability)
 	lastReloadTok   atomic.Pointer[string] // admin_settings change token this pod last applied
 	appUIRuntime    atomic.Pointer[appUIRuntimeConfig]
+	adminModels     *adminModelCatalogCache
 }
 
 type atomicKillState struct {
@@ -128,13 +129,14 @@ func NewServer(cfg config.Config, db *store.SQLStore, logger *store.AsyncLogger,
 			Timeout:   cfg.Upstream.Timeout,
 			Transport: transport,
 		},
-		metrics:    newMetrics(),
-		breakers:   newProviderBreakers(),
-		balancer:   newProviderBalancer(),
-		instanceID: instanceIdentity(),
-		retention:  retention,
-		sessions:   newSessionInferer(cfg.Session.IdleTimeout),
-		dwCache:    newDWQueryCache(0),
+		metrics:     newMetrics(),
+		breakers:    newProviderBreakers(),
+		balancer:    newProviderBalancer(),
+		instanceID:  instanceIdentity(),
+		retention:   retention,
+		sessions:    newSessionInferer(cfg.Session.IdleTimeout),
+		dwCache:     newDWQueryCache(0),
+		adminModels: newAdminModelCatalogCache(),
 	}
 	server.secrets.Store(secrets)
 
@@ -280,6 +282,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/admin/api-keys/", s.handleAPIKeyByID)
 	mux.HandleFunc("/admin/providers", s.handleProviders)
 	mux.HandleFunc("/admin/providers/", s.handleProviderByName)
+	mux.HandleFunc("/admin/models", s.handleAdminModels)
 	mux.HandleFunc("/admin/chat-test/targets", s.handleChatTestTargets)
 	mux.HandleFunc("/admin/chat-test/run", s.handleChatTestRun)
 	mux.HandleFunc("/admin/chat-test/multi-run", s.handleChatTestMultiRun)
@@ -1150,19 +1153,38 @@ func (s *Server) handleAPIKeyByID(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleProviders(w http.ResponseWriter, r *http.Request) {
+	setVibeUIVariantHeaders(w)
 	if !s.authorizeAdmin(r) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
 	}
 	switch r.Method {
 	case http.MethodGet:
+		appProjection := r.Header.Get("X-Vibe-UI") == "app"
+		var providerRef providerReferenceFunc
+		if appProjection {
+			providerRef = s.providerRefSnapshot()
+		}
 		providers, err := s.db.ListProviders(r.Context())
 		if err != nil {
 			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "providers_failed")
 			return
 		}
+		for i := range providers {
+			rawName := providers[i].Name
+			if appProjection {
+				providers[i].ProviderRef = providerRef(rawName)
+				providers[i].Name = boundedModelsProviderLabel(rawName)
+			}
+			providers[i].BaseURL = sanitizeProviderBaseURL(providers[i].BaseURL)
+		}
 		writeJSON(w, http.StatusOK, map[string]any{"providers": providers})
 	case http.MethodPost:
+		appProjection := r.Header.Get("X-Vibe-UI") == "app"
+		var providerRef providerReferenceFunc
+		if appProjection {
+			providerRef = s.providerRefSnapshot()
+		}
 		var payload struct {
 			Name          string `json:"name"`
 			BaseURL       string `json:"base_url"`
@@ -1183,8 +1205,33 @@ func (s *Server) handleProviders(w http.ResponseWriter, r *http.Request) {
 			writeOpenAIError(w, http.StatusBadRequest, "name and base_url are required", "invalid_request_error", "missing_provider_fields")
 			return
 		}
-		if _, err := url.ParseRequestURI(payload.BaseURL); err != nil {
-			writeOpenAIError(w, http.StatusBadRequest, "base_url must be an absolute URL", "invalid_request_error", "invalid_base_url")
+		before, found, err := s.db.GetProvider(r.Context(), payload.Name)
+		if err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, "failed to load provider", "server_error", "provider_load_failed")
+			return
+		}
+		if !found && modelsProviderNameReserved(payload.Name) {
+			writeOpenAIError(w, http.StatusBadRequest, "provider name is reserved", "invalid_request_error", "provider_name_reserved")
+			return
+		}
+		if !found && !modelsProviderLabelSafe(payload.Name) {
+			if len(payload.Name) > maxModelsProviderNameBytes {
+				writeOpenAIError(w, http.StatusBadRequest, "provider name exceeds the supported limit", "invalid_request_error", "provider_name_too_long")
+			} else {
+				writeOpenAIError(w, http.StatusBadRequest, "provider name contains unsafe metadata", "invalid_request_error", "provider_name_invalid")
+			}
+			return
+		}
+		// Legacy rows may contain credentials from before this validation existed.
+		// Their public URL is redacted; accepting that exact redacted representation
+		// preserves the stored URL while an operator changes an unrelated field.
+		legacyURLIsUnsafe := found && validateProviderBaseURL(before.BaseURL) != nil
+		publicLegacyURL := strings.TrimRight(sanitizeProviderBaseURL(before.BaseURL), "/")
+		preserveRedactedURL := legacyURLIsUnsafe && payload.BaseURL == publicLegacyURL
+		if preserveRedactedURL {
+			payload.BaseURL = before.BaseURL
+		} else if err := validateProviderBaseURL(payload.BaseURL); err != nil {
+			writeOpenAIError(w, http.StatusBadRequest, err.Error(), "invalid_request_error", "invalid_base_url")
 			return
 		}
 		if payload.TimeoutMS <= 0 {
@@ -1195,7 +1242,6 @@ func (s *Server) handleProviders(w http.ResponseWriter, r *http.Request) {
 			enabled = *payload.Enabled
 		}
 
-		before, _, _ := s.db.GetProvider(r.Context(), payload.Name)
 		encryptedKey := before.EncryptedAPIKey
 		if strings.TrimSpace(payload.APIKey) != "" {
 			var err error
@@ -1226,19 +1272,25 @@ func (s *Server) handleProviders(w http.ResponseWriter, r *http.Request) {
 			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "provider_save_failed")
 			return
 		}
-		s.auditAdmin(r, "provider.upsert", providerAuditJSON(before), providerAuditJSON(provider))
-		writeJSON(w, http.StatusOK, map[string]any{
-			"provider": map[string]any{
-				"name":               provider.Name,
-				"base_url":           provider.BaseURL,
-				"api_key_configured": provider.EncryptedAPIKey != "",
-				"timeout_ms":         provider.TimeoutMS,
-				"enabled":            provider.Enabled,
-				"model_patterns":     provider.ModelPatterns,
-				"failover_group":     provider.FailoverGroup,
-				"priority":           provider.Priority,
-			},
-		})
+		s.auditAdminWithProviderTarget(r, "provider.upsert", providerAuditJSON(before), providerAuditJSON(provider), provider.Name)
+		responseName := provider.Name
+		if appProjection {
+			responseName = boundedModelsProviderLabel(responseName)
+		}
+		responseProvider := map[string]any{
+			"name":               responseName,
+			"base_url":           sanitizeProviderBaseURL(provider.BaseURL),
+			"api_key_configured": provider.EncryptedAPIKey != "",
+			"timeout_ms":         provider.TimeoutMS,
+			"enabled":            provider.Enabled,
+			"model_patterns":     provider.ModelPatterns,
+			"failover_group":     provider.FailoverGroup,
+			"priority":           provider.Priority,
+		}
+		if appProjection {
+			responseProvider["provider_ref"] = providerRef(provider.Name)
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"provider": responseProvider})
 	default:
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
 	}
@@ -1256,9 +1308,10 @@ func (s *Server) handleProviderByName(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.Method {
 	case http.MethodDelete:
+		displayName := boundedModelsProviderLabel(name)
 		before, found, _ := s.db.GetProvider(r.Context(), name)
 		if !found {
-			writeOpenAIError(w, http.StatusNotFound, "provider not found: "+name, "invalid_request_error", "provider_not_found")
+			writeOpenAIError(w, http.StatusNotFound, "provider not found: "+displayName, "invalid_request_error", "provider_not_found")
 			return
 		}
 		deleted, err := s.db.DeleteProvider(r.Context(), name)
@@ -1267,11 +1320,11 @@ func (s *Server) handleProviderByName(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if !deleted {
-			writeOpenAIError(w, http.StatusNotFound, "provider not found: "+name, "invalid_request_error", "provider_not_found")
+			writeOpenAIError(w, http.StatusNotFound, "provider not found: "+displayName, "invalid_request_error", "provider_not_found")
 			return
 		}
-		s.auditAdmin(r, "provider.delete", providerAuditJSON(before), "")
-		writeJSON(w, http.StatusOK, map[string]string{"deleted": name})
+		s.auditAdminWithProviderTarget(r, "provider.delete", providerAuditJSON(before), "", before.Name)
+		writeJSON(w, http.StatusOK, map[string]string{"deleted": displayName})
 	default:
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
 	}
@@ -1583,6 +1636,10 @@ type resolvedProvider struct {
 // provider that actually answered, and (if a failover occurred) the original primary's
 // name in `failoverFrom`.
 func (s *Server) dialUpstream(reqCtx context.Context, r *http.Request, body []byte, primary resolvedProvider, traceID string, failoverCandidates []string) (*http.Response, string, string, string, []string, []byte, string, http.Header, error) {
+	boundModelsMetadata := r.Method == http.MethodGet && r.URL.Path == "/v1/models" && !clientPinnedProvider(r)
+	providerLabel := func(name string) string {
+		return boundedModelsProviderLabel(name)
+	}
 	attempts := []providerAttempt{{provider: primary}}
 	for _, name := range failoverCandidates {
 		// Re-resolve each candidate so we get its decrypted key and timeout.
@@ -1590,7 +1647,11 @@ func (s *Server) dialUpstream(reqCtx context.Context, r *http.Request, body []by
 		fakeReq.Header.Set("X-Proxy-Provider", name)
 		cand, err := s.selectProvider(reqCtx, fakeReq, "")
 		if err != nil {
-			slog.Warn("failover candidate unavailable", "name", name, "error", err)
+			code := "provider_candidate_unavailable"
+			if boundModelsMetadata {
+				code = "models_fallback_candidate_unavailable"
+			}
+			slog.Warn("failover candidate unavailable", "name", providerLabel(name), "code", code)
 			continue
 		}
 		attempts = append(attempts, providerAttempt{provider: cand})
@@ -1630,7 +1691,21 @@ func (s *Server) dialUpstream(reqCtx context.Context, r *http.Request, body []by
 	var lastUpstreamHeaders http.Header
 	for i := 0; i < len(attempts); {
 		att := attempts[i]
-		upstreamURL, err := s.upstreamURL(att.provider.BaseURL, r.URL)
+		upstreamRequestURL := r.URL
+		if boundModelsMetadata {
+			var modelsURLErr error
+			upstreamRequestURL, modelsURLErr = modelsCatalogRequestURL(att.provider.BaseURL, r.URL.Path)
+			if modelsURLErr != nil {
+				return nil, "", "", "", failoverPath, currentBody, currentModel, lastUpstreamHeaders, modelsURLErr
+			}
+		} else if r.Method == http.MethodGet && r.URL.Path == "/v1/models" && clientPinnedProvider(r) {
+			var modelsURLErr error
+			upstreamRequestURL, modelsURLErr = pinnedModelsRequestURL(att.provider.BaseURL, r.URL)
+			if modelsURLErr != nil {
+				return nil, "", "", "", failoverPath, currentBody, currentModel, lastUpstreamHeaders, modelsURLErr
+			}
+		}
+		upstreamURL, err := s.upstreamURL(att.provider.BaseURL, upstreamRequestURL)
 		if err != nil {
 			return nil, "", "", "", failoverPath, currentBody, currentModel, lastUpstreamHeaders, err
 		}
@@ -1646,7 +1721,11 @@ func (s *Server) dialUpstream(reqCtx context.Context, r *http.Request, body []by
 			}
 			return nil, "", "", "", failoverPath, currentBody, currentModel, lastUpstreamHeaders, err
 		}
-		copyUpstreamHeaders(upstreamReq.Header, r.Header)
+		if boundModelsMetadata {
+			upstreamReq.Header.Set("Accept", "application/json")
+		} else {
+			copyUpstreamHeaders(upstreamReq.Header, r.Header)
+		}
 		upstreamReq.Header.Set("Authorization", "Bearer "+att.provider.APIKey)
 		upstreamReq.Header.Set("X-Request-ID", traceID)
 		if r.Method == http.MethodPost && upstreamReq.Header.Get("Content-Type") == "" {
@@ -1670,14 +1749,14 @@ func (s *Server) dialUpstream(reqCtx context.Context, r *http.Request, body []by
 				if cancel != nil {
 					cancel()
 				}
-				failoverPath = append(failoverPath, reason+":"+att.provider.Name+"->"+attempts[i+1].provider.Name)
-				slog.Warn("upstream status fallback", "provider", att.provider.Name, "status", resp.StatusCode, "next", attempts[i+1].provider.Name)
+				failoverPath = append(failoverPath, reason+":"+providerLabel(att.provider.Name)+"->"+providerLabel(attempts[i+1].provider.Name))
+				slog.Warn("upstream status fallback", "provider", providerLabel(att.provider.Name), "status", resp.StatusCode, "next", providerLabel(attempts[i+1].provider.Name))
 				i++
 				continue
 			}
 			if statusFallbackAllowed(resp.StatusCode) && i+1 < len(attempts) && budgetSpent() {
-				failoverPath = append(failoverPath, "failover_budget_exhausted:"+att.provider.Name)
-				slog.Warn("failover budget exhausted", "provider", att.provider.Name, "status", resp.StatusCode, "trace_id", traceID)
+				failoverPath = append(failoverPath, "failover_budget_exhausted:"+providerLabel(att.provider.Name))
+				slog.Warn("failover budget exhausted", "provider", providerLabel(att.provider.Name), "status", resp.StatusCode, "trace_id", traceID)
 			}
 			if resp.StatusCode == http.StatusBadRequest && !usedLongContext {
 				sniff, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
@@ -1717,14 +1796,18 @@ func (s *Server) dialUpstream(reqCtx context.Context, r *http.Request, body []by
 		if breakerEnabled {
 			s.noteBreakerFailure(att.provider.Name, reason, breakerThreshold, traceID)
 		}
-		slog.Warn("upstream call failed", "provider", att.provider.Name, "attempt", i, "error", doErr)
+		code := "upstream_transport_failed"
+		if boundModelsMetadata {
+			code = "models_fallback_transport_failed"
+		}
+		slog.Warn("upstream call failed", "provider", providerLabel(att.provider.Name), "attempt", i, "code", code, "reason", reason)
 		if i+1 < len(attempts) {
 			if budgetSpent() {
-				failoverPath = append(failoverPath, "failover_budget_exhausted:"+att.provider.Name)
-				slog.Warn("failover budget exhausted", "provider", att.provider.Name, "trace_id", traceID)
+				failoverPath = append(failoverPath, "failover_budget_exhausted:"+providerLabel(att.provider.Name))
+				slog.Warn("failover budget exhausted", "provider", providerLabel(att.provider.Name), "trace_id", traceID)
 				break
 			}
-			failoverPath = append(failoverPath, reason+":"+att.provider.Name+"->"+attempts[i+1].provider.Name)
+			failoverPath = append(failoverPath, reason+":"+providerLabel(att.provider.Name)+"->"+providerLabel(attempts[i+1].provider.Name))
 		}
 		i++
 	}
@@ -1743,7 +1826,7 @@ func (s *Server) selectProviderForced(ctx context.Context, r *http.Request, mode
 		clone.Header.Set("X-Proxy-Provider", forceProvider)
 		rp, err := s.selectProvider(ctx, clone, model)
 		if err == nil {
-			rp.Reason, rp.Detail = "rule_provider", forceProvider
+			rp.Reason, rp.Detail = "rule_provider", boundedModelsProviderLabel(forceProvider)
 		}
 		return rp, err
 	}
@@ -1778,17 +1861,17 @@ func (s *Server) selectProvider(ctx context.Context, r *http.Request, model stri
 		return resolvedProvider{}, err
 	}
 	if !found {
-		return resolvedProvider{}, fmt.Errorf("provider %q is not configured", name)
+		return resolvedProvider{}, errors.New("provider is not configured")
 	}
 	if !provider.Enabled {
-		return resolvedProvider{}, fmt.Errorf("provider %q is disabled", name)
+		return resolvedProvider{}, errors.New("provider is disabled")
 	}
 	apiKey, err := s.secrets.Load().Decrypt(provider.EncryptedAPIKey)
 	if err != nil {
-		return resolvedProvider{}, fmt.Errorf("provider %q API key cannot be decrypted", name)
+		return resolvedProvider{}, errors.New("provider credentials cannot be decrypted")
 	}
 	if apiKey == "" {
-		return resolvedProvider{}, fmt.Errorf("provider %q API key is not configured", name)
+		return resolvedProvider{}, errors.New("provider credentials are not configured")
 	}
 	timeout := time.Duration(provider.TimeoutMS) * time.Millisecond
 	if timeout <= 0 {
@@ -1932,6 +2015,13 @@ func generateProxyKey() (string, error) {
 }
 
 func (s *Server) auditAdmin(r *http.Request, action string, before string, after string) {
+	s.auditAdminWithProviderTarget(r, action, before, after, "")
+}
+
+// auditAdminWithProviderTarget keeps an exact raw provider only in request-local
+// memory for post-change target selection. The persisted audit remains the bounded
+// before/after payload supplied by the caller.
+func (s *Server) auditAdminWithProviderTarget(r *http.Request, action string, before string, after string, provider string) {
 	if err := s.db.InsertAdminAudit(r.Context(), store.AdminAuditLog{
 		ID:          newID("audit"),
 		AdminID:     adminID(r),
@@ -1941,7 +2031,7 @@ func (s *Server) auditAdmin(r *http.Request, action string, before string, after
 	}); err != nil {
 		slog.Warn("write admin audit failed", "action", action, "error", err)
 	}
-	if err := s.maybeRunPostChangeRedTeam(r, action, before, after); err != nil {
+	if err := s.maybeRunPostChangeRedTeam(r, action, before, after, provider); err != nil {
 		// The admin mutation has already succeeded. Surface the regression trigger failure
 		// operationally without turning a successful configuration write into an HTTP error.
 		slog.Warn("post-change redteam trigger failed", "action", action, "error", err)
@@ -1969,8 +2059,8 @@ func providerAuditJSON(provider store.ProviderConfig) string {
 		return ""
 	}
 	return auditJSON(map[string]any{
-		"name":               provider.Name,
-		"base_url":           provider.BaseURL,
+		"name":               boundedModelsProviderLabel(provider.Name),
+		"base_url":           sanitizeProviderBaseURL(provider.BaseURL),
 		"api_key_configured": provider.EncryptedAPIKey != "",
 		"timeout_ms":         provider.TimeoutMS,
 		"enabled":            provider.Enabled,
@@ -2476,7 +2566,8 @@ func hostname() string {
 func copyUpstreamHeaders(dst http.Header, src http.Header) {
 	for key, values := range src {
 		canonical := http.CanonicalHeaderKey(key)
-		if hopByHopHeader(canonical) || canonical == "Authorization" || canonical == "Host" || canonical == "Content-Length" {
+		if hopByHopHeader(canonical) || canonical == "Authorization" || canonical == "Host" || canonical == "Content-Length" ||
+			canonical == "X-Proxy-Provider" || canonical == "X-Proxy-No-Route" {
 			continue
 		}
 		for _, value := range values {
@@ -2488,12 +2579,36 @@ func copyUpstreamHeaders(dst http.Header, src http.Header) {
 func copyDownstreamHeaders(dst http.Header, src http.Header) {
 	for key, values := range src {
 		canonical := http.CanonicalHeaderKey(key)
-		if hopByHopHeader(canonical) || canonical == "Content-Length" {
+		if hopByHopHeader(canonical) || canonical == "Content-Length" || gatewayOwnedRoutingHeader(canonical) {
 			continue
 		}
 		for _, value := range values {
 			dst.Add(canonical, value)
 		}
+	}
+}
+
+// setVibeUIVariantHeaders protects endpoints whose legacy and React projections
+// intentionally differ. Even a misconfigured shared cache must neither reuse a
+// legacy response for the app nor retain either representation.
+func setVibeUIVariantHeaders(w http.ResponseWriter) {
+	w.Header().Set("Cache-Control", "no-store")
+	for _, value := range w.Header().Values("Vary") {
+		for _, field := range strings.Split(value, ",") {
+			if strings.EqualFold(strings.TrimSpace(field), "X-Vibe-UI") {
+				return
+			}
+		}
+	}
+	w.Header().Add("Vary", "X-Vibe-UI")
+}
+
+func gatewayOwnedRoutingHeader(key string) bool {
+	switch http.CanonicalHeaderKey(key) {
+	case "X-Provider", "X-Route-Reason", "X-Route-Detail", "X-Failover-From", "X-Failover-Reason", "X-Failover-Path", "X-Health-Demoted", "X-Agent-Provider", "X-Request-Id":
+		return true
+	default:
+		return false
 	}
 }
 

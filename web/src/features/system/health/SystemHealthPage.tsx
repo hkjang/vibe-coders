@@ -22,6 +22,7 @@ import {
 import { HealthWidget, UpdatedTime } from "@/features/health/health-ui";
 import { apiClient } from "@/shared/api/client";
 import { endpoints } from "@/shared/api/endpoints";
+import { isProviderRef, providerDisplayLabel } from "@/shared/api/provider-ref";
 import type { OpsStatus } from "@/shared/api/schemas";
 import { Badge, type BadgeProps } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
@@ -67,6 +68,21 @@ export function SystemHealthPage(): React.JSX.Element {
   const snapshot = operations.data?.status;
   const risk = operations.data?.risk;
   const providerFailure = snapshot?.partial_failures?.find((failure) => failure.component === "providers");
+  const providerNameCounts = new Map<string, number>();
+  for (const provider of snapshot?.providers ?? []) {
+    providerNameCounts.set(provider.provider, (providerNameCounts.get(provider.provider) ?? 0) + 1);
+  }
+  const providerRows = (snapshot?.providers ?? []).map((provider, index) => ({
+    displayName: isProviderRef(provider.provider_ref)
+      ? providerDisplayLabel(
+          provider.provider,
+          provider.provider_ref,
+          (providerNameCounts.get(provider.provider) ?? 0) > 1,
+        )
+      : `Provider 확인 불가 · ${index + 1}`,
+    key: isProviderRef(provider.provider_ref) ? provider.provider_ref : `provider-unidentified-${index}`,
+    provider,
+  }));
   const fallbackFailure = snapshot?.partial_failures?.find((failure) => failure.component === "fallback");
   const securityRisk = snapshot
     ? snapshot.security.dev_secret ||
@@ -353,9 +369,9 @@ export function SystemHealthPage(): React.JSX.Element {
                     </tr>
                   </thead>
                   <tbody>
-                    {snapshot.providers.map((provider) => (
-                      <tr key={provider.provider}>
-                        <td>{provider.provider}</td>
+                    {providerRows.map(({ displayName, key, provider }) => (
+                      <tr key={key}>
+                        <td>{displayName}</td>
                         <td>
                           <span className="score-cell">
                             <span

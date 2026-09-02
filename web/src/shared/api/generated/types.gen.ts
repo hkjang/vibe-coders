@@ -4,6 +4,58 @@ export type ClientOptions = {
     baseUrl: `${string}://${string}` | (string & {});
 };
 
+export type AdminModel = {
+    created: number | null;
+    deprecation: AdminModelDeprecation | null;
+    fetched_at: string;
+    id: string;
+    object: string;
+    owned_by: string;
+    provider: string;
+    provider_ref: string;
+    shadowed: boolean;
+    shadowed_by: string;
+    source: 'live' | 'cache' | 'agent_route';
+    stale: boolean;
+    virtual: boolean;
+};
+
+export type AdminModelDeprecation = {
+    action: 'warn' | 'rewrite' | 'block';
+    id: string;
+    message: string;
+    model_glob: string;
+    replacement: string;
+    retired: boolean;
+    sunset_date: string;
+    sunset_reached: boolean;
+};
+
+export type AdminModelPartialFailure = {
+    code: string;
+    message: string;
+    provider: string;
+    provider_ref: string;
+};
+
+export type AdminModelProvider = {
+    fetched_at?: string;
+    model_count: number;
+    provider: string;
+    provider_ref: string;
+    source: 'live' | 'cache' | 'agent_route';
+    stale: boolean;
+    status: 'ok' | 'failed' | 'skipped';
+};
+
+export type AdminModelsResponse = {
+    generated_at: string;
+    models: Array<AdminModel>;
+    partial_failures: Array<AdminModelPartialFailure>;
+    providers: Array<AdminModelProvider>;
+    request_id: string;
+};
+
 export type AdminSettingView = {
     category: string;
     description: string;
@@ -37,6 +89,48 @@ export type AdminStatsResponse = {
     total_cost_krw: number;
     total_requests: number;
     total_tokens: number;
+};
+
+export type AgentRoute = {
+    allowed_tools: Array<string>;
+    backing_model: string;
+    created_at: string;
+    created_by: string;
+    enabled: boolean;
+    id: string;
+    max_cost_krw: number;
+    max_steps: number;
+    mcp_upstreams: Array<string>;
+    name: string;
+    provider: string;
+    provider_ref?: string;
+    system_prompt: string;
+    updated_at: string;
+    virtual_model: string;
+};
+
+export type AgentRouteListResponse = {
+    agent_routes: Array<AgentRoute>;
+    count: number;
+    note: string;
+};
+
+export type AgentRouteWriteRequest = {
+    allowed_tools?: Array<string>;
+    backing_model?: string;
+    enabled?: boolean;
+    id?: string;
+    max_cost_krw?: number;
+    max_steps?: number;
+    mcp_upstreams?: Array<string>;
+    name?: string;
+    provider?: string;
+    system_prompt?: string;
+    virtual_model: string;
+};
+
+export type AgentRouteWriteResponse = {
+    agent_route: AgentRoute;
 };
 
 export type AppError = {
@@ -91,6 +185,11 @@ export type AuthUser = {
     roles?: Array<string>;
     scopes?: Array<string>;
     team_id?: string;
+};
+
+export type CategoryScore = {
+    pass_rate: number;
+    samples: number;
 };
 
 export type EmbeddingCacheStats = {
@@ -156,6 +255,56 @@ export type MigrationFeature = {
     rollout_percent: number;
     status: 'hidden' | 'legacy' | 'preview_read_only' | 'preview' | 'stable' | 'deprecated' | 'retired';
     title: string;
+};
+
+export type ModelPrice = {
+    cached_input_krw_per_1m: number;
+    input_krw_per_1m: number;
+    output_krw_per_1m: number;
+};
+
+export type ModelPricingVersion = {
+    cached_input_krw_per_1m: number;
+    created_at: string;
+    id: string;
+    input_krw_per_1m: number;
+    model: string;
+    note: string;
+    output_krw_per_1m: number;
+    source: string;
+};
+
+export type ModelQualityResponse = {
+    categories: Array<string>;
+    models: Array<ModelQualityScore>;
+    since: string;
+};
+
+export type ModelQualityScore = {
+    categories: {
+        [key: string]: CategoryScore;
+    };
+    eval_pass_rate: number;
+    eval_samples: number;
+    golden_pass_rate: number;
+    golden_samples: number;
+    model: string;
+    quality_score: number;
+    requests: number;
+    success_rate: number;
+};
+
+export type ModelUsageTag = {
+    avoid_for: string;
+    good_for: string;
+    model: string;
+    risk_note: string;
+    updated_at: string;
+    updated_by: string;
+};
+
+export type ModelUsageTagsResponse = {
+    tags: Array<ModelUsageTag>;
 };
 
 export type NavigationResponse = {
@@ -236,10 +385,31 @@ export type OpsStatusPartialFailure = {
     message: string;
 };
 
+export type PricingResponse = {
+    effective: {
+        [key: string]: ModelPrice;
+    };
+    versions: Array<ModelPricingVersion>;
+};
+
+export type PricingWriteRequest = {
+    cached_input_krw_per_1m?: number;
+    input_krw_per_1m: number;
+    model: string;
+    note?: string;
+    output_krw_per_1m: number;
+    source?: string;
+};
+
+export type PricingWriteResponse = {
+    version: ModelPricingVersion;
+};
+
 export type ProviderHealthAlert = {
     code: string;
     message: string;
     provider: string;
+    provider_ref?: string;
     severity: 'info' | 'warning' | 'critical';
 };
 
@@ -248,6 +418,7 @@ export type ProviderHealthRankingItem = {
     fallback_rate: number;
     p95_latency_ms: number;
     provider: string;
+    provider_ref?: string;
     rank: number;
     requests: number;
     score: number;
@@ -259,6 +430,7 @@ export type ProviderHealthScore = {
     fallbacks: number;
     p95_latency_ms: number;
     provider: string;
+    provider_ref?: string;
     rate_429: number;
     rate_5xx: number;
     requests: number;
@@ -270,6 +442,82 @@ export type ProviderHealthTrendBucket = {
     providers: Array<ProviderHealthScore>;
     since: string;
     until: string;
+};
+
+export type ProviderListResponse = {
+    providers: Array<ProviderPublic>;
+};
+
+export type ProviderPublic = {
+    api_key_configured: boolean;
+    base_url: string;
+    created_at: string;
+    enabled: boolean;
+    failover_group: string;
+    model_patterns: string;
+    name: string;
+    priority: number;
+    provider_ref?: string;
+    timeout_ms: number;
+};
+
+export type ProviderSlo = {
+    availability_target: number;
+    enabled: boolean;
+    error_rate_target: number;
+    fallback_rate_target: number;
+    note: string;
+    p95_latency_target_ms: number;
+    provider: string;
+    provider_ref?: string;
+    updated_at: string;
+};
+
+export type ProviderSloDeleteResponse = {
+    provider: string;
+    provider_ref?: string;
+    status: 'deleted';
+};
+
+export type ProviderSloEvaluation = {
+    breached: boolean;
+    enabled: boolean;
+    metrics: {
+        availability: ProviderSloMetric;
+        error_rate: ProviderSloMetric;
+        fallback_rate: ProviderSloMetric;
+        p95_latency_ms: ProviderSloMetric;
+    };
+    provider: string;
+    provider_ref?: string;
+    requests: number;
+};
+
+export type ProviderSloMetric = {
+    actual: number;
+    breached: boolean;
+    enforced: boolean;
+    target: number;
+};
+
+export type ProviderSloResponse = {
+    evaluations: Array<ProviderSloEvaluation>;
+    since: string;
+    slos: Array<ProviderSlo>;
+};
+
+export type ProviderSloWriteRequest = {
+    availability_target?: number;
+    enabled?: boolean;
+    error_rate_target?: number;
+    fallback_rate_target?: number;
+    note?: string;
+    p95_latency_target_ms?: number;
+    provider: string;
+};
+
+export type ProviderSloWriteResponse = {
+    slo: ProviderSlo;
 };
 
 export type ReadinessFailureResponse = {
@@ -289,6 +537,7 @@ export type RoutingBreakerState = {
     opens: number;
     phase: 'closed' | 'open' | 'half_open';
     provider: string;
+    provider_ref?: string;
     retry_in_seconds?: number;
 };
 
@@ -426,26 +675,48 @@ export type GetAdminAgentRoutesData = {
     url: '/admin/agent-routes';
 };
 
+export type GetAdminAgentRoutesErrors = {
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminAgentRoutesError = GetAdminAgentRoutesErrors[keyof GetAdminAgentRoutesErrors];
+
 export type GetAdminAgentRoutesResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: AgentRouteListResponse;
 };
 
+export type GetAdminAgentRoutesResponse = GetAdminAgentRoutesResponses[keyof GetAdminAgentRoutesResponses];
+
 export type PostAdminAgentRoutesData = {
-    body?: never;
+    body: AgentRouteWriteRequest;
     path?: never;
     query?: never;
     url: '/admin/agent-routes';
 };
 
+export type PostAdminAgentRoutesErrors = {
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostAdminAgentRoutesError = PostAdminAgentRoutesErrors[keyof PostAdminAgentRoutesErrors];
+
 export type PostAdminAgentRoutesResponses = {
     /**
-     * OK
+     * Created
      */
-    200: unknown;
+    201: AgentRouteWriteResponse;
 };
+
+export type PostAdminAgentRoutesResponse = PostAdminAgentRoutesResponses[keyof PostAdminAgentRoutesResponses];
 
 export type GetAdminAgentsData = {
     body?: never;
@@ -3026,12 +3297,23 @@ export type GetAdminModelTagsData = {
     url: '/admin/model-tags';
 };
 
+export type GetAdminModelTagsErrors = {
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminModelTagsError = GetAdminModelTagsErrors[keyof GetAdminModelTagsErrors];
+
 export type GetAdminModelTagsResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: ModelUsageTagsResponse;
 };
+
+export type GetAdminModelTagsResponse = GetAdminModelTagsResponses[keyof GetAdminModelTagsResponses];
 
 export type PostAdminModelTagsData = {
     body?: never;
@@ -3062,6 +3344,40 @@ export type DeleteAdminModelTagsIdResponses = {
      */
     200: unknown;
 };
+
+export type GetAdminModelsData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * Exact provider name. The filter is applied by the gateway and is not forwarded upstream.
+         */
+        provider?: string;
+        /**
+         * Exact model ID. IDs containing slashes are supported because this is a query parameter.
+         */
+        model?: string;
+    };
+    url: '/admin/models';
+};
+
+export type GetAdminModelsErrors = {
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminModelsError = GetAdminModelsErrors[keyof GetAdminModelsErrors];
+
+export type GetAdminModelsResponses = {
+    /**
+     * OK
+     */
+    200: AdminModelsResponse;
+};
+
+export type GetAdminModelsResponse = GetAdminModelsResponses[keyof GetAdminModelsResponses];
 
 export type DeleteAdminModelsContractsData = {
     body?: never;
@@ -3122,16 +3438,32 @@ export type PostAdminModelsContractsRunResponses = {
 export type GetAdminModelsQualityData = {
     body?: never;
     path?: never;
-    query?: never;
+    query?: {
+        /**
+         * Quality lookback window. Supports 1h, 6h, 24h/1d, 7d, 30d, or a Go duration.
+         */
+        window?: string;
+    };
     url: '/admin/models/quality';
 };
+
+export type GetAdminModelsQualityErrors = {
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminModelsQualityError = GetAdminModelsQualityErrors[keyof GetAdminModelsQualityErrors];
 
 export type GetAdminModelsQualityResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: ModelQualityResponse;
 };
+
+export type GetAdminModelsQualityResponse = GetAdminModelsQualityResponses[keyof GetAdminModelsQualityResponses];
 
 export type GetAdminNotificationsMattermostData = {
     body?: never;
@@ -3726,30 +4058,55 @@ export type GetAdminPolicyAdvisorSuggestionsResponses = {
 export type GetAdminPricingData = {
     body?: never;
     path?: never;
-    query?: never;
+    query?: {
+        model?: string;
+        limit?: number;
+    };
     url: '/admin/pricing';
 };
+
+export type GetAdminPricingErrors = {
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminPricingError = GetAdminPricingErrors[keyof GetAdminPricingErrors];
 
 export type GetAdminPricingResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: PricingResponse;
 };
 
+export type GetAdminPricingResponse = GetAdminPricingResponses[keyof GetAdminPricingResponses];
+
 export type PostAdminPricingData = {
-    body?: never;
+    body: PricingWriteRequest;
     path?: never;
     query?: never;
     url: '/admin/pricing';
 };
 
+export type PostAdminPricingErrors = {
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostAdminPricingError = PostAdminPricingErrors[keyof PostAdminPricingErrors];
+
 export type PostAdminPricingResponses = {
     /**
-     * OK
+     * Created
      */
-    200: unknown;
+    201: PricingWriteResponse;
 };
+
+export type PostAdminPricingResponse = PostAdminPricingResponses[keyof PostAdminPricingResponses];
 
 export type PostAdminPricingSeedData = {
     body?: never;
@@ -4086,12 +4443,23 @@ export type GetAdminProvidersData = {
     url: '/admin/providers';
 };
 
+export type GetAdminProvidersErrors = {
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminProvidersError = GetAdminProvidersErrors[keyof GetAdminProvidersErrors];
+
 export type GetAdminProvidersResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: ProviderListResponse;
 };
+
+export type GetAdminProvidersResponse = GetAdminProvidersResponses[keyof GetAdminProvidersResponses];
 
 export type PostAdminProvidersData = {
     body?: never;
@@ -4107,19 +4475,87 @@ export type PostAdminProvidersResponses = {
     200: unknown;
 };
 
+export type DeleteAdminProvidersSloData = {
+    body?: never;
+    path?: never;
+    query: {
+        provider: string;
+    };
+    url: '/admin/providers/slo';
+};
+
+export type DeleteAdminProvidersSloErrors = {
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type DeleteAdminProvidersSloError = DeleteAdminProvidersSloErrors[keyof DeleteAdminProvidersSloErrors];
+
+export type DeleteAdminProvidersSloResponses = {
+    /**
+     * OK
+     */
+    200: ProviderSloDeleteResponse;
+};
+
+export type DeleteAdminProvidersSloResponse = DeleteAdminProvidersSloResponses[keyof DeleteAdminProvidersSloResponses];
+
 export type GetAdminProvidersSloData = {
     body?: never;
     path?: never;
-    query?: never;
+    query?: {
+        /**
+         * Health lookback window. Supports 1h, 6h, 24h/1d, 7d, 30d, or a Go duration.
+         */
+        window?: string;
+    };
     url: '/admin/providers/slo';
 };
+
+export type GetAdminProvidersSloErrors = {
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminProvidersSloError = GetAdminProvidersSloErrors[keyof GetAdminProvidersSloErrors];
 
 export type GetAdminProvidersSloResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: ProviderSloResponse;
 };
+
+export type GetAdminProvidersSloResponse = GetAdminProvidersSloResponses[keyof GetAdminProvidersSloResponses];
+
+export type PostAdminProvidersSloData = {
+    body: ProviderSloWriteRequest;
+    path?: never;
+    query?: never;
+    url: '/admin/providers/slo';
+};
+
+export type PostAdminProvidersSloErrors = {
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostAdminProvidersSloError = PostAdminProvidersSloErrors[keyof PostAdminProvidersSloErrors];
+
+export type PostAdminProvidersSloResponses = {
+    /**
+     * Created
+     */
+    201: ProviderSloWriteResponse;
+};
+
+export type PostAdminProvidersSloResponse = PostAdminProvidersSloResponses[keyof PostAdminProvidersSloResponses];
 
 export type DeleteAdminProvidersNameData = {
     body?: never;
@@ -4131,38 +4567,6 @@ export type DeleteAdminProvidersNameData = {
 };
 
 export type DeleteAdminProvidersNameResponses = {
-    /**
-     * OK
-     */
-    200: unknown;
-};
-
-export type GetAdminProvidersNameData = {
-    body?: never;
-    path: {
-        name: string;
-    };
-    query?: never;
-    url: '/admin/providers/{name}';
-};
-
-export type GetAdminProvidersNameResponses = {
-    /**
-     * OK
-     */
-    200: unknown;
-};
-
-export type PutAdminProvidersNameData = {
-    body?: never;
-    path: {
-        name: string;
-    };
-    query?: never;
-    url: '/admin/providers/{name}';
-};
-
-export type PutAdminProvidersNameResponses = {
     /**
      * OK
      */
@@ -8264,19 +8668,44 @@ export type GetV1ModelTagsData = {
     url: '/v1/model-tags';
 };
 
+export type GetV1ModelTagsErrors = {
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetV1ModelTagsError = GetV1ModelTagsErrors[keyof GetV1ModelTagsErrors];
+
 export type GetV1ModelTagsResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: ModelUsageTagsResponse;
 };
+
+export type GetV1ModelTagsResponse = GetV1ModelTagsResponses[keyof GetV1ModelTagsResponses];
 
 export type GetV1ModelsData = {
     body?: never;
     path?: never;
-    query?: never;
+    query?: {
+        /**
+         * Exact configured provider name. When set, the gateway uses the pinned-provider model catalogue instead of aggregating all providers.
+         */
+        provider?: string;
+    };
     url: '/v1/models';
 };
+
+export type GetV1ModelsErrors = {
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetV1ModelsError = GetV1ModelsErrors[keyof GetV1ModelsErrors];
 
 export type GetV1ModelsResponses = {
     /**

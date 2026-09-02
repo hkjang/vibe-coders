@@ -20,8 +20,11 @@ vi.mock("@/app/auth/AuthProvider", () => ({
   }),
 }));
 
+const providerRef = `prv_${"a".repeat(43)}`;
+
 const provider = {
   provider: "openai",
+  provider_ref: providerRef,
   score: 92,
   requests: 120,
   average_latency_ms: 180.5,

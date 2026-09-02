@@ -38,17 +38,26 @@ func performRequest(t *testing.T, handler http.Handler, method, target string) *
 	return response
 }
 
-func TestAppRedirectPreservesQuery(t *testing.T) {
+func TestAppRedirectDropsQuery(t *testing.T) {
 	handler := NewHandler(testFiles(), Options{})
 
-	for _, method := range []string{http.MethodGet, http.MethodHead} {
-		t.Run(method, func(t *testing.T) {
-			response := performRequest(t, handler, method, "/app?return_to=%2Fapp%2Fproviders&x=1")
+	for _, tt := range []struct {
+		name, method, target string
+	}{
+		{name: "ordinary GET", method: http.MethodGet, target: "/app?return_to=%2Fapp%2Fproviders&x=1"},
+		{name: "secret GET", method: http.MethodGet, target: "/app?q=Bearer%20redirect-secret-value"},
+		{name: "ordinary HEAD", method: http.MethodHead, target: "/app?from=legacy"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			response := performRequest(t, handler, tt.method, tt.target)
 			if response.Code != http.StatusPermanentRedirect {
 				t.Fatalf("status = %d, want %d", response.Code, http.StatusPermanentRedirect)
 			}
-			if location := response.Header().Get("Location"); location != "/app/?return_to=%2Fapp%2Fproviders&x=1" {
+			if location := response.Header().Get("Location"); location != "/app/" {
 				t.Fatalf("Location = %q", location)
+			}
+			if reflected := response.Header().Get("Location") + response.Body.String(); strings.Contains(reflected, "redirect-secret-value") || strings.Contains(reflected, "return_to") {
+				t.Fatalf("redirect reflected query data: %q", reflected)
 			}
 			if response.Header().Get("Cache-Control") != appCacheControl {
 				t.Fatalf("Cache-Control = %q", response.Header().Get("Cache-Control"))

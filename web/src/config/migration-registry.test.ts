@@ -22,6 +22,18 @@ const operator: AuthUser = {
   features: {},
 };
 
+const gatewayAdmin: AuthUser = {
+  ...operator,
+  role: "admin",
+  roles: ["admin"],
+};
+
+const legacyOnlyAdmin: AuthUser = {
+  ...operator,
+  role: "ops_admin",
+  roles: ["ops_admin"],
+};
+
 describe("migration registry", () => {
   const serverContract = [
     ["overview", "/app/overview"],
@@ -65,16 +77,47 @@ describe("migration registry", () => {
     expect(featureByPath("/routing/rules/decision-1")?.featureId).toBe("routing.rules");
   });
 
-  it("keeps runtime promotions on Legacy when this UI build has no matching screen", () => {
-    const provider = migrationRegistry.find((feature) => feature.featureId === "gateway.providers");
-    if (!provider) throw new Error("gateway.providers fixture is missing");
-    const effective = resolveFeature(
-      { ...provider, status: "stable", serverAvailable: true },
-      operator,
-      "v0.80.0",
-    );
-    expect(isAppFeatureImplemented(provider.featureId)).toBe(false);
-    expect(effective).toMatchObject({ permitted: true, status: "legacy", reason: "ui_not_implemented" });
+  it("exposes the implemented Provider and Models read-only previews", () => {
+    for (const featureId of ["gateway.providers", "gateway.models"] as const) {
+      const feature = migrationRegistry.find((candidate) => candidate.featureId === featureId);
+      if (!feature) throw new Error(`${featureId} fixture is missing`);
+
+      expect(feature).toMatchObject({
+        status: "preview_read_only",
+        legacyPath: featureId === "gateway.providers" ? "/admin#/settings" : "/admin#/model-contracts",
+        requiredPermission: "admin:read",
+        readOnly: true,
+        enabledRoles: ["super_admin", "admin", "ai_admin"],
+        rolloutPercent: 100,
+        fallbackEnabled: true,
+        minimumApiVersion: "v0.82.0",
+      });
+      expect(isAppFeatureImplemented(feature.featureId)).toBe(true);
+      expect(resolveFeature(feature, gatewayAdmin, "v0.82.0")).toMatchObject({
+        permitted: true,
+        status: "preview_read_only",
+        readOnly: true,
+      });
+    }
+  });
+
+  it("keeps Legacy access when a permitted role is outside the local Preview cohort", () => {
+    for (const featureId of ["gateway.providers", "gateway.models"] as const) {
+      const feature = migrationRegistry.find((candidate) => candidate.featureId === featureId);
+      if (!feature) throw new Error(`${featureId} fixture is missing`);
+
+      expect(resolveFeature(feature, legacyOnlyAdmin, "v0.82.0")).toMatchObject({
+        permitted: true,
+        status: "legacy",
+        readOnly: true,
+        reason: "legacy_fallback",
+      });
+      expect(resolveFeature(feature, legacyOnlyAdmin, "v0.82.0", { legacyFallback: false })).toMatchObject({
+        permitted: false,
+        status: "hidden",
+        reason: "preview_role",
+      });
+    }
   });
 
   it("keeps an implemented Retired feature available only in the app", () => {
@@ -89,12 +132,12 @@ describe("migration registry", () => {
   });
 
   it("fails closed when an unimplemented feature is Retired or Legacy fallback is disabled", () => {
-    const provider = migrationRegistry.find((feature) => feature.featureId === "gateway.providers");
-    if (!provider) throw new Error("gateway.providers fixture is missing");
+    const provider = migrationRegistry.find((feature) => feature.featureId === "system.settings");
+    if (!provider) throw new Error("system.settings fixture is missing");
     expect(
       resolveFeature({ ...provider, status: "retired", serverAvailable: true }, operator, "v0.80.0"),
     ).toMatchObject({ permitted: false, reason: "ui_not_implemented" });
-    expect(resolveFeature(provider, operator, "v0.80.0", { legacyFallback: false })).toMatchObject({
+    expect(resolveFeature(provider, gatewayAdmin, "v0.82.0", { legacyFallback: false })).toMatchObject({
       permitted: false,
       reason: "legacy_fallback_disabled",
     });

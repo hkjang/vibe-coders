@@ -23,7 +23,7 @@ func TestRedTeamTargetsCollectRegisteredInventory(t *testing.T) {
 	db := openTestStore(t)
 	defer db.Close()
 	ctx := context.Background()
-	if err := db.UpsertProvider(ctx, store.ProviderConfig{Name: "openai", BaseURL: upstream.URL, Enabled: true, ModelPatterns: "gpt-4.1-mini,vibe/auto"}); err != nil {
+	if err := db.UpsertProvider(ctx, store.ProviderConfig{Name: "openai", BaseURL: "https://provider.example/proxy/sk-proj-privatecredential?api-version=2026-01-01", Enabled: true, ModelPatterns: "gpt-4.1-mini,vibe/auto"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.UpsertMCPUpstream(ctx, store.MCPUpstream{
@@ -86,6 +86,17 @@ func TestRedTeamTargetsCollectRegisteredInventory(t *testing.T) {
 		}
 		if target.TargetRef == "mcp_tool:github/create_issue" && target.RiskLevel != "high" {
 			t.Fatalf("MCP contract risk should be preserved, got %#v", target)
+		}
+		if target.Provider == "openai" {
+			baseURL, _ := target.Metadata["base_url"].(string)
+			for _, secret := range []string{"provider.example", "privatecredential", "api-version"} {
+				if strings.Contains(baseURL, secret) {
+					t.Fatalf("redteam target metadata leaked %q: %#v", secret, target)
+				}
+			}
+			if baseURL != invalidProviderURLDisplay {
+				t.Fatalf("redteam target did not replace unsafe URL in full: %#v", target)
+			}
 		}
 	}
 	for ref, found := range want {

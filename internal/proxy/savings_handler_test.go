@@ -48,7 +48,7 @@ func TestSavingsHandler(t *testing.T) {
 
 	// Price the requested (premium) model high so the downshift baseline far exceeds the
 	// actual served cost — guaranteeing positive savings independent of the seeded catalog.
-	if err := db.InsertPricingVersion(ctx, store.ModelPricingVersion{
+	if err := db.InsertPricingVersion(ctx, &store.ModelPricingVersion{
 		ID: newID("price"), Model: "premium-x", InputKRWPer1M: 100000, OutputKRWPer1M: 100000, Source: "manual",
 	}); err != nil {
 		t.Fatal(err)

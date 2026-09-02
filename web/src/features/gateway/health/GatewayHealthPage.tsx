@@ -21,6 +21,7 @@ import { HealthWidget, TimeRangePicker } from "@/features/health/health-ui";
 import { useHealthRange } from "@/features/health/use-health-range";
 import { apiClient } from "@/shared/api/client";
 import { endpoints } from "@/shared/api/endpoints";
+import { isProviderRef, providerDisplayLabel } from "@/shared/api/provider-ref";
 import type { RoutingHealth } from "@/shared/api/schemas";
 import { Badge, type BadgeProps } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
@@ -61,6 +62,12 @@ function severityLabel(severity: RoutingHealth["alerts"][number]["severity"]): s
 
 function hasOpenBreaker(data: RoutingHealth | undefined): boolean {
   return data?.breakers.states.some((state) => state.phase !== "closed") ?? false;
+}
+
+function routingProviderLabel(provider: string, providerRef: string | undefined, index: number): string {
+  return isProviderRef(providerRef)
+    ? providerDisplayLabel(provider, providerRef, provider === "[provider-name-omitted]")
+    : `Provider 확인 불가 · ${index + 1}`;
 }
 
 export function GatewayHealthPage(): React.JSX.Element {
@@ -231,10 +238,10 @@ function RoutingHealthDetails({ data }: { data: RoutingHealth }): React.JSX.Elem
                 </tr>
               </thead>
               <tbody>
-                {data.ranking.map((provider) => (
-                  <tr key={`${provider.rank}-${provider.provider}`}>
+                {data.ranking.map((provider, index) => (
+                  <tr key={isProviderRef(provider.provider_ref) ? provider.provider_ref : `ranking-${index}`}>
                     <td>{formatInteger(provider.rank)}</td>
-                    <td>{provider.provider}</td>
+                    <td>{routingProviderLabel(provider.provider, provider.provider_ref, index)}</td>
                     <td>
                       <span className="score-cell">
                         <span
@@ -295,9 +302,9 @@ function RoutingHealthDetails({ data }: { data: RoutingHealth }): React.JSX.Elem
                 </tr>
               </thead>
               <tbody>
-                {data.breakers.states.map((breaker) => (
-                  <tr key={breaker.provider}>
-                    <td>{breaker.provider}</td>
+                {data.breakers.states.map((breaker, index) => (
+                  <tr key={isProviderRef(breaker.provider_ref) ? breaker.provider_ref : `breaker-${index}`}>
+                    <td>{routingProviderLabel(breaker.provider, breaker.provider_ref, index)}</td>
                     <td>{phaseLabel(breaker.phase)}</td>
                     <td>{formatInteger(breaker.failures)}</td>
                     <td>{formatInteger(breaker.opens)}</td>
@@ -321,12 +328,18 @@ function RoutingHealthDetails({ data }: { data: RoutingHealth }): React.JSX.Elem
         {data.alerts.length > 0 ? (
           <ul className="health-alert-list">
             {data.alerts.map((alert, index) => (
-              <li key={`${alert.provider}-${alert.code}-${index}`}>
+              <li
+                key={
+                  isProviderRef(alert.provider_ref)
+                    ? `${alert.provider_ref}-${alert.code}-${index}`
+                    : `alert-${alert.code}-${index}`
+                }
+              >
                 <ShieldAlert aria-hidden="true" />
                 <div>
                   <p>{alert.message}</p>
                   <small>
-                    {alert.provider} · {alert.code}
+                    {routingProviderLabel(alert.provider, alert.provider_ref, index)} · {alert.code}
                   </small>
                 </div>
                 <Badge tone={severityTone(alert.severity)}>{severityLabel(alert.severity)}</Badge>

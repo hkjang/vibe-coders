@@ -584,7 +584,11 @@ func TestProviderBreakerStopsDiallingDeadPrimary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer health.Body.Close()
+	healthBody, _ := io.ReadAll(health.Body)
+	health.Body.Close()
+	if strings.Contains(string(healthBody), `"provider_ref"`) {
+		t.Fatalf("legacy routing health response gained app-only provider_ref: %s", healthBody)
+	}
 	var out struct {
 		Breakers struct {
 			Enabled bool `json:"enabled"`
@@ -594,7 +598,7 @@ func TestProviderBreakerStopsDiallingDeadPrimary(t *testing.T) {
 			} `json:"states"`
 		} `json:"breakers"`
 	}
-	if err := json.NewDecoder(health.Body).Decode(&out); err != nil {
+	if err := json.Unmarshal(healthBody, &out); err != nil {
 		t.Fatal(err)
 	}
 	if !out.Breakers.Enabled {
@@ -623,6 +627,236 @@ func TestProviderBreakerStopsDiallingDeadPrimary(t *testing.T) {
 	if primaryHits.Load() != 3 {
 		t.Fatalf("reset did not put the primary back in rotation: %d hits", primaryHits.Load())
 	}
+}
+
+func TestRoutingBreakerResetAllUsesRawKeysWithoutLeakingLegacyName(t *testing.T) {
+	const unsafeName = "sk-ant-provider-secret-value"
+	const peerOnlyName = "Bearer peer-only-secret"
+	db := openTestStore(t)
+	logger := store.NewAsyncLogger(db, 16, filepath.Join(t.TempDir(), "breaker-reset.ndjson"))
+	logger.Start()
+	t.Cleanup(func() { logger.Stop(context.Background()) })
+
+	cfg := testConfig("http://unused.invalid", "secret")
+	cfg.Upstream.BreakerEnabled = true
+	cfg.Upstream.BreakerShared = true
+	cfg.Upstream.BreakerThreshold = 1
+	cfg.Upstream.BreakerCooldown = time.Hour
+	server, err := NewServer(cfg, db, logger, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server.noteBreakerFailure(unsafeName, "5xx", 1, "trace-reset")
+	now := time.Now().UTC()
+	if err := db.PublishProviderBreaker(t.Context(), store.ProviderBreakerState{
+		Provider: peerOnlyName, Phase: "open", Reason: "5xx", Instance: "peer-only",
+		OpenedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.InsertLogRecord(t.Context(), store.LogRecord{Request: store.RequestLog{
+		ID: "unsafe-health", TraceID: "unsafe-health", Endpoint: "/v1/chat/completions",
+		Model: "m", Provider: unsafeName, StatusCode: 504, LatencyMS: 9_000, Error: "timeout",
+		CreatedAt: now,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if names := server.breakers.rawNames(); len(names) != 1 || names[0] != unsafeName {
+		t.Fatalf("internal breaker keys = %q", names)
+	}
+	if snapshots := server.breakers.snapshot(time.Hour, time.Now()); len(snapshots) != 1 || snapshots[0].Provider != "[provider-name-omitted]" {
+		t.Fatalf("admin snapshot did not redact legacy name: %+v", snapshots)
+	}
+
+	gateway := httptest.NewServer(server.Routes())
+	defer gateway.Close()
+	healthRequest, err := http.NewRequest(http.MethodGet, gateway.URL+"/admin/routing/health", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	healthRequest.Header.Set("X-Vibe-UI", "app")
+	health, err := http.DefaultClient.Do(healthRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	healthBody, _ := io.ReadAll(health.Body)
+	health.Body.Close()
+	if health.StatusCode != http.StatusOK || strings.Contains(string(healthBody), unsafeName) || strings.Contains(string(healthBody), peerOnlyName) || !strings.Contains(string(healthBody), "[provider-name-omitted]") {
+		t.Fatalf("unsafe admin breaker snapshot: status=%d body=%s", health.StatusCode, healthBody)
+	}
+	var healthOut struct {
+		Providers []store.ProviderHealthScore `json:"providers"`
+		Ranking   []providerHealthRankingItem `json:"ranking"`
+		Degraded  []store.ProviderHealthScore `json:"degraded"`
+		Alerts    []providerHealthAlert       `json:"alerts"`
+		Trend     []providerHealthTrendBucket `json:"trend"`
+		Breakers  struct {
+			States []breakerSnapshot `json:"states"`
+		} `json:"breakers"`
+	}
+	if err := json.Unmarshal(healthBody, &healthOut); err != nil {
+		t.Fatal(err)
+	}
+	assertBoundedScores := func(section string, scores []store.ProviderHealthScore) {
+		t.Helper()
+		if len(scores) == 0 {
+			t.Fatalf("%s did not include the unsafe provider health score", section)
+		}
+		for _, score := range scores {
+			if score.Provider != "[provider-name-omitted]" || score.ProviderRef != server.providerRef(unsafeName) {
+				t.Fatalf("%s leaked provider label: %+v", section, scores)
+			}
+		}
+	}
+	assertBoundedScores("providers", healthOut.Providers)
+	assertBoundedScores("degraded", healthOut.Degraded)
+	if len(healthOut.Ranking) != 1 || healthOut.Ranking[0].Provider != "[provider-name-omitted]" || healthOut.Ranking[0].ProviderRef != server.providerRef(unsafeName) {
+		t.Fatalf("ranking leaked provider label: %+v", healthOut.Ranking)
+	}
+	if len(healthOut.Alerts) == 0 {
+		t.Fatal("alerts did not include the failing provider")
+	}
+	for _, alert := range healthOut.Alerts {
+		if alert.Provider != "[provider-name-omitted]" || alert.ProviderRef != server.providerRef(unsafeName) || strings.Contains(alert.Message, unsafeName) {
+			t.Fatalf("alert leaked provider label: %+v", alert)
+		}
+	}
+	trendFound := false
+	for _, bucket := range healthOut.Trend {
+		for _, score := range bucket.Providers {
+			trendFound = true
+			if score.Provider != "[provider-name-omitted]" || score.ProviderRef != server.providerRef(unsafeName) {
+				t.Fatalf("trend leaked provider label: %+v", healthOut.Trend)
+			}
+		}
+	}
+	if !trendFound {
+		t.Fatal("trend did not include the unsafe provider health score")
+	}
+	if len(healthOut.Breakers.States) != 1 || healthOut.Breakers.States[0].Provider != "[provider-name-omitted]" || healthOut.Breakers.States[0].ProviderRef != server.providerRef(unsafeName) {
+		t.Fatalf("breaker state did not preserve opaque provider identity: %+v", healthOut.Breakers.States)
+	}
+
+	for _, body := range []string{`{"provider":`, `null`, `{}`, `{"provider":null}`} {
+		response, err := http.Post(gateway.URL+"/admin/routing/breaker-reset", "application/json", strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		responseBody, _ := io.ReadAll(response.Body)
+		response.Body.Close()
+		if response.StatusCode != http.StatusBadRequest || !strings.Contains(string(responseBody), "invalid_body") {
+			t.Fatalf("malformed reset body was not rejected: status=%d body=%s", response.StatusCode, responseBody)
+		}
+	}
+	whitespace := postJSON(t, gateway.URL+"/admin/routing/breaker-reset", "", map[string]any{"provider": "   "})
+	whitespaceBody, _ := io.ReadAll(whitespace.Body)
+	whitespace.Body.Close()
+	if whitespace.StatusCode != http.StatusBadRequest || !strings.Contains(string(whitespaceBody), "breaker_provider_invalid") {
+		t.Fatalf("whitespace provider became reset-all: status=%d body=%s", whitespace.StatusCode, whitespaceBody)
+	}
+	if !server.breakers.has(unsafeName) {
+		t.Fatal("invalid reset input cleared the existing breaker")
+	}
+
+	for _, provider := range []string{"[provider-name-omitted]", unsafeName} {
+		response := postJSON(t, gateway.URL+"/admin/routing/breaker-reset", "", map[string]any{"provider": provider})
+		body, _ := io.ReadAll(response.Body)
+		response.Body.Close()
+		if response.StatusCode != http.StatusBadRequest || strings.Contains(string(body), unsafeName) || !strings.Contains(string(body), "breaker_provider_ambiguous") {
+			t.Fatalf("ambiguous reset response: status=%d body=%s", response.StatusCode, body)
+		}
+	}
+	unknown := postJSON(t, gateway.URL+"/admin/routing/breaker-reset", "", map[string]any{"provider": "invented-provider"})
+	unknownBody, _ := io.ReadAll(unknown.Body)
+	unknown.Body.Close()
+	if unknown.StatusCode != http.StatusNotFound || strings.Contains(string(unknownBody), "invented-provider") || !strings.Contains(string(unknownBody), "breaker_not_found") {
+		t.Fatalf("unknown reset echoed caller input: status=%d body=%s", unknown.StatusCode, unknownBody)
+	}
+
+	reset := postJSON(t, gateway.URL+"/admin/routing/breaker-reset", "", map[string]any{"provider": ""})
+	resetBody, _ := io.ReadAll(reset.Body)
+	reset.Body.Close()
+	if reset.StatusCode != http.StatusOK || strings.Contains(string(resetBody), unsafeName) {
+		t.Fatalf("reset-all leaked legacy name: status=%d body=%s", reset.StatusCode, resetBody)
+	}
+	if names := server.breakers.rawNames(); len(names) != 0 {
+		t.Fatalf("reset-all left local raw keys: %q", names)
+	}
+	shared, err := db.ListOpenProviderBreakers(t.Context(), time.Now().Add(-2*time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(shared) != 0 {
+		t.Fatalf("reset-all left local or peer-only shared rows that can be re-adopted: %+v", shared)
+	}
+	if adopted := server.breakers.adoptRemote(shared, time.Now().Add(-time.Hour)); len(adopted) != 0 {
+		t.Fatalf("reset state was re-adopted: %q", adopted)
+	}
+	audits, err := db.ListAdminAudit(t.Context(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(audits) != 1 || audits[0].Action != "routing.breaker.reset" || audits[0].BeforeValue != "*" {
+		t.Fatalf("unexpected reset audit: %+v", audits)
+	}
+	if strings.Contains(audits[0].BeforeValue+audits[0].AfterValue, unsafeName) {
+		t.Fatalf("reset audit leaked legacy name: %+v", audits[0])
+	}
+}
+
+func TestRoutingBreakerResetClearsStaleRowsWhenSharingDisabled(t *testing.T) {
+	db := openTestStore(t)
+	logger := store.NewAsyncLogger(db, 16, filepath.Join(t.TempDir(), "breaker-disabled-reset.ndjson"))
+	logger.Start()
+	t.Cleanup(func() { logger.Stop(context.Background()) })
+
+	cfg := testConfig("http://unused.invalid", "secret")
+	cfg.Upstream.BreakerEnabled = true
+	cfg.Upstream.BreakerShared = false
+	server, err := NewServer(cfg, db, logger, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gateway := httptest.NewServer(server.Routes())
+	defer gateway.Close()
+	now := time.Now().UTC()
+	publish := func(provider string) {
+		t.Helper()
+		if err := db.PublishProviderBreaker(t.Context(), store.ProviderBreakerState{
+			Provider: provider, Phase: "open", Reason: "5xx", Instance: "stale-peer",
+			OpenedAt: now, UpdatedAt: now,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	assertNoSharedRows := func() {
+		t.Helper()
+		rows, err := db.ListOpenProviderBreakers(t.Context(), now.Add(-time.Hour))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(rows) != 0 {
+			t.Fatalf("sharing-disabled admin reset left stale rows: %+v", rows)
+		}
+	}
+
+	const individual = "stale-individual"
+	server.breakers.recordFailure(individual, "5xx", 1, now)
+	publish(individual)
+	response := postJSON(t, gateway.URL+"/admin/routing/breaker-reset", "", map[string]any{"provider": individual})
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("sharing-disabled individual reset status = %d", response.StatusCode)
+	}
+	assertNoSharedRows()
+
+	publish("stale-peer-only")
+	response = postJSON(t, gateway.URL+"/admin/routing/breaker-reset", "", map[string]any{"provider": ""})
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("sharing-disabled reset-all status = %d", response.StatusCode)
+	}
+	assertNoSharedRows()
 }
 
 // A failover budget bounds how long the gateway keeps trying alternates. Without it

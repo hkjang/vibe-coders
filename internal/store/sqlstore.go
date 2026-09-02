@@ -1449,6 +1449,7 @@ func migrationStatements() []string {
 		// had none. priority orders the group; ties fall back to name for determinism.
 		`ALTER TABLE provider_configs ADD COLUMN failover_group TEXT`,
 		`ALTER TABLE provider_configs ADD COLUMN priority INTEGER NOT NULL DEFAULT 100`,
+		`CREATE INDEX IF NOT EXISTS idx_provider_configs_enabled_priority_name ON provider_configs(enabled, priority, name)`,
 		`CREATE TABLE IF NOT EXISTS admin_audit_logs (
 			id TEXT PRIMARY KEY,
 			admin_id TEXT,
@@ -2196,6 +2197,7 @@ func migrationStatements() []string {
 		)`,
 		`ALTER TABLE agent_routes ADD COLUMN allowed_tools_json TEXT NOT NULL DEFAULT '[]'`,
 		`ALTER TABLE agent_routes ADD COLUMN max_cost_krw REAL NOT NULL DEFAULT 0`,
+		`CREATE INDEX IF NOT EXISTS idx_agent_routes_enabled_created_id ON agent_routes(enabled, created_at DESC, id ASC)`,
 		// Red Team: opt-in raw (unmasked) evidence retention for admin review, and its storage.
 		`ALTER TABLE redteam_campaigns ADD COLUMN retain_raw_evidence INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE redteam_campaigns ADD COLUMN trigger_source TEXT NOT NULL DEFAULT 'manual'`,
@@ -2693,6 +2695,83 @@ func (s *SQLStore) ListProviderConfigs(ctx context.Context) ([]ProviderConfig, e
 	}
 	s.providers.storeConfigs(result, gen, now)
 	return result, nil
+}
+
+const (
+	// ProviderModelCatalogNameMaxBytes is shared by provider admission and the
+	// anonymous catalogue projection. It is intentionally a byte, not rune, limit.
+	ProviderModelCatalogNameMaxBytes      = 256
+	maxProviderModelCatalogBaseURLBytes   = 8 << 10
+	maxProviderModelCatalogEncryptedBytes = 64 << 10
+	maxProviderModelCatalogConfigs        = 64
+)
+
+// ListProviderModelCatalogConfigs returns the narrow provider projection needed by
+// the public model catalogue. It deliberately bypasses the provider cache: an
+// anonymous /v1/models request must not materialize model patterns, failover groups,
+// timestamps, or every enabled provider before applying its admission limit.
+//
+// exactName restricts the lookup to one provider for the classic compatibility
+// fallback. truncated reports at least one row omitted by the cap or per-field
+// legacy bounds. The query reads at most cap+1 indexed rows; it never counts or
+// sorts an unbounded matching set in application memory.
+func (s *SQLStore) ListProviderModelCatalogConfigs(ctx context.Context, exactName string, limit int) ([]ProviderConfig, bool, error) {
+	if limit <= 0 {
+		return []ProviderConfig{}, false, nil
+	}
+	if limit > maxProviderModelCatalogConfigs {
+		limit = maxProviderModelCatalogConfigs
+	}
+	where := "WHERE enabled = 1"
+	args := []any{
+		ProviderModelCatalogNameMaxBytes + 1,
+		maxProviderModelCatalogBaseURLBytes + 1,
+		maxProviderModelCatalogEncryptedBytes + 1,
+		ProviderModelCatalogNameMaxBytes,
+		maxProviderModelCatalogBaseURLBytes,
+		maxProviderModelCatalogEncryptedBytes,
+	}
+	if exactName != "" {
+		where += " AND name = ?"
+		args = append(args, exactName)
+	}
+	args = append(args, limit+1)
+	rows, err := s.db.QueryContext(ctx, s.bind(`SELECT
+		SUBSTR(name, 1, ?), SUBSTR(base_url, 1, ?), SUBSTR(COALESCE(encrypted_api_key, ''), 1, ?),
+		timeout_ms, priority,
+		CASE WHEN LENGTH(name) > ? OR LENGTH(base_url) > ? OR LENGTH(COALESCE(encrypted_api_key, '')) > ? THEN 1 ELSE 0 END
+		FROM provider_configs `+where+`
+		ORDER BY priority ASC, name ASC LIMIT ?`), args...)
+	if err != nil {
+		return nil, false, err
+	}
+	defer rows.Close()
+
+	configs := make([]ProviderConfig, 0, limit)
+	truncated := false
+	for rows.Next() {
+		var provider ProviderConfig
+		var oversized int
+		if err := rows.Scan(&provider.Name, &provider.BaseURL, &provider.EncryptedAPIKey, &provider.TimeoutMS, &provider.Priority, &oversized); err != nil {
+			return nil, false, err
+		}
+		if oversized != 0 || len(provider.Name) > ProviderModelCatalogNameMaxBytes || len(provider.BaseURL) > maxProviderModelCatalogBaseURLBytes || len(provider.EncryptedAPIKey) > maxProviderModelCatalogEncryptedBytes || len(configs) >= limit {
+			truncated = true
+			continue
+		}
+		provider.Enabled = true
+		if provider.Priority <= 0 {
+			provider.Priority = DefaultProviderPriority
+		}
+		configs = append(configs, provider)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, false, err
+	}
+	if configs == nil {
+		configs = []ProviderConfig{}
+	}
+	return configs, truncated, nil
 }
 
 func (s *SQLStore) loadProviderConfigs(ctx context.Context) ([]ProviderConfig, error) {

@@ -2,8 +2,11 @@ package proxy
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -91,6 +94,22 @@ func TestSelectPostChangeRedTeamTargetsIsBoundedAndBalanced(t *testing.T) {
 	exact := selectPostChangeRedTeamTargets(targets, postChangeRedTeamSpec{Scope: "mcp", MCPUpstream: "m"}, 10)
 	if len(exact) != 1 || exact[0] != "mcp-tool" {
 		t.Fatalf("exact MCP selection = %v", exact)
+	}
+}
+
+func TestSelectPostChangeRedTeamTargetsDoesNotBroadenExactRedactedProvider(t *testing.T) {
+	unsafeProvider := "sk-ant-exact-provider-secret"
+	targets := []store.RedTeamTarget{
+		{ID: "unsafe", TargetType: "provider", Provider: unsafeProvider, Enabled: true},
+		{ID: "other", TargetType: "provider", Provider: "other", Enabled: true},
+	}
+	exact := postChangeRedTeamSpec{Scope: "provider", Provider: unsafeProvider, ProviderExact: true}
+	if got := selectPostChangeRedTeamTargets(targets, exact, 10); len(got) != 1 || got[0] != "unsafe" {
+		t.Fatalf("exact unsafe provider selection = %v", got)
+	}
+	exact.Provider = "sk-ant-deleted-provider-secret"
+	if got := selectPostChangeRedTeamTargets(targets, exact, 10); len(got) != 0 {
+		t.Fatalf("missing exact provider broadened to unrelated targets: %v", got)
 	}
 }
 
@@ -195,5 +214,66 @@ func TestPostChangeRedTeamDisabledLeavesNoCampaign(t *testing.T) {
 	}
 	if len(campaigns) != 0 {
 		t.Fatalf("disabled trigger created campaigns: %#v", campaigns)
+	}
+}
+
+func TestPostChangeRedTeamUsesRequestLocalRawProviderWithoutPersistingIt(t *testing.T) {
+	redteamKillSwitch.Store(false)
+	t.Cleanup(func() { redteamKillSwitch.Store(false) })
+	db := openTestStore(t)
+	logger := store.NewAsyncLogger(db, 32, filepath.Join(t.TempDir(), "post-change-exact.ndjson"))
+	logger.Start()
+	t.Cleanup(func() {
+		logger.Stop(context.Background())
+		db.Close()
+	})
+	cfg := testConfig("http://upstream.local", "upstream-secret")
+	cfg.RedTeam = config.RedTeamConfig{PostChangeEnabled: true, PostChangeCooldown: time.Hour, PostChangeMaxTargets: 20}
+	server, err := NewServer(cfg, db, logger, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unsafeProvider := "sk-ant-post-change-exact-secret"
+	for _, provider := range []store.ProviderConfig{
+		{Name: unsafeProvider, BaseURL: "http://unsafe.internal", Enabled: true, ModelPatterns: "unsafe-*"},
+		{Name: "other-provider", BaseURL: "http://other.internal", Enabled: true, ModelPatterns: "other-*"},
+	} {
+		if err := db.UpsertProvider(t.Context(), provider); err != nil {
+			t.Fatal(err)
+		}
+	}
+	req := httptest.NewRequest(http.MethodPost, "/admin/providers", nil)
+	server.auditAdminWithProviderTarget(req, "provider.upsert", "", providerAuditJSON(store.ProviderConfig{
+		Name: unsafeProvider, BaseURL: "http://unsafe.internal", Enabled: true,
+	}), unsafeProvider)
+	campaigns, err := db.ListRedTeamCampaigns(t.Context(), 10)
+	if err != nil || len(campaigns) != 1 {
+		t.Fatalf("campaigns=%#v err=%v", campaigns, err)
+	}
+	selected := map[string]bool{}
+	for _, rawID := range campaigns[0].TargetFilter["target_ids"].([]any) {
+		if id, ok := rawID.(string); ok {
+			selected[id] = true
+		}
+	}
+	targets, err := db.ListRedTeamTargets(t.Context(), store.RedTeamTargetFilter{EnabledOnly: true, Limit: 100})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(selected) == 0 {
+		t.Fatal("exact provider change selected no targets")
+	}
+	for _, target := range targets {
+		if selected[target.ID] && target.Provider != unsafeProvider {
+			t.Fatalf("exact provider change broadened to target %+v", target)
+		}
+	}
+	audits, err := db.ListAdminAudit(t.Context(), 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	persisted, _ := json.Marshal(map[string]any{"campaigns": campaigns, "audits": audits})
+	if strings.Contains(string(persisted), unsafeProvider) || strings.Contains(string(persisted), "provider_ref") {
+		t.Fatalf("post-change campaign/audit persisted provider identity: %s", persisted)
 	}
 }

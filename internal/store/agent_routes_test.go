@@ -2,7 +2,9 @@ package store
 
 import (
 	"context"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestAgentRouteCRUD(t *testing.T) {
@@ -52,5 +54,77 @@ func TestAgentRouteCRUD(t *testing.T) {
 	}
 	if _, found, _ := db.GetAgentRouteByModel(ctx, "vibe/agent-research"); found {
 		t.Fatal("route should be deleted")
+	}
+}
+
+func TestListEnabledAgentRouteModelsBoundedProjectsAndSignalsTruncation(t *testing.T) {
+	db := openAggTestStore(t)
+	defer db.Close()
+	ctx := context.Background()
+	for index, route := range []AgentRoute{
+		{ID: "a1", VirtualModel: "vibe/agent-one", Enabled: true, SystemPrompt: strings.Repeat("sensitive", 1_000)},
+		{ID: "a2", VirtualModel: "vibe/agent-two", Enabled: true, AllowedTools: []string{"private-tool"}},
+		{ID: "a3", VirtualModel: "vibe/agent-disabled", Enabled: false},
+		{ID: "a4", VirtualModel: "   ", Enabled: true},
+		{ID: strings.Repeat("i", maxBoundedAgentRouteModelFieldBytes+1), VirtualModel: "vibe/agent-known-with-oversized-id", Enabled: true},
+	} {
+		route.CreatedAt = time.Unix(int64(index+1), 0).UTC().Format(time.RFC3339Nano)
+		if err := db.UpsertAgentRoute(ctx, route); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	models, truncated, overflow, err := db.ListEnabledAgentRouteModelsBounded(ctx, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !truncated || !overflow || len(models) != 1 || models[0].VirtualModel != "vibe/agent-known-with-oversized-id" || models[0].ID != "" {
+		t.Fatalf("bounded model projection = %#v truncated=%v overflow=%v", models, truncated, overflow)
+	}
+
+	models, truncated, overflow, err = db.ListEnabledAgentRouteModelsBounded(ctx, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !truncated || overflow || len(models) != 3 {
+		t.Fatalf("full enabled model projection = %#v truncated=%v overflow=%v", models, truncated, overflow)
+	}
+}
+
+func TestListEnabledAgentRouteModelsBoundedInvalidOnly(t *testing.T) {
+	db := openAggTestStore(t)
+	defer db.Close()
+	for _, route := range []AgentRoute{
+		{ID: "blank-model", VirtualModel: "   ", Enabled: true, SystemPrompt: strings.Repeat("private", 10_000)},
+		{ID: "oversized-model", VirtualModel: strings.Repeat("v", maxBoundedAgentRouteModelFieldBytes+1), Enabled: true},
+		{ID: "disabled-model", VirtualModel: "vibe/disabled", Enabled: false},
+	} {
+		if err := db.UpsertAgentRoute(t.Context(), route); err != nil {
+			t.Fatal(err)
+		}
+	}
+	models, truncated, overflow, err := db.ListEnabledAgentRouteModelsBounded(t.Context(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(models) != 0 || !truncated || overflow {
+		t.Fatalf("invalid-only projection = %#v truncated=%v overflow=%v", models, truncated, overflow)
+	}
+}
+
+func TestListEnabledAgentRouteModelsBoundedOversizedIDKeepsCompleteShadowKey(t *testing.T) {
+	db := openAggTestStore(t)
+	defer db.Close()
+	if err := db.UpsertAgentRoute(t.Context(), AgentRoute{
+		ID: strings.Repeat("i", maxBoundedAgentRouteModelFieldBytes+1), VirtualModel: "vibe/id-only-shadow", Enabled: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	models, truncated, overflow, err := db.ListEnabledAgentRouteModelsBounded(t.Context(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(models) != 1 || models[0].ID != "" || models[0].VirtualModel != "vibe/id-only-shadow" || truncated || overflow {
+		t.Fatalf("ID-only oversized projection = %#v truncated=%v overflow=%v", models, truncated, overflow)
 	}
 }

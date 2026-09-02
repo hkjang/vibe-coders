@@ -110,7 +110,7 @@ func (s *Server) planIntelligentRouting(ctx context.Context, body []byte, endpoi
 		}
 	}
 	if selectedProvider != "" {
-		reasons = append(reasons, "provider health selected "+selectedProvider+"("+itoaProxy(health)+")")
+		reasons = append(reasons, "provider health selected "+boundedModelsProviderLabel(selectedProvider)+"("+itoaProxy(health)+")")
 	}
 	if selectedModel == "" {
 		selectedModel = model
@@ -138,6 +138,10 @@ func (s *Server) planIntelligentRouting(ctx context.Context, body []byte, endpoi
 
 func (p intelligentRoutingPlan) toStore(requestID, traceID, provider string) *store.RoutingDecisionLog {
 	selectedProvider := firstNonEmpty(provider, p.SelectedProvider)
+	decisionReason := p.DecisionReason
+	if rawProvider := strings.TrimSpace(p.SelectedProvider); rawProvider != "" && !modelsProviderLabelSafe(rawProvider) {
+		decisionReason = strings.ReplaceAll(decisionReason, rawProvider, boundedModelsProviderLabel(rawProvider))
+	}
 	return &store.RoutingDecisionLog{
 		ID:               newID("rdec"),
 		RequestID:        requestID,
@@ -149,7 +153,7 @@ func (p intelligentRoutingPlan) toStore(requestID, traceID, provider string) *st
 		Risk:             p.Risk,
 		HealthScore:      p.HealthScore,
 		FallbackPath:     p.FallbackPath,
-		DecisionReason:   p.DecisionReason,
+		DecisionReason:   decisionReason,
 		CreatedAt:        time.Now().UTC(),
 	}
 }
@@ -548,7 +552,7 @@ func (s *Server) routingFallbackPlan(ctx context.Context, model, selectedProvide
 		plan = append(plan, "no_provider_failover:single_matching_provider")
 	} else {
 		for _, peer := range peers {
-			plan = append(plan, "429|5xx|timeout:"+peer)
+			plan = append(plan, "429|5xx|timeout:"+boundedModelsProviderLabel(peer))
 		}
 	}
 	if longModel := defaultAutoModel("reasoning"); longModel != "" && longModel != model {

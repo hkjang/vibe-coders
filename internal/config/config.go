@@ -412,6 +412,7 @@ type ModelPrice struct {
 }
 
 func Load() (Config, error) {
+	proxyAPIKeysRaw := os.Getenv("PROXY_API_KEYS")
 	cfg := Config{
 		ListenAddr:            getEnv("LISTEN_ADDR", ":8080"),
 		RuntimeReloadInterval: durationEnv("SETTINGS_RELOAD_INTERVAL", 10*time.Second),
@@ -474,7 +475,7 @@ func Load() (Config, error) {
 			EmbeddingAPIKey:           os.Getenv("CACHE_EMBEDDING_API_KEY"),
 		},
 		Auth: AuthConfig{
-			ProxyAPIKeys:          parseProxyKeys(os.Getenv("PROXY_API_KEYS")),
+			ProxyAPIKeys:          parseProxyKeys(proxyAPIKeysRaw),
 			AdminToken:            os.Getenv("ADMIN_TOKEN"),
 			AdminReadonlyToken:    os.Getenv("ADMIN_READONLY_TOKEN"),
 			AttributeExternalKeys: boolEnv("ATTRIBUTE_EXTERNAL_KEYS", true),
@@ -615,6 +616,9 @@ func Load() (Config, error) {
 	if cfg.Logging.QueueSize <= 0 {
 		return Config{}, fmt.Errorf("LOG_QUEUE_SIZE must be positive")
 	}
+	if strings.TrimSpace(proxyAPIKeysRaw) != "" && len(cfg.Auth.ProxyAPIKeys) == 0 {
+		return Config{}, fmt.Errorf("PROXY_API_KEYS must contain at least one non-empty key")
+	}
 	if err := json.Unmarshal([]byte(getEnv("MODEL_PRICING_KRW_PER_1M", "{}")), &cfg.Pricing); err != nil {
 		return Config{}, fmt.Errorf("parse MODEL_PRICING_KRW_PER_1M: %w", err)
 	}
@@ -659,8 +663,14 @@ func parseProxyKeys(raw string) []ProxyAPIKey {
 	parts := strings.Split(raw, ",")
 	keys := make([]ProxyAPIKey, 0, len(parts))
 	for i, part := range parts {
-		fields := strings.Split(strings.TrimSpace(part), ":")
-		if len(fields) == 0 || strings.TrimSpace(fields[0]) == "" {
+		fields := strings.Split(part, ":")
+		// Trim every field, not just the entry: the bearer path hashes a trimmed
+		// token, so a secret stored with stray whitespace (e.g. "dev: dev-key")
+		// would never match a real request.
+		for j := range fields {
+			fields[j] = strings.TrimSpace(fields[j])
+		}
+		if len(fields) == 0 || fields[0] == "" {
 			continue
 		}
 
@@ -677,6 +687,12 @@ func parseProxyKeys(raw string) []ProxyAPIKey {
 		}
 		if len(fields) >= 4 {
 			team = fields[3]
+		}
+		// A blank secret ("dev:") would otherwise register sha256("") as an active
+		// key hash, flipping the gateway into key-required mode over an entry no
+		// caller can ever present.
+		if key == "" {
+			continue
 		}
 		sum := sha256.Sum256([]byte(key))
 		keyHash := hex.EncodeToString(sum[:])

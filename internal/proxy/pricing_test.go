@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"vibe-coders/internal/store"
 )
@@ -35,7 +36,31 @@ func TestPricingVersionsAndEffectiveMerge(t *testing.T) {
 		body, _ := io.ReadAll(resp.Body)
 		t.Fatalf("add version failed: %d %s", resp.StatusCode, body)
 	}
+	var created struct {
+		Version store.ModelPricingVersion `json:"version"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
+		t.Fatal(err)
+	}
 	resp.Body.Close()
+	if _, err := time.Parse(time.RFC3339Nano, created.Version.CreatedAt); err != nil {
+		t.Fatalf("created pricing timestamp = %q: %v", created.Version.CreatedAt, err)
+	}
+	getResponse, err := http.Get(srv.URL + "/admin/pricing?model=test-model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var listed struct {
+		Versions []store.ModelPricingVersion `json:"versions"`
+	}
+	if err := json.NewDecoder(getResponse.Body).Decode(&listed); err != nil {
+		getResponse.Body.Close()
+		t.Fatal(err)
+	}
+	getResponse.Body.Close()
+	if len(listed.Versions) != 1 || listed.Versions[0].CreatedAt != created.Version.CreatedAt {
+		t.Fatalf("listed versions = %+v, want created timestamp %q", listed.Versions, created.Version.CreatedAt)
+	}
 
 	server.invalidatePricingCache()
 	eff := server.pricingMap(context.Background())

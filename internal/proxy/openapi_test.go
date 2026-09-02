@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -130,7 +131,12 @@ func assertOpenAPIContract(t *testing.T, spec map[string]any) {
 		"UIAuthentication", "UISystemStatus", "UIBootstrapResponse", "SettingWriteRequest",
 		"SettingBatchItem", "SettingsBatchRequest", "SettingsBatchResponse", "AdminSettingView",
 		"ReadyResponse", "ReadinessFailureResponse", "AdminStatsResponse", "OpsStatus", "OpsStatusPartialFailure", "OpsRiskResponse", "ProviderHealthScore",
-		"RoutingHealthResponse", "RoutingBreakerSummary",
+		"RoutingHealthResponse", "RoutingBreakerSummary", "ProviderPublic", "ProviderListResponse",
+		"AgentRoute", "AgentRouteWriteRequest", "AgentRouteListResponse", "AgentRouteWriteResponse",
+		"AdminModel", "AdminModelDeprecation", "AdminModelProvider", "AdminModelPartialFailure", "AdminModelsResponse",
+		"ProviderSLO", "ProviderSLOMetric", "ProviderSLOEvaluation", "ProviderSLOResponse", "ProviderSLOWriteRequest", "ProviderSLOWriteResponse", "ProviderSLODeleteResponse",
+		"ModelQualityScore", "ModelQualityResponse", "ModelPrice", "ModelPricingVersion", "PricingResponse", "PricingWriteRequest", "PricingWriteResponse",
+		"ModelUsageTag", "ModelUsageTagsResponse",
 	} {
 		if _, ok := schemas[required]; !ok {
 			t.Errorf("components.schemas missing %s", required)
@@ -167,6 +173,92 @@ func assertOpenAPIContract(t *testing.T, spec map[string]any) {
 	if partialFailureItems["$ref"] != "#/components/schemas/OpsStatusPartialFailure" {
 		t.Errorf("OpsStatus.partial_failures schema = %v, want OpsStatusPartialFailure array", partialFailures)
 	}
+	adminModel, _ := schemas["AdminModel"].(map[string]any)
+	adminModelProperties, _ := adminModel["properties"].(map[string]any)
+	adminModelRequired, _ := adminModel["required"].([]any)
+	requiredAdminModelFields := make(map[string]bool, len(adminModelRequired))
+	for _, field := range adminModelRequired {
+		if name, ok := field.(string); ok {
+			requiredAdminModelFields[name] = true
+		}
+	}
+	for field, wantType := range map[string]string{"shadowed": "boolean", "shadowed_by": "string"} {
+		property, _ := adminModelProperties[field].(map[string]any)
+		if property["type"] != wantType || !requiredAdminModelFields[field] {
+			t.Errorf("AdminModel.%s schema = %v required=%v, want required %s", field, property, requiredAdminModelFields[field], wantType)
+		}
+	}
+	created, _ := adminModelProperties["created"].(map[string]any)
+	if created["type"] != "integer" || created["format"] != "int64" || created["nullable"] != true || created["minimum"] != float64(0) || created["maximum"] != float64(maxAdminModelCreated) {
+		t.Errorf("AdminModel.created schema = %v, want nullable JavaScript-safe non-negative int64", created)
+	}
+	for _, schemaName := range []string{"ProviderPublic", "ProviderSLO", "ProviderSLOEvaluation", "ProviderSLODeleteResponse", "ProviderHealthScore", "ProviderHealthRankingItem", "ProviderHealthAlert", "RoutingBreakerState", "AgentRoute", "AdminModel", "AdminModelProvider", "AdminModelPartialFailure"} {
+		schema, _ := schemas[schemaName].(map[string]any)
+		properties, _ := schema["properties"].(map[string]any)
+		providerRef, _ := properties["provider_ref"].(map[string]any)
+		requiredFields, _ := schema["required"].([]any)
+		providerRefRequired := false
+		for _, field := range requiredFields {
+			if field == "provider_ref" {
+				providerRefRequired = true
+				break
+			}
+		}
+		wantRequired := strings.HasPrefix(schemaName, "AdminModel")
+		if providerRefRequired != wantRequired || providerRef["type"] != "string" || providerRef["minLength"] != float64(providerRefLength) || providerRef["maxLength"] != float64(providerRefLength) || providerRef["pattern"] != `^prv_[A-Za-z0-9_-]{43}$` {
+			t.Errorf("%s.provider_ref schema = %v required=%v wantRequired=%v", schemaName, providerRef, providerRefRequired, wantRequired)
+		}
+	}
+	agentRouteWrite, _ := schemas["AgentRouteWriteRequest"].(map[string]any)
+	agentRouteWriteProperties, _ := agentRouteWrite["properties"].(map[string]any)
+	if _, acceptsProviderRef := agentRouteWriteProperties["provider_ref"]; acceptsProviderRef {
+		t.Error("AgentRouteWriteRequest.provider_ref must be output-only")
+	}
+	providerSLOEvaluation, _ := schemas["ProviderSLOEvaluation"].(map[string]any)
+	providerSLOEvaluationProperties, _ := providerSLOEvaluation["properties"].(map[string]any)
+	providerSLOMetrics, _ := providerSLOEvaluationProperties["metrics"].(map[string]any)
+	if providerSLOMetrics["additionalProperties"] != false {
+		t.Errorf("ProviderSLOEvaluation.metrics additionalProperties = %v, want false", providerSLOMetrics["additionalProperties"])
+	}
+	providerSLOMetricProperties, _ := providerSLOMetrics["properties"].(map[string]any)
+	providerSLOMetricRequired, _ := providerSLOMetrics["required"].([]any)
+	requiredProviderSLOMetrics := make(map[string]bool, len(providerSLOMetricRequired))
+	for _, field := range providerSLOMetricRequired {
+		if name, ok := field.(string); ok {
+			requiredProviderSLOMetrics[name] = true
+		}
+	}
+	for _, field := range []string{"availability", "p95_latency_ms", "error_rate", "fallback_rate"} {
+		property, _ := providerSLOMetricProperties[field].(map[string]any)
+		if property["$ref"] != "#/components/schemas/ProviderSLOMetric" || !requiredProviderSLOMetrics[field] {
+			t.Errorf("ProviderSLOEvaluation.metrics.%s schema = %v required=%v", field, property, requiredProviderSLOMetrics[field])
+		}
+	}
+	if len(providerSLOMetricProperties) != 4 || len(requiredProviderSLOMetrics) != 4 {
+		t.Errorf("ProviderSLOEvaluation.metrics properties/required = %d/%d, want exactly 4/4", len(providerSLOMetricProperties), len(requiredProviderSLOMetrics))
+	}
+	providerSLOMetric, _ := schemas["ProviderSLOMetric"].(map[string]any)
+	providerSLOMetricShape, _ := providerSLOMetric["properties"].(map[string]any)
+	providerSLOMetricFields, _ := providerSLOMetric["required"].([]any)
+	if providerSLOMetric["additionalProperties"] != false || len(providerSLOMetricShape) != 4 || len(providerSLOMetricFields) != 4 {
+		t.Errorf("ProviderSLOMetric shape = properties:%v required:%v additionalProperties:%v", providerSLOMetricShape, providerSLOMetricFields, providerSLOMetric["additionalProperties"])
+	}
+	adminModels, _ := schemas["AdminModelsResponse"].(map[string]any)
+	adminModelsProperties, _ := adminModels["properties"].(map[string]any)
+	adminModelsRows, _ := adminModelsProperties["models"].(map[string]any)
+	if adminModelsRows["maxItems"] != float64(maxAdminModelsResponseRows) {
+		t.Errorf("AdminModelsResponse.models maxItems = %v, want %d", adminModelsRows["maxItems"], maxAdminModelsResponseRows)
+	}
+	modelsPath, _ := paths["/v1/models"].(map[string]any)
+	modelsGet, _ := modelsPath["get"].(map[string]any)
+	modelsResponses, _ := modelsGet["responses"].(map[string]any)
+	modelsOK, _ := modelsResponses["200"].(map[string]any)
+	modelsHeaders, _ := modelsOK["headers"].(map[string]any)
+	for _, header := range []string{"X-Models-Providers", "X-Models-Providers-Failed", "X-Models-Providers-Skipped", "X-Models-Metadata-Omitted", "X-Models-Truncated"} {
+		if _, ok := modelsHeaders[header]; !ok {
+			t.Errorf("GET /v1/models 200 response missing %s header contract", header)
+		}
+	}
 
 	assertJSONOperationSchema(t, paths, "/health", "get", "200", "HealthResponse")
 	assertJSONOperationSchema(t, paths, "/ready", "get", "200", "ReadyResponse")
@@ -177,6 +269,35 @@ func assertOpenAPIContract(t *testing.T, spec map[string]any) {
 	assertJSONOperationSchema(t, paths, "/admin/routing/health", "get", "200", "RoutingHealthResponse")
 	assertOpenAPIParameter(t, paths, "/admin/routing/health", "get", "query", "window")
 	assertOpenAPIParameter(t, paths, "/admin/routing/health", "get", "query", "threshold")
+	assertOpenAPIParameterSchema(t, paths, "/v1/models", "get", "query", "provider", "string", false)
+	assertJSONOperationSchema(t, paths, "/admin/providers", "get", "200", "ProviderListResponse")
+	assertJSONOperationSchema(t, paths, "/admin/models", "get", "200", "AdminModelsResponse")
+	assertOpenAPIParameterSchema(t, paths, "/admin/models", "get", "query", "provider", "string", false)
+	assertOpenAPIParameterSchema(t, paths, "/admin/models", "get", "query", "model", "string", false)
+	assertJSONOperationSchema(t, paths, "/admin/providers/slo", "get", "200", "ProviderSLOResponse")
+	assertOpenAPIParameterSchema(t, paths, "/admin/providers/slo", "get", "query", "window", "string", false)
+	assertJSONRequestSchema(t, paths, "/admin/providers/slo", "post", "ProviderSLOWriteRequest")
+	assertJSONOperationSchema(t, paths, "/admin/providers/slo", "post", "201", "ProviderSLOWriteResponse")
+	assertOpenAPIParameterSchema(t, paths, "/admin/providers/slo", "delete", "query", "provider", "string", true)
+	assertJSONOperationSchema(t, paths, "/admin/providers/slo", "delete", "200", "ProviderSLODeleteResponse")
+	assertJSONOperationSchema(t, paths, "/admin/agent-routes", "get", "200", "AgentRouteListResponse")
+	assertJSONRequestSchema(t, paths, "/admin/agent-routes", "post", "AgentRouteWriteRequest")
+	assertJSONOperationSchema(t, paths, "/admin/agent-routes", "post", "201", "AgentRouteWriteResponse")
+	assertJSONOperationSchema(t, paths, "/admin/models/quality", "get", "200", "ModelQualityResponse")
+	assertOpenAPIParameterSchema(t, paths, "/admin/models/quality", "get", "query", "window", "string", false)
+	assertJSONOperationSchema(t, paths, "/admin/pricing", "get", "200", "PricingResponse")
+	assertOpenAPIParameterSchema(t, paths, "/admin/pricing", "get", "query", "model", "string", false)
+	assertOpenAPIParameterSchema(t, paths, "/admin/pricing", "get", "query", "limit", "integer", false)
+	assertJSONRequestSchema(t, paths, "/admin/pricing", "post", "PricingWriteRequest")
+	assertJSONOperationSchema(t, paths, "/admin/pricing", "post", "201", "PricingWriteResponse")
+	assertJSONOperationSchema(t, paths, "/admin/model-tags", "get", "200", "ModelUsageTagsResponse")
+	assertJSONOperationSchema(t, paths, "/v1/model-tags", "get", "200", "ModelUsageTagsResponse")
+	assertOpenAPIMethods(t, paths, "/admin/providers/{name}", "delete")
+	assertOpenAPIMethods(t, paths, "/admin/providers/slo", "delete", "get", "post")
+	assertOpenAPIPublic(t, paths, "/v1/models", "get")
+	assertOpenAPIPropertyFormat(t, schemas, "ProviderSLO", "updated_at", "date-time")
+	assertOpenAPIPropertyFormat(t, schemas, "ModelPricingVersion", "created_at", "date-time")
+	assertOpenAPIPropertyFormat(t, schemas, "ModelUsageTag", "updated_at", "date-time")
 	assertJSONOperationSchema(t, paths, "/auth/sso/exchange", "post", "200", "AuthTokenResponse")
 	assertJSONRequestSchema(t, paths, "/auth/sso/exchange", "post", "SSOExchangeRequest")
 	assertJSONOperationSchema(t, paths, "/auth/keycloak/logout", "post", "200", "KeycloakLogoutResponse")
@@ -195,6 +316,31 @@ func assertOpenAPIContract(t *testing.T, spec map[string]any) {
 	}
 }
 
+func assertOpenAPIMethods(t *testing.T, paths map[string]any, route string, expected ...string) {
+	t.Helper()
+	pathItem, _ := paths[route].(map[string]any)
+	got := make([]string, 0, len(pathItem))
+	for method, operation := range pathItem {
+		if _, ok := operation.(map[string]any); ok {
+			got = append(got, method)
+		}
+	}
+	sort.Strings(got)
+	sort.Strings(expected)
+	if strings.Join(got, ",") != strings.Join(expected, ",") {
+		t.Errorf("%s methods = %v, want %v", route, got, expected)
+	}
+}
+
+func assertOpenAPIPublic(t *testing.T, paths map[string]any, route, method string) {
+	t.Helper()
+	pathItem, _ := paths[route].(map[string]any)
+	op, _ := pathItem[method].(map[string]any)
+	if _, secured := op["security"]; secured {
+		t.Errorf("%s %s unexpectedly requires OpenAPI bearerAuth", method, route)
+	}
+}
+
 func assertOpenAPIParameter(t *testing.T, paths map[string]any, route, method, location, name string) {
 	t.Helper()
 	pathItem, _ := paths[route].(map[string]any)
@@ -207,6 +353,38 @@ func assertOpenAPIParameter(t *testing.T, paths map[string]any, route, method, l
 		}
 	}
 	t.Errorf("%s %s missing %s parameter %q", method, route, location, name)
+}
+
+func assertOpenAPIParameterSchema(t *testing.T, paths map[string]any, route, method, location, name, schemaType string, required bool) {
+	t.Helper()
+	pathItem, _ := paths[route].(map[string]any)
+	op, _ := pathItem[method].(map[string]any)
+	parameters, _ := op["parameters"].([]any)
+	for _, raw := range parameters {
+		parameter, _ := raw.(map[string]any)
+		if parameter["in"] != location || parameter["name"] != name {
+			continue
+		}
+		if parameter["required"] != required {
+			t.Errorf("%s %s %s parameter %q required = %v, want %v", method, route, location, name, parameter["required"], required)
+		}
+		schema, _ := parameter["schema"].(map[string]any)
+		if schema["type"] != schemaType {
+			t.Errorf("%s %s %s parameter %q type = %v, want %s", method, route, location, name, schema["type"], schemaType)
+		}
+		return
+	}
+	t.Errorf("%s %s missing %s parameter %q", method, route, location, name)
+}
+
+func assertOpenAPIPropertyFormat(t *testing.T, schemas map[string]any, schemaName, propertyName, format string) {
+	t.Helper()
+	schema, _ := schemas[schemaName].(map[string]any)
+	properties, _ := schema["properties"].(map[string]any)
+	property, _ := properties[propertyName].(map[string]any)
+	if property["format"] != format {
+		t.Errorf("%s.%s format = %v, want %s", schemaName, propertyName, property["format"], format)
+	}
 }
 
 func assertJSONOperationSchema(t *testing.T, paths map[string]any, route, method, status, schema string) {

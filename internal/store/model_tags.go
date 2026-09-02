@@ -17,7 +17,7 @@ type ModelUsageTag struct {
 	UpdatedAt string `json:"updated_at"`
 }
 
-func (s *SQLStore) UpsertModelUsageTag(ctx context.Context, t ModelUsageTag) error {
+func (s *SQLStore) UpsertModelUsageTag(ctx context.Context, t *ModelUsageTag) error {
 	t.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	_, err := s.db.ExecContext(ctx, s.bind(`INSERT INTO model_usage_tags
 		(model, good_for, avoid_for, risk_note, updated_by, updated_at)

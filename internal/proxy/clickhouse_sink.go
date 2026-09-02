@@ -29,10 +29,14 @@ func clickhouseSink(ctx context.Context, client *http.Client, cfg config.ClickHo
 	}
 	var body bytes.Buffer
 	for _, row := range rows {
+		dimValue := row.DimValue
+		if row.Dimension == "provider" {
+			dimValue = boundedModelsProviderLabelOrEmpty(dimValue)
+		}
 		line, err := json.Marshal(map[string]any{
 			"day":       row.Day,
 			"dimension": row.Dimension,
-			"dim_value": row.DimValue,
+			"dim_value": dimValue,
 			"requests":  row.Requests,
 			"tokens":    row.Tokens,
 			"cost_krw":  row.CostKRW,

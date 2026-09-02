@@ -1,3 +1,5 @@
+import { sanitizeAppRouteHash, sanitizeAppRouteSearch } from "@/shared/security/app-route-query";
+
 const appBase = "/app";
 const ssoReturnKey = "vibe.app.auth.sso-return-to";
 
@@ -10,7 +12,9 @@ export function safeReturnTo(raw: string | null | undefined, fallback = "/overvi
     if (parsed.origin !== window.location.origin) return fallback;
     if (parsed.pathname !== appBase && !parsed.pathname.startsWith(`${appBase}/`)) return fallback;
     const relativePath = parsed.pathname.slice(appBase.length) || "/";
-    return `${relativePath}${parsed.search}${parsed.hash}`;
+    const search = sanitizeAppRouteSearch(relativePath, parsed.search).search;
+    const hash = sanitizeAppRouteHash(parsed.hash, relativePath);
+    return `${relativePath}${search}${hash}`;
   } catch {
     return fallback;
   }
@@ -18,7 +22,9 @@ export function safeReturnTo(raw: string | null | undefined, fallback = "/overvi
 
 export function appReturnTo(pathname: string, search = "", hash = ""): string {
   const safePath = pathname.startsWith("/") ? pathname : `/${pathname}`;
-  return `${appBase}${safePath}${search}${hash}`;
+  const safeSearch = sanitizeAppRouteSearch(safePath, search).search;
+  const safeHash = sanitizeAppRouteHash(hash, safePath);
+  return `${appBase}${safePath}${safeSearch}${safeHash}`;
 }
 
 export function stageSsoReturnTo(routerPath: string): string {

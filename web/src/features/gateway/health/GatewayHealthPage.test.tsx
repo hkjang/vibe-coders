@@ -23,8 +23,11 @@ vi.mock("@/app/auth/AuthProvider", () => ({
   }),
 }));
 
+const providerRef = `prv_${"a".repeat(43)}`;
+
 const provider = {
   provider: "openai",
+  provider_ref: providerRef,
   score: 62,
   requests: 120,
   average_latency_ms: 420,
@@ -45,6 +48,7 @@ const routingHealth = {
     {
       rank: 1,
       provider: "openai",
+      provider_ref: providerRef,
       score: 62,
       requests: 120,
       fallback_rate: 0.05,
@@ -56,6 +60,7 @@ const routingHealth = {
   alerts: [
     {
       provider: "openai",
+      provider_ref: providerRef,
       code: "provider_degraded",
       severity: "warning",
       message: "Provider 상태 점수가 임계값보다 낮습니다.",
@@ -69,6 +74,7 @@ const routingHealth = {
     states: [
       {
         provider: "openai",
+        provider_ref: providerRef,
         phase: "open",
         failures: 3,
         opens: 1,

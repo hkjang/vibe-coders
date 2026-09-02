@@ -1,10 +1,244 @@
 package proxy
 
 import (
+	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/url"
+	"strings"
 	"testing"
+	"time"
 
 	"vibe-coders/internal/store"
 )
+
+func TestProviderSLOWriteReturnsPersistedTimestamp(t *testing.T) {
+	_, db, gateway := newAdminModelsTestServer(t, "")
+	if err := db.UpsertProvider(t.Context(), store.ProviderConfig{Name: "openai", BaseURL: "https://example.invalid", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	createdResponse := postJSON(t, gateway.URL+"/admin/providers/slo", "", map[string]any{
+		"provider": "openai", "availability_target": 0.99, "enabled": true,
+	})
+	defer createdResponse.Body.Close()
+	if createdResponse.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(createdResponse.Body)
+		t.Fatalf("create provider SLO status = %d body=%s", createdResponse.StatusCode, body)
+	}
+	var created struct {
+		SLO store.ProviderSLO `json:"slo"`
+	}
+	if err := json.NewDecoder(createdResponse.Body).Decode(&created); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := time.Parse(time.RFC3339Nano, created.SLO.UpdatedAt); err != nil {
+		t.Fatalf("created updated_at = %q: %v", created.SLO.UpdatedAt, err)
+	}
+
+	listedResponse, err := http.Get(gateway.URL + "/admin/providers/slo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listedResponse.Body.Close()
+	if listedResponse.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(listedResponse.Body)
+		t.Fatalf("list provider SLOs status = %d body=%s", listedResponse.StatusCode, body)
+	}
+	var listed struct {
+		SLOs []store.ProviderSLO `json:"slos"`
+	}
+	if err := json.NewDecoder(listedResponse.Body).Decode(&listed); err != nil {
+		t.Fatal(err)
+	}
+	if len(listed.SLOs) != 1 || listed.SLOs[0].UpdatedAt != created.SLO.UpdatedAt {
+		t.Fatalf("listed SLOs = %+v, want created updated_at %q", listed.SLOs, created.SLO.UpdatedAt)
+	}
+}
+
+func TestProviderSLOAppProjectionUsesOpaqueProviderRefsWithoutChangingLegacyShape(t *testing.T) {
+	server, db, gateway := newAdminModelsTestServer(t, "")
+	unsafeProvider := "sk-ant-legacy-slo-provider-secret"
+	for _, provider := range []string{unsafeProvider, "safe-provider"} {
+		if err := db.UpsertProvider(t.Context(), store.ProviderConfig{Name: provider, BaseURL: "https://example.invalid", Enabled: true}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, slo := range []store.ProviderSLO{
+		{Provider: unsafeProvider, AvailabilityTarget: 0.99, Enabled: true},
+		{Provider: "safe-provider", AvailabilityTarget: 0.95, Enabled: true},
+	} {
+		candidate := slo
+		if err := db.UpsertProviderSLO(t.Context(), &candidate); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	legacy, err := http.Get(gateway.URL + "/admin/providers/slo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyBody, _ := io.ReadAll(legacy.Body)
+	legacy.Body.Close()
+	if legacy.StatusCode != http.StatusOK || !strings.Contains(string(legacyBody), unsafeProvider) || strings.Contains(string(legacyBody), `"provider_ref"`) {
+		t.Fatalf("legacy SLO response shape changed: status=%d body=%s", legacy.StatusCode, legacyBody)
+	}
+
+	app := providerAppRequest(t, http.MethodGet, gateway.URL+"/admin/providers/slo", nil)
+	appBody, _ := io.ReadAll(app.Body)
+	app.Body.Close()
+	if app.StatusCode != http.StatusOK || strings.Contains(string(appBody), unsafeProvider) {
+		t.Fatalf("app SLO response leaked unsafe provider: status=%d body=%s", app.StatusCode, appBody)
+	}
+	var appPayload struct {
+		SLOs        []store.ProviderSLO     `json:"slos"`
+		Evaluations []providerSLOEvaluation `json:"evaluations"`
+	}
+	if err := json.Unmarshal(appBody, &appPayload); err != nil {
+		t.Fatal(err)
+	}
+	wantUnsafeRef := server.providerRef(unsafeProvider)
+	assertProjection := func(provider, providerRef string) {
+		t.Helper()
+		switch providerRef {
+		case wantUnsafeRef:
+			if provider != "[provider-name-omitted]" {
+				t.Fatalf("unsafe SLO label = %q", provider)
+			}
+		case server.providerRef("safe-provider"):
+			if provider != "safe-provider" {
+				t.Fatalf("safe SLO label = %q", provider)
+			}
+		default:
+			t.Fatalf("unexpected SLO provider_ref = %q", providerRef)
+		}
+	}
+	for _, slo := range appPayload.SLOs {
+		assertProjection(slo.Provider, slo.ProviderRef)
+	}
+	for _, evaluation := range appPayload.Evaluations {
+		assertProjection(evaluation.Provider, evaluation.ProviderRef)
+	}
+	if len(appPayload.SLOs) != 2 || len(appPayload.Evaluations) != 2 {
+		t.Fatalf("app SLO projection = %+v / %+v", appPayload.SLOs, appPayload.Evaluations)
+	}
+
+	updated := providerAppRequest(t, http.MethodPost, gateway.URL+"/admin/providers/slo", map[string]any{
+		"provider": unsafeProvider, "availability_target": 0.98, "enabled": true,
+	})
+	updatedBody, _ := io.ReadAll(updated.Body)
+	updated.Body.Close()
+	if updated.StatusCode != http.StatusCreated || strings.Contains(string(updatedBody), unsafeProvider) || !strings.Contains(string(updatedBody), wantUnsafeRef) {
+		t.Fatalf("app SLO update projection: status=%d body=%s", updated.StatusCode, updatedBody)
+	}
+	deleted := providerAppRequest(t, http.MethodDelete, gateway.URL+"/admin/providers/slo?provider="+url.QueryEscape(unsafeProvider), nil)
+	deletedBody, _ := io.ReadAll(deleted.Body)
+	deleted.Body.Close()
+	if deleted.StatusCode != http.StatusOK || strings.Contains(string(deletedBody), unsafeProvider) || !strings.Contains(string(deletedBody), wantUnsafeRef) {
+		t.Fatalf("app SLO delete projection: status=%d body=%s", deleted.StatusCode, deletedBody)
+	}
+	audits, err := db.ListAdminAudit(context.Background(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, audit := range audits {
+		values := audit.BeforeValue + audit.AfterValue
+		if strings.Contains(values, unsafeProvider) || strings.Contains(values, "provider_ref") {
+			t.Fatalf("SLO audit persisted unsafe or rotating identity: %+v", audit)
+		}
+	}
+}
+
+func TestProviderHealthAndSLOKeepDistinctLegacyUnsafeIdentities(t *testing.T) {
+	server, db, gateway := newAdminModelsTestServer(t, "")
+	providers := []string{"sk-ant-health-a-secret", "sk-ant-health-b-secret"}
+	now := time.Now().UTC()
+	for index, provider := range providers {
+		if err := db.UpsertProvider(t.Context(), store.ProviderConfig{Name: provider, BaseURL: "https://example.invalid", Enabled: true}); err != nil {
+			t.Fatal(err)
+		}
+		slo := store.ProviderSLO{Provider: provider, AvailabilityTarget: 0.99, Enabled: true}
+		if err := db.UpsertProviderSLO(t.Context(), &slo); err != nil {
+			t.Fatal(err)
+		}
+		status := http.StatusOK
+		if index == 0 {
+			status = http.StatusInternalServerError
+		}
+		if err := db.InsertLogRecord(t.Context(), store.LogRecord{Request: store.RequestLog{
+			ID: "req-unsafe-health-" + itoaProxy(index), TraceID: "trace-unsafe-health-" + itoaProxy(index),
+			Endpoint: "/v1/chat/completions", Model: "gpt-4o", Provider: provider,
+			StatusCode: status, LatencyMS: int64(100 + index), CreatedAt: now,
+		}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	health := providerAppRequest(t, http.MethodGet, gateway.URL+"/admin/routing/health?window=1h", nil)
+	healthBody, _ := io.ReadAll(health.Body)
+	health.Body.Close()
+	var healthPayload struct {
+		Providers []store.ProviderHealthScore `json:"providers"`
+	}
+	if health.StatusCode != http.StatusOK || json.Unmarshal(healthBody, &healthPayload) != nil || len(healthPayload.Providers) != 2 {
+		t.Fatalf("health response=%d %s", health.StatusCode, healthBody)
+	}
+	wantRefs := map[string]bool{server.providerRef(providers[0]): true, server.providerRef(providers[1]): true}
+	for _, score := range healthPayload.Providers {
+		if score.Provider != boundedModelsProviderLabel(providers[0]) || score.Requests != 1 || !wantRefs[score.ProviderRef] {
+			t.Fatalf("health provider identity collapsed: %+v", healthPayload.Providers)
+		}
+		delete(wantRefs, score.ProviderRef)
+	}
+	if len(wantRefs) != 0 {
+		t.Fatalf("health provider refs missing: %v", wantRefs)
+	}
+
+	sloResponse := providerAppRequest(t, http.MethodGet, gateway.URL+"/admin/providers/slo?window=1h", nil)
+	sloBody, _ := io.ReadAll(sloResponse.Body)
+	sloResponse.Body.Close()
+	var sloPayload struct {
+		Evaluations []providerSLOEvaluation `json:"evaluations"`
+	}
+	if sloResponse.StatusCode != http.StatusOK || json.Unmarshal(sloBody, &sloPayload) != nil || len(sloPayload.Evaluations) != 2 {
+		t.Fatalf("SLO response=%d %s", sloResponse.StatusCode, sloBody)
+	}
+	wantRefs = map[string]bool{server.providerRef(providers[0]): true, server.providerRef(providers[1]): true}
+	for _, evaluation := range sloPayload.Evaluations {
+		if evaluation.Provider != boundedModelsProviderLabel(providers[0]) || evaluation.Requests != 1 || !wantRefs[evaluation.ProviderRef] {
+			t.Fatalf("SLO provider identity collapsed: %+v", sloPayload.Evaluations)
+		}
+		delete(wantRefs, evaluation.ProviderRef)
+	}
+	if len(wantRefs) != 0 {
+		t.Fatalf("SLO provider refs missing: %v", wantRefs)
+	}
+}
+
+func TestProviderSLORejectsUnknownAndNewUnsafeProvider(t *testing.T) {
+	_, db, gateway := newAdminModelsTestServer(t, "")
+	unsafeProvider := "sk-ant-new-slo-secret"
+	if err := db.UpsertProvider(t.Context(), store.ProviderConfig{Name: unsafeProvider, BaseURL: "https://example.invalid", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		provider string
+		code     string
+	}{
+		{provider: "unknown-provider", code: "provider_slo_provider_not_found"},
+		{provider: unsafeProvider, code: "provider_slo_provider_invalid"},
+		{provider: "vibe", code: "provider_slo_provider_reserved"},
+	} {
+		response := postJSON(t, gateway.URL+"/admin/providers/slo", "", map[string]any{
+			"provider": tc.provider, "availability_target": 0.99,
+		})
+		body, _ := io.ReadAll(response.Body)
+		response.Body.Close()
+		if response.StatusCode != http.StatusBadRequest || !strings.Contains(string(body), tc.code) || strings.Contains(string(body), tc.provider) {
+			t.Fatalf("provider=%q status=%d body=%s", tc.provider, response.StatusCode, body)
+		}
+	}
+}
 
 func TestEvaluateProviderSLOs(t *testing.T) {
 	slos := []store.ProviderSLO{
@@ -26,6 +260,14 @@ func TestEvaluateProviderSLOs(t *testing.T) {
 	}
 
 	openai := byProvider["openai"]
+	if len(openai.Metrics) != 4 {
+		t.Fatalf("openai metrics = %#v, want exactly four documented metrics", openai.Metrics)
+	}
+	for _, name := range []string{"availability", "p95_latency_ms", "error_rate", "fallback_rate"} {
+		if _, ok := openai.Metrics[name]; !ok {
+			t.Errorf("openai metrics missing %q: %#v", name, openai.Metrics)
+		}
+	}
 	if !openai.Breached {
 		t.Error("openai should breach SLO")
 	}

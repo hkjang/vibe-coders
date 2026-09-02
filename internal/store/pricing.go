@@ -27,7 +27,7 @@ type ModelPricingVersion struct {
 }
 
 // InsertPricingVersion appends a new price version for a model.
-func (s *SQLStore) InsertPricingVersion(ctx context.Context, v ModelPricingVersion) error {
+func (s *SQLStore) InsertPricingVersion(ctx context.Context, v *ModelPricingVersion) error {
 	if v.CreatedAt == "" {
 		v.CreatedAt = nextPricingVersionTimestamp()
 	}

@@ -1,0 +1,382 @@
+package proxy
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"strconv"
+	"sync"
+	"time"
+
+	"vibe-coders/internal/store"
+)
+
+const (
+	adminModelsCatalogFreshTTL       = 20 * time.Second
+	adminModelsCatalogStaleTTL       = 10 * time.Minute
+	adminModelsCatalogRefreshTimeout = 10 * time.Second
+	adminModelsCatalogMaxConcurrency = 4
+
+	// The process-local last-known-good cache is shared by every admin request. Providers
+	// normally publish hundreds of models, so these bounds retain generous operational history
+	// without allowing configured provider count or large identifiers to grow memory forever.
+	adminModelsCatalogMaxEntries     = 64
+	adminModelsCatalogMaxRows        = 50_000
+	adminModelsCatalogMaxWeightBytes = 32 << 20
+	adminModelCatalogEntryOverhead   = 160
+	adminModelCatalogRowOverhead     = 64
+)
+
+// adminModelCatalogRow is the deliberately small subset of an upstream model object that
+// the gateway retains. Provider catalogues are arbitrary JSON, so caching their raw maps would
+// keep fields the UI never needs (and potentially provider-specific metadata) in memory.
+type adminModelCatalogRow struct {
+	ID      string
+	Object  string
+	OwnedBy string
+	Created *int64
+}
+
+type adminModelCatalogCacheEntry struct {
+	fingerprint string
+	models      []adminModelCatalogRow
+	fetchedAt   time.Time
+}
+
+type adminModelCatalogFlight struct {
+	done               chan struct{}
+	result             adminProviderModelsResult
+	leaderContextEnded bool
+}
+
+// adminModelCatalogCache keeps a short, process-local last-known-good catalogue per Provider.
+// It also coalesces concurrent refreshes and applies one process-wide outbound limit, so several
+// administrators polling the same page cannot multiply Provider traffic without bound.
+type adminModelCatalogCache struct {
+	mu        sync.Mutex
+	entries   map[string]adminModelCatalogCacheEntry
+	flights   map[string]*adminModelCatalogFlight
+	semaphore chan struct{}
+	freshTTL  time.Duration
+	staleTTL  time.Duration
+	// refreshTimeout bounds the whole provider-catalogue fan-out, including time spent
+	// waiting for a worker or the process-wide outbound semaphore.
+	refreshTimeout time.Duration
+	workerLimit    int
+	maxEntries     int
+	maxRows        int
+	maxWeightBytes int
+	now            func() time.Time
+
+	// testAfterFreshMiss lets cache tests stop a caller in the otherwise tiny window
+	// between its optimistic cache lookup and the atomic cache/flight decision below.
+	testAfterFreshMiss func()
+}
+
+func newAdminModelCatalogCache() *adminModelCatalogCache {
+	return &adminModelCatalogCache{
+		entries:        make(map[string]adminModelCatalogCacheEntry),
+		flights:        make(map[string]*adminModelCatalogFlight),
+		semaphore:      make(chan struct{}, adminModelsCatalogMaxConcurrency),
+		freshTTL:       adminModelsCatalogFreshTTL,
+		staleTTL:       adminModelsCatalogStaleTTL,
+		refreshTimeout: adminModelsCatalogRefreshTimeout,
+		workerLimit:    adminModelsCatalogMaxConcurrency,
+		maxEntries:     adminModelsCatalogMaxEntries,
+		maxRows:        adminModelsCatalogMaxRows,
+		maxWeightBytes: adminModelsCatalogMaxWeightBytes,
+		now:            time.Now,
+	}
+}
+
+func adminModelCatalogEntryWeight(providerName string, entry adminModelCatalogCacheEntry) (int, int) {
+	weight := adminModelCatalogEntryOverhead + len(providerName) + len(entry.fingerprint)
+	for _, row := range entry.models {
+		weight += adminModelCatalogRowWeight(row)
+	}
+	return len(entry.models), weight
+}
+
+func adminModelCatalogRowWeight(row adminModelCatalogRow) int {
+	weight := adminModelCatalogRowOverhead + len(row.ID) + len(row.Object) + len(row.OwnedBy)
+	if row.Created != nil {
+		weight += 8
+	}
+	return weight
+}
+
+// put stores a cloned entry after evicting the oldest catalogues needed to keep the cache's
+// entry, row, and conservative in-memory weight budgets. A live result that is too large is
+// still returned to its caller; it simply does not become last-known-good state.
+func (cache *adminModelCatalogCache) put(providerName string, entry adminModelCatalogCacheEntry) bool {
+	entry.models = cloneAdminModelCatalogRows(entry.models)
+	candidateRows, candidateWeight := adminModelCatalogEntryWeight(providerName, entry)
+
+	cache.mu.Lock()
+	defer cache.mu.Unlock()
+	delete(cache.entries, providerName)
+	if candidateRows > cache.maxRows || candidateWeight > cache.maxWeightBytes || cache.maxEntries <= 0 {
+		return false
+	}
+
+	for {
+		rows, weight := 0, 0
+		for name, existing := range cache.entries {
+			entryRows, entryWeight := adminModelCatalogEntryWeight(name, existing)
+			rows += entryRows
+			weight += entryWeight
+		}
+		if len(cache.entries) < cache.maxEntries && rows+candidateRows <= cache.maxRows && weight+candidateWeight <= cache.maxWeightBytes {
+			cache.entries[providerName] = entry
+			return true
+		}
+
+		oldestName := ""
+		var oldestAt time.Time
+		for name, existing := range cache.entries {
+			if oldestName == "" || existing.fetchedAt.Before(oldestAt) || (existing.fetchedAt.Equal(oldestAt) && name < oldestName) {
+				oldestName = name
+				oldestAt = existing.fetchedAt
+			}
+		}
+		if oldestName == "" {
+			return false
+		}
+		delete(cache.entries, oldestName)
+	}
+}
+
+func boundedAdminModelsCatalogRefreshTimeout(configured time.Duration) time.Duration {
+	if configured <= 0 || configured > adminModelsCatalogRefreshTimeout {
+		return adminModelsCatalogRefreshTimeout
+	}
+	return configured
+}
+
+func adminModelProviderFingerprint(provider store.ProviderConfig, fallbackTimeout time.Duration) string {
+	hash := sha256.New()
+	for _, value := range []string{
+		provider.Name,
+		provider.BaseURL,
+		provider.EncryptedAPIKey,
+		strconv.Itoa(provider.TimeoutMS),
+		fallbackTimeout.String(),
+	} {
+		_, _ = hash.Write([]byte(value))
+		_, _ = hash.Write([]byte{0})
+	}
+	return hex.EncodeToString(hash.Sum(nil))
+}
+
+func cloneAdminModelCatalogRows(source []adminModelCatalogRow) []adminModelCatalogRow {
+	if len(source) == 0 {
+		return []adminModelCatalogRow{}
+	}
+	cloned := make([]adminModelCatalogRow, len(source))
+	copy(cloned, source)
+	for index := range cloned {
+		if source[index].Created != nil {
+			created := *source[index].Created
+			cloned[index].Created = &created
+		}
+	}
+	return cloned
+}
+
+func cloneAdminProviderModelsResult(source adminProviderModelsResult) adminProviderModelsResult {
+	source.models = cloneAdminModelCatalogRows(source.models)
+	return source
+}
+
+func (cache *adminModelCatalogCache) prune(configs []store.ProviderConfig, fallbackTimeout time.Duration) {
+	now := cache.now()
+	cache.mu.Lock()
+	wanted := make(map[string]struct{}, len(cache.entries))
+	for name := range cache.entries {
+		wanted[name] = struct{}{}
+	}
+	cache.mu.Unlock()
+	valid := make(map[string]string, len(wanted))
+	for _, provider := range configs {
+		if _, exists := wanted[provider.Name]; provider.Enabled && exists {
+			valid[provider.Name] = adminModelProviderFingerprint(provider, fallbackTimeout)
+		}
+	}
+
+	cache.mu.Lock()
+	defer cache.mu.Unlock()
+	for name, entry := range cache.entries {
+		if _, wasPresent := wanted[name]; !wasPresent {
+			continue // a concurrent refresh added this entry after the snapshot
+		}
+		age := now.Sub(entry.fetchedAt)
+		if age < 0 {
+			age = 0
+		}
+		if validFingerprint, exists := valid[name]; !exists || validFingerprint != entry.fingerprint || age > cache.staleTTL {
+			delete(cache.entries, name)
+		}
+	}
+}
+
+func (cache *adminModelCatalogCache) cached(
+	provider store.ProviderConfig,
+	fallbackTimeout time.Duration,
+	allowStale bool,
+) (adminProviderModelsResult, bool) {
+	fingerprint := adminModelProviderFingerprint(provider, fallbackTimeout)
+	now := cache.now()
+	cache.mu.Lock()
+	entry, stale, ok := cache.cachedLocked(provider.Name, fingerprint, now, allowStale)
+	cache.mu.Unlock()
+	if !ok {
+		return adminProviderModelsResult{}, false
+	}
+	return adminProviderModelsResultFromEntry(provider, entry, stale), true
+}
+
+// cachedLocked performs a cache lookup while cache.mu is held. load uses it immediately before
+// creating a flight, making the fresh-cache decision and flight registration one atomic step.
+func (cache *adminModelCatalogCache) cachedLocked(
+	providerName string,
+	fingerprint string,
+	now time.Time,
+	allowStale bool,
+) (adminModelCatalogCacheEntry, bool, bool) {
+	entry, ok := cache.entries[providerName]
+	if !ok || entry.fingerprint != fingerprint {
+		return adminModelCatalogCacheEntry{}, false, false
+	}
+	age := now.Sub(entry.fetchedAt)
+	if age < 0 {
+		age = 0
+	}
+	if age > cache.staleTTL {
+		delete(cache.entries, providerName)
+		return adminModelCatalogCacheEntry{}, false, false
+	}
+	if age > cache.freshTTL && !allowStale {
+		return adminModelCatalogCacheEntry{}, false, false
+	}
+	return entry, age > cache.freshTTL, true
+}
+
+func adminProviderModelsResultFromEntry(
+	provider store.ProviderConfig,
+	entry adminModelCatalogCacheEntry,
+	stale bool,
+) adminProviderModelsResult {
+	return adminProviderModelsResult{
+		config:    provider,
+		models:    cloneAdminModelCatalogRows(entry.models),
+		status:    "ok",
+		source:    adminModelSourceCache,
+		fetchedAt: entry.fetchedAt.UTC().Format(time.RFC3339Nano),
+		stale:     stale,
+	}
+}
+
+func (cache *adminModelCatalogCache) staleAfterFailure(
+	provider store.ProviderConfig,
+	fallbackTimeout time.Duration,
+	code string,
+) adminProviderModelsResult {
+	if result, ok := cache.cached(provider, fallbackTimeout, true); ok {
+		result.stale = true
+		result.failureCode = code
+		return result
+	}
+	return adminProviderModelsResult{
+		config: provider, status: "failed", source: adminModelSourceLive, failureCode: code,
+	}
+}
+
+func (cache *adminModelCatalogCache) load(
+	ctx context.Context,
+	provider store.ProviderConfig,
+	fallbackTimeout time.Duration,
+	fetch func(context.Context) ([]adminModelCatalogRow, error),
+) adminProviderModelsResult {
+	if result, ok := cache.cached(provider, fallbackTimeout, false); ok {
+		return result
+	}
+	if cache.testAfterFreshMiss != nil {
+		cache.testAfterFreshMiss()
+	}
+
+	fingerprint := adminModelProviderFingerprint(provider, fallbackTimeout)
+	flightKey := provider.Name + "\x00" + fingerprint
+	for attempt := 0; attempt < 2; attempt++ {
+		cache.mu.Lock()
+		if entry, stale, ok := cache.cachedLocked(provider.Name, fingerprint, cache.now(), false); ok {
+			cache.mu.Unlock()
+			return adminProviderModelsResultFromEntry(provider, entry, stale)
+		}
+		if flight, ok := cache.flights[flightKey]; ok {
+			cache.mu.Unlock()
+			select {
+			case <-ctx.Done():
+				return adminProviderModelsResult{
+					config: provider, status: "failed", source: adminModelSourceLive,
+					failureCode: "provider_models_unavailable",
+				}
+			case <-flight.done:
+				result := cloneAdminProviderModelsResult(flight.result)
+				// If the request leading the shared refresh disappeared, one still-live waiter
+				// gets one chance to become the next leader instead of inheriting cancellation.
+				if flight.leaderContextEnded && result.status == "failed" && attempt == 0 && ctx.Err() == nil {
+					continue
+				}
+				return result
+			}
+		}
+		flight := &adminModelCatalogFlight{done: make(chan struct{})}
+		cache.flights[flightKey] = flight
+		cache.mu.Unlock()
+
+		result := cache.runLeader(ctx, provider, fallbackTimeout, fingerprint, fetch)
+		cache.mu.Lock()
+		flight.result = cloneAdminProviderModelsResult(result)
+		flight.leaderContextEnded = ctx.Err() != nil
+		close(flight.done)
+		delete(cache.flights, flightKey)
+		cache.mu.Unlock()
+		return result
+	}
+
+	return adminProviderModelsResult{
+		config: provider, status: "failed", source: adminModelSourceLive,
+		failureCode: "provider_models_unavailable",
+	}
+}
+
+func (cache *adminModelCatalogCache) runLeader(
+	ctx context.Context,
+	provider store.ProviderConfig,
+	fallbackTimeout time.Duration,
+	fingerprint string,
+	fetch func(context.Context) ([]adminModelCatalogRow, error),
+) adminProviderModelsResult {
+	select {
+	case cache.semaphore <- struct{}{}:
+		defer func() { <-cache.semaphore }()
+	case <-ctx.Done():
+		return cache.staleAfterFailure(provider, fallbackTimeout, "provider_models_unavailable")
+	}
+
+	models, err := fetch(ctx)
+	if err != nil {
+		return cache.staleAfterFailure(provider, fallbackTimeout, providerModelsFailureCode(err))
+	}
+	fetchedAt := cache.now().UTC()
+	models = cloneAdminModelCatalogRows(models)
+	cache.put(provider.Name, adminModelCatalogCacheEntry{
+		fingerprint: fingerprint,
+		models:      models,
+		fetchedAt:   fetchedAt,
+	})
+	return adminProviderModelsResult{
+		config: provider, models: models, status: "ok", source: adminModelSourceLive,
+		fetchedAt: fetchedAt.Format(time.RFC3339Nano), stale: false,
+	}
+}

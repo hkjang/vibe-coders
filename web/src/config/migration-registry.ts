@@ -76,15 +76,15 @@ export const migrationRegistry = [
     group: "AI Gateway",
     keywords: ["provider", "model", "공급자", "모델"],
     appPath: "/app/gateway/providers",
-    legacyPath: "/admin#/routing/health",
-    status: "legacy",
+    legacyPath: "/admin#/settings",
+    status: "preview_read_only",
     riskLevel: "medium",
     requiredPermission: "admin:read",
     readOnly: true,
-    enabledRoles: [],
-    rolloutPercent: 0,
+    enabledRoles: ["super_admin", "admin", "ai_admin"],
+    rolloutPercent: 100,
     fallbackEnabled: true,
-    minimumApiVersion: "v0.79.8",
+    minimumApiVersion: "v0.82.0",
   },
   {
     featureId: "gateway.models",
@@ -94,14 +94,14 @@ export const migrationRegistry = [
     keywords: ["model", "quality", "pricing", "모델"],
     appPath: "/app/gateway/models",
     legacyPath: "/admin#/model-contracts",
-    status: "legacy",
+    status: "preview_read_only",
     riskLevel: "medium",
     requiredPermission: "admin:read",
     readOnly: true,
-    enabledRoles: [],
+    enabledRoles: ["super_admin", "admin", "ai_admin"],
     rolloutPercent: 100,
     fallbackEnabled: true,
-    minimumApiVersion: "v0.80.0",
+    minimumApiVersion: "v0.82.0",
   },
   {
     featureId: "routing.rules",
@@ -337,6 +337,8 @@ export interface ResolveFeatureOptions {
 const appImplementedFeatureIds: ReadonlySet<string> = new Set([
   "overview",
   "gateway.health",
+  "gateway.providers",
+  "gateway.models",
   "system.health",
 ]);
 
@@ -406,8 +408,15 @@ export function resolveFeature(
         permitted: false,
         reason: feature.requiredPermission,
       };
-    } else if (feature.enabledRoles.length && !feature.enabledRoles.some((role) => roles.includes(role))) {
-      effective = { feature, status: "hidden", readOnly: true, permitted: false, reason: "preview_role" };
+    } else if (
+      (feature.status === "preview" || feature.status === "preview_read_only") &&
+      feature.enabledRoles.length &&
+      !feature.enabledRoles.some((role) => roles.includes(role))
+    ) {
+      effective =
+        legacyFallback && feature.fallbackEnabled
+          ? { feature, status: "legacy", readOnly: true, permitted: true, reason: "legacy_fallback" }
+          : { feature, status: "hidden", readOnly: true, permitted: false, reason: "preview_role" };
     } else if (!versionAtLeast(backendVersion, feature.minimumApiVersion)) {
       effective = { feature, status: "legacy", readOnly: true, permitted: true, reason: "api_version" };
     } else if (

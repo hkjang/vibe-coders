@@ -59,7 +59,7 @@ func TestAppUIBootstrapAndRuntimeToggle(t *testing.T) {
 		t.Fatalf("legacy route map must be empty when fallback is disabled: %#v", legacyRoutes)
 	}
 	allowed, _ := body["allowed_features"].([]any)
-	wantAllowed := []string{"overview", "gateway.health", "system.health"}
+	wantAllowed := []string{"overview", "gateway.health", "gateway.providers", "gateway.models", "system.health"}
 	if len(allowed) != len(wantAllowed) {
 		t.Fatalf("implemented previews allowed without Legacy fallback = %#v, want %v", allowed, wantAllowed)
 	}
@@ -126,7 +126,7 @@ func TestAppUIRoutesRemainIsolatedWhenDisabled(t *testing.T) {
 		t.Fatal(err)
 	}
 	redirect.Body.Close()
-	if redirect.StatusCode != http.StatusPermanentRedirect || redirect.Header.Get("Location") != "/app/?from=test" {
+	if redirect.StatusCode != http.StatusPermanentRedirect || redirect.Header.Get("Location") != "/app/" {
 		t.Fatalf("/app redirect = %d %q", redirect.StatusCode, redirect.Header.Get("Location"))
 	}
 
@@ -294,7 +294,7 @@ func TestAppUIMigrationRegistryContract(t *testing.T) {
 
 	wantLegacyPaths := map[string]string{
 		"gateway.health":       "/admin#/routing/health",
-		"gateway.providers":    "/admin#/routing/health",
+		"gateway.providers":    "/admin#/settings",
 		"gateway.models":       "/admin#/model-contracts",
 		"observability.traces": "/admin#/llm",
 		"prompts.lab":          "/admin#/prompt-lab",
@@ -315,6 +315,34 @@ func TestAppUIMigrationRegistryContract(t *testing.T) {
 	}
 	if got, want := len(appUIFeatureSettingDefs()), len(appUIFeatures)*4; got != want {
 		t.Fatalf("feature setting definitions = %d, want %d", got, want)
+	}
+}
+
+func TestGatewayCatalogFeaturesAreSafeReadOnlyPreviewDefaults(t *testing.T) {
+	wantRoles := "super_admin,admin,ai_admin"
+	for _, id := range []string{"gateway.providers", "gateway.models"} {
+		var feature *appUIFeature
+		for i := range appUIFeatures {
+			if appUIFeatures[i].FeatureID == id {
+				feature = &appUIFeatures[i]
+				break
+			}
+		}
+		if feature == nil {
+			t.Fatalf("gateway catalog feature %q is not registered", id)
+		}
+		if feature.Status != "preview_read_only" || !feature.ReadOnly || feature.RequiredPermission != "admin:read" {
+			t.Errorf("feature %q safety contract is incomplete: %+v", id, *feature)
+		}
+		if got := strings.Join(feature.EnabledRoles, ","); got != wantRoles {
+			t.Errorf("feature %q enabled roles = %q, want %q", id, got, wantRoles)
+		}
+		if feature.RolloutPercent != 100 || !feature.FallbackEnabled || feature.MinimumAPIVersion != "v0.82.0" {
+			t.Errorf("feature %q rollout contract is incomplete: %+v", id, *feature)
+		}
+		if _, implemented := appUIImplementedFeatureIDs[id]; !implemented {
+			t.Errorf("feature %q must be implemented", id)
+		}
 	}
 }
 

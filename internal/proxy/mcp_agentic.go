@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -73,6 +74,32 @@ type mcpAgentOutcome struct {
 	Streamed       bool
 	BudgetExceeded bool
 	Err            error
+}
+
+type mcpAgentUpstreamError struct {
+	code      string
+	transient bool
+}
+
+func (e mcpAgentUpstreamError) Error() string { return e.code }
+
+func newMCPAgentUpstreamError(code string, transient bool) error {
+	return mcpAgentUpstreamError{code: code, transient: transient}
+}
+
+func mcpAgentTransportError(err error) error {
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return newMCPAgentUpstreamError(governanceRunErrTimeout, true)
+	}
+	return newMCPAgentUpstreamError(governanceRunErrTransport, true)
+}
+
+func mcpAgentPublicError(err error) error {
+	var upstreamErr mcpAgentUpstreamError
+	if errors.As(err, &upstreamErr) {
+		return upstreamErr
+	}
+	return mcpAgentTransportError(err)
 }
 
 // mcpAgenticBackingModel returns a concrete upstream model whose provider is resolvable for
@@ -154,7 +181,7 @@ func (s *Server) buildMCPAgentToolset(ctx context.Context, candidates []MCPCandi
 			}
 			desc := strings.TrimSpace(tool.Description)
 			if desc == "" {
-				desc = route.upstreamName + " 도구 " + route.bareTool
+				desc = boundedModelsProviderLabel(route.upstreamName) + " 도구 " + route.bareTool
 			}
 			ts.tools = append(ts.tools, map[string]any{
 				"type": "function",
@@ -311,11 +338,11 @@ func (s *Server) runMCPAgenticChat(w http.ResponseWriter, r *http.Request, model
 			}
 		}
 		if provider != "" {
-			out.Provider = provider
+			out.Provider = boundedModelsProviderLabel(provider)
 		}
 		if err != nil {
-			out.Err = err
-			emitReason("⚠️ 모델 호출 실패: " + err.Error() + "\n")
+			out.Err = mcpAgentPublicError(err)
+			emitReason("⚠️ 모델 호출 실패: " + out.Err.Error() + "\n")
 			break
 		}
 		out.Usage.add(usage)
@@ -374,7 +401,7 @@ func (s *Server) runMCPAgenticChat(w http.ResponseWriter, r *http.Request, model
 			}
 			toolContent, ev := s.execAgentToolCall(r, apiKeyID, authCtx, route, tc.Args)
 			out.Evidences = append(out.Evidences, ev)
-			summary := fmt.Sprintf("   → %s · %d건 · %dms", route.upstreamName, ev.SourceCount, ev.LatencyMS)
+			summary := fmt.Sprintf("   → %s · %d건 · %dms", boundedModelsProviderLabel(route.upstreamName), ev.SourceCount, ev.LatencyMS)
 			if ev.Error != "" {
 				summary = "   → 오류: " + truncateText(ev.Error, 200)
 			}
@@ -395,22 +422,22 @@ func (s *Server) runMCPAgenticChat(w http.ResponseWriter, r *http.Request, model
 			content, _, _, usage, provider, ferr := s.postUpstreamChatStream(r.Context(), r, model, body, emitContent)
 			if ferr == nil {
 				if provider != "" {
-					out.Provider = provider
+					out.Provider = boundedModelsProviderLabel(provider)
 				}
 				out.Usage.add(usage)
 				out.Content = strings.TrimSpace(content)
 			} else {
-				out.Err = ferr
+				out.Err = mcpAgentPublicError(ferr)
 			}
 		} else if raw, provider, err := s.postUpstreamChat(r.Context(), r, model, body); err == nil {
 			if provider != "" {
-				out.Provider = provider
+				out.Provider = boundedModelsProviderLabel(provider)
 			}
 			_, content, _, _, usage := parseAgentResponse(raw)
 			out.Usage.add(usage)
 			out.Content = strings.TrimSpace(content)
 		} else {
-			out.Err = err
+			out.Err = mcpAgentPublicError(err)
 		}
 	}
 
@@ -507,6 +534,7 @@ func (s *Server) execAgentToolCall(r *http.Request, apiKeyID string, authCtx *st
 		if resp.Error != nil {
 			msg = resp.Error.Message
 		}
+		msg = boundedExternalProviderText(msg, route.upstreamName)
 		ev.Error = msg
 		return "ERROR: " + msg, ev
 	}
@@ -522,14 +550,17 @@ func (s *Server) execAgentToolCall(r *http.Request, apiKeyID string, authCtx *st
 	ev.LatencyMS = time.Since(start).Milliseconds()
 	if err != nil {
 		s.logMCPCall(r, apiKeyID, route.upstreamName, route.bareTool, argsJSON, true, http.StatusBadGateway, ev.LatencyMS)
-		ev.Error = err.Error()
-		return "ERROR: " + err.Error(), ev
+		ev.Error = mcpUpstreamRequestFailed
+		return "ERROR: " + mcpUpstreamRequestFailed, ev
 	}
 	items, toolErr := extractMCPResultItems(result)
 	s.logMCPCall(r, apiKeyID, route.upstreamName, route.bareTool, argsJSON, toolErr != "", http.StatusOK, ev.LatencyMS)
 	ev.Items = items
 	ev.SourceCount = len(items)
 	ev.Error = toolErr
+	if toolErr != "" {
+		return "ERROR: " + toolErr, ev
+	}
 	if len(items) > 0 {
 		ev.EvidenceScore = 0.8
 	}
@@ -547,19 +578,19 @@ func (s *Server) postUpstreamChat(ctx context.Context, r *http.Request, model st
 	bodyMap["stream"] = false
 	encoded, err := json.Marshal(bodyMap)
 	if err != nil {
-		return nil, "", err
+		return nil, "", newMCPAgentUpstreamError(governanceRunErrRequestEncoding, false)
 	}
 	provider, err := s.selectProvider(ctx, r, model)
 	if err != nil {
-		return nil, "", err
+		return nil, "", newMCPAgentUpstreamError(governanceRunErrProvider, false)
 	}
 	upstreamURL, err := s.upstreamURL(provider.BaseURL, &url.URL{Path: "/v1/chat/completions"})
 	if err != nil {
-		return nil, provider.Name, err
+		return nil, provider.Name, newMCPAgentUpstreamError(governanceRunErrUpstreamURL, false)
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, upstreamURL, bytes.NewReader(encoded))
 	if err != nil {
-		return nil, provider.Name, err
+		return nil, provider.Name, newMCPAgentUpstreamError(governanceRunErrRequestBuild, false)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+provider.APIKey)
@@ -567,12 +598,15 @@ func (s *Server) postUpstreamChat(ctx context.Context, r *http.Request, model st
 
 	resp, err := s.client.Do(req)
 	if err != nil {
-		return nil, provider.Name, err
+		return nil, provider.Name, mcpAgentTransportError(err)
 	}
 	defer resp.Body.Close()
-	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	raw, readErr := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	if readErr != nil {
+		return nil, provider.Name, newMCPAgentUpstreamError(governanceRunErrResponseRead, true)
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return raw, provider.Name, fmt.Errorf("upstream %d: %s", resp.StatusCode, truncateText(strings.TrimSpace(string(raw)), 400))
+		return nil, provider.Name, newMCPAgentUpstreamError(governanceRunErrStatus, resp.StatusCode >= 500)
 	}
 	return raw, provider.Name, nil
 }
@@ -605,20 +639,20 @@ func (s *Server) postUpstreamChatStream(ctx context.Context, r *http.Request, mo
 	bodyMap["stream_options"] = map[string]any{"include_usage": true}
 	encoded, merr := json.Marshal(bodyMap)
 	if merr != nil {
-		return "", nil, "", usage, "", merr
+		return "", nil, "", usage, "", newMCPAgentUpstreamError(governanceRunErrRequestEncoding, false)
 	}
 	rp, perr := s.selectProvider(ctx, r, model)
 	if perr != nil {
-		return "", nil, "", usage, "", perr
+		return "", nil, "", usage, "", newMCPAgentUpstreamError(governanceRunErrProvider, false)
 	}
 	provider = rp.Name
 	upstreamURL, uerr := s.upstreamURL(rp.BaseURL, &url.URL{Path: "/v1/chat/completions"})
 	if uerr != nil {
-		return "", nil, "", usage, provider, uerr
+		return "", nil, "", usage, provider, newMCPAgentUpstreamError(governanceRunErrUpstreamURL, false)
 	}
 	req, rerr := http.NewRequestWithContext(ctx, http.MethodPost, upstreamURL, bytes.NewReader(encoded))
 	if rerr != nil {
-		return "", nil, "", usage, provider, rerr
+		return "", nil, "", usage, provider, newMCPAgentUpstreamError(governanceRunErrRequestBuild, false)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+rp.APIKey)
@@ -626,12 +660,12 @@ func (s *Server) postUpstreamChatStream(ctx context.Context, r *http.Request, mo
 	req.Header.Set("X-Request-ID", traceIDFromRequest(r))
 	resp, derr := s.client.Do(req)
 	if derr != nil {
-		return "", nil, "", usage, provider, derr
+		return "", nil, "", usage, provider, mcpAgentTransportError(derr)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-		return "", nil, "", usage, provider, fmt.Errorf("upstream %d: %s", resp.StatusCode, truncateText(strings.TrimSpace(string(raw)), 400))
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
+		return "", nil, "", usage, provider, newMCPAgentUpstreamError(governanceRunErrStatus, resp.StatusCode >= 500)
 	}
 	// Provider ignored stream:true and returned a single JSON body — parse it as one shot.
 	if !strings.Contains(resp.Header.Get("Content-Type"), "text/event-stream") {
@@ -718,6 +752,10 @@ func (s *Server) postUpstreamChatStream(ctx context.Context, r *http.Request, mo
 func isTransientUpstreamErr(err error) bool {
 	if err == nil {
 		return false
+	}
+	var upstreamErr mcpAgentUpstreamError
+	if errors.As(err, &upstreamErr) {
+		return upstreamErr.transient
 	}
 	msg := err.Error()
 	if strings.Contains(msg, "upstream 4") {

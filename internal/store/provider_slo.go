@@ -2,6 +2,8 @@ package store
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"time"
 )
 
@@ -15,6 +17,7 @@ import (
 // A zero target means "not enforced" for that metric.
 type ProviderSLO struct {
 	Provider           string  `json:"provider"`
+	ProviderRef        string  `json:"provider_ref,omitempty"`
 	AvailabilityTarget float64 `json:"availability_target"`
 	P95LatencyTargetMS int64   `json:"p95_latency_target_ms"`
 	ErrorRateTarget    float64 `json:"error_rate_target"`
@@ -44,7 +47,23 @@ func (s *SQLStore) ListProviderSLOs(ctx context.Context) ([]ProviderSLO, error) 
 	return out, rows.Err()
 }
 
-func (s *SQLStore) UpsertProviderSLO(ctx context.Context, slo ProviderSLO) error {
+func (s *SQLStore) GetProviderSLO(ctx context.Context, provider string) (ProviderSLO, bool, error) {
+	row := s.db.QueryRowContext(ctx, s.bind(`SELECT provider, availability_target, p95_latency_target_ms, error_rate_target, fallback_rate_target, enabled, COALESCE(note, ''), updated_at
+		FROM provider_slos WHERE provider = ?`), provider)
+	var slo ProviderSLO
+	var enabled int
+	if err := row.Scan(&slo.Provider, &slo.AvailabilityTarget, &slo.P95LatencyTargetMS, &slo.ErrorRateTarget, &slo.FallbackRateTarget, &enabled, &slo.Note, &slo.UpdatedAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ProviderSLO{}, false, nil
+		}
+		return ProviderSLO{}, false, err
+	}
+	slo.Enabled = enabled == 1
+	return slo, true, nil
+}
+
+func (s *SQLStore) UpsertProviderSLO(ctx context.Context, slo *ProviderSLO) error {
+	slo.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	enabled := 0
 	if slo.Enabled {
 		enabled = 1
@@ -57,7 +76,7 @@ func (s *SQLStore) UpsertProviderSLO(ctx context.Context, slo ProviderSLO) error
 			fallback_rate_target = excluded.fallback_rate_target, enabled = excluded.enabled, note = excluded.note,
 			updated_at = excluded.updated_at`),
 		slo.Provider, slo.AvailabilityTarget, slo.P95LatencyTargetMS, slo.ErrorRateTarget, slo.FallbackRateTarget,
-		enabled, slo.Note, time.Now().UTC().Format(time.RFC3339Nano))
+		enabled, slo.Note, slo.UpdatedAt)
 	return err
 }
 
