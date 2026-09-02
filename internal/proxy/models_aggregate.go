@@ -7,12 +7,15 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
 
 	"vibe-coders/internal/store"
 )
+
+const maxModelsResponseBytes = 8 << 20
 
 // clientPinnedProvider reports whether the caller explicitly targeted one provider (via the
 // X-Proxy-Provider header or ?provider= query). A pinned GET /v1/models keeps the classic
@@ -70,7 +73,7 @@ func (s *Server) aggregatedModels(ctx context.Context, r *http.Request) (data []
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			models, ferr := s.fetchProviderModels(ctx, r, jobs[i].name, jobs[i].baseURL, jobs[i].apiKey, jobs[i].timeout)
+			models, ferr := s.fetchProviderModels(ctx, jobs[i].name, jobs[i].baseURL, jobs[i].apiKey, jobs[i].timeout, r.URL.RawQuery)
 			if ferr != nil {
 				failed[i] = true
 				slog.Warn("aggregated models: provider fetch failed", "provider", jobs[i].name, "error", ferr)
@@ -113,10 +116,13 @@ func (s *Server) aggregatedModels(ctx context.Context, r *http.Request) (data []
 }
 
 // fetchProviderModels performs one upstream GET /v1/models against a single provider and returns
-// its raw model objects (the JSON "data" array). The caller's path/query is reused via upstreamURL
-// so provider-specific base paths are respected; the provider's own key and timeout are applied.
-func (s *Server) fetchProviderModels(ctx context.Context, r *http.Request, name, baseURL, apiKey string, timeout time.Duration) ([]map[string]any, error) {
-	target, err := s.upstreamURL(baseURL, r.URL)
+// its raw model objects (the JSON "data" array). The target path is deliberately constructed
+// here instead of being copied from the caller: this helper is also used by /admin/models, whose
+// control-plane path and filters must never be forwarded to a provider. Provider-specific base
+// paths are preserved, while the provider's own key and timeout are applied. rawQuery exists
+// only to preserve the public /v1/models passthrough contract; admin callers always pass "".
+func (s *Server) fetchProviderModels(ctx context.Context, name, baseURL, apiKey string, timeout time.Duration, rawQuery string) ([]map[string]any, error) {
+	target, err := s.upstreamURL(baseURL, &url.URL{Path: "/v1/models", RawQuery: rawQuery})
 	if err != nil {
 		return nil, err
 	}
@@ -137,9 +143,12 @@ func (s *Server) fetchProviderModels(ctx context.Context, r *http.Request, name,
 		return nil, err
 	}
 	defer resp.Body.Close()
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxModelsResponseBytes+1))
 	if err != nil {
 		return nil, err
+	}
+	if len(raw) > maxModelsResponseBytes {
+		return nil, fmt.Errorf("provider %q model catalogue exceeds %d bytes", name, maxModelsResponseBytes)
 	}
 	if resp.StatusCode >= 400 {
 		return nil, fmt.Errorf("provider %q returned status %d", name, resp.StatusCode)

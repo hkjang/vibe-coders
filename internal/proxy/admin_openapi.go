@@ -31,7 +31,7 @@ var apiEndpoints = []apiEndpoint{
 
 	// ---- inference (OpenAI-compatible) ----
 	{"/v1/chat/completions", []string{"post"}, "inference", "Chat completions (SSE streaming + vibe/text2sql-* virtual models)", false},
-	{"/v1/models", []string{"get"}, "inference", "List models", false},
+	{"/v1/models", []string{"get"}, "inference", "List models", true},
 	{"/v1/embeddings", []string{"post"}, "inference", "Embeddings", false},
 
 	// ---- MCP / VCS ----
@@ -144,8 +144,9 @@ var apiEndpoints = []apiEndpoint{
 	{"/admin/api-keys/{id}", []string{"get", "patch", "delete"}, "admin", "API key detail / update / revoke ({id}/revoke)", false},
 	{"/admin/keys/health", []string{"get"}, "admin", "API key hygiene alerts (expiring/idle)", false},
 	{"/admin/providers", []string{"get", "post"}, "admin", "List / upsert providers", false},
-	{"/admin/providers/{name}", []string{"get", "put", "delete"}, "admin", "Provider detail / update / delete", false},
-	{"/admin/providers/slo", []string{"get"}, "admin", "Provider SLOs", false},
+	{"/admin/providers/{name}", []string{"delete"}, "admin", "Delete a provider", false},
+	{"/admin/providers/slo", []string{"get", "post", "delete"}, "admin", "List, upsert, or delete provider SLOs", false},
+	{"/admin/models", []string{"get"}, "models", "Normalized admin model inventory with provider freshness and partial failures", false},
 	{"/admin/chat-test/targets", []string{"get"}, "admin", "List Chat Completions test targets across routing, providers, Text2SQL, and MCP", false},
 	{"/admin/chat-test/run", []string{"post"}, "admin", "Run a real /v1/chat/completions test through the gateway pipeline", false},
 
@@ -625,6 +626,37 @@ func enrichOpenAPIOperation(route, method string, op map[string]any) {
 		responses["200"] = successResponse("NavigationResponse")
 	case "get /admin/ui-bootstrap":
 		responses["200"] = successResponse("UIBootstrapResponse")
+	case "get /admin/providers":
+		responses["200"] = successResponse("ProviderListResponse")
+	case "get /admin/models":
+		op["parameters"] = []any{
+			map[string]any{
+				"name": "provider", "in": "query", "required": false,
+				"description": "Exact provider name. The filter is applied by the gateway and is not forwarded upstream.",
+				"schema":      map[string]any{"type": "string"},
+			},
+			map[string]any{
+				"name": "model", "in": "query", "required": false,
+				"description": "Exact model ID. IDs containing slashes are supported because this is a query parameter.",
+				"schema":      map[string]any{"type": "string"},
+			},
+		}
+		responses["200"] = successResponse("AdminModelsResponse")
+	case "get /admin/providers/slo":
+		op["parameters"] = []any{map[string]any{
+			"name": "window", "in": "query", "required": false,
+			"description": "Health lookback window. Supports 1h, 6h, 24h/1d, 7d, 30d, or a Go duration.",
+			"schema":      map[string]any{"type": "string", "default": "1h"},
+		}}
+		responses["200"] = successResponse("ProviderSLOResponse")
+	case "post /admin/providers/slo":
+		op["requestBody"] = requestBody("ProviderSLOWriteRequest")
+		responses["201"] = map[string]any{"description": "Created", "content": jsonContent(schemaRef("ProviderSLOWriteResponse"))}
+	case "delete /admin/providers/slo":
+		op["parameters"] = []any{map[string]any{
+			"name": "provider", "in": "query", "required": true, "schema": map[string]any{"type": "string", "minLength": 1},
+		}}
+		responses["200"] = successResponse("ProviderSLODeleteResponse")
 	case "get /admin/stats":
 		responses["200"] = successResponse("AdminStatsResponse")
 	case "get /admin/ops/status":
@@ -645,6 +677,21 @@ func enrichOpenAPIOperation(route, method string, op map[string]any) {
 			},
 		}
 		responses["200"] = successResponse("RoutingHealthResponse")
+	case "get /admin/models/quality":
+		op["parameters"] = []any{map[string]any{
+			"name": "window", "in": "query", "required": false,
+			"description": "Quality lookback window. Supports 1h, 6h, 24h/1d, 7d, 30d, or a Go duration.",
+			"schema":      map[string]any{"type": "string", "default": "30d"},
+		}}
+		responses["200"] = successResponse("ModelQualityResponse")
+	case "get /admin/pricing":
+		op["parameters"] = []any{
+			map[string]any{"name": "model", "in": "query", "required": false, "schema": map[string]any{"type": "string"}},
+			map[string]any{"name": "limit", "in": "query", "required": false, "schema": map[string]any{"type": "integer", "minimum": 1, "maximum": 200, "default": 50}},
+		}
+		responses["200"] = successResponse("PricingResponse")
+	case "get /admin/model-tags", "get /v1/model-tags":
+		responses["200"] = successResponse("ModelUsageTagsResponse")
 	default:
 		return
 	}
@@ -709,7 +756,208 @@ func appUIOpenAPISchemas() map[string]any {
 	for name, schema := range operationalHealthOpenAPISchemas() {
 		schemas[name] = schema
 	}
+	for name, schema := range modelCatalogOpenAPISchemas() {
+		schemas[name] = schema
+	}
 	return schemas
+}
+
+// modelCatalogOpenAPISchemas documents the provider/model read contracts used by the
+// Gateway inventory preview. These are intentionally explicit so generated clients do not
+// infer unknown response bodies for the core read APIs.
+func modelCatalogOpenAPISchemas() map[string]any {
+	modelSource := map[string]any{"type": "string", "enum": []string{"live", "cache", "agent_route"}}
+	return map[string]any{
+		"ProviderPublic": map[string]any{
+			"type": "object", "additionalProperties": false,
+			"required": []string{"name", "base_url", "api_key_configured", "timeout_ms", "enabled", "model_patterns", "failover_group", "priority", "created_at"},
+			"properties": map[string]any{
+				"name": map[string]any{"type": "string"}, "base_url": map[string]any{"type": "string"},
+				"api_key_configured": map[string]any{"type": "boolean"}, "timeout_ms": map[string]any{"type": "integer"},
+				"enabled": map[string]any{"type": "boolean"}, "model_patterns": map[string]any{"type": "string"},
+				"failover_group": map[string]any{"type": "string"}, "priority": map[string]any{"type": "integer", "minimum": 1},
+				"created_at": map[string]any{"type": "string", "format": "date-time"},
+			},
+		},
+		"ProviderListResponse": map[string]any{
+			"type": "object", "additionalProperties": false, "required": []string{"providers"},
+			"properties": map[string]any{"providers": map[string]any{"type": "array", "items": schemaRef("ProviderPublic")}},
+		},
+		"AdminModelDeprecation": map[string]any{
+			"type": "object", "additionalProperties": false,
+			"required": []string{"id", "model_glob", "replacement", "sunset_date", "message", "sunset_reached", "retired", "action"},
+			"properties": map[string]any{
+				"id": map[string]any{"type": "string"}, "model_glob": map[string]any{"type": "string"},
+				"replacement": map[string]any{"type": "string"}, "sunset_date": map[string]any{"type": "string"},
+				"message": map[string]any{"type": "string"}, "sunset_reached": map[string]any{"type": "boolean"},
+				"retired": map[string]any{"type": "boolean"}, "action": map[string]any{"type": "string", "enum": []string{"warn", "rewrite", "block"}},
+			},
+		},
+		"AdminModel": map[string]any{
+			"type": "object", "additionalProperties": false,
+			"required": []string{"id", "provider", "object", "owned_by", "created", "source", "virtual", "stale", "fetched_at", "deprecation"},
+			"properties": map[string]any{
+				"id": map[string]any{"type": "string"}, "provider": map[string]any{"type": "string"},
+				"object": map[string]any{"type": "string"}, "owned_by": map[string]any{"type": "string"},
+				"created": map[string]any{"type": "integer", "format": "int64", "nullable": true}, "source": modelSource,
+				"virtual": map[string]any{"type": "boolean"}, "stale": map[string]any{"type": "boolean"},
+				"fetched_at":  map[string]any{"type": "string", "format": "date-time"},
+				"deprecation": map[string]any{"allOf": []any{schemaRef("AdminModelDeprecation")}, "nullable": true},
+			},
+		},
+		"AdminModelProvider": map[string]any{
+			"type": "object", "additionalProperties": false,
+			"required": []string{"provider", "status", "source", "model_count", "stale"},
+			"properties": map[string]any{
+				"provider": map[string]any{"type": "string"}, "status": map[string]any{"type": "string", "enum": []string{"ok", "failed", "skipped"}},
+				"source": modelSource, "model_count": map[string]any{"type": "integer", "minimum": 0},
+				"fetched_at": map[string]any{"type": "string", "format": "date-time"}, "stale": map[string]any{"type": "boolean"},
+			},
+		},
+		"AdminModelPartialFailure": map[string]any{
+			"type": "object", "additionalProperties": false, "required": []string{"provider", "code", "message"},
+			"properties": map[string]any{
+				"provider": map[string]any{"type": "string"}, "code": map[string]any{"type": "string"}, "message": map[string]any{"type": "string"},
+			},
+		},
+		"AdminModelsResponse": map[string]any{
+			"type": "object", "additionalProperties": false,
+			"required": []string{"request_id", "generated_at", "models", "providers", "partial_failures"},
+			"properties": map[string]any{
+				"request_id": map[string]any{"type": "string"}, "generated_at": map[string]any{"type": "string", "format": "date-time"},
+				"models":           map[string]any{"type": "array", "items": schemaRef("AdminModel")},
+				"providers":        map[string]any{"type": "array", "items": schemaRef("AdminModelProvider")},
+				"partial_failures": map[string]any{"type": "array", "items": schemaRef("AdminModelPartialFailure")},
+			},
+		},
+		"ProviderSLO": map[string]any{
+			"type": "object", "additionalProperties": false,
+			"required": []string{"provider", "availability_target", "p95_latency_target_ms", "error_rate_target", "fallback_rate_target", "enabled", "note", "updated_at"},
+			"properties": map[string]any{
+				"provider": map[string]any{"type": "string"}, "availability_target": map[string]any{"type": "number"},
+				"p95_latency_target_ms": map[string]any{"type": "integer", "format": "int64"},
+				"error_rate_target":     map[string]any{"type": "number"},
+				"fallback_rate_target":  map[string]any{"type": "number"},
+				"enabled":               map[string]any{"type": "boolean"}, "note": map[string]any{"type": "string"},
+				"updated_at": map[string]any{"type": "string"},
+			},
+		},
+		"ProviderSLOMetric": map[string]any{
+			"type": "object", "additionalProperties": false, "required": []string{"target", "actual", "breached", "enforced"},
+			"properties": map[string]any{
+				"target": map[string]any{"type": "number"}, "actual": map[string]any{"type": "number"},
+				"breached": map[string]any{"type": "boolean"}, "enforced": map[string]any{"type": "boolean"},
+			},
+		},
+		"ProviderSLOEvaluation": map[string]any{
+			"type": "object", "additionalProperties": false,
+			"required": []string{"provider", "requests", "enabled", "breached", "metrics"},
+			"properties": map[string]any{
+				"provider": map[string]any{"type": "string"}, "requests": map[string]any{"type": "integer", "format": "int64", "minimum": 0},
+				"enabled": map[string]any{"type": "boolean"}, "breached": map[string]any{"type": "boolean"},
+				"metrics": map[string]any{"type": "object", "additionalProperties": schemaRef("ProviderSLOMetric")},
+			},
+		},
+		"ProviderSLOResponse": map[string]any{
+			"type": "object", "additionalProperties": false, "required": []string{"slos", "evaluations", "since"},
+			"properties": map[string]any{
+				"slos":        map[string]any{"type": "array", "items": schemaRef("ProviderSLO")},
+				"evaluations": map[string]any{"type": "array", "items": schemaRef("ProviderSLOEvaluation")},
+				"since":       map[string]any{"type": "string", "format": "date-time"},
+			},
+		},
+		"ProviderSLOWriteRequest": map[string]any{
+			"type": "object", "additionalProperties": false, "required": []string{"provider"},
+			"properties": map[string]any{
+				"provider":              map[string]any{"type": "string", "minLength": 1},
+				"availability_target":   map[string]any{"type": "number"},
+				"p95_latency_target_ms": map[string]any{"type": "integer", "format": "int64"},
+				"error_rate_target":     map[string]any{"type": "number"},
+				"fallback_rate_target":  map[string]any{"type": "number"},
+				"enabled":               map[string]any{"type": "boolean"}, "note": map[string]any{"type": "string"},
+			},
+		},
+		"ProviderSLOWriteResponse": map[string]any{
+			"type": "object", "additionalProperties": false, "required": []string{"slo"},
+			"properties": map[string]any{"slo": schemaRef("ProviderSLO")},
+		},
+		"ProviderSLODeleteResponse": map[string]any{
+			"type": "object", "additionalProperties": false, "required": []string{"provider", "status"},
+			"properties": map[string]any{
+				"provider": map[string]any{"type": "string"}, "status": map[string]any{"type": "string", "enum": []string{"deleted"}},
+			},
+		},
+		"CategoryScore": map[string]any{
+			"type": "object", "additionalProperties": false, "required": []string{"pass_rate", "samples"},
+			"properties": map[string]any{
+				"pass_rate": map[string]any{"type": "number", "minimum": 0, "maximum": 1},
+				"samples":   map[string]any{"type": "integer", "format": "int64", "minimum": 0},
+			},
+		},
+		"ModelQualityScore": map[string]any{
+			"type": "object", "additionalProperties": false,
+			"required": []string{"model", "requests", "success_rate", "golden_pass_rate", "golden_samples", "eval_pass_rate", "eval_samples", "categories", "quality_score"},
+			"properties": map[string]any{
+				"model": map[string]any{"type": "string"}, "requests": map[string]any{"type": "integer", "format": "int64", "minimum": 0},
+				"success_rate":     map[string]any{"type": "number", "minimum": 0, "maximum": 1},
+				"golden_pass_rate": map[string]any{"type": "number", "minimum": 0, "maximum": 1},
+				"golden_samples":   map[string]any{"type": "integer", "format": "int64", "minimum": 0},
+				"eval_pass_rate":   map[string]any{"type": "number", "minimum": 0, "maximum": 1},
+				"eval_samples":     map[string]any{"type": "integer", "format": "int64", "minimum": 0},
+				"categories":       map[string]any{"type": "object", "additionalProperties": schemaRef("CategoryScore")},
+				"quality_score":    map[string]any{"type": "number", "minimum": 0, "maximum": 100},
+			},
+		},
+		"ModelQualityResponse": map[string]any{
+			"type": "object", "additionalProperties": false, "required": []string{"since", "models", "categories"},
+			"properties": map[string]any{
+				"since":      map[string]any{"type": "string", "format": "date-time"},
+				"models":     map[string]any{"type": "array", "items": schemaRef("ModelQualityScore")},
+				"categories": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+			},
+		},
+		"ModelPrice": map[string]any{
+			"type": "object", "additionalProperties": false,
+			"required": []string{"input_krw_per_1m", "output_krw_per_1m", "cached_input_krw_per_1m"},
+			"properties": map[string]any{
+				"input_krw_per_1m":        map[string]any{"type": "number"},
+				"output_krw_per_1m":       map[string]any{"type": "number"},
+				"cached_input_krw_per_1m": map[string]any{"type": "number"},
+			},
+		},
+		"ModelPricingVersion": map[string]any{
+			"type": "object", "additionalProperties": false,
+			"required": []string{"id", "model", "input_krw_per_1m", "output_krw_per_1m", "cached_input_krw_per_1m", "source", "note", "created_at"},
+			"properties": map[string]any{
+				"id": map[string]any{"type": "string"}, "model": map[string]any{"type": "string"},
+				"input_krw_per_1m":        map[string]any{"type": "number"},
+				"output_krw_per_1m":       map[string]any{"type": "number"},
+				"cached_input_krw_per_1m": map[string]any{"type": "number"},
+				"source":                  map[string]any{"type": "string"}, "note": map[string]any{"type": "string"},
+				"created_at": map[string]any{"type": "string", "format": "date-time"},
+			},
+		},
+		"PricingResponse": map[string]any{
+			"type": "object", "additionalProperties": false, "required": []string{"effective", "versions"},
+			"properties": map[string]any{
+				"effective": map[string]any{"type": "object", "additionalProperties": schemaRef("ModelPrice")},
+				"versions":  map[string]any{"type": "array", "items": schemaRef("ModelPricingVersion")},
+			},
+		},
+		"ModelUsageTag": map[string]any{
+			"type": "object", "additionalProperties": false,
+			"required": []string{"model", "good_for", "avoid_for", "risk_note", "updated_by", "updated_at"},
+			"properties": map[string]any{
+				"model": map[string]any{"type": "string"}, "good_for": map[string]any{"type": "string"},
+				"avoid_for": map[string]any{"type": "string"}, "risk_note": map[string]any{"type": "string"},
+				"updated_by": map[string]any{"type": "string"}, "updated_at": map[string]any{"type": "string", "format": "date-time"},
+			},
+		},
+		"ModelUsageTagsResponse": map[string]any{
+			"type": "object", "additionalProperties": false, "required": []string{"tags"},
+			"properties": map[string]any{"tags": map[string]any{"type": "array", "items": schemaRef("ModelUsageTag")}},
+		},
+	}
 }
 
 // operationalHealthOpenAPISchemas documents the existing read-only APIs used by

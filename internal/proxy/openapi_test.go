@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -130,7 +131,11 @@ func assertOpenAPIContract(t *testing.T, spec map[string]any) {
 		"UIAuthentication", "UISystemStatus", "UIBootstrapResponse", "SettingWriteRequest",
 		"SettingBatchItem", "SettingsBatchRequest", "SettingsBatchResponse", "AdminSettingView",
 		"ReadyResponse", "ReadinessFailureResponse", "AdminStatsResponse", "OpsStatus", "OpsStatusPartialFailure", "OpsRiskResponse", "ProviderHealthScore",
-		"RoutingHealthResponse", "RoutingBreakerSummary",
+		"RoutingHealthResponse", "RoutingBreakerSummary", "ProviderPublic", "ProviderListResponse",
+		"AdminModel", "AdminModelDeprecation", "AdminModelProvider", "AdminModelPartialFailure", "AdminModelsResponse",
+		"ProviderSLO", "ProviderSLOResponse", "ProviderSLOWriteRequest", "ProviderSLOWriteResponse", "ProviderSLODeleteResponse",
+		"ModelQualityScore", "ModelQualityResponse", "ModelPrice", "ModelPricingVersion", "PricingResponse",
+		"ModelUsageTag", "ModelUsageTagsResponse",
 	} {
 		if _, ok := schemas[required]; !ok {
 			t.Errorf("components.schemas missing %s", required)
@@ -177,6 +182,26 @@ func assertOpenAPIContract(t *testing.T, spec map[string]any) {
 	assertJSONOperationSchema(t, paths, "/admin/routing/health", "get", "200", "RoutingHealthResponse")
 	assertOpenAPIParameter(t, paths, "/admin/routing/health", "get", "query", "window")
 	assertOpenAPIParameter(t, paths, "/admin/routing/health", "get", "query", "threshold")
+	assertJSONOperationSchema(t, paths, "/admin/providers", "get", "200", "ProviderListResponse")
+	assertJSONOperationSchema(t, paths, "/admin/models", "get", "200", "AdminModelsResponse")
+	assertOpenAPIParameter(t, paths, "/admin/models", "get", "query", "provider")
+	assertOpenAPIParameter(t, paths, "/admin/models", "get", "query", "model")
+	assertJSONOperationSchema(t, paths, "/admin/providers/slo", "get", "200", "ProviderSLOResponse")
+	assertOpenAPIParameter(t, paths, "/admin/providers/slo", "get", "query", "window")
+	assertJSONRequestSchema(t, paths, "/admin/providers/slo", "post", "ProviderSLOWriteRequest")
+	assertJSONOperationSchema(t, paths, "/admin/providers/slo", "post", "201", "ProviderSLOWriteResponse")
+	assertOpenAPIParameter(t, paths, "/admin/providers/slo", "delete", "query", "provider")
+	assertJSONOperationSchema(t, paths, "/admin/providers/slo", "delete", "200", "ProviderSLODeleteResponse")
+	assertJSONOperationSchema(t, paths, "/admin/models/quality", "get", "200", "ModelQualityResponse")
+	assertOpenAPIParameter(t, paths, "/admin/models/quality", "get", "query", "window")
+	assertJSONOperationSchema(t, paths, "/admin/pricing", "get", "200", "PricingResponse")
+	assertOpenAPIParameter(t, paths, "/admin/pricing", "get", "query", "model")
+	assertOpenAPIParameter(t, paths, "/admin/pricing", "get", "query", "limit")
+	assertJSONOperationSchema(t, paths, "/admin/model-tags", "get", "200", "ModelUsageTagsResponse")
+	assertJSONOperationSchema(t, paths, "/v1/model-tags", "get", "200", "ModelUsageTagsResponse")
+	assertOpenAPIMethods(t, paths, "/admin/providers/{name}", "delete")
+	assertOpenAPIMethods(t, paths, "/admin/providers/slo", "delete", "get", "post")
+	assertOpenAPIPublic(t, paths, "/v1/models", "get")
 	assertJSONOperationSchema(t, paths, "/auth/sso/exchange", "post", "200", "AuthTokenResponse")
 	assertJSONRequestSchema(t, paths, "/auth/sso/exchange", "post", "SSOExchangeRequest")
 	assertJSONOperationSchema(t, paths, "/auth/keycloak/logout", "post", "200", "KeycloakLogoutResponse")
@@ -192,6 +217,31 @@ func assertOpenAPIContract(t *testing.T, spec map[string]any) {
 		if got["$ref"] != "#/components/schemas/"+want {
 			t.Errorf("UIBootstrapResponse.%s schema = %v, want %s", field, got, want)
 		}
+	}
+}
+
+func assertOpenAPIMethods(t *testing.T, paths map[string]any, route string, expected ...string) {
+	t.Helper()
+	pathItem, _ := paths[route].(map[string]any)
+	got := make([]string, 0, len(pathItem))
+	for method, operation := range pathItem {
+		if _, ok := operation.(map[string]any); ok {
+			got = append(got, method)
+		}
+	}
+	sort.Strings(got)
+	sort.Strings(expected)
+	if strings.Join(got, ",") != strings.Join(expected, ",") {
+		t.Errorf("%s methods = %v, want %v", route, got, expected)
+	}
+}
+
+func assertOpenAPIPublic(t *testing.T, paths map[string]any, route, method string) {
+	t.Helper()
+	pathItem, _ := paths[route].(map[string]any)
+	op, _ := pathItem[method].(map[string]any)
+	if _, secured := op["security"]; secured {
+		t.Errorf("%s %s unexpectedly requires OpenAPI bearerAuth", method, route)
 	}
 }
 

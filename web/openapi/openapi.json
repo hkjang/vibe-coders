@@ -1,6 +1,213 @@
 {
   "components": {
     "schemas": {
+      "AdminModel": {
+        "additionalProperties": false,
+        "properties": {
+          "created": {
+            "format": "int64",
+            "nullable": true,
+            "type": "integer"
+          },
+          "deprecation": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AdminModelDeprecation"
+              }
+            ],
+            "nullable": true
+          },
+          "fetched_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "object": {
+            "type": "string"
+          },
+          "owned_by": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "source": {
+            "enum": [
+              "live",
+              "cache",
+              "agent_route"
+            ],
+            "type": "string"
+          },
+          "stale": {
+            "type": "boolean"
+          },
+          "virtual": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "provider",
+          "object",
+          "owned_by",
+          "created",
+          "source",
+          "virtual",
+          "stale",
+          "fetched_at",
+          "deprecation"
+        ],
+        "type": "object"
+      },
+      "AdminModelDeprecation": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "warn",
+              "rewrite",
+              "block"
+            ],
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "model_glob": {
+            "type": "string"
+          },
+          "replacement": {
+            "type": "string"
+          },
+          "retired": {
+            "type": "boolean"
+          },
+          "sunset_date": {
+            "type": "string"
+          },
+          "sunset_reached": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "model_glob",
+          "replacement",
+          "sunset_date",
+          "message",
+          "sunset_reached",
+          "retired",
+          "action"
+        ],
+        "type": "object"
+      },
+      "AdminModelPartialFailure": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "code",
+          "message"
+        ],
+        "type": "object"
+      },
+      "AdminModelProvider": {
+        "additionalProperties": false,
+        "properties": {
+          "fetched_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "model_count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "source": {
+            "enum": [
+              "live",
+              "cache",
+              "agent_route"
+            ],
+            "type": "string"
+          },
+          "stale": {
+            "type": "boolean"
+          },
+          "status": {
+            "enum": [
+              "ok",
+              "failed",
+              "skipped"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "status",
+          "source",
+          "model_count",
+          "stale"
+        ],
+        "type": "object"
+      },
+      "AdminModelsResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "generated_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "models": {
+            "items": {
+              "$ref": "#/components/schemas/AdminModel"
+            },
+            "type": "array"
+          },
+          "partial_failures": {
+            "items": {
+              "$ref": "#/components/schemas/AdminModelPartialFailure"
+            },
+            "type": "array"
+          },
+          "providers": {
+            "items": {
+              "$ref": "#/components/schemas/AdminModelProvider"
+            },
+            "type": "array"
+          },
+          "request_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "request_id",
+          "generated_at",
+          "models",
+          "providers",
+          "partial_failures"
+        ],
+        "type": "object"
+      },
       "AdminSettingView": {
         "additionalProperties": false,
         "properties": {
@@ -328,6 +535,26 @@
         ],
         "type": "object"
       },
+      "CategoryScore": {
+        "additionalProperties": false,
+        "properties": {
+          "pass_rate": {
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
+          },
+          "samples": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "pass_rate",
+          "samples"
+        ],
+        "type": "object"
+      },
       "EmbeddingCacheStats": {
         "additionalProperties": false,
         "properties": {
@@ -584,6 +811,203 @@
           "fallback_enabled",
           "minimum_api_version",
           "available"
+        ],
+        "type": "object"
+      },
+      "ModelPrice": {
+        "additionalProperties": false,
+        "properties": {
+          "cached_input_krw_per_1m": {
+            "type": "number"
+          },
+          "input_krw_per_1m": {
+            "type": "number"
+          },
+          "output_krw_per_1m": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "input_krw_per_1m",
+          "output_krw_per_1m",
+          "cached_input_krw_per_1m"
+        ],
+        "type": "object"
+      },
+      "ModelPricingVersion": {
+        "additionalProperties": false,
+        "properties": {
+          "cached_input_krw_per_1m": {
+            "type": "number"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "input_krw_per_1m": {
+            "type": "number"
+          },
+          "model": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          },
+          "output_krw_per_1m": {
+            "type": "number"
+          },
+          "source": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "model",
+          "input_krw_per_1m",
+          "output_krw_per_1m",
+          "cached_input_krw_per_1m",
+          "source",
+          "note",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "ModelQualityResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "categories": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "models": {
+            "items": {
+              "$ref": "#/components/schemas/ModelQualityScore"
+            },
+            "type": "array"
+          },
+          "since": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "since",
+          "models",
+          "categories"
+        ],
+        "type": "object"
+      },
+      "ModelQualityScore": {
+        "additionalProperties": false,
+        "properties": {
+          "categories": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/CategoryScore"
+            },
+            "type": "object"
+          },
+          "eval_pass_rate": {
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
+          },
+          "eval_samples": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "golden_pass_rate": {
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
+          },
+          "golden_samples": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "model": {
+            "type": "string"
+          },
+          "quality_score": {
+            "maximum": 100,
+            "minimum": 0,
+            "type": "number"
+          },
+          "requests": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "success_rate": {
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
+          }
+        },
+        "required": [
+          "model",
+          "requests",
+          "success_rate",
+          "golden_pass_rate",
+          "golden_samples",
+          "eval_pass_rate",
+          "eval_samples",
+          "categories",
+          "quality_score"
+        ],
+        "type": "object"
+      },
+      "ModelUsageTag": {
+        "additionalProperties": false,
+        "properties": {
+          "avoid_for": {
+            "type": "string"
+          },
+          "good_for": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "risk_note": {
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "updated_by": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "model",
+          "good_for",
+          "avoid_for",
+          "risk_note",
+          "updated_by",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "ModelUsageTagsResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "tags": {
+            "items": {
+              "$ref": "#/components/schemas/ModelUsageTag"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "tags"
         ],
         "type": "object"
       },
@@ -895,6 +1319,28 @@
         ],
         "type": "object"
       },
+      "PricingResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "effective": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ModelPrice"
+            },
+            "type": "object"
+          },
+          "versions": {
+            "items": {
+              "$ref": "#/components/schemas/ModelPricingVersion"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "effective",
+          "versions"
+        ],
+        "type": "object"
+      },
       "ProviderHealthAlert": {
         "additionalProperties": false,
         "properties": {
@@ -1047,6 +1493,255 @@
           "since",
           "until",
           "providers"
+        ],
+        "type": "object"
+      },
+      "ProviderListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "providers": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderPublic"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "providers"
+        ],
+        "type": "object"
+      },
+      "ProviderPublic": {
+        "additionalProperties": false,
+        "properties": {
+          "api_key_configured": {
+            "type": "boolean"
+          },
+          "base_url": {
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "failover_group": {
+            "type": "string"
+          },
+          "model_patterns": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "priority": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "timeout_ms": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "base_url",
+          "api_key_configured",
+          "timeout_ms",
+          "enabled",
+          "model_patterns",
+          "failover_group",
+          "priority",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "ProviderSLO": {
+        "additionalProperties": false,
+        "properties": {
+          "availability_target": {
+            "type": "number"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "error_rate_target": {
+            "type": "number"
+          },
+          "fallback_rate_target": {
+            "type": "number"
+          },
+          "note": {
+            "type": "string"
+          },
+          "p95_latency_target_ms": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "availability_target",
+          "p95_latency_target_ms",
+          "error_rate_target",
+          "fallback_rate_target",
+          "enabled",
+          "note",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "ProviderSLODeleteResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "provider": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "deleted"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "status"
+        ],
+        "type": "object"
+      },
+      "ProviderSLOEvaluation": {
+        "additionalProperties": false,
+        "properties": {
+          "breached": {
+            "type": "boolean"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "metrics": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ProviderSLOMetric"
+            },
+            "type": "object"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "requests": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "provider",
+          "requests",
+          "enabled",
+          "breached",
+          "metrics"
+        ],
+        "type": "object"
+      },
+      "ProviderSLOMetric": {
+        "additionalProperties": false,
+        "properties": {
+          "actual": {
+            "type": "number"
+          },
+          "breached": {
+            "type": "boolean"
+          },
+          "enforced": {
+            "type": "boolean"
+          },
+          "target": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "target",
+          "actual",
+          "breached",
+          "enforced"
+        ],
+        "type": "object"
+      },
+      "ProviderSLOResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "evaluations": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderSLOEvaluation"
+            },
+            "type": "array"
+          },
+          "since": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "slos": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderSLO"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "slos",
+          "evaluations",
+          "since"
+        ],
+        "type": "object"
+      },
+      "ProviderSLOWriteRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "availability_target": {
+            "type": "number"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "error_rate_target": {
+            "type": "number"
+          },
+          "fallback_rate_target": {
+            "type": "number"
+          },
+          "note": {
+            "type": "string"
+          },
+          "p95_latency_target_ms": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "provider": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider"
+        ],
+        "type": "object"
+      },
+      "ProviderSLOWriteResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "slo": {
+            "$ref": "#/components/schemas/ProviderSLO"
+          }
+        },
+        "required": [
+          "slo"
         ],
         "type": "object"
       },
@@ -5355,7 +6050,24 @@
         "operationId": "get__admin_model_tags",
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelUsageTagsResponse"
+                }
+              }
+            },
             "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -5410,6 +6122,62 @@
           }
         ],
         "summary": "Delete a model usage tag",
+        "tags": [
+          "models"
+        ]
+      }
+    },
+    "/admin/models": {
+      "get": {
+        "operationId": "get__admin_models",
+        "parameters": [
+          {
+            "description": "Exact provider name. The filter is applied by the gateway and is not forwarded upstream.",
+            "in": "query",
+            "name": "provider",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Exact model ID. IDs containing slashes are supported because this is a query parameter.",
+            "in": "query",
+            "name": "model",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminModelsResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Normalized admin model inventory with provider freshness and partial failures",
         "tags": [
           "models"
         ]
@@ -5490,9 +6258,38 @@
     "/admin/models/quality": {
       "get": {
         "operationId": "get__admin_models_quality",
+        "parameters": [
+          {
+            "description": "Quality lookback window. Supports 1h, 6h, 24h/1d, 7d, 30d, or a Go duration.",
+            "in": "query",
+            "name": "window",
+            "required": false,
+            "schema": {
+              "default": "30d",
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelQualityResponse"
+                }
+              }
+            },
             "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -6327,9 +7124,47 @@
     "/admin/pricing": {
       "get": {
         "operationId": "get__admin_pricing",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "model",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PricingResponse"
+                }
+              }
+            },
             "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -6818,7 +7653,24 @@
         "operationId": "get__admin_providers",
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderListResponse"
+                }
+              }
+            },
             "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -6850,11 +7702,39 @@
       }
     },
     "/admin/providers/slo": {
-      "get": {
-        "operationId": "get__admin_providers_slo",
+      "delete": {
+        "operationId": "delete__admin_providers_slo",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "provider",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderSLODeleteResponse"
+                }
+              }
+            },
             "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -6862,7 +7742,97 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Provider SLOs",
+        "summary": "List, upsert, or delete provider SLOs",
+        "tags": [
+          "admin"
+        ]
+      },
+      "get": {
+        "operationId": "get__admin_providers_slo",
+        "parameters": [
+          {
+            "description": "Health lookback window. Supports 1h, 6h, 24h/1d, 7d, 30d, or a Go duration.",
+            "in": "query",
+            "name": "window",
+            "required": false,
+            "schema": {
+              "default": "1h",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderSLOResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List, upsert, or delete provider SLOs",
+        "tags": [
+          "admin"
+        ]
+      },
+      "post": {
+        "operationId": "post__admin_providers_slo",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProviderSLOWriteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderSLOWriteResponse"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List, upsert, or delete provider SLOs",
         "tags": [
           "admin"
         ]
@@ -6891,61 +7861,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Provider detail / update / delete",
-        "tags": [
-          "admin"
-        ]
-      },
-      "get": {
-        "operationId": "get__admin_providers_name",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "name",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK"
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "summary": "Provider detail / update / delete",
-        "tags": [
-          "admin"
-        ]
-      },
-      "put": {
-        "operationId": "put__admin_providers_name",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "name",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK"
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "summary": "Provider detail / update / delete",
+        "summary": "Delete a provider",
         "tags": [
           "admin"
         ]
@@ -12851,7 +13767,24 @@
         "operationId": "get__v1_model_tags",
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelUsageTagsResponse"
+                }
+              }
+            },
             "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -12873,11 +13806,6 @@
             "description": "OK"
           }
         },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
         "summary": "List models",
         "tags": [
           "inference"

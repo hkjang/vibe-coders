@@ -6,7 +6,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"vibe-coders/internal/store"
 )
@@ -20,6 +22,9 @@ func TestAggregatedModelsMergesAllProviders(t *testing.T) {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
+		if r.URL.RawQuery != "vendor_hint=full" {
+			t.Errorf("openai model query = %q, want public query preserved", r.URL.RawQuery)
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"object":"list","data":[{"id":"gpt-4.1","object":"model"},{"id":"gpt-4.1-mini","object":"model"}]}`))
 	}))
@@ -28,6 +33,9 @@ func TestAggregatedModelsMergesAllProviders(t *testing.T) {
 		if r.URL.Path != "/v1/models" {
 			w.WriteHeader(http.StatusNotFound)
 			return
+		}
+		if r.URL.RawQuery != "vendor_hint=full" {
+			t.Errorf("anthropic model query = %q, want public query preserved", r.URL.RawQuery)
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"object":"list","data":[{"id":"claude-opus-4-8","object":"model","owned_by":"anthropic"}]}`))
@@ -64,7 +72,7 @@ func TestAggregatedModelsMergesAllProviders(t *testing.T) {
 	proxy := httptest.NewServer(server.Routes())
 	defer proxy.Close()
 
-	resp, err := http.Get(proxy.URL + "/v1/models")
+	resp, err := http.Get(proxy.URL + "/v1/models?vendor_hint=full")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,4 +128,16 @@ func keysOfAny(m map[string]map[string]any) []string {
 		out = append(out, k)
 	}
 	return out
+}
+
+func TestFetchProviderModelsRejectsOversizedCatalog(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"data":[{"id":"` + strings.Repeat("x", maxModelsResponseBytes) + `"}]}`))
+	}))
+	defer upstream.Close()
+
+	server := &Server{client: upstream.Client()}
+	if _, err := server.fetchProviderModels(t.Context(), "oversized", upstream.URL, "secret", time.Second, ""); err == nil || !strings.Contains(err.Error(), "exceeds") {
+		t.Fatalf("oversized catalogue error = %v", err)
+	}
 }
