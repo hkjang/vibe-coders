@@ -66,6 +66,7 @@ func TestListEnabledAgentRouteModelsBoundedProjectsAndSignalsTruncation(t *testi
 		{ID: "a2", VirtualModel: "vibe/agent-two", Enabled: true, AllowedTools: []string{"private-tool"}},
 		{ID: "a3", VirtualModel: "vibe/agent-disabled", Enabled: false},
 		{ID: "a4", VirtualModel: "   ", Enabled: true},
+		{ID: strings.Repeat("i", maxBoundedAgentRouteModelFieldBytes+1), VirtualModel: "vibe/agent-known-with-oversized-id", Enabled: true},
 	} {
 		route.CreatedAt = time.Unix(int64(index+1), 0).UTC().Format(time.RFC3339Nano)
 		if err := db.UpsertAgentRoute(ctx, route); err != nil {
@@ -77,7 +78,7 @@ func TestListEnabledAgentRouteModelsBoundedProjectsAndSignalsTruncation(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !truncated || !overflow || len(models) != 0 {
+	if !truncated || !overflow || len(models) != 1 || models[0].VirtualModel != "vibe/agent-known-with-oversized-id" || models[0].ID != "" {
 		t.Fatalf("bounded model projection = %#v truncated=%v overflow=%v", models, truncated, overflow)
 	}
 
@@ -85,7 +86,28 @@ func TestListEnabledAgentRouteModelsBoundedProjectsAndSignalsTruncation(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !truncated || overflow || len(models) != 2 {
+	if !truncated || overflow || len(models) != 3 {
 		t.Fatalf("full enabled model projection = %#v truncated=%v overflow=%v", models, truncated, overflow)
+	}
+}
+
+func TestListEnabledAgentRouteModelsBoundedInvalidOnly(t *testing.T) {
+	db := openAggTestStore(t)
+	defer db.Close()
+	for _, route := range []AgentRoute{
+		{ID: "blank-model", VirtualModel: "   ", Enabled: true, SystemPrompt: strings.Repeat("private", 10_000)},
+		{ID: "oversized-model", VirtualModel: strings.Repeat("v", maxBoundedAgentRouteModelFieldBytes+1), Enabled: true},
+		{ID: "disabled-model", VirtualModel: "vibe/disabled", Enabled: false},
+	} {
+		if err := db.UpsertAgentRoute(t.Context(), route); err != nil {
+			t.Fatal(err)
+		}
+	}
+	models, truncated, overflow, err := db.ListEnabledAgentRouteModelsBounded(t.Context(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(models) != 0 || !truncated || overflow {
+		t.Fatalf("invalid-only projection = %#v truncated=%v overflow=%v", models, truncated, overflow)
 	}
 }

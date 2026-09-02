@@ -204,6 +204,11 @@ func (s *Server) handleAdminModels(w http.ResponseWriter, r *http.Request) {
 	seenModels := make(map[string]struct{})
 	limiter := newAdminModelsResponseLimiter(providerRef)
 	limiter.limited = agentRoutesProjectionTruncated
+	// A truncated projection means an enabled route outside the known set may shadow any
+	// physical model ID. The response has no "shadow state unknown" representation, so omit
+	// physical rows rather than advertise a route that runtime dispatch could replace. A DB
+	// error deliberately keeps the established partial-result contract below.
+	omitPhysicalModels := agentRoutesErr == nil && agentRoutesProjectionTruncated
 	for _, result := range results {
 		provider := adminModelProvider{
 			Provider: result.config.Name,
@@ -215,7 +220,7 @@ func (s *Server) handleAdminModels(w http.ResponseWriter, r *http.Request) {
 			fetchedAt := result.fetchedAt
 			provider.FetchedAt = &fetchedAt
 		}
-		if result.status == "ok" {
+		if result.status == "ok" && !omitPhysicalModels {
 			for _, catalogModel := range result.models {
 				model := s.adminModelFromCatalog(r.Context(), catalogModel, result, now)
 				if routeID, shadowed := agentRouteShadows[model.ID]; shadowed {

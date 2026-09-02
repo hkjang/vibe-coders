@@ -371,7 +371,15 @@ func TestAdminModelsKeepsPhysicalRowsWhenAgentRouteCatalogFails(t *testing.T) {
 }
 
 func TestAdminModelsUsesBoundedAgentRouteProjection(t *testing.T) {
-	_, db, gateway := newAdminModelsTestServer(t, "")
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"data":[{"id":"physical-model"}]}`)
+	}))
+	defer upstream.Close()
+	server, db, gateway := newAdminModelsTestServer(t, "")
+	addAdminModelsProvider(t, server, db, store.ProviderConfig{
+		Name: "alpha", BaseURL: upstream.URL, TimeoutMS: 1_000, Enabled: true,
+	}, "alpha-key")
 	largePrompt := "private-system-prompt:" + strings.Repeat("x", 2<<20)
 	for _, route := range []store.AgentRoute{
 		{
@@ -386,20 +394,26 @@ func TestAdminModelsUsesBoundedAgentRouteProjection(t *testing.T) {
 			ID: "agent-oversized-model", VirtualModel: strings.Repeat("v", 513), Name: "Oversized", Enabled: true,
 			SystemPrompt: largePrompt,
 		},
+		{
+			ID: strings.Repeat("i", 513), VirtualModel: "vibe/known-oversized-id", Name: "Oversized ID", Enabled: true,
+			SystemPrompt: largePrompt,
+		},
 	} {
 		if err := db.UpsertAgentRoute(t.Context(), route); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	response, body := getAdminModels(t, gateway.URL+"/admin/models?provider=vibe", "")
+	response, body := getAdminModels(t, gateway.URL+"/admin/models", "")
 	if response.StatusCode != http.StatusOK {
 		t.Fatalf("status=%d body=%+v", response.StatusCode, body)
 	}
-	if len(body.Models) != 1 || body.Models[0].ID != "vibe/bounded-agent" || !body.Models[0].Virtual {
+	if len(body.Models) != 2 || body.Models[0].ID != "vibe/bounded-agent" || body.Models[1].ID != "vibe/known-oversized-id" ||
+		!body.Models[0].Virtual || !body.Models[1].Virtual {
 		t.Fatalf("bounded agent route models = %+v", body.Models)
 	}
-	if len(body.Providers) != 1 || body.Providers[0].Provider != "vibe" || body.Providers[0].ModelCount != 1 {
+	if len(body.Providers) != 2 || body.Providers[0].Provider != "alpha" || body.Providers[0].ModelCount != 0 ||
+		body.Providers[1].Provider != "vibe" || body.Providers[1].ModelCount != 2 {
 		t.Fatalf("bounded agent route provider = %+v", body.Providers)
 	}
 	if len(body.PartialFailures) != 1 || body.PartialFailures[0].Code != "models_response_limit_exceeded" {
@@ -409,10 +423,58 @@ func TestAdminModelsUsesBoundedAgentRouteProjection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, forbidden := range []string{"private-system-prompt", "private-upstream", "private-tool", "vibe/disabled-agent", strings.Repeat("v", 513)} {
+	for _, forbidden := range []string{
+		"private-system-prompt", "private-upstream", "private-tool", "physical-model", "vibe/disabled-agent",
+		strings.Repeat("v", 513), strings.Repeat("i", 513),
+	} {
 		if strings.Contains(string(encoded), forbidden) {
 			t.Fatalf("agent route catalogue materialized private/disabled/oversized data %q: %s", forbidden, encoded)
 		}
+	}
+
+	_, physicalFiltered := getAdminModels(t, gateway.URL+"/admin/models?provider=alpha&model=physical-model", "")
+	if len(physicalFiltered.Models) != 0 || len(physicalFiltered.Providers) != 1 ||
+		physicalFiltered.Providers[0].Provider != "alpha" || physicalFiltered.Providers[0].ModelCount != 0 ||
+		len(physicalFiltered.PartialFailures) != 1 || physicalFiltered.PartialFailures[0].Code != "models_response_limit_exceeded" {
+		t.Fatalf("physical filter did not fail closed on unknown route shadows: %+v", physicalFiltered)
+	}
+	_, vibeFiltered := getAdminModels(t, gateway.URL+"/admin/models?provider=vibe", "")
+	if len(vibeFiltered.Models) != 2 || len(vibeFiltered.Providers) != 1 || vibeFiltered.Providers[0].Provider != "vibe" {
+		t.Fatalf("vibe filter lost known virtual models: %+v", vibeFiltered)
+	}
+	_, modelFiltered := getAdminModels(t, gateway.URL+"/admin/models?provider=vibe&model=vibe%2Fbounded-agent", "")
+	if len(modelFiltered.Models) != 1 || modelFiltered.Models[0].ID != "vibe/bounded-agent" ||
+		len(modelFiltered.PartialFailures) != 1 || modelFiltered.PartialFailures[0].Code != "models_response_limit_exceeded" {
+		t.Fatalf("model filter/dedup/truncation semantics changed: %+v", modelFiltered)
+	}
+}
+
+func TestAdminModelsInvalidOnlyAgentProjectionFailsClosed(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"data":[{"id":"physical-model"}]}`)
+	}))
+	defer upstream.Close()
+	server, db, gateway := newAdminModelsTestServer(t, "")
+	addAdminModelsProvider(t, server, db, store.ProviderConfig{
+		Name: "alpha", BaseURL: upstream.URL, TimeoutMS: 1_000, Enabled: true,
+	}, "alpha-key")
+	if err := db.UpsertAgentRoute(t.Context(), store.AgentRoute{
+		ID: "invalid-only", VirtualModel: "   ", Enabled: true, SystemPrompt: strings.Repeat("private", 100_000),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	response, body := getAdminModels(t, gateway.URL+"/admin/models", "")
+	if response.StatusCode != http.StatusOK || len(body.Models) != 0 {
+		t.Fatalf("invalid-only projection advertised uncertain physical rows: status=%d body=%+v", response.StatusCode, body)
+	}
+	if len(body.Providers) != 2 || body.Providers[0].Provider != "alpha" || body.Providers[0].ModelCount != 0 ||
+		body.Providers[1].Provider != "vibe" || body.Providers[1].ModelCount != 0 {
+		t.Fatalf("invalid-only provider summaries = %+v", body.Providers)
+	}
+	if len(body.PartialFailures) != 1 || body.PartialFailures[0].Code != "models_response_limit_exceeded" {
+		t.Fatalf("invalid-only truncation was not reported: %+v", body.PartialFailures)
 	}
 }
 

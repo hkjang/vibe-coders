@@ -102,7 +102,8 @@ func (s *SQLStore) ListEnabledAgentRouteModelsBounded(ctx context.Context, limit
 	}
 	rows, err := s.db.QueryContext(ctx, s.bind(`SELECT
 		SUBSTR(id, 1, ?), SUBSTR(virtual_model, 1, ?),
-		CASE WHEN LENGTH(id) > ? OR LENGTH(virtual_model) > ? THEN 1 ELSE 0 END
+		CASE WHEN LENGTH(id) > ? THEN 1 ELSE 0 END,
+		CASE WHEN LENGTH(virtual_model) > ? THEN 1 ELSE 0 END
 		FROM agent_routes WHERE enabled = 1 ORDER BY created_at DESC, id ASC LIMIT ?`),
 		maxBoundedAgentRouteModelFieldBytes+1, maxBoundedAgentRouteModelFieldBytes+1,
 		maxBoundedAgentRouteModelFieldBytes, maxBoundedAgentRouteModelFieldBytes, limit+1)
@@ -117,8 +118,8 @@ func (s *SQLStore) ListEnabledAgentRouteModelsBounded(ctx context.Context, limit
 	for rows.Next() {
 		rowsSeen++
 		var model AgentRouteModel
-		var oversized int
-		if err := rows.Scan(&model.ID, &model.VirtualModel, &oversized); err != nil {
+		var idOversized, virtualModelOversized int
+		if err := rows.Scan(&model.ID, &model.VirtualModel, &idOversized, &virtualModelOversized); err != nil {
 			return nil, false, false, err
 		}
 		if rowsSeen > limit {
@@ -126,9 +127,15 @@ func (s *SQLStore) ListEnabledAgentRouteModelsBounded(ctx context.Context, limit
 			truncated = true
 			continue
 		}
-		if oversized != 0 || len(model.ID) > maxBoundedAgentRouteModelFieldBytes || len(model.VirtualModel) > maxBoundedAgentRouteModelFieldBytes || strings.TrimSpace(model.VirtualModel) != model.VirtualModel || model.VirtualModel == "" {
+		if virtualModelOversized != 0 || len(model.VirtualModel) > maxBoundedAgentRouteModelFieldBytes || strings.TrimSpace(model.VirtualModel) != model.VirtualModel || model.VirtualModel == "" {
 			truncated = true
 			continue
+		}
+		if idOversized != 0 || len(model.ID) > maxBoundedAgentRouteModelFieldBytes {
+			// The route ID is only descriptive shadow metadata. Keep the valid virtual
+			// model discoverable, mark the projection uncertain, and omit its oversized ID.
+			model.ID = ""
+			truncated = true
 		}
 		models = append(models, model)
 	}
