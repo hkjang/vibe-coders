@@ -70,9 +70,10 @@ var appUIFeatures = []appUIFeature{
 }
 
 var appUIImplementedFeatureIDs = map[string]struct{}{
-	"overview":       {},
-	"gateway.health": {},
-	"system.health":  {},
+	"overview":          {},
+	"gateway.health":    {},
+	"gateway.providers": {},
+	"system.health":     {},
 }
 
 func appUIEnv(name, fallback string) string {

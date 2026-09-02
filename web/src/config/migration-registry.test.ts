@@ -77,7 +77,7 @@ describe("migration registry", () => {
     expect(featureByPath("/routing/rules/decision-1")?.featureId).toBe("routing.rules");
   });
 
-  it("keeps Gateway catalog previews behind the build capability guard until their data screens exist", () => {
+  it("exposes only the implemented Provider preview while Models stays behind the capability guard", () => {
     for (const featureId of ["gateway.providers", "gateway.models"] as const) {
       const feature = migrationRegistry.find((candidate) => candidate.featureId === featureId);
       if (!feature) throw new Error(`${featureId} fixture is missing`);
@@ -92,13 +92,13 @@ describe("migration registry", () => {
         fallbackEnabled: true,
         minimumApiVersion: "v0.82.0",
       });
-      expect(isAppFeatureImplemented(feature.featureId)).toBe(false);
-      expect(resolveFeature(feature, gatewayAdmin, "v0.82.0")).toMatchObject({
-        permitted: true,
-        status: "legacy",
-        readOnly: true,
-        reason: "ui_not_implemented",
-      });
+      const implemented = featureId === "gateway.providers";
+      expect(isAppFeatureImplemented(feature.featureId)).toBe(implemented);
+      expect(resolveFeature(feature, gatewayAdmin, "v0.82.0")).toMatchObject(
+        implemented
+          ? { permitted: true, status: "preview_read_only", readOnly: true }
+          : { permitted: true, status: "legacy", readOnly: true, reason: "ui_not_implemented" },
+      );
     }
   });
 
@@ -133,8 +133,8 @@ describe("migration registry", () => {
   });
 
   it("fails closed when an unimplemented feature is Retired or Legacy fallback is disabled", () => {
-    const provider = migrationRegistry.find((feature) => feature.featureId === "gateway.providers");
-    if (!provider) throw new Error("gateway.providers fixture is missing");
+    const provider = migrationRegistry.find((feature) => feature.featureId === "gateway.models");
+    if (!provider) throw new Error("gateway.models fixture is missing");
     expect(
       resolveFeature({ ...provider, status: "retired", serverAvailable: true }, operator, "v0.80.0"),
     ).toMatchObject({ permitted: false, reason: "ui_not_implemented" });

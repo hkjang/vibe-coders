@@ -59,7 +59,7 @@ func TestAppUIBootstrapAndRuntimeToggle(t *testing.T) {
 		t.Fatalf("legacy route map must be empty when fallback is disabled: %#v", legacyRoutes)
 	}
 	allowed, _ := body["allowed_features"].([]any)
-	wantAllowed := []string{"overview", "gateway.health", "system.health"}
+	wantAllowed := []string{"overview", "gateway.health", "gateway.providers", "system.health"}
 	if len(allowed) != len(wantAllowed) {
 		t.Fatalf("implemented previews allowed without Legacy fallback = %#v, want %v", allowed, wantAllowed)
 	}
@@ -340,8 +340,10 @@ func TestGatewayCatalogFeaturesAreSafeReadOnlyPreviewDefaults(t *testing.T) {
 		if feature.RolloutPercent != 100 || !feature.FallbackEnabled || feature.MinimumAPIVersion != "v0.82.0" {
 			t.Errorf("feature %q rollout contract is incomplete: %+v", id, *feature)
 		}
-		if _, implemented := appUIImplementedFeatureIDs[id]; implemented {
-			t.Errorf("feature %q must stay behind the build capability guard until its data screen is implemented", id)
+		_, implemented := appUIImplementedFeatureIDs[id]
+		wantImplemented := id == "gateway.providers"
+		if implemented != wantImplemented {
+			t.Errorf("feature %q implemented = %v, want %v", id, implemented, wantImplemented)
 		}
 	}
 }

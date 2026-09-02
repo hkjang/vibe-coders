@@ -337,6 +337,7 @@ export interface ResolveFeatureOptions {
 const appImplementedFeatureIds: ReadonlySet<string> = new Set([
   "overview",
   "gateway.health",
+  "gateway.providers",
   "system.health",
 ]);
 

@@ -358,6 +358,65 @@ export const routingHealthSchema = z.object({
   }),
 }) satisfies z.ZodType<GeneratedRoutingHealthResponse>;
 
+export const providerSchema = z.object({
+  name: z.string().min(1),
+  base_url: z.string().min(1),
+  api_key_configured: z.boolean(),
+  timeout_ms: countSchema,
+  enabled: z.boolean(),
+  model_patterns: z.string(),
+  failover_group: z.string(),
+  priority: z.number().int().positive(),
+  created_at: z.string().min(1),
+});
+
+export const providerListSchema = z.object({
+  providers: z.array(providerSchema),
+});
+
+export const providerSLOMetricSchema = z.object({
+  target: z.number().nonnegative(),
+  actual: z.number().nonnegative(),
+  breached: z.boolean(),
+  enforced: z.boolean(),
+});
+
+export const providerSLOSchema = z.object({
+  provider: z.string().min(1),
+  availability_target: z.number().nonnegative(),
+  p95_latency_target_ms: countSchema,
+  error_rate_target: z.number().nonnegative(),
+  fallback_rate_target: z.number().nonnegative(),
+  enabled: z.boolean(),
+  note: z.string(),
+  updated_at: z.string().min(1),
+});
+
+export const providerSLOEvaluationSchema = z.object({
+  provider: z.string().min(1),
+  requests: countSchema,
+  enabled: z.boolean(),
+  breached: z.boolean(),
+  metrics: z.object({
+    availability: providerSLOMetricSchema,
+    p95_latency_ms: providerSLOMetricSchema,
+    error_rate: providerSLOMetricSchema,
+    fallback_rate: providerSLOMetricSchema,
+  }),
+});
+
+export const providerSLOResponseSchema = z.object({
+  slos: z.array(providerSLOSchema),
+  evaluations: z.array(providerSLOEvaluationSchema),
+  since: timestampSchema,
+});
+
+export const providerSLOQuerySchema = z
+  .object({
+    window: z.union([z.enum(["1h", "6h", "24h", "1d", "7d", "30d"]), goDurationSchema]).optional(),
+  })
+  .strict();
+
 export type AuthMe = z.output<typeof authMeSchema>;
 export type AuthUser = z.output<typeof authUserSchema>;
 export type AdminStats = z.output<typeof adminStatsSchema>;
@@ -365,6 +424,12 @@ export type GatewayHealth = z.output<typeof gatewayHealthSchema>;
 export type OpsRisk = z.output<typeof opsRiskSchema>;
 export type OpsRiskResponse = z.output<typeof opsRiskResponseSchema>;
 export type OpsStatus = z.output<typeof opsStatusSchema>;
+export type Provider = z.output<typeof providerSchema>;
+export type ProviderList = z.output<typeof providerListSchema>;
+export type ProviderSLO = z.output<typeof providerSLOSchema>;
+export type ProviderSLOEvaluation = z.output<typeof providerSLOEvaluationSchema>;
+export type ProviderSLOQuery = z.input<typeof providerSLOQuerySchema>;
+export type ProviderSLOResponse = z.output<typeof providerSLOResponseSchema>;
 export type Readiness = z.output<typeof readinessSchema>;
 export type ReadinessFailure = z.output<typeof readinessFailureSchema>;
 export type RoutingHealth = z.output<typeof routingHealthSchema>;

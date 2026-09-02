@@ -40,6 +40,21 @@ const featureRoutes: RouteObject[] = migrationRegistry.map((feature) => {
       },
     };
   }
+  if (feature.featureId === "gateway.providers") {
+    return {
+      path,
+      lazy: async () => {
+        const { ProviderPage } = await import("@/features/gateway/providers/ProviderPage");
+        return {
+          Component: () => (
+            <FeatureRoute feature={feature}>
+              <ProviderPage />
+            </FeatureRoute>
+          ),
+        };
+      },
+    };
+  }
   if (feature.featureId === "system.health") {
     return {
       path,

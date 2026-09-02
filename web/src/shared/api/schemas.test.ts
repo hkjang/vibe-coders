@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { migrationFeatureSchema, uiBootstrapSchema } from "@/shared/api/schemas";
+import {
+  migrationFeatureSchema,
+  providerListSchema,
+  providerSLOResponseSchema,
+  uiBootstrapSchema,
+} from "@/shared/api/schemas";
 
 const validBootstrap = {
   backend_version: "v0.80.0",
@@ -76,5 +81,32 @@ describe("OpenAPI runtime schemas", () => {
         available: true,
       }).success,
     ).toBe(false);
+  });
+
+  it("accepts Provider list and SLO read contracts without secret material", () => {
+    const providers = providerListSchema.parse({
+      providers: [
+        {
+          name: "openai",
+          base_url: "https://api.openai.example/v1",
+          api_key_configured: true,
+          timeout_ms: 15_000,
+          enabled: true,
+          model_patterns: "gpt-*",
+          failover_group: "primary",
+          priority: 10,
+          created_at: "2026-09-01T00:00:00Z",
+        },
+      ],
+    });
+    expect(providers.providers[0]).not.toHaveProperty("api_key");
+
+    expect(
+      providerSLOResponseSchema.safeParse({
+        slos: [],
+        evaluations: [],
+        since: "2026-09-01T00:00:00Z",
+      }).success,
+    ).toBe(true);
   });
 });

@@ -5,6 +5,8 @@ import type {
   GetAdminOpsRiskResponse,
   GetAdminOpsStatusData,
   GetAdminOpsStatusResponse,
+  GetAdminProvidersData,
+  GetAdminProvidersSloData,
   GetAdminRoutingHealthData,
   GetAdminRoutingHealthResponse,
   GetAdminStatsData,
@@ -39,6 +41,9 @@ import {
   logoutResponseSchema,
   opsRiskResponseSchema,
   opsStatusSchema,
+  providerListSchema,
+  providerSLOQuerySchema,
+  providerSLOResponseSchema,
   readinessFailureSchema,
   readinessSchema,
   routingHealthQuerySchema,
@@ -47,7 +52,7 @@ import {
   tokenPairSchema,
   uiBootstrapSchema,
 } from "@/shared/api/schemas";
-import type { RoutingHealthQuery } from "@/shared/api/schemas";
+import type { ProviderSLOQuery, RoutingHealthQuery } from "@/shared/api/schemas";
 
 const endpointBrand: unique symbol = Symbol("api-endpoint");
 declare const operationData: unique symbol;
@@ -165,6 +170,15 @@ export const endpoints = {
   ),
   admin: {
     stats: operation<GetAdminStatsData, GetAdminStatsResponse>()("GET", "/admin/stats", adminStatsSchema),
+    providers: {
+      list: operation<GetAdminProvidersData, unknown>()("GET", "/admin/providers", providerListSchema),
+      slo: operation<WithQuery<GetAdminProvidersSloData, ProviderSLOQuery>, unknown>()(
+        "GET",
+        "/admin/providers/slo",
+        providerSLOResponseSchema,
+        providerSLOQuerySchema,
+      ),
+    },
     ops: {
       status: operation<GetAdminOpsStatusData, GetAdminOpsStatusResponse>()(
         "GET",

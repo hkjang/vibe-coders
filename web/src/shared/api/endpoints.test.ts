@@ -42,6 +42,8 @@ describe("endpoints", () => {
       endpoints.admin.stats.path,
       endpoints.admin.ops.status.path,
       endpoints.admin.ops.risk.path,
+      endpoints.admin.providers.list.path,
+      endpoints.admin.providers.slo.path,
       endpoints.admin.routing.health.path,
     ]).toEqual([
       "/health",
@@ -49,9 +51,12 @@ describe("endpoints", () => {
       "/admin/stats",
       "/admin/ops/status",
       "/admin/ops/risk",
+      "/admin/providers",
+      "/admin/providers/slo",
       "/admin/routing/health",
     ]);
     expect(endpoints.health.querySchema).toBeUndefined();
+    expect(endpoints.admin.providers.slo.querySchema).toBeDefined();
     expect(endpoints.admin.routing.health.querySchema).toBeDefined();
   });
 });
