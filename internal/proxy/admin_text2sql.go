@@ -352,12 +352,16 @@ var t2sKnownFeatures = []struct{ Name, Description string }{
 }
 
 // reloadText2SQLFeatures refreshes the in-memory feature-flag cache from the DB.
-func (s *Server) reloadText2SQLFeatures(ctx context.Context) {
+func (s *Server) reloadText2SQLFeatures(ctx context.Context) error {
 	m, err := s.db.Text2SQLFeatureFlagMap(ctx)
-	if err != nil || m == nil {
+	if err != nil {
+		return err
+	}
+	if m == nil {
 		m = map[string]bool{}
 	}
 	s.t2sFeatures.Store(&m)
+	return nil
 }
 
 // t2sFeatureOn reports whether a runtime Text2SQL feature toggle is enabled.
@@ -406,7 +410,10 @@ func (s *Server) handleText2SQLFeatures(w http.ResponseWriter, r *http.Request) 
 			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "feature_save_failed")
 			return
 		}
-		s.reloadText2SQLFeatures(r.Context())
+		if err := s.reloadText2SQLFeatures(r.Context()); err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, "feature was saved but runtime reload failed", "server_error", "feature_reload_failed")
+			return
+		}
 		s.auditAdmin(r, "text2sql.feature.toggle", "", auditJSON(map[string]any{"name": p.Name, "enabled": p.Enabled}))
 		writeJSON(w, http.StatusOK, map[string]any{"name": p.Name, "enabled": p.Enabled})
 	default:

@@ -621,6 +621,9 @@ func Load() (Config, error) {
 	if cfg.Auth.Enabled && cfg.Auth.JWTSecret == "" {
 		return Config{}, fmt.Errorf("AUTH_JWT_SECRET is required when AUTH_ENABLED=true")
 	}
+	if cfg.Keycloak.Enabled && !cfg.Auth.Enabled {
+		return Config{}, fmt.Errorf("AUTH_ENABLED=true is required when SSO_KEYCLOAK_ENABLED=true")
+	}
 
 	return cfg, nil
 }

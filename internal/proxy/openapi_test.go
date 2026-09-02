@@ -58,12 +58,13 @@ func TestOpenAPISwaggerAndVersion(t *testing.T) {
 	for _, p := range []string{
 		"/admin/text2sql/golden", "/admin/okf/documents", "/admin/llm/traces",
 		"/me/keys", "/admin/settings/by-key/{key}", "/admin/dw/clickhouse/overview",
-		"/admin/mcp/policies/{server}", "/admin/routing/decisions/{id}",
+		"/admin/mcp/policies/{server}", "/admin/routing/decisions/{id}", "/admin/ui-bootstrap",
 	} {
 		if _, ok := pathsMap[p]; !ok {
 			t.Errorf("openapi.json missing expected path %s", p)
 		}
 	}
+	assertOpenAPIContract(t, spec)
 
 	// swagger page renders and points at the spec.
 	sw, err := http.Get(srv.URL + "/swagger")
@@ -74,6 +75,15 @@ func TestOpenAPISwaggerAndVersion(t *testing.T) {
 	sw.Body.Close()
 	if sw.StatusCode != http.StatusOK || !strings.Contains(string(swBody), "/openapi.json") {
 		t.Fatalf("/swagger should render and reference /openapi.json (status %d)", sw.StatusCode)
+	}
+	if strings.Contains(string(swBody), "unpkg.com") || strings.Contains(string(swBody), `src="http`) || strings.Contains(string(swBody), `href="http`) {
+		t.Fatal("/swagger must not depend on external runtime assets")
+	}
+	if csp := sw.Header.Get("Content-Security-Policy"); !strings.Contains(csp, "script-src 'nonce-") || strings.Contains(csp, "unsafe-eval") {
+		t.Fatalf("/swagger CSP = %q", csp)
+	}
+	if strings.Contains(string(swBody), "{{NONCE}}") || !strings.Contains(string(swBody), `nonce="`) {
+		t.Fatal("/swagger must replace its CSP nonce placeholder")
 	}
 
 	// /auth/me exposes the version (legacy/no-auth mode in testConfig).
@@ -86,6 +96,145 @@ func TestOpenAPISwaggerAndVersion(t *testing.T) {
 	me.Body.Close()
 	if meBody["version"] != AppVersion {
 		t.Errorf("/auth/me version = %v, want %s", meBody["version"], AppVersion)
+	}
+}
+
+func assertOpenAPIContract(t *testing.T, spec map[string]any) {
+	t.Helper()
+	paths, _ := spec["paths"].(map[string]any)
+	operationIDs := map[string]string{}
+	for route, rawPath := range paths {
+		pathItem, _ := rawPath.(map[string]any)
+		for method, rawOperation := range pathItem {
+			operation, ok := rawOperation.(map[string]any)
+			if !ok || operation["responses"] == nil {
+				continue
+			}
+			operationID, _ := operation["operationId"].(string)
+			if operationID == "" {
+				t.Errorf("%s %s has no operationId", method, route)
+				continue
+			}
+			if previous, duplicate := operationIDs[operationID]; duplicate {
+				t.Errorf("duplicate operationId %q on %s %s and %s", operationID, method, route, previous)
+			}
+			operationIDs[operationID] = method + " " + route
+		}
+	}
+
+	components, _ := spec["components"].(map[string]any)
+	schemas, _ := components["schemas"].(map[string]any)
+	for _, required := range []string{
+		"AppError", "HealthResponse", "AuthTokenResponse", "AuthMeResponse", "SSOExchangeRequest",
+		"KeycloakLogoutRequest", "KeycloakLogoutResponse", "MigrationFeature", "UIRuntimeConfig",
+		"UIAuthentication", "UISystemStatus", "UIBootstrapResponse", "SettingWriteRequest",
+		"SettingBatchItem", "SettingsBatchRequest", "SettingsBatchResponse", "AdminSettingView",
+	} {
+		if _, ok := schemas[required]; !ok {
+			t.Errorf("components.schemas missing %s", required)
+		}
+	}
+	walkOpenAPIValue(spec, func(ref string) {
+		const prefix = "#/components/schemas/"
+		if !strings.HasPrefix(ref, prefix) {
+			t.Errorf("unsupported local OpenAPI reference %q", ref)
+			return
+		}
+		if _, ok := schemas[strings.TrimPrefix(ref, prefix)]; !ok {
+			t.Errorf("unresolved OpenAPI schema reference %q", ref)
+		}
+	})
+
+	tokenSchema, _ := schemas["AuthTokenResponse"].(map[string]any)
+	required, _ := tokenSchema["required"].([]any)
+	for _, field := range required {
+		if field == "user" {
+			t.Error("AuthTokenResponse.user must be optional because refresh responses omit it")
+		}
+	}
+	authMe, _ := schemas["AuthMeResponse"].(map[string]any)
+	authMeProperties, _ := authMe["properties"].(map[string]any)
+	menuVersion, _ := authMeProperties["menu_version"].(map[string]any)
+	if menuVersion["type"] != "integer" {
+		t.Errorf("AuthMeResponse.menu_version type = %v, want integer", menuVersion["type"])
+	}
+
+	assertJSONOperationSchema(t, paths, "/health", "get", "200", "HealthResponse")
+	assertJSONOperationSchema(t, paths, "/auth/sso/exchange", "post", "200", "AuthTokenResponse")
+	assertJSONRequestSchema(t, paths, "/auth/sso/exchange", "post", "SSOExchangeRequest")
+	assertJSONOperationSchema(t, paths, "/auth/keycloak/logout", "post", "200", "KeycloakLogoutResponse")
+	assertJSONRequestSchema(t, paths, "/auth/keycloak/logout", "post", "KeycloakLogoutRequest")
+	assertJSONRequestSchema(t, paths, "/admin/settings/by-key/{key}", "put", "SettingWriteRequest")
+	assertJSONRequestSchema(t, paths, "/admin/settings/bulk", "put", "SettingsBatchRequest")
+	assertOpenAPIParameter(t, paths, "/admin/settings/by-key/{key}", "delete", "path", "key")
+	assertOpenAPIParameter(t, paths, "/admin/settings/by-key/{key}", "delete", "query", "expected_version")
+	bootstrap, _ := schemas["UIBootstrapResponse"].(map[string]any)
+	bootstrapProperties, _ := bootstrap["properties"].(map[string]any)
+	for field, want := range map[string]string{"ui": "UIRuntimeConfig", "authentication": "UIAuthentication", "system_status": "UISystemStatus"} {
+		got, _ := bootstrapProperties[field].(map[string]any)
+		if got["$ref"] != "#/components/schemas/"+want {
+			t.Errorf("UIBootstrapResponse.%s schema = %v, want %s", field, got, want)
+		}
+	}
+}
+
+func assertOpenAPIParameter(t *testing.T, paths map[string]any, route, method, location, name string) {
+	t.Helper()
+	pathItem, _ := paths[route].(map[string]any)
+	op, _ := pathItem[method].(map[string]any)
+	parameters, _ := op["parameters"].([]any)
+	for _, raw := range parameters {
+		parameter, _ := raw.(map[string]any)
+		if parameter["in"] == location && parameter["name"] == name {
+			return
+		}
+	}
+	t.Errorf("%s %s missing %s parameter %q", method, route, location, name)
+}
+
+func assertJSONOperationSchema(t *testing.T, paths map[string]any, route, method, status, schema string) {
+	t.Helper()
+	pathItem, _ := paths[route].(map[string]any)
+	op, _ := pathItem[method].(map[string]any)
+	responses, _ := op["responses"].(map[string]any)
+	response, _ := responses[status].(map[string]any)
+	content, _ := response["content"].(map[string]any)
+	jsonBody, _ := content["application/json"].(map[string]any)
+	got, _ := jsonBody["schema"].(map[string]any)
+	if got["$ref"] != "#/components/schemas/"+schema {
+		t.Errorf("%s %s response %s schema = %v, want %s", method, route, status, got, schema)
+	}
+}
+
+func assertJSONRequestSchema(t *testing.T, paths map[string]any, route, method, schema string) {
+	t.Helper()
+	pathItem, _ := paths[route].(map[string]any)
+	op, _ := pathItem[method].(map[string]any)
+	body, _ := op["requestBody"].(map[string]any)
+	content, _ := body["content"].(map[string]any)
+	jsonBody, _ := content["application/json"].(map[string]any)
+	got, _ := jsonBody["schema"].(map[string]any)
+	if got["$ref"] != "#/components/schemas/"+schema {
+		t.Errorf("%s %s request schema = %v, want %s", method, route, got, schema)
+	}
+}
+
+func walkOpenAPIValue(value any, visitRef func(string)) {
+	switch typed := value.(type) {
+	case map[string]any:
+		for key, child := range typed {
+			if key == "$ref" {
+				if ref, ok := child.(string); ok {
+					visitRef(ref)
+				}
+				continue
+			}
+			walkOpenAPIValue(child, visitRef)
+		}
+	case []any:
+		for _, child := range typed {
+			walkOpenAPIValue(child, visitRef)
+		}
 	}
 }
 

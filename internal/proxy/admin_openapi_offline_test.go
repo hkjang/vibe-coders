@@ -17,26 +17,23 @@ func TestSwaggerOfflineSelfContained(t *testing.T) {
 	}
 }
 
-func TestHandleSwaggerUIOfflineSwitch(t *testing.T) {
+func TestHandleSwaggerUIIsAlwaysSelfContained(t *testing.T) {
 	s := &Server{}
-	// ?offline=1 → self-contained explorer.
-	rec := httptest.NewRecorder()
-	s.handleSwaggerUI(rec, httptest.NewRequest(http.MethodGet, "/swagger?offline=1", nil))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("offline swagger = %d", rec.Code)
-	}
-	body := rec.Body.String()
-	if !strings.Contains(body, "오프라인 API 탐색기") && !strings.Contains(body, "오프라인 탐색기") {
-		t.Error("offline switch should serve the offline explorer")
-	}
-	if strings.Contains(body, "unpkg.com") {
-		t.Error("offline page must not include the CDN bundle")
-	}
-
-	// Default → CDN page (links to the offline explorer).
-	rec2 := httptest.NewRecorder()
-	s.handleSwaggerUI(rec2, httptest.NewRequest(http.MethodGet, "/swagger", nil))
-	if !strings.Contains(rec2.Body.String(), "/swagger?offline=1") {
-		t.Error("default swagger page should link to the offline explorer")
+	for _, target := range []string{"/swagger", "/swagger?offline=1"} {
+		rec := httptest.NewRecorder()
+		s.handleSwaggerUI(rec, httptest.NewRequest(http.MethodGet, target, nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s = %d", target, rec.Code)
+		}
+		body := rec.Body.String()
+		if !strings.Contains(body, "오프라인 API 탐색기") && !strings.Contains(body, "오프라인 탐색기") {
+			t.Errorf("%s should serve the self-contained explorer", target)
+		}
+		if strings.Contains(body, "unpkg.com") || strings.Contains(body, `src="http`) || strings.Contains(body, "{{NONCE}}") {
+			t.Errorf("%s contains an external asset or unresolved nonce", target)
+		}
+		if csp := rec.Header().Get("Content-Security-Policy"); !strings.Contains(csp, "script-src 'nonce-") {
+			t.Errorf("%s CSP = %q", target, csp)
+		}
 	}
 }

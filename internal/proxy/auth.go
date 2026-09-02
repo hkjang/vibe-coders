@@ -160,16 +160,13 @@ func (s *Server) rotateRefreshToken(ctx context.Context, raw string, ip, ua stri
 	if !found || user.Status != "active" {
 		return nil, errors.New("user inactive")
 	}
-	if err := s.db.RevokeRefreshToken(ctx, rec.ID); err != nil {
-		return nil, err
-	}
 	teamID, _ := s.db.PrimaryTeamForUser(ctx, user.ID)
 	refresh, err := randomSecret(40)
 	if err != nil {
 		return nil, err
 	}
 	now := time.Now().UTC()
-	if err := s.db.InsertRefreshToken(ctx, store.RefreshTokenRecord{
+	replacement := store.RefreshTokenRecord{
 		ID:          newID("rt"),
 		UserID:      user.ID,
 		SessionID:   rec.SessionID,
@@ -177,8 +174,6 @@ func (s *Server) rotateRefreshToken(ctx context.Context, raw string, ip, ua stri
 		ExpiresAt:   now.Add(s.cfg.Auth.RefreshTokenTTL),
 		CreatedAt:   now,
 		RotatedFrom: rec.ID,
-	}); err != nil {
-		return nil, err
 	}
 	access, err := s.signAccessToken(accessClaims{
 		Subject: user.ID, Email: user.Email, Role: user.Role, TeamID: teamID,
@@ -187,6 +182,13 @@ func (s *Server) rotateRefreshToken(ctx context.Context, raw string, ip, ua stri
 	})
 	if err != nil {
 		return nil, err
+	}
+	rotated, err := s.db.RotateRefreshToken(ctx, rec.ID, replacement)
+	if err != nil {
+		return nil, err
+	}
+	if !rotated {
+		return nil, errors.New("invalid refresh token")
 	}
 	_ = ip
 	_ = ua

@@ -1,8 +1,9 @@
 name: CI
 
-# Code-quality gate for every PR + push to master: formatting, vet, build, unit
-# tests (incl. the race detector, which also exercises all SQL migrations via the
-# store tests), a vulnerability scan, a Docker build, and an OpenAPI sanity check.
+# Code-quality gate for every PR + push to master: the frozen React toolchain,
+# formatting, type checks, unit/accessibility tests, Go vet/build/test (including
+# race), vulnerability and canonical source-SBOM drift checks, embedded-App-UI,
+# deep-link/visual/container smoke tests, and an OpenAPI sanity check.
 
 on:
   push:
@@ -10,13 +11,91 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
+  frontend:
+    name: frontend · lint · typecheck · test · build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Reject tracked local-output and seed files
+        run: |
+          forbidden="$(git -C .. ls-files | grep -E '(^|/)(\.gitframe|output)(/|$)|(^|/)seed\.sql$' || true)"
+          if [ -n "$forbidden" ]; then
+            echo "::error::Repository contains forbidden tracked paths"
+            printf '%s\n' "$forbidden"
+            exit 1
+          fi
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+        with:
+          version: 11.25.0
+          run_install: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: web/.node-version
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      - name: Install frozen dependencies
+        run: pnpm install --frozen-lockfile
+      - name: High and critical dependency vulnerability gate
+        run: pnpm audit --audit-level high
+      - name: Generated OpenAPI contract drift
+        run: pnpm openapi:check
+      - name: ESLint
+        run: pnpm lint
+      - name: Prettier check
+        run: pnpm format:check
+      - name: TypeScript typecheck
+        run: pnpm typecheck
+      - name: Unit, component, and accessibility tests
+        # The Vitest suite includes the axe-core App Shell accessibility checks.
+        run: pnpm test
+      - name: Production build
+        env:
+          VITE_UI_VERSION: ci-${{ github.sha }}
+        run: pnpm build
+      - name: Install Chromium for React E2E
+        run: pnpm exec playwright install --with-deps chromium
+      - name: React deep-link, CSP, and visual E2E
+        run: pnpm test:e2e
+      - name: Upload React E2E diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: react-e2e-diagnostics
+          path: |
+            web/test-results
+            web/playwright-report
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Validate production assets
+        run: |
+          test -s dist/index.html
+          test -d dist/assets
+          test -n "$(find dist/assets -type f -print -quit)"
+          if find dist -type f \( -name 'sw.js' -o -name 'service-worker.js' \) | grep -q .; then
+            echo "::error::Service Worker output is not allowed in Phase 0"
+            exit 1
+          fi
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: appui-dist
+          path: web/dist
+          if-no-files-found: error
+          retention-days: 7
+
   test:
     name: build · vet · test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version-file: go.mod
           cache: true
@@ -52,44 +131,174 @@ jobs:
     name: TypeScript SDK typecheck
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: '20'
+          node-version-file: web/.node-version
       - name: tsc --noEmit (no deps, strict)
-        run: npx --yes --package=typescript@5 tsc --noEmit --strict --target ES2020 --lib ES2020,DOM --moduleResolution bundler sdk/typescript/vibe.ts
+        run: npx --yes --package=typescript@5.9.3 tsc --noEmit --strict --target ES2020 --lib ES2020,DOM --moduleResolution bundler sdk/typescript/vibe.ts
 
   vuln:
     name: govulncheck
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version-file: go.mod
           cache: true
       - name: Install govulncheck
-        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
       - name: Scan
         run: govulncheck ./...
 
-  docker:
-    name: docker build
+  source-sbom-drift:
+    name: canonical Go+npm SBOM · license drift
     runs-on: ubuntu-latest
+    env:
+      SOURCE_SBOM_VERSION: v0.80.0
+      GO_VERSION: 1.26.8
+      NODE_VERSION: 24.20.0
+      PNPM_VERSION: 11.25.0
+      SYFT_VERSION: v1.51.0
     steps:
-      - uses: actions/checkout@v4
-      - name: Build image
-        run: docker build -t ai-coding-proxy-gateway:ci .
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: 1.26.8
+          cache: true
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+        with:
+          version: 11.25.0
+          run_install: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24.20.0
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      # anchore/sbom-action v0.20.5, commit-pinned; Syft itself is also exact-pinned below.
+      - id: syft
+        uses: anchore/sbom-action/download-syft@da167eac915b4e86f08b264dbdbc867b61be6f0c
+        with:
+          syft-version: v1.51.0
 
-  openapi:
-    name: OpenAPI spec valid
+      - name: Verify pinned toolchain
+        env:
+          SYFT_BIN: ${{ steps.syft.outputs.cmd }}
+        run: |
+          test "$(go env GOVERSION)" = "go${GO_VERSION}"
+          test "$(node --version)" = "v${NODE_VERSION}"
+          test "$(pnpm --version)" = "${PNPM_VERSION}"
+          test "$(corepack pnpm --version)" = "${PNPM_VERSION}"
+          test "$(cat web/.node-version)" = "${NODE_VERSION}"
+          manifest_package_manager="$(node -p "require('./web/package.json').packageManager")"
+          test "$manifest_package_manager" = "pnpm@${PNPM_VERSION}"
+          actual_syft_version="$("$SYFT_BIN" version | sed -n 's/^Version:[[:space:]]*//p')"
+          test "v${actual_syft_version}" = "$SYFT_VERSION"
+
+      - name: Reuse canonical creation timestamp
+        run: |
+          epoch="$(node <<'NODE'
+          const fs = require('node:fs');
+          const document = JSON.parse(fs.readFileSync('SBOM.spdx.json', 'utf8'));
+          const milliseconds = Date.parse(document.creationInfo?.created ?? '');
+          if (!Number.isFinite(milliseconds)) throw new Error('canonical SBOM has no valid creationInfo.created');
+          process.stdout.write(String(Math.floor(milliseconds / 1000)));
+          NODE
+          )"
+          test "$epoch" -gt 0
+          echo "SOURCE_DATE_EPOCH=$epoch" >> "$GITHUB_ENV"
+
+      - name: Regenerate integrated source inventory
+        env:
+          SYFT_BIN: ${{ steps.syft.outputs.cmd }}
+        run: bash scripts/generate-source-sbom.sh "$SOURCE_SBOM_VERSION"
+
+      - name: Verify canonical SBOM and license files are current
+        run: |
+          unexpected="$(git diff --name-only | grep -Ev '^(SBOM\.spdx\.json|THIRD_PARTY_LICENSES\.md)$' || true)"
+          if [ -n "$unexpected" ]; then
+            echo "::error::SBOM generation modified unexpected tracked files"
+            printf '%s\n' "$unexpected"
+            exit 1
+          fi
+          if ! git diff --quiet -- SBOM.spdx.json THIRD_PARTY_LICENSES.md; then
+            echo "::error::Canonical SBOM/license inventory is stale. Run scripts/generate-source-sbom.sh ${SOURCE_SBOM_VERSION} and commit both files."
+            git diff --stat -- SBOM.spdx.json THIRD_PARTY_LICENSES.md
+            exit 1
+          fi
+
+      - name: Upload regenerated inventory on failure
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: regenerated-source-compliance-assets
+          path: |
+            SBOM.spdx.json
+            THIRD_PARTY_LICENSES.md
+          if-no-files-found: error
+          retention-days: 7
+
+  appui-contract:
+    name: App UI embed contract
+    needs: frontend
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: appui-dist
+          path: internal/appui/dist
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version-file: go.mod
           cache: true
+      - name: Validate staged embed assets
+        run: |
+          test -s internal/appui/dist/index.html
+          test -d internal/appui/dist/assets
+          test -n "$(find internal/appui/dist/assets -type f -print -quit)"
+      - name: Test App UI handler
+        run: go test ./internal/appui/... -count=1
+      - name: Build gateway with embedded UI
+        run: go build -ldflags "-X vibe-coders/internal/proxy.AppVersion=ci-contract" -o /dev/null ./cmd/gateway
+
+  docker:
+    name: docker build · App UI smoke
+    needs: [frontend, test, appui-contract]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Build image
+        run: |
+          VERSION="ci-${GITHUB_SHA::12}"
+          echo "SMOKE_VERSION=$VERSION" >> "$GITHUB_ENV"
+          docker build \
+            --build-arg VERSION="$VERSION" \
+            --build-arg VCS_REF="$GITHUB_SHA" \
+            --tag ai-coding-proxy-gateway:ci \
+            .
+      - name: Container smoke and deep-link checks
+        run: bash scripts/container-smoke.sh ai-coding-proxy-gateway:ci "$SMOKE_VERSION" "$GITHUB_SHA"
+
+  openapi:
+    name: OpenAPI spec valid · TypeScript contract drift
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+        with:
+          version: 11.25.0
+          run_install: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: web/.node-version
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
       - name: Build gateway
         run: go build -o gateway ./cmd/gateway
       - name: Boot + fetch /openapi.json
@@ -113,3 +322,9 @@ jobs:
           assert len(paths) > 0, 'no paths in spec'
           print(f"OpenAPI {spec['openapi']} OK — {len(paths)} paths")
           PY
+      - name: Install frozen frontend generator
+        working-directory: web
+        run: pnpm install --frozen-lockfile
+      - name: Verify live OpenAPI snapshot and generated TypeScript
+        working-directory: web
+        run: pnpm openapi:check -- ../openapi.json

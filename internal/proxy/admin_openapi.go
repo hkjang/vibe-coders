@@ -70,6 +70,7 @@ var apiEndpoints = []apiEndpoint{
 
 	// ---- admin UI ----
 	{"/admin", []string{"get"}, "admin", "Admin dashboard (HTML)", false},
+	{"/admin/ui-bootstrap", []string{"get"}, "admin", "Next Admin UI bootstrap, permissions, migration registry, and health", true},
 
 	// ---- admin: core analytics ----
 	{"/admin/stats", []string{"get"}, "admin", "Summary stats", false},
@@ -168,7 +169,7 @@ var apiEndpoints = []apiEndpoint{
 	{"/admin/settings/validate", []string{"post"}, "settings", "Validate a setting value", false},
 	{"/admin/settings/history", []string{"get"}, "settings", "Setting change history", false},
 	{"/admin/settings/rollback", []string{"post"}, "settings", "Roll back a setting", false},
-	{"/admin/settings/bulk", []string{"put"}, "settings", "Apply multiple settings atomically", false},
+	{"/admin/settings/bulk", []string{"put", "post"}, "settings", "Apply multiple settings atomically", false},
 	{"/admin/settings/export", []string{"get"}, "settings", "Export non-secret setting overrides", false},
 	{"/admin/settings/import", []string{"post"}, "settings", "Import settings (rejects secret keys)", false},
 	{"/admin/settings/test/clickhouse", []string{"post"}, "settings", "Test ClickHouse connectivity", false},
@@ -330,6 +331,7 @@ var apiEndpoints = []apiEndpoint{
 	{"/v1", []string{"get", "post"}, "openai", "OpenAI-compatible passthrough root (proxies other /v1/* paths upstream)", false},
 	// ---- Keycloak SSO / auth ----
 	{"/auth/sso/status", []string{"get"}, "auth", "Whether SSO is enabled + the login URL", true},
+	{"/auth/sso/exchange", []string{"post"}, "auth", "Exchange a browser-bound one-time SSO code for an internal session", true},
 	{"/auth/keycloak/login", []string{"get"}, "auth", "Start the Keycloak Authorization Code + PKCE login", true},
 	{"/auth/keycloak/callback", []string{"get"}, "auth", "Keycloak login callback (code exchange)", true},
 	{"/auth/keycloak/logout", []string{"post"}, "auth", "Log out and return the Keycloak end-session URL", false},
@@ -398,7 +400,7 @@ var apiEndpoints = []apiEndpoint{
 	// ---- admin: RBAC / secrets / SSO ----
 	{"/admin/roles", []string{"get", "post"}, "rbac", "List/create custom roles", false},
 	{"/admin/secrets/rotate", []string{"post"}, "security", "Rotate the gateway secret", false},
-	{"/admin/sso/keycloak/config", []string{"get", "put"}, "auth", "Get/save the DB-backed Keycloak provider config", false},
+	{"/admin/sso/keycloak/config", []string{"get", "put", "post"}, "auth", "Get/save the DB-backed Keycloak provider config", false},
 	{"/admin/sso/keycloak/test", []string{"post"}, "auth", "Diagnose the Keycloak connection", false},
 	// ---- admin: Text2SQL registry ----
 	{"/admin/text2sql/connections", []string{"get", "post"}, "text2sql", "Manage Text2SQL DB connections", false},
@@ -501,13 +503,15 @@ func buildOpenAPISpec() map[string]any {
 		ops := map[string]any{}
 		for _, m := range e.methods {
 			op := map[string]any{
-				"tags":      []string{e.tag},
-				"summary":   e.summary,
-				"responses": map[string]any{"200": map[string]any{"description": "OK"}},
+				"tags":        []string{e.tag},
+				"summary":     e.summary,
+				"operationId": openAPIOperationID(m, e.path),
+				"responses":   map[string]any{"200": map[string]any{"description": "OK"}},
 			}
 			if !e.public {
 				op["security"] = []any{map[string]any{"bearerAuth": []any{}}}
 			}
+			enrichOpenAPIOperation(e.path, m, op)
 			ops[m] = op
 		}
 		// Path-level parameter for templated paths.
@@ -515,9 +519,10 @@ func buildOpenAPISpec() map[string]any {
 			name := e.path[i+1 : strings.IndexByte(e.path, '}')]
 			for _, m := range e.methods {
 				op := ops[m].(map[string]any)
-				op["parameters"] = []any{map[string]any{
+				parameters, _ := op["parameters"].([]any)
+				op["parameters"] = append(parameters, map[string]any{
 					"name": name, "in": "path", "required": true, "schema": map[string]any{"type": "string"},
-				}}
+				})
 			}
 		}
 		paths[e.path] = ops
@@ -543,7 +548,140 @@ func buildOpenAPISpec() map[string]any {
 			"securitySchemes": map[string]any{
 				"bearerAuth": map[string]any{"type": "http", "scheme": "bearer", "bearerFormat": "JWT or API key"},
 			},
+			"schemas": appUIOpenAPISchemas(),
 		},
+	}
+}
+
+func openAPIOperationID(method, route string) string {
+	replacer := strings.NewReplacer("/", "_", "{", "", "}", "", "-", "_", ".", "_")
+	return strings.Trim(replacer.Replace(strings.ToLower(method)+"_"+route), "_")
+}
+
+func schemaRef(name string) map[string]any {
+	return map[string]any{"$ref": "#/components/schemas/" + name}
+}
+
+func jsonContent(schema map[string]any) map[string]any {
+	return map[string]any{"application/json": map[string]any{"schema": schema}}
+}
+
+func requestBody(schema string) map[string]any {
+	return map[string]any{"required": true, "content": jsonContent(schemaRef(schema))}
+}
+
+func successResponse(schema string) map[string]any {
+	return map[string]any{"description": "OK", "content": jsonContent(schemaRef(schema))}
+}
+
+func enrichOpenAPIOperation(route, method string, op map[string]any) {
+	key := strings.ToLower(method) + " " + route
+	responses := map[string]any{"default": map[string]any{"description": "Error", "content": jsonContent(schemaRef("AppError"))}}
+	switch key {
+	case "get /health":
+		responses["200"] = successResponse("HealthResponse")
+	case "post /auth/login":
+		op["requestBody"] = requestBody("AuthLoginRequest")
+		responses["200"] = successResponse("AuthTokenResponse")
+	case "post /auth/refresh":
+		op["requestBody"] = requestBody("AuthRefreshRequest")
+		responses["200"] = successResponse("AuthTokenResponse")
+	case "post /auth/logout":
+		op["requestBody"] = requestBody("AuthLogoutRequest")
+		responses["200"] = successResponse("StatusResponse")
+	case "get /auth/me":
+		responses["200"] = successResponse("AuthMeResponse")
+	case "get /auth/sso/status":
+		responses["200"] = successResponse("SSOStatusResponse")
+	case "post /auth/sso/exchange":
+		op["requestBody"] = requestBody("SSOExchangeRequest")
+		responses["200"] = successResponse("AuthTokenResponse")
+	case "get /auth/keycloak/login", "get /auth/keycloak/callback":
+		responses["302"] = map[string]any{
+			"description": "Browser redirect",
+			"headers":     map[string]any{"Location": map[string]any{"schema": map[string]any{"type": "string"}}},
+		}
+	case "post /auth/keycloak/logout":
+		op["requestBody"] = requestBody("KeycloakLogoutRequest")
+		responses["200"] = successResponse("KeycloakLogoutResponse")
+	case "put /admin/sso/keycloak/config", "post /admin/sso/keycloak/config":
+		responses["204"] = map[string]any{"description": "Configuration saved"}
+	case "put /admin/settings/by-key/{key}":
+		op["requestBody"] = requestBody("SettingWriteRequest")
+		responses["200"] = successResponse("AdminSettingView")
+	case "delete /admin/settings/by-key/{key}":
+		op["parameters"] = []any{
+			map[string]any{"name": "expected_version", "in": "query", "required": false, "schema": map[string]any{"type": "integer", "minimum": 0}},
+			map[string]any{"name": "reason", "in": "query", "required": false, "schema": map[string]any{"type": "string"}},
+		}
+		responses["200"] = successResponse("AdminSettingView")
+	case "put /admin/settings/bulk", "post /admin/settings/bulk", "post /admin/settings/import":
+		op["requestBody"] = requestBody("SettingsBatchRequest")
+		responses["200"] = successResponse("SettingsBatchResponse")
+	case "get /me/navigation":
+		responses["200"] = successResponse("NavigationResponse")
+	case "get /admin/ui-bootstrap":
+		responses["200"] = successResponse("UIBootstrapResponse")
+	default:
+		return
+	}
+	op["responses"] = responses
+}
+
+func appUIOpenAPISchemas() map[string]any {
+	stringArray := map[string]any{"type": "array", "items": map[string]any{"type": "string"}}
+	user := map[string]any{
+		"type": "object", "required": []string{"id", "role"},
+		"properties": map[string]any{
+			"id": map[string]any{"type": "string"}, "email": map[string]any{"type": "string"}, "name": map[string]any{"type": "string"},
+			"role": map[string]any{"type": "string"}, "roles": stringArray, "team_id": map[string]any{"type": "string"},
+			"cost_center": map[string]any{"type": "string"}, "scopes": stringArray, "default_home": map[string]any{"type": "string"},
+			"features": map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "boolean"}},
+		},
+	}
+	return map[string]any{
+		"AppError":           map[string]any{"type": "object", "required": []string{"error"}, "properties": map[string]any{"error": map[string]any{"type": "object", "required": []string{"message", "type", "code"}, "properties": map[string]any{"message": map[string]any{"type": "string"}, "type": map[string]any{"type": "string"}, "param": map[string]any{"type": "string", "nullable": true}, "code": map[string]any{"type": "string"}}}}},
+		"HealthResponse":     map[string]any{"type": "object", "additionalProperties": false, "required": []string{"status"}, "properties": map[string]any{"status": map[string]any{"type": "string", "enum": []string{"ok"}}}},
+		"AuthLoginRequest":   map[string]any{"type": "object", "required": []string{"email", "password"}, "properties": map[string]any{"email": map[string]any{"type": "string", "format": "email"}, "password": map[string]any{"type": "string", "format": "password"}}},
+		"AuthRefreshRequest": map[string]any{"type": "object", "required": []string{"refresh_token"}, "properties": map[string]any{"refresh_token": map[string]any{"type": "string"}}},
+		"AuthLogoutRequest":  map[string]any{"type": "object", "properties": map[string]any{"refresh_token": map[string]any{"type": "string"}}},
+		"AuthUser":           user,
+		"AuthTokenResponse":  map[string]any{"type": "object", "required": []string{"access_token", "refresh_token", "token_type", "expires_in", "refresh_expires_in"}, "properties": map[string]any{"access_token": map[string]any{"type": "string"}, "refresh_token": map[string]any{"type": "string"}, "token_type": map[string]any{"type": "string", "enum": []string{"Bearer"}}, "expires_in": map[string]any{"type": "integer"}, "refresh_expires_in": map[string]any{"type": "integer"}, "user": schemaRef("AuthUser")}},
+		"StatusResponse":     map[string]any{"type": "object", "required": []string{"status"}, "properties": map[string]any{"status": map[string]any{"type": "string"}}},
+		"AuthMeResponse":     map[string]any{"type": "object", "required": []string{"auth_enabled", "version"}, "properties": map[string]any{"auth_enabled": map[string]any{"type": "boolean"}, "version": map[string]any{"type": "string"}, "expires_at": map[string]any{"type": "integer", "nullable": true}, "menu_version": map[string]any{"type": "integer"}, "user": map[string]any{"allOf": []any{schemaRef("AuthUser")}, "nullable": true}}},
+		"SSOStatusResponse":  map[string]any{"type": "object", "required": []string{"keycloak_enabled", "allow_local_login", "login_url"}, "properties": map[string]any{"keycloak_enabled": map[string]any{"type": "boolean"}, "allow_local_login": map[string]any{"type": "boolean"}, "login_url": map[string]any{"type": "string"}}},
+		"SSOExchangeRequest": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"code"}, "properties": map[string]any{"code": map[string]any{"type": "string", "minLength": 1, "maxLength": 128}}},
+		"KeycloakLogoutRequest": map[string]any{"type": "object", "additionalProperties": false, "properties": map[string]any{
+			"refresh_token": map[string]any{"type": "string"}, "id_token_hint": map[string]any{"type": "string"}, "return_to": map[string]any{"type": "string", "pattern": "^/app(?:/|$)"},
+		}},
+		"KeycloakLogoutResponse": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"status", "end_session_url"}, "properties": map[string]any{
+			"status": map[string]any{"type": "string", "enum": []string{"logged_out"}}, "end_session_url": map[string]any{"type": "string"},
+		}},
+		"SettingWriteRequest": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"value"}, "properties": map[string]any{
+			"value": map[string]any{"type": "string"}, "reason": map[string]any{"type": "string"}, "expected_version": map[string]any{"type": "integer", "minimum": 0},
+		}},
+		"SettingBatchItem": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"key", "value"}, "properties": map[string]any{
+			"key": map[string]any{"type": "string"}, "value": map[string]any{"type": "string"}, "expected_version": map[string]any{"type": "integer", "minimum": 0},
+		}},
+		"SettingsBatchRequest": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"settings"}, "properties": map[string]any{
+			"settings": map[string]any{"type": "array", "minItems": 1, "items": schemaRef("SettingBatchItem")}, "reason": map[string]any{"type": "string"},
+		}},
+		"SettingsBatchResponse": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"ok", "applied"}, "properties": map[string]any{
+			"ok": map[string]any{"type": "boolean"}, "applied": map[string]any{"type": "integer", "minimum": 0},
+		}},
+		"AdminSettingView": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"key", "category", "type", "is_secret", "restart_required", "source", "description", "read_only", "value"}, "properties": map[string]any{
+			"key": map[string]any{"type": "string"}, "category": map[string]any{"type": "string"}, "type": map[string]any{"type": "string"}, "is_secret": map[string]any{"type": "boolean"}, "restart_required": map[string]any{"type": "boolean"}, "source": map[string]any{"type": "string"}, "description": map[string]any{"type": "string"}, "read_only": map[string]any{"type": "boolean"}, "value": map[string]any{"type": "string"}, "version": map[string]any{"type": "integer", "minimum": 1}, "updated_by": map[string]any{"type": "string"}, "updated_at": map[string]any{"type": "string"}, "is_set": map[string]any{"type": "boolean"}, "value_error": map[string]any{"type": "string"},
+		}},
+		"NavigationResponse": map[string]any{"type": "object", "required": []string{"menus", "allowed_tabs", "default_home", "role", "scopes", "features", "menu_version"}, "properties": map[string]any{"menus": map[string]any{"type": "array", "items": map[string]any{"type": "object", "additionalProperties": true}}, "allowed_tabs": stringArray, "default_home": map[string]any{"type": "string"}, "role": map[string]any{"type": "string"}, "scopes": stringArray, "features": map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "boolean"}}, "menu_version": map[string]any{"type": "integer"}}},
+		"MigrationFeature":   map[string]any{"type": "object", "required": []string{"feature_id", "title", "app_path", "legacy_path", "status", "risk_level", "required_permission", "read_only", "enabled_roles", "rollout_percent", "fallback_enabled", "minimum_api_version", "available"}, "properties": map[string]any{"feature_id": map[string]any{"type": "string"}, "title": map[string]any{"type": "string"}, "app_path": map[string]any{"type": "string"}, "legacy_path": map[string]any{"type": "string"}, "status": map[string]any{"type": "string", "enum": []string{"hidden", "legacy", "preview_read_only", "preview", "stable", "deprecated", "retired"}}, "risk_level": map[string]any{"type": "string", "enum": []string{"low", "medium", "high", "critical"}}, "required_permission": map[string]any{"type": "string"}, "read_only": map[string]any{"type": "boolean"}, "enabled_roles": stringArray, "rollout_percent": map[string]any{"type": "integer", "minimum": 0, "maximum": 100}, "fallback_enabled": map[string]any{"type": "boolean"}, "minimum_api_version": map[string]any{"type": "string"}, "available": map[string]any{"type": "boolean"}, "availability_reason": map[string]any{"type": "string"}}},
+		"UIRuntimeConfig": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"enabled", "default_entry", "legacy_fallback", "feedback_enabled", "telemetry_enabled"}, "properties": map[string]any{
+			"enabled": map[string]any{"type": "boolean"}, "default_entry": map[string]any{"type": "string", "pattern": "^/app(?:/|$)"}, "legacy_fallback": map[string]any{"type": "boolean"}, "feedback_enabled": map[string]any{"type": "boolean"}, "telemetry_enabled": map[string]any{"type": "boolean"},
+		}},
+		"UIAuthentication": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"enabled", "authenticated", "mode", "keycloak_enabled", "allow_local_login", "sso_login_url"}, "properties": map[string]any{
+			"enabled": map[string]any{"type": "boolean"}, "authenticated": map[string]any{"type": "boolean"}, "mode": map[string]any{"type": "string", "enum": []string{"open", "session", "legacy_token"}}, "keycloak_enabled": map[string]any{"type": "boolean"}, "allow_local_login": map[string]any{"type": "boolean"}, "sso_login_url": map[string]any{"type": "string"},
+		}},
+		"UISystemStatus":      map[string]any{"type": "object", "additionalProperties": false, "required": []string{"status"}, "properties": map[string]any{"status": map[string]any{"type": "string", "enum": []string{"healthy", "degraded"}}}},
+		"UIBootstrapResponse": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"backend_version", "ui_version", "api_version", "ui", "authentication", "roles", "permissions", "allowed_features", "migration_registry", "system_status", "legacy_route_map"}, "properties": map[string]any{"backend_version": map[string]any{"type": "string"}, "ui_version": map[string]any{"type": "string"}, "api_version": map[string]any{"type": "string"}, "ui": schemaRef("UIRuntimeConfig"), "authentication": schemaRef("UIAuthentication"), "user": map[string]any{"allOf": []any{schemaRef("AuthUser")}, "nullable": true}, "roles": stringArray, "permissions": stringArray, "allowed_features": stringArray, "migration_registry": map[string]any{"type": "array", "items": schemaRef("MigrationFeature")}, "system_status": schemaRef("UISystemStatus"), "legacy_route_map": map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}}}},
 	}
 }
 
@@ -562,46 +700,27 @@ func (s *Server) handleOpenAPISpec(w http.ResponseWriter, r *http.Request) {
 	_ = enc.Encode(buildOpenAPISpec())
 }
 
-// handleSwaggerUI serves a Swagger UI page pointing at /openapi.json. Swagger UI assets are
-// loaded from a CDN; in an air-gapped network the page won't render, but /openapi.json is
-// always downloadable directly.
+// handleSwaggerUI serves the self-contained API explorer. It has no CDN/font/script
+// dependency, so the documented control plane remains usable in air-gapped deployments.
 // GET /swagger
 func (s *Server) handleSwaggerUI(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
 		return
 	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	// Air-gapped networks can't reach the Swagger CDN; ?offline=1 serves a fully self-contained
-	// explorer (no external CSS/JS) that renders /openapi.json inline.
-	if r.URL.Query().Get("offline") != "" {
-		_, _ = w.Write([]byte(swaggerOfflineHTML))
+	nonce, err := randomURLSafe(24)
+	if err != nil {
+		writeOpenAIError(w, http.StatusServiceUnavailable, "secure CSP nonce generation failed", "server_error", "entropy_unavailable")
 		return
 	}
-	_, _ = w.Write([]byte(swaggerUIHTML))
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Security-Policy", "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; script-src 'nonce-"+nonce+"'; style-src-elem 'nonce-"+nonce+"'; style-src-attr 'unsafe-inline'; connect-src 'self'; img-src 'self' data:")
+	w.Header().Set("Referrer-Policy", "no-referrer")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	page := strings.ReplaceAll(swaggerOfflineHTML, "{{NONCE}}", nonce)
+	_, _ = w.Write([]byte(page))
 }
-
-const swaggerUIHTML = `<!DOCTYPE html>
-<html lang="ko">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>AI Gateway API — Swagger</title>
-  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css">
-  <style>body{margin:0}#hint{font:13px system-ui;padding:8px 14px;background:#fff3cd;color:#664d03;border-bottom:1px solid #ffe69c}</style>
-</head>
-<body>
-  <div id="hint">오프라인(폐쇄망)에서는 Swagger UI 자산 로드가 실패할 수 있습니다. 그 경우 <a href="/swagger?offline=1">오프라인 API 탐색기</a> 또는 <a href="/openapi.json">/openapi.json</a>을 사용하세요.</div>
-  <div id="swagger-ui"></div>
-  <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js" crossorigin></script>
-  <script>
-    window.addEventListener('load', function () {
-      if (!window.SwaggerUIBundle) return;
-      window.ui = SwaggerUIBundle({ url: '/openapi.json', dom_id: '#swagger-ui', deepLinking: true });
-    });
-  </script>
-</body>
-</html>`
 
 // swaggerOfflineHTML is a fully self-contained API explorer (no external CSS/JS/fonts) that
 // fetches /openapi.json and renders operations grouped by tag — for air-gapped networks.
@@ -611,7 +730,7 @@ const swaggerOfflineHTML = `<!DOCTYPE html>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>AI Gateway API — 오프라인 탐색기</title>
-  <style>
+  <style nonce="{{NONCE}}">
     :root{--bg:#0f1115;--card:#171a21;--line:#262b36;--muted:#8b94a7;--fg:#e6e9ef;--accent:#6ea8fe}
     body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
     header{padding:14px 20px;border-bottom:1px solid var(--line)}
@@ -639,11 +758,11 @@ const swaggerOfflineHTML = `<!DOCTYPE html>
 <body>
   <header>
     <h1>AI Gateway API — 오프라인 탐색기</h1>
-    <div class="sub">외부 자산 없이 동작합니다. <a href="/openapi.json" style="color:var(--accent)">/openapi.json</a> 원본 · <a href="/swagger" style="color:var(--accent)">Swagger UI(온라인)</a></div>
+    <div class="sub">외부 자산 없이 동작합니다. <a href="/openapi.json" style="color:var(--accent)">/openapi.json</a> 원본</div>
     <input id="q" placeholder="경로/요약 필터…">
   </header>
   <main id="out"><div class="muted">불러오는 중…</div></main>
-  <script>
+  <script nonce="{{NONCE}}">
     var METHODS = ['get','post','put','delete','patch','options','head'];
     function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
     function paramRows(params){

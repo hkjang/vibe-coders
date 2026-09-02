@@ -1,4 +1,6 @@
 .env
+.env.*
+!.env.example
 data/
 release/
 *.db
@@ -10,6 +12,24 @@ gateway.exe
 coverage.out
 .playwright-mcp/
 .gocache/
+.gitframe
+output/
+seed.sql
+
+# React application build and test output
+web/node_modules/
+web/.pnpm-store/
+web/.vite/
+web/.eslintcache
+web/dist/
+web/coverage/
+web/test-results/
+web/playwright-report/
+
+# The Go package keeps only a marker so clean Go builds can embed an empty dist.
+# Production assets are always staged from web/dist by the Docker build.
+internal/appui/dist/*
+!internal/appui/dist/.gitkeep
 
 # Temp test scripts and log files
 *.log

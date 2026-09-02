@@ -2,9 +2,62 @@ package store
 
 import (
 	"context"
+	"fmt"
+	"sync"
 	"testing"
 	"time"
 )
+
+func TestRefreshTokenRotationHasOneConcurrentWinner(t *testing.T) {
+	db := openAggTestStore(t)
+	defer db.Close()
+	ctx := context.Background()
+	now := time.Now().UTC()
+	if err := db.InsertRefreshToken(ctx, RefreshTokenRecord{
+		ID: "old-refresh", UserID: "user", SessionID: "session", TokenHash: "old-hash",
+		ExpiresAt: now.Add(time.Hour), CreatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	const contenders = 8
+	start := make(chan struct{})
+	results := make(chan bool, contenders)
+	errs := make(chan error, contenders)
+	var wg sync.WaitGroup
+	for i := range contenders {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			id := fmt.Sprintf("new-refresh-%d", i)
+			won, err := db.RotateRefreshToken(ctx, "old-refresh", RefreshTokenRecord{
+				ID: id, UserID: "user", SessionID: "session", TokenHash: id + "-hash",
+				ExpiresAt: now.Add(time.Hour), CreatedAt: now,
+			})
+			results <- won
+			errs <- err
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(results)
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	winners := 0
+	for won := range results {
+		if won {
+			winners++
+		}
+	}
+	if winners != 1 {
+		t.Fatalf("rotation winners = %d, want 1", winners)
+	}
+}
 
 func TestAuthStoreUserTeamTokenAuditAndAPIKeyLifecycle(t *testing.T) {
 	db := openAggTestStore(t)

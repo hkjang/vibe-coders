@@ -8,11 +8,11 @@ AI 코딩 프록시 게이트웨이의 기동·종료·관측·백업·장애 �
 
 | 항목 | 값 |
 | --- | --- |
-| Go 버전 | 1.24 이상 (`go.mod` 기준) |
+| Go 버전 | 1.26.8 (`go.mod` 기준) |
 | OS | Linux / Windows / macOS |
 | DB | SQLite (기본) 또는 PostgreSQL |
 | 포트 | 기본 `:8080` (LISTEN_ADDR 로 변경 가능) |
-| 데이터 디렉토리 | `./data` (SQLite + fallback ndjson) |
+| 데이터 위치 | 로컬 바이너리: `./data`; Docker: named volume `proxy-gateway-data` |
 
 필수 환경변수는 단 두 가지입니다.
 
@@ -49,56 +49,88 @@ go run ./cmd/gateway
 
 ### 2.2 바이너리 빌드
 
+React `/app`까지 포함하는 직접 빌드는 frontend 산출물을 embed 경로에 먼저 overlay해야
+합니다. 이전 hashed 파일은 제거하되 추적 중인 `.gitkeep`은 보존합니다.
+
 ```bash
+corepack enable
+pnpm --dir web install --frozen-lockfile
+VITE_UI_VERSION=v0.80.0 pnpm --dir web build
+find internal/appui/dist -mindepth 1 ! -name '.gitkeep' -delete
+cp -R web/dist/. internal/appui/dist/
+test -s internal/appui/dist/index.html
+test -n "$(find internal/appui/dist/assets -type f -print -quit)"
+
 GOOS=linux GOARCH=amd64 CGO_ENABLED=0 \
-  go build -trimpath -ldflags "-s -w" -o gateway ./cmd/gateway
-./gateway
+  go build -trimpath \
+  -ldflags "-s -w -X vibe-coders/internal/proxy.AppVersion=v0.80.0" \
+  -o gateway ./cmd/gateway
+UI_APP_ENABLED=true ./gateway
 ```
+
+생성된 `web/dist`와 `internal/appui/dist`의 overlay 파일은 ignore 대상이며 소스 자산으로
+커밋하지 않습니다.
 
 ### 2.3 Docker
 
 ```bash
-docker build -t ai-coding-proxy-gateway:dev .
+docker build --build-arg VERSION=v0.80.0 -t ai-coding-proxy-gateway:v0.80.0 .
 
+export GATEWAY_VERSION=v0.80.0
+export UPSTREAM_API_KEY='<실제 upstream key>'
+scripts/init-deployment-env.sh /opt/proxy-gateway/gateway.env
+docker volume create proxy-gateway-data >/dev/null
 docker run -d --name proxy-gateway --restart=always \
   -p 8080:8080 \
-  -v $PWD/data:/data \
-  -e UPSTREAM_BASE_URL=https://api.openai.com \
-  -e UPSTREAM_API_KEY=sk-... \
-  -e ADMIN_TOKEN=$(openssl rand -hex 32) \
-  -e GATEWAY_SECRET=$(openssl rand -hex 32) \
-  ai-coding-proxy-gateway:dev
+  --mount source=proxy-gateway-data,target=/data \
+  --env-file /opt/proxy-gateway/gateway.env \
+  ai-coding-proxy-gateway:v0.80.0
 ```
+
+Dockerfile은 Node 24+pnpm frozen frontend builder → Go 1.26.8 embed builder → distroless
+nonroot의 3-stage 구조입니다. React 정적 에셋은 Go 바이너리에 포함되고 운영
+컨테이너에는 Node.js가 없습니다. `/app`은 기본 OFF이므로 Preview가 필요할 때만
+`UI_APP_ENABLED=true`를 지정합니다. `/admin`은 설정과 무관하게 계속 제공됩니다.
 
 ### 2.4 docker compose
 
-`docker-compose.yml` 이 함께 제공됩니다. `.env` 또는 셸 환경변수에 비밀값을 두고 한 줄로 띄웁니다.
+`docker-compose.yml`도 단일 컨테이너 실행과 정확히 같은 실제 named volume
+`proxy-gateway-data`를 사용합니다. 운영 비밀값은 저장소의 `.env`가 아니라 권한 0600인
+`/opt/proxy-gateway/gateway.env`에 고정합니다.
 
 ```bash
-export GATEWAY_VERSION=v0.1.0
-export UPSTREAM_API_KEY=sk-...
-export ADMIN_TOKEN=$(openssl rand -hex 32)
-export GATEWAY_SECRET=$(openssl rand -hex 32)
-docker compose up -d
-docker compose logs -f gateway
+export GATEWAY_VERSION=v0.80.0
+export UPSTREAM_API_KEY='<실제 upstream key>'
+scripts/init-deployment-env.sh /opt/proxy-gateway/gateway.env
+docker compose --env-file /opt/proxy-gateway/gateway.env up -d
+docker compose --env-file /opt/proxy-gateway/gateway.env logs -f gateway
 ```
+
+초기화 스크립트는 새 secret을 원자적으로 만들고, 기존 파일이면 필수 키와 64자리 secret을
+검증한 뒤 요청한 `GATEWAY_VERSION` 행만 원자 갱신합니다. 기존 secret은 회전하지 않습니다.
+개발용 Compose에서만 같은 스크립트에 저장소의 `.env`
+경로를 넘길 수 있으며 이 경우에도 권한은 0600이어야 합니다. 운영 중에는
+`docker compose down -v`를 실행하지 마세요.
 
 ### 2.5 오프라인망 적재
 
 운영 망에 인터넷이 없을 때는 외부에서 릴리즈 패키지를 만들어 옮깁니다.
+릴리스 빌드 호스트에는 Docker, Bash, curl, Python 3가 필요하며 Node.js와 jq는
+Docker builder 외부에 설치할 필요가 없습니다.
 
 ```bash
 # 인터넷이 되는 환경에서 산출
-./scripts/release.sh -v v0.1.0 -p linux/amd64
-# release/ai-coding-proxy-gateway-v0.1.0.tar.gz, .sha256, README-offline-*.md 생성
+./scripts/release.sh -v v0.80.0 -p linux/amd64
+# 기존 이미지·sha256·README + SBOM-v0.80.0.spdx.json +
+# THIRD_PARTY_LICENSES-v0.80.0.md 생성
 ```
 
 폐쇄망 서버에서:
 
 ```bash
-sha256sum -c ai-coding-proxy-gateway-v0.1.0.tar.gz.sha256
-gunzip -c ai-coding-proxy-gateway-v0.1.0.tar.gz | docker load
-docker run -d ... ai-coding-proxy-gateway:v0.1.0   # 2.3 절과 동일
+sha256sum -c ai-coding-proxy-gateway-v0.80.0.tar.gz.sha256
+gunzip -c ai-coding-proxy-gateway-v0.80.0.tar.gz | docker load
+docker run -d ... -e UI_APP_ENABLED=true ai-coding-proxy-gateway:v0.80.0
 ```
 
 ---
@@ -113,13 +145,23 @@ curl -fsS http://localhost:8080/metrics    # Prometheus exposition
 
 부팅이 정상이면 `/ready` 가 200 을 반환합니다. DB 가 잠시 끊겨도 `/ready` 는 503, `/health` 는 그대로 200 입니다.
 
-기동 직후 어드민 UI 도 확인하세요.
+기동 직후 두 관리자 UI와 Next Console deep link를 확인하세요.
 
 ```
-http://<host>:8080/admin
+Legacy Stable Console: http://<host>:8080/admin
+Next Console Preview:  http://<host>:8080/app/
 ```
 
+```bash
+curl -fsSI http://localhost:8080/app
+curl -fsS http://localhost:8080/app/providers >/dev/null
+curl -fsS http://localhost:8080/admin >/dev/null
+```
+
+`/app`은 기본 OFF이며 위 Preview 확인에는 `UI_APP_ENABLED=true`가 필요합니다.
 `ADMIN_TOKEN` 을 설정한 경우 UI 상단의 "관리자 토큰" 입력란에 그 값을 넣어야 데이터를 받아옵니다.
+릴리스 빌드 호스트에서는 `bash scripts/container-smoke.sh <image> <version>`으로 redirect,
+deep link, hashed asset cache, 버전 일치와 `/admin` fallback까지 검증합니다.
 
 ---
 
@@ -146,8 +188,8 @@ docker rm proxy-gateway        # 컨테이너 제거 (이미지/데이터는 유
 ### 4.3 docker compose
 
 ```bash
-docker compose stop gateway    # graceful
-docker compose down            # 컨테이너만 제거 (볼륨 보존)
+docker compose --env-file /opt/proxy-gateway/gateway.env stop gateway
+docker compose --env-file /opt/proxy-gateway/gateway.env down  # volume 보존; -v 금지
 ```
 
 ### 4.4 검증
@@ -155,11 +197,14 @@ docker compose down            # 컨테이너만 제거 (볼륨 보존)
 종료 후 다음을 확인:
 
 ```bash
-ls -lah data/                     # gateway.db 가 정상 사이즈
-test -s data/fallback.ndjson || true   # 비정상 종료 시 fallback 에 잔여 로그 가능
+test "$(docker volume inspect --format '{{.Name}}' proxy-gateway-data)" = proxy-gateway-data
+test -z "$(docker ps -q --filter volume=proxy-gateway-data)"  # 실행 중 사용자가 없어야 함
 ```
 
-만약 fallback.ndjson 에 데이터가 남았다면, 다음 기동 후 설정 탭의 "Fallback 로그 재처리" 또는 `POST /admin/fallback` 으로 DB 에 재반영하세요. 성공한 라인은 파일에서 제거되고, 파싱 실패나 DB 재삽입 실패 라인은 그대로 남습니다.
+Docker 데이터는 호스트의 `data/` 디렉터리가 아니라 named volume 안에 있습니다. 파일을
+확인하려고 임의 helper 이미지를 실행하지 말고 6절의 backup 스크립트로 검증된 사본을
+만드세요. `/data/fallback.ndjson`에 데이터가 남았다면 다음 기동 후 설정 탭의
+"Fallback 로그 재처리" 또는 `POST /admin/fallback`으로 DB에 재반영합니다.
 
 ---
 
@@ -226,7 +271,8 @@ curl "http://localhost:8080/admin/llm/evaluations?limit=100"
 ### 5.4 로그 위치
 
 - 표준 출력 (slog JSON 또는 텍스트). systemd / docker logs / 컨테이너 stdout 로 수집하세요.
-- 비상시 `data/fallback.ndjson` — DB 쓰기가 실패하거나 비정상 종료 시 마지막 보루.
+- 비상시 로컬 바이너리는 `data/fallback.ndjson`, Docker는 named volume 내부
+  `/data/fallback.ndjson` — DB 쓰기가 실패하거나 비정상 종료 시 마지막 보루.
 
 Fallback 상태 확인과 재처리:
 
@@ -241,45 +287,72 @@ curl -X POST http://localhost:8080/admin/fallback
 
 ## 6. 백업 / 복구
 
-### 6.1 백업
+Docker 운영 데이터는 `proxy-gateway-data` named volume에 있고 비밀값은
+`/opt/proxy-gateway/gateway.env`(0600)에 있습니다. 둘은 한 복구 단위이므로 함께
+백업합니다. distroless 런타임에는 shell이나 tar가 없기 때문에
+`scripts/backup-volume.sh`는 지정한 gateway 이미지를 **실행하지 않은 carrier
+container**로만 만들고 `docker cp`를 사용합니다. 외부 helper 이미지는 필요하지 않습니다.
 
-자동/수동 백업은 `scripts/backup.sh` (또는 `.ps1`) 으로 수행합니다. `sqlite3` 가 있으면 `.backup` 명령으로 락 충돌 없이 일관 사본을 만듭니다.
+### 6.1 Docker named volume 백업
+
+SQLite 일관성을 위해 먼저 gateway를 중지합니다. stopped gateway container가 volume을
+참조하는 것은 허용되지만 실행 중인 container가 하나라도 있으면 스크립트가 중단합니다.
 
 ```bash
-./scripts/backup.sh -d data -o backups -k 14     # 14일 보관
-# 산출: backups/gateway-20260602-1430.tar.gz
+docker compose --env-file /opt/proxy-gateway/gateway.env stop gateway
+scripts/backup-volume.sh backup \
+  --image ai-coding-proxy-gateway:v0.80.0 \
+  --volume proxy-gateway-data \
+  --env-file /opt/proxy-gateway/gateway.env \
+  --output-dir /opt/proxy-gateway/backups
+docker compose --env-file /opt/proxy-gateway/gateway.env start gateway
 ```
 
-크론 예시 (매일 04:00):
+산출물은 `gateway-volume-<UTC>-<pid>.tar.gz`와 같은 이름의 `.sha256`입니다. archive는
+SQLite header/가능한 경우 `PRAGMA quick_check`, 내부 파일 checksum, volume 이름을
+포함합니다. `gateway.env`도 들어 있으므로 두 파일 모두 0600으로 보관하고 별도 매체에
+암호화해 복제하세요. 이미지 태그는 `latest`가 아닌 현재 배포된 정확한 태그를 사용합니다.
 
-```cron
-0 4 * * *  /opt/proxy-gateway/scripts/backup.sh -d /opt/proxy-gateway/data -o /opt/proxy-gateway/backups -k 30 >> /var/log/proxy-backup.log 2>&1
+로컬 바이너리의 `./data`만 백업할 때는 기존 `scripts/backup.sh -d data -o backups`를
+사용할 수 있습니다. 이 host-directory 절차를 Docker named volume에 사용하지 마세요.
+
+### 6.2 Docker named volume 복구
+
+복구 스크립트는 다음을 모두 확인하기 전에는 volume을 삭제하지 않습니다.
+
+- 대상 volume의 정확한 이름, local driver 및 archive에 기록된 source volume
+- archive와 sidecar SHA256, 허용된 경로/파일 형식, 내부 checksum 및 SQLite 상태
+- 현재/백업 `GATEWAY_SECRET` 일치(불일치 시 명시적인 `--restore-env` 필요)
+- volume을 참조하는 container가 전혀 없음
+- 정확한 확인 문구 `RESTORE proxy-gateway-data`
+
+```bash
+# container만 제거하고 volume은 유지합니다. 절대로 -v를 붙이지 않습니다.
+docker compose --env-file /opt/proxy-gateway/gateway.env down
+
+scripts/backup-volume.sh restore \
+  --image ai-coding-proxy-gateway:v0.80.0 \
+  --volume proxy-gateway-data \
+  --env-file /opt/proxy-gateway/gateway.env \
+  --output-dir /opt/proxy-gateway/backups \
+  --archive /opt/proxy-gateway/backups/gateway-volume-<UTC>-<pid>.tar.gz \
+  --confirm 'RESTORE proxy-gateway-data'
+
+docker compose --env-file /opt/proxy-gateway/gateway.env up -d
+curl -fsS http://localhost:8080/ready
+curl -fsS http://localhost:8080/admin >/dev/null
 ```
 
-### 6.2 복구
+삭제 직전 스크립트는 현재 volume과 env의 `gateway-volume-prerestore-*` 안전 archive를
+자동 생성합니다. 백업의 env까지 되돌리겠다고 결정한 경우에만 `--restore-env`를
+추가하세요. 이 명시적 옵션은 현재 env가 분실되거나 손상된 재해복구도 지원하며, archive의
+검증된 env를 0600 파일로 원자적으로 복원합니다. 이때 현재 env가 유효하지 않으면 복구 전
+안전 archive의 configuration source에도 그 사실을 기록합니다. 복구 실패 시 volume을
+임의로 다시 삭제하지 말고 출력된 안전 archive를 보존해 원인을 조사합니다. 수동
+`docker volume rm`이나 `docker compose down -v`로 이 검증 절차를 우회하지 마세요.
 
-1. 게이트웨이 중지
-
-   ```bash
-   docker compose stop gateway
-   ```
-
-2. 손상된 `data/gateway.db` 를 다른 곳으로 옮기고 백업을 풉니다.
-
-   ```bash
-   mv data/gateway.db data/gateway.db.broken
-   tar -xzf backups/gateway-YYYYMMDD-HHMM.tar.gz -C /tmp
-   cp /tmp/data/gateway.db data/gateway.db
-   ```
-
-3. 기동
-
-   ```bash
-   docker compose up -d gateway
-   curl -fsS http://localhost:8080/ready
-   ```
-
-`GATEWAY_SECRET` 이 백업 시점과 동일해야 provider key 가 복호화됩니다. 다르면 `/admin/providers` 의 키들이 "복호화 실패" 가 되니, 그 경우 어드민에서 키만 재입력하세요(다른 데이터는 그대로 살아 있습니다).
+`GATEWAY_SECRET`이 백업 시점과 다르면 provider key를 복호화할 수 있으므로 기본 복구는
+fail closed로 중단합니다.
 
 ### 6.3 PostgreSQL 사용 시
 

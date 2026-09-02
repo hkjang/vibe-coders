@@ -3,12 +3,16 @@ package store
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"strconv"
 	"time"
 )
+
+var ErrAdminSettingConflict = errors.New("admin setting changed concurrently")
 
 // newStoreID makes a unique id for store-originated rows (e.g. setting history).
 func newStoreID(prefix string) string {
@@ -23,15 +27,16 @@ func newStoreID(prefix string) string {
 // JSON-encoded value (or, for secrets, the encrypted ciphertext). value_type tells the
 // caller how to decode it (string/int/bool/float/duration/csv).
 type AdminSetting struct {
-	Key       string `json:"key"`
-	Category  string `json:"category"`
-	ValueJSON string `json:"value_json"`
-	ValueType string `json:"value_type"`
-	IsSecret  bool   `json:"is_secret"`
-	Source    string `json:"source"`
-	Version   int    `json:"version"`
-	UpdatedBy string `json:"updated_by"`
-	UpdatedAt string `json:"updated_at"`
+	Key             string `json:"key"`
+	Category        string `json:"category"`
+	ValueJSON       string `json:"value_json"`
+	ValueType       string `json:"value_type"`
+	IsSecret        bool   `json:"is_secret"`
+	Source          string `json:"source"`
+	Version         int    `json:"version"`
+	ExpectedVersion *int   `json:"-"`
+	UpdatedBy       string `json:"updated_by"`
+	UpdatedAt       string `json:"updated_at"`
 }
 
 // AdminSettingHistory is one change record for a setting.
@@ -46,11 +51,11 @@ type AdminSettingHistory struct {
 	ChangedAt    string `json:"changed_at"`
 }
 
-// ListAdminSettings returns all stored admin settings.
-// AdminSettingsChangeToken returns a cheap token that changes whenever the admin_settings table
-// changes — MAX(updated_at) advances on any upsert, COUNT(*) and SUM(version) shift on deletes or
-// re-creates. A background reloader polls this so every pod converges after a change made on any
-// pod, without a restart.
+// AdminSettingsChangeToken returns a token for all DB-backed settings consumed by the runtime
+// reload loop. The admin_settings aggregate changes on upserts and deletes. The SSO digest covers
+// every provider field so a Keycloak update made on one pod also reloads every other pod, even if
+// two writes happen to receive the same updated_at value. The digest prevents secrets from being
+// exposed through pod-status change tokens.
 func (s *SQLStore) AdminSettingsChangeToken(ctx context.Context) (string, error) {
 	var count, versionSum int64
 	var maxUpdated string
@@ -58,9 +63,85 @@ func (s *SQLStore) AdminSettingsChangeToken(ctx context.Context) (string, error)
 	if err := row.Scan(&count, &versionSum, &maxUpdated); err != nil {
 		return "", err
 	}
-	return strconv.FormatInt(count, 10) + ":" + strconv.FormatInt(versionSum, 10) + ":" + maxUpdated, nil
+
+	ssoRows, err := s.db.QueryContext(ctx, `SELECT provider, enabled, issuer_url, client_id, client_secret_enc,
+		redirect_uri, scopes, default_role, role_claim, group_claim, allow_local_login,
+		COALESCE(role_map, ''), updated_at, COALESCE(updated_by, '')
+		FROM sso_provider_config ORDER BY provider`)
+	if err != nil {
+		return "", err
+	}
+	defer ssoRows.Close()
+
+	ssoDigest := sha256.New()
+	writeDigestPart := func(value string) {
+		_, _ = ssoDigest.Write(strconv.AppendInt(nil, int64(len(value)), 10))
+		_, _ = ssoDigest.Write([]byte{':'})
+		_, _ = ssoDigest.Write([]byte(value))
+	}
+	for ssoRows.Next() {
+		var (
+			provider, issuerURL, clientID, clientSecretEnc, redirectURI string
+			scopes, defaultRole, roleClaim, groupClaim, roleMap         string
+			updatedAt, updatedBy                                        string
+			enabled, allowLocalLogin                                    int64
+		)
+		if err := ssoRows.Scan(&provider, &enabled, &issuerURL, &clientID, &clientSecretEnc,
+			&redirectURI, &scopes, &defaultRole, &roleClaim, &groupClaim, &allowLocalLogin,
+			&roleMap, &updatedAt, &updatedBy); err != nil {
+			return "", err
+		}
+		for _, part := range []string{
+			provider,
+			strconv.FormatInt(enabled, 10),
+			issuerURL,
+			clientID,
+			clientSecretEnc,
+			redirectURI,
+			scopes,
+			defaultRole,
+			roleClaim,
+			groupClaim,
+			strconv.FormatInt(allowLocalLogin, 10),
+			roleMap,
+			updatedAt,
+			updatedBy,
+		} {
+			writeDigestPart(part)
+		}
+	}
+	if err := ssoRows.Err(); err != nil {
+		return "", err
+	}
+	featureRows, err := s.db.QueryContext(ctx, `SELECT name, enabled, COALESCE(updated_at, '')
+		FROM text2sql_feature_flags ORDER BY name`)
+	if err != nil {
+		return "", err
+	}
+	defer featureRows.Close()
+	featureDigest := sha256.New()
+	for featureRows.Next() {
+		var name, updatedAt string
+		var enabled int64
+		if err := featureRows.Scan(&name, &enabled, &updatedAt); err != nil {
+			return "", err
+		}
+		for _, part := range []string{name, strconv.FormatInt(enabled, 10), updatedAt} {
+			_, _ = featureDigest.Write(strconv.AppendInt(nil, int64(len(part)), 10))
+			_, _ = featureDigest.Write([]byte{':'})
+			_, _ = featureDigest.Write([]byte(part))
+		}
+	}
+	if err := featureRows.Err(); err != nil {
+		return "", err
+	}
+
+	return strconv.FormatInt(count, 10) + ":" + strconv.FormatInt(versionSum, 10) + ":" + maxUpdated +
+		":sso-sha256:" + hex.EncodeToString(ssoDigest.Sum(nil)) +
+		":t2s-sha256:" + hex.EncodeToString(featureDigest.Sum(nil)), nil
 }
 
+// ListAdminSettings returns all stored admin settings.
 func (s *SQLStore) ListAdminSettings(ctx context.Context) ([]AdminSetting, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT key, category, value_json, value_type, is_secret, source, version, COALESCE(updated_by, ''), updated_at
 		FROM admin_settings ORDER BY category, key`)
@@ -101,21 +182,56 @@ func (s *SQLStore) GetAdminSetting(ctx context.Context, key string) (AdminSettin
 // UpsertAdminSetting writes a setting and appends a history row, bumping the version. The
 // history records value hashes for secrets (the new/old JSON is omitted for secrets).
 func (s *SQLStore) UpsertAdminSetting(ctx context.Context, a AdminSetting, changedBy, reason string) error {
+	return s.UpsertAdminSettings(ctx, []AdminSetting{a}, changedBy, reason)
+}
+
+// UpsertAdminSettings applies a validated settings batch and all history rows in one
+// transaction. Each existing row uses a version compare-and-swap so concurrent pods
+// cannot silently overwrite one another with the same version.
+func (s *SQLStore) UpsertAdminSettings(ctx context.Context, settings []AdminSetting, changedBy, reason string) error {
+	if len(settings) == 0 {
+		return nil
+	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
+	seen := make(map[string]struct{}, len(settings))
+	for _, setting := range settings {
+		if setting.Key == "" {
+			return fmt.Errorf("admin setting key is required")
+		}
+		if _, exists := seen[setting.Key]; exists {
+			return fmt.Errorf("duplicate admin setting key %q", setting.Key)
+		}
+		seen[setting.Key] = struct{}{}
+		if err := s.upsertAdminSettingTx(ctx, tx, setting, changedBy, reason, now); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
 
+func (s *SQLStore) upsertAdminSettingTx(ctx context.Context, tx *sql.Tx, a AdminSetting, changedBy, reason, now string) error {
 	var oldValue string
 	var oldVersion int
 	row := tx.QueryRowContext(ctx, s.bind(`SELECT value_json, version FROM admin_settings WHERE key = ?`), a.Key)
+	found := true
 	switch err := row.Scan(&oldValue, &oldVersion); {
 	case errors.Is(err, sql.ErrNoRows):
+		found = false
 		oldVersion = 0
 	case err != nil:
 		return err
+	}
+	expectedVersion := a.Version
+	if a.ExpectedVersion != nil {
+		expectedVersion = *a.ExpectedVersion
+	}
+	if (a.ExpectedVersion != nil || a.Version > 0) && expectedVersion != oldVersion {
+		return fmt.Errorf("%w: %s expected version %d, current version %d", ErrAdminSettingConflict, a.Key, expectedVersion, oldVersion)
 	}
 	a.Version = oldVersion + 1
 	if a.Source == "" {
@@ -125,19 +241,29 @@ func (s *SQLStore) UpsertAdminSetting(ctx context.Context, a AdminSetting, chang
 	if a.IsSecret {
 		isSecret = 1
 	}
-	if _, err := tx.ExecContext(ctx, s.bind(`INSERT INTO admin_settings (key, category, value_json, value_type, is_secret, source, version, updated_by, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(key) DO UPDATE SET
-			category = excluded.category,
-			value_json = excluded.value_json,
-			value_type = excluded.value_type,
-			is_secret = excluded.is_secret,
-			source = excluded.source,
-			version = excluded.version,
-			updated_by = excluded.updated_by,
-			updated_at = excluded.updated_at`),
-		a.Key, a.Category, a.ValueJSON, a.ValueType, isSecret, a.Source, a.Version, changedBy, now); err != nil {
+	var result sql.Result
+	var err error
+	if found {
+		result, err = tx.ExecContext(ctx, s.bind(`UPDATE admin_settings SET
+			category = ?, value_json = ?, value_type = ?, is_secret = ?, source = ?,
+			version = ?, updated_by = ?, updated_at = ? WHERE key = ? AND version = ?`),
+			a.Category, a.ValueJSON, a.ValueType, isSecret, a.Source,
+			a.Version, changedBy, now, a.Key, oldVersion)
+	} else {
+		result, err = tx.ExecContext(ctx, s.bind(`INSERT INTO admin_settings
+			(key, category, value_json, value_type, is_secret, source, version, updated_by, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(key) DO NOTHING`),
+			a.Key, a.Category, a.ValueJSON, a.ValueType, isSecret, a.Source, a.Version, changedBy, now)
+	}
+	if err != nil {
 		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected != 1 {
+		return fmt.Errorf("%w: %s", ErrAdminSettingConflict, a.Key)
 	}
 	// History: omit raw secret values (store empty so only the change fact is kept).
 	histOld, histNew := oldValue, a.ValueJSON
@@ -149,11 +275,16 @@ func (s *SQLStore) UpsertAdminSetting(ctx context.Context, a AdminSetting, chang
 		newStoreID("ash"), a.Key, histOld, histNew, isSecret, changedBy, reason, now); err != nil {
 		return err
 	}
-	return tx.Commit()
+	return nil
 }
 
-// DeleteAdminSetting removes a stored override (reverting the key to env/default), recording history.
-func (s *SQLStore) DeleteAdminSetting(ctx context.Context, key, changedBy, reason string) error {
+// DeleteAdminSetting removes a stored override (reverting the key to env/default), recording
+// history. Callers may pass an expected version. Without one, the version read in this transaction
+// is still used by the DELETE compare-and-swap so a concurrent update cannot be silently removed.
+func (s *SQLStore) DeleteAdminSetting(ctx context.Context, key, changedBy, reason string, expectedVersions ...int) error {
+	if len(expectedVersions) > 1 {
+		return fmt.Errorf("at most one expected admin setting version may be supplied")
+	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -161,15 +292,29 @@ func (s *SQLStore) DeleteAdminSetting(ctx context.Context, key, changedBy, reaso
 	}
 	defer tx.Rollback()
 	var oldValue string
-	var isSecret int
-	row := tx.QueryRowContext(ctx, s.bind(`SELECT value_json, is_secret FROM admin_settings WHERE key = ?`), key)
-	if err := row.Scan(&oldValue, &isSecret); errors.Is(err, sql.ErrNoRows) {
+	var isSecret, currentVersion int
+	row := tx.QueryRowContext(ctx, s.bind(`SELECT value_json, is_secret, version FROM admin_settings WHERE key = ?`), key)
+	if err := row.Scan(&oldValue, &isSecret, &currentVersion); errors.Is(err, sql.ErrNoRows) {
+		if len(expectedVersions) == 1 && expectedVersions[0] != 0 {
+			return fmt.Errorf("%w: %s expected version %d, current setting does not exist", ErrAdminSettingConflict, key, expectedVersions[0])
+		}
 		return nil
 	} else if err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, s.bind(`DELETE FROM admin_settings WHERE key = ?`), key); err != nil {
+	if len(expectedVersions) == 1 && expectedVersions[0] != currentVersion {
+		return fmt.Errorf("%w: %s expected version %d, current version %d", ErrAdminSettingConflict, key, expectedVersions[0], currentVersion)
+	}
+	result, err := tx.ExecContext(ctx, s.bind(`DELETE FROM admin_settings WHERE key = ? AND version = ?`), key, currentVersion)
+	if err != nil {
 		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected != 1 {
+		return fmt.Errorf("%w: %s", ErrAdminSettingConflict, key)
 	}
 	if isSecret == 1 {
 		oldValue = ""

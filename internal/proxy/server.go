@@ -24,14 +24,16 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"vibe-coders/internal/appui"
 	"vibe-coders/internal/audit"
 	"vibe-coders/internal/config"
 	"vibe-coders/internal/secret"
 	"vibe-coders/internal/store"
 )
 
-// AppVersion is the gateway build version, surfaced in /auth/me and the admin UI.
-const AppVersion = "v0.79.8"
+// AppVersion is the gateway build version, surfaced in /auth/me and both admin UIs.
+// Release builds override it with -X vibe-coders/internal/proxy.AppVersion=<tag>.
+var AppVersion = "v0.80.0"
 
 type Server struct {
 	cfg      config.Config
@@ -89,6 +91,7 @@ type Server struct {
 	mcpRefresh      atomic.Bool
 	lastReloadNano  atomic.Int64           // unix nanos of this pod's last runtime-config reload (convergence observability)
 	lastReloadTok   atomic.Pointer[string] // admin_settings change token this pod last applied
+	appUIRuntime    atomic.Pointer[appUIRuntimeConfig]
 }
 
 type atomicKillState struct {
@@ -137,7 +140,10 @@ func NewServer(cfg config.Config, db *store.SQLStore, logger *store.AsyncLogger,
 
 	// Build the runtime config snapshot (env defaults overlaid with admin settings)
 	// before starting workers, so workers and handlers see admin-managed values.
-	server.reloadRuntimeConfig(context.Background())
+	initialReloadToken, initialReloadTokenErr := db.AdminSettingsChangeToken(context.Background())
+	if err := server.reloadRuntimeConfig(context.Background()); err != nil {
+		return nil, fmt.Errorf("load runtime settings: %w", err)
+	}
 
 	// Background ClickHouse auto-sink, managed so it can be (re)started/stopped when
 	// settings change (only runs when URL + interval are configured).
@@ -158,11 +164,20 @@ func NewServer(cfg config.Config, db *store.SQLStore, logger *store.AsyncLogger,
 	server.seedPricingIfEmpty(context.Background())
 
 	// Load admin-managed Text2SQL feature toggles into the in-memory cache.
-	server.reloadText2SQLFeatures(context.Background())
+	if err := server.reloadText2SQLFeatures(context.Background()); err != nil {
+		return nil, fmt.Errorf("load Text2SQL feature flags: %w", err)
+	}
 
 	// Load the DB-backed Keycloak provider overlay (decrypts the stored client secret),
 	// falling back to environment config when no row exists.
-	server.reloadKeycloakConfig(context.Background())
+	keycloakReloadErr := server.reloadKeycloakConfig(context.Background())
+	if keycloakReloadErr != nil {
+		slog.Warn("Keycloak config initialization failed; SSO is disabled", "error", keycloakReloadErr)
+	}
+	if tok, err := db.AdminSettingsChangeToken(context.Background()); err == nil && initialReloadTokenErr == nil && keycloakReloadErr == nil && tok == initialReloadToken {
+		server.lastReloadTok.Store(&tok)
+		server.lastReloadNano.Store(time.Now().UnixNano())
+	}
 
 	// Multi-pod convergence: poll the admin_settings change token so a settings change made on any
 	// pod (or via direct DB edit) is applied on every pod within one interval, without a restart.
@@ -226,6 +241,11 @@ func (s *Server) MetricsHandle() *Metrics { return s.metrics }
 
 func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
+	appHandler := appui.NewEmbeddedHandler(appui.Options{Enabled: func(context.Context) bool {
+		return s.appUIConf().Enabled
+	}})
+	mux.Handle("/app", appHandler)
+	mux.Handle("/app/", appHandler)
 	mux.HandleFunc("/favicon.ico", s.handleFavicon)
 	mux.HandleFunc("/health", s.handleHealth)
 	mux.HandleFunc("/ready", s.handleReady)
@@ -237,6 +257,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/auth/refresh", s.handleAuthRefresh)
 	mux.HandleFunc("/auth/me", s.handleAuthMe)
 	mux.HandleFunc("/auth/sso/status", s.handleSSOStatus)
+	mux.HandleFunc("/auth/sso/exchange", s.handleSSOExchange)
 	mux.HandleFunc("/auth/keycloak/login", s.handleKeycloakLogin)
 	mux.HandleFunc("/auth/keycloak/callback", s.handleKeycloakCallback)
 	mux.HandleFunc("/auth/keycloak/logout", s.handleKeycloakLogout)
@@ -250,6 +271,7 @@ func (s *Server) Routes() http.Handler {
 		s.handleKeycloakConfig(w, r)
 	})
 	mux.HandleFunc("/admin/sso/keycloak/test", s.handleKeycloakTest)
+	mux.HandleFunc("/admin/ui-bootstrap", s.handleAdminUIBootstrap)
 	mux.HandleFunc("/admin", s.handleAdminUI)
 	mux.HandleFunc("/admin/", s.handleAdminUI)
 	mux.HandleFunc("/admin/stats", s.handleStats)
@@ -635,7 +657,18 @@ func (s *Server) Routes() http.Handler {
 	// Keep the bare service URL useful without turning unknown paths into admin routes.
 	// The admin UI already owns authentication and the branded login experience.
 	mux.HandleFunc("/", s.handleRoot)
-	return withTrace(mux)
+
+	// net/http.ServeMux canonicalizes dot segments and repeated slashes before it
+	// selects a handler. Route the /app namespace first so the app handler can
+	// reject those paths instead of redirecting them into another namespace.
+	router := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/app" || strings.HasPrefix(r.URL.Path, "/app/") {
+			appHandler.ServeHTTP(w, r)
+			return
+		}
+		mux.ServeHTTP(w, r)
+	})
+	return withTrace(router)
 }
 
 func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
@@ -1966,7 +1999,9 @@ func (s *Server) authorizeAdmin(r *http.Request) bool {
 		// readonly: only allow safe methods on /admin
 		return r.Method == http.MethodGet || r.Method == http.MethodHead
 	}
-	slog.Warn("admin auth failed: token mismatch", "received_token", token, "expected_token", s.cfg.Auth.AdminToken)
+	// Never put presented or configured credentials in logs. A short event is enough
+	// for operators; the auth audit record already contains IP and user-agent context.
+	slog.Warn("admin auth failed: token mismatch")
 	return false
 }
 
@@ -2461,17 +2496,33 @@ func bearerToken(header string) string {
 }
 
 func traceIDFromRequest(r *http.Request) string {
-	if value := strings.TrimSpace(r.Header.Get("X-Request-ID")); value != "" {
+	if value := strings.TrimSpace(r.Header.Get("X-Request-ID")); validRequestID(value) {
 		return value
 	}
-	if value := strings.TrimSpace(r.Header.Get("X-Trace-ID")); value != "" {
+	if value := strings.TrimSpace(r.Header.Get("X-Trace-ID")); validRequestID(value) {
 		return value
 	}
 	return newID("trace")
 }
 
+func validRequestID(value string) bool {
+	if value == "" || len(value) > 128 {
+		return false
+	}
+	for _, r := range value {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' || r == '.' || r == ':' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
 func withTrace(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestID := traceIDFromRequest(r)
+		r.Header.Set("X-Request-ID", requestID)
+		w.Header().Set("X-Request-ID", requestID)
 		next.ServeHTTP(w, r)
 	})
 }

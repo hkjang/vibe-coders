@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"math/big"
 	"net/http"
@@ -38,14 +39,34 @@ var (
 	discFetch time.Time
 
 	jwksMu    sync.Mutex
-	jwksKeys  map[string]*rsa.PublicKey
-	jwksFetch time.Time
+	jwksCache = map[string]jwksCacheEntry{}
 )
 
-const oidcCacheTTL = 10 * time.Minute
+type jwksCacheEntry struct {
+	keys    map[string]*rsa.PublicKey
+	fetched time.Time
+}
+
+const (
+	oidcCacheTTL     = 10 * time.Minute
+	maxOIDCJSONBytes = 1 << 20 // discovery and JWKS documents are configuration, never bulk data
+	minRSAKeyBits    = 2048
+	maxRSAKeyBits    = 8192
+)
+
+func invalidateOIDCCaches() {
+	discMu.Lock()
+	discCache = oidcDiscovery{}
+	discFetch = time.Time{}
+	discMu.Unlock()
+	jwksMu.Lock()
+	jwksCache = map[string]jwksCacheEntry{}
+	jwksMu.Unlock()
+}
 
 // keycloakDiscover fetches (and caches) the issuer's OIDC discovery document.
 func keycloakDiscover(ctx context.Context, issuer string) (oidcDiscovery, error) {
+	issuer = strings.TrimRight(strings.TrimSpace(issuer), "/")
 	discMu.Lock()
 	defer discMu.Unlock()
 	if discCache.Issuer == issuer && time.Since(discFetch) < oidcCacheTTL {
@@ -58,6 +79,9 @@ func keycloakDiscover(ctx context.Context, issuer string) (oidcDiscovery, error)
 	}
 	if d.Issuer == "" || d.AuthorizationEndpoint == "" || d.TokenEndpoint == "" || d.JWKSURI == "" {
 		return oidcDiscovery{}, errors.New("incomplete OIDC discovery document")
+	}
+	if d.Issuer != issuer {
+		return oidcDiscovery{}, fmt.Errorf("OIDC discovery issuer mismatch: got %q", d.Issuer)
 	}
 	discCache, discFetch = d, time.Now()
 	return d, nil
@@ -76,11 +100,12 @@ type jwkSet struct {
 
 // keycloakJWKSKey returns the RSA public key for a kid, refreshing the JWKS on a miss
 // (handles key rotation) and on TTL expiry.
-func keycloakJWKSKey(ctx context.Context, jwksURI, kid string) (*rsa.PublicKey, error) {
+func keycloakJWKSKey(ctx context.Context, issuer, jwksURI, kid string) (*rsa.PublicKey, error) {
 	jwksMu.Lock()
 	defer jwksMu.Unlock()
-	if jwksKeys != nil && time.Since(jwksFetch) < oidcCacheTTL {
-		if k, ok := jwksKeys[kid]; ok {
+	cacheKey := issuer + "\x00" + jwksURI
+	if cached, ok := jwksCache[cacheKey]; ok && time.Since(cached.fetched) < oidcCacheTTL {
+		if k, ok := cached.keys[kid]; ok {
 			return k, nil
 		}
 	}
@@ -100,7 +125,7 @@ func keycloakJWKSKey(ctx context.Context, jwksURI, kid string) (*rsa.PublicKey, 
 		}
 		keys[k.Kid] = pub
 	}
-	jwksKeys, jwksFetch = keys, time.Now()
+	jwksCache[cacheKey] = jwksCacheEntry{keys: keys, fetched: time.Now()}
 	if k, ok := keys[kid]; ok {
 		return k, nil
 	}
@@ -112,19 +137,29 @@ func jwkToRSA(nB64, eB64 string) (*rsa.PublicKey, error) {
 	if err != nil {
 		return nil, err
 	}
+	modulus := new(big.Int).SetBytes(nb)
+	if bits := modulus.BitLen(); bits < minRSAKeyBits || bits > maxRSAKeyBits {
+		return nil, fmt.Errorf("invalid RSA modulus size: %d bits", bits)
+	}
 	eb, err := base64.RawURLEncoding.DecodeString(strings.TrimRight(eB64, "="))
 	if err != nil {
 		return nil, err
 	}
-	e := 0
+	if len(eb) == 0 || len(eb) > 8 {
+		return nil, errors.New("invalid RSA exponent size")
+	}
 	// Big-endian exponent bytes → int.
 	padded := make([]byte, 8)
 	copy(padded[8-len(eb):], eb)
-	e = int(binary.BigEndian.Uint64(padded))
-	if e == 0 {
+	exponent := binary.BigEndian.Uint64(padded)
+	if exponent > uint64(^uint(0)>>1) {
+		return nil, errors.New("RSA exponent overflows int")
+	}
+	e := int(exponent)
+	if e < 3 || e%2 == 0 {
 		return nil, errors.New("invalid RSA exponent")
 	}
-	return &rsa.PublicKey{N: new(big.Int).SetBytes(nb), E: e}, nil
+	return &rsa.PublicKey{N: modulus, E: e}, nil
 }
 
 // keycloakVerifyJWT verifies an RS256 JWT's signature (via JWKS), issuer, and expiry
@@ -146,7 +181,7 @@ func (s *Server) keycloakVerifyJWT(ctx context.Context, disc oidcDiscovery, toke
 	if header.Alg != "RS256" {
 		return nil, errors.New("unsupported jwt alg: " + header.Alg)
 	}
-	key, err := keycloakJWKSKey(ctx, disc.JWKSURI, header.Kid)
+	key, err := keycloakJWKSKey(ctx, disc.Issuer, disc.JWKSURI, header.Kid)
 	if err != nil {
 		return nil, err
 	}
@@ -186,10 +221,18 @@ func (s *Server) verifyKeycloakIDToken(ctx context.Context, disc oidcDiscovery, 
 	if err != nil {
 		return nil, err
 	}
-	if !audienceMatches(claims["aud"], s.keycloakConfig().ClientID) {
-		if azp, _ := claims["azp"].(string); azp != s.keycloakConfig().ClientID {
-			return nil, errors.New("id_token audience mismatch")
-		}
+	clientID := s.keycloakConfig().ClientID
+	if !audienceMatches(claims["aud"], clientID) {
+		return nil, errors.New("id_token audience mismatch")
+	}
+	// azp identifies the authorized party; it narrows a valid audience and can never
+	// substitute for a missing audience grant. Require it for multi-audience ID tokens
+	// and reject an explicit value for a different client.
+	azp, azpPresent := claims["azp"]
+	azpValue, azpIsString := azp.(string)
+	if (audienceCount(claims["aud"]) > 1 && (!azpIsString || azpValue != clientID)) ||
+		(azpPresent && (!azpIsString || azpValue != clientID)) {
+		return nil, errors.New("id_token authorized party mismatch")
 	}
 	if expectedNonce != "" {
 		if n, _ := claims["nonce"].(string); n != expectedNonce {
@@ -204,7 +247,8 @@ func (s *Server) verifyKeycloakIDToken(ctx context.Context, disc oidcDiscovery, 
 // clients and SSO callers authenticate to the API/admin with a Keycloak bearer token. No
 // internal session is required (the token is externally minted).
 func (s *Server) verifyKeycloakAccessToken(ctx context.Context, token string) (accessClaims, bool) {
-	if !s.keycloakConfig().Enabled || token == "" {
+	kc := s.keycloakConfig()
+	if !kc.Enabled || kc.ClientID == "" || token == "" {
 		return accessClaims{}, false
 	}
 	// Cheap reject: our internal tokens are HS256; only attempt RS256 ones.
@@ -220,12 +264,18 @@ func (s *Server) verifyKeycloakAccessToken(ctx context.Context, token string) (a
 			return accessClaims{}, false
 		}
 	}
-	disc, err := keycloakDiscover(ctx, s.keycloakConfig().IssuerURL)
+	disc, err := keycloakDiscover(ctx, kc.IssuerURL)
 	if err != nil {
 		return accessClaims{}, false
 	}
 	claims, err := s.keycloakVerifyJWT(ctx, disc, token)
 	if err != nil {
+		return accessClaims{}, false
+	}
+	// An access token minted for another client in the same realm has a valid issuer
+	// and signature too. This service is a resource server, so its configured client
+	// ID must be an explicit audience; azp alone is not an audience grant.
+	if !audienceMatches(claims["aud"], kc.ClientID) || strClaim(claims, "sub") == "" {
 		return accessClaims{}, false
 	}
 	role := resolveKeycloakRoleWith(s.effectiveKeycloakRoleMap(), s.keycloakRolesFromClaims(claims), s.keycloakConfig().DefaultRole)
@@ -248,17 +298,51 @@ func (s *Server) verifyKeycloakAccessToken(ctx context.Context, token string) (a
 }
 
 func audienceMatches(aud any, clientID string) bool {
-	switch v := aud.(type) {
-	case string:
-		return v == clientID
-	case []any:
-		for _, a := range v {
-			if s, _ := a.(string); s == clientID {
-				return true
-			}
+	values, valid := audienceValues(aud)
+	if !valid {
+		return false
+	}
+	for _, value := range values {
+		if value == clientID {
+			return true
 		}
 	}
 	return false
+}
+
+func audienceCount(aud any) int {
+	values, valid := audienceValues(aud)
+	if !valid {
+		return 0
+	}
+	return len(values)
+}
+
+// audienceValues enforces JWT StringOrURI semantics. Ignoring malformed array entries can
+// accidentally turn a multi-audience token into a single-audience token and skip the azp check.
+func audienceValues(aud any) ([]string, bool) {
+	switch value := aud.(type) {
+	case string:
+		if value == "" {
+			return nil, false
+		}
+		return []string{value}, true
+	case []any:
+		if len(value) == 0 {
+			return nil, false
+		}
+		values := make([]string, 0, len(value))
+		for _, item := range value {
+			text, ok := item.(string)
+			if !ok || text == "" {
+				return nil, false
+			}
+			values = append(values, text)
+		}
+		return values, true
+	default:
+		return nil, false
+	}
 }
 
 func oidcGetJSON(ctx context.Context, url string, out any) error {
@@ -274,7 +358,17 @@ func oidcGetJSON(ctx context.Context, url string, out any) error {
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("GET %s: status %d", url, resp.StatusCode)
 	}
-	return json.NewDecoder(resp.Body).Decode(out)
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxOIDCJSONBytes+1))
+	if err != nil {
+		return err
+	}
+	if len(data) > maxOIDCJSONBytes {
+		return fmt.Errorf("GET %s: OIDC JSON exceeds %d bytes", url, maxOIDCJSONBytes)
+	}
+	if err := json.Unmarshal(data, out); err != nil {
+		return fmt.Errorf("GET %s: decode OIDC JSON: %w", url, err)
+	}
+	return nil
 }
 
 // ── login-flow state store (state → nonce + PKCE verifier), short-lived ──────────
@@ -282,7 +376,11 @@ func oidcGetJSON(ctx context.Context, url string, out any) error {
 type oidcFlowState struct {
 	nonce    string
 	verifier string
+	returnTo string
 	created  time.Time
+	// persisted distinguishes a durable DB mirror from the only copy retained after a failed
+	// DB save. A normal DB miss must never resurrect a durable flow already consumed by a pod.
+	persisted bool
 }
 
 var (
@@ -317,14 +415,17 @@ func takeFlowState(state string) (oidcFlowState, bool) {
 
 // saveOIDCFlow persists the login-flow state in the DB (durable across restarts and shared across
 // instances) and mirrors it in the in-memory map as a fallback for the single-instance/no-DB case.
-func (s *Server) saveOIDCFlow(ctx context.Context, state, nonce, verifier string) {
+func (s *Server) saveOIDCFlow(ctx context.Context, state, nonce, verifier, returnTo string) {
 	now := time.Now()
-	storeFlowState(state, oidcFlowState{nonce: nonce, verifier: verifier, created: now})
+	fs := oidcFlowState{nonce: nonce, verifier: verifier, returnTo: returnTo, created: now}
 	if s.db != nil {
-		if err := s.db.SaveOIDCFlowState(ctx, state, nonce, verifier, now.UTC()); err != nil {
+		if err := s.db.SaveOIDCFlowState(ctx, state, nonce, verifier, returnTo, now.UTC()); err != nil {
 			slog.Warn("persist oidc flow state failed; relying on in-memory state", "error", err)
+		} else {
+			fs.persisted = true
 		}
 	}
+	storeFlowState(state, fs)
 }
 
 // takeOIDCFlow consumes the login-flow state, preferring the durable DB copy and falling back to
@@ -332,20 +433,39 @@ func (s *Server) saveOIDCFlow(ctx context.Context, state, nonce, verifier string
 // write had failed).
 func (s *Server) takeOIDCFlow(ctx context.Context, state string) (oidcFlowState, bool) {
 	if s.db != nil {
-		if nonce, verifier, found, err := s.db.TakeOIDCFlowState(ctx, state); err != nil {
-			slog.Warn("read oidc flow state failed; falling back to in-memory", "error", err)
+		if nonce, verifier, returnTo, found, err := s.db.TakeOIDCFlowState(ctx, state); err != nil {
+			slog.Warn("read oidc flow state failed", "error", err)
+			// Fail closed for a state that was successfully persisted: another pod might have
+			// consumed it before this read failed. Only a state whose DB save failed is safe to
+			// recover from the originating process's memory.
+			fs, ok := takeFlowState(state)
+			if !ok || fs.persisted {
+				return oidcFlowState{}, false
+			}
+			return fs, true
 		} else if found {
 			_, _ = takeFlowState(state) // clear any mirrored in-memory copy
-			return oidcFlowState{nonce: nonce, verifier: verifier, created: time.Now()}, true
+			return oidcFlowState{nonce: nonce, verifier: verifier, returnTo: returnTo, created: time.Now()}, true
+		} else {
+			// A healthy DB miss means another pod already consumed (or pruned) any durable row.
+			// Remove its mirror without returning it. Only a failed DB save has no durable copy
+			// and may therefore use the originating pod's in-memory state.
+			fs, ok := takeFlowState(state)
+			if !ok || fs.persisted {
+				return oidcFlowState{}, false
+			}
+			return fs, true
 		}
 	}
 	return takeFlowState(state)
 }
 
-func randomURLSafe(nbytes int) string {
+func randomURLSafe(nbytes int) (string, error) {
 	b := make([]byte, nbytes)
-	_, _ = rand.Read(b)
-	return base64.RawURLEncoding.EncodeToString(b)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
 func pkceChallenge(verifier string) string {
@@ -376,9 +496,8 @@ func resolveKeycloakRoleWith(roleMap map[string]string, roles []string, defaultR
 }
 
 // resolveKeycloakRoleExplicit resolves the internal role and reports whether it came from an
-// explicit claim→role mapping (true) or the default fallback (false). A fallback role must not
-// silently overwrite an existing user's internal role — otherwise a super_admin whose IdP carries
-// no mapped role would be demoted to the default role on their next SSO login.
+// explicit claim→role mapping (true) or the configured default fallback (false). Both outcomes
+// are authoritative for SSO-linked users so removed IdP roles cannot leave stale privileges.
 func resolveKeycloakRoleExplicit(roleMap map[string]string, roles []string, defaultRole string) (string, bool) {
 	if len(roleMap) == 0 {
 		roleMap = keycloakRoleMap

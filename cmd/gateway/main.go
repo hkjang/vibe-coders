@@ -56,6 +56,9 @@ func main() {
 		Addr:              cfg.ListenAddr,
 		Handler:           srv.Routes(),
 		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       2 * time.Minute,
+		IdleTimeout:       2 * time.Minute,
+		MaxHeaderBytes:    1 << 20,
 	}
 
 	errCh := make(chan error, 1)

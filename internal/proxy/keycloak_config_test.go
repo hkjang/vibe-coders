@@ -3,6 +3,7 @@ package proxy
 import (
 	"context"
 	"testing"
+	"time"
 
 	"vibe-coders/internal/config"
 	"vibe-coders/internal/secret"
@@ -19,10 +20,13 @@ func TestKeycloakConfigDBOverlayAndSecretAtRest(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := &Server{
-		cfg: config.Config{Keycloak: config.KeycloakConfig{
-			Enabled: false, IssuerURL: "https://env-issuer/realms/x", ClientID: "env-client",
-			ClientSecret: "env-secret", DefaultRole: "developer", Scopes: []string{"openid"},
-		}},
+		cfg: config.Config{
+			Auth: config.AuthConfig{Enabled: true, JWTSecret: "test-jwt-secret"},
+			Keycloak: config.KeycloakConfig{
+				Enabled: false, IssuerURL: "https://env-issuer/realms/x", ClientID: "env-client",
+				ClientSecret: "env-secret", DefaultRole: "developer", Scopes: []string{"openid"},
+			},
+		},
 		db: db,
 	}
 	s.secrets.Store(cipher)
@@ -68,6 +72,73 @@ func TestKeycloakConfigDBOverlayAndSecretAtRest(t *testing.T) {
 	}
 	if got.DefaultRole != "team_admin" || got.AllowLocalLogin {
 		t.Fatalf("other fields not applied: %+v", got)
+	}
+
+	wrongCipher, err := secret.New("different-unit-test-passphrase")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.secrets.Store(wrongCipher)
+	if err := s.reloadKeycloakConfig(ctx); err == nil {
+		t.Fatal("decrypting the DB config with the wrong key must fail")
+	}
+	retained := s.keycloakConfig()
+	if retained.IssuerURL != got.IssuerURL || retained.ClientID != got.ClientID || retained.ClientSecret != got.ClientSecret || retained.AllowLocalLogin != got.AllowLocalLogin {
+		t.Fatalf("failed reload replaced the last-known-good config: got %+v want %+v", retained, got)
+	}
+}
+
+func TestKeycloakConfigConvergesThroughRuntimeReloadLoop(t *testing.T) {
+	db := openTestStore(t)
+	ctx := context.Background()
+
+	cipher, err := secret.New("unit-test-passphrase")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pod := &Server{
+		cfg: config.Config{
+			Auth: config.AuthConfig{Enabled: true, JWTSecret: "test-jwt-secret"},
+			Keycloak: config.KeycloakConfig{
+				IssuerURL: "https://env-issuer/realms/x",
+				ClientID:  "env-client",
+			},
+		},
+		db: db,
+	}
+	pod.secrets.Store(cipher)
+	// Model startup: runtime config and Keycloak are loaded before the polling goroutine starts.
+	pod.reloadRuntimeConfig(ctx)
+	pod.reloadText2SQLFeatures(ctx)
+	pod.reloadKeycloakConfig(ctx)
+
+	enc, err := cipher.Encrypt("db-top-secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SaveSSOProviderConfig(ctx, store.SSOProviderConfig{
+		Provider: "keycloak", Enabled: true, IssuerURL: "https://db-issuer/realms/y",
+		ClientID: "db-client", ClientSecretEnc: enc, RedirectURI: "https://gw.example/auth/keycloak/callback", Scopes: []string{"openid"},
+		AllowLocalLogin: false, UpdatedBy: "admin@x.com",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	loopCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		pod.runtimeReloadLoop(loopCtx, 5*time.Millisecond)
+	}()
+	waitFor(t, time.Second, func() bool {
+		got := pod.keycloakConfig()
+		return got.Enabled && got.ClientID == "db-client" && got.ClientSecret == "db-top-secret"
+	})
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("runtime reload loop did not stop")
 	}
 }
 

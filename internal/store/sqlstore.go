@@ -1923,6 +1923,14 @@ func migrationStatements() []string {
 			state TEXT PRIMARY KEY,
 			nonce TEXT NOT NULL DEFAULT '',
 			verifier TEXT NOT NULL DEFAULT '',
+			return_to TEXT NOT NULL DEFAULT '/admin',
+			created_at TEXT NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS oidc_login_exchanges (
+			code_hash TEXT PRIMARY KEY,
+			user_id TEXT NOT NULL,
+			team_id TEXT NOT NULL DEFAULT '',
+			keycloak_sid TEXT NOT NULL DEFAULT '',
 			created_at TEXT NOT NULL
 		)`,
 		`CREATE TABLE IF NOT EXISTS mcp_tool_contracts (
@@ -2160,9 +2168,12 @@ func migrationStatements() []string {
 			allow_local_login INTEGER NOT NULL DEFAULT 1,
 			role_map TEXT NOT NULL DEFAULT '',
 			updated_at TEXT NOT NULL DEFAULT '',
-			updated_by TEXT NOT NULL DEFAULT ''
+			updated_by TEXT NOT NULL DEFAULT '',
+			version INTEGER NOT NULL DEFAULT 1
 		)`,
 		`ALTER TABLE sso_provider_config ADD COLUMN role_map TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE sso_provider_config ADD COLUMN version INTEGER NOT NULL DEFAULT 1`,
+		`ALTER TABLE oidc_flow_states ADD COLUMN return_to TEXT NOT NULL DEFAULT '/admin'`,
 		`ALTER TABLE workflow_runs ADD COLUMN trace_id TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE ai_app_runs ADD COLUMN trace_id TEXT NOT NULL DEFAULT ''`,
 		// Agent Routes: operator-defined virtual models that run an agentic loop over pinned
