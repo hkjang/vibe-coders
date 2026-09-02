@@ -406,8 +406,15 @@ export function resolveFeature(
         permitted: false,
         reason: feature.requiredPermission,
       };
-    } else if (feature.enabledRoles.length && !feature.enabledRoles.some((role) => roles.includes(role))) {
-      effective = { feature, status: "hidden", readOnly: true, permitted: false, reason: "preview_role" };
+    } else if (
+      (feature.status === "preview" || feature.status === "preview_read_only") &&
+      feature.enabledRoles.length &&
+      !feature.enabledRoles.some((role) => roles.includes(role))
+    ) {
+      effective =
+        legacyFallback && feature.fallbackEnabled
+          ? { feature, status: "legacy", readOnly: true, permitted: true, reason: "legacy_fallback" }
+          : { feature, status: "hidden", readOnly: true, permitted: false, reason: "preview_role" };
     } else if (!versionAtLeast(backendVersion, feature.minimumApiVersion)) {
       effective = { feature, status: "legacy", readOnly: true, permitted: true, reason: "api_version" };
     } else if (

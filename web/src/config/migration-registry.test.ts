@@ -28,6 +28,12 @@ const gatewayAdmin: AuthUser = {
   roles: ["admin"],
 };
 
+const legacyOnlyAdmin: AuthUser = {
+  ...operator,
+  role: "ops_admin",
+  roles: ["ops_admin"],
+};
+
 describe("migration registry", () => {
   const serverContract = [
     ["overview", "/app/overview"],
@@ -92,6 +98,25 @@ describe("migration registry", () => {
         status: "legacy",
         readOnly: true,
         reason: "ui_not_implemented",
+      });
+    }
+  });
+
+  it("keeps Legacy access when a permitted role is outside the local Preview cohort", () => {
+    for (const featureId of ["gateway.providers", "gateway.models"] as const) {
+      const feature = migrationRegistry.find((candidate) => candidate.featureId === featureId);
+      if (!feature) throw new Error(`${featureId} fixture is missing`);
+
+      expect(resolveFeature(feature, legacyOnlyAdmin, "v0.82.0")).toMatchObject({
+        permitted: true,
+        status: "legacy",
+        readOnly: true,
+        reason: "legacy_fallback",
+      });
+      expect(resolveFeature(feature, legacyOnlyAdmin, "v0.82.0", { legacyFallback: false })).toMatchObject({
+        permitted: false,
+        status: "hidden",
+        reason: "preview_role",
       });
     }
   });
