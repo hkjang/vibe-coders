@@ -39,7 +39,11 @@ func (rc *requestPipeline) stepAgentRoute() bool {
 		return true
 	}
 	route, ok, err := s.db.GetAgentRouteByModel(r.Context(), model)
-	if err != nil || !ok || !route.Enabled {
+	if err != nil {
+		writeOpenAIError(w, http.StatusServiceUnavailable, "agent route lookup is unavailable", "server_error", "agent_route_lookup_failed")
+		return false
+	}
+	if !ok || !route.Enabled {
 		return true // not an agent route → continue the normal pipeline
 	}
 	// RBAC: honor per-key model allow/deny on the virtual model name.

@@ -543,6 +543,41 @@ func TestAdminModelsCatalogRefreshTimeoutIsBounded(t *testing.T) {
 	}
 }
 
+func TestAdminModelCatalogCacheEvictsEntriesBeyondStaleTTL(t *testing.T) {
+	cache := newAdminModelCatalogCache()
+	now := time.Date(2026, 9, 2, 12, 0, 0, 0, time.UTC)
+	cache.now = func() time.Time { return now }
+	cache.freshTTL = time.Minute
+	cache.staleTTL = 10 * time.Minute
+	fallbackTimeout := 30 * time.Second
+	provider := store.ProviderConfig{
+		Name: "expired", BaseURL: "https://models.example", EncryptedAPIKey: "encrypted", Enabled: true,
+	}
+	fingerprint := adminModelProviderFingerprint(provider, fallbackTimeout)
+	cache.entries[provider.Name] = adminModelCatalogCacheEntry{
+		fingerprint: fingerprint,
+		models:      []adminModelCatalogRow{{ID: "expired-model"}},
+		fetchedAt:   now.Add(-cache.staleTTL - time.Second),
+	}
+
+	cache.prune([]store.ProviderConfig{provider}, fallbackTimeout)
+	if _, exists := cache.entries[provider.Name]; exists {
+		t.Fatal("prune retained a catalogue beyond the stale TTL")
+	}
+
+	cache.entries[provider.Name] = adminModelCatalogCacheEntry{
+		fingerprint: fingerprint,
+		models:      []adminModelCatalogRow{{ID: "expired-model"}},
+		fetchedAt:   now.Add(-cache.staleTTL - time.Second),
+	}
+	if _, ok := cache.cached(provider, fallbackTimeout, true); ok {
+		t.Fatal("stale lookup served a catalogue beyond the stale TTL")
+	}
+	if _, exists := cache.entries[provider.Name]; exists {
+		t.Fatal("stale lookup retained an expired catalogue in memory")
+	}
+}
+
 func TestNormalizedModelCreatedRejectsNonIntegralAndOverflowValues(t *testing.T) {
 	if got := normalizedModelCreated(float64(123)); got == nil || *got != 123 {
 		t.Fatalf("created = %v, want 123", got)

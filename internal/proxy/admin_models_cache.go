@@ -123,10 +123,15 @@ func (cache *adminModelCatalogCache) prune(configs []store.ProviderConfig, fallb
 			valid[provider.Name] = adminModelProviderFingerprint(provider, fallbackTimeout)
 		}
 	}
+	now := cache.now()
 	cache.mu.Lock()
 	defer cache.mu.Unlock()
 	for name, entry := range cache.entries {
-		if fingerprint, ok := valid[name]; !ok || fingerprint != entry.fingerprint {
+		age := now.Sub(entry.fetchedAt)
+		if age < 0 {
+			age = 0
+		}
+		if fingerprint, ok := valid[name]; !ok || fingerprint != entry.fingerprint || age > cache.staleTTL {
 			delete(cache.entries, name)
 		}
 	}
@@ -164,7 +169,11 @@ func (cache *adminModelCatalogCache) cachedLocked(
 	if age < 0 {
 		age = 0
 	}
-	if age > cache.freshTTL && (!allowStale || age > cache.staleTTL) {
+	if age > cache.staleTTL {
+		delete(cache.entries, providerName)
+		return adminModelCatalogCacheEntry{}, false, false
+	}
+	if age > cache.freshTTL && !allowStale {
 		return adminModelCatalogCacheEntry{}, false, false
 	}
 	return entry, age > cache.freshTTL, true
