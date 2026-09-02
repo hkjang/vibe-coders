@@ -59,19 +59,23 @@ func sunsetReached(sunsetDate string, now time.Time) bool {
 	return !now.UTC().Before(d)
 }
 
-// stepDeprecation annotates (and after sunset, rewrites or blocks) requests to deprecated
-// models. Runs after skill, before governance, so the effective model is known and any
-// rewrite flows to provider selection. Chat POST only.
-func (rc *requestPipeline) stepDeprecation() bool {
+type modelDeprecationApplication struct {
+	matched     bool
+	rewritten   bool
+	replacement string
+}
+
+// applyModelDeprecation applies the shared warning/block/rewrite contract to model.
+// replacementAllowed is optional: agent routes use it to re-check model RBAC before a
+// sunset rewrite, while the normal post-routing path keeps its established behaviour.
+func (rc *requestPipeline) applyModelDeprecation(model string, replacementAllowed func(string) bool) (modelDeprecationApplication, bool) {
 	s, r, w := rc.s, rc.r, rc.w
-	if r.Method != http.MethodPost {
-		return true
-	}
-	dep, ok := s.matchModelDeprecation(r.Context(), rc.meta.Request.Model)
+	dep, ok := s.matchModelDeprecation(r.Context(), model)
 	if !ok {
-		return true
+		return modelDeprecationApplication{}, true
 	}
-	w.Header().Set("X-Model-Deprecated", rc.meta.Request.Model)
+	result := modelDeprecationApplication{matched: true}
+	w.Header().Set("X-Model-Deprecated", model)
 	if dep.Replacement != "" {
 		w.Header().Set("X-Model-Replacement", dep.Replacement)
 	}
@@ -83,19 +87,41 @@ func (rc *requestPipeline) stepDeprecation() bool {
 	}
 
 	if !sunsetReached(dep.SunsetDate, time.Now()) {
-		return true // warn-only: headers set, request proceeds unchanged
+		return result, true
 	}
-	// Sunset reached.
 	if dep.Replacement == "" {
 		s.metrics.IncModelSunsetBlock()
-		writeOpenAIError(w, http.StatusBadRequest, "model '"+rc.meta.Request.Model+"' is retired (sunset "+dep.SunsetDate+")", "invalid_request_error", "model_sunset")
-		return false
+		writeOpenAIError(w, http.StatusBadRequest, "model '"+model+"' is retired (sunset "+dep.SunsetDate+")", "invalid_request_error", "model_sunset")
+		return result, false
 	}
+	if replacementAllowed != nil && !replacementAllowed(dep.Replacement) {
+		return result, false
+	}
+
 	rc.body = rewriteModelField(rc.body, dep.Replacement)
 	s.metrics.IncModelSunsetRewrite()
 	w.Header().Set("X-Model-Sunset-Rewritten", dep.Replacement)
 	rc.meta.Request.Model = dep.Replacement
-	return true
+	result.rewritten = true
+	result.replacement = dep.Replacement
+	return result, true
+}
+
+// stepDeprecation annotates (and after sunset, rewrites or blocks) requests to deprecated
+// models. Runs after skill, before governance, so the effective model is known and any
+// rewrite flows to provider selection. Chat POST only.
+func (rc *requestPipeline) stepDeprecation() bool {
+	r := rc.r
+	if r.Method != http.MethodPost {
+		return true
+	}
+	handledModel := strings.TrimSpace(rc.agentRouteDeprecationModel)
+	rc.agentRouteDeprecationModel = ""
+	if handledModel != "" && strings.TrimSpace(rc.meta.Request.Model) == handledModel {
+		return true
+	}
+	_, proceed := rc.applyModelDeprecation(rc.meta.Request.Model, nil)
+	return proceed
 }
 
 type deprecationPayload struct {

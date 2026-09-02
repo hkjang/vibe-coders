@@ -43,10 +43,36 @@ func (rc *requestPipeline) stepAgentRoute() bool {
 		return true // not an agent route → continue the normal pipeline
 	}
 	// RBAC: honor per-key model allow/deny on the virtual model name.
-	if rc.authCtx != nil && !listAllows(model, rc.authCtx.AllowedModels, rc.authCtx.DeniedModels) {
-		_ = s.db.InsertAuditEvent(r.Context(), store.AuthEvent{ID: newID("ae"), EventType: "model_denied", APIKeyID: rc.authCtx.APIKeyID, TeamID: rc.authCtx.TeamID, IP: clientIP(r), UserAgent: r.UserAgent(), Detail: model, CreatedAt: time.Now().UTC()})
-		writeOpenAIError(w, http.StatusForbidden, "model is not allowed by auth policy", "permission_error", "model_denied")
+	if !rc.authorizeAgentRouteModel(model) {
 		return false
+	}
+
+	requestedModel := ""
+	application, proceed := rc.applyModelDeprecation(model, rc.authorizeAgentRouteModel)
+	if !proceed {
+		return false
+	}
+	if application.matched {
+		rc.agentRouteDeprecationModel = model
+	}
+	if application.rewritten {
+		requestedModel = model
+		model = application.replacement
+		rc.agentRouteDeprecatedFrom = requestedModel
+		rc.agentRouteDeprecationModel = model
+
+		// One-hop semantics match the existing physical-model deprecation contract:
+		// resolve the replacement once, but do not recursively follow another
+		// deprecation (including self- and A↔B cycles).
+		replacementRoute, found, lookupErr := s.db.GetAgentRouteByModel(r.Context(), model)
+		if lookupErr != nil {
+			writeOpenAIError(w, http.StatusServiceUnavailable, "replacement model routing is unavailable", "server_error", "agent_route_lookup_failed")
+			return false
+		}
+		if !found || !replacementRoute.Enabled {
+			return true // physical/disabled replacement → continue the normal pipeline
+		}
+		route = replacementRoute
 	}
 	payload := jsonMap(rc.body)
 	externalTools, _ := payload["tools"].([]any)
@@ -78,7 +104,22 @@ func (rc *requestPipeline) stepAgentRoute() bool {
 		w.Header().Set("X-Agent-Mode", "passthrough")
 		return true
 	}
-	s.handleAgentRouteChat(w, r, rc.body, route, rc.apiKeyID, rc.authCtx)
+	rc.meta = s.handleAgentRouteChatWithRequestedModel(w, r, rc.body, route, rc.apiKeyID, rc.authCtx, requestedModel)
+	rc.traceID = rc.meta.Request.TraceID
+	return false
+}
+
+func (rc *requestPipeline) authorizeAgentRouteModel(model string) bool {
+	if rc.authCtx == nil || listAllows(model, rc.authCtx.AllowedModels, rc.authCtx.DeniedModels) {
+		return true
+	}
+	s, r := rc.s, rc.r
+	_ = s.db.InsertAuditEvent(r.Context(), store.AuthEvent{
+		ID: newID("ae"), EventType: "model_denied", APIKeyID: rc.authCtx.APIKeyID,
+		TeamID: rc.authCtx.TeamID, IP: clientIP(r), UserAgent: r.UserAgent(), Detail: model,
+		CreatedAt: time.Now().UTC(),
+	})
+	writeOpenAIError(rc.w, http.StatusForbidden, "model is not allowed by auth policy", "permission_error", "model_denied")
 	return false
 }
 
@@ -146,9 +187,17 @@ func filterAgentToolset(ts mcpAgentToolset, allowed []string) mcpAgentToolset {
 // handleAgentRouteChat runs the agentic loop for one agent-route request and writes the response
 // (streaming SSE or a buffered chat completion), reusing the MCP agentic machinery.
 func (s *Server) handleAgentRouteChat(w http.ResponseWriter, r *http.Request, body []byte, route store.AgentRoute, apiKeyID string, authCtx *store.AuthContext) {
+	_ = s.handleAgentRouteChatWithRequestedModel(w, r, body, route, apiKeyID, authCtx, "")
+}
+
+func (s *Server) handleAgentRouteChatWithRequestedModel(w http.ResponseWriter, r *http.Request, body []byte, route store.AgentRoute, apiKeyID string, authCtx *store.AuthContext, requestedModel string) store.LogRecord {
 	start := time.Now()
 	traceID := traceIDFromRequest(r)
 	meta := s.auditRequest(r.URL.Path, body, apiKeyID, traceID, r)
+	if requestedModel = strings.TrimSpace(requestedModel); requestedModel != "" && requestedModel != meta.Request.Model {
+		meta.Request.RequestedModel = requestedModel
+	}
+	meta.Request.ResolvedModel = route.VirtualModel
 	meta.Request.Provider = firstNonEmpty(route.Provider, "agent_route")
 	meta.Request.RouteReason = "agent_route"
 	meta.Request.RouteDetail = route.VirtualModel
@@ -172,19 +221,20 @@ func (s *Server) handleAgentRouteChat(w http.ResponseWriter, r *http.Request, bo
 	}
 	if backingModel == "" {
 		writeOpenAIError(w, http.StatusBadGateway, "agent route has no resolvable backing model — set one or register a provider", "server_error", "agent_route_no_model")
-		return
+		return meta
 	}
+	meta.Request.UpstreamModel = backingModel
 
 	candidates := s.agentRouteCandidates(r.Context(), route)
 	if len(route.MCPUpstreams) > 0 && len(candidates) == 0 {
 		writeOpenAIError(w, http.StatusBadGateway, "agent route has no enabled MCP upstream — review the route server selection", "server_error", "agent_route_no_mcp_upstream")
-		return
+		return meta
 	}
 	ts := s.buildMCPAgentToolset(r.Context(), candidates)
 	ts = filterAgentToolset(ts, route.AllowedTools)
 	if len(route.AllowedTools) > 0 && len(ts.tools) == 0 {
 		writeOpenAIError(w, http.StatusBadGateway, "agent route allowed_tools matched no currently exposed MCP tool — refresh the route tool selection", "server_error", "agent_route_no_allowed_tool")
-		return
+		return meta
 	}
 
 	messages := extractChatMessagesRaw(body)
@@ -214,7 +264,7 @@ func (s *Server) handleAgentRouteChat(w http.ResponseWriter, r *http.Request, bo
 			w.Header().Set("X-Agent-Tool-Calls", strconv.Itoa(outcome.ToolCalls))
 			writeMCPDiscoveryCompletion(w, route.VirtualModel, outcome.Content, nil)
 		}
-		return
+		return meta
 	}
 
 	// The loop produced no content (e.g. backing model error). Surface it rather than hang.
@@ -223,6 +273,7 @@ func (s *Server) handleAgentRouteChat(w http.ResponseWriter, r *http.Request, bo
 		msg = "agent route failed: " + outcome.Err.Error()
 	}
 	writeOpenAIError(w, http.StatusBadGateway, msg, "server_error", "agent_route_failed")
+	return meta
 }
 
 // finishAgentRoute enqueues the audit record for an agent-route run (response, usage, and per-tool

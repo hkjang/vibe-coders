@@ -69,6 +69,14 @@ type requestPipeline struct {
 	skillVersion string
 	skillTools   string
 
+	// An enabled agent route is resolved before the normal routing/skill/deprecation
+	// stages. If that virtual model is sunset, stepAgentRoute applies its deprecation
+	// exactly once and records the transition here. The normal deprecation stage skips
+	// only the same replacement model; if routing or a skill selects a different model,
+	// that effective model still receives the existing post-routing deprecation check.
+	agentRouteDeprecatedFrom   string
+	agentRouteDeprecationModel string
+
 	// policyEvents collects the governance decisions of every phase, written once at the
 	// end of the request. See the deferred flush in handleOpenAI.
 	policyEvents []store.PolicyDecisionEvent
@@ -271,6 +279,12 @@ func (rc *requestPipeline) stepRouting() bool {
 		meta.Request.ResolvedModel = routeDecision.TargetModel
 		meta.Request.UpstreamModel = routeDecision.TargetModel
 		s.metrics.IncRoutingOverride()
+	}
+	if rc.agentRouteDeprecatedFrom != "" {
+		// stepRouting sees the already-rewritten body. Preserve what the client
+		// actually requested while leaving ResolvedModel/UpstreamModel aligned with
+		// the replacement (or any later intelligent-routing decision).
+		meta.Request.RequestedModel = rc.agentRouteDeprecatedFrom
 	}
 	refreshRoutingSummary(&meta.Request, routingPlan)
 
