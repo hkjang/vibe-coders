@@ -209,6 +209,7 @@ func (s *Server) emitPolicyFacts(events []store.PolicyDecisionEvent) {
 		if ts.IsZero() {
 			ts = time.Now().UTC()
 		}
+		rawProvider := e.Provider
 		rows = append(rows, map[string]any{
 			"event_date":       ts.Format("2006-01-02"),
 			"event_time":       ts.Format(time.RFC3339Nano),
@@ -221,9 +222,9 @@ func (s *Server) emitPolicyFacts(events []store.PolicyDecisionEvent) {
 			"rule_id":          e.RuleID,
 			"rule_name":        e.RuleName,
 			"decision":         e.Decision,
-			"reason":           e.Reason,
+			"reason":           boundedExternalProviderText(e.Reason, rawProvider),
 			"model":            e.Model,
-			"provider":         e.Provider,
+			"provider":         boundedModelsProviderLabelOrEmpty(rawProvider),
 			"risk_score":       e.RiskScore,
 			"complexity_score": e.ComplexityScore,
 			"cost_krw":         e.CostKRW,
@@ -398,9 +399,10 @@ func routingFactRow(rec store.LogRecord) (map[string]any, bool) {
 	}
 	r := rec.Routing
 	ts := factEventTime(rec.Request.CreatedAt, r.CreatedAt)
+	rawProvider := r.SelectedProvider
 	fallback := ""
-	if len(r.FallbackPath) > 0 {
-		fallback = strings.Join(r.FallbackPath, ">")
+	if path := boundedExternalFallbackPath(r.FallbackPath, rawProvider); len(path) > 0 {
+		fallback = strings.Join(path, ">")
 	}
 	return map[string]any{
 		"event_date":        ts.Format("2006-01-02"),
@@ -409,14 +411,14 @@ func routingFactRow(rec store.LogRecord) (map[string]any, bool) {
 		"trace_id":          r.TraceID,
 		"requested_model":   r.RequestedModel,
 		"selected_model":    r.SelectedModel,
-		"selected_provider": r.SelectedProvider,
+		"selected_provider": boundedModelsProviderLabelOrEmpty(rawProvider),
 		"complexity_score":  r.Complexity.Score,
 		"complexity_tier":   r.Complexity.Tier,
 		"risk_score":        r.Risk.Score,
 		"risk_tier":         r.Risk.Tier,
 		"health_score":      r.HealthScore,
 		"fallback_path":     fallback,
-		"decision_reason":   r.DecisionReason,
+		"decision_reason":   boundedExternalProviderText(r.DecisionReason, rawProvider),
 		"ingested_at":       time.Now().UTC().Format(time.RFC3339Nano),
 	}, true
 }
@@ -503,6 +505,8 @@ func insertJSONEachRow(ctx context.Context, client *http.Client, cfg config.Clic
 // client IP is hashed and no raw prompt/response text is included — only hashes/features.
 func requestFactRow(rec store.LogRecord) map[string]any {
 	r := rec.Request
+	rawProvider := r.Provider
+	rawFallback := r.FallbackFrom
 	ts := r.CreatedAt.UTC()
 	if ts.IsZero() {
 		ts = time.Now().UTC()
@@ -535,7 +539,7 @@ func requestFactRow(rec store.LogRecord) map[string]any {
 		"api_key_id":         r.APIKeyID,
 		"team":               "", // resolved at query time via api_key; kept blank to avoid a join here
 		"endpoint":           r.Endpoint,
-		"provider":           r.Provider,
+		"provider":           boundedModelsProviderLabelOrEmpty(rawProvider),
 		"model":              r.Model,
 		"requested_model":    r.RequestedModel,
 		"stream":             b2i(r.Stream),
@@ -561,10 +565,10 @@ func requestFactRow(rec store.LogRecord) map[string]any {
 		"prompt_fingerprint": r.PromptFingerprint,
 		"tool_count":         r.ToolCount,
 		"failover":           b2i(r.Failover),
-		"fallback_from":      r.FallbackFrom,
-		"fallback_reason":    r.FallbackReason,
+		"fallback_from":      boundedModelsProviderLabelOrEmpty(rawFallback),
+		"fallback_reason":    boundedExternalProviderText(r.FallbackReason, rawProvider, rawFallback),
 		"route_reason":       r.RouteReason,
-		"route_detail":       r.RouteDetail,
+		"route_detail":       boundedExternalProviderText(r.RouteDetail, rawProvider, rawFallback),
 		"complexity_score":   r.Complexity,
 		"language_top":       langTop,
 		"client_ip_hash":     ipHash,

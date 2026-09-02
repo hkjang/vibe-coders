@@ -82,6 +82,7 @@ func TestClickHouseRequestFactSink(t *testing.T) {
 }
 
 func TestClickHouseFactFanout(t *testing.T) {
+	const unsafeProvider = "sk-ant-legacy-clickhouse-secret"
 	var mu sync.Mutex
 	byTable := map[string]string{} // table -> last body
 	ch := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -117,6 +118,7 @@ func TestClickHouseFactFanout(t *testing.T) {
 	cfg.ClickHouse.ToolFactTable = "ai_tool_fact"
 	cfg.ClickHouse.RoutingFactTable = "ai_routing_fact"
 	cfg.ClickHouse.EvalFactTable = "ai_eval_fact"
+	cfg.ClickHouse.PolicyFactTable = "ai_policy_fact"
 	cfg.ClickHouse.BatchSize = 1
 	cfg.ClickHouse.FlushInterval = 200 * time.Millisecond
 	server, err := NewServer(cfg, db, logger, nil)
@@ -126,17 +128,29 @@ func TestClickHouseFactFanout(t *testing.T) {
 
 	now := time.Now().UTC()
 	server.enqueue(store.LogRecord{
-		Request:     store.RequestLog{ID: "rq1", TraceID: "tr1", Model: "gpt-4.1", Provider: "openai", StatusCode: 200, CreatedAt: now},
-		Tools:       []store.ToolInvocation{{RequestID: "rq1", TraceID: "tr1", ServerLabel: "github", ToolName: "create_pr", Source: "call", IsMCP: true, CreatedAt: now}},
-		Routing:     &store.RoutingDecisionLog{RequestID: "rq1", TraceID: "tr1", RequestedModel: "auto", SelectedModel: "gpt-4.1", SelectedProvider: "openai", DecisionReason: "complexity", CreatedAt: now},
+		Request: store.RequestLog{
+			ID: "rq1", TraceID: "tr1", Model: "gpt-4.1", Provider: unsafeProvider,
+			FallbackFrom: unsafeProvider, FallbackReason: "token=clickhouse-secret",
+			RouteDetail: unsafeProvider, StatusCode: 200, CreatedAt: now,
+		},
+		Tools: []store.ToolInvocation{{RequestID: "rq1", TraceID: "tr1", ServerLabel: "github", ToolName: "create_pr", Source: "call", IsMCP: true, CreatedAt: now}},
+		Routing: &store.RoutingDecisionLog{
+			RequestID: "rq1", TraceID: "tr1", RequestedModel: "auto", SelectedModel: "gpt-4.1",
+			SelectedProvider: unsafeProvider, FallbackPath: []string{unsafeProvider},
+			DecisionReason: "selected " + unsafeProvider, CreatedAt: now,
+		},
 		Evaluations: []store.LLMEvaluation{{RequestID: "rq1", TraceID: "tr1", Name: "injection", Category: "security", Score: 0.9, Label: "clean", Passed: true, CreatedAt: now}},
 	})
+	server.emitPolicyFacts([]store.PolicyDecisionEvent{{
+		RequestID: "rq1", Decision: "block", Reason: "blocked " + unsafeProvider,
+		Provider: unsafeProvider, CreatedAt: now,
+	}})
 
 	waitFor(t, 3*time.Second, func() bool {
 		mu.Lock()
 		defer mu.Unlock()
 		return byTable["ai_request_fact"] != "" && byTable["ai_tool_fact"] != "" &&
-			byTable["ai_routing_fact"] != "" && byTable["ai_eval_fact"] != ""
+			byTable["ai_routing_fact"] != "" && byTable["ai_eval_fact"] != "" && byTable["ai_policy_fact"] != ""
 	})
 
 	mu.Lock()
@@ -149,6 +163,39 @@ func TestClickHouseFactFanout(t *testing.T) {
 	}
 	if !strings.Contains(byTable["ai_eval_fact"], `"name":"injection"`) {
 		t.Errorf("eval fact wrong: %s", byTable["ai_eval_fact"])
+	}
+	for _, table := range []string{"ai_request_fact", "ai_routing_fact", "ai_policy_fact"} {
+		body := byTable[table]
+		if strings.Contains(body, unsafeProvider) || strings.Contains(body, "clickhouse-secret") {
+			t.Fatalf("%s leaked provider metadata: %s", table, body)
+		}
+		if !strings.Contains(body, boundedModelsProviderLabel(unsafeProvider)) {
+			t.Fatalf("%s lost bounded provider label: %s", table, body)
+		}
+	}
+}
+
+func TestClickHouseProviderRollupBoundsLegacyName(t *testing.T) {
+	const unsafeProvider = "sk-ant-legacy-rollup-secret"
+	var body string
+	ch := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		payload, _ := io.ReadAll(r.Body)
+		body = string(payload)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ch.Close()
+
+	rows := []store.AnalyticsRollupRow{{
+		Day: "2026-09-03", Dimension: "provider", DimValue: unsafeProvider, Requests: 1,
+	}}
+	n, err := clickhouseSink(t.Context(), http.DefaultClient, config.ClickHouseConfig{
+		URL: ch.URL, Database: "ai_gateway", Table: "analytics_daily",
+	}, rows)
+	if err != nil || n != 1 {
+		t.Fatalf("clickhouseSink = %d, %v", n, err)
+	}
+	if strings.Contains(body, unsafeProvider) || !strings.Contains(body, boundedModelsProviderLabel(unsafeProvider)) {
+		t.Fatalf("provider rollup was not bounded: %s", body)
 	}
 }
 

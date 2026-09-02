@@ -25,6 +25,9 @@ func (s *Server) handleMyRecentRequests(w http.ResponseWriter, r *http.Request) 
 		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "list_failed")
 		return
 	}
+	for index := range items {
+		items[index].Provider = boundedModelsProviderLabelOrEmpty(items[index].Provider)
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"requests": items})
 }
 
@@ -74,7 +77,7 @@ func (s *Server) handleMyRequestReceipt(w http.ResponseWriter, r *http.Request) 
 		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "detail_failed")
 		return
 	}
-	req := detail.Request
+	req := projectRecentRequestProviderForExternal(detail.Request)
 
 	receipt := map[string]any{
 		"request_id":    req.ID,
@@ -95,6 +98,7 @@ func (s *Server) handleMyRequestReceipt(w http.ResponseWriter, r *http.Request) 
 
 	// Routing reason (if a routing decision was recorded).
 	if rd, err := s.db.RoutingDecisionByID(r.Context(), reqID); err == nil {
+		rd = projectRoutingDecisionProviderForExternal(rd)
 		receipt["routing"] = map[string]any{
 			"requested_model": rd.RequestedModel, "selected_model": rd.SelectedModel,
 			"selected_provider": rd.SelectedProvider, "reason": rd.DecisionReason,
@@ -117,7 +121,11 @@ func (s *Server) handleMyRequestReceipt(w http.ResponseWriter, r *http.Request) 
 			if d == "allow" || d == "default" {
 				continue
 			}
-			policy = append(policy, map[string]any{"decision": e.Decision, "rule": e.RuleName, "reason": e.Reason})
+			policy = append(policy, map[string]any{
+				"decision": e.Decision,
+				"rule":     e.RuleName,
+				"reason":   boundedExternalProviderText(e.Reason, e.Provider),
+			})
 		}
 	}
 	receipt["blocked"] = blocked

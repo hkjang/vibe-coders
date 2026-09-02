@@ -400,10 +400,14 @@ func (s *Server) runGatewayTool(ctx context.Context, r *http.Request, apiKeyID s
 			"messages": []map[string]string{{"role": "user", "content": firstNonEmpty(a.Prompt, "preview")}},
 		})
 		plan := s.planIntelligentRouting(ctx, body, "/v1/chat/completions", false, false, authCtx)
+		rawProvider := plan.SelectedProvider
 		return gatewayToolJSON(map[string]any{
 			"requested_model": plan.RequestedModel, "selected_model": plan.SelectedModel,
-			"selected_provider": plan.SelectedProvider, "reason": firstNonEmpty(plan.DecisionReason, plan.RouteReason),
-			"complexity_tier": plan.Complexity.Tier, "risk_tier": plan.Risk.Tier, "fallback_plan": plan.FallbackPlan,
+			"selected_provider": boundedModelsProviderLabelOrEmpty(rawProvider),
+			"reason":            boundedExternalProviderText(firstNonEmpty(plan.DecisionReason, plan.RouteReason), rawProvider),
+			"complexity_tier":   plan.Complexity.Tier,
+			"risk_tier":         plan.Risk.Tier,
+			"fallback_plan":     boundedExternalFallbackPath(plan.FallbackPlan, rawProvider),
 		}), nil
 
 	case "gateway_list_skills":
@@ -447,7 +451,7 @@ func (s *Server) runGatewayTool(ctx context.Context, r *http.Request, apiKeyID s
 		if err != nil {
 			return nil, err
 		}
-		req := detail.Request
+		req := projectRecentRequestProviderForExternal(detail.Request)
 		summary := map[string]any{
 			"request_id": req.ID, "model": req.Model, "provider": req.Provider,
 			"status_code": req.StatusCode, "cost_krw": req.EstimatedCost,
@@ -455,6 +459,7 @@ func (s *Server) runGatewayTool(ctx context.Context, r *http.Request, apiKeyID s
 			"cache_hit": req.CachedTokens > 0, "created_at": req.CreatedAt,
 		}
 		if rd, err := s.db.RoutingDecisionByID(ctx, reqID); err == nil {
+			rd = projectRoutingDecisionProviderForExternal(rd)
 			summary["routing"] = map[string]any{"selected_model": rd.SelectedModel, "reason": rd.DecisionReason}
 		}
 		return gatewayToolJSON(summary), nil
