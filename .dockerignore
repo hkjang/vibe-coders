@@ -15,6 +15,7 @@ release/
 coverage.out
 .playwright-mcp/
 .gocache/
+.pnpm-store/
 .gitframe
 output/
 seed.sql

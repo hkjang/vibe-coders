@@ -71,6 +71,8 @@ rollout bucket은 사용자 ID와 feature ID의 SHA-256 기반으로 계산하�
 
 현재 React 제공 기능은 `overview`, `gateway.health`, `system.health`, `gateway.providers`, `gateway.models`의 읽기 전용 Preview다. Provider·Model 조회는 `/admin/providers`, `/admin/models`와 기존 품질·가격·태그 API를 공통으로 사용하고, Loading·부분 실패·last-known-good·Request ID·재시도·Legacy Bridge를 제공한다. Provider·Model 변경, Routing 변경, Observability, Governance, MCP, Text2SQL, FinOps, Security, Settings는 Legacy Bridge를 유지한다.
 
+Provider·Model Preview의 페이지 이동은 v0.82.0에서 서버 상한이 적용된 전체 응답을 사용하는 bounded client-side pagination이다. `/admin/models`는 최대 20,000행·16MiB로 제한하지만 대규모 catalogue의 화면 성능 SLA는 아직 보장하지 않는다. Stable 승격 전에는 cursor 기반 server-side pagination과 현재 page 범위의 품질·가격·태그 enrichment를 적용해야 한다. 운영에서 Model 응답이 1MiB를 넘거나 1,000행 이상이 상시 발생하거나 화면 API p95가 2초를 넘으면 Preview rollout을 중지하고 pagination 전환을 우선한다.
+
 Phase 1의 자동 갱신 기본값은 OFF이며 사용자가 1분 또는 5분을 선택할 수 있다. 대규모 보존 데이터에서도 자동 갱신을 기본 활성화하려면 `/admin/stats`와 장기간 routing health에 서버 집계·캐시를 추가하고 성능 회귀 기준을 먼저 통과해야 한다.
 
 ## 인증 안전성
