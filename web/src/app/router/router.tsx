@@ -3,6 +3,7 @@ import { createBrowserRouter, type RouteObject } from "react-router";
 import { FeatureRoute } from "@/app/guards/FeatureRoute";
 import { ProtectedRoute } from "@/app/guards/ProtectedRoute";
 import { AppShell } from "@/app/layouts/AppShell";
+import { CompatibilityRedirect } from "@/app/router/CompatibilityRedirect";
 import { DefaultEntryRedirect } from "@/app/router/DefaultEntryRedirect";
 import { NotFoundPage, RouteErrorPage } from "@/app/router/RouteErrorPage";
 import { featurePath, migrationRegistry } from "@/config/migration-registry";
@@ -75,6 +76,8 @@ export const router = createBrowserRouter(
           element: <AppShell />,
           children: [
             { index: true, element: <DefaultEntryRedirect /> },
+            { path: "providers", element: <CompatibilityRedirect to="/gateway/providers" /> },
+            { path: "models", element: <CompatibilityRedirect to="/gateway/models" /> },
             ...featureRoutes,
             { path: "*", element: <NotFoundPage /> },
           ],

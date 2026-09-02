@@ -157,6 +157,7 @@ const bootstrap = {
   legacy_route_map: {
     "/app/overview": "/admin#/dashboard",
     "/app/gateway/health": "/admin#/routing/health",
+    "/app/gateway/providers": "/admin#/settings",
     "/app/system/health": "/admin#/ops-home",
   },
 };
@@ -396,6 +397,26 @@ test("opens and reloads Gateway Health at a URL-backed range", async ({ page }) 
   await expect(page).toHaveURL(/\/app\/gateway\/health\?range=7d$/);
   await expect(page.getByRole("heading", { name: "Gateway Health", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "7일" })).toHaveAttribute("aria-pressed", "true");
+});
+
+test("replaces legacy short Gateway paths without dropping query or hash", async ({ page }) => {
+  await mockGateway(page);
+
+  await page.goto("providers?team=platform#connections");
+  await expect(page).toHaveURL(/\/app\/gateway\/providers\?team=platform#connections$/);
+  await expect(page.getByRole("heading", { name: "Provider", exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: /Legacy에서 Provider 열기/ })).toHaveAttribute(
+    "href",
+    "/admin#/settings",
+  );
+
+  await page.goto("models?status=deprecated#pricing");
+  await expect(page).toHaveURL(/\/app\/gateway\/models\?status=deprecated#pricing$/);
+  await expect(page.getByRole("heading", { name: "Models", exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: /Legacy에서 Models 열기/ })).toHaveAttribute(
+    "href",
+    "/admin#/model-contracts",
+  );
 });
 
 test("opens and reloads the read-only System Health deep link", async ({ page }) => {
