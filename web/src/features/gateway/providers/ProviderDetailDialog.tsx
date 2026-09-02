@@ -99,6 +99,9 @@ function DetailQueryState({
 
 function SLODetails({ row }: { row: ProviderCatalogRow }): React.JSX.Element {
   const { evaluation, slo } = row;
+  if (row.nameRedacted) {
+    return <p className="provider-detail-empty">이름 보호를 위해 SLO 연결을 생략했습니다.</p>;
+  }
   if (!slo) return <p className="provider-detail-empty">이 Provider에는 SLO가 설정되지 않았습니다.</p>;
   const metrics = evaluation?.metrics;
   return (
@@ -152,6 +155,9 @@ function SLODetails({ row }: { row: ProviderCatalogRow }): React.JSX.Element {
 }
 
 function RoutingDetails({ row }: { row: ProviderCatalogRow }): React.JSX.Element {
+  if (row.nameRedacted) {
+    return <p className="provider-detail-empty">이름 보호를 위해 라우팅 상태 연결을 생략했습니다.</p>;
+  }
   if (!row.routing) {
     return <p className="provider-detail-empty">선택 기간의 라우팅 상태 데이터가 없습니다.</p>;
   }
@@ -202,7 +208,7 @@ export function ProviderDetailDialog({
       onOpenChange={onOpenChange}
       open={open}
       returnFocusRef={returnFocusRef}
-      title={row?.provider.name ?? (requestedName || "Provider 상세")}
+      title={row?.displayName ?? (requestedName || "Provider 상세")}
     >
       {providerState.pending && !row ? (
         <div className="provider-detail-loading" role="status">
@@ -221,6 +227,15 @@ export function ProviderDetailDialog({
       ) : (
         <div className="provider-detail-stack">
           <DetailQueryState label="Provider 설정" state={providerState} />
+          {row.nameRedacted ? (
+            <div className="provider-detail-error" role="status">
+              <AlertTriangle aria-hidden="true" />
+              <div>
+                <strong>Provider 이름을 안전하게 표시할 수 없습니다.</strong>
+                <p>잘못된 상태 귀속을 막기 위해 이 Provider의 운영 상태 연결을 생략했습니다.</p>
+              </div>
+            </div>
+          ) : null}
           <div className="provider-detail-heading">
             <div className="provider-detail-badges">
               <Badge tone={row.provider.enabled ? "success" : "muted"}>

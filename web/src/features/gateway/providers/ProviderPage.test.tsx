@@ -217,24 +217,34 @@ function renderPage(
 }
 
 interface ApiScenario {
+  providerData?: ProviderList;
   providerError?: AppError;
+  routingData?: RoutingHealth;
   routingError?: AppError;
+  sloData?: ProviderSLOResponse;
   sloError?: AppError;
 }
 
-function mockApi({ providerError, routingError, sloError }: ApiScenario = {}) {
+function mockApi({
+  providerData = providerList,
+  providerError,
+  routingData = routingHealth,
+  routingError,
+  sloData = sloResponse,
+  sloError,
+}: ApiScenario = {}) {
   return vi.spyOn(apiClient, "request").mockImplementation(async (endpoint) => {
     if (endpoint.path === endpoints.admin.providers.list.path) {
       if (providerError) throw providerError;
-      return providerList as never;
+      return providerData as never;
     }
     if (endpoint.path === endpoints.admin.providers.slo.path) {
       if (sloError) throw sloError;
-      return sloResponse as never;
+      return sloData as never;
     }
     if (endpoint.path === endpoints.admin.routing.health.path) {
       if (routingError) throw routingError;
-      return routingHealth as never;
+      return routingData as never;
     }
     throw new Error(`Unexpected endpoint: ${endpoint.path}`);
   });
@@ -485,6 +495,81 @@ describe("ProviderPage", () => {
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "openai" })).not.toBeInTheDocument());
     expect(screen.getByTestId("location")).not.toHaveTextContent("provider=");
     await waitFor(() => expect(screen.getByRole("link", { name: "openai" })).toHaveFocus());
+  });
+
+  it("never exposes or misattributes distinct unsafe legacy provider names", async () => {
+    authRuntime.scopes = ["admin:read", "routing:read"];
+    const user = userEvent.setup();
+    const firstName = "sk-ant-first-private-value";
+    const secondName = "Bearer second-private-value";
+    const unsafeProviders = [firstName, secondName].map((name, index) => ({
+      ...openAIProvider,
+      name,
+      base_url: "https://legacy.example/v1",
+      model_patterns: "legacy-*",
+      priority: 30 + index,
+    }));
+    const [baseScore] = routingHealth.providers;
+    const [firstSlo, secondSlo] = sloResponse.slos;
+    const [firstEvaluation, secondEvaluation] = sloResponse.evaluations;
+    if (!baseScore || !firstSlo || !secondSlo || !firstEvaluation || !secondEvaluation) {
+      throw new Error("Provider fixtures are incomplete");
+    }
+    const redactedScore = {
+      ...baseScore,
+      provider: "[provider-name-omitted]",
+    };
+    mockApi({
+      providerData: { providers: unsafeProviders },
+      routingData: {
+        ...routingHealth,
+        providers: [redactedScore, { ...redactedScore }],
+        degraded: [redactedScore, { ...redactedScore }],
+      },
+      sloData: {
+        ...sloResponse,
+        slos: [
+          { ...firstSlo, provider: firstName },
+          { ...secondSlo, provider: secondName },
+        ],
+        evaluations: [
+          { ...firstEvaluation, provider: firstName, breached: true },
+          { ...secondEvaluation, provider: secondName, breached: true },
+        ],
+      },
+    });
+    const { container } = renderPage();
+
+    const table = await screen.findByRole("table", { name: "Provider 연결 설정과 운영 상태" });
+    const redactedLinks = await within(table).findAllByRole("link", { name: /Provider 이름 비공개/ });
+    expect(redactedLinks).toHaveLength(2);
+    expect(new Set(redactedLinks.map((link) => link.textContent)).size).toBe(2);
+    expect(within(table).getAllByText("Unknown")).toHaveLength(2);
+    expect(container.outerHTML).not.toContain(firstName);
+    expect(container.outerHTML).not.toContain(secondName);
+    for (const link of redactedLinks) {
+      expect(link.getAttribute("href")).toContain("provider=redacted-provider-");
+      expect(link.getAttribute("href")).not.toContain("private-value");
+    }
+
+    const firstRedactedLink = redactedLinks[0];
+    if (!firstRedactedLink) throw new Error("Expected a redacted Provider link");
+    await user.click(firstRedactedLink);
+    const dialog = await screen.findByRole("dialog", { name: /Provider 이름 비공개/ });
+    expect(within(dialog).getByText(/운영 상태 연결을 생략했습니다/)).toBeVisible();
+    expect(within(dialog).getByText("이름 보호를 위해 SLO 연결을 생략했습니다.")).toBeVisible();
+    expect(within(dialog).getByText("이름 보호를 위해 라우팅 상태 연결을 생략했습니다.")).toBeVisible();
+    expect(within(dialog).queryByText(/SLO가 설정되지 않았습니다/)).not.toBeInTheDocument();
+    expect(within(dialog).queryByText(/라우팅 상태 데이터가 없습니다/)).not.toBeInTheDocument();
+    expect(dialog.outerHTML).not.toContain(firstName);
+    expect(dialog.outerHTML).not.toContain(secondName);
+    expect(screen.getByTestId("location")).not.toHaveTextContent("private-value");
+
+    await user.keyboard("{Escape}");
+    const input = screen.getByRole("textbox", { name: "Provider 검색" });
+    await user.type(input, "first-private");
+    await user.click(screen.getByRole("button", { name: "검색" }));
+    expect(await screen.findByText("검색 및 필터 조건에 맞는 Provider가 없습니다.")).toBeVisible();
   });
 
   it("paginates client-side while preserving the page in the URL", async () => {

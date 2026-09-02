@@ -63,17 +63,17 @@ function createProviderColumns(
 ): ReadonlyArray<DataTableColumn<ProviderCatalogRow>> {
   const column = createDataTableColumnHelper<ProviderCatalogRow>();
   return column.columns([
-    column.accessor((row) => row.provider.name, {
+    column.accessor((row) => row.displayName, {
       id: "provider",
       header: "Provider",
       cell: ({ row }) => (
         <div className="provider-name-cell">
           <Link
-            data-provider-trigger={row.original.provider.name}
-            to={{ search: detailSearch(row.original.provider.name) }}
-            onClick={(event) => rememberTrigger(event.currentTarget, row.original.provider.name)}
+            data-provider-trigger={row.original.identity}
+            to={{ search: detailSearch(row.original.identity) }}
+            onClick={(event) => rememberTrigger(event.currentTarget, row.original.identity)}
           >
-            {row.original.provider.name}
+            {row.original.displayName}
           </Link>
           <span>{displayProviderBaseURL(row.original.provider.base_url)}</span>
         </div>
@@ -181,8 +181,8 @@ export function ProviderTable({
               ? "등록된 Provider가 없습니다. Provider 등록은 Legacy 설정에서 수행할 수 있습니다."
               : "검색 및 필터 조건에 맞는 Provider가 없습니다."
           }
-          getRowActionLabel={(row) => `${row.provider.name} Provider 상세 열기`}
-          getRowId={(row) => row.provider.name}
+          getRowActionLabel={(row) => `${row.displayName} Provider 상세 열기`}
+          getRowId={(row) => row.identity}
           loading={loading}
           onPageChange={onPageChange}
           onRowClick={onRowClick}

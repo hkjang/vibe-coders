@@ -111,7 +111,7 @@ export function ProviderPage(): React.JSX.Element {
       ).sort(
         (left, right) =>
           left.provider.priority - right.provider.priority ||
-          left.provider.name.localeCompare(right.provider.name),
+          left.displayName.localeCompare(right.displayName),
       ),
     [
       canReadRouting,
@@ -126,7 +126,7 @@ export function ProviderPage(): React.JSX.Element {
   const pageCount = Math.max(1, Math.ceil(filteredRows.length / pageSize));
   const page = Math.min(currentPage, pageCount);
   const pageRows = filteredRows.slice((page - 1) * pageSize, page * pageSize);
-  const selectedRow = allRows.find((row) => row.provider.name === selectedName);
+  const selectedRow = allRows.find((row) => row.identity === selectedName);
   const refreshing = providers.isFetching || slo.isFetching || (canReadRouting && routing.isFetching);
 
   useEffect(() => {
@@ -140,8 +140,8 @@ export function ProviderPage(): React.JSX.Element {
   );
   const openProvider = useCallback(
     (row: ProviderCatalogRow): void => {
-      rememberRowTrigger(row.provider.name);
-      updateSearch({ provider: row.provider.name }, false);
+      rememberRowTrigger(row.identity);
+      updateSearch({ provider: row.identity }, false);
     },
     [rememberRowTrigger, updateSearch],
   );
