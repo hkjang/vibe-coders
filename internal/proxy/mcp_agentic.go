@@ -181,7 +181,7 @@ func (s *Server) buildMCPAgentToolset(ctx context.Context, candidates []MCPCandi
 			}
 			desc := strings.TrimSpace(tool.Description)
 			if desc == "" {
-				desc = route.upstreamName + " 도구 " + route.bareTool
+				desc = boundedModelsProviderLabel(route.upstreamName) + " 도구 " + route.bareTool
 			}
 			ts.tools = append(ts.tools, map[string]any{
 				"type": "function",
@@ -401,7 +401,7 @@ func (s *Server) runMCPAgenticChat(w http.ResponseWriter, r *http.Request, model
 			}
 			toolContent, ev := s.execAgentToolCall(r, apiKeyID, authCtx, route, tc.Args)
 			out.Evidences = append(out.Evidences, ev)
-			summary := fmt.Sprintf("   → %s · %d건 · %dms", route.upstreamName, ev.SourceCount, ev.LatencyMS)
+			summary := fmt.Sprintf("   → %s · %d건 · %dms", boundedModelsProviderLabel(route.upstreamName), ev.SourceCount, ev.LatencyMS)
 			if ev.Error != "" {
 				summary = "   → 오류: " + truncateText(ev.Error, 200)
 			}
@@ -534,6 +534,7 @@ func (s *Server) execAgentToolCall(r *http.Request, apiKeyID string, authCtx *st
 		if resp.Error != nil {
 			msg = resp.Error.Message
 		}
+		msg = boundedExternalProviderText(msg, route.upstreamName)
 		ev.Error = msg
 		return "ERROR: " + msg, ev
 	}
@@ -549,8 +550,8 @@ func (s *Server) execAgentToolCall(r *http.Request, apiKeyID string, authCtx *st
 	ev.LatencyMS = time.Since(start).Milliseconds()
 	if err != nil {
 		s.logMCPCall(r, apiKeyID, route.upstreamName, route.bareTool, argsJSON, true, http.StatusBadGateway, ev.LatencyMS)
-		ev.Error = "MCP upstream request failed"
-		return "ERROR: MCP upstream request failed", ev
+		ev.Error = mcpUpstreamRequestFailed
+		return "ERROR: " + mcpUpstreamRequestFailed, ev
 	}
 	items, toolErr := extractMCPResultItems(result)
 	s.logMCPCall(r, apiKeyID, route.upstreamName, route.bareTool, argsJSON, toolErr != "", http.StatusOK, ev.LatencyMS)

@@ -576,9 +576,11 @@ func mergeAgentRouteModels(result *aggregatedModelsResult, routes []store.AgentR
 	}
 }
 
+const providerNameOmitted = "[provider-name-omitted]"
+
 func boundedModelsProviderLabel(name string) string {
 	if !modelsProviderLabelSafe(name) {
-		return "[provider-name-omitted]"
+		return providerNameOmitted
 	}
 	return name
 }
@@ -610,7 +612,7 @@ func modelsProviderLabelSafe(name string) bool {
 
 func modelsProviderNameReserved(name string) bool {
 	switch strings.ToLower(strings.TrimSpace(name)) {
-	case "*", "vibe", "aggregate", "[provider-name-omitted]":
+	case "*", "vibe", "aggregate", providerNameOmitted:
 		return true
 	default:
 		return false

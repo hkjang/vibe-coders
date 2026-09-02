@@ -26,7 +26,9 @@ func (s *Server) handleMyRecentRequests(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	for index := range items {
-		items[index].Provider = boundedModelsProviderLabelOrEmpty(items[index].Provider)
+		rawProvider := items[index].Provider
+		items[index].Provider = boundedModelsProviderLabelOrEmpty(rawProvider)
+		items[index].Model = boundedExternalProviderText(items[index].Model, rawProvider)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"requests": items})
 }
@@ -146,7 +148,7 @@ func (s *Server) handleMyRequestReceipt(w http.ResponseWriter, r *http.Request) 
 				key := t.ServerLabel + "/" + t.ToolName
 				if !mcpSeen[key] {
 					mcpSeen[key] = true
-					mcpTools = append(mcpTools, map[string]any{"server": t.ServerLabel, "tool": t.ToolName, "error": t.IsError})
+					mcpTools = append(mcpTools, map[string]any{"server": boundedModelsProviderLabelOrEmpty(t.ServerLabel), "tool": t.ToolName, "error": t.IsError})
 				}
 			} else {
 				skillUsed = true

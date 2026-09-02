@@ -134,7 +134,7 @@ func (s *Server) buildMCPToolsSnapshot(ctx context.Context) *mcpToolsSnapshot {
 		}
 		// tools (the primary capability; record discovery failures here)
 		if d.toolsErr != nil {
-			snap.errors[up.Name] = d.toolsErr.Error()
+			snap.errors[up.Name] = mcpUpstreamRequestFailed
 		}
 		for _, t := range d.tools {
 			namespaced := up.ID + "__" + t.Name
@@ -170,6 +170,7 @@ func (s *Server) buildMCPToolsSnapshot(ctx context.Context) *mcpToolsSnapshot {
 }
 
 func prefixDesc(upstream, desc string) string {
+	upstream = boundedModelsProviderLabel(upstream)
 	if desc != "" {
 		return "[" + upstream + "] " + desc
 	}
@@ -306,7 +307,7 @@ func (s *Server) mcpToolsCall(r *http.Request, apiKeyID string, authCtx *store.A
 	snap := s.mcpToolsSnapshotCached(r.Context())
 	route, found := snap.routes[p.Name]
 	if !found {
-		return rpcErrorResponse(id, -32602, "unknown tool: "+p.Name)
+		return rpcErrorResponse(id, -32602, "unknown tool")
 	}
 
 	// policy: reuse the MCP allowlist/block rules keyed by server label (upstream name)
@@ -316,15 +317,15 @@ func (s *Server) mcpToolsCall(r *http.Request, apiKeyID string, authCtx *store.A
 		s.metrics.IncMCPBlocked()
 		reqID := s.logMCPCall(r, apiKeyID, route.upstreamName, route.bareTool, p.Arguments, true, http.StatusForbidden, 0)
 		s.recordMCPRouteDecision(r, reqID, apiKeyID, "tools/call", p.Name, route, "block", decision.Reason, 0)
-		return rpcErrorResponse(id, -32000, "blocked by MCP policy: "+decision.Reason+" ("+decision.BlockedServer+")")
+		return rpcErrorResponse(id, -32000, boundedExternalProviderText("blocked by MCP policy: "+decision.Reason+" ("+decision.BlockedServer+")", route.upstreamName, decision.BlockedServer))
 	}
 	if resp := s.enforceMCPToolGovernance(r, apiKeyID, authCtx, route, "tools/call", p.Name, route.bareTool, p.Arguments, id); resp != nil {
-		return resp
+		return projectMCPRPCErrorForExternal(resp, route.upstreamName)
 	}
 
 	up, found, err := s.db.GetMCPUpstream(r.Context(), route.upstreamID)
 	if err != nil || !found || !up.Enabled {
-		return rpcErrorResponse(id, -32602, "upstream unavailable: "+route.upstreamName)
+		return rpcErrorResponse(id, -32602, "upstream unavailable: "+boundedModelsProviderLabel(route.upstreamName))
 	}
 
 	start := time.Now()
@@ -334,8 +335,8 @@ func (s *Server) mcpToolsCall(r *http.Request, apiKeyID string, authCtx *store.A
 	latency := time.Since(start).Milliseconds()
 	if callErr != nil {
 		reqID := s.logMCPCall(r, apiKeyID, route.upstreamName, route.bareTool, p.Arguments, true, http.StatusBadGateway, latency)
-		s.recordMCPRouteDecision(r, reqID, apiKeyID, "tools/call", p.Name, route, "upstream_error", callErr.Error(), latency)
-		return rpcErrorResponse(id, -32603, "upstream error: "+callErr.Error())
+		s.recordMCPRouteDecision(r, reqID, apiKeyID, "tools/call", p.Name, route, "upstream_error", mcpUpstreamRequestFailed, latency)
+		return rpcErrorResponse(id, -32603, mcpUpstreamRequestFailed)
 	}
 	// detect tool-level error in the CallToolResult to flag it in observability
 	isErr := false
@@ -367,7 +368,7 @@ func (s *Server) mcpResourcesRead(r *http.Request, apiKeyID string, authCtx *sto
 	snap := s.mcpToolsSnapshotCached(r.Context())
 	route, found := snap.resourceRoutes[p.URI]
 	if !found {
-		return rpcErrorResponse(id, -32602, "unknown resource: "+p.URI)
+		return rpcErrorResponse(id, -32602, "unknown resource")
 	}
 	return s.routeUpstreamRPC(r, apiKeyID, authCtx, id, route, "resources/read", p.URI, "resources/read", map[string]any{"uri": p.URI}, params)
 }
@@ -384,7 +385,7 @@ func (s *Server) mcpPromptsGet(r *http.Request, apiKeyID string, authCtx *store.
 	snap := s.mcpToolsSnapshotCached(r.Context())
 	route, found := snap.promptRoutes[p.Name]
 	if !found {
-		return rpcErrorResponse(id, -32602, "unknown prompt: "+p.Name)
+		return rpcErrorResponse(id, -32602, "unknown prompt")
 	}
 	return s.routeUpstreamRPC(r, apiKeyID, authCtx, id, route, "prompts/get", p.Name, route.bareTool, map[string]any{"name": route.bareTool, "arguments": rawOrEmpty(p.Arguments)}, params)
 }
@@ -399,14 +400,14 @@ func (s *Server) routeUpstreamRPC(r *http.Request, apiKeyID string, authCtx *sto
 		s.metrics.IncMCPBlocked()
 		reqID := s.logMCPCall(r, apiKeyID, route.upstreamName, logLabel, rawParams, true, http.StatusForbidden, 0)
 		s.recordMCPRouteDecision(r, reqID, apiKeyID, method, exposedName, route, "block", decision.Reason, 0)
-		return rpcErrorResponse(id, -32000, "blocked by MCP policy: "+route.upstreamName)
+		return rpcErrorResponse(id, -32000, "blocked by MCP policy: "+boundedModelsProviderLabel(route.upstreamName))
 	}
 	if resp := s.enforceMCPToolGovernance(r, apiKeyID, authCtx, route, method, exposedName, logLabel, rawParams, id); resp != nil {
-		return resp
+		return projectMCPRPCErrorForExternal(resp, route.upstreamName)
 	}
 	up, found, err := s.db.GetMCPUpstream(r.Context(), route.upstreamID)
 	if err != nil || !found || !up.Enabled {
-		return rpcErrorResponse(id, -32602, "upstream unavailable: "+route.upstreamName)
+		return rpcErrorResponse(id, -32602, "upstream unavailable: "+boundedModelsProviderLabel(route.upstreamName))
 	}
 	start := time.Now()
 	callCtx, cancel := context.WithTimeout(r.Context(), s.cfg.Upstream.Timeout)
@@ -415,8 +416,8 @@ func (s *Server) routeUpstreamRPC(r *http.Request, apiKeyID string, authCtx *sto
 	latency := time.Since(start).Milliseconds()
 	if callErr != nil {
 		reqID := s.logMCPCall(r, apiKeyID, route.upstreamName, logLabel, rawParams, true, http.StatusBadGateway, latency)
-		s.recordMCPRouteDecision(r, reqID, apiKeyID, method, exposedName, route, "upstream_error", callErr.Error(), latency)
-		return rpcErrorResponse(id, -32603, "upstream error: "+callErr.Error())
+		s.recordMCPRouteDecision(r, reqID, apiKeyID, method, exposedName, route, "upstream_error", mcpUpstreamRequestFailed, latency)
+		return rpcErrorResponse(id, -32603, mcpUpstreamRequestFailed)
 	}
 	reqID := s.logMCPCall(r, apiKeyID, route.upstreamName, logLabel, rawParams, false, http.StatusOK, latency)
 	s.recordMCPRouteDecision(r, reqID, apiKeyID, method, exposedName, route, "allow", "upstream call completed", latency)
@@ -520,6 +521,17 @@ func rpcResultResponse(id json.RawMessage, result any) *rpcResponse {
 
 func rpcErrorResponse(id json.RawMessage, code int, message string) *rpcResponse {
 	return &rpcResponse{JSONRPC: "2.0", ID: idOrNull(id), Error: &rpcError{Code: code, Message: message}}
+}
+
+func projectMCPRPCErrorForExternal(resp *rpcResponse, rawUpstreams ...string) *rpcResponse {
+	if resp == nil || resp.Error == nil {
+		return resp
+	}
+	projected := *resp
+	projectedError := *resp.Error
+	projectedError.Message = boundedExternalProviderText(projectedError.Message, rawUpstreams...)
+	projected.Error = &projectedError
+	return &projected
 }
 
 func idOrNull(id json.RawMessage) json.RawMessage {

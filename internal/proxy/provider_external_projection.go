@@ -42,6 +42,7 @@ func projectRecentRequestProviderForExternal(req store.RecentRequest) store.Rece
 	rawFallback := req.FallbackFrom
 	req.Provider = boundedModelsProviderLabelOrEmpty(rawProvider)
 	req.FallbackFrom = boundedModelsProviderLabelOrEmpty(rawFallback)
+	req.Model = boundedExternalProviderText(req.Model, rawProvider, rawFallback)
 	req.RouteDetail = boundedExternalProviderText(req.RouteDetail, rawProvider, rawFallback)
 	req.FallbackReason = boundedExternalProviderText(req.FallbackReason, rawProvider, rawFallback)
 	req.Error = boundedExternalProviderText(req.Error, rawProvider, rawFallback)

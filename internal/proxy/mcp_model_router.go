@@ -563,9 +563,9 @@ func (s *Server) selectMCPCandidates(ctx context.Context, query string, policy M
 		if len(tools) == 0 {
 			diag.NoToolsInSnap++
 			if snapErr := snap.errors[up.Name]; snapErr != "" {
-				diag.SnapErrors = append(diag.SnapErrors, up.Name+": "+snapErr)
+				diag.SnapErrors = append(diag.SnapErrors, boundedModelsProviderLabel(up.Name)+": "+mcpUpstreamRequestFailed)
 			} else {
-				diag.SnapErrors = append(diag.SnapErrors, up.Name+": 도구 목록 없음")
+				diag.SnapErrors = append(diag.SnapErrors, boundedModelsProviderLabel(up.Name)+": 도구 목록 없음")
 			}
 			continue
 		}
@@ -663,6 +663,7 @@ func (s *Server) callOneMCPDiscoveryTool(r *http.Request, apiKeyID string, authC
 		if resp.Error != nil {
 			msg = resp.Error.Message
 		}
+		msg = boundedExternalProviderText(msg, candidate.UpstreamName)
 		return MCPEvidence{UpstreamID: candidate.UpstreamID, UpstreamName: candidate.UpstreamName, ToolName: candidate.ToolName, SelectorScore: candidate.SelectorScore, Error: msg}
 	}
 	up, found, err := s.db.GetMCPUpstream(r.Context(), candidate.UpstreamID)
@@ -677,7 +678,7 @@ func (s *Server) callOneMCPDiscoveryTool(r *http.Request, apiKeyID string, authC
 	latency := time.Since(start).Milliseconds()
 	if err != nil {
 		s.logMCPCall(r, apiKeyID, candidate.UpstreamName, candidate.ToolName, rawArgs, true, http.StatusBadGateway, latency)
-		return MCPEvidence{UpstreamID: candidate.UpstreamID, UpstreamName: candidate.UpstreamName, ToolName: candidate.ToolName, SelectorScore: candidate.SelectorScore, Error: err.Error(), LatencyMS: latency}
+		return MCPEvidence{UpstreamID: candidate.UpstreamID, UpstreamName: candidate.UpstreamName, ToolName: candidate.ToolName, SelectorScore: candidate.SelectorScore, Error: mcpUpstreamRequestFailed, LatencyMS: latency}
 	}
 	items, toolErr := extractMCPResultItems(result)
 	isErr := toolErr != ""
@@ -774,7 +775,7 @@ func renderMCPDiscoveryAnswer(policy MCPDiscoveryPolicy, candidates []MCPCandida
 	b.WriteString(policy.Mode)
 	b.WriteString("\n\n")
 	for i, evidence := range evidences {
-		b.WriteString(fmt.Sprintf("%d. %s / %s (evidence %.2f)\n", i+1, evidence.UpstreamName, evidence.ToolName, evidence.EvidenceScore))
+		b.WriteString(fmt.Sprintf("%d. %s / %s (evidence %.2f)\n", i+1, boundedModelsProviderLabel(evidence.UpstreamName), evidence.ToolName, evidence.EvidenceScore))
 		for j, item := range evidence.Items {
 			if j >= 3 {
 				break
@@ -803,6 +804,7 @@ func renderMCPDiscoveryAnswer(policy MCPDiscoveryPolicy, candidates []MCPCandida
 }
 
 func writeMCPDiscoveryCompletion(w http.ResponseWriter, model, content string, evidences []MCPEvidence) {
+	evidences = projectMCPEvidencesForExternal(evidences)
 	resp := map[string]any{
 		"id":      "chatcmpl-" + newID("mcp"),
 		"object":  "chat.completion",
@@ -819,6 +821,20 @@ func writeMCPDiscoveryCompletion(w http.ResponseWriter, model, content string, e
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("X-Task-Type", "mcp_discovery")
 	_ = json.NewEncoder(w).Encode(resp)
+}
+
+func projectMCPEvidencesForExternal(evidences []MCPEvidence) []MCPEvidence {
+	if len(evidences) == 0 {
+		return evidences
+	}
+	projected := make([]MCPEvidence, len(evidences))
+	for index, evidence := range evidences {
+		rawUpstream := evidence.UpstreamName
+		projected[index] = evidence
+		projected[index].UpstreamName = boundedModelsProviderLabelOrEmpty(rawUpstream)
+		projected[index].Error = boundedExternalProviderText(evidence.Error, rawUpstream)
+	}
+	return projected
 }
 
 func defaultedMCPMetadata(up store.MCPUpstream) store.MCPUpstreamMetadata {

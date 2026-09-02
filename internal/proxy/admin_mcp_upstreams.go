@@ -68,6 +68,15 @@ func (s *Server) handleMCPUpstreams(w http.ResponseWriter, r *http.Request) {
 			writeOpenAIError(w, http.StatusBadRequest, "could not derive a slug id", "invalid_request_error", "invalid_slug")
 			return
 		}
+		existing, existingFound, err := s.db.GetMCPUpstream(r.Context(), slug)
+		if err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, "failed to load MCP upstream", "server_error", "mcp_upstream_lookup_failed")
+			return
+		}
+		if code, message := validateMCPUpstreamName(p.Name, existing.Name, existingFound); code != "" {
+			writeOpenAIError(w, http.StatusBadRequest, message, "invalid_request_error", code)
+			return
+		}
 		encAuth := ""
 		if strings.TrimSpace(p.AuthToken) != "" {
 			enc, err := s.secrets.Load().Encrypt(strings.TrimSpace(p.AuthToken))
@@ -159,6 +168,7 @@ func (s *Server) handleMCPUpstreamByID(w http.ResponseWriter, r *http.Request) {
 			writeOpenAIError(w, http.StatusNotFound, "upstream not found", "invalid_request_error", "upstream_not_found")
 			return
 		}
+		legacyName := cur.Name
 		var p struct {
 			Name             *string                    `json:"name"`
 			URL              *string                    `json:"url"`
@@ -181,6 +191,10 @@ func (s *Server) handleMCPUpstreamByID(w http.ResponseWriter, r *http.Request) {
 		}
 		if p.Name != nil {
 			cur.Name = strings.TrimSpace(*p.Name)
+		}
+		if code, message := validateMCPUpstreamName(cur.Name, legacyName, true); code != "" {
+			writeOpenAIError(w, http.StatusBadRequest, message, "invalid_request_error", code)
+			return
 		}
 		if p.URL != nil {
 			cur.URL = strings.TrimSpace(*p.URL)
@@ -217,6 +231,30 @@ func (s *Server) handleMCPUpstreamByID(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
 	}
+}
+
+func validateMCPUpstreamName(name, legacyName string, existing bool) (code, message string) {
+	name = strings.TrimSpace(name)
+	reserved := name == providerNameOmitted
+	// Older rows may predate display-name validation. Allow their exact name to be
+	// preserved while an operator changes an unrelated field, but do not admit a new
+	// unsafe name or let an existing row be renamed to one.
+	if existing && name == strings.TrimSpace(legacyName) && (!modelsProviderLabelSafe(name) || reserved) {
+		return "", ""
+	}
+	// Provider-specific names such as "vibe" and "aggregate" are valid MCP display
+	// names. Only reserve the shared omission marker that would be indistinguishable
+	// from an unsafe legacy-name projection.
+	if reserved {
+		return "mcp_upstream_name_reserved", "MCP upstream name is reserved"
+	}
+	if len(name) > maxModelsProviderNameBytes {
+		return "mcp_upstream_name_too_long", "MCP upstream name exceeds the supported limit"
+	}
+	if !modelsProviderLabelSafe(name) {
+		return "mcp_upstream_name_invalid", "MCP upstream name contains unsafe metadata"
+	}
+	return "", ""
 }
 
 func mcpMetadataFromPayload(meta *store.MCPUpstreamMetadata, description string, domains []string, riskLevel string, allowedModels []string, defaultTool string, timeoutMS, maxResults int, requiresApproval, fallbackAllowed bool) store.MCPUpstreamMetadata {

@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -14,6 +14,10 @@ import (
 )
 
 const mcpProtocolVersion = "2025-06-18"
+
+const mcpUpstreamRequestFailed = "MCP upstream request failed"
+
+var errMCPUpstreamRequestFailed = errors.New(mcpUpstreamRequestFailed)
 
 // JSON-RPC 2.0 message shapes (the subset the MCP gateway needs).
 type rpcRequest struct {
@@ -88,7 +92,7 @@ func (s *Server) ensureUpstreamInit(ctx context.Context, up store.MCPUpstream, c
 		"clientInfo":      map[string]any{"name": "vibe-coders-mcp-gateway", "version": "1"},
 	}
 	if _, err := s.rpcCall(ctx, up, conn, "initialize", params); err != nil {
-		return fmt.Errorf("initialize %s: %w", up.Name, err)
+		return errMCPUpstreamRequestFailed
 	}
 	// notifications/initialized is a notification (no id, no response expected)
 	_ = s.rpcNotify(ctx, up, conn, "notifications/initialized")
@@ -102,10 +106,10 @@ func (s *Server) rpcCall(ctx context.Context, up store.MCPUpstream, conn *mcpUps
 		return nil, err
 	}
 	if resp == nil {
-		return nil, fmt.Errorf("%s: empty response", method)
+		return nil, errMCPUpstreamRequestFailed
 	}
 	if resp.Error != nil {
-		return nil, fmt.Errorf("%s: upstream error %d: %s", method, resp.Error.Code, resp.Error.Message)
+		return nil, errMCPUpstreamRequestFailed
 	}
 	return resp.Result, nil
 }
@@ -120,11 +124,11 @@ func (s *Server) rpcNotify(ctx context.Context, up store.MCPUpstream, conn *mcpU
 func (s *Server) postRPC(ctx context.Context, up store.MCPUpstream, conn *mcpUpstreamConn, msg rpcRequest) (*rpcResponse, error) {
 	payload, err := json.Marshal(msg)
 	if err != nil {
-		return nil, err
+		return nil, errMCPUpstreamRequestFailed
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, up.URL, bytes.NewReader(payload))
 	if err != nil {
-		return nil, err
+		return nil, errMCPUpstreamRequestFailed
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json, text/event-stream")
@@ -139,15 +143,17 @@ func (s *Server) postRPC(ctx context.Context, up store.MCPUpstream, conn *mcpUps
 	}
 	resp, err := s.client.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, errMCPUpstreamRequestFailed
 	}
 	defer resp.Body.Close()
 	if sid := resp.Header.Get("Mcp-Session-Id"); sid != "" {
 		conn.sessionID = sid
 	}
 	if resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
-		return nil, fmt.Errorf("upstream HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		// The body is untrusted and may echo credentials, request arguments, or the
+		// upstream URL. Drain a bounded amount for connection reuse but never retain it.
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
+		return nil, errMCPUpstreamRequestFailed
 	}
 	// notification: server may answer 202 Accepted with no body
 	if msg.ID == nil {
@@ -155,7 +161,7 @@ func (s *Server) postRPC(ctx context.Context, up store.MCPUpstream, conn *mcpUps
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 	if err != nil {
-		return nil, err
+		return nil, errMCPUpstreamRequestFailed
 	}
 	ct := resp.Header.Get("Content-Type")
 	if strings.Contains(ct, "text/event-stream") {
@@ -163,7 +169,7 @@ func (s *Server) postRPC(ctx context.Context, up store.MCPUpstream, conn *mcpUps
 	}
 	var out rpcResponse
 	if err := json.Unmarshal(bytes.TrimSpace(body), &out); err != nil {
-		return nil, fmt.Errorf("decode response: %w", err)
+		return nil, errMCPUpstreamRequestFailed
 	}
 	return &out, nil
 }
@@ -187,7 +193,7 @@ func parseSSEResponse(body []byte) (*rpcResponse, error) {
 			return &out, nil
 		}
 	}
-	return nil, fmt.Errorf("no JSON-RPC response in SSE stream")
+	return nil, errMCPUpstreamRequestFailed
 }
 
 // listUpstreamTools fetches and decodes an upstream's tools/list.
@@ -200,7 +206,7 @@ func (s *Server) listUpstreamTools(ctx context.Context, up store.MCPUpstream) ([
 		Tools []mcpToolDef `json:"tools"`
 	}
 	if err := json.Unmarshal(res, &parsed); err != nil {
-		return nil, fmt.Errorf("decode tools/list: %w", err)
+		return nil, errMCPUpstreamRequestFailed
 	}
 	return parsed.Tools, nil
 }
@@ -231,7 +237,7 @@ func (s *Server) listUpstreamResources(ctx context.Context, up store.MCPUpstream
 		Resources []mcpResource `json:"resources"`
 	}
 	if err := json.Unmarshal(res, &parsed); err != nil {
-		return nil, fmt.Errorf("decode resources/list: %w", err)
+		return nil, errMCPUpstreamRequestFailed
 	}
 	return parsed.Resources, nil
 }
@@ -245,7 +251,7 @@ func (s *Server) listUpstreamResourceTemplates(ctx context.Context, up store.MCP
 		ResourceTemplates []json.RawMessage `json:"resourceTemplates"`
 	}
 	if err := json.Unmarshal(res, &parsed); err != nil {
-		return nil, fmt.Errorf("decode resources/templates/list: %w", err)
+		return nil, errMCPUpstreamRequestFailed
 	}
 	return parsed.ResourceTemplates, nil
 }
@@ -259,7 +265,7 @@ func (s *Server) listUpstreamPrompts(ctx context.Context, up store.MCPUpstream) 
 		Prompts []mcpPrompt `json:"prompts"`
 	}
 	if err := json.Unmarshal(res, &parsed); err != nil {
-		return nil, fmt.Errorf("decode prompts/list: %w", err)
+		return nil, errMCPUpstreamRequestFailed
 	}
 	return parsed.Prompts, nil
 }
