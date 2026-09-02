@@ -159,6 +159,12 @@ func TestAggregatedModelsMergesAllProviders(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	oversizedRouteID := strings.Repeat("i", 513)
+	if err := db.UpsertAgentRoute(ctx, store.AgentRoute{
+		ID: oversizedRouteID, VirtualModel: "id-only-route", Name: "Oversized descriptive ID", Enabled: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	proxy := httptest.NewServer(server.Routes())
 	defer proxy.Close()
@@ -197,13 +203,16 @@ func TestAggregatedModelsMergesAllProviders(t *testing.T) {
 		id, _ := m["id"].(string)
 		byID[id] = m
 	}
-	for _, want := range []string{"gpt-4.1", "gpt-4.1-mini", "claude-opus-4-8"} {
+	for _, want := range []string{"gpt-4.1", "gpt-4.1-mini", "claude-opus-4-8", "id-only-route"} {
 		if _, ok := byID[want]; !ok {
 			t.Fatalf("expected model %q in aggregated list, got %v", want, keysOfAny(byID))
 		}
 	}
 	if hdr := resp.Header.Get("X-Models-Providers"); hdr == "" {
 		t.Fatal("expected X-Models-Providers header")
+	}
+	if got := resp.Header.Get("X-Models-Truncated"); got != "" {
+		t.Fatalf("oversized descriptive route ID marked the complete model projection truncated: %q", got)
 	}
 	// Every merged model is tagged with a source provider, and the provider name fills in
 	// owned_by when the upstream omits it.
@@ -228,6 +237,13 @@ func TestAggregatedModelsMergesAllProviders(t *testing.T) {
 	}
 	if got := byID["shared-priority"]["provider"]; got != "vibe" || byID["shared-priority"]["agent_route"] != true || sharedCount != 1 {
 		t.Fatalf("agent route must deterministically shadow the physical duplicate once: count=%d model=%v", sharedCount, byID["shared-priority"])
+	}
+	if got := byID["id-only-route"]["provider"]; got != "vibe" || byID["id-only-route"]["agent_route"] != true {
+		t.Fatalf("oversized route ID lost its complete virtual key: %v", byID["id-only-route"])
+	}
+	encoded, _ := json.Marshal(parsed)
+	if strings.Contains(string(encoded), oversizedRouteID) {
+		t.Fatalf("oversized descriptive route ID escaped through public models: %s", encoded)
 	}
 }
 

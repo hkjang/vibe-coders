@@ -478,6 +478,53 @@ func TestAdminModelsInvalidOnlyAgentProjectionFailsClosed(t *testing.T) {
 	}
 }
 
+func TestAdminModelsOversizedRouteIDKeepsPhysicalInventoryAndShadowKey(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"data":[{"id":"vibe/id-only-shadow"},{"id":"physical-other"}]}`)
+	}))
+	defer upstream.Close()
+	server, db, gateway := newAdminModelsTestServer(t, "")
+	addAdminModelsProvider(t, server, db, store.ProviderConfig{
+		Name: "alpha", BaseURL: upstream.URL, TimeoutMS: 1_000, Enabled: true,
+	}, "alpha-key")
+	oversizedID := strings.Repeat("i", 513)
+	if err := db.UpsertAgentRoute(t.Context(), store.AgentRoute{
+		ID: oversizedID, VirtualModel: "vibe/id-only-shadow", Enabled: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	response, body := getAdminModels(t, gateway.URL+"/admin/models", "")
+	if response.StatusCode != http.StatusOK || len(body.Models) != 3 || len(body.PartialFailures) != 0 {
+		t.Fatalf("ID-only oversized route truncated the inventory: status=%d body=%+v", response.StatusCode, body)
+	}
+	find := func(provider, id string) adminModel {
+		t.Helper()
+		for _, model := range body.Models {
+			if model.Provider == provider && model.ID == id {
+				return model
+			}
+		}
+		t.Fatalf("missing model %s/%s in %+v", provider, id, body.Models)
+		return adminModel{}
+	}
+	shadowed := find("alpha", "vibe/id-only-shadow")
+	if !shadowed.Shadowed || shadowed.ShadowedBy != "" {
+		t.Fatalf("matching physical model did not retain the known shadow key: %+v", shadowed)
+	}
+	if other := find("alpha", "physical-other"); other.Shadowed || other.ShadowedBy != "" {
+		t.Fatalf("unmatched physical model changed: %+v", other)
+	}
+	if virtual := find("vibe", "vibe/id-only-shadow"); !virtual.Virtual || virtual.Shadowed {
+		t.Fatalf("known virtual model changed: %+v", virtual)
+	}
+	encoded, _ := json.Marshal(body)
+	if strings.Contains(string(encoded), oversizedID) {
+		t.Fatalf("oversized descriptive route ID escaped: %s", encoded)
+	}
+}
+
 func TestAdminModelShadowFieldsAreAlwaysEncoded(t *testing.T) {
 	encoded, err := json.Marshal(adminModel{})
 	if err != nil {

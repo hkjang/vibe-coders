@@ -111,3 +111,20 @@ func TestListEnabledAgentRouteModelsBoundedInvalidOnly(t *testing.T) {
 		t.Fatalf("invalid-only projection = %#v truncated=%v overflow=%v", models, truncated, overflow)
 	}
 }
+
+func TestListEnabledAgentRouteModelsBoundedOversizedIDKeepsCompleteShadowKey(t *testing.T) {
+	db := openAggTestStore(t)
+	defer db.Close()
+	if err := db.UpsertAgentRoute(t.Context(), AgentRoute{
+		ID: strings.Repeat("i", maxBoundedAgentRouteModelFieldBytes+1), VirtualModel: "vibe/id-only-shadow", Enabled: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	models, truncated, overflow, err := db.ListEnabledAgentRouteModelsBounded(t.Context(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(models) != 1 || models[0].ID != "" || models[0].VirtualModel != "vibe/id-only-shadow" || truncated || overflow {
+		t.Fatalf("ID-only oversized projection = %#v truncated=%v overflow=%v", models, truncated, overflow)
+	}
+}

@@ -133,9 +133,9 @@ func (s *SQLStore) ListEnabledAgentRouteModelsBounded(ctx context.Context, limit
 		}
 		if idOversized != 0 || len(model.ID) > maxBoundedAgentRouteModelFieldBytes {
 			// The route ID is only descriptive shadow metadata. Keep the valid virtual
-			// model discoverable, mark the projection uncertain, and omit its oversized ID.
+			// model discoverable and omit its oversized ID. Shadow coverage remains
+			// complete because runtime matching uses VirtualModel, so this is not truncation.
 			model.ID = ""
-			truncated = true
 		}
 		models = append(models, model)
 	}
