@@ -1,9 +1,10 @@
-import { ExternalLink, RefreshCw, Search } from "lucide-react";
+import { Search } from "lucide-react";
 import { useCallback, useEffect, useMemo } from "react";
 import { useSearchParams } from "react-router";
 
 import { useAuth } from "@/app/auth/AuthProvider";
 import { ModelDetailDialog } from "@/features/gateway/models/ModelDetailDialog";
+import { ModelPageHeader } from "@/features/gateway/models/ModelPageHeader";
 import {
   buildModelRows,
   filterModelRows,
@@ -18,9 +19,8 @@ import { ModelPartialFailureNotice, ModelTable } from "@/features/gateway/models
 import { useModelCatalogQueries } from "@/features/gateway/models/use-model-catalog";
 import { useModelDialogFocus } from "@/features/gateway/models/use-model-dialog-focus";
 import { QueryFailureNotice } from "@/features/gateway/providers/ProviderTableParts";
-import { formatInteger, isHealthRange, maxUpdatedAt, type HealthRange } from "@/features/health/health-utils";
+import { isHealthRange, maxUpdatedAt, type HealthRange } from "@/features/health/health-utils";
 import { TimeRangePicker } from "@/features/health/health-ui";
-import { Badge } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
 import { canOpenLegacyAdmin } from "@/shared/permissions/legacy-admin";
 
@@ -48,12 +48,14 @@ export function ModelPage(): React.JSX.Element {
   const requestedRange = searchParams.get("range");
   const requestedStatus = searchParams.get("status");
   const requestedPage = searchParams.get("page");
+  const requestedModelProvider = searchParams.get("model_provider");
   const requestedSource = searchParams.get("source");
   const range = isHealthRange(requestedRange) ? requestedRange : defaultRange;
   const status = isModelStatusFilter(requestedStatus) ? requestedStatus : "all";
   const query = searchParams.get("q") ?? "";
   const providerFilter = searchParams.get("provider")?.trim() ?? "";
   const selectedModel = searchParams.get("model")?.trim() ?? "";
+  const selectedProvider = requestedModelProvider?.trim() || (selectedModel !== "" ? providerFilter : "");
   const selectedSource = isModelSource(requestedSource) ? requestedSource : undefined;
   const currentPage = positivePage(requestedPage);
   const showLegacyAdmin = canOpenLegacyAdmin(auth);
@@ -76,11 +78,22 @@ export function ModelPage(): React.JSX.Element {
     if (requestedRange !== null && !isHealthRange(requestedRange)) updates.range = defaultRange;
     if (requestedStatus !== null && !isModelStatusFilter(requestedStatus)) updates.status = undefined;
     if (requestedSource !== null && !isModelSource(requestedSource)) updates.source = undefined;
+    if (requestedModelProvider !== null && (selectedModel === "" || requestedModelProvider.trim() === "")) {
+      updates.model_provider = undefined;
+    }
     if (requestedPage !== null && positivePage(requestedPage) === 1 && requestedPage !== "1") {
       updates.page = undefined;
     }
     if (Object.keys(updates).length > 0) updateSearch(updates);
-  }, [requestedPage, requestedRange, requestedSource, requestedStatus, updateSearch]);
+  }, [
+    requestedModelProvider,
+    requestedPage,
+    requestedRange,
+    requestedSource,
+    requestedStatus,
+    selectedModel,
+    updateSearch,
+  ]);
 
   const allRows = useMemo(
     () =>
@@ -106,7 +119,7 @@ export function ModelPage(): React.JSX.Element {
     ? allRows.filter(
         (row) =>
           row.model.id === selectedModel &&
-          (providerFilter === "" || row.model.provider === providerFilter) &&
+          (selectedProvider === "" || row.model.provider === selectedProvider) &&
           (selectedSource === undefined || row.model.source === selectedSource),
       )
     : [];
@@ -119,6 +132,10 @@ export function ModelPage(): React.JSX.Element {
   );
   const refreshing = models.isFetching || quality.isFetching || pricing.isFetching || tags.isFetching;
   const catalogueAvailable = models.data !== undefined;
+  const enrichmentLoading = useMemo(
+    () => ({ pricing: pricing.isPending, quality: quality.isPending, tags: tags.isPending }),
+    [pricing.isPending, quality.isPending, tags.isPending],
+  );
 
   useEffect(() => {
     if (!models.data || currentPage <= pageCount) return;
@@ -132,7 +149,10 @@ export function ModelPage(): React.JSX.Element {
   const openModel = useCallback(
     (row: ModelCatalogRow): void => {
       rememberRowTrigger(modelRowKey(row.model));
-      updateSearch({ model: row.model.id, provider: row.model.provider, source: row.model.source }, false);
+      updateSearch(
+        { model: row.model.id, model_provider: row.model.provider, source: row.model.source },
+        false,
+      );
     },
     [rememberRowTrigger, updateSearch],
   );
@@ -140,7 +160,7 @@ export function ModelPage(): React.JSX.Element {
     (row: ModelCatalogRow): string => {
       const next = new URLSearchParams(searchParams);
       next.set("model", row.model.id);
-      next.set("provider", row.model.provider);
+      next.set("model_provider", row.model.provider);
       next.set("source", row.model.source);
       return `?${next.toString()}`;
     },
@@ -158,48 +178,17 @@ export function ModelPage(): React.JSX.Element {
 
   return (
     <div className="page-stack">
-      <header className="page-header">
-        <div>
-          <div className="eyebrow">Preview Read Only</div>
-          <h1>Models</h1>
-          <p>Provider별 Model 재고와 Model ID 기준 품질, 가격, 사용 지침을 함께 조회합니다.</p>
-        </div>
-        <div className="page-actions">
-          <Badge tone="info">Read Only</Badge>
-          {showLegacyAdmin ? (
-            <a className="button button-secondary button-default" href="/admin#/model-contracts">
-              Legacy에서 열기 <ExternalLink aria-hidden="true" />
-            </a>
-          ) : null}
-          <Button variant="primary" onClick={refreshAll} disabled={refreshing}>
-            <RefreshCw aria-hidden="true" /> {refreshing ? "갱신 중" : "새로고침"}
-          </Button>
-          {refreshing ? (
-            <span className="sr-only" role="status">
-              Model 카탈로그를 갱신하고 있습니다.
-            </span>
-          ) : null}
-        </div>
-      </header>
-
-      <section className="model-summary" aria-busy={models.isPending || undefined} aria-label="Model 요약">
-        <article>
-          <span>전체 Model</span>
-          <strong>{catalogueAvailable ? formatInteger(allRows.length) : "—"}</strong>
-        </article>
-        <article>
-          <span>Available</span>
-          <strong>{catalogueAvailable ? formatInteger(availableCount) : "—"}</strong>
-        </article>
-        <article>
-          <span>Virtual</span>
-          <strong>{catalogueAvailable ? formatInteger(virtualCount) : "—"}</strong>
-        </article>
-        <article>
-          <span>확인 필요</span>
-          <strong>{catalogueAvailable ? formatInteger(attentionCount) : "—"}</strong>
-        </article>
-      </section>
+      <ModelPageHeader
+        attentionCount={attentionCount}
+        availableCount={availableCount}
+        catalogueAvailable={catalogueAvailable}
+        loading={models.isPending}
+        onRefresh={refreshAll}
+        refreshing={refreshing}
+        showLegacyAdmin={showLegacyAdmin}
+        totalCount={allRows.length}
+        virtualCount={virtualCount}
+      />
 
       <div className="model-toolbar">
         <form
@@ -237,6 +226,7 @@ export function ModelPage(): React.JSX.Element {
               updateSearch({
                 provider: event.target.value || undefined,
                 model: undefined,
+                model_provider: undefined,
                 page: undefined,
                 source: undefined,
               })
@@ -258,6 +248,7 @@ export function ModelPage(): React.JSX.Element {
               updateSearch({
                 status: event.target.value === "all" ? undefined : event.target.value,
                 model: undefined,
+                model_provider: undefined,
                 page: undefined,
                 source: undefined,
               })
@@ -283,6 +274,7 @@ export function ModelPage(): React.JSX.Element {
           onClick={() =>
             updateSearch({
               model: undefined,
+              model_provider: undefined,
               page: undefined,
               provider: undefined,
               q: undefined,
@@ -336,6 +328,7 @@ export function ModelPage(): React.JSX.Element {
         allRowCount={allRows.length}
         catalogueAvailable={catalogueAvailable}
         detailSearch={detailSearch}
+        enrichmentLoading={enrichmentLoading}
         filteredRowCount={filteredRows.length}
         loading={models.isPending}
         modelUnavailable={models.isError && !models.data}
@@ -343,6 +336,7 @@ export function ModelPage(): React.JSX.Element {
           updateSearch({
             page: pageIndex === 0 ? undefined : String(pageIndex + 1),
             model: undefined,
+            model_provider: undefined,
             source: undefined,
           })
         }
@@ -355,6 +349,13 @@ export function ModelPage(): React.JSX.Element {
       />
 
       <ModelDetailDialog
+        catalogue={{
+          error: models.error,
+          fetching: models.isFetching,
+          hasResponse: models.data !== undefined,
+          pending: models.isPending,
+          retry: () => void models.refetch(),
+        }}
         enrichment={{
           pricing: {
             error: pricing.error,
@@ -378,14 +379,12 @@ export function ModelPage(): React.JSX.Element {
             retry: () => void tags.refetch(),
           },
         }}
-        error={models.error}
-        loading={models.isPending}
         onOpenChange={(open) => {
           if (!open) closeModel();
         }}
         open={selectedModel !== ""}
         requestedModel={selectedModel}
-        requestedProvider={providerFilter}
+        requestedProvider={selectedProvider}
         returnFocusRef={returnFocusRef}
         row={selectedRow}
         showLegacyAdmin={showLegacyAdmin}

@@ -42,6 +42,8 @@ const baseModel = {
   object: "model",
   owned_by: "openai",
   provider: "openai",
+  shadowed: false,
+  shadowed_by: "",
   source: "live",
   stale: false,
   virtual: false,
@@ -82,6 +84,14 @@ const retiredModel = {
   id: "gpt-old",
 } satisfies AdminModel;
 
+const shadowedModel = {
+  ...baseModel,
+  id: "gpt-shadowed",
+  shadowed: true,
+  shadowed_by: "agent-route-priority",
+  stale: true,
+} satisfies AdminModel;
+
 const modelResponse = {
   generated_at: "2026-09-02T00:00:00Z",
   models: [baseModel, openAISharedLive, openAIShared, anthropicShared, retiredModel],
@@ -107,7 +117,7 @@ const modelResponse = {
   request_id: "req-model-catalogue",
 } satisfies AdminModelsResponse;
 
-const qualityResponse = {
+const qualityResponse: ModelQualityResponse = {
   categories: ["tests", "security"],
   models: [
     {
@@ -134,7 +144,7 @@ const qualityResponse = {
     },
   ],
   since: "2026-09-01T00:00:00Z",
-} satisfies ModelQualityResponse;
+};
 
 const pricingResponse = {
   effective: {
@@ -263,10 +273,10 @@ describe("ModelPage", () => {
   it("keeps duplicate provider/model sources distinct and restores the exact trigger after Escape", async () => {
     const user = userEvent.setup();
     mockApi();
-    renderPage();
+    renderPage("/gateway/models?provider=openai");
 
     const links = await screen.findAllByRole("link", { name: "shared-model" });
-    expect(links).toHaveLength(3);
+    expect(links).toHaveLength(2);
     const agentRouteRow = links
       .map((link) => link.closest("tr"))
       .find((row) => row && within(row).queryAllByText("agent route").length > 0);
@@ -278,6 +288,7 @@ describe("ModelPage", () => {
     expect(within(dialog).getAllByText("openai").length).toBeGreaterThan(0);
     expect(within(dialog).getByText("agent route")).toBeVisible();
     expect(screen.getByTestId("location")).toHaveTextContent("provider=openai");
+    expect(screen.getByTestId("location")).toHaveTextContent("model_provider=openai");
     expect(screen.getByTestId("location")).toHaveTextContent("model=shared-model");
     expect(screen.getByTestId("location")).toHaveTextContent("source=agent_route");
 
@@ -285,14 +296,32 @@ describe("ModelPage", () => {
     await waitFor(() =>
       expect(screen.queryByRole("dialog", { name: "shared-model" })).not.toBeInTheDocument(),
     );
-    expect(screen.getByTestId("location")).not.toHaveTextContent("model=");
-    expect(screen.getByTestId("location")).not.toHaveTextContent("source=");
-    expect(screen.getByTestId("location")).toHaveTextContent("provider=openai");
+    expect(screen.getByTestId("location")).toHaveTextContent("/gateway/models?provider=openai");
     const restoredTrigger = screen
       .getAllByRole("link", { name: "shared-model" })
       .find((link) => link.dataset.modelTrigger?.includes("agent_route"));
     if (!restoredTrigger) throw new Error("restored agent-route trigger not found");
     await waitFor(() => expect(restoredTrigger).toHaveFocus());
+  });
+
+  it("shows the required shadow status and prioritizing Agent Route in the detail dialog", async () => {
+    const user = userEvent.setup();
+    mockApi({ models: { ...modelResponse, models: [...modelResponse.models, shadowedModel] } });
+    renderPage("/gateway/models?model_provider=openai&model=gpt-shadowed&source=live");
+
+    const dialog = await screen.findByRole("dialog", { name: "gpt-shadowed" });
+    expect(await within(dialog).findByText("Shadowed")).toBeVisible();
+    expect(
+      within(dialog).getByText("Agent Route “agent-route-priority”가 동일 Model ID를 우선 처리합니다."),
+    ).toBeVisible();
+    expect(within(dialog).getByText("마지막 정상 카탈로그")).toBeVisible();
+    expect(within(dialog).getByText(/마지막 정상 카탈로그 데이터입니다\. Fetched/)).toBeVisible();
+
+    await user.keyboard("{Escape}");
+    const row = screen.getByRole("link", { name: "gpt-shadowed" }).closest("tr");
+    if (!row) throw new Error("gpt-shadowed row not found");
+    expect(within(row).getByText("Shadowed")).toBeVisible();
+    expect(within(row).getByText("마지막 정상 카탈로그")).toBeVisible();
   });
 
   it("keeps rows usable on enrichment errors and exposes exact request IDs", async () => {
@@ -340,6 +369,28 @@ describe("ModelPage", () => {
     await waitFor(() => expect(request).toHaveBeenCalledTimes(8));
   });
 
+  it("marks enrichment cells as checking during their initial load", async () => {
+    let resolveQuality: ((value: ModelQualityResponse) => void) | undefined;
+    const pendingQuality = new Promise<ModelQualityResponse>((resolve) => {
+      resolveQuality = resolve;
+    });
+    vi.spyOn(apiClient, "request").mockImplementation(async (endpoint) => {
+      if (endpoint.path === endpoints.admin.models.list.path) return modelResponse as never;
+      if (endpoint.path === endpoints.admin.models.quality.path) return pendingQuality as never;
+      if (endpoint.path === endpoints.admin.models.pricing.path) return pricingResponse as never;
+      if (endpoint.path === endpoints.admin.models.tags.path) return tagsResponse as never;
+      throw new Error(`Unexpected endpoint: ${endpoint.path}`);
+    });
+    renderPage();
+
+    const row = (await screen.findByRole("link", { name: "gpt-5" })).closest("tr");
+    if (!row) throw new Error("gpt-5 row not found");
+    await waitFor(() => expect(within(row).getAllByText("확인 중")).toHaveLength(2));
+
+    resolveQuality?.(qualityResponse);
+    expect(await within(row).findByText("91점")).toBeVisible();
+  });
+
   it("does not present previous-range quality as the newly selected range", async () => {
     const user = userEvent.setup();
     let qualityCalls = 0;
@@ -364,7 +415,11 @@ describe("ModelPage", () => {
     await user.keyboard("{Escape}");
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "gpt-5" })).not.toBeInTheDocument());
     await user.click(screen.getByRole("button", { name: "7일" }));
-    await user.click(screen.getByRole("link", { name: "gpt-5" }));
+    const trigger = screen.getByRole("link", { name: "gpt-5" });
+    const row = trigger.closest("tr");
+    if (!row) throw new Error("gpt-5 row not found");
+    await waitFor(() => expect(within(row).getAllByText("확인 중")).toHaveLength(2));
+    await user.click(trigger);
     const loadingDialog = await screen.findByRole("dialog", { name: "gpt-5" });
     expect(await within(loadingDialog).findByText("Model 품질 정보를 불러오는 중입니다.")).toBeVisible();
     expect(within(loadingDialog).queryByText("91점")).not.toBeInTheDocument();
@@ -437,21 +492,52 @@ describe("ModelPage", () => {
   });
 
   it("shows last-known-good rows after catalogue refresh failure", async () => {
+    const user = userEvent.setup();
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     client.setQueryData(["admin", "models"], modelResponse, { updatedAt: Date.now() - 30_000 });
-    mockApi({
+    const request = mockApi({
       modelError: new AppError("Model 목록 갱신 실패", {
         kind: "network",
         requestId: "req-model-lkg",
         retryable: true,
       }),
     });
-    renderPage("/gateway/models", client);
+    renderPage("/gateway/models?model=gpt-5&model_provider=openai&source=live", client);
 
-    const table = await screen.findByRole("table", { name: "Provider별 Model 상태, 품질과 가격" });
-    expect(within(table).getByRole("link", { name: "gpt-5" })).toBeVisible();
-    expect(await screen.findByText(/Model 목록 갱신에 실패해 마지막 정상 데이터를 표시합니다/)).toBeVisible();
-    expect(screen.getByText("Request ID: req-model-lkg")).toBeVisible();
+    const dialog = await screen.findByRole("dialog", { name: "gpt-5" });
+    expect(
+      await within(dialog).findByText("Model 카탈로그 갱신에 실패해 마지막 정상 데이터를 표시합니다."),
+    ).toBeVisible();
+    expect(within(dialog).getByText("Request ID: req-model-lkg")).toBeVisible();
+    expect(within(dialog).getByText("Catalogue")).toBeVisible();
+    await user.click(within(dialog).getByRole("button", { name: "Model 카탈로그 상세 재시도" }));
+    await waitFor(() => expect(request).toHaveBeenCalledTimes(5));
+  });
+
+  it("shows catalogue refresh progress inside an open detail dialog", async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    client.setQueryData(["admin", "models"], modelResponse, { updatedAt: Date.now() - 30_000 });
+    let resolveModels: ((value: AdminModelsResponse) => void) | undefined;
+    const pendingModels = new Promise<AdminModelsResponse>((resolve) => {
+      resolveModels = resolve;
+    });
+    vi.spyOn(apiClient, "request").mockImplementation(async (endpoint) => {
+      if (endpoint.path === endpoints.admin.models.list.path) return pendingModels as never;
+      if (endpoint.path === endpoints.admin.models.quality.path) return qualityResponse as never;
+      if (endpoint.path === endpoints.admin.models.pricing.path) return pricingResponse as never;
+      if (endpoint.path === endpoints.admin.models.tags.path) return tagsResponse as never;
+      throw new Error(`Unexpected endpoint: ${endpoint.path}`);
+    });
+    renderPage("/gateway/models?model=gpt-5&model_provider=openai&source=live", client);
+
+    const dialog = await screen.findByRole("dialog", { name: "gpt-5" });
+    expect(await within(dialog).findByText("Model 카탈로그 정보를 갱신하고 있습니다.")).toBeVisible();
+    expect(within(dialog).getByText("Catalogue")).toBeVisible();
+
+    resolveModels?.(modelResponse);
+    await waitFor(() =>
+      expect(within(dialog).queryByText("Model 카탈로그 정보를 갱신하고 있습니다.")).not.toBeInTheDocument(),
+    );
   });
 
   it("renders a terminal error when no catalogue data has succeeded", async () => {

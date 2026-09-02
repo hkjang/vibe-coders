@@ -24,9 +24,8 @@ export interface ModelDetailEnrichment {
 }
 
 interface ModelDetailDialogProps {
-  error?: unknown;
+  catalogue: ModelDetailResourceState;
   enrichment: ModelDetailEnrichment;
-  loading: boolean;
   onOpenChange: (open: boolean) => void;
   open: boolean;
   requestedModel: string;
@@ -179,8 +178,9 @@ function DeprecationDetails({ row }: { row: ModelCatalogRow }): React.JSX.Elemen
       ) : null}
       {row.model.shadowed || row.model.shadowed_by ? (
         <p className="model-detail-note">
-          이 항목은 {row.model.shadowed_by ? `“${row.model.shadowed_by}”` : "다른 Model"}에 의해 가려져
-          있습니다.
+          {row.model.shadowed_by
+            ? `Agent Route “${row.model.shadowed_by}”가 동일 Model ID를 우선 처리합니다.`
+            : "다른 Agent Route가 동일 Model ID를 우선 처리합니다."}
         </p>
       ) : null}
     </section>
@@ -188,9 +188,8 @@ function DeprecationDetails({ row }: { row: ModelCatalogRow }): React.JSX.Elemen
 }
 
 export function ModelDetailDialog({
-  error,
+  catalogue,
   enrichment,
-  loading,
   onOpenChange,
   open,
   requestedModel,
@@ -199,7 +198,7 @@ export function ModelDetailDialog({
   row,
   showLegacyAdmin,
 }: ModelDetailDialogProps): React.JSX.Element {
-  const requestId = isAppError(error) ? error.requestId : undefined;
+  const requestId = isAppError(catalogue.error) ? catalogue.error.requestId : undefined;
   const footer = showLegacyAdmin ? (
     <a className="button button-secondary button-default" href="/admin#/model-contracts">
       Legacy Model 계약 열기 <ExternalLink aria-hidden="true" />
@@ -220,18 +219,21 @@ export function ModelDetailDialog({
       returnFocusRef={returnFocusRef}
       title={row?.model.id ?? (requestedModel || "Model 상세")}
     >
-      {loading ? (
+      {catalogue.pending && !catalogue.hasResponse ? (
         <div className="model-detail-loading" role="status">
           상세 정보를 불러오는 중입니다.
         </div>
-      ) : error && !row ? (
+      ) : catalogue.error && !row ? (
         <div className="model-detail-error" role="alert">
           <AlertTriangle aria-hidden="true" />
           <div>
             <strong>Model 상세를 불러오지 못했습니다.</strong>
-            <p>{isAppError(error) ? error.message : "잠시 후 다시 시도해 주세요."}</p>
+            <p>{isAppError(catalogue.error) ? catalogue.error.message : "잠시 후 다시 시도해 주세요."}</p>
             {requestId ? <code>Request ID: {requestId}</code> : null}
           </div>
+          <Button size="small" variant="secondary" onClick={catalogue.retry}>
+            <RefreshCw aria-hidden="true" /> 재시도
+          </Button>
         </div>
       ) : !row ? (
         <div className="model-detail-error" role="alert">
@@ -245,85 +247,95 @@ export function ModelDetailDialog({
           </div>
         </div>
       ) : (
-        <div className="model-detail-stack">
-          <div className="model-detail-badges">
-            <Badge tone={status?.tone}>{status?.label}</Badge>
-            <Badge tone="info">{row.model.provider}</Badge>
-            <Badge tone={row.model.source === "live" ? "success" : "muted"}>
-              {row.model.source.replace("_", " ")}
-            </Badge>
+        <DetailResourceState label="Model 카탈로그" state={catalogue}>
+          <div className="model-detail-stack">
+            <div className="model-detail-badges">
+              <Badge tone={status?.tone}>{status?.label}</Badge>
+              {row.model.stale && row.status !== "stale" ? (
+                <Badge tone="warning">마지막 정상 카탈로그</Badge>
+              ) : null}
+              <Badge tone="info">{row.model.provider}</Badge>
+              <Badge tone={row.model.source === "live" ? "success" : "muted"}>
+                {row.model.source.replace("_", " ")}
+              </Badge>
+            </div>
+
+            <section className="model-detail-section" aria-labelledby="model-identity-title">
+              <h3 id="model-identity-title">Catalogue</h3>
+              <dl className="model-detail-grid">
+                <div>
+                  <dt>Provider</dt>
+                  <dd>{row.model.provider}</dd>
+                </div>
+                <div>
+                  <dt>Owned by</dt>
+                  <dd>{row.model.owned_by || "정보 없음"}</dd>
+                </div>
+                <div>
+                  <dt>Object</dt>
+                  <dd>{row.model.object || "정보 없음"}</dd>
+                </div>
+                <div>
+                  <dt>Provider 상태</dt>
+                  <dd>{row.provider?.status ?? "정보 없음"}</dd>
+                </div>
+                <div>
+                  <dt>Created</dt>
+                  <dd>{formatDate(row.model.created)}</dd>
+                </div>
+                <div>
+                  <dt>Fetched</dt>
+                  <dd>{formatDate(row.model.fetched_at)}</dd>
+                </div>
+              </dl>
+              {row.model.stale ? (
+                <p className="model-detail-note">
+                  마지막 정상 카탈로그 데이터입니다. Fetched {formatDate(row.model.fetched_at)}
+                </p>
+              ) : null}
+            </section>
+
+            <section className="model-detail-section" aria-labelledby="model-quality-title">
+              <h3 id="model-quality-title">선택 기간 품질 · Model ID 집계</h3>
+              <DetailResourceState label="Model 품질" state={enrichment.quality}>
+                <QualityDetails row={row} />
+              </DetailResourceState>
+            </section>
+
+            <section className="model-detail-section" aria-labelledby="model-pricing-title">
+              <h3 id="model-pricing-title">Effective Pricing</h3>
+              <DetailResourceState label="Model 가격" state={enrichment.pricing}>
+                <PricingDetails row={row} />
+              </DetailResourceState>
+            </section>
+
+            <section className="model-detail-section" aria-labelledby="model-guidance-title">
+              <h3 id="model-guidance-title">사용 지침</h3>
+              <DetailResourceState label="Model 사용 지침" state={enrichment.tags}>
+                {row.tag ? (
+                  <dl className="model-detail-grid">
+                    <div>
+                      <dt>Good for</dt>
+                      <dd>{row.tag.good_for || "지정되지 않음"}</dd>
+                    </div>
+                    <div>
+                      <dt>Avoid for</dt>
+                      <dd>{row.tag.avoid_for || "지정되지 않음"}</dd>
+                    </div>
+                    <div className="model-detail-wide">
+                      <dt>Risk note</dt>
+                      <dd>{row.tag.risk_note || "등록된 위험 안내가 없습니다."}</dd>
+                    </div>
+                  </dl>
+                ) : (
+                  <p className="model-detail-empty">등록된 Model 사용 지침이 없습니다.</p>
+                )}
+              </DetailResourceState>
+            </section>
+
+            <DeprecationDetails row={row} />
           </div>
-
-          <section className="model-detail-section" aria-labelledby="model-identity-title">
-            <h3 id="model-identity-title">Catalogue</h3>
-            <dl className="model-detail-grid">
-              <div>
-                <dt>Provider</dt>
-                <dd>{row.model.provider}</dd>
-              </div>
-              <div>
-                <dt>Owned by</dt>
-                <dd>{row.model.owned_by || "정보 없음"}</dd>
-              </div>
-              <div>
-                <dt>Object</dt>
-                <dd>{row.model.object || "정보 없음"}</dd>
-              </div>
-              <div>
-                <dt>Provider 상태</dt>
-                <dd>{row.provider?.status ?? "정보 없음"}</dd>
-              </div>
-              <div>
-                <dt>Created</dt>
-                <dd>{formatDate(row.model.created)}</dd>
-              </div>
-              <div>
-                <dt>Fetched</dt>
-                <dd>{formatDate(row.model.fetched_at)}</dd>
-              </div>
-            </dl>
-          </section>
-
-          <section className="model-detail-section" aria-labelledby="model-quality-title">
-            <h3 id="model-quality-title">선택 기간 품질 · Model ID 집계</h3>
-            <DetailResourceState label="Model 품질" state={enrichment.quality}>
-              <QualityDetails row={row} />
-            </DetailResourceState>
-          </section>
-
-          <section className="model-detail-section" aria-labelledby="model-pricing-title">
-            <h3 id="model-pricing-title">Effective Pricing</h3>
-            <DetailResourceState label="Model 가격" state={enrichment.pricing}>
-              <PricingDetails row={row} />
-            </DetailResourceState>
-          </section>
-
-          <section className="model-detail-section" aria-labelledby="model-guidance-title">
-            <h3 id="model-guidance-title">사용 지침</h3>
-            <DetailResourceState label="Model 사용 지침" state={enrichment.tags}>
-              {row.tag ? (
-                <dl className="model-detail-grid">
-                  <div>
-                    <dt>Good for</dt>
-                    <dd>{row.tag.good_for || "지정되지 않음"}</dd>
-                  </div>
-                  <div>
-                    <dt>Avoid for</dt>
-                    <dd>{row.tag.avoid_for || "지정되지 않음"}</dd>
-                  </div>
-                  <div className="model-detail-wide">
-                    <dt>Risk note</dt>
-                    <dd>{row.tag.risk_note || "등록된 위험 안내가 없습니다."}</dd>
-                  </div>
-                </dl>
-              ) : (
-                <p className="model-detail-empty">등록된 Model 사용 지침이 없습니다.</p>
-              )}
-            </DetailResourceState>
-          </section>
-
-          <DeprecationDetails row={row} />
-        </div>
+        </DetailResourceState>
       )}
     </Dialog>
   );

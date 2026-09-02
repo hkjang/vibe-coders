@@ -454,9 +454,8 @@ export const adminModelSchema = z
     source: z.enum(["live", "cache", "agent_route"]),
     stale: z.boolean(),
     virtual: z.boolean(),
-    // Forward-compatible read-only metadata planned for the normalized catalogue.
-    shadowed: z.boolean().optional(),
-    shadowed_by: z.string().nullable().optional(),
+    shadowed: z.boolean(),
+    shadowed_by: z.string(),
   })
   .strict() satisfies z.ZodType<GeneratedAdminModel>;
 

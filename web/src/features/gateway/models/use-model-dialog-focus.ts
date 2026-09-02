@@ -18,14 +18,24 @@ export function useModelDialogFocus(
   const restoreFocusPendingRef = useRef(false);
 
   useEffect(() => {
-    if (selectedModel !== "" || !restoreFocusPendingRef.current) return;
-    restoreFocusPendingRef.current = false;
     const returnModel = returnFocusModelRef.current;
     const currentTrigger = Array.from(document.querySelectorAll<HTMLElement>("[data-model-trigger]")).find(
       (candidate) => candidate.dataset.modelTrigger === returnModel,
     );
-    const returnTarget = currentTrigger ?? returnFocusRef.current;
-    if (returnTarget?.isConnected && !returnTarget.matches(":disabled")) returnTarget.focus();
+    if (selectedModel !== "") {
+      if (currentTrigger) returnFocusRef.current = currentTrigger;
+      return;
+    }
+    if (!restoreFocusPendingRef.current) return;
+    restoreFocusPendingRef.current = false;
+    const timeout = window.setTimeout(() => {
+      const latestTrigger = Array.from(document.querySelectorAll<HTMLElement>("[data-model-trigger]")).find(
+        (candidate) => candidate.dataset.modelTrigger === returnModel,
+      );
+      const returnTarget = latestTrigger ?? returnFocusRef.current;
+      if (returnTarget?.isConnected && !returnTarget.matches(":disabled")) returnTarget.focus();
+    });
+    return () => window.clearTimeout(timeout);
   }, [selectedModel]);
 
   const rememberTrigger = useCallback((trigger: HTMLElement, modelKey: string): void => {
@@ -40,7 +50,7 @@ export function useModelDialogFocus(
 
   const closeModel = useCallback((): void => {
     restoreFocusPendingRef.current = true;
-    updateSearch({ model: undefined, source: undefined });
+    updateSearch({ model: undefined, model_provider: undefined, source: undefined });
   }, [updateSearch]);
 
   return { closeModel, rememberRowTrigger, rememberTrigger, returnFocusRef };

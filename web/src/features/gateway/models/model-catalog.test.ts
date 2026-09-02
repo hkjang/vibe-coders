@@ -17,6 +17,8 @@ const baseModel = {
   object: "model",
   owned_by: "vendor",
   provider: "openai",
+  shadowed: false,
+  shadowed_by: "",
   source: "live",
   stale: false,
   virtual: false,
@@ -64,7 +66,7 @@ describe("model catalog", () => {
     ]);
   });
 
-  it("assigns safe lifecycle precedence including forward-compatible shadow metadata", () => {
+  it("assigns safe lifecycle precedence including shadow metadata", () => {
     const deprecated = {
       ...baseModel,
       deprecation: {
@@ -86,7 +88,9 @@ describe("model catalog", () => {
     expect(modelStatus({ ...deprecated, deprecation: { ...deprecated.deprecation, retired: true } })).toBe(
       "retired",
     );
-    expect(modelStatus({ ...baseModel, shadowed: true, shadowed_by: "replacement" })).toBe("shadowed");
+    expect(modelStatus({ ...baseModel, shadowed: true, shadowed_by: "agent-route-priority" })).toBe(
+      "shadowed",
+    );
   });
 
   it("joins enrichments by model while filtering by provider, status, and guidance text", () => {

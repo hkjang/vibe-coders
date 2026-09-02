@@ -2,7 +2,7 @@ import { Boxes, TriangleAlert } from "lucide-react";
 import { useMemo } from "react";
 import { Link } from "react-router";
 
-import { modelRowKey, type ModelCatalogRow, type ModelStatus } from "@/features/gateway/models/model-catalog";
+import { modelRowKey, type ModelCatalogRow } from "@/features/gateway/models/model-catalog";
 import { modelStatusPresentation } from "@/features/gateway/models/model-presentation";
 import { formatInteger, formatKRW, formatPercent } from "@/features/health/health-utils";
 import { UpdatedTime } from "@/features/health/health-ui";
@@ -10,14 +10,27 @@ import { Badge } from "@/shared/components/ui/Badge";
 import { createDataTableColumnHelper, type DataTableColumn } from "@/shared/data-table/columns";
 import { DataTable } from "@/shared/data-table/DataTable";
 
-function StatusBadge({ status }: { status: ModelStatus }): React.JSX.Element {
+function StatusBadges({ row }: { row: ModelCatalogRow }): React.JSX.Element {
+  const { status } = row;
   const presentation = modelStatusPresentation[status];
-  return <Badge tone={presentation.tone}>{presentation.label}</Badge>;
+  return (
+    <div className="model-status-badges">
+      <Badge tone={presentation.tone}>{presentation.label}</Badge>
+      {row.model.stale && status !== "stale" ? <Badge tone="warning">마지막 정상 카탈로그</Badge> : null}
+    </div>
+  );
+}
+
+export interface ModelEnrichmentLoading {
+  pricing: boolean;
+  quality: boolean;
+  tags: boolean;
 }
 
 function createModelColumns(
   detailSearch: (row: ModelCatalogRow) => string,
   rememberTrigger: (trigger: HTMLElement, modelKey: string) => void,
+  enrichmentLoading: ModelEnrichmentLoading,
 ): ReadonlyArray<DataTableColumn<ModelCatalogRow>> {
   const column = createDataTableColumnHelper<ModelCatalogRow>();
   return column.columns([
@@ -53,14 +66,18 @@ function createModelColumns(
     column.accessor((row) => row.status, {
       id: "status",
       header: "상태",
-      cell: ({ getValue }) => <StatusBadge status={getValue()} />,
+      cell: ({ row }) => <StatusBadges row={row.original} />,
     }),
     column.accessor((row) => row.quality?.quality_score, {
       id: "quality",
       header: "품질",
       cell: ({ getValue }) => {
         const value = getValue();
-        return value === undefined ? "-" : `${formatInteger(value)}점`;
+        return value === undefined
+          ? enrichmentLoading.quality
+            ? "확인 중"
+            : "-"
+          : `${formatInteger(value)}점`;
       },
     }),
     column.accessor((row) => row.quality?.success_rate, {
@@ -68,7 +85,7 @@ function createModelColumns(
       header: "성공률",
       cell: ({ getValue }) => {
         const value = getValue();
-        return value === undefined ? "-" : formatPercent(value);
+        return value === undefined ? (enrichmentLoading.quality ? "확인 중" : "-") : formatPercent(value);
       },
     }),
     column.accessor((row) => row.price?.input_krw_per_1m, {
@@ -76,7 +93,7 @@ function createModelColumns(
       header: "Input / 1M",
       cell: ({ getValue }) => {
         const value = getValue();
-        return value === undefined ? "-" : formatKRW(value);
+        return value === undefined ? (enrichmentLoading.pricing ? "확인 중" : "-") : formatKRW(value);
       },
     }),
     column.accessor((row) => row.price?.output_krw_per_1m, {
@@ -84,13 +101,15 @@ function createModelColumns(
       header: "Output / 1M",
       cell: ({ getValue }) => {
         const value = getValue();
-        return value === undefined ? "-" : formatKRW(value);
+        return value === undefined ? (enrichmentLoading.pricing ? "확인 중" : "-") : formatKRW(value);
       },
     }),
     column.accessor((row) => row.tag?.good_for, {
       id: "good-for",
       header: "Good for",
-      cell: ({ getValue }) => <span className="model-tag-summary">{getValue() || "-"}</span>,
+      cell: ({ getValue }) => (
+        <span className="model-tag-summary">{getValue() || (enrichmentLoading.tags ? "확인 중" : "-")}</span>
+      ),
     }),
   ]) as Array<DataTableColumn<ModelCatalogRow>>;
 }
@@ -99,6 +118,7 @@ interface ModelTableProps {
   allRowCount: number;
   catalogueAvailable: boolean;
   detailSearch: (row: ModelCatalogRow) => string;
+  enrichmentLoading: ModelEnrichmentLoading;
   filteredRowCount: number;
   loading: boolean;
   modelUnavailable: boolean;
@@ -115,6 +135,7 @@ export function ModelTable({
   allRowCount,
   catalogueAvailable,
   detailSearch,
+  enrichmentLoading,
   filteredRowCount,
   loading,
   modelUnavailable,
@@ -127,8 +148,8 @@ export function ModelTable({
   updatedAt,
 }: ModelTableProps): React.JSX.Element {
   const columns = useMemo(
-    () => createModelColumns(detailSearch, rememberTrigger),
-    [detailSearch, rememberTrigger],
+    () => createModelColumns(detailSearch, rememberTrigger, enrichmentLoading),
+    [detailSearch, enrichmentLoading, rememberTrigger],
   );
   return (
     <section className="model-list-section" aria-labelledby="model-list-title">

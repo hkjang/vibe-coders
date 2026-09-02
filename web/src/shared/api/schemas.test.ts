@@ -114,7 +114,7 @@ describe("OpenAPI runtime schemas", () => {
     ).toBe(true);
   });
 
-  it("validates strict Model catalogue responses and accepts planned shadow metadata", () => {
+  it("validates the strict Model catalogue including required shadow metadata", () => {
     const response = {
       generated_at: "2026-09-02T00:00:00Z",
       models: [
@@ -127,7 +127,7 @@ describe("OpenAPI runtime schemas", () => {
           owned_by: "openai",
           provider: "openai",
           shadowed: true,
-          shadowed_by: "gpt-5.1",
+          shadowed_by: "agent-route-priority",
           source: "live",
           stale: false,
           virtual: false,
@@ -148,6 +148,24 @@ describe("OpenAPI runtime schemas", () => {
     };
     expect(adminModelsResponseSchema.safeParse(response).success).toBe(true);
     expect(adminModelsResponseSchema.safeParse({ ...response, leaked_secret: "no" }).success).toBe(false);
+    const model = response.models[0];
+    if (!model) throw new Error("expected a Model fixture");
+    const modelWithoutShadowed: Record<string, unknown> = { ...model };
+    delete modelWithoutShadowed.shadowed;
+    expect(
+      adminModelsResponseSchema.safeParse({
+        ...response,
+        models: [modelWithoutShadowed],
+      }).success,
+    ).toBe(false);
+    const modelWithoutShadowedBy: Record<string, unknown> = { ...model };
+    delete modelWithoutShadowedBy.shadowed_by;
+    expect(
+      adminModelsResponseSchema.safeParse({
+        ...response,
+        models: [modelWithoutShadowedBy],
+      }).success,
+    ).toBe(false);
     expect(
       adminModelsResponseSchema.safeParse({
         ...response,
