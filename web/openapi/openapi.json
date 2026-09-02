@@ -34,6 +34,12 @@
           "provider": {
             "type": "string"
           },
+          "provider_ref": {
+            "maxLength": 47,
+            "minLength": 47,
+            "pattern": "^prv_[A-Za-z0-9_-]{43}$",
+            "type": "string"
+          },
           "shadowed": {
             "type": "boolean"
           },
@@ -58,6 +64,7 @@
         "required": [
           "id",
           "provider",
+          "provider_ref",
           "object",
           "owned_by",
           "created",
@@ -127,10 +134,17 @@
           },
           "provider": {
             "type": "string"
+          },
+          "provider_ref": {
+            "maxLength": 47,
+            "minLength": 47,
+            "pattern": "^prv_[A-Za-z0-9_-]{43}$",
+            "type": "string"
           }
         },
         "required": [
           "provider",
+          "provider_ref",
           "code",
           "message"
         ],
@@ -148,6 +162,12 @@
             "type": "integer"
           },
           "provider": {
+            "type": "string"
+          },
+          "provider_ref": {
+            "maxLength": 47,
+            "minLength": 47,
+            "pattern": "^prv_[A-Za-z0-9_-]{43}$",
             "type": "string"
           },
           "source": {
@@ -172,6 +192,7 @@
         },
         "required": [
           "provider",
+          "provider_ref",
           "status",
           "source",
           "model_count",
@@ -1407,6 +1428,12 @@
           "provider": {
             "type": "string"
           },
+          "provider_ref": {
+            "maxLength": 47,
+            "minLength": 47,
+            "pattern": "^prv_[A-Za-z0-9_-]{43}$",
+            "type": "string"
+          },
           "severity": {
             "enum": [
               "info",
@@ -1440,6 +1467,12 @@
             "type": "integer"
           },
           "provider": {
+            "type": "string"
+          },
+          "provider_ref": {
+            "maxLength": 47,
+            "minLength": 47,
+            "pattern": "^prv_[A-Za-z0-9_-]{43}$",
             "type": "string"
           },
           "rank": {
@@ -1487,6 +1520,12 @@
             "type": "integer"
           },
           "provider": {
+            "type": "string"
+          },
+          "provider_ref": {
+            "maxLength": 47,
+            "minLength": 47,
+            "pattern": "^prv_[A-Za-z0-9_-]{43}$",
             "type": "string"
           },
           "rate_429": {
@@ -1594,6 +1633,12 @@
             "minimum": 1,
             "type": "integer"
           },
+          "provider_ref": {
+            "maxLength": 47,
+            "minLength": 47,
+            "pattern": "^prv_[A-Za-z0-9_-]{43}$",
+            "type": "string"
+          },
           "timeout_ms": {
             "type": "integer"
           }
@@ -1636,6 +1681,12 @@
           "provider": {
             "type": "string"
           },
+          "provider_ref": {
+            "maxLength": 47,
+            "minLength": 47,
+            "pattern": "^prv_[A-Za-z0-9_-]{43}$",
+            "type": "string"
+          },
           "updated_at": {
             "format": "date-time",
             "type": "string"
@@ -1657,6 +1708,12 @@
         "additionalProperties": false,
         "properties": {
           "provider": {
+            "type": "string"
+          },
+          "provider_ref": {
+            "maxLength": 47,
+            "minLength": 47,
+            "pattern": "^prv_[A-Za-z0-9_-]{43}$",
             "type": "string"
           },
           "status": {
@@ -1706,6 +1763,12 @@
             "type": "object"
           },
           "provider": {
+            "type": "string"
+          },
+          "provider_ref": {
+            "maxLength": 47,
+            "minLength": 47,
+            "pattern": "^prv_[A-Za-z0-9_-]{43}$",
             "type": "string"
           },
           "requests": {
@@ -1884,6 +1947,12 @@
             "type": "string"
           },
           "provider": {
+            "type": "string"
+          },
+          "provider_ref": {
+            "maxLength": 47,
+            "minLength": 47,
+            "pattern": "^prv_[A-Za-z0-9_-]{43}$",
             "type": "string"
           },
           "retry_in_seconds": {

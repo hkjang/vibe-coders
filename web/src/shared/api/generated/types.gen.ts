@@ -12,6 +12,7 @@ export type AdminModel = {
     object: string;
     owned_by: string;
     provider: string;
+    provider_ref: string;
     shadowed: boolean;
     shadowed_by: string;
     source: 'live' | 'cache' | 'agent_route';
@@ -34,12 +35,14 @@ export type AdminModelPartialFailure = {
     code: string;
     message: string;
     provider: string;
+    provider_ref: string;
 };
 
 export type AdminModelProvider = {
     fetched_at?: string;
     model_count: number;
     provider: string;
+    provider_ref: string;
     source: 'live' | 'cache' | 'agent_route';
     stale: boolean;
     status: 'ok' | 'failed' | 'skipped';
@@ -364,6 +367,7 @@ export type ProviderHealthAlert = {
     code: string;
     message: string;
     provider: string;
+    provider_ref?: string;
     severity: 'info' | 'warning' | 'critical';
 };
 
@@ -372,6 +376,7 @@ export type ProviderHealthRankingItem = {
     fallback_rate: number;
     p95_latency_ms: number;
     provider: string;
+    provider_ref?: string;
     rank: number;
     requests: number;
     score: number;
@@ -383,6 +388,7 @@ export type ProviderHealthScore = {
     fallbacks: number;
     p95_latency_ms: number;
     provider: string;
+    provider_ref?: string;
     rate_429: number;
     rate_5xx: number;
     requests: number;
@@ -409,6 +415,7 @@ export type ProviderPublic = {
     model_patterns: string;
     name: string;
     priority: number;
+    provider_ref?: string;
     timeout_ms: number;
 };
 
@@ -420,11 +427,13 @@ export type ProviderSlo = {
     note: string;
     p95_latency_target_ms: number;
     provider: string;
+    provider_ref?: string;
     updated_at: string;
 };
 
 export type ProviderSloDeleteResponse = {
     provider: string;
+    provider_ref?: string;
     status: 'deleted';
 };
 
@@ -438,6 +447,7 @@ export type ProviderSloEvaluation = {
         p95_latency_ms: ProviderSloMetric;
     };
     provider: string;
+    provider_ref?: string;
     requests: number;
 };
 
@@ -485,6 +495,7 @@ export type RoutingBreakerState = {
     opens: number;
     phase: 'closed' | 'open' | 'half_open';
     provider: string;
+    provider_ref?: string;
     retry_in_seconds?: number;
 };
 
