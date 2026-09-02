@@ -77,7 +77,7 @@ describe("migration registry", () => {
     expect(featureByPath("/routing/rules/decision-1")?.featureId).toBe("routing.rules");
   });
 
-  it("exposes only the implemented Provider preview while Models stays behind the capability guard", () => {
+  it("exposes the implemented Provider and Models read-only previews", () => {
     for (const featureId of ["gateway.providers", "gateway.models"] as const) {
       const feature = migrationRegistry.find((candidate) => candidate.featureId === featureId);
       if (!feature) throw new Error(`${featureId} fixture is missing`);
@@ -92,13 +92,12 @@ describe("migration registry", () => {
         fallbackEnabled: true,
         minimumApiVersion: "v0.82.0",
       });
-      const implemented = featureId === "gateway.providers";
-      expect(isAppFeatureImplemented(feature.featureId)).toBe(implemented);
-      expect(resolveFeature(feature, gatewayAdmin, "v0.82.0")).toMatchObject(
-        implemented
-          ? { permitted: true, status: "preview_read_only", readOnly: true }
-          : { permitted: true, status: "legacy", readOnly: true, reason: "ui_not_implemented" },
-      );
+      expect(isAppFeatureImplemented(feature.featureId)).toBe(true);
+      expect(resolveFeature(feature, gatewayAdmin, "v0.82.0")).toMatchObject({
+        permitted: true,
+        status: "preview_read_only",
+        readOnly: true,
+      });
     }
   });
 
@@ -133,14 +132,14 @@ describe("migration registry", () => {
   });
 
   it("fails closed when an unimplemented feature is Retired or Legacy fallback is disabled", () => {
-    const provider = migrationRegistry.find((feature) => feature.featureId === "gateway.models");
-    if (!provider) throw new Error("gateway.models fixture is missing");
+    const provider = migrationRegistry.find((feature) => feature.featureId === "system.settings");
+    if (!provider) throw new Error("system.settings fixture is missing");
     expect(
       resolveFeature({ ...provider, status: "retired", serverAvailable: true }, operator, "v0.80.0"),
     ).toMatchObject({ permitted: false, reason: "ui_not_implemented" });
     expect(resolveFeature(provider, gatewayAdmin, "v0.82.0", { legacyFallback: false })).toMatchObject({
       permitted: false,
-      reason: "ui_not_implemented",
+      reason: "legacy_fallback_disabled",
     });
   });
 

@@ -73,6 +73,7 @@ var appUIImplementedFeatureIDs = map[string]struct{}{
 	"overview":          {},
 	"gateway.health":    {},
 	"gateway.providers": {},
+	"gateway.models":    {},
 	"system.health":     {},
 }
 

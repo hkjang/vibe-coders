@@ -44,6 +44,10 @@ describe("endpoints", () => {
       endpoints.admin.ops.risk.path,
       endpoints.admin.providers.list.path,
       endpoints.admin.providers.slo.path,
+      endpoints.admin.models.list.path,
+      endpoints.admin.models.quality.path,
+      endpoints.admin.models.pricing.path,
+      endpoints.admin.models.tags.path,
       endpoints.admin.routing.health.path,
     ]).toEqual([
       "/health",
@@ -53,10 +57,18 @@ describe("endpoints", () => {
       "/admin/ops/risk",
       "/admin/providers",
       "/admin/providers/slo",
+      "/admin/models",
+      "/admin/models/quality",
+      "/admin/pricing",
+      "/admin/model-tags",
       "/admin/routing/health",
     ]);
     expect(endpoints.health.querySchema).toBeUndefined();
     expect(endpoints.admin.providers.slo.querySchema).toBeDefined();
+    expect(endpoints.admin.models.list.querySchema).toBeDefined();
+    expect(endpoints.admin.models.quality.querySchema).toBeDefined();
+    expect(endpoints.admin.models.pricing.querySchema).toBeDefined();
+    expect(endpoints.admin.models.tags.querySchema).toBeUndefined();
     expect(endpoints.admin.routing.health.querySchema).toBeDefined();
   });
 });

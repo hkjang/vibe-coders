@@ -338,6 +338,7 @@ const appImplementedFeatureIds: ReadonlySet<string> = new Set([
   "overview",
   "gateway.health",
   "gateway.providers",
+  "gateway.models",
   "system.health",
 ]);
 

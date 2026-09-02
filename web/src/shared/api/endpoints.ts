@@ -1,12 +1,22 @@
 import { z } from "zod";
 
 import type {
+  GetAdminModelsData,
+  GetAdminModelsQualityData,
+  GetAdminModelsQualityResponse,
+  GetAdminModelsResponse,
+  GetAdminModelTagsData,
+  GetAdminModelTagsResponse,
   GetAdminOpsRiskData,
   GetAdminOpsRiskResponse,
   GetAdminOpsStatusData,
   GetAdminOpsStatusResponse,
   GetAdminProvidersData,
+  GetAdminProvidersResponse,
   GetAdminProvidersSloData,
+  GetAdminProvidersSloResponse,
+  GetAdminPricingData,
+  GetAdminPricingResponse,
   GetAdminRoutingHealthData,
   GetAdminRoutingHealthResponse,
   GetAdminStatsData,
@@ -35,12 +45,19 @@ import type {
 } from "@/shared/api/generated";
 import type { OpenApiMethod, OpenApiMethodFor, OpenApiPath } from "@/shared/api/generated/paths.gen";
 import {
+  adminModelsQuerySchema,
+  adminModelsResponseSchema,
   adminStatsSchema,
   authMeSchema,
   gatewayHealthSchema,
   logoutResponseSchema,
+  modelQualityQuerySchema,
+  modelQualityResponseSchema,
+  modelUsageTagsResponseSchema,
   opsRiskResponseSchema,
   opsStatusSchema,
+  pricingQuerySchema,
+  pricingResponseSchema,
   providerListSchema,
   providerSLOQuerySchema,
   providerSLOResponseSchema,
@@ -52,7 +69,13 @@ import {
   tokenPairSchema,
   uiBootstrapSchema,
 } from "@/shared/api/schemas";
-import type { ProviderSLOQuery, RoutingHealthQuery } from "@/shared/api/schemas";
+import type {
+  AdminModelsQuery,
+  ModelQualityQuery,
+  PricingQuery,
+  ProviderSLOQuery,
+  RoutingHealthQuery,
+} from "@/shared/api/schemas";
 
 const endpointBrand: unique symbol = Symbol("api-endpoint");
 declare const operationData: unique symbol;
@@ -171,12 +194,39 @@ export const endpoints = {
   admin: {
     stats: operation<GetAdminStatsData, GetAdminStatsResponse>()("GET", "/admin/stats", adminStatsSchema),
     providers: {
-      list: operation<GetAdminProvidersData, unknown>()("GET", "/admin/providers", providerListSchema),
-      slo: operation<WithQuery<GetAdminProvidersSloData, ProviderSLOQuery>, unknown>()(
+      list: operation<GetAdminProvidersData, GetAdminProvidersResponse>()(
+        "GET",
+        "/admin/providers",
+        providerListSchema,
+      ),
+      slo: operation<WithQuery<GetAdminProvidersSloData, ProviderSLOQuery>, GetAdminProvidersSloResponse>()(
         "GET",
         "/admin/providers/slo",
         providerSLOResponseSchema,
         providerSLOQuerySchema,
+      ),
+    },
+    models: {
+      list: operation<WithQuery<GetAdminModelsData, AdminModelsQuery>, GetAdminModelsResponse>()(
+        "GET",
+        "/admin/models",
+        adminModelsResponseSchema,
+        adminModelsQuerySchema,
+      ),
+      quality: operation<
+        WithQuery<GetAdminModelsQualityData, ModelQualityQuery>,
+        GetAdminModelsQualityResponse
+      >()("GET", "/admin/models/quality", modelQualityResponseSchema, modelQualityQuerySchema),
+      pricing: operation<WithQuery<GetAdminPricingData, PricingQuery>, GetAdminPricingResponse>()(
+        "GET",
+        "/admin/pricing",
+        pricingResponseSchema,
+        pricingQuerySchema,
+      ),
+      tags: operation<GetAdminModelTagsData, GetAdminModelTagsResponse>()(
+        "GET",
+        "/admin/model-tags",
+        modelUsageTagsResponseSchema,
       ),
     },
     ops: {

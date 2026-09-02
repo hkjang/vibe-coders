@@ -1,6 +1,11 @@
 import { z } from "zod";
 
 import type {
+  AdminModel as GeneratedAdminModel,
+  AdminModelDeprecation as GeneratedAdminModelDeprecation,
+  AdminModelPartialFailure as GeneratedAdminModelPartialFailure,
+  AdminModelProvider as GeneratedAdminModelProvider,
+  AdminModelsResponse as GeneratedAdminModelsResponse,
   AdminStatsResponse as GeneratedAdminStatsResponse,
   AuthMeResponse as GeneratedAuthMeResponse,
   AuthTokenResponse as GeneratedAuthTokenResponse,
@@ -9,8 +14,15 @@ import type {
   HealthResponse as GeneratedHealthResponse,
   KeycloakLogoutResponse as GeneratedKeycloakLogoutResponse,
   MigrationFeature as GeneratedMigrationFeature,
+  ModelPrice as GeneratedModelPrice,
+  ModelPricingVersion as GeneratedModelPricingVersion,
+  ModelQualityResponse as GeneratedModelQualityResponse,
+  ModelQualityScore as GeneratedModelQualityScore,
+  ModelUsageTag as GeneratedModelUsageTag,
+  ModelUsageTagsResponse as GeneratedModelUsageTagsResponse,
   OpsRiskResponse as GeneratedOpsRiskResponse,
   OpsStatus as GeneratedOpsStatus,
+  PricingResponse as GeneratedPricingResponse,
   ReadyResponse as GeneratedReadyResponse,
   RoutingHealthResponse as GeneratedRoutingHealthResponse,
   SsoStatusResponse as GeneratedSsoStatusResponse,
@@ -417,9 +429,161 @@ export const providerSLOQuerySchema = z
   })
   .strict();
 
+export const adminModelDeprecationSchema = z
+  .object({
+    action: z.enum(["warn", "rewrite", "block"]),
+    id: z.string(),
+    message: z.string(),
+    model_glob: z.string(),
+    replacement: z.string(),
+    retired: z.boolean(),
+    sunset_date: z.string(),
+    sunset_reached: z.boolean(),
+  })
+  .strict() satisfies z.ZodType<GeneratedAdminModelDeprecation>;
+
+export const adminModelSchema = z
+  .object({
+    created: z.number().int().nonnegative().nullable(),
+    deprecation: adminModelDeprecationSchema.nullable(),
+    fetched_at: timestampSchema,
+    id: z.string().min(1),
+    object: z.string(),
+    owned_by: z.string(),
+    provider: z.string().min(1),
+    source: z.enum(["live", "cache", "agent_route"]),
+    stale: z.boolean(),
+    virtual: z.boolean(),
+    // Forward-compatible read-only metadata planned for the normalized catalogue.
+    shadowed: z.boolean().optional(),
+    shadowed_by: z.string().nullable().optional(),
+  })
+  .strict() satisfies z.ZodType<GeneratedAdminModel>;
+
+export const adminModelProviderSchema = z
+  .object({
+    fetched_at: timestampSchema.optional(),
+    model_count: countSchema,
+    provider: z.string().min(1),
+    source: z.enum(["live", "cache", "agent_route"]),
+    stale: z.boolean(),
+    status: z.enum(["ok", "failed", "skipped"]),
+  })
+  .strict() satisfies z.ZodType<GeneratedAdminModelProvider>;
+
+export const adminModelPartialFailureSchema = z
+  .object({
+    code: z.string().min(1),
+    message: z.string().min(1),
+    provider: z.string().min(1),
+  })
+  .strict() satisfies z.ZodType<GeneratedAdminModelPartialFailure>;
+
+export const adminModelsResponseSchema = z
+  .object({
+    generated_at: timestampSchema,
+    models: z.array(adminModelSchema),
+    partial_failures: z.array(adminModelPartialFailureSchema),
+    providers: z.array(adminModelProviderSchema),
+    request_id: z.string(),
+  })
+  .strict() satisfies z.ZodType<GeneratedAdminModelsResponse>;
+
+const categoryScoreSchema = z
+  .object({
+    pass_rate: z.number().min(0).max(1),
+    samples: countSchema,
+  })
+  .strict();
+
+export const modelQualityScoreSchema = z
+  .object({
+    categories: z.record(z.string(), categoryScoreSchema),
+    eval_pass_rate: z.number().min(0).max(1),
+    eval_samples: countSchema,
+    golden_pass_rate: z.number().min(0).max(1),
+    golden_samples: countSchema,
+    model: z.string().min(1),
+    quality_score: z.number().min(0).max(100),
+    requests: countSchema,
+    success_rate: z.number().min(0).max(1),
+  })
+  .strict() satisfies z.ZodType<GeneratedModelQualityScore>;
+
+export const modelQualityResponseSchema = z
+  .object({
+    categories: z.array(z.string()),
+    models: z.array(modelQualityScoreSchema),
+    since: timestampSchema,
+  })
+  .strict() satisfies z.ZodType<GeneratedModelQualityResponse>;
+
+export const modelPriceSchema = z
+  .object({
+    cached_input_krw_per_1m: z.number(),
+    input_krw_per_1m: z.number(),
+    output_krw_per_1m: z.number(),
+  })
+  .strict() satisfies z.ZodType<GeneratedModelPrice>;
+
+export const modelPricingVersionSchema = z
+  .object({
+    cached_input_krw_per_1m: z.number(),
+    created_at: timestampSchema,
+    id: z.string(),
+    input_krw_per_1m: z.number(),
+    model: z.string(),
+    note: z.string(),
+    output_krw_per_1m: z.number(),
+    source: z.string(),
+  })
+  .strict() satisfies z.ZodType<GeneratedModelPricingVersion>;
+
+export const pricingResponseSchema = z
+  .object({
+    effective: z.record(z.string(), modelPriceSchema),
+    versions: z.array(modelPricingVersionSchema),
+  })
+  .strict() satisfies z.ZodType<GeneratedPricingResponse>;
+
+export const modelUsageTagSchema = z
+  .object({
+    avoid_for: z.string(),
+    good_for: z.string(),
+    model: z.string().min(1),
+    risk_note: z.string(),
+    updated_at: timestampSchema,
+    updated_by: z.string(),
+  })
+  .strict() satisfies z.ZodType<GeneratedModelUsageTag>;
+
+export const modelUsageTagsResponseSchema = z
+  .object({ tags: z.array(modelUsageTagSchema) })
+  .strict() satisfies z.ZodType<GeneratedModelUsageTagsResponse>;
+
+export const adminModelsQuerySchema = z
+  .object({ provider: z.string().min(1).optional(), model: z.string().min(1).optional() })
+  .strict();
+
+export const modelQualityQuerySchema = z
+  .object({
+    window: z.union([z.enum(["1h", "6h", "24h", "1d", "7d", "30d"]), goDurationSchema]).optional(),
+  })
+  .strict();
+
+export const pricingQuerySchema = z
+  .object({
+    model: z.string().min(1).optional(),
+    limit: z.number().int().positive().optional(),
+  })
+  .strict();
+
 export type AuthMe = z.output<typeof authMeSchema>;
 export type AuthUser = z.output<typeof authUserSchema>;
 export type AdminStats = z.output<typeof adminStatsSchema>;
+export type AdminModel = z.output<typeof adminModelSchema>;
+export type AdminModelsResponse = z.output<typeof adminModelsResponseSchema>;
+export type AdminModelsQuery = z.input<typeof adminModelsQuerySchema>;
 export type GatewayHealth = z.output<typeof gatewayHealthSchema>;
 export type OpsRisk = z.output<typeof opsRiskSchema>;
 export type OpsRiskResponse = z.output<typeof opsRiskResponseSchema>;
@@ -430,6 +594,14 @@ export type ProviderSLO = z.output<typeof providerSLOSchema>;
 export type ProviderSLOEvaluation = z.output<typeof providerSLOEvaluationSchema>;
 export type ProviderSLOQuery = z.input<typeof providerSLOQuerySchema>;
 export type ProviderSLOResponse = z.output<typeof providerSLOResponseSchema>;
+export type ModelPrice = z.output<typeof modelPriceSchema>;
+export type ModelQualityResponse = z.output<typeof modelQualityResponseSchema>;
+export type ModelQualityQuery = z.input<typeof modelQualityQuerySchema>;
+export type ModelQualityScore = z.output<typeof modelQualityScoreSchema>;
+export type ModelUsageTag = z.output<typeof modelUsageTagSchema>;
+export type ModelUsageTagsResponse = z.output<typeof modelUsageTagsResponseSchema>;
+export type PricingQuery = z.input<typeof pricingQuerySchema>;
+export type PricingResponse = z.output<typeof pricingResponseSchema>;
 export type Readiness = z.output<typeof readinessSchema>;
 export type ReadinessFailure = z.output<typeof readinessFailureSchema>;
 export type RoutingHealth = z.output<typeof routingHealthSchema>;

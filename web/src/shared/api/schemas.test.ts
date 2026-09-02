@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  adminModelsResponseSchema,
   migrationFeatureSchema,
+  modelQualityResponseSchema,
+  modelUsageTagsResponseSchema,
+  pricingResponseSchema,
   providerListSchema,
   providerSLOResponseSchema,
   uiBootstrapSchema,
@@ -108,5 +112,96 @@ describe("OpenAPI runtime schemas", () => {
         since: "2026-09-01T00:00:00Z",
       }).success,
     ).toBe(true);
+  });
+
+  it("validates strict Model catalogue responses and accepts planned shadow metadata", () => {
+    const response = {
+      generated_at: "2026-09-02T00:00:00Z",
+      models: [
+        {
+          created: 1_700_000_000,
+          deprecation: null,
+          fetched_at: "2026-09-02T00:00:00Z",
+          id: "gpt-5",
+          object: "model",
+          owned_by: "openai",
+          provider: "openai",
+          shadowed: true,
+          shadowed_by: "gpt-5.1",
+          source: "live",
+          stale: false,
+          virtual: false,
+        },
+      ],
+      partial_failures: [],
+      providers: [
+        {
+          fetched_at: "2026-09-02T00:00:00Z",
+          model_count: 1,
+          provider: "openai",
+          source: "live",
+          stale: false,
+          status: "ok",
+        },
+      ],
+      request_id: "req-models-1",
+    };
+    expect(adminModelsResponseSchema.safeParse(response).success).toBe(true);
+    expect(adminModelsResponseSchema.safeParse({ ...response, leaked_secret: "no" }).success).toBe(false);
+    expect(
+      adminModelsResponseSchema.safeParse({
+        ...response,
+        models: [{ ...response.models[0], unexpected: true }],
+      }).success,
+    ).toBe(false);
+  });
+
+  it("validates strict Model quality, pricing, and usage-tag responses", () => {
+    expect(
+      modelQualityResponseSchema.safeParse({
+        categories: ["tests"],
+        models: [
+          {
+            categories: { tests: { pass_rate: 1, samples: 2 } },
+            eval_pass_rate: 1,
+            eval_samples: 2,
+            golden_pass_rate: 0.5,
+            golden_samples: 2,
+            model: "gpt-5",
+            quality_score: 90,
+            requests: 10,
+            success_rate: 0.9,
+          },
+        ],
+        since: "2026-09-01T00:00:00Z",
+      }).success,
+    ).toBe(true);
+    expect(
+      pricingResponseSchema.safeParse({
+        effective: {
+          "gpt-5": {
+            cached_input_krw_per_1m: 100,
+            input_krw_per_1m: 1_000,
+            output_krw_per_1m: 2_000,
+          },
+        },
+        versions: [],
+      }).success,
+    ).toBe(true);
+    expect(
+      modelUsageTagsResponseSchema.safeParse({
+        tags: [
+          {
+            avoid_for: "",
+            good_for: "coding",
+            model: "gpt-5",
+            risk_note: "",
+            updated_at: "2026-09-02T00:00:00Z",
+            updated_by: "admin",
+          },
+        ],
+      }).success,
+    ).toBe(true);
+    expect(modelUsageTagsResponseSchema.safeParse({ tags: [], extra: true }).success).toBe(false);
   });
 });
