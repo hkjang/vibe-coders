@@ -308,6 +308,41 @@ describe("ApiClient", () => {
       status: 200,
     });
   });
+
+  it("rejects an app Provider response without an opaque reference instead of dropping the row", async () => {
+    const responseBody = {
+      providers: [
+        {
+          api_key_configured: true,
+          base_url: "https://api.openai.example/v1",
+          created_at: "2026-09-01T00:00:00Z",
+          enabled: true,
+          failover_group: "primary",
+          model_patterns: "gpt-*",
+          name: "openai",
+          priority: 10,
+          timeout_ms: 15_000,
+        },
+      ],
+    };
+    const client = new ApiClient({
+      fetch: vi.fn(async (_input, init) => {
+        expect(new Headers(init?.headers).get("X-Vibe-UI")).toBe("app");
+        return jsonResponse(responseBody, 200, { "X-Request-ID": "req-provider-ref" });
+      }) as typeof fetch,
+    });
+
+    await expect(client.request(endpoints.admin.providers.list)).rejects.toMatchObject({
+      kind: "contract",
+      requestId: "req-provider-ref",
+      status: 200,
+      details: {
+        fieldErrors: {
+          providers: [expect.stringContaining("expected string")],
+        },
+      },
+    });
+  });
 });
 
 function compileTimeOperationContracts(client: ApiClient): void {

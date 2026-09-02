@@ -10,8 +10,11 @@ import {
   routingHealthSchema,
 } from "@/shared/api/schemas";
 
+const providerRef = (suffix: string): string => `prv_${suffix.padEnd(43, "x").slice(0, 43)}`;
+
 const providerHealth = {
   provider: "openai",
+  provider_ref: providerRef("openai"),
   score: 92,
   requests: 120,
   average_latency_ms: 180.5,
@@ -85,6 +88,7 @@ const routingHealth = {
     {
       rank: 1,
       provider: "openai",
+      provider_ref: providerRef("openai"),
       score: 92,
       requests: 120,
       fallback_rate: 0.025,
@@ -108,6 +112,7 @@ const routingHealth = {
     states: [
       {
         provider: "backup",
+        provider_ref: providerRef("backup"),
         phase: "open",
         failures: 5,
         opens: 1,
@@ -223,7 +228,15 @@ describe("Phase 1 API response contracts", () => {
         ...routingHealth,
         breakers: {
           ...routingHealth.breakers,
-          states: [{ provider: "backup", phase: "unknown", failures: 1, opens: 1 }],
+          states: [
+            {
+              provider: "backup",
+              provider_ref: providerRef("backup"),
+              phase: "unknown",
+              failures: 1,
+              opens: 1,
+            },
+          ],
         },
       }).success,
     ).toBe(false);

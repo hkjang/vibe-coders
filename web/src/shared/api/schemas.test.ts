@@ -6,10 +6,14 @@ import {
   modelQualityResponseSchema,
   modelUsageTagsResponseSchema,
   pricingResponseSchema,
+  providerHealthScoreSchema,
   providerListSchema,
   providerSLOResponseSchema,
+  routingHealthSchema,
   uiBootstrapSchema,
 } from "@/shared/api/schemas";
+
+const providerRef = `prv_${"a".repeat(43)}`;
 
 const validBootstrap = {
   backend_version: "v0.80.0",
@@ -92,6 +96,7 @@ describe("OpenAPI runtime schemas", () => {
       providers: [
         {
           name: "openai",
+          provider_ref: providerRef,
           base_url: "https://api.openai.example/v1",
           api_key_configured: true,
           timeout_ms: 15_000,
@@ -104,14 +109,151 @@ describe("OpenAPI runtime schemas", () => {
       ],
     });
     expect(providers.providers[0]).not.toHaveProperty("api_key");
+    expect(providers.providers[0]?.provider_ref).toBe(providerRef);
 
     expect(
-      providerSLOResponseSchema.safeParse({
-        slos: [],
-        evaluations: [],
-        since: "2026-09-01T00:00:00Z",
+      providerListSchema.safeParse({
+        providers: [{ ...providers.providers[0], provider_ref: undefined }],
       }).success,
-    ).toBe(true);
+    ).toBe(false);
+
+    const metric = { actual: 1, breached: false, enforced: true, target: 1 };
+    const sloResponse = {
+      slos: [
+        {
+          availability_target: 0.99,
+          enabled: true,
+          error_rate_target: 0.01,
+          fallback_rate_target: 0.01,
+          note: "production",
+          p95_latency_target_ms: 800,
+          provider: "openai",
+          provider_ref: providerRef,
+          updated_at: "2026-09-01T00:00:00Z",
+        },
+      ],
+      evaluations: [
+        {
+          breached: false,
+          enabled: true,
+          metrics: {
+            availability: metric,
+            error_rate: metric,
+            fallback_rate: metric,
+            p95_latency_ms: metric,
+          },
+          provider: "openai",
+          provider_ref: providerRef,
+          requests: 10,
+        },
+      ],
+      since: "2026-09-01T00:00:00Z",
+    };
+    expect(providerSLOResponseSchema.safeParse(sloResponse).success).toBe(true);
+    expect(
+      providerSLOResponseSchema.safeParse({
+        ...sloResponse,
+        slos: [{ ...sloResponse.slos[0], provider_ref: undefined }],
+      }).success,
+    ).toBe(false);
+    expect(
+      providerSLOResponseSchema.safeParse({
+        ...sloResponse,
+        evaluations: [{ ...sloResponse.evaluations[0], provider_ref: "openai" }],
+      }).success,
+    ).toBe(false);
+  });
+
+  it("requires opaque Provider references for Ops and every Routing health identity", () => {
+    const score = {
+      average_latency_ms: 120,
+      fallback_rate: 0,
+      fallbacks: 0,
+      p95_latency_ms: 200,
+      provider: "openai",
+      provider_ref: providerRef,
+      rate_429: 0,
+      rate_5xx: 0,
+      requests: 10,
+      score: 90,
+      timeouts: 0,
+    };
+    expect(providerHealthScoreSchema.safeParse(score).success).toBe(true);
+    expect(providerHealthScoreSchema.safeParse({ ...score, provider_ref: undefined }).success).toBe(false);
+
+    const routing = {
+      alerts: [
+        {
+          code: "healthy",
+          message: "healthy",
+          provider: "openai",
+          provider_ref: providerRef,
+          severity: "info",
+        },
+      ],
+      breakers: {
+        cooldown_seconds: 30,
+        enabled: true,
+        instance_id: "gateway-1",
+        shared: false,
+        states: [
+          {
+            failures: 0,
+            opens: 0,
+            phase: "closed",
+            provider: "openai",
+            provider_ref: providerRef,
+          },
+        ],
+        threshold: 5,
+      },
+      degraded: [score],
+      providers: [score],
+      ranking: [
+        {
+          average_latency_ms: 120,
+          fallback_rate: 0,
+          p95_latency_ms: 200,
+          provider: "openai",
+          provider_ref: providerRef,
+          rank: 1,
+          requests: 10,
+          score: 90,
+        },
+      ],
+      since: "2026-09-01T00:00:00Z",
+      threshold: 70,
+      trend: [
+        {
+          providers: [score],
+          since: "2026-09-01T00:00:00Z",
+          until: "2026-09-01T01:00:00Z",
+        },
+      ],
+      until: "2026-09-01T01:00:00Z",
+    } as const;
+    expect(routingHealthSchema.safeParse(routing).success).toBe(true);
+    expect(
+      routingHealthSchema.safeParse({
+        ...routing,
+        ranking: [{ ...routing.ranking[0], provider_ref: undefined }],
+      }).success,
+    ).toBe(false);
+    expect(
+      routingHealthSchema.safeParse({
+        ...routing,
+        alerts: [{ ...routing.alerts[0], provider_ref: undefined }],
+      }).success,
+    ).toBe(false);
+    expect(
+      routingHealthSchema.safeParse({
+        ...routing,
+        breakers: {
+          ...routing.breakers,
+          states: [{ ...routing.breakers.states[0], provider_ref: undefined }],
+        },
+      }).success,
+    ).toBe(false);
   });
 
   it("validates the strict Model catalogue including required shadow metadata", () => {

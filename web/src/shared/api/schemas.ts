@@ -238,7 +238,7 @@ export const adminStatsSchema = z.object({
 
 export const providerHealthScoreSchema = z.object({
   provider: z.string(),
-  provider_ref: providerRefSchema.optional(),
+  provider_ref: providerRefSchema,
   score: z.number().int().min(0).max(100),
   requests: countSchema,
   average_latency_ms: measurementSchema,
@@ -329,7 +329,7 @@ export const routingHealthSchema = z.object({
     z.object({
       rank: z.number().int().positive(),
       provider: z.string(),
-      provider_ref: providerRefSchema.optional(),
+      provider_ref: providerRefSchema,
       score: z.number().int().min(0).max(100),
       requests: countSchema,
       fallback_rate: z.number().min(0).max(1),
@@ -341,7 +341,7 @@ export const routingHealthSchema = z.object({
   alerts: z.array(
     z.object({
       provider: z.string(),
-      provider_ref: providerRefSchema.optional(),
+      provider_ref: providerRefSchema,
       code: z.string(),
       severity: z.enum(["info", "warning", "critical"]),
       message: z.string(),
@@ -361,7 +361,7 @@ export const routingHealthSchema = z.object({
     states: z.array(
       z.object({
         provider: z.string(),
-        provider_ref: providerRefSchema.optional(),
+        provider_ref: providerRefSchema,
         phase: z.enum(["closed", "open", "half_open"]),
         failures: countSchema,
         opens: countSchema,
@@ -378,7 +378,7 @@ export const routingHealthSchema = z.object({
 
 export const providerSchema = z.object({
   name: z.string().min(1),
-  provider_ref: providerRefSchema.optional(),
+  provider_ref: providerRefSchema,
   base_url: z.string().min(1),
   api_key_configured: z.boolean(),
   timeout_ms: countSchema,
@@ -402,7 +402,7 @@ export const providerSLOMetricSchema = z.object({
 
 export const providerSLOSchema = z.object({
   provider: z.string().min(1),
-  provider_ref: providerRefSchema.optional(),
+  provider_ref: providerRefSchema,
   availability_target: z.number().nonnegative(),
   p95_latency_target_ms: countSchema,
   error_rate_target: z.number().nonnegative(),
@@ -414,7 +414,7 @@ export const providerSLOSchema = z.object({
 
 export const providerSLOEvaluationSchema = z.object({
   provider: z.string().min(1),
-  provider_ref: providerRefSchema.optional(),
+  provider_ref: providerRefSchema,
   requests: countSchema,
   enabled: z.boolean(),
   breached: z.boolean(),

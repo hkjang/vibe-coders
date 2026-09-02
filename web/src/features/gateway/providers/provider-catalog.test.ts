@@ -126,18 +126,6 @@ describe("provider catalog", () => {
     expect(filterProviderRows(rows, "primary", "disabled").map((row) => row.provider.name)).toEqual(["Beta"]);
   });
 
-  it("fails closed when a Provider or enrichment has no valid opaque reference", () => {
-    const missingRef = { ...provider("missing"), provider_ref: undefined };
-    const valid = provider("valid");
-    const wrongRefEvaluation = { ...evaluation("valid", true), provider_ref: "not-a-provider-ref" };
-
-    const rows = buildProviderRows([missingRef, valid], [], [wrongRefEvaluation]);
-
-    expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ displayName: "valid", health: "unknown" });
-    expect(rows[0]?.evaluation).toBeUndefined();
-  });
-
   it("uses opaque references to distinguish and enrich unsafe legacy provider names", () => {
     const firstName = "sk-ant-first-private-value";
     const secondName = "Bearer second-private-value";

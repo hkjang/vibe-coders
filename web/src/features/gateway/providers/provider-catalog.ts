@@ -1,5 +1,5 @@
 import type { Provider, ProviderSLO, ProviderSLOEvaluation, RoutingHealth } from "@/shared/api/schemas";
-import { isProviderRef, isSafeLegacyProviderName, providerDisplayLabels } from "@/shared/api/provider-ref";
+import { isSafeLegacyProviderName, providerDisplayLabels } from "@/shared/api/provider-ref";
 import { containsPotentialSecret, isSensitiveCredentialKey } from "@/shared/security/secrets";
 
 export const providerStatusFilters = [
@@ -72,29 +72,15 @@ export function buildProviderRows(
   routing?: RoutingHealth,
   healthPending = false,
 ): ProviderCatalogRow[] {
-  const sloByProvider = new Map(
-    slos.filter((item) => isProviderRef(item.provider_ref)).map((item) => [item.provider_ref, item]),
-  );
-  const evaluationByProvider = new Map(
-    evaluations.filter((item) => isProviderRef(item.provider_ref)).map((item) => [item.provider_ref, item]),
-  );
-  const routingByProvider = new Map(
-    routing?.providers
-      .filter((item) => isProviderRef(item.provider_ref))
-      .map((item) => [item.provider_ref, item]) ?? [],
-  );
-  const degradedProviders = new Set(
-    routing?.degraded.filter((item) => isProviderRef(item.provider_ref)).map((item) => item.provider_ref) ??
-      [],
-  );
-  const validProviders = providers.filter((provider): provider is Provider & { provider_ref: string } =>
-    isProviderRef(provider.provider_ref),
-  );
+  const sloByProvider = new Map(slos.map((item) => [item.provider_ref, item]));
+  const evaluationByProvider = new Map(evaluations.map((item) => [item.provider_ref, item]));
+  const routingByProvider = new Map(routing?.providers.map((item) => [item.provider_ref, item]) ?? []);
+  const degradedProviders = new Set(routing?.degraded.map((item) => item.provider_ref) ?? []);
   const displayLabels = providerDisplayLabels(
-    validProviders.map((provider) => ({ name: provider.name, providerRef: provider.provider_ref })),
+    providers.map((provider) => ({ name: provider.name, providerRef: provider.provider_ref })),
   );
 
-  return validProviders.map((provider) => {
+  return providers.map((provider) => {
     const nameRedacted = !isSafeLegacyProviderName(provider.name);
     const displayName = displayLabels.get(provider.provider_ref) ?? "Provider 확인 불가";
     const evaluation = evaluationByProvider.get(provider.provider_ref);
