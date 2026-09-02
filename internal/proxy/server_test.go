@@ -368,6 +368,27 @@ func TestOperationalHealthReadyMetricsAndFavicon(t *testing.T) {
 			t.Fatalf("%s returned status=%d body=%s", path, resp.StatusCode, body)
 		}
 	}
+	for _, request := range []struct {
+		method string
+		path   string
+	}{
+		{method: http.MethodPost, path: "/health"},
+		{method: http.MethodDelete, path: "/ready"},
+		{method: http.MethodPost, path: "/admin/stats"},
+	} {
+		req, err := http.NewRequest(request.method, proxy.URL+request.path, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusMethodNotAllowed || resp.Header.Get("Allow") != http.MethodGet {
+			t.Errorf("%s %s returned status=%d allow=%q, want 405 Allow=GET", request.method, request.path, resp.StatusCode, resp.Header.Get("Allow"))
+		}
+	}
 	metrics, err := http.Get(proxy.URL + "/metrics")
 	if err != nil {
 		t.Fatal(err)

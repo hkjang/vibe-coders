@@ -25,6 +25,7 @@ const operator: AuthUser = {
 describe("migration registry", () => {
   const serverContract = [
     ["overview", "/app/overview"],
+    ["gateway.health", "/app/gateway/health"],
     ["gateway.providers", "/app/gateway/providers"],
     ["gateway.models", "/app/gateway/models"],
     ["routing.rules", "/app/routing/rules"],
@@ -37,6 +38,7 @@ describe("migration registry", () => {
     ["text2sql.overview", "/app/text2sql"],
     ["finops.overview", "/app/finops"],
     ["security.overview", "/app/security"],
+    ["system.health", "/app/system/health"],
     ["system.settings", "/app/system/settings"],
   ] as const;
 
@@ -98,7 +100,7 @@ describe("migration registry", () => {
     });
   });
 
-  it("keeps all 14 fallback IDs and paths aligned with the authoritative server registry", () => {
+  it("keeps every fallback ID and path aligned with the authoritative server registry", () => {
     expect(migrationRegistry.map(({ featureId, appPath }) => [featureId, appPath])).toEqual(serverContract);
     const payload: UIBootstrapFeature[] = serverContract.map(([featureId, appPath]) => {
       const fallback = migrationRegistry.find((feature) => feature.featureId === featureId);

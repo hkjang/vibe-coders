@@ -580,6 +580,9 @@ func enrichOpenAPIOperation(route, method string, op map[string]any) {
 	switch key {
 	case "get /health":
 		responses["200"] = successResponse("HealthResponse")
+	case "get /ready":
+		responses["200"] = successResponse("ReadyResponse")
+		responses["503"] = map[string]any{"description": "Database is not ready", "content": jsonContent(schemaRef("ReadinessFailureResponse"))}
 	case "post /auth/login":
 		op["requestBody"] = requestBody("AuthLoginRequest")
 		responses["200"] = successResponse("AuthTokenResponse")
@@ -622,6 +625,26 @@ func enrichOpenAPIOperation(route, method string, op map[string]any) {
 		responses["200"] = successResponse("NavigationResponse")
 	case "get /admin/ui-bootstrap":
 		responses["200"] = successResponse("UIBootstrapResponse")
+	case "get /admin/stats":
+		responses["200"] = successResponse("AdminStatsResponse")
+	case "get /admin/ops/status":
+		responses["200"] = successResponse("OpsStatus")
+	case "get /admin/ops/risk":
+		responses["200"] = successResponse("OpsRiskResponse")
+	case "get /admin/routing/health":
+		op["parameters"] = []any{
+			map[string]any{
+				"name": "window", "in": "query", "required": false,
+				"description": "Health lookback window. Supports 1h, 6h, 24h/1d, 7d, 30d, or a Go duration.",
+				"schema":      map[string]any{"type": "string", "default": "15m"},
+			},
+			map[string]any{
+				"name": "threshold", "in": "query", "required": false,
+				"description": "Provider score below this value is degraded; the server clamps it to 0..100.",
+				"schema":      map[string]any{"type": "integer", "minimum": 0, "maximum": 100, "default": providerHealthDefaultThreshold},
+			},
+		}
+		responses["200"] = successResponse("RoutingHealthResponse")
 	default:
 		return
 	}
@@ -639,7 +662,7 @@ func appUIOpenAPISchemas() map[string]any {
 			"features": map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "boolean"}},
 		},
 	}
-	return map[string]any{
+	schemas := map[string]any{
 		"AppError":           map[string]any{"type": "object", "required": []string{"error"}, "properties": map[string]any{"error": map[string]any{"type": "object", "required": []string{"message", "type", "code"}, "properties": map[string]any{"message": map[string]any{"type": "string"}, "type": map[string]any{"type": "string"}, "param": map[string]any{"type": "string", "nullable": true}, "code": map[string]any{"type": "string"}}}}},
 		"HealthResponse":     map[string]any{"type": "object", "additionalProperties": false, "required": []string{"status"}, "properties": map[string]any{"status": map[string]any{"type": "string", "enum": []string{"ok"}}}},
 		"AuthLoginRequest":   map[string]any{"type": "object", "required": []string{"email", "password"}, "properties": map[string]any{"email": map[string]any{"type": "string", "format": "email"}, "password": map[string]any{"type": "string", "format": "password"}}},
@@ -682,6 +705,244 @@ func appUIOpenAPISchemas() map[string]any {
 		}},
 		"UISystemStatus":      map[string]any{"type": "object", "additionalProperties": false, "required": []string{"status"}, "properties": map[string]any{"status": map[string]any{"type": "string", "enum": []string{"healthy", "degraded"}}}},
 		"UIBootstrapResponse": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"backend_version", "ui_version", "api_version", "ui", "authentication", "roles", "permissions", "allowed_features", "migration_registry", "system_status", "legacy_route_map"}, "properties": map[string]any{"backend_version": map[string]any{"type": "string"}, "ui_version": map[string]any{"type": "string"}, "api_version": map[string]any{"type": "string"}, "ui": schemaRef("UIRuntimeConfig"), "authentication": schemaRef("UIAuthentication"), "user": map[string]any{"allOf": []any{schemaRef("AuthUser")}, "nullable": true}, "roles": stringArray, "permissions": stringArray, "allowed_features": stringArray, "migration_registry": map[string]any{"type": "array", "items": schemaRef("MigrationFeature")}, "system_status": schemaRef("UISystemStatus"), "legacy_route_map": map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}}}},
+	}
+	for name, schema := range operationalHealthOpenAPISchemas() {
+		schemas[name] = schema
+	}
+	return schemas
+}
+
+// operationalHealthOpenAPISchemas documents the existing read-only APIs used by
+// the Phase 1 health screens. Keep these schemas aligned with the response structs
+// and maps in server.go, ops_status.go, admin_routing.go, and the store package.
+func operationalHealthOpenAPISchemas() map[string]any {
+	providerHealthArray := map[string]any{"type": "array", "items": schemaRef("ProviderHealthScore")}
+	return map[string]any{
+		"ReadyResponse": map[string]any{
+			"type": "object", "additionalProperties": false, "required": []string{"status"},
+			"properties": map[string]any{
+				"status": map[string]any{"type": "string", "enum": []string{"ready"}},
+			},
+		},
+		"ReadinessFailureResponse": map[string]any{
+			"type": "object", "additionalProperties": false, "required": []string{"status", "error"},
+			"properties": map[string]any{
+				"status": map[string]any{"type": "string", "enum": []string{"not_ready"}},
+				"error":  map[string]any{"type": "string", "minLength": 1},
+			},
+		},
+		"GroupedStat": map[string]any{
+			"type": "object", "additionalProperties": false,
+			"required": []string{"key", "requests", "tokens", "cost_krw", "average_latency_ms"},
+			"properties": map[string]any{
+				"key": map[string]any{"type": "string"}, "requests": map[string]any{"type": "integer", "minimum": 0},
+				"tokens": map[string]any{"type": "integer", "minimum": 0}, "cost_krw": map[string]any{"type": "number"},
+				"average_latency_ms": map[string]any{"type": "number", "minimum": 0},
+			},
+		},
+		"LanguageGroupedStat": map[string]any{
+			"type": "object", "additionalProperties": false,
+			"required": []string{"language", "requests", "average_confidence"},
+			"properties": map[string]any{
+				"language": map[string]any{"type": "string"}, "requests": map[string]any{"type": "integer", "minimum": 0},
+				"average_confidence": map[string]any{"type": "number"},
+			},
+		},
+		"StatusBucket": map[string]any{
+			"type": "object", "additionalProperties": false, "required": []string{"class", "requests"},
+			"properties": map[string]any{
+				"class": map[string]any{"type": "string"}, "requests": map[string]any{"type": "integer", "minimum": 0},
+			},
+		},
+		"UserSummary": map[string]any{
+			"type": "object", "additionalProperties": false,
+			"required": []string{"api_key_id", "name", "owner", "team", "status", "requests", "tokens", "cost_krw", "average_latency_ms", "last_seen"},
+			"properties": map[string]any{
+				"api_key_id": map[string]any{"type": "string"}, "name": map[string]any{"type": "string"},
+				"owner": map[string]any{"type": "string"}, "team": map[string]any{"type": "string"}, "status": map[string]any{"type": "string"},
+				"requests": map[string]any{"type": "integer", "minimum": 0}, "tokens": map[string]any{"type": "integer", "minimum": 0},
+				"cost_krw": map[string]any{"type": "number"}, "average_latency_ms": map[string]any{"type": "number", "minimum": 0},
+				"last_seen": map[string]any{"type": "string"},
+			},
+		},
+		"EmbeddingCacheTop": map[string]any{
+			"type": "object", "additionalProperties": false, "required": []string{"model", "entries", "hits"},
+			"properties": map[string]any{
+				"model": map[string]any{"type": "string"}, "entries": map[string]any{"type": "integer", "minimum": 0},
+				"hits": map[string]any{"type": "integer", "minimum": 0},
+			},
+		},
+		"EmbeddingCacheStats": map[string]any{
+			"type": "object", "additionalProperties": false, "required": []string{"entries", "bytes", "total_hits", "top_models"},
+			"properties": map[string]any{
+				"entries": map[string]any{"type": "integer", "minimum": 0}, "bytes": map[string]any{"type": "integer", "minimum": 0},
+				"total_hits": map[string]any{"type": "integer", "minimum": 0},
+				"top_models": map[string]any{"type": "array", "items": schemaRef("EmbeddingCacheTop")},
+			},
+		},
+		"LatencyQuantiles": map[string]any{
+			"type": "object", "additionalProperties": false, "required": []string{"p50", "p95", "p99"},
+			"properties": map[string]any{
+				"p50": map[string]any{"type": "integer", "minimum": 0}, "p95": map[string]any{"type": "integer", "minimum": 0},
+				"p99": map[string]any{"type": "integer", "minimum": 0},
+			},
+		},
+		"AdminStatsResponse": map[string]any{
+			"type": "object", "additionalProperties": false,
+			"required": []string{"total_requests", "total_tokens", "total_cost_krw", "average_latency_ms", "by_ip", "by_model", "by_language", "by_status", "top_users", "latency_quantiles", "first_chunk_quantiles", "cache", "failover_total", "cache_hits", "cache_misses"},
+			"properties": map[string]any{
+				"total_requests": map[string]any{"type": "integer", "minimum": 0}, "total_tokens": map[string]any{"type": "integer", "minimum": 0},
+				"total_cost_krw": map[string]any{"type": "number"}, "average_latency_ms": map[string]any{"type": "number", "minimum": 0},
+				"by_ip":             map[string]any{"type": "array", "items": schemaRef("GroupedStat")},
+				"by_model":          map[string]any{"type": "array", "items": schemaRef("GroupedStat")},
+				"by_language":       map[string]any{"type": "array", "items": schemaRef("LanguageGroupedStat")},
+				"by_status":         map[string]any{"type": "array", "items": schemaRef("StatusBucket")},
+				"top_users":         map[string]any{"type": "array", "items": schemaRef("UserSummary")},
+				"latency_quantiles": schemaRef("LatencyQuantiles"), "first_chunk_quantiles": schemaRef("LatencyQuantiles"),
+				"cache": schemaRef("EmbeddingCacheStats"), "failover_total": map[string]any{"type": "integer", "minimum": 0},
+				"cache_hits": map[string]any{"type": "integer", "minimum": 0}, "cache_misses": map[string]any{"type": "integer", "minimum": 0},
+			},
+		},
+		"ProviderHealthScore": map[string]any{
+			"type": "object", "additionalProperties": false,
+			"required": []string{"provider", "score", "requests", "average_latency_ms", "p95_latency_ms", "timeouts", "rate_429", "rate_5xx", "fallbacks", "fallback_rate"},
+			"properties": map[string]any{
+				"provider": map[string]any{"type": "string"}, "score": map[string]any{"type": "integer", "minimum": 0, "maximum": 100},
+				"requests": map[string]any{"type": "integer", "minimum": 0}, "average_latency_ms": map[string]any{"type": "number", "minimum": 0},
+				"p95_latency_ms": map[string]any{"type": "integer", "minimum": 0}, "timeouts": map[string]any{"type": "integer", "minimum": 0},
+				"rate_429": map[string]any{"type": "integer", "minimum": 0}, "rate_5xx": map[string]any{"type": "integer", "minimum": 0},
+				"fallbacks": map[string]any{"type": "integer", "minimum": 0}, "fallback_rate": map[string]any{"type": "number", "minimum": 0},
+			},
+		},
+		"OpsLoggingStatus": map[string]any{
+			"type": "object", "additionalProperties": false, "required": []string{"queue_depth", "written", "dropped"},
+			"properties": map[string]any{
+				"queue_depth": map[string]any{"type": "integer", "minimum": 0}, "written": map[string]any{"type": "integer", "minimum": 0},
+				"dropped": map[string]any{"type": "integer", "minimum": 0},
+			},
+		},
+		"OpsFallbackStatus": map[string]any{
+			"type": "object", "additionalProperties": false,
+			"required": []string{"path", "exists", "lines", "bytes", "modified_at"},
+			"properties": map[string]any{
+				"path": map[string]any{"type": "string"}, "exists": map[string]any{"type": "boolean"},
+				"lines": map[string]any{"type": "integer", "minimum": 0}, "bytes": map[string]any{"type": "integer", "minimum": 0},
+				"modified_at": map[string]any{"type": "string"},
+			},
+		},
+		"OpsSecurityStatus": map[string]any{
+			"type": "object", "additionalProperties": false,
+			"required": []string{"auth_enabled", "dev_secret", "raw_prompts_logged", "raw_bodies_logged", "pricing_configured"},
+			"properties": map[string]any{
+				"auth_enabled": map[string]any{"type": "boolean"}, "dev_secret": map[string]any{"type": "boolean"},
+				"raw_prompts_logged": map[string]any{"type": "boolean"}, "raw_bodies_logged": map[string]any{"type": "boolean"},
+				"pricing_configured": map[string]any{"type": "boolean"},
+			},
+		},
+		"OpsDiskStatus": map[string]any{
+			"type": "object", "additionalProperties": false,
+			"required": []string{"path", "available", "free_bytes", "total_bytes", "used_percent"},
+			"properties": map[string]any{
+				"path": map[string]any{"type": "string"}, "available": map[string]any{"type": "boolean"},
+				"free_bytes": map[string]any{"type": "integer", "minimum": 0}, "total_bytes": map[string]any{"type": "integer", "minimum": 0},
+				"used_percent": map[string]any{"type": "number", "minimum": 0, "maximum": 100},
+			},
+		},
+		"OpsStatusPartialFailure": map[string]any{
+			"type": "object", "additionalProperties": false,
+			"required": []string{"component", "code", "message"},
+			"properties": map[string]any{
+				"component": map[string]any{"type": "string", "enum": []string{"providers", "fallback"}},
+				"code": map[string]any{
+					"type": "string", "enum": []string{"provider_health_unavailable", "fallback_stats_unavailable"},
+				},
+				"message": map[string]any{"type": "string"},
+			},
+		},
+		"OpsStatus": map[string]any{
+			"type": "object", "additionalProperties": false,
+			"required": []string{"generated_at", "providers", "logging", "fallback", "security", "disk"},
+			"properties": map[string]any{
+				"generated_at": map[string]any{"type": "string", "format": "date-time"}, "providers": providerHealthArray,
+				"logging": schemaRef("OpsLoggingStatus"), "fallback": schemaRef("OpsFallbackStatus"),
+				"security": schemaRef("OpsSecurityStatus"), "disk": schemaRef("OpsDiskStatus"),
+				"partial_failures": map[string]any{"type": "array", "items": schemaRef("OpsStatusPartialFailure")},
+			},
+		},
+		"OpsRiskFactor": map[string]any{
+			"type": "object", "additionalProperties": false, "required": []string{"key", "points", "severity", "message"},
+			"properties": map[string]any{
+				"key": map[string]any{"type": "string"}, "points": map[string]any{"type": "integer", "minimum": 0},
+				"severity": map[string]any{"type": "string", "enum": []string{"info", "warning", "critical"}}, "message": map[string]any{"type": "string"},
+			},
+		},
+		"OpsRisk": map[string]any{
+			"type": "object", "additionalProperties": false, "required": []string{"score", "tier", "factors"},
+			"properties": map[string]any{
+				"score":   map[string]any{"type": "integer", "minimum": 0, "maximum": 100},
+				"tier":    map[string]any{"type": "string", "enum": []string{"low", "medium", "high", "critical"}},
+				"factors": map[string]any{"type": "array", "items": schemaRef("OpsRiskFactor")},
+			},
+		},
+		"OpsRiskResponse": map[string]any{
+			"type": "object", "additionalProperties": false, "required": []string{"risk", "status"},
+			"properties": map[string]any{"risk": schemaRef("OpsRisk"), "status": schemaRef("OpsStatus")},
+		},
+		"ProviderHealthRankingItem": map[string]any{
+			"type": "object", "additionalProperties": false,
+			"required": []string{"rank", "provider", "score", "requests", "fallback_rate", "p95_latency_ms", "average_latency_ms"},
+			"properties": map[string]any{
+				"rank": map[string]any{"type": "integer", "minimum": 1}, "provider": map[string]any{"type": "string"},
+				"score": map[string]any{"type": "integer", "minimum": 0, "maximum": 100}, "requests": map[string]any{"type": "integer", "minimum": 0},
+				"fallback_rate": map[string]any{"type": "number", "minimum": 0}, "p95_latency_ms": map[string]any{"type": "integer", "minimum": 0},
+				"average_latency_ms": map[string]any{"type": "number", "minimum": 0},
+			},
+		},
+		"ProviderHealthAlert": map[string]any{
+			"type": "object", "additionalProperties": false, "required": []string{"provider", "code", "severity", "message"},
+			"properties": map[string]any{
+				"provider": map[string]any{"type": "string"}, "code": map[string]any{"type": "string"},
+				"severity": map[string]any{"type": "string", "enum": []string{"info", "warning", "critical"}}, "message": map[string]any{"type": "string"},
+			},
+		},
+		"ProviderHealthTrendBucket": map[string]any{
+			"type": "object", "additionalProperties": false, "required": []string{"since", "until", "providers"},
+			"properties": map[string]any{
+				"since": map[string]any{"type": "string", "format": "date-time"}, "until": map[string]any{"type": "string", "format": "date-time"},
+				"providers": providerHealthArray,
+			},
+		},
+		"RoutingBreakerState": map[string]any{
+			"type": "object", "additionalProperties": false, "required": []string{"provider", "phase", "failures", "opens"},
+			"properties": map[string]any{
+				"provider": map[string]any{"type": "string"}, "phase": map[string]any{"type": "string", "enum": []string{"closed", "open", "half_open"}},
+				"failures": map[string]any{"type": "integer", "minimum": 0}, "opens": map[string]any{"type": "integer", "minimum": 0},
+				"last_reason": map[string]any{"type": "string"}, "last_failure_at": map[string]any{"type": "string", "format": "date-time"},
+				"opened_at": map[string]any{"type": "string", "format": "date-time"}, "retry_in_seconds": map[string]any{"type": "integer", "minimum": 0},
+			},
+		},
+		"RoutingBreakerSummary": map[string]any{
+			"type": "object", "additionalProperties": false,
+			"required": []string{"enabled", "threshold", "cooldown_seconds", "states", "shared", "instance_id"},
+			"properties": map[string]any{
+				"enabled": map[string]any{"type": "boolean"}, "threshold": map[string]any{"type": "integer", "minimum": 1},
+				"cooldown_seconds": map[string]any{"type": "integer", "minimum": 0},
+				"states":           map[string]any{"type": "array", "items": schemaRef("RoutingBreakerState")},
+				"shared":           map[string]any{"type": "boolean"}, "instance_id": map[string]any{"type": "string"},
+			},
+		},
+		"RoutingHealthResponse": map[string]any{
+			"type": "object", "additionalProperties": false,
+			"required": []string{"since", "until", "threshold", "providers", "ranking", "degraded", "alerts", "trend", "breakers"},
+			"properties": map[string]any{
+				"since": map[string]any{"type": "string", "format": "date-time"}, "until": map[string]any{"type": "string", "format": "date-time"},
+				"threshold": map[string]any{"type": "integer", "minimum": 0, "maximum": 100}, "providers": providerHealthArray,
+				"ranking": map[string]any{"type": "array", "items": schemaRef("ProviderHealthRankingItem")}, "degraded": providerHealthArray,
+				"alerts":   map[string]any{"type": "array", "items": schemaRef("ProviderHealthAlert")},
+				"trend":    map[string]any{"type": "array", "items": schemaRef("ProviderHealthTrendBucket")},
+				"breakers": schemaRef("RoutingBreakerSummary"),
+			},
+		},
 	}
 }
 

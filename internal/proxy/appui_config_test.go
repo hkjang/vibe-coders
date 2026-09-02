@@ -59,8 +59,14 @@ func TestAppUIBootstrapAndRuntimeToggle(t *testing.T) {
 		t.Fatalf("legacy route map must be empty when fallback is disabled: %#v", legacyRoutes)
 	}
 	allowed, _ := body["allowed_features"].([]any)
-	if len(allowed) != 1 || allowed[0] != "overview" {
-		t.Fatalf("only the implemented Overview may remain allowed without Legacy fallback: %#v", allowed)
+	wantAllowed := []string{"overview", "gateway.health", "system.health"}
+	if len(allowed) != len(wantAllowed) {
+		t.Fatalf("implemented previews allowed without Legacy fallback = %#v, want %v", allowed, wantAllowed)
+	}
+	for i, want := range wantAllowed {
+		if allowed[i] != want {
+			t.Fatalf("implemented previews allowed without Legacy fallback = %#v, want %v", allowed, wantAllowed)
+		}
 	}
 }
 
@@ -287,6 +293,7 @@ func TestAppUIMigrationRegistryContract(t *testing.T) {
 	}
 
 	wantLegacyPaths := map[string]string{
+		"gateway.health":       "/admin#/routing/health",
 		"gateway.providers":    "/admin#/routing/health",
 		"gateway.models":       "/admin#/model-contracts",
 		"observability.traces": "/admin#/llm",
@@ -294,6 +301,7 @@ func TestAppUIMigrationRegistryContract(t *testing.T) {
 		"access.users":         "/admin#/users",
 		"governance.policies":  "/admin#/safety",
 		"finops.overview":      "/admin#/billing",
+		"system.health":        "/admin#/ops-home",
 	}
 	for _, feature := range appUIFeatures {
 		if want, ok := wantLegacyPaths[feature.FeatureID]; ok && feature.LegacyPath != want {
@@ -307,6 +315,89 @@ func TestAppUIMigrationRegistryContract(t *testing.T) {
 	}
 	if got, want := len(appUIFeatureSettingDefs()), len(appUIFeatures)*4; got != want {
 		t.Fatalf("feature setting definitions = %d, want %d", got, want)
+	}
+}
+
+func TestOverviewMigrationContractRemainsConservative(t *testing.T) {
+	var overview *appUIFeature
+	for i := range appUIFeatures {
+		if appUIFeatures[i].FeatureID == "overview" {
+			overview = &appUIFeatures[i]
+			break
+		}
+	}
+	if overview == nil {
+		t.Fatal("overview migration feature is not registered")
+	}
+	if overview.Status != "preview_read_only" || !overview.ReadOnly || overview.RequiredPermission != "admin:read" {
+		t.Fatalf("overview safety contract changed: %+v", *overview)
+	}
+	if got, want := strings.Join(overview.EnabledRoles, ","), "super_admin,admin,ops_admin,ai_admin,security_admin,billing_admin,readonly_admin,viewer"; got != want {
+		t.Fatalf("overview enabled roles = %q, want authoritative role cohort %q", got, want)
+	}
+	if overview.MinimumAPIVersion != "v0.80.0" {
+		t.Fatalf("overview minimum API version = %q, want foundation API v0.80.0", overview.MinimumAPIVersion)
+	}
+}
+
+func TestPhaseOneHealthFeaturesAreSafeReadOnlyPreviews(t *testing.T) {
+	systemAdminRoles := map[string]bool{
+		"super_admin":    true,
+		"admin":          true,
+		"ops_admin":      true,
+		"ai_admin":       true,
+		"security_admin": true,
+		"billing_admin":  true,
+		"readonly_admin": true,
+	}
+	expectedRoles := map[string]map[string]bool{
+		"gateway.health": {"super_admin": true, "admin": true, "ai_admin": true},
+		"system.health":  systemAdminRoles,
+	}
+	expectedPermission := map[string]string{
+		"gateway.health": "routing:read",
+		"system.health":  "admin:read",
+	}
+	for _, id := range []string{"gateway.health", "system.health"} {
+		var feature *appUIFeature
+		for i := range appUIFeatures {
+			if appUIFeatures[i].FeatureID == id {
+				feature = &appUIFeatures[i]
+				break
+			}
+		}
+		if feature == nil {
+			t.Fatalf("phase one feature %q is not registered", id)
+		}
+		if feature.Status != "preview_read_only" || !feature.ReadOnly {
+			t.Errorf("feature %q safety = status %q read_only=%v", id, feature.Status, feature.ReadOnly)
+		}
+		if feature.RequiredPermission != expectedPermission[id] {
+			t.Errorf("feature %q permission = %q, want %q", id, feature.RequiredPermission, expectedPermission[id])
+		}
+		if feature.RolloutPercent != 100 || !feature.FallbackEnabled || feature.MinimumAPIVersion != "v0.81.0" {
+			t.Errorf("feature %q rollout contract is unsafe or incomplete: %+v", id, *feature)
+		}
+		if _, implemented := appUIImplementedFeatureIDs[id]; !implemented {
+			t.Errorf("feature %q is not marked as implemented", id)
+		}
+		gotRoles := map[string]bool{}
+		for _, role := range feature.EnabledRoles {
+			gotRoles[role] = true
+		}
+		if len(gotRoles) != len(expectedRoles[id]) {
+			t.Errorf("feature %q enabled roles = %v, want roles %v", id, feature.EnabledRoles, expectedRoles[id])
+		}
+		for role := range expectedRoles[id] {
+			if !gotRoles[role] {
+				t.Errorf("feature %q missing preview role %q", id, role)
+			}
+		}
+		for _, role := range []string{"viewer", "team_admin", "developer"} {
+			if gotRoles[role] {
+				t.Errorf("feature %q must not preview for non-operator role %q", id, role)
+			}
+		}
 	}
 }
 

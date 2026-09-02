@@ -21,6 +21,24 @@ export type AdminSettingView = {
     version?: number;
 };
 
+export type AdminStatsResponse = {
+    average_latency_ms: number;
+    by_ip: Array<GroupedStat>;
+    by_language: Array<LanguageGroupedStat>;
+    by_model: Array<GroupedStat>;
+    by_status: Array<StatusBucket>;
+    cache: EmbeddingCacheStats;
+    cache_hits: number;
+    cache_misses: number;
+    failover_total: number;
+    first_chunk_quantiles: LatencyQuantiles;
+    latency_quantiles: LatencyQuantiles;
+    top_users: Array<UserSummary>;
+    total_cost_krw: number;
+    total_requests: number;
+    total_tokens: number;
+};
+
 export type AppError = {
     error: {
         code: string;
@@ -75,6 +93,27 @@ export type AuthUser = {
     team_id?: string;
 };
 
+export type EmbeddingCacheStats = {
+    bytes: number;
+    entries: number;
+    top_models: Array<EmbeddingCacheTop>;
+    total_hits: number;
+};
+
+export type EmbeddingCacheTop = {
+    entries: number;
+    hits: number;
+    model: string;
+};
+
+export type GroupedStat = {
+    average_latency_ms: number;
+    cost_krw: number;
+    key: string;
+    requests: number;
+    tokens: number;
+};
+
 export type HealthResponse = {
     status: 'ok';
 };
@@ -88,6 +127,18 @@ export type KeycloakLogoutRequest = {
 export type KeycloakLogoutResponse = {
     end_session_url: string;
     status: 'logged_out';
+};
+
+export type LanguageGroupedStat = {
+    average_confidence: number;
+    language: string;
+    requests: number;
+};
+
+export type LatencyQuantiles = {
+    p50: number;
+    p95: number;
+    p99: number;
 };
 
 export type MigrationFeature = {
@@ -121,6 +172,147 @@ export type NavigationResponse = {
     scopes: Array<string>;
 };
 
+export type OpsDiskStatus = {
+    available: boolean;
+    free_bytes: number;
+    path: string;
+    total_bytes: number;
+    used_percent: number;
+};
+
+export type OpsFallbackStatus = {
+    bytes: number;
+    exists: boolean;
+    lines: number;
+    modified_at: string;
+    path: string;
+};
+
+export type OpsLoggingStatus = {
+    dropped: number;
+    queue_depth: number;
+    written: number;
+};
+
+export type OpsRisk = {
+    factors: Array<OpsRiskFactor>;
+    score: number;
+    tier: 'low' | 'medium' | 'high' | 'critical';
+};
+
+export type OpsRiskFactor = {
+    key: string;
+    message: string;
+    points: number;
+    severity: 'info' | 'warning' | 'critical';
+};
+
+export type OpsRiskResponse = {
+    risk: OpsRisk;
+    status: OpsStatus;
+};
+
+export type OpsSecurityStatus = {
+    auth_enabled: boolean;
+    dev_secret: boolean;
+    pricing_configured: boolean;
+    raw_bodies_logged: boolean;
+    raw_prompts_logged: boolean;
+};
+
+export type OpsStatus = {
+    disk: OpsDiskStatus;
+    fallback: OpsFallbackStatus;
+    generated_at: string;
+    logging: OpsLoggingStatus;
+    partial_failures?: Array<OpsStatusPartialFailure>;
+    providers: Array<ProviderHealthScore>;
+    security: OpsSecurityStatus;
+};
+
+export type OpsStatusPartialFailure = {
+    code: 'provider_health_unavailable' | 'fallback_stats_unavailable';
+    component: 'providers' | 'fallback';
+    message: string;
+};
+
+export type ProviderHealthAlert = {
+    code: string;
+    message: string;
+    provider: string;
+    severity: 'info' | 'warning' | 'critical';
+};
+
+export type ProviderHealthRankingItem = {
+    average_latency_ms: number;
+    fallback_rate: number;
+    p95_latency_ms: number;
+    provider: string;
+    rank: number;
+    requests: number;
+    score: number;
+};
+
+export type ProviderHealthScore = {
+    average_latency_ms: number;
+    fallback_rate: number;
+    fallbacks: number;
+    p95_latency_ms: number;
+    provider: string;
+    rate_429: number;
+    rate_5xx: number;
+    requests: number;
+    score: number;
+    timeouts: number;
+};
+
+export type ProviderHealthTrendBucket = {
+    providers: Array<ProviderHealthScore>;
+    since: string;
+    until: string;
+};
+
+export type ReadinessFailureResponse = {
+    error: string;
+    status: 'not_ready';
+};
+
+export type ReadyResponse = {
+    status: 'ready';
+};
+
+export type RoutingBreakerState = {
+    failures: number;
+    last_failure_at?: string;
+    last_reason?: string;
+    opened_at?: string;
+    opens: number;
+    phase: 'closed' | 'open' | 'half_open';
+    provider: string;
+    retry_in_seconds?: number;
+};
+
+export type RoutingBreakerSummary = {
+    cooldown_seconds: number;
+    enabled: boolean;
+    instance_id: string;
+    shared: boolean;
+    states: Array<RoutingBreakerState>;
+    threshold: number;
+};
+
+export type RoutingHealthResponse = {
+    alerts: Array<ProviderHealthAlert>;
+    breakers: RoutingBreakerSummary;
+    degraded: Array<ProviderHealthScore>;
+    providers: Array<ProviderHealthScore>;
+    ranking: Array<ProviderHealthRankingItem>;
+    since: string;
+    threshold: number;
+    trend: Array<ProviderHealthTrendBucket>;
+    until: string;
+};
+
 export type SsoExchangeRequest = {
     code: string;
 };
@@ -151,6 +343,11 @@ export type SettingsBatchRequest = {
 export type SettingsBatchResponse = {
     applied: number;
     ok: boolean;
+};
+
+export type StatusBucket = {
+    class: string;
+    requests: number;
 };
 
 export type StatusResponse = {
@@ -193,6 +390,19 @@ export type UiRuntimeConfig = {
 
 export type UiSystemStatus = {
     status: 'healthy' | 'degraded';
+};
+
+export type UserSummary = {
+    api_key_id: string;
+    average_latency_ms: number;
+    cost_krw: number;
+    last_seen: string;
+    name: string;
+    owner: string;
+    requests: number;
+    status: string;
+    team: string;
+    tokens: number;
 };
 
 export type GetAdminData = {
@@ -3158,12 +3368,23 @@ export type GetAdminOpsRiskData = {
     url: '/admin/ops/risk';
 };
 
+export type GetAdminOpsRiskErrors = {
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminOpsRiskError = GetAdminOpsRiskErrors[keyof GetAdminOpsRiskErrors];
+
 export type GetAdminOpsRiskResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: OpsRiskResponse;
 };
+
+export type GetAdminOpsRiskResponse = GetAdminOpsRiskResponses[keyof GetAdminOpsRiskResponses];
 
 export type GetAdminOpsStatusData = {
     body?: never;
@@ -3172,12 +3393,23 @@ export type GetAdminOpsStatusData = {
     url: '/admin/ops/status';
 };
 
+export type GetAdminOpsStatusErrors = {
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminOpsStatusError = GetAdminOpsStatusErrors[keyof GetAdminOpsStatusErrors];
+
 export type GetAdminOpsStatusResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: OpsStatus;
 };
+
+export type GetAdminOpsStatusResponse = GetAdminOpsStatusResponses[keyof GetAdminOpsStatusResponses];
 
 export type GetAdminOpsWorkersData = {
     body?: never;
@@ -4870,16 +5102,36 @@ export type PostAdminRoutingFailoverDrillResponses = {
 export type GetAdminRoutingHealthData = {
     body?: never;
     path?: never;
-    query?: never;
+    query?: {
+        /**
+         * Health lookback window. Supports 1h, 6h, 24h/1d, 7d, 30d, or a Go duration.
+         */
+        window?: string;
+        /**
+         * Provider score below this value is degraded; the server clamps it to 0..100.
+         */
+        threshold?: number;
+    };
     url: '/admin/routing/health';
 };
+
+export type GetAdminRoutingHealthErrors = {
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminRoutingHealthError = GetAdminRoutingHealthErrors[keyof GetAdminRoutingHealthErrors];
 
 export type GetAdminRoutingHealthResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: RoutingHealthResponse;
 };
+
+export type GetAdminRoutingHealthResponse = GetAdminRoutingHealthResponses[keyof GetAdminRoutingHealthResponses];
 
 export type GetAdminRoutingLearningData = {
     body?: never;
@@ -5798,12 +6050,23 @@ export type GetAdminStatsData = {
     url: '/admin/stats';
 };
 
+export type GetAdminStatsErrors = {
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminStatsError = GetAdminStatsErrors[keyof GetAdminStatsErrors];
+
 export type GetAdminStatsResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: AdminStatsResponse;
 };
+
+export type GetAdminStatsResponse = GetAdminStatsResponses[keyof GetAdminStatsResponses];
 
 export type GetAdminSuggestData = {
     body?: never;
@@ -7714,12 +7977,27 @@ export type GetReadyData = {
     url: '/ready';
 };
 
+export type GetReadyErrors = {
+    /**
+     * Database is not ready
+     */
+    503: ReadinessFailureResponse;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetReadyError = GetReadyErrors[keyof GetReadyErrors];
+
 export type GetReadyResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: ReadyResponse;
 };
+
+export type GetReadyResponse = GetReadyResponses[keyof GetReadyResponses];
 
 export type GetSecurityDashboardData = {
     body?: never;

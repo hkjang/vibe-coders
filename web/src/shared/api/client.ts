@@ -7,6 +7,7 @@ import {
   type RegisteredApiEndpoint,
 } from "@/shared/api/endpoints";
 import { openAIErrorSchema } from "@/shared/api/schemas";
+import { buildApiPath } from "@/shared/api/query";
 import { publishLogout, tokenStore } from "@/shared/auth/token-store";
 
 const defaultTimeoutMs = 15_000;
@@ -21,6 +22,13 @@ interface ApiRequestMetadata {
 type ApiEndpointBody<Endpoint extends ApiEndpointBase> =
   ApiEndpointData<Endpoint> extends { body: infer Body } ? Body : never;
 
+type ApiEndpointQuery<Endpoint extends ApiEndpointBase> =
+  ApiEndpointData<Endpoint> extends { query?: infer Query }
+    ? Exclude<Query, undefined> extends object
+      ? Exclude<Query, undefined>
+      : never
+    : never;
+
 export type ApiRequestOptions<Endpoint extends ApiEndpointBase> = Omit<
   RequestInit,
   "body" | "method" | "signal"
@@ -28,7 +36,10 @@ export type ApiRequestOptions<Endpoint extends ApiEndpointBase> = Omit<
   ApiRequestMetadata &
   ([ApiEndpointBody<Endpoint>] extends [never]
     ? { readonly body?: never }
-    : { readonly body: ApiEndpointBody<Endpoint> });
+    : { readonly body: ApiEndpointBody<Endpoint> }) &
+  ([ApiEndpointQuery<Endpoint>] extends [never]
+    ? { readonly query?: never }
+    : { readonly query?: ApiEndpointQuery<Endpoint> });
 
 type ApiRequestArguments<Endpoint extends ApiEndpointBase> = [ApiEndpointBody<Endpoint>] extends [never]
   ? [options?: ApiRequestOptions<Endpoint>]
@@ -37,6 +48,7 @@ type ApiRequestArguments<Endpoint extends ApiEndpointBase> = [ApiEndpointBody<En
 interface InternalApiRequestOptions
   extends Omit<RequestInit, "body" | "method" | "signal">, ApiRequestMetadata {
   body?: unknown;
+  query?: object;
 }
 
 export interface ApiClientDependencies {
@@ -128,7 +140,7 @@ export class ApiClient {
     }
 
     const body = await readResponseBody(response);
-    if (!response.ok) throw this.toAppError(response, body);
+    if (!response.ok) throw this.endpointError(endpoint, response, body);
 
     const parsed = endpoint.schema.safeParse(body);
     if (!parsed.success) {
@@ -192,11 +204,36 @@ export class ApiClient {
   }
 
   private async perform(endpoint: ApiEndpointBase, options: InternalApiRequestOptions): Promise<Response> {
-    const { body, timeoutMs = defaultTimeoutMs, signal, routeId, retryUnauthorized, ...init } = options;
+    const {
+      body,
+      query,
+      timeoutMs = defaultTimeoutMs,
+      signal,
+      routeId,
+      retryUnauthorized,
+      ...init
+    } = options;
     void retryUnauthorized;
     const headers = this.headers(init.headers, true, routeId);
+    let validatedQuery = query;
+    if (query !== undefined) {
+      if (!endpoint.querySchema) {
+        throw new AppError("이 API는 쿼리 매개변수를 지원하지 않습니다.", {
+          kind: "contract",
+          details: query,
+        });
+      }
+      const parsedQuery = endpoint.querySchema.safeParse(query);
+      if (!parsedQuery.success) {
+        throw new AppError("API 쿼리 형식이 예상 계약과 다릅니다.", {
+          kind: "contract",
+          details: parsedQuery.error.flatten(),
+        });
+      }
+      validatedQuery = parsedQuery.data;
+    }
     return this.fetchWithTimeout(
-      endpoint.path,
+      buildApiPath(endpoint.path, validatedQuery),
       {
         ...init,
         method: endpoint.method,
@@ -278,6 +315,41 @@ export class ApiClient {
       requestId: requestIdFrom(response, body),
       retryable: response.status === 408 || response.status === 429 || response.status >= 500,
       details: body,
+    });
+  }
+
+  private endpointError(endpoint: ApiEndpointBase, response: Response, body: unknown): AppError {
+    const errorSchema = endpoint.errorSchemas?.[response.status];
+    if (!errorSchema) return this.toAppError(response, body);
+
+    const parsed = errorSchema.safeParse(body);
+    if (!parsed.success) {
+      return new AppError("API 오류 응답 형식이 예상 계약과 다릅니다.", {
+        kind: "contract",
+        status: response.status,
+        requestId: requestIdFrom(response, body),
+        details: {
+          responseBody: body,
+          validation: parsed.error.flatten(),
+        },
+      });
+    }
+
+    const error = this.toAppError(response, parsed.data);
+    const message =
+      typeof parsed.data === "object" &&
+      parsed.data !== null &&
+      "error" in parsed.data &&
+      typeof parsed.data.error === "string"
+        ? parsed.data.error
+        : error.message;
+    return new AppError(message, {
+      kind: error.kind,
+      status: error.status,
+      code: error.code,
+      requestId: requestIdFrom(response, body),
+      retryable: error.retryable,
+      details: parsed.data,
     });
   }
 }

@@ -61,6 +61,95 @@
         ],
         "type": "object"
       },
+      "AdminStatsResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "average_latency_ms": {
+            "minimum": 0,
+            "type": "number"
+          },
+          "by_ip": {
+            "items": {
+              "$ref": "#/components/schemas/GroupedStat"
+            },
+            "type": "array"
+          },
+          "by_language": {
+            "items": {
+              "$ref": "#/components/schemas/LanguageGroupedStat"
+            },
+            "type": "array"
+          },
+          "by_model": {
+            "items": {
+              "$ref": "#/components/schemas/GroupedStat"
+            },
+            "type": "array"
+          },
+          "by_status": {
+            "items": {
+              "$ref": "#/components/schemas/StatusBucket"
+            },
+            "type": "array"
+          },
+          "cache": {
+            "$ref": "#/components/schemas/EmbeddingCacheStats"
+          },
+          "cache_hits": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "cache_misses": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "failover_total": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "first_chunk_quantiles": {
+            "$ref": "#/components/schemas/LatencyQuantiles"
+          },
+          "latency_quantiles": {
+            "$ref": "#/components/schemas/LatencyQuantiles"
+          },
+          "top_users": {
+            "items": {
+              "$ref": "#/components/schemas/UserSummary"
+            },
+            "type": "array"
+          },
+          "total_cost_krw": {
+            "type": "number"
+          },
+          "total_requests": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "total_tokens": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total_requests",
+          "total_tokens",
+          "total_cost_krw",
+          "average_latency_ms",
+          "by_ip",
+          "by_model",
+          "by_language",
+          "by_status",
+          "top_users",
+          "latency_quantiles",
+          "first_chunk_quantiles",
+          "cache",
+          "failover_total",
+          "cache_hits",
+          "cache_misses"
+        ],
+        "type": "object"
+      },
       "AppError": {
         "properties": {
           "error": {
@@ -239,6 +328,89 @@
         ],
         "type": "object"
       },
+      "EmbeddingCacheStats": {
+        "additionalProperties": false,
+        "properties": {
+          "bytes": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "entries": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "top_models": {
+            "items": {
+              "$ref": "#/components/schemas/EmbeddingCacheTop"
+            },
+            "type": "array"
+          },
+          "total_hits": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "entries",
+          "bytes",
+          "total_hits",
+          "top_models"
+        ],
+        "type": "object"
+      },
+      "EmbeddingCacheTop": {
+        "additionalProperties": false,
+        "properties": {
+          "entries": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "hits": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "model": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "model",
+          "entries",
+          "hits"
+        ],
+        "type": "object"
+      },
+      "GroupedStat": {
+        "additionalProperties": false,
+        "properties": {
+          "average_latency_ms": {
+            "minimum": 0,
+            "type": "number"
+          },
+          "cost_krw": {
+            "type": "number"
+          },
+          "key": {
+            "type": "string"
+          },
+          "requests": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "tokens": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "key",
+          "requests",
+          "tokens",
+          "cost_krw",
+          "average_latency_ms"
+        ],
+        "type": "object"
+      },
       "HealthResponse": {
         "additionalProperties": false,
         "properties": {
@@ -286,6 +458,50 @@
         "required": [
           "status",
           "end_session_url"
+        ],
+        "type": "object"
+      },
+      "LanguageGroupedStat": {
+        "additionalProperties": false,
+        "properties": {
+          "average_confidence": {
+            "type": "number"
+          },
+          "language": {
+            "type": "string"
+          },
+          "requests": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "language",
+          "requests",
+          "average_confidence"
+        ],
+        "type": "object"
+      },
+      "LatencyQuantiles": {
+        "additionalProperties": false,
+        "properties": {
+          "p50": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "p95": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "p99": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "p50",
+          "p95",
+          "p99"
         ],
         "type": "object"
       },
@@ -419,6 +635,602 @@
         ],
         "type": "object"
       },
+      "OpsDiskStatus": {
+        "additionalProperties": false,
+        "properties": {
+          "available": {
+            "type": "boolean"
+          },
+          "free_bytes": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "path": {
+            "type": "string"
+          },
+          "total_bytes": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "used_percent": {
+            "maximum": 100,
+            "minimum": 0,
+            "type": "number"
+          }
+        },
+        "required": [
+          "path",
+          "available",
+          "free_bytes",
+          "total_bytes",
+          "used_percent"
+        ],
+        "type": "object"
+      },
+      "OpsFallbackStatus": {
+        "additionalProperties": false,
+        "properties": {
+          "bytes": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "exists": {
+            "type": "boolean"
+          },
+          "lines": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "modified_at": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "exists",
+          "lines",
+          "bytes",
+          "modified_at"
+        ],
+        "type": "object"
+      },
+      "OpsLoggingStatus": {
+        "additionalProperties": false,
+        "properties": {
+          "dropped": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "queue_depth": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "written": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "queue_depth",
+          "written",
+          "dropped"
+        ],
+        "type": "object"
+      },
+      "OpsRisk": {
+        "additionalProperties": false,
+        "properties": {
+          "factors": {
+            "items": {
+              "$ref": "#/components/schemas/OpsRiskFactor"
+            },
+            "type": "array"
+          },
+          "score": {
+            "maximum": 100,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "tier": {
+            "enum": [
+              "low",
+              "medium",
+              "high",
+              "critical"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "score",
+          "tier",
+          "factors"
+        ],
+        "type": "object"
+      },
+      "OpsRiskFactor": {
+        "additionalProperties": false,
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "points": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "severity": {
+            "enum": [
+              "info",
+              "warning",
+              "critical"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "points",
+          "severity",
+          "message"
+        ],
+        "type": "object"
+      },
+      "OpsRiskResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "risk": {
+            "$ref": "#/components/schemas/OpsRisk"
+          },
+          "status": {
+            "$ref": "#/components/schemas/OpsStatus"
+          }
+        },
+        "required": [
+          "risk",
+          "status"
+        ],
+        "type": "object"
+      },
+      "OpsSecurityStatus": {
+        "additionalProperties": false,
+        "properties": {
+          "auth_enabled": {
+            "type": "boolean"
+          },
+          "dev_secret": {
+            "type": "boolean"
+          },
+          "pricing_configured": {
+            "type": "boolean"
+          },
+          "raw_bodies_logged": {
+            "type": "boolean"
+          },
+          "raw_prompts_logged": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "auth_enabled",
+          "dev_secret",
+          "raw_prompts_logged",
+          "raw_bodies_logged",
+          "pricing_configured"
+        ],
+        "type": "object"
+      },
+      "OpsStatus": {
+        "additionalProperties": false,
+        "properties": {
+          "disk": {
+            "$ref": "#/components/schemas/OpsDiskStatus"
+          },
+          "fallback": {
+            "$ref": "#/components/schemas/OpsFallbackStatus"
+          },
+          "generated_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "logging": {
+            "$ref": "#/components/schemas/OpsLoggingStatus"
+          },
+          "partial_failures": {
+            "items": {
+              "$ref": "#/components/schemas/OpsStatusPartialFailure"
+            },
+            "type": "array"
+          },
+          "providers": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderHealthScore"
+            },
+            "type": "array"
+          },
+          "security": {
+            "$ref": "#/components/schemas/OpsSecurityStatus"
+          }
+        },
+        "required": [
+          "generated_at",
+          "providers",
+          "logging",
+          "fallback",
+          "security",
+          "disk"
+        ],
+        "type": "object"
+      },
+      "OpsStatusPartialFailure": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "enum": [
+              "provider_health_unavailable",
+              "fallback_stats_unavailable"
+            ],
+            "type": "string"
+          },
+          "component": {
+            "enum": [
+              "providers",
+              "fallback"
+            ],
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "component",
+          "code",
+          "message"
+        ],
+        "type": "object"
+      },
+      "ProviderHealthAlert": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "severity": {
+            "enum": [
+              "info",
+              "warning",
+              "critical"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "code",
+          "severity",
+          "message"
+        ],
+        "type": "object"
+      },
+      "ProviderHealthRankingItem": {
+        "additionalProperties": false,
+        "properties": {
+          "average_latency_ms": {
+            "minimum": 0,
+            "type": "number"
+          },
+          "fallback_rate": {
+            "minimum": 0,
+            "type": "number"
+          },
+          "p95_latency_ms": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "rank": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "requests": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "score": {
+            "maximum": 100,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "rank",
+          "provider",
+          "score",
+          "requests",
+          "fallback_rate",
+          "p95_latency_ms",
+          "average_latency_ms"
+        ],
+        "type": "object"
+      },
+      "ProviderHealthScore": {
+        "additionalProperties": false,
+        "properties": {
+          "average_latency_ms": {
+            "minimum": 0,
+            "type": "number"
+          },
+          "fallback_rate": {
+            "minimum": 0,
+            "type": "number"
+          },
+          "fallbacks": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "p95_latency_ms": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "rate_429": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "rate_5xx": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "requests": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "score": {
+            "maximum": 100,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "timeouts": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "provider",
+          "score",
+          "requests",
+          "average_latency_ms",
+          "p95_latency_ms",
+          "timeouts",
+          "rate_429",
+          "rate_5xx",
+          "fallbacks",
+          "fallback_rate"
+        ],
+        "type": "object"
+      },
+      "ProviderHealthTrendBucket": {
+        "additionalProperties": false,
+        "properties": {
+          "providers": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderHealthScore"
+            },
+            "type": "array"
+          },
+          "since": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "until": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "since",
+          "until",
+          "providers"
+        ],
+        "type": "object"
+      },
+      "ReadinessFailureResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "not_ready"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "error"
+        ],
+        "type": "object"
+      },
+      "ReadyResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "status": {
+            "enum": [
+              "ready"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "type": "object"
+      },
+      "RoutingBreakerState": {
+        "additionalProperties": false,
+        "properties": {
+          "failures": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "last_failure_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "last_reason": {
+            "type": "string"
+          },
+          "opened_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "opens": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "phase": {
+            "enum": [
+              "closed",
+              "open",
+              "half_open"
+            ],
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "retry_in_seconds": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "provider",
+          "phase",
+          "failures",
+          "opens"
+        ],
+        "type": "object"
+      },
+      "RoutingBreakerSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "cooldown_seconds": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "instance_id": {
+            "type": "string"
+          },
+          "shared": {
+            "type": "boolean"
+          },
+          "states": {
+            "items": {
+              "$ref": "#/components/schemas/RoutingBreakerState"
+            },
+            "type": "array"
+          },
+          "threshold": {
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "enabled",
+          "threshold",
+          "cooldown_seconds",
+          "states",
+          "shared",
+          "instance_id"
+        ],
+        "type": "object"
+      },
+      "RoutingHealthResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "alerts": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderHealthAlert"
+            },
+            "type": "array"
+          },
+          "breakers": {
+            "$ref": "#/components/schemas/RoutingBreakerSummary"
+          },
+          "degraded": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderHealthScore"
+            },
+            "type": "array"
+          },
+          "providers": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderHealthScore"
+            },
+            "type": "array"
+          },
+          "ranking": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderHealthRankingItem"
+            },
+            "type": "array"
+          },
+          "since": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "threshold": {
+            "maximum": 100,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "trend": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderHealthTrendBucket"
+            },
+            "type": "array"
+          },
+          "until": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "since",
+          "until",
+          "threshold",
+          "providers",
+          "ranking",
+          "degraded",
+          "alerts",
+          "trend",
+          "breakers"
+        ],
+        "type": "object"
+      },
       "SSOExchangeRequest": {
         "additionalProperties": false,
         "properties": {
@@ -524,6 +1336,23 @@
         "required": [
           "ok",
           "applied"
+        ],
+        "type": "object"
+      },
+      "StatusBucket": {
+        "additionalProperties": false,
+        "properties": {
+          "class": {
+            "type": "string"
+          },
+          "requests": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "class",
+          "requests"
         ],
         "type": "object"
       },
@@ -694,6 +1523,57 @@
           "status"
         ],
         "type": "object"
+      },
+      "UserSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "api_key_id": {
+            "type": "string"
+          },
+          "average_latency_ms": {
+            "minimum": 0,
+            "type": "number"
+          },
+          "cost_krw": {
+            "type": "number"
+          },
+          "last_seen": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "owner": {
+            "type": "string"
+          },
+          "requests": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "status": {
+            "type": "string"
+          },
+          "team": {
+            "type": "string"
+          },
+          "tokens": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "api_key_id",
+          "name",
+          "owner",
+          "team",
+          "status",
+          "requests",
+          "tokens",
+          "cost_krw",
+          "average_latency_ms",
+          "last_seen"
+        ],
+        "type": "object"
       }
     },
     "securitySchemes": {
@@ -707,7 +1587,7 @@
   "info": {
     "description": "OpenAI-compatible AI control-plane gateway. This document covers the full HTTP surface; request/response bodies are summarized — see the admin UI for live examples.",
     "title": "AI Proxy Gateway API",
-    "version": "v0.80.0"
+    "version": "v0.81.0"
   },
   "openapi": "3.0.3",
   "paths": {
@@ -4947,7 +5827,24 @@
         "operationId": "get__admin_ops_risk",
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpsRiskResponse"
+                }
+              }
+            },
             "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -4966,7 +5863,24 @@
         "operationId": "get__admin_ops_status",
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpsStatus"
+                }
+              }
+            },
             "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -7451,9 +8365,50 @@
     "/admin/routing/health": {
       "get": {
         "operationId": "get__admin_routing_health",
+        "parameters": [
+          {
+            "description": "Health lookback window. Supports 1h, 6h, 24h/1d, 7d, 30d, or a Go duration.",
+            "in": "query",
+            "name": "window",
+            "required": false,
+            "schema": {
+              "default": "15m",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Provider score below this value is degraded; the server clamps it to 0..100.",
+            "in": "query",
+            "name": "threshold",
+            "required": false,
+            "schema": {
+              "default": 70,
+              "maximum": 100,
+              "minimum": 0,
+              "type": "integer"
+            }
+          }
+        ],
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoutingHealthResponse"
+                }
+              }
+            },
             "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -8802,7 +9757,24 @@
         "operationId": "get__admin_stats",
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminStatsResponse"
+                }
+              }
+            },
             "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -11473,7 +12445,34 @@
         "operationId": "get__ready",
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadyResponse"
+                }
+              }
+            },
             "description": "OK"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadinessFailureResponse"
+                }
+              }
+            },
+            "description": "Database is not ready"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "summary": "Readiness probe",

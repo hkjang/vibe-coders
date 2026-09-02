@@ -1,6 +1,14 @@
 import { z } from "zod";
 
 import type {
+  GetAdminOpsRiskData,
+  GetAdminOpsRiskResponse,
+  GetAdminOpsStatusData,
+  GetAdminOpsStatusResponse,
+  GetAdminRoutingHealthData,
+  GetAdminRoutingHealthResponse,
+  GetAdminStatsData,
+  GetAdminStatsResponse,
   GetAdminUiBootstrapData,
   GetAdminUiBootstrapResponse,
   GetAuthKeycloakLoginData,
@@ -10,6 +18,8 @@ import type {
   GetAuthSsoStatusResponse,
   GetHealthData,
   GetHealthResponse,
+  GetReadyData,
+  GetReadyResponse,
   PostAuthKeycloakLogoutData,
   PostAuthKeycloakLogoutResponse,
   PostAuthLoginData,
@@ -23,20 +33,33 @@ import type {
 } from "@/shared/api/generated";
 import type { OpenApiMethod, OpenApiMethodFor, OpenApiPath } from "@/shared/api/generated/paths.gen";
 import {
+  adminStatsSchema,
   authMeSchema,
   gatewayHealthSchema,
   logoutResponseSchema,
+  opsRiskResponseSchema,
+  opsStatusSchema,
+  readinessFailureSchema,
+  readinessSchema,
+  routingHealthQuerySchema,
+  routingHealthSchema,
   ssoStatusSchema,
   tokenPairSchema,
   uiBootstrapSchema,
 } from "@/shared/api/schemas";
+import type { RoutingHealthQuery } from "@/shared/api/schemas";
 
 const endpointBrand: unique symbol = Symbol("api-endpoint");
 declare const operationData: unique symbol;
 
 interface OperationData {
   readonly url: OpenApiPath;
+  readonly query?: object;
 }
+
+type WithQuery<Data extends OperationData, Query extends object> = Omit<Data, "query"> & {
+  readonly query?: Query;
+};
 
 export interface ApiRoute<
   Data extends OperationData = OperationData,
@@ -54,12 +77,18 @@ export interface ApiEndpoint<
   Schema extends z.ZodType = z.ZodType,
 > extends ApiRoute<Data, Method> {
   readonly schema: Schema;
+  readonly querySchema?: z.ZodType<object>;
+  readonly errorSchemas?: ApiEndpointErrorSchemas;
 }
+
+export type ApiEndpointErrorSchemas = Readonly<Partial<Record<number, z.ZodType>>>;
 
 export interface ApiEndpointBase {
   readonly method: OpenApiMethod;
   readonly path: OpenApiPath;
   readonly schema: z.ZodType;
+  readonly querySchema?: z.ZodType<object>;
+  readonly errorSchemas?: ApiEndpointErrorSchemas;
   readonly [endpointBrand]: true;
 }
 
@@ -73,7 +102,16 @@ function operation<Data extends OperationData, Response>() {
     method: Method,
     path: Data["url"],
     schema: Schema,
-  ): ApiEndpoint<Data, Method, Schema> => ({ [endpointBrand]: true, method, path, schema });
+    querySchema?: z.ZodType<object>,
+    errorSchemas?: ApiEndpointErrorSchemas,
+  ): ApiEndpoint<Data, Method, Schema> => ({
+    [endpointBrand]: true,
+    method,
+    path,
+    schema,
+    ...(querySchema ? { querySchema } : {}),
+    ...(errorSchemas ? { errorSchemas } : {}),
+  });
 }
 
 function route<Data extends OperationData>() {
@@ -87,6 +125,9 @@ const statusResponseSchema = z.object({ status: z.string() }) satisfies z.ZodTyp
 
 export const endpoints = {
   health: operation<GetHealthData, GetHealthResponse>()("GET", "/health", gatewayHealthSchema),
+  ready: operation<GetReadyData, GetReadyResponse>()("GET", "/ready", readinessSchema, undefined, {
+    503: readinessFailureSchema,
+  }),
   auth: {
     login: operation<PostAuthLoginData, PostAuthLoginResponse>()("POST", "/auth/login", tokenPairSchema),
     logout: operation<PostAuthLogoutData, PostAuthLogoutResponse>()(
@@ -122,6 +163,27 @@ export const endpoints = {
     "/admin/ui-bootstrap",
     uiBootstrapSchema,
   ),
+  admin: {
+    stats: operation<GetAdminStatsData, GetAdminStatsResponse>()("GET", "/admin/stats", adminStatsSchema),
+    ops: {
+      status: operation<GetAdminOpsStatusData, GetAdminOpsStatusResponse>()(
+        "GET",
+        "/admin/ops/status",
+        opsStatusSchema,
+      ),
+      risk: operation<GetAdminOpsRiskData, GetAdminOpsRiskResponse>()(
+        "GET",
+        "/admin/ops/risk",
+        opsRiskResponseSchema,
+      ),
+    },
+    routing: {
+      health: operation<
+        WithQuery<GetAdminRoutingHealthData, RoutingHealthQuery>,
+        GetAdminRoutingHealthResponse
+      >()("GET", "/admin/routing/health", routingHealthSchema, routingHealthQuerySchema),
+    },
+  },
 } as const;
 
 type EndpointLeaves<Registry> = Registry extends ApiEndpointBase

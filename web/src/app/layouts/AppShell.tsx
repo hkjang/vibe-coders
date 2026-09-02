@@ -19,7 +19,7 @@ import {
   type ThemePreference,
 } from "@/shared/stores/preferences";
 
-const refreshValues = new Set([0, 15, 30, 60]);
+const refreshValues = new Set([0, 60, 300]);
 
 export function AppShell(): React.JSX.Element {
   const auth = useAuth();
@@ -44,6 +44,21 @@ export function AppShell(): React.JSX.Element {
     refetchInterval: refreshInterval ? refreshInterval * 1_000 : false,
     refetchIntervalInBackground: false,
   });
+  const healthLabel = health.isError
+    ? health.data
+      ? "Degraded"
+      : "Disconnected"
+    : health.data?.status === "ok"
+      ? "Healthy"
+      : "Checking";
+  const healthTone =
+    healthLabel === "Healthy"
+      ? "success"
+      : healthLabel === "Degraded"
+        ? "warning"
+        : healthLabel === "Disconnected"
+          ? "danger"
+          : "muted";
 
   useEffect(() => {
     const openPalette = (event: KeyboardEvent): void => {
@@ -101,9 +116,9 @@ export function AppShell(): React.JSX.Element {
           </button>
 
           <div className="header-controls">
-            <Badge tone={health.data?.status === "ok" ? "success" : health.isError ? "danger" : "muted"}>
+            <Badge tone={healthTone}>
               <span className="status-dot" aria-hidden="true" />
-              {health.data?.status === "ok" ? "Healthy" : health.isError ? "Disconnected" : "Checking"}
+              {healthLabel}
             </Badge>
             <label className="compact-select">
               <span className="sr-only">자동 새로고침 간격</span>
@@ -115,9 +130,8 @@ export function AppShell(): React.JSX.Element {
                 }}
               >
                 <option value={0}>자동 갱신 끔</option>
-                <option value={15}>15초</option>
-                <option value={30}>30초</option>
-                <option value={60}>60초</option>
+                <option value={60}>1분</option>
+                <option value={300}>5분</option>
               </select>
             </label>
             <details className="preference-menu">

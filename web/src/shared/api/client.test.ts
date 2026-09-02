@@ -178,6 +178,136 @@ describe("ApiClient", () => {
       retryable: true,
     });
   });
+
+  it("validates and preserves the typed readiness payload on 503 responses", async () => {
+    const client = new ApiClient({
+      fetch: vi.fn(async () =>
+        jsonResponse({ status: "not_ready", error: "database unavailable" }, 503, {
+          "X-Request-ID": "req-ready-503",
+        }),
+      ) as typeof fetch,
+    });
+
+    await expect(client.request(endpoints.ready, { retryUnauthorized: false })).rejects.toMatchObject({
+      kind: "http",
+      status: 503,
+      message: "database unavailable",
+      requestId: "req-ready-503",
+      retryable: true,
+      details: { status: "not_ready", error: "database unavailable" },
+    });
+  });
+
+  it("preserves a body request id before normalizing a typed readiness error", async () => {
+    const client = new ApiClient({
+      fetch: vi.fn(async () =>
+        jsonResponse(
+          {
+            status: "not_ready",
+            error: "database unavailable",
+            request_id: "req-ready-body",
+          },
+          503,
+        ),
+      ) as typeof fetch,
+    });
+
+    await expect(client.request(endpoints.ready, { retryUnauthorized: false })).rejects.toMatchObject({
+      requestId: "req-ready-body",
+      details: { status: "not_ready", error: "database unavailable" },
+    });
+  });
+
+  it("reports malformed typed error payloads as contract failures with diagnostics", async () => {
+    const responseBody = { status: "not_ready" };
+    const client = new ApiClient({
+      fetch: vi.fn(async () =>
+        jsonResponse(responseBody, 503, { "X-Request-ID": "req-ready-contract" }),
+      ) as typeof fetch,
+    });
+
+    await expect(client.request(endpoints.ready, { retryUnauthorized: false })).rejects.toMatchObject({
+      kind: "contract",
+      status: 503,
+      requestId: "req-ready-contract",
+      retryable: false,
+      details: {
+        responseBody,
+        validation: {
+          fieldErrors: { error: [expect.any(String)] },
+        },
+      },
+    });
+  });
+
+  it("serializes and validates endpoint-specific query parameters", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL): Promise<Response> => {
+      expect(String(input)).toBe("/admin/routing/health?window=1h&threshold=0");
+      return jsonResponse({
+        since: "2026-09-02T00:00:00Z",
+        until: "2026-09-02T01:00:00Z",
+        threshold: 0,
+        providers: [],
+        ranking: [],
+        degraded: [],
+        alerts: [],
+        trend: [],
+        breakers: {
+          enabled: true,
+          threshold: 5,
+          cooldown_seconds: 30,
+          states: [],
+          shared: false,
+          instance_id: "gateway-1",
+        },
+      });
+    });
+    const client = new ApiClient({ fetch: fetchMock as typeof fetch });
+
+    await expect(
+      client.request(endpoints.admin.routing.health, {
+        query: { window: "1h", threshold: 0 },
+      }),
+    ).resolves.toMatchObject({ threshold: 0 });
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("rejects invalid endpoint query values before calling fetch", async () => {
+    const fetchMock = vi.fn();
+    const client = new ApiClient({ fetch: fetchMock as typeof fetch });
+    const invalidQuery = { threshold: 101 } as unknown as {
+      threshold: 0;
+    };
+
+    await expect(
+      client.request(endpoints.admin.routing.health, { query: invalidQuery }),
+    ).rejects.toMatchObject({ kind: "contract" });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects query parameters on operations that do not declare them", async () => {
+    const fetchMock = vi.fn();
+    const client = new ApiClient({ fetch: fetchMock as typeof fetch });
+
+    await expect(
+      client.request(endpoints.health, { query: { window: "1h" } } as never),
+    ).rejects.toMatchObject({ kind: "contract" });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("reports response schema mismatches as contract errors with request ids", async () => {
+    const client = new ApiClient({
+      fetch: vi.fn(async () =>
+        jsonResponse({ total_requests: "not-a-number" }, 200, { "X-Request-ID": "req-contract" }),
+      ) as typeof fetch,
+    });
+
+    await expect(client.request(endpoints.admin.stats)).rejects.toMatchObject({
+      kind: "contract",
+      requestId: "req-contract",
+      status: 200,
+    });
+  });
 });
 
 function compileTimeOperationContracts(client: ApiClient): void {
@@ -196,6 +326,19 @@ function compileTimeOperationContracts(client: ApiClient): void {
 
   // @ts-expect-error GetHealthData does not accept a request body.
   void client.request(endpoints.health, { body: { unrelated: true } });
+
+  void client.request(endpoints.admin.routing.health, {
+    query: { window: "24h", threshold: 70 },
+  });
+
+  // @ts-expect-error Routing health only accepts its declared query keys.
+  void client.request(endpoints.admin.routing.health, { query: { provider: "openai" } });
+
+  // @ts-expect-error Routing health threshold must be numeric.
+  void client.request(endpoints.admin.routing.health, { query: { threshold: "70" } });
+
+  // @ts-expect-error Health has no query contract.
+  void client.request(endpoints.health, { query: { window: "1h" } });
 
   const forgedDelete = { ...endpoints.auth.login, method: "DELETE" as const };
   // @ts-expect-error ApiClient only accepts the registered POST operation descriptor.
