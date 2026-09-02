@@ -20,7 +20,45 @@ const (
 	oidcStateCookieName      = "vibe_oidc_state"
 	ssoExchangeCookieName    = "vibe_sso_exchange"
 	maxKeycloakJSONBodyBytes = int64(64 << 10)
+
+	keycloakCallbackErrorBrowserBinding  = "browser_binding_failed"
+	keycloakCallbackErrorState           = "invalid_or_expired_state"
+	keycloakCallbackErrorProvider        = "identity_provider_error"
+	keycloakCallbackErrorMissingCode     = "missing_authorization_code"
+	keycloakCallbackErrorDiscovery       = "discovery_failed"
+	keycloakCallbackErrorTokenExchange   = "token_exchange_failed"
+	keycloakCallbackErrorIDToken         = "id_token_verification_failed"
+	keycloakCallbackErrorProvisioning    = "user_provisioning_failed"
+	keycloakCallbackErrorExchangeEntropy = "session_exchange_generation_failed"
+	keycloakCallbackErrorExchangePersist = "session_exchange_initialization_failed"
+	keycloakCallbackErrorUnexpected      = "sso_callback_failed"
 )
+
+// stableKeycloakCallbackErrorCode is an exhaustive boundary between internal/IdP
+// failures and browser-visible redirects/audit records. In particular, callers must
+// never put an error's text in kc_error: HTTP client errors can contain configured
+// endpoint queries and token/provisioning errors can contain credentials or PII.
+func stableKeycloakCallbackErrorCode(code string) string {
+	switch code {
+	case keycloakCallbackErrorBrowserBinding,
+		keycloakCallbackErrorState,
+		keycloakCallbackErrorProvider,
+		keycloakCallbackErrorMissingCode,
+		keycloakCallbackErrorDiscovery,
+		keycloakCallbackErrorTokenExchange,
+		keycloakCallbackErrorIDToken,
+		keycloakCallbackErrorProvisioning,
+		keycloakCallbackErrorExchangeEntropy,
+		keycloakCallbackErrorExchangePersist,
+		"access_denied",
+		"interaction_required",
+		"login_required",
+		"temporarily_unavailable":
+		return code
+	default:
+		return keycloakCallbackErrorUnexpected
+	}
+}
 
 func decodeKeycloakJSONBody(w http.ResponseWriter, r *http.Request, out any, allowEmpty bool) error {
 	r.Body = http.MaxBytesReader(w, r.Body, maxKeycloakJSONBodyBytes)
@@ -182,9 +220,12 @@ func (s *Server) handleKeycloakCallback(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	returnTo := "/admin"
-	fail := func(reason string) {
-		s.auditAuthEvent(r.Context(), "sso_login_failed", "", "", "", "keycloak: "+reason)
-		http.Redirect(w, r, returnTo+"#kc_error="+url.QueryEscape(reason), http.StatusFound)
+	fail := func(code string) {
+		code = stableKeycloakCallbackErrorCode(code)
+		s.auditAuthEvent(r.Context(), "sso_login_failed", "", "", "", "keycloak code="+code)
+		fragment := url.Values{}
+		fragment.Set("kc_error", code)
+		http.Redirect(w, r, returnTo+"#"+fragment.Encode(), http.StatusFound)
 	}
 	state := r.URL.Query().Get("state")
 	stateCookie, cookieErr := r.Cookie(oidcStateCookieName)
@@ -192,12 +233,12 @@ func (s *Server) handleKeycloakCallback(w http.ResponseWriter, r *http.Request) 
 	// identity-provider error or malformed callback.
 	s.setTransientAuthCookie(w, oidcStateCookieName, "", "/auth/keycloak/callback", -1, http.SameSiteLaxMode)
 	if state == "" || cookieErr != nil || !secureTokenEqual(stateCookie.Value, state) {
-		fail("login browser binding check failed")
+		fail(keycloakCallbackErrorBrowserBinding)
 		return
 	}
 	fs, ok := s.takeOIDCFlow(r.Context(), state)
 	if !ok {
-		fail("invalid or expired state (CSRF check failed)")
+		fail(keycloakCallbackErrorState)
 		return
 	}
 	if target, valid := safeAuthReturnTo(fs.returnTo); valid {
@@ -210,45 +251,45 @@ func (s *Server) handleKeycloakCallback(w http.ResponseWriter, r *http.Request) 
 		case "access_denied", "interaction_required", "login_required", "temporarily_unavailable":
 			fail(providerError)
 		default:
-			fail("identity_provider_error")
+			fail(keycloakCallbackErrorProvider)
 		}
 		return
 	}
 	code := r.URL.Query().Get("code")
 	if code == "" {
-		fail("missing authorization code")
+		fail(keycloakCallbackErrorMissingCode)
 		return
 	}
 	disc, err := keycloakDiscover(r.Context(), kc.IssuerURL)
 	if err != nil {
-		fail("discovery failed")
+		fail(keycloakCallbackErrorDiscovery)
 		return
 	}
 	tok, err := s.keycloakExchangeCode(r.Context(), disc, code, fs.verifier)
 	if err != nil {
-		fail("token exchange failed: " + err.Error())
+		fail(keycloakCallbackErrorTokenExchange)
 		return
 	}
 	claims, err := s.verifyKeycloakIDToken(r.Context(), disc, tok.IDToken, fs.nonce)
 	if err != nil {
-		fail("id_token verification failed: " + err.Error())
+		fail(keycloakCallbackErrorIDToken)
 		return
 	}
 	user, team, err := s.provisionKeycloakUser(r.Context(), claims)
 	if err != nil {
-		fail(err.Error())
+		fail(keycloakCallbackErrorProvisioning)
 		return
 	}
 	exchangeCode, err := randomURLSafe(32)
 	if err != nil {
-		fail("secure session exchange generation failed")
+		fail(keycloakCallbackErrorExchangeEntropy)
 		return
 	}
 	if err := s.db.SaveOIDCLoginExchange(r.Context(), store.OIDCLoginExchange{
 		CodeHash: hashProxyKey(exchangeCode), UserID: user.ID, TeamID: team,
 		KeycloakSID: strClaim(claims, "sid"), CreatedAt: time.Now().UTC(),
 	}); err != nil {
-		fail("session exchange initialization failed")
+		fail(keycloakCallbackErrorExchangePersist)
 		return
 	}
 	s.setTransientAuthCookie(w, ssoExchangeCookieName, exchangeCode, "/auth/sso/exchange", 120, http.SameSiteStrictMode)
