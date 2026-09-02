@@ -1,5 +1,5 @@
 import { AlertTriangle, Clock3, RefreshCw, type LucideIcon } from "lucide-react";
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 import { exactTime, healthRanges, relativeTime, type HealthRange } from "@/features/health/health-utils";
 import { isAppError } from "@/shared/api/error";
@@ -12,6 +12,24 @@ const rangeLabels: Record<HealthRange, string> = {
   "7d": "7일",
   "30d": "30일",
 };
+
+const relativeClockIntervalMs = 30_000;
+
+function useRelativeClock(): void {
+  const [, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    const updateWhileVisible = (): void => {
+      if (document.visibilityState === "visible") setNow(Date.now());
+    };
+    const interval = window.setInterval(updateWhileVisible, relativeClockIntervalMs);
+    document.addEventListener("visibilitychange", updateWhileVisible);
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", updateWhileVisible);
+    };
+  }, []);
+}
 
 export function TimeRangePicker({
   value,
@@ -38,6 +56,7 @@ export function UpdatedTime({
   timestamp: number;
   label?: string;
 }): React.JSX.Element {
+  useRelativeClock();
   const exact = exactTime(timestamp);
   return (
     <time dateTime={new Date(timestamp).toISOString()} title={exact}>

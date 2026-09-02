@@ -1,11 +1,11 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Activity } from "lucide-react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import { describe, expect, it, vi } from "vitest";
 
 import { formatBytes, isHealthRange } from "@/features/health/health-utils";
-import { HealthWidget, TimeRangePicker } from "@/features/health/health-ui";
+import { HealthWidget, TimeRangePicker, UpdatedTime } from "@/features/health/health-ui";
 import { useHealthRange } from "@/features/health/use-health-range";
 import { AppError } from "@/shared/api/error";
 
@@ -68,6 +68,23 @@ describe("health UI primitives", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("마지막 정상 데이터를 표시합니다");
     expect(screen.getByRole("alert")).toHaveTextContent("Request ID: req-stale-7");
     expect(screen.getByText(/마지막 정상 갱신/)).toBeVisible();
+  });
+
+  it("updates a relative timestamp while the page remains open", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-02T09:00:00Z"));
+    const timestamp = Date.now();
+    const view = render(<UpdatedTime timestamp={timestamp} />);
+    const initialLabel = screen.getByText(/마지막 갱신/).textContent;
+
+    try {
+      act(() => vi.advanceTimersByTime(120_000));
+      expect(screen.getByText(/마지막 갱신/)).toHaveTextContent("2분 전");
+      expect(screen.getByText(/마지막 갱신/).textContent).not.toBe(initialLabel);
+    } finally {
+      view.unmount();
+      vi.useRealTimers();
+    }
   });
 
   it("validates ranges and formats binary byte units", () => {
