@@ -69,7 +69,7 @@ ui.app.feature.<feature-id>.readonly
 
 rollout bucket은 사용자 ID와 feature ID의 SHA-256 기반으로 계산하므로 새로고침이나 pod 변경 후에도 동일하다. Preview는 scope, 허용 역할, rollout을 모두 통과해야 한다. UI의 메뉴 숨김은 편의 기능일 뿐이며 모든 API는 기존 서버 권한 검사를 다시 수행한다.
 
-현재 React 제공 기능은 `overview`, `gateway.health`, `system.health`의 읽기 전용 Preview다. Provider, Model, Routing 변경, Observability, Governance, MCP, Text2SQL, FinOps, Security, Settings는 Legacy Bridge를 유지한다.
+현재 React 제공 기능은 `overview`, `gateway.health`, `system.health`, `gateway.providers`, `gateway.models`의 읽기 전용 Preview다. Provider·Model 조회는 `/admin/providers`, `/admin/models`와 기존 품질·가격·태그 API를 공통으로 사용하고, Loading·부분 실패·last-known-good·Request ID·재시도·Legacy Bridge를 제공한다. Provider·Model 변경, Routing 변경, Observability, Governance, MCP, Text2SQL, FinOps, Security, Settings는 Legacy Bridge를 유지한다.
 
 Phase 1의 자동 갱신 기본값은 OFF이며 사용자가 1분 또는 5분을 선택할 수 있다. 대규모 보존 데이터에서도 자동 갱신을 기본 활성화하려면 `/admin/stats`와 장기간 routing health에 서버 집계·캐시를 추가하고 성능 회귀 기준을 먼저 통과해야 한다.
 
@@ -98,7 +98,7 @@ Phase 1의 자동 갱신 기본값은 OFF이며 사용자가 1분 또는 5분을
 | Phase | 범위 | 현재 상태 |
 | --- | --- | --- |
 | 0 | route/embed, App Shell, API client, auth/RBAC, registry, Legacy Bridge, CI | 완료 (`v0.80.0`) |
-| 1 | Overview, health, request/trace/session, usage/cost, provider/model 조회 | 진행 중 (`v0.81.0`: Overview·Gateway Health·System Health 조회) |
+| 1 | Overview, health, request/trace/session, usage/cost, provider/model 조회 | 진행 중 (`v0.82.0`: Overview·Gateway Health·System Health·Provider·Model 읽기 전용 Preview) |
 | 2 | Provider/Model Tag/Alert/Saved Filter 등 저위험 변경 | 대기 |
 | 3 | 사용자·팀·API Key·Quota·MCP·App·Workflow·Skill | 대기 |
 | 4 | Routing·Policy·Settings·Text2SQL·DW retry | 대기 |
