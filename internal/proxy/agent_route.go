@@ -202,7 +202,7 @@ func (s *Server) handleAgentRouteChatWithRequestedModel(w http.ResponseWriter, r
 		meta.Request.RequestedModel = requestedModel
 	}
 	meta.Request.ResolvedModel = route.VirtualModel
-	meta.Request.Provider = boundedModelsProviderLabel(firstNonEmpty(route.Provider, "agent_route"))
+	meta.Request.Provider = firstNonEmpty(route.Provider, "agent_route")
 	meta.Request.RouteReason = "agent_route"
 	meta.Request.RouteDetail = route.VirtualModel
 

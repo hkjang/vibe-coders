@@ -142,7 +142,7 @@ type adminProviderModelsResult struct {
 // explicit. It never returns provider credentials or upstream error text.
 // GET /admin/models[?provider=<exact>&model=<exact>]
 func (s *Server) handleAdminModels(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Cache-Control", "no-store")
+	setVibeUIVariantHeaders(w)
 	if !s.authorizeAdmin(r) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return

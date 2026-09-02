@@ -266,6 +266,7 @@ func buildOpsRiskResponse(status OpsStatus) OpsRiskResponse {
 }
 
 func (s *Server) handleOpsRisk(w http.ResponseWriter, r *http.Request) {
+	setVibeUIVariantHeaders(w)
 	if !s.authorizeAdmin(r) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
@@ -283,6 +284,7 @@ func (s *Server) handleOpsRisk(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleOpsStatus(w http.ResponseWriter, r *http.Request) {
+	setVibeUIVariantHeaders(w)
 	if !s.authorizeAdmin(r) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return

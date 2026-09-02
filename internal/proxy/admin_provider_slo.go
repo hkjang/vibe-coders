@@ -31,6 +31,7 @@ type providerSLOEvaluation struct {
 // against them. GET /admin/providers/slo → {slos, evaluations}; POST upserts;
 // DELETE ?provider=name removes one.
 func (s *Server) handleProviderSLOs(w http.ResponseWriter, r *http.Request) {
+	setVibeUIVariantHeaders(w)
 	if !s.authorizeAdmin(r) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return

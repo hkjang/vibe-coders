@@ -131,6 +131,7 @@ func (s *Server) validateAgentRouteProvider(ctx context.Context, provider string
 // Admin CRUD for Agent Routes (operator-defined agentic virtual models).
 
 func (s *Server) handleAgentRoutes(w http.ResponseWriter, r *http.Request) {
+	setVibeUIVariantHeaders(w)
 	if !s.authorizeAdmin(r) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
@@ -277,6 +278,7 @@ func (s *Server) validateAgentRouteMCP(r *http.Request, a store.AgentRoute) erro
 }
 
 func (s *Server) handleAgentRouteByID(w http.ResponseWriter, r *http.Request) {
+	setVibeUIVariantHeaders(w)
 	if !s.authorizeAdmin(r) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return

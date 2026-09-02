@@ -3,7 +3,6 @@ package proxy
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
@@ -151,17 +150,13 @@ func TestLegacyUnsafeProviderMetadataIsBoundedOnSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	detail, err := db.RequestDetail(t.Context(), recent[0].ID)
-	if err != nil {
-		t.Fatal(err)
+	if recent[0].Provider != unsafeProvider {
+		t.Fatalf("internal provider identity was lost: request=%+v", recent[0])
 	}
-	detailJSON, _ := json.Marshal(detail)
-	persisted := recent[0].Provider + recent[0].FallbackFrom + string(detailJSON)
 	for _, decision := range decisions {
-		persisted += decision.SelectedProvider + decision.DecisionReason + strings.Join(decision.FallbackPath, ",")
-	}
-	if strings.Contains(persisted, unsafeProvider) || recent[0].Provider != boundedModelsProviderLabel(unsafeProvider) {
-		t.Fatalf("unsafe provider persisted in request/routing logs: request=%+v decisions=%+v", recent[0], decisions)
+		if decision.DecisionReason == unsafeProvider || strings.Contains(strings.Join(decision.FallbackPath, ","), unsafeProvider) {
+			t.Fatalf("provider leaked into descriptive routing metadata: %+v", decision)
+		}
 	}
 }
 
@@ -217,9 +212,8 @@ func TestLegacyUnsafeProviderTransportFailureIsStableAndSanitized(t *testing.T) 
 	if err != nil || len(recent) != 1 {
 		t.Fatalf("recent requests: %#v err=%v", recent, err)
 	}
-	persisted, _ := json.Marshal(recent[0])
-	if strings.Contains(string(persisted), unsafeProvider) || strings.Contains(string(persisted), urlSecret) {
-		t.Fatalf("transport error leaked to request log: %s", persisted)
+	if recent[0].Provider != unsafeProvider || strings.Contains(recent[0].Error+recent[0].FallbackReason+recent[0].RouteDetail, urlSecret) {
+		t.Fatalf("transport log lost identity or leaked URL error: %+v", recent[0])
 	}
 	select {
 	case notification := <-mattermostPayload:
@@ -279,9 +273,13 @@ func TestLegacyUnsafeProviderFailoverPathIsBounded(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	persisted, _ := json.Marshal(map[string]any{"request": recent[0], "decisions": decisions})
-	if strings.Contains(string(persisted), primaryName) || strings.Contains(string(persisted), backupName) {
-		t.Fatalf("unsafe failover metadata persisted: %s", persisted)
+	if recent[0].Provider != backupName {
+		t.Fatalf("served provider identity was lost: request=%+v", recent[0])
+	}
+	for _, decision := range decisions {
+		if decision.SelectedProvider != backupName || strings.Contains(decision.DecisionReason+strings.Join(decision.FallbackPath, ","), primaryName) || strings.Contains(decision.DecisionReason+strings.Join(decision.FallbackPath, ","), backupName) {
+			t.Fatalf("routing identity/metadata mismatch: %+v", decision)
+		}
 	}
 }
 

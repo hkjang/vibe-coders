@@ -137,7 +137,7 @@ func (s *Server) planIntelligentRouting(ctx context.Context, body []byte, endpoi
 }
 
 func (p intelligentRoutingPlan) toStore(requestID, traceID, provider string) *store.RoutingDecisionLog {
-	selectedProvider := boundedModelsProviderLabelOrEmpty(firstNonEmpty(provider, p.SelectedProvider))
+	selectedProvider := firstNonEmpty(provider, p.SelectedProvider)
 	decisionReason := p.DecisionReason
 	if rawProvider := strings.TrimSpace(p.SelectedProvider); rawProvider != "" && !modelsProviderLabelSafe(rawProvider) {
 		decisionReason = strings.ReplaceAll(decisionReason, rawProvider, boundedModelsProviderLabel(rawProvider))

@@ -159,6 +159,7 @@ func (s *Server) handleRoutingDecisionByID(w http.ResponseWriter, r *http.Reques
 }
 
 func (s *Server) handleRoutingHealth(w http.ResponseWriter, r *http.Request) {
+	setVibeUIVariantHeaders(w)
 	if !s.authorizeAdmin(r) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return

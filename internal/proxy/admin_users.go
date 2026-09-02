@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -568,7 +567,7 @@ func (s *Server) handleRequestAnalyze(w http.ResponseWriter, r *http.Request) {
 
 	provider, err := s.selectProvider(r.Context(), r, "")
 	if err != nil {
-		writeOpenAIError(w, http.StatusBadGateway, "select default provider failed: "+err.Error(), "server_error", "provider_selection_failed")
+		writeOpenAIError(w, http.StatusBadGateway, "provider is unavailable", "server_error", "provider_selection_failed")
 		return
 	}
 
@@ -589,19 +588,19 @@ func (s *Server) handleRequestAnalyze(w http.ResponseWriter, r *http.Request) {
 
 	payloadBytes, err := json.Marshal(requestPayload)
 	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "marshal_payload_failed")
+		writeOpenAIError(w, http.StatusInternalServerError, "analysis request encoding failed", "server_error", "marshal_payload_failed")
 		return
 	}
 
 	upstreamURL, err := s.upstreamURL(provider.BaseURL, &url.URL{Path: "/v1/chat/completions"})
 	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "build_upstream_url_failed")
+		writeOpenAIError(w, http.StatusInternalServerError, "upstream configuration is invalid", "server_error", "build_upstream_url_failed")
 		return
 	}
 
 	req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, upstreamURL, bytes.NewReader(payloadBytes))
 	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "create_request_failed")
+		writeOpenAIError(w, http.StatusInternalServerError, "upstream request is invalid", "server_error", "create_request_failed")
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
@@ -609,14 +608,18 @@ func (s *Server) handleRequestAnalyze(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := s.client.Do(req)
 	if err != nil {
-		writeOpenAIError(w, http.StatusBadGateway, "upstream call failed: "+err.Error(), "server_error", "upstream_failed")
+		status := statusForUpstreamError(err)
+		message, code := "upstream request failed", "upstream_failed"
+		if fallbackReasonForError(err) == "timeout" {
+			message, code = "upstream request timed out", "upstream_timeout"
+		}
+		writeOpenAIError(w, status, message, "server_error", code)
 		return
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		writeOpenAIError(w, http.StatusBadGateway, fmt.Sprintf("upstream returned status %d: %s", resp.StatusCode, string(bodyBytes)), "server_error", "upstream_error")
+		writeOpenAIError(w, http.StatusBadGateway, "upstream returned non-success status", "server_error", "upstream_error")
 		return
 	}
 
@@ -629,7 +632,7 @@ func (s *Server) handleRequestAnalyze(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(&openAIResp); err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, "decode upstream response failed: "+err.Error(), "server_error", "decode_failed")
+		writeOpenAIError(w, http.StatusInternalServerError, "upstream response decode failed", "server_error", "decode_failed")
 		return
 	}
 

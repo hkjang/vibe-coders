@@ -539,9 +539,8 @@ func (s *Server) recordSecretEvents(r *http.Request, requestID, action string, a
 
 func (s *Server) writeGovernanceOpenAIBlock(w http.ResponseWriter, meta *store.LogRecord, status int, typ, code, message string) {
 	meta.Request.StatusCode = status
-	meta.Request.Provider = boundedModelsProviderLabel(firstNonEmpty(meta.Request.Provider, "blocked"))
-	if meta.Routing != nil {
-		meta.Routing.SelectedProvider = boundedModelsProviderLabel(meta.Routing.SelectedProvider)
+	if meta.Request.Provider == "" {
+		meta.Request.Provider = "blocked"
 	}
 	meta.Request.Error = message
 	s.enqueue(*meta)
@@ -584,10 +583,11 @@ func (s *Server) governanceApprovalGate(r *http.Request, g governanceContext, re
 		}
 		return true, approval.ID, ""
 	}
+	publicReason := boundedProviderMetadataText(reason, g.Provider)
 	payload := auditJSON(map[string]any{
 		"endpoint":         g.Endpoint,
 		"model":            g.Model,
-		"provider":         g.Provider,
+		"provider":         boundedModelsProviderLabelOrEmpty(g.Provider),
 		"risk_score":       g.RiskScore,
 		"complexity_score": g.ComplexityScore,
 		"cost_krw":         g.CostKRW,
@@ -605,7 +605,7 @@ func (s *Server) governanceApprovalGate(r *http.Request, g governanceContext, re
 		SubjectType: g.SubjectType,
 		SubjectID:   g.SubjectID,
 		Status:      "pending",
-		Reason:      reason,
+		Reason:      publicReason,
 		RiskScore:   g.RiskScore,
 		CostKRW:     g.CostKRW,
 		Payload:     payload,
@@ -613,7 +613,7 @@ func (s *Server) governanceApprovalGate(r *http.Request, g governanceContext, re
 		CreatedAt:   now,
 	}
 	_ = s.db.InsertApproval(r.Context(), approval)
-	return false, approval.ID, "approval required: " + reason
+	return false, approval.ID, "approval required: " + publicReason
 }
 
 func (s *Server) enforceMCPToolGovernance(r *http.Request, apiKeyID string, authCtx *store.AuthContext, route mcpRoute, method, exposedName, toolName string, args json.RawMessage, id json.RawMessage) *rpcResponse {

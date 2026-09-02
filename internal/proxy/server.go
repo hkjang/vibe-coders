@@ -1153,7 +1153,7 @@ func (s *Server) handleAPIKeyByID(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleProviders(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Cache-Control", "no-store")
+	setVibeUIVariantHeaders(w)
 	if !s.authorizeAdmin(r) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
@@ -2586,6 +2586,21 @@ func copyDownstreamHeaders(dst http.Header, src http.Header) {
 			dst.Add(canonical, value)
 		}
 	}
+}
+
+// setVibeUIVariantHeaders protects endpoints whose legacy and React projections
+// intentionally differ. Even a misconfigured shared cache must neither reuse a
+// legacy response for the app nor retain either representation.
+func setVibeUIVariantHeaders(w http.ResponseWriter) {
+	w.Header().Set("Cache-Control", "no-store")
+	for _, value := range w.Header().Values("Vary") {
+		for _, field := range strings.Split(value, ",") {
+			if strings.EqualFold(strings.TrimSpace(field), "X-Vibe-UI") {
+				return
+			}
+		}
+	}
+	w.Header().Add("Vary", "X-Vibe-UI")
 }
 
 func gatewayOwnedRoutingHeader(key string) bool {

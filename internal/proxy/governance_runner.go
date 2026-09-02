@@ -26,11 +26,22 @@ type governanceRunResult struct {
 	Error            string  `json:"error,omitempty"`
 }
 
+const (
+	governanceRunErrRequestEncoding = "request_encoding_failed"
+	governanceRunErrProvider        = "provider_unavailable"
+	governanceRunErrUpstreamURL     = "upstream_configuration_invalid"
+	governanceRunErrRequestBuild    = "upstream_request_invalid"
+	governanceRunErrTransport       = "upstream_request_failed"
+	governanceRunErrTimeout         = "upstream_request_timeout"
+	governanceRunErrResponseRead    = "upstream_response_read_failed"
+	governanceRunErrStatus          = "upstream_non_success_status"
+)
+
 func (s *Server) runGovernanceChat(ctx context.Context, r *http.Request, model, prompt string) governanceRunResult {
 	result := governanceRunResult{Model: model}
 	body, err := replayBodyForModel(prompt, model)
 	if err != nil {
-		result.Error = err.Error()
+		result.Error = governanceRunErrRequestEncoding
 		return result
 	}
 	if expanded, _, _ := s.expandKnowledge(r, body); len(expanded) > 0 {
@@ -38,18 +49,18 @@ func (s *Server) runGovernanceChat(ctx context.Context, r *http.Request, model, 
 	}
 	provider, err := s.selectProvider(ctx, r, model)
 	if err != nil {
-		result.Error = err.Error()
+		result.Error = governanceRunErrProvider
 		return result
 	}
-	result.Provider = provider.Name
+	result.Provider = boundedModelsProviderLabelOrEmpty(provider.Name)
 	upstreamURL, err := s.upstreamURL(provider.BaseURL, &url.URL{Path: "/v1/chat/completions"})
 	if err != nil {
-		result.Error = err.Error()
+		result.Error = governanceRunErrUpstreamURL
 		return result
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, upstreamURL, bytes.NewReader(body))
 	if err != nil {
-		result.Error = err.Error()
+		result.Error = governanceRunErrRequestBuild
 		return result
 	}
 	req.Header.Set("Content-Type", "application/json")
@@ -60,7 +71,10 @@ func (s *Server) runGovernanceChat(ctx context.Context, r *http.Request, model, 
 	resp, err := s.client.Do(req)
 	result.LatencyMS = time.Since(start).Milliseconds()
 	if err != nil {
-		result.Error = err.Error()
+		result.Error = governanceRunErrTransport
+		if fallbackReasonForError(err) == "timeout" {
+			result.Error = governanceRunErrTimeout
+		}
 		return result
 	}
 	defer resp.Body.Close()
@@ -71,11 +85,14 @@ func (s *Server) runGovernanceChat(ctx context.Context, r *http.Request, model, 
 	}
 	raw, readErr := io.ReadAll(io.LimitReader(resp.Body, limit))
 	if readErr != nil {
-		result.Error = readErr.Error()
+		result.Error = governanceRunErrResponseRead
 		return result
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		result.Error = strings.TrimSpace(string(raw))
+		// Upstream error bodies are untrusted and commonly contain credentials or
+		// echoed request data. StatusCode carries the useful classification; never
+		// persist or return the raw body through replay/evaluation consumers.
+		result.Error = governanceRunErrStatus
 		return result
 	}
 

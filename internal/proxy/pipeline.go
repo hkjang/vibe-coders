@@ -562,7 +562,7 @@ func (rc *requestPipeline) stepUpstream() bool {
 		meta.Routing = routingPlan.toStore(meta.Request.ID, traceID, provider.Name)
 	}
 	if rc.modelsAggregateFallback {
-		meta.Request.Provider = boundedModelsProviderLabel(provider.Name)
+		meta.Request.Provider = provider.Name
 		meta.Request.RouteReason = "models_fallback"
 		meta.Request.RouteDetail = aggregatedModelsAuditDetail(rc.modelsAggregateResult)
 	}
@@ -573,11 +573,11 @@ func (rc *requestPipeline) stepUpstream() bool {
 			return false
 		}
 	}
-	// Provider names remain raw only while routing and governance need the configured
-	// identity. From this point onward request/routing logs and client metadata use a
-	// bounded label, including legacy rows created before validation existed.
+	// Keep the registry identity in request/routing storage so health and SLO aggregation
+	// can distinguish legacy providers that share the same public placeholder. Every
+	// response/header/notification boundary projects this raw key to a bounded label.
 	selectedProviderRaw := provider.Name
-	meta.Request.Provider = boundedModelsProviderLabel(provider.Name)
+	meta.Request.Provider = provider.Name
 	if routingPlan != nil {
 		routingPlan.SelectedProvider = meta.Request.Provider
 		meta.Routing = routingPlan.toStore(meta.Request.ID, traceID, meta.Request.Provider)
@@ -662,7 +662,7 @@ func (rc *requestPipeline) stepUpstream() bool {
 		s.metrics.ObserveLLMEvaluations(meta.Evaluations)
 		rc.recordSkillRun(rc.skillName, rc.skillVersion, "error", meta.Request.Model, 0, meta.Request.LatencyMS)
 		s.enqueue(meta)
-		s.notifyMattermost(r.Context(), "provider", "Provider 장애: "+meta.Request.Provider+" 요청 실패 ("+reason+")")
+		s.notifyMattermost(r.Context(), "provider", "Provider 장애: "+boundedModelsProviderLabel(meta.Request.Provider)+" 요청 실패 ("+reason+")")
 		message := "upstream request failed"
 		if reason == "timeout" {
 			message = "upstream request timed out"
@@ -675,19 +675,15 @@ func (rc *requestPipeline) stepUpstream() bool {
 		s.metrics.IncFailover()
 		meta.Request.Failover = true
 		if rc.modelsAggregateFallback {
-			meta.Request.FallbackFrom = boundedModelsProviderLabel(failoverFrom)
+			meta.Request.FallbackFrom = failoverFrom
 			meta.Request.FallbackReason = "models_fallback"
 		} else {
-			meta.Request.FallbackFrom = boundedModelsProviderLabel(failoverFrom)
+			meta.Request.FallbackFrom = failoverFrom
 			meta.Request.FallbackReason = failoverReason
 		}
 	}
 	if resolvedName != "" {
-		if rc.modelsAggregateFallback {
-			meta.Request.Provider = boundedModelsProviderLabel(resolvedName)
-		} else {
-			meta.Request.Provider = boundedModelsProviderLabel(resolvedName)
-		}
+		meta.Request.Provider = resolvedName
 	}
 	// A failover means the bound provider did not serve this turn. Move the binding to
 	// the one that did, otherwise every later turn would retry the bad node first.

@@ -149,6 +149,72 @@ func TestProviderSLOAppProjectionUsesOpaqueProviderRefsWithoutChangingLegacyShap
 	}
 }
 
+func TestProviderHealthAndSLOKeepDistinctLegacyUnsafeIdentities(t *testing.T) {
+	server, db, gateway := newAdminModelsTestServer(t, "")
+	providers := []string{"sk-ant-health-a-secret", "sk-ant-health-b-secret"}
+	now := time.Now().UTC()
+	for index, provider := range providers {
+		if err := db.UpsertProvider(t.Context(), store.ProviderConfig{Name: provider, BaseURL: "https://example.invalid", Enabled: true}); err != nil {
+			t.Fatal(err)
+		}
+		slo := store.ProviderSLO{Provider: provider, AvailabilityTarget: 0.99, Enabled: true}
+		if err := db.UpsertProviderSLO(t.Context(), &slo); err != nil {
+			t.Fatal(err)
+		}
+		status := http.StatusOK
+		if index == 0 {
+			status = http.StatusInternalServerError
+		}
+		if err := db.InsertLogRecord(t.Context(), store.LogRecord{Request: store.RequestLog{
+			ID: "req-unsafe-health-" + itoaProxy(index), TraceID: "trace-unsafe-health-" + itoaProxy(index),
+			Endpoint: "/v1/chat/completions", Model: "gpt-4o", Provider: provider,
+			StatusCode: status, LatencyMS: int64(100 + index), CreatedAt: now,
+		}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	health := providerAppRequest(t, http.MethodGet, gateway.URL+"/admin/routing/health?window=1h", nil)
+	healthBody, _ := io.ReadAll(health.Body)
+	health.Body.Close()
+	var healthPayload struct {
+		Providers []store.ProviderHealthScore `json:"providers"`
+	}
+	if health.StatusCode != http.StatusOK || json.Unmarshal(healthBody, &healthPayload) != nil || len(healthPayload.Providers) != 2 {
+		t.Fatalf("health response=%d %s", health.StatusCode, healthBody)
+	}
+	wantRefs := map[string]bool{server.providerRef(providers[0]): true, server.providerRef(providers[1]): true}
+	for _, score := range healthPayload.Providers {
+		if score.Provider != boundedModelsProviderLabel(providers[0]) || score.Requests != 1 || !wantRefs[score.ProviderRef] {
+			t.Fatalf("health provider identity collapsed: %+v", healthPayload.Providers)
+		}
+		delete(wantRefs, score.ProviderRef)
+	}
+	if len(wantRefs) != 0 {
+		t.Fatalf("health provider refs missing: %v", wantRefs)
+	}
+
+	sloResponse := providerAppRequest(t, http.MethodGet, gateway.URL+"/admin/providers/slo?window=1h", nil)
+	sloBody, _ := io.ReadAll(sloResponse.Body)
+	sloResponse.Body.Close()
+	var sloPayload struct {
+		Evaluations []providerSLOEvaluation `json:"evaluations"`
+	}
+	if sloResponse.StatusCode != http.StatusOK || json.Unmarshal(sloBody, &sloPayload) != nil || len(sloPayload.Evaluations) != 2 {
+		t.Fatalf("SLO response=%d %s", sloResponse.StatusCode, sloBody)
+	}
+	wantRefs = map[string]bool{server.providerRef(providers[0]): true, server.providerRef(providers[1]): true}
+	for _, evaluation := range sloPayload.Evaluations {
+		if evaluation.Provider != boundedModelsProviderLabel(providers[0]) || evaluation.Requests != 1 || !wantRefs[evaluation.ProviderRef] {
+			t.Fatalf("SLO provider identity collapsed: %+v", sloPayload.Evaluations)
+		}
+		delete(wantRefs, evaluation.ProviderRef)
+	}
+	if len(wantRefs) != 0 {
+		t.Fatalf("SLO provider refs missing: %v", wantRefs)
+	}
+}
+
 func TestProviderSLORejectsUnknownAndNewUnsafeProvider(t *testing.T) {
 	_, db, gateway := newAdminModelsTestServer(t, "")
 	unsafeProvider := "sk-ant-new-slo-secret"
