@@ -2,7 +2,7 @@ import { Search } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useLocation } from "react-router";
 
-import type { ModelStatusFilter } from "@/features/gateway/models/model-catalog";
+import type { ModelProviderOption, ModelStatusFilter } from "@/features/gateway/models/model-catalog";
 import type { HealthRange } from "@/features/health/health-utils";
 import { TimeRangePicker } from "@/features/health/health-ui";
 import { Button } from "@/shared/components/ui/Button";
@@ -22,7 +22,7 @@ const statusLabels: Record<ModelStatusFilter, string> = {
 interface ModelToolbarProps {
   onUpdate: (updates: Readonly<Record<string, string | undefined>>) => void;
   provider: string;
-  providers: readonly string[];
+  providers: readonly ModelProviderOption[];
   query: string;
   range: HealthRange;
   status: ModelStatusFilter;
@@ -109,9 +109,9 @@ export function ModelToolbar({
           }
         >
           <option value="">전체 Provider</option>
-          {providers.map((providerName) => (
-            <option key={providerName} value={providerName}>
-              {providerName}
+          {providers.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
             </option>
           ))}
         </select>

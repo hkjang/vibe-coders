@@ -7,6 +7,7 @@ import { modelStatusPresentation } from "@/features/gateway/models/model-present
 import { formatInteger, formatKRW, formatPercent } from "@/features/health/health-utils";
 import { UpdatedTime } from "@/features/health/health-ui";
 import { Badge } from "@/shared/components/ui/Badge";
+import { providerDisplayLabel } from "@/shared/api/provider-ref";
 import { createDataTableColumnHelper, type DataTableColumn } from "@/shared/data-table/columns";
 import { DataTable } from "@/shared/data-table/DataTable";
 
@@ -53,7 +54,7 @@ function createModelColumns(
         );
       },
     }),
-    column.accessor((row) => row.model.provider, {
+    column.accessor((row) => row.providerLabel, {
       id: "provider",
       header: "Provider",
       cell: ({ getValue, row }) => (
@@ -182,7 +183,7 @@ export function ModelTable({
               ? "조회 가능한 Model이 없습니다. Provider 연결과 Model route를 확인하세요."
               : "검색 및 필터 조건에 맞는 Model이 없습니다."
           }
-          getRowActionLabel={(row) => `${row.model.provider} ${row.model.id} Model 상세 열기`}
+          getRowActionLabel={(row) => `${row.providerLabel} ${row.model.id} Model 상세 열기`}
           getRowId={(row) => modelRowKey(row.model)}
           loading={loading}
           onPageChange={onPageChange}
@@ -199,7 +200,7 @@ export function ModelPartialFailureNotice({
   failures,
   requestId,
 }: {
-  failures: readonly { code: string; message: string; provider: string }[];
+  failures: readonly { code: string; message: string; provider: string; provider_ref: string }[];
   requestId: string;
 }): React.JSX.Element | null {
   if (failures.length === 0) return null;
@@ -210,8 +211,9 @@ export function ModelPartialFailureNotice({
         <strong>일부 Provider의 Model 목록을 갱신하지 못했습니다.</strong>
         <ul>
           {failures.map((failure) => (
-            <li key={`${failure.provider}-${failure.code}`}>
-              <strong>{failure.provider}</strong> · {failure.message} ({failure.code})
+            <li key={`${failure.provider_ref}-${failure.code}`}>
+              <strong>{providerDisplayLabel(failure.provider, failure.provider_ref)}</strong> ·{" "}
+              {failure.message} ({failure.code})
             </li>
           ))}
         </ul>

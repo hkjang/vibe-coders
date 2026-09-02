@@ -6,6 +6,10 @@ interface AxeRuntime {
   }>;
 }
 
+const openAIRef = `prv_${"a".repeat(43)}`;
+const agentRouteRef = `prv_${"b".repeat(43)}`;
+const anthropicRef = `prv_${"c".repeat(43)}`;
+
 const bootstrap = {
   backend_version: "v0.82.0",
   ui_version: "e2e-v0.82.0",
@@ -67,6 +71,7 @@ const baseModel = {
   object: "model",
   owned_by: "openai",
   provider: "openai",
+  provider_ref: openAIRef,
   shadowed: false,
   shadowed_by: "",
   source: "live",
@@ -78,7 +83,7 @@ const models = {
   generated_at: "2026-09-02T00:00:00Z",
   models: [
     baseModel,
-    { ...baseModel, source: "agent_route", virtual: true },
+    { ...baseModel, provider_ref: agentRouteRef, source: "agent_route", virtual: true },
     {
       ...baseModel,
       id: "gpt-shadowed",
@@ -91,6 +96,7 @@ const models = {
       code: "provider_models_unavailable",
       message: "Provider model catalogue is unavailable.",
       provider: "anthropic",
+      provider_ref: anthropicRef,
     },
   ],
   providers: [
@@ -98,6 +104,7 @@ const models = {
       fetched_at: "2026-09-02T00:00:00Z",
       model_count: 2,
       provider: "openai",
+      provider_ref: openAIRef,
       source: "live",
       stale: false,
       status: "ok",
@@ -106,6 +113,7 @@ const models = {
       fetched_at: "2026-09-02T00:00:00Z",
       model_count: 1,
       provider: "openai",
+      provider_ref: agentRouteRef,
       source: "agent_route",
       stale: false,
       status: "ok",
@@ -218,7 +226,7 @@ test("keeps an exact model deep link across reload, restores focus, retries deta
   await page.addInitScript({ path: "node_modules/axe-core/axe.min.js" });
   const tagRequestCount = await mockModelGateway(page);
   await page.goto(
-    "gateway/models?provider=openai&range=7d&model=shared-model&model_provider=openai&source=agent_route",
+    `gateway/models?provider=${agentRouteRef}&range=7d&model=shared-model&model_provider=${agentRouteRef}&source=agent_route`,
   );
 
   await expect(page.locator("h1", { hasText: "Models" })).toBeVisible();
@@ -227,7 +235,9 @@ test("keeps an exact model deep link across reload, restores focus, retries deta
   await expect(dialog.getByText("agent route", { exact: true })).toBeVisible();
   await expect(dialog.getByText("Virtual", { exact: true })).toBeVisible();
   await expect(page).toHaveURL(
-    /\/app\/gateway\/models\?provider=openai&range=7d&model=shared-model&model_provider=openai&source=agent_route$/,
+    new RegExp(
+      `/app/gateway/models\\?provider=${agentRouteRef}&range=7d&model=shared-model&model_provider=${agentRouteRef}&source=agent_route$`,
+    ),
   );
 
   await expect(dialog.getByText("Request ID: req-tags-e2e")).toBeVisible();
@@ -239,7 +249,9 @@ test("keeps an exact model deep link across reload, restores focus, retries deta
   await page.reload();
   dialog = page.getByRole("dialog", { name: "shared-model" });
   await expect(dialog.getByText("agent route", { exact: true })).toBeVisible();
-  await expect(page).toHaveURL(/model=shared-model&model_provider=openai&source=agent_route$/);
+  await expect(page).toHaveURL(
+    new RegExp(`model=shared-model&model_provider=${agentRouteRef}&source=agent_route$`),
+  );
   await expect(dialog.getByText("coding and analysis")).toBeVisible();
   await expect.poll(tagRequestCount).toBe(4);
   expect(await axeViolations(page)).toEqual([]);
@@ -290,7 +302,7 @@ test("requires an exact Provider and source for an ambiguous model deep link", a
 
   const dialog = page.getByRole("dialog", { name: "shared-model" });
   await expect(dialog.getByText("Provider와 source를 선택해 주세요.")).toBeVisible();
-  await dialog.getByRole("link", { name: "openai · agent route" }).click();
+  await dialog.getByRole("link", { name: /openai .* agent route/ }).click();
   await expect(dialog.getByText("Virtual", { exact: true })).toBeVisible();
-  await expect(page).toHaveURL(/model_provider=openai&source=agent_route/);
+  await expect(page).toHaveURL(new RegExp(`model_provider=${agentRouteRef}&source=agent_route`));
 });

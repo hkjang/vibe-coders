@@ -126,6 +126,7 @@ describe("OpenAPI runtime schemas", () => {
           object: "model",
           owned_by: "openai",
           provider: "openai",
+          provider_ref: `prv_${"a".repeat(43)}`,
           shadowed: true,
           shadowed_by: "agent-route-priority",
           source: "live",
@@ -139,6 +140,7 @@ describe("OpenAPI runtime schemas", () => {
           fetched_at: "2026-09-02T00:00:00Z",
           model_count: 1,
           provider: "openai",
+          provider_ref: `prv_${"a".repeat(43)}`,
           source: "live",
           stale: false,
           status: "ok",
@@ -147,6 +149,12 @@ describe("OpenAPI runtime schemas", () => {
       request_id: "req-models-1",
     };
     expect(adminModelsResponseSchema.safeParse(response).success).toBe(true);
+    expect(
+      adminModelsResponseSchema.safeParse({
+        ...response,
+        models: [{ ...response.models[0], provider_ref: "openai" }],
+      }).success,
+    ).toBe(false);
     expect(adminModelsResponseSchema.safeParse({ ...response, leaked_secret: "no" }).success).toBe(false);
     const model = response.models[0];
     if (!model) throw new Error("expected a Model fixture");

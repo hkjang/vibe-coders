@@ -6,6 +6,13 @@ interface AxeRuntime {
   }>;
 }
 
+const providerRef = (seed: string): string =>
+  `prv_${[...seed]
+    .map((character) => character.charCodeAt(0).toString(36))
+    .join("")
+    .padStart(43, "x")
+    .slice(-43)}`;
+
 async function axeViolations(page: Page): Promise<unknown[]> {
   return page.evaluate(async () => {
     const axe = (window as unknown as { axe: AxeRuntime }).axe;
@@ -23,6 +30,7 @@ const opsStatus = {
   providers: [
     {
       provider: "openai-primary",
+      provider_ref: providerRef("openai-primary"),
       score: 96,
       requests: 9_640,
       average_latency_ms: 712.4,
@@ -35,6 +43,7 @@ const opsStatus = {
     },
     {
       provider: "anthropic-fallback",
+      provider_ref: providerRef("anthropic-fallback"),
       score: 91,
       requests: 3_200,
       average_latency_ms: 884.2,
@@ -199,6 +208,7 @@ const providers = {
   providers: [
     {
       name: "openai-primary",
+      provider_ref: providerRef("openai-primary"),
       base_url: "https://openai.example/v1?api-version=2026-01-01",
       api_key_configured: true,
       timeout_ms: 30_000,
@@ -210,6 +220,7 @@ const providers = {
     },
     {
       name: "anthropic-fallback",
+      provider_ref: providerRef("anthropic-fallback"),
       base_url: "https://anthropic.example/v1",
       api_key_configured: true,
       timeout_ms: 30_000,
@@ -224,6 +235,7 @@ const providers = {
       const suffix = String(ordinal).padStart(2, "0");
       return {
         name: `provider-${suffix}`,
+        provider_ref: providerRef(`provider-${suffix}`),
         base_url: `https://provider-${suffix}.example/v1`,
         api_key_configured: true,
         timeout_ms: 15_000,
@@ -241,6 +253,7 @@ const providerSLO = {
   slos: [
     {
       provider: "openai-primary",
+      provider_ref: providerRef("openai-primary"),
       availability_target: 0.99,
       p95_latency_target_ms: 1_500,
       error_rate_target: 0.02,
@@ -253,6 +266,7 @@ const providerSLO = {
   evaluations: [
     {
       provider: "openai-primary",
+      provider_ref: providerRef("openai-primary"),
       requests: 9_640,
       enabled: true,
       breached: false,
@@ -337,6 +351,7 @@ const routingHealth = {
     {
       rank: 1,
       provider: "openai-primary",
+      provider_ref: providerRef("openai-primary"),
       score: 96,
       requests: 9_640,
       fallback_rate: 0.0039,
@@ -346,6 +361,7 @@ const routingHealth = {
     {
       rank: 2,
       provider: "anthropic-fallback",
+      provider_ref: providerRef("anthropic-fallback"),
       score: 91,
       requests: 3_200,
       fallback_rate: 0.0038,
@@ -369,6 +385,7 @@ const routingHealth = {
     states: [
       {
         provider: "openai-primary",
+        provider_ref: providerRef("openai-primary"),
         phase: "closed",
         failures: 0,
         opens: 1,
@@ -377,6 +394,7 @@ const routingHealth = {
       },
       {
         provider: "anthropic-fallback",
+        provider_ref: providerRef("anthropic-fallback"),
         phase: "closed",
         failures: 0,
         opens: 0,
@@ -550,12 +568,16 @@ test("restores Provider list filters, pagination, and a deep-linked dialog acros
   await expect(dialog.getByText("https://provider-11.example/v1")).toBeVisible();
   await expect.poll(() => routingWindows).toContain("7d");
   await expect(page).toHaveURL(
-    /\/app\/gateway\/providers\?q=example&status=enabled&range=7d&page=2&provider=provider-11$/,
+    new RegExp(
+      `/app/gateway/providers\\?q=example&status=enabled&range=7d&page=2&provider=${providerRef("provider-11")}$`,
+    ),
   );
 
   await page.reload();
   await expect(page).toHaveURL(
-    /\/app\/gateway\/providers\?q=example&status=enabled&range=7d&page=2&provider=provider-11$/,
+    new RegExp(
+      `/app/gateway/providers\\?q=example&status=enabled&range=7d&page=2&provider=${providerRef("provider-11")}$`,
+    ),
   );
   await expect(page.getByRole("dialog", { name: "provider-11" })).toBeVisible();
   await page.keyboard.press("Escape");
@@ -576,7 +598,7 @@ test("restores focus to the Provider row trigger after Escape", async ({ page })
   await expect(page.getByRole("dialog", { name: "openai-primary" })).toBeHidden();
   await expect
     .poll(() => page.evaluate(() => document.activeElement?.getAttribute("data-provider-trigger") ?? ""))
-    .toBe("openai-primary");
+    .toBe(providerRef("openai-primary"));
 });
 
 test("never fetches routing health for Provider without routing:read", async ({ page }) => {

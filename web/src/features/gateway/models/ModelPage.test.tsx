@@ -34,6 +34,13 @@ vi.mock("@/app/auth/AuthProvider", () => ({
   }),
 }));
 
+const providerRef = (seed: string): string =>
+  `prv_${[...seed]
+    .map((character) => character.charCodeAt(0).toString(36))
+    .join("")
+    .padEnd(43, "x")
+    .slice(0, 43)}`;
+
 const baseModel = {
   created: 1_700_000_000,
   deprecation: null,
@@ -42,6 +49,7 @@ const baseModel = {
   object: "model",
   owned_by: "openai",
   provider: "openai",
+  provider_ref: providerRef("openai"),
   shadowed: false,
   shadowed_by: "",
   source: "live",
@@ -52,6 +60,7 @@ const baseModel = {
 const openAIShared = {
   ...baseModel,
   id: "shared-model",
+  provider_ref: providerRef("agent-route-openai"),
   source: "agent_route",
   virtual: true,
 } satisfies AdminModel;
@@ -66,6 +75,7 @@ const anthropicShared = {
   id: "shared-model",
   owned_by: "anthropic",
   provider: "anthropic",
+  provider_ref: providerRef("anthropic"),
   stale: true,
 } satisfies AdminModel;
 
@@ -101,6 +111,7 @@ const modelResponse = {
       fetched_at: "2026-09-02T00:00:00Z",
       model_count: 4,
       provider: "openai",
+      provider_ref: providerRef("openai"),
       source: "live",
       stale: false,
       status: "ok",
@@ -109,6 +120,7 @@ const modelResponse = {
       fetched_at: "2026-09-02T00:00:00Z",
       model_count: 1,
       provider: "anthropic",
+      provider_ref: providerRef("anthropic"),
       source: "live",
       stale: true,
       status: "ok",
@@ -250,7 +262,7 @@ describe("ModelPage", () => {
   it("filters through URL state and requests all read-only enrichments with the selected range", async () => {
     const user = userEvent.setup();
     const request = mockApi();
-    renderPage("/gateway/models?q=shared&provider=anthropic&status=stale&range=7d");
+    renderPage(`/gateway/models?q=shared&provider=${providerRef("anthropic")}&status=stale&range=7d`);
 
     const link = await screen.findByRole("link", { name: "shared-model" });
     const table = screen.getByRole("table", { name: "Provider별 Model 상태, 품질과 가격" });
@@ -266,17 +278,17 @@ describe("ModelPage", () => {
 
     await user.selectOptions(screen.getByLabelText("상태"), "all");
     expect(screen.getByTestId("location")).toHaveTextContent(
-      "/gateway/models?q=shared&provider=anthropic&range=7d",
+      `/gateway/models?q=shared&provider=${providerRef("anthropic")}&range=7d`,
     );
   });
 
   it("keeps duplicate provider/model sources distinct and restores the exact trigger after Escape", async () => {
     const user = userEvent.setup();
     mockApi();
-    renderPage("/gateway/models?provider=openai");
+    renderPage();
 
     const links = await screen.findAllByRole("link", { name: "shared-model" });
-    expect(links).toHaveLength(2);
+    expect(links).toHaveLength(3);
     const agentRouteRow = links
       .map((link) => link.closest("tr"))
       .find((row) => row && within(row).queryAllByText("agent route").length > 0);
@@ -285,10 +297,11 @@ describe("ModelPage", () => {
     await user.click(trigger);
 
     const dialog = await screen.findByRole("dialog", { name: "shared-model" });
-    expect(within(dialog).getAllByText("openai").length).toBeGreaterThan(0);
+    expect(within(dialog).getAllByText(/openai/).length).toBeGreaterThan(0);
     expect(within(dialog).getByText("agent route")).toBeVisible();
-    expect(screen.getByTestId("location")).toHaveTextContent("provider=openai");
-    expect(screen.getByTestId("location")).toHaveTextContent("model_provider=openai");
+    expect(screen.getByTestId("location")).toHaveTextContent(
+      `model_provider=${providerRef("agent-route-openai")}`,
+    );
     expect(screen.getByTestId("location")).toHaveTextContent("model=shared-model");
     expect(screen.getByTestId("location")).toHaveTextContent("source=agent_route");
 
@@ -296,12 +309,73 @@ describe("ModelPage", () => {
     await waitFor(() =>
       expect(screen.queryByRole("dialog", { name: "shared-model" })).not.toBeInTheDocument(),
     );
-    expect(screen.getByTestId("location")).toHaveTextContent("/gateway/models?provider=openai");
+    expect(screen.getByTestId("location")).toHaveTextContent("/gateway/models");
     const restoredTrigger = screen
       .getAllByRole("link", { name: "shared-model" })
       .find((link) => link.dataset.modelTrigger?.includes("agent_route"));
     if (!restoredTrigger) throw new Error("restored agent-route trigger not found");
     await waitFor(() => expect(restoredTrigger).toHaveFocus());
+  });
+
+  it("deep-links, filters, and restores focus for duplicate masked Providers by provider_ref", async () => {
+    const user = userEvent.setup();
+    const firstRef = `prv_${"A".repeat(43)}`;
+    const secondRef = `prv_${"B".repeat(43)}`;
+    const maskedModel = {
+      ...baseModel,
+      id: "masked-shared",
+      owned_by: "[provider-name-omitted]",
+      provider: "[provider-name-omitted]",
+      provider_ref: firstRef,
+    } satisfies AdminModel;
+    mockApi({
+      models: {
+        generated_at: modelResponse.generated_at,
+        models: [maskedModel, { ...maskedModel, provider_ref: secondRef }],
+        partial_failures: [],
+        providers: [
+          {
+            model_count: 1,
+            provider: "[provider-name-omitted]",
+            provider_ref: firstRef,
+            source: "live",
+            stale: false,
+            status: "ok",
+          },
+          {
+            model_count: 1,
+            provider: "[provider-name-omitted]",
+            provider_ref: secondRef,
+            source: "live",
+            stale: false,
+            status: "ok",
+          },
+        ],
+        request_id: "req-masked-shared",
+      },
+    });
+    renderPage();
+
+    const table = await screen.findByRole("table", { name: "Provider별 Model 상태, 품질과 가격" });
+    const trigger = (await within(table).findAllByRole("link", { name: "masked-shared" })).find((link) =>
+      link.getAttribute("href")?.includes(secondRef),
+    );
+    if (!trigger) throw new Error("Second masked Provider row not found");
+    await user.click(trigger);
+
+    const dialog = await screen.findByRole("dialog", { name: "masked-shared" });
+    expect(within(dialog).getAllByText(/BBBBBBBB/).length).toBeGreaterThan(0);
+    expect(screen.getByTestId("location")).toHaveTextContent(`model_provider=${secondRef}`);
+    await user.keyboard("{Escape}");
+    const restoredTrigger = screen
+      .getAllByRole("link", { name: "masked-shared" })
+      .find((link) => link.dataset.modelTrigger?.includes(secondRef));
+    if (!restoredTrigger) throw new Error("Restored masked Provider trigger not found");
+    await waitFor(() => expect(restoredTrigger).toHaveFocus());
+
+    await user.selectOptions(screen.getByLabelText("Provider"), secondRef);
+    expect(within(table).getAllByRole("link", { name: "masked-shared" })).toHaveLength(1);
+    expect(screen.getByTestId("location")).toHaveTextContent(`provider=${secondRef}`);
   });
 
   it("asks for an exact Provider and source when a model deep link is ambiguous", async () => {
@@ -312,17 +386,19 @@ describe("ModelPage", () => {
     const dialog = await screen.findByRole("dialog", { name: "shared-model" });
     expect(await within(dialog).findByText("Provider와 source를 선택해 주세요.")).toBeVisible();
     expect(within(dialog).queryByText("Model을 찾을 수 없습니다.")).not.toBeInTheDocument();
-    await user.click(within(dialog).getByRole("link", { name: "openai · agent route" }));
+    await user.click(within(dialog).getByRole("link", { name: /openai .* agent route/ }));
 
     expect(await within(dialog).findByText("Virtual")).toBeVisible();
-    expect(screen.getByTestId("location")).toHaveTextContent("model_provider=openai");
+    expect(screen.getByTestId("location")).toHaveTextContent(
+      `model_provider=${providerRef("agent-route-openai")}`,
+    );
     expect(screen.getByTestId("location")).toHaveTextContent("source=agent_route");
   });
 
   it("shows the required shadow status and prioritizing Agent Route in the detail dialog", async () => {
     const user = userEvent.setup();
     mockApi({ models: { ...modelResponse, models: [...modelResponse.models, shadowedModel] } });
-    renderPage("/gateway/models?model_provider=openai&model=gpt-shadowed&source=live");
+    renderPage(`/gateway/models?model_provider=${providerRef("openai")}&model=gpt-shadowed&source=live`);
 
     const dialog = await screen.findByRole("dialog", { name: "gpt-shadowed" });
     expect(await within(dialog).findByText("Shadowed")).toBeVisible();
@@ -361,7 +437,7 @@ describe("ModelPage", () => {
         status: 503,
       }),
     });
-    renderPage("/gateway/models?provider=openai&model=gpt-5&source=live");
+    renderPage(`/gateway/models?provider=${providerRef("openai")}&model=gpt-5&source=live`);
 
     const dialog = await screen.findByRole("dialog", { name: "gpt-5" });
     expect(await within(dialog).findByText("Request ID: req-pricing-503")).toBeVisible();
@@ -423,7 +499,7 @@ describe("ModelPage", () => {
       if (endpoint.path === endpoints.admin.models.tags.path) return tagsResponse as never;
       throw new Error(`Unexpected endpoint: ${endpoint.path}`);
     });
-    renderPage("/gateway/models?provider=openai&model=gpt-5&source=live");
+    renderPage(`/gateway/models?provider=${providerRef("openai")}&model=gpt-5&source=live`);
 
     const dialog = await screen.findByRole("dialog", { name: "gpt-5" });
     expect(await within(dialog).findByText("91점")).toBeVisible();
@@ -473,7 +549,7 @@ describe("ModelPage", () => {
         retryable: true,
       }),
     });
-    renderPage("/gateway/models?provider=openai&model=gpt-5&source=live", client);
+    renderPage(`/gateway/models?provider=${providerRef("openai")}&model=gpt-5&source=live`, client);
 
     const dialog = await screen.findByRole("dialog", { name: "gpt-5" });
     expect(await within(dialog).findByText("Request ID: req-quality-lkg")).toBeVisible();
@@ -494,6 +570,7 @@ describe("ModelPage", () => {
             code: "provider_models_unavailable",
             message: "Provider model catalog is unavailable.",
             provider: "anthropic",
+            provider_ref: providerRef("anthropic"),
           },
         ],
         request_id: "req-partial-models",
@@ -516,12 +593,13 @@ describe("ModelPage", () => {
             code: "provider_models_unavailable",
             message: "Provider model catalog is unavailable.",
             provider: "anthropic",
+            provider_ref: providerRef("anthropic"),
           },
         ],
         request_id: "req-provider-partial",
       },
     });
-    renderPage("/gateway/models?model=claude-4&model_provider=anthropic&source=live");
+    renderPage(`/gateway/models?model=claude-4&model_provider=${providerRef("anthropic")}&source=live`);
 
     const dialog = await screen.findByRole("dialog", { name: "claude-4" });
     expect(await within(dialog).findByText("Provider Model 카탈로그를 확인할 수 없습니다.")).toBeVisible();
@@ -539,9 +617,10 @@ describe("ModelPage", () => {
         ...modelResponse,
         partial_failures: [
           {
-            code: "model_response_limit_exceeded",
+            code: "models_response_limit_exceeded",
             message: "Model response limit exceeded.",
             provider: "*",
+            provider_ref: providerRef("system-global"),
           },
         ],
         request_id: "req-global-partial",
@@ -551,7 +630,7 @@ describe("ModelPage", () => {
 
     const dialog = await screen.findByRole("dialog", { name: "not-in-truncated-response" });
     expect(await within(dialog).findByText("Provider Model 카탈로그를 확인할 수 없습니다.")).toBeVisible();
-    expect(within(dialog).getByText(/model_response_limit_exceeded/)).toBeVisible();
+    expect(within(dialog).getByText(/models_response_limit_exceeded/)).toBeVisible();
     expect(within(dialog).getByText("Request ID: req-global-partial")).toBeVisible();
     expect(within(dialog).queryByText("Model을 찾을 수 없습니다.")).not.toBeInTheDocument();
   });
@@ -565,12 +644,15 @@ describe("ModelPage", () => {
             code: "provider_models_stale",
             message: "Provider refresh failed.",
             provider: "anthropic",
+            provider_ref: providerRef("anthropic"),
           },
         ],
         request_id: "req-provider-stale",
       },
     });
-    renderPage("/gateway/models?model=shared-model&model_provider=anthropic&source=live&provider=anthropic");
+    renderPage(
+      `/gateway/models?model=shared-model&model_provider=${providerRef("anthropic")}&source=live&provider=${providerRef("anthropic")}`,
+    );
 
     const dialog = await screen.findByRole("dialog", { name: "shared-model" });
     expect(
@@ -599,6 +681,7 @@ describe("ModelPage", () => {
                     code: "provider_models_unavailable",
                     message: "Provider model catalog is unavailable.",
                     provider: "missing-provider",
+                    provider_ref: providerRef("missing-provider"),
                   },
                 ],
                 request_id: "req-retry-disabled",
@@ -611,7 +694,7 @@ describe("ModelPage", () => {
       if (endpoint.path === endpoints.admin.models.tags.path) return tagsResponse as never;
       throw new Error(`Unexpected endpoint: ${endpoint.path}`);
     });
-    renderPage("/gateway/models?model=missing&model_provider=missing-provider&source=live");
+    renderPage(`/gateway/models?model=missing&model_provider=${providerRef("missing-provider")}&source=live`);
 
     const dialog = await screen.findByRole("dialog", { name: "missing" });
     const retry = await within(dialog).findByRole("button", { name: "Model 카탈로그 상세 재시도" });
@@ -626,10 +709,12 @@ describe("ModelPage", () => {
   it("removes credential searches from deep links and rejects submitted secrets", async () => {
     const user = userEvent.setup();
     mockApi();
-    renderPage("/gateway/models?q=eyJheader.eyJpayload.signature&provider=openai");
+    renderPage(`/gateway/models?q=eyJheader.eyJpayload.signature&provider=${providerRef("openai")}`);
 
     const input = screen.getByRole("textbox", { name: "Model 검색" });
-    await waitFor(() => expect(screen.getByTestId("location")).toHaveTextContent("?provider=openai"));
+    await waitFor(() =>
+      expect(screen.getByTestId("location")).toHaveTextContent(`provider=${providerRef("openai")}`),
+    );
     expect(screen.getByTestId("location")).not.toHaveTextContent("eyJpayload");
     expect(screen.getByRole("alert")).toHaveTextContent("인증정보로 보이는 검색어");
     expect(input).toHaveFocus();
@@ -640,6 +725,18 @@ describe("ModelPage", () => {
     expect(input).toHaveFocus();
     expect(input).toHaveAttribute("aria-invalid", "true");
     expect(screen.getByTestId("location")).not.toHaveTextContent("private");
+  });
+
+  it("scrubs a secret-like legacy model_provider and renders a generic not-found state", async () => {
+    mockApi();
+    const unsafeProvider = "Bearer provider-private-value";
+    renderPage(`/gateway/models?model=missing-model&model_provider=${encodeURIComponent(unsafeProvider)}`);
+
+    const dialog = await screen.findByRole("dialog", { name: "missing-model" });
+    await waitFor(() => expect(screen.getByTestId("location")).not.toHaveTextContent("model_provider="));
+    expect(within(dialog).getByText("Model을 찾을 수 없습니다.")).toBeVisible();
+    expect(dialog).not.toHaveTextContent(unsafeProvider);
+    expect(screen.getByTestId("location")).not.toHaveTextContent("private-value");
   });
 
   it("shows last-known-good rows after catalogue refresh failure", async () => {
@@ -654,6 +751,7 @@ describe("ModelPage", () => {
             code: "provider_models_stale",
             message: "Cached provider failure.",
             provider: "anthropic",
+            provider_ref: providerRef("anthropic"),
           },
         ],
         request_id: "req-model-cached-response",
@@ -667,7 +765,10 @@ describe("ModelPage", () => {
         retryable: true,
       }),
     });
-    renderPage("/gateway/models?model=shared-model&model_provider=anthropic&source=live", client);
+    renderPage(
+      `/gateway/models?model=shared-model&model_provider=${providerRef("anthropic")}&source=live`,
+      client,
+    );
 
     const dialog = await screen.findByRole("dialog", { name: "shared-model" });
     expect(
@@ -696,7 +797,7 @@ describe("ModelPage", () => {
       if (endpoint.path === endpoints.admin.models.tags.path) return tagsResponse as never;
       throw new Error(`Unexpected endpoint: ${endpoint.path}`);
     });
-    renderPage("/gateway/models?model=gpt-5&model_provider=openai&source=live", client);
+    renderPage(`/gateway/models?model=gpt-5&model_provider=${providerRef("openai")}&source=live`, client);
 
     const dialog = await screen.findByRole("dialog", { name: "gpt-5" });
     expect(await within(dialog).findByText("Model 카탈로그 정보를 갱신하고 있습니다.")).toBeVisible();

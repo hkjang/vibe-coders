@@ -28,8 +28,16 @@ vi.mock("@/app/auth/AuthProvider", () => ({
   }),
 }));
 
+const providerRef = (seed: string): string =>
+  `prv_${[...seed]
+    .map((character) => character.charCodeAt(0).toString(36))
+    .join("")
+    .padEnd(43, "x")
+    .slice(0, 43)}`;
+
 const openAIProvider = {
   name: "openai",
+  provider_ref: providerRef("openai"),
   base_url: "https://api.openai.example/v1",
   api_key_configured: true,
   timeout_ms: 30_000,
@@ -43,6 +51,7 @@ const openAIProvider = {
 const anthropicProvider = {
   ...openAIProvider,
   name: "anthropic",
+  provider_ref: providerRef("anthropic"),
   base_url: "https://api.anthropic.example/v1",
   model_patterns: "claude-*",
   failover_group: "balanced",
@@ -52,6 +61,7 @@ const anthropicProvider = {
 const disabledProvider = {
   ...openAIProvider,
   name: "local-disabled",
+  provider_ref: providerRef("local-disabled"),
   base_url: "http://local-model:8080/v1",
   api_key_configured: false,
   enabled: false,
@@ -75,6 +85,7 @@ const sloResponse = {
   slos: [
     {
       provider: "openai",
+      provider_ref: providerRef("openai"),
       availability_target: 0.99,
       p95_latency_target_ms: 700,
       error_rate_target: 0.02,
@@ -85,6 +96,7 @@ const sloResponse = {
     },
     {
       provider: "anthropic",
+      provider_ref: providerRef("anthropic"),
       availability_target: 0.99,
       p95_latency_target_ms: 900,
       error_rate_target: 0.02,
@@ -97,6 +109,7 @@ const sloResponse = {
   evaluations: [
     {
       provider: "openai",
+      provider_ref: providerRef("openai"),
       requests: 120,
       enabled: true,
       breached: true,
@@ -109,6 +122,7 @@ const sloResponse = {
     },
     {
       provider: "anthropic",
+      provider_ref: providerRef("anthropic"),
       requests: 80,
       enabled: true,
       breached: false,
@@ -130,6 +144,7 @@ const routingHealth = {
   providers: [
     {
       provider: "openai",
+      provider_ref: providerRef("openai"),
       score: 62,
       requests: 120,
       average_latency_ms: 420,
@@ -142,6 +157,7 @@ const routingHealth = {
     },
     {
       provider: "anthropic",
+      provider_ref: providerRef("anthropic"),
       score: 94,
       requests: 80,
       average_latency_ms: 310,
@@ -157,6 +173,7 @@ const routingHealth = {
   degraded: [
     {
       provider: "openai",
+      provider_ref: providerRef("openai"),
       score: 62,
       requests: 120,
       average_latency_ms: 420,
@@ -487,7 +504,7 @@ describe("ProviderPage", () => {
     const trigger = await screen.findByRole("link", { name: "openai" });
     await user.click(trigger);
     expect(await screen.findByRole("dialog", { name: "openai" })).toBeVisible();
-    expect(screen.getByTestId("location")).toHaveTextContent("provider=openai");
+    expect(screen.getByTestId("location")).toHaveTextContent(`provider=${providerRef("openai")}`);
     expect(screen.getByText("production objective")).toBeVisible();
     expect(screen.getByText(/routing:read 권한이 없어/)).toBeVisible();
 
@@ -495,6 +512,28 @@ describe("ProviderPage", () => {
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "openai" })).not.toBeInTheDocument());
     expect(screen.getByTestId("location")).not.toHaveTextContent("provider=");
     await waitFor(() => expect(screen.getByRole("link", { name: "openai" })).toHaveFocus());
+  });
+
+  it("scrubs an unsafe legacy Provider identity without reflecting it", async () => {
+    mockApi();
+    const secretName = "sk-ant-provider-private-value";
+    renderPage(`/gateway/providers?provider=${secretName}`);
+
+    await waitFor(() => expect(screen.getByTestId("location")).not.toHaveTextContent("provider="));
+    expect(screen.getByTestId("location")).not.toHaveTextContent(secretName);
+    const dialog = await screen.findByRole("dialog", { name: "Provider 상세" });
+    expect(within(dialog).getByText("현재 목록에 요청한 Provider가 없습니다.")).toBeVisible();
+    expect(dialog).not.toHaveTextContent(secretName);
+  });
+
+  it("renders a generic not-found state for an unknown opaque Provider reference", async () => {
+    mockApi();
+    const unknownRef = providerRef("unknown-provider");
+    renderPage(`/gateway/providers?provider=${unknownRef}`);
+
+    const dialog = await screen.findByRole("dialog", { name: "Provider 상세" });
+    expect(await within(dialog).findByText("현재 목록에 요청한 Provider가 없습니다.")).toBeVisible();
+    expect(dialog).not.toHaveTextContent(unknownRef);
   });
 
   it("never exposes or misattributes distinct unsafe legacy provider names", async () => {
@@ -505,6 +544,7 @@ describe("ProviderPage", () => {
     const unsafeProviders = [firstName, secondName].map((name, index) => ({
       ...openAIProvider,
       name,
+      provider_ref: providerRef(name),
       base_url: "https://legacy.example/v1",
       model_patterns: "legacy-*",
       priority: 30 + index,
@@ -518,23 +558,34 @@ describe("ProviderPage", () => {
     const redactedScore = {
       ...baseScore,
       provider: "[provider-name-omitted]",
+      provider_ref: providerRef(firstName),
     };
     mockApi({
       providerData: { providers: unsafeProviders },
       routingData: {
         ...routingHealth,
-        providers: [redactedScore, { ...redactedScore }],
-        degraded: [redactedScore, { ...redactedScore }],
+        providers: [redactedScore, { ...redactedScore, provider_ref: providerRef(secondName) }],
+        degraded: [redactedScore],
       },
       sloData: {
         ...sloResponse,
         slos: [
-          { ...firstSlo, provider: firstName },
-          { ...secondSlo, provider: secondName },
+          { ...firstSlo, provider: "[provider-name-omitted]", provider_ref: providerRef(firstName) },
+          { ...secondSlo, provider: "[provider-name-omitted]", provider_ref: providerRef(secondName) },
         ],
         evaluations: [
-          { ...firstEvaluation, provider: firstName, breached: true },
-          { ...secondEvaluation, provider: secondName, breached: true },
+          {
+            ...firstEvaluation,
+            provider: "[provider-name-omitted]",
+            provider_ref: providerRef(firstName),
+            breached: true,
+          },
+          {
+            ...secondEvaluation,
+            provider: "[provider-name-omitted]",
+            provider_ref: providerRef(secondName),
+            breached: false,
+          },
         ],
       },
     });
@@ -544,11 +595,12 @@ describe("ProviderPage", () => {
     const redactedLinks = await within(table).findAllByRole("link", { name: /Provider 이름 비공개/ });
     expect(redactedLinks).toHaveLength(2);
     expect(new Set(redactedLinks.map((link) => link.textContent)).size).toBe(2);
-    expect(within(table).getAllByText("Unknown")).toHaveLength(2);
+    expect(within(table).getByText("Degraded")).toBeVisible();
+    expect(within(table).getByText("Healthy")).toBeVisible();
     expect(container.outerHTML).not.toContain(firstName);
     expect(container.outerHTML).not.toContain(secondName);
     for (const link of redactedLinks) {
-      expect(link.getAttribute("href")).toContain("provider=redacted-provider-");
+      expect(link.getAttribute("href")).toMatch(/provider=prv_[A-Za-z0-9_-]{43}/);
       expect(link.getAttribute("href")).not.toContain("private-value");
     }
 
@@ -556,9 +608,9 @@ describe("ProviderPage", () => {
     if (!firstRedactedLink) throw new Error("Expected a redacted Provider link");
     await user.click(firstRedactedLink);
     const dialog = await screen.findByRole("dialog", { name: /Provider 이름 비공개/ });
-    expect(within(dialog).getByText(/운영 상태 연결을 생략했습니다/)).toBeVisible();
-    expect(within(dialog).getByText("이름 보호를 위해 SLO 연결을 생략했습니다.")).toBeVisible();
-    expect(within(dialog).getByText("이름 보호를 위해 라우팅 상태 연결을 생략했습니다.")).toBeVisible();
+    expect(within(dialog).getByText(/안전한 Provider 참조를 기준으로 연결/)).toBeVisible();
+    expect(within(dialog).getByText("production objective")).toBeVisible();
+    expect(within(dialog).getByText("62점")).toBeVisible();
     expect(within(dialog).queryByText(/SLO가 설정되지 않았습니다/)).not.toBeInTheDocument();
     expect(within(dialog).queryByText(/라우팅 상태 데이터가 없습니다/)).not.toBeInTheDocument();
     expect(dialog.outerHTML).not.toContain(firstName);
@@ -574,11 +626,15 @@ describe("ProviderPage", () => {
 
   it("paginates client-side while preserving the page in the URL", async () => {
     const user = userEvent.setup();
-    const manyProviders = Array.from({ length: 11 }, (_, index) => ({
-      ...openAIProvider,
-      name: `provider-${String(index + 1).padStart(2, "0")}`,
-      priority: 100,
-    }));
+    const manyProviders = Array.from({ length: 11 }, (_, index) => {
+      const name = `provider-${String(index + 1).padStart(2, "0")}`;
+      return {
+        ...openAIProvider,
+        name,
+        provider_ref: providerRef(name),
+        priority: 100,
+      };
+    });
     vi.spyOn(apiClient, "request").mockImplementation(async (endpoint) => {
       if (endpoint.path === endpoints.admin.providers.list.path) {
         return { providers: manyProviders } as never;

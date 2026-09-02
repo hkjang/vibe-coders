@@ -1,6 +1,7 @@
 import { AlertTriangle, RefreshCw } from "lucide-react";
 
 import type { AdminModelPartialFailure } from "@/shared/api/schemas";
+import { providerDisplayLabel } from "@/shared/api/provider-ref";
 import { Button } from "@/shared/components/ui/Button";
 
 interface ModelCatalogueFailureProps {
@@ -30,8 +31,8 @@ export function ModelCatalogueFailure({
         </strong>
         <ul>
           {failures.map((failure) => (
-            <li key={`${failure.provider}-${failure.code}`}>
-              {failure.provider ? `${failure.provider} · ` : ""}
+            <li key={`${failure.provider_ref}-${failure.code}`}>
+              {failure.provider ? `${providerDisplayLabel(failure.provider, failure.provider_ref)} · ` : ""}
               {failure.message} ({failure.code})
             </li>
           ))}

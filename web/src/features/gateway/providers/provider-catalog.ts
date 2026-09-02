@@ -1,4 +1,5 @@
 import type { Provider, ProviderSLO, ProviderSLOEvaluation, RoutingHealth } from "@/shared/api/schemas";
+import { isProviderRef, isSafeLegacyProviderName, providerDisplayLabels } from "@/shared/api/provider-ref";
 import { containsPotentialSecret, isSensitiveCredentialKey } from "@/shared/security/secrets";
 
 export const providerStatusFilters = [
@@ -22,56 +23,6 @@ export interface ProviderCatalogRow {
   routing?: RoutingHealth["providers"][number];
   slo?: ProviderSLO;
   evaluation?: ProviderSLOEvaluation;
-}
-
-const redactedRoutingProviderName = "[provider-name-omitted]";
-const redactedProviderIdentities = new WeakMap<Provider, string>();
-let fallbackIdentitySequence = 0;
-
-function providerNameSafe(name: string): boolean {
-  if (
-    name === "" ||
-    name === redactedRoutingProviderName ||
-    name.trim() !== name ||
-    name.includes(",") ||
-    [...name].some((character) => {
-      const code = character.charCodeAt(0);
-      return code <= 31 || (code >= 127 && code <= 159);
-    }) ||
-    containsPotentialSecret(name)
-  ) {
-    return false;
-  }
-  return name.length <= 256 && new TextEncoder().encode(name).byteLength <= 256;
-}
-
-function randomIdentitySuffix(): string {
-  if (globalThis.crypto?.getRandomValues) {
-    const values = new Uint32Array(4);
-    globalThis.crypto.getRandomValues(values);
-    return [...values].map((value) => value.toString(16).padStart(8, "0")).join("");
-  }
-  fallbackIdentitySequence += 1;
-  return `${Date.now().toString(36)}-${fallbackIdentitySequence.toString(36)}`;
-}
-
-const redactedProviderSession = randomIdentitySuffix();
-let redactedProviderSequence = 0;
-
-function redactedProviderIdentity(provider: Provider, occupied: Set<string>): string {
-  const current = redactedProviderIdentities.get(provider);
-  if (current && !occupied.has(current)) {
-    occupied.add(current);
-    return current;
-  }
-  let identity: string;
-  do {
-    redactedProviderSequence += 1;
-    identity = `redacted-provider-${redactedProviderSession}-${redactedProviderSequence.toString(36)}`;
-  } while (occupied.has(identity));
-  redactedProviderIdentities.set(provider, identity);
-  occupied.add(identity);
-  return identity;
 }
 
 export function isProviderStatusFilter(value: string | null): value is ProviderStatusFilter {
@@ -121,33 +72,38 @@ export function buildProviderRows(
   routing?: RoutingHealth,
   healthPending = false,
 ): ProviderCatalogRow[] {
-  const sloByProvider = new Map(slos.map((slo) => [slo.provider, slo]));
-  const evaluationByProvider = new Map(evaluations.map((evaluation) => [evaluation.provider, evaluation]));
-  const routingByProvider = new Map(routing?.providers.map((health) => [health.provider, health]) ?? []);
-  const degradedProviders = new Set(routing?.degraded.map((health) => health.provider) ?? []);
-  const occupiedIdentities = new Set(
-    providers.filter((provider) => providerNameSafe(provider.name)).map((provider) => provider.name),
+  const sloByProvider = new Map(
+    slos.filter((item) => isProviderRef(item.provider_ref)).map((item) => [item.provider_ref, item]),
   );
-  const occupiedDisplayNames = new Set(occupiedIdentities);
-  let redactedDisplaySequence = 0;
+  const evaluationByProvider = new Map(
+    evaluations.filter((item) => isProviderRef(item.provider_ref)).map((item) => [item.provider_ref, item]),
+  );
+  const routingByProvider = new Map(
+    routing?.providers
+      .filter((item) => isProviderRef(item.provider_ref))
+      .map((item) => [item.provider_ref, item]) ?? [],
+  );
+  const degradedProviders = new Set(
+    routing?.degraded.filter((item) => isProviderRef(item.provider_ref)).map((item) => item.provider_ref) ??
+      [],
+  );
+  const validProviders = providers.filter((provider): provider is Provider & { provider_ref: string } =>
+    isProviderRef(provider.provider_ref),
+  );
+  const displayLabels = providerDisplayLabels(
+    validProviders.map((provider) => ({ name: provider.name, providerRef: provider.provider_ref })),
+  );
 
-  return providers.map((provider) => {
-    const nameRedacted = !providerNameSafe(provider.name);
-    const identity = nameRedacted ? redactedProviderIdentity(provider, occupiedIdentities) : provider.name;
-    let displayName = provider.name;
-    if (nameRedacted) {
-      do {
-        redactedDisplaySequence += 1;
-        displayName = `Provider 이름 비공개 ${redactedDisplaySequence}`;
-      } while (occupiedDisplayNames.has(displayName));
-      occupiedDisplayNames.add(displayName);
-    }
-    const evaluation = nameRedacted ? undefined : evaluationByProvider.get(provider.name);
-    const routingHealth = nameRedacted ? undefined : routingByProvider.get(provider.name);
+  return validProviders.map((provider) => {
+    const nameRedacted = !isSafeLegacyProviderName(provider.name);
+    const displayName = displayLabels.get(provider.provider_ref) ?? "Provider 확인 불가";
+    const evaluation = evaluationByProvider.get(provider.provider_ref);
+    const providerSlo = sloByProvider.get(provider.provider_ref);
+    const routingHealth = routingByProvider.get(provider.provider_ref);
     let health: ProviderHealthState = provider.enabled && healthPending ? "checking" : "unknown";
     if (provider.enabled) {
       if (healthPending) health = "checking";
-      else if (routingHealth) health = degradedProviders.has(provider.name) ? "degraded" : "healthy";
+      else if (routingHealth) health = degradedProviders.has(provider.provider_ref) ? "degraded" : "healthy";
       else if (evaluation?.enabled && evaluation.requests > 0) {
         health = evaluation.breached ? "degraded" : "healthy";
       }
@@ -156,11 +112,11 @@ export function buildProviderRows(
       displayName,
       provider: nameRedacted ? { ...provider, name: displayName } : provider,
       health,
-      identity,
+      identity: provider.provider_ref,
       nameRedacted,
-      routing: routingHealth,
-      slo: nameRedacted ? undefined : sloByProvider.get(provider.name),
-      evaluation,
+      routing: routingHealth ? { ...routingHealth, provider: displayName } : undefined,
+      slo: providerSlo ? { ...providerSlo, provider: displayName } : undefined,
+      evaluation: evaluation ? { ...evaluation, provider: displayName } : undefined,
     };
   });
 }

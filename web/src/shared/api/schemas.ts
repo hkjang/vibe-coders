@@ -28,6 +28,7 @@ import type {
   SsoStatusResponse as GeneratedSsoStatusResponse,
   UiBootstrapResponse as GeneratedUiBootstrapResponse,
 } from "@/shared/api/generated";
+import { providerRefPattern } from "@/shared/api/provider-ref";
 
 export const authUserSchema = z.object({
   id: z.string(),
@@ -164,6 +165,7 @@ const countSchema = z.number().int().nonnegative();
 const measurementSchema = z.number().nonnegative();
 const percentageSchema = z.number().min(0).max(100);
 const timestampSchema = z.string().datetime({ offset: true });
+export const providerRefSchema = z.string().regex(providerRefPattern);
 
 export const latencyQuantilesSchema = z.object({
   p50: countSchema,
@@ -236,6 +238,7 @@ export const adminStatsSchema = z.object({
 
 export const providerHealthScoreSchema = z.object({
   provider: z.string(),
+  provider_ref: providerRefSchema.optional(),
   score: z.number().int().min(0).max(100),
   requests: countSchema,
   average_latency_ms: measurementSchema,
@@ -326,6 +329,7 @@ export const routingHealthSchema = z.object({
     z.object({
       rank: z.number().int().positive(),
       provider: z.string(),
+      provider_ref: providerRefSchema.optional(),
       score: z.number().int().min(0).max(100),
       requests: countSchema,
       fallback_rate: z.number().min(0).max(1),
@@ -337,6 +341,7 @@ export const routingHealthSchema = z.object({
   alerts: z.array(
     z.object({
       provider: z.string(),
+      provider_ref: providerRefSchema.optional(),
       code: z.string(),
       severity: z.enum(["info", "warning", "critical"]),
       message: z.string(),
@@ -356,6 +361,7 @@ export const routingHealthSchema = z.object({
     states: z.array(
       z.object({
         provider: z.string(),
+        provider_ref: providerRefSchema.optional(),
         phase: z.enum(["closed", "open", "half_open"]),
         failures: countSchema,
         opens: countSchema,
@@ -372,6 +378,7 @@ export const routingHealthSchema = z.object({
 
 export const providerSchema = z.object({
   name: z.string().min(1),
+  provider_ref: providerRefSchema.optional(),
   base_url: z.string().min(1),
   api_key_configured: z.boolean(),
   timeout_ms: countSchema,
@@ -395,6 +402,7 @@ export const providerSLOMetricSchema = z.object({
 
 export const providerSLOSchema = z.object({
   provider: z.string().min(1),
+  provider_ref: providerRefSchema.optional(),
   availability_target: z.number().nonnegative(),
   p95_latency_target_ms: countSchema,
   error_rate_target: z.number().nonnegative(),
@@ -406,6 +414,7 @@ export const providerSLOSchema = z.object({
 
 export const providerSLOEvaluationSchema = z.object({
   provider: z.string().min(1),
+  provider_ref: providerRefSchema.optional(),
   requests: countSchema,
   enabled: z.boolean(),
   breached: z.boolean(),
@@ -451,6 +460,7 @@ export const adminModelSchema = z
     object: z.string(),
     owned_by: z.string(),
     provider: z.string().min(1),
+    provider_ref: providerRefSchema,
     source: z.enum(["live", "cache", "agent_route"]),
     stale: z.boolean(),
     virtual: z.boolean(),
@@ -464,6 +474,7 @@ export const adminModelProviderSchema = z
     fetched_at: timestampSchema.optional(),
     model_count: countSchema,
     provider: z.string().min(1),
+    provider_ref: providerRefSchema,
     source: z.enum(["live", "cache", "agent_route"]),
     stale: z.boolean(),
     status: z.enum(["ok", "failed", "skipped"]),
@@ -475,6 +486,7 @@ export const adminModelPartialFailureSchema = z
     code: z.string().min(1),
     message: z.string().min(1),
     provider: z.string().min(1),
+    provider_ref: providerRefSchema,
   })
   .strict() satisfies z.ZodType<GeneratedAdminModelPartialFailure>;
 

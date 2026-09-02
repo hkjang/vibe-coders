@@ -9,8 +9,16 @@ import {
 } from "@/features/gateway/providers/provider-catalog";
 import type { Provider, ProviderSLO, ProviderSLOEvaluation, RoutingHealth } from "@/shared/api/schemas";
 
+const providerRef = (seed: string): string =>
+  `prv_${[...seed]
+    .map((character) => character.charCodeAt(0).toString(36))
+    .join("")
+    .padEnd(43, "x")
+    .slice(0, 43)}`;
+
 const provider = (name: string, enabled = true): Provider => ({
   name,
+  provider_ref: providerRef(name),
   base_url: `https://${name}.example/v1`,
   api_key_configured: true,
   timeout_ms: 15_000,
@@ -23,6 +31,7 @@ const provider = (name: string, enabled = true): Provider => ({
 
 const evaluation = (providerName: string, breached: boolean): ProviderSLOEvaluation => ({
   provider: providerName,
+  provider_ref: providerRef(providerName),
   requests: 10,
   enabled: true,
   breached,
@@ -36,6 +45,7 @@ const evaluation = (providerName: string, breached: boolean): ProviderSLOEvaluat
 
 const slo = (providerName: string): ProviderSLO => ({
   provider: providerName,
+  provider_ref: providerRef(providerName),
   availability_target: 0.99,
   p95_latency_target_ms: 500,
   error_rate_target: 0.01,
@@ -48,6 +58,7 @@ const slo = (providerName: string): ProviderSLO => ({
 function routingHealth(providerName: string): RoutingHealth {
   const score = {
     provider: providerName,
+    provider_ref: providerRef(providerName),
     score: 20,
     requests: 10,
     average_latency_ms: 400,
@@ -115,34 +126,61 @@ describe("provider catalog", () => {
     expect(filterProviderRows(rows, "primary", "disabled").map((row) => row.provider.name)).toEqual(["Beta"]);
   });
 
-  it("projects unsafe legacy names to distinct opaque identities without assigning redacted health", () => {
+  it("fails closed when a Provider or enrichment has no valid opaque reference", () => {
+    const missingRef = { ...provider("missing"), provider_ref: undefined };
+    const valid = provider("valid");
+    const wrongRefEvaluation = { ...evaluation("valid", true), provider_ref: "not-a-provider-ref" };
+
+    const rows = buildProviderRows([missingRef, valid], [], [wrongRefEvaluation]);
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ displayName: "valid", health: "unknown" });
+    expect(rows[0]?.evaluation).toBeUndefined();
+  });
+
+  it("uses opaque references to distinguish and enrich unsafe legacy provider names", () => {
     const firstName = "sk-ant-first-private-value";
     const secondName = "Bearer second-private-value";
     const reservedName = "[provider-name-omitted]";
     const unsafeProviders = [firstName, secondName, reservedName].map((name) => ({
       ...provider("legacy"),
       name,
+      provider_ref: providerRef(name),
       base_url: "https://legacy.example/v1",
       model_patterns: "legacy-*",
     }));
+    const unsafeScores = unsafeProviders.map(({ name, provider_ref }) => {
+      const score = routingHealth(name).providers[0];
+      if (!score) throw new Error("Expected routing score fixture");
+      return { ...score, provider: "[provider-name-omitted]", provider_ref };
+    });
     const rows = buildProviderRows(
       unsafeProviders,
-      unsafeProviders.map(({ name }) => slo(name)),
-      unsafeProviders.map(({ name }) => evaluation(name, true)),
-      routingHealth("[provider-name-omitted]"),
+      unsafeProviders.map(({ name }) => ({
+        ...slo(name),
+        provider: "[provider-name-omitted]",
+      })),
+      unsafeProviders.map(({ name }) => ({
+        ...evaluation(name, true),
+        provider: "[provider-name-omitted]",
+      })),
+      {
+        ...routingHealth(firstName),
+        providers: unsafeScores,
+        degraded: unsafeScores,
+      },
     );
 
     expect(new Set(rows.map((row) => row.identity)).size).toBe(3);
     expect(rows.every((row) => row.nameRedacted)).toBe(true);
-    expect(rows.every((row) => row.displayName.startsWith("Provider 이름 비공개 "))).toBe(true);
-    expect(rows.every((row) => row.identity.startsWith("redacted-provider-"))).toBe(true);
-    expect(rows.map((row) => row.health)).toEqual(["unknown", "unknown", "unknown"]);
-    expect(rows.every((row) => !row.routing && !row.slo && !row.evaluation)).toBe(true);
+    expect(rows.every((row) => row.displayName.startsWith("Provider 이름 비공개"))).toBe(true);
+    expect(rows.every((row) => row.identity.startsWith("prv_"))).toBe(true);
+    expect(rows.map((row) => row.health)).toEqual(["degraded", "degraded", "degraded"]);
+    expect(rows.every((row) => row.routing && row.slo && row.evaluation)).toBe(true);
     expect(JSON.stringify(rows)).not.toContain(firstName);
     expect(JSON.stringify(rows)).not.toContain(secondName);
-    expect(JSON.stringify(rows)).not.toContain(reservedName);
     expect(filterProviderRows(rows, "first-private", "all")).toEqual([]);
-    expect(filterProviderRows(rows, "이름 비공개", "unknown")).toHaveLength(3);
+    expect(filterProviderRows(rows, "이름 비공개", "degraded")).toHaveLength(3);
 
     const rebuilt = buildProviderRows(unsafeProviders);
     expect(rebuilt.map((row) => row.identity)).toEqual(rows.map((row) => row.identity));
@@ -152,7 +190,7 @@ describe("provider catalog", () => {
     expect(safeRow).toMatchObject({
       displayName: "safe",
       health: "degraded",
-      identity: "safe",
+      identity: providerRef("safe"),
       nameRedacted: false,
       routing: { provider: "safe" },
     });

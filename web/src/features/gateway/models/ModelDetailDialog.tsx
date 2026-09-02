@@ -218,13 +218,13 @@ export function ModelDetailDialog({
 }: ModelDetailDialogProps): React.JSX.Element {
   const requestId = isAppError(catalogue.error) ? catalogue.error.requestId : undefined;
   const catalogueRequestId = requestId || catalogue.requestId;
-  const failureProvider = row?.model.provider ?? requestedProvider;
+  const failureProviderRef = row?.model.provider_ref ?? requestedProvider;
   const relevantFailures = catalogue.partialFailures.filter(
     (failure) =>
-      failure.provider === "" ||
-      failure.provider === "*" ||
-      failureProvider === "" ||
-      failure.provider === failureProvider,
+      failureProviderRef === "" ||
+      failure.provider_ref === failureProviderRef ||
+      failure.code === "models_provider_limit_exceeded" ||
+      failure.code === "models_response_limit_exceeded",
   );
   const footer = showLegacyAdmin ? (
     <a className="button button-secondary button-default" href="/admin#/model-contracts">
@@ -237,7 +237,7 @@ export function ModelDetailDialog({
     <Dialog
       description={
         row
-          ? `${row.model.provider} Provider의 품질, 가격, 사용 지침을 읽기 전용으로 확인합니다.`
+          ? `${row.providerLabel} Provider의 품질, 가격, 사용 지침을 읽기 전용으로 확인합니다.`
           : "Model 품질, 가격과 사용 지침을 읽기 전용으로 확인합니다."
       }
       footer={footer}
@@ -277,10 +277,7 @@ export function ModelDetailDialog({
           <AlertTriangle aria-hidden="true" />
           <div>
             <strong>Model을 찾을 수 없습니다.</strong>
-            <p>
-              {requestedProvider ? `${requestedProvider} / ` : ""}“{requestedModel}” 항목이 현재 목록에
-              없습니다.
-            </p>
+            <p>요청한 “{requestedModel}” 항목이 현재 목록에 없습니다.</p>
           </div>
         </div>
       ) : (
@@ -291,7 +288,7 @@ export function ModelDetailDialog({
               {row.model.stale && row.status !== "stale" ? (
                 <Badge tone="warning">마지막 정상 카탈로그</Badge>
               ) : null}
-              <Badge tone="info">{row.model.provider}</Badge>
+              <Badge tone="info">{row.providerLabel}</Badge>
               <Badge tone={row.model.source === "live" ? "success" : "muted"}>
                 {row.model.source.replace("_", " ")}
               </Badge>
@@ -312,7 +309,7 @@ export function ModelDetailDialog({
               <dl className="model-detail-grid">
                 <div>
                   <dt>Provider</dt>
-                  <dd>{row.model.provider}</dd>
+                  <dd>{row.providerLabel}</dd>
                 </div>
                 <div>
                   <dt>Owned by</dt>

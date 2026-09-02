@@ -22,7 +22,7 @@ export function ModelCandidateSelection({
           {candidates.map((candidate) => (
             <li key={modelRowKey(candidate.model)}>
               <Link to={{ search: detailSearch(candidate) }}>
-                {candidate.model.provider} · {candidate.model.source.replace("_", " ")}
+                {candidate.providerLabel} · {candidate.model.source.replace("_", " ")}
               </Link>
             </li>
           ))}

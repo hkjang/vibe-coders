@@ -9,6 +9,13 @@ import {
 } from "@/features/gateway/models/model-catalog";
 import type { AdminModel, AdminModelsResponse } from "@/shared/api/schemas";
 
+const providerRef = (seed: string): string =>
+  `prv_${[...seed]
+    .map((character) => character.charCodeAt(0).toString(36))
+    .join("")
+    .padEnd(43, "x")
+    .slice(0, 43)}`;
+
 const baseModel = {
   created: 1_700_000_000,
   deprecation: null,
@@ -17,6 +24,7 @@ const baseModel = {
   object: "model",
   owned_by: "vendor",
   provider: "openai",
+  provider_ref: providerRef("openai"),
   shadowed: false,
   shadowed_by: "",
   source: "live",
@@ -34,6 +42,7 @@ function catalogue(models: readonly AdminModel[]): AdminModelsResponse {
         fetched_at: "2026-09-02T00:00:00Z",
         model_count: 1,
         provider: "openai",
+        provider_ref: providerRef("openai"),
         source: "live",
         stale: false,
         status: "ok",
@@ -42,6 +51,7 @@ function catalogue(models: readonly AdminModel[]): AdminModelsResponse {
         fetched_at: "2026-09-02T00:00:00Z",
         model_count: 1,
         provider: "anthropic",
+        provider_ref: providerRef("anthropic"),
         source: "live",
         stale: false,
         status: "ok",
@@ -53,8 +63,17 @@ function catalogue(models: readonly AdminModel[]): AdminModelsResponse {
 
 describe("model catalog", () => {
   it("keeps duplicate model IDs distinct by provider and source", () => {
-    const anthropic = { ...baseModel, provider: "anthropic" } satisfies AdminModel;
-    const virtual = { ...baseModel, source: "agent_route", virtual: true } satisfies AdminModel;
+    const anthropic = {
+      ...baseModel,
+      provider: "anthropic",
+      provider_ref: providerRef("anthropic"),
+    } satisfies AdminModel;
+    const virtual = {
+      ...baseModel,
+      provider_ref: providerRef("agent-route-openai"),
+      source: "agent_route",
+      virtual: true,
+    } satisfies AdminModel;
     const rows = buildModelRows(catalogue([baseModel, anthropic, virtual]));
 
     expect(rows).toHaveLength(3);
@@ -94,7 +113,12 @@ describe("model catalog", () => {
   });
 
   it("joins enrichments by model while filtering by provider, status, and guidance text", () => {
-    const anthropic = { ...baseModel, provider: "anthropic", stale: true } satisfies AdminModel;
+    const anthropic = {
+      ...baseModel,
+      provider: "anthropic",
+      provider_ref: providerRef("anthropic"),
+      stale: true,
+    } satisfies AdminModel;
     const source = catalogue([baseModel, anthropic]);
     const rows = buildModelRows(
       source,
@@ -145,7 +169,55 @@ describe("model catalog", () => {
     expect(rows.every((row) => row.quality?.quality_score === 88)).toBe(true);
     expect(rows[0]?.price?.input_krw_per_1m).toBe(1_500);
     expect(rows[1]?.price?.input_krw_per_1m).toBe(1_000);
-    expect(filterModelRows(rows, "regulated", "anthropic", "stale")).toEqual([rows[1]]);
-    expect(uniqueModelProviders(source)).toEqual(["anthropic", "openai"]);
+    expect(filterModelRows(rows, "regulated", providerRef("anthropic"), "stale")).toEqual([rows[1]]);
+    expect(uniqueModelProviders(source)).toEqual([
+      { label: "anthropic", value: providerRef("anthropic") },
+      { label: "openai", value: providerRef("openai") },
+    ]);
+  });
+
+  it("keeps same-name masked Providers serving the same Model distinct by provider_ref", () => {
+    const firstRef = `prv_${"A".repeat(43)}`;
+    const secondRef = `prv_${"B".repeat(43)}`;
+    const first = {
+      ...baseModel,
+      id: "masked-model",
+      provider: "[provider-name-omitted]",
+      provider_ref: firstRef,
+    };
+    const second = { ...first, provider_ref: secondRef };
+    const source: AdminModelsResponse = {
+      generated_at: "2026-09-02T00:00:00Z",
+      models: [first, second],
+      partial_failures: [],
+      providers: [
+        {
+          model_count: 1,
+          provider: "[provider-name-omitted]",
+          provider_ref: firstRef,
+          source: "live",
+          stale: false,
+          status: "ok",
+        },
+        {
+          model_count: 1,
+          provider: "[provider-name-omitted]",
+          provider_ref: secondRef,
+          source: "live",
+          stale: false,
+          status: "ok",
+        },
+      ],
+      request_id: "req-masked-models",
+    };
+
+    const rows = buildModelRows(source);
+    expect(new Set(rows.map((row) => modelRowKey(row.model))).size).toBe(2);
+    expect(new Set(rows.map((row) => row.providerLabel)).size).toBe(2);
+    expect(filterModelRows(rows, "", firstRef, "all")).toEqual([rows[0]]);
+    expect(uniqueModelProviders(source)).toEqual([
+      { label: expect.stringContaining("AAAAAAAA"), value: firstRef },
+      { label: expect.stringContaining("BBBBBBBB"), value: secondRef },
+    ]);
   });
 });

@@ -19,6 +19,7 @@ import { useModelCatalogQueries } from "@/features/gateway/models/use-model-cata
 import { useModelDialogFocus } from "@/features/gateway/models/use-model-dialog-focus";
 import { QueryFailureNotice } from "@/features/gateway/providers/ProviderTableParts";
 import { isHealthRange, maxUpdatedAt, type HealthRange } from "@/features/health/health-utils";
+import { isProviderRef, isSafeLegacyProviderName } from "@/shared/api/provider-ref";
 import { canOpenLegacyAdmin } from "@/shared/permissions/legacy-admin";
 import { containsPotentialSecret } from "@/shared/security/secrets";
 
@@ -36,16 +37,23 @@ export function ModelPage(): React.JSX.Element {
   const requestedRange = searchParams.get("range");
   const requestedStatus = searchParams.get("status");
   const requestedPage = searchParams.get("page");
-  const requestedModelProvider = searchParams.get("model_provider");
+  const requestedProviderFilter = searchParams.get("provider")?.trim() ?? "";
+  const requestedModelProvider = searchParams.get("model_provider")?.trim() ?? "";
   const requestedSource = searchParams.get("source");
   const requestedQuery = searchParams.get("q") ?? "";
   const range = isHealthRange(requestedRange) ? requestedRange : defaultRange;
   const status = isModelStatusFilter(requestedStatus) ? requestedStatus : "all";
   const unsafeStoredQuery = containsPotentialSecret(requestedQuery);
   const query = unsafeStoredQuery ? "" : requestedQuery;
-  const providerFilter = searchParams.get("provider")?.trim() ?? "";
+  const providerFilter = isProviderRef(requestedProviderFilter) ? requestedProviderFilter : "";
+  const providerFilterInvalid = requestedProviderFilter !== "" && !isProviderRef(requestedProviderFilter);
   const selectedModel = searchParams.get("model")?.trim() ?? "";
-  const selectedProvider = requestedModelProvider?.trim() || (selectedModel !== "" ? providerFilter : "");
+  const selectedProviderInvalid = requestedModelProvider !== "" && !isProviderRef(requestedModelProvider);
+  const selectedProvider = isProviderRef(requestedModelProvider)
+    ? requestedModelProvider
+    : selectedModel !== ""
+      ? providerFilter
+      : "";
   const selectedSource = isModelSource(requestedSource) ? requestedSource : undefined;
   const currentPage = positivePage(requestedPage);
   const showLegacyAdmin = canOpenLegacyAdmin(auth);
@@ -69,7 +77,21 @@ export function ModelPage(): React.JSX.Element {
     if (requestedStatus !== null && !isModelStatusFilter(requestedStatus)) updates.status = undefined;
     if (requestedSource !== null && !isModelSource(requestedSource)) updates.source = undefined;
     if (unsafeStoredQuery) updates.q = undefined;
-    if (requestedModelProvider !== null && (selectedModel === "" || requestedModelProvider.trim() === "")) {
+    if (
+      requestedProviderFilter !== "" &&
+      !isProviderRef(requestedProviderFilter) &&
+      !isSafeLegacyProviderName(requestedProviderFilter)
+    ) {
+      updates.provider = undefined;
+    }
+    if (
+      requestedModelProvider !== "" &&
+      !isProviderRef(requestedModelProvider) &&
+      !isSafeLegacyProviderName(requestedModelProvider)
+    ) {
+      updates.model_provider = undefined;
+    }
+    if (requestedModelProvider !== "" && selectedModel === "") {
       updates.model_provider = undefined;
     }
     if (requestedPage !== null && positivePage(requestedPage) === 1 && requestedPage !== "1") {
@@ -79,6 +101,7 @@ export function ModelPage(): React.JSX.Element {
   }, [
     requestedModelProvider,
     requestedPage,
+    requestedProviderFilter,
     requestedRange,
     requestedSource,
     requestedStatus,
@@ -92,7 +115,7 @@ export function ModelPage(): React.JSX.Element {
       models.data
         ? buildModelRows(models.data, quality.data, pricing.data, tags.data?.tags).sort(
             (left, right) =>
-              left.model.provider.localeCompare(right.model.provider) ||
+              left.providerLabel.localeCompare(right.providerLabel) ||
               left.model.id.localeCompare(right.model.id) ||
               left.model.source.localeCompare(right.model.source),
           )
@@ -101,20 +124,21 @@ export function ModelPage(): React.JSX.Element {
   );
   const providers = useMemo(() => uniqueModelProviders(models.data), [models.data]);
   const filteredRows = useMemo(
-    () => filterModelRows(allRows, query, providerFilter, status),
-    [allRows, providerFilter, query, status],
+    () => (providerFilterInvalid ? [] : filterModelRows(allRows, query, providerFilter, status)),
+    [allRows, providerFilter, providerFilterInvalid, query, status],
   );
   const pageCount = Math.max(1, Math.ceil(filteredRows.length / pageSize));
   const page = Math.min(currentPage, pageCount);
   const pageRows = filteredRows.slice((page - 1) * pageSize, page * pageSize);
-  const selectedMatches = selectedModel
-    ? allRows.filter(
-        (row) =>
-          row.model.id === selectedModel &&
-          (selectedProvider === "" || row.model.provider === selectedProvider) &&
-          (selectedSource === undefined || row.model.source === selectedSource),
-      )
-    : [];
+  const selectedMatches =
+    selectedModel && !selectedProviderInvalid
+      ? allRows.filter(
+          (row) =>
+            row.model.id === selectedModel &&
+            (selectedProvider === "" || row.model.provider_ref === selectedProvider) &&
+            (selectedSource === undefined || row.model.source === selectedSource),
+        )
+      : [];
   const selectedRow = selectedMatches.length === 1 ? selectedMatches[0] : undefined;
   const updatedAt = maxUpdatedAt(
     models.dataUpdatedAt,
@@ -134,6 +158,27 @@ export function ModelPage(): React.JSX.Element {
     updateSearch({ page: pageCount === 1 ? undefined : String(pageCount) });
   }, [currentPage, models.data, pageCount, updateSearch]);
 
+  useEffect(() => {
+    if (!models.data) return;
+    const resolveLegacyRef = (candidate: string): string | undefined => {
+      if (!isSafeLegacyProviderName(candidate)) return undefined;
+      const refs = new Set(
+        [...models.data.providers, ...models.data.models]
+          .filter((item) => item.provider === candidate)
+          .map((item) => item.provider_ref),
+      );
+      return refs.size === 1 ? [...refs][0] : undefined;
+    };
+    const updates: Record<string, string | undefined> = {};
+    if (requestedProviderFilter !== "" && !isProviderRef(requestedProviderFilter)) {
+      updates.provider = resolveLegacyRef(requestedProviderFilter);
+    }
+    if (requestedModelProvider !== "" && !isProviderRef(requestedModelProvider)) {
+      updates.model_provider = selectedModel === "" ? undefined : resolveLegacyRef(requestedModelProvider);
+    }
+    if (Object.keys(updates).length > 0) updateSearch(updates);
+  }, [models.data, requestedModelProvider, requestedProviderFilter, selectedModel, updateSearch]);
+
   const { closeModel, rememberRowTrigger, rememberTrigger, returnFocusRef } = useModelDialogFocus(
     selectedModel,
     updateSearch,
@@ -142,7 +187,7 @@ export function ModelPage(): React.JSX.Element {
     (row: ModelCatalogRow): void => {
       rememberRowTrigger(modelRowKey(row.model));
       updateSearch(
-        { model: row.model.id, model_provider: row.model.provider, source: row.model.source },
+        { model: row.model.id, model_provider: row.model.provider_ref, source: row.model.source },
         false,
       );
     },
@@ -152,7 +197,7 @@ export function ModelPage(): React.JSX.Element {
     (row: ModelCatalogRow): string => {
       const next = new URLSearchParams(searchParams);
       next.set("model", row.model.id);
-      next.set("model_provider", row.model.provider);
+      next.set("model_provider", row.model.provider_ref);
       next.set("source", row.model.source);
       return `?${next.toString()}`;
     },

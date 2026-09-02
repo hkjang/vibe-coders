@@ -19,6 +19,7 @@ import { TimeRangePicker } from "@/features/health/health-ui";
 import { Badge } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
 import { canOpenLegacyAdmin } from "@/shared/permissions/legacy-admin";
+import { isProviderRef, isSafeLegacyProviderName } from "@/shared/api/provider-ref";
 import { rejectedSensitiveQuery } from "@/shared/security/app-route-query";
 import { containsPotentialSecret, secretSearchMessage } from "@/shared/security/secrets";
 
@@ -50,7 +51,8 @@ export function ProviderPage(): React.JSX.Element {
   const status = isProviderStatusFilter(requestedStatus) ? requestedStatus : "all";
   const unsafeStoredQuery = containsPotentialSecret(requestedQuery);
   const query = unsafeStoredQuery ? "" : requestedQuery;
-  const selectedName = searchParams.get("provider")?.trim() ?? "";
+  const requestedProvider = searchParams.get("provider")?.trim() ?? "";
+  const selectedRef = isProviderRef(requestedProvider) ? requestedProvider : "";
   const currentPage = positivePage(requestedPage);
   const canReadRouting = auth.user?.scopes.includes("routing:read") ?? false;
   const showLegacyAdmin = canOpenLegacyAdmin(auth);
@@ -63,6 +65,11 @@ export function ProviderPage(): React.JSX.Element {
       location.state !== null &&
       "providerSearchRejected" in location.state &&
       location.state.providerSearchRejected === true);
+  const rejectedProviderDetail =
+    typeof location.state === "object" &&
+    location.state !== null &&
+    "providerDetailRejected" in location.state &&
+    location.state.providerDetailRejected === true;
   const visibleSearchError =
     searchError ?? (unsafeStoredQuery || rejectedSearchNavigation ? secretSearchMessage : undefined);
 
@@ -84,13 +91,27 @@ export function ProviderPage(): React.JSX.Element {
     if (requestedRange !== null && !isHealthRange(requestedRange)) updates.range = defaultRange;
     if (requestedStatus !== null && !isProviderStatusFilter(requestedStatus)) updates.status = undefined;
     if (unsafeStoredQuery) updates.q = undefined;
+    if (
+      requestedProvider !== "" &&
+      !isProviderRef(requestedProvider) &&
+      !isSafeLegacyProviderName(requestedProvider)
+    ) {
+      updates.provider = undefined;
+    }
     if (requestedPage !== null && positivePage(requestedPage) === 1 && requestedPage !== "1") {
       updates.page = undefined;
     }
     if (Object.keys(updates).length > 0) {
-      updateSearch(updates, true, unsafeStoredQuery ? { providerSearchRejected: true } : undefined);
+      updateSearch(updates, true, {
+        ...(unsafeStoredQuery ? { providerSearchRejected: true } : {}),
+        ...(requestedProvider !== "" &&
+        !isProviderRef(requestedProvider) &&
+        !isSafeLegacyProviderName(requestedProvider)
+          ? { providerDetailRejected: true }
+          : {}),
+      });
     }
-  }, [requestedPage, requestedRange, requestedStatus, unsafeStoredQuery, updateSearch]);
+  }, [requestedPage, requestedProvider, requestedRange, requestedStatus, unsafeStoredQuery, updateSearch]);
 
   useEffect(() => {
     if (visibleSearchError) searchInputRef.current?.focus();
@@ -126,7 +147,7 @@ export function ProviderPage(): React.JSX.Element {
   const pageCount = Math.max(1, Math.ceil(filteredRows.length / pageSize));
   const page = Math.min(currentPage, pageCount);
   const pageRows = filteredRows.slice((page - 1) * pageSize, page * pageSize);
-  const selectedRow = allRows.find((row) => row.identity === selectedName);
+  const selectedRow = allRows.find((row) => row.identity === selectedRef);
   const refreshing = providers.isFetching || slo.isFetching || (canReadRouting && routing.isFetching);
 
   useEffect(() => {
@@ -134,8 +155,21 @@ export function ProviderPage(): React.JSX.Element {
     updateSearch({ page: pageCount === 1 ? undefined : String(pageCount) });
   }, [currentPage, pageCount, providers.data, updateSearch]);
 
+  useEffect(() => {
+    if (requestedProvider === "" || isProviderRef(requestedProvider)) return;
+    if (!providers.data) return;
+    const legacyMatches = isSafeLegacyProviderName(requestedProvider)
+      ? allRows.filter((row) => !row.nameRedacted && row.provider.name === requestedProvider)
+      : [];
+    updateSearch(
+      { provider: legacyMatches.length === 1 ? legacyMatches[0]?.identity : undefined },
+      true,
+      legacyMatches.length === 1 ? undefined : { providerDetailRejected: true },
+    );
+  }, [allRows, providers.data, requestedProvider, updateSearch]);
+
   const { closeProvider, rememberRowTrigger, rememberTrigger, returnFocusRef } = useProviderDialogFocus(
-    selectedName,
+    selectedRef,
     updateSearch,
   );
   const openProvider = useCallback(
@@ -345,10 +379,12 @@ export function ProviderPage(): React.JSX.Element {
       <ProviderDetailDialog
         canReadRouting={canReadRouting}
         onOpenChange={(open) => {
-          if (!open) closeProvider();
+          if (!open) {
+            if (rejectedProviderDetail) updateSearch({ provider: undefined }, true, null);
+            else closeProvider();
+          }
         }}
-        open={selectedName !== ""}
-        requestedName={selectedName}
+        open={selectedRef !== "" || rejectedProviderDetail}
         returnFocusRef={returnFocusRef}
         row={selectedRow}
         showLegacyAdmin={showLegacyAdmin}
