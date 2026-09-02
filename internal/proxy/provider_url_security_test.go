@@ -21,6 +21,9 @@ func TestProviderBaseURLValidationAndSanitization(t *testing.T) {
 	}{
 		{name: "plain HTTPS", raw: "https://provider.example/v1"},
 		{name: "Azure api version", raw: "https://azure.example/openai?api-version=2026-01-01"},
+		{name: "safe deployment and region", raw: "https://azure.example/openai/deployments/chat-main?api-version=2026-01-01&region=koreacentral"},
+		{name: "ordinary credential vocabulary in path", raw: "https://provider.example/docs/tokenization/secret-management/authorization-code"},
+		{name: "ordinary sk prefix", raw: "https://provider.example/models/sketch-v2?model=sketch-large"},
 		{name: "basic credentials", raw: "https://operator:password@provider.example/v1", wantErr: true},
 		{name: "generic key", raw: "https://provider.example/v1?key=private", wantErr: true},
 		{name: "AWS credential", raw: "https://provider.example/v1?X-Amz-Credential=private", wantErr: true},
@@ -34,6 +37,18 @@ func TestProviderBaseURLValidationAndSanitization(t *testing.T) {
 		{name: "embedded client secret", raw: "https://provider.example/v1?clientsecretvalue=private", wantErr: true},
 		{name: "camel segment secret", raw: "https://provider.example/v1?clientSecretValue=private", wantErr: true},
 		{name: "fragment", raw: "https://provider.example/v1#access_token=private", wantErr: true},
+		{name: "bearer in decoded query value", raw: "https://provider.example/v1?region=Bearer%20eyJprivatevalue", wantErr: true},
+		{name: "OpenAI key in query value", raw: "https://provider.example/v1?deployment=sk-proj-privatecredential", wantErr: true},
+		{name: "Anthropic key in query value", raw: "https://provider.example/v1?deployment=sk-ant-api03-privatecredential", wantErr: true},
+		{name: "JWT in query value", raw: "https://provider.example/v1?region=eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.signaturevalue", wantErr: true},
+		{name: "nested token assignment", raw: "https://provider.example/v1?redirect=%2Fcallback%3Faccess_token%3Dprivate", wantErr: true},
+		{name: "nested token assignment with slash value", raw: "https://provider.example/v1?redirect=access_token%3D%2Fprivate", wantErr: true},
+		{name: "nested URL userinfo", raw: "https://provider.example/v1?redirect=https%3A%2F%2Foperator%3Apassword%40callback.example%2Fdone", wantErr: true},
+		{name: "double encoded token key", raw: "https://provider.example/v1?%2574oken=private", wantErr: true},
+		{name: "double encoded secret assignment", raw: "https://provider.example/v1?next=%252Fcallback%253Fclient_secret%253Dprivate", wantErr: true},
+		{name: "bearer in path", raw: "https://provider.example/proxy/Bearer%20privatecredential", wantErr: true},
+		{name: "OpenAI key in path", raw: "https://provider.example/proxy/sk-live-privatecredential", wantErr: true},
+		{name: "token assignment in path", raw: "https://provider.example/callback/token=private", wantErr: true},
 		{name: "malformed query", raw: "https://provider.example/v1?auth=private;region=kr", wantErr: true},
 		{name: "relative", raw: "/provider/v1", wantErr: true},
 		{name: "non HTTP", raw: "file:///tmp/provider", wantErr: true},
@@ -47,15 +62,17 @@ func TestProviderBaseURLValidationAndSanitization(t *testing.T) {
 		})
 	}
 
-	raw := "https://operator:password@provider.example/v1?api-version=2026-01-01&credential=private&sig=signed#access_token=fragment"
-	got := sanitizeProviderBaseURL(raw)
-	for _, secret := range []string{"operator", "password", "private", "signed", "fragment"} {
-		if strings.Contains(got, secret) {
-			t.Errorf("sanitized URL still contains %q: %s", secret, got)
+	for _, raw := range []string{
+		"https://operator:password@provider.example/v1?api-version=2026-01-01&credential=private&sig=signed#access_token=fragment",
+		"https://provider.example/proxy/Bearer%20privatecredential?api-version=2026-01-01",
+		"https://provider.example/v1?region=%2Fcallback%3Ftoken%3Dprivate",
+	} {
+		if got := sanitizeProviderBaseURL(raw); got != invalidProviderURLDisplay {
+			t.Errorf("unsafe URL %q must be replaced in full, got %q", raw, got)
 		}
 	}
-	if !strings.Contains(got, "api-version=2026-01-01") || !strings.Contains(got, "%2A%2A%2A") {
-		t.Errorf("sanitized URL did not preserve safe query or redact credentials: %s", got)
+	if got := sanitizeProviderBaseURL("https://azure.example/openai?api-version=2026-01-01"); got != "https://azure.example/openai?api-version=2026-01-01" {
+		t.Errorf("safe Azure URL changed: %q", got)
 	}
 	if got := sanitizeProviderBaseURL("not a URL credential=private"); got != invalidProviderURLDisplay {
 		t.Errorf("invalid URL must fail closed, got %q", got)
@@ -77,6 +94,9 @@ func TestProviderAPIRejectsCredentialURLsAndSanitizesLegacyRows(t *testing.T) {
 	for _, raw := range []string{
 		"https://operator:password@provider.example/v1",
 		"https://provider.example/v1?subscription-key=private",
+		"https://provider.example/v1?region=Bearer%20privatecredential",
+		"https://provider.example/proxy/sk-proj-privatecredential",
+		"https://provider.example/callback/token=private",
 		"https://provider.example/v1#token=private",
 	} {
 		response := postJSON(t, proxy.URL+"/admin/providers", "", map[string]any{
@@ -100,7 +120,7 @@ func TestProviderAPIRejectsCredentialURLsAndSanitizesLegacyRows(t *testing.T) {
 	}
 	response.Body.Close()
 
-	legacyRaw := "https://operator:password@legacy.example/v1?api-version=2026-01-01&credential=private#token"
+	legacyRaw := "https://legacy.example/proxy/Bearer%20legacy-path-secret?api-version=2026-01-01&region=%2Fcallback%3Ftoken%3Dquery-secret"
 	if err := db.UpsertProvider(context.Background(), store.ProviderConfig{
 		Name: "legacy", BaseURL: legacyRaw, TimeoutMS: 5_000, Enabled: true,
 	}); err != nil {
@@ -116,7 +136,7 @@ func TestProviderAPIRejectsCredentialURLsAndSanitizesLegacyRows(t *testing.T) {
 	if listed.StatusCode != http.StatusOK || listed.Header.Get("Cache-Control") != "no-store" {
 		t.Fatalf("provider list status/cache = %d/%q", listed.StatusCode, listed.Header.Get("Cache-Control"))
 	}
-	for _, secret := range []string{"operator", "password", "private", "#token"} {
+	for _, secret := range []string{"legacy.example", "legacy-path-secret", "query-secret"} {
 		if strings.Contains(string(listedBody), secret) {
 			t.Errorf("provider list leaked %q: %s", secret, listedBody)
 		}
@@ -133,7 +153,7 @@ func TestProviderAPIRejectsCredentialURLsAndSanitizesLegacyRows(t *testing.T) {
 			legacyPublic = provider
 		}
 	}
-	if legacyPublic.BaseURL == "" || !strings.Contains(legacyPublic.BaseURL, "api-version=2026-01-01") {
+	if legacyPublic.BaseURL != invalidProviderURLDisplay {
 		t.Fatalf("legacy provider was not returned safely: %+v", legacyPublic)
 	}
 
@@ -147,7 +167,7 @@ func TestProviderAPIRejectsCredentialURLsAndSanitizesLegacyRows(t *testing.T) {
 	if updated.StatusCode != http.StatusOK {
 		t.Fatalf("redacted legacy update returned %d: %s", updated.StatusCode, updatedBody)
 	}
-	if strings.Contains(string(updatedBody), "private") || strings.Contains(string(updatedBody), "password") {
+	if strings.Contains(string(updatedBody), "legacy-path-secret") || strings.Contains(string(updatedBody), "query-secret") {
 		t.Fatalf("provider update response leaked legacy credentials: %s", updatedBody)
 	}
 	stored, found, err := db.GetProvider(context.Background(), "legacy")
@@ -158,9 +178,28 @@ func TestProviderAPIRejectsCredentialURLsAndSanitizesLegacyRows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	foundLegacyAudit := false
 	for _, audit := range audits {
-		if strings.Contains(audit.BeforeValue+audit.AfterValue, "private") || strings.Contains(audit.BeforeValue+audit.AfterValue, "password") {
+		if strings.Contains(audit.BeforeValue+audit.AfterValue, "legacy-path-secret") || strings.Contains(audit.BeforeValue+audit.AfterValue, "query-secret") {
 			t.Fatalf("provider audit leaked legacy credentials: %+v", audit)
 		}
+		if strings.Contains(audit.BeforeValue+audit.AfterValue, `"name":"legacy"`) {
+			foundLegacyAudit = true
+			if !strings.Contains(audit.BeforeValue, invalidProviderURLDisplay) || !strings.Contains(audit.AfterValue, invalidProviderURLDisplay) {
+				t.Fatalf("provider audit did not replace unsafe URL in full: %+v", audit)
+			}
+		}
+	}
+	if !foundLegacyAudit {
+		t.Fatal("legacy provider audit was not recorded")
+	}
+}
+
+func TestChatProviderMetadataNeverReflectsLegacyCredentialURL(t *testing.T) {
+	metadata := providerMetadata(store.ProviderPublic{
+		BaseURL: "https://provider.example/proxy/sk-proj-privatecredential?api-version=2026-01-01",
+	})
+	if metadata["base_url"] != invalidProviderURLDisplay {
+		t.Fatalf("chat target metadata base_url = %v, want fail-closed placeholder", metadata["base_url"])
 	}
 }

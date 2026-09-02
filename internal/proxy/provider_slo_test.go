@@ -70,6 +70,14 @@ func TestEvaluateProviderSLOs(t *testing.T) {
 	}
 
 	openai := byProvider["openai"]
+	if len(openai.Metrics) != 4 {
+		t.Fatalf("openai metrics = %#v, want exactly four documented metrics", openai.Metrics)
+	}
+	for _, name := range []string{"availability", "p95_latency_ms", "error_rate", "fallback_rate"} {
+		if _, ok := openai.Metrics[name]; !ok {
+			t.Errorf("openai metrics missing %q: %#v", name, openai.Metrics)
+		}
+	}
 	if !openai.Breached {
 		t.Error("openai should breach SLO")
 	}

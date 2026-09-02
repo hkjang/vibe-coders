@@ -817,7 +817,7 @@ func modelCatalogOpenAPISchemas() map[string]any {
 			"properties": map[string]any{
 				"id": map[string]any{"type": "string"}, "provider": map[string]any{"type": "string"},
 				"object": map[string]any{"type": "string"}, "owned_by": map[string]any{"type": "string"},
-				"created": map[string]any{"type": "integer", "format": "int64", "nullable": true}, "source": modelSource,
+				"created": map[string]any{"type": "integer", "format": "int64", "minimum": 0, "nullable": true}, "source": modelSource,
 				"virtual": map[string]any{"type": "boolean"}, "shadowed": map[string]any{"type": "boolean"},
 				"shadowed_by": map[string]any{"type": "string"}, "stale": map[string]any{"type": "boolean"},
 				"fetched_at":  map[string]any{"type": "string", "format": "date-time"},
@@ -874,7 +874,16 @@ func modelCatalogOpenAPISchemas() map[string]any {
 			"properties": map[string]any{
 				"provider": map[string]any{"type": "string"}, "requests": map[string]any{"type": "integer", "format": "int64", "minimum": 0},
 				"enabled": map[string]any{"type": "boolean"}, "breached": map[string]any{"type": "boolean"},
-				"metrics": map[string]any{"type": "object", "additionalProperties": schemaRef("ProviderSLOMetric")},
+				"metrics": map[string]any{
+					"type": "object", "additionalProperties": false,
+					"required": []string{"availability", "p95_latency_ms", "error_rate", "fallback_rate"},
+					"properties": map[string]any{
+						"availability":   schemaRef("ProviderSLOMetric"),
+						"p95_latency_ms": schemaRef("ProviderSLOMetric"),
+						"error_rate":     schemaRef("ProviderSLOMetric"),
+						"fallback_rate":  schemaRef("ProviderSLOMetric"),
+					},
+				},
 			},
 		},
 		"ProviderSLOResponse": map[string]any{

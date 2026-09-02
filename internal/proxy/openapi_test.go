@@ -133,7 +133,7 @@ func assertOpenAPIContract(t *testing.T, spec map[string]any) {
 		"ReadyResponse", "ReadinessFailureResponse", "AdminStatsResponse", "OpsStatus", "OpsStatusPartialFailure", "OpsRiskResponse", "ProviderHealthScore",
 		"RoutingHealthResponse", "RoutingBreakerSummary", "ProviderPublic", "ProviderListResponse",
 		"AdminModel", "AdminModelDeprecation", "AdminModelProvider", "AdminModelPartialFailure", "AdminModelsResponse",
-		"ProviderSLO", "ProviderSLOResponse", "ProviderSLOWriteRequest", "ProviderSLOWriteResponse", "ProviderSLODeleteResponse",
+		"ProviderSLO", "ProviderSLOMetric", "ProviderSLOEvaluation", "ProviderSLOResponse", "ProviderSLOWriteRequest", "ProviderSLOWriteResponse", "ProviderSLODeleteResponse",
 		"ModelQualityScore", "ModelQualityResponse", "ModelPrice", "ModelPricingVersion", "PricingResponse", "PricingWriteRequest", "PricingWriteResponse",
 		"ModelUsageTag", "ModelUsageTagsResponse",
 	} {
@@ -186,6 +186,39 @@ func assertOpenAPIContract(t *testing.T, spec map[string]any) {
 		if property["type"] != wantType || !requiredAdminModelFields[field] {
 			t.Errorf("AdminModel.%s schema = %v required=%v, want required %s", field, property, requiredAdminModelFields[field], wantType)
 		}
+	}
+	created, _ := adminModelProperties["created"].(map[string]any)
+	if created["type"] != "integer" || created["format"] != "int64" || created["nullable"] != true || created["minimum"] != float64(0) {
+		t.Errorf("AdminModel.created schema = %v, want nullable non-negative int64", created)
+	}
+	providerSLOEvaluation, _ := schemas["ProviderSLOEvaluation"].(map[string]any)
+	providerSLOEvaluationProperties, _ := providerSLOEvaluation["properties"].(map[string]any)
+	providerSLOMetrics, _ := providerSLOEvaluationProperties["metrics"].(map[string]any)
+	if providerSLOMetrics["additionalProperties"] != false {
+		t.Errorf("ProviderSLOEvaluation.metrics additionalProperties = %v, want false", providerSLOMetrics["additionalProperties"])
+	}
+	providerSLOMetricProperties, _ := providerSLOMetrics["properties"].(map[string]any)
+	providerSLOMetricRequired, _ := providerSLOMetrics["required"].([]any)
+	requiredProviderSLOMetrics := make(map[string]bool, len(providerSLOMetricRequired))
+	for _, field := range providerSLOMetricRequired {
+		if name, ok := field.(string); ok {
+			requiredProviderSLOMetrics[name] = true
+		}
+	}
+	for _, field := range []string{"availability", "p95_latency_ms", "error_rate", "fallback_rate"} {
+		property, _ := providerSLOMetricProperties[field].(map[string]any)
+		if property["$ref"] != "#/components/schemas/ProviderSLOMetric" || !requiredProviderSLOMetrics[field] {
+			t.Errorf("ProviderSLOEvaluation.metrics.%s schema = %v required=%v", field, property, requiredProviderSLOMetrics[field])
+		}
+	}
+	if len(providerSLOMetricProperties) != 4 || len(requiredProviderSLOMetrics) != 4 {
+		t.Errorf("ProviderSLOEvaluation.metrics properties/required = %d/%d, want exactly 4/4", len(providerSLOMetricProperties), len(requiredProviderSLOMetrics))
+	}
+	providerSLOMetric, _ := schemas["ProviderSLOMetric"].(map[string]any)
+	providerSLOMetricShape, _ := providerSLOMetric["properties"].(map[string]any)
+	providerSLOMetricFields, _ := providerSLOMetric["required"].([]any)
+	if providerSLOMetric["additionalProperties"] != false || len(providerSLOMetricShape) != 4 || len(providerSLOMetricFields) != 4 {
+		t.Errorf("ProviderSLOMetric shape = properties:%v required:%v additionalProperties:%v", providerSLOMetricShape, providerSLOMetricFields, providerSLOMetric["additionalProperties"])
 	}
 	adminModels, _ := schemas["AdminModelsResponse"].(map[string]any)
 	adminModelsProperties, _ := adminModels["properties"].(map[string]any)

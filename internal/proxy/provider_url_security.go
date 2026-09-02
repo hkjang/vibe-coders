@@ -3,12 +3,29 @@ package proxy
 import (
 	"fmt"
 	"net/url"
+	"regexp"
 	"strings"
 	"unicode"
 )
 
-const redactedProviderURLValue = "***"
 const invalidProviderURLDisplay = "[invalid or redacted provider URL]"
+
+var providerURLCredentialPatterns = []*regexp.Regexp{
+	// Authorization header values accidentally pasted into a path or query value.
+	regexp.MustCompile(`(?i)(?:^|[^a-z0-9])bearer(?:\s|%20|\+)+[a-z0-9._~+/=-]{8,}`),
+	// OpenAI-compatible secret keys, including project and service-account forms.
+	regexp.MustCompile(`(?i)(?:^|[^a-z0-9])sk-(?:proj-|svcacct-|ant-)?[a-z0-9_-]{8,}`),
+	// A nested URL with userinfo can otherwise bypass the top-level User check
+	// when it is percent-encoded inside a redirect parameter.
+	regexp.MustCompile(`(?i)https?://[^/?#@\s]+@`),
+	// JWTs. Requiring three non-trivial base64url segments avoids treating dotted
+	// hostnames, versions, and ordinary filenames as credentials.
+	regexp.MustCompile(`(?:^|[^A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}(?:$|[^A-Za-z0-9_-])`),
+	// Credentials nested in redirect URLs or path parameters. A separator and an
+	// assignment operator are both required, so paths such as /docs/tokenization
+	// and /secret-management remain valid.
+	regexp.MustCompile(`(?i)(?:^|[^a-z0-9])(?:access[_-]?token|refresh[_-]?token|bearer[_-]?token|api[_-]?key|subscription[_-]?key|private[_-]?key|access[_-]?key|client[_-]?secret|password|passwd|credentials?|authorization|auth|signature|sig|secret|token)\s*[:=]\s*[^\s?&#;]+`),
+}
 
 // providerURLQueryKeyIsSensitive deliberately works on key segments instead of
 // substrings. This catches common credential names (for example
@@ -71,6 +88,53 @@ func parseProviderBaseURL(raw string) (*url.URL, error) {
 	return parsed, nil
 }
 
+// providerURLComponentHasCredential checks both the decoded component and a
+// small, bounded number of additional decoding layers. This catches credentials
+// hidden in encoded redirect URLs without permitting adversarial unbounded work.
+func providerURLComponentHasCredential(component string) bool {
+	candidates := []string{component}
+	seen := map[string]struct{}{component: {}}
+	for round := 0; round < 2; round++ {
+		for _, candidate := range append([]string(nil), candidates...) {
+			for _, decode := range []func(string) (string, error){url.QueryUnescape, url.PathUnescape} {
+				decoded, err := decode(candidate)
+				if err != nil || decoded == candidate {
+					continue
+				}
+				if _, exists := seen[decoded]; !exists {
+					seen[decoded] = struct{}{}
+					candidates = append(candidates, decoded)
+				}
+			}
+		}
+	}
+	for _, candidate := range candidates {
+		for _, pattern := range providerURLCredentialPatterns {
+			if pattern.MatchString(candidate) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func providerURLQueryKeyHasSensitiveName(key string) bool {
+	if providerURLQueryKeyIsSensitive(key) {
+		return true
+	}
+	for round := 0; round < 2; round++ {
+		decoded, err := url.QueryUnescape(key)
+		if err != nil || decoded == key {
+			return false
+		}
+		if providerURLQueryKeyIsSensitive(decoded) {
+			return true
+		}
+		key = decoded
+	}
+	return false
+}
+
 func validateProviderBaseURL(raw string) error {
 	parsed, err := parseProviderBaseURL(raw)
 	if err != nil {
@@ -82,49 +146,34 @@ func validateProviderBaseURL(raw string) error {
 	if parsed.Fragment != "" {
 		return fmt.Errorf("provider URL must not contain a fragment")
 	}
+	if providerURLComponentHasCredential(parsed.EscapedPath()) || providerURLComponentHasCredential(parsed.Path) {
+		return fmt.Errorf("provider URL path must not contain credentials")
+	}
 	query, err := url.ParseQuery(parsed.RawQuery)
 	if err != nil {
 		return fmt.Errorf("provider URL contains an invalid query")
 	}
-	for key := range query {
-		if providerURLQueryKeyIsSensitive(key) {
+	for key, values := range query {
+		if providerURLQueryKeyHasSensitiveName(key) {
 			return fmt.Errorf("provider URL must not contain credential query parameters")
+		}
+		for _, value := range values {
+			if providerURLComponentHasCredential(value) {
+				return fmt.Errorf("provider URL query values must not contain credentials")
+			}
 		}
 	}
 	return nil
 }
 
 // sanitizeProviderBaseURL is a final response-boundary defense for rows that
-// predate validation. Invalid URLs fail closed, credentials are removed, and
-// fragments are never returned to an administrator's browser.
+// predate validation. Any URL that current storage validation would reject is
+// replaced in full, so no credential-bearing component is reflected to a
+// browser, audit entry, knowledge document, or generated test target.
 func sanitizeProviderBaseURL(raw string) string {
-	parsed, err := parseProviderBaseURL(raw)
-	if err != nil {
+	if err := validateProviderBaseURL(raw); err != nil {
 		return invalidProviderURLDisplay
 	}
-	changed := false
-	if parsed.User != nil {
-		parsed.User = nil
-		changed = true
-	}
-	query, queryErr := url.ParseQuery(parsed.RawQuery)
-	if queryErr != nil {
-		// Do not reflect an unparseable raw query: it may contain a credential
-		// hidden in a component url.Values deliberately discarded.
-		parsed.RawQuery = ""
-		changed = true
-	}
-	for key := range query {
-		if providerURLQueryKeyIsSensitive(key) {
-			query.Set(key, redactedProviderURLValue)
-			changed = true
-		}
-	}
-	if changed {
-		// Re-encoding also drops malformed query components that Query could not
-		// parse, rather than reflecting their raw values.
-		parsed.RawQuery = query.Encode()
-	}
-	parsed.Fragment = ""
+	parsed, _ := parseProviderBaseURL(raw)
 	return parsed.String()
 }
