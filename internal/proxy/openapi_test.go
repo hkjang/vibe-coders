@@ -187,6 +187,22 @@ func assertOpenAPIContract(t *testing.T, spec map[string]any) {
 			t.Errorf("AdminModel.%s schema = %v required=%v, want required %s", field, property, requiredAdminModelFields[field], wantType)
 		}
 	}
+	adminModels, _ := schemas["AdminModelsResponse"].(map[string]any)
+	adminModelsProperties, _ := adminModels["properties"].(map[string]any)
+	adminModelsRows, _ := adminModelsProperties["models"].(map[string]any)
+	if adminModelsRows["maxItems"] != float64(maxAdminModelsResponseRows) {
+		t.Errorf("AdminModelsResponse.models maxItems = %v, want %d", adminModelsRows["maxItems"], maxAdminModelsResponseRows)
+	}
+	modelsPath, _ := paths["/v1/models"].(map[string]any)
+	modelsGet, _ := modelsPath["get"].(map[string]any)
+	modelsResponses, _ := modelsGet["responses"].(map[string]any)
+	modelsOK, _ := modelsResponses["200"].(map[string]any)
+	modelsHeaders, _ := modelsOK["headers"].(map[string]any)
+	for _, header := range []string{"X-Models-Providers", "X-Models-Providers-Failed", "X-Models-Providers-Skipped", "X-Models-Truncated"} {
+		if _, ok := modelsHeaders[header]; !ok {
+			t.Errorf("GET /v1/models 200 response missing %s header contract", header)
+		}
+	}
 
 	assertJSONOperationSchema(t, paths, "/health", "get", "200", "HealthResponse")
 	assertJSONOperationSchema(t, paths, "/ready", "get", "200", "ReadyResponse")

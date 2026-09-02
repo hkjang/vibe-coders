@@ -480,8 +480,14 @@ func (rc *requestPipeline) stepUpstream() bool {
 	// Unpinned GET /v1/models: serve the union of every enabled provider's catalogue so a
 	// caller sees all reachable models, not just the default provider's. A pinned request
 	// (X-Proxy-Provider / ?provider=) keeps the classic single-provider passthrough below,
-	// and aggregation falling short (no provider reachable) also falls through to it.
+	// and aggregation falling short (no provider reachable) also falls through to it. The
+	// fallback shares the same deadline so an all-provider timeout cannot start a second full
+	// provider timeout after the aggregate budget has already elapsed.
 	if rc.isModelsGet && !clientPinnedProvider(r) {
+		modelsCtx, cancelModels := context.WithTimeout(r.Context(), s.modelsCatalogTimeout())
+		defer cancelModels()
+		r = r.WithContext(modelsCtx)
+		rc.r = r
 		if rc.serveAggregatedModels() {
 			return false
 		}

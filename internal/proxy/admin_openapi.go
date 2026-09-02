@@ -632,7 +632,15 @@ func enrichOpenAPIOperation(route, method string, op map[string]any) {
 			"description": "Exact configured provider name. When set, the gateway uses the pinned-provider model catalogue instead of aggregating all providers.",
 			"schema":      map[string]any{"type": "string"},
 		}}
-		responses["200"] = map[string]any{"description": "OK"}
+		responses["200"] = map[string]any{
+			"description": "OK",
+			"headers": map[string]any{
+				"X-Models-Providers":         map[string]any{"description": "Successfully aggregated providers in deterministic priority order.", "schema": map[string]any{"type": "string"}},
+				"X-Models-Providers-Failed":  map[string]any{"description": "Providers whose catalogues were unavailable.", "schema": map[string]any{"type": "string"}},
+				"X-Models-Providers-Skipped": map[string]any{"description": "Provider count skipped by the bounded aggregation budget.", "schema": map[string]any{"type": "integer", "minimum": 0}},
+				"X-Models-Truncated":         map[string]any{"description": "True when provider, row, or encoded-response limits truncated aggregation.", "schema": map[string]any{"type": "boolean"}},
+			},
+		}
 	case "get /admin/providers":
 		responses["200"] = successResponse("ProviderListResponse")
 	case "get /admin/models":
@@ -836,9 +844,9 @@ func modelCatalogOpenAPISchemas() map[string]any {
 			"required": []string{"request_id", "generated_at", "models", "providers", "partial_failures"},
 			"properties": map[string]any{
 				"request_id": map[string]any{"type": "string"}, "generated_at": map[string]any{"type": "string", "format": "date-time"},
-				"models":           map[string]any{"type": "array", "items": schemaRef("AdminModel")},
-				"providers":        map[string]any{"type": "array", "items": schemaRef("AdminModelProvider")},
-				"partial_failures": map[string]any{"type": "array", "items": schemaRef("AdminModelPartialFailure")},
+				"models":           map[string]any{"type": "array", "maxItems": maxAdminModelsResponseRows, "items": schemaRef("AdminModel")},
+				"providers":        map[string]any{"type": "array", "maxItems": maxAdminModelsProviders + 1, "items": schemaRef("AdminModelProvider")},
+				"partial_failures": map[string]any{"type": "array", "maxItems": maxAdminModelsProviders + 3, "items": schemaRef("AdminModelPartialFailure")},
 			},
 		},
 		"ProviderSLO": map[string]any{

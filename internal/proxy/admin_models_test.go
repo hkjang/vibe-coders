@@ -543,6 +543,107 @@ func TestAdminModelsCatalogRefreshTimeoutIsBounded(t *testing.T) {
 	}
 }
 
+func TestAdminModelsReportsProviderDecodeLimitWithStableFailure(t *testing.T) {
+	payload := providerCatalogPayload("bounded-", maxModelsPerProvider+1)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(payload)
+	}))
+	defer upstream.Close()
+
+	server, db, gateway := newAdminModelsTestServer(t, "")
+	addAdminModelsProvider(t, server, db, store.ProviderConfig{
+		Name: "too-many", BaseURL: upstream.URL, TimeoutMS: 2_000, Enabled: true,
+	}, "private-catalog-key")
+
+	response, body := getAdminModels(t, gateway.URL+"/admin/models", "")
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", response.StatusCode)
+	}
+	if len(body.Models) != 0 || len(body.Providers) != 1 || body.Providers[0].Status != "failed" {
+		t.Fatalf("decode-limited catalogue response = %+v", body)
+	}
+	if len(body.PartialFailures) != 1 || body.PartialFailures[0].Provider != "too-many" || body.PartialFailures[0].Code != "provider_models_limit_exceeded" {
+		t.Fatalf("decode limit partial failure = %+v", body.PartialFailures)
+	}
+	if body.PartialFailures[0].Message != "Provider model catalog exceeds the supported limit." {
+		t.Fatalf("decode limit message was not sanitized: %q", body.PartialFailures[0].Message)
+	}
+	encoded, err := json.Marshal(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "private-catalog-key") {
+		t.Fatalf("decode limit response exposed credential: %s", encoded)
+	}
+}
+
+func TestAdminModelsResponseLimiterCapsRowsAndEncodedBytes(t *testing.T) {
+	response := adminModelsResponse{Models: []adminModel{}}
+	limiter := adminModelsResponseLimiter{}
+	for index := range maxAdminModelsResponseRows + 1 {
+		limiter.append(&response, adminModel{
+			ID: "model-" + strconv.Itoa(index), Provider: "provider", Object: "model", OwnedBy: "provider", Source: adminModelSourceLive,
+		})
+	}
+	if len(response.Models) != maxAdminModelsResponseRows || !limiter.limited {
+		t.Fatalf("response limiter rows=%d limited=%v, want rows=%d limited", len(response.Models), limiter.limited, maxAdminModelsResponseRows)
+	}
+	if limiter.modelBytes > maxAdminModelsResponseModelBytes {
+		t.Fatalf("model payload bytes = %d, cap %d", limiter.modelBytes, maxAdminModelsResponseModelBytes)
+	}
+
+	oversized := adminModelsResponse{
+		RequestID: "request", GeneratedAt: time.Now().UTC().Format(time.RFC3339Nano), Models: []adminModel{}, Providers: []adminModelProvider{},
+		PartialFailures: []adminModelPartialFailure{{Provider: "*", Code: "oversized", Message: strings.Repeat("x", maxAdminModelsResponseBytes)}},
+	}
+	recorder := httptest.NewRecorder()
+	writeAdminModelsResponse(recorder, oversized)
+	if recorder.Code != http.StatusServiceUnavailable || recorder.Body.Len() >= maxAdminModelsResponseBytes {
+		t.Fatalf("oversized response status=%d bytes=%d", recorder.Code, recorder.Body.Len())
+	}
+}
+
+func TestAdminModelCatalogCacheEnforcesTotalBounds(t *testing.T) {
+	cache := newAdminModelCatalogCache()
+	cache.maxEntries = 2
+	cache.maxRows = 3
+	cache.maxWeightBytes = 8 << 10
+	baseTime := time.Date(2026, 9, 2, 12, 0, 0, 0, time.UTC)
+	entry := func(id string, fetchedAt time.Time) adminModelCatalogCacheEntry {
+		return adminModelCatalogCacheEntry{fingerprint: "fingerprint", models: []adminModelCatalogRow{{ID: id, Object: "model", OwnedBy: "owner"}}, fetchedAt: fetchedAt}
+	}
+	if !cache.put("oldest", entry("one", baseTime)) || !cache.put("newer", entry("two", baseTime.Add(time.Second))) || !cache.put("newest", entry("three", baseTime.Add(2*time.Second))) {
+		t.Fatal("cache rejected entries within the configured total bounds")
+	}
+	if _, exists := cache.entries["oldest"]; exists {
+		t.Fatal("cache did not evict the oldest entry at the entry bound")
+	}
+	if len(cache.entries) != 2 {
+		t.Fatalf("cache entries = %d, want 2", len(cache.entries))
+	}
+
+	rowBounded := newAdminModelCatalogCache()
+	rowBounded.maxRows = 1
+	if rowBounded.put("too-many", adminModelCatalogCacheEntry{
+		fingerprint: "fingerprint", models: []adminModelCatalogRow{{ID: "one"}, {ID: "two"}}, fetchedAt: baseTime,
+	}) {
+		t.Fatal("cache accepted a catalogue above the total row bound")
+	}
+	if len(rowBounded.entries) != 0 {
+		t.Fatalf("row-bounded cache retained %d entries", len(rowBounded.entries))
+	}
+
+	weightBounded := newAdminModelCatalogCache()
+	weightBounded.maxWeightBytes = 256
+	if weightBounded.put("too-large", entry(strings.Repeat("x", 512), baseTime)) {
+		t.Fatal("cache accepted a catalogue above the total weight bound")
+	}
+	if len(weightBounded.entries) != 0 {
+		t.Fatalf("weight-bounded cache retained %d entries", len(weightBounded.entries))
+	}
+}
+
 func TestAdminModelCatalogCacheEvictsEntriesBeyondStaleTTL(t *testing.T) {
 	cache := newAdminModelCatalogCache()
 	now := time.Date(2026, 9, 2, 12, 0, 0, 0, time.UTC)
@@ -835,7 +936,7 @@ func TestAdminModelsWorkerPoolConvergesAfterCancellation(t *testing.T) {
 	finished := make(chan fetchResult, 1)
 	go func() {
 		response := adminModelsResponse{}
-		models := server.fetchAdminProviderModels(ctx, configs, "", &response)
+		models := server.fetchAdminProviderModels(ctx, configs, "", "", &response)
 		finished <- fetchResult{models: models, response: response}
 	}()
 	for range 2 {
@@ -916,7 +1017,7 @@ func TestAdminModelsRefreshDeadlineCancelsSemaphoreWaitersAndServesStale(t *test
 	defer cancel()
 	response := adminModelsResponse{}
 	startedAt := time.Now()
-	results := server.fetchAdminProviderModels(callerCtx, configs, "", &response)
+	results := server.fetchAdminProviderModels(callerCtx, configs, "", "", &response)
 	elapsed := time.Since(startedAt)
 	if callerCtx.Err() != nil {
 		t.Fatalf("caller deadline fired before the catalogue deadline: %v", callerCtx.Err())
