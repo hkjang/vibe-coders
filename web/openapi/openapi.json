@@ -189,18 +189,21 @@
             "items": {
               "$ref": "#/components/schemas/AdminModel"
             },
+            "maxItems": 20000,
             "type": "array"
           },
           "partial_failures": {
             "items": {
               "$ref": "#/components/schemas/AdminModelPartialFailure"
             },
+            "maxItems": 67,
             "type": "array"
           },
           "providers": {
             "items": {
               "$ref": "#/components/schemas/AdminModelProvider"
             },
+            "maxItems": 65,
             "type": "array"
           },
           "request_id": {
@@ -13892,7 +13895,34 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "headers": {
+              "X-Models-Providers": {
+                "description": "Successfully aggregated providers in deterministic priority order.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Models-Providers-Failed": {
+                "description": "Providers whose catalogues were unavailable.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Models-Providers-Skipped": {
+                "description": "Provider count skipped by the bounded aggregation budget.",
+                "schema": {
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "X-Models-Truncated": {
+                "description": "True when provider, row, or encoded-response limits truncated aggregation.",
+                "schema": {
+                  "type": "boolean"
+                }
+              }
+            }
           },
           "default": {
             "content": {
