@@ -4,17 +4,23 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { LoginPage } from "@/app/auth/LoginPage";
 
-const authRuntime = vi.hoisted(() => ({ legacyFallback: true }));
+const authRuntime = vi.hoisted(() => ({
+  authenticationMode: "legacy_token" as "legacy_token" | "session",
+  error: undefined as string | undefined,
+  legacyFallback: true,
+  sso: { allow_local_login: true, keycloak_enabled: false, login_url: "/auth/keycloak/login" },
+}));
 
 vi.mock("@/app/auth/AuthProvider", () => ({
   useAuth: () => ({
     mode: "anonymous",
-    authenticationMode: "legacy_token",
+    authenticationMode: authRuntime.authenticationMode,
     legacyFallback: authRuntime.legacyFallback,
     backendVersion: "v0.80.0",
     uiVersion: "v0.80.0",
     apiVersion: "v1",
-    sso: { allow_local_login: true, keycloak_enabled: false, login_url: "/auth/keycloak/login" },
+    error: authRuntime.error,
+    sso: authRuntime.sso,
     login: vi.fn(),
     setLegacyToken: vi.fn(),
   }),
@@ -32,7 +38,14 @@ function renderLogin(): ReturnType<typeof render> {
 
 describe("LoginPage Legacy bridge", () => {
   beforeEach(() => {
+    authRuntime.authenticationMode = "legacy_token";
+    authRuntime.error = undefined;
     authRuntime.legacyFallback = true;
+    authRuntime.sso = {
+      allow_local_login: true,
+      keycloak_enabled: false,
+      login_url: "/auth/keycloak/login",
+    };
   });
 
   it("shows the Legacy Admin link in Legacy token mode when fallback is enabled", () => {
@@ -47,5 +60,22 @@ describe("LoginPage Legacy bridge", () => {
     authRuntime.legacyFallback = false;
     renderLogin();
     expect(screen.queryByRole("link", { name: "기존 관리자 화면" })).not.toBeInTheDocument();
+  });
+
+  it("shows an SSO provisioning error when local login is disabled", () => {
+    authRuntime.authenticationMode = "session";
+    authRuntime.error =
+      "SSO 사용자 정보를 준비하지 못했습니다. 잠시 후 다시 시도하거나 관리자에게 문의하세요. (진단 코드: user_provisioning_failed)";
+    authRuntime.sso = {
+      allow_local_login: false,
+      keycloak_enabled: true,
+      login_url: "/auth/keycloak/login",
+    };
+
+    renderLogin();
+
+    expect(screen.getByRole("alert")).toHaveTextContent("SSO 사용자 정보를 준비하지 못했습니다.");
+    expect(screen.getByRole("button", { name: /Keycloak SSO/ })).toBeVisible();
+    expect(screen.queryByLabelText("이메일")).not.toBeInTheDocument();
   });
 });

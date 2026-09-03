@@ -77,6 +77,12 @@ export function LoginPage(): React.JSX.Element {
           <p>기존 게이트웨이 계정 또는 Keycloak SSO를 사용합니다.</p>
         </div>
 
+        {serverError || auth.error ? (
+          <div className="form-error" role="alert">
+            {serverError ?? auth.error}
+          </div>
+        ) : null}
+
         {auth.authenticationMode === "legacy_token" ? (
           <div className="login-form">
             <div className="field">
@@ -93,11 +99,6 @@ export function LoginPage(): React.JSX.Element {
                 브라우저 탭의 세션 저장소에만 저장하며 로컬 저장소에는 저장하지 않습니다.
               </p>
             </div>
-            {serverError || auth.error ? (
-              <div className="form-error" role="alert">
-                {serverError ?? auth.error}
-              </div>
-            ) : null}
             <Button variant="primary" onClick={() => void saveLegacyToken()}>
               <KeyRound aria-hidden="true" /> 콘솔 열기
             </Button>
@@ -138,11 +139,6 @@ export function LoginPage(): React.JSX.Element {
                     </p>
                   ) : null}
                 </div>
-                {serverError || auth.error ? (
-                  <div className="form-error" role="alert">
-                    {serverError ?? auth.error}
-                  </div>
-                ) : null}
                 <Button variant="primary" type="submit" disabled={form.formState.isSubmitting}>
                   {form.formState.isSubmitting ? "로그인 중…" : "로그인"}
                 </Button>
