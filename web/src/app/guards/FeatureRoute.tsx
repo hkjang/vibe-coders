@@ -15,10 +15,14 @@ export function FeatureRoute({ feature, children }: FeatureRouteProps): React.JS
   const runtimeFeature = features.find((candidate) => candidate.featureId === feature.featureId) ?? feature;
   const effective = resolveFeature(runtimeFeature, user, backendVersion, { legacyFallback });
   if (!effective.permitted) {
+    const missingPermission =
+      effective.reason === "permission_denied" || effective.reason === runtimeFeature.requiredPermission
+        ? runtimeFeature.requiredPermission
+        : undefined;
     return effective.reason === "ui_not_implemented" || effective.reason === "legacy_fallback_disabled" ? (
       <FeatureUnavailable />
     ) : (
-      <PermissionDenied permission={effective.reason} />
+      <PermissionDenied permission={missingPermission} reason={effective.reason} />
     );
   }
   if (effective.status === "legacy") return <LegacyFeaturePage feature={runtimeFeature} />;

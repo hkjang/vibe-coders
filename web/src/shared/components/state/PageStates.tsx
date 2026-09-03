@@ -80,12 +80,49 @@ export function FeatureUnavailable(): React.JSX.Element {
   );
 }
 
-export function PermissionDenied({ permission }: { permission?: string }): React.JSX.Element {
+function deniedFeatureCopy(reason: string | undefined): { title: string; message: string } {
+  switch (reason) {
+    case "authentication_required":
+      return { title: "로그인이 필요합니다.", message: "다시 로그인한 뒤 이 화면을 열어 주세요." };
+    case "feature_hidden":
+      return {
+        title: "현재 숨김 처리된 기능입니다.",
+        message: "운영자에게 기능 전환 상태를 확인해 달라고 요청하세요.",
+      };
+    case "outside_rollout":
+    case "rollout":
+      return {
+        title: "아직 이 기능의 배포 대상이 아닙니다.",
+        message: "점진 배포 범위에 포함되면 사용할 수 있습니다.",
+      };
+    case "role_not_enabled":
+    case "preview_role":
+      return {
+        title: "현재 역할에는 미리보기가 열려 있지 않습니다.",
+        message: "운영자에게 이 기능의 미리보기 대상 역할을 확인해 달라고 요청하세요.",
+      };
+    case "permission_denied":
+    default:
+      return {
+        title: "접근 권한이 없습니다.",
+        message: "이 화면을 보려면 관리자에게 필요한 권한을 요청하세요.",
+      };
+  }
+}
+
+export function PermissionDenied({
+  permission,
+  reason,
+}: {
+  permission?: string;
+  reason?: string;
+}): React.JSX.Element {
+  const copy = deniedFeatureCopy(reason);
   return (
     <section className="page-state" role="alert">
       <LockKeyhole aria-hidden="true" />
-      <h1>접근 권한이 없습니다.</h1>
-      <p>이 화면을 보려면 관리자에게 필요한 권한을 요청하세요.</p>
+      <h1>{copy.title}</h1>
+      <p>{copy.message}</p>
       {permission ? <p className="request-id">필요 권한: {permission}</p> : null}
       <a className="button button-secondary button-default" href="/app/overview">
         개요로 이동
