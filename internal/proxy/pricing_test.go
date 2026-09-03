@@ -117,3 +117,54 @@ func TestPricingVersionsAndEffectiveMerge(t *testing.T) {
 		t.Error("expected overwrite seed to re-add catalog entries")
 	}
 }
+
+// A negative unit price makes EstimateCostKRW return a negative cost, and every
+// enforcement point is a `cost > limit` comparison, so the per-key budget and the cost
+// guard would pass unconditionally for that model while quota totals shrink. The POST
+// handler must reject it instead of recording the version.
+func TestPricingRejectsNegativePrices(t *testing.T) {
+	db := openTestStore(t)
+	defer db.Close()
+	logger := store.NewAsyncLogger(db, 32, filepath.Join(t.TempDir(), "fallback.ndjson"))
+	logger.Start()
+	defer logger.Stop(context.Background())
+	server, err := NewServer(testConfig("http://upstream.invalid", "secret"), db, logger, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(server.Routes())
+	defer srv.Close()
+
+	bodies := map[string]map[string]any{
+		"input":  {"model": "neg-model", "input_krw_per_1m": -1.0, "output_krw_per_1m": 2.0},
+		"output": {"model": "neg-model", "input_krw_per_1m": 1.0, "output_krw_per_1m": -2.0},
+		"cached": {"model": "neg-model", "input_krw_per_1m": 1.0, "output_krw_per_1m": 2.0, "cached_input_krw_per_1m": -0.5},
+	}
+	for name, body := range bodies {
+		t.Run(name, func(t *testing.T) {
+			resp := postJSON(t, srv.URL+"/admin/pricing", "", body)
+			payload, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			if resp.StatusCode != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400 (body %s)", resp.StatusCode, payload)
+			}
+		})
+	}
+
+	versions, err := db.ListPricingVersions(context.Background(), "neg-model", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(versions) != 0 {
+		t.Fatalf("rejected prices were still recorded: %+v", versions)
+	}
+
+	// Zero stays valid — it is how operators mark a model as not billed.
+	free := postJSON(t, srv.URL+"/admin/pricing", "", map[string]any{
+		"model": "free-model", "input_krw_per_1m": 0.0, "output_krw_per_1m": 0.0,
+	})
+	free.Body.Close()
+	if free.StatusCode != http.StatusCreated {
+		t.Fatalf("zero price status = %d, want 201", free.StatusCode)
+	}
+}
