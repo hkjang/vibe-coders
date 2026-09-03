@@ -316,7 +316,7 @@ func (s *Server) handleAppRequests(w http.ResponseWriter, r *http.Request) {
 	for key := range values {
 		max, ok := allowed[key]
 		if !ok {
-			writeOpenAIError(w, http.StatusBadRequest, "지원하지 않는 필터입니다: "+key, "invalid_request_error", "invalid_requests_filter")
+			writeOpenAIError(w, http.StatusBadRequest, "지원하지 않는 요청 필터입니다.", "invalid_request_error", "invalid_requests_filter")
 			return
 		}
 		value, err := singleAppRequestParam(values, key, max)

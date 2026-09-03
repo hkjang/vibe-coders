@@ -171,13 +171,13 @@ func TestAppRequestsProjectionBoundsAndRedactsUntrustedMetadata(t *testing.T) {
 	jwToken := "eyJabcde.eyJfghij.abcdefgh"
 	huge := strings.Repeat("가", 300)
 	now := time.Date(2026, 9, 3, 1, 2, 3, 0, time.UTC)
-	maxInt := int(^uint(0) >> 1)
+	maxDBInt := int(math.MaxInt32)
 	if err := db.InsertLogRecord(t.Context(), store.LogRecord{
 		Request: store.RequestLog{
 			ID: "req-untrusted", TraceID: apiSecret, APIKeyID: serviceSecret,
 			Method: http.MethodPost, ClientIP: huge, Model: huge,
 			Endpoint: "/v1/chat/completions?client_secret=do-not-return", Provider: provider,
-			StatusCode: 5000, LatencyMS: -1, FirstChunkMS: math.MaxInt64,
+			StatusCode: 5000, LatencyMS: -1, FirstChunkMS: math.MaxInt32,
 			SessionID: "Bearer abcdefghijklmnop", CreatedAt: now,
 		},
 		Response: &store.ResponseLog{
@@ -186,7 +186,7 @@ func TestAppRequestsProjectionBoundsAndRedactsUntrustedMetadata(t *testing.T) {
 		},
 		Usage: &store.TokenUsage{
 			ID: "usage-untrusted", RequestID: "req-untrusted", PromptTokens: -4,
-			CompletionTokens: maxInt, TotalTokens: -1, CachedTokens: maxInt,
+			CompletionTokens: maxDBInt, TotalTokens: -1, CachedTokens: maxDBInt,
 			ReasoningTokens: -1, EstimatedCost: -12.5, Currency: apiSecret, CreatedAt: now,
 		},
 	}); err != nil {
@@ -222,7 +222,7 @@ func TestAppRequestsProjectionBoundsAndRedactsUntrustedMetadata(t *testing.T) {
 		item.Currency != appRequestValueRedacted || item.FinishReason != appRequestValueRedacted {
 		t.Fatalf("untrusted strings were not projected safely: %+v", item)
 	}
-	if item.StatusCode != 0 || item.LatencyMS != 0 || item.FirstChunkMS != appRequestMaxSafeInteger ||
+	if item.StatusCode != 0 || item.LatencyMS != 0 || item.FirstChunkMS != math.MaxInt32 ||
 		item.PromptTokens != 0 || item.CompletionTokens != appRequestMaxCount || item.TotalTokens != 0 ||
 		item.CachedTokens != appRequestMaxCount || item.ReasoningTokens != 0 || item.EstimatedCost != 0 {
 		t.Fatalf("untrusted numbers were not clamped: %+v", item)
@@ -231,6 +231,9 @@ func TestAppRequestsProjectionBoundsAndRedactsUntrustedMetadata(t *testing.T) {
 		if got := clampAppRequestCost(value); got != 0 {
 			t.Fatalf("clampAppRequestCost(%v) = %v", value, got)
 		}
+	}
+	if got := clampAppRequestInt64(math.MaxInt64); got != appRequestMaxSafeInteger {
+		t.Fatalf("clampAppRequestInt64(MaxInt64) = %d", got)
 	}
 }
 
@@ -316,6 +319,43 @@ func TestAppRequestsRejectsInvalidFilters(t *testing.T) {
 	}
 }
 
+func TestAppRequestsUnknownQueryKeyDoesNotReflectInput(t *testing.T) {
+	_, _, gateway := newAdminModelsTestServer(t, "")
+	secretKey := "vc_sk_" + strings.Repeat("s", 43)
+	for name, key := range map[string]string{
+		"secret-shaped": secretKey,
+		"oversized":     strings.Repeat("oversized-filter-key-", 600),
+	} {
+		t.Run(name, func(t *testing.T) {
+			response := providerAppRequest(t, http.MethodGet, gateway.URL+"/admin/requests?"+
+				url.QueryEscape(key)+"=value", nil)
+			body, err := io.ReadAll(response.Body)
+			response.Body.Close()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if response.StatusCode != http.StatusBadRequest {
+				t.Fatalf("status=%d body=%s", response.StatusCode, body)
+			}
+			if strings.Contains(string(body), key) || strings.Contains(string(body), secretKey) {
+				t.Fatalf("unknown query key was reflected: %s", body)
+			}
+			var envelope struct {
+				Error struct {
+					Message string `json:"message"`
+					Code    string `json:"code"`
+				} `json:"error"`
+			}
+			if err := json.Unmarshal(body, &envelope); err != nil {
+				t.Fatal(err)
+			}
+			if envelope.Error.Message != "지원하지 않는 요청 필터입니다." || envelope.Error.Code != "invalid_requests_filter" {
+				t.Fatalf("unstable error envelope: %+v", envelope)
+			}
+		})
+	}
+}
+
 func TestAppRequestsOpenAPIProjectionMatchesRuntimeFields(t *testing.T) {
 	spec := buildOpenAPISpec()
 	components := spec["components"].(map[string]any)
@@ -339,12 +379,51 @@ func TestAppRequestsOpenAPIProjectionMatchesRuntimeFields(t *testing.T) {
 			t.Errorf("AppRequestSummary documents forbidden field %q", forbidden)
 		}
 	}
+	requestID := properties["request_id"].(map[string]any)
+	if requestID["minLength"] != 1 || requestID["maxLength"] != appRequestIDMaxBytes {
+		t.Fatalf("request_id OpenAPI bounds = %v", requestID)
+	}
+	createdAt := properties["created_at"].(map[string]any)
+	if createdAt["maxLength"] != len(appRequestTimestampLayout) {
+		t.Fatalf("created_at OpenAPI bounds = %v", createdAt)
+	}
+	responseSchema := schemas["AppRequestsResponse"].(map[string]any)
+	responseProperties := responseSchema["properties"].(map[string]any)
+	requests := responseProperties["requests"].(map[string]any)
+	if requests["maxItems"] != 200 {
+		t.Fatalf("requests OpenAPI bounds = %v", requests)
+	}
+	for _, field := range []string{"next_cursor", "previous_cursor"} {
+		cursor := responseProperties[field].(map[string]any)
+		if cursor["minLength"] != 1 || cursor["maxLength"] != appRequestCursorMaxBytes {
+			t.Fatalf("%s OpenAPI bounds = %v", field, cursor)
+		}
+	}
+	generatedAt := responseProperties["generated_at"].(map[string]any)
+	if generatedAt["maxLength"] != len(appRequestTimestampLayout) {
+		t.Fatalf("generated_at OpenAPI bounds = %v", generatedAt)
+	}
 	paths := spec["paths"].(map[string]any)
 	operation := paths["/admin/requests"].(map[string]any)["get"].(map[string]any)
 	parameters := operation["parameters"].([]any)
 	header := parameters[0].(map[string]any)
 	if header["name"] != "X-Vibe-UI" || header["required"] != false {
 		t.Fatalf("X-Vibe-UI must remain optional for legacy callers: %v", header)
+	}
+	var cursorParameter map[string]any
+	for _, raw := range parameters {
+		parameter := raw.(map[string]any)
+		if parameter["name"] == "cursor" {
+			cursorParameter = parameter
+			break
+		}
+	}
+	if cursorParameter == nil {
+		t.Fatal("cursor query parameter missing")
+	}
+	cursorSchema := cursorParameter["schema"].(map[string]any)
+	if _, hasMin := cursorSchema["minLength"]; hasMin || cursorSchema["maxLength"] != appRequestCursorMaxBytes {
+		t.Fatalf("cursor query OpenAPI bounds = %v", cursorSchema)
 	}
 	responses := operation["responses"].(map[string]any)
 	encoded, err := json.Marshal(responses["200"])

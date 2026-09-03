@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -142,6 +143,119 @@ func TestAppRecentRequestsOrdersVariableRFC3339NanoChronologically(t *testing.T)
 	if _, _, err := db.AppRecentRequests(ctx, AppRequestFilter{Limit: 10}); err == nil {
 		t.Fatal("malformed created_at was silently projected")
 	}
+}
+
+func TestAppRecentRequestsNormalizedCursorUsesExpressionIndex(t *testing.T) {
+	db := openStoreForTest(t)
+	defer db.Close()
+	ctx := t.Context()
+	base := time.Date(2026, 9, 3, 1, 2, 3, 0, time.UTC)
+	for index := 0; index < 8; index++ {
+		id := fmt.Sprintf("index-row-%02d", index)
+		if err := db.InsertLogRecord(ctx, LogRecord{Request: RequestLog{
+			ID: id, TraceID: id, Endpoint: "/v1/chat/completions", StatusCode: 200,
+			CreatedAt: base.Add(time.Duration(index) * time.Nanosecond),
+		}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	createdAt := appRequestCreatedAtExpr("r.created_at")
+	for _, test := range []struct {
+		name      string
+		predicate string
+		order     string
+		args      []any
+	}{
+		{
+			name:      "range descending",
+			predicate: createdAt + " >= ?",
+			order:     createdAt + " DESC, r.id DESC",
+			args:      []any{appRequestFixedTime(base), 5},
+		},
+		{
+			name:      "older cursor",
+			predicate: "(" + createdAt + ", r.id) < (?, ?)",
+			order:     createdAt + " DESC, r.id DESC",
+			args:      []any{appRequestFixedTime(base.Add(7 * time.Nanosecond)), "index-row-07", 5},
+		},
+		{
+			name:      "newer cursor",
+			predicate: "(" + createdAt + ", r.id) > (?, ?)",
+			order:     createdAt + " ASC, r.id ASC",
+			args:      []any{appRequestFixedTime(base), "index-row-00", 5},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			query := `SELECT r.id FROM request_logs r
+				WHERE length(r.created_at) BETWEEN 20 AND 30 AND ` + test.predicate + `
+				ORDER BY ` + test.order + ` LIMIT ?`
+			plan := explainAppRequestQuery(t, db, query, test.args...)
+			if !strings.Contains(plan, "idx_request_logs_app_cursor") {
+				t.Fatalf("normalized cursor index is not used:\n%s", plan)
+			}
+			lower := strings.ToLower(plan)
+			if strings.Contains(lower, "temp b-tree") || strings.Contains(lower, "sort") {
+				t.Fatalf("normalized cursor query requires an avoidable sort:\n%s", plan)
+			}
+		})
+	}
+}
+
+func explainAppRequestQuery(t *testing.T, db *SQLStore, query string, args ...any) string {
+	t.Helper()
+	ctx := t.Context()
+	var lines []string
+	if db.dialect == "postgres" {
+		tx, err := db.db.BeginTx(ctx, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer tx.Rollback()
+		if _, err := tx.ExecContext(ctx, `SET LOCAL enable_seqscan = off`); err != nil {
+			t.Fatal(err)
+		}
+		// Tiny test fixtures make a bitmap scan plus sort look artificially cheap.
+		// Disable it with the sequential scan so EXPLAIN proves the ordered btree
+		// path is eligible; production remains free to choose by actual table size.
+		if _, err := tx.ExecContext(ctx, `SET LOCAL enable_bitmapscan = off`); err != nil {
+			t.Fatal(err)
+		}
+		rows, err := tx.QueryContext(ctx, `EXPLAIN (COSTS OFF) `+db.bind(query), args...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var line string
+			if err := rows.Scan(&line); err != nil {
+				t.Fatal(err)
+			}
+			lines = append(lines, line)
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatal(err)
+		}
+		return strings.Join(lines, "\n")
+	}
+
+	rows, err := db.db.QueryContext(ctx, `EXPLAIN QUERY PLAN `+query, args...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, parent, unused int
+		var detail string
+		if err := rows.Scan(&id, &parent, &unused, &detail); err != nil {
+			t.Fatal(err)
+		}
+		lines = append(lines, detail)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return strings.Join(lines, "\n")
 }
 
 func TestAppRequestProviderCandidatesOnlyUsesBoundedConfiguration(t *testing.T) {

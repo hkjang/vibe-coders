@@ -548,7 +548,7 @@ func TestRequestLogIngestionUsesFixedWidthMonotonicClockAndIndexes(t *testing.T)
 func TestPostgresXViewIndexesAreBuiltWithoutBlockingWriters(t *testing.T) {
 	checked := 0
 	for _, statement := range migrationStatements() {
-		if !strings.Contains(statement, "idx_request_logs_ingested_cursor") && !strings.Contains(statement, "idx_request_logs_xview_legacy") && !strings.Contains(statement, "idx_request_logs_xview_team_cursor") && !strings.Contains(statement, "idx_secret_events_request") {
+		if !strings.Contains(statement, "idx_request_logs_ingested_cursor") && !strings.Contains(statement, "idx_request_logs_xview_legacy") && !strings.Contains(statement, "idx_request_logs_xview_team_cursor") && !strings.Contains(statement, "idx_request_logs_app_cursor") && !strings.Contains(statement, "idx_secret_events_request") {
 			continue
 		}
 		rendered := renderForDialect(statement, "postgres")
@@ -560,7 +560,7 @@ func TestPostgresXViewIndexesAreBuiltWithoutBlockingWriters(t *testing.T) {
 		}
 		checked++
 	}
-	if checked != 4 {
-		t.Fatalf("checked %d XView indexes, want 4", checked)
+	if checked != 5 {
+		t.Fatalf("checked %d high-write indexes, want 5", checked)
 	}
 }

@@ -118,16 +118,17 @@ func (s *SQLStore) AppRequestProviderCandidates(ctx context.Context) ([]string, 
 // formatTime to one fixed-width representation inside SQL. RFC3339Nano omits
 // trailing fractional zeroes, so a direct TEXT comparison incorrectly sorts an
 // exact second (..03Z) after a later fractional instant (..03.5Z). The
-// expression uses functions/operators shared by SQLite and PostgreSQL.
+// expression uses functions/operators shared by SQLite and PostgreSQL and is
+// shared verbatim by the query and its expression index.
 func appRequestCreatedAtExpr(column string) string {
 	return `(CASE
-		WHEN length(` + column + `) = 20 AND substr(` + column + `, 20, 1) = 'Z'
-			THEN substr(` + column + `, 1, 19) || '.000000000Z'
-		WHEN length(` + column + `) BETWEEN 22 AND 30
-			AND substr(` + column + `, 20, 1) = '.'
-			AND substr(` + column + `, length(` + column + `), 1) = 'Z'
-			THEN substr(` + column + `, 1, length(` + column + `) - 1)
-				|| substr('000000000', 1, 30 - length(` + column + `)) || 'Z'
+		WHEN ((length(` + column + `) = 20) AND (substr(` + column + `, 20, 1) = 'Z'))
+			THEN (substr(` + column + `, 1, 19) || '.000000000Z')
+		WHEN ((length(` + column + `) >= 22) AND (length(` + column + `) <= 30)
+			AND (substr(` + column + `, 20, 1) = '.')
+			AND (substr(` + column + `, length(` + column + `), 1) = 'Z'))
+			THEN ((substr(` + column + `, 1, (length(` + column + `) - 1))
+				|| substr('000000000', 1, (30 - length(` + column + `)))) || 'Z')
 		ELSE ` + column + ` END)`
 }
 
@@ -200,8 +201,8 @@ func (s *SQLStore) AppRecentRequests(ctx context.Context, filter AppRequestFilte
 			operator = ">"
 			order = createdAt + " ASC, r.id ASC"
 		}
-		where = append(where, "("+createdAt+" "+operator+" ? OR ("+createdAt+" = ? AND r.id "+operator+" ?))")
-		args = append(args, cursorAt, cursorAt, filter.CursorID)
+		where = append(where, "("+createdAt+", r.id) "+operator+" (?, ?)")
+		args = append(args, cursorAt, filter.CursorID)
 	}
 	args = append(args, filter.Limit+1)
 	query := s.bind(`SELECT substr(r.id, 1, ` + fmt.Sprint(appRequestReadIDChars) + `),
