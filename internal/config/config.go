@@ -622,6 +622,14 @@ func Load() (Config, error) {
 	if err := json.Unmarshal([]byte(getEnv("MODEL_PRICING_KRW_PER_1M", "{}")), &cfg.Pricing); err != nil {
 		return Config{}, fmt.Errorf("parse MODEL_PRICING_KRW_PER_1M: %w", err)
 	}
+	// Cost enforcement compares `cost > limit`, so a negative unit price here would make
+	// every request on that model look free-or-better and disable the budget and cost
+	// guard entirely. Refuse to boot rather than run with silently unenforceable limits.
+	for model, price := range cfg.Pricing {
+		if price.InputKRWPer1M < 0 || price.OutputKRWPer1M < 0 || price.CachedInputKRWPer1M < 0 {
+			return Config{}, fmt.Errorf("MODEL_PRICING_KRW_PER_1M[%q]: prices must be non-negative", model)
+		}
+	}
 	if cfg.Auth.Enabled && cfg.Auth.JWTSecret == "" {
 		return Config{}, fmt.Errorf("AUTH_JWT_SECRET is required when AUTH_ENABLED=true")
 	}

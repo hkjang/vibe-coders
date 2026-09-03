@@ -145,6 +145,15 @@ func (s *Server) handlePricing(w http.ResponseWriter, r *http.Request) {
 			writeOpenAIError(w, http.StatusBadRequest, "model, input_krw_per_1m, output_krw_per_1m are required", "invalid_request_error", "missing_fields")
 			return
 		}
+		// A negative unit price is never a rate, but it is an easy typo (e.g. -1 meaning
+		// "unset"). It would make EstimateCostKRW return a negative cost, which silently
+		// disables the per-key budget and the cost guard (both are `cost > limit` checks)
+		// and subtracts from quota totals instead of adding to them. Reject at the edge so
+		// no such version can be recorded.
+		if *p.InputKRWPer1M < 0 || *p.OutputKRWPer1M < 0 || p.CachedInputKRWPer1M < 0 {
+			writeOpenAIError(w, http.StatusBadRequest, "input_krw_per_1m, output_krw_per_1m, cached_input_krw_per_1m must be non-negative", "invalid_request_error", "invalid_price")
+			return
+		}
 		v := store.ModelPricingVersion{
 			ID: newID("price"), Model: p.Model, InputKRWPer1M: *p.InputKRWPer1M, OutputKRWPer1M: *p.OutputKRWPer1M,
 			CachedInputKRWPer1M: p.CachedInputKRWPer1M, Source: firstNonEmpty(strings.TrimSpace(p.Source), "manual"), Note: strings.TrimSpace(p.Note),
