@@ -593,57 +593,72 @@
         "additionalProperties": false,
         "properties": {
           "api_key_id": {
+            "maxLength": 512,
             "type": "string"
           },
           "cached_tokens": {
+            "maximum": 2147483647,
             "minimum": 0,
             "type": "integer"
           },
           "completion_tokens": {
+            "maximum": 2147483647,
             "minimum": 0,
             "type": "integer"
           },
           "created_at": {
             "format": "date-time",
+            "maxLength": 30,
             "type": "string"
           },
           "currency": {
+            "maxLength": 16,
             "type": "string"
           },
           "endpoint": {
+            "maxLength": 512,
             "type": "string"
           },
           "estimated_cost": {
+            "maximum": 1000000000000000,
             "minimum": 0,
             "type": "number"
           },
           "finish_reason": {
+            "maxLength": 256,
             "type": "string"
           },
           "first_chunk_ms": {
             "format": "int64",
+            "maximum": 9007199254740991,
             "minimum": 0,
             "type": "integer"
           },
           "ip": {
+            "maxLength": 128,
             "type": "string"
           },
           "latency_ms": {
             "format": "int64",
+            "maximum": 9007199254740991,
             "minimum": 0,
             "type": "integer"
           },
           "method": {
+            "maxLength": 32,
             "type": "string"
           },
           "model": {
+            "maxLength": 256,
             "type": "string"
           },
           "prompt_tokens": {
+            "maximum": 2147483647,
             "minimum": 0,
             "type": "integer"
           },
           "provider_display": {
+            "maxLength": 256,
             "type": "string"
           },
           "provider_ref": {
@@ -653,13 +668,17 @@
             "type": "string"
           },
           "reasoning_tokens": {
+            "maximum": 2147483647,
             "minimum": 0,
             "type": "integer"
           },
           "request_id": {
+            "maxLength": 512,
+            "minLength": 1,
             "type": "string"
           },
           "session_id": {
+            "maxLength": 512,
             "type": "string"
           },
           "status_code": {
@@ -671,10 +690,12 @@
             "type": "boolean"
           },
           "total_tokens": {
+            "maximum": 2147483647,
             "minimum": 0,
             "type": "integer"
           },
           "trace_id": {
+            "maxLength": 512,
             "type": "string"
           }
         },
@@ -710,6 +731,7 @@
         "properties": {
           "generated_at": {
             "format": "date-time",
+            "maxLength": 30,
             "type": "string"
           },
           "limit": {
@@ -718,15 +740,20 @@
             "type": "integer"
           },
           "next_cursor": {
+            "maxLength": 4096,
+            "minLength": 1,
             "type": "string"
           },
           "previous_cursor": {
+            "maxLength": 4096,
+            "minLength": 1,
             "type": "string"
           },
           "requests": {
             "items": {
               "$ref": "#/components/schemas/AppRequestSummary"
             },
+            "maxItems": 200,
             "type": "array"
           }
         },
@@ -2740,7 +2767,7 @@
   "info": {
     "description": "OpenAI-compatible AI control-plane gateway. This document covers the full HTTP surface; request/response bodies are summarized — see the admin UI for live examples.",
     "title": "AI Proxy Gateway API",
-    "version": "v0.82.0"
+    "version": "v0.82.1"
   },
   "openapi": "3.0.3",
   "paths": {
@@ -9167,13 +9194,14 @@
     },
     "/admin/requests": {
       "get": {
-        "description": "X-Vibe-UI: app requests receive the safe typed request-summary projection. Legacy callers keep the existing response shape.",
+        "description": "Legacy callers keep the existing dynamic response shape. When X-Vibe-UI: app is supplied, the response follows the AppRequestsResponse component.",
         "operationId": "get__admin_requests",
         "parameters": [
           {
+            "description": "Set to app to request the safe React console projection.",
             "in": "header",
             "name": "X-Vibe-UI",
-            "required": true,
+            "required": false,
             "schema": {
               "enum": [
                 "app"
@@ -9248,6 +9276,7 @@
             "name": "request_id",
             "required": false,
             "schema": {
+              "maxLength": 512,
               "type": "string"
             }
           },
@@ -9296,20 +9325,14 @@
             "name": "cursor",
             "required": false,
             "schema": {
+              "maxLength": 4096,
               "type": "string"
             }
           }
         ],
         "responses": {
           "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AppRequestsResponse"
-                }
-              }
-            },
-            "description": "OK"
+            "description": "OK. X-Vibe-UI: app uses AppRequestsResponse; legacy callers receive the existing response shape."
           },
           "default": {
             "content": {

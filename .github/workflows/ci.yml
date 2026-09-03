@@ -129,6 +129,38 @@ jobs:
         # Fails if the cmd/vibe CLI or the TypeScript SDK call a path the server no longer serves.
         run: go run ./cmd/api-surface-audit
 
+  request-planner:
+    name: SQLite + PostgreSQL request explorer · natural planner
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73
+        env:
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: vibe
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d vibe"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      TEST_POSTGRES_DSN: postgres://postgres:test@127.0.0.1:5432/vibe?sslmode=disable
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Verify SQLite 200k-row natural query plans
+        env:
+          TEST_POSTGRES_DSN: ""
+          TEST_SQLITE_PLANNER: "1"
+        run: go test ./internal/store -run '^TestAppRecentRequestsSQLiteNaturalPlannerAtScale$' -count=1 -timeout=5m
+      - name: Verify PostgreSQL 200k-row plans and oversized legacy upgrade
+        run: go test ./internal/store -run '^(TestAppRecentRequestsPostgresNaturalPlannerAtScale|TestMigrateAppRequestIndexesIgnoreOversizedLegacyKeys)$' -count=1 -timeout=5m
+
   sdk-typecheck:
     name: TypeScript SDK typecheck
     runs-on: ubuntu-latest

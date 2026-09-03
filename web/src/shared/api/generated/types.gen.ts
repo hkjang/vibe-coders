@@ -5123,8 +5123,11 @@ export type GetAdminReportsNarrativeResponses = {
 
 export type GetAdminRequestsData = {
     body?: never;
-    headers: {
-        'X-Vibe-UI': 'app';
+    headers?: {
+        /**
+         * Set to app to request the safe React console projection.
+         */
+        'X-Vibe-UI'?: 'app';
     };
     path?: never;
     query?: {
@@ -5157,12 +5160,10 @@ export type GetAdminRequestsError = GetAdminRequestsErrors[keyof GetAdminRequest
 
 export type GetAdminRequestsResponses = {
     /**
-     * OK
+     * OK. X-Vibe-UI: app uses AppRequestsResponse; legacy callers receive the existing response shape.
      */
-    200: AppRequestsResponse;
+    200: unknown;
 };
-
-export type GetAdminRequestsResponse = GetAdminRequestsResponses[keyof GetAdminRequestsResponses];
 
 export type GetAdminRequestsDiffData = {
     body?: never;

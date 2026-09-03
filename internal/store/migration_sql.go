@@ -103,12 +103,16 @@ func migrationSQLFor(dialect string) MigrationSQLReport {
 		rep.Statements = append(rep.Statements, item)
 	}
 	rep.Counts.Total = len(rep.Statements)
+	rep.PostMigration = []string{
+		"사전 릴리스 요청 탐색기의 구형 커서 인덱스를 안전한 부분 인덱스 생성 후 제거합니다.",
+	}
 
 	if dialect == "postgres" {
-		rep.PostMigration = []string{
+		rep.PostMigration = append(rep.PostMigration,
 			"REAL 컬럼을 DOUBLE PRECISION 으로 넓힙니다 (information_schema 를 읽어 대상 결정).",
 			"카운터 컬럼을 BIGINT 로 넓힙니다 (pgCounterColumns 목록).",
-		}
+			"요청 탐색기 식별자 가드 통계가 없을 때만 request_logs 와 api_keys 를 ANALYZE 합니다.",
+		)
 	}
 	return rep
 }

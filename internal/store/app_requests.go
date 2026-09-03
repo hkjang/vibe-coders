@@ -10,6 +10,7 @@ import (
 
 const (
 	appRequestTimeLayout            = "2006-01-02T15:04:05.000000000Z"
+	maxAppRequestPageSize           = 200
 	maxAppRequestProviderCandidates = 1024
 	// SQL substr counts Unicode characters, while the public projection limits
 	// UTF-8 bytes. Reading max+1 characters lets the proxy detect overflow and
@@ -132,20 +133,43 @@ func appRequestCreatedAtExpr(column string) string {
 		ELSE ` + column + ` END)`
 }
 
+// appRequestValidRowPredicate is shared by the request-page query and its
+// partial cursor indexes. Keeping malformed or oversized identifiers outside
+// those indexes gives PostgreSQL an ordered path with useful statistics and
+// keeps SQLite from walking rows the public projection must reject anyway.
+func appRequestValidRowPredicate(idColumn, createdAtColumn string) string {
+	return appRequestBoundedTextPredicate(idColumn) + " AND length(" + createdAtColumn + ") BETWEEN 20 AND 30"
+}
+
+func appRequestBoundedTextPredicate(column string) string {
+	return "length(CAST(" + column + " AS BLOB)) BETWEEN 1 AND 512"
+}
+
+func appRequestValidChildPredicate(requestIDColumn, idColumn, createdAtColumn string) string {
+	return appRequestBoundedTextPredicate(requestIDColumn) + " AND " +
+		appRequestBoundedTextPredicate(idColumn) + " AND length(" + createdAtColumn + ") BETWEEN 20 AND 30"
+}
+
 func appRequestFixedTime(value time.Time) string {
 	return value.UTC().Format(appRequestTimeLayout)
 }
 
-// AppRecentRequests returns one stable keyset page. hasMore refers to the
-// requested direction; newer pages are queried ascending and reversed so the
-// public result is always (created_at DESC, id DESC).
-func (s *SQLStore) AppRecentRequests(ctx context.Context, filter AppRequestFilter) ([]AppRequestSummary, bool, error) {
-	createdAt := appRequestCreatedAtExpr("r.created_at")
-	requestIDBytes := "length(CAST(r.id AS BLOB))"
-	if s.dialect == "postgres" {
-		requestIDBytes = "octet_length(r.id)"
+// appRecentRequestsQuery selects the bounded request page before joining the
+// request-scoped usage and response tables. The LIMIT in the derived table is
+// an intentional optimization boundary: a page of 51 requests must never turn
+// into a full token_usage/response_logs join on a long-lived installation.
+func (s *SQLStore) appRecentRequestsQuery(filter AppRequestFilter) (string, []any, int, error) {
+	limit := filter.Limit
+	if limit <= 0 || limit > maxAppRequestPageSize {
+		limit = 50
 	}
-	where := []string{requestIDBytes + " BETWEEN 1 AND 512", "length(r.created_at) BETWEEN 20 AND 30"}
+	createdAt := appRequestCreatedAtExpr("r.created_at")
+	validRow := renderForDialect(appRequestValidRowPredicate("r.id", "r.created_at"), s.dialect)
+	validRequestAPIKey := renderForDialect(appRequestBoundedTextPredicate("r.api_key_id"), s.dialect)
+	validTeamKey := renderForDialect(appRequestBoundedTextPredicate("k.id")+" AND "+appRequestBoundedTextPredicate("k.team"), s.dialect)
+	validTokenUsage := renderForDialect(appRequestValidChildPredicate("t_pick.request_id", "t_pick.id", "t_pick.created_at"), s.dialect)
+	validResponse := renderForDialect(appRequestValidChildPredicate("resp_pick.request_id", "resp_pick.id", "resp_pick.created_at"), s.dialect)
+	where := []string{validRow}
 	args := []any{}
 	addExact := func(column, value string) {
 		if value != "" {
@@ -162,7 +186,10 @@ func (s *SQLStore) AppRecentRequests(ctx context.Context, filter AppRequestFilte
 	addExact("r.id", filter.RequestID)
 	addExact("r.trace_id", filter.TraceID)
 	addExact("COALESCE(NULLIF(r.session_id, ''), 'no-session')", filter.SessionID)
-	addExact("r.api_key_id", filter.APIKeyID)
+	if filter.APIKeyID != "" {
+		where = append(where, validRequestAPIKey)
+		addExact("r.api_key_id", filter.APIKeyID)
+	}
 	if filter.Language != "" {
 		where = append(where, "EXISTS (SELECT 1 FROM language_stats ls WHERE ls.request_id = r.id AND ls.language = ?)")
 		args = append(args, filter.Language)
@@ -180,7 +207,10 @@ func (s *SQLStore) AppRecentRequests(ctx context.Context, filter AppRequestFilte
 			args = append(args, filter.StatusMax)
 		}
 	}
-	where, args = appendRequestTeamCondition(where, args, "", filter.Teams, filter.TeamScoped)
+	where, args = appendRequestTeamConditionWithPredicates(
+		where, args, "", filter.Teams, filter.TeamScoped, validRequestAPIKey, validTeamKey,
+		s.dialect == "sqlite",
+	)
 	if !filter.From.IsZero() {
 		where = append(where, createdAt+" >= ?")
 		args = append(args, appRequestFixedTime(filter.From))
@@ -193,38 +223,78 @@ func (s *SQLStore) AppRecentRequests(ctx context.Context, filter AppRequestFilte
 	if filter.CursorAt != "" {
 		cursorTime, err := time.Parse(time.RFC3339Nano, filter.CursorAt)
 		if err != nil {
-			return nil, false, fmt.Errorf("invalid app request cursor time: %w", err)
+			return "", nil, 0, fmt.Errorf("invalid app request cursor time: %w", err)
 		}
 		cursorAt := appRequestFixedTime(cursorTime)
 		operator := "<"
+		scalarOperator := "<="
 		if filter.Direction == "newer" {
 			operator = ">"
+			scalarOperator = ">="
 			order = createdAt + " ASC, r.id ASC"
 		}
+		// SQLite does not turn a row-value comparison into an expression-index
+		// range seek by itself. This logically redundant scalar bound does.
+		where = append(where, createdAt+" "+scalarOperator+" ?")
+		args = append(args, cursorAt)
 		where = append(where, "("+createdAt+", r.id) "+operator+" (?, ?)")
 		args = append(args, cursorAt, filter.CursorID)
 	}
-	args = append(args, filter.Limit+1)
-	query := s.bind(`SELECT substr(r.id, 1, ` + fmt.Sprint(appRequestReadIDChars) + `),
-			substr(COALESCE(r.trace_id, ''), 1, ` + fmt.Sprint(appRequestReadIDChars) + `),
-			substr(COALESCE(r.session_id, ''), 1, ` + fmt.Sprint(appRequestReadIDChars) + `),
-			substr(COALESCE(r.api_key_id, ''), 1, ` + fmt.Sprint(appRequestReadIDChars) + `),
-			substr(COALESCE(NULLIF(r.client_ip, ''), 'unknown'), 1, ` + fmt.Sprint(appRequestReadIPChars) + `),
-			substr(COALESCE(r.method, ''), 1, ` + fmt.Sprint(appRequestReadMethodChars) + `),
-			substr(COALESCE(r.model, ''), 1, ` + fmt.Sprint(appRequestReadModelChars) + `),
-			substr(COALESCE(r.provider, ''), 1, ` + fmt.Sprint(appRequestReadProviderChars) + `),
-			substr(COALESCE(r.endpoint, ''), 1, ` + fmt.Sprint(appRequestReadEndpointChars) + `),
-			r.stream, r.status_code, r.latency_ms,
-			COALESCE(r.first_chunk_ms, 0), COALESCE(t.prompt_tokens, 0),
-			COALESCE(t.completion_tokens, 0), COALESCE(t.total_tokens, 0),
-			COALESCE(t.cached_tokens, 0), COALESCE(t.reasoning_tokens, 0),
-			COALESCE(t.estimated_cost, 0), substr(COALESCE(t.currency, ''), 1, ` + fmt.Sprint(appRequestReadCurrencyChars) + `),
-			substr(COALESCE(resp.finish_reason, ''), 1, ` + fmt.Sprint(appRequestReadFinishReasonChars) + `), ` + createdAt + `
-		FROM request_logs r
-		LEFT JOIN token_usage t ON t.request_id = r.id
-		LEFT JOIN response_logs resp ON resp.request_id = r.id
-		WHERE ` + strings.Join(where, " AND ") + `
-		ORDER BY ` + order + ` LIMIT ?`)
+	pageLimit := limit + 1
+	args = append(args, pageLimit, pageLimit)
+	pageOrder := "page.created_at DESC, page.request_id DESC"
+	if filter.Direction == "newer" && filter.CursorAt != "" {
+		pageOrder = "page.created_at ASC, page.request_id ASC"
+	}
+	query := s.bind(`SELECT page.request_id, page.trace_id, page.session_id, page.api_key_id,
+			page.client_ip, page.method, page.model, page.provider, page.endpoint,
+			page.stream, page.status_code, page.latency_ms, page.first_chunk_ms,
+			COALESCE(t.prompt_tokens, 0), COALESCE(t.completion_tokens, 0),
+			COALESCE(t.total_tokens, 0), COALESCE(t.cached_tokens, 0),
+			COALESCE(t.reasoning_tokens, 0), COALESCE(t.estimated_cost, 0),
+			substr(COALESCE(t.currency, ''), 1, ` + fmt.Sprint(appRequestReadCurrencyChars) + `),
+			substr(COALESCE(resp.finish_reason, ''), 1, ` + fmt.Sprint(appRequestReadFinishReasonChars) + `),
+			page.created_at
+		FROM (
+			SELECT substr(r.id, 1, ` + fmt.Sprint(appRequestReadIDChars) + `) AS request_id,
+			substr(COALESCE(r.trace_id, ''), 1, ` + fmt.Sprint(appRequestReadIDChars) + `) AS trace_id,
+			substr(COALESCE(r.session_id, ''), 1, ` + fmt.Sprint(appRequestReadIDChars) + `) AS session_id,
+			substr(COALESCE(r.api_key_id, ''), 1, ` + fmt.Sprint(appRequestReadIDChars) + `) AS api_key_id,
+			substr(COALESCE(NULLIF(r.client_ip, ''), 'unknown'), 1, ` + fmt.Sprint(appRequestReadIPChars) + `) AS client_ip,
+			substr(COALESCE(r.method, ''), 1, ` + fmt.Sprint(appRequestReadMethodChars) + `) AS method,
+			substr(COALESCE(r.model, ''), 1, ` + fmt.Sprint(appRequestReadModelChars) + `) AS model,
+			substr(COALESCE(r.provider, ''), 1, ` + fmt.Sprint(appRequestReadProviderChars) + `) AS provider,
+			substr(COALESCE(r.endpoint, ''), 1, ` + fmt.Sprint(appRequestReadEndpointChars) + `) AS endpoint,
+			r.stream AS stream, r.status_code AS status_code, r.latency_ms AS latency_ms,
+			COALESCE(r.first_chunk_ms, 0) AS first_chunk_ms, ` + createdAt + ` AS created_at
+			FROM request_logs r
+			WHERE ` + strings.Join(where, " AND ") + `
+			ORDER BY ` + order + ` LIMIT ?
+		) page
+		LEFT JOIN token_usage t ON t.id = (
+			SELECT t_pick.id FROM token_usage t_pick
+			WHERE t_pick.request_id = page.request_id
+			AND ` + validTokenUsage + `
+			ORDER BY ` + appRequestCreatedAtExpr("t_pick.created_at") + ` DESC, t_pick.id DESC LIMIT 1
+		)
+		LEFT JOIN response_logs resp ON resp.id = (
+			SELECT resp_pick.id FROM response_logs resp_pick
+			WHERE resp_pick.request_id = page.request_id
+			AND ` + validResponse + `
+			ORDER BY ` + appRequestCreatedAtExpr("resp_pick.created_at") + ` DESC, resp_pick.id DESC LIMIT 1
+		)
+		ORDER BY ` + pageOrder + ` LIMIT ?`)
+	return query, args, limit, nil
+}
+
+// AppRecentRequests returns one stable keyset page. hasMore refers to the
+// requested direction; newer pages are queried ascending and reversed so the
+// public result is always (created_at DESC, id DESC).
+func (s *SQLStore) AppRecentRequests(ctx context.Context, filter AppRequestFilter) ([]AppRequestSummary, bool, error) {
+	query, args, limit, err := s.appRecentRequestsQuery(filter)
+	if err != nil {
+		return nil, false, err
+	}
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, false, err
@@ -253,9 +323,9 @@ func (s *SQLStore) AppRecentRequests(ctx context.Context, filter AppRequestFilte
 	if err := rows.Err(); err != nil {
 		return nil, false, err
 	}
-	hasMore := len(items) > filter.Limit
+	hasMore := len(items) > limit
 	if hasMore {
-		items = items[:filter.Limit]
+		items = items[:limit]
 	}
 	if filter.Direction == "newer" {
 		for left, right := 0, len(items)-1; left < right; left, right = left+1, right-1 {

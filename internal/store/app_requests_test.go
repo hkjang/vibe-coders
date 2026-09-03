@@ -2,7 +2,11 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -145,6 +149,48 @@ func TestAppRecentRequestsOrdersVariableRFC3339NanoChronologically(t *testing.T)
 	}
 }
 
+func TestAppRecentRequestsSelectsLatestChildWithoutDuplicatingPage(t *testing.T) {
+	db := openStoreForTest(t)
+	defer db.Close()
+	ctx := t.Context()
+	base := time.Date(2026, 9, 3, 1, 2, 3, 0, time.UTC)
+	if err := db.InsertLogRecord(ctx, LogRecord{
+		Request: RequestLog{ID: "request-with-retry", TraceID: "trace-with-retry",
+			Endpoint: "/v1/chat/completions", StatusCode: 200, CreatedAt: base},
+		Usage: &TokenUsage{ID: "usage-old", RequestID: "request-with-retry", PromptTokens: 1,
+			CompletionTokens: 1, TotalTokens: 2, Currency: "KRW", Source: "usage", CreatedAt: base},
+		Response: &ResponseLog{ID: "response-old", RequestID: "request-with-retry", StatusCode: 200,
+			FinishReason: "old", ResponseHash: "old-hash", CreatedAt: base},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.db.ExecContext(ctx, db.bind(`INSERT INTO token_usage
+		(id, request_id, prompt_tokens, completion_tokens, total_tokens, cached_tokens,
+		 reasoning_tokens, estimated_cost, currency, source, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+		"usage-new", "request-with-retry", 3, 5, 8, 1, 2, 12.5, "KRW", "usage", formatTime(base.Add(500*time.Millisecond))); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.db.ExecContext(ctx, db.bind(`INSERT INTO response_logs
+		(id, request_id, status_code, finish_reason, response_hash, created_at)
+		VALUES (?, ?, ?, ?, ?, ?)`),
+		"response-new", "request-with-retry", 200, "new", "new-hash", formatTime(base.Add(500*time.Millisecond))); err != nil {
+		t.Fatal(err)
+	}
+
+	items, more, err := db.AppRecentRequests(ctx, AppRequestFilter{Limit: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if more || len(items) != 1 {
+		t.Fatalf("duplicate child rows changed page cardinality: items=%+v more=%v", items, more)
+	}
+	if items[0].TotalTokens != 8 || items[0].CachedTokens != 1 ||
+		items[0].ReasoningTokens != 2 || items[0].FinishReason != "new" {
+		t.Fatalf("latest child metadata was not selected: %+v", items[0])
+	}
+}
+
 func TestAppRecentRequestsNormalizedCursorUsesExpressionIndex(t *testing.T) {
 	db := openStoreForTest(t)
 	defer db.Close()
@@ -160,46 +206,192 @@ func TestAppRecentRequestsNormalizedCursorUsesExpressionIndex(t *testing.T) {
 		}
 	}
 
-	createdAt := appRequestCreatedAtExpr("r.created_at")
 	for _, test := range []struct {
-		name      string
-		predicate string
-		order     string
-		args      []any
+		name   string
+		filter AppRequestFilter
 	}{
 		{
-			name:      "range descending",
-			predicate: createdAt + " >= ?",
-			order:     createdAt + " DESC, r.id DESC",
-			args:      []any{appRequestFixedTime(base), 5},
+			name:   "default descending",
+			filter: AppRequestFilter{Limit: 5},
 		},
 		{
-			name:      "older cursor",
-			predicate: "(" + createdAt + ", r.id) < (?, ?)",
-			order:     createdAt + " DESC, r.id DESC",
-			args:      []any{appRequestFixedTime(base.Add(7 * time.Nanosecond)), "index-row-07", 5},
+			name:   "range descending",
+			filter: AppRequestFilter{Limit: 5, From: base},
 		},
 		{
-			name:      "newer cursor",
-			predicate: "(" + createdAt + ", r.id) > (?, ?)",
-			order:     createdAt + " ASC, r.id ASC",
-			args:      []any{appRequestFixedTime(base), "index-row-00", 5},
+			name: "older cursor",
+			filter: AppRequestFilter{Limit: 5, CursorAt: appRequestFixedTime(base.Add(7 * time.Nanosecond)),
+				CursorID: "index-row-07", Direction: "older"},
+		},
+		{
+			name: "newer cursor",
+			filter: AppRequestFilter{Limit: 5, CursorAt: appRequestFixedTime(base),
+				CursorID: "index-row-00", Direction: "newer"},
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			query := `SELECT r.id FROM request_logs r
-				WHERE length(r.created_at) BETWEEN 20 AND 30 AND ` + test.predicate + `
-				ORDER BY ` + test.order + ` LIMIT ?`
-			plan := explainAppRequestQuery(t, db, query, test.args...)
-			if !strings.Contains(plan, "idx_request_logs_app_cursor") {
+			query, args, _, err := db.appRecentRequestsQuery(test.filter)
+			if err != nil {
+				t.Fatal(err)
+			}
+			plan := explainAppRequestQuery(t, db, query, args...)
+			if !strings.Contains(plan, "idx_request_logs_app_valid_cursor") {
 				t.Fatalf("normalized cursor index is not used:\n%s", plan)
 			}
+			if test.filter.CursorAt != "" && db.dialect == "sqlite" &&
+				!strings.Contains(plan, "SEARCH r USING INDEX idx_request_logs_app_valid_cursor") {
+				t.Fatalf("cursor did not become an expression-index range seek:\n%s", plan)
+			}
 			lower := strings.ToLower(plan)
-			if strings.Contains(lower, "temp b-tree") || strings.Contains(lower, "sort") {
-				t.Fatalf("normalized cursor query requires an avoidable sort:\n%s", plan)
+			if strings.Contains(lower, "scan t") || strings.Contains(lower, "scan resp") ||
+				strings.Contains(lower, "seq scan on token_usage") || strings.Contains(lower, "seq scan on response_logs") {
+				t.Fatalf("bounded child lookups degraded to full scans:\n%s", plan)
 			}
 		})
 	}
+}
+
+func TestMigrateRemovesSupersededAppRequestCursorIndex(t *testing.T) {
+	db := openStoreForTest(t)
+	defer db.Close()
+	ctx := t.Context()
+	statement := `CREATE INDEX idx_request_logs_app_cursor ON request_logs(created_at, id)`
+	if s := renderForDialect(statement, db.dialect); s != statement {
+		statement = s
+	}
+	if _, err := db.db.ExecContext(ctx, statement); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	var count int
+	if db.dialect == "postgres" {
+		if err := db.db.QueryRowContext(ctx, `SELECT COUNT(*)
+			FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+			WHERE n.nspname = current_schema() AND c.relname = 'idx_request_logs_app_cursor'`).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+	} else if err := db.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master
+		WHERE type = 'index' AND name = 'idx_request_logs_app_cursor'`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatal("superseded app request cursor index survived migration")
+	}
+	report, err := db.IndexDrift(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !report.InSync() {
+		t.Fatalf("replacement indexes drift after cleanup: %+v", report.Items)
+	}
+}
+
+func TestMigrateAppRequestIndexesIgnoreOversizedLegacyKeys(t *testing.T) {
+	db := openStoreForTest(t)
+	defer db.Close()
+	ctx := t.Context()
+	for _, name := range []string{
+		"idx_api_keys_team_id",
+		"idx_request_logs_app_valid_cursor",
+		"idx_request_logs_app_team_valid_cursor",
+		"idx_token_usage_request_latest",
+		"idx_response_logs_request_latest",
+	} {
+		statement := "DROP INDEX IF EXISTS " + name
+		if db.dialect == "postgres" {
+			statement = "DROP INDEX CONCURRENTLY IF EXISTS " + name
+		}
+		if _, err := db.db.ExecContext(ctx, statement); err != nil {
+			t.Fatalf("drop %s: %v", name, err)
+		}
+	}
+
+	createdAt := appRequestFixedTime(time.Date(2026, 9, 3, 1, 2, 3, 0, time.UTC))
+	oversizedKeyID := incompressibleAppRequestText("key", 1500)
+	oversizedTeam := incompressibleAppRequestText("team", 1500)
+	if _, err := db.db.ExecContext(ctx, db.bind(`INSERT INTO api_keys
+		(id, name, key_hash, team, status, created_at) VALUES (?, ?, ?, ?, ?, ?)`),
+		oversizedKeyID, "legacy oversized key", "legacy-oversized-key-hash",
+		oversizedTeam, "active", createdAt); err != nil {
+		t.Fatal(err)
+	}
+
+	requestID := incompressibleAppRequestText("request", 500)
+	if _, err := db.db.ExecContext(ctx, db.bind(`INSERT INTO request_logs
+		(id, trace_id, api_key_id, endpoint, stream, status_code, latency_ms,
+		 first_chunk_ms, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+		requestID, "legacy-trace", "normal-key", "/v1/chat/completions",
+		0, 200, 12, 4, createdAt); err != nil {
+		t.Fatal(err)
+	}
+	oversizedUsageID := incompressibleAppRequestText("usage", 2200)
+	if _, err := db.db.ExecContext(ctx, db.bind(`INSERT INTO token_usage
+		(id, request_id, prompt_tokens, completion_tokens, total_tokens, cached_tokens,
+		 reasoning_tokens, estimated_cost, currency, source, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+		oversizedUsageID, requestID, 10, 20, 30, 0, 0, 1.5, "KRW", "legacy", createdAt); err != nil {
+		t.Fatal(err)
+	}
+	oversizedResponseID := incompressibleAppRequestText("response", 2200)
+	if _, err := db.db.ExecContext(ctx, db.bind(`INSERT INTO response_logs
+		(id, request_id, status_code, finish_reason, response_hash, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?)`),
+		oversizedResponseID, requestID, 200, "legacy", "legacy-response-hash", createdAt); err != nil {
+		t.Fatal(err)
+	}
+
+	// These values fit their individual legacy indexes but would exceed a
+	// PostgreSQL btree tuple once combined. Partial guards must let an upgrade
+	// rebuild the new composite indexes without leaving an invalid shell.
+	if err := db.Migrate(ctx); err != nil {
+		t.Fatalf("migrate with oversized legacy keys: %v", err)
+	}
+	items, more, err := db.AppRecentRequests(ctx, AppRequestFilter{Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if more || len(items) != 1 || items[0].RequestID != requestID {
+		t.Fatalf("unexpected request page: items=%+v more=%v", items, more)
+	}
+	if items[0].TotalTokens != 0 || items[0].FinishReason != "" {
+		t.Fatalf("oversized child identifiers crossed the projection boundary: %+v", items[0])
+	}
+	if db.dialect == "postgres" {
+		var invalid int
+		if err := db.db.QueryRowContext(ctx, `SELECT COUNT(*)
+			FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid
+			JOIN pg_namespace n ON n.oid = c.relnamespace
+			WHERE n.nspname = current_schema() AND NOT i.indisvalid
+				AND c.relname IN ('idx_api_keys_team_id',
+					'idx_request_logs_app_valid_cursor',
+					'idx_request_logs_app_team_valid_cursor',
+					'idx_token_usage_request_latest',
+					'idx_response_logs_request_latest')`).Scan(&invalid); err != nil {
+			t.Fatal(err)
+		}
+		if invalid != 0 {
+			t.Fatalf("migration left %d invalid app request indexes", invalid)
+		}
+	}
+	report, err := db.IndexDrift(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !report.InSync() {
+		t.Fatalf("app request indexes drift after guarded migration: %+v", report.Items)
+	}
+}
+
+func incompressibleAppRequestText(namespace string, size int) string {
+	var value strings.Builder
+	for sequence := 0; value.Len() < size; sequence++ {
+		digest := sha256.Sum256([]byte(fmt.Sprintf("%s-%d", namespace, sequence)))
+		value.WriteString(hex.EncodeToString(digest[:]))
+	}
+	return value.String()[:size]
 }
 
 func explainAppRequestQuery(t *testing.T, db *SQLStore, query string, args ...any) string {
@@ -258,6 +450,343 @@ func explainAppRequestQuery(t *testing.T, db *SQLStore, query string, args ...an
 	return strings.Join(lines, "\n")
 }
 
+func TestAppRecentRequestsPostgresNaturalPlannerAtScale(t *testing.T) {
+	if os.Getenv("TEST_POSTGRES_DSN") == "" {
+		t.Skip("set TEST_POSTGRES_DSN to verify the production planner")
+	}
+	db := openStoreForTest(t)
+	defer db.Close()
+	if db.dialect != "postgres" {
+		t.Skip("PostgreSQL planner regression")
+	}
+	ctx := t.Context()
+	// The initial test-store migration creates statistics against empty tables.
+	// Remove them so the second migration below represents the first upgrade of
+	// a populated pre-v0.82.1 installation.
+	for _, name := range []string{"app_request_guard_stats_v2", "app_request_key_guard_stats_v1"} {
+		if _, err := db.db.ExecContext(ctx, `DROP STATISTICS IF EXISTS `+name); err != nil {
+			t.Fatalf("drop empty planner statistics %s: %v", name, err)
+		}
+	}
+	const rows = 200_000
+	statements := []string{
+		`INSERT INTO api_keys (id, name, key_hash, team, status, created_at)
+			SELECT 'planner-key-' || g, 'planner key ' || g, 'planner-hash-' || g,
+				CASE WHEN g <= 10 THEN 'team-a' ELSE 'team-b' END,
+				'active', '2026-09-01T00:00:00Z'
+			FROM generate_series(1, 100) g`,
+		`INSERT INTO request_logs
+			(id, trace_id, api_key_id, method, client_ip, model, endpoint, stream,
+			 provider, status_code, latency_ms, first_chunk_ms, session_id, created_at)
+			SELECT 'planner-req-' || lpad(g::text, 12, '0'), 'planner-trace-' || g,
+				'planner-key-' || ((g % 100) + 1), 'POST', '192.0.2.1', 'model-a',
+				'/v1/chat/completions', 0, 'provider-a', 200, 10, 5,
+				'planner-session-' || (g % 100),
+				to_char(timestamptz '2026-09-01 00:00:00+00' + g * interval '1 second',
+					'YYYY-MM-DD"T"HH24:MI:SS.US') || '000Z'
+			FROM generate_series(1, 200000) g`,
+		`INSERT INTO token_usage
+			(id, request_id, prompt_tokens, completion_tokens, total_tokens, cached_tokens,
+			 reasoning_tokens, estimated_cost, currency, source, created_at)
+			SELECT 'planner-usage-' || g, 'planner-req-' || lpad(g::text, 12, '0'),
+				10, 20, 30, 0, 0, 0.01, 'KRW', 'usage', '2026-09-01T00:00:00Z'
+			FROM generate_series(1, 200000) g`,
+		`INSERT INTO response_logs
+			(id, request_id, status_code, finish_reason, response_hash, created_at)
+			SELECT 'planner-response-' || g, 'planner-req-' || lpad(g::text, 12, '0'),
+				200, 'stop', 'planner-response-hash-' || g, '2026-09-01T00:00:00Z'
+			FROM generate_series(1, 200000) g`,
+		`ANALYZE token_usage`,
+		`ANALYZE response_logs`,
+	}
+	for _, statement := range statements {
+		if _, err := db.db.ExecContext(ctx, statement); err != nil {
+			t.Fatalf("prepare %d-row planner fixture: %v", rows, err)
+		}
+	}
+	// Simulate an upgrade of an existing populated database. Migrate must notice
+	// that the newly declared expression statistics have no samples yet and run
+	// the one-time request_logs ANALYZE itself.
+	if err := db.Migrate(ctx); err != nil {
+		t.Fatalf("refresh request planner statistics: %v", err)
+	}
+	var guardExpressions int
+	if err := db.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM pg_stats_ext_exprs
+		WHERE schemaname = current_schema() AND statistics_schemaname = current_schema()
+			AND statistics_name = 'app_request_guard_stats_v2'
+			AND n_distinct IS NOT NULL`).Scan(&guardExpressions); err != nil {
+		t.Fatal(err)
+	}
+	if guardExpressions != 3 {
+		t.Fatalf("populated guard expression statistics = %d, want 3", guardExpressions)
+	}
+	var keyGuardExpressions int
+	if err := db.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM pg_stats_ext_exprs
+		WHERE schemaname = current_schema() AND statistics_schemaname = current_schema()
+			AND statistics_name = 'app_request_key_guard_stats_v1'
+			AND n_distinct IS NOT NULL`).Scan(&keyGuardExpressions); err != nil {
+		t.Fatal(err)
+	}
+	if keyGuardExpressions != 2 {
+		t.Fatalf("populated API-key guard expression statistics = %d, want 2", keyGuardExpressions)
+	}
+
+	base := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	cursorAt := appRequestFixedTime(base.Add(172_800 * time.Second))
+	for _, test := range []struct {
+		name   string
+		filter AppRequestFilter
+	}{
+		{name: "default", filter: AppRequestFilter{Limit: 50}},
+		{name: "range", filter: AppRequestFilter{Limit: 50, From: base.Add(100_000 * time.Second)}},
+		{name: "older", filter: AppRequestFilter{Limit: 50, CursorAt: cursorAt, CursorID: "planner-req-000000172800", Direction: "older"}},
+		{name: "newer", filter: AppRequestFilter{Limit: 50, CursorAt: cursorAt, CursorID: "planner-req-000000172800", Direction: "newer"}},
+		{name: "team", filter: AppRequestFilter{Limit: 50, Teams: []string{"team-a"}, TeamScoped: true}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			query, args, _, err := db.appRecentRequestsQuery(test.filter)
+			if err != nil {
+				t.Fatal(err)
+			}
+			plan, root := explainNaturalPostgresAppRequestQuery(t, db, query, args...)
+			if !strings.Contains(plan, "idx_request_logs_app_valid_cursor") &&
+				!strings.Contains(plan, "idx_request_logs_app_team_valid_cursor") {
+				t.Fatalf("natural planner did not use an ordered app cursor index:\n%s", plan)
+			}
+			for _, table := range []string{"request_logs", "token_usage", "response_logs"} {
+				for _, node := range planNodesForRelation(&root, table) {
+					if node.NodeType == "Seq Scan" || node.NodeType == "Parallel Seq Scan" {
+						t.Fatalf("natural planner scanned %s end to end:\n%s", table, plan)
+					}
+				}
+			}
+			for _, indexName := range []string{
+				"idx_token_usage_request_latest",
+				"idx_response_logs_request_latest",
+			} {
+				if !strings.Contains(plan, indexName) {
+					t.Fatalf("latest child lookup did not use %s:\n%s", indexName, plan)
+				}
+			}
+			pageLimit := deepestLimitForRelation(&root, "request_logs")
+			if pageLimit == nil || pageLimit.ActualLoops != 1 || pageLimit.ActualRows > 51 {
+				t.Fatalf("inner request page limit was not enforced before child lookups: %+v\n%s", pageLimit, plan)
+			}
+			for _, nodeType := range []string{"Sort", "Incremental Sort", "Hash Join"} {
+				if planContainsNodeType(pageLimit, nodeType) {
+					t.Fatalf("inner request page used avoidable %s:\n%s", nodeType, plan)
+				}
+			}
+			for _, node := range planNodesForRelation(pageLimit, "request_logs") {
+				if visits := node.ActualRows * node.ActualLoops; visits > 5_000 {
+					t.Fatalf("request cursor read %.0f rows, want at most 5000:\n%s", visits, plan)
+				}
+			}
+			for _, relation := range []string{"token_usage", "response_logs"} {
+				nodes := planNodesForRelation(&root, relation)
+				if len(nodes) == 0 {
+					t.Fatalf("no %s lookup node in plan:\n%s", relation, plan)
+				}
+				for _, node := range nodes {
+					if node.ActualLoops > 51 {
+						t.Fatalf("%s lookup ran %.0f times, want at most 51:\n%s", relation, node.ActualLoops, plan)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestAppRecentRequestsSQLiteNaturalPlannerAtScale(t *testing.T) {
+	if os.Getenv("TEST_SQLITE_PLANNER") != "1" {
+		t.Skip("set TEST_SQLITE_PLANNER=1 to verify the production planner")
+	}
+	db := openStoreForTest(t)
+	defer db.Close()
+	if db.dialect != "sqlite" {
+		t.Skip("SQLite planner regression")
+	}
+	ctx := t.Context()
+	const rows = 200_000
+	statements := []string{
+		`WITH RECURSIVE n(g) AS (VALUES(1) UNION ALL SELECT g + 1 FROM n WHERE g < 100)
+			INSERT INTO api_keys (id, name, key_hash, team, status, created_at)
+			SELECT 'planner-key-' || g, 'planner key ' || g, 'planner-hash-' || g,
+				CASE WHEN g <= 10 THEN 'team-a' ELSE 'team-b' END,
+				'active', '2026-09-01T00:00:00Z' FROM n`,
+		`WITH RECURSIVE n(g) AS (VALUES(1) UNION ALL SELECT g + 1 FROM n WHERE g < 200000)
+			INSERT INTO request_logs
+			(id, trace_id, api_key_id, method, client_ip, model, endpoint, stream,
+			 provider, status_code, latency_ms, first_chunk_ms, session_id, created_at)
+			SELECT printf('planner-req-%012d', g), 'planner-trace-' || g,
+				'planner-key-' || ((g % 100) + 1), 'POST', '192.0.2.1', 'model-a',
+				'/v1/chat/completions', 0, 'provider-a', 200, 10, 5,
+				'planner-session-' || (g % 100),
+				strftime('%Y-%m-%dT%H:%M:%S', '2026-09-01 00:00:00', printf('+%d seconds', g)) || '.000000000Z'
+			FROM n`,
+		`WITH RECURSIVE n(g) AS (VALUES(1) UNION ALL SELECT g + 1 FROM n WHERE g < 200000)
+			INSERT INTO token_usage
+			(id, request_id, prompt_tokens, completion_tokens, total_tokens, cached_tokens,
+			 reasoning_tokens, estimated_cost, currency, source, created_at)
+			SELECT 'planner-usage-' || g, printf('planner-req-%012d', g),
+				10, 20, 30, 0, 0, 0.01, 'KRW', 'usage', '2026-09-01T00:00:00Z' FROM n`,
+		`WITH RECURSIVE n(g) AS (VALUES(1) UNION ALL SELECT g + 1 FROM n WHERE g < 200000)
+			INSERT INTO response_logs
+			(id, request_id, status_code, finish_reason, response_hash, created_at)
+			SELECT 'planner-response-' || g, printf('planner-req-%012d', g),
+				200, 'stop', 'planner-response-hash-' || g, '2026-09-01T00:00:00Z' FROM n`,
+		`ANALYZE`,
+	}
+	for _, statement := range statements {
+		if _, err := db.db.ExecContext(ctx, statement); err != nil {
+			t.Fatalf("prepare %d-row SQLite planner fixture: %v", rows, err)
+		}
+	}
+
+	base := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	cursorAt := appRequestFixedTime(base.Add(172_800 * time.Second))
+	for _, test := range []struct {
+		name           string
+		filter         AppRequestFilter
+		requestIndexes []string
+		wantSearch     bool
+	}{
+		{name: "default", filter: AppRequestFilter{Limit: 50}, requestIndexes: []string{"idx_request_logs_app_valid_cursor"}},
+		{name: "range", filter: AppRequestFilter{Limit: 50, From: base.Add(100_000 * time.Second)}, requestIndexes: []string{"idx_request_logs_app_valid_cursor"}, wantSearch: true},
+		{name: "older", filter: AppRequestFilter{Limit: 50, CursorAt: cursorAt, CursorID: "planner-req-000000172800", Direction: "older"}, requestIndexes: []string{"idx_request_logs_app_valid_cursor"}, wantSearch: true},
+		{name: "newer", filter: AppRequestFilter{Limit: 50, CursorAt: cursorAt, CursorID: "planner-req-000000172800", Direction: "newer"}, requestIndexes: []string{"idx_request_logs_app_valid_cursor"}, wantSearch: true},
+		{name: "api key", filter: AppRequestFilter{Limit: 50, APIKeyID: "planner-key-1"}, requestIndexes: []string{"idx_request_logs_app_team_valid_cursor"}, wantSearch: true},
+		{name: "team", filter: AppRequestFilter{Limit: 50, Teams: []string{"team-a"}, TeamScoped: true}, requestIndexes: []string{"idx_request_logs_app_valid_cursor"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			query, args, _, err := db.appRecentRequestsQuery(test.filter)
+			if err != nil {
+				t.Fatal(err)
+			}
+			plan := explainAppRequestQuery(t, db, query, args...)
+			if !strings.Contains(plan, "CO-ROUTINE page") {
+				t.Fatalf("SQLite did not preserve the bounded parent-page boundary:\n%s", plan)
+			}
+			usedIndex := ""
+			for _, indexName := range test.requestIndexes {
+				if strings.Contains(plan, indexName) {
+					usedIndex = indexName
+					break
+				}
+			}
+			if usedIndex == "" {
+				t.Fatalf("SQLite planner did not use one of %v:\n%s", test.requestIndexes, plan)
+			}
+			if test.wantSearch && !strings.Contains(plan, "SEARCH r USING INDEX "+usedIndex) {
+				t.Fatalf("SQLite planner did not range-seek %s:\n%s", usedIndex, plan)
+			}
+			for _, indexName := range []string{
+				"idx_token_usage_request_latest",
+				"idx_response_logs_request_latest",
+			} {
+				if !strings.Contains(plan, indexName) {
+					t.Fatalf("SQLite latest child lookup did not use %s:\n%s", indexName, plan)
+				}
+			}
+			if strings.Contains(plan, "SCAN t_pick") || strings.Contains(plan, "SCAN resp_pick") {
+				t.Fatalf("SQLite scanned a child table end to end:\n%s", plan)
+			}
+			if test.name == "team" && !strings.Contains(plan, "SEARCH k USING INDEX") {
+				t.Fatalf("SQLite team scope did not seek API keys by identifier:\n%s", plan)
+			}
+			if test.name == "team" {
+				sortAt := strings.Index(plan, "USE TEMP B-TREE FOR ORDER BY")
+				boundedPageAt := strings.Index(plan, "SCAN page")
+				if sortAt >= 0 && (boundedPageAt < 0 || sortAt < boundedPageAt) {
+					t.Fatalf("SQLite sorted the full team history before applying the page limit:\n%s", plan)
+				}
+			}
+			items, more, err := db.AppRecentRequests(ctx, test.filter)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(items) != 50 || !more {
+				t.Fatalf("unexpected bounded page: items=%d more=%v", len(items), more)
+			}
+		})
+	}
+}
+
+type postgresPlanNode struct {
+	NodeType     string             `json:"Node Type"`
+	RelationName string             `json:"Relation Name"`
+	ActualRows   float64            `json:"Actual Rows"`
+	ActualLoops  float64            `json:"Actual Loops"`
+	Plans        []postgresPlanNode `json:"Plans"`
+}
+
+func explainNaturalPostgresAppRequestQuery(t *testing.T, db *SQLStore, query string, args ...any) (string, postgresPlanNode) {
+	t.Helper()
+	var raw []byte
+	if err := db.db.QueryRowContext(t.Context(),
+		`EXPLAIN (ANALYZE, BUFFERS, COSTS OFF, FORMAT JSON) `+query, args...).Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	var document []struct {
+		Plan postgresPlanNode `json:"Plan"`
+	}
+	if err := json.Unmarshal(raw, &document); err != nil {
+		t.Fatalf("decode PostgreSQL plan: %v\n%s", err, raw)
+	}
+	if len(document) != 1 {
+		t.Fatalf("PostgreSQL returned %d plan documents", len(document))
+	}
+	return string(raw), document[0].Plan
+}
+
+func deepestLimitForRelation(node *postgresPlanNode, relation string) *postgresPlanNode {
+	for index := range node.Plans {
+		if limit := deepestLimitForRelation(&node.Plans[index], relation); limit != nil {
+			return limit
+		}
+	}
+	if node.NodeType == "Limit" && planContainsRelation(node, relation) &&
+		!planContainsRelation(node, "token_usage") && !planContainsRelation(node, "response_logs") {
+		return node
+	}
+	return nil
+}
+
+func planContainsRelation(node *postgresPlanNode, relation string) bool {
+	if node.RelationName == relation {
+		return true
+	}
+	for index := range node.Plans {
+		if planContainsRelation(&node.Plans[index], relation) {
+			return true
+		}
+	}
+	return false
+}
+
+func planContainsNodeType(node *postgresPlanNode, nodeType string) bool {
+	if node.NodeType == nodeType {
+		return true
+	}
+	for index := range node.Plans {
+		if planContainsNodeType(&node.Plans[index], nodeType) {
+			return true
+		}
+	}
+	return false
+}
+
+func planNodesForRelation(node *postgresPlanNode, relation string) []*postgresPlanNode {
+	nodes := []*postgresPlanNode{}
+	if node.RelationName == relation {
+		nodes = append(nodes, node)
+	}
+	for index := range node.Plans {
+		nodes = append(nodes, planNodesForRelation(&node.Plans[index], relation)...)
+	}
+	return nodes
+}
+
 func TestAppRequestProviderCandidatesOnlyUsesBoundedConfiguration(t *testing.T) {
 	db := openStoreForTest(t)
 	defer db.Close()
@@ -307,10 +836,13 @@ func TestAppRecentRequestsBoundsTextAtDatabaseBoundary(t *testing.T) {
 	defer db.Close()
 	ctx := context.Background()
 	huge := strings.Repeat("🧪", 1000)
+	// Keep the request-side key below PostgreSQL's older XView composite-index
+	// tuple ceiling while still exceeding the projection read bound.
+	oversizedAPIKey := strings.Repeat("🧪", appRequestReadIDChars+50)
 	now := time.Now().UTC()
 	if err := db.InsertLogRecord(ctx, LogRecord{
 		Request: RequestLog{
-			ID: "bounded-row", TraceID: huge, SessionID: huge, APIKeyID: huge,
+			ID: "bounded-row", TraceID: huge, SessionID: huge, APIKeyID: oversizedAPIKey,
 			ClientIP: huge, Method: huge, Model: huge, Provider: huge, Endpoint: huge,
 			StatusCode: 200, CreatedAt: now,
 		},

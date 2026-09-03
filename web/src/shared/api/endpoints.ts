@@ -1,12 +1,12 @@
 import { z } from "zod";
 
 import type {
+  AppRequestsResponse,
   GetAdminModelsData,
   GetAdminModelsQualityData,
   GetAdminModelsQualityResponse,
   GetAdminModelsResponse,
   GetAdminRequestsData,
-  GetAdminRequestsResponse,
   GetAdminModelTagsData,
   GetAdminModelTagsResponse,
   GetAdminOpsRiskData,
@@ -198,7 +198,7 @@ export const endpoints = {
   ),
   admin: {
     stats: operation<GetAdminStatsData, GetAdminStatsResponse>()("GET", "/admin/stats", adminStatsSchema),
-    requests: operation<WithQuery<GetAdminRequestsData, AppRequestsQuery>, GetAdminRequestsResponse>()(
+    requests: operation<WithQuery<GetAdminRequestsData, AppRequestsQuery>, AppRequestsResponse>()(
       "GET",
       "/admin/requests",
       appRequestsResponseSchema,
