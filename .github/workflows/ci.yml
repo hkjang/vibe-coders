@@ -120,10 +120,10 @@ jobs:
         run: go test ./... -count=1
 
       - name: go test -race
-        # internal/proxy has 570+ tests and each isolated SQLite fixture runs the
-        # full migration under race instrumentation. Hosted runners can exceed Go's
-        # default 10-minute package timeout even though the suite is still progressing.
-        run: go test -race ./internal/... -count=1 -timeout=20m
+        # internal/proxy has 700+ tests and each isolated SQLite fixture runs the
+        # full migration under race instrumentation. A clean hosted runner already
+        # needs about 19 minutes, so keep enough headroom for normal runner variance.
+        run: go test -race ./internal/... -count=1 -timeout=30m
 
       - name: API surface audit (CLI/SDK ↔ server route contract)
         # Fails if the cmd/vibe CLI or the TypeScript SDK call a path the server no longer serves.
