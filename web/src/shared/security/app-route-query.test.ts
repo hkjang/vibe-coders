@@ -49,6 +49,49 @@ describe("app route query security", () => {
     expect(result.search).toContain("request_id=req-1");
   });
 
+  it.each([
+    `vc_sk_${"a".repeat(43)}`,
+    `VC_SA_${"A1_-".repeat(11)}`,
+    "Bearer private-credential",
+    "api_key=private-credential",
+  ])("never retains issued or credential-like material in any request query: %s", (secret) => {
+    const requestKeys = [
+      "api_key_id",
+      "cursor",
+      "from",
+      "ip",
+      "language",
+      "limit",
+      "model",
+      "provider_ref",
+      "request_id",
+      "session_id",
+      "status",
+      "to",
+      "trace_id",
+      "tz",
+    ];
+
+    for (const key of requestKeys) {
+      const result = sanitizeAppRouteSearch(
+        "/app/observability/requests",
+        `?${key}=${encodeURIComponent(secret)}`,
+      );
+      expect(result.search, key).toBe("");
+      expect(result.sensitiveKeys, key).toEqual([key]);
+    }
+  });
+
+  it("keeps a bounded API key database ID while rejecting the corresponding plaintext key", () => {
+    const keyID = "key_3f668812d94a5b7c";
+    expect(sanitizeAppRouteSearch("/app/observability/requests", `?api_key_id=${keyID}`).search).toBe(
+      `?api_key_id=${keyID}`,
+    );
+    expect(
+      sanitizeAppRouteSearch("/app/observability/requests", `?api_key_id=vc_sk_${"a".repeat(43)}`).search,
+    ).toBe("");
+  });
+
   it("removes unknown credential parameters and allowed values that contain secrets", () => {
     const result = sanitizeAppRouteSearch(
       "/app/gateway/models",

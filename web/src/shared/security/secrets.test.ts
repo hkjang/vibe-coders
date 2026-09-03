@@ -29,6 +29,8 @@ describe("secret detection", () => {
     "Bearer private-value",
     "Bearer+private-value",
     "sk-proj-private12345678",
+    `vc_sk_${"a".repeat(43)}`,
+    `Vc_Sa_${"A1_-".repeat(11)}`,
     "eyJheader.eyJpayload.signature",
     "api_key=private",
     '"clientSecret": "private"',

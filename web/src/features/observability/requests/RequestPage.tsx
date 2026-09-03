@@ -3,7 +3,9 @@ import { ExternalLink, Filter, RefreshCw, Search } from "lucide-react";
 import { useCallback, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router";
 
+import { useAuth } from "@/app/auth/AuthProvider";
 import { RequestDetailDialog } from "@/features/observability/requests/RequestDetailDialog";
+import { refreshIntervalMs } from "@/features/health/health-utils";
 import { apiClient } from "@/shared/api/client";
 import { endpoints } from "@/shared/api/endpoints";
 import { isAppError } from "@/shared/api/error";
@@ -11,6 +13,8 @@ import type { AppRequestSummary, AppRequestsQuery } from "@/shared/api/schemas";
 import { ErrorState, LoadingState } from "@/shared/components/state/PageStates";
 import { Badge } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
+import { canOpenLegacyAdmin } from "@/shared/permissions/legacy-admin";
+import { usePreferences } from "@/shared/stores/preferences";
 import "@/features/observability/requests/request-page.css";
 
 const filterKeys = [
@@ -52,6 +56,10 @@ function formatDate(value: string, options: Intl.DateTimeFormatOptions): string 
 }
 
 export function RequestPage(): React.JSX.Element {
+  const auth = useAuth();
+  const showLegacyAdmin = canOpenLegacyAdmin(auth);
+  const refreshInterval = usePreferences((state) => state.refreshInterval);
+  const interval = refreshIntervalMs(refreshInterval);
   const [searchParams, setSearchParams] = useSearchParams();
   const query = useMemo(() => queryFromSearch(searchParams), [searchParams]);
   const result = useQuery({
@@ -60,6 +68,8 @@ export function RequestPage(): React.JSX.Element {
       apiClient.request(endpoints.admin.requests, { query, signal, routeId: "observability.requests" }),
     placeholderData: keepPreviousData,
     staleTime: 10_000,
+    refetchInterval: interval,
+    refetchIntervalInBackground: false,
   });
   const [selected, setSelected] = useState<AppRequestSummary>();
   const returnFocusRef = useRef<HTMLElement | null>(null);
@@ -97,6 +107,7 @@ export function RequestPage(): React.JSX.Element {
         message={isAppError(result.error) ? result.error.message : "잠시 후 다시 시도해 주세요."}
         requestId={isAppError(result.error) ? result.error.requestId : undefined}
         onRetry={() => void result.refetch()}
+        showLegacy={showLegacyAdmin}
       />
     );
   }
@@ -114,9 +125,11 @@ export function RequestPage(): React.JSX.Element {
           <Button variant="secondary" disabled={result.isFetching} onClick={() => void result.refetch()}>
             <RefreshCw aria-hidden="true" /> {result.isFetching ? "갱신 중" : "새로고침"}
           </Button>
-          <a className="button button-secondary button-default" href="/admin#/requests">
-            <ExternalLink aria-hidden="true" /> 기존 화면 보기
-          </a>
+          {showLegacyAdmin ? (
+            <a className="button button-secondary button-default" href="/admin#/requests">
+              <ExternalLink aria-hidden="true" /> 기존 화면 보기
+            </a>
+          ) : null}
         </div>
       </header>
 
@@ -244,11 +257,7 @@ export function RequestPage(): React.JSX.Element {
             <tbody>
               {data?.requests.length ? (
                 data.requests.map((request) => (
-                  <tr
-                    className="data-table-row-action"
-                    key={request.request_id}
-                    onClick={(event) => openRequest(request, event.currentTarget)}
-                  >
+                  <tr key={request.request_id}>
                     <td>{formatDate(request.created_at, { dateStyle: "short", timeStyle: "medium" })}</td>
                     <td>
                       <Badge tone={statusTone(request.status_code)}>{request.status_code}</Badge>
@@ -267,10 +276,7 @@ export function RequestPage(): React.JSX.Element {
                       <Button
                         size="small"
                         variant="ghost"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          openRequest(request, event.currentTarget);
-                        }}
+                        onClick={(event) => openRequest(request, event.currentTarget)}
                       >
                         상세
                       </Button>
@@ -317,6 +323,7 @@ export function RequestPage(): React.JSX.Element {
           if (!open) setSelected(undefined);
         }}
         returnFocusRef={returnFocusRef}
+        showLegacy={showLegacyAdmin}
       />
     </section>
   );

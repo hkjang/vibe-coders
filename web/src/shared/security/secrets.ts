@@ -84,6 +84,7 @@ export function containsPotentialSecret(value: string): boolean {
   if (
     /\bbearer(?:\s|\+)+[^\s,;]+/i.test(candidate) ||
     /\bsk-(?:proj-|ant-|svcacct-)?[a-z0-9_-]{8,}\b/i.test(candidate) ||
+    /(?:^|[^a-z0-9])vc_(?:sk|sa)_[a-z0-9_-]{8,}(?=$|[^a-z0-9_-])/i.test(candidate) ||
     /\beyJ[a-z0-9_-]{4,}\.[a-z0-9_-]{4,}\.[a-z0-9_-]{4,}\b/i.test(candidate) ||
     /(?:^|[?&#=;,\s/])[^\s/@:]+:[^\s/@]+@(?:\[[^\]]+\]|[^\s/:?#]+)(?::\d+)?(?:[/?#]|$)/i.test(candidate)
   ) {

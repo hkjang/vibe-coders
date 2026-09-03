@@ -1,14 +1,31 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import axe from "axe-core";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 
 import { RequestPage } from "@/features/observability/requests/RequestPage";
 import { apiClient } from "@/shared/api/client";
 import { AppError } from "@/shared/api/error";
 import type { AppRequestsResponse } from "@/shared/api/schemas";
+import { usePreferences } from "@/shared/stores/preferences";
+
+const authRuntime = vi.hoisted(() => ({ legacyFallback: true, scopes: ["admin:read"] as string[] }));
+
+vi.mock("@/app/auth/AuthProvider", () => ({
+  useAuth: () => ({
+    authenticationMode: "session",
+    legacyFallback: authRuntime.legacyFallback,
+    mode: "authenticated",
+    user: {
+      id: "admin-1",
+      role: "admin",
+      roles: ["admin"],
+      scopes: authRuntime.scopes,
+    },
+  }),
+}));
 
 const providerRef = `prv_${"a".repeat(43)}`;
 const row = {
@@ -71,6 +88,12 @@ function renderPage(initialEntry = "/observability/requests") {
 }
 
 describe("RequestPage", () => {
+  beforeEach(() => {
+    authRuntime.legacyFallback = true;
+    authRuntime.scopes = ["admin:read"];
+    usePreferences.setState({ refreshInterval: 0 });
+  });
+
   it("restores URL filters, pages by cursor, opens safe detail and restores focus", async () => {
     const request = vi.spyOn(apiClient, "request").mockResolvedValue(response as never);
     const user = userEvent.setup();
@@ -90,10 +113,17 @@ describe("RequestPage", () => {
       });
     });
 
+    await user.click(screen.getByText("req-001"));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
     const detail = screen.getByRole("button", { name: "상세" });
     await user.click(detail);
     expect(screen.getByRole("dialog")).toHaveTextContent("프롬프트, 응답 본문, 원시 오류");
     expect(screen.getByRole("dialog")).not.toHaveTextContent("raw-secret");
+    expect(screen.getByRole("link", { name: "기존 요청 화면 열기" })).toHaveAttribute(
+      "href",
+      "/admin#/requests",
+    );
     await user.click(screen.getByRole("button", { name: "닫기" }));
     await waitFor(() => expect(detail).toHaveFocus());
 
@@ -115,6 +145,71 @@ describe("RequestPage", () => {
     expect(await screen.findByText("갱신에 실패해 마지막 정상 데이터를 표시합니다.")).toBeInTheDocument();
     expect(screen.getByText("req-001")).toBeInTheDocument();
     expect(request).toHaveBeenCalledTimes(2);
+  });
+
+  it("hides every existing-screen bridge when fallback is disabled or permission is missing", async () => {
+    authRuntime.legacyFallback = false;
+    const request = vi.spyOn(apiClient, "request").mockResolvedValue(response as never);
+    const user = userEvent.setup();
+    const page = renderPage();
+
+    expect(await screen.findByText("req-001")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "기존 화면 보기" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "상세" }));
+    expect(screen.queryByRole("link", { name: "기존 요청 화면 열기" })).not.toBeInTheDocument();
+    page.unmount();
+
+    authRuntime.legacyFallback = true;
+    authRuntime.scopes = ["requests:read"];
+    request.mockRejectedValueOnce(
+      new AppError("목록 실패", { kind: "http", requestId: "gateway-request-no-legacy" }),
+    );
+    renderPage();
+    expect(await screen.findByText("목록 실패")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "기존 관리자 화면 열기" })).not.toBeInTheDocument();
+  });
+
+  it("uses the global automatic refresh interval and pauses request polling while hidden", async () => {
+    const originalVisibility = Object.getOwnPropertyDescriptor(document, "visibilityState");
+    let visibility: DocumentVisibilityState = "visible";
+    let poll: (() => void) | undefined;
+    let unmount: (() => void) | undefined;
+
+    try {
+      Object.defineProperty(document, "visibilityState", {
+        configurable: true,
+        get: () => visibility,
+      });
+      vi.spyOn(window, "setInterval").mockImplementation((handler: TimerHandler, timeout?: number) => {
+        if (timeout === 60_000 && typeof handler === "function") poll = handler as () => void;
+        return 1;
+      });
+      usePreferences.setState({ refreshInterval: 60 });
+      const request = vi.spyOn(apiClient, "request").mockResolvedValue(response as never);
+      const page = renderPage();
+      unmount = page.unmount;
+
+      expect(await screen.findByText("req-001")).toBeInTheDocument();
+      expect(poll).toBeDefined();
+      request.mockClear();
+
+      visibility = "hidden";
+      act(() => poll?.());
+      await act(async () => Promise.resolve());
+      expect(request).not.toHaveBeenCalled();
+
+      visibility = "visible";
+      act(() => poll?.());
+      await waitFor(() => expect(request).toHaveBeenCalledOnce());
+    } finally {
+      unmount?.();
+      if (originalVisibility) {
+        Object.defineProperty(document, "visibilityState", originalVisibility);
+      } else {
+        Reflect.deleteProperty(document, "visibilityState");
+      }
+      act(() => usePreferences.setState({ refreshInterval: 0 }));
+    }
   });
 
   it("distinguishes loading, empty and terminal error states", async () => {

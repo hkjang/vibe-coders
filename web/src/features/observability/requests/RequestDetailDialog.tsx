@@ -9,6 +9,7 @@ interface RequestDetailDialogProps {
   open: boolean;
   request?: AppRequestSummary;
   returnFocusRef: RefObject<HTMLElement | null>;
+  showLegacy: boolean;
 }
 
 function formatDate(value: string): string {
@@ -23,15 +24,18 @@ export function RequestDetailDialog({
   open,
   request,
   returnFocusRef,
+  showLegacy,
 }: RequestDetailDialogProps): React.JSX.Element {
   return (
     <Dialog
       description="프롬프트, 응답 본문, 원시 오류와 사용자 에이전트는 이 미리보기에서 제공하지 않습니다."
       footer={
         <>
-          <a className="button button-secondary button-default" href="/admin#/requests">
-            기존 요청 화면 열기
-          </a>
+          {showLegacy ? (
+            <a className="button button-secondary button-default" href="/admin#/requests">
+              기존 요청 화면 열기
+            </a>
+          ) : null}
           <Button variant="primary" onClick={() => onOpenChange(false)}>
             닫기
           </Button>
