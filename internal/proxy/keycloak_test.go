@@ -337,6 +337,37 @@ func TestVerifyKeycloakAccessToken(t *testing.T) {
 	if _, ok := s.verifyKeycloakAccessToken(t.Context(), missingSubject); ok {
 		t.Error("access token without a subject must be rejected")
 	}
+	for name, claim := range map[string]map[string]any{
+		"padded subject": {
+			"iss": issuer, "aud": "vibe-coders", "sub": "svc-1 ",
+			"realm_access": map[string]any{"roles": []any{"vibe-admin"}},
+			"exp":          float64(time.Now().Add(time.Hour).Unix()),
+		},
+		"control subject": {
+			"iss": issuer, "aud": "vibe-coders", "sub": "svc-1\n",
+			"realm_access": map[string]any{"roles": []any{"vibe-admin"}},
+			"exp":          float64(time.Now().Add(time.Hour).Unix()),
+		},
+		"padded team": {
+			"iss": issuer, "aud": "vibe-coders", "sub": "svc-1",
+			"realm_access": map[string]any{"roles": []any{"vibe-admin"}},
+			"groups":       []any{"/teams/ai-platform "},
+			"exp":          float64(time.Now().Add(time.Hour).Unix()),
+		},
+		"control team": {
+			"iss": issuer, "aud": "vibe-coders", "sub": "svc-1",
+			"realm_access": map[string]any{"roles": []any{"vibe-admin"}},
+			"groups":       []any{"/teams/ai-platform\t"},
+			"exp":          float64(time.Now().Add(time.Hour).Unix()),
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			token := signRS256(t, key, "at-kid", claim)
+			if _, ok := s.verifyKeycloakAccessToken(t.Context(), token); ok {
+				t.Fatalf("access token with %s must be rejected", name)
+			}
+		})
+	}
 	// Expired access token rejected.
 	expired := signRS256(t, key, "at-kid", map[string]any{"iss": issuer, "aud": "vibe-coders", "sub": "x", "realm_access": map[string]any{"roles": []any{"vibe-admin"}}, "exp": float64(time.Now().Add(-time.Hour).Unix())})
 	if _, ok := s.verifyKeycloakAccessToken(t.Context(), expired); ok {
@@ -377,6 +408,70 @@ func TestProvisionKeycloakUserKeepsUnverifiedEmailSeparateFromLocalAccount(t *te
 	persistedLocal, found, err := db.AuthUserByID(t.Context(), local.ID)
 	if err != nil || !found || persistedLocal.PasswordHash != local.PasswordHash {
 		t.Fatalf("local account was changed: %+v found=%v err=%v", persistedLocal, found, err)
+	}
+}
+
+func TestProvisionKeycloakUserRejectsNonExactSubject(t *testing.T) {
+	db := openTestStore(t)
+	defer db.Close()
+	s := &Server{cfg: config.Config{Keycloak: config.KeycloakConfig{
+		IssuerURL: "https://kc.example/realms/vibe", DefaultRole: "developer",
+	}}, db: db}
+
+	first, _, err := s.provisionKeycloakUser(t.Context(), map[string]any{"sub": "victim"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.provisionKeycloakUser(t.Context(), map[string]any{"sub": "victim "}); err == nil || stableKeycloakProvisioningStage(err) != keycloakProvisioningStageClaimValidation {
+		t.Fatalf("non-exact subject error = %v", err)
+	}
+	identity, found, err := db.AuthIdentityBySubject(t.Context(), "keycloak", s.cfg.Keycloak.IssuerURL, "victim")
+	if err != nil || !found || identity.UserID != first.ID {
+		t.Fatalf("original subject identity changed: identity=%+v found=%v err=%v", identity, found, err)
+	}
+}
+
+func TestProvisionKeycloakUserDoesNotNormalizeVerifiedEmailForLinking(t *testing.T) {
+	db := openTestStore(t)
+	defer db.Close()
+	s := &Server{cfg: config.Config{Keycloak: config.KeycloakConfig{
+		IssuerURL: "https://kc.example/realms/vibe", DefaultRole: "developer",
+	}}, db: db}
+
+	existing := store.AuthUser{ID: "existing-sso", Email: "victim@example.com", Role: "developer", Status: "active"}
+	if err := db.CreateAuthUser(t.Context(), existing); err != nil {
+		t.Fatal(err)
+	}
+	user, _, err := s.provisionKeycloakUser(t.Context(), map[string]any{
+		"sub": "different-subject", "email": " victim@example.com ", "email_verified": true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if user.ID == existing.ID || user.Email == existing.Email || !strings.HasSuffix(user.Email, "@sso.local") {
+		t.Fatalf("padded verified email was normalized into an existing account: %+v", user)
+	}
+	identity, found, err := db.AuthIdentityBySubject(t.Context(), "keycloak", s.cfg.Keycloak.IssuerURL, "different-subject")
+	if err != nil || !found || identity.UserID != user.ID || identity.Email != "" {
+		t.Fatalf("isolated identity = %+v found=%v err=%v", identity, found, err)
+	}
+}
+
+func TestProvisionKeycloakUserRejectsWhitespaceTeamClaim(t *testing.T) {
+	db := openTestStore(t)
+	defer db.Close()
+	s := &Server{cfg: config.Config{Keycloak: config.KeycloakConfig{
+		IssuerURL: "https://kc.example/realms/vibe", DefaultRole: "developer", GroupClaim: "groups",
+	}}, db: db}
+
+	_, _, err := s.provisionKeycloakUser(t.Context(), map[string]any{
+		"sub": "team-whitespace-subject", "groups": []any{"/teams/platform "},
+	})
+	if err == nil || stableKeycloakProvisioningStage(err) != keycloakProvisioningStageTeamResolution || !errors.Is(err, store.ErrAuthTeamIdentityInvalid) {
+		t.Fatalf("whitespace team claim error = %v", err)
+	}
+	if users, listErr := db.ListAuthUsers(t.Context()); listErr != nil || len(users) != 0 {
+		t.Fatalf("invalid team claim created users: users=%+v err=%v", users, listErr)
 	}
 }
 

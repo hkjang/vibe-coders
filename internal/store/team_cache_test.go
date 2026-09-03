@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -139,19 +141,88 @@ func TestResolveOrCreateAuthTeamBypassesStaleCacheAndUsesCanonicalNameMatch(t *t
 	if err := db.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM teams`).Scan(&count); err != nil || count != 1 {
 		t.Fatalf("team count = %d err=%v", count, err)
 	}
+	if cached, found, err := db.AuthTeamByIDOrName(ctx, "PLATFORM"); err != nil || !found || cached.ID != "team_opaque" {
+		t.Fatalf("resolver did not invalidate stale cache: team=%+v found=%v err=%v", cached, found, err)
+	}
 }
 
 func TestResolveOrCreateAuthTeamCreatesMissingTeam(t *testing.T) {
 	db := openStoreForTest(t)
 	defer db.Close()
 
-	team, err := db.ResolveOrCreateAuthTeam(t.Context(), "new-team")
-	if err != nil || team.ID != "new-team" || team.Name != "new-team" {
+	team, err := db.ResolveOrCreateAuthTeam(t.Context(), "New-Team")
+	if err != nil || team.ID != "new-team" || team.Name != "New-Team" {
 		t.Fatalf("created team = %+v err=%v", team, err)
 	}
 	resolved, found, err := db.AuthTeamByIDOrName(t.Context(), "NEW-TEAM")
 	if err != nil || !found || resolved.ID != team.ID {
 		t.Fatalf("created team lookup = %+v found=%v err=%v", resolved, found, err)
+	}
+}
+
+func TestResolveOrCreateAuthTeamUsesPortableUnicodeCaseFolding(t *testing.T) {
+	db := openStoreForTest(t)
+	defer db.Close()
+	seedTeam(t, db, "team_unicode", "Ä-Team")
+
+	team, err := db.ResolveOrCreateAuthTeam(t.Context(), "ä-team")
+	if err != nil || team.ID != "team_unicode" {
+		t.Fatalf("Unicode canonical team = %+v err=%v", team, err)
+	}
+	var count int
+	if err := db.db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM teams`).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("Unicode resolution created a duplicate: count=%d err=%v", count, err)
+	}
+}
+
+func TestResolveOrCreateAuthTeamRejectsWhitespaceIdentity(t *testing.T) {
+	db := openStoreForTest(t)
+	defer db.Close()
+	if _, err := db.ResolveOrCreateAuthTeam(t.Context(), "platform "); !errors.Is(err, ErrAuthTeamIdentityInvalid) {
+		t.Fatalf("whitespace team identity error = %v", err)
+	}
+}
+
+func TestResolveOrCreateAuthTeamConcurrentCaseVariantsConverge(t *testing.T) {
+	db := openStoreForTest(t)
+	defer db.Close()
+
+	const contenders = 12
+	start := make(chan struct{})
+	results := make(chan AuthTeam, contenders)
+	errs := make(chan error, contenders)
+	var wg sync.WaitGroup
+	for index := range contenders {
+		value := "platform"
+		if index%2 == 0 {
+			value = "Platform"
+		}
+		wg.Add(1)
+		go func(value string) {
+			defer wg.Done()
+			<-start
+			team, err := db.ResolveOrCreateAuthTeam(t.Context(), value)
+			results <- team
+			errs <- err
+		}(value)
+	}
+	close(start)
+	wg.Wait()
+	close(results)
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	for team := range results {
+		if team.ID != "platform" || !strings.EqualFold(team.Name, "platform") {
+			t.Fatalf("concurrent canonical team = %+v", team)
+		}
+	}
+	var count int
+	if err := db.db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM teams`).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("concurrent team count = %d err=%v", count, err)
 	}
 }
 

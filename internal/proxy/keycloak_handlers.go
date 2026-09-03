@@ -12,6 +12,7 @@ import (
 	"path"
 	"strings"
 	"time"
+	"unicode"
 
 	"vibe-coders/internal/audit"
 	"vibe-coders/internal/store"
@@ -462,17 +463,19 @@ func stableKeycloakProvisioningStage(err error) string {
 // syncing role and team from claims. Returns the user and resolved team id.
 func (s *Server) provisionKeycloakUser(ctx context.Context, claims map[string]any) (store.AuthUser, string, error) {
 	kc := s.keycloakConfig()
-	sub := strings.TrimSpace(strClaim(claims, "sub"))
-	claimedEmail := strings.TrimSpace(strClaim(claims, "email"))
+	sub := strClaim(claims, "sub")
+	claimedEmail := strClaim(claims, "email")
 	username := strings.TrimSpace(strClaim(claims, "preferred_username"))
-	if sub == "" {
+	// OIDC subject identifiers are exact and case-sensitive. Normalizing one here could
+	// merge two identities (for example "user" and "user ") into the same account.
+	if !keycloakExactClaimValue(sub, 255) {
 		return store.AuthUser{}, "", keycloakProvisioningFailure(keycloakProvisioningStageClaimValidation, &keycloakError{"id_token missing sub"})
 	}
 	// An email is account-linking material only when the IdP explicitly marks it verified.
 	// Missing/false email_verified must not block subject-based SSO; it simply disables the
 	// email-link shortcut and uses an opaque internal address for a new SSO-only user.
 	verifiedEmail := ""
-	if verified, ok := claims["email_verified"].(bool); ok && verified {
+	if verified, ok := claims["email_verified"].(bool); ok && verified && keycloakEmailSafeForLinking(claimedEmail) {
 		verifiedEmail = claimedEmail
 	}
 	role, _ := resolveKeycloakRoleExplicit(s.effectiveKeycloakRoleMap(), s.keycloakRolesFromClaims(claims), kc.DefaultRole)
@@ -582,11 +585,16 @@ func keycloakSyntheticEmail(issuer, sub string) string {
 	return "sso-" + audit.HashText("keycloak-email|" + issuer + "|" + sub)[:24] + "@sso.local"
 }
 
+func keycloakEmailSafeForLinking(email string) bool {
+	return email != "" && len(email) <= 320 && strings.TrimSpace(email) == email &&
+		strings.Count(email, "@") == 1 && !strings.HasPrefix(email, "@") && !strings.HasSuffix(email, "@") &&
+		strings.IndexFunc(email, func(r rune) bool { return unicode.IsControl(r) || unicode.IsSpace(r) }) < 0
+}
+
 // resolveKeycloakTeam maps the group segment to the canonical team ID. Admin-created teams
 // commonly have an opaque ID (team_<hash>) and a human name that matches the Keycloak group;
 // inserting name-as-ID in that case violates teams.name UNIQUE on both SQLite and Postgres.
 func (s *Server) resolveKeycloakTeam(ctx context.Context, candidate string) (string, error) {
-	candidate = strings.TrimSpace(candidate)
 	if candidate == "" {
 		return "", nil
 	}
