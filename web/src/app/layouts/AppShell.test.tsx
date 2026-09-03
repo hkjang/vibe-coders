@@ -15,6 +15,7 @@ const authRuntime = vi.hoisted(() => ({
   uiEnabled: true,
   legacyFallback: true,
   scopes: ["admin:read", "routing:read", "observability:read", "costs:read", "security:read"],
+  role: "admin",
 }));
 
 vi.mock("@/app/auth/AuthProvider", () => ({
@@ -24,7 +25,7 @@ vi.mock("@/app/auth/AuthProvider", () => ({
       id: "admin-1",
       email: "admin@example.test",
       name: "Admin",
-      role: "admin",
+      role: authRuntime.role,
       roles: ["admin"],
       team_id: "platform",
       scopes: authRuntime.scopes,
@@ -67,6 +68,7 @@ describe("AppShell", () => {
   beforeEach(() => {
     authRuntime.uiEnabled = true;
     authRuntime.legacyFallback = true;
+    authRuntime.role = "admin";
     authRuntime.scopes = ["admin:read", "routing:read", "observability:read", "costs:read", "security:read"];
     usePreferences.setState({
       theme: "system",
@@ -85,11 +87,11 @@ describe("AppShell", () => {
     await user.keyboard("{Control>}k{/Control}");
     expect(await screen.findByRole("dialog", { name: "명령 팔레트" })).toBeVisible();
     const search = screen.getByRole("combobox", { name: "메뉴 검색" });
-    expect(screen.getByRole("option", { name: /Overview/ })).toHaveAttribute("aria-selected", "true");
-    await user.type(search, "AI Gateway");
-    expect(screen.getByRole("option", { name: /Gateway Health/ })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("option", { name: /통합 현황/ })).toHaveAttribute("aria-selected", "true");
+    await user.type(search, "AI 게이트웨이");
+    expect(screen.getByRole("option", { name: /게이트웨이 상태/ })).toHaveAttribute("aria-selected", "true");
     await user.type(search, "{ArrowDown}");
-    expect(screen.getByRole("option", { name: /Provider/ })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("option", { name: /AI 공급자/ })).toHaveAttribute("aria-selected", "true");
     await user.type(search, "{Enter}");
     expect(screen.getByRole("heading", { name: "Provider content" })).toBeVisible();
     expect(screen.queryByRole("dialog", { name: "명령 팔레트" })).not.toBeInTheDocument();
@@ -112,6 +114,17 @@ describe("AppShell", () => {
     renderShell();
     await user.click(screen.getByLabelText("사용자 메뉴"));
     expect(screen.getByRole("link", { name: "기존 관리자 화면 열기" })).toHaveAttribute("href", "/admin");
+    expect(screen.getByText("역할: 관리자")).toBeVisible();
+  });
+
+  it("does not expose an unknown role code in the user menu", async () => {
+    authRuntime.role = "unexpected_private_role";
+    const user = userEvent.setup();
+    renderShell();
+
+    await user.click(screen.getByLabelText("사용자 메뉴"));
+    expect(screen.getByText("역할: 확인 불가")).toBeVisible();
+    expect(screen.queryByText(/unexpected_private_role/)).not.toBeInTheDocument();
   });
 
   it("removes every optional Legacy entry point when runtime fallback is disabled", async () => {
@@ -122,7 +135,7 @@ describe("AppShell", () => {
     await user.keyboard("{Control>}k{/Control}");
     expect(await screen.findByRole("dialog", { name: "명령 팔레트" })).toBeVisible();
     expect(screen.queryByRole("link", { name: /기존 관리자 화면/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole("option", { name: /Provider/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: /AI 공급자/ })).not.toBeInTheDocument();
   });
 
   it("does not expose the Legacy Admin home to a user without effective admin permission", async () => {
@@ -159,6 +172,6 @@ describe("AppShell", () => {
   it("does not repeat the page title when the breadcrumb group has the same name", () => {
     renderShell();
     const breadcrumb = screen.getByRole("navigation", { name: "현재 위치" });
-    expect(within(breadcrumb).getAllByText("Overview")).toHaveLength(1);
+    expect(within(breadcrumb).getAllByText("통합 현황")).toHaveLength(1);
   });
 });

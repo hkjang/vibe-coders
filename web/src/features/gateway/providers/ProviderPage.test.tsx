@@ -413,11 +413,11 @@ describe("ProviderPage", () => {
     const table = screen.getByRole("table", { name: "공급자 연결 설정과 운영 상태" });
     await screen.findByRole("link", { name: "openai" });
     expect(within(table).getByRole("link", { name: "openai" })).toBeVisible();
-    expect(screen.getByText("Request ID: req-provider-slo-503")).toBeVisible();
+    expect(screen.getByText("요청 ID: req-provider-slo-503")).toBeVisible();
     expect(screen.getByText(/공급자 SLO 조회에 실패했습니다/)).toBeVisible();
 
     await user.click(screen.getByRole("button", { name: "공급자 SLO 재시도" }));
-    expect(screen.getByText("Request ID: req-provider-slo-503")).toBeVisible();
+    expect(screen.getByText("요청 ID: req-provider-slo-503")).toBeVisible();
   });
 
   it("shows last-known-good rows after a provider refresh failure", async () => {
@@ -437,7 +437,7 @@ describe("ProviderPage", () => {
     expect(
       await screen.findByText(/공급자 목록 갱신에 실패해 마지막 정상 데이터를 표시합니다/),
     ).toBeVisible();
-    expect(screen.getByText("Request ID: req-provider-lkg")).toBeVisible();
+    expect(screen.getByText("요청 ID: req-provider-lkg")).toBeVisible();
   });
 
   it("shows source-specific SLO and routing failures inside a deep-linked dialog", async () => {
@@ -458,13 +458,18 @@ describe("ProviderPage", () => {
 
     const dialog = await screen.findByRole("dialog", { name: "openai" });
     expect(await within(dialog).findByText(/공급자 SLO 조회에 실패했습니다/)).toBeVisible();
-    expect(within(dialog).getByText("Request ID: req-dialog-slo")).toBeVisible();
+    expect(within(dialog).getByText("요청 ID: req-dialog-slo")).toBeVisible();
     expect(within(dialog).getByRole("button", { name: "공급자 SLO 재시도" })).toBeVisible();
     expect(within(dialog).getByText(/공급자 라우팅 상태 조회에 실패했습니다/)).toBeVisible();
-    expect(within(dialog).getByText("Request ID: req-dialog-routing")).toBeVisible();
+    expect(within(dialog).getByText("요청 ID: req-dialog-routing")).toBeVisible();
     expect(within(dialog).getByRole("button", { name: "공급자 라우팅 상태 재시도" })).toBeVisible();
     expect(within(dialog).queryByText(/SLO가 설정되지 않았습니다/)).not.toBeInTheDocument();
     expect(within(dialog).queryByText(/라우팅 상태 데이터가 없습니다/)).not.toBeInTheDocument();
+    expect(within(dialog).queryByText("SLO unavailable")).not.toBeInTheDocument();
+    expect(within(dialog).queryByText("Routing unavailable")).not.toBeInTheDocument();
+    expect(
+      within(dialog).getAllByText("서버가 요청을 처리하지 못했습니다. 잠시 후 다시 시도하세요."),
+    ).toHaveLength(2);
   });
 
   it("shows provider last-known-good and request ID inside the dialog", async () => {
@@ -482,9 +487,11 @@ describe("ProviderPage", () => {
     expect(
       await within(dialog).findByText(/공급자 설정 갱신에 실패해 마지막 정상 데이터를 표시합니다/),
     ).toBeVisible();
-    expect(within(dialog).getByText("Request ID: req-dialog-provider-lkg")).toBeVisible();
+    expect(within(dialog).getByText("요청 ID: req-dialog-provider-lkg")).toBeVisible();
     expect(within(dialog).getByRole("button", { name: "공급자 설정 재시도" })).toBeVisible();
     expect(within(dialog).getByText("https://api.openai.example/v1")).toBeVisible();
+    expect(within(dialog).getByText("게이트웨이에 연결할 수 없습니다.")).toBeVisible();
+    expect(within(dialog).queryByText("Provider refresh failed")).not.toBeInTheDocument();
   });
 
   it("removes credential searches from deep links and never writes submitted secrets to the URL", async () => {

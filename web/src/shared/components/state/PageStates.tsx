@@ -16,6 +16,7 @@ interface ErrorStateProps {
   title?: string;
   message: string;
   requestId?: string;
+  diagnosticCode?: string;
   onRetry?: () => void;
   showLegacy?: boolean;
 }
@@ -24,6 +25,7 @@ export function ErrorState({
   title = "화면을 불러오지 못했습니다.",
   message,
   requestId,
+  diagnosticCode,
   onRetry,
   showLegacy = true,
 }: ErrorStateProps): React.JSX.Element {
@@ -32,7 +34,8 @@ export function ErrorState({
       <AlertTriangle aria-hidden="true" />
       <h1>{title}</h1>
       <p>{message}</p>
-      {requestId ? <p className="request-id">Request ID: {requestId}</p> : null}
+      {requestId ? <p className="request-id">요청 ID: {requestId}</p> : null}
+      {diagnosticCode ? <p className="request-id">진단 코드: {diagnosticCode}</p> : null}
       <div className="state-actions">
         {onRetry ? (
           <Button variant="primary" onClick={onRetry}>

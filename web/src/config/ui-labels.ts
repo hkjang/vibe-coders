@@ -50,3 +50,28 @@ export const riskLevelLabels = {
   high: "높음",
   critical: "심각",
 } as const;
+
+const roleLabels = {
+  super_admin: "최고 관리자",
+  admin: "관리자",
+  ops_admin: "운영 관리자",
+  ai_admin: "AI 관리자",
+  security_admin: "보안 관리자",
+  billing_admin: "비용 관리자",
+  readonly_admin: "읽기 전용 관리자",
+  team_admin: "팀 관리자",
+  team_manager: "팀 운영자",
+  developer: "개발자",
+  viewer: "조회자",
+  operator: "운영자",
+  service_account: "서비스 계정",
+  legacy_admin: "기존 관리자",
+} as const;
+
+export function roleLabel(role: string | undefined): string {
+  const normalized = role?.trim().toLowerCase();
+  if (!normalized || !Object.prototype.hasOwnProperty.call(roleLabels, normalized)) {
+    return "확인 불가";
+  }
+  return roleLabels[normalized as keyof typeof roleLabels];
+}

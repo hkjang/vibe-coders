@@ -14,6 +14,7 @@ import { Badge, type BadgeProps } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
 import { createDataTableColumnHelper, type DataTableColumn } from "@/shared/data-table/columns";
 import { DataTable } from "@/shared/data-table/DataTable";
+import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
 import { healthStatusLabels } from "@/config/ui-labels";
 
 const healthPresentation: Record<ProviderHealthState, { label: string; tone: BadgeProps["tone"] }> = {
@@ -35,6 +36,7 @@ export function QueryFailureNotice({
   onRetry: () => void;
 }): React.JSX.Element {
   const requestId = isAppError(error) ? error.requestId : undefined;
+  const diagnosticCode = isAppError(error) ? error.code : undefined;
   return (
     <div className="provider-query-warning" role="alert">
       <AlertTriangle aria-hidden="true" />
@@ -43,8 +45,9 @@ export function QueryFailureNotice({
           {label}{" "}
           {hasPreviousData ? "갱신에 실패해 마지막 정상 데이터를 표시합니다." : "조회에 실패했습니다."}
         </strong>
-        <p>{isAppError(error) ? error.message : "잠시 후 다시 시도해 주세요."}</p>
-        {requestId ? <code>Request ID: {requestId}</code> : null}
+        <p>{safeAppErrorMessage(error, `${label} 데이터를 확인할 수 없습니다.`)}</p>
+        {requestId ? <code>요청 ID: {requestId}</code> : null}
+        {diagnosticCode ? <code>진단 코드: {diagnosticCode}</code> : null}
       </div>
       <Button size="small" variant="secondary" onClick={onRetry} aria-label={`${label} 재시도`}>
         <RefreshCw aria-hidden="true" /> 재시도
@@ -170,7 +173,7 @@ export function ProviderTable({
         <div className="provider-list-unavailable">
           <ServerCog aria-hidden="true" />
           <strong>마지막 정상 공급자 목록이 없습니다.</strong>
-          <span>위 오류의 Request ID를 확인하고 목록 조회를 다시 시도하세요.</span>
+          <span>위 오류의 요청 ID를 확인하고 목록 조회를 다시 시도하세요.</span>
         </div>
       ) : (
         <DataTable

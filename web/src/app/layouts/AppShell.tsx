@@ -7,7 +7,7 @@ import { useAuth } from "@/app/auth/AuthProvider";
 import { CommandPalette } from "@/app/layouts/CommandPalette";
 import { Sidebar } from "@/app/layouts/Sidebar";
 import { featureByPath } from "@/config/migration-registry";
-import { healthStatusLabels, preferenceLabels, uiLabels } from "@/config/ui-labels";
+import { healthStatusLabels, preferenceLabels, roleLabel, uiLabels } from "@/config/ui-labels";
 import { apiClient } from "@/shared/api/client";
 import { endpoints } from "@/shared/api/endpoints";
 import { Badge } from "@/shared/components/ui/Badge";
@@ -175,7 +175,7 @@ export function AppShell(): React.JSX.Element {
               </summary>
               <div className="popover-card user-card">
                 <strong>{auth.user?.name ?? auth.user?.email ?? uiLabels.legacyAdministrator}</strong>
-                <span>역할: {auth.user?.role ?? "admin"}</span>
+                <span>역할: {roleLabel(auth.user?.role)}</span>
                 <span>팀: {auth.user?.team_id || "-"}</span>
                 <span>백엔드 {auth.backendVersion}</span>
                 <span>UI {auth.uiVersion}</span>

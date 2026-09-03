@@ -3,6 +3,7 @@ import { AlertTriangle, RefreshCw } from "lucide-react";
 import type { AdminModelPartialFailure } from "@/shared/api/schemas";
 import { providerDisplayLabel } from "@/shared/api/provider-ref";
 import { Button } from "@/shared/components/ui/Button";
+import { operationalMessage } from "@/shared/errors/operational-messages";
 
 interface ModelCatalogueFailureProps {
   failures: readonly AdminModelPartialFailure[];
@@ -33,11 +34,11 @@ export function ModelCatalogueFailure({
           {failures.map((failure) => (
             <li key={`${failure.provider_ref}-${failure.code}`}>
               {failure.provider ? `${providerDisplayLabel(failure.provider, failure.provider_ref)} · ` : ""}
-              {failure.message} ({failure.code})
+              {operationalMessage(failure.code, "모델 카탈로그 일부를 확인할 수 없습니다.")} ({failure.code})
             </li>
           ))}
         </ul>
-        {requestId ? <code>Request ID: {requestId}</code> : null}
+        {requestId ? <code>요청 ID: {requestId}</code> : null}
       </div>
       <Button
         size="small"

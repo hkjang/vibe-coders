@@ -13,5 +13,5 @@ export const modelStatusPresentation: Record<ModelStatus, { label: string; tone:
 export const modelSourceLabels = {
   live: "실시간",
   cache: "캐시",
-  agent_route: "Agent Route",
+  agent_route: "에이전트 경로",
 } as const;

@@ -27,6 +27,7 @@ import { isProviderRef, providerDisplayLabel } from "@/shared/api/provider-ref";
 import type { OpsStatus } from "@/shared/api/schemas";
 import { Badge, type BadgeProps } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
+import { operationalMessage } from "@/shared/errors/operational-messages";
 import { canOpenLegacyAdmin } from "@/shared/permissions/legacy-admin";
 import { usePreferences } from "@/shared/stores/preferences";
 
@@ -222,8 +223,13 @@ export function SystemHealthPage(): React.JSX.Element {
                       <li key={factor.key}>
                         <ShieldCheck aria-hidden="true" />
                         <div>
-                          <p>{factor.message}</p>
-                          <small>{factor.key}</small>
+                          <p>
+                            {operationalMessage(
+                              factor.key,
+                              "운영 위험 요인의 상세 내용을 확인할 수 없습니다.",
+                            )}
+                          </p>
+                          <small>진단 코드: {factor.key}</small>
                         </div>
                         <Badge tone={riskFactorTone(factor.severity)}>+{factor.points}</Badge>
                       </li>
@@ -321,7 +327,12 @@ export function SystemHealthPage(): React.JSX.Element {
                 {fallbackFailure ? (
                   <div className="health-inline-warning" role="status">
                     <AlertTriangle aria-hidden="true" />
-                    <p>{fallbackFailure.message}</p>
+                    <div>
+                      <p>
+                        {operationalMessage(fallbackFailure.code, "운영 상태 일부를 확인할 수 없습니다.")}
+                      </p>
+                      <small>진단 코드: {fallbackFailure.code}</small>
+                    </div>
                   </div>
                 ) : null}
                 <dl className="metric-pairs">
@@ -368,7 +379,8 @@ export function SystemHealthPage(): React.JSX.Element {
             {providerFailure ? (
               <div className="health-empty health-partial-failure" role="status">
                 <AlertTriangle aria-hidden="true" />
-                <p>{providerFailure.message}</p>
+                <p>{operationalMessage(providerFailure.code, "운영 상태 일부를 확인할 수 없습니다.")}</p>
+                <small>진단 코드: {providerFailure.code}</small>
               </div>
             ) : snapshot?.providers.length ? (
               <div className="health-table-wrap">

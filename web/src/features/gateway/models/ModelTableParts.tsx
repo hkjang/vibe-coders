@@ -10,6 +10,7 @@ import { Badge } from "@/shared/components/ui/Badge";
 import { providerDisplayLabel } from "@/shared/api/provider-ref";
 import { createDataTableColumnHelper, type DataTableColumn } from "@/shared/data-table/columns";
 import { DataTable } from "@/shared/data-table/DataTable";
+import { operationalMessage } from "@/shared/errors/operational-messages";
 
 function StatusBadges({ row }: { row: ModelCatalogRow }): React.JSX.Element {
   const { status } = row;
@@ -91,7 +92,7 @@ function createModelColumns(
     }),
     column.accessor((row) => row.price?.input_krw_per_1m, {
       id: "input-price",
-      header: "입력 / 1M",
+      header: "입력 / 100만 토큰",
       cell: ({ getValue }) => {
         const value = getValue();
         return value === undefined ? (enrichmentLoading.pricing ? "확인 중" : "-") : formatKRW(value);
@@ -99,7 +100,7 @@ function createModelColumns(
     }),
     column.accessor((row) => row.price?.output_krw_per_1m, {
       id: "output-price",
-      header: "출력 / 1M",
+      header: "출력 / 100만 토큰",
       cell: ({ getValue }) => {
         const value = getValue();
         return value === undefined ? (enrichmentLoading.pricing ? "확인 중" : "-") : formatKRW(value);
@@ -171,7 +172,7 @@ export function ModelTable({
         <div className="model-list-unavailable">
           <Boxes aria-hidden="true" />
           <strong>마지막 정상 모델 목록이 없습니다.</strong>
-          <span>위 오류의 Request ID를 확인하고 목록 조회를 다시 시도하세요.</span>
+          <span>위 오류의 요청 ID를 확인하고 목록 조회를 다시 시도하세요.</span>
         </div>
       ) : (
         <DataTable
@@ -213,11 +214,11 @@ export function ModelPartialFailureNotice({
           {failures.map((failure) => (
             <li key={`${failure.provider_ref}-${failure.code}`}>
               <strong>{providerDisplayLabel(failure.provider, failure.provider_ref)}</strong> ·{" "}
-              {failure.message} ({failure.code})
+              {operationalMessage(failure.code, "모델 카탈로그 일부를 확인할 수 없습니다.")} ({failure.code})
             </li>
           ))}
         </ul>
-        {requestId ? <code>Request ID: {requestId}</code> : null}
+        {requestId ? <code>요청 ID: {requestId}</code> : null}
       </div>
     </div>
   );

@@ -291,14 +291,14 @@ describe("ModelPage", () => {
     expect(links).toHaveLength(3);
     const agentRouteRow = links
       .map((link) => link.closest("tr"))
-      .find((row) => row && within(row).queryAllByText("Agent Route").length > 0);
+      .find((row) => row && within(row).queryAllByText("에이전트 경로").length > 0);
     if (!agentRouteRow) throw new Error("agent-route duplicate row not found");
     const trigger = within(agentRouteRow).getByRole("link", { name: "shared-model" });
     await user.click(trigger);
 
     const dialog = await screen.findByRole("dialog", { name: "shared-model" });
     expect(within(dialog).getAllByText(/openai/).length).toBeGreaterThan(0);
-    expect(within(dialog).getByText("Agent Route")).toBeVisible();
+    expect(within(dialog).getByText("에이전트 경로")).toBeVisible();
     expect(screen.getByTestId("location")).toHaveTextContent(
       `model_provider=${providerRef("agent-route-openai")}`,
     );
@@ -401,7 +401,7 @@ describe("ModelPage", () => {
     const dialog = await screen.findByRole("dialog", { name: "shared-model" });
     expect(await within(dialog).findByText("공급자와 출처를 선택해 주세요.")).toBeVisible();
     expect(within(dialog).queryByText("모델을 찾을 수 없습니다.")).not.toBeInTheDocument();
-    await user.click(within(dialog).getByRole("link", { name: /openai .* Agent Route/ }));
+    await user.click(within(dialog).getByRole("link", { name: /openai .* 에이전트 경로/ }));
 
     expect(await within(dialog).findByText("가상")).toBeVisible();
     expect(screen.getByTestId("location")).toHaveTextContent(
@@ -410,7 +410,7 @@ describe("ModelPage", () => {
     expect(screen.getByTestId("location")).toHaveTextContent("source=agent_route");
   });
 
-  it("shows the required shadow status and prioritizing Agent Route in the detail dialog", async () => {
+  it("shows the required shadow status and prioritizing agent route in the detail dialog", async () => {
     const user = userEvent.setup();
     mockApi({ models: { ...modelResponse, models: [...modelResponse.models, shadowedModel] } });
     renderPage(`/gateway/models?model_provider=${providerRef("openai")}&model=gpt-shadowed&source=live`);
@@ -418,7 +418,7 @@ describe("ModelPage", () => {
     const dialog = await screen.findByRole("dialog", { name: "gpt-shadowed" });
     expect(await within(dialog).findByText("우선순위 밀림")).toBeVisible();
     expect(
-      within(dialog).getByText("Agent Route “agent-route-priority”가 동일 모델 ID를 우선 처리합니다."),
+      within(dialog).getByText("에이전트 경로 “agent-route-priority”가 동일 모델 ID를 우선 처리합니다."),
     ).toBeVisible();
     expect(within(dialog).getByText("마지막 정상 카탈로그")).toBeVisible();
     expect(within(dialog).getByText(/마지막 정상 카탈로그 데이터입니다\. 조회 시각/)).toBeVisible();
@@ -455,9 +455,9 @@ describe("ModelPage", () => {
     renderPage(`/gateway/models?provider=${providerRef("openai")}&model=gpt-5&source=live`);
 
     const dialog = await screen.findByRole("dialog", { name: "gpt-5" });
-    expect(await within(dialog).findByText("Request ID: req-pricing-503")).toBeVisible();
-    expect(within(dialog).getByText("Request ID: req-quality-503")).toBeVisible();
-    expect(within(dialog).getByText("Request ID: req-tags-503")).toBeVisible();
+    expect(await within(dialog).findByText("요청 ID: req-pricing-503")).toBeVisible();
+    expect(within(dialog).getByText("요청 ID: req-quality-503")).toBeVisible();
+    expect(within(dialog).getByText("요청 ID: req-tags-503")).toBeVisible();
 
     await waitFor(() => expect(request).toHaveBeenCalledTimes(4));
     await user.click(within(dialog).getByRole("button", { name: "모델 가격 상세 재시도" }));
@@ -567,9 +567,9 @@ describe("ModelPage", () => {
     renderPage(`/gateway/models?provider=${providerRef("openai")}&model=gpt-5&source=live`, client);
 
     const dialog = await screen.findByRole("dialog", { name: "gpt-5" });
-    expect(await within(dialog).findByText("Request ID: req-quality-lkg")).toBeVisible();
-    expect(within(dialog).getByText("Request ID: req-pricing-lkg")).toBeVisible();
-    expect(within(dialog).getByText("Request ID: req-tags-lkg")).toBeVisible();
+    expect(await within(dialog).findByText("요청 ID: req-quality-lkg")).toBeVisible();
+    expect(within(dialog).getByText("요청 ID: req-pricing-lkg")).toBeVisible();
+    expect(within(dialog).getByText("요청 ID: req-tags-lkg")).toBeVisible();
     expect(within(dialog).getAllByText(/마지막 정상 데이터를 표시합니다/)).toHaveLength(3);
     expect(within(dialog).getByText("91점")).toBeVisible();
     expect(within(dialog).getByText("₩1,000")).toBeVisible();
@@ -593,8 +593,9 @@ describe("ModelPage", () => {
     });
     renderPage();
 
-    expect(await screen.findByText("Request ID: req-partial-models")).toBeVisible();
-    expect(screen.getByText(/Provider model catalog is unavailable/)).toBeVisible();
+    expect(await screen.findByText("요청 ID: req-partial-models")).toBeVisible();
+    expect(screen.getByText(/공급자 모델 카탈로그를 일시적으로 확인할 수 없습니다/)).toBeVisible();
+    expect(screen.queryByText(/Provider model catalog is unavailable/)).not.toBeInTheDocument();
     expect(screen.getByRole("table", { name: "공급자별 모델 상태, 품질과 가격" })).toBeVisible();
   });
 
@@ -618,8 +619,10 @@ describe("ModelPage", () => {
 
     const dialog = await screen.findByRole("dialog", { name: "claude-4" });
     expect(await within(dialog).findByText("공급자 모델 카탈로그를 확인할 수 없습니다.")).toBeVisible();
+    expect(within(dialog).getByText(/공급자 모델 카탈로그를 일시적으로 확인할 수 없습니다/)).toBeVisible();
+    expect(within(dialog).queryByText(/Provider model catalog is unavailable/)).not.toBeInTheDocument();
     expect(within(dialog).getByText(/provider_models_unavailable/)).toBeVisible();
-    expect(within(dialog).getByText("Request ID: req-provider-partial")).toBeVisible();
+    expect(within(dialog).getByText("요청 ID: req-provider-partial")).toBeVisible();
     expect(within(dialog).queryByText("모델을 찾을 수 없습니다.")).not.toBeInTheDocument();
 
     await user.click(within(dialog).getByRole("button", { name: "모델 카탈로그 상세 재시도" }));
@@ -645,8 +648,12 @@ describe("ModelPage", () => {
 
     const dialog = await screen.findByRole("dialog", { name: "not-in-truncated-response" });
     expect(await within(dialog).findByText("공급자 모델 카탈로그를 확인할 수 없습니다.")).toBeVisible();
+    expect(
+      within(dialog).getByText(/지원 한도로 인해 모델 카탈로그 응답 일부가 생략되었습니다/),
+    ).toBeVisible();
+    expect(within(dialog).queryByText(/Model response limit exceeded/)).not.toBeInTheDocument();
     expect(within(dialog).getByText(/models_response_limit_exceeded/)).toBeVisible();
-    expect(within(dialog).getByText("Request ID: req-global-partial")).toBeVisible();
+    expect(within(dialog).getByText("요청 ID: req-global-partial")).toBeVisible();
     expect(within(dialog).queryByText("모델을 찾을 수 없습니다.")).not.toBeInTheDocument();
   });
 
@@ -673,8 +680,12 @@ describe("ModelPage", () => {
     expect(
       await within(dialog).findByText("공급자 갱신에 실패해 마지막 정상 모델을 표시합니다."),
     ).toBeVisible();
+    expect(
+      within(dialog).getByText(/공급자 갱신에 실패해 마지막 정상 모델 카탈로그를 표시합니다/),
+    ).toBeVisible();
+    expect(within(dialog).queryByText(/Provider refresh failed/)).not.toBeInTheDocument();
     expect(within(dialog).getByText(/provider_models_stale/)).toBeVisible();
-    expect(within(dialog).getByText("Request ID: req-provider-stale")).toBeVisible();
+    expect(within(dialog).getByText("요청 ID: req-provider-stale")).toBeVisible();
   });
 
   it("disables a model detail retry while the catalogue refresh is running", async () => {
@@ -789,9 +800,11 @@ describe("ModelPage", () => {
     expect(
       await within(dialog).findByText("모델 카탈로그 갱신에 실패해 마지막 정상 데이터를 표시합니다."),
     ).toBeVisible();
-    expect(within(dialog).getByText("Request ID: req-model-lkg")).toBeVisible();
-    expect(within(dialog).queryByText("Request ID: req-model-cached-response")).not.toBeInTheDocument();
+    expect(within(dialog).getByText("요청 ID: req-model-lkg")).toBeVisible();
+    expect(within(dialog).queryByText("요청 ID: req-model-cached-response")).not.toBeInTheDocument();
     expect(within(dialog).queryByText(/Cached provider failure/)).not.toBeInTheDocument();
+    expect(within(dialog).queryByText("Model 목록 갱신 실패")).not.toBeInTheDocument();
+    expect(within(dialog).getByText("게이트웨이에 연결할 수 없습니다.")).toBeVisible();
     expect(within(dialog).getAllByRole("alert")).toHaveLength(1);
     expect(within(dialog).getByText("카탈로그")).toBeVisible();
     await user.click(within(dialog).getByRole("button", { name: "모델 카탈로그 상세 재시도" }));
@@ -835,7 +848,9 @@ describe("ModelPage", () => {
     });
     renderPage();
 
-    expect(await screen.findByText("Request ID: req-model-terminal")).toBeVisible();
+    expect(await screen.findByText("요청 ID: req-model-terminal")).toBeVisible();
+    expect(screen.getByText("서버가 요청을 처리하지 못했습니다. 잠시 후 다시 시도하세요.")).toBeVisible();
+    expect(screen.queryByText("Model 목록 조회 실패")).not.toBeInTheDocument();
     expect(within(screen.getByLabelText("모델 요약")).getAllByText("—")).toHaveLength(4);
     expect(screen.getByText("마지막 정상 모델 목록이 없습니다.")).toBeVisible();
     expect(screen.queryByRole("table", { name: "공급자별 모델 상태, 품질과 가격" })).not.toBeInTheDocument();

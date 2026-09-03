@@ -79,9 +79,9 @@ export function AuthProvider({ children }: PropsWithChildren): React.JSX.Element
   const queryClient = useQueryClient();
   const [mode, setMode] = useState<AuthMode>("loading");
   const [user, setUser] = useState<AuthUser>();
-  const [backendVersion, setBackendVersion] = useState("unknown");
+  const [backendVersion, setBackendVersion] = useState("확인 불가");
   const [uiVersion, setUiVersion] = useState(__UI_VERSION__);
-  const [apiVersion, setApiVersion] = useState("unknown");
+  const [apiVersion, setApiVersion] = useState("확인 불가");
   const [expiresAt, setExpiresAt] = useState<number>();
   const [sso, setSso] = useState<SsoStatus>(defaultSso);
   const [authenticationMode, setAuthenticationMode] = useState<AuthenticationMode>("session");
@@ -192,13 +192,7 @@ export function AuthProvider({ children }: PropsWithChildren): React.JSX.Element
           setMode("anonymous");
         } else {
           setMode("error");
-          setError(
-            isAppError(bootstrapError)
-              ? bootstrapError.message
-              : isAppError(fallbackError)
-                ? fallbackError.message
-                : "인증 상태를 확인할 수 없습니다.",
-          );
+          setError("인증 상태를 확인할 수 없습니다.");
         }
       }
     }

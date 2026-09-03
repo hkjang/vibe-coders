@@ -13,6 +13,7 @@ import type { AppRequestSummary, AppRequestsQuery } from "@/shared/api/schemas";
 import { ErrorState, LoadingState } from "@/shared/components/state/PageStates";
 import { Badge } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
+import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
 import { canOpenLegacyAdmin } from "@/shared/permissions/legacy-admin";
 import { usePreferences } from "@/shared/stores/preferences";
 import "@/features/observability/requests/request-page.css";
@@ -104,8 +105,9 @@ export function RequestPage(): React.JSX.Element {
   if (result.error && !result.data) {
     return (
       <ErrorState
-        message={isAppError(result.error) ? result.error.message : "잠시 후 다시 시도해 주세요."}
+        message={safeAppErrorMessage(result.error, "요청 목록을 확인할 수 없습니다.")}
         requestId={isAppError(result.error) ? result.error.requestId : undefined}
+        diagnosticCode={isAppError(result.error) ? result.error.code : undefined}
         onRetry={() => void result.refetch()}
         showLegacy={showLegacyAdmin}
       />

@@ -196,7 +196,7 @@ describe("OverviewPage", () => {
     mockPhaseOneApi(endpoints.admin.ops.risk.path);
     renderOverview();
 
-    expect((await screen.findAllByText("Request ID: req-overview-42")).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText("요청 ID: req-overview-42")).length).toBeGreaterThan(0);
     expect(screen.getByText("12")).toBeVisible();
     expect(screen.getByRole("button", { name: "운영 위험 재시도" })).toBeEnabled();
     expect(screen.getAllByText("저하").length).toBeGreaterThan(0);
@@ -243,7 +243,7 @@ describe("OverviewPage", () => {
     mockPhaseOneApi(endpoints.admin.stats.path);
     renderOverview();
 
-    expect(await screen.findAllByText("Request ID: req-overview-42")).toHaveLength(1);
+    expect(await screen.findAllByText("요청 ID: req-overview-42")).toHaveLength(1);
     expect(screen.getAllByRole("button", { name: "보존 트래픽과 비용 재시도" })).toHaveLength(1);
     expect(screen.queryByText("프로세스 런타임")).not.toBeInTheDocument();
   });
@@ -267,7 +267,9 @@ describe("OverviewPage", () => {
     renderOverview("/app/overview?range=1h");
 
     expect(screen.getByRole("button", { name: "1시간" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText("1시간 선택 기간의 공급자와 회로 차단기")).toBeVisible();
     await user.click(screen.getByRole("button", { name: "7일" }));
+    expect(screen.getByText("7일 선택 기간의 공급자와 회로 차단기")).toBeVisible();
 
     await waitFor(() => expect(routingWindows).toContain("7d"));
   });

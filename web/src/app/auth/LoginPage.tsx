@@ -7,9 +7,9 @@ import { z } from "zod";
 
 import { useAuth } from "@/app/auth/AuthProvider";
 import { uiLabels } from "@/config/ui-labels";
-import { isAppError } from "@/shared/api/error";
 import { tokenStore } from "@/shared/auth/token-store";
 import { Button } from "@/shared/components/ui/Button";
+import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
 import { canOpenLegacyAdmin } from "@/shared/permissions/legacy-admin";
 import { safeReturnTo, stageSsoReturnTo } from "@/shared/utils/safe-return-to";
 
@@ -42,7 +42,7 @@ export function LoginPage(): React.JSX.Element {
       await auth.login(values.email, values.password);
       navigate(returnTo, { replace: true });
     } catch (error) {
-      setServerError(isAppError(error) ? error.message : "로그인할 수 없습니다.");
+      setServerError(safeAppErrorMessage(error, "로그인할 수 없습니다."));
     }
   });
 
@@ -58,7 +58,7 @@ export function LoginPage(): React.JSX.Element {
       await auth.setLegacyToken(legacyToken);
       navigate(returnTo, { replace: true });
     } catch (error) {
-      setServerError(isAppError(error) ? error.message : "기존 관리자 토큰을 확인할 수 없습니다.");
+      setServerError(safeAppErrorMessage(error, "기존 관리자 토큰을 확인할 수 없습니다."));
     }
   };
 
@@ -90,7 +90,7 @@ export function LoginPage(): React.JSX.Element {
                 aria-describedby="legacy-token-help"
               />
               <p id="legacy-token-help" className="field-help">
-                브라우저 탭의 sessionStorage에만 저장되며 LocalStorage에는 저장하지 않습니다.
+                브라우저 탭의 세션 저장소에만 저장하며 로컬 저장소에는 저장하지 않습니다.
               </p>
             </div>
             {serverError || auth.error ? (

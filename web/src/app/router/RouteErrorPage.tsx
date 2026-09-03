@@ -1,21 +1,17 @@
-import { isRouteErrorResponse, useRouteError } from "react-router";
+import { useRouteError } from "react-router";
 
 import { useAuth } from "@/app/auth/AuthProvider";
+import { routeErrorMessage } from "@/app/router/route-error-message";
 import { ErrorState } from "@/shared/components/state/PageStates";
 import { canOpenLegacyAdmin } from "@/shared/permissions/legacy-admin";
 
 export function RouteErrorPage(): React.JSX.Element {
   const auth = useAuth();
   const error = useRouteError();
-  const message = isRouteErrorResponse(error)
-    ? `${error.status} ${error.statusText}`
-    : error instanceof Error
-      ? error.message
-      : "요청한 화면을 표시할 수 없습니다.";
   return (
     <ErrorState
       title="화면 오류"
-      message={message}
+      message={routeErrorMessage(error)}
       onRetry={() => window.location.reload()}
       showLegacy={canOpenLegacyAdmin(auth)}
     />

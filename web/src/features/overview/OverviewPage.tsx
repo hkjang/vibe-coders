@@ -18,6 +18,7 @@ import {
   formatKRW,
   formatMilliseconds,
   formatPercent,
+  healthRangeLabels,
   maxUpdatedAt,
   refreshIntervalMs,
 } from "@/features/health/health-utils";
@@ -284,7 +285,7 @@ export function OverviewPage(): React.JSX.Element {
 
         <HealthWidget
           title="라우팅"
-          description={`${range} 선택 기간의 공급자와 회로 차단기`}
+          description={`${healthRangeLabels[range]} 선택 기간의 공급자와 회로 차단기`}
           icon={Route}
           loading={canReadRouting && routing.isPending}
           error={canReadRouting ? routing.error : undefined}

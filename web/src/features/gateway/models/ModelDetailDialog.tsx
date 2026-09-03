@@ -12,6 +12,7 @@ import type { AdminModelPartialFailure } from "@/shared/api/schemas";
 import { Badge } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
 import { Dialog } from "@/shared/components/ui/Dialog";
+import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
 
 export interface ModelDetailResourceState {
   error?: unknown;
@@ -56,6 +57,7 @@ function DetailResourceState({
   state: ModelDetailResourceState;
 }): React.JSX.Element {
   const requestId = isAppError(state.error) ? state.error.requestId : undefined;
+  const diagnosticCode = isAppError(state.error) ? state.error.code : undefined;
   const showBody = state.hasResponse || (!state.pending && !state.error);
   return (
     <div className="model-detail-resource">
@@ -72,8 +74,9 @@ function DetailResourceState({
               {label}{" "}
               {state.hasResponse ? "갱신에 실패해 마지막 정상 데이터를 표시합니다." : "조회에 실패했습니다."}
             </strong>
-            <p>{isAppError(state.error) ? state.error.message : "잠시 후 다시 시도해 주세요."}</p>
-            {requestId ? <code>Request ID: {requestId}</code> : null}
+            <p>{safeAppErrorMessage(state.error, `${label} 정보를 확인할 수 없습니다.`)}</p>
+            {requestId ? <code>요청 ID: {requestId}</code> : null}
+            {diagnosticCode ? <code>진단 코드: {diagnosticCode}</code> : null}
           </div>
           <Button
             size="small"
@@ -143,15 +146,15 @@ function PricingDetails({ row }: { row: ModelCatalogRow }): React.JSX.Element {
   return (
     <dl className="model-detail-grid model-price-grid">
       <div>
-        <dt>입력 / 1M 토큰</dt>
+        <dt>입력 / 100만 토큰</dt>
         <dd>{formatKRW(row.price.input_krw_per_1m)}</dd>
       </div>
       <div>
-        <dt>출력 / 1M 토큰</dt>
+        <dt>출력 / 100만 토큰</dt>
         <dd>{formatKRW(row.price.output_krw_per_1m)}</dd>
       </div>
       <div>
-        <dt>캐시 입력 / 1M</dt>
+        <dt>캐시 입력 / 100만 토큰</dt>
         <dd>{formatKRW(row.price.cached_input_krw_per_1m)}</dd>
       </div>
     </dl>
@@ -189,8 +192,8 @@ function DeprecationDetails({ row }: { row: ModelCatalogRow }): React.JSX.Elemen
       {row.model.shadowed || row.model.shadowed_by ? (
         <p className="model-detail-note">
           {row.model.shadowed_by
-            ? `Agent Route “${row.model.shadowed_by}”가 동일 모델 ID를 우선 처리합니다.`
-            : "다른 Agent Route가 동일 모델 ID를 우선 처리합니다."}
+            ? `에이전트 경로 “${row.model.shadowed_by}”가 동일 모델 ID를 우선 처리합니다.`
+            : "다른 에이전트 경로가 동일 모델 ID를 우선 처리합니다."}
         </p>
       ) : null}
     </section>
@@ -211,6 +214,7 @@ export function ModelDetailDialog({
   showLegacyAdmin,
 }: ModelDetailDialogProps): React.JSX.Element {
   const requestId = isAppError(catalogue.error) ? catalogue.error.requestId : undefined;
+  const diagnosticCode = isAppError(catalogue.error) ? catalogue.error.code : undefined;
   const catalogueRequestId = requestId || catalogue.requestId;
   const failureProviderRef = row?.model.provider_ref ?? requestedProvider;
   const relevantFailures = catalogue.partialFailures.filter(
@@ -249,8 +253,9 @@ export function ModelDetailDialog({
           <AlertTriangle aria-hidden="true" />
           <div>
             <strong>모델 상세를 불러오지 못했습니다.</strong>
-            <p>{isAppError(catalogue.error) ? catalogue.error.message : "잠시 후 다시 시도해 주세요."}</p>
-            {requestId ? <code>Request ID: {requestId}</code> : null}
+            <p>{safeAppErrorMessage(catalogue.error, "모델 상세 정보를 확인할 수 없습니다.")}</p>
+            {requestId ? <code>요청 ID: {requestId}</code> : null}
+            {diagnosticCode ? <code>진단 코드: {diagnosticCode}</code> : null}
           </div>
           <Button size="small" variant="secondary" onClick={catalogue.retry} disabled={catalogue.fetching}>
             <RefreshCw aria-hidden="true" /> {catalogue.fetching ? "갱신 중" : "재시도"}

@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { containsPotentialSecret, isSensitiveCredentialKey } from "@/shared/security/secrets";
+import {
+  containsPotentialSecret,
+  isSensitiveCredentialKey,
+  secretSearchMessage,
+} from "@/shared/security/secrets";
 
 function encoded(value: string, passes: number): string {
   let result = value;
@@ -63,5 +67,10 @@ describe("secret detection", () => {
   it("fails closed when bounded decoding cannot reach a fixed point or input is excessive", () => {
     expect(containsPotentialSecret(encoded("api_key=too-deep", 10))).toBe(true);
     expect(containsPotentialSecret("x".repeat(16_385))).toBe(true);
+  });
+
+  it("provides a Korean remediation message", () => {
+    expect(secretSearchMessage).toContain("비밀정보를 제거");
+    expect(secretSearchMessage).not.toContain("Secret");
   });
 });

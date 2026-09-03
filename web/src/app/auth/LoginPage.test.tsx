@@ -38,6 +38,9 @@ describe("LoginPage Legacy bridge", () => {
   it("shows the Legacy Admin link in Legacy token mode when fallback is enabled", () => {
     renderLogin();
     expect(screen.getByRole("link", { name: "기존 관리자 화면" })).toHaveAttribute("href", "/admin");
+    expect(
+      screen.getByText("브라우저 탭의 세션 저장소에만 저장하며 로컬 저장소에는 저장하지 않습니다."),
+    ).toBeVisible();
   });
 
   it("hides the Legacy Admin link when runtime fallback is disabled", () => {

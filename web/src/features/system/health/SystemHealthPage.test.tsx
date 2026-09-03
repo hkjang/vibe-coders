@@ -162,20 +162,22 @@ describe("SystemHealthPage", () => {
     const user = userEvent.setup();
     renderPage();
 
-    expect((await screen.findAllByText("Request ID: req-risk-7")).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText("요청 ID: req-risk-7")).length).toBeGreaterThan(0);
     const retry = screen.getAllByRole("button", { name: "시스템 상태 현황 재시도" }).at(0);
     if (!retry) throw new Error("retry button was not rendered");
     await user.click(retry);
 
-    await waitFor(() => expect(screen.getByText("Body 원문 로깅을 확인하세요.")).toBeVisible());
-    expect(screen.queryByText("Request ID: req-risk-7")).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByText("요청과 응답 원문 저장이 활성화되어 있습니다.")).toBeVisible(),
+    );
+    expect(screen.queryByText("요청 ID: req-risk-7")).not.toBeInTheDocument();
   });
 
   it("does not report medium risk or a 95 percent disk as healthy", async () => {
     mockSystemApi(false, true);
     renderPage();
 
-    expect(await screen.findByText("데이터 디스크 사용률이 높습니다.")).toBeVisible();
+    expect(await screen.findByText("데이터 디스크 사용률이 위험 수준입니다.")).toBeVisible();
     expect(screen.getAllByText("저하").length).toBeGreaterThan(0);
     expect(screen.getByText("심각")).toBeVisible();
   });
@@ -184,8 +186,16 @@ describe("SystemHealthPage", () => {
     mockSystemApi(false, false, true);
     renderPage();
 
-    expect(await screen.findByText("Provider health data is temporarily unavailable.")).toBeVisible();
-    expect(screen.getByText("Fallback log statistics are temporarily unavailable.")).toBeVisible();
+    expect(
+      (await screen.findAllByText("공급자 상태 데이터를 일시적으로 확인할 수 없습니다.")).length,
+    ).toBeGreaterThan(0);
+    expect(screen.getByText("대체 응답 로그 통계를 일시적으로 확인할 수 없습니다.")).toBeVisible();
+    expect(screen.queryByText("Provider health data is temporarily unavailable.")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Fallback log statistics are temporarily unavailable."),
+    ).not.toBeInTheDocument();
+    expect(screen.getAllByText(/진단 코드: provider_health_unavailable/).length).toBeGreaterThan(0);
+    expect(screen.getByText(/진단 코드: fallback_stats_unavailable/)).toBeVisible();
     expect(screen.getByText("확인 불가")).toBeVisible();
     expect(screen.queryByText("수집된 공급자 상태가 없습니다.")).not.toBeInTheDocument();
     expect(screen.getAllByText("확인 실패").length).toBeGreaterThanOrEqual(2);

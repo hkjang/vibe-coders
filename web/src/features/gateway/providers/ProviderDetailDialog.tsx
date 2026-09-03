@@ -10,6 +10,7 @@ import { isAppError } from "@/shared/api/error";
 import { Badge } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
 import { Dialog } from "@/shared/components/ui/Dialog";
+import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
 import { healthStatusLabels } from "@/config/ui-labels";
 
 export interface ProviderDetailSourceState {
@@ -54,6 +55,7 @@ function DetailQueryState({
 }): React.JSX.Element | null {
   if (state.error) {
     const requestId = isAppError(state.error) ? state.error.requestId : undefined;
+    const diagnosticCode = isAppError(state.error) ? state.error.code : undefined;
     return (
       <div className="provider-detail-query-state provider-detail-query-error" role="alert">
         <AlertTriangle aria-hidden="true" />
@@ -62,8 +64,9 @@ function DetailQueryState({
             {label}{" "}
             {state.hasData ? "갱신에 실패해 마지막 정상 데이터를 표시합니다." : "조회에 실패했습니다."}
           </strong>
-          <p>{isAppError(state.error) ? state.error.message : "잠시 후 다시 시도해 주세요."}</p>
-          {requestId ? <code>Request ID: {requestId}</code> : null}
+          <p>{safeAppErrorMessage(state.error, `${label} 데이터를 확인할 수 없습니다.`)}</p>
+          {requestId ? <code>요청 ID: {requestId}</code> : null}
+          {diagnosticCode ? <code>진단 코드: {diagnosticCode}</code> : null}
           {state.refreshing ? <span>다시 갱신하는 중입니다.</span> : null}
         </div>
         <Button
@@ -257,7 +260,7 @@ export function ProviderDetailDialog({
             <h3 id="provider-connection-title">연결 설정</h3>
             <dl className="provider-detail-grid">
               <div className="provider-detail-wide">
-                <dt>Base URL</dt>
+                <dt>기본 URL</dt>
                 <dd>
                   <code>{displayProviderBaseURL(row.provider.base_url)}</code>
                 </dd>

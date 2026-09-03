@@ -157,6 +157,7 @@ describe("GatewayHealthPage", () => {
     renderPage("/gateway/health?team=platform&range=7d");
 
     expect(screen.getByRole("button", { name: "7일" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText("최근 7일 · 점수 70 미만을 저하로 판단")).toBeVisible();
     const ranking = await screen.findByRole("table", {
       name: "선택 기간의 공급자 상태 점수 순위",
     });
@@ -165,7 +166,9 @@ describe("GatewayHealthPage", () => {
 
     const breakers = screen.getByRole("table", { name: "공급자별 회로 차단기 상태" });
     expect(within(breakers).getByText("차단(개방)")).toBeInTheDocument();
-    expect(screen.getByText("Provider 상태 점수가 임계값보다 낮습니다.")).toBeInTheDocument();
+    expect(screen.getByText("공급자 상태 점수가 임계값보다 낮습니다.")).toBeInTheDocument();
+    expect(screen.queryByText("Provider 상태 점수가 임계값보다 낮습니다.")).not.toBeInTheDocument();
+    expect(screen.getByText(/진단 코드: provider_degraded/)).toBeInTheDocument();
     expect(screen.getByText("경고")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /기존 상태 화면 열기/ })).toHaveAttribute(
       "href",
@@ -178,6 +181,7 @@ describe("GatewayHealthPage", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "30일" }));
+    expect(screen.getByText("최근 30일 · 점수 70 미만을 저하로 판단")).toBeVisible();
     expect(screen.getByTestId("location")).toHaveTextContent("/gateway/health?team=platform&range=30d");
     await waitFor(() =>
       expect(request).toHaveBeenCalledWith(
@@ -194,8 +198,11 @@ describe("GatewayHealthPage", () => {
 
     expect(await screen.findByText("API 연결 가능")).toBeInTheDocument();
     expect(screen.getByText("요청 수신 가능")).toBeInTheDocument();
-    expect(screen.getByText("라우팅 상태를 불러오지 못했습니다.")).toBeInTheDocument();
-    expect(screen.getByText("Request ID: req-routing-503")).toBeInTheDocument();
+    expect(
+      screen.getByText("서버가 요청을 처리하지 못했습니다. 잠시 후 다시 시도하세요."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("라우팅 상태를 불러오지 못했습니다.")).not.toBeInTheDocument();
+    expect(screen.getByText("요청 ID: req-routing-503")).toBeInTheDocument();
     expect(screen.getByText("저하")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "공급자 라우팅 상태 재시도" }));
@@ -249,7 +256,7 @@ describe("GatewayHealthPage", () => {
     renderPage("/gateway/health", client);
 
     expect(await screen.findByText(/마지막 정상 데이터를 표시합니다/)).toBeVisible();
-    expect(screen.getByText("Request ID: req-health-stale")).toBeVisible();
+    expect(screen.getByText("요청 ID: req-health-stale")).toBeVisible();
     expect(screen.getAllByText("저하").length).toBeGreaterThan(0);
     expect(screen.queryByText("연결 끊김")).not.toBeInTheDocument();
     expect(screen.getByText("API 연결 가능")).toBeVisible();

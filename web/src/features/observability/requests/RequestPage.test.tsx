@@ -165,7 +165,8 @@ describe("RequestPage", () => {
       new AppError("목록 실패", { kind: "http", requestId: "gateway-request-no-legacy" }),
     );
     renderPage();
-    expect(await screen.findByText("목록 실패")).toBeInTheDocument();
+    expect(await screen.findByText("요청 목록을 확인할 수 없습니다.")).toBeInTheDocument();
+    expect(screen.queryByText("목록 실패")).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "기존 관리자 화면 열기" })).not.toBeInTheDocument();
   });
 
@@ -232,7 +233,8 @@ describe("RequestPage", () => {
       new AppError("목록 실패", { kind: "http", requestId: "gateway-request-2" }),
     );
     renderPage();
-    expect(await screen.findByText("목록 실패")).toBeInTheDocument();
-    expect(screen.getByText("Request ID: gateway-request-2")).toBeInTheDocument();
+    expect(await screen.findByText("요청 목록을 확인할 수 없습니다.")).toBeInTheDocument();
+    expect(screen.queryByText("목록 실패")).not.toBeInTheDocument();
+    expect(screen.getByText("요청 ID: gateway-request-2")).toBeInTheDocument();
   });
 });

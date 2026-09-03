@@ -16,6 +16,7 @@ import {
   formatInteger,
   formatMilliseconds,
   formatPercent,
+  healthRangeLabels,
   refreshIntervalMs,
 } from "@/features/health/health-utils";
 import { HealthWidget, TimeRangePicker } from "@/features/health/health-ui";
@@ -26,6 +27,7 @@ import { isProviderRef, providerDisplayLabel } from "@/shared/api/provider-ref";
 import type { RoutingHealth } from "@/shared/api/schemas";
 import { Badge, type BadgeProps } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
+import { operationalMessage } from "@/shared/errors/operational-messages";
 import { canOpenLegacyAdmin } from "@/shared/permissions/legacy-admin";
 import { usePreferences } from "@/shared/stores/preferences";
 
@@ -199,7 +201,7 @@ export function GatewayHealthPage(): React.JSX.Element {
 
       <HealthWidget
         title="공급자 라우팅 상태"
-        description={`최근 ${range} · 점수 ${scoreThreshold} 미만을 저하로 판단`}
+        description={`최근 ${healthRangeLabels[range]} · 점수 ${scoreThreshold} 미만을 저하로 판단`}
         icon={Route}
         loading={routing.isPending}
         error={routing.error}
@@ -339,9 +341,10 @@ function RoutingHealthDetails({ data }: { data: RoutingHealth }): React.JSX.Elem
               >
                 <ShieldAlert aria-hidden="true" />
                 <div>
-                  <p>{alert.message}</p>
+                  <p>{operationalMessage(alert.code, "라우팅 알림의 상세 내용을 확인할 수 없습니다.")}</p>
                   <small>
-                    {routingProviderLabel(alert.provider, alert.provider_ref, index)} · {alert.code}
+                    {routingProviderLabel(alert.provider, alert.provider_ref, index)} · 진단 코드:{" "}
+                    {alert.code}
                   </small>
                 </div>
                 <Badge tone={severityTone(alert.severity)}>{severityLabel(alert.severity)}</Badge>
