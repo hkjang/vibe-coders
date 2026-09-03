@@ -95,7 +95,8 @@ named volume `proxy-gateway-data`에 유지됩니다. `down -v`는 사용하지 
 - 호출 단건 상세 + 첫 청크/전체 지연 + 프롬프트 전문(마스킹) + 응답 메타 조회
 - API 키 / 팀 / IP / 전체 단위 일별·월별 쿼터 (토큰·KRW). 한도 초과 시 429 + Retry-After + X-Quota-*
 - 보존 정책 (RETENTION_REQUEST_DAYS / RETENTION_PROMPT_DAYS / RETENTION_RESPONSE_DAYS) 기반 백그라운드 cleanup
-- `/admin` Legacy Stable Console과 기본 OFF인 `/app` React Next Console Preview. 기존 한국어 어드민 다중 탭과 비용 KRW 표기는 그대로 유지
+- `/admin` 기존 안정 운영 콘솔과 기본 OFF인 `/app` React 차세대 콘솔 미리보기. `/app` 메뉴·버튼·기능명은 한글을 우선하고 기존 한국어 관리자 다중 탭과 비용 KRW 표기는 그대로 유지
+- `/app/observability/requests` 읽기 전용 요청 탐색기: URL 필터, 암호화·서명된 커서 페이지 이동, 마지막 정상 데이터, 안전한 상세 대화상자와 기존 화면 연결을 제공하며 프롬프트·응답 본문·원시 오류는 노출하지 않음
 - Datadog LLM Observability 대응 기능: Trace/Span Explorer, Session Explorer, Prompt Tracking, Patterns, Insights, trend timeseries, human feedback(label/prompt/alignment summary), managed evaluation, external evaluation submit API
 - 사용자 상세 화면에 API 키별 LLM 요청/eval failure/feedback/alignment trend drill-down 제공
 - prompt name/version 비교 API와 UI 모달로 버전별 지연·비용·오류율·평가 실패율 비교 제공
