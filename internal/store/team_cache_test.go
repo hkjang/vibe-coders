@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -111,6 +112,61 @@ func TestTeamWritesTakeEffectImmediately(t *testing.T) {
 	seedTeam(t, db, "t2", "second")
 	if _, found, _ := db.AuthTeamByIDOrName(ctx, "second"); !found {
 		t.Fatal("a newly created team does not resolve")
+	}
+}
+
+func TestResolveOrCreateAuthTeamBypassesStaleCacheAndUsesCanonicalNameMatch(t *testing.T) {
+	db := openStoreForTest(t)
+	defer db.Close()
+	ctx := context.Background()
+
+	// Prime a miss, then simulate another pod creating an opaque-ID team without touching
+	// this process's cache.
+	if _, found, err := db.AuthTeamByIDOrName(ctx, "platform"); err != nil || found {
+		t.Fatalf("initial team lookup: found=%v err=%v", found, err)
+	}
+	now := formatTime(time.Now().UTC())
+	if _, err := db.db.ExecContext(ctx, db.bind(`INSERT INTO teams (id, name, created_at, updated_at)
+		VALUES (?, ?, ?, ?)`), "team_opaque", "Platform", now, now); err != nil {
+		t.Fatal(err)
+	}
+
+	team, err := db.ResolveOrCreateAuthTeam(ctx, "platform")
+	if err != nil || team.ID != "team_opaque" || team.Name != "Platform" {
+		t.Fatalf("canonical team = %+v err=%v", team, err)
+	}
+	var count int
+	if err := db.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM teams`).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("team count = %d err=%v", count, err)
+	}
+}
+
+func TestResolveOrCreateAuthTeamCreatesMissingTeam(t *testing.T) {
+	db := openStoreForTest(t)
+	defer db.Close()
+
+	team, err := db.ResolveOrCreateAuthTeam(t.Context(), "new-team")
+	if err != nil || team.ID != "new-team" || team.Name != "new-team" {
+		t.Fatalf("created team = %+v err=%v", team, err)
+	}
+	resolved, found, err := db.AuthTeamByIDOrName(t.Context(), "NEW-TEAM")
+	if err != nil || !found || resolved.ID != team.ID {
+		t.Fatalf("created team lookup = %+v found=%v err=%v", resolved, found, err)
+	}
+}
+
+func TestResolveOrCreateAuthTeamRejectsCrossTeamIDAmbiguity(t *testing.T) {
+	db := openStoreForTest(t)
+	defer db.Close()
+	seedTeam(t, db, "platform", "Platform ID owner")
+	seedTeam(t, db, "team_other", "platform")
+
+	if _, err := db.ResolveOrCreateAuthTeam(t.Context(), "platform"); !errors.Is(err, ErrAuthTeamIdentityAmbiguous) {
+		t.Fatalf("ambiguous team identity error = %v", err)
+	}
+	var count int
+	if err := db.db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM teams`).Scan(&count); err != nil || count != 2 {
+		t.Fatalf("ambiguous lookup changed teams: count=%d err=%v", count, err)
 	}
 }
 

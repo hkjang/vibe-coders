@@ -7,12 +7,15 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"vibe-coders/internal/audit"
 	"vibe-coders/internal/config"
 	"vibe-coders/internal/store"
 )
@@ -33,6 +36,30 @@ func TestResolveKeycloakRole(t *testing.T) {
 	for i, c := range cases {
 		if got := resolveKeycloakRole(c.roles, c.def); got != c.want {
 			t.Errorf("case %d: resolveKeycloakRole(%v, %q) = %q, want %q", i, c.roles, c.def, got, c.want)
+		}
+	}
+}
+
+func TestStableKeycloakProvisioningStageAllowsOnlyBoundedCategories(t *testing.T) {
+	for _, stage := range []string{
+		keycloakProvisioningStageClaimValidation,
+		keycloakProvisioningStageRoleMapping,
+		keycloakProvisioningStageTeamResolution,
+		keycloakProvisioningStageIdentityLookup,
+		keycloakProvisioningStageAccountLookup,
+		keycloakProvisioningStageAccountPersistence,
+	} {
+		err := keycloakProvisioningFailure(stage, errors.New("driver detail with PII"))
+		if got := stableKeycloakProvisioningStage(err); got != stage {
+			t.Errorf("stage %q projected as %q", stage, got)
+		}
+	}
+	for _, err := range []error{
+		errors.New("raw SQL error with secret"),
+		keycloakProvisioningFailure("email=private@example.com", errors.New("secret")),
+	} {
+		if got := stableKeycloakProvisioningStage(err); got != keycloakProvisioningStageAccountPersistence {
+			t.Errorf("untrusted provisioning error projected as %q", got)
 		}
 	}
 }
@@ -321,28 +348,249 @@ func TestVerifyKeycloakAccessToken(t *testing.T) {
 	}
 }
 
-func TestProvisionKeycloakUserRequiresVerifiedEmailAndSafeLinkTarget(t *testing.T) {
+func TestProvisionKeycloakUserKeepsUnverifiedEmailSeparateFromLocalAccount(t *testing.T) {
 	db := openTestStore(t)
 	defer db.Close()
 	s := &Server{cfg: config.Config{Keycloak: config.KeycloakConfig{
 		IssuerURL: "https://kc.example/realms/vibe", DefaultRole: "developer",
 	}}, db: db}
 
-	base := map[string]any{"sub": "subject-1", "email": "person@example.com"}
-	if _, _, err := s.provisionKeycloakUser(t.Context(), base); err == nil {
-		t.Fatal("an unverified email must not provision or link an account")
+	local := store.AuthUser{ID: "local-user", Email: "person@example.com", PasswordHash: "local-password-hash", Role: "developer", Status: "active"}
+	if err := db.CreateAuthUser(t.Context(), local); err != nil {
+		t.Fatal(err)
 	}
+	claims := map[string]any{
+		"sub": "subject-1", "email": " person@example.com ",
+		"preferred_username": " person ", "name": " Person ",
+	}
+	user, _, err := s.provisionKeycloakUser(t.Context(), claims)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if user.ID == local.ID || user.Email == local.Email || !strings.HasSuffix(user.Email, "@sso.local") || user.PasswordHash != "" {
+		t.Fatalf("unverified email was used to link or identify the SSO account: %+v", user)
+	}
+	identity, found, err := db.AuthIdentityBySubject(t.Context(), "keycloak", s.cfg.Keycloak.IssuerURL, "subject-1")
+	if err != nil || !found || identity.UserID != user.ID || identity.Email != "" || identity.PreferredUsername != "person" {
+		t.Fatalf("subject identity = %+v found=%v err=%v", identity, found, err)
+	}
+	persistedLocal, found, err := db.AuthUserByID(t.Context(), local.ID)
+	if err != nil || !found || persistedLocal.PasswordHash != local.PasswordHash {
+		t.Fatalf("local account was changed: %+v found=%v err=%v", persistedLocal, found, err)
+	}
+}
+
+func TestProvisionKeycloakUserKeepsLocalPrivilegedEmailAccountSeparate(t *testing.T) {
+	db := openTestStore(t)
+	defer db.Close()
+	s := &Server{cfg: config.Config{Keycloak: config.KeycloakConfig{
+		IssuerURL: "https://kc.example/realms/vibe", DefaultRole: "developer",
+	}}, db: db}
 
 	local := store.AuthUser{ID: "local-admin", Email: "admin@example.com", PasswordHash: "local-password-hash", Role: "super_admin", Status: "active"}
 	if err := db.CreateAuthUser(t.Context(), local); err != nil {
 		t.Fatal(err)
 	}
-	claims := map[string]any{"sub": "attacker-subject", "email": local.Email, "email_verified": true}
-	if _, _, err := s.provisionKeycloakUser(t.Context(), claims); err == nil {
-		t.Fatal("a verified email alone must not auto-link a local or privileged account")
+	claims := map[string]any{"sub": "sso-admin-subject", "email": local.Email, "email_verified": true}
+	user, _, err := s.provisionKeycloakUser(t.Context(), claims)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if _, found, err := db.AuthIdentityBySubject(t.Context(), "keycloak", s.cfg.Keycloak.IssuerURL, "attacker-subject"); err != nil || found {
-		t.Fatalf("unsafe identity link was persisted: found=%v err=%v", found, err)
+	if user.ID == local.ID || user.Email == local.Email || user.PasswordHash != "" || user.Role != "developer" {
+		t.Fatalf("privileged local account was linked or modified: SSO user=%+v", user)
+	}
+	identity, found, err := db.AuthIdentityBySubject(t.Context(), "keycloak", s.cfg.Keycloak.IssuerURL, "sso-admin-subject")
+	if err != nil || !found || identity.UserID != user.ID || identity.Email != local.Email {
+		t.Fatalf("separate SSO identity = %+v found=%v err=%v", identity, found, err)
+	}
+	persistedLocal, found, err := db.AuthUserByID(t.Context(), local.ID)
+	if err != nil || !found || persistedLocal.Role != "super_admin" || persistedLocal.PasswordHash != local.PasswordHash {
+		t.Fatalf("local privileged account changed: %+v found=%v err=%v", persistedLocal, found, err)
+	}
+}
+
+func TestProvisionKeycloakUserResolvesExistingTeamNameToCanonicalID(t *testing.T) {
+	db := openTestStore(t)
+	defer db.Close()
+	s := &Server{cfg: config.Config{Keycloak: config.KeycloakConfig{
+		IssuerURL: "https://kc.example/realms/vibe", DefaultRole: "developer", GroupClaim: "groups",
+	}}, db: db}
+
+	const canonicalTeamID = "team_b71504e91f0da261"
+	if err := db.UpsertAuthTeam(t.Context(), store.AuthTeam{ID: canonicalTeamID, Name: "platform"}); err != nil {
+		t.Fatal(err)
+	}
+	claims := map[string]any{
+		"sub": "canonical-team-subject", "email": "member@example.com", "email_verified": true,
+		"groups": []any{"/teams/platform"},
+	}
+	user, team, err := s.provisionKeycloakUser(t.Context(), claims)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if team != canonicalTeamID {
+		t.Fatalf("resolved team = %q, want canonical ID %q", team, canonicalTeamID)
+	}
+	if primary, err := db.PrimaryTeamForUser(t.Context(), user.ID); err != nil || primary != canonicalTeamID {
+		t.Fatalf("membership team = %q err=%v", primary, err)
+	}
+	teams, err := db.ListAuthTeams(t.Context())
+	if err != nil || len(teams) != 1 {
+		t.Fatalf("team-name collision created another team: teams=%+v err=%v", teams, err)
+	}
+}
+
+func TestProvisionKeycloakUserRejectsAmbiguousTeamIdentity(t *testing.T) {
+	db := openTestStore(t)
+	defer db.Close()
+	s := &Server{cfg: config.Config{Keycloak: config.KeycloakConfig{
+		IssuerURL: "https://kc.example/realms/vibe", DefaultRole: "developer", GroupClaim: "groups",
+	}}, db: db}
+	if err := db.UpsertAuthTeam(t.Context(), store.AuthTeam{ID: "platform", Name: "ID owner"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.UpsertAuthTeam(t.Context(), store.AuthTeam{ID: "team_other", Name: "platform"}); err != nil {
+		t.Fatal(err)
+	}
+
+	_, _, err := s.provisionKeycloakUser(t.Context(), map[string]any{
+		"sub": "ambiguous-team-subject", "groups": []any{"/teams/platform"},
+	})
+	if err == nil || stableKeycloakProvisioningStage(err) != keycloakProvisioningStageTeamResolution || !errors.Is(err, store.ErrAuthTeamIdentityAmbiguous) {
+		t.Fatalf("ambiguous team provision error = %v", err)
+	}
+	if users, listErr := db.ListAuthUsers(t.Context()); listErr != nil || len(users) != 0 {
+		t.Fatalf("ambiguous team provision created users: users=%+v err=%v", users, listErr)
+	}
+}
+
+func TestProvisionKeycloakUserAllowsMissingProfileClaims(t *testing.T) {
+	db := openTestStore(t)
+	defer db.Close()
+	s := &Server{cfg: config.Config{Keycloak: config.KeycloakConfig{
+		IssuerURL: "https://kc.example/realms/vibe", DefaultRole: "developer",
+	}}, db: db}
+
+	user, _, err := s.provisionKeycloakUser(t.Context(), map[string]any{"sub": "subject-without-profile"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if user.Name != "SSO 사용자" || !strings.HasSuffix(user.Email, "@sso.local") || strings.Contains(user.Email, "subject-without-profile") {
+		t.Fatalf("missing profile fallback = %+v", user)
+	}
+}
+
+func TestProvisionKeycloakUserLinkedSubjectDoesNotRequireRepeatedEmailVerificationClaim(t *testing.T) {
+	db := openTestStore(t)
+	defer db.Close()
+	s := &Server{cfg: config.Config{Keycloak: config.KeycloakConfig{
+		IssuerURL: "https://kc.example/realms/vibe", DefaultRole: "developer",
+	}}, db: db}
+
+	initial := map[string]any{
+		"sub": "linked-subject", "email": "linked@example.com", "email_verified": true,
+		"preferred_username": "linked-user",
+	}
+	first, _, err := s.provisionKeycloakUser(t.Context(), initial)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, _, err := s.provisionKeycloakUser(t.Context(), map[string]any{
+		"sub": "linked-subject", "email": "untrusted-change@example.com",
+		"preferred_username": "renamed-user",
+	})
+	if err != nil || second.ID != first.ID {
+		t.Fatalf("linked subject login = %+v err=%v", second, err)
+	}
+	identity, found, err := db.AuthIdentityBySubject(t.Context(), "keycloak", s.cfg.Keycloak.IssuerURL, "linked-subject")
+	if err != nil || !found || identity.Email != "linked@example.com" || identity.PreferredUsername != "renamed-user" {
+		t.Fatalf("linked identity metadata = %+v found=%v err=%v", identity, found, err)
+	}
+}
+
+func TestProvisionKeycloakUserRecoversLegacyPartialAccount(t *testing.T) {
+	db := openTestStore(t)
+	defer db.Close()
+	const issuer = "https://kc.example/realms/vibe"
+	s := &Server{cfg: config.Config{Keycloak: config.KeycloakConfig{
+		IssuerURL: issuer, DefaultRole: "developer",
+	}}, db: db}
+	const subject = "legacy-partial-subject"
+	userID := "usr_" + audit.HashText("keycloak|" + issuer + "|" + subject)[:16]
+	if err := db.CreateAuthUser(t.Context(), store.AuthUser{
+		ID: userID, Email: "legacy-partial@example.com", Role: "admin", Status: "active",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	user, _, err := s.provisionKeycloakUser(t.Context(), map[string]any{
+		"sub": subject, "email": "legacy-partial@example.com", "email_verified": true,
+	})
+	if err != nil || user.ID != userID || user.Role != "developer" {
+		t.Fatalf("legacy partial recovery = %+v err=%v", user, err)
+	}
+	identity, found, err := db.AuthIdentityBySubject(t.Context(), "keycloak", issuer, subject)
+	if err != nil || !found || identity.UserID != userID {
+		t.Fatalf("recovered identity = %+v found=%v err=%v", identity, found, err)
+	}
+}
+
+func TestProvisionKeycloakUserConcurrentSubjectIsIdempotent(t *testing.T) {
+	db := openTestStore(t)
+	defer db.Close()
+	s := &Server{cfg: config.Config{Keycloak: config.KeycloakConfig{
+		IssuerURL: "https://kc.example/realms/vibe", DefaultRole: "developer",
+	}}, db: db}
+	local := store.AuthUser{ID: "concurrent-local", Email: "concurrent@example.com", PasswordHash: "local-hash", Role: "super_admin", Status: "active"}
+	if err := db.CreateAuthUser(t.Context(), local); err != nil {
+		t.Fatal(err)
+	}
+	claims := map[string]any{
+		"sub": "concurrent-subject", "email": "concurrent@example.com", "email_verified": true,
+	}
+
+	const contenders = 8
+	start := make(chan struct{})
+	users := make(chan store.AuthUser, contenders)
+	errs := make(chan error, contenders)
+	var wg sync.WaitGroup
+	for range contenders {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			user, _, err := s.provisionKeycloakUser(t.Context(), claims)
+			users <- user
+			errs <- err
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(users)
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	userID := ""
+	internalEmail := ""
+	for user := range users {
+		if userID == "" {
+			userID = user.ID
+			internalEmail = user.Email
+		}
+		if user.ID != userID || user.Email != internalEmail || user.Email == local.Email || !strings.HasSuffix(user.Email, "@sso.local") {
+			t.Fatalf("concurrent login returned inconsistent SSO user: %+v", user)
+		}
+	}
+	persisted, err := db.ListAuthUsers(t.Context())
+	if err != nil || len(persisted) != 2 {
+		t.Fatalf("concurrent users = %+v err=%v", persisted, err)
+	}
+	linked, found, err := db.AuthIdentityBySubject(t.Context(), "keycloak", s.cfg.Keycloak.IssuerURL, "concurrent-subject")
+	if err != nil || !found || linked.UserID != userID {
+		t.Fatalf("concurrent identity = %+v found=%v err=%v", linked, found, err)
 	}
 }
 

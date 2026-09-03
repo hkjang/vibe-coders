@@ -2,10 +2,13 @@ package store
 
 import (
 	"context"
+	"errors"
 	"sort"
 	"strings"
 	"time"
 )
+
+var ErrAuthTeamIdentityAmbiguous = errors.New("auth team identity is ambiguous")
 
 // Caching the teams table.
 //
@@ -49,6 +52,73 @@ func (s *SQLStore) AuthTeamByIDOrName(ctx context.Context, value string) (AuthTe
 		return team, true, nil
 	}
 	return AuthTeam{}, false, nil
+}
+
+// ResolveOrCreateAuthTeam resolves an IdP-provided team identity to the canonical database
+// row, creating it only when neither its ID nor its case-insensitive name exists. Unlike the
+// hot-path cache lookup, this provisioning path reads the database directly so a stale cache
+// on another pod cannot turn a concurrently created team into a UNIQUE(name) login failure.
+func (s *SQLStore) ResolveOrCreateAuthTeam(ctx context.Context, value string) (AuthTeam, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return AuthTeam{}, nil
+	}
+	lookup := func() (AuthTeam, bool, error) {
+		rows, err := s.db.QueryContext(ctx, s.bind(`SELECT id, name, created_at, updated_at
+			FROM teams
+			WHERE id = ? OR LOWER(name) = LOWER(?)
+			ORDER BY id
+			LIMIT 2`), value, value)
+		if err != nil {
+			return AuthTeam{}, false, err
+		}
+		defer rows.Close()
+		var team AuthTeam
+		count := 0
+		for rows.Next() {
+			var candidate AuthTeam
+			var createdAt, updatedAt string
+			if err := rows.Scan(&candidate.ID, &candidate.Name, &createdAt, &updatedAt); err != nil {
+				return AuthTeam{}, false, err
+			}
+			candidate.CreatedAt = parseOptionalTime(createdAt)
+			candidate.UpdatedAt = parseOptionalTime(updatedAt)
+			team = candidate
+			count++
+		}
+		if err := rows.Err(); err != nil {
+			return AuthTeam{}, false, err
+		}
+		if count > 1 {
+			return AuthTeam{}, false, ErrAuthTeamIdentityAmbiguous
+		}
+		if count == 0 {
+			return AuthTeam{}, false, nil
+		}
+		return team, true, nil
+	}
+	if team, found, err := lookup(); err != nil {
+		return AuthTeam{}, err
+	} else if found {
+		return team, nil
+	}
+
+	now := time.Now().UTC()
+	_, insertErr := s.db.ExecContext(ctx, s.bind(`INSERT INTO teams (id, name, created_at, updated_at)
+		VALUES (?, ?, ?, ?)`), value, value, formatTime(now), formatTime(now))
+	if insertErr == nil {
+		s.teams.invalidate()
+		return AuthTeam{ID: value, Name: value, CreatedAt: now, UpdatedAt: now}, nil
+	}
+	// Another pod may have created the ID or name after our lookup. Resolve that winner
+	// instead of surfacing a transient uniqueness violation as an SSO provisioning error.
+	if team, found, err := lookup(); err != nil {
+		return AuthTeam{}, err
+	} else if found {
+		s.teams.invalidate()
+		return team, nil
+	}
+	return AuthTeam{}, insertErr
 }
 
 // AuthTeamScopeIdentities returns exact api_keys.team values that unambiguously belong to

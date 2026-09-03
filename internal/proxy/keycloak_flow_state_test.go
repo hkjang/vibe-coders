@@ -68,6 +68,9 @@ func assertSanitizedKeycloakCallbackFailure(t *testing.T, db *store.SQLStore, re
 		t.Fatalf("missing SSO failure audit event: %+v", events)
 	}
 	wantDetail := "keycloak code=" + wantCode
+	if wantCode == keycloakCallbackErrorProvisioning {
+		wantDetail += " stage=" + keycloakProvisioningStageRoleMapping
+	}
 	if events[0].Detail != wantDetail {
 		t.Fatalf("audit detail = %q, want %q", events[0].Detail, wantDetail)
 	}
@@ -306,12 +309,12 @@ func TestKeycloakCallbackRedactsProvisioningErrorFromRedirectBodyAndAudit(t *tes
 		jwksMu.Unlock()
 	})
 	s := &Server{db: db, cfg: config.Config{Keycloak: config.KeycloakConfig{
-		Enabled: true, IssuerURL: issuerMarker, ClientID: "vibe-coders", DefaultRole: "developer",
+		Enabled: true, IssuerURL: issuerMarker, ClientID: "vibe-coders",
 	}}}
 
 	response := runKeycloakCallback(t, s, "provisioning-redaction")
 	assertSanitizedKeycloakCallbackFailure(t, db, response, keycloakCallbackErrorProvisioning,
-		issuerMarker, piiMarker, "requires explicit SSO linking")
+		issuerMarker, piiMarker, "no role mapping matched")
 }
 
 func TestKeycloakCallbackSuccessStillReturnsOneTimeExchangeCode(t *testing.T) {
