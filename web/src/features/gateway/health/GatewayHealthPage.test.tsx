@@ -158,16 +158,16 @@ describe("GatewayHealthPage", () => {
 
     expect(screen.getByRole("button", { name: "7일" })).toHaveAttribute("aria-pressed", "true");
     const ranking = await screen.findByRole("table", {
-      name: "선택 기간의 Provider 상태 점수 순위",
+      name: "선택 기간의 공급자 상태 점수 순위",
     });
     expect(within(ranking).getByText("openai")).toBeInTheDocument();
     expect(within(ranking).getByText("62점")).toBeInTheDocument();
 
-    const breakers = screen.getByRole("table", { name: "Provider별 Circuit Breaker 상태" });
-    expect(within(breakers).getByText("차단(Open)")).toBeInTheDocument();
+    const breakers = screen.getByRole("table", { name: "공급자별 회로 차단기 상태" });
+    expect(within(breakers).getByText("차단(개방)")).toBeInTheDocument();
     expect(screen.getByText("Provider 상태 점수가 임계값보다 낮습니다.")).toBeInTheDocument();
-    expect(screen.getByText("Warning")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /Legacy 상태 열기/ })).toHaveAttribute(
+    expect(screen.getByText("경고")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /기존 상태 화면 열기/ })).toHaveAttribute(
       "href",
       "/admin#/routing/health",
     );
@@ -196,10 +196,10 @@ describe("GatewayHealthPage", () => {
     expect(screen.getByText("요청 수신 가능")).toBeInTheDocument();
     expect(screen.getByText("라우팅 상태를 불러오지 못했습니다.")).toBeInTheDocument();
     expect(screen.getByText("Request ID: req-routing-503")).toBeInTheDocument();
-    expect(screen.getByText("Degraded")).toBeInTheDocument();
+    expect(screen.getByText("저하")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Provider 라우팅 상태 재시도" }));
-    expect(await screen.findByRole("table", { name: "Provider별 Circuit Breaker 상태" })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "공급자 라우팅 상태 재시도" }));
+    expect(await screen.findByRole("table", { name: "공급자별 회로 차단기 상태" })).toBeVisible();
     expect(routingAttempts()).toBe(2);
   });
 
@@ -209,9 +209,9 @@ describe("GatewayHealthPage", () => {
     const { request } = mockApi();
     renderPage();
 
-    await screen.findByRole("table", { name: "선택 기간의 Provider 상태 점수 순위" });
-    expect(screen.queryByRole("link", { name: /Legacy 상태 열기/ })).not.toBeInTheDocument();
-    expect(screen.getByText("Read Only")).toBeInTheDocument();
+    await screen.findByRole("table", { name: "선택 기간의 공급자 상태 점수 순위" });
+    expect(screen.queryByRole("link", { name: /기존 상태 화면 열기/ })).not.toBeInTheDocument();
+    expect(screen.getByText("읽기 전용")).toBeInTheDocument();
 
     request.mockClear();
     await user.click(screen.getByRole("button", { name: "새로고침" }));
@@ -250,8 +250,8 @@ describe("GatewayHealthPage", () => {
 
     expect(await screen.findByText(/마지막 정상 데이터를 표시합니다/)).toBeVisible();
     expect(screen.getByText("Request ID: req-health-stale")).toBeVisible();
-    expect(screen.getAllByText("Degraded").length).toBeGreaterThan(0);
-    expect(screen.queryByText("Disconnected")).not.toBeInTheDocument();
+    expect(screen.getAllByText("저하").length).toBeGreaterThan(0);
+    expect(screen.queryByText("연결 끊김")).not.toBeInTheDocument();
     expect(screen.getByText("API 연결 가능")).toBeVisible();
   });
 
@@ -259,7 +259,7 @@ describe("GatewayHealthPage", () => {
     mockApi();
     const { container } = renderPage();
 
-    await screen.findByRole("table", { name: "선택 기간의 Provider 상태 점수 순위" });
+    await screen.findByRole("table", { name: "선택 기간의 공급자 상태 점수 순위" });
     expect((await axe.run(container)).violations).toEqual([]);
   });
 });

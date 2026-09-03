@@ -28,7 +28,7 @@ export class AppErrorBoundary extends Component<PropsWithChildren, State> {
               다시 불러오기
             </button>
             <a className="button button-secondary button-default" href="/admin">
-              Legacy Admin 열기
+              기존 관리자 화면 열기
             </a>
           </div>
         </section>

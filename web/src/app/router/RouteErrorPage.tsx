@@ -27,9 +27,9 @@ export function NotFoundPage(): React.JSX.Element {
     <section className="page-state">
       <p className="eyebrow">404</p>
       <h1>화면을 찾을 수 없습니다.</h1>
-      <p>주소를 확인하거나 Overview로 돌아가세요.</p>
+      <p>주소를 확인하거나 개요로 돌아가세요.</p>
       <a className="button button-primary button-default" href="/app/overview">
-        Overview로 이동
+        개요로 이동
       </a>
     </section>
   );

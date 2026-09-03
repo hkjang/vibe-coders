@@ -25,8 +25,8 @@ describe("opaque Provider references", () => {
     ]);
 
     expect(new Set(labels.values()).size).toBe(2);
-    expect(labels.get(firstRef)).toMatch(/^Provider 이름 비공개 · 01 · /);
-    expect(labels.get(secondRef)).toMatch(/^Provider 이름 비공개 · 02 · /);
+    expect(labels.get(firstRef)).toMatch(/^공급자 이름 비공개 · 01 · /);
+    expect(labels.get(secondRef)).toMatch(/^공급자 이름 비공개 · 02 · /);
     expect([...labels.values()].join(" ")).not.toContain("private-provider");
     expect(isSafeLegacyProviderName("openai")).toBe(true);
     expect(isSafeLegacyProviderName("sk-provider-private-value")).toBe(false);

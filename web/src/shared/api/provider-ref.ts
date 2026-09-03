@@ -24,7 +24,7 @@ export function isSafeLegacyProviderName(value: string): boolean {
 }
 
 export function providerDisplayLabel(name: string, providerRef: string, disambiguate = false): string {
-  const safeName = isSafeLegacyProviderName(name) ? name : "Provider 이름 비공개";
+  const safeName = isSafeLegacyProviderName(name) ? name : "공급자 이름 비공개";
   if (!disambiguate && safeName === name) return safeName;
   return `${safeName} · ${providerRef.slice(-8)}`;
 }
@@ -42,7 +42,7 @@ export function providerDisplayLabels(
   }
   const groups = new Map<string, Array<{ name: string; providerRef: string }>>();
   for (const [providerRef, name] of namesByRef) {
-    const baseName = isSafeLegacyProviderName(name) ? name : "Provider 이름 비공개";
+    const baseName = isSafeLegacyProviderName(name) ? name : "공급자 이름 비공개";
     const group = groups.get(baseName) ?? [];
     group.push({ name, providerRef });
     groups.set(baseName, group);

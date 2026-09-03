@@ -10,6 +10,7 @@ import { isAppError } from "@/shared/api/error";
 import { Badge } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
 import { Dialog } from "@/shared/components/ui/Dialog";
+import { healthStatusLabels } from "@/config/ui-labels";
 
 export interface ProviderDetailSourceState {
   error?: unknown;
@@ -32,10 +33,10 @@ interface ProviderDetailDialogProps {
 }
 
 const healthLabels = {
-  checking: "Checking",
-  healthy: "Healthy",
-  degraded: "Degraded",
-  unknown: "Unknown",
+  checking: healthStatusLabels.checking,
+  healthy: healthStatusLabels.healthy,
+  degraded: healthStatusLabels.degraded,
+  unknown: healthStatusLabels.unknown,
 } as const;
 
 function formatDate(value: string): string {
@@ -98,12 +99,12 @@ function DetailQueryState({
 
 function SLODetails({ row }: { row: ProviderCatalogRow }): React.JSX.Element {
   const { evaluation, slo } = row;
-  if (!slo) return <p className="provider-detail-empty">이 Provider에는 SLO가 설정되지 않았습니다.</p>;
+  if (!slo) return <p className="provider-detail-empty">이 공급자에는 SLO가 설정되지 않았습니다.</p>;
   const metrics = evaluation?.metrics;
   return (
     <div className="provider-detail-section">
       <div className="provider-detail-heading">
-        <h3>Service Level Objective</h3>
+        <h3>서비스 수준 목표(SLO)</h3>
         <Badge tone={!slo.enabled ? "muted" : evaluation?.breached ? "danger" : "success"}>
           {!slo.enabled ? "비활성" : evaluation?.breached ? "위반" : "정상"}
         </Badge>
@@ -134,7 +135,7 @@ function SLODetails({ row }: { row: ProviderCatalogRow }): React.JSX.Element {
           </dd>
         </div>
         <div>
-          <dt>Fallback 비율</dt>
+          <dt>장애 전환 비율</dt>
           <dd>
             {metrics?.fallback_rate.enforced
               ? `${formatPercent(metrics.fallback_rate.actual)} / ${formatPercent(metrics.fallback_rate.target)}`
@@ -169,7 +170,7 @@ function RoutingDetails({ row }: { row: ProviderCatalogRow }): React.JSX.Element
         <dd>{formatMilliseconds(row.routing.p95_latency_ms)}</dd>
       </div>
       <div>
-        <dt>Fallback</dt>
+        <dt>장애 전환</dt>
         <dd>{formatPercent(row.routing.fallback_rate)}</dd>
       </div>
     </dl>
@@ -189,42 +190,42 @@ export function ProviderDetailDialog({
 }: ProviderDetailDialogProps): React.JSX.Element {
   const footer = showLegacyAdmin ? (
     <a className="button button-secondary button-default" href="/admin#/settings">
-      Legacy 설정 열기 <ExternalLink aria-hidden="true" />
+      기존 설정 화면 열기 <ExternalLink aria-hidden="true" />
     </a>
   ) : undefined;
 
   return (
     <Dialog
-      description="Provider 연결 설정과 선택 기간의 운영 신호를 읽기 전용으로 확인합니다."
+      description="공급자 연결 설정과 선택 기간의 운영 신호를 읽기 전용으로 확인합니다."
       footer={footer}
       onOpenChange={onOpenChange}
       open={open}
       returnFocusRef={returnFocusRef}
-      title={row?.displayName ?? "Provider 상세"}
+      title={row?.displayName ?? "공급자 상세"}
     >
       {providerState.pending && !row ? (
         <div className="provider-detail-loading" role="status">
           상세 정보를 불러오는 중입니다.
         </div>
       ) : providerState.error && !row ? (
-        <DetailQueryState label="Provider 설정" state={providerState} />
+        <DetailQueryState label="공급자 설정" state={providerState} />
       ) : !row ? (
         <div className="provider-detail-error" role="alert">
           <AlertTriangle aria-hidden="true" />
           <div>
-            <strong>Provider를 찾을 수 없습니다.</strong>
-            <p>현재 목록에 요청한 Provider가 없습니다.</p>
+            <strong>공급자를 찾을 수 없습니다.</strong>
+            <p>현재 목록에 요청한 공급자가 없습니다.</p>
           </div>
         </div>
       ) : (
         <div className="provider-detail-stack">
-          <DetailQueryState label="Provider 설정" state={providerState} />
+          <DetailQueryState label="공급자 설정" state={providerState} />
           {row.nameRedacted ? (
             <div className="provider-detail-error" role="status">
               <AlertTriangle aria-hidden="true" />
               <div>
-                <strong>Provider 이름을 안전하게 표시할 수 없습니다.</strong>
-                <p>운영 상태는 안전한 Provider 참조를 기준으로 연결했습니다.</p>
+                <strong>공급자 이름을 안전하게 표시할 수 없습니다.</strong>
+                <p>운영 상태는 안전한 공급자 참조를 기준으로 연결했습니다.</p>
               </div>
             </div>
           ) : null}
@@ -247,7 +248,7 @@ export function ProviderDetailDialog({
                 {healthLabels[row.health]}
               </Badge>
               <Badge tone={row.provider.api_key_configured ? "info" : "muted"}>
-                {row.provider.api_key_configured ? "Secret 설정됨" : "Secret 없음"}
+                {row.provider.api_key_configured ? "비밀정보 설정됨" : "비밀정보 없음"}
               </Badge>
             </div>
           </div>
@@ -262,15 +263,15 @@ export function ProviderDetailDialog({
                 </dd>
               </div>
               <div>
-                <dt>Timeout</dt>
+                <dt>제한 시간</dt>
                 <dd>{formatInteger(row.provider.timeout_ms)} ms</dd>
               </div>
               <div>
-                <dt>Priority</dt>
+                <dt>우선순위</dt>
                 <dd>{formatInteger(row.provider.priority)}</dd>
               </div>
               <div>
-                <dt>Failover Group</dt>
+                <dt>장애 전환 그룹</dt>
                 <dd>{row.provider.failover_group || "설정 없음"}</dd>
               </div>
               <div>
@@ -278,7 +279,7 @@ export function ProviderDetailDialog({
                 <dd>{formatDate(row.provider.created_at)}</dd>
               </div>
               <div className="provider-detail-wide">
-                <dt>Model Patterns</dt>
+                <dt>모델 패턴</dt>
                 <dd>
                   <code>{row.provider.model_patterns || "모든 모델"}</code>
                 </dd>
@@ -288,9 +289,9 @@ export function ProviderDetailDialog({
 
           <section className="provider-detail-section" aria-labelledby="provider-slo-title">
             <h3 id="provider-slo-title" className="sr-only">
-              Provider SLO
+              공급자 SLO
             </h3>
-            <DetailQueryState label="Provider SLO" state={sloState} />
+            <DetailQueryState label="공급자 SLO" state={sloState} />
             {!sloState.pending && (!sloState.error || sloState.hasData) ? <SLODetails row={row} /> : null}
           </section>
 
@@ -298,7 +299,7 @@ export function ProviderDetailDialog({
             <h3 id="provider-routing-title">라우팅 상태</h3>
             {canReadRouting ? (
               <>
-                <DetailQueryState label="Provider 라우팅 상태" state={routingState} />
+                <DetailQueryState label="공급자 라우팅 상태" state={routingState} />
                 {!routingState.pending && (!routingState.error || routingState.hasData) ? (
                   <RoutingDetails row={row} />
                 ) : null}

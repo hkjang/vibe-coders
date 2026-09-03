@@ -148,8 +148,8 @@ describe("SystemHealthPage", () => {
     expect(await screen.findByText("openai")).toBeVisible();
     expect(screen.getByText("1 MiB")).toBeVisible();
     expect(screen.getByRole("list", { name: "보안 설정 점검" })).toBeVisible();
-    expect(screen.getByRole("table", { name: "Provider 현재 운영 점수" })).toBeVisible();
-    expect(screen.getByText("Legacy에서 열기")).toHaveAttribute("href", "/admin#/ops-home");
+    expect(screen.getByRole("table", { name: "공급자 현재 운영 점수" })).toBeVisible();
+    expect(screen.getByText("기존 화면에서 열기")).toHaveAttribute("href", "/admin#/ops-home");
     expect(
       vi
         .mocked(apiClient.request)
@@ -163,7 +163,7 @@ describe("SystemHealthPage", () => {
     renderPage();
 
     expect((await screen.findAllByText("Request ID: req-risk-7")).length).toBeGreaterThan(0);
-    const retry = screen.getAllByRole("button", { name: "System Health snapshot 재시도" }).at(0);
+    const retry = screen.getAllByRole("button", { name: "시스템 상태 현황 재시도" }).at(0);
     if (!retry) throw new Error("retry button was not rendered");
     await user.click(retry);
 
@@ -176,8 +176,8 @@ describe("SystemHealthPage", () => {
     renderPage();
 
     expect(await screen.findByText("데이터 디스크 사용률이 높습니다.")).toBeVisible();
-    expect(screen.getAllByText("Degraded").length).toBeGreaterThan(0);
-    expect(screen.getByText("Critical")).toBeVisible();
+    expect(screen.getAllByText("저하").length).toBeGreaterThan(0);
+    expect(screen.getByText("심각")).toBeVisible();
   });
 
   it("distinguishes unavailable Provider and fallback data from valid empty values", async () => {
@@ -186,8 +186,8 @@ describe("SystemHealthPage", () => {
 
     expect(await screen.findByText("Provider health data is temporarily unavailable.")).toBeVisible();
     expect(screen.getByText("Fallback log statistics are temporarily unavailable.")).toBeVisible();
-    expect(screen.getByText("Unavailable")).toBeVisible();
-    expect(screen.queryByText("수집된 Provider 상태가 없습니다.")).not.toBeInTheDocument();
+    expect(screen.getByText("확인 불가")).toBeVisible();
+    expect(screen.queryByText("수집된 공급자 상태가 없습니다.")).not.toBeInTheDocument();
     expect(screen.getAllByText("확인 실패").length).toBeGreaterThanOrEqual(2);
   });
 
@@ -195,7 +195,7 @@ describe("SystemHealthPage", () => {
     mockSystemApi();
     const { container } = renderPage();
 
-    await screen.findByRole("table", { name: "Provider 현재 운영 점수" });
+    await screen.findByRole("table", { name: "공급자 현재 운영 점수" });
     expect((await axe.run(container)).violations).toEqual([]);
   });
 });

@@ -41,7 +41,7 @@ export function ErrorState({
         ) : null}
         {showLegacy ? (
           <a className="button button-secondary button-default" href="/admin">
-            Legacy Admin 열기
+            기존 관리자 화면 열기
           </a>
         ) : null}
       </div>
@@ -56,7 +56,7 @@ export function AppDisabled(): React.JSX.Element {
       <h1>신규 콘솔이 비활성화되어 있습니다.</h1>
       <p>운영자가 `/app`을 활성화할 때까지 안정 운영 화면을 이용하세요.</p>
       <a className="button button-primary button-default" href="/admin">
-        Legacy Admin 열기
+        기존 관리자 화면 열기
       </a>
     </section>
   );
@@ -71,7 +71,7 @@ export function FeatureUnavailable(): React.JSX.Element {
         기능 전환 상태와 현재 UI 빌드가 일치하지 않습니다. 운영자에게 전환 설정을 확인해 달라고 요청하세요.
       </p>
       <a className="button button-primary button-default" href="/app/overview">
-        Overview로 이동
+        개요로 이동
       </a>
     </section>
   );
@@ -85,7 +85,7 @@ export function PermissionDenied({ permission }: { permission?: string }): React
       <p>이 화면을 보려면 관리자에게 필요한 권한을 요청하세요.</p>
       {permission ? <p className="request-id">필요 권한: {permission}</p> : null}
       <a className="button button-secondary button-default" href="/app/overview">
-        Overview로 이동
+        개요로 이동
       </a>
     </section>
   );

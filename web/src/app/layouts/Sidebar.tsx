@@ -5,7 +5,8 @@ import { NavLink } from "react-router";
 
 import { useAuth } from "@/app/auth/AuthProvider";
 import { featurePath, resolveFeature } from "@/config/migration-registry";
-import { navigationGroups, statusLabels } from "@/config/navigation";
+import { navigationGroups } from "@/config/navigation";
+import { migrationStatusLabels, uiLabels } from "@/config/ui-labels";
 import { Badge } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
 import { usePreferences } from "@/shared/stores/preferences";
@@ -57,7 +58,7 @@ export function Sidebar({ mobileTriggerRef }: SidebarProps): React.JSX.Element {
         </span>
         <span className="sidebar-brand-copy">
           <strong>Vibe Coders</strong>
-          <small>Next Console</small>
+          <small>{uiLabels.nextConsole}</small>
         </span>
         {mobile ? (
           <Dialog.Close asChild>
@@ -101,7 +102,7 @@ export function Sidebar({ mobileTriggerRef }: SidebarProps): React.JSX.Element {
                         <span className="nav-copy">{feature.title}</span>
                         {effective.status !== "stable" ? (
                           <Badge tone={effective.status === "legacy" ? "warning" : "info"}>
-                            {statusLabels[effective.status]}
+                            {migrationStatusLabels[effective.status]}
                           </Badge>
                         ) : null}
                       </NavLink>

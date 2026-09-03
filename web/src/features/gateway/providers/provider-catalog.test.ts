@@ -161,7 +161,7 @@ describe("provider catalog", () => {
 
     expect(new Set(rows.map((row) => row.identity)).size).toBe(3);
     expect(rows.every((row) => row.nameRedacted)).toBe(true);
-    expect(rows.every((row) => row.displayName.startsWith("Provider 이름 비공개"))).toBe(true);
+    expect(rows.every((row) => row.displayName.startsWith("공급자 이름 비공개"))).toBe(true);
     expect(rows.every((row) => row.identity.startsWith("prv_"))).toBe(true);
     expect(rows.map((row) => row.health)).toEqual(["degraded", "degraded", "degraded"]);
     expect(rows.every((row) => row.routing && row.slo && row.evaluation)).toBe(true);

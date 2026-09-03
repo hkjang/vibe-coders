@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 
 import { useAuth } from "@/app/auth/AuthProvider";
+import { healthStatusLabels, riskLevelLabels, uiLabels } from "@/config/ui-labels";
 import {
   formatBytes,
   formatInteger,
@@ -42,10 +43,10 @@ function riskFactorTone(severity: "critical" | "info" | "warning"): BadgeProps["
 }
 
 function diskState(disk: OpsStatus["disk"]): { label: string; tone: BadgeProps["tone"] } {
-  if (!disk.available) return { label: "Unavailable", tone: "danger" };
-  if (disk.used_percent >= 90) return { label: "Critical", tone: "danger" };
-  if (disk.used_percent >= 80) return { label: "Attention", tone: "warning" };
-  return { label: "Available", tone: "success" };
+  if (!disk.available) return { label: healthStatusLabels.unavailable, tone: "danger" };
+  if (disk.used_percent >= 90) return { label: healthStatusLabels.critical, tone: "danger" };
+  if (disk.used_percent >= 80) return { label: healthStatusLabels.attention, tone: "warning" };
+  return { label: "사용 가능", tone: "success" };
 }
 
 export function SystemHealthPage(): React.JSX.Element {
@@ -79,7 +80,7 @@ export function SystemHealthPage(): React.JSX.Element {
           provider.provider_ref,
           (providerNameCounts.get(provider.provider) ?? 0) > 1,
         )
-      : `Provider 확인 불가 · ${index + 1}`,
+      : `공급자 확인 불가 · ${index + 1}`,
     key: isProviderRef(provider.provider_ref) ? provider.provider_ref : `provider-unidentified-${index}`,
     provider,
   }));
@@ -99,19 +100,20 @@ export function SystemHealthPage(): React.JSX.Element {
     Boolean(snapshot?.partial_failures?.length) ||
     Boolean(risk?.factors.length) ||
     (risk?.tier !== undefined && risk.tier !== "low");
-  const overallStatus = operations.isPending
-    ? "Checking"
+  const overallState = operations.isPending
+    ? "checking"
     : operations.isError && !operations.data
-      ? "Disconnected"
+      ? "disconnected"
       : degraded
-        ? "Degraded"
-        : "Healthy";
+        ? "degraded"
+        : "healthy";
+  const overallStatus = healthStatusLabels[overallState];
   const overallTone =
-    overallStatus === "Healthy"
+    overallState === "healthy"
       ? "success"
-      : overallStatus === "Checking"
+      : overallState === "checking"
         ? "muted"
-        : overallStatus === "Degraded"
+        : overallState === "degraded"
           ? "warning"
           : "danger";
   const updatedAt = maxUpdatedAt(operations.dataUpdatedAt);
@@ -129,17 +131,17 @@ export function SystemHealthPage(): React.JSX.Element {
           detail: snapshot.security.auth_enabled ? "활성화됨" : "비활성화됨",
         },
         {
-          label: "개발용 Secret",
+          label: "개발용 비밀정보",
           safe: !snapshot.security.dev_secret,
           detail: snapshot.security.dev_secret ? "운영에서 사용 중" : "사용하지 않음",
         },
         {
-          label: "Prompt 원문 로깅",
+          label: "프롬프트 원문 로깅",
           safe: !snapshot.security.raw_prompts_logged,
           detail: snapshot.security.raw_prompts_logged ? "활성화됨" : "비활성화됨",
         },
         {
-          label: "Body 원문 로깅",
+          label: "본문 원문 로깅",
           safe: !snapshot.security.raw_bodies_logged,
           detail: snapshot.security.raw_bodies_logged ? "활성화됨" : "비활성화됨",
         },
@@ -155,16 +157,16 @@ export function SystemHealthPage(): React.JSX.Element {
     <div className="page-stack">
       <header className="page-header">
         <div>
-          <div className="eyebrow">Preview Read Only</div>
-          <h1>System Health</h1>
-          <p>로깅, 저장 공간, 보안 설정과 운영 위험의 현재 snapshot을 확인합니다.</p>
+          <div className="eyebrow">{uiLabels.previewReadOnly}</div>
+          <h1>시스템 상태</h1>
+          <p>로깅, 저장 공간, 보안 설정과 운영 위험의 현재 현황을 확인합니다.</p>
         </div>
         <div className="page-actions">
-          <Badge tone="info">Read Only</Badge>
+          <Badge tone="info">{uiLabels.readOnly}</Badge>
           <Badge tone={overallTone}>{overallStatus}</Badge>
           {showLegacyAdmin ? (
             <a className="button button-secondary button-default" href="/admin#/ops-home">
-              Legacy에서 열기
+              기존 화면에서 열기
             </a>
           ) : null}
           <Button onClick={refreshAll} disabled={refreshing}>
@@ -174,23 +176,23 @@ export function SystemHealthPage(): React.JSX.Element {
       </header>
 
       <div className="health-page-toolbar">
-        <p className="metric-note">기간 집계가 아닌 Gateway의 최신 운영 snapshot입니다.</p>
+        <p className="metric-note">기간 집계가 아닌 게이트웨이의 최신 운영 현황입니다.</p>
         <div className="status-meta">
-          <span>Backend {auth.backendVersion}</span>
+          <span>백엔드 {auth.backendVersion}</span>
           {updatedAt > 0 ? <UpdatedTime timestamp={updatedAt} /> : null}
         </div>
       </div>
 
       {operations.isError && !operations.data ? (
         <HealthWidget
-          title="System Health snapshot"
+          title="시스템 상태 현황"
           description="운영 상태와 위험도를 함께 조회합니다."
           icon={Activity}
           error={operations.error}
           onRetry={() => void operations.refetch()}
         />
       ) : (
-        <section className="health-grid" aria-label="System Health 상세">
+        <section className="health-grid" aria-label="시스템 상태 상세">
           <HealthWidget
             title="운영 위험"
             description="현재 설정과 상태에서 탐지한 위험 요인"
@@ -199,7 +201,7 @@ export function SystemHealthPage(): React.JSX.Element {
             error={operations.error}
             onRetry={() => void operations.refetch()}
             updatedAt={operations.dataUpdatedAt || undefined}
-            status={risk?.tier.toUpperCase()}
+            status={risk ? riskLevelLabels[risk.tier] : undefined}
             statusTone={
               risk?.tier === "critical" || risk?.tier === "high"
                 ? "danger"
@@ -212,7 +214,7 @@ export function SystemHealthPage(): React.JSX.Element {
               <>
                 <div className="metric-value">
                   <strong>{risk.score}</strong>
-                  <span>/ 100 risk score</span>
+                  <span>/ 100 위험 점수</span>
                 </div>
                 {risk.factors.length ? (
                   <ul className="health-alert-list" aria-label="위험 요인">
@@ -238,18 +240,24 @@ export function SystemHealthPage(): React.JSX.Element {
           </HealthWidget>
 
           <HealthWidget
-            title="로깅 Pipeline"
+            title="로깅 처리 흐름"
             description="비동기 로그 기록량과 누락 상태"
             icon={FileClock}
             loading={operations.isPending}
             updatedAt={operations.dataUpdatedAt || undefined}
-            status={snapshot?.logging.dropped ? "Dropped" : snapshot ? "Normal" : undefined}
+            status={
+              snapshot?.logging.dropped
+                ? healthStatusLabels.dropped
+                : snapshot
+                  ? healthStatusLabels.normal
+                  : undefined
+            }
             statusTone={snapshot?.logging.dropped ? "danger" : "success"}
           >
             {snapshot ? (
               <dl className="metric-pairs">
                 <div>
-                  <dt>Queue depth</dt>
+                  <dt>대기열 깊이</dt>
                   <dd>{formatInteger(snapshot.logging.queue_depth)}</dd>
                 </div>
                 <div>
@@ -265,12 +273,14 @@ export function SystemHealthPage(): React.JSX.Element {
           </HealthWidget>
 
           <HealthWidget
-            title="Security posture"
+            title="보안 상태"
             description="민감 데이터와 운영 보안 설정 점검"
             icon={ShieldCheck}
             loading={operations.isPending}
             updatedAt={operations.dataUpdatedAt || undefined}
-            status={securityRisk ? "Attention" : snapshot ? "Safe" : undefined}
+            status={
+              securityRisk ? healthStatusLabels.attention : snapshot ? healthStatusLabels.safe : undefined
+            }
             statusTone={securityRisk ? "warning" : "success"}
           >
             {snapshot ? (
@@ -292,13 +302,17 @@ export function SystemHealthPage(): React.JSX.Element {
           </HealthWidget>
 
           <HealthWidget
-            title="저장 공간과 Fallback"
-            description="운영 데이터 경로와 fallback 파일 상태"
+            title="저장 공간과 대체 응답"
+            description="운영 데이터 경로와 대체 응답 파일 상태"
             icon={HardDrive}
             loading={operations.isPending}
             updatedAt={operations.dataUpdatedAt || undefined}
             status={
-              snapshot ? (fallbackFailure ? "Partial failure" : diskState(snapshot.disk).label) : undefined
+              snapshot
+                ? fallbackFailure
+                  ? healthStatusLabels.partialFailure
+                  : diskState(snapshot.disk).label
+                : undefined
             }
             statusTone={snapshot ? (fallbackFailure ? "danger" : diskState(snapshot.disk).tone) : "muted"}
           >
@@ -324,11 +338,11 @@ export function SystemHealthPage(): React.JSX.Element {
                     <dd>{snapshot.disk.available ? formatBytes(snapshot.disk.free_bytes) : "확인 실패"}</dd>
                   </div>
                   <div>
-                    <dt>Fallback 행</dt>
+                    <dt>대체 응답 행</dt>
                     <dd>{fallbackFailure ? "확인 실패" : formatInteger(snapshot.fallback.lines)}</dd>
                   </div>
                   <div>
-                    <dt>Fallback 크기</dt>
+                    <dt>대체 응답 크기</dt>
                     <dd>{fallbackFailure ? "확인 실패" : formatBytes(snapshot.fallback.bytes)}</dd>
                   </div>
                 </dl>
@@ -337,16 +351,16 @@ export function SystemHealthPage(): React.JSX.Element {
           </HealthWidget>
 
           <HealthWidget
-            title="Provider snapshot"
-            description="System status 수집 시점의 Provider 점수"
+            title="공급자 현황"
+            description="시스템 상태 수집 시점의 공급자 점수"
             icon={ServerCog}
             loading={operations.isPending}
             updatedAt={operations.dataUpdatedAt || undefined}
             status={
               snapshot
                 ? providerFailure
-                  ? "Unavailable"
-                  : `${snapshot.providers.length} providers`
+                  ? healthStatusLabels.unavailable
+                  : `공급자 ${snapshot.providers.length}개`
                 : undefined
             }
             statusTone={providerFailure ? "danger" : "muted"}
@@ -359,10 +373,10 @@ export function SystemHealthPage(): React.JSX.Element {
             ) : snapshot?.providers.length ? (
               <div className="health-table-wrap">
                 <table className="health-table">
-                  <caption className="sr-only">Provider 현재 운영 점수</caption>
+                  <caption className="sr-only">공급자 현재 운영 점수</caption>
                   <thead>
                     <tr>
-                      <th scope="col">Provider</th>
+                      <th scope="col">공급자</th>
                       <th scope="col">점수</th>
                       <th scope="col">요청</th>
                       <th scope="col">P95 지연</th>
@@ -392,7 +406,7 @@ export function SystemHealthPage(): React.JSX.Element {
             ) : snapshot ? (
               <div className="health-empty">
                 <Database aria-hidden="true" />
-                <p>수집된 Provider 상태가 없습니다.</p>
+                <p>수집된 공급자 상태가 없습니다.</p>
               </div>
             ) : null}
           </HealthWidget>

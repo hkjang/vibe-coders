@@ -5,6 +5,7 @@ import { type PropsWithChildren } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AuthProvider, useAuth } from "@/app/auth/AuthProvider";
+import { formatSsoFailure } from "@/app/auth/sso-errors";
 import { apiClient } from "@/shared/api/client";
 import { endpoints, type ApiEndpointBase } from "@/shared/api/endpoints";
 import { AppError } from "@/shared/api/error";
@@ -71,6 +72,11 @@ function AuthStateHarness(): React.JSX.Element {
       <span>{auth.sso.allow_local_login ? "local-enabled" : "local-disabled"}</span>
     </div>
   );
+}
+
+function AuthErrorHarness(): React.JSX.Element {
+  const auth = useAuth();
+  return <span>{auth.error ?? "오류 없음"}</span>;
 }
 
 afterEach(() => {
@@ -181,6 +187,105 @@ describe("AuthProvider Keycloak logout", () => {
     });
     expect(tokenStore.getAccessToken()).toBe("");
     expect(tokenStore.getRefreshToken()).toBe("");
+  });
+});
+
+describe("AuthProvider SSO callback errors", () => {
+  it.each([
+    [
+      "user_provisioning_failed",
+      "SSO 사용자 정보를 준비하지 못했습니다. 잠시 후 다시 시도하거나 관리자에게 문의하세요. (진단 코드: user_provisioning_failed)",
+    ],
+    [
+      "invalid_or_expired_state",
+      "SSO 로그인 상태가 만료되었거나 올바르지 않습니다. 로그인을 다시 시작하세요. (진단 코드: invalid_or_expired_state)",
+    ],
+    [
+      "token_exchange_failed",
+      "SSO 인증 토큰을 발급받지 못했습니다. 잠시 후 다시 시도하세요. (진단 코드: token_exchange_failed)",
+    ],
+    [
+      "sso_exchange_failed",
+      "SSO 세션을 교환하지 못했습니다. 로그인을 다시 시작하세요. (진단 코드: sso_exchange_failed)",
+    ],
+  ])("maps the stable %s code to a Korean message", (code, expected) => {
+    expect(formatSsoFailure(code)).toBe(expected);
+  });
+
+  it("maps an unknown callback value to the generic stable code without reflecting it", () => {
+    const unsafe = "client_secret=do-not-reflect";
+    const message = formatSsoFailure(unsafe);
+
+    expect(message).toContain("진단 코드: sso_callback_failed");
+    expect(message).not.toContain(unsafe);
+  });
+
+  it("shows the provisioning guidance after scrubbing the callback fragment", async () => {
+    window.history.replaceState(null, "", "/app/login#kc_error=user_provisioning_failed");
+    const anonymousBootstrap: UIBootstrap = {
+      ...bootstrap,
+      authentication: { ...bootstrap.authentication, authenticated: false },
+      user: null,
+      roles: [],
+      permissions: [],
+    };
+    vi.spyOn(apiClient, "request").mockImplementation((async (endpoint: ApiEndpointBase) => {
+      if (endpoint.path === endpoints.uiBootstrap.path) return anonymousBootstrap;
+      throw new Error(`unexpected request ${endpoint.path}`);
+    }) as typeof apiClient.request);
+
+    render(
+      <TestProviders>
+        <AuthProvider>
+          <AuthErrorHarness />
+        </AuthProvider>
+      </TestProviders>,
+    );
+
+    expect(
+      await screen.findByText(
+        "SSO 사용자 정보를 준비하지 못했습니다. 잠시 후 다시 시도하거나 관리자에게 문의하세요. (진단 코드: user_provisioning_failed)",
+      ),
+    ).toBeVisible();
+    expect(window.location.hash).toBe("");
+  });
+
+  it("does not expose an exchange error's internal message", async () => {
+    window.history.replaceState(null, "", "/app/login#kc_code=once-sensitive");
+    const anonymousBootstrap: UIBootstrap = {
+      ...bootstrap,
+      authentication: { ...bootstrap.authentication, authenticated: false },
+      user: null,
+      roles: [],
+      permissions: [],
+    };
+    const sensitiveInternalMessage = "exchange failed at https://idp.test/token?client_secret=private";
+    vi.spyOn(apiClient, "request").mockImplementation((async (endpoint: ApiEndpointBase) => {
+      if (endpoint.path === endpoints.auth.ssoExchange.path) {
+        throw new AppError(sensitiveInternalMessage, {
+          code: "sso_session_failed",
+          kind: "http",
+          status: 500,
+        });
+      }
+      if (endpoint.path === endpoints.uiBootstrap.path) return anonymousBootstrap;
+      throw new Error(`unexpected request ${endpoint.path}`);
+    }) as typeof apiClient.request);
+
+    render(
+      <TestProviders>
+        <AuthProvider>
+          <AuthErrorHarness />
+        </AuthProvider>
+      </TestProviders>,
+    );
+
+    expect(
+      await screen.findByText(
+        "SSO 세션을 준비하지 못했습니다. 잠시 후 다시 시도하세요. (진단 코드: sso_session_failed)",
+      ),
+    ).toBeVisible();
+    expect(document.body).not.toHaveTextContent(sensitiveInternalMessage);
   });
 });
 

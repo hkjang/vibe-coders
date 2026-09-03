@@ -38,7 +38,7 @@ describe("ProtectedRoute runtime UI flags", () => {
     authRuntime.legacyFallback = false;
     renderRoute();
     expect(screen.getByRole("heading", { name: "신규 콘솔이 비활성화되어 있습니다." })).toBeVisible();
-    expect(screen.getByRole("link", { name: "Legacy Admin 열기" })).toHaveAttribute("href", "/admin");
+    expect(screen.getByRole("link", { name: "기존 관리자 화면 열기" })).toHaveAttribute("href", "/admin");
     expect(screen.queryByRole("heading", { name: "Protected content" })).not.toBeInTheDocument();
   });
 

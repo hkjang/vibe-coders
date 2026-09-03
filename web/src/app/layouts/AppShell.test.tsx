@@ -111,17 +111,17 @@ describe("AppShell", () => {
     const user = userEvent.setup();
     renderShell();
     await user.click(screen.getByLabelText("사용자 메뉴"));
-    expect(screen.getByRole("link", { name: "Legacy Admin 열기" })).toHaveAttribute("href", "/admin");
+    expect(screen.getByRole("link", { name: "기존 관리자 화면 열기" })).toHaveAttribute("href", "/admin");
   });
 
   it("removes every optional Legacy entry point when runtime fallback is disabled", async () => {
     authRuntime.legacyFallback = false;
     const user = userEvent.setup();
     renderShell();
-    expect(screen.queryByRole("link", { name: /Legacy/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /기존 화면/ })).not.toBeInTheDocument();
     await user.keyboard("{Control>}k{/Control}");
     expect(await screen.findByRole("dialog", { name: "명령 팔레트" })).toBeVisible();
-    expect(screen.queryByRole("link", { name: /Legacy Admin/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /기존 관리자 화면/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("option", { name: /Provider/ })).not.toBeInTheDocument();
   });
 
@@ -132,12 +132,12 @@ describe("AppShell", () => {
     expect(document.querySelector('a[href="/admin"]')).not.toBeInTheDocument();
     await user.keyboard("{Control>}k{/Control}");
     expect(await screen.findByRole("dialog", { name: "명령 팔레트" })).toBeVisible();
-    expect(screen.queryByRole("link", { name: /Legacy Admin/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /기존 관리자 화면/ })).not.toBeInTheDocument();
   });
 
   it("has no automated axe accessibility violations in the application shell", async () => {
     const { container } = renderShell();
-    await waitFor(() => expect(screen.getByText("Healthy")).toBeVisible());
+    await waitFor(() => expect(screen.getByText("정상")).toBeVisible());
     const result = await axe.run(container);
     expect(result.violations).toEqual([]);
   });
@@ -151,9 +151,9 @@ describe("AppShell", () => {
 
     renderShell(client);
 
-    expect(await screen.findByText("Degraded")).toBeVisible();
-    expect(screen.queryByText("Healthy")).not.toBeInTheDocument();
-    expect(screen.queryByText("Disconnected")).not.toBeInTheDocument();
+    expect(await screen.findByText("저하")).toBeVisible();
+    expect(screen.queryByText("정상")).not.toBeInTheDocument();
+    expect(screen.queryByText("연결 끊김")).not.toBeInTheDocument();
   });
 
   it("does not repeat the page title when the breadcrumb group has the same name", () => {

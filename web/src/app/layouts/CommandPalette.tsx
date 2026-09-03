@@ -5,6 +5,7 @@ import { useNavigate } from "react-router";
 
 import { useAuth } from "@/app/auth/AuthProvider";
 import { featurePath, resolveFeature } from "@/config/migration-registry";
+import { migrationStatusLabels, uiLabels } from "@/config/ui-labels";
 import { Badge } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
 import { canOpenLegacyAdmin } from "@/shared/permissions/legacy-admin";
@@ -148,7 +149,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps): Rea
                     <small>{feature.group}</small>
                   </span>
                   <Badge tone={effective.status === "legacy" ? "warning" : "info"}>
-                    {effective.status === "preview_read_only" ? "Read Only" : effective.status}
+                    {migrationStatusLabels[effective.status]}
                   </Badge>
                 </button>
               ))
@@ -160,7 +161,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps): Rea
             <span>권한이 있는 기능만 표시됩니다.</span>
             {showLegacyAdmin ? (
               <a href="/admin">
-                Legacy Admin <ExternalLink aria-hidden="true" />
+                {uiLabels.legacyAdmin} <ExternalLink aria-hidden="true" />
               </a>
             ) : null}
           </div>

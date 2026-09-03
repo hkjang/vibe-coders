@@ -18,6 +18,7 @@ import { formatInteger, isHealthRange, type HealthRange } from "@/features/healt
 import { TimeRangePicker } from "@/features/health/health-ui";
 import { Badge } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
+import { healthStatusLabels, uiLabels } from "@/config/ui-labels";
 import { canOpenLegacyAdmin } from "@/shared/permissions/legacy-admin";
 import { isProviderRef, isSafeLegacyProviderName } from "@/shared/api/provider-ref";
 import { rejectedSensitiveQuery } from "@/shared/security/app-route-query";
@@ -29,9 +30,9 @@ const statusLabels: Record<ProviderStatusFilter, string> = {
   all: "전체 상태",
   enabled: "활성",
   disabled: "비활성",
-  healthy: "Healthy",
-  degraded: "Degraded",
-  unknown: "Unknown",
+  healthy: healthStatusLabels.healthy,
+  degraded: healthStatusLabels.degraded,
+  unknown: healthStatusLabels.unknown,
 };
 
 function positivePage(value: string | null): number {
@@ -202,15 +203,15 @@ export function ProviderPage(): React.JSX.Element {
     <div className="page-stack">
       <header className="page-header">
         <div>
-          <div className="eyebrow">Preview Read Only</div>
-          <h1>Provider</h1>
-          <p>AI Provider 연결 설정과 SLO, 선택 기간의 운영 상태를 안전하게 조회합니다.</p>
+          <div className="eyebrow">{uiLabels.previewReadOnly}</div>
+          <h1>공급자</h1>
+          <p>AI 공급자 연결 설정과 SLO, 선택 기간의 운영 상태를 안전하게 조회합니다.</p>
         </div>
         <div className="page-actions">
-          <Badge tone="info">Read Only</Badge>
+          <Badge tone="info">{uiLabels.readOnly}</Badge>
           {showLegacyAdmin ? (
             <a className="button button-secondary button-default" href="/admin#/settings">
-              Legacy에서 열기 <ExternalLink aria-hidden="true" />
+              기존 화면에서 열기 <ExternalLink aria-hidden="true" />
             </a>
           ) : null}
           <Button variant="primary" onClick={refreshAll} disabled={refreshing}>
@@ -219,9 +220,9 @@ export function ProviderPage(): React.JSX.Element {
         </div>
       </header>
 
-      <section className="provider-summary" aria-label="Provider 요약">
+      <section className="provider-summary" aria-label="공급자 요약">
         <article>
-          <span>전체 Provider</span>
+          <span>전체 공급자</span>
           <strong>{providerSummaryUnavailable ? "—" : formatInteger(allRows.length)}</strong>
         </article>
         <article>
@@ -229,7 +230,7 @@ export function ProviderPage(): React.JSX.Element {
           <strong>{providerSummaryUnavailable ? "—" : formatInteger(enabledCount)}</strong>
         </article>
         <article>
-          <span>Degraded</span>
+          <span>{healthStatusLabels.degraded}</span>
           <strong>{healthSummaryUnavailable ? "—" : formatInteger(degradedCount)}</strong>
         </article>
         <article>
@@ -240,7 +241,7 @@ export function ProviderPage(): React.JSX.Element {
 
       {healthPending ? (
         <p className="provider-enrichment-note" role="status">
-          선택 기간의 Provider 운영 상태를 확인하는 중입니다. 목록에는 Checking으로 표시합니다.
+          선택 기간의 공급자 운영 상태를 확인하는 중입니다. 목록에는 확인 중으로 표시합니다.
         </p>
       ) : null}
 
@@ -264,7 +265,7 @@ export function ProviderPage(): React.JSX.Element {
             });
           }}
         >
-          <label htmlFor="provider-search">Provider 검색</label>
+          <label htmlFor="provider-search">공급자 검색</label>
           <div>
             <Search aria-hidden="true" />
             <input
@@ -273,7 +274,7 @@ export function ProviderPage(): React.JSX.Element {
               id="provider-search"
               name="q"
               defaultValue={query}
-              placeholder="이름, URL, 모델 패턴, Failover Group"
+              placeholder="이름, URL, 모델 패턴, 장애 전환 그룹"
               aria-describedby={visibleSearchError ? "provider-search-error" : undefined}
               aria-invalid={visibleSearchError ? "true" : undefined}
               onChange={() => {
@@ -338,7 +339,7 @@ export function ProviderPage(): React.JSX.Element {
         <QueryFailureNotice
           error={providers.error}
           hasPreviousData={Boolean(providers.data)}
-          label="Provider 목록"
+          label="공급자 목록"
           onRetry={() => void providers.refetch()}
         />
       ) : null}
@@ -346,7 +347,7 @@ export function ProviderPage(): React.JSX.Element {
         <QueryFailureNotice
           error={slo.error}
           hasPreviousData={Boolean(slo.data)}
-          label="Provider SLO"
+          label="공급자 SLO"
           onRetry={() => void slo.refetch()}
         />
       ) : null}
@@ -354,7 +355,7 @@ export function ProviderPage(): React.JSX.Element {
         <QueryFailureNotice
           error={routing.error}
           hasPreviousData={Boolean(routing.data)}
-          label="Provider 라우팅 상태"
+          label="공급자 라우팅 상태"
           onRetry={() => void routing.refetch()}
         />
       ) : null}

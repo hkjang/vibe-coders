@@ -18,6 +18,7 @@ import { publishLogout, subscribeToLogout, tokenStore } from "@/shared/auth/toke
 import { authNavigation, safeEndSessionUrl } from "@/shared/auth/logout-navigation";
 import { consumeSsoReturnTo } from "@/shared/utils/safe-return-to";
 import { migrationRegistry, registryFromBootstrap, type MigrationFeature } from "@/config/migration-registry";
+import { formatSsoFailure, normalizeSsoFailureCode } from "@/app/auth/sso-errors";
 
 export type AuthMode = "anonymous" | "authenticated" | "error" | "legacy" | "loading" | "open";
 export type AuthenticationMode = "legacy_token" | "open" | "session";
@@ -229,7 +230,7 @@ export function AuthProvider({ children }: PropsWithChildren): React.JSX.Element
 
   const completeSsoBootstrap = useCallback(
     async (fragment: SsoFragment): Promise<void> => {
-      let ssoError = fragment.error;
+      let ssoErrorCode = fragment.error;
       if (fragment.code) {
         tokenStore.clearTokens();
         try {
@@ -240,11 +241,14 @@ export function AuthProvider({ children }: PropsWithChildren): React.JSX.Element
           });
           tokenStore.saveTokens(tokens);
         } catch (exchangeError) {
-          ssoError = isAppError(exchangeError) ? exchangeError.message : "SSO 코드를 교환할 수 없습니다.";
+          ssoErrorCode = normalizeSsoFailureCode(
+            isAppError(exchangeError) ? exchangeError.code : undefined,
+            "sso_exchange_failed",
+          );
         }
       }
       await bootstrap();
-      if (ssoError) setError(`SSO 로그인 실패: ${ssoError}`);
+      if (ssoErrorCode) setError(formatSsoFailure(ssoErrorCode));
     },
     [bootstrap],
   );
@@ -331,7 +335,7 @@ export function AuthProvider({ children }: PropsWithChildren): React.JSX.Element
           routeId: "auth.legacy-token",
         });
         if (data.authentication.mode !== "legacy_token" || !data.authentication.authenticated) {
-          throw new AppError("Legacy Admin Token이 올바르지 않습니다.", { kind: "auth", status: 401 });
+          throw new AppError("기존 관리자 토큰이 올바르지 않습니다.", { kind: "auth", status: 401 });
         }
         applyBootstrap(data);
       } catch (error) {

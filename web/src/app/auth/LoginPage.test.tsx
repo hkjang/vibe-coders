@@ -37,12 +37,12 @@ describe("LoginPage Legacy bridge", () => {
 
   it("shows the Legacy Admin link in Legacy token mode when fallback is enabled", () => {
     renderLogin();
-    expect(screen.getByRole("link", { name: "Legacy Admin" })).toHaveAttribute("href", "/admin");
+    expect(screen.getByRole("link", { name: "기존 관리자 화면" })).toHaveAttribute("href", "/admin");
   });
 
   it("hides the Legacy Admin link when runtime fallback is disabled", () => {
     authRuntime.legacyFallback = false;
     renderLogin();
-    expect(screen.queryByRole("link", { name: "Legacy Admin" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "기존 관리자 화면" })).not.toBeInTheDocument();
   });
 });
