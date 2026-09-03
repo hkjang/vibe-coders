@@ -5,6 +5,7 @@ import { useSearchParams } from "react-router";
 
 import { useAuth } from "@/app/auth/AuthProvider";
 import { RequestDetailDialog } from "@/features/observability/requests/RequestDetailDialog";
+import { formatRequestDate } from "@/features/observability/requests/request-date";
 import { refreshIntervalMs } from "@/features/health/health-utils";
 import { apiClient } from "@/shared/api/client";
 import { endpoints } from "@/shared/api/endpoints";
@@ -51,11 +52,6 @@ function statusTone(code: number): "success" | "warning" | "danger" {
   return code < 500 ? "warning" : "danger";
 }
 
-function formatDate(value: string, options: Intl.DateTimeFormatOptions): string {
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? "확인 불가" : new Intl.DateTimeFormat("ko-KR", options).format(date);
-}
-
 export function RequestPage(): React.JSX.Element {
   const auth = useAuth();
   const showLegacyAdmin = canOpenLegacyAdmin(auth);
@@ -63,6 +59,7 @@ export function RequestPage(): React.JSX.Element {
   const interval = refreshIntervalMs(refreshInterval);
   const [searchParams, setSearchParams] = useSearchParams();
   const query = useMemo(() => queryFromSearch(searchParams), [searchParams]);
+  const selectedTimeZone = query.tz ?? "Asia/Seoul";
   const result = useQuery({
     queryKey: ["admin", "requests", query],
     queryFn: ({ signal }) =>
@@ -260,7 +257,17 @@ export function RequestPage(): React.JSX.Element {
               {data?.requests.length ? (
                 data.requests.map((request) => (
                   <tr key={request.request_id}>
-                    <td>{formatDate(request.created_at, { dateStyle: "short", timeStyle: "medium" })}</td>
+                    <td>
+                      <time
+                        data-testid={`request-created-at-${request.request_id}`}
+                        dateTime={request.created_at}
+                      >
+                        {formatRequestDate(request.created_at, selectedTimeZone, {
+                          dateStyle: "short",
+                          timeStyle: "medium",
+                        })}
+                      </time>
+                    </td>
                     <td>
                       <Badge tone={statusTone(request.status_code)}>{request.status_code}</Badge>
                     </td>
@@ -298,7 +305,13 @@ export function RequestPage(): React.JSX.Element {
         <div className="data-table-pagination">
           <span>
             {data?.requests.length ?? 0}건 · 마지막 갱신{" "}
-            {data ? formatDate(data.generated_at, { timeStyle: "medium" }) : "-"}
+            {data ? (
+              <time data-testid="requests-generated-at" dateTime={data.generated_at}>
+                {formatRequestDate(data.generated_at, selectedTimeZone, { timeStyle: "medium" })}
+              </time>
+            ) : (
+              "-"
+            )}
           </span>
           <Button
             variant="secondary"
@@ -326,6 +339,7 @@ export function RequestPage(): React.JSX.Element {
         }}
         returnFocusRef={returnFocusRef}
         showLegacy={showLegacyAdmin}
+        timeZone={selectedTimeZone}
       />
     </section>
   );

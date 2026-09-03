@@ -147,6 +147,58 @@ describe("RequestPage", () => {
     expect(request).toHaveBeenCalledTimes(2);
   });
 
+  it("renders list and detail times in the timezone selected by the filter", async () => {
+    const request = vi.spyOn(apiClient, "request").mockResolvedValue(response as never);
+    const user = userEvent.setup();
+    const utcPage = renderPage("/observability/requests?tz=UTC");
+
+    const utcListExpected = new Intl.DateTimeFormat("ko-KR", {
+      dateStyle: "short",
+      timeStyle: "medium",
+      timeZone: "UTC",
+    }).format(new Date(row.created_at));
+    const utcDetailExpected = new Intl.DateTimeFormat("ko-KR", {
+      dateStyle: "medium",
+      timeStyle: "medium",
+      timeZone: "UTC",
+    }).format(new Date(row.created_at));
+    const utcGeneratedExpected = new Intl.DateTimeFormat("ko-KR", {
+      timeStyle: "medium",
+      timeZone: "UTC",
+    }).format(new Date(response.generated_at));
+
+    expect(await screen.findByTestId("request-created-at-req-001")).toHaveTextContent(utcListExpected);
+    expect(screen.getByTestId("requests-generated-at")).toHaveTextContent(utcGeneratedExpected);
+    await waitFor(() => {
+      const options = request.mock.calls[0]?.[1] as { query?: Record<string, unknown> };
+      expect(options.query?.tz).toBe("UTC");
+    });
+    await user.click(screen.getByRole("button", { name: "상세" }));
+    expect(screen.getByTestId("request-detail-created-at")).toHaveTextContent(utcDetailExpected);
+    utcPage.unmount();
+
+    renderPage("/observability/requests?tz=Asia%2FSeoul");
+    const seoulListExpected = new Intl.DateTimeFormat("ko-KR", {
+      dateStyle: "short",
+      timeStyle: "medium",
+      timeZone: "Asia/Seoul",
+    }).format(new Date(row.created_at));
+    const seoulDetailExpected = new Intl.DateTimeFormat("ko-KR", {
+      dateStyle: "medium",
+      timeStyle: "medium",
+      timeZone: "Asia/Seoul",
+    }).format(new Date(row.created_at));
+    const seoulGeneratedExpected = new Intl.DateTimeFormat("ko-KR", {
+      timeStyle: "medium",
+      timeZone: "Asia/Seoul",
+    }).format(new Date(response.generated_at));
+
+    expect(await screen.findByTestId("request-created-at-req-001")).toHaveTextContent(seoulListExpected);
+    expect(screen.getByTestId("requests-generated-at")).toHaveTextContent(seoulGeneratedExpected);
+    await user.click(screen.getByRole("button", { name: "상세" }));
+    expect(screen.getByTestId("request-detail-created-at")).toHaveTextContent(seoulDetailExpected);
+  });
+
   it("hides every existing-screen bridge when fallback is disabled or permission is missing", async () => {
     authRuntime.legacyFallback = false;
     const request = vi.spyOn(apiClient, "request").mockResolvedValue(response as never);

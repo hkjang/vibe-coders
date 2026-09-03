@@ -3,6 +3,7 @@ import type { RefObject } from "react";
 import type { AppRequestSummary } from "@/shared/api/schemas";
 import { Button } from "@/shared/components/ui/Button";
 import { Dialog } from "@/shared/components/ui/Dialog";
+import { formatRequestDate } from "@/features/observability/requests/request-date";
 
 interface RequestDetailDialogProps {
   onOpenChange: (open: boolean) => void;
@@ -10,13 +11,7 @@ interface RequestDetailDialogProps {
   request?: AppRequestSummary;
   returnFocusRef: RefObject<HTMLElement | null>;
   showLegacy: boolean;
-}
-
-function formatDate(value: string): string {
-  const date = new Date(value);
-  return Number.isNaN(date.getTime())
-    ? "확인 불가"
-    : new Intl.DateTimeFormat("ko-KR", { dateStyle: "medium", timeStyle: "medium" }).format(date);
+  timeZone: string;
 }
 
 export function RequestDetailDialog({
@@ -25,6 +20,7 @@ export function RequestDetailDialog({
   request,
   returnFocusRef,
   showLegacy,
+  timeZone,
 }: RequestDetailDialogProps): React.JSX.Element {
   return (
     <Dialog
@@ -50,7 +46,14 @@ export function RequestDetailDialog({
         <dl className="request-detail-grid">
           <div>
             <dt>요청 시각</dt>
-            <dd>{formatDate(request.created_at)}</dd>
+            <dd>
+              <time data-testid="request-detail-created-at" dateTime={request.created_at}>
+                {formatRequestDate(request.created_at, timeZone, {
+                  dateStyle: "medium",
+                  timeStyle: "medium",
+                })}
+              </time>
+            </dd>
           </div>
           <div>
             <dt>상태</dt>

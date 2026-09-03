@@ -178,19 +178,36 @@ test("요청 탐색기 직접 접근과 새로고침에서 필터·커서·안�
   }));
 
   await page.goto(
-    `observability/requests?model=gpt-test&status=success&provider_ref=${providerRef}&limit=25&tz=Asia%2FSeoul&prompt=private`,
+    `observability/requests?model=gpt-test&status=success&provider_ref=${providerRef}&limit=25&tz=UTC&prompt=private`,
   );
 
   await expect(page.getByRole("heading", { name: "요청 탐색기", exact: true })).toBeVisible();
   await expect(page.getByLabel("모델", { exact: true })).toHaveValue("gpt-test");
   await expect(page.getByRole("combobox", { name: "상태", exact: true })).toHaveValue("success");
   await expect(page.getByLabel("공급자 참조", { exact: true })).toHaveValue(providerRef);
+  await expect(page.getByLabel("시간대", { exact: true })).toHaveValue("UTC");
   await expect(page).toHaveURL(
     new RegExp(
-      `/app/observability/requests\\?model=gpt-test&status=success&provider_ref=${providerRef}&limit=25&tz=Asia%2FSeoul$`,
+      `/app/observability/requests\\?model=gpt-test&status=success&provider_ref=${providerRef}&limit=25&tz=UTC$`,
     ),
   );
   await expect(page.getByText("req-001", { exact: true })).toBeVisible();
+  const expectedListTime = new Intl.DateTimeFormat("ko-KR", {
+    dateStyle: "short",
+    timeStyle: "medium",
+    timeZone: "UTC",
+  }).format(new Date(requestOne.created_at));
+  const expectedDetailTime = new Intl.DateTimeFormat("ko-KR", {
+    dateStyle: "medium",
+    timeStyle: "medium",
+    timeZone: "UTC",
+  }).format(new Date(requestOne.created_at));
+  const expectedGeneratedTime = new Intl.DateTimeFormat("ko-KR", {
+    timeStyle: "medium",
+    timeZone: "UTC",
+  }).format(new Date(firstPage.generated_at));
+  await expect(page.getByTestId("request-created-at-req-001")).toHaveText(expectedListTime);
+  await expect(page.getByTestId("requests-generated-at")).toHaveText(expectedGeneratedTime);
   await expect(page.getByRole("link", { name: "기존 화면 보기" })).toHaveAttribute(
     "href",
     "/admin#/requests",
@@ -204,18 +221,22 @@ test("요청 탐색기 직접 접근과 새로고침에서 필터·커서·안�
   expect(initialCall?.url.searchParams.get("model")).toBe("gpt-test");
   expect(initialCall?.url.searchParams.get("status")).toBe("success");
   expect(initialCall?.url.searchParams.get("provider_ref")).toBe(providerRef);
+  expect(initialCall?.url.searchParams.get("tz")).toBe("UTC");
   expect(initialCall?.url.searchParams.has("prompt")).toBe(false);
 
   await page.reload();
   await expect(page.getByRole("heading", { name: "요청 탐색기", exact: true })).toBeVisible();
   await expect(page.getByText("req-001", { exact: true })).toBeVisible();
   await expect.poll(() => calls.length).toBeGreaterThan(1);
+  expect(calls.at(-1)?.url.searchParams.get("tz")).toBe("UTC");
+  await expect(page.getByTestId("request-created-at-req-001")).toHaveText(expectedListTime);
 
   const detailTrigger = page.getByRole("button", { name: "상세" });
   await detailTrigger.click();
   const dialog = page.getByRole("dialog", { name: "요청 req-001" });
   await expect(dialog).toBeVisible();
   await expect(dialog).toContainText("프롬프트, 응답 본문, 원시 오류와 사용자 에이전트");
+  await expect(dialog.getByTestId("request-detail-created-at")).toHaveText(expectedDetailTime);
   await expect(dialog).not.toContainText("prompt-private-e2e");
   await expect(dialog).not.toContainText("raw-error-private-e2e");
   expect(await axeViolations(page)).toEqual([]);
