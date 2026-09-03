@@ -167,6 +167,23 @@ const countSchema = z.number().int().nonnegative();
 const measurementSchema = z.number().nonnegative();
 const percentageSchema = z.number().min(0).max(100);
 const timestampSchema = z.string().datetime({ offset: true });
+
+const utf8Encoder = new TextEncoder();
+
+function utf8BoundedString(maxBytes: number): z.ZodString {
+  return z.string().refine((value) => utf8Encoder.encode(value).byteLength <= maxBytes, {
+    message: `UTF-8 ${maxBytes}바이트 이하여야 합니다.`,
+  });
+}
+
+const appRequestTimestampSchema = timestampSchema.refine(
+  (value) => utf8Encoder.encode(value).byteLength <= 30,
+  { message: "요청 시각은 UTF-8 30바이트 이하여야 합니다." },
+);
+
+const appRequestSafeIntegerSchema = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
+const appRequestCountSchema = z.number().int().min(0).max(2_147_483_647);
+const appRequestCostSchema = z.number().min(0).max(1_000_000_000_000_000);
 export const providerRefSchema = z.string().regex(providerRefPattern);
 
 export const latencyQuantilesSchema = z.object({
@@ -576,39 +593,39 @@ export const modelUsageTagsResponseSchema = z
 
 export const appRequestSummarySchema = z
   .object({
-    request_id: z.string(),
-    trace_id: z.string(),
-    session_id: z.string(),
-    api_key_id: z.string(),
-    ip: z.string(),
-    method: z.string(),
-    model: z.string(),
+    request_id: utf8BoundedString(512).min(1),
+    trace_id: utf8BoundedString(512),
+    session_id: utf8BoundedString(512),
+    api_key_id: utf8BoundedString(512),
+    ip: utf8BoundedString(128),
+    method: utf8BoundedString(32),
+    model: utf8BoundedString(256),
     provider_ref: z.string().regex(providerRefPattern),
-    provider_display: z.string(),
-    endpoint: z.string(),
+    provider_display: utf8BoundedString(256),
+    endpoint: utf8BoundedString(512),
     stream: z.boolean(),
     status_code: z.number().int().min(0).max(999),
-    latency_ms: z.number().int().nonnegative(),
-    first_chunk_ms: z.number().int().nonnegative(),
-    prompt_tokens: z.number().int().nonnegative(),
-    completion_tokens: z.number().int().nonnegative(),
-    total_tokens: z.number().int().nonnegative(),
-    cached_tokens: z.number().int().nonnegative(),
-    reasoning_tokens: z.number().int().nonnegative(),
-    estimated_cost: z.number().nonnegative(),
-    currency: z.string(),
-    finish_reason: z.string(),
-    created_at: timestampSchema,
+    latency_ms: appRequestSafeIntegerSchema,
+    first_chunk_ms: appRequestSafeIntegerSchema,
+    prompt_tokens: appRequestCountSchema,
+    completion_tokens: appRequestCountSchema,
+    total_tokens: appRequestCountSchema,
+    cached_tokens: appRequestCountSchema,
+    reasoning_tokens: appRequestCountSchema,
+    estimated_cost: appRequestCostSchema,
+    currency: utf8BoundedString(16),
+    finish_reason: utf8BoundedString(256),
+    created_at: appRequestTimestampSchema,
   })
   .strict() satisfies z.ZodType<GeneratedAppRequestSummary>;
 
 export const appRequestsResponseSchema = z
   .object({
-    requests: z.array(appRequestSummarySchema),
+    requests: z.array(appRequestSummarySchema).max(200),
     limit: z.number().int().min(1).max(200),
-    next_cursor: z.string().optional(),
-    previous_cursor: z.string().optional(),
-    generated_at: timestampSchema,
+    next_cursor: utf8BoundedString(4096).min(1).optional(),
+    previous_cursor: utf8BoundedString(4096).min(1).optional(),
+    generated_at: appRequestTimestampSchema,
   })
   .strict() satisfies z.ZodType<GeneratedAppRequestsResponse>;
 
