@@ -7,6 +7,7 @@ import { useAuth } from "@/app/auth/AuthProvider";
 import { CommandPalette } from "@/app/layouts/CommandPalette";
 import { Sidebar } from "@/app/layouts/Sidebar";
 import { featureByPath } from "@/config/migration-registry";
+import { healthStatusLabels, preferenceLabels, roleLabel, uiLabels } from "@/config/ui-labels";
 import { apiClient } from "@/shared/api/client";
 import { endpoints } from "@/shared/api/endpoints";
 import { Badge } from "@/shared/components/ui/Badge";
@@ -44,19 +45,20 @@ export function AppShell(): React.JSX.Element {
     refetchInterval: refreshInterval ? refreshInterval * 1_000 : false,
     refetchIntervalInBackground: false,
   });
-  const healthLabel = health.isError
+  const healthState = health.isError
     ? health.data
-      ? "Degraded"
-      : "Disconnected"
+      ? "degraded"
+      : "disconnected"
     : health.data?.status === "ok"
-      ? "Healthy"
-      : "Checking";
+      ? "healthy"
+      : "checking";
+  const healthLabel = healthStatusLabels[healthState];
   const healthTone =
-    healthLabel === "Healthy"
+    healthState === "healthy"
       ? "success"
-      : healthLabel === "Degraded"
+      : healthState === "degraded"
         ? "warning"
-        : healthLabel === "Disconnected"
+        : healthState === "disconnected"
           ? "danger"
           : "muted";
 
@@ -101,7 +103,7 @@ export function AppShell(): React.JSX.Element {
             {currentFeature ? (
               <strong aria-current="page">{currentFeature.title}</strong>
             ) : (
-              <strong aria-current="page">Console</strong>
+              <strong aria-current="page">{uiLabels.console}</strong>
             )}
           </nav>
 
@@ -140,29 +142,29 @@ export function AppShell(): React.JSX.Element {
               </summary>
               <div className="popover-card">
                 <label>
-                  Theme
+                  {preferenceLabels.theme}
                   <select value={theme} onChange={(event) => setTheme(event.target.value as ThemePreference)}>
-                    <option value="light">Light</option>
-                    <option value="dark">Dark</option>
-                    <option value="system">System</option>
+                    <option value="light">{preferenceLabels.light}</option>
+                    <option value="dark">{preferenceLabels.dark}</option>
+                    <option value="system">{preferenceLabels.system}</option>
                   </select>
                 </label>
                 <label>
-                  Density
+                  {preferenceLabels.density}
                   <select
                     value={density}
                     onChange={(event) => setDensity(event.target.value as DensityPreference)}
                   >
-                    <option value="compact">Compact</option>
-                    <option value="default">Default</option>
-                    <option value="comfortable">Comfortable</option>
+                    <option value="compact">{preferenceLabels.compact}</option>
+                    <option value="default">{preferenceLabels.default}</option>
+                    <option value="comfortable">{preferenceLabels.comfortable}</option>
                   </select>
                 </label>
               </div>
             </details>
             {showLegacyAdmin ? (
               <a className="header-legacy" href="/admin">
-                Legacy <ExternalLink aria-hidden="true" />
+                기존 화면 <ExternalLink aria-hidden="true" />
               </a>
             ) : null}
             <details className="user-menu">
@@ -172,15 +174,15 @@ export function AppShell(): React.JSX.Element {
                 </span>
               </summary>
               <div className="popover-card user-card">
-                <strong>{auth.user?.name ?? auth.user?.email ?? "Legacy Administrator"}</strong>
-                <span>역할: {auth.user?.role ?? "admin"}</span>
+                <strong>{auth.user?.name ?? auth.user?.email ?? uiLabels.legacyAdministrator}</strong>
+                <span>역할: {roleLabel(auth.user?.role)}</span>
                 <span>팀: {auth.user?.team_id || "-"}</span>
-                <span>Backend {auth.backendVersion}</span>
+                <span>백엔드 {auth.backendVersion}</span>
                 <span>UI {auth.uiVersion}</span>
                 <span>API {auth.apiVersion}</span>
                 {showLegacyAdmin ? (
                   <a className="button button-secondary button-default" href="/admin">
-                    Legacy Admin 열기 <ExternalLink aria-hidden="true" />
+                    {uiLabels.legacyAdmin} 열기 <ExternalLink aria-hidden="true" />
                   </a>
                 ) : null}
                 <Button variant="secondary" onClick={() => void auth.logout()}>

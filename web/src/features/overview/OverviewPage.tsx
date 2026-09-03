@@ -11,12 +11,14 @@ import {
 } from "lucide-react";
 
 import { useAuth } from "@/app/auth/AuthProvider";
+import { healthStatusLabels, riskLevelLabels, uiLabels } from "@/config/ui-labels";
 import {
   formatBytes,
   formatInteger,
   formatKRW,
   formatMilliseconds,
   formatPercent,
+  healthRangeLabels,
   maxUpdatedAt,
   refreshIntervalMs,
 } from "@/features/health/health-utils";
@@ -108,22 +110,23 @@ export function OverviewPage(): React.JSX.Element {
     routingNeedsAttention ||
     operationsNeedAttention ||
     (opsRisk?.tier !== undefined && opsRisk.tier !== "low");
-  const overallStatus =
+  const overallState =
     health.isError && !health.data
-      ? "Disconnected"
+      ? "disconnected"
       : checking
-        ? "Checking"
+        ? "checking"
         : health.data?.status === "ok"
           ? degraded
-            ? "Degraded"
-            : "Healthy"
-          : "Checking";
+            ? "degraded"
+            : "healthy"
+          : "checking";
+  const overallStatus = healthStatusLabels[overallState];
   const overallTone =
-    overallStatus === "Healthy"
+    overallState === "healthy"
       ? "success"
-      : overallStatus === "Checking"
+      : overallState === "checking"
         ? "muted"
-        : overallStatus === "Degraded"
+        : overallState === "degraded"
           ? "warning"
           : "danger";
   const updatedAt = maxUpdatedAt(
@@ -148,15 +151,15 @@ export function OverviewPage(): React.JSX.Element {
     <div className="page-stack">
       <header className="page-header">
         <div>
-          <div className="eyebrow">Preview Read Only</div>
-          <h1>운영 Overview</h1>
-          <p>Gateway 상태, 트래픽, 비용과 위험 신호를 한 화면에서 확인합니다.</p>
+          <div className="eyebrow">{uiLabels.previewReadOnly}</div>
+          <h1>운영 개요</h1>
+          <p>게이트웨이 상태, 트래픽, 비용과 위험 신호를 한 화면에서 확인합니다.</p>
         </div>
         <div className="page-actions">
           <Badge tone={overallTone}>{overallStatus}</Badge>
           {showLegacyAdmin ? (
             <a className="button button-secondary button-default" href="/admin#/dashboard">
-              Legacy에서 열기
+              기존 화면에서 열기
             </a>
           ) : null}
           <Button onClick={refreshAll} disabled={refreshing}>
@@ -168,28 +171,28 @@ export function OverviewPage(): React.JSX.Element {
       <div className="health-page-toolbar">
         <TimeRangePicker value={range} onChange={setRange} />
         <div className="status-meta">
-          <span>Backend {auth.backendVersion}</span>
+          <span>백엔드 {auth.backendVersion}</span>
           {updatedAt > 0 ? <UpdatedTime timestamp={updatedAt} /> : null}
         </div>
       </div>
 
       <section className="status-banner" aria-labelledby="gateway-health-title">
-        <div className="status-icon" data-status={overallStatus.toLowerCase()}>
+        <div className="status-icon" data-status={overallState}>
           <Activity aria-hidden="true" />
         </div>
         <div>
-          <h2 id="gateway-health-title">Gateway Health</h2>
-          {health.isPending ? <p>Gateway 연결을 확인하는 중입니다.</p> : null}
+          <h2 id="gateway-health-title">게이트웨이 상태</h2>
+          {health.isPending ? <p>게이트웨이 연결을 확인하는 중입니다.</p> : null}
           {health.data ? (
             <p>
-              Gateway는 요청을 처리할 수 있으며, 운영 신호는 <strong>{overallStatus}</strong> 상태입니다.
+              게이트웨이는 요청을 처리할 수 있으며, 운영 신호는 <strong>{overallStatus}</strong> 상태입니다.
             </p>
           ) : null}
           {health.isError ? (
             <p>
               {health.data
                 ? "새 상태 갱신에 실패해 마지막 정상 응답을 표시합니다."
-                : "Gateway 상태 확인에 실패했습니다. 각 영역의 재시도를 이용하세요."}
+                : "게이트웨이 상태 확인에 실패했습니다. 각 영역의 재시도를 이용하세요."}
             </p>
           ) : null}
         </div>
@@ -234,7 +237,7 @@ export function OverviewPage(): React.JSX.Element {
                   <dd>{formatMilliseconds(stats.data.average_latency_ms)}</dd>
                 </div>
                 <div>
-                  <dt>전체 Token</dt>
+                  <dt>전체 토큰</dt>
                   <dd>{formatInteger(stats.data.total_tokens)}</dd>
                 </div>
               </dl>
@@ -245,7 +248,7 @@ export function OverviewPage(): React.JSX.Element {
         {stats.isPending || stats.data ? (
           <HealthWidget
             title="프로세스 런타임"
-            description="현재 Gateway 프로세스 시작 이후 로컬 지표"
+            description="현재 게이트웨이 프로세스 시작 이후 로컬 지표"
             icon={Gauge}
             loading={stats.isPending}
             updatedAt={stats.dataUpdatedAt || undefined}
@@ -259,7 +262,7 @@ export function OverviewPage(): React.JSX.Element {
                 </div>
                 <dl className="metric-pairs">
                   <div>
-                    <dt>Cache hit</dt>
+                    <dt>캐시 적중률</dt>
                     <dd>
                       {formatPercent(
                         ratio(stats.data.cache_hits, stats.data.cache_hits + stats.data.cache_misses),
@@ -267,7 +270,7 @@ export function OverviewPage(): React.JSX.Element {
                     </dd>
                   </div>
                   <div>
-                    <dt>Failover</dt>
+                    <dt>장애 전환</dt>
                     <dd>{formatInteger(stats.data.failover_total)}</dd>
                   </div>
                   <div>
@@ -282,7 +285,7 @@ export function OverviewPage(): React.JSX.Element {
 
         <HealthWidget
           title="라우팅"
-          description={`${range} 선택 기간의 Provider와 Circuit Breaker`}
+          description={`${healthRangeLabels[range]} 선택 기간의 공급자와 회로 차단기`}
           icon={Route}
           loading={canReadRouting && routing.isPending}
           error={canReadRouting ? routing.error : undefined}
@@ -292,8 +295,8 @@ export function OverviewPage(): React.JSX.Element {
             canReadRouting
               ? routing.data
                 ? routingNeedsAttention
-                  ? "Degraded"
-                  : "Healthy"
+                  ? healthStatusLabels.degraded
+                  : healthStatusLabels.healthy
                 : undefined
               : "권한 필요"
           }
@@ -308,11 +311,11 @@ export function OverviewPage(): React.JSX.Element {
           ) : routing.data ? (
             <dl className="metric-pairs">
               <div>
-                <dt>Provider</dt>
+                <dt>공급자</dt>
                 <dd>{formatInteger(routing.data.providers.length)}</dd>
               </div>
               <div>
-                <dt>저하 Provider</dt>
+                <dt>저하 공급자</dt>
                 <dd>{formatInteger(routing.data.degraded.length)}</dd>
               </div>
               <div>
@@ -320,7 +323,7 @@ export function OverviewPage(): React.JSX.Element {
                 <dd>{formatInteger(routing.data.alerts.length)}</dd>
               </div>
               <div>
-                <dt>Open Breaker</dt>
+                <dt>열린 회로 차단기</dt>
                 <dd>
                   {formatInteger(
                     routing.data.breakers.states.filter((state) => state.phase === "open").length,
@@ -339,7 +342,7 @@ export function OverviewPage(): React.JSX.Element {
           error={operations.error}
           onRetry={() => void operations.refetch()}
           updatedAt={operations.dataUpdatedAt || undefined}
-          status={opsRisk?.tier.toUpperCase()}
+          status={opsRisk ? riskLevelLabels[opsRisk.tier] : undefined}
           statusTone={
             opsRisk?.tier === "critical" || opsRisk?.tier === "high"
               ? "danger"
@@ -352,7 +355,7 @@ export function OverviewPage(): React.JSX.Element {
             <>
               <div className="metric-value">
                 <strong>{opsRisk.score}</strong>
-                <span>/ 100 risk score</span>
+                <span>/ 100 위험 점수</span>
               </div>
               <p className="metric-note">
                 {opsRisk.factors.length
@@ -366,17 +369,23 @@ export function OverviewPage(): React.JSX.Element {
         {operations.isPending || operations.data ? (
           <HealthWidget
             title="운영 기반"
-            description="로깅, fallback 파일과 저장 공간의 현재 snapshot"
+            description="로깅, 대체 응답 파일과 저장 공간의 현재 현황"
             icon={DatabaseZap}
             loading={operations.isPending}
             updatedAt={operations.dataUpdatedAt || undefined}
-            status={opsStatus ? (operationsNeedAttention ? "Attention" : "Normal") : undefined}
+            status={
+              opsStatus
+                ? operationsNeedAttention
+                  ? healthStatusLabels.attention
+                  : healthStatusLabels.normal
+                : undefined
+            }
             statusTone={operationsNeedAttention ? "warning" : "success"}
           >
             {opsStatus ? (
               <dl className="metric-pairs">
                 <div>
-                  <dt>로그 Queue</dt>
+                  <dt>로그 대기열</dt>
                   <dd>{formatInteger(opsStatus.logging.queue_depth)}</dd>
                 </div>
                 <div>
@@ -384,7 +393,7 @@ export function OverviewPage(): React.JSX.Element {
                   <dd>{formatInteger(opsStatus.logging.dropped)}</dd>
                 </div>
                 <div>
-                  <dt>Fallback 크기</dt>
+                  <dt>대체 응답 파일 크기</dt>
                   <dd>{fallbackUnavailable ? "확인 실패" : formatBytes(opsStatus.fallback.bytes)}</dd>
                 </div>
                 <div>

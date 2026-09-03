@@ -33,7 +33,7 @@ import (
 
 // AppVersion is the gateway build version, surfaced in /auth/me and both admin UIs.
 // Release builds override it with -X vibe-coders/internal/proxy.AppVersion=<tag>.
-var AppVersion = "v0.82.0"
+var AppVersion = "v0.82.1"
 
 type Server struct {
 	cfg      config.Config
@@ -812,6 +812,11 @@ func parseRangeBound(value string, loc *time.Location, endOfDay bool) time.Time 
 }
 
 func (s *Server) handleRequests(w http.ResponseWriter, r *http.Request) {
+	setVibeUIVariantHeaders(w)
+	if strings.EqualFold(strings.TrimSpace(r.Header.Get("X-Vibe-UI")), "app") {
+		s.handleAppRequests(w, r)
+		return
+	}
 	if !s.authorizeAdmin(r) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return

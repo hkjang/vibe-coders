@@ -57,8 +57,8 @@ go run -ldflags "-X vibe-coders/internal/proxy.AppVersion=dev" ./cmd/gateway
 Docker로 독립 실행할 때는 현재 소스에서 이미지를 먼저 빌드합니다.
 
 ```bash
-docker build --build-arg VERSION=v0.82.0 -t ai-coding-proxy-gateway:v0.82.0 .
-UI_APP_ENABLED=true GATEWAY_VERSION=v0.82.0 ./scripts/init-deployment-env.sh .env
+docker build --build-arg VERSION=v0.82.1 -t ai-coding-proxy-gateway:v0.82.1 .
+UI_APP_ENABLED=true GATEWAY_VERSION=v0.82.1 ./scripts/init-deployment-env.sh .env
 docker compose --env-file .env up -d
 docker compose --env-file .env ps
 curl http://localhost:8080/health
@@ -95,7 +95,8 @@ named volume `proxy-gateway-data`에 유지됩니다. `down -v`는 사용하지 
 - 호출 단건 상세 + 첫 청크/전체 지연 + 프롬프트 전문(마스킹) + 응답 메타 조회
 - API 키 / 팀 / IP / 전체 단위 일별·월별 쿼터 (토큰·KRW). 한도 초과 시 429 + Retry-After + X-Quota-*
 - 보존 정책 (RETENTION_REQUEST_DAYS / RETENTION_PROMPT_DAYS / RETENTION_RESPONSE_DAYS) 기반 백그라운드 cleanup
-- `/admin` Legacy Stable Console과 기본 OFF인 `/app` React Next Console Preview. 기존 한국어 어드민 다중 탭과 비용 KRW 표기는 그대로 유지
+- `/admin` 기존 안정 운영 콘솔과 기본 OFF인 `/app` React 차세대 콘솔 미리보기. `/app` 메뉴·버튼·기능명은 한글을 우선하고 기존 한국어 관리자 다중 탭과 비용 KRW 표기는 그대로 유지
+- `/app/observability/requests` 읽기 전용 요청 탐색기: URL 필터, 암호화·서명된 커서 페이지 이동, 마지막 정상 데이터, 안전한 상세 대화상자와 기존 화면 연결을 제공하며 프롬프트·응답 본문·원시 오류는 노출하지 않음
 - Datadog LLM Observability 대응 기능: Trace/Span Explorer, Session Explorer, Prompt Tracking, Patterns, Insights, trend timeseries, human feedback(label/prompt/alignment summary), managed evaluation, external evaluation submit API
 - 사용자 상세 화면에 API 키별 LLM 요청/eval failure/feedback/alignment trend drill-down 제공
 - prompt name/version 비교 API와 UI 모달로 버전별 지연·비용·오류율·평가 실패율 비교 제공
@@ -1077,24 +1078,24 @@ React 산출물은 Go 바이너리에 embed되므로 운영 컨테이너에 Node
 주입됩니다.
 
 ```powershell
-pwsh -File scripts/release.ps1 -Version v0.82.0
+pwsh -File scripts/release.ps1 -Version v0.82.1
 ```
 
 ```bash
-./scripts/release.sh -v v0.82.0 -p linux/amd64
+./scripts/release.sh -v v0.82.1 -p linux/amd64
 ```
 
 산출물 예시:
 
 ```
 release/
-  ai-coding-proxy-gateway-v0.82.0.tar.gz
-  ai-coding-proxy-gateway-v0.82.0.tar.gz.sha256
-  README-offline-v0.82.0.md
-  SBOM-v0.82.0.spdx.json
-  THIRD_PARTY_LICENSES-v0.82.0.md
-  init-deployment-env-v0.82.0.sh
-  backup-volume-v0.82.0.sh
+  ai-coding-proxy-gateway-v0.82.1.tar.gz
+  ai-coding-proxy-gateway-v0.82.1.tar.gz.sha256
+  README-offline-v0.82.1.md
+  SBOM-v0.82.1.spdx.json
+  THIRD_PARTY_LICENSES-v0.82.1.md
+  init-deployment-env-v0.82.1.sh
+  backup-volume-v0.82.1.sh
 ```
 
 ### 폐쇄망 적재
@@ -1103,27 +1104,27 @@ release/
 2. 체크섬 확인
 
    ```bash
-   sha256sum -c ai-coding-proxy-gateway-v0.82.0.tar.gz.sha256
+   sha256sum -c ai-coding-proxy-gateway-v0.82.1.tar.gz.sha256
    ```
 
 3. 이미지 적재
 
    ```bash
-   gunzip -c ai-coding-proxy-gateway-v0.82.0.tar.gz | docker load
+   gunzip -c ai-coding-proxy-gateway-v0.82.1.tar.gz | docker load
    ```
 
 4. 최초 1회 비밀값 파일과 데이터 볼륨을 만든 뒤 실행
 
    ```bash
-   chmod 0700 init-deployment-env-v0.82.0.sh backup-volume-v0.82.0.sh
-   sudo env GATEWAY_VERSION=v0.82.0 \
-     ./init-deployment-env-v0.82.0.sh /opt/proxy-gateway/gateway.env
+   chmod 0700 init-deployment-env-v0.82.1.sh backup-volume-v0.82.1.sh
+   sudo env GATEWAY_VERSION=v0.82.1 \
+     ./init-deployment-env-v0.82.1.sh /opt/proxy-gateway/gateway.env
    docker volume create proxy-gateway-data >/dev/null
    docker run -d --name proxy-gateway --restart=always \
        -p 8080:8080 \
        --mount source=proxy-gateway-data,target=/data \
        --env-file /opt/proxy-gateway/gateway.env \
-       ai-coding-proxy-gateway:v0.82.0
+       ai-coding-proxy-gateway:v0.82.1
    ```
 
    초기화 스크립트는 `openssl`과 생성 결과를 검증한 뒤 임시 파일을 원자적으로 설치하며 API Key를 숨김 입력받습니다.
@@ -1133,7 +1134,7 @@ release/
 5. 또는 저장소에서 별도로 검토·전달한 `docker-compose.yml` 과 함께 운영
 
    ```bash
-   GATEWAY_VERSION=v0.82.0 ./init-deployment-env-v0.82.0.sh .env
+   GATEWAY_VERSION=v0.82.1 ./init-deployment-env-v0.82.1.sh .env
    docker compose up -d
    ```
 
@@ -1144,5 +1145,5 @@ release/
 같이 다시 검증할 수 있습니다.
 
 ```bash
-bash scripts/container-smoke.sh ai-coding-proxy-gateway:v0.82.0 v0.82.0
+bash scripts/container-smoke.sh ai-coding-proxy-gateway:v0.82.1 v0.82.1
 ```

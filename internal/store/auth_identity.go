@@ -7,6 +7,8 @@ import (
 	"time"
 )
 
+var ErrAuthIdentityUserConflict = errors.New("auth identity is linked to another user")
+
 // AuthIdentity links an external SSO identity (provider + issuer + subject) to an internal
 // user, so repeat logins resolve to the same account.
 type AuthIdentity struct {
@@ -53,4 +55,93 @@ func (s *SQLStore) UpsertAuthIdentity(ctx context.Context, a AuthIdentity) error
 			email = excluded.email, preferred_username = excluded.preferred_username, last_login_at = excluded.last_login_at`),
 		a.ID, a.UserID, a.Provider, a.Issuer, a.Subject, a.Email, a.PreferredUsername, a.CreatedAt, a.LastLoginAt)
 	return err
+}
+
+// ProvisionAuthIdentity atomically creates or updates an SSO user, links the external
+// identity, and replaces the user's IdP-owned team membership. Keeping these writes in one
+// transaction prevents a failed team/identity write from leaving an unlinked user that can
+// no longer complete a later login.
+func (s *SQLStore) ProvisionAuthIdentity(ctx context.Context, user AuthUser, createUser bool, identity AuthIdentity, teamID string) error {
+	now := time.Now().UTC()
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if createUser {
+		if user.CreatedAt.IsZero() {
+			user.CreatedAt = now
+		}
+		if user.UpdatedAt.IsZero() {
+			user.UpdatedAt = user.CreatedAt
+		}
+		if user.Status == "" {
+			user.Status = "active"
+		}
+		if user.Role == "" {
+			user.Role = "developer"
+		}
+		if _, err := tx.ExecContext(ctx, s.bind(`INSERT INTO users
+			(id, email, password_hash, name, role, status, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`),
+			user.ID, user.Email, user.PasswordHash, user.Name, user.Role, user.Status,
+			formatTime(user.CreatedAt), formatTime(user.UpdatedAt)); err != nil {
+			return err
+		}
+	} else {
+		result, err := tx.ExecContext(ctx, s.bind(`UPDATE users SET
+				role = CASE WHEN ? = '' THEN role ELSE ? END,
+				status = CASE WHEN ? = '' THEN status ELSE ? END,
+				updated_at = ?
+			WHERE id = ?`), user.Role, user.Role, user.Status, user.Status, formatTime(now), user.ID)
+		if err != nil {
+			return err
+		}
+		if affected, err := result.RowsAffected(); err != nil {
+			return err
+		} else if affected != 1 {
+			return ErrNotFound
+		}
+	}
+
+	identity.UserID = user.ID
+	if identity.CreatedAt == "" {
+		identity.CreatedAt = now.Format(time.RFC3339Nano)
+	}
+	if identity.LastLoginAt == "" {
+		identity.LastLoginAt = now.Format(time.RFC3339Nano)
+	}
+	result, err := tx.ExecContext(ctx, s.bind(`INSERT INTO auth_identities
+		(id, user_id, provider, issuer, subject, email, preferred_username, created_at, last_login_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(provider, issuer, subject) DO UPDATE SET
+			email = excluded.email,
+			preferred_username = excluded.preferred_username,
+			last_login_at = excluded.last_login_at
+		WHERE auth_identities.user_id = excluded.user_id`),
+		identity.ID, identity.UserID, identity.Provider, identity.Issuer, identity.Subject,
+		identity.Email, identity.PreferredUsername, identity.CreatedAt, identity.LastLoginAt)
+	if err != nil {
+		return err
+	}
+	if affected, err := result.RowsAffected(); err != nil {
+		return err
+	} else if affected != 1 {
+		return ErrAuthIdentityUserConflict
+	}
+
+	if _, err := tx.ExecContext(ctx, s.bind(`DELETE FROM user_team_memberships WHERE user_id = ?`), user.ID); err != nil {
+		return err
+	}
+	if teamID != "" {
+		if _, err := tx.ExecContext(ctx, s.bind(`INSERT INTO user_team_memberships (user_id, team_id, role, created_at)
+			VALUES (?, ?, ?, ?)
+			ON CONFLICT(user_id, team_id) DO UPDATE SET role = excluded.role`),
+			user.ID, teamID, "", formatTime(now)); err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
 }

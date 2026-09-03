@@ -5,13 +5,14 @@ import type { ModelCatalogRow } from "@/features/gateway/models/model-catalog";
 import { ModelCandidateSelection } from "@/features/gateway/models/ModelCandidateSelection";
 import { ModelCatalogueFailure } from "@/features/gateway/models/ModelCatalogueFailure";
 import { formatModelDate } from "@/features/gateway/models/model-date";
-import { modelStatusPresentation } from "@/features/gateway/models/model-presentation";
+import { modelSourceLabels, modelStatusPresentation } from "@/features/gateway/models/model-presentation";
 import { formatInteger, formatKRW, formatPercent } from "@/features/health/health-utils";
 import { isAppError } from "@/shared/api/error";
 import type { AdminModelPartialFailure } from "@/shared/api/schemas";
 import { Badge } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
 import { Dialog } from "@/shared/components/ui/Dialog";
+import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
 
 export interface ModelDetailResourceState {
   error?: unknown;
@@ -56,6 +57,7 @@ function DetailResourceState({
   state: ModelDetailResourceState;
 }): React.JSX.Element {
   const requestId = isAppError(state.error) ? state.error.requestId : undefined;
+  const diagnosticCode = isAppError(state.error) ? state.error.code : undefined;
   const showBody = state.hasResponse || (!state.pending && !state.error);
   return (
     <div className="model-detail-resource">
@@ -72,8 +74,9 @@ function DetailResourceState({
               {label}{" "}
               {state.hasResponse ? "갱신에 실패해 마지막 정상 데이터를 표시합니다." : "조회에 실패했습니다."}
             </strong>
-            <p>{isAppError(state.error) ? state.error.message : "잠시 후 다시 시도해 주세요."}</p>
-            {requestId ? <code>Request ID: {requestId}</code> : null}
+            <p>{safeAppErrorMessage(state.error, `${label} 정보를 확인할 수 없습니다.`)}</p>
+            {requestId ? <code>요청 ID: {requestId}</code> : null}
+            {diagnosticCode ? <code>진단 코드: {diagnosticCode}</code> : null}
           </div>
           <Button
             size="small"
@@ -111,20 +114,20 @@ function QualityDetails({ row }: { row: ModelCatalogRow }): React.JSX.Element {
           <dd>{formatPercent(quality.success_rate)}</dd>
         </div>
         <div>
-          <dt>Golden Prompt</dt>
+          <dt>골든 프롬프트</dt>
           <dd>
             {formatPercent(quality.golden_pass_rate)} · {formatInteger(quality.golden_samples)}건
           </dd>
         </div>
         <div>
-          <dt>Evaluation</dt>
+          <dt>평가</dt>
           <dd>
             {formatPercent(quality.eval_pass_rate)} · {formatInteger(quality.eval_samples)}건
           </dd>
         </div>
       </dl>
       {Object.keys(quality.categories).length > 0 ? (
-        <ul className="model-category-list" aria-label="Evaluation 카테고리">
+        <ul className="model-category-list" aria-label="평가 카테고리">
           {Object.entries(quality.categories).map(([category, score]) => (
             <li key={category}>
               <span>{category}</span>
@@ -139,19 +142,19 @@ function QualityDetails({ row }: { row: ModelCatalogRow }): React.JSX.Element {
 }
 
 function PricingDetails({ row }: { row: ModelCatalogRow }): React.JSX.Element {
-  if (!row.price) return <p className="model-detail-empty">이 Model에 적용된 가격이 없습니다.</p>;
+  if (!row.price) return <p className="model-detail-empty">이 모델에 적용된 가격이 없습니다.</p>;
   return (
     <dl className="model-detail-grid model-price-grid">
       <div>
-        <dt>Input / 1M tokens</dt>
+        <dt>입력 / 100만 토큰</dt>
         <dd>{formatKRW(row.price.input_krw_per_1m)}</dd>
       </div>
       <div>
-        <dt>Output / 1M tokens</dt>
+        <dt>출력 / 100만 토큰</dt>
         <dd>{formatKRW(row.price.output_krw_per_1m)}</dd>
       </div>
       <div>
-        <dt>Cached Input / 1M</dt>
+        <dt>캐시 입력 / 100만 토큰</dt>
         <dd>{formatKRW(row.price.cached_input_krw_per_1m)}</dd>
       </div>
     </dl>
@@ -167,15 +170,15 @@ function DeprecationDetails({ row }: { row: ModelCatalogRow }): React.JSX.Elemen
       {deprecation ? (
         <dl className="model-detail-grid">
           <div>
-            <dt>Action</dt>
+            <dt>조치</dt>
             <dd>{deprecation.action}</dd>
           </div>
           <div>
-            <dt>Sunset</dt>
+            <dt>종료 예정일</dt>
             <dd>{deprecation.sunset_date || "미정"}</dd>
           </div>
           <div className="model-detail-wide">
-            <dt>Replacement</dt>
+            <dt>대체 모델</dt>
             <dd>{deprecation.replacement || "지정되지 않음"}</dd>
           </div>
           {deprecation.message ? (
@@ -189,8 +192,8 @@ function DeprecationDetails({ row }: { row: ModelCatalogRow }): React.JSX.Elemen
       {row.model.shadowed || row.model.shadowed_by ? (
         <p className="model-detail-note">
           {row.model.shadowed_by
-            ? `Agent Route “${row.model.shadowed_by}”가 동일 Model ID를 우선 처리합니다.`
-            : "다른 Agent Route가 동일 Model ID를 우선 처리합니다."}
+            ? `에이전트 경로 “${row.model.shadowed_by}”가 동일 모델 ID를 우선 처리합니다.`
+            : "다른 에이전트 경로가 동일 모델 ID를 우선 처리합니다."}
         </p>
       ) : null}
     </section>
@@ -211,6 +214,7 @@ export function ModelDetailDialog({
   showLegacyAdmin,
 }: ModelDetailDialogProps): React.JSX.Element {
   const requestId = isAppError(catalogue.error) ? catalogue.error.requestId : undefined;
+  const diagnosticCode = isAppError(catalogue.error) ? catalogue.error.code : undefined;
   const catalogueRequestId = requestId || catalogue.requestId;
   const failureProviderRef = row?.model.provider_ref ?? requestedProvider;
   const relevantFailures = catalogue.partialFailures.filter(
@@ -222,7 +226,7 @@ export function ModelDetailDialog({
   );
   const footer = showLegacyAdmin ? (
     <a className="button button-secondary button-default" href="/admin#/model-contracts">
-      Legacy Model 계약 열기 <ExternalLink aria-hidden="true" />
+      기존 모델 계약 열기 <ExternalLink aria-hidden="true" />
     </a>
   ) : undefined;
   const status = row ? modelStatusPresentation[row.status] : undefined;
@@ -231,14 +235,14 @@ export function ModelDetailDialog({
     <Dialog
       description={
         row
-          ? `${row.providerLabel} Provider의 품질, 가격, 사용 지침을 읽기 전용으로 확인합니다.`
-          : "Model 품질, 가격과 사용 지침을 읽기 전용으로 확인합니다."
+          ? `${row.providerLabel} 공급자의 품질, 가격, 사용 지침을 읽기 전용으로 확인합니다.`
+          : "모델 품질, 가격과 사용 지침을 읽기 전용으로 확인합니다."
       }
       footer={footer}
       onOpenChange={onOpenChange}
       open={open}
       returnFocusRef={returnFocusRef}
-      title={row?.model.id ?? (requestedModel || "Model 상세")}
+      title={row?.model.id ?? (requestedModel || "모델 상세")}
     >
       {catalogue.pending && !catalogue.hasResponse ? (
         <div className="model-detail-loading" role="status">
@@ -248,9 +252,10 @@ export function ModelDetailDialog({
         <div className="model-detail-error" role="alert">
           <AlertTriangle aria-hidden="true" />
           <div>
-            <strong>Model 상세를 불러오지 못했습니다.</strong>
-            <p>{isAppError(catalogue.error) ? catalogue.error.message : "잠시 후 다시 시도해 주세요."}</p>
-            {requestId ? <code>Request ID: {requestId}</code> : null}
+            <strong>모델 상세를 불러오지 못했습니다.</strong>
+            <p>{safeAppErrorMessage(catalogue.error, "모델 상세 정보를 확인할 수 없습니다.")}</p>
+            {requestId ? <code>요청 ID: {requestId}</code> : null}
+            {diagnosticCode ? <code>진단 코드: {diagnosticCode}</code> : null}
           </div>
           <Button size="small" variant="secondary" onClick={catalogue.retry} disabled={catalogue.fetching}>
             <RefreshCw aria-hidden="true" /> {catalogue.fetching ? "갱신 중" : "재시도"}
@@ -270,12 +275,12 @@ export function ModelDetailDialog({
         <div className="model-detail-error" role="alert">
           <AlertTriangle aria-hidden="true" />
           <div>
-            <strong>Model을 찾을 수 없습니다.</strong>
+            <strong>모델을 찾을 수 없습니다.</strong>
             <p>요청한 “{requestedModel}” 항목이 현재 목록에 없습니다.</p>
           </div>
         </div>
       ) : (
-        <DetailResourceState label="Model 카탈로그" state={catalogue}>
+        <DetailResourceState label="모델 카탈로그" state={catalogue}>
           <div className="model-detail-stack">
             <div className="model-detail-badges">
               <Badge tone={status?.tone}>{status?.label}</Badge>
@@ -284,7 +289,7 @@ export function ModelDetailDialog({
               ) : null}
               <Badge tone="info">{row.providerLabel}</Badge>
               <Badge tone={row.model.source === "live" ? "success" : "muted"}>
-                {row.model.source.replace("_", " ")}
+                {modelSourceLabels[row.model.source]}
               </Badge>
             </div>
 
@@ -299,74 +304,74 @@ export function ModelDetailDialog({
             ) : null}
 
             <section className="model-detail-section" aria-labelledby="model-identity-title">
-              <h3 id="model-identity-title">Catalogue</h3>
+              <h3 id="model-identity-title">카탈로그</h3>
               <dl className="model-detail-grid">
                 <div>
-                  <dt>Provider</dt>
+                  <dt>공급자</dt>
                   <dd>{row.providerLabel}</dd>
                 </div>
                 <div>
-                  <dt>Owned by</dt>
+                  <dt>소유자</dt>
                   <dd>{row.model.owned_by || "정보 없음"}</dd>
                 </div>
                 <div>
-                  <dt>Object</dt>
+                  <dt>객체 유형</dt>
                   <dd>{row.model.object || "정보 없음"}</dd>
                 </div>
                 <div>
-                  <dt>Provider 상태</dt>
-                  <dd>{row.provider?.status ?? "정보 없음"}</dd>
+                  <dt>공급자 상태</dt>
+                  <dd>{row.provider?.status === "ok" ? "정상" : (row.provider?.status ?? "정보 없음")}</dd>
                 </div>
                 <div>
-                  <dt>Created</dt>
+                  <dt>생성 시각</dt>
                   <dd>{formatModelDate(row.model.created)}</dd>
                 </div>
                 <div>
-                  <dt>Fetched</dt>
+                  <dt>조회 시각</dt>
                   <dd>{formatModelDate(row.model.fetched_at)}</dd>
                 </div>
               </dl>
               {row.model.stale ? (
                 <p className="model-detail-note">
-                  마지막 정상 카탈로그 데이터입니다. Fetched {formatModelDate(row.model.fetched_at)}
+                  마지막 정상 카탈로그 데이터입니다. 조회 시각 {formatModelDate(row.model.fetched_at)}
                 </p>
               ) : null}
             </section>
 
             <section className="model-detail-section" aria-labelledby="model-quality-title">
-              <h3 id="model-quality-title">선택 기간 품질 · Model ID 집계</h3>
-              <DetailResourceState label="Model 품질" state={enrichment.quality}>
+              <h3 id="model-quality-title">선택 기간 품질 · 모델 ID 집계</h3>
+              <DetailResourceState label="모델 품질" state={enrichment.quality}>
                 <QualityDetails row={row} />
               </DetailResourceState>
             </section>
 
             <section className="model-detail-section" aria-labelledby="model-pricing-title">
-              <h3 id="model-pricing-title">Effective Pricing</h3>
-              <DetailResourceState label="Model 가격" state={enrichment.pricing}>
+              <h3 id="model-pricing-title">적용 가격</h3>
+              <DetailResourceState label="모델 가격" state={enrichment.pricing}>
                 <PricingDetails row={row} />
               </DetailResourceState>
             </section>
 
             <section className="model-detail-section" aria-labelledby="model-guidance-title">
               <h3 id="model-guidance-title">사용 지침</h3>
-              <DetailResourceState label="Model 사용 지침" state={enrichment.tags}>
+              <DetailResourceState label="모델 사용 지침" state={enrichment.tags}>
                 {row.tag ? (
                   <dl className="model-detail-grid">
                     <div>
-                      <dt>Good for</dt>
+                      <dt>적합한 용도</dt>
                       <dd>{row.tag.good_for || "지정되지 않음"}</dd>
                     </div>
                     <div>
-                      <dt>Avoid for</dt>
+                      <dt>피해야 할 용도</dt>
                       <dd>{row.tag.avoid_for || "지정되지 않음"}</dd>
                     </div>
                     <div className="model-detail-wide">
-                      <dt>Risk note</dt>
+                      <dt>위험 안내</dt>
                       <dd>{row.tag.risk_note || "등록된 위험 안내가 없습니다."}</dd>
                     </div>
                   </dl>
                 ) : (
-                  <p className="model-detail-empty">등록된 Model 사용 지침이 없습니다.</p>
+                  <p className="model-detail-empty">등록된 모델 사용 지침이 없습니다.</p>
                 )}
               </DetailResourceState>
             </section>

@@ -142,6 +142,40 @@ export type AppError = {
     };
 };
 
+export type AppRequestSummary = {
+    api_key_id: string;
+    cached_tokens: number;
+    completion_tokens: number;
+    created_at: string;
+    currency: string;
+    endpoint: string;
+    estimated_cost: number;
+    finish_reason: string;
+    first_chunk_ms: number;
+    ip: string;
+    latency_ms: number;
+    method: string;
+    model: string;
+    prompt_tokens: number;
+    provider_display: string;
+    provider_ref: string;
+    reasoning_tokens: number;
+    request_id: string;
+    session_id: string;
+    status_code: number;
+    stream: boolean;
+    total_tokens: number;
+    trace_id: string;
+};
+
+export type AppRequestsResponse = {
+    generated_at: string;
+    limit: number;
+    next_cursor?: string;
+    previous_cursor?: string;
+    requests: Array<AppRequestSummary>;
+};
+
 export type AuthLoginRequest = {
     email: string;
     password: string;
@@ -5089,14 +5123,44 @@ export type GetAdminReportsNarrativeResponses = {
 
 export type GetAdminRequestsData = {
     body?: never;
+    headers?: {
+        /**
+         * Set to app to request the safe React console projection.
+         */
+        'X-Vibe-UI'?: 'app';
+    };
     path?: never;
-    query?: never;
+    query?: {
+        limit?: number;
+        from?: string;
+        to?: string;
+        tz?: string;
+        status?: string;
+        model?: string;
+        provider_ref?: string;
+        request_id?: string;
+        trace_id?: string;
+        session_id?: string;
+        api_key_id?: string;
+        ip?: string;
+        language?: string;
+        cursor?: string;
+    };
     url: '/admin/requests';
 };
 
+export type GetAdminRequestsErrors = {
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminRequestsError = GetAdminRequestsErrors[keyof GetAdminRequestsErrors];
+
 export type GetAdminRequestsResponses = {
     /**
-     * OK
+     * OK. X-Vibe-UI: app uses AppRequestsResponse; legacy callers receive the existing response shape.
      */
     200: unknown;
 };

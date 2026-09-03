@@ -166,6 +166,19 @@ describe("ApiClient", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("uses a Korean gateway message for network failures", async () => {
+    const client = new ApiClient({
+      fetch: vi.fn(async () => {
+        throw new TypeError("Failed to fetch");
+      }) as typeof fetch,
+    });
+
+    await expect(client.request(endpoints.health)).rejects.toMatchObject({
+      kind: "network",
+      message: "게이트웨이에 연결할 수 없습니다.",
+    });
+  });
+
   it("preserves the request id on API errors", async () => {
     const client = new ApiClient({
       fetch: vi.fn(async () =>

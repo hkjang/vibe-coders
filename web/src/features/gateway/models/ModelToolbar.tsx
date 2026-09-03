@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { useLocation } from "react-router";
 
 import type { ModelProviderOption, ModelStatusFilter } from "@/features/gateway/models/model-catalog";
+import { modelStatusPresentation } from "@/features/gateway/models/model-presentation";
 import type { HealthRange } from "@/features/health/health-utils";
 import { TimeRangePicker } from "@/features/health/health-ui";
 import { Button } from "@/shared/components/ui/Button";
@@ -11,12 +12,12 @@ import { containsPotentialSecret, secretSearchMessage } from "@/shared/security/
 
 const statusLabels: Record<ModelStatusFilter, string> = {
   all: "전체 상태",
-  available: "Available",
-  virtual: "Virtual",
-  deprecated: "Deprecated",
-  retired: "Retired",
-  stale: "Stale",
-  shadowed: "Shadowed",
+  available: modelStatusPresentation.available.label,
+  virtual: modelStatusPresentation.virtual.label,
+  deprecated: modelStatusPresentation.deprecated.label,
+  retired: modelStatusPresentation.retired.label,
+  stale: modelStatusPresentation.stale.label,
+  shadowed: modelStatusPresentation.shadowed.label,
 };
 
 interface ModelToolbarProps {
@@ -68,7 +69,7 @@ export function ModelToolbar({
           onUpdate({ q: nextQuery || undefined, page: undefined });
         }}
       >
-        <label htmlFor="model-search">Model 검색</label>
+        <label htmlFor="model-search">모델 검색</label>
         <div>
           <Search aria-hidden="true" />
           <input
@@ -77,7 +78,7 @@ export function ModelToolbar({
             id="model-search"
             name="q"
             defaultValue={query}
-            placeholder="Model ID, Provider, 소유자, 사용 지침"
+            placeholder="모델 ID, 공급자, 소유자, 사용 지침"
             aria-describedby={visibleError ? "model-search-error" : undefined}
             aria-invalid={visibleError ? "true" : undefined}
             onChange={() => {
@@ -95,7 +96,7 @@ export function ModelToolbar({
         ) : null}
       </form>
       <label className="model-filter">
-        <span>Provider</span>
+        <span>공급자</span>
         <select
           value={provider}
           onChange={(event) =>
@@ -108,7 +109,7 @@ export function ModelToolbar({
             })
           }
         >
-          <option value="">전체 Provider</option>
+          <option value="">전체 공급자</option>
           {providers.map((option) => (
             <option key={option.value} value={option.value}>
               {option.label}

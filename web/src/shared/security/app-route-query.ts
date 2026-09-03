@@ -18,6 +18,22 @@ const routeQueryAllowlist: Readonly<Record<string, ReadonlySet<string>>> = {
   "/overview": new Set(["range"]),
   "/gateway/health": new Set(["range"]),
   "/routing/rules": new Set(["page"]),
+  "/observability/requests": new Set([
+    "api_key_id",
+    "cursor",
+    "from",
+    "ip",
+    "language",
+    "limit",
+    "model",
+    "provider_ref",
+    "request_id",
+    "session_id",
+    "status",
+    "to",
+    "trace_id",
+    "tz",
+  ]),
   "/system/health": new Set(["range"]),
 };
 
@@ -37,6 +53,15 @@ function routerPath(pathname: string): string {
 }
 
 function sensitiveParameter(key: string, values: readonly string[]): boolean {
+  // api_key_id is a database identifier used for request filtering, not an API
+  // credential. Preserve only its bounded identifier form; actual key material
+  // remains rejected by both the character contract and secret scanner.
+  if (
+    key === "api_key_id" &&
+    values.every((value) => /^[a-z0-9._:-]{1,512}$/iu.test(value) && !containsPotentialSecret(value))
+  ) {
+    return false;
+  }
   return isSensitiveCredentialKey(key) || values.some(containsPotentialSecret);
 }
 

@@ -71,6 +71,21 @@ const featureRoutes: RouteObject[] = migrationRegistry.map((feature) => {
       },
     };
   }
+  if (feature.featureId === "observability.requests") {
+    return {
+      path,
+      lazy: async () => {
+        const { RequestPage } = await import("@/features/observability/requests/RequestPage");
+        return {
+          Component: () => (
+            <FeatureRoute feature={feature}>
+              <RequestPage />
+            </FeatureRoute>
+          ),
+        };
+      },
+    };
+  }
   if (feature.featureId === "system.health") {
     return {
       path,

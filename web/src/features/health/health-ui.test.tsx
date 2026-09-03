@@ -4,7 +4,7 @@ import { Activity } from "lucide-react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import { describe, expect, it, vi } from "vitest";
 
-import { exactTime, formatBytes, isHealthRange } from "@/features/health/health-utils";
+import { exactTime, formatBytes, healthRangeLabels, isHealthRange } from "@/features/health/health-utils";
 import { HealthWidget, TimeRangePicker, UpdatedTime } from "@/features/health/health-ui";
 import { useHealthRange } from "@/features/health/use-health-range";
 import { AppError } from "@/shared/api/error";
@@ -22,6 +22,15 @@ function RangeHarness(): React.JSX.Element {
 }
 
 describe("health UI primitives", () => {
+  it("provides Korean labels for every supported range", () => {
+    expect(healthRangeLabels).toEqual({
+      "1h": "1시간",
+      "24h": "24시간",
+      "7d": "7일",
+      "30d": "30일",
+    });
+  });
+
   it("stores the selected range in the URL while preserving other filters", async () => {
     const user = userEvent.setup();
     render(
@@ -48,7 +57,9 @@ describe("health UI primitives", () => {
         onRetry={retry}
       />,
     );
-    expect(screen.getByRole("alert")).toHaveTextContent("Request ID: req-42");
+    expect(screen.getByRole("alert")).toHaveTextContent("요청 ID: req-42");
+    expect(screen.getByRole("alert")).toHaveTextContent("운영 위험 데이터를 확인할 수 없습니다.");
+    expect(screen.getByRole("alert")).not.toHaveTextContent("조회 실패");
     await user.click(screen.getByRole("button", { name: "운영 위험 재시도" }));
     expect(retry).toHaveBeenCalledOnce();
   });
@@ -67,7 +78,8 @@ describe("health UI primitives", () => {
 
     expect(screen.getByText("마지막 정상 Provider 3개")).toBeVisible();
     expect(screen.getByRole("alert")).toHaveTextContent("마지막 정상 데이터를 표시합니다");
-    expect(screen.getByRole("alert")).toHaveTextContent("Request ID: req-stale-7");
+    expect(screen.getByRole("alert")).toHaveTextContent("요청 ID: req-stale-7");
+    expect(screen.getByRole("alert")).not.toHaveTextContent("갱신 실패");
     expect(screen.getByText(/마지막 정상 갱신/)).toBeVisible();
   });
 

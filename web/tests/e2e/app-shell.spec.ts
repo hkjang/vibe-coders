@@ -80,8 +80,8 @@ const opsStatus = {
 };
 
 const bootstrap = {
-  backend_version: "v0.82.0",
-  ui_version: "e2e-v0.82.0",
+  backend_version: "v0.82.1",
+  ui_version: "e2e-v0.82.1",
   api_version: "v1",
   ui: {
     enabled: true,
@@ -120,7 +120,7 @@ const bootstrap = {
   migration_registry: [
     {
       feature_id: "overview",
-      title: "Overview",
+      title: "통합 현황",
       app_path: "/app/overview",
       legacy_path: "/admin#/dashboard",
       status: "preview_read_only",
@@ -135,7 +135,7 @@ const bootstrap = {
     },
     {
       feature_id: "gateway.health",
-      title: "Gateway Health",
+      title: "게이트웨이 상태",
       app_path: "/app/gateway/health",
       legacy_path: "/admin#/routing/health",
       status: "preview_read_only",
@@ -150,7 +150,7 @@ const bootstrap = {
     },
     {
       feature_id: "gateway.providers",
-      title: "Provider",
+      title: "AI 공급자",
       app_path: "/app/gateway/providers",
       legacy_path: "/admin#/settings",
       status: "preview_read_only",
@@ -165,7 +165,7 @@ const bootstrap = {
     },
     {
       feature_id: "gateway.models",
-      title: "Models",
+      title: "모델",
       app_path: "/app/gateway/models",
       legacy_path: "/admin#/model-contracts",
       status: "preview_read_only",
@@ -180,7 +180,7 @@ const bootstrap = {
     },
     {
       feature_id: "system.health",
-      title: "System Health",
+      title: "시스템 상태",
       app_path: "/app/system/health",
       legacy_path: "/admin#/ops-home",
       status: "preview_read_only",
@@ -479,8 +479,8 @@ async function openOverview(page: Page, colorScheme: "dark" | "light" = "light")
   await page.emulateMedia({ colorScheme, reducedMotion: "reduce" });
   await mockGateway(page);
   await page.goto("overview");
-  await expect(page.getByRole("heading", { name: "운영 Overview" })).toBeVisible();
-  await expect(page.getByText("Gateway는 요청을 처리할 수 있으며, 운영 신호는")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "운영 개요" })).toBeVisible();
+  await expect(page.getByText("게이트웨이는 요청을 처리할 수 있으며, 운영 신호는")).toBeVisible();
   await expect(page.getByText("12,840")).toBeVisible();
   await expect(page.getByText("₩428,751")).toBeVisible();
 }
@@ -503,7 +503,7 @@ test("opens the command palette on a deep link without CSP or external asset err
   });
   await mockGateway(page);
   await page.goto("overview");
-  await expect(page.getByRole("heading", { name: "운영 Overview" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "운영 개요" })).toBeVisible();
 
   await page.keyboard.press("Control+K");
   await expect(page.getByRole("dialog", { name: "명령 팔레트" })).toBeVisible();
@@ -522,14 +522,14 @@ test("opens and reloads Gateway Health at a URL-backed range", async ({ page }) 
   });
 
   await page.goto("gateway/health?range=7d");
-  await expect(page.getByRole("heading", { name: "Gateway Health", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "게이트웨이 상태", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "7일" })).toHaveAttribute("aria-pressed", "true");
   await expect(
-    page.getByRole("table", { name: "선택 기간의 Provider 상태 점수 순위" }).getByText("openai-primary"),
+    page.getByRole("table", { name: "선택 기간의 공급자 상태 점수 순위" }).getByText("openai-primary"),
   ).toBeVisible();
   await expect(page.getByText("96점", { exact: true })).toBeVisible();
-  await expect(page.locator("#main-content").getByText("Read Only", { exact: true })).toBeVisible();
-  await expect(page.getByRole("link", { name: /Legacy 상태 열기/ })).toHaveAttribute(
+  await expect(page.locator("#main-content").getByText("읽기 전용", { exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: /기존 상태 화면 열기/ })).toHaveAttribute(
     "href",
     "/admin#/routing/health",
   );
@@ -537,7 +537,7 @@ test("opens and reloads Gateway Health at a URL-backed range", async ({ page }) 
 
   await page.reload();
   await expect(page).toHaveURL(/\/app\/gateway\/health\?range=7d$/);
-  await expect(page.getByRole("heading", { name: "Gateway Health", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "게이트웨이 상태", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "7일" })).toHaveAttribute("aria-pressed", "true");
 });
 
@@ -552,14 +552,14 @@ test("restores Provider list filters, pagination, and a deep-linked dialog acros
   });
 
   await page.goto("gateway/providers?q=example&status=enabled&range=7d&page=2");
-  await expect(page.getByRole("heading", { name: "Provider", exact: true })).toBeVisible();
-  const table = page.getByRole("table", { name: "Provider 연결 설정과 운영 상태" });
+  await expect(page.getByRole("heading", { name: "공급자", exact: true })).toBeVisible();
+  const table = page.getByRole("table", { name: "공급자 연결 설정과 운영 상태" });
   await expect(table.getByRole("link", { name: "provider-11" })).toBeVisible();
-  await expect(table.getByRole("columnheader", { name: "Provider" })).toBeVisible();
+  await expect(table.getByRole("columnheader", { name: "공급자" })).toBeVisible();
   await expect(table.getByRole("columnheader", { name: "운영 상태" })).toBeVisible();
-  await expect(page.getByRole("navigation", { name: "Provider 연결 설정과 운영 상태 페이지" })).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "공급자 연결 설정과 운영 상태 페이지" })).toBeVisible();
   await expect(page.getByText("2 / 2", { exact: true })).toBeVisible();
-  await expect(page.getByRole("textbox", { name: "Provider 검색" })).toHaveValue("example");
+  await expect(page.getByRole("textbox", { name: "공급자 검색" })).toHaveValue("example");
   await expect(page.getByRole("combobox", { name: "상태", exact: true })).toHaveValue("enabled");
   await expect(page.getByRole("button", { name: "7일" })).toHaveAttribute("aria-pressed", "true");
   await table.getByRole("link", { name: "provider-11" }).click();
@@ -616,9 +616,9 @@ test("never fetches routing health for Provider without routing:read", async ({ 
   });
 
   await page.goto("gateway/providers?range=30d");
-  const table = page.getByRole("table", { name: "Provider 연결 설정과 운영 상태" });
+  const table = page.getByRole("table", { name: "공급자 연결 설정과 운영 상태" });
   await expect(table).toBeVisible();
-  await expect(table.getByText("Healthy", { exact: true })).toBeVisible();
+  await expect(table.getByText("정상", { exact: true })).toBeVisible();
   await expect(page.getByText(/SLO 평가만 표시합니다/)).toBeVisible();
   expect(routingRequests).toBe(0);
 });
@@ -628,16 +628,16 @@ test("replaces legacy short Gateway paths with only allowed query and safe hash"
 
   await page.goto("providers?team=platform#connections");
   await expect(page).toHaveURL(/\/app\/gateway\/providers#connections$/);
-  await expect(page.getByRole("heading", { name: "Provider", exact: true })).toBeVisible();
-  await expect(page.getByRole("link", { name: /Legacy에서 열기/ })).toHaveAttribute(
+  await expect(page.getByRole("heading", { name: "공급자", exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: /기존 화면에서 열기/ })).toHaveAttribute(
     "href",
     "/admin#/settings",
   );
 
   await page.goto("models?status=deprecated#pricing");
   await expect(page).toHaveURL(/\/app\/gateway\/models\?status=deprecated#pricing$/);
-  await expect(page.getByRole("heading", { name: "Models", exact: true })).toBeVisible();
-  await expect(page.getByRole("link", { name: /Legacy에서 열기/ })).toHaveAttribute(
+  await expect(page.getByRole("heading", { name: "모델", exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: /기존 화면에서 열기/ })).toHaveAttribute(
     "href",
     "/admin#/model-contracts",
   );
@@ -651,9 +651,9 @@ test("removes secret and arbitrary route query state before rendering the Provid
   await page.goto(
     "gateway/providers?q=sk-proj-private12345678&status=enabled&token=private&team=platform#token=private",
   );
-  await expect(page.getByRole("heading", { name: "Provider", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "공급자", exact: true })).toBeVisible();
   await expect(page).toHaveURL(/\/app\/gateway\/providers\?status=enabled$/);
-  const search = page.getByRole("textbox", { name: "Provider 검색" });
+  const search = page.getByRole("textbox", { name: "공급자 검색" });
   await expect(search).toBeFocused();
   await expect(search).toHaveAttribute("aria-invalid", "true");
   await expect(page.getByRole("alert")).toContainText("인증정보로 보이는 검색어");
@@ -668,20 +668,20 @@ test("opens and reloads the read-only System Health deep link", async ({ page })
   await mockGateway(page);
   await page.goto("system/health");
 
-  await expect(page.getByRole("heading", { name: "System Health", exact: true })).toBeVisible();
-  await expect(page.getByText("Preview Read Only", { exact: true })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Security posture" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "시스템 상태", exact: true })).toBeVisible();
+  await expect(page.getByText("읽기 전용 미리보기", { exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "보안 상태" })).toBeVisible();
   await expect(page.getByText("78 GiB", { exact: true })).toBeVisible();
   await expect(page.getByText("openai-primary", { exact: true })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Legacy에서 열기" })).toHaveAttribute(
+  await expect(page.getByRole("link", { name: "기존 화면에서 열기" })).toHaveAttribute(
     "href",
     "/admin#/ops-home",
   );
 
   await page.reload();
   await expect(page).toHaveURL(/\/app\/system\/health$/);
-  await expect(page.getByRole("heading", { name: "System Health", exact: true })).toBeVisible();
-  await expect(page.getByText("LOW", { exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "시스템 상태", exact: true })).toBeVisible();
+  await expect(page.getByText("낮음", { exact: true })).toBeVisible();
 });
 
 test("meets automated browser accessibility checks on every Phase 1 screen", async ({ page }) => {
@@ -690,15 +690,15 @@ test("meets automated browser accessibility checks on every Phase 1 screen", asy
   expect(await axeViolations(page)).toEqual([]);
 
   await page.goto("gateway/health");
-  await expect(page.getByRole("heading", { name: "Gateway Health", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "게이트웨이 상태", exact: true })).toBeVisible();
   expect(await axeViolations(page)).toEqual([]);
 
   await page.goto("system/health");
-  await expect(page.getByRole("heading", { name: "System Health", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "시스템 상태", exact: true })).toBeVisible();
   expect(await axeViolations(page)).toEqual([]);
 
   await page.goto("gateway/providers");
-  await expect(page.getByRole("table", { name: "Provider 연결 설정과 운영 상태" })).toBeVisible();
+  await expect(page.getByRole("table", { name: "공급자 연결 설정과 운영 상태" })).toBeVisible();
   expect(await axeViolations(page)).toEqual([]);
   await page.getByRole("link", { name: "openai-primary" }).click();
   await expect(page.getByRole("dialog", { name: "openai-primary" })).toBeVisible();
@@ -741,8 +741,8 @@ test("keeps the mobile Overview and navigation drawer stable", async ({ page }) 
   await page.getByRole("button", { name: "탐색 메뉴 열기" }).click();
   const navigation = page.getByRole("dialog", { name: "주 메뉴" });
   await expect(navigation).toBeVisible();
-  await expect(navigation.getByRole("link", { name: "Gateway Health Read Only" })).toBeVisible();
-  await expect(navigation.getByRole("link", { name: "System Health Read Only" })).toBeVisible();
+  await expect(navigation.getByRole("link", { name: "게이트웨이 상태 읽기 전용" })).toBeVisible();
+  await expect(navigation.getByRole("link", { name: "시스템 상태 읽기 전용" })).toBeVisible();
   await expect(page).toHaveScreenshot("navigation-mobile.png", {
     animations: "disabled",
     caret: "hide",

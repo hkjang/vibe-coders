@@ -1,18 +1,18 @@
 import { AlertTriangle, Clock3, RefreshCw, type LucideIcon } from "lucide-react";
 import { useEffect, useReducer, type ReactNode } from "react";
 
-import { exactTime, healthRanges, relativeTime, type HealthRange } from "@/features/health/health-utils";
+import {
+  exactTime,
+  healthRangeLabels,
+  healthRanges,
+  relativeTime,
+  type HealthRange,
+} from "@/features/health/health-utils";
 import { isAppError } from "@/shared/api/error";
 import { Badge, type BadgeProps } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
+import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
 import { usePreferences, type RefreshInterval } from "@/shared/stores/preferences";
-
-const rangeLabels: Record<HealthRange, string> = {
-  "1h": "1시간",
-  "24h": "24시간",
-  "7d": "7일",
-  "30d": "30일",
-};
 
 function useControlledRelativeClock(refreshInterval: RefreshInterval): void {
   const [, advanceClock] = useReducer((tick: number) => tick + 1, 0);
@@ -43,7 +43,7 @@ export function TimeRangePicker({
     <div className="range-picker" role="group" aria-label="조회 기간">
       {healthRanges.map((range) => (
         <button key={range} type="button" aria-pressed={range === value} onClick={() => onChange(range)}>
-          {rangeLabels[range]}
+          {healthRangeLabels[range]}
         </button>
       ))}
     </div>
@@ -93,6 +93,7 @@ export function HealthWidget({
   children,
 }: HealthWidgetProps): React.JSX.Element {
   const requestId = isAppError(error) ? error.requestId : undefined;
+  const diagnosticCode = isAppError(error) ? error.code : undefined;
   const lastUpdatedAt = updatedAt ?? 0;
   const hasPreviousData = lastUpdatedAt > 0;
   const showInitialLoading = loading && !hasPreviousData;
@@ -120,8 +121,9 @@ export function HealthWidget({
           <AlertTriangle aria-hidden="true" />
           <div>
             <strong>이 영역을 불러오지 못했습니다.</strong>
-            <p>{isAppError(error) ? error.message : "잠시 후 다시 시도해 주세요."}</p>
-            {requestId ? <code>Request ID: {requestId}</code> : null}
+            <p>{safeAppErrorMessage(error, `${title} 데이터를 확인할 수 없습니다.`)}</p>
+            {requestId ? <code>요청 ID: {requestId}</code> : null}
+            {diagnosticCode ? <code>진단 코드: {diagnosticCode}</code> : null}
           </div>
           {onRetry ? (
             <Button size="small" variant="secondary" aria-label={`${title} 재시도`} onClick={onRetry}>
@@ -135,8 +137,9 @@ export function HealthWidget({
           <AlertTriangle aria-hidden="true" />
           <div>
             <strong>새 갱신에 실패해 마지막 정상 데이터를 표시합니다.</strong>
-            <p>{isAppError(error) ? error.message : "잠시 후 다시 시도해 주세요."}</p>
-            {requestId ? <code>Request ID: {requestId}</code> : null}
+            <p>{safeAppErrorMessage(error, `${title} 데이터를 확인할 수 없습니다.`)}</p>
+            {requestId ? <code>요청 ID: {requestId}</code> : null}
+            {diagnosticCode ? <code>진단 코드: {diagnosticCode}</code> : null}
           </div>
           {onRetry ? (
             <Button size="small" variant="secondary" aria-label={`${title} 재시도`} onClick={onRetry}>

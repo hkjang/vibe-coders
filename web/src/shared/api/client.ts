@@ -288,7 +288,7 @@ export class ApiClient {
       if (externalSignal?.aborted || controller.signal.aborted) {
         throw new AppError("API 요청이 취소되었습니다.", { kind: "aborted", cause });
       }
-      throw new AppError("Gateway에 연결할 수 없습니다.", {
+      throw new AppError("게이트웨이에 연결할 수 없습니다.", {
         kind: "network",
         retryable: true,
         cause,

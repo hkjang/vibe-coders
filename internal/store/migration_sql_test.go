@@ -126,14 +126,15 @@ func TestMigrationSQLAttributesEveryStatementToATable(t *testing.T) {
 	}
 }
 
-// The list is not the whole story on Postgres: Migrate widens column types afterwards.
-// Presenting it as complete would leave an operator hunting for a REAL column that the
-// database no longer has.
-func TestMigrationSQLDisclosesPostMigrationChangesOnPostgres(t *testing.T) {
-	if len(migrationSQLFor("postgres").PostMigration) == 0 {
+// The statement list is not the whole story: both dialects retire a superseded
+// pre-release index, and PostgreSQL also widens types and gathers planner statistics.
+func TestMigrationSQLDisclosesPostMigrationChanges(t *testing.T) {
+	postgres := migrationSQLFor("postgres").PostMigration
+	if len(postgres) < 3 {
 		t.Fatal("postgres report does not mention the column widening Migrate does after the list")
 	}
-	if len(migrationSQLFor("sqlite").PostMigration) != 0 {
-		t.Fatal("sqlite report claims post-migration changes that only happen on postgres")
+	sqlite := migrationSQLFor("sqlite").PostMigration
+	if len(sqlite) != 1 || !strings.Contains(sqlite[0], "구형 커서 인덱스") {
+		t.Fatalf("sqlite report does not disclose shared cursor-index cleanup: %v", sqlite)
 	}
 }

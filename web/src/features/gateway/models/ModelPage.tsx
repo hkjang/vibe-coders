@@ -241,7 +241,7 @@ export function ModelPage(): React.JSX.Element {
         <QueryFailureNotice
           error={models.error}
           hasPreviousData={Boolean(models.data)}
-          label="Model 목록"
+          label="모델 목록"
           onRetry={() => void models.refetch()}
         />
       ) : null}
@@ -249,7 +249,7 @@ export function ModelPage(): React.JSX.Element {
         <QueryFailureNotice
           error={quality.error}
           hasPreviousData={Boolean(quality.data)}
-          label="Model 품질"
+          label="모델 품질"
           onRetry={() => void quality.refetch()}
         />
       ) : null}
@@ -257,7 +257,7 @@ export function ModelPage(): React.JSX.Element {
         <QueryFailureNotice
           error={pricing.error}
           hasPreviousData={Boolean(pricing.data)}
-          label="Model 가격"
+          label="모델 가격"
           onRetry={() => void pricing.refetch()}
         />
       ) : null}
@@ -265,7 +265,7 @@ export function ModelPage(): React.JSX.Element {
         <QueryFailureNotice
           error={tags.error}
           hasPreviousData={Boolean(tags.data)}
-          label="Model 사용 지침"
+          label="모델 사용 지침"
           onRetry={() => void tags.refetch()}
         />
       ) : null}

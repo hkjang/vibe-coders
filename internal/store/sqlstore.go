@@ -192,6 +192,9 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 			return err
 		}
 	}
+	if _, err := s.db.ExecContext(ctx, supersededAppRequestCursorDropSQL(s.dialect)); err != nil {
+		return fmt.Errorf("drop superseded app request cursor index: %w", err)
+	}
 	if err := s.syncXViewIngestClock(ctx); err != nil {
 		return err
 	}
@@ -202,10 +205,82 @@ func (s *SQLStore) Migrate(ctx context.Context) error {
 		if err := s.widenPostgresCounterColumns(ctx); err != nil {
 			return err
 		}
+		if err := s.ensurePostgresAppRequestPlannerStats(ctx); err != nil {
+			return err
+		}
 	}
 	// Recorded after the schema exists and only on the first run, so an existing database
 	// does not claim its day totals cover traffic from before they were being kept.
 	return s.markUsageRollupStarted(ctx)
+}
+
+func supersededAppRequestCursorDropSQL(dialect string) string {
+	if dialect == "postgres" {
+		return `DROP INDEX CONCURRENTLY IF EXISTS idx_request_logs_app_cursor`
+	}
+	return `DROP INDEX IF EXISTS idx_request_logs_app_cursor`
+}
+
+// ensurePostgresAppRequestPlannerStats runs ANALYZE only when the expression
+// statistics introduced for the React request explorer have no samples yet.
+// PostgreSQL otherwise estimates the defensive request/API-key length guards
+// as only a handful of rows and can choose a broad scan plus sort. Existing
+// installations pay this cost once; normal autovacuum/analyze maintains the
+// statistics afterwards.
+func (s *SQLStore) ensurePostgresAppRequestPlannerStats(ctx context.Context) error {
+	const (
+		indexName             = "idx_request_logs_app_valid_cursor"
+		requestStatisticsName = "app_request_guard_stats_v2"
+		keyStatisticsName     = "app_request_key_guard_stats_v1"
+	)
+	// Version the statistics object instead of changing the definition behind
+	// IF NOT EXISTS. PostgreSQL keeps the old definition on upgraded databases,
+	// which would leave api_key_id selectivity unknown for team-scoped pages.
+	if _, err := s.db.ExecContext(ctx, `CREATE STATISTICS IF NOT EXISTS app_request_guard_stats_v2
+		ON (length(CAST(id AS BYTEA))), (length(created_at)),
+			(length(CAST(api_key_id AS BYTEA))) FROM request_logs`); err != nil {
+		return fmt.Errorf("create app request guard statistics: %w", err)
+	}
+	if _, err := s.db.ExecContext(ctx, `CREATE STATISTICS IF NOT EXISTS app_request_key_guard_stats_v1
+		ON (length(CAST(id AS BYTEA))), (length(CAST(team AS BYTEA))) FROM api_keys`); err != nil {
+		return fmt.Errorf("create app request API-key guard statistics: %w", err)
+	}
+	var indexReady bool
+	var requestGuardExpressions int
+	var keyGuardExpressions int
+	if err := s.db.QueryRowContext(ctx, `SELECT
+		EXISTS (
+			SELECT 1 FROM pg_stats
+			WHERE schemaname = current_schema() AND tablename = $1
+				AND n_distinct IS NOT NULL
+		),
+		(
+			SELECT COUNT(*) FROM pg_stats_ext_exprs
+			WHERE schemaname = current_schema()
+				AND statistics_schemaname = current_schema() AND statistics_name = $2
+				AND n_distinct IS NOT NULL
+		),
+		(
+			SELECT COUNT(*) FROM pg_stats_ext_exprs
+			WHERE schemaname = current_schema()
+				AND statistics_schemaname = current_schema() AND statistics_name = $3
+				AND n_distinct IS NOT NULL
+		)`, indexName, requestStatisticsName, keyStatisticsName).Scan(
+		&indexReady, &requestGuardExpressions, &keyGuardExpressions,
+	); err != nil {
+		return fmt.Errorf("inspect app request planner statistics: %w", err)
+	}
+	if !indexReady || requestGuardExpressions != 3 {
+		if _, err := s.db.ExecContext(ctx, `ANALYZE request_logs`); err != nil {
+			return fmt.Errorf("analyze request_logs for app cursor: %w", err)
+		}
+	}
+	if keyGuardExpressions != 2 {
+		if _, err := s.db.ExecContext(ctx, `ANALYZE api_keys`); err != nil {
+			return fmt.Errorf("analyze api_keys for app cursor: %w", err)
+		}
+	}
+	return nil
 }
 
 // A cancelled or crashed CREATE INDEX CONCURRENTLY can leave an index with the requested
@@ -274,7 +349,7 @@ func renderForDialect(statement, dialect string) string {
 	// These indexes are introduced on high-write observability tables. PostgreSQL's
 	// ordinary CREATE INDEX blocks writers for the duration of the build; each migration
 	// statement runs outside an explicit transaction, so the concurrent form is safe here.
-	if strings.Contains(out, "idx_request_logs_ingested_cursor") || strings.Contains(out, "idx_request_logs_xview_legacy") || strings.Contains(out, "idx_request_logs_xview_team_cursor") || strings.Contains(out, "idx_secret_events_request") {
+	if strings.Contains(out, "idx_api_keys_team_id") || strings.Contains(out, "idx_request_logs_ingested_cursor") || strings.Contains(out, "idx_request_logs_xview_legacy") || strings.Contains(out, "idx_request_logs_xview_team_cursor") || strings.Contains(out, "idx_request_logs_app_valid_cursor") || strings.Contains(out, "idx_request_logs_app_team_valid_cursor") || strings.Contains(out, "idx_token_usage_request_latest") || strings.Contains(out, "idx_response_logs_request_latest") || strings.Contains(out, "idx_secret_events_request") {
 		out = strings.Replace(out, "CREATE INDEX IF NOT EXISTS", "CREATE INDEX CONCURRENTLY IF NOT EXISTS", 1)
 	}
 	return out
@@ -307,6 +382,7 @@ func migrationStatements() []string {
 		`ALTER TABLE api_keys ADD COLUMN budget_limit_krw REAL NOT NULL DEFAULT 0`,
 		`ALTER TABLE api_keys ADD COLUMN expires_at TEXT`,
 		`ALTER TABLE api_keys ADD COLUMN revoked_at TEXT`,
+		`CREATE INDEX IF NOT EXISTS idx_api_keys_team_id ON api_keys(team, id) WHERE ` + appRequestBoundedTextPredicate("team") + ` AND ` + appRequestBoundedTextPredicate("id"),
 		`CREATE TABLE IF NOT EXISTS users (
 			id TEXT PRIMARY KEY,
 			email TEXT NOT NULL UNIQUE,
@@ -477,6 +553,8 @@ func migrationStatements() []string {
 		`CREATE INDEX IF NOT EXISTS idx_request_logs_project ON request_logs(project)`,
 		`CREATE INDEX IF NOT EXISTS idx_request_logs_cost_center ON request_logs(cost_center)`,
 		`CREATE INDEX IF NOT EXISTS idx_request_logs_created_at ON request_logs(created_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_request_logs_app_valid_cursor ON request_logs(` + appRequestCreatedAtExpr("created_at") + `, id) WHERE ` + appRequestValidRowPredicate("id", "created_at"),
+		`CREATE INDEX IF NOT EXISTS idx_request_logs_app_team_valid_cursor ON request_logs(api_key_id, ` + appRequestCreatedAtExpr("created_at") + `, id) WHERE ` + appRequestValidRowPredicate("id", "created_at") + ` AND ` + appRequestBoundedTextPredicate("api_key_id"),
 		`CREATE INDEX IF NOT EXISTS idx_request_logs_ingested_cursor ON request_logs(ingested_at, id)`,
 		`CREATE INDEX IF NOT EXISTS idx_request_logs_xview_legacy ON request_logs(ingested_at, created_at DESC, id DESC) WHERE ingested_at = ''`,
 		`CREATE INDEX IF NOT EXISTS idx_request_logs_xview_team_cursor ON request_logs(api_key_id, created_at, ingested_at, id)`,
@@ -548,6 +626,7 @@ func migrationStatements() []string {
 		`ALTER TABLE token_usage ADD COLUMN cached_tokens INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE token_usage ADD COLUMN reasoning_tokens INTEGER NOT NULL DEFAULT 0`,
 		`CREATE INDEX IF NOT EXISTS idx_token_usage_request_id ON token_usage(request_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_token_usage_request_latest ON token_usage(request_id, ` + appRequestCreatedAtExpr("created_at") + `, id) WHERE ` + appRequestValidChildPredicate("request_id", "id", "created_at"),
 		`CREATE TABLE IF NOT EXISTS language_stats (
 			id TEXT PRIMARY KEY,
 			request_id TEXT NOT NULL,
@@ -2238,6 +2317,7 @@ func migrationStatements() []string {
 		// so every purge run scanned them end to end — on tables that gain a row per
 		// request and are among the largest in a long-lived deployment.
 		`CREATE INDEX IF NOT EXISTS idx_response_logs_request_id ON response_logs(request_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_response_logs_request_latest ON response_logs(request_id, ` + appRequestCreatedAtExpr("created_at") + `, id) WHERE ` + appRequestValidChildPredicate("request_id", "id", "created_at"),
 		`CREATE INDEX IF NOT EXISTS idx_language_stats_request_id ON language_stats(request_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_domain_routing_decisions_request_id ON domain_routing_decisions(request_id)`,
 

@@ -6,11 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"path"
 	"strings"
 	"time"
+	"unicode"
 
 	"vibe-coders/internal/audit"
 	"vibe-coders/internal/store"
@@ -32,6 +34,13 @@ const (
 	keycloakCallbackErrorExchangeEntropy = "session_exchange_generation_failed"
 	keycloakCallbackErrorExchangePersist = "session_exchange_initialization_failed"
 	keycloakCallbackErrorUnexpected      = "sso_callback_failed"
+
+	keycloakProvisioningStageClaimValidation    = "claim_validation"
+	keycloakProvisioningStageRoleMapping        = "role_mapping"
+	keycloakProvisioningStageTeamResolution     = "team_resolution"
+	keycloakProvisioningStageIdentityLookup     = "identity_lookup"
+	keycloakProvisioningStageAccountLookup      = "account_lookup"
+	keycloakProvisioningStageAccountPersistence = "account_provisioning"
 )
 
 // stableKeycloakCallbackErrorCode is an exhaustive boundary between internal/IdP
@@ -220,9 +229,14 @@ func (s *Server) handleKeycloakCallback(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	returnTo := "/admin"
+	provisioningStage := ""
 	fail := func(code string) {
 		code = stableKeycloakCallbackErrorCode(code)
-		s.auditAuthEvent(r.Context(), "sso_login_failed", "", "", "", "keycloak code="+code)
+		detail := "keycloak code=" + code
+		if code == keycloakCallbackErrorProvisioning && provisioningStage != "" {
+			detail += " stage=" + provisioningStage
+		}
+		s.auditAuthEvent(r.Context(), "sso_login_failed", "", "", "", detail)
 		fragment := url.Values{}
 		fragment.Set("kc_error", code)
 		http.Redirect(w, r, returnTo+"#"+fragment.Encode(), http.StatusFound)
@@ -277,6 +291,10 @@ func (s *Server) handleKeycloakCallback(w http.ResponseWriter, r *http.Request) 
 	}
 	user, team, err := s.provisionKeycloakUser(r.Context(), claims)
 	if err != nil {
+		provisioningStage = stableKeycloakProvisioningStage(err)
+		// The cause can include SQL driver text or claim-derived PII, so only the bounded
+		// stage is emitted. Browser and audit error codes remain stable and non-sensitive.
+		slog.Warn("Keycloak user provisioning failed", "stage", provisioningStage)
 		fail(keycloakCallbackErrorProvisioning)
 		return
 	}
@@ -411,111 +429,189 @@ type keycloakError struct{ msg string }
 
 func (e *keycloakError) Error() string { return e.msg }
 
+type keycloakProvisioningError struct {
+	stage string
+	cause error
+}
+
+func (e *keycloakProvisioningError) Error() string { return e.cause.Error() }
+func (e *keycloakProvisioningError) Unwrap() error { return e.cause }
+
+func keycloakProvisioningFailure(stage string, cause error) error {
+	return &keycloakProvisioningError{stage: stage, cause: cause}
+}
+
+func stableKeycloakProvisioningStage(err error) string {
+	var provisioningErr *keycloakProvisioningError
+	if !errors.As(err, &provisioningErr) {
+		return keycloakProvisioningStageAccountPersistence
+	}
+	switch provisioningErr.stage {
+	case keycloakProvisioningStageClaimValidation,
+		keycloakProvisioningStageRoleMapping,
+		keycloakProvisioningStageTeamResolution,
+		keycloakProvisioningStageIdentityLookup,
+		keycloakProvisioningStageAccountLookup,
+		keycloakProvisioningStageAccountPersistence:
+		return provisioningErr.stage
+	default:
+		return keycloakProvisioningStageAccountPersistence
+	}
+}
+
 // provisionKeycloakUser resolves (or creates) the internal user for a verified ID token,
 // syncing role and team from claims. Returns the user and resolved team id.
 func (s *Server) provisionKeycloakUser(ctx context.Context, claims map[string]any) (store.AuthUser, string, error) {
 	kc := s.keycloakConfig()
 	sub := strClaim(claims, "sub")
-	email := strClaim(claims, "email")
-	name := firstNonEmpty(strClaim(claims, "name"), strClaim(claims, "preferred_username"), email)
-	username := strClaim(claims, "preferred_username")
-	if sub == "" {
-		return store.AuthUser{}, "", &keycloakError{"id_token missing sub"}
+	claimedEmail := strClaim(claims, "email")
+	username := strings.TrimSpace(strClaim(claims, "preferred_username"))
+	// OIDC subject identifiers are exact and case-sensitive. Normalizing one here could
+	// merge two identities (for example "user" and "user ") into the same account.
+	if !keycloakExactClaimValue(sub, 255) {
+		return store.AuthUser{}, "", keycloakProvisioningFailure(keycloakProvisioningStageClaimValidation, &keycloakError{"id_token missing sub"})
 	}
-	if email != "" {
-		verified, ok := claims["email_verified"].(bool)
-		if !ok || !verified {
-			return store.AuthUser{}, "", &keycloakError{"id_token email is not verified"}
-		}
+	// An email is account-linking material only when the IdP explicitly marks it verified.
+	// Missing/false email_verified must not block subject-based SSO; it simply disables the
+	// email-link shortcut and uses an opaque internal address for a new SSO-only user.
+	verifiedEmail := ""
+	if verified, ok := claims["email_verified"].(bool); ok && verified && keycloakEmailSafeForLinking(claimedEmail) {
+		verifiedEmail = claimedEmail
 	}
 	role, _ := resolveKeycloakRoleExplicit(s.effectiveKeycloakRoleMap(), s.keycloakRolesFromClaims(claims), kc.DefaultRole)
 	if role == "" {
-		return store.AuthUser{}, "", &keycloakError{"no role mapping matched and no default role — login blocked"}
+		return store.AuthUser{}, "", keycloakProvisioningFailure(keycloakProvisioningStageRoleMapping, &keycloakError{"no role mapping matched and no default role — login blocked"})
 	}
-	team := keycloakTeamFromGroups(claimStrings(claims, kc.GroupClaim))
 
 	// 1) Existing linked identity → load + sync IdP-owned role and team. Falling back
 	// to a prior local role/team when a claim disappears would preserve privileges after
 	// an administrator revoked them in Keycloak.
 	id, linked, err := s.db.AuthIdentityBySubject(ctx, "keycloak", kc.IssuerURL, sub)
 	if err != nil {
-		return store.AuthUser{}, "", err
+		return store.AuthUser{}, "", keycloakProvisioningFailure(keycloakProvisioningStageIdentityLookup, err)
+	}
+	team, err := s.resolveKeycloakTeam(ctx, keycloakTeamFromGroups(claimStrings(claims, kc.GroupClaim)))
+	if err != nil {
+		return store.AuthUser{}, "", keycloakProvisioningFailure(keycloakProvisioningStageTeamResolution, err)
 	}
 	if linked {
 		user, found, err := s.db.AuthUserByID(ctx, id.UserID)
 		if err != nil {
-			return store.AuthUser{}, "", err
+			return store.AuthUser{}, "", keycloakProvisioningFailure(keycloakProvisioningStageAccountLookup, err)
 		}
 		if !found {
-			return store.AuthUser{}, "", &keycloakError{"linked SSO user no longer exists"}
-		}
-		if err := s.db.UpdateAuthUserRoleStatus(ctx, user.ID, role, "active"); err != nil {
-			return store.AuthUser{}, "", err
+			return store.AuthUser{}, "", keycloakProvisioningFailure(keycloakProvisioningStageAccountLookup, &keycloakError{"linked SSO user no longer exists"})
 		}
 		user.Role, user.Status = role, "active"
-		if err := s.finishKeycloakLink(ctx, user.ID, sub, email, username, team); err != nil {
-			return store.AuthUser{}, "", err
+		identityEmail := firstNonEmpty(verifiedEmail, id.Email)
+		if err := s.finishKeycloakLink(ctx, user, false, sub, identityEmail, username, team); err != nil {
+			return store.AuthUser{}, "", keycloakProvisioningFailure(keycloakProvisioningStageAccountPersistence, err)
 		}
 		return user, team, nil
 	}
+
+	userID := "usr_" + audit.HashText("keycloak|" + kc.IssuerURL + "|" + sub)[:16]
+	// Recover accounts left by older non-atomic provisioning. The deterministic ID proves
+	// which issuer+subject attempted the creation; only an active SSO-only account is safe
+	// to finish linking automatically.
+	if user, found, err := s.db.AuthUserByID(ctx, userID); err != nil {
+		return store.AuthUser{}, "", keycloakProvisioningFailure(keycloakProvisioningStageAccountLookup, err)
+	} else if found {
+		if user.PasswordHash != "" || user.Status != "active" {
+			return store.AuthUser{}, "", keycloakProvisioningFailure(keycloakProvisioningStageAccountPersistence, &keycloakError{"deterministic SSO user id is unavailable"})
+		}
+		user.Role, user.Status = role, "active"
+		if err := s.finishKeycloakLink(ctx, user, false, sub, verifiedEmail, username, team); err != nil {
+			return store.AuthUser{}, "", keycloakProvisioningFailure(keycloakProvisioningStageAccountPersistence, err)
+		}
+		return user, team, nil
+	}
+
 	// 2) Existing SSO-only, non-privileged user with the same verified email may be
 	// linked. Local-password and privileged accounts require an explicit administrator
-	// linking workflow; silently joining either by email would turn a weak/self-service
-	// IdP realm into an account-takeover path.
-	if email != "" {
-		user, found, err := s.db.AuthUserByEmail(ctx, email)
+	// linking workflow. Until that workflow exists, provision a separate SSO-only account
+	// instead of either taking over the local account or permanently blocking SSO.
+	emailConflict := false
+	if verifiedEmail != "" {
+		user, found, err := s.db.AuthUserByEmail(ctx, verifiedEmail)
 		if err != nil {
-			return store.AuthUser{}, "", err
+			return store.AuthUser{}, "", keycloakProvisioningFailure(keycloakProvisioningStageAccountLookup, err)
 		}
 		if found {
 			if user.PasswordHash != "" || user.Status != "active" || roleRank(user.Role) >= 3 || user.Role == "readonly_admin" || user.Role == "service_account" {
-				return store.AuthUser{}, "", &keycloakError{"existing local, inactive, or privileged account requires explicit SSO linking"}
+				emailConflict = true
+			} else {
+				user.Role, user.Status = role, "active"
+				if err := s.finishKeycloakLink(ctx, user, false, sub, verifiedEmail, username, team); err != nil {
+					return store.AuthUser{}, "", keycloakProvisioningFailure(keycloakProvisioningStageAccountPersistence, err)
+				}
+				return user, team, nil
 			}
-			if err := s.db.UpdateAuthUserRoleStatus(ctx, user.ID, role, "active"); err != nil {
-				return store.AuthUser{}, "", err
-			}
-			user.Role, user.Status = role, "active"
-			if err := s.finishKeycloakLink(ctx, user.ID, sub, email, username, team); err != nil {
-				return store.AuthUser{}, "", err
-			}
-			return user, team, nil
 		}
 	}
 	// 3) New user.
+	internalEmail := verifiedEmail
+	if internalEmail == "" || emailConflict {
+		internalEmail = keycloakSyntheticEmail(kc.IssuerURL, sub)
+	}
+	name := firstNonEmpty(strings.TrimSpace(strClaim(claims, "name")), username, verifiedEmail, "SSO 사용자")
 	user := store.AuthUser{
-		ID:           "usr_" + audit.HashText("keycloak|" + kc.IssuerURL + "|" + sub)[:16],
-		Email:        firstNonEmpty(email, sub+"@sso.local"),
+		ID:           userID,
+		Email:        internalEmail,
 		PasswordHash: "", // SSO-only account (no local password)
 		Name:         name,
 		Role:         role,
 		Status:       "active",
 	}
-	if err := s.db.CreateAuthUser(ctx, user); err != nil {
-		return store.AuthUser{}, "", err
-	}
-	if err := s.finishKeycloakLink(ctx, user.ID, sub, email, username, team); err != nil {
-		return store.AuthUser{}, "", err
+	if err := s.finishKeycloakLink(ctx, user, true, sub, verifiedEmail, username, team); err != nil {
+		// Concurrent callbacks for the same issuer+subject derive the same user ID. If
+		// another transaction committed first, reuse that exact SSO-only account instead
+		// of turning the harmless uniqueness race into user_provisioning_failed.
+		if racedIdentity, found, lookupErr := s.db.AuthIdentityBySubject(ctx, "keycloak", kc.IssuerURL, sub); lookupErr == nil && found && racedIdentity.UserID == userID {
+			if persisted, userFound, userErr := s.db.AuthUserByID(ctx, userID); userErr == nil && userFound && persisted.PasswordHash == "" && persisted.Status == "active" {
+				persisted.Role = role
+				identityEmail := firstNonEmpty(verifiedEmail, racedIdentity.Email)
+				if retryErr := s.finishKeycloakLink(ctx, persisted, false, sub, identityEmail, username, team); retryErr == nil {
+					return persisted, team, nil
+				}
+			}
+		}
+		return store.AuthUser{}, "", keycloakProvisioningFailure(keycloakProvisioningStageAccountPersistence, err)
 	}
 	return user, team, nil
 }
 
-// finishKeycloakLink persists the identity and its IdP-owned team membership.
-func (s *Server) finishKeycloakLink(ctx context.Context, userID, sub, email, username, team string) error {
-	if err := s.db.UpsertAuthIdentity(ctx, store.AuthIdentity{
-		ID: newID("authid"), UserID: userID, Provider: "keycloak", Issuer: s.keycloakConfig().IssuerURL,
+func keycloakSyntheticEmail(issuer, sub string) string {
+	return "sso-" + audit.HashText("keycloak-email|" + issuer + "|" + sub)[:24] + "@sso.local"
+}
+
+func keycloakEmailSafeForLinking(email string) bool {
+	return email != "" && len(email) <= 320 && strings.TrimSpace(email) == email &&
+		strings.Count(email, "@") == 1 && !strings.HasPrefix(email, "@") && !strings.HasSuffix(email, "@") &&
+		strings.IndexFunc(email, func(r rune) bool { return unicode.IsControl(r) || unicode.IsSpace(r) }) < 0
+}
+
+// resolveKeycloakTeam maps the group segment to the canonical team ID. Admin-created teams
+// commonly have an opaque ID (team_<hash>) and a human name that matches the Keycloak group;
+// inserting name-as-ID in that case violates teams.name UNIQUE on both SQLite and Postgres.
+func (s *Server) resolveKeycloakTeam(ctx context.Context, candidate string) (string, error) {
+	if candidate == "" {
+		return "", nil
+	}
+	team, err := s.db.ResolveOrCreateAuthTeam(ctx, candidate)
+	if err != nil {
+		return "", err
+	}
+	return team.ID, nil
+}
+
+// finishKeycloakLink atomically persists the user, external identity, and IdP-owned team
+// membership so a constraint failure cannot leave a half-provisioned account behind.
+func (s *Server) finishKeycloakLink(ctx context.Context, user store.AuthUser, createUser bool, sub, email, username, team string) error {
+	return s.db.ProvisionAuthIdentity(ctx, user, createUser, store.AuthIdentity{
+		ID: newID("authid"), UserID: user.ID, Provider: "keycloak", Issuer: s.keycloakConfig().IssuerURL,
 		Subject: sub, Email: email, PreferredUsername: username,
-	}); err != nil {
-		return err
-	}
-	if team != "" {
-		// Group → team auto-create: ensure the team row exists before linking membership.
-		if err := s.db.UpsertAuthTeam(ctx, store.AuthTeam{ID: team, Name: team}); err != nil {
-			return err
-		}
-	}
-	// Keycloak owns the membership for a linked identity; an empty claim removes
-	// prior memberships so group revocation takes effect on the next login.
-	return s.db.SetUserTeam(ctx, userID, team, "")
+	}, team)
 }
 
 // backchannelLogoutEvent reports whether a logout_token's `events` claim contains the

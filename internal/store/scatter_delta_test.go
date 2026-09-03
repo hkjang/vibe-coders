@@ -548,7 +548,7 @@ func TestRequestLogIngestionUsesFixedWidthMonotonicClockAndIndexes(t *testing.T)
 func TestPostgresXViewIndexesAreBuiltWithoutBlockingWriters(t *testing.T) {
 	checked := 0
 	for _, statement := range migrationStatements() {
-		if !strings.Contains(statement, "idx_request_logs_ingested_cursor") && !strings.Contains(statement, "idx_request_logs_xview_legacy") && !strings.Contains(statement, "idx_request_logs_xview_team_cursor") && !strings.Contains(statement, "idx_secret_events_request") {
+		if !strings.Contains(statement, "idx_api_keys_team_id") && !strings.Contains(statement, "idx_request_logs_ingested_cursor") && !strings.Contains(statement, "idx_request_logs_xview_legacy") && !strings.Contains(statement, "idx_request_logs_xview_team_cursor") && !strings.Contains(statement, "idx_request_logs_app_valid_cursor") && !strings.Contains(statement, "idx_request_logs_app_team_valid_cursor") && !strings.Contains(statement, "idx_token_usage_request_latest") && !strings.Contains(statement, "idx_response_logs_request_latest") && !strings.Contains(statement, "idx_secret_events_request") {
 			continue
 		}
 		rendered := renderForDialect(statement, "postgres")
@@ -560,7 +560,14 @@ func TestPostgresXViewIndexesAreBuiltWithoutBlockingWriters(t *testing.T) {
 		}
 		checked++
 	}
-	if checked != 4 {
-		t.Fatalf("checked %d XView indexes, want 4", checked)
+	if checked != 9 {
+		t.Fatalf("checked %d high-write indexes, want 9", checked)
+	}
+
+	if statement := supersededAppRequestCursorDropSQL("postgres"); !strings.Contains(statement, "DROP INDEX CONCURRENTLY IF EXISTS") {
+		t.Fatalf("superseded PostgreSQL app cursor index is not dropped concurrently: %s", statement)
+	}
+	if statement := supersededAppRequestCursorDropSQL("sqlite"); strings.Contains(statement, "CONCURRENTLY") {
+		t.Fatalf("superseded SQLite app cursor index uses PostgreSQL syntax: %s", statement)
 	}
 }

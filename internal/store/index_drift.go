@@ -178,6 +178,17 @@ func normalizeIndexColumn(raw string) string {
 	if fields := strings.Fields(s); len(fields) == 2 && strings.HasSuffix(fields[1], "_ops") {
 		s = fields[0]
 	}
+	// Expressions are not identifiers. Passing one through normalizeIdent would
+	// mistake a dot inside a string literal (for example the RFC3339 fraction
+	// separator) for a schema qualifier and discard most of the expression.
+	// PostgreSQL annotates text literals in reconstructed expression indexes with
+	// ::text while SQLite preserves the submitted SQL. Removing only that implicit
+	// cast plus insignificant whitespace makes the same portable expression compare
+	// equally without hiding changed operators or literals.
+	if strings.Contains(s, "(") {
+		s = strings.ReplaceAll(s, "::text", "")
+		return strings.Join(strings.Fields(s), "")
+	}
 	return normalizeIdent(s)
 }
 

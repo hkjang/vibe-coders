@@ -1,6 +1,13 @@
 export const healthRanges = ["1h", "24h", "7d", "30d"] as const;
 export type HealthRange = (typeof healthRanges)[number];
 
+export const healthRangeLabels: Record<HealthRange, string> = {
+  "1h": "1시간",
+  "24h": "24시간",
+  "7d": "7일",
+  "30d": "30일",
+};
+
 export function isHealthRange(value: string | null): value is HealthRange {
   return value !== null && healthRanges.some((candidate) => candidate === value);
 }

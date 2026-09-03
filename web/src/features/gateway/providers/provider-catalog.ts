@@ -29,7 +29,7 @@ export function isProviderStatusFilter(value: string | null): value is ProviderS
   return value !== null && providerStatusFilters.some((candidate) => candidate === value);
 }
 
-export const invalidProviderURLDisplay = "Provider URL을 안전하게 표시할 수 없습니다.";
+export const invalidProviderURLDisplay = "공급자 URL을 안전하게 표시할 수 없습니다.";
 
 function parseProviderURL(value: string): URL | undefined {
   const trimmed = value.trim();
@@ -82,7 +82,7 @@ export function buildProviderRows(
 
   return providers.map((provider) => {
     const nameRedacted = !isSafeLegacyProviderName(provider.name);
-    const displayName = displayLabels.get(provider.provider_ref) ?? "Provider 확인 불가";
+    const displayName = displayLabels.get(provider.provider_ref) ?? "공급자 확인 불가";
     const evaluation = evaluationByProvider.get(provider.provider_ref);
     const providerSlo = sloByProvider.get(provider.provider_ref);
     const routingHealth = routingByProvider.get(provider.provider_ref);

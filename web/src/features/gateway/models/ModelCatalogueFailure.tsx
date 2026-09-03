@@ -3,6 +3,7 @@ import { AlertTriangle, RefreshCw } from "lucide-react";
 import type { AdminModelPartialFailure } from "@/shared/api/schemas";
 import { providerDisplayLabel } from "@/shared/api/provider-ref";
 import { Button } from "@/shared/components/ui/Button";
+import { operationalMessage } from "@/shared/errors/operational-messages";
 
 interface ModelCatalogueFailureProps {
   failures: readonly AdminModelPartialFailure[];
@@ -26,25 +27,25 @@ export function ModelCatalogueFailure({
       <div>
         <strong>
           {stale
-            ? "Provider 갱신에 실패해 마지막 정상 Model을 표시합니다."
-            : "Provider Model 카탈로그를 확인할 수 없습니다."}
+            ? "공급자 갱신에 실패해 마지막 정상 모델을 표시합니다."
+            : "공급자 모델 카탈로그를 확인할 수 없습니다."}
         </strong>
         <ul>
           {failures.map((failure) => (
             <li key={`${failure.provider_ref}-${failure.code}`}>
               {failure.provider ? `${providerDisplayLabel(failure.provider, failure.provider_ref)} · ` : ""}
-              {failure.message} ({failure.code})
+              {operationalMessage(failure.code, "모델 카탈로그 일부를 확인할 수 없습니다.")} ({failure.code})
             </li>
           ))}
         </ul>
-        {requestId ? <code>Request ID: {requestId}</code> : null}
+        {requestId ? <code>요청 ID: {requestId}</code> : null}
       </div>
       <Button
         size="small"
         variant="secondary"
         onClick={onRetry}
         disabled={fetching}
-        aria-label="Model 카탈로그 상세 재시도"
+        aria-label="모델 카탈로그 상세 재시도"
       >
         <RefreshCw aria-hidden="true" /> {fetching ? "갱신 중" : "재시도"}
       </Button>

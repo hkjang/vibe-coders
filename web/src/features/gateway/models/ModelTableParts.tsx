@@ -3,13 +3,14 @@ import { useMemo } from "react";
 import { Link } from "react-router";
 
 import { modelRowKey, type ModelCatalogRow } from "@/features/gateway/models/model-catalog";
-import { modelStatusPresentation } from "@/features/gateway/models/model-presentation";
+import { modelSourceLabels, modelStatusPresentation } from "@/features/gateway/models/model-presentation";
 import { formatInteger, formatKRW, formatPercent } from "@/features/health/health-utils";
 import { UpdatedTime } from "@/features/health/health-ui";
 import { Badge } from "@/shared/components/ui/Badge";
 import { providerDisplayLabel } from "@/shared/api/provider-ref";
 import { createDataTableColumnHelper, type DataTableColumn } from "@/shared/data-table/columns";
 import { DataTable } from "@/shared/data-table/DataTable";
+import { operationalMessage } from "@/shared/errors/operational-messages";
 
 function StatusBadges({ row }: { row: ModelCatalogRow }): React.JSX.Element {
   const { status } = row;
@@ -37,7 +38,7 @@ function createModelColumns(
   return column.columns([
     column.accessor((row) => row.model.id, {
       id: "model",
-      header: "Model",
+      header: "모델",
       cell: ({ row }) => {
         const key = modelRowKey(row.original.model);
         return (
@@ -56,11 +57,11 @@ function createModelColumns(
     }),
     column.accessor((row) => row.providerLabel, {
       id: "provider",
-      header: "Provider",
+      header: "공급자",
       cell: ({ getValue, row }) => (
         <div className="model-provider-cell">
           <strong>{getValue()}</strong>
-          <span>{row.original.model.source.replace("_", " ")}</span>
+          <span>{modelSourceLabels[row.original.model.source]}</span>
         </div>
       ),
     }),
@@ -91,7 +92,7 @@ function createModelColumns(
     }),
     column.accessor((row) => row.price?.input_krw_per_1m, {
       id: "input-price",
-      header: "Input / 1M",
+      header: "입력 / 100만 토큰",
       cell: ({ getValue }) => {
         const value = getValue();
         return value === undefined ? (enrichmentLoading.pricing ? "확인 중" : "-") : formatKRW(value);
@@ -99,7 +100,7 @@ function createModelColumns(
     }),
     column.accessor((row) => row.price?.output_krw_per_1m, {
       id: "output-price",
-      header: "Output / 1M",
+      header: "출력 / 100만 토큰",
       cell: ({ getValue }) => {
         const value = getValue();
         return value === undefined ? (enrichmentLoading.pricing ? "확인 중" : "-") : formatKRW(value);
@@ -107,7 +108,7 @@ function createModelColumns(
     }),
     column.accessor((row) => row.tag?.good_for, {
       id: "good-for",
-      header: "Good for",
+      header: "적합한 용도",
       cell: ({ getValue }) => (
         <span className="model-tag-summary">{getValue() || (enrichmentLoading.tags ? "확인 중" : "-")}</span>
       ),
@@ -156,13 +157,13 @@ export function ModelTable({
     <section className="model-list-section" aria-labelledby="model-list-title">
       <header>
         <div>
-          <h2 id="model-list-title">Model 목록</h2>
+          <h2 id="model-list-title">모델 목록</h2>
           <p>
             {catalogueAvailable
-              ? `${formatInteger(filteredRowCount)}개 결과 · Provider와 Model ID 기준으로 표시합니다.`
+              ? `${formatInteger(filteredRowCount)}개 결과 · 공급자와 모델 ID 기준으로 표시합니다.`
               : modelUnavailable
-                ? "Model 목록을 불러올 수 없습니다."
-                : "Model 목록을 불러오는 중입니다."}
+                ? "모델 목록을 불러올 수 없습니다."
+                : "모델 목록을 불러오는 중입니다."}
           </p>
         </div>
         {updatedAt > 0 ? <UpdatedTime timestamp={updatedAt} /> : null}
@@ -170,20 +171,20 @@ export function ModelTable({
       {modelUnavailable ? (
         <div className="model-list-unavailable">
           <Boxes aria-hidden="true" />
-          <strong>마지막 정상 Model 목록이 없습니다.</strong>
-          <span>위 오류의 Request ID를 확인하고 목록 조회를 다시 시도하세요.</span>
+          <strong>마지막 정상 모델 목록이 없습니다.</strong>
+          <span>위 오류의 요청 ID를 확인하고 목록 조회를 다시 시도하세요.</span>
         </div>
       ) : (
         <DataTable
-          caption="Provider별 Model 상태, 품질과 가격"
+          caption="공급자별 모델 상태, 품질과 가격"
           columns={columns}
           data={rows}
           emptyMessage={
             allRowCount === 0
-              ? "조회 가능한 Model이 없습니다. Provider 연결과 Model route를 확인하세요."
-              : "검색 및 필터 조건에 맞는 Model이 없습니다."
+              ? "조회 가능한 모델이 없습니다. 공급자 연결과 모델 라우트를 확인하세요."
+              : "검색 및 필터 조건에 맞는 모델이 없습니다."
           }
-          getRowActionLabel={(row) => `${row.providerLabel} ${row.model.id} Model 상세 열기`}
+          getRowActionLabel={(row) => `${row.providerLabel} ${row.model.id} 모델 상세 열기`}
           getRowId={(row) => modelRowKey(row.model)}
           loading={loading}
           onPageChange={onPageChange}
@@ -208,16 +209,16 @@ export function ModelPartialFailureNotice({
     <div className="model-partial-warning" role="alert">
       <TriangleAlert aria-hidden="true" />
       <div>
-        <strong>일부 Provider의 Model 목록을 갱신하지 못했습니다.</strong>
+        <strong>일부 공급자의 모델 목록을 갱신하지 못했습니다.</strong>
         <ul>
           {failures.map((failure) => (
             <li key={`${failure.provider_ref}-${failure.code}`}>
               <strong>{providerDisplayLabel(failure.provider, failure.provider_ref)}</strong> ·{" "}
-              {failure.message} ({failure.code})
+              {operationalMessage(failure.code, "모델 카탈로그 일부를 확인할 수 없습니다.")} ({failure.code})
             </li>
           ))}
         </ul>
-        {requestId ? <code>Request ID: {requestId}</code> : null}
+        {requestId ? <code>요청 ID: {requestId}</code> : null}
       </div>
     </div>
   );

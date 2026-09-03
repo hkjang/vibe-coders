@@ -40,6 +40,58 @@ describe("app route query security", () => {
     );
   });
 
+  it("preserves only the request explorer deep-link filters", () => {
+    const safe = `?status=5xx&model=gpt-test&provider_ref=prv_${"a".repeat(43)}&request_id=req-1&trace_id=trace-1&session_id=session-1&api_key_id=key-1&ip=192.0.2.1&language=ko&from=2026-09-01&to=2026-09-03&tz=Asia%2FSeoul&limit=50&cursor=opaque.cursor&prompt=private`;
+    const result = sanitizeAppRouteSearch("/app/observability/requests", safe);
+    expect(result.rejectedKeys).toEqual(["prompt"]);
+    expect(result.search).not.toContain("prompt");
+    expect(result.search).toContain("cursor=opaque.cursor");
+    expect(result.search).toContain("request_id=req-1");
+  });
+
+  it.each([
+    `vc_sk_${"a".repeat(43)}`,
+    `VC_SA_${"A1_-".repeat(11)}`,
+    "Bearer private-credential",
+    "api_key=private-credential",
+  ])("never retains issued or credential-like material in any request query: %s", (secret) => {
+    const requestKeys = [
+      "api_key_id",
+      "cursor",
+      "from",
+      "ip",
+      "language",
+      "limit",
+      "model",
+      "provider_ref",
+      "request_id",
+      "session_id",
+      "status",
+      "to",
+      "trace_id",
+      "tz",
+    ];
+
+    for (const key of requestKeys) {
+      const result = sanitizeAppRouteSearch(
+        "/app/observability/requests",
+        `?${key}=${encodeURIComponent(secret)}`,
+      );
+      expect(result.search, key).toBe("");
+      expect(result.sensitiveKeys, key).toEqual([key]);
+    }
+  });
+
+  it("keeps a bounded API key database ID while rejecting the corresponding plaintext key", () => {
+    const keyID = "key_3f668812d94a5b7c";
+    expect(sanitizeAppRouteSearch("/app/observability/requests", `?api_key_id=${keyID}`).search).toBe(
+      `?api_key_id=${keyID}`,
+    );
+    expect(
+      sanitizeAppRouteSearch("/app/observability/requests", `?api_key_id=vc_sk_${"a".repeat(43)}`).search,
+    ).toBe("");
+  });
+
   it("removes unknown credential parameters and allowed values that contain secrets", () => {
     const result = sanitizeAppRouteSearch(
       "/app/gateway/models",

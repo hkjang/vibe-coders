@@ -180,11 +180,11 @@ describe("OverviewPage", () => {
 
     expect(await screen.findByText("12")).toBeVisible();
     expect(screen.getByText("₩4,200")).toBeVisible();
-    expect(screen.getAllByText("Healthy").length).toBeGreaterThan(0);
-    expect(screen.getByText("Legacy에서 열기")).toHaveAttribute("href", "/admin#/dashboard");
+    expect(screen.getAllByText("정상").length).toBeGreaterThan(0);
+    expect(screen.getByText("기존 화면에서 열기")).toHaveAttribute("href", "/admin#/dashboard");
     expect(screen.getByText("보존 데이터")).toBeVisible();
     expect(screen.getByText("재시작 후")).toBeVisible();
-    expect(screen.getByText("현재 Gateway 프로세스 시작 이후 로컬 지표")).toBeVisible();
+    expect(screen.getByText("현재 게이트웨이 프로세스 시작 이후 로컬 지표")).toBeVisible();
     expect(
       vi
         .mocked(apiClient.request)
@@ -196,10 +196,10 @@ describe("OverviewPage", () => {
     mockPhaseOneApi(endpoints.admin.ops.risk.path);
     renderOverview();
 
-    expect((await screen.findAllByText("Request ID: req-overview-42")).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText("요청 ID: req-overview-42")).length).toBeGreaterThan(0);
     expect(screen.getByText("12")).toBeVisible();
     expect(screen.getByRole("button", { name: "운영 위험 재시도" })).toBeEnabled();
-    expect(screen.getAllByText("Degraded").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("저하").length).toBeGreaterThan(0);
   });
 
   it("marks cached health data as degraded when its refresh fails", async () => {
@@ -231,19 +231,19 @@ describe("OverviewPage", () => {
     const user = userEvent.setup();
     renderOverview();
 
-    expect((await screen.findAllByText("Healthy")).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText("정상")).length).toBeGreaterThan(0);
     await user.click(screen.getByRole("button", { name: "전체 새로고침" }));
 
     expect(await screen.findByText("새 상태 갱신에 실패해 마지막 정상 응답을 표시합니다.")).toBeVisible();
-    expect(screen.getAllByText("Degraded").length).toBeGreaterThan(0);
-    expect(screen.queryByText("Disconnected")).not.toBeInTheDocument();
+    expect(screen.getAllByText("저하").length).toBeGreaterThan(0);
+    expect(screen.queryByText("연결 끊김")).not.toBeInTheDocument();
   });
 
   it("does not render duplicate errors for two cards backed by the same stats query", async () => {
     mockPhaseOneApi(endpoints.admin.stats.path);
     renderOverview();
 
-    expect(await screen.findAllByText("Request ID: req-overview-42")).toHaveLength(1);
+    expect(await screen.findAllByText("요청 ID: req-overview-42")).toHaveLength(1);
     expect(screen.getAllByRole("button", { name: "보존 트래픽과 비용 재시도" })).toHaveLength(1);
     expect(screen.queryByText("프로세스 런타임")).not.toBeInTheDocument();
   });
@@ -255,9 +255,9 @@ describe("OverviewPage", () => {
     }) as typeof apiClient.request);
     renderOverview();
 
-    expect(await screen.findByText(/Gateway는 요청을 처리할 수 있으며/)).toHaveTextContent("Checking");
-    expect(screen.getAllByText("Checking").length).toBeGreaterThan(0);
-    expect(screen.queryByText("Healthy")).not.toBeInTheDocument();
+    expect(await screen.findByText(/게이트웨이는 요청을 처리할 수 있으며/)).toHaveTextContent("확인 중");
+    expect(screen.getAllByText("확인 중").length).toBeGreaterThan(0);
+    expect(screen.queryByText("정상")).not.toBeInTheDocument();
   });
 
   it("stores the routing range in the URL state and sends it to the API", async () => {
@@ -267,7 +267,9 @@ describe("OverviewPage", () => {
     renderOverview("/app/overview?range=1h");
 
     expect(screen.getByRole("button", { name: "1시간" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText("1시간 선택 기간의 공급자와 회로 차단기")).toBeVisible();
     await user.click(screen.getByRole("button", { name: "7일" }));
+    expect(screen.getByText("7일 선택 기간의 공급자와 회로 차단기")).toBeVisible();
 
     await waitFor(() => expect(routingWindows).toContain("7d"));
   });
@@ -284,7 +286,7 @@ describe("OverviewPage", () => {
         .mocked(apiClient.request)
         .mock.calls.some(([endpoint]) => endpoint.path === endpoints.admin.routing.health.path),
     ).toBe(false);
-    expect(screen.queryByText("Degraded")).not.toBeInTheDocument();
+    expect(screen.queryByText("저하")).not.toBeInTheDocument();
   });
 
   it("hides the Legacy bridge when fallback is disabled", () => {
@@ -292,15 +294,15 @@ describe("OverviewPage", () => {
     mockPhaseOneApi();
     renderOverview();
 
-    expect(screen.queryByText("Legacy에서 열기")).not.toBeInTheDocument();
+    expect(screen.queryByText("기존 화면에서 열기")).not.toBeInTheDocument();
   });
 
   it("marks a medium operational risk as degraded", async () => {
     mockPhaseOneApi(undefined, undefined, "medium");
     renderOverview();
 
-    await screen.findByText("MEDIUM");
-    expect(screen.getAllByText("Degraded").length).toBeGreaterThan(0);
+    await screen.findByText("보통");
+    expect(screen.getAllByText("저하").length).toBeGreaterThan(0);
   });
 
   it("has no automated accessibility violations", async () => {

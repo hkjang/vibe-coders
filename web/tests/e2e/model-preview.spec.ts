@@ -11,8 +11,8 @@ const agentRouteRef = `prv_${"b".repeat(43)}`;
 const anthropicRef = `prv_${"c".repeat(43)}`;
 
 const bootstrap = {
-  backend_version: "v0.82.0",
-  ui_version: "e2e-v0.82.0",
+  backend_version: "v0.82.1",
+  ui_version: "e2e-v0.82.1",
   api_version: "v1",
   ui: {
     enabled: true,
@@ -45,7 +45,7 @@ const bootstrap = {
   migration_registry: [
     {
       feature_id: "gateway.models",
-      title: "Models",
+      title: "모델",
       app_path: "/app/gateway/models",
       legacy_path: "/admin#/model-contracts",
       status: "preview_read_only",
@@ -229,26 +229,26 @@ test("keeps an exact model deep link across reload, restores focus, retries deta
     `gateway/models?provider=${agentRouteRef}&range=7d&model=shared-model&model_provider=${agentRouteRef}&source=agent_route`,
   );
 
-  await expect(page.locator("h1", { hasText: "Models" })).toBeVisible();
+  await expect(page.locator("h1", { hasText: "모델" })).toBeVisible();
   await expect(page.locator("button", { hasText: "7일" })).toHaveAttribute("aria-pressed", "true");
   let dialog = page.getByRole("dialog", { name: "shared-model" });
-  await expect(dialog.getByText("agent route", { exact: true })).toBeVisible();
-  await expect(dialog.getByText("Virtual", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("에이전트 경로", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("가상", { exact: true })).toBeVisible();
   await expect(page).toHaveURL(
     new RegExp(
       `/app/gateway/models\\?provider=${agentRouteRef}&range=7d&model=shared-model&model_provider=${agentRouteRef}&source=agent_route$`,
     ),
   );
 
-  await expect(dialog.getByText("Request ID: req-tags-e2e")).toBeVisible();
+  await expect(dialog.getByText("요청 ID: req-tags-e2e")).toBeVisible();
   await expect.poll(tagRequestCount).toBe(2);
-  await dialog.getByRole("button", { name: "Model 사용 지침 상세 재시도" }).click();
+  await dialog.getByRole("button", { name: "모델 사용 지침 상세 재시도" }).click();
   await expect(dialog.getByText("coding and analysis")).toBeVisible();
   await expect.poll(tagRequestCount).toBe(3);
 
   await page.reload();
   dialog = page.getByRole("dialog", { name: "shared-model" });
-  await expect(dialog.getByText("agent route", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("에이전트 경로", { exact: true })).toBeVisible();
   await expect(page).toHaveURL(
     new RegExp(`model=shared-model&model_provider=${agentRouteRef}&source=agent_route$`),
   );
@@ -261,7 +261,7 @@ test("keeps an exact model deep link across reload, restores focus, retries deta
   const agentRow = page
     .getByRole("row")
     .filter({ has: page.getByRole("link", { name: "shared-model", exact: true }) })
-    .filter({ hasText: "agent route" });
+    .filter({ hasText: "에이전트 경로" });
   const trigger = agentRow.getByRole("link", { name: "shared-model", exact: true });
   await trigger.click();
   dialog = page.getByRole("dialog", { name: "shared-model" });
@@ -278,7 +278,7 @@ test("keeps an exact model deep link across reload, restores focus, retries deta
     )
     .toContain("agent_route");
 
-  await expect(page.getByText("Request ID: req-models-e2e")).toBeVisible();
+  await expect(page.getByText("요청 ID: req-models-e2e")).toBeVisible();
   expect(await axeViolations(page)).toEqual([]);
 });
 
@@ -290,10 +290,10 @@ test("distinguishes a partial failure from a missing model when the provider is 
 
   const dialog = page.getByRole("dialog", { name: "claude-4" });
   await expect(dialog).toBeVisible();
-  await expect(dialog.getByText("Provider Model 카탈로그를 확인할 수 없습니다.")).toBeVisible();
+  await expect(dialog.getByText("공급자 모델 카탈로그를 확인할 수 없습니다.")).toBeVisible();
   await expect(dialog.getByText(/provider_models_unavailable/)).toBeVisible();
-  await expect(dialog.getByText("Request ID: req-models-e2e")).toBeVisible();
-  await expect(dialog.getByText("Model을 찾을 수 없습니다.")).toBeHidden();
+  await expect(dialog.getByText("요청 ID: req-models-e2e")).toBeVisible();
+  await expect(dialog.getByText("모델을 찾을 수 없습니다.")).toBeHidden();
 });
 
 test("requires an exact Provider and source for an ambiguous model deep link", async ({ page }) => {
@@ -301,8 +301,8 @@ test("requires an exact Provider and source for an ambiguous model deep link", a
   await page.goto("gateway/models?model=shared-model");
 
   const dialog = page.getByRole("dialog", { name: "shared-model" });
-  await expect(dialog.getByText("Provider와 source를 선택해 주세요.")).toBeVisible();
-  await dialog.getByRole("link", { name: /openai .* agent route/ }).click();
-  await expect(dialog.getByText("Virtual", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("공급자와 출처를 선택해 주세요.")).toBeVisible();
+  await dialog.getByRole("link", { name: /openai .* 에이전트 경로/ }).click();
+  await expect(dialog.getByText("가상", { exact: true })).toBeVisible();
   await expect(page).toHaveURL(new RegExp(`model_provider=${agentRouteRef}&source=agent_route`));
 });

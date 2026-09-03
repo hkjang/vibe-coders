@@ -306,7 +306,7 @@ describe("ProviderPage", () => {
     const request = mockApi();
     renderPage("/gateway/providers?q=anth&status=enabled&range=7d");
 
-    const table = screen.getByRole("table", { name: "Provider 연결 설정과 운영 상태" });
+    const table = screen.getByRole("table", { name: "공급자 연결 설정과 운영 상태" });
     await screen.findByRole("link", { name: "anthropic" });
     expect(within(table).getByRole("link", { name: "anthropic" })).toBeVisible();
     expect(within(table).queryByRole("link", { name: "openai" })).not.toBeInTheDocument();
@@ -327,7 +327,7 @@ describe("ProviderPage", () => {
     const request = mockApi();
     renderPage("/gateway/providers?range=30d");
 
-    const table = screen.getByRole("table", { name: "Provider 연결 설정과 운영 상태" });
+    const table = screen.getByRole("table", { name: "공급자 연결 설정과 운영 상태" });
     await within(table).findByText("810 ms");
     expect(within(table).getByText("810 ms")).toBeVisible();
     expect(screen.queryByText(/라우팅 상세 신호는 제한/)).not.toBeInTheDocument();
@@ -359,14 +359,14 @@ describe("ProviderPage", () => {
     const user = userEvent.setup();
     renderPage("/gateway/providers?range=24h");
 
-    const table = screen.getByRole("table", { name: "Provider 연결 설정과 운영 상태" });
+    const table = screen.getByRole("table", { name: "공급자 연결 설정과 운영 상태" });
     expect(await within(table).findByText("810 ms")).toBeVisible();
     await user.click(screen.getByRole("button", { name: "7일" }));
 
-    expect(await within(table).findAllByText("Checking")).not.toHaveLength(0);
+    expect(await within(table).findAllByText("확인 중")).not.toHaveLength(0);
     expect(within(table).queryByText("810 ms")).not.toBeInTheDocument();
-    expect(screen.getByText(/선택 기간의 Provider 운영 상태를 확인하는 중/)).toBeVisible();
-    const summary = screen.getByRole("region", { name: "Provider 요약" });
+    expect(screen.getByText(/선택 기간의 공급자 운영 상태를 확인하는 중/)).toBeVisible();
+    const summary = screen.getByRole("region", { name: "공급자 요약" });
     expect(within(summary).getAllByText("—")).toHaveLength(2);
 
     resolveSevenDays?.(routingHealth);
@@ -389,7 +389,7 @@ describe("ProviderPage", () => {
     });
     renderPage();
 
-    const summary = screen.getByRole("region", { name: "Provider 요약" });
+    const summary = screen.getByRole("region", { name: "공급자 요약" });
     expect(within(summary).getAllByText("—")).toHaveLength(4);
     expect(within(summary).queryByText("0")).not.toBeInTheDocument();
 
@@ -410,14 +410,14 @@ describe("ProviderPage", () => {
     });
     renderPage();
 
-    const table = screen.getByRole("table", { name: "Provider 연결 설정과 운영 상태" });
+    const table = screen.getByRole("table", { name: "공급자 연결 설정과 운영 상태" });
     await screen.findByRole("link", { name: "openai" });
     expect(within(table).getByRole("link", { name: "openai" })).toBeVisible();
-    expect(screen.getByText("Request ID: req-provider-slo-503")).toBeVisible();
-    expect(screen.getByText(/Provider SLO 조회에 실패했습니다/)).toBeVisible();
+    expect(screen.getByText("요청 ID: req-provider-slo-503")).toBeVisible();
+    expect(screen.getByText(/공급자 SLO 조회에 실패했습니다/)).toBeVisible();
 
-    await user.click(screen.getByRole("button", { name: "Provider SLO 재시도" }));
-    expect(screen.getByText("Request ID: req-provider-slo-503")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "공급자 SLO 재시도" }));
+    expect(screen.getByText("요청 ID: req-provider-slo-503")).toBeVisible();
   });
 
   it("shows last-known-good rows after a provider refresh failure", async () => {
@@ -432,12 +432,12 @@ describe("ProviderPage", () => {
     });
     renderPage("/gateway/providers", client);
 
-    const table = await screen.findByRole("table", { name: "Provider 연결 설정과 운영 상태" });
+    const table = await screen.findByRole("table", { name: "공급자 연결 설정과 운영 상태" });
     expect(within(table).getByRole("link", { name: "openai" })).toBeVisible();
     expect(
-      await screen.findByText(/Provider 목록 갱신에 실패해 마지막 정상 데이터를 표시합니다/),
+      await screen.findByText(/공급자 목록 갱신에 실패해 마지막 정상 데이터를 표시합니다/),
     ).toBeVisible();
-    expect(screen.getByText("Request ID: req-provider-lkg")).toBeVisible();
+    expect(screen.getByText("요청 ID: req-provider-lkg")).toBeVisible();
   });
 
   it("shows source-specific SLO and routing failures inside a deep-linked dialog", async () => {
@@ -457,14 +457,19 @@ describe("ProviderPage", () => {
     renderPage("/gateway/providers?provider=openai");
 
     const dialog = await screen.findByRole("dialog", { name: "openai" });
-    expect(await within(dialog).findByText(/Provider SLO 조회에 실패했습니다/)).toBeVisible();
-    expect(within(dialog).getByText("Request ID: req-dialog-slo")).toBeVisible();
-    expect(within(dialog).getByRole("button", { name: "Provider SLO 재시도" })).toBeVisible();
-    expect(within(dialog).getByText(/Provider 라우팅 상태 조회에 실패했습니다/)).toBeVisible();
-    expect(within(dialog).getByText("Request ID: req-dialog-routing")).toBeVisible();
-    expect(within(dialog).getByRole("button", { name: "Provider 라우팅 상태 재시도" })).toBeVisible();
+    expect(await within(dialog).findByText(/공급자 SLO 조회에 실패했습니다/)).toBeVisible();
+    expect(within(dialog).getByText("요청 ID: req-dialog-slo")).toBeVisible();
+    expect(within(dialog).getByRole("button", { name: "공급자 SLO 재시도" })).toBeVisible();
+    expect(within(dialog).getByText(/공급자 라우팅 상태 조회에 실패했습니다/)).toBeVisible();
+    expect(within(dialog).getByText("요청 ID: req-dialog-routing")).toBeVisible();
+    expect(within(dialog).getByRole("button", { name: "공급자 라우팅 상태 재시도" })).toBeVisible();
     expect(within(dialog).queryByText(/SLO가 설정되지 않았습니다/)).not.toBeInTheDocument();
     expect(within(dialog).queryByText(/라우팅 상태 데이터가 없습니다/)).not.toBeInTheDocument();
+    expect(within(dialog).queryByText("SLO unavailable")).not.toBeInTheDocument();
+    expect(within(dialog).queryByText("Routing unavailable")).not.toBeInTheDocument();
+    expect(
+      within(dialog).getAllByText("서버가 요청을 처리하지 못했습니다. 잠시 후 다시 시도하세요."),
+    ).toHaveLength(2);
   });
 
   it("shows provider last-known-good and request ID inside the dialog", async () => {
@@ -480,11 +485,13 @@ describe("ProviderPage", () => {
 
     const dialog = await screen.findByRole("dialog", { name: "openai" });
     expect(
-      await within(dialog).findByText(/Provider 설정 갱신에 실패해 마지막 정상 데이터를 표시합니다/),
+      await within(dialog).findByText(/공급자 설정 갱신에 실패해 마지막 정상 데이터를 표시합니다/),
     ).toBeVisible();
-    expect(within(dialog).getByText("Request ID: req-dialog-provider-lkg")).toBeVisible();
-    expect(within(dialog).getByRole("button", { name: "Provider 설정 재시도" })).toBeVisible();
+    expect(within(dialog).getByText("요청 ID: req-dialog-provider-lkg")).toBeVisible();
+    expect(within(dialog).getByRole("button", { name: "공급자 설정 재시도" })).toBeVisible();
     expect(within(dialog).getByText("https://api.openai.example/v1")).toBeVisible();
+    expect(within(dialog).getByText("게이트웨이에 연결할 수 없습니다.")).toBeVisible();
+    expect(within(dialog).queryByText("Provider refresh failed")).not.toBeInTheDocument();
   });
 
   it("removes credential searches from deep links and never writes submitted secrets to the URL", async () => {
@@ -500,7 +507,7 @@ describe("ProviderPage", () => {
     expect(screen.getByTestId("location")).not.toHaveTextContent("private");
     expect(screen.getByRole("alert")).toHaveTextContent("인증정보로 보이는 검색어");
 
-    const input = screen.getByRole("textbox", { name: "Provider 검색" });
+    const input = screen.getByRole("textbox", { name: "공급자 검색" });
     await user.clear(input);
     await user.type(input, "https://operator:password@provider.example/v1");
     await user.click(screen.getByRole("button", { name: "검색" }));
@@ -519,7 +526,7 @@ describe("ProviderPage", () => {
     await user.click(screen.getByRole("button", { name: "Unsafe search navigation" }));
     await waitFor(() => expect(screen.getByTestId("location")).not.toHaveTextContent("private"));
     expect(screen.getByRole("alert")).toHaveTextContent("인증정보로 보이는 검색어");
-    expect(screen.getByRole("textbox", { name: "Provider 검색" })).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByRole("textbox", { name: "공급자 검색" })).toHaveAttribute("aria-invalid", "true");
   });
 
   it("deep-links provider details, closes with Escape, and restores trigger focus", async () => {
@@ -547,8 +554,8 @@ describe("ProviderPage", () => {
 
     await waitFor(() => expect(screen.getByTestId("location")).not.toHaveTextContent("provider="));
     expect(screen.getByTestId("location")).not.toHaveTextContent(secretName);
-    const dialog = await screen.findByRole("dialog", { name: "Provider 상세" });
-    expect(within(dialog).getByText("현재 목록에 요청한 Provider가 없습니다.")).toBeVisible();
+    const dialog = await screen.findByRole("dialog", { name: "공급자 상세" });
+    expect(within(dialog).getByText("현재 목록에 요청한 공급자가 없습니다.")).toBeVisible();
     expect(dialog).not.toHaveTextContent(secretName);
   });
 
@@ -558,8 +565,8 @@ describe("ProviderPage", () => {
     renderGuardedPage(`/gateway/providers?provider=${encodeURIComponent(unsafeName)}`);
 
     await waitFor(() => expect(screen.getByTestId("location")).not.toHaveTextContent("provider="));
-    const dialog = await screen.findByRole("dialog", { name: "Provider 상세" });
-    expect(within(dialog).getByText("현재 목록에 요청한 Provider가 없습니다.")).toBeVisible();
+    const dialog = await screen.findByRole("dialog", { name: "공급자 상세" });
+    expect(within(dialog).getByText("현재 목록에 요청한 공급자가 없습니다.")).toBeVisible();
     expect(document.body).not.toHaveTextContent(unsafeName);
   });
 
@@ -568,8 +575,8 @@ describe("ProviderPage", () => {
     const unknownRef = providerRef("unknown-provider");
     renderPage(`/gateway/providers?provider=${unknownRef}`);
 
-    const dialog = await screen.findByRole("dialog", { name: "Provider 상세" });
-    expect(await within(dialog).findByText("현재 목록에 요청한 Provider가 없습니다.")).toBeVisible();
+    const dialog = await screen.findByRole("dialog", { name: "공급자 상세" });
+    expect(await within(dialog).findByText("현재 목록에 요청한 공급자가 없습니다.")).toBeVisible();
     expect(dialog).not.toHaveTextContent(unknownRef);
   });
 
@@ -628,12 +635,12 @@ describe("ProviderPage", () => {
     });
     const { container } = renderPage();
 
-    const table = await screen.findByRole("table", { name: "Provider 연결 설정과 운영 상태" });
-    const redactedLinks = await within(table).findAllByRole("link", { name: /Provider 이름 비공개/ });
+    const table = await screen.findByRole("table", { name: "공급자 연결 설정과 운영 상태" });
+    const redactedLinks = await within(table).findAllByRole("link", { name: /공급자 이름 비공개/ });
     expect(redactedLinks).toHaveLength(2);
     expect(new Set(redactedLinks.map((link) => link.textContent)).size).toBe(2);
-    expect(within(table).getByText("Degraded")).toBeVisible();
-    expect(within(table).getByText("Healthy")).toBeVisible();
+    expect(within(table).getByText("저하")).toBeVisible();
+    expect(within(table).getByText("정상")).toBeVisible();
     expect(container.outerHTML).not.toContain(firstName);
     expect(container.outerHTML).not.toContain(secondName);
     for (const link of redactedLinks) {
@@ -644,8 +651,8 @@ describe("ProviderPage", () => {
     const firstRedactedLink = redactedLinks[0];
     if (!firstRedactedLink) throw new Error("Expected a redacted Provider link");
     await user.click(firstRedactedLink);
-    const dialog = await screen.findByRole("dialog", { name: /Provider 이름 비공개/ });
-    expect(within(dialog).getByText(/안전한 Provider 참조를 기준으로 연결/)).toBeVisible();
+    const dialog = await screen.findByRole("dialog", { name: /공급자 이름 비공개/ });
+    expect(within(dialog).getByText(/안전한 공급자 참조를 기준으로 연결/)).toBeVisible();
     expect(within(dialog).getByText("production objective")).toBeVisible();
     expect(within(dialog).getByText("62점")).toBeVisible();
     expect(within(dialog).queryByText(/SLO가 설정되지 않았습니다/)).not.toBeInTheDocument();
@@ -655,10 +662,10 @@ describe("ProviderPage", () => {
     expect(screen.getByTestId("location")).not.toHaveTextContent("private-value");
 
     await user.keyboard("{Escape}");
-    const input = screen.getByRole("textbox", { name: "Provider 검색" });
+    const input = screen.getByRole("textbox", { name: "공급자 검색" });
     await user.type(input, "first-private");
     await user.click(screen.getByRole("button", { name: "검색" }));
-    expect(await screen.findByText("검색 및 필터 조건에 맞는 Provider가 없습니다.")).toBeVisible();
+    expect(await screen.findByText("검색 및 필터 조건에 맞는 공급자가 없습니다.")).toBeVisible();
   });
 
   it("paginates client-side while preserving the page in the URL", async () => {
@@ -694,7 +701,7 @@ describe("ProviderPage", () => {
     mockApi();
     const { container } = renderPage();
 
-    await screen.findByRole("table", { name: "Provider 연결 설정과 운영 상태" });
+    await screen.findByRole("table", { name: "공급자 연결 설정과 운영 상태" });
     expect((await axe.run(container)).violations).toEqual([]);
   });
 });

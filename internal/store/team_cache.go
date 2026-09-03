@@ -2,10 +2,21 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 )
+
+var (
+	ErrAuthTeamIdentityAmbiguous = errors.New("auth team identity is ambiguous")
+	ErrAuthTeamIdentityInvalid   = errors.New("auth team identity is invalid")
+)
+
+const maxAuthTeamIdentityBytes = 256
 
 // Caching the teams table.
 //
@@ -49,6 +60,95 @@ func (s *SQLStore) AuthTeamByIDOrName(ctx context.Context, value string) (AuthTe
 		return team, true, nil
 	}
 	return AuthTeam{}, false, nil
+}
+
+// ResolveOrCreateAuthTeam resolves an IdP-provided team identity to the canonical database
+// row, creating it only when neither its ID nor its case-insensitive name exists. Unlike the
+// hot-path cache lookup, this provisioning path reads the database directly so a stale cache
+// on another pod cannot turn a concurrently created team into a UNIQUE(name) login failure.
+func (s *SQLStore) ResolveOrCreateAuthTeam(ctx context.Context, value string) (AuthTeam, error) {
+	if value == "" {
+		return AuthTeam{}, nil
+	}
+	if len(value) > maxAuthTeamIdentityBytes || strings.TrimSpace(value) != value || strings.IndexFunc(value, unicode.IsControl) >= 0 {
+		return AuthTeam{}, ErrAuthTeamIdentityInvalid
+	}
+	canonicalID := canonicalAuthTeamIdentity(value)
+	lookup := func() (AuthTeam, bool, error) {
+		// Use Go's case folding over a fresh database snapshot. SQLite LOWER is
+		// ASCII-only in common builds while PostgreSQL follows its locale, which
+		// otherwise makes SSO team resolution depend on the selected backend.
+		index, err := s.loadTeamIndex(ctx)
+		if err != nil {
+			return AuthTeam{}, false, err
+		}
+		owners := teamIdentityOwners(index, value)
+		if reserved, found := index.byID[canonicalID]; found {
+			// A deterministic auto-create ID owned by a row whose name does not
+			// match this claim is a real cross-team collision, not an alias.
+			if _, related := owners[reserved.ID]; !related {
+				return AuthTeam{}, false, ErrAuthTeamIdentityAmbiguous
+			}
+		}
+		if len(owners) > 1 {
+			return AuthTeam{}, false, ErrAuthTeamIdentityAmbiguous
+		}
+		if len(owners) == 0 {
+			return AuthTeam{}, false, nil
+		}
+		for _, team := range owners {
+			return team, true, nil
+		}
+		return AuthTeam{}, false, nil
+	}
+	if team, found, err := lookup(); err != nil {
+		return AuthTeam{}, err
+	} else if found {
+		s.teams.invalidate()
+		return team, nil
+	}
+
+	now := time.Now().UTC()
+	_, insertErr := s.db.ExecContext(ctx, s.bind(`INSERT INTO teams (id, name, created_at, updated_at)
+		VALUES (?, ?, ?, ?)`), canonicalID, value, formatTime(now), formatTime(now))
+	if insertErr == nil {
+		s.teams.invalidate()
+		return AuthTeam{ID: canonicalID, Name: value, CreatedAt: now, UpdatedAt: now}, nil
+	}
+	// Another pod may have created the ID or name after our lookup. Resolve that winner
+	// instead of surfacing a transient uniqueness violation as an SSO provisioning error.
+	if team, found, err := lookup(); err != nil {
+		return AuthTeam{}, err
+	} else if found {
+		s.teams.invalidate()
+		return team, nil
+	}
+	return AuthTeam{}, insertErr
+}
+
+// canonicalAuthTeamIdentity produces one deterministic ID for every value that
+// strings.EqualFold considers the same. This lets the database primary key serialize
+// concurrent first logins even when IdP group capitalization differs across tokens.
+func canonicalAuthTeamIdentity(value string) string {
+	var folded strings.Builder
+	folded.Grow(len(value))
+	for _, current := range value {
+		minimum := current
+		for next := unicode.SimpleFold(current); next != current; next = unicode.SimpleFold(next) {
+			if next < minimum {
+				minimum = next
+			}
+		}
+		folded.WriteRune(unicode.ToLower(minimum))
+	}
+	canonical := folded.String()
+	if len(canonical) <= maxAuthTeamIdentityBytes {
+		return canonical
+	}
+	// Unicode case conversion can expand in future tables. Keep the identifier bounded
+	// without making the external display name part of an SQL or URL contract.
+	digest := sha256.Sum256([]byte(canonical))
+	return "sso-team-" + hex.EncodeToString(digest[:16])
 }
 
 // AuthTeamScopeIdentities returns exact api_keys.team values that unambiguously belong to

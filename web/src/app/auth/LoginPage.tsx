@@ -6,9 +6,10 @@ import { Navigate, useNavigate, useSearchParams } from "react-router";
 import { z } from "zod";
 
 import { useAuth } from "@/app/auth/AuthProvider";
-import { isAppError } from "@/shared/api/error";
+import { uiLabels } from "@/config/ui-labels";
 import { tokenStore } from "@/shared/auth/token-store";
 import { Button } from "@/shared/components/ui/Button";
+import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
 import { canOpenLegacyAdmin } from "@/shared/permissions/legacy-admin";
 import { safeReturnTo, stageSsoReturnTo } from "@/shared/utils/safe-return-to";
 
@@ -41,7 +42,7 @@ export function LoginPage(): React.JSX.Element {
       await auth.login(values.email, values.password);
       navigate(returnTo, { replace: true });
     } catch (error) {
-      setServerError(isAppError(error) ? error.message : "로그인할 수 없습니다.");
+      setServerError(safeAppErrorMessage(error, "로그인할 수 없습니다."));
     }
   });
 
@@ -57,7 +58,7 @@ export function LoginPage(): React.JSX.Element {
       await auth.setLegacyToken(legacyToken);
       navigate(returnTo, { replace: true });
     } catch (error) {
-      setServerError(isAppError(error) ? error.message : "Legacy Admin Token을 확인할 수 없습니다.");
+      setServerError(safeAppErrorMessage(error, "기존 관리자 토큰을 확인할 수 없습니다."));
     }
   };
 
@@ -71,15 +72,21 @@ export function LoginPage(): React.JSX.Element {
           <span>Vibe Coders</span>
         </div>
         <div>
-          <div className="eyebrow">Next Admin Console</div>
+          <div className="eyebrow">차세대 관리자 콘솔</div>
           <h1 id="login-title">관리자 로그인</h1>
-          <p>기존 Gateway 계정 또는 Keycloak SSO를 사용합니다.</p>
+          <p>기존 게이트웨이 계정 또는 Keycloak SSO를 사용합니다.</p>
         </div>
+
+        {serverError || auth.error ? (
+          <div className="form-error" role="alert">
+            {serverError ?? auth.error}
+          </div>
+        ) : null}
 
         {auth.authenticationMode === "legacy_token" ? (
           <div className="login-form">
             <div className="field">
-              <label htmlFor="legacy-token">Legacy Admin Token</label>
+              <label htmlFor="legacy-token">기존 관리자 토큰</label>
               <input
                 id="legacy-token"
                 type="password"
@@ -89,14 +96,9 @@ export function LoginPage(): React.JSX.Element {
                 aria-describedby="legacy-token-help"
               />
               <p id="legacy-token-help" className="field-help">
-                브라우저 탭의 sessionStorage에만 저장되며 LocalStorage에는 저장하지 않습니다.
+                브라우저 탭의 세션 저장소에만 저장하며 로컬 저장소에는 저장하지 않습니다.
               </p>
             </div>
-            {serverError || auth.error ? (
-              <div className="form-error" role="alert">
-                {serverError ?? auth.error}
-              </div>
-            ) : null}
             <Button variant="primary" onClick={() => void saveLegacyToken()}>
               <KeyRound aria-hidden="true" /> 콘솔 열기
             </Button>
@@ -137,11 +139,6 @@ export function LoginPage(): React.JSX.Element {
                     </p>
                   ) : null}
                 </div>
-                {serverError || auth.error ? (
-                  <div className="form-error" role="alert">
-                    {serverError ?? auth.error}
-                  </div>
-                ) : null}
                 <Button variant="primary" type="submit" disabled={form.formState.isSubmitting}>
                   {form.formState.isSubmitting ? "로그인 중…" : "로그인"}
                 </Button>
@@ -156,10 +153,10 @@ export function LoginPage(): React.JSX.Element {
         )}
 
         <footer className="login-meta">
-          <span>Backend {auth.backendVersion}</span>
+          <span>백엔드 {auth.backendVersion}</span>
           <span>UI {auth.uiVersion}</span>
           <span>API {auth.apiVersion}</span>
-          {canOpenLegacyAdmin(auth) ? <a href="/admin">Legacy Admin</a> : null}
+          {canOpenLegacyAdmin(auth) ? <a href="/admin">{uiLabels.legacyAdmin}</a> : null}
         </footer>
       </section>
     </main>

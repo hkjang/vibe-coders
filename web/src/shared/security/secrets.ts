@@ -31,7 +31,7 @@ const exactCredentialKeys = new Set([
 const exactCredentialParts = new Set(["auth", "key", "sig"]);
 
 export const secretSearchMessage =
-  "인증정보로 보이는 검색어는 주소에 저장하지 않습니다. Secret을 제거한 뒤 검색하세요.";
+  "인증정보로 보이는 검색어는 주소에 저장하지 않습니다. 비밀정보를 제거한 뒤 검색하세요.";
 
 const maxSecretCandidateLength = 16_384;
 const maxDecodePasses = 8;
@@ -84,6 +84,7 @@ export function containsPotentialSecret(value: string): boolean {
   if (
     /\bbearer(?:\s|\+)+[^\s,;]+/i.test(candidate) ||
     /\bsk-(?:proj-|ant-|svcacct-)?[a-z0-9_-]{8,}\b/i.test(candidate) ||
+    /(?:^|[^a-z0-9])vc_(?:sk|sa)_[a-z0-9_-]{8,}(?=$|[^a-z0-9_-])/i.test(candidate) ||
     /\beyJ[a-z0-9_-]{4,}\.[a-z0-9_-]{4,}\.[a-z0-9_-]{4,}\b/i.test(candidate) ||
     /(?:^|[?&#=;,\s/])[^\s/@:]+:[^\s/@]+@(?:\[[^\]]+\]|[^\s/:?#]+)(?::\d+)?(?:[/?#]|$)/i.test(candidate)
   ) {

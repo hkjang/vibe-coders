@@ -101,6 +101,40 @@ describe("migration registry", () => {
     }
   });
 
+  it("exposes the request explorer only to the admin-read preview cohort", () => {
+    const feature = migrationRegistry.find((candidate) => candidate.featureId === "observability.requests");
+    if (!feature) throw new Error("observability.requests fixture is missing");
+    expect(feature).toMatchObject({
+      status: "preview_read_only",
+      requiredPermission: "admin:read",
+      readOnly: true,
+      enabledRoles: [
+        "super_admin",
+        "admin",
+        "ops_admin",
+        "ai_admin",
+        "security_admin",
+        "billing_admin",
+        "readonly_admin",
+      ],
+      rolloutPercent: 100,
+      minimumApiVersion: "v0.82.1",
+    });
+    expect(isAppFeatureImplemented(feature.featureId)).toBe(true);
+    expect(resolveFeature(feature, gatewayAdmin, "v0.82.1")).toMatchObject({
+      permitted: true,
+      status: "preview_read_only",
+      readOnly: true,
+    });
+    expect(
+      resolveFeature(feature, { ...gatewayAdmin, role: "viewer", roles: ["viewer"] }, "v0.82.1"),
+    ).toMatchObject({
+      permitted: true,
+      status: "legacy",
+      reason: "legacy_fallback",
+    });
+  });
+
   it("keeps Legacy access when a permitted role is outside the local Preview cohort", () => {
     for (const featureId of ["gateway.providers", "gateway.models"] as const) {
       const feature = migrationRegistry.find((candidate) => candidate.featureId === featureId);

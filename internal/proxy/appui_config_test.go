@@ -59,7 +59,7 @@ func TestAppUIBootstrapAndRuntimeToggle(t *testing.T) {
 		t.Fatalf("legacy route map must be empty when fallback is disabled: %#v", legacyRoutes)
 	}
 	allowed, _ := body["allowed_features"].([]any)
-	wantAllowed := []string{"overview", "gateway.health", "gateway.providers", "gateway.models", "system.health"}
+	wantAllowed := []string{"overview", "gateway.health", "gateway.providers", "gateway.models", "observability.requests", "system.health"}
 	if len(allowed) != len(wantAllowed) {
 		t.Fatalf("implemented previews allowed without Legacy fallback = %#v, want %v", allowed, wantAllowed)
 	}
@@ -344,6 +344,30 @@ func TestGatewayCatalogFeaturesAreSafeReadOnlyPreviewDefaults(t *testing.T) {
 			t.Errorf("feature %q must be implemented", id)
 		}
 	}
+}
+
+func TestRequestExplorerIsAdminReadOnlyPreview(t *testing.T) {
+	wantRoles := "super_admin,admin,ops_admin,ai_admin,security_admin,billing_admin,readonly_admin"
+	for i := range appUIFeatures {
+		feature := appUIFeatures[i]
+		if feature.FeatureID != "observability.requests" {
+			continue
+		}
+		if feature.Status != "preview_read_only" || !feature.ReadOnly || feature.RequiredPermission != "admin:read" {
+			t.Fatalf("request explorer permission contract widened: %+v", feature)
+		}
+		if got := strings.Join(feature.EnabledRoles, ","); got != wantRoles {
+			t.Fatalf("request explorer roles = %q, want %q", got, wantRoles)
+		}
+		if feature.MinimumAPIVersion != "v0.82.1" || feature.RolloutPercent != 100 || !feature.FallbackEnabled {
+			t.Fatalf("request explorer rollout contract is incomplete: %+v", feature)
+		}
+		if _, ok := appUIImplementedFeatureIDs[feature.FeatureID]; !ok {
+			t.Fatal("request explorer must be marked implemented")
+		}
+		return
+	}
+	t.Fatal("request explorer feature is missing")
 }
 
 func TestOverviewMigrationContractRemainsConservative(t *testing.T) {

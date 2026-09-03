@@ -108,6 +108,14 @@ func scatterConditions(f ScatterFilter) ([]string, []any) {
 // synthetic traffic whose API key is missing. The semi-join also lets XView use its
 // composite request-log index instead of walking every tenant row.
 func appendRequestTeamCondition(where []string, args []any, team string, teams []string, scoped bool) ([]string, []any) {
+	return appendRequestTeamConditionWithPredicates(where, args, team, teams, scoped, "", "", false)
+}
+
+// appendRequestTeamConditionWithPredicates optionally adds bounded-key guards
+// to both sides of the API-key semi-join. The React request projection uses
+// these guards to match its partial indexes and fail closed on corrupt legacy
+// identifiers; existing request queries retain their historical semantics.
+func appendRequestTeamConditionWithPredicates(where []string, args []any, team string, teams []string, scoped bool, requestKeyPredicate, keyRowPredicate string, correlated bool) ([]string, []any) {
 	keys := make([]string, 0, len(teams)+1)
 	seen := make(map[string]struct{}, len(teams)+1)
 	candidates := teams
@@ -135,7 +143,18 @@ func appendRequestTeamCondition(where []string, args []any, team string, teams [
 	if !scoped && len(teams) == 0 && strings.TrimSpace(team) == "unassigned" {
 		where = append(where, requestTeamExpr+" IN ("+placeholders+")")
 	} else {
-		where = append(where, "r.api_key_id IN (SELECT k.id FROM api_keys k WHERE k.team IN ("+placeholders+"))")
+		if requestKeyPredicate != "" {
+			where = append(where, requestKeyPredicate)
+		}
+		keyFilter := "k.team IN (" + placeholders + ")"
+		if keyRowPredicate != "" {
+			keyFilter += " AND " + keyRowPredicate
+		}
+		if correlated {
+			where = append(where, "EXISTS (SELECT 1 FROM api_keys k WHERE k.id = r.api_key_id AND "+keyFilter+")")
+		} else {
+			where = append(where, "r.api_key_id IN (SELECT k.id FROM api_keys k WHERE "+keyFilter+")")
+		}
 	}
 	for _, key := range keys {
 		args = append(args, key)

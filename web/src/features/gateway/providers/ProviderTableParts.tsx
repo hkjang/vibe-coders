@@ -14,12 +14,14 @@ import { Badge, type BadgeProps } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
 import { createDataTableColumnHelper, type DataTableColumn } from "@/shared/data-table/columns";
 import { DataTable } from "@/shared/data-table/DataTable";
+import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
+import { healthStatusLabels } from "@/config/ui-labels";
 
 const healthPresentation: Record<ProviderHealthState, { label: string; tone: BadgeProps["tone"] }> = {
-  checking: { label: "Checking", tone: "info" },
-  healthy: { label: "Healthy", tone: "success" },
-  degraded: { label: "Degraded", tone: "warning" },
-  unknown: { label: "Unknown", tone: "muted" },
+  checking: { label: healthStatusLabels.checking, tone: "info" },
+  healthy: { label: healthStatusLabels.healthy, tone: "success" },
+  degraded: { label: healthStatusLabels.degraded, tone: "warning" },
+  unknown: { label: healthStatusLabels.unknown, tone: "muted" },
 };
 
 export function QueryFailureNotice({
@@ -34,6 +36,7 @@ export function QueryFailureNotice({
   onRetry: () => void;
 }): React.JSX.Element {
   const requestId = isAppError(error) ? error.requestId : undefined;
+  const diagnosticCode = isAppError(error) ? error.code : undefined;
   return (
     <div className="provider-query-warning" role="alert">
       <AlertTriangle aria-hidden="true" />
@@ -42,8 +45,9 @@ export function QueryFailureNotice({
           {label}{" "}
           {hasPreviousData ? "갱신에 실패해 마지막 정상 데이터를 표시합니다." : "조회에 실패했습니다."}
         </strong>
-        <p>{isAppError(error) ? error.message : "잠시 후 다시 시도해 주세요."}</p>
-        {requestId ? <code>Request ID: {requestId}</code> : null}
+        <p>{safeAppErrorMessage(error, `${label} 데이터를 확인할 수 없습니다.`)}</p>
+        {requestId ? <code>요청 ID: {requestId}</code> : null}
+        {diagnosticCode ? <code>진단 코드: {diagnosticCode}</code> : null}
       </div>
       <Button size="small" variant="secondary" onClick={onRetry} aria-label={`${label} 재시도`}>
         <RefreshCw aria-hidden="true" /> 재시도
@@ -65,7 +69,7 @@ function createProviderColumns(
   return column.columns([
     column.accessor((row) => row.displayName, {
       id: "provider",
-      header: "Provider",
+      header: "공급자",
       cell: ({ row }) => (
         <div className="provider-name-cell">
           <Link
@@ -102,22 +106,22 @@ function createProviderColumns(
     }),
     column.accessor((row) => row.provider.model_patterns, {
       id: "patterns",
-      header: "Model Patterns",
+      header: "모델 패턴",
       cell: ({ getValue }) => <code className="provider-patterns">{getValue() || "모든 모델"}</code>,
     }),
     column.accessor((row) => row.provider.failover_group, {
       id: "failover",
-      header: "Failover / Priority",
+      header: "장애 전환 / 우선순위",
       cell: ({ getValue, row }) => `${getValue() || "-"} / ${formatInteger(row.original.provider.priority)}`,
     }),
     column.accessor((row) => row.provider.timeout_ms, {
       id: "timeout",
-      header: "Timeout",
+      header: "제한 시간",
       cell: ({ getValue }) => `${formatInteger(getValue())} ms`,
     }),
     column.accessor((row) => row.provider.api_key_configured, {
       id: "secret",
-      header: "Secret",
+      header: "비밀정보",
       cell: ({ getValue }) => (getValue() ? "설정됨" : "없음"),
     }),
   ]) as Array<DataTableColumn<ProviderCatalogRow>>;
@@ -160,28 +164,28 @@ export function ProviderTable({
     <section className="provider-list-section" aria-labelledby="provider-list-title">
       <header>
         <div>
-          <h2 id="provider-list-title">Provider 목록</h2>
-          <p>{formatInteger(filteredRowCount)}개 결과 · 우선순위가 낮은 Provider부터 표시합니다.</p>
+          <h2 id="provider-list-title">공급자 목록</h2>
+          <p>{formatInteger(filteredRowCount)}개 결과 · 우선순위가 낮은 공급자부터 표시합니다.</p>
         </div>
         {updatedAt > 0 ? <UpdatedTime timestamp={updatedAt} /> : null}
       </header>
       {providerUnavailable ? (
         <div className="provider-list-unavailable">
           <ServerCog aria-hidden="true" />
-          <strong>마지막 정상 Provider 목록이 없습니다.</strong>
-          <span>위 오류의 Request ID를 확인하고 목록 조회를 다시 시도하세요.</span>
+          <strong>마지막 정상 공급자 목록이 없습니다.</strong>
+          <span>위 오류의 요청 ID를 확인하고 목록 조회를 다시 시도하세요.</span>
         </div>
       ) : (
         <DataTable
-          caption="Provider 연결 설정과 운영 상태"
+          caption="공급자 연결 설정과 운영 상태"
           columns={columns}
           data={rows}
           emptyMessage={
             allRowCount === 0
-              ? "등록된 Provider가 없습니다. Provider 등록은 Legacy 설정에서 수행할 수 있습니다."
-              : "검색 및 필터 조건에 맞는 Provider가 없습니다."
+              ? "등록된 공급자가 없습니다. 공급자 등록은 기존 설정 화면에서 수행할 수 있습니다."
+              : "검색 및 필터 조건에 맞는 공급자가 없습니다."
           }
-          getRowActionLabel={(row) => `${row.displayName} Provider 상세 열기`}
+          getRowActionLabel={(row) => `${row.displayName} 공급자 상세 열기`}
           getRowId={(row) => row.identity}
           loading={loading}
           onPageChange={onPageChange}

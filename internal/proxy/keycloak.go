@@ -18,6 +18,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 )
 
 // ── OIDC discovery + JWKS caches (process-wide; single issuer expected) ──────────
@@ -275,7 +276,12 @@ func (s *Server) verifyKeycloakAccessToken(ctx context.Context, token string) (a
 	// An access token minted for another client in the same realm has a valid issuer
 	// and signature too. This service is a resource server, so its configured client
 	// ID must be an explicit audience; azp alone is not an audience grant.
-	if !audienceMatches(claims["aud"], kc.ClientID) || strClaim(claims, "sub") == "" {
+	subject := strClaim(claims, "sub")
+	if !audienceMatches(claims["aud"], kc.ClientID) || !keycloakExactClaimValue(subject, 255) {
+		return accessClaims{}, false
+	}
+	teamID := keycloakTeamFromGroups(claimStrings(claims, kc.GroupClaim))
+	if teamID != "" && !keycloakExactClaimValue(teamID, 256) {
 		return accessClaims{}, false
 	}
 	role := resolveKeycloakRoleWith(s.effectiveKeycloakRoleMap(), s.keycloakRolesFromClaims(claims), s.keycloakConfig().DefaultRole)
@@ -287,14 +293,22 @@ func (s *Server) verifyKeycloakAccessToken(ctx context.Context, token string) (a
 		exp = int64(v)
 	}
 	return accessClaims{
-		Subject:   strClaim(claims, "sub"),
+		Subject:   subject,
 		Email:     strClaim(claims, "email"),
 		Role:      role,
-		TeamID:    keycloakTeamFromGroups(claimStrings(claims, s.keycloakConfig().GroupClaim)),
+		TeamID:    teamID,
 		Scopes:    s.effectiveScopesForRole(ctx, role),
 		ExpiresAt: exp,
 		Type:      "access",
 	}, true
+}
+
+// OIDC subject and team identifiers are exact identity material. Normalizing
+// surrounding whitespace or control characters can alias a different signed
+// claim to an existing local identity or team.
+func keycloakExactClaimValue(value string, maxBytes int) bool {
+	return value != "" && len(value) <= maxBytes && strings.TrimSpace(value) == value &&
+		strings.IndexFunc(value, unicode.IsControl) < 0
 }
 
 func audienceMatches(aud any, clientID string) bool {
