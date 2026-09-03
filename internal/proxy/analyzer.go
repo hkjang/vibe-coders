@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"hash"
+	"sort"
 	"strings"
 
 	"vibe-coders/internal/audit"
@@ -76,8 +77,17 @@ func (a *ResponseAnalyzer) Finalize() ResponseAnalysis {
 		text = a.capture.String()
 	}
 	completionText := a.completion.String()
-	// finalize any streamed tool-call names that were assembled across chunks
-	for _, name := range a.streamToolNames {
+	// finalize any streamed tool-call names that were assembled across chunks.
+	// Ranging the map directly would emit them in Go's randomized map order, so the
+	// tool_invocations rows for one streamed response land in a different order on
+	// every run; delta.tool_calls carries the call order in its index, so use it.
+	indexes := make([]int, 0, len(a.streamToolNames))
+	for index := range a.streamToolNames {
+		indexes = append(indexes, index)
+	}
+	sort.Ints(indexes)
+	for _, index := range indexes {
+		name := a.streamToolNames[index]
 		if name == "" {
 			continue
 		}
@@ -219,10 +229,19 @@ func (a *ResponseAnalyzer) parseChunk(payload []byte) {
 	}
 }
 
+// contentString flattens an OpenAI-compatible content field into plain text. Besides a
+// bare string, providers also answer with structured content parts
+// ([{"type":"text","text":"..."}]), which the request side already flattens in
+// flattenContent. Dropping them here left CompletionText empty for those responses, so
+// the completion token estimate used when a response carries no usage block came out 0.
+// Parts with no text (image/audio) still contribute nothing rather than their raw JSON,
+// which would inflate that estimate.
 func contentString(value any) string {
 	switch v := value.(type) {
 	case string:
 		return v
+	case map[string]any:
+		return contentPartText(v)
 	case []any:
 		var builder strings.Builder
 		for _, item := range v {
@@ -232,4 +251,15 @@ func contentString(value any) string {
 	default:
 		return ""
 	}
+}
+
+// contentPartText pulls the text out of a single structured content part.
+func contentPartText(part map[string]any) string {
+	if text, ok := part["text"].(string); ok {
+		return text
+	}
+	if text, ok := part["input_text"].(string); ok {
+		return text
+	}
+	return ""
 }
