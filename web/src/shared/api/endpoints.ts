@@ -5,6 +5,8 @@ import type {
   GetAdminModelsQualityData,
   GetAdminModelsQualityResponse,
   GetAdminModelsResponse,
+  GetAdminRequestsData,
+  GetAdminRequestsResponse,
   GetAdminModelTagsData,
   GetAdminModelTagsResponse,
   GetAdminOpsRiskData,
@@ -47,6 +49,8 @@ import type { OpenApiMethod, OpenApiMethodFor, OpenApiPath } from "@/shared/api/
 import {
   adminModelsQuerySchema,
   adminModelsResponseSchema,
+  appRequestsQuerySchema,
+  appRequestsResponseSchema,
   adminStatsSchema,
   authMeSchema,
   gatewayHealthSchema,
@@ -71,6 +75,7 @@ import {
 } from "@/shared/api/schemas";
 import type {
   AdminModelsQuery,
+  AppRequestsQuery,
   ModelQualityQuery,
   PricingQuery,
   ProviderSLOQuery,
@@ -193,6 +198,12 @@ export const endpoints = {
   ),
   admin: {
     stats: operation<GetAdminStatsData, GetAdminStatsResponse>()("GET", "/admin/stats", adminStatsSchema),
+    requests: operation<WithQuery<GetAdminRequestsData, AppRequestsQuery>, GetAdminRequestsResponse>()(
+      "GET",
+      "/admin/requests",
+      appRequestsResponseSchema,
+      appRequestsQuerySchema,
+    ),
     providers: {
       list: operation<GetAdminProvidersData, GetAdminProvidersResponse>()(
         "GET",

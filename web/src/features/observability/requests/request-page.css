@@ -1,0 +1,109 @@
+.request-filters {
+  display: grid;
+  gap: var(--space-4);
+  padding: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-medium);
+  background: var(--color-card);
+}
+.request-filter-heading {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.request-filter-heading span {
+  color: var(--color-muted);
+  font-size: 0.8125rem;
+}
+.request-filter-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+.request-filter-grid label {
+  display: grid;
+  gap: var(--space-1);
+  color: var(--color-muted);
+  font-size: 0.8125rem;
+  font-weight: 650;
+}
+.request-filter-grid input,
+.request-filter-grid select {
+  width: 100%;
+  min-height: 2.25rem;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-small);
+  background: var(--color-card);
+  color: var(--color-foreground);
+}
+.request-advanced {
+  grid-column: 1 / -1;
+}
+.request-advanced summary {
+  cursor: pointer;
+  color: var(--color-primary);
+  font-weight: 700;
+}
+.request-advanced .request-filter-grid {
+  margin-top: var(--space-3);
+}
+.request-filter-actions,
+.request-stale {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.request-stale {
+  justify-content: space-between;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-warning);
+  border-radius: var(--radius-medium);
+  background: var(--color-warning-soft);
+}
+.request-table {
+  min-width: 74rem;
+}
+.request-table code {
+  display: inline-block;
+  max-width: 15rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
+}
+.request-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+.request-detail-grid div {
+  min-width: 0;
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-small);
+}
+.request-detail-grid dt {
+  color: var(--color-muted);
+  font-size: 0.8125rem;
+}
+.request-detail-grid dd {
+  margin: var(--space-1) 0 0;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 64rem) {
+  .request-filter-grid,
+  .request-detail-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+@media (max-width: 48rem) {
+  .request-filter-grid,
+  .request-detail-grid {
+    grid-template-columns: 1fr;
+  }
+  .request-filter-heading,
+  .request-stale {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}

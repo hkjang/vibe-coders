@@ -7,6 +7,8 @@ import type {
   AdminModelProvider as GeneratedAdminModelProvider,
   AdminModelsResponse as GeneratedAdminModelsResponse,
   AdminStatsResponse as GeneratedAdminStatsResponse,
+  AppRequestSummary as GeneratedAppRequestSummary,
+  AppRequestsResponse as GeneratedAppRequestsResponse,
   AuthMeResponse as GeneratedAuthMeResponse,
   AuthTokenResponse as GeneratedAuthTokenResponse,
   AuthUser as GeneratedAuthUser,
@@ -572,6 +574,65 @@ export const modelUsageTagsResponseSchema = z
   .object({ tags: z.array(modelUsageTagSchema) })
   .strict() satisfies z.ZodType<GeneratedModelUsageTagsResponse>;
 
+export const appRequestSummarySchema = z
+  .object({
+    request_id: z.string(),
+    trace_id: z.string(),
+    session_id: z.string(),
+    api_key_id: z.string(),
+    ip: z.string(),
+    method: z.string(),
+    model: z.string(),
+    provider_ref: z.string().regex(providerRefPattern),
+    provider_display: z.string(),
+    endpoint: z.string(),
+    stream: z.boolean(),
+    status_code: z.number().int().min(0).max(999),
+    latency_ms: z.number().int().nonnegative(),
+    first_chunk_ms: z.number().int().nonnegative(),
+    prompt_tokens: z.number().int().nonnegative(),
+    completion_tokens: z.number().int().nonnegative(),
+    total_tokens: z.number().int().nonnegative(),
+    cached_tokens: z.number().int().nonnegative(),
+    reasoning_tokens: z.number().int().nonnegative(),
+    estimated_cost: z.number().nonnegative(),
+    currency: z.string(),
+    finish_reason: z.string(),
+    created_at: timestampSchema,
+  })
+  .strict() satisfies z.ZodType<GeneratedAppRequestSummary>;
+
+export const appRequestsResponseSchema = z
+  .object({
+    requests: z.array(appRequestSummarySchema),
+    limit: z.number().int().min(1).max(200),
+    next_cursor: z.string().optional(),
+    previous_cursor: z.string().optional(),
+    generated_at: timestampSchema,
+  })
+  .strict() satisfies z.ZodType<GeneratedAppRequestsResponse>;
+
+export const appRequestsQuerySchema = z
+  .object({
+    limit: z.number().int().min(1).max(200).optional(),
+    from: z.string().max(64).optional(),
+    to: z.string().max(64).optional(),
+    tz: z.string().max(64).optional(),
+    status: z
+      .union([z.enum(["success", "error", "4xx", "5xx"]), z.string().regex(/^[1-5][0-9]{2}$/)])
+      .optional(),
+    model: z.string().max(256).optional(),
+    provider_ref: z.string().regex(providerRefPattern).optional(),
+    request_id: z.string().max(512).optional(),
+    trace_id: z.string().max(512).optional(),
+    session_id: z.string().max(512).optional(),
+    api_key_id: z.string().max(512).optional(),
+    ip: z.string().max(128).optional(),
+    language: z.string().max(64).optional(),
+    cursor: z.string().max(4096).optional(),
+  })
+  .strict();
+
 export const adminModelsQuerySchema = z
   .object({ provider: z.string().min(1).optional(), model: z.string().min(1).optional() })
   .strict();
@@ -595,6 +656,9 @@ export type AdminStats = z.output<typeof adminStatsSchema>;
 export type AdminModel = z.output<typeof adminModelSchema>;
 export type AdminModelsResponse = z.output<typeof adminModelsResponseSchema>;
 export type AdminModelsQuery = z.input<typeof adminModelsQuerySchema>;
+export type AppRequestSummary = z.output<typeof appRequestSummarySchema>;
+export type AppRequestsQuery = z.input<typeof appRequestsQuerySchema>;
+export type AppRequestsResponse = z.output<typeof appRequestsResponseSchema>;
 export type AdminModelPartialFailure = z.output<typeof adminModelPartialFailureSchema>;
 export type GatewayHealth = z.output<typeof gatewayHealthSchema>;
 export type OpsRisk = z.output<typeof opsRiskSchema>;

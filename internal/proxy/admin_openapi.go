@@ -658,6 +658,26 @@ func enrichOpenAPIOperation(route, method string, op map[string]any) {
 			},
 		}
 		responses["200"] = successResponse("AdminModelsResponse")
+	case "get /admin/requests":
+		op["description"] = "X-Vibe-UI: app requests receive the safe typed request-summary projection. Legacy callers keep the existing response shape."
+		op["parameters"] = []any{
+			map[string]any{"name": "X-Vibe-UI", "in": "header", "required": true, "schema": map[string]any{"type": "string", "enum": []string{"app"}}},
+			map[string]any{"name": "limit", "in": "query", "required": false, "schema": map[string]any{"type": "integer", "minimum": 1, "maximum": 200, "default": 50}},
+			map[string]any{"name": "from", "in": "query", "required": false, "schema": map[string]any{"type": "string"}},
+			map[string]any{"name": "to", "in": "query", "required": false, "schema": map[string]any{"type": "string"}},
+			map[string]any{"name": "tz", "in": "query", "required": false, "schema": map[string]any{"type": "string", "default": "Asia/Seoul"}},
+			map[string]any{"name": "status", "in": "query", "required": false, "schema": map[string]any{"type": "string", "pattern": `^(success|error|4xx|5xx|[1-5][0-9]{2})$`}},
+			map[string]any{"name": "model", "in": "query", "required": false, "schema": map[string]any{"type": "string"}},
+			map[string]any{"name": "provider_ref", "in": "query", "required": false, "schema": map[string]any{"type": "string", "pattern": `^prv_[A-Za-z0-9_-]{43}$`}},
+			map[string]any{"name": "request_id", "in": "query", "required": false, "schema": map[string]any{"type": "string"}},
+			map[string]any{"name": "trace_id", "in": "query", "required": false, "schema": map[string]any{"type": "string"}},
+			map[string]any{"name": "session_id", "in": "query", "required": false, "schema": map[string]any{"type": "string"}},
+			map[string]any{"name": "api_key_id", "in": "query", "required": false, "schema": map[string]any{"type": "string"}},
+			map[string]any{"name": "ip", "in": "query", "required": false, "schema": map[string]any{"type": "string"}},
+			map[string]any{"name": "language", "in": "query", "required": false, "schema": map[string]any{"type": "string"}},
+			map[string]any{"name": "cursor", "in": "query", "required": false, "schema": map[string]any{"type": "string"}},
+		}
+		responses["200"] = successResponse("AppRequestsResponse")
 	case "get /admin/providers/slo":
 		op["parameters"] = []any{map[string]any{
 			"name": "window", "in": "query", "required": false,
@@ -783,7 +803,44 @@ func appUIOpenAPISchemas() map[string]any {
 	for name, schema := range modelCatalogOpenAPISchemas() {
 		schemas[name] = schema
 	}
+	for name, schema := range requestExplorerOpenAPISchemas() {
+		schemas[name] = schema
+	}
 	return schemas
+}
+
+func requestExplorerOpenAPISchemas() map[string]any {
+	providerRef := map[string]any{"type": "string", "minLength": providerRefLength, "maxLength": providerRefLength, "pattern": `^prv_[A-Za-z0-9_-]{43}$`}
+	return map[string]any{
+		"AppRequestSummary": map[string]any{
+			"type": "object", "additionalProperties": false,
+			"required": []string{"request_id", "trace_id", "session_id", "api_key_id", "ip", "method", "model", "provider_ref", "provider_display", "endpoint", "stream", "status_code", "latency_ms", "first_chunk_ms", "prompt_tokens", "completion_tokens", "total_tokens", "cached_tokens", "reasoning_tokens", "estimated_cost", "currency", "finish_reason", "created_at"},
+			"properties": map[string]any{
+				"request_id": map[string]any{"type": "string"}, "trace_id": map[string]any{"type": "string"},
+				"session_id": map[string]any{"type": "string"}, "api_key_id": map[string]any{"type": "string"},
+				"ip": map[string]any{"type": "string"}, "method": map[string]any{"type": "string"},
+				"model": map[string]any{"type": "string"}, "provider_ref": providerRef,
+				"provider_display": map[string]any{"type": "string"}, "endpoint": map[string]any{"type": "string"},
+				"stream": map[string]any{"type": "boolean"}, "status_code": map[string]any{"type": "integer", "minimum": 0, "maximum": 999},
+				"latency_ms":     map[string]any{"type": "integer", "format": "int64", "minimum": 0},
+				"first_chunk_ms": map[string]any{"type": "integer", "format": "int64", "minimum": 0},
+				"prompt_tokens":  map[string]any{"type": "integer", "minimum": 0}, "completion_tokens": map[string]any{"type": "integer", "minimum": 0},
+				"total_tokens": map[string]any{"type": "integer", "minimum": 0}, "cached_tokens": map[string]any{"type": "integer", "minimum": 0},
+				"reasoning_tokens": map[string]any{"type": "integer", "minimum": 0}, "estimated_cost": map[string]any{"type": "number", "minimum": 0},
+				"currency": map[string]any{"type": "string"}, "finish_reason": map[string]any{"type": "string"},
+				"created_at": map[string]any{"type": "string", "format": "date-time"},
+			},
+		},
+		"AppRequestsResponse": map[string]any{
+			"type": "object", "additionalProperties": false, "required": []string{"requests", "limit", "generated_at"},
+			"properties": map[string]any{
+				"requests":    map[string]any{"type": "array", "items": schemaRef("AppRequestSummary")},
+				"limit":       map[string]any{"type": "integer", "minimum": 1, "maximum": 200},
+				"next_cursor": map[string]any{"type": "string"}, "previous_cursor": map[string]any{"type": "string"},
+				"generated_at": map[string]any{"type": "string", "format": "date-time"},
+			},
+		},
+	}
 }
 
 // modelCatalogOpenAPISchemas documents the provider/model read contracts used by the

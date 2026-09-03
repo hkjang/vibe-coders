@@ -40,6 +40,15 @@ describe("app route query security", () => {
     );
   });
 
+  it("preserves only the request explorer deep-link filters", () => {
+    const safe = `?status=5xx&model=gpt-test&provider_ref=prv_${"a".repeat(43)}&request_id=req-1&trace_id=trace-1&session_id=session-1&api_key_id=key-1&ip=192.0.2.1&language=ko&from=2026-09-01&to=2026-09-03&tz=Asia%2FSeoul&limit=50&cursor=opaque.cursor&prompt=private`;
+    const result = sanitizeAppRouteSearch("/app/observability/requests", safe);
+    expect(result.rejectedKeys).toEqual(["prompt"]);
+    expect(result.search).not.toContain("prompt");
+    expect(result.search).toContain("cursor=opaque.cursor");
+    expect(result.search).toContain("request_id=req-1");
+  });
+
   it("removes unknown credential parameters and allowed values that contain secrets", () => {
     const result = sanitizeAppRouteSearch(
       "/app/gateway/models",

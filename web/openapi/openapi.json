@@ -589,6 +589,154 @@
         ],
         "type": "object"
       },
+      "AppRequestSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "api_key_id": {
+            "type": "string"
+          },
+          "cached_tokens": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "completion_tokens": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "endpoint": {
+            "type": "string"
+          },
+          "estimated_cost": {
+            "minimum": 0,
+            "type": "number"
+          },
+          "finish_reason": {
+            "type": "string"
+          },
+          "first_chunk_ms": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "ip": {
+            "type": "string"
+          },
+          "latency_ms": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "method": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "prompt_tokens": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "provider_display": {
+            "type": "string"
+          },
+          "provider_ref": {
+            "maxLength": 47,
+            "minLength": 47,
+            "pattern": "^prv_[A-Za-z0-9_-]{43}$",
+            "type": "string"
+          },
+          "reasoning_tokens": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "request_id": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "status_code": {
+            "maximum": 999,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "stream": {
+            "type": "boolean"
+          },
+          "total_tokens": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "trace_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "request_id",
+          "trace_id",
+          "session_id",
+          "api_key_id",
+          "ip",
+          "method",
+          "model",
+          "provider_ref",
+          "provider_display",
+          "endpoint",
+          "stream",
+          "status_code",
+          "latency_ms",
+          "first_chunk_ms",
+          "prompt_tokens",
+          "completion_tokens",
+          "total_tokens",
+          "cached_tokens",
+          "reasoning_tokens",
+          "estimated_cost",
+          "currency",
+          "finish_reason",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "AppRequestsResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "generated_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "limit": {
+            "maximum": 200,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "next_cursor": {
+            "type": "string"
+          },
+          "previous_cursor": {
+            "type": "string"
+          },
+          "requests": {
+            "items": {
+              "$ref": "#/components/schemas/AppRequestSummary"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "requests",
+          "limit",
+          "generated_at"
+        ],
+        "type": "object"
+      },
       "AuthLoginRequest": {
         "properties": {
           "email": {
@@ -9019,10 +9167,159 @@
     },
     "/admin/requests": {
       "get": {
+        "description": "X-Vibe-UI: app requests receive the safe typed request-summary projection. Legacy callers keep the existing response shape.",
         "operationId": "get__admin_requests",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Vibe-UI",
+            "required": true,
+            "schema": {
+              "enum": [
+                "app"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "tz",
+            "required": false,
+            "schema": {
+              "default": "Asia/Seoul",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "pattern": "^(success|error|4xx|5xx|[1-5][0-9]{2})$",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "model",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "provider_ref",
+            "required": false,
+            "schema": {
+              "pattern": "^prv_[A-Za-z0-9_-]{43}$",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "request_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "trace_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "session_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "api_key_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "ip",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "language",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppRequestsResponse"
+                }
+              }
+            },
             "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
