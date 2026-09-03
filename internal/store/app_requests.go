@@ -2,8 +2,26 @@ package store
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
+)
+
+const (
+	appRequestTimeLayout            = "2006-01-02T15:04:05.000000000Z"
+	maxAppRequestProviderCandidates = 1024
+	// SQL substr counts Unicode characters, while the public projection limits
+	// UTF-8 bytes. Reading max+1 characters lets the proxy detect overflow and
+	// still bounds each database value to at most 4*(max+1) bytes.
+	appRequestReadIDChars           = 513
+	appRequestReadIPChars           = 129
+	appRequestReadMethodChars       = 33
+	appRequestReadModelChars        = 257
+	appRequestReadProviderChars     = 257
+	appRequestReadEndpointChars     = 513
+	appRequestReadCurrencyChars     = 17
+	appRequestReadFinishReasonChars = 257
 )
 
 // AppRequestFilter is the bounded, read-only filter used by the React request
@@ -60,36 +78,73 @@ type AppRequestSummary struct {
 	CreatedAt        string  `json:"created_at"`
 }
 
-// AppRequestProviderNames returns provider identities visible in the caller's
-// team scope. Names never leave the proxy; they are used only to resolve an
-// opaque provider_ref back to an exact SQL predicate.
-func (s *SQLStore) AppRequestProviderNames(ctx context.Context, teams []string, teamScoped bool) ([]string, error) {
-	where, args := appendRequestTeamCondition([]string{"1=1"}, nil, "", teams, teamScoped)
-	rows, err := s.db.QueryContext(ctx, s.bind(`SELECT DISTINCT COALESCE(r.provider, '')
-		FROM request_logs r
-		WHERE `+strings.Join(where, " AND ")+`
-		ORDER BY COALESCE(r.provider, '')
-		LIMIT 10001`), args...)
+// AppRequestProviderCandidates returns a bounded list of configured provider
+// identities. It deliberately does not discover names by scanning request_logs:
+// provider_ref is accepted only for an operator-configured provider and fails
+// closed when the configured set exceeds the bounded lookup budget or contains
+// an identity that cannot be read within the public provider boundary.
+func (s *SQLStore) AppRequestProviderCandidates(ctx context.Context) ([]string, bool, error) {
+	rows, err := s.db.QueryContext(ctx, s.bind(`SELECT substr(name, 1, `+fmt.Sprint(appRequestReadProviderChars)+`)
+		FROM provider_configs
+		ORDER BY name ASC
+		LIMIT ?`), maxAppRequestProviderCandidates+1)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	defer rows.Close()
 	providers := []string{}
+	unsafe := false
 	for rows.Next() {
 		var provider string
 		if err := rows.Scan(&provider); err != nil {
-			return nil, err
+			return nil, false, err
+		}
+		if len(provider) > appRequestReadProviderChars-1 || !utf8.ValidString(provider) {
+			unsafe = true
 		}
 		providers = append(providers, provider)
 	}
-	return providers, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, false, err
+	}
+	truncated := len(providers) > maxAppRequestProviderCandidates
+	if truncated {
+		providers = providers[:maxAppRequestProviderCandidates]
+	}
+	return providers, truncated || unsafe, nil
+}
+
+// appRequestCreatedAtExpr normalizes the UTC RFC3339Nano strings written by
+// formatTime to one fixed-width representation inside SQL. RFC3339Nano omits
+// trailing fractional zeroes, so a direct TEXT comparison incorrectly sorts an
+// exact second (..03Z) after a later fractional instant (..03.5Z). The
+// expression uses functions/operators shared by SQLite and PostgreSQL.
+func appRequestCreatedAtExpr(column string) string {
+	return `(CASE
+		WHEN length(` + column + `) = 20 AND substr(` + column + `, 20, 1) = 'Z'
+			THEN substr(` + column + `, 1, 19) || '.000000000Z'
+		WHEN length(` + column + `) BETWEEN 22 AND 30
+			AND substr(` + column + `, 20, 1) = '.'
+			AND substr(` + column + `, length(` + column + `), 1) = 'Z'
+			THEN substr(` + column + `, 1, length(` + column + `) - 1)
+				|| substr('000000000', 1, 30 - length(` + column + `)) || 'Z'
+		ELSE ` + column + ` END)`
+}
+
+func appRequestFixedTime(value time.Time) string {
+	return value.UTC().Format(appRequestTimeLayout)
 }
 
 // AppRecentRequests returns one stable keyset page. hasMore refers to the
 // requested direction; newer pages are queried ascending and reversed so the
 // public result is always (created_at DESC, id DESC).
 func (s *SQLStore) AppRecentRequests(ctx context.Context, filter AppRequestFilter) ([]AppRequestSummary, bool, error) {
-	where := []string{"1=1"}
+	createdAt := appRequestCreatedAtExpr("r.created_at")
+	requestIDBytes := "length(CAST(r.id AS BLOB))"
+	if s.dialect == "postgres" {
+		requestIDBytes = "octet_length(r.id)"
+	}
+	where := []string{requestIDBytes + " BETWEEN 1 AND 512", "length(r.created_at) BETWEEN 20 AND 30"}
 	args := []any{}
 	addExact := func(column, value string) {
 		if value != "" {
@@ -126,33 +181,44 @@ func (s *SQLStore) AppRecentRequests(ctx context.Context, filter AppRequestFilte
 	}
 	where, args = appendRequestTeamCondition(where, args, "", filter.Teams, filter.TeamScoped)
 	if !filter.From.IsZero() {
-		where = append(where, "r.created_at >= ?")
-		args = append(args, filter.From.UTC().Format(time.RFC3339Nano))
+		where = append(where, createdAt+" >= ?")
+		args = append(args, appRequestFixedTime(filter.From))
 	}
 	if !filter.To.IsZero() {
-		where = append(where, "r.created_at <= ?")
-		args = append(args, filter.To.UTC().Format(time.RFC3339Nano))
+		where = append(where, createdAt+" <= ?")
+		args = append(args, appRequestFixedTime(filter.To))
 	}
-	order := "r.created_at DESC, r.id DESC"
+	order := createdAt + " DESC, r.id DESC"
 	if filter.CursorAt != "" {
+		cursorTime, err := time.Parse(time.RFC3339Nano, filter.CursorAt)
+		if err != nil {
+			return nil, false, fmt.Errorf("invalid app request cursor time: %w", err)
+		}
+		cursorAt := appRequestFixedTime(cursorTime)
 		operator := "<"
 		if filter.Direction == "newer" {
 			operator = ">"
-			order = "r.created_at ASC, r.id ASC"
+			order = createdAt + " ASC, r.id ASC"
 		}
-		where = append(where, "(r.created_at "+operator+" ? OR (r.created_at = ? AND r.id "+operator+" ?))")
-		args = append(args, filter.CursorAt, filter.CursorAt, filter.CursorID)
+		where = append(where, "("+createdAt+" "+operator+" ? OR ("+createdAt+" = ? AND r.id "+operator+" ?))")
+		args = append(args, cursorAt, cursorAt, filter.CursorID)
 	}
 	args = append(args, filter.Limit+1)
-	query := s.bind(`SELECT r.id, COALESCE(r.trace_id, ''), COALESCE(r.session_id, ''),
-			COALESCE(r.api_key_id, ''), COALESCE(NULLIF(r.client_ip, ''), 'unknown'),
-			COALESCE(r.method, ''), COALESCE(r.model, ''), COALESCE(r.provider, ''),
-			COALESCE(r.endpoint, ''), r.stream, r.status_code, r.latency_ms,
+	query := s.bind(`SELECT substr(r.id, 1, ` + fmt.Sprint(appRequestReadIDChars) + `),
+			substr(COALESCE(r.trace_id, ''), 1, ` + fmt.Sprint(appRequestReadIDChars) + `),
+			substr(COALESCE(r.session_id, ''), 1, ` + fmt.Sprint(appRequestReadIDChars) + `),
+			substr(COALESCE(r.api_key_id, ''), 1, ` + fmt.Sprint(appRequestReadIDChars) + `),
+			substr(COALESCE(NULLIF(r.client_ip, ''), 'unknown'), 1, ` + fmt.Sprint(appRequestReadIPChars) + `),
+			substr(COALESCE(r.method, ''), 1, ` + fmt.Sprint(appRequestReadMethodChars) + `),
+			substr(COALESCE(r.model, ''), 1, ` + fmt.Sprint(appRequestReadModelChars) + `),
+			substr(COALESCE(r.provider, ''), 1, ` + fmt.Sprint(appRequestReadProviderChars) + `),
+			substr(COALESCE(r.endpoint, ''), 1, ` + fmt.Sprint(appRequestReadEndpointChars) + `),
+			r.stream, r.status_code, r.latency_ms,
 			COALESCE(r.first_chunk_ms, 0), COALESCE(t.prompt_tokens, 0),
 			COALESCE(t.completion_tokens, 0), COALESCE(t.total_tokens, 0),
 			COALESCE(t.cached_tokens, 0), COALESCE(t.reasoning_tokens, 0),
-			COALESCE(t.estimated_cost, 0), COALESCE(t.currency, ''),
-			COALESCE(resp.finish_reason, ''), r.created_at
+			COALESCE(t.estimated_cost, 0), substr(COALESCE(t.currency, ''), 1, ` + fmt.Sprint(appRequestReadCurrencyChars) + `),
+			substr(COALESCE(resp.finish_reason, ''), 1, ` + fmt.Sprint(appRequestReadFinishReasonChars) + `), ` + createdAt + `
 		FROM request_logs r
 		LEFT JOIN token_usage t ON t.request_id = r.id
 		LEFT JOIN response_logs resp ON resp.request_id = r.id
@@ -175,6 +241,11 @@ func (s *SQLStore) AppRecentRequests(ctx context.Context, filter AppRequestFilte
 			&item.FinishReason, &item.CreatedAt); err != nil {
 			return nil, false, err
 		}
+		parsedAt, err := time.Parse(appRequestTimeLayout, item.CreatedAt)
+		if err != nil {
+			return nil, false, fmt.Errorf("invalid app request created_at: %w", err)
+		}
+		item.CreatedAt = appRequestFixedTime(parsedAt)
 		item.Stream = stream == 1
 		items = append(items, item)
 	}
