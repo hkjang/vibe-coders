@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [string]$Version,
-    [string]$PrevVersion = "v0.82.0",
+    [string]$PrevVersion = "v0.82.1",
     [switch]$Edit  # update an existing release's notes instead of creating it (no asset upload)
 )
 
@@ -29,7 +29,7 @@ function Test-RequiresComplianceAssets {
 }
 
 if (-not $Version) {
-    throw "Version parameter is required. Example: pwsh -File scripts/gh_release.ps1 -Version v0.82.1"
+    throw "Version parameter is required. Example: pwsh -File scripts/gh_release.ps1 -Version v0.82.2"
 }
 
 $repoRoot = Split-Path -Parent $PSScriptRoot

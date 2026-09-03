@@ -57,8 +57,8 @@ go run -ldflags "-X vibe-coders/internal/proxy.AppVersion=dev" ./cmd/gateway
 Docker로 독립 실행할 때는 현재 소스에서 이미지를 먼저 빌드합니다.
 
 ```bash
-docker build --build-arg VERSION=v0.82.1 -t ai-coding-proxy-gateway:v0.82.1 .
-UI_APP_ENABLED=true GATEWAY_VERSION=v0.82.1 ./scripts/init-deployment-env.sh .env
+docker build --build-arg VERSION=v0.82.2 -t ai-coding-proxy-gateway:v0.82.2 .
+UI_APP_ENABLED=true GATEWAY_VERSION=v0.82.2 ./scripts/init-deployment-env.sh .env
 docker compose --env-file .env up -d
 docker compose --env-file .env ps
 curl http://localhost:8080/health
@@ -1078,24 +1078,24 @@ React 산출물은 Go 바이너리에 embed되므로 운영 컨테이너에 Node
 주입됩니다.
 
 ```powershell
-pwsh -File scripts/release.ps1 -Version v0.82.1
+pwsh -File scripts/release.ps1 -Version v0.82.2
 ```
 
 ```bash
-./scripts/release.sh -v v0.82.1 -p linux/amd64
+./scripts/release.sh -v v0.82.2 -p linux/amd64
 ```
 
 산출물 예시:
 
 ```
 release/
-  ai-coding-proxy-gateway-v0.82.1.tar.gz
-  ai-coding-proxy-gateway-v0.82.1.tar.gz.sha256
-  README-offline-v0.82.1.md
-  SBOM-v0.82.1.spdx.json
-  THIRD_PARTY_LICENSES-v0.82.1.md
-  init-deployment-env-v0.82.1.sh
-  backup-volume-v0.82.1.sh
+  ai-coding-proxy-gateway-v0.82.2.tar.gz
+  ai-coding-proxy-gateway-v0.82.2.tar.gz.sha256
+  README-offline-v0.82.2.md
+  SBOM-v0.82.2.spdx.json
+  THIRD_PARTY_LICENSES-v0.82.2.md
+  init-deployment-env-v0.82.2.sh
+  backup-volume-v0.82.2.sh
 ```
 
 ### 폐쇄망 적재
@@ -1104,27 +1104,27 @@ release/
 2. 체크섬 확인
 
    ```bash
-   sha256sum -c ai-coding-proxy-gateway-v0.82.1.tar.gz.sha256
+   sha256sum -c ai-coding-proxy-gateway-v0.82.2.tar.gz.sha256
    ```
 
 3. 이미지 적재
 
    ```bash
-   gunzip -c ai-coding-proxy-gateway-v0.82.1.tar.gz | docker load
+   gunzip -c ai-coding-proxy-gateway-v0.82.2.tar.gz | docker load
    ```
 
 4. 최초 1회 비밀값 파일과 데이터 볼륨을 만든 뒤 실행
 
    ```bash
-   chmod 0700 init-deployment-env-v0.82.1.sh backup-volume-v0.82.1.sh
-   sudo env GATEWAY_VERSION=v0.82.1 \
-     ./init-deployment-env-v0.82.1.sh /opt/proxy-gateway/gateway.env
+   chmod 0700 init-deployment-env-v0.82.2.sh backup-volume-v0.82.2.sh
+   sudo env GATEWAY_VERSION=v0.82.2 \
+     ./init-deployment-env-v0.82.2.sh /opt/proxy-gateway/gateway.env
    docker volume create proxy-gateway-data >/dev/null
    docker run -d --name proxy-gateway --restart=always \
        -p 8080:8080 \
        --mount source=proxy-gateway-data,target=/data \
        --env-file /opt/proxy-gateway/gateway.env \
-       ai-coding-proxy-gateway:v0.82.1
+       ai-coding-proxy-gateway:v0.82.2
    ```
 
    초기화 스크립트는 `openssl`과 생성 결과를 검증한 뒤 임시 파일을 원자적으로 설치하며 API Key를 숨김 입력받습니다.
@@ -1134,7 +1134,7 @@ release/
 5. 또는 저장소에서 별도로 검토·전달한 `docker-compose.yml` 과 함께 운영
 
    ```bash
-   GATEWAY_VERSION=v0.82.1 ./init-deployment-env-v0.82.1.sh .env
+   GATEWAY_VERSION=v0.82.2 ./init-deployment-env-v0.82.2.sh .env
    docker compose up -d
    ```
 
@@ -1145,5 +1145,5 @@ release/
 같이 다시 검증할 수 있습니다.
 
 ```bash
-bash scripts/container-smoke.sh ai-coding-proxy-gateway:v0.82.1 v0.82.1
+bash scripts/container-smoke.sh ai-coding-proxy-gateway:v0.82.2 v0.82.2
 ```
