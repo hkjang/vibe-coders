@@ -232,7 +232,7 @@ test("keeps an exact model deep link across reload, restores focus, retries deta
   await expect(page.locator("h1", { hasText: "모델" })).toBeVisible();
   await expect(page.locator("button", { hasText: "7일" })).toHaveAttribute("aria-pressed", "true");
   let dialog = page.getByRole("dialog", { name: "shared-model" });
-  await expect(dialog.getByText("Agent Route", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("에이전트 경로", { exact: true })).toBeVisible();
   await expect(dialog.getByText("가상", { exact: true })).toBeVisible();
   await expect(page).toHaveURL(
     new RegExp(
@@ -240,7 +240,7 @@ test("keeps an exact model deep link across reload, restores focus, retries deta
     ),
   );
 
-  await expect(dialog.getByText("Request ID: req-tags-e2e")).toBeVisible();
+  await expect(dialog.getByText("요청 ID: req-tags-e2e")).toBeVisible();
   await expect.poll(tagRequestCount).toBe(2);
   await dialog.getByRole("button", { name: "모델 사용 지침 상세 재시도" }).click();
   await expect(dialog.getByText("coding and analysis")).toBeVisible();
@@ -248,7 +248,7 @@ test("keeps an exact model deep link across reload, restores focus, retries deta
 
   await page.reload();
   dialog = page.getByRole("dialog", { name: "shared-model" });
-  await expect(dialog.getByText("Agent Route", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("에이전트 경로", { exact: true })).toBeVisible();
   await expect(page).toHaveURL(
     new RegExp(`model=shared-model&model_provider=${agentRouteRef}&source=agent_route$`),
   );
@@ -261,7 +261,7 @@ test("keeps an exact model deep link across reload, restores focus, retries deta
   const agentRow = page
     .getByRole("row")
     .filter({ has: page.getByRole("link", { name: "shared-model", exact: true }) })
-    .filter({ hasText: "Agent Route" });
+    .filter({ hasText: "에이전트 경로" });
   const trigger = agentRow.getByRole("link", { name: "shared-model", exact: true });
   await trigger.click();
   dialog = page.getByRole("dialog", { name: "shared-model" });
@@ -278,7 +278,7 @@ test("keeps an exact model deep link across reload, restores focus, retries deta
     )
     .toContain("agent_route");
 
-  await expect(page.getByText("Request ID: req-models-e2e")).toBeVisible();
+  await expect(page.getByText("요청 ID: req-models-e2e")).toBeVisible();
   expect(await axeViolations(page)).toEqual([]);
 });
 
@@ -292,7 +292,7 @@ test("distinguishes a partial failure from a missing model when the provider is 
   await expect(dialog).toBeVisible();
   await expect(dialog.getByText("공급자 모델 카탈로그를 확인할 수 없습니다.")).toBeVisible();
   await expect(dialog.getByText(/provider_models_unavailable/)).toBeVisible();
-  await expect(dialog.getByText("Request ID: req-models-e2e")).toBeVisible();
+  await expect(dialog.getByText("요청 ID: req-models-e2e")).toBeVisible();
   await expect(dialog.getByText("모델을 찾을 수 없습니다.")).toBeHidden();
 });
 
@@ -302,7 +302,7 @@ test("requires an exact Provider and source for an ambiguous model deep link", a
 
   const dialog = page.getByRole("dialog", { name: "shared-model" });
   await expect(dialog.getByText("공급자와 출처를 선택해 주세요.")).toBeVisible();
-  await dialog.getByRole("link", { name: /openai .* Agent Route/ }).click();
+  await dialog.getByRole("link", { name: /openai .* 에이전트 경로/ }).click();
   await expect(dialog.getByText("가상", { exact: true })).toBeVisible();
   await expect(page).toHaveURL(new RegExp(`model_provider=${agentRouteRef}&source=agent_route`));
 });
