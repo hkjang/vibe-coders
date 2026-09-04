@@ -187,6 +187,7 @@ export type AuthLogoutRequest = {
 
 export type AuthMeResponse = {
     auth_enabled: boolean;
+    credential_prefixes?: Array<string>;
     expires_at?: number | null;
     menu_version?: number;
     user?: AuthUser | null;
@@ -640,6 +641,7 @@ export type StatusResponse = {
 export type UiAuthentication = {
     allow_local_login: boolean;
     authenticated: boolean;
+    credential_prefixes?: Array<string>;
     enabled: boolean;
     keycloak_enabled: boolean;
     mode: 'open' | 'session' | 'legacy_token';

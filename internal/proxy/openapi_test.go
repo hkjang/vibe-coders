@@ -166,6 +166,10 @@ func assertOpenAPIContract(t *testing.T, spec map[string]any) {
 	if menuVersion["type"] != "integer" {
 		t.Errorf("AuthMeResponse.menu_version type = %v, want integer", menuVersion["type"])
 	}
+	authMePrefixes, _ := authMeProperties["credential_prefixes"].(map[string]any)
+	if authMePrefixes["type"] != "array" || authMePrefixes["maxItems"] != float64(64) {
+		t.Errorf("AuthMeResponse.credential_prefixes schema = %v, want bounded array", authMePrefixes)
+	}
 	opsStatus, _ := schemas["OpsStatus"].(map[string]any)
 	opsStatusProperties, _ := opsStatus["properties"].(map[string]any)
 	partialFailures, _ := opsStatusProperties["partial_failures"].(map[string]any)

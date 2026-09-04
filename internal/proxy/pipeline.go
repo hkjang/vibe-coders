@@ -543,7 +543,7 @@ func (rc *requestPipeline) stepUpstream() bool {
 		provider.Reason, provider.Detail = balanced.Reason, balanced.Detail
 	}
 	if rc.authCtx != nil && !listAllows(provider.Name, rc.authCtx.AllowedProviders, rc.authCtx.DeniedProviders) {
-		providerLabel := boundedModelsProviderLabel(provider.Name)
+		providerLabel := s.boundedModelsProviderLabelForConfig(provider.Name)
 		_ = s.db.InsertAuditEvent(r.Context(), store.AuthEvent{ID: newID("ae"), EventType: "model_denied", APIKeyID: rc.authCtx.APIKeyID, TeamID: rc.authCtx.TeamID, IP: clientIP(r), UserAgent: r.UserAgent(), Detail: "provider:" + providerLabel, CreatedAt: time.Now().UTC()})
 		writeOpenAIError(w, http.StatusForbidden, "provider is not allowed by auth policy", "permission_error", "provider_denied")
 		return false
@@ -600,7 +600,7 @@ func (rc *requestPipeline) stepUpstream() bool {
 			if len(demoted) > 0 {
 				safeDemoted := make([]string, 0, len(demoted))
 				for _, name := range demoted {
-					safeDemoted = append(safeDemoted, boundedModelsProviderLabel(name))
+					safeDemoted = append(safeDemoted, s.boundedModelsProviderLabelForConfig(name))
 				}
 				// Say so: reordering that cannot be seen is exactly the opacity this
 				// gateway's routing work has been undoing.
@@ -656,13 +656,13 @@ func (rc *requestPipeline) stepUpstream() bool {
 			meta.Routing = routingPlan.toStore(meta.Request.ID, traceID, meta.Request.Provider)
 		}
 		applyUpstreamHeaderSummary(&meta.Request, upstreamHeaders, nil, w.Header())
-		setRoutingHeaders(w, provider, meta.Request.Provider, failoverFrom, failoverReason, failoverPath)
+		s.setRoutingHeaders(w, provider, meta.Request.Provider, failoverFrom, failoverReason, failoverPath)
 		refreshRoutingSummary(&meta.Request, routingPlan)
 		meta.Evaluations = buildLLMEvaluations(meta, ResponseAnalysis{})
 		s.metrics.ObserveLLMEvaluations(meta.Evaluations)
 		rc.recordSkillRun(rc.skillName, rc.skillVersion, "error", meta.Request.Model, 0, meta.Request.LatencyMS)
 		s.enqueue(meta)
-		s.notifyMattermost(r.Context(), "provider", "Provider 장애: "+boundedModelsProviderLabel(meta.Request.Provider)+" 요청 실패 ("+reason+")")
+		s.notifyMattermost(r.Context(), "provider", "Provider 장애: "+s.boundedModelsProviderLabelForConfig(meta.Request.Provider)+" 요청 실패 ("+reason+")")
 		message := "upstream request failed"
 		if reason == "timeout" {
 			message = "upstream request timed out"
@@ -751,10 +751,10 @@ func (rc *requestPipeline) stepUpstream() bool {
 		w.Header().Set("X-Accel-Buffering", "no")
 	}
 	if rc.modelsAggregateFallback {
-		w.Header().Set("X-Provider", boundedModelsProviderLabel(firstNonEmpty(resolvedName, provider.Name)))
+		w.Header().Set("X-Provider", s.boundedModelsProviderLabelForConfig(firstNonEmpty(resolvedName, provider.Name)))
 		w.Header().Set("X-Route-Reason", "models_fallback")
 	} else {
-		setRoutingHeaders(w, provider, meta.Request.Provider, failoverFrom, failoverReason, failoverPath)
+		s.setRoutingHeaders(w, provider, meta.Request.Provider, failoverFrom, failoverReason, failoverPath)
 	}
 	if rc.affinity.Key != "" {
 		// Echo how the conversation was identified so a client can confirm that its
@@ -895,23 +895,24 @@ func (rc *requestPipeline) stepUpstream() bool {
 //	X-Failover-From     original provider, only when a failover occurred
 //	X-Failover-Reason   what triggered it: 429 | 5xx | timeout | transport_error | context_overflow
 //	X-Failover-Path     full chain of actual failover hops (comma separated)
-func setRoutingHeaders(w http.ResponseWriter, selected resolvedProvider, servedBy, failoverFrom, failoverReason string, failoverPath []string) {
+func (s *Server) setRoutingHeaders(w http.ResponseWriter, selected resolvedProvider, servedBy, failoverFrom, failoverReason string, failoverPath []string) {
+	projectionArgs := s.externalCredentialProjectionArgs(selected.Name, servedBy, failoverFrom)
 	if name := firstNonEmpty(servedBy, selected.Name); name != "" {
-		w.Header().Set("X-Provider", boundedModelsProviderLabel(name))
+		w.Header().Set("X-Provider", s.boundedModelsProviderLabelForConfig(name))
 	}
 	if selected.Reason != "" {
-		w.Header().Set("X-Route-Reason", selected.Reason)
+		w.Header().Set("X-Route-Reason", boundedExternalProviderText(selected.Reason, projectionArgs...))
 	}
 	if selected.Detail != "" {
-		w.Header().Set("X-Route-Detail", selected.Detail)
+		w.Header().Set("X-Route-Detail", boundedExternalProviderText(selected.Detail, projectionArgs...))
 	}
 	if failoverFrom != "" {
-		w.Header().Set("X-Failover-From", boundedModelsProviderLabel(failoverFrom))
+		w.Header().Set("X-Failover-From", s.boundedModelsProviderLabelForConfig(failoverFrom))
 	}
 	if failoverReason != "" {
-		w.Header().Set("X-Failover-Reason", failoverReason)
+		w.Header().Set("X-Failover-Reason", boundedExternalProviderText(failoverReason, projectionArgs...))
 	}
 	if len(failoverPath) > 0 {
-		w.Header().Set("X-Failover-Path", strings.Join(failoverPath, ","))
+		w.Header().Set("X-Failover-Path", strings.Join(boundedExternalFallbackPath(failoverPath, projectionArgs...), ","))
 	}
 }

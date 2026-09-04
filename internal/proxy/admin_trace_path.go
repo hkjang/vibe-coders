@@ -26,10 +26,17 @@ func adminTracePathID(path, prefix, suffix string) (string, bool) {
 		}
 		id = strings.TrimSuffix(id, suffix)
 	}
-	if id == "" || id == "." || id == ".." || len(id) > adminTracePathIDMaxBytes ||
-		strings.Contains(id, "/") || !utf8.ValidString(id) ||
-		strings.IndexFunc(id, unicode.IsControl) >= 0 {
+	if !adminTraceIdentifierValid(id) {
 		return "", false
 	}
 	return id, true
+}
+
+func adminTraceIdentifierValid(id string) bool {
+	if id == "" || id == "." || id == ".." || len(id) > adminTracePathIDMaxBytes ||
+		strings.Contains(id, "/") || !utf8.ValidString(id) ||
+		strings.IndexFunc(id, unicode.IsControl) >= 0 {
+		return false
+	}
+	return true
 }

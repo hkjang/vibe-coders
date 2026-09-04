@@ -198,15 +198,26 @@ func (s *Server) handleMCPRequests(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
 	}
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
+	teams, teamScoped, scopeErr := requestTeamScopeForCallerChecked(s, r)
+	if scopeErr != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, "MCP request scope could not be resolved", "server_error", "mcp_request_scope_failed")
+		return
+	}
 	server := strings.TrimSpace(r.URL.Query().Get("server"))
 	tool := strings.TrimSpace(r.URL.Query().Get("tool"))
 	errorsOnly := r.URL.Query().Get("errors") == "1"
 	limit := recentLimit(r)
-	requests, err := s.db.RequestsForTool(r.Context(), server, tool, errorsOnly, limit)
+	requests, err := s.db.RequestsForToolScoped(r.Context(), server, tool, errorsOnly, limit, teams, teamScoped)
 	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "mcp_requests_failed")
+		writeOpenAIError(w, http.StatusInternalServerError, "MCP requests could not be loaded", "server_error", "mcp_requests_failed")
 		return
 	}
+	s.maskRecentRequests(r, requests)
 	writeJSON(w, http.StatusOK, map[string]any{"requests": requests})
 }
 

@@ -1,9 +1,13 @@
 package proxy
 
 import (
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
+
+	"vibe-coders/internal/audit"
+	"vibe-coders/internal/store"
 )
 
 // handleWaterfall returns the transaction waterfall for one session.
@@ -14,11 +18,12 @@ func (s *Server) handleWaterfall(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
 		return
 	}
 	sessionID := strings.TrimSpace(r.URL.Query().Get("session_id"))
-	if sessionID == "" {
+	if !adminTraceIdentifierValid(sessionID) {
 		writeOpenAIError(w, http.StatusBadRequest, "session_id is required", "invalid_request_error", "missing_session_id")
 		return
 	}
@@ -34,10 +39,49 @@ func (s *Server) handleWaterfall(w http.ResponseWriter, r *http.Request) {
 			slowMS = n
 		}
 	}
-	trace, err := s.db.Waterfall(r.Context(), sessionID, limit, slowMS)
-	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "waterfall_failed")
+	teams, teamScoped, scopeErr := requestTeamScopeForCallerChecked(s, r)
+	if scopeErr != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, "waterfall scope could not be resolved", "server_error", "waterfall_scope_failed")
 		return
 	}
+	trace, err := s.db.WaterfallScoped(r.Context(), sessionID, limit, slowMS, teams, teamScoped)
+	if err != nil {
+		slog.Error("waterfall query failed", "error", err)
+		writeOpenAIError(w, http.StatusInternalServerError, "waterfall could not be loaded", "server_error", "waterfall_failed")
+		return
+	}
+	s.projectWaterfallForExternal(r, &trace)
 	writeJSON(w, http.StatusOK, trace)
+}
+
+func (s *Server) projectWaterfallForExternal(r *http.Request, trace *store.WaterfallTrace) {
+	if trace == nil || s.canViewRawPrompts(r) {
+		return
+	}
+	rawProviders := make([]string, 0, len(trace.Spans)*2)
+	for _, span := range trace.Spans {
+		rawProviders = append(rawProviders, span.Provider, span.FallbackFrom)
+	}
+	projectionArgs := s.externalCredentialProjectionArgs(rawProviders...)
+	projectText := func(value string) string {
+		return audit.Redact(boundedExternalProviderText(value, projectionArgs...))
+	}
+	projectLabel := func(value string) string {
+		return audit.Redact(boundedExternalProviderLabelOrEmpty(value, projectionArgs...))
+	}
+
+	trace.SessionID = projectText(trace.SessionID)
+	trace.StartedAt = projectText(trace.StartedAt)
+	for index := range trace.Spans {
+		span := &trace.Spans[index]
+		span.RequestID = projectText(span.RequestID)
+		span.TraceID = projectText(span.TraceID)
+		span.Model = projectText(span.Model)
+		span.RequestedModel = projectText(span.RequestedModel)
+		span.Provider = projectLabel(span.Provider)
+		span.Endpoint = projectText(span.Endpoint)
+		span.Category = projectText(span.Category)
+		span.FallbackFrom = projectLabel(span.FallbackFrom)
+		span.CreatedAt = projectText(span.CreatedAt)
+	}
 }

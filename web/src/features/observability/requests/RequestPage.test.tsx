@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import axe from "axe-core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -12,6 +12,7 @@ import type { AppRequestsResponse } from "@/shared/api/schemas";
 import { usePreferences } from "@/shared/stores/preferences";
 
 const authRuntime = vi.hoisted(() => ({
+  credentialPrefixes: ["corp_"],
   featureFallback: true,
   legacyFallback: true,
   legacyPath: "/admin#/requests" as `/admin${string}`,
@@ -21,6 +22,7 @@ const authRuntime = vi.hoisted(() => ({
 vi.mock("@/app/auth/AuthProvider", () => ({
   useAuth: () => ({
     authenticationMode: "session",
+    credentialPrefixes: authRuntime.credentialPrefixes,
     features: [
       {
         appPath: "/app/observability/requests",
@@ -41,6 +43,7 @@ vi.mock("@/app/auth/AuthProvider", () => ({
 }));
 
 const providerRef = `prv_${"a".repeat(43)}`;
+const nextCursor = `djE6dGVzdA.${"n".repeat(43)}`;
 const row = {
   request_id: "req-001",
   trace_id: "trace-001",
@@ -70,7 +73,7 @@ const row = {
 const response = {
   requests: [row],
   limit: 50,
-  next_cursor: "next-cursor",
+  next_cursor: nextCursor,
   generated_at: "2026-09-03T01:03:00Z",
 } satisfies AppRequestsResponse;
 
@@ -147,7 +150,7 @@ describe("RequestPage", () => {
     await waitFor(() => expect(detail).toHaveFocus());
 
     await user.click(screen.getByRole("button", { name: "다음" }));
-    expect(screen.getByTestId("location")).toHaveTextContent("cursor=next-cursor");
+    expect(screen.getByTestId("location")).toHaveTextContent(`cursor=${nextCursor}`);
     const results = await axe.run(view.container);
     expect(results.violations).toHaveLength(0);
   });
@@ -164,6 +167,111 @@ describe("RequestPage", () => {
     expect(await screen.findByText("갱신에 실패해 마지막 정상 데이터를 표시합니다.")).toBeInTheDocument();
     expect(screen.getByText("req-001")).toBeInTheDocument();
     expect(request).toHaveBeenCalledTimes(2);
+  });
+
+  it("validates the IP filter inline and never sends an invalid deep link value", async () => {
+    const request = vi.spyOn(apiClient, "request").mockResolvedValue(response as never);
+    const user = userEvent.setup();
+    renderPage("/observability/requests?ip=not-an-ip");
+
+    expect(await screen.findByText("req-001")).toBeInTheDocument();
+    const input = screen.getByRole("textbox", { name: "클라이언트 IP" });
+    expect(input).toHaveValue("not-an-ip");
+    expect(input).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByText("올바른 IP 주소를 입력하세요.")).toHaveAttribute("role", "alert");
+    expect((request.mock.calls[0]?.[1] as { query?: Record<string, unknown> }).query).not.toHaveProperty(
+      "ip",
+    );
+
+    await user.click(screen.getByRole("button", { name: "조회" }));
+    expect(input).toHaveFocus();
+    expect(request).toHaveBeenCalledTimes(1);
+
+    await user.clear(input);
+    await user.type(input, "::ffff:192.0.2.10");
+    expect(input).not.toHaveAttribute("aria-invalid");
+    await user.click(screen.getByRole("button", { name: "조회" }));
+    expect(screen.getByTestId("location")).toHaveTextContent("ip=%3A%3Affff%3A192.0.2.10");
+    await waitFor(() => {
+      const latest = request.mock.calls.at(-1)?.[1] as { query?: Record<string, unknown> };
+      expect(latest.query?.ip).toBe("::ffff:192.0.2.10");
+    });
+  });
+
+  it("keeps a configured credential out of the API query and browser URL", async () => {
+    const request = vi.spyOn(apiClient, "request").mockResolvedValue(response as never);
+    const user = userEvent.setup();
+    renderPage();
+
+    expect(await screen.findByText("req-001")).toBeInTheDocument();
+    const model = screen.getByRole("textbox", { name: "모델" });
+    await user.type(model, `corp_${"A".repeat(43)}`);
+    await user.click(screen.getByRole("button", { name: "조회" }));
+
+    expect(model).toHaveFocus();
+    expect(screen.getByRole("alert")).toHaveTextContent("비밀정보를 제거한 뒤 검색하세요.");
+    expect(screen.getByTestId("location")).not.toHaveTextContent("corp_");
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+
+  it("validates request date-time and timezone filters before querying", async () => {
+    const request = vi.spyOn(apiClient, "request").mockResolvedValue(response as never);
+    const user = userEvent.setup();
+    renderPage();
+
+    expect(await screen.findByText("req-001")).toBeInTheDocument();
+    const from = screen.getByRole("textbox", { name: "시작 시각" });
+    await user.type(from, "2026-09-04T25:00");
+    await user.click(screen.getByRole("button", { name: "조회" }));
+    expect(from).toHaveFocus();
+    expect(screen.getByRole("alert")).toHaveTextContent("날짜와 시각");
+    expect(request).toHaveBeenCalledTimes(1);
+
+    await user.clear(from);
+    const timeZone = screen.getByRole("textbox", { name: "시간대" });
+    await user.clear(timeZone);
+    await user.type(timeZone, "Not/AZone");
+    await user.click(screen.getByRole("button", { name: "조회" }));
+    expect(timeZone).toHaveFocus();
+    expect(screen.getByRole("alert")).toHaveTextContent("IANA 시간대");
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+
+  it("validates bounded text and provider reference filters before querying", async () => {
+    const request = vi.spyOn(apiClient, "request").mockResolvedValue(response as never);
+    const user = userEvent.setup();
+    renderPage();
+
+    expect(await screen.findByText("req-001")).toBeInTheDocument();
+    const model = screen.getByRole("textbox", { name: "모델" });
+    fireEvent.change(model, { target: { value: "한".repeat(86) } });
+    await user.click(screen.getByRole("button", { name: "조회" }));
+    expect(model).toHaveFocus();
+    expect(screen.getByRole("alert")).toHaveTextContent("UTF-8 기준 256바이트");
+    expect(request).toHaveBeenCalledTimes(1);
+
+    fireEvent.change(model, { target: { value: "" } });
+    const provider = screen.getByRole("textbox", { name: "공급자 참조" });
+    await user.type(provider, "typo");
+    await user.click(screen.getByRole("button", { name: "조회" }));
+    expect(provider).toHaveFocus();
+    expect(screen.getByRole("alert")).toHaveTextContent("공급자 참조 형식");
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+
+  it("never sends oversized free-text or cursor values restored from a deep link", async () => {
+    const request = vi.spyOn(apiClient, "request").mockResolvedValue(response as never);
+    renderPage(
+      `/observability/requests?model=${encodeURIComponent("한".repeat(86))}&language=${encodeURIComponent("한".repeat(22))}&cursor=${"a".repeat(4_097)}`,
+    );
+
+    expect(await screen.findByText("req-001")).toBeInTheDocument();
+    await waitFor(() => {
+      const options = request.mock.calls[0]?.[1] as { query?: Record<string, unknown> };
+      expect(options.query).not.toHaveProperty("model");
+      expect(options.query).not.toHaveProperty("language");
+      expect(options.query).not.toHaveProperty("cursor");
+    });
   });
 
   it("renders list and detail times in the timezone selected by the filter", async () => {

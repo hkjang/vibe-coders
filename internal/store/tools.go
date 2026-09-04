@@ -14,6 +14,8 @@ type ToolFilter struct {
 	MCPOnly     bool
 	Since       time.Time
 	Limit       int
+	Teams       []string
+	TeamScoped  bool
 }
 
 func (f ToolFilter) where() (string, []any) {
@@ -76,6 +78,9 @@ func (s *SQLStore) ListMCPTools(ctx context.Context, f ToolFilter) ([]MCPToolSta
 		limit = 200
 	}
 	whereSQL, args := f.whereAliased("ti")
+	where := []string{whereSQL}
+	where, args = appendRequestTeamCondition(where, args, "", f.Teams, f.TeamScoped)
+	whereSQL = strings.Join(where, " AND ")
 	args = append(args, limit)
 	query := s.bind(`
 		SELECT COALESCE(NULLIF(ti.server_label, ''), '(none)') AS server,
@@ -191,11 +196,19 @@ func (s *SQLStore) ToolsForRequest(ctx context.Context, requestID string) ([]Too
 
 // RequestsForTool returns recent requests that touched the given server/tool.
 func (s *SQLStore) RequestsForTool(ctx context.Context, server, tool string, errorsOnly bool, limit int) ([]RecentRequest, error) {
+	return s.RequestsForToolScoped(ctx, server, tool, errorsOnly, limit, nil, false)
+}
+
+// RequestsForToolScoped applies the caller's request-team boundary while retaining
+// the unrestricted legacy wrapper for full administrators.
+func (s *SQLStore) RequestsForToolScoped(ctx context.Context, server, tool string, errorsOnly bool, limit int, teams []string, teamScoped bool) ([]RecentRequest, error) {
 	return s.RecentRequests(ctx, RequestFilter{
 		Limit:          limit,
 		ToolServer:     server,
 		ToolName:       tool,
 		ToolErrorsOnly: errorsOnly,
+		Teams:          teams,
+		TeamScoped:     teamScoped,
 	})
 }
 

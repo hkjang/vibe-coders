@@ -31,6 +31,7 @@ const bootstrap: UIBootstrap = {
     keycloak_enabled: true,
     allow_local_login: false,
     sso_login_url: "/auth/keycloak/login",
+    credential_prefixes: ["corp_", "svc_"],
   },
   user: {
     id: "admin-1",
@@ -48,6 +49,12 @@ const bootstrap: UIBootstrap = {
   system_status: { status: "healthy" },
   legacy_route_map: {},
 };
+
+const fallbackSsoStatus = {
+  keycloak_enabled: false,
+  allow_local_login: true,
+  login_url: endpoints.auth.keycloakLogin.path,
+} as const;
 
 function TestProviders({ children }: PropsWithChildren): React.JSX.Element {
   return <QueryClientProvider client={new QueryClient()}>{children}</QueryClientProvider>;
@@ -77,6 +84,11 @@ function AuthStateHarness(): React.JSX.Element {
 function AuthErrorHarness(): React.JSX.Element {
   const auth = useAuth();
   return <span>{auth.error ?? "오류 없음"}</span>;
+}
+
+function CredentialPrefixHarness(): React.JSX.Element {
+  const auth = useAuth();
+  return <span>{auth.credentialPrefixes.join("|")}</span>;
 }
 
 afterEach(() => {
@@ -290,6 +302,62 @@ describe("AuthProvider SSO callback errors", () => {
 });
 
 describe("AuthProvider runtime bootstrap refresh", () => {
+  it("uses the authenticated fallback credential-prefix registry when the combined bootstrap fails", async () => {
+    vi.spyOn(apiClient, "request").mockImplementation((async (endpoint: ApiEndpointBase) => {
+      if (endpoint.path === endpoints.uiBootstrap.path) {
+        throw new AppError("bootstrap unavailable", { kind: "http", status: 503 });
+      }
+      if (endpoint.path === endpoints.auth.ssoStatus.path) return fallbackSsoStatus;
+      if (endpoint.path === endpoints.auth.me.path) {
+        return {
+          auth_enabled: true,
+          credential_prefixes: ["corp_", "old_"],
+          expires_at: 2_000_000_000,
+          user: bootstrap.user,
+          version: "v0.83.0",
+        };
+      }
+      throw new Error(`unexpected request ${endpoint.path}`);
+    }) as typeof apiClient.request);
+
+    render(
+      <TestProviders>
+        <AuthProvider>
+          <CredentialPrefixHarness />
+        </AuthProvider>
+      </TestProviders>,
+    );
+
+    expect(await screen.findByText("corp_|old_")).toBeVisible();
+  });
+
+  it("fails closed when a legacy fallback response has no credential-prefix registry", async () => {
+    vi.spyOn(apiClient, "request").mockImplementation((async (endpoint: ApiEndpointBase) => {
+      if (endpoint.path === endpoints.uiBootstrap.path) {
+        throw new AppError("bootstrap unavailable", { kind: "http", status: 503 });
+      }
+      if (endpoint.path === endpoints.auth.ssoStatus.path) return fallbackSsoStatus;
+      if (endpoint.path === endpoints.auth.me.path) {
+        return {
+          auth_enabled: true,
+          user: bootstrap.user,
+          version: "v0.82.2",
+        };
+      }
+      throw new Error(`unexpected request ${endpoint.path}`);
+    }) as typeof apiClient.request);
+
+    render(
+      <TestProviders>
+        <AuthProvider>
+          <AuthStateHarness />
+        </AuthProvider>
+      </TestProviders>,
+    );
+
+    expect(await screen.findByText("error")).toBeVisible();
+  });
+
   it("refreshes runtime UI flags on visibility and bounded active-tab polling without loading flicker", async () => {
     let currentBootstrap = bootstrap;
     let poll: (() => void) | undefined;

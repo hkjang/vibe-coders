@@ -65,6 +65,10 @@ func (s *Server) handleDomainRoutingDecisions(w http.ResponseWriter, r *http.Req
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
 		return
 	}
+	if !s.canViewRawPrompts(r) {
+		writeOpenAIError(w, http.StatusForbidden, "원문 라우팅 학습 데이터 조회 권한이 필요합니다.", "permission_error", "raw_prompt_access_required")
+		return
+	}
 	filter := domainRoutingFilterFromRequest(r)
 	decisions, err := s.db.ListDomainRoutingDecisions(r.Context(), filter)
 	if err != nil {
@@ -90,6 +94,10 @@ func (s *Server) handleDomainExamples(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
 		return
 	}
+	if !s.canViewRawPrompts(r) {
+		writeOpenAIError(w, http.StatusForbidden, "원문 라우팅 예시 조회 권한이 필요합니다.", "permission_error", "raw_prompt_access_required")
+		return
+	}
 	examples, err := s.db.ListDomainExamples(r.Context(), strings.TrimSpace(r.URL.Query().Get("route")), recentLimit(r))
 	if err != nil {
 		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "domain_examples_failed")
@@ -105,6 +113,10 @@ func (s *Server) handleDomainReviewQueue(w http.ResponseWriter, r *http.Request)
 	}
 	if r.Method != http.MethodGet {
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
+	if !s.canViewRawPrompts(r) {
+		writeOpenAIError(w, http.StatusForbidden, "원문 라우팅 검토 데이터 조회 권한이 필요합니다.", "permission_error", "raw_prompt_access_required")
 		return
 	}
 	filter := domainRoutingFilterFromRequest(r)

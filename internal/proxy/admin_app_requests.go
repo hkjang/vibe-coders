@@ -14,6 +14,7 @@ import (
 	"time"
 	"unicode"
 
+	"vibe-coders/internal/audit"
 	"vibe-coders/internal/store"
 )
 
@@ -219,15 +220,11 @@ func normalizeAppRequestCursor(cursor *appRequestCursor) error {
 }
 
 func (s *Server) appRequestTextHasCredential(value string) bool {
-	if providerURLComponentHasCredential(value) {
+	if providerURLComponentHasCredential(value) || audit.Contains(value) {
 		return true
 	}
-	lower := strings.ToLower(value)
-	if strings.Contains(lower, "vc_sk_") || strings.Contains(lower, "vc_sa_") {
-		return true
-	}
-	for _, prefix := range []string{s.cfg.Auth.APIKeyPrefix, s.cfg.Auth.ServiceKeyPrefix} {
-		if len(prefix) >= 4 && strings.Contains(value, prefix) {
+	for _, prefix := range uiCredentialPrefixes(s.cfg.Auth) {
+		if providerTextContainsConfiguredCredentialPrefix(value, prefix) {
 			return true
 		}
 	}
@@ -350,6 +347,14 @@ func (s *Server) handleAppRequests(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusBadRequest, "조회 기간이 올바르지 않습니다.", "invalid_request_error", "invalid_requests_range")
 		return
 	}
+	if params["ip"] != "" {
+		canonicalIP, validIP := canonicalExternalIPAddress(params["ip"])
+		if !validIP {
+			writeOpenAIError(w, http.StatusBadRequest, "ip가 올바르지 않습니다.", "invalid_request_error", "invalid_requests_ip")
+			return
+		}
+		params["ip"] = canonicalIP
+	}
 	teams, teamScoped, err := requestTeamScopeForCallerChecked(s, r)
 	if err != nil {
 		writeOpenAIError(w, http.StatusInternalServerError, "요청 목록을 불러오지 못했습니다.", "server_error", "requests_failed")
@@ -422,7 +427,7 @@ func (s *Server) handleAppRequests(w http.ResponseWriter, r *http.Request) {
 			TraceID:          s.projectAppRequestText(row.TraceID, appRequestIDMaxBytes),
 			SessionID:        s.projectAppRequestText(row.SessionID, appRequestIDMaxBytes),
 			APIKeyID:         s.projectAppRequestText(row.APIKeyID, appRequestIDMaxBytes),
-			IP:               s.projectAppRequestText(row.IP, appRequestIPMaxBytes),
+			IP:               boundedExternalIPAddress(row.IP),
 			Method:           s.projectAppRequestText(row.Method, appRequestMethodMaxBytes),
 			Model:            s.projectAppRequestText(row.Model, appRequestModelMaxBytes),
 			ProviderRef:      providerRefValue,

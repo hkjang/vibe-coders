@@ -101,7 +101,7 @@ func (rc *requestPipeline) stepAgentRoute() bool {
 		rc.body = rewritten
 		if provider := strings.TrimSpace(route.Provider); provider != "" {
 			r.Header.Set("X-Proxy-Provider", provider)
-			w.Header().Set("X-Agent-Provider", boundedModelsProviderLabel(provider))
+			w.Header().Set("X-Agent-Provider", s.boundedModelsProviderLabelForConfig(provider))
 		}
 		w.Header().Set("X-Agent-Route", route.VirtualModel)
 		w.Header().Set("X-Agent-Backing-Model", backingModel)
@@ -255,7 +255,7 @@ func (s *Server) handleAgentRouteChatWithRequestedModel(w http.ResponseWriter, r
 	w.Header().Set("X-Agent-Route", route.VirtualModel)
 	w.Header().Set("X-Agent-Backing-Model", backingModel)
 	if route.Provider != "" {
-		w.Header().Set("X-Agent-Provider", boundedModelsProviderLabel(route.Provider))
+		w.Header().Set("X-Agent-Provider", s.boundedModelsProviderLabelForConfig(route.Provider))
 	}
 	w.Header().Set("X-Agent-Tools", strconv.Itoa(len(ts.tools)))
 
@@ -266,7 +266,7 @@ func (s *Server) handleAgentRouteChatWithRequestedModel(w http.ResponseWriter, r
 		if !stream {
 			w.Header().Set("X-Agent-Steps", strconv.Itoa(outcome.Steps))
 			w.Header().Set("X-Agent-Tool-Calls", strconv.Itoa(outcome.ToolCalls))
-			writeMCPDiscoveryCompletion(w, route.VirtualModel, outcome.Content, nil)
+			s.writeMCPDiscoveryCompletion(w, route.VirtualModel, outcome.Content, nil)
 		}
 		return meta
 	}

@@ -5,6 +5,10 @@ import { describe, expect, it, vi } from "vitest";
 import { RouteQueryGuard } from "@/app/guards/RouteQueryGuard";
 import { rejectedSensitiveQuery } from "@/shared/security/app-route-query";
 
+vi.mock("@/app/auth/AuthProvider", () => ({
+  useAuth: () => ({ credentialPrefixes: ["vc_sk_", "vc_sa_", "corp_"] }),
+}));
+
 function Probe({ rendered }: { rendered: () => void }): React.JSX.Element {
   const location = useLocation();
   rendered();

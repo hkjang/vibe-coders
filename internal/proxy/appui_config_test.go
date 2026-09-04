@@ -30,6 +30,10 @@ func TestAppUIBootstrapAndRuntimeToggle(t *testing.T) {
 	if authenticated, _ := auth["authenticated"].(bool); !authenticated {
 		t.Fatal("auth-disabled deployment without legacy tokens should bootstrap as an operator")
 	}
+	prefixes, _ := auth["credential_prefixes"].([]any)
+	if len(prefixes) != 2 || prefixes[0] != "vc_sk_" || prefixes[1] != "vc_sa_" {
+		t.Fatalf("bootstrap credential prefixes = %#v", prefixes)
+	}
 	features, _ := body["migration_registry"].([]any)
 	if len(features) != len(appUIFeatures) {
 		t.Fatalf("migration registry length = %d, want %d", len(features), len(appUIFeatures))
@@ -67,6 +71,33 @@ func TestAppUIBootstrapAndRuntimeToggle(t *testing.T) {
 		if allowed[i] != want {
 			t.Fatalf("implemented previews allowed without Legacy fallback = %#v, want %v", allowed, wantAllowed)
 		}
+	}
+}
+
+func TestUICredentialPrefixesAreBoundedAndDeduplicated(t *testing.T) {
+	got := uiCredentialPrefixes(config.AuthConfig{
+		APIKeyPrefix: "corp_", ServiceKeyPrefix: "corp_",
+		HistoricalKeyPrefixes: []string{"old_", "corp_", "legacy"},
+	})
+	if strings.Join(got, ",") != "corp_,vc_sk_,vc_sa_,old_,legacy" {
+		t.Fatalf("custom credential prefixes = %#v", got)
+	}
+	if got := uiCredentialPrefixes(config.AuthConfig{APIKeyPrefix: strings.Repeat("x", 513)}); strings.Join(got, ",") != "vc_sk_,vc_sa_" {
+		t.Fatalf("oversized credential prefix must be omitted while built-ins remain: %#v", got)
+	}
+}
+
+func TestHistoricalCredentialPrefixesApplyToProviderProjection(t *testing.T) {
+	server := &Server{cfg: config.Config{Auth: config.AuthConfig{
+		APIKeyPrefix: "corp_", ServiceKeyPrefix: "svc_",
+		HistoricalKeyPrefixes: []string{"oldfoo_"},
+	}}}
+	oldKey := "oldfoo_" + strings.Repeat("A", 43)
+	if server.modelsProviderLabelSafeForConfig(oldKey) {
+		t.Fatal("historical generated key must not cross provider display boundaries")
+	}
+	if !server.modelsProviderLabelSafeForConfig("model-" + strings.Repeat("A", 43)) {
+		t.Fatal("ordinary long model identifier must remain visible")
 	}
 }
 

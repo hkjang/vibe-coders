@@ -408,6 +408,60 @@ func TestMCPUpstreamNameAdmissionPreservesExactLegacyEdit(t *testing.T) {
 	}
 }
 
+func TestMCPUpstreamURLAdmissionAndLowerProjectionRejectCredentials(t *testing.T) {
+	const credential = "vc_sk_abcdefghijklmnopqrstuvwxyzABCDEF"
+	server, db := newKnowledgeServer(t)
+	gateway := httptest.NewServer(server.Routes())
+	defer gateway.Close()
+
+	unsafeCreate := postJSON(t, gateway.URL+"/admin/mcp/upstreams", "", map[string]any{
+		"id": "unsafe-url", "name": "unsafe url", "url": "https://operator:password@mcp.invalid/rpc?token=" + credential, "enabled": false,
+	})
+	unsafeCreateBody, _ := io.ReadAll(unsafeCreate.Body)
+	unsafeCreate.Body.Close()
+	if unsafeCreate.StatusCode != http.StatusBadRequest || !bytes.Contains(unsafeCreateBody, []byte("invalid_url")) {
+		t.Fatalf("credential-bearing MCP URL admission status=%d body=%s", unsafeCreate.StatusCode, unsafeCreateBody)
+	}
+
+	safeLabel := postJSON(t, gateway.URL+"/admin/mcp/upstreams", "", map[string]any{
+		"id": "vc_sk_model", "name": "svc-vc_sk_preview", "url": "https://mcp.invalid/rpc", "enabled": false,
+	})
+	safeLabelBody, _ := io.ReadAll(safeLabel.Body)
+	safeLabel.Body.Close()
+	if safeLabel.StatusCode != http.StatusCreated {
+		t.Fatalf("ordinary vc_sk label was rejected: status=%d body=%s", safeLabel.StatusCode, safeLabelBody)
+	}
+	unsafePatch := patchJSON(t, gateway.URL+"/admin/mcp/upstreams/vc_sk_model", "", map[string]any{
+		"url": "https://mcp.invalid/rpc?client_secret=" + credential,
+	})
+	unsafePatchBody, _ := io.ReadAll(unsafePatch.Body)
+	unsafePatch.Body.Close()
+	if unsafePatch.StatusCode != http.StatusBadRequest || !bytes.Contains(unsafePatchBody, []byte("invalid_url")) {
+		t.Fatalf("credential-bearing MCP URL patch status=%d body=%s", unsafePatch.StatusCode, unsafePatchBody)
+	}
+	stored, found, err := db.GetMCPUpstream(t.Context(), "vc_sk_model")
+	if err != nil || !found || stored.URL != "https://mcp.invalid/rpc" {
+		t.Fatalf("rejected MCP URL patch mutated storage: upstream=%+v found=%v err=%v", stored, found, err)
+	}
+
+	projected := server.projectMCPUpstreamsForExternal([]store.MCPUpstream{{
+		ID: credential, Name: "legacy-safe", URL: "https://operator:password@mcp.invalid/rpc?token=" + credential,
+		Metadata: store.MCPUpstreamMetadata{
+			Description: credential, Domains: []string{credential}, AllowedModels: []string{credential}, DefaultTool: credential,
+		},
+	}})
+	projectedErrors := server.projectMCPDiscoveryErrorsForExternal(map[string]string{credential: "owner@example.com " + credential})
+	visible, err := json.Marshal(map[string]any{"upstreams": projected, "errors": projectedErrors})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{credential, "operator:password", "owner@example.com"} {
+		if bytes.Contains(visible, []byte(forbidden)) {
+			t.Fatalf("lower MCP upstream projection leaked %q: %s", forbidden, visible)
+		}
+	}
+}
+
 func TestMCPGroundedDatabaseFailureIsStable(t *testing.T) {
 	server, db := newKnowledgeServer(t)
 	if err := db.Close(); err != nil {

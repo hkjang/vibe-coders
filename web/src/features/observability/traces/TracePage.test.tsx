@@ -3,7 +3,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import userEvent from "@testing-library/user-event";
 import axe from "axe-core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { MemoryRouter, Route, Routes, useLocation } from "react-router";
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router";
 
 import { TracePage } from "@/features/observability/traces/TracePage";
 import { apiClient } from "@/shared/api/client";
@@ -13,6 +13,7 @@ import type { AppRequestsResponse } from "@/shared/api/schemas";
 import { usePreferences } from "@/shared/stores/preferences";
 
 const authRuntime = vi.hoisted(() => ({
+  credentialPrefixes: ["corp_"],
   legacyFallback: true,
   legacyPath: "/admin#/llm",
   scopes: ["admin:read"] as string[],
@@ -21,6 +22,7 @@ const authRuntime = vi.hoisted(() => ({
 vi.mock("@/app/auth/AuthProvider", () => ({
   useAuth: () => ({
     authenticationMode: "session",
+    credentialPrefixes: authRuntime.credentialPrefixes,
     features: [
       {
         appPath: "/app/observability/traces",
@@ -41,6 +43,8 @@ vi.mock("@/app/auth/AuthProvider", () => ({
 }));
 
 const providerRef = `prv_${"a".repeat(43)}`;
+const previousCursor = `djE6cHJldmlvdXM.${"p".repeat(43)}`;
+const nextCursor = `djE6bmV4dA.${"n".repeat(43)}`;
 const firstRow = {
   request_id: "req-001",
   trace_id: "trace-001",
@@ -78,14 +82,25 @@ const secondRow = {
 const response = {
   requests: [secondRow, firstRow],
   limit: 50,
-  previous_cursor: "previous-cursor",
-  next_cursor: "next-cursor",
+  previous_cursor: previousCursor,
+  next_cursor: nextCursor,
   generated_at: "2026-09-04T01:03:00Z",
 } satisfies AppRequestsResponse;
 
 function LocationProbe(): React.JSX.Element {
   const location = useLocation();
-  return <output data-testid="location">{`${location.pathname}${location.search}`}</output>;
+  const navigate = useNavigate();
+  return (
+    <>
+      <output data-testid="location">{`${location.pathname}${location.search}`}</output>
+      <button type="button" onClick={() => void navigate(-1)}>
+        테스트 기록 뒤로
+      </button>
+      <button type="button" onClick={() => void navigate(1)}>
+        테스트 기록 앞으로
+      </button>
+    </>
+  );
 }
 
 function renderPage(initialEntry = "/observability/traces") {
@@ -165,6 +180,21 @@ describe("TracePage", () => {
     expect(screen.getByTestId("location")).not.toHaveTextContent("selected_request");
   });
 
+  it("restores the selection trigger when browser history closes request details", async () => {
+    vi.spyOn(apiClient, "request").mockResolvedValue(response as never);
+    const user = userEvent.setup();
+    renderPage();
+
+    expect(await screen.findByRole("heading", { name: "요청 처리 흐름" })).toBeVisible();
+    const trigger = screen.getByRole("button", { name: "요청 req-001 흐름 선택" });
+    await user.click(trigger);
+    expect(screen.getByRole("region", { name: "요청 req-001" })).toHaveFocus();
+
+    await user.click(screen.getByRole("button", { name: "테스트 기록 뒤로" }));
+    await waitFor(() => expect(screen.getByTestId("location")).not.toHaveTextContent("selected_request"));
+    expect(trigger).toHaveFocus();
+  });
+
   it("restores URL filters, selects a safe request detail and pages without retaining the selection", async () => {
     const request = vi.spyOn(apiClient, "request").mockResolvedValue({
       ...response,
@@ -197,7 +227,7 @@ describe("TracePage", () => {
     });
 
     await user.click(screen.getByRole("button", { name: "다음" }));
-    expect(screen.getByTestId("location")).toHaveTextContent("cursor=next-cursor");
+    expect(screen.getByTestId("location")).toHaveTextContent(`cursor=${nextCursor}`);
     expect(screen.getByTestId("location")).not.toHaveTextContent("selected_request");
   });
 
@@ -255,6 +285,24 @@ describe("TracePage", () => {
     expect(screen.getByLabelText("모델")).toHaveValue("작성 중인 모델");
   });
 
+  it("restores omitted defaults and clears an unsubmitted draft on browser history navigation", async () => {
+    vi.spyOn(apiClient, "request").mockResolvedValue(response as never);
+    const user = userEvent.setup();
+    renderPage();
+
+    expect(await screen.findByRole("heading", { name: "요청 처리 흐름" })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "흐름 조회" }));
+    await waitFor(() => expect(screen.getByTestId("location")).toHaveTextContent("limit=50"));
+    expect(screen.getByTestId("location")).toHaveTextContent("tz=Asia%2FSeoul");
+
+    await user.type(screen.getByLabelText("모델"), "저장하지 않은 초안");
+    await user.click(screen.getByRole("button", { name: "테스트 기록 뒤로" }));
+
+    await waitFor(() => expect(screen.getByTestId("location")).toHaveTextContent("/observability/traces"));
+    expect(screen.getByTestId("location")).not.toHaveTextContent("limit=");
+    expect(screen.getByLabelText("모델")).toHaveValue("");
+  });
+
   it("blocks an overlong UTF-8 trace ID and focuses its inline error", async () => {
     const request = vi.spyOn(apiClient, "request").mockResolvedValue(response as never);
     const user = userEvent.setup();
@@ -270,6 +318,112 @@ describe("TracePage", () => {
     expect(traceID).toHaveFocus();
     expect(request).toHaveBeenCalledTimes(1);
     expect(screen.getByTestId("location")).not.toHaveTextContent("trace_id=");
+  });
+
+  it("blocks an overlong UTF-8 model and focuses its inline error", async () => {
+    const request = vi.spyOn(apiClient, "request").mockResolvedValue(response as never);
+    const user = userEvent.setup();
+    renderPage();
+
+    expect(await screen.findByRole("heading", { name: "요청 처리 흐름" })).toBeVisible();
+    const model = screen.getByLabelText("모델");
+    fireEvent.change(model, { target: { value: "한".repeat(86) } });
+    await user.click(screen.getByRole("button", { name: "흐름 조회" }));
+
+    expect(screen.getByRole("alert")).toHaveTextContent("UTF-8 기준 256바이트 이하여야 합니다.");
+    expect(model).toHaveAttribute("aria-invalid", "true");
+    expect(model).toHaveFocus();
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId("location")).not.toHaveTextContent("model=");
+
+    fireEvent.input(model, { target: { value: "한글-모델" } });
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("keeps a configured credential out of the trace query and browser URL", async () => {
+    const request = vi.spyOn(apiClient, "request").mockResolvedValue(response as never);
+    const user = userEvent.setup();
+    renderPage();
+
+    expect(await screen.findByRole("heading", { name: "요청 처리 흐름" })).toBeVisible();
+    const model = screen.getByLabelText("모델");
+    await user.type(model, `corp_${"A".repeat(43)}`);
+    await user.click(screen.getByRole("button", { name: "흐름 조회" }));
+
+    expect(model).toHaveFocus();
+    expect(screen.getByRole("alert")).toHaveTextContent("비밀정보를 제거한 뒤 검색하세요.");
+    expect(screen.getByTestId("location")).not.toHaveTextContent("corp_");
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+
+  it("validates trace date-time and timezone filters before querying", async () => {
+    const request = vi.spyOn(apiClient, "request").mockResolvedValue(response as never);
+    const user = userEvent.setup();
+    renderPage();
+
+    expect(await screen.findByRole("heading", { name: "요청 처리 흐름" })).toBeVisible();
+    const from = screen.getByLabelText("시작 시각");
+    await user.type(from, "2026-09-04T25:00");
+    await user.click(screen.getByRole("button", { name: "흐름 조회" }));
+    expect(from).toHaveFocus();
+    expect(screen.getByRole("alert")).toHaveTextContent("날짜와 시각");
+    expect(request).toHaveBeenCalledTimes(1);
+
+    await user.clear(from);
+    const timeZone = screen.getByLabelText("시간대");
+    await user.clear(timeZone);
+    await user.type(timeZone, "Not/AZone");
+    await user.click(screen.getByRole("button", { name: "흐름 조회" }));
+    expect(timeZone).toHaveFocus();
+    expect(screen.getByRole("alert")).toHaveTextContent("IANA 시간대");
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+
+  it("clears an invalid draft and its accessibility state when empty filters are reset", async () => {
+    vi.spyOn(apiClient, "request").mockResolvedValue(response as never);
+    const user = userEvent.setup();
+    renderPage();
+
+    expect(await screen.findByRole("heading", { name: "요청 처리 흐름" })).toBeVisible();
+    const model = screen.getByLabelText("모델");
+    fireEvent.change(model, { target: { value: "한".repeat(86) } });
+    await user.click(screen.getByRole("button", { name: "흐름 조회" }));
+    expect(model).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByRole("alert")).toHaveTextContent("UTF-8 기준 256바이트 이하여야 합니다.");
+
+    await user.click(screen.getByRole("button", { name: "필터 초기화" }));
+    expect(model).toHaveValue("");
+    expect(model).not.toHaveAttribute("aria-invalid");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByTestId("location")).toHaveTextContent("/observability/traces");
+  });
+
+  it("clears stale validation errors when browser history restores valid filters", async () => {
+    vi.spyOn(apiClient, "request").mockResolvedValue(response as never);
+    const user = userEvent.setup();
+    renderPage("/observability/traces?model=%EC%B2%AB-%EB%AA%A8%EB%8D%B8");
+
+    expect(await screen.findByRole("heading", { name: "요청 처리 흐름" })).toBeVisible();
+    const model = screen.getByLabelText("모델");
+    fireEvent.change(model, { target: { value: "둘째-모델" } });
+    await user.click(screen.getByRole("button", { name: "흐름 조회" }));
+    await waitFor(() =>
+      expect(screen.getByTestId("location")).toHaveTextContent("model=%EB%91%98%EC%A7%B8-%EB%AA%A8%EB%8D%B8"),
+    );
+
+    fireEvent.change(screen.getByLabelText("모델"), { target: { value: "한".repeat(86) } });
+    await user.click(screen.getByRole("button", { name: "흐름 조회" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("UTF-8 기준 256바이트 이하여야 합니다.");
+
+    await user.click(screen.getByRole("button", { name: "테스트 기록 뒤로" }));
+    await waitFor(() => expect(screen.getByLabelText("모델")).toHaveValue("첫-모델"));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("모델")).not.toHaveAttribute("aria-invalid");
+
+    await user.click(screen.getByRole("button", { name: "테스트 기록 앞으로" }));
+    await waitFor(() => expect(screen.getByLabelText("모델")).toHaveValue("둘째-모델"));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("모델")).not.toHaveAttribute("aria-invalid");
   });
 
   it("uses a muted status badge for an unknown HTTP status", async () => {

@@ -27,8 +27,13 @@ func (s *Server) handleFlowMap(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
 	}
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
 	id := strings.TrimSpace(r.URL.Query().Get("request_id"))
-	if id == "" {
+	if id == "" || !adminTraceIdentifierValid(id) {
 		writeOpenAIError(w, http.StatusBadRequest, "request_id is required", "invalid_request_error", "missing_request_id")
 		return
 	}
@@ -37,10 +42,22 @@ func (s *Server) handleFlowMap(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusNotFound, "request not found", "invalid_request_error", "not_found")
 		return
 	}
+	if !s.canViewRequestDetail(r, detail.Request) {
+		writeOpenAIError(w, http.StatusForbidden, "request is outside your team scope", "permission_error", "cross_team_access_denied")
+		return
+	}
+	rawProvider := detail.Request.Provider
+	rawFallback := detail.Request.FallbackFrom
+	projectionArgs := s.externalCredentialProjectionArgs(rawProvider, rawFallback)
+	s.maskRequestDetail(r, &detail)
 	req := detail.Request
 	gov := detail.Governance
-	routing, _ := s.db.RoutingDecisionByID(r.Context(), id)
+	routing, _ := s.db.RoutingDecisionByRequestID(r.Context(), id)
 	mcpRoutes, _ := s.db.MCPRouteDecisionsForRequest(r.Context(), id)
+	if !s.canViewRawPrompts(r) {
+		routing = projectRoutingDecisionProviderForExternal(routing, projectionArgs...)
+		projectMCPRouteDecisionsProviderForExternal(mcpRoutes, projectionArgs...)
+	}
 
 	stages := []flowStage{}
 

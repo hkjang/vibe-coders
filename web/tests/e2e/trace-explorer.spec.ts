@@ -18,6 +18,8 @@ interface TraceGatewayHarness {
 }
 
 const providerRef = `prv_${"t".repeat(43)}`;
+const traceNextCursor = `djE6dHJhY2UtbmV4dA.${"n".repeat(43)}`;
+const tracePreviousCursor = `djE6dHJhY2UtcHJldmlvdXM.${"p".repeat(43)}`;
 const exactTraceId = "Trace-Mixed_Case:001";
 const rangeFrom = "2026-09-03T23:00:00Z";
 const rangeTo = "2026-09-04T02:00:00+00:00";
@@ -121,14 +123,14 @@ const nextPageRequest = {
 const firstPage = {
   requests: [selectedRequest, relatedRequest],
   limit: 25,
-  next_cursor: "trace-cursor-next",
+  next_cursor: traceNextCursor,
   generated_at: "2026-09-04T01:00:05Z",
 };
 
 const secondPage = {
   requests: [nextPageRequest],
   limit: 25,
-  previous_cursor: "trace-cursor-previous",
+  previous_cursor: tracePreviousCursor,
   generated_at: "2026-09-04T01:00:06Z",
 };
 
@@ -198,8 +200,8 @@ async function mockTraceGateway(
       validateTraceFilters(url, expectedFilters, filterViolations);
       const cursor = url.searchParams.get("cursor");
       const limit = Number(expectedFilters.limit);
-      if (cursor === "trace-cursor-next") return json({ ...secondPage, limit });
-      if (cursor === null || cursor === "trace-cursor-previous") return json({ ...firstPage, limit });
+      if (cursor === traceNextCursor) return json({ ...secondPage, limit });
+      if (cursor === null || cursor === tracePreviousCursor) return json({ ...firstPage, limit });
       filterViolations.push(`unexpected cursor: ${cursor}`);
       return route.fulfill({
         status: 400,
@@ -317,43 +319,41 @@ test("추적 탐색기 딥링크와 새로고침에서 안전한 필터·선택�
   await expect(firstDetailTrigger).toBeFocused();
 
   await page.getByRole("button", { name: "다음" }).click();
-  await expect(page).toHaveURL(/cursor=trace-cursor-next/u);
+  await expect.poll(() => new URL(page.url()).searchParams.get("cursor")).toBe(traceNextCursor);
   await expect(page).not.toHaveURL(/selected_request=/u);
   await expect(page.getByRole("button", { name: "요청 req-trace-page-2 상세 보기" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "요청 req-trace-001", exact: true })).toBeHidden();
   await expect
     .poll(
-      () =>
-        harness.calls.filter((call) => call.url.searchParams.get("cursor") === "trace-cursor-next").length,
+      () => harness.calls.filter((call) => call.url.searchParams.get("cursor") === traceNextCursor).length,
     )
     .toBe(1);
-  const nextCall = harness.calls.find((call) => call.url.searchParams.get("cursor") === "trace-cursor-next");
+  const nextCall = harness.calls.find((call) => call.url.searchParams.get("cursor") === traceNextCursor);
   for (const [key, value] of Object.entries(expectedFilters)) {
     expect(nextCall?.url.searchParams.get(key)).toBe(value);
   }
   expect(await axeViolations(page)).toEqual([]);
 
   const nextPageCallCount = harness.calls.filter(
-    (call) => call.url.searchParams.get("cursor") === "trace-cursor-next",
+    (call) => call.url.searchParams.get("cursor") === traceNextCursor,
   ).length;
   await page.reload();
   await expect(page.getByRole("button", { name: "요청 req-trace-page-2 상세 보기" })).toBeVisible();
   await expect
     .poll(
-      () =>
-        harness.calls.filter((call) => call.url.searchParams.get("cursor") === "trace-cursor-next").length,
+      () => harness.calls.filter((call) => call.url.searchParams.get("cursor") === traceNextCursor).length,
     )
     .toBeGreaterThan(nextPageCallCount);
 
   await page.getByRole("button", { name: "이전" }).click();
-  await expect(page).toHaveURL(/cursor=trace-cursor-previous/u);
+  await expect.poll(() => new URL(page.url()).searchParams.get("cursor")).toBe(tracePreviousCursor);
   await expect(page).not.toHaveURL(/selected_request=/u);
   await expect(page.getByRole("button", { name: "요청 req-trace-001 상세 보기" })).toBeVisible();
   await expect
-    .poll(() => harness.calls.some((call) => call.url.searchParams.get("cursor") === "trace-cursor-previous"))
+    .poll(() => harness.calls.some((call) => call.url.searchParams.get("cursor") === tracePreviousCursor))
     .toBe(true);
   const previousCall = harness.calls.find(
-    (call) => call.url.searchParams.get("cursor") === "trace-cursor-previous",
+    (call) => call.url.searchParams.get("cursor") === tracePreviousCursor,
   );
   for (const [key, value] of Object.entries(expectedFilters)) {
     expect(previousCall?.url.searchParams.get(key)).toBe(value);

@@ -121,7 +121,7 @@ func (s *Server) shipMultiModelFacts(table string, rows []map[string]any) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		payload, _, err := insertJSONEachRow(ctx, s.client, ch, table, rows)
+		payload, _, err := insertJSONEachRow(ctx, s.client, ch, table, rows, s.externalCredentialProjectionArgs()...)
 		if err != nil {
 			_ = s.db.RecordClickHouseFactRetry(context.Background(), table, payload, len(rows), err.Error())
 		}

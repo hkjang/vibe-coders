@@ -27,8 +27,11 @@ func (s *Server) handleMyRecentRequests(w http.ResponseWriter, r *http.Request) 
 	}
 	for index := range items {
 		rawProvider := items[index].Provider
-		items[index].Provider = boundedModelsProviderLabelOrEmpty(rawProvider)
-		items[index].Model = boundedExternalProviderText(items[index].Model, rawProvider)
+		projectionArgs := s.externalCredentialProjectionArgs(rawProvider)
+		items[index].ID = boundedExternalProviderText(items[index].ID, projectionArgs...)
+		items[index].Provider = boundedExternalProviderLabelOrEmpty(rawProvider, projectionArgs...)
+		items[index].Model = boundedExternalProviderText(items[index].Model, projectionArgs...)
+		items[index].Endpoint = boundedExternalProviderText(items[index].Endpoint, projectionArgs...)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"requests": items})
 }
@@ -79,7 +82,7 @@ func (s *Server) handleMyRequestReceipt(w http.ResponseWriter, r *http.Request) 
 		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "detail_failed")
 		return
 	}
-	req := projectRecentRequestProviderForExternal(detail.Request)
+	req := projectRecentRequestProviderForExternal(detail.Request, s.externalCredentialProjectionArgs()...)
 
 	receipt := map[string]any{
 		"request_id":    req.ID,
@@ -99,8 +102,8 @@ func (s *Server) handleMyRequestReceipt(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Routing reason (if a routing decision was recorded).
-	if rd, err := s.db.RoutingDecisionByID(r.Context(), reqID); err == nil {
-		rd = projectRoutingDecisionProviderForExternal(rd)
+	if rd, err := s.db.RoutingDecisionByRequestID(r.Context(), reqID); err == nil {
+		rd = projectRoutingDecisionProviderForExternal(rd, s.externalCredentialProjectionArgs()...)
 		receipt["routing"] = map[string]any{
 			"requested_model": rd.RequestedModel, "selected_model": rd.SelectedModel,
 			"selected_provider": rd.SelectedProvider, "reason": rd.DecisionReason,

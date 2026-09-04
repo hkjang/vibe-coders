@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -18,18 +20,44 @@ func (s *Server) handleRequestReadableSubresource(w http.ResponseWriter, r *http
 		return
 	}
 	id, sub := rest[:idx], strings.Trim(rest[idx+1:], "/")
+	if !adminTraceIdentifierValid(id) {
+		writeOpenAIError(w, http.StatusBadRequest, "invalid request id", "invalid_request_error", "invalid_request_id")
+		return
+	}
+	switch sub {
+	case "headers", "routing", "body", "timeline":
+		if r.Method != http.MethodGet {
+			w.Header().Set("Allow", http.MethodGet)
+			writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+			return
+		}
+	case "export":
+		if r.Method != http.MethodPost {
+			w.Header().Set("Allow", http.MethodPost)
+			writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+			return
+		}
+	default:
+		writeOpenAIError(w, http.StatusNotFound, "not found", "invalid_request_error", "not_found")
+		return
+	}
 	detail, err := s.db.RequestDetail(r.Context(), id)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeOpenAIError(w, http.StatusNotFound, "request not found", "invalid_request_error", "request_not_found")
 			return
 		}
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "request_detail_failed")
+		slog.Error("request readability query failed", "request_id", id, "error", err)
+		writeOpenAIError(w, http.StatusInternalServerError, "request detail could not be loaded", "server_error", "request_detail_failed")
 		return
 	}
 	if !s.canViewRequestDetail(r, detail.Request) {
 		writeOpenAIError(w, http.StatusForbidden, "request is outside your team scope", "permission_error", "cross_team_access_denied")
 		return
+	}
+	var legacyProviderIdentities []string
+	if !s.canViewRawPrompts(r) {
+		legacyProviderIdentities = s.externalCredentialProjectionArgs(detail.Request.Provider, detail.Request.FallbackFrom)
 	}
 	s.maskRequestDetail(r, &detail)
 	if detail.Readability == nil {
@@ -37,43 +65,21 @@ func (s *Server) handleRequestReadableSubresource(w http.ResponseWriter, r *http
 	}
 	switch sub {
 	case "headers":
-		if r.Method != http.MethodGet {
-			writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
-			return
-		}
 		writeJSON(w, http.StatusOK, map[string]any{"request_id": id, "headers": detail.Readability.Headers})
 	case "routing":
-		if r.Method != http.MethodGet {
-			writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
-			return
-		}
 		writeJSON(w, http.StatusOK, map[string]any{"request_id": id, "routing": detail.Readability.Routing, "model": detail.Readability.Model, "badges": detail.Readability.Badges})
 	case "body":
-		if r.Method != http.MethodGet {
-			writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]any{"request_id": id, "body": requestBodyEvidence(r.Context(), s, id, detail)})
+		writeJSON(w, http.StatusOK, map[string]any{"request_id": id, "body": requestBodyEvidence(r.Context(), s, id, detail, legacyProviderIdentities...)})
 	case "timeline":
-		if r.Method != http.MethodGet {
-			writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
-			return
-		}
 		writeJSON(w, http.StatusOK, map[string]any{"request_id": id, "timeline": detail.Readability.Timeline, "spans": detail.Spans, "text2sql_spans": detail.Text2SQLSpans, "tools": detail.Tools})
 	case "export":
-		if r.Method != http.MethodPost {
-			writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
-			return
-		}
 		format := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("format")))
 		if format == "md" || format == "markdown" {
 			w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
-			_, _ = w.Write([]byte(markdownRequestEvidence(r.Context(), s, id, detail)))
+			_, _ = w.Write([]byte(markdownRequestEvidence(r.Context(), s, id, detail, legacyProviderIdentities...)))
 			return
 		}
-		writeJSON(w, http.StatusOK, maskedRequestEvidence(r.Context(), s, id, detail))
-	default:
-		writeOpenAIError(w, http.StatusNotFound, "not found", "invalid_request_error", "not_found")
+		writeJSON(w, http.StatusOK, maskedRequestEvidence(r.Context(), s, id, detail, legacyProviderIdentities...))
 	}
 }
 
@@ -150,7 +156,7 @@ func (s *Server) canViewRequestDetail(r *http.Request, request store.RecentReque
 	return false
 }
 
-func requestBodyEvidence(ctx context.Context, s *Server, id string, detail store.RequestDetail) map[string]any {
+func requestBodyEvidence(ctx context.Context, s *Server, id string, detail store.RequestDetail, legacyProviderIdentities ...string) map[string]any {
 	body := map[string]any{}
 	if detail.Readability != nil && detail.Readability.Body != nil {
 		for k, v := range detail.Readability.Body {
@@ -165,10 +171,13 @@ func requestBodyEvidence(ctx context.Context, s *Server, id string, detail store
 	} else {
 		body["raw_available"] = false
 	}
+	if len(legacyProviderIdentities) > 0 {
+		projectProviderMetadataMapForExternal(body, legacyProviderIdentities...)
+	}
 	return body
 }
 
-func maskedRequestEvidence(ctx context.Context, s *Server, id string, detail store.RequestDetail) map[string]any {
+func maskedRequestEvidence(ctx context.Context, s *Server, id string, detail store.RequestDetail, legacyProviderIdentities ...string) map[string]any {
 	redactPromptDetails(detail.Prompts)
 	if detail.Response != nil {
 		detail.Response.ResponseTextOptional = audit.Redact(detail.Response.ResponseTextOptional)
@@ -180,12 +189,12 @@ func maskedRequestEvidence(ctx context.Context, s *Server, id string, detail sto
 		"prompts":     detail.Prompts,
 		"response":    detail.Response,
 		"governance":  detail.Governance,
-		"body":        requestBodyEvidence(ctx, s, id, detail),
+		"body":        requestBodyEvidence(ctx, s, id, detail, legacyProviderIdentities...),
 	}
 }
 
-func markdownRequestEvidence(ctx context.Context, s *Server, id string, detail store.RequestDetail) string {
-	ev := maskedRequestEvidence(ctx, s, id, detail)
+func markdownRequestEvidence(ctx context.Context, s *Server, id string, detail store.RequestDetail, legacyProviderIdentities ...string) string {
+	ev := maskedRequestEvidence(ctx, s, id, detail, legacyProviderIdentities...)
 	b, _ := json.MarshalIndent(ev, "", "  ")
 	r := detail.Request
 	return "# Request Evidence\n\n" +
@@ -205,7 +214,12 @@ func maskedRawJSON(raw string) any {
 		return ""
 	}
 	var decoded any
-	if err := json.Unmarshal([]byte(raw), &decoded); err != nil {
+	decoder := json.NewDecoder(strings.NewReader(raw))
+	decoder.UseNumber()
+	if err := decoder.Decode(&decoded); err != nil {
+		return audit.Redact(raw)
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
 		return audit.Redact(raw)
 	}
 	return maskJSONForDisplay(decoded)

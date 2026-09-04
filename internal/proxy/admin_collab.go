@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
 
+	"vibe-coders/internal/audit"
 	"vibe-coders/internal/store"
 )
 
@@ -18,32 +20,41 @@ func (s *Server) handleRequestNote(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
 	}
-	// Path: /admin/requests/{id}/note
-	rest := strings.TrimPrefix(r.URL.Path, "/admin/requests/")
-	parts := strings.SplitN(rest, "/", 2)
-	if len(parts) != 2 || parts[1] != "note" {
-		writeOpenAIError(w, http.StatusNotFound, "not found", "invalid_request_error", "not_found")
+	if r.Method != http.MethodGet && r.Method != http.MethodPost && r.Method != http.MethodPut && r.Method != http.MethodDelete {
+		w.Header().Set("Allow", "GET, POST, PUT, DELETE")
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
 		return
 	}
-	id := parts[0]
+	id, valid := adminTracePathID(r.URL.Path, "/admin/requests/", "/note")
+	if !valid {
+		writeOpenAIError(w, http.StatusBadRequest, "invalid request id", "invalid_request_error", "invalid_request_id")
+		return
+	}
+	detail, err := s.db.RequestDetail(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeOpenAIError(w, http.StatusNotFound, "request not found", "invalid_request_error", "request_not_found")
+			return
+		}
+		slog.Error("request note scope lookup failed", "request_id", id, "error", err)
+		writeOpenAIError(w, http.StatusInternalServerError, "request lookup failed", "server_error", "request_lookup_failed")
+		return
+	}
+	if !s.canViewRequestDetail(r, detail.Request) {
+		writeOpenAIError(w, http.StatusForbidden, "request is outside your team scope", "permission_error", "cross_team_access_denied")
+		return
+	}
 	switch r.Method {
 	case http.MethodGet:
 		note, _, err := s.db.GetRequestNote(r.Context(), id)
 		if err != nil {
-			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "note_failed")
+			slog.Error("request note query failed", "request_id", id, "error", err)
+			writeOpenAIError(w, http.StatusInternalServerError, "request note could not be loaded", "server_error", "note_failed")
 			return
 		}
+		maskRequestNoteForExternal(&note, s.canViewRawPrompts(r), s.externalCredentialProjectionArgs(detail.Request.Provider, detail.Request.FallbackFrom)...)
 		writeJSON(w, http.StatusOK, note)
 	case http.MethodPut, http.MethodPost:
-		// verify the request exists so we don't accumulate orphans
-		if _, err := s.db.RequestDetail(r.Context(), id); err != nil {
-			if errors.Is(err, store.ErrNotFound) {
-				writeOpenAIError(w, http.StatusNotFound, "request not found", "invalid_request_error", "request_not_found")
-				return
-			}
-			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "request_lookup_failed")
-			return
-		}
 		var payload struct {
 			Tags []string `json:"tags"`
 			Note string   `json:"note"`
@@ -59,20 +70,34 @@ func (s *Server) handleRequestNote(w http.ResponseWriter, r *http.Request) {
 			CreatedBy: adminID(r),
 		}
 		if err := s.db.UpsertRequestNote(r.Context(), note); err != nil {
-			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "note_save_failed")
+			slog.Error("request note save failed", "request_id", id, "error", err)
+			writeOpenAIError(w, http.StatusInternalServerError, "request note could not be saved", "server_error", "note_save_failed")
 			return
 		}
-		s.auditAdmin(r, "request_note.upsert", "", auditJSON(map[string]any{"id": id, "tags": note.Tags}))
+		// Tags are operator-controlled and may accidentally contain a secret. Keep the
+		// audit record useful without persisting their raw values a second time.
+		s.auditAdmin(r, "request_note.upsert", "", auditJSON(map[string]any{"id": id, "tag_count": len(note.Tags)}))
+		maskRequestNoteForExternal(&note, s.canViewRawPrompts(r), s.externalCredentialProjectionArgs(detail.Request.Provider, detail.Request.FallbackFrom)...)
 		writeJSON(w, http.StatusOK, note)
 	case http.MethodDelete:
 		if err := s.db.DeleteRequestNote(r.Context(), id); err != nil {
-			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "note_delete_failed")
+			slog.Error("request note delete failed", "request_id", id, "error", err)
+			writeOpenAIError(w, http.StatusInternalServerError, "request note could not be deleted", "server_error", "note_delete_failed")
 			return
 		}
 		s.auditAdmin(r, "request_note.delete", auditJSON(map[string]string{"id": id}), "")
 		writeJSON(w, http.StatusOK, map[string]string{"id": id, "status": "deleted"})
-	default:
-		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+	}
+}
+
+func maskRequestNoteForExternal(note *store.RequestNote, showRaw bool, rawProviders ...string) {
+	if note == nil || showRaw {
+		return
+	}
+	note.Note = audit.Redact(boundedExternalProviderText(note.Note, rawProviders...))
+	note.CreatedBy = audit.Redact(boundedExternalProviderText(note.CreatedBy, rawProviders...))
+	for index := range note.Tags {
+		note.Tags[index] = audit.Redact(boundedExternalProviderText(note.Tags[index], rawProviders...))
 	}
 }
 
@@ -341,6 +366,10 @@ func (s *Server) handleAuditExportCSV(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "audit_export_failed")
 		return
 	}
+	showRaw := s.canViewRawPrompts(r)
+	if !showRaw {
+		s.projectAdminAuditsForExternal(audits)
+	}
 	events, err := s.db.ListAlertEvents(r.Context(), limit)
 	if err != nil {
 		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "audit_export_failed")
@@ -360,7 +389,13 @@ func (s *Server) handleAuditExportCSV(w http.ResponseWriter, r *http.Request) {
 	for _, e := range events {
 		detail := fmt.Sprintf("rule=%s metric=%s value=%.2f threshold=%.2f delivered=%t err=%s",
 			e.RuleName, e.Metric, e.Value, e.Threshold, e.Delivered, e.DeliveryError)
-		_ = wr.Write([]string{e.CreatedAt.UTC().Format(time.RFC3339), "alert_event", e.RuleID, "alert.fire", "", detail})
+		actor := e.RuleID
+		if !showRaw {
+			projectionArgs := s.externalCredentialProjectionArgs()
+			actor = audit.Redact(boundedExternalProviderText(actor, projectionArgs...))
+			detail = audit.Redact(boundedExternalProviderText(detail, projectionArgs...))
+		}
+		_ = wr.Write([]string{e.CreatedAt.UTC().Format(time.RFC3339), "alert_event", actor, "alert.fire", "", detail})
 	}
 	wr.Flush()
 }

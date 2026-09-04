@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"sort"
 	"strings"
@@ -198,7 +199,8 @@ func (s *Server) handleMCPUpstreamFlow(w http.ResponseWriter, r *http.Request) {
 	}
 	up, found, err := s.db.GetMCPUpstream(r.Context(), id)
 	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "mcp_upstream_lookup_failed")
+		slog.Error("MCP upstream flow lookup failed", "upstream_id", id, "error", err)
+		writeOpenAIError(w, http.StatusInternalServerError, "MCP upstream flow could not be loaded", "server_error", "mcp_upstream_lookup_failed")
 		return
 	}
 	if !found {
@@ -212,11 +214,27 @@ func (s *Server) handleMCPUpstreamFlow(w http.ResponseWriter, r *http.Request) {
 			routes = append(routes, rv)
 		}
 	}
-	tools, _ := s.db.ListMCPTools(r.Context(), store.ToolFilter{ServerLabel: up.Name, MCPOnly: true, Since: time.Now().Add(-7 * 24 * time.Hour), Limit: 100})
-	recent, _ := s.db.RequestsForTool(r.Context(), up.Name, "", false, 20)
+	teams, teamScoped, scopeErr := requestTeamScopeForCallerChecked(s, r)
+	if scopeErr != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, "MCP upstream flow scope could not be resolved", "server_error", "mcp_upstream_flow_scope_failed")
+		return
+	}
+	tools, err := s.db.ListMCPTools(r.Context(), store.ToolFilter{
+		ServerLabel: up.Name, MCPOnly: true, Since: time.Now().Add(-7 * 24 * time.Hour), Limit: 100,
+		Teams: teams, TeamScoped: teamScoped,
+	})
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, "MCP upstream flow could not be loaded", "server_error", "mcp_upstream_flow_failed")
+		return
+	}
+	recent, err := s.db.RequestsForToolScoped(r.Context(), up.Name, "", false, 20, teams, teamScoped)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, "MCP upstream flow could not be loaded", "server_error", "mcp_upstream_flow_failed")
+		return
+	}
 	discoveryRuns, _ := s.db.MCPDiscoveryRuns(r.Context(), up.ID, 10)
 	policy, final := s.effectiveMCPPolicy(r.Context(), up.Name, "")
-	writeJSON(w, http.StatusOK, map[string]any{
+	response := map[string]any{
 		"upstream":        up,
 		"routes":          routes,
 		"tool_stats":      tools,
@@ -232,7 +250,66 @@ func (s *Server) handleMCPUpstreamFlow(w http.ResponseWriter, r *http.Request) {
 			{"name": "route_map", "status": map[bool]string{true: "ok", false: "warn"}[len(routes) > 0], "detail": len(routes)},
 			{"name": "policy", "status": final["decision"], "detail": final["reason"]},
 		},
-	})
+	}
+	if !s.canViewRawPrompts(r) {
+		projectionArgs := s.externalCredentialProjectionArgs(up.ID, up.Name, up.URL)
+		projectedUpstreams := s.projectMCPUpstreamsForExternal([]store.MCPUpstream{up})
+		response["upstream"] = projectedUpstreams[0]
+		projectMCPRouteViewsForExternal(routes, projectionArgs...)
+		projectMCPToolStatsForExternal(tools, projectionArgs...)
+		projectMCPDiscoveryRunsForExternal(discoveryRuns, projectionArgs...)
+		for _, step := range response["steps"].([]map[string]any) {
+			projectProviderMetadataMapForExternal(step, projectionArgs...)
+		}
+		projectProviderMetadataMapForExternal(policy, projectionArgs...)
+		projectProviderMetadataMapForExternal(final, projectionArgs...)
+		response["discovery_error"] = boundedExternalProviderText(snap.errors[up.Name], projectionArgs...)
+	}
+	s.maskRecentRequests(r, recent)
+	writeJSON(w, http.StatusOK, response)
+}
+
+func projectMCPRouteViewsForExternal(routes []mcpRouteView, projectionArgs ...string) {
+	for index := range routes {
+		route := &routes[index]
+		rawUpstream := route.UpstreamName
+		args := append([]string{rawUpstream}, projectionArgs...)
+		route.Kind = boundedExternalProviderText(route.Kind, args...)
+		route.ExposedName = boundedExternalProviderText(route.ExposedName, args...)
+		route.URI = boundedExternalProviderText(route.URI, args...)
+		route.UpstreamID = boundedExternalProviderText(route.UpstreamID, args...)
+		route.UpstreamName = boundedExternalProviderLabelOrEmpty(rawUpstream, projectionArgs...)
+		route.TargetMethod = boundedExternalProviderText(route.TargetMethod, args...)
+		route.TargetName = boundedExternalProviderText(route.TargetName, args...)
+		route.Description = boundedExternalProviderText(route.Description, args...)
+		route.LastDiscoveredAt = boundedExternalProviderText(route.LastDiscoveredAt, args...)
+		route.DiscoveryError = boundedExternalProviderText(route.DiscoveryError, args...)
+	}
+}
+
+func projectMCPToolStatsForExternal(tools []store.MCPToolStat, projectionArgs ...string) {
+	for index := range tools {
+		tool := &tools[index]
+		rawServer := tool.ServerLabel
+		args := append([]string{rawServer}, projectionArgs...)
+		tool.ServerLabel = boundedExternalProviderLabelOrEmpty(rawServer, projectionArgs...)
+		tool.ToolName = boundedExternalProviderText(tool.ToolName, args...)
+		tool.SampleIP = boundedExternalIPAddress(tool.SampleIP)
+		tool.LastSeen = boundedExternalProviderText(tool.LastSeen, args...)
+	}
+}
+
+func projectMCPDiscoveryRunsForExternal(runs []store.MCPDiscoveryRun, projectionArgs ...string) {
+	for index := range runs {
+		run := &runs[index]
+		rawUpstream := run.UpstreamName
+		args := append([]string{rawUpstream}, projectionArgs...)
+		run.ID = boundedExternalProviderText(run.ID, args...)
+		run.UpstreamID = boundedExternalProviderText(run.UpstreamID, args...)
+		run.UpstreamName = boundedExternalProviderLabelOrEmpty(rawUpstream, projectionArgs...)
+		run.Status = boundedExternalProviderText(run.Status, args...)
+		run.Error = boundedExternalProviderText(run.Error, args...)
+	}
 }
 
 func (s *Server) handleMCPTopology(w http.ResponseWriter, r *http.Request) {
@@ -276,7 +353,7 @@ func (s *Server) handleMCPRequestWaterfall(w http.ResponseWriter, r *http.Reques
 	}
 	path := strings.TrimPrefix(r.URL.Path, "/admin/mcp/requests/")
 	id, tail, ok := strings.Cut(path, "/")
-	if !ok || tail != "waterfall" || strings.TrimSpace(id) == "" {
+	if !ok || tail != "waterfall" || strings.TrimSpace(id) == "" || !adminTraceIdentifierValid(id) {
 		writeOpenAIError(w, http.StatusBadRequest, "invalid MCP request waterfall path", "invalid_request_error", "invalid_mcp_waterfall_path")
 		return
 	}
@@ -286,11 +363,33 @@ func (s *Server) handleMCPRequestWaterfall(w http.ResponseWriter, r *http.Reques
 			writeOpenAIError(w, http.StatusNotFound, "request not found", "invalid_request_error", "request_not_found")
 			return
 		}
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "mcp_waterfall_failed")
+		slog.Error("MCP waterfall request lookup failed", "request_id", id, "error", err)
+		writeOpenAIError(w, http.StatusInternalServerError, "MCP waterfall could not be loaded", "server_error", "mcp_waterfall_failed")
+		return
+	}
+	if !s.canViewRequestDetail(r, detail.Request) {
+		writeOpenAIError(w, http.StatusForbidden, "request is outside your team scope", "permission_error", "cross_team_access_denied")
 		return
 	}
 	steps := s.mcpWaterfallSteps(r.Context(), detail)
-	decisions, _ := s.db.MCPRouteDecisionsForRequest(r.Context(), id)
+	decisions, err := s.db.MCPRouteDecisionsForRequest(r.Context(), id)
+	if err != nil {
+		slog.Error("MCP waterfall route lookup failed", "request_id", id, "error", err)
+		writeOpenAIError(w, http.StatusInternalServerError, "MCP waterfall could not be loaded", "server_error", "mcp_waterfall_failed")
+		return
+	}
+	if !s.canViewRawPrompts(r) {
+		rawIdentities := []string{detail.Request.Provider, detail.Request.FallbackFrom}
+		for _, tool := range detail.Tools {
+			rawIdentities = append(rawIdentities, tool.ServerLabel)
+		}
+		projectionArgs := s.externalCredentialProjectionArgs(rawIdentities...)
+		for _, step := range steps {
+			projectProviderMetadataMapForExternal(step, projectionArgs...)
+		}
+		projectMCPRouteDecisionsProviderForExternal(decisions, projectionArgs...)
+	}
+	s.maskRequestDetail(r, &detail)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"request_id":      detail.Request.ID,
 		"trace_id":        detail.Request.TraceID,

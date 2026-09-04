@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"strings"
 
+	"vibe-coders/internal/audit"
 	"vibe-coders/internal/store"
 )
 
@@ -59,6 +60,15 @@ func (s *Server) handleTraceByID(w http.ResponseWriter, r *http.Request) {
 		appRuns = traceAppRunsForTeams(appRuns, teams)
 		codeVerdicts = traceCodeVerdictsForRequests(codeVerdicts, requests)
 	}
+	responseTraceID := traceID
+	if !s.canViewRawPrompts(r) {
+		rawProviders := s.externalCredentialProjectionArgs(recentRequestProviderIdentities(requests)...)
+		responseTraceID = audit.Redact(boundedExternalProviderText(traceID, rawProviders...))
+		projectTraceWorkflowRunsForExternal(workflowRuns, rawProviders...)
+		projectTraceAppRunsForExternal(appRuns, rawProviders...)
+		projectTraceCodeVerdictsForExternal(codeVerdicts, rawProviders...)
+	}
+	s.maskRecentRequests(r, requests)
 
 	// Lightweight request rows (the per-request waterfall lives at /admin/requests/{id}/trace).
 	reqRows := make([]map[string]any, 0, len(requests))
@@ -71,7 +81,7 @@ func (s *Server) handleTraceByID(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"trace_id":      traceID,
+		"trace_id":      responseTraceID,
 		"requests":      reqRows,
 		"workflow_runs": workflowRuns,
 		"app_runs":      appRuns,
@@ -79,6 +89,44 @@ func (s *Server) handleTraceByID(w http.ResponseWriter, r *http.Request) {
 		"counts":        map[string]int{"requests": len(reqRows), "workflow_runs": len(workflowRuns), "app_runs": len(appRuns), "code_verdicts": len(codeVerdicts)},
 		"note":          "이 trace_id로 묶인 게이트웨이 요청·워크플로·앱 실행입니다. 요청별 단계 waterfall은 request trace 링크로 확인하세요.",
 	})
+}
+
+func projectTraceWorkflowRunsForExternal(rows []store.WorkflowRun, rawProviders ...string) {
+	for index := range rows {
+		row := &rows[index]
+		row.ID = audit.Redact(boundedExternalProviderText(row.ID, rawProviders...))
+		row.WorkflowID = audit.Redact(boundedExternalProviderText(row.WorkflowID, rawProviders...))
+		row.UserID = audit.Redact(boundedExternalProviderText(row.UserID, rawProviders...))
+		row.Team = audit.Redact(boundedExternalProviderText(row.Team, rawProviders...))
+		row.Status = audit.Redact(boundedExternalProviderText(row.Status, rawProviders...))
+		row.ErrorClass = audit.Redact(boundedExternalProviderText(row.ErrorClass, rawProviders...))
+		row.TraceID = audit.Redact(boundedExternalProviderText(row.TraceID, rawProviders...))
+	}
+}
+
+func projectTraceAppRunsForExternal(rows []store.AIAppRun, rawProviders ...string) {
+	for index := range rows {
+		row := &rows[index]
+		row.ID = audit.Redact(boundedExternalProviderText(row.ID, rawProviders...))
+		row.AppID = audit.Redact(boundedExternalProviderText(row.AppID, rawProviders...))
+		row.UserID = audit.Redact(boundedExternalProviderText(row.UserID, rawProviders...))
+		row.Team = audit.Redact(boundedExternalProviderText(row.Team, rawProviders...))
+		row.Status = audit.Redact(boundedExternalProviderText(row.Status, rawProviders...))
+		row.InputHash = audit.Redact(boundedExternalProviderText(row.InputHash, rawProviders...))
+		row.OutputSummary = audit.Redact(boundedExternalProviderText(row.OutputSummary, rawProviders...))
+		row.ErrorClass = audit.Redact(boundedExternalProviderText(row.ErrorClass, rawProviders...))
+		row.TraceID = audit.Redact(boundedExternalProviderText(row.TraceID, rawProviders...))
+	}
+}
+
+func projectTraceCodeVerdictsForExternal(rows []store.CodeVerifyLog, rawProviders ...string) {
+	for index := range rows {
+		row := &rows[index]
+		row.TraceID = audit.Redact(boundedExternalProviderText(row.TraceID, rawProviders...))
+		row.Risk = audit.Redact(boundedExternalProviderText(row.Risk, rawProviders...))
+		row.Languages = audit.Redact(boundedExternalProviderText(row.Languages, rawProviders...))
+		row.FindingsJSON = audit.Redact(boundedExternalProviderText(row.FindingsJSON, rawProviders...))
+	}
 }
 
 func writeTraceQueryFailed(w http.ResponseWriter) {

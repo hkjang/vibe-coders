@@ -33,8 +33,20 @@ const exactCredentialParts = new Set(["auth", "key", "sig"]);
 export const secretSearchMessage =
   "인증정보로 보이는 검색어는 주소에 저장하지 않습니다. 비밀정보를 제거한 뒤 검색하세요.";
 
+export const defaultCredentialPrefixes = ["vc_sk_", "vc_sa_"] as const;
+
 const maxSecretCandidateLength = 16_384;
 const maxDecodePasses = 8;
+const basicCredentialPattern = /(?:^|[^a-z0-9])basic(?:\s|\+)+([a-z0-9+/]{4,}={0,2})/giu;
+const vendorCredentialPatterns = [
+  /(?:^|[^A-Za-z0-9])gh[pousr]_[A-Za-z0-9]{20,}(?=$|[^A-Za-z0-9])/u,
+  /(?:^|[^A-Za-z0-9])github_pat_[A-Za-z0-9_]{20,}(?=$|[^A-Za-z0-9_])/u,
+  /(?:^|[^A-Za-z0-9])(?:AKIA|ASIA)[0-9A-Z]{16}(?=$|[^A-Za-z0-9])/u,
+  /(?:^|[^A-Za-z0-9])(?:xox[abprs]|xapp|xwfp)-[A-Za-z0-9-]{10,}(?=$|[^A-Za-z0-9-])/u,
+  /(?:^|[^A-Za-z0-9])xoxe(?:\.[A-Za-z0-9.-]{8,}|-[A-Za-z0-9-]{8,})(?=$|[^A-Za-z0-9.-])/u,
+  /(?:^|[^A-Za-z0-9])AIza[0-9A-Za-z_-]{35}(?=$|[^A-Za-z0-9_-])/u,
+  /-----BEGIN [A-Z ]*PRIVATE KEY-----/u,
+] as const;
 
 interface DecodedCandidate {
   exceededLimit: boolean;
@@ -75,11 +87,60 @@ export function isSensitiveCredentialKey(key: string): boolean {
   return parts.some((part) => sensitiveCredentialTerms.some((term) => part.includes(term)));
 }
 
-export function containsPotentialSecret(value: string): boolean {
+function hasGeneratedCredentialSuffix(value: string): boolean {
+  let length = 0;
+  while (length < value.length && /[A-Za-z0-9_-]/u.test(value[length] ?? "")) length += 1;
+  return length >= 32;
+}
+
+function containsBasicCredential(value: string): boolean {
+  for (const match of value.matchAll(basicCredentialPattern)) {
+    const encoded = match[1] ?? "";
+    if (encoded.length > 8_192) return true;
+    try {
+      const binary = globalThis.atob(encoded);
+      const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+      if (bytes.includes(58) && !bytes.some((byte) => byte <= 31 || byte === 127)) {
+        return true;
+      }
+    } catch {
+      // Ordinary prose following the word "Basic" is not a credential unless
+      // it decodes to a valid user:password payload.
+    }
+  }
+  return false;
+}
+
+export function containsConfiguredCredential(value: string, credentialPrefixes: readonly string[]): boolean {
+  const decodedCandidate = decoded(value.trim());
+  if (decodedCandidate.exceededLimit) return true;
+  const candidate = decodedCandidate.value;
+  for (const prefix of new Set(credentialPrefixes)) {
+    if (prefix === "") continue;
+    if (prefix.length > maxSecretCandidateLength) return true;
+    let searchFrom = 0;
+    while (searchFrom <= candidate.length) {
+      const start = candidate.indexOf(prefix, searchFrom);
+      if (start < 0) break;
+      if (hasGeneratedCredentialSuffix(candidate.slice(start + prefix.length))) return true;
+      searchFrom = start + 1;
+    }
+  }
+  return false;
+}
+
+export function containsPotentialSecret(
+  value: string,
+  credentialPrefixes: readonly string[] = defaultCredentialPrefixes,
+): boolean {
   const decodedCandidate = decoded(value.trim());
   if (decodedCandidate.exceededLimit) return true;
   const candidate = decodedCandidate.value;
   if (candidate === "") return false;
+
+  if (containsConfiguredCredential(candidate, credentialPrefixes)) return true;
+  if (containsBasicCredential(candidate)) return true;
+  if (vendorCredentialPatterns.some((pattern) => pattern.test(candidate))) return true;
 
   if (
     /\bbearer(?:\s|\+)+[^\s,;]+/i.test(candidate) ||

@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"vibe-coders/internal/config"
 	"vibe-coders/internal/secret"
 	"vibe-coders/internal/store"
 )
@@ -28,6 +29,23 @@ func insertAppRequestTestRow(t *testing.T, db *store.SQLStore, id, provider stri
 		CompletionTokens: 4, TotalTokens: 7, EstimatedCost: 1.25, Currency: "KRW", CreatedAt: createdAt}})
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestAppRequestCredentialProjectionUsesHistoricalPrefixes(t *testing.T) {
+	server := &Server{cfg: config.Config{Auth: config.AuthConfig{
+		APIKeyPrefix: "corp_", ServiceKeyPrefix: "svc_",
+		HistoricalKeyPrefixes: []string{"legacy"},
+	}}}
+	oldKey := "legacy" + strings.Repeat("A", 43)
+	if !server.appRequestTextHasCredential(oldKey) {
+		t.Fatal("historical generated key was not detected")
+	}
+	if got := server.projectAppRequestText(oldKey, appRequestIDMaxBytes); got != appRequestValueRedacted {
+		t.Fatalf("historical generated key projection = %q", got)
+	}
+	if server.appRequestTextHasCredential("model-" + strings.Repeat("A", 43)) {
+		t.Fatal("ordinary long model identifier was treated as a credential")
 	}
 }
 
@@ -168,6 +186,7 @@ func TestAppRequestsProjectionBoundsAndRedactsUntrustedMetadata(t *testing.T) {
 	}
 	apiSecret := "vc_sk_" + strings.Repeat("s", 43)
 	serviceSecret := "vc_sa_" + strings.Repeat("a", 43)
+	currencyPII := "owner@evil.co"
 	jwToken := "eyJabcde.eyJfghij.abcdefgh"
 	huge := strings.Repeat("가", 300)
 	now := time.Date(2026, 9, 3, 1, 2, 3, 0, time.UTC)
@@ -187,7 +206,7 @@ func TestAppRequestsProjectionBoundsAndRedactsUntrustedMetadata(t *testing.T) {
 		Usage: &store.TokenUsage{
 			ID: "usage-untrusted", RequestID: "req-untrusted", PromptTokens: -4,
 			CompletionTokens: maxDBInt, TotalTokens: -1, CachedTokens: maxDBInt,
-			ReasoningTokens: -1, EstimatedCost: -12.5, Currency: apiSecret, CreatedAt: now,
+			ReasoningTokens: -1, EstimatedCost: -12.5, Currency: currencyPII, CreatedAt: now,
 		},
 	}); err != nil {
 		t.Fatal(err)
@@ -203,7 +222,7 @@ func TestAppRequestsProjectionBoundsAndRedactsUntrustedMetadata(t *testing.T) {
 		t.Fatalf("status=%d body=%s", response.StatusCode, body)
 	}
 	visible := string(body)
-	for _, forbidden := range []string{apiSecret, serviceSecret, "abcdefghijklmnop", jwToken, "do-not-return", huge} {
+	for _, forbidden := range []string{apiSecret, serviceSecret, currencyPII, "abcdefghijklmnop", jwToken, "do-not-return", huge} {
 		if strings.Contains(visible, forbidden) {
 			t.Fatalf("projection leaked untrusted value %q: %s", forbidden, visible)
 		}
@@ -217,7 +236,7 @@ func TestAppRequestsProjectionBoundsAndRedactsUntrustedMetadata(t *testing.T) {
 	}
 	item := page.Requests[0]
 	if item.TraceID != appRequestValueRedacted || item.APIKeyID != appRequestValueRedacted ||
-		item.SessionID != appRequestValueRedacted || item.IP != appRequestValueOmitted ||
+		item.SessionID != appRequestValueRedacted || item.IP != externalIPUnknown ||
 		item.Model != appRequestValueOmitted || item.Endpoint != appRequestValueRedacted ||
 		item.Currency != appRequestValueRedacted || item.FinishReason != appRequestValueRedacted {
 		t.Fatalf("untrusted strings were not projected safely: %+v", item)
@@ -226,6 +245,9 @@ func TestAppRequestsProjectionBoundsAndRedactsUntrustedMetadata(t *testing.T) {
 		item.PromptTokens != 0 || item.CompletionTokens != appRequestMaxCount || item.TotalTokens != 0 ||
 		item.CachedTokens != appRequestMaxCount || item.ReasoningTokens != 0 || item.EstimatedCost != 0 {
 		t.Fatalf("untrusted numbers were not clamped: %+v", item)
+	}
+	if got := (&Server{}).projectAppRequestText("model-owner@example.com", appRequestModelMaxBytes); got != appRequestValueRedacted {
+		t.Fatalf("PII-shaped app metadata projection = %q, want %q", got, appRequestValueRedacted)
 	}
 	for _, value := range []float64{math.NaN(), math.Inf(1), math.Inf(-1), -1} {
 		if got := clampAppRequestCost(value); got != 0 {
@@ -303,7 +325,7 @@ func TestAppRequestsRejectsInvalidFilters(t *testing.T) {
 	_, _, gateway := newAdminModelsTestServer(t, "")
 	for name, query := range map[string]string{
 		"limit": "limit=0", "timezone": "tz=Not%2FAZone", "range": "from=2026-09-04&to=2026-09-03",
-		"duplicate": "model=a&model=b", "unknown": "ids=req-a", "status": "status=600",
+		"duplicate": "model=a&model=b", "unknown": "ids=req-a", "status": "status=600", "ip": "ip=victim%40example.com",
 	} {
 		t.Run(name, func(t *testing.T) {
 			response := providerAppRequest(t, http.MethodGet, gateway.URL+"/admin/requests?"+query, nil)

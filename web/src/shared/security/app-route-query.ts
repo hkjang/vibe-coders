@@ -1,4 +1,12 @@
-import { containsPotentialSecret, isSensitiveCredentialKey } from "@/shared/security/secrets";
+import {
+  containsConfiguredCredential,
+  containsPotentialSecret,
+  defaultCredentialPrefixes,
+  isSensitiveCredentialKey,
+} from "@/shared/security/secrets";
+import { validateRequestTimeFilters } from "@/shared/utils/request-time-filters";
+import { isOpaqueAppRequestCursor, isValidRequestQueryField } from "@/shared/utils/request-query-filters";
+import { isProviderRef } from "@/shared/api/provider-ref";
 
 const routeQueryAllowlist: Readonly<Record<string, ReadonlySet<string>>> = {
   "/login": new Set(["return_to"]),
@@ -63,31 +71,91 @@ function routerPath(pathname: string): string {
   return withoutBase.length > 1 ? withoutBase.replace(/\/+$/, "") : withoutBase;
 }
 
-function sensitiveParameter(key: string, values: readonly string[]): boolean {
+function sensitiveParameter(
+  key: string,
+  values: readonly string[],
+  credentialPrefixes: readonly string[],
+): boolean {
+  if (values.some((value) => containsConfiguredCredential(value, credentialPrefixes))) return true;
+  if (key === "provider_ref" && values.every(isProviderRef)) return false;
+  if (key === "cursor" && values.every(isOpaqueAppRequestCursor)) return false;
   // api_key_id is a database identifier used for request filtering, not an API
   // credential. Preserve only its bounded identifier form; actual key material
   // remains rejected by both the character contract and secret scanner.
   if (
     key === "api_key_id" &&
-    values.every((value) => /^[a-z0-9._:-]{1,512}$/iu.test(value) && !containsPotentialSecret(value))
+    values.every(
+      (value) => /^[a-z0-9._:-]{1,512}$/iu.test(value) && !containsPotentialSecret(value, credentialPrefixes),
+    )
   ) {
     return false;
   }
-  return isSensitiveCredentialKey(key) || values.some(containsPotentialSecret);
+  return (
+    isSensitiveCredentialKey(key) ||
+    values.some((value) => containsPotentialSecret(value, credentialPrefixes))
+  );
 }
 
-export function sanitizeAppRouteSearch(pathname: string, search: string): SanitizedAppRouteSearch {
+export function sanitizeAppRouteSearch(
+  pathname: string,
+  search: string,
+  credentialPrefixes: readonly string[] = defaultCredentialPrefixes,
+): SanitizedAppRouteSearch {
   const parameters = new URLSearchParams(search);
   const allowed = routeQueryAllowlist[routerPath(pathname)] ?? new Set<string>();
   const rejectedKeys = new Set<string>();
   const sensitiveKeys = new Set<string>();
   const rejectedValues = new Map<string, boolean>();
+  const route = routerPath(pathname);
+  const invalidOperationalKeys = new Set<string>();
+  if (route === "/observability/requests" || route === "/observability/traces") {
+    const requestFields =
+      route === "/observability/requests"
+        ? ([
+            "from",
+            "to",
+            "tz",
+            "status",
+            "model",
+            "provider_ref",
+            "request_id",
+            "trace_id",
+            "session_id",
+            "api_key_id",
+            "ip",
+            "language",
+            "limit",
+            "cursor",
+          ] as const)
+        : (["from", "to", "tz", "status", "model", "trace_id", "limit", "cursor"] as const);
+    for (const key of requestFields) {
+      const values = parameters.getAll(key);
+      if (values.length > 1 || (values.length === 1 && !isValidRequestQueryField(key, values[0] ?? ""))) {
+        invalidOperationalKeys.add(key);
+      }
+    }
+    const selectedRequests = parameters.getAll("selected_request");
+    if (
+      route === "/observability/traces" &&
+      (selectedRequests.length > 1 ||
+        (selectedRequests.length === 1 && !isValidRequestQueryField("request_id", selectedRequests[0] ?? "")))
+    ) {
+      invalidOperationalKeys.add("selected_request");
+    }
+    const temporalError = validateRequestTimeFilters({
+      from: parameters.get("from") ?? undefined,
+      to: parameters.get("to") ?? undefined,
+      tz: parameters.get("tz") ?? undefined,
+    });
+    if (temporalError) invalidOperationalKeys.add(temporalError.field);
+  }
 
   for (const key of new Set(parameters.keys())) {
     const values = parameters.getAll(key);
-    const sensitive = sensitiveParameter(key, values);
-    rejectedValues.set(key, sensitive);
-    if (!allowed.has(key) || sensitive) {
+    const sensitive = sensitiveParameter(key, values, credentialPrefixes);
+    const rejected = sensitive || invalidOperationalKeys.has(key);
+    rejectedValues.set(key, rejected);
+    if (!allowed.has(key) || rejected) {
       rejectedKeys.add(key);
       if (sensitive) sensitiveKeys.add(key);
     }
@@ -130,10 +198,14 @@ function sanitizedLoginSsoHash(hash: string, pathname: string): string | undefin
   return serialized ? `#${serialized}` : "";
 }
 
-export function sanitizeAppRouteHash(hash: string, pathname = ""): string {
+export function sanitizeAppRouteHash(
+  hash: string,
+  pathname = "",
+  credentialPrefixes: readonly string[] = defaultCredentialPrefixes,
+): string {
   const ssoHash = sanitizedLoginSsoHash(hash, pathname);
   if (ssoHash !== undefined) return ssoHash;
-  return hash !== "" && containsPotentialSecret(hash.slice(1)) ? "" : hash;
+  return hash !== "" && containsPotentialSecret(hash.slice(1), credentialPrefixes) ? "" : hash;
 }
 
 export function locationStateWithSensitiveRejections(

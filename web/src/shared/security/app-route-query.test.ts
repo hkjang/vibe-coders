@@ -16,6 +16,7 @@ function encoded(value: string, passes: number): string {
 
 describe("app route query security", () => {
   const initialURL = window.location.href;
+  const cursor = `djE6dGVzdA.${"c".repeat(43)}`;
 
   afterEach(() => window.history.replaceState(null, "", initialURL));
 
@@ -41,23 +42,23 @@ describe("app route query security", () => {
   });
 
   it("preserves only the request explorer deep-link filters", () => {
-    const safe = `?status=5xx&model=gpt-test&provider_ref=prv_${"a".repeat(43)}&request_id=req-1&trace_id=trace-1&session_id=session-1&api_key_id=key-1&ip=192.0.2.1&language=ko&from=2026-09-01&to=2026-09-03&tz=Asia%2FSeoul&limit=50&cursor=opaque.cursor&prompt=private`;
+    const safe = `?status=5xx&model=gpt-test&provider_ref=prv_${"a".repeat(43)}&request_id=req-1&trace_id=trace-1&session_id=session-1&api_key_id=key-1&ip=192.0.2.1&language=ko&from=2026-09-01&to=2026-09-03&tz=Asia%2FSeoul&limit=50&cursor=${cursor}&prompt=private`;
     const result = sanitizeAppRouteSearch("/app/observability/requests", safe);
     expect(result.rejectedKeys).toEqual(["prompt"]);
     expect(result.search).not.toContain("prompt");
-    expect(result.search).toContain("cursor=opaque.cursor");
+    expect(result.search).toContain(`cursor=${cursor}`);
     expect(result.search).toContain("request_id=req-1");
   });
 
   it("preserves only safe trace explorer filters and selection state", () => {
     const result = sanitizeAppRouteSearch(
       "/app/observability/traces",
-      "?trace_id=trace-1&selected_request=req-1&status=error&model=gpt-test&from=2026-09-01&to=2026-09-03&tz=Asia%2FSeoul&limit=50&cursor=opaque.cursor&prompt=private",
+      `?trace_id=trace-1&selected_request=req-1&status=error&model=gpt-test&from=2026-09-01&to=2026-09-03&tz=Asia%2FSeoul&limit=50&cursor=${cursor}&prompt=private`,
     );
     expect(result.rejectedKeys).toEqual(["prompt"]);
     expect(result.search).toContain("trace_id=trace-1");
     expect(result.search).toContain("selected_request=req-1");
-    expect(result.search).toContain("cursor=opaque.cursor");
+    expect(result.search).toContain(`cursor=${cursor}`);
     expect(result.search).not.toContain("prompt");
   });
 
@@ -124,6 +125,70 @@ describe("app route query security", () => {
     expect(result.search).toBe("?provider=openai");
     expect(result.rejectedKeys).toEqual(["q", "token", "api_key"]);
     expect(result.sensitiveKeys).toEqual(["q", "token", "api_key"]);
+  });
+
+  it("removes values matching runtime credential prefixes before they reach browser history", () => {
+    const secret = `corp_${"A".repeat(43)}`;
+    const result = sanitizeAppRouteSearch("/app/observability/traces", `?model=${secret}&status=error`, [
+      "corp_",
+    ]);
+    expect(result.search).toBe("?status=error");
+    expect(result.sensitiveKeys).toEqual(["model"]);
+  });
+
+  it("drops malformed request time filters while retaining valid filters", () => {
+    const result = sanitizeAppRouteSearch(
+      "/app/observability/requests",
+      "?tz=Not%2FAZone&from=2026-09-04T25%3A00&status=error",
+    );
+    expect(result.search).toBe("?status=error");
+    expect(result.rejectedKeys).toEqual(["tz", "from"]);
+    expect(result.sensitiveKeys).toEqual([]);
+  });
+
+  it("drops every request filter that violates the endpoint contract", () => {
+    const result = sanitizeAppRouteSearch(
+      "/app/observability/requests",
+      `?model=${encodeURIComponent("한".repeat(86))}&provider_ref=typo&language=${encodeURIComponent("한".repeat(22))}&cursor=${"a".repeat(4_097)}&request_id=req-safe`,
+    );
+    expect(result.search).toBe("?request_id=req-safe");
+    expect(result.rejectedKeys).toEqual(["model", "provider_ref", "language", "cursor"]);
+    expect(result.sensitiveKeys).toEqual([]);
+  });
+
+  it("drops duplicated request filters rather than selecting one ambiguous value", () => {
+    const result = sanitizeAppRouteSearch(
+      "/app/observability/requests",
+      "?model=first&model=second&status=success",
+    );
+    expect(result.search).toBe("?status=success");
+    expect(result.rejectedKeys).toEqual(["model"]);
+  });
+
+  it.each([
+    "Basic dXNlcjpwYXNz",
+    `oldfoo_${"A".repeat(43)}`,
+    `ghp_${"B".repeat(36)}`,
+    `AKIA${"C".repeat(16)}`,
+    `xoxb-${"D".repeat(24)}`,
+    `AIza${"E".repeat(35)}`,
+  ])("removes legacy or vendor credential material from request URLs: %s", (secret) => {
+    const result = sanitizeAppRouteSearch(
+      "/app/observability/traces",
+      `?model=${encodeURIComponent(secret)}`,
+      ["corp_", "svc_", "oldfoo_"],
+    );
+    expect(result.search).toBe("");
+    expect(result.sensitiveKeys).toEqual(["model"]);
+  });
+
+  it("prefers a configured credential prefix over the provider reference shape", () => {
+    const collision = `prv_${"A".repeat(43)}`;
+    const result = sanitizeAppRouteSearch("/app/observability/requests", `?provider_ref=${collision}`, [
+      "prv_",
+    ]);
+    expect(result.search).toBe("");
+    expect(result.sensitiveKeys).toEqual(["provider_ref"]);
   });
 
   it("allows ordinary hashes but drops credential-like fragments", () => {

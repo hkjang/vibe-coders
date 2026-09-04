@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"strings"
 	"time"
 )
 
@@ -110,14 +111,25 @@ func (s *SQLStore) Text2SQLSpansForRequest(ctx context.Context, requestID string
 
 // ListText2SQLLogs returns recent Text2SQL query logs, newest first.
 func (s *SQLStore) ListText2SQLLogs(ctx context.Context, limit int) ([]Text2SQLQueryLog, error) {
+	return s.ListText2SQLLogsScoped(ctx, limit, nil, false)
+}
+
+func (s *SQLStore) ListText2SQLLogsScoped(ctx context.Context, limit int, teams []string, teamScoped bool) ([]Text2SQLQueryLog, error) {
 	if limit <= 0 || limit > 1000 {
 		limit = 100
 	}
+	where := []string{"COALESCE(mode,'') <> 'shadow'"}
+	args := []any{}
+	if condition, scopeArgs := text2SQLRequestScopeCondition("text2sql_query_logs.request_id", teams, teamScoped); condition != "" {
+		where = append(where, condition)
+		args = append(args, scopeArgs...)
+	}
+	args = append(args, limit)
 	rows, err := s.db.QueryContext(ctx, s.bind(`SELECT id, COALESCE(request_id,''), COALESCE(api_key_id,''), COALESCE(team,''),
 		COALESCE(virtual_model,''), COALESCE(upstream_model,''), COALESCE(mode,''), COALESCE(question,''), COALESCE(generated_sql,''),
 		COALESCE(schema_name,''), COALESCE(schema_version,0), COALESCE(permission_hash,''), COALESCE(glossary_hash,''),
 		valid, COALESCE(reject_reason,''), executed, row_count, COALESCE(error,''), COALESCE(failure_category,''), explain_cost, explain_risk, cost_krw, COALESCE(generation_cost,0), COALESCE(summary_cost,0), latency_ms, created_at
-		FROM text2sql_query_logs WHERE COALESCE(mode,'') <> 'shadow' ORDER BY created_at DESC LIMIT ?`), limit)
+		FROM text2sql_query_logs WHERE `+strings.Join(where, " AND ")+` ORDER BY created_at DESC LIMIT ?`), args...)
 	if err != nil {
 		return nil, err
 	}
@@ -190,16 +202,33 @@ type Text2SQLStats struct {
 // RiskyText2SQLLogs returns the queue of Text2SQL requests that warrant operator
 // attention: rejected, high EXPLAIN risk, or classified as a failure — newest first.
 func (s *SQLStore) RiskyText2SQLLogs(ctx context.Context, since time.Time, minRisk, limit int) ([]Text2SQLQueryLog, error) {
+	return s.RiskyText2SQLLogsScoped(ctx, since, minRisk, limit, nil, false)
+}
+
+// RiskyText2SQLLogsScoped returns the risk queue inside the caller's request-team
+// boundary. A scoped caller without any usable team identity receives no rows.
+func (s *SQLStore) RiskyText2SQLLogsScoped(ctx context.Context, since time.Time, minRisk, limit int, teams []string, teamScoped bool) ([]Text2SQLQueryLog, error) {
 	if limit <= 0 || limit > 1000 {
 		limit = 100
 	}
+	where := []string{
+		"created_at >= ?",
+		"COALESCE(mode,'') <> 'shadow'",
+		"(valid = 0 OR explain_risk >= ? OR COALESCE(failure_category,'') <> '')",
+	}
+	args := []any{since.UTC().Format(time.RFC3339Nano), minRisk}
+	if condition, scopeArgs := text2SQLRequestScopeCondition("text2sql_query_logs.request_id", teams, teamScoped); condition != "" {
+		where = append(where, condition)
+		args = append(args, scopeArgs...)
+	}
+	args = append(args, limit)
 	rows, err := s.db.QueryContext(ctx, s.bind(`SELECT id, COALESCE(request_id,''), COALESCE(api_key_id,''), COALESCE(team,''),
 		COALESCE(virtual_model,''), COALESCE(upstream_model,''), COALESCE(mode,''), COALESCE(question,''), COALESCE(generated_sql,''),
 		COALESCE(schema_name,''), COALESCE(schema_version,0), COALESCE(permission_hash,''), COALESCE(glossary_hash,''),
 		valid, COALESCE(reject_reason,''), executed, row_count, COALESCE(error,''), COALESCE(failure_category,''), explain_cost, explain_risk, cost_krw, COALESCE(generation_cost,0), COALESCE(summary_cost,0), latency_ms, created_at
 		FROM text2sql_query_logs
-		WHERE created_at >= ? AND COALESCE(mode,'') <> 'shadow' AND (valid = 0 OR explain_risk >= ? OR COALESCE(failure_category,'') <> '')
-		ORDER BY created_at DESC LIMIT ?`), since.UTC().Format(time.RFC3339Nano), minRisk, limit)
+		WHERE `+strings.Join(where, " AND ")+`
+		ORDER BY created_at DESC LIMIT ?`), args...)
 	if err != nil {
 		return nil, err
 	}
@@ -232,9 +261,19 @@ type Text2SQLFailureBucket struct {
 
 // Text2SQLFailureBreakdownSince groups failed Text2SQL requests by failure_category.
 func (s *SQLStore) Text2SQLFailureBreakdownSince(ctx context.Context, since time.Time) ([]Text2SQLFailureBucket, error) {
+	return s.Text2SQLFailureBreakdownSinceScoped(ctx, since, nil, false)
+}
+
+func (s *SQLStore) Text2SQLFailureBreakdownSinceScoped(ctx context.Context, since time.Time, teams []string, teamScoped bool) ([]Text2SQLFailureBucket, error) {
+	where := []string{"created_at >= ?", "COALESCE(mode,'') <> 'shadow'", "COALESCE(failure_category,'') <> ''"}
+	args := []any{since.UTC().Format(time.RFC3339Nano)}
+	if condition, scopeArgs := text2SQLRequestScopeCondition("text2sql_query_logs.request_id", teams, teamScoped); condition != "" {
+		where = append(where, condition)
+		args = append(args, scopeArgs...)
+	}
 	rows, err := s.db.QueryContext(ctx, s.bind(`SELECT COALESCE(NULLIF(failure_category,''),'(none)'), COUNT(*)
-		FROM text2sql_query_logs WHERE created_at >= ? AND COALESCE(mode,'') <> 'shadow' AND COALESCE(failure_category,'') <> ''
-		GROUP BY COALESCE(NULLIF(failure_category,''),'(none)') ORDER BY COUNT(*) DESC`), since.UTC().Format(time.RFC3339Nano))
+		FROM text2sql_query_logs WHERE `+strings.Join(where, " AND ")+`
+		GROUP BY COALESCE(NULLIF(failure_category,''),'(none)') ORDER BY COUNT(*) DESC`), args...)
 	if err != nil {
 		return nil, err
 	}
@@ -278,6 +317,16 @@ type Text2SQLStageMetric struct {
 
 // Text2SQLModelMetricsSince ranks upstream models by how well they generate SQL.
 func (s *SQLStore) Text2SQLModelMetricsSince(ctx context.Context, since time.Time) ([]Text2SQLModelMetric, error) {
+	return s.Text2SQLModelMetricsSinceScoped(ctx, since, nil, false)
+}
+
+func (s *SQLStore) Text2SQLModelMetricsSinceScoped(ctx context.Context, since time.Time, teams []string, teamScoped bool) ([]Text2SQLModelMetric, error) {
+	where := []string{"created_at >= ?"}
+	args := []any{since.UTC().Format(time.RFC3339Nano)}
+	if condition, scopeArgs := text2SQLRequestScopeCondition("text2sql_query_logs.request_id", teams, teamScoped); condition != "" {
+		where = append(where, condition)
+		args = append(args, scopeArgs...)
+	}
 	rows, err := s.db.QueryContext(ctx, s.bind(`
 		SELECT COALESCE(NULLIF(upstream_model,''),'(unknown)'),
 			COUNT(*),
@@ -286,9 +335,9 @@ func (s *SQLStore) Text2SQLModelMetricsSince(ctx context.Context, since time.Tim
 			COALESCE(SUM(CASE WHEN COALESCE(error,'') <> '' THEN 1 ELSE 0 END),0),
 			COALESCE(AVG(cost_krw),0),
 			COALESCE(AVG(latency_ms),0)
-		FROM text2sql_query_logs WHERE created_at >= ?
+		FROM text2sql_query_logs WHERE `+strings.Join(where, " AND ")+`
 		GROUP BY COALESCE(NULLIF(upstream_model,''),'(unknown)')
-		ORDER BY COUNT(*) DESC`), since.UTC().Format(time.RFC3339Nano))
+		ORDER BY COUNT(*) DESC`), args...)
 	if err != nil {
 		return nil, err
 	}
@@ -309,6 +358,16 @@ func (s *SQLStore) Text2SQLModelMetricsSince(ctx context.Context, since time.Tim
 
 // Text2SQLStageMetricsSince ranks Text2SQL pipeline stages by total cost and latency.
 func (s *SQLStore) Text2SQLStageMetricsSince(ctx context.Context, since time.Time) ([]Text2SQLStageMetric, error) {
+	return s.Text2SQLStageMetricsSinceScoped(ctx, since, nil, false)
+}
+
+func (s *SQLStore) Text2SQLStageMetricsSinceScoped(ctx context.Context, since time.Time, teams []string, teamScoped bool) ([]Text2SQLStageMetric, error) {
+	where := []string{"created_at >= ?"}
+	args := []any{since.UTC().Format(time.RFC3339Nano)}
+	if condition, scopeArgs := text2SQLRequestScopeCondition("text2sql_spans.request_id", teams, teamScoped); condition != "" {
+		where = append(where, condition)
+		args = append(args, scopeArgs...)
+	}
 	rows, err := s.db.QueryContext(ctx, s.bind(`
 		SELECT stage,
 			COALESCE(NULLIF(status,''),'unknown'),
@@ -320,9 +379,9 @@ func (s *SQLStore) Text2SQLStageMetricsSince(ctx context.Context, since time.Tim
 			COALESCE(AVG(latency_ms),0),
 			COALESCE(MAX(latency_ms),0)
 		FROM text2sql_spans
-		WHERE created_at >= ?
+		WHERE `+strings.Join(where, " AND ")+`
 		GROUP BY stage, COALESCE(NULLIF(status,''),'unknown'), COALESCE(NULLIF(model,''),'')
-		ORDER BY COALESCE(SUM(cost_krw),0) DESC, COALESCE(AVG(latency_ms),0) DESC, COUNT(*) DESC`), since.UTC().Format(time.RFC3339Nano))
+		ORDER BY COALESCE(SUM(cost_krw),0) DESC, COALESCE(AVG(latency_ms),0) DESC, COUNT(*) DESC`), args...)
 	if err != nil {
 		return nil, err
 	}
@@ -343,13 +402,23 @@ func (s *SQLStore) Text2SQLStageMetricsSince(ctx context.Context, since time.Tim
 
 // Text2SQLStatsSince aggregates Text2SQL logs since a time.
 func (s *SQLStore) Text2SQLStatsSince(ctx context.Context, since time.Time) (Text2SQLStats, error) {
+	return s.Text2SQLStatsSinceScoped(ctx, since, nil, false)
+}
+
+func (s *SQLStore) Text2SQLStatsSinceScoped(ctx context.Context, since time.Time, teams []string, teamScoped bool) (Text2SQLStats, error) {
 	var st Text2SQLStats
+	where := []string{"created_at >= ?", "COALESCE(mode,'') <> 'shadow'"}
+	args := []any{since.UTC().Format(time.RFC3339Nano)}
+	if condition, scopeArgs := text2SQLRequestScopeCondition("text2sql_query_logs.request_id", teams, teamScoped); condition != "" {
+		where = append(where, condition)
+		args = append(args, scopeArgs...)
+	}
 	err := s.db.QueryRowContext(ctx, s.bind(`SELECT COUNT(*),
 		COALESCE(SUM(CASE WHEN valid = 1 THEN 1 ELSE 0 END),0),
 		COALESCE(SUM(CASE WHEN executed = 1 THEN 1 ELSE 0 END),0),
 		COALESCE(SUM(CASE WHEN COALESCE(error,'') <> '' THEN 1 ELSE 0 END),0),
 		COALESCE(SUM(cost_krw),0)
-		FROM text2sql_query_logs WHERE created_at >= ? AND COALESCE(mode,'') <> 'shadow'`), since.UTC().Format(time.RFC3339Nano)).
+		FROM text2sql_query_logs WHERE `+strings.Join(where, " AND ")), args...).
 		Scan(&st.Total, &st.Valid, &st.Executed, &st.Errors, &st.CostKRW)
 	if err != nil {
 		return st, err
@@ -358,4 +427,12 @@ func (s *SQLStore) Text2SQLStatsSince(ctx context.Context, since time.Time) (Tex
 		st.ValidRate = float64(st.Valid) / float64(st.Total)
 	}
 	return st, nil
+}
+
+func text2SQLRequestScopeCondition(outerRequestID string, teams []string, teamScoped bool) (string, []any) {
+	if !routingDecisionTeamFilterRequested(teams, teamScoped) {
+		return "", nil
+	}
+	where, args := appendRequestTeamCondition([]string{"r.id = " + outerRequestID}, nil, "", teams, teamScoped)
+	return "EXISTS (SELECT 1 FROM request_logs r WHERE " + strings.Join(where, " AND ") + ")", args
 }

@@ -84,7 +84,14 @@ func (s *SQLStore) ListUsers(ctx context.Context) ([]UserSummary, error) {
 }
 
 func (s *SQLStore) ListIPs(ctx context.Context) ([]IPSummary, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	return s.ListIPsScoped(ctx, nil, false)
+}
+
+// ListIPsScoped returns IP aggregates within the caller's allowed teams. A
+// scoped caller without any team identity fails closed and receives no rows.
+func (s *SQLStore) ListIPsScoped(ctx context.Context, teams []string, teamScoped bool) ([]IPSummary, error) {
+	where, args := appendRequestTeamCondition([]string{"1=1"}, nil, "", teams, teamScoped)
+	rows, err := s.db.QueryContext(ctx, s.bind(`
 		SELECT COALESCE(NULLIF(r.client_ip, ''), 'unknown') AS ip,
 			COUNT(r.id) AS requests,
 			COALESCE(SUM(t.total_tokens), 0) AS tokens,
@@ -94,10 +101,11 @@ func (s *SQLStore) ListIPs(ctx context.Context) ([]IPSummary, error) {
 			COUNT(DISTINCT NULLIF(r.api_key_id, '')) AS distinct_keys
 		FROM request_logs r
 		LEFT JOIN token_usage t ON t.request_id = r.id
+		WHERE `+strings.Join(where, " AND ")+`
 		GROUP BY COALESCE(NULLIF(r.client_ip, ''), 'unknown')
 		ORDER BY requests DESC
 		LIMIT 200
-	`)
+	`), args...)
 	if err != nil {
 		return nil, err
 	}
@@ -630,7 +638,21 @@ func (s *SQLStore) statusBreakdownFilter(ctx context.Context, whereClause string
 }
 
 func (s *SQLStore) GetIPDetail(ctx context.Context, ip string, recent int) (IPDetail, error) {
+	return s.GetIPDetailScoped(ctx, ip, recent, nil, false)
+}
+
+// GetIPDetailScoped returns an IP's statistics only for requests attributed to
+// the caller's allowed teams. Every child aggregation uses the same boundary.
+func (s *SQLStore) GetIPDetailScoped(ctx context.Context, ip string, recent int, teams []string, teamScoped bool) (IPDetail, error) {
 	detail := IPDetail{Daily: []TimeseriesPoint{}, ByModel: []GroupedStat{}, ByLanguage: []LanguageGrouped{}, ByKey: []GroupedStat{}, Recent: []RecentRequest{}}
+	where, args := appendRequestTeamCondition(
+		[]string{"COALESCE(NULLIF(r.client_ip, ''), 'unknown') = ?"},
+		[]any{ip},
+		"",
+		teams,
+		teamScoped,
+	)
+	whereClause := strings.Join(where, " AND ")
 
 	stats := IPSummary{IP: ip}
 	err := s.db.QueryRowContext(ctx, s.bind(`
@@ -642,8 +664,8 @@ func (s *SQLStore) GetIPDetail(ctx context.Context, ip string, recent int) (IPDe
 			COUNT(DISTINCT NULLIF(r.api_key_id, ''))
 		FROM request_logs r
 		LEFT JOIN token_usage t ON t.request_id = r.id
-		WHERE COALESCE(NULLIF(r.client_ip, ''), 'unknown') = ?
-	`), ip).Scan(&stats.Requests, &stats.Tokens, &stats.CostKRW, &stats.AverageLatencyMS, &stats.LastSeen, &stats.DistinctKeys)
+		WHERE `+whereClause+`
+	`), args...).Scan(&stats.Requests, &stats.Tokens, &stats.CostKRW, &stats.AverageLatencyMS, &stats.LastSeen, &stats.DistinctKeys)
 	if err != nil {
 		return detail, err
 	}
@@ -652,19 +674,19 @@ func (s *SQLStore) GetIPDetail(ctx context.Context, ip string, recent int) (IPDe
 	}
 	detail.Stats = stats
 
-	if detail.Daily, err = s.dailyTimeseries(ctx, "COALESCE(NULLIF(r.client_ip, ''), 'unknown') = ?", ip); err != nil {
+	if detail.Daily, err = s.dailyTimeseries(ctx, whereClause, args...); err != nil {
 		return detail, err
 	}
-	if detail.ByModel, err = s.groupedFilter(ctx, "r.model", "COALESCE(NULLIF(r.client_ip, ''), 'unknown') = ?", ip); err != nil {
+	if detail.ByModel, err = s.groupedFilter(ctx, "r.model", whereClause, args...); err != nil {
 		return detail, err
 	}
-	if detail.ByKey, err = s.groupedFilter(ctx, "r.api_key_id", "COALESCE(NULLIF(r.client_ip, ''), 'unknown') = ?", ip); err != nil {
+	if detail.ByKey, err = s.groupedFilter(ctx, "r.api_key_id", whereClause, args...); err != nil {
 		return detail, err
 	}
-	if detail.ByLanguage, err = s.languagesFilter(ctx, "COALESCE(NULLIF(r.client_ip, ''), 'unknown') = ?", ip); err != nil {
+	if detail.ByLanguage, err = s.languagesFilter(ctx, whereClause, args...); err != nil {
 		return detail, err
 	}
-	if detail.Recent, err = s.RecentRequests(ctx, RequestFilter{Limit: recent, IP: ip}); err != nil {
+	if detail.Recent, err = s.RecentRequests(ctx, RequestFilter{Limit: recent, IP: ip, Teams: teams, TeamScoped: teamScoped}); err != nil {
 		return detail, err
 	}
 	return detail, nil
@@ -2804,9 +2826,14 @@ func (s *SQLStore) SearchPrompts(ctx context.Context, q PromptSearch) ([]RecentR
 		kw = ""
 	}
 	if kw != "" {
-		where = append(where, "EXISTS (SELECT 1 FROM prompt_logs pl WHERE pl.request_id = r.id AND (pl.redacted_text LIKE ? OR pl.content_text LIKE ?))")
 		needle := "%" + kw + "%"
-		args = append(args, needle, needle)
+		if q.SearchRedactedOnly {
+			where = append(where, "EXISTS (SELECT 1 FROM prompt_logs pl WHERE pl.request_id = r.id AND pl.redacted_text LIKE ?)")
+			args = append(args, needle)
+		} else {
+			where = append(where, "EXISTS (SELECT 1 FROM prompt_logs pl WHERE pl.request_id = r.id AND (pl.redacted_text LIKE ? OR pl.content_text LIKE ?))")
+			args = append(args, needle, needle)
+		}
 	}
 	if q.APIKeyID != "" {
 		where = append(where, "r.api_key_id = ?")
@@ -2824,6 +2851,7 @@ func (s *SQLStore) SearchPrompts(ctx context.Context, q PromptSearch) ([]RecentR
 		where = append(where, "r.created_at >= ?")
 		args = append(args, q.Since)
 	}
+	where, args = appendRequestTeamCondition(where, args, "", q.Teams, q.TeamScoped)
 	args = append(args, limit)
 
 	query := s.bind(`SELECT r.id, r.trace_id, COALESCE(r.api_key_id, ''), COALESCE(r.client_ip, ''), COALESCE(r.forwarded_for, ''),
@@ -3210,26 +3238,80 @@ func (s *SQLStore) RequestRawBody(ctx context.Context, id string) (string, strin
 }
 
 func (s *SQLStore) DistinctValues(ctx context.Context, field string, limit int) ([]string, error) {
+	return s.DistinctValuesScoped(ctx, field, limit, nil, false)
+}
+
+// DistinctValuesScoped returns request-derived filter values within the
+// caller's allowed teams. Notes and language values are joined back to their
+// request so those derived tables cannot cross a team boundary.
+func (s *SQLStore) DistinctValuesScoped(ctx context.Context, field string, limit int, teams []string, teamScoped bool) ([]string, error) {
 	if limit <= 0 {
 		limit = 50
 	}
 	if limit > 500 {
 		limit = 500
 	}
-	var query string
+	where := []string{}
+	args := []any{}
 	switch field {
 	case "model":
-		query = `SELECT model, COUNT(*) AS c FROM request_logs WHERE model != '' GROUP BY model ORDER BY c DESC LIMIT ?`
+		where = append(where, "r.model != ''")
 	case "ip":
-		query = `SELECT COALESCE(NULLIF(client_ip, ''), 'unknown'), COUNT(*) AS c FROM request_logs GROUP BY COALESCE(NULLIF(client_ip, ''), 'unknown') ORDER BY c DESC LIMIT ?`
 	case "language":
-		query = `SELECT language, COUNT(DISTINCT request_id) AS c FROM language_stats GROUP BY language ORDER BY c DESC LIMIT ?`
 	case "tag":
-		query = `SELECT tags, 1 FROM request_notes WHERE tags != '' LIMIT ?`
+		where = append(where, "rn.tags != ''")
 	default:
 		return nil, fmt.Errorf("unsupported field %q", field)
 	}
-	rows, err := s.db.QueryContext(ctx, s.bind(query), limit)
+	where, args = appendRequestTeamCondition(where, args, "", teams, teamScoped)
+	whereClause := strings.Join(where, " AND ")
+	if whereClause == "" {
+		whereClause = "1=1"
+	}
+	unrestricted := !teamScoped
+	for _, team := range teams {
+		if strings.TrimSpace(team) != "" {
+			unrestricted = false
+			break
+		}
+	}
+
+	var query string
+	switch field {
+	case "model":
+		query = `SELECT r.model, COUNT(*) AS c
+			FROM request_logs r
+			WHERE ` + whereClause + `
+			GROUP BY r.model ORDER BY c DESC LIMIT ?`
+	case "ip":
+		query = `SELECT COALESCE(NULLIF(r.client_ip, ''), 'unknown'), COUNT(*) AS c
+			FROM request_logs r
+			WHERE ` + whereClause + `
+			GROUP BY COALESCE(NULLIF(r.client_ip, ''), 'unknown') ORDER BY c DESC LIMIT ?`
+	case "language":
+		query = `SELECT ls.language, COUNT(DISTINCT ls.request_id) AS c
+			FROM language_stats ls
+			JOIN request_logs r ON r.id = ls.request_id
+			WHERE ` + whereClause + `
+			GROUP BY ls.language ORDER BY c DESC LIMIT ?`
+	case "tag":
+		if unrestricted {
+			// Operator notes intentionally survive request-log retention. Preserve
+			// those tags for the legacy unrestricted query.
+			query = `SELECT rn.tags, 1
+				FROM request_notes rn
+				WHERE ` + whereClause + `
+				LIMIT ?`
+		} else {
+			query = `SELECT rn.tags, 1
+				FROM request_notes rn
+				JOIN request_logs r ON r.id = rn.request_id
+				WHERE ` + whereClause + `
+				LIMIT ?`
+		}
+	}
+	args = append(args, limit)
+	rows, err := s.db.QueryContext(ctx, s.bind(query), args...)
 	if err != nil {
 		return nil, err
 	}

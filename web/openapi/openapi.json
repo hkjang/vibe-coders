@@ -794,6 +794,14 @@
           "auth_enabled": {
             "type": "boolean"
           },
+          "credential_prefixes": {
+            "items": {
+              "maxLength": 512,
+              "type": "string"
+            },
+            "maxItems": 64,
+            "type": "array"
+          },
           "expires_at": {
             "nullable": true,
             "type": "integer"
@@ -2555,6 +2563,14 @@
           },
           "authenticated": {
             "type": "boolean"
+          },
+          "credential_prefixes": {
+            "items": {
+              "maxLength": 512,
+              "type": "string"
+            },
+            "maxItems": 64,
+            "type": "array"
           },
           "enabled": {
             "type": "boolean"

@@ -33,6 +33,7 @@ const validBootstrap = {
     keycloak_enabled: true,
     allow_local_login: true,
     sso_login_url: "/auth/keycloak/login",
+    credential_prefixes: ["corp_", "svc_"],
   },
   user: null,
   roles: ["admin"],

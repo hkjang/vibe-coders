@@ -13,8 +13,8 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
 	"strconv"
@@ -93,6 +93,7 @@ type Server struct {
 	lastReloadTok   atomic.Pointer[string] // admin_settings change token this pod last applied
 	appUIRuntime    atomic.Pointer[appUIRuntimeConfig]
 	adminModels     *adminModelCatalogCache
+	trustedProxies  []netip.Prefix
 }
 
 type atomicKillState struct {
@@ -108,6 +109,10 @@ type killSnapshot struct {
 }
 
 func NewServer(cfg config.Config, db *store.SQLStore, logger *store.AsyncLogger, retention *store.RetentionWorker) (*Server, error) {
+	trustedProxies, err := parseTrustedProxyCIDRs(cfg.Auth.TrustedProxyCIDRs)
+	if err != nil {
+		return nil, fmt.Errorf("parse trusted proxy CIDRs: %w", err)
+	}
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.DisableCompression = false
 	// Client.Timeout covers the whole exchange including a long stream body, so it
@@ -129,14 +134,15 @@ func NewServer(cfg config.Config, db *store.SQLStore, logger *store.AsyncLogger,
 			Timeout:   cfg.Upstream.Timeout,
 			Transport: transport,
 		},
-		metrics:     newMetrics(),
-		breakers:    newProviderBreakers(),
-		balancer:    newProviderBalancer(),
-		instanceID:  instanceIdentity(),
-		retention:   retention,
-		sessions:    newSessionInferer(cfg.Session.IdleTimeout),
-		dwCache:     newDWQueryCache(0),
-		adminModels: newAdminModelCatalogCache(),
+		metrics:        newMetrics(),
+		breakers:       newProviderBreakers(),
+		balancer:       newProviderBalancer(),
+		instanceID:     instanceIdentity(),
+		retention:      retention,
+		sessions:       newSessionInferer(cfg.Session.IdleTimeout),
+		dwCache:        newDWQueryCache(0),
+		adminModels:    newAdminModelCatalogCache(),
+		trustedProxies: trustedProxies,
 	}
 	server.secrets.Store(secrets)
 
@@ -671,7 +677,7 @@ func (s *Server) Routes() http.Handler {
 		}
 		mux.ServeHTTP(w, r)
 	})
-	return withTrace(router)
+	return withTrace(withTrustedClientIP(router, s.trustedProxies))
 }
 
 func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
@@ -821,6 +827,11 @@ func (s *Server) handleRequests(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
 	}
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
 	limit := 50
 	if value := strings.TrimSpace(r.URL.Query().Get("limit")); value != "" {
 		if parsed, err := strconv.Atoi(value); err == nil {
@@ -850,12 +861,14 @@ func (s *Server) handleRequests(w http.ResponseWriter, r *http.Request) {
 		To:         to,
 	})
 	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "requests_failed")
+		slog.Error("admin request list query failed", "error", err)
+		writeOpenAIError(w, http.StatusInternalServerError, "request list query failed", "server_error", "requests_failed")
 		return
 	}
 	if requests == nil {
 		requests = []store.RecentRequest{}
 	}
+	s.maskRecentRequests(r, requests)
 	writeJSON(w, http.StatusOK, map[string]any{"requests": requests})
 }
 
@@ -1179,7 +1192,12 @@ func (s *Server) handleProviders(w http.ResponseWriter, r *http.Request) {
 			rawName := providers[i].Name
 			if appProjection {
 				providers[i].ProviderRef = providerRef(rawName)
-				providers[i].Name = boundedModelsProviderLabel(rawName)
+			}
+			if appProjection || !s.canViewRawPrompts(r) {
+				projectionArgs := s.externalCredentialProjectionArgs(rawName)
+				providers[i].Name = s.boundedModelsProviderLabelForConfig(rawName)
+				providers[i].ModelPatterns = boundedExternalProviderText(providers[i].ModelPatterns, projectionArgs...)
+				providers[i].FailoverGroup = boundedExternalProviderText(providers[i].FailoverGroup, projectionArgs...)
 			}
 			providers[i].BaseURL = sanitizeProviderBaseURL(providers[i].BaseURL)
 		}
@@ -1219,7 +1237,7 @@ func (s *Server) handleProviders(w http.ResponseWriter, r *http.Request) {
 			writeOpenAIError(w, http.StatusBadRequest, "provider name is reserved", "invalid_request_error", "provider_name_reserved")
 			return
 		}
-		if !found && !modelsProviderLabelSafe(payload.Name) {
+		if !found && !s.modelsProviderLabelSafeForConfig(payload.Name) {
 			if len(payload.Name) > maxModelsProviderNameBytes {
 				writeOpenAIError(w, http.StatusBadRequest, "provider name exceeds the supported limit", "invalid_request_error", "provider_name_too_long")
 			} else {
@@ -1277,10 +1295,10 @@ func (s *Server) handleProviders(w http.ResponseWriter, r *http.Request) {
 			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "provider_save_failed")
 			return
 		}
-		s.auditAdminWithProviderTarget(r, "provider.upsert", providerAuditJSON(before), providerAuditJSON(provider), provider.Name)
+		s.auditAdminWithProviderTarget(r, "provider.upsert", s.providerAuditJSONForConfig(before), s.providerAuditJSONForConfig(provider), provider.Name)
 		responseName := provider.Name
-		if appProjection {
-			responseName = boundedModelsProviderLabel(responseName)
+		if appProjection || !s.canViewRawPrompts(r) {
+			responseName = s.boundedModelsProviderLabelForConfig(responseName)
 		}
 		responseProvider := map[string]any{
 			"name":               responseName,
@@ -1313,7 +1331,10 @@ func (s *Server) handleProviderByName(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.Method {
 	case http.MethodDelete:
-		displayName := boundedModelsProviderLabel(name)
+		displayName := name
+		if !s.canViewRawPrompts(r) {
+			displayName = s.boundedModelsProviderLabelForConfig(name)
+		}
 		before, found, _ := s.db.GetProvider(r.Context(), name)
 		if !found {
 			writeOpenAIError(w, http.StatusNotFound, "provider not found: "+displayName, "invalid_request_error", "provider_not_found")
@@ -1328,7 +1349,7 @@ func (s *Server) handleProviderByName(w http.ResponseWriter, r *http.Request) {
 			writeOpenAIError(w, http.StatusNotFound, "provider not found: "+displayName, "invalid_request_error", "provider_not_found")
 			return
 		}
-		s.auditAdminWithProviderTarget(r, "provider.delete", providerAuditJSON(before), "", before.Name)
+		s.auditAdminWithProviderTarget(r, "provider.delete", s.providerAuditJSONForConfig(before), "", before.Name)
 		writeJSON(w, http.StatusOK, map[string]string{"deleted": displayName})
 	default:
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
@@ -1350,6 +1371,9 @@ func (s *Server) handleAuditLogs(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "audit_logs_failed")
 		return
+	}
+	if !s.canViewRawPrompts(r) {
+		s.projectAdminAuditsForExternal(logs)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"audit_logs": logs})
 }
@@ -2075,6 +2099,23 @@ func providerAuditJSON(provider store.ProviderConfig) string {
 	})
 }
 
+func (s *Server) providerAuditJSONForConfig(provider store.ProviderConfig) string {
+	if provider.Name == "" {
+		return ""
+	}
+	projectionArgs := s.externalCredentialProjectionArgs(provider.Name)
+	return auditJSON(map[string]any{
+		"name":               s.boundedModelsProviderLabelForConfig(provider.Name),
+		"base_url":           sanitizeProviderBaseURL(provider.BaseURL),
+		"api_key_configured": provider.EncryptedAPIKey != "",
+		"timeout_ms":         provider.TimeoutMS,
+		"enabled":            provider.Enabled,
+		"model_patterns":     boundedExternalProviderText(provider.ModelPatterns, projectionArgs...),
+		"failover_group":     boundedExternalProviderText(provider.FailoverGroup, projectionArgs...),
+		"priority":           provider.Priority,
+	})
+}
+
 func (s *Server) authorizeAdmin(r *http.Request) bool {
 	if s.cfg.Auth.Enabled {
 		claims, ok := s.verifyAccessToken(r.Context(), bearerToken(r.Header.Get("Authorization")))
@@ -2106,10 +2147,10 @@ func (s *Server) authorizeAdmin(r *http.Request) bool {
 		slog.Warn("admin auth failed: missing or invalid bearer token header")
 		return false
 	}
-	if s.cfg.Auth.AdminToken != "" && token == s.cfg.Auth.AdminToken {
+	if s.cfg.Auth.AdminToken != "" && secureTokenEqual(token, s.cfg.Auth.AdminToken) {
 		return true
 	}
-	if s.cfg.Auth.AdminReadonlyToken != "" && token == s.cfg.Auth.AdminReadonlyToken {
+	if s.cfg.Auth.AdminReadonlyToken != "" && secureTokenEqual(token, s.cfg.Auth.AdminReadonlyToken) {
 		// readonly: only allow safe methods on /admin
 		return r.Method == http.MethodGet || r.Method == http.MethodHead
 	}
@@ -2286,7 +2327,7 @@ func (s *Server) auditRequestWithPrompts(endpoint string, body []byte, apiKeyID 
 			APIKeyID:            apiKeyID,
 			Method:              r.Method,
 			ClientIP:            clientIP(r),
-			ForwardedFor:        r.Header.Get("X-Forwarded-For"),
+			ForwardedFor:        trustedForwardedFor(r),
 			UserAgent:           r.UserAgent(),
 			Hostname:            hostname(),
 			Model:               model,
@@ -2544,20 +2585,10 @@ func jsonString(value any) string {
 }
 
 func clientIP(r *http.Request) string {
-	if value := strings.TrimSpace(r.Header.Get("CF-Connecting-IP")); value != "" {
-		return value
+	if address, ok := r.Context().Value(effectiveClientIPContextKey{}).(string); ok && address != "" {
+		return address
 	}
-	if value := strings.TrimSpace(r.Header.Get("X-Real-IP")); value != "" {
-		return value
-	}
-	if forwarded := strings.TrimSpace(r.Header.Get("X-Forwarded-For")); forwarded != "" {
-		return strings.TrimSpace(strings.Split(forwarded, ",")[0])
-	}
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
-	}
-	return host
+	return directClientIPAddress(r.RemoteAddr)
 }
 
 func hostname() string {

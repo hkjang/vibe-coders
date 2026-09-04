@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"vibe-coders/internal/audit"
 	"vibe-coders/internal/store"
 )
 
@@ -44,6 +45,47 @@ func parseModelsParam(raw string) []string {
 		}
 	}
 	return out
+}
+
+// projectScatterPointsForCaller applies the same raw-content boundary as the request
+// explorer to every free-form string emitted by XView. Scatter is backed by request,
+// routing and governance rows, so legacy data can contain client-supplied trace/model
+// values or credential-shaped provider metadata even when the current write paths reject
+// them. Privileged raw-prompt viewers retain the exact stored representation.
+func (s *Server) projectScatterPointsForCaller(r *http.Request, points []store.ScatterPoint) {
+	if s.canViewRawPrompts(r) {
+		return
+	}
+	configuredArgs := s.externalCredentialProjectionArgs()
+	for index := range points {
+		point := &points[index]
+		rawProvider := point.Provider
+		projectionArgs := append([]string{rawProvider}, configuredArgs...)
+		project := func(value string) string {
+			return audit.Redact(boundedExternalProviderText(value, projectionArgs...))
+		}
+
+		point.RequestID = project(point.RequestID)
+		point.TraceID = project(point.TraceID)
+		point.Provider = audit.Redact(boundedExternalProviderLabelOrEmpty(rawProvider, configuredArgs...))
+		point.Model = project(point.Model)
+		point.Endpoint = project(point.Endpoint)
+		point.DecisionReason = project(point.DecisionReason)
+		point.PolicyDecision = project(point.PolicyDecision)
+		point.ApprovalStatus = project(point.ApprovalStatus)
+		point.SecretAction = project(point.SecretAction)
+	}
+}
+
+// projectScatterCursorForCaller also covers a delta cursor supplied by the client. When
+// no matching row is committed, ScatterDelta intentionally echoes after_request_id; that
+// reflection must not become a lower-role credential/PII bypass.
+func (s *Server) projectScatterCursorForCaller(r *http.Request, cursor store.ScatterCursor) store.ScatterCursor {
+	if s.canViewRawPrompts(r) {
+		return cursor
+	}
+	cursor.RequestID = audit.Redact(boundedExternalProviderText(cursor.RequestID, s.externalCredentialProjectionArgs()...))
+	return cursor
 }
 
 // computeModelGroups aggregates per-model statistics from a slice of scatter points.
@@ -184,6 +226,7 @@ func (s *Server) xviewAggregatePoints(r *http.Request, since, until time.Time) (
 	if err != nil {
 		return nil, nil, err
 	}
+	s.projectScatterPointsForCaller(r, points)
 	coverage := map[string]any{
 		"truncated":       truncated,
 		"sample_size":     len(points),
@@ -265,6 +308,8 @@ func (s *Server) handleXViewDelta(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "xview_delta_failed")
 		return
 	}
+	s.projectScatterPointsForCaller(r, points)
+	cursor = s.projectScatterCursorForCaller(r, cursor)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"points":      points,
 		"cursor":      cursor,

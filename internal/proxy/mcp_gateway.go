@@ -140,7 +140,7 @@ func (s *Server) buildMCPToolsSnapshot(ctx context.Context) *mcpToolsSnapshot {
 			namespaced := up.ID + "__" + t.Name
 			adv := t
 			adv.Name = namespaced
-			adv.Description = prefixDesc(up.Name, adv.Description)
+			adv.Description = s.prefixMCPDescription(up.Name, adv.Description)
 			snap.tools = append(snap.tools, adv)
 			snap.routes[namespaced] = route(t.Name)
 		}
@@ -149,7 +149,7 @@ func (s *Server) buildMCPToolsSnapshot(ctx context.Context) *mcpToolsSnapshot {
 				continue // first upstream wins on URI collision
 			}
 			adv := res
-			adv.Description = prefixDesc(up.Name, adv.Description)
+			adv.Description = s.prefixMCPDescription(up.Name, adv.Description)
 			snap.resources = append(snap.resources, adv)
 			snap.resourceRoutes[res.URI] = route(res.URI)
 		}
@@ -158,7 +158,7 @@ func (s *Server) buildMCPToolsSnapshot(ctx context.Context) *mcpToolsSnapshot {
 			namespaced := up.ID + "__" + pr.Name
 			adv := pr
 			adv.Name = namespaced
-			adv.Description = prefixDesc(up.Name, adv.Description)
+			adv.Description = s.prefixMCPDescription(up.Name, adv.Description)
 			snap.prompts = append(snap.prompts, adv)
 			snap.promptRoutes[namespaced] = route(pr.Name)
 		}
@@ -169,8 +169,10 @@ func (s *Server) buildMCPToolsSnapshot(ctx context.Context) *mcpToolsSnapshot {
 	return snap
 }
 
-func prefixDesc(upstream, desc string) string {
-	upstream = boundedModelsProviderLabel(upstream)
+func (s *Server) prefixMCPDescription(upstream, desc string) string {
+	rawUpstream := upstream
+	upstream = s.boundedModelsProviderLabelForConfig(upstream)
+	desc = boundedExternalProviderText(desc, s.externalCredentialProjectionArgs(rawUpstream)...)
 	if desc != "" {
 		return "[" + upstream + "] " + desc
 	}
@@ -317,15 +319,18 @@ func (s *Server) mcpToolsCall(r *http.Request, apiKeyID string, authCtx *store.A
 		s.metrics.IncMCPBlocked()
 		reqID := s.logMCPCall(r, apiKeyID, route.upstreamName, route.bareTool, p.Arguments, true, http.StatusForbidden, 0)
 		s.recordMCPRouteDecision(r, reqID, apiKeyID, "tools/call", p.Name, route, "block", decision.Reason, 0)
-		return rpcErrorResponse(id, -32000, boundedExternalProviderText("blocked by MCP policy: "+decision.Reason+" ("+decision.BlockedServer+")", route.upstreamName, decision.BlockedServer))
+		return rpcErrorResponse(id, -32000, boundedExternalProviderText(
+			"blocked by MCP policy: "+decision.Reason+" ("+decision.BlockedServer+")",
+			s.externalCredentialProjectionArgs(route.upstreamName, decision.BlockedServer)...,
+		))
 	}
 	if resp := s.enforceMCPToolGovernance(r, apiKeyID, authCtx, route, "tools/call", p.Name, route.bareTool, p.Arguments, id); resp != nil {
-		return projectMCPRPCErrorForExternal(resp, route.upstreamName)
+		return projectMCPRPCErrorForExternal(resp, s.externalCredentialProjectionArgs(route.upstreamName)...)
 	}
 
 	up, found, err := s.db.GetMCPUpstream(r.Context(), route.upstreamID)
 	if err != nil || !found || !up.Enabled {
-		return rpcErrorResponse(id, -32602, "upstream unavailable: "+boundedModelsProviderLabel(route.upstreamName))
+		return rpcErrorResponse(id, -32602, "upstream unavailable: "+s.boundedModelsProviderLabelForConfig(route.upstreamName))
 	}
 
 	start := time.Now()
@@ -400,14 +405,14 @@ func (s *Server) routeUpstreamRPC(r *http.Request, apiKeyID string, authCtx *sto
 		s.metrics.IncMCPBlocked()
 		reqID := s.logMCPCall(r, apiKeyID, route.upstreamName, logLabel, rawParams, true, http.StatusForbidden, 0)
 		s.recordMCPRouteDecision(r, reqID, apiKeyID, method, exposedName, route, "block", decision.Reason, 0)
-		return rpcErrorResponse(id, -32000, "blocked by MCP policy: "+boundedModelsProviderLabel(route.upstreamName))
+		return rpcErrorResponse(id, -32000, "blocked by MCP policy: "+s.boundedModelsProviderLabelForConfig(route.upstreamName))
 	}
 	if resp := s.enforceMCPToolGovernance(r, apiKeyID, authCtx, route, method, exposedName, logLabel, rawParams, id); resp != nil {
-		return projectMCPRPCErrorForExternal(resp, route.upstreamName)
+		return projectMCPRPCErrorForExternal(resp, s.externalCredentialProjectionArgs(route.upstreamName)...)
 	}
 	up, found, err := s.db.GetMCPUpstream(r.Context(), route.upstreamID)
 	if err != nil || !found || !up.Enabled {
-		return rpcErrorResponse(id, -32602, "upstream unavailable: "+boundedModelsProviderLabel(route.upstreamName))
+		return rpcErrorResponse(id, -32602, "upstream unavailable: "+s.boundedModelsProviderLabelForConfig(route.upstreamName))
 	}
 	start := time.Now()
 	callCtx, cancel := context.WithTimeout(r.Context(), s.cfg.Upstream.Timeout)

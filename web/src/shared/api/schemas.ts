@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { isValidIPAddress } from "@/shared/utils/ip-address";
+
 import { fitsUTF8Bytes } from "@/shared/utils/utf8";
 
 import type {
@@ -60,6 +62,7 @@ export const tokenPairSchema = z.object({
 
 export const authMeSchema = z.object({
   auth_enabled: z.boolean(),
+  credential_prefixes: z.array(utf8BoundedString(512)).max(64).optional(),
   version: z.string(),
   expires_at: z.number().optional(),
   menu_version: z.number().optional(),
@@ -155,6 +158,7 @@ export const uiBootstrapSchema = z.object({
     keycloak_enabled: z.boolean(),
     allow_local_login: z.boolean(),
     sso_login_url: z.string(),
+    credential_prefixes: z.array(utf8BoundedString(512)).max(64).optional(),
   }),
   user: authUserSchema.nullable().optional(),
   roles: z.array(z.string()),
@@ -643,7 +647,7 @@ export const appRequestsQuerySchema = z
     trace_id: utf8BoundedString(512).optional(),
     session_id: utf8BoundedString(512).optional(),
     api_key_id: utf8BoundedString(512).optional(),
-    ip: utf8BoundedString(128).optional(),
+    ip: utf8BoundedString(128).refine(isValidIPAddress, "올바른 IP 주소를 입력하세요.").optional(),
     language: utf8BoundedString(64).optional(),
     cursor: utf8BoundedString(4096).optional(),
   })

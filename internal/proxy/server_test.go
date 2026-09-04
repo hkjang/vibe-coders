@@ -58,6 +58,9 @@ func TestChatCompletionStreamingProxyAndAsyncAudit(t *testing.T) {
 			Timeout:  5 * time.Second,
 		},
 		Database: config.DatabaseConfig{Driver: "sqlite"},
+		Auth: config.AuthConfig{
+			TrustedProxyCIDRs: []string{"127.0.0.0/8"},
+		},
 		Logging: config.LoggingConfig{
 			ResponseText:     true,
 			ResponseMaxBytes: 4096,

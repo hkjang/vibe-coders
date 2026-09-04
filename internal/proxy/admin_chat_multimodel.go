@@ -329,6 +329,15 @@ func (s *Server) handleChatTestMultiRuns(w http.ResponseWriter, r *http.Request)
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
 	}
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
+	if !s.canViewRawPrompts(r) {
+		writeOpenAIError(w, http.StatusForbidden, "원문 멀티 모델 실행 이력 조회 권한이 필요합니다.", "permission_error", "raw_prompt_access_required")
+		return
+	}
 	runs, err := s.db.ListMultiModelRuns(r.Context(), recentLimit(r))
 	if err != nil {
 		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "multi_runs_failed")
@@ -342,6 +351,10 @@ func (s *Server) handleChatTestMultiRuns(w http.ResponseWriter, r *http.Request)
 func (s *Server) handleChatTestMultiRunByID(w http.ResponseWriter, r *http.Request) {
 	if !s.authorizeAdmin(r) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
+		return
+	}
+	if r.Method == http.MethodGet && !s.canViewRawPrompts(r) {
+		writeOpenAIError(w, http.StatusForbidden, "원문 멀티 모델 실행 이력 조회 권한이 필요합니다.", "permission_error", "raw_prompt_access_required")
 		return
 	}
 	rest := strings.TrimPrefix(r.URL.Path, "/admin/chat-test/multi-run/runs/")

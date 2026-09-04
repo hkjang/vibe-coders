@@ -4,6 +4,7 @@ import (
 	"context"
 	"math"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -76,16 +77,26 @@ const highComplexityThreshold = 70
 // sessionID "no-session" groups the requests that carried no session header.
 // slowMS flags spans with total_ms >= slowMS; pass 0 to auto-pick max(3000, p95).
 func (s *SQLStore) Waterfall(ctx context.Context, sessionID string, limit int, slowMS int64) (WaterfallTrace, error) {
+	return s.WaterfallScoped(ctx, sessionID, limit, slowMS, nil, false)
+}
+
+// WaterfallScoped assembles a session waterfall inside an optional caller team
+// boundary. Scoped requests are attributed through request_logs.api_key_id to
+// api_keys.team; a scoped caller without any resolved team identity sees no rows.
+// Waterfall remains the unrestricted compatibility wrapper for legacy callers.
+func (s *SQLStore) WaterfallScoped(ctx context.Context, sessionID string, limit int, slowMS int64, teams []string, teamScoped bool) (WaterfallTrace, error) {
 	trace := WaterfallTrace{SessionID: sessionID, Categories: map[string]int{}, Spans: []WaterfallSpan{}}
 	if limit <= 0 || limit > 2000 {
 		limit = 500
 	}
-	sessionPredicate := "r.session_id = ?"
-	queryArgs := []any{sessionID, limit + 1}
+	where := []string{"r.session_id = ?"}
+	queryArgs := []any{sessionID}
 	if sessionID == "no-session" {
-		sessionPredicate = "(r.session_id IS NULL OR r.session_id = '')"
-		queryArgs = []any{limit + 1}
+		where = []string{"(r.session_id IS NULL OR r.session_id = '')"}
+		queryArgs = nil
 	}
+	where, queryArgs = appendRequestTeamCondition(where, queryArgs, "", teams, teamScoped)
+	queryArgs = append(queryArgs, limit+1)
 	query := s.bind(`
 		SELECT r.id, r.trace_id, COALESCE(r.model, ''), COALESCE(r.requested_model, ''),
 			COALESCE(r.provider, ''), r.endpoint, r.status_code,
@@ -97,7 +108,7 @@ func (s *SQLStore) Waterfall(ctx context.Context, sessionID string, limit int, s
 			r.created_at
 		FROM request_logs r
 		LEFT JOIN token_usage t ON t.request_id = r.id
-		WHERE ` + sessionPredicate + `
+		WHERE ` + strings.Join(where, " AND ") + `
 		ORDER BY r.created_at ASC
 		LIMIT ?`)
 	rows, err := s.db.QueryContext(ctx, query, queryArgs...)

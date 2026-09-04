@@ -101,7 +101,7 @@ func (s *Server) handleProviderSLOs(w http.ResponseWriter, r *http.Request) {
 			writeOpenAIError(w, http.StatusBadRequest, "provider name is reserved", "invalid_request_error", "provider_slo_provider_reserved")
 			return
 		}
-		if !modelsProviderLabelSafe(p.Provider) && !existingLegacySLO {
+		if !s.modelsProviderLabelSafeForConfig(p.Provider) && !existingLegacySLO {
 			writeOpenAIError(w, http.StatusBadRequest, "provider name contains unsafe metadata", "invalid_request_error", "provider_slo_provider_invalid")
 			return
 		}

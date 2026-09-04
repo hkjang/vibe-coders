@@ -17,8 +17,12 @@ import { Badge } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
 import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
 import { canOpenLegacyAdmin } from "@/shared/permissions/legacy-admin";
+import { containsPotentialSecret, secretSearchMessage } from "@/shared/security/secrets";
 import { usePreferences } from "@/shared/stores/preferences";
 import { httpStatusTone } from "@/shared/utils/http-status";
+import { isValidIPAddress } from "@/shared/utils/ip-address";
+import { requestQueryFieldError } from "@/shared/utils/request-query-filters";
+import { isValidRequestTimeZone, validateRequestTimeFilters } from "@/shared/utils/request-time-filters";
 import "@/features/observability/requests/request-page.css";
 
 const filterKeys = [
@@ -36,27 +40,57 @@ const filterKeys = [
 ] as const;
 const defaultLimit = 50;
 const defaultTimeZone = "Asia/Seoul";
-const requestStatusPattern = /^(?:success|error|4xx|5xx|[1-5][0-9]{2})$/u;
 const exactHTTPStatusPattern = /^[1-5][0-9]{2}$/u;
 const standardPageLimits = [25, 50, 100, 200] as const;
 
 function queryFromSearch(search: URLSearchParams): AppRequestsQuery {
   const requestedLimit = Number(search.get("limit"));
+  const temporalError = validateRequestTimeFilters({
+    from: search.get("from") ?? undefined,
+    to: search.get("to") ?? undefined,
+    tz: search.get("tz") ?? undefined,
+  });
+  const requestedTimeZone = search.get("tz")?.trim() ?? "";
   const query: AppRequestsQuery = {
     limit:
       Number.isInteger(requestedLimit) && requestedLimit >= 1 && requestedLimit <= 200
         ? requestedLimit
         : defaultLimit,
-    tz: search.get("tz")?.trim() || defaultTimeZone,
+    tz: isValidRequestTimeZone(requestedTimeZone) ? requestedTimeZone : defaultTimeZone,
   };
   for (const key of filterKeys) {
     const value = search.get(key)?.trim();
-    if (key === "status" && value && !requestStatusPattern.test(value)) continue;
+    if (value && requestQueryFieldError(key, value)) continue;
+    if ((key === "from" || key === "to") && temporalError?.field === key) continue;
     if (value) Object.assign(query, { [key]: value });
   }
   const cursor = search.get("cursor");
-  if (cursor) query.cursor = cursor;
+  if (cursor && !requestQueryFieldError("cursor", cursor)) query.cursor = cursor;
   return query;
+}
+
+function RequestIPFilter({ initialValue }: { initialValue: string }): React.JSX.Element {
+  const [value, setValue] = useState(initialValue);
+  const error = value.trim() !== "" && !isValidIPAddress(value) ? "올바른 IP 주소를 입력하세요." : "";
+
+  return (
+    <label>
+      클라이언트 IP
+      <input
+        name="ip"
+        aria-label="클라이언트 IP"
+        value={value}
+        aria-invalid={error ? "true" : undefined}
+        aria-describedby={error ? "request-ip-error" : undefined}
+        onChange={(event) => setValue(event.currentTarget.value)}
+      />
+      {error ? (
+        <span id="request-ip-error" className="field-error" role="alert">
+          {error}
+        </span>
+      ) : null}
+    </label>
+  );
 }
 
 export function RequestPage(): React.JSX.Element {
@@ -69,6 +103,7 @@ export function RequestPage(): React.JSX.Element {
   const refreshInterval = usePreferences((state) => state.refreshInterval);
   const interval = refreshIntervalMs(refreshInterval);
   const [searchParams, setSearchParams] = useSearchParams();
+  const searchKey = searchParams.toString();
   const query = useMemo(() => queryFromSearch(searchParams), [searchParams]);
   const selectedTimeZone = query.tz ?? defaultTimeZone;
   const selectedStatus = query.status ?? "";
@@ -87,7 +122,11 @@ export function RequestPage(): React.JSX.Element {
     refetchIntervalInBackground: false,
   });
   const [selected, setSelected] = useState<AppRequestSummary>();
+  const [filterRevision, setFilterRevision] = useState(0);
+  const [filterError, setFilterError] = useState<string>();
   const returnFocusRef = useRef<HTMLElement | null>(null);
+  const deepLinkIP = searchParams.get("ip")?.trim() ?? "";
+  const deepLinkIPError = deepLinkIP !== "" && !isValidIPAddress(deepLinkIP);
 
   const updateCursor = useCallback(
     (cursor?: string) => {
@@ -102,6 +141,43 @@ export function RequestPage(): React.JSX.Element {
   const submitFilters = (event: React.FormEvent<HTMLFormElement>): void => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
+    for (const key of [...filterKeys, "limit", "tz"] as const) {
+      const value = String(form.get(key) ?? "").trim();
+      if (value !== "" && containsPotentialSecret(value, auth.credentialPrefixes)) {
+        setFilterError(secretSearchMessage);
+        const control = event.currentTarget.elements.namedItem(key);
+        if (control instanceof HTMLElement) control.focus();
+        return;
+      }
+    }
+    for (const key of [...filterKeys, "limit", "tz"] as const) {
+      const value = String(form.get(key) ?? "").trim();
+      const validationError = requestQueryFieldError(key, value);
+      if (validationError) {
+        if (key !== "ip") setFilterError(validationError);
+        const control = event.currentTarget.elements.namedItem(key);
+        if (control instanceof HTMLElement) control.focus();
+        return;
+      }
+    }
+    const temporalError = validateRequestTimeFilters({
+      from: String(form.get("from") ?? ""),
+      to: String(form.get("to") ?? ""),
+      tz: String(form.get("tz") ?? ""),
+    });
+    if (temporalError) {
+      setFilterError(temporalError.message);
+      const control = event.currentTarget.elements.namedItem(temporalError.field);
+      if (control instanceof HTMLElement) control.focus();
+      return;
+    }
+    setFilterError(undefined);
+    const submittedIP = String(form.get("ip") ?? "").trim();
+    if (submittedIP !== "" && !isValidIPAddress(submittedIP)) {
+      const ipInput = event.currentTarget.elements.namedItem("ip");
+      if (ipInput instanceof HTMLInputElement) ipInput.focus();
+      return;
+    }
     const next = new URLSearchParams();
     for (const key of [...filterKeys, "limit", "tz"] as const) {
       const value = String(form.get(key) ?? "").trim();
@@ -123,6 +199,8 @@ export function RequestPage(): React.JSX.Element {
         requestId={isAppError(result.error) ? result.error.requestId : undefined}
         diagnosticCode={isAppError(result.error) ? result.error.code : undefined}
         onRetry={() => void result.refetch()}
+        onReset={() => setSearchParams({}, { replace: false })}
+        resetLabel="필터 초기화"
         showLegacy={showLegacyAdmin}
         legacyHref={legacyPath}
       />
@@ -150,7 +228,12 @@ export function RequestPage(): React.JSX.Element {
         </div>
       </header>
 
-      <form className="request-filters" key={searchParams.toString()} onSubmit={submitFilters}>
+      <form
+        className="request-filters"
+        key={`${searchKey}:${filterRevision}`}
+        onInput={() => setFilterError(undefined)}
+        onSubmit={submitFilters}
+      >
         <div className="request-filter-heading">
           <Filter aria-hidden="true" />
           <strong>조회 필터</strong>
@@ -190,38 +273,43 @@ export function RequestPage(): React.JSX.Element {
           </label>
           <label>
             모델
-            <input name="model" defaultValue={searchParams.get("model") ?? ""} />
+            <input name="model" maxLength={256} defaultValue={searchParams.get("model") ?? ""} />
           </label>
           <label>
             요청 ID
-            <input name="request_id" defaultValue={searchParams.get("request_id") ?? ""} />
+            <input name="request_id" maxLength={512} defaultValue={searchParams.get("request_id") ?? ""} />
           </label>
           <label>
             공급자 참조
-            <input name="provider_ref" defaultValue={searchParams.get("provider_ref") ?? ""} />
+            <input name="provider_ref" maxLength={47} defaultValue={searchParams.get("provider_ref") ?? ""} />
           </label>
-          <details className="request-advanced">
+          <details className="request-advanced" open={deepLinkIPError || undefined}>
             <summary>고급 필터</summary>
             <div className="request-filter-grid">
               <label>
                 추적 ID
-                <input name="trace_id" defaultValue={searchParams.get("trace_id") ?? ""} />
+                <input name="trace_id" maxLength={512} defaultValue={searchParams.get("trace_id") ?? ""} />
               </label>
               <label>
                 세션 ID
-                <input name="session_id" defaultValue={searchParams.get("session_id") ?? ""} />
+                <input
+                  name="session_id"
+                  maxLength={512}
+                  defaultValue={searchParams.get("session_id") ?? ""}
+                />
               </label>
               <label>
                 API 키 ID
-                <input name="api_key_id" defaultValue={searchParams.get("api_key_id") ?? ""} />
+                <input
+                  name="api_key_id"
+                  maxLength={512}
+                  defaultValue={searchParams.get("api_key_id") ?? ""}
+                />
               </label>
-              <label>
-                클라이언트 IP
-                <input name="ip" defaultValue={searchParams.get("ip") ?? ""} />
-              </label>
+              <RequestIPFilter initialValue={deepLinkIP} />
               <label>
                 언어
-                <input name="language" defaultValue={searchParams.get("language") ?? ""} />
+                <input name="language" maxLength={64} defaultValue={searchParams.get("language") ?? ""} />
               </label>
               <label>
                 표시 건수
@@ -240,11 +328,24 @@ export function RequestPage(): React.JSX.Element {
             </div>
           </details>
         </div>
+        {filterError ? (
+          <p className="field-error" role="alert">
+            {filterError}
+          </p>
+        ) : null}
         <div className="request-filter-actions">
           <Button type="submit" variant="primary">
             <Search aria-hidden="true" /> 조회
           </Button>
-          <Button type="button" variant="ghost" onClick={() => setSearchParams({}, { replace: false })}>
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={() => {
+              setFilterError(undefined);
+              setFilterRevision((revision) => revision + 1);
+              setSearchParams({}, { replace: false });
+            }}
+          >
             필터 초기화
           </Button>
         </div>

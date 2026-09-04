@@ -1,10 +1,11 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { ExternalLink, Filter, ListTree, RefreshCw, Search } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ExternalLink, ListTree, RefreshCw, Search } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { Link, useLocation, useSearchParams } from "react-router";
 
 import { useAuth } from "@/app/auth/AuthProvider";
 import { featureByPath } from "@/config/migration-registry";
+import { TraceFilters } from "@/features/observability/traces/TraceFilters";
 import { TraceRequestDetails } from "@/features/observability/traces/TraceRequestDetails";
 import { TraceRequestTable } from "@/features/observability/traces/TraceRequestTable";
 import { TraceTimeline } from "@/features/observability/traces/TraceTimeline";
@@ -14,6 +15,7 @@ import {
   formatTraceDuration,
   requestExplorerPath,
   selectedRequestFromSearch,
+  traceFilterFormKey,
   traceCount,
 } from "@/features/observability/traces/trace-utils";
 import { refreshIntervalMs } from "@/features/health/health-utils";
@@ -27,12 +29,7 @@ import { Button } from "@/shared/components/ui/Button";
 import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
 import { canOpenLegacyAdmin } from "@/shared/permissions/legacy-admin";
 import { usePreferences } from "@/shared/stores/preferences";
-import { fitsUTF8Bytes } from "@/shared/utils/utf8";
 import "@/features/observability/traces/trace-page.css";
-
-const submittedFilterKeys = ["trace_id", "from", "to", "status", "model", "limit", "tz"] as const;
-const standardPageLimits = [25, 50, 100, 200] as const;
-const exactHTTPStatusPattern = /^[1-5][0-9]{2}$/u;
 
 export function TracePage(): React.JSX.Element {
   const auth = useAuth();
@@ -47,19 +44,12 @@ export function TracePage(): React.JSX.Element {
   const query = useMemo(() => buildTraceQuery(searchParams), [searchParams]);
   const selectedTimeZone = query.tz ?? "Asia/Seoul";
   const selectedRequestId = selectedRequestFromSearch(searchParams);
-  const filterFormKey = JSON.stringify(submittedFilterKeys.map((key) => query[key] ?? ""));
-  const selectedStatus = query.status ?? "";
-  const selectedLimit = query.limit ?? 50;
-  const customStatus = exactHTTPStatusPattern.test(selectedStatus) ? selectedStatus : undefined;
-  const customLimit = standardPageLimits.includes(selectedLimit as (typeof standardPageLimits)[number])
-    ? undefined
-    : selectedLimit;
+  const filterFormKey = traceFilterFormKey(searchParams);
   const detailRef = useRef<HTMLElement>(null);
   const pageHeadingRef = useRef<HTMLHeadingElement>(null);
-  const traceIdInputRef = useRef<HTMLInputElement>(null);
   const selectionTriggerRef = useRef<HTMLButtonElement | null>(null);
-  const restoreSelectionFocusRef = useRef(false);
-  const [traceIdError, setTraceIdError] = useState("");
+  const previousSelectedRequestIdRef = useRef<string | undefined>(undefined);
+
   const result = useQuery({
     queryKey: ["admin", "requests", "trace-explorer", query],
     queryFn: ({ signal }) =>
@@ -96,7 +86,6 @@ export function TracePage(): React.JSX.Element {
   const selectRequest = useCallback(
     (requestId: string, trigger: HTMLButtonElement): void => {
       selectionTriggerRef.current = trigger;
-      restoreSelectionFocusRef.current = false;
       if (selectedRequestId === requestId) {
         detailRef.current?.focus();
         return;
@@ -107,46 +96,26 @@ export function TracePage(): React.JSX.Element {
   );
 
   const clearSelectedRequest = useCallback((): void => {
-    restoreSelectionFocusRef.current = true;
     updateSearch({ selected_request: undefined }, true);
   }, [updateSearch]);
 
   const forgetSelectionTrigger = useCallback((): void => {
-    restoreSelectionFocusRef.current = false;
     selectionTriggerRef.current = null;
   }, []);
 
   useEffect(() => {
+    const previousSelectedRequestId = previousSelectedRequestIdRef.current;
+    previousSelectedRequestIdRef.current = selectedRequestId;
     if (selectedRequestId) {
       if (selectionPresence !== "loading") detailRef.current?.focus();
       return;
     }
-    if (!restoreSelectionFocusRef.current) return;
-    restoreSelectionFocusRef.current = false;
+    if (!previousSelectedRequestId) return;
     const target = selectionTriggerRef.current;
     selectionTriggerRef.current = null;
     if (target?.isConnected) target.focus();
     else pageHeadingRef.current?.focus();
   }, [selectedRequestId, selectionPresence]);
-
-  const submitFilters = (event: React.FormEvent<HTMLFormElement>): void => {
-    event.preventDefault();
-    const form = new FormData(event.currentTarget);
-    const traceID = String(form.get("trace_id") ?? "").trim();
-    if (!fitsUTF8Bytes(traceID, 512)) {
-      setTraceIdError("추적 ID는 UTF-8 기준 512바이트 이하여야 합니다.");
-      traceIdInputRef.current?.focus();
-      return;
-    }
-    setTraceIdError("");
-    const next = new URLSearchParams();
-    for (const key of submittedFilterKeys) {
-      const value = String(form.get(key) ?? "").trim();
-      if (value) next.set(key, value);
-    }
-    forgetSelectionTrigger();
-    setSearchParams(next, { replace: false });
-  };
 
   if (result.isPending && !result.data) {
     return <LoadingState label="추적 요청 흐름을 불러오는 중입니다." />;
@@ -159,6 +128,8 @@ export function TracePage(): React.JSX.Element {
         requestId={isAppError(result.error) ? result.error.requestId : undefined}
         diagnosticCode={isAppError(result.error) ? result.error.code : undefined}
         onRetry={() => void result.refetch()}
+        onReset={() => setSearchParams({}, { replace: false })}
+        resetLabel="필터 초기화"
         showLegacy={showLegacyAdmin}
         legacyHref={legacyPath}
       />
@@ -203,111 +174,19 @@ export function TracePage(): React.JSX.Element {
         </div>
       </header>
 
-      <form
-        className="trace-filters"
+      <TraceFilters
         key={filterFormKey}
-        aria-label="추적 조회 필터"
-        onSubmit={submitFilters}
-      >
-        <div className="trace-filter-heading">
-          <Filter aria-hidden="true" />
-          <div>
-            <strong>추적 조회</strong>
-            <span>필터와 선택한 요청은 URL에 저장됩니다.</span>
-          </div>
-        </div>
-        <div className="trace-filter-grid">
-          <label className="trace-id-filter">
-            추적 ID
-            <input
-              ref={traceIdInputRef}
-              name="trace_id"
-              aria-label="추적 ID"
-              aria-describedby={`trace-id-help${traceIdError ? " trace-id-error" : ""}`}
-              aria-invalid={traceIdError ? "true" : undefined}
-              maxLength={512}
-              placeholder="예: trace-01H..."
-              defaultValue={query.trace_id ?? ""}
-              onInput={(event) => {
-                if (traceIdError && fitsUTF8Bytes(event.currentTarget.value.trim(), 512)) {
-                  setTraceIdError("");
-                }
-              }}
-            />
-            <small id="trace-id-help">비워 두면 최근 요청의 추적 흐름을 표시합니다.</small>
-            {traceIdError ? (
-              <small id="trace-id-error" className="field-error" role="alert">
-                {traceIdError}
-              </small>
-            ) : null}
-          </label>
-          <label>
-            상태
-            <select name="status" defaultValue={selectedStatus}>
-              <option value="">전체</option>
-              <option value="success">성공 (2xx·3xx)</option>
-              <option value="error">오류 (4xx·5xx)</option>
-              <option value="4xx">4xx</option>
-              <option value="5xx">5xx</option>
-              {customStatus ? <option value={customStatus}>HTTP {customStatus}</option> : null}
-            </select>
-          </label>
-          <label>
-            모델
-            <input name="model" maxLength={256} defaultValue={query.model ?? ""} />
-          </label>
-          <label>
-            시작 시각
-            <input
-              name="from"
-              type="text"
-              maxLength={64}
-              placeholder="예: 2026-09-04T09:00 또는 RFC3339"
-              defaultValue={query.from ?? ""}
-            />
-          </label>
-          <label>
-            종료 시각
-            <input
-              name="to"
-              type="text"
-              maxLength={64}
-              placeholder="예: 2026-09-04T18:00 또는 RFC3339"
-              defaultValue={query.to ?? ""}
-            />
-          </label>
-          <label>
-            표시 건수
-            <select name="limit" defaultValue={String(selectedLimit)}>
-              {customLimit ? <option value={customLimit}>{customLimit}건</option> : null}
-              <option value="25">25건</option>
-              <option value="50">50건</option>
-              <option value="100">100건</option>
-              <option value="200">200건</option>
-            </select>
-          </label>
-          <label>
-            시간대
-            <input name="tz" maxLength={64} defaultValue={selectedTimeZone} />
-          </label>
-        </div>
-        <div className="trace-filter-actions">
-          <Button type="submit" variant="primary">
-            <Search aria-hidden="true" /> 흐름 조회
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            onClick={() => {
-              forgetSelectionTrigger();
-              setTraceIdError("");
-              setSearchParams({}, { replace: false });
-            }}
-          >
-            필터 초기화
-          </Button>
-        </div>
-      </form>
+        query={query}
+        credentialPrefixes={auth.credentialPrefixes}
+        onApply={(next) => {
+          forgetSelectionTrigger();
+          setSearchParams(next, { replace: false });
+        }}
+        onReset={() => {
+          forgetSelectionTrigger();
+          setSearchParams({}, { replace: false });
+        }}
+      />
 
       <p className="sr-only" role="status" aria-live="polite" aria-atomic="true">
         {selectedRequestId

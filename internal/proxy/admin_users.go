@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -211,6 +212,11 @@ func (s *Server) handleTeamDetail(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
 	}
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
 	team := strings.TrimPrefix(r.URL.Path, "/admin/teams/")
 	if team == "" || strings.Contains(team, "/") {
 		writeOpenAIError(w, http.StatusBadRequest, "invalid team", "invalid_request_error", "invalid_team")
@@ -226,9 +232,11 @@ func (s *Server) handleTeamDetail(w http.ResponseWriter, r *http.Request) {
 			writeOpenAIError(w, http.StatusNotFound, "team not found", "invalid_request_error", "team_not_found")
 			return
 		}
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "team_detail_failed")
+		slog.Error("team detail query failed", "team", team, "error", err)
+		writeOpenAIError(w, http.StatusInternalServerError, "team detail could not be loaded", "server_error", "team_detail_failed")
 		return
 	}
+	s.maskTeamDetail(r, &detail)
 	writeJSON(w, http.StatusOK, detail)
 }
 
@@ -268,9 +276,11 @@ func (s *Server) handleUserDetail(w http.ResponseWriter, r *http.Request) {
 			writeOpenAIError(w, http.StatusNotFound, "user not found", "invalid_request_error", "user_not_found")
 			return
 		}
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "user_detail_failed")
+		slog.Error("user detail query failed", "user_id", id, "error", err)
+		writeOpenAIError(w, http.StatusInternalServerError, "user detail could not be loaded", "server_error", "user_detail_failed")
 		return
 	}
+	s.maskUserDetail(r, &detail)
 	writeJSON(w, http.StatusOK, struct {
 		*store.UserDetail
 		TeamNames map[string]string `json:"team_names"`
@@ -432,10 +442,33 @@ func (s *Server) handleIPs(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
 	}
-	ips, err := s.db.ListIPs(r.Context())
-	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "ips_failed")
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
 		return
+	}
+	teams, teamScoped, scopeErr := requestTeamScopeForCallerChecked(s, r)
+	if scopeErr != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, "team scope lookup failed", "server_error", "team_scope_failed")
+		return
+	}
+	ips, err := s.db.ListIPsScoped(r.Context(), teams, teamScoped)
+	if err != nil {
+		slog.Error("IP list query failed", "error", err)
+		writeOpenAIError(w, http.StatusInternalServerError, "IP list could not be loaded", "server_error", "ips_failed")
+		return
+	}
+	if !s.canViewRawPrompts(r) {
+		projected := ips[:0]
+		for _, summary := range ips {
+			ip, valid := validatedExternalIPAddress(summary.IP)
+			if !valid {
+				continue
+			}
+			summary.IP = ip
+			projected = append(projected, summary)
+		}
+		ips = projected
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ips": ips})
 }
@@ -445,20 +478,34 @@ func (s *Server) handleIPDetail(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
 	}
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
 	ip := strings.TrimPrefix(r.URL.Path, "/admin/ips/")
-	if ip == "" || strings.Contains(ip, "/") {
+	_, validIP := canonicalExternalIPAddress(ip)
+	if ip == "" || strings.Contains(ip, "/") || !validIP {
 		writeOpenAIError(w, http.StatusBadRequest, "invalid ip", "invalid_request_error", "invalid_ip")
 		return
 	}
-	detail, err := s.db.GetIPDetail(r.Context(), ip, recentLimit(r))
+	ip = strings.TrimSpace(ip)
+	teams, teamScoped, scopeErr := requestTeamScopeForCallerChecked(s, r)
+	if scopeErr != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, "team scope lookup failed", "server_error", "team_scope_failed")
+		return
+	}
+	detail, err := s.db.GetIPDetailScoped(r.Context(), ip, recentLimit(r), teams, teamScoped)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeOpenAIError(w, http.StatusNotFound, "ip not found", "invalid_request_error", "ip_not_found")
 			return
 		}
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "ip_detail_failed")
+		slog.Error("IP detail query failed", "ip", ip, "error", err)
+		writeOpenAIError(w, http.StatusInternalServerError, "IP detail could not be loaded", "server_error", "ip_detail_failed")
 		return
 	}
+	s.maskIPDetail(r, &detail)
 	writeJSON(w, http.StatusOK, detail)
 }
 
@@ -479,6 +526,14 @@ func (s *Server) handleRequestDetail(w http.ResponseWriter, r *http.Request) {
 		s.handleRequestTrace(w, r)
 		return
 	}
+	if strings.HasSuffix(rest, "/explain") {
+		s.handleRequestExplain(w, r)
+		return
+	}
+	if strings.HasSuffix(rest, "/links") {
+		s.handleRequestLinks(w, r)
+		return
+	}
 	if idx := strings.Index(rest, "/"); idx >= 0 {
 		sub := rest[idx+1:]
 		switch sub {
@@ -491,12 +546,6 @@ func (s *Server) handleRequestDetail(w http.ResponseWriter, r *http.Request) {
 		case "analyze":
 			s.handleRequestAnalyze(w, r)
 			return
-		case "explain":
-			s.handleRequestExplain(w, r)
-			return
-		case "links":
-			s.handleRequestLinks(w, r)
-			return
 		case "headers", "routing", "body", "timeline", "export":
 			s.handleRequestReadableSubresource(w, r, rest)
 			return
@@ -504,8 +553,13 @@ func (s *Server) handleRequestDetail(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusNotFound, "not found", "invalid_request_error", "not_found")
 		return
 	}
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
 	id := rest
-	if id == "" {
+	if !adminTraceIdentifierValid(id) {
 		writeOpenAIError(w, http.StatusBadRequest, "invalid request id", "invalid_request_error", "invalid_request_id")
 		return
 	}
@@ -515,7 +569,8 @@ func (s *Server) handleRequestDetail(w http.ResponseWriter, r *http.Request) {
 			writeOpenAIError(w, http.StatusNotFound, "request not found", "invalid_request_error", "request_not_found")
 			return
 		}
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "request_detail_failed")
+		slog.Error("request detail query failed", "request_id", id, "error", err)
+		writeOpenAIError(w, http.StatusInternalServerError, "request detail could not be loaded", "server_error", "request_detail_failed")
 		return
 	}
 	if !s.canViewRequestDetail(r, detail.Request) {
@@ -531,13 +586,15 @@ func (s *Server) handleRequestAnalyze(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
 		return
 	}
-	rest := strings.TrimPrefix(r.URL.Path, "/admin/requests/")
-	idx := strings.Index(rest, "/")
-	if idx <= 0 {
+	id, valid := adminTracePathID(r.URL.Path, "/admin/requests/", "/analyze")
+	if !valid {
 		writeOpenAIError(w, http.StatusBadRequest, "invalid request id", "invalid_request_error", "invalid_request_id")
 		return
 	}
-	id := rest[:idx]
+	if !s.canViewRawPrompts(r) {
+		writeOpenAIError(w, http.StatusForbidden, "request analysis requires privileged trace access", "permission_error", "raw_trace_access_denied")
+		return
+	}
 
 	detail, err := s.db.RequestDetail(r.Context(), id)
 	if err != nil {
@@ -545,7 +602,12 @@ func (s *Server) handleRequestAnalyze(w http.ResponseWriter, r *http.Request) {
 			writeOpenAIError(w, http.StatusNotFound, "request not found", "invalid_request_error", "request_not_found")
 			return
 		}
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "request_detail_failed")
+		slog.Error("request analysis lookup failed", "request_id", id, "error", err)
+		writeOpenAIError(w, http.StatusInternalServerError, "request detail could not be loaded", "server_error", "request_detail_failed")
+		return
+	}
+	if !s.canViewRequestDetail(r, detail.Request) {
+		writeOpenAIError(w, http.StatusForbidden, "request is outside your team scope", "permission_error", "cross_team_access_denied")
 		return
 	}
 
@@ -654,19 +716,33 @@ func (s *Server) handlePromptSearch(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
 	}
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
+	teams, teamScoped, scopeErr := requestTeamScopeForCallerChecked(s, r)
+	if scopeErr != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, "prompt scope could not be resolved", "server_error", "prompt_scope_failed")
+		return
+	}
 	q := store.PromptSearch{
-		Keyword:  strings.TrimSpace(r.URL.Query().Get("q")),
-		APIKeyID: strings.TrimSpace(r.URL.Query().Get("api_key_id")),
-		IP:       strings.TrimSpace(r.URL.Query().Get("ip")),
-		Language: strings.TrimSpace(r.URL.Query().Get("language")),
-		Since:    strings.TrimSpace(r.URL.Query().Get("since")),
-		Limit:    recentLimit(r),
+		Keyword:            strings.TrimSpace(r.URL.Query().Get("q")),
+		APIKeyID:           strings.TrimSpace(r.URL.Query().Get("api_key_id")),
+		IP:                 strings.TrimSpace(r.URL.Query().Get("ip")),
+		Language:           strings.TrimSpace(r.URL.Query().Get("language")),
+		Since:              strings.TrimSpace(r.URL.Query().Get("since")),
+		Limit:              recentLimit(r),
+		Teams:              teams,
+		TeamScoped:         teamScoped,
+		SearchRedactedOnly: !s.canViewRawPrompts(r),
 	}
 	results, err := s.db.SearchPrompts(r.Context(), q)
 	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "prompt_search_failed")
+		writeOpenAIError(w, http.StatusInternalServerError, "prompt search could not be completed", "server_error", "prompt_search_failed")
 		return
 	}
+	s.maskRecentRequests(r, results)
 	writeJSON(w, http.StatusOK, map[string]any{"requests": results})
 }
 

@@ -181,7 +181,7 @@ func (s *Server) buildMCPAgentToolset(ctx context.Context, candidates []MCPCandi
 			}
 			desc := strings.TrimSpace(tool.Description)
 			if desc == "" {
-				desc = boundedModelsProviderLabel(route.upstreamName) + " 도구 " + route.bareTool
+				desc = s.boundedModelsProviderLabelForConfig(route.upstreamName) + " 도구 " + boundedExternalProviderText(route.bareTool, s.externalCredentialProjectionArgs(route.upstreamName)...)
 			}
 			ts.tools = append(ts.tools, map[string]any{
 				"type": "function",
@@ -338,7 +338,7 @@ func (s *Server) runMCPAgenticChat(w http.ResponseWriter, r *http.Request, model
 			}
 		}
 		if provider != "" {
-			out.Provider = boundedModelsProviderLabel(provider)
+			out.Provider = s.boundedModelsProviderLabelForConfig(provider)
 		}
 		if err != nil {
 			out.Err = mcpAgentPublicError(err)
@@ -401,7 +401,7 @@ func (s *Server) runMCPAgenticChat(w http.ResponseWriter, r *http.Request, model
 			}
 			toolContent, ev := s.execAgentToolCall(r, apiKeyID, authCtx, route, tc.Args)
 			out.Evidences = append(out.Evidences, ev)
-			summary := fmt.Sprintf("   → %s · %d건 · %dms", boundedModelsProviderLabel(route.upstreamName), ev.SourceCount, ev.LatencyMS)
+			summary := fmt.Sprintf("   → %s · %d건 · %dms", s.boundedModelsProviderLabelForConfig(route.upstreamName), ev.SourceCount, ev.LatencyMS)
 			if ev.Error != "" {
 				summary = "   → 오류: " + truncateText(ev.Error, 200)
 			}
@@ -422,7 +422,7 @@ func (s *Server) runMCPAgenticChat(w http.ResponseWriter, r *http.Request, model
 			content, _, _, usage, provider, ferr := s.postUpstreamChatStream(r.Context(), r, model, body, emitContent)
 			if ferr == nil {
 				if provider != "" {
-					out.Provider = boundedModelsProviderLabel(provider)
+					out.Provider = s.boundedModelsProviderLabelForConfig(provider)
 				}
 				out.Usage.add(usage)
 				out.Content = strings.TrimSpace(content)
@@ -431,7 +431,7 @@ func (s *Server) runMCPAgenticChat(w http.ResponseWriter, r *http.Request, model
 			}
 		} else if raw, provider, err := s.postUpstreamChat(r.Context(), r, model, body); err == nil {
 			if provider != "" {
-				out.Provider = boundedModelsProviderLabel(provider)
+				out.Provider = s.boundedModelsProviderLabelForConfig(provider)
 			}
 			_, content, _, _, usage := parseAgentResponse(raw)
 			out.Usage.add(usage)

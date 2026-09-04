@@ -3,6 +3,7 @@ package proxy
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -18,13 +19,11 @@ func (s *Server) handleRequestLinks(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
 		return
 	}
-	rest := strings.TrimPrefix(r.URL.Path, "/admin/requests/")
-	idx := strings.Index(rest, "/")
-	if idx <= 0 {
+	id, valid := adminTracePathID(r.URL.Path, "/admin/requests/", "/links")
+	if !valid {
 		writeOpenAIError(w, http.StatusBadRequest, "invalid request id", "invalid_request_error", "invalid_request_id")
 		return
 	}
-	id := rest[:idx]
 
 	detail, err := s.db.RequestDetail(r.Context(), id)
 	if err != nil {
@@ -32,18 +31,32 @@ func (s *Server) handleRequestLinks(w http.ResponseWriter, r *http.Request) {
 			writeOpenAIError(w, http.StatusNotFound, "request not found", "invalid_request_error", "request_not_found")
 			return
 		}
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "request_links_failed")
+		writeRequestLinksFailure(w, id, "request detail", err)
 		return
 	}
+	if !s.canViewRequestDetail(r, detail.Request) {
+		writeOpenAIError(w, http.StatusForbidden, "request is outside your team scope", "permission_error", "cross_team_access_denied")
+		return
+	}
+	showRaw := s.canViewRawPrompts(r)
+	rawProvider := detail.Request.Provider
+	rawFallback := detail.Request.FallbackFrom
+	s.maskRequestDetail(r, &detail)
 	routing, routingFound, err := s.requestRoutingDecision(r.Context(), id)
 	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "request_links_failed")
+		writeRequestLinksFailure(w, id, "routing decision", err)
 		return
+	}
+	if routingFound && !showRaw {
+		routing = projectRoutingDecisionProviderForExternal(routing, s.externalCredentialProjectionArgs()...)
 	}
 	mcpDecisions, err := s.db.MCPRouteDecisionsForRequest(r.Context(), id)
 	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "request_links_failed")
+		writeRequestLinksFailure(w, id, "mcp route decisions", err)
 		return
+	}
+	if !showRaw {
+		projectMCPRouteDecisionsProviderForExternal(mcpDecisions, s.externalCredentialProjectionArgs(rawProvider, rawFallback)...)
 	}
 
 	mcpTools := 0
@@ -147,8 +160,13 @@ func (s *Server) handleRequestLinks(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func writeRequestLinksFailure(w http.ResponseWriter, requestID, operation string, err error) {
+	slog.Error("request links query failed", "request_id", requestID, "operation", operation, "error", err)
+	writeOpenAIError(w, http.StatusInternalServerError, "request links could not be loaded", "server_error", "request_links_failed")
+}
+
 func (s *Server) requestRoutingDecision(ctx context.Context, requestID string) (store.RoutingDecisionLog, bool, error) {
-	decision, err := s.db.RoutingDecisionByID(ctx, requestID)
+	decision, err := s.db.RoutingDecisionByRequestID(ctx, requestID)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return store.RoutingDecisionLog{}, false, nil

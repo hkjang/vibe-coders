@@ -1,10 +1,13 @@
 import type { AppRequestSummary, AppRequestsQuery } from "@/shared/api/schemas";
 import { httpStatusTone, type HTTPStatusTone } from "@/shared/utils/http-status";
 import { fitsUTF8Bytes } from "@/shared/utils/utf8";
+import { isValidRequestTimeZone, validateRequestTimeFilters } from "@/shared/utils/request-time-filters";
+import { requestQueryFieldError } from "@/shared/utils/request-query-filters";
 
 const defaultLimit = 50;
 const defaultTimeZone = "Asia/Seoul";
 const requestStatusPattern = /^(?:success|error|4xx|5xx|[1-5][0-9]{2})$/u;
+export const traceSubmittedFilterKeys = ["trace_id", "from", "to", "status", "model", "limit", "tz"] as const;
 
 export interface TraceTimelineLane {
   offsetPercent: number;
@@ -41,21 +44,30 @@ export function buildTraceQuery(search: URLSearchParams): AppRequestsQuery {
   const model = boundedParameter(search, "model", 256);
   const traceId = boundedParameter(search, "trace_id", 512);
   const cursor = boundedParameter(search, "cursor", 4_096);
+  const requestedTimeZone = boundedParameter(search, "tz", 64) ?? "";
+  const temporalError = validateRequestTimeFilters({ from, to, tz: requestedTimeZone });
 
   return {
     limit,
-    tz: boundedParameter(search, "tz", 64) ?? defaultTimeZone,
-    ...(from ? { from } : {}),
-    ...(to ? { to } : {}),
-    ...(status && requestStatusPattern.test(status) ? { status } : {}),
-    ...(model ? { model } : {}),
-    ...(traceId ? { trace_id: traceId } : {}),
-    ...(cursor ? { cursor } : {}),
+    tz: isValidRequestTimeZone(requestedTimeZone) ? requestedTimeZone : defaultTimeZone,
+    ...(from && temporalError?.field !== "from" ? { from } : {}),
+    ...(to && temporalError?.field !== "to" ? { to } : {}),
+    ...(status && requestStatusPattern.test(status) && !requestQueryFieldError("status", status)
+      ? { status }
+      : {}),
+    ...(model && !requestQueryFieldError("model", model) ? { model } : {}),
+    ...(traceId && !requestQueryFieldError("trace_id", traceId) ? { trace_id: traceId } : {}),
+    ...(cursor && !requestQueryFieldError("cursor", cursor) ? { cursor } : {}),
   };
 }
 
+export function traceFilterFormKey(search: URLSearchParams): string {
+  return JSON.stringify(traceSubmittedFilterKeys.map((key) => search.getAll(key)));
+}
+
 export function selectedRequestFromSearch(search: URLSearchParams): string | undefined {
-  return boundedParameter(search, "selected_request", 512);
+  const selected = boundedParameter(search, "selected_request", 512);
+  return selected && !requestQueryFieldError("request_id", selected) ? selected : undefined;
 }
 
 export function requestExplorerPath(query: AppRequestsQuery, selectedRequest?: string): string {

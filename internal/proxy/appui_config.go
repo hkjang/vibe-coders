@@ -10,6 +10,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"vibe-coders/internal/config"
 	"vibe-coders/internal/store"
@@ -46,6 +47,29 @@ type appUIFeature struct {
 	MinimumAPIVersion  string   `json:"minimum_api_version"`
 	Available          bool     `json:"available"`
 	AvailabilityReason string   `json:"availability_reason,omitempty"`
+}
+
+func uiCredentialPrefixes(cfg config.AuthConfig) []string {
+	const maximumPrefixes = 64
+	candidates := make([]string, 0, 4+len(cfg.HistoricalKeyPrefixes))
+	candidates = append(candidates, cfg.APIKeyPrefix, cfg.ServiceKeyPrefix, "vc_sk_", "vc_sa_")
+	candidates = append(candidates, cfg.HistoricalKeyPrefixes...)
+	prefixes := make([]string, 0, min(len(candidates), maximumPrefixes))
+	seen := make(map[string]struct{}, len(candidates))
+	for _, prefix := range candidates {
+		if prefix == "" || len(prefix) > 512 || !utf8.ValidString(prefix) {
+			continue
+		}
+		if _, exists := seen[prefix]; exists {
+			continue
+		}
+		seen[prefix] = struct{}{}
+		prefixes = append(prefixes, prefix)
+		if len(prefixes) == maximumPrefixes {
+			break
+		}
+	}
+	return prefixes
 }
 
 // appUIFeatures is deliberately conservative. New React screens enter as read-only
@@ -405,7 +429,8 @@ func (s *Server) handleAdminUIBootstrap(w http.ResponseWriter, r *http.Request) 
 		"authentication": map[string]any{
 			"enabled": s.cfg.Auth.Enabled, "authenticated": authenticated, "mode": mode,
 			"keycloak_enabled": kc.Enabled, "allow_local_login": !kc.Enabled || kc.AllowLocalLogin,
-			"sso_login_url": "/auth/keycloak/login",
+			"sso_login_url":       "/auth/keycloak/login",
+			"credential_prefixes": uiCredentialPrefixes(s.cfg.Auth),
 		},
 		"user":               user,
 		"roles":              roles,

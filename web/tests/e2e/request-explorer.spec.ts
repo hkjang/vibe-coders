@@ -13,6 +13,8 @@ interface RequestProjectionCall {
 }
 
 const providerRef = `prv_${"r".repeat(43)}`;
+const requestNextCursor = `djE6cmVxdWVzdC1uZXh0.${"n".repeat(43)}`;
+const requestPreviousCursor = `djE6cmVxdWVzdC1wcmV2aW91cw.${"p".repeat(43)}`;
 
 const bootstrap = {
   backend_version: "v0.82.1",
@@ -109,14 +111,14 @@ const requestTwo = {
 const firstPage = {
   requests: [requestOne],
   limit: 25,
-  next_cursor: "cursor-next-page",
+  next_cursor: requestNextCursor,
   generated_at: "2026-09-03T01:00:05Z",
 };
 
 const secondPage = {
   requests: [requestTwo],
   limit: 25,
-  previous_cursor: "cursor-previous-page",
+  previous_cursor: requestPreviousCursor,
   generated_at: "2026-09-03T01:00:06Z",
 };
 
@@ -174,7 +176,7 @@ async function mockRequestGateway(
 test("요청 탐색기 직접 접근과 새로고침에서 필터·커서·안전 상세를 유지한다", async ({ page }) => {
   await page.addInitScript({ path: "node_modules/axe-core/axe.min.js" });
   const calls = await mockRequestGateway(page, (call) => ({
-    body: call.cursor === "cursor-next-page" ? secondPage : firstPage,
+    body: call.cursor === requestNextCursor ? secondPage : firstPage,
   }));
 
   await page.goto(
@@ -246,9 +248,9 @@ test("요청 탐색기 직접 접근과 새로고침에서 필터·커서·안�
   await expect(detailTrigger).toBeFocused();
 
   await page.getByRole("button", { name: "다음" }).click();
-  await expect(page).toHaveURL(/cursor=cursor-next-page/);
+  await expect.poll(() => new URL(page.url()).searchParams.get("cursor")).toBe(requestNextCursor);
   await expect(page.getByText("req-002", { exact: true })).toBeVisible();
-  await expect.poll(() => calls.some((call) => call.cursor === "cursor-next-page")).toBe(true);
+  await expect.poll(() => calls.some((call) => call.cursor === requestNextCursor)).toBe(true);
   expect(await axeViolations(page)).toEqual([]);
 });
 

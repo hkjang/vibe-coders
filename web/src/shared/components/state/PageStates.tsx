@@ -18,6 +18,8 @@ interface ErrorStateProps {
   requestId?: string;
   diagnosticCode?: string;
   onRetry?: () => void;
+  onReset?: () => void;
+  resetLabel?: string;
   showLegacy?: boolean;
   legacyHref?: `/admin${string}`;
 }
@@ -28,6 +30,8 @@ export function ErrorState({
   requestId,
   diagnosticCode,
   onRetry,
+  onReset,
+  resetLabel = "입력 초기화",
   showLegacy = true,
   legacyHref = "/admin",
 }: ErrorStateProps): React.JSX.Element {
@@ -42,6 +46,11 @@ export function ErrorState({
         {onRetry ? (
           <Button variant="primary" onClick={onRetry}>
             <RefreshCw aria-hidden="true" /> 다시 시도
+          </Button>
+        ) : null}
+        {onReset ? (
+          <Button variant="secondary" onClick={onReset}>
+            {resetLabel}
           </Button>
         ) : null}
         {showLegacy ? (

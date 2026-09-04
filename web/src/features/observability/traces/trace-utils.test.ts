@@ -6,6 +6,7 @@ import {
   requestExplorerPath,
   selectedRequestFromSearch,
   traceCount,
+  traceFilterFormKey,
   traceStatusTone,
 } from "@/features/observability/traces/trace-utils";
 import type { AppRequestSummary } from "@/shared/api/schemas";
@@ -87,6 +88,15 @@ describe("trace utilities", () => {
       limit: 50,
       tz: "Asia/Seoul",
     });
+  });
+
+  it("distinguishes omitted and explicit default filters for history restoration", () => {
+    expect(traceFilterFormKey(new URLSearchParams())).not.toBe(
+      traceFilterFormKey(new URLSearchParams("limit=50&tz=Asia%2FSeoul")),
+    );
+    expect(traceFilterFormKey(new URLSearchParams("model=one&selected_request=req-1"))).toBe(
+      traceFilterFormKey(new URLSearchParams("model=one&selected_request=req-2")),
+    );
   });
 
   it("orders request lanes by time and computes bounded timeline positions", () => {

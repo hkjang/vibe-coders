@@ -1,6 +1,8 @@
 package proxy
 
 import (
+	"errors"
+	"log/slog"
 	"net/http"
 	"sort"
 	"strings"
@@ -17,24 +19,51 @@ func (s *Server) handleMCPAgenticRuns(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
 	}
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
 	id := strings.TrimSpace(r.URL.Query().Get("request_id"))
 	if id == "" {
 		writeOpenAIError(w, http.StatusBadRequest, "request_id is required", "invalid_request_error", "missing_request_id")
 		return
 	}
+	if !adminTraceIdentifierValid(id) {
+		writeOpenAIError(w, http.StatusBadRequest, "invalid request_id", "invalid_request_error", "invalid_request_id")
+		return
+	}
+	detail, err := s.db.RequestDetail(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeOpenAIError(w, http.StatusNotFound, "request not found", "invalid_request_error", "request_not_found")
+			return
+		}
+		writeOpenAIError(w, http.StatusInternalServerError, "agentic run could not be loaded", "server_error", "agentic_failed")
+		return
+	}
+	if !s.canViewRequestDetail(r, detail.Request) {
+		writeOpenAIError(w, http.StatusForbidden, "request is outside your team scope", "permission_error", "cross_team_access_denied")
+		return
+	}
 	decisions, err := s.db.ListDomainRoutingDecisions(r.Context(), store.DomainRoutingFilter{RequestID: id, Limit: 1})
 	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "agentic_failed")
+		slog.Error("MCP agentic decision lookup failed", "request_id", id, "error", err)
+		writeOpenAIError(w, http.StatusInternalServerError, "agentic run could not be loaded", "server_error", "agentic_failed")
 		return
 	}
 	tools, _ := s.db.ToolsForRequest(r.Context(), id)
 	mcpRoutes, _ := s.db.MCPRouteDecisionsForRequest(r.Context(), id)
 
 	if len(decisions) == 0 && len(tools) == 0 && len(mcpRoutes) == 0 {
-		writeJSON(w, http.StatusOK, map[string]any{
+		response := map[string]any{
 			"request_id": id, "agentic": false,
 			"note": "이 요청에 대한 MCP agentic discovery 기록이 없습니다(일반 chat이거나 도구 미사용).",
-		})
+		}
+		if !s.canViewRawPrompts(r) {
+			projectMCPAgenticResponseForExternal(response, s.externalCredentialProjectionArgs(detail.Request.Provider, detail.Request.FallbackFrom)...)
+		}
+		writeJSON(w, http.StatusOK, response)
 		return
 	}
 
@@ -104,6 +133,27 @@ func (s *Server) handleMCPAgenticRuns(w http.ResponseWriter, r *http.Request) {
 	}
 	resp["route_decisions"] = routeDecisions
 	resp["note"] = "후보 점수·증거·tool 호출은 저장된 라우팅 결정/시그널 기준입니다. tool arguments 원문은 저장하지 않고 hash만 노출합니다. 원시 selector relevance·stopping reason 등 일부 신호는 현재 미적재."
+	if !s.canViewRawPrompts(r) {
+		rawIdentities := []string{detail.Request.Provider, detail.Request.FallbackFrom}
+		for _, tool := range tools {
+			rawIdentities = append(rawIdentities, tool.ServerLabel)
+		}
+		for _, route := range mcpRoutes {
+			rawIdentities = append(rawIdentities, route.UpstreamName)
+		}
+		projectMCPAgenticResponseForExternal(resp, s.externalCredentialProjectionArgs(rawIdentities...)...)
+	}
 
 	writeJSON(w, http.StatusOK, resp)
+}
+
+func projectMCPAgenticResponseForExternal(response map[string]any, projectionArgs ...string) {
+	for _, value := range response {
+		if rows, ok := value.([]map[string]any); ok {
+			for _, row := range rows {
+				projectProviderMetadataMapForExternal(row, projectionArgs...)
+			}
+		}
+	}
+	projectProviderMetadataMapForExternal(response, projectionArgs...)
 }

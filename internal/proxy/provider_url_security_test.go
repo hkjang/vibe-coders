@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -97,11 +98,132 @@ func TestProviderBaseURLValidationAndSanitization(t *testing.T) {
 			t.Errorf("unsafe URL %q must be replaced in full, got %q", raw, got)
 		}
 	}
+	for _, safe := range []string{"vc_sk_model", "vc_sa_preview", "svc-vc_sk_preview"} {
+		if providerURLComponentHasCredential(safe) {
+			t.Errorf("ordinary provider/model label %q was treated as a credential", safe)
+		}
+	}
 	if got := sanitizeProviderBaseURL("https://azure.example/openai?api-version=2026-01-01"); got != "https://azure.example/openai?api-version=2026-01-01" {
 		t.Errorf("safe Azure URL changed: %q", got)
 	}
 	if got := sanitizeProviderBaseURL("not a URL credential=private"); got != invalidProviderURLDisplay {
 		t.Errorf("invalid URL must fail closed, got %q", got)
+	}
+}
+
+func TestProviderCredentialBoundaryRejectsVendorTokensAndUserinfo(t *testing.T) {
+	credentials := []string{
+		"ghp_" + strings.Repeat("A", 36),
+		"prod_ghp_" + strings.Repeat("A", 36),
+		"github_pat_" + strings.Repeat("B", 30),
+		"prod_github_pat_" + strings.Repeat("B", 30),
+		"AKIA" + strings.Repeat("C", 16),
+		"ASIA" + strings.Repeat("D", 16),
+		"xoxb-" + strings.Repeat("E", 24),
+		"xapp-1-A1234567890-B1234567890-C1234567890",
+		"xwfp-" + strings.Repeat("W", 24),
+		"xoxe.xoxb-1-1234567890-secretvalue",
+		"xoxe-1-abcdefg",
+		"AIza" + strings.Repeat("F", 35),
+		"prod_AIza" + strings.Repeat("F", 35),
+		"vc_sk_" + strings.Repeat("G", 32),
+		"prod_vc_sk_" + strings.Repeat("G", 32),
+		"vc_sa_" + strings.Repeat("H", 32),
+		"Basic ZGVtbzpwYXNzd29yZA==",
+		"Basic dTpw",
+		"Basic dG9rZW46",
+		"Basic OnBhc3N3b3Jk",
+		"Basic 6Tp4",
+		"Bearer abcdefghijklmnop0",
+		"Bearer abc123XYZ890",
+		"prod_eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.signaturevalue",
+		"postgres://dbuser:dbpass@db.internal/gateway",
+		"dbuser:dbpass@db.internal",
+		"-----BEGIN PRIVATE KEY-----",
+	}
+	for _, credential := range credentials {
+		t.Run(credential[:min(len(credential), 24)], func(t *testing.T) {
+			if !providerURLComponentHasCredential(credential) {
+				t.Fatalf("credential was not detected: %q", credential)
+			}
+			if modelsProviderLabelSafe(credential) {
+				t.Fatalf("credential was accepted as a provider label: %q", credential)
+			}
+			if got := boundedModelsProviderLabel(credential); got != providerNameOmitted {
+				t.Fatalf("bounded provider label = %q, want %q", got, providerNameOmitted)
+			}
+			if got := boundedExternalProviderText("metadata=" + credential); got != providerMetadataOmitted {
+				t.Fatalf("external metadata = %q, want %q", got, providerMetadataOmitted)
+			}
+			projected := boundedExternalProviderText("selected "+credential, credential)
+			if strings.Contains(projected, credential) || !strings.Contains(projected, providerNameOmitted) {
+				t.Fatalf("raw provider was not safely projected: %q", projected)
+			}
+
+			providerURL := "https://provider.example/v1?region=" + url.QueryEscape(credential)
+			if err := validateProviderBaseURL(providerURL); err == nil {
+				t.Fatalf("credential-bearing provider URL was accepted: %q", providerURL)
+			}
+			if got := sanitizeProviderBaseURL(providerURL); got != invalidProviderURLDisplay {
+				t.Fatalf("sanitized provider URL = %q, want %q", got, invalidProviderURLDisplay)
+			}
+		})
+	}
+	for _, unsafeLabel := range []string{"provider-owner@example.com", "dbuser@db.internal"} {
+		if modelsProviderLabelSafe(unsafeLabel) {
+			t.Fatalf("PII-shaped provider label was accepted: %q", unsafeLabel)
+		}
+	}
+
+	for _, safe := range []string{
+		"github-enterprise",
+		"ghp_preview",
+		"AKIA-region",
+		"xoxb-short",
+		"xapp-short",
+		"xwfp-short",
+		"xoxe-short",
+		"AIza-model",
+		"Basic auth",
+		"Basic authentication",
+		"Basic sjoerd",
+		"Bearer auth",
+		"Bearer authentication",
+		"Bearer authentication-service",
+		"Bearer authorization-service",
+		"Bearer compatible-provider",
+		"highp_" + strings.Repeat("A", 36),
+		"prefixxoxb-" + strings.Repeat("E", 24),
+		"fooAKIA" + strings.Repeat("C", 16) + "bar",
+		"postgres-main",
+	} {
+		if !modelsProviderLabelSafe(safe) {
+			t.Errorf("safe provider label was rejected: %q", safe)
+		}
+	}
+	if !providerURLComponentHasCredential(strings.Repeat("x", maxProviderCredentialScanBytes+1)) {
+		t.Fatal("oversized provider metadata must fail closed before decoding")
+	}
+}
+
+func TestConfiguredCredentialPrefixRequiresGeneratedSecretSuffix(t *testing.T) {
+	for _, safe := range []string{"corp_model", "my-api_gateway", "api_provider", "corp_" + strings.Repeat("a", 31)} {
+		if providerTextContainsConfiguredCredentialPrefix(safe, "corp_") || providerTextContainsConfiguredCredentialPrefix(safe, "api_") {
+			t.Fatalf("ordinary label was treated as a configured credential: %q", safe)
+		}
+	}
+	for _, unsafe := range []string{
+		"corp_" + strings.Repeat("A", 43),
+		"metadata=api_" + strings.Repeat("B", 32),
+		"encoded%3Dcorp_" + strings.Repeat("C", 43),
+	} {
+		prefix := "corp_"
+		if strings.Contains(unsafe, "api_") {
+			prefix = "api_"
+		}
+		if !providerTextContainsConfiguredCredentialPrefix(unsafe, prefix) {
+			t.Fatalf("configured generated credential was not detected: %q", unsafe)
+		}
 	}
 }
 

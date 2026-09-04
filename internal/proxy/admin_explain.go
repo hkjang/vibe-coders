@@ -3,6 +3,7 @@ package proxy
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -20,14 +21,30 @@ func (s *Server) handleRequestExplain(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
 	}
-	// path: /admin/requests/{id}/explain
-	rest := strings.TrimPrefix(r.URL.Path, "/admin/requests/")
-	parts := strings.SplitN(rest, "/", 2)
-	if len(parts) != 2 || parts[1] != "explain" {
-		writeOpenAIError(w, http.StatusNotFound, "not found", "invalid_request_error", "not_found")
+	if r.Method != http.MethodGet {
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
 		return
 	}
-	id := parts[0]
+	id, valid := adminTracePathID(r.URL.Path, "/admin/requests/", "/explain")
+	if !valid {
+		writeOpenAIError(w, http.StatusBadRequest, "invalid request id", "invalid_request_error", "invalid_request_id")
+		return
+	}
+
+	detail, err := s.db.RequestDetail(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeOpenAIError(w, http.StatusNotFound, "request not found", "invalid_request_error", "request_not_found")
+			return
+		}
+		writeRequestExplainFailure(w, id, "request detail", err)
+		return
+	}
+	if !s.canViewRequestDetail(r, detail.Request) {
+		writeOpenAIError(w, http.StatusForbidden, "request is outside your team scope", "permission_error", "cross_team_access_denied")
+		return
+	}
+	showRaw := s.canViewRawPrompts(r)
 
 	d, err := s.db.ExplainRow(r.Context(), id)
 	if err != nil {
@@ -35,23 +52,49 @@ func (s *Server) handleRequestExplain(w http.ResponseWriter, r *http.Request) {
 			writeOpenAIError(w, http.StatusNotFound, "request not found", "invalid_request_error", "request_not_found")
 			return
 		}
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "explain_failed")
+		writeRequestExplainFailure(w, id, "explain row", err)
 		return
+	}
+	if !showRaw {
+		d = projectExplainDataProviderForExternal(d, s.externalCredentialProjectionArgs()...)
+		d.Error = audit.Redact(d.Error)
+		d.FallbackReason = audit.Redact(d.FallbackReason)
+		d.RoutingReason = audit.Redact(d.RoutingReason)
 	}
 	evals, err := s.db.EvaluationsForRequest(r.Context(), id)
 	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "explain_failed")
+		writeRequestExplainFailure(w, id, "evaluations", err)
 		return
+	}
+	if !showRaw {
+		projectionArgs := s.externalCredentialProjectionArgs(detail.Request.Provider, detail.Request.FallbackFrom)
+		for index := range evals {
+			evals[index].TraceID = audit.Redact(boundedExternalProviderText(evals[index].TraceID, projectionArgs...))
+			projectAndRedactEvaluationForExternal(&evals[index], projectionArgs...)
+		}
 	}
 	governance, err := s.governanceEventsForRequest(r.Context(), id)
 	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "explain_failed")
+		writeRequestExplainFailure(w, id, "governance", err)
 		return
+	}
+	if !showRaw {
+		projectRequestGovernanceProviderForExternal(&governance, s.externalCredentialProjectionArgs(detail.Request.Provider, detail.Request.FallbackFrom)...)
+		redactRequestGovernance(&governance)
 	}
 	text2sqlSpans, err := s.db.Text2SQLSpansForRequest(r.Context(), id)
 	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "explain_failed")
+		writeRequestExplainFailure(w, id, "text2sql spans", err)
 		return
+	}
+	if !showRaw {
+		projectionArgs := s.externalCredentialProjectionArgs(detail.Request.Provider, detail.Request.FallbackFrom)
+		for index := range text2sqlSpans {
+			text2sqlSpans[index].TraceID = audit.Redact(boundedExternalProviderText(text2sqlSpans[index].TraceID, projectionArgs...))
+			text2sqlSpans[index].Model = boundedExternalProviderText(text2sqlSpans[index].Model, projectionArgs...)
+			text2sqlSpans[index].RejectReason = audit.Redact(boundedExternalProviderText(text2sqlSpans[index].RejectReason, projectionArgs...))
+			text2sqlSpans[index].Detail = audit.Redact(boundedExternalProviderText(text2sqlSpans[index].Detail, projectionArgs...))
+		}
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -67,6 +110,11 @@ func (s *Server) handleRequestExplain(w http.ResponseWriter, r *http.Request) {
 		"cost":       s.explainCost(d),
 		"session":    map[string]any{"session_id": d.SessionID, "stream": d.Stream},
 	})
+}
+
+func writeRequestExplainFailure(w http.ResponseWriter, requestID, operation string, err error) {
+	slog.Error("request explain query failed", "request_id", requestID, "operation", operation, "error", err)
+	writeOpenAIError(w, http.StatusInternalServerError, "request explanation could not be loaded", "server_error", "explain_failed")
 }
 
 func explainText2SQL(spans []store.Text2SQLSpan) map[string]any {

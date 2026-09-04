@@ -19,6 +19,7 @@ import { authNavigation, safeEndSessionUrl } from "@/shared/auth/logout-navigati
 import { consumeSsoReturnTo } from "@/shared/utils/safe-return-to";
 import { migrationRegistry, registryFromBootstrap, type MigrationFeature } from "@/config/migration-registry";
 import { formatSsoFailure, normalizeSsoFailureCode } from "@/app/auth/sso-errors";
+import { defaultCredentialPrefixes } from "@/shared/security/secrets";
 
 export type AuthMode = "anonymous" | "authenticated" | "error" | "legacy" | "loading" | "open";
 export type AuthenticationMode = "legacy_token" | "open" | "session";
@@ -35,6 +36,7 @@ export interface AuthContextValue {
   uiEnabled: boolean;
   defaultEntry: string;
   legacyFallback: boolean;
+  credentialPrefixes: readonly string[];
   features: readonly MigrationFeature[];
   error?: string;
   login: (email: string, password: string) => Promise<void>;
@@ -88,6 +90,9 @@ export function AuthProvider({ children }: PropsWithChildren): React.JSX.Element
   const [uiEnabled, setUiEnabled] = useState(true);
   const [defaultEntry, setDefaultEntry] = useState("/app/overview");
   const [legacyFallback, setLegacyFallback] = useState(true);
+  const [credentialPrefixes, setCredentialPrefixes] = useState<readonly string[]>([
+    ...defaultCredentialPrefixes,
+  ]);
   const [features, setFeatures] = useState<readonly MigrationFeature[]>(migrationRegistry);
   const [error, setError] = useState<string>();
   const started = useRef(false);
@@ -100,6 +105,11 @@ export function AuthProvider({ children }: PropsWithChildren): React.JSX.Element
     setUiEnabled(data.ui.enabled);
     setDefaultEntry(data.ui.default_entry);
     setLegacyFallback(data.ui.legacy_fallback);
+    setCredentialPrefixes(
+      data.authentication.credential_prefixes?.length
+        ? [...data.authentication.credential_prefixes]
+        : [...defaultCredentialPrefixes],
+    );
     setAuthenticationMode(data.authentication.mode);
     setSso({
       keycloak_enabled: data.authentication.keycloak_enabled,
@@ -128,7 +138,11 @@ export function AuthProvider({ children }: PropsWithChildren): React.JSX.Element
     const me = await apiClient.request(endpoints.auth.me, {
       routeId: "auth.bootstrap.fallback",
     });
+    if (!me.credential_prefixes?.length) {
+      throw new Error("credential prefix configuration unavailable");
+    }
     setBackendVersion(me.version);
+    setCredentialPrefixes([...me.credential_prefixes]);
     setExpiresAt(me.expires_at);
     setFeatures(migrationRegistry);
     if (!me.auth_enabled) {
@@ -353,6 +367,7 @@ export function AuthProvider({ children }: PropsWithChildren): React.JSX.Element
       uiEnabled,
       defaultEntry,
       legacyFallback,
+      credentialPrefixes,
       features,
       error,
       login,
@@ -365,6 +380,7 @@ export function AuthProvider({ children }: PropsWithChildren): React.JSX.Element
       authenticationMode,
       backendVersion,
       bootstrap,
+      credentialPrefixes,
       defaultEntry,
       error,
       expiresAt,
