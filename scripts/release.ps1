@@ -88,9 +88,9 @@ if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
 if (-not (Get-Command bash -ErrorAction SilentlyContinue)) {
     throw "bash is required to run scripts/container-smoke.sh before packaging the release image."
 }
-bash -c "command -v docker >/dev/null && command -v curl >/dev/null && command -v python3 >/dev/null"
+bash -c "command -v docker >/dev/null && command -v curl >/dev/null && command -v python3 >/dev/null && command -v grype >/dev/null"
 if ($LASTEXITCODE -ne 0) {
-    throw "docker, curl, and python3 must be available in the Bash environment used for container smoke."
+    throw "docker, curl, python3, and Grype 0.117.0 must be available in the Bash release environment."
 }
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
@@ -182,6 +182,10 @@ if ($LASTEXITCODE -ne 0) { throw "docker build failed" }
 Write-Host "[verify] embedded /app assets, deep links, and build version" -ForegroundColor Cyan
 bash "scripts/container-smoke.sh" $tag $Version $releaseSourceCommit
 if ($LASTEXITCODE -ne 0) { throw "container smoke failed" }
+
+Write-Host "[verify] final image high and critical vulnerability gate" -ForegroundColor Cyan
+bash "scripts/scan-container-image.sh" $tag
+if ($LASTEXITCODE -ne 0) { throw "final image vulnerability scan failed" }
 
 Write-Host "[2/$totalSteps] docker save -> $tarPath" -ForegroundColor Cyan
 docker save -o $tarPath $tag

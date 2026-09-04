@@ -115,8 +115,9 @@ docker compose --env-file /opt/proxy-gateway/gateway.env logs -f gateway
 ### 2.5 오프라인망 적재
 
 운영 망에 인터넷이 없을 때는 외부에서 릴리즈 패키지를 만들어 옮깁니다.
-릴리스 빌드 호스트에는 Docker, Bash, curl, Python 3가 필요하며 Node.js와 jq는
-Docker builder 외부에 설치할 필요가 없습니다.
+릴리스 빌드 호스트에는 Docker, Bash, curl, Python 3, Grype 0.117.0이 필요하며 Node.js와
+jq는 Docker builder 외부에 설치할 필요가 없습니다. 패키징 전에 Grype가 실제 최종
+이미지의 High·Critical 취약점을 검사합니다.
 
 ```bash
 # 인터넷이 되는 환경에서 산출

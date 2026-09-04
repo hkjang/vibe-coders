@@ -172,10 +172,11 @@ git push origin $VERSION
 
 ## 5. 오프라인 배포 패키지 빌드 (Docker 이미지)
 
-릴리즈 스크립트 한 번으로 3-stage Docker 이미지 빌드 → container smoke → tar.gz 압축
+릴리즈 스크립트 한 번으로 3-stage Docker 이미지 빌드 → container smoke → Grype 이미지 검사 → tar.gz 압축
 → SHA256 체크섬 → 오프라인 가이드 생성을 수행합니다. v0.80.0부터는 versioned 통합
 SBOM과 제3자 라이선스 목록도 함께 산출합니다. PowerShell 경로도 동일한 smoke를 위해
-Bash, curl, Python 3가 필요합니다.
+Bash, curl, Python 3와 Grype 0.117.0이 필요합니다. Grype 검사는 실제 최종 이미지에서
+High·Critical 취약점을 발견하면 패키징 전에 실패합니다.
 대상 플랫폼이 빌드 호스트와 다르면 최종 이미지를 실행할 수 있도록 Docker binfmt/QEMU를
 먼저 구성하거나 대상 아키텍처 호스트에서 빌드해야 합니다. Smoke를 실행할 수 없는
 cross-platform 이미지는 릴리스 스크립트가 패키징하지 않습니다.
@@ -198,6 +199,7 @@ pwsh -File scripts/release.ps1 -Version v0.83.0
 |------|------|
 | **[1/5] docker build** | Node 24+pnpm frozen → Go 1.26.8 embed → distroless nonroot 3-stage 이미지 생성 |
 | **[verify] container smoke** | `/admin`, `/app` 308/deep link, hashed asset cache, `/auth/me` build version 검증 |
+| **[verify] image CVE** | Grype 0.117.0으로 최종 이미지의 High·Critical 취약점 차단 |
 | **[2/5] docker save** | OCI tar 파일 추출 |
 | **[3/5] gzip 압축** | tar → tar.gz (최적 압축) |
 | **[4/5] 가이드 생성** | `README-offline-{version}.md` 산출 |

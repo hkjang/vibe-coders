@@ -87,6 +87,9 @@ done
 expect_status 200 GET /health
 expect_status 200 GET /ready
 expect_status 200 GET /admin
+ADMIN_HTML="$(curl -fsS "${BASE_URL}/admin")" || fail "GET /admin body could not be read"
+grep -Fq '<title>vibe-coders AI 게이트웨이</title>' <<<"$ADMIN_HTML" || \
+    fail "GET /admin did not return the Legacy Stable Console"
 
 APP_REDIRECT_HEADERS="$(curl -sS -D - -o /dev/null "${BASE_URL}/app")"
 grep -Eq '^HTTP/[^ ]+ 308([[:space:]]|$)' <<<"$APP_REDIRECT_HEADERS" || fail "GET /app is not a 308 redirect"
@@ -120,4 +123,8 @@ fi
 
 # The failed app requests above must not affect the stable legacy console.
 expect_status 200 GET /admin
+ADMIN_HTML_AFTER_APP_FAILURES="$(curl -fsS "${BASE_URL}/admin")" || \
+    fail "GET /admin body could not be read after app failures"
+grep -Fq '<title>vibe-coders AI 게이트웨이</title>' <<<"$ADMIN_HTML_AFTER_APP_FAILURES" || \
+    fail "GET /admin did not remain the Legacy Stable Console after app failures"
 echo "container smoke passed: $IMAGE (${BASE_URL})"

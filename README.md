@@ -326,6 +326,8 @@ $env:PROXY_API_KEYS="dev:dev-proxy-key:alice:platform,team:team-proxy-key:bob:ba
 | `AUTH_REFRESH_TOKEN_TTL` | `168h` | refresh token TTL. refresh 시 rotation 및 이전 토큰 폐기 |
 | `AUTH_API_KEY_PREFIX` | `vc_sk_` | 일반 API key 자동 생성 prefix |
 | `AUTH_SERVICE_KEY_PREFIX` | `vc_sa_` | service account key 자동 생성 prefix |
+| `AUTH_HISTORICAL_KEY_PREFIXES` | 빈 값 | 키 prefix 변경 전 발급된 활성 키를 응답·React URL에서 계속 탐지할 이전 prefix CSV. prefix 변경 시 기존 값을 반드시 추가 |
+| `TRUSTED_PROXY_CIDRS` | 빈 값 | `X-Forwarded-For` 체인을 확장할 reverse proxy CIDR 목록(CSV). 빈 값이면 모든 전달 IP 헤더 무시 |
 | `AUTH_ADMIN_BOOTSTRAP_EMAIL` | 없음 | 초기 `super_admin` 생성 email |
 | `AUTH_ADMIN_BOOTSTRAP_PASSWORD` | 없음 | 초기 `super_admin` 생성 password. DB에는 bcrypt hash만 저장 |
 | `GATEWAY_SECRET` | 개발용 기본값 | Provider API key 암호화 secret. 운영에서는 반드시 설정 |
@@ -1063,14 +1065,16 @@ pwsh -File scripts/backup.ps1 -DataDir data -OutDir backups -KeepDays 14
 
 `scripts/release.ps1` (Windows / PowerShell) 또는 `scripts/release.sh` (Linux / macOS) 가 다음을 한 번에 수행합니다.
 
-릴리스 빌드 호스트에는 Docker, Bash, curl, Python 3가 필요합니다. Python 3는 SPDX
-JSON과 container smoke의 `/auth/me` 버전을 검증하는 데 사용합니다. 호스트 Node.js와
-jq는 필요하지 않습니다.
+릴리스 빌드 호스트에는 Docker, Bash, curl, Python 3, Grype 0.117.0이 필요합니다.
+Python 3는 SPDX JSON과 container smoke의 `/auth/me` 버전을 검증하고, Grype는 실제
+Distroless 최종 이미지의 High·Critical CVE를 검사합니다. 호스트 Node.js와 jq는
+필요하지 않습니다.
 
 1. Node 24+pnpm frozen frontend build → Go 1.26.8 embed build → distroless nonroot의 3-stage 이미지 빌드
 2. 최종 이미지에서 `/admin`, `/app` redirect/deep link, hashed asset, `/auth/me` build version smoke 검증
-3. `docker save` 로 OCI tar 추출 후 `gzip -9` 압축
-4. 기존 이미지·체크섬·가이드 산출. v0.80.0부터 versioned SPDX SBOM·제3자 라이선스도 산출
+3. 고정 버전 Grype로 최종 이미지의 High·Critical 취약점이 없는지 검증
+4. `docker save` 로 OCI tar 추출 후 `gzip -9` 압축
+5. 기존 이미지·체크섬·가이드 산출. v0.80.0부터 versioned SPDX SBOM·제3자 라이선스도 산출
 
 React 산출물은 Go 바이너리에 embed되므로 운영 컨테이너에 Node.js나 외부 CDN이
 필요하지 않습니다. 릴리스 스크립트는 v0.80.0부터 루트 SBOM이 해당 버전이고 Go·npm

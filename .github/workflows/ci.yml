@@ -301,6 +301,9 @@ jobs:
     name: docker build · App UI smoke
     needs: [frontend, test, appui-contract]
     runs-on: ubuntu-latest
+    env:
+      GRYPE_REQUIRED_VERSION: 0.117.0
+      GRYPE_LINUX_AMD64_SHA256: 38525dab1e06f162ebaa02f94d82d1f807076b011a44180cf2777edf1a7b9c26
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Build image
@@ -314,6 +317,18 @@ jobs:
             .
       - name: Container smoke and deep-link checks
         run: bash scripts/container-smoke.sh ai-coding-proxy-gateway:ci "$SMOKE_VERSION" "$GITHUB_SHA"
+      - name: Install checksum-pinned Grype
+        run: |
+          archive="grype_${GRYPE_REQUIRED_VERSION}_linux_amd64.tar.gz"
+          install_dir="${RUNNER_TEMP}/grype-bin"
+          mkdir -p "$install_dir"
+          curl -fsSLo "${RUNNER_TEMP}/${archive}" \
+            "https://github.com/anchore/grype/releases/download/v${GRYPE_REQUIRED_VERSION}/${archive}"
+          printf '%s  %s\n' "$GRYPE_LINUX_AMD64_SHA256" "${RUNNER_TEMP}/${archive}" | sha256sum -c -
+          tar -xzf "${RUNNER_TEMP}/${archive}" -C "$install_dir" grype
+          echo "$install_dir" >> "$GITHUB_PATH"
+      - name: Final image high and critical vulnerability gate
+        run: bash scripts/scan-container-image.sh ai-coding-proxy-gateway:ci
 
   openapi:
     name: OpenAPI spec valid · TypeScript contract drift
