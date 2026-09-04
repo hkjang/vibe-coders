@@ -29,7 +29,8 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Reject tracked local-output and seed files
         run: |
-          forbidden="$(git -C .. ls-files | grep -E '(^|/)(\.gitframe|output)(/|$)|(^|/)seed\.sql$' || true)"
+          tracked="$(git -c safe.directory="$GITHUB_WORKSPACE" -C "$GITHUB_WORKSPACE" ls-files)"
+          forbidden="$(printf '%s\n' "$tracked" | grep -E '(^|/)(\.gitframe|output)(/|$)|(^|/)seed\.sql$' || true)"
           if [ -n "$forbidden" ]; then
             echo "::error::Repository contains forbidden tracked paths"
             printf '%s\n' "$forbidden"
