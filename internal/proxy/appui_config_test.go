@@ -59,7 +59,7 @@ func TestAppUIBootstrapAndRuntimeToggle(t *testing.T) {
 		t.Fatalf("legacy route map must be empty when fallback is disabled: %#v", legacyRoutes)
 	}
 	allowed, _ := body["allowed_features"].([]any)
-	wantAllowed := []string{"overview", "gateway.health", "gateway.providers", "gateway.models", "observability.requests", "system.health"}
+	wantAllowed := []string{"overview", "gateway.health", "gateway.providers", "gateway.models", "observability.requests", "observability.traces", "system.health"}
 	if len(allowed) != len(wantAllowed) {
 		t.Fatalf("implemented previews allowed without Legacy fallback = %#v, want %v", allowed, wantAllowed)
 	}
@@ -368,6 +368,30 @@ func TestRequestExplorerIsAdminReadOnlyPreview(t *testing.T) {
 		return
 	}
 	t.Fatal("request explorer feature is missing")
+}
+
+func TestTraceExplorerIsAdminReadOnlyPreview(t *testing.T) {
+	wantRoles := "super_admin,admin,ops_admin,ai_admin,security_admin,billing_admin,readonly_admin"
+	for i := range appUIFeatures {
+		feature := appUIFeatures[i]
+		if feature.FeatureID != "observability.traces" {
+			continue
+		}
+		if feature.Status != "preview_read_only" || !feature.ReadOnly || feature.RequiredPermission != "admin:read" {
+			t.Fatalf("trace explorer permission contract widened: %+v", feature)
+		}
+		if got := strings.Join(feature.EnabledRoles, ","); got != wantRoles {
+			t.Fatalf("trace explorer roles = %q, want %q", got, wantRoles)
+		}
+		if feature.MinimumAPIVersion != "v0.83.0" || feature.RolloutPercent != 100 || !feature.FallbackEnabled {
+			t.Fatalf("trace explorer rollout contract is incomplete: %+v", feature)
+		}
+		if _, ok := appUIImplementedFeatureIDs[feature.FeatureID]; !ok {
+			t.Fatal("trace explorer must be marked implemented")
+		}
+		return
+	}
+	t.Fatal("trace explorer feature is missing")
 }
 
 func TestOverviewMigrationContractRemainsConservative(t *testing.T) {

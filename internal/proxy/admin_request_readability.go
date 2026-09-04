@@ -78,35 +78,64 @@ func (s *Server) handleRequestReadableSubresource(w http.ResponseWriter, r *http
 }
 
 func requestTeamScopeForCaller(s *Server, r *http.Request) ([]string, bool) {
-	if claims, ok := s.currentAccessClaims(r); ok && claims.Role == "team_admin" {
-		teamID := strings.TrimSpace(claims.TeamID)
-		if teamID == "" {
-			return nil, true
-		}
-		keys, found, err := s.db.AuthTeamScopeIdentities(r.Context(), teamID)
-		if err != nil || !found {
-			return nil, true
-		}
-		return keys, true
+	teams, scoped, err := requestTeamScopeForCallerChecked(s, r)
+	if err != nil {
+		// Existing callers cannot return an error from this helper. Preserve their API
+		// contract while failing closed instead of accidentally treating the caller as
+		// an unrestricted administrator after an identity lookup failure.
+		return nil, true
 	}
-	return nil, false
+	return teams, scoped
+}
+
+// requestTeamScopeForCallerChecked is used by endpoints where a partial success would be
+// misleading. It distinguishes an unrestricted administrator from a failed authenticated
+// identity lookup, allowing the handler to return a stable server error while staying closed.
+func requestTeamScopeForCallerChecked(s *Server, r *http.Request) ([]string, bool, error) {
+	if !s.cfg.Auth.Enabled {
+		return nil, false, nil
+	}
+	claims, ok := s.currentAccessClaims(r)
+	if !ok {
+		return nil, true, errors.New("admin access claims unavailable")
+	}
+	if claims.Role != "team_admin" {
+		return nil, false, nil
+	}
+	teamID := claims.TeamID
+	if teamID == "" || strings.TrimSpace(teamID) != teamID {
+		return nil, true, nil
+	}
+	keys, found, err := s.db.AuthTeamScopeIdentities(r.Context(), teamID)
+	if err != nil {
+		return nil, true, err
+	}
+	if !found {
+		return nil, true, nil
+	}
+	return keys, true, nil
 }
 
 func (s *Server) canViewRequestDetail(r *http.Request, request store.RecentRequest) bool {
-	claims, ok := s.currentAccessClaims(r)
-	if !ok || claims.Role != "team_admin" {
+	if !s.cfg.Auth.Enabled {
 		return true
 	}
-	if strings.TrimSpace(claims.TeamID) == "" {
+	claims, ok := s.currentAccessClaims(r)
+	if !ok {
+		return false
+	}
+	if claims.Role != "team_admin" {
+		return true
+	}
+	claimTeamID := claims.TeamID
+	if claimTeamID == "" || strings.TrimSpace(claimTeamID) != claimTeamID {
 		return false
 	}
 	keyTeam, err := s.db.GetTeamForAPIKey(r.Context(), request.APIKeyID)
 	if err != nil {
 		return false
 	}
-	claimTeamID := strings.TrimSpace(claims.TeamID)
-	keyTeam = strings.TrimSpace(keyTeam)
-	if keyTeam == "" {
+	if keyTeam == "" || strings.TrimSpace(keyTeam) != keyTeam {
 		return false
 	}
 	keys, found, err := s.db.AuthTeamScopeIdentities(r.Context(), claimTeamID)

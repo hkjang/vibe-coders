@@ -349,7 +349,7 @@ func renderForDialect(statement, dialect string) string {
 	// These indexes are introduced on high-write observability tables. PostgreSQL's
 	// ordinary CREATE INDEX blocks writers for the duration of the build; each migration
 	// statement runs outside an explicit transaction, so the concurrent form is safe here.
-	if strings.Contains(out, "idx_api_keys_team_id") || strings.Contains(out, "idx_request_logs_ingested_cursor") || strings.Contains(out, "idx_request_logs_xview_legacy") || strings.Contains(out, "idx_request_logs_xview_team_cursor") || strings.Contains(out, "idx_request_logs_app_valid_cursor") || strings.Contains(out, "idx_request_logs_app_team_valid_cursor") || strings.Contains(out, "idx_token_usage_request_latest") || strings.Contains(out, "idx_response_logs_request_latest") || strings.Contains(out, "idx_secret_events_request") {
+	if strings.Contains(out, "idx_api_keys_team_id") || strings.Contains(out, "idx_request_logs_ingested_cursor") || strings.Contains(out, "idx_request_logs_xview_legacy") || strings.Contains(out, "idx_request_logs_xview_team_cursor") || strings.Contains(out, "idx_request_logs_app_valid_cursor") || strings.Contains(out, "idx_request_logs_app_team_valid_cursor") || strings.Contains(out, "idx_request_logs_app_trace_valid_cursor") || strings.Contains(out, "idx_token_usage_request_latest") || strings.Contains(out, "idx_response_logs_request_latest") || strings.Contains(out, "idx_secret_events_request") {
 		out = strings.Replace(out, "CREATE INDEX IF NOT EXISTS", "CREATE INDEX CONCURRENTLY IF NOT EXISTS", 1)
 	}
 	return out
@@ -555,6 +555,7 @@ func migrationStatements() []string {
 		`CREATE INDEX IF NOT EXISTS idx_request_logs_created_at ON request_logs(created_at)`,
 		`CREATE INDEX IF NOT EXISTS idx_request_logs_app_valid_cursor ON request_logs(` + appRequestCreatedAtExpr("created_at") + `, id) WHERE ` + appRequestValidRowPredicate("id", "created_at"),
 		`CREATE INDEX IF NOT EXISTS idx_request_logs_app_team_valid_cursor ON request_logs(api_key_id, ` + appRequestCreatedAtExpr("created_at") + `, id) WHERE ` + appRequestValidRowPredicate("id", "created_at") + ` AND ` + appRequestBoundedTextPredicate("api_key_id"),
+		`CREATE INDEX IF NOT EXISTS idx_request_logs_app_trace_valid_cursor ON request_logs(trace_id, ` + appRequestCreatedAtExpr("created_at") + `, id) WHERE ` + appRequestValidRowPredicate("id", "created_at") + ` AND ` + appRequestBoundedTextPredicate("trace_id"),
 		`CREATE INDEX IF NOT EXISTS idx_request_logs_ingested_cursor ON request_logs(ingested_at, id)`,
 		`CREATE INDEX IF NOT EXISTS idx_request_logs_xview_legacy ON request_logs(ingested_at, created_at DESC, id DESC) WHERE ingested_at = ''`,
 		`CREATE INDEX IF NOT EXISTS idx_request_logs_xview_team_cursor ON request_logs(api_key_id, created_at, ingested_at, id)`,

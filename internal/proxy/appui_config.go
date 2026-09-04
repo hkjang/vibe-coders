@@ -57,7 +57,7 @@ var appUIFeatures = []appUIFeature{
 	{FeatureID: "gateway.models", Title: "모델", AppPath: "/app/gateway/models", LegacyPath: "/admin#/model-contracts", Status: "preview_read_only", RiskLevel: "medium", RequiredPermission: "admin:read", ReadOnly: true, EnabledRoles: []string{"super_admin", "admin", "ai_admin"}, RolloutPercent: 100, FallbackEnabled: true, MinimumAPIVersion: "v0.82.0"},
 	{FeatureID: "routing.rules", Title: "라우팅", AppPath: "/app/routing/rules", LegacyPath: "/admin#/routing", Status: "legacy", RiskLevel: "high", RequiredPermission: "routing:read", ReadOnly: true, RolloutPercent: 100, FallbackEnabled: true, MinimumAPIVersion: "v0.80.0"},
 	{FeatureID: "observability.requests", Title: "요청 탐색기", AppPath: "/app/observability/requests", LegacyPath: "/admin#/requests", Status: "preview_read_only", RiskLevel: "low", RequiredPermission: "admin:read", ReadOnly: true, EnabledRoles: []string{"super_admin", "admin", "ops_admin", "ai_admin", "security_admin", "billing_admin", "readonly_admin"}, RolloutPercent: 100, FallbackEnabled: true, MinimumAPIVersion: "v0.82.1"},
-	{FeatureID: "observability.traces", Title: "추적 탐색기", AppPath: "/app/observability/traces", LegacyPath: "/admin#/llm", Status: "legacy", RiskLevel: "low", RequiredPermission: "observability:read", ReadOnly: true, RolloutPercent: 100, FallbackEnabled: true, MinimumAPIVersion: "v0.80.0"},
+	{FeatureID: "observability.traces", Title: "추적 탐색기", AppPath: "/app/observability/traces", LegacyPath: "/admin#/llm", Status: "preview_read_only", RiskLevel: "low", RequiredPermission: "admin:read", ReadOnly: true, EnabledRoles: []string{"super_admin", "admin", "ops_admin", "ai_admin", "security_admin", "billing_admin", "readonly_admin"}, RolloutPercent: 100, FallbackEnabled: true, MinimumAPIVersion: "v0.83.0"},
 	{FeatureID: "prompts.lab", Title: "프롬프트 실험실", AppPath: "/app/prompts/lab", LegacyPath: "/admin#/prompt-lab", Status: "legacy", RiskLevel: "medium", RequiredPermission: "admin:read", ReadOnly: true, RolloutPercent: 100, FallbackEnabled: true, MinimumAPIVersion: "v0.80.0"},
 	{FeatureID: "access.users", Title: "사용자와 팀", AppPath: "/app/access/users", LegacyPath: "/admin#/users", Status: "legacy", RiskLevel: "medium", RequiredPermission: "admin:read", ReadOnly: true, RolloutPercent: 100, FallbackEnabled: true, MinimumAPIVersion: "v0.80.0"},
 	{FeatureID: "governance.policies", Title: "정책 및 거버넌스", AppPath: "/app/governance/policies", LegacyPath: "/admin#/safety", Status: "legacy", RiskLevel: "high", RequiredPermission: "security:read", ReadOnly: true, RolloutPercent: 100, FallbackEnabled: true, MinimumAPIVersion: "v0.80.0"},
@@ -75,6 +75,7 @@ var appUIImplementedFeatureIDs = map[string]struct{}{
 	"gateway.providers":      {},
 	"gateway.models":         {},
 	"observability.requests": {},
+	"observability.traces":   {},
 	"system.health":          {},
 }
 

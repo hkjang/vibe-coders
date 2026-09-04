@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"vibe-coders/internal/audit"
 	"vibe-coders/internal/store"
 )
 
@@ -44,6 +45,61 @@ func (s *Server) maskRequestDetail(r *http.Request, d *store.RequestDetail) {
 		return
 	}
 	redactPromptDetails(d.Prompts)
+	for index := range d.Prompts {
+		d.Prompts[index].ContentText = audit.Redact(d.Prompts[index].ContentText)
+		d.Prompts[index].RedactedText = audit.Redact(d.Prompts[index].RedactedText)
+	}
+	for index := range d.Request.Prompts {
+		d.Request.Prompts[index].RedactedText = audit.Redact(d.Request.Prompts[index].RedactedText)
+	}
+	d.Request.Error = audit.Redact(d.Request.Error)
+	d.Request.FallbackReason = audit.Redact(d.Request.FallbackReason)
+	d.Request.UserAgent = audit.Redact(d.Request.UserAgent)
+	if d.Response != nil {
+		d.Response.ResponseTextOptional = audit.Redact(d.Response.ResponseTextOptional)
+	}
+	for index := range d.Spans {
+		d.Spans[index].Error = audit.Redact(d.Spans[index].Error)
+	}
+	for index := range d.Text2SQLSpans {
+		d.Text2SQLSpans[index].RejectReason = audit.Redact(d.Text2SQLSpans[index].RejectReason)
+	}
+	if d.Readability != nil {
+		redactRequestReadabilityValue(d.Readability.Model, "fallback_reason")
+		redactRequestReadabilityValue(d.Readability.Routing, "fallback_reason")
+		for index := range d.Readability.Timeline {
+			d.Readability.Timeline[index].Reason = audit.Redact(d.Readability.Timeline[index].Reason)
+		}
+		for index := range d.Readability.Badges {
+			d.Readability.Badges[index].Reason = audit.Redact(d.Readability.Badges[index].Reason)
+		}
+	}
+}
+
+// maskRecentRequests applies the same lower-privilege audit masking as request detail
+// endpoints. The legacy trace list keeps its response shape, but must not become a
+// bypass for prompt, upstream-error, fallback-reason, or user-agent redaction.
+func (s *Server) maskRecentRequests(r *http.Request, requests []store.RecentRequest) {
+	if s.canViewRawPrompts(r) {
+		return
+	}
+	for index := range requests {
+		requests[index].Error = audit.Redact(requests[index].Error)
+		requests[index].FallbackReason = audit.Redact(requests[index].FallbackReason)
+		requests[index].UserAgent = audit.Redact(requests[index].UserAgent)
+		for promptIndex := range requests[index].Prompts {
+			requests[index].Prompts[promptIndex].RedactedText = audit.Redact(requests[index].Prompts[promptIndex].RedactedText)
+		}
+	}
+}
+
+func redactRequestReadabilityValue(values map[string]any, key string) {
+	if values == nil {
+		return
+	}
+	if value, ok := values[key].(string); ok {
+		values[key] = audit.Redact(value)
+	}
 }
 
 // roleDescriptions documents each built-in role for the admin roles screen.

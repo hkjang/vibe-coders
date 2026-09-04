@@ -86,6 +86,21 @@ const featureRoutes: RouteObject[] = migrationRegistry.map((feature) => {
       },
     };
   }
+  if (feature.featureId === "observability.traces") {
+    return {
+      path,
+      lazy: async () => {
+        const { TracePage } = await import("@/features/observability/traces/TracePage");
+        return {
+          Component: () => (
+            <FeatureRoute feature={feature}>
+              <TracePage />
+            </FeatureRoute>
+          ),
+        };
+      },
+    };
+  }
   if (feature.featureId === "system.health") {
     return {
       path,

@@ -410,6 +410,29 @@ func TestAppRequestsOpenAPIProjectionMatchesRuntimeFields(t *testing.T) {
 	if header["name"] != "X-Vibe-UI" || header["required"] != false {
 		t.Fatalf("X-Vibe-UI must remain optional for legacy callers: %v", header)
 	}
+	wantQueryBounds := map[string]int{
+		"from": 64, "to": 64, "tz": 64, "model": 256, "request_id": appRequestIDMaxBytes,
+		"trace_id": appRequestIDMaxBytes, "session_id": appRequestIDMaxBytes,
+		"api_key_id": appRequestIDMaxBytes, "ip": 128, "language": 64,
+		"cursor": appRequestCursorMaxBytes,
+	}
+	seenQueryBounds := make(map[string]bool, len(wantQueryBounds))
+	for _, raw := range parameters {
+		parameter := raw.(map[string]any)
+		name, _ := parameter["name"].(string)
+		maximum, bounded := wantQueryBounds[name]
+		if !bounded {
+			continue
+		}
+		schema := parameter["schema"].(map[string]any)
+		if schema["maxLength"] != maximum {
+			t.Fatalf("%s query OpenAPI bounds = %v, want maxLength %d", name, schema, maximum)
+		}
+		seenQueryBounds[name] = true
+	}
+	if len(seenQueryBounds) != len(wantQueryBounds) {
+		t.Fatalf("bounded query parameters = %v, want %v", seenQueryBounds, wantQueryBounds)
+	}
 	var cursorParameter map[string]any
 	for _, raw := range parameters {
 		parameter := raw.(map[string]any)

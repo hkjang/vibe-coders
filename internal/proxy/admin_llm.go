@@ -20,6 +20,11 @@ func (s *Server) handleLLMTraces(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
 		return
 	}
+	teams, teamScoped, err := requestTeamScopeForCallerChecked(s, r)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, "trace list query failed", "server_error", "llm_traces_failed")
+		return
+	}
 	traces, err := s.db.RecentRequests(r.Context(), store.RequestFilter{
 		Limit:          llmLimit(r, 100, 500),
 		Model:          strings.TrimSpace(r.URL.Query().Get("model")),
@@ -29,11 +34,14 @@ func (s *Server) handleLLMTraces(w http.ResponseWriter, r *http.Request) {
 		PromptName:     strings.TrimSpace(r.URL.Query().Get("prompt_name")),
 		PromptVersion:  strings.TrimSpace(r.URL.Query().Get("prompt_version")),
 		EvaluationName: strings.TrimSpace(r.URL.Query().Get("evaluation_name")),
+		Teams:          teams,
+		TeamScoped:     teamScoped,
 	})
 	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "llm_traces_failed")
+		writeOpenAIError(w, http.StatusInternalServerError, "trace list query failed", "server_error", "llm_traces_failed")
 		return
 	}
+	s.maskRecentRequests(r, traces)
 	writeJSON(w, http.StatusOK, map[string]any{"traces": traces})
 }
 
@@ -46,8 +54,8 @@ func (s *Server) handleLLMTraceDetail(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
 		return
 	}
-	id := strings.TrimPrefix(r.URL.Path, "/admin/llm/traces/")
-	if id == "" || strings.Contains(id, "/") {
+	id, valid := adminTracePathID(r.URL.Path, "/admin/llm/traces/", "")
+	if !valid {
 		writeOpenAIError(w, http.StatusBadRequest, "invalid trace id", "invalid_request_error", "invalid_trace_id")
 		return
 	}
@@ -57,9 +65,14 @@ func (s *Server) handleLLMTraceDetail(w http.ResponseWriter, r *http.Request) {
 			writeOpenAIError(w, http.StatusNotFound, "trace not found", "invalid_request_error", "trace_not_found")
 			return
 		}
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "llm_trace_detail_failed")
+		writeOpenAIError(w, http.StatusInternalServerError, "trace detail query failed", "server_error", "llm_trace_detail_failed")
 		return
 	}
+	if !s.canViewRequestDetail(r, detail.Request) {
+		writeOpenAIError(w, http.StatusForbidden, "request is outside your team scope", "permission_error", "cross_team_access_denied")
+		return
+	}
+	s.maskRequestDetail(r, &detail)
 	writeJSON(w, http.StatusOK, detail)
 }
 

@@ -323,7 +323,7 @@ func TestHardDeleteKeyTeamChangeAndScopeEdit(t *testing.T) {
 }
 
 func TestTeamAdminIsolationAndRoleEscalationGuards(t *testing.T) {
-	_, proxy := newAuthTestServer(t, "http://example.invalid")
+	db, proxy := newAuthTestServer(t, "http://example.invalid")
 	defer proxy.Close()
 
 	login := postJSON(t, proxy.URL+"/auth/login", "", map[string]string{"email": "root@example.com", "password": "correct-password"})
@@ -457,6 +457,135 @@ func TestTeamAdminIsolationAndRoleEscalationGuards(t *testing.T) {
 	ownKey.Body.Close()
 	if ownKey.StatusCode != http.StatusCreated || ownKeyOut.APIKey.Team != "team_alpha" {
 		t.Fatalf("team_admin key should be forced to own team, status=%d out=%+v", ownKey.StatusCode, ownKeyOut)
+	}
+	if err := db.UpsertAPIKey(t.Context(), store.APIKeyRecord{
+		ID: "padded-alpha-key", Name: "malformed legacy key", KeyHash: "padded-alpha-key-hash",
+		Team: " team_alpha ", Status: "active",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	createdAt := time.Date(2026, 9, 4, 1, 2, 3, 0, time.UTC)
+	for _, fixture := range []struct {
+		id       string
+		apiKeyID string
+	}{
+		{id: "req-alpha-trace", apiKeyID: alphaKeyOut.APIKey.ID},
+		{id: "req-beta-trace", apiKeyID: betaKeyOut.APIKey.ID},
+		{id: "req-padded-alpha-trace", apiKeyID: "padded-alpha-key"},
+	} {
+		if err := db.InsertLogRecord(t.Context(), store.LogRecord{
+			Request: store.RequestLog{
+				ID: fixture.id, TraceID: "trace-shared", APIKeyID: fixture.apiKeyID,
+				Method: http.MethodPost, Endpoint: "/v1/chat/completions", Model: "test-model",
+				StatusCode: http.StatusOK, CreatedAt: createdAt,
+			},
+			CodeVerify: &store.CodeVerifyLog{
+				ID: "code-" + fixture.id, RequestID: fixture.id, TraceID: "trace-shared",
+				HasCode: true, Risk: "low", CreatedAt: createdAt,
+			},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, run := range []store.WorkflowRun{
+		{ID: "workflow-alpha-trace", WorkflowID: "workflow-alpha", Team: "Alpha", TraceID: "trace-shared", CreatedAt: createdAt.Format(time.RFC3339Nano)},
+		{ID: "workflow-beta-trace", WorkflowID: "workflow-beta", Team: "team_beta", TraceID: "trace-shared", CreatedAt: createdAt.Format(time.RFC3339Nano)},
+		{ID: "workflow-padded-alpha-trace", WorkflowID: "workflow-padded-alpha", Team: " Alpha ", TraceID: "trace-shared", CreatedAt: createdAt.Format(time.RFC3339Nano)},
+	} {
+		if err := db.RecordWorkflowRun(t.Context(), run); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, run := range []store.AIAppRun{
+		{ID: "app-alpha-trace", AppID: "app-alpha", Team: "team_alpha", TraceID: "trace-shared", CreatedAt: createdAt.Format(time.RFC3339Nano)},
+		{ID: "app-beta-trace", AppID: "app-beta", Team: "Beta", TraceID: "trace-shared", CreatedAt: createdAt.Format(time.RFC3339Nano)},
+		{ID: "app-padded-alpha-trace", AppID: "app-padded-alpha", Team: " team_alpha ", TraceID: "trace-shared", CreatedAt: createdAt.Format(time.RFC3339Nano)},
+	} {
+		if err := db.RecordAIAppRun(t.Context(), run); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, requestPath := range []string{
+		"/admin/requests/req-beta-trace/trace",
+		"/admin/llm/traces/req-beta-trace",
+		"/admin/requests/req-padded-alpha-trace/trace",
+		"/admin/llm/traces/req-padded-alpha-trace",
+	} {
+		request, _ := http.NewRequest(http.MethodGet, proxy.URL+requestPath, nil)
+		request.Header.Set("Authorization", "Bearer "+teamTok.AccessToken)
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		if response.StatusCode != http.StatusForbidden {
+			t.Fatalf("team_admin cross-team trace %s status = %d, want %d", requestPath, response.StatusCode, http.StatusForbidden)
+		}
+	}
+	for _, requestPath := range []string{
+		"/admin/requests/req-alpha-trace/trace",
+		"/admin/llm/traces/req-alpha-trace",
+	} {
+		request, _ := http.NewRequest(http.MethodGet, proxy.URL+requestPath, nil)
+		request.Header.Set("Authorization", "Bearer "+teamTok.AccessToken)
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		if response.StatusCode != http.StatusOK {
+			t.Fatalf("team_admin own-team trace %s status = %d, want %d", requestPath, response.StatusCode, http.StatusOK)
+		}
+	}
+	traceListRequest, _ := http.NewRequest(http.MethodGet, proxy.URL+"/admin/llm/traces?limit=10", nil)
+	traceListRequest.Header.Set("Authorization", "Bearer "+teamTok.AccessToken)
+	traceListResponse, err := http.DefaultClient.Do(traceListRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	traceListBody, _ := io.ReadAll(traceListResponse.Body)
+	traceListResponse.Body.Close()
+	if traceListResponse.StatusCode != http.StatusOK || !strings.Contains(string(traceListBody), "req-alpha-trace") || strings.Contains(string(traceListBody), "req-beta-trace") {
+		t.Fatalf("team_admin trace list escaped team scope: status=%d body=%s", traceListResponse.StatusCode, traceListBody)
+	}
+	traceScopeBody := func(token string) (int, string) {
+		t.Helper()
+		request, _ := http.NewRequest(http.MethodGet, proxy.URL+"/admin/traces/trace-shared", nil)
+		request.Header.Set("Authorization", "Bearer "+token)
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, err := io.ReadAll(response.Body)
+		response.Body.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response.StatusCode, string(body)
+	}
+	teamTraceStatus, teamTraceBody := traceScopeBody(teamTok.AccessToken)
+	for _, allowed := range []string{"req-alpha-trace", "workflow-alpha-trace", "app-alpha-trace", "code-req-alpha-trace"} {
+		if !strings.Contains(teamTraceBody, allowed) {
+			t.Fatalf("team_admin trace response missing own-team %q: status=%d body=%s", allowed, teamTraceStatus, teamTraceBody)
+		}
+	}
+	for _, denied := range []string{
+		"req-beta-trace", "workflow-beta-trace", "app-beta-trace", "code-req-beta-trace",
+		"req-padded-alpha-trace", "workflow-padded-alpha-trace", "app-padded-alpha-trace", "code-req-padded-alpha-trace",
+	} {
+		if strings.Contains(teamTraceBody, denied) {
+			t.Fatalf("team_admin trace response exposed other-team %q: status=%d body=%s", denied, teamTraceStatus, teamTraceBody)
+		}
+	}
+	if teamTraceStatus != http.StatusOK {
+		t.Fatalf("team_admin trace response status=%d body=%s", teamTraceStatus, teamTraceBody)
+	}
+	rootTraceStatus, rootTraceBody := traceScopeBody(rootTok.AccessToken)
+	if rootTraceStatus != http.StatusOK || !strings.Contains(rootTraceBody, "req-beta-trace") ||
+		!strings.Contains(rootTraceBody, "workflow-beta-trace") || !strings.Contains(rootTraceBody, "app-beta-trace") ||
+		!strings.Contains(rootTraceBody, "code-req-beta-trace") {
+		t.Fatalf("super_admin trace response lost cross-team rows: status=%d body=%s", rootTraceStatus, rootTraceBody)
 	}
 
 	patchOther, _ := http.NewRequest(http.MethodPatch, proxy.URL+"/admin/api-keys/"+betaKeyOut.APIKey.ID, strings.NewReader(`{"scopes":["chat:completion"]}`))

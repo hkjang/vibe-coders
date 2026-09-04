@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { appRequestSummarySchema, appRequestsResponseSchema } from "@/shared/api/schemas";
+import {
+  appRequestSummarySchema,
+  appRequestsQuerySchema,
+  appRequestsResponseSchema,
+} from "@/shared/api/schemas";
 
 const providerRef = `prv_${"a".repeat(43)}`;
 const timestamp = "2026-09-03T01:02:03.000000000Z";
@@ -102,6 +106,8 @@ describe("요청 탐색기 API 런타임 스키마", () => {
         request_id: "가".repeat(171),
       }).success,
     ).toBe(false);
+    expect(appRequestsQuerySchema.safeParse({ trace_id: `${"가".repeat(170)}aa` }).success).toBe(true);
+    expect(appRequestsQuerySchema.safeParse({ trace_id: "가".repeat(171) }).success).toBe(false);
   });
 
   it.each([

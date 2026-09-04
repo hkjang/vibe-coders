@@ -350,7 +350,11 @@ func (s *Server) handleAppRequests(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusBadRequest, "조회 기간이 올바르지 않습니다.", "invalid_request_error", "invalid_requests_range")
 		return
 	}
-	teams, teamScoped := requestTeamScopeForCaller(s, r)
+	teams, teamScoped, err := requestTeamScopeForCallerChecked(s, r)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, "요청 목록을 불러오지 못했습니다.", "server_error", "requests_failed")
+		return
+	}
 	filter := store.AppRequestFilter{Limit: limit, IP: params["ip"], Model: params["model"],
 		RequestID: params["request_id"], TraceID: params["trace_id"], SessionID: params["session_id"],
 		APIKeyID: params["api_key_id"], Language: params["language"], Teams: teams,

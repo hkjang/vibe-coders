@@ -1,0 +1,393 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import axe from "axe-core";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router";
+
+import { TracePage } from "@/features/observability/traces/TracePage";
+import { apiClient } from "@/shared/api/client";
+import { endpoints } from "@/shared/api/endpoints";
+import { AppError } from "@/shared/api/error";
+import type { AppRequestsResponse } from "@/shared/api/schemas";
+import { usePreferences } from "@/shared/stores/preferences";
+
+const authRuntime = vi.hoisted(() => ({
+  legacyFallback: true,
+  legacyPath: "/admin#/llm",
+  scopes: ["admin:read"] as string[],
+}));
+
+vi.mock("@/app/auth/AuthProvider", () => ({
+  useAuth: () => ({
+    authenticationMode: "session",
+    features: [
+      {
+        appPath: "/app/observability/traces",
+        fallbackEnabled: true,
+        featureId: "observability.traces",
+        legacyPath: authRuntime.legacyPath,
+      },
+    ],
+    legacyFallback: authRuntime.legacyFallback,
+    mode: "authenticated",
+    user: {
+      id: "admin-1",
+      role: "admin",
+      roles: ["admin"],
+      scopes: authRuntime.scopes,
+    },
+  }),
+}));
+
+const providerRef = `prv_${"a".repeat(43)}`;
+const firstRow = {
+  request_id: "req-001",
+  trace_id: "trace-001",
+  session_id: "session-001",
+  api_key_id: "key-001",
+  ip: "192.0.2.10",
+  method: "POST",
+  model: "gpt-test",
+  provider_ref: providerRef,
+  provider_display: "공급자 하나",
+  endpoint: "/v1/chat/completions",
+  stream: true,
+  status_code: 200,
+  latency_ms: 200,
+  first_chunk_ms: 40,
+  prompt_tokens: 3,
+  completion_tokens: 4,
+  total_tokens: 7,
+  cached_tokens: 1,
+  reasoning_tokens: 0,
+  estimated_cost: 1.25,
+  currency: "KRW",
+  finish_reason: "stop",
+  created_at: "2026-09-04T01:02:03Z",
+} as const;
+
+const secondRow = {
+  ...firstRow,
+  request_id: "req-002",
+  status_code: 503,
+  latency_ms: 400,
+  created_at: "2026-09-04T01:02:03.100Z",
+} as const;
+
+const response = {
+  requests: [secondRow, firstRow],
+  limit: 50,
+  previous_cursor: "previous-cursor",
+  next_cursor: "next-cursor",
+  generated_at: "2026-09-04T01:03:00Z",
+} satisfies AppRequestsResponse;
+
+function LocationProbe(): React.JSX.Element {
+  const location = useLocation();
+  return <output data-testid="location">{`${location.pathname}${location.search}`}</output>;
+}
+
+function renderPage(initialEntry = "/observability/traces") {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={[initialEntry]}>
+        <Routes>
+          <Route
+            path="/observability/traces"
+            element={
+              <>
+                <TracePage />
+                <LocationProbe />
+              </>
+            }
+          />
+          <Route path="/observability/requests" element={<h1>요청 탐색기 대상</h1>} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+}
+
+describe("TracePage", () => {
+  beforeEach(() => {
+    authRuntime.legacyFallback = true;
+    authRuntime.legacyPath = "/admin#/llm";
+    authRuntime.scopes = ["admin:read"];
+    usePreferences.setState({ refreshInterval: 0 });
+  });
+
+  it("lists recent request-level traces with guidance and safe navigation", async () => {
+    const request = vi.spyOn(apiClient, "request").mockResolvedValue(response as never);
+    const user = userEvent.setup();
+    const view = renderPage();
+
+    expect(await screen.findByRole("heading", { name: "추적 ID로 요청 흐름을 좁혀 보세요." })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "요청 처리 흐름" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "요청 목록" })).toBeVisible();
+    expect(screen.getAllByText("trace-001", { exact: false }).length).toBeGreaterThan(0);
+    const table = screen.getByRole("table", {
+      name: "요청 시각, 상태, 식별자, 모델, 공급자, 지연, 토큰과 비용 목록",
+    });
+    for (const header of ["시각", "상태", "요청 ID", "모델", "공급자", "지연", "토큰", "비용"]) {
+      expect(within(table).getByRole("columnheader", { name: header })).toBeVisible();
+    }
+    const firstRowInTable = within(table).getByRole("row", { name: /req-001/u });
+    await user.click(within(firstRowInTable).getByText("req-001"));
+    expect(screen.getByTestId("location")).not.toHaveTextContent("selected_request");
+    const detailTrigger = within(firstRowInTable).getByRole("button", {
+      name: "요청 req-001 상세 보기",
+    });
+    await user.click(detailTrigger);
+    expect(screen.getByTestId("location")).toHaveTextContent("selected_request=req-001");
+    expect(detailTrigger).toHaveAttribute("aria-controls", "trace-request-detail");
+    expect(detailTrigger).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("region", { name: "요청 req-001" })).toHaveFocus();
+    expect(screen.getByText("요청 req-001 상세가 열렸습니다.", { exact: true })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "요청 탐색기" })).toHaveAttribute(
+      "href",
+      expect.stringContaining("request_id=req-001"),
+    );
+    expect(screen.getByRole("link", { name: /기존 화면 보기/u })).toHaveAttribute("href", "/admin#/llm");
+    await waitFor(() => {
+      expect(request).toHaveBeenCalledWith(
+        endpoints.admin.requests,
+        expect.objectContaining({
+          query: { limit: 50, tz: "Asia/Seoul" },
+          routeId: "observability.traces",
+        }),
+      );
+    });
+    expect((await axe.run(view.container)).violations).toHaveLength(0);
+    await user.click(screen.getByRole("button", { name: "요청 상세 닫기" }));
+    await waitFor(() => expect(detailTrigger).toHaveFocus());
+    expect(screen.getByTestId("location")).not.toHaveTextContent("selected_request");
+  });
+
+  it("restores URL filters, selects a safe request detail and pages without retaining the selection", async () => {
+    const request = vi.spyOn(apiClient, "request").mockResolvedValue({
+      ...response,
+      requests: [{ ...secondRow, prompt: "원문-비밀", response: "응답-비밀", error: "오류-비밀" }],
+    } as never);
+    const user = userEvent.setup();
+    renderPage(
+      "/observability/traces?trace_id=trace-001&status=5xx&model=gpt-test&tz=UTC&selected_request=req-002",
+    );
+
+    expect(await screen.findByRole("heading", { name: "요청 req-002" })).toBeVisible();
+    expect(screen.getByLabelText("추적 ID")).toHaveValue("trace-001");
+    expect(screen.getByLabelText("상태")).toHaveValue("5xx");
+    expect(screen.getByLabelText("모델")).toHaveValue("gpt-test");
+    expect(screen.queryByText("원문-비밀")).not.toBeInTheDocument();
+    expect(screen.queryByText("응답-비밀")).not.toBeInTheDocument();
+    expect(screen.queryByText("오류-비밀")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "요청 탐색기에서 열기" })).toHaveAttribute(
+      "href",
+      expect.stringContaining("request_id=req-002"),
+    );
+    await waitFor(() => {
+      const options = request.mock.calls[0]?.[1] as { query?: Record<string, unknown> };
+      expect(options.query).toMatchObject({
+        trace_id: "trace-001",
+        status: "5xx",
+        model: "gpt-test",
+        tz: "UTC",
+      });
+    });
+
+    await user.click(screen.getByRole("button", { name: "다음" }));
+    expect(screen.getByTestId("location")).toHaveTextContent("cursor=next-cursor");
+    expect(screen.getByTestId("location")).not.toHaveTextContent("selected_request");
+  });
+
+  it("represents exact status, custom limit and RFC3339 bounds without changing them on submit", async () => {
+    const request = vi.spyOn(apiClient, "request").mockResolvedValue({
+      ...response,
+      limit: 75,
+      requests: [secondRow],
+    } as never);
+    const user = userEvent.setup();
+    renderPage(
+      "/observability/traces?trace_id=trace-001&status=503&model=gpt-test&limit=75&from=2026-09-04T01%3A00%3A00Z&to=2026-09-04T02%3A00%3A00%2B00%3A00&tz=UTC",
+    );
+
+    expect(await screen.findByRole("heading", { name: "추적 탐색기" })).toBeVisible();
+    expect(screen.getByLabelText("상태")).toHaveValue("503");
+    expect(screen.getByLabelText("표시 건수")).toHaveValue("75");
+    expect(screen.getByLabelText("시작 시각")).toHaveValue("2026-09-04T01:00:00Z");
+    expect(screen.getByLabelText("종료 시각")).toHaveValue("2026-09-04T02:00:00+00:00");
+
+    const requestExplorer = screen.getByRole("link", { name: "요청 탐색기" });
+    expect(requestExplorer).toHaveAttribute(
+      "href",
+      "/observability/requests?from=2026-09-04T01%3A00%3A00Z&to=2026-09-04T02%3A00%3A00%2B00%3A00&status=503&model=gpt-test&trace_id=trace-001&limit=75&tz=UTC",
+    );
+
+    await user.click(screen.getByRole("button", { name: "흐름 조회" }));
+    expect(screen.getByTestId("location")).toHaveTextContent("status=503");
+    expect(screen.getByTestId("location")).toHaveTextContent("limit=75");
+    expect(screen.getByTestId("location")).toHaveTextContent("from=2026-09-04T01%3A00%3A00Z");
+    expect(screen.getByTestId("location")).toHaveTextContent("to=2026-09-04T02%3A00%3A00%2B00%3A00");
+    await waitFor(() => {
+      const options = request.mock.calls[0]?.[1] as { query?: Record<string, unknown> };
+      expect(options.query).toMatchObject({
+        from: "2026-09-04T01:00:00Z",
+        limit: 75,
+        status: "503",
+        to: "2026-09-04T02:00:00+00:00",
+      });
+    });
+  });
+
+  it("keeps unsubmitted filter input when opening and closing request details", async () => {
+    vi.spyOn(apiClient, "request").mockResolvedValue(response as never);
+    const user = userEvent.setup();
+    renderPage();
+
+    expect(await screen.findByRole("heading", { name: "요청 처리 흐름" })).toBeVisible();
+    const modelFilter = screen.getByLabelText("모델");
+    await user.type(modelFilter, "작성 중인 모델");
+    await user.click(screen.getByRole("button", { name: "요청 req-001 상세 보기" }));
+
+    expect(screen.getByLabelText("모델")).toHaveValue("작성 중인 모델");
+    await user.click(screen.getByRole("button", { name: "요청 상세 닫기" }));
+    expect(screen.getByLabelText("모델")).toHaveValue("작성 중인 모델");
+  });
+
+  it("blocks an overlong UTF-8 trace ID and focuses its inline error", async () => {
+    const request = vi.spyOn(apiClient, "request").mockResolvedValue(response as never);
+    const user = userEvent.setup();
+    renderPage();
+
+    expect(await screen.findByRole("heading", { name: "요청 처리 흐름" })).toBeVisible();
+    const traceID = screen.getByLabelText("추적 ID");
+    fireEvent.change(traceID, { target: { value: "한".repeat(171) } });
+    await user.click(screen.getByRole("button", { name: "흐름 조회" }));
+
+    expect(screen.getByRole("alert")).toHaveTextContent("UTF-8 기준 512바이트 이하여야 합니다.");
+    expect(traceID).toHaveAttribute("aria-invalid", "true");
+    expect(traceID).toHaveFocus();
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId("location")).not.toHaveTextContent("trace_id=");
+  });
+
+  it("uses a muted status badge for an unknown HTTP status", async () => {
+    vi.spyOn(apiClient, "request").mockResolvedValue({
+      ...response,
+      requests: [
+        { ...firstRow, request_id: "req-unknown-zero", status_code: 0 },
+        { ...firstRow, request_id: "req-unknown-high", status_code: 600 },
+      ],
+    } as never);
+    renderPage();
+
+    const zeroTimelineTrigger = await screen.findByRole("button", {
+      name: "요청 req-unknown-zero 흐름 선택",
+    });
+    const highTimelineTrigger = screen.getByRole("button", {
+      name: "요청 req-unknown-high 흐름 선택",
+    });
+    expect(within(zeroTimelineTrigger).getByText("HTTP 0")).toHaveClass("badge-muted");
+    expect(within(highTimelineTrigger).getByText("HTTP 600")).toHaveClass("badge-muted");
+    const summary = screen.getByRole("region", { name: "추적 요청 요약" });
+    expect(
+      within(within(summary).getByText("오류 요청").parentElement as HTMLElement).getByText("0건"),
+    ).toBeVisible();
+  });
+
+  it("uses the runtime migration registry as the Legacy link source", async () => {
+    authRuntime.legacyPath = "/admin#/runtime-traces";
+    vi.spyOn(apiClient, "request").mockResolvedValue(response as never);
+    renderPage();
+
+    expect(await screen.findByRole("link", { name: "기존 화면 보기" })).toHaveAttribute(
+      "href",
+      "/admin#/runtime-traces",
+    );
+  });
+
+  it("uses the runtime Legacy path from a terminal error state", async () => {
+    authRuntime.legacyPath = "/admin#/runtime-traces";
+    vi.spyOn(apiClient, "request").mockRejectedValueOnce(
+      new AppError("서버 상세 오류", { kind: "http", requestId: "gateway-request-runtime" }),
+    );
+    renderPage();
+
+    expect(await screen.findByRole("link", { name: "기존 관리자 화면 열기" })).toHaveAttribute(
+      "href",
+      "/admin#/runtime-traces",
+    );
+  });
+
+  it("keeps a missing deep-linked selection actionable and focused when the result is empty", async () => {
+    vi.spyOn(apiClient, "request").mockResolvedValue({
+      ...response,
+      requests: [],
+      next_cursor: undefined,
+      previous_cursor: undefined,
+    } as never);
+    const user = userEvent.setup();
+    renderPage("/observability/traces?selected_request=req-missing");
+
+    const missingSelection = await screen.findByText("선택한 요청이 현재 페이지에 없습니다.", {
+      selector: "strong",
+    });
+    expect(missingSelection.closest("section")).toHaveFocus();
+    await user.click(screen.getByRole("button", { name: "선택 해제" }));
+    expect(screen.getByTestId("location")).not.toHaveTextContent("selected_request");
+    await waitFor(() => expect(screen.getByRole("heading", { name: "추적 탐색기" })).toHaveFocus());
+  });
+
+  it("keeps the last good timeline visible and exposes a retry when refresh fails", async () => {
+    const request = vi
+      .spyOn(apiClient, "request")
+      .mockResolvedValueOnce(response as never)
+      .mockRejectedValueOnce(
+        new AppError("원시 오류를 표시하면 안 됩니다.", {
+          kind: "http",
+          requestId: "gateway-request-1",
+        }),
+      );
+    const user = userEvent.setup();
+    renderPage();
+
+    expect(await screen.findByRole("button", { name: "요청 req-001 흐름 선택" })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "새로고침" }));
+    expect(await screen.findByText("갱신에 실패해 마지막 정상 데이터를 표시합니다.")).toBeVisible();
+    expect(screen.getByText("요청 ID: gateway-request-1")).toBeVisible();
+    expect(screen.queryByText("원시 오류를 표시하면 안 됩니다.")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "요청 req-001 흐름 선택" })).toBeVisible();
+    expect(request).toHaveBeenCalledTimes(2);
+  });
+
+  it("distinguishes loading, empty and terminal error states and honors Legacy permissions", async () => {
+    let resolvePending: ((value: AppRequestsResponse) => void) | undefined;
+    vi.spyOn(apiClient, "request").mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolvePending = resolve as (value: AppRequestsResponse) => void;
+        }) as never,
+    );
+    const loading = renderPage("/observability/traces?trace_id=missing");
+    expect(screen.getByText("추적 요청 흐름을 불러오는 중입니다.")).toBeInTheDocument();
+    resolvePending?.({ ...response, requests: [], next_cursor: undefined, previous_cursor: undefined });
+    expect(await screen.findByRole("heading", { name: "일치하는 추적 요청이 없습니다." })).toBeVisible();
+    loading.unmount();
+
+    authRuntime.scopes = ["observability:read"];
+    vi.spyOn(apiClient, "request").mockRejectedValueOnce(
+      new AppError("서버 상세 오류", {
+        kind: "http",
+        requestId: "gateway-request-2",
+      }),
+    );
+    renderPage();
+    expect(
+      await screen.findByRole("heading", { name: "추적 요청 흐름을 불러오지 못했습니다." }),
+    ).toBeVisible();
+    expect(screen.getByText("요청 ID: gateway-request-2")).toBeVisible();
+    expect(screen.queryByText("서버 상세 오류")).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "기존 관리자 화면 열기" })).not.toBeInTheDocument();
+  });
+});

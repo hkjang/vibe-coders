@@ -166,6 +166,7 @@ func (s *SQLStore) appRecentRequestsQuery(filter AppRequestFilter) (string, []an
 	createdAt := appRequestCreatedAtExpr("r.created_at")
 	validRow := renderForDialect(appRequestValidRowPredicate("r.id", "r.created_at"), s.dialect)
 	validRequestAPIKey := renderForDialect(appRequestBoundedTextPredicate("r.api_key_id"), s.dialect)
+	validTraceID := renderForDialect(appRequestBoundedTextPredicate("r.trace_id"), s.dialect)
 	validTeamKey := renderForDialect(appRequestBoundedTextPredicate("k.id")+" AND "+appRequestBoundedTextPredicate("k.team"), s.dialect)
 	validTokenUsage := renderForDialect(appRequestValidChildPredicate("t_pick.request_id", "t_pick.id", "t_pick.created_at"), s.dialect)
 	validResponse := renderForDialect(appRequestValidChildPredicate("resp_pick.request_id", "resp_pick.id", "resp_pick.created_at"), s.dialect)
@@ -184,7 +185,10 @@ func (s *SQLStore) appRecentRequestsQuery(filter AppRequestFilter) (string, []an
 		args = append(args, filter.Provider)
 	}
 	addExact("r.id", filter.RequestID)
-	addExact("r.trace_id", filter.TraceID)
+	if filter.TraceID != "" {
+		where = append(where, validTraceID)
+		addExact("r.trace_id", filter.TraceID)
+	}
 	addExact("COALESCE(NULLIF(r.session_id, ''), 'no-session')", filter.SessionID)
 	if filter.APIKeyID != "" {
 		where = append(where, validRequestAPIKey)

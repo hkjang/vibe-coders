@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { fitsUTF8Bytes } from "@/shared/utils/utf8";
+
 import type {
   AdminModel as GeneratedAdminModel,
   AdminModelDeprecation as GeneratedAdminModelDeprecation,
@@ -168,18 +170,15 @@ const measurementSchema = z.number().nonnegative();
 const percentageSchema = z.number().min(0).max(100);
 const timestampSchema = z.string().datetime({ offset: true });
 
-const utf8Encoder = new TextEncoder();
-
 function utf8BoundedString(maxBytes: number): z.ZodString {
-  return z.string().refine((value) => utf8Encoder.encode(value).byteLength <= maxBytes, {
+  return z.string().refine((value) => fitsUTF8Bytes(value, maxBytes), {
     message: `UTF-8 ${maxBytes}바이트 이하여야 합니다.`,
   });
 }
 
-const appRequestTimestampSchema = timestampSchema.refine(
-  (value) => utf8Encoder.encode(value).byteLength <= 30,
-  { message: "요청 시각은 UTF-8 30바이트 이하여야 합니다." },
-);
+const appRequestTimestampSchema = timestampSchema.refine((value) => fitsUTF8Bytes(value, 30), {
+  message: "요청 시각은 UTF-8 30바이트 이하여야 합니다.",
+});
 
 const appRequestSafeIntegerSchema = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
 const appRequestCountSchema = z.number().int().min(0).max(2_147_483_647);
@@ -632,21 +631,21 @@ export const appRequestsResponseSchema = z
 export const appRequestsQuerySchema = z
   .object({
     limit: z.number().int().min(1).max(200).optional(),
-    from: z.string().max(64).optional(),
-    to: z.string().max(64).optional(),
-    tz: z.string().max(64).optional(),
+    from: utf8BoundedString(64).optional(),
+    to: utf8BoundedString(64).optional(),
+    tz: utf8BoundedString(64).optional(),
     status: z
       .union([z.enum(["success", "error", "4xx", "5xx"]), z.string().regex(/^[1-5][0-9]{2}$/)])
       .optional(),
-    model: z.string().max(256).optional(),
+    model: utf8BoundedString(256).optional(),
     provider_ref: z.string().regex(providerRefPattern).optional(),
-    request_id: z.string().max(512).optional(),
-    trace_id: z.string().max(512).optional(),
-    session_id: z.string().max(512).optional(),
-    api_key_id: z.string().max(512).optional(),
-    ip: z.string().max(128).optional(),
-    language: z.string().max(64).optional(),
-    cursor: z.string().max(4096).optional(),
+    request_id: utf8BoundedString(512).optional(),
+    trace_id: utf8BoundedString(512).optional(),
+    session_id: utf8BoundedString(512).optional(),
+    api_key_id: utf8BoundedString(512).optional(),
+    ip: utf8BoundedString(128).optional(),
+    language: utf8BoundedString(64).optional(),
+    cursor: utf8BoundedString(4096).optional(),
   })
   .strict();
 

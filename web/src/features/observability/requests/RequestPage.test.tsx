@@ -11,11 +11,24 @@ import { AppError } from "@/shared/api/error";
 import type { AppRequestsResponse } from "@/shared/api/schemas";
 import { usePreferences } from "@/shared/stores/preferences";
 
-const authRuntime = vi.hoisted(() => ({ legacyFallback: true, scopes: ["admin:read"] as string[] }));
+const authRuntime = vi.hoisted(() => ({
+  featureFallback: true,
+  legacyFallback: true,
+  legacyPath: "/admin#/requests" as `/admin${string}`,
+  scopes: ["admin:read"] as string[],
+}));
 
 vi.mock("@/app/auth/AuthProvider", () => ({
   useAuth: () => ({
     authenticationMode: "session",
+    features: [
+      {
+        appPath: "/app/observability/requests",
+        fallbackEnabled: authRuntime.featureFallback,
+        featureId: "observability.requests",
+        legacyPath: authRuntime.legacyPath,
+      },
+    ],
     legacyFallback: authRuntime.legacyFallback,
     mode: "authenticated",
     user: {
@@ -89,7 +102,9 @@ function renderPage(initialEntry = "/observability/requests") {
 
 describe("RequestPage", () => {
   beforeEach(() => {
+    authRuntime.featureFallback = true;
     authRuntime.legacyFallback = true;
+    authRuntime.legacyPath = "/admin#/requests";
     authRuntime.scopes = ["admin:read"];
     usePreferences.setState({ refreshInterval: 0 });
   });
@@ -123,6 +138,10 @@ describe("RequestPage", () => {
     expect(screen.getByRole("link", { name: "기존 요청 화면 열기" })).toHaveAttribute(
       "href",
       "/admin#/requests",
+    );
+    expect(screen.getByRole("link", { name: "이 요청의 추적 보기" })).toHaveAttribute(
+      "href",
+      "/observability/traces?selected_request=req-001&trace_id=trace-001",
     );
     await user.click(screen.getByRole("button", { name: "닫기" }));
     await waitFor(() => expect(detail).toHaveFocus());
@@ -199,6 +218,91 @@ describe("RequestPage", () => {
     expect(screen.getByTestId("request-detail-created-at")).toHaveTextContent(seoulDetailExpected);
   });
 
+  it.each([
+    [0, "muted"],
+    [100, "muted"],
+    [200, "success"],
+    [399, "success"],
+    [400, "warning"],
+    [500, "danger"],
+    [599, "danger"],
+    [600, "muted"],
+  ] as const)("renders HTTP status %i with the %s tone", async (status, tone) => {
+    vi.spyOn(apiClient, "request").mockResolvedValue({
+      ...response,
+      requests: [{ ...row, status_code: status }],
+    } as never);
+    renderPage();
+
+    const badge = await screen.findByText(String(status), { selector: ".badge" });
+    expect(badge).toHaveClass(`badge-${tone}`);
+  });
+
+  it("does not offer a broken Trace handoff when the request has no trace ID", async () => {
+    vi.spyOn(apiClient, "request").mockResolvedValue({
+      ...response,
+      requests: [{ ...row, trace_id: "" }],
+    } as never);
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(await screen.findByRole("button", { name: "상세" }));
+    expect(screen.queryByRole("link", { name: "이 요청의 추적 보기" })).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ["100", "1"],
+    ["503", "75"],
+    ["599", "200"],
+  ])(
+    "preserves exact HTTP status %s, limit %s and RFC3339 bounds from a Trace handoff",
+    async (status, limit) => {
+      const request = vi.spyOn(apiClient, "request").mockResolvedValue({
+        ...response,
+        limit: Number(limit),
+      } as never);
+      const user = userEvent.setup();
+      const from = "2026-09-04T01:00:00Z";
+      const to = "2026-09-04T02:00:00+00:00";
+      renderPage(
+        `/observability/requests?${new URLSearchParams({
+          from,
+          to,
+          status,
+          limit,
+          trace_id: "Trace-Mixed_Case:001",
+          tz: "UTC",
+        }).toString()}`,
+      );
+
+      expect(await screen.findByLabelText("상태")).toHaveValue(status);
+      expect(screen.getByLabelText("표시 건수")).toHaveValue(limit);
+      expect(screen.getByLabelText("시작 시각")).toHaveValue(from);
+      expect(screen.getByLabelText("종료 시각")).toHaveValue(to);
+      await waitFor(() => {
+        const options = request.mock.calls[0]?.[1] as { query?: Record<string, unknown> };
+        expect(options.query).toMatchObject({
+          from,
+          to,
+          status,
+          limit: Number(limit),
+          trace_id: "Trace-Mixed_Case:001",
+          tz: "UTC",
+        });
+      });
+
+      await user.click(screen.getByRole("button", { name: "조회" }));
+      const location = new URL(
+        screen.getByTestId("location").textContent ?? "",
+        "https://app.example.invalid",
+      );
+      expect(location.searchParams.get("status")).toBe(status);
+      expect(location.searchParams.get("limit")).toBe(limit);
+      expect(location.searchParams.get("from")).toBe(from);
+      expect(location.searchParams.get("to")).toBe(to);
+    },
+  );
+
   it("hides every existing-screen bridge when fallback is disabled or permission is missing", async () => {
     authRuntime.legacyFallback = false;
     const request = vi.spyOn(apiClient, "request").mockResolvedValue(response as never);
@@ -220,6 +324,43 @@ describe("RequestPage", () => {
     expect(await screen.findByText("요청 목록을 확인할 수 없습니다.")).toBeInTheDocument();
     expect(screen.queryByText("목록 실패")).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "기존 관리자 화면 열기" })).not.toBeInTheDocument();
+  });
+
+  it("uses the runtime request Legacy path and honors its feature fallback toggle", async () => {
+    authRuntime.legacyPath = "/admin#/runtime-requests";
+    const request = vi.spyOn(apiClient, "request").mockResolvedValue(response as never);
+    const user = userEvent.setup();
+    const page = renderPage();
+
+    expect(await screen.findByRole("link", { name: "기존 화면 보기" })).toHaveAttribute(
+      "href",
+      "/admin#/runtime-requests",
+    );
+    await user.click(screen.getByRole("button", { name: "상세" }));
+    expect(screen.getByRole("link", { name: "기존 요청 화면 열기" })).toHaveAttribute(
+      "href",
+      "/admin#/runtime-requests",
+    );
+    page.unmount();
+
+    authRuntime.featureFallback = false;
+    request.mockResolvedValueOnce(response as never);
+    renderPage();
+    expect(await screen.findByText("req-001")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "기존 화면 보기" })).not.toBeInTheDocument();
+  });
+
+  it("uses the runtime request Legacy path in a terminal error", async () => {
+    authRuntime.legacyPath = "/admin#/runtime-requests";
+    vi.spyOn(apiClient, "request").mockRejectedValueOnce(
+      new AppError("내부 오류", { kind: "http", requestId: "gateway-request-runtime" }),
+    );
+    renderPage();
+
+    expect(await screen.findByRole("link", { name: "기존 관리자 화면 열기" })).toHaveAttribute(
+      "href",
+      "/admin#/runtime-requests",
+    );
   });
 
   it("uses the global automatic refresh interval and pauses request polling while hidden", async () => {

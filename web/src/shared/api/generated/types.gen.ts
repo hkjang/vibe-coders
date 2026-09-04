@@ -5139,6 +5139,9 @@ export type GetAdminRequestsData = {
         model?: string;
         provider_ref?: string;
         request_id?: string;
+        /**
+         * Exact trace ID, limited to 512 UTF-8 bytes.
+         */
         trace_id?: string;
         session_id?: string;
         api_key_id?: string;

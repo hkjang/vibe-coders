@@ -472,6 +472,13 @@ func (s *Server) handleRequestDetail(w http.ResponseWriter, r *http.Request) {
 		s.handleRequestDiff(w, r)
 		return
 	}
+	// Route every waterfall-shaped path through its shared identifier validator,
+	// including malformed nested identifiers. This keeps all trace detail endpoints on
+	// the same slash/control/UTF-8/length contract instead of returning a dispatcher 404.
+	if strings.HasSuffix(rest, "/trace") {
+		s.handleRequestTrace(w, r)
+		return
+	}
 	if idx := strings.Index(rest, "/"); idx >= 0 {
 		sub := rest[idx+1:]
 		switch sub {
@@ -489,9 +496,6 @@ func (s *Server) handleRequestDetail(w http.ResponseWriter, r *http.Request) {
 			return
 		case "links":
 			s.handleRequestLinks(w, r)
-			return
-		case "trace":
-			s.handleRequestTrace(w, r)
 			return
 		case "headers", "routing", "body", "timeline", "export":
 			s.handleRequestReadableSubresource(w, r, rest)

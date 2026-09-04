@@ -49,6 +49,30 @@ describe("app route query security", () => {
     expect(result.search).toContain("request_id=req-1");
   });
 
+  it("preserves only safe trace explorer filters and selection state", () => {
+    const result = sanitizeAppRouteSearch(
+      "/app/observability/traces",
+      "?trace_id=trace-1&selected_request=req-1&status=error&model=gpt-test&from=2026-09-01&to=2026-09-03&tz=Asia%2FSeoul&limit=50&cursor=opaque.cursor&prompt=private",
+    );
+    expect(result.rejectedKeys).toEqual(["prompt"]);
+    expect(result.search).toContain("trace_id=trace-1");
+    expect(result.search).toContain("selected_request=req-1");
+    expect(result.search).toContain("cursor=opaque.cursor");
+    expect(result.search).not.toContain("prompt");
+  });
+
+  it.each([`vc_sk_${"a".repeat(43)}`, "Bearer private-credential"])(
+    "removes credential-like values from trace deep links: %s",
+    (secret) => {
+      const result = sanitizeAppRouteSearch(
+        "/app/observability/traces",
+        `?trace_id=${encodeURIComponent(secret)}&selected_request=${encodeURIComponent(secret)}`,
+      );
+      expect(result.search).toBe("");
+      expect(result.sensitiveKeys).toEqual(["trace_id", "selected_request"]);
+    },
+  );
+
   it.each([
     `vc_sk_${"a".repeat(43)}`,
     `VC_SA_${"A1_-".repeat(11)}`,

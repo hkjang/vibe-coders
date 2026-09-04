@@ -1,9 +1,10 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { ExternalLink, Filter, RefreshCw, Search } from "lucide-react";
 import { useCallback, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "react-router";
+import { useLocation, useSearchParams } from "react-router";
 
 import { useAuth } from "@/app/auth/AuthProvider";
+import { featureByPath } from "@/config/migration-registry";
 import { RequestDetailDialog } from "@/features/observability/requests/RequestDetailDialog";
 import { formatRequestDate } from "@/features/observability/requests/request-date";
 import { refreshIntervalMs } from "@/features/health/health-utils";
@@ -17,6 +18,7 @@ import { Button } from "@/shared/components/ui/Button";
 import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
 import { canOpenLegacyAdmin } from "@/shared/permissions/legacy-admin";
 import { usePreferences } from "@/shared/stores/preferences";
+import { httpStatusTone } from "@/shared/utils/http-status";
 import "@/features/observability/requests/request-page.css";
 
 const filterKeys = [
@@ -32,14 +34,24 @@ const filterKeys = [
   "ip",
   "language",
 ] as const;
+const defaultLimit = 50;
+const defaultTimeZone = "Asia/Seoul";
+const requestStatusPattern = /^(?:success|error|4xx|5xx|[1-5][0-9]{2})$/u;
+const exactHTTPStatusPattern = /^[1-5][0-9]{2}$/u;
+const standardPageLimits = [25, 50, 100, 200] as const;
 
 function queryFromSearch(search: URLSearchParams): AppRequestsQuery {
+  const requestedLimit = Number(search.get("limit"));
   const query: AppRequestsQuery = {
-    limit: Number(search.get("limit") ?? 50),
-    tz: search.get("tz") ?? "Asia/Seoul",
+    limit:
+      Number.isInteger(requestedLimit) && requestedLimit >= 1 && requestedLimit <= 200
+        ? requestedLimit
+        : defaultLimit,
+    tz: search.get("tz")?.trim() || defaultTimeZone,
   };
   for (const key of filterKeys) {
-    const value = search.get(key);
+    const value = search.get(key)?.trim();
+    if (key === "status" && value && !requestStatusPattern.test(value)) continue;
     if (value) Object.assign(query, { [key]: value });
   }
   const cursor = search.get("cursor");
@@ -47,19 +59,24 @@ function queryFromSearch(search: URLSearchParams): AppRequestsQuery {
   return query;
 }
 
-function statusTone(code: number): "success" | "warning" | "danger" {
-  if (code < 400) return "success";
-  return code < 500 ? "warning" : "danger";
-}
-
 export function RequestPage(): React.JSX.Element {
   const auth = useAuth();
-  const showLegacyAdmin = canOpenLegacyAdmin(auth);
+  const location = useLocation();
+  const runtimeFeature = featureByPath(location.pathname, auth.features) ?? featureByPath(location.pathname);
+  const legacyPath = runtimeFeature?.legacyPath;
+  const showLegacyAdmin =
+    canOpenLegacyAdmin(auth) && runtimeFeature?.fallbackEnabled === true && legacyPath !== undefined;
   const refreshInterval = usePreferences((state) => state.refreshInterval);
   const interval = refreshIntervalMs(refreshInterval);
   const [searchParams, setSearchParams] = useSearchParams();
   const query = useMemo(() => queryFromSearch(searchParams), [searchParams]);
-  const selectedTimeZone = query.tz ?? "Asia/Seoul";
+  const selectedTimeZone = query.tz ?? defaultTimeZone;
+  const selectedStatus = query.status ?? "";
+  const selectedLimit = query.limit ?? defaultLimit;
+  const customStatus = exactHTTPStatusPattern.test(selectedStatus) ? selectedStatus : undefined;
+  const customLimit = standardPageLimits.includes(selectedLimit as (typeof standardPageLimits)[number])
+    ? undefined
+    : selectedLimit;
   const result = useQuery({
     queryKey: ["admin", "requests", query],
     queryFn: ({ signal }) =>
@@ -107,6 +124,7 @@ export function RequestPage(): React.JSX.Element {
         diagnosticCode={isAppError(result.error) ? result.error.code : undefined}
         onRetry={() => void result.refetch()}
         showLegacy={showLegacyAdmin}
+        legacyHref={legacyPath}
       />
     );
   }
@@ -124,8 +142,8 @@ export function RequestPage(): React.JSX.Element {
           <Button variant="secondary" disabled={result.isFetching} onClick={() => void result.refetch()}>
             <RefreshCw aria-hidden="true" /> {result.isFetching ? "갱신 중" : "새로고침"}
           </Button>
-          {showLegacyAdmin ? (
-            <a className="button button-secondary button-default" href="/admin#/requests">
+          {showLegacyAdmin && legacyPath ? (
+            <a className="button button-secondary button-default" href={legacyPath}>
               <ExternalLink aria-hidden="true" /> 기존 화면 보기
             </a>
           ) : null}
@@ -141,20 +159,33 @@ export function RequestPage(): React.JSX.Element {
         <div className="request-filter-grid">
           <label>
             시작 시각
-            <input name="from" type="datetime-local" defaultValue={searchParams.get("from") ?? ""} />
+            <input
+              name="from"
+              type="text"
+              maxLength={64}
+              placeholder="예: 2026-09-04T09:00 또는 RFC3339"
+              defaultValue={query.from ?? ""}
+            />
           </label>
           <label>
             종료 시각
-            <input name="to" type="datetime-local" defaultValue={searchParams.get("to") ?? ""} />
+            <input
+              name="to"
+              type="text"
+              maxLength={64}
+              placeholder="예: 2026-09-04T18:00 또는 RFC3339"
+              defaultValue={query.to ?? ""}
+            />
           </label>
           <label>
             상태
-            <select name="status" defaultValue={searchParams.get("status") ?? ""}>
+            <select name="status" defaultValue={selectedStatus}>
               <option value="">전체</option>
               <option value="success">성공 (2xx·3xx)</option>
               <option value="error">오류 (4xx·5xx)</option>
               <option value="4xx">4xx</option>
               <option value="5xx">5xx</option>
+              {customStatus ? <option value={customStatus}>HTTP {customStatus}</option> : null}
             </select>
           </label>
           <label>
@@ -194,16 +225,17 @@ export function RequestPage(): React.JSX.Element {
               </label>
               <label>
                 표시 건수
-                <select name="limit" defaultValue={searchParams.get("limit") ?? "50"}>
-                  <option value="25">25</option>
-                  <option value="50">50</option>
-                  <option value="100">100</option>
-                  <option value="200">200</option>
+                <select name="limit" defaultValue={String(selectedLimit)}>
+                  {customLimit ? <option value={customLimit}>{customLimit}건</option> : null}
+                  <option value="25">25건</option>
+                  <option value="50">50건</option>
+                  <option value="100">100건</option>
+                  <option value="200">200건</option>
                 </select>
               </label>
               <label>
                 시간대
-                <input name="tz" defaultValue={searchParams.get("tz") ?? "Asia/Seoul"} />
+                <input name="tz" defaultValue={selectedTimeZone} />
               </label>
             </div>
           </details>
@@ -269,7 +301,7 @@ export function RequestPage(): React.JSX.Element {
                       </time>
                     </td>
                     <td>
-                      <Badge tone={statusTone(request.status_code)}>{request.status_code}</Badge>
+                      <Badge tone={httpStatusTone(request.status_code)}>{request.status_code}</Badge>
                     </td>
                     <td>
                       <code>{request.request_id}</code>
@@ -338,7 +370,7 @@ export function RequestPage(): React.JSX.Element {
           if (!open) setSelected(undefined);
         }}
         returnFocusRef={returnFocusRef}
-        showLegacy={showLegacyAdmin}
+        legacyHref={showLegacyAdmin ? legacyPath : undefined}
         timeZone={selectedTimeZone}
       />
     </section>

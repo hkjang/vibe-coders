@@ -19,6 +19,7 @@ interface ErrorStateProps {
   diagnosticCode?: string;
   onRetry?: () => void;
   showLegacy?: boolean;
+  legacyHref?: `/admin${string}`;
 }
 
 export function ErrorState({
@@ -28,6 +29,7 @@ export function ErrorState({
   diagnosticCode,
   onRetry,
   showLegacy = true,
+  legacyHref = "/admin",
 }: ErrorStateProps): React.JSX.Element {
   return (
     <section className="page-state page-state-error" role="alert">
@@ -43,7 +45,7 @@ export function ErrorState({
           </Button>
         ) : null}
         {showLegacy ? (
-          <a className="button button-secondary button-default" href="/admin">
+          <a className="button button-secondary button-default" href={legacyHref}>
             기존 관리자 화면 열기
           </a>
         ) : null}

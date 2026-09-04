@@ -2767,7 +2767,7 @@
   "info": {
     "description": "OpenAI-compatible AI control-plane gateway. This document covers the full HTTP surface; request/response bodies are summarized — see the admin UI for live examples.",
     "title": "AI Proxy Gateway API",
-    "version": "v0.82.1"
+    "version": "v0.83.0"
   },
   "openapi": "3.0.3",
   "paths": {
@@ -9225,6 +9225,7 @@
             "name": "from",
             "required": false,
             "schema": {
+              "maxLength": 64,
               "type": "string"
             }
           },
@@ -9233,6 +9234,7 @@
             "name": "to",
             "required": false,
             "schema": {
+              "maxLength": 64,
               "type": "string"
             }
           },
@@ -9242,6 +9244,7 @@
             "required": false,
             "schema": {
               "default": "Asia/Seoul",
+              "maxLength": 64,
               "type": "string"
             }
           },
@@ -9259,6 +9262,7 @@
             "name": "model",
             "required": false,
             "schema": {
+              "maxLength": 256,
               "type": "string"
             }
           },
@@ -9281,10 +9285,12 @@
             }
           },
           {
+            "description": "Exact trace ID, limited to 512 UTF-8 bytes.",
             "in": "query",
             "name": "trace_id",
             "required": false,
             "schema": {
+              "maxLength": 512,
               "type": "string"
             }
           },
@@ -9293,6 +9299,7 @@
             "name": "session_id",
             "required": false,
             "schema": {
+              "maxLength": 512,
               "type": "string"
             }
           },
@@ -9301,6 +9308,7 @@
             "name": "api_key_id",
             "required": false,
             "schema": {
+              "maxLength": 512,
               "type": "string"
             }
           },
@@ -9309,6 +9317,7 @@
             "name": "ip",
             "required": false,
             "schema": {
+              "maxLength": 128,
               "type": "string"
             }
           },
@@ -9317,6 +9326,7 @@
             "name": "language",
             "required": false,
             "schema": {
+              "maxLength": 64,
               "type": "string"
             }
           },

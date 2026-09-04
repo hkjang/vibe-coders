@@ -34,6 +34,17 @@ const routeQueryAllowlist: Readonly<Record<string, ReadonlySet<string>>> = {
     "trace_id",
     "tz",
   ]),
+  "/observability/traces": new Set([
+    "cursor",
+    "from",
+    "limit",
+    "model",
+    "selected_request",
+    "status",
+    "to",
+    "trace_id",
+    "tz",
+  ]),
   "/system/health": new Set(["range"]),
 };
 

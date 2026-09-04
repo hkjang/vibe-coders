@@ -1,4 +1,5 @@
 import type { RefObject } from "react";
+import { Link } from "react-router";
 
 import type { AppRequestSummary } from "@/shared/api/schemas";
 import { Button } from "@/shared/components/ui/Button";
@@ -6,20 +7,20 @@ import { Dialog } from "@/shared/components/ui/Dialog";
 import { formatRequestDate } from "@/features/observability/requests/request-date";
 
 interface RequestDetailDialogProps {
+  legacyHref?: `/admin${string}`;
   onOpenChange: (open: boolean) => void;
   open: boolean;
   request?: AppRequestSummary;
   returnFocusRef: RefObject<HTMLElement | null>;
-  showLegacy: boolean;
   timeZone: string;
 }
 
 export function RequestDetailDialog({
+  legacyHref,
   onOpenChange,
   open,
   request,
   returnFocusRef,
-  showLegacy,
   timeZone,
 }: RequestDetailDialogProps): React.JSX.Element {
   return (
@@ -27,8 +28,22 @@ export function RequestDetailDialog({
       description="프롬프트, 응답 본문, 원시 오류와 사용자 에이전트는 이 미리보기에서 제공하지 않습니다."
       footer={
         <>
-          {showLegacy ? (
-            <a className="button button-secondary button-default" href="/admin#/requests">
+          {request?.trace_id ? (
+            <Link
+              className="button button-secondary button-default"
+              to={{
+                pathname: "/observability/traces",
+                search: new URLSearchParams({
+                  selected_request: request.request_id,
+                  trace_id: request.trace_id,
+                }).toString(),
+              }}
+            >
+              이 요청의 추적 보기
+            </Link>
+          ) : null}
+          {legacyHref ? (
+            <a className="button button-secondary button-default" href={legacyHref}>
               기존 요청 화면 열기
             </a>
           ) : null}
