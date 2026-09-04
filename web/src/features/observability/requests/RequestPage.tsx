@@ -1,22 +1,29 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { ExternalLink, Filter, RefreshCw, Search } from "lucide-react";
-import { useCallback, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "react-router";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useLocation, useSearchParams } from "react-router";
 
 import { useAuth } from "@/app/auth/AuthProvider";
+import { featureByPath } from "@/config/migration-registry";
 import { RequestDetailDialog } from "@/features/observability/requests/RequestDetailDialog";
 import { formatRequestDate } from "@/features/observability/requests/request-date";
 import { refreshIntervalMs } from "@/features/health/health-utils";
 import { apiClient } from "@/shared/api/client";
 import { endpoints } from "@/shared/api/endpoints";
 import { isAppError } from "@/shared/api/error";
+import { appRequestsContractHeaders } from "@/shared/api/app-request-contract";
 import type { AppRequestSummary, AppRequestsQuery } from "@/shared/api/schemas";
 import { ErrorState, LoadingState } from "@/shared/components/state/PageStates";
 import { Badge } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
 import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
 import { canOpenLegacyAdmin } from "@/shared/permissions/legacy-admin";
+import { containsPotentialSecret, secretSearchMessage } from "@/shared/security/secrets";
 import { usePreferences } from "@/shared/stores/preferences";
+import { httpStatusTone } from "@/shared/utils/http-status";
+import { isValidIPAddress } from "@/shared/utils/ip-address";
+import { requestQueryFieldError } from "@/shared/utils/request-query-filters";
+import { isValidRequestTimeZone, validateRequestTimeFilters } from "@/shared/utils/request-time-filters";
 import "@/features/observability/requests/request-page.css";
 
 const filterKeys = [
@@ -32,45 +39,118 @@ const filterKeys = [
   "ip",
   "language",
 ] as const;
+const defaultLimit = 50;
+const defaultTimeZone = "Asia/Seoul";
+const exactHTTPStatusPattern = /^[1-5][0-9]{2}$/u;
+const standardPageLimits = [25, 50, 100, 200] as const;
+
+interface SelectedRequestDetail {
+  contractVersion: 1 | 2;
+  dataUpdatedAt: number;
+  ordinal: number;
+  request: AppRequestSummary;
+}
 
 function queryFromSearch(search: URLSearchParams): AppRequestsQuery {
+  const requestedLimit = Number(search.get("limit"));
+  const temporalError = validateRequestTimeFilters({
+    from: search.get("from") ?? undefined,
+    to: search.get("to") ?? undefined,
+    tz: search.get("tz") ?? undefined,
+  });
+  const requestedTimeZone = search.get("tz")?.trim() ?? "";
   const query: AppRequestsQuery = {
-    limit: Number(search.get("limit") ?? 50),
-    tz: search.get("tz") ?? "Asia/Seoul",
+    limit:
+      Number.isInteger(requestedLimit) && requestedLimit >= 1 && requestedLimit <= 200
+        ? requestedLimit
+        : defaultLimit,
+    tz: isValidRequestTimeZone(requestedTimeZone) ? requestedTimeZone : defaultTimeZone,
   };
   for (const key of filterKeys) {
-    const value = search.get(key);
+    const value = search.get(key)?.trim();
+    if (value && requestQueryFieldError(key, value)) continue;
+    if ((key === "from" || key === "to") && temporalError?.field === key) continue;
     if (value) Object.assign(query, { [key]: value });
   }
   const cursor = search.get("cursor");
-  if (cursor) query.cursor = cursor;
+  if (cursor && !requestQueryFieldError("cursor", cursor)) query.cursor = cursor;
   return query;
 }
 
-function statusTone(code: number): "success" | "warning" | "danger" {
-  if (code < 400) return "success";
-  return code < 500 ? "warning" : "danger";
+function RequestIPFilter({ initialValue }: { initialValue: string }): React.JSX.Element {
+  const [value, setValue] = useState(initialValue);
+  const error = value.trim() !== "" && !isValidIPAddress(value) ? "올바른 IP 주소를 입력하세요." : "";
+
+  return (
+    <label>
+      클라이언트 IP
+      <input
+        name="ip"
+        aria-label="클라이언트 IP"
+        value={value}
+        aria-invalid={error ? "true" : undefined}
+        aria-describedby={error ? "request-ip-error" : undefined}
+        onChange={(event) => setValue(event.currentTarget.value)}
+      />
+      {error ? (
+        <span id="request-ip-error" className="field-error" role="alert">
+          {error}
+        </span>
+      ) : null}
+    </label>
+  );
 }
 
 export function RequestPage(): React.JSX.Element {
   const auth = useAuth();
-  const showLegacyAdmin = canOpenLegacyAdmin(auth);
+  const location = useLocation();
+  const runtimeFeature = featureByPath(location.pathname, auth.features) ?? featureByPath(location.pathname);
+  const legacyPath = runtimeFeature?.legacyPath;
+  const showLegacyAdmin =
+    canOpenLegacyAdmin(auth) && runtimeFeature?.fallbackEnabled === true && legacyPath !== undefined;
   const refreshInterval = usePreferences((state) => state.refreshInterval);
   const interval = refreshIntervalMs(refreshInterval);
   const [searchParams, setSearchParams] = useSearchParams();
+  const searchKey = searchParams.toString();
   const query = useMemo(() => queryFromSearch(searchParams), [searchParams]);
-  const selectedTimeZone = query.tz ?? "Asia/Seoul";
+  const selectedTimeZone = query.tz ?? defaultTimeZone;
+  const selectedStatus = query.status ?? "";
+  const selectedLimit = query.limit ?? defaultLimit;
+  const customStatus = exactHTTPStatusPattern.test(selectedStatus) ? selectedStatus : undefined;
+  const customLimit = standardPageLimits.includes(selectedLimit as (typeof standardPageLimits)[number])
+    ? undefined
+    : selectedLimit;
+  const [selected, setSelected] = useState<SelectedRequestDetail>();
   const result = useQuery({
     queryKey: ["admin", "requests", query],
     queryFn: ({ signal }) =>
-      apiClient.request(endpoints.admin.requests, { query, signal, routeId: "observability.requests" }),
+      apiClient.request(endpoints.admin.requests, {
+        headers: appRequestsContractHeaders,
+        query,
+        signal,
+        routeId: "observability.requests",
+      }),
     placeholderData: keepPreviousData,
     staleTime: 10_000,
-    refetchInterval: interval,
+    refetchInterval: (requestQuery) =>
+      (selected !== undefined && selected.dataUpdatedAt === requestQuery.state.dataUpdatedAt) ||
+      (requestQuery.state.status === "error" && requestQuery.state.data === undefined)
+        ? false
+        : interval,
     refetchIntervalInBackground: false,
   });
-  const [selected, setSelected] = useState<AppRequestSummary>();
+  const [filterRevision, setFilterRevision] = useState(0);
+  const [filterError, setFilterError] = useState<string>();
   const returnFocusRef = useRef<HTMLElement | null>(null);
+  const resultsHeadingRef = useRef<HTMLHeadingElement>(null);
+  const errorHeadingRef = useRef<HTMLHeadingElement>(null);
+  const pendingPageFocusRef = useRef(false);
+  const pageErrorFocusedRef = useRef(false);
+  const pendingErrorActionFocusRef = useRef<"reset" | "retry" | undefined>(undefined);
+  const errorRetryButtonRef = useRef<HTMLButtonElement>(null);
+  const errorResetButtonRef = useRef<HTMLButtonElement>(null);
+  const deepLinkIP = searchParams.get("ip")?.trim() ?? "";
+  const deepLinkIPError = deepLinkIP !== "" && !isValidIPAddress(deepLinkIP);
 
   const updateCursor = useCallback(
     (cursor?: string) => {
@@ -82,9 +162,78 @@ export function RequestPage(): React.JSX.Element {
     [searchParams, setSearchParams],
   );
 
+  useEffect(() => {
+    if (!pendingPageFocusRef.current || result.isFetching || result.isPlaceholderData) return;
+    if (resultsHeadingRef.current) {
+      pendingPageFocusRef.current = false;
+      pageErrorFocusedRef.current = false;
+      pendingErrorActionFocusRef.current = undefined;
+      resultsHeadingRef.current.focus();
+      return;
+    }
+    const errorActionTarget =
+      pendingErrorActionFocusRef.current === "retry"
+        ? errorRetryButtonRef.current
+        : pendingErrorActionFocusRef.current === "reset"
+          ? errorResetButtonRef.current
+          : undefined;
+    if (errorActionTarget) {
+      pendingErrorActionFocusRef.current = undefined;
+      errorActionTarget.focus();
+      return;
+    }
+    if (!pageErrorFocusedRef.current && errorHeadingRef.current) {
+      pageErrorFocusedRef.current = true;
+      errorHeadingRef.current.focus();
+    }
+  }, [
+    query.cursor,
+    result.dataUpdatedAt,
+    result.errorUpdatedAt,
+    result.isFetching,
+    result.isPlaceholderData,
+  ]);
+
   const submitFilters = (event: React.FormEvent<HTMLFormElement>): void => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
+    for (const key of [...filterKeys, "limit", "tz"] as const) {
+      const value = String(form.get(key) ?? "").trim();
+      if (value !== "" && containsPotentialSecret(value, auth.credentialPrefixes)) {
+        setFilterError(secretSearchMessage);
+        const control = event.currentTarget.elements.namedItem(key);
+        if (control instanceof HTMLElement) control.focus();
+        return;
+      }
+    }
+    for (const key of [...filterKeys, "limit", "tz"] as const) {
+      const value = String(form.get(key) ?? "").trim();
+      const validationError = requestQueryFieldError(key, value);
+      if (validationError) {
+        if (key !== "ip") setFilterError(validationError);
+        const control = event.currentTarget.elements.namedItem(key);
+        if (control instanceof HTMLElement) control.focus();
+        return;
+      }
+    }
+    const temporalError = validateRequestTimeFilters({
+      from: String(form.get("from") ?? ""),
+      to: String(form.get("to") ?? ""),
+      tz: String(form.get("tz") ?? ""),
+    });
+    if (temporalError) {
+      setFilterError(temporalError.message);
+      const control = event.currentTarget.elements.namedItem(temporalError.field);
+      if (control instanceof HTMLElement) control.focus();
+      return;
+    }
+    setFilterError(undefined);
+    const submittedIP = String(form.get("ip") ?? "").trim();
+    if (submittedIP !== "" && !isValidIPAddress(submittedIP)) {
+      const ipInput = event.currentTarget.elements.namedItem("ip");
+      if (ipInput instanceof HTMLInputElement) ipInput.focus();
+      return;
+    }
     const next = new URLSearchParams();
     for (const key of [...filterKeys, "limit", "tz"] as const) {
       const value = String(form.get(key) ?? "").trim();
@@ -93,25 +242,49 @@ export function RequestPage(): React.JSX.Element {
     setSearchParams(next, { replace: false });
   };
 
-  const openRequest = (request: AppRequestSummary, trigger: HTMLElement): void => {
+  const openRequest = (request: AppRequestSummary, ordinal: number, trigger: HTMLElement): void => {
     returnFocusRef.current = trigger;
-    setSelected(request);
+    setSelected({
+      contractVersion: result.data?.request_contract_version ?? 1,
+      dataUpdatedAt: result.dataUpdatedAt,
+      ordinal,
+      request,
+    });
   };
 
-  if (result.isPending && !result.data) return <LoadingState label="최근 요청을 불러오는 중입니다." />;
   if (result.error && !result.data) {
     return (
       <ErrorState
+        headingRef={errorHeadingRef}
         message={safeAppErrorMessage(result.error, "요청 목록을 확인할 수 없습니다.")}
         requestId={isAppError(result.error) ? result.error.requestId : undefined}
         diagnosticCode={isAppError(result.error) ? result.error.code : undefined}
-        onRetry={() => void result.refetch()}
+        onRetry={() => {
+          pendingPageFocusRef.current = true;
+          pendingErrorActionFocusRef.current = "retry";
+          void result.refetch();
+        }}
+        onReset={() => {
+          pendingPageFocusRef.current = true;
+          pendingErrorActionFocusRef.current = "reset";
+          setSearchParams({}, { replace: false });
+        }}
+        retryButtonRef={errorRetryButtonRef}
+        resetButtonRef={errorResetButtonRef}
+        resetLabel="필터 초기화"
         showLegacy={showLegacyAdmin}
+        legacyHref={legacyPath}
       />
     );
   }
+  if (result.isPending && !result.data) return <LoadingState label="최근 요청을 불러오는 중입니다." />;
 
   const data = result.data;
+  const activeSelected =
+    selected?.contractVersion === data?.request_contract_version &&
+    selected.dataUpdatedAt === result.dataUpdatedAt
+      ? selected
+      : undefined;
   return (
     <section className="page-stack request-page">
       <header className="page-header">
@@ -124,15 +297,20 @@ export function RequestPage(): React.JSX.Element {
           <Button variant="secondary" disabled={result.isFetching} onClick={() => void result.refetch()}>
             <RefreshCw aria-hidden="true" /> {result.isFetching ? "갱신 중" : "새로고침"}
           </Button>
-          {showLegacyAdmin ? (
-            <a className="button button-secondary button-default" href="/admin#/requests">
+          {showLegacyAdmin && legacyPath ? (
+            <a className="button button-secondary button-default" href={legacyPath}>
               <ExternalLink aria-hidden="true" /> 기존 화면 보기
             </a>
           ) : null}
         </div>
       </header>
 
-      <form className="request-filters" key={searchParams.toString()} onSubmit={submitFilters}>
+      <form
+        className="request-filters"
+        key={`${searchKey}:${filterRevision}`}
+        onInput={() => setFilterError(undefined)}
+        onSubmit={submitFilters}
+      >
         <div className="request-filter-heading">
           <Filter aria-hidden="true" />
           <strong>조회 필터</strong>
@@ -141,78 +319,110 @@ export function RequestPage(): React.JSX.Element {
         <div className="request-filter-grid">
           <label>
             시작 시각
-            <input name="from" type="datetime-local" defaultValue={searchParams.get("from") ?? ""} />
+            <input
+              name="from"
+              type="text"
+              maxLength={64}
+              placeholder="예: 2026-09-04T09:00 또는 RFC3339"
+              defaultValue={query.from ?? ""}
+            />
           </label>
           <label>
             종료 시각
-            <input name="to" type="datetime-local" defaultValue={searchParams.get("to") ?? ""} />
+            <input
+              name="to"
+              type="text"
+              maxLength={64}
+              placeholder="예: 2026-09-04T18:00 또는 RFC3339"
+              defaultValue={query.to ?? ""}
+            />
           </label>
           <label>
             상태
-            <select name="status" defaultValue={searchParams.get("status") ?? ""}>
+            <select name="status" defaultValue={selectedStatus}>
               <option value="">전체</option>
               <option value="success">성공 (2xx·3xx)</option>
               <option value="error">오류 (4xx·5xx)</option>
               <option value="4xx">4xx</option>
               <option value="5xx">5xx</option>
+              {customStatus ? <option value={customStatus}>HTTP {customStatus}</option> : null}
             </select>
           </label>
           <label>
             모델
-            <input name="model" defaultValue={searchParams.get("model") ?? ""} />
+            <input name="model" maxLength={256} defaultValue={searchParams.get("model") ?? ""} />
           </label>
           <label>
             요청 ID
-            <input name="request_id" defaultValue={searchParams.get("request_id") ?? ""} />
+            <input name="request_id" maxLength={512} defaultValue={searchParams.get("request_id") ?? ""} />
           </label>
           <label>
             공급자 참조
-            <input name="provider_ref" defaultValue={searchParams.get("provider_ref") ?? ""} />
+            <input name="provider_ref" maxLength={47} defaultValue={searchParams.get("provider_ref") ?? ""} />
           </label>
-          <details className="request-advanced">
+          <details className="request-advanced" open={deepLinkIPError || undefined}>
             <summary>고급 필터</summary>
             <div className="request-filter-grid">
               <label>
                 추적 ID
-                <input name="trace_id" defaultValue={searchParams.get("trace_id") ?? ""} />
+                <input name="trace_id" maxLength={512} defaultValue={searchParams.get("trace_id") ?? ""} />
               </label>
               <label>
                 세션 ID
-                <input name="session_id" defaultValue={searchParams.get("session_id") ?? ""} />
+                <input
+                  name="session_id"
+                  maxLength={512}
+                  defaultValue={searchParams.get("session_id") ?? ""}
+                />
               </label>
               <label>
                 API 키 ID
-                <input name="api_key_id" defaultValue={searchParams.get("api_key_id") ?? ""} />
+                <input
+                  name="api_key_id"
+                  maxLength={512}
+                  defaultValue={searchParams.get("api_key_id") ?? ""}
+                />
               </label>
-              <label>
-                클라이언트 IP
-                <input name="ip" defaultValue={searchParams.get("ip") ?? ""} />
-              </label>
+              <RequestIPFilter initialValue={deepLinkIP} />
               <label>
                 언어
-                <input name="language" defaultValue={searchParams.get("language") ?? ""} />
+                <input name="language" maxLength={64} defaultValue={searchParams.get("language") ?? ""} />
               </label>
               <label>
                 표시 건수
-                <select name="limit" defaultValue={searchParams.get("limit") ?? "50"}>
-                  <option value="25">25</option>
-                  <option value="50">50</option>
-                  <option value="100">100</option>
-                  <option value="200">200</option>
+                <select name="limit" defaultValue={String(selectedLimit)}>
+                  {customLimit ? <option value={customLimit}>{customLimit}건</option> : null}
+                  <option value="25">25건</option>
+                  <option value="50">50건</option>
+                  <option value="100">100건</option>
+                  <option value="200">200건</option>
                 </select>
               </label>
               <label>
                 시간대
-                <input name="tz" defaultValue={searchParams.get("tz") ?? "Asia/Seoul"} />
+                <input name="tz" defaultValue={selectedTimeZone} />
               </label>
             </div>
           </details>
         </div>
+        {filterError ? (
+          <p className="field-error" role="alert">
+            {filterError}
+          </p>
+        ) : null}
         <div className="request-filter-actions">
           <Button type="submit" variant="primary">
             <Search aria-hidden="true" /> 조회
           </Button>
-          <Button type="button" variant="ghost" onClick={() => setSearchParams({}, { replace: false })}>
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={() => {
+              setFilterError(undefined);
+              setFilterRevision((revision) => revision + 1);
+              setSearchParams({}, { replace: false });
+            }}
+          >
             필터 초기화
           </Button>
         </div>
@@ -234,6 +444,18 @@ export function RequestPage(): React.JSX.Element {
           새 필터를 조회하는 동안 직전 결과를 표시합니다.
         </div>
       ) : null}
+      {data?.request_contract_version === 1 ? (
+        <div className="request-contract-warning" role="status">
+          <strong>서버 배포 버전을 맞추는 중입니다.</strong>
+          <span>
+            요청 목록은 계속 조회할 수 있지만 추적 화면 연결은 모든 서버가 v0.83.0 이상이 된 뒤 제공됩니다.
+          </span>
+        </div>
+      ) : null}
+
+      <h2 ref={resultsHeadingRef} className="sr-only" tabIndex={-1}>
+        요청 조회 결과
+      </h2>
 
       <div className="data-table-shell">
         <div className="data-table-scroll">
@@ -255,8 +477,8 @@ export function RequestPage(): React.JSX.Element {
             </thead>
             <tbody>
               {data?.requests.length ? (
-                data.requests.map((request) => (
-                  <tr key={request.request_id}>
+                data.requests.map((request, index) => (
+                  <tr key={request.request_ref}>
                     <td>
                       <time
                         data-testid={`request-created-at-${request.request_id}`}
@@ -269,7 +491,7 @@ export function RequestPage(): React.JSX.Element {
                       </time>
                     </td>
                     <td>
-                      <Badge tone={statusTone(request.status_code)}>{request.status_code}</Badge>
+                      <Badge tone={httpStatusTone(request.status_code)}>{request.status_code}</Badge>
                     </td>
                     <td>
                       <code>{request.request_id}</code>
@@ -285,7 +507,8 @@ export function RequestPage(): React.JSX.Element {
                       <Button
                         size="small"
                         variant="ghost"
-                        onClick={(event) => openRequest(request, event.currentTarget)}
+                        aria-label={`${index + 1}번째 요청 ${request.request_id} 상세 보기`}
+                        onClick={(event) => openRequest(request, index + 1, event.currentTarget)}
                       >
                         상세
                       </Button>
@@ -317,7 +540,10 @@ export function RequestPage(): React.JSX.Element {
             variant="secondary"
             size="small"
             disabled={!data?.previous_cursor || result.isFetching}
-            onClick={() => updateCursor(data?.previous_cursor)}
+            onClick={() => {
+              pendingPageFocusRef.current = true;
+              updateCursor(data?.previous_cursor);
+            }}
           >
             이전
           </Button>
@@ -325,20 +551,25 @@ export function RequestPage(): React.JSX.Element {
             variant="secondary"
             size="small"
             disabled={!data?.next_cursor || result.isFetching}
-            onClick={() => updateCursor(data?.next_cursor)}
+            onClick={() => {
+              pendingPageFocusRef.current = true;
+              updateCursor(data?.next_cursor);
+            }}
           >
             다음
           </Button>
         </div>
       </div>
       <RequestDetailDialog
-        open={Boolean(selected)}
-        request={selected}
+        open={Boolean(activeSelected)}
+        request={activeSelected?.request}
+        requestOrdinal={activeSelected?.ordinal}
+        traceHandoffEnabled={data?.request_contract_version === 2}
         onOpenChange={(open) => {
           if (!open) setSelected(undefined);
         }}
         returnFocusRef={returnFocusRef}
-        showLegacy={showLegacyAdmin}
+        legacyHref={showLegacyAdmin ? legacyPath : undefined}
         timeZone={selectedTimeZone}
       />
     </section>

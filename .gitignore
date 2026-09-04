@@ -18,6 +18,7 @@ output/
 seed.sql
 
 # React application build and test output
+/node_modules/
 web/node_modules/
 web/.pnpm-store/
 web/.vite/

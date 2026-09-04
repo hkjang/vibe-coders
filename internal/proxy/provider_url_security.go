@@ -1,6 +1,8 @@
 package proxy
 
 import (
+	"bytes"
+	"encoding/base64"
 	"fmt"
 	"net/url"
 	"regexp"
@@ -9,18 +11,32 @@ import (
 )
 
 const invalidProviderURLDisplay = "[invalid or redacted provider URL]"
+const maxProviderCredentialScanBytes = 64 << 10
+
+var providerBasicCredentialPattern = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])basic(?:\s|%20|\+)+([a-z0-9+/]{4,}={0,2})`)
+var providerBearerCredentialPattern = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])bearer(?:\s|%20|\+)+([a-z0-9._~+/=-]+)(?:$|[^a-z0-9._~+/=-])`)
 
 var providerURLCredentialPatterns = []*regexp.Regexp{
-	// Authorization header values accidentally pasted into a path or query value.
-	regexp.MustCompile(`(?i)(?:^|[^a-z0-9])bearer(?:\s|%20|\+)+[a-z0-9._~+/=-]{8,}`),
 	// OpenAI-compatible secret keys, including project and service-account forms.
 	regexp.MustCompile(`(?i)(?:^|[^a-z0-9])sk-(?:proj-|svcacct-|ant-)?[a-z0-9_-]{8,}`),
-	// A nested URL with userinfo can otherwise bypass the top-level User check
-	// when it is percent-encoded inside a redirect parameter.
-	regexp.MustCompile(`(?i)https?://[^/?#@\s]+@`),
+	// Common vendor token formats that can otherwise look like ordinary provider labels.
+	regexp.MustCompile(`(?:^|[^A-Za-z0-9])gh[pousr]_[A-Za-z0-9]{20,}(?:$|[^A-Za-z0-9])`),
+	regexp.MustCompile(`(?:^|[^A-Za-z0-9])github_pat_[A-Za-z0-9_]{20,}(?:$|[^A-Za-z0-9_])`),
+	regexp.MustCompile(`(?:^|[^A-Za-z0-9])(?:AKIA|ASIA)[0-9A-Z]{16}(?:$|[^A-Za-z0-9])`),
+	regexp.MustCompile(`(?:^|[^A-Za-z0-9])(?:xox[abprs]|xapp|xwfp)-[A-Za-z0-9-]{10,}(?:$|[^A-Za-z0-9-])`),
+	regexp.MustCompile(`(?:^|[^A-Za-z0-9])xoxe(?:\.[A-Za-z0-9.-]{8,}|-[A-Za-z0-9-]{8,})(?:$|[^A-Za-z0-9.-])`),
+	regexp.MustCompile(`(?:^|[^A-Za-z0-9])AIza[0-9A-Za-z_-]{35}(?:$|[^A-Za-z0-9_-])`),
+	regexp.MustCompile(`(?:^|[^A-Za-z0-9])vc_(?:sk|sa)_[A-Za-z0-9_-]{32,}(?:$|[^A-Za-z0-9_-])`),
+	regexp.MustCompile(`-----BEGIN [A-Z ]*PRIVATE KEY-----`),
+	// Nested URLs with userinfo can otherwise bypass the top-level User check
+	// when they are percent-encoded inside a redirect parameter. Cover every URI
+	// scheme because legacy provider names may contain database connection URLs.
+	regexp.MustCompile(`(?i)[a-z][a-z0-9+.-]*://[^/?#@\s]+@`),
+	// Legacy metadata sometimes contains userinfo without a URI scheme.
+	regexp.MustCompile(`(?i)(?:^|[^a-z0-9])[^:/@\s]+:[^/@\s]+@[a-z0-9.-]+(?::[0-9]+)?(?:$|[/\s?#])`),
 	// JWTs. Requiring three non-trivial base64url segments avoids treating dotted
 	// hostnames, versions, and ordinary filenames as credentials.
-	regexp.MustCompile(`(?:^|[^A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}(?:$|[^A-Za-z0-9_-])`),
+	regexp.MustCompile(`(?:^|[^A-Za-z0-9])eyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}(?:$|[^A-Za-z0-9_-])`),
 	// Credentials nested in redirect URLs or path parameters. A separator and an
 	// assignment operator are both required, so paths such as /docs/tokenization
 	// and /secret-management remain valid.
@@ -92,6 +108,9 @@ func parseProviderBaseURL(raw string) (*url.URL, error) {
 // small, bounded number of additional decoding layers. This catches credentials
 // hidden in encoded redirect URLs without permitting adversarial unbounded work.
 func providerURLComponentHasCredential(component string) bool {
+	if len(component) > maxProviderCredentialScanBytes {
+		return true
+	}
 	candidates := []string{component}
 	seen := map[string]struct{}{component: {}}
 	for round := 0; round < 2; round++ {
@@ -109,6 +128,9 @@ func providerURLComponentHasCredential(component string) bool {
 		}
 	}
 	for _, candidate := range candidates {
+		if providerBasicAuthorizationHasCredential(candidate) || providerBearerAuthorizationHasCredential(candidate) {
+			return true
+		}
 		for _, pattern := range providerURLCredentialPatterns {
 			if pattern.MatchString(candidate) {
 				return true
@@ -116,6 +138,131 @@ func providerURLComponentHasCredential(component string) bool {
 		}
 	}
 	return false
+}
+
+// providerTextContainsConfiguredCredentialPrefix detects runtime-configured API-key
+// prefixes followed by a generated-key-sized base64url suffix in decoded legacy
+// metadata. A prefix can be an ordinary word such as "corp_" or "api_", so the
+// suffix requirement is intentional and avoids suppressing legitimate labels.
+func providerTextContainsConfiguredCredentialPrefix(value, prefix string) bool {
+	if prefix == "" {
+		return false
+	}
+	if len(value) > maxProviderCredentialScanBytes || len(prefix) > maxProviderCredentialScanBytes {
+		return true
+	}
+	candidates := []string{value}
+	seen := map[string]struct{}{value: {}}
+	for round := 0; round < 2; round++ {
+		for _, candidate := range append([]string(nil), candidates...) {
+			for _, decode := range []func(string) (string, error){url.QueryUnescape, url.PathUnescape} {
+				decoded, err := decode(candidate)
+				if err != nil || decoded == candidate {
+					continue
+				}
+				if _, exists := seen[decoded]; !exists {
+					seen[decoded] = struct{}{}
+					candidates = append(candidates, decoded)
+				}
+			}
+		}
+	}
+	for _, candidate := range candidates {
+		searchFrom := 0
+		for searchFrom <= len(candidate) {
+			relative := strings.Index(candidate[searchFrom:], prefix)
+			if relative < 0 {
+				break
+			}
+			start := searchFrom + relative
+			if providerGeneratedCredentialSuffix(candidate[start+len(prefix):]) {
+				return true
+			}
+			searchFrom = start + 1
+		}
+	}
+	return false
+}
+
+func providerGeneratedCredentialSuffix(value string) bool {
+	length := 0
+	for length < len(value) {
+		character := value[length]
+		if !((character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z') ||
+			(character >= '0' && character <= '9') || character == '_' || character == '-') {
+			break
+		}
+		length++
+	}
+	return length >= 32
+}
+
+func providerBearerAuthorizationHasCredential(candidate string) bool {
+	for _, match := range providerBearerCredentialPattern.FindAllStringSubmatch(candidate, -1) {
+		token := match[1]
+		if len(token) > 8<<10 {
+			return true
+		}
+		if providerBearerDescription(token) {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+func providerBearerDescription(value string) bool {
+	words := strings.FieldsFunc(strings.ToLower(value), func(character rune) bool {
+		return character == '-'
+	})
+	if len(words) == 0 {
+		return false
+	}
+	allowed := map[string]bool{
+		"auth": true, "authentication": true, "authorization": true, "compatible": true,
+		"endpoint": true, "provider": true, "service": true,
+		"support": true, "supported": true,
+	}
+	for _, word := range words {
+		if !allowed[word] {
+			return false
+		}
+	}
+	return true
+}
+
+func providerBasicAuthorizationHasCredential(candidate string) bool {
+	for _, match := range providerBasicCredentialPattern.FindAllStringSubmatch(candidate, -1) {
+		encoded := match[1]
+		// An authorization value this large is not useful provider metadata. Treat it
+		// as sensitive without allocating a proportionally large decode buffer.
+		if len(encoded) > 8<<10 {
+			return true
+		}
+		for _, encoding := range []*base64.Encoding{base64.StdEncoding, base64.RawStdEncoding} {
+			decoded, err := encoding.DecodeString(encoded)
+			if err == nil && basicAuthorizationPayload(decoded) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func basicAuthorizationPayload(decoded []byte) bool {
+	// RFC 7617 credentials are user-pass, but deployments commonly use an API
+	// token as the user with an empty password ("token:") and older clients can
+	// still send an ISO-8859-1-compatible byte sequence. Any decodable Basic
+	// payload containing the required colon is credential material.
+	if bytes.IndexByte(decoded, ':') < 0 {
+		return false
+	}
+	for _, character := range decoded {
+		if character <= 31 || character == 127 {
+			return false
+		}
+	}
+	return true
 }
 
 func providerURLQueryKeyHasSensitiveName(key string) bool {

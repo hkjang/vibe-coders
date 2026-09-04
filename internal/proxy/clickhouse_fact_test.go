@@ -200,6 +200,230 @@ func TestClickHouseFactFanout(t *testing.T) {
 	}
 }
 
+func TestClickHouseCustomCredentialPrefixProjectedForLiveAndRetry(t *testing.T) {
+	const customPrefix = "corp_"
+	customCredential := customPrefix + strings.Repeat("A", 43)
+
+	var mu sync.Mutex
+	byTable := map[string][]string{}
+	ch := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fields := strings.Fields(r.URL.Query().Get("query"))
+		if len(fields) >= 3 && fields[0] == "INSERT" && fields[1] == "INTO" {
+			table := fields[2]
+			if index := strings.IndexByte(table, '.'); index >= 0 {
+				table = table[index+1:]
+			}
+			payload, _ := io.ReadAll(r.Body)
+			mu.Lock()
+			byTable[table] = append(byTable[table], string(payload))
+			mu.Unlock()
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ch.Close()
+
+	db := openTestStore(t)
+	defer db.Close()
+	logger := store.NewAsyncLogger(db, 8, filepath.Join(t.TempDir(), "custom-prefix.ndjson"))
+	logger.Start()
+	defer logger.Stop(context.Background())
+
+	cfg := testConfig("http://upstream.invalid", "secret")
+	cfg.Auth.APIKeyPrefix = customPrefix
+	cfg.ClickHouse.URL = ch.URL
+	cfg.ClickHouse.Database = "ai_gateway"
+	cfg.ClickHouse.RequestFactTable = "ai_request_fact"
+	cfg.ClickHouse.ToolFactTable = "ai_tool_fact"
+	cfg.ClickHouse.RoutingFactTable = "ai_routing_fact"
+	cfg.ClickHouse.EvalFactTable = "ai_eval_fact"
+	cfg.ClickHouse.PolicyFactTable = "ai_policy_fact"
+	cfg.ClickHouse.MultiModelFactTable = "ai_multimodel_fact"
+	cfg.ClickHouse.FeedbackFactTable = "ai_feedback_fact"
+	cfg.ClickHouse.SkillFactTable = "ai_skill_fact"
+	cfg.ClickHouse.BatchSize = 1
+	cfg.ClickHouse.FlushInterval = 200 * time.Millisecond
+	server, err := NewServer(cfg, db, logger, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	factTables := []string{
+		"ai_request_fact",
+		"ai_tool_fact",
+		"ai_routing_fact",
+		"ai_eval_fact",
+		"ai_policy_fact",
+		"ai_multimodel_fact",
+		"ai_feedback_fact",
+		"ai_skill_fact",
+	}
+	now := time.Now().UTC()
+	server.enqueue(store.LogRecord{
+		Request: store.RequestLog{
+			ID: "custom-live-request", TraceID: "trace-" + customCredential,
+			Model: "model-" + customCredential, Provider: customCredential,
+			FallbackFrom: customCredential, FallbackReason: "fallback " + customCredential,
+			RouteDetail: "route " + customCredential, StatusCode: 200, CreatedAt: now,
+		},
+		Tools: []store.ToolInvocation{{
+			RequestID: "custom-live-request", TraceID: "trace-" + customCredential,
+			ServerLabel: customCredential, ToolName: "tool-" + customCredential,
+			Source: "source " + customCredential, IsMCP: true, CreatedAt: now,
+		}},
+		Routing: &store.RoutingDecisionLog{
+			RequestID: "custom-live-request", TraceID: "trace-" + customCredential,
+			RequestedModel: "requested-" + customCredential, SelectedModel: "selected-" + customCredential,
+			SelectedProvider: customCredential, FallbackPath: []string{customCredential},
+			DecisionReason: "selected " + customCredential, CreatedAt: now,
+		},
+		Evaluations: []store.LLMEvaluation{{
+			RequestID: "custom-live-request", TraceID: "trace-" + customCredential,
+			Name: "eval-" + customCredential, Category: "security", Score: 1,
+			Label: "label-" + customCredential, Passed: true, CreatedAt: now,
+		}},
+	})
+	server.emitPolicyFacts([]store.PolicyDecisionEvent{{
+		RequestID: "custom-live-policy", Decision: "block", Provider: customCredential,
+		RuleID: "rule-" + customCredential, Reason: "blocked " + customCredential,
+		CreatedAt: now,
+	}})
+	server.emitMultiModelFacts(store.MultiModelTestRun{
+		ID: "custom-live-run", ModelCount: 1, Success: 1, CreatedAt: now.Format(time.RFC3339Nano),
+	}, []store.MultiModelTestResult{{
+		RunID: "custom-live-run", Model: "model-" + customCredential,
+		Provider: customCredential, Status: "ok",
+	}}, nil)
+	server.emitFeedbackFact(store.LLMFeedback{
+		RequestID: "custom-live-feedback", TraceID: "trace-" + customCredential,
+		Rating: 1, Label: "label-" + customCredential, Source: "source-" + customCredential,
+		CreatedBy: "actor-" + customCredential, CreatedAt: now,
+	})
+	server.emitSkillFact(store.SkillRun{
+		SkillName: "skill-" + customCredential, SkillVersion: "version-" + customCredential,
+		Actor: "actor-" + customCredential, Model: "model-" + customCredential,
+		Status: "ok", ToolsUsed: "tool-" + customCredential, CreatedAt: now.Format(time.RFC3339Nano),
+	})
+
+	waitFor(t, 3*time.Second, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		for _, table := range factTables {
+			if len(byTable[table]) == 0 {
+				return false
+			}
+		}
+		return true
+	})
+
+	liveBodies := make(map[string]string, len(factTables))
+	liveCounts := make(map[string]int, len(factTables))
+	mu.Lock()
+	for _, table := range factTables {
+		liveBodies[table] = strings.Join(byTable[table], "\n")
+		liveCounts[table] = len(byTable[table])
+	}
+	mu.Unlock()
+	for _, table := range factTables {
+		payload := liveBodies[table]
+		if strings.Contains(payload, customCredential) {
+			t.Fatalf("%s live insert leaked configured credential: %s", table, payload)
+		}
+		if !strings.Contains(payload, providerNameOmitted) && !strings.Contains(payload, providerMetadataOmitted) {
+			t.Fatalf("%s live insert did not retain a projection marker: %s", table, payload)
+		}
+	}
+
+	retryRows := map[string]map[string]any{
+		"ai_request_fact": {
+			"request_id": "custom-retry-request", "provider": customCredential,
+			"model": "model-" + customCredential,
+		},
+		"ai_tool_fact": {
+			"request_id": "custom-retry-tool", "server_label": customCredential,
+			"tool_name": "tool-" + customCredential,
+		},
+		"ai_routing_fact": {
+			"request_id": "custom-retry-routing", "selected_provider": customCredential,
+			"selected_model": "model-" + customCredential,
+		},
+		"ai_eval_fact": {
+			"request_id": "custom-retry-eval", "name": "eval-" + customCredential,
+		},
+		"ai_policy_fact": {
+			"request_id": "custom-retry-policy", "provider": customCredential,
+			"reason": "blocked " + customCredential,
+		},
+		"ai_multimodel_fact": {
+			"run_id": "custom-retry-multimodel", "row_type": "result",
+			"provider": customCredential, "model": "model-" + customCredential,
+		},
+		"ai_feedback_fact": {
+			"request_id": "custom-retry-feedback", "label": "label-" + customCredential,
+		},
+		"ai_skill_fact": {
+			"skill_name": "skill-" + customCredential, "status": "ok",
+		},
+	}
+	for _, table := range factTables {
+		marker := "retry-" + table
+		retryRows[table]["retry_marker"] = marker
+		payload, err := json.Marshal(retryRows[table])
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := db.RecordClickHouseFactRetry(t.Context(), table, string(payload)+"\n", 1, "historical failure"); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	gateway := httptest.NewServer(server.Routes())
+	defer gateway.Close()
+	response := postJSON(t, gateway.URL+"/admin/dw/clickhouse/fact-retry", "", map[string]any{})
+	body, _ := io.ReadAll(response.Body)
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("retry status=%d body=%s", response.StatusCode, body)
+	}
+	var result struct {
+		Recovered   int `json:"recovered_batches"`
+		Rows        int `json:"rows"`
+		Failing     int `json:"still_failing"`
+		Quarantined int `json:"quarantined_batches"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Recovered != len(factTables) || result.Rows != len(factTables) || result.Failing != 0 || result.Quarantined != 0 {
+		t.Fatalf("unexpected custom-prefix retry result: %+v body=%s", result, body)
+	}
+
+	mu.Lock()
+	retryBodies := make(map[string][]string, len(factTables))
+	for _, table := range factTables {
+		retryBodies[table] = append([]string(nil), byTable[table][liveCounts[table]:]...)
+	}
+	mu.Unlock()
+	for _, table := range factTables {
+		marker := "retry-" + table
+		payload := ""
+		for _, candidate := range retryBodies[table] {
+			if strings.Contains(candidate, marker) {
+				payload = candidate
+				break
+			}
+		}
+		if payload == "" {
+			t.Fatalf("%s retry payload was not sent: %+v", table, retryBodies[table])
+		}
+		if strings.Contains(payload, customCredential) {
+			t.Fatalf("%s retry leaked configured credential: %s", table, payload)
+		}
+		if !strings.Contains(payload, providerNameOmitted) && !strings.Contains(payload, providerMetadataOmitted) {
+			t.Fatalf("%s retry did not retain a projection marker: %s", table, payload)
+		}
+	}
+}
+
 func TestClickHouseProviderRollupBoundsLegacyName(t *testing.T) {
 	const unsafeProvider = "sk-ant-legacy-rollup-secret"
 	var body string

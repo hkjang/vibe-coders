@@ -2,11 +2,13 @@ package proxy
 
 import (
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	"vibe-coders/internal/audit"
 	"vibe-coders/internal/store"
 )
 
@@ -43,6 +45,11 @@ func (s *Server) handleSessionList(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
 	}
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
 	days := 7
 	if d := strings.TrimSpace(r.URL.Query().Get("days")); d != "" {
 		if n, err := strconv.Atoi(d); err == nil && n > 0 && n <= 365 {
@@ -50,16 +57,33 @@ func (s *Server) handleSessionList(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	since := time.Now().UTC().AddDate(0, 0, -days)
-	sessions, err := s.db.RecentSessions(r.Context(), since, 200)
-	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "session_list_failed")
+	teams, teamScoped, scopeErr := requestTeamScopeForCallerChecked(s, r)
+	if scopeErr != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, "session scope could not be resolved", "server_error", "session_scope_failed")
 		return
 	}
+	sessions, err := s.db.RecentSessionsScoped(r.Context(), since, 200, teams, teamScoped)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, "sessions could not be loaded", "server_error", "session_list_failed")
+		return
+	}
+	s.maskSessionSummaries(r, sessions)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"days":     days,
 		"sessions": sessions,
 		"note":     "최근 코딩 세션(클라이언트 session_id)을 활동순으로 보여줍니다. 각 세션의 비행기록으로 드릴인하세요.",
 	})
+}
+
+func (s *Server) maskSessionSummaries(r *http.Request, sessions []store.SessionSummary) {
+	if s.canViewRawPrompts(r) {
+		return
+	}
+	projectionArgs := s.externalCredentialProjectionArgs()
+	for index := range sessions {
+		sessions[index].SessionID = audit.Redact(boundedExternalProviderText(sessions[index].SessionID, projectionArgs...))
+		sessions[index].LastMessage = audit.Redact(boundedExternalProviderText(sessions[index].LastMessage, projectionArgs...))
+	}
 }
 
 // lastUserPromptPreview returns a compact, whitespace-collapsed snippet of the last user-role
@@ -80,6 +104,11 @@ func (s *Server) handleSessionFlightRecorder(w http.ResponseWriter, r *http.Requ
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
 	}
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
 	rest := strings.TrimPrefix(r.URL.Path, "/admin/sessions/")
 	sessionID := rest
 	if i := strings.Index(rest, "/"); i >= 0 {
@@ -94,21 +123,43 @@ func (s *Server) handleSessionFlightRecorder(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	sessionID = strings.TrimSpace(sessionID)
-	if sessionID == "" {
+	if sessionID == "" || !adminTraceIdentifierValid(sessionID) {
 		writeOpenAIError(w, http.StatusBadRequest, "session_id required", "invalid_request_error", "bad_request")
 		return
 	}
 
-	reqs, err := s.db.RecentRequests(r.Context(), store.RequestFilter{SessionID: sessionID, Limit: 500})
+	teams, teamScoped, scopeErr := requestTeamScopeForCallerChecked(s, r)
+	if scopeErr != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, "session scope could not be resolved", "server_error", "session_scope_failed")
+		return
+	}
+	reqs, err := s.db.RecentRequests(r.Context(), store.RequestFilter{
+		SessionID: sessionID, Limit: 500, Teams: teams, TeamScoped: teamScoped,
+	})
 	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "flight_recorder_failed")
+		writeOpenAIError(w, http.StatusInternalServerError, "session flight recorder could not be loaded", "server_error", "flight_recorder_failed")
+		return
+	}
+	if len(reqs) == 0 {
+		writeOpenAIError(w, http.StatusNotFound, "session not found", "invalid_request_error", "not_found")
 		return
 	}
 	// RecentRequests is newest-first; replay chronologically.
 	sort.SliceStable(reqs, func(i, j int) bool { return reqs[i].CreatedAt < reqs[j].CreatedAt })
 
-	// Governance/risk markers tied to this session's requests (best-effort overlay).
-	markers, _ := s.db.SessionRiskMarkersFor(r.Context(), sessionID)
+	// Governance/risk markers are resolved from the already-authorized request set,
+	// not the client-controlled session id, which may be shared across teams.
+	requestIDs := make([]string, 0, len(reqs))
+	for _, request := range reqs {
+		requestIDs = append(requestIDs, request.ID)
+	}
+	markers, _ := s.db.SessionRiskMarkersForRequests(r.Context(), requestIDs)
+	responseSessionID := sessionID
+	if !s.canViewRawPrompts(r) {
+		projectionArgs := s.externalCredentialProjectionArgs(recentRequestProviderIdentities(reqs)...)
+		responseSessionID = audit.Redact(boundedExternalProviderText(sessionID, projectionArgs...))
+	}
+	s.maskRecentRequests(r, reqs)
 
 	events := make([]map[string]any, 0, len(reqs))
 	models := map[string]bool{}
@@ -159,8 +210,8 @@ func (s *Server) handleSessionFlightRecorder(w http.ResponseWriter, r *http.Requ
 			"tool_count":   rq.ToolCount,
 			"created_at":   rq.CreatedAt,
 			"last_message": lastUserPromptPreview(rq.Prompts),
-			"detail":       "/admin/requests/" + rq.ID,
-			"trace":        "/admin/requests/" + rq.ID + "/trace",
+			"detail":       "/admin/requests/" + url.PathEscape(rq.ID),
+			"trace":        "/admin/requests/" + url.PathEscape(rq.ID) + "/trace",
 		}
 		// Governance/risk overlay for this request.
 		if n := markers.Secrets[rq.ID]; n > 0 {
@@ -183,7 +234,7 @@ func (s *Server) handleSessionFlightRecorder(w http.ResponseWriter, r *http.Requ
 	summary := sessionRCASummary(len(events), errorCount, secretReqs, policyBlockReqs, highRiskCodeReqs, len(models), totalCost)
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"session_id": sessionID,
+		"session_id": responseSessionID,
 		"events":     events,
 		"summary":    summary,
 		"rollup": map[string]any{

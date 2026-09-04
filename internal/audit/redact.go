@@ -38,7 +38,8 @@ var redactPatterns = []struct {
 	{regexp.MustCompile(`sk-[A-Za-z0-9_\-]{16,}`), `[REDACTED_OPENAI_KEY]`, nil},
 	{regexp.MustCompile(`AKIA[0-9A-Z]{16}`), `[REDACTED_AWS_ACCESS_KEY]`, nil},
 	{regexp.MustCompile(`gh[pousr]_[A-Za-z0-9]{20,}`), `[REDACTED_GITHUB_TOKEN]`, nil},
-	{regexp.MustCompile(`xox[abprs]-[A-Za-z0-9\-]{10,}`), `[REDACTED_SLACK_TOKEN]`, nil},
+	{regexp.MustCompile(`xoxe(?:\.[A-Za-z0-9.\-]{8,}|-[A-Za-z0-9\-]{8,})`), `[REDACTED_SLACK_TOKEN]`, nil},
+	{regexp.MustCompile(`(?:xox[abprs]|xapp|xwfp)-[A-Za-z0-9\-]{10,}`), `[REDACTED_SLACK_TOKEN]`, nil},
 	{regexp.MustCompile(`AIza[0-9A-Za-z_\-]{35}`), `[REDACTED_GOOGLE_KEY]`, nil},
 	// JWT (header.payload.signature)
 	{regexp.MustCompile(`eyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+`), `[REDACTED_JWT]`, nil},

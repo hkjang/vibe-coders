@@ -13,6 +13,8 @@ anthropic = sk-ant-api03-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 password = hunter2
 aws AKIAABCDEFGHIJKLMNOP
 github ghp_abcdefghijklmnopqrstuvwxyz1234567890
+slack-app xapp-1-A1234567890-B1234567890-C1234567890
+slack-rotating xoxe.xoxb-1-1234567890-secretvalue
 주민번호 900101-1234567
 사업자등록번호 123-45-67890
 휴대폰 010-1234-5678
@@ -30,6 +32,7 @@ MIIBOgIBAAJBA...
 	forbidden := []string{
 		"abc.def-123", "sk-abcdefghijklmnopqrstuvwxyz", "sk-ant-api03-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
 		"hunter2", "AKIAABCDEFGHIJKLMNOP", "ghp_abcdefghijklmnopqrstuvwxyz1234567890",
+		"xapp-1-A1234567890-B1234567890-C1234567890", "xoxe.xoxb-1-1234567890-secretvalue",
 		"900101-1234567", "123-45-67890", "010-1234-5678", "02-345-6789",
 		"alice@example.com", "4111-1111-1111-1111", "eyJabc.eyJdef.signaturepart",
 		"203.0.113.10", "MIIBOgIBAAJBA",
@@ -43,6 +46,7 @@ MIIBOgIBAAJBA...
 	required := []string{
 		"[REDACTED_OPENAI_KEY]", "[REDACTED_ANTHROPIC_KEY]",
 		"[REDACTED_AWS_ACCESS_KEY]", "[REDACTED_GITHUB_TOKEN]",
+		"[REDACTED_SLACK_TOKEN]",
 		"[REDACTED_RRN]", "[REDACTED_BIZNO]", "[REDACTED_PHONE_KR]",
 		"[REDACTED_EMAIL]", "[REDACTED_CARD]", "[REDACTED_JWT]",
 		"[REDACTED_IPV4]", "[REDACTED_PRIVATE_KEY]",

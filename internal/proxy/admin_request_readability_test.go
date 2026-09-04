@@ -168,3 +168,120 @@ func TestRequestDetailReadabilityCapturesParametersHeadersAndRouting(t *testing.
 		t.Fatalf("export leaked secret: %s", exportBody)
 	}
 }
+
+func TestMaskedRawJSONRedactsKeysNumbersAndPreservesCollisions(t *testing.T) {
+	raw := `{
+		"first-sensitive@example.com":{"customer_number":4111111111111111,"exponent_number":4111111111111111e0,"evidence":"first"},
+		"second-sensitive@example.com":[{"nested":"second"}],
+		"postgres://reader:password@db.internal/gateway":{"evidence":"third"}
+	}`
+	masked, err := json.Marshal(maskedRawJSON(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	visible := string(masked)
+	for _, forbidden := range []string{
+		"first-sensitive@example.com",
+		"second-sensitive@example.com",
+		"4111111111111111",
+		"reader:password",
+	} {
+		if strings.Contains(visible, forbidden) {
+			t.Fatalf("masked JSON exposed %q: %s", forbidden, visible)
+		}
+	}
+	if strings.Count(visible, "[REDACTED_EMAIL]") != 2 {
+		t.Fatalf("colliding redacted keys were not preserved: %s", visible)
+	}
+	if strings.Count(visible, "[REDACTED_CARD]") != 2 {
+		t.Fatalf("plain and exponent-form card numbers were not both redacted: %s", visible)
+	}
+	for _, evidence := range []string{"first", "second", "[REDACTED_CARD]", providerMetadataOmitted} {
+		if !strings.Contains(visible, evidence) {
+			t.Fatalf("masked JSON lost %q: %s", evidence, visible)
+		}
+	}
+}
+
+func TestDerivedMetadataProjectionPreservesCollidingKeysDeterministically(t *testing.T) {
+	newValues := func() map[string]any {
+		return map[string]any{
+			"first-sensitive@example.com":  map[string]any{"evidence": "first"},
+			"second-sensitive@example.com": map[string]any{"evidence": "second"},
+		}
+	}
+	assertProjection := func(name string, project func(map[string]any)) {
+		t.Helper()
+		t.Run(name, func(t *testing.T) {
+			values := newValues()
+			project(values)
+			if len(values) != 2 {
+				t.Fatalf("colliding projection lost a field: %#v", values)
+			}
+			first, err := json.Marshal(values)
+			if err != nil {
+				t.Fatal(err)
+			}
+			visible := string(first)
+			for _, evidence := range []string{"first", "second", "[REDACTED_EMAIL]", "[REDACTED_EMAIL] #2"} {
+				if !strings.Contains(visible, evidence) {
+					t.Fatalf("projection lost %q: %s", evidence, visible)
+				}
+			}
+			project(values)
+			second, err := json.Marshal(values)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(first) != string(second) {
+				t.Fatalf("projection was not idempotent:\nfirst:  %s\nsecond: %s", first, second)
+			}
+		})
+	}
+	assertProjection("provider metadata", func(values map[string]any) {
+		projectProviderMetadataMapForExternal(values)
+	})
+	assertProjection("request readability", redactRequestReadabilityMap)
+}
+
+func TestLowerPrivilegeProjectionCoversCodeVerifyMethodAndGovernanceIdentities(t *testing.T) {
+	const configuredCredential = "corp_abcdefghijklmnopqrstuvwxyzABCDEF"
+	projectionArgs := []string{externalCredentialPrefixMarker + "corp_"}
+
+	codeVerify := &store.CodeVerifyDetail{
+		Risk: configuredCredential, Languages: configuredCredential, CreatedAt: configuredCredential,
+		Findings: json.RawMessage(`[{"lang":"corp_abcdefghijklmnopqrstuvwxyzABCDEF","card":4111111111111111e0}]`),
+	}
+	projectCodeVerifyForExternal(codeVerify, projectionArgs...)
+	encodedCodeVerify, err := json.Marshal(codeVerify)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encodedCodeVerify), configuredCredential) || strings.Contains(string(encodedCodeVerify), "4111111111111111") {
+		t.Fatalf("code verification projection leaked a credential or numeric PII: %s", encodedCodeVerify)
+	}
+
+	request := store.RecentRequest{Method: configuredCredential}
+	maskRecentRequestForExternal(&request, projectionArgs...)
+	if request.Method == configuredCredential {
+		t.Fatalf("request method bypassed lower-privilege projection: %+v", request)
+	}
+
+	governance := store.GovernanceEvents{
+		SecretEvents: []store.SecretEvent{{APIKeyID: configuredCredential, UserID: "owner@example.com", TeamID: configuredCredential}},
+		Approvals:    []store.Approval{{APIKeyID: configuredCredential, UserID: "owner@example.com", TeamID: configuredCredential}},
+		PolicyDecisions: []store.PolicyDecisionEvent{{
+			APIKeyID: configuredCredential, UserID: "owner@example.com", TeamID: configuredCredential,
+		}},
+	}
+	projectRequestGovernanceProviderForExternal(&governance, projectionArgs...)
+	encodedGovernance, err := json.Marshal(governance)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{configuredCredential, "owner@example.com"} {
+		if strings.Contains(string(encodedGovernance), forbidden) {
+			t.Fatalf("governance projection leaked %q: %s", forbidden, encodedGovernance)
+		}
+	}
+}

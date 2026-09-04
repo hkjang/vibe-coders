@@ -64,12 +64,26 @@ func (s *SQLStore) fetchMiningRows(ctx context.Context, since time.Time, limit i
 	Question, SQL, CreatedAt string
 	Valid                    bool
 }, error) {
+	return s.fetchMiningRowsScoped(ctx, since, limit, nil, false)
+}
+
+func (s *SQLStore) fetchMiningRowsScoped(ctx context.Context, since time.Time, limit int, teams []string, teamScoped bool) ([]struct {
+	Question, SQL, CreatedAt string
+	Valid                    bool
+}, error) {
 	if limit <= 0 || limit > 20000 {
 		limit = 5000
 	}
+	where := []string{"created_at >= ?", "COALESCE(mode,'') <> 'shadow'", "COALESCE(question,'') <> ''"}
+	args := []any{since.UTC().Format(time.RFC3339Nano)}
+	if condition, scopeArgs := text2SQLRequestScopeCondition("text2sql_query_logs.request_id", teams, teamScoped); condition != "" {
+		where = append(where, condition)
+		args = append(args, scopeArgs...)
+	}
+	args = append(args, limit)
 	rows, err := s.db.QueryContext(ctx, s.bind(`SELECT COALESCE(question,''), COALESCE(generated_sql,''), valid, created_at
-		FROM text2sql_query_logs WHERE created_at >= ? AND COALESCE(mode,'') <> 'shadow' AND COALESCE(question,'') <> ''
-		ORDER BY created_at DESC LIMIT ?`), since.UTC().Format(time.RFC3339Nano), limit)
+		FROM text2sql_query_logs WHERE `+strings.Join(where, " AND ")+`
+		ORDER BY created_at DESC LIMIT ?`), args...)
 	if err != nil {
 		return nil, err
 	}
@@ -99,7 +113,13 @@ func normalizeQuestion(q string) string {
 // Text2SQLReportCandidates groups recurring questions (normalized) seen since `since`
 // and returns those asked at least minCount times — candidates for a saved report.
 func (s *SQLStore) Text2SQLReportCandidates(ctx context.Context, since time.Time, minCount, limit int) ([]Text2SQLReportCandidate, error) {
-	rows, err := s.fetchMiningRows(ctx, since, 20000)
+	return s.Text2SQLReportCandidatesScoped(ctx, since, minCount, limit, nil, false)
+}
+
+// Text2SQLReportCandidatesScoped mines recurring questions inside the caller's
+// request-team boundary.
+func (s *SQLStore) Text2SQLReportCandidatesScoped(ctx context.Context, since time.Time, minCount, limit int, teams []string, teamScoped bool) ([]Text2SQLReportCandidate, error) {
+	rows, err := s.fetchMiningRowsScoped(ctx, since, 20000, teams, teamScoped)
 	if err != nil {
 		return nil, err
 	}
@@ -156,7 +176,13 @@ func (s *SQLStore) Text2SQLReportCandidates(ctx context.Context, since time.Time
 // already-defined glossary terms) seen since `since`, as candidate business terms.
 // Counting is per-question-distinct so one chatty question can't inflate a token.
 func (s *SQLStore) Text2SQLGlossaryCandidates(ctx context.Context, since time.Time, minCount, limit int) ([]Text2SQLGlossaryCandidate, error) {
-	rows, err := s.fetchMiningRows(ctx, since, 20000)
+	return s.Text2SQLGlossaryCandidatesScoped(ctx, since, minCount, limit, nil, false)
+}
+
+// Text2SQLGlossaryCandidatesScoped mines glossary terms inside the caller's
+// request-team boundary.
+func (s *SQLStore) Text2SQLGlossaryCandidatesScoped(ctx context.Context, since time.Time, minCount, limit int, teams []string, teamScoped bool) ([]Text2SQLGlossaryCandidate, error) {
+	rows, err := s.fetchMiningRowsScoped(ctx, since, 20000, teams, teamScoped)
 	if err != nil {
 		return nil, err
 	}

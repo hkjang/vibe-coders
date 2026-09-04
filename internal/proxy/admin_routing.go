@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	"vibe-coders/internal/audit"
 	"vibe-coders/internal/store"
 )
 
@@ -53,8 +55,13 @@ func (s *Server) handleRoutingPreview(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
 		return
 	}
-	body, err := io.ReadAll(r.Body)
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 4<<20))
 	if err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			writeOpenAIError(w, http.StatusRequestEntityTooLarge, "request body is too large", "invalid_request_error", "body_too_large")
+			return
+		}
 		writeOpenAIError(w, http.StatusBadRequest, "failed to read request body", "invalid_request_error", "invalid_body")
 		return
 	}
@@ -68,10 +75,27 @@ func (s *Server) handleRoutingPreview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	plan := s.planIntelligentRouting(r.Context(), body, "/v1/chat/completions", false, false, authCtx)
+	requestedModel := plan.RequestedModel
+	selectedModel := plan.SelectedModel
+	selectedProvider := plan.SelectedProvider
+	fallbackPlan := plan.FallbackPlan
+	routeReason := plan.RouteReason
+	decisionReason := plan.DecisionReason
+	if !s.canViewRawPrompts(r) {
+		rawProvider := selectedProvider
+		projectionArgs := s.externalCredentialProjectionArgs(rawProvider)
+		requestedModel = audit.Redact(boundedExternalProviderText(requestedModel, projectionArgs...))
+		selectedModel = audit.Redact(boundedExternalProviderText(selectedModel, projectionArgs...))
+		selectedProvider = boundedExternalProviderLabelOrEmpty(rawProvider, projectionArgs...)
+		policyKeyID = audit.Redact(boundedExternalProviderText(policyKeyID, projectionArgs...))
+		fallbackPlan = boundedExternalFallbackPath(fallbackPlan, projectionArgs...)
+		routeReason = audit.Redact(boundedExternalProviderText(routeReason, projectionArgs...))
+		decisionReason = audit.Redact(boundedExternalProviderText(decisionReason, projectionArgs...))
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"requested_model":   plan.RequestedModel,
-		"selected_model":    plan.SelectedModel,
-		"selected_provider": plan.SelectedProvider,
+		"requested_model":   requestedModel,
+		"selected_model":    selectedModel,
+		"selected_provider": selectedProvider,
 		"policy_api_key_id": policyKeyID,
 		"complexity":        plan.Complexity,
 		"risk":              plan.Risk,
@@ -79,9 +103,9 @@ func (s *Server) handleRoutingPreview(w http.ResponseWriter, r *http.Request) {
 		// A preview never dials upstream, so it can only report the plan. The actual
 		// hop list (fallback_path) is populated on real requests and read back from
 		// /admin/routing/decisions or the request explain view.
-		"fallback_plan":   plan.FallbackPlan,
-		"route_reason":    plan.RouteReason,
-		"decision_reason": plan.DecisionReason,
+		"fallback_plan":   fallbackPlan,
+		"route_reason":    routeReason,
+		"decision_reason": decisionReason,
 		"would_rewrite":   plan.RequestedModel != "" && plan.SelectedModel != "" && plan.RequestedModel != plan.SelectedModel,
 	})
 }
@@ -93,16 +117,31 @@ func (s *Server) routingPreviewAuthContext(w http.ResponseWriter, r *http.Reques
 	}
 	key, found, err := s.db.GetAPIKey(r.Context(), apiKeyID)
 	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "api_key_lookup_failed")
+		slog.Error("routing preview API key lookup failed", "error", err)
+		writeOpenAIError(w, http.StatusInternalServerError, "api key could not be loaded", "server_error", "api_key_lookup_failed")
 		return nil, "", false
 	}
 	if !found {
 		writeOpenAIError(w, http.StatusNotFound, "api key not found", "invalid_request_error", "api_key_not_found")
 		return nil, "", false
 	}
-	if claims, ok := s.currentAccessClaims(r); ok && claims.Role == "team_admin" && key.Team != claims.TeamID {
-		writeOpenAIError(w, http.StatusForbidden, "team_admin can only preview own team api keys", "permission_error", "team_scope_denied")
+	teams, teamScoped, scopeErr := requestTeamScopeForCallerChecked(s, r)
+	if scopeErr != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, "team scope lookup failed", "server_error", "team_scope_failed")
 		return nil, "", false
+	}
+	if teamScoped {
+		allowed := false
+		for _, team := range teams {
+			if key.Team != "" && key.Team == team {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			writeOpenAIError(w, http.StatusForbidden, "team_admin can only preview own team api keys", "permission_error", "team_scope_denied")
+			return nil, "", false
+		}
 	}
 	authCtx := authContextFromAPIKey(key)
 	s.enrichAuthContextTeam(r.Context(), &authCtx)
@@ -124,10 +163,22 @@ func (s *Server) handleRoutingDecisions(w http.ResponseWriter, r *http.Request) 
 			limit = parsed
 		}
 	}
-	decisions, err := s.db.ListRoutingDecisions(r.Context(), limit)
+	teams, teamScoped, err := requestTeamScopeForCallerChecked(s, r)
 	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "routing_decisions_failed")
+		writeOpenAIError(w, http.StatusInternalServerError, "team scope lookup failed", "server_error", "team_scope_failed")
 		return
+	}
+	decisions, err := s.db.ListRoutingDecisionsScoped(r.Context(), limit, teams, teamScoped)
+	if err != nil {
+		slog.Error("routing decisions query failed", "error", err)
+		writeOpenAIError(w, http.StatusInternalServerError, "routing decisions could not be loaded", "server_error", "routing_decisions_failed")
+		return
+	}
+	if !s.canViewRawPrompts(r) {
+		projectionArgs := s.externalCredentialProjectionArgs()
+		for index := range decisions {
+			decisions[index] = projectRoutingDecisionProviderForExternal(decisions[index], projectionArgs...)
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"decisions": decisions})
 }
@@ -141,19 +192,28 @@ func (s *Server) handleRoutingDecisionByID(w http.ResponseWriter, r *http.Reques
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
 		return
 	}
-	id := strings.TrimPrefix(r.URL.Path, "/admin/routing/decisions/")
-	if id == "" || strings.Contains(id, "/") {
+	id, valid := adminTracePathID(r.URL.Path, "/admin/routing/decisions/", "")
+	if !valid {
 		writeOpenAIError(w, http.StatusBadRequest, "invalid decision id", "invalid_request_error", "invalid_decision_id")
 		return
 	}
-	decision, err := s.db.RoutingDecisionByID(r.Context(), id)
+	teams, teamScoped, err := requestTeamScopeForCallerChecked(s, r)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, "team scope lookup failed", "server_error", "team_scope_failed")
+		return
+	}
+	decision, err := s.db.RoutingDecisionByIDScoped(r.Context(), id, teams, teamScoped)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeOpenAIError(w, http.StatusNotFound, "routing decision not found", "invalid_request_error", "routing_decision_not_found")
 			return
 		}
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "routing_decision_failed")
+		slog.Error("routing decision query failed", "error", err)
+		writeOpenAIError(w, http.StatusInternalServerError, "routing decision could not be loaded", "server_error", "routing_decision_failed")
 		return
+	}
+	if !s.canViewRawPrompts(r) {
+		decision = projectRoutingDecisionProviderForExternal(decision, s.externalCredentialProjectionArgs()...)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"decision": decision})
 }
@@ -247,7 +307,7 @@ func (s *Server) handleRoutingBreakerReset(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	name := strings.TrimSpace(*payload.Provider)
-	if name != "" && (name == "[provider-name-omitted]" || !modelsProviderLabelSafe(name)) {
+	if name != "" && (name == "[provider-name-omitted]" || !s.modelsProviderLabelSafeForConfig(name)) {
 		writeOpenAIError(w, http.StatusBadRequest, "redacted provider names cannot be reset individually; reset all breakers", "invalid_request_error", "breaker_provider_ambiguous")
 		return
 	}
@@ -469,7 +529,7 @@ func (s *Server) handleRoutingBalancer(w http.ResponseWriter, r *http.Request) {
 				writeOpenAIError(w, http.StatusBadRequest, "provider name is reserved", "invalid_request_error", "balancer_provider_reserved")
 				return
 			}
-			if !modelsProviderLabelSafe(name) {
+			if !s.modelsProviderLabelSafeForConfig(name) {
 				writeOpenAIError(w, http.StatusBadRequest, "provider name contains unsafe metadata", "invalid_request_error", "balancer_provider_invalid")
 				return
 			}

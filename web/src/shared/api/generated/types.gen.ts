@@ -160,11 +160,14 @@ export type AppRequestSummary = {
     provider_display: string;
     provider_ref: string;
     reasoning_tokens: number;
+    request_filterable: boolean;
     request_id: string;
+    request_ref: string;
     session_id: string;
     status_code: number;
     stream: boolean;
     total_tokens: number;
+    trace_filterable: boolean;
     trace_id: string;
 };
 
@@ -187,6 +190,7 @@ export type AuthLogoutRequest = {
 
 export type AuthMeResponse = {
     auth_enabled: boolean;
+    credential_prefixes?: Array<string>;
     expires_at?: number | null;
     menu_version?: number;
     user?: AuthUser | null;
@@ -640,6 +644,7 @@ export type StatusResponse = {
 export type UiAuthentication = {
     allow_local_login: boolean;
     authenticated: boolean;
+    credential_prefixes?: Array<string>;
     enabled: boolean;
     keycloak_enabled: boolean;
     mode: 'open' | 'session' | 'legacy_token';
@@ -5128,6 +5133,10 @@ export type GetAdminRequestsData = {
          * Set to app to request the safe React console projection.
          */
         'X-Vibe-UI'?: 'app';
+        /**
+         * Set to 2 for request_ref and filterability fields. Absent or 1 returns the v0.82-compatible app shape.
+         */
+        'X-Vibe-App-Requests-Version'?: '1' | '2';
     };
     path?: never;
     query?: {
@@ -5139,6 +5148,9 @@ export type GetAdminRequestsData = {
         model?: string;
         provider_ref?: string;
         request_id?: string;
+        /**
+         * Exact trace ID, limited to 512 UTF-8 bytes.
+         */
         trace_id?: string;
         session_id?: string;
         api_key_id?: string;
@@ -5160,7 +5172,7 @@ export type GetAdminRequestsError = GetAdminRequestsErrors[keyof GetAdminRequest
 
 export type GetAdminRequestsResponses = {
     /**
-     * OK. X-Vibe-UI: app uses AppRequestsResponse; legacy callers receive the existing response shape.
+     * OK. Version 2 app callers receive AppRequestsResponse; version 1 app and legacy callers retain their prior shape.
      */
     200: unknown;
 };

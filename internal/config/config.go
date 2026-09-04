@@ -10,6 +10,13 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
+)
+
+const (
+	maxGeneratedKeyPrefixBytes = 512
+	maxHistoricalKeyPrefixes   = 60
 )
 
 type Config struct {
@@ -279,8 +286,15 @@ type AuthConfig struct {
 	RefreshTokenTTL       time.Duration
 	APIKeyPrefix          string
 	ServiceKeyPrefix      string
-	BootstrapEmail        string
-	BootstrapPassword     string
+	// HistoricalKeyPrefixes keeps previously issued generated-key prefixes in
+	// redaction and browser URL detection after an operator rotates a prefix.
+	// Existing key rows store only hashes, so old prefixes cannot be inferred.
+	HistoricalKeyPrefixes []string
+	// TrustedProxyCIDRs is the explicit network boundary allowed to extend the
+	// X-Forwarded-For chain. Empty means all forwarded client-IP headers are ignored.
+	TrustedProxyCIDRs []string
+	BootstrapEmail    string
+	BootstrapPassword string
 	// SelfServiceKeys lets an authenticated user manage their OWN API keys via /me/keys
 	// (list/create/rotate/revoke), capped to their own role's scopes. Default off.
 	SelfServiceKeys bool
@@ -485,6 +499,8 @@ func Load() (Config, error) {
 			RefreshTokenTTL:       durationEnv("AUTH_REFRESH_TOKEN_TTL", 168*time.Hour),
 			APIKeyPrefix:          getEnv("AUTH_API_KEY_PREFIX", "vc_sk_"),
 			ServiceKeyPrefix:      getEnv("AUTH_SERVICE_KEY_PREFIX", "vc_sa_"),
+			HistoricalKeyPrefixes: csvEnv("AUTH_HISTORICAL_KEY_PREFIXES"),
+			TrustedProxyCIDRs:     csvEnv("TRUSTED_PROXY_CIDRS"),
 			BootstrapEmail:        strings.TrimSpace(os.Getenv("AUTH_ADMIN_BOOTSTRAP_EMAIL")),
 			BootstrapPassword:     os.Getenv("AUTH_ADMIN_BOOTSTRAP_PASSWORD"),
 			SelfServiceKeys:       boolEnv("SELF_SERVICE_KEYS_ENABLED", false),
@@ -619,6 +635,27 @@ func Load() (Config, error) {
 	if strings.TrimSpace(proxyAPIKeysRaw) != "" && len(cfg.Auth.ProxyAPIKeys) == 0 {
 		return Config{}, fmt.Errorf("PROXY_API_KEYS must contain at least one non-empty key")
 	}
+	for _, item := range []struct {
+		name  string
+		value string
+	}{
+		{name: "AUTH_API_KEY_PREFIX", value: cfg.Auth.APIKeyPrefix},
+		{name: "AUTH_SERVICE_KEY_PREFIX", value: cfg.Auth.ServiceKeyPrefix},
+	} {
+		if !validGeneratedKeyPrefix(item.value) {
+			return Config{}, fmt.Errorf("%s must be 1 to %d bytes of valid UTF-8 without whitespace or control characters", item.name, maxGeneratedKeyPrefixBytes)
+		}
+	}
+	if len(cfg.Auth.HistoricalKeyPrefixes) > maxHistoricalKeyPrefixes {
+		return Config{}, fmt.Errorf("AUTH_HISTORICAL_KEY_PREFIXES must contain at most %d entries", maxHistoricalKeyPrefixes)
+	}
+	// Do not return a configured prefix in errors: old prefixes are still
+	// credential metadata and must not be copied into startup logs.
+	for _, prefix := range cfg.Auth.HistoricalKeyPrefixes {
+		if !validGeneratedKeyPrefix(prefix) {
+			return Config{}, fmt.Errorf("AUTH_HISTORICAL_KEY_PREFIXES entries must be 1 to %d bytes of valid UTF-8 without whitespace or control characters", maxGeneratedKeyPrefixBytes)
+		}
+	}
 	if err := json.Unmarshal([]byte(getEnv("MODEL_PRICING_KRW_PER_1M", "{}")), &cfg.Pricing); err != nil {
 		return Config{}, fmt.Errorf("parse MODEL_PRICING_KRW_PER_1M: %w", err)
 	}
@@ -638,6 +675,15 @@ func Load() (Config, error) {
 	}
 
 	return cfg, nil
+}
+
+func validGeneratedKeyPrefix(value string) bool {
+	return value != "" &&
+		len(value) <= maxGeneratedKeyPrefixBytes &&
+		utf8.ValidString(value) &&
+		strings.IndexFunc(value, func(r rune) bool {
+			return unicode.IsControl(r) || unicode.IsSpace(r)
+		}) < 0
 }
 
 func databaseConfig() DatabaseConfig {

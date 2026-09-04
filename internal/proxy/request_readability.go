@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 
 	"vibe-coders/internal/audit"
@@ -553,12 +554,15 @@ func maskJSONForDisplay(v any) any {
 	switch x := v.(type) {
 	case map[string]any:
 		out := map[string]any{}
-		for k, val := range x {
+		keys := newUniqueJSONDisplayKeys(len(x))
+		for _, k := range sortedMapKeys(x) {
+			val := x[k]
+			displayKey := keys.claim(maskJSONKeyForDisplay(k))
 			if sensitiveJSONKey(k) {
-				out[k] = maskToken(fmt.Sprint(val))
+				out[displayKey] = maskToken(fmt.Sprint(val))
 				continue
 			}
-			out[k] = maskJSONForDisplay(val)
+			out[displayKey] = maskJSONForDisplay(val)
 		}
 		return out
 	case []any:
@@ -569,9 +573,79 @@ func maskJSONForDisplay(v any) any {
 		return out
 	case string:
 		return audit.Redact(stringLimit(x, 20000))
+	case json.Number:
+		return maskJSONNumberForDisplay(x.String(), x)
+	case float64:
+		return maskJSONNumberForDisplay(strconv.FormatFloat(x, 'f', -1, 64), x)
+	case float32:
+		return maskJSONNumberForDisplay(strconv.FormatFloat(float64(x), 'f', -1, 32), x)
+	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
+		return maskJSONNumberForDisplay(fmt.Sprint(x), x)
 	default:
 		return x
 	}
+}
+
+type uniqueJSONDisplayKeys struct {
+	used map[string]struct{}
+	next map[string]int
+}
+
+func newUniqueJSONDisplayKeys(capacity int) *uniqueJSONDisplayKeys {
+	return &uniqueJSONDisplayKeys{
+		used: make(map[string]struct{}, capacity),
+		next: make(map[string]int, capacity),
+	}
+}
+
+// claim preserves every projected field with deterministic suffixes. The next
+// suffix is retained per base key, avoiding a full rescan for every collision.
+func (keys *uniqueJSONDisplayKeys) claim(key string) string {
+	if _, exists := keys.used[key]; !exists {
+		keys.used[key] = struct{}{}
+		if keys.next[key] < 2 {
+			keys.next[key] = 2
+		}
+		return key
+	}
+	suffix := keys.next[key]
+	if suffix < 2 {
+		suffix = 2
+	}
+	for {
+		candidate := fmt.Sprintf("%s #%d", key, suffix)
+		suffix++
+		if _, exists := keys.used[candidate]; exists {
+			continue
+		}
+		keys.next[key] = suffix
+		keys.used[candidate] = struct{}{}
+		return candidate
+	}
+}
+
+func maskJSONNumberForDisplay(text string, original any) any {
+	if redacted := audit.Redact(text); redacted != text {
+		return redacted
+	}
+	mantissa := text
+	if exponent := strings.IndexAny(mantissa, "eE"); exponent >= 0 {
+		mantissa = mantissa[:exponent]
+	}
+	mantissa = strings.TrimLeft(strings.ReplaceAll(mantissa, ".", ""), "+-")
+	if mantissa != "" {
+		if redacted := audit.Redact(mantissa); redacted != mantissa {
+			return redacted
+		}
+	}
+	return original
+}
+
+func maskJSONKeyForDisplay(key string) string {
+	if providerURLComponentHasCredential(key) {
+		return providerMetadataOmitted
+	}
+	return audit.Redact(key)
 }
 
 func sensitiveJSONKey(key string) bool {
@@ -581,10 +655,20 @@ func sensitiveJSONKey(key string) bool {
 }
 
 func maskScalar(v any) any {
-	if s, ok := v.(string); ok {
-		return audit.Redact(s)
+	switch value := v.(type) {
+	case string:
+		return audit.Redact(value)
+	case json.Number:
+		return maskJSONNumberForDisplay(value.String(), value)
+	case float64:
+		return maskJSONNumberForDisplay(strconv.FormatFloat(value, 'f', -1, 64), value)
+	case float32:
+		return maskJSONNumberForDisplay(strconv.FormatFloat(float64(value), 'f', -1, 32), value)
+	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
+		return maskJSONNumberForDisplay(fmt.Sprint(value), value)
+	default:
+		return v
 	}
-	return v
 }
 
 func requestTemperatureLabel(value *float64) string {

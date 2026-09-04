@@ -14,6 +14,7 @@ import (
 	"time"
 	"unicode"
 
+	"vibe-coders/internal/audit"
 	"vibe-coders/internal/store"
 )
 
@@ -21,6 +22,13 @@ const (
 	appRequestValueRedacted   = "[값 비공개]"
 	appRequestValueOmitted    = "[값 생략]"
 	appRequestProviderOmitted = "공급자 이름 비공개"
+	appRequestRefPrefix       = "req_"
+	appRequestRefFirstLength  = 22
+	appRequestRefSecondLength = 21
+	appRequestRefLength       = len(appRequestRefPrefix) + appRequestRefFirstLength + 1 + appRequestRefSecondLength
+	appRequestContractHeader  = "X-Vibe-App-Requests-Version"
+	appRequestContractV1      = "1"
+	appRequestContractV2      = "2"
 
 	appRequestIDMaxBytes           = 512
 	appRequestIPMaxBytes           = 128
@@ -45,7 +53,7 @@ type appRequestCursor struct {
 	FilterHash string `json:"filter"`
 }
 
-type appRequestItem struct {
+type appRequestItemV1 struct {
 	RequestID        string  `json:"request_id"`
 	TraceID          string  `json:"trace_id"`
 	SessionID        string  `json:"session_id"`
@@ -71,12 +79,69 @@ type appRequestItem struct {
 	CreatedAt        string  `json:"created_at"`
 }
 
+type appRequestItem struct {
+	appRequestItemV1
+	RequestRef        string `json:"request_ref"`
+	RequestFilterable bool   `json:"request_filterable"`
+	TraceFilterable   bool   `json:"trace_filterable"`
+}
+
+type appRequestReferenceFunc func(string) string
+
+// appRequestRefSnapshot captures one immutable secret epoch for the response.
+// The opaque reference is stable across pages and refreshes while GATEWAY_SECRET
+// is unchanged, but it cannot be reversed to the client-controlled request ID.
+func (s *Server) appRequestRefSnapshot() appRequestReferenceFunc {
+	cipher := s.secrets.Load()
+	return func(requestID string) string {
+		digest := cipher.OpaqueReference("app-request", requestID)
+		return appRequestRefPrefix + digest[:appRequestRefFirstLength] + "." + digest[appRequestRefFirstLength:]
+	}
+}
+
 type appRequestsResponse struct {
 	Requests       []appRequestItem `json:"requests"`
 	Limit          int              `json:"limit"`
 	NextCursor     string           `json:"next_cursor,omitempty"`
 	PreviousCursor string           `json:"previous_cursor,omitempty"`
 	GeneratedAt    string           `json:"generated_at"`
+}
+
+type appRequestsResponseV1 struct {
+	Requests       []appRequestItemV1 `json:"requests"`
+	Limit          int                `json:"limit"`
+	NextCursor     string             `json:"next_cursor,omitempty"`
+	PreviousCursor string             `json:"previous_cursor,omitempty"`
+	GeneratedAt    string             `json:"generated_at"`
+}
+
+func appRequestContractVersion(r *http.Request) (string, bool) {
+	values := r.Header.Values(appRequestContractHeader)
+	if len(values) == 0 {
+		return appRequestContractV1, true
+	}
+	if len(values) != 1 {
+		return "", false
+	}
+	value := strings.TrimSpace(values[0])
+	if value != appRequestContractV1 && value != appRequestContractV2 {
+		return "", false
+	}
+	return value, true
+}
+
+func appRequestsLegacyResponse(response appRequestsResponse) appRequestsResponseV1 {
+	legacy := appRequestsResponseV1{
+		Requests:       make([]appRequestItemV1, 0, len(response.Requests)),
+		Limit:          response.Limit,
+		NextCursor:     response.NextCursor,
+		PreviousCursor: response.PreviousCursor,
+		GeneratedAt:    response.GeneratedAt,
+	}
+	for _, request := range response.Requests {
+		legacy.Requests = append(legacy.Requests, request.appRequestItemV1)
+	}
+	return legacy
 }
 
 func singleAppRequestParam(values map[string][]string, key string, max int) (string, error) {
@@ -219,15 +284,11 @@ func normalizeAppRequestCursor(cursor *appRequestCursor) error {
 }
 
 func (s *Server) appRequestTextHasCredential(value string) bool {
-	if providerURLComponentHasCredential(value) {
+	if providerURLComponentHasCredential(value) || audit.Contains(value) {
 		return true
 	}
-	lower := strings.ToLower(value)
-	if strings.Contains(lower, "vc_sk_") || strings.Contains(lower, "vc_sa_") {
-		return true
-	}
-	for _, prefix := range []string{s.cfg.Auth.APIKeyPrefix, s.cfg.Auth.ServiceKeyPrefix} {
-		if len(prefix) >= 4 && strings.Contains(value, prefix) {
+	for _, prefix := range uiCredentialPrefixes(s.cfg.Auth) {
+		if providerTextContainsConfiguredCredentialPrefix(value, prefix) {
 			return true
 		}
 	}
@@ -260,6 +321,10 @@ func (s *Server) projectAppRequestText(value string, maxBytes int) string {
 		return appRequestValueRedacted
 	}
 	return value
+}
+
+func appRequestTextFilterable(raw, projected string) bool {
+	return raw != "" && raw == projected && strings.TrimSpace(raw) == raw
 }
 
 func clampAppRequestInt(value int) int {
@@ -308,6 +373,11 @@ func (s *Server) handleAppRequests(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
 	}
+	contractVersion, validContract := appRequestContractVersion(r)
+	if !validContract {
+		writeOpenAIError(w, http.StatusBadRequest, "요청 탐색기 계약 버전이 올바르지 않습니다.", "invalid_request_error", "invalid_requests_contract")
+		return
+	}
 	values := r.URL.Query()
 	allowed := map[string]int{"limit": 3, "from": 64, "to": 64, "tz": 64, "status": 16,
 		"model": 256, "provider_ref": providerRefLength, "request_id": 512, "trace_id": 512,
@@ -350,7 +420,24 @@ func (s *Server) handleAppRequests(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusBadRequest, "조회 기간이 올바르지 않습니다.", "invalid_request_error", "invalid_requests_range")
 		return
 	}
-	teams, teamScoped := requestTeamScopeForCaller(s, r)
+	if params["ip"] != "" {
+		// The database groups client IPs by their stored text. Current ingress writes a
+		// canonical representation, but pre-upgrade rows can contain another valid IPv6
+		// spelling. Preserve the validated filter exactly so an IP copied from a projected
+		// legacy row round-trips through the exact SQL predicate. Canonicalizing only the
+		// filter would make that row impossible to retrieve.
+		validatedIP, validIP := validatedExternalIPAddress(params["ip"])
+		if !validIP {
+			writeOpenAIError(w, http.StatusBadRequest, "ip가 올바르지 않습니다.", "invalid_request_error", "invalid_requests_ip")
+			return
+		}
+		params["ip"] = validatedIP
+	}
+	teams, teamScoped, err := requestTeamScopeForCallerChecked(s, r)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, "요청 목록을 불러오지 못했습니다.", "server_error", "requests_failed")
+		return
+	}
 	filter := store.AppRequestFilter{Limit: limit, IP: params["ip"], Model: params["model"],
 		RequestID: params["request_id"], TraceID: params["trace_id"], SessionID: params["session_id"],
 		APIKeyID: params["api_key_id"], Language: params["language"], Teams: teams,
@@ -361,6 +448,7 @@ func (s *Server) handleAppRequests(w http.ResponseWriter, r *http.Request) {
 	}
 	providerRef := params["provider_ref"]
 	refs := s.providerRefsSnapshot()
+	requestRef := s.appRequestRefSnapshot()
 	if providerRef != "" {
 		if len(providerRef) != providerRefLength || !strings.HasPrefix(providerRef, providerRefPrefix) {
 			writeOpenAIError(w, http.StatusBadRequest, "provider_ref가 올바르지 않습니다.", "invalid_request_error", "invalid_provider_ref")
@@ -413,30 +501,37 @@ func (s *Server) handleAppRequests(w http.ResponseWriter, r *http.Request) {
 		} else if display == providerNameOmitted || s.appRequestTextHasCredential(row.Provider) {
 			display = appRequestProviderOmitted
 		}
+		projectedRequestID := s.projectAppRequestText(row.RequestID, appRequestIDMaxBytes)
+		projectedTraceID := s.projectAppRequestText(row.TraceID, appRequestIDMaxBytes)
 		response.Requests = append(response.Requests, appRequestItem{
-			RequestID:        s.projectAppRequestText(row.RequestID, appRequestIDMaxBytes),
-			TraceID:          s.projectAppRequestText(row.TraceID, appRequestIDMaxBytes),
-			SessionID:        s.projectAppRequestText(row.SessionID, appRequestIDMaxBytes),
-			APIKeyID:         s.projectAppRequestText(row.APIKeyID, appRequestIDMaxBytes),
-			IP:               s.projectAppRequestText(row.IP, appRequestIPMaxBytes),
-			Method:           s.projectAppRequestText(row.Method, appRequestMethodMaxBytes),
-			Model:            s.projectAppRequestText(row.Model, appRequestModelMaxBytes),
-			ProviderRef:      providerRefValue,
-			ProviderDisplay:  display,
-			Endpoint:         s.projectAppRequestText(row.Endpoint, appRequestEndpointMaxBytes),
-			Stream:           row.Stream,
-			StatusCode:       clampAppRequestStatus(row.StatusCode),
-			LatencyMS:        clampAppRequestInt64(row.LatencyMS),
-			FirstChunkMS:     clampAppRequestInt64(row.FirstChunkMS),
-			PromptTokens:     clampAppRequestInt(row.PromptTokens),
-			CompletionTokens: clampAppRequestInt(row.CompletionTokens),
-			TotalTokens:      clampAppRequestInt(row.TotalTokens),
-			CachedTokens:     clampAppRequestInt(row.CachedTokens),
-			ReasoningTokens:  clampAppRequestInt(row.ReasoningTokens),
-			EstimatedCost:    clampAppRequestCost(row.EstimatedCost),
-			Currency:         s.projectAppRequestText(row.Currency, appRequestCurrencyMaxBytes),
-			FinishReason:     s.projectAppRequestText(row.FinishReason, appRequestFinishReasonMaxBytes),
-			CreatedAt:        row.CreatedAt,
+			appRequestItemV1: appRequestItemV1{
+				RequestID:        projectedRequestID,
+				TraceID:          projectedTraceID,
+				SessionID:        s.projectAppRequestText(row.SessionID, appRequestIDMaxBytes),
+				APIKeyID:         s.projectAppRequestText(row.APIKeyID, appRequestIDMaxBytes),
+				IP:               boundedExternalIPAddress(row.IP),
+				Method:           s.projectAppRequestText(row.Method, appRequestMethodMaxBytes),
+				Model:            s.projectAppRequestText(row.Model, appRequestModelMaxBytes),
+				ProviderRef:      providerRefValue,
+				ProviderDisplay:  display,
+				Endpoint:         s.projectAppRequestText(row.Endpoint, appRequestEndpointMaxBytes),
+				Stream:           row.Stream,
+				StatusCode:       clampAppRequestStatus(row.StatusCode),
+				LatencyMS:        clampAppRequestInt64(row.LatencyMS),
+				FirstChunkMS:     clampAppRequestInt64(row.FirstChunkMS),
+				PromptTokens:     clampAppRequestInt(row.PromptTokens),
+				CompletionTokens: clampAppRequestInt(row.CompletionTokens),
+				TotalTokens:      clampAppRequestInt(row.TotalTokens),
+				CachedTokens:     clampAppRequestInt(row.CachedTokens),
+				ReasoningTokens:  clampAppRequestInt(row.ReasoningTokens),
+				EstimatedCost:    clampAppRequestCost(row.EstimatedCost),
+				Currency:         s.projectAppRequestText(row.Currency, appRequestCurrencyMaxBytes),
+				FinishReason:     s.projectAppRequestText(row.FinishReason, appRequestFinishReasonMaxBytes),
+				CreatedAt:        row.CreatedAt,
+			},
+			RequestRef:        requestRef(row.RequestID),
+			RequestFilterable: appRequestTextFilterable(row.RequestID, projectedRequestID),
+			TraceFilterable:   appRequestTextFilterable(row.TraceID, projectedTraceID),
 		})
 	}
 	if len(rows) > 0 {
@@ -456,6 +551,11 @@ func (s *Server) handleAppRequests(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+	}
+	w.Header().Set(appRequestContractHeader, contractVersion)
+	if contractVersion == appRequestContractV1 {
+		writeJSON(w, http.StatusOK, appRequestsLegacyResponse(response))
+		return
 	}
 	writeJSON(w, http.StatusOK, response)
 }

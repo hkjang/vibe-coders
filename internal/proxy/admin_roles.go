@@ -1,11 +1,16 @@
 package proxy
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
+	"strconv"
 	"strings"
 
+	"vibe-coders/internal/audit"
 	"vibe-coders/internal/store"
 )
 
@@ -18,7 +23,11 @@ var rawPromptViewerRoles = map[string]bool{"super_admin": true, "admin": true, "
 // Legacy admin-token mode (auth disabled) is treated as full admin.
 func (s *Server) canViewRawPrompts(r *http.Request) bool {
 	if !s.cfg.Auth.Enabled {
-		return true
+		if s.cfg.Auth.AdminToken == "" && s.cfg.Auth.AdminReadonlyToken == "" {
+			return true
+		}
+		token := bearerToken(r.Header.Get("Authorization"))
+		return s.cfg.Auth.AdminToken != "" && secureTokenEqual(token, s.cfg.Auth.AdminToken)
 	}
 	claims, ok := s.currentAccessClaims(r)
 	if !ok {
@@ -43,7 +52,320 @@ func (s *Server) maskRequestDetail(r *http.Request, d *store.RequestDetail) {
 	if d == nil || s.canViewRawPrompts(r) {
 		return
 	}
+	rawProvider := d.Request.Provider
+	rawFallback := d.Request.FallbackFrom
+	projectionArgs := s.externalCredentialProjectionArgs(rawProvider, rawFallback)
+	maskRecentRequestForExternal(&d.Request, projectionArgs...)
+	projectRequestReadabilityProviderForExternal(d.Readability, projectionArgs...)
+	projectRequestGovernanceProviderForExternal(&d.Governance, projectionArgs...)
 	redactPromptDetails(d.Prompts)
+	for index := range d.Prompts {
+		d.Prompts[index].Role = audit.Redact(boundedExternalProviderText(d.Prompts[index].Role, projectionArgs...))
+		d.Prompts[index].ContentText = audit.Redact(boundedExternalProviderText(d.Prompts[index].ContentText, projectionArgs...))
+		d.Prompts[index].RedactedText = audit.Redact(boundedExternalProviderText(d.Prompts[index].RedactedText, projectionArgs...))
+		d.Prompts[index].LanguageHint = audit.Redact(boundedExternalProviderText(d.Prompts[index].LanguageHint, projectionArgs...))
+	}
+	if d.Response != nil {
+		d.Response.FinishReason = audit.Redact(boundedExternalProviderText(d.Response.FinishReason, projectionArgs...))
+		d.Response.ResponseTextOptional = audit.Redact(boundedExternalProviderText(d.Response.ResponseTextOptional, projectionArgs...))
+	}
+	for index := range d.Languages {
+		d.Languages[index].Language = audit.Redact(boundedExternalProviderText(d.Languages[index].Language, projectionArgs...))
+		d.Languages[index].Evidence = audit.Redact(boundedExternalProviderText(d.Languages[index].Evidence, projectionArgs...))
+	}
+	for index := range d.Spans {
+		d.Spans[index].TraceID = audit.Redact(boundedExternalProviderText(d.Spans[index].TraceID, projectionArgs...))
+		d.Spans[index].Name = audit.Redact(boundedExternalProviderText(d.Spans[index].Name, projectionArgs...))
+		d.Spans[index].Error = audit.Redact(boundedExternalProviderText(d.Spans[index].Error, projectionArgs...))
+	}
+	for index := range d.Text2SQLSpans {
+		d.Text2SQLSpans[index].TraceID = audit.Redact(boundedExternalProviderText(d.Text2SQLSpans[index].TraceID, projectionArgs...))
+		d.Text2SQLSpans[index].Model = boundedExternalProviderText(d.Text2SQLSpans[index].Model, projectionArgs...)
+		d.Text2SQLSpans[index].RejectReason = audit.Redact(boundedExternalProviderText(d.Text2SQLSpans[index].RejectReason, projectionArgs...))
+		d.Text2SQLSpans[index].Detail = audit.Redact(boundedExternalProviderText(d.Text2SQLSpans[index].Detail, projectionArgs...))
+	}
+	for index := range d.Evaluations {
+		d.Evaluations[index].TraceID = audit.Redact(boundedExternalProviderText(d.Evaluations[index].TraceID, projectionArgs...))
+		projectAndRedactEvaluationForExternal(&d.Evaluations[index], projectionArgs...)
+	}
+	for index := range d.Feedback {
+		d.Feedback[index].TraceID = audit.Redact(boundedExternalProviderText(d.Feedback[index].TraceID, projectionArgs...))
+		d.Feedback[index].Label = audit.Redact(boundedExternalProviderText(d.Feedback[index].Label, projectionArgs...))
+		d.Feedback[index].Comment = audit.Redact(boundedExternalProviderText(d.Feedback[index].Comment, projectionArgs...))
+		d.Feedback[index].Source = audit.Redact(boundedExternalProviderText(d.Feedback[index].Source, projectionArgs...))
+		d.Feedback[index].CreatedBy = audit.Redact(boundedExternalProviderText(d.Feedback[index].CreatedBy, projectionArgs...))
+	}
+	for index := range d.Tools {
+		d.Tools[index].TraceID = audit.Redact(boundedExternalProviderText(d.Tools[index].TraceID, projectionArgs...))
+		d.Tools[index].APIKeyID = audit.Redact(boundedExternalProviderText(d.Tools[index].APIKeyID, projectionArgs...))
+		d.Tools[index].ServerLabel = audit.Redact(boundedExternalProviderText(d.Tools[index].ServerLabel, projectionArgs...))
+		d.Tools[index].ToolName = audit.Redact(boundedExternalProviderText(d.Tools[index].ToolName, projectionArgs...))
+		d.Tools[index].Source = audit.Redact(boundedExternalProviderText(d.Tools[index].Source, projectionArgs...))
+	}
+	projectCodeVerifyForExternal(d.CodeVerify, projectionArgs...)
+	redactRequestGovernance(&d.Governance)
+	if d.Readability != nil {
+		redactRequestReadabilityMap(d.Readability.Basic)
+		redactRequestReadabilityMap(d.Readability.Model)
+		redactRequestReadabilityMap(d.Readability.Parameters)
+		redactRequestReadabilityMap(d.Readability.Headers)
+		redactRequestReadabilityMap(d.Readability.Body)
+		redactRequestReadabilityMap(d.Readability.Routing)
+		redactRequestReadabilityMap(d.Readability.Policy)
+		for index := range d.Readability.Timeline {
+			d.Readability.Timeline[index].Stage = audit.Redact(d.Readability.Timeline[index].Stage)
+			d.Readability.Timeline[index].Status = audit.Redact(d.Readability.Timeline[index].Status)
+			d.Readability.Timeline[index].Reason = audit.Redact(d.Readability.Timeline[index].Reason)
+			redactRequestReadabilityMap(d.Readability.Timeline[index].Detail)
+		}
+		for index := range d.Readability.Badges {
+			d.Readability.Badges[index].Code = audit.Redact(d.Readability.Badges[index].Code)
+			d.Readability.Badges[index].Label = audit.Redact(d.Readability.Badges[index].Label)
+			d.Readability.Badges[index].Severity = audit.Redact(d.Readability.Badges[index].Severity)
+			d.Readability.Badges[index].Reason = audit.Redact(d.Readability.Badges[index].Reason)
+		}
+	}
+}
+
+func projectCodeVerifyForExternal(detail *store.CodeVerifyDetail, projectionArgs ...string) {
+	if detail == nil {
+		return
+	}
+	project := func(value string) string {
+		return audit.Redact(boundedExternalProviderText(value, projectionArgs...))
+	}
+	detail.Risk = project(detail.Risk)
+	detail.Languages = project(detail.Languages)
+	detail.CreatedAt = project(detail.CreatedAt)
+	if len(detail.Findings) == 0 {
+		return
+	}
+	decoder := json.NewDecoder(bytes.NewReader(detail.Findings))
+	decoder.UseNumber()
+	var decoded any
+	if err := decoder.Decode(&decoded); err != nil {
+		detail.Findings = json.RawMessage("[]")
+		return
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		detail.Findings = json.RawMessage("[]")
+		return
+	}
+	projected := projectProviderMetadataValueForExternal(decoded, projectionArgs...)
+	encoded, err := json.Marshal(maskJSONForDisplay(projected))
+	if err != nil {
+		detail.Findings = json.RawMessage("[]")
+		return
+	}
+	detail.Findings = encoded
+}
+
+func maskRecentRequestForExternal(request *store.RecentRequest, rawProviders ...string) {
+	if request == nil {
+		return
+	}
+	*request = projectRecentRequestProviderForExternal(*request, rawProviders...)
+	request.Method = audit.Redact(boundedExternalProviderText(request.Method, rawProviders...))
+	request.TraceID = audit.Redact(boundedExternalProviderText(request.TraceID, rawProviders...))
+	request.APIKeyID = audit.Redact(boundedExternalProviderText(request.APIKeyID, rawProviders...))
+	request.ClientIP = boundedExternalIPAddress(request.ClientIP)
+	request.ForwardedFor = boundedExternalForwardedFor(request.ForwardedFor)
+	request.SessionID = audit.Redact(boundedExternalProviderText(request.SessionID, rawProviders...))
+	request.Model = audit.Redact(boundedExternalProviderText(request.Model, rawProviders...))
+	request.RequestedModel = audit.Redact(boundedExternalProviderText(request.RequestedModel, rawProviders...))
+	request.ResolvedModel = audit.Redact(boundedExternalProviderText(request.ResolvedModel, rawProviders...))
+	request.UpstreamModel = audit.Redact(boundedExternalProviderText(request.UpstreamModel, rawProviders...))
+	request.RouteReason = audit.Redact(boundedExternalProviderText(request.RouteReason, rawProviders...))
+	request.RouteDetail = audit.Redact(boundedExternalProviderText(request.RouteDetail, rawProviders...))
+	request.Endpoint = audit.Redact(boundedExternalProviderText(request.Endpoint, rawProviders...))
+	request.ResponseFormatType = audit.Redact(boundedExternalProviderText(request.ResponseFormatType, rawProviders...))
+	request.TokenSource = audit.Redact(boundedExternalProviderText(request.TokenSource, rawProviders...))
+	request.Error = audit.Redact(boundedExternalProviderText(request.Error, rawProviders...))
+	request.FallbackReason = audit.Redact(boundedExternalProviderText(request.FallbackReason, rawProviders...))
+	request.UserAgent = audit.Redact(boundedExternalProviderText(request.UserAgent, rawProviders...))
+	request.FinishReason = audit.Redact(boundedExternalProviderText(request.FinishReason, rawProviders...))
+	request.PromptName = audit.Redact(boundedExternalProviderText(request.PromptName, rawProviders...))
+	request.PromptVersion = audit.Redact(boundedExternalProviderText(request.PromptVersion, rawProviders...))
+	request.Note = audit.Redact(boundedExternalProviderText(request.Note, rawProviders...))
+	for index := range request.Tags {
+		request.Tags[index] = audit.Redact(boundedExternalProviderText(request.Tags[index], rawProviders...))
+	}
+	for index := range request.Prompts {
+		request.Prompts[index].Role = audit.Redact(boundedExternalProviderText(request.Prompts[index].Role, rawProviders...))
+		request.Prompts[index].RedactedText = audit.Redact(boundedExternalProviderText(request.Prompts[index].RedactedText, rawProviders...))
+		request.Prompts[index].LanguageHint = audit.Redact(boundedExternalProviderText(request.Prompts[index].LanguageHint, rawProviders...))
+	}
+	for index := range request.Languages {
+		request.Languages[index].Language = audit.Redact(boundedExternalProviderText(request.Languages[index].Language, rawProviders...))
+		request.Languages[index].Evidence = audit.Redact(boundedExternalProviderText(request.Languages[index].Evidence, rawProviders...))
+	}
+}
+
+func projectAndRedactEvaluationForExternal(evaluation *store.LLMEvaluation, rawProviders ...string) {
+	if evaluation == nil {
+		return
+	}
+	evaluation.Name = audit.Redact(boundedExternalProviderText(evaluation.Name, rawProviders...))
+	evaluation.Category = audit.Redact(boundedExternalProviderText(evaluation.Category, rawProviders...))
+	evaluation.Evaluator = audit.Redact(boundedExternalProviderText(evaluation.Evaluator, rawProviders...))
+	evaluation.Label = audit.Redact(boundedExternalProviderText(evaluation.Label, rawProviders...))
+	evaluation.Reason = audit.Redact(boundedExternalProviderText(evaluation.Reason, rawProviders...))
+	evaluation.Metadata = audit.Redact(boundedExternalProviderText(evaluation.Metadata, rawProviders...))
+}
+
+func redactRequestGovernance(governance *store.GovernanceEvents) {
+	if governance == nil {
+		return
+	}
+	for index := range governance.SecretEvents {
+		governance.SecretEvents[index].Location = audit.Redact(governance.SecretEvents[index].Location)
+	}
+	for index := range governance.Approvals {
+		governance.Approvals[index].SubjectID = audit.Redact(governance.Approvals[index].SubjectID)
+		governance.Approvals[index].Reason = audit.Redact(governance.Approvals[index].Reason)
+		governance.Approvals[index].Payload = audit.Redact(governance.Approvals[index].Payload)
+		governance.Approvals[index].DecidedBy = audit.Redact(governance.Approvals[index].DecidedBy)
+	}
+	for index := range governance.AnomalyEvents {
+		governance.AnomalyEvents[index].ScopeValue = audit.Redact(governance.AnomalyEvents[index].ScopeValue)
+	}
+	for index := range governance.PolicyDecisions {
+		governance.PolicyDecisions[index].Reason = audit.Redact(governance.PolicyDecisions[index].Reason)
+	}
+}
+
+// maskRecentRequests applies the same lower-privilege audit masking as request detail
+// endpoints. The legacy trace list keeps its response shape, but must not become a
+// bypass for prompt, upstream-error, fallback-reason, or user-agent redaction.
+func (s *Server) maskRecentRequests(r *http.Request, requests []store.RecentRequest) {
+	if s.canViewRawPrompts(r) {
+		return
+	}
+	for index := range requests {
+		rawProvider := requests[index].Provider
+		rawFallback := requests[index].FallbackFrom
+		maskRecentRequestForExternal(&requests[index], s.externalCredentialProjectionArgs(rawProvider, rawFallback)...)
+	}
+}
+
+func (s *Server) maskUserDetail(r *http.Request, detail *store.UserDetail) {
+	if detail == nil || s.canViewRawPrompts(r) {
+		return
+	}
+	rawProviders := recentRequestProviderIdentities(detail.Recent)
+	rawProviders = s.externalCredentialProjectionArgs(rawProviders...)
+	s.maskRecentRequests(r, detail.Recent)
+	maskGroupedTextStats(detail.ByModel, rawProviders...)
+	maskGroupedIPStats(detail.ByIP)
+	maskLanguageGroupedStats(detail.ByLanguage, rawProviders...)
+	maskLLMSummaryStrings(&detail.LLM, rawProviders...)
+}
+
+func (s *Server) maskTeamDetail(r *http.Request, detail *store.TeamDetail) {
+	if detail == nil || s.canViewRawPrompts(r) {
+		return
+	}
+	rawProviders := recentRequestProviderIdentities(detail.Recent)
+	rawProviders = s.externalCredentialProjectionArgs(rawProviders...)
+	s.maskRecentRequests(r, detail.Recent)
+	maskGroupedTextStats(detail.ByModel, rawProviders...)
+	maskGroupedIPStats(detail.ByIP)
+	maskGroupedTextStats(detail.ByKey, rawProviders...)
+	maskLanguageGroupedStats(detail.ByLanguage, rawProviders...)
+	maskLLMSummaryStrings(&detail.LLM, rawProviders...)
+}
+
+func (s *Server) maskIPDetail(r *http.Request, detail *store.IPDetail) {
+	if detail == nil || s.canViewRawPrompts(r) {
+		return
+	}
+	rawProviders := recentRequestProviderIdentities(detail.Recent)
+	rawProviders = s.externalCredentialProjectionArgs(rawProviders...)
+	s.maskRecentRequests(r, detail.Recent)
+	detail.Stats.IP = boundedExternalIPAddress(detail.Stats.IP)
+	maskGroupedTextStats(detail.ByModel, rawProviders...)
+	maskGroupedTextStats(detail.ByKey, rawProviders...)
+	maskLanguageGroupedStats(detail.ByLanguage, rawProviders...)
+}
+
+func maskGroupedIPStats(stats []store.GroupedStat) {
+	for index := range stats {
+		stats[index].Key = boundedExternalIPAddress(stats[index].Key)
+	}
+}
+
+func recentRequestProviderIdentities(requests []store.RecentRequest) []string {
+	providers := make([]string, 0, len(requests)*2)
+	for _, request := range requests {
+		providers = append(providers, request.Provider, request.FallbackFrom)
+	}
+	return providers
+}
+
+func maskGroupedTextStats(stats []store.GroupedStat, rawProviders ...string) {
+	for index := range stats {
+		stats[index].Key = audit.Redact(boundedExternalProviderText(stats[index].Key, rawProviders...))
+	}
+}
+
+func maskLanguageGroupedStats(stats []store.LanguageGrouped, rawProviders ...string) {
+	for index := range stats {
+		stats[index].Language = audit.Redact(boundedExternalProviderText(stats[index].Language, rawProviders...))
+	}
+}
+
+func maskLLMSummaryStrings(detail *store.UserLLMDetail, rawProviders ...string) {
+	if detail == nil {
+		return
+	}
+	for index := range detail.Prompts {
+		detail.Prompts[index].PromptName = audit.Redact(boundedExternalProviderText(detail.Prompts[index].PromptName, rawProviders...))
+		detail.Prompts[index].PromptVersion = audit.Redact(boundedExternalProviderText(detail.Prompts[index].PromptVersion, rawProviders...))
+	}
+	for index := range detail.FeedbackLabels {
+		detail.FeedbackLabels[index].Label = audit.Redact(boundedExternalProviderText(detail.FeedbackLabels[index].Label, rawProviders...))
+	}
+}
+
+func redactRequestReadabilityMap(values map[string]any) {
+	redacted := make(map[string]any, len(values))
+	uniqueKeys := newUniqueJSONDisplayKeys(len(values))
+	for _, key := range sortedMapKeys(values) {
+		redacted[uniqueKeys.claim(audit.Redact(key))] = redactRequestReadabilityAny(values[key])
+	}
+	for key := range values {
+		delete(values, key)
+	}
+	for key, value := range redacted {
+		values[key] = value
+	}
+}
+
+func redactRequestReadabilityAny(value any) any {
+	switch typed := value.(type) {
+	case string:
+		return audit.Redact(typed)
+	case json.Number:
+		return maskJSONNumberForDisplay(typed.String(), typed)
+	case float64:
+		return maskJSONNumberForDisplay(strconv.FormatFloat(typed, 'f', -1, 64), typed)
+	case float32:
+		return maskJSONNumberForDisplay(strconv.FormatFloat(float64(typed), 'f', -1, 32), typed)
+	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
+		return maskJSONNumberForDisplay(fmt.Sprint(typed), typed)
+	case []string:
+		for index := range typed {
+			typed[index] = audit.Redact(typed[index])
+		}
+	case []any:
+		for index := range typed {
+			typed[index] = redactRequestReadabilityAny(typed[index])
+		}
+	case map[string]any:
+		redactRequestReadabilityMap(typed)
+	}
+	return value
 }
 
 // roleDescriptions documents each built-in role for the admin roles screen.

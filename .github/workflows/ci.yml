@@ -29,7 +29,8 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Reject tracked local-output and seed files
         run: |
-          forbidden="$(git -C .. ls-files | grep -E '(^|/)(\.gitframe|output)(/|$)|(^|/)seed\.sql$' || true)"
+          tracked="$(git -c safe.directory="$GITHUB_WORKSPACE" -C "$GITHUB_WORKSPACE" ls-files)"
+          forbidden="$(printf '%s\n' "$tracked" | grep -E '(^|/)(\.gitframe|output)(/|$)|(^|/)seed\.sql$' || true)"
           if [ -n "$forbidden" ]; then
             echo "::error::Repository contains forbidden tracked paths"
             printf '%s\n' "$forbidden"
@@ -47,8 +48,6 @@ jobs:
 
       - name: Install frozen dependencies
         run: pnpm install --frozen-lockfile
-      - name: High and critical dependency vulnerability gate
-        run: pnpm audit --audit-level high
       - name: Generated OpenAPI contract drift
         run: pnpm openapi:check
       - name: ESLint
@@ -190,11 +189,13 @@ jobs:
     name: canonical Go+npm SBOM · license drift
     runs-on: ubuntu-latest
     env:
-      SOURCE_SBOM_VERSION: v0.82.2
+      SOURCE_SBOM_VERSION: v0.83.0
       GO_VERSION: 1.26.8
       NODE_VERSION: 24.20.0
       PNPM_VERSION: 11.25.0
       SYFT_VERSION: v1.51.0
+      GRYPE_REQUIRED_VERSION: 0.117.0
+      GRYPE_LINUX_AMD64_SHA256: 38525dab1e06f162ebaa02f94d82d1f807076b011a44180cf2777edf1a7b9c26
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
@@ -216,6 +217,17 @@ jobs:
         with:
           syft-version: v1.51.0
 
+      - name: Install checksum-pinned Grype
+        run: |
+          archive="grype_${GRYPE_REQUIRED_VERSION}_linux_amd64.tar.gz"
+          install_dir="${RUNNER_TEMP}/grype-bin"
+          mkdir -p "$install_dir"
+          curl -fsSLo "${RUNNER_TEMP}/${archive}" \
+            "https://github.com/anchore/grype/releases/download/v${GRYPE_REQUIRED_VERSION}/${archive}"
+          printf '%s  %s\n' "$GRYPE_LINUX_AMD64_SHA256" "${RUNNER_TEMP}/${archive}" | sha256sum -c -
+          tar -xzf "${RUNNER_TEMP}/${archive}" -C "$install_dir" grype
+          echo "$install_dir" >> "$GITHUB_PATH"
+
       - name: Verify pinned toolchain
         env:
           SYFT_BIN: ${{ steps.syft.outputs.cmd }}
@@ -229,6 +241,19 @@ jobs:
           test "$manifest_package_manager" = "pnpm@${PNPM_VERSION}"
           actual_syft_version="$("$SYFT_BIN" version | sed -n 's/^Version:[[:space:]]*//p')"
           test "v${actual_syft_version}" = "$SYFT_VERSION"
+          actual_grype_version="$(grype version | sed -n 's/^Version:[[:space:]]*//p')"
+          test "${actual_grype_version#v}" = "$GRYPE_REQUIRED_VERSION"
+
+      - name: High and critical frontend dependency vulnerability gate
+        env:
+          SYFT_BIN: ${{ steps.syft.outputs.cmd }}
+        run: |
+          frontend_sbom="${RUNNER_TEMP}/pnpm-lock.spdx.json"
+          "$SYFT_BIN" scan file:web/pnpm-lock.yaml -o "spdx-json=${frontend_sbom}"
+          package_count="$(jq '[.packages[] | select(any(.externalRefs[]?; .referenceLocator | startswith("pkg:npm/")))] | length' "$frontend_sbom")"
+          test "$package_count" -gt 0
+          GRYPE_CHECK_FOR_APP_UPDATE=false GRYPE_DB_REQUIRE_UPDATE_CHECK=true \
+            grype "sbom:${frontend_sbom}" --fail-on high --output table
 
       - name: Reuse canonical creation timestamp
         run: |
@@ -301,6 +326,9 @@ jobs:
     name: docker build · App UI smoke
     needs: [frontend, test, appui-contract]
     runs-on: ubuntu-latest
+    env:
+      GRYPE_REQUIRED_VERSION: 0.117.0
+      GRYPE_LINUX_AMD64_SHA256: 38525dab1e06f162ebaa02f94d82d1f807076b011a44180cf2777edf1a7b9c26
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Build image
@@ -314,6 +342,18 @@ jobs:
             .
       - name: Container smoke and deep-link checks
         run: bash scripts/container-smoke.sh ai-coding-proxy-gateway:ci "$SMOKE_VERSION" "$GITHUB_SHA"
+      - name: Install checksum-pinned Grype
+        run: |
+          archive="grype_${GRYPE_REQUIRED_VERSION}_linux_amd64.tar.gz"
+          install_dir="${RUNNER_TEMP}/grype-bin"
+          mkdir -p "$install_dir"
+          curl -fsSLo "${RUNNER_TEMP}/${archive}" \
+            "https://github.com/anchore/grype/releases/download/v${GRYPE_REQUIRED_VERSION}/${archive}"
+          printf '%s  %s\n' "$GRYPE_LINUX_AMD64_SHA256" "${RUNNER_TEMP}/${archive}" | sha256sum -c -
+          tar -xzf "${RUNNER_TEMP}/${archive}" -C "$install_dir" grype
+          echo "$install_dir" >> "$GITHUB_PATH"
+      - name: Final image high and critical vulnerability gate
+        run: bash scripts/scan-container-image.sh ai-coding-proxy-gateway:ci
 
   openapi:
     name: OpenAPI spec valid · TypeScript contract drift

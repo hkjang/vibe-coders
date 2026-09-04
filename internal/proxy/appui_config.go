@@ -10,6 +10,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"vibe-coders/internal/config"
 	"vibe-coders/internal/store"
@@ -48,6 +49,29 @@ type appUIFeature struct {
 	AvailabilityReason string   `json:"availability_reason,omitempty"`
 }
 
+func uiCredentialPrefixes(cfg config.AuthConfig) []string {
+	const maximumPrefixes = 64
+	candidates := make([]string, 0, 4+len(cfg.HistoricalKeyPrefixes))
+	candidates = append(candidates, cfg.APIKeyPrefix, cfg.ServiceKeyPrefix, "vc_sk_", "vc_sa_")
+	candidates = append(candidates, cfg.HistoricalKeyPrefixes...)
+	prefixes := make([]string, 0, min(len(candidates), maximumPrefixes))
+	seen := make(map[string]struct{}, len(candidates))
+	for _, prefix := range candidates {
+		if prefix == "" || len(prefix) > 512 || !utf8.ValidString(prefix) {
+			continue
+		}
+		if _, exists := seen[prefix]; exists {
+			continue
+		}
+		seen[prefix] = struct{}{}
+		prefixes = append(prefixes, prefix)
+		if len(prefixes) == maximumPrefixes {
+			break
+		}
+	}
+	return prefixes
+}
+
 // appUIFeatures is deliberately conservative. New React screens enter as read-only
 // previews for a narrow role cohort; every other domain keeps its proven /admin path.
 var appUIFeatures = []appUIFeature{
@@ -56,8 +80,8 @@ var appUIFeatures = []appUIFeature{
 	{FeatureID: "gateway.providers", Title: "AI 공급자", AppPath: "/app/gateway/providers", LegacyPath: "/admin#/settings", Status: "preview_read_only", RiskLevel: "medium", RequiredPermission: "admin:read", ReadOnly: true, EnabledRoles: []string{"super_admin", "admin", "ai_admin"}, RolloutPercent: 100, FallbackEnabled: true, MinimumAPIVersion: "v0.82.0"},
 	{FeatureID: "gateway.models", Title: "모델", AppPath: "/app/gateway/models", LegacyPath: "/admin#/model-contracts", Status: "preview_read_only", RiskLevel: "medium", RequiredPermission: "admin:read", ReadOnly: true, EnabledRoles: []string{"super_admin", "admin", "ai_admin"}, RolloutPercent: 100, FallbackEnabled: true, MinimumAPIVersion: "v0.82.0"},
 	{FeatureID: "routing.rules", Title: "라우팅", AppPath: "/app/routing/rules", LegacyPath: "/admin#/routing", Status: "legacy", RiskLevel: "high", RequiredPermission: "routing:read", ReadOnly: true, RolloutPercent: 100, FallbackEnabled: true, MinimumAPIVersion: "v0.80.0"},
-	{FeatureID: "observability.requests", Title: "요청 탐색기", AppPath: "/app/observability/requests", LegacyPath: "/admin#/requests", Status: "preview_read_only", RiskLevel: "low", RequiredPermission: "admin:read", ReadOnly: true, EnabledRoles: []string{"super_admin", "admin", "ops_admin", "ai_admin", "security_admin", "billing_admin", "readonly_admin"}, RolloutPercent: 100, FallbackEnabled: true, MinimumAPIVersion: "v0.82.1"},
-	{FeatureID: "observability.traces", Title: "추적 탐색기", AppPath: "/app/observability/traces", LegacyPath: "/admin#/llm", Status: "legacy", RiskLevel: "low", RequiredPermission: "observability:read", ReadOnly: true, RolloutPercent: 100, FallbackEnabled: true, MinimumAPIVersion: "v0.80.0"},
+	{FeatureID: "observability.requests", Title: "요청 탐색기", AppPath: "/app/observability/requests", LegacyPath: "/admin#/requests", Status: "preview_read_only", RiskLevel: "low", RequiredPermission: "admin:read", ReadOnly: true, EnabledRoles: []string{"super_admin", "admin", "ops_admin", "ai_admin", "security_admin", "billing_admin", "readonly_admin"}, RolloutPercent: 100, FallbackEnabled: true, MinimumAPIVersion: "v0.83.0"},
+	{FeatureID: "observability.traces", Title: "추적 탐색기", AppPath: "/app/observability/traces", LegacyPath: "/admin#/llm", Status: "preview_read_only", RiskLevel: "low", RequiredPermission: "admin:read", ReadOnly: true, EnabledRoles: []string{"super_admin", "admin", "ops_admin", "ai_admin", "security_admin", "billing_admin", "readonly_admin"}, RolloutPercent: 100, FallbackEnabled: true, MinimumAPIVersion: "v0.83.0"},
 	{FeatureID: "prompts.lab", Title: "프롬프트 실험실", AppPath: "/app/prompts/lab", LegacyPath: "/admin#/prompt-lab", Status: "legacy", RiskLevel: "medium", RequiredPermission: "admin:read", ReadOnly: true, RolloutPercent: 100, FallbackEnabled: true, MinimumAPIVersion: "v0.80.0"},
 	{FeatureID: "access.users", Title: "사용자와 팀", AppPath: "/app/access/users", LegacyPath: "/admin#/users", Status: "legacy", RiskLevel: "medium", RequiredPermission: "admin:read", ReadOnly: true, RolloutPercent: 100, FallbackEnabled: true, MinimumAPIVersion: "v0.80.0"},
 	{FeatureID: "governance.policies", Title: "정책 및 거버넌스", AppPath: "/app/governance/policies", LegacyPath: "/admin#/safety", Status: "legacy", RiskLevel: "high", RequiredPermission: "security:read", ReadOnly: true, RolloutPercent: 100, FallbackEnabled: true, MinimumAPIVersion: "v0.80.0"},
@@ -75,6 +99,7 @@ var appUIImplementedFeatureIDs = map[string]struct{}{
 	"gateway.providers":      {},
 	"gateway.models":         {},
 	"observability.requests": {},
+	"observability.traces":   {},
 	"system.health":          {},
 }
 
@@ -404,7 +429,8 @@ func (s *Server) handleAdminUIBootstrap(w http.ResponseWriter, r *http.Request) 
 		"authentication": map[string]any{
 			"enabled": s.cfg.Auth.Enabled, "authenticated": authenticated, "mode": mode,
 			"keycloak_enabled": kc.Enabled, "allow_local_login": !kc.Enabled || kc.AllowLocalLogin,
-			"sso_login_url": "/auth/keycloak/login",
+			"sso_login_url":       "/auth/keycloak/login",
+			"credential_prefixes": uiCredentialPrefixes(s.cfg.Auth),
 		},
 		"user":               user,
 		"roles":              roles,

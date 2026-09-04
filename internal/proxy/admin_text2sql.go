@@ -3,7 +3,9 @@ package proxy
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"regexp"
 	"strings"
@@ -53,24 +55,81 @@ func (s *Server) handleText2SQLAdmin(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
 		return
 	}
-	logs, err := s.db.ListText2SQLLogs(r.Context(), recentLimit(r))
+	teams, teamScoped, scopeErr := requestTeamScopeForCallerChecked(s, r)
+	if scopeErr != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, "Text2SQL scope could not be resolved", "server_error", "text2sql_scope_failed")
+		return
+	}
+	logs, err := s.db.ListText2SQLLogsScoped(r.Context(), recentLimit(r), teams, teamScoped)
 	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "text2sql_logs_failed")
+		slog.Error("Text2SQL logs query failed", "error", err)
+		writeOpenAIError(w, http.StatusInternalServerError, "Text2SQL logs could not be loaded", "server_error", "text2sql_logs_failed")
 		return
 	}
 	since := parseWindow(r.URL.Query().Get("window"), 7*24*time.Hour, "day")
-	stats, err := s.db.Text2SQLStatsSince(r.Context(), since)
+	stats, err := s.db.Text2SQLStatsSinceScoped(r.Context(), since, teams, teamScoped)
 	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "text2sql_stats_failed")
+		slog.Error("Text2SQL stats query failed", "error", err)
+		writeOpenAIError(w, http.StatusInternalServerError, "Text2SQL statistics could not be loaded", "server_error", "text2sql_stats_failed")
 		return
 	}
-	schemas, _ := s.db.ListText2SQLSchemas(r.Context())
-	modelMetrics, _ := s.db.Text2SQLModelMetricsSince(r.Context(), since)
-	stageMetrics, _ := s.db.Text2SQLStageMetricsSince(r.Context(), since)
-	goldens, _ := s.db.ListText2SQLGoldenQueries(r.Context(), false)
-	dbProfiles, _ := s.db.ListText2SQLProfiles(r.Context())
-	permissions, _ := s.db.ListText2SQLPermissions(r.Context())
-	failures, _ := s.db.Text2SQLFailureBreakdownSince(r.Context(), since)
+	schemas, err := s.db.ListText2SQLSchemas(r.Context())
+	if err != nil {
+		slog.Error("Text2SQL schemas query failed", "error", err)
+		writeOpenAIError(w, http.StatusInternalServerError, "Text2SQL schemas could not be loaded", "server_error", "text2sql_schemas_failed")
+		return
+	}
+	modelMetrics, err := s.db.Text2SQLModelMetricsSinceScoped(r.Context(), since, teams, teamScoped)
+	if err != nil {
+		slog.Error("Text2SQL model metrics query failed", "error", err)
+		writeOpenAIError(w, http.StatusInternalServerError, "Text2SQL model metrics could not be loaded", "server_error", "text2sql_model_metrics_failed")
+		return
+	}
+	stageMetrics, err := s.db.Text2SQLStageMetricsSinceScoped(r.Context(), since, teams, teamScoped)
+	if err != nil {
+		slog.Error("Text2SQL stage metrics query failed", "error", err)
+		writeOpenAIError(w, http.StatusInternalServerError, "Text2SQL stage metrics could not be loaded", "server_error", "text2sql_stage_metrics_failed")
+		return
+	}
+	goldens, err := s.db.ListText2SQLGoldenQueries(r.Context(), false)
+	if err != nil {
+		slog.Error("Text2SQL golden queries query failed", "error", err)
+		writeOpenAIError(w, http.StatusInternalServerError, "Text2SQL golden queries could not be loaded", "server_error", "text2sql_golden_queries_failed")
+		return
+	}
+	dbProfiles, err := s.db.ListText2SQLProfiles(r.Context())
+	if err != nil {
+		slog.Error("Text2SQL profiles query failed", "error", err)
+		writeOpenAIError(w, http.StatusInternalServerError, "Text2SQL profiles could not be loaded", "server_error", "text2sql_profiles_failed")
+		return
+	}
+	permissions, err := s.db.ListText2SQLPermissions(r.Context())
+	if err != nil {
+		slog.Error("Text2SQL permissions query failed", "error", err)
+		writeOpenAIError(w, http.StatusInternalServerError, "Text2SQL permissions could not be loaded", "server_error", "text2sql_permissions_failed")
+		return
+	}
+	failures, err := s.db.Text2SQLFailureBreakdownSinceScoped(r.Context(), since, teams, teamScoped)
+	if err != nil {
+		slog.Error("Text2SQL failure metrics query failed", "error", err)
+		writeOpenAIError(w, http.StatusInternalServerError, "Text2SQL failure metrics could not be loaded", "server_error", "text2sql_failure_metrics_failed")
+		return
+	}
+	if teamScoped {
+		schemas = text2SQLSchemasForTeams(schemas, teams)
+		goldens = []store.Text2SQLGoldenQuery{}
+		permissions = text2SQLPermissionsForTeams(permissions, teams)
+	}
+	runtimeProfiles := []map[string]string{
+		{"model": "vibe/text2sql-preview", "mode": "preview", "upstream": s.t2sConf().PreviewModel},
+		{"model": "vibe/text2sql-execute", "mode": "execute", "upstream": s.t2sConf().ExecuteModel},
+		{"model": "vibe/text2sql-accurate", "mode": "preview", "upstream": s.t2sConf().AccurateModel},
+		{"model": "vibe/text2sql-local", "mode": "preview", "upstream": s.t2sConf().LocalModel},
+		{"model": "vibe/text2sql-auto", "mode": "auto", "upstream": "(complexity 기반)"},
+	}
+	if !s.canViewRawPrompts(r) {
+		s.projectText2SQLAdminForExternal(logs, schemas, modelMetrics, stageMetrics, goldens, dbProfiles, permissions, failures, runtimeProfiles)
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"schemas":       schemas,
 		"model_metrics": modelMetrics,
@@ -80,16 +139,171 @@ func (s *Server) handleText2SQLAdmin(w http.ResponseWriter, r *http.Request) {
 		"permissions":   permissions,
 		"failures":      failures,
 		"enabled":       s.t2sConf().Enabled,
-		"profiles": []map[string]string{
-			{"model": "vibe/text2sql-preview", "mode": "preview", "upstream": s.t2sConf().PreviewModel},
-			{"model": "vibe/text2sql-execute", "mode": "execute", "upstream": s.t2sConf().ExecuteModel},
-			{"model": "vibe/text2sql-accurate", "mode": "preview", "upstream": s.t2sConf().AccurateModel},
-			{"model": "vibe/text2sql-local", "mode": "preview", "upstream": s.t2sConf().LocalModel},
-			{"model": "vibe/text2sql-auto", "mode": "auto", "upstream": "(complexity 기반)"},
-		},
-		"stats": stats,
-		"logs":  logs,
+		"profiles":      runtimeProfiles,
+		"stats":         stats,
+		"logs":          logs,
 	})
+}
+
+const text2SQLSensitiveContentOmitted = "[sensitive-content-omitted]"
+
+// allowText2SQLSensitiveRead keeps raw schema, SQL, glossary, connection and policy
+// registries behind the same explicit permission boundary as raw prompts. The safe
+// overview and request-scoped span APIs provide projected data to lower roles.
+func (s *Server) allowText2SQLSensitiveRead(w http.ResponseWriter, r *http.Request) bool {
+	if r.Method != http.MethodGet || s.canViewRawPrompts(r) {
+		return true
+	}
+	writeOpenAIError(w, http.StatusForbidden, "민감한 Text2SQL 관리 데이터 조회 권한이 필요합니다.", "permission_error", "raw_prompt_access_required")
+	return false
+}
+
+func text2SQLSchemasForTeams(schemas []store.Text2SQLSchema, teams []string) []store.Text2SQLSchema {
+	allowed := make(map[string]struct{}, len(teams))
+	for _, team := range teams {
+		if team != "" && strings.TrimSpace(team) == team {
+			allowed[team] = struct{}{}
+		}
+	}
+	filtered := make([]store.Text2SQLSchema, 0, len(schemas))
+	for _, schema := range schemas {
+		if schema.Team == "" {
+			filtered = append(filtered, schema)
+			continue
+		}
+		if strings.TrimSpace(schema.Team) != schema.Team {
+			continue
+		}
+		if _, ok := allowed[schema.Team]; ok {
+			filtered = append(filtered, schema)
+		}
+	}
+	return filtered
+}
+
+func text2SQLPermissionsForTeams(permissions []store.Text2SQLPermission, teams []string) []store.Text2SQLPermission {
+	allowed := make(map[string]struct{}, len(teams))
+	for _, team := range teams {
+		if team = strings.TrimSpace(team); team != "" {
+			allowed[team] = struct{}{}
+		}
+	}
+	filtered := make([]store.Text2SQLPermission, 0, len(permissions))
+	for _, permission := range permissions {
+		subjectType := strings.ToLower(strings.TrimSpace(permission.SubjectType))
+		if subjectType == "*" || subjectType == "any" || subjectType == "all" {
+			filtered = append(filtered, permission)
+			continue
+		}
+		if subjectType == "team" {
+			if _, ok := allowed[strings.TrimSpace(permission.SubjectID)]; ok {
+				filtered = append(filtered, permission)
+			}
+		}
+	}
+	return filtered
+}
+
+func (s *Server) projectText2SQLAdminForExternal(
+	logs []store.Text2SQLQueryLog,
+	schemas []store.Text2SQLSchema,
+	modelMetrics []store.Text2SQLModelMetric,
+	stageMetrics []store.Text2SQLStageMetric,
+	goldens []store.Text2SQLGoldenQuery,
+	dbProfiles []store.Text2SQLProfile,
+	permissions []store.Text2SQLPermission,
+	failures []store.Text2SQLFailureBucket,
+	runtimeProfiles []map[string]string,
+) {
+	projectionArgs := s.externalCredentialProjectionArgs()
+	project := func(value string) string {
+		return boundedExternalProviderText(value, projectionArgs...)
+	}
+	s.projectText2SQLLogsForExternal(logs)
+	for index := range schemas {
+		schema := &schemas[index]
+		schema.Team = project(schema.Team)
+		schema.Name = project(schema.Name)
+		schema.Dialect = project(schema.Dialect)
+		schema.SchemaText = text2SQLSensitiveContentOmitted
+		schema.AllowedTables = []string{}
+		schema.CollectedAt = project(schema.CollectedAt)
+		schema.SourceFingerprint = project(schema.SourceFingerprint)
+		schema.UpdatedAt = project(schema.UpdatedAt)
+	}
+	for index := range modelMetrics {
+		modelMetrics[index].UpstreamModel = project(modelMetrics[index].UpstreamModel)
+	}
+	for index := range stageMetrics {
+		stageMetrics[index].Stage = project(stageMetrics[index].Stage)
+		stageMetrics[index].Status = project(stageMetrics[index].Status)
+		stageMetrics[index].Model = project(stageMetrics[index].Model)
+	}
+	for index := range goldens {
+		golden := &goldens[index]
+		golden.ID = project(golden.ID)
+		golden.Name = project(golden.Name)
+		golden.Question = text2SQLSensitiveContentOmitted
+		golden.ExpectedSQL = text2SQLSensitiveContentOmitted
+		golden.SchemaName = project(golden.SchemaName)
+		golden.Source = project(golden.Source)
+		for tagIndex := range golden.Tags {
+			golden.Tags[tagIndex] = project(golden.Tags[tagIndex])
+		}
+	}
+	for index := range dbProfiles {
+		profile := &dbProfiles[index]
+		profile.VirtualModel = project(profile.VirtualModel)
+		profile.Mode = project(profile.Mode)
+		profile.UpstreamModel = project(profile.UpstreamModel)
+		profile.SummaryModel = project(profile.SummaryModel)
+		profile.SchemaName = project(profile.SchemaName)
+		profile.ExecConnectionID = project(profile.ExecConnectionID)
+		profile.UpdatedAt = project(profile.UpdatedAt)
+	}
+	for index := range permissions {
+		permission := &permissions[index]
+		permission.ID = project(permission.ID)
+		permission.SubjectType = project(permission.SubjectType)
+		permission.SubjectID = project(permission.SubjectID)
+		permission.SchemaName = project(permission.SchemaName)
+		permission.TableName = project(permission.TableName)
+		permission.ColumnName = project(permission.ColumnName)
+		permission.Action = project(permission.Action)
+	}
+	for index := range failures {
+		failures[index].Category = project(failures[index].Category)
+	}
+	for _, profile := range runtimeProfiles {
+		for key, value := range profile {
+			profile[key] = project(value)
+		}
+	}
+}
+
+func (s *Server) projectText2SQLLogsForExternal(logs []store.Text2SQLQueryLog) {
+	projectionArgs := s.externalCredentialProjectionArgs()
+	project := func(value string) string {
+		return boundedExternalProviderText(value, projectionArgs...)
+	}
+	for index := range logs {
+		log := &logs[index]
+		log.ID = project(log.ID)
+		log.RequestID = project(log.RequestID)
+		log.APIKeyID = project(log.APIKeyID)
+		log.Team = project(log.Team)
+		log.VirtualModel = project(log.VirtualModel)
+		log.UpstreamModel = project(log.UpstreamModel)
+		log.Mode = project(log.Mode)
+		log.Question = text2SQLSensitiveContentOmitted
+		log.GeneratedSQL = text2SQLSensitiveContentOmitted
+		log.SchemaName = project(log.SchemaName)
+		log.PermissionHash = project(log.PermissionHash)
+		log.GlossaryHash = project(log.GlossaryHash)
+		log.RejectReason = project(log.RejectReason)
+		log.Error = project(log.Error)
+		log.FailureCategory = project(log.FailureCategory)
+	}
 }
 
 // handleText2SQLSpans returns the pipeline timeline for one Text2SQL request.
@@ -104,16 +318,26 @@ func (s *Server) handleText2SQLSpans(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	requestID := strings.TrimSpace(r.URL.Query().Get("request_id"))
-	if requestID == "" {
+	if requestID == "" || !adminTraceIdentifierValid(requestID) {
 		writeOpenAIError(w, http.StatusBadRequest, "request_id is required", "invalid_request_error", "missing_request_id")
 		return
 	}
-	spans, err := s.db.Text2SQLSpansForRequest(r.Context(), requestID)
+	detail, err := s.db.RequestDetail(r.Context(), requestID)
 	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "text2sql_spans_failed")
+		if errors.Is(err, store.ErrNotFound) {
+			writeOpenAIError(w, http.StatusNotFound, "request not found", "invalid_request_error", "request_not_found")
+			return
+		}
+		slog.Error("Text2SQL span request lookup failed", "request_id", requestID, "error", err)
+		writeOpenAIError(w, http.StatusInternalServerError, "Text2SQL spans could not be loaded", "server_error", "text2sql_spans_failed")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"request_id": requestID, "spans": spans})
+	if !s.canViewRequestDetail(r, detail.Request) {
+		writeOpenAIError(w, http.StatusForbidden, "request is outside your team scope", "permission_error", "cross_team_access_denied")
+		return
+	}
+	s.maskRequestDetail(r, &detail)
+	writeJSON(w, http.StatusOK, map[string]any{"request_id": detail.Request.ID, "spans": detail.Text2SQLSpans})
 }
 
 // handleText2SQLTables manages the table registry for a schema.
@@ -125,6 +349,9 @@ func (s *Server) handleText2SQLTables(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.Method {
 	case http.MethodGet:
+		if !s.allowText2SQLSensitiveRead(w, r) {
+			return
+		}
 		schema := strings.TrimSpace(r.URL.Query().Get("schema"))
 		tables, err := s.db.ListText2SQLTables(r.Context(), schema)
 		if err != nil {
@@ -256,16 +483,29 @@ func (s *Server) handleText2SQLRiskQueue(w http.ResponseWriter, r *http.Request)
 			minRisk = n
 		}
 	}
-	logs, err := s.db.RiskyText2SQLLogs(r.Context(), since, minRisk, recentLimit(r))
+	teams, teamScoped, scopeErr := requestTeamScopeForCallerChecked(s, r)
+	if scopeErr != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, "Text2SQL scope could not be resolved", "server_error", "text2sql_scope_failed")
+		return
+	}
+	logs, err := s.db.RiskyText2SQLLogsScoped(r.Context(), since, minRisk, recentLimit(r), teams, teamScoped)
 	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "risk_queue_failed")
+		slog.Error("Text2SQL risk queue query failed", "error", err)
+		writeOpenAIError(w, http.StatusInternalServerError, "Text2SQL risk queue could not be loaded", "server_error", "risk_queue_failed")
 		return
 	}
 	// Attach actionable fix suggestions per entry so operators get next steps, not just
 	// a block reason.
+	suggestions := make([][]string, len(logs))
+	for index := range logs {
+		suggestions[index] = suggestText2SQLFixes(logs[index])
+	}
+	if !s.canViewRawPrompts(r) {
+		s.projectText2SQLLogsForExternal(logs)
+	}
 	queue := make([]map[string]any, 0, len(logs))
-	for _, l := range logs {
-		queue = append(queue, map[string]any{"log": l, "suggestions": suggestText2SQLFixes(l)})
+	for index, log := range logs {
+		queue = append(queue, map[string]any{"log": log, "suggestions": suggestions[index]})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"queue": queue, "count": len(queue)})
 }
@@ -317,6 +557,16 @@ func (s *Server) handleText2SQLMiners(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
 	}
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
+	teams, teamScoped, scopeErr := requestTeamScopeForCallerChecked(s, r)
+	if scopeErr != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, "Text2SQL scope could not be resolved", "server_error", "text2sql_scope_failed")
+		return
+	}
 	since := parseWindow(r.URL.Query().Get("window"), 30*24*time.Hour, "day")
 	minCount := 3
 	if v := strings.TrimSpace(r.URL.Query().Get("min_count")); v != "" {
@@ -324,15 +574,31 @@ func (s *Server) handleText2SQLMiners(w http.ResponseWriter, r *http.Request) {
 			minCount = n
 		}
 	}
-	reports, err := s.db.Text2SQLReportCandidates(r.Context(), since, minCount, 100)
+	reports, err := s.db.Text2SQLReportCandidatesScoped(r.Context(), since, minCount, 100, teams, teamScoped)
 	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "report_miner_failed")
+		slog.Error("Text2SQL report miner query failed", "error", err)
+		writeOpenAIError(w, http.StatusInternalServerError, "Text2SQL report candidates could not be loaded", "server_error", "report_miner_failed")
 		return
 	}
-	terms, err := s.db.Text2SQLGlossaryCandidates(r.Context(), since, minCount, 100)
+	terms, err := s.db.Text2SQLGlossaryCandidatesScoped(r.Context(), since, minCount, 100, teams, teamScoped)
 	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "glossary_miner_failed")
+		slog.Error("Text2SQL glossary miner query failed", "error", err)
+		writeOpenAIError(w, http.StatusInternalServerError, "Text2SQL glossary candidates could not be loaded", "server_error", "glossary_miner_failed")
 		return
+	}
+	if !s.canViewRawPrompts(r) {
+		project := func(value string) string {
+			return boundedExternalProviderText(value, s.externalCredentialProjectionArgs()...)
+		}
+		for index := range reports {
+			reports[index].Question = text2SQLSensitiveContentOmitted
+			reports[index].SampleSQL = text2SQLSensitiveContentOmitted
+			reports[index].LastSeen = project(reports[index].LastSeen)
+			reports[index].RecommendedProduct = project(reports[index].RecommendedProduct)
+		}
+		for index := range terms {
+			terms[index].Term = project(terms[index].Term)
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"report_candidates": reports, "glossary_candidates": terms})
 }
@@ -509,6 +775,9 @@ func (s *Server) handleText2SQLReports(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.Method {
 	case http.MethodGet:
+		if !s.allowText2SQLSensitiveRead(w, r) {
+			return
+		}
 		reports, err := s.db.ListText2SQLSavedReports(r.Context())
 		if err != nil {
 			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "reports_failed")
@@ -574,6 +843,16 @@ func (s *Server) handleText2SQLPromptDNA(w http.ResponseWriter, r *http.Request)
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
 	}
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
+	teams, teamScoped, scopeErr := requestTeamScopeForCallerChecked(s, r)
+	if scopeErr != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, "Text2SQL scope could not be resolved", "server_error", "text2sql_scope_failed")
+		return
+	}
 	since := parseWindow(r.URL.Query().Get("window"), 30*24*time.Hour, "day")
 	minCount := 3
 	if v := strings.TrimSpace(r.URL.Query().Get("min_count")); v != "" {
@@ -581,10 +860,22 @@ func (s *Server) handleText2SQLPromptDNA(w http.ResponseWriter, r *http.Request)
 			minCount = n
 		}
 	}
-	dna, err := s.db.Text2SQLPromptDNAReport(r.Context(), since, minCount, 100)
+	dna, err := s.db.Text2SQLPromptDNAReportScoped(r.Context(), since, minCount, 100, teams, teamScoped)
 	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "prompt_dna_failed")
+		slog.Error("Text2SQL prompt DNA query failed", "error", err)
+		writeOpenAIError(w, http.StatusInternalServerError, "Text2SQL prompt DNA could not be loaded", "server_error", "prompt_dna_failed")
 		return
+	}
+	if !s.canViewRawPrompts(r) {
+		project := func(value string) string {
+			return boundedExternalProviderText(value, s.externalCredentialProjectionArgs()...)
+		}
+		for index := range dna {
+			dna[index].Question = text2SQLSensitiveContentOmitted
+			for labelIndex := range dna[index].Labels {
+				dna[index].Labels[labelIndex] = project(dna[index].Labels[labelIndex])
+			}
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"prompt_dna": dna})
 }
@@ -599,21 +890,57 @@ func (s *Server) handleText2SQLAnomalies(w http.ResponseWriter, r *http.Request)
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
 	}
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
+	teams, teamScoped, scopeErr := requestTeamScopeForCallerChecked(s, r)
+	if scopeErr != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, "Text2SQL scope could not be resolved", "server_error", "text2sql_scope_failed")
+		return
+	}
 	since := parseWindow(r.URL.Query().Get("window"), 7*24*time.Hour, "day")
-	smells, err := s.db.Text2SQLUsageSmells(r.Context(), since, 0, 0)
+	smells, err := s.db.Text2SQLUsageSmellsScoped(r.Context(), since, 0, 0, teams, teamScoped)
 	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "smell_detect_failed")
+		slog.Error("Text2SQL usage anomaly query failed", "error", err)
+		writeOpenAIError(w, http.StatusInternalServerError, "Text2SQL usage anomalies could not be loaded", "server_error", "smell_detect_failed")
 		return
 	}
-	exposure, err := s.db.Text2SQLRiskExposureByTeam(r.Context(), since)
+	exposure, err := s.db.Text2SQLRiskExposureByTeamScoped(r.Context(), since, teams, teamScoped)
 	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "risk_exposure_failed")
+		slog.Error("Text2SQL risk exposure query failed", "error", err)
+		writeOpenAIError(w, http.StatusInternalServerError, "Text2SQL risk exposure could not be loaded", "server_error", "risk_exposure_failed")
 		return
 	}
-	drifts, err := s.db.Text2SQLIntentDrifts(r.Context(), since)
+	drifts, err := s.db.Text2SQLIntentDriftsScoped(r.Context(), since, teams, teamScoped)
 	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "intent_drift_failed")
+		slog.Error("Text2SQL intent drift query failed", "error", err)
+		writeOpenAIError(w, http.StatusInternalServerError, "Text2SQL intent drift could not be loaded", "server_error", "intent_drift_failed")
 		return
+	}
+	if !s.canViewRawPrompts(r) {
+		project := func(value string) string {
+			return boundedExternalProviderText(value, s.externalCredentialProjectionArgs()...)
+		}
+		for index := range smells {
+			smells[index].Subject = project(smells[index].Subject)
+			smells[index].Category = project(smells[index].Category)
+			if smells[index].Sample != "" {
+				smells[index].Sample = text2SQLSensitiveContentOmitted
+			}
+		}
+		for index := range exposure {
+			exposure[index].Team = project(exposure[index].Team)
+		}
+		for index := range drifts {
+			drifts[index].Subject = project(drifts[index].Subject)
+			drifts[index].FirstSeen = project(drifts[index].FirstSeen)
+			drifts[index].DriftSeen = project(drifts[index].DriftSeen)
+			drifts[index].FromSample = text2SQLSensitiveContentOmitted
+			drifts[index].ToSample = text2SQLSensitiveContentOmitted
+			drifts[index].Reason = project(drifts[index].Reason)
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"detection_only": true,
@@ -659,6 +986,14 @@ func (s *Server) handleText2SQLSchemaImpact(w http.ResponseWriter, r *http.Reque
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
 	}
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
+	if !s.allowText2SQLSensitiveRead(w, r) {
+		return
+	}
 	schema := strings.TrimSpace(r.URL.Query().Get("schema"))
 	if schema == "" {
 		writeOpenAIError(w, http.StatusBadRequest, "schema query param is required", "invalid_request_error", "missing_schema")
@@ -680,17 +1015,40 @@ func (s *Server) handleText2SQLReplay(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
 	}
-	key := strings.TrimSpace(r.URL.Query().Get("id"))
-	if key == "" {
-		key = strings.TrimSpace(r.URL.Query().Get("request_id"))
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
 	}
-	if key == "" {
+	if !s.canViewRawPrompts(r) {
+		writeOpenAIError(w, http.StatusForbidden, "replay bundles require sensitive prompt access", "permission_error", "raw_prompt_access_required")
+		return
+	}
+	id := strings.TrimSpace(r.URL.Query().Get("id"))
+	requestID := strings.TrimSpace(r.URL.Query().Get("request_id"))
+	if id == "" && requestID == "" {
 		writeOpenAIError(w, http.StatusBadRequest, "id or request_id is required", "invalid_request_error", "missing_id")
 		return
 	}
-	bundle, found, err := s.db.GetText2SQLReplayBundle(r.Context(), key)
+	key := id
+	if key == "" {
+		key = requestID
+	}
+	if !adminTraceIdentifierValid(key) {
+		writeOpenAIError(w, http.StatusBadRequest, "id or request_id is invalid", "invalid_request_error", "invalid_id")
+		return
+	}
+	var bundle store.Text2SQLReplayBundle
+	var found bool
+	var err error
+	if id != "" {
+		bundle, found, err = s.db.GetText2SQLReplayBundleByID(r.Context(), id)
+	} else {
+		bundle, found, err = s.db.GetText2SQLReplayBundleByRequestID(r.Context(), requestID)
+	}
 	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "replay_failed")
+		slog.Error("Text2SQL replay lookup failed", "lookup_kind", map[bool]string{true: "id", false: "request_id"}[id != ""], "error", err)
+		writeOpenAIError(w, http.StatusInternalServerError, "Text2SQL replay could not be loaded", "server_error", "replay_failed")
 		return
 	}
 	if !found {
@@ -709,6 +1067,9 @@ func (s *Server) handleText2SQLGlossary(w http.ResponseWriter, r *http.Request) 
 	}
 	switch r.Method {
 	case http.MethodGet:
+		if !s.allowText2SQLSensitiveRead(w, r) {
+			return
+		}
 		schema := strings.TrimSpace(r.URL.Query().Get("schema"))
 		terms, err := s.db.ListText2SQLBusinessTerms(r.Context(), schema)
 		if err != nil {
@@ -762,6 +1123,9 @@ func (s *Server) handleText2SQLPermissions(w http.ResponseWriter, r *http.Reques
 	}
 	switch r.Method {
 	case http.MethodGet:
+		if !s.allowText2SQLSensitiveRead(w, r) {
+			return
+		}
 		list, err := s.db.ListText2SQLPermissions(r.Context())
 		if err != nil {
 			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "permissions_failed")
@@ -875,6 +1239,9 @@ func (s *Server) handleText2SQLConnections(w http.ResponseWriter, r *http.Reques
 	}
 	switch r.Method {
 	case http.MethodGet:
+		if !s.allowText2SQLSensitiveRead(w, r) {
+			return
+		}
 		conns, err := s.db.ListText2SQLExecConnections(r.Context())
 		if err != nil {
 			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "connections_failed")
@@ -950,6 +1317,9 @@ func (s *Server) handleText2SQLRegistryExport(w http.ResponseWriter, r *http.Req
 	}
 	if r.Method != http.MethodGet {
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
+	if !s.allowText2SQLSensitiveRead(w, r) {
 		return
 	}
 	schema := strings.TrimSpace(r.URL.Query().Get("schema"))
@@ -1033,6 +1403,9 @@ func (s *Server) handleText2SQLProfiles(w http.ResponseWriter, r *http.Request) 
 	}
 	switch r.Method {
 	case http.MethodGet:
+		if !s.allowText2SQLSensitiveRead(w, r) {
+			return
+		}
 		list, err := s.db.ListText2SQLProfiles(r.Context())
 		if err != nil {
 			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "profiles_failed")
@@ -1105,6 +1478,9 @@ func (s *Server) handleText2SQLGolden(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.Method {
 	case http.MethodGet:
+		if !s.allowText2SQLSensitiveRead(w, r) {
+			return
+		}
 		list, err := s.db.ListText2SQLGoldenQueries(r.Context(), false)
 		if err != nil {
 			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "golden_list_failed")
@@ -1305,6 +1681,9 @@ func (s *Server) handleText2SQLSchemas(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.Method {
 	case http.MethodGet:
+		if !s.allowText2SQLSensitiveRead(w, r) {
+			return
+		}
 		schemas, err := s.db.ListText2SQLSchemas(r.Context())
 		if err != nil {
 			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "text2sql_schemas_failed")

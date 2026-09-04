@@ -59,6 +59,8 @@ func (s *Server) handleScatter(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "scatter_failed")
 		return
 	}
+	s.projectScatterPointsForCaller(r, points)
+	cursor = s.projectScatterCursorForCaller(r, cursor)
 
 	resp := map[string]any{
 		"points":      points,

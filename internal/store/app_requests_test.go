@@ -66,6 +66,58 @@ func TestAppRecentRequestsKeysetAndFilters(t *testing.T) {
 	}
 }
 
+func TestAppRecentRequestsTraceFilterKeepsStableKeyset(t *testing.T) {
+	db := openStoreForTest(t)
+	defer db.Close()
+	ctx := t.Context()
+	base := time.Date(2026, 9, 4, 1, 2, 3, 0, time.UTC)
+	for _, item := range []struct {
+		id      string
+		traceID string
+		at      time.Time
+	}{
+		{id: "trace-request-a", traceID: "shared-trace", at: base},
+		{id: "trace-request-b", traceID: "shared-trace", at: base.Add(time.Nanosecond)},
+		{id: "trace-request-c", traceID: "shared-trace", at: base.Add(time.Nanosecond)},
+		{id: "other-request", traceID: "other-trace", at: base.Add(2 * time.Nanosecond)},
+	} {
+		if err := db.InsertLogRecord(ctx, LogRecord{Request: RequestLog{
+			ID: item.id, TraceID: item.traceID, Endpoint: "/v1/chat/completions",
+			StatusCode: 200, CreatedAt: item.at,
+		}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	first, more, err := db.AppRecentRequests(ctx, AppRequestFilter{Limit: 1, TraceID: "shared-trace"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !more || len(first) != 1 || first[0].RequestID != "trace-request-c" {
+		t.Fatalf("first trace page = %+v more=%v", first, more)
+	}
+	second, more, err := db.AppRecentRequests(ctx, AppRequestFilter{
+		Limit: 1, TraceID: "shared-trace", CursorAt: first[0].CreatedAt,
+		CursorID: first[0].RequestID, Direction: "older",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !more || len(second) != 1 || second[0].RequestID != "trace-request-b" {
+		t.Fatalf("second trace page = %+v more=%v", second, more)
+	}
+	newer, more, err := db.AppRecentRequests(ctx, AppRequestFilter{
+		Limit: 1, TraceID: "shared-trace", CursorAt: second[0].CreatedAt,
+		CursorID: second[0].RequestID, Direction: "newer",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if more || len(newer) != 1 || newer[0].RequestID != "trace-request-c" {
+		t.Fatalf("newer trace page = %+v more=%v", newer, more)
+	}
+}
+
 func TestAppRecentRequestsOrdersVariableRFC3339NanoChronologically(t *testing.T) {
 	db := openStoreForTest(t)
 	defer db.Close()
@@ -207,26 +259,38 @@ func TestAppRecentRequestsNormalizedCursorUsesExpressionIndex(t *testing.T) {
 	}
 
 	for _, test := range []struct {
-		name   string
-		filter AppRequestFilter
+		name      string
+		filter    AppRequestFilter
+		wantIndex string
 	}{
 		{
-			name:   "default descending",
-			filter: AppRequestFilter{Limit: 5},
+			name:      "default descending",
+			filter:    AppRequestFilter{Limit: 5},
+			wantIndex: "idx_request_logs_app_valid_cursor",
 		},
 		{
-			name:   "range descending",
-			filter: AppRequestFilter{Limit: 5, From: base},
+			name:      "range descending",
+			filter:    AppRequestFilter{Limit: 5, From: base},
+			wantIndex: "idx_request_logs_app_valid_cursor",
 		},
 		{
 			name: "older cursor",
 			filter: AppRequestFilter{Limit: 5, CursorAt: appRequestFixedTime(base.Add(7 * time.Nanosecond)),
 				CursorID: "index-row-07", Direction: "older"},
+			wantIndex: "idx_request_logs_app_valid_cursor",
 		},
 		{
 			name: "newer cursor",
 			filter: AppRequestFilter{Limit: 5, CursorAt: appRequestFixedTime(base),
 				CursorID: "index-row-00", Direction: "newer"},
+			wantIndex: "idx_request_logs_app_valid_cursor",
+		},
+		{
+			name: "trace exact with cursor",
+			filter: AppRequestFilter{Limit: 5, TraceID: "index-row-07",
+				CursorAt: appRequestFixedTime(base.Add(7 * time.Nanosecond)),
+				CursorID: "index-row-08", Direction: "older"},
+			wantIndex: "idx_request_logs_app_trace_valid_cursor",
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -235,12 +299,12 @@ func TestAppRecentRequestsNormalizedCursorUsesExpressionIndex(t *testing.T) {
 				t.Fatal(err)
 			}
 			plan := explainAppRequestQuery(t, db, query, args...)
-			if !strings.Contains(plan, "idx_request_logs_app_valid_cursor") {
-				t.Fatalf("normalized cursor index is not used:\n%s", plan)
+			if !strings.Contains(plan, test.wantIndex) {
+				t.Fatalf("normalized cursor index %s is not used:\n%s", test.wantIndex, plan)
 			}
 			if test.filter.CursorAt != "" && db.dialect == "sqlite" &&
-				!strings.Contains(plan, "SEARCH r USING INDEX idx_request_logs_app_valid_cursor") {
-				t.Fatalf("cursor did not become an expression-index range seek:\n%s", plan)
+				!strings.Contains(plan, "SEARCH r USING INDEX "+test.wantIndex) {
+				t.Fatalf("cursor did not become an expression-index range seek on %s:\n%s", test.wantIndex, plan)
 			}
 			lower := strings.ToLower(plan)
 			if strings.Contains(lower, "scan t") || strings.Contains(lower, "scan resp") ||
@@ -289,6 +353,41 @@ func TestMigrateRemovesSupersededAppRequestCursorIndex(t *testing.T) {
 	}
 }
 
+func TestAppTraceCursorIndexRendersForBothDialects(t *testing.T) {
+	const indexName = "idx_request_logs_app_trace_valid_cursor"
+	var declared string
+	for _, statement := range migrationStatements() {
+		if strings.Contains(statement, indexName) {
+			declared = statement
+			break
+		}
+	}
+	if declared == "" {
+		t.Fatalf("%s is not declared", indexName)
+	}
+
+	sqlite := renderForDialect(declared, "sqlite")
+	if strings.Contains(sqlite, "CONCURRENTLY") || !strings.Contains(sqlite, "CAST(trace_id AS BLOB)") {
+		t.Fatalf("unsafe SQLite trace index rendering: %s", sqlite)
+	}
+	postgres := renderForDialect(declared, "postgres")
+	if !strings.Contains(postgres, "CREATE INDEX CONCURRENTLY IF NOT EXISTS") ||
+		!strings.Contains(postgres, "CAST(trace_id AS BYTEA)") {
+		t.Fatalf("unsafe PostgreSQL trace index rendering: %s", postgres)
+	}
+	for _, test := range []struct {
+		dialect string
+		sql     string
+	}{{dialect: "sqlite", sql: sqlite}, {dialect: "postgres", sql: postgres}} {
+		validRow := renderForDialect(appRequestValidRowPredicate("id", "created_at"), test.dialect)
+		if !strings.Contains(test.sql, "ON request_logs(trace_id,") ||
+			!strings.Contains(test.sql, appRequestCreatedAtExpr("created_at")) ||
+			!strings.Contains(test.sql, validRow) {
+			t.Fatalf("%s trace cursor shape or valid-row predicate missing: %s", test.dialect, test.sql)
+		}
+	}
+}
+
 func TestMigrateAppRequestIndexesIgnoreOversizedLegacyKeys(t *testing.T) {
 	db := openStoreForTest(t)
 	defer db.Close()
@@ -297,6 +396,7 @@ func TestMigrateAppRequestIndexesIgnoreOversizedLegacyKeys(t *testing.T) {
 		"idx_api_keys_team_id",
 		"idx_request_logs_app_valid_cursor",
 		"idx_request_logs_app_team_valid_cursor",
+		"idx_request_logs_app_trace_valid_cursor",
 		"idx_token_usage_request_latest",
 		"idx_response_logs_request_latest",
 	} {
@@ -320,10 +420,11 @@ func TestMigrateAppRequestIndexesIgnoreOversizedLegacyKeys(t *testing.T) {
 	}
 
 	requestID := incompressibleAppRequestText("request", 500)
+	oversizedTraceID := incompressibleAppRequestText("trace", 5000)
 	if _, err := db.db.ExecContext(ctx, db.bind(`INSERT INTO request_logs
 		(id, trace_id, api_key_id, endpoint, stream, status_code, latency_ms,
 		 first_chunk_ms, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`),
-		requestID, "legacy-trace", "normal-key", "/v1/chat/completions",
+		requestID, oversizedTraceID, "normal-key", "/v1/chat/completions",
 		0, 200, 12, 4, createdAt); err != nil {
 		t.Fatal(err)
 	}
@@ -368,6 +469,7 @@ func TestMigrateAppRequestIndexesIgnoreOversizedLegacyKeys(t *testing.T) {
 				AND c.relname IN ('idx_api_keys_team_id',
 					'idx_request_logs_app_valid_cursor',
 					'idx_request_logs_app_team_valid_cursor',
+					'idx_request_logs_app_trace_valid_cursor',
 					'idx_token_usage_request_latest',
 					'idx_response_logs_request_latest')`).Scan(&invalid); err != nil {
 			t.Fatal(err)
@@ -478,7 +580,7 @@ func TestAppRecentRequestsPostgresNaturalPlannerAtScale(t *testing.T) {
 		`INSERT INTO request_logs
 			(id, trace_id, api_key_id, method, client_ip, model, endpoint, stream,
 			 provider, status_code, latency_ms, first_chunk_ms, session_id, created_at)
-			SELECT 'planner-req-' || lpad(g::text, 12, '0'), 'planner-trace-' || g,
+			SELECT 'planner-req-' || lpad(g::text, 12, '0'), 'planner-trace-' || (g % 100),
 				'planner-key-' || ((g % 100) + 1), 'POST', '192.0.2.1', 'model-a',
 				'/v1/chat/completions', 0, 'provider-a', 200, 10, 5,
 				'planner-session-' || (g % 100),
@@ -534,14 +636,18 @@ func TestAppRecentRequestsPostgresNaturalPlannerAtScale(t *testing.T) {
 	base := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
 	cursorAt := appRequestFixedTime(base.Add(172_800 * time.Second))
 	for _, test := range []struct {
-		name   string
-		filter AppRequestFilter
+		name      string
+		filter    AppRequestFilter
+		wantIndex string
 	}{
 		{name: "default", filter: AppRequestFilter{Limit: 50}},
 		{name: "range", filter: AppRequestFilter{Limit: 50, From: base.Add(100_000 * time.Second)}},
 		{name: "older", filter: AppRequestFilter{Limit: 50, CursorAt: cursorAt, CursorID: "planner-req-000000172800", Direction: "older"}},
 		{name: "newer", filter: AppRequestFilter{Limit: 50, CursorAt: cursorAt, CursorID: "planner-req-000000172800", Direction: "newer"}},
 		{name: "team", filter: AppRequestFilter{Limit: 50, Teams: []string{"team-a"}, TeamScoped: true}},
+		{name: "trace", filter: AppRequestFilter{Limit: 50, TraceID: "planner-trace-0",
+			CursorAt: cursorAt, CursorID: "planner-req-000000172800", Direction: "older"},
+			wantIndex: "idx_request_logs_app_trace_valid_cursor"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			query, args, _, err := db.appRecentRequestsQuery(test.filter)
@@ -549,8 +655,12 @@ func TestAppRecentRequestsPostgresNaturalPlannerAtScale(t *testing.T) {
 				t.Fatal(err)
 			}
 			plan, root := explainNaturalPostgresAppRequestQuery(t, db, query, args...)
+			if test.wantIndex != "" && !strings.Contains(plan, test.wantIndex) {
+				t.Fatalf("natural planner did not use %s:\n%s", test.wantIndex, plan)
+			}
 			if !strings.Contains(plan, "idx_request_logs_app_valid_cursor") &&
-				!strings.Contains(plan, "idx_request_logs_app_team_valid_cursor") {
+				!strings.Contains(plan, "idx_request_logs_app_team_valid_cursor") &&
+				!strings.Contains(plan, "idx_request_logs_app_trace_valid_cursor") {
 				t.Fatalf("natural planner did not use an ordered app cursor index:\n%s", plan)
 			}
 			for _, table := range []string{"request_logs", "token_usage", "response_logs"} {
@@ -618,7 +728,7 @@ func TestAppRecentRequestsSQLiteNaturalPlannerAtScale(t *testing.T) {
 			INSERT INTO request_logs
 			(id, trace_id, api_key_id, method, client_ip, model, endpoint, stream,
 			 provider, status_code, latency_ms, first_chunk_ms, session_id, created_at)
-			SELECT printf('planner-req-%012d', g), 'planner-trace-' || g,
+			SELECT printf('planner-req-%012d', g), 'planner-trace-' || (g % 100),
 				'planner-key-' || ((g % 100) + 1), 'POST', '192.0.2.1', 'model-a',
 				'/v1/chat/completions', 0, 'provider-a', 200, 10, 5,
 				'planner-session-' || (g % 100),
@@ -657,6 +767,9 @@ func TestAppRecentRequestsSQLiteNaturalPlannerAtScale(t *testing.T) {
 		{name: "newer", filter: AppRequestFilter{Limit: 50, CursorAt: cursorAt, CursorID: "planner-req-000000172800", Direction: "newer"}, requestIndexes: []string{"idx_request_logs_app_valid_cursor"}, wantSearch: true},
 		{name: "api key", filter: AppRequestFilter{Limit: 50, APIKeyID: "planner-key-1"}, requestIndexes: []string{"idx_request_logs_app_team_valid_cursor"}, wantSearch: true},
 		{name: "team", filter: AppRequestFilter{Limit: 50, Teams: []string{"team-a"}, TeamScoped: true}, requestIndexes: []string{"idx_request_logs_app_valid_cursor"}},
+		{name: "trace", filter: AppRequestFilter{Limit: 50, TraceID: "planner-trace-0",
+			CursorAt: cursorAt, CursorID: "planner-req-000000172800", Direction: "older"},
+			requestIndexes: []string{"idx_request_logs_app_trace_valid_cursor"}, wantSearch: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			query, args, _, err := db.appRecentRequestsQuery(test.filter)

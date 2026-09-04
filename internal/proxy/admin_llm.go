@@ -8,32 +8,56 @@ import (
 	"strings"
 	"time"
 
+	"vibe-coders/internal/audit"
 	"vibe-coders/internal/store"
 )
+
+func requireLLMMethod(w http.ResponseWriter, r *http.Request, allowed ...string) bool {
+	for _, method := range allowed {
+		if r.Method == method {
+			return true
+		}
+	}
+	w.Header().Set("Allow", strings.Join(allowed, ", "))
+	writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+	return false
+}
 
 func (s *Server) handleLLMTraces(w http.ResponseWriter, r *http.Request) {
 	if !s.authorizeAdmin(r) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
 	}
-	if r.Method != http.MethodGet {
-		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+	if !requireLLMMethod(w, r, http.MethodGet) {
+		return
+	}
+	teams, teamScoped, err := requestTeamScopeForCallerChecked(s, r)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, "trace list query failed", "server_error", "llm_traces_failed")
+		return
+	}
+	requestedTeam := strings.TrimSpace(r.URL.Query().Get("team"))
+	if !llmTeamFilterWithinScope(requestedTeam, teams, teamScoped) {
+		writeJSON(w, http.StatusOK, map[string]any{"traces": []store.RecentRequest{}})
 		return
 	}
 	traces, err := s.db.RecentRequests(r.Context(), store.RequestFilter{
 		Limit:          llmLimit(r, 100, 500),
 		Model:          strings.TrimSpace(r.URL.Query().Get("model")),
 		APIKeyID:       strings.TrimSpace(r.URL.Query().Get("api_key_id")),
-		Team:           strings.TrimSpace(r.URL.Query().Get("team")),
+		Team:           requestedTeam,
 		SessionID:      strings.TrimSpace(r.URL.Query().Get("session_id")),
 		PromptName:     strings.TrimSpace(r.URL.Query().Get("prompt_name")),
 		PromptVersion:  strings.TrimSpace(r.URL.Query().Get("prompt_version")),
 		EvaluationName: strings.TrimSpace(r.URL.Query().Get("evaluation_name")),
+		Teams:          teams,
+		TeamScoped:     teamScoped,
 	})
 	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "llm_traces_failed")
+		writeOpenAIError(w, http.StatusInternalServerError, "trace list query failed", "server_error", "llm_traces_failed")
 		return
 	}
+	s.maskRecentRequests(r, traces)
 	writeJSON(w, http.StatusOK, map[string]any{"traces": traces})
 }
 
@@ -42,12 +66,11 @@ func (s *Server) handleLLMTraceDetail(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
 	}
-	if r.Method != http.MethodGet {
-		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+	if !requireLLMMethod(w, r, http.MethodGet) {
 		return
 	}
-	id := strings.TrimPrefix(r.URL.Path, "/admin/llm/traces/")
-	if id == "" || strings.Contains(id, "/") {
+	id, valid := adminTracePathID(r.URL.Path, "/admin/llm/traces/", "")
+	if !valid {
 		writeOpenAIError(w, http.StatusBadRequest, "invalid trace id", "invalid_request_error", "invalid_trace_id")
 		return
 	}
@@ -57,9 +80,14 @@ func (s *Server) handleLLMTraceDetail(w http.ResponseWriter, r *http.Request) {
 			writeOpenAIError(w, http.StatusNotFound, "trace not found", "invalid_request_error", "trace_not_found")
 			return
 		}
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "llm_trace_detail_failed")
+		writeOpenAIError(w, http.StatusInternalServerError, "trace detail query failed", "server_error", "llm_trace_detail_failed")
 		return
 	}
+	if !s.canViewRequestDetail(r, detail.Request) {
+		writeOpenAIError(w, http.StatusForbidden, "request is outside your team scope", "permission_error", "cross_team_access_denied")
+		return
+	}
+	s.maskRequestDetail(r, &detail)
 	writeJSON(w, http.StatusOK, detail)
 }
 
@@ -68,26 +96,27 @@ func (s *Server) handleLLMSessions(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
 	}
-	if r.Method != http.MethodGet {
-		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+	if !requireLLMMethod(w, r, http.MethodGet) {
 		return
 	}
-	whereClause, whereArgs := llmScopeWhere(r)
+	whereClause, whereArgs, _, _, err := s.llmRequestScope(r)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, "LLM session scope could not be resolved", "server_error", "llm_sessions_failed")
+		return
+	}
 	limit := llmLimit(r, 100, 500)
 	offset := llmOffset(r)
 	// Fetch one extra row to expose has_more without an expensive full COUNT/GROUP BY.
-	sessions, err := s.db.LLMSessionsPage(r.Context(), limit+1, offset)
-	if whereClause != "1=1" {
-		sessions, err = s.db.LLMSessionsFilterPage(r.Context(), whereClause, limit+1, offset, whereArgs...)
-	}
+	sessions, err := s.db.LLMSessionsFilterPage(r.Context(), whereClause, limit+1, offset, whereArgs...)
 	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "llm_sessions_failed")
+		writeOpenAIError(w, http.StatusInternalServerError, "LLM sessions could not be loaded", "server_error", "llm_sessions_failed")
 		return
 	}
 	hasMore := len(sessions) > limit
 	if hasMore {
 		sessions = sessions[:limit]
 	}
+	s.projectLLMSessionsForExternal(r, sessions)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"sessions": sessions,
 		"page":     map[string]any{"limit": limit, "offset": offset, "has_more": hasMore},
@@ -99,8 +128,7 @@ func (s *Server) handleLLMSessionTimeline(w http.ResponseWriter, r *http.Request
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
 	}
-	if r.Method != http.MethodGet {
-		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+	if !requireLLMMethod(w, r, http.MethodGet) {
 		return
 	}
 	sessionID := strings.TrimSpace(r.URL.Query().Get("session_id"))
@@ -108,11 +136,21 @@ func (s *Server) handleLLMSessionTimeline(w http.ResponseWriter, r *http.Request
 		writeOpenAIError(w, http.StatusBadRequest, "session_id is required", "invalid_request_error", "missing_session_id")
 		return
 	}
-	timeline, err := s.db.SessionTimeline(r.Context(), sessionID, llmLimit(r, 1000, 2000))
+	teams, teamScoped, err := requestTeamScopeForCallerChecked(s, r)
 	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "session_timeline_failed")
+		writeOpenAIError(w, http.StatusInternalServerError, "LLM session scope could not be resolved", "server_error", "session_timeline_failed")
 		return
 	}
+	timeline, err := s.db.SessionTimelineScoped(r.Context(), sessionID, llmLimit(r, 1000, 2000), teams, teamScoped)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, "LLM session timeline could not be loaded", "server_error", "session_timeline_failed")
+		return
+	}
+	if teamScoped && len(timeline.Points) == 0 {
+		writeOpenAIError(w, http.StatusForbidden, "session is outside your team scope", "permission_error", "cross_team_access_denied")
+		return
+	}
+	s.projectLLMSessionTimelineForExternal(r, &timeline)
 	writeJSON(w, http.StatusOK, timeline)
 }
 
@@ -121,23 +159,24 @@ func (s *Server) handleLLMPrompts(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
 	}
-	if r.Method != http.MethodGet {
-		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+	if !requireLLMMethod(w, r, http.MethodGet) {
 		return
 	}
 	if strings.HasSuffix(r.URL.Path, "/compare") {
 		s.handleLLMPromptCompare(w, r)
 		return
 	}
-	whereClause, whereArgs := llmScopeWhere(r)
-	prompts, err := s.db.LLMPrompts(r.Context(), llmLimit(r, 100, 500))
-	if whereClause != "1=1" {
-		prompts, err = s.db.LLMPromptsFilter(r.Context(), whereClause, llmLimit(r, 100, 500), whereArgs...)
-	}
+	whereClause, whereArgs, _, _, err := s.llmRequestScope(r)
 	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "llm_prompts_failed")
+		writeOpenAIError(w, http.StatusInternalServerError, "LLM prompt scope could not be resolved", "server_error", "llm_prompts_failed")
 		return
 	}
+	prompts, err := s.db.LLMPromptsFilter(r.Context(), whereClause, llmLimit(r, 100, 500), whereArgs...)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, "LLM prompts could not be loaded", "server_error", "llm_prompts_failed")
+		return
+	}
+	s.projectLLMPromptsForExternal(r, prompts)
 	writeJSON(w, http.StatusOK, map[string]any{"prompts": prompts})
 }
 
@@ -146,39 +185,38 @@ func (s *Server) handleLLMPromptCompare(w http.ResponseWriter, r *http.Request) 
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
 	}
+	if !requireLLMMethod(w, r, http.MethodGet) {
+		return
+	}
 	promptName := strings.TrimSpace(r.URL.Query().Get("prompt_name"))
 	if promptName == "" {
 		writeOpenAIError(w, http.StatusBadRequest, "prompt_name is required", "invalid_request_error", "missing_prompt_name")
 		return
 	}
-	whereClause, whereArgs := llmScopeWhere(r)
+	whereClause, whereArgs, _, _, scopeErr := s.llmRequestScope(r)
+	if scopeErr != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, "LLM prompt scope could not be resolved", "server_error", "llm_prompt_compare_failed")
+		return
+	}
 	candidateLimit := llmPromptCandidateLimit(r)
-	comparison, err := s.db.LLMPromptComparisonLimit(
+	comparison, err := s.db.LLMPromptComparisonFilterLimit(
 		r.Context(),
 		promptName,
 		strings.TrimSpace(r.URL.Query().Get("candidate")),
 		strings.TrimSpace(r.URL.Query().Get("baseline")),
 		candidateLimit,
+		whereClause,
+		whereArgs...,
 	)
-	if whereClause != "1=1" {
-		comparison, err = s.db.LLMPromptComparisonFilterLimit(
-			r.Context(),
-			promptName,
-			strings.TrimSpace(r.URL.Query().Get("candidate")),
-			strings.TrimSpace(r.URL.Query().Get("baseline")),
-			candidateLimit,
-			whereClause,
-			whereArgs...,
-		)
-	}
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeOpenAIError(w, http.StatusNotFound, "prompt comparison not found", "invalid_request_error", "prompt_compare_not_found")
 			return
 		}
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "llm_prompt_compare_failed")
+		writeOpenAIError(w, http.StatusInternalServerError, "LLM prompt comparison could not be loaded", "server_error", "llm_prompt_compare_failed")
 		return
 	}
+	s.projectLLMPromptComparisonForExternal(r, &comparison)
 	writeJSON(w, http.StatusOK, comparison)
 }
 
@@ -187,19 +225,20 @@ func (s *Server) handleLLMPatterns(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
 	}
-	if r.Method != http.MethodGet {
-		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+	if !requireLLMMethod(w, r, http.MethodGet) {
 		return
 	}
-	whereClause, whereArgs := llmScopeWhere(r)
-	patterns, err := s.db.LLMPatterns(r.Context(), llmLimit(r, 50, 200))
-	if whereClause != "1=1" {
-		patterns, err = s.db.LLMPatternsFilter(r.Context(), whereClause, llmLimit(r, 50, 200), whereArgs...)
-	}
+	whereClause, whereArgs, _, _, err := s.llmRequestScope(r)
 	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "llm_patterns_failed")
+		writeOpenAIError(w, http.StatusInternalServerError, "LLM pattern scope could not be resolved", "server_error", "llm_patterns_failed")
 		return
 	}
+	patterns, err := s.db.LLMPatternsFilter(r.Context(), whereClause, llmLimit(r, 50, 200), whereArgs...)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, "LLM patterns could not be loaded", "server_error", "llm_patterns_failed")
+		return
+	}
+	s.projectLLMPatternsForExternal(r, patterns)
 	writeJSON(w, http.StatusOK, map[string]any{"patterns": patterns})
 }
 
@@ -208,20 +247,21 @@ func (s *Server) handleLLMInsights(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
 	}
-	if r.Method != http.MethodGet {
-		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+	if !requireLLMMethod(w, r, http.MethodGet) {
 		return
 	}
 	since, window := llmInsightWindow(r)
-	whereClause, whereArgs := llmScopeWhere(r)
-	insights, err := s.db.LLMInsights(r.Context(), since, llmLimit(r, 50, 200))
-	if whereClause != "1=1" {
-		insights, err = s.db.LLMInsightsFilter(r.Context(), since, whereClause, llmLimit(r, 50, 200), whereArgs...)
-	}
+	whereClause, whereArgs, _, _, err := s.llmRequestScope(r)
 	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "llm_insights_failed")
+		writeOpenAIError(w, http.StatusInternalServerError, "LLM insight scope could not be resolved", "server_error", "llm_insights_failed")
 		return
 	}
+	insights, err := s.db.LLMInsightsFilter(r.Context(), since, whereClause, llmLimit(r, 50, 200), whereArgs...)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, "LLM insights could not be loaded", "server_error", "llm_insights_failed")
+		return
+	}
+	s.projectLLMInsightsForExternal(r, insights)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"window":   window,
 		"since":    since.UTC().Format(time.RFC3339),
@@ -234,8 +274,7 @@ func (s *Server) handleLLMTimeseries(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
 	}
-	if r.Method != http.MethodGet {
-		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+	if !requireLLMMethod(w, r, http.MethodGet) {
 		return
 	}
 	bucket := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("bucket")))
@@ -243,15 +282,17 @@ func (s *Server) handleLLMTimeseries(w http.ResponseWriter, r *http.Request) {
 		bucket = "hour"
 	}
 	since, window := llmInsightWindow(r)
-	whereClause, whereArgs := llmScopeWhere(r)
-	points, err := s.db.LLMTimeseries(r.Context(), bucket, since)
-	if whereClause != "1=1" {
-		points, err = s.db.LLMTimeseriesFilter(r.Context(), bucket, since, whereClause, whereArgs...)
-	}
+	whereClause, whereArgs, _, _, err := s.llmRequestScope(r)
 	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "llm_timeseries_failed")
+		writeOpenAIError(w, http.StatusInternalServerError, "LLM timeseries scope could not be resolved", "server_error", "llm_timeseries_failed")
 		return
 	}
+	points, err := s.db.LLMTimeseriesFilter(r.Context(), bucket, since, whereClause, whereArgs...)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, "LLM timeseries could not be loaded", "server_error", "llm_timeseries_failed")
+		return
+	}
+	s.projectLLMTimeseriesForExternal(r, points)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"window": window,
 		"bucket": bucket,
@@ -267,55 +308,42 @@ func (s *Server) handleLLMFeedback(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.Method {
 	case http.MethodGet:
-		whereClause, whereArgs := llmScopeWhere(r)
-		summary, err := s.db.LLMFeedbackSummary(r.Context())
-		if whereClause != "1=1" {
-			summary, err = s.db.LLMFeedbackSummaryFilter(r.Context(), whereClause, whereArgs...)
-		}
+		whereClause, whereArgs, _, _, err := s.llmRequestScope(r)
 		if err != nil {
-			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "llm_feedback_failed")
+			writeOpenAIError(w, http.StatusInternalServerError, "LLM feedback scope could not be resolved", "server_error", "llm_feedback_failed")
 			return
 		}
-		feedback, err := s.db.RecentLLMFeedback(r.Context(), llmLimit(r, 100, 500))
-		if whereClause != "1=1" {
-			feedback, err = s.db.RecentLLMFeedbackFilter(r.Context(), whereClause, llmLimit(r, 100, 500), whereArgs...)
-		}
+		summary, err := s.db.LLMFeedbackSummaryFilter(r.Context(), whereClause, whereArgs...)
 		if err != nil {
-			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "llm_feedback_failed")
+			writeOpenAIError(w, http.StatusInternalServerError, "LLM feedback could not be loaded", "server_error", "llm_feedback_failed")
 			return
 		}
-		labels, err := s.db.LLMFeedbackLabels(r.Context(), 20)
-		if whereClause != "1=1" {
-			labels, err = s.db.LLMFeedbackLabelsFilter(r.Context(), whereClause, 20, whereArgs...)
-		}
+		feedback, err := s.db.RecentLLMFeedbackFilter(r.Context(), whereClause, llmLimit(r, 100, 500), whereArgs...)
 		if err != nil {
-			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "llm_feedback_failed")
+			writeOpenAIError(w, http.StatusInternalServerError, "LLM feedback could not be loaded", "server_error", "llm_feedback_failed")
 			return
 		}
-		prompts, err := s.db.LLMFeedbackPrompts(r.Context(), 20)
-		if whereClause != "1=1" {
-			prompts, err = s.db.LLMFeedbackPromptsFilter(r.Context(), whereClause, 20, whereArgs...)
-		}
+		labels, err := s.db.LLMFeedbackLabelsFilter(r.Context(), whereClause, 20, whereArgs...)
 		if err != nil {
-			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "llm_feedback_failed")
+			writeOpenAIError(w, http.StatusInternalServerError, "LLM feedback could not be loaded", "server_error", "llm_feedback_failed")
 			return
 		}
-		alignment, err := s.db.LLMAlignmentSummary(r.Context())
-		if whereClause != "1=1" {
-			alignment, err = s.db.LLMAlignmentSummaryFilter(r.Context(), whereClause, whereArgs...)
-		}
+		prompts, err := s.db.LLMFeedbackPromptsFilter(r.Context(), whereClause, 20, whereArgs...)
 		if err != nil {
-			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "llm_feedback_failed")
+			writeOpenAIError(w, http.StatusInternalServerError, "LLM feedback could not be loaded", "server_error", "llm_feedback_failed")
 			return
 		}
-		alignmentPrompts, err := s.db.LLMAlignmentPrompts(r.Context(), 20)
-		if whereClause != "1=1" {
-			alignmentPrompts, err = s.db.LLMAlignmentPromptsFilter(r.Context(), whereClause, 20, whereArgs...)
-		}
+		alignment, err := s.db.LLMAlignmentSummaryFilter(r.Context(), whereClause, whereArgs...)
 		if err != nil {
-			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "llm_feedback_failed")
+			writeOpenAIError(w, http.StatusInternalServerError, "LLM feedback could not be loaded", "server_error", "llm_feedback_failed")
 			return
 		}
+		alignmentPrompts, err := s.db.LLMAlignmentPromptsFilter(r.Context(), whereClause, 20, whereArgs...)
+		if err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, "LLM feedback could not be loaded", "server_error", "llm_feedback_failed")
+			return
+		}
+		s.projectLLMFeedbackForExternal(r, feedback, labels, prompts, alignmentPrompts)
 		writeJSON(w, http.StatusOK, map[string]any{
 			"summary":           summary,
 			"feedback":          feedback,
@@ -327,7 +355,7 @@ func (s *Server) handleLLMFeedback(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPost:
 		s.handleLLMFeedbackPost(w, r)
 	default:
-		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		requireLLMMethod(w, r, http.MethodGet, http.MethodPost)
 	}
 }
 
@@ -342,28 +370,27 @@ func (s *Server) handleLLMEvaluations(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPost:
 		s.handleLLMEvaluationsPost(w, r)
 	default:
-		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		requireLLMMethod(w, r, http.MethodGet, http.MethodPost)
 	}
 }
 
 func (s *Server) handleLLMEvaluationsGet(w http.ResponseWriter, r *http.Request) {
-	whereClause, whereArgs := llmScopeWhere(r)
-	summary, err := s.db.EvaluationSummary(r.Context())
-	if whereClause != "1=1" {
-		summary, err = s.db.EvaluationSummaryFilter(r.Context(), whereClause, whereArgs...)
-	}
+	whereClause, whereArgs, _, _, err := s.llmRequestScope(r)
 	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "llm_evaluations_failed")
+		writeOpenAIError(w, http.StatusInternalServerError, "LLM evaluation scope could not be resolved", "server_error", "llm_evaluations_failed")
 		return
 	}
-	recent, err := s.db.RecentEvaluations(r.Context(), llmLimit(r, 100, 500))
-	if whereClause != "1=1" {
-		recent, err = s.db.RecentEvaluationsFilter(r.Context(), whereClause, llmLimit(r, 100, 500), whereArgs...)
-	}
+	summary, err := s.db.EvaluationSummaryFilter(r.Context(), whereClause, whereArgs...)
 	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "llm_evaluations_failed")
+		writeOpenAIError(w, http.StatusInternalServerError, "LLM evaluations could not be loaded", "server_error", "llm_evaluations_failed")
 		return
 	}
+	recent, err := s.db.RecentEvaluationsFilter(r.Context(), whereClause, llmLimit(r, 100, 500), whereArgs...)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, "LLM evaluations could not be loaded", "server_error", "llm_evaluations_failed")
+		return
+	}
+	s.projectLLMEvaluationsForExternal(r, summary, recent)
 	writeJSON(w, http.StatusOK, map[string]any{"summary": summary, "evaluations": recent})
 }
 
@@ -545,6 +572,207 @@ func (s *Server) normalizeLLMFeedback(r *http.Request, input llmFeedbackSubmit) 
 		Source:    input.Source,
 		CreatedBy: adminID(r),
 	}, nil
+}
+
+func (s *Server) llmRequestScope(r *http.Request) (string, []any, []string, bool, error) {
+	teams, teamScoped, err := requestTeamScopeForCallerChecked(s, r)
+	if err != nil {
+		return "", nil, nil, true, err
+	}
+	whereClause, args := llmScopeWhere(r)
+	whereClause, args = store.MergeLLMRequestTeamScope(whereClause, args, teams, teamScoped)
+	return whereClause, args, teams, teamScoped, nil
+}
+
+func llmTeamFilterWithinScope(requested string, teams []string, teamScoped bool) bool {
+	if !teamScoped || requested == "" {
+		return true
+	}
+	for _, team := range teams {
+		if requested == team {
+			return true
+		}
+	}
+	return false
+}
+
+func projectLLMString(value string, projectionArgs ...string) string {
+	return audit.Redact(boundedExternalProviderText(value, projectionArgs...))
+}
+
+func (s *Server) projectLLMSessionsForExternal(r *http.Request, sessions []store.LLMSessionSummary) {
+	if s.canViewRawPrompts(r) {
+		return
+	}
+	projectionArgs := s.externalCredentialProjectionArgs()
+	for index := range sessions {
+		session := &sessions[index]
+		session.SessionID = projectLLMString(session.SessionID, projectionArgs...)
+		session.FirstSeen = projectLLMString(session.FirstSeen, projectionArgs...)
+		session.LastSeen = projectLLMString(session.LastSeen, projectionArgs...)
+		session.LastMessage = projectLLMString(session.LastMessage, projectionArgs...)
+	}
+}
+
+func (s *Server) projectLLMSessionTimelineForExternal(r *http.Request, timeline *store.SessionTimeline) {
+	if timeline == nil || s.canViewRawPrompts(r) {
+		return
+	}
+	baseProjectionArgs := s.externalCredentialProjectionArgs()
+	timeline.SessionID = projectLLMString(timeline.SessionID, baseProjectionArgs...)
+	for index := range timeline.Points {
+		point := &timeline.Points[index]
+		rawProvider := point.Provider
+		projectionArgs := s.externalCredentialProjectionArgs(rawProvider)
+		point.RequestID = projectLLMString(point.RequestID, projectionArgs...)
+		point.TraceID = projectLLMString(point.TraceID, projectionArgs...)
+		point.Model = projectLLMString(point.Model, projectionArgs...)
+		point.Provider = boundedExternalProviderLabelOrEmpty(rawProvider, projectionArgs...)
+		point.PromptName = projectLLMString(point.PromptName, projectionArgs...)
+		point.LastMessage = projectLLMString(point.LastMessage, projectionArgs...)
+		point.CreatedAt = projectLLMString(point.CreatedAt, projectionArgs...)
+	}
+}
+
+func projectLLMPromptSummaryStrings(prompt *store.LLMPromptSummary, projectionArgs ...string) {
+	if prompt == nil {
+		return
+	}
+	prompt.PromptName = projectLLMString(prompt.PromptName, projectionArgs...)
+	prompt.PromptVersion = projectLLMString(prompt.PromptVersion, projectionArgs...)
+	prompt.FirstSeen = projectLLMString(prompt.FirstSeen, projectionArgs...)
+	prompt.LastSeen = projectLLMString(prompt.LastSeen, projectionArgs...)
+}
+
+func (s *Server) projectLLMPromptsForExternal(r *http.Request, prompts []store.LLMPromptSummary) {
+	if s.canViewRawPrompts(r) {
+		return
+	}
+	projectionArgs := s.externalCredentialProjectionArgs()
+	for index := range prompts {
+		projectLLMPromptSummaryStrings(&prompts[index], projectionArgs...)
+	}
+}
+
+func (s *Server) projectLLMPromptComparisonForExternal(r *http.Request, comparison *store.LLMPromptComparison) {
+	if comparison == nil || s.canViewRawPrompts(r) {
+		return
+	}
+	projectionArgs := s.externalCredentialProjectionArgs()
+	comparison.PromptName = projectLLMString(comparison.PromptName, projectionArgs...)
+	comparison.BaselineReason = projectLLMString(comparison.BaselineReason, projectionArgs...)
+	comparison.CandidateOrdering = projectLLMString(comparison.CandidateOrdering, projectionArgs...)
+	projectLLMPromptSummaryStrings(&comparison.Candidate, projectionArgs...)
+	projectLLMPromptSummaryStrings(comparison.Baseline, projectionArgs...)
+	for index := range comparison.BaselineCandidates {
+		candidate := &comparison.BaselineCandidates[index]
+		candidate.PromptVersion = projectLLMString(candidate.PromptVersion, projectionArgs...)
+		candidate.Reason = projectLLMString(candidate.Reason, projectionArgs...)
+		candidate.LastSeen = projectLLMString(candidate.LastSeen, projectionArgs...)
+	}
+	for index := range comparison.AvailableVersions {
+		comparison.AvailableVersions[index] = projectLLMString(comparison.AvailableVersions[index], projectionArgs...)
+	}
+}
+
+func (s *Server) projectLLMPatternsForExternal(r *http.Request, patterns []store.LLMPatternSummary) {
+	if s.canViewRawPrompts(r) {
+		return
+	}
+	projectionArgs := s.externalCredentialProjectionArgs()
+	for index := range patterns {
+		pattern := &patterns[index]
+		pattern.Pattern = projectLLMString(pattern.Pattern, projectionArgs...)
+		pattern.Language = projectLLMString(pattern.Language, projectionArgs...)
+		pattern.Sample = projectLLMString(pattern.Sample, projectionArgs...)
+	}
+}
+
+func (s *Server) projectLLMInsightsForExternal(r *http.Request, insights []store.LLMInsight) {
+	if s.canViewRawPrompts(r) {
+		return
+	}
+	projectionArgs := s.externalCredentialProjectionArgs()
+	for index := range insights {
+		insight := &insights[index]
+		insight.ID = projectLLMString(insight.ID, projectionArgs...)
+		insight.Severity = projectLLMString(insight.Severity, projectionArgs...)
+		insight.Kind = projectLLMString(insight.Kind, projectionArgs...)
+		insight.Title = projectLLMString(insight.Title, projectionArgs...)
+		insight.Detail = projectLLMString(insight.Detail, projectionArgs...)
+		insight.Scope = projectLLMString(insight.Scope, projectionArgs...)
+		insight.ScopeValue = projectLLMString(insight.ScopeValue, projectionArgs...)
+		insight.ScopeDetail = projectLLMString(insight.ScopeDetail, projectionArgs...)
+		insight.Recommendation = projectLLMString(insight.Recommendation, projectionArgs...)
+		insight.LastSeen = projectLLMString(insight.LastSeen, projectionArgs...)
+	}
+}
+
+func (s *Server) projectLLMTimeseriesForExternal(r *http.Request, points []store.LLMTimeseriesPoint) {
+	if s.canViewRawPrompts(r) {
+		return
+	}
+	projectionArgs := s.externalCredentialProjectionArgs()
+	for index := range points {
+		points[index].Date = projectLLMString(points[index].Date, projectionArgs...)
+		points[index].Bucket = projectLLMString(points[index].Bucket, projectionArgs...)
+	}
+}
+
+func (s *Server) projectLLMFeedbackForExternal(
+	r *http.Request,
+	feedback []store.LLMFeedback,
+	labels []store.LLMFeedbackLabelSummary,
+	prompts []store.LLMFeedbackPromptSummary,
+	alignmentPrompts []store.LLMAlignmentPromptSummary,
+) {
+	if s.canViewRawPrompts(r) {
+		return
+	}
+	projectionArgs := s.externalCredentialProjectionArgs()
+	for index := range feedback {
+		item := &feedback[index]
+		item.ID = projectLLMString(item.ID, projectionArgs...)
+		item.RequestID = projectLLMString(item.RequestID, projectionArgs...)
+		item.TraceID = projectLLMString(item.TraceID, projectionArgs...)
+		item.Label = projectLLMString(item.Label, projectionArgs...)
+		item.Comment = projectLLMString(item.Comment, projectionArgs...)
+		item.Source = projectLLMString(item.Source, projectionArgs...)
+		item.CreatedBy = projectLLMString(item.CreatedBy, projectionArgs...)
+	}
+	for index := range labels {
+		labels[index].Label = projectLLMString(labels[index].Label, projectionArgs...)
+	}
+	for index := range prompts {
+		item := &prompts[index]
+		item.PromptName = projectLLMString(item.PromptName, projectionArgs...)
+		item.PromptVersion = projectLLMString(item.PromptVersion, projectionArgs...)
+		item.LastSeen = projectLLMString(item.LastSeen, projectionArgs...)
+	}
+	for index := range alignmentPrompts {
+		item := &alignmentPrompts[index]
+		item.PromptName = projectLLMString(item.PromptName, projectionArgs...)
+		item.PromptVersion = projectLLMString(item.PromptVersion, projectionArgs...)
+		item.LastSeen = projectLLMString(item.LastSeen, projectionArgs...)
+	}
+}
+
+func (s *Server) projectLLMEvaluationsForExternal(r *http.Request, summary []store.LLMEvaluationSummary, evaluations []store.LLMEvaluation) {
+	if s.canViewRawPrompts(r) {
+		return
+	}
+	projectionArgs := s.externalCredentialProjectionArgs()
+	for index := range summary {
+		summary[index].Name = projectLLMString(summary[index].Name, projectionArgs...)
+		summary[index].Category = projectLLMString(summary[index].Category, projectionArgs...)
+	}
+	for index := range evaluations {
+		evaluation := &evaluations[index]
+		evaluation.ID = projectLLMString(evaluation.ID, projectionArgs...)
+		evaluation.RequestID = projectLLMString(evaluation.RequestID, projectionArgs...)
+		evaluation.TraceID = projectLLMString(evaluation.TraceID, projectionArgs...)
+		projectAndRedactEvaluationForExternal(evaluation, projectionArgs...)
+	}
 }
 
 func llmLimit(r *http.Request, fallback int, max int) int {

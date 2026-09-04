@@ -54,6 +54,18 @@
   align-items: center;
   gap: var(--space-2);
 }
+.request-contract-warning {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-warning);
+  border-radius: var(--radius-medium);
+  background: var(--color-warning-soft);
+}
+.request-contract-warning span {
+  color: var(--color-muted);
+  font-size: 0.8125rem;
+}
 .request-stale {
   justify-content: space-between;
   padding: var(--space-3) var(--space-4);

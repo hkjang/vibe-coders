@@ -11,19 +11,35 @@ import (
 )
 
 func (s *SQLStore) ListRoutingDecisions(ctx context.Context, limit int) ([]RoutingDecisionLog, error) {
+	return s.ListRoutingDecisionsScoped(ctx, limit, nil, false)
+}
+
+// ListRoutingDecisionsScoped keeps routing history inside the caller's request-team
+// boundary. The unrestricted wrapper deliberately avoids joining request_logs so
+// retention-orphaned legacy decisions remain visible to full administrators.
+func (s *SQLStore) ListRoutingDecisionsScoped(ctx context.Context, limit int, teams []string, teamScoped bool) ([]RoutingDecisionLog, error) {
 	if limit <= 0 || limit > 1000 {
 		limit = 100
 	}
-	rows, err := s.db.QueryContext(ctx, s.bind(`
-		SELECT id, request_id, trace_id, COALESCE(requested_model, ''), COALESCE(selected_model, ''),
-			COALESCE(selected_provider, ''), complexity_score, COALESCE(complexity_tier, ''),
-			prompt_length, token_estimate, code_density, file_count, conversation_depth,
-			instruction_density, reasoning_keywords, refactoring_keywords, debugging_keywords,
-			risk_score, COALESCE(risk_tier, ''), COALESCE(risk_categories, '[]'),
-			health_score, COALESCE(fallback_path, '[]'), COALESCE(decision_reason, ''), created_at
-		FROM routing_decisions
-		ORDER BY created_at DESC
-		LIMIT ?`), limit)
+	from := " FROM routing_decisions rd"
+	where := []string{}
+	args := []any{}
+	if routingDecisionTeamFilterRequested(teams, teamScoped) {
+		from += " JOIN request_logs r ON r.id = rd.request_id"
+		where, args = appendRequestTeamCondition(where, args, "", teams, teamScoped)
+	}
+	query := `SELECT rd.id, rd.request_id, rd.trace_id, COALESCE(rd.requested_model, ''), COALESCE(rd.selected_model, ''),
+			COALESCE(rd.selected_provider, ''), rd.complexity_score, COALESCE(rd.complexity_tier, ''),
+			rd.prompt_length, rd.token_estimate, rd.code_density, rd.file_count, rd.conversation_depth,
+			rd.instruction_density, rd.reasoning_keywords, rd.refactoring_keywords, rd.debugging_keywords,
+			rd.risk_score, COALESCE(rd.risk_tier, ''), COALESCE(rd.risk_categories, '[]'),
+			rd.health_score, COALESCE(rd.fallback_path, '[]'), COALESCE(rd.decision_reason, ''), rd.created_at` + from
+	if len(where) > 0 {
+		query += " WHERE " + strings.Join(where, " AND ")
+	}
+	query += " ORDER BY rd.created_at DESC LIMIT ?"
+	args = append(args, limit)
+	rows, err := s.db.QueryContext(ctx, s.bind(query), args...)
 	if err != nil {
 		return nil, err
 	}
@@ -40,6 +56,53 @@ func (s *SQLStore) ListRoutingDecisions(ctx context.Context, limit int) ([]Routi
 }
 
 func (s *SQLStore) RoutingDecisionByID(ctx context.Context, id string) (RoutingDecisionLog, error) {
+	return s.RoutingDecisionByIDScoped(ctx, id, nil, false)
+}
+
+// RoutingDecisionByIDScoped applies the same team boundary as the list endpoint.
+// Scoped lookups use an inner join and therefore fail closed for retention orphans.
+func (s *SQLStore) RoutingDecisionByIDScoped(ctx context.Context, id string, teams []string, teamScoped bool) (RoutingDecisionLog, error) {
+	from := " FROM routing_decisions rd"
+	where := []string{"(rd.id = ? OR rd.request_id = ?)"}
+	args := []any{id, id}
+	if routingDecisionTeamFilterRequested(teams, teamScoped) {
+		from += " JOIN request_logs r ON r.id = rd.request_id"
+		where, args = appendRequestTeamCondition(where, args, "", teams, teamScoped)
+	}
+	query := `SELECT rd.id, rd.request_id, rd.trace_id, COALESCE(rd.requested_model, ''), COALESCE(rd.selected_model, ''),
+			COALESCE(rd.selected_provider, ''), rd.complexity_score, COALESCE(rd.complexity_tier, ''),
+			rd.prompt_length, rd.token_estimate, rd.code_density, rd.file_count, rd.conversation_depth,
+			rd.instruction_density, rd.reasoning_keywords, rd.refactoring_keywords, rd.debugging_keywords,
+			rd.risk_score, COALESCE(rd.risk_tier, ''), COALESCE(rd.risk_categories, '[]'),
+			rd.health_score, COALESCE(rd.fallback_path, '[]'), COALESCE(rd.decision_reason, ''), rd.created_at` + from +
+		" WHERE " + strings.Join(where, " AND ") +
+		" ORDER BY CASE WHEN rd.id = ? THEN 0 ELSE 1 END, rd.created_at DESC, rd.id DESC LIMIT 1"
+	args = append(args, id)
+	row := s.db.QueryRowContext(ctx, s.bind(query), args...)
+	item, err := scanRoutingDecision(row)
+	if err == sql.ErrNoRows {
+		return RoutingDecisionLog{}, ErrNotFound
+	}
+	return item, err
+}
+
+func routingDecisionTeamFilterRequested(teams []string, teamScoped bool) bool {
+	if teamScoped {
+		return true
+	}
+	for _, team := range teams {
+		if strings.TrimSpace(team) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// RoutingDecisionByRequestID resolves only the request foreign key. Callers that
+// already hold a request ID must not use RoutingDecisionByID: legacy data can contain
+// a decision primary key equal to another request ID, and the broad lookup would mix
+// artifacts across requests.
+func (s *SQLStore) RoutingDecisionByRequestID(ctx context.Context, requestID string) (RoutingDecisionLog, error) {
 	row := s.db.QueryRowContext(ctx, s.bind(`
 		SELECT id, request_id, trace_id, COALESCE(requested_model, ''), COALESCE(selected_model, ''),
 			COALESCE(selected_provider, ''), complexity_score, COALESCE(complexity_tier, ''),
@@ -48,8 +111,9 @@ func (s *SQLStore) RoutingDecisionByID(ctx context.Context, id string) (RoutingD
 			risk_score, COALESCE(risk_tier, ''), COALESCE(risk_categories, '[]'),
 			health_score, COALESCE(fallback_path, '[]'), COALESCE(decision_reason, ''), created_at
 		FROM routing_decisions
-		WHERE id = ? OR request_id = ?
-		LIMIT 1`), id, id)
+		WHERE request_id = ?
+		ORDER BY created_at DESC, id DESC
+		LIMIT 1`), requestID)
 	item, err := scanRoutingDecision(row)
 	if err == sql.ErrNoRows {
 		return RoutingDecisionLog{}, ErrNotFound

@@ -1,5 +1,9 @@
 import { z } from "zod";
 
+import { isValidIPAddress } from "@/shared/utils/ip-address";
+
+import { fitsUTF8Bytes } from "@/shared/utils/utf8";
+
 import type {
   AdminModel as GeneratedAdminModel,
   AdminModelDeprecation as GeneratedAdminModelDeprecation,
@@ -30,6 +34,7 @@ import type {
   SsoStatusResponse as GeneratedSsoStatusResponse,
   UiBootstrapResponse as GeneratedUiBootstrapResponse,
 } from "@/shared/api/generated";
+import { appRequestRefPattern } from "@/shared/api/app-request-ref";
 import { providerRefPattern } from "@/shared/api/provider-ref";
 
 export const authUserSchema = z.object({
@@ -58,6 +63,7 @@ export const tokenPairSchema = z.object({
 
 export const authMeSchema = z.object({
   auth_enabled: z.boolean(),
+  credential_prefixes: z.array(utf8BoundedString(512)).max(64).optional(),
   version: z.string(),
   expires_at: z.number().optional(),
   menu_version: z.number().optional(),
@@ -153,6 +159,7 @@ export const uiBootstrapSchema = z.object({
     keycloak_enabled: z.boolean(),
     allow_local_login: z.boolean(),
     sso_login_url: z.string(),
+    credential_prefixes: z.array(utf8BoundedString(512)).max(64).optional(),
   }),
   user: authUserSchema.nullable().optional(),
   roles: z.array(z.string()),
@@ -168,18 +175,15 @@ const measurementSchema = z.number().nonnegative();
 const percentageSchema = z.number().min(0).max(100);
 const timestampSchema = z.string().datetime({ offset: true });
 
-const utf8Encoder = new TextEncoder();
-
 function utf8BoundedString(maxBytes: number): z.ZodString {
-  return z.string().refine((value) => utf8Encoder.encode(value).byteLength <= maxBytes, {
+  return z.string().refine((value) => fitsUTF8Bytes(value, maxBytes), {
     message: `UTF-8 ${maxBytes}바이트 이하여야 합니다.`,
   });
 }
 
-const appRequestTimestampSchema = timestampSchema.refine(
-  (value) => utf8Encoder.encode(value).byteLength <= 30,
-  { message: "요청 시각은 UTF-8 30바이트 이하여야 합니다." },
-);
+const appRequestTimestampSchema = timestampSchema.refine((value) => fitsUTF8Bytes(value, 30), {
+  message: "요청 시각은 UTF-8 30바이트 이하여야 합니다.",
+});
 
 const appRequestSafeIntegerSchema = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
 const appRequestCountSchema = z.number().int().min(0).max(2_147_483_647);
@@ -591,62 +595,104 @@ export const modelUsageTagsResponseSchema = z
   .object({ tags: z.array(modelUsageTagSchema) })
   .strict() satisfies z.ZodType<GeneratedModelUsageTagsResponse>;
 
+const appRequestSummaryV1Shape = {
+  request_id: utf8BoundedString(512).min(1),
+  trace_id: utf8BoundedString(512),
+  session_id: utf8BoundedString(512),
+  api_key_id: utf8BoundedString(512),
+  ip: utf8BoundedString(128),
+  method: utf8BoundedString(32),
+  model: utf8BoundedString(256),
+  provider_ref: z.string().regex(providerRefPattern),
+  provider_display: utf8BoundedString(256),
+  endpoint: utf8BoundedString(512),
+  stream: z.boolean(),
+  status_code: z.number().int().min(0).max(999),
+  latency_ms: appRequestSafeIntegerSchema,
+  first_chunk_ms: appRequestSafeIntegerSchema,
+  prompt_tokens: appRequestCountSchema,
+  completion_tokens: appRequestCountSchema,
+  total_tokens: appRequestCountSchema,
+  cached_tokens: appRequestCountSchema,
+  reasoning_tokens: appRequestCountSchema,
+  estimated_cost: appRequestCostSchema,
+  currency: utf8BoundedString(16),
+  finish_reason: utf8BoundedString(256),
+  created_at: appRequestTimestampSchema,
+} as const;
+
+const appRequestSummaryV1Schema = z.object(appRequestSummaryV1Shape).strict();
+
 export const appRequestSummarySchema = z
   .object({
-    request_id: utf8BoundedString(512).min(1),
-    trace_id: utf8BoundedString(512),
-    session_id: utf8BoundedString(512),
-    api_key_id: utf8BoundedString(512),
-    ip: utf8BoundedString(128),
-    method: utf8BoundedString(32),
-    model: utf8BoundedString(256),
-    provider_ref: z.string().regex(providerRefPattern),
-    provider_display: utf8BoundedString(256),
-    endpoint: utf8BoundedString(512),
-    stream: z.boolean(),
-    status_code: z.number().int().min(0).max(999),
-    latency_ms: appRequestSafeIntegerSchema,
-    first_chunk_ms: appRequestSafeIntegerSchema,
-    prompt_tokens: appRequestCountSchema,
-    completion_tokens: appRequestCountSchema,
-    total_tokens: appRequestCountSchema,
-    cached_tokens: appRequestCountSchema,
-    reasoning_tokens: appRequestCountSchema,
-    estimated_cost: appRequestCostSchema,
-    currency: utf8BoundedString(16),
-    finish_reason: utf8BoundedString(256),
-    created_at: appRequestTimestampSchema,
+    ...appRequestSummaryV1Shape,
+    request_ref: z.string().regex(appRequestRefPattern),
+    request_filterable: z.boolean(),
+    trace_filterable: z.boolean(),
   })
   .strict() satisfies z.ZodType<GeneratedAppRequestSummary>;
 
-export const appRequestsResponseSchema = z
-  .object({
-    requests: z.array(appRequestSummarySchema).max(200),
-    limit: z.number().int().min(1).max(200),
-    next_cursor: utf8BoundedString(4096).min(1).optional(),
-    previous_cursor: utf8BoundedString(4096).min(1).optional(),
-    generated_at: appRequestTimestampSchema,
-  })
+const appRequestsEnvelopeShape = {
+  limit: z.number().int().min(1).max(200),
+  next_cursor: utf8BoundedString(4096).min(1).optional(),
+  previous_cursor: utf8BoundedString(4096).min(1).optional(),
+  generated_at: appRequestTimestampSchema,
+} as const;
+
+const appRequestsV2ResponseSchema = z
+  .object({ requests: z.array(appRequestSummarySchema).max(200), ...appRequestsEnvelopeShape })
   .strict() satisfies z.ZodType<GeneratedAppRequestsResponse>;
+
+const appRequestsV1ResponseSchema = z
+  .object({ requests: z.array(appRequestSummaryV1Schema).max(200), ...appRequestsEnvelopeShape })
+  .strict();
+
+const legacyRequestRefSuffix = "0".repeat(21);
+
+function legacyRequestRef(index: number): string {
+  const ordinal = index.toString(36).padStart(22, "0");
+  return `req_${ordinal}.${legacyRequestRefSuffix}`;
+}
+
+// During a non-sticky rolling deployment, a v0.83 UI request can reach a v0.82
+// pod after bootstrap. Decode that already-safe projection conservatively: the
+// list remains usable, while identity-dependent filters and trace handoff stay
+// disabled until a v2 response arrives.
+export const appRequestsResponseSchema = z.union([
+  appRequestsV2ResponseSchema.transform((response) => ({
+    ...response,
+    request_contract_version: 2 as const,
+  })),
+  appRequestsV1ResponseSchema.transform((response) => ({
+    ...response,
+    request_contract_version: 1 as const,
+    requests: response.requests.map((request, index) => ({
+      ...request,
+      request_ref: legacyRequestRef(index),
+      request_filterable: false,
+      trace_filterable: false,
+    })),
+  })),
+]);
 
 export const appRequestsQuerySchema = z
   .object({
     limit: z.number().int().min(1).max(200).optional(),
-    from: z.string().max(64).optional(),
-    to: z.string().max(64).optional(),
-    tz: z.string().max(64).optional(),
+    from: utf8BoundedString(64).optional(),
+    to: utf8BoundedString(64).optional(),
+    tz: utf8BoundedString(64).optional(),
     status: z
       .union([z.enum(["success", "error", "4xx", "5xx"]), z.string().regex(/^[1-5][0-9]{2}$/)])
       .optional(),
-    model: z.string().max(256).optional(),
+    model: utf8BoundedString(256).optional(),
     provider_ref: z.string().regex(providerRefPattern).optional(),
-    request_id: z.string().max(512).optional(),
-    trace_id: z.string().max(512).optional(),
-    session_id: z.string().max(512).optional(),
-    api_key_id: z.string().max(512).optional(),
-    ip: z.string().max(128).optional(),
-    language: z.string().max(64).optional(),
-    cursor: z.string().max(4096).optional(),
+    request_id: utf8BoundedString(512).optional(),
+    trace_id: utf8BoundedString(512).optional(),
+    session_id: utf8BoundedString(512).optional(),
+    api_key_id: utf8BoundedString(512).optional(),
+    ip: utf8BoundedString(128).refine(isValidIPAddress, "올바른 IP 주소를 입력하세요.").optional(),
+    language: utf8BoundedString(64).optional(),
+    cursor: utf8BoundedString(4096).optional(),
   })
   .strict();
 

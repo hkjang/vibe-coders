@@ -2,6 +2,8 @@ package store
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"time"
 )
 
@@ -53,13 +55,31 @@ func (s *SQLStore) PurgeText2SQLReplayBundles(ctx context.Context, days int) (in
 
 // GetText2SQLReplayBundle fetches a replay bundle by query log ID or request ID.
 func (s *SQLStore) GetText2SQLReplayBundle(ctx context.Context, idOrRequestID string) (Text2SQLReplayBundle, bool, error) {
+	if bundle, found, err := s.GetText2SQLReplayBundleByID(ctx, idOrRequestID); err != nil || found {
+		return bundle, found, err
+	}
+	return s.GetText2SQLReplayBundleByRequestID(ctx, idOrRequestID)
+}
+
+func (s *SQLStore) GetText2SQLReplayBundleByID(ctx context.Context, id string) (Text2SQLReplayBundle, bool, error) {
+	return s.getText2SQLReplayBundle(ctx, "id", id)
+}
+
+func (s *SQLStore) GetText2SQLReplayBundleByRequestID(ctx context.Context, requestID string) (Text2SQLReplayBundle, bool, error) {
+	return s.getText2SQLReplayBundle(ctx, "request_id", requestID)
+}
+
+func (s *SQLStore) getText2SQLReplayBundle(ctx context.Context, column, value string) (Text2SQLReplayBundle, bool, error) {
 	var b Text2SQLReplayBundle
 	err := s.db.QueryRowContext(ctx, s.bind(`SELECT id, COALESCE(request_id,''), COALESCE(schema_name,''), COALESCE(schema_version,0),
 		COALESCE(system_prompt,''), COALESCE(schema_context,''), COALESCE(glossary_text,''), COALESCE(permission_snapshot,''), COALESCE(generated_sql,''), COALESCE(created_at,'')
-		FROM text2sql_replay_bundles WHERE id = ? OR request_id = ? LIMIT 1`), idOrRequestID, idOrRequestID).
+		FROM text2sql_replay_bundles WHERE `+column+` = ? ORDER BY created_at DESC, id DESC LIMIT 1`), value).
 		Scan(&b.ID, &b.RequestID, &b.SchemaName, &b.SchemaVersion, &b.SystemPrompt, &b.SchemaContext, &b.GlossaryText, &b.PermissionSnapshot, &b.GeneratedSQL, &b.CreatedAt)
-	if err != nil {
+	if errors.Is(err, sql.ErrNoRows) {
 		return Text2SQLReplayBundle{}, false, nil
+	}
+	if err != nil {
+		return Text2SQLReplayBundle{}, false, err
 	}
 	return b, true, nil
 }

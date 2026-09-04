@@ -3,7 +3,6 @@ package proxy
 import (
 	"net/http"
 	"sort"
-	"strings"
 	"time"
 
 	"vibe-coders/internal/store"
@@ -37,16 +36,29 @@ type requestTrace struct {
 // data (request_logs + tool_invocations + text2sql_spans) keyed by request_id/trace_id.
 // GET /admin/requests/{id}/trace
 func (s *Server) handleRequestTrace(w http.ResponseWriter, r *http.Request) {
-	id := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/admin/requests/"), "/trace")
+	if r.Method != http.MethodGet {
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
+	id, valid := adminTracePathID(r.URL.Path, "/admin/requests/", "/trace")
+	if !valid {
+		writeOpenAIError(w, http.StatusBadRequest, "invalid request id", "invalid_request_error", "invalid_request_id")
+		return
+	}
 	detail, err := s.db.RequestDetail(r.Context(), id)
 	if err != nil {
 		if err == store.ErrNotFound {
 			writeOpenAIError(w, http.StatusNotFound, "request not found", "invalid_request_error", "not_found")
 			return
 		}
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "trace_failed")
+		writeOpenAIError(w, http.StatusInternalServerError, "request trace query failed", "server_error", "trace_failed")
 		return
 	}
+	if !s.canViewRequestDetail(r, detail.Request) {
+		writeOpenAIError(w, http.StatusForbidden, "request is outside your team scope", "permission_error", "cross_team_access_denied")
+		return
+	}
+	s.maskRequestDetail(r, &detail)
 	writeJSON(w, http.StatusOK, buildRequestTrace(detail))
 }
 

@@ -30,6 +30,10 @@ func TestAppUIBootstrapAndRuntimeToggle(t *testing.T) {
 	if authenticated, _ := auth["authenticated"].(bool); !authenticated {
 		t.Fatal("auth-disabled deployment without legacy tokens should bootstrap as an operator")
 	}
+	prefixes, _ := auth["credential_prefixes"].([]any)
+	if len(prefixes) != 2 || prefixes[0] != "vc_sk_" || prefixes[1] != "vc_sa_" {
+		t.Fatalf("bootstrap credential prefixes = %#v", prefixes)
+	}
 	features, _ := body["migration_registry"].([]any)
 	if len(features) != len(appUIFeatures) {
 		t.Fatalf("migration registry length = %d, want %d", len(features), len(appUIFeatures))
@@ -59,7 +63,7 @@ func TestAppUIBootstrapAndRuntimeToggle(t *testing.T) {
 		t.Fatalf("legacy route map must be empty when fallback is disabled: %#v", legacyRoutes)
 	}
 	allowed, _ := body["allowed_features"].([]any)
-	wantAllowed := []string{"overview", "gateway.health", "gateway.providers", "gateway.models", "observability.requests", "system.health"}
+	wantAllowed := []string{"overview", "gateway.health", "gateway.providers", "gateway.models", "observability.requests", "observability.traces", "system.health"}
 	if len(allowed) != len(wantAllowed) {
 		t.Fatalf("implemented previews allowed without Legacy fallback = %#v, want %v", allowed, wantAllowed)
 	}
@@ -67,6 +71,33 @@ func TestAppUIBootstrapAndRuntimeToggle(t *testing.T) {
 		if allowed[i] != want {
 			t.Fatalf("implemented previews allowed without Legacy fallback = %#v, want %v", allowed, wantAllowed)
 		}
+	}
+}
+
+func TestUICredentialPrefixesAreBoundedAndDeduplicated(t *testing.T) {
+	got := uiCredentialPrefixes(config.AuthConfig{
+		APIKeyPrefix: "corp_", ServiceKeyPrefix: "corp_",
+		HistoricalKeyPrefixes: []string{"old_", "corp_", "legacy"},
+	})
+	if strings.Join(got, ",") != "corp_,vc_sk_,vc_sa_,old_,legacy" {
+		t.Fatalf("custom credential prefixes = %#v", got)
+	}
+	if got := uiCredentialPrefixes(config.AuthConfig{APIKeyPrefix: strings.Repeat("x", 513)}); strings.Join(got, ",") != "vc_sk_,vc_sa_" {
+		t.Fatalf("oversized credential prefix must be omitted while built-ins remain: %#v", got)
+	}
+}
+
+func TestHistoricalCredentialPrefixesApplyToProviderProjection(t *testing.T) {
+	server := &Server{cfg: config.Config{Auth: config.AuthConfig{
+		APIKeyPrefix: "corp_", ServiceKeyPrefix: "svc_",
+		HistoricalKeyPrefixes: []string{"oldfoo_"},
+	}}}
+	oldKey := "oldfoo_" + strings.Repeat("A", 43)
+	if server.modelsProviderLabelSafeForConfig(oldKey) {
+		t.Fatal("historical generated key must not cross provider display boundaries")
+	}
+	if !server.modelsProviderLabelSafeForConfig("model-" + strings.Repeat("A", 43)) {
+		t.Fatal("ordinary long model identifier must remain visible")
 	}
 }
 
@@ -359,7 +390,7 @@ func TestRequestExplorerIsAdminReadOnlyPreview(t *testing.T) {
 		if got := strings.Join(feature.EnabledRoles, ","); got != wantRoles {
 			t.Fatalf("request explorer roles = %q, want %q", got, wantRoles)
 		}
-		if feature.MinimumAPIVersion != "v0.82.1" || feature.RolloutPercent != 100 || !feature.FallbackEnabled {
+		if feature.MinimumAPIVersion != "v0.83.0" || feature.RolloutPercent != 100 || !feature.FallbackEnabled {
 			t.Fatalf("request explorer rollout contract is incomplete: %+v", feature)
 		}
 		if _, ok := appUIImplementedFeatureIDs[feature.FeatureID]; !ok {
@@ -368,6 +399,30 @@ func TestRequestExplorerIsAdminReadOnlyPreview(t *testing.T) {
 		return
 	}
 	t.Fatal("request explorer feature is missing")
+}
+
+func TestTraceExplorerIsAdminReadOnlyPreview(t *testing.T) {
+	wantRoles := "super_admin,admin,ops_admin,ai_admin,security_admin,billing_admin,readonly_admin"
+	for i := range appUIFeatures {
+		feature := appUIFeatures[i]
+		if feature.FeatureID != "observability.traces" {
+			continue
+		}
+		if feature.Status != "preview_read_only" || !feature.ReadOnly || feature.RequiredPermission != "admin:read" {
+			t.Fatalf("trace explorer permission contract widened: %+v", feature)
+		}
+		if got := strings.Join(feature.EnabledRoles, ","); got != wantRoles {
+			t.Fatalf("trace explorer roles = %q, want %q", got, wantRoles)
+		}
+		if feature.MinimumAPIVersion != "v0.83.0" || feature.RolloutPercent != 100 || !feature.FallbackEnabled {
+			t.Fatalf("trace explorer rollout contract is incomplete: %+v", feature)
+		}
+		if _, ok := appUIImplementedFeatureIDs[feature.FeatureID]; !ok {
+			t.Fatal("trace explorer must be marked implemented")
+		}
+		return
+	}
+	t.Fatal("trace explorer feature is missing")
 }
 
 func TestOverviewMigrationContractRemainsConservative(t *testing.T) {

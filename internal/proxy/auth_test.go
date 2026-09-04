@@ -3,6 +3,7 @@ package proxy
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -94,8 +95,9 @@ func TestAdminLoginFlowBootContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	var meOut struct {
-		AuthEnabled bool `json:"auth_enabled"`
-		User        struct {
+		AuthEnabled        bool     `json:"auth_enabled"`
+		CredentialPrefixes []string `json:"credential_prefixes"`
+		User               struct {
 			Email string `json:"email"`
 			Role  string `json:"role"`
 		} `json:"user"`
@@ -106,6 +108,9 @@ func TestAdminLoginFlowBootContract(t *testing.T) {
 	me2.Body.Close()
 	if !meOut.AuthEnabled || meOut.User.Email != "root@example.com" || meOut.User.Role != "super_admin" {
 		t.Fatalf("unexpected /auth/me after login: %+v", meOut)
+	}
+	if strings.Join(meOut.CredentialPrefixes, ",") != "vc_sk_,vc_sa_" {
+		t.Fatalf("unexpected /auth/me credential prefixes: %#v", meOut.CredentialPrefixes)
 	}
 }
 
@@ -323,7 +328,7 @@ func TestHardDeleteKeyTeamChangeAndScopeEdit(t *testing.T) {
 }
 
 func TestTeamAdminIsolationAndRoleEscalationGuards(t *testing.T) {
-	_, proxy := newAuthTestServer(t, "http://example.invalid")
+	db, proxy := newAuthTestServer(t, "http://example.invalid")
 	defer proxy.Close()
 
 	login := postJSON(t, proxy.URL+"/auth/login", "", map[string]string{"email": "root@example.com", "password": "correct-password"})
@@ -457,6 +462,534 @@ func TestTeamAdminIsolationAndRoleEscalationGuards(t *testing.T) {
 	ownKey.Body.Close()
 	if ownKey.StatusCode != http.StatusCreated || ownKeyOut.APIKey.Team != "team_alpha" {
 		t.Fatalf("team_admin key should be forced to own team, status=%d out=%+v", ownKey.StatusCode, ownKeyOut)
+	}
+	if err := db.UpsertAPIKey(t.Context(), store.APIKeyRecord{
+		ID: "padded-alpha-key", Name: "malformed legacy key", KeyHash: "padded-alpha-key-hash",
+		Team: " team_alpha ", Status: "active",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	createdAt := time.Now().UTC().Add(-time.Minute)
+	for _, fixture := range []struct {
+		id       string
+		apiKeyID string
+		ip       string
+		model    string
+		language string
+		tag      string
+		session  string
+	}{
+		{id: "req-alpha-trace", apiKeyID: alphaKeyOut.APIKey.ID, ip: "198.51.100.10", model: "alpha-model", language: "ko", tag: "alpha-tag", session: "scope-session-shared"},
+		{id: "req-beta-trace", apiKeyID: betaKeyOut.APIKey.ID, ip: "198.51.100.10", model: "beta-model", language: "en", tag: "beta-tag", session: "scope-session-shared"},
+		{id: "req-beta-only-trace", apiKeyID: betaKeyOut.APIKey.ID, ip: "198.51.100.20", model: "beta-only-model", language: "fr", tag: "beta-only-tag", session: "scope-session-beta-only"},
+		{id: "req-padded-alpha-trace", apiKeyID: "padded-alpha-key", ip: "198.51.100.30", model: "padded-model", language: "de", tag: "padded-tag", session: "scope-session-padded"},
+	} {
+		if err := db.InsertLogRecord(t.Context(), store.LogRecord{
+			Request: store.RequestLog{
+				ID: fixture.id, TraceID: "trace-shared", APIKeyID: fixture.apiKeyID,
+				Method: http.MethodPost, Endpoint: "/v1/chat/completions", Model: fixture.model, Provider: "scope-provider", ClientIP: fixture.ip,
+				SessionID:  fixture.session,
+				StatusCode: http.StatusOK, CreatedAt: createdAt,
+			},
+			Prompts: []store.PromptLog{{
+				ID: "prompt-" + fixture.id, RequestID: fixture.id, Role: "user",
+				ContentText: fixture.tag + "-private", RedactedText: fixture.tag + "-safe", CreatedAt: createdAt,
+			}},
+			Languages: []store.LanguageStat{{
+				ID: "language-" + fixture.id, RequestID: fixture.id, Language: fixture.language,
+				Confidence: 1, Evidence: fixture.language, CreatedAt: createdAt,
+			}},
+			CodeVerify: &store.CodeVerifyLog{
+				ID: "code-" + fixture.id, RequestID: fixture.id, TraceID: "trace-shared",
+				HasCode: true, Risk: "low", CreatedAt: createdAt,
+			},
+			Tools: []store.ToolInvocation{{
+				ID: "tool-" + fixture.id, RequestID: fixture.id, TraceID: "trace-shared", APIKeyID: fixture.apiKeyID,
+				ServerLabel: "scope-mcp", ToolName: "scope-read", Source: "call", IsMCP: true, CreatedAt: createdAt,
+			}},
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.UpsertRequestNote(t.Context(), store.RequestNote{
+			RequestID: fixture.id, Tags: []string{fixture.tag}, Note: fixture.tag, CreatedBy: "scope-test", UpdatedAt: createdAt,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := db.InsertText2SQLSpans(t.Context(), []store.Text2SQLSpan{
+		{ID: "span-alpha-scope", RequestID: "req-alpha-trace", TraceID: "trace-shared", Stage: "validate", Status: "ok", Model: "alpha-model", Detail: "alpha-owner@example.com", CreatedAt: createdAt},
+		{ID: "span-beta-scope", RequestID: "req-beta-trace", TraceID: "trace-shared", Stage: "validate", Status: "ok", Model: "beta-model", Detail: "beta-owner@example.com", CreatedAt: createdAt},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, text2SQLLog := range []store.Text2SQLQueryLog{
+		{ID: "text2sql-alpha-scope", RequestID: "req-alpha-trace", APIKeyID: alphaKeyOut.APIKey.ID, Team: "team_alpha", VirtualModel: "vibe/text2sql-preview", UpstreamModel: "alpha-model", Mode: "preview", Question: "alpha question private", GeneratedSQL: "SELECT alpha_private", Valid: true, CostKRW: 1, CreatedAt: createdAt},
+		{ID: "text2sql-beta-scope", RequestID: "req-beta-trace", APIKeyID: betaKeyOut.APIKey.ID, Team: "team_beta", VirtualModel: "vibe/text2sql-preview", UpstreamModel: "beta-model", Mode: "preview", Question: "beta question private", GeneratedSQL: "SELECT beta_private", Error: "beta error private", FailureCategory: "beta-private", CostKRW: 2, CreatedAt: createdAt},
+	} {
+		if err := db.InsertText2SQLLog(t.Context(), text2SQLLog); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for index := 0; index < 5; index++ {
+		for _, fixture := range []struct {
+			id, requestID, apiKeyID, team, model, question, sql string
+			cost                                                float64
+		}{
+			{id: fmt.Sprintf("text2sql-alpha-risk-%d", index), requestID: "req-alpha-trace", apiKeyID: alphaKeyOut.APIKey.ID, team: "team_alpha", model: "alpha-model", question: "alpha question private", sql: "SELECT alpha_private", cost: 0},
+			{id: fmt.Sprintf("text2sql-beta-risk-%d", index), requestID: "req-beta-trace", apiKeyID: betaKeyOut.APIKey.ID, team: "team_beta", model: "beta-model", question: "beta question private", sql: "SELECT beta_private", cost: 0},
+		} {
+			if err := db.InsertText2SQLLog(t.Context(), store.Text2SQLQueryLog{
+				ID: fixture.id, RequestID: fixture.requestID, APIKeyID: fixture.apiKeyID, Team: fixture.team,
+				VirtualModel: "vibe/text2sql-preview", UpstreamModel: fixture.model, Mode: "preview",
+				Question: fixture.question, GeneratedSQL: fixture.sql, Valid: true, RejectReason: fixture.team + " reject private",
+				FailureCategory: "permission_denied", ExplainRisk: 80, CostKRW: fixture.cost, CreatedAt: createdAt.Add(time.Duration(index+1) * time.Second),
+			}); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	for _, schema := range []store.Text2SQLSchema{
+		{Team: "", Name: "schema-global-scope", Dialect: "postgres", SchemaText: "global schema private", AllowedTables: []string{"global_private"}, Enabled: true},
+		{Team: "team_alpha", Name: "schema-alpha-scope", Dialect: "postgres", SchemaText: "alpha schema private", AllowedTables: []string{"alpha_private"}, Enabled: true},
+		{Team: "team_beta", Name: "schema-beta-scope", Dialect: "postgres", SchemaText: "beta schema private", AllowedTables: []string{"beta_private"}, Enabled: true},
+		{Team: " team_alpha ", Name: "schema-malformed-scope", Dialect: "postgres", SchemaText: "malformed schema private", AllowedTables: []string{"malformed_private"}, Enabled: true},
+	} {
+		if err := db.UpsertText2SQLSchema(t.Context(), schema); err != nil {
+			t.Fatal(err)
+		}
+	}
+	const text2SQLProfileCredential = "vc_sk_abcdefghijklmnopqrstuvwxyzABCDEF"
+	if err := db.UpsertText2SQLProfile(t.Context(), store.Text2SQLProfile{
+		VirtualModel: "vibe/text2sql-team-scope", Mode: "preview", UpstreamModel: text2SQLProfileCredential,
+		SummaryModel: text2SQLProfileCredential, SchemaName: "schema-alpha-scope", ExecConnectionID: text2SQLProfileCredential, Enabled: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range []store.PolicyDecisionEvent{
+		{ID: "policy-alpha-scope", RequestID: "req-alpha-trace", APIKeyID: text2SQLProfileCredential, UserID: "alpha-owner@example.com", TeamID: "team_alpha", Decision: "allow", Reason: text2SQLProfileCredential, CreatedAt: createdAt},
+		{ID: "policy-beta-scope", RequestID: "req-beta-trace", APIKeyID: text2SQLProfileCredential, UserID: "beta-owner@example.com", TeamID: "team_beta", Decision: "allow", Reason: "beta policy private", CreatedAt: createdAt},
+	} {
+		if err := db.InsertPolicyDecisionEvent(t.Context(), event); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, approval := range []store.Approval{
+		{ID: "approval-alpha-scope", RequestID: "req-alpha-trace", APIKeyID: text2SQLProfileCredential, UserID: "alpha-owner@example.com", TeamID: "team_alpha", SubjectType: "request", SubjectID: text2SQLProfileCredential, Status: "pending", Reason: "alpha approval private", Payload: text2SQLProfileCredential, ExpiresAt: createdAt.Add(2 * time.Hour), CreatedAt: createdAt},
+		{ID: "approval-beta-scope", RequestID: "req-beta-trace", APIKeyID: text2SQLProfileCredential, UserID: "beta-owner@example.com", TeamID: "team_beta", SubjectType: "request", SubjectID: text2SQLProfileCredential, Status: "pending", Reason: "beta approval private", Payload: text2SQLProfileCredential, ExpiresAt: createdAt.Add(2 * time.Hour), CreatedAt: createdAt},
+	} {
+		if err := db.InsertApproval(t.Context(), approval); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, event := range []store.SecretEvent{
+		{ID: "secret-alpha-scope", RequestID: "req-alpha-trace", APIKeyID: text2SQLProfileCredential, UserID: "alpha-owner@example.com", TeamID: "team_alpha", SecretType: "api_key", Action: "mask", Location: text2SQLProfileCredential, MatchedHash: text2SQLProfileCredential, CreatedAt: createdAt},
+		{ID: "secret-beta-scope", RequestID: "req-beta-trace", APIKeyID: text2SQLProfileCredential, UserID: "beta-owner@example.com", TeamID: "team_beta", SecretType: "api_key", Action: "mask", Location: "beta secret private", MatchedHash: text2SQLProfileCredential, CreatedAt: createdAt},
+	} {
+		if err := db.InsertSecretEvent(t.Context(), event); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, bundle := range []store.Text2SQLReplayBundle{
+		{ID: "replay-alpha-scope", RequestID: "req-alpha-trace", SystemPrompt: "alpha replay private", GeneratedSQL: "SELECT alpha_private"},
+		{ID: "replay-beta-scope", RequestID: "req-beta-trace", SystemPrompt: "beta replay private", GeneratedSQL: "SELECT beta_private"},
+	} {
+		if err := db.PutText2SQLReplayBundle(t.Context(), bundle); err != nil {
+			t.Fatal(err)
+		}
+	}
+	getWithToken := func(token, path string) (int, []byte) {
+		t.Helper()
+		request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, proxy.URL+path, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Header.Set("Authorization", "Bearer "+token)
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, err := io.ReadAll(response.Body)
+		response.Body.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response.StatusCode, body
+	}
+	teamGet := func(path string) (int, []byte) { return getWithToken(teamTok.AccessToken, path) }
+	rootGet := func(path string) (int, []byte) { return getWithToken(rootTok.AccessToken, path) }
+
+	requestsStatus, requestsBody := teamGet("/admin/requests?limit=20")
+	if requestsStatus != http.StatusOK || !strings.Contains(string(requestsBody), "req-alpha-trace") {
+		t.Fatalf("team_admin request list lost own-team row: status=%d body=%s", requestsStatus, requestsBody)
+	}
+	for _, denied := range []string{"req-beta-trace", "req-beta-only-trace", "req-padded-alpha-trace"} {
+		if strings.Contains(string(requestsBody), denied) {
+			t.Fatalf("team_admin request list exposed %q: %s", denied, requestsBody)
+		}
+	}
+	waterfallStatus, waterfallBody := teamGet("/admin/mcp/requests/req-alpha-trace/waterfall")
+	if waterfallStatus != http.StatusOK || !strings.Contains(string(waterfallBody), "req-alpha-trace") {
+		t.Fatalf("team_admin MCP waterfall lost own request: status=%d body=%s", waterfallStatus, waterfallBody)
+	}
+	if status, body := teamGet("/admin/mcp/requests/req-beta-trace/waterfall"); status != http.StatusForbidden {
+		t.Fatalf("team_admin could read another team's MCP waterfall: status=%d body=%s", status, body)
+	}
+	spanStatus, spanBody := teamGet("/admin/text2sql/spans?request_id=req-alpha-trace")
+	if spanStatus != http.StatusOK || !strings.Contains(string(spanBody), "span-alpha-scope") || strings.Contains(string(spanBody), "alpha-owner@example.com") {
+		t.Fatalf("team_admin own Text2SQL spans were missing or unmasked: status=%d body=%s", spanStatus, spanBody)
+	}
+	if status, body := teamGet("/admin/text2sql/spans?request_id=req-beta-trace"); status != http.StatusForbidden {
+		t.Fatalf("team_admin could read another team's Text2SQL spans: status=%d body=%s", status, body)
+	}
+	if status, body := teamGet("/admin/text2sql/replay?request_id=req-alpha-trace"); status != http.StatusForbidden || strings.Contains(string(body), "alpha replay private") {
+		t.Fatalf("team_admin could read a raw Text2SQL replay: status=%d body=%s", status, body)
+	}
+	text2SQLStatus, text2SQLBody := teamGet("/admin/text2sql?window=7d")
+	if text2SQLStatus != http.StatusOK || !strings.Contains(string(text2SQLBody), "text2sql-alpha-scope") ||
+		!strings.Contains(string(text2SQLBody), text2SQLSensitiveContentOmitted) {
+		t.Fatalf("team_admin Text2SQL overview lost safe own-team metadata: status=%d body=%s", text2SQLStatus, text2SQLBody)
+	}
+	for _, denied := range []string{
+		"text2sql-beta-scope", "alpha question private", "SELECT alpha_private", "beta question private", "SELECT beta_private", "beta error private",
+		"schema-beta-scope", "schema-malformed-scope", "alpha schema private", "global schema private", "beta schema private", "malformed schema private",
+		"alpha_private", "global_private", "beta_private", "malformed_private", text2SQLProfileCredential,
+	} {
+		if strings.Contains(string(text2SQLBody), denied) {
+			t.Fatalf("team_admin Text2SQL overview exposed %q: %s", denied, text2SQLBody)
+		}
+	}
+	for _, expected := range []string{"schema-alpha-scope", "schema-global-scope", text2SQLSensitiveContentOmitted} {
+		if !strings.Contains(string(text2SQLBody), expected) {
+			t.Fatalf("team_admin Text2SQL overview lost safe schema marker %q: %s", expected, text2SQLBody)
+		}
+	}
+	var text2SQLPayload struct {
+		Stats store.Text2SQLStats `json:"stats"`
+	}
+	if err := json.Unmarshal(text2SQLBody, &text2SQLPayload); err != nil {
+		t.Fatal(err)
+	}
+	if text2SQLPayload.Stats.Total != 6 || text2SQLPayload.Stats.CostKRW != 1 {
+		t.Fatalf("team_admin Text2SQL statistics escaped team scope: %+v", text2SQLPayload.Stats)
+	}
+	for _, check := range []struct {
+		path         string
+		want         []string
+		mustNotExist []string
+	}{
+		{path: "/admin/text2sql/risk-queue?window=7d", want: []string{"text2sql-alpha-risk-0", text2SQLSensitiveContentOmitted}, mustNotExist: []string{"text2sql-beta-risk-0", "alpha question private", "SELECT alpha_private", "beta question private"}},
+		{path: "/admin/text2sql/miners?window=7d&min_count=2", want: []string{"alpha", text2SQLSensitiveContentOmitted}, mustNotExist: []string{"beta", "alpha question private", "SELECT alpha_private"}},
+		{path: "/admin/text2sql/prompt-dna?window=7d&min_count=2", want: []string{"\"count\":6", text2SQLSensitiveContentOmitted}, mustNotExist: []string{"alpha question private", "beta question private", "\"count\":12"}},
+		{path: "/admin/text2sql/anomalies?window=7d", want: []string{alphaKeyOut.APIKey.ID, text2SQLSensitiveContentOmitted}, mustNotExist: []string{betaKeyOut.APIKey.ID, "alpha question private", "beta question private"}},
+	} {
+		status, body := teamGet(check.path)
+		if status != http.StatusOK {
+			t.Fatalf("team_admin safe Text2SQL endpoint failed for %s: status=%d body=%s", check.path, status, body)
+		}
+		for _, expected := range check.want {
+			if !strings.Contains(string(body), expected) {
+				t.Fatalf("team_admin safe Text2SQL endpoint %s lost %q: %s", check.path, expected, body)
+			}
+		}
+		for _, denied := range check.mustNotExist {
+			if strings.Contains(string(body), denied) {
+				t.Fatalf("team_admin safe Text2SQL endpoint %s exposed %q: %s", check.path, denied, body)
+			}
+		}
+	}
+	for _, path := range []string{
+		"/admin/text2sql/tables?schema=schema-alpha-scope", "/admin/text2sql/reports", "/admin/text2sql/schema-impact?schema=schema-alpha-scope",
+		"/admin/text2sql/glossary", "/admin/text2sql/permissions", "/admin/text2sql/connections", "/admin/text2sql/registry/export",
+		"/admin/text2sql/profiles", "/admin/text2sql/golden", "/admin/text2sql/schemas",
+		"/admin/routing/domain-decisions", "/admin/routing/domain-examples", "/admin/routing/domain-review",
+		"/admin/chat-test/multi-run/runs", "/admin/chat-test/multi-run/runs/nonexistent",
+	} {
+		if status, body := teamGet(path); status != http.StatusForbidden || strings.Contains(string(body), "alpha schema private") {
+			t.Fatalf("team_admin sensitive admin endpoint was not fail-closed for %s: status=%d body=%s", path, status, body)
+		}
+	}
+	rootText2SQLStatus, rootText2SQLBody := rootGet("/admin/text2sql?window=7d")
+	if rootText2SQLStatus != http.StatusOK {
+		t.Fatalf("privileged Text2SQL overview failed: status=%d body=%s", rootText2SQLStatus, rootText2SQLBody)
+	}
+	for _, expected := range []string{"alpha question private", "beta question private", "alpha schema private", "beta schema private", text2SQLProfileCredential} {
+		if !strings.Contains(string(rootText2SQLBody), expected) {
+			t.Fatalf("privileged Text2SQL overview lost raw compatibility marker %q: %s", expected, rootText2SQLBody)
+		}
+	}
+	for _, check := range []struct {
+		path, ownID, otherID string
+	}{
+		{path: "/admin/policies/decisions?team_id=team_beta", ownID: "policy-alpha-scope", otherID: "policy-beta-scope"},
+		{path: "/admin/approvals?team_id=team_beta", ownID: "approval-alpha-scope", otherID: "approval-beta-scope"},
+		{path: "/admin/security/secrets?team_id=team_beta", ownID: "secret-alpha-scope", otherID: "secret-beta-scope"},
+	} {
+		status, body := teamGet(check.path)
+		if status != http.StatusOK || !strings.Contains(string(body), check.ownID) {
+			t.Fatalf("team_admin governance list lost own scope for %s: status=%d body=%s", check.path, status, body)
+		}
+		for _, denied := range []string{check.otherID, "beta-owner@example.com", "alpha-owner@example.com", text2SQLProfileCredential, "beta policy private", "beta approval private", "beta secret private"} {
+			if strings.Contains(string(body), denied) {
+				t.Fatalf("team_admin governance list %s exposed %q: %s", check.path, denied, body)
+			}
+		}
+	}
+	rootPolicyStatus, rootPolicyBody := rootGet("/admin/policies/decisions?team_id=team_beta")
+	if rootPolicyStatus != http.StatusOK || !strings.Contains(string(rootPolicyBody), "policy-beta-scope") || !strings.Contains(string(rootPolicyBody), "beta-owner@example.com") {
+		t.Fatalf("privileged governance list lost raw compatibility: status=%d body=%s", rootPolicyStatus, rootPolicyBody)
+	}
+
+	sessionsStatus, sessionsBody := teamGet("/admin/sessions?days=365")
+	var sessionsPayload struct {
+		Sessions []store.SessionSummary `json:"sessions"`
+	}
+	if err := json.Unmarshal(sessionsBody, &sessionsPayload); err != nil {
+		t.Fatal(err)
+	}
+	if sessionsStatus != http.StatusOK || len(sessionsPayload.Sessions) != 1 ||
+		sessionsPayload.Sessions[0].SessionID != "scope-session-shared" || sessionsPayload.Sessions[0].Requests != 1 ||
+		sessionsPayload.Sessions[0].LastMessage != "alpha-tag-safe" {
+		t.Fatalf("team_admin session list escaped team scope: status=%d payload=%+v body=%s", sessionsStatus, sessionsPayload, sessionsBody)
+	}
+	flightStatus, flightBody := teamGet("/admin/sessions/scope-session-shared/flight-recorder")
+	if flightStatus != http.StatusOK || !strings.Contains(string(flightBody), "req-alpha-trace") {
+		t.Fatalf("team_admin flight recorder lost own request: status=%d body=%s", flightStatus, flightBody)
+	}
+	for _, denied := range []string{"req-beta-trace", "beta-tag", "req-padded-alpha-trace"} {
+		if strings.Contains(string(flightBody), denied) {
+			t.Fatalf("team_admin flight recorder exposed %q: %s", denied, flightBody)
+		}
+	}
+	if status, body := teamGet("/admin/sessions/scope-session-beta-only/flight-recorder"); status != http.StatusNotFound {
+		t.Fatalf("team_admin could enumerate another team's session: status=%d body=%s", status, body)
+	}
+
+	promptStatus, promptBody := teamGet("/admin/prompts?q=alpha-tag-safe")
+	if promptStatus != http.StatusOK || !strings.Contains(string(promptBody), "req-alpha-trace") {
+		t.Fatalf("team_admin prompt search lost own redacted prompt: status=%d body=%s", promptStatus, promptBody)
+	}
+	for _, query := range []string{"alpha-tag-private", "beta-tag-safe", "beta-tag-private"} {
+		status, body := teamGet("/admin/prompts?q=" + query)
+		if status != http.StatusOK || strings.Contains(string(body), "req-alpha-trace") || strings.Contains(string(body), "req-beta-trace") {
+			t.Fatalf("team_admin prompt search exposed raw or cross-team match for %q: status=%d body=%s", query, status, body)
+		}
+	}
+	mcpStatus, mcpBody := teamGet("/admin/mcp/requests?server=scope-mcp&tool=scope-read")
+	if mcpStatus != http.StatusOK || !strings.Contains(string(mcpBody), "req-alpha-trace") {
+		t.Fatalf("team_admin MCP request list lost own row: status=%d body=%s", mcpStatus, mcpBody)
+	}
+	for _, denied := range []string{"req-beta-trace", "req-beta-only-trace", "req-padded-alpha-trace"} {
+		if strings.Contains(string(mcpBody), denied) {
+			t.Fatalf("team_admin MCP request list exposed %q: %s", denied, mcpBody)
+		}
+	}
+
+	ipsStatus, ipsBody := teamGet("/admin/ips")
+	var ipsPayload struct {
+		IPs []store.IPSummary `json:"ips"`
+	}
+	if err := json.Unmarshal(ipsBody, &ipsPayload); err != nil {
+		t.Fatal(err)
+	}
+	if ipsStatus != http.StatusOK || len(ipsPayload.IPs) != 1 || ipsPayload.IPs[0].IP != "198.51.100.10" || ipsPayload.IPs[0].Requests != 1 || ipsPayload.IPs[0].DistinctKeys != 1 {
+		t.Fatalf("team_admin IP list escaped team scope: status=%d payload=%+v body=%s", ipsStatus, ipsPayload, ipsBody)
+	}
+
+	ipDetailStatus, ipDetailBody := teamGet("/admin/ips/198.51.100.10")
+	var ipDetail store.IPDetail
+	if err := json.Unmarshal(ipDetailBody, &ipDetail); err != nil {
+		t.Fatal(err)
+	}
+	if ipDetailStatus != http.StatusOK || ipDetail.Stats.Requests != 1 || ipDetail.Stats.DistinctKeys != 1 || len(ipDetail.Recent) != 1 || ipDetail.Recent[0].ID != "req-alpha-trace" {
+		t.Fatalf("team_admin shared IP detail escaped team scope: status=%d detail=%+v body=%s", ipDetailStatus, ipDetail, ipDetailBody)
+	}
+	if len(ipDetail.ByModel) != 1 || ipDetail.ByModel[0].Key != "alpha-model" || len(ipDetail.ByKey) != 1 || ipDetail.ByKey[0].Key != alphaKeyOut.APIKey.ID {
+		t.Fatalf("team_admin shared IP breakdown escaped team scope: %+v", ipDetail)
+	}
+	if status, body := teamGet("/admin/ips/198.51.100.20"); status != http.StatusNotFound {
+		t.Fatalf("team_admin could enumerate other-team IP: status=%d body=%s", status, body)
+	}
+
+	for field, expected := range map[string]string{
+		"model":    "alpha-model",
+		"ip":       "198.51.100.10",
+		"language": "ko",
+		"tag":      "alpha-tag",
+	} {
+		status, body := teamGet("/admin/suggest?field=" + field)
+		var payload struct {
+			Values []string `json:"values"`
+		}
+		if err := json.Unmarshal(body, &payload); err != nil {
+			t.Fatal(err)
+		}
+		if status != http.StatusOK || len(payload.Values) != 1 || payload.Values[0] != expected {
+			t.Fatalf("team_admin %s suggestions escaped team scope: status=%d values=%v body=%s", field, status, payload.Values, body)
+		}
+	}
+	const malformedClientIP = "client-ip-sensitive@example.com"
+	if err := db.InsertLogRecord(t.Context(), store.LogRecord{Request: store.RequestLog{
+		ID: "req-alpha-malformed-ip", TraceID: "trace-malformed-ip", APIKeyID: alphaKeyOut.APIKey.ID,
+		Method: http.MethodPost, Endpoint: "/v1/chat/completions", Model: "alpha-model",
+		ClientIP: malformedClientIP, StatusCode: http.StatusOK, CreatedAt: createdAt.Add(time.Second),
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"/admin/requests?limit=20", "/admin/ips", "/admin/suggest?field=ip"} {
+		status, body := teamGet(path)
+		if status != http.StatusOK || strings.Contains(string(body), malformedClientIP) {
+			t.Fatalf("team_admin malformed IP projection failed for %s: status=%d body=%s", path, status, body)
+		}
+		if strings.HasPrefix(path, "/admin/requests") && !strings.Contains(string(body), externalIPUnknown) {
+			t.Fatalf("team_admin request list did not mark malformed IP as unknown: %s", body)
+		}
+	}
+	if status, body := teamGet("/admin/ips/" + malformedClientIP); status != http.StatusBadRequest || strings.Contains(string(body), malformedClientIP) {
+		t.Fatalf("malformed IP detail was accepted or reflected: status=%d body=%s", status, body)
+	}
+	if status, body := teamGet("/admin/requests/req-beta-trace/note"); status != http.StatusForbidden {
+		t.Fatalf("team_admin could read other-team request note: status=%d body=%s", status, body)
+	}
+	if status, body := teamGet("/admin/requests/req-alpha-trace/note"); status != http.StatusOK || !strings.Contains(string(body), "alpha-tag") {
+		t.Fatalf("team_admin could not read own-team request note: status=%d body=%s", status, body)
+	}
+	for _, run := range []store.WorkflowRun{
+		{ID: "workflow-alpha-trace", WorkflowID: "workflow-alpha", Team: "Alpha", TraceID: "trace-shared", CreatedAt: createdAt.Format(time.RFC3339Nano)},
+		{ID: "workflow-beta-trace", WorkflowID: "workflow-beta", Team: "team_beta", TraceID: "trace-shared", CreatedAt: createdAt.Format(time.RFC3339Nano)},
+		{ID: "workflow-padded-alpha-trace", WorkflowID: "workflow-padded-alpha", Team: " Alpha ", TraceID: "trace-shared", CreatedAt: createdAt.Format(time.RFC3339Nano)},
+	} {
+		if err := db.RecordWorkflowRun(t.Context(), run); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, run := range []store.AIAppRun{
+		{ID: "app-alpha-trace", AppID: "app-alpha", Team: "team_alpha", TraceID: "trace-shared", CreatedAt: createdAt.Format(time.RFC3339Nano)},
+		{ID: "app-beta-trace", AppID: "app-beta", Team: "Beta", TraceID: "trace-shared", CreatedAt: createdAt.Format(time.RFC3339Nano)},
+		{ID: "app-padded-alpha-trace", AppID: "app-padded-alpha", Team: " team_alpha ", TraceID: "trace-shared", CreatedAt: createdAt.Format(time.RFC3339Nano)},
+	} {
+		if err := db.RecordAIAppRun(t.Context(), run); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, requestPath := range []string{
+		"/admin/requests/req-beta-trace/trace",
+		"/admin/requests/req-beta-trace/explain",
+		"/admin/requests/req-beta-trace/links",
+		"/admin/flow-map?request_id=req-beta-trace",
+		"/admin/llm/traces/req-beta-trace",
+		"/admin/requests/req-beta-only-trace/trace",
+		"/admin/requests/req-beta-only-trace/explain",
+		"/admin/requests/req-beta-only-trace/links",
+		"/admin/llm/traces/req-beta-only-trace",
+		"/admin/requests/req-padded-alpha-trace/trace",
+		"/admin/requests/req-padded-alpha-trace/explain",
+		"/admin/requests/req-padded-alpha-trace/links",
+		"/admin/llm/traces/req-padded-alpha-trace",
+	} {
+		request, _ := http.NewRequest(http.MethodGet, proxy.URL+requestPath, nil)
+		request.Header.Set("Authorization", "Bearer "+teamTok.AccessToken)
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		if response.StatusCode != http.StatusForbidden {
+			t.Fatalf("team_admin cross-team trace %s status = %d, want %d", requestPath, response.StatusCode, http.StatusForbidden)
+		}
+	}
+	for _, requestPath := range []string{
+		"/admin/requests/req-alpha-trace/trace",
+		"/admin/requests/req-alpha-trace/explain",
+		"/admin/requests/req-alpha-trace/links",
+		"/admin/flow-map?request_id=req-alpha-trace",
+		"/admin/llm/traces/req-alpha-trace",
+	} {
+		request, _ := http.NewRequest(http.MethodGet, proxy.URL+requestPath, nil)
+		request.Header.Set("Authorization", "Bearer "+teamTok.AccessToken)
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		if response.StatusCode != http.StatusOK {
+			t.Fatalf("team_admin own-team trace %s status = %d, want %d", requestPath, response.StatusCode, http.StatusOK)
+		}
+	}
+	for _, requestPath := range []string{
+		"/admin/requests/diff?a=req-alpha-trace&b=req-beta-trace",
+		"/admin/requests/diff?a=req-alpha-trace&b=req-padded-alpha-trace",
+	} {
+		request, _ := http.NewRequest(http.MethodGet, proxy.URL+requestPath, nil)
+		request.Header.Set("Authorization", "Bearer "+teamTok.AccessToken)
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		if response.StatusCode != http.StatusForbidden {
+			t.Fatalf("team_admin cross-team diff %s status = %d, want %d", requestPath, response.StatusCode, http.StatusForbidden)
+		}
+	}
+	ownDiffRequest, _ := http.NewRequest(http.MethodGet, proxy.URL+"/admin/requests/diff?a=req-alpha-trace&b=req-alpha-trace", nil)
+	ownDiffRequest.Header.Set("Authorization", "Bearer "+teamTok.AccessToken)
+	ownDiffResponse, err := http.DefaultClient.Do(ownDiffRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ownDiffResponse.Body.Close()
+	if ownDiffResponse.StatusCode != http.StatusOK {
+		t.Fatalf("team_admin own-team diff status = %d, want %d", ownDiffResponse.StatusCode, http.StatusOK)
+	}
+	traceListRequest, _ := http.NewRequest(http.MethodGet, proxy.URL+"/admin/llm/traces?limit=10", nil)
+	traceListRequest.Header.Set("Authorization", "Bearer "+teamTok.AccessToken)
+	traceListResponse, err := http.DefaultClient.Do(traceListRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	traceListBody, _ := io.ReadAll(traceListResponse.Body)
+	traceListResponse.Body.Close()
+	if traceListResponse.StatusCode != http.StatusOK || !strings.Contains(string(traceListBody), "req-alpha-trace") || strings.Contains(string(traceListBody), "req-beta-trace") {
+		t.Fatalf("team_admin trace list escaped team scope: status=%d body=%s", traceListResponse.StatusCode, traceListBody)
+	}
+	traceScopeBody := func(token string) (int, string) {
+		t.Helper()
+		request, _ := http.NewRequest(http.MethodGet, proxy.URL+"/admin/traces/trace-shared", nil)
+		request.Header.Set("Authorization", "Bearer "+token)
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, err := io.ReadAll(response.Body)
+		response.Body.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response.StatusCode, string(body)
+	}
+	teamTraceStatus, teamTraceBody := traceScopeBody(teamTok.AccessToken)
+	for _, allowed := range []string{"req-alpha-trace", "workflow-alpha-trace", "app-alpha-trace", "code-req-alpha-trace"} {
+		if !strings.Contains(teamTraceBody, allowed) {
+			t.Fatalf("team_admin trace response missing own-team %q: status=%d body=%s", allowed, teamTraceStatus, teamTraceBody)
+		}
+	}
+	for _, denied := range []string{
+		"req-beta-trace", "workflow-beta-trace", "app-beta-trace", "code-req-beta-trace",
+		"req-beta-only-trace", "code-req-beta-only-trace",
+		"req-padded-alpha-trace", "workflow-padded-alpha-trace", "app-padded-alpha-trace", "code-req-padded-alpha-trace",
+	} {
+		if strings.Contains(teamTraceBody, denied) {
+			t.Fatalf("team_admin trace response exposed other-team %q: status=%d body=%s", denied, teamTraceStatus, teamTraceBody)
+		}
+	}
+	if teamTraceStatus != http.StatusOK {
+		t.Fatalf("team_admin trace response status=%d body=%s", teamTraceStatus, teamTraceBody)
+	}
+	rootTraceStatus, rootTraceBody := traceScopeBody(rootTok.AccessToken)
+	if rootTraceStatus != http.StatusOK || !strings.Contains(rootTraceBody, "req-beta-trace") ||
+		!strings.Contains(rootTraceBody, "workflow-beta-trace") || !strings.Contains(rootTraceBody, "app-beta-trace") ||
+		!strings.Contains(rootTraceBody, "code-req-beta-trace") {
+		t.Fatalf("super_admin trace response lost cross-team rows: status=%d body=%s", rootTraceStatus, rootTraceBody)
 	}
 
 	patchOther, _ := http.NewRequest(http.MethodPatch, proxy.URL+"/admin/api-keys/"+betaKeyOut.APIKey.ID, strings.NewReader(`{"scopes":["chat:completion"]}`))

@@ -3,7 +3,9 @@ package proxy
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -19,13 +21,18 @@ func (s *Server) handleMCPUpstreams(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		list, err := s.db.ListMCPUpstreams(r.Context())
 		if err != nil {
-			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "mcp_upstreams_failed")
+			slog.Error("MCP upstream list query failed", "error", err)
+			writeOpenAIError(w, http.StatusInternalServerError, "MCP upstreams could not be loaded", "server_error", "mcp_upstreams_failed")
 			return
 		}
 		// surface last tool-discovery error per upstream from the cached snapshot
 		errs := map[string]string{}
 		if snap := s.mcpTools.Load(); snap != nil {
 			errs = snap.errors
+		}
+		if !s.canViewRawPrompts(r) {
+			list = s.projectMCPUpstreamsForExternal(list)
+			errs = s.projectMCPDiscoveryErrorsForExternal(errs)
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"upstreams": list, "discovery_errors": errs})
 	case http.MethodPost:
@@ -56,8 +63,8 @@ func (s *Server) handleMCPUpstreams(w http.ResponseWriter, r *http.Request) {
 			writeOpenAIError(w, http.StatusBadRequest, "name and url are required", "invalid_request_error", "missing_fields")
 			return
 		}
-		if !strings.HasPrefix(p.URL, "http://") && !strings.HasPrefix(p.URL, "https://") {
-			writeOpenAIError(w, http.StatusBadRequest, "url must be http(s)", "invalid_request_error", "invalid_url")
+		if err := validateProviderBaseURL(p.URL); err != nil {
+			writeOpenAIError(w, http.StatusBadRequest, "url must be a safe absolute http(s) URL without credentials", "invalid_request_error", "invalid_url")
 			return
 		}
 		slug := slugify(p.ID)
@@ -68,12 +75,16 @@ func (s *Server) handleMCPUpstreams(w http.ResponseWriter, r *http.Request) {
 			writeOpenAIError(w, http.StatusBadRequest, "could not derive a slug id", "invalid_request_error", "invalid_slug")
 			return
 		}
+		if !s.modelsProviderLabelSafeForConfig(slug) || slug == providerNameOmitted {
+			writeOpenAIError(w, http.StatusBadRequest, "MCP upstream id contains unsafe metadata", "invalid_request_error", "invalid_upstream_id")
+			return
+		}
 		existing, existingFound, err := s.db.GetMCPUpstream(r.Context(), slug)
 		if err != nil {
 			writeOpenAIError(w, http.StatusInternalServerError, "failed to load MCP upstream", "server_error", "mcp_upstream_lookup_failed")
 			return
 		}
-		if code, message := validateMCPUpstreamName(p.Name, existing.Name, existingFound); code != "" {
+		if code, message := s.validateMCPUpstreamName(p.Name, existing.Name, existingFound); code != "" {
 			writeOpenAIError(w, http.StatusBadRequest, message, "invalid_request_error", code)
 			return
 		}
@@ -192,12 +203,17 @@ func (s *Server) handleMCPUpstreamByID(w http.ResponseWriter, r *http.Request) {
 		if p.Name != nil {
 			cur.Name = strings.TrimSpace(*p.Name)
 		}
-		if code, message := validateMCPUpstreamName(cur.Name, legacyName, true); code != "" {
+		if code, message := s.validateMCPUpstreamName(cur.Name, legacyName, true); code != "" {
 			writeOpenAIError(w, http.StatusBadRequest, message, "invalid_request_error", code)
 			return
 		}
 		if p.URL != nil {
-			cur.URL = strings.TrimSpace(*p.URL)
+			candidateURL := strings.TrimSpace(*p.URL)
+			if err := validateProviderBaseURL(candidateURL); err != nil {
+				writeOpenAIError(w, http.StatusBadRequest, "url must be a safe absolute http(s) URL without credentials", "invalid_request_error", "invalid_url")
+				return
+			}
+			cur.URL = candidateURL
 		}
 		if p.Enabled != nil {
 			cur.Enabled = *p.Enabled
@@ -233,13 +249,53 @@ func (s *Server) handleMCPUpstreamByID(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func validateMCPUpstreamName(name, legacyName string, existing bool) (code, message string) {
+func (s *Server) projectMCPUpstreamsForExternal(upstreams []store.MCPUpstream) []store.MCPUpstream {
+	projectionArgs := s.externalCredentialProjectionArgs()
+	project := func(value string) string {
+		return boundedExternalProviderText(value, projectionArgs...)
+	}
+	for index := range upstreams {
+		upstream := &upstreams[index]
+		upstream.ID = project(upstream.ID)
+		upstream.Name = boundedExternalProviderLabelOrEmpty(upstream.Name, projectionArgs...)
+		upstream.URL = project(sanitizeProviderBaseURL(upstream.URL))
+		upstream.CreatedAt = project(upstream.CreatedAt)
+		upstream.Metadata.Description = project(upstream.Metadata.Description)
+		for domainIndex := range upstream.Metadata.Domains {
+			upstream.Metadata.Domains[domainIndex] = project(upstream.Metadata.Domains[domainIndex])
+		}
+		upstream.Metadata.RiskLevel = project(upstream.Metadata.RiskLevel)
+		for modelIndex := range upstream.Metadata.AllowedModels {
+			upstream.Metadata.AllowedModels[modelIndex] = project(upstream.Metadata.AllowedModels[modelIndex])
+		}
+		upstream.Metadata.DefaultTool = project(upstream.Metadata.DefaultTool)
+	}
+	return upstreams
+}
+
+func (s *Server) projectMCPDiscoveryErrorsForExternal(errorsByUpstream map[string]string) map[string]string {
+	projectionArgs := s.externalCredentialProjectionArgs()
+	projected := make(map[string]string, len(errorsByUpstream))
+	uniqueKeys := newUniqueJSONDisplayKeys(len(errorsByUpstream))
+	keys := make([]string, 0, len(errorsByUpstream))
+	for key := range errorsByUpstream {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		projectedKey := uniqueKeys.claim(boundedExternalProviderText(key, projectionArgs...))
+		projected[projectedKey] = boundedExternalProviderText(errorsByUpstream[key], projectionArgs...)
+	}
+	return projected
+}
+
+func (s *Server) validateMCPUpstreamName(name, legacyName string, existing bool) (code, message string) {
 	name = strings.TrimSpace(name)
 	reserved := name == providerNameOmitted
 	// Older rows may predate display-name validation. Allow their exact name to be
 	// preserved while an operator changes an unrelated field, but do not admit a new
 	// unsafe name or let an existing row be renamed to one.
-	if existing && name == strings.TrimSpace(legacyName) && (!modelsProviderLabelSafe(name) || reserved) {
+	if existing && name == strings.TrimSpace(legacyName) && (!s.modelsProviderLabelSafeForConfig(name) || reserved) {
 		return "", ""
 	}
 	// Provider-specific names such as "vibe" and "aggregate" are valid MCP display
@@ -251,7 +307,7 @@ func validateMCPUpstreamName(name, legacyName string, existing bool) (code, mess
 	if len(name) > maxModelsProviderNameBytes {
 		return "mcp_upstream_name_too_long", "MCP upstream name exceeds the supported limit"
 	}
-	if !modelsProviderLabelSafe(name) {
+	if !s.modelsProviderLabelSafeForConfig(name) {
 		return "mcp_upstream_name_invalid", "MCP upstream name contains unsafe metadata"
 	}
 	return "", ""
@@ -316,7 +372,8 @@ func (s *Server) resetMCPUpstream(id string) {
 func (s *Server) handleMCPUpstreamProbe(w http.ResponseWriter, r *http.Request, id string) {
 	up, found, err := s.db.GetMCPUpstream(r.Context(), id)
 	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "mcp_upstream_lookup_failed")
+		slog.Error("MCP upstream probe lookup failed", "upstream_id", id, "error", err)
+		writeOpenAIError(w, http.StatusInternalServerError, "MCP upstream probe could not be loaded", "server_error", "mcp_upstream_lookup_failed")
 		return
 	}
 	if !found {
@@ -330,7 +387,7 @@ func (s *Server) handleMCPUpstreamProbe(w http.ResponseWriter, r *http.Request, 
 	start := time.Now()
 
 	out := map[string]any{"id": up.ID, "name": up.Name, "url": up.URL}
-	errs := map[string]string{}
+	errs := map[string]any{}
 	resourceCount := 0
 	promptCount := 0
 
@@ -338,17 +395,17 @@ func (s *Server) handleMCPUpstreamProbe(w http.ResponseWriter, r *http.Request, 
 	if terr != nil {
 		errs["tools"] = terr.Error()
 	}
-	toolNames := make([]map[string]string, 0, len(tools))
+	toolNames := make([]any, 0, len(tools))
 	for _, t := range tools {
-		toolNames = append(toolNames, map[string]string{"name": t.Name, "namespaced": up.ID + "__" + t.Name, "description": t.Description})
+		toolNames = append(toolNames, map[string]any{"name": t.Name, "namespaced": up.ID + "__" + t.Name, "description": t.Description})
 	}
 	out["tools"] = toolNames
 	out["tool_count"] = len(tools)
 
 	if resources, rerr := s.listUpstreamResources(ctx, up); rerr == nil {
-		res := make([]map[string]string, 0, len(resources))
+		res := make([]any, 0, len(resources))
 		for _, rsc := range resources {
-			res = append(res, map[string]string{"uri": rsc.URI, "name": rsc.Name})
+			res = append(res, map[string]any{"uri": rsc.URI, "name": rsc.Name})
 		}
 		out["resources"] = res
 		out["resource_count"] = len(resources)
@@ -358,9 +415,9 @@ func (s *Server) handleMCPUpstreamProbe(w http.ResponseWriter, r *http.Request, 
 	}
 
 	if prompts, perr := s.listUpstreamPrompts(ctx, up); perr == nil {
-		pr := make([]map[string]string, 0, len(prompts))
+		pr := make([]any, 0, len(prompts))
 		for _, p := range prompts {
-			pr = append(pr, map[string]string{"name": p.Name, "namespaced": up.ID + "__" + p.Name})
+			pr = append(pr, map[string]any{"name": p.Name, "namespaced": up.ID + "__" + p.Name})
 		}
 		out["prompts"] = pr
 		out["prompt_count"] = len(prompts)
@@ -392,6 +449,9 @@ func (s *Server) handleMCPUpstreamProbe(w http.ResponseWriter, r *http.Request, 
 	// a successful probe means the global catalog should be refreshed
 	if terr == nil {
 		s.invalidateMCPToolsCache()
+	}
+	if !s.canViewRawPrompts(r) {
+		projectProviderMetadataMapForExternal(out, s.externalCredentialProjectionArgs(up.ID, up.Name, up.URL)...)
 	}
 	writeJSON(w, http.StatusOK, out)
 }

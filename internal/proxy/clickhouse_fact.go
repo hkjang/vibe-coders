@@ -237,7 +237,7 @@ func (s *Server) emitPolicyFacts(events []store.PolicyDecisionEvent) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		payload, _, err := insertJSONEachRow(ctx, s.client, ch, table, rows)
+		payload, _, err := insertJSONEachRow(ctx, s.client, ch, table, rows, s.externalCredentialProjectionArgs()...)
 		if err != nil {
 			_ = s.db.RecordClickHouseFactRetry(context.Background(), table, payload, len(rows), err.Error())
 		}
@@ -286,7 +286,7 @@ func (s *Server) emitFeedbackFact(fb store.LLMFeedback) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		payload, _, err := insertJSONEachRow(ctx, s.client, ch, table, []map[string]any{row})
+		payload, _, err := insertJSONEachRow(ctx, s.client, ch, table, []map[string]any{row}, s.externalCredentialProjectionArgs()...)
 		if err != nil {
 			_ = s.db.RecordClickHouseFactRetry(context.Background(), table, payload, 1, err.Error())
 		}
@@ -342,7 +342,7 @@ func (s *Server) emitSkillFact(run store.SkillRun) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		payload, _, err := insertJSONEachRow(ctx, s.client, ch, table, []map[string]any{row})
+		payload, _, err := insertJSONEachRow(ctx, s.client, ch, table, []map[string]any{row}, s.externalCredentialProjectionArgs()...)
 		if err != nil {
 			_ = s.db.RecordClickHouseFactRetry(context.Background(), table, payload, 1, err.Error())
 		}
@@ -454,7 +454,7 @@ func anyFactTableConfigured(ch config.ClickHouseConfig) bool {
 // best_effort lets RFC3339 timestamps parse into DateTime columns; skip_unknown_fields keeps
 // older table schemas accepting payloads after new columns are added. Returns the projected
 // body that was sent (for retry persistence) and the row count.
-func insertJSONEachRow(ctx context.Context, client *http.Client, cfg config.ClickHouseConfig, table string, rows []map[string]any) (string, int, error) {
+func insertJSONEachRow(ctx context.Context, client *http.Client, cfg config.ClickHouseConfig, table string, rows []map[string]any, projectionArgs ...string) (string, int, error) {
 	if cfg.URL == "" || table == "" || len(rows) == 0 {
 		return "", 0, nil
 	}
@@ -468,7 +468,7 @@ func insertJSONEachRow(ctx context.Context, client *http.Client, cfg config.Clic
 	}
 	var body bytes.Buffer
 	for _, row := range rows {
-		projected, err := projectClickHouseOutboundRow(row, projection)
+		projected, err := projectClickHouseOutboundRow(row, projection, projectionArgs...)
 		if err != nil {
 			return "", 0, fmt.Errorf("clickhouse fact row projection failed")
 		}
@@ -632,20 +632,20 @@ func clickhouseRetryString(row map[string]any, key string) (string, error) {
 	return text, nil
 }
 
-func sanitizeClickHouseRetryValue(value any) any {
+func sanitizeClickHouseRetryValue(value any, projectionArgs ...string) any {
 	switch typed := value.(type) {
 	case string:
-		return boundedExternalProviderText(typed)
+		return boundedExternalProviderText(typed, projectionArgs...)
 	case []any:
 		out := make([]any, len(typed))
 		for index := range typed {
-			out[index] = sanitizeClickHouseRetryValue(typed[index])
+			out[index] = sanitizeClickHouseRetryValue(typed[index], projectionArgs...)
 		}
 		return out
 	case map[string]any:
 		out := make(map[string]any, len(typed))
 		for key, item := range typed {
-			out[key] = sanitizeClickHouseRetryValue(item)
+			out[key] = sanitizeClickHouseRetryValue(item, projectionArgs...)
 		}
 		return out
 	default:
@@ -653,7 +653,7 @@ func sanitizeClickHouseRetryValue(value any) any {
 	}
 }
 
-func sanitizeClickHouseRetryRow(row map[string]any, projection clickhouseRetryProjection) error {
+func sanitizeClickHouseRetryRow(row map[string]any, projection clickhouseRetryProjection, projectionArgs ...string) error {
 	providerKey := ""
 	switch {
 	case projection&retryProjectRequest != 0:
@@ -671,7 +671,7 @@ func sanitizeClickHouseRetryRow(row map[string]any, projection clickhouseRetryPr
 			return err
 		}
 		if _, exists := row[providerKey]; exists {
-			row[providerKey] = boundedModelsProviderLabelOrEmpty(rawProvider)
+			row[providerKey] = boundedExternalProviderLabelOrEmpty(rawProvider, projectionArgs...)
 		}
 	}
 
@@ -681,15 +681,16 @@ func sanitizeClickHouseRetryRow(row map[string]any, projection clickhouseRetryPr
 			return err
 		}
 		if _, exists := row["fallback_from"]; exists {
-			row["fallback_from"] = boundedModelsProviderLabelOrEmpty(rawFallback)
+			row["fallback_from"] = boundedExternalProviderLabelOrEmpty(rawFallback, projectionArgs...)
 		}
+		providers := append([]string{rawProvider, rawFallback}, projectionArgs...)
 		for _, key := range []string{"model", "requested_model", "fallback_reason", "route_reason", "route_detail"} {
 			value, err := clickhouseRetryString(row, key)
 			if err != nil {
 				return err
 			}
 			if _, exists := row[key]; exists {
-				row[key] = boundedExternalProviderText(value, rawProvider, rawFallback)
+				row[key] = boundedExternalProviderText(value, providers...)
 			}
 		}
 	}
@@ -699,7 +700,7 @@ func sanitizeClickHouseRetryRow(row map[string]any, projection clickhouseRetryPr
 			return err
 		}
 		if _, exists := row["fallback_path"]; exists {
-			row["fallback_path"] = strings.Join(boundedExternalFallbackPath(strings.Split(fallbackPath, ">"), rawProvider), ">")
+			row["fallback_path"] = strings.Join(boundedExternalFallbackPath(strings.Split(fallbackPath, ">"), append([]string{rawProvider}, projectionArgs...)...), ">")
 		}
 		for _, key := range []string{"requested_model", "selected_model", "decision_reason"} {
 			value, err := clickhouseRetryString(row, key)
@@ -707,7 +708,7 @@ func sanitizeClickHouseRetryRow(row map[string]any, projection clickhouseRetryPr
 				return err
 			}
 			if _, exists := row[key]; exists {
-				row[key] = boundedExternalProviderText(value, rawProvider)
+				row[key] = boundedExternalProviderText(value, append([]string{rawProvider}, projectionArgs...)...)
 			}
 		}
 	}
@@ -718,7 +719,7 @@ func sanitizeClickHouseRetryRow(row map[string]any, projection clickhouseRetryPr
 				return err
 			}
 			if _, exists := row[key]; exists {
-				row[key] = boundedExternalProviderText(value, rawProvider)
+				row[key] = boundedExternalProviderText(value, append([]string{rawProvider}, projectionArgs...)...)
 			}
 		}
 	}
@@ -728,7 +729,7 @@ func sanitizeClickHouseRetryRow(row map[string]any, projection clickhouseRetryPr
 			return err
 		}
 		if _, exists := row["server_label"]; exists {
-			row["server_label"] = boundedModelsProviderLabelOrEmpty(serverLabel)
+			row["server_label"] = boundedExternalProviderLabelOrEmpty(serverLabel, projectionArgs...)
 		}
 		for _, key := range []string{"tool_name", "source"} {
 			value, err := clickhouseRetryString(row, key)
@@ -736,7 +737,7 @@ func sanitizeClickHouseRetryRow(row map[string]any, projection clickhouseRetryPr
 				return err
 			}
 			if _, exists := row[key]; exists {
-				row[key] = boundedExternalProviderText(value, serverLabel)
+				row[key] = boundedExternalProviderText(value, append([]string{serverLabel}, projectionArgs...)...)
 			}
 		}
 	}
@@ -747,12 +748,12 @@ func sanitizeClickHouseRetryRow(row map[string]any, projection clickhouseRetryPr
 				return err
 			}
 			if _, exists := row[key]; exists {
-				row[key] = boundedExternalProviderText(value, rawProvider)
+				row[key] = boundedExternalProviderText(value, append([]string{rawProvider}, projectionArgs...)...)
 			}
 		}
 	}
 	for key, value := range row {
-		row[key] = sanitizeClickHouseRetryValue(value)
+		row[key] = sanitizeClickHouseRetryValue(value, projectionArgs...)
 	}
 	return nil
 }
@@ -760,12 +761,12 @@ func sanitizeClickHouseRetryRow(row map[string]any, projection clickhouseRetryPr
 // projectClickHouseOutboundRow applies the same table-specific projection to live
 // facts and historical retries. It clones the top-level map so async exporters do
 // not mutate request-owned data while replacing legacy credential-shaped labels.
-func projectClickHouseOutboundRow(row map[string]any, projection clickhouseRetryProjection) (map[string]any, error) {
+func projectClickHouseOutboundRow(row map[string]any, projection clickhouseRetryProjection, projectionArgs ...string) (map[string]any, error) {
 	projected := make(map[string]any, len(row))
 	for key, value := range row {
 		projected[key] = value
 	}
-	if err := sanitizeClickHouseRetryRow(projected, projection); err != nil {
+	if err := sanitizeClickHouseRetryRow(projected, projection, projectionArgs...); err != nil {
 		return nil, err
 	}
 	return projected, nil
@@ -774,7 +775,7 @@ func projectClickHouseOutboundRow(row map[string]any, projection clickhouseRetry
 // sanitizeClickHouseRetryPayload upgrades historical JSONEachRow batches at the
 // retry boundary. The primary database retains raw legacy provider identities,
 // but an old retry record must not bypass today's outbound projections.
-func sanitizeClickHouseRetryPayload(payload string, projection clickhouseRetryProjection) (string, int, error) {
+func sanitizeClickHouseRetryPayload(payload string, projection clickhouseRetryProjection, projectionArgs ...string) (string, int, error) {
 	if payload == "" || len(payload) > maxClickHouseRetryPayloadBytes {
 		return "", 0, fmt.Errorf("retry payload size is invalid")
 	}
@@ -799,7 +800,7 @@ func sanitizeClickHouseRetryPayload(payload string, projection clickhouseRetryPr
 		if err := decoder.Decode(&extra); err != io.EOF {
 			return "", 0, fmt.Errorf("retry payload contains trailing JSON")
 		}
-		if err := sanitizeClickHouseRetryRow(row, projection); err != nil {
+		if err := sanitizeClickHouseRetryRow(row, projection, projectionArgs...); err != nil {
 			return "", 0, fmt.Errorf("retry payload schema is invalid")
 		}
 		encoded, err := json.Marshal(row)
@@ -867,7 +868,7 @@ func (s *Server) handleClickHouseFactRetry(w http.ResponseWriter, r *http.Reques
 			}
 			continue
 		}
-		payload, payloadRows, projectionErr := sanitizeClickHouseRetryPayload(b.Payload, projection)
+		payload, payloadRows, projectionErr := sanitizeClickHouseRetryPayload(b.Payload, projection, s.externalCredentialProjectionArgs()...)
 		if projectionErr != nil {
 			if !quarantine(b.ID, "payload_invalid") {
 				return
@@ -1111,7 +1112,7 @@ func (s *Server) clickhouseFactLoop(parent context.Context) {
 				return
 			}
 			ctx, cancel := context.WithTimeout(parent, 45*time.Second)
-			payload, _, err := insertJSONEachRow(ctx, s.client, ch, table, rows)
+			payload, _, err := insertJSONEachRow(ctx, s.client, ch, table, rows, s.externalCredentialProjectionArgs()...)
 			cancel()
 			if err != nil {
 				slog.Warn("clickhouse fact flush failed", "table", table, "rows", len(rows), "error", err)

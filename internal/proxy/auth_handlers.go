@@ -98,7 +98,11 @@ func (s *Server) handleAuthMe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !s.cfg.Auth.Enabled {
-		writeJSON(w, http.StatusOK, map[string]any{"auth_enabled": false, "version": AppVersion})
+		writeJSON(w, http.StatusOK, map[string]any{
+			"auth_enabled":        false,
+			"credential_prefixes": uiCredentialPrefixes(s.cfg.Auth),
+			"version":             AppVersion,
+		})
 		return
 	}
 	claims, ok := s.verifyAccessToken(r.Context(), bearerToken(r.Header.Get("Authorization")))
@@ -107,10 +111,11 @@ func (s *Server) handleAuthMe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"auth_enabled": true,
-		"version":      AppVersion,
-		"expires_at":   claims.ExpiresAt, // unix seconds; the access token's expiry
-		"menu_version": menuVersion,
+		"auth_enabled":        true,
+		"credential_prefixes": uiCredentialPrefixes(s.cfg.Auth),
+		"version":             AppVersion,
+		"expires_at":          claims.ExpiresAt, // unix seconds; the access token's expiry
+		"menu_version":        menuVersion,
 		"user": map[string]any{
 			"id": claims.Subject, "email": claims.Email, "role": claims.Role,
 			"roles":        []string{claims.Role},

@@ -3,9 +3,11 @@ package proxy
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -202,5 +204,227 @@ func TestWaterfallEndpoint(t *testing.T) {
 	}
 	if tr.Spans[3].Category != "error" {
 		t.Fatalf("last span category=%q want error", tr.Spans[3].Category)
+	}
+
+	post, err := http.Post(proxy.URL+"/admin/waterfall?session_id=wf-1", "application/json", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	post.Body.Close()
+	if post.StatusCode != http.StatusMethodNotAllowed || post.Header.Get("Allow") != http.MethodGet {
+		t.Fatalf("POST waterfall status=%d Allow=%q", post.StatusCode, post.Header.Get("Allow"))
+	}
+}
+
+func TestWaterfallEndpointScopesTeamAndProjectsLowerRoleMetadata(t *testing.T) {
+	db, proxy := newAuthTestServer(t, "http://example.invalid")
+	defer proxy.Close()
+
+	login := postJSON(t, proxy.URL+"/auth/login", "", map[string]string{
+		"email": "root@example.com", "password": "correct-password",
+	})
+	var rootToken struct {
+		AccessToken string `json:"access_token"`
+	}
+	if err := json.NewDecoder(login.Body).Decode(&rootToken); err != nil {
+		t.Fatal(err)
+	}
+	login.Body.Close()
+
+	for _, team := range []map[string]string{
+		{"id": "waterfall-team-alpha", "name": "Waterfall Alpha"},
+		{"id": "waterfall-team-beta", "name": "Waterfall Beta"},
+	} {
+		response := postJSON(t, proxy.URL+"/admin/teams", rootToken.AccessToken, team)
+		response.Body.Close()
+		if response.StatusCode != http.StatusCreated {
+			t.Fatalf("create team %q status=%d", team["id"], response.StatusCode)
+		}
+	}
+	teamAdmin := postJSON(t, proxy.URL+"/admin/users", rootToken.AccessToken, map[string]string{
+		"email": "waterfall-admin@example.com", "password": "waterfall-password",
+		"role": "team_admin", "team_id": "waterfall-team-alpha",
+	})
+	teamAdmin.Body.Close()
+	if teamAdmin.StatusCode != http.StatusCreated {
+		t.Fatalf("create team admin status=%d", teamAdmin.StatusCode)
+	}
+	teamLogin := postJSON(t, proxy.URL+"/auth/login", "", map[string]string{
+		"email": "waterfall-admin@example.com", "password": "waterfall-password",
+	})
+	var teamToken struct {
+		AccessToken string `json:"access_token"`
+	}
+	if err := json.NewDecoder(teamLogin.Body).Decode(&teamToken); err != nil {
+		t.Fatal(err)
+	}
+	teamLogin.Body.Close()
+
+	for _, key := range []store.APIKeyRecord{
+		{ID: "waterfall-alpha-key", Name: "alpha", Team: "waterfall-team-alpha", KeyHash: "waterfall-alpha-hash", Status: "active"},
+		{ID: "waterfall-beta-key", Name: "beta", Team: "waterfall-team-beta", KeyHash: "waterfall-beta-hash", Status: "active"},
+	} {
+		if err := db.UpsertAPIKey(t.Context(), key); err != nil {
+			t.Fatal(err)
+		}
+	}
+	unsafeProvider := "vc_sk_" + strings.Repeat("A", 32)
+	unsafeFallback := "vc_sa_" + strings.Repeat("B", 32)
+	unsafeTrace := "waterfall-trace-owner@example.com"
+	unsafeModel := "waterfall-model-owner@example.com"
+	unsafeRequestedModel := "010-1234-5678"
+	unsafeEndpoint := "/v1/waterfall-owner@example.com"
+	now := time.Now().UTC().Add(-time.Minute)
+	for _, record := range []store.RequestLog{
+		{
+			ID: "waterfall-alpha-request", TraceID: unsafeTrace, APIKeyID: "waterfall-alpha-key",
+			SessionID: "waterfall-shared-session", Model: unsafeModel, RequestedModel: unsafeRequestedModel,
+			Provider: unsafeProvider, FallbackFrom: unsafeFallback, Endpoint: unsafeEndpoint,
+			StatusCode: http.StatusOK, LatencyMS: 10, CreatedAt: now,
+		},
+		{
+			ID: "waterfall-beta-request", TraceID: "waterfall-beta-private@example.com", APIKeyID: "waterfall-beta-key",
+			SessionID: "waterfall-shared-session", Model: "beta-model", Provider: "beta-provider",
+			Endpoint: "/v1/chat/completions", StatusCode: http.StatusOK, LatencyMS: 10, CreatedAt: now.Add(time.Second),
+		},
+	} {
+		if err := db.InsertLogRecord(t.Context(), store.LogRecord{Request: record}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	get := func(token string) (int, []byte) {
+		t.Helper()
+		request, err := http.NewRequest(http.MethodGet, proxy.URL+"/admin/waterfall?session_id=waterfall-shared-session", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Header.Set("Authorization", "Bearer "+token)
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, err := io.ReadAll(response.Body)
+		response.Body.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response.StatusCode, body
+	}
+
+	teamStatus, teamBody := get(teamToken.AccessToken)
+	if teamStatus != http.StatusOK || !strings.Contains(string(teamBody), "waterfall-alpha-request") {
+		t.Fatalf("team waterfall lost own request: status=%d body=%s", teamStatus, teamBody)
+	}
+	for _, forbidden := range []string{
+		"waterfall-beta-request", "waterfall-beta-private@example.com", unsafeProvider,
+		unsafeFallback, unsafeTrace, unsafeModel, unsafeRequestedModel, unsafeEndpoint,
+	} {
+		if strings.Contains(string(teamBody), forbidden) {
+			t.Fatalf("team waterfall exposed %q: %s", forbidden, teamBody)
+		}
+	}
+	if !strings.Contains(string(teamBody), providerNameOmitted) || !strings.Contains(string(teamBody), "[REDACTED_EMAIL]") {
+		t.Fatalf("team waterfall did not apply lower-role projection: %s", teamBody)
+	}
+
+	rootStatus, rootBody := get(rootToken.AccessToken)
+	if rootStatus != http.StatusOK {
+		t.Fatalf("root waterfall status=%d body=%s", rootStatus, rootBody)
+	}
+	for _, preserved := range []string{"waterfall-alpha-request", "waterfall-beta-request", unsafeProvider, unsafeFallback, unsafeTrace, unsafeModel, unsafeRequestedModel, unsafeEndpoint} {
+		if !strings.Contains(string(rootBody), preserved) {
+			t.Fatalf("unrestricted waterfall lost %q: %s", preserved, rootBody)
+		}
+	}
+
+	emptyAdmin := postJSON(t, proxy.URL+"/admin/users", rootToken.AccessToken, map[string]string{
+		"email": "waterfall-empty@example.com", "password": "waterfall-password", "role": "team_admin",
+	})
+	emptyAdmin.Body.Close()
+	if emptyAdmin.StatusCode != http.StatusCreated {
+		t.Fatalf("create empty-scope team admin status=%d", emptyAdmin.StatusCode)
+	}
+	emptyLogin := postJSON(t, proxy.URL+"/auth/login", "", map[string]string{
+		"email": "waterfall-empty@example.com", "password": "waterfall-password",
+	})
+	var emptyToken struct {
+		AccessToken string `json:"access_token"`
+	}
+	if err := json.NewDecoder(emptyLogin.Body).Decode(&emptyToken); err != nil {
+		t.Fatal(err)
+	}
+	emptyLogin.Body.Close()
+	emptyStatus, emptyBody := get(emptyToken.AccessToken)
+	if emptyStatus != http.StatusOK {
+		t.Fatalf("empty-scope waterfall status=%d body=%s", emptyStatus, emptyBody)
+	}
+	var emptyTrace store.WaterfallTrace
+	if err := json.Unmarshal(emptyBody, &emptyTrace); err != nil {
+		t.Fatal(err)
+	}
+	if emptyTrace.Requests != 0 || len(emptyTrace.Spans) != 0 {
+		t.Fatalf("empty team scope did not fail closed: %+v", emptyTrace)
+	}
+}
+
+func TestWaterfallEndpointDoesNotExposeDatabaseErrors(t *testing.T) {
+	db := openTestStore(t)
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	server := &Server{db: db}
+	request := httptest.NewRequest(http.MethodGet, "/admin/waterfall?session_id=waterfall-db-error", nil)
+	recorder := httptest.NewRecorder()
+	server.handleWaterfall(recorder, request)
+	if recorder.Code != http.StatusInternalServerError {
+		t.Fatalf("waterfall DB failure status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if strings.Contains(strings.ToLower(recorder.Body.String()), "database") || strings.Contains(strings.ToLower(recorder.Body.String()), "closed") {
+		t.Fatalf("waterfall reflected database error: %s", recorder.Body.String())
+	}
+}
+
+func TestWaterfallProjectionUsesConfiguredCredentialPrefixAndPreservesFullAdmin(t *testing.T) {
+	cfg := testConfig("http://example.invalid", "secret")
+	cfg.Auth.AdminToken = "waterfall-full-admin"
+	cfg.Auth.AdminReadonlyToken = "waterfall-readonly"
+	cfg.Auth.APIKeyPrefix = "corp_"
+	server := &Server{cfg: cfg}
+	credential := "corp_" + strings.Repeat("C", 43)
+	newTrace := func() store.WaterfallTrace {
+		return store.WaterfallTrace{
+			SessionID: credential, StartedAt: credential,
+			Spans: []store.WaterfallSpan{{
+				RequestID: credential, TraceID: credential, Model: credential, RequestedModel: credential,
+				Provider: credential, Endpoint: credential, Category: credential, FallbackFrom: credential,
+				CreatedAt: credential,
+			}},
+		}
+	}
+	request := func(token string) *http.Request {
+		t.Helper()
+		r := httptest.NewRequest(http.MethodGet, "/admin/waterfall?session_id=projection", nil)
+		r.Header.Set("Authorization", "Bearer "+token)
+		return r
+	}
+
+	readonly := newTrace()
+	server.projectWaterfallForExternal(request("waterfall-readonly"), &readonly)
+	encoded, err := json.Marshal(readonly)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), credential) {
+		t.Fatalf("readonly waterfall leaked configured credential prefix: %s", encoded)
+	}
+	if readonly.Spans[0].Provider != providerNameOmitted || readonly.Spans[0].FallbackFrom != providerNameOmitted {
+		t.Fatalf("readonly provider labels were not omitted: %+v", readonly.Spans[0])
+	}
+
+	full := newTrace()
+	server.projectWaterfallForExternal(request("waterfall-full-admin"), &full)
+	if full.SessionID != credential || full.Spans[0].Provider != credential || full.Spans[0].CreatedAt != credential {
+		t.Fatalf("full admin waterfall did not preserve raw metadata: %+v", full)
 	}
 }

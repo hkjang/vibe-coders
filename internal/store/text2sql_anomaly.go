@@ -15,13 +15,24 @@ type anomalyRow struct {
 }
 
 func (s *SQLStore) fetchAnomalyRows(ctx context.Context, since time.Time, limit int) ([]anomalyRow, error) {
+	return s.fetchAnomalyRowsScoped(ctx, since, limit, nil, false)
+}
+
+func (s *SQLStore) fetchAnomalyRowsScoped(ctx context.Context, since time.Time, limit int, teams []string, teamScoped bool) ([]anomalyRow, error) {
 	if limit <= 0 || limit > 20000 {
 		limit = 10000
 	}
+	where := []string{"created_at >= ?", "COALESCE(mode,'') <> 'shadow'"}
+	args := []any{since.UTC().Format(time.RFC3339Nano)}
+	if condition, scopeArgs := text2SQLRequestScopeCondition("text2sql_query_logs.request_id", teams, teamScoped); condition != "" {
+		where = append(where, condition)
+		args = append(args, scopeArgs...)
+	}
+	args = append(args, limit)
 	rows, err := s.db.QueryContext(ctx, s.bind(`SELECT COALESCE(api_key_id,''), COALESCE(team,''), COALESCE(question,''),
 		COALESCE(reject_reason,''), COALESCE(failure_category,''), valid, explain_risk, created_at
-		FROM text2sql_query_logs WHERE created_at >= ? AND COALESCE(mode,'') <> 'shadow'
-		ORDER BY created_at ASC LIMIT ?`), since.UTC().Format(time.RFC3339Nano), limit)
+		FROM text2sql_query_logs WHERE `+strings.Join(where, " AND ")+`
+		ORDER BY created_at ASC LIMIT ?`), args...)
 	if err != nil {
 		return nil, err
 	}
@@ -75,7 +86,13 @@ func isBroadScope(question string) bool {
 // repetition of the same question, repeated permission-denied probing, and requests
 // for whole-schema scope. Returns patterns at/above the given thresholds.
 func (s *SQLStore) Text2SQLUsageSmells(ctx context.Context, since time.Time, repeatMin, probeMin int) ([]Text2SQLUsageSmell, error) {
-	rows, err := s.fetchAnomalyRows(ctx, since, 20000)
+	return s.Text2SQLUsageSmellsScoped(ctx, since, repeatMin, probeMin, nil, false)
+}
+
+// Text2SQLUsageSmellsScoped detects usage anomalies inside the caller's
+// request-team boundary.
+func (s *SQLStore) Text2SQLUsageSmellsScoped(ctx context.Context, since time.Time, repeatMin, probeMin int, teams []string, teamScoped bool) ([]Text2SQLUsageSmell, error) {
+	rows, err := s.fetchAnomalyRowsScoped(ctx, since, 20000, teams, teamScoped)
 	if err != nil {
 		return nil, err
 	}
@@ -147,7 +164,13 @@ type Text2SQLRiskExposure struct {
 
 // Text2SQLRiskExposureByTeam aggregates risk signals per team since `since`.
 func (s *SQLStore) Text2SQLRiskExposureByTeam(ctx context.Context, since time.Time) ([]Text2SQLRiskExposure, error) {
-	rows, err := s.fetchAnomalyRows(ctx, since, 20000)
+	return s.Text2SQLRiskExposureByTeamScoped(ctx, since, nil, false)
+}
+
+// Text2SQLRiskExposureByTeamScoped aggregates risk only from requests inside
+// the caller's request-team boundary.
+func (s *SQLStore) Text2SQLRiskExposureByTeamScoped(ctx context.Context, since time.Time, teams []string, teamScoped bool) ([]Text2SQLRiskExposure, error) {
+	rows, err := s.fetchAnomalyRowsScoped(ctx, since, 20000, teams, teamScoped)
 	if err != nil {
 		return nil, err
 	}
@@ -198,12 +221,23 @@ type Text2SQLPromptDNA struct {
 // Text2SQLPromptDNAReport profiles recurring questions over a window: frequency,
 // distinct users, average cost, and reject/exec rates, labeling each.
 func (s *SQLStore) Text2SQLPromptDNAReport(ctx context.Context, since time.Time, minCount, limit int) ([]Text2SQLPromptDNA, error) {
+	return s.Text2SQLPromptDNAReportScoped(ctx, since, minCount, limit, nil, false)
+}
+
+// Text2SQLPromptDNAReportScoped profiles recurring questions inside the
+// caller's request-team boundary.
+func (s *SQLStore) Text2SQLPromptDNAReportScoped(ctx context.Context, since time.Time, minCount, limit int, teams []string, teamScoped bool) ([]Text2SQLPromptDNA, error) {
 	if minCount < 2 {
 		minCount = 2
 	}
+	where := []string{"created_at >= ?", "COALESCE(mode,'') <> 'shadow'", "COALESCE(question,'') <> ''"}
+	args := []any{since.UTC().Format(time.RFC3339Nano)}
+	if condition, scopeArgs := text2SQLRequestScopeCondition("text2sql_query_logs.request_id", teams, teamScoped); condition != "" {
+		where = append(where, condition)
+		args = append(args, scopeArgs...)
+	}
 	rows, err := s.db.QueryContext(ctx, s.bind(`SELECT COALESCE(question,''), COALESCE(api_key_id,''), valid, executed, cost_krw
-		FROM text2sql_query_logs WHERE created_at >= ? AND COALESCE(mode,'') <> 'shadow' AND COALESCE(question,'') <> ''`),
-		since.UTC().Format(time.RFC3339Nano))
+		FROM text2sql_query_logs WHERE `+strings.Join(where, " AND ")), args...)
 	if err != nil {
 		return nil, err
 	}
@@ -334,7 +368,13 @@ func driftPosture(r anomalyRow) (int, string) {
 // Text2SQLIntentDrifts detects, per API key, a transition from an initial benign
 // question to a later higher-risk one in the same window — a possible intent shift.
 func (s *SQLStore) Text2SQLIntentDrifts(ctx context.Context, since time.Time) ([]Text2SQLIntentDrift, error) {
-	rows, err := s.fetchAnomalyRows(ctx, since, 20000) // ASC order (oldest first)
+	return s.Text2SQLIntentDriftsScoped(ctx, since, nil, false)
+}
+
+// Text2SQLIntentDriftsScoped detects intent changes inside the caller's
+// request-team boundary.
+func (s *SQLStore) Text2SQLIntentDriftsScoped(ctx context.Context, since time.Time, teams []string, teamScoped bool) ([]Text2SQLIntentDrift, error) {
+	rows, err := s.fetchAnomalyRowsScoped(ctx, since, 20000, teams, teamScoped) // ASC order (oldest first)
 	if err != nil {
 		return nil, err
 	}

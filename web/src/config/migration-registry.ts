@@ -143,24 +143,32 @@ export const migrationRegistry = [
     ],
     rolloutPercent: 100,
     fallbackEnabled: true,
-    minimumApiVersion: "v0.82.1",
+    minimumApiVersion: "v0.83.0",
   },
   {
     featureId: "observability.traces",
     title: "추적 탐색기",
-    description: "추적, 스팬 트리와 요청 처리 흐름을 확인합니다.",
+    description: "같은 추적 ID로 연결된 요청의 처리 흐름을 확인합니다.",
     group: "관측",
     keywords: ["trace", "span", "waterfall", "추적"],
     appPath: "/app/observability/traces",
     legacyPath: "/admin#/llm",
-    status: "legacy",
+    status: "preview_read_only",
     riskLevel: "low",
-    requiredPermission: "observability:read",
+    requiredPermission: "admin:read",
     readOnly: true,
-    enabledRoles: [],
+    enabledRoles: [
+      "super_admin",
+      "admin",
+      "ops_admin",
+      "ai_admin",
+      "security_admin",
+      "billing_admin",
+      "readonly_admin",
+    ],
     rolloutPercent: 100,
     fallbackEnabled: true,
-    minimumApiVersion: "v0.80.0",
+    minimumApiVersion: "v0.83.0",
   },
   {
     featureId: "prompts.lab",
@@ -348,6 +356,7 @@ const appImplementedFeatureIds: ReadonlySet<string> = new Set([
   "gateway.providers",
   "gateway.models",
   "observability.requests",
+  "observability.traces",
   "system.health",
 ]);
 
@@ -355,23 +364,66 @@ export function isAppFeatureImplemented(featureId: string): boolean {
   return appImplementedFeatureIds.has(featureId);
 }
 
-function versionParts(version: string): number[] {
-  return version
-    .replace(/^v/, "")
-    .split(".")
-    .map((part) => Number.parseInt(part, 10) || 0);
+interface ParsedReleaseVersion {
+  core: readonly [bigint, bigint, bigint];
+  prerelease: readonly string[];
+}
+
+const releaseVersionPattern =
+  /^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/u;
+const numericIdentifierPattern = /^\d+$/u;
+
+function parseReleaseVersion(version: string): ParsedReleaseVersion | undefined {
+  const match = releaseVersionPattern.exec(version);
+  if (!match) return undefined;
+  const prerelease = match[4]?.split(".") ?? [];
+  if (
+    prerelease.some(
+      (identifier) =>
+        numericIdentifierPattern.test(identifier) && identifier.length > 1 && identifier.startsWith("0"),
+    )
+  ) {
+    return undefined;
+  }
+  return {
+    core: [BigInt(match[1] as string), BigInt(match[2] as string), BigInt(match[3] as string)],
+    prerelease,
+  };
+}
+
+function comparePrerelease(left: readonly string[], right: readonly string[]): number {
+  if (!left.length || !right.length) {
+    if (left.length === right.length) return 0;
+    return left.length === 0 ? 1 : -1;
+  }
+  const length = Math.max(left.length, right.length);
+  for (let index = 0; index < length; index += 1) {
+    const a = left[index];
+    const b = right[index];
+    if (a === undefined || b === undefined) return a === undefined ? -1 : 1;
+    if (a === b) continue;
+    const aNumeric = numericIdentifierPattern.test(a);
+    const bNumeric = numericIdentifierPattern.test(b);
+    if (aNumeric && bNumeric) return BigInt(a) > BigInt(b) ? 1 : -1;
+    if (aNumeric !== bNumeric) return aNumeric ? -1 : 1;
+    return a > b ? 1 : -1;
+  }
+  return 0;
+}
+
+function compareReleaseVersions(left: string, right: string): number | undefined {
+  const a = parseReleaseVersion(left);
+  const b = parseReleaseVersion(right);
+  if (!a || !b) return undefined;
+  for (const index of [0, 1, 2] as const) {
+    if (a.core[index] !== b.core[index]) return a.core[index] > b.core[index] ? 1 : -1;
+  }
+  return comparePrerelease(a.prerelease, b.prerelease);
 }
 
 export function versionAtLeast(current: string, minimum: string): boolean {
-  const left = versionParts(current);
-  const right = versionParts(minimum);
-  const length = Math.max(left.length, right.length);
-  for (let index = 0; index < length; index += 1) {
-    const a = left[index] ?? 0;
-    const b = right[index] ?? 0;
-    if (a !== b) return a > b;
-  }
-  return true;
+  const comparison = compareReleaseVersions(current, minimum);
+  return comparison !== undefined && comparison >= 0;
 }
 
 export function rolloutBucket(userId: string, featureId: string): number {
@@ -393,13 +445,28 @@ export function resolveFeature(
   let effective: EffectiveFeature;
 
   if (feature.serverAvailable !== undefined) {
-    effective = {
-      feature,
-      status: feature.status,
-      readOnly: feature.readOnly || feature.status === "preview_read_only",
-      permitted: feature.serverAvailable,
-      reason: feature.availabilityReason,
-    };
+    if (!feature.serverAvailable) {
+      effective = {
+        feature,
+        status: feature.status,
+        readOnly: feature.readOnly || feature.status === "preview_read_only",
+        permitted: false,
+        reason: feature.availabilityReason,
+      };
+    } else if (!versionAtLeast(backendVersion, feature.minimumApiVersion)) {
+      // A rolling deployment may pair this UI build with an older backend
+      // whose registry still marks the feature available. The UI's static
+      // contract remains the lower bound for opening the React screen.
+      effective = { feature, status: "legacy", readOnly: true, permitted: true, reason: "api_version" };
+    } else {
+      effective = {
+        feature,
+        status: feature.status,
+        readOnly: feature.readOnly || feature.status === "preview_read_only",
+        permitted: true,
+        reason: feature.availabilityReason,
+      };
+    }
   } else {
     const roles = user ? (user.roles.length ? user.roles : [user.role]) : ["admin"];
     const scopes = user?.scopes ?? [
@@ -515,7 +582,10 @@ export function registryFromBootstrap(features: readonly UIBootstrapFeature[]): 
       enabledRoles: feature.enabled_roles,
       rolloutPercent: feature.rollout_percent,
       fallbackEnabled: feature.fallback_enabled,
-      minimumApiVersion: feature.minimum_api_version,
+      minimumApiVersion:
+        fallback && !versionAtLeast(feature.minimum_api_version, fallback.minimumApiVersion)
+          ? fallback.minimumApiVersion
+          : feature.minimum_api_version,
       serverAvailable: feature.available,
       availabilityReason: feature.availability_reason,
     };

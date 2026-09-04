@@ -89,3 +89,57 @@ func TestProviderHealthScoresBetweenBoundsWindow(t *testing.T) {
 		t.Fatalf("bounded health signals not accumulated: %+v", byProvider)
 	}
 }
+
+func TestRoutingDecisionByRequestIDDoesNotMatchAnotherDecisionPrimaryKey(t *testing.T) {
+	db := openAggTestStore(t)
+	defer db.Close()
+	ctx := context.Background()
+	when := time.Date(2026, 9, 4, 1, 2, 3, 0, time.UTC)
+
+	for _, fixture := range []struct {
+		requestID string
+		decision  RoutingDecisionLog
+	}{
+		{
+			requestID: "request-shared",
+			decision: RoutingDecisionLog{
+				ID: "decision-desired", RequestID: "request-shared", TraceID: "trace-desired",
+				SelectedModel: "desired-model", SelectedProvider: "desired-provider", CreatedAt: when,
+			},
+		},
+		{
+			requestID: "other-request",
+			decision: RoutingDecisionLog{
+				ID: "request-shared", RequestID: "other-request", TraceID: "trace-other",
+				SelectedModel: "collision-model", SelectedProvider: "collision-provider", CreatedAt: when.Add(time.Second),
+			},
+		},
+	} {
+		if err := db.InsertLogRecord(ctx, LogRecord{
+			Request: RequestLog{
+				ID: fixture.requestID, TraceID: fixture.decision.TraceID, Endpoint: "/v1/chat/completions",
+				Model: fixture.decision.SelectedModel, Provider: fixture.decision.SelectedProvider,
+				StatusCode: 200, CreatedAt: fixture.decision.CreatedAt,
+			},
+			Routing: &fixture.decision,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	decision, err := db.RoutingDecisionByRequestID(ctx, "request-shared")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.ID != "decision-desired" || decision.RequestID != "request-shared" || decision.SelectedProvider != "desired-provider" {
+		t.Fatalf("request-id lookup mixed a cross-column collision: %+v", decision)
+	}
+
+	legacyDecision, err := db.RoutingDecisionByID(ctx, "request-shared")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if legacyDecision.ID != "request-shared" || legacyDecision.RequestID != "other-request" || legacyDecision.SelectedProvider != "collision-provider" {
+		t.Fatalf("legacy id-or-request lookup did not prefer the exact decision id: %+v", legacyDecision)
+	}
+}

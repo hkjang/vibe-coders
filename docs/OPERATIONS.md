@@ -55,7 +55,7 @@ React `/app`까지 포함하는 직접 빌드는 frontend 산출물을 embed 경
 ```bash
 corepack enable
 pnpm --dir web install --frozen-lockfile
-VITE_UI_VERSION=v0.82.2 pnpm --dir web build
+VITE_UI_VERSION=v0.83.0 pnpm --dir web build
 find internal/appui/dist -mindepth 1 ! -name '.gitkeep' -delete
 cp -R web/dist/. internal/appui/dist/
 test -s internal/appui/dist/index.html
@@ -63,7 +63,7 @@ test -n "$(find internal/appui/dist/assets -type f -print -quit)"
 
 GOOS=linux GOARCH=amd64 CGO_ENABLED=0 \
   go build -trimpath \
-  -ldflags "-s -w -X vibe-coders/internal/proxy.AppVersion=v0.82.2" \
+  -ldflags "-s -w -X vibe-coders/internal/proxy.AppVersion=v0.83.0" \
   -o gateway ./cmd/gateway
 UI_APP_ENABLED=true ./gateway
 ```
@@ -74,9 +74,9 @@ UI_APP_ENABLED=true ./gateway
 ### 2.3 Docker
 
 ```bash
-docker build --build-arg VERSION=v0.82.2 -t ai-coding-proxy-gateway:v0.82.2 .
+docker build --build-arg VERSION=v0.83.0 -t ai-coding-proxy-gateway:v0.83.0 .
 
-export GATEWAY_VERSION=v0.82.2
+export GATEWAY_VERSION=v0.83.0
 export UPSTREAM_API_KEY='<실제 upstream key>'
 scripts/init-deployment-env.sh /opt/proxy-gateway/gateway.env
 docker volume create proxy-gateway-data >/dev/null
@@ -84,7 +84,7 @@ docker run -d --name proxy-gateway --restart=always \
   -p 8080:8080 \
   --mount source=proxy-gateway-data,target=/data \
   --env-file /opt/proxy-gateway/gateway.env \
-  ai-coding-proxy-gateway:v0.82.2
+  ai-coding-proxy-gateway:v0.83.0
 ```
 
 Dockerfile은 Node 24+pnpm frozen frontend builder → Go 1.26.8 embed builder → distroless
@@ -99,7 +99,7 @@ nonroot의 3-stage 구조입니다. React 정적 에셋은 Go 바이너리에 �
 `/opt/proxy-gateway/gateway.env`에 고정합니다.
 
 ```bash
-export GATEWAY_VERSION=v0.82.2
+export GATEWAY_VERSION=v0.83.0
 export UPSTREAM_API_KEY='<실제 upstream key>'
 scripts/init-deployment-env.sh /opt/proxy-gateway/gateway.env
 docker compose --env-file /opt/proxy-gateway/gateway.env up -d
@@ -115,22 +115,23 @@ docker compose --env-file /opt/proxy-gateway/gateway.env logs -f gateway
 ### 2.5 오프라인망 적재
 
 운영 망에 인터넷이 없을 때는 외부에서 릴리즈 패키지를 만들어 옮깁니다.
-릴리스 빌드 호스트에는 Docker, Bash, curl, Python 3가 필요하며 Node.js와 jq는
-Docker builder 외부에 설치할 필요가 없습니다.
+릴리스 빌드 호스트에는 Docker, Bash, curl, Python 3, Grype 0.117.0이 필요하며 Node.js와
+jq는 Docker builder 외부에 설치할 필요가 없습니다. 패키징 전에 Grype가 실제 최종
+이미지의 High·Critical 취약점을 검사합니다.
 
 ```bash
 # 인터넷이 되는 환경에서 산출
-./scripts/release.sh -v v0.82.2 -p linux/amd64
-# 기존 이미지·sha256·README + SBOM-v0.82.2.spdx.json +
-# THIRD_PARTY_LICENSES-v0.82.2.md 생성
+./scripts/release.sh -v v0.83.0 -p linux/amd64
+# 기존 이미지·sha256·README + SBOM-v0.83.0.spdx.json +
+# THIRD_PARTY_LICENSES-v0.83.0.md 생성
 ```
 
 폐쇄망 서버에서:
 
 ```bash
-sha256sum -c ai-coding-proxy-gateway-v0.82.2.tar.gz.sha256
-gunzip -c ai-coding-proxy-gateway-v0.82.2.tar.gz | docker load
-docker run -d ... -e UI_APP_ENABLED=true ai-coding-proxy-gateway:v0.82.2
+sha256sum -c ai-coding-proxy-gateway-v0.83.0.tar.gz.sha256
+gunzip -c ai-coding-proxy-gateway-v0.83.0.tar.gz | docker load
+docker run -d ... -e UI_APP_ENABLED=true ai-coding-proxy-gateway:v0.83.0
 ```
 
 ---
@@ -301,7 +302,7 @@ SQLite 일관성을 위해 먼저 gateway를 중지합니다. stopped gateway co
 ```bash
 docker compose --env-file /opt/proxy-gateway/gateway.env stop gateway
 scripts/backup-volume.sh backup \
-  --image ai-coding-proxy-gateway:v0.82.2 \
+  --image ai-coding-proxy-gateway:v0.83.0 \
   --volume proxy-gateway-data \
   --env-file /opt/proxy-gateway/gateway.env \
   --output-dir /opt/proxy-gateway/backups
@@ -331,7 +332,7 @@ SQLite header/가능한 경우 `PRAGMA quick_check`, 내부 파일 checksum, vol
 docker compose --env-file /opt/proxy-gateway/gateway.env down
 
 scripts/backup-volume.sh restore \
-  --image ai-coding-proxy-gateway:v0.82.2 \
+  --image ai-coding-proxy-gateway:v0.83.0 \
   --volume proxy-gateway-data \
   --env-file /opt/proxy-gateway/gateway.env \
   --output-dir /opt/proxy-gateway/backups \

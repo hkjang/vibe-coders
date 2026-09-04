@@ -17,6 +17,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"vibe-coders/internal/audit"
 	"vibe-coders/internal/store"
 )
 
@@ -604,10 +605,23 @@ func modelsProviderLabelSafe(name string) bool {
 	if name == "" || len(name) > maxModelsProviderNameBytes || !utf8.ValidString(name) || strings.TrimSpace(name) != name || strings.ContainsRune(name, ',') {
 		return false
 	}
-	if strings.IndexFunc(name, unicode.IsControl) >= 0 || providerURLComponentHasCredential(name) {
+	if strings.IndexFunc(name, unicode.IsControl) >= 0 || providerURLComponentHasCredential(name) || providerLabelContainsSensitivePII(name) {
 		return false
 	}
 	return true
+}
+
+func providerLabelContainsSensitivePII(name string) bool {
+	redacted := audit.Redact(name)
+	for _, marker := range []string{
+		"[REDACTED_RRN]", "[REDACTED_PHONE_KR]", "[REDACTED_BIZNO]",
+		"[REDACTED_SSN]", "[REDACTED_CARD]", "[REDACTED_EMAIL]", "[REDACTED_IPV4]",
+	} {
+		if strings.Contains(redacted, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func modelsProviderNameReserved(name string) bool {

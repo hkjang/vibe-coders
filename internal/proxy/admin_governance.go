@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -144,30 +145,71 @@ func (s *Server) handlePolicyDecisions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	filter := policyDecisionFilterFromRequest(r)
-	events, err := s.db.ListPolicyDecisionEventsFiltered(r.Context(), filter)
-	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "policy_decisions_failed")
+	if err := s.enforceGovernanceTeamScope(r, &filter.TeamID); err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, "governance scope could not be resolved", "server_error", "governance_scope_failed")
 		return
 	}
+	events, err := s.db.ListPolicyDecisionEventsFiltered(r.Context(), filter)
+	if err != nil {
+		slog.Error("policy decision query failed", "error", err)
+		writeOpenAIError(w, http.StatusInternalServerError, "policy decisions could not be loaded", "server_error", "policy_decisions_failed")
+		return
+	}
+	if !s.canViewRawPrompts(r) {
+		governance := store.GovernanceEvents{PolicyDecisions: events}
+		projectRequestGovernanceProviderForExternal(&governance, s.externalCredentialProjectionArgs()...)
+		events = governance.PolicyDecisions
+	}
+	filters := map[string]any{
+		"request_id": filter.RequestID,
+		"api_key_id": filter.APIKeyID,
+		"user_id":    filter.UserID,
+		"team_id":    filter.TeamID,
+		"endpoint":   filter.Endpoint,
+		"phase":      filter.Phase,
+		"policy_id":  filter.PolicyID,
+		"rule_id":    filter.RuleID,
+		"decision":   filter.Decision,
+		"model":      filter.Model,
+		"provider":   filter.Provider,
+		"since":      formatFilterSince(filter.Since),
+		"limit":      filter.Limit,
+	}
+	s.projectGovernanceFiltersForExternal(r, filters)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"policy_decisions": events,
 		"count":            len(events),
-		"filters": map[string]any{
-			"request_id": filter.RequestID,
-			"api_key_id": filter.APIKeyID,
-			"user_id":    filter.UserID,
-			"team_id":    filter.TeamID,
-			"endpoint":   filter.Endpoint,
-			"phase":      filter.Phase,
-			"policy_id":  filter.PolicyID,
-			"rule_id":    filter.RuleID,
-			"decision":   filter.Decision,
-			"model":      filter.Model,
-			"provider":   filter.Provider,
-			"since":      formatFilterSince(filter.Since),
-			"limit":      filter.Limit,
-		},
+		"filters":          filters,
 	})
+}
+
+func (s *Server) enforceGovernanceTeamScope(r *http.Request, teamID *string) error {
+	if !s.cfg.Auth.Enabled {
+		return nil
+	}
+	claims, ok := s.currentAccessClaims(r)
+	if !ok {
+		return fmt.Errorf("admin access claims unavailable")
+	}
+	if claims.Role != "team_admin" {
+		return nil
+	}
+	if claims.TeamID == "" || strings.TrimSpace(claims.TeamID) != claims.TeamID {
+		// A value that can never be persisted by supported team admission keeps the
+		// query fail-closed without falling back to a global listing.
+		*teamID = "\x00invalid-team-scope"
+		return nil
+	}
+	*teamID = claims.TeamID
+	return nil
+}
+
+func (s *Server) projectGovernanceFiltersForExternal(r *http.Request, filters map[string]any) {
+	if s.canViewRawPrompts(r) {
+		return
+	}
+	projectProviderMetadataMapForExternal(filters, s.externalCredentialProjectionArgs()...)
+	redactRequestReadabilityMap(filters)
 }
 
 func policyDecisionFilterFromRequest(r *http.Request) store.PolicyDecisionFilter {
@@ -216,32 +258,45 @@ func (s *Server) handleApprovals(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if _, err := s.db.ExpireApprovals(r.Context(), time.Now().UTC()); err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "approvals_expire_failed")
+		slog.Error("approval expiry update failed", "error", err)
+		writeOpenAIError(w, http.StatusInternalServerError, "approval status could not be refreshed", "server_error", "approvals_expire_failed")
 		return
 	}
 	filter := approvalFilterFromRequest(r)
-	approvals, err := s.db.ListApprovalsFiltered(r.Context(), filter)
-	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "approvals_failed")
+	if err := s.enforceGovernanceTeamScope(r, &filter.TeamID); err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, "governance scope could not be resolved", "server_error", "governance_scope_failed")
 		return
 	}
+	approvals, err := s.db.ListApprovalsFiltered(r.Context(), filter)
+	if err != nil {
+		slog.Error("approval list query failed", "error", err)
+		writeOpenAIError(w, http.StatusInternalServerError, "approvals could not be loaded", "server_error", "approvals_failed")
+		return
+	}
+	if !s.canViewRawPrompts(r) {
+		governance := store.GovernanceEvents{Approvals: approvals}
+		projectRequestGovernanceProviderForExternal(&governance, s.externalCredentialProjectionArgs()...)
+		approvals = governance.Approvals
+	}
+	filters := map[string]any{
+		"id":           filter.ID,
+		"request_id":   filter.RequestID,
+		"api_key_id":   filter.APIKeyID,
+		"user_id":      filter.UserID,
+		"team_id":      filter.TeamID,
+		"subject_type": filter.SubjectType,
+		"subject_id":   filter.SubjectID,
+		"status":       filter.Status,
+		"decided_by":   filter.DecidedBy,
+		"reason":       filter.Reason,
+		"since":        formatFilterSince(filter.Since),
+		"limit":        filter.Limit,
+	}
+	s.projectGovernanceFiltersForExternal(r, filters)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"approvals": approvals,
 		"count":     len(approvals),
-		"filters": map[string]any{
-			"id":           filter.ID,
-			"request_id":   filter.RequestID,
-			"api_key_id":   filter.APIKeyID,
-			"user_id":      filter.UserID,
-			"team_id":      filter.TeamID,
-			"subject_type": filter.SubjectType,
-			"subject_id":   filter.SubjectID,
-			"status":       filter.Status,
-			"decided_by":   filter.DecidedBy,
-			"reason":       filter.Reason,
-			"since":        formatFilterSince(filter.Since),
-			"limit":        filter.Limit,
-		},
+		"filters":   filters,
 	})
 }
 
@@ -339,26 +394,38 @@ func (s *Server) handleSecretEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	filter := secretEventFilterFromRequest(r)
-	events, err := s.db.ListSecretEventsFiltered(r.Context(), filter)
-	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "secret_events_failed")
+	if err := s.enforceGovernanceTeamScope(r, &filter.TeamID); err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, "governance scope could not be resolved", "server_error", "governance_scope_failed")
 		return
 	}
+	events, err := s.db.ListSecretEventsFiltered(r.Context(), filter)
+	if err != nil {
+		slog.Error("secret event query failed", "error", err)
+		writeOpenAIError(w, http.StatusInternalServerError, "secret events could not be loaded", "server_error", "secret_events_failed")
+		return
+	}
+	if !s.canViewRawPrompts(r) {
+		governance := store.GovernanceEvents{SecretEvents: events}
+		projectRequestGovernanceProviderForExternal(&governance, s.externalCredentialProjectionArgs()...)
+		events = governance.SecretEvents
+	}
+	filters := map[string]any{
+		"request_id":   filter.RequestID,
+		"api_key_id":   filter.APIKeyID,
+		"user_id":      filter.UserID,
+		"team_id":      filter.TeamID,
+		"secret_type":  filter.SecretType,
+		"action":       filter.Action,
+		"location":     filter.Location,
+		"matched_hash": filter.MatchedHash,
+		"since":        formatFilterSince(filter.Since),
+		"limit":        filter.Limit,
+	}
+	s.projectGovernanceFiltersForExternal(r, filters)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"secret_events": events,
 		"count":         len(events),
-		"filters": map[string]any{
-			"request_id":   filter.RequestID,
-			"api_key_id":   filter.APIKeyID,
-			"user_id":      filter.UserID,
-			"team_id":      filter.TeamID,
-			"secret_type":  filter.SecretType,
-			"action":       filter.Action,
-			"location":     filter.Location,
-			"matched_hash": filter.MatchedHash,
-			"since":        formatFilterSince(filter.Since),
-			"limit":        filter.Limit,
-		},
+		"filters":       filters,
 	})
 }
 

@@ -164,10 +164,27 @@ func (s *SQLStore) SessionRiskMarkersFor(ctx context.Context, sessionID string) 
 // RecentSessions groups request_logs by session_id since a cutoff, newest activity first.
 // Sessions with an empty session_id (anonymous/no client session) are excluded.
 func (s *SQLStore) RecentSessions(ctx context.Context, since time.Time, limit int) ([]SessionSummary, error) {
+	return s.RecentSessionsScoped(ctx, since, limit, nil, false)
+}
+
+// RecentSessionsScoped groups only requests visible inside the caller's team
+// boundary. The last-message subquery reads from the same scoped CTE so a shared
+// client session id cannot pull another team's prompt preview into the result.
+func (s *SQLStore) RecentSessionsScoped(ctx context.Context, since time.Time, limit int, teams []string, teamScoped bool) ([]SessionSummary, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
-	query := s.bind(`
+	where, args := appendRequestTeamCondition(
+		[]string{"r.session_id <> ''", "r.created_at >= ?"},
+		[]any{since.UTC().Format(time.RFC3339Nano)},
+		"",
+		teams,
+		teamScoped,
+	)
+	args = append(args, limit)
+	query := s.bind(`WITH scoped_requests AS (
+		SELECT r.* FROM request_logs r WHERE ` + strings.Join(where, " AND ") + `
+	)
 		SELECT r.session_id,
 			COUNT(*),
 			MIN(r.created_at),
@@ -178,21 +195,20 @@ func (s *SQLStore) RecentSessions(ctx context.Context, since time.Time, limit in
 			COALESCE(SUM(t.total_tokens), 0),
 			COALESCE(SUM(t.estimated_cost), 0),
 			COALESCE((
-				SELECT COALESCE(NULLIF(pl.redacted_text, ''), pl.content_text)
+				SELECT COALESCE(pl.redacted_text, '')
 				FROM prompt_logs pl
-				JOIN request_logs plr ON plr.id = pl.request_id
+				JOIN scoped_requests plr ON plr.id = pl.request_id
 				WHERE plr.session_id = r.session_id AND LOWER(pl.role) = 'user'
 				ORDER BY pl.created_at DESC
 				LIMIT 1
 			), '')
-		FROM request_logs r
+		FROM scoped_requests r
 		LEFT JOIN token_usage t ON t.request_id = r.id
-		WHERE r.session_id <> '' AND r.created_at >= ?
 		GROUP BY r.session_id
 		ORDER BY MAX(r.created_at) DESC
 		LIMIT ?
 	`)
-	rows, err := s.db.QueryContext(ctx, query, since.UTC().Format(time.RFC3339Nano), limit)
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -208,4 +224,90 @@ func (s *SQLStore) RecentSessions(ctx context.Context, since time.Time, limit in
 		out = append(out, x)
 	}
 	return out, rows.Err()
+}
+
+// SessionRiskMarkersForRequests returns governance markers only for an already
+// authorized, bounded request-id set. This prevents a shared session id from
+// widening a team-scoped flight recorder after its requests were filtered.
+func (s *SQLStore) SessionRiskMarkersForRequests(ctx context.Context, requestIDs []string) (SessionRiskMarkers, error) {
+	markers := SessionRiskMarkers{Secrets: map[string]int{}, PolicyBlocks: map[string]int{}, CodeRisk: map[string]string{}}
+	ids := make([]string, 0, min(len(requestIDs), 500))
+	seen := make(map[string]struct{}, min(len(requestIDs), 500))
+	for _, id := range requestIDs {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		if _, exists := seen[id]; exists {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+		if len(ids) == 500 {
+			break
+		}
+	}
+	if len(ids) == 0 {
+		return markers, nil
+	}
+	placeholders := strings.Repeat(",?", len(ids))[1:]
+	args := make([]any, len(ids))
+	for index := range ids {
+		args[index] = ids[index]
+	}
+
+	secretRows, err := s.db.QueryContext(ctx, s.bind(`SELECT request_id, COUNT(*) FROM secret_events
+		WHERE request_id IN (`+placeholders+`) GROUP BY request_id`), args...)
+	if err != nil {
+		return markers, err
+	}
+	for secretRows.Next() {
+		var id string
+		var count int
+		if err := secretRows.Scan(&id, &count); err != nil {
+			secretRows.Close()
+			return markers, err
+		}
+		markers.Secrets[id] = count
+	}
+	if err := secretRows.Close(); err != nil {
+		return markers, err
+	}
+
+	policyRows, err := s.db.QueryContext(ctx, s.bind(`SELECT request_id, COUNT(*) FROM policy_decision_events
+		WHERE request_id IN (`+placeholders+`) AND LOWER(decision) NOT IN ('allow', 'allowed', 'pass')
+		GROUP BY request_id`), args...)
+	if err != nil {
+		return markers, err
+	}
+	for policyRows.Next() {
+		var id string
+		var count int
+		if err := policyRows.Scan(&id, &count); err != nil {
+			policyRows.Close()
+			return markers, err
+		}
+		markers.PolicyBlocks[id] = count
+	}
+	if err := policyRows.Close(); err != nil {
+		return markers, err
+	}
+
+	codeRows, err := s.db.QueryContext(ctx, s.bind(`SELECT request_id, COALESCE(risk, '') FROM code_verify_results
+		WHERE request_id IN (`+placeholders+`) AND has_code = 1`), args...)
+	if err != nil {
+		return markers, err
+	}
+	for codeRows.Next() {
+		var id, risk string
+		if err := codeRows.Scan(&id, &risk); err != nil {
+			codeRows.Close()
+			return markers, err
+		}
+		markers.CodeRisk[id] = risk
+	}
+	if err := codeRows.Close(); err != nil {
+		return markers, err
+	}
+	return markers, nil
 }

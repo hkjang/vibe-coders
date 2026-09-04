@@ -1,6 +1,8 @@
 package proxy
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -51,6 +53,22 @@ func TestBuildRequestTrace(t *testing.T) {
 	// total = max(latency 1200, last child offset 900) = 1200.
 	if tr.TotalMS != 1200 {
 		t.Fatalf("total_ms = %d, want 1200", tr.TotalMS)
+	}
+}
+
+func TestRequestTraceRejectsNonGetAndInvalidIDs(t *testing.T) {
+	server := &Server{}
+
+	method := httptest.NewRecorder()
+	server.handleRequestTrace(method, httptest.NewRequest(http.MethodPost, "/admin/requests/req-1/trace", nil))
+	if method.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("POST status = %d, want %d", method.Code, http.StatusMethodNotAllowed)
+	}
+
+	invalid := httptest.NewRecorder()
+	server.handleRequestTrace(invalid, httptest.NewRequest(http.MethodGet, "/admin/requests//trace", nil))
+	if invalid.Code != http.StatusBadRequest {
+		t.Fatalf("invalid ID status = %d, want %d", invalid.Code, http.StatusBadRequest)
 	}
 }
 

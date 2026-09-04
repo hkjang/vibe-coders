@@ -13,10 +13,12 @@ interface RequestProjectionCall {
 }
 
 const providerRef = `prv_${"r".repeat(43)}`;
+const requestNextCursor = `djE6cmVxdWVzdC1uZXh0.${"n".repeat(43)}`;
+const requestPreviousCursor = `djE6cmVxdWVzdC1wcmV2aW91cw.${"p".repeat(43)}`;
 
 const bootstrap = {
-  backend_version: "v0.82.1",
-  ui_version: "e2e-v0.82.1",
+  backend_version: "v0.83.0",
+  ui_version: "e2e-v0.83.0",
   api_version: "v1",
   ui: {
     enabled: true,
@@ -59,7 +61,7 @@ const bootstrap = {
       enabled_roles: ["admin"],
       rollout_percent: 100,
       fallback_enabled: true,
-      minimum_api_version: "v0.82.1",
+      minimum_api_version: "v0.83.0",
       available: true,
     },
   ],
@@ -69,7 +71,10 @@ const bootstrap = {
 
 const requestOne = {
   request_id: "req-001",
+  request_ref: `req_${"a".repeat(22)}.${"a".repeat(21)}`,
+  request_filterable: true,
   trace_id: "trace-001",
+  trace_filterable: true,
   session_id: "session-001",
   api_key_id: "key-001",
   ip: "192.0.2.10",
@@ -96,6 +101,7 @@ const requestOne = {
 const requestTwo = {
   ...requestOne,
   request_id: "req-002",
+  request_ref: `req_${"b".repeat(22)}.${"b".repeat(21)}`,
   trace_id: "trace-002",
   session_id: "session-002",
   status_code: 503,
@@ -109,16 +115,24 @@ const requestTwo = {
 const firstPage = {
   requests: [requestOne],
   limit: 25,
-  next_cursor: "cursor-next-page",
+  next_cursor: requestNextCursor,
   generated_at: "2026-09-03T01:00:05Z",
 };
 
 const secondPage = {
   requests: [requestTwo],
   limit: 25,
-  previous_cursor: "cursor-previous-page",
+  previous_cursor: requestPreviousCursor,
   generated_at: "2026-09-03T01:00:06Z",
 };
+
+function withoutV2Identity(request: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(request).filter(
+      ([key]) => !["request_ref", "request_filterable", "trace_filterable"].includes(key),
+    ),
+  );
+}
 
 async function axeViolations(page: Page): Promise<unknown[]> {
   return page.evaluate(async () => {
@@ -174,7 +188,7 @@ async function mockRequestGateway(
 test("요청 탐색기 직접 접근과 새로고침에서 필터·커서·안전 상세를 유지한다", async ({ page }) => {
   await page.addInitScript({ path: "node_modules/axe-core/axe.min.js" });
   const calls = await mockRequestGateway(page, (call) => ({
-    body: call.cursor === "cursor-next-page" ? secondPage : firstPage,
+    body: call.cursor === requestNextCursor ? secondPage : firstPage,
   }));
 
   await page.goto(
@@ -192,20 +206,25 @@ test("요청 탐색기 직접 접근과 새로고침에서 필터·커서·안�
     ),
   );
   await expect(page.getByText("req-001", { exact: true })).toBeVisible();
-  const expectedListTime = new Intl.DateTimeFormat("ko-KR", {
-    dateStyle: "short",
-    timeStyle: "medium",
-    timeZone: "UTC",
-  }).format(new Date(requestOne.created_at));
-  const expectedDetailTime = new Intl.DateTimeFormat("ko-KR", {
-    dateStyle: "medium",
-    timeStyle: "medium",
-    timeZone: "UTC",
-  }).format(new Date(requestOne.created_at));
-  const expectedGeneratedTime = new Intl.DateTimeFormat("ko-KR", {
-    timeStyle: "medium",
-    timeZone: "UTC",
-  }).format(new Date(firstPage.generated_at));
+  const { expectedDetailTime, expectedGeneratedTime, expectedListTime } = await page.evaluate(
+    ({ createdAt, generatedAt }) => ({
+      expectedDetailTime: new Intl.DateTimeFormat("ko-KR", {
+        dateStyle: "medium",
+        timeStyle: "medium",
+        timeZone: "UTC",
+      }).format(new Date(createdAt)),
+      expectedGeneratedTime: new Intl.DateTimeFormat("ko-KR", {
+        timeStyle: "medium",
+        timeZone: "UTC",
+      }).format(new Date(generatedAt)),
+      expectedListTime: new Intl.DateTimeFormat("ko-KR", {
+        dateStyle: "short",
+        timeStyle: "medium",
+        timeZone: "UTC",
+      }).format(new Date(createdAt)),
+    }),
+    { createdAt: requestOne.created_at, generatedAt: firstPage.generated_at },
+  );
   await expect(page.getByTestId("request-created-at-req-001")).toHaveText(expectedListTime);
   await expect(page.getByTestId("requests-generated-at")).toHaveText(expectedGeneratedTime);
   await expect(page.getByRole("link", { name: "기존 화면 보기" })).toHaveAttribute(
@@ -218,6 +237,7 @@ test("요청 탐색기 직접 접근과 새로고침에서 필터·커서·안�
   expect(initialCall?.headers["x-vibe-ui"]).toBe("app");
   expect(initialCall?.headers["x-vibe-ui-version"]).toBeTruthy();
   expect(initialCall?.headers["x-vibe-route"]).toBe("observability.requests");
+  expect(initialCall?.headers["x-vibe-app-requests-version"]).toBe("2");
   expect(initialCall?.url.searchParams.get("model")).toBe("gpt-test");
   expect(initialCall?.url.searchParams.get("status")).toBe("success");
   expect(initialCall?.url.searchParams.get("provider_ref")).toBe(providerRef);
@@ -231,9 +251,9 @@ test("요청 탐색기 직접 접근과 새로고침에서 필터·커서·안�
   expect(calls.at(-1)?.url.searchParams.get("tz")).toBe("UTC");
   await expect(page.getByTestId("request-created-at-req-001")).toHaveText(expectedListTime);
 
-  const detailTrigger = page.getByRole("button", { name: "상세" });
+  const detailTrigger = page.getByRole("button", { name: "1번째 요청 req-001 상세 보기" });
   await detailTrigger.click();
-  const dialog = page.getByRole("dialog", { name: "요청 req-001" });
+  const dialog = page.getByRole("dialog", { name: "1번째 요청 req-001" });
   await expect(dialog).toBeVisible();
   await expect(dialog).toContainText("프롬프트, 응답 본문, 원시 오류와 사용자 에이전트");
   await expect(dialog.getByTestId("request-detail-created-at")).toHaveText(expectedDetailTime);
@@ -246,10 +266,100 @@ test("요청 탐색기 직접 접근과 새로고침에서 필터·커서·안�
   await expect(detailTrigger).toBeFocused();
 
   await page.getByRole("button", { name: "다음" }).click();
-  await expect(page).toHaveURL(/cursor=cursor-next-page/);
+  await expect.poll(() => new URL(page.url()).searchParams.get("cursor")).toBe(requestNextCursor);
   await expect(page.getByText("req-002", { exact: true })).toBeVisible();
-  await expect.poll(() => calls.some((call) => call.cursor === "cursor-next-page")).toBe(true);
+  await expect(page.getByRole("heading", { name: "요청 조회 결과" })).toBeFocused();
+  await expect.poll(() => calls.some((call) => call.cursor === requestNextCursor)).toBe(true);
   expect(await axeViolations(page)).toEqual([]);
+});
+
+test("같은 비공개 요청 ID도 순서와 불투명 참조로 상세를 구분한다", async ({ page }) => {
+  const privateRequests = [
+    {
+      ...requestOne,
+      request_id: "[값 비공개]",
+      request_ref: `req_${"c".repeat(22)}.${"c".repeat(21)}`,
+      request_filterable: false,
+      model: "비공개 요청 모델 1",
+    },
+    {
+      ...requestTwo,
+      request_id: "[값 비공개]",
+      request_ref: `req_${"d".repeat(22)}.${"d".repeat(21)}`,
+      request_filterable: false,
+      model: "비공개 요청 모델 2",
+    },
+  ];
+  await mockRequestGateway(page, () => ({
+    body: { ...firstPage, requests: privateRequests, next_cursor: undefined },
+  }));
+
+  await page.goto("observability/requests");
+  const firstDetail = page.getByRole("button", {
+    name: "1번째 요청 [값 비공개] 상세 보기",
+  });
+  const secondDetail = page.getByRole("button", {
+    name: "2번째 요청 [값 비공개] 상세 보기",
+  });
+  await expect(firstDetail).toBeVisible();
+  await expect(secondDetail).toBeVisible();
+
+  await secondDetail.click();
+  const dialog = page.getByRole("dialog", { name: "2번째 요청 [값 비공개]" });
+  await expect(dialog).toContainText("비공개 요청 모델 2");
+  await expect(dialog).not.toContainText("비공개 요청 모델 1");
+  await page.keyboard.press("Escape");
+  await expect(secondDetail).toBeFocused();
+});
+
+test("v1 호환 응답은 경고와 로컬 상세를 유지하고 추적 연결은 숨긴다", async ({ page }) => {
+  const calls = await mockRequestGateway(page, () => ({
+    body: {
+      ...firstPage,
+      requests: [withoutV2Identity(requestOne)],
+      next_cursor: undefined,
+    },
+  }));
+
+  await page.goto("observability/requests");
+  await expect(page.getByText("서버 배포 버전을 맞추는 중입니다.")).toBeVisible();
+  await expect(page.getByText(/v0\.83\.0 이상이 된 뒤 제공됩니다/u)).toBeVisible();
+
+  const detailTrigger = page.getByRole("button", { name: "1번째 요청 req-001 상세 보기" });
+  await expect(detailTrigger).toBeEnabled();
+  await detailTrigger.click();
+  const dialog = page.getByRole("dialog", { name: "1번째 요청 req-001" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole("link", { name: "이 요청의 추적 보기" })).toHaveCount(0);
+  await expect.poll(() => calls.length).toBeGreaterThan(0);
+  expect(calls[0]?.headers["x-vibe-app-requests-version"]).toBe("2");
+});
+
+test("페이지 이동 최종 실패 시 오류 제목으로 포커스를 옮긴다", async ({ page }) => {
+  await mockRequestGateway(page, (call) => {
+    if (call.cursor === requestNextCursor) {
+      return {
+        status: 503,
+        body: {
+          error: {
+            code: "request_page_unavailable",
+            message: "페이지 이동에 실패했습니다.",
+            type: "server_error",
+          },
+          request_id: "request-page-error",
+        },
+      };
+    }
+    return { body: firstPage };
+  });
+
+  await page.goto("observability/requests");
+  await expect(page.getByText("req-001", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "다음" }).click();
+
+  const errorHeading = page.getByRole("heading", { name: "화면을 불러오지 못했습니다." });
+  await expect(errorHeading).toBeFocused();
+  await expect(page.getByText("요청 ID: request-page-error")).toBeVisible();
 });
 
 test("요청 목록 갱신 실패 시 마지막 정상 데이터를 유지하고 빈 결과를 구분한다", async ({ page }) => {

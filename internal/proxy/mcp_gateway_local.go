@@ -401,13 +401,15 @@ func (s *Server) runGatewayTool(ctx context.Context, r *http.Request, apiKeyID s
 		})
 		plan := s.planIntelligentRouting(ctx, body, "/v1/chat/completions", false, false, authCtx)
 		rawProvider := plan.SelectedProvider
+		projectionArgs := s.externalCredentialProjectionArgs(rawProvider)
 		return gatewayToolJSON(map[string]any{
-			"requested_model": plan.RequestedModel, "selected_model": plan.SelectedModel,
-			"selected_provider": boundedModelsProviderLabelOrEmpty(rawProvider),
-			"reason":            boundedExternalProviderText(firstNonEmpty(plan.DecisionReason, plan.RouteReason), rawProvider),
+			"requested_model":   boundedExternalProviderText(plan.RequestedModel, projectionArgs...),
+			"selected_model":    boundedExternalProviderText(plan.SelectedModel, projectionArgs...),
+			"selected_provider": s.boundedModelsProviderLabelOrEmptyForConfig(rawProvider),
+			"reason":            boundedExternalProviderText(firstNonEmpty(plan.DecisionReason, plan.RouteReason), projectionArgs...),
 			"complexity_tier":   plan.Complexity.Tier,
 			"risk_tier":         plan.Risk.Tier,
-			"fallback_plan":     boundedExternalFallbackPath(plan.FallbackPlan, rawProvider),
+			"fallback_plan":     boundedExternalFallbackPath(plan.FallbackPlan, projectionArgs...),
 		}), nil
 
 	case "gateway_list_skills":
@@ -451,15 +453,15 @@ func (s *Server) runGatewayTool(ctx context.Context, r *http.Request, apiKeyID s
 		if err != nil {
 			return nil, err
 		}
-		req := projectRecentRequestProviderForExternal(detail.Request)
+		req := projectRecentRequestProviderForExternal(detail.Request, s.externalCredentialProjectionArgs()...)
 		summary := map[string]any{
 			"request_id": req.ID, "model": req.Model, "provider": req.Provider,
 			"status_code": req.StatusCode, "cost_krw": req.EstimatedCost,
 			"tokens":    map[string]any{"prompt": req.PromptTokens, "completion": req.CompletionTokens, "total": req.TotalTokens, "cached": req.CachedTokens},
 			"cache_hit": req.CachedTokens > 0, "created_at": req.CreatedAt,
 		}
-		if rd, err := s.db.RoutingDecisionByID(ctx, reqID); err == nil {
-			rd = projectRoutingDecisionProviderForExternal(rd)
+		if rd, err := s.db.RoutingDecisionByRequestID(ctx, reqID); err == nil {
+			rd = projectRoutingDecisionProviderForExternal(rd, s.externalCredentialProjectionArgs()...)
 			summary["routing"] = map[string]any{"selected_model": rd.SelectedModel, "reason": rd.DecisionReason}
 		}
 		return gatewayToolJSON(summary), nil

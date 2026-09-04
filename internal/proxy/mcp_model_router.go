@@ -257,7 +257,7 @@ func (s *Server) handleMCPDiscoveryChat(w http.ResponseWriter, r *http.Request, 
 					w.Header().Set("X-MCP-Grounded", strconv.FormatBool(len(filtered) > 0))
 					w.Header().Set("X-MCP-Steps", strconv.Itoa(outcome.Steps))
 					w.Header().Set("X-MCP-Tool-Calls", strconv.Itoa(outcome.ToolCalls))
-					writeMCPDiscoveryCompletion(w, policy.Model, outcome.Content, filtered)
+					s.writeMCPDiscoveryCompletion(w, policy.Model, outcome.Content, filtered)
 				}
 				return
 			}
@@ -291,7 +291,7 @@ func (s *Server) handleMCPDiscoveryChat(w http.ResponseWriter, r *http.Request, 
 		}
 	}
 	w.Header().Set("X-MCP-Evidence", strconv.Itoa(len(filtered)))
-	content := renderMCPDiscoveryAnswer(policy, candidates, filtered, diag)
+	content := s.renderMCPDiscoveryAnswer(policy, candidates, filtered, diag)
 	if len(filtered) == 0 && !policy.AllowNoGroundAnswer {
 		w.Header().Set("X-MCP-Grounded", "false")
 	} else {
@@ -308,7 +308,7 @@ func (s *Server) handleMCPDiscoveryChat(w http.ResponseWriter, r *http.Request, 
 		CreatedAt:        time.Now().UTC(),
 	}
 	s.finishMCPDiscovery(r, meta, start, query, policy, candidates, evidences, filtered, content, usage, apiKeyID, authCtx)
-	writeMCPDiscoveryCompletion(w, policy.Model, content, filtered)
+	s.writeMCPDiscoveryCompletion(w, policy.Model, content, filtered)
 }
 
 // agenticUsageRecord builds a TokenUsage row from the agentic loop's aggregated usage,
@@ -563,9 +563,9 @@ func (s *Server) selectMCPCandidates(ctx context.Context, query string, policy M
 		if len(tools) == 0 {
 			diag.NoToolsInSnap++
 			if snapErr := snap.errors[up.Name]; snapErr != "" {
-				diag.SnapErrors = append(diag.SnapErrors, boundedModelsProviderLabel(up.Name)+": "+mcpUpstreamRequestFailed)
+				diag.SnapErrors = append(diag.SnapErrors, s.boundedModelsProviderLabelForConfig(up.Name)+": "+mcpUpstreamRequestFailed)
 			} else {
-				diag.SnapErrors = append(diag.SnapErrors, boundedModelsProviderLabel(up.Name)+": 도구 목록 없음")
+				diag.SnapErrors = append(diag.SnapErrors, s.boundedModelsProviderLabelForConfig(up.Name)+": 도구 목록 없음")
 			}
 			continue
 		}
@@ -738,7 +738,7 @@ func extractMCPResultItems(raw json.RawMessage) ([]MCPResultItem, string) {
 	return items, ""
 }
 
-func renderMCPDiscoveryAnswer(policy MCPDiscoveryPolicy, candidates []MCPCandidate, evidences []MCPEvidence, diag mcpSelectionDiag) string {
+func (s *Server) renderMCPDiscoveryAnswer(policy MCPDiscoveryPolicy, candidates []MCPCandidate, evidences []MCPEvidence, diag mcpSelectionDiag) string {
 	if len(candidates) == 0 {
 		var b strings.Builder
 		b.WriteString("확인 가능한 MCP 후보가 없습니다.\n\n")
@@ -765,6 +765,9 @@ func renderMCPDiscoveryAnswer(policy MCPDiscoveryPolicy, candidates []MCPCandida
 	}
 	if len(evidences) == 0 {
 		names := candidateIDs(candidates)
+		for index := range names {
+			names[index] = s.boundedModelsProviderLabelForConfig(names[index])
+		}
 		return "선택된 MCP 후보(" + strings.Join(names, ", ") + ")에서 evidence score 기준을 넘는 근거를 찾지 못했습니다. 일반 LLM 추정 답변은 비활성화되어 있습니다."
 	}
 	var b strings.Builder
@@ -775,18 +778,19 @@ func renderMCPDiscoveryAnswer(policy MCPDiscoveryPolicy, candidates []MCPCandida
 	b.WriteString(policy.Mode)
 	b.WriteString("\n\n")
 	for i, evidence := range evidences {
-		b.WriteString(fmt.Sprintf("%d. %s / %s (evidence %.2f)\n", i+1, boundedModelsProviderLabel(evidence.UpstreamName), evidence.ToolName, evidence.EvidenceScore))
+		projectionArgs := s.externalCredentialProjectionArgs(evidence.UpstreamName)
+		b.WriteString(fmt.Sprintf("%d. %s / %s (evidence %.2f)\n", i+1, s.boundedModelsProviderLabelForConfig(evidence.UpstreamName), boundedExternalProviderText(evidence.ToolName, projectionArgs...), evidence.EvidenceScore))
 		for j, item := range evidence.Items {
 			if j >= 3 {
 				break
 			}
-			line := strings.TrimSpace(item.Text)
+			line := strings.TrimSpace(boundedExternalProviderText(item.Text, projectionArgs...))
 			if line == "" {
-				line = item.URI
+				line = boundedExternalProviderText(item.URI, projectionArgs...)
 			}
 			if item.Title != "" {
 				b.WriteString("   - ")
-				b.WriteString(item.Title)
+				b.WriteString(boundedExternalProviderText(item.Title, projectionArgs...))
 				b.WriteString(": ")
 			} else {
 				b.WriteString("   - ")
@@ -794,7 +798,7 @@ func renderMCPDiscoveryAnswer(policy MCPDiscoveryPolicy, candidates []MCPCandida
 			b.WriteString(truncateText(line, 500))
 			if item.URI != "" {
 				b.WriteString(" (")
-				b.WriteString(item.URI)
+				b.WriteString(boundedExternalProviderText(item.URI, projectionArgs...))
 				b.WriteString(")")
 			}
 			b.WriteString("\n")
@@ -803,8 +807,8 @@ func renderMCPDiscoveryAnswer(policy MCPDiscoveryPolicy, candidates []MCPCandida
 	return b.String()
 }
 
-func writeMCPDiscoveryCompletion(w http.ResponseWriter, model, content string, evidences []MCPEvidence) {
-	evidences = projectMCPEvidencesForExternal(evidences)
+func (s *Server) writeMCPDiscoveryCompletion(w http.ResponseWriter, model, content string, evidences []MCPEvidence) {
+	evidences = projectMCPEvidencesForExternal(evidences, s.externalCredentialProjectionArgs()...)
 	resp := map[string]any{
 		"id":      "chatcmpl-" + newID("mcp"),
 		"object":  "chat.completion",
@@ -823,16 +827,27 @@ func writeMCPDiscoveryCompletion(w http.ResponseWriter, model, content string, e
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
-func projectMCPEvidencesForExternal(evidences []MCPEvidence) []MCPEvidence {
+func projectMCPEvidencesForExternal(evidences []MCPEvidence, projectionArgs ...string) []MCPEvidence {
 	if len(evidences) == 0 {
 		return evidences
 	}
 	projected := make([]MCPEvidence, len(evidences))
 	for index, evidence := range evidences {
 		rawUpstream := evidence.UpstreamName
+		providers := append([]string{rawUpstream}, projectionArgs...)
 		projected[index] = evidence
-		projected[index].UpstreamName = boundedModelsProviderLabelOrEmpty(rawUpstream)
-		projected[index].Error = boundedExternalProviderText(evidence.Error, rawUpstream)
+		projected[index].UpstreamID = boundedExternalProviderText(evidence.UpstreamID, providers...)
+		projected[index].UpstreamName = boundedExternalProviderLabelOrEmpty(rawUpstream, projectionArgs...)
+		projected[index].ToolName = boundedExternalProviderText(evidence.ToolName, providers...)
+		projected[index].Args = boundedExternalProviderText(evidence.Args, providers...)
+		projected[index].Error = boundedExternalProviderText(evidence.Error, providers...)
+		projected[index].Items = append([]MCPResultItem(nil), evidence.Items...)
+		for itemIndex := range projected[index].Items {
+			item := &projected[index].Items[itemIndex]
+			item.Title = boundedExternalProviderText(item.Title, providers...)
+			item.URI = boundedExternalProviderText(item.URI, providers...)
+			item.Text = boundedExternalProviderText(item.Text, providers...)
+		}
 	}
 	return projected
 }

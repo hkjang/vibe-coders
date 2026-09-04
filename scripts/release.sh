@@ -5,8 +5,8 @@
 #   ./scripts/release.sh [-v VERSION] [-i IMAGE] [-p PLATFORM]
 #
 # 예:
-#   ./scripts/release.sh -v v0.82.2
-#   ./scripts/release.sh -v v0.82.2 -p linux/arm64
+#   ./scripts/release.sh -v v0.83.0
+#   ./scripts/release.sh -v v0.83.0 -p linux/arm64
 set -euo pipefail
 
 IMAGE="ai-coding-proxy-gateway"
@@ -107,9 +107,9 @@ if ! command -v docker >/dev/null 2>&1; then
     echo "docker 가 PATH 에 없습니다." >&2
     exit 1
 fi
-for smoke_dependency in curl python3; do
+for smoke_dependency in curl python3 grype; do
     if ! command -v "$smoke_dependency" >/dev/null 2>&1; then
-        echo "container smoke 필수 도구가 PATH 에 없습니다: $smoke_dependency" >&2
+        echo "릴리즈 검증 필수 도구가 PATH 에 없습니다: $smoke_dependency" >&2
         exit 1
     fi
 done
@@ -205,6 +205,9 @@ docker build \
 
 echo "[verify] embedded /app assets, deep links, and build version"
 bash "${REPO_ROOT}/scripts/container-smoke.sh" "$TAG" "$VERSION" "$RELEASE_SOURCE_COMMIT"
+
+echo "[verify] final image high and critical vulnerability gate"
+bash "${REPO_ROOT}/scripts/scan-container-image.sh" "$TAG"
 
 echo "[2/${TOTAL_STEPS}] docker save -> $TAR_PATH"
 docker save -o "$TAR_PATH" "$TAG"

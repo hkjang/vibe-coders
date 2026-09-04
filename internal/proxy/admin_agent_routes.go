@@ -108,14 +108,14 @@ func (s *Server) validateAgentRouteProvider(ctx context.Context, provider string
 	// name. Preserve an exact unchanged binding so operators can edit unrelated route
 	// fields; never permit a new route or changed binding to introduce one.
 	legacyExact := existingFound && provider == strings.TrimSpace(existing.Provider) &&
-		(!modelsProviderLabelSafe(provider) || modelsProviderNameReserved(provider))
+		(!s.modelsProviderLabelSafeForConfig(provider) || modelsProviderNameReserved(provider))
 	if legacyExact {
 		return "", ""
 	}
 	if modelsProviderNameReserved(provider) {
 		return "agent_route_provider_reserved", "provider name is reserved"
 	}
-	if !modelsProviderLabelSafe(provider) {
+	if !s.modelsProviderLabelSafeForConfig(provider) {
 		return "agent_route_provider_invalid", "provider name contains unsafe metadata"
 	}
 	_, found, err := s.db.GetProvider(ctx, provider)

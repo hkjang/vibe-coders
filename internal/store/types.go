@@ -9,12 +9,15 @@ import (
 var ErrNotFound = errors.New("not found")
 
 type PromptSearch struct {
-	Keyword  string
-	APIKeyID string
-	IP       string
-	Language string
-	Since    string
-	Limit    int
+	Keyword            string
+	APIKeyID           string
+	IP                 string
+	Language           string
+	Since              string
+	Limit              int
+	Teams              []string
+	TeamScoped         bool
+	SearchRedactedOnly bool
 }
 
 type UsageFilter struct {

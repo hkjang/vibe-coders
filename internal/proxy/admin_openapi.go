@@ -659,28 +659,31 @@ func enrichOpenAPIOperation(route, method string, op map[string]any) {
 		}
 		responses["200"] = successResponse("AdminModelsResponse")
 	case "get /admin/requests":
-		op["description"] = "Legacy callers keep the existing dynamic response shape. When X-Vibe-UI: app is supplied, the response follows the AppRequestsResponse component."
+		op["description"] = "Legacy callers keep the existing dynamic response shape. React callers request the version 2 safe projection with X-Vibe-UI: app and X-Vibe-App-Requests-Version: 2. Omitting the version header preserves the v0.82 app projection during rolling deployments."
 		op["parameters"] = []any{
 			map[string]any{"name": "X-Vibe-UI", "in": "header", "required": false, "description": "Set to app to request the safe React console projection.", "schema": map[string]any{"type": "string", "enum": []string{"app"}}},
+			map[string]any{"name": appRequestContractHeader, "in": "header", "required": false, "description": "Set to 2 for request_ref and filterability fields. Absent or 1 returns the v0.82-compatible app shape.", "schema": map[string]any{"type": "string", "enum": []string{appRequestContractV1, appRequestContractV2}, "default": appRequestContractV1}},
 			map[string]any{"name": "limit", "in": "query", "required": false, "schema": map[string]any{"type": "integer", "minimum": 1, "maximum": 200, "default": 50}},
-			map[string]any{"name": "from", "in": "query", "required": false, "schema": map[string]any{"type": "string"}},
-			map[string]any{"name": "to", "in": "query", "required": false, "schema": map[string]any{"type": "string"}},
-			map[string]any{"name": "tz", "in": "query", "required": false, "schema": map[string]any{"type": "string", "default": "Asia/Seoul"}},
+			map[string]any{"name": "from", "in": "query", "required": false, "schema": map[string]any{"type": "string", "maxLength": 64}},
+			map[string]any{"name": "to", "in": "query", "required": false, "schema": map[string]any{"type": "string", "maxLength": 64}},
+			map[string]any{"name": "tz", "in": "query", "required": false, "schema": map[string]any{"type": "string", "maxLength": 64, "default": "Asia/Seoul"}},
 			map[string]any{"name": "status", "in": "query", "required": false, "schema": map[string]any{"type": "string", "pattern": `^(success|error|4xx|5xx|[1-5][0-9]{2})$`}},
-			map[string]any{"name": "model", "in": "query", "required": false, "schema": map[string]any{"type": "string"}},
+			map[string]any{"name": "model", "in": "query", "required": false, "schema": map[string]any{"type": "string", "maxLength": 256}},
 			map[string]any{"name": "provider_ref", "in": "query", "required": false, "schema": map[string]any{"type": "string", "pattern": `^prv_[A-Za-z0-9_-]{43}$`}},
 			map[string]any{"name": "request_id", "in": "query", "required": false, "schema": map[string]any{"type": "string", "maxLength": appRequestIDMaxBytes}},
-			map[string]any{"name": "trace_id", "in": "query", "required": false, "schema": map[string]any{"type": "string"}},
-			map[string]any{"name": "session_id", "in": "query", "required": false, "schema": map[string]any{"type": "string"}},
-			map[string]any{"name": "api_key_id", "in": "query", "required": false, "schema": map[string]any{"type": "string"}},
-			map[string]any{"name": "ip", "in": "query", "required": false, "schema": map[string]any{"type": "string"}},
-			map[string]any{"name": "language", "in": "query", "required": false, "schema": map[string]any{"type": "string"}},
+			map[string]any{"name": "trace_id", "in": "query", "required": false, "description": "Exact trace ID, limited to 512 UTF-8 bytes.", "schema": map[string]any{"type": "string", "maxLength": appRequestIDMaxBytes}},
+			map[string]any{"name": "session_id", "in": "query", "required": false, "schema": map[string]any{"type": "string", "maxLength": appRequestIDMaxBytes}},
+			map[string]any{"name": "api_key_id", "in": "query", "required": false, "schema": map[string]any{"type": "string", "maxLength": appRequestIDMaxBytes}},
+			map[string]any{"name": "ip", "in": "query", "required": false, "schema": map[string]any{"type": "string", "maxLength": 128}},
+			map[string]any{"name": "language", "in": "query", "required": false, "schema": map[string]any{"type": "string", "maxLength": 64}},
 			map[string]any{"name": "cursor", "in": "query", "required": false, "schema": map[string]any{"type": "string", "maxLength": appRequestCursorMaxBytes}},
 		}
-		// Do not attach AppRequestsResponse as the operation's sole 200 schema:
-		// /admin and existing SDK callers intentionally retain the pre-existing
-		// dynamic legacy contract when the optional variant header is absent.
-		responses["200"] = map[string]any{"description": "OK. X-Vibe-UI: app uses AppRequestsResponse; legacy callers receive the existing response shape."}
+		responses["200"] = map[string]any{
+			"description": "OK. Version 2 app callers receive AppRequestsResponse; version 1 app and legacy callers retain their prior shape.",
+			"headers": map[string]any{
+				appRequestContractHeader: map[string]any{"description": "Selected app request projection contract version.", "schema": map[string]any{"type": "string", "enum": []string{appRequestContractV1, appRequestContractV2}}},
+			},
+		}
 	case "get /admin/providers/slo":
 		op["parameters"] = []any{map[string]any{
 			"name": "window", "in": "query", "required": false,
@@ -765,7 +768,7 @@ func appUIOpenAPISchemas() map[string]any {
 		"AuthUser":           user,
 		"AuthTokenResponse":  map[string]any{"type": "object", "required": []string{"access_token", "refresh_token", "token_type", "expires_in", "refresh_expires_in"}, "properties": map[string]any{"access_token": map[string]any{"type": "string"}, "refresh_token": map[string]any{"type": "string"}, "token_type": map[string]any{"type": "string", "enum": []string{"Bearer"}}, "expires_in": map[string]any{"type": "integer"}, "refresh_expires_in": map[string]any{"type": "integer"}, "user": schemaRef("AuthUser")}},
 		"StatusResponse":     map[string]any{"type": "object", "required": []string{"status"}, "properties": map[string]any{"status": map[string]any{"type": "string"}}},
-		"AuthMeResponse":     map[string]any{"type": "object", "required": []string{"auth_enabled", "version"}, "properties": map[string]any{"auth_enabled": map[string]any{"type": "boolean"}, "version": map[string]any{"type": "string"}, "expires_at": map[string]any{"type": "integer", "nullable": true}, "menu_version": map[string]any{"type": "integer"}, "user": map[string]any{"allOf": []any{schemaRef("AuthUser")}, "nullable": true}}},
+		"AuthMeResponse":     map[string]any{"type": "object", "required": []string{"auth_enabled", "version"}, "properties": map[string]any{"auth_enabled": map[string]any{"type": "boolean"}, "credential_prefixes": map[string]any{"type": "array", "maxItems": 64, "items": map[string]any{"type": "string", "maxLength": 512}}, "version": map[string]any{"type": "string"}, "expires_at": map[string]any{"type": "integer", "nullable": true}, "menu_version": map[string]any{"type": "integer"}, "user": map[string]any{"allOf": []any{schemaRef("AuthUser")}, "nullable": true}}},
 		"SSOStatusResponse":  map[string]any{"type": "object", "required": []string{"keycloak_enabled", "allow_local_login", "login_url"}, "properties": map[string]any{"keycloak_enabled": map[string]any{"type": "boolean"}, "allow_local_login": map[string]any{"type": "boolean"}, "login_url": map[string]any{"type": "string"}}},
 		"SSOExchangeRequest": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"code"}, "properties": map[string]any{"code": map[string]any{"type": "string", "minLength": 1, "maxLength": 128}}},
 		"KeycloakLogoutRequest": map[string]any{"type": "object", "additionalProperties": false, "properties": map[string]any{
@@ -795,7 +798,7 @@ func appUIOpenAPISchemas() map[string]any {
 			"enabled": map[string]any{"type": "boolean"}, "default_entry": map[string]any{"type": "string", "pattern": "^/app(?:/|$)"}, "legacy_fallback": map[string]any{"type": "boolean"}, "feedback_enabled": map[string]any{"type": "boolean"}, "telemetry_enabled": map[string]any{"type": "boolean"},
 		}},
 		"UIAuthentication": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"enabled", "authenticated", "mode", "keycloak_enabled", "allow_local_login", "sso_login_url"}, "properties": map[string]any{
-			"enabled": map[string]any{"type": "boolean"}, "authenticated": map[string]any{"type": "boolean"}, "mode": map[string]any{"type": "string", "enum": []string{"open", "session", "legacy_token"}}, "keycloak_enabled": map[string]any{"type": "boolean"}, "allow_local_login": map[string]any{"type": "boolean"}, "sso_login_url": map[string]any{"type": "string"},
+			"enabled": map[string]any{"type": "boolean"}, "authenticated": map[string]any{"type": "boolean"}, "mode": map[string]any{"type": "string", "enum": []string{"open", "session", "legacy_token"}}, "keycloak_enabled": map[string]any{"type": "boolean"}, "allow_local_login": map[string]any{"type": "boolean"}, "sso_login_url": map[string]any{"type": "string"}, "credential_prefixes": map[string]any{"type": "array", "maxItems": 64, "items": map[string]any{"type": "string", "maxLength": 512}},
 		}},
 		"UISystemStatus":      map[string]any{"type": "object", "additionalProperties": false, "required": []string{"status"}, "properties": map[string]any{"status": map[string]any{"type": "string", "enum": []string{"healthy", "degraded"}}}},
 		"UIBootstrapResponse": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"backend_version", "ui_version", "api_version", "ui", "authentication", "roles", "permissions", "allowed_features", "migration_registry", "system_status", "legacy_route_map"}, "properties": map[string]any{"backend_version": map[string]any{"type": "string"}, "ui_version": map[string]any{"type": "string"}, "api_version": map[string]any{"type": "string"}, "ui": schemaRef("UIRuntimeConfig"), "authentication": schemaRef("UIAuthentication"), "user": map[string]any{"allOf": []any{schemaRef("AuthUser")}, "nullable": true}, "roles": stringArray, "permissions": stringArray, "allowed_features": stringArray, "migration_registry": map[string]any{"type": "array", "items": schemaRef("MigrationFeature")}, "system_status": schemaRef("UISystemStatus"), "legacy_route_map": map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}}}},
@@ -814,12 +817,14 @@ func appUIOpenAPISchemas() map[string]any {
 
 func requestExplorerOpenAPISchemas() map[string]any {
 	providerRef := map[string]any{"type": "string", "minLength": providerRefLength, "maxLength": providerRefLength, "pattern": `^prv_[A-Za-z0-9_-]{43}$`}
+	requestRef := map[string]any{"type": "string", "minLength": appRequestRefLength, "maxLength": appRequestRefLength, "pattern": `^req_[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{21}$`}
 	return map[string]any{
 		"AppRequestSummary": map[string]any{
 			"type": "object", "additionalProperties": false,
-			"required": []string{"request_id", "trace_id", "session_id", "api_key_id", "ip", "method", "model", "provider_ref", "provider_display", "endpoint", "stream", "status_code", "latency_ms", "first_chunk_ms", "prompt_tokens", "completion_tokens", "total_tokens", "cached_tokens", "reasoning_tokens", "estimated_cost", "currency", "finish_reason", "created_at"},
+			"required": []string{"request_id", "request_ref", "request_filterable", "trace_id", "trace_filterable", "session_id", "api_key_id", "ip", "method", "model", "provider_ref", "provider_display", "endpoint", "stream", "status_code", "latency_ms", "first_chunk_ms", "prompt_tokens", "completion_tokens", "total_tokens", "cached_tokens", "reasoning_tokens", "estimated_cost", "currency", "finish_reason", "created_at"},
 			"properties": map[string]any{
-				"request_id": map[string]any{"type": "string", "minLength": 1, "maxLength": appRequestIDMaxBytes}, "trace_id": map[string]any{"type": "string", "maxLength": appRequestIDMaxBytes},
+				"request_id": map[string]any{"type": "string", "minLength": 1, "maxLength": appRequestIDMaxBytes}, "request_ref": requestRef, "request_filterable": map[string]any{"type": "boolean"},
+				"trace_id": map[string]any{"type": "string", "maxLength": appRequestIDMaxBytes}, "trace_filterable": map[string]any{"type": "boolean"},
 				"session_id": map[string]any{"type": "string", "maxLength": appRequestIDMaxBytes}, "api_key_id": map[string]any{"type": "string", "maxLength": appRequestIDMaxBytes},
 				"ip": map[string]any{"type": "string", "maxLength": appRequestIPMaxBytes}, "method": map[string]any{"type": "string", "maxLength": appRequestMethodMaxBytes},
 				"model": map[string]any{"type": "string", "maxLength": appRequestModelMaxBytes}, "provider_ref": providerRef,

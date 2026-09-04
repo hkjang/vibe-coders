@@ -3,6 +3,7 @@ package config
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -114,4 +115,55 @@ func TestLoadProxyKeysBlankAndMixedCompatibility(t *testing.T) {
 			t.Fatalf("Load() proxy keys = %+v, want the single valid entry", cfg.Auth.ProxyAPIKeys)
 		}
 	})
+}
+
+func TestLoadHistoricalKeyPrefixes(t *testing.T) {
+	t.Setenv("AUTH_HISTORICAL_KEY_PREFIXES", " oldfoo_ , legacy , 긴접두사 ")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"oldfoo_", "legacy", "긴접두사"}
+	if strings.Join(cfg.Auth.HistoricalKeyPrefixes, ",") != strings.Join(want, ",") {
+		t.Fatalf("historical key prefixes = %#v, want %#v", cfg.Auth.HistoricalKeyPrefixes, want)
+	}
+}
+
+func TestLoadRejectsInvalidGeneratedKeyPrefixesWithoutLeakingValues(t *testing.T) {
+	tests := []struct {
+		name    string
+		envName string
+		value   string
+		want    string
+	}{
+		{name: "API prefix byte overflow", envName: "AUTH_API_KEY_PREFIX", value: strings.Repeat("한", 171), want: "AUTH_API_KEY_PREFIX"},
+		{name: "service prefix whitespace", envName: "AUTH_SERVICE_KEY_PREFIX", value: "service key_", want: "AUTH_SERVICE_KEY_PREFIX"},
+		{name: "API prefix control character", envName: "AUTH_API_KEY_PREFIX", value: "corp_\n", want: "AUTH_API_KEY_PREFIX"},
+		{name: "historical prefix byte overflow", envName: "AUTH_HISTORICAL_KEY_PREFIXES", value: strings.Repeat("한", 171), want: "AUTH_HISTORICAL_KEY_PREFIXES"},
+		{name: "historical prefix whitespace", envName: "AUTH_HISTORICAL_KEY_PREFIXES", value: "old key_", want: "AUTH_HISTORICAL_KEY_PREFIXES"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv(test.envName, test.value)
+			_, err := Load()
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("Load() error = %v, want stable %s validation error", err, test.want)
+			}
+			if strings.Contains(err.Error(), test.value) {
+				t.Fatalf("Load() error leaked credential prefix metadata: %q", err)
+			}
+		})
+	}
+}
+
+func TestLoadRejectsTooManyHistoricalKeyPrefixes(t *testing.T) {
+	prefixes := make([]string, maxHistoricalKeyPrefixes+1)
+	for index := range prefixes {
+		prefixes[index] = fmt.Sprintf("old%d_", index)
+	}
+	t.Setenv("AUTH_HISTORICAL_KEY_PREFIXES", strings.Join(prefixes, ","))
+	_, err := Load()
+	if err == nil || !strings.Contains(err.Error(), "AUTH_HISTORICAL_KEY_PREFIXES must contain at most 60 entries") {
+		t.Fatalf("Load() error = %v, want bounded historical-prefix count", err)
+	}
 }
