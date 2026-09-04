@@ -43,10 +43,14 @@ vi.mock("@/app/auth/AuthProvider", () => ({
 }));
 
 const providerRef = `prv_${"a".repeat(43)}`;
+const requestRef = `req_${"a".repeat(22)}.${"a".repeat(21)}`;
 const nextCursor = `djE6dGVzdA.${"n".repeat(43)}`;
 const row = {
   request_id: "req-001",
+  request_ref: requestRef,
+  request_filterable: true,
   trace_id: "trace-001",
+  trace_filterable: true,
   session_id: "session-001",
   api_key_id: "key-001",
   ip: "192.0.2.10",
@@ -71,6 +75,7 @@ const row = {
 } as const;
 
 const response = {
+  request_contract_version: 2,
   requests: [row],
   limit: 50,
   next_cursor: nextCursor,
@@ -123,7 +128,11 @@ describe("RequestPage", () => {
     expect(screen.getByLabelText("모델")).toHaveValue("gpt-test");
     expect(screen.getByLabelText("상태")).toHaveValue("success");
     await waitFor(() => {
-      const options = request.mock.calls[0]?.[1] as { query?: Record<string, unknown> };
+      const options = request.mock.calls[0]?.[1] as {
+        headers?: Record<string, string>;
+        query?: Record<string, unknown>;
+      };
+      expect(options.headers).toEqual({ "X-Vibe-App-Requests-Version": "2" });
       expect(options.query).toMatchObject({
         model: "gpt-test",
         status: "success",
@@ -134,7 +143,7 @@ describe("RequestPage", () => {
     await user.click(screen.getByText("req-001"));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 
-    const detail = screen.getByRole("button", { name: "상세" });
+    const detail = screen.getByRole("button", { name: "1번째 요청 req-001 상세 보기" });
     await user.click(detail);
     expect(screen.getByRole("dialog")).toHaveTextContent("프롬프트, 응답 본문, 원시 오류");
     expect(screen.getByRole("dialog")).not.toHaveTextContent("raw-secret");
@@ -144,15 +153,60 @@ describe("RequestPage", () => {
     );
     expect(screen.getByRole("link", { name: "이 요청의 추적 보기" })).toHaveAttribute(
       "href",
-      "/observability/traces?selected_request=req-001&trace_id=trace-001",
+      "/observability/traces?trace_id=trace-001&selected_request=req-001",
     );
     await user.click(screen.getByRole("button", { name: "닫기" }));
     await waitFor(() => expect(detail).toHaveFocus());
 
     await user.click(screen.getByRole("button", { name: "다음" }));
     expect(screen.getByTestId("location")).toHaveTextContent(`cursor=${nextCursor}`);
+    await waitFor(() => expect(screen.getByRole("heading", { name: "요청 조회 결과" })).toHaveFocus());
     const results = await axe.run(view.container);
     expect(results.violations).toHaveLength(0);
+  });
+
+  it("페이지 이동이 최종 실패하면 오류 제목으로 포커스를 옮긴다", async () => {
+    let rejectRetry: ((reason?: unknown) => void) | undefined;
+    vi.spyOn(apiClient, "request")
+      .mockResolvedValueOnce(response as never)
+      .mockRejectedValueOnce(
+        new AppError("페이지 이동 실패", { kind: "http", requestId: "gateway-page-error" }),
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise((_resolve, reject) => {
+            rejectRetry = reject;
+          }) as never,
+      )
+      .mockResolvedValueOnce(response as never);
+    const user = userEvent.setup();
+    renderPage();
+
+    expect(await screen.findByText("req-001")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "다음" }));
+
+    const errorHeading = await screen.findByRole("heading", {
+      name: "화면을 불러오지 못했습니다.",
+    });
+    await waitFor(() => expect(errorHeading).toHaveFocus());
+    expect(screen.getByText("요청 ID: gateway-page-error")).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "다시 시도" }));
+    expect(rejectRetry).toBeDefined();
+    await act(async () => {
+      rejectRetry?.(
+        new AppError("페이지 재시도 실패", {
+          kind: "http",
+          requestId: "gateway-page-retry-error",
+        }),
+      );
+    });
+    expect(await screen.findByText("요청 ID: gateway-page-retry-error")).toBeVisible();
+    expect(screen.getByRole("button", { name: "다시 시도" })).toHaveFocus();
+
+    await user.click(screen.getByRole("button", { name: "다시 시도" }));
+    expect(await screen.findByText("req-001")).toBeVisible();
+    await waitFor(() => expect(screen.getByRole("heading", { name: "요청 조회 결과" })).toHaveFocus());
   });
 
   it("keeps the last good page visible when refresh fails", async () => {
@@ -300,7 +354,7 @@ describe("RequestPage", () => {
       const options = request.mock.calls[0]?.[1] as { query?: Record<string, unknown> };
       expect(options.query?.tz).toBe("UTC");
     });
-    await user.click(screen.getByRole("button", { name: "상세" }));
+    await user.click(screen.getByRole("button", { name: "1번째 요청 req-001 상세 보기" }));
     expect(screen.getByTestId("request-detail-created-at")).toHaveTextContent(utcDetailExpected);
     utcPage.unmount();
 
@@ -322,7 +376,7 @@ describe("RequestPage", () => {
 
     expect(await screen.findByTestId("request-created-at-req-001")).toHaveTextContent(seoulListExpected);
     expect(screen.getByTestId("requests-generated-at")).toHaveTextContent(seoulGeneratedExpected);
-    await user.click(screen.getByRole("button", { name: "상세" }));
+    await user.click(screen.getByRole("button", { name: "1번째 요청 req-001 상세 보기" }));
     expect(screen.getByTestId("request-detail-created-at")).toHaveTextContent(seoulDetailExpected);
   });
 
@@ -346,16 +400,178 @@ describe("RequestPage", () => {
     expect(badge).toHaveClass(`badge-${tone}`);
   });
 
-  it("does not offer a broken Trace handoff when the request has no trace ID", async () => {
+  it.each(["", "[값 비공개]", "[값 생략]"])(
+    "does not offer a broken Trace handoff when trace ID %j is not filterable",
+    async (traceID) => {
+      vi.spyOn(apiClient, "request").mockResolvedValue({
+        ...response,
+        requests: [{ ...row, trace_id: traceID, trace_filterable: false }],
+      } as never);
+      const user = userEvent.setup();
+      renderPage();
+
+      await user.click(await screen.findByRole("button", { name: "1번째 요청 req-001 상세 보기" }));
+      expect(screen.queryByRole("link", { name: "이 요청의 추적 보기" })).not.toBeInTheDocument();
+    },
+  );
+
+  it("hands off a projected request through its opaque selection reference", async () => {
     vi.spyOn(apiClient, "request").mockResolvedValue({
       ...response,
-      requests: [{ ...row, trace_id: "" }],
+      requests: [{ ...row, request_id: "[값 비공개]", request_filterable: false }],
     } as never);
     const user = userEvent.setup();
     renderPage();
 
-    await user.click(await screen.findByRole("button", { name: "상세" }));
+    await user.click(await screen.findByRole("button", { name: "1번째 요청 [값 비공개] 상세 보기" }));
+    expect(screen.getByRole("link", { name: "이 요청의 추적 보기" })).toHaveAttribute(
+      "href",
+      `/observability/traces?trace_id=trace-001&selected_ref=${requestRef}`,
+    );
+  });
+
+  it("같은 비공개 ID로 투영된 요청도 순서별 접근성 이름과 상세를 구분한다", async () => {
+    const secondRequestRef = `req_${"b".repeat(22)}.${"b".repeat(21)}`;
+    vi.spyOn(apiClient, "request").mockResolvedValue({
+      ...response,
+      requests: [
+        {
+          ...row,
+          request_id: "[값 비공개]",
+          request_filterable: false,
+          model: "비공개 요청 모델 1",
+        },
+        {
+          ...row,
+          request_id: "[값 비공개]",
+          request_ref: secondRequestRef,
+          request_filterable: false,
+          trace_id: "trace-002",
+          model: "비공개 요청 모델 2",
+        },
+      ],
+    } as never);
+    const user = userEvent.setup();
+    renderPage();
+
+    const firstDetail = await screen.findByRole("button", {
+      name: "1번째 요청 [값 비공개] 상세 보기",
+    });
+    const secondDetail = screen.getByRole("button", {
+      name: "2번째 요청 [값 비공개] 상세 보기",
+    });
+    expect(firstDetail).toBeVisible();
+    expect(secondDetail).toBeVisible();
+
+    await user.click(secondDetail);
+    const dialog = screen.getByRole("dialog", { name: "2번째 요청 [값 비공개]" });
+    expect(dialog).toHaveTextContent("비공개 요청 모델 2");
+    expect(dialog).not.toHaveTextContent("비공개 요청 모델 1");
+
+    await user.click(screen.getByRole("button", { name: "닫기" }));
+    await waitFor(() => expect(secondDetail).toHaveFocus());
+  });
+
+  it("v1 호환 응답은 배포 경고를 표시하고 로컬 상세만 제공한다", async () => {
+    vi.spyOn(apiClient, "request").mockResolvedValue({
+      ...response,
+      request_contract_version: 1,
+      requests: [
+        {
+          ...row,
+          request_ref: `req_${"0".repeat(22)}.${"0".repeat(21)}`,
+          request_filterable: false,
+          trace_filterable: false,
+        },
+      ],
+    } as never);
+    const user = userEvent.setup();
+    renderPage();
+
+    expect(await screen.findByText("서버 배포 버전을 맞추는 중입니다.")).toBeVisible();
+    expect(screen.getByText(/v0\.83\.0 이상이 된 뒤 제공됩니다/u)).toBeVisible();
+    const detailTrigger = screen.getByRole("button", { name: "1번째 요청 req-001 상세 보기" });
+    expect(detailTrigger).toBeEnabled();
+
+    await user.click(detailTrigger);
+    expect(screen.getByRole("dialog", { name: "1번째 요청 req-001" })).toBeVisible();
     expect(screen.queryByRole("link", { name: "이 요청의 추적 보기" })).not.toBeInTheDocument();
+  });
+
+  it("열린 v2 상세는 v1 호환 응답으로 전환되면 즉시 닫고 추적 연결을 제거한다", async () => {
+    vi.spyOn(apiClient, "request")
+      .mockResolvedValueOnce(response as never)
+      .mockResolvedValueOnce({
+        ...response,
+        request_contract_version: 1,
+        requests: [
+          {
+            ...row,
+            request_ref: `req_${"0".repeat(22)}.${"0".repeat(21)}`,
+            request_filterable: false,
+            trace_filterable: false,
+          },
+        ],
+      } as never)
+      .mockResolvedValueOnce(response as never);
+    const user = userEvent.setup();
+    renderPage();
+
+    const refresh = await screen.findByRole("button", { name: "새로고침" });
+    await user.click(screen.getByRole("button", { name: "1번째 요청 req-001 상세 보기" }));
+    expect(screen.getByRole("link", { name: "이 요청의 추적 보기" })).toBeVisible();
+
+    fireEvent.click(refresh);
+    expect(await screen.findByText("서버 배포 버전을 맞추는 중입니다.")).toBeVisible();
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(screen.queryByRole("link", { name: "이 요청의 추적 보기" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "새로고침" }));
+    await waitFor(() =>
+      expect(screen.queryByText("서버 배포 버전을 맞추는 중입니다.")).not.toBeInTheDocument(),
+    );
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("v1 상세는 새 응답의 같은 순번 행으로 바뀌지 않고 닫힌다", async () => {
+    const v1RequestRef = `req_${"0".repeat(22)}.${"0".repeat(21)}`;
+    vi.spyOn(apiClient, "request")
+      .mockResolvedValueOnce({
+        ...response,
+        request_contract_version: 1,
+        requests: [
+          {
+            ...row,
+            request_ref: v1RequestRef,
+            request_filterable: false,
+            trace_filterable: false,
+          },
+        ],
+      } as never)
+      .mockResolvedValueOnce({
+        ...response,
+        request_contract_version: 1,
+        requests: [
+          {
+            ...row,
+            request_id: "req-new",
+            request_ref: v1RequestRef,
+            request_filterable: false,
+            trace_filterable: false,
+          },
+        ],
+      } as never);
+    const user = userEvent.setup();
+    renderPage();
+
+    const refresh = await screen.findByRole("button", { name: "새로고침" });
+    await user.click(screen.getByRole("button", { name: "1번째 요청 req-001 상세 보기" }));
+    expect(screen.getByRole("dialog", { name: "1번째 요청 req-001" })).toBeVisible();
+
+    fireEvent.click(refresh);
+    expect(await screen.findByText("req-new")).toBeVisible();
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(screen.queryByRole("dialog", { name: "1번째 요청 req-new" })).not.toBeInTheDocument();
   });
 
   it.each([
@@ -419,7 +635,7 @@ describe("RequestPage", () => {
 
     expect(await screen.findByText("req-001")).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "기존 화면 보기" })).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "상세" }));
+    await user.click(screen.getByRole("button", { name: "1번째 요청 req-001 상세 보기" }));
     expect(screen.queryByRole("link", { name: "기존 요청 화면 열기" })).not.toBeInTheDocument();
     page.unmount();
 
@@ -444,7 +660,7 @@ describe("RequestPage", () => {
       "href",
       "/admin#/runtime-requests",
     );
-    await user.click(screen.getByRole("button", { name: "상세" }));
+    await user.click(screen.getByRole("button", { name: "1번째 요청 req-001 상세 보기" }));
     expect(screen.getByRole("link", { name: "기존 요청 화면 열기" })).toHaveAttribute(
       "href",
       "/admin#/runtime-requests",
@@ -475,6 +691,7 @@ describe("RequestPage", () => {
     const originalVisibility = Object.getOwnPropertyDescriptor(document, "visibilityState");
     let visibility: DocumentVisibilityState = "visible";
     let poll: (() => void) | undefined;
+    let pollRegistrations = 0;
     let unmount: (() => void) | undefined;
 
     try {
@@ -483,16 +700,27 @@ describe("RequestPage", () => {
         get: () => visibility,
       });
       vi.spyOn(window, "setInterval").mockImplementation((handler: TimerHandler, timeout?: number) => {
-        if (timeout === 60_000 && typeof handler === "function") poll = handler as () => void;
+        if (timeout === 60_000 && typeof handler === "function") {
+          poll = handler as () => void;
+          pollRegistrations += 1;
+        }
         return 1;
       });
       usePreferences.setState({ refreshInterval: 60 });
       const request = vi.spyOn(apiClient, "request").mockResolvedValue(response as never);
+      const user = userEvent.setup();
       const page = renderPage();
       unmount = page.unmount;
 
       expect(await screen.findByText("req-001")).toBeInTheDocument();
       expect(poll).toBeDefined();
+      const registrationsBeforeDetail = pollRegistrations;
+      const refresh = screen.getByRole("button", { name: "새로고침" });
+      await user.click(screen.getByRole("button", { name: "1번째 요청 req-001 상세 보기" }));
+      expect(screen.getByRole("dialog", { name: "1번째 요청 req-001" })).toBeVisible();
+      fireEvent.click(refresh);
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      await waitFor(() => expect(pollRegistrations).toBeGreaterThan(registrationsBeforeDetail));
       request.mockClear();
 
       visibility = "hidden";

@@ -10,9 +10,10 @@ import type { AppRequestSummary } from "@/shared/api/schemas";
 import { Badge } from "@/shared/components/ui/Badge";
 
 interface TraceTimelineProps {
-  onSelect: (requestId: string, trigger: HTMLButtonElement) => void;
+  onSelect: (request: AppRequestSummary, trigger: HTMLButtonElement) => void;
   requests: readonly AppRequestSummary[];
-  selectedRequestId?: string;
+  selectionEnabled: boolean;
+  selectedRequestRef?: string;
   timeZone: string;
 }
 
@@ -24,7 +25,8 @@ type TimelineStyle = CSSProperties & {
 export function TraceTimeline({
   onSelect,
   requests,
-  selectedRequestId,
+  selectionEnabled,
+  selectedRequestRef,
   timeZone,
 }: TraceTimelineProps): React.JSX.Element {
   const timeline = buildTraceTimeline(requests);
@@ -45,22 +47,24 @@ export function TraceTimeline({
         <span>{formatTraceDuration(timeline.spanMs)}</span>
       </div>
       <ol className="trace-lanes">
-        {timeline.lanes.map(({ offsetPercent, request, startOffsetMs, widthPercent }) => {
-          const selected = request.request_id === selectedRequestId;
+        {timeline.lanes.map(({ offsetPercent, request, startOffsetMs, widthPercent }, index) => {
+          const selected = request.request_ref === selectedRequestRef;
           const style: TimelineStyle = {
             "--trace-offset": `${offsetPercent}%`,
             "--trace-width": `${widthPercent}%`,
           };
           return (
-            <li key={request.request_id}>
+            <li key={request.request_ref}>
               <button
                 type="button"
                 className="trace-lane"
                 aria-controls={selected ? "trace-request-detail" : undefined}
                 aria-expanded={selected}
-                aria-label={`요청 ${request.request_id} 흐름 선택`}
+                aria-label={`${index + 1}번째 요청 ${request.request_id} 흐름 선택`}
                 aria-pressed={selected}
-                onClick={(event) => onSelect(request.request_id, event.currentTarget)}
+                disabled={!selectionEnabled}
+                title={selectionEnabled ? undefined : "서버 배포 완료 후 요청 상세를 열 수 있습니다."}
+                onClick={(event) => onSelect(request, event.currentTarget)}
               >
                 <span className="trace-lane-heading">
                   <span>

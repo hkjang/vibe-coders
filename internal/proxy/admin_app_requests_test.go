@@ -8,6 +8,7 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -18,10 +19,14 @@ import (
 )
 
 func insertAppRequestTestRow(t *testing.T, db *store.SQLStore, id, provider string, status int, createdAt time.Time) {
+	insertAppRequestTestRowWithIP(t, db, id, provider, status, "192.0.2.10", createdAt)
+}
+
+func insertAppRequestTestRowWithIP(t *testing.T, db *store.SQLStore, id, provider string, status int, clientIP string, createdAt time.Time) {
 	t.Helper()
 	err := db.InsertLogRecord(t.Context(), store.LogRecord{Request: store.RequestLog{
 		ID: id, TraceID: "trace-" + id, APIKeyID: "key-" + id, Method: http.MethodPost,
-		ClientIP: "192.0.2.10", UserAgent: "raw-secret-user-agent", Model: "test-model",
+		ClientIP: clientIP, UserAgent: "raw-secret-user-agent", Model: "test-model",
 		Endpoint: "/v1/chat/completions", Provider: provider, StatusCode: status,
 		LatencyMS: 123, Error: "raw-secret-provider-error", SessionID: "session-" + id,
 		CreatedAt: createdAt,
@@ -29,6 +34,155 @@ func insertAppRequestTestRow(t *testing.T, db *store.SQLStore, id, provider stri
 		CompletionTokens: 4, TotalTokens: 7, EstimatedCost: 1.25, Currency: "KRW", CreatedAt: createdAt}})
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestAppRequestsIPFilterPreservesValidLegacySpelling(t *testing.T) {
+	_, db, gateway := newAdminModelsTestServer(t, "")
+	legacyIP := "2001:0db8::1"
+	canonicalIP := "2001:db8::1"
+	createdAt := time.Date(2026, 9, 4, 1, 2, 3, 0, time.UTC)
+	insertAppRequestTestRowWithIP(t, db, "req-legacy-ip", "provider-a", http.StatusOK, legacyIP, createdAt)
+	insertAppRequestTestRowWithIP(t, db, "req-canonical-ip", "provider-a", http.StatusOK, canonicalIP, createdAt.Add(-time.Second))
+
+	legacy := readAppRequestPage(t, providerAppRequest(t, http.MethodGet,
+		gateway.URL+"/admin/requests?ip="+url.QueryEscape(legacyIP), nil))
+	if len(legacy.Requests) != 1 || legacy.Requests[0].RequestID != "req-legacy-ip" || legacy.Requests[0].IP != legacyIP {
+		t.Fatalf("legacy IPv6 filter = %+v", legacy)
+	}
+
+	canonical := readAppRequestPage(t, providerAppRequest(t, http.MethodGet,
+		gateway.URL+"/admin/requests?ip="+url.QueryEscape(canonicalIP), nil))
+	if len(canonical.Requests) != 1 || canonical.Requests[0].RequestID != "req-canonical-ip" || canonical.Requests[0].IP != canonicalIP {
+		t.Fatalf("canonical IPv6 filter = %+v", canonical)
+	}
+}
+
+func TestAppRequestsContractNegotiationPreservesRollingCompatibility(t *testing.T) {
+	_, db, gateway := newAdminModelsTestServer(t, "")
+	createdAt := time.Date(2026, 9, 4, 1, 2, 3, 0, time.UTC)
+	insertAppRequestTestRow(t, db, "req-compatible", "provider-a", http.StatusOK, createdAt)
+	insertAppRequestTestRow(t, db, "req-compatible-older", "provider-a", http.StatusOK, createdAt.Add(-time.Second))
+
+	requestPage := func(testingT *testing.T, values ...string) (*http.Response, []byte) {
+		testingT.Helper()
+		request, err := http.NewRequest(http.MethodGet, gateway.URL+"/admin/requests?limit=1", nil)
+		if err != nil {
+			testingT.Fatal(err)
+		}
+		request.Header.Set("X-Vibe-UI", "app")
+		for _, value := range values {
+			request.Header.Add(appRequestContractHeader, value)
+		}
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			testingT.Fatal(err)
+		}
+		body, err := io.ReadAll(response.Body)
+		response.Body.Close()
+		if err != nil {
+			testingT.Fatal(err)
+		}
+		return response, body
+	}
+	assertFieldSet := func(testingT *testing.T, label string, body []byte, want []string) {
+		testingT.Helper()
+		var envelope map[string]json.RawMessage
+		if err := json.Unmarshal(body, &envelope); err != nil {
+			testingT.Fatalf("%s response decode=%v body=%s", label, err, body)
+		}
+		for _, field := range []string{"requests", "limit", "next_cursor", "generated_at"} {
+			if _, exists := envelope[field]; !exists {
+				testingT.Fatalf("%s response omitted top-level %s: %s", label, field, body)
+			}
+		}
+		if len(envelope) != 4 {
+			testingT.Fatalf("%s top-level fields=%v body=%s", label, envelope, body)
+		}
+		var requests []map[string]json.RawMessage
+		if err := json.Unmarshal(envelope["requests"], &requests); err != nil || len(requests) != 1 {
+			testingT.Fatalf("%s requests decode=%v requests=%v body=%s", label, err, requests, body)
+		}
+		if len(requests[0]) != len(want) {
+			testingT.Fatalf("%s fields=%v want=%v body=%s", label, requests[0], want, body)
+		}
+		for _, field := range want {
+			if _, exists := requests[0][field]; !exists {
+				testingT.Fatalf("%s response omitted %s: %s", label, field, body)
+			}
+		}
+	}
+	v1Fields := []string{"request_id", "trace_id", "session_id", "api_key_id", "ip", "method", "model",
+		"provider_ref", "provider_display", "endpoint", "stream", "status_code", "latency_ms", "first_chunk_ms",
+		"prompt_tokens", "completion_tokens", "total_tokens", "cached_tokens", "reasoning_tokens", "estimated_cost",
+		"currency", "finish_reason", "created_at"}
+	v2Fields := append(append([]string{}, v1Fields...), "request_ref", "request_filterable", "trace_filterable")
+
+	for _, test := range []struct {
+		name   string
+		values []string
+		want   string
+		fields []string
+	}{
+		{name: "header omitted", want: appRequestContractV1, fields: v1Fields},
+		{name: "explicit v1", values: []string{appRequestContractV1}, want: appRequestContractV1, fields: v1Fields},
+		{name: "explicit v2", values: []string{appRequestContractV2}, want: appRequestContractV2, fields: v2Fields},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			response, body := requestPage(t, test.values...)
+			if response.StatusCode != http.StatusOK || response.Header.Get(appRequestContractHeader) != test.want {
+				t.Fatalf("negotiation status=%d headers=%v body=%s", response.StatusCode, response.Header, body)
+			}
+			if !headerListContains(response.Header.Values("Vary"), "X-Vibe-UI") ||
+				!headerListContains(response.Header.Values("Vary"), appRequestContractHeader) {
+				t.Fatalf("request contract cache boundary missing: %v", response.Header)
+			}
+			assertFieldSet(t, test.name, body, test.fields)
+		})
+	}
+
+	for _, test := range []struct {
+		name   string
+		values []string
+	}{
+		{name: "empty", values: []string{""}},
+		{name: "unsupported", values: []string{"3"}},
+		{name: "combined", values: []string{"1, 2"}},
+		{name: "duplicate", values: []string{"1", "2"}},
+	} {
+		t.Run("invalid "+test.name, func(t *testing.T) {
+			response, body := requestPage(t, test.values...)
+			if response.StatusCode != http.StatusBadRequest || response.Header.Get(appRequestContractHeader) != "" {
+				t.Fatalf("invalid contract status=%d headers=%v body=%s", response.StatusCode, response.Header, body)
+			}
+			var envelope struct {
+				Error struct {
+					Code string `json:"code"`
+				} `json:"error"`
+			}
+			if err := json.Unmarshal(body, &envelope); err != nil || envelope.Error.Code != "invalid_requests_contract" {
+				t.Fatalf("invalid contract response=%s decode=%v", body, err)
+			}
+		})
+	}
+
+	legacyRequest, err := http.NewRequest(http.MethodGet, gateway.URL+"/admin/requests?limit=1", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyRequest.Header.Set(appRequestContractHeader, appRequestContractV2)
+	legacyResponse, err := http.DefaultClient.Do(legacyRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyBody, err := io.ReadAll(legacyResponse.Body)
+	legacyResponse.Body.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if legacyResponse.StatusCode != http.StatusOK || legacyResponse.Header.Get(appRequestContractHeader) != "" ||
+		!strings.Contains(string(legacyBody), `"user_agent"`) {
+		t.Fatalf("legacy caller contract changed: status=%d headers=%v body=%s", legacyResponse.StatusCode, legacyResponse.Header, legacyBody)
 	}
 }
 
@@ -46,6 +200,57 @@ func TestAppRequestCredentialProjectionUsesHistoricalPrefixes(t *testing.T) {
 	}
 	if server.appRequestTextHasCredential("model-" + strings.Repeat("A", 43)) {
 		t.Fatal("ordinary long model identifier was treated as a credential")
+	}
+	for name, test := range map[string]struct {
+		raw       string
+		projected string
+		want      bool
+	}{
+		"safe":               {raw: "req-safe", projected: "req-safe", want: true},
+		"empty":              {raw: "", projected: "", want: false},
+		"leading space":      {raw: " req-safe", projected: " req-safe", want: false},
+		"trailing space":     {raw: "req-safe ", projected: "req-safe ", want: false},
+		"changed projection": {raw: oldKey, projected: appRequestValueRedacted, want: false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := appRequestTextFilterable(test.raw, test.projected); got != test.want {
+				t.Fatalf("appRequestTextFilterable(%q, %q) = %v, want %v", test.raw, test.projected, got, test.want)
+			}
+		})
+	}
+}
+
+func TestAppRequestsUseDistinctOpaqueRefsForProjectedIdentifiers(t *testing.T) {
+	server, db, gateway := newAdminModelsTestServer(t, "")
+	requestA := "vc_sk_" + strings.Repeat("a", 43)
+	requestB := "vc_sk_" + strings.Repeat("b", 43)
+	createdAt := time.Date(2026, 9, 4, 1, 2, 3, 0, time.UTC)
+	insertAppRequestTestRow(t, db, requestA, "provider-a", http.StatusOK, createdAt)
+	insertAppRequestTestRow(t, db, requestB, "provider-a", http.StatusOK, createdAt.Add(-time.Second))
+
+	page := readAppRequestPage(t, providerAppRequest(t, http.MethodGet, gateway.URL+"/admin/requests?limit=2", nil))
+	if len(page.Requests) != 2 {
+		t.Fatalf("projected request page = %+v", page)
+	}
+	refs := make(map[string]bool, len(page.Requests))
+	for _, item := range page.Requests {
+		if item.RequestID != appRequestValueRedacted || item.RequestFilterable {
+			t.Fatalf("credential-shaped request ID remained filterable: %+v", item)
+		}
+		if item.TraceID != appRequestValueRedacted || item.TraceFilterable {
+			t.Fatalf("credential-shaped trace ID remained filterable: %+v", item)
+		}
+		if matched := regexp.MustCompile(`^req_[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{21}$`).MatchString(item.RequestRef); len(item.RequestRef) != appRequestRefLength || !matched {
+			t.Fatalf("opaque request ref has invalid shape: %q", item.RequestRef)
+		}
+		refs[item.RequestRef] = true
+	}
+	if len(refs) != 2 {
+		t.Fatalf("distinct projected request IDs shared an opaque ref: %+v", page.Requests)
+	}
+	ref := server.appRequestRefSnapshot()
+	if !refs[ref(requestA)] || !refs[ref(requestB)] || ref(requestA) == server.providerRef(requestA) {
+		t.Fatalf("request refs are unstable or share the Provider namespace: %+v", refs)
 	}
 }
 
@@ -99,6 +304,10 @@ func TestAppRequestsSafeProjectionAndStableCursor(t *testing.T) {
 	if firstResponse.StatusCode != http.StatusOK {
 		t.Fatalf("status=%d body=%s", firstResponse.StatusCode, firstBody)
 	}
+	if firstResponse.Header.Get(appRequestContractHeader) != appRequestContractV2 ||
+		!headerListContains(firstResponse.Header.Values("Vary"), appRequestContractHeader) {
+		t.Fatalf("v2 request contract headers missing: %v", firstResponse.Header)
+	}
 	visible := string(firstBody)
 	for _, forbidden := range []string{unsafeProvider, "raw-secret-user-agent", "raw-secret-provider-error", `"user_agent"`, `"error"`, `"prompts"`} {
 		if strings.Contains(visible, forbidden) {
@@ -114,6 +323,10 @@ func TestAppRequestsSafeProjectionAndStableCursor(t *testing.T) {
 	}
 	if len(first.Requests) != 1 || first.Requests[0].RequestID != "req-c" || first.NextCursor == "" || first.PreviousCursor != "" {
 		t.Fatalf("first page = %+v", first)
+	}
+	if first.Requests[0].RequestRef != server.appRequestRefSnapshot()("req-c") ||
+		!first.Requests[0].RequestFilterable || !first.Requests[0].TraceFilterable {
+		t.Fatalf("safe request identity contract = %+v", first.Requests[0])
 	}
 	sealedCursor, err := base64.RawURLEncoding.DecodeString(strings.Split(first.NextCursor, ".")[0])
 	if err != nil || strings.Contains(string(sealedCursor), "req-c") {
@@ -240,6 +453,9 @@ func TestAppRequestsProjectionBoundsAndRedactsUntrustedMetadata(t *testing.T) {
 		item.Model != appRequestValueOmitted || item.Endpoint != appRequestValueRedacted ||
 		item.Currency != appRequestValueRedacted || item.FinishReason != appRequestValueRedacted {
 		t.Fatalf("untrusted strings were not projected safely: %+v", item)
+	}
+	if !item.RequestFilterable || item.TraceFilterable || len(item.RequestRef) != appRequestRefLength {
+		t.Fatalf("request filterability/ref contract = %+v", item)
 	}
 	if item.StatusCode != 0 || item.LatencyMS != 0 || item.FirstChunkMS != math.MaxInt32 ||
 		item.PromptTokens != 0 || item.CompletionTokens != appRequestMaxCount || item.TotalTokens != 0 ||
@@ -384,7 +600,7 @@ func TestAppRequestsOpenAPIProjectionMatchesRuntimeFields(t *testing.T) {
 	schemas := components["schemas"].(map[string]any)
 	summary := schemas["AppRequestSummary"].(map[string]any)
 	properties := summary["properties"].(map[string]any)
-	want := []string{"request_id", "trace_id", "session_id", "api_key_id", "ip", "method", "model",
+	want := []string{"request_id", "request_ref", "request_filterable", "trace_id", "trace_filterable", "session_id", "api_key_id", "ip", "method", "model",
 		"provider_ref", "provider_display", "endpoint", "stream", "status_code", "latency_ms",
 		"first_chunk_ms", "prompt_tokens", "completion_tokens", "total_tokens", "cached_tokens",
 		"reasoning_tokens", "estimated_cost", "currency", "finish_reason", "created_at"}
@@ -431,6 +647,23 @@ func TestAppRequestsOpenAPIProjectionMatchesRuntimeFields(t *testing.T) {
 	header := parameters[0].(map[string]any)
 	if header["name"] != "X-Vibe-UI" || header["required"] != false {
 		t.Fatalf("X-Vibe-UI must remain optional for legacy callers: %v", header)
+	}
+	var contractHeader map[string]any
+	for _, raw := range parameters {
+		parameter := raw.(map[string]any)
+		if parameter["name"] == appRequestContractHeader {
+			contractHeader = parameter
+			break
+		}
+	}
+	if contractHeader == nil || contractHeader["required"] != false {
+		t.Fatalf("request contract header must be optional for rolling compatibility: %v", contractHeader)
+	}
+	contractHeaderSchema := contractHeader["schema"].(map[string]any)
+	contractVersions := contractHeaderSchema["enum"].([]string)
+	if contractHeaderSchema["default"] != appRequestContractV1 || len(contractVersions) != 2 ||
+		contractVersions[0] != appRequestContractV1 || contractVersions[1] != appRequestContractV2 {
+		t.Fatalf("request contract header schema = %v", contractHeaderSchema)
 	}
 	wantQueryBounds := map[string]int{
 		"from": 64, "to": 64, "tz": 64, "model": 256, "request_id": appRequestIDMaxBytes,
@@ -479,7 +712,16 @@ func TestAppRequestsOpenAPIProjectionMatchesRuntimeFields(t *testing.T) {
 	if err := json.Unmarshal(encoded, &responseContract); err != nil {
 		t.Fatal(err)
 	}
-	if _, typed := responseContract["content"]; typed || !strings.Contains(responseContract["description"].(string), "AppRequestsResponse") {
-		t.Fatalf("/admin/requests must document app projection without replacing legacy response: %s", encoded)
+	if !strings.Contains(responseContract["description"].(string), "AppRequestsResponse") {
+		t.Fatalf("/admin/requests response description lost version contract: %s", encoded)
+	}
+	responseHeaders := responseContract["headers"].(map[string]any)
+	selectedVersion := responseHeaders[appRequestContractHeader].(map[string]any)["schema"].(map[string]any)
+	versions := selectedVersion["enum"].([]any)
+	if len(versions) != 2 || versions[0] != appRequestContractV1 || versions[1] != appRequestContractV2 {
+		t.Fatalf("selected request contract response header = %v", selectedVersion)
+	}
+	if _, typed := responseContract["content"]; typed {
+		t.Fatalf("/admin/requests must not replace the distinct legacy and app response bodies with one schema: %s", encoded)
 	}
 }

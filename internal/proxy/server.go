@@ -819,6 +819,7 @@ func parseRangeBound(value string, loc *time.Location, endOfDay bool) time.Time 
 
 func (s *Server) handleRequests(w http.ResponseWriter, r *http.Request) {
 	setVibeUIVariantHeaders(w)
+	addVaryHeader(w, appRequestContractHeader)
 	if strings.EqualFold(strings.TrimSpace(r.Header.Get("X-Vibe-UI")), "app") {
 		s.handleAppRequests(w, r)
 		return
@@ -2629,14 +2630,18 @@ func copyDownstreamHeaders(dst http.Header, src http.Header) {
 // legacy response for the app nor retain either representation.
 func setVibeUIVariantHeaders(w http.ResponseWriter) {
 	w.Header().Set("Cache-Control", "no-store")
+	addVaryHeader(w, "X-Vibe-UI")
+}
+
+func addVaryHeader(w http.ResponseWriter, header string) {
 	for _, value := range w.Header().Values("Vary") {
 		for _, field := range strings.Split(value, ",") {
-			if strings.EqualFold(strings.TrimSpace(field), "X-Vibe-UI") {
+			if strings.EqualFold(strings.TrimSpace(field), header) {
 				return
 			}
 		}
 	}
-	w.Header().Add("Vary", "X-Vibe-UI")
+	w.Header().Add("Vary", header)
 }
 
 func gatewayOwnedRoutingHeader(key string) bool {

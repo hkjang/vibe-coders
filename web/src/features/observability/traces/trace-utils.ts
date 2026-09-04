@@ -1,4 +1,5 @@
 import type { AppRequestSummary, AppRequestsQuery } from "@/shared/api/schemas";
+import { isAppRequestRef } from "@/shared/api/app-request-ref";
 import { httpStatusTone, type HTTPStatusTone } from "@/shared/utils/http-status";
 import { fitsUTF8Bytes } from "@/shared/utils/utf8";
 import { isValidRequestTimeZone, validateRequestTimeFilters } from "@/shared/utils/request-time-filters";
@@ -65,9 +66,25 @@ export function traceFilterFormKey(search: URLSearchParams): string {
   return JSON.stringify(traceSubmittedFilterKeys.map((key) => search.getAll(key)));
 }
 
-export function selectedRequestFromSearch(search: URLSearchParams): string | undefined {
-  const selected = boundedParameter(search, "selected_request", 512);
-  return selected && !requestQueryFieldError("request_id", selected) ? selected : undefined;
+export interface TraceRequestSelection {
+  kind: "id" | "ref";
+  value: string;
+}
+
+export function selectedRequestFromSearch(search: URLSearchParams): TraceRequestSelection | undefined {
+  const requestIds = search.getAll("selected_request");
+  const requestRefs = search.getAll("selected_ref");
+  if (requestIds.length + requestRefs.length !== 1) return undefined;
+
+  if (requestRefs.length === 1) {
+    const selectedRef = requestRefs[0] ?? "";
+    return isAppRequestRef(selectedRef) ? { kind: "ref", value: selectedRef } : undefined;
+  }
+
+  const selectedId = boundedParameter(search, "selected_request", 512);
+  return selectedId && !requestQueryFieldError("request_id", selectedId)
+    ? { kind: "id", value: selectedId }
+    : undefined;
 }
 
 export function requestExplorerPath(query: AppRequestsQuery, selectedRequest?: string): string {
@@ -94,13 +111,17 @@ function requestStartMs(request: AppRequestSummary): number {
   return Number.isFinite(timestamp) ? timestamp : 0;
 }
 
+export function orderTraceRequests(requests: readonly AppRequestSummary[]): readonly AppRequestSummary[] {
+  return [...requests].sort(
+    (left, right) =>
+      requestStartMs(left) - requestStartMs(right) || left.request_ref.localeCompare(right.request_ref),
+  );
+}
+
 export function buildTraceTimeline(requests: readonly AppRequestSummary[]): TraceTimelineLayout {
   if (requests.length === 0) return { lanes: [], spanMs: 0 };
 
-  const ordered = [...requests].sort(
-    (left, right) =>
-      requestStartMs(left) - requestStartMs(right) || left.request_id.localeCompare(right.request_id),
-  );
+  const ordered = orderTraceRequests(requests);
   const firstStart = requestStartMs(ordered[0] as AppRequestSummary);
   const lastEnd = ordered.reduce(
     (latest, request) => Math.max(latest, requestStartMs(request) + request.latency_ms),

@@ -30,6 +30,7 @@ func providerAppRequest(t *testing.T, method, requestURL string, body any) *http
 		t.Fatal(err)
 	}
 	req.Header.Set("X-Vibe-UI", "app")
+	req.Header.Set(appRequestContractHeader, appRequestContractV2)
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}

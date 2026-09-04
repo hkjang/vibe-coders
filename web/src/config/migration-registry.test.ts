@@ -57,6 +57,11 @@ describe("migration registry", () => {
   it("compares release versions numerically", () => {
     expect(versionAtLeast("v0.80.0", "v0.79.8")).toBe(true);
     expect(versionAtLeast("v0.79.7", "v0.79.8")).toBe(false);
+    expect(versionAtLeast("v0.83.0-rc.1", "v0.83.0")).toBe(false);
+    expect(versionAtLeast("v0.83.0", "v0.83.0-rc.1")).toBe(true);
+    expect(versionAtLeast("v0.83.0-rc.2", "v0.83.0-rc.1")).toBe(true);
+    expect(versionAtLeast("not-a-version.999", "v0.83.0")).toBe(false);
+    expect(versionAtLeast("v0.83.0-01", "v0.83.0")).toBe(false);
   });
 
   it("uses a deterministic rollout bucket", () => {
@@ -118,16 +123,27 @@ describe("migration registry", () => {
         "readonly_admin",
       ],
       rolloutPercent: 100,
-      minimumApiVersion: "v0.82.1",
+      minimumApiVersion: "v0.83.0",
     });
     expect(isAppFeatureImplemented(feature.featureId)).toBe(true);
-    expect(resolveFeature(feature, gatewayAdmin, "v0.82.1")).toMatchObject({
+    expect(resolveFeature(feature, gatewayAdmin, "v0.82.2")).toMatchObject({
+      permitted: true,
+      status: "legacy",
+      readOnly: true,
+      reason: "api_version",
+    });
+    expect(resolveFeature(feature, gatewayAdmin, "v0.83.0-rc.1")).toMatchObject({
+      permitted: true,
+      status: "legacy",
+      reason: "api_version",
+    });
+    expect(resolveFeature(feature, gatewayAdmin, "v0.83.0")).toMatchObject({
       permitted: true,
       status: "preview_read_only",
       readOnly: true,
     });
     expect(
-      resolveFeature(feature, { ...gatewayAdmin, role: "viewer", roles: ["viewer"] }, "v0.82.1"),
+      resolveFeature(feature, { ...gatewayAdmin, role: "viewer", roles: ["viewer"] }, "v0.83.0"),
     ).toMatchObject({
       permitted: true,
       status: "legacy",
@@ -240,5 +256,41 @@ describe("migration registry", () => {
     expect(registryFromBootstrap(payload).map(({ featureId, appPath }) => [featureId, appPath])).toEqual(
       serverContract,
     );
+  });
+
+  it("keeps the UI contract as the minimum during a rolling backend deployment", () => {
+    const fallback = migrationRegistry.find((feature) => feature.featureId === "observability.requests");
+    if (!fallback) throw new Error("observability.requests fixture is missing");
+    const [feature] = registryFromBootstrap([
+      {
+        feature_id: fallback.featureId,
+        title: fallback.title,
+        app_path: fallback.appPath,
+        legacy_path: fallback.legacyPath,
+        status: fallback.status,
+        risk_level: fallback.riskLevel,
+        required_permission: fallback.requiredPermission ?? "",
+        read_only: fallback.readOnly,
+        enabled_roles: [...fallback.enabledRoles],
+        rollout_percent: fallback.rolloutPercent,
+        fallback_enabled: fallback.fallbackEnabled,
+        minimum_api_version: "v0.82.1",
+        available: true,
+      },
+    ]);
+    if (!feature) throw new Error("runtime request explorer feature is missing");
+
+    expect(feature.minimumApiVersion).toBe("v0.83.0");
+    expect(resolveFeature(feature, gatewayAdmin, "v0.82.2")).toMatchObject({
+      permitted: true,
+      status: "legacy",
+      readOnly: true,
+      reason: "api_version",
+    });
+    expect(resolveFeature(feature, gatewayAdmin, "v0.83.0")).toMatchObject({
+      permitted: true,
+      status: "preview_read_only",
+      readOnly: true,
+    });
   });
 });

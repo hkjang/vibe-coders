@@ -11,8 +11,10 @@ interface RequestDetailDialogProps {
   onOpenChange: (open: boolean) => void;
   open: boolean;
   request?: AppRequestSummary;
+  requestOrdinal?: number;
   returnFocusRef: RefObject<HTMLElement | null>;
   timeZone: string;
+  traceHandoffEnabled: boolean;
 }
 
 export function RequestDetailDialog({
@@ -20,23 +22,30 @@ export function RequestDetailDialog({
   onOpenChange,
   open,
   request,
+  requestOrdinal,
   returnFocusRef,
   timeZone,
+  traceHandoffEnabled,
 }: RequestDetailDialogProps): React.JSX.Element {
+  let traceSearch: string | undefined;
+  if (traceHandoffEnabled && request?.trace_filterable === true && request.trace_id) {
+    const parameters = new URLSearchParams({ trace_id: request.trace_id });
+    if (request.request_filterable) parameters.set("selected_request", request.request_id);
+    else parameters.set("selected_ref", request.request_ref);
+    traceSearch = parameters.toString();
+  }
+
   return (
     <Dialog
       description="프롬프트, 응답 본문, 원시 오류와 사용자 에이전트는 이 미리보기에서 제공하지 않습니다."
       footer={
         <>
-          {request?.trace_id ? (
+          {traceSearch ? (
             <Link
               className="button button-secondary button-default"
               to={{
                 pathname: "/observability/traces",
-                search: new URLSearchParams({
-                  selected_request: request.request_id,
-                  trace_id: request.trace_id,
-                }).toString(),
+                search: traceSearch,
               }}
             >
               이 요청의 추적 보기
@@ -55,7 +64,7 @@ export function RequestDetailDialog({
       onOpenChange={onOpenChange}
       open={open}
       returnFocusRef={returnFocusRef}
-      title={request ? `요청 ${request.request_id}` : "요청 상세"}
+      title={request ? `${requestOrdinal ?? 1}번째 요청 ${request.request_id}` : "요청 상세"}
     >
       {request ? (
         <dl className="request-detail-grid">

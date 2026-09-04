@@ -4,6 +4,7 @@ import {
   defaultCredentialPrefixes,
   isSensitiveCredentialKey,
 } from "@/shared/security/secrets";
+import { isAppRequestRef } from "@/shared/api/app-request-ref";
 import { validateRequestTimeFilters } from "@/shared/utils/request-time-filters";
 import { isOpaqueAppRequestCursor, isValidRequestQueryField } from "@/shared/utils/request-query-filters";
 import { isProviderRef } from "@/shared/api/provider-ref";
@@ -47,6 +48,7 @@ const routeQueryAllowlist: Readonly<Record<string, ReadonlySet<string>>> = {
     "from",
     "limit",
     "model",
+    "selected_ref",
     "selected_request",
     "status",
     "to",
@@ -76,6 +78,11 @@ function sensitiveParameter(
   values: readonly string[],
   credentialPrefixes: readonly string[],
 ): boolean {
+  // request_ref values are server-issued keyed references. Their segmented,
+  // exact-length contract deliberately takes precedence over configurable and
+  // generic credential heuristics so a prefix such as `req_`, or an incidental
+  // `sk-` substring, cannot break safe request-detail navigation.
+  if (key === "selected_ref" && values.every(isAppRequestRef)) return false;
   if (values.some((value) => containsConfiguredCredential(value, credentialPrefixes))) return true;
   if (key === "provider_ref" && values.every(isProviderRef)) return false;
   if (key === "cursor" && values.every(isOpaqueAppRequestCursor)) return false;
@@ -135,12 +142,23 @@ export function sanitizeAppRouteSearch(
       }
     }
     const selectedRequests = parameters.getAll("selected_request");
+    const selectedRefs = parameters.getAll("selected_ref");
+    const hasAmbiguousSelection = selectedRequests.length > 0 && selectedRefs.length > 0;
     if (
       route === "/observability/traces" &&
-      (selectedRequests.length > 1 ||
+      (hasAmbiguousSelection ||
+        selectedRequests.length > 1 ||
         (selectedRequests.length === 1 && !isValidRequestQueryField("request_id", selectedRequests[0] ?? "")))
     ) {
       invalidOperationalKeys.add("selected_request");
+    }
+    if (
+      route === "/observability/traces" &&
+      (hasAmbiguousSelection ||
+        selectedRefs.length > 1 ||
+        (selectedRefs.length === 1 && !isAppRequestRef(selectedRefs[0])))
+    ) {
+      invalidOperationalKeys.add("selected_ref");
     }
     const temporalError = validateRequestTimeFilters({
       from: parameters.get("from") ?? undefined,

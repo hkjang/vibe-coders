@@ -15,10 +15,13 @@ export function LoadingState({ label = "화면을 준비하는 중입니다." }:
 interface ErrorStateProps {
   title?: string;
   message: string;
+  headingRef?: React.Ref<HTMLHeadingElement>;
   requestId?: string;
   diagnosticCode?: string;
   onRetry?: () => void;
   onReset?: () => void;
+  retryButtonRef?: React.Ref<HTMLButtonElement>;
+  resetButtonRef?: React.Ref<HTMLButtonElement>;
   resetLabel?: string;
   showLegacy?: boolean;
   legacyHref?: `/admin${string}`;
@@ -27,10 +30,13 @@ interface ErrorStateProps {
 export function ErrorState({
   title = "화면을 불러오지 못했습니다.",
   message,
+  headingRef,
   requestId,
   diagnosticCode,
   onRetry,
   onReset,
+  retryButtonRef,
+  resetButtonRef,
   resetLabel = "입력 초기화",
   showLegacy = true,
   legacyHref = "/admin",
@@ -38,18 +44,20 @@ export function ErrorState({
   return (
     <section className="page-state page-state-error" role="alert">
       <AlertTriangle aria-hidden="true" />
-      <h1>{title}</h1>
+      <h1 ref={headingRef} tabIndex={headingRef ? -1 : undefined}>
+        {title}
+      </h1>
       <p>{message}</p>
       {requestId ? <p className="request-id">요청 ID: {requestId}</p> : null}
       {diagnosticCode ? <p className="request-id">진단 코드: {diagnosticCode}</p> : null}
       <div className="state-actions">
         {onRetry ? (
-          <Button variant="primary" onClick={onRetry}>
+          <Button ref={retryButtonRef} variant="primary" onClick={onRetry}>
             <RefreshCw aria-hidden="true" /> 다시 시도
           </Button>
         ) : null}
         {onReset ? (
-          <Button variant="secondary" onClick={onReset}>
+          <Button ref={resetButtonRef} variant="secondary" onClick={onReset}>
             {resetLabel}
           </Button>
         ) : null}

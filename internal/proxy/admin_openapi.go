@@ -659,9 +659,10 @@ func enrichOpenAPIOperation(route, method string, op map[string]any) {
 		}
 		responses["200"] = successResponse("AdminModelsResponse")
 	case "get /admin/requests":
-		op["description"] = "Legacy callers keep the existing dynamic response shape. When X-Vibe-UI: app is supplied, the response follows the AppRequestsResponse component."
+		op["description"] = "Legacy callers keep the existing dynamic response shape. React callers request the version 2 safe projection with X-Vibe-UI: app and X-Vibe-App-Requests-Version: 2. Omitting the version header preserves the v0.82 app projection during rolling deployments."
 		op["parameters"] = []any{
 			map[string]any{"name": "X-Vibe-UI", "in": "header", "required": false, "description": "Set to app to request the safe React console projection.", "schema": map[string]any{"type": "string", "enum": []string{"app"}}},
+			map[string]any{"name": appRequestContractHeader, "in": "header", "required": false, "description": "Set to 2 for request_ref and filterability fields. Absent or 1 returns the v0.82-compatible app shape.", "schema": map[string]any{"type": "string", "enum": []string{appRequestContractV1, appRequestContractV2}, "default": appRequestContractV1}},
 			map[string]any{"name": "limit", "in": "query", "required": false, "schema": map[string]any{"type": "integer", "minimum": 1, "maximum": 200, "default": 50}},
 			map[string]any{"name": "from", "in": "query", "required": false, "schema": map[string]any{"type": "string", "maxLength": 64}},
 			map[string]any{"name": "to", "in": "query", "required": false, "schema": map[string]any{"type": "string", "maxLength": 64}},
@@ -677,10 +678,12 @@ func enrichOpenAPIOperation(route, method string, op map[string]any) {
 			map[string]any{"name": "language", "in": "query", "required": false, "schema": map[string]any{"type": "string", "maxLength": 64}},
 			map[string]any{"name": "cursor", "in": "query", "required": false, "schema": map[string]any{"type": "string", "maxLength": appRequestCursorMaxBytes}},
 		}
-		// Do not attach AppRequestsResponse as the operation's sole 200 schema:
-		// /admin and existing SDK callers intentionally retain the pre-existing
-		// dynamic legacy contract when the optional variant header is absent.
-		responses["200"] = map[string]any{"description": "OK. X-Vibe-UI: app uses AppRequestsResponse; legacy callers receive the existing response shape."}
+		responses["200"] = map[string]any{
+			"description": "OK. Version 2 app callers receive AppRequestsResponse; version 1 app and legacy callers retain their prior shape.",
+			"headers": map[string]any{
+				appRequestContractHeader: map[string]any{"description": "Selected app request projection contract version.", "schema": map[string]any{"type": "string", "enum": []string{appRequestContractV1, appRequestContractV2}}},
+			},
+		}
 	case "get /admin/providers/slo":
 		op["parameters"] = []any{map[string]any{
 			"name": "window", "in": "query", "required": false,
@@ -814,12 +817,14 @@ func appUIOpenAPISchemas() map[string]any {
 
 func requestExplorerOpenAPISchemas() map[string]any {
 	providerRef := map[string]any{"type": "string", "minLength": providerRefLength, "maxLength": providerRefLength, "pattern": `^prv_[A-Za-z0-9_-]{43}$`}
+	requestRef := map[string]any{"type": "string", "minLength": appRequestRefLength, "maxLength": appRequestRefLength, "pattern": `^req_[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{21}$`}
 	return map[string]any{
 		"AppRequestSummary": map[string]any{
 			"type": "object", "additionalProperties": false,
-			"required": []string{"request_id", "trace_id", "session_id", "api_key_id", "ip", "method", "model", "provider_ref", "provider_display", "endpoint", "stream", "status_code", "latency_ms", "first_chunk_ms", "prompt_tokens", "completion_tokens", "total_tokens", "cached_tokens", "reasoning_tokens", "estimated_cost", "currency", "finish_reason", "created_at"},
+			"required": []string{"request_id", "request_ref", "request_filterable", "trace_id", "trace_filterable", "session_id", "api_key_id", "ip", "method", "model", "provider_ref", "provider_display", "endpoint", "stream", "status_code", "latency_ms", "first_chunk_ms", "prompt_tokens", "completion_tokens", "total_tokens", "cached_tokens", "reasoning_tokens", "estimated_cost", "currency", "finish_reason", "created_at"},
 			"properties": map[string]any{
-				"request_id": map[string]any{"type": "string", "minLength": 1, "maxLength": appRequestIDMaxBytes}, "trace_id": map[string]any{"type": "string", "maxLength": appRequestIDMaxBytes},
+				"request_id": map[string]any{"type": "string", "minLength": 1, "maxLength": appRequestIDMaxBytes}, "request_ref": requestRef, "request_filterable": map[string]any{"type": "boolean"},
+				"trace_id": map[string]any{"type": "string", "maxLength": appRequestIDMaxBytes}, "trace_filterable": map[string]any{"type": "boolean"},
 				"session_id": map[string]any{"type": "string", "maxLength": appRequestIDMaxBytes}, "api_key_id": map[string]any{"type": "string", "maxLength": appRequestIDMaxBytes},
 				"ip": map[string]any{"type": "string", "maxLength": appRequestIPMaxBytes}, "method": map[string]any{"type": "string", "maxLength": appRequestMethodMaxBytes},
 				"model": map[string]any{"type": "string", "maxLength": appRequestModelMaxBytes}, "provider_ref": providerRef,

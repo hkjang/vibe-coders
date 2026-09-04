@@ -390,7 +390,7 @@ func TestRequestExplorerIsAdminReadOnlyPreview(t *testing.T) {
 		if got := strings.Join(feature.EnabledRoles, ","); got != wantRoles {
 			t.Fatalf("request explorer roles = %q, want %q", got, wantRoles)
 		}
-		if feature.MinimumAPIVersion != "v0.82.1" || feature.RolloutPercent != 100 || !feature.FallbackEnabled {
+		if feature.MinimumAPIVersion != "v0.83.0" || feature.RolloutPercent != 100 || !feature.FallbackEnabled {
 			t.Fatalf("request explorer rollout contract is incomplete: %+v", feature)
 		}
 		if _, ok := appUIImplementedFeatureIDs[feature.FeatureID]; !ok {

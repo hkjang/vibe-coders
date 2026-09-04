@@ -19,9 +19,16 @@ function request(
   latencyMs: number,
   traceId = "trace-001",
 ): AppRequestSummary {
+  const digest = requestId
+    .replace(/[^A-Za-z0-9_-]/gu, "_")
+    .padEnd(43, "_")
+    .slice(0, 43);
   return {
     request_id: requestId,
+    request_ref: `req_${digest.slice(0, 22)}.${digest.slice(22)}`,
+    request_filterable: true,
     trace_id: traceId,
+    trace_filterable: true,
     session_id: "session-001",
     api_key_id: "key-001",
     ip: "192.0.2.10",
@@ -76,7 +83,7 @@ describe("trace utilities", () => {
       to: "2026-09-04T02:00:00+00:00",
       tz: "UTC",
     });
-    expect(selectedRequestFromSearch(search)).toBe("req-1");
+    expect(selectedRequestFromSearch(search)).toEqual({ kind: "id", value: "req-1" });
   });
 
   it("drops invalid exact statuses and applies bounded defaults", () => {
@@ -90,12 +97,27 @@ describe("trace utilities", () => {
     });
   });
 
+  it("parses opaque refs separately and rejects ambiguous selection parameters", () => {
+    const requestRef = `req_${"a".repeat(22)}.${"b".repeat(21)}`;
+    expect(selectedRequestFromSearch(new URLSearchParams(`selected_ref=${requestRef}`))).toEqual({
+      kind: "ref",
+      value: requestRef,
+    });
+    expect(
+      selectedRequestFromSearch(new URLSearchParams(`selected_ref=${requestRef}&selected_request=req-safe`)),
+    ).toBeUndefined();
+    expect(selectedRequestFromSearch(new URLSearchParams("selected_ref=req_invalid"))).toBeUndefined();
+  });
+
   it("distinguishes omitted and explicit default filters for history restoration", () => {
     expect(traceFilterFormKey(new URLSearchParams())).not.toBe(
       traceFilterFormKey(new URLSearchParams("limit=50&tz=Asia%2FSeoul")),
     );
     expect(traceFilterFormKey(new URLSearchParams("model=one&selected_request=req-1"))).toBe(
       traceFilterFormKey(new URLSearchParams("model=one&selected_request=req-2")),
+    );
+    expect(traceFilterFormKey(new URLSearchParams("model=one&selected_ref=first"))).toBe(
+      traceFilterFormKey(new URLSearchParams("model=one&selected_ref=second")),
     );
   });
 

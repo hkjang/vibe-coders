@@ -1,6 +1,7 @@
 import {
   formatTraceDate,
   formatTraceDuration,
+  orderTraceRequests,
   traceStatusTone,
 } from "@/features/observability/traces/trace-utils";
 import type { AppRequestSummary } from "@/shared/api/schemas";
@@ -8,18 +9,22 @@ import { Badge } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
 
 interface TraceRequestTableProps {
-  onSelect: (requestId: string, trigger: HTMLButtonElement) => void;
+  onSelect: (request: AppRequestSummary, trigger: HTMLButtonElement) => void;
   requests: readonly AppRequestSummary[];
-  selectedRequestId?: string;
+  selectionEnabled: boolean;
+  selectedRequestRef?: string;
   timeZone: string;
 }
 
 export function TraceRequestTable({
   onSelect,
   requests,
-  selectedRequestId,
+  selectionEnabled,
+  selectedRequestRef,
   timeZone,
 }: TraceRequestTableProps): React.JSX.Element {
+  const orderedRequests = orderTraceRequests(requests);
+
   return (
     <section className="trace-request-list" aria-labelledby="trace-request-list-title">
       <header>
@@ -27,7 +32,7 @@ export function TraceRequestTable({
           <h2 id="trace-request-list-title">요청 목록</h2>
           <p>처리 흐름에 표시된 요청의 안전한 운영 메타데이터입니다.</p>
         </div>
-        <span>{requests.length.toLocaleString("ko-KR")}건</span>
+        <span>{orderedRequests.length.toLocaleString("ko-KR")}건</span>
       </header>
       <div className="data-table-shell">
         <div className="data-table-scroll">
@@ -57,10 +62,10 @@ export function TraceRequestTable({
               </tr>
             </thead>
             <tbody>
-              {requests.map((request) => {
-                const selected = request.request_id === selectedRequestId;
+              {orderedRequests.map((request, index) => {
+                const selected = request.request_ref === selectedRequestRef;
                 return (
-                  <tr key={request.request_id} data-selected={selected || undefined}>
+                  <tr key={request.request_ref} data-selected={selected || undefined}>
                     <td>
                       <time dateTime={request.created_at}>
                         {formatTraceDate(request.created_at, timeZone, {
@@ -88,9 +93,11 @@ export function TraceRequestTable({
                         variant={selected ? "secondary" : "ghost"}
                         aria-controls={selected ? "trace-request-detail" : undefined}
                         aria-expanded={selected}
-                        aria-label={`요청 ${request.request_id} 상세 보기`}
+                        aria-label={`${index + 1}번째 요청 ${request.request_id} 상세 보기`}
                         aria-pressed={selected}
-                        onClick={(event) => onSelect(request.request_id, event.currentTarget)}
+                        disabled={!selectionEnabled}
+                        title={selectionEnabled ? undefined : "서버 배포 완료 후 요청 상세를 열 수 있습니다."}
+                        onClick={(event) => onSelect(request, event.currentTarget)}
                       >
                         {selected ? "선택됨" : "상세"}
                       </Button>

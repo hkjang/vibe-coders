@@ -87,6 +87,7 @@
 .trace-guidance,
 .trace-empty,
 .trace-stale,
+.trace-contract-warning,
 .trace-selection-missing {
   border: 1px solid var(--color-border);
   border-radius: var(--radius-medium);
@@ -121,6 +122,7 @@
 }
 
 .trace-stale,
+.trace-contract-warning,
 .trace-selection-missing {
   display: flex;
   align-items: center;
@@ -131,6 +133,7 @@
 }
 
 .trace-stale > div,
+.trace-contract-warning > div,
 .trace-selection-missing > div {
   display: grid;
   gap: var(--space-1);
@@ -140,6 +143,10 @@
   overflow-wrap: anywhere;
   color: var(--color-muted);
   font-size: 0.8125rem;
+}
+
+.trace-contract-warning p {
+  margin: 0;
 }
 
 .trace-summary {

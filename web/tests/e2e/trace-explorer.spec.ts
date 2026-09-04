@@ -17,6 +17,14 @@ interface TraceGatewayHarness {
   unexpectedAdminCalls: string[];
 }
 
+interface TracePageFixture {
+  generated_at: string;
+  limit: number;
+  next_cursor?: string;
+  previous_cursor?: string;
+  requests: readonly unknown[];
+}
+
 const providerRef = `prv_${"t".repeat(43)}`;
 const traceNextCursor = `djE6dHJhY2UtbmV4dA.${"n".repeat(43)}`;
 const tracePreviousCursor = `djE6dHJhY2UtcHJldmlvdXM.${"p".repeat(43)}`;
@@ -79,7 +87,10 @@ const bootstrap = {
 
 const selectedRequest = {
   request_id: "req-trace-001",
+  request_ref: `req_${"a".repeat(22)}.${"a".repeat(21)}`,
+  request_filterable: true,
   trace_id: exactTraceId,
+  trace_filterable: true,
   session_id: "session-trace-001",
   api_key_id: "key-trace-001",
   ip: "192.0.2.20",
@@ -106,6 +117,7 @@ const selectedRequest = {
 const relatedRequest = {
   ...selectedRequest,
   request_id: "req-trace-002",
+  request_ref: `req_${"b".repeat(22)}.${"b".repeat(21)}`,
   latency_ms: 1_250,
   total_tokens: 0,
   estimated_cost: 0,
@@ -116,8 +128,17 @@ const relatedRequest = {
 const nextPageRequest = {
   ...selectedRequest,
   request_id: "req-trace-page-2",
+  request_ref: `req_${"c".repeat(22)}.${"c".repeat(21)}`,
   session_id: "session-trace-002",
   created_at: "2026-09-04T00:59:00Z",
+};
+
+const privateRequest = {
+  ...selectedRequest,
+  request_id: "[값 비공개]",
+  request_ref: `req_${"d".repeat(22)}.${"d".repeat(21)}`,
+  request_filterable: false,
+  model: "비공개 요청 모델",
 };
 
 const firstPage = {
@@ -133,6 +154,14 @@ const secondPage = {
   previous_cursor: tracePreviousCursor,
   generated_at: "2026-09-04T01:00:06Z",
 };
+
+function withoutRequestIdentity(request: typeof selectedRequest): Record<string, unknown> {
+  const legacy: Record<string, unknown> = { ...request };
+  delete legacy.request_ref;
+  delete legacy.request_filterable;
+  delete legacy.trace_filterable;
+  return legacy;
+}
 
 async function axeViolations(page: Page): Promise<unknown[]> {
   return page.evaluate(async () => {
@@ -169,7 +198,14 @@ function validateTraceFilters(
 async function mockTraceGateway(
   page: Page,
   expectedFilters: Readonly<Record<string, string>>,
+  fixtures: {
+    first?: TracePageFixture;
+    second?: TracePageFixture;
+    secondGate?: Promise<void>;
+  } = {},
 ): Promise<TraceGatewayHarness> {
+  const firstResponse = fixtures.first ?? firstPage;
+  const secondResponse = fixtures.second ?? secondPage;
   const calls: TraceProjectionCall[] = [];
   const filterViolations: string[] = [];
   const unexpectedAdminCalls: string[] = [];
@@ -200,8 +236,11 @@ async function mockTraceGateway(
       validateTraceFilters(url, expectedFilters, filterViolations);
       const cursor = url.searchParams.get("cursor");
       const limit = Number(expectedFilters.limit);
-      if (cursor === traceNextCursor) return json({ ...secondPage, limit });
-      if (cursor === null || cursor === tracePreviousCursor) return json({ ...firstPage, limit });
+      if (cursor === traceNextCursor) {
+        if (fixtures.secondGate) await fixtures.secondGate;
+        return json({ ...secondResponse, limit });
+      }
+      if (cursor === null || cursor === tracePreviousCursor) return json({ ...firstResponse, limit });
       filterViolations.push(`unexpected cursor: ${cursor}`);
       return route.fulfill({
         status: 400,
@@ -253,7 +292,7 @@ test("추적 탐색기 딥링크와 새로고침에서 안전한 필터·선택�
   await expect(page.getByLabel("시작 시각", { exact: true })).toHaveValue(rangeFrom);
   await expect(page.getByLabel("종료 시각", { exact: true })).toHaveValue(rangeTo);
   await expect(page.getByRole("heading", { name: "요청 req-trace-001", exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "요청 req-trace-001 상세 보기" })).toHaveAttribute(
+  await expect(page.getByRole("button", { name: "1번째 요청 req-trace-001 상세 보기" })).toHaveAttribute(
     "aria-pressed",
     "true",
   );
@@ -277,6 +316,7 @@ test("추적 탐색기 딥링크와 새로고침에서 안전한 필터·선택�
   expect(initialCall?.headers["x-vibe-ui"]).toBe("app");
   expect(initialCall?.headers["x-vibe-ui-version"]).toBeTruthy();
   expect(initialCall?.headers["x-vibe-route"]).toBe("observability.traces");
+  expect(initialCall?.headers["x-vibe-app-requests-version"]).toBe("2");
   expect(initialCall?.url.searchParams.get("trace_id")).toBe(exactTraceId);
   expect(initialCall?.url.searchParams.get("status")).toBe("error");
   expect(initialCall?.url.searchParams.get("model")).toBe("gpt-trace-test");
@@ -308,20 +348,23 @@ test("추적 탐색기 딥링크와 새로고침에서 안전한 필터·선택�
 
   await page.getByRole("button", { name: "요청 상세 닫기" }).click();
   await expect(page.getByRole("heading", { name: "추적 탐색기", exact: true })).toBeFocused();
-  const firstDetailTrigger = page.getByRole("button", { name: "요청 req-trace-001 상세 보기" });
+  const firstDetailTrigger = page.getByRole("button", {
+    name: "1번째 요청 req-trace-001 상세 보기",
+  });
   await firstDetailTrigger.click();
-  const firstDetail = page.getByRole("region", { name: "요청 req-trace-001" });
+  const firstDetail = page.getByRole("region", { name: "1번째 요청 req-trace-001" });
   await expect(firstDetail).toBeFocused();
   await expect(firstDetailTrigger).toHaveAttribute("aria-controls", "trace-request-detail");
   await expect(firstDetailTrigger).toHaveAttribute("aria-expanded", "true");
-  await expect(page.getByText("요청 req-trace-001 상세가 열렸습니다.", { exact: true })).toBeAttached();
+  await expect(page.getByText("1번째 요청 req-trace-001 상세가 열렸습니다.", { exact: true })).toBeAttached();
   await page.getByRole("button", { name: "요청 상세 닫기" }).click();
   await expect(firstDetailTrigger).toBeFocused();
 
   await page.getByRole("button", { name: "다음" }).click();
   await expect.poll(() => new URL(page.url()).searchParams.get("cursor")).toBe(traceNextCursor);
   await expect(page).not.toHaveURL(/selected_request=/u);
-  await expect(page.getByRole("button", { name: "요청 req-trace-page-2 상세 보기" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "1번째 요청 req-trace-page-2 상세 보기" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "추적 조회 결과" })).toBeFocused();
   await expect(page.getByRole("heading", { name: "요청 req-trace-001", exact: true })).toBeHidden();
   await expect
     .poll(
@@ -338,7 +381,7 @@ test("추적 탐색기 딥링크와 새로고침에서 안전한 필터·선택�
     (call) => call.url.searchParams.get("cursor") === traceNextCursor,
   ).length;
   await page.reload();
-  await expect(page.getByRole("button", { name: "요청 req-trace-page-2 상세 보기" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "1번째 요청 req-trace-page-2 상세 보기" })).toBeVisible();
   await expect
     .poll(
       () => harness.calls.filter((call) => call.url.searchParams.get("cursor") === traceNextCursor).length,
@@ -348,7 +391,8 @@ test("추적 탐색기 딥링크와 새로고침에서 안전한 필터·선택�
   await page.getByRole("button", { name: "이전" }).click();
   await expect.poll(() => new URL(page.url()).searchParams.get("cursor")).toBe(tracePreviousCursor);
   await expect(page).not.toHaveURL(/selected_request=/u);
-  await expect(page.getByRole("button", { name: "요청 req-trace-001 상세 보기" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "1번째 요청 req-trace-001 상세 보기" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "추적 조회 결과" })).toBeFocused();
   await expect
     .poll(() => harness.calls.some((call) => call.url.searchParams.get("cursor") === tracePreviousCursor))
     .toBe(true);
@@ -359,6 +403,101 @@ test("추적 탐색기 딥링크와 새로고침에서 안전한 필터·선택�
     expect(previousCall?.url.searchParams.get(key)).toBe(value);
   }
   expect(await axeViolations(page)).toEqual([]);
+  expect(harness.filterViolations).toEqual([]);
+  expect(harness.unexpectedAdminCalls).toEqual([]);
+});
+
+test("v1 요청 응답은 배포 경고와 읽기 전용 흐름만 제공한다", async ({ page }) => {
+  const expectedFilters = {
+    trace_id: exactTraceId,
+    limit: "25",
+    tz: "UTC",
+  };
+  const harness = await mockTraceGateway(page, expectedFilters, {
+    first: {
+      ...firstPage,
+      requests: [withoutRequestIdentity(selectedRequest)],
+    },
+  });
+  const deepLink = new URLSearchParams({
+    ...expectedFilters,
+    selected_request: selectedRequest.request_id,
+  });
+
+  await page.goto(`observability/traces?${deepLink.toString()}`);
+
+  const contractWarning = page.getByRole("status").filter({
+    hasText: "서버 배포 버전을 맞추는 중입니다.",
+  });
+  await expect(contractWarning).toContainText(
+    "요청 상세 연결은 모든 서버가 v0.83.0 이상이 된 뒤 제공됩니다.",
+  );
+  await expect(
+    page.getByText("서버 업그레이드 중에는 요청 상세를 열 수 없습니다.", { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "1번째 요청 req-trace-001 흐름 선택" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "1번째 요청 req-trace-001 상세 보기" })).toBeDisabled();
+  await expect.poll(() => harness.calls.length).toBeGreaterThan(0);
+  expect(harness.filterViolations).toEqual([]);
+  expect(harness.unexpectedAdminCalls).toEqual([]);
+});
+
+test("비공개 요청 상세를 유지하고 페이지 응답 완료 뒤 결과로 포커스를 옮긴다", async ({ page }) => {
+  const expectedFilters = {
+    trace_id: exactTraceId,
+    limit: "25",
+    tz: "UTC",
+  };
+  let releaseNextPage: (() => void) | undefined;
+  const nextPageGate = new Promise<void>((resolve) => {
+    releaseNextPage = resolve;
+  });
+  const harness = await mockTraceGateway(page, expectedFilters, {
+    first: { ...firstPage, requests: [privateRequest] },
+    secondGate: nextPageGate,
+  });
+  await page.goto(`observability/traces?${new URLSearchParams(expectedFilters).toString()}`);
+
+  const detailTrigger = page.getByRole("button", {
+    name: "1번째 요청 [값 비공개] 상세 보기",
+  });
+  await expect(detailTrigger).toBeVisible();
+  await detailTrigger.click();
+
+  await expect
+    .poll(() => new URL(page.url()).searchParams.get("selected_ref"))
+    .toBe(privateRequest.request_ref);
+  expect(new URL(page.url()).searchParams.has("selected_request")).toBe(false);
+  let detail = page.getByRole("region", { name: "1번째 요청 [값 비공개]" });
+  await expect(detail).toContainText("비공개 요청 모델");
+  await expect(detailTrigger).toHaveAttribute("aria-pressed", "true");
+  await expect.poll(() => harness.calls.length).toBeGreaterThan(0);
+  expect(harness.calls.at(-1)?.url.searchParams.has("selected_ref")).toBe(false);
+  expect(harness.calls.at(-1)?.url.searchParams.has("selected_request")).toBe(false);
+
+  const callCount = harness.calls.length;
+  await page.reload();
+  detail = page.getByRole("region", { name: "1번째 요청 [값 비공개]" });
+  await expect(detail).toContainText("비공개 요청 모델");
+  await expect
+    .poll(() => new URL(page.url()).searchParams.get("selected_ref"))
+    .toBe(privateRequest.request_ref);
+  await expect.poll(() => harness.calls.length).toBeGreaterThan(callCount);
+  expect(harness.calls.at(-1)?.url.searchParams.has("selected_ref")).toBe(false);
+  expect(harness.calls.at(-1)?.url.searchParams.has("selected_request")).toBe(false);
+
+  await page.getByRole("button", { name: "다음" }).click();
+  await expect.poll(() => new URL(page.url()).searchParams.get("cursor")).toBe(traceNextCursor);
+  await expect(page).not.toHaveURL(/selected_ref=/u);
+  await expect(page).not.toHaveURL(/selected_request=/u);
+  await expect
+    .poll(
+      () => harness.calls.filter((call) => call.url.searchParams.get("cursor") === traceNextCursor).length,
+    )
+    .toBe(1);
+  await expect(page.getByRole("heading", { name: "추적 탐색기", exact: true })).not.toBeFocused();
+  releaseNextPage?.();
+  await expect(page.getByRole("heading", { name: "추적 조회 결과" })).toBeFocused();
   expect(harness.filterViolations).toEqual([]);
   expect(harness.unexpectedAdminCalls).toEqual([]);
 });

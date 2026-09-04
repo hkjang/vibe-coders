@@ -196,6 +196,53 @@ func assertOpenAPIContract(t *testing.T, spec map[string]any) {
 	if created["type"] != "integer" || created["format"] != "int64" || created["nullable"] != true || created["minimum"] != float64(0) || created["maximum"] != float64(maxAdminModelCreated) {
 		t.Errorf("AdminModel.created schema = %v, want nullable JavaScript-safe non-negative int64", created)
 	}
+	appRequest, _ := schemas["AppRequestSummary"].(map[string]any)
+	appRequestProperties, _ := appRequest["properties"].(map[string]any)
+	appRequestRequired, _ := appRequest["required"].([]any)
+	requiredAppRequestFields := make(map[string]bool, len(appRequestRequired))
+	for _, field := range appRequestRequired {
+		if name, ok := field.(string); ok {
+			requiredAppRequestFields[name] = true
+		}
+	}
+	requestRef, _ := appRequestProperties["request_ref"].(map[string]any)
+	if requestRef["type"] != "string" || requestRef["minLength"] != float64(appRequestRefLength) ||
+		requestRef["maxLength"] != float64(appRequestRefLength) || requestRef["pattern"] != `^req_[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{21}$` ||
+		!requiredAppRequestFields["request_ref"] {
+		t.Errorf("AppRequestSummary.request_ref schema = %v required=%v", requestRef, requiredAppRequestFields["request_ref"])
+	}
+	for _, field := range []string{"request_filterable", "trace_filterable"} {
+		property, _ := appRequestProperties[field].(map[string]any)
+		if property["type"] != "boolean" || !requiredAppRequestFields[field] {
+			t.Errorf("AppRequestSummary.%s schema = %v required=%v, want required boolean", field, property, requiredAppRequestFields[field])
+		}
+	}
+	requestOperation, _ := paths["/admin/requests"].(map[string]any)["get"].(map[string]any)
+	requestParameters, _ := requestOperation["parameters"].([]any)
+	var requestVersionParameter map[string]any
+	for _, raw := range requestParameters {
+		parameter, _ := raw.(map[string]any)
+		if parameter["in"] == "header" && parameter["name"] == appRequestContractHeader {
+			requestVersionParameter = parameter
+			break
+		}
+	}
+	requestVersionSchema, _ := requestVersionParameter["schema"].(map[string]any)
+	requestVersions, _ := requestVersionSchema["enum"].([]any)
+	if requestVersionParameter["required"] != false || requestVersionSchema["default"] != appRequestContractV1 ||
+		len(requestVersions) != 2 || requestVersions[0] != appRequestContractV1 || requestVersions[1] != appRequestContractV2 {
+		t.Errorf("%s request parameter = %v", appRequestContractHeader, requestVersionParameter)
+	}
+	requestResponses, _ := requestOperation["responses"].(map[string]any)
+	requestOK, _ := requestResponses["200"].(map[string]any)
+	requestResponseHeaders, _ := requestOK["headers"].(map[string]any)
+	requestVersionResponse, _ := requestResponseHeaders[appRequestContractHeader].(map[string]any)
+	requestVersionResponseSchema, _ := requestVersionResponse["schema"].(map[string]any)
+	responseVersions, _ := requestVersionResponseSchema["enum"].([]any)
+	_, hasSingleResponseSchema := requestOK["content"]
+	if len(responseVersions) != 2 || responseVersions[0] != appRequestContractV1 || responseVersions[1] != appRequestContractV2 || hasSingleResponseSchema {
+		t.Errorf("/admin/requests versioned response contract headers=%v response=%v", requestResponseHeaders, requestOK)
+	}
 	for _, schemaName := range []string{"ProviderPublic", "ProviderSLO", "ProviderSLOEvaluation", "ProviderSLODeleteResponse", "ProviderHealthScore", "ProviderHealthRankingItem", "ProviderHealthAlert", "RoutingBreakerState", "AgentRoute", "AdminModel", "AdminModelProvider", "AdminModelPartialFailure"} {
 		schema, _ := schemas[schemaName].(map[string]any)
 		properties, _ := schema["properties"].(map[string]any)

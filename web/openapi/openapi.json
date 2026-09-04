@@ -672,9 +672,18 @@
             "minimum": 0,
             "type": "integer"
           },
+          "request_filterable": {
+            "type": "boolean"
+          },
           "request_id": {
             "maxLength": 512,
             "minLength": 1,
+            "type": "string"
+          },
+          "request_ref": {
+            "maxLength": 48,
+            "minLength": 48,
+            "pattern": "^req_[A-Za-z0-9_-]{22}\\.[A-Za-z0-9_-]{21}$",
             "type": "string"
           },
           "session_id": {
@@ -694,6 +703,9 @@
             "minimum": 0,
             "type": "integer"
           },
+          "trace_filterable": {
+            "type": "boolean"
+          },
           "trace_id": {
             "maxLength": 512,
             "type": "string"
@@ -701,7 +713,10 @@
         },
         "required": [
           "request_id",
+          "request_ref",
+          "request_filterable",
           "trace_id",
+          "trace_filterable",
           "session_id",
           "api_key_id",
           "ip",
@@ -9210,7 +9225,7 @@
     },
     "/admin/requests": {
       "get": {
-        "description": "Legacy callers keep the existing dynamic response shape. When X-Vibe-UI: app is supplied, the response follows the AppRequestsResponse component.",
+        "description": "Legacy callers keep the existing dynamic response shape. React callers request the version 2 safe projection with X-Vibe-UI: app and X-Vibe-App-Requests-Version: 2. Omitting the version header preserves the v0.82 app projection during rolling deployments.",
         "operationId": "get__admin_requests",
         "parameters": [
           {
@@ -9221,6 +9236,20 @@
             "schema": {
               "enum": [
                 "app"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Set to 2 for request_ref and filterability fields. Absent or 1 returns the v0.82-compatible app shape.",
+            "in": "header",
+            "name": "X-Vibe-App-Requests-Version",
+            "required": false,
+            "schema": {
+              "default": "1",
+              "enum": [
+                "1",
+                "2"
               ],
               "type": "string"
             }
@@ -9358,7 +9387,19 @@
         ],
         "responses": {
           "200": {
-            "description": "OK. X-Vibe-UI: app uses AppRequestsResponse; legacy callers receive the existing response shape."
+            "description": "OK. Version 2 app callers receive AppRequestsResponse; version 1 app and legacy callers retain their prior shape.",
+            "headers": {
+              "X-Vibe-App-Requests-Version": {
+                "description": "Selected app request projection contract version.",
+                "schema": {
+                  "enum": [
+                    "1",
+                    "2"
+                  ],
+                  "type": "string"
+                }
+              }
+            }
           },
           "default": {
             "content": {

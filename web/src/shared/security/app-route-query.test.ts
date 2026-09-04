@@ -17,6 +17,7 @@ function encoded(value: string, passes: number): string {
 describe("app route query security", () => {
   const initialURL = window.location.href;
   const cursor = `djE6dGVzdA.${"c".repeat(43)}`;
+  const selectedRef = `req_${"a".repeat(22)}.${"b".repeat(21)}`;
 
   afterEach(() => window.history.replaceState(null, "", initialURL));
 
@@ -60,6 +61,64 @@ describe("app route query security", () => {
     expect(result.search).toContain("selected_request=req-1");
     expect(result.search).toContain(`cursor=${cursor}`);
     expect(result.search).not.toContain("prompt");
+  });
+
+  it("preserves an exact segmented request reference ahead of credential heuristics", () => {
+    const refWithSecretShapedSubstring = `req_${"a".repeat(22)}.sk-${"b".repeat(18)}`;
+    for (const reference of [selectedRef, refWithSecretShapedSubstring]) {
+      const result = sanitizeAppRouteSearch(
+        "/app/observability/traces",
+        `?selected_ref=${encodeURIComponent(reference)}&status=error`,
+        ["req_"],
+      );
+      expect(result).toEqual({
+        rejectedKeys: [],
+        sensitiveKeys: [],
+        search: `?selected_ref=${encodeURIComponent(reference)}&status=error`,
+      });
+    }
+  });
+
+  it.each([
+    `req_${"a".repeat(43)}`,
+    `req_${"a".repeat(21)}.${"b".repeat(21)}`,
+    `req_${"a".repeat(22)}.${"b".repeat(20)}`,
+    `req_${"a".repeat(22)}.${"b".repeat(21)}.extra`,
+    `req_${"a".repeat(22)}.${"b".repeat(20)}!`,
+  ])("rejects malformed segmented request reference %s", (reference) => {
+    const result = sanitizeAppRouteSearch(
+      "/app/observability/traces",
+      `?selected_ref=${encodeURIComponent(reference)}&status=error`,
+    );
+    expect(result.search).toBe("?status=error");
+    expect(result.rejectedKeys).toEqual(["selected_ref"]);
+  });
+
+  it("rejects duplicate or competing request selection keys together", () => {
+    const duplicate = sanitizeAppRouteSearch(
+      "/app/observability/traces",
+      `?selected_ref=${selectedRef}&selected_ref=${selectedRef}&status=error`,
+    );
+    expect(duplicate.search).toBe("?status=error");
+    expect(duplicate.rejectedKeys).toEqual(["selected_ref"]);
+
+    const competing = sanitizeAppRouteSearch(
+      "/app/observability/traces",
+      `?selected_request=req-legacy&selected_ref=${selectedRef}&status=error`,
+    );
+    expect(competing.search).toBe("?status=error");
+    expect(competing.rejectedKeys).toEqual(["selected_request", "selected_ref"]);
+  });
+
+  it("still rejects raw credential material in the legacy selection key", () => {
+    const secret = `vc_sk_${"z".repeat(43)}`;
+    const result = sanitizeAppRouteSearch(
+      "/app/observability/traces",
+      `?selected_request=${encodeURIComponent(secret)}&status=error`,
+    );
+    expect(result.search).toBe("?status=error");
+    expect(result.rejectedKeys).toEqual(["selected_request"]);
+    expect(result.sensitiveKeys).toEqual(["selected_request"]);
   });
 
   it.each([`vc_sk_${"a".repeat(43)}`, "Bearer private-credential"])(

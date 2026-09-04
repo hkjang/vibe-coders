@@ -1,6 +1,6 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { ExternalLink, Filter, RefreshCw, Search } from "lucide-react";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useSearchParams } from "react-router";
 
 import { useAuth } from "@/app/auth/AuthProvider";
@@ -11,6 +11,7 @@ import { refreshIntervalMs } from "@/features/health/health-utils";
 import { apiClient } from "@/shared/api/client";
 import { endpoints } from "@/shared/api/endpoints";
 import { isAppError } from "@/shared/api/error";
+import { appRequestsContractHeaders } from "@/shared/api/app-request-contract";
 import type { AppRequestSummary, AppRequestsQuery } from "@/shared/api/schemas";
 import { ErrorState, LoadingState } from "@/shared/components/state/PageStates";
 import { Badge } from "@/shared/components/ui/Badge";
@@ -42,6 +43,13 @@ const defaultLimit = 50;
 const defaultTimeZone = "Asia/Seoul";
 const exactHTTPStatusPattern = /^[1-5][0-9]{2}$/u;
 const standardPageLimits = [25, 50, 100, 200] as const;
+
+interface SelectedRequestDetail {
+  contractVersion: 1 | 2;
+  dataUpdatedAt: number;
+  ordinal: number;
+  request: AppRequestSummary;
+}
 
 function queryFromSearch(search: URLSearchParams): AppRequestsQuery {
   const requestedLimit = Number(search.get("limit"));
@@ -112,19 +120,35 @@ export function RequestPage(): React.JSX.Element {
   const customLimit = standardPageLimits.includes(selectedLimit as (typeof standardPageLimits)[number])
     ? undefined
     : selectedLimit;
+  const [selected, setSelected] = useState<SelectedRequestDetail>();
   const result = useQuery({
     queryKey: ["admin", "requests", query],
     queryFn: ({ signal }) =>
-      apiClient.request(endpoints.admin.requests, { query, signal, routeId: "observability.requests" }),
+      apiClient.request(endpoints.admin.requests, {
+        headers: appRequestsContractHeaders,
+        query,
+        signal,
+        routeId: "observability.requests",
+      }),
     placeholderData: keepPreviousData,
     staleTime: 10_000,
-    refetchInterval: interval,
+    refetchInterval: (requestQuery) =>
+      (selected !== undefined && selected.dataUpdatedAt === requestQuery.state.dataUpdatedAt) ||
+      (requestQuery.state.status === "error" && requestQuery.state.data === undefined)
+        ? false
+        : interval,
     refetchIntervalInBackground: false,
   });
-  const [selected, setSelected] = useState<AppRequestSummary>();
   const [filterRevision, setFilterRevision] = useState(0);
   const [filterError, setFilterError] = useState<string>();
   const returnFocusRef = useRef<HTMLElement | null>(null);
+  const resultsHeadingRef = useRef<HTMLHeadingElement>(null);
+  const errorHeadingRef = useRef<HTMLHeadingElement>(null);
+  const pendingPageFocusRef = useRef(false);
+  const pageErrorFocusedRef = useRef(false);
+  const pendingErrorActionFocusRef = useRef<"reset" | "retry" | undefined>(undefined);
+  const errorRetryButtonRef = useRef<HTMLButtonElement>(null);
+  const errorResetButtonRef = useRef<HTMLButtonElement>(null);
   const deepLinkIP = searchParams.get("ip")?.trim() ?? "";
   const deepLinkIPError = deepLinkIP !== "" && !isValidIPAddress(deepLinkIP);
 
@@ -137,6 +161,38 @@ export function RequestPage(): React.JSX.Element {
     },
     [searchParams, setSearchParams],
   );
+
+  useEffect(() => {
+    if (!pendingPageFocusRef.current || result.isFetching || result.isPlaceholderData) return;
+    if (resultsHeadingRef.current) {
+      pendingPageFocusRef.current = false;
+      pageErrorFocusedRef.current = false;
+      pendingErrorActionFocusRef.current = undefined;
+      resultsHeadingRef.current.focus();
+      return;
+    }
+    const errorActionTarget =
+      pendingErrorActionFocusRef.current === "retry"
+        ? errorRetryButtonRef.current
+        : pendingErrorActionFocusRef.current === "reset"
+          ? errorResetButtonRef.current
+          : undefined;
+    if (errorActionTarget) {
+      pendingErrorActionFocusRef.current = undefined;
+      errorActionTarget.focus();
+      return;
+    }
+    if (!pageErrorFocusedRef.current && errorHeadingRef.current) {
+      pageErrorFocusedRef.current = true;
+      errorHeadingRef.current.focus();
+    }
+  }, [
+    query.cursor,
+    result.dataUpdatedAt,
+    result.errorUpdatedAt,
+    result.isFetching,
+    result.isPlaceholderData,
+  ]);
 
   const submitFilters = (event: React.FormEvent<HTMLFormElement>): void => {
     event.preventDefault();
@@ -186,28 +242,49 @@ export function RequestPage(): React.JSX.Element {
     setSearchParams(next, { replace: false });
   };
 
-  const openRequest = (request: AppRequestSummary, trigger: HTMLElement): void => {
+  const openRequest = (request: AppRequestSummary, ordinal: number, trigger: HTMLElement): void => {
     returnFocusRef.current = trigger;
-    setSelected(request);
+    setSelected({
+      contractVersion: result.data?.request_contract_version ?? 1,
+      dataUpdatedAt: result.dataUpdatedAt,
+      ordinal,
+      request,
+    });
   };
 
-  if (result.isPending && !result.data) return <LoadingState label="최근 요청을 불러오는 중입니다." />;
   if (result.error && !result.data) {
     return (
       <ErrorState
+        headingRef={errorHeadingRef}
         message={safeAppErrorMessage(result.error, "요청 목록을 확인할 수 없습니다.")}
         requestId={isAppError(result.error) ? result.error.requestId : undefined}
         diagnosticCode={isAppError(result.error) ? result.error.code : undefined}
-        onRetry={() => void result.refetch()}
-        onReset={() => setSearchParams({}, { replace: false })}
+        onRetry={() => {
+          pendingPageFocusRef.current = true;
+          pendingErrorActionFocusRef.current = "retry";
+          void result.refetch();
+        }}
+        onReset={() => {
+          pendingPageFocusRef.current = true;
+          pendingErrorActionFocusRef.current = "reset";
+          setSearchParams({}, { replace: false });
+        }}
+        retryButtonRef={errorRetryButtonRef}
+        resetButtonRef={errorResetButtonRef}
         resetLabel="필터 초기화"
         showLegacy={showLegacyAdmin}
         legacyHref={legacyPath}
       />
     );
   }
+  if (result.isPending && !result.data) return <LoadingState label="최근 요청을 불러오는 중입니다." />;
 
   const data = result.data;
+  const activeSelected =
+    selected?.contractVersion === data?.request_contract_version &&
+    selected.dataUpdatedAt === result.dataUpdatedAt
+      ? selected
+      : undefined;
   return (
     <section className="page-stack request-page">
       <header className="page-header">
@@ -367,6 +444,18 @@ export function RequestPage(): React.JSX.Element {
           새 필터를 조회하는 동안 직전 결과를 표시합니다.
         </div>
       ) : null}
+      {data?.request_contract_version === 1 ? (
+        <div className="request-contract-warning" role="status">
+          <strong>서버 배포 버전을 맞추는 중입니다.</strong>
+          <span>
+            요청 목록은 계속 조회할 수 있지만 추적 화면 연결은 모든 서버가 v0.83.0 이상이 된 뒤 제공됩니다.
+          </span>
+        </div>
+      ) : null}
+
+      <h2 ref={resultsHeadingRef} className="sr-only" tabIndex={-1}>
+        요청 조회 결과
+      </h2>
 
       <div className="data-table-shell">
         <div className="data-table-scroll">
@@ -388,8 +477,8 @@ export function RequestPage(): React.JSX.Element {
             </thead>
             <tbody>
               {data?.requests.length ? (
-                data.requests.map((request) => (
-                  <tr key={request.request_id}>
+                data.requests.map((request, index) => (
+                  <tr key={request.request_ref}>
                     <td>
                       <time
                         data-testid={`request-created-at-${request.request_id}`}
@@ -418,7 +507,8 @@ export function RequestPage(): React.JSX.Element {
                       <Button
                         size="small"
                         variant="ghost"
-                        onClick={(event) => openRequest(request, event.currentTarget)}
+                        aria-label={`${index + 1}번째 요청 ${request.request_id} 상세 보기`}
+                        onClick={(event) => openRequest(request, index + 1, event.currentTarget)}
                       >
                         상세
                       </Button>
@@ -450,7 +540,10 @@ export function RequestPage(): React.JSX.Element {
             variant="secondary"
             size="small"
             disabled={!data?.previous_cursor || result.isFetching}
-            onClick={() => updateCursor(data?.previous_cursor)}
+            onClick={() => {
+              pendingPageFocusRef.current = true;
+              updateCursor(data?.previous_cursor);
+            }}
           >
             이전
           </Button>
@@ -458,15 +551,20 @@ export function RequestPage(): React.JSX.Element {
             variant="secondary"
             size="small"
             disabled={!data?.next_cursor || result.isFetching}
-            onClick={() => updateCursor(data?.next_cursor)}
+            onClick={() => {
+              pendingPageFocusRef.current = true;
+              updateCursor(data?.next_cursor);
+            }}
           >
             다음
           </Button>
         </div>
       </div>
       <RequestDetailDialog
-        open={Boolean(selected)}
-        request={selected}
+        open={Boolean(activeSelected)}
+        request={activeSelected?.request}
+        requestOrdinal={activeSelected?.ordinal}
+        traceHandoffEnabled={data?.request_contract_version === 2}
         onOpenChange={(open) => {
           if (!open) setSelected(undefined);
         }}

@@ -160,11 +160,14 @@ export type AppRequestSummary = {
     provider_display: string;
     provider_ref: string;
     reasoning_tokens: number;
+    request_filterable: boolean;
     request_id: string;
+    request_ref: string;
     session_id: string;
     status_code: number;
     stream: boolean;
     total_tokens: number;
+    trace_filterable: boolean;
     trace_id: string;
 };
 
@@ -5130,6 +5133,10 @@ export type GetAdminRequestsData = {
          * Set to app to request the safe React console projection.
          */
         'X-Vibe-UI'?: 'app';
+        /**
+         * Set to 2 for request_ref and filterability fields. Absent or 1 returns the v0.82-compatible app shape.
+         */
+        'X-Vibe-App-Requests-Version'?: '1' | '2';
     };
     path?: never;
     query?: {
@@ -5165,7 +5172,7 @@ export type GetAdminRequestsError = GetAdminRequestsErrors[keyof GetAdminRequest
 
 export type GetAdminRequestsResponses = {
     /**
-     * OK. X-Vibe-UI: app uses AppRequestsResponse; legacy callers receive the existing response shape.
+     * OK. Version 2 app callers receive AppRequestsResponse; version 1 app and legacy callers retain their prior shape.
      */
     200: unknown;
 };

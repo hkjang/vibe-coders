@@ -24,6 +24,7 @@ seed.sql
 README.md
 
 # Frontend dependencies and generated output are rebuilt inside the image.
+node_modules/
 web/node_modules/
 web/.pnpm-store/
 web/.vite/

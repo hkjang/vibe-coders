@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import axe from "axe-core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -43,11 +43,16 @@ vi.mock("@/app/auth/AuthProvider", () => ({
 }));
 
 const providerRef = `prv_${"a".repeat(43)}`;
+const firstRequestRef = `req_${"a".repeat(22)}.${"a".repeat(21)}`;
+const secondRequestRef = `req_${"b".repeat(22)}.${"b".repeat(21)}`;
 const previousCursor = `djE6cHJldmlvdXM.${"p".repeat(43)}`;
 const nextCursor = `djE6bmV4dA.${"n".repeat(43)}`;
 const firstRow = {
   request_id: "req-001",
+  request_ref: firstRequestRef,
+  request_filterable: true,
   trace_id: "trace-001",
+  trace_filterable: true,
   session_id: "session-001",
   api_key_id: "key-001",
   ip: "192.0.2.10",
@@ -74,12 +79,14 @@ const firstRow = {
 const secondRow = {
   ...firstRow,
   request_id: "req-002",
+  request_ref: secondRequestRef,
   status_code: 503,
   latency_ms: 400,
   created_at: "2026-09-04T01:02:03.100Z",
 } as const;
 
 const response = {
+  request_contract_version: 2,
   requests: [secondRow, firstRow],
   limit: 50,
   previous_cursor: previousCursor,
@@ -152,14 +159,15 @@ describe("TracePage", () => {
     await user.click(within(firstRowInTable).getByText("req-001"));
     expect(screen.getByTestId("location")).not.toHaveTextContent("selected_request");
     const detailTrigger = within(firstRowInTable).getByRole("button", {
-      name: "요청 req-001 상세 보기",
+      name: "1번째 요청 req-001 상세 보기",
     });
     await user.click(detailTrigger);
     expect(screen.getByTestId("location")).toHaveTextContent("selected_request=req-001");
+    expect(screen.getByTestId("location")).not.toHaveTextContent("selected_ref");
     expect(detailTrigger).toHaveAttribute("aria-controls", "trace-request-detail");
     expect(detailTrigger).toHaveAttribute("aria-expanded", "true");
-    expect(screen.getByRole("region", { name: "요청 req-001" })).toHaveFocus();
-    expect(screen.getByText("요청 req-001 상세가 열렸습니다.", { exact: true })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "1번째 요청 req-001" })).toHaveFocus();
+    expect(screen.getByText("1번째 요청 req-001 상세가 열렸습니다.", { exact: true })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "요청 탐색기" })).toHaveAttribute(
       "href",
       expect.stringContaining("request_id=req-001"),
@@ -169,6 +177,7 @@ describe("TracePage", () => {
       expect(request).toHaveBeenCalledWith(
         endpoints.admin.requests,
         expect.objectContaining({
+          headers: { "X-Vibe-App-Requests-Version": "2" },
           query: { limit: 50, tz: "Asia/Seoul" },
           routeId: "observability.traces",
         }),
@@ -180,19 +189,193 @@ describe("TracePage", () => {
     expect(screen.getByTestId("location")).not.toHaveTextContent("selected_request");
   });
 
+  it.each(["[값 비공개]", "[값 생략]"])(
+    "uses distinct opaque refs when projected request IDs share %s",
+    async (projectedRequestID) => {
+      const firstPrivateRef = `req_${"c".repeat(22)}.${"c".repeat(21)}`;
+      const secondPrivateRef = `req_${"d".repeat(22)}.${"d".repeat(21)}`;
+      const firstPrivate = {
+        ...firstRow,
+        request_id: projectedRequestID,
+        request_ref: firstPrivateRef,
+        request_filterable: false,
+        model: "비공개 요청 모델 1",
+      };
+      const secondPrivate = {
+        ...secondRow,
+        request_id: projectedRequestID,
+        request_ref: secondPrivateRef,
+        request_filterable: false,
+        model: "비공개 요청 모델 2",
+      };
+      const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+      vi.spyOn(apiClient, "request").mockResolvedValue({
+        ...response,
+        requests: [secondPrivate, firstPrivate],
+      } as never);
+      const user = userEvent.setup();
+      const view = renderPage();
+
+      const timeline = (await screen.findByRole("heading", { name: "요청 처리 흐름" })).closest("section");
+      expect(timeline).not.toBeNull();
+      const triggers = within(timeline as HTMLElement).getAllByRole("button", {
+        name: /^\d+번째 요청 \[(?:값 비공개|값 생략)\] 흐름 선택$/u,
+      });
+      expect(triggers).toHaveLength(2);
+
+      await user.click(triggers[0] as HTMLButtonElement);
+      expect(screen.getByTestId("location")).toHaveTextContent(`selected_ref=${firstPrivateRef}`);
+      expect(screen.getByTestId("location")).not.toHaveTextContent("selected_request");
+      let detail = screen.getByRole("region", { name: `1번째 요청 ${projectedRequestID}` });
+      expect(within(detail).getByText("비공개 요청 모델 1")).toBeVisible();
+      expect(
+        screen.getByText(`1번째 요청 ${projectedRequestID} 상세가 열렸습니다.`, { exact: true }),
+      ).toBeInTheDocument();
+      expect(triggers[0]).toHaveAttribute("aria-pressed", "true");
+      expect(triggers[1]).toHaveAttribute("aria-pressed", "false");
+      expect(
+        new URL(
+          within(detail).getByRole("link", { name: "요청 탐색기에서 열기" }).getAttribute("href") ?? "",
+          "https://app.example.invalid",
+        ).searchParams.has("request_id"),
+      ).toBe(false);
+
+      await user.click(triggers[1] as HTMLButtonElement);
+      expect(screen.getByTestId("location")).toHaveTextContent(`selected_ref=${secondPrivateRef}`);
+      detail = screen.getByRole("region", { name: `2번째 요청 ${projectedRequestID}` });
+      expect(within(detail).getByText("비공개 요청 모델 2")).toBeVisible();
+      expect(
+        screen.getByText(`2번째 요청 ${projectedRequestID} 상세가 열렸습니다.`, { exact: true }),
+      ).toBeInTheDocument();
+      expect(triggers[0]).toHaveAttribute("aria-pressed", "false");
+      expect(triggers[1]).toHaveAttribute("aria-pressed", "true");
+      expect(consoleError.mock.calls.flat().join(" ")).not.toContain("same key");
+      consoleError.mockRestore();
+      view.unmount();
+    },
+  );
+
+  it.each(["[값 비공개]", "[값 생략]"])(
+    "does not resolve projected request ID %s as a selectable deep link",
+    async (projectedRequestID) => {
+      vi.spyOn(apiClient, "request").mockResolvedValue({
+        ...response,
+        requests: [
+          { ...firstRow, request_id: projectedRequestID, request_filterable: false },
+          { ...secondRow, request_id: projectedRequestID, request_filterable: false },
+        ],
+      } as never);
+      renderPage(`/observability/traces?selected_request=${encodeURIComponent(projectedRequestID)}`);
+
+      expect(
+        await screen.findByText("선택한 요청이 현재 페이지에 없습니다.", {
+          selector: "strong",
+        }),
+      ).toBeVisible();
+      for (const trigger of screen.getAllByRole("button", {
+        name: /^\d+번째 요청 \[(?:값 비공개|값 생략)\] 흐름 선택$/u,
+      })) {
+        expect(trigger).toHaveAttribute("aria-pressed", "false");
+      }
+    },
+  );
+
+  it("v1 호환 응답은 배포 경고를 표시하고 요청 선택을 비활성화한다", async () => {
+    vi.spyOn(apiClient, "request").mockResolvedValue({
+      ...response,
+      request_contract_version: 1,
+      requests: response.requests.map((request) => ({
+        ...request,
+        request_filterable: false,
+        trace_filterable: false,
+      })),
+    } as never);
+    renderPage("/observability/traces?selected_request=req-001");
+
+    expect(await screen.findByText("서버 배포 버전을 맞추는 중입니다.")).toBeVisible();
+    expect(screen.getByText(/v0\.83\.0 이상이 된 뒤 제공됩니다/u)).toBeVisible();
+    expect(screen.getByRole("button", { name: "1번째 요청 req-001 흐름 선택" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "1번째 요청 req-001 상세 보기" })).toBeDisabled();
+
+    const unavailable = screen
+      .getByText("서버 업그레이드 중에는 요청 상세를 열 수 없습니다.", { selector: "strong" })
+      .closest("section");
+    expect(unavailable).toHaveFocus();
+    expect(screen.queryByRole("region", { name: /요청 req-001/u })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "요청 탐색기" })).not.toHaveAttribute(
+      "href",
+      expect.stringContaining("request_id="),
+    );
+  });
+
+  it("keeps opaque-reference and raw-ID selections in disjoint URL namespaces", async () => {
+    const referenceOwner = {
+      ...firstRow,
+      request_id: "[값 비공개]",
+      request_ref: firstRequestRef,
+      request_filterable: false,
+      model: "참조 소유 요청",
+    };
+    const rawIdOwner = {
+      ...secondRow,
+      request_id: firstRequestRef,
+      request_ref: secondRequestRef,
+      request_filterable: true,
+      model: "원시 ID 소유 요청",
+    };
+    vi.spyOn(apiClient, "request").mockResolvedValue({
+      ...response,
+      requests: [rawIdOwner, referenceOwner],
+    } as never);
+
+    const byReference = renderPage(
+      `/observability/traces?selected_ref=${encodeURIComponent(firstRequestRef)}`,
+    );
+    let detail = await screen.findByRole("region", { name: "1번째 요청 [값 비공개]" });
+    expect(within(detail).getByText("참조 소유 요청")).toBeVisible();
+    expect(within(detail).queryByText("원시 ID 소유 요청")).not.toBeInTheDocument();
+    byReference.unmount();
+
+    renderPage(`/observability/traces?selected_request=${encodeURIComponent(firstRequestRef)}`);
+    detail = await screen.findByRole("region", { name: `2번째 요청 ${firstRequestRef}` });
+    expect(within(detail).getByText("원시 ID 소유 요청")).toBeVisible();
+    expect(within(detail).queryByText("참조 소유 요청")).not.toBeInTheDocument();
+  });
+
   it("restores the selection trigger when browser history closes request details", async () => {
     vi.spyOn(apiClient, "request").mockResolvedValue(response as never);
     const user = userEvent.setup();
     renderPage();
 
     expect(await screen.findByRole("heading", { name: "요청 처리 흐름" })).toBeVisible();
-    const trigger = screen.getByRole("button", { name: "요청 req-001 흐름 선택" });
+    const trigger = screen.getByRole("button", { name: "1번째 요청 req-001 흐름 선택" });
     await user.click(trigger);
-    expect(screen.getByRole("region", { name: "요청 req-001" })).toHaveFocus();
+    expect(screen.getByRole("region", { name: "1번째 요청 req-001" })).toHaveFocus();
 
     await user.click(screen.getByRole("button", { name: "테스트 기록 뒤로" }));
     await waitFor(() => expect(screen.getByTestId("location")).not.toHaveTextContent("selected_request"));
     expect(trigger).toHaveFocus();
+  });
+
+  it("restores focus to the matching request after browser history changes the selection", async () => {
+    vi.spyOn(apiClient, "request").mockResolvedValue(response as never);
+    const user = userEvent.setup();
+    renderPage();
+
+    expect(await screen.findByRole("heading", { name: "요청 처리 흐름" })).toBeVisible();
+    const firstTrigger = screen.getByRole("button", { name: "1번째 요청 req-001 흐름 선택" });
+    const secondTrigger = screen.getByRole("button", { name: "2번째 요청 req-002 흐름 선택" });
+    await user.click(firstTrigger);
+    await user.click(secondTrigger);
+    expect(screen.getByRole("region", { name: "2번째 요청 req-002" })).toHaveFocus();
+
+    await user.click(screen.getByRole("button", { name: "테스트 기록 뒤로" }));
+    await waitFor(() => expect(screen.getByTestId("location")).toHaveTextContent("selected_request=req-001"));
+    expect(screen.getByRole("region", { name: "1번째 요청 req-001" })).toHaveFocus();
+
+    await user.click(screen.getByRole("button", { name: "요청 상세 닫기" }));
+    await waitFor(() => expect(firstTrigger).toHaveFocus());
+    expect(secondTrigger).not.toHaveFocus();
   });
 
   it("restores URL filters, selects a safe request detail and pages without retaining the selection", async () => {
@@ -229,6 +412,82 @@ describe("TracePage", () => {
     await user.click(screen.getByRole("button", { name: "다음" }));
     expect(screen.getByTestId("location")).toHaveTextContent(`cursor=${nextCursor}`);
     expect(screen.getByTestId("location")).not.toHaveTextContent("selected_request");
+    await waitFor(() => expect(screen.getByRole("heading", { name: "추적 조회 결과" })).toHaveFocus());
+  });
+
+  it("페이지 이동이 최종 실패하면 오류 제목으로 포커스를 옮긴다", async () => {
+    vi.spyOn(apiClient, "request")
+      .mockResolvedValueOnce(response as never)
+      .mockRejectedValueOnce(
+        new AppError("페이지 이동 실패", {
+          kind: "http",
+          requestId: "gateway-trace-page-error",
+        }),
+      );
+    const user = userEvent.setup();
+    renderPage();
+
+    expect(await screen.findByRole("heading", { name: "요청 처리 흐름" })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "다음" }));
+
+    const errorHeading = await screen.findByRole("heading", {
+      name: "추적 요청 흐름을 불러오지 못했습니다.",
+    });
+    await waitFor(() => expect(errorHeading).toHaveFocus());
+    expect(screen.getByText("요청 ID: gateway-trace-page-error")).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "테스트 기록 뒤로" }));
+    expect(await screen.findByRole("heading", { name: "요청 처리 흐름" })).toBeVisible();
+    await waitFor(() => expect(screen.getByRole("heading", { name: "추적 조회 결과" })).toHaveFocus());
+  });
+
+  it("상세가 열린 페이지 이동 중에는 제목을 건너뛰고 완료된 결과로 포커스를 옮긴다", async () => {
+    let resolveNextPage: ((value: AppRequestsResponse) => void) | undefined;
+    vi.spyOn(apiClient, "request")
+      .mockResolvedValueOnce(response as never)
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveNextPage = resolve as (value: AppRequestsResponse) => void;
+          }) as never,
+      );
+    const user = userEvent.setup();
+    renderPage();
+
+    const detailTrigger = await screen.findByRole("button", {
+      name: "1번째 요청 req-001 흐름 선택",
+    });
+    await user.click(detailTrigger);
+    expect(screen.getByRole("region", { name: "1번째 요청 req-001" })).toHaveFocus();
+    const pageHeading = screen.getByRole("heading", { name: "추적 탐색기" });
+    const pageHeadingFocus = vi.spyOn(pageHeading, "focus");
+
+    await user.click(screen.getByRole("button", { name: "다음" }));
+    await waitFor(() => expect(screen.getByTestId("location")).toHaveTextContent(`cursor=${nextCursor}`));
+    await waitFor(() =>
+      expect(screen.queryByRole("region", { name: "1번째 요청 req-001" })).not.toBeInTheDocument(),
+    );
+    expect(pageHeadingFocus).not.toHaveBeenCalled();
+    expect(pageHeading).not.toHaveFocus();
+
+    expect(resolveNextPage).toBeDefined();
+    await act(async () => {
+      resolveNextPage?.({
+        ...response,
+        requests: [
+          {
+            ...firstRow,
+            request_id: "req-page-2",
+            request_ref: `req_${"z".repeat(22)}.${"z".repeat(21)}`,
+          },
+        ],
+        previous_cursor: nextCursor,
+        next_cursor: undefined,
+      });
+    });
+
+    await waitFor(() => expect(screen.getByRole("heading", { name: "추적 조회 결과" })).toHaveFocus());
+    expect(pageHeadingFocus).not.toHaveBeenCalled();
   });
 
   it("represents exact status, custom limit and RFC3339 bounds without changing them on submit", async () => {
@@ -278,7 +537,7 @@ describe("TracePage", () => {
     expect(await screen.findByRole("heading", { name: "요청 처리 흐름" })).toBeVisible();
     const modelFilter = screen.getByLabelText("모델");
     await user.type(modelFilter, "작성 중인 모델");
-    await user.click(screen.getByRole("button", { name: "요청 req-001 상세 보기" }));
+    await user.click(screen.getByRole("button", { name: "1번째 요청 req-001 상세 보기" }));
 
     expect(screen.getByLabelText("모델")).toHaveValue("작성 중인 모델");
     await user.click(screen.getByRole("button", { name: "요청 상세 닫기" }));
@@ -430,17 +689,27 @@ describe("TracePage", () => {
     vi.spyOn(apiClient, "request").mockResolvedValue({
       ...response,
       requests: [
-        { ...firstRow, request_id: "req-unknown-zero", status_code: 0 },
-        { ...firstRow, request_id: "req-unknown-high", status_code: 600 },
+        {
+          ...firstRow,
+          request_id: "req-unknown-zero",
+          request_ref: `req_${"e".repeat(22)}.${"e".repeat(21)}`,
+          status_code: 0,
+        },
+        {
+          ...firstRow,
+          request_id: "req-unknown-high",
+          request_ref: `req_${"f".repeat(22)}.${"f".repeat(21)}`,
+          status_code: 600,
+        },
       ],
     } as never);
     renderPage();
 
     const zeroTimelineTrigger = await screen.findByRole("button", {
-      name: "요청 req-unknown-zero 흐름 선택",
+      name: "1번째 요청 req-unknown-zero 흐름 선택",
     });
     const highTimelineTrigger = screen.getByRole("button", {
-      name: "요청 req-unknown-high 흐름 선택",
+      name: "2번째 요청 req-unknown-high 흐름 선택",
     });
     expect(within(zeroTimelineTrigger).getByText("HTTP 0")).toHaveClass("badge-muted");
     expect(within(highTimelineTrigger).getByText("HTTP 600")).toHaveClass("badge-muted");
@@ -506,12 +775,12 @@ describe("TracePage", () => {
     const user = userEvent.setup();
     renderPage();
 
-    expect(await screen.findByRole("button", { name: "요청 req-001 흐름 선택" })).toBeVisible();
+    expect(await screen.findByRole("button", { name: "1번째 요청 req-001 흐름 선택" })).toBeVisible();
     await user.click(screen.getByRole("button", { name: "새로고침" }));
     expect(await screen.findByText("갱신에 실패해 마지막 정상 데이터를 표시합니다.")).toBeVisible();
     expect(screen.getByText("요청 ID: gateway-request-1")).toBeVisible();
     expect(screen.queryByText("원시 오류를 표시하면 안 됩니다.")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "요청 req-001 흐름 선택" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "1번째 요청 req-001 흐름 선택" })).toBeVisible();
     expect(request).toHaveBeenCalledTimes(2);
   });
 

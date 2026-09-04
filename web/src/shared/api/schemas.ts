@@ -34,6 +34,7 @@ import type {
   SsoStatusResponse as GeneratedSsoStatusResponse,
   UiBootstrapResponse as GeneratedUiBootstrapResponse,
 } from "@/shared/api/generated";
+import { appRequestRefPattern } from "@/shared/api/app-request-ref";
 import { providerRefPattern } from "@/shared/api/provider-ref";
 
 export const authUserSchema = z.object({
@@ -594,43 +595,85 @@ export const modelUsageTagsResponseSchema = z
   .object({ tags: z.array(modelUsageTagSchema) })
   .strict() satisfies z.ZodType<GeneratedModelUsageTagsResponse>;
 
+const appRequestSummaryV1Shape = {
+  request_id: utf8BoundedString(512).min(1),
+  trace_id: utf8BoundedString(512),
+  session_id: utf8BoundedString(512),
+  api_key_id: utf8BoundedString(512),
+  ip: utf8BoundedString(128),
+  method: utf8BoundedString(32),
+  model: utf8BoundedString(256),
+  provider_ref: z.string().regex(providerRefPattern),
+  provider_display: utf8BoundedString(256),
+  endpoint: utf8BoundedString(512),
+  stream: z.boolean(),
+  status_code: z.number().int().min(0).max(999),
+  latency_ms: appRequestSafeIntegerSchema,
+  first_chunk_ms: appRequestSafeIntegerSchema,
+  prompt_tokens: appRequestCountSchema,
+  completion_tokens: appRequestCountSchema,
+  total_tokens: appRequestCountSchema,
+  cached_tokens: appRequestCountSchema,
+  reasoning_tokens: appRequestCountSchema,
+  estimated_cost: appRequestCostSchema,
+  currency: utf8BoundedString(16),
+  finish_reason: utf8BoundedString(256),
+  created_at: appRequestTimestampSchema,
+} as const;
+
+const appRequestSummaryV1Schema = z.object(appRequestSummaryV1Shape).strict();
+
 export const appRequestSummarySchema = z
   .object({
-    request_id: utf8BoundedString(512).min(1),
-    trace_id: utf8BoundedString(512),
-    session_id: utf8BoundedString(512),
-    api_key_id: utf8BoundedString(512),
-    ip: utf8BoundedString(128),
-    method: utf8BoundedString(32),
-    model: utf8BoundedString(256),
-    provider_ref: z.string().regex(providerRefPattern),
-    provider_display: utf8BoundedString(256),
-    endpoint: utf8BoundedString(512),
-    stream: z.boolean(),
-    status_code: z.number().int().min(0).max(999),
-    latency_ms: appRequestSafeIntegerSchema,
-    first_chunk_ms: appRequestSafeIntegerSchema,
-    prompt_tokens: appRequestCountSchema,
-    completion_tokens: appRequestCountSchema,
-    total_tokens: appRequestCountSchema,
-    cached_tokens: appRequestCountSchema,
-    reasoning_tokens: appRequestCountSchema,
-    estimated_cost: appRequestCostSchema,
-    currency: utf8BoundedString(16),
-    finish_reason: utf8BoundedString(256),
-    created_at: appRequestTimestampSchema,
+    ...appRequestSummaryV1Shape,
+    request_ref: z.string().regex(appRequestRefPattern),
+    request_filterable: z.boolean(),
+    trace_filterable: z.boolean(),
   })
   .strict() satisfies z.ZodType<GeneratedAppRequestSummary>;
 
-export const appRequestsResponseSchema = z
-  .object({
-    requests: z.array(appRequestSummarySchema).max(200),
-    limit: z.number().int().min(1).max(200),
-    next_cursor: utf8BoundedString(4096).min(1).optional(),
-    previous_cursor: utf8BoundedString(4096).min(1).optional(),
-    generated_at: appRequestTimestampSchema,
-  })
+const appRequestsEnvelopeShape = {
+  limit: z.number().int().min(1).max(200),
+  next_cursor: utf8BoundedString(4096).min(1).optional(),
+  previous_cursor: utf8BoundedString(4096).min(1).optional(),
+  generated_at: appRequestTimestampSchema,
+} as const;
+
+const appRequestsV2ResponseSchema = z
+  .object({ requests: z.array(appRequestSummarySchema).max(200), ...appRequestsEnvelopeShape })
   .strict() satisfies z.ZodType<GeneratedAppRequestsResponse>;
+
+const appRequestsV1ResponseSchema = z
+  .object({ requests: z.array(appRequestSummaryV1Schema).max(200), ...appRequestsEnvelopeShape })
+  .strict();
+
+const legacyRequestRefSuffix = "0".repeat(21);
+
+function legacyRequestRef(index: number): string {
+  const ordinal = index.toString(36).padStart(22, "0");
+  return `req_${ordinal}.${legacyRequestRefSuffix}`;
+}
+
+// During a non-sticky rolling deployment, a v0.83 UI request can reach a v0.82
+// pod after bootstrap. Decode that already-safe projection conservatively: the
+// list remains usable, while identity-dependent filters and trace handoff stay
+// disabled until a v2 response arrives.
+export const appRequestsResponseSchema = z.union([
+  appRequestsV2ResponseSchema.transform((response) => ({
+    ...response,
+    request_contract_version: 2 as const,
+  })),
+  appRequestsV1ResponseSchema.transform((response) => ({
+    ...response,
+    request_contract_version: 1 as const,
+    requests: response.requests.map((request, index) => ({
+      ...request,
+      request_ref: legacyRequestRef(index),
+      request_filterable: false,
+      trace_filterable: false,
+    })),
+  })),
+]);
 
 export const appRequestsQuerySchema = z
   .object({

@@ -13,6 +13,7 @@ import {
   buildTraceQuery,
   formatTraceDate,
   formatTraceDuration,
+  orderTraceRequests,
   requestExplorerPath,
   selectedRequestFromSearch,
   traceFilterFormKey,
@@ -23,6 +24,8 @@ import { uiLabels } from "@/config/ui-labels";
 import { apiClient } from "@/shared/api/client";
 import { endpoints } from "@/shared/api/endpoints";
 import { isAppError } from "@/shared/api/error";
+import { appRequestsContractHeaders } from "@/shared/api/app-request-contract";
+import type { AppRequestSummary } from "@/shared/api/schemas";
 import { ErrorState, LoadingState } from "@/shared/components/state/PageStates";
 import { Badge } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
@@ -43,31 +46,60 @@ export function TracePage(): React.JSX.Element {
   const [searchParams, setSearchParams] = useSearchParams();
   const query = useMemo(() => buildTraceQuery(searchParams), [searchParams]);
   const selectedTimeZone = query.tz ?? "Asia/Seoul";
-  const selectedRequestId = selectedRequestFromSearch(searchParams);
+  const selectedRequestSelection = selectedRequestFromSearch(searchParams);
   const filterFormKey = traceFilterFormKey(searchParams);
   const detailRef = useRef<HTMLElement>(null);
   const pageHeadingRef = useRef<HTMLHeadingElement>(null);
-  const selectionTriggerRef = useRef<HTMLButtonElement | null>(null);
-  const previousSelectedRequestIdRef = useRef<string | undefined>(undefined);
+  const resultsHeadingRef = useRef<HTMLHeadingElement>(null);
+  const errorHeadingRef = useRef<HTMLHeadingElement>(null);
+  const selectionTriggersByKeyRef = useRef(new Map<string, HTMLButtonElement>());
+  const pendingPageFocusRef = useRef(false);
+  const pageErrorFocusedRef = useRef(false);
+  const pendingErrorActionFocusRef = useRef<"reset" | "retry" | undefined>(undefined);
+  const errorRetryButtonRef = useRef<HTMLButtonElement>(null);
+  const errorResetButtonRef = useRef<HTMLButtonElement>(null);
+  const previousSelectionKeyRef = useRef<string | undefined>(undefined);
 
   const result = useQuery({
     queryKey: ["admin", "requests", "trace-explorer", query],
     queryFn: ({ signal }) =>
       apiClient.request(endpoints.admin.requests, {
+        headers: appRequestsContractHeaders,
         query,
         signal,
         routeId: "observability.traces",
       }),
     placeholderData: keepPreviousData,
     staleTime: 10_000,
-    refetchInterval: interval,
+    refetchInterval: (traceQuery) =>
+      traceQuery.state.status === "error" && traceQuery.state.data === undefined ? false : interval,
     refetchIntervalInBackground: false,
   });
-  const selectionPresence = selectedRequestId
+  const requestIdentityAvailable = result.data?.request_contract_version === 2;
+  const selectedRequest =
+    selectedRequestSelection && requestIdentityAvailable
+      ? result.data?.requests.find((request) =>
+          selectedRequestSelection.kind === "ref"
+            ? request.request_ref === selectedRequestSelection.value
+            : request.request_filterable && request.request_id === selectedRequestSelection.value,
+        )
+      : undefined;
+  const selectedRequestRef = selectedRequest?.request_ref;
+  const selectedRequestOrdinal = selectedRequest
+    ? orderTraceRequests(result.data?.requests ?? []).findIndex(
+        (request) => request.request_ref === selectedRequest.request_ref,
+      ) + 1
+    : undefined;
+  const selectionKey = selectedRequestSelection
+    ? `${selectedRequestSelection.kind}:${selectedRequestSelection.value}`
+    : undefined;
+  const selectionPresence = selectedRequestSelection
     ? result.data
-      ? result.data.requests.some((request) => request.request_id === selectedRequestId)
-        ? "found"
-        : "missing"
+      ? requestIdentityAvailable
+        ? selectedRequest
+          ? "found"
+          : "missing"
+        : "unsupported"
       : "loading"
     : "none";
 
@@ -83,62 +115,110 @@ export function TracePage(): React.JSX.Element {
     [searchParams, setSearchParams],
   );
 
-  const selectRequest = useCallback(
-    (requestId: string, trigger: HTMLButtonElement): void => {
-      selectionTriggerRef.current = trigger;
-      if (selectedRequestId === requestId) {
-        detailRef.current?.focus();
-        return;
-      }
-      updateSearch({ selected_request: requestId }, false);
-    },
-    [selectedRequestId, updateSearch],
-  );
+  const selectRequest = (request: AppRequestSummary, trigger: HTMLButtonElement): void => {
+    const nextSelection = request.request_filterable
+      ? { kind: "id" as const, value: request.request_id }
+      : { kind: "ref" as const, value: request.request_ref };
+    const nextSelectionKey = `${nextSelection.kind}:${nextSelection.value}`;
+    selectionTriggersByKeyRef.current.set(nextSelectionKey, trigger);
+    if (selectionKey === nextSelectionKey) {
+      detailRef.current?.focus();
+      return;
+    }
+    updateSearch(
+      nextSelection.kind === "id"
+        ? { selected_ref: undefined, selected_request: nextSelection.value }
+        : { selected_ref: nextSelection.value, selected_request: undefined },
+      false,
+    );
+  };
 
   const clearSelectedRequest = useCallback((): void => {
-    updateSearch({ selected_request: undefined }, true);
+    updateSearch({ selected_ref: undefined, selected_request: undefined }, true);
   }, [updateSearch]);
 
   const forgetSelectionTrigger = useCallback((): void => {
-    selectionTriggerRef.current = null;
+    selectionTriggersByKeyRef.current.clear();
   }, []);
 
   useEffect(() => {
-    const previousSelectedRequestId = previousSelectedRequestIdRef.current;
-    previousSelectedRequestIdRef.current = selectedRequestId;
-    if (selectedRequestId) {
+    const previousSelectionKey = previousSelectionKeyRef.current;
+    previousSelectionKeyRef.current = selectionKey;
+    if (selectionKey) {
       if (selectionPresence !== "loading") detailRef.current?.focus();
       return;
     }
-    if (!previousSelectedRequestId) return;
-    const target = selectionTriggerRef.current;
-    selectionTriggerRef.current = null;
+    if (!previousSelectionKey) return;
+    if (pendingPageFocusRef.current) return;
+    const target = selectionTriggersByKeyRef.current.get(previousSelectionKey);
     if (target?.isConnected) target.focus();
     else pageHeadingRef.current?.focus();
-  }, [selectedRequestId, selectionPresence]);
+  }, [selectionKey, selectionPresence]);
 
-  if (result.isPending && !result.data) {
-    return <LoadingState label="추적 요청 흐름을 불러오는 중입니다." />;
-  }
+  useEffect(() => {
+    if (!pendingPageFocusRef.current || result.isFetching || result.isPlaceholderData) return;
+    if (resultsHeadingRef.current) {
+      pendingPageFocusRef.current = false;
+      pageErrorFocusedRef.current = false;
+      pendingErrorActionFocusRef.current = undefined;
+      resultsHeadingRef.current.focus();
+      return;
+    }
+    const errorActionTarget =
+      pendingErrorActionFocusRef.current === "retry"
+        ? errorRetryButtonRef.current
+        : pendingErrorActionFocusRef.current === "reset"
+          ? errorResetButtonRef.current
+          : undefined;
+    if (errorActionTarget) {
+      pendingErrorActionFocusRef.current = undefined;
+      errorActionTarget.focus();
+      return;
+    }
+    if (!pageErrorFocusedRef.current && errorHeadingRef.current) {
+      pageErrorFocusedRef.current = true;
+      errorHeadingRef.current.focus();
+    }
+  }, [
+    query.cursor,
+    result.dataUpdatedAt,
+    result.errorUpdatedAt,
+    result.isFetching,
+    result.isPlaceholderData,
+  ]);
+
   if (result.error && !result.data) {
     return (
       <ErrorState
+        headingRef={errorHeadingRef}
         title="추적 요청 흐름을 불러오지 못했습니다."
         message={safeAppErrorMessage(result.error, "추적 요청 흐름을 확인할 수 없습니다.")}
         requestId={isAppError(result.error) ? result.error.requestId : undefined}
         diagnosticCode={isAppError(result.error) ? result.error.code : undefined}
-        onRetry={() => void result.refetch()}
-        onReset={() => setSearchParams({}, { replace: false })}
+        onRetry={() => {
+          pendingPageFocusRef.current = true;
+          pendingErrorActionFocusRef.current = "retry";
+          void result.refetch();
+        }}
+        onReset={() => {
+          pendingPageFocusRef.current = true;
+          pendingErrorActionFocusRef.current = "reset";
+          setSearchParams({}, { replace: false });
+        }}
+        retryButtonRef={errorRetryButtonRef}
+        resetButtonRef={errorResetButtonRef}
         resetLabel="필터 초기화"
         showLegacy={showLegacyAdmin}
         legacyHref={legacyPath}
       />
     );
   }
+  if (result.isPending && !result.data) {
+    return <LoadingState label="추적 요청 흐름을 불러오는 중입니다." />;
+  }
 
   const data = result.data;
   const requests = data?.requests ?? [];
-  const selectedRequest = requests.find((request) => request.request_id === selectedRequestId);
   const requestedTraceId = query.trace_id;
   const averageLatency = requests.length
     ? requests.reduce((total, request) => total + request.latency_ms, 0) / requests.length
@@ -146,7 +226,10 @@ export function TracePage(): React.JSX.Element {
   const failedRequests = requests.filter(
     (request) => request.status_code >= 400 && request.status_code < 600,
   ).length;
-  const explorerHref = requestExplorerPath(query, selectedRequestId);
+  const explorerHref = requestExplorerPath(
+    query,
+    selectedRequest?.request_filterable ? selectedRequest.request_id : undefined,
+  );
 
   return (
     <div className="page-stack trace-page">
@@ -189,10 +272,12 @@ export function TracePage(): React.JSX.Element {
       />
 
       <p className="sr-only" role="status" aria-live="polite" aria-atomic="true">
-        {selectedRequestId
-          ? selectedRequest
-            ? `요청 ${selectedRequest.request_id} 상세가 열렸습니다.`
-            : "선택한 요청이 현재 페이지에 없습니다."
+        {selectedRequestSelection
+          ? selectionPresence === "unsupported"
+            ? "서버 업그레이드 중에는 요청 상세 연결을 사용할 수 없습니다."
+            : selectedRequest
+              ? `${selectedRequestOrdinal}번째 요청 ${selectedRequest.request_id} 상세가 열렸습니다.`
+              : "선택한 요청이 현재 페이지에 없습니다."
           : ""}
       </p>
 
@@ -227,6 +312,20 @@ export function TracePage(): React.JSX.Element {
           새 필터를 조회하는 동안 직전 결과를 표시합니다.
         </div>
       ) : null}
+      {data?.request_contract_version === 1 ? (
+        <div className="trace-contract-warning" role="status">
+          <div>
+            <strong>서버 배포 버전을 맞추는 중입니다.</strong>
+            <p>
+              요청 흐름은 계속 조회할 수 있지만 요청 상세 연결은 모든 서버가 v0.83.0 이상이 된 뒤 제공됩니다.
+            </p>
+          </div>
+        </div>
+      ) : null}
+
+      <h2 ref={resultsHeadingRef} id="trace-results-title" className="sr-only" tabIndex={-1}>
+        추적 조회 결과
+      </h2>
 
       {requests.length ? (
         <>
@@ -251,14 +350,16 @@ export function TracePage(): React.JSX.Element {
 
           <TraceTimeline
             requests={requests}
-            selectedRequestId={selectedRequestId}
+            selectionEnabled={requestIdentityAvailable}
+            selectedRequestRef={selectedRequestRef}
             timeZone={selectedTimeZone}
             onSelect={selectRequest}
           />
 
           <TraceRequestTable
             requests={requests}
-            selectedRequestId={selectedRequestId}
+            selectionEnabled={requestIdentityAvailable}
+            selectedRequestRef={selectedRequestRef}
             timeZone={selectedTimeZone}
             onSelect={selectRequest}
           />
@@ -280,8 +381,16 @@ export function TracePage(): React.JSX.Element {
                 size="small"
                 disabled={!data?.previous_cursor || result.isFetching}
                 onClick={() => {
+                  pendingPageFocusRef.current = true;
                   forgetSelectionTrigger();
-                  updateSearch({ cursor: data?.previous_cursor, selected_request: undefined }, false);
+                  updateSearch(
+                    {
+                      cursor: data?.previous_cursor,
+                      selected_ref: undefined,
+                      selected_request: undefined,
+                    },
+                    false,
+                  );
                 }}
               >
                 이전
@@ -291,8 +400,16 @@ export function TracePage(): React.JSX.Element {
                 size="small"
                 disabled={!data?.next_cursor || result.isFetching}
                 onClick={() => {
+                  pendingPageFocusRef.current = true;
                   forgetSelectionTrigger();
-                  updateSearch({ cursor: data?.next_cursor, selected_request: undefined }, false);
+                  updateSearch(
+                    {
+                      cursor: data?.next_cursor,
+                      selected_ref: undefined,
+                      selected_request: undefined,
+                    },
+                    false,
+                  );
                 }}
               >
                 다음
@@ -315,7 +432,9 @@ export function TracePage(): React.JSX.Element {
       <TraceRequestDetails
         request={selectedRequest}
         detailRef={detailRef}
-        selectedRequestId={selectedRequestId}
+        selectionOrdinal={selectedRequestOrdinal}
+        selectionActive={selectedRequestSelection !== undefined}
+        selectionUnavailable={selectionPresence === "unsupported"}
         timeZone={selectedTimeZone}
         requestExplorerHref={explorerHref}
         onClear={clearSelectedRequest}
