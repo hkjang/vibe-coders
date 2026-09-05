@@ -7,16 +7,17 @@ package text2sql
 import (
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
 // ValidateOptions tunes SQL validation.
 type ValidateOptions struct {
-	DefaultLimit         int      // when > 0, a LIMIT is appended to limit-less SELECTs
+	DefaultLimit         int      // when > 0, a LIMIT is appended to SELECTs whose own result is unbounded
 	AllowedTables        []string // when non-empty, every referenced table must be in this set
 	BlockedColumns       []string // sensitive columns that must not appear anywhere in the SQL
 	AggregateOnlyColumns []string // columns that may appear ONLY inside an aggregate function
-	MaxLimit             int      // when > 0, an explicit LIMIT larger than this is rejected
+	MaxLimit             int      // when > 0, any explicit LIMIT larger than this is rejected
 }
 
 // ValidationResult is the outcome of validating a generated SQL statement.
@@ -43,8 +44,11 @@ var dangerousFunctions = []string{
 }
 
 var (
-	wordRe  = regexp.MustCompile(`[a-zA-Z_][a-zA-Z0-9_]*`)
-	limitRe = regexp.MustCompile(`(?is)\blimit\s+\d+`)
+	wordRe = regexp.MustCompile(`[a-zA-Z_][a-zA-Z0-9_]*`)
+	// The row count is captured so it can be parsed straight out of the match: \s+ spans
+	// newlines, and an LLM that breaks the line after LIMIT produced a match that
+	// fmt.Sscanf("limit %d") could not read back, silently yielding 0.
+	limitRe = regexp.MustCompile(`(?is)\blimit\s+(\d+)`)
 	// Captures the table reference after FROM/JOIN, allowing double-quoted and
 	// schema-qualified identifiers (e.g. FROM "Sales"."Orders" o). A leading "(" is
 	// not matched, so subquery sources are skipped.
@@ -232,22 +236,76 @@ func ValidateSQL(raw string, opts ValidateOptions) ValidationResult {
 
 	result := ValidationResult{OK: true, SQL: sql, Tables: tables}
 
-	// Enforce an explicit-LIMIT ceiling.
+	limits := statementLimits(lower)
+
+	// Enforce the ceiling on every LIMIT, not just the first one in the text. Reading only
+	// the first match let a subquery answer for the outer query, because a subquery is
+	// written before the LIMIT that bounds the statement.
 	if opts.MaxLimit > 0 {
-		if m := limitRe.FindString(lower); m != "" {
-			var n int
-			fmt.Sscanf(strings.ToLower(m), "limit %d", &n)
-			if n > opts.MaxLimit {
-				return ValidationResult{Reason: fmt.Sprintf("LIMIT %d exceeds max %d", n, opts.MaxLimit)}
+		for _, l := range limits {
+			if l.overflow || l.rows > opts.MaxLimit {
+				return ValidationResult{Reason: fmt.Sprintf("LIMIT %s exceeds max %d", l.text, opts.MaxLimit)}
 			}
 		}
 	}
-	// Inject a default LIMIT when none is present.
-	if opts.DefaultLimit > 0 && !limitRe.MatchString(lower) {
+	// Inject a default LIMIT when the statement's own result is unbounded. A LIMIT inside a
+	// subquery or a CTE body bounds that body alone, so leaving the outer query untouched
+	// on account of it hands the database an unbounded scan (and an ORDER BY over the whole
+	// table) for exactly the queries the default is there to bound.
+	if opts.DefaultLimit > 0 && !hasTopLevelLimit(limits) {
 		result.SQL = result.SQL + fmt.Sprintf("\nLIMIT %d", opts.DefaultLimit)
 		result.LimitAdded = true
 	}
 	return result
+}
+
+// sqlLimit is one LIMIT found in a statement.
+type sqlLimit struct {
+	text     string // the row count as written, for the rejection message
+	rows     int
+	overflow bool // the literal does not fit in an int, so it cannot be shown to be in range
+	topLevel bool // sits outside every parenthesis, i.e. bounds the statement's own result
+}
+
+// statementLimits lists every LIMIT in already-scrubbed SQL, marking the ones that are not
+// nested inside a subquery or a CTE body.
+func statementLimits(stripped string) []sqlLimit {
+	depths := parenDepths(stripped)
+	var out []sqlLimit
+	for _, loc := range limitRe.FindAllStringSubmatchIndex(stripped, -1) {
+		text := stripped[loc[2]:loc[3]]
+		rows, err := strconv.Atoi(text)
+		out = append(out, sqlLimit{text: text, rows: rows, overflow: err != nil, topLevel: depths[loc[0]] == 0})
+	}
+	return out
+}
+
+func hasTopLevelLimit(limits []sqlLimit) bool {
+	for _, l := range limits {
+		if l.topLevel {
+			return true
+		}
+	}
+	return false
+}
+
+// parenDepths returns, for each byte of the SQL, how many parentheses are open before it.
+// Parentheses inside string literals and comments are already gone by the time this runs.
+func parenDepths(stripped string) []int {
+	out := make([]int, len(stripped))
+	depth := 0
+	for i := 0; i < len(stripped); i++ {
+		out[i] = depth
+		switch stripped[i] {
+		case '(':
+			depth++
+		case ')':
+			if depth > 0 {
+				depth--
+			}
+		}
+	}
+	return out
 }
 
 // structuralCheck does a lightweight in-tree structural validation on already-scrubbed
