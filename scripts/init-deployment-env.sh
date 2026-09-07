@@ -36,7 +36,7 @@ ENV_DIR="$(dirname "$ENV_FILE")"
 install -d -m 0700 "$ENV_DIR" || fail "cannot create $ENV_DIR"
 [[ -d "$ENV_DIR" && ! -L "$ENV_DIR" ]] || fail "$ENV_DIR must be a real directory, not a symbolic link"
 [[ ! -L "$ENV_FILE" ]] || fail "$ENV_FILE must not be a symbolic link"
-gateway_version="${GATEWAY_VERSION:-v0.83.1}"
+gateway_version="${GATEWAY_VERSION:-v0.83.2}"
 [[ "$gateway_version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]] || fail "GATEWAY_VERSION must be an exact v-prefixed release"
 ui_app_enabled="${UI_APP_ENABLED:-false}"
 case "$ui_app_enabled" in
