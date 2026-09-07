@@ -103,9 +103,15 @@ func (s *Server) handleMattermostConfig(w http.ResponseWriter, r *http.Request) 
 				events = append(events, e)
 			}
 		}
+		// The webhook URL carries the token that authorises posting into the
+		// channel, and every admin:read role can read this endpoint. Report
+		// whether one is configured the way the settings API masks secrets,
+		// rather than handing the token back to the caller.
+		maskedURL, urlSet := settingMaskedValue(cfg.webhookURL, true)
 		writeJSON(w, http.StatusOK, map[string]any{
-			"enabled": cfg.enabled, "webhook_url": cfg.webhookURL, "channel": cfg.channel,
-			"events": events, "available_events": mattermostEventCategories,
+			"enabled": cfg.enabled, "webhook_url": maskedURL, "webhook_url_set": urlSet,
+			"channel": cfg.channel,
+			"events":  events, "available_events": mattermostEventCategories,
 		})
 	case http.MethodPost:
 		var p struct {

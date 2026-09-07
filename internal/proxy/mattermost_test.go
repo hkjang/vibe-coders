@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -88,4 +89,60 @@ func indexOf(s, sub string) int {
 		}
 	}
 	return -1
+}
+
+// The webhook URL embeds the token that authorises posting into the channel, and
+// every admin:read role can read this endpoint, so the configured URL must never
+// come back in the response.
+func TestMattermostConfigMasksTheWebhookToken(t *testing.T) {
+	db := openTestStore(t)
+	defer db.Close()
+	logger := store.NewAsyncLogger(db, 32, filepath.Join(t.TempDir(), "fallback.ndjson"))
+	logger.Start()
+	defer logger.Stop(context.Background())
+	server, err := NewServer(testConfig("http://upstream.invalid", "secret"), db, logger, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+
+	read := func() map[string]any {
+		t.Helper()
+		recorder := httptest.NewRecorder()
+		server.handleMattermostConfig(recorder, httptest.NewRequest(http.MethodGet, "/admin/notifications/mattermost", nil))
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("status = %d", recorder.Code)
+		}
+		var body map[string]any
+		if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		return body
+	}
+
+	body := read()
+	if body["webhook_url"] != "" || body["webhook_url_set"] != false {
+		t.Fatalf("unset webhook must report itself as unset: %#v", body)
+	}
+
+	const secretURL = "https://mattermost.example/hooks/tok_do_not_leak_me"
+	if err := db.SetFlag(ctx, store.RuntimeFlag{Key: "mattermost_webhook_url", Value: secretURL, UpdatedAt: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	server.invalidateMattermostCache()
+
+	body = read()
+	if body["webhook_url_set"] != true {
+		t.Fatalf("configured webhook must report itself as set: %#v", body)
+	}
+	if url, _ := body["webhook_url"].(string); url != "********" {
+		t.Fatalf("webhook_url = %q, want the masked placeholder", url)
+	}
+	encoded, err := json.Marshal(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "tok_do_not_leak_me") {
+		t.Fatalf("response leaked the webhook token: %s", encoded)
+	}
 }
