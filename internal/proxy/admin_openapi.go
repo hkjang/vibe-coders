@@ -280,9 +280,8 @@ var apiEndpoints = []apiEndpoint{
 	{"/admin/text2sql/promote", []string{"post"}, "text2sql", "Promote question → report/golden/glossary", false},
 	{"/admin/text2sql/reports", []string{"get", "post", "delete"}, "text2sql", "Saved reports (schedule/MM delivery)", false},
 	{"/admin/text2sql/features", []string{"get", "post"}, "text2sql", "Feature toggles", false},
-	{"/admin/text2sql/golden", []string{"get", "post", "delete"}, "text2sql", "Golden queries (+ /run, /{id})", false},
+	{"/admin/text2sql/golden", []string{"get", "post", "delete"}, "text2sql", "Golden queries; delete one with ?id=", false},
 	{"/admin/text2sql/golden/run", []string{"post"}, "text2sql", "Run every golden query and report pass/fail", false},
-	{"/admin/text2sql/golden/{id}", []string{"delete"}, "text2sql", "Delete one golden query", false},
 
 	// ---- admin: OKF ----
 	{"/admin/okf/documents", []string{"get", "post"}, "okf", "List / upsert OKF documents", false},

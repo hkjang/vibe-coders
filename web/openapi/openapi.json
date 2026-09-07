@@ -13068,7 +13068,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Golden queries (+ /run, /{id})",
+        "summary": "Golden queries; delete one with ?id=",
         "tags": [
           "text2sql"
         ]
@@ -13085,7 +13085,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Golden queries (+ /run, /{id})",
+        "summary": "Golden queries; delete one with ?id=",
         "tags": [
           "text2sql"
         ]
@@ -13102,7 +13102,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Golden queries (+ /run, /{id})",
+        "summary": "Golden queries; delete one with ?id=",
         "tags": [
           "text2sql"
         ]
@@ -13122,35 +13122,6 @@
           }
         ],
         "summary": "Run every golden query and report pass/fail",
-        "tags": [
-          "text2sql"
-        ]
-      }
-    },
-    "/admin/text2sql/golden/{id}": {
-      "delete": {
-        "operationId": "delete__admin_text2sql_golden_id",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK"
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "summary": "Delete one golden query",
         "tags": [
           "text2sql"
         ]

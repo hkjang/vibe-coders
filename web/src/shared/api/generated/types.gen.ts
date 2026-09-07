@@ -7601,22 +7601,6 @@ export type PostAdminText2SqlGoldenRunResponses = {
     200: unknown;
 };
 
-export type DeleteAdminText2SqlGoldenIdData = {
-    body?: never;
-    path: {
-        id: string;
-    };
-    query?: never;
-    url: '/admin/text2sql/golden/{id}';
-};
-
-export type DeleteAdminText2SqlGoldenIdResponses = {
-    /**
-     * OK
-     */
-    200: unknown;
-};
-
 export type GetAdminText2SqlHealthcheckData = {
     body?: never;
     path?: never;

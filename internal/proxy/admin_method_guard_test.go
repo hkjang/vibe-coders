@@ -178,3 +178,56 @@ func TestUnknownSubActionDoesNotFallThroughToTheParentResource(t *testing.T) {
 		}
 	}
 }
+
+// The catalog documented DELETE /admin/text2sql/golden/{id}, but the server has always
+// deleted by ?id= and answered a path segment with the whole collection. Following the
+// documented call therefore deleted nothing.
+func TestText2SQLGoldenIsAddressedByQueryNotPath(t *testing.T) {
+	proxy, db := newMethodGuardServer(t)
+	ctx := context.Background()
+	golden := store.Text2SQLGoldenQuery{
+		ID: "t2sg_guard", Name: "guard", Question: "q", ExpectedSQL: "SELECT 1", Enabled: true,
+	}
+	if err := db.UpsertText2SQLGoldenQuery(ctx, golden); err != nil {
+		t.Fatal(err)
+	}
+	stillThere := func() bool {
+		list, err := db.ListText2SQLGoldenQueries(ctx, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, g := range list {
+			if g.ID == golden.ID {
+				return true
+			}
+		}
+		return false
+	}
+
+	// A path segment is not an address here, for a read or for a delete.
+	for _, method := range []string{http.MethodGet, http.MethodDelete} {
+		resp := requestMethod(t, method, proxy.URL+"/admin/text2sql/golden/"+golden.ID)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusNotFound {
+			t.Fatalf("%s /admin/text2sql/golden/{id} status = %d, want 404", method, resp.StatusCode)
+		}
+	}
+	if !stillThere() {
+		t.Fatal("addressing the golden query by path removed it")
+	}
+	for _, ep := range apiEndpoints {
+		if ep.path == "/admin/text2sql/golden/{id}" {
+			t.Fatal("the catalog still documents a path-addressed golden query the server does not serve")
+		}
+	}
+
+	// The supported spelling still works.
+	deleted := requestMethod(t, http.MethodDelete, proxy.URL+"/admin/text2sql/golden?id="+golden.ID)
+	deleted.Body.Close()
+	if deleted.StatusCode != http.StatusOK {
+		t.Fatalf("DELETE /admin/text2sql/golden?id= status = %d, want 200", deleted.StatusCode)
+	}
+	if stillThere() {
+		t.Fatal("DELETE /admin/text2sql/golden?id= left the golden query in place")
+	}
+}

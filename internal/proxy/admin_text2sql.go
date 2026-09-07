@@ -1472,8 +1472,15 @@ func (s *Server) handleText2SQLGolden(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// /admin/text2sql/golden/run — regression replay.
-	if strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/admin/text2sql/golden"), "/") == "/run" {
+	rest := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/admin/text2sql/golden"), "/")
+	if rest == "/run" {
 		s.handleText2SQLGoldenRun(w, r)
+		return
+	}
+	// The collection is addressed by ?id=, never by a path segment. Answering
+	// /golden/{anything} with the whole list would look like a single-item read.
+	if rest != "" {
+		writeOpenAIError(w, http.StatusNotFound, "unknown action", "invalid_request_error", "not_found")
 		return
 	}
 	switch r.Method {
