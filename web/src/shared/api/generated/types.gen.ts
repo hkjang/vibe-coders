@@ -6144,6 +6144,20 @@ export type GetAdminRoutingLearningResponses = {
     200: unknown;
 };
 
+export type GetAdminRoutingLearningAutoData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/admin/routing/learning/auto';
+};
+
+export type GetAdminRoutingLearningAutoResponses = {
+    /**
+     * OK
+     */
+    200: unknown;
+};
+
 export type PostAdminRoutingLearningAutoData = {
     body?: never;
     path?: never;

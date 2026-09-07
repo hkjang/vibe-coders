@@ -224,7 +224,7 @@ var apiEndpoints = []apiEndpoint{
 	{"/admin/routing/decisions/{id}", []string{"get"}, "routing", "Routing decision detail", false},
 	{"/admin/routing/health", []string{"get"}, "routing", "Provider routing health", false},
 	{"/admin/routing/learning", []string{"get"}, "routing", "Routing learning suggestions", false},
-	{"/admin/routing/learning/auto", []string{"post"}, "routing", "Apply auto routing learning", false},
+	{"/admin/routing/learning/auto", []string{"get", "post"}, "routing", "Auto routing learning state (GET); enable it or set the sample floor (POST)", false},
 	{"/admin/routing/domain-decisions", []string{"get"}, "routing", "Domain routing decisions and signals", false},
 	{"/admin/routing/domain-examples", []string{"get"}, "routing", "Auto-promoted domain routing examples", false},
 	{"/admin/routing/domain-review", []string{"get"}, "routing", "Domain routing review queue", false},

@@ -3,6 +3,7 @@ package proxy
 import (
 	"net/http"
 	"strconv"
+	"strings"
 )
 
 // handleSystemErrors serves the system errors log API.
@@ -13,8 +14,16 @@ func (s *Server) handleSystemErrors(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
 	}
+	// Both /admin/system-errors and /admin/system-errors/clear reach this handler. The
+	// clear alias exists only to be posted to, so reading it must not quietly answer with
+	// the error list under a URL that reads like an action.
+	clearAlias := strings.HasSuffix(r.URL.Path, "/clear")
 	switch r.Method {
 	case http.MethodGet:
+		if clearAlias {
+			writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+			return
+		}
 		limit := 100
 		if lStr := r.URL.Query().Get("limit"); lStr != "" {
 			if parsed, err := strconv.Atoi(lStr); err == nil && parsed > 0 {

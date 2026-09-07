@@ -822,6 +822,7 @@ export const openApiOperations = [
   { method: "POST", path: "/admin/routing/failover-drill" },
   { method: "GET", path: "/admin/routing/health" },
   { method: "GET", path: "/admin/routing/learning" },
+  { method: "GET", path: "/admin/routing/learning/auto" },
   { method: "POST", path: "/admin/routing/learning/auto" },
   { method: "GET", path: "/admin/routing/pattern-conflicts" },
   { method: "POST", path: "/admin/routing/pattern-conflicts" },

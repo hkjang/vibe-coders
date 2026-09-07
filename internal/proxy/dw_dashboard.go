@@ -566,6 +566,13 @@ func (s *Server) handleDWDashboardRefresh(w http.ResponseWriter, r *http.Request
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
 	}
+	// Dropping the cache and recording who did it is a write, so it needs an explicit
+	// request for it. Without this guard a prefetch of the URL emptied the cache and left
+	// an audit row behind, and both consoles already post here.
+	if r.Method != http.MethodPost {
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+		return
+	}
 	cleared := 0
 	if s.dwCache != nil {
 		cleared = s.dwCache.clear()

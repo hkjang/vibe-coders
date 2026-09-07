@@ -11016,6 +11016,23 @@
       }
     },
     "/admin/routing/learning/auto": {
+      "get": {
+        "operationId": "get__admin_routing_learning_auto",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Auto routing learning state (GET); enable it or set the sample floor (POST)",
+        "tags": [
+          "routing"
+        ]
+      },
       "post": {
         "operationId": "post__admin_routing_learning_auto",
         "responses": {
@@ -11028,7 +11045,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Apply auto routing learning",
+        "summary": "Auto routing learning state (GET); enable it or set the sample floor (POST)",
         "tags": [
           "routing"
         ]
