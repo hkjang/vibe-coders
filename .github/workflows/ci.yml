@@ -235,7 +235,9 @@ jobs:
           test "$(go env GOVERSION)" = "go${GO_VERSION}"
           test "$(node --version)" = "v${NODE_VERSION}"
           test "$(pnpm --version)" = "${PNPM_VERSION}"
-          test "$(corepack pnpm --version)" = "${PNPM_VERSION}"
+          # corepack resolves packageManager from the current directory; the repo root has
+          # no package.json, so from there it would fetch whatever pnpm is newest instead.
+          test "$(cd web && corepack pnpm --version)" = "${PNPM_VERSION}"
           test "$(cat web/.node-version)" = "${NODE_VERSION}"
           manifest_package_manager="$(node -p "require('./web/package.json').packageManager")"
           test "$manifest_package_manager" = "pnpm@${PNPM_VERSION}"

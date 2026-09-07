@@ -30,7 +30,9 @@ if [[ "$(go env GOVERSION)" != "go${GO_VERSION}" ]]; then
     echo "Go ${GO_VERSION} is required for the canonical SBOM (got $(go env GOVERSION))" >&2
     exit 1
 fi
-CI=true corepack pnpm --dir web install --frozen-lockfile
+# Run corepack inside web/ so its packageManager pin selects the pnpm version; from the
+# repo root corepack has no package.json to consult and picks the newest release.
+(cd web && CI=true corepack pnpm install --frozen-lockfile)
 go build -trimpath \
     -ldflags "-X vibe-coders/internal/proxy.AppVersion=${VERSION}" \
     -o "$SBOM_TMP_DIR/gateway" \
@@ -40,7 +42,7 @@ SYFT_FORMAT_PRETTY=true "$SYFT_BIN" "file:$SBOM_TMP_DIR/gateway" \
     -o "spdx-json@2.3=$SBOM_TMP_DIR/go.spdx.json" >/dev/null
 SYFT_FORMAT_PRETTY=true "$SYFT_BIN" "file:$REPO_ROOT/web/pnpm-lock.yaml" \
     -o "spdx-json@2.3=$SBOM_TMP_DIR/npm.spdx.json" >/dev/null
-corepack pnpm --dir web licenses list --json >"$SBOM_TMP_DIR/npm-licenses.json"
+(cd web && corepack pnpm licenses list --json) >"$SBOM_TMP_DIR/npm-licenses.json"
 
 node scripts/merge-source-sbom.mjs \
     "$VERSION" \
