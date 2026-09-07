@@ -28,7 +28,7 @@ func TestProvisionAuthIdentityIsAtomicWhenIdentityInsertFails(t *testing.T) {
 		// user insert. The transaction must roll the user insert back.
 		ID: "identity-primary-key", Provider: "keycloak",
 		Issuer: "https://issuer.example/realms/main", Subject: "candidate-subject",
-	}, "")
+	}, "", true)
 	if err == nil {
 		t.Fatal("expected identity primary-key conflict")
 	}
@@ -68,7 +68,7 @@ func TestProvisionAuthIdentityRollsBackUserAndMembershipOnSubjectConflict(t *tes
 	err := db.ProvisionAuthIdentity(ctx,
 		AuthUser{ID: "candidate", Role: "admin", Status: "active"}, false,
 		AuthIdentity{ID: "new-identity", Provider: "keycloak", Issuer: "https://issuer.example/realms/main", Subject: "shared-subject"},
-		"new-team")
+		"new-team", true)
 	if !errors.Is(err, ErrAuthIdentityUserConflict) {
 		t.Fatalf("subject owner conflict error = %v", err)
 	}

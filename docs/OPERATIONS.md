@@ -55,7 +55,7 @@ React `/app`까지 포함하는 직접 빌드는 frontend 산출물을 embed 경
 ```bash
 corepack enable
 pnpm --dir web install --frozen-lockfile
-VITE_UI_VERSION=v0.83.1 pnpm --dir web build
+VITE_UI_VERSION=v0.83.2 pnpm --dir web build
 find internal/appui/dist -mindepth 1 ! -name '.gitkeep' -delete
 cp -R web/dist/. internal/appui/dist/
 test -s internal/appui/dist/index.html
@@ -63,7 +63,7 @@ test -n "$(find internal/appui/dist/assets -type f -print -quit)"
 
 GOOS=linux GOARCH=amd64 CGO_ENABLED=0 \
   go build -trimpath \
-  -ldflags "-s -w -X vibe-coders/internal/proxy.AppVersion=v0.83.1" \
+  -ldflags "-s -w -X vibe-coders/internal/proxy.AppVersion=v0.83.2" \
   -o gateway ./cmd/gateway
 UI_APP_ENABLED=true ./gateway
 ```
@@ -74,20 +74,20 @@ UI_APP_ENABLED=true ./gateway
 ### 2.3 Docker
 
 ```bash
-docker build --build-arg VERSION=v0.83.1 -t ai-coding-proxy-gateway:v0.83.1 .
+docker build --build-arg VERSION=v0.83.2 -t ai-coding-proxy-gateway:v0.83.2 .
 
-export GATEWAY_VERSION=v0.83.1
+export GATEWAY_VERSION=v0.83.2
 export UPSTREAM_API_KEY='<실제 upstream key>'
 scripts/init-deployment-env.sh /opt/proxy-gateway/gateway.env
 docker volume create proxy-gateway-data >/dev/null
 # 기존 볼륨·바인드 마운트를 재사용할 때 소유권을 nonroot(65532)로 복구합니다. 새 볼륨은 변경 없이 끝납니다.
 docker run --rm --user 0:0 --mount source=proxy-gateway-data,target=/data \
-  ai-coding-proxy-gateway:v0.83.1 repair-data-dir
+  ai-coding-proxy-gateway:v0.83.2 repair-data-dir
 docker run -d --name proxy-gateway --restart=always \
   -p 8080:8080 \
   --mount source=proxy-gateway-data,target=/data \
   --env-file /opt/proxy-gateway/gateway.env \
-  ai-coding-proxy-gateway:v0.83.1
+  ai-coding-proxy-gateway:v0.83.2
 ```
 
 Dockerfile은 Node 24+pnpm frozen frontend builder → Go 1.26.8 embed builder → distroless
@@ -102,7 +102,7 @@ nonroot의 3-stage 구조입니다. React 정적 에셋은 Go 바이너리에 �
 `/opt/proxy-gateway/gateway.env`에 고정합니다.
 
 ```bash
-export GATEWAY_VERSION=v0.83.1
+export GATEWAY_VERSION=v0.83.2
 export UPSTREAM_API_KEY='<실제 upstream key>'
 scripts/init-deployment-env.sh /opt/proxy-gateway/gateway.env
 docker compose --env-file /opt/proxy-gateway/gateway.env up -d
@@ -125,17 +125,17 @@ jq는 Docker builder 외부에 설치할 필요가 없습니다. 패키징 전�
 
 ```bash
 # 인터넷이 되는 환경에서 산출
-./scripts/release.sh -v v0.83.1 -p linux/amd64
-# 기존 이미지·sha256·README + SBOM-v0.83.1.spdx.json +
-# THIRD_PARTY_LICENSES-v0.83.1.md 생성
+./scripts/release.sh -v v0.83.2 -p linux/amd64
+# 기존 이미지·sha256·README + SBOM-v0.83.2.spdx.json +
+# THIRD_PARTY_LICENSES-v0.83.2.md 생성
 ```
 
 폐쇄망 서버에서:
 
 ```bash
-sha256sum -c ai-coding-proxy-gateway-v0.83.1.tar.gz.sha256
-gunzip -c ai-coding-proxy-gateway-v0.83.1.tar.gz | docker load
-docker run -d ... -e UI_APP_ENABLED=true ai-coding-proxy-gateway:v0.83.1
+sha256sum -c ai-coding-proxy-gateway-v0.83.2.tar.gz.sha256
+gunzip -c ai-coding-proxy-gateway-v0.83.2.tar.gz | docker load
+docker run -d ... -e UI_APP_ENABLED=true ai-coding-proxy-gateway:v0.83.2
 ```
 
 ---
@@ -306,7 +306,7 @@ SQLite 일관성을 위해 먼저 gateway를 중지합니다. stopped gateway co
 ```bash
 docker compose --env-file /opt/proxy-gateway/gateway.env stop gateway
 scripts/backup-volume.sh backup \
-  --image ai-coding-proxy-gateway:v0.83.1 \
+  --image ai-coding-proxy-gateway:v0.83.2 \
   --volume proxy-gateway-data \
   --env-file /opt/proxy-gateway/gateway.env \
   --output-dir /opt/proxy-gateway/backups
@@ -336,7 +336,7 @@ SQLite header/가능한 경우 `PRAGMA quick_check`, 내부 파일 checksum, vol
 docker compose --env-file /opt/proxy-gateway/gateway.env down
 
 scripts/backup-volume.sh restore \
-  --image ai-coding-proxy-gateway:v0.83.1 \
+  --image ai-coding-proxy-gateway:v0.83.2 \
   --volume proxy-gateway-data \
   --env-file /opt/proxy-gateway/gateway.env \
   --output-dir /opt/proxy-gateway/backups \
@@ -459,7 +459,7 @@ root로 실행한 다른 프로세스가 볼륨을 채운 경우, Kubernetes PVC
 
    ```bash
    docker run --rm --mount source=proxy-gateway-data,target=/data \
-     ai-coding-proxy-gateway:v0.83.1 check-data-dir
+     ai-coding-proxy-gateway:v0.83.2 check-data-dir
    ```
 
    사용 불가한 경로마다 소유자·권한과 원인을 출력하고 종료 코드 1을 반환합니다.
@@ -468,7 +468,7 @@ root로 실행한 다른 프로세스가 볼륨을 채운 경우, Kubernetes PVC
 
    ```bash
    docker run --rm --user 0:0 --mount source=proxy-gateway-data,target=/data \
-     ai-coding-proxy-gateway:v0.83.1 repair-data-dir
+     ai-coding-proxy-gateway:v0.83.2 repair-data-dir
    ```
 
    변경한 항목을 모두 출력하며, 다시 실행해도 변경이 없습니다. 심볼릭 링크는 재소유만 하고 따라가지 않습니다.
@@ -478,7 +478,7 @@ root로 실행한 다른 프로세스가 볼륨을 채운 경우, Kubernetes PVC
 
    ```bash
    docker run --rm --mount source=proxy-gateway-data,target=/data \
-     ai-coding-proxy-gateway:v0.83.1 check-data-dir
+     ai-coding-proxy-gateway:v0.83.2 check-data-dir
    docker restart proxy-gateway
    curl -fsS http://<HOST>:8080/ready
    ```
@@ -486,6 +486,36 @@ root로 실행한 다른 프로세스가 볼륨을 채운 경우, Kubernetes PVC
 바인드 마운트는 `--mount source=...` 대신 `-v /opt/proxy-gateway/data:/data`를 그대로 씁니다.
 Kubernetes는 `securityContext.fsGroup: 65532`를 지정하거나 위 복구 명령을 initContainer(`runAsUser: 0`)로 실행합니다.
 `LOG_FALLBACK_PATH` 디렉터리가 쓰기 불가하면 기동은 되지만 시작 시 WARN 로그가 남고 DB 장애 중 요청 로그가 유실되므로 같은 방법으로 복구합니다.
+
+### 8.7 SSO 로그인 후 메뉴가 거의 사라짐 (역할 강등)
+
+증상: Keycloak으로 로그인하면 `/admin`에 '내 홈' 정도만 남고 운영·보안·설정 메뉴가 보이지 않습니다.
+`/auth/me`의 `role`이 `developer`(또는 `SSO_KEYCLOAK_DEFAULT_ROLE` 값)로 바뀌어 있고, 어드민 → 설정 → 변경 이력에
+`sso_authorized ... role=developer` 이벤트가 남습니다.
+
+원인: v0.82.1~v0.83.2은 SSO 로그인마다 저장된 역할을 클레임에서 계산한 역할로 덮어썼습니다. Keycloak 토큰의
+realm/client 역할이 역할 매핑(`vibe-admin` → `admin` 등, 또는 관리자 화면의 역할 매핑)에 하나도 걸리지 않으면
+기본 역할이 적용돼 콘솔에서 승격해 둔 `super_admin`까지 강등됐습니다. 팀도 groups 클레임이 없으면 비워졌습니다.
+
+v0.83.2부터의 동작: 명시적 매핑은 상향·하향 모두 그대로 적용됩니다. 매핑이 없을 때는 **IdP가 직전 로그인에서
+직접 부여했던 역할·팀만** 철회하고, 관리자가 콘솔에서 지정한 역할·팀은 유지합니다(Keycloak에서 역할을 제거한
+경우의 회수는 그대로 동작합니다). 이미 강등된 계정은 자동으로 복구되지 않으므로 아래 중 하나로 되돌립니다.
+
+1. 남아 있는 `super_admin`이 있으면 어드민 → 사용자 → 해당 계정 → 역할 변경.
+2. 남은 관리자가 없으면 데이터 볼륨에 대해 보조 명령으로 역할을 지정합니다. 게이트웨이와 같은 env 파일을 쓰며
+   기존 세션은 모두 종료되므로 다시 로그인합니다.
+
+   ```bash
+   docker run --rm --mount source=proxy-gateway-data,target=/data \
+     --env-file /opt/proxy-gateway/gateway.env \
+     ai-coding-proxy-gateway:v0.83.2 set-user-role --email admin@example.com --role super_admin
+   ```
+
+   PostgreSQL이면 같은 env 파일의 `DB_DSN`으로 접속하므로 볼륨 마운트 없이 실행합니다. 변경은 감사 이력에
+   `role_repaired`로 남습니다.
+
+재발 방지: Keycloak 역할을 내부 역할로 매핑해 두면(기본 매핑 `vibe-admin`→`admin` 등, 또는 어드민 → 설정 → SSO 화면의
+역할 매핑) IdP가 역할의 단일 출처가 되어 이 구분이 필요 없습니다.
 
 ---
 

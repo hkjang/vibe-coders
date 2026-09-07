@@ -478,22 +478,27 @@ func (s *Server) provisionKeycloakUser(ctx context.Context, claims map[string]an
 	if verified, ok := claims["email_verified"].(bool); ok && verified && keycloakEmailSafeForLinking(claimedEmail) {
 		verifiedEmail = claimedEmail
 	}
-	role, _ := resolveKeycloakRoleExplicit(s.effectiveKeycloakRoleMap(), s.keycloakRolesFromClaims(claims), kc.DefaultRole)
+	role, roleExplicit := resolveKeycloakRoleExplicit(s.effectiveKeycloakRoleMap(), s.keycloakRolesFromClaims(claims), kc.DefaultRole)
 	if role == "" {
 		return store.AuthUser{}, "", keycloakProvisioningFailure(keycloakProvisioningStageRoleMapping, &keycloakError{"no role mapping matched and no default role — login blocked"})
 	}
 
-	// 1) Existing linked identity → load + sync IdP-owned role and team. Falling back
-	// to a prior local role/team when a claim disappears would preserve privileges after
-	// an administrator revoked them in Keycloak.
+	// 1) Existing linked identity → load + sync what the IdP owns. An explicit claim
+	// mapping is authoritative in both directions, and a claim the IdP granted last time
+	// and now omits is withdrawn, so revoking in Keycloak takes effect at the next login.
+	// A role or team the IdP never granted was assigned locally by an administrator and
+	// is kept: applying the default role there silently demoted every super_admin whose
+	// realm carries no mapped role, which emptied the console menu after login.
 	id, linked, err := s.db.AuthIdentityBySubject(ctx, "keycloak", kc.IssuerURL, sub)
 	if err != nil {
 		return store.AuthUser{}, "", keycloakProvisioningFailure(keycloakProvisioningStageIdentityLookup, err)
 	}
-	team, err := s.resolveKeycloakTeam(ctx, keycloakTeamFromGroups(claimStrings(claims, kc.GroupClaim)))
+	claimedTeam := keycloakTeamFromGroups(claimStrings(claims, kc.GroupClaim))
+	team, err := s.resolveKeycloakTeam(ctx, claimedTeam)
 	if err != nil {
 		return store.AuthUser{}, "", keycloakProvisioningFailure(keycloakProvisioningStageTeamResolution, err)
 	}
+	grant := keycloakGrant{role: role, roleExplicit: roleExplicit, team: team, teamClaimed: claimedTeam != ""}
 	if linked {
 		user, found, err := s.db.AuthUserByID(ctx, id.UserID)
 		if err != nil {
@@ -502,12 +507,17 @@ func (s *Server) provisionKeycloakUser(ctx context.Context, claims map[string]an
 		if !found {
 			return store.AuthUser{}, "", keycloakProvisioningFailure(keycloakProvisioningStageAccountLookup, &keycloakError{"linked SSO user no longer exists"})
 		}
-		user.Role, user.Status = role, "active"
-		identityEmail := firstNonEmpty(verifiedEmail, id.Email)
-		if err := s.finishKeycloakLink(ctx, user, false, sub, identityEmail, username, team); err != nil {
+		currentTeam, err := s.db.PrimaryTeamForUser(ctx, user.ID)
+		if err != nil {
+			return store.AuthUser{}, "", keycloakProvisioningFailure(keycloakProvisioningStageAccountLookup, err)
+		}
+		user.Role, user.Status = grant.roleForLinkedUser(user.Role, id.IdPRole), "active"
+		link := grant.link(sub, firstNonEmpty(verifiedEmail, id.Email), username)
+		link.team, link.syncTeam = grant.teamForLinkedUser(currentTeam, id.IdPTeam)
+		if err := s.finishKeycloakLink(ctx, user, false, link); err != nil {
 			return store.AuthUser{}, "", keycloakProvisioningFailure(keycloakProvisioningStageAccountPersistence, err)
 		}
-		return user, team, nil
+		return user, link.team, nil
 	}
 
 	userID := "usr_" + audit.HashText("keycloak|" + kc.IssuerURL + "|" + sub)[:16]
@@ -521,7 +531,7 @@ func (s *Server) provisionKeycloakUser(ctx context.Context, claims map[string]an
 			return store.AuthUser{}, "", keycloakProvisioningFailure(keycloakProvisioningStageAccountPersistence, &keycloakError{"deterministic SSO user id is unavailable"})
 		}
 		user.Role, user.Status = role, "active"
-		if err := s.finishKeycloakLink(ctx, user, false, sub, verifiedEmail, username, team); err != nil {
+		if err := s.finishKeycloakLink(ctx, user, false, grant.link(sub, verifiedEmail, username)); err != nil {
 			return store.AuthUser{}, "", keycloakProvisioningFailure(keycloakProvisioningStageAccountPersistence, err)
 		}
 		return user, team, nil
@@ -542,7 +552,7 @@ func (s *Server) provisionKeycloakUser(ctx context.Context, claims map[string]an
 				emailConflict = true
 			} else {
 				user.Role, user.Status = role, "active"
-				if err := s.finishKeycloakLink(ctx, user, false, sub, verifiedEmail, username, team); err != nil {
+				if err := s.finishKeycloakLink(ctx, user, false, grant.link(sub, verifiedEmail, username)); err != nil {
 					return store.AuthUser{}, "", keycloakProvisioningFailure(keycloakProvisioningStageAccountPersistence, err)
 				}
 				return user, team, nil
@@ -563,7 +573,7 @@ func (s *Server) provisionKeycloakUser(ctx context.Context, claims map[string]an
 		Role:         role,
 		Status:       "active",
 	}
-	if err := s.finishKeycloakLink(ctx, user, true, sub, verifiedEmail, username, team); err != nil {
+	if err := s.finishKeycloakLink(ctx, user, true, grant.link(sub, verifiedEmail, username)); err != nil {
 		// Concurrent callbacks for the same issuer+subject derive the same user ID. If
 		// another transaction committed first, reuse that exact SSO-only account instead
 		// of turning the harmless uniqueness race into user_provisioning_failed.
@@ -571,7 +581,7 @@ func (s *Server) provisionKeycloakUser(ctx context.Context, claims map[string]an
 			if persisted, userFound, userErr := s.db.AuthUserByID(ctx, userID); userErr == nil && userFound && persisted.PasswordHash == "" && persisted.Status == "active" {
 				persisted.Role = role
 				identityEmail := firstNonEmpty(verifiedEmail, racedIdentity.Email)
-				if retryErr := s.finishKeycloakLink(ctx, persisted, false, sub, identityEmail, username, team); retryErr == nil {
+				if retryErr := s.finishKeycloakLink(ctx, persisted, false, grant.link(sub, identityEmail, username)); retryErr == nil {
 					return persisted, team, nil
 				}
 			}
@@ -607,11 +617,70 @@ func (s *Server) resolveKeycloakTeam(ctx context.Context, candidate string) (str
 
 // finishKeycloakLink atomically persists the user, external identity, and IdP-owned team
 // membership so a constraint failure cannot leave a half-provisioned account behind.
-func (s *Server) finishKeycloakLink(ctx context.Context, user store.AuthUser, createUser bool, sub, email, username, team string) error {
+func (s *Server) finishKeycloakLink(ctx context.Context, user store.AuthUser, createUser bool, link keycloakLink) error {
 	return s.db.ProvisionAuthIdentity(ctx, user, createUser, store.AuthIdentity{
 		ID: newID("authid"), UserID: user.ID, Provider: "keycloak", Issuer: s.keycloakConfig().IssuerURL,
-		Subject: sub, Email: email, PreferredUsername: username,
-	}, team)
+		Subject: link.sub, Email: link.email, PreferredUsername: link.username,
+		IdPRole: link.idpRole, IdPTeam: link.idpTeam,
+	}, link.team, link.syncTeam)
+}
+
+// keycloakGrant is what this login's claims say about the user: the resolved role and
+// whether an explicit mapping produced it, and the resolved team and whether a groups
+// claim named one.
+type keycloakGrant struct {
+	role         string
+	roleExplicit bool
+	team         string
+	teamClaimed  bool
+}
+
+// keycloakLink is everything finishKeycloakLink persists about one login.
+type keycloakLink struct {
+	sub, email, username string
+	team                 string
+	syncTeam             bool
+	idpRole, idpTeam     string
+}
+
+// link records on the identity only what the IdP explicitly granted, so the next login
+// can tell a withdrawn grant from a claim that was never there.
+func (g keycloakGrant) link(sub, email, username string) keycloakLink {
+	l := keycloakLink{sub: sub, email: email, username: username, team: g.team, syncTeam: true}
+	if g.roleExplicit {
+		l.idpRole = g.role
+	}
+	if g.teamClaimed {
+		l.idpTeam = g.team
+	}
+	return l
+}
+
+// roleForLinkedUser decides an already-linked user's role. An explicit mapping wins in
+// both directions. Without one, the default role replaces only the role the IdP itself
+// granted last time (idpRole) and has now withdrawn; anything else was assigned locally
+// and stays.
+func (g keycloakGrant) roleForLinkedUser(current, idpRole string) string {
+	if g.roleExplicit {
+		return g.role
+	}
+	if idpRole != "" && idpRole == current {
+		return g.role
+	}
+	return current
+}
+
+// teamForLinkedUser applies the same rule to the team: a groups claim is authoritative,
+// a team the IdP granted last time and no longer names is removed, and a locally
+// assigned team is left untouched (syncTeam=false).
+func (g keycloakGrant) teamForLinkedUser(currentTeam, idpTeam string) (team string, syncTeam bool) {
+	if g.teamClaimed {
+		return g.team, true
+	}
+	if idpTeam != "" && idpTeam == currentTeam {
+		return "", true
+	}
+	return currentTeam, false
 }
 
 // backchannelLogoutEvent reports whether a logout_token's `events` claim contains the

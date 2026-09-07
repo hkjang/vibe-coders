@@ -31,6 +31,8 @@ func runMaintenanceCommand(args []string, stdout, stderr io.Writer) (int, bool) 
 		return runCheckDataDir(args[1:], stdout, stderr), true
 	case "repair-data-dir":
 		return runRepairDataDir(args[1:], stdout, stderr), true
+	case "set-user-role":
+		return runSetUserRole(args[1:], stdout, stderr), true
 	case "help", "-h", "--help":
 		printMaintenanceUsage(stdout)
 		return 0, true
@@ -53,6 +55,9 @@ commands:
                                        chown DIR recursively to uid:gid (default %d:%d, the image's
                                        nonroot user) and restore owner read/write; run once as root:
                                        docker run --rm --user 0:0 --mount source=proxy-gateway-data,target=/data IMAGE repair-data-dir
+  set-user-role --email E --role R     assign role R to the local account E and revoke its
+                                       sessions; recovers a console whose last administrator
+                                       lost their role (uses the gateway's DB_DRIVER/DB_DSN)
   version                              print the build version
 `, defaultDataDir, datadir.DefaultUID, datadir.DefaultGID)
 }

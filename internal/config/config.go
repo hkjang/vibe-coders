@@ -686,6 +686,12 @@ func validGeneratedKeyPrefix(value string) bool {
 		}) < 0
 }
 
+// DatabaseFromEnv resolves the database settings alone, for maintenance commands that
+// must reach the store without the full configuration (and its upstream requirements).
+func DatabaseFromEnv() DatabaseConfig {
+	return databaseConfig()
+}
+
 func databaseConfig() DatabaseConfig {
 	// 1. Precedence 1: Auto-detect PostgreSQL if any key DSN environment variable starts with postgres:// or postgresql://.
 	// This ensures that even if DB_DRIVER=sqlite is hardcoded in Docker, it will be overridden if PostgreSQL DSN is supplied.

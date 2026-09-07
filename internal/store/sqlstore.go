@@ -2243,6 +2243,10 @@ func migrationStatements() []string {
 			last_login_at TEXT NOT NULL DEFAULT ''
 		)`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_auth_identities_sub ON auth_identities(provider, issuer, subject)`,
+		// What the IdP itself granted at the last login, so a missing claim withdraws only
+		// that and never a role or team an administrator assigned locally.
+		`ALTER TABLE auth_identities ADD COLUMN idp_role TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE auth_identities ADD COLUMN idp_team TEXT NOT NULL DEFAULT ''`,
 		`CREATE TABLE IF NOT EXISTS sso_provider_config (
 			provider TEXT PRIMARY KEY,
 			enabled INTEGER NOT NULL DEFAULT 0,

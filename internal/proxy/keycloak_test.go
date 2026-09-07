@@ -768,3 +768,130 @@ func TestSSOExchangeRequiresMatchingBrowserCookieAndIsSingleUse(t *testing.T) {
 		t.Fatalf("replayed exchange status = %d", response.Code)
 	}
 }
+
+func TestKeycloakGrantDecisionsForLinkedUsers(t *testing.T) {
+	explicitAdmin := keycloakGrant{role: "admin", roleExplicit: true}
+	defaultDeveloper := keycloakGrant{role: "developer"}
+	roleCases := []struct {
+		name             string
+		grant            keycloakGrant
+		current, idpRole string
+		want             string
+	}{
+		{"explicit mapping wins upward", explicitAdmin, "developer", "", "admin"},
+		{"explicit mapping wins downward over a local promotion", keycloakGrant{role: "developer", roleExplicit: true}, "super_admin", "admin", "developer"},
+		{"no mapping keeps a locally assigned super_admin", defaultDeveloper, "super_admin", "", "super_admin"},
+		{"no mapping keeps a local promotion above what the IdP once granted", defaultDeveloper, "super_admin", "admin", "super_admin"},
+		{"no mapping withdraws the role the IdP itself granted", defaultDeveloper, "admin", "admin", "developer"},
+		{"first default login stays at the default", defaultDeveloper, "developer", "", "developer"},
+	}
+	for _, tc := range roleCases {
+		if got := tc.grant.roleForLinkedUser(tc.current, tc.idpRole); got != tc.want {
+			t.Errorf("%s: role = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+
+	teamCases := []struct {
+		name                 string
+		grant                keycloakGrant
+		currentTeam, idpTeam string
+		wantTeam             string
+		wantSync             bool
+	}{
+		{"groups claim is authoritative", keycloakGrant{team: "platform", teamClaimed: true}, "ops", "ops", "platform", true},
+		{"no groups claim keeps a locally assigned team", keycloakGrant{}, "ops", "", "ops", false},
+		{"no groups claim withdraws the team the IdP granted", keycloakGrant{}, "ops", "ops", "", true},
+		{"no groups claim and no team leaves nothing to sync", keycloakGrant{}, "", "", "", false},
+	}
+	for _, tc := range teamCases {
+		team, sync := tc.grant.teamForLinkedUser(tc.currentTeam, tc.idpTeam)
+		if team != tc.wantTeam || sync != tc.wantSync {
+			t.Errorf("%s: team = (%q, %v), want (%q, %v)", tc.name, team, sync, tc.wantTeam, tc.wantSync)
+		}
+	}
+}
+
+// Before v0.83.2 every SSO login overwrote the stored role with the resolved one, so a
+// super_admin whose realm carried no mapped role was demoted to the default and lost the
+// operator menu. A missing mapping must leave a locally assigned role alone.
+func TestProvisionKeycloakUserKeepsLocallyAssignedRoleWhenNoClaimMaps(t *testing.T) {
+	db := openTestStore(t)
+	defer db.Close()
+	s := &Server{cfg: config.Config{Keycloak: config.KeycloakConfig{
+		IssuerURL: "https://kc.example/realms/vibe", ClientID: "vibe-coders", DefaultRole: "developer",
+		RoleClaim: "realm_access.roles", GroupClaim: "groups",
+	}}, db: db}
+	claims := map[string]any{"sub": "subject-local-admin", "email": "owner@example.com", "email_verified": true}
+
+	user, _, err := s.provisionKeycloakUser(t.Context(), claims)
+	if err != nil || user.Role != "developer" {
+		t.Fatalf("first login = %+v err=%v", user, err)
+	}
+	identity, found, err := db.AuthIdentityBySubject(t.Context(), "keycloak", s.cfg.Keycloak.IssuerURL, "subject-local-admin")
+	if err != nil || !found || identity.IdPRole != "" {
+		t.Fatalf("default role must not be recorded as an IdP grant: %+v found=%v err=%v", identity, found, err)
+	}
+
+	// An administrator promotes the account in the console.
+	if err := db.UpdateAuthUserRoleStatus(t.Context(), user.ID, "super_admin", ""); err != nil {
+		t.Fatal(err)
+	}
+	user, _, err = s.provisionKeycloakUser(t.Context(), claims)
+	if err != nil || user.Role != "super_admin" {
+		t.Fatalf("login without a mapped role demoted the local super_admin: %+v err=%v", user, err)
+	}
+	persisted, found, err := db.AuthUserByID(t.Context(), user.ID)
+	if err != nil || !found || persisted.Role != "super_admin" {
+		t.Fatalf("persisted role = %+v found=%v err=%v", persisted, found, err)
+	}
+
+	// An explicit mapping stays authoritative, including downward.
+	mapped := map[string]any{"sub": "subject-local-admin", "realm_access": map[string]any{"roles": []any{"vibe-developer"}}}
+	user, _, err = s.provisionKeycloakUser(t.Context(), mapped)
+	if err != nil || user.Role != "developer" {
+		t.Fatalf("explicit mapping was not applied: %+v err=%v", user, err)
+	}
+	identity, _, err = db.AuthIdentityBySubject(t.Context(), "keycloak", s.cfg.Keycloak.IssuerURL, "subject-local-admin")
+	if err != nil || identity.IdPRole != "developer" {
+		t.Fatalf("explicit grant not recorded: %+v err=%v", identity, err)
+	}
+}
+
+func TestProvisionKeycloakUserKeepsLocallyAssignedTeamWhenGroupsClaimAbsent(t *testing.T) {
+	db := openTestStore(t)
+	defer db.Close()
+	s := &Server{cfg: config.Config{Keycloak: config.KeycloakConfig{
+		IssuerURL: "https://kc.example/realms/vibe", ClientID: "vibe-coders", DefaultRole: "developer",
+		RoleClaim: "realm_access.roles", GroupClaim: "groups",
+	}}, db: db}
+	claims := map[string]any{"sub": "subject-local-team"}
+
+	user, team, err := s.provisionKeycloakUser(t.Context(), claims)
+	if err != nil || team != "" {
+		t.Fatalf("first login = user=%+v team=%q err=%v", user, team, err)
+	}
+	if err := db.SetUserTeam(t.Context(), user.ID, "ops-team", "developer"); err != nil {
+		t.Fatal(err)
+	}
+
+	user, team, err = s.provisionKeycloakUser(t.Context(), claims)
+	if err != nil || team != "ops-team" {
+		t.Fatalf("login without a groups claim dropped the local team: team=%q err=%v", team, err)
+	}
+	if primary, err := db.PrimaryTeamForUser(t.Context(), user.ID); err != nil || primary != "ops-team" {
+		t.Fatalf("persisted team = %q err=%v", primary, err)
+	}
+
+	// A groups claim is authoritative and is remembered as the IdP's grant …
+	withGroup := map[string]any{"sub": "subject-local-team", "groups": []any{"/teams/idp-team"}}
+	if _, team, err = s.provisionKeycloakUser(t.Context(), withGroup); err != nil || team != "idp-team" {
+		t.Fatalf("groups claim not applied: team=%q err=%v", team, err)
+	}
+	// … so its later absence withdraws exactly that team.
+	if _, team, err = s.provisionKeycloakUser(t.Context(), claims); err != nil || team != "" {
+		t.Fatalf("withdrawn groups claim kept the IdP team: team=%q err=%v", team, err)
+	}
+	if primary, err := db.PrimaryTeamForUser(t.Context(), user.ID); err != nil || primary != "" {
+		t.Fatalf("persisted team after withdrawal = %q err=%v", primary, err)
+	}
+}

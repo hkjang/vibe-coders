@@ -21,14 +21,21 @@ type AuthIdentity struct {
 	PreferredUsername string `json:"preferred_username"`
 	CreatedAt         string `json:"created_at"`
 	LastLoginAt       string `json:"last_login_at"`
+	// IdPRole is the internal role an explicit claim mapping granted at the last login
+	// ("" when the configured default applied). IdPTeam is the team the groups claim
+	// granted then. Together they let a later login tell "the IdP withdrew this" from
+	// "the IdP never said anything and an administrator assigned it locally".
+	IdPRole string `json:"idp_role"`
+	IdPTeam string `json:"idp_team"`
 }
 
 // AuthIdentityBySubject finds the internal linkage for an external (provider,issuer,subject).
 func (s *SQLStore) AuthIdentityBySubject(ctx context.Context, provider, issuer, subject string) (AuthIdentity, bool, error) {
 	var a AuthIdentity
-	err := s.db.QueryRowContext(ctx, s.bind(`SELECT id, user_id, provider, issuer, subject, email, preferred_username, created_at, COALESCE(last_login_at,'')
+	err := s.db.QueryRowContext(ctx, s.bind(`SELECT id, user_id, provider, issuer, subject, email, preferred_username, created_at, COALESCE(last_login_at,''),
+			COALESCE(idp_role,''), COALESCE(idp_team,'')
 		FROM auth_identities WHERE provider = ? AND issuer = ? AND subject = ?`), provider, issuer, subject).
-		Scan(&a.ID, &a.UserID, &a.Provider, &a.Issuer, &a.Subject, &a.Email, &a.PreferredUsername, &a.CreatedAt, &a.LastLoginAt)
+		Scan(&a.ID, &a.UserID, &a.Provider, &a.Issuer, &a.Subject, &a.Email, &a.PreferredUsername, &a.CreatedAt, &a.LastLoginAt, &a.IdPRole, &a.IdPTeam)
 	if errors.Is(err, sql.ErrNoRows) {
 		return AuthIdentity{}, false, nil
 	}
@@ -49,19 +56,22 @@ func (s *SQLStore) UpsertAuthIdentity(ctx context.Context, a AuthIdentity) error
 		a.LastLoginAt = now
 	}
 	_, err := s.db.ExecContext(ctx, s.bind(`INSERT INTO auth_identities
-		(id, user_id, provider, issuer, subject, email, preferred_username, created_at, last_login_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		(id, user_id, provider, issuer, subject, email, preferred_username, created_at, last_login_at, idp_role, idp_team)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(provider, issuer, subject) DO UPDATE SET
-			email = excluded.email, preferred_username = excluded.preferred_username, last_login_at = excluded.last_login_at`),
-		a.ID, a.UserID, a.Provider, a.Issuer, a.Subject, a.Email, a.PreferredUsername, a.CreatedAt, a.LastLoginAt)
+			email = excluded.email, preferred_username = excluded.preferred_username, last_login_at = excluded.last_login_at,
+			idp_role = excluded.idp_role, idp_team = excluded.idp_team`),
+		a.ID, a.UserID, a.Provider, a.Issuer, a.Subject, a.Email, a.PreferredUsername, a.CreatedAt, a.LastLoginAt, a.IdPRole, a.IdPTeam)
 	return err
 }
 
 // ProvisionAuthIdentity atomically creates or updates an SSO user, links the external
-// identity, and replaces the user's IdP-owned team membership. Keeping these writes in one
+// identity, and — when syncTeam is set — replaces the user's team membership with teamID
+// ("" removes it). A login whose groups claim never granted the current team passes
+// syncTeam=false so a locally assigned team survives. Keeping these writes in one
 // transaction prevents a failed team/identity write from leaving an unlinked user that can
 // no longer complete a later login.
-func (s *SQLStore) ProvisionAuthIdentity(ctx context.Context, user AuthUser, createUser bool, identity AuthIdentity, teamID string) error {
+func (s *SQLStore) ProvisionAuthIdentity(ctx context.Context, user AuthUser, createUser bool, identity AuthIdentity, teamID string, syncTeam bool) error {
 	now := time.Now().UTC()
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -113,15 +123,18 @@ func (s *SQLStore) ProvisionAuthIdentity(ctx context.Context, user AuthUser, cre
 		identity.LastLoginAt = now.Format(time.RFC3339Nano)
 	}
 	result, err := tx.ExecContext(ctx, s.bind(`INSERT INTO auth_identities
-		(id, user_id, provider, issuer, subject, email, preferred_username, created_at, last_login_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		(id, user_id, provider, issuer, subject, email, preferred_username, created_at, last_login_at, idp_role, idp_team)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(provider, issuer, subject) DO UPDATE SET
 			email = excluded.email,
 			preferred_username = excluded.preferred_username,
-			last_login_at = excluded.last_login_at
+			last_login_at = excluded.last_login_at,
+			idp_role = excluded.idp_role,
+			idp_team = excluded.idp_team
 		WHERE auth_identities.user_id = excluded.user_id`),
 		identity.ID, identity.UserID, identity.Provider, identity.Issuer, identity.Subject,
-		identity.Email, identity.PreferredUsername, identity.CreatedAt, identity.LastLoginAt)
+		identity.Email, identity.PreferredUsername, identity.CreatedAt, identity.LastLoginAt,
+		identity.IdPRole, identity.IdPTeam)
 	if err != nil {
 		return err
 	}
@@ -131,6 +144,9 @@ func (s *SQLStore) ProvisionAuthIdentity(ctx context.Context, user AuthUser, cre
 		return ErrAuthIdentityUserConflict
 	}
 
+	if !syncTeam {
+		return tx.Commit()
+	}
 	if _, err := tx.ExecContext(ctx, s.bind(`DELETE FROM user_team_memberships WHERE user_id = ?`), user.ID); err != nil {
 		return err
 	}
