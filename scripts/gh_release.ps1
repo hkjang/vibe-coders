@@ -29,7 +29,7 @@ function Test-RequiresComplianceAssets {
 }
 
 if (-not $Version) {
-    throw "Version parameter is required. Example: pwsh -File scripts/gh_release.ps1 -Version v0.83.0"
+    throw "Version parameter is required. Example: pwsh -File scripts/gh_release.ps1 -Version v0.83.1"
 }
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
@@ -196,6 +196,8 @@ $notes += '  [ "$(grep -Ec ''^GATEWAY_VERSION='' "$ENV_FILE")" -eq 1 ] && ' + "`
 $notes += "  grep -qxF 'GATEWAY_VERSION=$Version' `"`$ENV_FILE`" || `r`n"
 $notes += '  { echo "gateway.env의 필수 비밀값이 유효하지 않습니다." >&2; exit 1; }' + "`r`n"
 $notes += "docker volume create proxy-gateway-data >/dev/null || exit 1`r`n`r`n"
+$notes += "# 기존 볼륨·바인드 마운트 재사용 시 nonroot(65532) 소유권 복구 (새 볼륨은 변경 없음)`r`n"
+$notes += "docker run --rm --user 0:0 --mount source=proxy-gateway-data,target=/data ai-coding-proxy-gateway:" + $Version + " repair-data-dir || exit 1`r`n`r`n"
 $notes += "docker run -d --name proxy-gateway --restart=always \`r`n"
 $notes += "  -p 8080:8080 \`r`n"
 $notes += "  --mount source=proxy-gateway-data,target=/data \`r`n"
@@ -208,6 +210,7 @@ $notes += "- React assets are embedded in the Go binary; the runtime image does 
 $notes += "- Reuse and back up the same 0600 env file; rotating GATEWAY_SECRET without migration makes stored Provider Secrets unreadable.`r`n"
 $notes += "- Transfer, checksum, and chmod 0700 the bundled init-deployment-env-$Version.sh and backup-volume-$Version.sh helpers.`r`n"
 $notes += "- The init helper preserves secrets and atomically updates only GATEWAY_VERSION during upgrades.`r`n"
+$notes += "- If the container restarts and 8080 never opens with 'readonly database' in docker logs, /data was written by another user: run the repair-data-dir command above once, then verify with: docker run --rm --mount source=proxy-gateway-data,target=/data ai-coding-proxy-gateway:" + $Version + " check-data-dir`r`n"
 
 $notesPath = Join-Path $repoRoot "release\release-notes.txt"
 # Ensure the release directory exists

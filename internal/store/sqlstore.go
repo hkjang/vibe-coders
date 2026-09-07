@@ -18,6 +18,7 @@ import (
 	_ "modernc.org/sqlite"
 
 	"vibe-coders/internal/config"
+	"vibe-coders/internal/datadir"
 )
 
 var blobRegex = regexp.MustCompile(`(?i)\bblob\b`)
@@ -94,9 +95,16 @@ func Open(ctx context.Context, cfg config.DatabaseConfig) (*SQLStore, error) {
 			}
 			dsn = dsn + delim + "_pragma=busy_timeout(10000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)"
 		}
-		dbPath := strings.Split(dsn, "?")[0]
-		if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
-			return nil, err
+		if dbPath, ok := datadir.SQLitePath(dsn); ok {
+			dir := filepath.Dir(dbPath)
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				return nil, fmt.Errorf("create data directory %s: %w. %s", dir, err, datadir.RepairHint(dir))
+			}
+			// Fail here, naming the owner and the repair command, instead of letting the
+			// first migration die with SQLite's bare "attempt to write a readonly database".
+			if err := datadir.Check(dbPath); err != nil {
+				return nil, err
+			}
 		}
 	} else if driver != "postgres" {
 		return nil, fmt.Errorf("unsupported database driver %q", cfg.Driver)

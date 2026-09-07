@@ -55,7 +55,7 @@ React `/app`까지 포함하는 직접 빌드는 frontend 산출물을 embed 경
 ```bash
 corepack enable
 pnpm --dir web install --frozen-lockfile
-VITE_UI_VERSION=v0.83.0 pnpm --dir web build
+VITE_UI_VERSION=v0.83.1 pnpm --dir web build
 find internal/appui/dist -mindepth 1 ! -name '.gitkeep' -delete
 cp -R web/dist/. internal/appui/dist/
 test -s internal/appui/dist/index.html
@@ -63,7 +63,7 @@ test -n "$(find internal/appui/dist/assets -type f -print -quit)"
 
 GOOS=linux GOARCH=amd64 CGO_ENABLED=0 \
   go build -trimpath \
-  -ldflags "-s -w -X vibe-coders/internal/proxy.AppVersion=v0.83.0" \
+  -ldflags "-s -w -X vibe-coders/internal/proxy.AppVersion=v0.83.1" \
   -o gateway ./cmd/gateway
 UI_APP_ENABLED=true ./gateway
 ```
@@ -74,17 +74,20 @@ UI_APP_ENABLED=true ./gateway
 ### 2.3 Docker
 
 ```bash
-docker build --build-arg VERSION=v0.83.0 -t ai-coding-proxy-gateway:v0.83.0 .
+docker build --build-arg VERSION=v0.83.1 -t ai-coding-proxy-gateway:v0.83.1 .
 
-export GATEWAY_VERSION=v0.83.0
+export GATEWAY_VERSION=v0.83.1
 export UPSTREAM_API_KEY='<실제 upstream key>'
 scripts/init-deployment-env.sh /opt/proxy-gateway/gateway.env
 docker volume create proxy-gateway-data >/dev/null
+# 기존 볼륨·바인드 마운트를 재사용할 때 소유권을 nonroot(65532)로 복구합니다. 새 볼륨은 변경 없이 끝납니다.
+docker run --rm --user 0:0 --mount source=proxy-gateway-data,target=/data \
+  ai-coding-proxy-gateway:v0.83.1 repair-data-dir
 docker run -d --name proxy-gateway --restart=always \
   -p 8080:8080 \
   --mount source=proxy-gateway-data,target=/data \
   --env-file /opt/proxy-gateway/gateway.env \
-  ai-coding-proxy-gateway:v0.83.0
+  ai-coding-proxy-gateway:v0.83.1
 ```
 
 Dockerfile은 Node 24+pnpm frozen frontend builder → Go 1.26.8 embed builder → distroless
@@ -99,7 +102,7 @@ nonroot의 3-stage 구조입니다. React 정적 에셋은 Go 바이너리에 �
 `/opt/proxy-gateway/gateway.env`에 고정합니다.
 
 ```bash
-export GATEWAY_VERSION=v0.83.0
+export GATEWAY_VERSION=v0.83.1
 export UPSTREAM_API_KEY='<실제 upstream key>'
 scripts/init-deployment-env.sh /opt/proxy-gateway/gateway.env
 docker compose --env-file /opt/proxy-gateway/gateway.env up -d
@@ -110,7 +113,8 @@ docker compose --env-file /opt/proxy-gateway/gateway.env logs -f gateway
 검증한 뒤 요청한 `GATEWAY_VERSION` 행만 원자 갱신합니다. 기존 secret은 회전하지 않습니다.
 개발용 Compose에서만 같은 스크립트에 저장소의 `.env`
 경로를 넘길 수 있으며 이 경우에도 권한은 0600이어야 합니다. 운영 중에는
-`docker compose down -v`를 실행하지 마세요.
+`docker compose down -v`를 실행하지 마세요. 이전 배포의 볼륨이나 바인드 마운트를 이어받는다면
+`up -d` 전에 2.3의 `repair-data-dir` 1회 실행으로 소유권을 nonroot에 맞춥니다.
 
 ### 2.5 오프라인망 적재
 
@@ -121,17 +125,17 @@ jq는 Docker builder 외부에 설치할 필요가 없습니다. 패키징 전�
 
 ```bash
 # 인터넷이 되는 환경에서 산출
-./scripts/release.sh -v v0.83.0 -p linux/amd64
-# 기존 이미지·sha256·README + SBOM-v0.83.0.spdx.json +
-# THIRD_PARTY_LICENSES-v0.83.0.md 생성
+./scripts/release.sh -v v0.83.1 -p linux/amd64
+# 기존 이미지·sha256·README + SBOM-v0.83.1.spdx.json +
+# THIRD_PARTY_LICENSES-v0.83.1.md 생성
 ```
 
 폐쇄망 서버에서:
 
 ```bash
-sha256sum -c ai-coding-proxy-gateway-v0.83.0.tar.gz.sha256
-gunzip -c ai-coding-proxy-gateway-v0.83.0.tar.gz | docker load
-docker run -d ... -e UI_APP_ENABLED=true ai-coding-proxy-gateway:v0.83.0
+sha256sum -c ai-coding-proxy-gateway-v0.83.1.tar.gz.sha256
+gunzip -c ai-coding-proxy-gateway-v0.83.1.tar.gz | docker load
+docker run -d ... -e UI_APP_ENABLED=true ai-coding-proxy-gateway:v0.83.1
 ```
 
 ---
@@ -302,7 +306,7 @@ SQLite 일관성을 위해 먼저 gateway를 중지합니다. stopped gateway co
 ```bash
 docker compose --env-file /opt/proxy-gateway/gateway.env stop gateway
 scripts/backup-volume.sh backup \
-  --image ai-coding-proxy-gateway:v0.83.0 \
+  --image ai-coding-proxy-gateway:v0.83.1 \
   --volume proxy-gateway-data \
   --env-file /opt/proxy-gateway/gateway.env \
   --output-dir /opt/proxy-gateway/backups
@@ -332,7 +336,7 @@ SQLite header/가능한 경우 `PRAGMA quick_check`, 내부 파일 checksum, vol
 docker compose --env-file /opt/proxy-gateway/gateway.env down
 
 scripts/backup-volume.sh restore \
-  --image ai-coding-proxy-gateway:v0.83.0 \
+  --image ai-coding-proxy-gateway:v0.83.1 \
   --volume proxy-gateway-data \
   --env-file /opt/proxy-gateway/gateway.env \
   --output-dir /opt/proxy-gateway/backups \
@@ -437,6 +441,51 @@ SQLite 의 경우 디스크가 가득 차면 모든 쓰기가 실패하고 `fall
 2. 어드민 설정 → 변경 이력 → 의심 시점부터 정렬 → CSV 다운로드
 3. 프롬프트 탭에서 해당 키 ID 로 검색 + #의심 태그 부여
 4. `GATEWAY_SECRET` 까지 유출되었다면 — provider key 모두 재발급 + DB 의 `provider_configs` 갱신
+
+### 8.6 컨테이너가 8080에서 뜨지 않음 (readonly database / 데이터 디렉터리 권한)
+
+증상: 컨테이너가 `restart=always`로 재시작을 반복하고 `curl http://<HOST>:8080/ready`가 연결조차 되지 않습니다.
+`docker logs --tail 20 proxy-gateway`에 다음 중 하나가 보입니다.
+
+- `open database error="data directory /data is not writable by the gateway process (uid=65532 gid=65532); /data (owner 0:0, mode drwxr-xr-x) ..."`
+- `migrate database error="attempt to write a readonly database (8)"` (v0.83.0 이하)
+
+원인: 게이트웨이는 distroless nonroot(uid 65532)로 실행되는데 `/data`를 다른 사용자가 만들었거나 기록한 경우입니다.
+대표적으로 root가 `mkdir`한 호스트 디렉터리를 `-v /opt/proxy-gateway/data:/data`로 바인드 마운트한 경우,
+root로 실행한 다른 프로세스가 볼륨을 채운 경우, Kubernetes PVC를 `fsGroup` 없이 마운트한 경우입니다.
+이미지에는 셸과 `chown`이 없으므로 게이트웨이 바이너리의 보조 명령으로 진단·복구합니다.
+
+1. 진단 (nonroot로 실행되며 아무것도 바꾸지 않습니다)
+
+   ```bash
+   docker run --rm --mount source=proxy-gateway-data,target=/data \
+     ai-coding-proxy-gateway:v0.83.1 check-data-dir
+   ```
+
+   사용 불가한 경로마다 소유자·권한과 원인을 출력하고 종료 코드 1을 반환합니다.
+
+2. 복구 (root로 1회 실행, `/data` 이하를 65532:65532로 재소유하고 소유자 읽기·쓰기 비트를 복원)
+
+   ```bash
+   docker run --rm --user 0:0 --mount source=proxy-gateway-data,target=/data \
+     ai-coding-proxy-gateway:v0.83.1 repair-data-dir
+   ```
+
+   변경한 항목을 모두 출력하며, 다시 실행해도 변경이 없습니다. 심볼릭 링크는 재소유만 하고 따라가지 않습니다.
+   다른 uid로 실행하도록 이미지를 바꿨다면 `--uid`/`--gid`로 지정합니다.
+
+3. 재검증 후 재기동
+
+   ```bash
+   docker run --rm --mount source=proxy-gateway-data,target=/data \
+     ai-coding-proxy-gateway:v0.83.1 check-data-dir
+   docker restart proxy-gateway
+   curl -fsS http://<HOST>:8080/ready
+   ```
+
+바인드 마운트는 `--mount source=...` 대신 `-v /opt/proxy-gateway/data:/data`를 그대로 씁니다.
+Kubernetes는 `securityContext.fsGroup: 65532`를 지정하거나 위 복구 명령을 initContainer(`runAsUser: 0`)로 실행합니다.
+`LOG_FALLBACK_PATH` 디렉터리가 쓰기 불가하면 기동은 되지만 시작 시 WARN 로그가 남고 DB 장애 중 요청 로그가 유실되므로 같은 방법으로 복구합니다.
 
 ---
 

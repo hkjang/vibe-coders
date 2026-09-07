@@ -5,8 +5,8 @@
 #   ./scripts/release.sh [-v VERSION] [-i IMAGE] [-p PLATFORM]
 #
 # 예:
-#   ./scripts/release.sh -v v0.83.0
-#   ./scripts/release.sh -v v0.83.0 -p linux/arm64
+#   ./scripts/release.sh -v v0.83.1
+#   ./scripts/release.sh -v v0.83.1 -p linux/arm64
 set -euo pipefail
 
 IMAGE="ai-coding-proxy-gateway"
@@ -300,6 +300,8 @@ cat > "$README_PATH" <<EOF
        grep -qxF 'GATEWAY_VERSION=${VERSION}' "\$ENV_FILE" ||
        { echo "gateway.env의 필수 비밀값이 유효하지 않습니다." >&2; exit 1; }
    docker volume create proxy-gateway-data >/dev/null || exit 1
+   # 기존 볼륨·바인드 마운트를 재사용할 때 소유권을 nonroot(65532)로 복구합니다. 새 볼륨은 변경 없이 끝납니다.
+   docker run --rm --user 0:0 --mount source=proxy-gateway-data,target=/data ${TAG} repair-data-dir || exit 1
    docker run -d --name proxy-gateway --restart=always \\
        -p 8080:8080 \\
        --mount source=proxy-gateway-data,target=/data \\
@@ -345,6 +347,28 @@ cat > "$README_PATH" <<EOF
    archive와 sidecar를 함께 암호화 보관하십시오. 복구는 컨테이너를 제거한 뒤
    \`./${BACKUP_NAME} restore --help\`의 검증·확인 절차를 따릅니다. 수동 volume 삭제로
    이 절차를 우회하지 마십시오.
+
+7. 기동 실패 진단 (8080 미응답, readonly database)
+
+   컨테이너가 재시작을 반복하고 8080이 열리지 않으면 로그와 데이터 디렉터리 상태를 먼저 확인합니다.
+
+   \`\`\`bash
+   docker logs --tail 20 proxy-gateway
+   docker run --rm --mount source=proxy-gateway-data,target=/data ${TAG} check-data-dir
+   \`\`\`
+
+   \`data directory /data is not writable\` 또는 \`attempt to write a readonly database\`가 보이면
+   \`/data\`를 다른 사용자(root 등)가 기록한 상태입니다. 게이트웨이는 nonroot(uid 65532)로 실행되고
+   이미지에는 셸이 없으므로, 같은 이미지로 한 번만 소유권을 복구한 뒤 재기동합니다.
+
+   \`\`\`bash
+   docker run --rm --user 0:0 --mount source=proxy-gateway-data,target=/data ${TAG} repair-data-dir
+   docker run --rm --mount source=proxy-gateway-data,target=/data ${TAG} check-data-dir
+   docker restart proxy-gateway
+   \`\`\`
+
+   바인드 마운트는 \`--mount\` 대신 \`-v <호스트 경로>:/data\`를 쓰고, Kubernetes는
+   \`securityContext.fsGroup: 65532\`를 지정하거나 같은 명령을 initContainer로 실행합니다.
 EOF
 
 if [[ "$REQUIRES_COMPLIANCE" == "1" ]]; then

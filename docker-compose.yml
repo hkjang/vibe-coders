@@ -7,6 +7,8 @@ services:
     restart: always
     ports:
       - "8080:8080"
+    # 이전 배포의 볼륨이나 바인드 마운트를 이어받는다면 up 전에 한 번만 nonroot(65532) 소유권을 복구한다. 새 볼륨은 변경 없음:
+    #   docker run --rm --user 0:0 --mount source=proxy-gateway-data,target=/data ai-coding-proxy-gateway:<GATEWAY_VERSION> repair-data-dir
     volumes:
       - gateway_data:/data
     environment:

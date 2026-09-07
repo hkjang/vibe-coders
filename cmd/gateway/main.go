@@ -7,15 +7,21 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
 	"vibe-coders/internal/config"
+	"vibe-coders/internal/datadir"
 	"vibe-coders/internal/proxy"
 	"vibe-coders/internal/store"
 )
 
 func main() {
+	if code, handled := runMaintenanceCommand(os.Args[1:], os.Stdout, os.Stderr); handled {
+		os.Exit(code)
+	}
+
 	cfg, err := config.Load()
 	if err != nil {
 		slog.Error("invalid configuration", "error", err)
@@ -24,14 +30,22 @@ func main() {
 
 	db, err := store.Open(context.Background(), cfg.Database)
 	if err != nil {
-		slog.Error("open database", "error", err)
+		slog.Error("open database", "error", describeStartupError(err, cfg.Database.DSN))
 		os.Exit(1)
 	}
 	defer db.Close()
 
 	if err := db.Migrate(context.Background()); err != nil {
-		slog.Error("migrate database", "error", err)
+		slog.Error("migrate database", "error", describeStartupError(err, cfg.Database.DSN))
 		os.Exit(1)
+	}
+
+	// The fallback file only matters once the database is unavailable, which is the
+	// worst moment to discover its directory was never writable. Warn now instead.
+	if cfg.Logging.FallbackPath != "" {
+		if err := datadir.CheckDir(filepath.Dir(cfg.Logging.FallbackPath)); err != nil {
+			slog.Warn("fallback log directory is not writable; request logs queued while the database is down will be lost", "path", cfg.Logging.FallbackPath, "error", err)
+		}
 	}
 
 	logger := store.NewAsyncLogger(db, cfg.Logging.QueueSize, cfg.Logging.FallbackPath)
