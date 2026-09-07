@@ -89,3 +89,39 @@ func TestPromptLabStoreLifecycle(t *testing.T) {
 		t.Error("runs should be deleted with experiment")
 	}
 }
+
+// Renaming an experiment used to be impossible: the update read only "status", so
+// fixing a title meant deleting the experiment along with its test cases and runs.
+func TestPromptExperimentPartialUpdateKeepsUntouchedFields(t *testing.T) {
+	db := openTestStore(t)
+	defer db.Close()
+	ctx := t.Context()
+
+	if err := db.CreatePromptExperiment(ctx, store.PromptExperiment{
+		ID: "e1", Title: "Draft title", Description: "first note", Owner: "me", Status: "active",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := db.UpdatePromptExperiment(ctx, "e1", "Reviewed title", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	exp, found, err := db.GetPromptExperiment(ctx, "e1")
+	if err != nil || !found {
+		t.Fatalf("lookup after rename: found=%v err=%v", found, err)
+	}
+	if exp.Title != "Reviewed title" || exp.Description != "first note" || exp.Status != "active" {
+		t.Fatalf("rename changed untouched fields: %+v", exp)
+	}
+
+	if err := db.UpdatePromptExperiment(ctx, "e1", "", "second note", "archived"); err != nil {
+		t.Fatal(err)
+	}
+	exp, _, err = db.GetPromptExperiment(ctx, "e1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if exp.Title != "Reviewed title" || exp.Description != "second note" || exp.Status != "archived" {
+		t.Fatalf("partial update = %+v", exp)
+	}
+}

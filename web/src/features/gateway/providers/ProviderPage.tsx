@@ -205,21 +205,25 @@ export function ProviderPage(): React.JSX.Element {
   const [sloEditing, setSloEditing] = useState<ProviderCatalogRow | undefined>();
   const [removing, setRemoving] = useState<ProviderCatalogRow | undefined>();
   const writeDeniedReason = canWrite ? undefined : "공급자 변경은 admin:write 권한이 필요합니다.";
-  const redactedReason = "공급자 이름이 비공개 처리되어 이 화면에서는 변경할 수 없습니다.";
+  // Deleting a provider and editing its SLO key on an identifier the server resolves,
+  // so the opaque reference works for a provider whose name is redacted. Saving the
+  // provider itself is an upsert on the name, which a redacted row cannot supply.
+  const redactedSaveReason = "공급자 이름이 비공개 처리되어 연결 설정은 기존 화면에서 변경합니다.";
 
   const rememberAdminTrigger = (event: React.MouseEvent<HTMLButtonElement>): void => {
     adminReturnFocusRef.current = event.currentTarget;
   };
   const renderRowActions = useCallback(
     (row: ProviderCatalogRow): React.JSX.Element => {
-      const blocked = !canWrite ? writeDeniedReason : row.nameRedacted ? redactedReason : undefined;
+      const blocked = writeDeniedReason;
+      const saveBlocked = blocked ?? (row.nameRedacted ? redactedSaveReason : undefined);
       return (
         <>
           <Button
             size="small"
             variant="ghost"
-            disabled={blocked !== undefined}
-            title={blocked}
+            disabled={saveBlocked !== undefined}
+            title={saveBlocked}
             onClick={(event) => {
               rememberAdminTrigger(event);
               setEditing({ row });
@@ -230,8 +234,8 @@ export function ProviderPage(): React.JSX.Element {
           <Button
             size="small"
             variant="ghost"
-            disabled={blocked !== undefined || admin.save.isPending}
-            title={blocked}
+            disabled={saveBlocked !== undefined || admin.save.isPending}
+            title={saveBlocked}
             onClick={(event) => {
               rememberAdminTrigger(event);
               void admin.save.mutateAsync({
@@ -274,7 +278,7 @@ export function ProviderPage(): React.JSX.Element {
         </>
       );
     },
-    [admin.save, canWrite, writeDeniedReason],
+    [admin.save, redactedSaveReason, writeDeniedReason],
   );
 
   const enabledCount = allRows.filter((row) => row.provider.enabled).length;
@@ -541,7 +545,9 @@ export function ProviderPage(): React.JSX.Element {
         confirmLabel="삭제"
         onConfirm={async () => {
           if (!removing) return;
-          await admin.remove.mutateAsync(removing.provider.name);
+          // The reference resolves server-side, so a provider whose name is
+          // redacted can still be removed from here.
+          await admin.remove.mutateAsync(removing.nameRedacted ? removing.identity : removing.provider.name);
           setRemoving(undefined);
         }}
       />

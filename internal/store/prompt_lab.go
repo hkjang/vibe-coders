@@ -126,6 +126,19 @@ func (s *SQLStore) UpdatePromptExperimentStatus(ctx context.Context, id, status 
 	return err
 }
 
+// UpdatePromptExperiment applies a partial edit. An empty string leaves that column
+// as it is, so a caller can rename an experiment without restating its status.
+func (s *SQLStore) UpdatePromptExperiment(ctx context.Context, id, title, description, status string) error {
+	_, err := s.db.ExecContext(ctx, s.bind(`UPDATE prompt_experiments SET
+			title = CASE WHEN ? = '' THEN title ELSE ? END,
+			description = CASE WHEN ? = '' THEN description ELSE ? END,
+			status = CASE WHEN ? = '' THEN status ELSE ? END,
+			updated_at = ?
+		WHERE id = ?`),
+		title, title, description, description, status, status, nowRFC(), id)
+	return err
+}
+
 func (s *SQLStore) DeletePromptExperiment(ctx context.Context, id string) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {

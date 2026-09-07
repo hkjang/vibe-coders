@@ -58,9 +58,20 @@ const routingRuleListSchema = looseObject({ rules: list(routingRuleShape) });
 const routingRuleWriteSchema = looseObject({ rule: looseObject(routingRuleShape).optional() });
 const deletedSchema = looseObject({ id: text, status: text });
 
-/** `PATCH /admin/routing-rules/{id}` — the handler reads `enabled` only. */
+/**
+ * `PATCH /admin/routing-rules/{id}` — a partial edit. Absent fields keep their
+ * stored value, and the server validates the merged rule, so moving one
+ * complexity bound past the other is rejected rather than stored.
+ */
 export interface RoutingRuleToggleInput {
-  enabled: boolean;
+  enabled?: boolean;
+  priority?: number;
+  match_pattern?: string;
+  min_complexity?: number;
+  max_complexity?: number;
+  target_model?: string;
+  target_provider?: string;
+  note?: string;
 }
 
 export interface RoutingRuleInput {

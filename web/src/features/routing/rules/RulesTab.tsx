@@ -6,7 +6,11 @@ import { z } from "zod";
 import { routingRulesQueryKey, writeScopeMessage } from "@/features/routing/rules/routing-shared";
 import { QueryFailureNotice, ScopeNotice } from "@/features/routing/rules/routing-ui";
 import { apiClient } from "@/shared/api/client";
-import { type RoutingRule, type RoutingRuleInput } from "@/shared/api/domains/routing";
+import {
+  type RoutingRule,
+  type RoutingRuleInput,
+  type RoutingRuleToggleInput,
+} from "@/shared/api/domains/routing";
 import { withPathParams } from "@/shared/api/endpoint-factory";
 import { endpoints } from "@/shared/api/endpoints";
 import { FormDialog } from "@/shared/components/form/FormDialog";
@@ -46,6 +50,7 @@ type RuleFormValues = z.output<typeof ruleFormSchema>;
 
 interface RuleRowActions {
   onDelete: (rule: RoutingRule, trigger: HTMLButtonElement) => void;
+  onEdit: (rule: RoutingRule, trigger: HTMLButtonElement) => void;
   onToggle: (rule: RoutingRule, trigger: HTMLButtonElement) => void;
 }
 
@@ -118,6 +123,16 @@ function ruleColumns(
           <Button
             size="small"
             variant="ghost"
+            aria-label={`${ruleLabel(row.original)} 규칙 수정`}
+            disabled={!canWrite}
+            title={canWrite ? undefined : writeScopeMessage}
+            onClick={(event) => actions.onEdit(row.original, event.currentTarget)}
+          >
+            수정
+          </Button>
+          <Button
+            size="small"
+            variant="ghost"
             aria-label={`${ruleLabel(row.original)} 규칙 삭제`}
             disabled={!canWrite}
             title={canWrite ? undefined : writeScopeMessage}
@@ -134,11 +149,13 @@ function ruleColumns(
 export function RulesTab({ canWrite }: { canWrite: boolean }): React.JSX.Element {
   const [searchParams, updateSearch] = useSearchState();
   const [createOpen, setCreateOpen] = useState(false);
+  const [editing, setEditing] = useState<RoutingRule>();
   const [pendingDelete, setPendingDelete] = useState<RoutingRule>();
   const [pendingToggle, setPendingToggle] = useState<RoutingRule>();
   const createTrigger = useRef<HTMLButtonElement>(null);
   const [deleteTrigger, setDeleteTrigger] = useState<HTMLElement | null>(null);
   const [toggleTrigger, setToggleTrigger] = useState<HTMLElement | null>(null);
+  const [editTrigger, setEditTrigger] = useState<HTMLElement | null>(null);
 
   const rules = useQuery({
     queryKey: routingRulesQueryKey,
@@ -168,6 +185,14 @@ export function RulesTab({ canWrite }: { canWrite: boolean }): React.JSX.Element
     invalidates: [routingRulesQueryKey],
     successMessage: "라우팅 규칙을 삭제했습니다.",
     errorMessage: "라우팅 규칙을 삭제하지 못했습니다.",
+  });
+
+  const updateRule = useMutationFeedback<{ id: string; body: RoutingRuleToggleInput }, unknown>({
+    mutate: ({ body, id }) =>
+      apiClient.request(withPathParams(endpoints.domains.routing.rules.update, { id }), { body }),
+    invalidates: [routingRulesQueryKey],
+    successMessage: "라우팅 규칙을 수정했습니다.",
+    errorMessage: "라우팅 규칙을 수정하지 못했습니다.",
   });
 
   const toggleRule = useMutationFeedback<{ id: string; enabled: boolean }, unknown>({
@@ -224,6 +249,19 @@ export function RulesTab({ canWrite }: { canWrite: boolean }): React.JSX.Element
               setDeleteTrigger(trigger);
               setPendingDelete(rule);
             },
+            onEdit: (rule, trigger) => {
+              setEditTrigger(trigger);
+              form.reset({
+                match_pattern: rule.match_pattern,
+                target_model: rule.target_model,
+                target_provider: rule.target_provider,
+                min_complexity: rule.min_complexity,
+                max_complexity: rule.max_complexity,
+                priority: rule.priority,
+                note: rule.note,
+              });
+              setEditing(rule);
+            },
             onToggle: (rule, trigger) => {
               setToggleTrigger(trigger);
               setPendingToggle(rule);
@@ -248,6 +286,13 @@ export function RulesTab({ canWrite }: { canWrite: boolean }): React.JSX.Element
         description="복잡도 범위와 모델 패턴이 맞는 요청을 지정한 모델로 라우팅합니다."
         form={form}
         onOpenChange={(open) => {
+          if (editing) {
+            if (!open) {
+              setEditing(undefined);
+              form.reset();
+            }
+            return;
+          }
           setCreateOpen(open);
           if (!open) form.reset();
         }}
@@ -255,21 +300,29 @@ export function RulesTab({ canWrite }: { canWrite: boolean }): React.JSX.Element
           if (values.min_complexity > values.max_complexity) {
             throw new Error("복잡도 범위는 최소값이 최대값보다 클 수 없습니다.");
           }
-          await createRule.mutateAsync({
+          const body = {
             match_pattern: values.match_pattern || "*",
             target_model: values.target_model,
             target_provider: values.target_provider,
             min_complexity: values.min_complexity,
             max_complexity: values.max_complexity,
             priority: values.priority,
-            enabled: true,
             note: values.note,
-          });
+          };
+          if (editing) {
+            // Editing in place keeps the rule live. Deleting and recreating it
+            // would route traffic differently for as long as it is gone.
+            await updateRule.mutateAsync({ id: editing.id, body });
+            setEditing(undefined);
+            form.reset();
+            return;
+          }
+          await createRule.mutateAsync({ ...body, enabled: true });
         }}
-        open={createOpen}
-        returnFocusRef={createTrigger}
-        submitLabel="규칙 만들기"
-        title="라우팅 규칙 추가"
+        open={createOpen || editing !== undefined}
+        returnFocusRef={editing ? { current: editTrigger } : createTrigger}
+        submitLabel={editing ? "규칙 저장" : "규칙 만들기"}
+        title={editing ? "라우팅 규칙 수정" : "라우팅 규칙 추가"}
       >
         <FormField
           label="모델 패턴"

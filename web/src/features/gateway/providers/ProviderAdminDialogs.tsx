@@ -230,7 +230,7 @@ export function ProviderSloDialog({
       description="0을 넣으면 해당 항목은 평가하지 않습니다. 가용성과 비율은 0~1 사이의 값입니다."
       onSubmit={(values) =>
         onSubmit({
-          provider: row?.provider.name ?? "",
+          provider: (row?.nameRedacted ? row.identity : row?.provider.name) ?? "",
           availability_target: Number(values.availability_target || 0),
           p95_latency_target_ms: Number(values.p95_latency_target_ms || 0),
           error_rate_target: Number(values.error_rate_target || 0),

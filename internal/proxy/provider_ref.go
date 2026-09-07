@@ -1,5 +1,11 @@
 package proxy
 
+import (
+	"context"
+	"crypto/subtle"
+	"strings"
+)
+
 const (
 	providerRefPrefix = "prv_"
 	// A full SHA-256 digest is 43 bytes in unpadded base64url form.
@@ -44,4 +50,32 @@ func (s *Server) providerRef(provider string) string {
 
 func (s *Server) systemProviderRef(provider string) string {
 	return s.providerRefsSnapshot().system(provider)
+}
+
+// resolveProviderIdentifier maps what a caller sent to the stored provider name.
+//
+// The console is served provider names redacted, with an opaque reference in their
+// place, so for those providers it can only send the reference back. Write endpoints
+// that key on the name would otherwise be unreachable for exactly the providers the
+// projection protects. Anything that is not a reference is taken as the name itself,
+// which keeps existing callers working.
+//
+// The reference is an HMAC and cannot be reversed, so the match is made by hashing
+// each configured provider and comparing in constant time.
+func (s *Server) resolveProviderIdentifier(ctx context.Context, identifier string) (string, bool, error) {
+	identifier = strings.TrimSpace(identifier)
+	if len(identifier) != providerRefLength || !strings.HasPrefix(identifier, providerRefPrefix) {
+		return identifier, identifier != "", nil
+	}
+	providers, err := s.db.ListProviders(ctx)
+	if err != nil {
+		return "", false, err
+	}
+	refs := s.providerRefsSnapshot()
+	for _, provider := range providers {
+		if subtle.ConstantTimeCompare([]byte(refs.physical(provider.Name)), []byte(identifier)) == 1 {
+			return provider.Name, true, nil
+		}
+	}
+	return "", false, nil
 }

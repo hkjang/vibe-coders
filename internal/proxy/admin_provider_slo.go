@@ -88,6 +88,15 @@ func (s *Server) handleProviderSLOs(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		p.Provider = strings.TrimSpace(p.Provider)
+		if resolved, ok, err := s.resolveProviderIdentifier(r.Context(), p.Provider); err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "provider_lookup_failed")
+			return
+		} else if p.Provider != "" && !ok {
+			writeOpenAIError(w, http.StatusNotFound, "provider not found", "invalid_request_error", "provider_not_found")
+			return
+		} else {
+			p.Provider = resolved
+		}
 		if p.Provider == "" {
 			writeOpenAIError(w, http.StatusBadRequest, "provider is required", "invalid_request_error", "missing_provider")
 			return
@@ -144,6 +153,16 @@ func (s *Server) handleProviderSLOs(w http.ResponseWriter, r *http.Request) {
 			writeOpenAIError(w, http.StatusBadRequest, "provider query param is required", "invalid_request_error", "missing_provider")
 			return
 		}
+		resolved, ok, err := s.resolveProviderIdentifier(r.Context(), provider)
+		if err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "provider_lookup_failed")
+			return
+		}
+		if !ok {
+			writeOpenAIError(w, http.StatusNotFound, "provider not found", "invalid_request_error", "provider_not_found")
+			return
+		}
+		provider = resolved
 		if err := s.db.DeleteProviderSLO(r.Context(), provider); err != nil {
 			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "provider_slo_delete_failed")
 			return

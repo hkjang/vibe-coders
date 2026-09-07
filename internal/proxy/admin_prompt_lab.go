@@ -182,19 +182,48 @@ func (s *Server) handlePromptLabExperimentByID(w http.ResponseWriter, r *http.Re
 		cases, _ := s.db.ListPromptTestCases(r.Context(), id)
 		writeJSON(w, http.StatusOK, map[string]any{"experiment": exp, "test_cases": cases})
 	case http.MethodPatch:
+		// Renaming an experiment used to be impossible: only status was read, so a
+		// typo in a title could only be fixed by deleting the experiment and its runs.
 		var p struct {
-			Status string `json:"status"`
+			Title       *string `json:"title"`
+			Description *string `json:"description"`
+			Status      *string `json:"status"`
 		}
-		_ = json.NewDecoder(r.Body).Decode(&p)
-		if p.Status != "active" && p.Status != "archived" {
-			writeOpenAIError(w, http.StatusBadRequest, "status must be active|archived", "invalid_request_error", "bad_status")
+		if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+			writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "invalid_body")
 			return
 		}
-		if err := s.db.UpdatePromptExperimentStatus(r.Context(), id, p.Status); err != nil {
+		title, description, status := "", "", ""
+		if p.Title != nil {
+			if title = strings.TrimSpace(*p.Title); title == "" {
+				writeOpenAIError(w, http.StatusBadRequest, "title cannot be blank", "invalid_request_error", "bad_title")
+				return
+			}
+		}
+		if p.Description != nil {
+			description = strings.TrimSpace(*p.Description)
+		}
+		if p.Status != nil {
+			status = strings.TrimSpace(*p.Status)
+			if status != "active" && status != "archived" {
+				writeOpenAIError(w, http.StatusBadRequest, "status must be active|archived", "invalid_request_error", "bad_status")
+				return
+			}
+		}
+		if title == "" && description == "" && status == "" {
+			writeOpenAIError(w, http.StatusBadRequest, "nothing to update", "invalid_request_error", "empty_update")
+			return
+		}
+		if err := s.db.UpdatePromptExperiment(r.Context(), id, title, description, status); err != nil {
 			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "update_failed")
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"status": p.Status})
+		updated, found, err := s.db.GetPromptExperiment(r.Context(), id)
+		if err != nil || !found {
+			writeOpenAIError(w, http.StatusNotFound, "experiment not found", "invalid_request_error", "not_found")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"experiment": updated, "status": updated.Status})
 	case http.MethodDelete:
 		if err := s.db.DeletePromptExperiment(r.Context(), id); err != nil {
 			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "delete_failed")

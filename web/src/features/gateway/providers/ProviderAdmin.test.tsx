@@ -174,14 +174,37 @@ describe("ProviderPage administration", () => {
     expect(within(row as HTMLElement).getByRole("button", { name: "수정" })).toBeDisabled();
   });
 
-  it("blocks writes for a redacted provider name", async () => {
+  it("blocks only the name-keyed edit for a redacted provider", async () => {
     mockApi(handlers());
     renderProviders();
 
     const hiddenRow = (await screen.findByText(/공급자 이름 비공개/)).closest("tr");
+    // Saving is an upsert on the provider name, which a redacted row cannot supply.
     const edit = within(hiddenRow as HTMLElement).getByRole("button", { name: "수정" });
     expect(edit).toBeDisabled();
     expect(edit).toHaveAttribute("title", expect.stringContaining("비공개"));
+    // Deleting and editing the SLO resolve the opaque reference server-side.
+    expect(within(hiddenRow as HTMLElement).getByRole("button", { name: "삭제" })).toBeEnabled();
+    expect(within(hiddenRow as HTMLElement).getByRole("button", { name: "SLO" })).toBeEnabled();
+  });
+
+  it("deletes a redacted provider by its opaque reference", async () => {
+    const api = mockApi({
+      ...handlers(),
+      "DELETE /admin/providers/{name}": () => ({ deleted: "공급자 이름 비공개" }),
+    });
+    const user = userEvent.setup();
+    renderProviders();
+
+    const hiddenRow = (await screen.findByText(/공급자 이름 비공개/)).closest("tr");
+    await user.click(within(hiddenRow as HTMLElement).getByRole("button", { name: "삭제" }));
+    await user.click(await screen.findByRole("button", { name: "삭제", hidden: false }));
+
+    await waitFor(() =>
+      expect(api.calls.some((call) => call.key === `DELETE /admin/providers/${providerRef("hidden")}`)).toBe(
+        true,
+      ),
+    );
   });
 
   it("has no accessibility violations with the administration column", async () => {

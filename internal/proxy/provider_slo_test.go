@@ -294,3 +294,69 @@ func TestEvaluateProviderSLOs(t *testing.T) {
 		t.Error("idle provider with no traffic should not be flagged as breached")
 	}
 }
+
+// The console is served provider names redacted, with an opaque reference in their
+// place. Write endpoints keyed on the raw name were therefore unreachable for
+// exactly the providers the projection protects, so they must accept the reference.
+func TestProviderWritesAcceptTheOpaqueReferenceTheConsoleWasGiven(t *testing.T) {
+	server, db, gateway := newAdminModelsTestServer(t, "")
+	if err := db.UpsertProvider(t.Context(), store.ProviderConfig{
+		Name: "openai", BaseURL: "https://example.invalid", Enabled: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	ref := server.providerRef("openai")
+
+	saved := postJSON(t, gateway.URL+"/admin/providers/slo", "", map[string]any{
+		"provider": ref, "availability_target": 0.99, "enabled": true,
+	})
+	defer saved.Body.Close()
+	if saved.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(saved.Body)
+		t.Fatalf("save by reference status = %d body=%s", saved.StatusCode, body)
+	}
+	if _, found, err := db.GetProviderSLO(t.Context(), "openai"); err != nil || !found {
+		t.Fatalf("SLO was not stored under the provider name: found=%v err=%v", found, err)
+	}
+
+	unknown := postJSON(t, gateway.URL+"/admin/providers/slo", "", map[string]any{
+		"provider": providerRefPrefix + strings.Repeat("z", 43), "availability_target": 0.99,
+	})
+	defer unknown.Body.Close()
+	if unknown.StatusCode != http.StatusNotFound {
+		t.Fatalf("unknown reference status = %d, want 404", unknown.StatusCode)
+	}
+
+	deleteRequest, err := http.NewRequest(http.MethodDelete,
+		gateway.URL+"/admin/providers/slo?provider="+url.QueryEscape(ref), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deleted, err := http.DefaultClient.Do(deleteRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deleted.Body.Close()
+	if deleted.StatusCode != http.StatusOK {
+		t.Fatalf("delete SLO by reference status = %d", deleted.StatusCode)
+	}
+	if _, found, _ := db.GetProviderSLO(t.Context(), "openai"); found {
+		t.Fatal("SLO still stored after deleting by reference")
+	}
+
+	providerDelete, err := http.NewRequest(http.MethodDelete, gateway.URL+"/admin/providers/"+ref, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	removed, err := http.DefaultClient.Do(providerDelete)
+	if err != nil {
+		t.Fatal(err)
+	}
+	removed.Body.Close()
+	if removed.StatusCode != http.StatusOK {
+		t.Fatalf("delete provider by reference status = %d", removed.StatusCode)
+	}
+	if _, found, _ := db.GetProvider(t.Context(), "openai"); found {
+		t.Fatal("provider still configured after deleting by reference")
+	}
+}

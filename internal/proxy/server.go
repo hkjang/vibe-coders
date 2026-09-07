@@ -1330,6 +1330,18 @@ func (s *Server) handleProviderByName(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusBadRequest, "invalid provider name", "invalid_request_error", "invalid_provider_name")
 		return
 	}
+	// A caller that only ever saw the redacted projection has the reference, not
+	// the name, so accept either form here.
+	resolved, ok, err := s.resolveProviderIdentifier(r.Context(), name)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "provider_lookup_failed")
+		return
+	}
+	if !ok {
+		writeOpenAIError(w, http.StatusNotFound, "provider not found", "invalid_request_error", "provider_not_found")
+		return
+	}
+	name = resolved
 	switch r.Method {
 	case http.MethodDelete:
 		displayName := name
