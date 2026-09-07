@@ -13212,7 +13212,8 @@ const adminHTML = `<!doctype html>
 
     async function snapshotProfile(userID) {
       try {
-        await api('/admin/personalization/profiles/' + encodeURIComponent(userID) + '?window=30d&snapshot=1');
+        // Recording a snapshot is a write, so it goes over POST; the GET only reads.
+        await api('/admin/personalization/profiles/' + encodeURIComponent(userID) + '?window=30d', { method: 'POST' });
         await renderPersonalProfileDetail(userID);
       } catch (err) {
         toast('스냅샷 생성 실패: ' + err.message);

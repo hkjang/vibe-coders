@@ -191,6 +191,7 @@ const personalizationHandlers = {
   "GET /admin/personalization/model-affinity": () => modelAffinityResponse,
   "GET /admin/personalization/mcp-affinity": () => mcpAffinityResponse,
   "GET /admin/personalization/profiles/usr_alice": () => profileDetailResponse,
+  "POST /admin/personalization/profiles/usr_alice": () => profileDetailResponse,
 };
 
 function mockAllEndpoints(overrides: Record<string, () => unknown> = {}) {
@@ -302,12 +303,11 @@ describe("AssetsPage", () => {
     await waitFor(() =>
       expect(toastSpy.success).toHaveBeenCalledWith("현재 프로필을 스냅샷으로 저장했습니다."),
     );
+    // Taking a snapshot is a POST: reading the profile must never record one.
     const snapshotCall = api.calls.find(
-      (call) =>
-        call.key === "GET /admin/personalization/profiles/usr_alice" &&
-        (call.options.query as { snapshot?: string } | undefined)?.snapshot === "1",
+      (call) => call.key === "POST /admin/personalization/profiles/usr_alice",
     );
-    expect(snapshotCall?.options.query).toEqual({ window: "30d", snapshot: "1" });
+    expect(snapshotCall?.options.query).toEqual({ window: "30d" });
     expect(
       api.calls.filter((call) => call.key === "GET /admin/personalization/profiles/usr_alice").length,
     ).toBeGreaterThan(before);

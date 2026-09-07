@@ -127,7 +127,7 @@ func TestAnomaliesEndpoint(t *testing.T) {
 	var payload struct {
 		Anomalies      []store.AnomalyFinding     `json:"anomalies"`
 		CostAnomalies  []store.CostAnomalyFinding `json:"cost_anomalies"`
-		InsertedEvents []store.AnomalyEvent       `json:"inserted_events"`
+		DetectedEvents []store.AnomalyEvent       `json:"detected_events"`
 		Events         []store.AnomalyEvent       `json:"events"`
 		ZThreshold     float64                    `json:"z_threshold"`
 	}
@@ -140,8 +140,34 @@ func TestAnomaliesEndpoint(t *testing.T) {
 	if len(payload.CostAnomalies) == 0 {
 		t.Fatal("expected scope cost anomalies via endpoint")
 	}
-	if len(payload.InsertedEvents) == 0 || len(payload.Events) == 0 {
-		t.Fatalf("expected anomaly events to be recorded, inserted=%v events=%v", payload.InsertedEvents, payload.Events)
+	// Reading the screen must not record anything: it used to insert rows and
+	// fire webhooks, so opening a dashboard sent alerts.
+	if len(payload.Events) != 0 {
+		t.Fatalf("reading the anomalies endpoint recorded events: %v", payload.Events)
+	}
+	if len(payload.DetectedEvents) == 0 {
+		t.Fatal("expected the read to report what it detected")
+	}
+
+	// The scheduled sweep is what records them.
+	inserted, err := server.sweepAnomalies(t.Context(), 7*24*time.Hour, time.Hour, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(inserted) == 0 {
+		t.Fatal("scheduled sweep recorded nothing")
+	}
+	stored, err := db.ListAnomalyEvents(t.Context(), 50)
+	if err != nil || len(stored) == 0 {
+		t.Fatalf("stored events = %d err=%v", len(stored), err)
+	}
+	// Sweeping again inside the dedupe window must not duplicate the event.
+	repeat, err := server.sweepAnomalies(t.Context(), 7*24*time.Hour, time.Hour, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(repeat) != 0 {
+		t.Fatalf("repeat sweep recorded %d duplicate events", len(repeat))
 	}
 }
 
@@ -186,17 +212,11 @@ func TestAnomalyAlertWebhook(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		seedCostReq(t, db, "wr-"+itoaT(i), 900, now.Add(-time.Duration(i)*time.Minute))
 	}
-	resp, err := http.Get(proxy.URL + "/admin/anomalies?recent=1h&z=3")
+	inserted, err := server.sweepAnomalies(t.Context(), 7*24*time.Hour, time.Hour, 3)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
-	var payload struct {
-		InsertedEvents []store.AnomalyEvent `json:"inserted_events"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		t.Fatal(err)
-	}
+	payload := struct{ InsertedEvents []store.AnomalyEvent }{InsertedEvents: inserted}
 	if len(payload.InsertedEvents) == 0 {
 		t.Fatalf("expected inserted anomaly events")
 	}

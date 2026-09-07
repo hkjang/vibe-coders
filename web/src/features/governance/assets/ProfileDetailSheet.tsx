@@ -7,6 +7,7 @@ import { riskTone } from "@/features/governance/reports/report-window";
 import { apiClient } from "@/shared/api/client";
 import {
   personalizationProfileEndpoint,
+  personalizationSnapshotEndpoint,
   type ProfileCount,
   type ProfileSnapshot,
 } from "@/shared/api/domains/governance-reports";
@@ -85,11 +86,10 @@ export function ProfileDetailSheet({
       }),
   });
 
-  // `snapshot=1` is a GET with a side effect, so it only ever runs from this button.
   const snapshot = useMutationFeedback({
     mutate: () =>
-      apiClient.request(personalizationProfileEndpoint(userId), {
-        query: { window: reportWindow, snapshot: "1" },
+      apiClient.request(personalizationSnapshotEndpoint(userId), {
+        query: { window: reportWindow },
         routeId: "governance.assets",
       }),
     invalidates: [queryKey],

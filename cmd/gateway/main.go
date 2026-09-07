@@ -66,6 +66,11 @@ func main() {
 	alerts.Start()
 	defer alerts.Stop()
 
+	// Anomaly detection runs here rather than when somebody opens the dashboard.
+	anomalies := proxy.NewAnomalyWorker(srv, 5*time.Minute)
+	anomalies.Start()
+	defer anomalies.Stop()
+
 	httpServer := &http.Server{
 		Addr:              cfg.ListenAddr,
 		Handler:           srv.Routes(),

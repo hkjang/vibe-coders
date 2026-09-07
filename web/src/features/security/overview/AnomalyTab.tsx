@@ -143,7 +143,7 @@ export function AnomalyTab({ canRead, refreshInterval }: AnomalyTabProps): React
   const recent = isAnomalyWindow(requestedRecent) ? requestedRecent : "6h";
   const threshold = anomalyThreshold(params.get("z"));
 
-  const query: AnomaliesQuery = { recent, z: threshold, record: "0", limit: 100 };
+  const query: AnomaliesQuery = { recent, z: threshold, limit: 100 };
   const anomalies = useQuery({
     queryKey: ["security", "anomalies", recent, threshold],
     queryFn: ({ signal }) =>

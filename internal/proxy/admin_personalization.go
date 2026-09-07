@@ -447,9 +447,11 @@ func (s *Server) handlePersonalizationText2SQLHints(w http.ResponseWriter, r *ht
 }
 
 // handlePersonalProfileDetail computes one user's profile live, caches it as the latest
-// stored profile, and (with ?snapshot=1) records a point-in-time snapshot. Returns the
-// profile plus the user's snapshot history.
-// GET /admin/personalization/profiles/{user_id}?window=30d&snapshot=1
+// stored profile, and returns it with the user's snapshot history. Recording a
+// point-in-time snapshot is a write, so it happens only on POST — a GET never
+// mutates snapshot history, however it is spelled.
+// GET  /admin/personalization/profiles/{user_id}?window=30d  → read
+// POST /admin/personalization/profiles/{user_id}?window=30d  → read + record a snapshot
 func (s *Server) handlePersonalProfileDetail(w http.ResponseWriter, r *http.Request) {
 	if !s.authorizeAdmin(r) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
@@ -484,7 +486,11 @@ func (s *Server) handlePersonalProfileDetail(w http.ResponseWriter, r *http.Requ
 	}
 	// Cache the latest profile; best-effort.
 	_ = s.db.UpsertPersonalProfile(r.Context(), userID, string(encoded))
-	if strings.TrimSpace(r.URL.Query().Get("snapshot")) == "1" {
+	// A snapshot is an audited row that accumulates and feeds the drift
+	// comparison, so it is taken only when a caller asks for one. Reading the
+	// profile used to create one whenever the URL carried snapshot=1, which put
+	// that decision in a query parameter a refresh or a prefetch could repeat.
+	if r.Method == http.MethodPost {
 		if err := s.db.InsertPersonalProfileSnapshot(r.Context(), newID("pps"), userID, string(encoded)); err != nil {
 			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "snapshot_failed")
 			return

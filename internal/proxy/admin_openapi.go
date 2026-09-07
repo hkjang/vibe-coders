@@ -505,7 +505,7 @@ var apiEndpoints = []apiEndpoint{
 	{"/admin/personalization/mcp-affinity", []string{"get"}, "admin", "Per-user MCP tool affinity", false},
 	{"/admin/personalization/text2sql-hints", []string{"get"}, "admin", "Per-user Text2SQL report hints", false},
 	{"/admin/personalization/profiles", []string{"get"}, "admin", "Personal AI profiles", false},
-	{"/admin/personalization/profiles/{user_id}", []string{"get", "post"}, "admin", "Profile detail / snapshot / drift", false},
+	{"/admin/personalization/profiles/{user_id}", []string{"get", "post"}, "admin", "Profile detail and drift (GET); take a snapshot (POST)", false},
 	{"/admin/recommendations/adoption", []string{"get"}, "admin", "Recommendation adoption rates", false},
 	{"/admin/knowledge", []string{"get", "post"}, "admin", "Knowledge base entries", false},
 	{"/admin/knowledge/{id}", []string{"get", "put", "delete"}, "admin", "Knowledge entry by id", false},

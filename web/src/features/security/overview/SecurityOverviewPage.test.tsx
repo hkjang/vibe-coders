@@ -246,9 +246,7 @@ describe("SecurityOverviewPage", () => {
     renderPage("/security?tab=anomalies");
 
     expect(await screen.findByRole("table", { name: "모델 지표 이상" })).toHaveTextContent("gpt-4.1");
-    expect(api.calls.find((call) => call.key === "GET /admin/anomalies")?.options.query).toMatchObject({
-      record: "0",
-    });
+    expect(api.calls.find((call) => call.key === "GET /admin/anomalies")?.options.query).toMatchObject({});
   });
 
   it("비밀정보 탐지에서 조치 필터와 상세 패널이 동작한다", async () => {

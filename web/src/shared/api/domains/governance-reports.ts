@@ -8,6 +8,7 @@ import type {
   GetAdminPersonalizationModelAffinityData,
   GetAdminPersonalizationProfilesData,
   GetAdminPersonalizationProfilesUserIdData,
+  PostAdminPersonalizationProfilesUserIdData,
   GetAdminPersonalizationText2SqlHintsData,
   GetAdminProductivityData,
   GetAdminRecommendationsAdoptionData,
@@ -43,11 +44,7 @@ const hintsQuerySchema = z.object({
   min_count: z.number().int().min(2).max(100).optional(),
 });
 const productivityQuerySchema = z.object({ days: z.number().int().min(1).max(365).optional() });
-/** `snapshot=1` makes this GET record a point-in-time profile snapshot (side effect). */
-const profileQuerySchema = z.object({
-  window: z.string().optional(),
-  snapshot: z.literal("1").optional(),
-});
+const profileQuerySchema = z.object({ window: z.string().optional() });
 
 export type GovernanceWindowQuery = z.infer<typeof windowQuerySchema>;
 export type GovernanceWindowLimitQuery = z.infer<typeof windowLimitQuerySchema>;
@@ -336,6 +333,11 @@ const personalizationProfileDetail = operation<
   unknown
 >()("GET", "/admin/personalization/profiles/{user_id}", profileDetailSchema, profileQuerySchema);
 
+const personalizationProfileSnapshot = operation<
+  WithQuery<PostAdminPersonalizationProfilesUserIdData, GovernanceProfileQuery>,
+  unknown
+>()("POST", "/admin/personalization/profiles/{user_id}", profileDetailSchema, profileQuerySchema);
+
 /**
  * Binds one user id into the profile detail route. The user id is percent-encoded,
  * so it can never introduce a new path segment or query string.
@@ -343,6 +345,14 @@ const personalizationProfileDetail = operation<
 export function personalizationProfileEndpoint(userId: string): typeof personalizationProfileDetail {
   return {
     ...personalizationProfileDetail,
+    path: pathWithParams("/admin/personalization/profiles/{user_id}", { user_id: userId }),
+  };
+}
+
+/** The same route as a POST, which is what records a point-in-time snapshot. */
+export function personalizationSnapshotEndpoint(userId: string): typeof personalizationProfileSnapshot {
+  return {
+    ...personalizationProfileSnapshot,
     path: pathWithParams("/admin/personalization/profiles/{user_id}", { user_id: userId }),
   };
 }
@@ -385,6 +395,7 @@ export const governanceReportsEndpoints = {
       unknown
     >()("GET", "/admin/personalization/profiles", profilesSchema, windowLimitQuerySchema),
     profile: personalizationProfileDetail,
+    profileSnapshot: personalizationProfileSnapshot,
     coaching: operation<
       WithQuery<GetAdminPersonalizationCoachingData, GovernanceWindowLimitQuery>,
       unknown

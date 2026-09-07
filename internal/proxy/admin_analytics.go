@@ -144,38 +144,56 @@ func (s *Server) handleAnomalies(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	detected := anomalyEventsFromFindings(findings, costFindings, z, now.UTC())
-	record := !strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("record")), "0")
-	inserted := []store.AnomalyEvent{}
-	if record {
-		cfg := s.anomalyAlertConfig(r.Context())
-		dedupeWindow := now.Sub(recent)
-		if dedupeWindow < 15*time.Minute {
-			dedupeWindow = 15 * time.Minute
-		}
-		for _, event := range detected {
-			exists, err := s.db.RecentAnomalyEventExists(r.Context(), event.Scope, event.ScopeValue, event.Metric, now.Add(-dedupeWindow))
-			if err != nil || exists {
-				continue
-			}
-			event.ID = newID("anom")
-			if cfg.Enabled {
-				event.Channel, event.Status = s.notifyAnomalyEvent(r.Context(), cfg, event)
-			}
-			if err := s.db.InsertAnomalyEvent(r.Context(), event); err == nil {
-				inserted = append(inserted, event)
-			}
-		}
-	}
+	// Reading this screen used to record every detected anomaly and fire the
+	// configured webhooks, so opening a dashboard sent alerts. The sweep now runs
+	// on a schedule (see anomalyWorker) and this stays a read.
 	events, _ := s.db.ListAnomalyEvents(r.Context(), recentLimit(r))
 	writeJSON(w, http.StatusOK, map[string]any{
 		"anomalies":       findings,
 		"cost_anomalies":  costFindings,
 		"detected_events": detected,
-		"inserted_events": inserted,
 		"events":          events,
 		"alerts":          s.anomalyAlertConfig(r.Context()),
 		"z_threshold":     z,
 	})
+}
+
+// sweepAnomalies detects anomalies over the given windows, records the ones that
+// are not already covered by a recent event, and notifies when alerting is on.
+// It returns what it inserted so a caller can report or assert on the sweep.
+func (s *Server) sweepAnomalies(ctx context.Context, baseline, recent time.Duration, z float64) ([]store.AnomalyEvent, error) {
+	findings, err := s.db.ModelAnomalies(ctx, baseline, recent, z)
+	if err != nil {
+		return nil, err
+	}
+	costFindings, err := s.db.CostAnomalies(ctx, baseline, recent, z)
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now()
+	detected := anomalyEventsFromFindings(findings, costFindings, z, now.UTC())
+	cfg := s.anomalyAlertConfig(ctx)
+	// The same anomaly stays true for as long as the recent window covers it, so
+	// re-detecting it must not produce a second event or a second alert.
+	dedupeWindow := recent
+	if dedupeWindow < 15*time.Minute {
+		dedupeWindow = 15 * time.Minute
+	}
+	inserted := []store.AnomalyEvent{}
+	for _, event := range detected {
+		exists, err := s.db.RecentAnomalyEventExists(ctx, event.Scope, event.ScopeValue, event.Metric, now.Add(-dedupeWindow))
+		if err != nil || exists {
+			continue
+		}
+		event.ID = newID("anom")
+		if cfg.Enabled {
+			event.Channel, event.Status = s.notifyAnomalyEvent(ctx, cfg, event)
+		}
+		if err := s.db.InsertAnomalyEvent(ctx, event); err == nil {
+			inserted = append(inserted, event)
+		}
+	}
+	return inserted, nil
 }
 
 type anomalyAlertConfig struct {

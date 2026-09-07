@@ -210,8 +210,6 @@ const anomaliesQuerySchema = z.object({
   recent: z.string().optional(),
   baseline: z.string().optional(),
   z: z.number().positive().optional(),
-  // "0" keeps this screen read-only: the server records and notifies otherwise.
-  record: z.literal("0"),
   limit: z.number().int().positive().max(200).optional(),
 });
 export type AnomaliesQuery = z.infer<typeof anomaliesQuerySchema>;
