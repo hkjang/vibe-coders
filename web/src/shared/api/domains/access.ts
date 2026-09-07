@@ -12,6 +12,7 @@ import {
   adminTeamsSchema,
   adminUserDetailSchema,
   adminUserMutationSchema,
+  adminUserReportSchema,
   adminUsersSchema,
   apiKeyCreatedSchema,
   apiKeyUpdatedSchema,
@@ -19,12 +20,15 @@ import {
   benchmarkUsersSchema,
   budgetAlertsSchema,
   budgetCreatedSchema,
+  budgetProjectionSchema,
   deletionSchema,
   effectivePermissionsSchema,
   meActionsSchema,
   meConnectionDoctorSchema,
   meDashboardSchema,
   meKeyCreatedSchema,
+  meKeyRotatedSchema,
+  meKeyScopesSchema,
   meKeysSchema,
   meNotificationsSchema,
   meOnboardingPackSchema,
@@ -37,31 +41,29 @@ import {
   meSessionRevokedSchema,
   meSessionsRevokedSchema,
   meSessionsSchema,
+  meSkillActionSchema,
   meSkillsSchema,
   meSnoozeSchema,
-  quotaCreatedSchema,
+  quotaSavedSchema,
+  roleDeletedSchema,
   roleSavedSchema,
   teamDashboardSchema,
   teamOnboardingSchema,
   teamPopularSkillsSchema,
   teamPortalSchema,
+  teamReportDecisionSchema,
   teamReportsSchema,
   teamRiskSchema,
   teamSavingsChallengeSchema,
   teamScorecardSchema,
   teamTemplateCandidatesSchema,
 } from "@/shared/api/domains/access.schemas";
-import {
-  operation,
-  pathWithParams,
-  type ApiEndpointBase,
-  type OperationData,
-  type WithQuery,
-} from "@/shared/api/endpoint-factory";
+import { operation, type WithBody, type WithQuery } from "@/shared/api/endpoint-factory";
 import type {
   DeleteAdminApiKeysIdData,
   DeleteAdminBudgetsIdData,
   DeleteAdminQuotasIdData,
+  DeleteAdminRolesData,
   DeleteMeKeysIdData,
   DeleteMeSessionsIdData,
   GetAdminApiKeysData,
@@ -69,6 +71,7 @@ import type {
   GetAdminBenchmarkUsersData,
   GetAdminBudgetsAlertsData,
   GetAdminBudgetsData,
+  GetAdminBudgetsProjectionData,
   GetAdminIpsData,
   GetAdminIpsIpData,
   GetAdminQuotasData,
@@ -78,6 +81,7 @@ import type {
   GetAdminTeamsTeamData,
   GetAdminUsersData,
   GetAdminUsersIdData,
+  GetAdminUsersIdReportData,
   GetMeActionsData,
   GetMeDashboardData,
   GetMeKeysData,
@@ -100,7 +104,9 @@ import type {
   GetTeamSkillsPopularData,
   GetTeamTemplatesCandidatesData,
   PatchAdminApiKeysIdData,
+  PatchAdminQuotasIdData,
   PatchAdminUsersIdData,
+  PatchMeKeysIdData,
   PostAdminApiKeysData,
   PostAdminBudgetsData,
   PostAdminQuotasData,
@@ -110,24 +116,13 @@ import type {
   PostMeActionsSnoozeData,
   PostMeConnectionDoctorData,
   PostMeKeysData,
+  PostMeKeysIdRotateData,
   PostMeRecommendationsIdFeedbackData,
   PostMeSessionsRevokeOthersData,
+  PostMeSkillsNameFeedbackData,
+  PostMeSkillsNameRequestAccessData,
+  PostTeamReportsData,
 } from "@/shared/api/generated";
-
-/**
- * Replaces the generated (usually `never`) request body with the shape the legacy
- * handler actually reads. The OpenAPI document has no request schemas for these
- * operations, so the Go handler's decoded struct is the contract.
- */
-type WithBody<Data extends OperationData, Body> = Omit<Data, "body"> & { readonly body: Body };
-
-/** Substitutes `{id}`-style path parameters just before the call. */
-export function withPathParams<Endpoint extends ApiEndpointBase>(
-  endpoint: Endpoint,
-  params: Readonly<Record<string, string | number>>,
-): Endpoint {
-  return { ...endpoint, path: pathWithParams(endpoint.path, params) } as Endpoint;
-}
 
 /* ---------------------------------------------------------------- queries */
 
@@ -144,6 +139,8 @@ const budgetAlertsQuery = z.object({
   notify: z.number().int().optional(),
 });
 const hardDeleteQuery = z.object({ hard: z.number().int().optional() });
+/** `DELETE /admin/roles` takes the role in the query string, not the path. */
+const deleteRoleQuery = z.object({ role: z.string().min(1) });
 const meReportQuery = z.object({ window: z.enum(["weekly", "monthly"]).optional() });
 const meRequestsQuery = z.object({ limit: z.number().int().positive().max(100).optional() });
 const onboardingPackQuery = z.object({ client: z.string().optional() });
@@ -160,6 +157,7 @@ export type WindowQuery = z.infer<typeof windowQuery>;
 export type WindowLimitQuery = z.infer<typeof windowLimitQuery>;
 export type BudgetAlertsQuery = z.infer<typeof budgetAlertsQuery>;
 export type HardDeleteQuery = z.infer<typeof hardDeleteQuery>;
+export type DeleteRoleQuery = z.infer<typeof deleteRoleQuery>;
 export type MeReportQuery = z.infer<typeof meReportQuery>;
 export type MeRequestsQuery = z.infer<typeof meRequestsQuery>;
 export type OnboardingPackQuery = z.infer<typeof onboardingPackQuery>;
@@ -190,6 +188,13 @@ export interface CreateQuotaBody {
   scope: "api_key" | "team" | "ip" | "global";
   scope_value: string;
   period: "daily" | "monthly";
+  token_limit?: number;
+  krw_limit?: number;
+  enabled?: boolean;
+  note?: string;
+}
+/** `PATCH /admin/quotas/{id}` only reads these four; scope and period are fixed. */
+export interface UpdateQuotaBody {
   token_limit?: number;
   krw_limit?: number;
   enabled?: boolean;
@@ -245,6 +250,22 @@ export interface CreateMeKeyBody {
   scopes?: readonly string[];
   expires_at?: string;
 }
+/** An empty array clears the key's own scopes so it inherits the role's. */
+export interface UpdateMeKeyScopesBody {
+  scopes: readonly string[];
+}
+export interface SkillAccessRequestBody {
+  reason: string;
+}
+export interface SkillFeedbackBody {
+  rating: number;
+  comment?: string;
+}
+/** Anything other than "approve" is recorded as a rejection by the server. */
+export interface DecideTeamReportBody {
+  report_id: string;
+  action: "approve" | "reject";
+}
 
 /* -------------------------------------------------------------- endpoints */
 
@@ -266,6 +287,12 @@ export const accessEndpoints = {
       "/admin/users/{id}",
       adminUserDetailSchema,
       limitQuery,
+    ),
+    report: operation<WithQuery<GetAdminUsersIdReportData, WindowQuery>, unknown>()(
+      "GET",
+      "/admin/users/{id}/report",
+      adminUserReportSchema,
+      windowQuery,
     ),
     benchmark: operation<WithQuery<GetAdminBenchmarkUsersData, WindowLimitQuery>, unknown>()(
       "GET",
@@ -314,7 +341,12 @@ export const accessEndpoints = {
     create: operation<WithBody<PostAdminQuotasData, CreateQuotaBody>, unknown>()(
       "POST",
       "/admin/quotas",
-      quotaCreatedSchema,
+      quotaSavedSchema,
+    ),
+    update: operation<WithBody<PatchAdminQuotasIdData, UpdateQuotaBody>, unknown>()(
+      "PATCH",
+      "/admin/quotas/{id}",
+      quotaSavedSchema,
     ),
     remove: operation<DeleteAdminQuotasIdData, unknown>()("DELETE", "/admin/quotas/{id}", deletionSchema),
   },
@@ -331,6 +363,11 @@ export const accessEndpoints = {
       "/admin/budgets/alerts",
       budgetAlertsSchema,
       budgetAlertsQuery,
+    ),
+    projection: operation<GetAdminBudgetsProjectionData, unknown>()(
+      "GET",
+      "/admin/budgets/projection",
+      budgetProjectionSchema,
     ),
   },
   apiKeys: {
@@ -358,6 +395,12 @@ export const accessEndpoints = {
       "POST",
       "/admin/roles",
       roleSavedSchema,
+    ),
+    remove: operation<WithQuery<DeleteAdminRolesData, DeleteRoleQuery>, unknown>()(
+      "DELETE",
+      "/admin/roles",
+      roleDeletedSchema,
+      deleteRoleQuery,
     ),
   },
   permissions: {
@@ -404,6 +447,15 @@ export const accessEndpoints = {
       meReceiptSchema,
     ),
     skills: operation<GetMeSkillsData, unknown>()("GET", "/me/skills", meSkillsSchema),
+    requestSkillAccess: operation<
+      WithBody<PostMeSkillsNameRequestAccessData, SkillAccessRequestBody>,
+      unknown
+    >()("POST", "/me/skills/{name}/request-access", meSkillActionSchema),
+    skillFeedback: operation<WithBody<PostMeSkillsNameFeedbackData, SkillFeedbackBody>, unknown>()(
+      "POST",
+      "/me/skills/{name}/feedback",
+      meSkillActionSchema,
+    ),
     sessions: operation<GetMeSessionsData, unknown>()("GET", "/me/sessions", meSessionsSchema),
     revokeSession: operation<DeleteMeSessionsIdData, unknown>()(
       "DELETE",
@@ -435,6 +487,16 @@ export const accessEndpoints = {
       "/me/keys",
       meKeyCreatedSchema,
     ),
+    updateKeyScopes: operation<WithBody<PatchMeKeysIdData, UpdateMeKeyScopesBody>, unknown>()(
+      "PATCH",
+      "/me/keys/{id}",
+      meKeyScopesSchema,
+    ),
+    rotateKey: operation<PostMeKeysIdRotateData, unknown>()(
+      "POST",
+      "/me/keys/{id}/rotate",
+      meKeyRotatedSchema,
+    ),
     revokeKey: operation<DeleteMeKeysIdData, unknown>()("DELETE", "/me/keys/{id}", deletionSchema),
     onboardingPack: operation<WithQuery<GetMeOnboardingPackData, OnboardingPackQuery>, unknown>()(
       "GET",
@@ -455,6 +517,11 @@ export const accessEndpoints = {
       "/team/reports",
       teamReportsSchema,
       teamWindowQuery,
+    ),
+    decideReport: operation<WithBody<PostTeamReportsData, DecideTeamReportBody>, unknown>()(
+      "POST",
+      "/team/reports",
+      teamReportDecisionSchema,
     ),
     savingsChallenge: operation<WithQuery<GetTeamSavingsChallengeData, TeamWindowQuery>, unknown>()(
       "GET",

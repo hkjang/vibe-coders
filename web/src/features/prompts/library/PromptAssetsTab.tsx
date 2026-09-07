@@ -1,13 +1,20 @@
 import { useQuery } from "@tanstack/react-query";
-import { Plus, Trash2 } from "lucide-react";
+import { Plus, Send, Trash2 } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 import { z } from "zod";
 
+import { AssetReviewSheet } from "@/features/prompts/library/AssetReviewSheet";
 import { PanelFailure, PromptTable, type PromptColumn } from "@/features/prompts/library/prompt-parts";
-import { assetStatusLabel, assetStatusTone } from "@/features/prompts/library/prompt-utils";
+import {
+  assetStatusLabel,
+  assetStatusTone,
+  assetStatusTransitions,
+  canSubmitAsset,
+  type AssetStatusTransition,
+} from "@/features/prompts/library/prompt-utils";
 import { apiClient } from "@/shared/api/client";
 import type { PromptAsset, PromptAssetQuery } from "@/shared/api/domains/prompts";
-import { pathWithParams } from "@/shared/api/endpoint-factory";
+import { withPathParams } from "@/shared/api/endpoint-factory";
 import { endpoints } from "@/shared/api/endpoints";
 import { FormField } from "@/shared/components/form/FormField";
 import { FormDialog } from "@/shared/components/form/FormDialog";
@@ -16,21 +23,39 @@ import { Badge } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
 import { ConfirmDialog } from "@/shared/components/ui/ConfirmDialog";
 import { EmptyState } from "@/shared/components/ui/EmptyState";
-import { InlineNotice } from "@/shared/components/ui/InlineNotice";
 import { Input } from "@/shared/components/ui/Input";
-import { KeyValueList } from "@/shared/components/ui/KeyValueList";
 import { SectionCard } from "@/shared/components/ui/SectionCard";
 import { Select } from "@/shared/components/ui/Select";
-import { Sheet } from "@/shared/components/ui/Sheet";
 import { StatCard, StatGrid } from "@/shared/components/ui/StatCard";
+import { Switch } from "@/shared/components/ui/Switch";
 import { Textarea } from "@/shared/components/ui/Textarea";
 import { useMutationFeedback } from "@/shared/hooks/use-mutation-feedback";
 import { useSearchState } from "@/shared/hooks/use-search-state";
 import { containsPotentialSecret, secretSearchMessage } from "@/shared/security/secrets";
-import { formatDateTime, formatKRW, formatNumber, formatPercent } from "@/shared/utils/format";
+import { formatKRW, formatNumber, formatPercent } from "@/shared/utils/format";
 
 const routeId = "prompts.library";
 const assetStatuses = ["draft", "pending", "approved", "standard"] as const;
+const writeHint = "admin:write 권한이 필요합니다.";
+const assetQueryKeys = [["prompts", "assets"]];
+
+const emptyAssetForm = {
+  id: "",
+  name: "",
+  category: "custom",
+  tags: "",
+  description: "",
+  body: "",
+  status: "draft",
+  note: "",
+} as const;
+
+function tagsFromInput(value: string): string[] {
+  return value
+    .split(",")
+    .map((tag) => tag.trim())
+    .filter(Boolean);
+}
 
 const assetFormSchema = z.object({
   id: z.string().trim().max(120),
@@ -40,6 +65,7 @@ const assetFormSchema = z.object({
   description: z.string().trim().max(2000),
   body: z.string().trim().min(1, "프롬프트 본문을 입력하세요."),
   status: z.string().trim().min(1),
+  note: z.string().trim().max(500),
 });
 type AssetFormValues = z.infer<typeof assetFormSchema>;
 
@@ -61,6 +87,10 @@ export function PromptAssetsTab({ canWrite }: { canWrite: boolean }): React.JSX.
   const [editing, setEditing] = useState<PromptAsset | undefined>();
   const [formOpen, setFormOpen] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<PromptAsset | undefined>();
+  const [pendingSubmit, setPendingSubmit] = useState<PromptAsset | undefined>();
+  const [pendingDecision, setPendingDecision] = useState<
+    { asset: PromptAsset; transition: AssetStatusTransition } | undefined
+  >();
   const [searchError, setSearchError] = useState<string | undefined>();
   const createTriggerRef = useRef<HTMLButtonElement>(null);
   const rowTriggerRef = useRef<HTMLButtonElement | null>(null);
@@ -80,17 +110,11 @@ export function PromptAssetsTab({ canWrite }: { canWrite: boolean }): React.JSX.
   const knownTags = assets.data?.known_tags ?? [];
   const selected = rows.find((asset) => asset.id === selectedId);
 
-  const form = useZodForm<AssetFormValues, AssetFormValues>(assetFormSchema, {
-    id: "",
-    name: "",
-    category: "custom",
-    tags: "",
-    description: "",
-    body: "",
-    status: "draft",
-  });
+  const form = useZodForm<AssetFormValues, AssetFormValues>(assetFormSchema, { ...emptyAssetForm });
 
-  const saveAsset = useMutationFeedback({
+  // Creating upserts by slug (POST); editing an existing asset sends only the
+  // changed fields (PATCH), so its review status and counters stay untouched.
+  const createAsset = useMutationFeedback({
     mutate: (values: AssetFormValues) =>
       apiClient.request(endpoints.domains.prompts.assets.save, {
         body: {
@@ -99,44 +123,77 @@ export function PromptAssetsTab({ canWrite }: { canWrite: boolean }): React.JSX.
           category: values.category,
           description: values.description,
           body: values.body,
-          tags: values.tags
-            .split(",")
-            .map((tag) => tag.trim())
-            .filter(Boolean),
+          tags: tagsFromInput(values.tags),
           status: values.status,
+          note: values.note,
         },
         routeId,
       }),
-    invalidates: [["prompts", "assets"]],
+    invalidates: assetQueryKeys,
     successMessage: "프롬프트 자산을 저장했습니다.",
     errorMessage: "프롬프트 자산을 저장하지 못했습니다.",
   });
 
+  const updateAsset = useMutationFeedback({
+    mutate: (values: AssetFormValues) =>
+      apiClient.request(withPathParams(endpoints.domains.prompts.assets.update, { id: values.id }), {
+        body: {
+          name: values.name,
+          category: values.category,
+          description: values.description,
+          body: values.body,
+          tags: tagsFromInput(values.tags),
+          note: values.note,
+        },
+        routeId,
+      }),
+    invalidates: assetQueryKeys,
+    successMessage: "프롬프트 자산을 수정했습니다.",
+    errorMessage: "프롬프트 자산을 수정하지 못했습니다.",
+  });
+
+  const toggleAsset = useMutationFeedback({
+    mutate: (variables: { id: string; enabled: boolean }) =>
+      apiClient.request(withPathParams(endpoints.domains.prompts.assets.update, { id: variables.id }), {
+        body: { enabled: variables.enabled },
+        routeId,
+      }),
+    invalidates: assetQueryKeys,
+    successMessage: (_result, variables) =>
+      variables.enabled ? "자산을 사용 상태로 바꿨습니다." : "자산을 중지했습니다.",
+    errorMessage: "자산 사용 여부를 바꾸지 못했습니다.",
+  });
+
+  const submitAsset = useMutationFeedback({
+    mutate: (id: string) =>
+      apiClient.request(withPathParams(endpoints.domains.prompts.assets.submit, { id }), { routeId }),
+    invalidates: assetQueryKeys,
+    successMessage: "검토를 요청했습니다.",
+    errorMessage: "검토를 요청하지 못했습니다.",
+  });
+
+  const decideAsset = useMutationFeedback({
+    mutate: (variables: { id: string; status: string; note: string }) =>
+      apiClient.request(withPathParams(endpoints.domains.prompts.assets.approve, { id: variables.id }), {
+        body: { status: variables.status, note: variables.note },
+        routeId,
+      }),
+    invalidates: assetQueryKeys,
+    successMessage: "검토 결과를 반영했습니다.",
+    errorMessage: "검토 결과를 반영하지 못했습니다.",
+  });
+
   const removeAsset = useMutationFeedback({
     mutate: (id: string) =>
-      apiClient.request(
-        {
-          ...endpoints.domains.prompts.assets.remove,
-          path: pathWithParams(endpoints.domains.prompts.assets.remove.path, { id }),
-        },
-        { routeId },
-      ),
-    invalidates: [["prompts", "assets"]],
+      apiClient.request(withPathParams(endpoints.domains.prompts.assets.remove, { id }), { routeId }),
+    invalidates: assetQueryKeys,
     successMessage: "프롬프트 자산을 삭제했습니다.",
     errorMessage: "프롬프트 자산을 삭제하지 못했습니다.",
   });
 
   const openCreate = (): void => {
     setEditing(undefined);
-    form.reset({
-      id: "",
-      name: "",
-      category: "custom",
-      tags: "",
-      description: "",
-      body: "",
-      status: "draft",
-    });
+    form.reset({ ...emptyAssetForm });
     setFormOpen(true);
   };
 
@@ -150,6 +207,7 @@ export function PromptAssetsTab({ canWrite }: { canWrite: boolean }): React.JSX.
       description: asset.description ?? "",
       body: asset.body ?? "",
       status: asset.status ?? "draft",
+      note: asset.note ?? "",
     });
     setFormOpen(true);
   };
@@ -214,14 +272,58 @@ export function PromptAssetsTab({ canWrite }: { canWrite: boolean }): React.JSX.
       cell: (asset) => asset.approved_by || "—",
     },
     {
+      id: "enabled",
+      header: "사용",
+      cell: (asset) => (
+        <Switch
+          checked={asset.enabled !== false}
+          disabled={!canWrite}
+          title={canWrite ? undefined : writeHint}
+          label="사용"
+          aria-label={`${asset.name || asset.id} 사용`}
+          onCheckedChange={(checked) => toggleAsset.mutate({ id: asset.id, enabled: checked })}
+        />
+      ),
+    },
+    {
       id: "actions",
       header: "동작",
       cell: (asset) => (
         <span className="prompt-filter-actions">
+          {canSubmitAsset(asset.status) ? (
+            <Button
+              size="small"
+              disabled={!canWrite}
+              title={canWrite ? undefined : writeHint}
+              aria-label={`${asset.name || asset.id} 검토 제출`}
+              onClick={(event) => {
+                rowTriggerRef.current = event.currentTarget;
+                setPendingSubmit(asset);
+              }}
+            >
+              <Send aria-hidden="true" /> 검토 제출
+            </Button>
+          ) : null}
+          {assetStatusTransitions(asset.status).map((transition) => (
+            <Button
+              key={transition.status}
+              size="small"
+              variant={transition.tone === "danger" ? "danger" : "secondary"}
+              disabled={!canWrite}
+              title={canWrite ? undefined : writeHint}
+              aria-label={`${asset.name || asset.id} ${transition.label}`}
+              onClick={(event) => {
+                rowTriggerRef.current = event.currentTarget;
+                setPendingDecision({ asset, transition });
+              }}
+            >
+              {transition.label}
+            </Button>
+          ))}
           <Button
             size="small"
             disabled={!canWrite}
-            title={canWrite ? undefined : "admin:write 권한이 필요합니다."}
+            title={canWrite ? undefined : writeHint}
             aria-label={`${asset.name || asset.id} 편집`}
             onClick={(event) => {
               rowTriggerRef.current = event.currentTarget;
@@ -234,7 +336,7 @@ export function PromptAssetsTab({ canWrite }: { canWrite: boolean }): React.JSX.
             size="small"
             variant="danger"
             disabled={!canWrite}
-            title={canWrite ? undefined : "admin:write 권한이 필요합니다."}
+            title={canWrite ? undefined : writeHint}
             aria-label={`${asset.name || asset.id} 삭제`}
             onClick={(event) => {
               rowTriggerRef.current = event.currentTarget;
@@ -396,43 +498,14 @@ export function PromptAssetsTab({ canWrite }: { canWrite: boolean }): React.JSX.
         )}
       </SectionCard>
 
-      <InlineNotice tone="warning" title="이 화면에서 제공하지 않는 기능">
-        검토 제출·승인·반려, 버전 이력과 롤백, 팀별 사용 현황은 서버 API가 아직 공개 규격(OpenAPI)에 포함되어
-        있지 않아 이식하지 못했습니다. 기존 화면(/admin#/prompt-assets)에서 처리하세요.
-      </InlineNotice>
-
-      <Sheet
-        open={selected !== undefined}
+      <AssetReviewSheet
+        asset={selected}
+        canWrite={canWrite}
+        returnFocusRef={rowTriggerRef}
         onOpenChange={(open) => {
           if (!open) updateSearch({ asset: undefined });
         }}
-        returnFocusRef={rowTriggerRef}
-        title={selected?.name ?? "프롬프트 자산"}
-        description="자산의 메타데이터와 프롬프트 본문입니다."
-      >
-        {selected ? (
-          <div className="page-stack">
-            <KeyValueList
-              items={[
-                { label: "ID", value: selected.id, mono: true },
-                { label: "상태", value: assetStatusLabel(selected.status) },
-                { label: "분류", value: selected.category ?? "—" },
-                { label: "태그", value: (selected.tags ?? []).join(", ") },
-                { label: "설명", value: selected.description ?? "—" },
-                { label: "승인자", value: selected.approved_by ?? "—" },
-                { label: "승인 시각", value: formatDateTime(selected.approved_at) },
-                { label: "최근 사용", value: formatDateTime(selected.last_used_at) },
-                { label: "재사용 횟수", value: formatNumber(selected.use_count) },
-                { label: "성공률", value: formatPercent(selected.success_rate) },
-                { label: "평균 비용", value: formatKRW(selected.avg_cost_krw) },
-                { label: "평균 지연", value: `${formatNumber(selected.avg_latency_ms)} ms` },
-              ]}
-            />
-            <h3>프롬프트 본문</h3>
-            <p className="prompt-asset-body">{selected.body || "본문이 없습니다."}</p>
-          </div>
-        ) : null}
-      </Sheet>
+      />
 
       <FormDialog
         open={formOpen}
@@ -443,7 +516,7 @@ export function PromptAssetsTab({ canWrite }: { canWrite: boolean }): React.JSX.
         description="이름과 본문은 필수입니다. 본문은 서버에만 저장되며 주소에는 남지 않습니다."
         submitLabel="저장"
         onSubmit={async (values) => {
-          await saveAsset.mutateAsync(values);
+          await (editing ? updateAsset : createAsset).mutateAsync(values);
         }}
       >
         <FormField label="이름" required error={form.formState.errors.name?.message}>
@@ -467,17 +540,23 @@ export function PromptAssetsTab({ canWrite }: { canWrite: boolean }): React.JSX.
             </Select>
           )}
         </FormField>
-        <FormField label="상태" error={form.formState.errors.status?.message}>
-          {(control) => (
-            <Select {...control} {...form.register("status")}>
-              {assetStatuses.map((status) => (
-                <option key={status} value={status}>
-                  {assetStatusLabel(status)}
-                </option>
-              ))}
-            </Select>
-          )}
-        </FormField>
+        {editing ? null : (
+          <FormField
+            label="상태"
+            description="등록 후에는 검토 제출·승인 흐름으로만 상태가 바뀝니다."
+            error={form.formState.errors.status?.message}
+          >
+            {(control) => (
+              <Select {...control} {...form.register("status")}>
+                {assetStatuses.map((status) => (
+                  <option key={status} value={status}>
+                    {assetStatusLabel(status)}
+                  </option>
+                ))}
+              </Select>
+            )}
+          </FormField>
+        )}
         <FormField
           label="태그"
           description="쉼표로 구분합니다. 예: security, java"
@@ -490,6 +569,9 @@ export function PromptAssetsTab({ canWrite }: { canWrite: boolean }): React.JSX.
         </FormField>
         <FormField label="프롬프트 본문" required error={form.formState.errors.body?.message}>
           {(control) => <Textarea {...control} rows={8} {...form.register("body")} />}
+        </FormField>
+        <FormField label="노트" error={form.formState.errors.note?.message}>
+          {(control) => <Input {...control} {...form.register("note")} />}
         </FormField>
       </FormDialog>
 
@@ -505,6 +587,42 @@ export function PromptAssetsTab({ canWrite }: { canWrite: boolean }): React.JSX.
         tone="danger"
         onConfirm={async () => {
           if (pendingDelete) await removeAsset.mutateAsync(pendingDelete.id);
+        }}
+      />
+
+      <ConfirmDialog
+        open={pendingSubmit !== undefined}
+        onOpenChange={(open) => {
+          if (!open) setPendingSubmit(undefined);
+        }}
+        returnFocusRef={rowTriggerRef}
+        title="검토를 제출할까요?"
+        description={`"${pendingSubmit?.name ?? pendingSubmit?.id ?? ""}" 자산을 검토 대기 상태로 보내고 검토자에게 알립니다.`}
+        confirmLabel="검토 제출"
+        onConfirm={async () => {
+          if (pendingSubmit) await submitAsset.mutateAsync(pendingSubmit.id);
+        }}
+      />
+
+      <ConfirmDialog
+        open={pendingDecision !== undefined}
+        onOpenChange={(open) => {
+          if (!open) setPendingDecision(undefined);
+        }}
+        returnFocusRef={rowTriggerRef}
+        title={`이 자산을 ${pendingDecision?.transition.label ?? ""} 처리할까요?`}
+        description={`"${pendingDecision?.asset.name ?? pendingDecision?.asset.id ?? ""}" 자산의 상태가 바뀌며 변경 이력에 사유가 함께 남습니다.`}
+        confirmLabel={pendingDecision?.transition.label ?? "확인"}
+        tone={pendingDecision?.transition.tone ?? "primary"}
+        requireReason
+        onConfirm={async (reason) => {
+          if (pendingDecision) {
+            await decideAsset.mutateAsync({
+              id: pendingDecision.asset.id,
+              status: pendingDecision.transition.status,
+              note: reason,
+            });
+          }
         }}
       />
     </div>

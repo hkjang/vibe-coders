@@ -4,8 +4,8 @@ import { useRef, useState } from "react";
 import { QueryNotice } from "@/features/mcp/mcp-ui";
 import { detailText, stepTone } from "@/features/mcp/mcp-utils";
 import { apiClient } from "@/shared/api/client";
-import { withMcpPathParams } from "@/shared/api/domains/mcp";
 import type { McpFlowStep, McpRequest } from "@/shared/api/domains/mcp.schemas";
+import { withPathParams } from "@/shared/api/endpoint-factory";
 import { endpoints } from "@/shared/api/endpoints";
 import { Badge } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
@@ -125,7 +125,7 @@ export function McpRequestsTab(): React.JSX.Element {
   const waterfall = useQuery({
     queryKey: ["mcp", "requests", requestId, "waterfall"],
     queryFn: ({ signal }) =>
-      apiClient.request(withMcpPathParams(endpoints.domains.mcp.requestWaterfall, { id: requestId }), {
+      apiClient.request(withPathParams(endpoints.domains.mcp.requestWaterfall, { id: requestId }), {
         signal,
         routeId,
       }),

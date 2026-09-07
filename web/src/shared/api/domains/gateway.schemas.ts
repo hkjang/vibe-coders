@@ -231,6 +231,78 @@ export const multiRunCodeVerifySchema = looseObject({
   note: z.string().nullish(),
 });
 
+export const multiRunFeedbackSchema = looseObject({
+  status: z.string().nullish(),
+  run_id: z.string().nullish(),
+  model: z.string().nullish(),
+});
+
+export const multiRunPromoteSchema = looseObject({
+  status: z.string().nullish(),
+  note: z.string().nullish(),
+  promotion: looseObject({
+    id: z.string().nullish(),
+    run_id: z.string().nullish(),
+    selected_model: z.string().nullish(),
+    task_type: z.string().nullish(),
+    status: z.string().nullish(),
+    created_by: z.string().nullish(),
+  }).nullish(),
+});
+
+export const multiRunGoldenSchema = looseObject({
+  status: z.string().nullish(),
+  workflow_id: z.string().nullish(),
+  workflow_name: z.string().nullish(),
+  step_name: z.string().nullish(),
+  step_count: numberish.nullish(),
+  baseline_score: numberish.nullish(),
+});
+
+/** One structural block of a stored answer; `preview` is response text, so it stays on screen. */
+const multiRunDiffBlockShape = {
+  type: z.string().nullish(),
+  preview: z.string().nullish(),
+  key: z.string().nullish(),
+} as const;
+
+const multiRunDiffStatsSchema = looseObject({
+  available: z.boolean().nullish(),
+  paragraphs: numberish.nullish(),
+  list_items: numberish.nullish(),
+  code_blocks: numberish.nullish(),
+  chars: numberish.nullish(),
+  lines: numberish.nullish(),
+  has_table: z.boolean().nullish(),
+  has_code: z.boolean().nullish(),
+});
+
+export const multiRunDiffSchema = looseObject({
+  run_id: z.string().nullish(),
+  answered_models: numberish.nullish(),
+  note: z.string().nullish(),
+  common_blocks: looseList(multiRunDiffBlockShape)
+    .nullish()
+    .transform((value) => value ?? []),
+  models: looseList({
+    model: z.string().nullish(),
+    blocks: looseList(multiRunDiffBlockShape).nullish(),
+    stats: multiRunDiffStatsSchema.nullish(),
+  })
+    .nullish()
+    .transform((value) => value ?? []),
+  per_model: looseList({
+    model: z.string().nullish(),
+    available: z.boolean().nullish(),
+    block_count: numberish.nullish(),
+    missing: looseList(multiRunDiffBlockShape).nullish(),
+    extra: looseList(multiRunDiffBlockShape).nullish(),
+    stats: multiRunDiffStatsSchema.nullish(),
+  })
+    .nullish()
+    .transform((value) => value ?? []),
+});
+
 export const multiRunLeaderboardSchema = looseObject({
   team: z.string().nullish(),
   days: numberish.nullish(),
@@ -483,6 +555,47 @@ export const promptExperimentDetailSchema = looseObject({
     .transform((value) => value ?? []),
 });
 
+/** `PATCH /admin/prompt-lab/experiments/{id}` echoes only the new status. */
+export const promptExperimentStatusSchema = looseObject({ status: z.string().nullish() });
+
+const promptTestCaseRunHistoryShape = {
+  id: z.string().nullish(),
+  run_id: z.string().nullish(),
+  best_model: z.string().nullish(),
+  avg_score: numberish.nullish(),
+  contract_pass: numberish.nullish(),
+  model_count: numberish.nullish(),
+  avg_cost_krw: numberish.nullish(),
+  avg_latency_ms: numberish.nullish(),
+  created_at: z.string().nullish(),
+} as const;
+
+/** `POST /admin/prompt-lab/test-cases/{id}/run` — scores only, never the answers. */
+export const promptTestCaseRunSchema = looseObject({
+  status: z.string().nullish(),
+  run_id: z.string().nullish(),
+  best_model: z.string().nullish(),
+  avg_score: numberish.nullish(),
+  contract_applied: z.boolean().nullish(),
+  contract_pass: numberish.nullish(),
+  model_count: numberish.nullish(),
+  results: looseList({
+    model: z.string().nullish(),
+    score: numberish.nullish(),
+    verdict: z.string().nullish(),
+    contract_pass: z.boolean().nullish(),
+    contract_errors: z.array(z.string()).nullish(),
+    cost_krw: numberish.nullish(),
+    latency_ms: numberish.nullish(),
+    status: z.string().nullish(),
+  })
+    .nullish()
+    .transform((value) => value ?? []),
+  history: looseList(promptTestCaseRunHistoryShape)
+    .nullish()
+    .transform((value) => value ?? []),
+});
+
 export const promptTestCaseDetailSchema = looseObject({
   test_case: promptTestCaseSchema.nullish(),
   history: looseList({
@@ -514,6 +627,10 @@ export type MultiRunList = z.output<typeof multiRunListSchema>;
 export type MultiRunDetail = z.output<typeof multiRunDetailSchema>;
 export type MultiRunJudge = z.output<typeof multiRunJudgeSchema>;
 export type MultiRunCodeVerify = z.output<typeof multiRunCodeVerifySchema>;
+export type MultiRunPromote = z.output<typeof multiRunPromoteSchema>;
+export type MultiRunGolden = z.output<typeof multiRunGoldenSchema>;
+export type MultiRunDiff = z.output<typeof multiRunDiffSchema>;
+export type PromptTestCaseRun = z.output<typeof promptTestCaseRunSchema>;
 export type MultiRunLeaderboard = z.output<typeof multiRunLeaderboardSchema>;
 export type ModelContract = z.output<typeof modelContractSchema>;
 export type ModelContractRun = z.output<typeof modelContractRunSchema>;

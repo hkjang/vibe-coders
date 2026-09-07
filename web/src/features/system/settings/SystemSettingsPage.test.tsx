@@ -337,25 +337,31 @@ describe("SystemSettingsPage — 데이터·알림 운영", () => {
 });
 
 describe("SystemSettingsPage — 변경 세트", () => {
-  const changeSets = {
-    change_sets: [
-      {
-        id: "cset_1",
-        title: "ClickHouse 이전",
-        description: "새 노드로 이전",
-        status: "pending",
-        items: [{ kind: "setting", key: "clickhouse.url", value: "http://ch2:8123", note: "" }],
-        prior: [],
-        canary_scope: "",
-        created_by: "operator@example.com",
-        created_at: "2026-09-05T00:00:00Z",
-        updated_at: "2026-09-05T00:00:00Z",
-        applied_at: "",
-      },
-    ],
-  };
+  function changeSet(overrides: Record<string, unknown> = {}) {
+    return {
+      id: "cset_1",
+      title: "ClickHouse 이전",
+      description: "새 노드로 이전",
+      status: "pending",
+      items: [{ kind: "setting", key: "clickhouse.url", value: "http://ch2:8123", note: "" }],
+      prior: [],
+      canary_scope: "",
+      created_by: "operator@example.com",
+      created_at: "2026-09-05T00:00:00Z",
+      updated_at: "2026-09-05T00:00:00Z",
+      applied_at: "",
+      ...overrides,
+    };
+  }
 
-  it("creates a change set and says where the approval steps still live", async () => {
+  const changeSets = { change_sets: [changeSet()] };
+
+  async function openDetail(user: ReturnType<typeof userEvent.setup>) {
+    await user.click(await screen.findByRole("button", { name: /상세/ }));
+    return screen.findByRole("dialog");
+  }
+
+  it("creates a change set", async () => {
     const api = mockApi({
       "GET /admin/change-sets": () => changeSets,
       "POST /admin/change-sets": () => ({ id: "cset_2", status: "draft" }),
@@ -364,7 +370,6 @@ describe("SystemSettingsPage — 변경 세트", () => {
     renderPage("/system/settings?tab=changesets");
 
     expect(await screen.findByText("ClickHouse 이전")).toBeVisible();
-    expect(screen.getByText("제출·승인·적용·롤백은 아직 기존 화면에서 진행합니다.")).toBeVisible();
 
     await user.click(screen.getByRole("button", { name: /새 변경 세트/ }));
     const dialog = await screen.findByRole("dialog");
@@ -376,6 +381,151 @@ describe("SystemSettingsPage — 변경 세트", () => {
         { title: "로그 보존 단축", description: "", canary_scope: "", items: [] },
       ]),
     );
+  });
+
+  it("shows the dry run comparison before anything is applied", async () => {
+    mockApi({
+      "GET /admin/change-sets": () => changeSets,
+      "POST /admin/change-sets/cset_1/dryrun": () => ({
+        change_set_id: "cset_1",
+        status: "pending",
+        checks: [
+          {
+            kind: "setting",
+            key: "clickhouse.url",
+            current: "http://clickhouse:8123",
+            proposed: "http://ch2:8123",
+            source: "db_setting",
+            changed: true,
+            valid: true,
+            restart_required: true,
+          },
+        ],
+        changed_count: 1,
+        invalid_count: 0,
+        restart_required: true,
+        canary_scope: "",
+        note: "setting 변경은 전역 적용입니다",
+      }),
+    });
+    const user = userEvent.setup();
+    renderPage("/system/settings?tab=changesets");
+
+    const sheet = await openDetail(user);
+    await user.click(within(sheet).getByRole("button", { name: "미리보기" }));
+
+    expect(await within(sheet).findByText("변경 1건 · 오류 0건")).toBeVisible();
+    expect(within(sheet).getByText("http://clickhouse:8123")).toBeVisible();
+    expect(within(sheet).getByText("재시작 필요")).toBeVisible();
+  });
+
+  it("approves a pending change set with the reviewer note", async () => {
+    const api = mockApi({
+      "GET /admin/change-sets": () => changeSets,
+      "GET /admin/settings/effective": () => effectiveSettings,
+      "POST /admin/change-sets/cset_1/approve": () => changeSet({ status: "approved" }),
+    });
+    const user = userEvent.setup();
+    renderPage("/system/settings?tab=changesets");
+
+    const sheet = await openDetail(user);
+    expect(within(sheet).getByRole("button", { name: "검토 제출" })).toBeDisabled();
+    await user.click(within(sheet).getByRole("button", { name: "승인" }));
+
+    const confirm = await screen.findByRole("dialog", { name: "변경 세트를 승인할까요?" });
+    await user.type(within(confirm).getByLabelText(/변경 사유/), "용량 확보");
+    await user.click(within(confirm).getByRole("button", { name: "승인" }));
+
+    await waitFor(() =>
+      expect(api.bodies("POST /admin/change-sets/cset_1/approve")).toEqual([{ note: "용량 확보" }]),
+    );
+  });
+
+  it("applies an approved change set behind a danger confirmation", async () => {
+    const api = mockApi({
+      "GET /admin/change-sets": () => ({ change_sets: [changeSet({ status: "approved" })] }),
+      "GET /admin/settings/effective": () => effectiveSettings,
+      "POST /admin/change-sets/cset_1/apply": () => ({
+        status: "applied",
+        applied_count: 1,
+        change_set: changeSet({ status: "applied" }),
+      }),
+    });
+    const user = userEvent.setup();
+    renderPage("/system/settings?tab=changesets");
+
+    const sheet = await openDetail(user);
+    await user.click(within(sheet).getByRole("button", { name: "적용" }));
+
+    const confirm = await screen.findByRole("dialog", { name: "설정을 실제로 적용할까요?" });
+    await user.click(within(confirm).getByRole("button", { name: "적용" }));
+    expect(api.bodies("POST /admin/change-sets/cset_1/apply")).toHaveLength(0);
+
+    await user.type(within(confirm).getByLabelText(/변경 사유/), "승인 완료");
+    await user.click(within(confirm).getByRole("button", { name: "적용" }));
+
+    await waitFor(() =>
+      expect(api.bodies("POST /admin/change-sets/cset_1/apply")).toEqual([{ note: "승인 완료" }]),
+    );
+  });
+
+  it("rolls back an applied change set", async () => {
+    const api = mockApi({
+      "GET /admin/change-sets": () => ({ change_sets: [changeSet({ status: "applied" })] }),
+      "GET /admin/settings/effective": () => effectiveSettings,
+      "POST /admin/change-sets/cset_1/rollback": () => ({
+        status: "rolled_back",
+        restored_count: 1,
+        change_set: changeSet({ status: "rolled_back" }),
+      }),
+    });
+    const user = userEvent.setup();
+    renderPage("/system/settings?tab=changesets");
+
+    const sheet = await openDetail(user);
+    expect(within(sheet).getByRole("button", { name: "적용" })).toBeDisabled();
+    await user.click(within(sheet).getByRole("button", { name: "롤백" }));
+
+    const confirm = await screen.findByRole("dialog", { name: "적용 전 값으로 되돌릴까요?" });
+    await user.type(within(confirm).getByLabelText(/변경 사유/), "성능 저하");
+    await user.click(within(confirm).getByRole("button", { name: "롤백" }));
+
+    await waitFor(() =>
+      expect(api.bodies("POST /admin/change-sets/cset_1/rollback")).toEqual([{ note: "성능 저하" }]),
+    );
+  });
+
+  it("deletes a change set and closes the detail panel", async () => {
+    const api = mockApi({
+      "GET /admin/change-sets": () => changeSets,
+      "GET /admin/settings/effective": () => effectiveSettings,
+      "DELETE /admin/change-sets/cset_1": () => ({ status: "deleted" }),
+    });
+    const user = userEvent.setup();
+    renderPage("/system/settings?tab=changesets");
+
+    const sheet = await openDetail(user);
+    await user.click(within(sheet).getByRole("button", { name: "삭제" }));
+
+    const confirm = await screen.findByRole("dialog", { name: "변경 세트를 삭제할까요?" });
+    await user.type(within(confirm).getByLabelText(/변경 사유/), "중복 등록");
+    await user.click(within(confirm).getByRole("button", { name: "삭제" }));
+
+    await waitFor(() =>
+      expect(api.calls.some((call) => call.key === "DELETE /admin/change-sets/cset_1")).toBe(true),
+    );
+  });
+
+  it("disables every lifecycle action for a read-only operator", async () => {
+    authState.scopes = ["admin:read"];
+    mockApi({ "GET /admin/change-sets": () => changeSets });
+    const user = userEvent.setup();
+    renderPage("/system/settings?tab=changesets");
+
+    const sheet = await openDetail(user);
+    for (const label of ["검토 제출", "승인", "적용", "롤백", "삭제"]) {
+      expect(within(sheet).getByRole("button", { name: label })).toBeDisabled();
+    }
   });
 });
 

@@ -18,6 +18,7 @@ export const accessKeys = {
   quotas: ["access", "quotas"] as const,
   budgets: ["access", "budgets"] as const,
   budgetAlerts: ["access", "budgets", "alerts"] as const,
+  budgetProjection: ["access", "budgets", "projection"] as const,
   apiKeys: ["access", "api-keys"] as const,
   roles: ["access", "roles"] as const,
 };
@@ -97,6 +98,14 @@ export function useBudgetsQuery(enabled: boolean) {
   return useAccessQuery(
     accessKeys.budgets,
     (signal) => apiClient.request(access.budgets.list, { signal, routeId }),
+    enabled,
+  );
+}
+
+export function useBudgetProjectionQuery(enabled: boolean) {
+  return useAccessQuery(
+    accessKeys.budgetProjection,
+    (signal) => apiClient.request(access.budgets.projection, { signal, routeId }),
     enabled,
   );
 }

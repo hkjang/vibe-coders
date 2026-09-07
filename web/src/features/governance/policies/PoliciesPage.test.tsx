@@ -238,6 +238,8 @@ const canaryResponse = {
   ],
 };
 
+const costGuardResponse = { enabled: false, threshold_krw: 500 };
+
 function mockAllEndpoints(overrides: Record<string, () => unknown> = {}) {
   return mockApi({
     "GET /admin/kill-switch": () => killSwitchResponse,
@@ -267,7 +269,10 @@ function mockAllEndpoints(overrides: Record<string, () => unknown> = {}) {
     "GET /admin/policies/decisions": () => policyDecisionsResponse,
     "GET /admin/alerts": () => alertsResponse,
     "POST /admin/alerts": () => ({ rule: alertsResponse.rules[0] }),
+    "PATCH /admin/alerts/alert_1": () => ({ rule: { ...alertsResponse.rules[0], enabled: false } }),
     "DELETE /admin/alerts/alert_1": () => ({ id: "alert_1", status: "deleted" }),
+    "GET /admin/cost": () => costGuardResponse,
+    "POST /admin/cost": () => ({ enabled: true, threshold_krw: 900 }),
     "GET /admin/model-deprecations": () => deprecationsResponse,
     "POST /admin/model-deprecations": () => ({ deprecation: deprecationsResponse.deprecations[0] }),
     "DELETE /admin/model-deprecations/moddep_1": () => ({ id: "moddep_1", status: "deleted" }),
@@ -351,6 +356,9 @@ describe("PoliciesPage", () => {
     expect(stopButton).toBeDisabled();
     expect(stopButton).toHaveAttribute("title", expect.stringContaining("admin:write"));
     expect(await screen.findByRole("button", { name: "승인 요청 apr_1 승인" })).toBeDisabled();
+    expect(screen.getByRole("switch", { name: "오류율 경보 사용" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "오류율 경보 알림 규칙 수정" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "비용 가드 저장" })).toBeDisabled();
     expect(screen.getByText("읽기 전용으로 열려 있습니다.")).toBeInTheDocument();
   });
 
@@ -384,6 +392,55 @@ describe("PoliciesPage", () => {
     await waitFor(() =>
       expect(api.calls.some((call) => call.key === "POST /admin/approvals/apr_1/approve")).toBe(true),
     );
+  });
+
+  it("알림 규칙의 임계값과 Webhook을 부분 수정한다", async () => {
+    const api = mockAllEndpoints();
+    const user = userEvent.setup();
+    render();
+
+    await user.click(await screen.findByRole("button", { name: "오류율 경보 알림 규칙 수정" }));
+    const dialog = await screen.findByRole("dialog", { name: "알림 규칙 수정" });
+    const threshold = within(dialog).getByLabelText(/^임계값/u);
+    await user.clear(threshold);
+    await user.type(threshold, "0.1");
+    await user.click(within(dialog).getByRole("button", { name: "저장" }));
+
+    await waitFor(() =>
+      expect(api.bodies("PATCH /admin/alerts/alert_1")).toEqual([
+        { threshold: 0.1, webhook_url: "https://hooks.example/1", note: "운영 채널로 통보" },
+      ]),
+    );
+    await waitFor(() => expect(toastSpy.success).toHaveBeenCalledWith("알림 규칙을 수정했습니다."));
+  });
+
+  it("알림 규칙 스위치를 끄면 enabled 만 부분 수정한다", async () => {
+    const api = mockAllEndpoints();
+    const user = userEvent.setup();
+    render();
+
+    await user.click(await screen.findByRole("switch", { name: "오류율 경보 사용" }));
+
+    await waitFor(() => expect(api.bodies("PATCH /admin/alerts/alert_1")).toEqual([{ enabled: false }]));
+    await waitFor(() => expect(toastSpy.success).toHaveBeenCalledWith("알림 규칙을 중지했습니다."));
+  });
+
+  it("비용 가드 한도를 저장한다", async () => {
+    const api = mockAllEndpoints();
+    const user = userEvent.setup();
+    render();
+
+    const threshold = await screen.findByLabelText(/요청당 임계값/u);
+    await waitFor(() => expect(threshold).toHaveValue(500));
+    await user.click(screen.getByRole("switch", { name: "비용 가드 사용" }));
+    await user.clear(threshold);
+    await user.type(threshold, "900");
+    await user.click(screen.getByRole("button", { name: "비용 가드 저장" }));
+
+    await waitFor(() =>
+      expect(api.bodies("POST /admin/cost")).toEqual([{ enabled: true, threshold_krw: 900 }]),
+    );
+    await waitFor(() => expect(toastSpy.success).toHaveBeenCalledWith("비용 가드를 저장했습니다."));
   });
 
   it("URL 쿼리에서 탭과 조회 조건을 복원한다", async () => {

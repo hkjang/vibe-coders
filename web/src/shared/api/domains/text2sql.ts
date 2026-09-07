@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import type {
   DeleteAdminText2SqlColumnsData,
+  DeleteAdminText2SqlConnectionsData,
   DeleteAdminText2SqlGlossaryData,
   DeleteAdminText2SqlGoldenData,
   DeleteAdminText2SqlPermissionsData,
@@ -38,11 +39,8 @@ import type {
   PostAdminText2SqlSchemasData,
   PostAdminText2SqlTablesData,
 } from "@/shared/api/generated";
-import { operation, type OperationData, type WithQuery } from "@/shared/api/endpoint-factory";
+import { operation, type WithBody, type WithQuery } from "@/shared/api/endpoint-factory";
 import { acknowledgementSchema, looseList, looseObject, numberish, orDefault } from "@/shared/api/loose";
-
-/** Replaces the generated (always `never`) body with the payload the screen sends. */
-type WithBody<Data extends OperationData, Body> = Omit<Data, "body"> & { readonly body: Body };
 
 // The legacy Text2SQL admin APIs are documented without response schemas, so these
 // zod shapes are the contract: they normalise the fields the screens render and let
@@ -396,6 +394,7 @@ const virtualModelQuerySchema = z.object({ virtual_model: z.string() });
 const tableQuerySchema = z.object({ schema: z.string(), table: z.string() });
 const columnQuerySchema = z.object({ schema: z.string(), table: z.string(), column: z.string() });
 const connectionQuerySchema = z.object({ connection_id: z.string().optional() });
+const connectionIdQuerySchema = z.object({ id: z.string() });
 const spansQuerySchema = z.object({ request_id: z.string() });
 
 export interface Text2SQLSchemaInput {
@@ -542,8 +541,12 @@ export const text2sqlEndpoints = {
       "/admin/text2sql/connections",
       acknowledgementSchema,
     ),
-    // DELETE /admin/text2sql/connections exists on the server but is absent from the
-    // generated OpenAPI operation list, so it cannot be declared here yet.
+    remove: operation<WithQuery<DeleteAdminText2SqlConnectionsData, { id: string }>, unknown>()(
+      "DELETE",
+      "/admin/text2sql/connections",
+      acknowledgementSchema,
+      connectionIdQuerySchema,
+    ),
     // Probes the execute database, so it must stay behind an explicit button.
     healthcheck: operation<WithQuery<GetAdminText2SqlHealthcheckData, { connection_id?: string }>, unknown>()(
       "GET",

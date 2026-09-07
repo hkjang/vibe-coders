@@ -4,6 +4,7 @@ import type {
   DeleteAdminModelDeprecationsIdData,
   DeleteAdminModelTagsIdData,
   DeleteAdminModelsContractsData,
+  DeleteAdminPromptLabExperimentsIdData,
   DeleteAdminPromptLabTestCasesIdData,
   DeleteAdminProvidersNameData,
   DeleteAdminProvidersSloData,
@@ -11,6 +12,8 @@ import type {
   GetAdminChatTestMultiRunRunsData,
   GetAdminChatTestMultiRunRunsIdCodeVerifyData,
   GetAdminChatTestMultiRunRunsIdData,
+  GetAdminChatTestMultiRunRunsIdDiffData,
+  GetAdminChatTestMultiRunRunsIdExportData,
   GetAdminChatTestTargetsData,
   GetAdminCodeVerifyStatsData,
   GetAdminModelDeprecationsData,
@@ -21,9 +24,13 @@ import type {
   GetAdminPromptLabRubricsData,
   GetAdminPromptLabTestCasesIdData,
   GetAdminRoutingBalancerData,
+  PatchAdminPromptLabExperimentsIdData,
   PostAdminChatTestMultiRunData,
   PostAdminChatTestMultiRunJudgeData,
   PostAdminChatTestMultiRunPredictData,
+  PostAdminChatTestMultiRunRunsIdFeedbackData,
+  PostAdminChatTestMultiRunRunsIdGoldenData,
+  PostAdminChatTestMultiRunRunsIdPromoteData,
   PostAdminChatTestRunData,
   PostAdminChatTestStreamData,
   PostAdminCodeVerifyData,
@@ -37,20 +44,14 @@ import type {
   PostAdminPromptLabExperimentsData,
   PostAdminPromptLabRubricsData,
   PostAdminPromptLabTestCasesData,
+  PostAdminPromptLabTestCasesIdRunData,
   PostAdminProvidersData,
   PostAdminProvidersSloData,
   PostAdminRoutingBalancerData,
   PostAdminRoutingBreakerResetData,
   PostAdminRoutingPreviewData,
 } from "@/shared/api/generated";
-import type { OpenApiPath } from "@/shared/api/generated/paths.gen";
-import {
-  operation,
-  pathWithParams,
-  route,
-  type OperationData,
-  type WithQuery,
-} from "@/shared/api/endpoint-factory";
+import { operation, route, type WithBody, type WithQuery } from "@/shared/api/endpoint-factory";
 import {
   balancerReleaseSchema,
   balancerSchema,
@@ -68,19 +69,25 @@ import {
   modelUsageTagWriteSchema,
   multiRunCodeVerifySchema,
   multiRunDetailSchema,
+  multiRunDiffSchema,
+  multiRunFeedbackSchema,
+  multiRunGoldenSchema,
   multiRunJudgeSchema,
   multiRunLeaderboardSchema,
   multiRunListSchema,
   multiRunPredictSchema,
+  multiRunPromoteSchema,
   multiRunResponseSchema,
   promptContractListSchema,
   promptContractSchema,
   promptExperimentDetailSchema,
   promptExperimentListSchema,
   promptExperimentSchema,
+  promptExperimentStatusSchema,
   promptRubricListSchema,
   promptRubricSchema,
   promptTestCaseDetailSchema,
+  promptTestCaseRunSchema,
   promptTestCaseSchema,
   providerDeleteSchema,
   providerSLODeleteSchema,
@@ -89,20 +96,9 @@ import {
   routingPreviewSchema,
 } from "@/shared/api/domains/gateway.schemas";
 
-/**
- * Adds a request body to a generated operation. The legacy admin API is documented
- * without request schemas, so the generated `Data` types carry `body?: never`; the
- * shapes below mirror the Go handlers' decode structs.
- */
-type WithBody<Data extends OperationData, Body> = Omit<Data, "body"> & { readonly body: Body };
-
-/** Fills `{id}` / `{name}` in a declared path so the client calls the concrete resource. */
-export function withGatewayPathParams<Endpoint extends { readonly path: OpenApiPath }>(
-  endpoint: Endpoint,
-  params: Readonly<Record<string, string | number>>,
-): Endpoint {
-  return { ...endpoint, path: pathWithParams(endpoint.path, params) };
-}
+// Request bodies below mirror the Go handlers' decode structs: the legacy admin API
+// is documented without request schemas, so the generated `Data` types carry
+// `body?: never` and each operation states the body it actually sends.
 
 export interface ChatTestRunBody {
   readonly target_id?: string;
@@ -136,6 +132,33 @@ export interface MultiRunJudgeBody {
   readonly method: "rule" | "model";
   readonly judge_model?: string;
   readonly rubric?: string;
+}
+
+export interface MultiRunFeedbackBody {
+  readonly model: string;
+  /** 0–5; the server rejects anything outside that range. */
+  readonly rating: number;
+  readonly label?: string;
+  readonly comment?: string;
+}
+
+export interface MultiRunPromoteBody {
+  readonly model: string;
+  readonly task_type?: string;
+  readonly reason?: string;
+}
+
+export interface MultiRunGoldenBody {
+  readonly selected_model: string;
+  readonly workflow_id?: string;
+  readonly workflow_name?: string;
+  readonly step_name?: string;
+  readonly task_type?: string;
+  readonly contract_id?: string;
+  readonly rubric_id?: string;
+  /** Sent only when the run itself stored no prompt; never persisted by the console. */
+  readonly prompt?: string;
+  readonly expected?: string;
 }
 
 export interface ProviderWriteBody {
@@ -202,6 +225,16 @@ export interface PromptContractWriteBody {
 export interface PromptRubricWriteBody {
   readonly name: string;
   readonly criteria?: unknown;
+}
+
+export interface PromptExperimentPatchBody {
+  readonly status: "active" | "archived";
+}
+
+export interface PromptTestCaseRunBody {
+  /** Overrides the models saved on the test case; empty means "use the saved ones". */
+  readonly models?: readonly string[];
+  readonly save_prompt?: boolean;
 }
 
 export interface PromptTestCaseWriteBody {
@@ -297,6 +330,28 @@ export const gatewayEndpoints = {
       "POST",
       "/admin/chat-test/multi-run/judge",
       multiRunJudgeSchema,
+    ),
+    multiRunFeedback: operation<
+      WithBody<PostAdminChatTestMultiRunRunsIdFeedbackData, MultiRunFeedbackBody>,
+      unknown
+    >()("POST", "/admin/chat-test/multi-run/runs/{id}/feedback", multiRunFeedbackSchema),
+    multiRunPromote: operation<
+      WithBody<PostAdminChatTestMultiRunRunsIdPromoteData, MultiRunPromoteBody>,
+      unknown
+    >()("POST", "/admin/chat-test/multi-run/runs/{id}/promote", multiRunPromoteSchema),
+    multiRunGolden: operation<
+      WithBody<PostAdminChatTestMultiRunRunsIdGoldenData, MultiRunGoldenBody>,
+      unknown
+    >()("POST", "/admin/chat-test/multi-run/runs/{id}/golden", multiRunGoldenSchema),
+    multiRunDiff: operation<GetAdminChatTestMultiRunRunsIdDiffData, unknown>()(
+      "GET",
+      "/admin/chat-test/multi-run/runs/{id}/diff",
+      multiRunDiffSchema,
+    ),
+    // File response (markdown / csv / json): downloaded with `fetch`, not `apiClient`.
+    multiRunExport: route<GetAdminChatTestMultiRunRunsIdExportData>()(
+      "GET",
+      "/admin/chat-test/multi-run/runs/{id}/export",
     ),
     leaderboard: operation<
       WithQuery<GetAdminChatTestMultiRunLeaderboardData, { days?: number; team?: string }>,
@@ -414,6 +469,15 @@ export const gatewayEndpoints = {
         "/admin/prompt-lab/experiments/{id}",
         promptExperimentDetailSchema,
       ),
+      updateStatus: operation<
+        WithBody<PatchAdminPromptLabExperimentsIdData, PromptExperimentPatchBody>,
+        unknown
+      >()("PATCH", "/admin/prompt-lab/experiments/{id}", promptExperimentStatusSchema),
+      remove: operation<DeleteAdminPromptLabExperimentsIdData, unknown>()(
+        "DELETE",
+        "/admin/prompt-lab/experiments/{id}",
+        gatewayAcknowledgementSchema,
+      ),
     },
     contracts: {
       list: operation<GetAdminPromptLabContractsData, unknown>()(
@@ -454,6 +518,11 @@ export const gatewayEndpoints = {
         "DELETE",
         "/admin/prompt-lab/test-cases/{id}",
         gatewayAcknowledgementSchema,
+      ),
+      run: operation<WithBody<PostAdminPromptLabTestCasesIdRunData, PromptTestCaseRunBody>, unknown>()(
+        "POST",
+        "/admin/prompt-lab/test-cases/{id}/run",
+        promptTestCaseRunSchema,
       ),
     },
   },

@@ -5,7 +5,8 @@ import { useState } from "react";
 import { routingDecisionsQueryKey } from "@/features/routing/rules/routing-shared";
 import { QueryFailureNotice } from "@/features/routing/rules/routing-ui";
 import { apiClient } from "@/shared/api/client";
-import { routingDecisionDetailEndpoint, type RoutingDecisionEntry } from "@/shared/api/domains/routing";
+import { type RoutingDecisionEntry } from "@/shared/api/domains/routing";
+import { withPathParams } from "@/shared/api/endpoint-factory";
 import { endpoints } from "@/shared/api/endpoints";
 import { Badge } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
@@ -117,10 +118,13 @@ export function DecisionsTab(): React.JSX.Element {
   const detail = useQuery({
     queryKey: [...routingDecisionsQueryKey, "detail", selectedId],
     queryFn: ({ signal }) =>
-      apiClient.request(routingDecisionDetailEndpoint(selectedId ?? ""), {
-        signal,
-        routeId: "routing.rules",
-      }),
+      apiClient.request(
+        withPathParams(endpoints.domains.routing.decisions.detail, { id: selectedId ?? "" }),
+        {
+          signal,
+          routeId: "routing.rules",
+        },
+      ),
     enabled: selectedId !== undefined,
   });
 

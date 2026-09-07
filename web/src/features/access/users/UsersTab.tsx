@@ -5,10 +5,11 @@ import { formatSignedRatio, statusLabel, statusTone } from "@/features/access/ac
 import { QueryNotice, UpdatedAt } from "@/features/access/access-ui";
 import { UserDetailSheet } from "@/features/access/users/UserDetailSheet";
 import { accessKeys, useUserBenchmarkQuery, useUsersQuery } from "@/features/access/users/use-access-admin";
-import { useReturnFocus } from "@/features/access/use-return-focus";
+import { useReturnFocus } from "@/shared/hooks/use-return-focus";
 import { apiClient } from "@/shared/api/client";
-import { withPathParams, type CreateUserBody, type UpdateUserBody } from "@/shared/api/domains/access";
+import type { CreateUserBody, UpdateUserBody } from "@/shared/api/domains/access";
 import type { AuthUserRow, UserSummary } from "@/shared/api/domains/access.schemas";
+import { withPathParams } from "@/shared/api/endpoint-factory";
 import { endpoints } from "@/shared/api/endpoints";
 import { FormDialog } from "@/shared/components/form/FormDialog";
 import { FormField } from "@/shared/components/form/FormField";

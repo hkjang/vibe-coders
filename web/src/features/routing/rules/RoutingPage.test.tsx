@@ -266,6 +266,9 @@ function mockAllEndpoints(overrides: Readonly<Record<string, ApiHandler>> = {}) 
     "GET /admin/routing-rules": () => ({ rules: [rule] }),
     "POST /admin/routing-rules": () => ({ rule }),
     "DELETE /admin/routing-rules/route_1": () => ({ id: "route_1", status: "deleted" }),
+    "PATCH /admin/routing-rules/route_1": (options) => ({
+      rule: { ...rule, ...(options.body as { enabled: boolean }) },
+    }),
     "GET /admin/routing/health": () => healthResponse,
     "GET /admin/routing/balancer": () => balancerResponse,
     "POST /admin/routing/breaker-reset": () => ({
@@ -383,6 +386,7 @@ describe("RoutingPage", () => {
     expect(createButton).toBeDisabled();
     expect(createButton).toHaveAttribute("title", expect.stringContaining("routing:write"));
     expect(await screen.findByRole("button", { name: "gpt-* → gpt-4.1-mini 규칙 삭제" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "gpt-* → gpt-4.1-mini 규칙 중지" })).toBeDisabled();
     expect(screen.getByText(/라우팅 변경 권한\(routing:write\)/u)).toBeInTheDocument();
   });
 
@@ -398,6 +402,36 @@ describe("RoutingPage", () => {
       expect(api.calls.some((call) => call.key === "DELETE /admin/routing-rules/route_1")).toBe(true),
     );
     await waitFor(() => expect(toastSpy.success).toHaveBeenCalledWith("라우팅 규칙을 삭제했습니다."));
+  });
+
+  it("규칙 사용을 중지하면 enabled=false 를 보내고 결과를 알린다", async () => {
+    const api = mockAllEndpoints();
+    render();
+
+    await userEvent.click(await screen.findByRole("button", { name: "gpt-* → gpt-4.1-mini 규칙 중지" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog).toHaveTextContent("라우팅 규칙 중지");
+    await userEvent.click(within(dialog).getByRole("button", { name: "중지" }));
+
+    await waitFor(() => expect(api.bodies("PATCH /admin/routing-rules/route_1")).toHaveLength(1));
+    expect(api.bodies("PATCH /admin/routing-rules/route_1")[0]).toEqual({ enabled: false });
+    await waitFor(() => expect(toastSpy.success).toHaveBeenCalledWith("규칙 사용을 중지했습니다."));
+  });
+
+  it("중지된 규칙은 다시 사용으로 되돌릴 수 있다", async () => {
+    const api = mockAllEndpoints({
+      "GET /admin/routing-rules": () => ({ rules: [{ ...rule, enabled: false }] }),
+    });
+    render();
+
+    await userEvent.click(await screen.findByRole("button", { name: "gpt-* → gpt-4.1-mini 규칙 사용" }));
+    const dialog = await screen.findByRole("dialog");
+    await userEvent.click(within(dialog).getByRole("button", { name: "사용" }));
+
+    await waitFor(() =>
+      expect(api.bodies("PATCH /admin/routing-rules/route_1")[0]).toEqual({ enabled: true }),
+    );
+    await waitFor(() => expect(toastSpy.success).toHaveBeenCalledWith("규칙을 다시 사용합니다."));
   });
 
   it("규칙을 추가하면 입력한 값을 그대로 보낸다", async () => {

@@ -3,7 +3,7 @@ import type { RefObject } from "react";
 
 import { httpTone } from "@/features/access/access-format";
 import { apiClient } from "@/shared/api/client";
-import { withPathParams } from "@/shared/api/domains/access";
+import { withPathParams } from "@/shared/api/endpoint-factory";
 import { endpoints } from "@/shared/api/endpoints";
 import { isAppError } from "@/shared/api/error";
 import { LoadingState } from "@/shared/components/state/PageStates";

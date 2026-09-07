@@ -18,6 +18,7 @@ import { publishLogout, subscribeToLogout, tokenStore } from "@/shared/auth/toke
 import { authNavigation, safeEndSessionUrl } from "@/shared/auth/logout-navigation";
 import { consumeSsoReturnTo } from "@/shared/utils/safe-return-to";
 import { migrationRegistry, registryFromBootstrap, type MigrationFeature } from "@/config/migration-registry";
+import type { UICapabilities } from "@/shared/api/schemas";
 import { formatSsoFailure, normalizeSsoFailureCode } from "@/app/auth/sso-errors";
 import { defaultCredentialPrefixes } from "@/shared/security/secrets";
 
@@ -37,6 +38,7 @@ export interface AuthContextValue {
   defaultEntry: string;
   legacyFallback: boolean;
   credentialPrefixes: readonly string[];
+  capabilities: UICapabilities;
   features: readonly MigrationFeature[];
   error?: string;
   login: (email: string, password: string) => Promise<void>;
@@ -93,6 +95,7 @@ export function AuthProvider({ children }: PropsWithChildren): React.JSX.Element
   const [credentialPrefixes, setCredentialPrefixes] = useState<readonly string[]>([
     ...defaultCredentialPrefixes,
   ]);
+  const [capabilities, setCapabilities] = useState<UICapabilities>({ raw_prompt_view: false });
   const [features, setFeatures] = useState<readonly MigrationFeature[]>(migrationRegistry);
   const [error, setError] = useState<string>();
   const started = useRef(false);
@@ -116,6 +119,7 @@ export function AuthProvider({ children }: PropsWithChildren): React.JSX.Element
       allow_local_login: data.authentication.allow_local_login,
       login_url: data.authentication.sso_login_url,
     });
+    setCapabilities(data.capabilities);
     setFeatures(registryFromBootstrap(data.migration_registry));
     setUser(data.user ?? undefined);
 
@@ -368,6 +372,7 @@ export function AuthProvider({ children }: PropsWithChildren): React.JSX.Element
       defaultEntry,
       legacyFallback,
       credentialPrefixes,
+      capabilities,
       features,
       error,
       login,
@@ -380,6 +385,7 @@ export function AuthProvider({ children }: PropsWithChildren): React.JSX.Element
       authenticationMode,
       backendVersion,
       bootstrap,
+      capabilities,
       credentialPrefixes,
       defaultEntry,
       error,

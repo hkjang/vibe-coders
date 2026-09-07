@@ -4,10 +4,16 @@ import { z } from "zod";
 
 import { formatSignedRatio, severityTone } from "@/features/access/access-format";
 import { QueryNotice, UpdatedAt, UsageMeter } from "@/features/access/access-ui";
-import { accessKeys, useBudgetsQuery, useQuotasQuery } from "@/features/access/users/use-access-admin";
+import {
+  accessKeys,
+  useBudgetProjectionQuery,
+  useBudgetsQuery,
+  useQuotasQuery,
+} from "@/features/access/users/use-access-admin";
 import { apiClient } from "@/shared/api/client";
-import { withPathParams, type CreateBudgetBody, type CreateQuotaBody } from "@/shared/api/domains/access";
+import type { CreateBudgetBody, CreateQuotaBody, UpdateQuotaBody } from "@/shared/api/domains/access";
 import type { BudgetStatus, QuotaUsage } from "@/shared/api/domains/access.schemas";
+import { withPathParams } from "@/shared/api/endpoint-factory";
 import { endpoints } from "@/shared/api/endpoints";
 import { FormDialog } from "@/shared/components/form/FormDialog";
 import { FormField } from "@/shared/components/form/FormField";
@@ -22,6 +28,7 @@ import { Input } from "@/shared/components/ui/Input";
 import { SectionCard } from "@/shared/components/ui/SectionCard";
 import { Select } from "@/shared/components/ui/Select";
 import { StatCard, StatGrid } from "@/shared/components/ui/StatCard";
+import { Switch } from "@/shared/components/ui/Switch";
 import { Textarea } from "@/shared/components/ui/Textarea";
 import { useMutationFeedback } from "@/shared/hooks/use-mutation-feedback";
 import { formatDate, formatKRW, formatNumber } from "@/shared/utils/format";
@@ -47,6 +54,16 @@ const quotaSchema = z
     path: ["scope_value"],
   });
 type QuotaForm = z.infer<typeof quotaSchema>;
+
+// PATCH only accepts the limits, the on/off flag and the note; scope and period
+// are fixed for the life of a quota.
+const quotaEditSchema = z
+  .object({ token_limit: z.string(), krw_limit: z.string(), note: z.string() })
+  .refine((values) => Number(values.token_limit) >= 0 && Number(values.krw_limit) >= 0, {
+    message: "한도는 0 이상이어야 합니다.",
+    path: ["token_limit"],
+  });
+type QuotaEditForm = z.infer<typeof quotaEditSchema>;
 
 const budgetSchema = z
   .object({
@@ -84,9 +101,13 @@ interface QuotasTabProps {
 export function QuotasTab({ canWrite, writeDeniedReason }: QuotasTabProps): React.JSX.Element {
   const quotas = useQuotasQuery(true);
   const budgets = useBudgetsQuery(true);
+  const projection = useBudgetProjectionQuery(true);
   const [alertsRequested, setAlertsRequested] = useState(false);
   const [quotaOpen, setQuotaOpen] = useState(false);
   const [budgetOpen, setBudgetOpen] = useState(false);
+  const [editingQuota, setEditingQuota] = useState<QuotaUsage | undefined>();
+  const [editEnabled, setEditEnabled] = useState(true);
+  const [togglingQuota, setTogglingQuota] = useState<QuotaUsage | undefined>();
   const [removingQuota, setRemovingQuota] = useState<QuotaUsage | undefined>();
   const [removingBudget, setRemovingBudget] = useState<BudgetStatus | undefined>();
   const [notifying, setNotifying] = useState(false);
@@ -109,6 +130,11 @@ export function QuotasTab({ canWrite, writeDeniedReason }: QuotasTabProps): Reac
     krw_limit: "",
     note: "",
   });
+  const quotaEditForm = useZodForm<QuotaEditForm, QuotaEditForm>(quotaEditSchema, {
+    token_limit: "",
+    krw_limit: "",
+    note: "",
+  });
   const budgetForm = useZodForm<BudgetForm, BudgetForm>(budgetSchema, {
     scope: "team",
     scope_value: "",
@@ -120,6 +146,12 @@ export function QuotasTab({ canWrite, writeDeniedReason }: QuotasTabProps): Reac
     mutate: (body: CreateQuotaBody) => apiClient.request(access.quotas.create, { body, routeId }),
     invalidates: [accessKeys.quotas],
     successMessage: "할당량을 만들었습니다.",
+  });
+  const updateQuota = useMutationFeedback({
+    mutate: ({ id, body }: { id: string; body: UpdateQuotaBody }) =>
+      apiClient.request(withPathParams(access.quotas.update, { id }), { body, routeId }),
+    invalidates: [accessKeys.quotas],
+    successMessage: "할당량을 수정했습니다.",
   });
   const removeQuota = useMutationFeedback({
     mutate: (id: string) => apiClient.request(withPathParams(access.quotas.remove, { id }), { routeId }),
@@ -147,6 +179,7 @@ export function QuotasTab({ canWrite, writeDeniedReason }: QuotasTabProps): Reac
 
   const usage = quotas.data?.usage ?? [];
   const budgetRows = budgets.data?.budgets ?? [];
+  const projectionRows = projection.data?.teams ?? [];
   const overBudget = budgetRows.filter((row) => !row.on_track).length;
 
   return (
@@ -181,11 +214,6 @@ export function QuotasTab({ canWrite, writeDeniedReason }: QuotasTabProps): Reac
           value={formatNumber(overBudget)}
         />
       </StatGrid>
-
-      <InlineNotice tone="info" title="할당량은 만들고 지울 수만 있습니다.">
-        서버가 이 UI 버전에 할당량 수정(사용/중지 전환, 한도 변경) API를 노출하지 않습니다. 한도를 바꾸려면
-        기존 할당량을 삭제하고 새로 만드세요.
-      </InlineNotice>
 
       <SectionCard
         title="할당량"
@@ -278,6 +306,35 @@ export function QuotasTab({ canWrite, writeDeniedReason }: QuotasTabProps): Reac
                     </td>
                     <td>
                       <div className="table-actions">
+                        <Button
+                          size="small"
+                          disabled={!canWrite}
+                          title={canWrite ? undefined : writeDeniedReason}
+                          onClick={(event) => {
+                            rowTrigger.current = event.currentTarget;
+                            quotaEditForm.reset({
+                              token_limit: row.quota.token_limit > 0 ? String(row.quota.token_limit) : "",
+                              krw_limit: row.quota.krw_limit > 0 ? String(row.quota.krw_limit) : "",
+                              note: row.quota.note,
+                            });
+                            setEditEnabled(row.quota.enabled);
+                            setEditingQuota(row);
+                          }}
+                        >
+                          수정
+                        </Button>
+                        <Button
+                          size="small"
+                          variant="secondary"
+                          disabled={!canWrite}
+                          title={canWrite ? undefined : writeDeniedReason}
+                          onClick={(event) => {
+                            rowTrigger.current = event.currentTarget;
+                            setTogglingQuota(row);
+                          }}
+                        >
+                          {row.quota.enabled ? "중지" : "사용"}
+                        </Button>
                         <Button
                           size="small"
                           variant="danger"
@@ -379,6 +436,66 @@ export function QuotasTab({ canWrite, writeDeniedReason }: QuotasTabProps): Reac
           </div>
         )}
         <UpdatedAt at={budgets.dataUpdatedAt} />
+      </SectionCard>
+
+      <SectionCard
+        title="팀별 월말 예상 지출"
+        description="이번 달 사용 속도로 계산한 팀별 월말 예상 지출과 팀 예산 초과 여부입니다."
+      >
+        {projection.isError ? (
+          <QueryNotice
+            error={projection.error}
+            hasData={Boolean(projection.data)}
+            label="지출 예측"
+            onRetry={() => void projection.refetch()}
+          />
+        ) : null}
+        {projectionRows.length === 0 ? (
+          <EmptyState
+            title="예측할 팀 사용량이 없습니다."
+            description="이번 달에 요청을 보낸 팀이 생기면 월말 예상 지출을 계산합니다."
+          />
+        ) : (
+          <div className="data-table-scroll" tabIndex={0} aria-label="팀별 월말 예상 지출 표 영역">
+            <table className="data-table">
+              <caption className="sr-only">팀별 월말 예상 지출</caption>
+              <thead>
+                <tr>
+                  <th scope="col">팀</th>
+                  <th scope="col">이번 달 지출</th>
+                  <th scope="col">월말 예상</th>
+                  <th scope="col">팀 예산</th>
+                  <th scope="col">예상 초과액</th>
+                  <th scope="col">경과일</th>
+                </tr>
+              </thead>
+              <tbody>
+                {projectionRows.map((row) => (
+                  <tr key={row.team} className={row.will_exceed ? "row-danger" : undefined}>
+                    <td className="truncate">
+                      {row.team || "—"}
+                      {row.will_exceed ? <Badge tone="danger">초과 예상</Badge> : null}
+                    </td>
+                    <td className="cell-number">{formatKRW(row.spent_krw)}</td>
+                    <td className="cell-number">{formatKRW(row.projected_krw)}</td>
+                    <td className="cell-number">{row.has_budget ? formatKRW(row.budget_krw) : "미설정"}</td>
+                    <td className="cell-number">
+                      {row.projected_overage_krw > 0 ? formatKRW(row.projected_overage_krw) : "—"}
+                    </td>
+                    <td className="cell-number">
+                      {formatNumber(row.days_elapsed, 1)} / {formatNumber(row.days_in_month, 1)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <p className="access-note">
+          예상 초과 팀 {formatNumber(projection.data?.exceeding ?? 0)}곳입니다. 팀 예산이 없는 팀은 초과
+          여부를 계산하지 않습니다.
+        </p>
+        <UpdatedAt at={projection.dataUpdatedAt} />
       </SectionCard>
 
       <SectionCard
@@ -530,6 +647,85 @@ export function QuotasTab({ canWrite, writeDeniedReason }: QuotasTabProps): Reac
           {(control) => <Textarea {...control} rows={2} {...budgetForm.register("note")} />}
         </FormField>
       </FormDialog>
+
+      <FormDialog
+        form={quotaEditForm}
+        open={editingQuota !== undefined}
+        onOpenChange={(open) => {
+          if (!open) setEditingQuota(undefined);
+        }}
+        returnFocusRef={rowTrigger}
+        title="할당량 수정"
+        description="한도와 메모, 사용 여부만 바꿀 수 있습니다. 범위와 주기는 만들 때 정해집니다."
+        onSubmit={async (values) => {
+          if (!editingQuota) return;
+          await updateQuota.mutateAsync({
+            id: editingQuota.quota.id,
+            body: {
+              token_limit: Number(values.token_limit) || 0,
+              krw_limit: Number(values.krw_limit) || 0,
+              enabled: editEnabled,
+              note: values.note,
+            },
+          });
+          setEditingQuota(undefined);
+        }}
+      >
+        <FormField label="범위와 대상">
+          {(control) => (
+            <Input
+              {...control}
+              readOnly
+              value={`${scopeLabels[editingQuota?.quota.scope ?? ""] ?? editingQuota?.quota.scope ?? ""} · ${editingQuota?.quota.scope_value || "*"}`}
+            />
+          )}
+        </FormField>
+        <FormField
+          label="토큰 한도"
+          description="0을 넣으면 토큰 한도를 없앱니다."
+          error={quotaEditForm.formState.errors.token_limit?.message}
+        >
+          {(control) => (
+            <Input {...control} type="number" min={0} {...quotaEditForm.register("token_limit")} />
+          )}
+        </FormField>
+        <FormField label="비용 한도(원)" description="0을 넣으면 비용 한도를 없앱니다.">
+          {(control) => <Input {...control} type="number" min={0} {...quotaEditForm.register("krw_limit")} />}
+        </FormField>
+        <FormField label="메모">
+          {(control) => <Textarea {...control} rows={2} {...quotaEditForm.register("note")} />}
+        </FormField>
+        <Switch
+          checked={editEnabled}
+          onCheckedChange={setEditEnabled}
+          label={editEnabled ? "사용 중" : "중지됨"}
+        />
+      </FormDialog>
+
+      <ConfirmDialog
+        open={togglingQuota !== undefined}
+        onOpenChange={(open) => {
+          if (!open) setTogglingQuota(undefined);
+        }}
+        returnFocusRef={rowTrigger}
+        tone={togglingQuota?.quota.enabled ? "danger" : "primary"}
+        title={togglingQuota?.quota.enabled ? "할당량 중지" : "할당량 사용"}
+        description={
+          togglingQuota?.quota.enabled
+            ? `${togglingQuota.quota.scope_value || "*"} 대상 할당량을 중지합니다. 중지하는 동안 이 범위에는 한도가 적용되지 않습니다.`
+            : `${togglingQuota?.quota.scope_value || "*"} 대상 할당량을 다시 적용합니다.`
+        }
+        confirmLabel={togglingQuota?.quota.enabled ? "중지" : "사용"}
+        onConfirm={async () => {
+          if (togglingQuota) {
+            await updateQuota.mutateAsync({
+              id: togglingQuota.quota.id,
+              body: { enabled: !togglingQuota.quota.enabled },
+            });
+          }
+          setTogglingQuota(undefined);
+        }}
+      />
 
       <ConfirmDialog
         open={removingQuota !== undefined}

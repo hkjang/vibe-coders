@@ -5,8 +5,9 @@ import { z } from "zod";
 
 import { QueryNotice } from "@/features/mcp/mcp-ui";
 import { apiClient } from "@/shared/api/client";
-import { withMcpPathParams, type AgentRouteBody } from "@/shared/api/domains/mcp";
+import type { AgentRouteBody } from "@/shared/api/domains/mcp";
 import type { AgentRouteRow } from "@/shared/api/domains/mcp.schemas";
+import { withPathParams } from "@/shared/api/endpoint-factory";
 import { endpoints } from "@/shared/api/endpoints";
 import { providerDisplayLabel } from "@/shared/api/provider-ref";
 import { FormDialog } from "@/shared/components/form/FormDialog";
@@ -127,14 +128,14 @@ export function AgentRoutesTab({ canWrite }: { canWrite: boolean }): React.JSX.E
   });
   const removeRoute = useMutationFeedback({
     mutate: (id: string) =>
-      apiClient.request(withMcpPathParams(endpoints.domains.mcp.agents.deleteRoute, { id }), { routeId }),
+      apiClient.request(withPathParams(endpoints.domains.mcp.agents.deleteRoute, { id }), { routeId }),
     invalidates: [["agents"]],
     successMessage: "에이전트 라우트를 삭제했습니다.",
     errorMessage: "에이전트 라우트를 삭제하지 못했습니다.",
   });
   const testRoute = useMutationFeedback({
     mutate: (variables: { id: string; prompt: string }) =>
-      apiClient.request(withMcpPathParams(endpoints.domains.mcp.agents.testRoute, { id: variables.id }), {
+      apiClient.request(withPathParams(endpoints.domains.mcp.agents.testRoute, { id: variables.id }), {
         body: variables.prompt ? { prompt: variables.prompt } : {},
         routeId,
       }),

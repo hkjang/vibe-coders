@@ -4,8 +4,8 @@ import { useRef, useState } from "react";
 import { z } from "zod";
 
 import { apiClient } from "@/shared/api/client";
-import { withObservabilityPath } from "@/shared/api/domains/observability";
 import type { SavedFilter } from "@/shared/api/domains/observability.schemas";
+import { withPathParams } from "@/shared/api/endpoint-factory";
 import { endpoints } from "@/shared/api/endpoints";
 import { FormDialog } from "@/shared/components/form/FormDialog";
 import { FormField } from "@/shared/components/form/FormField";
@@ -72,7 +72,7 @@ export function SavedViewBar({
   const update = useMutationFeedback<SavedFilter, unknown>({
     mutate: (view) =>
       apiClient.request(
-        withObservabilityPath(endpoints.domains.observability.savedFilters.update, { id: view.id }),
+        withPathParams(endpoints.domains.observability.savedFilters.update, { id: view.id }),
         {
           body: { params: currentParams },
           routeId: "observability.xview.saved-filters.update",
@@ -86,7 +86,7 @@ export function SavedViewBar({
   const remove = useMutationFeedback<SavedFilter, unknown>({
     mutate: (view) =>
       apiClient.request(
-        withObservabilityPath(endpoints.domains.observability.savedFilters.remove, { id: view.id }),
+        withPathParams(endpoints.domains.observability.savedFilters.remove, { id: view.id }),
         { routeId: "observability.xview.saved-filters.delete" },
       ),
     invalidates: [savedViewsQueryKey],

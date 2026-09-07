@@ -111,6 +111,7 @@ export function Text2SqlRuntimeTab({
   const [profileDialogOpen, setProfileDialogOpen] = useState(false);
   const [connectionDialogOpen, setConnectionDialogOpen] = useState(false);
   const [profileToDelete, setProfileToDelete] = useState("");
+  const [connectionToDelete, setConnectionToDelete] = useState<Text2SQLConnectionRow | undefined>();
   const [killConfirmOpen, setKillConfirmOpen] = useState(false);
   const [health, setHealth] = useState<{ id: string; result: Text2SQLHealthcheck } | undefined>();
   const [healthError, setHealthError] = useState<string | undefined>();
@@ -119,6 +120,7 @@ export function Text2SqlRuntimeTab({
   const connectionTriggerRef = useRef<HTMLButtonElement>(null);
   const killTriggerRef = useRef<HTMLButtonElement>(null);
   const rowTriggerRef = useRef<HTMLElement | null>(null);
+  const connectionRowTriggerRef = useRef<HTMLElement | null>(null);
 
   const profileForm = useZodForm<ProfileFormValues, ProfileFormValues>(profileFormSchema, {
     virtual_model: "",
@@ -163,6 +165,16 @@ export function Text2SqlRuntimeTab({
       }),
     invalidates: text2sqlInvalidations.connections,
     successMessage: "실행 DB 연결을 저장했습니다.",
+  });
+  const removeConnection = useMutationFeedback({
+    mutate: (connectionId: string) =>
+      apiClient.request(endpoints.domains.text2sql.connections.remove, {
+        query: { id: connectionId },
+        routeId: text2sqlRouteId,
+      }),
+    invalidates: text2sqlInvalidations.connections,
+    successMessage: (_result, connectionId) => `실행 DB 연결 ${connectionId}을(를) 삭제했습니다.`,
+    errorMessage: "실행 DB 연결을 삭제하지 못했습니다.",
   });
   const toggleFeature = useMutationFeedback({
     mutate: (variables: { name: string; enabled: boolean }) =>
@@ -281,13 +293,28 @@ export function Text2SqlRuntimeTab({
       id: "actions",
       header: "동작",
       cell: ({ row }) => (
-        <Button
-          size="small"
-          disabled={healthPending !== ""}
-          onClick={() => void runHealthcheck(row.original.id)}
-        >
-          {healthPending === row.original.id ? "확인 중" : "헬스체크"}
-        </Button>
+        <div className="t2s-row-actions">
+          <Button
+            size="small"
+            disabled={healthPending !== ""}
+            onClick={() => void runHealthcheck(row.original.id)}
+          >
+            {healthPending === row.original.id ? "확인 중" : "헬스체크"}
+          </Button>
+          <Button
+            size="small"
+            variant="danger"
+            disabled={!canWrite}
+            title={writeDisabledTitle(canWrite)}
+            aria-label={`${row.original.id} 연결 삭제`}
+            onClick={(event) => {
+              connectionRowTriggerRef.current = event.currentTarget;
+              setConnectionToDelete(row.original);
+            }}
+          >
+            삭제
+          </Button>
+        </div>
       ),
     }),
   ]) as Array<DataTableColumn<Text2SQLConnectionRow>>;
@@ -390,10 +417,6 @@ export function Text2SqlRuntimeTab({
             />
           </InlineNotice>
         ) : null}
-        <InlineNotice tone="info" title="연결 삭제는 기존 화면에서">
-          연결 삭제 API는 아직 이 콘솔의 API 계약에 포함되어 있지 않습니다. 삭제가 필요하면 기존 화면에서
-          진행하세요.
-        </InlineNotice>
       </SectionCard>
 
       <SectionCard
@@ -565,6 +588,22 @@ export function Text2SqlRuntimeTab({
         onConfirm={async () => {
           await removeProfile.mutateAsync(profileToDelete);
           setProfileToDelete("");
+        }}
+      />
+
+      <ConfirmDialog
+        open={connectionToDelete !== undefined}
+        onOpenChange={(next) => {
+          if (!next) setConnectionToDelete(undefined);
+        }}
+        returnFocusRef={connectionRowTriggerRef}
+        tone="danger"
+        title="실행 DB 연결 삭제"
+        description={`${connectionToDelete?.name ?? ""} 연결을 삭제하면 이 연결을 쓰던 프로필은 SQL을 실행하지 못합니다. 저장된 DSN도 함께 삭제됩니다.`}
+        confirmLabel="삭제"
+        onConfirm={async () => {
+          if (connectionToDelete) await removeConnection.mutateAsync(connectionToDelete.id);
+          setConnectionToDelete(undefined);
         }}
       />
 

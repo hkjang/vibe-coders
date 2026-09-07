@@ -484,8 +484,14 @@ func (s *Server) handleAdminUIBootstrap(w http.ResponseWriter, r *http.Request) 
 			"sso_login_url":       "/auth/keycloak/login",
 			"credential_prefixes": uiCredentialPrefixes(s.cfg.Auth),
 		},
-		"user":               user,
-		"roles":              roles,
+		"user":  user,
+		"roles": roles,
+		// Some server rules are decided by role rather than by scope, so a client
+		// cannot derive them from "permissions". Report them here instead of
+		// letting a screen discover them from a 403 after the operator clicks.
+		"capabilities": map[string]any{
+			"raw_prompt_view": s.canViewRawPrompts(r),
+		},
 		"permissions":        scopes,
 		"allowed_features":   allowedFeatures,
 		"migration_registry": features,

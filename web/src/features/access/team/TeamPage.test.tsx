@@ -1,4 +1,4 @@
-import { screen } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import axe from "axe-core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -59,6 +59,50 @@ function handlers(overrides: Record<string, () => unknown> = {}) {
     ...overrides,
   };
 }
+
+const pendingReports = {
+  team_id: "platform",
+  reports: [
+    {
+      id: "rep_1",
+      name: "주간 비용",
+      question: "",
+      sql: "",
+      schema_name: "analytics",
+      kind: "text2sql",
+      created_by: "usr_alpha",
+      created_at: "2026-09-01T00:00:00Z",
+      schedule_interval: "",
+      schedule_enabled: false,
+      deliver_mattermost: false,
+      last_run_at: "",
+      team: "platform",
+      visibility: "team",
+      approval_status: "pending",
+      approved_by: "",
+      approved_at: "",
+    },
+    {
+      id: "rep_2",
+      name: "이미 승인된 리포트",
+      question: "",
+      sql: "",
+      schema_name: "analytics",
+      kind: "text2sql",
+      created_by: "usr_beta",
+      created_at: "2026-08-01T00:00:00Z",
+      schedule_interval: "",
+      schedule_enabled: false,
+      deliver_mattermost: false,
+      last_run_at: "",
+      team: "platform",
+      visibility: "team",
+      approval_status: "approved",
+      approved_by: "usr_lead",
+      approved_at: "2026-08-02T00:00:00Z",
+    },
+  ],
+};
 
 describe("TeamPage", () => {
   beforeEach(() => {
@@ -144,6 +188,49 @@ describe("TeamPage", () => {
     expect(members[0]).toHaveTextContent("alice");
     await user.click(screen.getByRole("tab", { name: "팀 대시보드" }));
     expect(await screen.findByText("usr_alpha")).toBeVisible();
+  });
+
+  it("approves a pending team report", async () => {
+    const user = userEvent.setup();
+    const api = mockApi(
+      handlers({
+        "GET /team/reports": () => pendingReports,
+        "POST /team/reports": () => ({ report_id: "rep_1", approval_status: "approved" }),
+      }),
+    );
+    renderScreen(<TeamPage />, { path: "/team/*", route: "/team" });
+
+    await screen.findByText("주간 비용");
+    const [pendingApprove, decidedApprove] = screen.getAllByRole("button", { name: "승인" });
+    expect(decidedApprove).toBeDisabled();
+    await user.click(pendingApprove as HTMLElement);
+    const dialog = await screen.findByRole("dialog");
+    await user.click(within(dialog).getByRole("button", { name: "승인" }));
+
+    await waitFor(() => {
+      expect(api.bodies("POST /team/reports")).toEqual([{ report_id: "rep_1", action: "approve" }]);
+    });
+  });
+
+  it("rejects a pending team report", async () => {
+    const user = userEvent.setup();
+    const api = mockApi(
+      handlers({
+        "GET /team/reports": () => pendingReports,
+        "POST /team/reports": () => ({ report_id: "rep_1", approval_status: "rejected" }),
+      }),
+    );
+    renderScreen(<TeamPage />, { path: "/team/*", route: "/team" });
+
+    await screen.findByText("주간 비용");
+    const [pendingReject] = screen.getAllByRole("button", { name: "반려" });
+    await user.click(pendingReject as HTMLElement);
+    const dialog = await screen.findByRole("dialog");
+    await user.click(within(dialog).getByRole("button", { name: "반려" }));
+
+    await waitFor(() => {
+      expect(api.bodies("POST /team/reports")).toEqual([{ report_id: "rep_1", action: "reject" }]);
+    });
   });
 
   it("has no automated accessibility violations", async () => {

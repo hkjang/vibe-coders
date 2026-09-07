@@ -94,6 +94,40 @@ const assetsResponse = {
       avg_latency_ms: 1500,
       call_count: 210,
     },
+    {
+      id: "security-review",
+      name: "보안 점검",
+      category: "security",
+      description: "보안 관점 코드 리뷰 프롬프트",
+      body: "다음 코드를 보안 관점에서 점검하세요.",
+      enabled: true,
+      use_count: 4,
+      last_used_at: "",
+      created_at: "2026-08-01T00:00:00Z",
+      updated_at: "2026-08-20T00:00:00Z",
+      tags: ["security"],
+      status: "draft",
+      approved_by: "",
+      approved_at: "",
+      note: "",
+    },
+    {
+      id: "test-gen",
+      name: "테스트 생성",
+      category: "test",
+      description: "단위 테스트 생성 프롬프트",
+      body: "다음 코드의 단위 테스트를 작성하세요.",
+      enabled: true,
+      use_count: 12,
+      last_used_at: "2026-09-01T00:00:00Z",
+      created_at: "2026-07-01T00:00:00Z",
+      updated_at: "2026-08-30T00:00:00Z",
+      tags: ["test"],
+      status: "pending",
+      approved_by: "",
+      approved_at: "",
+      note: "",
+    },
   ],
   stats: { draft: 2, pending: 1, approved: 3, standard: 1 },
   categories: [
@@ -130,6 +164,62 @@ const debtResponse = {
   ],
 };
 
+const assetHistoryResponse = {
+  history: [
+    {
+      id: "pth_2",
+      template_id: "refactor-basic",
+      action: "edit",
+      version_num: 2,
+      name: "기본 리팩터링",
+      category: "refactor",
+      description: "",
+      body: "다음 코드를 읽고 가독성을 높여 리팩터링하세요.",
+      tags: ["java", "refactor"],
+      to_status: "standard",
+      note: "",
+      actor: "lead@example.com",
+      has_snapshot: true,
+      created_at: "2026-09-01T00:00:00Z",
+    },
+    {
+      id: "pth_1",
+      template_id: "refactor-basic",
+      action: "create",
+      version_num: 1,
+      name: "기본 리팩터링",
+      category: "refactor",
+      description: "",
+      body: "코드를 리팩터링하세요.",
+      tags: ["java"],
+      to_status: "draft",
+      note: "",
+      actor: "operator@example.com",
+      has_snapshot: true,
+      created_at: "2026-06-01T00:00:00Z",
+    },
+    {
+      id: "pth_0",
+      template_id: "refactor-basic",
+      action: "approve",
+      version_num: 2,
+      from_status: "pending",
+      to_status: "approved",
+      note: "품질 확인 완료",
+      actor: "lead@example.com",
+      has_snapshot: false,
+      created_at: "2026-07-01T00:00:00Z",
+    },
+  ],
+};
+
+const assetUsageResponse = {
+  usage: [
+    { team: "platform", calls: 120, errors: 3, cost_krw: 33600.5 },
+    { team: "unassigned", calls: 18, errors: 0, cost_krw: 4100 },
+  ],
+};
+
 function mockAllEndpoints(overrides: Record<string, () => unknown> = {}) {
   return mockApi({
     "GET /admin/prompts": () => promptSearchResponse,
@@ -139,6 +229,24 @@ function mockAllEndpoints(overrides: Record<string, () => unknown> = {}) {
     "GET /admin/prompt-assets": () => assetsResponse,
     "POST /admin/templates": () => ({ template: assetsResponse.assets[0] }),
     "DELETE /admin/templates/refactor-basic": () => ({ id: "refactor-basic", status: "deleted" }),
+    "PATCH /admin/templates/refactor-basic": () => ({ template: assetsResponse.assets[0] }),
+    "GET /admin/templates/refactor-basic/history": () => assetHistoryResponse,
+    "GET /admin/templates/refactor-basic/usage": () => assetUsageResponse,
+    "POST /admin/templates/refactor-basic/rollback": () => ({
+      template: assetsResponse.assets[0],
+      restored_from: 1,
+    }),
+    "POST /admin/templates/refactor-basic/use": () => ({
+      id: "refactor-basic",
+      name: "기본 리팩터링",
+      category: "refactor",
+      description: "",
+      body: "다음 코드를 읽고 가독성을 높여 리팩터링하세요.",
+      tags: ["java", "refactor"],
+      status: "standard",
+    }),
+    "POST /admin/templates/security-review/submit": () => ({ id: "security-review", status: "pending" }),
+    "POST /admin/templates/test-gen/approve": () => ({ id: "test-gen", status: "approved" }),
     "POST /admin/saved-filters": () => ({ filter: savedFiltersResponse.filters[0] }),
     ...overrides,
   });
@@ -205,6 +313,16 @@ describe("PromptLibraryPage", () => {
     expect(screen.getByText("읽기 전용으로 열려 있습니다.")).toBeInTheDocument();
   });
 
+  it("쓰기 권한이 없으면 자산 검토 조작을 비활성화한다", async () => {
+    authRuntime.scopes = ["admin:read"];
+    mockAllEndpoints();
+    render("/prompts/library?tab=assets");
+
+    expect(await screen.findByRole("button", { name: "보안 점검 검토 제출" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "테스트 생성 승인" })).toBeDisabled();
+    expect(screen.getByRole("switch", { name: "기본 리팩터링 사용" })).toBeDisabled();
+  });
+
   it("검색 조건을 URL 쿼리에 반영해 서버에 전달한다", async () => {
     const api = mockAllEndpoints();
     const user = userEvent.setup();
@@ -239,6 +357,123 @@ describe("PromptLibraryPage", () => {
       expect(api.calls.some((call) => call.key === "DELETE /admin/templates/refactor-basic")).toBe(true),
     );
     await waitFor(() => expect(toastSpy.success).toHaveBeenCalledWith("프롬프트 자산을 삭제했습니다."));
+  });
+
+  it("자산 탭에서 초안을 검토 제출한다", async () => {
+    const api = mockAllEndpoints();
+    const user = userEvent.setup();
+    render("/prompts/library?tab=assets");
+
+    await user.click(await screen.findByRole("button", { name: "보안 점검 검토 제출" }));
+    expect(await screen.findByRole("heading", { name: "검토를 제출할까요?" })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "검토 제출", hidden: false }));
+
+    await waitFor(() =>
+      expect(api.calls.some((call) => call.key === "POST /admin/templates/security-review/submit")).toBe(
+        true,
+      ),
+    );
+    await waitFor(() => expect(toastSpy.success).toHaveBeenCalledWith("검토를 요청했습니다."));
+  });
+
+  it("검토 대기 자산은 사유를 받은 뒤에만 승인한다", async () => {
+    const api = mockAllEndpoints();
+    const user = userEvent.setup();
+    render("/prompts/library?tab=assets");
+
+    await user.click(await screen.findByRole("button", { name: "테스트 생성 승인" }));
+    const confirm = await screen.findByRole("button", { name: "승인", hidden: false });
+    expect(confirm).toBeDisabled();
+    await user.type(screen.getByLabelText(/변경 사유/u), "품질 기준 통과");
+    await user.click(confirm);
+
+    await waitFor(() =>
+      expect(api.bodies("POST /admin/templates/test-gen/approve")).toEqual([
+        { status: "approved", note: "품질 기준 통과" },
+      ]),
+    );
+  });
+
+  it("자산 편집은 부분 수정(PATCH)으로 저장한다", async () => {
+    const api = mockAllEndpoints();
+    const user = userEvent.setup();
+    render("/prompts/library?tab=assets");
+
+    await user.click(await screen.findByRole("button", { name: "기본 리팩터링 편집" }));
+    const dialog = await screen.findByRole("dialog", { name: "프롬프트 자산 편집" });
+    const nameInput = within(dialog).getByLabelText(/^이름/u);
+    await user.clear(nameInput);
+    await user.type(nameInput, "기본 리팩터링 v2");
+    await user.click(within(dialog).getByRole("button", { name: "저장" }));
+
+    await waitFor(() =>
+      expect(api.bodies("PATCH /admin/templates/refactor-basic")).toEqual([
+        {
+          name: "기본 리팩터링 v2",
+          category: "refactor",
+          description: "레거시 자바 코드를 정리하는 표준 프롬프트",
+          body: "다음 코드를 읽고 가독성을 높여 리팩터링하세요.",
+          tags: ["java", "refactor"],
+          note: "",
+        },
+      ]),
+    );
+    await waitFor(() => expect(toastSpy.success).toHaveBeenCalledWith("프롬프트 자산을 수정했습니다."));
+  });
+
+  it("사용 스위치를 끄면 enabled 만 부분 수정한다", async () => {
+    const api = mockAllEndpoints();
+    const user = userEvent.setup();
+    render("/prompts/library?tab=assets");
+
+    await user.click(await screen.findByRole("switch", { name: "기본 리팩터링 사용" }));
+
+    await waitFor(() =>
+      expect(api.bodies("PATCH /admin/templates/refactor-basic")).toEqual([{ enabled: false }]),
+    );
+  });
+
+  it("자산 상세에서 버전 이력과 팀별 사용 현황을 보여주고 이전 버전으로 복원한다", async () => {
+    const api = mockAllEndpoints();
+    const user = userEvent.setup();
+    render("/prompts/library?tab=assets&asset=refactor-basic");
+
+    expect(await screen.findByText("platform")).toBeInTheDocument();
+    const usageTable = screen.getByRole("table", { name: "팀별 사용 현황" });
+    expect(within(usageTable).getByText("120")).toBeInTheDocument();
+
+    const versionTable = screen.getByRole("table", { name: "버전 이력" });
+    expect(within(versionTable).getByText("v2")).toBeInTheDocument();
+    expect(within(versionTable).getByText("현재")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "v1으로 복원" }));
+    expect(await screen.findByRole("heading", { name: "이전 버전으로 복원할까요?" })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "복원", hidden: false }));
+
+    await waitFor(() =>
+      expect(api.bodies("POST /admin/templates/refactor-basic/rollback")).toEqual([{ version: 1 }]),
+    );
+    await waitFor(() => expect(toastSpy.success).toHaveBeenCalledWith("이전 버전으로 복원했습니다."));
+  });
+
+  it("자산 상세에서 사용 기록을 남기고 본문을 복사한다", async () => {
+    const api = mockAllEndpoints();
+    const user = userEvent.setup();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(globalThis.navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    render("/prompts/library?tab=assets&asset=refactor-basic");
+
+    await user.click(await screen.findByRole("button", { name: /사용 기록 남기고 복사/u }));
+
+    await waitFor(() =>
+      expect(api.calls.some((call) => call.key === "POST /admin/templates/refactor-basic/use")).toBe(true),
+    );
+    await waitFor(() =>
+      expect(writeText).toHaveBeenCalledWith("다음 코드를 읽고 가독성을 높여 리팩터링하세요."),
+    );
   });
 
   it("URL 쿼리에서 탭과 부채 기간을 복원한다", async () => {

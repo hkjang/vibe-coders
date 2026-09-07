@@ -77,3 +77,85 @@ export function debtTypeTone(type: string | undefined): "danger" | "info" | "mut
       return "muted";
   }
 }
+
+/** Change-log action names used by `store.PromptTemplateHistory`. */
+export function assetHistoryActionLabel(action: string | undefined): string {
+  switch (action) {
+    case "create":
+      return "생성";
+    case "edit":
+      return "편집";
+    case "rollback":
+      return "롤백";
+    case "submit":
+      return "검토 제출";
+    case "approve":
+      return "승인";
+    case "promote":
+      return "표준 승격";
+    case "reject":
+      return "반려";
+    default:
+      return action ?? "—";
+  }
+}
+
+export interface AssetStatusTransition {
+  /** Target status the `/approve` handler accepts. */
+  readonly status: "approved" | "draft" | "standard";
+  readonly label: string;
+  readonly tone: "danger" | "primary";
+}
+
+const approveTransition: AssetStatusTransition = { status: "approved", label: "승인", tone: "primary" };
+const promoteTransition: AssetStatusTransition = { status: "standard", label: "표준 승격", tone: "primary" };
+const rejectTransition: AssetStatusTransition = { status: "draft", label: "반려", tone: "danger" };
+
+/** Review steps the server allows from the asset's current status (legacy parity). */
+export function assetStatusTransitions(status: string | undefined): readonly AssetStatusTransition[] {
+  switch (status) {
+    case "pending":
+      return [approveTransition, rejectTransition];
+    case "approved":
+      return [promoteTransition, rejectTransition];
+    case "standard":
+      return [rejectTransition];
+    default:
+      return [];
+  }
+}
+
+/** Only a draft can be submitted for review (`draft → pending`). */
+export function canSubmitAsset(status: string | undefined): boolean {
+  return (status ?? "draft") === "draft";
+}
+
+export interface DiffLine {
+  readonly key: string;
+  readonly text: string;
+  readonly tone: "added" | "removed";
+}
+
+/**
+ * Line-level difference between two version snapshots, matching the legacy
+ * screen: a line present in only one side is shown as added or removed.
+ */
+export function diffPromptBodies(older: string, newer: string): readonly DiffLine[] {
+  const oldLines = older.split("\n");
+  const newLines = newer.split("\n");
+  const oldSet = new Set(oldLines);
+  const newSet = new Set(newLines);
+  const lines: DiffLine[] = [];
+  const max = Math.max(oldLines.length, newLines.length);
+  for (let index = 0; index < max; index += 1) {
+    const removed = oldLines[index];
+    const added = newLines[index];
+    if (removed !== undefined && !newSet.has(removed)) {
+      lines.push({ key: `-${index}`, text: removed, tone: "removed" });
+    }
+    if (added !== undefined && !oldSet.has(added)) {
+      lines.push({ key: `+${index}`, text: added, tone: "added" });
+    }
+  }
+  return lines;
+}

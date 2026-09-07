@@ -20,6 +20,11 @@ import {
   llmTraceDetailSchema,
   llmTimeseriesResponseSchema,
   podsResponseSchema,
+  requestAnalysisSchema,
+  requestExplainSchema,
+  requestNoteDeletedSchema,
+  requestNoteSchema,
+  requestReplaySchema,
   savedFilterDeletedSchema,
   savedFilterEnvelopeSchema,
   savedFilterListSchema,
@@ -31,8 +36,9 @@ import {
   xviewModelSeriesResponseSchema,
   xviewModelsResponseSchema,
 } from "@/shared/api/domains/observability.schemas";
-import { operation, pathWithParams, type OperationData, type WithQuery } from "@/shared/api/endpoint-factory";
+import { operation, type WithBody, type WithQuery } from "@/shared/api/endpoint-factory";
 import type {
+  DeleteAdminRequestsIdNoteData,
   DeleteAdminSavedFiltersIdData,
   GetAdminCapabilitiesData,
   GetAdminFlowMapData,
@@ -47,6 +53,8 @@ import type {
   GetAdminLlmTimeseriesData,
   GetAdminLlmTracesIdData,
   GetAdminPodsData,
+  GetAdminRequestsIdExplainData,
+  GetAdminRequestsIdNoteData,
   GetAdminSavedFiltersData,
   GetAdminScatterData,
   GetAdminSessionsData,
@@ -59,29 +67,14 @@ import type {
   PatchAdminSavedFiltersIdData,
   PostAdminJourneyProbeData,
   PostAdminLlmFeedbackData,
+  PostAdminRequestsIdAnalyzeData,
+  PostAdminRequestsIdReplayData,
   PostAdminSavedFiltersData,
+  PutAdminRequestsIdNoteData,
 } from "@/shared/api/generated";
-import type { OpenApiPath } from "@/shared/api/generated/paths.gen";
 
 // The legacy admin surface is documented without request/response schemas, so the
 // generated response type is `unknown` and the zod schemas above are the contract.
-
-/**
- * Replaces the generated (undocumented) request body with an app-defined one. The
- * legacy admin document declares these POST/PATCH operations without a requestBody,
- * so the generated `Data` carries `body?: never` and the client would reject a body.
- */
-type WithBody<Data extends OperationData, Body extends object> = Omit<Data, "body"> & {
-  readonly body: Body;
-};
-
-/** Fills `{id}`-style path parameters so the client calls the concrete resource. */
-export function withObservabilityPath<Endpoint extends { readonly path: OpenApiPath }>(
-  endpoint: Endpoint,
-  params: Readonly<Record<string, string | number>>,
-): Endpoint {
-  return { ...endpoint, path: pathWithParams(endpoint.path, params) };
-}
 
 export interface SavedFilterCreateBody {
   view: string;
@@ -107,6 +100,13 @@ export interface LLMFeedbackBody {
 export interface JourneyProbeBody {
   proxy_key: string;
   clients?: string[];
+}
+
+/** Body of `PUT /admin/requests/{id}/note` (see `handleRequestNote`). */
+export interface RequestNoteBody {
+  /** Operator labels; the server strips `#` and commas and de-duplicates. */
+  tags: readonly string[];
+  note: string;
 }
 
 const optionalString = z.string().optional();
@@ -351,6 +351,41 @@ export const observabilityEndpoints = {
       "/admin/pods",
       podsResponseSchema,
       podsQuerySchema,
+    ),
+  },
+  requests: {
+    explain: operation<GetAdminRequestsIdExplainData, unknown>()(
+      "GET",
+      "/admin/requests/{id}/explain",
+      requestExplainSchema,
+    ),
+    note: operation<GetAdminRequestsIdNoteData, unknown>()(
+      "GET",
+      "/admin/requests/{id}/note",
+      requestNoteSchema,
+    ),
+    // POST and PUT share one upsert handler; PUT states the intent the screen has.
+    saveNote: operation<WithBody<PutAdminRequestsIdNoteData, RequestNoteBody>, unknown>()(
+      "PUT",
+      "/admin/requests/{id}/note",
+      requestNoteSchema,
+    ),
+    removeNote: operation<DeleteAdminRequestsIdNoteData, unknown>()(
+      "DELETE",
+      "/admin/requests/{id}/note",
+      requestNoteDeletedSchema,
+    ),
+    /** Sends the request's prompts to a model, so it needs raw-prompt access. */
+    analyze: operation<PostAdminRequestsIdAnalyzeData, unknown>()(
+      "POST",
+      "/admin/requests/{id}/analyze",
+      requestAnalysisSchema,
+    ),
+    /** Re-sends the stored raw body upstream — a real, billable call. */
+    replay: operation<PostAdminRequestsIdReplayData, unknown>()(
+      "POST",
+      "/admin/requests/{id}/replay",
+      requestReplaySchema,
     ),
   },
   capabilities: operation<GetAdminCapabilitiesData, unknown>()(

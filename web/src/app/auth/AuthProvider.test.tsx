@@ -17,6 +17,7 @@ const bootstrap: UIBootstrap = {
   backend_version: "v0.80.0",
   ui_version: "v0.80.0",
   api_version: "v1",
+  capabilities: { raw_prompt_view: false },
   ui: {
     enabled: true,
     default_entry: "/app/overview",

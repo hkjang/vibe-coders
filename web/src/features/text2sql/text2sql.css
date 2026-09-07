@@ -137,3 +137,8 @@
   font-size: 12px;
   color: var(--color-muted);
 }
+.t2s-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}

@@ -270,6 +270,63 @@ describe("LLMPage", () => {
     expect(screen.getByText("위험도 medium")).toBeVisible();
   });
 
+  it("loads the request explanation only after the operator opens it", async () => {
+    const user = userEvent.setup();
+    const api = mockApi({
+      ...baseHandlers,
+      "GET /admin/llm/traces/req-1": () => traceDetail,
+      "GET /admin/requests/req-1/explain": () => ({
+        request_id: "req-1",
+        trace_id: "trace-1",
+        created_at: "2026-09-06T01:00:00Z",
+        routing: {
+          chosen_provider: "openai",
+          chosen_model: "gpt-test",
+          reason: "default",
+          reason_text: "기본 provider",
+          risk_categories: [],
+          fallback_path: [],
+        },
+        fallback: { occurred: false },
+        cache: { hit: false, cached_tokens: 0 },
+        safety: { blocked: false, masking: "", finding_count: 0, findings: [] },
+        governance: {
+          secret_event_count: 0,
+          secret_actions: {},
+          approval_count: 0,
+          approval_status: "",
+          anomaly_event_count: 0,
+          policy_decision_count: 0,
+          policy_decision_total: 0,
+        },
+        text2sql: { span_count: 0, status: "none", total_latency_ms: 0, total_cost_krw: 0 },
+        cost: {
+          actual_krw: 90,
+          currency: "KRW",
+          token_source: "usage",
+          prompt_tokens: 800,
+          completion_tokens: 400,
+          cached_tokens: 0,
+          reasoning_tokens: 0,
+          total_tokens: 1200,
+          priced: false,
+        },
+        session: { session_id: "", stream: false },
+      }),
+      "GET /admin/requests/req-1/note": () => ({ request_id: "req-1", tags: [], note: "" }),
+    });
+    renderPage("/observability/llm?tab=evaluations");
+
+    await user.click(await screen.findByRole("button", { name: "req-1 호출 상세 열기" }));
+    await screen.findByRole("table", { name: "이 호출에서 사용한 도구" });
+    expect(api.calls.some((call) => call.key === "GET /admin/requests/req-1/explain")).toBe(false);
+
+    await user.click(screen.getByRole("button", { name: "원인 설명 열기" }));
+
+    expect(await screen.findByText("기본 provider")).toBeVisible();
+    expect(api.calls.some((call) => call.key === "GET /admin/requests/req-1/explain")).toBe(true);
+  });
+
   it("submits feedback with the operator's rating", async () => {
     const user = userEvent.setup();
     const api = mockApi({

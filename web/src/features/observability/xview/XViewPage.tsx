@@ -2,6 +2,11 @@ import { useQuery } from "@tanstack/react-query";
 import { RefreshCw } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 
+import {
+  canInspectRawRequest,
+  canWriteRequestNote,
+} from "@/features/observability/request-insight/request-access";
+import { RequestInsightPanel } from "@/features/observability/request-insight/RequestInsightPanel";
 import { ModelAggregatePanel } from "@/features/observability/xview/ModelAggregatePanel";
 import { SavedViewBar } from "@/features/observability/xview/SavedViewBar";
 import { savedViewParamKeys } from "@/features/observability/xview/saved-view-params";
@@ -108,8 +113,12 @@ export function XViewPage(): React.JSX.Element {
   const [filterError, setFilterError] = useState<string>();
   const [selection, setSelection] = useState<ReadonlyArray<ScatterPoint>>([]);
   const [flowRequestId, setFlowRequestId] = useState("");
+  const [insightRequestId, setInsightRequestId] = useState("");
   const selectionFocusRef = useRef<HTMLElement | null>(null);
   const flowFocusRef = useRef<HTMLElement | null>(null);
+  const insightFocusRef = useRef<HTMLElement | null>(null);
+  const canInspectRaw = canInspectRawRequest(auth);
+  const canWriteNote = canWriteRequestNote(auth);
 
   const live_ = useXViewLive(filters, live && tab === "scatter");
 
@@ -527,16 +536,28 @@ export function XViewPage(): React.JSX.Element {
                   <td className="cell-number">{formatNumber(metricValue(point, metric))}</td>
                   <td className="cell-number">{formatKRW(point.cost_krw)}</td>
                   <td>
-                    <Button
-                      size="small"
-                      onClick={(event) => {
-                        flowFocusRef.current = event.currentTarget;
-                        setFlowRequestId(point.request_id);
-                      }}
-                      aria-label={`${point.request_id} 처리 흐름 열기`}
-                    >
-                      처리 흐름
-                    </Button>
+                    <div className="obs-row-actions">
+                      <Button
+                        size="small"
+                        onClick={(event) => {
+                          flowFocusRef.current = event.currentTarget;
+                          setFlowRequestId(point.request_id);
+                        }}
+                        aria-label={`${point.request_id} 처리 흐름 열기`}
+                      >
+                        처리 흐름
+                      </Button>
+                      <Button
+                        size="small"
+                        onClick={(event) => {
+                          insightFocusRef.current = event.currentTarget;
+                          setInsightRequestId(point.request_id);
+                        }}
+                        aria-label={`${point.request_id} 원인 설명 열기`}
+                      >
+                        원인 설명
+                      </Button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -608,6 +629,26 @@ export function XViewPage(): React.JSX.Element {
             </ol>
             {flowMap.data.note ? <p className="obs-meta">{flowMap.data.note}</p> : null}
           </div>
+        ) : null}
+      </Sheet>
+
+      <Sheet
+        open={insightRequestId !== ""}
+        onOpenChange={(next) => {
+          if (!next) setInsightRequestId("");
+        }}
+        returnFocusRef={insightFocusRef}
+        size="wide"
+        title="요청 원인 설명"
+        description="라우팅·폴백·캐시·안전장치·비용을 나눠 설명하고, 메모·분석·재실행을 이어서 처리합니다."
+      >
+        {insightRequestId ? (
+          <RequestInsightPanel
+            key={insightRequestId}
+            requestId={insightRequestId}
+            canInspectRaw={canInspectRaw}
+            canWriteNote={canWriteNote}
+          />
         ) : null}
       </Sheet>
     </div>

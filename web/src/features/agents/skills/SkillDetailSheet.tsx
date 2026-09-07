@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState, type RefObject } from "react";
+import { z } from "zod";
 
 import {
   riskTone,
@@ -11,14 +12,21 @@ import { SkillPolicyTester } from "@/features/agents/skills/SkillPolicyTester";
 import { apiClient } from "@/shared/api/client";
 import type { Skill } from "@/shared/api/domains/agents.schemas";
 import { endpoints } from "@/shared/api/endpoints";
+import { FormField } from "@/shared/components/form/FormField";
+import { useZodForm } from "@/shared/components/form/use-zod-form";
 import { Badge } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
+import { Checkbox } from "@/shared/components/ui/Checkbox";
 import { EmptyState } from "@/shared/components/ui/EmptyState";
 import { InlineNotice } from "@/shared/components/ui/InlineNotice";
+import { Input } from "@/shared/components/ui/Input";
 import { KeyValueList } from "@/shared/components/ui/KeyValueList";
 import { SectionCard } from "@/shared/components/ui/SectionCard";
+import { Select } from "@/shared/components/ui/Select";
 import { Sheet } from "@/shared/components/ui/Sheet";
+import { Textarea } from "@/shared/components/ui/Textarea";
 import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
+import { useMutationFeedback } from "@/shared/hooks/use-mutation-feedback";
 import { formatDateTime, formatDuration, formatKRW, formatNumber } from "@/shared/utils/format";
 
 interface SkillDetailSheetProps {
@@ -40,6 +48,34 @@ const panelLabels: Record<DetailPanel, string> = {
   history: "승격 이력",
   fitness: "적합성 근거",
   policy: "정책 시뮬레이션",
+};
+
+const fitnessKinds = ["multimodel", "golden", "testcase"] as const;
+const fitnessKindLabels: Record<(typeof fitnessKinds)[number], string> = {
+  multimodel: "멀티모델 비교",
+  golden: "Golden 세트",
+  testcase: "테스트케이스",
+};
+
+// The note is operator-written evidence, so it must never carry prompt originals.
+const fitnessFormSchema = z.object({
+  kind: z.enum(fitnessKinds),
+  ref_id: z.string().trim().min(1, "근거가 되는 실행·세트 ID를 입력하세요."),
+  passed: z.boolean(),
+  score: z
+    .string()
+    .trim()
+    .refine((value) => value === "" || Number.isFinite(Number(value)), "숫자를 입력하세요."),
+  note: z.string().trim().max(500, "메모는 500자까지 입력할 수 있습니다."),
+});
+type FitnessFormValues = z.infer<typeof fitnessFormSchema>;
+
+const emptyFitnessForm: FitnessFormValues = {
+  kind: "multimodel",
+  ref_id: "",
+  passed: true,
+  score: "",
+  note: "",
 };
 
 export function SkillDetailSheet({
@@ -87,6 +123,29 @@ export function SkillDetailSheet({
         signal,
         routeId: "agents.skills",
       }),
+  });
+
+  const fitnessForm = useZodForm<FitnessFormValues, FitnessFormValues>(fitnessFormSchema, emptyFitnessForm);
+  const recordFitness = useMutationFeedback({
+    mutate: (values: FitnessFormValues) =>
+      apiClient.request(endpoints.domains.agents.skills.recordFitness, {
+        body: {
+          skill: name,
+          kind: values.kind,
+          ref_id: values.ref_id,
+          passed: values.passed,
+          score: values.score === "" ? 0 : Number(values.score),
+          note: values.note,
+        },
+        routeId: "agents.skills",
+      }),
+    invalidates: [
+      ["agents", "skills", name, "fitness"],
+      ["agents", "skills"],
+    ],
+    successMessage: "적합성 근거를 기록했습니다.",
+    errorMessage: "적합성 근거를 기록하지 못했습니다.",
+    onSuccess: () => fitnessForm.reset(emptyFitnessForm),
   });
 
   return (
@@ -323,7 +382,7 @@ export function SkillDetailSheet({
                   {(fitness.data?.evidence ?? []).length === 0 ? (
                     <EmptyState
                       title="등록된 근거가 없습니다."
-                      description="멀티모델 비교·Golden·테스트케이스 결과를 기존 화면에서 기록하세요."
+                      description="아래 ‘근거 기록’에서 멀티모델 비교·Golden·테스트케이스 결과를 남기세요."
                     />
                   ) : (
                     <div className="data-table-scroll" tabIndex={0} aria-label="적합성 근거 표 영역">
@@ -358,10 +417,73 @@ export function SkillDetailSheet({
                       </table>
                     </div>
                   )}
-                  <InlineNotice tone="info" title="근거 기록은 기존 화면에서">
-                    적합성 근거 추가(POST /admin/skills/fitness)는 공개 API 계약에 아직 포함되어 있지 않아 이
-                    화면에서는 조회만 제공합니다.
-                  </InlineNotice>
+                  <SectionCard
+                    headingLevel={3}
+                    title="근거 기록"
+                    description="멀티모델 비교·Golden·테스트케이스 결과를 이 Skill의 승격 근거로 남깁니다."
+                  >
+                    {canWrite ? null : (
+                      <InlineNotice tone="warning" title="쓰기 권한이 없습니다.">
+                        {writeDisabledReason}
+                      </InlineNotice>
+                    )}
+                    <form
+                      className="agents-fitness-form"
+                      onSubmit={fitnessForm.handleSubmit(async (values) => {
+                        await recordFitness.mutateAsync(values);
+                      })}
+                    >
+                      <FormField
+                        label="근거 종류"
+                        required
+                        error={fitnessForm.formState.errors.kind?.message}
+                      >
+                        {(control) => (
+                          <Select
+                            {...control}
+                            {...fitnessForm.register("kind")}
+                            options={fitnessKinds.map((kind) => ({
+                              value: kind,
+                              label: fitnessKindLabels[kind],
+                            }))}
+                          />
+                        )}
+                      </FormField>
+                      <FormField
+                        label="참조 ID"
+                        required
+                        description="비교 실행 ID나 Golden 세트 이름처럼 근거를 다시 찾을 수 있는 식별자입니다."
+                        error={fitnessForm.formState.errors.ref_id?.message}
+                      >
+                        {(control) => <Input {...control} {...fitnessForm.register("ref_id")} />}
+                      </FormField>
+                      <FormField label="점수" error={fitnessForm.formState.errors.score?.message}>
+                        {(control) => (
+                          <Input {...control} inputMode="decimal" {...fitnessForm.register("score")} />
+                        )}
+                      </FormField>
+                      <FormField
+                        label="메모"
+                        description="판단 근거를 남깁니다. 프롬프트·응답 원문은 입력하지 마세요."
+                        error={fitnessForm.formState.errors.note?.message}
+                      >
+                        {(control) => <Textarea {...control} rows={2} {...fitnessForm.register("note")} />}
+                      </FormField>
+                      <Checkbox
+                        label="통과"
+                        description="통과 근거만 승격 요건 건수에 반영됩니다."
+                        {...fitnessForm.register("passed")}
+                      />
+                      <Button
+                        type="submit"
+                        variant="primary"
+                        disabled={!canWrite || fitnessForm.formState.isSubmitting}
+                        title={canWrite ? undefined : writeDisabledReason}
+                      >
+                        {fitnessForm.formState.isSubmitting ? "기록 중" : "근거 기록"}
+                      </Button>
+                    </form>
+                  </SectionCard>
                 </>
               )}
             </SectionCard>

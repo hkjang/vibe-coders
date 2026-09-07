@@ -397,6 +397,59 @@ describe("XViewPage", () => {
     });
   });
 
+  it("opens the explanation sheet for a selected request", async () => {
+    mockApi({
+      ...scatterHandlers,
+      "GET /admin/requests/req-1/explain": () => ({
+        request_id: "req-1",
+        trace_id: "trace-1",
+        created_at: "2026-09-06T01:00:00Z",
+        routing: {
+          chosen_provider: "openai",
+          chosen_model: "gpt-test",
+          reason: "default",
+          reason_text: "기본 provider",
+          risk_categories: [],
+          fallback_path: [],
+        },
+        fallback: { occurred: false },
+        cache: { hit: false, cached_tokens: 0 },
+        safety: { blocked: false, masking: "", finding_count: 0, findings: [] },
+        governance: {
+          secret_event_count: 0,
+          secret_actions: {},
+          approval_count: 0,
+          approval_status: "",
+          anomaly_event_count: 0,
+          policy_decision_count: 0,
+          policy_decision_total: 0,
+        },
+        text2sql: { span_count: 0, status: "none", total_latency_ms: 0, total_cost_krw: 0 },
+        cost: {
+          actual_krw: 90,
+          currency: "KRW",
+          token_source: "usage",
+          prompt_tokens: 800,
+          completion_tokens: 400,
+          cached_tokens: 0,
+          reasoning_tokens: 0,
+          total_tokens: 1200,
+          priced: false,
+        },
+        session: { session_id: "", stream: false },
+      }),
+      "GET /admin/requests/req-1/note": () => ({ request_id: "req-1", tags: [], note: "" }),
+    });
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(await screen.findByRole("button", { name: "최근 25건 선택" }));
+    await user.click(await screen.findByRole("button", { name: "req-1 원인 설명 열기" }));
+
+    const sheet = await screen.findByRole("dialog", { name: "요청 원인 설명" });
+    expect(await within(sheet).findByText("기본 provider")).toBeVisible();
+  });
+
   it("has no automated accessibility violations", async () => {
     mockApi(scatterHandlers);
     const { container } = renderPage();

@@ -38,6 +38,7 @@ import type {
   PostAdminAppTemplatesInstantiateData,
   PostAdminSkillsData,
   PostAdminSkillsEvaluateData,
+  PostAdminSkillsFitnessData,
   PostAdminSkillsImportData,
   PostAdminSkillsPromoteData,
   PostAdminSkillsRecommendData,
@@ -48,7 +49,7 @@ import type {
   PostAdminWorkflowsIdPublishData,
   PostV1AppsIdRunData,
 } from "@/shared/api/generated";
-import { operation, type OperationData, type WithQuery } from "@/shared/api/endpoint-factory";
+import { operation, type WithBody, type WithQuery } from "@/shared/api/endpoint-factory";
 import {
   appOnboardingSchema,
   appPermissionListSchema,
@@ -64,6 +65,7 @@ import {
   skillDependencyGraphSchema,
   skillEvaluationSchema,
   skillExportSchema,
+  skillFitnessRecordedSchema,
   skillFitnessSchema,
   skillImportSchema,
   skillListSchema,
@@ -94,6 +96,7 @@ import {
   type SkillAdoptBody,
   type SkillEvaluateBody,
   type SkillExportQuery,
+  type SkillFitnessBody,
   type SkillFitnessQuery,
   type SkillGraphQuery,
   type SkillImportBody,
@@ -114,13 +117,6 @@ import {
   type WorkflowUpsertBody,
 } from "@/shared/api/domains/agents.schemas";
 import { acknowledgementSchema } from "@/shared/api/loose";
-
-/**
- * Replaces the generated body type. The legacy admin routes are documented
- * without request schemas (`body?: never`), so each screen's payload contract is
- * declared here next to the zod response schema.
- */
-type WithBody<Data extends OperationData, Body> = Omit<Data, "body"> & { readonly body: Body };
 
 export const agentsEndpoints = {
   workflows: {
@@ -330,6 +326,11 @@ export const agentsEndpoints = {
       "/admin/skills/fitness",
       skillFitnessSchema,
       z.object({ skill: z.string() }),
+    ),
+    recordFitness: operation<WithBody<PostAdminSkillsFitnessData, SkillFitnessBody>, unknown>()(
+      "POST",
+      "/admin/skills/fitness",
+      skillFitnessRecordedSchema,
     ),
     dependencyGraph: operation<WithQuery<GetAdminSkillsDependencyGraphData, SkillGraphQuery>, unknown>()(
       "GET",

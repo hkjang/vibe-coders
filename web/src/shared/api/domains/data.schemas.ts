@@ -341,6 +341,15 @@ export const metricUpsertSchema = looseObject({
   validation: metricValidationSchema.optional(),
 });
 
+/** `POST /admin/dw/metrics/{key}/validate` re-runs the static check without saving. */
+export const metricValidateSchema = looseObject({
+  metric_key: text,
+  validation: metricValidationSchema.optional(),
+});
+
+/** `DELETE /admin/dw/metrics/{key}` answers `{"status":"deleted"}`. */
+export const metricDeleteSchema = looseObject({ status: text });
+
 const dataProductSchema = looseObject({
   id: text,
   product_key: text,

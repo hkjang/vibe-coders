@@ -529,6 +529,19 @@ export const skillFitnessSchema = looseObject({
 });
 export type SkillFitnessEvidence = NonNullable<z.output<typeof skillFitnessSchema>["evidence"]>[number];
 
+/** `POST /admin/skills/fitness` answers the stored evidence row (201). */
+export const skillFitnessRecordedSchema = looseObject({
+  id: optionalText,
+  skill_name: optionalText,
+  kind: optionalText,
+  ref_id: optionalText,
+  passed: optionalFlag,
+  score: optionalNumber,
+  note: optionalText,
+  created_by: optionalText,
+  created_at: optionalText,
+});
+
 export const skillGraphNodeSchema = looseObject({
   id: z.string(),
   type: optionalText,
@@ -670,6 +683,15 @@ export interface SkillEvaluateBody {
 }
 export interface SkillFitnessQuery {
   skill: string;
+}
+/** Body of `POST /admin/skills/fitness` (see `handleSkillFitness`). */
+export interface SkillFitnessBody {
+  skill: string;
+  kind: "multimodel" | "golden" | "testcase";
+  ref_id: string;
+  passed: boolean;
+  score: number;
+  note: string;
 }
 export interface SkillGraphQuery {
   skill?: string;

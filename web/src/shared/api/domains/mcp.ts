@@ -1,12 +1,6 @@
 import { z } from "zod";
 
-import {
-  operation,
-  pathWithParams,
-  type ApiEndpointBase,
-  type OperationData,
-  type WithQuery,
-} from "@/shared/api/endpoint-factory";
+import { operation, type WithBody, type WithQuery } from "@/shared/api/endpoint-factory";
 import type {
   DeleteAdminAgentRoutesIdData,
   DeleteAdminMcpContractsData,
@@ -32,7 +26,9 @@ import type {
   GetAdminMcpTrustScoresData,
   GetAdminMcpUpstreamsData,
   GetAdminMcpUpstreamsIdFlowData,
+  GetAdminMcpUpstreamsIdProbeData,
   GetAdminVcsEventsData,
+  PatchAdminMcpUpstreamsIdData,
   PostAdminAgentRoutesData,
   PostAdminAgentRoutesIdTestData,
   PostAdminMcpContractsData,
@@ -41,6 +37,7 @@ import type {
   PostAdminMcpPoliciesData,
   PostAdminMcpRouteExplainData,
   PostAdminMcpTestData,
+  PostAdminMcpToolsData,
   PostAdminMcpUpstreamsData,
 } from "@/shared/api/generated";
 import {
@@ -69,31 +66,18 @@ import {
   mcpServerListSchema,
   mcpTestResultSchema,
   mcpToolListSchema,
+  mcpToolRiskWriteSchema,
   mcpTopologySchema,
   mcpTrustScoreSchema,
   mcpUpstreamFlowSchema,
   mcpUpstreamListSchema,
+  mcpUpstreamProbeSchema,
   mcpUpstreamWriteSchema,
   mcpWaterfallSchema,
   onboardingChecklistSchema,
   onboardingRejectionSchema,
   vcsEventListSchema,
 } from "@/shared/api/domains/mcp.schemas";
-
-/**
- * Replaces the generated (usually `never`) request body with the shape the legacy
- * handler actually decodes; the Go handler struct is the contract because the
- * OpenAPI document carries no request schema for these operations.
- */
-type WithBody<Data extends OperationData, Body> = Omit<Data, "body"> & { readonly body: Body };
-
-/** Substitutes `{id}`-style path parameters just before the call. */
-export function withMcpPathParams<Endpoint extends ApiEndpointBase>(
-  endpoint: Endpoint,
-  params: Readonly<Record<string, string | number>>,
-): Endpoint {
-  return { ...endpoint, path: pathWithParams(endpoint.path, params) } as Endpoint;
-}
 
 /* ----------------------------------------------------------------- queries */
 
@@ -195,6 +179,28 @@ export interface McpUpstreamBody {
   metadata?: McpUpstreamMetadataBody;
 }
 
+/**
+ * Partial update of one upstream (PATCH). Every field is optional and only the
+ * keys present are changed; `auth_token: ""` clears the stored bearer token,
+ * while omitting the key keeps it.
+ */
+export interface McpUpstreamPatchBody {
+  name?: string;
+  url?: string;
+  auth_token?: string;
+  enabled?: boolean;
+  metadata?: McpUpstreamMetadataBody;
+}
+
+/** Risk grade and gateway action recorded for one discovered tool. */
+export interface McpToolRiskBody {
+  server_label: string;
+  tool_name: string;
+  risk_level: string;
+  action: string;
+  note?: string;
+}
+
 export interface McpPolicyBody {
   server_label?: string;
   mode?: string;
@@ -273,6 +279,11 @@ export const mcpEndpoints = {
     mcpToolListSchema,
     mcpToolQuerySchema,
   ),
+  saveToolRisk: operation<WithBody<PostAdminMcpToolsData, McpToolRiskBody>, unknown>()(
+    "POST",
+    "/admin/mcp/tools",
+    mcpToolRiskWriteSchema,
+  ),
   catalog: operation<WithQuery<GetAdminMcpCatalogData, McpCatalogQuery>, unknown>()(
     "GET",
     "/admin/mcp/catalog",
@@ -319,10 +330,20 @@ export const mcpEndpoints = {
   >()("POST", "/admin/mcp/upstreams", mcpUpstreamWriteSchema, mcpUpstreamWriteQuerySchema, {
     422: onboardingRejectionSchema,
   }),
+  patchUpstream: operation<WithBody<PatchAdminMcpUpstreamsIdData, McpUpstreamPatchBody>, unknown>()(
+    "PATCH",
+    "/admin/mcp/upstreams/{id}",
+    mcpUpstreamWriteSchema,
+  ),
   deleteUpstream: operation<DeleteAdminMcpUpstreamsIdData, unknown>()(
     "DELETE",
     "/admin/mcp/upstreams/{id}",
     mcpDeleteAcknowledgementSchema,
+  ),
+  probeUpstream: operation<GetAdminMcpUpstreamsIdProbeData, unknown>()(
+    "GET",
+    "/admin/mcp/upstreams/{id}/probe",
+    mcpUpstreamProbeSchema,
   ),
   upstreamFlow: operation<GetAdminMcpUpstreamsIdFlowData, unknown>()(
     "GET",

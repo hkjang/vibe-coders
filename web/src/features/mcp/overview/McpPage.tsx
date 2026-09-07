@@ -59,7 +59,7 @@ export function McpPage(): React.JSX.Element {
       <TabPanel id={tab} panelIdPrefix="mcp">
         {tab === "overview" ? <McpOverviewTab canWrite={canWrite} /> : null}
         {tab === "upstreams" ? <McpUpstreamsTab canWrite={canWrite} /> : null}
-        {tab === "tools" ? <McpToolsTab /> : null}
+        {tab === "tools" ? <McpToolsTab canWrite={canWrite} /> : null}
         {tab === "policy" ? <McpPolicyTab canWrite={canWrite} /> : null}
         {tab === "requests" ? <McpRequestsTab /> : null}
       </TabPanel>

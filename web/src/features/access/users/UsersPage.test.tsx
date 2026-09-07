@@ -67,6 +67,84 @@ const usersResponse = {
 };
 
 const emptyUsers = { users: [], auth_users: [], team_names: {} };
+
+const quotaUsage = {
+  quotas: [],
+  usage: [
+    {
+      quota: {
+        id: "q1",
+        scope: "team",
+        scope_value: "platform",
+        period: "monthly",
+        token_limit: 1000,
+        krw_limit: 0,
+        enabled: true,
+        note: "플랫폼 팀",
+        created_at: "2026-08-01T00:00:00Z",
+      },
+      tokens: 400,
+      cost_krw: 0,
+      requests: 0,
+      reserved_tokens: 0,
+      reserved_cost_krw: 0,
+      period_start: "2026-09-01T00:00:00Z",
+      period_end: "2026-09-30T00:00:00Z",
+      token_remain_ratio: 0.6,
+      krw_remain_ratio: -1,
+    },
+  ],
+};
+
+const projection = {
+  exceeding: 1,
+  teams: [
+    {
+      team: "platform",
+      spent_krw: 120_000,
+      projected_krw: 360_000,
+      budget_krw: 300_000,
+      has_budget: true,
+      will_exceed: true,
+      projected_overage_krw: 60_000,
+      days_elapsed: 10,
+      days_in_month: 30,
+    },
+  ],
+};
+
+const roles = {
+  roles: [
+    {
+      role: "admin",
+      scopes: ["admin:read", "admin:write"],
+      default_home: "#/dashboard",
+      is_admin: true,
+      is_system: true,
+      rank: 4,
+      description: "내장 관리자",
+    },
+    {
+      role: "data_reviewer",
+      scopes: ["observability:read"],
+      default_home: "",
+      is_admin: false,
+      is_system: false,
+      rank: 0,
+      description: "커스텀 검토자",
+    },
+  ],
+  all_scopes: ["admin:read", "admin:write", "observability:read"],
+};
+
+function quotaHandlers(overrides: Record<string, () => unknown> = {}) {
+  return {
+    "GET /admin/quotas": () => quotaUsage,
+    "GET /admin/budgets": () => ({ budgets: [] }),
+    "GET /admin/budgets/projection": () => projection,
+    ...overrides,
+  };
+}
 const benchmark = { users: [] };
 
 function handlers(overrides: Record<string, () => unknown> = {}) {
@@ -192,8 +270,7 @@ describe("UsersPage", () => {
     const user = userEvent.setup();
     const api = mockApi({
       ...handlers(),
-      "GET /admin/quotas": () => ({ quotas: [], usage: [] }),
-      "GET /admin/budgets": () => ({ budgets: [] }),
+      ...quotaHandlers({ "GET /admin/quotas": () => ({ quotas: [], usage: [] }) }),
       "POST /admin/quotas": () => ({ quota: { ID: "q1", Scope: "team", TokenLimit: 1000 } }),
     });
     renderScreen(<UsersPage />, { path: "/access/users/*", route: "/access/users?tab=quotas" });
@@ -214,6 +291,132 @@ describe("UsersPage", () => {
           enabled: true,
         },
       ]);
+    });
+  });
+
+  it("toggles a quota off through PATCH instead of delete-and-recreate", async () => {
+    const user = userEvent.setup();
+    const api = mockApi({
+      ...handlers(),
+      ...quotaHandlers(),
+      "PATCH /admin/quotas/q1": () => ({ quota: { ID: "q1", Enabled: false } }),
+    });
+    renderScreen(<UsersPage />, { path: "/access/users/*", route: "/access/users?tab=quotas" });
+
+    await user.click(await screen.findByRole("button", { name: "중지" }));
+    const dialog = await screen.findByRole("dialog");
+    await user.click(within(dialog).getByRole("button", { name: "중지" }));
+
+    await waitFor(() => {
+      expect(api.bodies("PATCH /admin/quotas/q1")).toEqual([{ enabled: false }]);
+    });
+  });
+
+  it("edits a quota's limits without touching scope or period", async () => {
+    const user = userEvent.setup();
+    const api = mockApi({
+      ...handlers(),
+      ...quotaHandlers(),
+      "PATCH /admin/quotas/q1": () => ({ quota: { ID: "q1", TokenLimit: 2000 } }),
+    });
+    renderScreen(<UsersPage />, { path: "/access/users/*", route: "/access/users?tab=quotas" });
+
+    await user.click(await screen.findByRole("button", { name: "수정" }));
+    const dialog = await screen.findByRole("dialog");
+    const tokenLimit = within(dialog).getByLabelText("토큰 한도");
+    await user.clear(tokenLimit);
+    await user.type(tokenLimit, "2000");
+    await user.click(within(dialog).getByRole("button", { name: "저장" }));
+
+    await waitFor(() => {
+      expect(api.bodies("PATCH /admin/quotas/q1")).toEqual([
+        { token_limit: 2000, krw_limit: 0, enabled: true, note: "플랫폼 팀" },
+      ]);
+    });
+  });
+
+  it("shows the month-end spend projection per team", async () => {
+    mockApi({ ...handlers(), ...quotaHandlers() });
+    const { container } = renderScreen(<UsersPage />, {
+      path: "/access/users/*",
+      route: "/access/users?tab=quotas",
+    });
+
+    expect(await screen.findByText("초과 예상")).toBeVisible();
+    expect(screen.getByText("₩360,000")).toBeVisible();
+    expect((await axe.run(container)).violations).toEqual([]);
+  });
+
+  it("deletes a custom role through the role query string", async () => {
+    const user = userEvent.setup();
+    const api = mockApi({
+      ...handlers(),
+      "GET /admin/roles": () => roles,
+      "DELETE /admin/roles": () => ({ role: "data_reviewer", deleted: true }),
+    });
+    renderScreen(<UsersPage />, { path: "/access/users/*", route: "/access/users?tab=roles" });
+
+    await screen.findByText("data_reviewer");
+    const [builtinDelete, customDelete] = screen.getAllByRole("button", { name: "삭제" });
+    expect(builtinDelete).toBeDisabled();
+    await user.click(customDelete as HTMLElement);
+    const dialog = await screen.findByRole("dialog");
+    await user.click(within(dialog).getByRole("button", { name: "삭제" }));
+
+    await waitFor(() => {
+      expect(api.calls.filter((call) => call.key === "DELETE /admin/roles")).toHaveLength(1);
+    });
+    expect(api.calls.find((call) => call.key === "DELETE /admin/roles")?.options.query).toEqual({
+      role: "data_reviewer",
+    });
+  });
+
+  it("loads a user's activity report in the detail sheet", async () => {
+    const user = userEvent.setup();
+    const api = mockApi(
+      handlers({
+        "GET /admin/users/key_managed": () => ({
+          api_key: { name: "빌드 봇" },
+          by_status: [],
+          daily: [],
+          by_model: [],
+          by_language: [],
+          by_ip: [],
+          recent: [],
+          team_names: {},
+        }),
+        "GET /admin/users/key_managed/report": () => ({
+          api_key_id: "key_managed",
+          window_start: "2026-08-31T00:00:00Z",
+          window_end: "2026-09-07T00:00:00Z",
+          requests: 210,
+          tokens: 40_000,
+          cost_krw: 5400,
+          average_latency_ms: 380,
+          error_requests: 3,
+          error_rate: 0.014,
+          sessions: 9,
+          work_seconds: 7200,
+          average_session_seconds: 800,
+          top_models: [{ model: "gpt-4o-mini", requests: 180, tokens: 30_000, cost_krw: 4000 }],
+          top_languages: [],
+          daily: [],
+        }),
+      }),
+    );
+    renderScreen(<UsersPage />, { path: "/access/users/*", route: "/access/users" });
+
+    await user.click(await screen.findByRole("button", { name: "빌드 봇 상세 열기" }));
+
+    const sheet = await screen.findByRole("dialog");
+    expect(within(sheet).getByText("활동 리포트")).toBeVisible();
+    expect(
+      api.calls.find((call) => call.key === "GET /admin/users/key_managed/report")?.options.query,
+    ).toEqual({ window: "7d" });
+
+    await user.selectOptions(within(sheet).getByLabelText("기간"), "30d");
+    await waitFor(() => {
+      expect(api.calls.filter((call) => call.key === "GET /admin/users/key_managed/report")).toHaveLength(2);
     });
   });
 

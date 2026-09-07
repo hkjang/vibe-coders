@@ -1,6 +1,6 @@
 import { apiClient } from "@/shared/api/client";
 import type { ProviderSLOWriteBody, ProviderWriteBody } from "@/shared/api/domains/gateway";
-import { withGatewayPathParams } from "@/shared/api/domains/gateway";
+import { withPathParams } from "@/shared/api/endpoint-factory";
 import { endpoints } from "@/shared/api/endpoints";
 import { useMutationFeedback } from "@/shared/hooks/use-mutation-feedback";
 
@@ -25,7 +25,7 @@ export function useProviderAdmin() {
 
   const remove = useMutationFeedback({
     mutate: (name: string) =>
-      apiClient.request(withGatewayPathParams(gateway.providers.remove, { name }), { routeId }),
+      apiClient.request(withPathParams(gateway.providers.remove, { name }), { routeId }),
     invalidates: [providerKey, sloKey, routingKey],
     successMessage: "공급자를 삭제했습니다.",
     errorMessage: "공급자를 삭제하지 못했습니다.",

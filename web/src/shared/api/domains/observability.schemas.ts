@@ -786,3 +786,124 @@ export const capabilitiesResponseSchema = looseObject({
   note: optionalText,
 });
 export type CapabilitiesResponse = z.output<typeof capabilitiesResponseSchema>;
+
+// ---------- request inspection (admin_explain.go, admin_collab.go, admin_users.go,
+// admin_debug.go). These payloads can carry upstream error text and model-written
+// prose, so the screen keeps them behind an explicit disclosure.
+
+const flag = orDefault(z.boolean(), false);
+
+/**
+ * A nested explain section that may be missing or null. Every field inside already
+ * has its own fallback, so an absent section parses as that all-fallback shape.
+ */
+function sectionOrEmpty<Shape extends z.ZodRawShape>(shape: Shape) {
+  return z.preprocess((value) => value ?? {}, looseObject(shape));
+}
+
+/** GET /admin/requests/{id}/explain (internal/proxy/admin_explain.go). */
+export const requestExplainSchema = looseObject({
+  request_id: optionalText,
+  trace_id: optionalText,
+  created_at: optionalText,
+  routing: sectionOrEmpty({
+    chosen_provider: optionalText,
+    chosen_model: optionalText,
+    requested_model: optionalText,
+    model_changed: flag,
+    reason: optionalText,
+    reason_text: optionalText,
+    detail: optionalText,
+    complexity: count,
+    tier: optionalText,
+    risk_score: count,
+    risk_tier: optionalText,
+    risk_categories: orDefault(z.array(z.string()), []),
+    health_score: count,
+    decision_reason: optionalText,
+    fallback_path: orDefault(z.array(z.string()), []),
+    endpoint: optionalText,
+  }),
+  fallback: sectionOrEmpty({
+    occurred: flag,
+    from_provider: optionalText,
+    to_provider: optionalText,
+    reason: optionalText,
+    error: optionalText,
+  }),
+  cache: sectionOrEmpty({
+    hit: flag,
+    cached_tokens: count,
+    savings_krw: count,
+    cached_savings_krw: count,
+  }),
+  safety: sectionOrEmpty({
+    blocked: flag,
+    masking: optionalText,
+    finding_count: count,
+    findings: orDefault(
+      looseList({
+        name: optionalText,
+        label: optionalText,
+        reason: optionalText,
+        category: optionalText,
+      }),
+      [],
+    ),
+  }),
+  governance: sectionOrEmpty({
+    secret_event_count: count,
+    secret_actions: orDefault(z.record(z.string(), numberish), {}),
+    approval_count: count,
+    approval_status: optionalText,
+    anomaly_event_count: count,
+    policy_decision_count: count,
+    policy_decision_total: count,
+  }),
+  text2sql: sectionOrEmpty({
+    span_count: count,
+    status: optionalText,
+    total_latency_ms: count,
+    total_cost_krw: count,
+  }),
+  cost: sectionOrEmpty({
+    actual_krw: count,
+    currency: optionalText,
+    token_source: optionalText,
+    prompt_tokens: count,
+    completion_tokens: count,
+    cached_tokens: count,
+    reasoning_tokens: count,
+    total_tokens: count,
+    list_krw: count,
+    savings_krw: count,
+    priced: flag,
+  }),
+  session: sectionOrEmpty({ session_id: optionalText, stream: flag }),
+});
+export type RequestExplain = z.output<typeof requestExplainSchema>;
+
+/** store.RequestNote — GET/POST/PUT /admin/requests/{id}/note. */
+export const requestNoteSchema = looseObject({
+  request_id: optionalText,
+  tags: orDefault(z.array(z.string()), []),
+  note: optionalText,
+  created_by: optionalText,
+  updated_at: optionalText,
+});
+export type RequestNote = z.output<typeof requestNoteSchema>;
+
+/** DELETE /admin/requests/{id}/note answers `{id, status:"deleted"}`. */
+export const requestNoteDeletedSchema = looseObject({ id: optionalText, status: optionalText });
+
+/** POST /admin/requests/{id}/analyze answers `{analysis}` written by a model. */
+export const requestAnalysisSchema = looseObject({ analysis: optionalText });
+export type RequestAnalysis = z.output<typeof requestAnalysisSchema>;
+
+/**
+ * POST /admin/requests/{id}/replay streams the upstream answer straight back, so the
+ * body is the provider's JSON object — or, for a streamed call, `text/event-stream`
+ * captured as plain text (`handleRequestReplay`).
+ */
+export const requestReplaySchema = z.union([z.string(), unknownRecord]);
+export type RequestReplay = z.output<typeof requestReplaySchema>;

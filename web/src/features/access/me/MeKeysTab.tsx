@@ -10,8 +10,13 @@ import {
   useMeSessionsQuery,
 } from "@/features/access/me/use-me-queries";
 import { apiClient } from "@/shared/api/client";
-import { withPathParams, type ConnectionDoctorBody, type CreateMeKeyBody } from "@/shared/api/domains/access";
+import type {
+  ConnectionDoctorBody,
+  CreateMeKeyBody,
+  UpdateMeKeyScopesBody,
+} from "@/shared/api/domains/access";
 import type { ApiKeyPublic, MeSession } from "@/shared/api/domains/access.schemas";
+import { withPathParams } from "@/shared/api/endpoint-factory";
 import { endpoints } from "@/shared/api/endpoints";
 import { isAppError } from "@/shared/api/error";
 import { FormDialog } from "@/shared/components/form/FormDialog";
@@ -71,6 +76,10 @@ export function MeKeysTab(): React.JSX.Element {
   const [createOpen, setCreateOpen] = useState(false);
   const [createScopes, setCreateScopes] = useState<readonly string[]>([]);
   const [issuedSecret, setIssuedSecret] = useState("");
+  const [secretTitle, setSecretTitle] = useState("발급된 비밀값");
+  const [scopeEditing, setScopeEditing] = useState<ApiKeyPublic | undefined>();
+  const [scopeDraft, setScopeDraft] = useState<readonly string[]>([]);
+  const [rotating, setRotating] = useState<ApiKeyPublic | undefined>();
   const [revoking, setRevoking] = useState<ApiKeyPublic | undefined>();
   const [revokingSession, setRevokingSession] = useState<MeSession | undefined>();
   const [revokingOthers, setRevokingOthers] = useState(false);
@@ -84,7 +93,25 @@ export function MeKeysTab(): React.JSX.Element {
     mutate: (body: CreateMeKeyBody) => apiClient.request(access.me.createKey, { body, routeId }),
     invalidates: [meKeys.keys],
     successMessage: "키를 발급했습니다.",
-    onSuccess: (result) => setIssuedSecret(result.secret),
+    onSuccess: (result) => {
+      setSecretTitle("발급된 비밀값");
+      setIssuedSecret(result.secret);
+    },
+  });
+  const updateScopes = useMutationFeedback({
+    mutate: ({ id, body }: { id: string; body: UpdateMeKeyScopesBody }) =>
+      apiClient.request(withPathParams(access.me.updateKeyScopes, { id }), { body, routeId }),
+    invalidates: [meKeys.keys],
+    successMessage: "키 스코프를 수정했습니다.",
+  });
+  const rotateKey = useMutationFeedback({
+    mutate: (id: string) => apiClient.request(withPathParams(access.me.rotateKey, { id }), { routeId }),
+    invalidates: [meKeys.keys],
+    successMessage: "키를 회전했습니다. 새 비밀값을 저장하세요.",
+    onSuccess: (result) => {
+      setSecretTitle("회전된 비밀값");
+      setIssuedSecret(result.secret);
+    },
   });
   const revokeKey = useMutationFeedback({
     mutate: (id: string) => apiClient.request(withPathParams(access.me.revokeKey, { id }), { routeId }),
@@ -195,6 +222,28 @@ export function MeKeysTab(): React.JSX.Element {
                         </span>
                         <Button
                           size="small"
+                          disabled={row.status === "revoked"}
+                          onClick={(event) => {
+                            rowTrigger.current = event.currentTarget;
+                            setScopeDraft(row.scopes);
+                            setScopeEditing(row);
+                          }}
+                        >
+                          스코프 수정
+                        </Button>
+                        <Button
+                          size="small"
+                          variant="secondary"
+                          disabled={row.status === "revoked"}
+                          onClick={(event) => {
+                            rowTrigger.current = event.currentTarget;
+                            setRotating(row);
+                          }}
+                        >
+                          회전
+                        </Button>
+                        <Button
+                          size="small"
                           variant="danger"
                           disabled={row.status === "revoked"}
                           onClick={(event) => {
@@ -211,10 +260,6 @@ export function MeKeysTab(): React.JSX.Element {
               </ul>
             )}
             <UpdatedAt at={keys.dataUpdatedAt} />
-            <InlineNotice tone="info" title="스코프 변경과 키 회전은 기존 화면에서 하세요.">
-              이 UI 버전의 API 목록에는 키 스코프 수정과 회전 경로가 포함되어 있지 않습니다. 필요하면 기존
-              관리자 화면의 '내 키'에서 처리하거나, 새 키를 발급한 뒤 기존 키를 폐기하세요.
-            </InlineNotice>
           </SectionCard>
         </>
       ) : null}
@@ -438,8 +483,8 @@ export function MeKeysTab(): React.JSX.Element {
         onOpenChange={(open) => {
           if (!open) setIssuedSecret("");
         }}
-        returnFocusRef={createTrigger}
-        title="발급된 비밀값"
+        returnFocusRef={secretTitle === "회전된 비밀값" ? rowTrigger : createTrigger}
+        title={secretTitle}
         description="이 값은 지금 한 번만 표시됩니다. 안전한 곳에 보관하세요."
         footer={
           <Button variant="primary" onClick={() => setIssuedSecret("")}>
@@ -452,6 +497,74 @@ export function MeKeysTab(): React.JSX.Element {
           <CopyButton value={issuedSecret} label="비밀값 복사" />
         </div>
       </Dialog>
+
+      <Dialog
+        open={scopeEditing !== undefined}
+        onOpenChange={(open) => {
+          if (!open) setScopeEditing(undefined);
+        }}
+        returnFocusRef={rowTrigger}
+        title="키 스코프 수정"
+        description="아무것도 고르지 않으면 내 역할의 권한을 그대로 상속합니다. 내가 가진 권한을 넘는 스코프는 서버가 거부합니다."
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setScopeEditing(undefined)}>
+              취소
+            </Button>
+            <Button
+              variant="primary"
+              disabled={updateScopes.isPending}
+              onClick={() => {
+                if (!scopeEditing) return;
+                updateScopes.mutate(
+                  { id: scopeEditing.id, body: { scopes: scopeDraft } },
+                  { onSuccess: () => setScopeEditing(undefined) },
+                );
+              }}
+            >
+              {updateScopes.isPending ? "저장 중" : "저장"}
+            </Button>
+          </>
+        }
+      >
+        <fieldset>
+          <legend>스코프</legend>
+          {grantable.length === 0 ? (
+            <p className="access-note">선택할 수 있는 스코프가 없습니다. 역할 권한을 그대로 상속합니다.</p>
+          ) : (
+            <div className="access-scope-grid">
+              {grantable.map((scope) => (
+                <Checkbox
+                  key={scope}
+                  label={scope}
+                  checked={scopeDraft.includes(scope)}
+                  onChange={(event) =>
+                    setScopeDraft((current) =>
+                      event.target.checked ? [...current, scope] : current.filter((item) => item !== scope),
+                    )
+                  }
+                />
+              ))}
+            </div>
+          )}
+        </fieldset>
+      </Dialog>
+
+      <ConfirmDialog
+        open={rotating !== undefined}
+        onOpenChange={(open) => {
+          if (!open) setRotating(undefined);
+        }}
+        returnFocusRef={rowTrigger}
+        tone="danger"
+        title="키 회전"
+        description={`${rotating?.name || rotating?.id || ""} 키를 같은 이름·스코프의 새 키로 바꾸고 기존 키를 폐기합니다. 새 비밀값은 한 번만 표시됩니다.`}
+        confirmLabel="회전"
+        onConfirm={async () => {
+          if (rotating) await rotateKey.mutateAsync(rotating.id);
+          setRotating(undefined);
+        }}
+      />
 
       <ConfirmDialog
         open={revoking !== undefined}

@@ -154,6 +154,64 @@ describe("SkillPage", () => {
     });
   });
 
+  it("records fitness evidence from the detail sheet", async () => {
+    const user = userEvent.setup();
+    const api = mockApi({
+      ...baseHandlers,
+      "GET /admin/skills/fitness": () => ({
+        skill: "code-review",
+        evidence: [],
+        passing_count: 0,
+        required: 2,
+      }),
+      "POST /admin/skills/fitness": () => ({
+        id: "skfit_1",
+        skill_name: "code-review",
+        kind: "multimodel",
+        ref_id: "cmp-42",
+        passed: true,
+        score: 0.9,
+        note: "",
+        created_by: "operator@example.com",
+        created_at: "2026-09-07T00:00:00Z",
+      }),
+    });
+    renderPage();
+
+    await user.click(await screen.findByRole("button", { name: "code-review 상세 열기" }));
+    await user.click(await screen.findByRole("button", { name: "적합성 근거" }));
+
+    await user.type(await screen.findByLabelText(/참조 ID/u), "cmp-42");
+    await user.type(screen.getByLabelText(/^점수/u), "0.9");
+    await user.click(screen.getByRole("button", { name: "근거 기록" }));
+
+    await waitFor(() => {
+      expect(api.bodies("POST /admin/skills/fitness")).toEqual([
+        { skill: "code-review", kind: "multimodel", ref_id: "cmp-42", passed: true, score: 0.9, note: "" },
+      ]);
+    });
+  });
+
+  it("disables fitness recording without write scope", async () => {
+    authRuntime.scopes = ["admin:read"];
+    const user = userEvent.setup();
+    mockApi({
+      ...baseHandlers,
+      "GET /admin/skills/fitness": () => ({
+        skill: "code-review",
+        evidence: [],
+        passing_count: 0,
+        required: 2,
+      }),
+    });
+    renderPage();
+
+    await user.click(await screen.findByRole("button", { name: "code-review 상세 열기" }));
+    await user.click(await screen.findByRole("button", { name: "적합성 근거" }));
+
+    expect(await screen.findByRole("button", { name: "근거 기록" })).toBeDisabled();
+  });
+
   it("renders the dependency graph tab from the URL", async () => {
     mockApi({
       ...baseHandlers,

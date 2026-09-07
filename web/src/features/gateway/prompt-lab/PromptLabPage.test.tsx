@@ -1,4 +1,4 @@
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import axe from "axe-core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -8,11 +8,48 @@ import { apiFailure, mockApi } from "@/test/api";
 import { renderScreen } from "@/test/render";
 
 const authRuntime = vi.hoisted(() => ({ scopes: ["admin:read", "admin:write"] }));
+const toastSpy = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
 
 vi.mock("@/app/auth/AuthProvider", async () => {
   const { testAuth } = await import("@/test/auth");
   return { useAuth: () => testAuth({ scopes: authRuntime.scopes }) };
 });
+
+vi.mock("sonner", () => ({ toast: { success: toastSpy.success, error: toastSpy.error } }));
+
+const testCaseRun = {
+  status: "completed",
+  run_id: "mmt_9",
+  best_model: "gpt-4.1",
+  avg_score: 4.2,
+  contract_applied: true,
+  contract_pass: 1,
+  model_count: 1,
+  results: [
+    {
+      model: "gpt-4.1",
+      score: 4.2,
+      verdict: "pass",
+      contract_pass: true,
+      cost_krw: 3.5,
+      latency_ms: 900,
+      status: "ok",
+    },
+  ],
+  history: [
+    {
+      id: "ptcr_1",
+      run_id: "mmt_9",
+      best_model: "gpt-4.1",
+      avg_score: 4.2,
+      contract_pass: 1,
+      model_count: 1,
+      avg_cost_krw: 3.5,
+      avg_latency_ms: 900,
+      created_at: "2026-09-07T00:00:00Z",
+    },
+  ],
+};
 
 const experiments = {
   experiments: [
@@ -87,6 +124,8 @@ function renderLab(route = "/prompts/lab") {
 
 beforeEach(() => {
   authRuntime.scopes = ["admin:read", "admin:write"];
+  toastSpy.success.mockClear();
+  toastSpy.error.mockClear();
 });
 
 describe("PromptLabPage", () => {
@@ -158,6 +197,73 @@ describe("PromptLabPage", () => {
     renderLab("/prompts/lab?tab=rubrics");
 
     expect(await screen.findByText("정확성 우선")).toBeInTheDocument();
+  });
+
+  it("runs a saved test case after confirming and shows only the scores", async () => {
+    const user = userEvent.setup();
+    const api = mockApi({
+      ...listHandlers(),
+      "GET /admin/prompt-lab/experiments/pexp_1": () => experimentDetail,
+      "POST /admin/prompt-lab/test-cases/ptc_1/run": () => testCaseRun,
+    });
+    renderLab("/prompts/lab?exp=pexp_1");
+
+    await user.click(await screen.findByRole("button", { name: "월별 매출 집계 테스트 케이스 실행" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog).toHaveTextContent("비용이 발생합니다");
+    await user.click(within(dialog).getByRole("button", { name: "실행" }));
+
+    await waitFor(() => expect(api.bodies("POST /admin/prompt-lab/test-cases/ptc_1/run")).toHaveLength(1));
+    expect(api.bodies("POST /admin/prompt-lab/test-cases/ptc_1/run")[0]).toEqual({ save_prompt: false });
+    expect(await screen.findByText(/최고 점수 모델 gpt-4.1/)).toBeInTheDocument();
+    await waitFor(() =>
+      expect(toastSpy.success).toHaveBeenCalledWith("실행을 마쳤습니다. 최고 점수 모델: gpt-4.1"),
+    );
+  });
+
+  it("archives an experiment through the status patch", async () => {
+    const user = userEvent.setup();
+    const api = mockApi({
+      ...listHandlers(),
+      "PATCH /admin/prompt-lab/experiments/pexp_1": () => ({ status: "archived" }),
+    });
+    renderLab();
+
+    await user.click(await screen.findByRole("button", { name: "SQL 생성 품질 실험 보관" }));
+    const dialog = await screen.findByRole("dialog");
+    await user.click(within(dialog).getByRole("button", { name: "보관" }));
+
+    await waitFor(() =>
+      expect(api.bodies("PATCH /admin/prompt-lab/experiments/pexp_1")[0]).toEqual({ status: "archived" }),
+    );
+    await waitFor(() => expect(toastSpy.success).toHaveBeenCalledWith("실험을 보관했습니다."));
+  });
+
+  it("deletes an experiment after a destructive confirmation", async () => {
+    const user = userEvent.setup();
+    const api = mockApi({
+      ...listHandlers(),
+      "DELETE /admin/prompt-lab/experiments/pexp_1": () => ({ status: "deleted" }),
+    });
+    renderLab();
+
+    await user.click(await screen.findByRole("button", { name: "SQL 생성 품질 실험 삭제" }));
+    const dialog = await screen.findByRole("dialog");
+    await user.click(within(dialog).getByRole("button", { name: "삭제" }));
+
+    await waitFor(() =>
+      expect(api.calls.some((call) => call.key === "DELETE /admin/prompt-lab/experiments/pexp_1")).toBe(true),
+    );
+    await waitFor(() => expect(toastSpy.success).toHaveBeenCalledWith("실험을 삭제했습니다."));
+  });
+
+  it("disables the run and archive actions without admin:write", async () => {
+    authRuntime.scopes = ["admin:read"];
+    mockApi({ ...listHandlers(), "GET /admin/prompt-lab/experiments/pexp_1": () => experimentDetail });
+    renderLab("/prompts/lab?exp=pexp_1");
+
+    expect(await screen.findByRole("button", { name: "월별 매출 집계 테스트 케이스 실행" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "SQL 생성 품질 실험 보관" })).toBeDisabled();
   });
 
   it("has no accessibility violations", async () => {

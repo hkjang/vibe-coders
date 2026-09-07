@@ -188,3 +188,9 @@
   color: var(--color-muted);
   font-size: 0.8125rem;
 }
+.agents-fitness-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  align-items: flex-start;
+}

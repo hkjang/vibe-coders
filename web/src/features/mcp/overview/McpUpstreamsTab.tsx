@@ -14,8 +14,8 @@ import {
 import { UpstreamFormDialog } from "@/features/mcp/overview/UpstreamFormDialog";
 import { apiClient } from "@/shared/api/client";
 import { isAppError } from "@/shared/api/error";
+import { withPathParams } from "@/shared/api/endpoint-factory";
 import { endpoints } from "@/shared/api/endpoints";
-import { withMcpPathParams } from "@/shared/api/domains/mcp";
 import type { McpDiscoveryRun, McpRequest, McpFlowStep, McpUpstream } from "@/shared/api/domains/mcp.schemas";
 import { Badge } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
@@ -130,6 +130,7 @@ export function McpUpstreamsTab({ canWrite }: { canWrite: boolean }): React.JSX.
   const [formInstance, setFormInstance] = useState(0);
   const [editing, setEditing] = useState<McpUpstream | undefined>();
   const [deleteTarget, setDeleteTarget] = useState<McpUpstream | undefined>();
+  const [toggleTarget, setToggleTarget] = useState<McpUpstream | undefined>();
   const createButtonRef = useRef<HTMLButtonElement>(null);
   const detailReturnRef = useRef<HTMLElement>(null);
 
@@ -142,7 +143,7 @@ export function McpUpstreamsTab({ canWrite }: { canWrite: boolean }): React.JSX.
   const flow = useQuery({
     queryKey: ["mcp", "upstreams", selectedId, "flow"],
     queryFn: ({ signal }) =>
-      apiClient.request(withMcpPathParams(endpoints.domains.mcp.upstreamFlow, { id: selectedId }), {
+      apiClient.request(withPathParams(endpoints.domains.mcp.upstreamFlow, { id: selectedId }), {
         signal,
         routeId,
       }),
@@ -151,19 +152,33 @@ export function McpUpstreamsTab({ canWrite }: { canWrite: boolean }): React.JSX.
 
   const remove = useMutationFeedback({
     mutate: (id: string) =>
-      apiClient.request(withMcpPathParams(endpoints.domains.mcp.deleteUpstream, { id }), { routeId }),
+      apiClient.request(withPathParams(endpoints.domains.mcp.deleteUpstream, { id }), { routeId }),
     invalidates: [["mcp"]],
     successMessage: "업스트림을 삭제했습니다.",
     errorMessage: "업스트림을 삭제하지 못했습니다.",
   });
+  // GET .../probe forces a fresh handshake and records a discovery run, so it is the
+  // real "is this registration working, and what does it expose?" check.
   const probe = useMutationFeedback({
     mutate: (id: string) =>
-      apiClient.request(endpoints.domains.mcp.test, {
-        body: { upstream_id: id, method: "tools/list" },
+      apiClient.request(withPathParams(endpoints.domains.mcp.probeUpstream, { id }), { routeId }),
+    invalidates: [["mcp"]],
+    successMessage: (result) =>
+      result.ok
+        ? `연결에 성공했습니다. 도구 ${formatNumber(result.tool_count)}개를 찾았습니다.`
+        : "연결 진단이 실패했습니다.",
+    errorMessage: "연결 진단을 실행하지 못했습니다.",
+  });
+  const toggleEnabled = useMutationFeedback({
+    mutate: (variables: { enabled: boolean; id: string }) =>
+      apiClient.request(withPathParams(endpoints.domains.mcp.patchUpstream, { id: variables.id }), {
+        body: { enabled: variables.enabled },
         routeId,
       }),
-    successMessage: (result) => (result.ok ? "연결 테스트에 성공했습니다." : "연결 테스트가 실패했습니다."),
-    errorMessage: "연결 테스트를 실행하지 못했습니다.",
+    invalidates: [["mcp"]],
+    successMessage: (_result, variables) =>
+      variables.enabled ? "업스트림을 사용 상태로 바꿨습니다." : "업스트림 사용을 중지했습니다.",
+    errorMessage: "업스트림 사용 상태를 바꾸지 못했습니다.",
   });
 
   const rows = upstreams.data?.upstreams ?? [];
@@ -183,11 +198,6 @@ export function McpUpstreamsTab({ canWrite }: { canWrite: boolean }): React.JSX.
           onRetry={() => void upstreams.refetch()}
         />
       ) : null}
-
-      <InlineNotice tone="info" title="업스트림 수정은 재등록(upsert)으로 저장됩니다.">
-        서버가 부분 수정(PATCH) API를 공개하지 않아, 저장 시 입력한 값 전체가 적용됩니다. 인증 토큰을 비워
-        두면 기존 토큰이 삭제되므로 토큰이 설정된 업스트림은 다시 입력하세요.
-      </InlineNotice>
 
       <Toolbar
         label="업스트림 작업"
@@ -276,6 +286,33 @@ export function McpUpstreamsTab({ canWrite }: { canWrite: boolean }): React.JSX.
         }}
       />
 
+      <ConfirmDialog
+        open={toggleTarget !== undefined}
+        onOpenChange={(open) => {
+          if (!open) setToggleTarget(undefined);
+        }}
+        returnFocusRef={detailReturnRef}
+        tone={toggleTarget?.enabled ? "danger" : "primary"}
+        title={toggleTarget?.enabled ? "업스트림 사용을 중지할까요?" : "업스트림을 사용할까요?"}
+        description={
+          toggleTarget?.enabled
+            ? `${toggleTarget.name} 업스트림의 도구가 게이트웨이 /mcp 목록에서 즉시 빠집니다.`
+            : `${toggleTarget?.name ?? ""} 업스트림의 도구가 게이트웨이 /mcp 목록에 즉시 노출됩니다.`
+        }
+        confirmLabel={toggleTarget?.enabled ? "사용 중지" : "사용 시작"}
+        onConfirm={async () => {
+          if (!toggleTarget) return;
+          await toggleEnabled.mutateAsync({ enabled: !toggleTarget.enabled, id: toggleTarget.id });
+          setToggleTarget(undefined);
+        }}
+      >
+        {toggleTarget?.enabled ? null : (
+          <p>
+            부분 수정은 온보딩 필수 항목을 다시 확인하지 않습니다. 위험 등급과 승인 게이트를 먼저 점검하세요.
+          </p>
+        )}
+      </ConfirmDialog>
+
       <Sheet
         open={selectedId !== ""}
         onOpenChange={(open) => {
@@ -292,7 +329,14 @@ export function McpUpstreamsTab({ canWrite }: { canWrite: boolean }): React.JSX.
               title={canWrite ? undefined : "mcp:admin 권한이 필요합니다."}
               onClick={() => selected && probe.mutate(selected.id)}
             >
-              {probe.isPending ? "확인 중" : "연결 테스트"}
+              {probe.isPending ? "확인 중" : "연결 진단"}
+            </Button>
+            <Button
+              disabled={!canWrite || !selected}
+              title={canWrite ? undefined : "mcp:admin 권한이 필요합니다."}
+              onClick={() => setToggleTarget(selected)}
+            >
+              {selected?.enabled ? "사용 중지" : "사용 시작"}
             </Button>
             <Button
               disabled={!canWrite || !selected}
@@ -348,12 +392,22 @@ export function McpUpstreamsTab({ canWrite }: { canWrite: boolean }): React.JSX.
         {probe.data ? (
           <InlineNotice
             tone={probe.data.ok ? "success" : "danger"}
-            title={probe.data.ok ? "연결 정상" : "연결 실패"}
+            title={probe.data.ok ? "연결 정상" : "도구 디스커버리 실패"}
           >
             <p>
-              {probe.data.method} · {formatNumber(probe.data.latency_ms)}ms
+              도구 {formatNumber(probe.data.tool_count)}개 · 프롬프트 {formatNumber(probe.data.prompt_count)}
+              개 · 리소스 {formatNumber(probe.data.resource_count)}개
             </p>
-            {probe.data.error ? <p className="mono">{probe.data.error}</p> : null}
+            {Object.entries(probe.data.errors).map(([capability, message]) => (
+              <p key={capability} className="mono">
+                {capability}: {message}
+              </p>
+            ))}
+            {probe.data.tools.length > 0 ? (
+              <p className="mono truncate">
+                {probe.data.tools.map((discovered) => discovered.namespaced || discovered.name).join(", ")}
+              </p>
+            ) : null}
           </InlineNotice>
         ) : null}
 

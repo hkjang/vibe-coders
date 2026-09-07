@@ -2,6 +2,7 @@
 // here with `operation()` from "@/shared/api/endpoint-factory" and a zod schema
 // (see "@/shared/api/loose" for legacy responses without a documented shape).
 import type {
+  DeleteAdminChangeSetsIdData,
   DeleteAdminSettingsByKeyKeyData,
   DeleteAdminSettingsByKeyKeyResponse,
   GetAdminAuditAuthEventsData,
@@ -19,6 +20,11 @@ import type {
   GetAdminSystemErrorsData,
   PostAdminChangeImpactSimulateData,
   PostAdminChangeSetsData,
+  PostAdminChangeSetsIdApplyData,
+  PostAdminChangeSetsIdApproveData,
+  PostAdminChangeSetsIdDryrunData,
+  PostAdminChangeSetsIdRollbackData,
+  PostAdminChangeSetsIdSubmitData,
   PostAdminFallbackData,
   PostAdminNotificationsMattermostData,
   PostAdminNotificationsMattermostTestData,
@@ -33,11 +39,13 @@ import type {
   PutAdminSettingsByKeyKeyResponse,
   PutAdminSsoKeycloakConfigData,
 } from "@/shared/api/generated";
-import { operation, type OperationData, type WithQuery } from "@/shared/api/endpoint-factory";
+import { operation, type WithBody, type WithQuery } from "@/shared/api/endpoint-factory";
 import {
   auditLogListSchema,
   authEventListSchema,
   changeImpactSchema,
+  changeSetApplySchema,
+  changeSetDryRunSchema,
   changeSetListSchema,
   changeSetSchema,
   connectionTestSchema,
@@ -62,13 +70,6 @@ import {
   systemErrorQuerySchema,
 } from "@/shared/api/domains/system.schemas";
 
-/**
- * Replaces a generated operation's (usually `never`) body with the payload the
- * legacy handler actually decodes. The OpenAPI document omits request bodies for
- * these admin routes, so the declaration here is the client-side contract.
- */
-type WithBody<Data extends OperationData, Body> = Omit<Data, "body"> & { readonly body: Body };
-
 export interface SettingWriteBody {
   value: string;
   reason?: string;
@@ -85,6 +86,11 @@ export interface ChangeSetCreateBody {
   description?: string;
   canary_scope?: string;
   items: ReadonlyArray<{ kind: string; key: string; value: string; note?: string }>;
+}
+
+/** submit/approve record an optional reviewer note on the change set. */
+export interface ChangeSetNoteBody {
+  note?: string;
 }
 
 export interface ChangeImpactBody {
@@ -173,6 +179,36 @@ export const systemEndpoints = {
       changeSetSchema,
     ),
     detail: operation<GetAdminChangeSetsIdData, unknown>()("GET", "/admin/change-sets/{id}", changeSetSchema),
+    remove: operation<DeleteAdminChangeSetsIdData, unknown>()(
+      "DELETE",
+      "/admin/change-sets/{id}",
+      systemAcknowledgementSchema,
+    ),
+    dryRun: operation<PostAdminChangeSetsIdDryrunData, unknown>()(
+      "POST",
+      "/admin/change-sets/{id}/dryrun",
+      changeSetDryRunSchema,
+    ),
+    submit: operation<WithBody<PostAdminChangeSetsIdSubmitData, ChangeSetNoteBody>, unknown>()(
+      "POST",
+      "/admin/change-sets/{id}/submit",
+      changeSetSchema,
+    ),
+    approve: operation<WithBody<PostAdminChangeSetsIdApproveData, ChangeSetNoteBody>, unknown>()(
+      "POST",
+      "/admin/change-sets/{id}/approve",
+      changeSetSchema,
+    ),
+    apply: operation<WithBody<PostAdminChangeSetsIdApplyData, ChangeSetNoteBody>, unknown>()(
+      "POST",
+      "/admin/change-sets/{id}/apply",
+      changeSetApplySchema,
+    ),
+    rollback: operation<WithBody<PostAdminChangeSetsIdRollbackData, ChangeSetNoteBody>, unknown>()(
+      "POST",
+      "/admin/change-sets/{id}/rollback",
+      changeSetApplySchema,
+    ),
     simulateImpact: operation<WithBody<PostAdminChangeImpactSimulateData, ChangeImpactBody>, unknown>()(
       "POST",
       "/admin/change-impact/simulate",

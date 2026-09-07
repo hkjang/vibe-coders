@@ -8,11 +8,49 @@ import { apiFailure, mockApi } from "@/test/api";
 import { renderScreen } from "@/test/render";
 
 const authRuntime = vi.hoisted(() => ({ scopes: ["admin:read", "admin:write", "routing:read"] }));
+const toastSpy = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
 
 vi.mock("@/app/auth/AuthProvider", async () => {
   const { testAuth } = await import("@/test/auth");
   return { useAuth: () => testAuth({ scopes: authRuntime.scopes }) };
 });
+
+vi.mock("sonner", () => ({ toast: { success: toastSpy.success, error: toastSpy.error } }));
+
+const multiRunResponse = {
+  status: "completed",
+  run_id: "mmt_1",
+  summary: { total_models: 1, success: 1, failed: 0, best_latency_model: "gpt-4.1" },
+  results: [
+    {
+      model: "gpt-4.1",
+      provider: "openai",
+      status: "success",
+      latency_ms: 812,
+      input_tokens: 12,
+      output_tokens: 44,
+      cost_krw_est: 3.2,
+      content: "비교 응답",
+    },
+  ],
+};
+
+function compareHandlers() {
+  return {
+    "GET /admin/chat-test/multi-run/runs": () => ({ runs: [] }),
+    "POST /admin/chat-test/multi-run": () => multiRunResponse,
+  };
+}
+
+/** Fills the comparison form and waits for the run to land. */
+async function runComparison(user: ReturnType<typeof userEvent.setup>): Promise<void> {
+  const models = await screen.findByLabelText(/^비교할 모델/);
+  await user.clear(models);
+  await user.type(models, "gpt-4.1:openai");
+  await user.type(screen.getByLabelText(/^User 프롬프트/), "요약해줘");
+  await user.click(screen.getByRole("button", { name: /멀티 실행/ }));
+  await screen.findByText("비교 응답");
+}
 
 const targetsFixture = {
   targets: [
@@ -95,6 +133,10 @@ afterEach(() => {
 
 beforeEach(() => {
   authRuntime.scopes = ["admin:read", "admin:write", "routing:read"];
+  toastSpy.success.mockClear();
+  toastSpy.error.mockClear();
+  Object.defineProperty(URL, "createObjectURL", { configurable: true, value: () => "blob:test" });
+  Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: () => undefined });
 });
 
 function renderChat(route = "/gateway/chat") {
@@ -168,40 +210,175 @@ describe("ChatTestPage", () => {
 
   it("restores the selected tab from the URL and runs a comparison", async () => {
     const user = userEvent.setup();
-    const api = mockApi({
-      "GET /admin/chat-test/multi-run/runs": () => ({ runs: [] }),
-      "POST /admin/chat-test/multi-run": () => ({
-        status: "completed",
-        run_id: "mmt_1",
-        summary: { total_models: 1, success: 1, failed: 0, best_latency_model: "gpt-4.1" },
-        results: [
-          {
-            model: "gpt-4.1",
-            provider: "openai",
-            status: "success",
-            latency_ms: 812,
-            input_tokens: 12,
-            output_tokens: 44,
-            cost_krw_est: 3.2,
-            content: "비교 응답",
-          },
-        ],
-      }),
-    });
+    const api = mockApi(compareHandlers());
 
     renderChat("/gateway/chat?tab=compare");
+    await runComparison(user);
 
-    const models = await screen.findByLabelText(/^비교할 모델/);
-    await user.clear(models);
-    await user.type(models, "gpt-4.1:openai");
-    await user.type(screen.getByLabelText(/^User 프롬프트/), "요약해줘");
-    await user.click(screen.getByRole("button", { name: /멀티 실행/ }));
-
-    expect(await screen.findByText("비교 응답")).toBeInTheDocument();
     expect(api.bodies("POST /admin/chat-test/multi-run")[0]).toMatchObject({
       models: [{ model: "gpt-4.1", provider: "openai" }],
       save_prompt: false,
     });
+  });
+
+  it("records per-model feedback for a saved run", async () => {
+    const user = userEvent.setup();
+    const api = mockApi({
+      ...compareHandlers(),
+      "POST /admin/chat-test/multi-run/runs/mmt_1/feedback": () => ({
+        status: "recorded",
+        run_id: "mmt_1",
+        model: "gpt-4.1",
+      }),
+    });
+
+    renderChat("/gateway/chat?tab=compare");
+    await runComparison(user);
+
+    await user.click(screen.getByRole("button", { name: /평가 남기기/ }));
+    const dialog = await screen.findByRole("dialog");
+    await user.selectOptions(within(dialog).getByLabelText(/^평점/), "5");
+    await user.type(within(dialog).getByLabelText("의견"), "표 형식이 정확함");
+    await user.click(within(dialog).getByRole("button", { name: "저장" }));
+
+    await waitFor(() =>
+      expect(api.bodies("POST /admin/chat-test/multi-run/runs/mmt_1/feedback")[0]).toEqual({
+        model: "gpt-4.1",
+        rating: 5,
+        label: undefined,
+        comment: "표 형식이 정확함",
+      }),
+    );
+    await waitFor(() => expect(toastSpy.success).toHaveBeenCalledWith("평가를 기록했습니다."));
+  });
+
+  it("promotes a model to a routing draft with a reason", async () => {
+    const user = userEvent.setup();
+    const api = mockApi({
+      ...compareHandlers(),
+      "POST /admin/chat-test/multi-run/runs/mmt_1/promote": () => ({
+        status: "draft_saved",
+        promotion: { id: "mmtpromo_1", selected_model: "gpt-4.1", status: "draft" },
+      }),
+    });
+
+    renderChat("/gateway/chat?tab=compare");
+    await runComparison(user);
+
+    await user.click(screen.getByRole("button", { name: /라우팅 후보로 승격/ }));
+    const dialog = await screen.findByRole("dialog");
+    await user.type(within(dialog).getByLabelText(/^작업 유형/), "sql");
+    await user.type(within(dialog).getByLabelText(/^사유/), "형식과 비용이 가장 좋음");
+    await user.click(within(dialog).getByRole("button", { name: "초안으로 저장" }));
+
+    await waitFor(() =>
+      expect(api.bodies("POST /admin/chat-test/multi-run/runs/mmt_1/promote")[0]).toEqual({
+        model: "gpt-4.1",
+        task_type: "sql",
+        reason: "형식과 비용이 가장 좋음",
+      }),
+    );
+  });
+
+  it("requires a workflow before saving a golden answer and sends the screen prompt", async () => {
+    const user = userEvent.setup();
+    const api = mockApi({
+      ...compareHandlers(),
+      "POST /admin/chat-test/multi-run/runs/mmt_1/golden": () => ({
+        status: "saved",
+        workflow_id: "gwf_1",
+        workflow_name: "요약 회귀",
+        step_name: "step-gpt-4.1",
+        step_count: 1,
+        baseline_score: 4.1,
+      }),
+    });
+
+    renderChat("/gateway/chat?tab=compare");
+    await runComparison(user);
+
+    await user.click(screen.getByRole("button", { name: /Golden 답변으로 저장/ }));
+    const dialog = await screen.findByRole("dialog");
+    await user.click(within(dialog).getByRole("button", { name: "저장" }));
+    expect(
+      await within(dialog).findByText("워크플로 이름 또는 기존 워크플로 ID 중 하나는 있어야 합니다."),
+    ).toBeInTheDocument();
+    expect(api.bodies("POST /admin/chat-test/multi-run/runs/mmt_1/golden")).toHaveLength(0);
+
+    await user.type(within(dialog).getByLabelText(/^워크플로 이름/), "요약 회귀");
+    await user.click(within(dialog).getByRole("button", { name: "저장" }));
+
+    await waitFor(() =>
+      expect(api.bodies("POST /admin/chat-test/multi-run/runs/mmt_1/golden")[0]).toMatchObject({
+        selected_model: "gpt-4.1",
+        workflow_name: "요약 회귀",
+        prompt: "요약해줘",
+      }),
+    );
+  });
+
+  it("compares the stored answers block by block", async () => {
+    const user = userEvent.setup();
+    mockApi({
+      ...compareHandlers(),
+      "GET /admin/chat-test/multi-run/runs/mmt_1/diff": () => ({
+        run_id: "mmt_1",
+        answered_models: 2,
+        common_blocks: [{ type: "paragraph", preview: "공통 문단", key: "k1" }],
+        models: [
+          {
+            model: "gpt-4.1",
+            blocks: [{ type: "paragraph", preview: "공통 문단", key: "k1" }],
+            stats: { available: true, has_table: true, has_code: false },
+          },
+        ],
+        per_model: [
+          {
+            model: "gpt-4.1",
+            available: true,
+            block_count: 1,
+            missing: [],
+            extra: [],
+            stats: { available: true, has_table: true, has_code: false },
+          },
+        ],
+        note: "저장된 응답 preview 기준입니다.",
+      }),
+    });
+
+    renderChat("/gateway/chat?tab=compare");
+    await runComparison(user);
+
+    await user.click(screen.getByRole("button", { name: /답변 비교/ }));
+    expect(await screen.findByText(/응답한 모델 2개 · 공통 블록 1개/)).toBeInTheDocument();
+    expect(screen.getByRole("table", { name: "모델별 공통·누락·고유 블록 수" })).toBeInTheDocument();
+  });
+
+  it("exports the run from the server in the chosen format", async () => {
+    const user = userEvent.setup();
+    mockApi(compareHandlers());
+    const fetchMock = vi.fn(async () => new Response("model,provider\n", { status: 200 }));
+    globalThis.fetch = fetchMock as unknown as typeof globalThis.fetch;
+
+    renderChat("/gateway/chat?tab=compare");
+    await runComparison(user);
+
+    await user.selectOptions(screen.getByLabelText("내보내기 형식"), "csv");
+    await user.click(screen.getByRole("button", { name: /서버에서 내보내기/ }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("/admin/chat-test/multi-run/runs/mmt_1/export?format=csv");
+    expect(new Headers(init.headers).get("X-Vibe-UI")).toBe("app");
+  });
+
+  it("disables the run operations without admin:write", async () => {
+    authRuntime.scopes = ["admin:read"];
+    mockApi(compareHandlers());
+    renderChat("/gateway/chat?tab=compare");
+
+    expect(await screen.findByLabelText(/^비교할 모델/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /멀티 실행/ })).toBeDisabled();
   });
 
   it("creates a model usage tag and invalidates the list", async () => {
@@ -240,6 +417,15 @@ describe("ChatTestPage", () => {
     const { container } = renderChat();
 
     await screen.findByLabelText(/^프롬프트/);
+    expect((await axe.run(container)).violations).toEqual([]);
+  });
+
+  it("keeps the comparison result actions accessible", async () => {
+    const user = userEvent.setup();
+    mockApi(compareHandlers());
+    const { container } = renderChat("/gateway/chat?tab=compare");
+
+    await runComparison(user);
     expect((await axe.run(container)).violations).toEqual([]);
   });
 });

@@ -16,6 +16,7 @@ import type {
   GetAdminRoutingLearningData,
   GetAdminRoutingPatternConflictsData,
   GetAdminRoutingRulesData,
+  PatchAdminRoutingRulesIdData,
   PostAdminCostPredictData,
   PostAdminRoutingBalancerData,
   PostAdminRoutingBreakerResetData,
@@ -24,11 +25,8 @@ import type {
   PostAdminRoutingPreviewData,
   PostAdminRoutingRulesData,
 } from "@/shared/api/generated";
-import { operation, pathWithParams, type OperationData, type WithQuery } from "@/shared/api/endpoint-factory";
+import { operation, pathWithParams, type WithBody, type WithQuery } from "@/shared/api/endpoint-factory";
 import { looseList, looseObject, numberish, orDefault, unknownRecord } from "@/shared/api/loose";
-
-/** Adds a request body to a generated operation type (the spec documents none). */
-type WithBody<Data extends OperationData, Body> = Omit<Data, "body"> & { readonly body: Body };
 
 const text = orDefault(z.string(), "");
 const count = orDefault(numberish, 0);
@@ -59,6 +57,11 @@ const routingRuleShape = {
 const routingRuleListSchema = looseObject({ rules: list(routingRuleShape) });
 const routingRuleWriteSchema = looseObject({ rule: looseObject(routingRuleShape).optional() });
 const deletedSchema = looseObject({ id: text, status: text });
+
+/** `PATCH /admin/routing-rules/{id}` — the handler reads `enabled` only. */
+export interface RoutingRuleToggleInput {
+  enabled: boolean;
+}
 
 export interface RoutingRuleInput {
   match_pattern: string;
@@ -390,6 +393,11 @@ export const routingEndpoints = {
       "/admin/routing-rules",
       routingRuleWriteSchema,
     ),
+    update: operation<WithBody<PatchAdminRoutingRulesIdData, RoutingRuleToggleInput>, unknown>()(
+      "PATCH",
+      "/admin/routing-rules/{id}",
+      routingRuleWriteSchema,
+    ),
     remove: operation<DeleteAdminRoutingRulesIdData, unknown>()(
       "DELETE",
       "/admin/routing-rules/{id}",
@@ -488,17 +496,8 @@ export const routingEndpoints = {
   >()("POST", "/admin/cost/predict", costEstimateSchema),
 } as const;
 
-/** Same endpoint with `{id}` resolved; the client sends the substituted path. */
-export function routingRuleDeleteEndpoint(id: string): typeof routingEndpoints.rules.remove {
-  const endpoint = routingEndpoints.rules.remove;
-  return { ...endpoint, path: pathWithParams(endpoint.path, { id }) };
-}
-
-export function routingDecisionDetailEndpoint(id: string): typeof routingEndpoints.decisions.detail {
-  const endpoint = routingEndpoints.decisions.detail;
-  return { ...endpoint, path: pathWithParams(endpoint.path, { id }) };
-}
-
+// Plain `{id}` binding uses the shared `withPathParams`. This helper stays because the
+// action is not a parameter of its own: the server routes on `<id>/approve|reject`.
 export function domainReviewActionEndpoint(
   id: string,
   action: "approve" | "reject",

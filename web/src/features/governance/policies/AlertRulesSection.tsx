@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Plus, Trash2 } from "lucide-react";
+import { Pencil, Plus, Trash2 } from "lucide-react";
 import { useRef, useState } from "react";
 import { z } from "zod";
 
@@ -10,7 +10,7 @@ import {
 } from "@/features/governance/policies/governance-parts";
 import { apiClient } from "@/shared/api/client";
 import type { AlertRule } from "@/shared/api/domains/governance";
-import { pathWithParams } from "@/shared/api/endpoint-factory";
+import { withPathParams } from "@/shared/api/endpoint-factory";
 import { endpoints } from "@/shared/api/endpoints";
 import { FormDialog } from "@/shared/components/form/FormDialog";
 import { FormField } from "@/shared/components/form/FormField";
@@ -19,10 +19,10 @@ import { Badge } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
 import { ConfirmDialog } from "@/shared/components/ui/ConfirmDialog";
 import { EmptyState } from "@/shared/components/ui/EmptyState";
-import { InlineNotice } from "@/shared/components/ui/InlineNotice";
 import { Input } from "@/shared/components/ui/Input";
 import { SectionCard } from "@/shared/components/ui/SectionCard";
 import { Select } from "@/shared/components/ui/Select";
+import { Switch } from "@/shared/components/ui/Switch";
 import { useMutationFeedback } from "@/shared/hooks/use-mutation-feedback";
 import { formatDateTime, formatNumber, formatRelative } from "@/shared/utils/format";
 
@@ -71,8 +71,21 @@ const alertFormSchema = z.object({
 type AlertFormValues = z.output<typeof alertFormSchema>;
 type AlertFormInput = z.input<typeof alertFormSchema>;
 
+// PATCH accepts only the operational fields; metric/scope/window are fixed at creation.
+const alertEditSchema = z.object({
+  threshold: z.coerce.number().positive("임계값은 0보다 커야 합니다."),
+  webhookUrl: z.string().trim().max(500),
+  note: z.string().trim().max(500),
+});
+type AlertEditValues = z.output<typeof alertEditSchema>;
+type AlertEditInput = z.input<typeof alertEditSchema>;
+
+const writeHint = "admin:write 권한이 필요합니다.";
+const alertQueryKeys = [["governance", "alerts"]];
+
 export function AlertRulesSection({ canWrite }: { canWrite: boolean }): React.JSX.Element {
   const [formOpen, setFormOpen] = useState(false);
+  const [editing, setEditing] = useState<AlertRule | undefined>();
   const [pendingDelete, setPendingDelete] = useState<AlertRule | undefined>();
   const createTriggerRef = useRef<HTMLButtonElement>(null);
   const rowTriggerRef = useRef<HTMLButtonElement | null>(null);
@@ -93,6 +106,12 @@ export function AlertRulesSection({ canWrite }: { canWrite: boolean }): React.JS
     note: "",
   });
 
+  const editForm = useZodForm<AlertEditInput, AlertEditValues>(alertEditSchema, {
+    threshold: 1,
+    webhookUrl: "",
+    note: "",
+  });
+
   const createRule = useMutationFeedback({
     mutate: (values: AlertFormValues) =>
       apiClient.request(endpoints.domains.governance.alerts.create, {
@@ -108,24 +127,54 @@ export function AlertRulesSection({ canWrite }: { canWrite: boolean }): React.JS
         },
         routeId,
       }),
-    invalidates: [["governance", "alerts"]],
+    invalidates: alertQueryKeys,
     successMessage: "알림 규칙을 추가했습니다.",
     errorMessage: "알림 규칙을 추가하지 못했습니다.",
   });
 
+  const updateRule = useMutationFeedback({
+    mutate: (variables: { id: string; values: AlertEditValues }) =>
+      apiClient.request(withPathParams(endpoints.domains.governance.alerts.update, { id: variables.id }), {
+        body: {
+          threshold: variables.values.threshold,
+          webhook_url: variables.values.webhookUrl,
+          note: variables.values.note,
+        },
+        routeId,
+      }),
+    invalidates: alertQueryKeys,
+    successMessage: "알림 규칙을 수정했습니다.",
+    errorMessage: "알림 규칙을 수정하지 못했습니다.",
+  });
+
+  const toggleRule = useMutationFeedback({
+    mutate: (variables: { id: string; enabled: boolean }) =>
+      apiClient.request(withPathParams(endpoints.domains.governance.alerts.update, { id: variables.id }), {
+        body: { enabled: variables.enabled },
+        routeId,
+      }),
+    invalidates: alertQueryKeys,
+    successMessage: (_result, variables) =>
+      variables.enabled ? "알림 규칙을 사용합니다." : "알림 규칙을 중지했습니다.",
+    errorMessage: "알림 규칙 사용 여부를 바꾸지 못했습니다.",
+  });
+
   const removeRule = useMutationFeedback({
     mutate: (id: string) =>
-      apiClient.request(
-        {
-          ...endpoints.domains.governance.alerts.remove,
-          path: pathWithParams(endpoints.domains.governance.alerts.remove.path, { id }),
-        },
-        { routeId },
-      ),
-    invalidates: [["governance", "alerts"]],
+      apiClient.request(withPathParams(endpoints.domains.governance.alerts.remove, { id }), { routeId }),
+    invalidates: alertQueryKeys,
     successMessage: "알림 규칙을 삭제했습니다.",
     errorMessage: "알림 규칙을 삭제하지 못했습니다.",
   });
+
+  const openEdit = (rule: AlertRule): void => {
+    setEditing(rule);
+    editForm.reset({
+      threshold: Number(rule.threshold ?? 0),
+      webhookUrl: rule.webhook_url ?? "",
+      note: rule.note ?? "",
+    });
+  };
 
   const ruleRows = alerts.data?.rules ?? [];
   const eventRows = alerts.data?.events ?? [];
@@ -175,7 +224,16 @@ export function AlertRulesSection({ canWrite }: { canWrite: boolean }): React.JS
     {
       id: "enabled",
       header: "상태",
-      cell: (row) => (row.enabled ? <Badge tone="success">사용</Badge> : <Badge tone="danger">중지</Badge>),
+      cell: (row) => (
+        <Switch
+          checked={row.enabled !== false}
+          disabled={!canWrite}
+          title={canWrite ? undefined : writeHint}
+          label="사용"
+          aria-label={`${row.name || row.id} 사용`}
+          onCheckedChange={(checked) => toggleRule.mutate({ id: row.id, enabled: checked })}
+        />
+      ),
     },
     {
       id: "last_fired",
@@ -186,19 +244,33 @@ export function AlertRulesSection({ canWrite }: { canWrite: boolean }): React.JS
       id: "actions",
       header: "동작",
       cell: (row) => (
-        <Button
-          size="small"
-          variant="danger"
-          disabled={!canWrite}
-          title={canWrite ? undefined : "admin:write 권한이 필요합니다."}
-          aria-label={`${row.name || row.id} 알림 규칙 삭제`}
-          onClick={(event) => {
-            rowTriggerRef.current = event.currentTarget;
-            setPendingDelete(row);
-          }}
-        >
-          <Trash2 aria-hidden="true" /> 삭제
-        </Button>
+        <span className="governance-actions">
+          <Button
+            size="small"
+            disabled={!canWrite}
+            title={canWrite ? undefined : writeHint}
+            aria-label={`${row.name || row.id} 알림 규칙 수정`}
+            onClick={(event) => {
+              rowTriggerRef.current = event.currentTarget;
+              openEdit(row);
+            }}
+          >
+            <Pencil aria-hidden="true" /> 수정
+          </Button>
+          <Button
+            size="small"
+            variant="danger"
+            disabled={!canWrite}
+            title={canWrite ? undefined : writeHint}
+            aria-label={`${row.name || row.id} 알림 규칙 삭제`}
+            onClick={(event) => {
+              rowTriggerRef.current = event.currentTarget;
+              setPendingDelete(row);
+            }}
+          >
+            <Trash2 aria-hidden="true" /> 삭제
+          </Button>
+        </span>
       ),
     },
   ];
@@ -243,7 +315,7 @@ export function AlertRulesSection({ canWrite }: { canWrite: boolean }): React.JS
             ref={createTriggerRef}
             variant="primary"
             disabled={!canWrite}
-            title={canWrite ? undefined : "admin:write 권한이 필요합니다."}
+            title={canWrite ? undefined : writeHint}
             onClick={() => setFormOpen(true)}
           >
             <Plus aria-hidden="true" /> 규칙 추가
@@ -258,10 +330,6 @@ export function AlertRulesSection({ canWrite }: { canWrite: boolean }): React.JS
             onRetry={() => void alerts.refetch()}
           />
         ) : null}
-        <InlineNotice tone="info" title="규칙 사용/중지 전환은 기존 화면에서 처리하세요.">
-          규칙의 사용·중지와 임계값 수정 API는 공개 규격(OpenAPI)에 포함되어 있지 않아 이 화면에서는 추가와
-          삭제만 제공합니다.
-        </InlineNotice>
         {!alerts.isPending && !alerts.isError && ruleRows.length === 0 ? (
           <EmptyState
             title="설정된 알림 규칙이 없습니다."
@@ -346,6 +414,32 @@ export function AlertRulesSection({ canWrite }: { canWrite: boolean }): React.JS
         </FormField>
         <FormField label="메모" error={form.formState.errors.note?.message}>
           {(control) => <Input {...control} {...form.register("note")} />}
+        </FormField>
+      </FormDialog>
+
+      <FormDialog
+        open={editing !== undefined}
+        onOpenChange={(open) => {
+          if (!open) setEditing(undefined);
+        }}
+        returnFocusRef={rowTriggerRef}
+        form={editForm}
+        title="알림 규칙 수정"
+        description="임계값과 Webhook, 메모를 바꿉니다. 지표와 대상 범위는 규칙을 새로 만들어야 바뀝니다."
+        submitLabel="저장"
+        onSubmit={async (values) => {
+          if (editing) await updateRule.mutateAsync({ id: editing.id, values });
+          setEditing(undefined);
+        }}
+      >
+        <FormField label="임계값" required error={editForm.formState.errors.threshold?.message}>
+          {(control) => <Input {...control} type="number" step="0.01" {...editForm.register("threshold")} />}
+        </FormField>
+        <FormField label="Webhook URL" error={editForm.formState.errors.webhookUrl?.message}>
+          {(control) => <Input {...control} {...editForm.register("webhookUrl")} placeholder="https://" />}
+        </FormField>
+        <FormField label="메모" error={editForm.formState.errors.note?.message}>
+          {(control) => <Input {...control} {...editForm.register("note")} />}
         </FormField>
       </FormDialog>
 

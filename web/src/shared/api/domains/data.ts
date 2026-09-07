@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import type {
   DeleteAdminDataProductsData,
+  DeleteAdminDwMetricsKeyData,
   GetAdminDataProductsCandidatesData,
   GetAdminDataProductsData,
   GetAdminDataProductsRequestsData,
@@ -24,10 +25,11 @@ import type {
   PostAdminDwClickhouseData,
   PostAdminDwDashboardRefreshData,
   PostAdminDwMetricsData,
+  PostAdminDwMetricsKeyValidateData,
   PostAdminDwSinkRetryData,
   PostAdminSettingsTestClickhouseData,
 } from "@/shared/api/generated";
-import { operation, type OperationData, type WithQuery } from "@/shared/api/endpoint-factory";
+import { operation, type WithBody, type WithQuery } from "@/shared/api/endpoint-factory";
 import {
   clickhouseBootstrapSchema,
   clickhouseEventsSchema,
@@ -52,17 +54,11 @@ import {
   dwSinkStatusSchema,
   dwText2SqlSchema,
   dwTimeseriesSchema,
+  metricDeleteSchema,
   metricListSchema,
   metricUpsertSchema,
+  metricValidateSchema,
 } from "@/shared/api/domains/data.schemas";
-
-/**
- * Replaces the generated (always `never`) body of a legacy operation with the
- * request body the Go handler decodes. Mirrors `WithQuery` for request payloads.
- */
-type WithBody<Data extends OperationData, Body extends object> = Omit<Data, "body"> & {
-  readonly body: Body;
-};
 
 /** Legacy admin paths are documented without a response schema; zod is the contract. */
 type LegacyResponse = unknown;
@@ -234,6 +230,17 @@ export const dataEndpoints = {
       "POST",
       "/admin/dw/metrics",
       metricUpsertSchema,
+    ),
+    // `{key}` accepts the catalog row id or the metric key (see `GetMetricCatalog`).
+    remove: operation<DeleteAdminDwMetricsKeyData, LegacyResponse>()(
+      "DELETE",
+      "/admin/dw/metrics/{key}",
+      metricDeleteSchema,
+    ),
+    validate: operation<PostAdminDwMetricsKeyValidateData, LegacyResponse>()(
+      "POST",
+      "/admin/dw/metrics/{key}/validate",
+      metricValidateSchema,
     ),
   },
   products: {

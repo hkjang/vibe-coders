@@ -255,3 +255,8 @@
   font-size: 0.8125rem;
   padding: var(--space-1) 0;
 }
+.obs-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}

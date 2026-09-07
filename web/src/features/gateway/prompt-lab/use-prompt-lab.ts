@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 
 import { apiClient } from "@/shared/api/client";
-import { withGatewayPathParams } from "@/shared/api/domains/gateway";
+import { withPathParams } from "@/shared/api/endpoint-factory";
 import { endpoints } from "@/shared/api/endpoints";
 
 export const promptLabRouteId = "prompts.lab";
@@ -40,7 +40,7 @@ export function usePromptExperimentDetail(id: string) {
   return useQuery({
     queryKey: promptLabKeys.experiment(id),
     queryFn: ({ signal }) =>
-      apiClient.request(withGatewayPathParams(lab.experiments.detail, { id }), {
+      apiClient.request(withPathParams(lab.experiments.detail, { id }), {
         signal,
         routeId: promptLabRouteId,
       }),

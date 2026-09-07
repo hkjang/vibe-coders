@@ -5,8 +5,8 @@ import { z } from "zod";
 import { safeModelLabel } from "@/features/gateway/chat/chat-console";
 import { chatRouteId, useModelUsageTags } from "@/features/gateway/chat/use-chat-console";
 import { apiClient } from "@/shared/api/client";
+import { withPathParams } from "@/shared/api/endpoint-factory";
 import { endpoints } from "@/shared/api/endpoints";
-import { withGatewayPathParams } from "@/shared/api/domains/gateway";
 import { Button } from "@/shared/components/ui/Button";
 import { ConfirmDialog } from "@/shared/components/ui/ConfirmDialog";
 import { EmptyState } from "@/shared/components/ui/EmptyState";
@@ -65,7 +65,7 @@ export function ModelTagPanel({ canWrite, writeDeniedReason }: ModelTagPanelProp
 
   const remove = useMutationFeedback({
     mutate: (model: string) =>
-      apiClient.request(withGatewayPathParams(endpoints.domains.gateway.models.tags.remove, { id: model }), {
+      apiClient.request(withPathParams(endpoints.domains.gateway.models.tags.remove, { id: model }), {
         routeId: chatRouteId,
       }),
     invalidates: [tagQueryKey],

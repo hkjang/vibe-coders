@@ -8,16 +8,17 @@ import {
   parseCompareModels,
   safeModelLabel,
 } from "@/features/gateway/chat/chat-console";
+import { ChatRunActions } from "@/features/gateway/chat/ChatRunActions";
 import { chatRouteId, useMultiRunHistory } from "@/features/gateway/chat/use-chat-console";
 import { apiClient } from "@/shared/api/client";
 import type { MultiRunBody } from "@/shared/api/domains/gateway";
-import { withGatewayPathParams } from "@/shared/api/domains/gateway";
 import type {
   MultiRunCodeVerify,
   MultiRunJudge,
   MultiRunPredict,
   MultiRunResponse,
 } from "@/shared/api/domains/gateway.schemas";
+import { withPathParams } from "@/shared/api/endpoint-factory";
 import { endpoints } from "@/shared/api/endpoints";
 import { isAppError } from "@/shared/api/error";
 import { Badge } from "@/shared/components/ui/Badge";
@@ -31,7 +32,6 @@ import { StatCard, StatGrid } from "@/shared/components/ui/StatCard";
 import { Textarea } from "@/shared/components/ui/Textarea";
 import { FormField } from "@/shared/components/form/FormField";
 import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
-import { downloadCsv, toCsv } from "@/shared/utils/csv";
 import { formatDateTime, formatKRW, formatNumber } from "@/shared/utils/format";
 
 interface ChatComparePanelProps {
@@ -106,7 +106,7 @@ export function ChatComparePanel({ canWrite, writeDeniedReason }: ChatComparePan
         } else if (kind === "code" && run?.run_id) {
           setCodeRisk(
             await apiClient.request(
-              withGatewayPathParams(endpoints.domains.gateway.chat.multiRunCodeVerify, {
+              withPathParams(endpoints.domains.gateway.chat.multiRunCodeVerify, {
                 id: run.run_id,
               }),
               { routeId: chatRouteId },
@@ -135,23 +135,6 @@ export function ChatComparePanel({ canWrite, writeDeniedReason }: ChatComparePan
     },
     [body, history, judgeMethod, judgeModel, run],
   );
-
-  const exportCsv = (): void => {
-    const results = run?.results ?? [];
-    if (results.length === 0) return;
-    downloadCsv(
-      `multi-model-${run?.run_id ?? "run"}.csv`,
-      toCsv(results, [
-        { header: "model", value: (row) => row.model },
-        { header: "provider", value: (row) => row.provider ?? "" },
-        { header: "status", value: (row) => row.status ?? "" },
-        { header: "latency_ms", value: (row) => row.latency_ms ?? "" },
-        { header: "input_tokens", value: (row) => row.input_tokens ?? "" },
-        { header: "output_tokens", value: (row) => row.output_tokens ?? "" },
-        { header: "cost_krw", value: (row) => row.cost_krw_est ?? "" },
-      ]),
-    );
-  };
 
   const judgeByModel = useMemo(
     () => new Map((judge?.judgements ?? []).map((item) => [item.model ?? "", item])),
@@ -240,10 +223,6 @@ export function ChatComparePanel({ canWrite, writeDeniedReason }: ChatComparePan
             {writeDeniedReason}
           </InlineNotice>
         ) : null}
-        <InlineNotice tone="info" title="일부 기능은 기존 화면에서 제공합니다.">
-          모델별 평가 의견 남기기, 라우팅 후보 승격, Golden 저장, 실행 간 Diff, MD/CSV 서버 내보내기는 공개된
-          API 계약에 아직 없어 이 화면에서 제공하지 않습니다. 기존 Chat 테스트 화면에서 수행하세요.
-        </InlineNotice>
         <div className="toolbar">
           <div className="toolbar-start">
             <Button
@@ -276,21 +255,23 @@ export function ChatComparePanel({ canWrite, writeDeniedReason }: ChatComparePan
       </SectionCard>
 
       {run ? (
-        <SectionCard
-          title="비교 결과"
-          description={run.run_id ? `실행 ID ${run.run_id}` : undefined}
-          actions={
-            <Button size="small" variant="secondary" onClick={exportCsv}>
-              CSV 내보내기
-            </Button>
-          }
-        >
+        <SectionCard title="비교 결과" description={run.run_id ? `실행 ID ${run.run_id}` : undefined}>
           <StatGrid label="비교 요약">
             <StatCard label="모델" value={formatNumber(run.summary?.total_models ?? run.results.length)} />
             <StatCard label="성공" value={formatNumber(run.summary?.success ?? 0)} tone="success" />
             <StatCard label="실패" value={formatNumber(run.summary?.failed ?? 0)} tone="warning" />
             <StatCard label="가장 빠른 모델" value={safeModelLabel(run.summary?.best_latency_model)} />
           </StatGrid>
+
+          {run.run_id ? (
+            <ChatRunActions
+              runId={run.run_id}
+              models={run.results.map((result) => result.model)}
+              canWrite={canWrite}
+              writeDeniedReason={writeDeniedReason}
+              prompt={userPrompt}
+            />
+          ) : null}
 
           <div className="toolbar">
             <div className="toolbar-start">

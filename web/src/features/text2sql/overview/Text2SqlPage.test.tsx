@@ -330,6 +330,38 @@ describe("Text2SqlPage", () => {
     expect(await screen.findByText("실행 DB 정상 (read-only 샌드박스 동작)")).toBeVisible();
   });
 
+  it("deletes an execute-database connection through the confirmation dialog", async () => {
+    const api = mockApi({
+      ...shellHandlers,
+      "GET /admin/text2sql/features": () => ({ features: [] }),
+      "DELETE /admin/text2sql/connections": () => ({ id: "analytics_db", status: "deleted" }),
+    });
+    const user = userEvent.setup();
+    renderPage("/text2sql?tab=runtime");
+
+    expect(await screen.findByText("분석 DB")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "analytics_db 연결 삭제" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "실행 DB 연결 삭제" });
+    expect(api.calls.some((call) => call.key === "DELETE /admin/text2sql/connections")).toBe(false);
+    await user.click(within(dialog).getByRole("button", { name: "삭제" }));
+
+    await waitFor(() => {
+      expect(api.calls.some((call) => call.key === "DELETE /admin/text2sql/connections")).toBe(true);
+    });
+    const call = api.calls.find((entry) => entry.key === "DELETE /admin/text2sql/connections");
+    expect(call?.options.query).toEqual({ id: "analytics_db" });
+  });
+
+  it("disables the connection delete button without write scope", async () => {
+    authRuntime.scopes = ["admin:read"];
+    mockApi({ ...shellHandlers, "GET /admin/text2sql/features": () => ({ features: [] }) });
+    renderPage("/text2sql?tab=runtime");
+
+    expect(await screen.findByText("분석 DB")).toBeVisible();
+    expect(screen.getByRole("button", { name: "analytics_db 연결 삭제" })).toBeDisabled();
+  });
+
   it("has no accessibility violations", async () => {
     mockApi({ ...shellHandlers });
     const { container } = renderPage();

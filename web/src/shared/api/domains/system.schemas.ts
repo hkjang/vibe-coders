@@ -117,6 +117,39 @@ export const changeSetListSchema = looseObject({
   change_sets: z.array(changeSetSchema).nullish(),
 });
 
+/** One line of a change-set dry run: current vs proposed effective value. */
+export const changeSetDryRunCheckSchema = looseObject({
+  kind: z.string().optional(),
+  key: z.string().optional(),
+  proposed: z.string().optional(),
+  current: z.string().optional(),
+  source: z.string().optional(),
+  changed: z.boolean().optional(),
+  valid: z.boolean().optional(),
+  detail: z.string().optional(),
+  restart_required: z.boolean().optional(),
+  applied_by_gateway: z.boolean().optional(),
+});
+
+export const changeSetDryRunSchema = looseObject({
+  change_set_id: z.string().optional(),
+  status: z.string().optional(),
+  checks: z.array(changeSetDryRunCheckSchema).nullish(),
+  changed_count: numberish.optional(),
+  invalid_count: numberish.optional(),
+  restart_required: z.boolean().optional(),
+  canary_scope: z.string().optional(),
+  note: z.string().optional(),
+});
+
+/** apply/rollback answer with the finished set plus how many settings moved. */
+export const changeSetApplySchema = looseObject({
+  status: z.string().optional(),
+  applied_count: numberish.optional(),
+  restored_count: numberish.optional(),
+  change_set: changeSetSchema.optional(),
+});
+
 export const changeImpactSchema = looseObject({
   change_type: z.string().optional(),
   window_days: numberish.optional(),
@@ -259,6 +292,9 @@ export const systemErrorQuerySchema = z.object({ limit: z.number().int().positiv
 export type EffectiveSetting = z.output<typeof effectiveSettingSchema>;
 export type SettingHistoryEntry = z.output<typeof settingHistorySchema>["history"][number];
 export type ChangeSet = z.output<typeof changeSetSchema>;
+export type ChangeSetDryRun = z.output<typeof changeSetDryRunSchema>;
+export type ChangeSetDryRunCheck = z.output<typeof changeSetDryRunCheckSchema>;
+export type ChangeSetApplyResult = z.output<typeof changeSetApplySchema>;
 export type SystemErrorRow = NonNullable<z.output<typeof systemErrorListSchema>["errors"]>[number];
 export type KeycloakConfig = z.output<typeof keycloakConfigSchema>;
 export type AuditLogRow = NonNullable<z.output<typeof auditLogListSchema>["audit_logs"]>[number];

@@ -141,10 +141,12 @@ func (s *Server) handleAdminChangeSetByID(w http.ResponseWriter, r *http.Request
 		case http.MethodGet:
 			writeJSON(w, http.StatusOK, sanitizeChangeSet(cs))
 		case http.MethodDelete:
+			reason := changeSetReason(r)
 			if err := s.db.DeleteChangeSet(r.Context(), id); err != nil {
 				writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "delete_failed")
 				return
 			}
+			s.auditAdmin(r, "change_set.delete", id, auditJSON(map[string]any{"status": cs.Status, "reason": reason}))
 			writeJSON(w, http.StatusOK, map[string]any{"status": "deleted"})
 		default:
 			writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
@@ -243,6 +245,18 @@ func (s *Server) storedSettingsMap(r *http.Request) (map[string]store.AdminSetti
 
 // changeSetTransition performs a simple status move (submit/approve), recording the reviewer
 // on approval.
+// changeSetReason reads the operator's reason from the request body. Applying,
+// rolling back or deleting a change set edits live gateway settings, so the audit
+// trail has to record why, not only what changed. A missing or malformed body is
+// not an error: the action itself is already authorised.
+func changeSetReason(r *http.Request) string {
+	var p struct {
+		Note string `json:"note"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&p)
+	return strings.TrimSpace(p.Note)
+}
+
 func (s *Server) changeSetTransition(w http.ResponseWriter, r *http.Request, cs store.ChangeSet, from, to string) {
 	if r.Method != http.MethodPost {
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
@@ -252,13 +266,10 @@ func (s *Server) changeSetTransition(w http.ResponseWriter, r *http.Request, cs 
 		writeOpenAIError(w, http.StatusUnprocessableEntity, "change set must be in '"+from+"' to "+to+" (current: "+cs.Status+")", "invalid_request_error", "bad_state")
 		return
 	}
-	var p struct {
-		Note string `json:"note"`
-	}
-	_ = json.NewDecoder(r.Body).Decode(&p)
+	reason := changeSetReason(r)
 	cs.Status = to
-	if strings.TrimSpace(p.Note) != "" {
-		cs.Note = strings.TrimSpace(p.Note)
+	if reason != "" {
+		cs.Note = reason
 	}
 	if to == "approved" {
 		cs.Reviewer = adminID(r)
@@ -267,7 +278,7 @@ func (s *Server) changeSetTransition(w http.ResponseWriter, r *http.Request, cs 
 		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "update_failed")
 		return
 	}
-	s.auditAdmin(r, "change_set."+to, cs.ID, "")
+	s.auditAdmin(r, "change_set."+to, cs.ID, auditJSON(map[string]any{"reason": reason}))
 	writeJSON(w, http.StatusOK, sanitizeChangeSet(cs))
 }
 
@@ -278,12 +289,13 @@ func (s *Server) changeSetApply(w http.ResponseWriter, r *http.Request, cs store
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
 		return
 	}
+	reason := changeSetReason(r)
 	if err := validateChangeSetSettingItems(cs.Items); err != nil {
 		writeUnsafeChangeSetSetting(w, err)
 		return
 	}
 	if cs.Status == "apply_pending" {
-		s.finishPendingChangeSet(w, r, cs, "apply_pending", "applied", "apply", len(cs.Prior))
+		s.finishPendingChangeSet(w, r, cs, "apply_pending", "applied", "apply", len(cs.Prior), reason)
 		return
 	}
 	if cs.Status != "approved" {
@@ -351,7 +363,7 @@ func (s *Server) changeSetApply(w http.ResponseWriter, r *http.Request, cs store
 		writeOpenAIError(w, status, err.Error(), "server_error", code)
 		return
 	}
-	s.finishPendingChangeSet(w, r, cs, "apply_pending", "applied", "apply", len(prior))
+	s.finishPendingChangeSet(w, r, cs, "apply_pending", "applied", "apply", len(prior), reason)
 }
 
 // changeSetRollback restores the prior effective values captured at apply time.
@@ -360,12 +372,13 @@ func (s *Server) changeSetRollback(w http.ResponseWriter, r *http.Request, cs st
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
 		return
 	}
+	reason := changeSetReason(r)
 	if err := validateChangeSetSettingItems(cs.Prior); err != nil {
 		writeUnsafeChangeSetSetting(w, err)
 		return
 	}
 	if cs.Status == "rollback_pending" {
-		s.finishPendingChangeSet(w, r, cs, "rollback_pending", "rolled_back", "rollback", len(cs.Prior))
+		s.finishPendingChangeSet(w, r, cs, "rollback_pending", "rolled_back", "rollback", len(cs.Prior), reason)
 		return
 	}
 	if cs.Status != "applied" {
@@ -408,13 +421,13 @@ func (s *Server) changeSetRollback(w http.ResponseWriter, r *http.Request, cs st
 		writeOpenAIError(w, status, err.Error(), "server_error", code)
 		return
 	}
-	s.finishPendingChangeSet(w, r, cs, "rollback_pending", "rolled_back", "rollback", len(records))
+	s.finishPendingChangeSet(w, r, cs, "rollback_pending", "rolled_back", "rollback", len(records), reason)
 }
 
 // finishPendingChangeSet performs only the resumable portion of apply/rollback. Settings are
 // already durable when a pending marker exists, so retries reload and finalize without rewriting
 // values or adding duplicate setting-history rows.
-func (s *Server) finishPendingChangeSet(w http.ResponseWriter, r *http.Request, cs store.ChangeSet, pendingStatus, finalStatus, action string, count int) {
+func (s *Server) finishPendingChangeSet(w http.ResponseWriter, r *http.Request, cs store.ChangeSet, pendingStatus, finalStatus, action string, count int, reason string) {
 	if err := s.reloadRuntimeConfig(r.Context()); err != nil {
 		writeOpenAIError(w, http.StatusServiceUnavailable, "settings were stored atomically but runtime reload is pending", "server_error", "setting_reload_pending")
 		return
@@ -434,6 +447,6 @@ func (s *Server) finishPendingChangeSet(w http.ResponseWriter, r *http.Request, 
 		metric = "restored"
 		countField = "restored_count"
 	}
-	s.auditAdmin(r, "change_set."+action, cs.ID, auditJSON(map[string]any{metric: count}))
+	s.auditAdmin(r, "change_set."+action, cs.ID, auditJSON(map[string]any{metric: count, "reason": reason}))
 	writeJSON(w, http.StatusOK, map[string]any{"status": finalStatus, countField: count, "change_set": sanitizeChangeSet(cs)})
 }

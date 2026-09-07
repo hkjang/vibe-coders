@@ -3,7 +3,7 @@
 // (see "@/shared/api/loose" for legacy responses without a documented shape).
 import { z } from "zod";
 
-import { operation, type OperationData, type WithQuery } from "@/shared/api/endpoint-factory";
+import { operation, type WithBody, type WithQuery } from "@/shared/api/endpoint-factory";
 import type {
   DeleteAdminSavedFiltersIdData,
   DeleteAdminTemplatesIdData,
@@ -12,17 +12,17 @@ import type {
   GetAdminPromptsDebtData,
   GetAdminPromptsFingerprintsData,
   GetAdminSavedFiltersData,
+  GetAdminTemplatesIdHistoryData,
+  GetAdminTemplatesIdUsageData,
+  PatchAdminTemplatesIdData,
   PostAdminSavedFiltersData,
   PostAdminTemplatesData,
+  PostAdminTemplatesIdApproveData,
+  PostAdminTemplatesIdRollbackData,
+  PostAdminTemplatesIdSubmitData,
+  PostAdminTemplatesIdUseData,
 } from "@/shared/api/generated";
 import { looseList, looseObject, numberish } from "@/shared/api/loose";
-
-/**
- * The generated operation types declare `body?: never` for the legacy admin
- * routes, which would make the typed client refuse a request body. Each mutation
- * below restates the body the Go handler decodes.
- */
-type WithBody<Data extends OperationData, Body> = Omit<Data, "body"> & { readonly body: Body };
 
 // ---------- prompt search (legacy `#/prompts`) ----------
 
@@ -181,6 +181,81 @@ export interface PromptAssetSaveBody {
 const promptAssetSaveResponseSchema = looseObject({ template: promptAssetSchema.optional() });
 const deleteAcknowledgementSchema = looseObject({ id: z.string().optional(), status: z.string().optional() });
 
+/** Partial edit of an existing asset (`PATCH /admin/templates/{id}`). */
+export interface PromptAssetUpdateBody {
+  readonly name?: string;
+  readonly category?: string;
+  readonly description?: string;
+  /** Prompt text. Sent in the request body only — never in a URL or storage. */
+  readonly body?: string;
+  readonly tags?: readonly string[];
+  readonly enabled?: boolean;
+  readonly note?: string;
+}
+
+/** Review decision: `approved`, `standard` (promote) or `draft` (reject). */
+export interface PromptAssetApproveBody {
+  readonly status: string;
+  readonly note: string;
+}
+
+export interface PromptAssetRollbackBody {
+  readonly version: number;
+}
+
+/** `store.PromptTemplateHistory` — one entry of an asset's change log. */
+const promptAssetHistorySchema = looseObject({
+  id: z.string(),
+  template_id: z.string().optional(),
+  action: z.string().optional(),
+  version_num: numberish.optional(),
+  name: z.string().optional(),
+  category: z.string().optional(),
+  description: z.string().optional(),
+  body: z.string().optional(),
+  tags: z.array(z.string()).nullish(),
+  from_status: z.string().optional(),
+  to_status: z.string().optional(),
+  note: z.string().optional(),
+  actor: z.string().optional(),
+  has_snapshot: z.boolean().optional(),
+  created_at: z.string().optional(),
+});
+export type PromptAssetHistoryEntry = z.infer<typeof promptAssetHistorySchema>;
+
+const promptAssetHistoryListSchema = looseObject({
+  history: z.array(promptAssetHistorySchema).nullish(),
+});
+
+/** `store.PromptAssetUsageRow` — per-team usage over the last 90 days. */
+const promptAssetUsageSchema = looseObject({
+  team: z.string(),
+  calls: numberish.optional(),
+  errors: numberish.optional(),
+  cost_krw: numberish.optional(),
+});
+export type PromptAssetUsageRow = z.infer<typeof promptAssetUsageSchema>;
+
+const promptAssetUsageListSchema = looseObject({ usage: z.array(promptAssetUsageSchema).nullish() });
+
+// `/use` returns the asset body and records a usage; the body stays in memory.
+const promptAssetUseSchema = looseObject({
+  id: z.string(),
+  name: z.string().optional(),
+  category: z.string().optional(),
+  description: z.string().optional(),
+  body: z.string().optional(),
+  tags: z.array(z.string()).nullish(),
+  status: z.string().optional(),
+});
+
+const promptAssetStatusSchema = looseObject({ id: z.string().optional(), status: z.string().optional() });
+
+const promptAssetRollbackSchema = looseObject({
+  template: promptAssetSchema.optional(),
+  restored_from: numberish.optional(),
+});
+
 // ---------- saved filters (shared with the legacy prompt search toolbar) ----------
 
 const savedFilterQuerySchema = z.object({ view: z.string().optional() });
@@ -238,10 +313,46 @@ export const promptsEndpoints = {
       "/admin/templates",
       promptAssetSaveResponseSchema,
     ),
+    // PATCH applies a partial edit; omitted fields keep their stored value.
+    update: operation<WithBody<PatchAdminTemplatesIdData, PromptAssetUpdateBody>, unknown>()(
+      "PATCH",
+      "/admin/templates/{id}",
+      promptAssetSaveResponseSchema,
+    ),
     remove: operation<DeleteAdminTemplatesIdData, unknown>()(
       "DELETE",
       "/admin/templates/{id}",
       deleteAcknowledgementSchema,
+    ),
+    submit: operation<PostAdminTemplatesIdSubmitData, unknown>()(
+      "POST",
+      "/admin/templates/{id}/submit",
+      promptAssetStatusSchema,
+    ),
+    approve: operation<WithBody<PostAdminTemplatesIdApproveData, PromptAssetApproveBody>, unknown>()(
+      "POST",
+      "/admin/templates/{id}/approve",
+      promptAssetStatusSchema,
+    ),
+    rollback: operation<WithBody<PostAdminTemplatesIdRollbackData, PromptAssetRollbackBody>, unknown>()(
+      "POST",
+      "/admin/templates/{id}/rollback",
+      promptAssetRollbackSchema,
+    ),
+    use: operation<PostAdminTemplatesIdUseData, unknown>()(
+      "POST",
+      "/admin/templates/{id}/use",
+      promptAssetUseSchema,
+    ),
+    history: operation<GetAdminTemplatesIdHistoryData, unknown>()(
+      "GET",
+      "/admin/templates/{id}/history",
+      promptAssetHistoryListSchema,
+    ),
+    usage: operation<GetAdminTemplatesIdUsageData, unknown>()(
+      "GET",
+      "/admin/templates/{id}/usage",
+      promptAssetUsageListSchema,
     ),
   },
   savedFilters: {
@@ -268,3 +379,5 @@ export type PromptSearchResult = z.infer<typeof promptSearchResponseSchema>;
 export type PromptFingerprintResult = z.infer<typeof fingerprintResponseSchema>;
 export type PromptDebtResult = z.infer<typeof promptDebtResponseSchema>;
 export type PromptAssetListResult = z.infer<typeof promptAssetListSchema>;
+export type PromptAssetHistoryResult = z.infer<typeof promptAssetHistoryListSchema>;
+export type PromptAssetUsageResult = z.infer<typeof promptAssetUsageListSchema>;

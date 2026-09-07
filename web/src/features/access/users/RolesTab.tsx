@@ -3,7 +3,7 @@ import { z } from "zod";
 
 import { QueryNotice, ScopeBadges, UpdatedAt } from "@/features/access/access-ui";
 import { accessKeys, useRolesQuery } from "@/features/access/users/use-access-admin";
-import { useReturnFocus } from "@/features/access/use-return-focus";
+import { useReturnFocus } from "@/shared/hooks/use-return-focus";
 import { apiClient } from "@/shared/api/client";
 import type { SaveRoleBody } from "@/shared/api/domains/access";
 import type { RoleRow } from "@/shared/api/domains/access.schemas";
@@ -15,6 +15,7 @@ import { LoadingState } from "@/shared/components/state/PageStates";
 import { Badge } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
 import { Checkbox } from "@/shared/components/ui/Checkbox";
+import { ConfirmDialog } from "@/shared/components/ui/ConfirmDialog";
 import { InlineNotice } from "@/shared/components/ui/InlineNotice";
 import { Input } from "@/shared/components/ui/Input";
 import { SectionCard } from "@/shared/components/ui/SectionCard";
@@ -39,6 +40,7 @@ type RoleForm = z.infer<typeof roleSchema>;
 
 function roleColumns(
   onEdit: (row: RoleRow, trigger: HTMLElement) => void,
+  onRemove: (row: RoleRow, trigger: HTMLElement) => void,
   canWrite: boolean,
   writeDeniedReason: string,
 ): ReadonlyArray<DataTableColumn<RoleRow>> {
@@ -99,6 +101,21 @@ function roleColumns(
           >
             수정
           </Button>
+          <Button
+            size="small"
+            variant="danger"
+            disabled={!canWrite || row.original.is_system}
+            title={
+              !canWrite
+                ? writeDeniedReason
+                : row.original.is_system
+                  ? "내장 역할은 삭제할 수 없습니다."
+                  : undefined
+            }
+            onClick={(event) => onRemove(row.original, event.currentTarget)}
+          >
+            삭제
+          </Button>
         </div>
       ),
     }),
@@ -115,6 +132,7 @@ export function RolesTab({ canWrite, writeDeniedReason }: RolesTabProps): React.
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingRole, setEditingRole] = useState("");
   const [scopeDraft, setScopeDraft] = useState<readonly string[]>([]);
+  const [removingRole, setRemovingRole] = useState<RoleRow | undefined>();
   const createTrigger = useRef<HTMLButtonElement>(null);
   const { returnFocusRef: rowTrigger, remember: rememberRowTrigger } = useReturnFocus();
 
@@ -123,6 +141,13 @@ export function RolesTab({ canWrite, writeDeniedReason }: RolesTabProps): React.
     mutate: (body: SaveRoleBody) => apiClient.request(access.roles.save, { body, routeId }),
     invalidates: [accessKeys.roles],
     successMessage: "역할을 저장했습니다.",
+  });
+
+  const removeRole = useMutationFeedback({
+    // The server takes the role name in the query string, not the path.
+    mutate: (role: string) => apiClient.request(access.roles.remove, { query: { role }, routeId }),
+    invalidates: [accessKeys.roles],
+    successMessage: "역할을 삭제했습니다.",
   });
 
   if (roles.isPending && !roles.data) return <LoadingState label="역할을 불러오는 중입니다." />;
@@ -149,8 +174,8 @@ export function RolesTab({ canWrite, writeDeniedReason }: RolesTabProps): React.
       </StatGrid>
 
       <InlineNotice tone="info" title="커스텀 역할은 최고 관리자만 부여할 수 있습니다.">
-        커스텀 역할의 랭크는 0이라서, 사용자에게 부여하려면 super_admin 권한이 필요합니다. 역할 삭제 API는 이
-        UI 버전에서 제공되지 않으므로, 더 이상 쓰지 않는 역할은 기존 관리자 화면에서 정리하세요.
+        커스텀 역할의 랭크는 0이라서, 사용자에게 부여하려면 super_admin 권한이 필요합니다. 내장 역할은
+        수정하거나 삭제할 수 없습니다.
       </InlineNotice>
 
       <SectionCard
@@ -187,6 +212,10 @@ export function RolesTab({ canWrite, writeDeniedReason }: RolesTabProps): React.
               setScopeDraft(row.scopes);
               setEditingRole(row.role);
               setEditorOpen(true);
+            },
+            (row, trigger) => {
+              rememberRowTrigger(trigger);
+              setRemovingRole(row);
             },
             canWrite,
             writeDeniedReason,
@@ -246,6 +275,22 @@ export function RolesTab({ canWrite, writeDeniedReason }: RolesTabProps): React.
           </div>
         </fieldset>
       </FormDialog>
+
+      <ConfirmDialog
+        open={removingRole !== undefined}
+        onOpenChange={(open) => {
+          if (!open) setRemovingRole(undefined);
+        }}
+        returnFocusRef={rowTrigger}
+        tone="danger"
+        title="역할 삭제"
+        description={`커스텀 역할 '${removingRole?.role ?? ""}'을(를) 삭제합니다. 이 역할을 쓰던 사용자와 키는 스코프를 잃습니다.`}
+        confirmLabel="삭제"
+        onConfirm={async () => {
+          if (removingRole) await removeRole.mutateAsync(removingRole.role);
+          setRemovingRole(undefined);
+        }}
+      />
     </div>
   );
 }

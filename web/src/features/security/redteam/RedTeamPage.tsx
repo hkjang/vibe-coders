@@ -10,7 +10,7 @@ import { RedTeamSchedulesTab } from "@/features/security/redteam/RedTeamSchedule
 import { RedTeamTargetsTab } from "@/features/security/redteam/RedTeamTargetsTab";
 import { writeDeniedReason } from "@/features/security/redteam/redteam-ui";
 import { redteamKeys, routeId, useRedTeamData } from "@/features/security/redteam/use-redteam-data";
-import { useReturnFocus } from "@/features/security/redteam/use-return-focus";
+import { useReturnFocus } from "@/shared/hooks/use-return-focus";
 import { apiClient } from "@/shared/api/client";
 import { withPathParams, type RedTeamDryRun } from "@/shared/api/domains/redteam";
 import { endpoints } from "@/shared/api/endpoints";

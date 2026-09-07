@@ -2,8 +2,8 @@ import { useQuery } from "@tanstack/react-query";
 import { Download } from "lucide-react";
 
 import { apiClient } from "@/shared/api/client";
-import { withObservabilityPath } from "@/shared/api/domains/observability";
 import type { FlightRecorderEvent } from "@/shared/api/domains/observability.schemas";
+import { withPathParams } from "@/shared/api/endpoint-factory";
 import { endpoints } from "@/shared/api/endpoints";
 import { isAppError } from "@/shared/api/error";
 import { Badge } from "@/shared/components/ui/Badge";
@@ -39,7 +39,7 @@ export function FlightRecorderPanel({ sessionId }: FlightRecorderPanelProps): Re
     queryKey: ["observability", "sessions", "flight-recorder", sessionId],
     queryFn: ({ signal }) =>
       apiClient.request(
-        withObservabilityPath(endpoints.domains.observability.sessions.flightRecorder, {
+        withPathParams(endpoints.domains.observability.sessions.flightRecorder, {
           session_id: sessionId,
         }),
         { signal, routeId: "observability.sessions.flight-recorder" },

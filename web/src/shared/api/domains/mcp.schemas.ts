@@ -64,6 +64,25 @@ export const mcpDeleteAcknowledgementSchema = looseObject({
   status: text,
 });
 
+/**
+ * GET /admin/mcp/upstreams/{id}/probe — a fresh handshake against one upstream.
+ * `ok` reflects tool discovery only; resources/prompts failures land in `errors`.
+ */
+export const mcpUpstreamProbeSchema = looseObject({
+  id: text,
+  name: text,
+  url: text,
+  ok: flag,
+  tool_count: count,
+  prompt_count: count,
+  resource_count: count,
+  tools: looseList({ name: text, namespaced: text, description: text }),
+  prompts: looseList({ name: text, namespaced: text }),
+  resources: looseList({ uri: text, name: text }),
+  errors: errorMap,
+});
+export type McpUpstreamProbe = z.output<typeof mcpUpstreamProbeSchema>;
+
 export const onboardingCheckSchema = looseObject({
   key: text,
   ok: flag,
@@ -177,6 +196,19 @@ export const mcpToolListSchema = looseObject({
   }),
   count: count,
   filters: unknownRecord.optional(),
+});
+
+/** POST /admin/mcp/tools answers with the stored risk profile. */
+export const mcpToolRiskWriteSchema = looseObject({
+  profile: looseObject({
+    id: text,
+    server_label: text,
+    tool_name: text,
+    risk_level: text,
+    action: text,
+    note: text,
+    updated_at: text,
+  }).optional(),
 });
 
 export const mcpServerListSchema = looseObject({

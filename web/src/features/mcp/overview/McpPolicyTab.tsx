@@ -6,8 +6,9 @@ import { z } from "zod";
 import { QueryNotice } from "@/features/mcp/mcp-ui";
 import { decisionLabel, decisionTone, riskTone } from "@/features/mcp/mcp-utils";
 import { apiClient } from "@/shared/api/client";
-import { withMcpPathParams, type McpPolicyBody } from "@/shared/api/domains/mcp";
+import type { McpPolicyBody } from "@/shared/api/domains/mcp";
 import type { McpPolicy } from "@/shared/api/domains/mcp.schemas";
+import { withPathParams } from "@/shared/api/endpoint-factory";
 import { endpoints } from "@/shared/api/endpoints";
 import { FormDialog } from "@/shared/components/form/FormDialog";
 import { FormField } from "@/shared/components/form/FormField";
@@ -117,7 +118,7 @@ export function McpPolicyTab({ canWrite }: { canWrite: boolean }): React.JSX.Ele
   });
   const removePolicy = useMutationFeedback({
     mutate: (server: string) =>
-      apiClient.request(withMcpPathParams(endpoints.domains.mcp.deletePolicy, { server }), { routeId }),
+      apiClient.request(withPathParams(endpoints.domains.mcp.deletePolicy, { server }), { routeId }),
     invalidates: [["mcp"]],
     successMessage: "정책을 삭제했습니다.",
     errorMessage: "정책을 삭제하지 못했습니다.",

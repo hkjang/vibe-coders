@@ -13,7 +13,7 @@ import { PanelFailure } from "@/features/security/redteam/RedTeamParts";
 import { exportProbePrompts, importProbePrompts } from "@/features/security/redteam/redteam-csv";
 import { riskTone, writeDeniedReason } from "@/features/security/redteam/redteam-ui";
 import { redteamKeys, routeId, type RedTeamData } from "@/features/security/redteam/use-redteam-data";
-import { useReturnFocus } from "@/features/security/redteam/use-return-focus";
+import { useReturnFocus } from "@/shared/hooks/use-return-focus";
 import { apiClient } from "@/shared/api/client";
 import {
   withPathParams,

@@ -12,7 +12,7 @@ import { DryRunSheet } from "@/features/security/redteam/DryRunSheet";
 import { FieldRow, PanelFailure } from "@/features/security/redteam/RedTeamParts";
 import { scoreTone, statusTone, writeDeniedReason } from "@/features/security/redteam/redteam-ui";
 import { redteamKeys, routeId, type RedTeamData } from "@/features/security/redteam/use-redteam-data";
-import { useReturnFocus } from "@/features/security/redteam/use-return-focus";
+import { useReturnFocus } from "@/shared/hooks/use-return-focus";
 import { apiClient } from "@/shared/api/client";
 import {
   withPathParams,

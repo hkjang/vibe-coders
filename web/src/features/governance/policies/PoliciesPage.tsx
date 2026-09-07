@@ -3,6 +3,7 @@ import { RefreshCw } from "lucide-react";
 
 import { useAuth } from "@/app/auth/AuthProvider";
 import { AlertRulesSection } from "@/features/governance/policies/AlertRulesSection";
+import { CostGuardSection } from "@/features/governance/policies/CostGuardSection";
 import { GovernanceEventsSection } from "@/features/governance/policies/GovernanceEventsSection";
 import { KillSwitchSection } from "@/features/governance/policies/KillSwitchSection";
 import { ModelSunsetTab } from "@/features/governance/policies/ModelSunsetTab";
@@ -68,9 +69,10 @@ export function PoliciesPage(): React.JSX.Element {
             <PolicyEngineSection canWrite={canWrite} />
             <GovernanceEventsSection canWrite={canWrite} />
             <AlertRulesSection canWrite={canWrite} />
-            <InlineNotice tone="warning" title="이 화면에서 제공하지 않는 기능">
-              비용 가드 설정·비용 예측은 저장 API가 공개 규격(OpenAPI)에 없어 이식하지 못했습니다. 기존
-              화면(/admin#/safety)에서 처리하세요.
+            <CostGuardSection canWrite={canWrite} />
+            <InlineNotice tone="info" title="비용 예측기는 이 화면에 없습니다.">
+              모델별 예상 비용 계산은 비용(FinOps) 도메인 화면에서 다룹니다. 급하면 기존
+              화면(/admin#/safety)에서도 실행할 수 있습니다.
             </InlineNotice>
           </div>
         </TabPanel>

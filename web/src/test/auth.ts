@@ -23,6 +23,7 @@ export interface TestAuthOptions {
   scopes?: readonly string[];
   legacyFallback?: boolean;
   backendVersion?: string;
+  rawPromptView?: boolean;
   user?: Partial<AuthUser>;
 }
 
@@ -59,6 +60,7 @@ export function testAuth(options: TestAuthOptions = {}): AuthContextValue {
     defaultEntry: "/app/overview",
     legacyFallback: options.legacyFallback ?? true,
     credentialPrefixes: ["vc_sk_", "vc_sa_"],
+    capabilities: { raw_prompt_view: options.rawPromptView ?? true },
     features: migrationRegistry,
     login: async () => undefined,
     logout: async () => undefined,

@@ -163,6 +163,9 @@ export const uiBootstrapSchema = z.object({
   }),
   user: authUserSchema.nullable().optional(),
   roles: z.array(z.string()),
+  // Rules the gateway decides by role rather than by scope, so a screen can
+  // disable an action with a reason instead of discovering a 403 on click.
+  capabilities: z.object({ raw_prompt_view: z.boolean() }).default({ raw_prompt_view: false }),
   permissions: z.array(z.string()),
   allowed_features: z.array(z.string()),
   migration_registry: z.array(migrationFeatureSchema),
@@ -748,4 +751,5 @@ export type RoutingHealthQuery = z.input<typeof routingHealthQuerySchema>;
 export type SsoStatus = z.output<typeof ssoStatusSchema>;
 export type TokenPair = z.output<typeof tokenPairSchema>;
 export type UIBootstrap = z.output<typeof uiBootstrapSchema>;
+export type UICapabilities = UIBootstrap["capabilities"];
 export type UIBootstrapFeature = z.output<typeof migrationFeatureSchema>;

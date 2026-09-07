@@ -121,3 +121,17 @@
   flex-wrap: wrap;
   gap: var(--space-2);
 }
+
+.gateway-run-actions,
+.gateway-run-diff,
+.gateway-run-result {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.gateway-diff-model > summary {
+  cursor: pointer;
+  font-weight: 600;
+  padding: var(--space-2) 0;
+}

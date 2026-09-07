@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { FlaskConical, Plus, Trash2 } from "lucide-react";
+import { Archive, FlaskConical, Play, Plus, RotateCcw, Trash2 } from "lucide-react";
 import { z } from "zod";
 
 import { useAuth } from "@/app/auth/AuthProvider";
@@ -13,7 +13,8 @@ import {
   usePromptRubrics,
 } from "@/features/gateway/prompt-lab/use-prompt-lab";
 import { apiClient } from "@/shared/api/client";
-import { withGatewayPathParams } from "@/shared/api/domains/gateway";
+import type { PromptExperiment, PromptTestCaseRun } from "@/shared/api/domains/gateway.schemas";
+import { withPathParams } from "@/shared/api/endpoint-factory";
 import { endpoints } from "@/shared/api/endpoints";
 import { PageHeader } from "@/shared/components/page/PageHeader";
 import { LoadingState } from "@/shared/components/state/PageStates";
@@ -34,7 +35,7 @@ import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
 import { useMutationFeedback } from "@/shared/hooks/use-mutation-feedback";
 import { useSearchState } from "@/shared/hooks/use-search-state";
 import { useTabParam } from "@/shared/hooks/use-tab-param";
-import { formatDateTime } from "@/shared/utils/format";
+import { formatDateTime, formatKRW, formatNumber } from "@/shared/utils/format";
 
 const lab = endpoints.domains.gateway.promptLab;
 
@@ -96,6 +97,12 @@ const testCaseSchema = z.object({
 type TestCaseInput = z.input<typeof testCaseSchema>;
 type TestCaseOutput = z.output<typeof testCaseSchema>;
 
+const verdictLabels: Readonly<Record<string, string>> = {
+  pass: "합격",
+  warn: "주의",
+  fail: "불합격",
+};
+
 const contractTypeLabels: Record<(typeof contractTypes)[number], string> = {
   json: "JSON",
   json_schema: "JSON 스키마",
@@ -103,6 +110,58 @@ const contractTypeLabels: Record<(typeof contractTypes)[number], string> = {
   sql: "읽기 전용 SQL",
   regex: "정규식",
 };
+
+/**
+ * Score card of the latest test-case run. The server returns judgements and contract
+ * verdicts only, so no answer text reaches this screen.
+ */
+function TestCaseRunResult({ name, result }: { name: string; result: PromptTestCaseRun }): React.JSX.Element {
+  return (
+    <div className="gateway-run-result">
+      <InlineNotice tone="success" title={`${name} 실행 결과`}>
+        {`최고 점수 모델 ${result.best_model || "없음"} · 평균 점수 ${formatNumber(result.avg_score ?? 0, 1)} · 모델 ${formatNumber(result.model_count ?? 0)}개`}
+        {result.contract_applied
+          ? ` · 출력 계약 통과 ${formatNumber(result.contract_pass ?? 0)}개`
+          : " · 출력 계약 미적용"}
+      </InlineNotice>
+      {result.results.length === 0 ? null : (
+        <div className="data-table-scroll" tabIndex={0} aria-label="테스트 케이스 실행 결과 표 영역">
+          <table className="data-table">
+            <caption className="sr-only">{`${name} 테스트 케이스 실행의 모델별 점수`}</caption>
+            <thead>
+              <tr>
+                <th scope="col">모델</th>
+                <th scope="col">점수</th>
+                <th scope="col">판정</th>
+                <th scope="col">출력 계약</th>
+                <th scope="col">비용</th>
+                <th scope="col">지연</th>
+              </tr>
+            </thead>
+            <tbody>
+              {result.results.map((row, index) => (
+                <tr key={`${row.model ?? "model"}-${index}`}>
+                  <td className="mono">{row.model || "-"}</td>
+                  <td className="cell-number">{formatNumber(row.score ?? 0, 1)}</td>
+                  <td>{verdictLabels[row.verdict ?? ""] ?? row.verdict ?? "-"}</td>
+                  <td>
+                    {row.contract_pass === null || row.contract_pass === undefined
+                      ? "미적용"
+                      : row.contract_pass
+                        ? "통과"
+                        : `위반 ${formatNumber(row.contract_errors?.length ?? 0)}건`}
+                  </td>
+                  <td className="cell-number">{formatKRW(row.cost_krw ?? 0)}</td>
+                  <td className="cell-number">{formatNumber(row.latency_ms ?? 0)} ms</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function PromptLabPage(): React.JSX.Element {
   const auth = useAuth();
@@ -122,6 +181,10 @@ export function PromptLabPage(): React.JSX.Element {
   const [rubricOpen, setRubricOpen] = useState(false);
   const [testCaseOpen, setTestCaseOpen] = useState(false);
   const [removeCase, setRemoveCase] = useState<{ id: string; name: string } | undefined>();
+  const [runCase, setRunCase] = useState<{ id: string; name: string } | undefined>();
+  const [lastRun, setLastRun] = useState<{ name: string; result: PromptTestCaseRun } | undefined>();
+  const [archiveTarget, setArchiveTarget] = useState<PromptExperiment | undefined>();
+  const [removeExperiment, setRemoveExperiment] = useState<PromptExperiment | undefined>();
   const returnFocusRef = useRef<HTMLElement | null>(null);
   const newExperimentRef = useRef<HTMLButtonElement>(null);
   const newContractRef = useRef<HTMLButtonElement>(null);
@@ -223,12 +286,46 @@ export function PromptLabPage(): React.JSX.Element {
 
   const deleteTestCase = useMutationFeedback({
     mutate: (id: string) =>
-      apiClient.request(withGatewayPathParams(lab.testCases.remove, { id }), {
+      apiClient.request(withPathParams(lab.testCases.remove, { id }), {
         routeId: promptLabRouteId,
       }),
     invalidates: [promptLabKeys.experiment(selectedExperiment)],
     successMessage: "테스트 케이스를 삭제했습니다.",
     errorMessage: "테스트 케이스를 삭제하지 못했습니다.",
+  });
+
+  const runTestCase = useMutationFeedback<{ id: string; name: string }, PromptTestCaseRun>({
+    mutate: ({ id }) =>
+      apiClient.request(withPathParams(lab.testCases.run, { id }), {
+        // The saved prompt is not re-persisted on the run that this creates.
+        body: { save_prompt: false },
+        routeId: promptLabRouteId,
+      }),
+    invalidates: [promptLabKeys.experiment(selectedExperiment)],
+    successMessage: (result) =>
+      result.best_model ? `실행을 마쳤습니다. 최고 점수 모델: ${result.best_model}` : "실행을 마쳤습니다.",
+    errorMessage: "테스트 케이스를 실행하지 못했습니다.",
+    onSuccess: (result, variables) => setLastRun({ name: variables.name, result }),
+  });
+
+  const updateExperimentStatus = useMutationFeedback<{ id: string; status: "active" | "archived" }, unknown>({
+    mutate: ({ id, status }) =>
+      apiClient.request(withPathParams(lab.experiments.updateStatus, { id }), {
+        body: { status },
+        routeId: promptLabRouteId,
+      }),
+    invalidates: [promptLabKeys.experiments],
+    successMessage: (_result, variables) =>
+      variables.status === "archived" ? "실험을 보관했습니다." : "실험을 다시 진행 중으로 바꿨습니다.",
+    errorMessage: "실험 상태를 바꾸지 못했습니다.",
+  });
+
+  const deleteExperiment = useMutationFeedback<string, unknown>({
+    mutate: (id) =>
+      apiClient.request(withPathParams(lab.experiments.remove, { id }), { routeId: promptLabRouteId }),
+    invalidates: [promptLabKeys.experiments],
+    successMessage: "실험을 삭제했습니다.",
+    errorMessage: "실험을 삭제하지 못했습니다.",
   });
 
   const openDialog = (
@@ -321,13 +418,46 @@ export function PromptLabPage(): React.JSX.Element {
                           <td>{experiment.status === "archived" ? "보관" : "진행 중"}</td>
                           <td>{formatDateTime(experiment.created_at)}</td>
                           <td>
-                            <Button
-                              size="small"
-                              variant="ghost"
-                              onClick={() => updateParams({ exp: experiment.id })}
-                            >
-                              테스트 케이스 보기
-                            </Button>
+                            <div className="gateway-row-actions">
+                              <Button
+                                size="small"
+                                variant="ghost"
+                                onClick={() => updateParams({ exp: experiment.id })}
+                              >
+                                테스트 케이스 보기
+                              </Button>
+                              <Button
+                                size="small"
+                                variant="ghost"
+                                disabled={!canWrite}
+                                title={canWrite ? undefined : writeDeniedReason}
+                                aria-label={`${experiment.title} 실험 ${experiment.status === "archived" ? "다시 진행" : "보관"}`}
+                                onClick={(event) => {
+                                  returnFocusRef.current = event.currentTarget;
+                                  setArchiveTarget(experiment);
+                                }}
+                              >
+                                {experiment.status === "archived" ? (
+                                  <RotateCcw aria-hidden="true" />
+                                ) : (
+                                  <Archive aria-hidden="true" />
+                                )}
+                                {experiment.status === "archived" ? "다시 진행" : "보관"}
+                              </Button>
+                              <Button
+                                size="small"
+                                variant="ghost"
+                                disabled={!canWrite}
+                                title={canWrite ? undefined : writeDeniedReason}
+                                aria-label={`${experiment.title} 실험 삭제`}
+                                onClick={(event) => {
+                                  returnFocusRef.current = event.currentTarget;
+                                  setRemoveExperiment(experiment);
+                                }}
+                              >
+                                <Trash2 aria-hidden="true" /> 삭제
+                              </Button>
+                            </div>
                           </td>
                         </tr>
                       ))}
@@ -373,10 +503,11 @@ export function PromptLabPage(): React.JSX.Element {
                   </div>
                 }
               >
-                <InlineNotice tone="info" title="실행은 기존 화면에서 진행합니다.">
-                  테스트 케이스 실행(POST /admin/prompt-lab/test-cases/&#123;id&#125;/run)은 아직 공개된 API
-                  계약에 없어 이 화면에서 제공하지 않습니다. 기존 화면에서 실행하세요.
+                <InlineNotice tone="info" title="실행은 실제 호출입니다.">
+                  실행하면 저장된 모델로 실제 요청이 나가며 비용이 발생합니다. 응답 원문은 저장하지 않고
+                  점수와 계약 검증 결과만 남깁니다.
                 </InlineNotice>
+                {lastRun ? <TestCaseRunResult name={lastRun.name} result={lastRun.result} /> : null}
                 {detail.isPending ? (
                   <LoadingState label="테스트 케이스를 불러오는 중입니다." />
                 ) : detail.isError ? (
@@ -409,15 +540,34 @@ export function PromptLabPage(): React.JSX.Element {
                             <td>{testCase.contract_id || "-"}</td>
                             <td>{formatDateTime(testCase.created_at)}</td>
                             <td>
-                              <Button
-                                size="small"
-                                variant="ghost"
-                                disabled={!canWrite}
-                                title={canWrite ? undefined : writeDeniedReason}
-                                onClick={() => setRemoveCase({ id: testCase.id, name: testCase.name })}
-                              >
-                                <Trash2 aria-hidden="true" /> 삭제
-                              </Button>
+                              <div className="gateway-row-actions">
+                                <Button
+                                  size="small"
+                                  variant="secondary"
+                                  disabled={!canWrite}
+                                  title={canWrite ? undefined : writeDeniedReason}
+                                  aria-label={`${testCase.name} 테스트 케이스 실행`}
+                                  onClick={(event) => {
+                                    returnFocusRef.current = event.currentTarget;
+                                    setRunCase({ id: testCase.id, name: testCase.name });
+                                  }}
+                                >
+                                  <Play aria-hidden="true" /> 실행
+                                </Button>
+                                <Button
+                                  size="small"
+                                  variant="ghost"
+                                  disabled={!canWrite}
+                                  title={canWrite ? undefined : writeDeniedReason}
+                                  aria-label={`${testCase.name} 테스트 케이스 삭제`}
+                                  onClick={(event) => {
+                                    returnFocusRef.current = event.currentTarget;
+                                    setRemoveCase({ id: testCase.id, name: testCase.name });
+                                  }}
+                                >
+                                  <Trash2 aria-hidden="true" /> 삭제
+                                </Button>
+                              </div>
                             </td>
                           </tr>
                         ))}
@@ -683,6 +833,61 @@ export function PromptLabPage(): React.JSX.Element {
           if (!removeCase) return;
           await deleteTestCase.mutateAsync(removeCase.id);
           setRemoveCase(undefined);
+        }}
+      />
+
+      <ConfirmDialog
+        open={runCase !== undefined}
+        onOpenChange={(open) => {
+          if (!open) setRunCase(undefined);
+        }}
+        returnFocusRef={returnFocusRef}
+        title="테스트 케이스 실행"
+        description={`${runCase?.name ?? ""} 테스트 케이스를 저장된 모델로 실행합니다.`}
+        confirmLabel="실행"
+        onConfirm={async () => {
+          if (!runCase) return;
+          await runTestCase.mutateAsync(runCase);
+          setRunCase(undefined);
+        }}
+      >
+        <p>실제 공급자 호출이므로 비용이 발생합니다. 결과는 점수와 계약 검증으로만 남습니다.</p>
+      </ConfirmDialog>
+
+      <ConfirmDialog
+        open={archiveTarget !== undefined}
+        onOpenChange={(open) => {
+          if (!open) setArchiveTarget(undefined);
+        }}
+        returnFocusRef={returnFocusRef}
+        title={archiveTarget?.status === "archived" ? "실험 다시 진행" : "실험 보관"}
+        description={`${archiveTarget?.title ?? ""} 실험을 ${archiveTarget?.status === "archived" ? "다시 진행 중으로" : "보관 상태로"} 바꿉니다.`}
+        confirmLabel={archiveTarget?.status === "archived" ? "다시 진행" : "보관"}
+        onConfirm={async () => {
+          if (!archiveTarget) return;
+          await updateExperimentStatus.mutateAsync({
+            id: archiveTarget.id,
+            status: archiveTarget.status === "archived" ? "active" : "archived",
+          });
+          setArchiveTarget(undefined);
+        }}
+      />
+
+      <ConfirmDialog
+        open={removeExperiment !== undefined}
+        onOpenChange={(open) => {
+          if (!open) setRemoveExperiment(undefined);
+        }}
+        returnFocusRef={returnFocusRef}
+        tone="danger"
+        title="실험 삭제"
+        description={`${removeExperiment?.title ?? ""} 실험과 그 안의 테스트 케이스를 삭제합니다.`}
+        confirmLabel="삭제"
+        onConfirm={async () => {
+          if (!removeExperiment) return;
+          await deleteExperiment.mutateAsync(removeExperiment.id);
+          if (selectedExperiment === removeExperiment.id) updateParams({ exp: undefined });
+          setRemoveExperiment(undefined);
         }}
       />
     </div>

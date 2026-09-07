@@ -1,23 +1,38 @@
 import { useQuery } from "@tanstack/react-query";
-import type { RefObject } from "react";
+import { useState, type RefObject } from "react";
 
 import { httpTone } from "@/features/access/access-format";
 import { apiClient } from "@/shared/api/client";
-import { withPathParams } from "@/shared/api/domains/access";
+import { withPathParams } from "@/shared/api/endpoint-factory";
 import { endpoints } from "@/shared/api/endpoints";
 import { isAppError } from "@/shared/api/error";
 import { LoadingState } from "@/shared/components/state/PageStates";
 import { Badge } from "@/shared/components/ui/Badge";
+import { EmptyState } from "@/shared/components/ui/EmptyState";
 import { InlineNotice } from "@/shared/components/ui/InlineNotice";
 import { JsonBlock } from "@/shared/components/ui/JsonBlock";
 import { KeyValueList } from "@/shared/components/ui/KeyValueList";
 import { SectionCard } from "@/shared/components/ui/SectionCard";
+import { Select } from "@/shared/components/ui/Select";
 import { Sheet } from "@/shared/components/ui/Sheet";
+import { StatCard, StatGrid } from "@/shared/components/ui/StatCard";
 import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
-import { formatDateTime, formatKRW, formatNumber } from "@/shared/utils/format";
+import {
+  formatDateTime,
+  formatDuration,
+  formatKRW,
+  formatNumber,
+  formatPercent,
+} from "@/shared/utils/format";
 
 const access = endpoints.domains.access;
 const routeId = "access.users";
+
+const reportWindows = [
+  { value: "7d", label: "최근 7일" },
+  { value: "30d", label: "최근 30일" },
+  { value: "24h", label: "최근 24시간" },
+] as const;
 
 interface UserDetailSheetProps {
   apiKeyId: string;
@@ -83,6 +98,18 @@ export function UserDetailSheet({
       }),
   });
 
+  const [reportWindow, setReportWindow] = useState("7d");
+  const report = useQuery({
+    queryKey: ["access", "users", "report", apiKeyId, reportWindow],
+    enabled: apiKeyId !== "",
+    queryFn: ({ signal }) =>
+      apiClient.request(withPathParams(access.users.report, { id: apiKeyId }), {
+        query: { window: reportWindow },
+        signal,
+        routeId,
+      }),
+  });
+
   const data = detail.data;
   const apiKey = (data?.api_key ?? {}) as Record<string, unknown>;
 
@@ -120,6 +147,67 @@ export function UserDetailSheet({
           />
           {data.stats ? <JsonBlock label="사용량 통계" value={data.stats} /> : null}
           {data.advanced ? <JsonBlock label="고급 지표" value={data.advanced} /> : null}
+          <SectionCard
+            title="활동 리포트"
+            headingLevel={3}
+            actions={
+              <label className="access-toolbar-field">
+                <span>기간</span>
+                <Select value={reportWindow} onChange={(event) => setReportWindow(event.target.value)}>
+                  {reportWindows.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </Select>
+              </label>
+            }
+          >
+            {report.isError ? (
+              <InlineNotice tone="warning" title="활동 리포트를 불러오지 못했습니다.">
+                {safeAppErrorMessage(report.error, "잠시 후 다시 시도하세요.")}
+                {isAppError(report.error) && report.error.requestId ? (
+                  <span className="request-id"> 요청 ID: {report.error.requestId}</span>
+                ) : null}
+              </InlineNotice>
+            ) : report.data ? (
+              <div className="access-stack">
+                <StatGrid label="활동 리포트 지표">
+                  <StatCard label="요청" value={formatNumber(report.data.requests)} />
+                  <StatCard
+                    label="오류율"
+                    tone={report.data.error_rate > 0.05 ? "warning" : "default"}
+                    value={report.data.error_rate < 0 ? "—" : formatPercent(report.data.error_rate)}
+                    hint={`오류 ${formatNumber(report.data.error_requests)}건`}
+                  />
+                  <StatCard label="비용" value={formatKRW(report.data.cost_krw)} />
+                  <StatCard label="평균 지연" value={formatDuration(report.data.average_latency_ms)} />
+                  <StatCard
+                    label="세션"
+                    value={formatNumber(report.data.sessions)}
+                    hint={`평균 ${formatDuration(report.data.average_session_seconds * 1000)}`}
+                  />
+                  <StatCard label="총 작업 시간" value={formatDuration(report.data.work_seconds * 1000)} />
+                </StatGrid>
+                <p className="access-note">
+                  {formatDateTime(report.data.window_start)} ~ {formatDateTime(report.data.window_end)}
+                </p>
+                {report.data.top_models.length === 0 ? (
+                  <EmptyState
+                    title="이 기간에는 기록이 없습니다."
+                    description="기간을 넓히거나 사용자가 요청을 보내면 리포트가 채워집니다."
+                  />
+                ) : (
+                  <BreakdownTable
+                    caption="리포트 상위 모델"
+                    label="모델"
+                    field={(row) => row.model}
+                    rows={report.data.top_models}
+                  />
+                )}
+              </div>
+            ) : null}
+          </SectionCard>
           <SectionCard title="모델별 사용" headingLevel={3}>
             <BreakdownTable
               caption="모델별 사용"

@@ -77,6 +77,40 @@ const upstreams = {
 
 const emptyUpstreams = { upstreams: [], discovery_errors: {} };
 
+const toolHandlers = {
+  "GET /admin/mcp/tools": () => ({
+    tools: [
+      {
+        server_label: "github",
+        tool_name: "create_issue",
+        is_mcp: true,
+        calls: 12,
+        errors: 1,
+        error_rate: 0.083,
+        distinct_keys: 2,
+        last_seen: "2026-09-06T10:00:00Z",
+      },
+    ],
+    tool_risk: [
+      {
+        server_label: "github",
+        tool_name: "create_issue",
+        access_class: "write",
+        risk_level: "high",
+        action: "require_approval",
+        recommended_action: "require_approval",
+        configured: false,
+        note: "",
+      },
+    ],
+    risk_profiles: [],
+    count: 1,
+  }),
+  "GET /admin/mcp/servers": () => ({ servers: [] }),
+  "GET /admin/mcp/catalog": () => ({ catalog: [], new_count: 0 }),
+  "GET /admin/mcp/trust-scores": () => ({ window_days: 30, count: 0, tools: [] }),
+};
+
 const baseHandlers = {
   "GET /admin/mcp/overview": () => overview,
   "GET /admin/mcp/routes": () => routes,
@@ -168,7 +202,7 @@ describe("McpPage", () => {
       enabled: true,
     });
     await waitFor(() => {
-      expect(toastSpy.success).toHaveBeenCalledWith("업스트림을 저장했습니다.");
+      expect(toastSpy.success).toHaveBeenCalledWith("업스트림을 등록했습니다.");
     });
   });
 
@@ -203,6 +237,128 @@ describe("McpPage", () => {
     await waitFor(() => {
       expect(toastSpy.success).toHaveBeenCalledWith("정책을 삭제했습니다.");
     });
+  });
+
+  it("업스트림을 수정하면 바꾼 항목만 PATCH로 보낸다", async () => {
+    const api = mockApi({
+      ...baseHandlers,
+      "GET /admin/mcp/upstreams/github/flow": () => ({ steps: [], discovery_runs: [], recent_requests: [] }),
+      "PATCH /admin/mcp/upstreams/github": () => ({
+        upstream: { ...upstreams.upstreams[0], name: "GitHub 도구" },
+      }),
+    });
+    const user = userEvent.setup();
+    renderPage("/mcp?tab=upstreams&upstream=github");
+
+    await user.click(await screen.findByRole("button", { name: "수정" }));
+    const dialog = await screen.findByRole("dialog", { name: "업스트림 수정" });
+    const nameInput = within(dialog).getByLabelText("표시 이름*");
+    await user.clear(nameInput);
+    await user.type(nameInput, "GitHub 도구");
+    await user.click(within(dialog).getByRole("button", { name: "저장" }));
+
+    // Only the changed field travels; the stored auth token is never resent or cleared.
+    await waitFor(() =>
+      expect(api.bodies("PATCH /admin/mcp/upstreams/github")).toEqual([{ name: "GitHub 도구" }]),
+    );
+    await waitFor(() => {
+      expect(toastSpy.success).toHaveBeenCalledWith("업스트림을 수정했습니다.");
+    });
+  });
+
+  it("연결 진단은 probe를 호출하고 찾은 도구를 보여 준다", async () => {
+    const api = mockApi({
+      ...baseHandlers,
+      "GET /admin/mcp/upstreams/github/flow": () => ({ steps: [], discovery_runs: [], recent_requests: [] }),
+      "GET /admin/mcp/upstreams/github/probe": () => ({
+        id: "github",
+        name: "GitHub MCP",
+        url: "https://mcp.example.com/mcp",
+        ok: true,
+        tool_count: 2,
+        prompt_count: 0,
+        resource_count: 1,
+        tools: [
+          { name: "create_issue", namespaced: "github__create_issue", description: "" },
+          { name: "list_repos", namespaced: "github__list_repos", description: "" },
+        ],
+        prompts: [],
+        resources: [{ uri: "repo://vibe", name: "vibe" }],
+        errors: {},
+      }),
+    });
+    const user = userEvent.setup();
+    renderPage("/mcp?tab=upstreams&upstream=github");
+
+    await user.click(await screen.findByRole("button", { name: "연결 진단" }));
+
+    await waitFor(() => {
+      expect(api.calls.some((call) => call.key === "GET /admin/mcp/upstreams/github/probe")).toBe(true);
+    });
+    expect(await screen.findByText("연결 정상")).toBeInTheDocument();
+    expect(screen.getByText("github__create_issue, github__list_repos")).toBeInTheDocument();
+  });
+
+  it("업스트림 사용을 확인 후 중지한다", async () => {
+    const api = mockApi({
+      ...baseHandlers,
+      "GET /admin/mcp/upstreams/github/flow": () => ({ steps: [], discovery_runs: [], recent_requests: [] }),
+      "PATCH /admin/mcp/upstreams/github": () => ({
+        upstream: { ...upstreams.upstreams[0], enabled: false },
+      }),
+    });
+    const user = userEvent.setup();
+    renderPage("/mcp?tab=upstreams&upstream=github");
+
+    await user.click(await screen.findByRole("button", { name: "사용 중지" }));
+    const confirm = await screen.findByRole("dialog", { name: "업스트림 사용을 중지할까요?" });
+    await user.click(within(confirm).getByRole("button", { name: "사용 중지" }));
+
+    await waitFor(() =>
+      expect(api.bodies("PATCH /admin/mcp/upstreams/github")).toEqual([{ enabled: false }]),
+    );
+  });
+
+  it("도구 위험 등급과 조치를 저장한다", async () => {
+    const api = mockApi({
+      ...baseHandlers,
+      ...toolHandlers,
+      "POST /admin/mcp/tools": () => ({
+        profile: { id: "trp_1", server_label: "github", tool_name: "create_issue" },
+      }),
+    });
+    const user = userEvent.setup();
+    renderPage("/mcp?tab=tools");
+
+    await user.click(await screen.findByRole("button", { name: "github create_issue 위험 등급 편집" }));
+    const dialog = await screen.findByRole("dialog", { name: "도구 위험 등급" });
+    await user.selectOptions(within(dialog).getByLabelText("위험 등급*"), "critical");
+    await user.selectOptions(within(dialog).getByLabelText("조치*"), "block");
+    await user.type(within(dialog).getByLabelText("메모"), "쓰기 도구");
+    await user.click(within(dialog).getByRole("button", { name: "저장" }));
+
+    await waitFor(() =>
+      expect(api.bodies("POST /admin/mcp/tools")).toEqual([
+        {
+          server_label: "github",
+          tool_name: "create_issue",
+          risk_level: "critical",
+          action: "block",
+          note: "쓰기 도구",
+        },
+      ]),
+    );
+    await waitFor(() => {
+      expect(toastSpy.success).toHaveBeenCalledWith("도구 위험 등급을 저장했습니다.");
+    });
+  });
+
+  it("권한이 없으면 도구 위험 등급 편집을 막는다", async () => {
+    authRuntime.scopes = ["admin:read"];
+    mockApi({ ...baseHandlers, ...toolHandlers });
+    renderPage("/mcp?tab=tools");
+
+    expect(await screen.findByRole("button", { name: "github create_issue 위험 등급 편집" })).toBeDisabled();
   });
 
   it("접근성 위반이 없다", async () => {

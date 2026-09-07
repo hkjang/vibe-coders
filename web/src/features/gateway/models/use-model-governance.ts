@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 
 import { apiClient } from "@/shared/api/client";
 import type { ModelContractWriteBody, ModelDeprecationWriteBody } from "@/shared/api/domains/gateway";
-import { withGatewayPathParams } from "@/shared/api/domains/gateway";
+import { withPathParams } from "@/shared/api/endpoint-factory";
 import { endpoints } from "@/shared/api/endpoints";
 import { useMutationFeedback } from "@/shared/hooks/use-mutation-feedback";
 
@@ -61,7 +61,7 @@ export function useModelGovernanceMutations() {
 
   const removeDeprecation = useMutationFeedback({
     mutate: (id: string) =>
-      apiClient.request(withGatewayPathParams(gateway.models.deprecations.remove, { id }), { routeId }),
+      apiClient.request(withPathParams(gateway.models.deprecations.remove, { id }), { routeId }),
     invalidates: [modelGovernanceKeys.deprecations, ["admin", "models"]],
     successMessage: "지원 종료 정책을 삭제했습니다.",
     errorMessage: "지원 종료 정책을 삭제하지 못했습니다.",

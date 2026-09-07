@@ -1,6 +1,9 @@
+import { useState } from "react";
+
 import { formatSignedRatio, httpTone, severityTone, statusTone } from "@/features/access/access-format";
 import { QueryNotice, UpdatedAt } from "@/features/access/access-ui";
 import {
+  teamQueryKeys,
   useTeamCandidatesQuery,
   useTeamDashboardQuery,
   useTeamOnboardingQuery,
@@ -9,13 +12,28 @@ import {
   useTeamSavingsQuery,
   useTeamSkillsQuery,
 } from "@/features/access/team/use-team-queries";
+import { useReturnFocus } from "@/shared/hooks/use-return-focus";
+import { apiClient } from "@/shared/api/client";
+import type { DecideTeamReportBody } from "@/shared/api/domains/access";
+import type { TeamReportRow } from "@/shared/api/domains/access.schemas";
+import { endpoints } from "@/shared/api/endpoints";
 import { LoadingState } from "@/shared/components/state/PageStates";
 import { Badge } from "@/shared/components/ui/Badge";
+import { Button } from "@/shared/components/ui/Button";
+import { ConfirmDialog } from "@/shared/components/ui/ConfirmDialog";
 import { EmptyState } from "@/shared/components/ui/EmptyState";
-import { InlineNotice } from "@/shared/components/ui/InlineNotice";
 import { SectionCard } from "@/shared/components/ui/SectionCard";
 import { StatCard, StatGrid } from "@/shared/components/ui/StatCard";
+import { useMutationFeedback } from "@/shared/hooks/use-mutation-feedback";
 import { formatDateTime, formatDuration, formatKRW, formatNumber, shortId } from "@/shared/utils/format";
+
+const access = endpoints.domains.access;
+const routeId = "team.home";
+
+interface ReportDecision {
+  report: TeamReportRow;
+  action: "approve" | "reject";
+}
 
 export function TeamDashboardTab({ team }: { team: string }): React.JSX.Element {
   const dashboard = useTeamDashboardQuery(team, true);
@@ -25,6 +43,16 @@ export function TeamDashboardTab({ team }: { team: string }): React.JSX.Element 
   const risk = useTeamRiskQuery(team, true);
   const skills = useTeamSkillsQuery(team, true);
   const candidates = useTeamCandidatesQuery(team, true);
+  const [deciding, setDeciding] = useState<ReportDecision | undefined>();
+  const { returnFocusRef: rowTrigger, remember: rememberRowTrigger } = useReturnFocus();
+
+  // `team:read` is the only scope the server checks; there is no separate write scope.
+  const decideReport = useMutationFeedback({
+    mutate: (body: DecideTeamReportBody) => apiClient.request(access.team.decideReport, { body, routeId }),
+    invalidates: [teamQueryKeys.reports],
+    successMessage: (result) =>
+      result.approval_status === "approved" ? "리포트를 승인했습니다." : "리포트를 반려했습니다.",
+  });
 
   if (dashboard.isPending && !dashboard.data) {
     return <LoadingState label="팀 대시보드를 불러오는 중입니다." />;
@@ -279,10 +307,6 @@ export function TeamDashboardTab({ team }: { team: string }): React.JSX.Element 
         title="팀 공용 리포트"
         description={`승인 대기 ${formatNumber(pendingReports.length)}건을 포함한 팀 리포트 목록입니다.`}
       >
-        <InlineNotice tone="info" title="승인과 반려는 기존 화면에서 하세요.">
-          이 UI 버전의 API 목록에 팀 리포트 승인·반려 경로가 포함되어 있지 않아 여기서는 조회만 할 수
-          있습니다.
-        </InlineNotice>
         {reports.isError ? (
           <QueryNotice
             error={reports.error}
@@ -309,6 +333,7 @@ export function TeamDashboardTab({ team }: { team: string }): React.JSX.Element 
                   <th scope="col">작성자</th>
                   <th scope="col">생성</th>
                   <th scope="col">최근 실행</th>
+                  <th scope="col">작업</th>
                 </tr>
               </thead>
               <tbody>
@@ -323,6 +348,42 @@ export function TeamDashboardTab({ team }: { team: string }): React.JSX.Element 
                     <td className="mono truncate">{shortId(row.created_by, 16)}</td>
                     <td>{formatDateTime(row.created_at)}</td>
                     <td>{row.last_run_at ? formatDateTime(row.last_run_at) : "—"}</td>
+                    <td>
+                      <div className="table-actions">
+                        <Button
+                          size="small"
+                          variant="primary"
+                          disabled={row.approval_status !== "pending"}
+                          title={
+                            row.approval_status === "pending"
+                              ? undefined
+                              : "승인 대기 중인 리포트만 결정할 수 있습니다."
+                          }
+                          onClick={(event) => {
+                            rememberRowTrigger(event.currentTarget);
+                            setDeciding({ report: row, action: "approve" });
+                          }}
+                        >
+                          승인
+                        </Button>
+                        <Button
+                          size="small"
+                          variant="danger"
+                          disabled={row.approval_status !== "pending"}
+                          title={
+                            row.approval_status === "pending"
+                              ? undefined
+                              : "승인 대기 중인 리포트만 결정할 수 있습니다."
+                          }
+                          onClick={(event) => {
+                            rememberRowTrigger(event.currentTarget);
+                            setDeciding({ report: row, action: "reject" });
+                          }}
+                        >
+                          반려
+                        </Button>
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -330,6 +391,28 @@ export function TeamDashboardTab({ team }: { team: string }): React.JSX.Element 
           </div>
         )}
       </SectionCard>
+
+      <ConfirmDialog
+        open={deciding !== undefined}
+        onOpenChange={(open) => {
+          if (!open) setDeciding(undefined);
+        }}
+        returnFocusRef={rowTrigger}
+        tone={deciding?.action === "reject" ? "danger" : "primary"}
+        title={deciding?.action === "reject" ? "리포트 반려" : "리포트 승인"}
+        description={
+          deciding?.action === "reject"
+            ? `'${deciding.report.name || deciding.report.id}' 리포트를 반려합니다. 작성자는 다시 제출해야 합니다.`
+            : `'${deciding?.report.name || deciding?.report.id || ""}' 리포트를 승인해 팀에 공개합니다.`
+        }
+        confirmLabel={deciding?.action === "reject" ? "반려" : "승인"}
+        onConfirm={async () => {
+          if (deciding) {
+            await decideReport.mutateAsync({ report_id: deciding.report.id, action: deciding.action });
+          }
+          setDeciding(undefined);
+        }}
+      />
 
       <UpdatedAt at={dashboard.dataUpdatedAt} />
     </div>

@@ -30,13 +30,56 @@
   white-space: pre-wrap;
   word-break: break-word;
   padding: var(--space-3, 12px);
-  border: 1px solid var(--color-border, #d5d8de);
+  border: 1px solid var(--color-border);
   border-radius: 6px;
-  background: var(--color-surface-muted, #f6f7f9);
+  background: var(--color-card-raised);
 }
 
 .prompt-tag-list {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-1, 4px);
+}
+
+.prompt-history-log {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2, 8px);
+  padding-left: var(--space-3, 12px);
+  border-left: 2px solid var(--color-border);
+}
+
+.prompt-history-entry {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2, 8px);
+  align-items: baseline;
+}
+
+.prompt-history-meta {
+  color: var(--color-muted);
+  font-size: 0.75rem;
+}
+
+.prompt-diff {
+  max-height: 240px;
+  overflow: auto;
+  margin: 0;
+  padding: var(--space-2, 8px);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-card-raised);
+  font-size: 0.75rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.prompt-diff-added {
+  display: block;
+  color: var(--color-success);
+}
+
+.prompt-diff-removed {
+  display: block;
+  color: var(--color-danger);
 }

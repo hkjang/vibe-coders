@@ -656,6 +656,9 @@ export type UiBootstrapResponse = {
     api_version: string;
     authentication: UiAuthentication;
     backend_version: string;
+    capabilities: {
+        raw_prompt_view: boolean;
+    };
     legacy_route_map: {
         [key: string]: string;
     };

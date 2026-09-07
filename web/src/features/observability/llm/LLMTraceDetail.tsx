@@ -1,7 +1,14 @@
 import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
 
+import {
+  canInspectRawRequest,
+  canWriteRequestNote,
+} from "@/features/observability/request-insight/request-access";
+import { RequestInsightPanel } from "@/features/observability/request-insight/RequestInsightPanel";
+import { useAuth } from "@/app/auth/AuthProvider";
 import { apiClient } from "@/shared/api/client";
-import { withObservabilityPath } from "@/shared/api/domains/observability";
+import { withPathParams } from "@/shared/api/endpoint-factory";
 import { endpoints } from "@/shared/api/endpoints";
 import { isAppError } from "@/shared/api/error";
 import { Badge } from "@/shared/components/ui/Badge";
@@ -36,13 +43,17 @@ export function LLMTraceDetail({
   requestId,
   writeDeniedReason,
 }: LLMTraceDetailProps): React.JSX.Element {
+  const auth = useAuth();
+  // The explanation and its actions are fetched only when the operator asks for
+  // them: the analysis and replay answers can quote the captured prompt.
+  const [insightOpen, setInsightOpen] = useState(false);
   const detail = useQuery({
     queryKey: ["observability", "llm", "trace", requestId],
     queryFn: ({ signal }) =>
-      apiClient.request(
-        withObservabilityPath(endpoints.domains.observability.llm.traceDetail, { id: requestId }),
-        { signal, routeId: "observability.llm.trace" },
-      ),
+      apiClient.request(withPathParams(endpoints.domains.observability.llm.traceDetail, { id: requestId }), {
+        signal,
+        routeId: "observability.llm.trace",
+      }),
     enabled: requestId !== "",
     staleTime: 30_000,
   });
@@ -106,6 +117,31 @@ export function LLMTraceDetail({
           { label: "발생 시각", value: formatDateTime(request.created_at) },
         ]}
       />
+
+      <SectionCard
+        headingLevel={3}
+        title="원인 설명과 조치"
+        description="이 호출이 느리거나 비쌌던 이유, 운영 메모, 모델 분석과 재실행입니다."
+        actions={
+          <Button size="small" onClick={() => setInsightOpen((current) => !current)}>
+            {insightOpen ? "접기" : "원인 설명 열기"}
+          </Button>
+        }
+      >
+        {insightOpen ? (
+          <RequestInsightPanel
+            key={request.id}
+            requestId={request.id}
+            canInspectRaw={canInspectRawRequest(auth)}
+            canWriteNote={canWriteRequestNote(auth)}
+          />
+        ) : (
+          <p className="obs-meta">
+            원인 설명에는 업스트림 오류 원문이, 분석·재실행 결과에는 프롬프트 내용이 포함될 수 있어 열었을
+            때만 불러옵니다.
+          </p>
+        )}
+      </SectionCard>
 
       <SectionCard headingLevel={3} title="코드 검증">
         {codeVerify ? (

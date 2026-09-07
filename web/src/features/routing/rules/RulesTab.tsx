@@ -6,11 +6,8 @@ import { z } from "zod";
 import { routingRulesQueryKey, writeScopeMessage } from "@/features/routing/rules/routing-shared";
 import { QueryFailureNotice, ScopeNotice } from "@/features/routing/rules/routing-ui";
 import { apiClient } from "@/shared/api/client";
-import {
-  routingRuleDeleteEndpoint,
-  type RoutingRule,
-  type RoutingRuleInput,
-} from "@/shared/api/domains/routing";
+import { type RoutingRule, type RoutingRuleInput } from "@/shared/api/domains/routing";
+import { withPathParams } from "@/shared/api/endpoint-factory";
 import { endpoints } from "@/shared/api/endpoints";
 import { FormDialog } from "@/shared/components/form/FormDialog";
 import { FormField } from "@/shared/components/form/FormField";
@@ -29,6 +26,11 @@ import { formatDateTime } from "@/shared/utils/format";
 
 const pageSize = 10;
 
+/** How a rule is named in confirmations and accessible action labels. */
+function ruleLabel(rule: RoutingRule): string {
+  return `${rule.match_pattern || "*"} → ${rule.target_model}`;
+}
+
 const ruleFormSchema = z.object({
   match_pattern: z.string().trim().max(200),
   target_model: z.string().trim().min(1, "대상 모델을 입력하세요."),
@@ -42,9 +44,14 @@ const ruleFormSchema = z.object({
 type RuleFormInput = z.input<typeof ruleFormSchema>;
 type RuleFormValues = z.output<typeof ruleFormSchema>;
 
+interface RuleRowActions {
+  onDelete: (rule: RoutingRule, trigger: HTMLButtonElement) => void;
+  onToggle: (rule: RoutingRule, trigger: HTMLButtonElement) => void;
+}
+
 function ruleColumns(
   canWrite: boolean,
-  onDelete: (rule: RoutingRule, trigger: HTMLButtonElement) => void,
+  actions: RuleRowActions,
 ): ReadonlyArray<DataTableColumn<RoutingRule>> {
   const column = createDataTableColumnHelper<RoutingRule>();
   return column.columns([
@@ -97,16 +104,28 @@ function ruleColumns(
       id: "actions",
       header: "작업",
       cell: ({ row }) => (
-        <Button
-          size="small"
-          variant="ghost"
-          aria-label={`${row.original.match_pattern || "*"} → ${row.original.target_model} 규칙 삭제`}
-          disabled={!canWrite}
-          title={canWrite ? undefined : writeScopeMessage}
-          onClick={(event) => onDelete(row.original, event.currentTarget)}
-        >
-          삭제
-        </Button>
+        <div className="routing-tab-actions">
+          <Button
+            size="small"
+            variant="ghost"
+            aria-label={`${ruleLabel(row.original)} 규칙 ${row.original.enabled ? "중지" : "사용"}`}
+            disabled={!canWrite}
+            title={canWrite ? undefined : writeScopeMessage}
+            onClick={(event) => actions.onToggle(row.original, event.currentTarget)}
+          >
+            {row.original.enabled ? "중지" : "사용"}
+          </Button>
+          <Button
+            size="small"
+            variant="ghost"
+            aria-label={`${ruleLabel(row.original)} 규칙 삭제`}
+            disabled={!canWrite}
+            title={canWrite ? undefined : writeScopeMessage}
+            onClick={(event) => actions.onDelete(row.original, event.currentTarget)}
+          >
+            삭제
+          </Button>
+        </div>
       ),
     }),
   ]);
@@ -116,8 +135,10 @@ export function RulesTab({ canWrite }: { canWrite: boolean }): React.JSX.Element
   const [searchParams, updateSearch] = useSearchState();
   const [createOpen, setCreateOpen] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<RoutingRule>();
+  const [pendingToggle, setPendingToggle] = useState<RoutingRule>();
   const createTrigger = useRef<HTMLButtonElement>(null);
   const [deleteTrigger, setDeleteTrigger] = useState<HTMLElement | null>(null);
+  const [toggleTrigger, setToggleTrigger] = useState<HTMLElement | null>(null);
 
   const rules = useQuery({
     queryKey: routingRulesQueryKey,
@@ -143,10 +164,21 @@ export function RulesTab({ canWrite }: { canWrite: boolean }): React.JSX.Element
   });
 
   const deleteRule = useMutationFeedback<string, unknown>({
-    mutate: (id) => apiClient.request(routingRuleDeleteEndpoint(id)),
+    mutate: (id) => apiClient.request(withPathParams(endpoints.domains.routing.rules.remove, { id })),
     invalidates: [routingRulesQueryKey],
     successMessage: "라우팅 규칙을 삭제했습니다.",
     errorMessage: "라우팅 규칙을 삭제하지 못했습니다.",
+  });
+
+  const toggleRule = useMutationFeedback<{ id: string; enabled: boolean }, unknown>({
+    mutate: ({ enabled, id }) =>
+      apiClient.request(withPathParams(endpoints.domains.routing.rules.update, { id }), {
+        body: { enabled },
+      }),
+    invalidates: [routingRulesQueryKey],
+    successMessage: (_result, variables) =>
+      variables.enabled ? "규칙을 다시 사용합니다." : "규칙 사용을 중지했습니다.",
+    errorMessage: "규칙 상태를 바꾸지 못했습니다.",
   });
 
   const rows = [...(rules.data?.rules ?? [])].sort(
@@ -187,9 +219,15 @@ export function RulesTab({ canWrite }: { canWrite: boolean }): React.JSX.Element
       >
         <DataTable
           caption="복잡도 기반 라우팅 규칙 목록"
-          columns={ruleColumns(canWrite, (rule, trigger) => {
-            setDeleteTrigger(trigger);
-            setPendingDelete(rule);
+          columns={ruleColumns(canWrite, {
+            onDelete: (rule, trigger) => {
+              setDeleteTrigger(trigger);
+              setPendingDelete(rule);
+            },
+            onToggle: (rule, trigger) => {
+              setToggleTrigger(trigger);
+              setPendingToggle(rule);
+            },
           })}
           data={pageRows}
           emptyMessage="등록된 라우팅 규칙이 없습니다. 규칙을 추가하면 복잡도에 따라 모델을 자동으로 바꿉니다."
@@ -202,8 +240,7 @@ export function RulesTab({ canWrite }: { canWrite: boolean }): React.JSX.Element
           pageIndex={page - 1}
         />
         <p className="routing-meta">
-          규칙 사용/중지 전환은 이 콘솔에서 지원하지 않습니다(서버 API가 OpenAPI 계약에 없음). 기존 화면 설정
-          센터에서 전환하세요.
+          중지한 규칙은 라우팅에서 건너뛰며, 다시 사용으로 바꾸면 우선순위대로 즉시 적용됩니다.
         </p>
       </SectionCard>
 
@@ -273,6 +310,33 @@ export function RulesTab({ canWrite }: { canWrite: boolean }): React.JSX.Element
           {(control) => <Textarea {...control} rows={2} {...form.register("note")} />}
         </FormField>
       </FormDialog>
+
+      <ConfirmDialog
+        confirmLabel={pendingToggle?.enabled ? "중지" : "사용"}
+        description={
+          pendingToggle
+            ? `${ruleLabel(pendingToggle)} 규칙을 ${pendingToggle.enabled ? "중지" : "다시 사용"}합니다.`
+            : "라우팅 규칙 상태를 바꿉니다."
+        }
+        onConfirm={async () => {
+          if (pendingToggle) {
+            await toggleRule.mutateAsync({ id: pendingToggle.id, enabled: !pendingToggle.enabled });
+          }
+        }}
+        onOpenChange={(open) => {
+          if (!open) setPendingToggle(undefined);
+        }}
+        open={pendingToggle !== undefined}
+        returnFocusRef={{ current: toggleTrigger }}
+        title={pendingToggle?.enabled ? "라우팅 규칙 중지" : "라우팅 규칙 사용"}
+        tone={pendingToggle?.enabled ? "danger" : "primary"}
+      >
+        <p>
+          {pendingToggle?.enabled
+            ? "중지하면 이 규칙에 걸리던 요청은 다음 우선순위 규칙 또는 기본 라우팅을 따릅니다."
+            : "다시 사용하면 조건이 맞는 요청이 이 규칙의 대상 모델로 바로 이동합니다."}
+        </p>
+      </ConfirmDialog>
 
       <ConfirmDialog
         confirmLabel="삭제"

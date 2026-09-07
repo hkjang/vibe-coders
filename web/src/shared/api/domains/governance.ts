@@ -3,13 +3,14 @@
 // (see "@/shared/api/loose" for legacy responses without a documented shape).
 import { z } from "zod";
 
-import { operation, type OperationData, type WithQuery } from "@/shared/api/endpoint-factory";
+import { operation, type WithBody, type WithQuery } from "@/shared/api/endpoint-factory";
 import type {
   DeleteAdminAlertsIdData,
   DeleteAdminModelDeprecationsIdData,
   DeleteAdminPoliciesRegressionCasesData,
   GetAdminAlertsData,
   GetAdminApprovalsData,
+  GetAdminCostData,
   GetAdminIncidentsData,
   GetAdminKillSwitchData,
   GetAdminModelDeprecationsData,
@@ -20,9 +21,11 @@ import type {
   GetAdminPolicyAdvisorSuggestionsData,
   GetAdminRemediationPlaybooksData,
   GetAdminSecuritySecretsData,
+  PatchAdminAlertsIdData,
   PostAdminAlertsData,
   PostAdminApprovalsIdApproveData,
   PostAdminApprovalsIdRejectData,
+  PostAdminCostData,
   PostAdminKillSwitchData,
   PostAdminModelDeprecationsData,
   PostAdminPoliciesData,
@@ -33,13 +36,6 @@ import type {
   PostAdminRemediationApplyData,
 } from "@/shared/api/generated";
 import { looseList, looseObject, numberish, unknownRecord } from "@/shared/api/loose";
-
-/**
- * The generated operation types declare `body?: never` for the legacy admin
- * routes, which would make the typed client refuse a request body. Each mutation
- * below restates the body the Go handler decodes.
- */
-type WithBody<Data extends OperationData, Body> = Omit<Data, "body"> & { readonly body: Body };
 
 // ---------- kill switch ----------
 
@@ -102,6 +98,27 @@ export interface AlertRuleBody {
   readonly scope_value: string;
   readonly webhook_url: string;
   readonly note: string;
+}
+
+/** Partial edit of a rule (`PATCH /admin/alerts/{id}`): only sent fields change. */
+export interface AlertRuleUpdateBody {
+  readonly threshold?: number;
+  readonly enabled?: boolean;
+  readonly webhook_url?: string;
+  readonly note?: string;
+}
+
+// ---------- cost guard (legacy `#/safety`) ----------
+
+const costGuardSchema = looseObject({
+  enabled: z.boolean().optional(),
+  threshold_krw: numberish.optional(),
+});
+export type CostGuard = z.infer<typeof costGuardSchema>;
+
+export interface CostGuardBody {
+  readonly enabled: boolean;
+  readonly threshold_krw: number;
 }
 
 // ---------- policy engine ----------
@@ -507,10 +524,23 @@ export const governanceEndpoints = {
       "/admin/alerts",
       looseObject({ rule: alertRuleSchema.optional() }),
     ),
+    update: operation<WithBody<PatchAdminAlertsIdData, AlertRuleUpdateBody>, unknown>()(
+      "PATCH",
+      "/admin/alerts/{id}",
+      looseObject({ rule: alertRuleSchema.optional() }),
+    ),
     remove: operation<DeleteAdminAlertsIdData, unknown>()(
       "DELETE",
       "/admin/alerts/{id}",
       looseObject({ id: z.string().optional(), status: z.string().optional() }),
+    ),
+  },
+  costGuard: {
+    get: operation<GetAdminCostData, unknown>()("GET", "/admin/cost", costGuardSchema),
+    save: operation<WithBody<PostAdminCostData, CostGuardBody>, unknown>()(
+      "POST",
+      "/admin/cost",
+      costGuardSchema,
     ),
   },
   policies: {

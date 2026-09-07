@@ -83,6 +83,54 @@ function handlers(overrides: Record<string, () => unknown> = {}) {
   };
 }
 
+const myKeys = {
+  api_keys: [
+    {
+      id: "key_mine",
+      name: "노트북",
+      owner: "",
+      team: "platform",
+      user_id: "usr_1",
+      role: "developer",
+      status: "active",
+      scopes: ["chat:completion"],
+      allowed_ips: [],
+      expires_at: "",
+      created_at: "2026-08-01T00:00:00Z",
+    },
+  ],
+  role: "developer",
+  grantable_scopes: ["chat:completion", "models:read"],
+};
+
+const skills = {
+  team: "platform",
+  available: [
+    {
+      name: "code-review",
+      description: "코드 리뷰 보조",
+      risk_level: "low",
+      runs_30d: 120,
+      success_rate: 0.98,
+      users_30d: 12,
+      satisfaction: 4.3,
+      feedback_count: 9,
+    },
+  ],
+  requestable: [
+    {
+      name: "prod-deploy",
+      description: "배포 자동화",
+      risk_level: "high",
+      runs_30d: 0,
+      success_rate: -1,
+      users_30d: 0,
+      satisfaction: -1,
+      feedback_count: 0,
+    },
+  ],
+};
+
 describe("MePage", () => {
   it("renders the personal dashboard without admin scopes", async () => {
     mockApi(handlers());
@@ -175,6 +223,93 @@ describe("MePage", () => {
       expect(api.bodies("POST /me/keys")).toEqual([{ name: "노트북" }]);
     });
     expect(await screen.findByText("vc_sk_plaintext_once")).toBeVisible();
+  });
+
+  it("edits a key's scopes, sending an empty array to inherit the role", async () => {
+    const user = userEvent.setup();
+    const api = mockApi({
+      ...handlers(),
+      "GET /me/keys": () => myKeys,
+      "GET /me/sessions": () => ({ current_session_id: "", sessions: [] }),
+      "PATCH /me/keys/key_mine": () => ({ id: "key_mine", scopes: [] }),
+    });
+    renderScreen(<MePage />, { path: "/me/*", route: "/me?tab=keys" });
+
+    await user.click(await screen.findByRole("button", { name: "스코프 수정" }));
+    const dialog = await screen.findByRole("dialog");
+    await user.click(within(dialog).getByLabelText("chat:completion"));
+    await user.click(within(dialog).getByRole("button", { name: "저장" }));
+
+    await waitFor(() => {
+      expect(api.bodies("PATCH /me/keys/key_mine")).toEqual([{ scopes: [] }]);
+    });
+  });
+
+  it("rotates a key after confirmation and shows the new secret once", async () => {
+    const user = userEvent.setup();
+    const api = mockApi({
+      ...handlers(),
+      "GET /me/keys": () => myKeys,
+      "GET /me/sessions": () => ({ current_session_id: "", sessions: [] }),
+      "POST /me/keys/key_mine/rotate": () => ({
+        rotated_from: "key_mine",
+        api_key: { id: "key_new", name: "노트북", scopes: ["chat:completion"], status: "active" },
+        secret: "vc_sk_rotated_once",
+      }),
+    });
+    renderScreen(<MePage />, { path: "/me/*", route: "/me?tab=keys" });
+
+    await user.click(await screen.findByRole("button", { name: "회전" }));
+    const confirm = await screen.findByRole("dialog");
+    await user.click(within(confirm).getByRole("button", { name: "회전" }));
+
+    await waitFor(() => {
+      expect(api.calls.filter((call) => call.key === "POST /me/keys/key_mine/rotate")).toHaveLength(1);
+    });
+    expect(await screen.findByText("vc_sk_rotated_once")).toBeVisible();
+  });
+
+  it("requests access to a skill with a reason", async () => {
+    const user = userEvent.setup();
+    const api = mockApi({
+      ...handlers(),
+      "GET /me/skills": () => skills,
+      "POST /me/skills/prod-deploy/request-access": () => ({ status: "requested", skill: "prod-deploy" }),
+    });
+    renderScreen(<MePage />, { path: "/me/*", route: "/me?tab=skills" });
+
+    await user.click(await screen.findByRole("button", { name: "접근 신청" }));
+    const dialog = await screen.findByRole("dialog");
+    await user.type(within(dialog).getByLabelText(/신청 사유/u), "배포 담당");
+    await user.click(within(dialog).getByRole("button", { name: "신청" }));
+
+    await waitFor(() => {
+      expect(api.bodies("POST /me/skills/prod-deploy/request-access")).toEqual([{ reason: "배포 담당" }]);
+    });
+  });
+
+  it("sends skill feedback in the 1..5 range", async () => {
+    const user = userEvent.setup();
+    const api = mockApi({
+      ...handlers(),
+      "GET /me/skills": () => skills,
+      "POST /me/skills/code-review/feedback": () => ({ status: "recorded", skill: "code-review" }),
+    });
+    const { container } = renderScreen(<MePage />, { path: "/me/*", route: "/me?tab=skills" });
+
+    await screen.findByText("code-review");
+    expect((await axe.run(container)).violations).toEqual([]);
+    await user.click(screen.getByRole("button", { name: "평가하기" }));
+    const dialog = await screen.findByRole("dialog");
+    await user.selectOptions(within(dialog).getByLabelText(/점수/u), "4");
+    await user.type(within(dialog).getByLabelText("의견"), "도움이 됩니다");
+    await user.click(within(dialog).getByRole("button", { name: "평가 보내기" }));
+
+    await waitFor(() => {
+      expect(api.bodies("POST /me/skills/code-review/feedback")).toEqual([
+        { rating: 4, comment: "도움이 됩니다" },
+      ]);
+    });
   });
 
   it("has no automated accessibility violations", async () => {

@@ -70,6 +70,28 @@ export const adminUserDetailSchema = looseObject({
 });
 export type AdminUserDetail = z.output<typeof adminUserDetailSchema>;
 
+// GET /admin/users/{id}/report is a flat object, not wrapped in a envelope.
+export const adminUserReportSchema = looseObject({
+  api_key_id: text,
+  name: text,
+  owner: text,
+  team: text,
+  window_start: text,
+  window_end: text,
+  requests: count,
+  tokens: count,
+  cost_krw: count,
+  average_latency_ms: count,
+  error_requests: count,
+  error_rate: ratio,
+  sessions: count,
+  work_seconds: count,
+  average_session_seconds: count,
+  top_models: list({ model: text, requests: count, tokens: count, cost_krw: count }),
+  top_languages: list({ language: text, requests: count }),
+  daily: list({ day: text, requests: count, tokens: count, cost_krw: count }),
+});
+
 export const benchmarkUsersSchema = looseObject({
   users: list({
     api_key_id: text,
@@ -221,9 +243,9 @@ export const adminQuotasSchema = looseObject({
   usage: orDefault(z.array(quotaUsageSchema), []),
 });
 
-// POST /admin/quotas returns the Go struct without json tags, so the fields keep
-// their exported Go names. This is deliberate, not a typo.
-export const quotaCreatedSchema = looseObject({
+// POST and PATCH /admin/quotas return the Go struct without json tags, so the
+// fields keep their exported Go names. This is deliberate, not a typo.
+export const quotaSavedSchema = looseObject({
   quota: looseObject({
     ID: text,
     Scope: text,
@@ -282,6 +304,22 @@ export const budgetAlertsSchema = looseObject({
   thresholds: looseObject({ warn: count, critical: count }).nullish(),
 });
 
+export const budgetProjectionSchema = looseObject({
+  exceeding: count,
+  teams: list({
+    team: text,
+    spent_krw: count,
+    projected_krw: count,
+    budget_krw: count,
+    has_budget: orDefault(z.boolean(), false),
+    will_exceed: orDefault(z.boolean(), false),
+    projected_overage_krw: count,
+    days_elapsed: count,
+    days_in_month: count,
+  }),
+});
+export type BudgetProjectionRow = z.output<typeof budgetProjectionSchema>["teams"][number];
+
 /* --------------------------------------------------------------- api keys */
 
 export const apiKeyPublicSchema = looseObject({
@@ -325,6 +363,24 @@ export const apiKeyCreatedSchema = looseObject({
   secret: text,
 });
 
+// PATCH /me/keys/{id} answers with the stored scopes only, not the whole key.
+export const meKeyScopesSchema = looseObject({ id: text, scopes: stringList });
+
+// POST /me/keys/{id}/rotate issues a replacement and revokes the old id. The
+// rotated key carries no `team` field, unlike the create response.
+export const meKeyRotatedSchema = looseObject({
+  rotated_from: text,
+  api_key: looseObject({
+    id: z.string(),
+    name: text,
+    user_id: text,
+    role: text,
+    scopes: stringList,
+    status: text,
+  }).nullish(),
+  secret: text,
+});
+
 export const apiKeyUpdatedSchema = looseObject({
   id: text,
   name: text,
@@ -354,6 +410,8 @@ export const adminRolesSchema = looseObject({
 });
 
 export const roleSavedSchema = looseObject({ role: roleSchema.nullish() });
+
+export const roleDeletedSchema = looseObject({ role: text, deleted: orDefault(z.boolean(), false) });
 
 export const effectivePermissionsSchema = looseObject({
   role: text,
@@ -563,6 +621,10 @@ export const meSkillsSchema = looseObject({
   requestable: list(meSkillSchema),
 });
 
+export type MeSkill = z.output<typeof meSkillsSchema>["available"][number];
+
+export const meSkillActionSchema = looseObject({ status: text, skill: text });
+
 export const meSessionsSchema = looseObject({
   current_session_id: text,
   sessions: list({
@@ -693,6 +755,10 @@ export const teamReportsSchema = looseObject({
     approved_at: text,
   }),
 });
+
+export type TeamReportRow = z.output<typeof teamReportsSchema>["reports"][number];
+
+export const teamReportDecisionSchema = looseObject({ report_id: text, approval_status: text });
 
 export const teamSavingsChallengeSchema = looseObject({
   team_id: text,

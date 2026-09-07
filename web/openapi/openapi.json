@@ -2633,6 +2633,18 @@
           "backend_version": {
             "type": "string"
           },
+          "capabilities": {
+            "additionalProperties": false,
+            "properties": {
+              "raw_prompt_view": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "raw_prompt_view"
+            ],
+            "type": "object"
+          },
           "legacy_route_map": {
             "additionalProperties": {
               "type": "string"
@@ -2683,6 +2695,7 @@
           "authentication",
           "roles",
           "permissions",
+          "capabilities",
           "allowed_features",
           "migration_registry",
           "system_status",
