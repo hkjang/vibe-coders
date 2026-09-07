@@ -70,3 +70,63 @@ func TestBuildReportContractIntact(t *testing.T) {
 		t.Fatalf("expected /v1/ghost flagged as sdk_only, got %v", rep2.SDKOnly)
 	}
 }
+
+func TestStaticPrefix(t *testing.T) {
+	cases := map[string]string{
+		"/admin/settings/by-key/":      "/admin/settings/by-key", // legacy concatenation
+		"/admin/settings/by-key/{key}": "/admin/settings/by-key", // React template
+		"/admin/users":                 "/admin/users",           // no variable part
+		"/admin/teams/{id}/members":    "/admin/teams",           // stops at the first variable
+	}
+	for in, want := range cases {
+		if got := staticPrefix(in); got != want {
+			t.Errorf("staticPrefix(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestConsoleCovered(t *testing.T) {
+	app := []string{
+		"/admin/users",
+		"/admin/settings/by-key/{key}",
+		"/admin/teams/{id}/members",
+	}
+	cases := []struct {
+		legacy string
+		want   bool
+	}{
+		{"/admin/users", true},               // same endpoint
+		{"/admin/settings/by-key/", true},    // concatenation vs template spelling
+		{"/admin/teams/", true},              // the app path continues past where the legacy one stops
+		{"/admin/legacy-only-widget", false}, // only the legacy console calls it
+		{"/admin/users-report", false},       // shares a prefix but is a different endpoint
+	}
+	for _, c := range cases {
+		if got := consoleCovered(c.legacy, app); got != c.want {
+			t.Errorf("consoleCovered(%q) = %v, want %v", c.legacy, got, c.want)
+		}
+	}
+}
+
+// A feature added to the legacy console alone reopens the migration gap, so it must fail the audit.
+func TestConsoleParityFlagsLegacyOnlyEndpoint(t *testing.T) {
+	legacyUI := `
+		api('/admin/users?limit=50')
+		api('/admin/settings/by-key/' + encodeURIComponent(key))
+		api('/admin/legacy-only-widget')
+	`
+	appUI := []string{
+		`endpoint("GET", "/admin/users", schema)`,
+		"const byKey = `/admin/settings/by-key/{key}`;",
+	}
+	legacy, app, gaps := consoleParity(legacyUI, appUI)
+	if len(legacy) != 3 {
+		t.Fatalf("legacy console paths = %v", legacy)
+	}
+	if len(app) != 2 {
+		t.Fatalf("app console paths = %v", app)
+	}
+	if len(gaps) != 1 || gaps[0] != "/admin/legacy-only-widget" {
+		t.Fatalf("console parity gaps = %v, want only /admin/legacy-only-widget", gaps)
+	}
+}

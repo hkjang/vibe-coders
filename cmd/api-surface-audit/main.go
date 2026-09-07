@@ -3,13 +3,19 @@
 // registers. It exists so a server route rename can't silently break the published client
 // contract: run `go run ./cmd/api-surface-audit` (CI fails on a contract break).
 //
+// It also audits console parity: every /admin endpoint the legacy console calls must also be
+// bound in the React console's API layer under /app. That is endpoint coverage, not a claim about
+// which control invokes it — but it is enough to catch the regression that matters, a feature
+// added to the legacy console alone, quietly reopening the migration gap the /app port closed.
+//
 // It is deliberately a static analyzer (no server boot): it greps mux.HandleFunc registrations,
-// the apiEndpoints OpenAPI catalog, and the path literals in the CLI/SDK sources.
+// the apiEndpoints OpenAPI catalog, and the path literals in the CLI/SDK/console sources.
 package main
 
 import (
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -26,6 +32,10 @@ type auditReport struct {
 	SDKOnly        []string `json:"sdk_only_methods"`    // SDK calls a path no server route serves (FAIL)
 	OpenAPIMissing []string `json:"openapi_missing"`     // server route absent from the OpenAPI catalog (warn)
 	StaleDocs      []string `json:"undocumented_routes"` // OpenAPI entry with no matching server route (warn)
+
+	LegacyConsolePaths []string `json:"legacy_console_paths"`
+	AppConsolePaths    []string `json:"app_console_paths"`
+	ConsoleParityGaps  []string `json:"console_parity_gaps"` // legacy console endpoint the React console never binds (FAIL)
 }
 
 var (
@@ -33,6 +43,10 @@ var (
 	reOpenAPI    = regexp.MustCompile(`\{"(/[^"]*)",\s*\[\]string\{`)
 	reClientGo   = regexp.MustCompile(`"(/(?:v1|me|mcp)[^"]*)"`)
 	reClientTS   = regexp.MustCompile("[\"`](/(?:v1|me|mcp)[^\"`]*)[\"`]")
+	// Console endpoints. The legacy console is JavaScript inside a Go string literal and quotes
+	// its paths with ', so it never uses backticks; the React sources use all three quote styles.
+	reLegacyAdmin = regexp.MustCompile(`['"](/admin/[^'"?#]*)`)
+	reAppAdmin    = regexp.MustCompile("['\"`](/admin/[^'\"`?#]*)")
 )
 
 func uniqueSorted(in []string) []string {
@@ -107,6 +121,49 @@ func docRegistered(doc string, routes []string) bool {
 	return false
 }
 
+// staticPrefix reduces an endpoint to the part that is fixed. Both consoles build paths around a
+// variable segment — the legacy one by concatenation ("/admin/settings/by-key/" + key), the React
+// one with a template ("/admin/settings/by-key/{key}") — so only the text before the variable can
+// be compared.
+func staticPrefix(path string) string {
+	if i := strings.Index(path, "{"); i >= 0 {
+		path = path[:i]
+	}
+	return strings.TrimRight(path, "/")
+}
+
+// consoleCovered reports whether the React console binds a legacy console endpoint. An app path
+// covers a legacy one when their static prefixes are equal, or when the app path continues past
+// the point where the legacy path stops building (the legacy prefix + a concatenated segment).
+func consoleCovered(legacyPath string, appPaths []string) bool {
+	prefix := staticPrefix(legacyPath)
+	for _, a := range appPaths {
+		app := staticPrefix(a)
+		if app == prefix || strings.HasPrefix(app, prefix+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+// consoleParity extracts both consoles' /admin endpoints and returns the legacy ones the React
+// console never binds. The React console may bind more (it does — its screens split work the
+// legacy console did in one view); only the reverse direction is a migration gap.
+func consoleParity(legacyUISrc string, appUISrcs []string) (legacy, app, gaps []string) {
+	legacy = uniqueSorted(extractMatches(reLegacyAdmin, legacyUISrc))
+	appPaths := []string{}
+	for _, s := range appUISrcs {
+		appPaths = append(appPaths, extractMatches(reAppAdmin, s)...)
+	}
+	app = uniqueSorted(appPaths)
+	for _, p := range legacy {
+		if !consoleCovered(p, app) {
+			gaps = append(gaps, p)
+		}
+	}
+	return legacy, app, gaps
+}
+
 func buildReport(serverSrcs []string, openapiSrc, cliSrc, sdkSrc string) auditReport {
 	routes := []string{}
 	for _, s := range serverSrcs {
@@ -176,6 +233,26 @@ func main() {
 		read(filepath.Join("cmd", "vibe", "main.go")),
 		read(filepath.Join("sdk", "typescript", "vibe.ts")))
 
+	appUISrcs := []string{}
+	appUIRoot := filepath.Join(root, "web", "src")
+	err := filepath.WalkDir(appUIRoot, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		if ext := filepath.Ext(path); ext != ".ts" && ext != ".tsx" {
+			return nil
+		}
+		if b, err := os.ReadFile(path); err == nil {
+			appUISrcs = append(appUISrcs, string(b))
+		}
+		return nil
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: cannot walk %s: %v\n", appUIRoot, err)
+	}
+	rep.LegacyConsolePaths, rep.AppConsolePaths, rep.ConsoleParityGaps = consoleParity(
+		read(filepath.Join("internal", "proxy", "admin_ui.go")), appUISrcs)
+
 	if jsonOut {
 		b, _ := json.MarshalIndent(rep, "", "  ")
 		fmt.Println(string(b))
@@ -185,19 +262,30 @@ func main() {
 		fmt.Printf("  OpenAPI paths : %d\n", len(rep.OpenAPIPaths))
 		fmt.Printf("  CLI paths     : %d\n", len(rep.CLIPaths))
 		fmt.Printf("  SDK paths     : %d\n", len(rep.SDKPaths))
+		fmt.Printf("  legacy console: %d admin endpoints\n", len(rep.LegacyConsolePaths))
+		fmt.Printf("  React console : %d admin endpoints\n", len(rep.AppConsolePaths))
 		fmt.Printf("  cli_only (FAIL)         : %v\n", rep.CLIOnly)
 		fmt.Printf("  sdk_only (FAIL)         : %v\n", rep.SDKOnly)
 		fmt.Printf("  openapi_missing (FAIL)  : %v\n", rep.OpenAPIMissing)
 		fmt.Printf("  undocumented_routes(FAIL): %v\n", rep.StaleDocs)
+		fmt.Printf("  console_parity_gaps(FAIL): %v\n", rep.ConsoleParityGaps)
+	}
+
+	// A console audit that read nothing would pass by accident, which is worse than no check.
+	if len(rep.LegacyConsolePaths) == 0 || len(rep.AppConsolePaths) == 0 {
+		fmt.Fprintf(os.Stderr, "FAIL: console sources unreadable — legacy=%d app=%d endpoints found; run from the repo root\n",
+			len(rep.LegacyConsolePaths), len(rep.AppConsolePaths))
+		os.Exit(1)
 	}
 
 	// Fail on any contract gap: a client (CLI/SDK) path the server doesn't serve, a server route
-	// absent from the OpenAPI catalog, or a documented route that no longer exists. The repo is at
-	// zero gaps, so this keeps the README/CLI/SDK/OpenAPI/server surfaces in lockstep.
-	gaps := len(rep.CLIOnly) + len(rep.SDKOnly) + len(rep.OpenAPIMissing) + len(rep.StaleDocs)
+	// absent from the OpenAPI catalog, a documented route that no longer exists, or a legacy
+	// console endpoint the React console dropped. The repo is at zero gaps, so this keeps the
+	// README/CLI/SDK/OpenAPI/server surfaces and the two consoles in lockstep.
+	gaps := len(rep.CLIOnly) + len(rep.SDKOnly) + len(rep.OpenAPIMissing) + len(rep.StaleDocs) + len(rep.ConsoleParityGaps)
 	if gaps > 0 {
-		fmt.Fprintf(os.Stderr, "FAIL: %d API surface gap(s) — cli_only=%v sdk_only=%v openapi_missing=%v undocumented=%v\n",
-			gaps, rep.CLIOnly, rep.SDKOnly, rep.OpenAPIMissing, rep.StaleDocs)
+		fmt.Fprintf(os.Stderr, "FAIL: %d API surface gap(s) — cli_only=%v sdk_only=%v openapi_missing=%v undocumented=%v console_parity=%v\n",
+			gaps, rep.CLIOnly, rep.SDKOnly, rep.OpenAPIMissing, rep.StaleDocs, rep.ConsoleParityGaps)
 		os.Exit(1)
 	}
 }

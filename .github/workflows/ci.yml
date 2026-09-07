@@ -124,8 +124,9 @@ jobs:
         # needs about 19 minutes, so keep enough headroom for normal runner variance.
         run: go test -race ./internal/... -count=1 -timeout=30m
 
-      - name: API surface audit (CLI/SDK ↔ server route contract)
-        # Fails if the cmd/vibe CLI or the TypeScript SDK call a path the server no longer serves.
+      - name: API surface audit (CLI/SDK ↔ server, legacy ↔ /app console)
+        # Fails if the cmd/vibe CLI or the TypeScript SDK call a path the server no longer serves,
+        # or if the legacy console calls an /admin endpoint the /app console does not bind.
         run: go run ./cmd/api-surface-audit
 
   request-planner:
