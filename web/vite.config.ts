@@ -30,6 +30,11 @@ export default defineConfig({
       "/auth": "http://127.0.0.1:8080",
       "/me": "http://127.0.0.1:8080",
       "/team": "http://127.0.0.1:8080",
+      // Role dashboards, permission previews and run/receipt calls live outside /admin.
+      "/security": "http://127.0.0.1:8080",
+      "/billing": "http://127.0.0.1:8080",
+      "/permissions": "http://127.0.0.1:8080",
+      "/v1": "http://127.0.0.1:8080",
       "/health": "http://127.0.0.1:8080",
       "/ready": "http://127.0.0.1:8080",
       "/openapi.json": "http://127.0.0.1:8080",

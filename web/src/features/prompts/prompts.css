@@ -1,0 +1,42 @@
+.prompt-filter-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--space-3, 12px);
+  align-items: end;
+}
+
+.prompt-filter-form .form-field {
+  min-width: 0;
+}
+
+.prompt-filter-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2, 8px);
+  align-items: center;
+}
+
+.prompt-sample {
+  display: block;
+  max-width: 46ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.prompt-asset-body {
+  max-height: 320px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  padding: var(--space-3, 12px);
+  border: 1px solid var(--color-border, #d5d8de);
+  border-radius: 6px;
+  background: var(--color-surface-muted, #f6f7f9);
+}
+
+.prompt-tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1, 4px);
+}

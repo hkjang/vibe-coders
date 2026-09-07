@@ -1,0 +1,51 @@
+/* Overview tab layouts. Tokens only, so both themes stay correct. */
+
+.overview-usage-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.obs-capability-grid {
+  display: grid;
+  gap: var(--space-3);
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+}
+
+.obs-capability-card {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-medium);
+  padding: var(--space-3);
+  background: var(--color-card);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.obs-capability-card h3 {
+  margin: 0;
+  font-size: 0.9375rem;
+}
+
+.obs-capability-card p {
+  margin: 0;
+  color: var(--color-muted);
+  font-size: 0.8125rem;
+}
+
+.obs-capability-card strong {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--color-muted);
+  margin-bottom: var(--space-1);
+}
+
+.obs-tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.75rem;
+}

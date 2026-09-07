@@ -1,5 +1,5 @@
 import { AlertTriangle, RefreshCw, ServerCog } from "lucide-react";
-import { useMemo } from "react";
+import { useMemo, type ReactNode } from "react";
 import { Link } from "react-router";
 
 import {
@@ -64,6 +64,7 @@ function ProviderHealthBadge({ health }: { health: ProviderHealthState }): React
 function createProviderColumns(
   detailSearch: (provider: string) => string,
   rememberTrigger: (trigger: HTMLElement, provider: string) => void,
+  renderActions?: (row: ProviderCatalogRow) => ReactNode,
 ): ReadonlyArray<DataTableColumn<ProviderCatalogRow>> {
   const column = createDataTableColumnHelper<ProviderCatalogRow>();
   return column.columns([
@@ -124,6 +125,15 @@ function createProviderColumns(
       header: "비밀정보",
       cell: ({ getValue }) => (getValue() ? "설정됨" : "없음"),
     }),
+    ...(renderActions
+      ? [
+          column.display({
+            id: "admin",
+            header: "관리",
+            cell: ({ row }) => <div className="gateway-row-actions">{renderActions(row.original)}</div>,
+          }),
+        ]
+      : []),
   ]) as Array<DataTableColumn<ProviderCatalogRow>>;
 }
 
@@ -138,6 +148,8 @@ interface ProviderTableProps {
   pageIndex: number;
   providerUnavailable: boolean;
   rememberTrigger: (trigger: HTMLElement, provider: string) => void;
+  /** Per-row administration controls; omitted when the operator may only read. */
+  renderActions?: (row: ProviderCatalogRow) => ReactNode;
   rows: readonly ProviderCatalogRow[];
   updatedAt: number;
 }
@@ -153,12 +165,13 @@ export function ProviderTable({
   pageIndex,
   providerUnavailable,
   rememberTrigger,
+  renderActions,
   rows,
   updatedAt,
 }: ProviderTableProps): React.JSX.Element {
   const columns = useMemo(
-    () => createProviderColumns(detailSearch, rememberTrigger),
-    [detailSearch, rememberTrigger],
+    () => createProviderColumns(detailSearch, rememberTrigger, renderActions),
+    [detailSearch, rememberTrigger, renderActions],
   );
   return (
     <section className="provider-list-section" aria-labelledby="provider-list-title">
@@ -182,7 +195,7 @@ export function ProviderTable({
           data={rows}
           emptyMessage={
             allRowCount === 0
-              ? "등록된 공급자가 없습니다. 공급자 등록은 기존 설정 화면에서 수행할 수 있습니다."
+              ? "등록된 공급자가 없습니다. 위의 공급자 추가 버튼으로 첫 연결을 등록하세요."
               : "검색 및 필터 조건에 맞는 공급자가 없습니다."
           }
           getRowActionLabel={(row) => `${row.displayName} 공급자 상세 열기`}

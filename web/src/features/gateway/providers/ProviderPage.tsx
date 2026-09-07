@@ -1,9 +1,12 @@
-import { ExternalLink, LockKeyhole, RefreshCw, Search } from "lucide-react";
+import { ExternalLink, LockKeyhole, Plus, RefreshCw, Search } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useSearchParams } from "react-router";
 
 import { useAuth } from "@/app/auth/AuthProvider";
+import "@/features/gateway/gateway.css";
+import { ProviderFormDialog, ProviderSloDialog } from "@/features/gateway/providers/ProviderAdminDialogs";
 import { ProviderDetailDialog } from "@/features/gateway/providers/ProviderDetailDialog";
+import { useProviderAdmin } from "@/features/gateway/providers/use-provider-admin";
 import {
   buildProviderRows,
   filterProviderRows,
@@ -18,6 +21,7 @@ import { formatInteger, isHealthRange, type HealthRange } from "@/features/healt
 import { TimeRangePicker } from "@/features/health/health-ui";
 import { Badge } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
+import { ConfirmDialog } from "@/shared/components/ui/ConfirmDialog";
 import { healthStatusLabels, uiLabels } from "@/config/ui-labels";
 import { canOpenLegacyAdmin } from "@/shared/permissions/legacy-admin";
 import { isProviderRef, isSafeLegacyProviderName } from "@/shared/api/provider-ref";
@@ -56,6 +60,7 @@ export function ProviderPage(): React.JSX.Element {
   const selectedRef = isProviderRef(requestedProvider) ? requestedProvider : "";
   const currentPage = positivePage(requestedPage);
   const canReadRouting = auth.user?.scopes.includes("routing:read") ?? false;
+  const canWrite = auth.user?.scopes.includes("admin:write") ?? false;
   const showLegacyAdmin = canOpenLegacyAdmin(auth);
   const { providers, routing, slo } = useProviderCatalogQueries(range, canReadRouting);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -193,6 +198,85 @@ export function ProviderPage(): React.JSX.Element {
     void Promise.all([providers.refetch(), slo.refetch(), ...(canReadRouting ? [routing.refetch()] : [])]);
   };
 
+  const admin = useProviderAdmin();
+  const createButtonRef = useRef<HTMLButtonElement>(null);
+  const adminReturnFocusRef = useRef<HTMLElement | null>(null);
+  const [editing, setEditing] = useState<{ row?: ProviderCatalogRow } | undefined>();
+  const [sloEditing, setSloEditing] = useState<ProviderCatalogRow | undefined>();
+  const [removing, setRemoving] = useState<ProviderCatalogRow | undefined>();
+  const writeDeniedReason = canWrite ? undefined : "공급자 변경은 admin:write 권한이 필요합니다.";
+  const redactedReason = "공급자 이름이 비공개 처리되어 이 화면에서는 변경할 수 없습니다.";
+
+  const rememberAdminTrigger = (event: React.MouseEvent<HTMLButtonElement>): void => {
+    adminReturnFocusRef.current = event.currentTarget;
+  };
+  const renderRowActions = useCallback(
+    (row: ProviderCatalogRow): React.JSX.Element => {
+      const blocked = !canWrite ? writeDeniedReason : row.nameRedacted ? redactedReason : undefined;
+      return (
+        <>
+          <Button
+            size="small"
+            variant="ghost"
+            disabled={blocked !== undefined}
+            title={blocked}
+            onClick={(event) => {
+              rememberAdminTrigger(event);
+              setEditing({ row });
+            }}
+          >
+            수정
+          </Button>
+          <Button
+            size="small"
+            variant="ghost"
+            disabled={blocked !== undefined || admin.save.isPending}
+            title={blocked}
+            onClick={(event) => {
+              rememberAdminTrigger(event);
+              void admin.save.mutateAsync({
+                name: row.provider.name,
+                base_url: row.provider.base_url,
+                timeout_ms: row.provider.timeout_ms,
+                model_patterns: row.provider.model_patterns,
+                failover_group: row.provider.failover_group,
+                priority: row.provider.priority,
+                enabled: !row.provider.enabled,
+              });
+            }}
+          >
+            {row.provider.enabled ? "중지" : "사용"}
+          </Button>
+          <Button
+            size="small"
+            variant="ghost"
+            disabled={blocked !== undefined}
+            title={blocked}
+            onClick={(event) => {
+              rememberAdminTrigger(event);
+              setSloEditing(row);
+            }}
+          >
+            SLO
+          </Button>
+          <Button
+            size="small"
+            variant="ghost"
+            disabled={blocked !== undefined}
+            title={blocked}
+            onClick={(event) => {
+              rememberAdminTrigger(event);
+              setRemoving(row);
+            }}
+          >
+            삭제
+          </Button>
+        </>
+      );
+    },
+    [admin.save, canWrite, writeDeniedReason],
+  );
+
   const enabledCount = allRows.filter((row) => row.provider.enabled).length;
   const degradedCount = allRows.filter((row) => row.health === "degraded").length;
   const unknownCount = allRows.filter((row) => row.health === "unknown").length;
@@ -203,18 +287,30 @@ export function ProviderPage(): React.JSX.Element {
     <div className="page-stack">
       <header className="page-header">
         <div>
-          <div className="eyebrow">{uiLabels.previewReadOnly}</div>
+          <div className="eyebrow">{canWrite ? "미리보기" : uiLabels.previewReadOnly}</div>
           <h1>공급자</h1>
-          <p>AI 공급자 연결 설정과 SLO, 선택 기간의 운영 상태를 안전하게 조회합니다.</p>
+          <p>AI 공급자 연결과 SLO를 등록·수정하고 선택 기간의 운영 상태를 확인합니다.</p>
         </div>
         <div className="page-actions">
-          <Badge tone="info">{uiLabels.readOnly}</Badge>
+          {canWrite ? null : <Badge tone="info">{uiLabels.readOnly}</Badge>}
           {showLegacyAdmin ? (
             <a className="button button-secondary button-default" href="/admin#/settings">
               기존 화면에서 열기 <ExternalLink aria-hidden="true" />
             </a>
           ) : null}
-          <Button variant="primary" onClick={refreshAll} disabled={refreshing}>
+          <Button
+            ref={createButtonRef}
+            variant="primary"
+            disabled={!canWrite}
+            title={writeDeniedReason}
+            onClick={() => {
+              adminReturnFocusRef.current = createButtonRef.current;
+              setEditing({});
+            }}
+          >
+            <Plus aria-hidden="true" /> 공급자 추가
+          </Button>
+          <Button onClick={refreshAll} disabled={refreshing}>
             <RefreshCw aria-hidden="true" /> {refreshing ? "갱신 중" : "새로고침"}
           </Button>
         </div>
@@ -373,6 +469,7 @@ export function ProviderPage(): React.JSX.Element {
         pageIndex={page - 1}
         providerUnavailable={providers.isError && !providers.data}
         rememberTrigger={rememberTrigger}
+        renderActions={renderRowActions}
         rows={pageRows}
         updatedAt={providers.dataUpdatedAt}
       />
@@ -409,6 +506,43 @@ export function ProviderPage(): React.JSX.Element {
           pending: routing.isPending,
           refreshing: routing.isFetching && !routing.isPending,
           onRetry: () => void routing.refetch(),
+        }}
+      />
+
+      <ProviderFormDialog
+        open={editing !== undefined}
+        onOpenChange={(open) => {
+          if (!open) setEditing(undefined);
+        }}
+        returnFocusRef={adminReturnFocusRef}
+        row={editing?.row}
+        onSubmit={(body) => admin.save.mutateAsync(body)}
+      />
+
+      <ProviderSloDialog
+        open={sloEditing !== undefined}
+        onOpenChange={(open) => {
+          if (!open) setSloEditing(undefined);
+        }}
+        returnFocusRef={adminReturnFocusRef}
+        row={sloEditing}
+        onSubmit={(body) => admin.saveSlo.mutateAsync(body)}
+      />
+
+      <ConfirmDialog
+        open={removing !== undefined}
+        onOpenChange={(open) => {
+          if (!open) setRemoving(undefined);
+        }}
+        returnFocusRef={adminReturnFocusRef}
+        tone="danger"
+        title="공급자 삭제"
+        description={`${removing?.displayName ?? ""} 공급자 연결을 삭제합니다. 이 공급자로 향하던 라우팅은 즉시 대체 경로를 찾습니다.`}
+        confirmLabel="삭제"
+        onConfirm={async () => {
+          if (!removing) return;
+          await admin.remove.mutateAsync(removing.provider.name);
+          setRemoving(undefined);
         }}
       />
     </div>

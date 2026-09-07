@@ -18,6 +18,15 @@ export type WithQuery<Data extends OperationData, Query extends object> = Omit<D
   readonly query?: Query;
 };
 
+/**
+ * Declares the request body of an operation. The generated types give every
+ * legacy route `body?: never` because those routes have no documented request
+ * schema, so a domain states the body it actually sends here.
+ */
+export type WithBody<Data extends OperationData, Body> = Omit<Data, "body"> & {
+  readonly body: Body;
+};
+
 export interface ApiRoute<
   Data extends OperationData = OperationData,
   Method extends OpenApiMethod = OpenApiMethod,
@@ -97,6 +106,18 @@ export function pathWithParams<Path extends OpenApiPath>(
     if (value === undefined) throw new Error(`missing path parameter ${key} for ${template}`);
     return encodeURIComponent(String(value));
   }) as Path;
+}
+
+/**
+ * Binds a parameterised endpoint to concrete path parameters, e.g.
+ * `withPathParams(endpoints.domains.access.users.update, { id })`. Values are
+ * percent-encoded, so an identifier can never add a path segment of its own.
+ */
+export function withPathParams<Endpoint extends ApiEndpointBase>(
+  endpoint: Endpoint,
+  params: Readonly<Record<string, string | number>>,
+): Endpoint {
+  return { ...endpoint, path: pathWithParams(endpoint.path, params) } as Endpoint;
 }
 
 export type EndpointLeaves<Registry> = Registry extends ApiEndpointBase

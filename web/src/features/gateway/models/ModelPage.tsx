@@ -1,8 +1,10 @@
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router";
 
 import { useAuth } from "@/app/auth/AuthProvider";
+import "@/features/gateway/gateway.css";
 import { ModelDetailDialog } from "@/features/gateway/models/ModelDetailDialog";
+import { ModelContractsPanel, ModelDeprecationsPanel } from "@/features/gateway/models/ModelGovernancePanels";
 import { ModelPageHeader } from "@/features/gateway/models/ModelPageHeader";
 import { ModelToolbar } from "@/features/gateway/models/ModelToolbar";
 import {
@@ -20,11 +22,20 @@ import { useModelDialogFocus } from "@/features/gateway/models/use-model-dialog-
 import { QueryFailureNotice } from "@/features/gateway/providers/ProviderTableParts";
 import { isHealthRange, maxUpdatedAt, type HealthRange } from "@/features/health/health-utils";
 import { isProviderRef, isSafeLegacyProviderName } from "@/shared/api/provider-ref";
+import { TabPanel, Tabs, type TabItem } from "@/shared/components/ui/Tabs";
 import { canOpenLegacyAdmin } from "@/shared/permissions/legacy-admin";
 import { containsPotentialSecret } from "@/shared/security/secrets";
 
 const pageSize = 10;
 const defaultRange: HealthRange = "24h";
+
+type ModelTabId = "catalog" | "contracts" | "deprecations";
+
+const modelTabs: ReadonlyArray<TabItem<ModelTabId>> = [
+  { id: "catalog", label: "모델 카탈로그" },
+  { id: "contracts", label: "모델 계약" },
+  { id: "deprecations", label: "지원 종료" },
+];
 
 function positivePage(value: string | null): number {
   const parsed = Number(value);
@@ -57,6 +68,11 @@ export function ModelPage(): React.JSX.Element {
   const selectedSource = isModelSource(requestedSource) ? requestedSource : undefined;
   const currentPage = positivePage(requestedPage);
   const showLegacyAdmin = canOpenLegacyAdmin(auth);
+  const canWrite = auth.user?.scopes.includes("admin:write") ?? false;
+  const writeDeniedReason = "모델 계약과 지원 종료 정책 변경은 admin:write 권한이 필요합니다.";
+  // `/gateway/models` has a fixed URL query allowlist, so the section selection
+  // stays in component state rather than in `?tab=`.
+  const [tab, setTab] = useState<ModelTabId>("catalog");
   const { models, pricing, quality, tags } = useModelCatalogQueries(range);
 
   const updateSearch = useCallback(
@@ -227,122 +243,142 @@ export function ModelPage(): React.JSX.Element {
         virtualCount={virtualCount}
       />
 
-      <ModelToolbar
-        onUpdate={updateSearch}
-        provider={providerFilter}
-        providers={providers}
-        query={query}
-        range={range}
-        status={status}
-        unsafeStoredQuery={unsafeStoredQuery}
+      <Tabs
+        ariaLabel="모델 화면"
+        items={modelTabs}
+        onChange={setTab}
+        panelIdPrefix="gateway-models"
+        value={tab}
       />
 
-      {models.isError ? (
-        <QueryFailureNotice
-          error={models.error}
-          hasPreviousData={Boolean(models.data)}
-          label="모델 목록"
-          onRetry={() => void models.refetch()}
-        />
-      ) : null}
-      {quality.isError ? (
-        <QueryFailureNotice
-          error={quality.error}
-          hasPreviousData={Boolean(quality.data)}
-          label="모델 품질"
-          onRetry={() => void quality.refetch()}
-        />
-      ) : null}
-      {pricing.isError ? (
-        <QueryFailureNotice
-          error={pricing.error}
-          hasPreviousData={Boolean(pricing.data)}
-          label="모델 가격"
-          onRetry={() => void pricing.refetch()}
-        />
-      ) : null}
-      {tags.isError ? (
-        <QueryFailureNotice
-          error={tags.error}
-          hasPreviousData={Boolean(tags.data)}
-          label="모델 사용 지침"
-          onRetry={() => void tags.refetch()}
-        />
-      ) : null}
-      <ModelPartialFailureNotice
-        failures={models.data?.partial_failures ?? []}
-        requestId={models.data?.request_id ?? ""}
-      />
+      <TabPanel id={tab} panelIdPrefix="gateway-models">
+        {tab === "contracts" ? (
+          <ModelContractsPanel canWrite={canWrite} writeDeniedReason={writeDeniedReason} />
+        ) : null}
+        {tab === "deprecations" ? (
+          <ModelDeprecationsPanel canWrite={canWrite} writeDeniedReason={writeDeniedReason} />
+        ) : null}
+        {tab !== "catalog" ? null : (
+          <div className="page-stack">
+            <ModelToolbar
+              onUpdate={updateSearch}
+              provider={providerFilter}
+              providers={providers}
+              query={query}
+              range={range}
+              status={status}
+              unsafeStoredQuery={unsafeStoredQuery}
+            />
 
-      <ModelTable
-        allRowCount={allRows.length}
-        catalogueAvailable={catalogueAvailable}
-        detailSearch={detailSearch}
-        enrichmentLoading={enrichmentLoading}
-        filteredRowCount={filteredRows.length}
-        loading={models.isPending}
-        modelUnavailable={models.isError && !models.data}
-        onPageChange={(pageIndex) =>
-          updateSearch({
-            page: pageIndex === 0 ? undefined : String(pageIndex + 1),
-            model: undefined,
-            model_provider: undefined,
-            source: undefined,
-          })
-        }
-        onRowClick={openModel}
-        pageCount={pageCount}
-        pageIndex={page - 1}
-        rememberTrigger={rememberTrigger}
-        rows={pageRows}
-        updatedAt={updatedAt}
-      />
+            {models.isError ? (
+              <QueryFailureNotice
+                error={models.error}
+                hasPreviousData={Boolean(models.data)}
+                label="모델 목록"
+                onRetry={() => void models.refetch()}
+              />
+            ) : null}
+            {quality.isError ? (
+              <QueryFailureNotice
+                error={quality.error}
+                hasPreviousData={Boolean(quality.data)}
+                label="모델 품질"
+                onRetry={() => void quality.refetch()}
+              />
+            ) : null}
+            {pricing.isError ? (
+              <QueryFailureNotice
+                error={pricing.error}
+                hasPreviousData={Boolean(pricing.data)}
+                label="모델 가격"
+                onRetry={() => void pricing.refetch()}
+              />
+            ) : null}
+            {tags.isError ? (
+              <QueryFailureNotice
+                error={tags.error}
+                hasPreviousData={Boolean(tags.data)}
+                label="모델 사용 지침"
+                onRetry={() => void tags.refetch()}
+              />
+            ) : null}
+            <ModelPartialFailureNotice
+              failures={models.data?.partial_failures ?? []}
+              requestId={models.data?.request_id ?? ""}
+            />
 
-      <ModelDetailDialog
-        candidates={selectedMatches}
-        catalogue={{
-          error: models.error,
-          fetching: models.isFetching,
-          hasResponse: models.data !== undefined,
-          partialFailures: models.data?.partial_failures ?? [],
-          pending: models.isPending,
-          requestId: models.data?.request_id ?? "",
-          retry: () => void models.refetch(),
-        }}
-        detailSearch={detailSearch}
-        enrichment={{
-          pricing: {
-            error: pricing.error,
-            fetching: pricing.isFetching,
-            hasResponse: pricing.data !== undefined,
-            pending: pricing.isPending,
-            retry: () => void pricing.refetch(),
-          },
-          quality: {
-            error: quality.error,
-            fetching: quality.isFetching,
-            hasResponse: quality.data !== undefined,
-            pending: quality.isPending,
-            retry: () => void quality.refetch(),
-          },
-          tags: {
-            error: tags.error,
-            fetching: tags.isFetching,
-            hasResponse: tags.data !== undefined,
-            pending: tags.isPending,
-            retry: () => void tags.refetch(),
-          },
-        }}
-        onOpenChange={(open) => {
-          if (!open) closeModel();
-        }}
-        open={selectedModel !== ""}
-        requestedModel={selectedModel}
-        requestedProvider={selectedProvider}
-        returnFocusRef={returnFocusRef}
-        row={selectedRow}
-        showLegacyAdmin={showLegacyAdmin}
-      />
+            <ModelTable
+              allRowCount={allRows.length}
+              catalogueAvailable={catalogueAvailable}
+              detailSearch={detailSearch}
+              enrichmentLoading={enrichmentLoading}
+              filteredRowCount={filteredRows.length}
+              loading={models.isPending}
+              modelUnavailable={models.isError && !models.data}
+              onPageChange={(pageIndex) =>
+                updateSearch({
+                  page: pageIndex === 0 ? undefined : String(pageIndex + 1),
+                  model: undefined,
+                  model_provider: undefined,
+                  source: undefined,
+                })
+              }
+              onRowClick={openModel}
+              pageCount={pageCount}
+              pageIndex={page - 1}
+              rememberTrigger={rememberTrigger}
+              rows={pageRows}
+              updatedAt={updatedAt}
+            />
+
+            <ModelDetailDialog
+              candidates={selectedMatches}
+              catalogue={{
+                error: models.error,
+                fetching: models.isFetching,
+                hasResponse: models.data !== undefined,
+                partialFailures: models.data?.partial_failures ?? [],
+                pending: models.isPending,
+                requestId: models.data?.request_id ?? "",
+                retry: () => void models.refetch(),
+              }}
+              detailSearch={detailSearch}
+              enrichment={{
+                pricing: {
+                  error: pricing.error,
+                  fetching: pricing.isFetching,
+                  hasResponse: pricing.data !== undefined,
+                  pending: pricing.isPending,
+                  retry: () => void pricing.refetch(),
+                },
+                quality: {
+                  error: quality.error,
+                  fetching: quality.isFetching,
+                  hasResponse: quality.data !== undefined,
+                  pending: quality.isPending,
+                  retry: () => void quality.refetch(),
+                },
+                tags: {
+                  error: tags.error,
+                  fetching: tags.isFetching,
+                  hasResponse: tags.data !== undefined,
+                  pending: tags.isPending,
+                  retry: () => void tags.refetch(),
+                },
+              }}
+              onOpenChange={(open) => {
+                if (!open) closeModel();
+              }}
+              open={selectedModel !== ""}
+              requestedModel={selectedModel}
+              requestedProvider={selectedProvider}
+              returnFocusRef={returnFocusRef}
+              row={selectedRow}
+              showLegacyAdmin={showLegacyAdmin}
+            />
+          </div>
+        )}
+      </TabPanel>
     </div>
   );
 }

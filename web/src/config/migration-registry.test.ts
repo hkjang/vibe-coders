@@ -102,26 +102,33 @@ describe("migration registry", () => {
     expect(featureByPath("/routing/rules/decision-1")?.featureId).toBe("routing.rules");
   });
 
-  it("exposes the implemented Provider and Models read-only previews", () => {
+  it("exposes the Provider and Models catalog previews to the gateway roles", () => {
     for (const featureId of ["gateway.providers", "gateway.models"] as const) {
       const feature = migrationRegistry.find((candidate) => candidate.featureId === featureId);
       if (!feature) throw new Error(`${featureId} fixture is missing`);
 
       expect(feature).toMatchObject({
-        status: "preview_read_only",
+        status: "preview",
         legacyPath: featureId === "gateway.providers" ? "/admin#/settings" : "/admin#/model-contracts",
         requiredPermission: "admin:read",
-        readOnly: true,
+        readOnly: false,
         enabledRoles: ["super_admin", "admin", "ai_admin"],
         rolloutPercent: 100,
         fallbackEnabled: true,
-        minimumApiVersion: "v0.82.0",
+        minimumApiVersion: "v0.84.0",
       });
       expect(isAppFeatureImplemented(feature.featureId)).toBe(true);
-      expect(resolveFeature(feature, gatewayAdmin, "v0.82.0")).toMatchObject({
+      expect(resolveFeature(feature, gatewayAdmin, "v0.84.0")).toMatchObject({
         permitted: true,
-        status: "preview_read_only",
+        status: "preview",
+        readOnly: false,
+      });
+      // A backend older than the screen's contract keeps the operator on Legacy.
+      expect(resolveFeature(feature, gatewayAdmin, "v0.83.2")).toMatchObject({
+        permitted: true,
+        status: "legacy",
         readOnly: true,
+        reason: "api_version",
       });
     }
   });
@@ -241,15 +248,20 @@ describe("migration registry", () => {
   });
 
   it("fails closed when an unimplemented feature is Retired or Legacy fallback is disabled", () => {
-    const provider = migrationRegistry.find((feature) => feature.featureId === "system.settings");
-    if (!provider) throw new Error("system.settings fixture is missing");
+    // A synthetic feature keeps this behavioural test independent of which real
+    // screens this build happens to own: every registry entry becomes implemented
+    // as the migration proceeds, and the fail-closed rule must still hold.
+    const template = migrationRegistry[0];
+    if (!template) throw new Error("registry is empty");
+    const unimplemented = { ...template, featureId: "example.never-implemented" };
     expect(
-      resolveFeature({ ...provider, status: "retired", serverAvailable: true }, operator, "v0.80.0"),
+      resolveFeature({ ...unimplemented, status: "retired", serverAvailable: true }, operator, "v0.80.0"),
     ).toMatchObject({ permitted: false, reason: "ui_not_implemented" });
-    expect(resolveFeature(provider, gatewayAdmin, "v0.82.0", { legacyFallback: false })).toMatchObject({
-      permitted: false,
-      reason: "legacy_fallback_disabled",
-    });
+    expect(
+      resolveFeature({ ...unimplemented, status: "legacy" }, gatewayAdmin, "v0.82.0", {
+        legacyFallback: false,
+      }),
+    ).toMatchObject({ permitted: false, reason: "legacy_fallback_disabled" });
   });
 
   it("keeps every fallback ID and path aligned with the authoritative server registry", () => {

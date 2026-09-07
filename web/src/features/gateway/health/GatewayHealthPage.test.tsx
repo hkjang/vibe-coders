@@ -12,14 +12,17 @@ import { AppError } from "@/shared/api/error";
 import type { RoutingHealth } from "@/shared/api/schemas";
 import { usePreferences } from "@/shared/stores/preferences";
 
-const authRuntime = vi.hoisted(() => ({ legacyFallback: true }));
+const authRuntime = vi.hoisted(() => ({
+  legacyFallback: true,
+  scopes: ["admin:read", "routing:read", "routing:write"],
+}));
 
 vi.mock("@/app/auth/AuthProvider", () => ({
   useAuth: () => ({
     authenticationMode: "session",
     legacyFallback: authRuntime.legacyFallback,
     mode: "authenticated",
-    user: { scopes: ["admin:read", "routing:read"] },
+    user: { scopes: authRuntime.scopes },
   }),
 }));
 
@@ -119,14 +122,34 @@ interface ApiScenario {
   failRoutingOnce?: boolean;
 }
 
+const balancerState = {
+  mode: "session_hash",
+  multi_instance_safe: true,
+  sticky_sessions: true,
+  sticky_ttl: "30m0s",
+  active_sessions: 4,
+  balance_index: 0.8,
+  pools: [],
+};
+
 function mockApi({ failRoutingOnce = false }: ApiScenario = {}): {
+  breakerResets: unknown[];
   request: ReturnType<typeof vi.spyOn>;
   routingAttempts: () => number;
 } {
   let routingAttempts = 0;
-  const request = vi.spyOn(apiClient, "request").mockImplementation(async (endpoint) => {
+  const breakerResets: unknown[] = [];
+  const request = vi.spyOn(apiClient, "request").mockImplementation(async (endpoint, ...args) => {
+    const options = args[0] as { body?: unknown } | undefined;
     if (endpoint.path === endpoints.health.path) return { status: "ok" } as never;
     if (endpoint.path === endpoints.ready.path) return { status: "ready" } as never;
+    if (endpoint.path === endpoints.domains.gateway.routing.balancer.path) {
+      return balancerState as never;
+    }
+    if (endpoint.path === endpoints.domains.gateway.routing.breakerReset.path) {
+      breakerResets.push(options?.body);
+      return { status: "reset", provider: "openai", states: [] } as never;
+    }
     if (endpoint.path === endpoints.admin.routing.health.path) {
       routingAttempts += 1;
       if (failRoutingOnce && routingAttempts === 1) {
@@ -141,12 +164,13 @@ function mockApi({ failRoutingOnce = false }: ApiScenario = {}): {
     }
     throw new Error(`Unexpected endpoint: ${endpoint.path}`);
   });
-  return { request, routingAttempts: () => routingAttempts };
+  return { breakerResets, request, routingAttempts: () => routingAttempts };
 }
 
 describe("GatewayHealthPage", () => {
   beforeEach(() => {
     authRuntime.legacyFallback = true;
+    authRuntime.scopes = ["admin:read", "routing:read", "routing:write"];
     usePreferences.setState({ refreshInterval: 0 });
     vi.restoreAllMocks();
   });
@@ -222,7 +246,7 @@ describe("GatewayHealthPage", () => {
 
     request.mockClear();
     await user.click(screen.getByRole("button", { name: "새로고침" }));
-    await waitFor(() => expect(request).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(request).toHaveBeenCalledTimes(4));
     expect(request).toHaveBeenCalledWith(
       endpoints.health,
       expect.objectContaining({ routeId: "gateway.health" }),
@@ -235,6 +259,32 @@ describe("GatewayHealthPage", () => {
       endpoints.admin.routing.health,
       expect.objectContaining({ routeId: "gateway.health" }),
     );
+    expect(request).toHaveBeenCalledWith(
+      endpoints.domains.gateway.routing.balancer,
+      expect.objectContaining({ routeId: "gateway.health" }),
+    );
+  });
+
+  it("resets a tripped circuit breaker after confirmation", async () => {
+    const user = userEvent.setup();
+    const { breakerResets } = mockApi();
+    renderPage();
+
+    const breakers = await screen.findByRole("table", { name: "공급자별 회로 차단기 상태" });
+    await user.click(within(breakers).getByRole("button", { name: "해제" }));
+    await user.click(await screen.findByRole("button", { name: "해제" }));
+
+    await waitFor(() => expect(breakerResets).toEqual([{ provider: "openai" }]));
+  });
+
+  it("keeps recovery actions disabled without routing:write", async () => {
+    authRuntime.scopes = ["admin:read", "routing:read"];
+    mockApi();
+    renderPage();
+
+    const breakers = await screen.findByRole("table", { name: "공급자별 회로 차단기 상태" });
+    expect(within(breakers).getByRole("button", { name: "해제" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "전체 해제" })).toBeDisabled();
   });
 
   it("reports a failed background liveness refresh as stale and degraded, not disconnected", async () => {

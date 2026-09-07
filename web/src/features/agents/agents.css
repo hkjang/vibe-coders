@@ -1,0 +1,190 @@
+/* Agent domain screens: workflows, AI work apps and skills. Tokens only so both
+   themes stay correct. */
+
+.agents-toolbar-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  font-size: 0.8125rem;
+  color: var(--color-muted);
+}
+
+.agents-toolbar-field > span {
+  font-weight: 600;
+}
+
+.agents-detail-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.agents-detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.agents-checklist {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.agents-checklist li {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-small);
+  background: var(--color-card);
+}
+
+.agents-checklist li[data-ok="false"] {
+  border-color: var(--color-danger);
+  background: var(--color-danger-soft);
+}
+
+.agents-checklist-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.agents-checklist-copy small {
+  color: var(--color-muted);
+}
+
+.agents-inline-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.agents-graph {
+  overflow-x: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-medium);
+  background: var(--color-card);
+  padding: var(--space-2);
+}
+
+.agents-graph svg {
+  display: block;
+  max-width: 100%;
+}
+
+.agents-graph-node-skill {
+  fill: var(--color-primary-soft);
+  stroke: var(--color-primary);
+}
+
+.agents-graph-node-model {
+  fill: var(--color-info-soft);
+  stroke: var(--color-info);
+}
+
+.agents-graph-node-tool {
+  fill: var(--color-warning-soft);
+  stroke: var(--color-warning);
+}
+
+.agents-graph-node-team {
+  fill: var(--color-success-soft);
+  stroke: var(--color-success);
+}
+
+.agents-graph-node-policy {
+  fill: var(--color-danger-soft);
+  stroke: var(--color-danger);
+}
+
+.agents-graph-edge {
+  stroke: var(--color-border);
+  stroke-width: 1.5;
+}
+
+.agents-graph-label {
+  fill: var(--color-foreground);
+  font-size: 11px;
+  font-family: var(--font-body);
+}
+
+.agents-graph-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-top: var(--space-2);
+  font-size: 0.8125rem;
+  color: var(--color-muted);
+}
+
+.agents-tree {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.agents-tree > li {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-medium);
+  padding: var(--space-3);
+  background: var(--color-card);
+}
+
+.agents-tree h4 {
+  margin: 0 0 var(--space-2);
+  font-size: 0.9375rem;
+}
+
+.agents-tree dl {
+  margin: 0;
+}
+
+.agents-card-grid {
+  display: grid;
+  gap: var(--space-3);
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+}
+
+.agents-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-medium);
+  padding: var(--space-3);
+  background: var(--color-card);
+}
+
+.agents-card h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.agents-card p {
+  margin: 0;
+  color: var(--color-muted);
+  font-size: 0.875rem;
+}
+
+.agents-card-actions {
+  margin-top: auto;
+  display: flex;
+  gap: var(--space-2);
+}
+
+.agents-updated {
+  color: var(--color-muted);
+  font-size: 0.8125rem;
+}

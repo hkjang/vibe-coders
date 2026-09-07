@@ -3075,13 +3075,13 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Alert rule by id",
+        "summary": "Update or delete an alert rule",
         "tags": [
           "admin"
         ]
       },
-      "put": {
-        "operationId": "put__admin_alerts_id",
+      "patch": {
+        "operationId": "patch__admin_alerts_id",
         "parameters": [
           {
             "in": "path",
@@ -3102,7 +3102,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Alert rule by id",
+        "summary": "Update or delete an alert rule",
         "tags": [
           "admin"
         ]
@@ -3303,9 +3303,9 @@
         ]
       }
     },
-    "/admin/approvals/{id}": {
+    "/admin/approvals/{id}/approve": {
       "post": {
-        "operationId": "post__admin_approvals_id",
+        "operationId": "post__admin_approvals_id_approve",
         "parameters": [
           {
             "in": "path",
@@ -3326,7 +3326,36 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Approve/reject ({id}/approve|/reject)",
+        "summary": "Approve a queued request",
+        "tags": [
+          "governance"
+        ]
+      }
+    },
+    "/admin/approvals/{id}/reject": {
+      "post": {
+        "operationId": "post__admin_approvals_id_reject",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Reject a queued request",
         "tags": [
           "governance"
         ]
@@ -3865,6 +3894,25 @@
         ]
       }
     },
+    "/admin/budgets/projection": {
+      "get": {
+        "operationId": "get__admin_budgets_projection",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Month-end spend forecast per team",
+        "tags": [
+          "cost"
+        ]
+      }
+    },
     "/admin/budgets/{id}": {
       "delete": {
         "operationId": "delete__admin_budgets_id",
@@ -3888,34 +3936,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Update / delete a budget",
-        "tags": [
-          "cost"
-        ]
-      },
-      "put": {
-        "operationId": "put__admin_budgets_id",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK"
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "summary": "Update / delete a budget",
+        "summary": "Delete a budget",
         "tags": [
           "cost"
         ]
@@ -4044,6 +4065,33 @@
       }
     },
     "/admin/change-sets/{id}": {
+      "delete": {
+        "operationId": "delete__admin_change_sets_id",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Get or delete a change set",
+        "tags": [
+          "ops"
+        ]
+      },
       "get": {
         "operationId": "get__admin_change_sets_id",
         "parameters": [
@@ -4066,13 +4114,15 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Get/apply a change set",
+        "summary": "Get or delete a change set",
         "tags": [
           "ops"
         ]
-      },
+      }
+    },
+    "/admin/change-sets/{id}/apply": {
       "post": {
-        "operationId": "post__admin_change_sets_id",
+        "operationId": "post__admin_change_sets_id_apply",
         "parameters": [
           {
             "in": "path",
@@ -4093,7 +4143,123 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Get/apply a change set",
+        "summary": "Apply an approved change set",
+        "tags": [
+          "ops"
+        ]
+      }
+    },
+    "/admin/change-sets/{id}/approve": {
+      "post": {
+        "operationId": "post__admin_change_sets_id_approve",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Approve a submitted change set",
+        "tags": [
+          "ops"
+        ]
+      }
+    },
+    "/admin/change-sets/{id}/dryrun": {
+      "post": {
+        "operationId": "post__admin_change_sets_id_dryrun",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Preview a change set without applying it",
+        "tags": [
+          "ops"
+        ]
+      }
+    },
+    "/admin/change-sets/{id}/rollback": {
+      "post": {
+        "operationId": "post__admin_change_sets_id_rollback",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Roll an applied change set back",
+        "tags": [
+          "ops"
+        ]
+      }
+    },
+    "/admin/change-sets/{id}/submit": {
+      "post": {
+        "operationId": "post__admin_change_sets_id_submit",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Submit a change set for approval",
         "tags": [
           "ops"
         ]
@@ -4406,7 +4572,24 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Cost guard overview",
+        "summary": "Cost guard overview and limit updates",
+        "tags": [
+          "cost"
+        ]
+      },
+      "post": {
+        "operationId": "post__admin_cost",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Cost guard overview and limit updates",
         "tags": [
           "cost"
         ]
@@ -4954,8 +5137,8 @@
       }
     },
     "/admin/dw/metrics/{key}": {
-      "post": {
-        "operationId": "post__admin_dw_metrics_key",
+      "delete": {
+        "operationId": "delete__admin_dw_metrics_key",
         "parameters": [
           {
             "in": "path",
@@ -4976,7 +5159,36 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Update one metric definition",
+        "summary": "Delete one metric definition",
+        "tags": [
+          "clickhouse"
+        ]
+      }
+    },
+    "/admin/dw/metrics/{key}/validate": {
+      "post": {
+        "operationId": "post__admin_dw_metrics_key_validate",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Statically validate a metric's query template",
         "tags": [
           "clickhouse"
         ]
@@ -6387,7 +6599,24 @@
             "bearerAuth": []
           }
         ],
-        "summary": "MCP tool risk grades",
+        "summary": "MCP tool risk grades: list/record",
+        "tags": [
+          "mcp"
+        ]
+      },
+      "post": {
+        "operationId": "post__admin_mcp_tools",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "MCP tool risk grades: list/record",
         "tags": [
           "mcp"
         ]
@@ -6490,13 +6719,13 @@
             "bearerAuth": []
           }
         ],
-        "summary": "MCP upstream by id",
+        "summary": "MCP upstream by id: update/delete",
         "tags": [
           "mcp"
         ]
       },
-      "get": {
-        "operationId": "get__admin_mcp_upstreams_id",
+      "patch": {
+        "operationId": "patch__admin_mcp_upstreams_id",
         "parameters": [
           {
             "in": "path",
@@ -6517,34 +6746,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "MCP upstream by id",
-        "tags": [
-          "mcp"
-        ]
-      },
-      "put": {
-        "operationId": "put__admin_mcp_upstreams_id",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK"
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "summary": "MCP upstream by id",
+        "summary": "MCP upstream by id: update/delete",
         "tags": [
           "mcp"
         ]
@@ -6574,6 +6776,35 @@
           }
         ],
         "summary": "MCP upstream operational flow",
+        "tags": [
+          "mcp"
+        ]
+      }
+    },
+    "/admin/mcp/upstreams/{id}/probe": {
+      "get": {
+        "operationId": "get__admin_mcp_upstreams_id_probe",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Live MCP upstream connectivity and tool discovery probe",
         "tags": [
           "mcp"
         ]
@@ -8595,8 +8826,8 @@
           "admin"
         ]
       },
-      "put": {
-        "operationId": "put__admin_quotas_id",
+      "patch": {
+        "operationId": "patch__admin_quotas_id",
         "parameters": [
           {
             "in": "path",
@@ -9702,6 +9933,35 @@
         ]
       }
     },
+    "/admin/requests/{id}/analyze": {
+      "post": {
+        "operationId": "post__admin_requests_id_analyze",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Model-written analysis of one request",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
     "/admin/requests/{id}/body": {
       "get": {
         "operationId": "get__admin_requests_id_body",
@@ -9726,6 +9986,35 @@
           }
         ],
         "summary": "Masked request body summary and raw body evidence when retained",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/requests/{id}/explain": {
+      "get": {
+        "operationId": "get__admin_requests_id_explain",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Why one request was slow, costly or routed the way it was",
         "tags": [
           "admin"
         ]
@@ -9813,6 +10102,145 @@
           }
         ],
         "summary": "Request trace links across routing/MCP/Text2SQL/governance",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/requests/{id}/note": {
+      "delete": {
+        "operationId": "delete__admin_requests_id_note",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Operator note attached to one request",
+        "tags": [
+          "admin"
+        ]
+      },
+      "get": {
+        "operationId": "get__admin_requests_id_note",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Operator note attached to one request",
+        "tags": [
+          "admin"
+        ]
+      },
+      "post": {
+        "operationId": "post__admin_requests_id_note",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Operator note attached to one request",
+        "tags": [
+          "admin"
+        ]
+      },
+      "put": {
+        "operationId": "put__admin_requests_id_note",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Operator note attached to one request",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/requests/{id}/replay": {
+      "post": {
+        "operationId": "post__admin_requests_id_replay",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Replay one request against the upstream",
         "tags": [
           "admin"
         ]
@@ -9942,6 +10370,23 @@
       }
     },
     "/admin/roles": {
+      "delete": {
+        "operationId": "delete__admin_roles",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List/create custom roles; delete with ?role=NAME",
+        "tags": [
+          "rbac"
+        ]
+      },
       "get": {
         "operationId": "get__admin_roles",
         "responses": {
@@ -9954,7 +10399,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "List/create custom roles",
+        "summary": "List/create custom roles; delete with ?role=NAME",
         "tags": [
           "rbac"
         ]
@@ -9971,7 +10416,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "List/create custom roles",
+        "summary": "List/create custom roles; delete with ?role=NAME",
         "tags": [
           "rbac"
         ]
@@ -10041,8 +10486,8 @@
           "routing"
         ]
       },
-      "put": {
-        "operationId": "put__admin_routing_rules_id",
+      "patch": {
+        "operationId": "patch__admin_routing_rules_id",
         "parameters": [
           {
             "in": "path",
@@ -11417,7 +11862,24 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Skill fitness scores",
+        "summary": "Skill fitness scores: read/record evidence",
+        "tags": [
+          "skills"
+        ]
+      },
+      "post": {
+        "operationId": "post__admin_skills_fitness",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Skill fitness scores: read/record evidence",
         "tags": [
           "skills"
         ]
@@ -11903,13 +12365,71 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Template by id",
+        "summary": "Update or delete a template",
         "tags": [
           "admin"
         ]
       },
+      "patch": {
+        "operationId": "patch__admin_templates_id",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Update or delete a template",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/templates/{id}/approve": {
+      "post": {
+        "operationId": "post__admin_templates_id_approve",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Approve a submitted template",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/templates/{id}/history": {
       "get": {
-        "operationId": "get__admin_templates_id",
+        "operationId": "get__admin_templates_id_history",
         "parameters": [
           {
             "in": "path",
@@ -11930,13 +12450,15 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Template by id",
+        "summary": "Template version history",
         "tags": [
           "admin"
         ]
-      },
-      "put": {
-        "operationId": "put__admin_templates_id",
+      }
+    },
+    "/admin/templates/{id}/rollback": {
+      "post": {
+        "operationId": "post__admin_templates_id_rollback",
         "parameters": [
           {
             "in": "path",
@@ -11957,7 +12479,94 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Template by id",
+        "summary": "Roll a template back to an earlier version",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/templates/{id}/submit": {
+      "post": {
+        "operationId": "post__admin_templates_id_submit",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Submit a template draft for review",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/templates/{id}/usage": {
+      "get": {
+        "operationId": "get__admin_templates_id_usage",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Template usage by team",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/templates/{id}/use": {
+      "post": {
+        "operationId": "post__admin_templates_id_use",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Record one use of a template",
         "tags": [
           "admin"
         ]
@@ -12074,6 +12683,23 @@
       }
     },
     "/admin/text2sql/connections": {
+      "delete": {
+        "operationId": "delete__admin_text2sql_connections",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Manage Text2SQL DB connections",
+        "tags": [
+          "text2sql"
+        ]
+      },
       "get": {
         "operationId": "get__admin_text2sql_connections",
         "responses": {
@@ -12928,7 +13554,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "User detail / update; {id}/report for weekly report",
+        "summary": "User detail / update",
         "tags": [
           "admin"
         ]
@@ -12955,7 +13581,36 @@
             "bearerAuth": []
           }
         ],
-        "summary": "User detail / update; {id}/report for weekly report",
+        "summary": "User detail / update",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/users/{id}/report": {
+      "get": {
+        "operationId": "get__admin_users_id_report",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Per-user coding report over a window",
         "tags": [
           "admin"
         ]
@@ -13924,13 +14579,13 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Rotate ({id}/rotate) or revoke the caller's key",
+        "summary": "Update scopes on, or revoke, the caller's key",
         "tags": [
           "self-service"
         ]
       },
-      "post": {
-        "operationId": "post__me_keys_id",
+      "patch": {
+        "operationId": "patch__me_keys_id",
         "parameters": [
           {
             "in": "path",
@@ -13951,7 +14606,36 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Rotate ({id}/rotate) or revoke the caller's key",
+        "summary": "Update scopes on, or revoke, the caller's key",
+        "tags": [
+          "self-service"
+        ]
+      }
+    },
+    "/me/keys/{id}/rotate": {
+      "post": {
+        "operationId": "post__me_keys_id_rotate",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Rotate the caller's key and return the new secret once",
         "tags": [
           "self-service"
         ]
@@ -14308,9 +14992,38 @@
         ]
       }
     },
-    "/me/skills/{name}/request": {
+    "/me/skills/{name}/feedback": {
       "post": {
-        "operationId": "post__me_skills_name_request",
+        "operationId": "post__me_skills_name_feedback",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Rate a skill (rating 1-5 and optional comment)",
+        "tags": [
+          "self-service"
+        ]
+      }
+    },
+    "/me/skills/{name}/request-access": {
+      "post": {
+        "operationId": "post__me_skills_name_request_access",
         "parameters": [
           {
             "in": "path",
@@ -14547,7 +15260,24 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Team's saved reports",
+        "summary": "Team's saved reports; approve or reject one",
+        "tags": [
+          "self-service"
+        ]
+      },
+      "post": {
+        "operationId": "post__team_reports",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Team's saved reports; approve or reject one",
         "tags": [
           "self-service"
         ]

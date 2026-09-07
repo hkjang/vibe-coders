@@ -1,0 +1,84 @@
+/* Governance reports and AI asset screens. Tokens only, so both themes stay correct. */
+
+.gov-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4, 16px);
+}
+
+.gov-note {
+  color: var(--color-muted);
+  font-size: 12px;
+  line-height: 1.6;
+  margin: 0;
+}
+
+.gov-narrative-section {
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+
+.gov-narrative-section h4 {
+  font-size: 14px;
+  margin: 0 0 6px;
+}
+
+.gov-narrative-section p {
+  line-height: 1.7;
+  margin: 0;
+}
+
+.gov-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.gov-bars-row {
+  align-items: center;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(90px, 30%) 1fr auto;
+}
+
+.gov-bars-label {
+  color: var(--color-muted);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gov-bars-value {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.gov-bars svg {
+  display: block;
+  height: 10px;
+  width: 100%;
+}
+
+.gov-toolbar-field {
+  align-items: center;
+  display: flex;
+  font-size: 12px;
+  gap: 6px;
+}
+
+.gov-detail-grid {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4, 16px);
+}
+
+.gov-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}

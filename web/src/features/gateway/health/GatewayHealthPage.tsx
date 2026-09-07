@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { useRef, useState } from "react";
 import {
   Activity,
   CheckCircle2,
@@ -8,9 +9,12 @@ import {
   RefreshCw,
   Route,
   ShieldAlert,
+  Unplug,
 } from "lucide-react";
 
 import { useAuth } from "@/app/auth/AuthProvider";
+import "@/features/gateway/gateway.css";
+import { useBalancerState, useHealthActions } from "@/features/gateway/health/use-health-actions";
 import { healthStatusLabels, uiLabels } from "@/config/ui-labels";
 import {
   formatInteger,
@@ -23,10 +27,13 @@ import { HealthWidget, TimeRangePicker } from "@/features/health/health-ui";
 import { useHealthRange } from "@/features/health/use-health-range";
 import { apiClient } from "@/shared/api/client";
 import { endpoints } from "@/shared/api/endpoints";
-import { isProviderRef, providerDisplayLabel } from "@/shared/api/provider-ref";
+import { isProviderRef, isSafeLegacyProviderName, providerDisplayLabel } from "@/shared/api/provider-ref";
 import type { RoutingHealth } from "@/shared/api/schemas";
 import { Badge, type BadgeProps } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
+import { ConfirmDialog } from "@/shared/components/ui/ConfirmDialog";
+import { InlineNotice } from "@/shared/components/ui/InlineNotice";
+import { KeyValueList } from "@/shared/components/ui/KeyValueList";
 import { operationalMessage } from "@/shared/errors/operational-messages";
 import { canOpenLegacyAdmin } from "@/shared/permissions/legacy-admin";
 import { usePreferences } from "@/shared/stores/preferences";
@@ -73,12 +80,24 @@ function routingProviderLabel(provider: string, providerRef: string | undefined,
     : `공급자 확인 불가 · ${index + 1}`;
 }
 
+interface BreakerActions {
+  canWrite: boolean;
+  deniedReason?: string;
+  onReset: (provider: string, label: string) => void;
+  pending: boolean;
+}
+
 export function GatewayHealthPage(): React.JSX.Element {
   const auth = useAuth();
   const showLegacyAdmin = canOpenLegacyAdmin(auth);
+  const canWriteRouting = auth.user?.scopes.includes("routing:write") ?? false;
+  const routingWriteDeniedReason = canWriteRouting
+    ? undefined
+    : "회로 차단기와 세션 고정 해제는 routing:write 권한이 필요합니다.";
   const refreshInterval = usePreferences((state) => state.refreshInterval);
   const interval = refreshIntervalMs(refreshInterval);
   const [range, setRange] = useHealthRange();
+  const canReadRoutingBalancer = auth.user?.scopes.includes("routing:read") ?? false;
 
   const gateway = useQuery({
     queryKey: ["gateway", "health"],
@@ -126,8 +145,29 @@ export function GatewayHealthPage(): React.JSX.Element {
         : "success";
   const refreshing = gateway.isFetching || readiness.isFetching || routing.isFetching;
 
+  const { releaseSessions, resetBreaker } = useHealthActions();
+  const balancer = useBalancerState(canReadRoutingBalancer, range);
+  const [confirming, setConfirming] = useState<
+    { kind: "breaker" | "sessions"; provider: string; label: string } | undefined
+  >();
+  const actionReturnFocusRef = useRef<HTMLElement | null>(null);
+  const rememberActionTrigger = (): void => {
+    actionReturnFocusRef.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  };
+
+  const breakerActions: BreakerActions = {
+    canWrite: canWriteRouting,
+    deniedReason: routingWriteDeniedReason,
+    pending: resetBreaker.isPending,
+    onReset: (provider, label) => {
+      rememberActionTrigger();
+      setConfirming({ kind: "breaker", provider, label });
+    },
+  };
+
   const refreshAll = (): void => {
-    void Promise.all([gateway.refetch(), readiness.refetch(), routing.refetch()]);
+    void Promise.all([gateway.refetch(), readiness.refetch(), routing.refetch(), balancer.refetch()]);
   };
 
   return (
@@ -216,13 +256,83 @@ export function GatewayHealthPage(): React.JSX.Element {
         }
         statusTone={routingDegraded ? "warning" : "success"}
       >
-        {routing.data ? <RoutingHealthDetails data={routing.data} /> : null}
+        {routing.data ? <RoutingHealthDetails actions={breakerActions} data={routing.data} /> : null}
       </HealthWidget>
+
+      <HealthWidget
+        title="로드 밸런싱 · 세션 고정"
+        description="GET /admin/routing/balancer"
+        icon={Unplug}
+        loading={balancer.isPending && canReadRoutingBalancer}
+        error={balancer.error}
+        onRetry={() => void balancer.refetch()}
+        updatedAt={balancer.dataUpdatedAt || undefined}
+      >
+        {!canReadRoutingBalancer ? (
+          <p className="metric-note">로드 밸런싱 상태는 routing:read 권한이 필요합니다.</p>
+        ) : balancer.data ? (
+          <div className="page-stack">
+            <KeyValueList
+              items={[
+                { label: "분배 방식", value: balancer.data.mode ?? "-" },
+                { label: "다중 인스턴스 안전", value: balancer.data.multi_instance_safe ? "예" : "아니오" },
+                { label: "세션 고정", value: balancer.data.sticky_sessions ? "사용" : "미사용" },
+                { label: "고정 유지 시간", value: balancer.data.sticky_ttl ?? "-" },
+                { label: "활성 세션", value: formatInteger(balancer.data.active_sessions ?? 0) },
+                { label: "분배 균형 지수", value: formatPercent(balancer.data.balance_index ?? 0) },
+              ]}
+            />
+            {routingWriteDeniedReason ? (
+              <InlineNotice tone="warning" title="조작 권한이 없습니다.">
+                {routingWriteDeniedReason}
+              </InlineNotice>
+            ) : null}
+            <Button
+              variant="secondary"
+              disabled={!canWriteRouting || releaseSessions.isPending}
+              title={routingWriteDeniedReason}
+              onClick={() => {
+                rememberActionTrigger();
+                setConfirming({ kind: "sessions", provider: "", label: "전체 공급자" });
+              }}
+            >
+              세션 고정 전체 해제
+            </Button>
+          </div>
+        ) : null}
+      </HealthWidget>
+
+      <ConfirmDialog
+        open={confirming !== undefined}
+        onOpenChange={(open) => {
+          if (!open) setConfirming(undefined);
+        }}
+        returnFocusRef={actionReturnFocusRef}
+        title={confirming?.kind === "sessions" ? "세션 고정 해제" : "회로 차단기 해제"}
+        description={
+          confirming?.kind === "sessions"
+            ? `${confirming.label}의 세션 고정을 해제합니다. 진행 중인 대화가 다른 공급자로 옮겨갈 수 있습니다.`
+            : `${confirming?.label ?? ""}의 회로 차단기를 해제합니다. 아직 복구되지 않았다면 오류가 다시 발생할 수 있습니다.`
+        }
+        confirmLabel="해제"
+        onConfirm={async () => {
+          if (!confirming) return;
+          if (confirming.kind === "sessions") await releaseSessions.mutateAsync(confirming.provider);
+          else await resetBreaker.mutateAsync(confirming.provider);
+          setConfirming(undefined);
+        }}
+      />
     </div>
   );
 }
 
-function RoutingHealthDetails({ data }: { data: RoutingHealth }): React.JSX.Element {
+function RoutingHealthDetails({
+  actions,
+  data,
+}: {
+  actions: BreakerActions;
+  data: RoutingHealth;
+}): React.JSX.Element {
   return (
     <div className="page-stack">
       <section aria-labelledby="provider-ranking-title">
@@ -274,6 +384,17 @@ function RoutingHealthDetails({ data }: { data: RoutingHealth }): React.JSX.Elem
 
       <section aria-labelledby="breaker-state-title">
         <h3 id="breaker-state-title">회로 차단기</h3>
+        <div className="gateway-row-actions">
+          <Button
+            size="small"
+            variant="secondary"
+            disabled={!actions.canWrite || actions.pending || data.breakers.states.length === 0}
+            title={actions.deniedReason}
+            onClick={() => actions.onReset("", "전체 공급자")}
+          >
+            전체 해제
+          </Button>
+        </div>
         <dl className="metric-pairs">
           <div>
             <dt>기능 상태</dt>
@@ -303,6 +424,7 @@ function RoutingHealthDetails({ data }: { data: RoutingHealth }): React.JSX.Elem
                   <th scope="col">연속 실패</th>
                   <th scope="col">차단 횟수</th>
                   <th scope="col">재시도까지</th>
+                  <th scope="col">조치</th>
                 </tr>
               </thead>
               <tbody>
@@ -316,6 +438,29 @@ function RoutingHealthDetails({ data }: { data: RoutingHealth }): React.JSX.Elem
                       {breaker.retry_in_seconds === undefined
                         ? "-"
                         : `${formatInteger(breaker.retry_in_seconds)}초`}
+                    </td>
+                    <td>
+                      <Button
+                        size="small"
+                        variant="ghost"
+                        disabled={
+                          !actions.canWrite || actions.pending || !isSafeLegacyProviderName(breaker.provider)
+                        }
+                        title={
+                          actions.deniedReason ??
+                          (isSafeLegacyProviderName(breaker.provider)
+                            ? undefined
+                            : "공급자 이름이 비공개 처리되어 개별 해제할 수 없습니다. 전체 해제를 사용하세요.")
+                        }
+                        onClick={() =>
+                          actions.onReset(
+                            breaker.provider,
+                            routingProviderLabel(breaker.provider, breaker.provider_ref, index),
+                          )
+                        }
+                      >
+                        해제
+                      </Button>
                     </td>
                   </tr>
                 ))}

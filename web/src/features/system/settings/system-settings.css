@@ -1,0 +1,101 @@
+.settings-tab-stack {
+  display: grid;
+  gap: var(--space-4);
+}
+.settings-sheet-stack {
+  display: grid;
+  gap: var(--space-4);
+}
+.settings-badge-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+.settings-filter {
+  display: grid;
+  gap: var(--space-1);
+  color: var(--color-muted);
+  font-size: 0.8125rem;
+  font-weight: 650;
+}
+.settings-search {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.settings-search label {
+  color: var(--color-muted);
+  font-size: 0.8125rem;
+  font-weight: 650;
+}
+.settings-test-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.settings-permission-note {
+  color: var(--color-muted);
+  font-size: 0.8125rem;
+}
+.settings-key-cell {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+}
+.settings-key-cell small {
+  color: var(--color-muted);
+}
+.settings-danger-actions,
+.settings-form-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.settings-history {
+  display: grid;
+  gap: var(--space-2);
+}
+.settings-fieldset {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-small);
+}
+.settings-fieldset legend {
+  padding: 0 var(--space-1);
+  color: var(--color-muted);
+  font-size: 0.8125rem;
+  font-weight: 650;
+}
+.settings-component-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-3);
+  padding: 0;
+  list-style: none;
+}
+.settings-delegated-list {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.settings-delegated-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--color-border);
+}
+.settings-delegated-list li:last-child {
+  border-bottom: none;
+}

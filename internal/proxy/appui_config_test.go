@@ -62,8 +62,19 @@ func TestAppUIBootstrapAndRuntimeToggle(t *testing.T) {
 	if len(legacyRoutes) != 0 {
 		t.Fatalf("legacy route map must be empty when fallback is disabled: %#v", legacyRoutes)
 	}
+	// Without the Legacy bridge only the features this build actually ships a
+	// React screen for may stay available. The expectation is derived from the
+	// implemented set rather than a fixed list, so it keeps holding as screens land.
 	allowed, _ := body["allowed_features"].([]any)
-	wantAllowed := []string{"overview", "gateway.health", "gateway.providers", "gateway.models", "observability.requests", "observability.traces", "system.health"}
+	wantAllowed := make([]string, 0, len(appUIFeatures))
+	for _, feature := range appUIFeatures {
+		if appUIFeatureImplemented(feature.FeatureID) {
+			wantAllowed = append(wantAllowed, feature.FeatureID)
+		}
+	}
+	if len(wantAllowed) == 0 {
+		t.Fatal("no implemented features to assert on")
+	}
 	if len(allowed) != len(wantAllowed) {
 		t.Fatalf("implemented previews allowed without Legacy fallback = %#v, want %v", allowed, wantAllowed)
 	}
@@ -349,7 +360,7 @@ func TestAppUIMigrationRegistryContract(t *testing.T) {
 	}
 }
 
-func TestGatewayCatalogFeaturesAreSafeReadOnlyPreviewDefaults(t *testing.T) {
+func TestGatewayCatalogFeaturesKeepTheirRoleAndRolloutContract(t *testing.T) {
 	wantRoles := "super_admin,admin,ai_admin"
 	for _, id := range []string{"gateway.providers", "gateway.models"} {
 		var feature *appUIFeature
@@ -362,13 +373,16 @@ func TestGatewayCatalogFeaturesAreSafeReadOnlyPreviewDefaults(t *testing.T) {
 		if feature == nil {
 			t.Fatalf("gateway catalog feature %q is not registered", id)
 		}
-		if feature.Status != "preview_read_only" || !feature.ReadOnly || feature.RequiredPermission != "admin:read" {
+		// These screens now carry the Legacy console's provider and model
+		// management, so they are no longer read-only; the role cohort and the
+		// Legacy bridge stay as they were.
+		if feature.Status != "preview" || feature.ReadOnly || feature.RequiredPermission != "admin:read" {
 			t.Errorf("feature %q safety contract is incomplete: %+v", id, *feature)
 		}
 		if got := strings.Join(feature.EnabledRoles, ","); got != wantRoles {
 			t.Errorf("feature %q enabled roles = %q, want %q", id, got, wantRoles)
 		}
-		if feature.RolloutPercent != 100 || !feature.FallbackEnabled || feature.MinimumAPIVersion != "v0.82.0" {
+		if feature.RolloutPercent != 100 || !feature.FallbackEnabled || feature.MinimumAPIVersion != "v0.84.0" {
 			t.Errorf("feature %q rollout contract is incomplete: %+v", id, *feature)
 		}
 		if _, implemented := appUIImplementedFeatureIDs[id]; !implemented {
@@ -465,6 +479,7 @@ func TestPhaseOneHealthFeaturesAreSafeReadOnlyPreviews(t *testing.T) {
 		"gateway.health": "routing:read",
 		"system.health":  "admin:read",
 	}
+	readOnly := map[string]bool{"gateway.health": false, "system.health": true}
 	for _, id := range []string{"gateway.health", "system.health"} {
 		var feature *appUIFeature
 		for i := range appUIFeatures {
@@ -476,13 +491,23 @@ func TestPhaseOneHealthFeaturesAreSafeReadOnlyPreviews(t *testing.T) {
 		if feature == nil {
 			t.Fatalf("phase one feature %q is not registered", id)
 		}
-		if feature.Status != "preview_read_only" || !feature.ReadOnly {
+		wantStatus := "preview_read_only"
+		if !readOnly[id] {
+			wantStatus = "preview"
+		}
+		if feature.Status != wantStatus || feature.ReadOnly != readOnly[id] {
 			t.Errorf("feature %q safety = status %q read_only=%v", id, feature.Status, feature.ReadOnly)
 		}
 		if feature.RequiredPermission != expectedPermission[id] {
 			t.Errorf("feature %q permission = %q, want %q", id, feature.RequiredPermission, expectedPermission[id])
 		}
-		if feature.RolloutPercent != 100 || !feature.FallbackEnabled || feature.MinimumAPIVersion != "v0.81.0" {
+		// gateway.health gained the circuit-breaker and balancer resets in
+		// v0.84.0; system.health stayed a read-only view of the same signals.
+		wantMinimum := "v0.81.0"
+		if !readOnly[id] {
+			wantMinimum = "v0.84.0"
+		}
+		if feature.RolloutPercent != 100 || !feature.FallbackEnabled || feature.MinimumAPIVersion != wantMinimum {
 			t.Errorf("feature %q rollout contract is unsafe or incomplete: %+v", id, *feature)
 		}
 		if _, implemented := appUIImplementedFeatureIDs[id]; !implemented {

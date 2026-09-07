@@ -1,4 +1,86 @@
 import { defineFeatureModules } from "@/features/feature-module";
 
 // Screens owned by the observability domain. Register each implemented feature here.
-export const observabilityFeatureModules = defineFeatureModules([]);
+export const observabilityFeatureModules = defineFeatureModules([
+  {
+    featureId: "observability.requests",
+    load: () => import("@/features/observability/requests/RequestPage").then((module) => module.RequestPage),
+    queryKeys: [
+      "api_key_id",
+      "cursor",
+      "from",
+      "ip",
+      "language",
+      "limit",
+      "model",
+      "provider_ref",
+      "request_id",
+      "session_id",
+      "status",
+      "to",
+      "trace_id",
+      "tz",
+    ],
+  },
+  {
+    featureId: "observability.traces",
+    load: () => import("@/features/observability/traces/TracePage").then((module) => module.TracePage),
+    queryKeys: [
+      "cursor",
+      "from",
+      "limit",
+      "model",
+      "selected_ref",
+      "selected_request",
+      "status",
+      "to",
+      "trace_id",
+      "tz",
+    ],
+  },
+  {
+    featureId: "observability.sessions",
+    load: () => import("@/features/observability/sessions/SessionPage").then((module) => module.SessionPage),
+    queryKeys: ["days", "q", "session_id"],
+  },
+  {
+    featureId: "observability.xview",
+    load: () => import("@/features/observability/xview/XViewPage").then((module) => module.XViewPage),
+    queryKeys: [
+      "endpoint",
+      "from",
+      "live",
+      "metric",
+      "models",
+      "scale",
+      "session_id",
+      "tab",
+      "to",
+      "tz",
+      "view",
+      "viewMode",
+      "window",
+    ],
+  },
+  {
+    featureId: "observability.llm",
+    load: () => import("@/features/observability/llm/LLMPage").then((module) => module.LLMPage),
+    queryKeys: [
+      "api_key_id",
+      "evaluation_name",
+      "model",
+      "prompt_name",
+      "prompt_version",
+      "session_id",
+      "tab",
+      "team",
+      "trace_id",
+      "window",
+    ],
+  },
+  {
+    featureId: "observability.probes",
+    load: () => import("@/features/observability/probes/ProbePage").then((module) => module.ProbePage),
+    queryKeys: ["tab"],
+  },
+]);

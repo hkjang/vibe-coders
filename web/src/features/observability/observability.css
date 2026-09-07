@@ -1,0 +1,257 @@
+/* Styles shared by the observability screens (sessions, xview, llm, probes).
+   Only design tokens are used so both themes stay correct. */
+
+.obs-filter-grid {
+  display: grid;
+  gap: var(--space-3);
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  align-items: end;
+}
+
+.obs-filter-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.obs-inline-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: end;
+}
+
+.obs-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  color: var(--color-muted);
+  font-size: 0.8125rem;
+}
+
+.obs-section-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.obs-chart {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.obs-chart svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+.obs-scatter-shell {
+  position: relative;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-medium);
+  background: var(--color-card);
+  padding: var(--space-2);
+}
+
+.obs-scatter-shell[data-selecting="true"] {
+  cursor: crosshair;
+}
+
+.obs-scatter-axis {
+  fill: var(--color-muted);
+  font-size: 10px;
+}
+
+.obs-scatter-grid {
+  stroke: var(--color-border);
+  stroke-width: 1;
+}
+
+.obs-scatter-band {
+  stroke: var(--color-warning);
+  stroke-dasharray: 4 4;
+  stroke-width: 1;
+}
+
+.obs-scatter-selection {
+  fill: var(--color-primary-soft);
+  stroke: var(--color-primary);
+  stroke-width: 1;
+}
+
+.obs-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-top: var(--space-2);
+  font-size: 0.8125rem;
+}
+
+.obs-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.obs-legend-swatch {
+  width: 0.75rem;
+  height: 0.75rem;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.obs-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.obs-timeline-item {
+  display: grid;
+  grid-template-columns: minmax(6rem, auto) 1fr;
+  gap: var(--space-3);
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.obs-timeline-item:last-child {
+  border-bottom: none;
+}
+
+.obs-timeline-when {
+  color: var(--color-muted);
+  font-size: 0.8125rem;
+}
+
+.obs-timeline-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.obs-timeline-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.obs-bar-track {
+  position: relative;
+  height: 0.5rem;
+  border-radius: var(--radius-small);
+  background: var(--color-muted-soft);
+  overflow: hidden;
+}
+
+.obs-bar-fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-radius: var(--radius-small);
+  background: var(--color-primary);
+}
+
+.obs-bar-fill[data-tone="danger"] {
+  background: var(--color-danger);
+}
+
+.obs-bar-fill[data-tone="warning"] {
+  background: var(--color-warning);
+}
+
+.obs-findings {
+  margin: 0;
+  padding-left: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.obs-coverage {
+  font-size: 0.8125rem;
+}
+
+.obs-tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.obs-capability-grid {
+  display: grid;
+  gap: var(--space-3);
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+}
+
+.obs-capability-card {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-medium);
+  padding: var(--space-3);
+  background: var(--color-card);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.obs-capability-card h3 {
+  margin: 0;
+  font-size: 0.9375rem;
+}
+
+.obs-capability-card p {
+  margin: 0;
+  color: var(--color-muted);
+  font-size: 0.8125rem;
+}
+
+.obs-probe-checks {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.obs-probe-check {
+  display: grid;
+  grid-template-columns: minmax(4rem, auto) 1fr;
+  gap: var(--space-3);
+  align-items: start;
+}
+
+.obs-probe-fix {
+  color: var(--color-muted);
+  font-size: 0.8125rem;
+}
+
+/* Categorical chart slots. Values are the data-viz reference palette's first
+   three slots, validated for the all-pairs case in both themes; a fourth series
+   folds into the neutral "기타" slot instead of adding a hue. */
+.obs-viz {
+  --obs-series-1: #2a78d6;
+  --obs-series-2: #eb6834;
+  --obs-series-3: #1baf7a;
+  --obs-series-other: var(--color-muted);
+}
+
+:root[data-theme="dark"] .obs-viz {
+  --obs-series-1: #3987e5;
+  --obs-series-2: #d95926;
+  --obs-series-3: #199e70;
+}
+
+.obs-viz details > summary {
+  cursor: pointer;
+  color: var(--color-muted);
+  font-size: 0.8125rem;
+  padding: var(--space-1) 0;
+}

@@ -69,7 +69,7 @@ ui.app.feature.<feature-id>.readonly
 
 rollout bucket은 사용자 ID와 feature ID의 SHA-256 기반으로 계산하므로 새로고침이나 pod 변경 후에도 동일하다. Preview는 scope, 허용 역할, rollout을 모두 통과해야 한다. UI의 메뉴 숨김은 편의 기능일 뿐이며 모든 API는 기존 서버 권한 검사를 다시 수행한다.
 
-현재 React 제공 기능은 `overview`, `gateway.health`, `system.health`, `gateway.providers`, `gateway.models`, `observability.requests`, `observability.traces`의 읽기 전용 미리보기다. 공급자·모델 조회는 `/admin/providers`, `/admin/models`와 기존 품질·가격·태그 API를 공통으로 사용한다. 요청 탐색기는 기존 `/admin/requests`를 공동 사용하되 `X-Vibe-UI: app` 요청에만 프롬프트·응답·원시 오류를 제외한 안전한 메타데이터 투영과 필터에 결합된 암호화·서명 양방향 커서를 제공한다. 추적 탐색기의 첫 단계도 같은 안전 투영을 재사용해 동일한 `trace_id`에 속한 요청만 시간축과 표로 비교하며, 원시 오류·Text2SQL 거절 사유가 포함될 수 있는 기존 상세 추적 API는 호출하지 않는다. 기존 시각 데이터를 재작성하지 않고 SQLite·PostgreSQL 공통 정규화 표현식 인덱스로 정확한 시간 순서를 유지하며, 최대 201개의 부모 요청을 먼저 확정한 뒤 해당 요청의 최신 사용량·응답만 조회한다. 각 화면은 로딩·부분 실패·마지막 정상 데이터·요청 ID·재시도·기존 화면 연결을 제공한다. 공급자·모델 변경과 세션을 포함한 나머지 관측, 라우팅, 거버넌스, MCP, Text2SQL, 비용, 보안, 설정 기능은 기존 화면 연결을 유지한다.
+`v0.84.0`에서 Legacy 콘솔의 모든 화면이 `/app`으로 이식되어 36개 기능 전체가 React 화면을 갖는다. 통합 현황, 게이트웨이 상태·공급자·모델·Chat 테스트, 라우팅, 요청·추적·세션·XView·LLM·프로브, 프롬프트 실험실과 라이브러리, 사용자·팀·내 홈, 거버넌스 정책·자동 조치·리포트·자산, MCP와 에이전트·워크플로·앱·Skill, Text2SQL, 데이터 웨어하우스·상품, 비용, 보안·Red Team·샌드박스, 시스템 상태·설정이 여기에 포함된다. 각 화면은 조회뿐 아니라 Legacy가 제공하던 생성·수정·삭제·실행·내보내기를 함께 제공하며, 통합 현황·요청 탐색기·추적 탐색기·시스템 상태는 성격상 읽기 전용으로 남는다. 서버 문서에 없어 호출할 수 없던 조작은 화면 안에 사유와 기존 화면 링크를 남겼고, 해당 API 문서를 바로잡았으므로 다음 단계에서 이식한다.
 
 `v0.83.0` 추적 탐색기는 요청 단위 미리보기다. 시작 시각과 지연 구간, HTTP 상태, 모델, 안전 공급자 표시명, 토큰과 비용을 제공하며 세부 MCP·도구·Text2SQL 스팬 트리는 아직 Legacy 화면에 남겨 둔다. 해당 세부 기능은 팀 범위와 원문 제거가 보장되는 앱 전용 계약, 명시적 OpenAPI·Zod 스키마, 응답 행 상한을 갖춘 뒤 별도 단계에서 승격한다. 정확한 추적 ID 조회는 전용 복합 부분 인덱스로 지원하고 대용량 SQLite·PostgreSQL 계획 회귀로 검증한다.
 
@@ -92,6 +92,38 @@ SQLite의 팀 범위 요청 조회는 전체 팀 이력을 먼저 정렬하지 �
 - Keycloak 설정에서 로컬 로그인을 끄면 로그인 화면뿐 아니라 `/auth/login` API도 403으로 차단한다.
 - API Key, password, client secret, prompt/response 원문은 local storage나 UI telemetry에 저장하지 않는다.
 
+## 화면 구성 구조
+
+`/app`의 모든 화면은 도메인별로 자기 자신을 등록한다. 라우터, URL 쿼리 허용 목록, 구현 여부 판정이
+한 곳에서 갈라져 어긋나지 않도록 하나의 등록부를 공유한다.
+
+| 파일 | 역할 |
+| --- | --- |
+| `web/src/features/<domain>/routes.ts` | 그 도메인이 소유한 화면을 `{ featureId, load, queryKeys }`로 선언 |
+| `web/src/features/registry.ts` | 도메인 선언을 모아 라우터·쿼리 허용 목록·구현 여부에 공급 |
+| `web/src/shared/api/domains/<domain>.ts` | 그 도메인이 호출하는 서버 엔드포인트와 응답 스키마 |
+| `web/src/shared/api/endpoint-factory.ts` | OpenAPI 경로·메서드 타입에 묶인 엔드포인트 선언 도구 |
+| `web/src/shared/api/loose.ts` | 응답 스키마가 문서화되지 않은 기존 API를 위한 관대한 zod 도구 |
+
+`queryKeys`에 등록하지 않은 쿼리 매개변수는 라우트 가드가 제거한다. 화면이 URL에 남길 수 있는 값을
+화면 자신이 선언하므로, 비밀정보나 프롬프트가 실린 매개변수가 새 화면과 함께 조용히 들어올 수 없다.
+
+구현 여부는 코드가 결정한다. `registry.ts`가 모은 featureId 집합이 곧 이 빌드가 소유한 화면이며,
+런타임 전환 설정이 아직 화면이 없는 기능을 승격하더라도 라우트는 기존 화면 연결로 남는다.
+
+## 공통 UI 구성요소
+
+도메인 화면은 같은 조각을 사용해 한 제품처럼 보이도록 한다.
+
+- 페이지: `PageHeader`(상태·기존 화면 링크·액션), `SectionCard`, `StatCard`/`StatGrid`, `KeyValueList`, `Toolbar`
+- 목록과 상세: `DataTable`, `Sheet`(사이드 패널), `Dialog`, `JsonBlock`, `CopyButton`
+- 입력과 변경: `FormField`, `FormDialog`+`useZodForm`, `ConfirmDialog`(사유 입력), `Select`, `Textarea`, `Checkbox`, `Switch`
+- 상태 전달: `LoadingState`, `ErrorState`(요청 ID 포함), `EmptyState`, `InlineNotice`
+- 훅: `useSearchState`(URL 필터), `useTabParam`, `useRefreshInterval`, `useMutationFeedback`(토스트와 캐시 무효화)
+
+화면 테스트는 `renderScreen`, `mockApi`, `testAuth` 헬퍼를 사용한다. `mockApi`는 등록되지 않은 API 호출을
+실패로 처리하므로, 화면이 호출하는 서버 계약이 테스트에 빠짐없이 드러난다.
+
 ## 빌드와 배포
 
 프로덕션 이미지는 세 단계로 만든다.
@@ -107,14 +139,14 @@ SQLite의 팀 범위 요청 조회는 전체 팀 이력을 먼저 정렬하지 �
 | Phase | 범위 | 현재 상태 |
 | --- | --- | --- |
 | 0 | route/embed, App Shell, API client, auth/RBAC, registry, Legacy Bridge, CI | 완료 (`v0.80.0`) |
-| 1 | 현황, 상태, 요청·추적·세션, 사용량·비용, 공급자·모델 조회 | 진행 중 (`v0.83.0`: 통합 현황·게이트웨이 상태·시스템 상태·공급자·모델·요청 탐색기·요청 단위 추적 탐색기 읽기 전용 미리보기) |
-| 2 | Provider/Model Tag/Alert/Saved Filter 등 저위험 변경 | 대기 |
-| 3 | 사용자·팀·API Key·Quota·MCP·App·Workflow·Skill | 대기 |
-| 4 | Routing·Policy·Settings·Text2SQL·DW retry | 대기 |
-| 5 | Kill Switch·Secret Rotation·Bulk Import 등 Critical 작업 | 대기 |
+| 1 | 현황, 상태, 요청·추적·세션, 사용량·비용, 공급자·모델 조회 | 완료 (`v0.84.0`) |
+| 2 | Provider/Model Tag/Alert/Saved Filter 등 저위험 변경 | 완료 (`v0.84.0`) |
+| 3 | 사용자·팀·API Key·Quota·MCP·App·Workflow·Skill | 완료 (`v0.84.0`) |
+| 4 | Routing·Policy·Settings·Text2SQL·DW retry | 완료 (`v0.84.0`) |
+| 5 | Kill Switch·Secret Rotation·Bulk Import 등 Critical 작업 | 완료 (`v0.84.0`, Bulk Import는 별도 설계) |
 | 6 | `/app` 기본화와 기능별 Legacy deprecation 검토 | 대기 |
 
-Phase 0 완료는 전체 프로젝트 완료를 의미하지 않는다. 각 기능은 데이터 정합성, 권한, URL 복원, 상태 UI, 접근성, 성능, 변경 안전성, 감사, E2E, Legacy fallback을 모두 통과한 뒤에만 Stable로 승격한다.
+화면 이식이 끝났다고 Stable 승격이 끝난 것은 아니다. 각 기능은 데이터 정합성, 권한, URL 복원, 상태 UI, 접근성, 성능, 변경 안전성, 감사, E2E, Legacy fallback을 모두 통과한 뒤에만 Stable로 승격한다.
 
 ## 검증 명령
 

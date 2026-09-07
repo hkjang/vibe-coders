@@ -1,4 +1,365 @@
 // agents domain endpoints. Declare every server call this domain's screens make
 // here with `operation()` from "@/shared/api/endpoint-factory" and a zod schema
 // (see "@/shared/api/loose" for legacy responses without a documented shape).
-export const agentsEndpoints = {} as const;
+import { z } from "zod";
+
+import type {
+  DeleteAdminAppsIdData,
+  DeleteAdminAppsIdPermissionsData,
+  DeleteAdminSkillsByNameNameData,
+  DeleteAdminWorkflowsData,
+  GetAdminAppsData,
+  GetAdminAppsIdPermissionsData,
+  GetAdminAppsIdVersionsData,
+  GetAdminAppTemplatesData,
+  GetAdminSkillsData,
+  GetAdminSkillsDependencyGraphData,
+  GetAdminSkillsExportData,
+  GetAdminSkillsFitnessData,
+  GetAdminSkillsPromotionsData,
+  GetAdminSkillsRunsData,
+  GetAdminSkillsScanData,
+  GetAdminSkillsStatsData,
+  GetAdminSkillStudioCandidatesData,
+  GetAdminSkillStudioReadinessData,
+  GetAdminWorkflowsData,
+  GetAdminWorkflowsIdVersionsData,
+  GetMeAppRunsData,
+  GetMeWorkflowRunsData,
+  GetV1AppRunsRunIdReceiptData,
+  GetV1WorkflowRunsRunIdReceiptData,
+  PatchAdminAppsIdData,
+  PostAdminAppsData,
+  PostAdminAppsIdDeprecateData,
+  PostAdminAppsIdPermissionsData,
+  PostAdminAppsIdPublishData,
+  PostAdminAppsIdValidateData,
+  PostAdminAppsOnboardingCheckData,
+  PostAdminAppTemplatesInstantiateData,
+  PostAdminSkillsData,
+  PostAdminSkillsEvaluateData,
+  PostAdminSkillsImportData,
+  PostAdminSkillsPromoteData,
+  PostAdminSkillsRecommendData,
+  PostAdminSkillsSeedRecommendedData,
+  PostAdminSkillStudioAdoptData,
+  PostAdminWorkflowsData,
+  PostAdminWorkflowsIdDryRunData,
+  PostAdminWorkflowsIdPublishData,
+  PostV1AppsIdRunData,
+} from "@/shared/api/generated";
+import { operation, type OperationData, type WithQuery } from "@/shared/api/endpoint-factory";
+import {
+  appOnboardingSchema,
+  appPermissionListSchema,
+  appRunReceiptSchema,
+  appRunListSchema,
+  appRunPlanSchema,
+  appTemplateListSchema,
+  appTemplateInstantiateSchema,
+  appValidationSchema,
+  appVersionListSchema,
+  publishAcknowledgementSchema,
+  skillAdoptSchema,
+  skillDependencyGraphSchema,
+  skillEvaluationSchema,
+  skillExportSchema,
+  skillFitnessSchema,
+  skillImportSchema,
+  skillListSchema,
+  skillPromotionListSchema,
+  skillReadinessSchema,
+  skillRecommendationSchema,
+  skillRunListSchema,
+  skillScanListSchema,
+  skillSeedSchema,
+  skillStatsSchema,
+  skillStudioCandidateListSchema,
+  skillWriteSchema,
+  workAppListSchema,
+  workAppSchema,
+  workflowDryRunSchema,
+  workflowListSchema,
+  workflowPublishSchema,
+  workflowRunListSchema,
+  workflowRunReceiptSchema,
+  workflowUpsertSchema,
+  workflowVersionListSchema,
+  type AppOnboardingBody,
+  type AppPermissionBody,
+  type AppPermissionQuery,
+  type AppPublishQuery,
+  type AppRunsQuery,
+  type AppTemplateInstantiateBody,
+  type SkillAdoptBody,
+  type SkillEvaluateBody,
+  type SkillExportQuery,
+  type SkillFitnessQuery,
+  type SkillGraphQuery,
+  type SkillImportBody,
+  type SkillListQuery,
+  type SkillPromoteBody,
+  type SkillPromotionsQuery,
+  type SkillReadinessQuery,
+  type SkillRecommendQuery,
+  type SkillRunsQuery,
+  type SkillScanQuery,
+  type SkillStatsQuery,
+  type SkillStudioCandidateQuery,
+  type SkillWriteBody,
+  type WorkAppWriteBody,
+  type WorkflowDeleteQuery,
+  type WorkflowPublishBody,
+  type WorkflowRunsQuery,
+  type WorkflowUpsertBody,
+} from "@/shared/api/domains/agents.schemas";
+import { acknowledgementSchema } from "@/shared/api/loose";
+
+/**
+ * Replaces the generated body type. The legacy admin routes are documented
+ * without request schemas (`body?: never`), so each screen's payload contract is
+ * declared here next to the zod response schema.
+ */
+type WithBody<Data extends OperationData, Body> = Omit<Data, "body"> & { readonly body: Body };
+
+export const agentsEndpoints = {
+  workflows: {
+    list: operation<GetAdminWorkflowsData, unknown>()("GET", "/admin/workflows", workflowListSchema),
+    upsert: operation<WithBody<PostAdminWorkflowsData, WorkflowUpsertBody>, unknown>()(
+      "POST",
+      "/admin/workflows",
+      workflowUpsertSchema,
+    ),
+    remove: operation<WithQuery<DeleteAdminWorkflowsData, WorkflowDeleteQuery>, unknown>()(
+      "DELETE",
+      "/admin/workflows",
+      acknowledgementSchema,
+      z.object({ id: z.string() }),
+    ),
+    dryRun: operation<PostAdminWorkflowsIdDryRunData, unknown>()(
+      "POST",
+      "/admin/workflows/{id}/dry-run",
+      workflowDryRunSchema,
+    ),
+    publish: operation<WithBody<PostAdminWorkflowsIdPublishData, WorkflowPublishBody>, unknown>()(
+      "POST",
+      "/admin/workflows/{id}/publish",
+      workflowPublishSchema,
+    ),
+    versions: operation<GetAdminWorkflowsIdVersionsData, unknown>()(
+      "GET",
+      "/admin/workflows/{id}/versions",
+      workflowVersionListSchema,
+    ),
+    runs: operation<WithQuery<GetMeWorkflowRunsData, WorkflowRunsQuery>, unknown>()(
+      "GET",
+      "/me/workflow-runs",
+      workflowRunListSchema,
+      z.object({ workflow_id: z.string().optional(), limit: z.number().optional() }),
+    ),
+    runReceipt: operation<GetV1WorkflowRunsRunIdReceiptData, unknown>()(
+      "GET",
+      "/v1/workflow-runs/{run_id}/receipt",
+      workflowRunReceiptSchema,
+    ),
+  },
+  apps: {
+    list: operation<GetAdminAppsData, unknown>()("GET", "/admin/apps", workAppListSchema),
+    create: operation<WithBody<PostAdminAppsData, WorkAppWriteBody>, unknown>()(
+      "POST",
+      "/admin/apps",
+      workAppSchema,
+    ),
+    update: operation<WithBody<PatchAdminAppsIdData, WorkAppWriteBody>, unknown>()(
+      "PATCH",
+      "/admin/apps/{id}",
+      workAppSchema,
+    ),
+    remove: operation<DeleteAdminAppsIdData, unknown>()("DELETE", "/admin/apps/{id}", acknowledgementSchema),
+    validate: operation<PostAdminAppsIdValidateData, unknown>()(
+      "POST",
+      "/admin/apps/{id}/validate",
+      appValidationSchema,
+    ),
+    publish: operation<
+      WithQuery<WithBody<PostAdminAppsIdPublishData, WorkflowPublishBody>, AppPublishQuery>,
+      unknown
+    >()(
+      "POST",
+      "/admin/apps/{id}/publish",
+      publishAcknowledgementSchema,
+      z.object({ force: z.literal("1").optional() }),
+    ),
+    deprecate: operation<PostAdminAppsIdDeprecateData, unknown>()(
+      "POST",
+      "/admin/apps/{id}/deprecate",
+      acknowledgementSchema,
+    ),
+    versions: operation<GetAdminAppsIdVersionsData, unknown>()(
+      "GET",
+      "/admin/apps/{id}/versions",
+      appVersionListSchema,
+    ),
+    permissions: operation<GetAdminAppsIdPermissionsData, unknown>()(
+      "GET",
+      "/admin/apps/{id}/permissions",
+      appPermissionListSchema,
+    ),
+    grantPermission: operation<WithBody<PostAdminAppsIdPermissionsData, AppPermissionBody>, unknown>()(
+      "POST",
+      "/admin/apps/{id}/permissions",
+      acknowledgementSchema,
+    ),
+    revokePermission: operation<WithQuery<DeleteAdminAppsIdPermissionsData, AppPermissionQuery>, unknown>()(
+      "DELETE",
+      "/admin/apps/{id}/permissions",
+      acknowledgementSchema,
+      z.object({ subject_type: z.string(), subject_id: z.string() }),
+    ),
+    onboardingCheck: operation<WithBody<PostAdminAppsOnboardingCheckData, AppOnboardingBody>, unknown>()(
+      "POST",
+      "/admin/apps/onboarding-check",
+      appOnboardingSchema,
+    ),
+    run: operation<PostV1AppsIdRunData, unknown>()("POST", "/v1/apps/{id}/run", appRunPlanSchema),
+    runs: operation<WithQuery<GetMeAppRunsData, AppRunsQuery>, unknown>()(
+      "GET",
+      "/me/app-runs",
+      appRunListSchema,
+      z.object({ app_id: z.string().optional(), limit: z.number().optional() }),
+    ),
+    runReceipt: operation<GetV1AppRunsRunIdReceiptData, unknown>()(
+      "GET",
+      "/v1/app-runs/{run_id}/receipt",
+      appRunReceiptSchema,
+    ),
+    templates: operation<GetAdminAppTemplatesData, unknown>()(
+      "GET",
+      "/admin/app-templates",
+      appTemplateListSchema,
+    ),
+    instantiateTemplate: operation<
+      WithBody<PostAdminAppTemplatesInstantiateData, AppTemplateInstantiateBody>,
+      unknown
+    >()("POST", "/admin/app-templates/instantiate", appTemplateInstantiateSchema),
+  },
+  skills: {
+    list: operation<WithQuery<GetAdminSkillsData, SkillListQuery>, unknown>()(
+      "GET",
+      "/admin/skills",
+      skillListSchema,
+      z.object({ status: z.string().optional() }),
+    ),
+    upsert: operation<WithBody<PostAdminSkillsData, SkillWriteBody>, unknown>()(
+      "POST",
+      "/admin/skills",
+      skillWriteSchema,
+    ),
+    remove: operation<DeleteAdminSkillsByNameNameData, unknown>()(
+      "DELETE",
+      "/admin/skills/by-name/{name}",
+      acknowledgementSchema,
+    ),
+    promote: operation<WithBody<PostAdminSkillsPromoteData, SkillPromoteBody>, unknown>()(
+      "POST",
+      "/admin/skills/promote",
+      skillWriteSchema,
+    ),
+    promotions: operation<WithQuery<GetAdminSkillsPromotionsData, SkillPromotionsQuery>, unknown>()(
+      "GET",
+      "/admin/skills/promotions",
+      skillPromotionListSchema,
+      z.object({ skill: z.string().optional(), limit: z.number().optional() }),
+    ),
+    runs: operation<WithQuery<GetAdminSkillsRunsData, SkillRunsQuery>, unknown>()(
+      "GET",
+      "/admin/skills/runs",
+      skillRunListSchema,
+      z.object({ skill: z.string().optional(), limit: z.number().optional() }),
+    ),
+    stats: operation<WithQuery<GetAdminSkillsStatsData, SkillStatsQuery>, unknown>()(
+      "GET",
+      "/admin/skills/stats",
+      skillStatsSchema,
+      z.object({ window: z.string().optional() }),
+    ),
+    // Side-effect free but expensive: only call from an explicit operator action.
+    scan: operation<WithQuery<GetAdminSkillsScanData, SkillScanQuery>, unknown>()(
+      "GET",
+      "/admin/skills/scan",
+      skillScanListSchema,
+      z.object({ name: z.string().optional() }),
+    ),
+    // Returns the full skill bundle: only call from an explicit export action.
+    export: operation<WithQuery<GetAdminSkillsExportData, SkillExportQuery>, unknown>()(
+      "GET",
+      "/admin/skills/export",
+      skillExportSchema,
+      z.object({ status: z.string().optional() }),
+    ),
+    import: operation<WithBody<PostAdminSkillsImportData, SkillImportBody>, unknown>()(
+      "POST",
+      "/admin/skills/import",
+      skillImportSchema,
+    ),
+    recommend: operation<
+      WithQuery<WithBody<PostAdminSkillsRecommendData, Record<string, never>>, SkillRecommendQuery>,
+      unknown
+    >()(
+      "POST",
+      "/admin/skills/recommend",
+      skillRecommendationSchema,
+      z.object({
+        window: z.string().optional(),
+        min_count: z.number().optional(),
+        apply: z.literal("1").optional(),
+      }),
+    ),
+    seedRecommended: operation<PostAdminSkillsSeedRecommendedData, unknown>()(
+      "POST",
+      "/admin/skills/seed-recommended",
+      skillSeedSchema,
+    ),
+    evaluate: operation<WithBody<PostAdminSkillsEvaluateData, SkillEvaluateBody>, unknown>()(
+      "POST",
+      "/admin/skills/evaluate",
+      skillEvaluationSchema,
+    ),
+    fitness: operation<WithQuery<GetAdminSkillsFitnessData, SkillFitnessQuery>, unknown>()(
+      "GET",
+      "/admin/skills/fitness",
+      skillFitnessSchema,
+      z.object({ skill: z.string() }),
+    ),
+    dependencyGraph: operation<WithQuery<GetAdminSkillsDependencyGraphData, SkillGraphQuery>, unknown>()(
+      "GET",
+      "/admin/skills/dependency-graph",
+      skillDependencyGraphSchema,
+      z.object({ skill: z.string().optional() }),
+    ),
+    studioCandidates: operation<
+      WithQuery<GetAdminSkillStudioCandidatesData, SkillStudioCandidateQuery>,
+      unknown
+    >()(
+      "GET",
+      "/admin/skill-studio/candidates",
+      skillStudioCandidateListSchema,
+      z.object({
+        window: z.string().optional(),
+        min_count: z.number().optional(),
+        limit: z.number().optional(),
+      }),
+    ),
+    studioAdopt: operation<WithBody<PostAdminSkillStudioAdoptData, SkillAdoptBody>, unknown>()(
+      "POST",
+      "/admin/skill-studio/adopt",
+      skillAdoptSchema,
+    ),
+    studioReadiness: operation<WithQuery<GetAdminSkillStudioReadinessData, SkillReadinessQuery>, unknown>()(
+      "GET",
+      "/admin/skill-studio/readiness",
+      skillReadinessSchema,
+      z.object({ name: z.string() }),
+    ),
+  },
+} as const;

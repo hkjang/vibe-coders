@@ -11,52 +11,12 @@ import { isProviderRef } from "@/shared/api/provider-ref";
 import { featureQueryKeys } from "@/features/registry";
 
 const routeQueryAllowlist: Readonly<Record<string, ReadonlySet<string>>> = {
+  // Screens declare their own query keys next to their route registration; this
+  // map covers the routes no feature module owns: the login screen and the two
+  // compatibility redirects that forward to the gateway catalog screens.
   "/login": new Set(["return_to"]),
   "/providers": new Set(["page", "provider", "q", "range", "status"]),
   "/models": new Set(["model", "model_provider", "page", "provider", "q", "range", "source", "status"]),
-  "/gateway/providers": new Set(["page", "provider", "q", "range", "status"]),
-  "/gateway/models": new Set([
-    "model",
-    "model_provider",
-    "page",
-    "provider",
-    "q",
-    "range",
-    "source",
-    "status",
-  ]),
-  "/overview": new Set(["range"]),
-  "/gateway/health": new Set(["range"]),
-  "/routing/rules": new Set(["page"]),
-  "/observability/requests": new Set([
-    "api_key_id",
-    "cursor",
-    "from",
-    "ip",
-    "language",
-    "limit",
-    "model",
-    "provider_ref",
-    "request_id",
-    "session_id",
-    "status",
-    "to",
-    "trace_id",
-    "tz",
-  ]),
-  "/observability/traces": new Set([
-    "cursor",
-    "from",
-    "limit",
-    "model",
-    "selected_ref",
-    "selected_request",
-    "status",
-    "to",
-    "trace_id",
-    "tz",
-  ]),
-  "/system/health": new Set(["range"]),
 };
 
 export const sensitiveQueryRejectionStateKey = "appSensitiveQueryKeys";
@@ -112,8 +72,10 @@ export function sanitizeAppRouteSearch(
   const parameters = new URLSearchParams(search);
   // Screens declare their own query keys next to their route registration; the
   // static map above covers the login screen and compatibility redirects.
+  // A screen's own declaration wins: the static map above must never shadow the
+  // keys a feature registered, or its filters are silently stripped from the URL.
   const allowed =
-    routeQueryAllowlist[routerPath(pathname)] ?? featureQueryKeys(routerPath(pathname)) ?? new Set<string>();
+    featureQueryKeys(routerPath(pathname)) ?? routeQueryAllowlist[routerPath(pathname)] ?? new Set<string>();
   const rejectedKeys = new Set<string>();
   const sensitiveKeys = new Set<string>();
   const rejectedValues = new Map<string, boolean>();

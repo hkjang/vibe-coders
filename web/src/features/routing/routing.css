@@ -1,0 +1,99 @@
+.routing-bars {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+}
+
+.routing-bar-row {
+  display: grid;
+  grid-template-columns: minmax(6rem, 12rem) 1fr auto;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.routing-bar-row dt {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.routing-bar-row dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.routing-bar-track {
+  height: 0.5rem;
+  border-radius: var(--radius-small);
+  background: var(--color-muted-soft);
+  overflow: hidden;
+}
+
+.routing-bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: var(--radius-small);
+  background: var(--color-primary);
+}
+
+.routing-bar-fill[data-tone="success"] {
+  background: var(--color-success);
+}
+
+.routing-bar-fill[data-tone="warning"] {
+  background: var(--color-warning);
+}
+
+.routing-bar-fill[data-tone="danger"] {
+  background: var(--color-danger);
+}
+
+.routing-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: flex-end;
+}
+
+.routing-form .form-field {
+  min-width: 12rem;
+  flex: 1 1 12rem;
+}
+
+.routing-steps {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.routing-steps li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-medium);
+  background: var(--color-card);
+}
+
+.routing-panel-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.routing-tab-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.routing-meta {
+  color: var(--color-muted);
+  font-size: 0.8125rem;
+}

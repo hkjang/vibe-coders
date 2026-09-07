@@ -1,0 +1,100 @@
+.access-stack {
+  display: grid;
+  gap: var(--space-4);
+}
+.access-cards {
+  display: grid;
+  gap: var(--space-4);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 24rem), 1fr));
+  align-items: start;
+}
+.access-note {
+  color: var(--color-muted);
+  font-size: 0.8125rem;
+  margin: 0;
+}
+.access-toolbar-field {
+  display: grid;
+  gap: var(--space-1);
+  color: var(--color-muted);
+  font-size: 0.8125rem;
+  font-weight: 650;
+}
+.access-toolbar-field input,
+.access-toolbar-field select {
+  min-width: 9rem;
+}
+.access-secret {
+  display: grid;
+  gap: var(--space-2);
+}
+.access-secret code {
+  overflow-wrap: anywhere;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-small);
+  background: var(--color-card);
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+}
+.access-scope-grid {
+  display: grid;
+  gap: var(--space-2);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr));
+  max-height: 18rem;
+  overflow-y: auto;
+}
+.access-meter {
+  display: block;
+  width: 100%;
+  height: 0.5rem;
+  border-radius: 999px;
+  background: var(--color-border);
+  overflow: hidden;
+}
+.access-meter span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--color-primary);
+}
+.access-meter[data-tone="warning"] span {
+  background: var(--color-warning);
+}
+.access-meter[data-tone="danger"] span {
+  background: var(--color-danger);
+}
+.access-list {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.access-list li {
+  display: grid;
+  gap: var(--space-1);
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+}
+.access-list li:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+.access-list-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  font-weight: 650;
+}
+.access-list-detail {
+  color: var(--color-muted);
+  font-size: 0.8125rem;
+}
+.access-inline-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}

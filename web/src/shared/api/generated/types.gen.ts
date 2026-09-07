@@ -875,7 +875,7 @@ export type DeleteAdminAlertsIdResponses = {
     200: unknown;
 };
 
-export type PutAdminAlertsIdData = {
+export type PatchAdminAlertsIdData = {
     body?: never;
     path: {
         id: string;
@@ -884,7 +884,7 @@ export type PutAdminAlertsIdData = {
     url: '/admin/alerts/{id}';
 };
 
-export type PutAdminAlertsIdResponses = {
+export type PatchAdminAlertsIdResponses = {
     /**
      * OK
      */
@@ -1023,16 +1023,32 @@ export type GetAdminApprovalsResponses = {
     200: unknown;
 };
 
-export type PostAdminApprovalsIdData = {
+export type PostAdminApprovalsIdApproveData = {
     body?: never;
     path: {
         id: string;
     };
     query?: never;
-    url: '/admin/approvals/{id}';
+    url: '/admin/approvals/{id}/approve';
 };
 
-export type PostAdminApprovalsIdResponses = {
+export type PostAdminApprovalsIdApproveResponses = {
+    /**
+     * OK
+     */
+    200: unknown;
+};
+
+export type PostAdminApprovalsIdRejectData = {
+    body?: never;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/admin/approvals/{id}/reject';
+};
+
+export type PostAdminApprovalsIdRejectResponses = {
     /**
      * OK
      */
@@ -1383,6 +1399,20 @@ export type GetAdminBudgetsAlertsResponses = {
     200: unknown;
 };
 
+export type GetAdminBudgetsProjectionData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/admin/budgets/projection';
+};
+
+export type GetAdminBudgetsProjectionResponses = {
+    /**
+     * OK
+     */
+    200: unknown;
+};
+
 export type DeleteAdminBudgetsIdData = {
     body?: never;
     path: {
@@ -1393,22 +1423,6 @@ export type DeleteAdminBudgetsIdData = {
 };
 
 export type DeleteAdminBudgetsIdResponses = {
-    /**
-     * OK
-     */
-    200: unknown;
-};
-
-export type PutAdminBudgetsIdData = {
-    body?: never;
-    path: {
-        id: string;
-    };
-    query?: never;
-    url: '/admin/budgets/{id}';
-};
-
-export type PutAdminBudgetsIdResponses = {
     /**
      * OK
      */
@@ -1501,6 +1515,22 @@ export type PostAdminChangeSetsResponses = {
     200: unknown;
 };
 
+export type DeleteAdminChangeSetsIdData = {
+    body?: never;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/admin/change-sets/{id}';
+};
+
+export type DeleteAdminChangeSetsIdResponses = {
+    /**
+     * OK
+     */
+    200: unknown;
+};
+
 export type GetAdminChangeSetsIdData = {
     body?: never;
     path: {
@@ -1517,16 +1547,80 @@ export type GetAdminChangeSetsIdResponses = {
     200: unknown;
 };
 
-export type PostAdminChangeSetsIdData = {
+export type PostAdminChangeSetsIdApplyData = {
     body?: never;
     path: {
         id: string;
     };
     query?: never;
-    url: '/admin/change-sets/{id}';
+    url: '/admin/change-sets/{id}/apply';
 };
 
-export type PostAdminChangeSetsIdResponses = {
+export type PostAdminChangeSetsIdApplyResponses = {
+    /**
+     * OK
+     */
+    200: unknown;
+};
+
+export type PostAdminChangeSetsIdApproveData = {
+    body?: never;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/admin/change-sets/{id}/approve';
+};
+
+export type PostAdminChangeSetsIdApproveResponses = {
+    /**
+     * OK
+     */
+    200: unknown;
+};
+
+export type PostAdminChangeSetsIdDryrunData = {
+    body?: never;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/admin/change-sets/{id}/dryrun';
+};
+
+export type PostAdminChangeSetsIdDryrunResponses = {
+    /**
+     * OK
+     */
+    200: unknown;
+};
+
+export type PostAdminChangeSetsIdRollbackData = {
+    body?: never;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/admin/change-sets/{id}/rollback';
+};
+
+export type PostAdminChangeSetsIdRollbackResponses = {
+    /**
+     * OK
+     */
+    200: unknown;
+};
+
+export type PostAdminChangeSetsIdSubmitData = {
+    body?: never;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/admin/change-sets/{id}/submit';
+};
+
+export type PostAdminChangeSetsIdSubmitResponses = {
     /**
      * OK
      */
@@ -1743,6 +1837,20 @@ export type GetAdminCostData = {
 };
 
 export type GetAdminCostResponses = {
+    /**
+     * OK
+     */
+    200: unknown;
+};
+
+export type PostAdminCostData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/admin/cost';
+};
+
+export type PostAdminCostResponses = {
     /**
      * OK
      */
@@ -2155,7 +2263,7 @@ export type PostAdminDwMetricsResponses = {
     200: unknown;
 };
 
-export type PostAdminDwMetricsKeyData = {
+export type DeleteAdminDwMetricsKeyData = {
     body?: never;
     path: {
         key: string;
@@ -2164,7 +2272,23 @@ export type PostAdminDwMetricsKeyData = {
     url: '/admin/dw/metrics/{key}';
 };
 
-export type PostAdminDwMetricsKeyResponses = {
+export type DeleteAdminDwMetricsKeyResponses = {
+    /**
+     * OK
+     */
+    200: unknown;
+};
+
+export type PostAdminDwMetricsKeyValidateData = {
+    body?: never;
+    path: {
+        key: string;
+    };
+    query?: never;
+    url: '/admin/dw/metrics/{key}/validate';
+};
+
+export type PostAdminDwMetricsKeyValidateResponses = {
     /**
      * OK
      */
@@ -3183,6 +3307,20 @@ export type GetAdminMcpToolsResponses = {
     200: unknown;
 };
 
+export type PostAdminMcpToolsData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/admin/mcp/tools';
+};
+
+export type PostAdminMcpToolsResponses = {
+    /**
+     * OK
+     */
+    200: unknown;
+};
+
 export type GetAdminMcpTopologyData = {
     body?: never;
     path?: never;
@@ -3255,7 +3393,7 @@ export type DeleteAdminMcpUpstreamsIdResponses = {
     200: unknown;
 };
 
-export type GetAdminMcpUpstreamsIdData = {
+export type PatchAdminMcpUpstreamsIdData = {
     body?: never;
     path: {
         id: string;
@@ -3264,23 +3402,7 @@ export type GetAdminMcpUpstreamsIdData = {
     url: '/admin/mcp/upstreams/{id}';
 };
 
-export type GetAdminMcpUpstreamsIdResponses = {
-    /**
-     * OK
-     */
-    200: unknown;
-};
-
-export type PutAdminMcpUpstreamsIdData = {
-    body?: never;
-    path: {
-        id: string;
-    };
-    query?: never;
-    url: '/admin/mcp/upstreams/{id}';
-};
-
-export type PutAdminMcpUpstreamsIdResponses = {
+export type PatchAdminMcpUpstreamsIdResponses = {
     /**
      * OK
      */
@@ -3297,6 +3419,22 @@ export type GetAdminMcpUpstreamsIdFlowData = {
 };
 
 export type GetAdminMcpUpstreamsIdFlowResponses = {
+    /**
+     * OK
+     */
+    200: unknown;
+};
+
+export type GetAdminMcpUpstreamsIdProbeData = {
+    body?: never;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/admin/mcp/upstreams/{id}/probe';
+};
+
+export type GetAdminMcpUpstreamsIdProbeResponses = {
     /**
      * OK
      */
@@ -4702,7 +4840,7 @@ export type DeleteAdminQuotasIdResponses = {
     200: unknown;
 };
 
-export type PutAdminQuotasIdData = {
+export type PatchAdminQuotasIdData = {
     body?: never;
     path: {
         id: string;
@@ -4711,7 +4849,7 @@ export type PutAdminQuotasIdData = {
     url: '/admin/quotas/{id}';
 };
 
-export type PutAdminQuotasIdResponses = {
+export type PatchAdminQuotasIdResponses = {
     /**
      * OK
      */
@@ -5345,6 +5483,22 @@ export type GetAdminRequestsIdResponses = {
     200: unknown;
 };
 
+export type PostAdminRequestsIdAnalyzeData = {
+    body?: never;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/admin/requests/{id}/analyze';
+};
+
+export type PostAdminRequestsIdAnalyzeResponses = {
+    /**
+     * OK
+     */
+    200: unknown;
+};
+
 export type GetAdminRequestsIdBodyData = {
     body?: never;
     path: {
@@ -5355,6 +5509,22 @@ export type GetAdminRequestsIdBodyData = {
 };
 
 export type GetAdminRequestsIdBodyResponses = {
+    /**
+     * OK
+     */
+    200: unknown;
+};
+
+export type GetAdminRequestsIdExplainData = {
+    body?: never;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/admin/requests/{id}/explain';
+};
+
+export type GetAdminRequestsIdExplainResponses = {
     /**
      * OK
      */
@@ -5403,6 +5573,86 @@ export type GetAdminRequestsIdLinksData = {
 };
 
 export type GetAdminRequestsIdLinksResponses = {
+    /**
+     * OK
+     */
+    200: unknown;
+};
+
+export type DeleteAdminRequestsIdNoteData = {
+    body?: never;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/admin/requests/{id}/note';
+};
+
+export type DeleteAdminRequestsIdNoteResponses = {
+    /**
+     * OK
+     */
+    200: unknown;
+};
+
+export type GetAdminRequestsIdNoteData = {
+    body?: never;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/admin/requests/{id}/note';
+};
+
+export type GetAdminRequestsIdNoteResponses = {
+    /**
+     * OK
+     */
+    200: unknown;
+};
+
+export type PostAdminRequestsIdNoteData = {
+    body?: never;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/admin/requests/{id}/note';
+};
+
+export type PostAdminRequestsIdNoteResponses = {
+    /**
+     * OK
+     */
+    200: unknown;
+};
+
+export type PutAdminRequestsIdNoteData = {
+    body?: never;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/admin/requests/{id}/note';
+};
+
+export type PutAdminRequestsIdNoteResponses = {
+    /**
+     * OK
+     */
+    200: unknown;
+};
+
+export type PostAdminRequestsIdReplayData = {
+    body?: never;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/admin/requests/{id}/replay';
+};
+
+export type PostAdminRequestsIdReplayResponses = {
     /**
      * OK
      */
@@ -5485,6 +5735,20 @@ export type PostAdminRetentionResponses = {
     200: unknown;
 };
 
+export type DeleteAdminRolesData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/admin/roles';
+};
+
+export type DeleteAdminRolesResponses = {
+    /**
+     * OK
+     */
+    200: unknown;
+};
+
 export type GetAdminRolesData = {
     body?: never;
     path?: never;
@@ -5557,7 +5821,7 @@ export type DeleteAdminRoutingRulesIdResponses = {
     200: unknown;
 };
 
-export type PutAdminRoutingRulesIdData = {
+export type PatchAdminRoutingRulesIdData = {
     body?: never;
     path: {
         id: string;
@@ -5566,7 +5830,7 @@ export type PutAdminRoutingRulesIdData = {
     url: '/admin/routing-rules/{id}';
 };
 
-export type PutAdminRoutingRulesIdResponses = {
+export type PatchAdminRoutingRulesIdResponses = {
     /**
      * OK
      */
@@ -6471,6 +6735,20 @@ export type GetAdminSkillsFitnessResponses = {
     200: unknown;
 };
 
+export type PostAdminSkillsFitnessData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/admin/skills/fitness';
+};
+
+export type PostAdminSkillsFitnessResponses = {
+    /**
+     * OK
+     */
+    200: unknown;
+};
+
 export type PostAdminSkillsImportData = {
     body?: never;
     path?: never;
@@ -6830,7 +7108,7 @@ export type DeleteAdminTemplatesIdResponses = {
     200: unknown;
 };
 
-export type GetAdminTemplatesIdData = {
+export type PatchAdminTemplatesIdData = {
     body?: never;
     path: {
         id: string;
@@ -6839,23 +7117,103 @@ export type GetAdminTemplatesIdData = {
     url: '/admin/templates/{id}';
 };
 
-export type GetAdminTemplatesIdResponses = {
+export type PatchAdminTemplatesIdResponses = {
     /**
      * OK
      */
     200: unknown;
 };
 
-export type PutAdminTemplatesIdData = {
+export type PostAdminTemplatesIdApproveData = {
     body?: never;
     path: {
         id: string;
     };
     query?: never;
-    url: '/admin/templates/{id}';
+    url: '/admin/templates/{id}/approve';
 };
 
-export type PutAdminTemplatesIdResponses = {
+export type PostAdminTemplatesIdApproveResponses = {
+    /**
+     * OK
+     */
+    200: unknown;
+};
+
+export type GetAdminTemplatesIdHistoryData = {
+    body?: never;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/admin/templates/{id}/history';
+};
+
+export type GetAdminTemplatesIdHistoryResponses = {
+    /**
+     * OK
+     */
+    200: unknown;
+};
+
+export type PostAdminTemplatesIdRollbackData = {
+    body?: never;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/admin/templates/{id}/rollback';
+};
+
+export type PostAdminTemplatesIdRollbackResponses = {
+    /**
+     * OK
+     */
+    200: unknown;
+};
+
+export type PostAdminTemplatesIdSubmitData = {
+    body?: never;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/admin/templates/{id}/submit';
+};
+
+export type PostAdminTemplatesIdSubmitResponses = {
+    /**
+     * OK
+     */
+    200: unknown;
+};
+
+export type GetAdminTemplatesIdUsageData = {
+    body?: never;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/admin/templates/{id}/usage';
+};
+
+export type GetAdminTemplatesIdUsageResponses = {
+    /**
+     * OK
+     */
+    200: unknown;
+};
+
+export type PostAdminTemplatesIdUseData = {
+    body?: never;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/admin/templates/{id}/use';
+};
+
+export type PostAdminTemplatesIdUseResponses = {
     /**
      * OK
      */
@@ -6940,6 +7298,20 @@ export type PostAdminText2SqlColumnsData = {
 };
 
 export type PostAdminText2SqlColumnsResponses = {
+    /**
+     * OK
+     */
+    200: unknown;
+};
+
+export type DeleteAdminText2SqlConnectionsData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/admin/text2sql/connections';
+};
+
+export type DeleteAdminText2SqlConnectionsResponses = {
     /**
      * OK
      */
@@ -7603,6 +7975,22 @@ export type PatchAdminUsersIdData = {
 };
 
 export type PatchAdminUsersIdResponses = {
+    /**
+     * OK
+     */
+    200: unknown;
+};
+
+export type GetAdminUsersIdReportData = {
+    body?: never;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/admin/users/{id}/report';
+};
+
+export type GetAdminUsersIdReportResponses = {
     /**
      * OK
      */
@@ -8289,7 +8677,7 @@ export type DeleteMeKeysIdResponses = {
     200: unknown;
 };
 
-export type PostMeKeysIdData = {
+export type PatchMeKeysIdData = {
     body?: never;
     path: {
         id: string;
@@ -8298,7 +8686,23 @@ export type PostMeKeysIdData = {
     url: '/me/keys/{id}';
 };
 
-export type PostMeKeysIdResponses = {
+export type PatchMeKeysIdResponses = {
+    /**
+     * OK
+     */
+    200: unknown;
+};
+
+export type PostMeKeysIdRotateData = {
+    body?: never;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/me/keys/{id}/rotate';
+};
+
+export type PostMeKeysIdRotateResponses = {
     /**
      * OK
      */
@@ -8546,16 +8950,32 @@ export type GetMeSkillsResponses = {
     200: unknown;
 };
 
-export type PostMeSkillsNameRequestData = {
+export type PostMeSkillsNameFeedbackData = {
     body?: never;
     path: {
         name: string;
     };
     query?: never;
-    url: '/me/skills/{name}/request';
+    url: '/me/skills/{name}/feedback';
 };
 
-export type PostMeSkillsNameRequestResponses = {
+export type PostMeSkillsNameFeedbackResponses = {
+    /**
+     * OK
+     */
+    200: unknown;
+};
+
+export type PostMeSkillsNameRequestAccessData = {
+    body?: never;
+    path: {
+        name: string;
+    };
+    query?: never;
+    url: '/me/skills/{name}/request-access';
+};
+
+export type PostMeSkillsNameRequestAccessResponses = {
     /**
      * OK
      */
@@ -8725,6 +9145,20 @@ export type GetTeamReportsData = {
 };
 
 export type GetTeamReportsResponses = {
+    /**
+     * OK
+     */
+    200: unknown;
+};
+
+export type PostTeamReportsData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/team/reports';
+};
+
+export type PostTeamReportsResponses = {
     /**
      * OK
      */
