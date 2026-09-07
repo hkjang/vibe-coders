@@ -757,6 +757,52 @@ export type PostAdminAgentRoutesResponses = {
 
 export type PostAdminAgentRoutesResponse = PostAdminAgentRoutesResponses[keyof PostAdminAgentRoutesResponses];
 
+export type GetAdminAgentRoutesToolCatalogData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/admin/agent-routes/tool-catalog';
+};
+
+export type GetAdminAgentRoutesToolCatalogResponses = {
+    /**
+     * OK
+     */
+    200: unknown;
+};
+
+export type DeleteAdminAgentRoutesIdData = {
+    body?: never;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/admin/agent-routes/{id}';
+};
+
+export type DeleteAdminAgentRoutesIdResponses = {
+    /**
+     * OK
+     */
+    200: unknown;
+};
+
+export type PostAdminAgentRoutesIdTestData = {
+    body?: never;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/admin/agent-routes/{id}/test';
+};
+
+export type PostAdminAgentRoutesIdTestResponses = {
+    /**
+     * OK
+     */
+    200: unknown;
+};
+
 export type GetAdminAgentsData = {
     body?: never;
     path?: never;
@@ -4892,6 +4938,22 @@ export type PostAdminRedteamProbeCasesResponses = {
     200: unknown;
 };
 
+export type DeleteAdminRedteamProbeCasesIdData = {
+    body?: never;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/admin/redteam/probe-cases/{id}';
+};
+
+export type DeleteAdminRedteamProbeCasesIdResponses = {
+    /**
+     * OK
+     */
+    200: unknown;
+};
+
 export type GetAdminRedteamProbePacksData = {
     body?: never;
     path?: never;
@@ -4920,6 +4982,34 @@ export type PostAdminRedteamProbePacksResponses = {
     200: unknown;
 };
 
+export type GetAdminRedteamProbePacksExportData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/admin/redteam/probe-packs/export';
+};
+
+export type GetAdminRedteamProbePacksExportResponses = {
+    /**
+     * OK
+     */
+    200: unknown;
+};
+
+export type PostAdminRedteamProbePacksImportData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/admin/redteam/probe-packs/import';
+};
+
+export type PostAdminRedteamProbePacksImportResponses = {
+    /**
+     * OK
+     */
+    200: unknown;
+};
+
 export type GetAdminRedteamRemediationsData = {
     body?: never;
     path?: never;
@@ -4928,6 +5018,38 @@ export type GetAdminRedteamRemediationsData = {
 };
 
 export type GetAdminRedteamRemediationsResponses = {
+    /**
+     * OK
+     */
+    200: unknown;
+};
+
+export type PostAdminRedteamRemediationsIdData = {
+    body?: never;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/admin/redteam/remediations/{id}';
+};
+
+export type PostAdminRedteamRemediationsIdResponses = {
+    /**
+     * OK
+     */
+    200: unknown;
+};
+
+export type PostAdminRedteamRemediationsIdApplyData = {
+    body?: never;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/admin/redteam/remediations/{id}/apply';
+};
+
+export type PostAdminRedteamRemediationsIdApplyResponses = {
     /**
      * OK
      */
@@ -4960,6 +5082,22 @@ export type PostAdminRedteamResultsIdRemediationData = {
 };
 
 export type PostAdminRedteamResultsIdRemediationResponses = {
+    /**
+     * OK
+     */
+    200: unknown;
+};
+
+export type PostAdminRedteamResultsIdRerunData = {
+    body?: never;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/admin/redteam/results/{id}/rerun';
+};
+
+export type PostAdminRedteamResultsIdRerunResponses = {
     /**
      * OK
      */
@@ -6942,6 +7080,36 @@ export type PostAdminText2SqlGoldenData = {
 };
 
 export type PostAdminText2SqlGoldenResponses = {
+    /**
+     * OK
+     */
+    200: unknown;
+};
+
+export type PostAdminText2SqlGoldenRunData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/admin/text2sql/golden/run';
+};
+
+export type PostAdminText2SqlGoldenRunResponses = {
+    /**
+     * OK
+     */
+    200: unknown;
+};
+
+export type DeleteAdminText2SqlGoldenIdData = {
+    body?: never;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/admin/text2sql/golden/{id}';
+};
+
+export type DeleteAdminText2SqlGoldenIdResponses = {
     /**
      * OK
      */

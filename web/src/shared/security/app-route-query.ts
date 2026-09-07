@@ -8,6 +8,7 @@ import { isAppRequestRef } from "@/shared/api/app-request-ref";
 import { validateRequestTimeFilters } from "@/shared/utils/request-time-filters";
 import { isOpaqueAppRequestCursor, isValidRequestQueryField } from "@/shared/utils/request-query-filters";
 import { isProviderRef } from "@/shared/api/provider-ref";
+import { featureQueryKeys } from "@/features/registry";
 
 const routeQueryAllowlist: Readonly<Record<string, ReadonlySet<string>>> = {
   "/login": new Set(["return_to"]),
@@ -109,7 +110,10 @@ export function sanitizeAppRouteSearch(
   credentialPrefixes: readonly string[] = defaultCredentialPrefixes,
 ): SanitizedAppRouteSearch {
   const parameters = new URLSearchParams(search);
-  const allowed = routeQueryAllowlist[routerPath(pathname)] ?? new Set<string>();
+  // Screens declare their own query keys next to their route registration; the
+  // static map above covers the login screen and compatibility redirects.
+  const allowed =
+    routeQueryAllowlist[routerPath(pathname)] ?? featureQueryKeys(routerPath(pathname)) ?? new Set<string>();
   const rejectedKeys = new Set<string>();
   const sensitiveKeys = new Set<string>();
   const rejectedValues = new Map<string, boolean>();

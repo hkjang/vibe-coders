@@ -45,7 +45,29 @@ import type {
   PostAuthSsoExchangeData,
   PostAuthSsoExchangeResponse,
 } from "@/shared/api/generated";
-import type { OpenApiMethod, OpenApiMethodFor, OpenApiPath } from "@/shared/api/generated/paths.gen";
+import {
+  operation,
+  route,
+  type ApiEndpointBase,
+  type ApiRoute,
+  type EndpointLeaves,
+  type WithQuery,
+} from "@/shared/api/endpoint-factory";
+import { accessEndpoints } from "@/shared/api/domains/access";
+import { agentsEndpoints } from "@/shared/api/domains/agents";
+import { dataEndpoints } from "@/shared/api/domains/data";
+import { finopsEndpoints } from "@/shared/api/domains/finops";
+import { gatewayEndpoints } from "@/shared/api/domains/gateway";
+import { governanceEndpoints } from "@/shared/api/domains/governance";
+import { governanceReportsEndpoints } from "@/shared/api/domains/governance-reports";
+import { mcpEndpoints } from "@/shared/api/domains/mcp";
+import { observabilityEndpoints } from "@/shared/api/domains/observability";
+import { promptsEndpoints } from "@/shared/api/domains/prompts";
+import { redteamEndpoints } from "@/shared/api/domains/redteam";
+import { routingEndpoints } from "@/shared/api/domains/routing";
+import { securityEndpoints } from "@/shared/api/domains/security";
+import { systemEndpoints } from "@/shared/api/domains/system";
+import { text2sqlEndpoints } from "@/shared/api/domains/text2sql";
 import {
   adminModelsQuerySchema,
   adminModelsResponseSchema,
@@ -82,77 +104,15 @@ import type {
   RoutingHealthQuery,
 } from "@/shared/api/schemas";
 
-const endpointBrand: unique symbol = Symbol("api-endpoint");
-declare const operationData: unique symbol;
-
-interface OperationData {
-  readonly url: OpenApiPath;
-  readonly query?: object;
-}
-
-type WithQuery<Data extends OperationData, Query extends object> = Omit<Data, "query"> & {
-  readonly query?: Query;
-};
-
-export interface ApiRoute<
-  Data extends OperationData = OperationData,
-  Method extends OpenApiMethod = OpenApiMethod,
-> {
-  readonly method: Method;
-  readonly path: Data["url"];
-  readonly [endpointBrand]: true;
-  readonly [operationData]?: Data;
-}
-
-export interface ApiEndpoint<
-  Data extends OperationData,
-  Method extends OpenApiMethod = OpenApiMethod,
-  Schema extends z.ZodType = z.ZodType,
-> extends ApiRoute<Data, Method> {
-  readonly schema: Schema;
-  readonly querySchema?: z.ZodType<object>;
-  readonly errorSchemas?: ApiEndpointErrorSchemas;
-}
-
-export type ApiEndpointErrorSchemas = Readonly<Partial<Record<number, z.ZodType>>>;
-
-export interface ApiEndpointBase {
-  readonly method: OpenApiMethod;
-  readonly path: OpenApiPath;
-  readonly schema: z.ZodType;
-  readonly querySchema?: z.ZodType<object>;
-  readonly errorSchemas?: ApiEndpointErrorSchemas;
-  readonly [endpointBrand]: true;
-}
-
-export type ApiEndpointData<Endpoint extends ApiEndpointBase> =
-  Endpoint extends ApiEndpoint<infer Data> ? Data : never;
-
-export type ApiEndpointOutput<Endpoint extends ApiEndpointBase> = z.output<Endpoint["schema"]>;
-
-function operation<Data extends OperationData, Response>() {
-  return <Method extends OpenApiMethodFor<Data["url"]>, Schema extends z.ZodType<Response>>(
-    method: Method,
-    path: Data["url"],
-    schema: Schema,
-    querySchema?: z.ZodType<object>,
-    errorSchemas?: ApiEndpointErrorSchemas,
-  ): ApiEndpoint<Data, Method, Schema> => ({
-    [endpointBrand]: true,
-    method,
-    path,
-    schema,
-    ...(querySchema ? { querySchema } : {}),
-    ...(errorSchemas ? { errorSchemas } : {}),
-  });
-}
-
-function route<Data extends OperationData>() {
-  return <Method extends OpenApiMethodFor<Data["url"]>>(
-    method: Method,
-    path: Data["url"],
-  ): ApiRoute<Data, Method> => ({ [endpointBrand]: true, method, path });
-}
+export type {
+  ApiEndpoint,
+  ApiEndpointBase,
+  ApiEndpointData,
+  ApiEndpointErrorSchemas,
+  ApiEndpointOutput,
+  ApiRoute,
+  WithQuery,
+} from "@/shared/api/endpoint-factory";
 
 const statusResponseSchema = z.object({ status: z.string() }) satisfies z.ZodType<PostAuthLogoutResponse>;
 
@@ -259,14 +219,27 @@ export const endpoints = {
       >()("GET", "/admin/routing/health", routingHealthSchema, routingHealthQuerySchema),
     },
   },
+  // Domain registries: one file per console domain under "@/shared/api/domains".
+  domains: {
+    access: accessEndpoints,
+    agents: agentsEndpoints,
+    data: dataEndpoints,
+    finops: finopsEndpoints,
+    gateway: gatewayEndpoints,
+    governance: governanceEndpoints,
+    governanceReports: governanceReportsEndpoints,
+    mcp: mcpEndpoints,
+    observability: observabilityEndpoints,
+    prompts: promptsEndpoints,
+    redteam: redteamEndpoints,
+    routing: routingEndpoints,
+    security: securityEndpoints,
+    system: systemEndpoints,
+    text2sql: text2sqlEndpoints,
+  },
 } as const;
 
-type EndpointLeaves<Registry> = Registry extends ApiEndpointBase
-  ? Registry
-  : Registry extends ApiRoute
-    ? never
-    : Registry extends object
-      ? { [Key in keyof Registry]: EndpointLeaves<Registry[Key]> }[keyof Registry]
-      : never;
-
 export type RegisteredApiEndpoint = EndpointLeaves<typeof endpoints>;
+
+// Keeps the imported types referenced for the re-export above under isolatedModules.
+export type { ApiEndpointBase as RegisteredApiEndpointBase, ApiRoute as RegisteredApiRoute };
