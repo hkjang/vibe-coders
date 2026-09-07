@@ -2798,7 +2798,7 @@
   "info": {
     "description": "OpenAI-compatible AI control-plane gateway. This document covers the full HTTP surface; request/response bodies are summarized — see the admin UI for live examples.",
     "title": "AI Proxy Gateway API",
-    "version": "v0.83.0"
+    "version": "v0.83.1"
   },
   "openapi": "3.0.3",
   "paths": {
