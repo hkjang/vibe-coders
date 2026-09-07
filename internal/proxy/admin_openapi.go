@@ -392,7 +392,12 @@ var apiEndpoints = []apiEndpoint{
 	{"/admin/chat-test/multi-run/predict", []string{"post"}, "chat-test", "Predict cost/latency of a multi-model run", false},
 	{"/admin/chat-test/multi-run/leaderboard", []string{"get"}, "chat-test", "Multi-model leaderboard", false},
 	{"/admin/chat-test/multi-run/runs", []string{"get"}, "chat-test", "List multi-model test runs", false},
-	{"/admin/chat-test/multi-run/runs/{id}", []string{"get", "post"}, "chat-test", "Get a run / submit feedback", false},
+	{"/admin/chat-test/multi-run/runs/{id}", []string{"get"}, "chat-test", "Get a multi-model run", false},
+	{"/admin/chat-test/multi-run/runs/{id}/feedback", []string{"post"}, "chat-test", "Rate one model's answer in a run", false},
+	{"/admin/chat-test/multi-run/runs/{id}/promote", []string{"post"}, "chat-test", "Promote a run result into a routing rule draft", false},
+	{"/admin/chat-test/multi-run/runs/{id}/golden", []string{"post"}, "chat-test", "Save a run result as a golden answer", false},
+	{"/admin/chat-test/multi-run/runs/{id}/diff", []string{"get"}, "chat-test", "Diff two answers in a run", false},
+	{"/admin/chat-test/multi-run/runs/{id}/export", []string{"get"}, "chat-test", "Export a run (?format=md|csv)", false},
 	{"/admin/chat-test/multi-run/runs/{id}/code-verify", []string{"get"}, "chat-test", "Code verification leaderboard across a run's models", false},
 	// ---- admin: DW / ClickHouse ----
 	{"/admin/dw/metrics", []string{"get", "post"}, "clickhouse", "Metric catalog: list/upsert", false},
@@ -410,11 +415,12 @@ var apiEndpoints = []apiEndpoint{
 	// ---- admin: prompt assets / lab ----
 	{"/admin/prompt-assets", []string{"get"}, "prompt-lab", "Reusable prompt assets", false},
 	{"/admin/prompt-lab/experiments", []string{"get", "post"}, "prompt-lab", "List/create prompt experiments", false},
-	{"/admin/prompt-lab/experiments/{id}", []string{"get"}, "prompt-lab", "Experiment detail (+ runs)", false},
+	{"/admin/prompt-lab/experiments/{id}", []string{"get", "patch", "delete"}, "prompt-lab", "Experiment detail, update or delete", false},
 	{"/admin/prompt-lab/rubrics", []string{"get", "post"}, "prompt-lab", "Evaluation rubrics", false},
 	{"/admin/prompt-lab/contracts", []string{"get", "post"}, "prompt-lab", "Output contracts", false},
 	{"/admin/prompt-lab/test-cases", []string{"post"}, "prompt-lab", "Create a test case", false},
 	{"/admin/prompt-lab/test-cases/{id}", []string{"get", "delete"}, "prompt-lab", "Get/delete a test case", false},
+	{"/admin/prompt-lab/test-cases/{id}/run", []string{"post"}, "prompt-lab", "Run one prompt test case", false},
 	// ---- admin: skills ----
 	{"/admin/skills/fitness", []string{"get", "post"}, "skills", "Skill fitness scores: read/record evidence", false},
 	{"/admin/skills/adoption", []string{"get"}, "skills", "Skill adoption metrics", false},

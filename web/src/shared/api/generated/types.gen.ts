@@ -1713,22 +1713,6 @@ export type GetAdminChatTestMultiRunRunsIdResponses = {
     200: unknown;
 };
 
-export type PostAdminChatTestMultiRunRunsIdData = {
-    body?: never;
-    path: {
-        id: string;
-    };
-    query?: never;
-    url: '/admin/chat-test/multi-run/runs/{id}';
-};
-
-export type PostAdminChatTestMultiRunRunsIdResponses = {
-    /**
-     * OK
-     */
-    200: unknown;
-};
-
 export type GetAdminChatTestMultiRunRunsIdCodeVerifyData = {
     body?: never;
     path: {
@@ -1739,6 +1723,86 @@ export type GetAdminChatTestMultiRunRunsIdCodeVerifyData = {
 };
 
 export type GetAdminChatTestMultiRunRunsIdCodeVerifyResponses = {
+    /**
+     * OK
+     */
+    200: unknown;
+};
+
+export type GetAdminChatTestMultiRunRunsIdDiffData = {
+    body?: never;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/admin/chat-test/multi-run/runs/{id}/diff';
+};
+
+export type GetAdminChatTestMultiRunRunsIdDiffResponses = {
+    /**
+     * OK
+     */
+    200: unknown;
+};
+
+export type GetAdminChatTestMultiRunRunsIdExportData = {
+    body?: never;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/admin/chat-test/multi-run/runs/{id}/export';
+};
+
+export type GetAdminChatTestMultiRunRunsIdExportResponses = {
+    /**
+     * OK
+     */
+    200: unknown;
+};
+
+export type PostAdminChatTestMultiRunRunsIdFeedbackData = {
+    body?: never;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/admin/chat-test/multi-run/runs/{id}/feedback';
+};
+
+export type PostAdminChatTestMultiRunRunsIdFeedbackResponses = {
+    /**
+     * OK
+     */
+    200: unknown;
+};
+
+export type PostAdminChatTestMultiRunRunsIdGoldenData = {
+    body?: never;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/admin/chat-test/multi-run/runs/{id}/golden';
+};
+
+export type PostAdminChatTestMultiRunRunsIdGoldenResponses = {
+    /**
+     * OK
+     */
+    200: unknown;
+};
+
+export type PostAdminChatTestMultiRunRunsIdPromoteData = {
+    body?: never;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/admin/chat-test/multi-run/runs/{id}/promote';
+};
+
+export type PostAdminChatTestMultiRunRunsIdPromoteResponses = {
     /**
      * OK
      */
@@ -4443,6 +4507,22 @@ export type PostAdminPromptLabExperimentsResponses = {
     200: unknown;
 };
 
+export type DeleteAdminPromptLabExperimentsIdData = {
+    body?: never;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/admin/prompt-lab/experiments/{id}';
+};
+
+export type DeleteAdminPromptLabExperimentsIdResponses = {
+    /**
+     * OK
+     */
+    200: unknown;
+};
+
 export type GetAdminPromptLabExperimentsIdData = {
     body?: never;
     path: {
@@ -4453,6 +4533,22 @@ export type GetAdminPromptLabExperimentsIdData = {
 };
 
 export type GetAdminPromptLabExperimentsIdResponses = {
+    /**
+     * OK
+     */
+    200: unknown;
+};
+
+export type PatchAdminPromptLabExperimentsIdData = {
+    body?: never;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/admin/prompt-lab/experiments/{id}';
+};
+
+export type PatchAdminPromptLabExperimentsIdResponses = {
     /**
      * OK
      */
@@ -4527,6 +4623,22 @@ export type GetAdminPromptLabTestCasesIdData = {
 };
 
 export type GetAdminPromptLabTestCasesIdResponses = {
+    /**
+     * OK
+     */
+    200: unknown;
+};
+
+export type PostAdminPromptLabTestCasesIdRunData = {
+    body?: never;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/admin/prompt-lab/test-cases/{id}/run';
+};
+
+export type PostAdminPromptLabTestCasesIdRunResponses = {
     /**
      * OK
      */

@@ -4383,34 +4383,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Get a run / submit feedback",
-        "tags": [
-          "chat-test"
-        ]
-      },
-      "post": {
-        "operationId": "post__admin_chat_test_multi_run_runs_id",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK"
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "summary": "Get a run / submit feedback",
+        "summary": "Get a multi-model run",
         "tags": [
           "chat-test"
         ]
@@ -4440,6 +4413,151 @@
           }
         ],
         "summary": "Code verification leaderboard across a run's models",
+        "tags": [
+          "chat-test"
+        ]
+      }
+    },
+    "/admin/chat-test/multi-run/runs/{id}/diff": {
+      "get": {
+        "operationId": "get__admin_chat_test_multi_run_runs_id_diff",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Diff two answers in a run",
+        "tags": [
+          "chat-test"
+        ]
+      }
+    },
+    "/admin/chat-test/multi-run/runs/{id}/export": {
+      "get": {
+        "operationId": "get__admin_chat_test_multi_run_runs_id_export",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Export a run (?format=md|csv)",
+        "tags": [
+          "chat-test"
+        ]
+      }
+    },
+    "/admin/chat-test/multi-run/runs/{id}/feedback": {
+      "post": {
+        "operationId": "post__admin_chat_test_multi_run_runs_id_feedback",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Rate one model's answer in a run",
+        "tags": [
+          "chat-test"
+        ]
+      }
+    },
+    "/admin/chat-test/multi-run/runs/{id}/golden": {
+      "post": {
+        "operationId": "post__admin_chat_test_multi_run_runs_id_golden",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Save a run result as a golden answer",
+        "tags": [
+          "chat-test"
+        ]
+      }
+    },
+    "/admin/chat-test/multi-run/runs/{id}/promote": {
+      "post": {
+        "operationId": "post__admin_chat_test_multi_run_runs_id_promote",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Promote a run result into a routing rule draft",
         "tags": [
           "chat-test"
         ]
@@ -8239,6 +8357,33 @@
       }
     },
     "/admin/prompt-lab/experiments/{id}": {
+      "delete": {
+        "operationId": "delete__admin_prompt_lab_experiments_id",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Experiment detail, update or delete",
+        "tags": [
+          "prompt-lab"
+        ]
+      },
       "get": {
         "operationId": "get__admin_prompt_lab_experiments_id",
         "parameters": [
@@ -8261,7 +8406,34 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Experiment detail (+ runs)",
+        "summary": "Experiment detail, update or delete",
+        "tags": [
+          "prompt-lab"
+        ]
+      },
+      "patch": {
+        "operationId": "patch__admin_prompt_lab_experiments_id",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Experiment detail, update or delete",
         "tags": [
           "prompt-lab"
         ]
@@ -8373,6 +8545,35 @@
           }
         ],
         "summary": "Get/delete a test case",
+        "tags": [
+          "prompt-lab"
+        ]
+      }
+    },
+    "/admin/prompt-lab/test-cases/{id}/run": {
+      "post": {
+        "operationId": "post__admin_prompt_lab_test_cases_id_run",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Run one prompt test case",
         "tags": [
           "prompt-lab"
         ]
