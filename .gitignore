@@ -1,21 +1,23 @@
 .env
 .env.*
 !.env.example
-data/
-release/
+# Anchored to the repository root: an unanchored "data/" also matched source
+# directories such as web/src/features/data, silently dropping them from commits.
+/data/
+/release/
 *.db
 *.sqlite
 *.sqlite3
 *.tar
 *.tar.gz
-gateway.exe
-coverage.out
+/gateway.exe
+/coverage.out
 .playwright-mcp/
 .gocache/
 .pnpm-store/
-.gitframe
-output/
-seed.sql
+/.gitframe
+/output/
+/seed.sql
 
 # React application build and test output
 /node_modules/
@@ -35,4 +37,4 @@ internal/appui/dist/*
 
 # Temp test scripts and log files
 *.log
-scratch/
+/scratch/
