@@ -158,44 +158,6 @@ export const multiRunListSchema = looseObject({
     .transform((value) => value ?? []),
 });
 
-export const multiRunDetailSchema = looseObject({
-  run: looseObject({
-    id: z.string(),
-    title: z.string().nullish(),
-    created_by: z.string().nullish(),
-    created_at: z.string().nullish(),
-    model_count: numberish.nullish(),
-    success: numberish.nullish(),
-    failed: numberish.nullish(),
-    prompt_preview: z.string().nullish(),
-  }).nullish(),
-  results: looseList({
-    model: z.string(),
-    provider: z.string().nullish(),
-    status: z.string().nullish(),
-    status_code: numberish.nullish(),
-    latency_ms: numberish.nullish(),
-    input_tokens: numberish.nullish(),
-    output_tokens: numberish.nullish(),
-    total_tokens: numberish.nullish(),
-    cost_krw: numberish.nullish(),
-    response_preview: z.string().nullish(),
-    error: z.string().nullish(),
-  })
-    .nullish()
-    .transform((value) => value ?? []),
-  feedback: z.array(unknownRecord).nullish(),
-  promotions: z.array(unknownRecord).nullish(),
-  judgements: looseList({
-    model: z.string().nullish(),
-    method: z.string().nullish(),
-    judge_model: z.string().nullish(),
-    total_score: numberish.nullish(),
-    verdict: z.string().nullish(),
-    reason_summary: z.string().nullish(),
-  }).nullish(),
-});
-
 export const multiRunJudgeSchema = looseObject({
   run_id: z.string().nullish(),
   method: z.string().nullish(),
@@ -317,21 +279,6 @@ export const multiRunLeaderboardSchema = looseObject({
   })
     .nullish()
     .transform((value) => value ?? []),
-});
-
-/* ── MCP routing probes ────────────────────────────────────────────────────── */
-
-export const mcpRouteExplainSchema = looseObject({
-  decision: z.string().nullish(),
-  reason: z.string().nullish(),
-  candidates: z.array(unknownRecord).nullish(),
-});
-
-export const mcpTestSchema = looseObject({
-  status: z.string().nullish(),
-  ok: z.boolean().nullish(),
-  latency_ms: numberish.nullish(),
-  error: z.string().nullish(),
 });
 
 /* ── model governance ──────────────────────────────────────────────────────── */
@@ -624,7 +571,6 @@ export type MultiRunResponse = z.output<typeof multiRunResponseSchema>;
 export type MultiRunResult = z.output<typeof multiRunResultSchema>;
 export type MultiRunPredict = z.output<typeof multiRunPredictSchema>;
 export type MultiRunList = z.output<typeof multiRunListSchema>;
-export type MultiRunDetail = z.output<typeof multiRunDetailSchema>;
 export type MultiRunJudge = z.output<typeof multiRunJudgeSchema>;
 export type MultiRunCodeVerify = z.output<typeof multiRunCodeVerifySchema>;
 export type MultiRunPromote = z.output<typeof multiRunPromoteSchema>;
