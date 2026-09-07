@@ -80,8 +80,8 @@ const opsStatus = {
 };
 
 const bootstrap = {
-  backend_version: "v0.82.1",
-  ui_version: "e2e-v0.82.1",
+  backend_version: "v0.84.0",
+  ui_version: "e2e-v0.84.0",
   api_version: "v1",
   ui: {
     enabled: true,
@@ -138,14 +138,14 @@ const bootstrap = {
       title: "게이트웨이 상태",
       app_path: "/app/gateway/health",
       legacy_path: "/admin#/routing/health",
-      status: "preview_read_only",
+      status: "preview",
       risk_level: "low",
       required_permission: "routing:read",
-      read_only: true,
+      read_only: false,
       enabled_roles: ["super_admin", "admin", "ai_admin"],
       rollout_percent: 100,
       fallback_enabled: true,
-      minimum_api_version: "v0.81.0",
+      minimum_api_version: "v0.84.0",
       available: true,
     },
     {
@@ -153,14 +153,14 @@ const bootstrap = {
       title: "AI 공급자",
       app_path: "/app/gateway/providers",
       legacy_path: "/admin#/settings",
-      status: "preview_read_only",
+      status: "preview",
       risk_level: "medium",
       required_permission: "admin:read",
-      read_only: true,
+      read_only: false,
       enabled_roles: ["super_admin", "admin", "ai_admin"],
       rollout_percent: 100,
       fallback_enabled: true,
-      minimum_api_version: "v0.82.0",
+      minimum_api_version: "v0.84.0",
       available: true,
     },
     {
@@ -168,14 +168,14 @@ const bootstrap = {
       title: "모델",
       app_path: "/app/gateway/models",
       legacy_path: "/admin#/model-contracts",
-      status: "preview_read_only",
+      status: "preview",
       risk_level: "medium",
       required_permission: "admin:read",
-      read_only: true,
+      read_only: false,
       enabled_roles: ["super_admin", "admin", "ai_admin"],
       rollout_percent: 100,
       fallback_enabled: true,
-      minimum_api_version: "v0.82.0",
+      minimum_api_version: "v0.84.0",
       available: true,
     },
     {
@@ -741,7 +741,9 @@ test("keeps the mobile Overview and navigation drawer stable", async ({ page }) 
   await page.getByRole("button", { name: "탐색 메뉴 열기" }).click();
   const navigation = page.getByRole("dialog", { name: "주 메뉴" });
   await expect(navigation).toBeVisible();
-  await expect(navigation.getByRole("link", { name: "게이트웨이 상태 읽기 전용" })).toBeVisible();
+  // Gateway Health carries the circuit-breaker resets from v0.84.0, so it is a
+  // full preview; System Health stays a read-only view of the same signals.
+  await expect(navigation.getByRole("link", { name: "게이트웨이 상태 미리보기" })).toBeVisible();
   await expect(navigation.getByRole("link", { name: "시스템 상태 읽기 전용" })).toBeVisible();
   await expect(page).toHaveScreenshot("navigation-mobile.png", {
     animations: "disabled",

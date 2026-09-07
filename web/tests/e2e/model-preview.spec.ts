@@ -11,8 +11,8 @@ const agentRouteRef = `prv_${"b".repeat(43)}`;
 const anthropicRef = `prv_${"c".repeat(43)}`;
 
 const bootstrap = {
-  backend_version: "v0.82.1",
-  ui_version: "e2e-v0.82.1",
+  backend_version: "v0.84.0",
+  ui_version: "e2e-v0.84.0",
   api_version: "v1",
   ui: {
     enabled: true,
@@ -48,14 +48,14 @@ const bootstrap = {
       title: "모델",
       app_path: "/app/gateway/models",
       legacy_path: "/admin#/model-contracts",
-      status: "preview_read_only",
+      status: "preview",
       risk_level: "medium",
       required_permission: "admin:read",
-      read_only: true,
+      read_only: false,
       enabled_roles: ["admin"],
       rollout_percent: 100,
       fallback_enabled: true,
-      minimum_api_version: "v0.82.0",
+      minimum_api_version: "v0.84.0",
       available: true,
     },
   ],
