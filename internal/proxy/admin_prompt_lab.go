@@ -366,6 +366,13 @@ func (s *Server) handlePromptLabTestCaseByID(w http.ResponseWriter, r *http.Requ
 		s.handlePromptLabTestCaseRun(w, r, id)
 		return
 	}
+	// A sub-action that no branch above claimed must not fall through to the plain
+	// {id} handling: DELETE on /{id}/run would then delete the test case itself, doing
+	// something the URL never named.
+	if action != "" {
+		writeOpenAIError(w, http.StatusNotFound, "unknown action", "invalid_request_error", "not_found")
+		return
+	}
 	switch r.Method {
 	case http.MethodGet:
 		tc, found, err := s.db.GetPromptTestCase(r.Context(), id)

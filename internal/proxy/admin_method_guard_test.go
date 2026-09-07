@@ -11,7 +11,7 @@ import (
 	"vibe-coders/internal/store"
 )
 
-func newMethodGuardServer(t *testing.T) *httptest.Server {
+func newMethodGuardServer(t *testing.T) (*httptest.Server, *store.SQLStore) {
 	t.Helper()
 	db := openTestStore(t)
 	t.Cleanup(func() { db.Close() })
@@ -24,7 +24,7 @@ func newMethodGuardServer(t *testing.T) *httptest.Server {
 	}
 	proxy := httptest.NewServer(server.Routes())
 	t.Cleanup(proxy.Close)
-	return proxy
+	return proxy, db
 }
 
 func requestMethod(t *testing.T, method, url string) *http.Response {
@@ -43,7 +43,7 @@ func requestMethod(t *testing.T, method, url string) *http.Response {
 // Clearing the DW dashboard cache writes an audit row, so it must take an explicit POST.
 // Answering any verb meant a prefetch of the URL emptied the cache on its own.
 func TestDWDashboardRefreshRequiresPost(t *testing.T) {
-	proxy := newMethodGuardServer(t)
+	proxy, _ := newMethodGuardServer(t)
 	for _, method := range []string{http.MethodGet, http.MethodPut, http.MethodPatch, http.MethodDelete} {
 		resp := requestMethod(t, method, proxy.URL+"/admin/dw/dashboard/refresh")
 		body, _ := json.Marshal(resp.StatusCode)
@@ -62,7 +62,7 @@ func TestDWDashboardRefreshRequiresPost(t *testing.T) {
 // The clear alias shares its handler with the list endpoint. Reading it used to answer with
 // the error list, so a URL that reads like an action returned 200 to a GET.
 func TestSystemErrorsClearAliasRejectsGet(t *testing.T) {
-	proxy := newMethodGuardServer(t)
+	proxy, _ := newMethodGuardServer(t)
 	resp := requestMethod(t, http.MethodGet, proxy.URL+"/admin/system-errors/clear")
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusMethodNotAllowed {
@@ -84,7 +84,7 @@ func TestSystemErrorsClearAliasRejectsGet(t *testing.T) {
 // The handler has always served a GET that reports the current learning state, but the
 // catalog documented only the POST, so no client could call it from the contract.
 func TestRoutingLearningAutoDocumentsItsRead(t *testing.T) {
-	proxy := newMethodGuardServer(t)
+	proxy, _ := newMethodGuardServer(t)
 	resp := requestMethod(t, http.MethodGet, proxy.URL+"/admin/routing/learning/auto")
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
@@ -113,4 +113,68 @@ func TestRoutingLearningAutoDocumentsItsRead(t *testing.T) {
 		return
 	}
 	t.Fatal("/admin/routing/learning/auto is missing from the OpenAPI catalog")
+}
+
+// These dispatchers split a path into {id} and a sub-action, handle the actions they know,
+// and used to fall through to the plain {id} branch for anything else. A DELETE aimed at a
+// sub-action URL therefore deleted the parent resource — the URL named "run", the effect was
+// "delete the test case".
+func TestUnknownSubActionDoesNotFallThroughToTheParentResource(t *testing.T) {
+	proxy, db := newMethodGuardServer(t)
+	ctx := context.Background()
+
+	if err := db.CreatePromptTestCase(ctx, store.PromptTestCase{
+		ID: "ptc_guard", Name: "guard", MessagesJSON: `[{"role":"user","content":"hi"}]`, ModelsJSON: `["m"]`,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.UpsertMetricCatalog(ctx, store.MetricCatalogEntry{
+		ID: "mc_guard", MetricKey: "mc_guard", NameKO: "guard", QueryTemplate: "SELECT 1", Enabled: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.CreateWorkApp(ctx, store.WorkApp{ID: "app_guard", Title: "guard", Status: "active"}); err != nil {
+		t.Fatal(err)
+	}
+
+	cases := []struct {
+		name    string
+		url     string
+		survive func() bool
+	}{
+		{
+			name: "prompt lab test case",
+			url:  "/admin/prompt-lab/test-cases/ptc_guard/run",
+			survive: func() bool {
+				_, found, _ := db.GetPromptTestCase(ctx, "ptc_guard")
+				return found
+			},
+		},
+		{
+			name: "DW metric",
+			url:  "/admin/dw/metrics/mc_guard/validate",
+			survive: func() bool {
+				_, found, _ := db.GetMetricCatalog(ctx, "mc_guard")
+				return found
+			},
+		},
+		{
+			name: "work app",
+			url:  "/admin/apps/app_guard/publish",
+			survive: func() bool {
+				_, found, _ := db.GetWorkApp(ctx, "app_guard")
+				return found
+			},
+		},
+	}
+	for _, c := range cases {
+		resp := requestMethod(t, http.MethodDelete, proxy.URL+c.url)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusNotFound {
+			t.Errorf("DELETE %s status = %d, want 404", c.url, resp.StatusCode)
+		}
+		if !c.survive() {
+			t.Errorf("DELETE %s deleted the %s it never named", c.url, c.name)
+		}
+	}
 }

@@ -175,6 +175,13 @@ func (s *Server) handleAdminAppByID(w http.ResponseWriter, r *http.Request) {
 		s.handleAppPermissions(w, r, id)
 		return
 	}
+	// A sub-action that no branch above claimed must not fall through to the plain
+	// {id} handling: DELETE on /{id}/publish would then delete the app itself, doing
+	// something the URL never named.
+	if action != "" {
+		writeOpenAIError(w, http.StatusNotFound, "unknown action", "invalid_request_error", "not_found")
+		return
+	}
 	switch r.Method {
 	case http.MethodGet:
 		writeJSON(w, http.StatusOK, app)

@@ -151,6 +151,13 @@ func (s *Server) handleAdminMetricByID(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"metric_key": m.MetricKey, "validation": s.validateMetricQuery(m.QueryTemplate)})
 		return
 	}
+	// A sub-action that no branch above claimed must not fall through to the plain
+	// {id} handling: DELETE on /{id}/validate would then delete the metric itself, doing
+	// something the URL never named.
+	if action != "" {
+		writeOpenAIError(w, http.StatusNotFound, "unknown action", "invalid_request_error", "not_found")
+		return
+	}
 	if r.Method == http.MethodDelete {
 		if err := s.db.DeleteMetricCatalog(r.Context(), id); err != nil {
 			writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "delete_failed")
