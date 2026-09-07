@@ -14,16 +14,30 @@ STARTED=0
 VOLUME_CREATED=0
 UPGRADE_VOLUME_CREATED=0
 
+# A --rm container is deleted asynchronously after `docker stop` returns, so the
+# first `docker volume rm` can still see it as in use; retry briefly instead of
+# leaking a volume on the release host every time the smoke fails.
+remove_volume() {
+    local attempt
+    for ((attempt = 1; attempt <= 10; attempt += 1)); do
+        if docker volume rm "$1" >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep 1
+    done
+    docker volume rm "$1" >/dev/null 2>&1 || true
+}
+
 cleanup() {
     if [[ "$STARTED" == "1" ]]; then
         docker stop --time 5 "$CONTAINER_NAME" >/dev/null 2>&1 || true
     fi
     docker rm -f "$UPGRADE_CONTAINER_NAME" >/dev/null 2>&1 || true
     if [[ "$VOLUME_CREATED" == "1" ]]; then
-        docker volume rm "$VOLUME_NAME" >/dev/null 2>&1 || true
+        remove_volume "$VOLUME_NAME"
     fi
     if [[ "$UPGRADE_VOLUME_CREATED" == "1" ]]; then
-        docker volume rm "$UPGRADE_VOLUME_NAME" >/dev/null 2>&1 || true
+        remove_volume "$UPGRADE_VOLUME_NAME"
     fi
 }
 trap cleanup EXIT INT TERM
