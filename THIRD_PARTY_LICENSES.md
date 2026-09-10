@@ -276,7 +276,7 @@ React 운영 번들 의존성과 Frontend 빌드·테스트 도구를 함께 포
 | `isexe` | 2.0.0 | ISC | transitive |
 | `jiti` | 2.7.0 | MIT | transitive |
 | `js-tokens` | 4.0.0 | MIT | transitive |
-| `js-yaml` | 4.3.1 | MIT | transitive |
+| `js-yaml` | 4.3.2 | MIT | transitive |
 | `jsdom` | 30.0.1 | MIT | build/test direct |
 | `jsesc` | 3.1.0 | MIT | transitive |
 | `json-buffer` | 3.0.1 | MIT | transitive |

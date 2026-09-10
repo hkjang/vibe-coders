@@ -4524,8 +4524,8 @@
     },
     {
       "name": "js-yaml",
-      "SPDXID": "SPDXRef-Package-npm-js-yaml-fb10816f27a1a087",
-      "versionInfo": "4.3.1",
+      "SPDXID": "SPDXRef-Package-npm-js-yaml-fba372f08ca82eef",
+      "versionInfo": "4.3.2",
       "downloadLocation": "NOASSERTION",
       "filesAnalyzed": false,
       "licenseConcluded": "MIT",
@@ -4535,7 +4535,7 @@
         {
           "referenceCategory": "PACKAGE-MANAGER",
           "referenceType": "purl",
-          "referenceLocator": "pkg:npm/js-yaml@4.3.1"
+          "referenceLocator": "pkg:npm/js-yaml@4.3.2"
         }
       ]
     },
@@ -8215,7 +8215,7 @@
     {
       "spdxElementId": "SPDXRef-Package-vibe-coders",
       "relationshipType": "DEPENDS_ON",
-      "relatedSpdxElement": "SPDXRef-Package-npm-js-yaml-fb10816f27a1a087"
+      "relatedSpdxElement": "SPDXRef-Package-npm-js-yaml-fba372f08ca82eef"
     },
     {
       "spdxElementId": "SPDXRef-Package-vibe-coders",
