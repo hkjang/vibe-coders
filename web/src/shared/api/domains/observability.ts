@@ -22,12 +22,16 @@ import {
   podsResponseSchema,
   requestAnalysisSchema,
   requestExplainSchema,
+  requestDiffSchema,
+  requestLinksSchema,
   requestNoteDeletedSchema,
   requestNoteSchema,
   requestReplaySchema,
+  requestTraceSchema,
   savedFilterDeletedSchema,
   savedFilterEnvelopeSchema,
   savedFilterListSchema,
+  suggestionsSchema,
   scatterResponseSchema,
   sessionListResponseSchema,
   waterfallResponseSchema,
@@ -53,9 +57,13 @@ import type {
   GetAdminLlmTimeseriesData,
   GetAdminLlmTracesIdData,
   GetAdminPodsData,
+  GetAdminRequestsDiffData,
   GetAdminRequestsIdExplainData,
+  GetAdminRequestsIdLinksData,
   GetAdminRequestsIdNoteData,
+  GetAdminRequestsIdTraceData,
   GetAdminSavedFiltersData,
+  GetAdminSuggestData,
   GetAdminScatterData,
   GetAdminSessionsData,
   GetAdminSessionsSessionIdFlightRecorderData,
@@ -151,6 +159,9 @@ const savedFilterListQuerySchema = z.object({ view: optionalString });
 export type SavedFilterListQuery = z.infer<typeof savedFilterListQuerySchema>;
 
 const sessionListQuerySchema = z.object({ days: optionalNumber });
+// The server rejects anything else, so the console cannot ask for an arbitrary column.
+const suggestQuerySchema = z.object({ field: z.enum(["model", "ip", "language", "tag"]) });
+const requestDiffQuerySchema = z.object({ a: z.string(), b: z.string() });
 export type SessionListQuery = z.infer<typeof sessionListQuerySchema>;
 
 const waterfallQuerySchema = z.object({
@@ -387,7 +398,33 @@ export const observabilityEndpoints = {
       "/admin/requests/{id}/replay",
       requestReplaySchema,
     ),
+    /** The end-to-end span waterfall; team-scoped and free of raw payloads. */
+    trace: operation<GetAdminRequestsIdTraceData, unknown>()(
+      "GET",
+      "/admin/requests/{id}/trace",
+      requestTraceSchema,
+    ),
+    /** Counts of the records this request produced across the other screens. */
+    links: operation<GetAdminRequestsIdLinksData, unknown>()(
+      "GET",
+      "/admin/requests/{id}/links",
+      requestLinksSchema,
+    ),
   },
+  /** Two requests side by side, for the compare view in the request explorer. */
+  requestDiff: operation<WithQuery<GetAdminRequestsDiffData, { a: string; b: string }>, unknown>()(
+    "GET",
+    "/admin/requests/diff",
+    requestDiffSchema,
+    requestDiffQuerySchema,
+  ),
+  /** Filter autocomplete for the request explorer: model, ip, language or tag. */
+  suggestions: operation<WithQuery<GetAdminSuggestData, { field: string }>, unknown>()(
+    "GET",
+    "/admin/suggest",
+    suggestionsSchema,
+    suggestQuerySchema,
+  ),
   capabilities: operation<GetAdminCapabilitiesData, unknown>()(
     "GET",
     "/admin/capabilities",

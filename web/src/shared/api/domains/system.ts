@@ -3,6 +3,7 @@
 // (see "@/shared/api/loose" for legacy responses without a documented shape).
 import type {
   DeleteAdminChangeSetsIdData,
+  DeleteAdminKnowledgeIdData,
   DeleteAdminSettingsByKeyKeyData,
   DeleteAdminSettingsByKeyKeyResponse,
   GetAdminAuditAuthEventsData,
@@ -10,7 +11,14 @@ import type {
   GetAdminChangeSetsData,
   GetAdminChangeSetsIdData,
   GetAdminFallbackData,
+  GetAdminKnowledgeData,
+  GetAdminIncidentsCandidatesData,
+  GetAdminIndexHealthData,
+  GetAdminMigrationSqlData,
   GetAdminNotificationsMattermostData,
+  GetAdminOpsHomeData,
+  GetAdminOpsPreflightData,
+  GetAdminOpsWorkersData,
   GetAdminRetentionData,
   GetAdminRolesData,
   GetAdminSettingsEffectiveData,
@@ -18,6 +26,7 @@ import type {
   GetAdminSettingsHistoryData,
   GetAdminSsoKeycloakConfigData,
   GetAdminSystemErrorsData,
+  PatchAdminKnowledgeIdData,
   PostAdminChangeImpactSimulateData,
   PostAdminChangeSetsData,
   PostAdminChangeSetsIdApplyData,
@@ -26,6 +35,7 @@ import type {
   PostAdminChangeSetsIdRollbackData,
   PostAdminChangeSetsIdSubmitData,
   PostAdminFallbackData,
+  PostAdminKnowledgeData,
   PostAdminNotificationsMattermostData,
   PostAdminNotificationsMattermostTestData,
   PostAdminRetentionData,
@@ -53,10 +63,18 @@ import {
   emptyBodySchema,
   fallbackReplaySchema,
   fallbackStatsSchema,
+  incidentCandidatesSchema,
+  indexHealthSchema,
   keycloakConfigSchema,
   keycloakTestSchema,
+  knowledgeListSchema,
+  knowledgeSavedSchema,
+  migrationSqlSchema,
   notificationConfigSchema,
   notificationTestSchema,
+  opsHomeSchema,
+  opsPreflightSchema,
+  opsWorkersSchema,
   recentLimitQuerySchema,
   retentionStatusSchema,
   roleCatalogSchema,
@@ -97,6 +115,18 @@ export interface ChangeImpactBody {
   change_type: string;
   days: number;
   params: Record<string, string | number>;
+}
+
+export interface KnowledgeCreateBody {
+  id?: string;
+  name: string;
+  content: string;
+}
+
+export interface KnowledgeUpdateBody {
+  content?: string;
+  enabled?: boolean;
+  name?: string;
 }
 
 export interface KeycloakConfigBody {
@@ -243,6 +273,53 @@ export const systemEndpoints = {
       "POST",
       "/admin/sso/keycloak/test",
       keycloakTestSchema,
+    ),
+  },
+  // The operations home the legacy console showed under #/ops-home. Every call here is
+  // read-only: index health and migration SQL display DDL for an operator to review, and
+  // the gateway never runs it.
+  ops: {
+    home: operation<GetAdminOpsHomeData, unknown>()("GET", "/admin/ops/home", opsHomeSchema),
+    incidents: operation<GetAdminIncidentsCandidatesData, unknown>()(
+      "GET",
+      "/admin/incidents/candidates",
+      incidentCandidatesSchema,
+    ),
+    workers: operation<GetAdminOpsWorkersData, unknown>()("GET", "/admin/ops/workers", opsWorkersSchema),
+    preflight: operation<GetAdminOpsPreflightData, unknown>()(
+      "GET",
+      "/admin/ops/preflight",
+      opsPreflightSchema,
+    ),
+    indexHealth: operation<GetAdminIndexHealthData, unknown>()(
+      "GET",
+      "/admin/index-health",
+      indexHealthSchema,
+    ),
+    migrationSql: operation<GetAdminMigrationSqlData, unknown>()(
+      "GET",
+      "/admin/migration-sql",
+      migrationSqlSchema,
+    ),
+  },
+  // The knowledge cache the legacy console kept inside its settings tab: rules and
+  // system prompts registered once and expanded upstream from a {{kb:ID}} reference.
+  knowledge: {
+    list: operation<GetAdminKnowledgeData, unknown>()("GET", "/admin/knowledge", knowledgeListSchema),
+    create: operation<WithBody<PostAdminKnowledgeData, KnowledgeCreateBody>, unknown>()(
+      "POST",
+      "/admin/knowledge",
+      knowledgeSavedSchema,
+    ),
+    update: operation<WithBody<PatchAdminKnowledgeIdData, KnowledgeUpdateBody>, unknown>()(
+      "PATCH",
+      "/admin/knowledge/{id}",
+      knowledgeSavedSchema,
+    ),
+    remove: operation<DeleteAdminKnowledgeIdData, unknown>()(
+      "DELETE",
+      "/admin/knowledge/{id}",
+      knowledgeSavedSchema,
     ),
   },
   roles: operation<GetAdminRolesData, unknown>()("GET", "/admin/roles", roleCatalogSchema),

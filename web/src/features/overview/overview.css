@@ -49,3 +49,43 @@
   list-style: none;
   font-size: 0.75rem;
 }
+
+/* Weekday/hour activity heatmap. The scale is relative to the busiest cell, so a quiet
+   week is not painted as if it were busy. */
+.overview-heatmap-scroll {
+  overflow-x: auto;
+}
+
+.overview-heatmap {
+  border-collapse: collapse;
+  font-size: 0.75rem;
+}
+
+.overview-heatmap th {
+  padding: var(--space-1);
+  color: var(--color-muted);
+  font-weight: 650;
+  text-align: center;
+}
+
+.overview-heat-cell {
+  width: 1.25rem;
+  height: 1.25rem;
+  padding: 0;
+  border: 1px solid var(--color-card);
+  border-radius: 2px;
+  background: var(--color-muted-soft);
+}
+
+.overview-heat-1 {
+  background: color-mix(in srgb, var(--color-primary) 25%, var(--color-muted-soft));
+}
+.overview-heat-2 {
+  background: color-mix(in srgb, var(--color-primary) 50%, var(--color-muted-soft));
+}
+.overview-heat-3 {
+  background: color-mix(in srgb, var(--color-primary) 75%, var(--color-muted-soft));
+}
+.overview-heat-4 {
+  background: var(--color-primary);
+}

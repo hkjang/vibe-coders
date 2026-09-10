@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import axe from "axe-core";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 
 import { RequestPage } from "@/features/observability/requests/RequestPage";
@@ -85,6 +85,11 @@ const response = {
 function LocationProbe(): React.JSX.Element {
   const location = useLocation();
   return <output data-testid="location">{`${location.pathname}${location.search}`}</output>;
+}
+
+/** How many times the request list itself was queried, ignoring filter autocomplete. */
+function requestListCalls(spy: MockInstance<typeof apiClient.request>): number {
+  return spy.mock.calls.filter(([endpoint]) => endpoint.path === "/admin/requests").length;
 }
 
 function renderPage(initialEntry = "/observability/requests") {
@@ -258,14 +263,16 @@ describe("RequestPage", () => {
     renderPage();
 
     expect(await screen.findByText("req-001")).toBeInTheDocument();
-    const model = screen.getByRole("textbox", { name: "모델" });
+    // The model filter offers autocomplete from a datalist, which makes it a combobox.
+    const model = screen.getByRole("combobox", { name: "모델" });
     await user.type(model, `corp_${"A".repeat(43)}`);
     await user.click(screen.getByRole("button", { name: "조회" }));
 
     expect(model).toHaveFocus();
     expect(screen.getByRole("alert")).toHaveTextContent("비밀정보를 제거한 뒤 검색하세요.");
     expect(screen.getByTestId("location")).not.toHaveTextContent("corp_");
-    expect(request).toHaveBeenCalledTimes(1);
+    // Focusing the model filter also loads its autocomplete, so count the list query only.
+    expect(requestListCalls(request)).toBe(1);
   });
 
   it("validates request date-time and timezone filters before querying", async () => {
@@ -297,12 +304,13 @@ describe("RequestPage", () => {
     renderPage();
 
     expect(await screen.findByText("req-001")).toBeInTheDocument();
-    const model = screen.getByRole("textbox", { name: "모델" });
+    // The model filter offers autocomplete from a datalist, which makes it a combobox.
+    const model = screen.getByRole("combobox", { name: "모델" });
     fireEvent.change(model, { target: { value: "한".repeat(86) } });
     await user.click(screen.getByRole("button", { name: "조회" }));
     expect(model).toHaveFocus();
     expect(screen.getByRole("alert")).toHaveTextContent("UTF-8 기준 256바이트");
-    expect(request).toHaveBeenCalledTimes(1);
+    expect(requestListCalls(request)).toBe(1);
 
     fireEvent.change(model, { target: { value: "" } });
     const provider = screen.getByRole("textbox", { name: "공급자 참조" });
@@ -310,7 +318,7 @@ describe("RequestPage", () => {
     await user.click(screen.getByRole("button", { name: "조회" }));
     expect(provider).toHaveFocus();
     expect(screen.getByRole("alert")).toHaveTextContent("공급자 참조 형식");
-    expect(request).toHaveBeenCalledTimes(1);
+    expect(requestListCalls(request)).toBe(1);
   });
 
   it("never sends oversized free-text or cursor values restored from a deep link", async () => {

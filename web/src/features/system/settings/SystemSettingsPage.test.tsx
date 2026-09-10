@@ -584,3 +584,52 @@ describe("SystemSettingsPage — SSO", () => {
     expect(body).not.toHaveProperty("client_secret");
   });
 });
+
+describe("SystemSettingsPage — 지식 캐시", () => {
+  const snippets = {
+    snippets: [
+      {
+        id: "coding-rules",
+        name: "사내 코딩 규칙",
+        content: "always use tabs",
+        enabled: true,
+        token_estimate: 120,
+        use_count: 42,
+        last_used_at: "2026-09-09T00:00:00Z",
+      },
+    ],
+  };
+
+  it("등록된 지식 항목과 참조 방법을 보여준다", async () => {
+    mockApi({ "GET /admin/knowledge": () => snippets });
+    renderPage("/system/settings?tab=knowledge");
+
+    expect(await screen.findByText("사내 코딩 규칙")).toBeVisible();
+    expect(screen.getByText("{{kb:coding-rules}}")).toBeVisible();
+    expect(screen.getByText("120")).toBeVisible();
+  });
+
+  it("사용 중지는 PATCH 로 enabled 만 보낸다", async () => {
+    const api = mockApi({
+      "GET /admin/knowledge": () => snippets,
+      "PATCH /admin/knowledge/coding-rules": () => ({ id: "coding-rules", status: "updated" }),
+    });
+    const user = userEvent.setup();
+    renderPage("/system/settings?tab=knowledge");
+
+    await user.click(await screen.findByRole("button", { name: "중지" }));
+    expect(api.bodies("PATCH /admin/knowledge/coding-rules")).toEqual([{ enabled: false }]);
+  });
+
+  it("변경 권한이 없으면 등록과 삭제를 막고 사유를 알린다", async () => {
+    authState.scopes = ["admin:read"];
+    mockApi({ "GET /admin/knowledge": () => snippets });
+    renderPage("/system/settings?tab=knowledge");
+
+    // Wait for the row itself: the register button renders before the list resolves.
+    expect(await screen.findByText("사내 코딩 규칙")).toBeVisible();
+    expect(screen.getByRole("button", { name: /항목 등록/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /삭제/ })).toBeDisabled();
+    expect(screen.getByText(/변경 권한\(admin:write\)이 없어/)).toBeVisible();
+  });
+});

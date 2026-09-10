@@ -6,6 +6,7 @@ import {
   noteWriteDeniedReason,
   rawAccessDeniedReason,
 } from "@/features/observability/request-insight/request-access";
+import { RequestSpanWaterfall } from "@/features/observability/request-insight/RequestSpanWaterfall";
 import { apiClient } from "@/shared/api/client";
 import type { RequestExplain } from "@/shared/api/domains/observability.schemas";
 import { withPathParams } from "@/shared/api/endpoint-factory";
@@ -198,6 +199,8 @@ export function RequestInsightPanel({
 
   return (
     <div className="obs-section-stack">
+      <RequestSpanWaterfall requestId={requestId} />
+
       <SectionCard
         headingLevel={3}
         title="원인 설명"

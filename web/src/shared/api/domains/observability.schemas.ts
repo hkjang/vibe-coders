@@ -907,3 +907,83 @@ export type RequestAnalysis = z.output<typeof requestAnalysisSchema>;
  */
 export const requestReplaySchema = z.union([z.string(), unknownRecord]);
 export type RequestReplay = z.output<typeof requestReplaySchema>;
+
+/**
+ * GET /admin/requests/{id}/trace — one request's end-to-end waterfall: the root request
+ * span plus a child span per MCP/tool call and Text2SQL stage. The server builds these
+ * from already-linked metadata and carries no prompt, SQL or tool arguments, so the
+ * screen has nothing raw to redact.
+ */
+export const requestTraceSchema = looseObject({
+  request_id: optionalText,
+  trace_id: optionalText,
+  total_ms: numberish.nullish(),
+  spans: looseList({
+    span_id: z.string(),
+    parent_span_id: optionalText,
+    name: optionalText,
+    kind: optionalText,
+    status: optionalText,
+    start_offset_ms: numberish.nullish(),
+    duration_ms: numberish.nullish(),
+    tokens: numberish.nullish(),
+    cost_krw: numberish.nullish(),
+    cache_hit: z.boolean().nullish(),
+    error: optionalText,
+  })
+    .nullish()
+    .transform((value) => value ?? []),
+});
+export type RequestTrace = z.output<typeof requestTraceSchema>;
+export type RequestTraceSpan = RequestTrace["spans"][number];
+
+/**
+ * GET /admin/requests/{id}/links — how many correlated records this request produced
+ * across tools, MCP, Text2SQL and governance, and whether governance blocked it.
+ */
+export const requestLinksSchema = looseObject({
+  request_id: optionalText,
+  trace_id: optionalText,
+  session_id: optionalText,
+  counts: z.record(z.string(), numberish).nullish(),
+  governance: looseObject({ blocked: z.boolean().nullish() }).nullish(),
+});
+export type RequestLinks = z.output<typeof requestLinksSchema>;
+
+/**
+ * GET /admin/suggest?field= — the distinct values already seen for one filter field,
+ * team-scoped by the server and masked for callers without raw-prompt access.
+ */
+export const suggestionsSchema = looseObject({
+  field: optionalText,
+  values: z
+    .array(z.string())
+    .nullish()
+    .transform((value) => value ?? []),
+});
+
+/**
+ * GET /admin/requests/diff?a=&b= — two requests side by side. The response carries the
+ * full stored detail, but the request explorer's contract is metadata only, so this
+ * schema reads just the operational fields the compare view shows.
+ */
+const diffSideSchema = looseObject({
+  request: looseObject({
+    id: optionalText,
+    created_at: optionalText,
+    model: optionalText,
+    provider: optionalText,
+    status_code: numberish.nullish(),
+    latency_ms: numberish.nullish(),
+    prompt_tokens: numberish.nullish(),
+    completion_tokens: numberish.nullish(),
+    total_tokens: numberish.nullish(),
+    estimated_cost: numberish.nullish(),
+  }).nullish(),
+});
+
+export const requestDiffSchema = looseObject({
+  left: diffSideSchema.nullish(),
+  right: diffSideSchema.nullish(),
+});
+export type RequestDiffSide = NonNullable<z.output<typeof requestDiffSchema>["left"]>;

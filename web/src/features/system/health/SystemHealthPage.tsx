@@ -21,15 +21,21 @@ import {
   refreshIntervalMs,
 } from "@/features/health/health-utils";
 import { HealthWidget, UpdatedTime } from "@/features/health/health-ui";
+import { IndexHealthTab } from "@/features/system/health/IndexHealthTab";
+import { OpsHomeTab } from "@/features/system/health/OpsHomeTab";
+import { OpsWorkersTab } from "@/features/system/health/OpsWorkersTab";
 import { apiClient } from "@/shared/api/client";
 import { endpoints } from "@/shared/api/endpoints";
 import { isProviderRef, providerDisplayLabel } from "@/shared/api/provider-ref";
 import type { OpsStatus } from "@/shared/api/schemas";
 import { Badge, type BadgeProps } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
+import { TabPanel, Tabs, type TabItem } from "@/shared/components/ui/Tabs";
+import { useTabParam } from "@/shared/hooks/use-tab-param";
 import { operationalMessage } from "@/shared/errors/operational-messages";
 import { canOpenLegacyAdmin } from "@/shared/permissions/legacy-admin";
 import { usePreferences } from "@/shared/stores/preferences";
+import "@/features/system/health/ops-home.css";
 
 function scoreTier(score: number): "danger" | "success" | "warning" {
   if (score < 50) return "danger";
@@ -50,7 +56,18 @@ function diskState(disk: OpsStatus["disk"]): { label: string; tone: BadgeProps["
   return { label: "사용 가능", tone: "success" };
 }
 
+const tabIds = ["status", "ops", "workers", "indexes"] as const;
+type TabId = (typeof tabIds)[number];
+
+const tabs: ReadonlyArray<TabItem<TabId>> = [
+  { id: "status", label: "상태" },
+  { id: "ops", label: "운영 홈" },
+  { id: "workers", label: "워커·프리플라이트" },
+  { id: "indexes", label: "인덱스" },
+];
+
 export function SystemHealthPage(): React.JSX.Element {
+  const [tab, setTab] = useTabParam<TabId>(tabIds);
   const refreshInterval = usePreferences((state) => state.refreshInterval);
   const interval = refreshIntervalMs(refreshInterval);
   const auth = useAuth();
@@ -176,254 +193,284 @@ export function SystemHealthPage(): React.JSX.Element {
         </div>
       </header>
 
-      <div className="health-page-toolbar">
-        <p className="metric-note">기간 집계가 아닌 게이트웨이의 최신 운영 현황입니다.</p>
-        <div className="status-meta">
-          <span>백엔드 {auth.backendVersion}</span>
-          {updatedAt > 0 ? <UpdatedTime timestamp={updatedAt} /> : null}
-        </div>
-      </div>
+      <Tabs
+        ariaLabel="시스템 상태 영역"
+        items={tabs}
+        value={tab}
+        onChange={setTab}
+        panelIdPrefix="system-health"
+      />
 
-      {operations.isError && !operations.data ? (
-        <HealthWidget
-          title="시스템 상태 현황"
-          description="운영 상태와 위험도를 함께 조회합니다."
-          icon={Activity}
-          error={operations.error}
-          onRetry={() => void operations.refetch()}
-        />
-      ) : (
-        <section className="health-grid" aria-label="시스템 상태 상세">
-          <HealthWidget
-            title="운영 위험"
-            description="현재 설정과 상태에서 탐지한 위험 요인"
-            icon={Activity}
-            loading={operations.isPending}
-            error={operations.error}
-            onRetry={() => void operations.refetch()}
-            updatedAt={operations.dataUpdatedAt || undefined}
-            status={risk ? riskLevelLabels[risk.tier] : undefined}
-            statusTone={
-              risk?.tier === "critical" || risk?.tier === "high"
-                ? "danger"
-                : risk?.tier === "medium"
-                  ? "warning"
-                  : "success"
-            }
-          >
-            {risk ? (
-              <>
-                <div className="metric-value">
-                  <strong>{risk.score}</strong>
-                  <span>/ 100 위험 점수</span>
-                </div>
-                {risk.factors.length ? (
-                  <ul className="health-alert-list" aria-label="위험 요인">
-                    {risk.factors.map((factor) => (
-                      <li key={factor.key}>
+      {tab === "ops" ? (
+        <TabPanel id="ops" panelIdPrefix="system-health">
+          <OpsHomeTab />
+        </TabPanel>
+      ) : null}
+      {tab === "workers" ? (
+        <TabPanel id="workers" panelIdPrefix="system-health">
+          <OpsWorkersTab />
+        </TabPanel>
+      ) : null}
+      {tab === "indexes" ? (
+        <TabPanel id="indexes" panelIdPrefix="system-health">
+          <IndexHealthTab />
+        </TabPanel>
+      ) : null}
+
+      {tab === "status" ? (
+        <TabPanel id="status" panelIdPrefix="system-health">
+          <div className="health-page-toolbar">
+            <p className="metric-note">기간 집계가 아닌 게이트웨이의 최신 운영 현황입니다.</p>
+            <div className="status-meta">
+              <span>백엔드 {auth.backendVersion}</span>
+              {updatedAt > 0 ? <UpdatedTime timestamp={updatedAt} /> : null}
+            </div>
+          </div>
+
+          {operations.isError && !operations.data ? (
+            <HealthWidget
+              title="시스템 상태 현황"
+              description="운영 상태와 위험도를 함께 조회합니다."
+              icon={Activity}
+              error={operations.error}
+              onRetry={() => void operations.refetch()}
+            />
+          ) : (
+            <section className="health-grid" aria-label="시스템 상태 상세">
+              <HealthWidget
+                title="운영 위험"
+                description="현재 설정과 상태에서 탐지한 위험 요인"
+                icon={Activity}
+                loading={operations.isPending}
+                error={operations.error}
+                onRetry={() => void operations.refetch()}
+                updatedAt={operations.dataUpdatedAt || undefined}
+                status={risk ? riskLevelLabels[risk.tier] : undefined}
+                statusTone={
+                  risk?.tier === "critical" || risk?.tier === "high"
+                    ? "danger"
+                    : risk?.tier === "medium"
+                      ? "warning"
+                      : "success"
+                }
+              >
+                {risk ? (
+                  <>
+                    <div className="metric-value">
+                      <strong>{risk.score}</strong>
+                      <span>/ 100 위험 점수</span>
+                    </div>
+                    {risk.factors.length ? (
+                      <ul className="health-alert-list" aria-label="위험 요인">
+                        {risk.factors.map((factor) => (
+                          <li key={factor.key}>
+                            <ShieldCheck aria-hidden="true" />
+                            <div>
+                              <p>
+                                {operationalMessage(
+                                  factor.key,
+                                  "운영 위험 요인의 상세 내용을 확인할 수 없습니다.",
+                                )}
+                              </p>
+                              <small>진단 코드: {factor.key}</small>
+                            </div>
+                            <Badge tone={riskFactorTone(factor.severity)}>+{factor.points}</Badge>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <div className="health-empty">
+                        <ShieldCheck aria-hidden="true" />
+                        <p>현재 탐지된 위험 요인이 없습니다.</p>
+                      </div>
+                    )}
+                  </>
+                ) : null}
+              </HealthWidget>
+
+              <HealthWidget
+                title="로깅 처리 흐름"
+                description="비동기 로그 기록량과 누락 상태"
+                icon={FileClock}
+                loading={operations.isPending}
+                updatedAt={operations.dataUpdatedAt || undefined}
+                status={
+                  snapshot?.logging.dropped
+                    ? healthStatusLabels.dropped
+                    : snapshot
+                      ? healthStatusLabels.normal
+                      : undefined
+                }
+                statusTone={snapshot?.logging.dropped ? "danger" : "success"}
+              >
+                {snapshot ? (
+                  <dl className="metric-pairs">
+                    <div>
+                      <dt>대기열 깊이</dt>
+                      <dd>{formatInteger(snapshot.logging.queue_depth)}</dd>
+                    </div>
+                    <div>
+                      <dt>기록 완료</dt>
+                      <dd>{formatInteger(snapshot.logging.written)}</dd>
+                    </div>
+                    <div>
+                      <dt>누락</dt>
+                      <dd>{formatInteger(snapshot.logging.dropped)}</dd>
+                    </div>
+                  </dl>
+                ) : null}
+              </HealthWidget>
+
+              <HealthWidget
+                title="보안 상태"
+                description="민감 데이터와 운영 보안 설정 점검"
+                icon={ShieldCheck}
+                loading={operations.isPending}
+                updatedAt={operations.dataUpdatedAt || undefined}
+                status={
+                  securityRisk ? healthStatusLabels.attention : snapshot ? healthStatusLabels.safe : undefined
+                }
+                statusTone={securityRisk ? "warning" : "success"}
+              >
+                {snapshot ? (
+                  <ul className="health-check-list" aria-label="보안 설정 점검">
+                    {securityChecks.map((check) => (
+                      <li key={check.label}>
                         <ShieldCheck aria-hidden="true" />
                         <div>
-                          <p>
-                            {operationalMessage(
-                              factor.key,
-                              "운영 위험 요인의 상세 내용을 확인할 수 없습니다.",
-                            )}
-                          </p>
-                          <small>진단 코드: {factor.key}</small>
+                          <p>{check.label}</p>
+                          <small>{check.detail}</small>
                         </div>
-                        <Badge tone={riskFactorTone(factor.severity)}>+{factor.points}</Badge>
+                        <Badge tone={check.safe ? "success" : "danger"}>
+                          {check.safe ? "안전" : "확인 필요"}
+                        </Badge>
                       </li>
                     ))}
                   </ul>
-                ) : (
-                  <div className="health-empty">
-                    <ShieldCheck aria-hidden="true" />
-                    <p>현재 탐지된 위험 요인이 없습니다.</p>
-                  </div>
-                )}
-              </>
-            ) : null}
-          </HealthWidget>
+                ) : null}
+              </HealthWidget>
 
-          <HealthWidget
-            title="로깅 처리 흐름"
-            description="비동기 로그 기록량과 누락 상태"
-            icon={FileClock}
-            loading={operations.isPending}
-            updatedAt={operations.dataUpdatedAt || undefined}
-            status={
-              snapshot?.logging.dropped
-                ? healthStatusLabels.dropped
-                : snapshot
-                  ? healthStatusLabels.normal
-                  : undefined
-            }
-            statusTone={snapshot?.logging.dropped ? "danger" : "success"}
-          >
-            {snapshot ? (
-              <dl className="metric-pairs">
-                <div>
-                  <dt>대기열 깊이</dt>
-                  <dd>{formatInteger(snapshot.logging.queue_depth)}</dd>
-                </div>
-                <div>
-                  <dt>기록 완료</dt>
-                  <dd>{formatInteger(snapshot.logging.written)}</dd>
-                </div>
-                <div>
-                  <dt>누락</dt>
-                  <dd>{formatInteger(snapshot.logging.dropped)}</dd>
-                </div>
-              </dl>
-            ) : null}
-          </HealthWidget>
+              <HealthWidget
+                title="저장 공간과 대체 응답"
+                description="운영 데이터 경로와 대체 응답 파일 상태"
+                icon={HardDrive}
+                loading={operations.isPending}
+                updatedAt={operations.dataUpdatedAt || undefined}
+                status={
+                  snapshot
+                    ? fallbackFailure
+                      ? healthStatusLabels.partialFailure
+                      : diskState(snapshot.disk).label
+                    : undefined
+                }
+                statusTone={snapshot ? (fallbackFailure ? "danger" : diskState(snapshot.disk).tone) : "muted"}
+              >
+                {snapshot ? (
+                  <>
+                    {fallbackFailure ? (
+                      <div className="health-inline-warning" role="status">
+                        <AlertTriangle aria-hidden="true" />
+                        <div>
+                          <p>
+                            {operationalMessage(fallbackFailure.code, "운영 상태 일부를 확인할 수 없습니다.")}
+                          </p>
+                          <small>진단 코드: {fallbackFailure.code}</small>
+                        </div>
+                      </div>
+                    ) : null}
+                    <dl className="metric-pairs">
+                      <div>
+                        <dt>디스크 사용</dt>
+                        <dd>
+                          {snapshot.disk.available
+                            ? formatPercent(snapshot.disk.used_percent / 100)
+                            : "확인 실패"}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>남은 공간</dt>
+                        <dd>
+                          {snapshot.disk.available ? formatBytes(snapshot.disk.free_bytes) : "확인 실패"}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>대체 응답 행</dt>
+                        <dd>{fallbackFailure ? "확인 실패" : formatInteger(snapshot.fallback.lines)}</dd>
+                      </div>
+                      <div>
+                        <dt>대체 응답 크기</dt>
+                        <dd>{fallbackFailure ? "확인 실패" : formatBytes(snapshot.fallback.bytes)}</dd>
+                      </div>
+                    </dl>
+                  </>
+                ) : null}
+              </HealthWidget>
 
-          <HealthWidget
-            title="보안 상태"
-            description="민감 데이터와 운영 보안 설정 점검"
-            icon={ShieldCheck}
-            loading={operations.isPending}
-            updatedAt={operations.dataUpdatedAt || undefined}
-            status={
-              securityRisk ? healthStatusLabels.attention : snapshot ? healthStatusLabels.safe : undefined
-            }
-            statusTone={securityRisk ? "warning" : "success"}
-          >
-            {snapshot ? (
-              <ul className="health-check-list" aria-label="보안 설정 점검">
-                {securityChecks.map((check) => (
-                  <li key={check.label}>
-                    <ShieldCheck aria-hidden="true" />
-                    <div>
-                      <p>{check.label}</p>
-                      <small>{check.detail}</small>
-                    </div>
-                    <Badge tone={check.safe ? "success" : "danger"}>
-                      {check.safe ? "안전" : "확인 필요"}
-                    </Badge>
-                  </li>
-                ))}
-              </ul>
-            ) : null}
-          </HealthWidget>
-
-          <HealthWidget
-            title="저장 공간과 대체 응답"
-            description="운영 데이터 경로와 대체 응답 파일 상태"
-            icon={HardDrive}
-            loading={operations.isPending}
-            updatedAt={operations.dataUpdatedAt || undefined}
-            status={
-              snapshot
-                ? fallbackFailure
-                  ? healthStatusLabels.partialFailure
-                  : diskState(snapshot.disk).label
-                : undefined
-            }
-            statusTone={snapshot ? (fallbackFailure ? "danger" : diskState(snapshot.disk).tone) : "muted"}
-          >
-            {snapshot ? (
-              <>
-                {fallbackFailure ? (
-                  <div className="health-inline-warning" role="status">
+              <HealthWidget
+                title="공급자 현황"
+                description="시스템 상태 수집 시점의 공급자 점수"
+                icon={ServerCog}
+                loading={operations.isPending}
+                updatedAt={operations.dataUpdatedAt || undefined}
+                status={
+                  snapshot
+                    ? providerFailure
+                      ? healthStatusLabels.unavailable
+                      : `공급자 ${snapshot.providers.length}개`
+                    : undefined
+                }
+                statusTone={providerFailure ? "danger" : "muted"}
+              >
+                {providerFailure ? (
+                  <div className="health-empty health-partial-failure" role="status">
                     <AlertTriangle aria-hidden="true" />
-                    <div>
-                      <p>
-                        {operationalMessage(fallbackFailure.code, "운영 상태 일부를 확인할 수 없습니다.")}
-                      </p>
-                      <small>진단 코드: {fallbackFailure.code}</small>
-                    </div>
+                    <p>{operationalMessage(providerFailure.code, "운영 상태 일부를 확인할 수 없습니다.")}</p>
+                    <small>진단 코드: {providerFailure.code}</small>
+                  </div>
+                ) : snapshot?.providers.length ? (
+                  <div className="health-table-wrap">
+                    <table className="health-table">
+                      <caption className="sr-only">공급자 현재 운영 점수</caption>
+                      <thead>
+                        <tr>
+                          <th scope="col">공급자</th>
+                          <th scope="col">점수</th>
+                          <th scope="col">요청</th>
+                          <th scope="col">P95 지연</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {providerRows.map(({ displayName, key, provider }) => (
+                          <tr key={key}>
+                            <td>{displayName}</td>
+                            <td>
+                              <span className="score-cell">
+                                <span
+                                  className="score-dot"
+                                  data-tier={scoreTier(provider.score)}
+                                  aria-hidden="true"
+                                />
+                                {provider.score}
+                              </span>
+                            </td>
+                            <td>{formatInteger(provider.requests)}</td>
+                            <td>{formatMilliseconds(provider.p95_latency_ms)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : snapshot ? (
+                  <div className="health-empty">
+                    <Database aria-hidden="true" />
+                    <p>수집된 공급자 상태가 없습니다.</p>
                   </div>
                 ) : null}
-                <dl className="metric-pairs">
-                  <div>
-                    <dt>디스크 사용</dt>
-                    <dd>
-                      {snapshot.disk.available
-                        ? formatPercent(snapshot.disk.used_percent / 100)
-                        : "확인 실패"}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>남은 공간</dt>
-                    <dd>{snapshot.disk.available ? formatBytes(snapshot.disk.free_bytes) : "확인 실패"}</dd>
-                  </div>
-                  <div>
-                    <dt>대체 응답 행</dt>
-                    <dd>{fallbackFailure ? "확인 실패" : formatInteger(snapshot.fallback.lines)}</dd>
-                  </div>
-                  <div>
-                    <dt>대체 응답 크기</dt>
-                    <dd>{fallbackFailure ? "확인 실패" : formatBytes(snapshot.fallback.bytes)}</dd>
-                  </div>
-                </dl>
-              </>
-            ) : null}
-          </HealthWidget>
-
-          <HealthWidget
-            title="공급자 현황"
-            description="시스템 상태 수집 시점의 공급자 점수"
-            icon={ServerCog}
-            loading={operations.isPending}
-            updatedAt={operations.dataUpdatedAt || undefined}
-            status={
-              snapshot
-                ? providerFailure
-                  ? healthStatusLabels.unavailable
-                  : `공급자 ${snapshot.providers.length}개`
-                : undefined
-            }
-            statusTone={providerFailure ? "danger" : "muted"}
-          >
-            {providerFailure ? (
-              <div className="health-empty health-partial-failure" role="status">
-                <AlertTriangle aria-hidden="true" />
-                <p>{operationalMessage(providerFailure.code, "운영 상태 일부를 확인할 수 없습니다.")}</p>
-                <small>진단 코드: {providerFailure.code}</small>
-              </div>
-            ) : snapshot?.providers.length ? (
-              <div className="health-table-wrap">
-                <table className="health-table">
-                  <caption className="sr-only">공급자 현재 운영 점수</caption>
-                  <thead>
-                    <tr>
-                      <th scope="col">공급자</th>
-                      <th scope="col">점수</th>
-                      <th scope="col">요청</th>
-                      <th scope="col">P95 지연</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {providerRows.map(({ displayName, key, provider }) => (
-                      <tr key={key}>
-                        <td>{displayName}</td>
-                        <td>
-                          <span className="score-cell">
-                            <span
-                              className="score-dot"
-                              data-tier={scoreTier(provider.score)}
-                              aria-hidden="true"
-                            />
-                            {provider.score}
-                          </span>
-                        </td>
-                        <td>{formatInteger(provider.requests)}</td>
-                        <td>{formatMilliseconds(provider.p95_latency_ms)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ) : snapshot ? (
-              <div className="health-empty">
-                <Database aria-hidden="true" />
-                <p>수집된 공급자 상태가 없습니다.</p>
-              </div>
-            ) : null}
-          </HealthWidget>
-        </section>
-      )}
+              </HealthWidget>
+            </section>
+          )}
+        </TabPanel>
+      ) : null}
     </div>
   );
 }

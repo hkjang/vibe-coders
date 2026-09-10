@@ -5,6 +5,7 @@ import type { AppRequestSummary } from "@/shared/api/schemas";
 import { Button } from "@/shared/components/ui/Button";
 import { Dialog } from "@/shared/components/ui/Dialog";
 import { formatRequestDate } from "@/features/observability/requests/request-date";
+import { RequestComparePanel } from "@/features/observability/requests/RequestComparePanel";
 
 interface RequestDetailDialogProps {
   legacyHref?: `/admin${string}`;
@@ -156,6 +157,9 @@ export function RequestDetailDialog({
             <dd>{request.finish_reason || "없음"}</dd>
           </div>
         </dl>
+      ) : null}
+      {request?.request_filterable === true && request.request_id ? (
+        <RequestComparePanel requestId={request.request_id} />
       ) : null}
     </Dialog>
   );

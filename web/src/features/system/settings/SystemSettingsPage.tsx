@@ -5,6 +5,7 @@ import { useAuth } from "@/app/auth/AuthProvider";
 import { AuditTab } from "@/features/system/settings/AuditTab";
 import { ChangeSetsTab } from "@/features/system/settings/ChangeSetsTab";
 import { ConsoleRolloutTab } from "@/features/system/settings/ConsoleRolloutTab";
+import { KnowledgeTab } from "@/features/system/settings/KnowledgeTab";
 import { OperationsTab } from "@/features/system/settings/OperationsTab";
 import { RuntimeSettingsTab } from "@/features/system/settings/RuntimeSettingsTab";
 import { SsoTab } from "@/features/system/settings/SsoTab";
@@ -19,13 +20,23 @@ import { TabPanel, Tabs, type TabItem } from "@/shared/components/ui/Tabs";
 import { useTabParam } from "@/shared/hooks/use-tab-param";
 import { canOpenLegacyAdmin } from "@/shared/permissions/legacy-admin";
 
-const tabIds = ["runtime", "console", "operations", "changesets", "sso", "audit", "errors"] as const;
+const tabIds = [
+  "runtime",
+  "console",
+  "operations",
+  "knowledge",
+  "changesets",
+  "sso",
+  "audit",
+  "errors",
+] as const;
 type TabId = (typeof tabIds)[number];
 
 const tabItems: ReadonlyArray<TabItem<TabId>> = [
   { id: "runtime", label: "런타임 설정" },
   { id: "console", label: "콘솔 전환" },
   { id: "operations", label: "데이터·알림 운영" },
+  { id: "knowledge", label: "지식 캐시" },
   { id: "changesets", label: "변경 세트" },
   { id: "sso", label: "SSO (Keycloak)" },
   { id: "audit", label: "변경 이력" },
@@ -98,6 +109,7 @@ export function SystemSettingsPage(): React.JSX.Element {
         {tab === "runtime" ? <RuntimeSettingsTab hasAdminWrite={hasAdminWrite} /> : null}
         {tab === "console" ? <ConsoleRolloutTab hasAdminWrite={hasAdminWrite} /> : null}
         {tab === "operations" ? <OperationsTab hasAdminWrite={hasAdminWrite} /> : null}
+        {tab === "knowledge" ? <KnowledgeTab hasAdminWrite={hasAdminWrite} /> : null}
         {tab === "changesets" ? <ChangeSetsTab hasAdminWrite={hasAdminWrite} /> : null}
         {tab === "sso" ? <SsoTab hasAdminWrite={hasAdminWrite} /> : null}
         {tab === "audit" ? <AuditTab /> : null}

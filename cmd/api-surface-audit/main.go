@@ -46,8 +46,17 @@ var (
 	// Console endpoints. The legacy console is JavaScript inside a Go string literal and quotes
 	// its paths with ', so it never uses backticks; the React sources use all three quote styles.
 	reLegacyAdmin = regexp.MustCompile(`['"](/admin/[^'"?#]*)`)
-	reAppAdmin    = regexp.MustCompile("['\"`](/admin/[^'\"`?#]*)")
+	// "$" ends the literal part of a React template ("`/admin/export.csv${query}`"), the same
+	// way "?" ends it at a query string.
+	reAppAdmin = regexp.MustCompile("['\"`](/admin/[^'\"`?#$]*)")
+	// " + <expression> + '/rest'" — the legacy console's way of writing a path parameter.
+	reLegacyConcat = regexp.MustCompile(`\A\s*\+\s*[^+']+?\s*\+\s*'(/[^'"?#]*)'`)
+	reParamSegment = regexp.MustCompile(`\{[^}]*\}`)
 )
+
+// concatLookahead bounds how far past a path literal the audit reads for a "+ id + '/rest'"
+// continuation. One argument list is far shorter than this.
+const concatLookahead = 200
 
 func uniqueSorted(in []string) []string {
 	seen := map[string]bool{}
@@ -121,25 +130,52 @@ func docRegistered(doc string, routes []string) bool {
 	return false
 }
 
-// staticPrefix reduces an endpoint to the part that is fixed. Both consoles build paths around a
-// variable segment — the legacy one by concatenation ("/admin/settings/by-key/" + key), the React
-// one with a template ("/admin/settings/by-key/{key}") — so only the text before the variable can
-// be compared.
-func staticPrefix(path string) string {
-	if i := strings.Index(path, "{"); i >= 0 {
-		path = path[:i]
+// normalizePath rewrites every variable segment to a single "{}" so the two consoles' spellings
+// of the same endpoint compare equal: the React console writes a template
+// ("/admin/requests/{id}/trace") and the legacy console concatenates
+// ("/admin/requests/" + encodeURIComponent(id) + "/trace"), which legacyConsolePaths has already
+// folded into the same shape.
+func normalizePath(path string) string {
+	return strings.TrimRight(reParamSegment.ReplaceAllString(path, "{}"), "/")
+}
+
+// legacyConsolePaths extracts the /admin endpoints the legacy console calls, folding a
+// concatenated path back into one endpoint. Reading only the first string literal would stop at
+// "/admin/requests/" and count every sub-action under it as covered, which is how the request
+// trace and links screens stayed missing from /app while this audit reported no gaps.
+func legacyConsolePaths(src string) []string {
+	out := []string{}
+	for _, m := range reLegacyAdmin.FindAllStringSubmatchIndex(src, -1) {
+		path := src[m[2]:m[3]]
+		// reLegacyAdmin stops before the closing quote; step over it so the continuation
+		// below starts at the " + expr + " that follows.
+		pos := m[1]
+		if pos < len(src) && (src[pos] == '\'' || src[pos] == '"') {
+			pos++
+		}
+		for {
+			tail := src[pos:min(pos+concatLookahead, len(src))]
+			cont := reLegacyConcat.FindStringSubmatchIndex(tail)
+			if cont == nil {
+				break
+			}
+			path = strings.TrimRight(path, "/") + "/{}" + tail[cont[2]:cont[3]]
+			pos += cont[1]
+		}
+		out = append(out, path)
 	}
-	return strings.TrimRight(path, "/")
+	return out
 }
 
 // consoleCovered reports whether the React console binds a legacy console endpoint. An app path
-// covers a legacy one when their static prefixes are equal, or when the app path continues past
-// the point where the legacy path stops building (the legacy prefix + a concatenated segment).
+// covers a legacy one when the normalized paths are equal, or when the app path continues past a
+// legacy path that stopped at a prefix (the legacy console builds "/admin/x/" + id with nothing
+// after it, which any "/admin/x/{}" binding answers).
 func consoleCovered(legacyPath string, appPaths []string) bool {
-	prefix := staticPrefix(legacyPath)
+	want := normalizePath(legacyPath)
 	for _, a := range appPaths {
-		app := staticPrefix(a)
-		if app == prefix || strings.HasPrefix(app, prefix+"/") {
+		app := normalizePath(a)
+		if app == want || strings.HasPrefix(app, want+"/") {
 			return true
 		}
 	}
@@ -150,7 +186,7 @@ func consoleCovered(legacyPath string, appPaths []string) bool {
 // console never binds. The React console may bind more (it does — its screens split work the
 // legacy console did in one view); only the reverse direction is a migration gap.
 func consoleParity(legacyUISrc string, appUISrcs []string) (legacy, app, gaps []string) {
-	legacy = uniqueSorted(extractMatches(reLegacyAdmin, legacyUISrc))
+	legacy = uniqueSorted(legacyConsolePaths(legacyUISrc))
 	appPaths := []string{}
 	for _, s := range appUISrcs {
 		appPaths = append(appPaths, extractMatches(reAppAdmin, s)...)
@@ -240,6 +276,13 @@ func main() {
 			return err
 		}
 		if ext := filepath.Ext(path); ext != ".ts" && ext != ".tsx" {
+			return nil
+		}
+		// web/src/shared/api/generated holds the OpenAPI-generated types, which name every
+		// documented path whether or not a screen calls it. Counting those as bindings made
+		// the audit compare the legacy console against the catalog instead of against the
+		// React console, and it passed while whole screens were still missing from /app.
+		if strings.Contains(filepath.ToSlash(path), "/shared/api/generated/") {
 			return nil
 		}
 		if b, err := os.ReadFile(path); err == nil {

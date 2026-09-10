@@ -81,9 +81,46 @@ const note = {
   updated_at: "2026-09-06T02:00:00Z",
 };
 
+const trace = {
+  request_id: "req-1",
+  trace_id: "trace-1",
+  total_ms: 1200,
+  spans: [
+    {
+      span_id: "span:req:req-1",
+      name: "gpt-4o-mini",
+      kind: "request",
+      status: "ok",
+      start_offset_ms: 0,
+      duration_ms: 1200,
+      tokens: 800,
+    },
+    {
+      span_id: "span:tool:1",
+      parent_span_id: "span:req:req-1",
+      name: "search_docs",
+      kind: "mcp_tool",
+      status: "error",
+      start_offset_ms: 300,
+      duration_ms: 250,
+      error: "upstream timeout",
+    },
+  ],
+};
+
+const links = {
+  request_id: "req-1",
+  trace_id: "trace-1",
+  session_id: "sess-1",
+  counts: { tools: 1, mcp_tools: 1, text2sql_spans: 0, tool_errors: 1 },
+  governance: { blocked: false },
+};
+
 const baseHandlers = {
   "GET /admin/requests/req-1/explain": () => explain,
   "GET /admin/requests/req-1/note": () => note,
+  "GET /admin/requests/req-1/trace": () => trace,
+  "GET /admin/requests/req-1/links": () => links,
 };
 
 function renderPanel(overrides: { canInspectRaw?: boolean; canWriteNote?: boolean } = {}) {
@@ -243,5 +280,34 @@ describe("RequestInsightPanel", () => {
 
     await screen.findByText("복잡도 기반 비용 최적 라우팅 규칙");
     expect((await axe.run(container)).violations).toEqual([]);
+  });
+
+  it("draws the request's span waterfall and links to the session flow", async () => {
+    mockApi(baseHandlers);
+    renderPanel();
+
+    const lanes = await screen.findByRole("list", { name: "요청 스팬 흐름" });
+    expect(within(lanes).getByText("gpt-4o-mini")).toBeVisible();
+    expect(within(lanes).getByText("search_docs")).toBeVisible();
+    expect(within(lanes).getByText("upstream timeout")).toBeVisible();
+    expect(screen.getByText("MCP 1건")).toBeVisible();
+    expect(screen.getByRole("link", { name: "세션 흐름 보기" })).toHaveAttribute(
+      "href",
+      "/app/observability/xview?session_id=sess-1",
+    );
+  });
+
+  it("keeps the panel usable when the waterfall cannot be read", async () => {
+    mockApi({
+      ...baseHandlers,
+      "GET /admin/requests/req-1/trace": () => {
+        throw apiFailure("trace unavailable", 500, "req_trace");
+      },
+    });
+    renderPanel();
+
+    expect(await screen.findByText("처리 흐름을 불러오지 못했습니다.")).toBeVisible();
+    // The rest of the panel still renders its own data.
+    expect(await screen.findByText("복잡도 기반 비용 최적 라우팅 규칙")).toBeVisible();
   });
 });

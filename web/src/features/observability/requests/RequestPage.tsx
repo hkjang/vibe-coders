@@ -8,6 +8,7 @@ import { featureByPath } from "@/config/migration-registry";
 import { RequestDetailDialog } from "@/features/observability/requests/RequestDetailDialog";
 import { formatRequestDate } from "@/features/observability/requests/request-date";
 import { refreshIntervalMs } from "@/features/health/health-utils";
+import { FilterSuggestions } from "@/features/observability/requests/FilterSuggestions";
 import { apiClient } from "@/shared/api/client";
 import { endpoints } from "@/shared/api/endpoints";
 import { isAppError } from "@/shared/api/error";
@@ -140,6 +141,11 @@ export function RequestPage(): React.JSX.Element {
     refetchIntervalInBackground: false,
   });
   const [filterRevision, setFilterRevision] = useState(0);
+  // Filter autocomplete is fetched when its own field is first focused, so opening the
+  // screen — or touching one filter — costs no request for the others.
+  const [suggestFields, setSuggestFields] = useState<Record<string, boolean>>({});
+  const enableSuggest = (field: string) => (): void =>
+    setSuggestFields((current) => (current[field] ? current : { ...current, [field]: true }));
   const [filterError, setFilterError] = useState<string>();
   const returnFocusRef = useRef<HTMLElement | null>(null);
   const resultsHeadingRef = useRef<HTMLHeadingElement>(null);
@@ -350,8 +356,20 @@ export function RequestPage(): React.JSX.Element {
           </label>
           <label>
             모델
-            <input name="model" maxLength={256} defaultValue={searchParams.get("model") ?? ""} />
+            <input
+              name="model"
+              maxLength={256}
+              list="request-filter-models"
+              defaultValue={searchParams.get("model") ?? ""}
+              onFocus={enableSuggest("model")}
+            />
           </label>
+          {/* Outside the label: a datalist inside one becomes part of the field's name. */}
+          <FilterSuggestions
+            enabled={suggestFields.model === true}
+            field="model"
+            id="request-filter-models"
+          />
           <label>
             요청 ID
             <input name="request_id" maxLength={512} defaultValue={searchParams.get("request_id") ?? ""} />
@@ -386,8 +404,19 @@ export function RequestPage(): React.JSX.Element {
               <RequestIPFilter initialValue={deepLinkIP} />
               <label>
                 언어
-                <input name="language" maxLength={64} defaultValue={searchParams.get("language") ?? ""} />
+                <input
+                  name="language"
+                  maxLength={64}
+                  list="request-filter-languages"
+                  defaultValue={searchParams.get("language") ?? ""}
+                  onFocus={enableSuggest("language")}
+                />
               </label>
+              <FilterSuggestions
+                enabled={suggestFields.language === true}
+                field="language"
+                id="request-filter-languages"
+              />
               <label>
                 표시 건수
                 <select name="limit" defaultValue={String(selectedLimit)}>

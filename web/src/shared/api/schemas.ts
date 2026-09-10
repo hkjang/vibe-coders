@@ -244,6 +244,27 @@ export const embeddingCacheStatsSchema = z.object({
   ),
 });
 
+/** GET /admin/timeseries — request, token and cost totals per day or hour bucket. */
+export const adminTimeseriesSchema = z.object({
+  bucket: z.string(),
+  since: z.string(),
+  points: z.array(
+    z.object({
+      date: z.string(),
+      bucket: z.string(),
+      requests: countSchema,
+      tokens: countSchema,
+      cost_krw: measurementSchema,
+    }),
+  ),
+});
+
+/** GET /admin/heatmap — request counts by KST weekday (0=Sunday) and hour. */
+export const adminHeatmapSchema = z.object({
+  since: z.string(),
+  cells: z.array(z.object({ day: z.number().int(), hour: z.number().int(), requests: countSchema })),
+});
+
 export const adminStatsSchema = z.object({
   total_requests: countSchema,
   total_tokens: countSchema,
@@ -703,6 +724,16 @@ export const adminModelsQuerySchema = z
   .object({ provider: z.string().min(1).optional(), model: z.string().min(1).optional() })
   .strict();
 
+/** The dashboard chart windows the server accepts, plus its bucket sizes. */
+export const timeseriesQuerySchema = z
+  .object({
+    window: z.enum(["24h", "7d", "30d"]),
+    bucket: z.enum(["hour", "day"]),
+  })
+  .strict();
+
+export const heatmapQuerySchema = z.object({ window: z.enum(["7d", "30d"]) }).strict();
+
 export const modelQualityQuerySchema = z
   .object({
     window: z.union([z.enum(["1h", "6h", "24h", "1d", "7d", "30d"]), goDurationSchema]).optional(),
@@ -719,6 +750,8 @@ export const pricingQuerySchema = z
 export type AuthMe = z.output<typeof authMeSchema>;
 export type AuthUser = z.output<typeof authUserSchema>;
 export type AdminStats = z.output<typeof adminStatsSchema>;
+export type AdminTimeseries = z.output<typeof adminTimeseriesSchema>;
+export type AdminHeatmap = z.output<typeof adminHeatmapSchema>;
 export type AdminModel = z.output<typeof adminModelSchema>;
 export type AdminModelsResponse = z.output<typeof adminModelsResponseSchema>;
 export type AdminModelsQuery = z.input<typeof adminModelsQuerySchema>;
@@ -739,6 +772,7 @@ export type ProviderSLOResponse = z.output<typeof providerSLOResponseSchema>;
 export type ModelPrice = z.output<typeof modelPriceSchema>;
 export type ModelQualityResponse = z.output<typeof modelQualityResponseSchema>;
 export type ModelQualityQuery = z.input<typeof modelQualityQuerySchema>;
+export type TimeseriesQuery = z.input<typeof timeseriesQuerySchema>;
 export type ModelQualityScore = z.output<typeof modelQualityScoreSchema>;
 export type ModelUsageTag = z.output<typeof modelUsageTagSchema>;
 export type ModelUsageTagsResponse = z.output<typeof modelUsageTagsResponseSchema>;

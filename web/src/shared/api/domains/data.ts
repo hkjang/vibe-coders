@@ -18,7 +18,9 @@ import type {
   GetAdminDwDashboardText2SqlData,
   GetAdminDwDashboardTimeseriesData,
   GetAdminDwMetricsData,
+  GetAdminModelMigrationData,
   GetAdminDwSinkStatusData,
+  GetAdminSavingsData,
   PostAdminDataProductsData,
   PostAdminDataProductsRequestsData,
   PostAdminDwClickhouseBootstrapData,
@@ -54,6 +56,8 @@ import {
   dwSinkStatusSchema,
   dwText2SqlSchema,
   dwTimeseriesSchema,
+  modelMigrationSchema,
+  savingsSchema,
   metricDeleteSchema,
   metricListSchema,
   metricUpsertSchema,
@@ -64,6 +68,7 @@ import {
 type LegacyResponse = unknown;
 
 const windowQuerySchema = z.object({ window: z.string() });
+const savingsQuerySchema = z.object({ window: z.string(), dimension: z.string() });
 const dimensionQuerySchema = z.object({
   window: z.string(),
   dimension: z.string(),
@@ -175,6 +180,19 @@ export const dataEndpoints = {
       "POST",
       "/admin/dw/dashboard/refresh",
       dwRefreshSchema,
+    ),
+    // Cost savings and the model migration advisor are computed from the operational
+    // database, not the warehouse; the insight tab shows them beside the DW panels the
+    // way the legacy dashboard did.
+    savings: operation<
+      WithQuery<GetAdminSavingsData, { window: string; dimension: string }>,
+      LegacyResponse
+    >()("GET", "/admin/savings", savingsSchema, savingsQuerySchema),
+    modelMigration: operation<WithQuery<GetAdminModelMigrationData, { window: string }>, LegacyResponse>()(
+      "GET",
+      "/admin/model-migration",
+      modelMigrationSchema,
+      windowQuerySchema,
     ),
   },
   pipeline: {

@@ -289,6 +289,189 @@ export const settingRevertQuerySchema = z.object({
 });
 export const systemErrorQuerySchema = z.object({ limit: z.number().int().positive().max(1000).optional() });
 
+/* ── operations home ──────────────────────────────────────────────────────── */
+
+/** One "today's things to watch" tile of GET /admin/ops/home. */
+export const opsHomeCardSchema = looseObject({
+  key: z.string(),
+  title: z.string(),
+  status: z.string().nullish(),
+  value: z.string().nullish(),
+  detail: z.string().nullish(),
+  link: z.string().nullish(),
+});
+
+export const opsHomeSchema = looseObject({
+  window_hours: numberish.nullish(),
+  overall: z.string().nullish(),
+  generated_at: z.string().nullish(),
+  cards: looseList({
+    key: z.string(),
+    status: z.string().nullish(),
+    title: z.string(),
+    value: z.string().nullish(),
+    detail: z.string().nullish(),
+    link: z.string().nullish(),
+  })
+    .nullish()
+    .transform((value) => value ?? []),
+});
+
+/** GET /admin/incidents/candidates — signals past their threshold, worst first. */
+export const incidentCandidatesSchema = looseObject({
+  window_hours: numberish.nullish(),
+  total: numberish.nullish(),
+  note: z.string().nullish(),
+  counts: z.record(z.string(), numberish).nullish(),
+  incidents: looseList({
+    id: z.string(),
+    severity: z.string().nullish(),
+    category: z.string().nullish(),
+    title: z.string(),
+    summary: z.string().nullish(),
+    recommended_actions: z.array(z.string()).nullish(),
+    links: z.array(z.string()).nullish(),
+    evidence: unknownRecord.nullish(),
+  })
+    .nullish()
+    .transform((value) => value ?? []),
+});
+
+/** GET /admin/ops/workers — the background workers and their queues. */
+export const opsWorkersSchema = looseObject({
+  overall: z.string().nullish(),
+  workers: looseList({
+    name: z.string(),
+    status: z.string().nullish(),
+    running: z.boolean().nullish(),
+    queue_depth: numberish.nullish(),
+    capacity: numberish.nullish(),
+    dropped: numberish.nullish(),
+    last_run: z.string().nullish(),
+    detail: z.string().nullish(),
+  })
+    .nullish()
+    .transform((value) => value ?? []),
+});
+
+/** GET /admin/ops/preflight — the read-only pre-deploy checklist. */
+export const opsPreflightSchema = looseObject({
+  version: z.string().nullish(),
+  overall: z.string().nullish(),
+  note: z.string().nullish(),
+  checks: looseList({
+    name: z.string(),
+    status: z.string().nullish(),
+    detail: z.string().nullish(),
+  })
+    .nullish()
+    .transform((value) => value ?? []),
+});
+
+/**
+ * GET /admin/index-health — what the migrations declare against what this database
+ * has, plus add/drop candidates. The `fix` and `sql` fields are DDL for an operator to
+ * read: the gateway never runs them, and this screen only displays them.
+ */
+export const indexHealthSchema = looseObject({
+  summary: looseObject({
+    in_sync: z.boolean().nullish(),
+    mismatched: numberish.nullish(),
+    missing: numberish.nullish(),
+    undeclared: numberish.nullish(),
+    advice_high: numberish.nullish(),
+    advice_total: numberish.nullish(),
+    headline: z.string().nullish(),
+  }).nullish(),
+  drift: looseObject({
+    dialect: z.string().nullish(),
+    declared_count: numberish.nullish(),
+    live_count: numberish.nullish(),
+    implicit_count: numberish.nullish(),
+    items: looseList({
+      kind: z.string().nullish(),
+      name: z.string(),
+      table: z.string().nullish(),
+      detail: z.string().nullish(),
+      fix: z.string().nullish(),
+    })
+      .nullish()
+      .transform((value) => value ?? []),
+  }).nullish(),
+  advice: looseObject({
+    dialect: z.string().nullish(),
+    limitations: z.array(z.string()).nullish(),
+    items: looseList({
+      kind: z.string().nullish(),
+      severity: z.string().nullish(),
+      table: z.string(),
+      index: z.string().nullish(),
+      columns: z.array(z.string()).nullish(),
+      reason: z.string().nullish(),
+      evidence: z.string().nullish(),
+      sql: z.string().nullish(),
+    })
+      .nullish()
+      .transform((value) => value ?? []),
+  }).nullish(),
+});
+
+/** GET /admin/migration-sql — the declared schema, annotated with what this DB has. */
+export const migrationSqlSchema = looseObject({
+  dialect: z.string().nullish(),
+  live_error: z.string().nullish(),
+  tables: z.array(z.string()).nullish(),
+  post_migration: z.array(z.string()).nullish(),
+  index_status: z.record(z.string(), z.string()).nullish(),
+  index_detail: z.record(z.string(), z.string()).nullish(),
+  counts: looseObject({
+    total: numberish.nullish(),
+    create_table: numberish.nullish(),
+    create_index: numberish.nullish(),
+    add_column: numberish.nullish(),
+    other: numberish.nullish(),
+    rewritten: numberish.nullish(),
+  }).nullish(),
+  statements: looseList({
+    seq: numberish.nullish(),
+    kind: z.string().nullish(),
+    table: z.string().nullish(),
+    name: z.string().nullish(),
+    column: z.string().nullish(),
+    sql: z.string(),
+    declared_sql: z.string().nullish(),
+  })
+    .nullish()
+    .transform((value) => value ?? []),
+});
+
+/* ── knowledge cache ──────────────────────────────────────────────────────── */
+
+/**
+ * GET /admin/knowledge — reusable rules and system prompts registered once and
+ * referenced by clients as `{{kb:ID}}`. `content` is the operator's own text, not a
+ * captured prompt, and it is what the screen edits.
+ */
+export const knowledgeListSchema = looseObject({
+  snippets: looseList({
+    id: z.string(),
+    name: z.string(),
+    content: z.string().nullish(),
+    enabled: z.boolean().nullish(),
+    token_estimate: numberish.nullish(),
+    use_count: numberish.nullish(),
+    last_used_at: z.string().nullish(),
+    created_at: z.string().nullish(),
+  })
+    .nullish()
+    .transform((value) => value ?? []),
+});
+
+export const knowledgeSavedSchema = looseObject({
+  id: z.string().nullish(),
+  status: z.string().nullish(),
+});
+
 export type EffectiveSetting = z.output<typeof effectiveSettingSchema>;
 export type SettingHistoryEntry = z.output<typeof settingHistorySchema>["history"][number];
 export type ChangeSet = z.output<typeof changeSetSchema>;
@@ -303,3 +486,11 @@ export type NotificationConfig = z.output<typeof notificationConfigSchema>;
 export type ConnectionTestResult = z.output<typeof connectionTestSchema>;
 export type KeycloakTestResult = z.output<typeof keycloakTestSchema>;
 export type ChangeImpactResult = z.output<typeof changeImpactSchema>;
+export type OpsHomeCard = z.output<typeof opsHomeSchema>["cards"][number];
+export type IncidentCandidate = z.output<typeof incidentCandidatesSchema>["incidents"][number];
+export type OpsWorkerRow = z.output<typeof opsWorkersSchema>["workers"][number];
+export type OpsPreflightCheck = z.output<typeof opsPreflightSchema>["checks"][number];
+export type IndexHealthReport = z.output<typeof indexHealthSchema>;
+export type MigrationSqlReport = z.output<typeof migrationSqlSchema>;
+export type MigrationSqlStatement = MigrationSqlReport["statements"][number];
+export type KnowledgeSnippet = z.output<typeof knowledgeListSchema>["snippets"][number];

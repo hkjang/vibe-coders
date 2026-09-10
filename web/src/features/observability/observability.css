@@ -260,3 +260,74 @@
   flex-wrap: wrap;
   gap: var(--space-2);
 }
+
+/* Per-request span waterfall in the request insight panel. Self-contained so the panel
+   does not depend on the trace explorer's stylesheet. */
+.obs-span-lanes {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.obs-span-lane {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-small);
+  background: var(--color-background);
+}
+
+.obs-span-heading,
+.obs-span-facts {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.obs-span-heading > span:first-child {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+
+.obs-span-heading code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.obs-span-facts {
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  color: var(--color-muted);
+  font-size: 0.8125rem;
+}
+
+.obs-span-error {
+  color: var(--color-danger);
+}
+
+.obs-span-track {
+  position: relative;
+  display: block;
+  height: 0.75rem;
+  overflow: hidden;
+  border-radius: var(--radius-small);
+  background: var(--color-muted-soft);
+}
+
+.obs-span-bar {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--span-offset);
+  width: var(--span-width);
+  min-width: 2px;
+  border-radius: var(--radius-small);
+  background: var(--color-primary);
+}

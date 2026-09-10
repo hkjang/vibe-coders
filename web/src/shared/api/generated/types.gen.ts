@@ -2842,7 +2842,7 @@ export type DeleteAdminKnowledgeIdResponses = {
     200: unknown;
 };
 
-export type GetAdminKnowledgeIdData = {
+export type PatchAdminKnowledgeIdData = {
     body?: never;
     path: {
         id: string;
@@ -2851,23 +2851,7 @@ export type GetAdminKnowledgeIdData = {
     url: '/admin/knowledge/{id}';
 };
 
-export type GetAdminKnowledgeIdResponses = {
-    /**
-     * OK
-     */
-    200: unknown;
-};
-
-export type PutAdminKnowledgeIdData = {
-    body?: never;
-    path: {
-        id: string;
-    };
-    query?: never;
-    url: '/admin/knowledge/{id}';
-};
-
-export type PutAdminKnowledgeIdResponses = {
+export type PatchAdminKnowledgeIdResponses = {
     /**
      * OK
      */

@@ -71,16 +71,46 @@ func TestBuildReportContractIntact(t *testing.T) {
 	}
 }
 
-func TestStaticPrefix(t *testing.T) {
+func TestNormalizePath(t *testing.T) {
 	cases := map[string]string{
-		"/admin/settings/by-key/":      "/admin/settings/by-key", // legacy concatenation
-		"/admin/settings/by-key/{key}": "/admin/settings/by-key", // React template
-		"/admin/users":                 "/admin/users",           // no variable part
-		"/admin/teams/{id}/members":    "/admin/teams",           // stops at the first variable
+		"/admin/settings/by-key/{}":    "/admin/settings/by-key/{}", // legacy concatenation, folded
+		"/admin/settings/by-key/{key}": "/admin/settings/by-key/{}", // React template
+		"/admin/users":                 "/admin/users",              // no variable part
+		"/admin/requests/{id}/trace":   "/admin/requests/{}/trace",  // a sub-action past the id
+		"/admin/teams/{id}/members/":   "/admin/teams/{}/members",   // trailing slash dropped
 	}
 	for in, want := range cases {
-		if got := staticPrefix(in); got != want {
-			t.Errorf("staticPrefix(%q) = %q, want %q", in, got, want)
+		if got := normalizePath(in); got != want {
+			t.Errorf("normalizePath(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// The legacy console writes a path parameter by concatenation. Reading only the first string
+// literal stops at the prefix and counts every sub-action under it as covered — the bug that let
+// the request trace screen stay missing from /app while this audit reported no gaps.
+func TestLegacyConsolePathsFoldsConcatenation(t *testing.T) {
+	src := `
+		api('/admin/requests?limit=20')
+		api('/admin/requests/' + encodeURIComponent(id) + '/trace')
+		api('/admin/requests/' + encodeURIComponent(id) + '/note')
+		api('/admin/settings/by-key/' + encodeURIComponent(key))
+	`
+	got := uniqueSorted(legacyConsolePaths(src))
+	// The two concatenated calls fold into their own endpoints rather than collapsing onto
+	// the "/admin/requests/" prefix they start from.
+	want := []string{
+		"/admin/requests",
+		"/admin/requests/{}/note",
+		"/admin/requests/{}/trace",
+		"/admin/settings/by-key/",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("legacy paths = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("legacy paths = %v, want %v", got, want)
 		}
 	}
 }
@@ -89,7 +119,7 @@ func TestConsoleCovered(t *testing.T) {
 	app := []string{
 		"/admin/users",
 		"/admin/settings/by-key/{key}",
-		"/admin/teams/{id}/members",
+		"/admin/requests/{id}/note",
 	}
 	cases := []struct {
 		legacy string
@@ -97,7 +127,9 @@ func TestConsoleCovered(t *testing.T) {
 	}{
 		{"/admin/users", true},               // same endpoint
 		{"/admin/settings/by-key/", true},    // concatenation vs template spelling
-		{"/admin/teams/", true},              // the app path continues past where the legacy one stops
+		{"/admin/requests/", true},           // the app path continues past a legacy prefix
+		{"/admin/requests/{}/note", true},    // the same sub-action, both spellings folded
+		{"/admin/requests/{}/trace", false},  // a sub-action only the legacy console calls
 		{"/admin/legacy-only-widget", false}, // only the legacy console calls it
 		{"/admin/users-report", false},       // shares a prefix but is a different endpoint
 	}

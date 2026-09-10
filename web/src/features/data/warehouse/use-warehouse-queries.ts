@@ -12,6 +12,8 @@ import type {
   DwRouting,
   DwSinkStatus,
   DwText2Sql,
+  ModelMigration,
+  Savings,
 } from "@/shared/api/domains/data.schemas";
 import { endpoints } from "@/shared/api/endpoints";
 import { useRefreshInterval } from "@/shared/hooks/use-refresh-interval";
@@ -36,6 +38,8 @@ export interface InsightsQueries {
   quality: UseQueryResult<DwQuality>;
   routing: UseQueryResult<DwRouting>;
   text2sql: UseQueryResult<DwText2Sql>;
+  savings: UseQueryResult<Savings>;
+  modelMigration: UseQueryResult<ModelMigration>;
 }
 
 function loadTimeseries(range: DwWindow, bucket: DwBucket, signal: AbortSignal) {
@@ -99,7 +103,36 @@ export function useInsightsQueries(
     enabled: configured,
     refetchInterval,
   });
-  return { overview, timeseries, dimensions, latency, quality, routing, text2sql };
+  // Both read the operational database rather than ClickHouse, but the legacy dashboard
+  // showed them here and only after the warehouse was configured, so the tab keeps that.
+  const savings = useQuery({
+    queryKey: [...dataQueryKeys.warehouse, "savings", range, dimension],
+    queryFn: ({ signal }) =>
+      apiClient.request(warehouse.savings, {
+        query: { window: range, dimension },
+        signal,
+      }),
+    enabled: configured,
+    refetchInterval,
+  });
+  const modelMigration = useQuery({
+    queryKey: [...dataQueryKeys.warehouse, "model-migration", range],
+    queryFn: ({ signal }) =>
+      apiClient.request(warehouse.modelMigration, { query: { window: range }, signal }),
+    enabled: configured,
+    refetchInterval,
+  });
+  return {
+    overview,
+    timeseries,
+    dimensions,
+    latency,
+    quality,
+    routing,
+    text2sql,
+    savings,
+    modelMigration,
+  };
 }
 
 export interface PipelineQueries {

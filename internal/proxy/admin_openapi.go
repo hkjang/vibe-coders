@@ -507,7 +507,7 @@ var apiEndpoints = []apiEndpoint{
 	{"/admin/personalization/profiles/{user_id}", []string{"get", "post"}, "admin", "Profile detail and drift (GET); take a snapshot (POST)", false},
 	{"/admin/recommendations/adoption", []string{"get"}, "admin", "Recommendation adoption rates", false},
 	{"/admin/knowledge", []string{"get", "post"}, "admin", "Knowledge base entries", false},
-	{"/admin/knowledge/{id}", []string{"get", "put", "delete"}, "admin", "Knowledge entry by id", false},
+	{"/admin/knowledge/{id}", []string{"patch", "delete"}, "admin", "Knowledge entry by id: edit fields (PATCH) or remove it", false},
 	{"/admin/templates", []string{"get", "post"}, "admin", "Work templates", false},
 	{"/admin/templates/{id}", []string{"patch", "delete"}, "admin", "Update or delete a template", false},
 	{"/admin/templates/{id}/use", []string{"post"}, "admin", "Record one use of a template", false},

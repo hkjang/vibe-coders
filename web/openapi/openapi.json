@@ -5973,13 +5973,13 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Knowledge entry by id",
+        "summary": "Knowledge entry by id: edit fields (PATCH) or remove it",
         "tags": [
           "admin"
         ]
       },
-      "get": {
-        "operationId": "get__admin_knowledge_id",
+      "patch": {
+        "operationId": "patch__admin_knowledge_id",
         "parameters": [
           {
             "in": "path",
@@ -6000,34 +6000,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Knowledge entry by id",
-        "tags": [
-          "admin"
-        ]
-      },
-      "put": {
-        "operationId": "put__admin_knowledge_id",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK"
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "summary": "Knowledge entry by id",
+        "summary": "Knowledge entry by id: edit fields (PATCH) or remove it",
         "tags": [
           "admin"
         ]

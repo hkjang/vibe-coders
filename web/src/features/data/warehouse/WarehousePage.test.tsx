@@ -219,6 +219,41 @@ const metricsResponse = {
   ],
 };
 
+const savingsResponse = {
+  dimension: "model",
+  total_savings_krw: 18_000,
+  total_downshift_savings_krw: 12_000,
+  total_cache_savings_krw: 6_000,
+  cache_savings_estimated: true,
+  scopes: [
+    {
+      scope: "gpt-4o-mini",
+      downshift_requests: 120,
+      downshift_savings_krw: 12_000,
+      cache_hits: 40,
+      cache_savings_krw: 6_000,
+      total_savings_krw: 18_000,
+    },
+  ],
+};
+
+const modelMigrationResponse = {
+  count: 1,
+  total_estimated_savings_krw: 9_000,
+  recommendations: [
+    {
+      fingerprint: "fp-1",
+      task_type: "summarize",
+      requests: 300,
+      current_model: "gpt-4o",
+      recommended_model: "gpt-4o-mini",
+      current_success_rate: 0.98,
+      recommended_success_rate: 0.97,
+      estimated_savings_krw: 9_000,
+    },
+  ],
+};
+
 function mockAllEndpoints(overrides: Readonly<Record<string, ApiHandler>> = {}) {
   return mockApi({
     "GET /admin/dw/dashboard/overview": () => overviewResponse,
@@ -228,6 +263,8 @@ function mockAllEndpoints(overrides: Readonly<Record<string, ApiHandler>> = {}) 
     "GET /admin/dw/dashboard/quality": () => qualityResponse,
     "GET /admin/dw/dashboard/routing": () => routingResponse,
     "GET /admin/dw/dashboard/text2sql": () => text2sqlResponse,
+    "GET /admin/savings": () => savingsResponse,
+    "GET /admin/model-migration": () => modelMigrationResponse,
     "POST /admin/dw/dashboard/refresh": () => ({ status: "refreshed", cleared: 4 }),
     "GET /admin/dw/clickhouse/overview": () => clickhouseOverviewResponse,
     "GET /admin/dw/clickhouse/lag": () => lagResponse,
@@ -283,6 +320,23 @@ describe("WarehousePage", () => {
 
     const table = screen.getByRole("table", { name: "모델별 사용량과 비용" });
     expect(within(table).getAllByText("gpt-4o-mini").length).toBeGreaterThan(0);
+  });
+
+  it("절감액과 모델 전환 추천을 함께 보여준다", async () => {
+    mockAllEndpoints();
+    render();
+
+    // The stat card and the table row both carry the total, so wait for either and
+    // then assert inside the table.
+    expect((await screen.findAllByText("₩18,000")).length).toBeGreaterThan(0);
+    const savings = screen.getByRole("table", { name: "모델별 절감액" });
+    expect(within(savings).getByText("gpt-4o-mini")).toBeVisible();
+    expect(within(savings).getByText("₩12,000")).toBeVisible();
+
+    const migration = screen.getByRole("table", { name: "모델 전환 추천" });
+    expect(within(migration).getByText("summarize")).toBeVisible();
+    expect(within(migration).getByText("gpt-4o")).toBeVisible();
+    expect(within(migration).getByText("98.0% → 97.0%")).toBeVisible();
   });
 
   it("분석 저장소가 연결되지 않으면 빈 상태로 안내한다", async () => {

@@ -401,3 +401,48 @@ export const dataProductRequestListSchema = looseObject({
 export const dataProductUpsertSchema = looseObject({ product_key: text, ok: flag });
 export const dataProductDeleteSchema = looseObject({ ok: flag });
 export const dataProductDecisionSchema = looseObject({ id: text, status: text });
+
+/**
+ * GET /admin/savings and GET /admin/model-migration. Both are computed from the
+ * operational database rather than the warehouse, and the legacy console surfaced them
+ * on the DW dashboard, so the insight tab keeps them together there.
+ */
+export const savingsSchema = looseObject({
+  dimension: orDefault(z.string(), ""),
+  total_savings_krw: count,
+  total_downshift_savings_krw: count,
+  total_cache_savings_krw: count,
+  cache_savings_estimated: z.boolean().nullish(),
+  scopes: looseList({
+    scope: orDefault(z.string(), ""),
+    downshift_requests: count,
+    downshift_savings_krw: count,
+    cache_hits: count,
+    cache_savings_krw: count,
+    total_savings_krw: count,
+  })
+    .nullish()
+    .transform((value) => value ?? []),
+});
+
+export const modelMigrationSchema = looseObject({
+  count: count,
+  total_estimated_savings_krw: count,
+  recommendations: looseList({
+    fingerprint: orDefault(z.string(), ""),
+    task_type: orDefault(z.string(), ""),
+    requests: count,
+    current_model: orDefault(z.string(), ""),
+    recommended_model: orDefault(z.string(), ""),
+    current_success_rate: count,
+    recommended_success_rate: count,
+    estimated_savings_krw: count,
+  })
+    .nullish()
+    .transform((value) => value ?? []),
+});
+
+export type Savings = z.output<typeof savingsSchema>;
+export type SavingsScope = Savings["scopes"][number];
+export type ModelMigration = z.output<typeof modelMigrationSchema>;
+export type ModelMigrationRecommendation = ModelMigration["recommendations"][number];

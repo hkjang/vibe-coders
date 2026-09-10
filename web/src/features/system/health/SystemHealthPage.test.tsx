@@ -1,10 +1,10 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import axe from "axe-core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SystemHealthPage } from "@/features/system/health/SystemHealthPage";
+import { renderScreen } from "@/test/render";
 import { apiClient } from "@/shared/api/client";
 import { endpoints, type ApiEndpointBase } from "@/shared/api/endpoints";
 import { AppError } from "@/shared/api/error";
@@ -123,13 +123,8 @@ function mockSystemApi(failFirstRisk = false, mediumRisk = false, partialFailure
   }) as typeof apiClient.request);
 }
 
-function renderPage(): ReturnType<typeof render> {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
-    <QueryClientProvider client={client}>
-      <SystemHealthPage />
-    </QueryClientProvider>,
-  );
+function renderPage(route = "/system/health"): ReturnType<typeof renderScreen> {
+  return renderScreen(<SystemHealthPage />, { path: "/system/health/*", route });
 }
 
 describe("SystemHealthPage", () => {

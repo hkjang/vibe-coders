@@ -5,7 +5,7 @@ export const systemFeatureModules = defineFeatureModules([
   {
     featureId: "system.health",
     load: () => import("@/features/system/health/SystemHealthPage").then((module) => module.SystemHealthPage),
-    queryKeys: ["range"],
+    queryKeys: ["range", "tab"],
   },
   {
     featureId: "system.settings",

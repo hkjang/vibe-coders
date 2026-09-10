@@ -1,3 +1,4 @@
+import { OverviewTrendPanel } from "@/features/overview/OverviewTrendPanel";
 import type { AdminStats } from "@/shared/api/schemas";
 import { EmptyState } from "@/shared/components/ui/EmptyState";
 import { SectionCard } from "@/shared/components/ui/SectionCard";
@@ -34,6 +35,8 @@ export function OverviewUsageTab({ stats }: OverviewUsageTabProps): React.JSX.El
 
   return (
     <div className="overview-usage-stack">
+      <OverviewTrendPanel />
+
       <SectionCard title="상태 분포" description="보존된 요청 로그의 응답 상태 구성입니다.">
         {stats.by_status.length === 0 ? (
           <EmptyState title="요청 기록이 없습니다." description="게이트웨이로 요청이 들어오면 채워집니다." />
