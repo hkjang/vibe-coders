@@ -12120,7 +12120,8 @@ const adminHTML = `<!doctype html>
     window.testMCPUpstream = async (id) => {
       openModal('업스트림 테스트 — ' + id, '<div class="muted" style="padding:14px">연결 중…</div>');
       try {
-        const d = await api('/admin/mcp/upstreams/' + encodeURIComponent(id) + '/probe');
+        // The probe connects out and records a discovery run, so it is a POST.
+        const d = await api('/admin/mcp/upstreams/' + encodeURIComponent(id) + '/probe', { method: 'POST' });
         const errs = d.errors || {};
         const status = d.ok
           ? '<span class="status">연결 성공</span> 도구 ' + fmt(d.tool_count || 0) + '개'

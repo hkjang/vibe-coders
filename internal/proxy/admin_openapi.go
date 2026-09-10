@@ -495,7 +495,7 @@ var apiEndpoints = []apiEndpoint{
 	{"/admin/mcp/catalog", []string{"get"}, "mcp", "MCP catalog", false},
 	{"/admin/mcp/upstreams", []string{"get", "post"}, "mcp", "MCP upstreams", false},
 	{"/admin/mcp/upstreams/{id}", []string{"patch", "delete"}, "mcp", "MCP upstream by id: update/delete", false},
-	{"/admin/mcp/upstreams/{id}/probe", []string{"get"}, "mcp", "Live MCP upstream connectivity and tool discovery probe", false},
+	{"/admin/mcp/upstreams/{id}/probe", []string{"post"}, "mcp", "Run a live MCP upstream connectivity and tool discovery probe", false},
 	{"/admin/mcp/upstreams/{id}/flow", []string{"get"}, "mcp", "MCP upstream operational flow", false},
 
 	// ---- admin: personalization / knowledge / templates / notifications ----

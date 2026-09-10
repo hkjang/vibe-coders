@@ -6913,8 +6913,8 @@
       }
     },
     "/admin/mcp/upstreams/{id}/probe": {
-      "get": {
-        "operationId": "get__admin_mcp_upstreams_id_probe",
+      "post": {
+        "operationId": "post__admin_mcp_upstreams_id_probe",
         "parameters": [
           {
             "in": "path",
@@ -6935,7 +6935,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Live MCP upstream connectivity and tool discovery probe",
+        "summary": "Run a live MCP upstream connectivity and tool discovery probe",
         "tags": [
           "mcp"
         ]

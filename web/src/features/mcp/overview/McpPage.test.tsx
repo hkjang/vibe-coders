@@ -270,7 +270,7 @@ describe("McpPage", () => {
     const api = mockApi({
       ...baseHandlers,
       "GET /admin/mcp/upstreams/github/flow": () => ({ steps: [], discovery_runs: [], recent_requests: [] }),
-      "GET /admin/mcp/upstreams/github/probe": () => ({
+      "POST /admin/mcp/upstreams/github/probe": () => ({
         id: "github",
         name: "GitHub MCP",
         url: "https://mcp.example.com/mcp",
@@ -293,7 +293,7 @@ describe("McpPage", () => {
     await user.click(await screen.findByRole("button", { name: "연결 진단" }));
 
     await waitFor(() => {
-      expect(api.calls.some((call) => call.key === "GET /admin/mcp/upstreams/github/probe")).toBe(true);
+      expect(api.calls.some((call) => call.key === "POST /admin/mcp/upstreams/github/probe")).toBe(true);
     });
     expect(await screen.findByText("연결 정상")).toBeInTheDocument();
     expect(screen.getByText("github__create_issue, github__list_repos")).toBeInTheDocument();

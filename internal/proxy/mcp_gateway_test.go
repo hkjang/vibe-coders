@@ -216,7 +216,7 @@ func TestMCPUpstreamProbe(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	resp, err := http.Get(proxy.URL + "/admin/mcp/upstreams/fake/probe")
+	resp, err := http.Post(proxy.URL+"/admin/mcp/upstreams/fake/probe", "application/json", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -451,7 +451,7 @@ func TestMCPAdminConsoleRoutesExplainAndTest(t *testing.T) {
 	if !tested.OK || !strings.Contains(tested.ResponsePreview, "called echo") {
 		t.Fatalf("expected successful test call, got %+v", tested)
 	}
-	probeResp, err := http.Get(proxy.URL + "/admin/mcp/upstreams/fake/probe")
+	probeResp, err := http.Post(proxy.URL+"/admin/mcp/upstreams/fake/probe", "application/json", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

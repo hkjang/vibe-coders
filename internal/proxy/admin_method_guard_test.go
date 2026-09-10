@@ -231,3 +231,51 @@ func TestText2SQLGoldenIsAddressedByQueryNotPath(t *testing.T) {
 		t.Fatal("DELETE /admin/text2sql/golden?id= left the golden query in place")
 	}
 }
+
+// Probing an MCP upstream drops the cached session, connects out to the upstream and records
+// a discovery run. As a GET it was reachable with admin:read and by the read-only admin
+// token, and any refresh or prefetch of the URL set another probe off.
+func TestMCPUpstreamProbeIsAPost(t *testing.T) {
+	proxy, db := newMethodGuardServer(t)
+	ctx := context.Background()
+	if err := db.UpsertMCPUpstream(ctx, store.MCPUpstream{
+		ID: "up_guard", Name: "guard", URL: "http://127.0.0.1:1/mcp", Enabled: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	runs := func() int {
+		rows, err := db.MCPDiscoveryRuns(ctx, "up_guard", 20)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(rows)
+	}
+
+	resp := requestMethod(t, http.MethodGet, proxy.URL+"/admin/mcp/upstreams/up_guard/probe")
+	resp.Body.Close()
+	if resp.StatusCode == http.StatusOK {
+		t.Fatalf("GET on the probe still runs it (status %d)", resp.StatusCode)
+	}
+	if n := runs(); n != 0 {
+		t.Fatalf("reading the probe URL recorded %d discovery runs", n)
+	}
+
+	// The upstream is unreachable on purpose: the probe still reports and records the attempt.
+	posted := requestMethod(t, http.MethodPost, proxy.URL+"/admin/mcp/upstreams/up_guard/probe")
+	posted.Body.Close()
+	if posted.StatusCode != http.StatusOK {
+		t.Fatalf("POST on the probe status = %d, want 200", posted.StatusCode)
+	}
+	if n := runs(); n != 1 {
+		t.Fatalf("discovery runs after one POST = %d, want 1", n)
+	}
+	for _, ep := range apiEndpoints {
+		if ep.path == "/admin/mcp/upstreams/{id}/probe" {
+			for _, m := range ep.methods {
+				if m == "get" {
+					t.Fatal("the catalog still documents the probe as a GET")
+				}
+			}
+		}
+	}
+}

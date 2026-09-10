@@ -26,7 +26,6 @@ import type {
   GetAdminMcpTrustScoresData,
   GetAdminMcpUpstreamsData,
   GetAdminMcpUpstreamsIdFlowData,
-  GetAdminMcpUpstreamsIdProbeData,
   GetAdminVcsEventsData,
   PatchAdminMcpUpstreamsIdData,
   PostAdminAgentRoutesData,
@@ -38,6 +37,7 @@ import type {
   PostAdminMcpRouteExplainData,
   PostAdminMcpTestData,
   PostAdminMcpToolsData,
+  PostAdminMcpUpstreamsIdProbeData,
   PostAdminMcpUpstreamsData,
 } from "@/shared/api/generated";
 import {
@@ -340,8 +340,8 @@ export const mcpEndpoints = {
     "/admin/mcp/upstreams/{id}",
     mcpDeleteAcknowledgementSchema,
   ),
-  probeUpstream: operation<GetAdminMcpUpstreamsIdProbeData, unknown>()(
-    "GET",
+  probeUpstream: operation<PostAdminMcpUpstreamsIdProbeData, unknown>()(
+    "POST",
     "/admin/mcp/upstreams/{id}/probe",
     mcpUpstreamProbeSchema,
   ),

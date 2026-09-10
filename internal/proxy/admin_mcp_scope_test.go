@@ -77,10 +77,30 @@ func TestMCPAdminAuxiliarySurfacesEnforceTeamScopeAndProjection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	teamToken := issueMCPScopedTestToken(t, db, server, "mcp-team-admin", "team_admin", "mcp-alpha-id", []string{"observability:read"}, now)
-	adminToken := issueMCPScopedTestToken(t, db, server, "mcp-super-admin", "super_admin", "", []string{"observability:read"}, now)
+	// The probe is a POST, so it needs mcp:admin; the reads still only need observability:read.
+	teamToken := issueMCPScopedTestToken(t, db, server, "mcp-team-admin", "team_admin", "mcp-alpha-id", []string{"observability:read", "mcp:admin"}, now)
+	adminToken := issueMCPScopedTestToken(t, db, server, "mcp-super-admin", "super_admin", "", []string{"observability:read", "mcp:admin"}, now)
 	gateway := httptest.NewServer(server.Routes())
 	defer gateway.Close()
+
+	post := func(token, path string) (int, []byte) {
+		t.Helper()
+		request, err := http.NewRequest(http.MethodPost, gateway.URL+path, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Header.Set("Authorization", "Bearer "+token)
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer response.Body.Close()
+		body, err := io.ReadAll(response.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response.StatusCode, body
+	}
 
 	get := func(token, path string) (int, []byte) {
 		t.Helper()
@@ -117,7 +137,7 @@ func TestMCPAdminAuxiliarySurfacesEnforceTeamScopeAndProjection(t *testing.T) {
 		t.Fatalf("team MCP flow was not consistently scoped: %+v", flowPayload)
 	}
 
-	status, probe := get(teamToken, "/admin/mcp/upstreams/mcp-legacy/probe")
+	status, probe := post(teamToken, "/admin/mcp/upstreams/mcp-legacy/probe")
 	if status != http.StatusOK {
 		t.Fatalf("team MCP probe status=%d body=%s", status, probe)
 	}
@@ -137,7 +157,7 @@ func TestMCPAdminAuxiliarySurfacesEnforceTeamScopeAndProjection(t *testing.T) {
 		!strings.Contains(string(adminFlow), "mcp-beta-request") || !strings.Contains(string(adminFlow), upstreamCredential) {
 		t.Fatalf("full admin MCP flow lost unrestricted raw compatibility: status=%d body=%s", status, adminFlow)
 	}
-	status, adminProbe := get(adminToken, "/admin/mcp/upstreams/mcp-legacy/probe")
+	status, adminProbe := post(adminToken, "/admin/mcp/upstreams/mcp-legacy/probe")
 	if status != http.StatusOK || !strings.Contains(string(adminProbe), upstreamCredential) || !strings.Contains(string(adminProbe), toolCredential) {
 		t.Fatalf("full admin MCP probe lost raw compatibility: status=%d body=%s", status, adminProbe)
 	}

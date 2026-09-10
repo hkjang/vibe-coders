@@ -3492,7 +3492,7 @@ export type GetAdminMcpUpstreamsIdFlowResponses = {
     200: unknown;
 };
 
-export type GetAdminMcpUpstreamsIdProbeData = {
+export type PostAdminMcpUpstreamsIdProbeData = {
     body?: never;
     path: {
         id: string;
@@ -3501,7 +3501,7 @@ export type GetAdminMcpUpstreamsIdProbeData = {
     url: '/admin/mcp/upstreams/{id}/probe';
 };
 
-export type GetAdminMcpUpstreamsIdProbeResponses = {
+export type PostAdminMcpUpstreamsIdProbeResponses = {
     /**
      * OK
      */

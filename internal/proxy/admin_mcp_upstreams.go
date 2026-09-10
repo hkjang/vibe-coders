@@ -142,17 +142,27 @@ func (s *Server) handleMCPUpstreamByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	path := strings.TrimPrefix(r.URL.Path, "/admin/mcp/upstreams/")
-	// support a /probe sub-path: GET /admin/mcp/upstreams/{id}/probe → live discovery
+	// support a /probe sub-path: POST /admin/mcp/upstreams/{id}/probe → live discovery.
+	// It is a POST because it drops the cached session, connects out to the upstream and
+	// records a discovery run: as a GET, every read-only caller could set that off, and a
+	// refresh or prefetch of the URL re-ran it.
 	if id, rest, ok := strings.Cut(path, "/"); ok {
-		if rest == "probe" && r.Method == http.MethodGet {
+		switch rest {
+		case "probe":
+			if r.Method != http.MethodPost {
+				writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+				return
+			}
 			s.handleMCPUpstreamProbe(w, r, id)
-			return
-		}
-		if rest == "flow" && r.Method == http.MethodGet {
+		case "flow":
+			if r.Method != http.MethodGet {
+				writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
+				return
+			}
 			s.handleMCPUpstreamFlow(w, r)
-			return
+		default:
+			writeOpenAIError(w, http.StatusBadRequest, "invalid upstream path", "invalid_request_error", "invalid_upstream_path")
 		}
-		writeOpenAIError(w, http.StatusBadRequest, "invalid upstream path", "invalid_request_error", "invalid_upstream_path")
 		return
 	}
 	id := path

@@ -653,7 +653,7 @@ export const openApiOperations = [
   { method: "DELETE", path: "/admin/mcp/upstreams/{id}" },
   { method: "PATCH", path: "/admin/mcp/upstreams/{id}" },
   { method: "GET", path: "/admin/mcp/upstreams/{id}/flow" },
-  { method: "GET", path: "/admin/mcp/upstreams/{id}/probe" },
+  { method: "POST", path: "/admin/mcp/upstreams/{id}/probe" },
   { method: "GET", path: "/admin/migration-sql" },
   { method: "GET", path: "/admin/model-deprecations" },
   { method: "POST", path: "/admin/model-deprecations" },

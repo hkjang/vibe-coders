@@ -157,7 +157,7 @@ export function McpUpstreamsTab({ canWrite }: { canWrite: boolean }): React.JSX.
     successMessage: "업스트림을 삭제했습니다.",
     errorMessage: "업스트림을 삭제하지 못했습니다.",
   });
-  // GET .../probe forces a fresh handshake and records a discovery run, so it is the
+  // POST .../probe forces a fresh handshake and records a discovery run, so it is the
   // real "is this registration working, and what does it expose?" check.
   const probe = useMutationFeedback({
     mutate: (id: string) =>
