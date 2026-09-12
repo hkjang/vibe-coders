@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import axe from "axe-core";
 import { MemoryRouter } from "react-router";
@@ -117,6 +117,7 @@ function mockPhaseOneApi(
   failingPath?: string,
   routingWindows?: string[],
   riskTier: "low" | "medium" = "low",
+  statsOverride?: Record<string, unknown>,
 ): ReturnType<typeof vi.spyOn> {
   return vi.spyOn(apiClient, "request").mockImplementation((async (
     endpoint: ApiEndpointBase,
@@ -130,7 +131,7 @@ function mockPhaseOneApi(
       });
     }
     if (endpoint.path === endpoints.health.path) return { status: "ok" };
-    if (endpoint.path === endpoints.admin.stats.path) return stats;
+    if (endpoint.path === endpoints.admin.stats.path) return { ...stats, ...statsOverride };
     if (endpoint.path === endpoints.admin.routing.health.path) {
       if (options?.query?.window) routingWindows?.push(options.query.window);
       return routing;
@@ -311,5 +312,28 @@ describe("OverviewPage", () => {
 
     await screen.findByText("₩4,200");
     expect((await axe.run(container)).violations).toEqual([]);
+  });
+
+  it("turns the first empty screen into the setup it is, and drops it once traffic arrives", async () => {
+    mockPhaseOneApi(undefined, undefined, "low", { total_requests: 0 });
+    renderOverview();
+
+    const steps = await screen.findByRole("list", { name: "게이트웨이 설정 단계" });
+    // Providers come back from the mocked ops status, so that step is already done.
+    expect(within(steps).getByText("AI 공급자 연결")).toBeVisible();
+    expect(within(steps).getAllByText("완료").length).toBeGreaterThan(0);
+    // Each unfinished step offers the screen that finishes it.
+    expect(within(steps).getByRole("link", { name: "Chat 테스트 열기" })).toHaveAttribute(
+      "href",
+      "/gateway/chat",
+    );
+  });
+
+  it("leaves the setup steps out once the gateway has served requests", async () => {
+    mockPhaseOneApi();
+    renderOverview();
+
+    await screen.findByText("₩4,200");
+    expect(screen.queryByRole("list", { name: "게이트웨이 설정 단계" })).not.toBeInTheDocument();
   });
 });

@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 
 import { useAuth } from "@/app/auth/AuthProvider";
+import { FirstRunChecklist } from "@/features/overview/FirstRunChecklist";
 import { OverviewCapabilitiesTab } from "@/features/overview/OverviewCapabilitiesTab";
 import { OverviewUsageTab } from "@/features/overview/OverviewUsageTab";
 import { healthStatusLabels, riskLevelLabels, uiLabels } from "@/config/ui-labels";
@@ -221,6 +222,7 @@ export function OverviewPage(): React.JSX.Element {
       />
 
       <TabPanel id={tab} panelIdPrefix="overview">
+        {tab === "status" ? <FirstRunChecklist stats={stats.data} status={opsStatus} /> : null}
         {tab === "usage" ? <OverviewUsageTab stats={stats.data} /> : null}
         {tab === "capabilities" ? <OverviewCapabilitiesTab /> : null}
         {tab === "status" ? (
