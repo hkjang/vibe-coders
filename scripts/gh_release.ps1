@@ -29,7 +29,7 @@ function Test-RequiresComplianceAssets {
 }
 
 if (-not $Version) {
-    throw "Version parameter is required. Example: pwsh -File scripts/gh_release.ps1 -Version v0.85.1"
+    throw "Version parameter is required. Example: pwsh -File scripts/gh_release.ps1 -Version v0.85.2"
 }
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
