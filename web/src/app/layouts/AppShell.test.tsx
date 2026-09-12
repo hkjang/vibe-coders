@@ -77,6 +77,7 @@ describe("AppShell", () => {
       sidebarCollapsed: false,
       mobileSidebarOpen: false,
       collapsedGroups: [],
+      recentFeatures: [],
     });
     vi.spyOn(apiClient, "request").mockResolvedValue({ status: "ok" });
   });
@@ -95,6 +96,64 @@ describe("AppShell", () => {
     await user.type(search, "{Enter}");
     expect(screen.getByRole("heading", { name: "Provider content" })).toBeVisible();
     expect(screen.queryByRole("dialog", { name: "명령 팔레트" })).not.toBeInTheDocument();
+  });
+
+  it("runs a setting from the palette instead of making the operator find its menu", async () => {
+    const user = userEvent.setup();
+    renderShell();
+    await user.keyboard("{Control>}k{/Control}");
+    const search = await screen.findByRole("combobox", { name: "메뉴 검색" });
+
+    await user.type(search, "테마");
+    const themeCommand = screen.getByRole("option", { name: /테마 전환/ });
+    expect(themeCommand).toHaveAttribute("aria-selected", "true");
+    await user.click(themeCommand);
+
+    expect(usePreferences.getState().theme).toBe("dark");
+    expect(screen.queryByRole("dialog", { name: "명령 팔레트" })).not.toBeInTheDocument();
+  });
+
+  it("offers a pasted request id as a jump, and refuses a pasted credential", async () => {
+    const user = userEvent.setup();
+    renderShell();
+    await user.keyboard("{Control>}k{/Control}");
+    const search = await screen.findByRole("combobox", { name: "메뉴 검색" });
+
+    await user.type(search, "req_01JABCDEF");
+    expect(screen.getByRole("option", { name: /요청 ID로 이동/ })).toHaveAttribute("aria-selected", "true");
+
+    await user.clear(search);
+    await user.type(search, `sk-ant-${"a".repeat(40)}`);
+    expect(screen.queryByRole("option", { name: /ID로 이동/ })).not.toBeInTheDocument();
+  });
+
+  it("offers the screens just visited before the rest of the menu", async () => {
+    usePreferences.setState({ recentFeatures: ["gateway.providers"] });
+    const user = userEvent.setup();
+    renderShell();
+    await user.keyboard("{Control>}k{/Control}");
+
+    const options = await screen.findAllByRole("option");
+    // The screen being viewed is the most recent one, then the previously seeded visit.
+    expect(options[0]).toHaveAccessibleName(/통합 현황.*최근/);
+    expect(options[1]).toHaveAccessibleName(/AI 공급자.*최근/);
+    expect(usePreferences.getState().recentFeatures.slice(0, 2)).toEqual(["overview", "gateway.providers"]);
+  });
+
+  it("documents the keyboard with ? and keeps it out of the way while typing", async () => {
+    const user = userEvent.setup();
+    renderShell();
+
+    await user.keyboard("?");
+    expect(await screen.findByRole("dialog", { name: "단축키" })).toBeVisible();
+    expect((await axe.run(document.body)).violations).toEqual([]);
+    await user.keyboard("{Escape}");
+
+    // Typing "?" into a field is a question mark, not a shortcut.
+    await user.keyboard("{Control>}k{/Control}");
+    const search = await screen.findByRole("combobox", { name: "메뉴 검색" });
+    await user.type(search, "?");
+    expect(screen.queryByRole("dialog", { name: "단축키" })).not.toBeInTheDocument();
   });
 
   it("traps focus in the mobile navigation dialog and restores it after Escape", async () => {

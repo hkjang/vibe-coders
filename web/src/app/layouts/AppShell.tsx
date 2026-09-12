@@ -5,6 +5,7 @@ import { Link, Outlet, useLocation } from "react-router";
 
 import { useAuth } from "@/app/auth/AuthProvider";
 import { CommandPalette } from "@/app/layouts/CommandPalette";
+import { ShortcutSheet } from "@/app/layouts/ShortcutSheet";
 import { Sidebar } from "@/app/layouts/Sidebar";
 import { featureByPath } from "@/config/migration-registry";
 import { healthStatusLabels, preferenceLabels, roleLabel, uiLabels } from "@/config/ui-labels";
@@ -26,6 +27,7 @@ export function AppShell(): React.JSX.Element {
   const auth = useAuth();
   const location = useLocation();
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const mobileMenuTriggerRef = useRef<HTMLButtonElement>(null);
   const theme = usePreferences((state) => state.theme);
   const density = usePreferences((state) => state.density);
@@ -63,15 +65,32 @@ export function AppShell(): React.JSX.Element {
           : "muted";
 
   useEffect(() => {
-    const openPalette = (event: KeyboardEvent): void => {
+    const onKeyDown = (event: KeyboardEvent): void => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLocaleLowerCase() === "k") {
         event.preventDefault();
         setPaletteOpen(true);
+        return;
       }
+      // "?" only opens help when the operator is not typing into something.
+      if (event.key !== "?" || event.metaKey || event.ctrlKey || event.altKey) return;
+      const target = event.target;
+      if (target instanceof HTMLElement) {
+        if (target.isContentEditable) return;
+        const tag = target.tagName;
+        if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      }
+      event.preventDefault();
+      setShortcutsOpen(true);
     };
-    window.addEventListener("keydown", openPalette);
-    return () => window.removeEventListener("keydown", openPalette);
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
+
+  // The palette offers recently opened screens; this is where "recent" is recorded.
+  const rememberFeature = usePreferences((state) => state.rememberFeature);
+  useEffect(() => {
+    if (currentFeature) rememberFeature(currentFeature.featureId);
+  }, [currentFeature, rememberFeature]);
 
   return (
     <div className="app-frame">
@@ -196,7 +215,12 @@ export function AppShell(): React.JSX.Element {
           <Outlet />
         </main>
       </div>
-      <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
+      <CommandPalette
+        open={paletteOpen}
+        onOpenChange={setPaletteOpen}
+        onShowShortcuts={() => setShortcutsOpen(true)}
+      />
+      <ShortcutSheet open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
     </div>
   );
 }

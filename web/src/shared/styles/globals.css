@@ -1080,6 +1080,32 @@ kbd {
   padding: var(--space-6);
   text-align: center;
 }
+/* Shortcut sheet: the same surface as the palette, so the two read as one feature. */
+.shortcut-table {
+  width: 100%;
+  border-collapse: collapse;
+  padding: 0 var(--space-4);
+  font-size: 0.8125rem;
+}
+.shortcut-table th,
+.shortcut-table td {
+  padding: var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+  text-align: left;
+}
+.shortcut-table td kbd + kbd {
+  margin-left: var(--space-1);
+}
+.shortcut-tips {
+  margin: 0;
+  padding: var(--space-3) var(--space-4) var(--space-4) calc(var(--space-4) + 1rem);
+  color: var(--color-muted);
+  font-size: 0.75rem;
+}
+.shortcut-tips li + li {
+  margin-top: var(--space-1);
+}
+
 .command-footer {
   display: flex;
   justify-content: space-between;

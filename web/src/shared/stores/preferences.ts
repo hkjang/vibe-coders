@@ -12,13 +12,19 @@ interface PreferenceState {
   sidebarCollapsed: boolean;
   mobileSidebarOpen: boolean;
   collapsedGroups: string[];
+  /** Feature ids most recently opened, newest first, so the palette can offer them back. */
+  recentFeatures: string[];
   setTheme: (theme: ThemePreference) => void;
   setDensity: (density: DensityPreference) => void;
   setRefreshInterval: (seconds: RefreshInterval) => void;
   toggleSidebar: () => void;
   setMobileSidebarOpen: (open: boolean) => void;
   toggleGroup: (group: string) => void;
+  rememberFeature: (featureId: string) => void;
 }
+
+/** Enough to answer "where was I?" without turning the palette into a history list. */
+const recentFeatureLimit = 5;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -48,6 +54,11 @@ function mergePersistedPreferences(persistedState: unknown, currentState: Prefer
     collapsedGroups: Array.isArray(collapsedGroups)
       ? collapsedGroups.filter((group): group is string => typeof group === "string")
       : currentState.collapsedGroups,
+    recentFeatures: Array.isArray(persistedState.recentFeatures)
+      ? persistedState.recentFeatures
+          .filter((featureId): featureId is string => typeof featureId === "string")
+          .slice(0, recentFeatureLimit)
+      : currentState.recentFeatures,
   };
 }
 
@@ -62,6 +73,7 @@ export const usePreferences = create<PreferenceState>()(
       sidebarCollapsed: false,
       mobileSidebarOpen: false,
       collapsedGroups: [],
+      recentFeatures: [],
       setTheme: (theme) => set({ theme }),
       setDensity: (density) => set({ density }),
       setRefreshInterval: (refreshInterval) => set({ refreshInterval }),
@@ -73,6 +85,17 @@ export const usePreferences = create<PreferenceState>()(
             ? state.collapsedGroups.filter((value) => value !== group)
             : [...state.collapsedGroups, group],
         })),
+      rememberFeature: (featureId) =>
+        set((state) =>
+          state.recentFeatures[0] === featureId
+            ? state
+            : {
+                recentFeatures: [
+                  featureId,
+                  ...state.recentFeatures.filter((value) => value !== featureId),
+                ].slice(0, recentFeatureLimit),
+              },
+        ),
     }),
     {
       name: "vibe.app.preferences.v1",
@@ -84,6 +107,7 @@ export const usePreferences = create<PreferenceState>()(
         refreshInterval: state.refreshInterval,
         sidebarCollapsed: state.sidebarCollapsed,
         collapsedGroups: state.collapsedGroups,
+        recentFeatures: state.recentFeatures,
       }),
     },
   ),
