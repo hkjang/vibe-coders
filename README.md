@@ -9,8 +9,8 @@ Roo Code / Cursor / Continue 등 OpenAI 호환 API 를 호출하는 VS Code 확�
 ## 문서
 
 - **[운영 가이드](docs/OPERATIONS.md)** — 기동/종료, 헬스체크, 백업·복구, 장애 대응 런북
-- **[사용자 가이드](docs/USER_GUIDE.md)** — Roo Code / Cline / Cursor / OpenAI SDK 연결, 본인 사용량 확인
-- **[관리자 가이드](docs/ADMIN_GUIDE.md)** — 어드민 UI 탭 사용법, 일상/주간/월간 운영 체크리스트
+- **[사용자 가이드](docs/USER_GUIDE.md)** ([PDF](docs/USER_GUIDE.pdf)) — 처음 5분, 화면별 사용법, Roo Code / Cline / Cursor / OpenAI SDK 연결, 막혔을 때
+- **[관리자 가이드](docs/ADMIN_GUIDE.md)** ([PDF](docs/ADMIN_GUIDE.pdf)) — 설치·환경 변수 전수 표·역할·장애 대응, 콘솔 화면 레퍼런스
 - **[안전 및 보안 거버넌스 가이드](docs/SAFETY_GUIDE.md)** — 정책 엔진, Secret Firewall, 승인 워크플로우 운영
 - **[릴리즈 가이드](docs/RELEASE_GUIDE.md)** — 빌드·태깅·GitHub 릴리즈·오프라인 패키지 산출·롤백 절차
 - **[부하 성능 개선 보고서](docs/PERFORMANCE_REPORT.md)** — 부하에서 느려지던 원인과 개선 전후 실측 ([HTML](docs/PERFORMANCE_REPORT.html) · [PDF](docs/PERFORMANCE_REPORT.pdf))

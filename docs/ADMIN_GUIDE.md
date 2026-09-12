@@ -1,4 +1,222 @@
-# 관리자 가이드 (Admin Guide)
+# 관리자 가이드
+
+> 이 문서는 게이트웨이를 **띄우고 지키는 사람**을 위한 것입니다. 도구를 연결해 쓰는 쪽은 [사용자 가이드](USER_GUIDE.md)를 보세요. PDF: [ADMIN_GUIDE.pdf](ADMIN_GUIDE.pdf). 기동·종료·백업·런북의 긴 절차는 [운영 가이드](OPERATIONS.md)에 있고, 이 문서는 그리로 가리킵니다.
+
+## 1. 구성 요소
+
+| 구성 요소 | 무엇 | 주고받는 것 |
+| --- | --- | --- |
+| `gateway` 컨테이너 (`ai-coding-proxy-gateway:<버전>`) | Go 단일 바이너리. `/v1/*` 프록시, `/admin/*` API, `/app` 새 콘솔, `/admin` 기존 콘솔, `/metrics` 를 한 프로세스에서 냅니다 | 8080/TCP 로 들어오는 도구·콘솔 요청, 업스트림 LLM 으로 나가는 HTTPS |
+| 데이터 볼륨 `proxy-gateway-data` → `/data` | SQLite `gateway.db` + 폴백 로그 `fallback.ndjson` | 백업 대상 전부 |
+| 업스트림 LLM 공급자 | OpenAI 호환 API(OpenAI, Anthropic, 사내 vLLM 등). 하나 이상 | `UPSTREAM_BASE_URL` 로 나가는 호출; 키는 게이트웨이만 보관 |
+| (선택) PostgreSQL | SQLite 대신 쓰는 저장소 (`DB_DRIVER=postgres`) | [POSTGRES_GUIDE.md](POSTGRES_GUIDE.md) |
+| (선택) Keycloak | SSO 로그인 (`SSO_KEYCLOAK_*`) | OIDC 리다이렉트 |
+| (선택) ClickHouse | 장기 분석 싱크 (`CLICKHOUSE_*`) | 배치 적재 |
+| (선택) Slack/Mattermost 웹훅 | 알림 규칙·예산 임박 통지 | 콘솔 **보안 → 알림** 에서 등록 |
+
+## 2. 설치
+
+릴리즈 자산(GitHub Release `v0.85.0`)으로 처음부터 끝까지. 빌드 호스트에서 이미지를 만드는 절차와 오프라인망 적재 배경은 [OPERATIONS.md 2.5](OPERATIONS.md#25-오프라인망-적재)에 있습니다.
+
+| 항목 | 값 |
+| --- | --- |
+| 포트 | `8080/TCP` (컨테이너 안 `LISTEN_ADDR=:8080`) |
+| 볼륨 | `proxy-gateway-data:/data` — nonroot(65532) 소유 |
+| 자원 | CPU 1코어·RAM 512 MB 로 시작 가능. 요청 로그는 `/data` 디스크를 씁니다(보존 기간은 `RETENTION_*`) |
+| 실행 계정 | distroless `nonroot`. root 로 띄우지 않습니다 |
+
+```bash
+# 1) 자산 검증과 적재
+sha256sum -c ai-coding-proxy-gateway-v0.85.0.tar.gz.sha256
+gunzip -c ai-coding-proxy-gateway-v0.85.0.tar.gz | docker load
+
+# 2) 비밀값 파일 (mode 0600). ADMIN_TOKEN·GATEWAY_SECRET 을 무작위로 만들고 UPSTREAM_API_KEY 자리를 비워 둡니다.
+sudo mkdir -p /opt/proxy-gateway
+sudo bash init-deployment-env-v0.85.0.sh /opt/proxy-gateway/gateway.env
+sudo sed -i 's|^UPSTREAM_API_KEY=.*|UPSTREAM_API_KEY=<업스트림 키>|' /opt/proxy-gateway/gateway.env
+#    최초 관리자 계정과 새 콘솔을 켭니다 (값은 가짜 예시입니다)
+sudo tee -a /opt/proxy-gateway/gateway.env >/dev/null <<'EOF'
+AUTH_ENABLED=true
+AUTH_JWT_SECRET=<openssl rand -hex 32 결과>
+AUTH_ADMIN_BOOTSTRAP_EMAIL=admin@example.com
+AUTH_ADMIN_BOOTSTRAP_PASSWORD=<처음 로그인 후 바꿀 임시 비밀번호>
+UI_APP_ENABLED=true
+EOF
+
+# 3) 기동
+export GATEWAY_VERSION=v0.85.0
+docker compose --env-file /opt/proxy-gateway/gateway.env up -d
+curl -fsS http://127.0.0.1:8080/ready
+
+# 4) 최초 관리자 로그인 → http://<호스트>:8080/app
+```
+
+`AUTH_ADMIN_BOOTSTRAP_*` 는 계정이 없을 때 한 번만 `super_admin` 을 만듭니다. 로그인한 뒤 **사용자와 팀**에서 비밀번호를 바꾸고 env 파일에서 두 줄을 지우세요. 이전 배포의 볼륨을 이어받는다면 `up` 전에 `repair-data-dir` 로 소유권을 복구합니다([OPERATIONS.md 8.6](OPERATIONS.md#86-컨테이너가-8080에서-뜨지-않음-readonly-database--데이터-디렉터리-권한)).
+
+## 3. 설정
+
+환경 변수는 기동 시 한 번 읽습니다(`internal/config/config.go`). 콘솔 **시스템 설정**에서 바꾼 런타임 값이 같은 이름의 env 보다 우선하며 `SETTINGS_RELOAD_INTERVAL` 마다 다시 읽힙니다. 비밀값 예시는 전부 가짜입니다.
+
+### 3.1 반드시 정하는 것
+
+| 이름 | 기본값 | 필수 | 설명 |
+| --- | --- | --- | --- |
+| `UPSTREAM_API_KEY` | (없음; `OPENAI_API_KEY` 도 읽음) | 예 | 업스트림 공급자 키. 게이트웨이만 보관 |
+| `ADMIN_TOKEN` | (없음) | 예(compose) | 기존 `/admin` 콘솔·API 관리자 토큰. 64 hex 권장 |
+| `GATEWAY_SECRET` | 내장 개발용 값 | 예(compose) | 키 해시·서명용 비밀. **기본값 그대로 두면 안 됩니다** |
+| `UPSTREAM_PROVIDER` | `openai` | 아니오 | 기본 공급자 이름 |
+| `UPSTREAM_BASE_URL` | `https://api.openai.com` | 아니오 | 기본 공급자 주소 |
+| `LISTEN_ADDR` | `:8080` | 아니오 | 수신 주소 |
+| `DB_DRIVER` / `DB_DSN` | `sqlite` / `data/gateway.db` | 아니오 | 저장소. `postgres` 면 `DB_DSN`(또는 `DATABASE_URL`/`POSTGRES_DSN`) 에 DSN |
+| `LOG_FALLBACK_PATH` | `data/fallback.ndjson` | 아니오 | DB 기록 실패 시 폴백 로그 |
+| `UI_APP_ENABLED` | `false` | 아니오 | 새 콘솔 `/app` 노출 |
+| `PROXY_API_KEYS` | (없음) | 아니오 | 부팅 시 등록할 proxy key: `이름:키:소유자:팀,…`. 콘솔 발급이 일반적 |
+| `MODEL_PRICING_KRW_PER_1M` | `{}` | 아니오 | 모델별 단가 JSON `{"모델":{"input_krw_per_1m":540,"output_krw_per_1m":2160}}`. 음수는 부팅 거부 |
+
+### 3.2 인증·SSO
+
+| 이름 | 기본값 | 필수 | 설명 |
+| --- | --- | --- | --- |
+| `AUTH_ENABLED` | `false` | 아니오 | 이메일·비밀번호 세션 로그인 |
+| `AUTH_JWT_SECRET` | (없음) | `AUTH_ENABLED` 일 때 | 액세스·리프레시 토큰 서명 키 |
+| `AUTH_ACCESS_TOKEN_TTL` / `AUTH_REFRESH_TOKEN_TTL` | `15m` / `168h` | 아니오 | 토큰 수명 |
+| `AUTH_ADMIN_BOOTSTRAP_EMAIL` / `AUTH_ADMIN_BOOTSTRAP_PASSWORD` | (없음) | 최초 1회 | 계정이 없을 때 만들 `super_admin` |
+| `AUTH_API_KEY_PREFIX` / `AUTH_SERVICE_KEY_PREFIX` | `vc_sk_` / `vc_sa_` | 아니오 | 발급 키 접두사 |
+| `ADMIN_READONLY_TOKEN` | (없음) | 아니오 | 읽기 전용 관리자 토큰 |
+| `ATTRIBUTE_EXTERNAL_KEYS` | `true` | 아니오 | 미등록 키를 지문으로 `ext_…` 사용자로 분리 |
+| `SELF_SERVICE_KEYS_ENABLED` | `false` | 아니오 | 개발자가 자기 키를 직접 발급 |
+| `SSO_KEYCLOAK_ENABLED` | `false` | 아니오 | Keycloak OIDC 로그인 |
+| `SSO_KEYCLOAK_ISSUER_URL` / `_CLIENT_ID` / `_CLIENT_SECRET` / `_REDIRECT_URI` / `_SCOPES` | (없음) | SSO 켤 때 | OIDC 클라이언트 |
+| `SSO_KEYCLOAK_ALLOW_LOCAL_LOGIN` | `true` | 아니오 | SSO 와 로컬 로그인 병행 |
+| `SSO_KEYCLOAK_DEFAULT_ROLE` / `_ROLE_CLAIM` / `_GROUP_CLAIM` | `developer` / `realm_access.roles` / `groups` | 아니오 | 클레임 → 역할·팀 매핑 |
+
+### 3.3 업스트림·라우팅
+
+| 이름 | 기본값 | 설명 |
+| --- | --- | --- |
+| `UPSTREAM_MODEL_PATTERNS` | (없음) | 이 공급자가 받는 모델 glob |
+| `UPSTREAM_DEFAULT_MODEL` | (없음) | 모델 미지정 요청의 기본 모델 |
+| `UPSTREAM_LOAD_BALANCE` | `first` | 다중 공급자 분배 방식 |
+| `UPSTREAM_TIMEOUT` / `UPSTREAM_RESPONSE_HEADER_TIMEOUT` | `10m` / `60s` | 업스트림 전체·첫 헤더 타임아웃 |
+| `UPSTREAM_FAILOVER_BUDGET` | `0` | 폴백에 쓸 추가 시간(0=무제한) |
+| `UPSTREAM_BREAKER_ENABLED` / `_THRESHOLD` / `_COOLDOWN` | `true` / `5` / `30s` | 회로 차단기 |
+| `UPSTREAM_BREAKER_SHARED` / `_SYNC_INTERVAL` | `false` / `3s` | 다중 인스턴스 차단기 공유 |
+| `UPSTREAM_STICKY_SESSIONS` / `UPSTREAM_STICKY_TTL` | `true` / `30m` | 세션을 같은 공급자에 고정 |
+| `UPSTREAM_HEALTH_DEMOTE_THRESHOLD` | `50` | 이 점수 아래면 공급자 강등 |
+| `LIMITS_MAX_REQUEST_BYTES` / `_MAX_MESSAGES` / `_MAX_OUTPUT_TOKENS` | `64 MiB` / `0` / `0` | 요청 크기 상한(0=무제한) |
+| `PRICING_FALLBACK_MODEL` | `qwen-plus` | 단가를 모르는 모델의 비용 추정 기준 |
+
+### 3.4 로깅·보존·캐시
+
+| 이름 | 기본값 | 설명 |
+| --- | --- | --- |
+| `LOG_RAW_PROMPTS` / `LOG_RAW_BODIES` / `LOG_RESPONSE_TEXT` | `false` | 원문 저장. 켜면 마스킹 전 본문이 DB 에 남습니다 |
+| `LOG_RESPONSE_MAX_BYTES` / `LOG_QUEUE_SIZE` | `1 MiB` / `4096` | 응답 저장 상한·비동기 로그 큐 |
+| `RETENTION_REQUEST_DAYS` / `_PROMPT_DAYS` / `_RESPONSE_DAYS` | `90` / `30` / `30` | 보존 일수 |
+| `RETENTION_TEXT2SQL_REPLAY_DAYS` / `_DOMAIN_EXAMPLE_DAYS` / `RETENTION_INTERVAL` | `30` / `365` / `1h` | 보존 일수·정리 주기 |
+| `CACHE_EMBEDDING_ENABLED` / `_TTL` / `_MAX_BYTES` / `_SCOPE` | `true` / `24h` / `1 MiB` / `global` | 임베딩 캐시 |
+| `CACHE_CHAT_ENABLED` / `_TTL` / `_SCOPE` | `false` / `1h` / `global` | 채팅 응답 캐시(비결정적이라 기본 꺼짐) |
+| `CACHE_CHAT_SEMANTIC_ENABLED` / `_MODEL` / `_MAX_CANDIDATES` / `_MULTITURN` | `false` / (없음) / `200` / `false` | 의미 기반 캐시 |
+| `CACHE_EMBEDDING_PROVIDER` / `_BASE_URL` / `_API_KEY` | (없음) | 캐시용 임베딩 공급자 |
+| `SESSION_INFERENCE_ENABLED` / `SESSION_INJECT_HEADER` / `SESSION_IDLE_TIMEOUT` | `true` / `true` / `30m` | 세션 추론 |
+| `QUOTA_RESERVATIONS_ENABLED` / `QUOTA_RESERVATION_SWEEP_INTERVAL` | `true` / `5m` | 진행 중 요청을 한도에 선반영 |
+| `SETTINGS_RELOAD_INTERVAL` | `10s` | 런타임 설정 재적재 주기 |
+| `VCS_WEBHOOK_SECRET` / `VCS_INFER_FROM_CONTENT` | (없음) / `true` | Prompt→Commit→MR 상관(웹훅 비밀 필수) |
+| `CARBON_MODEL_WH_PER_1K` | (없음) | 모델별 전력량 맵 |
+
+### 3.5 Text2SQL · MCP · 분석 싱크
+
+| 이름 | 기본값 | 설명 |
+| --- | --- | --- |
+| `TEXT2SQL_ENABLED` | `false` | Text2SQL 기능 |
+| `TEXT2SQL_SCHEMA` / `TEXT2SQL_DIALECT` | (없음) / `PostgreSQL` | 스키마 설명·방언 |
+| `TEXT2SQL_EXEC_DRIVER` / `TEXT2SQL_EXEC_DSN` | `postgres` / (없음) | 실행 대상 DB |
+| `TEXT2SQL_TWIN_DRIVER` / `TEXT2SQL_TWIN_DSN` | `postgres` / (없음) | 검증용 트윈 DB |
+| `TEXT2SQL_DEFAULT_LIMIT` / `TEXT2SQL_MAX_LIMIT` | `100` / `1000` | 결과 행 상한 |
+| `TEXT2SQL_PREVIEW_MODEL` / `_EXECUTE_MODEL` / `_SUMMARY_MODEL` / `_ACCURATE_MODEL` / `_LOCAL_MODEL` | `gpt-4.1-mini` ×3 / `claude-sonnet-4` / `qwen-coder` | 단계별 모델 |
+| `TEXT2SQL_MASK_RESULTS` / `_CACHE_ENABLED` / `_CACHE_TTL` | `true` / `true` / `1h` | 결과 마스킹·캐시 |
+| `TEXT2SQL_CLARIFY_ENABLED` / `_REQUIRE_DATE_FILTER` / `_REPLAY_BUNDLES` | `false` | 되묻기·날짜 필터 강제·재생 번들 |
+| `TEXT2SQL_STATEMENT_TIMEOUT` / `TEXT2SQL_WORK_MEM` | `15s` / (없음) | 실행 제한 |
+| `TEXT2SQL_DAILY_RISK_LIMIT` / `_DAILY_RISK_WARN` | `20` / `0` | 일일 위험 쿼리 한도 |
+| `MCP_AGENTIC_MODEL` / `MCP_MAX_AGENT_STEPS` / `MCP_MAX_TOKENS` / `MCP_MAX_TOOLS` / `MCP_FORCE_TOOL_FIRST` | (없음) / `8` / `2048` / `32` / `true` | MCP Gateway 에이전트 루프 |
+| `SKILLS_ENFORCEMENT` | `warn` | Skill 정책 모드 `off` / `warn` / `enforce` |
+| `REDTEAM_POST_CHANGE_ENABLED` / `_COOLDOWN` / `_MAX_TARGETS` | `true` / `10m` / `20` | 설정 변경 후 자동 Red Team 회귀 |
+| `CLICKHOUSE_URL` / `_USER` / `_PASSWORD` / `_DB` / `_TABLE` | (없음) / … / `default` / `analytics_daily` | 분석 싱크(비우면 꺼짐) |
+| `CLICKHOUSE_BATCH_SIZE` / `_FLUSH_INTERVAL` / `_MAX_QUEUE_SIZE` / `_SINK_DAYS` / `_SINK_INTERVAL` | `200` / `5s` / `10000` / `3` / `0` | 적재 배치 |
+| `CLICKHOUSE_*_FACT_TABLE` (request, routing, policy, tool, skill, text2sql, eval, feedback, multimodel, redteam) | (없음) | 팩트 테이블 이름 |
+| `UI_APP_DEFAULT_ENTRY` / `UI_APP_LEGACY_FALLBACK` / `UI_APP_FEEDBACK_ENABLED` / `UI_APP_TELEMETRY_ENABLED` | `/app/overview` / `true` / `false` / `false` | 새 콘솔 진입·폴백·피드백·텔레메트리 |
+
+`TEST_*`, `CH_IT_*` 는 테스트 전용이라 운영에서 쓰지 않습니다.
+
+## 4. 계정과 권한
+
+두 가지 인증이 공존합니다. **관리자 토큰**(`ADMIN_TOKEN`)은 기존 `/admin` 콘솔과 `/admin/*` API 용이고, **세션 로그인**(`AUTH_ENABLED=true`)은 새 콘솔 `/app` 용입니다. 역할별 권한은 `internal/proxy/auth.go` 의 `roleScopes` 가 정본입니다.
+
+| 역할 | 할 수 있는 일 |
+| --- | --- |
+| `super_admin` / `admin` | 전부. 역할 변경·비밀값·설정 쓰기 포함 |
+| `team_admin` | 자기 팀 범위의 조회 + 호출. 관리자 화면 읽기 |
+| `team_manager` | 자기 팀 대시보드(`/app/team`)만. 운영 대시보드 없음 |
+| `developer` | 호출·모델 조회·자기 사용량(`/app/me`) |
+| `viewer` | 관리자 화면 읽기 전용 |
+| `service_account` | 호출만(CI·봇) |
+| `ops_admin` / `ai_admin` / `security_admin` / `billing_admin` | 관리자 읽기 + 각자 영역의 런타임 설정 쓰기(운영·모델/라우팅·보안·비용) |
+| `readonly_admin` | 관리자 화면 읽기 전용(보안 포함) |
+
+콘솔 **접근 관리 → 사용자와 팀**에서 로그인 계정, 팀, API 키, IP, 할당량·예산, 역할을 한 곳에서 다룹니다. **사용자 등록**으로 계정을 만들고, 행의 **역할·상태 변경**으로 역할을 바꿉니다. proxy key 는 **API 키** 탭에서 발급하며 키 값은 발급 순간 한 번만 표시됩니다.
+
+![사용자와 팀 — 로그인 계정과 proxy key 사용량을 한 화면에서 관리한다](images/guide/access-users.png)
+
+SSO 로 들어온 계정의 역할은 클레임 매핑(`SSO_KEYCLOAK_ROLE_CLAIM`)이 정하되, 콘솔에서 직접 올린 역할·팀은 다음 SSO 로그인이 내리지 않습니다(v0.83.2).
+
+## 5. 운영
+
+- **상태 점검**: `GET /health`(프로세스), `GET /ready`(DB 포함), `GET /metrics`(Prometheus). 콘솔 **시스템 → 시스템 상태**가 같은 신호를 사람 눈으로 보여 줍니다.
+- **콘솔 홈**: **개요 → 통합 현황**에서 게이트웨이 상태·보존 비용·P95 지연·라우팅·운영 위험을 봅니다. 상단 **자동 갱신**을 켜면 주기적으로 다시 읽습니다.
+- **로그 위치**: 컨테이너 stdout(`docker compose logs -f gateway`), 폴백 로그 `/data/fallback.ndjson`(DB 기록 실패분; 콘솔 **시스템 설정 → Fallback 로그 재처리**로 되살립니다).
+- **백업·복구**: `/data` 볼륨이 전부입니다. `backup-volume-v0.85.0.sh` 로 tar 백업, 복구는 볼륨을 유지한 채 컨테이너만 교체합니다 — [OPERATIONS.md 6](OPERATIONS.md#6-백업--복구).
+- **업그레이드**: 새 tar.gz 를 `docker load` → `GATEWAY_VERSION` 만 올려 `docker compose up -d`. 마이그레이션은 기동 시 자동입니다. **되돌리기**: 업그레이드 전 백업을 복구하고 `GATEWAY_VERSION` 을 이전 값으로 되돌려 `up -d`. 새 버전이 추가한 컬럼은 이전 바이너리가 무시합니다.
+- **보존**: `RETENTION_*` 일수를 넘긴 요청·프롬프트·응답은 `RETENTION_INTERVAL` 마다 지워집니다. 콘솔 **시스템 설정 → 데이터 보존**에서 무엇이 함께 삭제되는지 볼 수 있습니다(9.3 절).
+
+![시스템 상태 — 프로세스·DB·업스트림 상태와 런타임 지표](images/guide/system-health.png)
+
+![시스템 설정 — 런타임 설정을 카테고리별로 읽고 바꾼다](images/guide/system-settings.png)
+
+## 6. 장애 대응
+
+| 증상 | 확인할 곳 | 조치 |
+| --- | --- | --- |
+| 모든 호출이 `503 kill_switch_active` | 콘솔 **보안 → Kill Switch** | 의도한 정지가 아니면 끕니다. 켠 사람은 관리자 변경 이력에 남습니다 |
+| 특정 사용자만 `429 quota_error` | **사용자와 팀 → 할당량·예산** | 한도 조정 또는 다음 기간 대기. 헤더 `X-Quota-Scope` 가 어느 범위인지 알려 줍니다 |
+| `502 provider_unavailable` 가 잇따름 | **AI 게이트웨이 → 게이트웨이 상태**의 공급자 점수·차단기 | 업스트림 장애. 폴백 공급자가 있으면 자동 전환. 없으면 [ROUTING_GUIDE.md](ROUTING_GUIDE.md) 대로 폴백 등록 |
+| 컨테이너가 8080 에서 뜨지 않음, 로그에 `readonly database` 또는 `attempt to write a readonly database` | `docker compose logs gateway` | 볼륨 소유권 문제. `repair-data-dir` 실행 — [OPERATIONS.md 8.6](OPERATIONS.md#86-컨테이너가-8080에서-뜨지-않음-readonly-database--데이터-디렉터리-권한) |
+| 부팅 직후 종료, 로그에 `invalid configuration error="parse MODEL_PRICING_KRW_PER_1M: …"` | env 파일 | 단가 JSON 형식 오류. `{"모델":{"input_krw_per_1m":…,"output_krw_per_1m":…}}` 형태인지, 음수가 없는지 확인 |
+| `/ready` 는 200 인데 콘솔이 "데이터를 불러오지 못했습니다" + 요청 ID | 서버 로그에서 그 요청 ID | 대개 권한(403) 또는 만료된 세션. 역할과 `AUTH_JWT_SECRET` 변경 여부 확인 |
+| 사용량이 전부 `anonymous` / `passthrough` | **사용자와 팀 → API 키** | 등록되지 않은 키로 호출 중. 사용자별 proxy key 발급 |
+| SSO 로그인 뒤 메뉴가 거의 사라짐 | 감사 이력의 `role_changed` | [OPERATIONS.md 8.7](OPERATIONS.md#87-sso-로그인-후-메뉴가-거의-사라짐-역할-강등) |
+| 디스크 가득 참 / DB 잠금 | `df /data`, 폴백 로그 크기 | 보존 일수 단축, 폴백 로그 재처리 후 정리 — [OPERATIONS.md 8.4](OPERATIONS.md#84-db-잠금--디스크-가득-참) |
+
+긴급 정지(모든 호출 즉시 차단)는 콘솔 **보안** 화면의 Kill Switch 또는 `POST /admin/kill-switch` 입니다. 절차와 되돌리기는 [OPERATIONS.md 8.1](OPERATIONS.md#81-모든-호출-즉시-차단-긴급-정지).
+
+![보안 — Kill Switch·비용 가드·알림 규칙을 한 화면에서 다룬다](images/guide/security.png)
+
+## 7. 보안
+
+- **바꿔야 하는 기본값**: `GATEWAY_SECRET`(내장 개발용 값), `ADMIN_TOKEN`(없으면 `/admin` 이 열립니다), `AUTH_JWT_SECRET`. 셋 다 `openssl rand -hex 32` 로 만들고 env 파일은 `0600` 으로 둡니다. `LOG_RAW_PROMPTS`·`LOG_RAW_BODIES`·`LOG_RESPONSE_TEXT` 는 기본 `false` 를 유지하세요.
+- **외부에 열면 안 되는 것**: 8080 은 사내망·VPN 뒤에만. 콘솔·`/admin/*`·`/metrics` 를 인터넷에 노출하지 않습니다. TLS 는 앞단 리버스 프록시에서 종료합니다.
+- **인증 연동**: 운영에서는 `AUTH_ENABLED=true` + SSO(`SSO_KEYCLOAK_*`)를 권장합니다. 관리자 토큰은 자동화·비상용으로만 쓰고, 읽기 작업에는 `ADMIN_READONLY_TOKEN` 을 씁니다.
+- **키 유출 의심**: 콘솔 **사용자와 팀 → API 키**에서 해당 키를 비활성화하고 새 키를 발급합니다. 업스트림 키가 유출됐다면 공급자에서 회전한 뒤 `UPSTREAM_API_KEY` 를 바꿔 재기동 — [OPERATIONS.md 8.5](OPERATIONS.md#85-보안-사건-키-유출-의심).
+- **정책·마스킹**: 프롬프트의 비밀·개인정보는 기본으로 마스킹됩니다. 모델·공급자 허용 목록, DLP, 승인 워크플로는 콘솔 **거버넌스 → 정책 및 거버넌스**와 [SAFETY_GUIDE.md](SAFETY_GUIDE.md).
+
+![정책 및 거버넌스 — 모델 허용 목록·DLP·승인 규칙](images/guide/governance-policies.png)
+
+![비용 관리 — 모델·팀별 비용과 예산 소진 예측](images/guide/finops.png)
+
+---
+
+# 화면 레퍼런스 (기존 `/admin` 콘솔)
+
+아래는 기존 콘솔의 탭별 상세 설명입니다. 새 콘솔 `/app` 의 화면은 같은 API 를 쓰며, 각 화면의 **기존 화면에서 열기** 로 아래 탭에 닿습니다.
 
 `http://<host>:8080/admin` 에 접속하는 운영 관리자를 위한 사용 설명서입니다. 한국어 UI 와 다중 탭으로 구성되어 있고, 모든 동작은 동일한 이름의 REST API 로도 자동화할 수 있습니다.
 
