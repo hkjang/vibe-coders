@@ -225,4 +225,66 @@ describe("WorkflowPage", () => {
     await screen.findByRole("table", { name: "정의된 워크플로 목록" });
     expect((await axe.run(container)).violations).toEqual([]);
   });
+
+  it("builds a workflow step by step, without anyone writing JSON", async () => {
+    const user = userEvent.setup();
+    const api = mockApi({
+      "GET /admin/workflows": listHandler,
+      "POST /admin/workflows": () => ({ workflow }),
+    });
+    renderPage();
+
+    await user.click(await screen.findByRole("button", { name: /새 워크플로/u }));
+    const dialog = await screen.findByRole("dialog", { name: "새 워크플로" });
+    await user.type(within(dialog).getByLabelText(/^이름/), "야간 점검");
+
+    // Two steps, added by choosing their kind rather than typing a schema.
+    const stepPicker = within(dialog).getByLabelText("추가할 단계 종류");
+    await user.selectOptions(stepPicker, "text2sql");
+    await user.selectOptions(stepPicker, "chat");
+
+    const stepItems = within(dialog).getAllByRole("listitem");
+    await user.type(within(dialog).getByLabelText("1번째 단계 이름"), "지표 수집");
+    await user.type(within(dialog).getByLabelText("2번째 단계 이름"), "초안 작성");
+    // Each step asks only for what its kind uses: a model for chat, tables for Text2SQL.
+    const chatStep = stepItems[1];
+    if (!chatStep) throw new Error("the chat step was not rendered");
+    await user.type(within(chatStep).getByLabelText("모델"), "vibe/auto");
+    await user.type(within(chatStep).getByLabelText("최대 토큰"), "800");
+    const sqlStep = stepItems[0];
+    if (!sqlStep) throw new Error("the Text2SQL step was not rendered");
+    expect(within(sqlStep).getByLabelText("허용 테이블")).toBeVisible();
+    expect(within(sqlStep).queryByLabelText("모델")).not.toBeInTheDocument();
+
+    // Order is editable after the fact.
+    await user.click(within(dialog).getByRole("button", { name: "2번째 단계 위로" }));
+
+    await user.click(within(dialog).getByRole("button", { name: "워크플로 만들기" }));
+
+    await waitFor(() => expect(api.bodies("POST /admin/workflows")).toHaveLength(1));
+    expect(api.bodies("POST /admin/workflows")[0]).toMatchObject({
+      name: "야간 점검",
+      steps: [
+        { name: "초안 작성", type: "chat", ref: "vibe/auto", max_tokens: 800 },
+        { name: "지표 수집", type: "text2sql" },
+      ],
+    });
+  });
+
+  it("keeps the JSON view as an exact alternative to the step editor", async () => {
+    const user = userEvent.setup();
+    mockApi({ "GET /admin/workflows": listHandler, "POST /admin/workflows": () => ({ workflow }) });
+    renderPage();
+
+    await user.click(await screen.findByRole("button", { name: /새 워크플로/u }));
+    const dialog = await screen.findByRole("dialog", { name: "새 워크플로" });
+    await user.selectOptions(within(dialog).getByLabelText("추가할 단계 종류"), "approval");
+    await user.type(within(dialog).getByLabelText("1번째 단계 이름"), "담당자 승인");
+
+    await user.click(within(dialog).getByRole("button", { name: "JSON으로 편집" }));
+    const json = within(dialog).getByLabelText(/단계 정의/);
+    expect(JSON.parse((json as HTMLTextAreaElement).value)).toEqual([
+      { name: "담당자 승인", type: "approval" },
+    ]);
+  });
 });

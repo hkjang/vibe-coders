@@ -194,3 +194,109 @@
   gap: var(--space-3);
   align-items: flex-start;
 }
+
+/* Workflow step builder: one row per step, in execution order. */
+.workflow-steps-group {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.workflow-steps-group h3 {
+  margin: 0;
+  font-size: 0.8125rem;
+  font-weight: 650;
+}
+
+.workflow-steps-help {
+  margin: 0;
+  color: var(--color-muted);
+  font-size: 0.75rem;
+}
+
+.workflow-step-list {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.workflow-step {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-medium);
+  background: var(--color-card);
+}
+
+.workflow-step-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.workflow-step-head .input {
+  flex: 1 1 10rem;
+  min-width: 0;
+}
+
+.workflow-step-index {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  flex: none;
+  border-radius: 50%;
+  background: var(--color-muted-soft);
+  color: var(--color-muted);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.workflow-step-actions {
+  display: inline-flex;
+  gap: 2px;
+  margin-left: auto;
+}
+
+.workflow-step-fields {
+  display: grid;
+  gap: var(--space-2);
+  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+}
+
+.workflow-step-fields label {
+  display: grid;
+  gap: 2px;
+  color: var(--color-muted);
+  font-size: 0.75rem;
+}
+
+.workflow-step-note {
+  grid-column: 1 / -1;
+}
+
+.workflow-step-extras {
+  margin: 0;
+  color: var(--color-muted);
+  font-size: 0.6875rem;
+}
+
+.workflow-step-add,
+.workflow-step-tools {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.workflow-step-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--color-muted);
+  font-size: 0.75rem;
+}
