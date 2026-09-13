@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"errors"
 	"io/fs"
 	"mime"
@@ -15,6 +17,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"vibe-coders/internal/tracking"
 )
 
 const (
@@ -30,18 +34,24 @@ type Options struct {
 	// Enabled is evaluated for every request so runtime settings can disable the
 	// new console without restarting the server. A nil function means enabled.
 	Enabled func(context.Context) bool
+	// Tracking returns the administrator's visitor tracking configuration. It is
+	// read for every index.html request so a change made in the console takes
+	// effect on the next page load. A nil function, or a configuration that is
+	// not active, leaves the page and its policy exactly as they were.
+	Tracking func(context.Context) tracking.Config
 }
 
 // NewHandler returns a handler for /app and /app/* using files from files.
 // Supplying nil or a filesystem without index.html is supported and produces
 // an operational fallback page rather than affecting other server routes.
 func NewHandler(files fs.FS, options Options) http.Handler {
-	return &handler{files: files, enabled: options.Enabled}
+	return &handler{files: files, enabled: options.Enabled, tracking: options.Tracking}
 }
 
 type handler struct {
 	files           fs.FS
 	enabled         func(context.Context) bool
+	tracking        func(context.Context) tracking.Config
 	compressedFiles sync.Map
 }
 
@@ -106,7 +116,50 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		serveFallback(w, r, http.StatusServiceUnavailable, unavailablePage)
 		return
 	}
+	if h.serveTrackedIndex(w, r, data) {
+		return
+	}
 	h.serveFile(w, r, "index.html", data, info.ModTime())
+}
+
+// serveTrackedIndex serves index.html with the visitor tracking snippet and
+// a policy that allows exactly that snippet. It reports false when tracking is
+// not active, in which case the caller serves the file untouched.
+//
+// The page is different on every request because of the nonce, so it goes out
+// without a validator: a 304 would hand the browser its cached body under a
+// fresh policy, and the old nonce in that body would no longer match.
+func (h *handler) serveTrackedIndex(w http.ResponseWriter, r *http.Request, data []byte) bool {
+	if h.tracking == nil {
+		return false
+	}
+	config := h.tracking(r.Context())
+	if !config.Active(false) {
+		return false
+	}
+	nonce, err := newNonce()
+	if err != nil {
+		internalError(w)
+		return true
+	}
+	page := tracking.Inject(data, config.Snippet(nonce), config.Placement)
+	w.Header().Set("Content-Security-Policy", tracking.Policy(appContentSecurityPolicy, config, false, nonce))
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Content-Length", strconv.Itoa(len(page)))
+	w.WriteHeader(http.StatusOK)
+	if r.Method != http.MethodHead {
+		_, _ = w.Write(page)
+	}
+	return true
+}
+
+func newNonce() (string, error) {
+	raw := make([]byte, 18)
+	if _, err := rand.Read(raw); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(raw), nil
 }
 
 func (h *handler) readFile(name string) ([]byte, fs.FileInfo, error) {

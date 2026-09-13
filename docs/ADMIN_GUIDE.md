@@ -166,6 +166,46 @@ Keycloak(또는 같은 realm 을 쓰는 ReSSO)에 이미 로그인한 사람이 
 
 `TEST_*`, `CH_IT_*` 는 테스트 전용이라 운영에서 쓰지 않습니다.
 
+### 3.6 방문 추적 스니펫 (콘솔 이용 현황 수집)
+
+"어느 화면이 실제로 쓰이는가"를 재려면 콘솔 페이지에 추적 스니펫을 붙여야 합니다. 이 설정은 환경 변수가 아니라 **런타임 설정(DB)** 에 두어 재배포 없이 화면에서 바꿉니다: 콘솔 **시스템 → 시스템 설정 → 런타임 설정**에서 범주 `tracking` 을 고르거나, **방문 추적** 탭의 **추적 설정 열기**로 갑니다. 기본값은 모두 꺼짐이라 새로 설치한 곳에서는 아무것도 달라지지 않습니다.
+
+| 설정 키 | 기본값 | 뜻 |
+| --- | --- | --- |
+| `tracking.enabled` | `false` | 스니펫 삽입 여부. 켜야 붙습니다 |
+| `tracking.provider` | `none` | `momento` · `ga4` · `gtm` · `matomo` · `custom` · `none` |
+| `tracking.momento_url` / `tracking.momento_site_id` / `tracking.momento_environment` | (없음) / (없음) / `prd` | Momento 수집기 주소·사이트 id·환경 |
+| `tracking.momento_proxy` | `true` | Momento 를 같은 오리진 프록시(`/momento/*`)로 넘김. 켜면 외부 출처가 CSP 에 등장하지 않음 |
+| `tracking.measurement_id` | (없음) | GA4 측정 ID(`G-…`) 또는 GTM 컨테이너 ID(`GTM-…`) |
+| `tracking.matomo_url` / `tracking.matomo_site_id` | (없음) | Matomo 주소·사이트 id |
+| `tracking.custom_snippet` | (없음) | 붙여넣은 스니펫. **8KB 를 넘으면 저장되지 않습니다** |
+| `tracking.allowed_hosts` | (없음) | 스니펫에서 자동으로 못 읽은 출처를 더하는 자리(쉼표·공백 구분) |
+| `tracking.include_admin` | `false` | 기존 관리자 콘솔(`/admin`)에도 붙일지. `/app` 콘솔은 모든 역할이 쓰는 화면이라 항상 대상 |
+| `tracking.placement` | `head` | `head` 또는 `body` |
+
+**Momento 를 먼저 씁니다.** Momento 는 사내 자체 호스팅 수집기라 데이터가 밖으로 나가지 않는 유일한 선택지입니다. `tracking.provider=momento`, `tracking.momento_url`, `tracking.momento_site_id` 를 넣고 `tracking.enabled=true` 로 켜면 페이지에 다음이 들어갑니다.
+
+```html
+<script nonce="…" async src="/momento/tracker.js" data-site-id="<site id>"
+        data-environment="prd" data-contract-version="1" data-endpoint="/momento"></script>
+```
+
+게이트웨이가 `/momento/*` 를 수집기로 넘기므로(브라우저의 `Authorization`·`Cookie` 는 벗겨서 보냄, 본문 256KB·응답 10초 제한) 브라우저 입장에서는 모든 요청이 같은 오리진입니다. `tracking.momento_proxy=false` 로 두면 스니펫이 수집기 주소를 직접 가리키고 그 출처가 정책에 추가됩니다.
+
+**CSP 는 어떻게 열리나.** 콘솔은 `script-src 'self'` 로 잠겨 있어서 스니펫을 그냥 붙이면 브라우저가 조용히 막고 관리자는 화면이 왜 비었는지 알 수 없습니다. 게이트웨이는 정책을 `'unsafe-inline'` 으로 풀지 않습니다 — 한 번 풀면 그 앱의 모든 인라인 스크립트가 함께 허용되고 추적을 끈 뒤에도 느슨한 채 남기 때문입니다. 대신 페이지를 낼 때마다:
+
+1. 요청마다 새 **nonce** 를 만들어 스니펫의 **모든** `<script>` 태그에 붙이고 같은 값을 `script-src` 에 넣습니다. nonce 가 붙은 페이지는 `Cache-Control: no-store` 로 나가 브라우저가 옛 본문을 새 정책과 섞어 쓰지 못합니다.
+2. provider 가 아는 출처(GA4·GTM 의 googletagmanager/google-analytics, Matomo·Momento 직접 연결의 주소)와 **붙여넣은 스니펫 안의 http(s) 출처**를 읽어 `script-src` · `connect-src` · `img-src` 에 더합니다. `tracking.allowed_hosts` 의 항목도 같은 자리에 들어갑니다.
+3. 추적이 켜져 있는 동안만 `report-uri /tracking/csp-report` 를 넣어 브라우저가 거부한 출처를 받습니다. 이 신고는 인증 없이 받지만(브라우저는 자격 증명을 붙이지 않음) 추적이 꺼져 있으면 404 로 거절하고, 본문은 16KB 로 제한하며, http(s) 출처만 메모리 고리 버퍼(서로 다른 출처 100개)에 남깁니다. 횟수가 아니라 **어떤 출처가 막혔는가**가 중요하기 때문입니다.
+
+`/v1/*`·`/admin/*` API·`/health`·`/metrics` 같은 비화면 경로와 정적 자산의 정책은 그대로 좁습니다. 추적을 끄면 정책은 원래대로 돌아갑니다.
+
+**막힌 출처 확인과 허용.** 콘솔 **시스템 설정 → 방문 추적** 탭이 차단된 출처를 지시어·페이지·횟수·마지막 시각과 함께 보여 줍니다. 현재 설정이 이미 허용하는 출처는 "허용됨"으로 표시되고, 막힌 출처는 **허용** 버튼 한 번으로 `tracking.allowed_hosts` 에 더해집니다(일반 설정 변경과 같이 감사 기록·버전이 남고 모든 파드에 재적재). 스니펫을 고친 뒤 **기록 비우기**로 지우고 페이지를 다시 열면 아직 막히는 것만 남습니다. 같은 정보는 API 로도 봅니다: `GET /admin/tracking/violations`, `POST /admin/tracking/violations/allow {"origin":"https://…"}`, `DELETE /admin/tracking/violations`.
+
+**확인 방법.** 설정을 켠 뒤 `/app/` 을 새로 열고 응답 헤더를 봅니다 — `Content-Security-Policy` 에 `'nonce-…'` 와 `report-uri /tracking/csp-report` 가 있고, 본문의 `<script>` 태그에 같은 nonce 가 붙어 있어야 합니다. 수집기 쪽에 페이지뷰가 들어오는지까지 확인한 뒤 운영에 적용합니다. `custom` 스니펫은 `İ`·`K`(켈빈 기호) 같은 글자가 섞여 있어도 태그가 깨지지 않도록 ASCII 만 접는 검색으로 처리합니다.
+
+> 로그인 화면(`/app/login`)도 `/app` 콘솔의 일부라 스니펫이 붙습니다. 개인 식별 값을 보내지 않는 provider 설정을 쓰고, 자격 증명을 다루는 화면에서 추가 이벤트를 심지 마세요.
+
 ## 4. 계정과 권한
 
 두 가지 인증이 공존합니다. **관리자 토큰**(`ADMIN_TOKEN`)은 기존 `/admin` 콘솔과 `/admin/*` API 용이고, **세션 로그인**(`AUTH_ENABLED=true`)은 새 콘솔 `/app` 용입니다. 역할별 권한은 `internal/proxy/auth.go` 의 `roleScopes` 가 정본입니다.

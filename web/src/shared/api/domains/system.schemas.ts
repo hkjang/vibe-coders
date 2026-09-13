@@ -189,6 +189,26 @@ export const keycloakConfigSchema = looseObject({
   version: numberish.optional(),
 });
 
+export const trackingStatusSchema = looseObject({
+  enabled: z.boolean(),
+  provider: z.string(),
+  active: z.boolean(),
+  include_admin: z.boolean().optional(),
+  placement: z.string().optional(),
+  momento_proxy: z.boolean().optional(),
+  allowed_hosts: z.array(z.string()).nullish(),
+  error: z.string().optional(),
+  violations: looseList({
+    origin: z.string(),
+    directive: z.string(),
+    page: z.string().optional(),
+    count: z.number(),
+    first_seen: z.string().optional(),
+    last_seen: z.string().optional(),
+    allowed: z.boolean(),
+  }).nullish(),
+});
+
 export const keycloakTestSchema = looseObject({
   ok: z.boolean().optional(),
   reason: z.string().optional(),
@@ -481,6 +501,7 @@ export type ChangeSetDryRunCheck = z.output<typeof changeSetDryRunCheckSchema>;
 export type ChangeSetApplyResult = z.output<typeof changeSetApplySchema>;
 export type SystemErrorRow = NonNullable<z.output<typeof systemErrorListSchema>["errors"]>[number];
 export type KeycloakConfig = z.output<typeof keycloakConfigSchema>;
+export type TrackingStatus = z.output<typeof trackingStatusSchema>;
 export type AuditLogRow = NonNullable<z.output<typeof auditLogListSchema>["audit_logs"]>[number];
 export type AuthEventRow = NonNullable<z.output<typeof authEventListSchema>["events"]>[number];
 export type NotificationConfig = z.output<typeof notificationConfigSchema>;

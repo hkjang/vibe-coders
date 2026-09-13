@@ -10,6 +10,7 @@ import { OperationsTab } from "@/features/system/settings/OperationsTab";
 import { RuntimeSettingsTab } from "@/features/system/settings/RuntimeSettingsTab";
 import { SsoTab } from "@/features/system/settings/SsoTab";
 import { SystemErrorsTab } from "@/features/system/settings/SystemErrorsTab";
+import { TrackingTab } from "@/features/system/settings/TrackingTab";
 import "@/features/system/settings/system-settings.css";
 import { PageHeader } from "@/shared/components/page/PageHeader";
 import { Badge } from "@/shared/components/ui/Badge";
@@ -27,6 +28,7 @@ const tabIds = [
   "knowledge",
   "changesets",
   "sso",
+  "tracking",
   "audit",
   "errors",
 ] as const;
@@ -39,6 +41,7 @@ const tabItems: ReadonlyArray<TabItem<TabId>> = [
   { id: "knowledge", label: "지식 캐시" },
   { id: "changesets", label: "변경 세트" },
   { id: "sso", label: "SSO (Keycloak)" },
+  { id: "tracking", label: "방문 추적" },
   { id: "audit", label: "변경 이력" },
   { id: "errors", label: "시스템 오류" },
 ];
@@ -112,6 +115,7 @@ export function SystemSettingsPage(): React.JSX.Element {
         {tab === "knowledge" ? <KnowledgeTab hasAdminWrite={hasAdminWrite} /> : null}
         {tab === "changesets" ? <ChangeSetsTab hasAdminWrite={hasAdminWrite} /> : null}
         {tab === "sso" ? <SsoTab hasAdminWrite={hasAdminWrite} /> : null}
+        {tab === "tracking" ? <TrackingTab hasAdminWrite={hasAdminWrite} /> : null}
         {tab === "audit" ? <AuditTab /> : null}
         {tab === "errors" ? <SystemErrorsTab hasAdminWrite={hasAdminWrite} /> : null}
       </TabPanel>

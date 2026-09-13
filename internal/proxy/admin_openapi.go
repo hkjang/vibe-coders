@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+
+	"vibe-coders/internal/tracking"
 )
 
 // apiEndpoint is one documented route: its path, the HTTP methods it serves, an OpenAPI tag,
@@ -431,6 +433,11 @@ var apiEndpoints = []apiEndpoint{
 	{"/admin/secrets/rotate", []string{"post"}, "security", "Rotate the gateway secret", false},
 	{"/admin/sso/keycloak/config", []string{"get", "put", "post"}, "auth", "Get/save the DB-backed Keycloak provider config", false},
 	{"/admin/sso/keycloak/test", []string{"post"}, "auth", "Diagnose the Keycloak connection", false},
+	// ---- visitor tracking (admin-configured analytics snippet + CSP) ----
+	{"/admin/tracking/violations", []string{"get", "delete"}, "settings", "Blocked origins reported by browsers while tracking is on: list, or clear the list", false},
+	{"/admin/tracking/violations/allow", []string{"post"}, "settings", "Add one blocked origin to tracking.allowed_hosts", false},
+	{"/tracking/csp-report", []string{"post"}, "ops", "Content-Security-Policy violation reports from browsers (unauthenticated; accepted only while tracking is on)", false},
+	{"/momento/{path}", []string{"get", "post"}, "ops", "Same-origin proxy to the Momento collector (only while tracking.provider=momento and tracking.momento_proxy is on)", false},
 	// ---- admin: Text2SQL registry ----
 	{"/admin/text2sql/connections", []string{"get", "post", "delete"}, "text2sql", "Manage Text2SQL DB connections", false},
 	{"/admin/text2sql/registry/export", []string{"get"}, "text2sql", "Export the Text2SQL schema registry", false},
@@ -648,6 +655,14 @@ func enrichOpenAPIOperation(route, method string, op map[string]any) {
 		responses["200"] = successResponse("KeycloakLogoutResponse")
 	case "put /admin/sso/keycloak/config", "post /admin/sso/keycloak/config":
 		responses["204"] = map[string]any{"description": "Configuration saved"}
+	case "get /admin/tracking/violations", "delete /admin/tracking/violations":
+		responses["200"] = successResponse("TrackingStatusResponse")
+	case "post /admin/tracking/violations/allow":
+		op["requestBody"] = requestBody("TrackingAllowRequest")
+		responses["200"] = successResponse("TrackingStatusResponse")
+	case "post /tracking/csp-report":
+		responses["204"] = map[string]any{"description": "Report recorded"}
+		responses["404"] = map[string]any{"description": "Tracking is off"}
 	case "put /admin/settings/by-key/{key}":
 		op["requestBody"] = requestBody("SettingWriteRequest")
 		responses["200"] = successResponse("AdminSettingView")
@@ -815,6 +830,18 @@ func appUIOpenAPISchemas() map[string]any {
 		"KeycloakLogoutResponse": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"status", "end_session_url"}, "properties": map[string]any{
 			"status": map[string]any{"type": "string", "enum": []string{"logged_out"}}, "end_session_url": map[string]any{"type": "string"},
 		}},
+		"TrackingViolation": map[string]any{"type": "object", "required": []string{"origin", "directive", "page", "count", "first_seen", "last_seen", "allowed"}, "properties": map[string]any{
+			"origin": map[string]any{"type": "string"}, "directive": map[string]any{"type": "string"}, "page": map[string]any{"type": "string"},
+			"count": map[string]any{"type": "integer", "minimum": 1}, "first_seen": map[string]any{"type": "string", "format": "date-time"}, "last_seen": map[string]any{"type": "string", "format": "date-time"},
+			"allowed": map[string]any{"type": "boolean", "description": "True when the current tracking configuration already allows this origin."},
+		}},
+		"TrackingStatusResponse": map[string]any{"type": "object", "required": []string{"enabled", "provider", "active", "include_admin", "placement", "momento_proxy", "allowed_hosts", "violations"}, "properties": map[string]any{
+			"enabled": map[string]any{"type": "boolean"}, "provider": map[string]any{"type": "string", "enum": tracking.Providers}, "active": map[string]any{"type": "boolean", "description": "True when pages are actually carrying the snippet."},
+			"include_admin": map[string]any{"type": "boolean"}, "placement": map[string]any{"type": "string", "enum": []string{tracking.PlacementHead, tracking.PlacementBody}}, "momento_proxy": map[string]any{"type": "boolean"},
+			"allowed_hosts": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}, "violations": map[string]any{"type": "array", "maxItems": tracking.MaxViolations, "items": schemaRef("TrackingViolation")},
+			"error": map[string]any{"type": "string", "description": "What the chosen provider is still missing; absent when the configuration is complete."},
+		}},
+		"TrackingAllowRequest": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"origin"}, "properties": map[string]any{"origin": map[string]any{"type": "string", "description": "An http(s) origin such as https://cdn.example"}}},
 		"SettingWriteRequest": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"value"}, "properties": map[string]any{
 			"value": map[string]any{"type": "string"}, "reason": map[string]any{"type": "string"}, "expected_version": map[string]any{"type": "integer", "minimum": 0},
 		}},

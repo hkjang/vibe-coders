@@ -2574,6 +2574,121 @@
         ],
         "type": "object"
       },
+      "TrackingAllowRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "origin": {
+            "description": "An http(s) origin such as https://cdn.example",
+            "type": "string"
+          }
+        },
+        "required": [
+          "origin"
+        ],
+        "type": "object"
+      },
+      "TrackingStatusResponse": {
+        "properties": {
+          "active": {
+            "description": "True when pages are actually carrying the snippet.",
+            "type": "boolean"
+          },
+          "allowed_hosts": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "error": {
+            "description": "What the chosen provider is still missing; absent when the configuration is complete.",
+            "type": "string"
+          },
+          "include_admin": {
+            "type": "boolean"
+          },
+          "momento_proxy": {
+            "type": "boolean"
+          },
+          "placement": {
+            "enum": [
+              "head",
+              "body"
+            ],
+            "type": "string"
+          },
+          "provider": {
+            "enum": [
+              "none",
+              "momento",
+              "ga4",
+              "gtm",
+              "matomo",
+              "custom"
+            ],
+            "type": "string"
+          },
+          "violations": {
+            "items": {
+              "$ref": "#/components/schemas/TrackingViolation"
+            },
+            "maxItems": 100,
+            "type": "array"
+          }
+        },
+        "required": [
+          "enabled",
+          "provider",
+          "active",
+          "include_admin",
+          "placement",
+          "momento_proxy",
+          "allowed_hosts",
+          "violations"
+        ],
+        "type": "object"
+      },
+      "TrackingViolation": {
+        "properties": {
+          "allowed": {
+            "description": "True when the current tracking configuration already allows this origin.",
+            "type": "boolean"
+          },
+          "count": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "directive": {
+            "type": "string"
+          },
+          "first_seen": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "last_seen": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "origin": {
+            "type": "string"
+          },
+          "page": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "origin",
+          "directive",
+          "page",
+          "count",
+          "first_seen",
+          "last_seen",
+          "allowed"
+        ],
+        "type": "object"
+      },
       "UIAuthentication": {
         "additionalProperties": false,
         "properties": {
@@ -13647,6 +13762,122 @@
         ]
       }
     },
+    "/admin/tracking/violations": {
+      "delete": {
+        "operationId": "delete__admin_tracking_violations",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrackingStatusResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Blocked origins reported by browsers while tracking is on: list, or clear the list",
+        "tags": [
+          "settings"
+        ]
+      },
+      "get": {
+        "operationId": "get__admin_tracking_violations",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrackingStatusResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Blocked origins reported by browsers while tracking is on: list, or clear the list",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/admin/tracking/violations/allow": {
+      "post": {
+        "operationId": "post__admin_tracking_violations_allow",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TrackingAllowRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrackingStatusResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Add one blocked origin to tracking.allowed_hosts",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
     "/admin/ui-bootstrap": {
       "get": {
         "operationId": "get__admin_ui_bootstrap",
@@ -15266,6 +15497,62 @@
         ]
       }
     },
+    "/momento/{path}": {
+      "get": {
+        "operationId": "get__momento_path",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Same-origin proxy to the Momento collector (only while tracking.provider=momento and tracking.momento_proxy is on)",
+        "tags": [
+          "ops"
+        ]
+      },
+      "post": {
+        "operationId": "post__momento_path",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Same-origin proxy to the Momento collector (only while tracking.provider=momento and tracking.momento_proxy is on)",
+        "tags": [
+          "ops"
+        ]
+      }
+    },
     "/openapi.json": {
       "get": {
         "operationId": "get__openapi_json",
@@ -15539,6 +15826,38 @@
         "summary": "Suggested app/report templates for the team",
         "tags": [
           "self-service"
+        ]
+      }
+    },
+    "/tracking/csp-report": {
+      "post": {
+        "operationId": "post__tracking_csp_report",
+        "responses": {
+          "204": {
+            "description": "Report recorded"
+          },
+          "404": {
+            "description": "Tracking is off"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Content-Security-Policy violation reports from browsers (unauthenticated; accepted only while tracking is on)",
+        "tags": [
+          "ops"
         ]
       }
     },

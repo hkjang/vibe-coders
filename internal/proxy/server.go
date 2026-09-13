@@ -29,6 +29,7 @@ import (
 	"vibe-coders/internal/config"
 	"vibe-coders/internal/secret"
 	"vibe-coders/internal/store"
+	"vibe-coders/internal/tracking"
 )
 
 // AppVersion is the gateway build version, surfaced in /auth/me and both admin UIs.
@@ -92,6 +93,8 @@ type Server struct {
 	lastReloadNano  atomic.Int64           // unix nanos of this pod's last runtime-config reload (convergence observability)
 	lastReloadTok   atomic.Pointer[string] // admin_settings change token this pod last applied
 	appUIRuntime    atomic.Pointer[appUIRuntimeConfig]
+	trackingRuntime atomic.Pointer[tracking.Config] // admin-managed visitor tracking (snippet + CSP sources)
+	cspViolations   *tracking.Recorder              // origins the browser refused while tracking is on
 	adminModels     *adminModelCatalogCache
 	trustedProxies  []netip.Prefix
 }
@@ -127,9 +130,10 @@ func NewServer(cfg config.Config, db *store.SQLStore, logger *store.AsyncLogger,
 		return nil, fmt.Errorf("create secret cipher: %w", err)
 	}
 	server := &Server{
-		cfg:    cfg,
-		db:     db,
-		logger: logger,
+		cfg:           cfg,
+		db:            db,
+		logger:        logger,
+		cspViolations: tracking.NewRecorder(),
 		client: &http.Client{
 			Timeout:   cfg.Upstream.Timeout,
 			Transport: transport,
@@ -249,11 +253,16 @@ func (s *Server) MetricsHandle() *Metrics { return s.metrics }
 
 func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
-	appHandler := appui.NewEmbeddedHandler(appui.Options{Enabled: func(context.Context) bool {
-		return s.appUIConf().Enabled
-	}})
+	appHandler := appui.NewEmbeddedHandler(appui.Options{
+		Enabled:  func(context.Context) bool { return s.appUIConf().Enabled },
+		Tracking: func(context.Context) tracking.Config { return s.trackingConf() },
+	})
 	mux.Handle("/app", appHandler)
 	mux.Handle("/app/", appHandler)
+	mux.HandleFunc("/tracking/csp-report", s.handleTrackingReport)
+	mux.HandleFunc("/momento/", s.handleMomentoProxy)
+	mux.HandleFunc("/admin/tracking/violations", s.handleTrackingViolations)
+	mux.HandleFunc("/admin/tracking/violations/allow", s.handleTrackingAllow)
 	mux.HandleFunc("/favicon.ico", s.handleFavicon)
 	mux.HandleFunc("/health", s.handleHealth)
 	mux.HandleFunc("/ready", s.handleReady)
@@ -2252,6 +2261,9 @@ func (s *Server) invalidateKillCache() {
 func (s *Server) handleAdminUI(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/admin" && r.URL.Path != "/admin/" {
 		http.NotFound(w, r)
+		return
+	}
+	if s.serveTrackedLegacyPage(w, r, adminUIPage()) {
 		return
 	}
 	servePage(w, r, adminUIPage())

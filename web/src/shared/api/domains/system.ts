@@ -24,7 +24,10 @@ import type {
   GetAdminSettingsEffectiveData,
   GetAdminSettingsExportData,
   GetAdminSettingsHistoryData,
+  DeleteAdminTrackingViolationsData,
   GetAdminSsoKeycloakConfigData,
+  GetAdminTrackingViolationsData,
+  PostAdminTrackingViolationsAllowData,
   GetAdminSystemErrorsData,
   PatchAdminKnowledgeIdData,
   PostAdminChangeImpactSimulateData,
@@ -67,6 +70,7 @@ import {
   indexHealthSchema,
   keycloakConfigSchema,
   keycloakTestSchema,
+  trackingStatusSchema,
   knowledgeListSchema,
   knowledgeSavedSchema,
   migrationSqlSchema,
@@ -275,6 +279,26 @@ export const systemEndpoints = {
       "POST",
       "/admin/sso/keycloak/test",
       keycloakTestSchema,
+    ),
+  },
+  // Visitor tracking: the snippet itself is configured through the ordinary
+  // settings under the "tracking" category; these calls surface what the
+  // browser's content security policy refused and let the operator allow it.
+  tracking: {
+    status: operation<GetAdminTrackingViolationsData, unknown>()(
+      "GET",
+      "/admin/tracking/violations",
+      trackingStatusSchema,
+    ),
+    clear: operation<DeleteAdminTrackingViolationsData, unknown>()(
+      "DELETE",
+      "/admin/tracking/violations",
+      trackingStatusSchema,
+    ),
+    allow: operation<PostAdminTrackingViolationsAllowData, unknown>()(
+      "POST",
+      "/admin/tracking/violations/allow",
+      trackingStatusSchema,
     ),
   },
   // The operations home the legacy console showed under #/ops-home. Every call here is
