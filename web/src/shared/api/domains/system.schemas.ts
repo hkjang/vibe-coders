@@ -178,6 +178,7 @@ export const keycloakConfigSchema = looseObject({
   role_claim: z.string().optional(),
   group_claim: z.string().optional(),
   allow_local_login: z.boolean().optional(),
+  auto_login: z.boolean().optional(),
   role_map: z.record(z.string(), z.string()).nullish(),
   role_map_default: z.record(z.string(), z.string()).nullish(),
   role_map_custom: z.boolean().optional(),

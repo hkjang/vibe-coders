@@ -481,6 +481,7 @@ func (s *Server) handleAdminUIBootstrap(w http.ResponseWriter, r *http.Request) 
 		"authentication": map[string]any{
 			"enabled": s.cfg.Auth.Enabled, "authenticated": authenticated, "mode": mode,
 			"keycloak_enabled": kc.Enabled, "allow_local_login": !kc.Enabled || kc.AllowLocalLogin,
+			"auto_login":          kc.Enabled && kc.AutoLogin,
 			"sso_login_url":       "/auth/keycloak/login",
 			"credential_prefixes": uiCredentialPrefixes(s.cfg.Auth),
 		},

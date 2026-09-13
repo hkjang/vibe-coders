@@ -12,6 +12,7 @@ import { AppError } from "@/shared/api/error";
 import type { UIBootstrap } from "@/shared/api/schemas";
 import { tokenStore } from "@/shared/auth/token-store";
 import { authNavigation } from "@/shared/auth/logout-navigation";
+import { silentSsoNavigation } from "@/shared/auth/silent-sso";
 
 const bootstrap: UIBootstrap = {
   backend_version: "v0.80.0",
@@ -94,6 +95,7 @@ function CredentialPrefixHarness(): React.JSX.Element {
 
 afterEach(() => {
   tokenStore.clearAll();
+  window.sessionStorage.clear();
   window.history.replaceState(null, "", "/");
 });
 
@@ -394,5 +396,121 @@ describe("AuthProvider runtime bootstrap refresh", () => {
     expect(
       request.mock.calls.filter(([endpoint]) => endpoint.path === endpoints.uiBootstrap.path),
     ).toHaveLength(3);
+  });
+});
+
+describe("AuthProvider silent SSO", () => {
+  const anonymousAutoLogin: UIBootstrap = {
+    ...bootstrap,
+    authentication: { ...bootstrap.authentication, authenticated: false, auto_login: true },
+    user: null,
+    roles: [],
+    permissions: [],
+  };
+
+  function mockAnonymousBootstrap(data: UIBootstrap = anonymousAutoLogin): ReturnType<typeof vi.spyOn> {
+    return vi.spyOn(apiClient, "request").mockImplementation((async (endpoint: ApiEndpointBase) => {
+      if (endpoint.path === endpoints.uiBootstrap.path) return data;
+      if (endpoint.path === endpoints.auth.keycloakLogout.path) {
+        return { status: "logged_out", end_session_url: "" };
+      }
+      throw new Error(`unexpected request ${endpoint.path}`);
+    }) as typeof apiClient.request);
+  }
+
+  function renderState(): void {
+    render(
+      <TestProviders>
+        <AuthProvider>
+          <AuthStateHarness />
+        </AuthProvider>
+      </TestProviders>,
+    );
+  }
+
+  it("sends an anonymous deep-link visitor to the provider once with prompt=none and the return path", async () => {
+    window.history.replaceState(null, "", "/app/traces/abc");
+    mockAnonymousBootstrap();
+    const navigate = vi.spyOn(silentSsoNavigation, "toProvider").mockImplementation(() => undefined);
+
+    renderState();
+
+    await waitFor(() => expect(navigate).toHaveBeenCalledTimes(1));
+    const target = new URL(navigate.mock.calls[0]?.[0] ?? "");
+    expect(target.pathname).toBe(endpoints.auth.keycloakLogin.path);
+    expect(target.searchParams.get("prompt")).toBe("none");
+    expect(target.searchParams.get("return_to")).toBe("/app/traces/abc");
+
+    // A re-render with the same anonymous state must not start a second attempt.
+    await waitFor(() => expect(screen.getByText("anonymous")).toBeVisible());
+    expect(navigate).toHaveBeenCalledTimes(1);
+  });
+
+  it("does nothing while auto_login is off even though SSO is enabled", async () => {
+    window.history.replaceState(null, "", "/app/overview");
+    mockAnonymousBootstrap({
+      ...anonymousAutoLogin,
+      authentication: { ...anonymousAutoLogin.authentication, auto_login: false },
+    });
+    const navigate = vi.spyOn(silentSsoNavigation, "toProvider").mockImplementation(() => undefined);
+
+    renderState();
+
+    await waitFor(() => expect(screen.getByText("anonymous")).toBeVisible());
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it("does not retry from the login screen the callback sent the visitor to", async () => {
+    window.history.replaceState(null, "", "/app/login?sso=none&return_to=%2Fapp%2Ftraces%2Fabc");
+    mockAnonymousBootstrap();
+    const navigate = vi.spyOn(silentSsoNavigation, "toProvider").mockImplementation(() => undefined);
+
+    renderState();
+
+    await waitFor(() => expect(screen.getByText("anonymous")).toBeVisible());
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it("does not start from an SSO callback landing that carried an error", async () => {
+    window.history.replaceState(null, "", "/app/overview#kc_error=access_denied");
+    mockAnonymousBootstrap();
+    const navigate = vi.spyOn(silentSsoNavigation, "toProvider").mockImplementation(() => undefined);
+
+    renderState();
+
+    await waitFor(() => expect(screen.getByText("anonymous")).toBeVisible());
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it("stays signed out after the user logs out on purpose", async () => {
+    window.history.replaceState(null, "", "/app/overview");
+    let current: UIBootstrap = {
+      ...bootstrap,
+      authentication: { ...bootstrap.authentication, auto_login: true },
+    };
+    vi.spyOn(apiClient, "request").mockImplementation((async (endpoint: ApiEndpointBase) => {
+      if (endpoint.path === endpoints.uiBootstrap.path) return current;
+      if (endpoint.path === endpoints.auth.keycloakLogout.path) {
+        return { status: "logged_out", end_session_url: "" };
+      }
+      throw new Error(`unexpected request ${endpoint.path}`);
+    }) as typeof apiClient.request);
+    const navigate = vi.spyOn(silentSsoNavigation, "toProvider").mockImplementation(() => undefined);
+    const user = userEvent.setup();
+
+    render(
+      <TestProviders>
+        <AuthProvider>
+          <LogoutHarness />
+          <AuthStateHarness />
+        </AuthProvider>
+      </TestProviders>,
+    );
+    await waitFor(() => expect(screen.getByRole("button", { name: "logout" })).toBeEnabled());
+    current = anonymousAutoLogin;
+    await user.click(screen.getByRole("button", { name: "logout" }));
+
+    await waitFor(() => expect(screen.getByText("anonymous")).toBeVisible());
+    expect(navigate).not.toHaveBeenCalled();
   });
 });

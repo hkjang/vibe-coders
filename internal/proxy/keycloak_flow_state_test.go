@@ -43,7 +43,7 @@ func installKeycloakCallbackTestGlobals(t *testing.T, disc oidcDiscovery, client
 
 func runKeycloakCallback(t *testing.T, s *Server, state string) *httptest.ResponseRecorder {
 	t.Helper()
-	s.saveOIDCFlow(t.Context(), state, "callback-nonce", "callback-verifier", "/app/login")
+	s.saveOIDCFlow(t.Context(), state, "callback-nonce", "callback-verifier", "/app/login", false)
 	query := url.Values{}
 	query.Set("state", state)
 	query.Set("code", "authorization-code-must-not-leak")
@@ -102,10 +102,10 @@ func TestTakeOIDCFlowDoesNotReusePersistedMirrorAfterDBMiss(t *testing.T) {
 	}
 	state := "durable-" + random
 
-	s.saveOIDCFlow(ctx, state, "nonce", "verifier", "/app/providers")
+	s.saveOIDCFlow(ctx, state, "nonce", "verifier", "/app/providers", false)
 	// Simulate another pod winning the callback and consuming the durable state. The local
 	// in-memory mirror remains until this originating pod observes the healthy DB miss.
-	if _, _, _, found, err := db.TakeOIDCFlowState(ctx, state); err != nil || !found {
+	if _, found, err := db.TakeOIDCFlowState(ctx, state); err != nil || !found {
 		t.Fatalf("remote durable take: found=%v err=%v", found, err)
 	}
 	if _, found := s.takeOIDCFlow(ctx, state); found {
@@ -128,7 +128,7 @@ func TestTakeOIDCFlowFallsBackAfterDBSaveFailure(t *testing.T) {
 
 	saveCtx, cancelSave := context.WithCancel(ctx)
 	cancelSave()
-	s.saveOIDCFlow(saveCtx, state, "nonce", "verifier", "/app/")
+	s.saveOIDCFlow(saveCtx, state, "nonce", "verifier", "/app/", false)
 
 	fs, found := s.takeOIDCFlow(ctx, state)
 	if !found {
@@ -149,7 +149,7 @@ func TestTakeOIDCFlowFailsClosedForPersistedStateAfterDBReadError(t *testing.T) 
 	}
 	state := "read-error-" + random
 
-	s.saveOIDCFlow(ctx, state, "nonce", "verifier", "/app/routing")
+	s.saveOIDCFlow(ctx, state, "nonce", "verifier", "/app/routing", false)
 	if err := db.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -169,7 +169,7 @@ func TestKeycloakCallbackConsumesBoundStateAndSanitizesProviderError(t *testing.
 		Enabled: true, IssuerURL: "https://idp.example/realms/vibe",
 	}}}
 	const state = "browser-bound-provider-error"
-	s.saveOIDCFlow(t.Context(), state, "nonce", "verifier", "/app/login")
+	s.saveOIDCFlow(t.Context(), state, "nonce", "verifier", "/app/login", false)
 
 	req := httptest.NewRequest(http.MethodGet, "/auth/keycloak/callback?state="+state+"&error=access_denied&error_description=do-not-reflect-secret", nil)
 	req.AddCookie(&http.Cookie{Name: oidcStateCookieName, Value: state})

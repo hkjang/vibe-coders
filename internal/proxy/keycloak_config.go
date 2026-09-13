@@ -45,6 +45,7 @@ func (s *Server) loadKeycloakConfig(ctx context.Context) (config.KeycloakConfig,
 		RoleClaim:       rec.RoleClaim,
 		GroupClaim:      rec.GroupClaim,
 		AllowLocalLogin: rec.AllowLocalLogin,
+		AutoLogin:       rec.AutoLogin,
 		RoleMap:         rec.RoleMap,
 	}
 	if len(eff.Scopes) == 0 {

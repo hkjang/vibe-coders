@@ -16,7 +16,13 @@ import { endpoints } from "@/shared/api/endpoints";
 import { type AuthUser, type SsoStatus, type UIBootstrap } from "@/shared/api/schemas";
 import { publishLogout, subscribeToLogout, tokenStore } from "@/shared/auth/token-store";
 import { authNavigation, safeEndSessionUrl } from "@/shared/auth/logout-navigation";
-import { consumeSsoReturnTo } from "@/shared/utils/safe-return-to";
+import {
+  beginSilentSso,
+  clearSilentSsoState,
+  markSignedOut,
+  shouldAttemptSilentSso,
+} from "@/shared/auth/silent-sso";
+import { consumeSsoReturnTo, safeReturnTo, stageSsoReturnTo } from "@/shared/utils/safe-return-to";
 import { migrationRegistry, registryFromBootstrap, type MigrationFeature } from "@/config/migration-registry";
 import type { UICapabilities } from "@/shared/api/schemas";
 import { formatSsoFailure, normalizeSsoFailureCode } from "@/app/auth/sso-errors";
@@ -51,6 +57,7 @@ const defaultSso: SsoStatus = {
   keycloak_enabled: false,
   allow_local_login: true,
   login_url: endpoints.auth.keycloakLogin.path,
+  auto_login: false,
 };
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -99,6 +106,9 @@ export function AuthProvider({ children }: PropsWithChildren): React.JSX.Element
   const [features, setFeatures] = useState<readonly MigrationFeature[]>(migrationRegistry);
   const [error, setError] = useState<string>();
   const started = useRef(false);
+  // True when this page load is the landing of an SSO callback (a code or an error came
+  // back in the fragment). A silent attempt must not start from that landing.
+  const ssoCallbackLanding = useRef(false);
   const runtimeRefreshFlight = useRef<Promise<void> | undefined>(undefined);
 
   const applyBootstrap = useCallback((data: UIBootstrap): void => {
@@ -118,6 +128,7 @@ export function AuthProvider({ children }: PropsWithChildren): React.JSX.Element
       keycloak_enabled: data.authentication.keycloak_enabled,
       allow_local_login: data.authentication.allow_local_login,
       login_url: data.authentication.sso_login_url,
+      auto_login: data.authentication.auto_login ?? false,
     });
     setCapabilities(data.capabilities);
     setFeatures(registryFromBootstrap(data.migration_registry));
@@ -269,12 +280,28 @@ export function AuthProvider({ children }: PropsWithChildren): React.JSX.Element
     if (started.current) return;
     started.current = true;
     const fragment = captureSsoFragment();
+    ssoCallbackLanding.current = Boolean(fragment.code || fragment.error);
     void completeSsoBootstrap(fragment);
   }, [completeSsoBootstrap]);
+
+  // Silent SSO: a visitor with a live Keycloak session is signed in without seeing the
+  // login screen. The rule module guarantees at most one attempt per tab session, none
+  // after a deliberate sign-out, and none once the callback has answered with ?sso=none.
+  useEffect(() => {
+    if (mode === "authenticated") {
+      clearSilentSsoState();
+      return;
+    }
+    if (mode !== "anonymous" || authenticationMode !== "session" || ssoCallbackLanding.current) return;
+    if (!shouldAttemptSilentSso(sso)) return;
+    const { pathname, search, hash } = window.location;
+    beginSilentSso(sso.login_url, stageSsoReturnTo(safeReturnTo(`${pathname}${search}${hash}`)));
+  }, [authenticationMode, mode, sso]);
 
   useEffect(
     () =>
       subscribeToLogout(() => {
+        markSignedOut();
         tokenStore.clearAll();
         queryClient.clear();
         setUser(undefined);
@@ -330,6 +357,8 @@ export function AuthProvider({ children }: PropsWithChildren): React.JSX.Element
     } catch {
       // Local logout must complete even if the gateway is unavailable.
     }
+    // Before the mode flips to anonymous, or the silent-SSO effect would sign back in.
+    markSignedOut();
     tokenStore.clearAll();
     queryClient.clear();
     setUser(undefined);

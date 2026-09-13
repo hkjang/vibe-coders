@@ -88,7 +88,25 @@ curl -fsS http://127.0.0.1:8080/ready
 | `SSO_KEYCLOAK_ENABLED` | `false` | 아니오 | Keycloak OIDC 로그인 |
 | `SSO_KEYCLOAK_ISSUER_URL` / `_CLIENT_ID` / `_CLIENT_SECRET` / `_REDIRECT_URI` / `_SCOPES` | (없음) | SSO 켤 때 | OIDC 클라이언트 |
 | `SSO_KEYCLOAK_ALLOW_LOCAL_LOGIN` | `true` | 아니오 | SSO 와 로컬 로그인 병행 |
+| `SSO_KEYCLOAK_AUTO_LOGIN` | `false` | 아니오 | Keycloak 세션이 살아 있으면 `/app` 콘솔이 로그인 화면 없이 조용히 로그인(`prompt=none`). 3.2.1 절 |
 | `SSO_KEYCLOAK_DEFAULT_ROLE` / `_ROLE_CLAIM` / `_GROUP_CLAIM` | `developer` / `realm_access.roles` / `groups` | 아니오 | 클레임 → 역할·팀 매핑 |
+
+콘솔 **시스템 → 시스템 설정 → SSO** 탭에 저장한 값(DB)이 있으면 위 `SSO_KEYCLOAK_*` 보다 우선합니다. 같은 화면에 **자동 로그인** 스위치가 있습니다.
+
+#### 3.2.1 자동 로그인 (silent SSO, `auto_login`)
+
+Keycloak(또는 같은 realm 을 쓰는 ReSSO)에 이미 로그인한 사람이 콘솔을 열면 로그인 화면을 거치지 않고 바로 본 화면으로 들어가게 하는 설정입니다. **기본값은 꺼짐**이며, 켜려면 `SSO_KEYCLOAK_AUTO_LOGIN=true` 또는 SSO 탭의 **자동 로그인** 스위치를 켭니다. 꺼진 설치에서는 아무것도 달라지지 않습니다.
+
+동작:
+
+- 로그인되지 않은 브라우저가 `/app/...` 을 열면 콘솔이 `/auth/keycloak/login?prompt=none&return_to=<그 자리>` 로 **최상위 이동**합니다(숨은 iframe 이 아니라서 서드파티 쿠키가 막힌 브라우저에서도 동작합니다). `prompt=none` 은 Keycloak 에 "이미 있는 세션으로만 답하라"는 요구라 화면을 그리지 않습니다.
+  - 세션이 있으면 인가 코드가 곧바로 돌아와 평소 SSO 로그인과 같은 절차로 끝나고, 깊은 링크로 들어온 사람은 **그 자리로** 돌아갑니다(`return_to` 는 `/app/` 아래 경로만 받습니다).
+  - 세션이 없으면 Keycloak 이 `error=login_required` 로 돌려보내고, 게이트웨이는 이를 실패가 아닌 평범한 대답으로 보아 `/app/login?sso=none&return_to=...` 으로 보냅니다. 로그인 화면이 평소처럼 뜨고 감사 이력에 `sso_login_failed` 가 남지 않습니다.
+- **무한 루프 방지**가 이 기능의 핵심이며 세 겹으로 막습니다: (1) 한 탭 세션에 한 번만 시도(`sessionStorage`; 새 탭은 다시 시도, 거절 뒤 새로고침은 시도하지 않음), (2) 콘솔에서 **로그아웃**한 뒤에는 다시 로그인하기 전까지 시도하지 않음, (3) 주소에 `?sso=none`·`?sso=error` 가 붙어 있으면 브라우저 저장소가 지워졌더라도 시도하지 않음. 브라우저가 저장소 접근을 막는 경우(사생활 보호 모드 등)는 "이미 시도했다"로 쳐서 막히는 쪽으로 동작합니다.
+- 로그인(`/app/login`)·콜백(`/auth/...`) 경로와 API·MCP·헬스 경로에서는 시도하지 않습니다. 브라우저 화면 이동에만 해당합니다.
+- 서버는 `auto_login` 이 꺼져 있으면 `?prompt=none` 이 붙어 와도 **조용히 평범한 로그인으로 바꿉니다.** 누구든 주소에 붙여 흐름을 바꿀 수 없게 하려는 것이며, 리다이렉트가 생기는 자리는 관리자 설정에만 묶입니다.
+
+확인 방법: Keycloak 에 로그인한 브라우저로 `/app/overview` 를 열면 로그인 화면 없이 개요가 뜨고, 로그아웃한 브라우저로 열면 로그인 화면이 한 번 뜨며 새로고침을 반복해도 리다이렉트가 되풀이되지 않습니다. 콘솔에서 로그아웃한 뒤 다시 열어도 자동으로 로그인되지 않습니다.
 
 ### 3.3 업스트림·라우팅
 
@@ -204,7 +222,7 @@ SSO 로 들어온 계정의 역할은 클레임 매핑(`SSO_KEYCLOAK_ROLE_CLAIM`
 
 - **바꿔야 하는 기본값**: `GATEWAY_SECRET`(내장 개발용 값), `ADMIN_TOKEN`(없으면 `/admin` 이 열립니다), `AUTH_JWT_SECRET`. 셋 다 `openssl rand -hex 32` 로 만들고 env 파일은 `0600` 으로 둡니다. `LOG_RAW_PROMPTS`·`LOG_RAW_BODIES`·`LOG_RESPONSE_TEXT` 는 기본 `false` 를 유지하세요.
 - **외부에 열면 안 되는 것**: 8080 은 사내망·VPN 뒤에만. 콘솔·`/admin/*`·`/metrics` 를 인터넷에 노출하지 않습니다. TLS 는 앞단 리버스 프록시에서 종료합니다.
-- **인증 연동**: 운영에서는 `AUTH_ENABLED=true` + SSO(`SSO_KEYCLOAK_*`)를 권장합니다. 관리자 토큰은 자동화·비상용으로만 쓰고, 읽기 작업에는 `ADMIN_READONLY_TOKEN` 을 씁니다.
+- **인증 연동**: 운영에서는 `AUTH_ENABLED=true` + SSO(`SSO_KEYCLOAK_*`)를 권장합니다. 관리자 토큰은 자동화·비상용으로만 쓰고, 읽기 작업에는 `ADMIN_READONLY_TOKEN` 을 씁니다. 스무 개가 넘는 사내 앱을 오가는 환경이면 `SSO_KEYCLOAK_AUTO_LOGIN`(3.2.1 절)을 켜 로그인 화면을 건너뛸 수 있습니다 — 기본은 꺼짐이고, 켜도 사용자가 스스로 로그아웃한 뒤에는 자동으로 다시 들어오지 않습니다.
 - **키 유출 의심**: 콘솔 **사용자와 팀 → API 키**에서 해당 키를 비활성화하고 새 키를 발급합니다. 업스트림 키가 유출됐다면 공급자에서 회전한 뒤 `UPSTREAM_API_KEY` 를 바꿔 재기동 — [OPERATIONS.md 8.5](OPERATIONS.md#85-보안-사건-키-유출-의심).
 - **정책·마스킹**: 프롬프트의 비밀·개인정보는 기본으로 마스킹됩니다. 모델·공급자 허용 목록, DLP, 승인 워크플로는 콘솔 **거버넌스 → 정책 및 거버넌스**와 [SAFETY_GUIDE.md](SAFETY_GUIDE.md).
 
