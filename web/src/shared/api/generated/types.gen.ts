@@ -645,6 +645,44 @@ export type StatusResponse = {
     status: string;
 };
 
+export type TrackingAllowRequest = {
+    /**
+     * An http(s) origin such as https://cdn.example
+     */
+    origin: string;
+};
+
+export type TrackingStatusResponse = {
+    /**
+     * True when pages are actually carrying the snippet.
+     */
+    active: boolean;
+    allowed_hosts: Array<string>;
+    enabled: boolean;
+    /**
+     * What the chosen provider is still missing; absent when the configuration is complete.
+     */
+    error?: string;
+    include_admin: boolean;
+    momento_proxy: boolean;
+    placement: 'head' | 'body';
+    provider: 'none' | 'momento' | 'ga4' | 'gtm' | 'matomo' | 'custom';
+    violations: Array<TrackingViolation>;
+};
+
+export type TrackingViolation = {
+    /**
+     * True when the current tracking configuration already allows this origin.
+     */
+    allowed: boolean;
+    count: number;
+    directive: string;
+    first_seen: string;
+    last_seen: string;
+    origin: string;
+    page: string;
+};
+
 export type UiAuthentication = {
     allow_local_login: boolean;
     authenticated: boolean;
@@ -8001,6 +8039,81 @@ export type GetAdminTracesTraceIdResponses = {
     200: unknown;
 };
 
+export type DeleteAdminTrackingViolationsData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/admin/tracking/violations';
+};
+
+export type DeleteAdminTrackingViolationsErrors = {
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type DeleteAdminTrackingViolationsError = DeleteAdminTrackingViolationsErrors[keyof DeleteAdminTrackingViolationsErrors];
+
+export type DeleteAdminTrackingViolationsResponses = {
+    /**
+     * OK
+     */
+    200: TrackingStatusResponse;
+};
+
+export type DeleteAdminTrackingViolationsResponse = DeleteAdminTrackingViolationsResponses[keyof DeleteAdminTrackingViolationsResponses];
+
+export type GetAdminTrackingViolationsData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/admin/tracking/violations';
+};
+
+export type GetAdminTrackingViolationsErrors = {
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminTrackingViolationsError = GetAdminTrackingViolationsErrors[keyof GetAdminTrackingViolationsErrors];
+
+export type GetAdminTrackingViolationsResponses = {
+    /**
+     * OK
+     */
+    200: TrackingStatusResponse;
+};
+
+export type GetAdminTrackingViolationsResponse = GetAdminTrackingViolationsResponses[keyof GetAdminTrackingViolationsResponses];
+
+export type PostAdminTrackingViolationsAllowData = {
+    body: TrackingAllowRequest;
+    path?: never;
+    query?: never;
+    url: '/admin/tracking/violations/allow';
+};
+
+export type PostAdminTrackingViolationsAllowErrors = {
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostAdminTrackingViolationsAllowError = PostAdminTrackingViolationsAllowErrors[keyof PostAdminTrackingViolationsAllowErrors];
+
+export type PostAdminTrackingViolationsAllowResponses = {
+    /**
+     * OK
+     */
+    200: TrackingStatusResponse;
+};
+
+export type PostAdminTrackingViolationsAllowResponse = PostAdminTrackingViolationsAllowResponses[keyof PostAdminTrackingViolationsAllowResponses];
+
 export type GetAdminUiBootstrapData = {
     body?: never;
     path?: never;
@@ -9115,6 +9228,38 @@ export type GetMetricsResponses = {
     200: unknown;
 };
 
+export type GetMomentoPathData = {
+    body?: never;
+    path: {
+        path: string;
+    };
+    query?: never;
+    url: '/momento/{path}';
+};
+
+export type GetMomentoPathResponses = {
+    /**
+     * OK
+     */
+    200: unknown;
+};
+
+export type PostMomentoPathData = {
+    body?: never;
+    path: {
+        path: string;
+    };
+    query?: never;
+    url: '/momento/{path}';
+};
+
+export type PostMomentoPathResponses = {
+    /**
+     * OK
+     */
+    200: unknown;
+};
+
 export type GetOpenapiJsonData = {
     body?: never;
     path?: never;
@@ -9325,6 +9470,35 @@ export type GetTeamTemplatesCandidatesResponses = {
      */
     200: unknown;
 };
+
+export type PostTrackingCspReportData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/tracking/csp-report';
+};
+
+export type PostTrackingCspReportErrors = {
+    /**
+     * Tracking is off
+     */
+    404: unknown;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostTrackingCspReportError = PostTrackingCspReportErrors[keyof PostTrackingCspReportErrors];
+
+export type PostTrackingCspReportResponses = {
+    /**
+     * Report recorded
+     */
+    204: void;
+};
+
+export type PostTrackingCspReportResponse = PostTrackingCspReportResponses[keyof PostTrackingCspReportResponses];
 
 export type GetV1Data = {
     body?: never;

@@ -13,6 +13,7 @@ export const systemSettingsKeys = {
   changeSet: (id: string) => ["system", "change-sets", id] as const,
   errors: ["system", "system-errors"] as const,
   sso: ["system", "sso", "keycloak"] as const,
+  tracking: ["system", "tracking"] as const,
   roles: ["system", "roles"] as const,
   auditLogs: ["system", "audit", "logs"] as const,
   authEvents: ["system", "audit", "auth-events"] as const,
@@ -67,6 +68,13 @@ export function useKeycloakConfig() {
   return useQuery({
     queryKey: systemSettingsKeys.sso,
     queryFn: ({ signal }) => apiClient.request(system.sso.config, { signal, routeId }),
+  });
+}
+
+export function useTrackingStatus() {
+  return useQuery({
+    queryKey: systemSettingsKeys.tracking,
+    queryFn: ({ signal }) => apiClient.request(system.tracking.status, { signal, routeId }),
   });
 }
 

@@ -585,6 +585,90 @@ describe("SystemSettingsPage — SSO", () => {
   });
 });
 
+describe("SystemSettingsPage — 방문 추적", () => {
+  const trackingStatus = {
+    enabled: true,
+    provider: "custom",
+    active: true,
+    include_admin: false,
+    placement: "head",
+    momento_proxy: false,
+    allowed_hosts: [],
+    violations: [
+      {
+        origin: "https://collect.tracker.example",
+        directive: "connect-src",
+        page: "/app/overview",
+        count: 3,
+        first_seen: "2026-09-13T00:00:00Z",
+        last_seen: "2026-09-13T00:05:00Z",
+        allowed: false,
+      },
+      {
+        origin: "https://cdn.tracker.example",
+        directive: "script-src-elem",
+        page: "/app/",
+        count: 1,
+        first_seen: "2026-09-13T00:00:00Z",
+        last_seen: "2026-09-13T00:01:00Z",
+        allowed: true,
+      },
+    ],
+  };
+
+  it("lists blocked origins and allows one with a single click", async () => {
+    const api = mockApi({
+      "GET /admin/tracking/violations": () => trackingStatus,
+      "POST /admin/tracking/violations/allow": () => ({
+        ...trackingStatus,
+        allowed_hosts: ["https://collect.tracker.example"],
+        violations: trackingStatus.violations.map((violation) => ({ ...violation, allowed: true })),
+      }),
+    });
+    const user = userEvent.setup();
+    renderPage("/system/settings?tab=tracking");
+
+    expect(await screen.findByText("https://collect.tracker.example")).toBeVisible();
+    expect(screen.getByText("직접 붙여넣은 스니펫")).toBeVisible();
+    expect(screen.getByText("허용됨")).toBeVisible();
+    expect(screen.getByRole("link", { name: "추적 설정 열기" })).toHaveAttribute(
+      "href",
+      "/system/settings?tab=runtime&category=tracking",
+    );
+
+    await user.click(screen.getByRole("button", { name: "https://collect.tracker.example 허용" }));
+
+    await waitFor(() =>
+      expect(api.bodies("POST /admin/tracking/violations/allow")).toEqual([
+        { origin: "https://collect.tracker.example" },
+      ]),
+    );
+  });
+
+  it("explains an incomplete configuration and hides write actions without admin:write", async () => {
+    authState.scopes = ["admin:read"];
+    mockApi({
+      "GET /admin/tracking/violations": () => ({
+        enabled: true,
+        provider: "momento",
+        active: false,
+        include_admin: false,
+        placement: "head",
+        momento_proxy: true,
+        allowed_hosts: [],
+        error: "tracking.momento_url and tracking.momento_site_id are required",
+        violations: [],
+      }),
+    });
+    renderPage("/system/settings?tab=tracking");
+
+    expect(await screen.findByText("켜졌지만 미완성")).toBeVisible();
+    expect(screen.getByText("tracking.momento_url and tracking.momento_site_id are required")).toBeVisible();
+    expect(screen.getByText("차단된 출처가 없습니다.")).toBeVisible();
+    expect(screen.getByRole("button", { name: /기록 비우기/ })).toBeDisabled();
+  });
+});
+
 describe("SystemSettingsPage — 지식 캐시", () => {
   const snippets = {
     snippets: [
