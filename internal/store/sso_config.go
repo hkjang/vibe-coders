@@ -16,37 +16,40 @@ var ErrSSOConfigConflict = errors.New("SSO provider config changed concurrently"
 // When a row exists, it takes precedence over environment defaults at runtime. The client
 // secret is stored encrypted (ClientSecretEnc holds the AES-GCM ciphertext, never plaintext).
 type SSOProviderConfig struct {
-	Provider        string            `json:"provider"`
-	Enabled         bool              `json:"enabled"`
-	IssuerURL       string            `json:"issuer_url"`
-	ClientID        string            `json:"client_id"`
-	ClientSecretEnc string            `json:"-"` // ciphertext; never serialized to clients
-	RedirectURI     string            `json:"redirect_uri"`
-	Scopes          []string          `json:"scopes"`
-	DefaultRole     string            `json:"default_role"`
-	RoleClaim       string            `json:"role_claim"`
-	GroupClaim      string            `json:"group_claim"`
-	AllowLocalLogin bool              `json:"allow_local_login"`
-	RoleMap         map[string]string `json:"role_map"` // Keycloak role → internal role (overrides defaults)
-	UpdatedAt       string            `json:"updated_at"`
-	UpdatedBy       string            `json:"updated_by"`
-	Version         int               `json:"version"`
+	Provider        string   `json:"provider"`
+	Enabled         bool     `json:"enabled"`
+	IssuerURL       string   `json:"issuer_url"`
+	ClientID        string   `json:"client_id"`
+	ClientSecretEnc string   `json:"-"` // ciphertext; never serialized to clients
+	RedirectURI     string   `json:"redirect_uri"`
+	Scopes          []string `json:"scopes"`
+	DefaultRole     string   `json:"default_role"`
+	RoleClaim       string   `json:"role_claim"`
+	GroupClaim      string   `json:"group_claim"`
+	AllowLocalLogin bool     `json:"allow_local_login"`
+	// AutoLogin enables the silent prompt=none sign-in attempt from the /app console.
+	AutoLogin bool              `json:"auto_login"`
+	RoleMap   map[string]string `json:"role_map"` // Keycloak role → internal role (overrides defaults)
+	UpdatedAt string            `json:"updated_at"`
+	UpdatedBy string            `json:"updated_by"`
+	Version   int               `json:"version"`
 }
 
 // GetSSOProviderConfig returns the stored override for a provider, if any.
 func (s *SQLStore) GetSSOProviderConfig(ctx context.Context, provider string) (SSOProviderConfig, bool, error) {
 	var (
-		c        SSOProviderConfig
-		enabled  int
-		allow    int
-		scopes   string
-		roleMapJ string
+		c         SSOProviderConfig
+		enabled   int
+		allow     int
+		autoLogin int
+		scopes    string
+		roleMapJ  string
 	)
 	err := s.db.QueryRowContext(ctx, s.bind(`SELECT provider, enabled, issuer_url, client_id, client_secret_enc,
-		redirect_uri, scopes, default_role, role_claim, group_claim, allow_local_login, COALESCE(role_map,''), updated_at, updated_by, version
+		redirect_uri, scopes, default_role, role_claim, group_claim, allow_local_login, COALESCE(role_map,''), updated_at, updated_by, version, auto_login
 		FROM sso_provider_config WHERE provider = ?`), provider).
 		Scan(&c.Provider, &enabled, &c.IssuerURL, &c.ClientID, &c.ClientSecretEnc, &c.RedirectURI,
-			&scopes, &c.DefaultRole, &c.RoleClaim, &c.GroupClaim, &allow, &roleMapJ, &c.UpdatedAt, &c.UpdatedBy, &c.Version)
+			&scopes, &c.DefaultRole, &c.RoleClaim, &c.GroupClaim, &allow, &roleMapJ, &c.UpdatedAt, &c.UpdatedBy, &c.Version, &autoLogin)
 	if errors.Is(err, sql.ErrNoRows) {
 		return SSOProviderConfig{}, false, nil
 	}
@@ -55,6 +58,7 @@ func (s *SQLStore) GetSSOProviderConfig(ctx context.Context, provider string) (S
 	}
 	c.Enabled = enabled != 0
 	c.AllowLocalLogin = allow != 0
+	c.AutoLogin = autoLogin != 0
 	if strings.TrimSpace(scopes) != "" {
 		c.Scopes = strings.Fields(scopes)
 	}
@@ -73,12 +77,15 @@ func (s *SQLStore) SaveSSOProviderConfig(ctx context.Context, c SSOProviderConfi
 		return errors.New("provider is required")
 	}
 	c.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
-	enabled, allow := 0, 0
+	enabled, allow, autoLogin := 0, 0, 0
 	if c.Enabled {
 		enabled = 1
 	}
 	if c.AllowLocalLogin {
 		allow = 1
+	}
+	if c.AutoLogin {
+		autoLogin = 1
 	}
 	roleMapJ := ""
 	if len(c.RoleMap) > 0 {
@@ -109,19 +116,19 @@ func (s *SQLStore) SaveSSOProviderConfig(ctx context.Context, c SSOProviderConfi
 	if !found {
 		result, err = tx.ExecContext(ctx, s.bind(`INSERT INTO sso_provider_config
 		(provider, enabled, issuer_url, client_id, client_secret_enc, redirect_uri, scopes,
-		 default_role, role_claim, group_claim, allow_local_login, role_map, updated_at, updated_by, version)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(provider) DO NOTHING`),
+		 default_role, role_claim, group_claim, allow_local_login, role_map, updated_at, updated_by, version, auto_login)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(provider) DO NOTHING`),
 			c.Provider, enabled, c.IssuerURL, c.ClientID, c.ClientSecretEnc, c.RedirectURI,
-			strings.Join(c.Scopes, " "), c.DefaultRole, c.RoleClaim, c.GroupClaim, allow, roleMapJ, c.UpdatedAt, c.UpdatedBy, c.Version)
+			strings.Join(c.Scopes, " "), c.DefaultRole, c.RoleClaim, c.GroupClaim, allow, roleMapJ, c.UpdatedAt, c.UpdatedBy, c.Version, autoLogin)
 	} else {
 		result, err = tx.ExecContext(ctx, s.bind(`UPDATE sso_provider_config SET
 			enabled = ?, issuer_url = ?, client_id = ?, client_secret_enc = ?, redirect_uri = ?,
 			scopes = ?, default_role = ?, role_claim = ?, group_claim = ?, allow_local_login = ?,
-			role_map = ?, updated_at = ?, updated_by = ?, version = ?
+			role_map = ?, updated_at = ?, updated_by = ?, version = ?, auto_login = ?
 			WHERE provider = ? AND version = ?`),
 			enabled, c.IssuerURL, c.ClientID, c.ClientSecretEnc, c.RedirectURI,
 			strings.Join(c.Scopes, " "), c.DefaultRole, c.RoleClaim, c.GroupClaim, allow,
-			roleMapJ, c.UpdatedAt, c.UpdatedBy, c.Version, c.Provider, oldVersion)
+			roleMapJ, c.UpdatedAt, c.UpdatedBy, c.Version, autoLogin, c.Provider, oldVersion)
 	}
 	if err != nil {
 		return err

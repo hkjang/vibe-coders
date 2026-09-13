@@ -606,6 +606,10 @@ export type SsoExchangeRequest = {
 
 export type SsoStatusResponse = {
     allow_local_login: boolean;
+    /**
+     * True when the console should attempt a silent (prompt=none) Keycloak sign-in before rendering the login screen.
+     */
+    auto_login?: boolean;
     keycloak_enabled: boolean;
     login_url: string;
 };
@@ -644,6 +648,10 @@ export type StatusResponse = {
 export type UiAuthentication = {
     allow_local_login: boolean;
     authenticated: boolean;
+    /**
+     * True when the console should attempt a silent (prompt=none) Keycloak sign-in before rendering the login screen.
+     */
+    auto_login?: boolean;
     credential_prefixes?: Array<string>;
     enabled: boolean;
     keycloak_enabled: boolean;

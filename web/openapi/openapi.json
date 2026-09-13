@@ -2453,6 +2453,10 @@
           "allow_local_login": {
             "type": "boolean"
           },
+          "auto_login": {
+            "description": "True when the console should attempt a silent (prompt=none) Keycloak sign-in before rendering the login screen.",
+            "type": "boolean"
+          },
           "keycloak_enabled": {
             "type": "boolean"
           },
@@ -2577,6 +2581,10 @@
             "type": "boolean"
           },
           "authenticated": {
+            "type": "boolean"
+          },
+          "auto_login": {
+            "description": "True when the console should attempt a silent (prompt=none) Keycloak sign-in before rendering the login screen.",
             "type": "boolean"
           },
           "credential_prefixes": {

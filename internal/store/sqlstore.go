@@ -2013,6 +2013,7 @@ func migrationStatements() []string {
 			nonce TEXT NOT NULL DEFAULT '',
 			verifier TEXT NOT NULL DEFAULT '',
 			return_to TEXT NOT NULL DEFAULT '/admin',
+			silent INTEGER NOT NULL DEFAULT 0,
 			created_at TEXT NOT NULL
 		)`,
 		`CREATE TABLE IF NOT EXISTS oidc_login_exchanges (
@@ -2262,11 +2263,16 @@ func migrationStatements() []string {
 			role_map TEXT NOT NULL DEFAULT '',
 			updated_at TEXT NOT NULL DEFAULT '',
 			updated_by TEXT NOT NULL DEFAULT '',
-			version INTEGER NOT NULL DEFAULT 1
+			version INTEGER NOT NULL DEFAULT 1,
+			auto_login INTEGER NOT NULL DEFAULT 0
 		)`,
 		`ALTER TABLE sso_provider_config ADD COLUMN role_map TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE sso_provider_config ADD COLUMN version INTEGER NOT NULL DEFAULT 1`,
+		`ALTER TABLE sso_provider_config ADD COLUMN auto_login INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE oidc_flow_states ADD COLUMN return_to TEXT NOT NULL DEFAULT '/admin'`,
+		// silent marks a prompt=none attempt so the callback can tell a provider's
+		// "no session" answer apart from a real login failure.
+		`ALTER TABLE oidc_flow_states ADD COLUMN silent INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE workflow_runs ADD COLUMN trace_id TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE ai_app_runs ADD COLUMN trace_id TEXT NOT NULL DEFAULT ''`,
 		// Agent Routes: operator-defined virtual models that run an agentic loop over pinned

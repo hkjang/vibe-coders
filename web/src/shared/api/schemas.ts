@@ -74,6 +74,8 @@ export const ssoStatusSchema = z.object({
   keycloak_enabled: z.boolean(),
   allow_local_login: z.boolean(),
   login_url: z.string(),
+  // Optional so an older gateway without silent SSO still bootstraps; absent means off.
+  auto_login: z.boolean().optional(),
 }) satisfies z.ZodType<GeneratedSsoStatusResponse>;
 
 export const logoutResponseSchema = z.object({
@@ -158,6 +160,7 @@ export const uiBootstrapSchema = z.object({
     mode: z.enum(["open", "session", "legacy_token"]),
     keycloak_enabled: z.boolean(),
     allow_local_login: z.boolean(),
+    auto_login: z.boolean().optional(),
     sso_login_url: z.string(),
     credential_prefixes: z.array(utf8BoundedString(512)).max(64).optional(),
   }),

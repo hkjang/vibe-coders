@@ -19,6 +19,8 @@ import (
 	"sync"
 	"time"
 	"unicode"
+
+	"vibe-coders/internal/store"
 )
 
 // ── OIDC discovery + JWKS caches (process-wide; single issuer expected) ──────────
@@ -391,7 +393,10 @@ type oidcFlowState struct {
 	nonce    string
 	verifier string
 	returnTo string
-	created  time.Time
+	// silent records a prompt=none attempt so the callback can route the provider's
+	// "no session" answer to the login screen without treating it as a failure.
+	silent  bool
+	created time.Time
 	// persisted distinguishes a durable DB mirror from the only copy retained after a failed
 	// DB save. A normal DB miss must never resurrect a durable flow already consumed by a pod.
 	persisted bool
@@ -429,11 +434,11 @@ func takeFlowState(state string) (oidcFlowState, bool) {
 
 // saveOIDCFlow persists the login-flow state in the DB (durable across restarts and shared across
 // instances) and mirrors it in the in-memory map as a fallback for the single-instance/no-DB case.
-func (s *Server) saveOIDCFlow(ctx context.Context, state, nonce, verifier, returnTo string) {
+func (s *Server) saveOIDCFlow(ctx context.Context, state, nonce, verifier, returnTo string, silent bool) {
 	now := time.Now()
-	fs := oidcFlowState{nonce: nonce, verifier: verifier, returnTo: returnTo, created: now}
+	fs := oidcFlowState{nonce: nonce, verifier: verifier, returnTo: returnTo, silent: silent, created: now}
 	if s.db != nil {
-		if err := s.db.SaveOIDCFlowState(ctx, state, nonce, verifier, returnTo, now.UTC()); err != nil {
+		if err := s.db.SaveOIDCFlowState(ctx, state, store.OIDCFlowState{Nonce: nonce, Verifier: verifier, ReturnTo: returnTo, Silent: silent}, now.UTC()); err != nil {
 			slog.Warn("persist oidc flow state failed; relying on in-memory state", "error", err)
 		} else {
 			fs.persisted = true
@@ -447,7 +452,7 @@ func (s *Server) saveOIDCFlow(ctx context.Context, state, nonce, verifier, retur
 // write had failed).
 func (s *Server) takeOIDCFlow(ctx context.Context, state string) (oidcFlowState, bool) {
 	if s.db != nil {
-		if nonce, verifier, returnTo, found, err := s.db.TakeOIDCFlowState(ctx, state); err != nil {
+		if durable, found, err := s.db.TakeOIDCFlowState(ctx, state); err != nil {
 			slog.Warn("read oidc flow state failed", "error", err)
 			// Fail closed for a state that was successfully persisted: another pod might have
 			// consumed it before this read failed. Only a state whose DB save failed is safe to
@@ -459,7 +464,7 @@ func (s *Server) takeOIDCFlow(ctx context.Context, state string) (oidcFlowState,
 			return fs, true
 		} else if found {
 			_, _ = takeFlowState(state) // clear any mirrored in-memory copy
-			return oidcFlowState{nonce: nonce, verifier: verifier, returnTo: returnTo, created: time.Now()}, true
+			return oidcFlowState{nonce: durable.Nonce, verifier: durable.Verifier, returnTo: durable.ReturnTo, silent: durable.Silent, created: time.Now()}, true
 		} else {
 			// A healthy DB miss means another pod already consumed (or pruned) any durable row.
 			// Remove its mirror without returning it. Only a failed DB save has no durable copy

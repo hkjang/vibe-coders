@@ -154,7 +154,31 @@ func (s *Server) handleSSOStatus(w http.ResponseWriter, r *http.Request) {
 		"keycloak_enabled":  kc.Enabled,
 		"allow_local_login": !kc.Enabled || kc.AllowLocalLogin,
 		"login_url":         "/auth/keycloak/login",
+		// Published so the console knows whether to try a silent sign-in before it
+		// renders the login screen.
+		"auto_login": kc.Enabled && kc.AutoLogin,
 	})
+}
+
+// silentSsoParam is the query marker the callback leaves on the login URL when a
+// prompt=none attempt came back without a session. The console never retries while it
+// is present, so a visitor whose browser storage was wiped still cannot be bounced in a loop.
+const silentSsoParam = "sso"
+
+// silentSsoLoginRedirect is where a silent attempt lands when the provider declines it:
+// the console login screen, carrying the refusal marker and the original destination so a
+// deep link survives the detour. A non-console return path (the legacy /admin UI) gets the
+// marker appended directly because it has no separate login route.
+func silentSsoLoginRedirect(returnTo, outcome string) string {
+	q := url.Values{}
+	q.Set(silentSsoParam, outcome)
+	if !strings.HasPrefix(returnTo, "/app/") {
+		return returnTo + "?" + q.Encode()
+	}
+	if returnTo != "/app/" && returnTo != "/app/login" && !strings.HasPrefix(returnTo, "/app/login?") {
+		q.Set("return_to", returnTo)
+	}
+	return "/app/login?" + q.Encode()
 }
 
 // handleKeycloakLogin starts the Authorization Code + PKCE flow and redirects to Keycloak.
@@ -195,7 +219,12 @@ func (s *Server) handleKeycloakLogin(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusServiceUnavailable, "secure PKCE generation failed", "server_error", "entropy_unavailable")
 		return
 	}
-	s.saveOIDCFlow(r.Context(), state, nonce, verifier, returnTo)
+	// prompt=none asks Keycloak to answer from an existing session only and never renders a
+	// screen: either a code comes straight back or error=login_required does. It is honoured
+	// only while the administrator has enabled auto_login, so a URL alone cannot switch the
+	// flow; otherwise the request quietly proceeds as an ordinary login.
+	silent := r.URL.Query().Get("prompt") == "none" && kc.AutoLogin
+	s.saveOIDCFlow(r.Context(), state, nonce, verifier, returnTo, silent)
 	s.setTransientAuthCookie(w, oidcStateCookieName, state, "/auth/keycloak/callback", 600, http.SameSiteLaxMode)
 
 	q := url.Values{}
@@ -207,6 +236,9 @@ func (s *Server) handleKeycloakLogin(w http.ResponseWriter, r *http.Request) {
 	q.Set("nonce", nonce)
 	q.Set("code_challenge", pkceChallenge(verifier))
 	q.Set("code_challenge_method", "S256")
+	if silent {
+		q.Set("prompt", "none")
+	}
 	http.Redirect(w, r, disc.AuthorizationEndpoint+"?"+q.Encode(), http.StatusFound)
 }
 
@@ -259,6 +291,29 @@ func (s *Server) handleKeycloakCallback(w http.ResponseWriter, r *http.Request) 
 		returnTo = target
 	}
 	if providerError := r.URL.Query().Get("error"); providerError != "" {
+		if fs.silent {
+			// A prompt=none attempt that found no provider session is the ordinary "not
+			// signed in" answer, not a failure: show the login screen and leave the marker
+			// that stops the console from trying again. Any other refusal of a silent
+			// attempt lands on the same screen with the sanitized code visible, so the
+			// visitor sees what happened and the console still does not retry.
+			switch providerError {
+			case "login_required", "interaction_required", "consent_required":
+				http.Redirect(w, r, silentSsoLoginRedirect(returnTo, "none"), http.StatusFound)
+			default:
+				// Same allowlist as the ordinary path below: never reflect a provider-chosen
+				// string, and never let it impersonate one of our internal codes.
+				code := keycloakCallbackErrorProvider
+				if providerError == "access_denied" || providerError == "temporarily_unavailable" {
+					code = providerError
+				}
+				s.auditAuthEvent(r.Context(), "sso_login_failed", "", "", "", "keycloak code="+code+" silent=true")
+				fragment := url.Values{}
+				fragment.Set("kc_error", code)
+				http.Redirect(w, r, silentSsoLoginRedirect(returnTo, "error")+"#"+fragment.Encode(), http.StatusFound)
+			}
+			return
+		}
 		// Never reflect the provider-controlled error_description into a redirect URL.
 		// A small allowlist preserves actionable cancellation/availability outcomes.
 		switch providerError {
@@ -921,6 +976,7 @@ func (s *Server) handleKeycloakConfig(w http.ResponseWriter, r *http.Request) {
 		"role_claim":        kc.RoleClaim,
 		"group_claim":       kc.GroupClaim,
 		"allow_local_login": kc.AllowLocalLogin,
+		"auto_login":        kc.AutoLogin,
 		"role_map":          s.effectiveKeycloakRoleMap(),
 		"role_map_default":  keycloakRoleMap,
 		"role_map_custom":   len(kc.RoleMap) > 0,
@@ -958,6 +1014,7 @@ func (s *Server) handleKeycloakConfigSave(w http.ResponseWriter, r *http.Request
 		RoleClaim       string            `json:"role_claim"`
 		GroupClaim      string            `json:"group_claim"`
 		AllowLocalLogin bool              `json:"allow_local_login"`
+		AutoLogin       bool              `json:"auto_login"`
 		RoleMap         map[string]string `json:"role_map"` // nil/omitted = keep existing; {} = reset to defaults
 		ExpectedVersion *int              `json:"expected_version"`
 	}
@@ -1014,6 +1071,7 @@ func (s *Server) handleKeycloakConfigSave(w http.ResponseWriter, r *http.Request
 		RoleClaim:       strings.TrimSpace(p.RoleClaim),
 		GroupClaim:      strings.TrimSpace(p.GroupClaim),
 		AllowLocalLogin: p.AllowLocalLogin,
+		AutoLogin:       p.AutoLogin,
 		ClientSecretEnc: prev.ClientSecretEnc, // default: keep the existing encrypted secret
 		RoleMap:         prev.RoleMap,         // default: keep existing custom map
 		Version:         prev.Version,

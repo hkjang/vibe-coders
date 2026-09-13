@@ -42,6 +42,7 @@ export function SsoTab({ hasAdminWrite }: { hasAdminWrite: boolean }): React.JSX
           role_claim: input.roleClaim,
           group_claim: input.groupClaim,
           allow_local_login: input.allowLocalLogin,
+          auto_login: input.autoLogin,
           role_map: input.resetRoleMap ? {} : input.roleMap,
           // Omitted keeps the stored secret; "" clears it.
           ...(input.clearSecret
@@ -159,7 +160,8 @@ export function SsoTab({ hasAdminWrite }: { hasAdminWrite: boolean }): React.JSX
       >
         {draft ? (
           <p>
-            SSO {draft.enabled ? "사용" : "미사용"} · 로컬 로그인 {draft.allowLocalLogin ? "허용" : "차단"}
+            SSO {draft.enabled ? "사용" : "미사용"} · 로컬 로그인 {draft.allowLocalLogin ? "허용" : "차단"} ·
+            자동 로그인 {draft.autoLogin ? "켬" : "끔"}
             {draft.resetRoleMap ? " · Role 매핑 기본값으로 초기화" : ""}
             {draft.clearSecret
               ? " · 저장된 Client Secret 삭제"

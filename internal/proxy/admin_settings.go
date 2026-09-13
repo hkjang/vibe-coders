@@ -266,6 +266,7 @@ func buildSettingRegistry() []settingDef {
 		{Key: "env.sso_keycloak_role_claim", Category: "env.sso", Type: stString, ReadOnly: true, envValue: func(c config.Config) string { return c.Keycloak.RoleClaim }},
 		{Key: "env.sso_keycloak_group_claim", Category: "env.sso", Type: stString, ReadOnly: true, envValue: func(c config.Config) string { return c.Keycloak.GroupClaim }},
 		{Key: "env.sso_keycloak_allow_local_login", Category: "env.sso", Type: stBool, ReadOnly: true, envValue: func(c config.Config) string { return strconv.FormatBool(c.Keycloak.AllowLocalLogin) }},
+		{Key: "env.sso_keycloak_auto_login", Category: "env.sso", Type: stBool, ReadOnly: true, envValue: func(c config.Config) string { return strconv.FormatBool(c.Keycloak.AutoLogin) }},
 	}
 	return append(registry, appUIFeatureSettingDefs()...)
 }
@@ -417,6 +418,7 @@ var settingDescriptions = map[string]string{
 	"env.sso_keycloak_role_claim":        "역할을 읽어올 토큰 클레임 이름(KEYCLOAK_ROLE_CLAIM).",
 	"env.sso_keycloak_group_claim":       "그룹/팀을 읽어올 토큰 클레임 이름(KEYCLOAK_GROUP_CLAIM).",
 	"env.sso_keycloak_allow_local_login": "SSO와 함께 로컬 ID/PW 로그인도 허용할지(KEYCLOAK_ALLOW_LOCAL_LOGIN). 끄면 SSO 장애 시 관리자도 로그인할 수 없습니다.",
+	"env.sso_keycloak_auto_login":        "Keycloak 세션이 살아 있으면 /app 콘솔이 로그인 화면 없이 조용히 로그인할지(SSO_KEYCLOAK_AUTO_LOGIN, prompt=none). 기본 꺼짐. DB 기반 SSO 설정 화면이 이 값을 덮어쓸 수 있습니다.",
 }
 
 // t2sConf returns the effective Text2SQL config (admin-settings overlay over env/default).

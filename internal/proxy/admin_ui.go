@@ -15131,6 +15131,7 @@ const adminHTML = `<!doctype html>
         ti('sso-role-claim', 'Role Claim', c.role_claim, 'realm_access.roles') +
         ti('sso-group-claim', 'Group Claim', c.group_claim, 'groups') +
         '<label style="display:block;margin:6px 0"><input type="checkbox" id="sso-allow-local"' + (c.allow_local_login ? ' checked' : '') + '> 로컬 로그인 허용 (fallback)</label>' +
+        '<label style="display:block;margin:6px 0"><input type="checkbox" id="sso-auto-login"' + (c.auto_login ? ' checked' : '') + '> 자동 로그인 (Keycloak 세션이 있으면 /app 콘솔이 로그인 화면 없이 진입, prompt=none)</label>' +
         '<p class="muted" style="font-size:11px;margin-top:8px">' + escapeHTML(c.note || '') + '</p>' +
         '<div style="margin-top:10px"><button type="button" id="sso-save-btn">저장 (DB)</button> ' +
           '<button type="button" id="sso-test-btn">연결 테스트</button></div>' +
@@ -15168,6 +15169,7 @@ const adminHTML = `<!doctype html>
           role_claim: v('sso-role-claim'),
           group_claim: v('sso-group-claim'),
           allow_local_login: chk('sso-allow-local'),
+          auto_login: chk('sso-auto-login'),
         };
         // Only send client_secret when re-entered or explicitly clearing; otherwise keep existing.
         const sec = v('sso-client-secret');

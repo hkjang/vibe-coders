@@ -139,6 +139,8 @@ export interface KeycloakConfigBody {
   role_claim?: string;
   group_claim?: string;
   allow_local_login: boolean;
+  /** Silent (prompt=none) sign-in from the console when a Keycloak session exists. */
+  auto_login: boolean;
   /** Omitted keeps the stored secret; "" clears it. Never read back from the server. */
   client_secret?: string;
   role_map?: Record<string, string>;

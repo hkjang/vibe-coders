@@ -61,7 +61,11 @@ type KeycloakConfig struct {
 	RoleClaim       string   // dotted path to roles, e.g. realm_access.roles
 	GroupClaim      string   // claim holding group paths, e.g. groups
 	AllowLocalLogin bool
-	RoleMap         map[string]string // Keycloak role → internal role; nil = use built-in defaults
+	// AutoLogin lets the /app console sign a visitor in silently (OIDC prompt=none) when the
+	// Keycloak session is still alive. Off by default: the server downgrades a prompt=none
+	// request to an ordinary login while this is false, so a URL alone cannot change the flow.
+	AutoLogin bool
+	RoleMap   map[string]string // Keycloak role → internal role; nil = use built-in defaults
 }
 
 // MCPConfig parameterizes the MCP discovery / grounding virtual models (vibe/grounded,
@@ -516,6 +520,7 @@ func Load() (Config, error) {
 			RoleClaim:       getEnv("SSO_KEYCLOAK_ROLE_CLAIM", "realm_access.roles"),
 			GroupClaim:      getEnv("SSO_KEYCLOAK_GROUP_CLAIM", "groups"),
 			AllowLocalLogin: boolEnv("SSO_KEYCLOAK_ALLOW_LOCAL_LOGIN", true),
+			AutoLogin:       boolEnv("SSO_KEYCLOAK_AUTO_LOGIN", false),
 		},
 		Secret: SecretConfig{
 			GatewaySecret: getEnv("GATEWAY_SECRET", DefaultGatewaySecret),

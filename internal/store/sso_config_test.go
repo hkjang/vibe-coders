@@ -43,3 +43,28 @@ func TestSSOProviderConfigRequiresVersionCAS(t *testing.T) {
 		t.Fatalf("latest config = %+v found=%v err=%v", latest, found, err)
 	}
 }
+
+func TestSSOProviderConfigRoundTripsAutoLogin(t *testing.T) {
+	db := openAggTestStore(t)
+	defer db.Close()
+	ctx := context.Background()
+
+	// Off by default: a row saved without the flag must read back as not auto-login.
+	base := SSOProviderConfig{Provider: "keycloak", Enabled: true, IssuerURL: "https://issuer.example/realms/vibe", ClientID: "client"}
+	if err := db.SaveSSOProviderConfig(ctx, base); err != nil {
+		t.Fatal(err)
+	}
+	current, found, err := db.GetSSOProviderConfig(ctx, "keycloak")
+	if err != nil || !found || current.AutoLogin {
+		t.Fatalf("default config = %+v found=%v err=%v, want auto_login off", current, found, err)
+	}
+
+	current.AutoLogin = true
+	if err := db.SaveSSOProviderConfig(ctx, current); err != nil {
+		t.Fatal(err)
+	}
+	updated, _, err := db.GetSSOProviderConfig(ctx, "keycloak")
+	if err != nil || !updated.AutoLogin {
+		t.Fatalf("updated config = %+v err=%v, want auto_login on", updated, err)
+	}
+}

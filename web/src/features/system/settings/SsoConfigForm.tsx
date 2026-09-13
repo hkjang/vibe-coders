@@ -23,6 +23,7 @@ export interface SsoSaveInput {
   roleClaim: string;
   groupClaim: string;
   allowLocalLogin: boolean;
+  autoLogin: boolean;
   roleMap: Record<string, string>;
   resetRoleMap: boolean;
 }
@@ -71,6 +72,7 @@ export function SsoConfigForm({
   const [roleClaim, setRoleClaim] = useState(config.role_claim ?? "");
   const [groupClaim, setGroupClaim] = useState(config.group_claim ?? "");
   const [allowLocalLogin, setAllowLocalLogin] = useState(config.allow_local_login !== false);
+  const [autoLogin, setAutoLogin] = useState(config.auto_login === true);
   const [roleMap, setRoleMap] = useState<RoleMapRow[]>(() =>
     Object.entries(config.role_map ?? {}).map(([keycloakRole, internalRole]) => ({
       id: nextRowId(),
@@ -101,6 +103,7 @@ export function SsoConfigForm({
       roleClaim: roleClaim.trim(),
       groupClaim: groupClaim.trim(),
       allowLocalLogin,
+      autoLogin,
       roleMap: map,
       resetRoleMap,
     };
@@ -123,6 +126,12 @@ export function SsoConfigForm({
           label="로컬 로그인 허용"
           onCheckedChange={setAllowLocalLogin}
         />
+        <Switch
+          checked={autoLogin}
+          disabled={!hasAdminWrite}
+          label="자동 로그인"
+          onCheckedChange={setAutoLogin}
+        />
         {enabled ? <Badge tone="success">활성</Badge> : <Badge tone="muted">비활성</Badge>}
       </div>
 
@@ -131,6 +140,16 @@ export function SsoConfigForm({
           Keycloak 연결이 끊기면 관리자도 로그인할 수 없습니다. 연결 테스트가 성공한 뒤에 끄세요.
         </InlineNotice>
       )}
+
+      {autoLogin ? (
+        <InlineNotice
+          tone="info"
+          title="자동 로그인은 Keycloak 세션이 살아 있는 사용자를 로그인 화면 없이 들여보냅니다."
+        >
+          콘솔이 탭마다 한 번만 prompt=none 으로 조용히 시도하고, 세션이 없으면 평소처럼 로그인 화면을 보여
+          줍니다. 로그아웃한 사용자는 다시 로그인하기 전까지 자동으로 들어오지 않습니다.
+        </InlineNotice>
+      ) : null}
 
       <FormField label="Issuer URL" description="예: https://keycloak.example.com/realms/main">
         {(control) => (
