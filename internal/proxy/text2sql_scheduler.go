@@ -53,6 +53,7 @@ func (s *Server) runScheduledReport(ctx context.Context, rep store.Text2SQLSaved
 	validation := text2sql.ValidateSQL(rep.SQL, text2sql.ValidateOptions{DefaultLimit: cfg.DefaultLimit, MaxLimit: cfg.MaxLimit})
 	if !validation.OK {
 		slog.Warn("scheduled report SQL failed validation", "report", rep.Name, "reason", validation.Reason)
+		s.mailReportFailed(ctx, rep, "SQL 검증 실패: "+validation.Reason)
 		if rep.DeliverMattermost {
 			s.notifyMattermost(ctx, "text2sql_report", fmt.Sprintf("리포트 '%s' 실행 보류: SQL 검증 실패(%s)", rep.Name, validation.Reason))
 		}
@@ -70,6 +71,7 @@ func (s *Server) runScheduledReport(ctx context.Context, rep store.Text2SQLSaved
 	_, _, rowCount, execErr := executeReadOnlyQuery(ctx, db, cfg.ExecDriver, validation.SQL, rowCap, cfg.StatementTimeout, cfg.WorkMem)
 	if execErr != nil {
 		slog.Warn("scheduled report execution failed", "report", rep.Name, "error", execErr)
+		s.mailReportFailed(ctx, rep, execErr.Error())
 		if rep.DeliverMattermost {
 			s.notifyMattermost(ctx, "text2sql_report", fmt.Sprintf("리포트 '%s' 실행 실패: %s", rep.Name, execErr.Error()))
 		}

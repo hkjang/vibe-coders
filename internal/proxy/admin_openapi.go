@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	"vibe-coders/internal/mail"
 	"vibe-coders/internal/tracking"
 )
 
@@ -438,6 +439,9 @@ var apiEndpoints = []apiEndpoint{
 	{"/admin/tracking/violations/allow", []string{"post"}, "settings", "Add one blocked origin to tracking.allowed_hosts", false},
 	{"/tracking/csp-report", []string{"post"}, "ops", "Content-Security-Policy violation reports from browsers (unauthenticated; accepted only while tracking is on)", false},
 	{"/momento/{path}", []string{"get", "post"}, "ops", "Same-origin proxy to the Momento collector (only while tracking.provider=momento and tracking.momento_proxy is on)", false},
+	// ---- mail notifications (SMTP relay; settings live in the "mail" category) ----
+	{"/admin/mail/deliveries", []string{"get"}, "settings", "Mail notification status and the delivery log (newest first; ?status=sent|failed|queued&limit=)", false},
+	{"/admin/mail/test", []string{"post"}, "settings", "Send one test mail with the saved SMTP settings and report the outcome", false},
 	// ---- admin: Text2SQL registry ----
 	{"/admin/text2sql/connections", []string{"get", "post", "delete"}, "text2sql", "Manage Text2SQL DB connections", false},
 	{"/admin/text2sql/registry/export", []string{"get"}, "text2sql", "Export the Text2SQL schema registry", false},
@@ -663,6 +667,13 @@ func enrichOpenAPIOperation(route, method string, op map[string]any) {
 	case "post /tracking/csp-report":
 		responses["204"] = map[string]any{"description": "Report recorded"}
 		responses["404"] = map[string]any{"description": "Tracking is off"}
+	case "get /admin/mail/deliveries":
+		responses["200"] = successResponse("MailDeliveriesResponse")
+	case "post /admin/mail/test":
+		op["requestBody"] = requestBody("MailTestRequest")
+		responses["200"] = successResponse("MailTestResponse")
+		responses["400"] = map[string]any{"description": "Mail is off, the settings are incomplete, or the recipient is not an address", "content": map[string]any{"application/json": map[string]any{"schema": schemaRef("MailTestResponse")}}}
+		responses["502"] = map[string]any{"description": "The relay refused or did not answer", "content": map[string]any{"application/json": map[string]any{"schema": schemaRef("MailTestResponse")}}}
 	case "put /admin/settings/by-key/{key}":
 		op["requestBody"] = requestBody("SettingWriteRequest")
 		responses["200"] = successResponse("AdminSettingView")
@@ -842,6 +853,27 @@ func appUIOpenAPISchemas() map[string]any {
 			"error": map[string]any{"type": "string", "description": "What the chosen provider is still missing; absent when the configuration is complete."},
 		}},
 		"TrackingAllowRequest": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"origin"}, "properties": map[string]any{"origin": map[string]any{"type": "string", "description": "An http(s) origin such as https://cdn.example"}}},
+		"MailDelivery": map[string]any{"type": "object", "required": []string{"id", "event", "recipient", "subject", "status", "attempts", "created_at", "updated_at"}, "properties": map[string]any{
+			"id": map[string]any{"type": "string"}, "event": map[string]any{"type": "string", "enum": []string{mail.EventApprovalRequested, mail.EventApprovalDecided, mail.EventKeyBlocked, mail.EventReportFailed, mail.EventTest}},
+			"recipient": map[string]any{"type": "string"}, "subject": map[string]any{"type": "string"}, "subject_id": map[string]any{"type": "string", "description": "What the mail was about: an approval id, an API key id, a report id."},
+			"actor_id": map[string]any{"type": "string"}, "status": map[string]any{"type": "string", "enum": []string{mail.StatusQueued, mail.StatusSent, mail.StatusFailed}},
+			"attempts": map[string]any{"type": "integer", "minimum": 0}, "error_message": map[string]any{"type": "string"},
+			"created_at": map[string]any{"type": "string", "format": "date-time"}, "updated_at": map[string]any{"type": "string", "format": "date-time"},
+		}},
+		"MailDeliveriesResponse": map[string]any{"type": "object", "required": []string{"enabled", "ready", "smtp_host", "smtp_port", "security", "username_set", "password_set", "from", "base_url", "events", "deliveries"}, "properties": map[string]any{
+			"enabled": map[string]any{"type": "boolean"}, "ready": map[string]any{"type": "boolean", "description": "True when mail is on and the relay settings are complete."},
+			"smtp_host": map[string]any{"type": "string"}, "smtp_port": map[string]any{"type": "integer"}, "security": map[string]any{"type": "string", "enum": mail.Securities},
+			"username_set": map[string]any{"type": "boolean"}, "password_set": map[string]any{"type": "boolean", "description": "The password itself is never returned."},
+			"from": map[string]any{"type": "string"}, "base_url": map[string]any{"type": "string"},
+			"events": map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "boolean"}, "description": "Per-event switches keyed by setting name (mail.notify_*)."},
+			"error":  map[string]any{"type": "string", "description": "What the relay settings are still missing; absent when complete."},
+			"counts": map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "integer"}}, "total": map[string]any{"type": "integer"},
+			"deliveries": map[string]any{"type": "array", "items": schemaRef("MailDelivery")},
+		}},
+		"MailTestRequest": map[string]any{"type": "object", "additionalProperties": false, "properties": map[string]any{"recipient": map[string]any{"type": "string", "description": "Where to send the test mail; defaults to the signed-in operator's address."}}},
+		"MailTestResponse": map[string]any{"type": "object", "required": []string{"sent", "recipient"}, "properties": map[string]any{
+			"sent": map[string]any{"type": "boolean"}, "recipient": map[string]any{"type": "string"}, "error": map[string]any{"type": "string"},
+		}},
 		"SettingWriteRequest": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"value"}, "properties": map[string]any{
 			"value": map[string]any{"type": "string"}, "reason": map[string]any{"type": "string"}, "expected_version": map[string]any{"type": "integer", "minimum": 0},
 		}},

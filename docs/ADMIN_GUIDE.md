@@ -206,6 +206,46 @@ Keycloak(또는 같은 realm 을 쓰는 ReSSO)에 이미 로그인한 사람이 
 
 > 로그인 화면(`/app/login`)도 `/app` 콘솔의 일부라 스니펫이 붙습니다. 개인 식별 값을 보내지 않는 provider 설정을 쓰고, 자격 증명을 다루는 화면에서 추가 이벤트를 심지 마세요.
 
+### 3.7 메일 알림 (사내 SMTP 릴레이)
+
+사람이 실제로 기다리는 일 네 가지를 사내 SMTP 릴레이로 알립니다. 기본값은 **꺼짐**이라 새로 설치한 곳에서는 아무것도 달라지지 않습니다. 릴레이 주소로 사내 `postra` 를 가리키면 알림이 밖으로 나가지 않습니다.
+
+| 이벤트 | 누구에게 | 언제 | 스위치 |
+|---|---|---|---|
+| `approval.requested` | 활성 `admin`·`super_admin` 전원(요청자 제외) | 거버넌스 정책이 요청을 승인 대기로 막았을 때. 15초 안에 몰린 대기는 한 통으로 묶임 | `mail.notify_approval` |
+| `approval.decided` | 요청자 | 관리자가 승인·거절했을 때(승인이면 `X-Governance-Approval-ID` 사용법 포함) | `mail.notify_approval` |
+| `key.blocked` | API 키 소유자 | 쿼터·키 예산 때문에 호출이 거절되기 시작했을 때. **키마다 하루 한 통** | `mail.notify_key_blocked` |
+| `report.failed` | 예약 리포트 작성자 | Text2SQL 예약 리포트가 검증·실행에 실패했을 때. **리포트마다 하루 한 통** | `mail.notify_report` |
+
+설정은 런타임 설정의 `mail` 범주(시스템 설정 → 런타임 설정 → mail)에 있습니다. 이름은 사내 표준(MAIL-STANDARD)과 같습니다.
+
+| 키 | 기본값 | 뜻 |
+|---|---|---|
+| `mail.enabled` | `false` | 꺼짐이 기본. 켜도 아래가 완성되기 전에는 보내지 않고 발송 기록에 이유만 남깁니다 |
+| `mail.smtp_host` | — | 사내 릴레이 주소(예: `relay.corp.example`, `postra`) |
+| `mail.smtp_port` | `25` | 사내 릴레이는 대개 25 |
+| `mail.security` | `auto` | `auto`(서버가 STARTTLS 를 알리면 사용) · `none` · `starttls`(필수) · `tls`(암시적, 465 는 자동) |
+| `mail.skip_tls_verify` | `false` | 사내 인증서가 사설일 때만 |
+| `mail.username` · `mail.password` | 빈 값 | 인증 없는 릴레이가 흔하므로 **선택**. 비밀번호는 암호화 저장되고 API·화면에는 "설정됨"만 보이며 로그에도 남지 않습니다 |
+| `mail.from_address` · `mail.from_name` | `vibe-coders@<smtp_host>` · `vibe-coders` | 보내는 사람 |
+| `mail.base_url` | — | 메일 속 "바로 열기" 링크의 기준 주소(예: `https://gateway.corp.example`). 비우면 링크 생략 |
+| `mail.timeout_seconds` | `10` | 연결·발송 제한 시간 |
+| `mail.notify_approval` · `mail.notify_key_blocked` · `mail.notify_report` | `true` | 이벤트 종류별 스위치 |
+
+동작 원칙:
+
+- **요청을 막지 않습니다.** 메일은 배경에서 보내고 한 번 재시도합니다. 릴레이가 죽어 있어도 승인·요청·리포트는 평소처럼 끝나고, 실패는 발송 기록에만 남습니다.
+- **시도마다 기록합니다.** 성공·실패·대기 전부 `mail_deliveries` 에 남고(본문 제외, 제목·수신자·사유만), 90일이 지나면 자동으로 지워집니다. 재시작 뒤 `queued` 로 남은 행은 종료 시점에 끊긴 것입니다.
+- **사용자 명부를 새로 만들지 않습니다.** 수신자는 계정 id 이고 주소는 `users` 표에서 그때그때 찾습니다. 주소가 없거나 비활성인 계정은 조용히 건너뜁니다.
+- **자기가 한 일은 자기에게 보내지 않습니다.** 관리자가 낸 요청이 승인 대기가 되면 그 관리자에게는 가지 않습니다.
+
+시험 발송과 기록 확인:
+
+1. `/app/system/settings?tab=mail` (메일 알림 탭) 을 엽니다. 상태 카드가 "켜졌지만 미완성" 이면 무엇이 빠졌는지 그 자리에 적혀 있습니다.
+2. 받는 사람을 넣고(비우면 로그인한 관리자 주소) **시험 메일 보내기**를 누릅니다. 결과가 바로 표시되고, 같은 화면의 발송 기록에 한 줄이 남습니다.
+3. API 로는 `POST /admin/mail/test {"recipient":"you@corp.example"}` → `{"sent":true}` / 400(꺼짐·미완성) / 502(릴레이 거절·응답 없음, `error` 에 사유). 기록은 `GET /admin/mail/deliveries?status=failed&limit=50`.
+4. 릴레이가 "서버가 인증을 지원하지 않습니다" 라고 답하면 `mail.username` 을 비웁니다. `STARTTLS 실패` 가 나오면 `mail.security=none` 또는 사설 인증서라면 `mail.skip_tls_verify=true` 를 검토합니다.
+
 ## 4. 계정과 권한
 
 두 가지 인증이 공존합니다. **관리자 토큰**(`ADMIN_TOKEN`)은 기존 `/admin` 콘솔과 `/admin/*` API 용이고, **세션 로그인**(`AUTH_ENABLED=true`)은 새 콘솔 `/app` 용입니다. 역할별 권한은 `internal/proxy/auth.go` 의 `roleScopes` 가 정본입니다.

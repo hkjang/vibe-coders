@@ -27,6 +27,8 @@ import type {
   DeleteAdminTrackingViolationsData,
   GetAdminSsoKeycloakConfigData,
   GetAdminTrackingViolationsData,
+  GetAdminMailDeliveriesData,
+  PostAdminMailTestData,
   PostAdminTrackingViolationsAllowData,
   GetAdminSystemErrorsData,
   PatchAdminKnowledgeIdData,
@@ -71,6 +73,8 @@ import {
   keycloakConfigSchema,
   keycloakTestSchema,
   trackingStatusSchema,
+  mailStatusSchema,
+  mailTestSchema,
   knowledgeListSchema,
   knowledgeSavedSchema,
   migrationSqlSchema,
@@ -300,6 +304,16 @@ export const systemEndpoints = {
       "/admin/tracking/violations/allow",
       trackingStatusSchema,
     ),
+  },
+  // Mail notifications: the relay settings themselves live under the "mail"
+  // settings category; these calls show what left and prove the relay works.
+  mail: {
+    deliveries: operation<GetAdminMailDeliveriesData, unknown>()(
+      "GET",
+      "/admin/mail/deliveries",
+      mailStatusSchema,
+    ),
+    test: operation<PostAdminMailTestData, unknown>()("POST", "/admin/mail/test", mailTestSchema),
   },
   // The operations home the legacy console showed under #/ops-home. Every call here is
   // read-only: index health and migration SQL display DDL for an operator to review, and

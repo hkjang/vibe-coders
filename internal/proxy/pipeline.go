@@ -196,6 +196,7 @@ func (rc *requestPipeline) stepQuota() bool {
 		w.Header().Set("X-Quota-Period-Start", decision.PeriodStart.Format(time.RFC3339))
 		w.Header().Set("X-Quota-Period-End", decision.PeriodEnd.Format(time.RFC3339))
 		s.metrics.IncQuotaBlock()
+		s.mailKeyBlocked(r.Context(), rc.authCtx, "quota exceeded: "+decision.Reason)
 		writeOpenAIError(w, http.StatusTooManyRequests, "quota exceeded: "+decision.Reason, "quota_error", decision.Reason)
 		return false
 	}
@@ -416,6 +417,7 @@ func (rc *requestPipeline) stepCost() bool {
 		}
 		if rc.authCtx != nil && rc.authCtx.BudgetLimitKRW > 0 && est.Priced && est.CostKRW > rc.authCtx.BudgetLimitKRW {
 			_ = s.db.InsertAuditEvent(r.Context(), store.AuthEvent{ID: newID("ae"), EventType: "budget_denied", APIKeyID: rc.authCtx.APIKeyID, TeamID: rc.authCtx.TeamID, IP: clientIP(r), UserAgent: r.UserAgent(), Detail: formatKRW(est.CostKRW) + " > " + formatKRW(rc.authCtx.BudgetLimitKRW), CreatedAt: time.Now().UTC()})
+			s.mailKeyBlocked(r.Context(), rc.authCtx, "estimated cost "+formatKRW(est.CostKRW)+" exceeds the key budget limit "+formatKRW(rc.authCtx.BudgetLimitKRW))
 			writeOpenAIError(w, http.StatusPaymentRequired, "estimated cost exceeds key budget limit", "budget_error", "budget_denied")
 			return false
 		}

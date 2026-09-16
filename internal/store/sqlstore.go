@@ -2350,6 +2350,26 @@ func migrationStatements() []string {
 		// paths that revoke in bulk: every token of a user, and every token of a session.
 		`CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user ON refresh_tokens(user_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_refresh_tokens_session ON refresh_tokens(session_id)`,
+
+		// Mail notifications: one row per attempt so an administrator can answer
+		// "did it go?". No body is stored — subject and recipient are enough, and a
+		// log that carried bodies would itself be a leak. Rows older than the
+		// retention window are dropped when a new one is written.
+		`CREATE TABLE IF NOT EXISTS mail_deliveries (
+			id TEXT PRIMARY KEY,
+			event TEXT NOT NULL,
+			recipient TEXT NOT NULL,
+			subject TEXT NOT NULL DEFAULT '',
+			subject_id TEXT NOT NULL DEFAULT '',
+			actor_id TEXT NOT NULL DEFAULT '',
+			status TEXT NOT NULL DEFAULT 'queued',
+			attempts INTEGER NOT NULL DEFAULT 0,
+			error_message TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_mail_deliveries_created ON mail_deliveries(created_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_mail_deliveries_repeat ON mail_deliveries(event, recipient, subject_id, created_at)`,
 	}
 }
 

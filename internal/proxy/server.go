@@ -27,6 +27,7 @@ import (
 	"vibe-coders/internal/appui"
 	"vibe-coders/internal/audit"
 	"vibe-coders/internal/config"
+	"vibe-coders/internal/mail"
 	"vibe-coders/internal/secret"
 	"vibe-coders/internal/store"
 	"vibe-coders/internal/tracking"
@@ -95,6 +96,8 @@ type Server struct {
 	appUIRuntime    atomic.Pointer[appUIRuntimeConfig]
 	trackingRuntime atomic.Pointer[tracking.Config] // admin-managed visitor tracking (snippet + CSP sources)
 	cspViolations   *tracking.Recorder              // origins the browser refused while tracking is on
+	mailRuntime     atomic.Pointer[mail.Config]     // admin-managed SMTP relay settings + event switches
+	mailer          *mail.Service                   // background event mail; nil only in tests that build a bare Server
 	adminModels     *adminModelCatalogCache
 	trustedProxies  []netip.Prefix
 }
@@ -149,6 +152,9 @@ func NewServer(cfg config.Config, db *store.SQLStore, logger *store.AsyncLogger,
 		trustedProxies: trustedProxies,
 	}
 	server.secrets.Store(secrets)
+	// Mail reads its settings snapshot on every notification, so a settings
+	// change applies without a restart; the users table is its directory.
+	server.mailer = mail.NewService(server.mailConf, db, mailDirectory{db: db}, slog.Default())
 
 	// Build the runtime config snapshot (env defaults overlaid with admin settings)
 	// before starting workers, so workers and handlers see admin-managed values.
@@ -263,6 +269,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/momento/", s.handleMomentoProxy)
 	mux.HandleFunc("/admin/tracking/violations", s.handleTrackingViolations)
 	mux.HandleFunc("/admin/tracking/violations/allow", s.handleTrackingAllow)
+	mux.HandleFunc("/admin/mail/deliveries", s.handleMailDeliveries)
+	mux.HandleFunc("/admin/mail/test", s.handleMailTest)
 	mux.HandleFunc("/favicon.ico", s.handleFavicon)
 	mux.HandleFunc("/health", s.handleHealth)
 	mux.HandleFunc("/ready", s.handleReady)

@@ -1131,6 +1131,177 @@
         ],
         "type": "object"
       },
+      "MailDeliveriesResponse": {
+        "properties": {
+          "base_url": {
+            "type": "string"
+          },
+          "counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object"
+          },
+          "deliveries": {
+            "items": {
+              "$ref": "#/components/schemas/MailDelivery"
+            },
+            "type": "array"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "error": {
+            "description": "What the relay settings are still missing; absent when complete.",
+            "type": "string"
+          },
+          "events": {
+            "additionalProperties": {
+              "type": "boolean"
+            },
+            "description": "Per-event switches keyed by setting name (mail.notify_*).",
+            "type": "object"
+          },
+          "from": {
+            "type": "string"
+          },
+          "password_set": {
+            "description": "The password itself is never returned.",
+            "type": "boolean"
+          },
+          "ready": {
+            "description": "True when mail is on and the relay settings are complete.",
+            "type": "boolean"
+          },
+          "security": {
+            "enum": [
+              "auto",
+              "none",
+              "starttls",
+              "tls"
+            ],
+            "type": "string"
+          },
+          "smtp_host": {
+            "type": "string"
+          },
+          "smtp_port": {
+            "type": "integer"
+          },
+          "total": {
+            "type": "integer"
+          },
+          "username_set": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled",
+          "ready",
+          "smtp_host",
+          "smtp_port",
+          "security",
+          "username_set",
+          "password_set",
+          "from",
+          "base_url",
+          "events",
+          "deliveries"
+        ],
+        "type": "object"
+      },
+      "MailDelivery": {
+        "properties": {
+          "actor_id": {
+            "type": "string"
+          },
+          "attempts": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "error_message": {
+            "type": "string"
+          },
+          "event": {
+            "enum": [
+              "approval.requested",
+              "approval.decided",
+              "key.blocked",
+              "report.failed",
+              "test"
+            ],
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "recipient": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "queued",
+              "sent",
+              "failed"
+            ],
+            "type": "string"
+          },
+          "subject": {
+            "type": "string"
+          },
+          "subject_id": {
+            "description": "What the mail was about: an approval id, an API key id, a report id.",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "event",
+          "recipient",
+          "subject",
+          "status",
+          "attempts",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "MailTestRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "recipient": {
+            "description": "Where to send the test mail; defaults to the signed-in operator's address.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "MailTestResponse": {
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "recipient": {
+            "type": "string"
+          },
+          "sent": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "sent",
+          "recipient"
+        ],
+        "type": "object"
+      },
       "MigrationFeature": {
         "properties": {
           "app_path": {
@@ -6362,6 +6533,108 @@
         "summary": "LLM trace detail",
         "tags": [
           "llm"
+        ]
+      }
+    },
+    "/admin/mail/deliveries": {
+      "get": {
+        "operationId": "get__admin_mail_deliveries",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MailDeliveriesResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Mail notification status and the delivery log (newest first; ?status=sent|failed|queued&limit=)",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/admin/mail/test": {
+      "post": {
+        "operationId": "post__admin_mail_test",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MailTestRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MailTestResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MailTestResponse"
+                }
+              }
+            },
+            "description": "Mail is off, the settings are incomplete, or the recipient is not an address"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MailTestResponse"
+                }
+              }
+            },
+            "description": "The relay refused or did not answer"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Send one test mail with the saved SMTP settings and report the outcome",
+        "tags": [
+          "settings"
         ]
       }
     },

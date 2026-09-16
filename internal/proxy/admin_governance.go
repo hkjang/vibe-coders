@@ -381,6 +381,7 @@ func (s *Server) handleApprovalDecision(w http.ResponseWriter, r *http.Request) 
 	}
 	approval, _, _ = s.db.GetApproval(r.Context(), parts[0])
 	s.auditAdmin(r, "governance.approval."+status, "", auditJSON(approval))
+	s.mailApprovalDecided(r, approval)
 	writeJSON(w, http.StatusOK, map[string]any{"approval": approval})
 }
 

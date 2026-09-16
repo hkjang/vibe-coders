@@ -612,7 +612,9 @@ func (s *Server) governanceApprovalGate(r *http.Request, g governanceContext, re
 		ExpiresAt:   now.Add(24 * time.Hour),
 		CreatedAt:   now,
 	}
-	_ = s.db.InsertApproval(r.Context(), approval)
+	if err := s.db.InsertApproval(r.Context(), approval); err == nil {
+		s.mailApprovalRequested(r.Context(), approval)
+	}
 	return false, approval.ID, "approval required: " + publicReason
 }
 

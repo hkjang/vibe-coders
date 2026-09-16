@@ -209,6 +209,41 @@ export const trackingStatusSchema = looseObject({
   }).nullish(),
 });
 
+export const mailStatusSchema = looseObject({
+  enabled: z.boolean(),
+  ready: z.boolean(),
+  smtp_host: z.string().optional(),
+  smtp_port: numberish.optional(),
+  security: z.string().optional(),
+  username_set: z.boolean().optional(),
+  password_set: z.boolean().optional(),
+  from: z.string().optional(),
+  base_url: z.string().optional(),
+  events: z.record(z.string(), z.boolean()).optional(),
+  error: z.string().optional(),
+  counts: z.record(z.string(), z.number()).optional(),
+  total: z.number().optional(),
+  deliveries: looseList({
+    id: z.string(),
+    event: z.string(),
+    recipient: z.string(),
+    subject: z.string().optional(),
+    subject_id: z.string().optional(),
+    actor_id: z.string().optional(),
+    status: z.string(),
+    attempts: z.number().optional(),
+    error_message: z.string().optional(),
+    created_at: z.string().optional(),
+    updated_at: z.string().optional(),
+  }).nullish(),
+});
+
+export const mailTestSchema = looseObject({
+  sent: z.boolean(),
+  recipient: z.string().optional(),
+  error: z.string().optional(),
+});
+
 export const keycloakTestSchema = looseObject({
   ok: z.boolean().optional(),
   reason: z.string().optional(),
@@ -502,6 +537,8 @@ export type ChangeSetApplyResult = z.output<typeof changeSetApplySchema>;
 export type SystemErrorRow = NonNullable<z.output<typeof systemErrorListSchema>["errors"]>[number];
 export type KeycloakConfig = z.output<typeof keycloakConfigSchema>;
 export type TrackingStatus = z.output<typeof trackingStatusSchema>;
+export type MailStatus = z.output<typeof mailStatusSchema>;
+export type MailDeliveryRow = NonNullable<MailStatus["deliveries"]>[number];
 export type AuditLogRow = NonNullable<z.output<typeof auditLogListSchema>["audit_logs"]>[number];
 export type AuthEventRow = NonNullable<z.output<typeof authEventListSchema>["events"]>[number];
 export type NotificationConfig = z.output<typeof notificationConfigSchema>;

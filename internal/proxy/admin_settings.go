@@ -269,6 +269,7 @@ func buildSettingRegistry() []settingDef {
 		{Key: "env.sso_keycloak_auto_login", Category: "env.sso", Type: stBool, ReadOnly: true, envValue: func(c config.Config) string { return strconv.FormatBool(c.Keycloak.AutoLogin) }},
 	}
 	registry = append(registry, trackingSettingDefs()...)
+	registry = append(registry, mailSettingDefs()...)
 	return append(registry, appUIFeatureSettingDefs()...)
 }
 
@@ -671,6 +672,7 @@ func (s *Server) reloadRuntimeConfig(ctx context.Context) error {
 	s.quotaRuntime.Store(&quota)
 	s.reloadAppUIRuntime(stored)
 	s.reloadTrackingRuntime(stored)
+	s.reloadMailRuntime(stored)
 	audit.SetFallbackPriceModel(pricing.FallbackModel) // apply the runtime fallback model
 	// Apply retention changes to the running worker (day thresholds next run; interval recreates the ticker).
 	if s.retention != nil && prevRet != ret {

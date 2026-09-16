@@ -278,6 +278,69 @@ export type LatencyQuantiles = {
     p99: number;
 };
 
+export type MailDeliveriesResponse = {
+    base_url: string;
+    counts?: {
+        [key: string]: number;
+    };
+    deliveries: Array<MailDelivery>;
+    enabled: boolean;
+    /**
+     * What the relay settings are still missing; absent when complete.
+     */
+    error?: string;
+    /**
+     * Per-event switches keyed by setting name (mail.notify_*).
+     */
+    events: {
+        [key: string]: boolean;
+    };
+    from: string;
+    /**
+     * The password itself is never returned.
+     */
+    password_set: boolean;
+    /**
+     * True when mail is on and the relay settings are complete.
+     */
+    ready: boolean;
+    security: 'auto' | 'none' | 'starttls' | 'tls';
+    smtp_host: string;
+    smtp_port: number;
+    total?: number;
+    username_set: boolean;
+};
+
+export type MailDelivery = {
+    actor_id?: string;
+    attempts: number;
+    created_at: string;
+    error_message?: string;
+    event: 'approval.requested' | 'approval.decided' | 'key.blocked' | 'report.failed' | 'test';
+    id: string;
+    recipient: string;
+    status: 'queued' | 'sent' | 'failed';
+    subject: string;
+    /**
+     * What the mail was about: an approval id, an API key id, a report id.
+     */
+    subject_id?: string;
+    updated_at: string;
+};
+
+export type MailTestRequest = {
+    /**
+     * Where to send the test mail; defaults to the signed-in operator's address.
+     */
+    recipient?: string;
+};
+
+export type MailTestResponse = {
+    error?: string;
+    recipient: string;
+    sent: boolean;
+};
+
 export type MigrationFeature = {
     app_path: string;
     availability_reason?: string;
@@ -3073,6 +3136,64 @@ export type GetAdminLlmTracesIdResponses = {
      */
     200: unknown;
 };
+
+export type GetAdminMailDeliveriesData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/admin/mail/deliveries';
+};
+
+export type GetAdminMailDeliveriesErrors = {
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminMailDeliveriesError = GetAdminMailDeliveriesErrors[keyof GetAdminMailDeliveriesErrors];
+
+export type GetAdminMailDeliveriesResponses = {
+    /**
+     * OK
+     */
+    200: MailDeliveriesResponse;
+};
+
+export type GetAdminMailDeliveriesResponse = GetAdminMailDeliveriesResponses[keyof GetAdminMailDeliveriesResponses];
+
+export type PostAdminMailTestData = {
+    body: MailTestRequest;
+    path?: never;
+    query?: never;
+    url: '/admin/mail/test';
+};
+
+export type PostAdminMailTestErrors = {
+    /**
+     * Mail is off, the settings are incomplete, or the recipient is not an address
+     */
+    400: MailTestResponse;
+    /**
+     * The relay refused or did not answer
+     */
+    502: MailTestResponse;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostAdminMailTestError = PostAdminMailTestErrors[keyof PostAdminMailTestErrors];
+
+export type PostAdminMailTestResponses = {
+    /**
+     * OK
+     */
+    200: MailTestResponse;
+};
+
+export type PostAdminMailTestResponse = PostAdminMailTestResponses[keyof PostAdminMailTestResponses];
 
 export type GetAdminMcpAgenticRunsData = {
     body?: never;
