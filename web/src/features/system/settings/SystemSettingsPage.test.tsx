@@ -551,9 +551,23 @@ describe("SystemSettingsPage — SSO", () => {
     version: 4,
   };
 
+  const mcpOAuthStatus = {
+    enabled: true,
+    active: true,
+    issuer: "https://keycloak.example.com/realms/main",
+    client_id: "vibe-console",
+    resource: "https://gateway.example.com/mcp",
+    resource_source: "derived",
+    gateway_resource: "https://gateway.example.com/mcp/gateway",
+    metadata_url: "https://gateway.example.com/.well-known/oauth-protected-resource/mcp",
+    audience: ["claude-mcp"],
+    scopes: ["mcp:use"],
+  };
+
   it("never echoes the client secret and confirms before saving", async () => {
     const api = mockApi({
       "GET /admin/sso/keycloak/config": () => ssoConfig,
+      "GET /admin/mcp/oauth": () => mcpOAuthStatus,
       "GET /admin/roles": () => ({
         roles: [
           { role: "admin", description: "관리자", is_system: true },
@@ -582,6 +596,43 @@ describe("SystemSettingsPage — SSO", () => {
       expected_version: 4,
     });
     expect(body).not.toHaveProperty("client_secret");
+  });
+
+  it("shows the MCP SSO card with the values a person copies, and why it is off", async () => {
+    mockApi({
+      "GET /admin/sso/keycloak/config": () => ssoConfig,
+      "GET /admin/roles": () => ({ roles: [] }),
+      "GET /admin/mcp/oauth": () => mcpOAuthStatus,
+    });
+    renderPage("/system/settings?tab=sso");
+
+    expect(
+      await screen.findByText("https://gateway.example.com/.well-known/oauth-protected-resource/mcp"),
+    ).toBeVisible();
+    expect(screen.getByText("https://gateway.example.com/mcp/gateway")).toBeVisible();
+    expect(screen.getByText("claude-mcp")).toBeVisible();
+    expect(screen.getByRole("link", { name: "MCP SSO 설정 열기" })).toHaveAttribute(
+      "href",
+      "/system/settings?tab=runtime&category=mcp",
+    );
+    expect(screen.queryByText("아직 SSO 토큰을 받지 않습니다.")).not.toBeInTheDocument();
+  });
+
+  it("explains an incomplete MCP SSO configuration", async () => {
+    mockApi({
+      "GET /admin/sso/keycloak/config": () => ssoConfig,
+      "GET /admin/roles": () => ({ roles: [] }),
+      "GET /admin/mcp/oauth": () => ({
+        ...mcpOAuthStatus,
+        active: false,
+        reason:
+          "Keycloak SSO 가 꺼져 있거나 발급자 주소(issuer)가 비어 있습니다. SSO 설정을 먼저 완성하세요.",
+      }),
+    });
+    renderPage("/system/settings?tab=sso");
+
+    expect(await screen.findByText("아직 SSO 토큰을 받지 않습니다.")).toBeVisible();
+    expect(screen.getByText("켜졌지만 미완성")).toBeVisible();
   });
 });
 

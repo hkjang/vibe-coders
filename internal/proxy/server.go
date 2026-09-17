@@ -94,6 +94,7 @@ type Server struct {
 	lastReloadTok   atomic.Pointer[string] // admin_settings change token this pod last applied
 	appUIRuntime    atomic.Pointer[appUIRuntimeConfig]
 	trackingRuntime atomic.Pointer[tracking.Config] // admin-managed visitor tracking (snippet + CSP sources)
+	mcpOAuthRuntime atomic.Pointer[mcpOAuthConfig]  // admin-managed "SSO access tokens open /mcp" (RFC 9728 resource server)
 	cspViolations   *tracking.Recorder              // origins the browser refused while tracking is on
 	adminModels     *adminModelCatalogCache
 	trustedProxies  []netip.Prefix
@@ -620,6 +621,9 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/admin/mcp/upstreams/", s.handleMCPUpstreamByID)
 	mux.HandleFunc("/mcp", s.handleMCPGateway)
 	mux.HandleFunc("/mcp/gateway", s.handleGatewayMCP)
+	mux.HandleFunc(protectedResourceMetadataPath, s.handleProtectedResourceMetadata)
+	mux.HandleFunc(protectedResourceMetadataPath+"/", s.handleProtectedResourceMetadata)
+	mux.HandleFunc("/admin/mcp/oauth", s.handleMCPOAuthStatus)
 	mux.HandleFunc("/admin/gateway-mcp/info", s.handleGatewayMCPInfo)
 	mux.HandleFunc("/admin/mcp/gateway/test", s.handleGatewayMCPTest)
 	mux.HandleFunc("/admin/mcp/contracts", s.handleAdminMCPContracts)

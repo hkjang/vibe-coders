@@ -1,6 +1,8 @@
 // This file is auto-generated from openapi/openapi.json. Do not edit manually.
 
 export const openApiPaths = [
+  "/.well-known/oauth-protected-resource",
+  "/.well-known/oauth-protected-resource/{path}",
   "/admin",
   "/admin/agent-routes",
   "/admin/agent-routes/tool-catalog",
@@ -138,6 +140,7 @@ export const openApiPaths = [
   "/admin/mcp/effective-policy",
   "/admin/mcp/gateway/test",
   "/admin/mcp/loops",
+  "/admin/mcp/oauth",
   "/admin/mcp/onboarding-check",
   "/admin/mcp/overview",
   "/admin/mcp/policies",
@@ -466,6 +469,8 @@ export const openApiPaths = [
 export type OpenApiPath = (typeof openApiPaths)[number];
 
 export const openApiOperations = [
+  { method: "GET", path: "/.well-known/oauth-protected-resource" },
+  { method: "GET", path: "/.well-known/oauth-protected-resource/{path}" },
   { method: "GET", path: "/admin" },
   { method: "GET", path: "/admin/agent-routes" },
   { method: "POST", path: "/admin/agent-routes" },
@@ -634,6 +639,7 @@ export const openApiOperations = [
   { method: "GET", path: "/admin/mcp/effective-policy" },
   { method: "POST", path: "/admin/mcp/gateway/test" },
   { method: "GET", path: "/admin/mcp/loops" },
+  { method: "GET", path: "/admin/mcp/oauth" },
   { method: "POST", path: "/admin/mcp/onboarding-check" },
   { method: "GET", path: "/admin/mcp/overview" },
   { method: "GET", path: "/admin/mcp/policies" },
