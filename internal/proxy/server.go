@@ -1583,6 +1583,12 @@ func (s *Server) authenticateProxyContext(r *http.Request) (string, *store.AuthC
 }
 
 func (s *Server) authenticateProxyContextWithOutcome(r *http.Request) (string, *store.AuthContext, authOutcome) {
+	// An SSO subject the MCP gateway already authenticated, re-entering
+	// /v1/chat/completions in-process (see mcpPrincipal). The bearer it forwards
+	// is the SSO token, which this door keeps refusing below.
+	if p := mcpPrincipalFrom(r.Context()); p != nil {
+		return s.authorizeMCPPrincipalReentry(r, p)
+	}
 	token := bearerToken(r.Header.Get("Authorization"))
 	if token == "" {
 		hasKeys, err := s.db.HasActiveAPIKeys(r.Context())

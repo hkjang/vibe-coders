@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
@@ -97,7 +98,12 @@ type mcpOAuthHarness struct {
 func newMCPOAuthHarness(t *testing.T) *mcpOAuthHarness {
 	t.Helper()
 	idp := newFakeIdP(t)
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`{}`)) }))
+	// The LLM provider behind /v1: answers every completion so the gateway tools
+	// that re-enter the pipeline (gateway_chat) have something to return.
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"cmpl-sso","object":"chat.completion","model":"test-model","choices":[{"index":0,"message":{"role":"assistant","content":"hello from upstream"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`))
+	}))
 	t.Cleanup(upstream.Close)
 	db := openTestStore(t)
 	t.Cleanup(func() { db.Close() })
@@ -495,4 +501,170 @@ func (s *Server) mustSignHS256(t *testing.T, claims map[string]any) string {
 	payload, _ := json.Marshal(claims)
 	unsigned := base64.RawURLEncoding.EncodeToString(header) + "." + base64.RawURLEncoding.EncodeToString(payload)
 	return unsigned + "." + base64.RawURLEncoding.EncodeToString([]byte("signature"))
+}
+
+// callTool posts a tools/call for one gateway tool with the bearer given.
+func (h *mcpOAuthHarness) callTool(t *testing.T, path, bearer, tool string, args map[string]any) (*http.Response, map[string]any) {
+	t.Helper()
+	body, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": map[string]any{"name": tool, "arguments": args}})
+	req, _ := http.NewRequest(http.MethodPost, h.ts.URL+path, bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	if bearer != "" {
+		req.Header.Set("Authorization", "Bearer "+bearer)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out map[string]any
+	raw, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	_ = json.Unmarshal(raw, &out)
+	return resp, out
+}
+
+// toolText flattens a tools/call result's content into one string, or the
+// JSON-RPC/tool error message.
+func toolText(out map[string]any) string {
+	if e, ok := out["error"].(map[string]any); ok {
+		msg, _ := e["message"].(string)
+		return msg
+	}
+	result, _ := out["result"].(map[string]any)
+	content, _ := result["content"].([]any)
+	var parts []string
+	for _, item := range content {
+		if m, ok := item.(map[string]any); ok {
+			if text, ok := m["text"].(string); ok {
+				parts = append(parts, text)
+			}
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
+func TestMCPOAuthEmptyScopeIntersectionIsRefusedNotUnscoped(t *testing.T) {
+	h := newMCPOAuthHarness(t)
+	h.enable(t)
+	h.putSetting(t, mcpOAuthAudienceKey, "claude-mcp")
+
+	// The administrator's ceiling shares nothing with the developer role.
+	// /mcp/gateway asks for no path scope of its own, so this is the case where an
+	// empty intersection handed downstream would open every gateway tool.
+	h.putSetting(t, mcpOAuthScopesKey, "mcp:admin")
+	for _, path := range []string{"/mcp/gateway", "/mcp"} {
+		resp, out := h.call(t, path, h.idp.accessToken(t, nil), "tools/list")
+		if resp.StatusCode != http.StatusUnauthorized || !strings.Contains(errorMessage(out), "남는 범위가 없습니다") {
+			t.Fatalf("%s with an empty scope intersection = %d %q, want 401 refusal", path, resp.StatusCode, errorMessage(out))
+		}
+		if code, _ := out["error"].(map[string]any)["code"].(string); code != "scope_denied" {
+			t.Fatalf("%s refusal code = %q", path, code)
+		}
+	}
+	r := httptest.NewRequest(http.MethodPost, "/mcp/gateway", nil)
+	r.Header.Set("Authorization", "Bearer "+h.idp.accessToken(t, nil))
+	if _, authCtx, outcome, _ := h.server.authenticateMCP(r); outcome == authOK || authCtx != nil {
+		t.Fatalf("an empty intersection must not yield a principal: outcome=%v ctx=%+v", outcome, authCtx)
+	}
+
+	// Restoring an overlapping ceiling reopens the door — the refusal was about the
+	// intersection, not the account.
+	h.putSetting(t, mcpOAuthScopesKey, "mcp:use")
+	if resp, _ := h.call(t, "/mcp/gateway", h.idp.accessToken(t, nil), "tools/list"); resp.StatusCode != http.StatusOK {
+		t.Fatalf("after restoring the ceiling = %d", resp.StatusCode)
+	}
+}
+
+func TestMCPOAuthGatewayToolsRunAsTheSSOSubject(t *testing.T) {
+	h := newMCPOAuthHarness(t)
+	h.enable(t)
+	h.putSetting(t, mcpOAuthAudienceKey, "claude-mcp")
+	token := h.idp.accessToken(t, nil)
+
+	// gateway_chat re-enters /v1/chat/completions in-process. With the default
+	// ceiling (mcp:use only) the subject lacks chat:completion, so the pipeline's
+	// own scope gate refuses — the same gate a key without that scope hits.
+	resp, out := h.callTool(t, "/mcp/gateway", token, "gateway_chat", map[string]any{"model": "test-model", "prompt": "hi"})
+	if resp.StatusCode != http.StatusOK || !strings.Contains(toolText(out), "HTTP 401") {
+		t.Fatalf("gateway_chat without chat:completion = %d %q, want a refused completion", resp.StatusCode, toolText(out))
+	}
+	events, err := h.db.ListAuditEvents(context.Background(), 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var denied bool
+	for _, e := range events {
+		if e.EventType == "scope_denied" && e.ActorUserID == h.userID && strings.Contains(e.Detail, "chat:completion") {
+			denied = true
+		}
+	}
+	if !denied {
+		t.Fatalf("scope refusal of the re-entry must be audited against the account: %+v", events)
+	}
+
+	// Granting the scope lets the same token run the completion as the account —
+	// no key exists for this subject, so nothing but the carried principal can
+	// have opened the door.
+	h.putSetting(t, mcpOAuthScopesKey, "mcp:use chat:completion")
+	resp, out = h.callTool(t, "/mcp/gateway", token, "gateway_chat", map[string]any{"model": "test-model", "prompt": "hi"})
+	if resp.StatusCode != http.StatusOK || !strings.Contains(toolText(out), "hello from upstream") {
+		t.Fatalf("gateway_chat with chat:completion = %d %q", resp.StatusCode, toolText(out))
+	}
+	// The REST door itself still refuses the token: the principal travels only on
+	// the in-process re-entry, never on a request from outside.
+	chat, _ := http.NewRequest(http.MethodPost, h.ts.URL+"/v1/chat/completions", strings.NewReader(`{"model":"test-model","messages":[{"role":"user","content":"hi"}]}`))
+	chat.Header.Set("Authorization", "Bearer "+token)
+	chat.Header.Set("Content-Type", "application/json")
+	chatResp, err := http.DefaultClient.Do(chat)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chatResp.Body.Close()
+	if chatResp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("SSO token on /v1/chat/completions = %d, want 401", chatResp.StatusCode)
+	}
+	// A key going through the same tool is re-authenticated as before.
+	createKey := postJSON(t, h.ts.URL+"/admin/api-keys", h.adminToken, map[string]any{"name": "chat-key"})
+	var created struct {
+		Secret string `json:"secret"`
+	}
+	_ = json.NewDecoder(createKey.Body).Decode(&created)
+	createKey.Body.Close()
+	if resp, out := h.callTool(t, "/mcp/gateway", created.Secret, "gateway_chat", map[string]any{"model": "test-model", "prompt": "hi"}); resp.StatusCode != http.StatusOK || !strings.Contains(toolText(out), "hello from upstream") {
+		t.Fatalf("gateway_chat with a key = %d %q", resp.StatusCode, toolText(out))
+	}
+}
+
+func TestMCPOAuthRefusalLogsTheCause(t *testing.T) {
+	h := newMCPOAuthHarness(t)
+	h.enable(t)
+	h.putSetting(t, mcpOAuthAudienceKey, "claude-mcp")
+
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	defer slog.SetDefault(previous)
+
+	otherKey, _ := rsa.GenerateKey(rand.Reader, 2048)
+	cases := []struct {
+		name, token, code, cause string
+	}{
+		{"wrong key", signRS256(t, otherKey, "idp-kid", map[string]any{"iss": h.idp.issuer(), "sub": "kc-subject-1", "azp": "claude-mcp", "aud": "account", "exp": float64(time.Now().Add(time.Hour).Unix())}), "invalid_token", "jwt signature verification failed"},
+		{"other issuer", h.idp.accessToken(t, map[string]any{"iss": "https://evil.example/realms/vibe"}), "invalid_token", "jwt issuer mismatch"},
+		{"expired", h.idp.accessToken(t, map[string]any{"exp": float64(time.Now().Add(-time.Hour).Unix())}), "invalid_token", "jwt expired"},
+		{"other audience", h.idp.accessToken(t, map[string]any{"azp": "some-other-app"}), "audience_mismatch", "azp=\\\"some-other-app\\\""},
+		{"unlinked", h.idp.accessToken(t, map[string]any{"sub": "kc-subject-unknown"}), "account_not_linked", "subject \\\"kc-subject-unknown\\\""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			logs.Reset()
+			if resp, _ := h.call(t, "/mcp", tc.token, "tools/list"); resp.StatusCode != http.StatusUnauthorized {
+				t.Fatalf("status = %d, want 401", resp.StatusCode)
+			}
+			got := logs.String()
+			if !strings.Contains(got, "mcp oauth token refused") || !strings.Contains(got, "code="+tc.code) || !strings.Contains(got, tc.cause) {
+				t.Fatalf("operator log must name the failed check:\n%s\nwant code=%s and %q", got, tc.code, tc.cause)
+			}
+		})
+	}
 }

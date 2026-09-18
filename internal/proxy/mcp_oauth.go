@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -218,13 +219,66 @@ func looksLikeJWT(token string) bool {
 
 // mcpOAuthRefusal says exactly why a token was not accepted. The message is
 // meant for the operator reading the client's error: it names what the token
-// carried and what to change.
+// carried and what to change. Cause is the underlying finding in the server's
+// own words (which check failed, what the token carried) and goes to the
+// server log, so the operator can tell a bad signature from a wrong issuer
+// even when the client only relays "invalid_token".
 type mcpOAuthRefusal struct {
 	Code    string
 	Message string
+	Cause   string
 }
 
 func (e *mcpOAuthRefusal) Error() string { return e.Code + ": " + e.Message }
+
+// mcpPrincipal is an SSO subject an MCP handler has already authenticated. The
+// gateway tools that run a completion (gateway_chat, gateway_run_skill, …)
+// re-enter /v1/chat/completions in-process with the caller's bearer, and that
+// door must keep refusing SSO tokens — so the principal travels by context, a
+// channel no external request can set. Keys are not carried this way: their
+// re-entry re-authenticates the key exactly as before.
+type mcpPrincipal struct {
+	ID      string
+	AuthCtx *store.AuthContext
+}
+
+type mcpPrincipalKey struct{}
+
+func withMCPPrincipal(ctx context.Context, id string, authCtx *store.AuthContext) context.Context {
+	return context.WithValue(ctx, mcpPrincipalKey{}, &mcpPrincipal{ID: id, AuthCtx: authCtx})
+}
+
+func mcpPrincipalFrom(ctx context.Context) *mcpPrincipal {
+	p, _ := ctx.Value(mcpPrincipalKey{}).(*mcpPrincipal)
+	return p
+}
+
+// ssoPrincipalID is the identity the MCP call log and route decisions record for
+// an SSO subject; it is never an api_keys id. isSSOPrincipalID is the one place
+// that reads the shape back.
+func ssoPrincipalID(userID string) string { return "sso_" + userID }
+func isSSOPrincipalID(id string) bool     { return strings.HasPrefix(id, "sso_") }
+
+// mcpRequestWithPrincipal attaches an SSO principal for the in-process re-entry
+// described at mcpPrincipal; a key principal leaves the request untouched.
+func mcpRequestWithPrincipal(r *http.Request, id string, authCtx *store.AuthContext) *http.Request {
+	if authCtx == nil || !isSSOPrincipalID(id) {
+		return r
+	}
+	return r.WithContext(withMCPPrincipal(r.Context(), id, authCtx))
+}
+
+// authorizeMCPPrincipalReentry is what authenticateProxyContextWithOutcome does
+// for a request carrying an SSO principal: the same scope gate a key passes for
+// that path, against the scopes the administrator granted the SSO subject.
+func (s *Server) authorizeMCPPrincipalReentry(r *http.Request, p *mcpPrincipal) (string, *store.AuthContext, authOutcome) {
+	if scope := apiScopeForRequest(r); s.cfg.Auth.Enabled && scope != "" && !hasScope(p.AuthCtx.Scopes, scope) {
+		_ = s.db.InsertAuditEvent(r.Context(), store.AuthEvent{ID: newID("ae"), EventType: "scope_denied", ActorUserID: p.AuthCtx.UserID, TeamID: p.AuthCtx.TeamID, IP: clientIP(r), UserAgent: r.UserAgent(), Detail: "mcp oauth: " + scope, CreatedAt: time.Now().UTC()})
+		slog.Warn("mcp oauth subject lacks scope for in-process call", "user_id", p.AuthCtx.UserID, "path", r.URL.Path, "scope", scope, "granted", p.AuthCtx.Scopes)
+		return "", nil, authDenied
+	}
+	return p.ID, p.AuthCtx, authOK
+}
 
 // authenticateMCP is authenticateProxyContext for the MCP endpoints: the same
 // bearer header, two kinds of credential. A JWT-shaped bearer goes to the SSO
@@ -251,6 +305,10 @@ func (s *Server) authenticateMCP(r *http.Request) (string, *store.AuthContext, a
 				} else {
 					return "", nil, authUnavailable, nil
 				}
+				// The client sees the message; the operator's log gets the cause —
+				// which check failed and what the token carried — because a client
+				// often relays nothing more than "invalid_token".
+				slog.Warn("mcp oauth token refused", "code", refusal.Code, "cause", firstNonEmpty(refusal.Cause, refusal.Message), "path", r.URL.Path, "ip", clientIP(r))
 				_ = s.db.InsertAuditEvent(r.Context(), store.AuthEvent{ID: newID("ae"), EventType: "api_key_denied", IP: clientIP(r), UserAgent: r.UserAgent(), Detail: "mcp oauth: " + refusal.Code, CreatedAt: time.Now().UTC()})
 				return "", nil, authDenied, refusal
 			}
@@ -295,11 +353,12 @@ func (s *Server) mcpOAuthPrincipal(r *http.Request, st mcpOAuthState, token stri
 	if !matched {
 		return "", nil, &mcpOAuthRefusal{Code: "audience_mismatch", Message: fmt.Sprintf(
 			"SSO 토큰이 이 서버를 위해 발급된 것이 아닙니다(aud=%v, azp=%q). 관리자가 %s 에 %q 를 더하거나, Keycloak 클라이언트에 Audience 매퍼로 %q 를 넣어야 합니다.",
-			audience, azp, mcpOAuthAudienceKey, firstNonEmpty(azp, "<client id>"), st.resourceFor(r.URL.Path))}
+			audience, azp, mcpOAuthAudienceKey, firstNonEmpty(azp, "<client id>"), st.resourceFor(r.URL.Path)),
+			Cause: fmt.Sprintf("audience check failed: aud=%v azp=%q accepted=%v", audience, azp, accepted)}
 	}
 	sub := strClaim(claims, "sub")
 	if !keycloakExactClaimValue(sub, 255) {
-		return "", nil, &mcpOAuthRefusal{Code: "invalid_token", Message: "SSO 토큰에 사용자 식별자(sub)가 없습니다."}
+		return "", nil, &mcpOAuthRefusal{Code: "invalid_token", Message: "SSO 토큰에 사용자 식별자(sub)가 없습니다.", Cause: "sub claim missing or malformed"}
 	}
 	// The same linkage the web sign-in wrote, without the provisioning half. The
 	// realm issues one subject per person whatever client asked, so one web
@@ -309,14 +368,14 @@ func (s *Server) mcpOAuthPrincipal(r *http.Request, st mcpOAuthState, token stri
 		return "", nil, err
 	}
 	if !linked {
-		return "", nil, &mcpOAuthRefusal{Code: "account_not_linked", Message: "이 SSO 계정은 아직 이 게이트웨이에 등록되지 않았습니다. 먼저 웹 콘솔에 SSO 로 한 번 로그인한 뒤 다시 연결하세요."}
+		return "", nil, &mcpOAuthRefusal{Code: "account_not_linked", Message: "이 SSO 계정은 아직 이 게이트웨이에 등록되지 않았습니다. 먼저 웹 콘솔에 SSO 로 한 번 로그인한 뒤 다시 연결하세요.", Cause: fmt.Sprintf("no auth identity for issuer %s subject %q", st.Issuer, sub)}
 	}
 	user, found, err := s.db.AuthUserByID(ctx, identity.UserID)
 	if err != nil {
 		return "", nil, err
 	}
 	if !found || user.Status != "active" {
-		return "", nil, &mcpOAuthRefusal{Code: "account_inactive", Message: "이 SSO 계정에 연결된 게이트웨이 계정이 비활성 상태입니다. 관리자에게 문의하세요."}
+		return "", nil, &mcpOAuthRefusal{Code: "account_inactive", Message: "이 SSO 계정에 연결된 게이트웨이 계정이 비활성 상태입니다. 관리자에게 문의하세요.", Cause: fmt.Sprintf("linked account %s status=%q", identity.UserID, user.Status)}
 	}
 	teamID, err := s.db.PrimaryTeamForUser(ctx, user.ID)
 	if err != nil {
@@ -325,16 +384,31 @@ func (s *Server) mcpOAuthPrincipal(r *http.Request, st mcpOAuthState, token stri
 	// Never wider than the account: the administrator's ceiling, cut to what the
 	// account's role allows, cut again by the token if Keycloak was taught this
 	// vocabulary. The token's role claims are deliberately not consulted.
+	//
+	// An empty intersection is a refusal, not an "unscoped" principal. /mcp/gateway
+	// asks for no path scope of its own, so a subject with no scopes left would
+	// otherwise walk in on the strength of the token alone — the case where the
+	// administrator's ceiling and the account's role share nothing is exactly the
+	// one where nothing should be granted.
 	scopes := intersectScopes(st.conf.Scopes, s.effectiveScopesForRole(ctx, user.Role))
 	if granted := tokenScopes(claims); len(granted) > 0 {
 		scopes = intersectScopes(scopes, granted)
 	}
-	if required := apiScopeForRequest(r); required != "" && !hasScope(scopes, required) {
-		return "", nil, &mcpOAuthRefusal{Code: "scope_denied", Message: fmt.Sprintf("SSO 주체의 범위 %v 에 %s 가 없습니다. 관리자가 %s 와 계정 역할(%s)의 범위를 확인해야 합니다.", scopes, required, mcpOAuthScopesKey, user.Role)}
+	if len(scopes) == 0 {
+		return "", nil, &mcpOAuthRefusal{Code: "scope_denied", Message: fmt.Sprintf("SSO 주체에게 남는 범위가 없습니다(%s=%v ∩ 계정 역할 %s 의 범위 = 없음). 관리자가 %s 와 계정 역할을 확인해야 합니다.", mcpOAuthScopesKey, st.conf.Scopes, user.Role, mcpOAuthScopesKey),
+			Cause: fmt.Sprintf("scope intersection empty: ceiling=%v role=%s token_scope=%v", st.conf.Scopes, user.Role, tokenScopes(claims))}
 	}
-	authCtx := store.AuthContext{UserID: user.ID, TeamID: teamID, Role: user.Role, Scopes: scopes}
+	if required := apiScopeForRequest(r); required != "" && !hasScope(scopes, required) {
+		return "", nil, &mcpOAuthRefusal{Code: "scope_denied", Message: fmt.Sprintf("SSO 주체의 범위 %v 에 %s 가 없습니다. 관리자가 %s 와 계정 역할(%s)의 범위를 확인해야 합니다.", scopes, required, mcpOAuthScopesKey, user.Role),
+			Cause: fmt.Sprintf("required scope %s not in %v (ceiling=%v role=%s)", required, scopes, st.conf.Scopes, user.Role)}
+	}
+	// APIKeyID/KeyTeam mirror what a key of this user would carry so the request
+	// pipeline's quota guard (authCtx.APIKeyID == apiKeyID → team known) and
+	// audit attribution treat the SSO subject like that key, not like nobody.
+	id := ssoPrincipalID(user.ID)
+	authCtx := store.AuthContext{UserID: user.ID, TeamID: teamID, KeyTeam: teamID, Role: user.Role, Scopes: scopes, APIKeyID: id}
 	s.enrichAuthContextTeam(ctx, &authCtx)
-	return "sso_" + user.ID, &authCtx, nil
+	return id, &authCtx, nil
 }
 
 // verifyMCPOAuthToken is the token check proper: signature against Keycloak's
@@ -347,33 +421,33 @@ func (s *Server) verifyMCPOAuthToken(ctx context.Context, st mcpOAuthState, toke
 	}
 	parts := strings.Split(token, ".")
 	if hb, err := base64.RawURLEncoding.DecodeString(parts[0]); err != nil || json.Unmarshal(hb, &header) != nil {
-		return nil, &mcpOAuthRefusal{Code: "invalid_token", Message: "SSO 토큰의 헤더를 읽을 수 없습니다."}
+		return nil, &mcpOAuthRefusal{Code: "invalid_token", Message: "SSO 토큰의 헤더를 읽을 수 없습니다.", Cause: "jwt header is not base64url JSON"}
 	}
 	// keycloakVerifyJWT accepts RS256 only, which already rules out HS* and none;
 	// the header is inspected here so the refusal can say which.
 	if header.Alg != "RS256" {
-		return nil, &mcpOAuthRefusal{Code: "invalid_token", Message: fmt.Sprintf("SSO 토큰 서명 알고리즘 %q 은 받지 않습니다(RS256 만 허용).", header.Alg)}
+		return nil, &mcpOAuthRefusal{Code: "invalid_token", Message: fmt.Sprintf("SSO 토큰 서명 알고리즘 %q 은 받지 않습니다(RS256 만 허용).", header.Alg), Cause: "unsupported alg " + header.Alg}
 	}
 	disc, err := keycloakDiscover(ctx, st.Issuer)
 	if err != nil {
-		return nil, &mcpOAuthRefusal{Code: "issuer_unavailable", Message: "Keycloak 발급자 정보를 읽지 못해 SSO 토큰을 확인할 수 없습니다. 잠시 후 다시 시도하거나 관리자에게 알리세요."}
+		return nil, &mcpOAuthRefusal{Code: "issuer_unavailable", Message: "Keycloak 발급자 정보를 읽지 못해 SSO 토큰을 확인할 수 없습니다. 잠시 후 다시 시도하거나 관리자에게 알리세요.", Cause: "discovery for " + st.Issuer + " failed: " + err.Error()}
 	}
 	claims, err := s.keycloakVerifyJWT(ctx, disc, token)
 	if err != nil {
-		return nil, &mcpOAuthRefusal{Code: "invalid_token", Message: "SSO 액세스 토큰이 유효하지 않습니다(서명·발급자·만료: " + err.Error() + "). 클라이언트에서 다시 로그인하세요."}
+		return nil, &mcpOAuthRefusal{Code: "invalid_token", Message: "SSO 액세스 토큰이 유효하지 않습니다(서명·발급자·만료: " + err.Error() + "). 클라이언트에서 다시 로그인하세요.", Cause: err.Error()}
 	}
 	if nbf, ok := claims["nbf"].(float64); ok && time.Now().Add(mcpOAuthClockSkew).Before(time.Unix(int64(nbf), 0)) {
-		return nil, &mcpOAuthRefusal{Code: "invalid_token", Message: "SSO 토큰이 아직 유효하지 않습니다(nbf). 클라이언트와 Keycloak 의 시계를 확인하세요."}
+		return nil, &mcpOAuthRefusal{Code: "invalid_token", Message: "SSO 토큰이 아직 유효하지 않습니다(nbf). 클라이언트와 Keycloak 의 시계를 확인하세요.", Cause: fmt.Sprintf("nbf %d is in the future", int64(nbf))}
 	}
 	// An ID token proves a sign-in; it is not an API credential. Keycloak marks
 	// one with typ=ID in the header and the claims alike.
 	if strings.EqualFold(header.Typ, "ID") || strings.EqualFold(strClaim(claims, "typ"), "ID") {
-		return nil, &mcpOAuthRefusal{Code: "invalid_token", Message: "ID 토큰은 받지 않습니다. 액세스 토큰을 보내세요."}
+		return nil, &mcpOAuthRefusal{Code: "invalid_token", Message: "ID 토큰은 받지 않습니다. 액세스 토큰을 보내세요.", Cause: "typ=ID"}
 	}
 	// A token bound to a proof of possession (DPoP, mTLS) that this server cannot
 	// verify is not a bearer token and must not be treated as one.
 	if _, bound := claims["cnf"]; bound {
-		return nil, &mcpOAuthRefusal{Code: "invalid_token", Message: "소지자 증명(cnf)이 묶인 토큰은 받지 않습니다. 일반 Bearer 액세스 토큰을 보내세요."}
+		return nil, &mcpOAuthRefusal{Code: "invalid_token", Message: "소지자 증명(cnf)이 묶인 토큰은 받지 않습니다. 일반 Bearer 액세스 토큰을 보내세요.", Cause: "cnf claim present"}
 	}
 	return claims, nil
 }

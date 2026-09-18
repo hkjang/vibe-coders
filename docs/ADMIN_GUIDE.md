@@ -124,7 +124,7 @@ Keycloak(또는 같은 realm 을 쓰는 ReSSO)에 이미 로그인한 사람이 
 
 **토큰을 믿는 조건.** 서명(Keycloak JWKS, `RS256` 만; `HS*`·`none` 거부), `iss`(발급자와 동일), `exp`·`nbf`, `typ=ID` 거부(ID 토큰은 로그인 증거지 API 자격이 아님), `cnf` 있으면 거부(검증할 수 없는 소지자 증명), `sub` 필수. **대상 검사**가 핵심입니다 — 다른 앱에 로그인해 받은 토큰이 이 게이트웨이의 `/mcp` 를 열면 안 되므로, 다음 중 하나는 맞아야 합니다: `aud` 에 리소스 식별자가 있다(Audience 매퍼 경로), `aud` 또는 `azp` 가 `mcp.oauth.audience` 에 있다(호환 경로), `aud`/`azp` 가 웹 로그인 Client ID 다. 실제 Keycloak 26 은 `aud` 에 `account` 만 싣고 클라이언트 ID 는 `azp` 에 담으므로 대부분은 `mcp.oauth.audience` 에 MCP 클라이언트 ID 를 적는 것으로 끝납니다.
 
-**계정은 만들지 않습니다.** 토큰의 `sub` 로 SSO 탭 발급자에 **이미 연결된 활성 계정**만 찾습니다(웹으로 한 번 로그인하면 연결됩니다). 없으면 "먼저 웹 콘솔에 SSO 로 로그인하세요"로 거부하고, 비활성 계정은 되살리지 않으며, 토큰의 role/groups claim 으로 권한을 올리지 않습니다 — 역할은 저장된 계정 역할이고 범위는 `mcp.oauth.scopes` ∩ 역할 범위입니다(토큰에 이 게이트웨이의 범위 어휘가 실려 오면 한 번 더 교집합). OAuth 주체는 그 사용자가 키로 들어왔을 때와 같은 문을 지납니다: `/mcp` 는 `mcp:use` 범위가 필요하고 MCP 정책·거버넌스·쿼터가 그대로 적용됩니다. OAuth 토큰은 **`/mcp`·`/mcp/gateway` 에서만** 받습니다. `/v1/*`·관리 API·웹소켓은 지금처럼 키와 세션만 받습니다.
+**계정은 만들지 않습니다.** 토큰의 `sub` 로 SSO 탭 발급자에 **이미 연결된 활성 계정**만 찾습니다(웹으로 한 번 로그인하면 연결됩니다). 없으면 "먼저 웹 콘솔에 SSO 로 로그인하세요"로 거부하고, 비활성 계정은 되살리지 않으며, 토큰의 role/groups claim 으로 권한을 올리지 않습니다 — 역할은 저장된 계정 역할이고 범위는 `mcp.oauth.scopes` ∩ 역할 범위입니다(토큰에 이 게이트웨이의 범위 어휘가 실려 오면 한 번 더 교집합). 교집합이 **비면 거부**합니다(빈 범위를 "제한 없음"으로 넘기지 않습니다). OAuth 주체는 그 사용자가 키로 들어왔을 때와 같은 문을 지납니다: `/mcp` 는 `mcp:use` 범위가 필요하고 MCP 도구 정책·거버넌스(승인·Secret Firewall)가 키와 똑같이 적용됩니다. `/mcp/gateway` 의 LLM 호출 도구(`gateway_chat`·`gateway_run_skill`·`gateway_run_text2sql_preview`·`gateway_run_saved_report`)는 `/v1/chat/completions` 파이프라인을 **SSO 주체 그대로** 지나므로 `mcp.oauth.scopes` 에 `chat:completion` 이 더 있어야 하고(없으면 도구 결과가 `chat failed: HTTP 401`, 감사 이력에 `scope_denied` / `mcp oauth: chat:completion`), 그 파이프라인의 쿼터(팀 쿼터는 계정의 기본 팀 기준)·모델 정책·비용 기록이 그대로 적용됩니다. OAuth 토큰은 **`/mcp`·`/mcp/gateway` 에서만** 받습니다. `/v1/*`·관리 API·웹소켓은 지금처럼 키와 세션만 받습니다.
 
 **Keycloak 쪽 할 일.**
 
@@ -155,7 +155,7 @@ curl -s https://<공개 주소>/admin/mcp/oauth -H "Authorization: Bearer <admin
 
 콘솔 **시스템 설정 → SSO** 탭의 **MCP SSO(OAuth) 연결** 카드가 같은 값을 복사 버튼과 함께 보여 줍니다. 가능하면 실제 MCP 클라이언트(Claude·Cursor)에 URL 만 넣어 연결까지 확인하세요.
 
-**거부 메시지별 조치.** 거부된 요청은 401 본문 `error.message` 와 `WWW-Authenticate` 의 `error_description` 에 같은 문장이 들어 있고, 감사 이력에 `api_key_denied` / `mcp oauth: <코드>` 로 남습니다.
+**거부 메시지별 조치.** 거부된 요청은 401 본문 `error.message` 와 `WWW-Authenticate` 의 `error_description` 에 같은 문장이 들어 있고, 감사 이력에 `api_key_denied` / `mcp oauth: <코드>` 로 남습니다. 어느 검사가 실패했는지(서명·발급자·만료·대상·계정)는 클라이언트 메시지가 아니라 **서버 로그**에 `WARN mcp oauth token refused code=<코드> cause=<원인> path=… ip=…` 한 줄로 남으므로, 클라이언트가 `invalid_token` 만 전해 와도 로그에서 원인을 찾을 수 있습니다.
 
 | 메시지 (코드) | 뜻 | 조치 |
 |---|---|---|
@@ -165,6 +165,8 @@ curl -s https://<공개 주소>/admin/mcp/oauth -H "Authorization: Bearer <admin
 | `SSO 액세스 토큰이 유효하지 않습니다(서명·발급자·만료: …)` (`invalid_token`) | 서명/`iss`/`exp` 실패 | 클라이언트 재로그인. 발급자가 SSO 탭과 같은 realm 인지, 시계가 맞는지 확인 |
 | `ID 토큰은 받지 않습니다` / `소지자 증명(cnf)…` / `… RS256 만 허용` (`invalid_token`) | 토큰 종류가 다름 | 클라이언트가 액세스 토큰을 보내는지, Keycloak 서명 알고리즘이 RS256 인지 확인 |
 | `SSO 주체의 범위 […] 에 mcp:use 가 없습니다` (`scope_denied`) | 범위 상한 또는 계정 역할에 `mcp:use` 없음 | `mcp.oauth.scopes` 와 계정 역할 확인 |
+| `SSO 주체에게 남는 범위가 없습니다(mcp.oauth.scopes=[…] ∩ 계정 역할 … = 없음)` (`scope_denied`) | 관리자 상한과 계정 역할의 범위가 하나도 겹치지 않음 — `/mcp/gateway` 처럼 경로 범위가 없는 곳도 열지 않음 | `mcp.oauth.scopes` 에 그 역할이 가진 범위(`mcp:use` 등)를 넣기 |
+| 도구 결과 `chat failed: HTTP 401` (`gateway_chat` 등) | SSO 주체에게 `chat:completion` 범위가 없어 `/v1` 파이프라인이 거부 | `mcp.oauth.scopes` 에 `chat:completion` 추가(계정 역할에도 있어야 함) |
 | `Keycloak 발급자 정보를 읽지 못해 …` (`issuer_unavailable`) | discovery/JWKS 를 못 읽음 | 게이트웨이에서 Keycloak 로의 네트워크·CA 확인(SSO 탭 **연결 테스트**) |
 | `invalid proxy API key` | JWT 모양이 아니거나 `mcp.oauth.enabled` 가 꺼져 있음 | 키 경로의 기존 응답. 켜져 있지 않은 설치는 새로운 말을 흘리지 않음 |
 
