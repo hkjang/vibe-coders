@@ -117,7 +117,7 @@ Keycloak(또는 같은 realm 을 쓰는 ReSSO)에 이미 로그인한 사람이 
 | 설정 키 (런타임 설정 → `mcp` 범주) | 기본값 | 뜻 |
 |---|---|---|
 | `mcp.oauth.enabled` | `false` | 스위치. 켜도 Keycloak SSO(발급자)가 꺼져 있으면 조용히 꺼진 것처럼 동작하고 SSO 탭 카드가 이유를 보여 줍니다 |
-| `mcp.oauth.resource` | 빈 값 | 리소스 식별자(공개 주소 + `/mcp`, 예 `https://ai.corp.example/mcp`). 비우면 **Keycloak Redirect URI 의 출처**(scheme://host)로 만들고, 그것도 없으면 요청 Host 로 만듭니다(마지막 수단). 프록시 뒤라면 공개 주소를 적으세요 |
+| `mcp.oauth.resource` | 빈 값 | 리소스 식별자(공개 주소 + `/mcp`, 예 `https://ai.corp.example/mcp`). 비우면 **Keycloak Redirect URI 의 출처**(scheme://host)로 만들고, 그것도 없으면 SSO 토큰을 받지 않습니다(SSO 탭 카드에 이유가 뜹니다). 요청의 Host·X-Forwarded-* 로는 **만들지 않습니다** — 리소스 식별자는 토큰 `aud` 를 대조하는 값이라 호출자가 고를 수 있으면 안 됩니다. 프록시 뒤라면 공개 주소를 적으세요 |
 | `mcp.oauth.audience` | 빈 값 | 허용 대상(공백 구분). 토큰의 `aud` 또는 `azp` 가 여기 있으면 통과. Keycloak 의 MCP 클라이언트 ID 를 적으면 Audience 매퍼 없이 동작합니다 |
 | `mcp.oauth.scopes` | `mcp:use` | SSO 주체에게 주는 범위(공백 구분). 계정 역할의 범위와 **교집합**만 적용됩니다 |
 | (재사용) SSO 탭의 발급자·Client ID | 웹 로그인 설정 | 새로 적지 않습니다. `SSO_KEYCLOAK_ISSUER_URL`/`SSO_KEYCLOAK_CLIENT_ID` 또는 SSO 탭 |

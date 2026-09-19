@@ -61,9 +61,10 @@ const (
 type mcpOAuthConfig struct {
 	Enabled bool
 	// Resource is the identifier this gateway claims for /mcp (RFC 8707). Empty
-	// means it is derived: from the Keycloak redirect URI's origin — the one
-	// public address this deployment already had to write down — and, failing
-	// that, from the request.
+	// means it is derived from the Keycloak redirect URI's origin — the one
+	// public address this deployment already had to write down. Never from the
+	// request: Host and X-Forwarded-* are the caller's to choose, and an
+	// identifier built from them is an audience the caller picks.
 	Resource string
 	// Audience lists additional accepted aud/azp values. A real Keycloak 26 puts
 	// only "account" in aud and the client id in azp, so naming the MCP client
@@ -108,7 +109,7 @@ func mcpOAuthSettingDefs() []settingDef {
 
 func init() {
 	settingDescriptions[mcpOAuthEnabledKey] = "MCP(/mcp, /mcp/gateway)에 Keycloak SSO 액세스 토큰으로 접속 허용. 기본 꺼짐. 개인 키는 그대로 동작하며, SSO 설정(발급자)이 켜져 있어야 실제로 켜집니다."
-	settingDescriptions[mcpOAuthResourceKey] = "이 게이트웨이의 MCP 리소스 식별자(공개 주소 + /mcp, 예: https://gateway.example/mcp). 비우면 Keycloak Redirect URI 의 출처로 만듭니다."
+	settingDescriptions[mcpOAuthResourceKey] = "이 게이트웨이의 MCP 리소스 식별자(공개 주소 + /mcp, 예: https://gateway.example/mcp). 비우면 Keycloak Redirect URI 의 출처로 만들고, 그것도 없으면 SSO 토큰을 받지 않습니다(요청 Host 로는 만들지 않습니다)."
 	settingDescriptions[mcpOAuthAudienceKey] = "허용 대상(공백 구분). 토큰의 aud 또는 azp 가 이 목록에 있으면 통과 — Keycloak 의 MCP 클라이언트 ID 를 적으면 Audience 매퍼 없이 동작합니다."
 	settingDescriptions[mcpOAuthScopesKey] = "SSO 토큰 주체에게 주는 범위(공백 구분, 기본 mcp:use). 계정 역할의 범위와 교집합만 적용됩니다."
 }
@@ -167,9 +168,13 @@ func (st mcpOAuthState) metadataURL(path string) string {
 
 // mcpOAuthState computes the effective state. The switch alone does not open the
 // door: the issuer has to exist (Keycloak SSO configured and on) and a resource
-// identifier has to be derivable, otherwise it stays closed and the status
-// endpoint says why.
-func (s *Server) mcpOAuthState(r *http.Request) mcpOAuthState {
+// identifier has to be derivable from configuration, otherwise it stays closed
+// and the status endpoint says why. Nothing here is read from a request — the
+// resource identifier is the audience a token is checked against, so it cannot
+// be something the caller supplies (Host, X-Forwarded-Host, X-Forwarded-Proto).
+// SSO_KEYCLOAK_REDIRECT_URI is not validated on the environment path, so the
+// "neither is set" case is reachable, and it is a closed door, not a fallback.
+func (s *Server) mcpOAuthState() mcpOAuthState {
 	conf := s.mcpOAuthConf()
 	kc := s.keycloakConfig()
 	st := mcpOAuthState{conf: conf, Issuer: strings.TrimRight(strings.TrimSpace(kc.IssuerURL), "/"), ClientID: strings.TrimSpace(kc.ClientID)}
@@ -177,8 +182,6 @@ func (s *Server) mcpOAuthState(r *http.Request) mcpOAuthState {
 	if st.Resource == "" {
 		if origin := originOf(kc.RedirectURI); origin != "" {
 			st.Resource = origin + "/mcp"
-		} else if r != nil {
-			st.Resource = requestOrigin(r) + "/mcp"
 		}
 	}
 	switch {
@@ -189,7 +192,7 @@ func (s *Server) mcpOAuthState(r *http.Request) mcpOAuthState {
 	case !kc.Enabled || st.Issuer == "":
 		st.Reason = "Keycloak SSO 가 꺼져 있거나 발급자 주소(issuer)가 비어 있습니다. SSO 설정을 먼저 완성하세요."
 	case st.Resource == "":
-		st.Reason = mcpOAuthResourceKey + " 가 비어 있고 Keycloak Redirect URI 로도 공개 주소를 알 수 없습니다."
+		st.Reason = mcpOAuthResourceKey + " 가 비어 있고 Keycloak Redirect URI 로도 공개 주소를 알 수 없습니다. 요청 Host 로는 만들지 않으므로 " + mcpOAuthResourceKey + " 에 공개 주소 + /mcp 를 적으세요."
 	}
 	return st
 }
@@ -289,7 +292,7 @@ func (s *Server) authorizeMCPPrincipalReentry(r *http.Request, p *mcpPrincipal) 
 func (s *Server) authenticateMCP(r *http.Request) (string, *store.AuthContext, authOutcome, *mcpOAuthRefusal) {
 	token := bearerToken(r.Header.Get("Authorization"))
 	if token != "" && looksLikeJWT(token) {
-		if st := s.mcpOAuthState(r); st.Active() {
+		if st := s.mcpOAuthState(); st.Active() {
 			// A credential the key table knows is a key, whatever it looks like.
 			if _, found, err := s.db.FindActiveAPIKeyByHash(r.Context(), hashProxyKey(token)); err != nil {
 				return "", nil, authUnavailable, nil
@@ -307,8 +310,10 @@ func (s *Server) authenticateMCP(r *http.Request) (string, *store.AuthContext, a
 				}
 				// The client sees the message; the operator's log gets the cause —
 				// which check failed and what the token carried — because a client
-				// often relays nothing more than "invalid_token".
-				slog.Warn("mcp oauth token refused", "code", refusal.Code, "cause", firstNonEmpty(refusal.Cause, refusal.Message), "path", r.URL.Path, "ip", clientIP(r))
+				// often relays nothing more than "invalid_token". request_id is the
+				// X-Request-ID the response carries (withTrace pinned it on the
+				// request), so the client's failed call and this line can be matched.
+				slog.Warn("mcp oauth token refused", "request_id", traceIDFromRequest(r), "code", refusal.Code, "cause", firstNonEmpty(refusal.Cause, refusal.Message), "path", r.URL.Path, "ip", clientIP(r))
 				_ = s.db.InsertAuditEvent(r.Context(), store.AuthEvent{ID: newID("ae"), EventType: "api_key_denied", IP: clientIP(r), UserAgent: r.UserAgent(), Detail: "mcp oauth: " + refusal.Code, CreatedAt: time.Now().UTC()})
 				return "", nil, authDenied, refusal
 			}
@@ -479,7 +484,7 @@ func intersectScopes(a, b []string) []string {
 // is a dead end. Only the MCP paths call this — a REST 401 carrying it would
 // send browsers and SDKs somewhere they cannot follow.
 func (s *Server) mcpOAuthChallenge(w http.ResponseWriter, r *http.Request, refusal *mcpOAuthRefusal) {
-	st := s.mcpOAuthState(r)
+	st := s.mcpOAuthState()
 	if !st.Active() {
 		return
 	}
@@ -521,7 +526,7 @@ func (s *Server) handleProtectedResourceMetadata(w http.ResponseWriter, r *http.
 	if path == "" || path == "/" {
 		path = "/mcp"
 	}
-	st := s.mcpOAuthState(r)
+	st := s.mcpOAuthState()
 	if !st.Active() || !isMCPPath(path) {
 		http.NotFound(w, r)
 		return
@@ -562,11 +567,11 @@ func (s *Server) handleMCPOAuthStatus(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
 		return
 	}
-	writeJSON(w, http.StatusOK, s.mcpOAuthStatus(r))
+	writeJSON(w, http.StatusOK, s.mcpOAuthStatus())
 }
 
-func (s *Server) mcpOAuthStatus(r *http.Request) map[string]any {
-	st := s.mcpOAuthState(r)
+func (s *Server) mcpOAuthStatus() map[string]any {
+	st := s.mcpOAuthState()
 	audience := st.conf.Audience
 	if audience == nil {
 		audience = []string{}

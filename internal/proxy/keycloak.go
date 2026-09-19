@@ -34,12 +34,27 @@ type oidcDiscovery struct {
 	EndSessionEndpoint    string `json:"end_session_endpoint"`
 }
 
+// The two caches are consulted on every SSO request — the web sign-in and every
+// /mcp call carrying a Keycloak access token — so the identity provider must
+// never be waited for while a lock is held. The locks below guard lookups and
+// stores only; every fetch runs unlocked, on the caller's context, so a slow
+// IdP delays the one request that needs it and a cancelled request stops its
+// own fetch. An entry past its TTL is still served and refreshed once in the
+// background. A fetch that failed, and a kid the JWKS turned out not to list,
+// are remembered for oidcNegativeTTL so a stream of bad tokens (or an IdP that
+// is down) does not become one round trip per request.
 var (
 	oidcHTTP = &http.Client{Timeout: 8 * time.Second}
 
 	discMu    sync.Mutex
 	discCache oidcDiscovery
 	discFetch time.Time
+	// discRefreshing is set while a background refresh of an expired entry runs.
+	discRefreshing bool
+	// discFailIssuer/discFailErr/discFailAt remember the last failed fetch.
+	discFailIssuer string
+	discFailErr    error
+	discFailAt     time.Time
 
 	jwksMu    sync.Mutex
 	jwksCache = map[string]jwksCacheEntry{}
@@ -48,33 +63,97 @@ var (
 type jwksCacheEntry struct {
 	keys    map[string]*rsa.PublicKey
 	fetched time.Time
+	// refreshing is set while a background refresh of this expired entry runs.
+	refreshing bool
+	// failErr/failAt remember the last failed fetch for this JWKS URI.
+	failErr error
+	failAt  time.Time
 }
 
 const (
-	oidcCacheTTL     = 10 * time.Minute
-	maxOIDCJSONBytes = 1 << 20 // discovery and JWKS documents are configuration, never bulk data
-	minRSAKeyBits    = 2048
-	maxRSAKeyBits    = 8192
+	oidcCacheTTL    = 10 * time.Minute
+	oidcNegativeTTL = 30 * time.Second
+	// oidcRefreshTimeout bounds a background refresh, which has no request to
+	// borrow a context from.
+	oidcRefreshTimeout = 8 * time.Second
+	maxOIDCJSONBytes   = 1 << 20 // discovery and JWKS documents are configuration, never bulk data
+	minRSAKeyBits      = 2048
+	maxRSAKeyBits      = 8192
 )
 
 func invalidateOIDCCaches() {
 	discMu.Lock()
 	discCache = oidcDiscovery{}
 	discFetch = time.Time{}
+	discRefreshing = false
+	discFailIssuer, discFailErr, discFailAt = "", nil, time.Time{}
 	discMu.Unlock()
 	jwksMu.Lock()
 	jwksCache = map[string]jwksCacheEntry{}
 	jwksMu.Unlock()
 }
 
-// keycloakDiscover fetches (and caches) the issuer's OIDC discovery document.
+// keycloakDiscover returns the issuer's OIDC discovery document from the cache,
+// fetching it (unlocked, on ctx) when the cache has nothing for this issuer. An
+// expired entry is returned as is and refreshed once in the background; a fetch
+// that failed within oidcNegativeTTL is not retried.
 func keycloakDiscover(ctx context.Context, issuer string) (oidcDiscovery, error) {
 	issuer = strings.TrimRight(strings.TrimSpace(issuer), "/")
 	discMu.Lock()
-	defer discMu.Unlock()
-	if discCache.Issuer == issuer && time.Since(discFetch) < oidcCacheTTL {
-		return discCache, nil
+	if discCache.Issuer == issuer && !discFetch.IsZero() {
+		cached := discCache
+		if time.Since(discFetch) >= oidcCacheTTL && !discRefreshing {
+			discRefreshing = true
+			go refreshDiscoveryInBackground(issuer)
+		}
+		discMu.Unlock()
+		return cached, nil
 	}
+	if discFailErr != nil && discFailIssuer == issuer && time.Since(discFailAt) < oidcNegativeTTL {
+		err := discFailErr
+		discMu.Unlock()
+		return oidcDiscovery{}, err
+	}
+	discMu.Unlock()
+
+	d, err := fetchDiscovery(ctx, issuer)
+	discMu.Lock()
+	defer discMu.Unlock()
+	if err != nil {
+		// A cancelled caller says nothing about the IdP; only a real failure is
+		// remembered against it.
+		if ctx.Err() == nil {
+			discFailIssuer, discFailErr, discFailAt = issuer, err, time.Now()
+		}
+		return oidcDiscovery{}, err
+	}
+	discCache, discFetch = d, time.Now()
+	discFailIssuer, discFailErr, discFailAt = "", nil, time.Time{}
+	return d, nil
+}
+
+// refreshDiscoveryInBackground replaces an expired discovery entry. A failure
+// leaves the expired entry in place — it is still the best answer available —
+// and is logged rather than surfaced to the request that noticed the expiry.
+func refreshDiscoveryInBackground(issuer string) {
+	ctx, cancel := context.WithTimeout(context.Background(), oidcRefreshTimeout)
+	defer cancel()
+	d, err := fetchDiscovery(ctx, issuer)
+	discMu.Lock()
+	defer discMu.Unlock()
+	discRefreshing = false
+	if discCache.Issuer != issuer {
+		return // invalidated or repointed meanwhile; do not resurrect
+	}
+	if err != nil {
+		slog.Warn("oidc discovery refresh failed; serving the cached document", "issuer", issuer, "error", err)
+		return
+	}
+	discCache, discFetch = d, time.Now()
+}
+
+// fetchDiscovery is the network half of keycloakDiscover; it takes no lock.
+func fetchDiscovery(ctx context.Context, issuer string) (oidcDiscovery, error) {
 	u := strings.TrimRight(issuer, "/") + "/.well-known/openid-configuration"
 	var d oidcDiscovery
 	if err := oidcGetJSON(ctx, u, &d); err != nil {
@@ -86,7 +165,6 @@ func keycloakDiscover(ctx context.Context, issuer string) (oidcDiscovery, error)
 	if d.Issuer != issuer {
 		return oidcDiscovery{}, fmt.Errorf("OIDC discovery issuer mismatch: got %q", d.Issuer)
 	}
-	discCache, discFetch = d, time.Now()
 	return d, nil
 }
 
@@ -101,18 +179,85 @@ type jwkSet struct {
 	} `json:"keys"`
 }
 
-// keycloakJWKSKey returns the RSA public key for a kid, refreshing the JWKS on a miss
-// (handles key rotation) and on TTL expiry.
+// keycloakJWKSKey returns the RSA public key for a kid. A kid the cache holds is
+// answered at once — past the TTL too, with one background refresh — so a token
+// signed with a known key never waits for the identity provider. A kid the
+// cache lacks refetches the JWKS unlocked on ctx (key rotation) — unless the
+// document was fetched within oidcNegativeTTL, in which case the kid is simply
+// not one the IdP lists and the answer is no without a round trip; a fetch that
+// failed is likewise not retried within oidcNegativeTTL. Either way a stream of
+// tokens with unknown kids costs one fetch per oidcNegativeTTL, not one each.
 func keycloakJWKSKey(ctx context.Context, issuer, jwksURI, kid string) (*rsa.PublicKey, error) {
-	jwksMu.Lock()
-	defer jwksMu.Unlock()
 	cacheKey := issuer + "\x00" + jwksURI
-	if cached, ok := jwksCache[cacheKey]; ok && time.Since(cached.fetched) < oidcCacheTTL {
-		if k, ok := cached.keys[kid]; ok {
+	jwksMu.Lock()
+	entry, cached := jwksCache[cacheKey]
+	if cached {
+		if k, ok := entry.keys[kid]; ok {
+			if time.Since(entry.fetched) >= oidcCacheTTL && !entry.refreshing {
+				entry.refreshing = true
+				jwksCache[cacheKey] = entry
+				go refreshJWKSInBackground(cacheKey, jwksURI)
+			}
+			jwksMu.Unlock()
 			return k, nil
 		}
+		if !entry.fetched.IsZero() && time.Since(entry.fetched) < oidcNegativeTTL {
+			jwksMu.Unlock()
+			return nil, errors.New("no JWKS key for kid " + kid)
+		}
+		if entry.failErr != nil && time.Since(entry.failAt) < oidcNegativeTTL {
+			err := entry.failErr
+			jwksMu.Unlock()
+			return nil, err
+		}
 	}
-	// Cache miss or expired → (re)fetch.
+	jwksMu.Unlock()
+
+	// Unknown kid (or nothing cached) → fetch, then look again.
+	keys, err := fetchJWKS(ctx, jwksURI)
+	jwksMu.Lock()
+	defer jwksMu.Unlock()
+	entry = jwksCache[cacheKey]
+	if err != nil {
+		if ctx.Err() == nil {
+			entry.failErr, entry.failAt = err, time.Now()
+			jwksCache[cacheKey] = entry
+		}
+		return nil, err
+	}
+	entry.keys, entry.fetched = keys, time.Now()
+	entry.failErr, entry.failAt = nil, time.Time{}
+	jwksCache[cacheKey] = entry
+	if k, ok := keys[kid]; ok {
+		return k, nil
+	}
+	return nil, errors.New("no JWKS key for kid " + kid)
+}
+
+// refreshJWKSInBackground replaces an expired JWKS entry. On failure the expired
+// keys stay — a key the IdP still lists verifies as before — and the failure is
+// logged rather than surfaced to the request that noticed the expiry.
+func refreshJWKSInBackground(cacheKey, jwksURI string) {
+	ctx, cancel := context.WithTimeout(context.Background(), oidcRefreshTimeout)
+	defer cancel()
+	keys, err := fetchJWKS(ctx, jwksURI)
+	jwksMu.Lock()
+	defer jwksMu.Unlock()
+	entry, ok := jwksCache[cacheKey]
+	if !ok {
+		return // invalidated meanwhile; do not resurrect
+	}
+	entry.refreshing = false
+	if err != nil {
+		slog.Warn("jwks refresh failed; serving the cached keys", "jwks_uri", jwksURI, "error", err)
+	} else {
+		entry.keys, entry.fetched = keys, time.Now()
+	}
+	jwksCache[cacheKey] = entry
+}
+
+// fetchJWKS is the network half of keycloakJWKSKey; it takes no lock.
+func fetchJWKS(ctx context.Context, jwksURI string) (map[string]*rsa.PublicKey, error) {
 	var set jwkSet
 	if err := oidcGetJSON(ctx, jwksURI, &set); err != nil {
 		return nil, err
@@ -128,11 +273,7 @@ func keycloakJWKSKey(ctx context.Context, issuer, jwksURI, kid string) (*rsa.Pub
 		}
 		keys[k.Kid] = pub
 	}
-	jwksCache[cacheKey] = jwksCacheEntry{keys: keys, fetched: time.Now()}
-	if k, ok := keys[kid]; ok {
-		return k, nil
-	}
-	return nil, errors.New("no JWKS key for kid " + kid)
+	return keys, nil
 }
 
 func jwkToRSA(nB64, eB64 string) (*rsa.PublicKey, error) {

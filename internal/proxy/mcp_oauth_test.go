@@ -97,6 +97,14 @@ type mcpOAuthHarness struct {
 
 func newMCPOAuthHarness(t *testing.T) *mcpOAuthHarness {
 	t.Helper()
+	return newMCPOAuthHarnessWith(t, nil)
+}
+
+// newMCPOAuthHarnessWith lets a test bend the gateway configuration before the
+// server is built — the Keycloak block in particular, which the harness fills in
+// the way a working web sign-in would.
+func newMCPOAuthHarnessWith(t *testing.T, adjust func(*config.Config)) *mcpOAuthHarness {
+	t.Helper()
 	idp := newFakeIdP(t)
 	// The LLM provider behind /v1: answers every completion so the gateway tools
 	// that re-enter the pipeline (gateway_chat) have something to return.
@@ -124,6 +132,9 @@ func newMCPOAuthHarness(t *testing.T) *mcpOAuthHarness {
 		RedirectURI: "https://gateway.example/auth/keycloak/callback",
 		Scopes:      []string{"openid", "profile", "email"}, DefaultRole: "developer",
 		RoleClaim: "realm_access.roles", GroupClaim: "groups", AllowLocalLogin: true,
+	}
+	if adjust != nil {
+		adjust(&cfg)
 	}
 	server, err := NewServer(cfg, db, logger, nil)
 	if err != nil {
@@ -179,11 +190,24 @@ func (h *mcpOAuthHarness) enable(t *testing.T) {
 // mcp posts one JSON-RPC message with the bearer given and returns the response.
 func (h *mcpOAuthHarness) call(t *testing.T, path, bearer, method string) (*http.Response, map[string]any) {
 	t.Helper()
+	return h.callWith(t, path, bearer, method, nil)
+}
+
+// callWith is call with extra request headers (Host is honoured as the request's Host).
+func (h *mcpOAuthHarness) callWith(t *testing.T, path, bearer, method string, headers map[string]string) (*http.Response, map[string]any) {
+	t.Helper()
 	body := `{"jsonrpc":"2.0","id":1,"method":"` + method + `"}`
 	req, _ := http.NewRequest(http.MethodPost, h.ts.URL+path, strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	if bearer != "" {
 		req.Header.Set("Authorization", "Bearer "+bearer)
+	}
+	for k, v := range headers {
+		if strings.EqualFold(k, "Host") {
+			req.Host = v
+			continue
+		}
+		req.Header.Set(k, v)
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -493,6 +517,58 @@ func TestMCPOAuthSettingsValidationAndResourceOverride(t *testing.T) {
 	}
 }
 
+func TestMCPOAuthNeverDerivesTheResourceFromTheRequestHost(t *testing.T) {
+	// Neither mcp.oauth.resource nor a Keycloak redirect URI: the environment
+	// path lets SSO be enabled with SSO_KEYCLOAK_REDIRECT_URI empty, so this is a
+	// reachable deployment, not a hypothetical one. The gateway must not fill the
+	// gap from Host / X-Forwarded-*: those are the caller's to choose, and an
+	// identifier built from them would let a token minted for whatever aud the
+	// caller names walk in.
+	h := newMCPOAuthHarnessWith(t, func(cfg *config.Config) { cfg.Keycloak.RedirectURI = "" })
+	h.enable(t)
+
+	_, status := h.get(t, "/admin/mcp/oauth", h.adminToken)
+	reason, _ := status["reason"].(string)
+	if status["active"] != false || !strings.Contains(reason, mcpOAuthResourceKey) || status["resource"] != "" {
+		t.Fatalf("status without a derivable resource = %v, want active=false with a reason naming %s", status, mcpOAuthResourceKey)
+	}
+	if resp, _ := h.get(t, protectedResourceMetadataPath+"/mcp", ""); resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("metadata without a derivable resource = %d, want 404", resp.StatusCode)
+	}
+
+	// A token whose aud matches whatever origin the request claims — the
+	// listener's own address, a chosen Host, or a forwarded host/proto — is refused.
+	for name, headers := range map[string]map[string]string{
+		"listener origin":  nil,
+		"chosen host":      {"Host": "attacker.example"},
+		"forwarded origin": {"X-Forwarded-Host": "attacker.example", "X-Forwarded-Proto": "https"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			origin := strings.TrimSuffix(h.ts.URL, "/")
+			if hostHeader := headers["Host"]; hostHeader != "" {
+				origin = "http://" + hostHeader
+			}
+			if fwd := headers["X-Forwarded-Host"]; fwd != "" {
+				origin = headers["X-Forwarded-Proto"] + "://" + fwd
+			}
+			token := h.idp.accessToken(t, map[string]any{"aud": []any{origin + "/mcp"}})
+			resp, out := h.callWith(t, "/mcp", token, "tools/list", headers)
+			if resp.StatusCode != http.StatusUnauthorized || resp.Header.Get("WWW-Authenticate") != "" {
+				t.Fatalf("token for aud %s/mcp = %d %v www-authenticate=%q, want 401 without a challenge", origin, resp.StatusCode, out, resp.Header.Get("WWW-Authenticate"))
+			}
+		})
+	}
+
+	// Writing the identifier down is what opens the door — nothing request-derived does.
+	h.putSetting(t, mcpOAuthResourceKey, "https://ai.corp.example/mcp")
+	if _, status := h.get(t, "/admin/mcp/oauth", h.adminToken); status["active"] != true || status["resource"] != "https://ai.corp.example/mcp" {
+		t.Fatalf("status after setting the resource = %v", status)
+	}
+	if resp, _ := h.callWith(t, "/mcp", h.idp.accessToken(t, map[string]any{"aud": []any{"https://ai.corp.example/mcp"}}), "tools/list", map[string]string{"Host": "attacker.example"}); resp.StatusCode != http.StatusOK {
+		t.Fatalf("token for the configured resource = %d, want 200 whatever the Host", resp.StatusCode)
+	}
+}
+
 // mustSignHS256 mints a token in the gateway's own session-token format so the
 // test can show an HS256 signature is never accepted as an SSO token.
 func (s *Server) mustSignHS256(t *testing.T, claims map[string]any) string {
@@ -648,23 +724,59 @@ func TestMCPOAuthRefusalLogsTheCause(t *testing.T) {
 	otherKey, _ := rsa.GenerateKey(rand.Reader, 2048)
 	cases := []struct {
 		name, token, code, cause string
+		// requestID is sent as X-Request-ID; empty lets the gateway mint one.
+		requestID string
 	}{
-		{"wrong key", signRS256(t, otherKey, "idp-kid", map[string]any{"iss": h.idp.issuer(), "sub": "kc-subject-1", "azp": "claude-mcp", "aud": "account", "exp": float64(time.Now().Add(time.Hour).Unix())}), "invalid_token", "jwt signature verification failed"},
-		{"other issuer", h.idp.accessToken(t, map[string]any{"iss": "https://evil.example/realms/vibe"}), "invalid_token", "jwt issuer mismatch"},
-		{"expired", h.idp.accessToken(t, map[string]any{"exp": float64(time.Now().Add(-time.Hour).Unix())}), "invalid_token", "jwt expired"},
-		{"other audience", h.idp.accessToken(t, map[string]any{"azp": "some-other-app"}), "audience_mismatch", "azp=\\\"some-other-app\\\""},
-		{"unlinked", h.idp.accessToken(t, map[string]any{"sub": "kc-subject-unknown"}), "account_not_linked", "subject \\\"kc-subject-unknown\\\""},
+		{"wrong key", signRS256(t, otherKey, "idp-kid", map[string]any{"iss": h.idp.issuer(), "sub": "kc-subject-1", "azp": "claude-mcp", "aud": "account", "exp": float64(time.Now().Add(time.Hour).Unix())}), "invalid_token", "jwt signature verification failed", ""},
+		{"other issuer", h.idp.accessToken(t, map[string]any{"iss": "https://evil.example/realms/vibe"}), "invalid_token", "jwt issuer mismatch", ""},
+		{"expired", h.idp.accessToken(t, map[string]any{"exp": float64(time.Now().Add(-time.Hour).Unix())}), "invalid_token", "jwt expired", ""},
+		{"other audience", h.idp.accessToken(t, map[string]any{"azp": "some-other-app"}), "audience_mismatch", "azp=\\\"some-other-app\\\"", ""},
+		{"unlinked", h.idp.accessToken(t, map[string]any{"sub": "kc-subject-unknown"}), "account_not_linked", "subject \\\"kc-subject-unknown\\\"", ""},
+		{"caller's request id", h.idp.accessToken(t, map[string]any{"azp": "some-other-app"}), "audience_mismatch", "azp=\\\"some-other-app\\\"", "req-mcp-oauth-42"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			logs.Reset()
-			if resp, _ := h.call(t, "/mcp", tc.token, "tools/list"); resp.StatusCode != http.StatusUnauthorized {
+			var headers map[string]string
+			if tc.requestID != "" {
+				headers = map[string]string{"X-Request-ID": tc.requestID}
+			}
+			resp, _ := h.callWith(t, "/mcp", tc.token, "tools/list", headers)
+			if resp.StatusCode != http.StatusUnauthorized {
 				t.Fatalf("status = %d, want 401", resp.StatusCode)
 			}
 			got := logs.String()
 			if !strings.Contains(got, "mcp oauth token refused") || !strings.Contains(got, "code="+tc.code) || !strings.Contains(got, tc.cause) {
 				t.Fatalf("operator log must name the failed check:\n%s\nwant code=%s and %q", got, tc.code, tc.cause)
 			}
+			// The refusal is tied to the request the client saw fail: the same id the
+			// response carries in X-Request-ID — the caller's when it sent one.
+			requestID := refusalLogField(got, "request_id")
+			if requestID == "" {
+				t.Fatalf("operator log must carry a non-empty request_id:\n%s", got)
+			}
+			if want := resp.Header.Get("X-Request-ID"); requestID != want {
+				t.Fatalf("request_id=%q in the log, but the response carried X-Request-ID %q", requestID, want)
+			}
+			if tc.requestID != "" && requestID != tc.requestID {
+				t.Fatalf("request_id=%q, want the caller's %q", requestID, tc.requestID)
+			}
 		})
 	}
+}
+
+// refusalLogField pulls key=value out of the "mcp oauth token refused" line of a
+// slog text log; "" when the line or the key is absent or the value is empty.
+func refusalLogField(logs, key string) string {
+	for _, line := range strings.Split(logs, "\n") {
+		if !strings.Contains(line, "mcp oauth token refused") {
+			continue
+		}
+		for _, field := range strings.Fields(line) {
+			if value, ok := strings.CutPrefix(field, key+"="); ok {
+				return strings.Trim(value, `"`)
+			}
+		}
+	}
+	return ""
 }
