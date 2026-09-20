@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -227,6 +228,12 @@ func (s *Server) handleMomentoProxy(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	ctx, cancel := context.WithTimeout(r.Context(), momentoProxyTimeout)
+	defer cancel()
+	r = r.WithContext(ctx)
+	transport := &http.Transport{ResponseHeaderTimeout: momentoProxyTimeout, Proxy: http.ProxyFromEnvironment}
+	// This pool belongs to one request, including when response copying aborts.
+	defer transport.CloseIdleConnections()
 	rest := strings.TrimPrefix(r.URL.Path, tracking.MomentoProxyPrefix)
 	proxy := &httputil.ReverseProxy{
 		Rewrite: func(request *httputil.ProxyRequest) {
@@ -239,7 +246,7 @@ func (s *Server) handleMomentoProxy(w http.ResponseWriter, r *http.Request) {
 			request.Out.Header.Del("Cookie")
 			request.SetXForwarded()
 		},
-		Transport: &http.Transport{ResponseHeaderTimeout: momentoProxyTimeout, Proxy: http.ProxyFromEnvironment},
+		Transport: transport,
 		ErrorHandler: func(w http.ResponseWriter, _ *http.Request, _ error) {
 			w.WriteHeader(http.StatusBadGateway)
 		},

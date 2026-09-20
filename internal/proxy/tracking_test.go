@@ -2,10 +2,12 @@ package proxy
 
 import (
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"vibe-coders/internal/tracking"
 )
@@ -230,5 +232,77 @@ func TestMomentoProxyForwardsSameOriginTraffic(t *testing.T) {
 	putSetting(t, ts.URL, trackingMomentoProxyKey, "false")
 	if resp, _ := req(t, http.MethodGet, ts.URL+"/momento/tracker.js", ""); resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("proxy after momento_proxy=false = %d", resp.StatusCode)
+	}
+}
+
+func TestMomentoProxyClosesCollectorConnections(t *testing.T) {
+	closed := make(chan struct{}, 4)
+	collector := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("ok"))
+	}))
+	collector.Config.ConnState = func(_ net.Conn, state http.ConnState) {
+		if state == http.StateClosed {
+			closed <- struct{}{}
+		}
+	}
+	collector.Start()
+	t.Cleanup(collector.Close)
+	ts, _ := settingsServer(t)
+	putSetting(t, ts.URL, trackingProviderKey, tracking.ProviderMomento)
+	putSetting(t, ts.URL, trackingMomentoURLKey, collector.URL)
+	putSetting(t, ts.URL, trackingMomentoSiteIDKey, "vibe")
+	putSetting(t, ts.URL, trackingEnabledKey, "true")
+	for i := 0; i < 4; i++ {
+		resp, err := http.Get(ts.URL + "/momento/tracker.js")
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil || resp.StatusCode != http.StatusOK || string(body) != "ok" {
+			t.Fatalf("response = %d %q, err=%v", resp.StatusCode, body, err)
+		}
+		select {
+		case <-closed:
+		case <-time.After(time.Second):
+			t.Fatal("collector connection remains open after completed proxy request")
+		}
+	}
+}
+
+func TestMomentoProxyTimesOutStalledResponseBody(t *testing.T) {
+	cancelled := make(chan struct{})
+	collector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("partial"))
+		w.(http.Flusher).Flush()
+		<-r.Context().Done()
+		close(cancelled)
+	}))
+	t.Cleanup(collector.Close)
+	ts, _ := settingsServer(t)
+	putSetting(t, ts.URL, trackingProviderKey, tracking.ProviderMomento)
+	putSetting(t, ts.URL, trackingMomentoURLKey, collector.URL)
+	putSetting(t, ts.URL, trackingMomentoSiteIDKey, "vibe")
+	putSetting(t, ts.URL, trackingEnabledKey, "true")
+	client := &http.Client{Timeout: momentoProxyTimeout + 3*time.Second}
+	start := time.Now()
+	resp, err := client.Get(ts.URL + "/momento/tracker.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	elapsed := time.Since(start)
+	if err == nil || string(body) != "partial" {
+		t.Fatalf("expected truncated response, got %q, err=%v", body, err)
+	}
+	if elapsed < momentoProxyTimeout-time.Second || elapsed > momentoProxyTimeout+2*time.Second {
+		t.Fatalf("body read ended after %s, want proxy deadline of %s", elapsed, momentoProxyTimeout)
+	}
+	select {
+	case <-cancelled:
+	case <-time.After(time.Second):
+		t.Fatal("collector request was not cancelled")
 	}
 }
