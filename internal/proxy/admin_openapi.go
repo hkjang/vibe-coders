@@ -40,6 +40,9 @@ var apiEndpoints = []apiEndpoint{
 	{"/mcp", []string{"post"}, "mcp", "MCP gateway (JSON-RPC passthrough)", false},
 	{"/mcp/gateway", []string{"post"}, "mcp", "AI Gateway MCP Server — vibe-coders' own features as MCP tools/resources/prompts", false},
 	{"/admin/gateway-mcp/info", []string{"get"}, "mcp", "Gateway MCP catalog (tools/resources/prompts) for the admin UI", false},
+	{"/admin/mcp/oauth", []string{"get"}, "mcp", "MCP SSO(OAuth) status: whether Keycloak access tokens are accepted on /mcp, the resource identifier, metadata URL, accepted audiences and scopes", false},
+	{"/.well-known/oauth-protected-resource", []string{"get"}, "mcp", "RFC 9728 protected resource metadata for /mcp (unauthenticated bare JSON; 404 while mcp.oauth.enabled is off)", true},
+	{"/.well-known/oauth-protected-resource/{path}", []string{"get"}, "mcp", "RFC 9728 protected resource metadata for one MCP endpoint (mcp or mcp/gateway)", true},
 	{"/admin/mcp/gateway/test", []string{"post"}, "mcp", "Admin: invoke a Gateway MCP tool by name to verify it", false},
 	{"/admin/mcp/contracts", []string{"get", "post", "delete"}, "mcp", "MCP Tool Contract Registry: list/upsert/delete tool contracts", false},
 	{"/admin/mcp/contracts/validate", []string{"post"}, "mcp", "Detect drift between registered MCP tool contracts and live gateway tools", false},
@@ -657,6 +660,11 @@ func enrichOpenAPIOperation(route, method string, op map[string]any) {
 		responses["204"] = map[string]any{"description": "Configuration saved"}
 	case "get /admin/tracking/violations", "delete /admin/tracking/violations":
 		responses["200"] = successResponse("TrackingStatusResponse")
+	case "get /admin/mcp/oauth":
+		responses["200"] = successResponse("MCPOAuthStatusResponse")
+	case "get /.well-known/oauth-protected-resource", "get /.well-known/oauth-protected-resource/{path}":
+		responses["200"] = successResponse("ProtectedResourceMetadata")
+		responses["404"] = map[string]any{"description": "SSO tokens are not accepted on MCP (mcp.oauth.enabled off or Keycloak SSO unset)"}
 	case "post /admin/tracking/violations/allow":
 		op["requestBody"] = requestBody("TrackingAllowRequest")
 		responses["200"] = successResponse("TrackingStatusResponse")
@@ -840,6 +848,19 @@ func appUIOpenAPISchemas() map[string]any {
 			"include_admin": map[string]any{"type": "boolean"}, "placement": map[string]any{"type": "string", "enum": []string{tracking.PlacementHead, tracking.PlacementBody}}, "momento_proxy": map[string]any{"type": "boolean"},
 			"allowed_hosts": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}, "violations": map[string]any{"type": "array", "maxItems": tracking.MaxViolations, "items": schemaRef("TrackingViolation")},
 			"error": map[string]any{"type": "string", "description": "What the chosen provider is still missing; absent when the configuration is complete."},
+		}},
+		"MCPOAuthStatusResponse": map[string]any{"type": "object", "required": []string{"enabled", "active", "issuer", "client_id", "resource", "resource_source", "gateway_resource", "metadata_url", "audience", "scopes"}, "properties": map[string]any{
+			"enabled": map[string]any{"type": "boolean", "description": "mcp.oauth.enabled as configured."}, "active": map[string]any{"type": "boolean", "description": "True when /mcp actually accepts Keycloak access tokens."},
+			"issuer": map[string]any{"type": "string", "description": "Keycloak realm issuer reused from the SSO configuration."}, "client_id": map[string]any{"type": "string", "description": "Web sign-in client id, accepted as an audience."},
+			"resource": map[string]any{"type": "string", "description": "Resource identifier advertised for /mcp (RFC 8707)."}, "resource_source": map[string]any{"type": "string", "enum": []string{"setting", "derived"}},
+			"gateway_resource": map[string]any{"type": "string", "description": "Resource identifier for /mcp/gateway."}, "metadata_url": map[string]any{"type": "string", "description": "RFC 9728 metadata URL clients are sent to."},
+			"audience": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}, "scopes": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+			"reason": map[string]any{"type": "string", "description": "Why tokens are not accepted; absent when active."},
+		}},
+		"ProtectedResourceMetadata": map[string]any{"type": "object", "required": []string{"resource", "authorization_servers", "bearer_methods_supported", "scopes_supported"}, "properties": map[string]any{
+			"resource": map[string]any{"type": "string"}, "authorization_servers": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+			"bearer_methods_supported": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}, "scopes_supported": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+			"resource_name": map[string]any{"type": "string"},
 		}},
 		"TrackingAllowRequest": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"origin"}, "properties": map[string]any{"origin": map[string]any{"type": "string", "description": "An http(s) origin such as https://cdn.example"}}},
 		"SettingWriteRequest": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"value"}, "properties": map[string]any{

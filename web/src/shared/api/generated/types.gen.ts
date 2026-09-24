@@ -278,6 +278,44 @@ export type LatencyQuantiles = {
     p99: number;
 };
 
+export type McpoAuthStatusResponse = {
+    /**
+     * True when /mcp actually accepts Keycloak access tokens.
+     */
+    active: boolean;
+    audience: Array<string>;
+    /**
+     * Web sign-in client id, accepted as an audience.
+     */
+    client_id: string;
+    /**
+     * mcp.oauth.enabled as configured.
+     */
+    enabled: boolean;
+    /**
+     * Resource identifier for /mcp/gateway.
+     */
+    gateway_resource: string;
+    /**
+     * Keycloak realm issuer reused from the SSO configuration.
+     */
+    issuer: string;
+    /**
+     * RFC 9728 metadata URL clients are sent to.
+     */
+    metadata_url: string;
+    /**
+     * Why tokens are not accepted; absent when active.
+     */
+    reason?: string;
+    /**
+     * Resource identifier advertised for /mcp (RFC 8707).
+     */
+    resource: string;
+    resource_source: 'setting' | 'derived';
+    scopes: Array<string>;
+};
+
 export type MigrationFeature = {
     app_path: string;
     availability_reason?: string;
@@ -441,6 +479,14 @@ export type PricingWriteRequest = {
 
 export type PricingWriteResponse = {
     version: ModelPricingVersion;
+};
+
+export type ProtectedResourceMetadata = {
+    authorization_servers: Array<string>;
+    bearer_methods_supported: Array<string>;
+    resource: string;
+    resource_name?: string;
+    scopes_supported: Array<string>;
 };
 
 export type ProviderHealthAlert = {
@@ -741,6 +787,66 @@ export type UserSummary = {
     team: string;
     tokens: number;
 };
+
+export type GetWellKnownOauthProtectedResourceData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/.well-known/oauth-protected-resource';
+};
+
+export type GetWellKnownOauthProtectedResourceErrors = {
+    /**
+     * SSO tokens are not accepted on MCP (mcp.oauth.enabled off or Keycloak SSO unset)
+     */
+    404: unknown;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetWellKnownOauthProtectedResourceError = GetWellKnownOauthProtectedResourceErrors[keyof GetWellKnownOauthProtectedResourceErrors];
+
+export type GetWellKnownOauthProtectedResourceResponses = {
+    /**
+     * OK
+     */
+    200: ProtectedResourceMetadata;
+};
+
+export type GetWellKnownOauthProtectedResourceResponse = GetWellKnownOauthProtectedResourceResponses[keyof GetWellKnownOauthProtectedResourceResponses];
+
+export type GetWellKnownOauthProtectedResourcePathData = {
+    body?: never;
+    path: {
+        path: string;
+    };
+    query?: never;
+    url: '/.well-known/oauth-protected-resource/{path}';
+};
+
+export type GetWellKnownOauthProtectedResourcePathErrors = {
+    /**
+     * SSO tokens are not accepted on MCP (mcp.oauth.enabled off or Keycloak SSO unset)
+     */
+    404: unknown;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetWellKnownOauthProtectedResourcePathError = GetWellKnownOauthProtectedResourcePathErrors[keyof GetWellKnownOauthProtectedResourcePathErrors];
+
+export type GetWellKnownOauthProtectedResourcePathResponses = {
+    /**
+     * OK
+     */
+    200: ProtectedResourceMetadata;
+};
+
+export type GetWellKnownOauthProtectedResourcePathResponse = GetWellKnownOauthProtectedResourcePathResponses[keyof GetWellKnownOauthProtectedResourcePathResponses];
 
 export type GetAdminData = {
     body?: never;
@@ -3199,6 +3305,31 @@ export type GetAdminMcpLoopsResponses = {
      */
     200: unknown;
 };
+
+export type GetAdminMcpOauthData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/admin/mcp/oauth';
+};
+
+export type GetAdminMcpOauthErrors = {
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminMcpOauthError = GetAdminMcpOauthErrors[keyof GetAdminMcpOauthErrors];
+
+export type GetAdminMcpOauthResponses = {
+    /**
+     * OK
+     */
+    200: McpoAuthStatusResponse;
+};
+
+export type GetAdminMcpOauthResponse = GetAdminMcpOauthResponses[keyof GetAdminMcpOauthResponses];
 
 export type PostAdminMcpOnboardingCheckData = {
     body?: never;

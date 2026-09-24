@@ -26,6 +26,7 @@ import type {
   GetAdminSettingsHistoryData,
   DeleteAdminTrackingViolationsData,
   GetAdminSsoKeycloakConfigData,
+  GetAdminMcpOauthData,
   GetAdminTrackingViolationsData,
   PostAdminTrackingViolationsAllowData,
   GetAdminSystemErrorsData,
@@ -70,6 +71,7 @@ import {
   indexHealthSchema,
   keycloakConfigSchema,
   keycloakTestSchema,
+  mcpOAuthStatusSchema,
   trackingStatusSchema,
   knowledgeListSchema,
   knowledgeSavedSchema,
@@ -280,6 +282,13 @@ export const systemEndpoints = {
       "/admin/sso/keycloak/test",
       keycloakTestSchema,
     ),
+  },
+  // MCP over SSO: the switch, resource identifier, audiences and scopes are
+  // ordinary settings under the "mcp" category; this call reports whether
+  // Keycloak access tokens are actually accepted on /mcp and the values a
+  // person copies into Keycloak or an MCP client.
+  mcpOAuth: {
+    status: operation<GetAdminMcpOauthData, unknown>()("GET", "/admin/mcp/oauth", mcpOAuthStatusSchema),
   },
   // Visitor tracking: the snippet itself is configured through the ordinary
   // settings under the "tracking" category; these calls surface what the

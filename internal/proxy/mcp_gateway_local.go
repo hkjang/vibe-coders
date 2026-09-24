@@ -22,11 +22,15 @@ func (s *Server) handleGatewayMCP(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
 		return
 	}
-	apiKeyID, authCtx, ok := s.authenticateProxyContext(r)
-	if !ok {
-		writeOpenAIError(w, http.StatusUnauthorized, "invalid proxy API key", "invalid_request_error", "invalid_api_key")
+	apiKeyID, authCtx, outcome, refusal := s.authenticateMCP(r)
+	if outcome != authOK {
+		s.writeMCPUnauthorized(w, r, refusal)
 		return
 	}
+	// Tools that run a completion re-enter /v1/chat/completions with this
+	// request; an SSO subject rides along by context because the REST door
+	// refuses its bearer. A key is re-authenticated there exactly as before.
+	r = mcpRequestWithPrincipal(r, apiKeyID, authCtx)
 	var raw json.RawMessage
 	if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
 		writeJSON(w, http.StatusOK, rpcErrorResponse(nil, -32700, "parse error"))
@@ -383,7 +387,14 @@ func (s *Server) runGatewayTool(ctx context.Context, r *http.Request, apiKeyID s
 		return gatewayToolJSON(map[string]any{"model": a.Model, "input_tokens": a.InputTokens, "output_tokens": a.OutputTokens, "estimated_cost_krw": round1(cost)}), nil
 
 	case "gateway_check_quota":
-		dec, err := s.checkQuotas(ctx, apiKeyID, "", nil)
+		// Same guard as the request pipeline: the team is known when the auth
+		// context belongs to this identity. An SSO subject has no api_keys row to
+		// look it up from, so this is the only way its team quota is consulted.
+		var knownTeam *string
+		if authCtx != nil && authCtx.APIKeyID == apiKeyID {
+			knownTeam = &authCtx.KeyTeam
+		}
+		dec, err := s.checkQuotas(ctx, apiKeyID, "", knownTeam)
 		if err != nil {
 			return nil, err
 		}

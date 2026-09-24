@@ -1131,6 +1131,74 @@
         ],
         "type": "object"
       },
+      "MCPOAuthStatusResponse": {
+        "properties": {
+          "active": {
+            "description": "True when /mcp actually accepts Keycloak access tokens.",
+            "type": "boolean"
+          },
+          "audience": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "client_id": {
+            "description": "Web sign-in client id, accepted as an audience.",
+            "type": "string"
+          },
+          "enabled": {
+            "description": "mcp.oauth.enabled as configured.",
+            "type": "boolean"
+          },
+          "gateway_resource": {
+            "description": "Resource identifier for /mcp/gateway.",
+            "type": "string"
+          },
+          "issuer": {
+            "description": "Keycloak realm issuer reused from the SSO configuration.",
+            "type": "string"
+          },
+          "metadata_url": {
+            "description": "RFC 9728 metadata URL clients are sent to.",
+            "type": "string"
+          },
+          "reason": {
+            "description": "Why tokens are not accepted; absent when active.",
+            "type": "string"
+          },
+          "resource": {
+            "description": "Resource identifier advertised for /mcp (RFC 8707).",
+            "type": "string"
+          },
+          "resource_source": {
+            "enum": [
+              "setting",
+              "derived"
+            ],
+            "type": "string"
+          },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "enabled",
+          "active",
+          "issuer",
+          "client_id",
+          "resource",
+          "resource_source",
+          "gateway_resource",
+          "metadata_url",
+          "audience",
+          "scopes"
+        ],
+        "type": "object"
+      },
       "MigrationFeature": {
         "properties": {
           "app_path": {
@@ -1779,6 +1847,41 @@
         },
         "required": [
           "version"
+        ],
+        "type": "object"
+      },
+      "ProtectedResourceMetadata": {
+        "properties": {
+          "authorization_servers": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "bearer_methods_supported": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "resource": {
+            "type": "string"
+          },
+          "resource_name": {
+            "type": "string"
+          },
+          "scopes_supported": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "resource",
+          "authorization_servers",
+          "bearer_methods_supported",
+          "scopes_supported"
         ],
         "type": "object"
       },
@@ -2938,6 +3041,84 @@
   },
   "openapi": "3.0.3",
   "paths": {
+    "/.well-known/oauth-protected-resource": {
+      "get": {
+        "operationId": "get___well_known_oauth_protected_resource",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProtectedResourceMetadata"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "description": "SSO tokens are not accepted on MCP (mcp.oauth.enabled off or Keycloak SSO unset)"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "RFC 9728 protected resource metadata for /mcp (unauthenticated bare JSON; 404 while mcp.oauth.enabled is off)",
+        "tags": [
+          "mcp"
+        ]
+      }
+    },
+    "/.well-known/oauth-protected-resource/{path}": {
+      "get": {
+        "operationId": "get___well_known_oauth_protected_resource_path",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProtectedResourceMetadata"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "description": "SSO tokens are not accepted on MCP (mcp.oauth.enabled off or Keycloak SSO unset)"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "RFC 9728 protected resource metadata for one MCP endpoint (mcp or mcp/gateway)",
+        "tags": [
+          "mcp"
+        ]
+      }
+    },
     "/admin": {
       "get": {
         "operationId": "get__admin",
@@ -6527,6 +6708,42 @@
           }
         ],
         "summary": "MCP tool-call loops",
+        "tags": [
+          "mcp"
+        ]
+      }
+    },
+    "/admin/mcp/oauth": {
+      "get": {
+        "operationId": "get__admin_mcp_oauth",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPOAuthStatusResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "MCP SSO(OAuth) status: whether Keycloak access tokens are accepted on /mcp, the resource identifier, metadata URL, accepted audiences and scopes",
         "tags": [
           "mcp"
         ]

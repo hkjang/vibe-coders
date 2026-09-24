@@ -99,3 +99,17 @@
 .settings-delegated-list li:last-child {
   border-bottom: none;
 }
+
+/* MCP SSO card: a value the operator copies into Keycloak or an MCP client. */
+.settings-copyable {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex-wrap: wrap;
+  word-break: break-all;
+}
+.settings-help {
+  margin: 0;
+  color: var(--color-muted);
+  font-size: 0.8125rem;
+}

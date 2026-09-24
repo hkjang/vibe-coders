@@ -14,6 +14,7 @@ export const systemSettingsKeys = {
   errors: ["system", "system-errors"] as const,
   sso: ["system", "sso", "keycloak"] as const,
   tracking: ["system", "tracking"] as const,
+  mcpOAuth: ["system", "mcp-oauth"] as const,
   roles: ["system", "roles"] as const,
   auditLogs: ["system", "audit", "logs"] as const,
   authEvents: ["system", "audit", "auth-events"] as const,
@@ -75,6 +76,13 @@ export function useTrackingStatus() {
   return useQuery({
     queryKey: systemSettingsKeys.tracking,
     queryFn: ({ signal }) => apiClient.request(system.tracking.status, { signal, routeId }),
+  });
+}
+
+export function useMcpOAuthStatus() {
+  return useQuery({
+    queryKey: systemSettingsKeys.mcpOAuth,
+    queryFn: ({ signal }) => apiClient.request(system.mcpOAuth.status, { signal, routeId }),
   });
 }
 
