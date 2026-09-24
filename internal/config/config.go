@@ -330,7 +330,7 @@ type Text2SQLConfig struct {
 	CacheTTL          time.Duration // preview SQL cache TTL
 	ClarifyEnabled    bool          // ask a clarification question instead of guessing on vague prompts
 	RequireDateFilter bool          // when clarifying, require a time qualifier
-	StatementTimeout  time.Duration // (postgres execute) per-statement timeout
+	StatementTimeout  time.Duration // per-statement timeout (all execute drivers; postgres also sets statement_timeout)
 	WorkMem           string        // (postgres execute) SET LOCAL work_mem, e.g. "64MB"
 	ShadowModels      []string      // candidate upstream models to shadow-evaluate on preview (quality data)
 	ShadowSampleRate  float64       // 0..1 fraction of eligible preview requests to shadow-evaluate

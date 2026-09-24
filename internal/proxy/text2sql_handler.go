@@ -1176,12 +1176,28 @@ func (s *Server) text2sqlExecDBByID(ctx context.Context, connID string) (*sql.DB
 	return db, nil
 }
 
+// execQueryHardCap bounds every execute query regardless of configuration; a configured
+// statement timeout only ever shortens it.
+const execQueryHardCap = 30 * time.Second
+
+// execQueryDeadline is the context deadline for one execute query: the configured
+// statement timeout when set and shorter than the hard cap, otherwise the hard cap.
+func execQueryDeadline(stmtTimeout time.Duration) time.Duration {
+	if stmtTimeout > 0 && stmtTimeout < execQueryHardCap {
+		return stmtTimeout
+	}
+	return execQueryHardCap
+}
+
 // executeReadOnlyQuery runs a SELECT with a timeout and row cap. The SQL has already
-// been validated as a single read-only statement. For PostgreSQL it runs inside a
-// READ ONLY transaction with a per-statement timeout and optional work_mem cap
-// (sandbox), so a heavy or accidentally-mutating query can't harm the source DB.
+// been validated as a single read-only statement. The statement timeout is applied as
+// the query context deadline for every driver (pgx, mysql, sqlite), so MySQL and SQLite
+// sources are bounded the same way as PostgreSQL. For PostgreSQL it additionally runs
+// inside a READ ONLY transaction with a server-side statement_timeout and optional
+// work_mem cap (sandbox), so a heavy or accidentally-mutating query can't harm the
+// source DB.
 func executeReadOnlyQuery(ctx context.Context, db *sql.DB, driver, query string, rowLimit int, stmtTimeout time.Duration, workMem string) ([]string, [][]string, int64, error) {
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, execQueryDeadline(stmtTimeout))
 	defer cancel()
 
 	driver = normalizeExecDriver(driver)
