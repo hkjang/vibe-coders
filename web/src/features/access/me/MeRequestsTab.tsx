@@ -250,7 +250,7 @@ export function MeRequestsTab(): React.JSX.Element {
                 </ul>
               )}
             </SectionCard>
-            <SectionCard title="MCP 도구와 Skill" headingLevel={3}>
+            <SectionCard title="MCP 도구와 스킬" headingLevel={3}>
               <KeyValueList
                 items={[
                   { label: "MCP 사용", value: receipt.data.mcp_used ? "예" : "아니오" },
@@ -263,8 +263,8 @@ export function MeRequestsTab(): React.JSX.Element {
                             .map((tool) => `${tool.server}/${tool.tool}${tool.error ? " (오류)" : ""}`)
                             .join(", "),
                   },
-                  { label: "Skill 사용", value: receipt.data.skill_used ? "예" : "아니오" },
-                  { label: "Skill", value: receipt.data.skills.join(", ") },
+                  { label: "스킬 사용", value: receipt.data.skill_used ? "예" : "아니오" },
+                  { label: "스킬", value: receipt.data.skills.join(", ") },
                 ]}
               />
             </SectionCard>

@@ -38,7 +38,7 @@ export function SkillPolicyTester({ skillName }: { skillName: string }): React.J
     <SectionCard
       title="정책 시뮬레이션"
       headingLevel={3}
-      description="모델·도구·팀 조합이 이 Skill의 정책을 통과하는지 실제 호출 없이 확인합니다."
+      description="모델·도구·팀 조합이 이 스킬의 정책을 통과하는지 실제 호출 없이 확인합니다."
     >
       <form
         className="form-grid"

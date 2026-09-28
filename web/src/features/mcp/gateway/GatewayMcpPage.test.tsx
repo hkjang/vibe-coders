@@ -80,6 +80,35 @@ describe("GatewayMcpPage", () => {
     expect(await screen.findByText("/mcp/gateway")).toBeInTheDocument();
     expect(await screen.findAllByText("gateway_chat")).not.toHaveLength(0);
     expect(screen.getByText("2025-06-18")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "게이트웨이 MCP", level: 1 })).toBeVisible();
+    const published = await screen.findByRole("table", { name: "게이트웨이 MCP 게시 계약" });
+    expect(within(published).getByText("보통")).toBeVisible();
+    const registry = await screen.findByRole("table", { name: "MCP 도구 계약 레지스트리" });
+    expect(within(registry).getByText("보통")).toBeVisible();
+  });
+
+  it("한국어 위험도를 선택해도 계약의 원래 enum과 식별자를 저장한다", async () => {
+    const api = mockApi({
+      ...baseHandlers,
+      "POST /admin/mcp/contracts": () => ({ contract: { ...contracts.contracts[0], risk_level: "high" } }),
+    });
+    const user = userEvent.setup();
+    renderScreen(<GatewayMcpPage />, { route: "/mcp-gateway", path: "/mcp-gateway/*" });
+
+    await user.click(await screen.findByRole("button", { name: "수정" }));
+    const dialog = await screen.findByRole("dialog", { name: "도구 계약" });
+    await user.selectOptions(within(dialog).getByLabelText("위험도*"), "높음");
+    await user.click(within(dialog).getByRole("button", { name: "저장" }));
+
+    await waitFor(() => expect(api.bodies("POST /admin/mcp/contracts")).toHaveLength(1));
+    expect(api.bodies("POST /admin/mcp/contracts")[0]).toMatchObject({
+      id: "mtc_1",
+      namespace: "gateway",
+      name: "gateway_chat",
+      risk_level: "high",
+      cost_policy: "per_call_model_cost",
+    });
+    await waitFor(() => expect(toastSpy.success).toHaveBeenCalledWith("도구 계약을 저장했습니다."));
   });
 
   it("계약이 없으면 빈 상태를 안내한다", async () => {

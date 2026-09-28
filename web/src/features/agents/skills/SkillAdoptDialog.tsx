@@ -15,7 +15,7 @@ const adoptSchema = z
     name: z
       .string()
       .trim()
-      .min(1, "Skill 이름을 입력하세요.")
+      .min(1, "스킬 이름을 입력하세요.")
       .regex(/^[a-z0-9][a-z0-9-]*$/u, "소문자, 숫자, 하이픈만 사용할 수 있습니다."),
     description: z.string(),
     risk_level: z.string(),
@@ -71,14 +71,14 @@ export function SkillAdoptDialog({
 
   return (
     <FormDialog
-      description="후보를 초안(draft) Skill로 채택합니다. 승격은 게이트를 통과한 뒤에만 가능합니다."
+      description="후보를 초안(draft) 스킬로 채택합니다. 승격은 게이트를 통과한 뒤에만 가능합니다."
       form={form}
       onOpenChange={onOpenChange}
       onSubmit={(values) => onSubmit({ ...values, source: candidate?.source ?? "" })}
       open={open}
       returnFocusRef={returnFocusRef}
       submitLabel="초안으로 채택"
-      title="후보를 Skill로 채택"
+      title="후보를 스킬로 채택"
     >
       <FormField label="이름" required error={errors.name?.message}>
         {(control) => <Input {...control} {...form.register("name")} />}

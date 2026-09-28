@@ -150,7 +150,7 @@ export function SkillDetailSheet({
 
   return (
     <Sheet
-      description="Skill 정의와 실행 정책, 실행 로그와 승격 이력을 확인합니다."
+      description="스킬 정의와 실행 정책, 실행 로그와 승격 이력을 확인합니다."
       onOpenChange={(next) => {
         if (!next) setPanel(undefined);
         onOpenChange(next);
@@ -158,10 +158,10 @@ export function SkillDetailSheet({
       open={open}
       returnFocusRef={returnFocusRef}
       size="wide"
-      title={skill?.name ?? "Skill"}
+      title={skill?.name ?? "스킬"}
     >
       {!skill ? (
-        <EmptyState title="Skill을 찾을 수 없습니다." description="목록에서 다시 선택하세요." />
+        <EmptyState title="스킬을 찾을 수 없습니다." description="목록에서 다시 선택하세요." />
       ) : (
         <div className="agents-detail-stack">
           <KeyValueList
@@ -234,7 +234,7 @@ export function SkillDetailSheet({
 
           <SectionCard title="지침" headingLevel={3}>
             {skill.instructions ? (
-              <pre className="mono" tabIndex={0} aria-label="Skill 지침">
+              <pre className="mono" tabIndex={0} aria-label="스킬 지침">
                 {skill.instructions}
               </pre>
             ) : (
@@ -266,9 +266,9 @@ export function SkillDetailSheet({
               ) : (runs.data?.runs ?? []).length === 0 ? (
                 <EmptyState title="실행 기록이 없습니다." />
               ) : (
-                <div className="data-table-scroll" tabIndex={0} aria-label="Skill 실행 로그 표 영역">
+                <div className="data-table-scroll" tabIndex={0} aria-label="스킬 실행 로그 표 영역">
                   <table className="data-table">
-                    <caption className="sr-only">Skill 실행 로그</caption>
+                    <caption className="sr-only">스킬 실행 로그</caption>
                     <thead>
                       <tr>
                         <th scope="col">실행 시각</th>
@@ -316,9 +316,9 @@ export function SkillDetailSheet({
               ) : (promotions.data?.promotions ?? []).length === 0 ? (
                 <EmptyState title="승격 이력이 없습니다." />
               ) : (
-                <div className="data-table-scroll" tabIndex={0} aria-label="Skill 승격 이력 표 영역">
+                <div className="data-table-scroll" tabIndex={0} aria-label="스킬 승격 이력 표 영역">
                   <table className="data-table">
-                    <caption className="sr-only">Skill 승격 이력</caption>
+                    <caption className="sr-only">스킬 승격 이력</caption>
                     <thead>
                       <tr>
                         <th scope="col">시각</th>
@@ -354,7 +354,7 @@ export function SkillDetailSheet({
             <SectionCard
               title="모델 적합성 근거"
               headingLevel={3}
-              description="높은 위험도 Skill은 통과 근거가 일정 건수 이상이어야 프로덕션으로 승격됩니다."
+              description="높은 위험도 스킬은 통과 근거가 일정 건수 이상이어야 프로덕션으로 승격됩니다."
             >
               {fitness.isPending ? (
                 <p role="status">적합성 근거를 불러오는 중입니다.</p>
@@ -387,7 +387,7 @@ export function SkillDetailSheet({
                   ) : (
                     <div className="data-table-scroll" tabIndex={0} aria-label="적합성 근거 표 영역">
                       <table className="data-table">
-                        <caption className="sr-only">Skill 모델 적합성 근거</caption>
+                        <caption className="sr-only">스킬 모델 적합성 근거</caption>
                         <thead>
                           <tr>
                             <th scope="col">종류</th>
@@ -420,7 +420,7 @@ export function SkillDetailSheet({
                   <SectionCard
                     headingLevel={3}
                     title="근거 기록"
-                    description="멀티모델 비교·Golden·테스트케이스 결과를 이 Skill의 승격 근거로 남깁니다."
+                    description="멀티모델 비교·Golden·테스트케이스 결과를 이 스킬의 승격 근거로 남깁니다."
                   >
                     {canWrite ? null : (
                       <InlineNotice tone="warning" title="쓰기 권한이 없습니다.">

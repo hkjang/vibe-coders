@@ -38,6 +38,25 @@ func TestAppUIBootstrapAndRuntimeToggle(t *testing.T) {
 	if len(features) != len(appUIFeatures) {
 		t.Fatalf("migration registry length = %d, want %d", len(features), len(appUIFeatures))
 	}
+	wantTitles := map[string]string{
+		"gateway.chat":     "채팅 테스트",
+		"mcp.gateway":      "게이트웨이 MCP",
+		"agents.skills":    "스킬",
+		"security.redteam": "레드팀 자동화",
+	}
+	for _, raw := range features {
+		feature, _ := raw.(map[string]any)
+		id, _ := feature["feature_id"].(string)
+		if want, ok := wantTitles[id]; ok {
+			if feature["title"] != want {
+				t.Fatalf("bootstrap title for %s = %v, want %q", id, feature["title"], want)
+			}
+			delete(wantTitles, id)
+		}
+	}
+	if len(wantTitles) != 0 {
+		t.Fatalf("missing Korean navigation titles: %v", wantTitles)
+	}
 
 	resp, _ = req(t, http.MethodPut, ts.URL+"/admin/settings/by-key/"+appUIEnabledKey, `{"value":"true","reason":"phase 0 preview"}`)
 	if resp.StatusCode != http.StatusOK {

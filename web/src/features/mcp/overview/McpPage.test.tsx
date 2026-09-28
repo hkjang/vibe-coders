@@ -136,6 +136,9 @@ describe("McpPage", () => {
     expect(await screen.findByText("128")).toBeInTheDocument();
     expect(screen.getByText("등록 업스트림")).toBeInTheDocument();
     expect(await screen.findByText("github__create_issue")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "경로 확인·호출 테스트" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "제공 기능 목록" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "적용 경로 확인" })).toBeEnabled();
   });
 
   it("URL 쿼리의 탭을 복원한다", async () => {
@@ -330,10 +333,16 @@ describe("McpPage", () => {
     const user = userEvent.setup();
     renderPage("/mcp?tab=tools");
 
+    const table = await screen.findByRole("table", { name: "MCP 도구 위험 등급" });
+    expect(await within(table).findByText("높음")).toBeVisible();
+    expect(within(table).getByText("승인 필요")).toBeVisible();
+    expect(screen.getByRole("option", { name: "심각" })).toHaveValue("critical");
+    expect(screen.getByRole("option", { name: "승인 필요" })).toHaveValue("require_approval");
     await user.click(await screen.findByRole("button", { name: "github create_issue 위험 등급 편집" }));
     const dialog = await screen.findByRole("dialog", { name: "도구 위험 등급" });
-    await user.selectOptions(within(dialog).getByLabelText("위험 등급*"), "critical");
-    await user.selectOptions(within(dialog).getByLabelText("조치*"), "block");
+    expect(within(dialog).getByText("권장 조치: 승인 필요")).toBeVisible();
+    await user.selectOptions(within(dialog).getByLabelText("위험 등급*"), "심각");
+    await user.selectOptions(within(dialog).getByLabelText("조치*"), "차단");
     await user.type(within(dialog).getByLabelText("메모"), "쓰기 도구");
     await user.click(within(dialog).getByRole("button", { name: "저장" }));
 

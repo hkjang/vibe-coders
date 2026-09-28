@@ -1,3 +1,4 @@
+import { riskLevelLabels } from "@/config/ui-labels";
 import type { BadgeProps } from "@/shared/components/ui/Badge";
 
 type Tone = NonNullable<BadgeProps["tone"]>;
@@ -11,6 +12,13 @@ const riskTones: Record<string, Tone> = {
 
 export function riskTone(level: string): Tone {
   return riskTones[level.toLowerCase()] ?? "muted";
+}
+
+export function riskLabel(level: string): string {
+  const normalized = level.toLowerCase();
+  return Object.hasOwn(riskLevelLabels, normalized)
+    ? riskLevelLabels[normalized as keyof typeof riskLevelLabels]
+    : level || "—";
 }
 
 const decisionTones: Record<string, Tone> = {

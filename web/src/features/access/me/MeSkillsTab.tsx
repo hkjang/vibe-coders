@@ -89,7 +89,7 @@ export function MeSkillsTab(): React.JSX.Element {
     successMessage: "의견을 반영했습니다.",
   });
 
-  if (skills.isPending && !skills.data) return <LoadingState label="Skill 목록을 불러오는 중입니다." />;
+  if (skills.isPending && !skills.data) return <LoadingState label="스킬 목록을 불러오는 중입니다." />;
 
   const available = skills.data?.available ?? [];
   const requestable = skills.data?.requestable ?? [];
@@ -101,16 +101,16 @@ export function MeSkillsTab(): React.JSX.Element {
         <QueryNotice
           error={skills.error}
           hasData={Boolean(skills.data)}
-          label="Skill 목록"
+          label="스킬 목록"
           onRetry={() => void skills.refetch()}
         />
       ) : null}
 
-      <SectionCard title="사용 가능한 Skill" description="내 팀에 열려 있는 Skill과 최근 30일 성과입니다.">
+      <SectionCard title="사용 가능한 스킬" description="내 팀에 열려 있는 스킬과 최근 30일 성과입니다.">
         {available.length === 0 ? (
           <EmptyState
-            title="사용 가능한 Skill이 없습니다."
-            description="관리자가 Skill을 팀에 배포하면 여기에 나타납니다."
+            title="사용 가능한 스킬이 없습니다."
+            description="관리자가 스킬을 팀에 배포하면 여기에 나타납니다."
           />
         ) : (
           <ul className="access-list">
@@ -143,11 +143,11 @@ export function MeSkillsTab(): React.JSX.Element {
         )}
       </SectionCard>
 
-      <SectionCard title="요청 가능한 Skill" description="접근 권한을 신청해야 쓸 수 있는 Skill입니다.">
+      <SectionCard title="요청 가능한 스킬" description="접근 권한을 신청해야 쓸 수 있는 스킬입니다.">
         {requestable.length === 0 ? (
           <EmptyState
-            title="신청할 Skill이 없습니다."
-            description="팀에 아직 열리지 않은 Skill이 생기면 여기에 표시됩니다."
+            title="신청할 스킬이 없습니다."
+            description="팀에 아직 열리지 않은 스킬이 생기면 여기에 표시됩니다."
           />
         ) : (
           <ul className="access-list">
@@ -249,8 +249,8 @@ export function MeSkillsTab(): React.JSX.Element {
           if (!open) setRequesting(undefined);
         }}
         returnFocusRef={rowTrigger}
-        title="Skill 접근 신청"
-        description={`'${requesting?.name ?? ""}' Skill 사용 권한을 신청합니다. 사유는 승인 담당자에게 그대로 전달됩니다.`}
+        title="스킬 접근 신청"
+        description={`'${requesting?.name ?? ""}' 스킬 사용 권한을 신청합니다. 사유는 승인 담당자에게 그대로 전달됩니다.`}
         submitLabel="신청"
         onSubmit={async (values) => {
           if (!requesting) return;
@@ -270,8 +270,8 @@ export function MeSkillsTab(): React.JSX.Element {
           if (!open) setRating(undefined);
         }}
         returnFocusRef={rowTrigger}
-        title="Skill 평가"
-        description={`'${rating?.name ?? ""}' Skill을 1~5점으로 평가합니다. 의견은 Skill 담당자가 확인합니다.`}
+        title="스킬 평가"
+        description={`'${rating?.name ?? ""}' 스킬을 1~5점으로 평가합니다. 의견은 스킬 담당자가 확인합니다.`}
         submitLabel="평가 보내기"
         onSubmit={async (values) => {
           if (!rating) return;

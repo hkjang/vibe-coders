@@ -2,7 +2,13 @@ import { useRef, useState } from "react";
 import { z } from "zod";
 
 import { PanelFailure, ReadOnlyNotice } from "@/features/text2sql/overview/text2sql-presentation";
-import { writeDisabledTitle } from "@/features/text2sql/overview/text2sql-labels";
+import {
+  permissionActionLabel,
+  permissionActionOptions,
+  permissionSubjectLabel,
+  permissionSubjectOptions,
+  writeDisabledTitle,
+} from "@/features/text2sql/overview/text2sql-labels";
 import { text2sqlInvalidations, text2sqlRouteId } from "@/features/text2sql/overview/use-text2sql-queries";
 import { apiClient } from "@/shared/api/client";
 import type { Text2SQLGlossaryTerm, Text2SQLPermissionRow } from "@/shared/api/domains/text2sql";
@@ -127,7 +133,11 @@ export function Text2SqlAccessTab({
 
   const permissionColumn = createDataTableColumnHelper<Text2SQLPermissionRow>();
   const permissionColumns = permissionColumn.columns([
-    permissionColumn.accessor((row) => row.subject_type, { id: "subject_type", header: "주체 유형" }),
+    permissionColumn.accessor((row) => row.subject_type, {
+      id: "subject_type",
+      header: "주체 유형",
+      cell: ({ getValue }) => permissionSubjectLabel(getValue()),
+    }),
     permissionColumn.accessor((row) => row.subject_id, {
       id: "subject_id",
       header: "주체 ID",
@@ -135,7 +145,7 @@ export function Text2SqlAccessTab({
     }),
     permissionColumn.display({
       id: "target",
-      header: "schema.table.column",
+      header: "대상(스키마.테이블.열)",
       cell: ({ row }) => (
         <code className="mono">
           {row.original.schema_name || "*"}.{row.original.table_name || "*"}.{row.original.column_name || "*"}
@@ -145,7 +155,11 @@ export function Text2SqlAccessTab({
     permissionColumn.accessor((row) => row.action, {
       id: "action",
       header: "동작",
-      cell: ({ getValue }) => <Badge tone={getValue() === "deny" ? "danger" : "success"}>{getValue()}</Badge>,
+      cell: ({ getValue }) => (
+        <Badge tone={getValue() === "deny" ? "danger" : getValue() === "allow" ? "success" : "muted"}>
+          {permissionActionLabel(getValue())}
+        </Badge>
+      ),
     }),
     permissionColumn.display({
       id: "actions",
@@ -214,7 +228,7 @@ export function Text2SqlAccessTab({
       <ReadOnlyNotice canWrite={canWrite} />
 
       <SectionCard
-        title="권한 매트릭스 (주체 × schema/table/column)"
+        title="권한 매트릭스 (주체 × 스키마·테이블·열)"
         description="deny 규칙은 테이블·컬럼 접근을 제한하고, allow 규칙은 민감(exclude) 컬럼 접근을 특정 주체에 부여합니다."
         actions={
           <Button
@@ -302,37 +316,25 @@ export function Text2SqlAccessTab({
             <Select
               {...control}
               {...permissionForm.register("subject_type")}
-              options={[
-                { value: "team", label: "team" },
-                { value: "api_key", label: "api_key" },
-                { value: "user", label: "user" },
-                { value: "*", label: "전체(*)" },
-              ]}
+              options={permissionSubjectOptions}
             />
           )}
         </FormField>
         <FormField label="주체 ID" error={permissionForm.formState.errors.subject_id?.message}>
           {(control) => <Input {...control} {...permissionForm.register("subject_id")} />}
         </FormField>
-        <FormField label="schema" error={permissionForm.formState.errors.schema_name?.message}>
+        <FormField label="스키마" error={permissionForm.formState.errors.schema_name?.message}>
           {(control) => <Input {...control} {...permissionForm.register("schema_name")} placeholder="*" />}
         </FormField>
-        <FormField label="table" error={permissionForm.formState.errors.table_name?.message}>
+        <FormField label="테이블" error={permissionForm.formState.errors.table_name?.message}>
           {(control) => <Input {...control} {...permissionForm.register("table_name")} placeholder="*" />}
         </FormField>
-        <FormField label="column" error={permissionForm.formState.errors.column_name?.message}>
+        <FormField label="열" error={permissionForm.formState.errors.column_name?.message}>
           {(control) => <Input {...control} {...permissionForm.register("column_name")} placeholder="*" />}
         </FormField>
         <FormField label="동작" required error={permissionForm.formState.errors.action?.message}>
           {(control) => (
-            <Select
-              {...control}
-              {...permissionForm.register("action")}
-              options={[
-                { value: "deny", label: "deny (차단)" },
-                { value: "allow", label: "allow (허용)" },
-              ]}
-            />
+            <Select {...control} {...permissionForm.register("action")} options={permissionActionOptions} />
           )}
         </FormField>
       </FormDialog>

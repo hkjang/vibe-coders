@@ -4,7 +4,7 @@ import { useRef, useState } from "react";
 import { z } from "zod";
 
 import { QueryNotice } from "@/features/mcp/mcp-ui";
-import { decisionLabel, decisionTone, riskTone } from "@/features/mcp/mcp-utils";
+import { decisionLabel, decisionTone, riskLabel, riskTone } from "@/features/mcp/mcp-utils";
 import { apiClient } from "@/shared/api/client";
 import type { McpPolicyBody } from "@/shared/api/domains/mcp";
 import type { McpPolicy } from "@/shared/api/domains/mcp.schemas";
@@ -32,9 +32,9 @@ import { formatDateTime, formatNumber } from "@/shared/utils/format";
 const routeId = "mcp.overview";
 
 const modeOptions = [
-  { value: "allow", label: "allow (허용)" },
-  { value: "warn", label: "warn (경고)" },
-  { value: "block", label: "block (차단)" },
+  { value: "allow", label: decisionLabel("allow") },
+  { value: "warn", label: decisionLabel("warn") },
+  { value: "block", label: decisionLabel("block") },
 ];
 
 const policyFormSchema = z.object({
@@ -269,7 +269,7 @@ export function McpPolicyTab({ canWrite }: { canWrite: boolean }): React.JSX.Ele
                 label: "도구 위험도",
                 value: effectivePolicy?.tool_risk_level ? (
                   <Badge tone={riskTone(effectivePolicy.tool_risk_level)}>
-                    {effectivePolicy.tool_risk_level}
+                    {riskLabel(effectivePolicy.tool_risk_level)}
                   </Badge>
                 ) : (
                   "—"

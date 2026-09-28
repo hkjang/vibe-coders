@@ -18,7 +18,7 @@ type TabId = (typeof tabIds)[number];
 const tabs: ReadonlyArray<TabItem<TabId>> = [
   { id: "home", label: "내 홈" },
   { id: "requests", label: "요청·영수증" },
-  { id: "skills", label: "Skill·추천" },
+  { id: "skills", label: "스킬·추천" },
   { id: "keys", label: "내 키·연결" },
 ];
 

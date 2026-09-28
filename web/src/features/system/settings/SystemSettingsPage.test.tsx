@@ -1,9 +1,11 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import axe from "axe-core";
+import { toast } from "sonner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SystemSettingsPage } from "@/features/system/settings/SystemSettingsPage";
+import { AppError } from "@/shared/api/error";
 import { apiFailure, mockApi } from "@/test/api";
 import { renderScreen } from "@/test/render";
 
@@ -277,17 +279,10 @@ describe("SystemSettingsPage — 콘솔 전환", () => {
     expect(within(dialog).getByText("현재 대상: 기능별 기본 역할 제한")).toBeVisible();
   });
 
-  it("saves the unchanged status, role, rollout, and read-only contract codes", async () => {
+  it("saves all changed rollout fields atomically with the reason and zero versions for absent overrides", async () => {
     const api = mockApi({
       "GET /admin/settings/effective": () => effectiveSettings,
-      "PUT /admin/settings/by-key/ui.app.feature.system.settings.status": () =>
-        consoleFeatureSetting("status", "preview"),
-      "PUT /admin/settings/by-key/ui.app.feature.system.settings.roles": () =>
-        consoleFeatureSetting("roles", "viewer,developer", "csv"),
-      "PUT /admin/settings/by-key/ui.app.feature.system.settings.rollout": () =>
-        consoleFeatureSetting("rollout", "35", "int"),
-      "PUT /admin/settings/by-key/ui.app.feature.system.settings.readonly": () =>
-        consoleFeatureSetting("readonly", "false", "bool"),
+      "PUT /admin/settings/bulk": () => ({ ok: true, applied: 4 }),
     });
     const user = userEvent.setup();
     renderPage("/system/settings?tab=console");
@@ -305,23 +300,186 @@ describe("SystemSettingsPage — 콘솔 전환", () => {
     await user.clear(rollout);
     await user.type(rollout, "35");
     await user.selectOptions(within(dialog).getByLabelText("읽기 전용 강제"), "false");
+    await user.type(within(dialog).getByLabelText("변경 사유"), "  점진 배포 확대  ");
     expect(within(dialog).getByText("현재 대상: 조회자, 개발자")).toBeVisible();
     await user.click(within(dialog).getByRole("button", { name: "저장" }));
 
-    await waitFor(() => {
-      expect(api.bodies("PUT /admin/settings/by-key/ui.app.feature.system.settings.status")).toEqual([
-        { value: "preview" },
-      ]);
-      expect(api.bodies("PUT /admin/settings/by-key/ui.app.feature.system.settings.roles")).toEqual([
-        { value: "viewer,developer" },
-      ]);
-      expect(api.bodies("PUT /admin/settings/by-key/ui.app.feature.system.settings.rollout")).toEqual([
-        { value: "35" },
-      ]);
-      expect(api.bodies("PUT /admin/settings/by-key/ui.app.feature.system.settings.readonly")).toEqual([
-        { value: "false" },
-      ]);
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(api.bodies("PUT /admin/settings/bulk")).toEqual([
+      {
+        settings: [
+          { key: "ui.app.feature.system.settings.status", value: "preview", expected_version: 0 },
+          { key: "ui.app.feature.system.settings.roles", value: "viewer,developer", expected_version: 0 },
+          { key: "ui.app.feature.system.settings.rollout", value: "35", expected_version: 0 },
+          { key: "ui.app.feature.system.settings.readonly", value: "false", expected_version: 0 },
+        ],
+        reason: "점진 배포 확대",
+      },
+    ]);
+    expect(api.calls.filter((call) => call.key.startsWith("PUT ")).map((call) => call.key)).toEqual([
+      "PUT /admin/settings/bulk",
+    ]);
+    expect(api.calls.filter((call) => call.key === "GET /admin/settings/effective")).toHaveLength(2);
+  });
+
+  it("sends only changed fields with the existing override version, including an intentionally empty role list", async () => {
+    const api = mockApi({
+      "GET /admin/settings/effective": () => ({
+        ...effectiveSettings,
+        settings: effectiveSettings.settings.map((setting) =>
+          setting.key === "ui.app.feature.system.settings.roles"
+            ? { ...setting, version: 7, source: "admin" }
+            : setting,
+        ),
+      }),
+      "PUT /admin/settings/bulk": () => ({ ok: true, applied: 1 }),
     });
+    const user = userEvent.setup();
+    renderPage("/system/settings?tab=console");
+    await user.click(await screen.findByRole("button", { name: "시스템 설정 전환 설정 편집" }));
+    const dialog = await screen.findByRole("dialog");
+    await user.clear(within(dialog).getByLabelText("미리보기 대상 역할"));
+    await user.click(within(dialog).getByRole("button", { name: "저장" }));
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(api.bodies("PUT /admin/settings/bulk")).toEqual([
+      {
+        settings: [{ key: "ui.app.feature.system.settings.roles", value: "", expected_version: 7 }],
+        reason: "",
+      },
+    ]);
+  });
+
+  it("refetches on conflict, preserves the draft, and blocks stale resubmission until the editor is reopened", async () => {
+    const successToast = vi.spyOn(toast, "success");
+    let conflicted = false;
+    const api = mockApi({
+      "GET /admin/settings/effective": () => ({
+        ...effectiveSettings,
+        settings: effectiveSettings.settings.map((setting) =>
+          setting.key === "ui.app.feature.system.settings.status"
+            ? { ...setting, value: conflicted ? "stable" : "legacy", version: conflicted ? 2 : 1 }
+            : setting,
+        ),
+      }),
+      "PUT /admin/settings/bulk": () => {
+        conflicted = true;
+        throw apiFailure("untrusted conflict detail", 409, "req-rollout-conflict");
+      },
+    });
+    const user = userEvent.setup();
+    renderPage("/system/settings?tab=console");
+    await user.click(await screen.findByRole("button", { name: "시스템 설정 전환 설정 편집" }));
+    const dialog = await screen.findByRole("dialog");
+    await user.selectOptions(within(dialog).getByLabelText("전환 상태"), "preview");
+    await user.type(within(dialog).getByLabelText("변경 사유"), "초안 유지");
+    await user.click(within(dialog).getByRole("button", { name: "저장" }));
+
+    expect(
+      await within(dialog).findByText(/다른 작업자가 전환 설정을 변경해 저장하지 않았습니다/),
+    ).toBeVisible();
+    expect(within(dialog).getByLabelText("전환 상태")).toHaveValue("preview");
+    expect(within(dialog).getByLabelText("변경 사유")).toHaveValue("초안 유지");
+    expect(await within(dialog).findByText("요청 ID: req-rollout-conflict")).toBeVisible();
+    expect(within(dialog).getByRole("button", { name: "저장" })).toBeDisabled();
+    expect(screen.queryByText("untrusted conflict detail")).not.toBeInTheDocument();
+    expect(api.bodies("PUT /admin/settings/bulk")).toHaveLength(1);
+    expect(api.calls.filter((call) => call.key === "GET /admin/settings/effective")).toHaveLength(2);
+    expect(successToast).not.toHaveBeenCalled();
+
+    await user.click(within(dialog).getByRole("button", { name: "취소" }));
+    await user.click(screen.getByRole("button", { name: "시스템 설정 전환 설정 편집" }));
+    const refreshedDialog = await screen.findByRole("dialog");
+    expect(within(refreshedDialog).getByLabelText("전환 상태")).toHaveValue("stable");
+    expect(within(refreshedDialog).getByRole("button", { name: "저장" })).toBeEnabled();
+    expect(api.bodies("PUT /admin/settings/bulk")).toHaveLength(1);
+  });
+
+  it("reports committed settings awaiting runtime reload, refreshes their values and never resaves or announces success", async () => {
+    const successToast = vi.spyOn(toast, "success");
+    let stored = false;
+    const api = mockApi({
+      "GET /admin/settings/effective": () => ({
+        ...effectiveSettings,
+        settings: effectiveSettings.settings.map((setting) =>
+          stored && setting.key === "ui.app.feature.system.settings.status"
+            ? { ...setting, value: "preview", version: 1 }
+            : setting,
+        ),
+      }),
+      "PUT /admin/settings/bulk": () => {
+        stored = true;
+        throw new AppError("untrusted reload detail", {
+          kind: "http",
+          status: 503,
+          code: "setting_reload_pending",
+          requestId: "req-rollout-pending",
+        });
+      },
+    });
+    const user = userEvent.setup();
+    renderPage("/system/settings?tab=console");
+    await user.click(await screen.findByRole("button", { name: "시스템 설정 전환 설정 편집" }));
+    const dialog = await screen.findByRole("dialog");
+    await user.selectOptions(within(dialog).getByLabelText("전환 상태"), "preview");
+    await user.click(within(dialog).getByRole("button", { name: "저장" }));
+
+    expect(await screen.findByText("설정은 저장됐으며 런타임 반영을 기다리고 있습니다.")).toBeVisible();
+    expect(screen.getByText("요청 ID: req-rollout-pending")).toBeVisible();
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(screen.getByText("preview", { exact: true })).toBeVisible();
+    expect(screen.queryByText("untrusted reload detail")).not.toBeInTheDocument();
+    expect(api.bodies("PUT /admin/settings/bulk")).toHaveLength(1);
+    expect(api.calls.filter((call) => call.key === "GET /admin/settings/effective")).toHaveLength(2);
+    expect(successToast).not.toHaveBeenCalled();
+  });
+
+  it.each([403, 503])("keeps HTTP %i in the editor without claiming the batch was saved", async (status) => {
+    const successToast = vi.spyOn(toast, "success");
+    const api = mockApi({
+      "GET /admin/settings/effective": () => effectiveSettings,
+      "PUT /admin/settings/bulk": () => {
+        throw apiFailure("untrusted server detail", status, "req-rollout-error");
+      },
+    });
+    const user = userEvent.setup();
+    renderPage("/system/settings?tab=console");
+    await user.click(await screen.findByRole("button", { name: "시스템 설정 전환 설정 편집" }));
+    const dialog = await screen.findByRole("dialog");
+    await user.selectOptions(within(dialog).getByLabelText("전환 상태"), "preview");
+    await user.click(within(dialog).getByRole("button", { name: "저장" }));
+
+    expect(await within(dialog).findByText("요청 ID: req-rollout-error")).toBeVisible();
+    expect(within(dialog).getByLabelText("전환 상태")).toHaveValue("preview");
+    expect(screen.queryByText("설정은 저장됐으며 런타임 반영을 기다리고 있습니다.")).not.toBeInTheDocument();
+    expect(screen.queryByText("untrusted server detail")).not.toBeInTheDocument();
+    expect(api.bodies("PUT /admin/settings/bulk")).toHaveLength(1);
+    expect(successToast).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { scopes: ["admin:read"], canWrite: true, reason: "admin:write 권한이 필요합니다." },
+    {
+      scopes: ["admin:read", "admin:write"],
+      canWrite: false,
+      reason: "현재 역할은 이 설정 범주를 변경할 수 없습니다.",
+    },
+  ])("blocks rollout writes when permission is denied: $reason", async ({ scopes, canWrite, reason }) => {
+    authState.scopes = scopes;
+    const api = mockApi({
+      "GET /admin/settings/effective": () => ({
+        ...effectiveSettings,
+        settings: effectiveSettings.settings.map((setting) => ({ ...setting, can_write: canWrite })),
+      }),
+    });
+    const user = userEvent.setup();
+    renderPage("/system/settings?tab=console");
+    await user.click(await screen.findByRole("button", { name: "시스템 설정 전환 설정 편집" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText(reason)).toBeVisible();
+    expect(within(dialog).getByLabelText("전환 상태")).toBeDisabled();
+    expect(within(dialog).getByRole("button", { name: "저장" })).toBeDisabled();
+    expect(api.calls.every((call) => call.key.startsWith("GET "))).toBe(true);
   });
 });
 

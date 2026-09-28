@@ -140,7 +140,7 @@ export const migrationRegistry = [
   },
   {
     featureId: "gateway.chat",
-    title: "Chat 테스트",
+    title: "채팅 테스트",
     description: "게이트웨이를 통해 모델을 직접 호출하고 스트리밍 응답을 비교합니다.",
     group: "AI 게이트웨이",
     keywords: ["chat", "test", "stream", "compare", "채팅", "테스트"],
@@ -428,7 +428,7 @@ export const migrationRegistry = [
   },
   {
     featureId: "mcp.gateway",
-    title: "Gateway MCP",
+    title: "게이트웨이 MCP",
     description: "게이트웨이가 제공하는 MCP 도구와 접근 정책을 관리합니다.",
     group: "MCP 및 에이전트",
     keywords: ["mcp", "gateway", "tool", "도구"],
@@ -496,8 +496,8 @@ export const migrationRegistry = [
   },
   {
     featureId: "agents.skills",
-    title: "Skill",
-    description: "Skill 카탈로그, 스튜디오와 의존성 그래프를 관리합니다.",
+    title: "스킬",
+    description: "스킬 카탈로그, 스튜디오와 의존성 그래프를 관리합니다.",
     group: "MCP 및 에이전트",
     keywords: ["skill", "studio", "graph", "스킬"],
     appPath: "/app/agents/skills",
@@ -598,8 +598,8 @@ export const migrationRegistry = [
   },
   {
     featureId: "security.redteam",
-    title: "Red Team",
-    description: "Red Team 캠페인, 프로브 팩과 조치를 운영합니다.",
+    title: "레드팀 자동화",
+    description: "레드팀 캠페인, 프로브 팩과 조치를 운영합니다.",
     group: "비용 및 보안",
     keywords: ["redteam", "probe", "campaign", "레드팀"],
     appPath: "/app/redteam",

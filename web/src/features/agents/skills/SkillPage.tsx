@@ -53,7 +53,7 @@ import "@/features/agents/agents.css";
 const tabIds = ["catalog", "studio", "graph"] as const;
 type TabId = (typeof tabIds)[number];
 const skillsKey = ["agents", "skills"] as const;
-const writeDisabledReason = "Skill을 변경하려면 admin:write 권한이 필요합니다.";
+const writeDisabledReason = "스킬을 변경하려면 admin:write 권한이 필요합니다.";
 
 export function SkillPage(): React.JSX.Element {
   const auth = useAuth();
@@ -136,8 +136,8 @@ export function SkillPage(): React.JSX.Element {
         routeId: "agents.skills",
       }),
     invalidates: [skillsKey],
-    successMessage: "Skill을 저장했습니다.",
-    errorMessage: "Skill을 저장하지 못했습니다.",
+    successMessage: "스킬을 저장했습니다.",
+    errorMessage: "스킬을 저장하지 못했습니다.",
   });
 
   const promote = useMutationFeedback({
@@ -148,8 +148,8 @@ export function SkillPage(): React.JSX.Element {
       }),
     invalidates: [skillsKey],
     successMessage: (_result, variables) =>
-      `Skill을 ${skillStatusLabels[variables.to_status] ?? variables.to_status} 상태로 승격했습니다.`,
-    errorMessage: "Skill을 승격하지 못했습니다.",
+      `스킬을 ${skillStatusLabels[variables.to_status] ?? variables.to_status} 상태로 승격했습니다.`,
+    errorMessage: "스킬을 승격하지 못했습니다.",
   });
 
   const remove = useMutationFeedback({
@@ -158,8 +158,8 @@ export function SkillPage(): React.JSX.Element {
         routeId: "agents.skills",
       }),
     invalidates: [skillsKey],
-    successMessage: "Skill을 삭제했습니다.",
-    errorMessage: "Skill을 삭제하지 못했습니다.",
+    successMessage: "스킬을 삭제했습니다.",
+    errorMessage: "스킬을 삭제하지 못했습니다.",
     onSuccess: () => closeSheet(),
   });
 
@@ -170,7 +170,7 @@ export function SkillPage(): React.JSX.Element {
         routeId: "agents.skills",
       }),
     invalidates: [skillsKey],
-    successMessage: "후보를 초안 Skill로 채택했습니다.",
+    successMessage: "후보를 초안 스킬로 채택했습니다.",
     errorMessage: "후보를 채택하지 못했습니다.",
     onSuccess: (_result, body) => updateSearch({ skill: body.name }),
   });
@@ -228,8 +228,8 @@ export function SkillPage(): React.JSX.Element {
 
   const header = (
     <PageHeader
-      title="Skill"
-      description="Skill 카탈로그와 스튜디오, 의존성 그래프를 한 화면에서 관리합니다."
+      title="스킬"
+      description="스킬 카탈로그와 스튜디오, 의존성 그래프를 한 화면에서 관리합니다."
       legacyHref="/admin#/skills"
       actions={
         <>
@@ -247,7 +247,7 @@ export function SkillPage(): React.JSX.Element {
               setFormOpen(true);
             }}
           >
-            <Plus aria-hidden="true" /> 새 Skill
+            <Plus aria-hidden="true" /> 스킬 추가
           </Button>
         </>
       }
@@ -258,7 +258,7 @@ export function SkillPage(): React.JSX.Element {
     return (
       <div className="page-stack">
         {header}
-        <LoadingState label="Skill 목록을 불러오는 중입니다." />
+        <LoadingState label="스킬 목록을 불러오는 중입니다." />
       </div>
     );
   }
@@ -268,7 +268,7 @@ export function SkillPage(): React.JSX.Element {
       <div className="page-stack">
         {header}
         <ErrorState
-          message={safeAppErrorMessage(list.error, "Skill 목록을 불러오지 못했습니다.")}
+          message={safeAppErrorMessage(list.error, "스킬 목록을 불러오지 못했습니다.")}
           requestId={isAppError(list.error) ? list.error.requestId : undefined}
           onRetry={() => void list.refetch()}
           legacyHref="/admin#/skills"
@@ -281,8 +281,8 @@ export function SkillPage(): React.JSX.Element {
     <div className="page-stack">
       {header}
 
-      <StatGrid label="Skill 요약">
-        <StatCard label="전체 Skill" value={summaryUnavailable ? "—" : formatNumber(skills.length)} />
+      <StatGrid label="스킬 요약">
+        <StatCard label="전체 스킬" value={summaryUnavailable ? "—" : formatNumber(skills.length)} />
         <StatCard
           label="프로덕션"
           tone="success"
@@ -324,7 +324,7 @@ export function SkillPage(): React.JSX.Element {
       ) : null}
 
       <Tabs
-        ariaLabel="Skill 화면"
+        ariaLabel="스킬 화면"
         items={[
           { id: "catalog", label: "카탈로그", badge: formatNumber(skills.length) },
           { id: "studio", label: "스튜디오" },
@@ -337,7 +337,7 @@ export function SkillPage(): React.JSX.Element {
 
       {tab === "catalog" ? (
         <TabPanel id="catalog" panelIdPrefix="skills">
-          <Toolbar label="Skill 필터">
+          <Toolbar label="스킬 필터">
             <form
               className="agents-toolbar-field"
               role="search"
@@ -353,7 +353,7 @@ export function SkillPage(): React.JSX.Element {
                 updateSearch({ q: next || undefined });
               }}
             >
-              <label htmlFor="skill-search">Skill 검색</label>
+              <label htmlFor="skill-search">스킬 검색</label>
               <Input
                 id="skill-search"
                 key={query}
@@ -391,8 +391,8 @@ export function SkillPage(): React.JSX.Element {
 
           {skills.length === 0 ? (
             <EmptyState
-              title="등록된 Skill이 없습니다."
-              description="추천 Skill을 시드하거나 스튜디오에서 후보를 채택하면 카탈로그가 채워집니다."
+              title="등록된 스킬이 없습니다."
+              description="추천 스킬을 추가하거나 스튜디오에서 후보를 채택하면 카탈로그가 채워집니다."
               actions={
                 <Button variant="secondary" onClick={() => setTab("studio")}>
                   스튜디오 열기
@@ -401,10 +401,10 @@ export function SkillPage(): React.JSX.Element {
             />
           ) : (
             <DataTable
-              caption="Skill 카탈로그"
+              caption="스킬 카탈로그"
               columns={columns}
               data={rows}
-              emptyMessage="조건에 맞는 Skill이 없습니다."
+              emptyMessage="조건에 맞는 스킬이 없습니다."
               getRowId={(row) => row.name}
               getRowActionLabel={(row) => `${row.name} 상세 열기`}
               onRowClick={(row) => {
@@ -418,7 +418,7 @@ export function SkillPage(): React.JSX.Element {
       ) : tab === "studio" ? (
         <TabPanel id="studio" panelIdPrefix="skills">
           <SectionCard
-            title="Skill 후보"
+            title="스킬 후보"
             headingLevel={3}
             description="반복 프롬프트·프롬프트 상품·반복 Text2SQL 질문·조직 추천에서 도출한 후보입니다."
           >
@@ -436,7 +436,7 @@ export function SkillPage(): React.JSX.Element {
               </InlineNotice>
             ) : null}
             <DataTable
-              caption="Skill 스튜디오 후보 목록"
+              caption="스킬 스튜디오 후보 목록"
               columns={candidateColumns}
               data={candidates.data?.candidates ?? []}
               emptyMessage="도출된 후보가 없습니다."
@@ -453,7 +453,7 @@ export function SkillPage(): React.JSX.Element {
 
           <Toolbar label="승격 준비도 대상">
             <label className="agents-toolbar-field" htmlFor="studio-skill">
-              <span>Skill 선택</span>
+              <span>스킬 선택</span>
               <Select
                 id="studio-skill"
                 value={selectedName}
@@ -481,7 +481,7 @@ export function SkillPage(): React.JSX.Element {
         </TabPanel>
       ) : (
         <TabPanel id="graph" panelIdPrefix="skills">
-          <p>{graph.data?.note ?? "프로덕션 Skill의 모델·도구·팀 의존성과 관할 정책을 보여줍니다."}</p>
+          <p>{graph.data?.note ?? "프로덕션 스킬의 모델·도구·팀 의존성과 관할 정책을 보여줍니다."}</p>
           {graph.isError ? (
             <InlineNotice
               tone="danger"
@@ -548,8 +548,8 @@ export function SkillPage(): React.JSX.Element {
       />
 
       <ConfirmDialog
-        title="Skill 승격"
-        description={`'${promoteTarget?.name ?? ""}' Skill의 상태를 바꿉니다. 프로덕션 승격은 정책·보안 게이트를 모두 통과해야 합니다.`}
+        title="스킬 승격"
+        description={`'${promoteTarget?.name ?? ""}' 스킬의 상태를 바꿉니다. 프로덕션 승격은 정책·보안 게이트를 모두 통과해야 합니다.`}
         confirmLabel="승격"
         requireReason
         open={promoteTarget !== undefined}
@@ -582,8 +582,8 @@ export function SkillPage(): React.JSX.Element {
       </ConfirmDialog>
 
       <ConfirmDialog
-        title="Skill 삭제"
-        description={`'${deleteTarget?.name ?? ""}' Skill을 삭제합니다. 이 작업은 되돌릴 수 없습니다.`}
+        title="스킬 삭제"
+        description={`'${deleteTarget?.name ?? ""}' 스킬을 삭제합니다. 이 작업은 되돌릴 수 없습니다.`}
         confirmLabel="삭제"
         tone="danger"
         open={deleteTarget !== undefined}
