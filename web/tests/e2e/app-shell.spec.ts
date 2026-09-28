@@ -713,7 +713,7 @@ test("opens and reloads the read-only System Health deep link", async ({ page })
   await page.goto("system/health");
 
   await expect(page.getByRole("heading", { name: "시스템 상태", exact: true })).toBeVisible();
-  await expect(page.getByText("읽기 전용 미리보기", { exact: true })).toBeVisible();
+  await expect(page.getByRole("main").getByText("읽기 전용 미리보기", { exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "보안 상태" })).toBeVisible();
   await expect(page.getByText("78 GiB", { exact: true })).toBeVisible();
   await expect(page.getByText("openai-primary", { exact: true })).toBeVisible();
