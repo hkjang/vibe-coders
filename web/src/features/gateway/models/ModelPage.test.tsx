@@ -881,6 +881,24 @@ describe("ModelPage", () => {
     expect(await screen.findByRole("link", { name: "model-11" })).toBeVisible();
   });
 
+  it("exposes column settings while keeping model identity columns visible", async () => {
+    const user = userEvent.setup();
+    mockApi();
+    renderPage();
+
+    await screen.findByRole("table", { name: "공급자별 모델 상태, 품질과 가격" });
+    const settingsButton = screen.getByRole("button", { name: "열 설정" });
+    expect(settingsButton).toBeVisible();
+
+    await user.click(settingsButton);
+    const modelColumn = screen.getByRole("checkbox", { name: /모델/ });
+    const providerColumn = screen.getByRole("checkbox", { name: /공급자/ });
+    expect(modelColumn).toBeChecked();
+    expect(modelColumn).toBeDisabled();
+    expect(providerColumn).toBeChecked();
+    expect(providerColumn).toBeDisabled();
+  });
+
   it("hides Legacy links when fallback is unavailable", async () => {
     authRuntime.legacyFallback = false;
     mockApi();

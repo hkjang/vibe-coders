@@ -696,6 +696,25 @@ describe("ProviderPage", () => {
     expect(await screen.findByRole("link", { name: "provider-11" })).toBeVisible();
   });
 
+  it("exposes column settings while keeping provider and administration columns visible", async () => {
+    const user = userEvent.setup();
+    authRuntime.scopes = ["admin:read", "admin:write"];
+    mockApi();
+    renderPage();
+
+    await screen.findByRole("table", { name: "공급자 연결 설정과 운영 상태" });
+    const settingsButton = screen.getByRole("button", { name: "열 설정" });
+    expect(settingsButton).toBeVisible();
+
+    await user.click(settingsButton);
+    const providerColumn = screen.getByRole("checkbox", { name: /공급자/ });
+    const adminColumn = screen.getByRole("checkbox", { name: /관리/ });
+    expect(providerColumn).toBeChecked();
+    expect(providerColumn).toBeDisabled();
+    expect(adminColumn).toBeChecked();
+    expect(adminColumn).toBeDisabled();
+  });
+
   it("has no automated accessibility violations", async () => {
     authRuntime.scopes = ["admin:read", "routing:read"];
     mockApi();

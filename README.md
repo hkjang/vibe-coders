@@ -10,7 +10,7 @@ Roo Code / Cursor / Continue 등 OpenAI 호환 API 를 호출하는 VS Code 확�
 
 - **[운영 가이드](docs/OPERATIONS.md)** — 기동/종료, 헬스체크, 백업·복구, 장애 대응 런북
 - **[사용자 가이드](docs/USER_GUIDE.md)** ([PDF](docs/USER_GUIDE.pdf)) — 처음 5분, 화면별 사용법, Roo Code / Cline / Cursor / OpenAI SDK 연결, 막혔을 때
-- **[관리자 가이드](docs/ADMIN_GUIDE.md)** ([PDF](docs/ADMIN_GUIDE.pdf)) — 설치·환경 변수 전수 표·역할·장애 대응, 콘솔 화면 레퍼런스
+- **[관리자 가이드](docs/ADMIN_GUIDE.md)** ([PDF 화면 보관본 · v0.85.3](docs/ADMIN_GUIDE.pdf)) — 설치·환경 변수 전수 표·역할·장애 대응, 콘솔 화면 레퍼런스. 현재 설치·업그레이드 명령은 Markdown을 기준으로 합니다.
 - **[안전 및 보안 거버넌스 가이드](docs/SAFETY_GUIDE.md)** — 정책 엔진, Secret Firewall, 승인 워크플로우 운영
 - **[릴리즈 가이드](docs/RELEASE_GUIDE.md)** — 빌드·태깅·GitHub 릴리즈·오프라인 패키지 산출·롤백 절차
 - **[부하 성능 개선 보고서](docs/PERFORMANCE_REPORT.md)** — 부하에서 느려지던 원인과 개선 전후 실측 ([HTML](docs/PERFORMANCE_REPORT.html) · [PDF](docs/PERFORMANCE_REPORT.pdf))
@@ -57,8 +57,8 @@ go run -ldflags "-X vibe-coders/internal/proxy.AppVersion=dev" ./cmd/gateway
 Docker로 독립 실행할 때는 현재 소스에서 이미지를 먼저 빌드합니다.
 
 ```bash
-docker build --build-arg VERSION=v0.85.6 -t ai-coding-proxy-gateway:v0.85.6 .
-UI_APP_ENABLED=true GATEWAY_VERSION=v0.85.6 ./scripts/init-deployment-env.sh .env
+docker build --build-arg VERSION=v0.86.0 -t ai-coding-proxy-gateway:v0.86.0 .
+UI_APP_ENABLED=true GATEWAY_VERSION=v0.86.0 ./scripts/init-deployment-env.sh .env
 docker compose --env-file .env up -d
 docker compose --env-file .env ps
 curl http://localhost:8080/health
@@ -96,6 +96,7 @@ named volume `proxy-gateway-data`에 유지됩니다. `down -v`는 사용하지 
 - API 키 / 팀 / IP / 전체 단위 일별·월별 쿼터 (토큰·KRW). 한도 초과 시 429 + Retry-After + X-Quota-*
 - 보존 정책 (RETENTION_REQUEST_DAYS / RETENTION_PROMPT_DAYS / RETENTION_RESPONSE_DAYS) 기반 백그라운드 cleanup
 - `/admin` 기존 안정 운영 콘솔과 기본 OFF인 `/app` React 차세대 콘솔 미리보기. `/app` 메뉴·버튼·기능명은 한글을 우선하고 기존 한국어 관리자 다중 탭과 비용 KRW 표기는 그대로 유지
+- `/app` 공급자·모델 운영 표의 한글 `열 설정`: 필수 식별 열을 보호하면서 표시·순서·너비를 키보드와 마우스로 조정하고, 행 데이터나 요청 ID 없이 표 레이아웃만 브라우저에 안전하게 복원
 - `/app/observability/requests` 읽기 전용 요청 탐색기: URL 필터, 암호화·서명된 커서 페이지 이동, 마지막 정상 데이터, 안전한 상세 대화상자와 기존 화면 연결을 제공하며 프롬프트·응답 본문·원시 오류는 노출하지 않음
 - `/app/observability/traces` 읽기 전용 추적 탐색기: 같은 추적 ID의 요청을 시간축과 표로 비교하고 URL 복원·커서 페이지 이동·요청 탐색기 연결을 제공하며 안전 요청 투영만 재사용
 - Datadog LLM Observability 대응 기능: Trace/Span Explorer, Session Explorer, Prompt Tracking, Patterns, Insights, trend timeseries, human feedback(label/prompt/alignment summary), managed evaluation, external evaluation submit API
@@ -1083,24 +1084,24 @@ React 산출물은 Go 바이너리에 embed되므로 운영 컨테이너에 Node
 주입됩니다.
 
 ```powershell
-pwsh -File scripts/release.ps1 -Version v0.85.6
+pwsh -File scripts/release.ps1 -Version v0.86.0
 ```
 
 ```bash
-./scripts/release.sh -v v0.85.6 -p linux/amd64
+./scripts/release.sh -v v0.86.0 -p linux/amd64
 ```
 
 산출물 예시:
 
 ```
 release/
-  ai-coding-proxy-gateway-v0.85.6.tar.gz
-  ai-coding-proxy-gateway-v0.85.6.tar.gz.sha256
-  README-offline-v0.85.6.md
-  SBOM-v0.85.6.spdx.json
-  THIRD_PARTY_LICENSES-v0.85.6.md
-  init-deployment-env-v0.85.6.sh
-  backup-volume-v0.85.6.sh
+  ai-coding-proxy-gateway-v0.86.0.tar.gz
+  ai-coding-proxy-gateway-v0.86.0.tar.gz.sha256
+  README-offline-v0.86.0.md
+  SBOM-v0.86.0.spdx.json
+  THIRD_PARTY_LICENSES-v0.86.0.md
+  init-deployment-env-v0.86.0.sh
+  backup-volume-v0.86.0.sh
 ```
 
 ### 폐쇄망 적재
@@ -1109,30 +1110,30 @@ release/
 2. 체크섬 확인
 
    ```bash
-   sha256sum -c ai-coding-proxy-gateway-v0.85.6.tar.gz.sha256
+   sha256sum -c ai-coding-proxy-gateway-v0.86.0.tar.gz.sha256
    ```
 
 3. 이미지 적재
 
    ```bash
-   gunzip -c ai-coding-proxy-gateway-v0.85.6.tar.gz | docker load
+   gunzip -c ai-coding-proxy-gateway-v0.86.0.tar.gz | docker load
    ```
 
 4. 최초 1회 비밀값 파일과 데이터 볼륨을 만든 뒤 실행
 
    ```bash
-   chmod 0700 init-deployment-env-v0.85.6.sh backup-volume-v0.85.6.sh
-   sudo env GATEWAY_VERSION=v0.85.6 \
-     ./init-deployment-env-v0.85.6.sh /opt/proxy-gateway/gateway.env
+   chmod 0700 init-deployment-env-v0.86.0.sh backup-volume-v0.86.0.sh
+   sudo env GATEWAY_VERSION=v0.86.0 \
+     ./init-deployment-env-v0.86.0.sh /opt/proxy-gateway/gateway.env
    docker volume create proxy-gateway-data >/dev/null
    # 기존 볼륨·바인드 마운트를 재사용할 때 소유권을 nonroot(65532)로 복구합니다. 새 볼륨은 변경 없이 끝납니다.
    docker run --rm --user 0:0 --mount source=proxy-gateway-data,target=/data \
-       ai-coding-proxy-gateway:v0.85.6 repair-data-dir
+       ai-coding-proxy-gateway:v0.86.0 repair-data-dir
    docker run -d --name proxy-gateway --restart=always \
        -p 8080:8080 \
        --mount source=proxy-gateway-data,target=/data \
        --env-file /opt/proxy-gateway/gateway.env \
-       ai-coding-proxy-gateway:v0.85.6
+       ai-coding-proxy-gateway:v0.86.0
    ```
 
    초기화 스크립트는 `openssl`과 생성 결과를 검증한 뒤 임시 파일을 원자적으로 설치하며 API Key를 숨김 입력받습니다.
@@ -1142,7 +1143,7 @@ release/
 5. 또는 저장소에서 별도로 검토·전달한 `docker-compose.yml` 과 함께 운영
 
    ```bash
-   GATEWAY_VERSION=v0.85.6 ./init-deployment-env-v0.85.6.sh .env
+   GATEWAY_VERSION=v0.86.0 ./init-deployment-env-v0.86.0.sh .env
    docker compose up -d
    ```
 
@@ -1154,8 +1155,8 @@ release/
 셸이 없으므로 같은 이미지로 한 번만 소유권을 복구합니다. 새 볼륨에서는 아무것도 바꾸지 않으므로 항상 실행해도 됩니다.
 
 ```bash
-docker run --rm --mount source=proxy-gateway-data,target=/data ai-coding-proxy-gateway:v0.85.6 check-data-dir
-docker run --rm --user 0:0 --mount source=proxy-gateway-data,target=/data ai-coding-proxy-gateway:v0.85.6 repair-data-dir
+docker run --rm --mount source=proxy-gateway-data,target=/data ai-coding-proxy-gateway:v0.86.0 check-data-dir
+docker run --rm --user 0:0 --mount source=proxy-gateway-data,target=/data ai-coding-proxy-gateway:v0.86.0 repair-data-dir
 docker restart proxy-gateway
 ```
 
@@ -1166,5 +1167,5 @@ docker restart proxy-gateway
 같이 다시 검증할 수 있습니다.
 
 ```bash
-bash scripts/container-smoke.sh ai-coding-proxy-gateway:v0.85.6 v0.85.6
+bash scripts/container-smoke.sh ai-coding-proxy-gateway:v0.86.0 v0.86.0
 ```

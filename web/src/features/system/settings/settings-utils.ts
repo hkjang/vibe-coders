@@ -1,3 +1,4 @@
+import { migrationStatusLabels } from "@/config/ui-labels";
 import type { EffectiveSetting } from "@/shared/api/domains/system.schemas";
 
 export const consoleSettingPrefix = "ui.app.";
@@ -119,13 +120,16 @@ export function consoleGlobalSettings(settings: readonly EffectiveSetting[]): Ef
 }
 
 export const consoleStatusOptions = [
-  { value: "hidden", label: "숨김 (hidden)" },
-  { value: "legacy", label: "기존 화면 (legacy)" },
-  { value: "preview_read_only", label: "미리보기 읽기 전용 (preview_read_only)" },
-  { value: "preview", label: "미리보기 (preview)" },
-  { value: "stable", label: "정식 (stable)" },
-  { value: "deprecated", label: "지원 종료 예정 (deprecated)" },
-  { value: "retired", label: "종료 (retired)" },
+  { value: "hidden", label: `${migrationStatusLabels.hidden} (hidden)` },
+  { value: "legacy", label: `${migrationStatusLabels.legacy} (legacy)` },
+  {
+    value: "preview_read_only",
+    label: `${migrationStatusLabels.preview_read_only} (preview_read_only)`,
+  },
+  { value: "preview", label: `${migrationStatusLabels.preview} (preview)` },
+  { value: "stable", label: `${migrationStatusLabels.stable} (stable)` },
+  { value: "deprecated", label: `${migrationStatusLabels.deprecated} (deprecated)` },
+  { value: "retired", label: `${migrationStatusLabels.retired} (retired)` },
 ] as const;
 
 export function isBooleanSetting(setting: EffectiveSetting): boolean {

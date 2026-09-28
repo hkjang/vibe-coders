@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { roleLabel } from "@/config/ui-labels";
+import { migrationStatusLabels, roleLabel } from "@/config/ui-labels";
+
+describe("migrationStatusLabels", () => {
+  it("distinguishes rollout status from the separate write restriction", () => {
+    expect(migrationStatusLabels.preview_read_only).toBe("읽기 전용 미리보기");
+    expect(migrationStatusLabels.stable).toBe("정식");
+  });
+});
 
 describe("roleLabel", () => {
   it.each([

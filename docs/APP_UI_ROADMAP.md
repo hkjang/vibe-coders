@@ -137,6 +137,15 @@ Legacy와 `/app`의 격차는 CI가 기계적으로 검사한다. `go run ./cmd/
 - 상태 전달: `LoadingState`, `ErrorState`(요청 ID 포함), `EmptyState`, `InlineNotice`
 - 훅: `useSearchState`(URL 필터), `useTabParam`, `useRefreshInterval`, `useMutationFeedback`(토스트와 캐시 무효화)
 
+`v0.86.0`부터 공통 `DataTable`은 화면이 안정적인 `tableId`를 지정한 경우에만 열 표시·순서·너비
+맞춤 설정을 제공한다. 공급자와 모델 목록에서 먼저 활성화했으며 리소스 식별 열과 쓰기 작업 열은
+숨길 수 없다. 열 설정은 허용된 열 ID, 순서, 표시 여부, 80~640px 범위의 너비만 브라우저에 저장한다.
+요청 ID, 행 데이터, 필터, 페이지 커서, Prompt와 Secret은 저장 형식에 포함되지 않는다. 저장값은
+현재 열 allowlist로 다시 검증하고 손상된 값, 사라진 열, 마지막 열을 숨기는 값은 폐기한다. 표가 실제로
+가로로 넘칠 때만 이동 안내를 표시하고 로딩 중에는 머리글과 열 폭을 유지하는 skeleton 행을 사용한다.
+마우스 드래그뿐 아니라 열 이동 버튼과 머리글 resize handle의 화살표·Home·End 키도 지원한다.
+`tableId`가 없는 기존 사용처는 전과 같은 호출·레이아웃 계약을 유지한다.
+
 화면 테스트는 `renderScreen`, `mockApi`, `testAuth` 헬퍼를 사용한다. `mockApi`는 등록되지 않은 API 호출을
 실패로 처리하므로, 화면이 호출하는 서버 계약이 테스트에 빠짐없이 드러난다.
 
@@ -160,7 +169,7 @@ Legacy와 `/app`의 격차는 CI가 기계적으로 검사한다. `go run ./cmd/
 | 3 | 사용자·팀·API Key·Quota·MCP·App·Workflow·Skill | 완료 (`v0.84.0`) |
 | 4 | Routing·Policy·Settings·Text2SQL·DW retry | 완료 (`v0.84.0`) |
 | 5 | Kill Switch·Secret Rotation·Bulk Import 등 Critical 작업 | 완료 (`v0.84.0`, Bulk Import는 별도 설계) |
-| 6 | `/app` 기본화와 기능별 Legacy deprecation 검토 | 대기 |
+| 6 | `/app` 기본화와 기능별 Legacy deprecation 검토 | 대기 (`v0.86.0`에서 공통 운영 표 승격 기반 보강) |
 
 화면 이식이 끝났다고 Stable 승격이 끝난 것은 아니다. 각 기능은 데이터 정합성, 권한, URL 복원, 상태 UI, 접근성, 성능, 변경 안전성, 감사, E2E, Legacy fallback을 모두 통과한 뒤에만 Stable로 승격한다.
 

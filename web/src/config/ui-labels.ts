@@ -11,9 +11,9 @@ export const uiLabels = {
 export const migrationStatusLabels = {
   hidden: "숨김",
   legacy: "기존 화면",
-  preview_read_only: "읽기 전용",
+  preview_read_only: "읽기 전용 미리보기",
   preview: "미리보기",
-  stable: "안정",
+  stable: "정식",
   deprecated: "지원 종료 예정",
   retired: "종료",
 } as const;
