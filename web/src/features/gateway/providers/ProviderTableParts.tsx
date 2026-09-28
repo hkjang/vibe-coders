@@ -24,6 +24,9 @@ const healthPresentation: Record<ProviderHealthState, { label: string; tone: Bad
   unknown: { label: healthStatusLabels.unknown, tone: "muted" },
 };
 
+const providerLockedColumnIds = ["provider"] as const;
+const providerAdminLockedColumnIds = ["provider", "admin"] as const;
+
 export function QueryFailureNotice({
   error,
   hasPreviousData,
@@ -201,10 +204,12 @@ export function ProviderTable({
           getRowActionLabel={(row) => `${row.displayName} 공급자 상세 열기`}
           getRowId={(row) => row.identity}
           loading={loading}
+          lockedColumnIds={renderActions ? providerAdminLockedColumnIds : providerLockedColumnIds}
           onPageChange={onPageChange}
           onRowClick={onRowClick}
           pageCount={pageCount}
           pageIndex={pageIndex}
+          tableId="gateway.providers"
         />
       )}
     </section>

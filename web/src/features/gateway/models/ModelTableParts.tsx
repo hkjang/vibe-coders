@@ -12,6 +12,8 @@ import { createDataTableColumnHelper, type DataTableColumn } from "@/shared/data
 import { DataTable } from "@/shared/data-table/DataTable";
 import { operationalMessage } from "@/shared/errors/operational-messages";
 
+const modelLockedColumnIds = ["model", "provider"] as const;
+
 function StatusBadges({ row }: { row: ModelCatalogRow }): React.JSX.Element {
   const { status } = row;
   const presentation = modelStatusPresentation[status];
@@ -187,10 +189,12 @@ export function ModelTable({
           getRowActionLabel={(row) => `${row.providerLabel} ${row.model.id} 모델 상세 열기`}
           getRowId={(row) => modelRowKey(row.model)}
           loading={loading}
+          lockedColumnIds={modelLockedColumnIds}
           onPageChange={onPageChange}
           onRowClick={onRowClick}
           pageCount={pageCount}
           pageIndex={pageIndex}
+          tableId="gateway.models"
         />
       )}
     </section>

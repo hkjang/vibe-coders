@@ -1,5 +1,6 @@
 import { useId, useState, type RefObject } from "react";
 
+import { roleLabel } from "@/config/ui-labels";
 import type { ConsoleFeatureRow } from "@/features/system/settings/settings-utils";
 import { consoleStatusOptions, normalizedBoolean } from "@/features/system/settings/settings-utils";
 import { isAppError } from "@/shared/api/error";
@@ -31,6 +32,23 @@ interface ConsoleFeatureFormProps {
   onSaved: () => void;
   onSubmit: (input: ConsoleFeatureSubmit) => Promise<unknown>;
   row: ConsoleFeatureRow;
+}
+
+function roleCodes(value: string): string[] {
+  return value
+    .split(",")
+    .map((role) => role.trim())
+    .filter((role) => role !== "");
+}
+
+function RoleSelectionSummary({ value }: { value: string }): React.JSX.Element {
+  const roles = roleCodes(value);
+  return (
+    <div className="settings-key-cell">
+      <span>현재 대상: {roles.length === 0 ? "기능별 기본 역할 제한" : roles.map(roleLabel).join(", ")}</span>
+      {roles.length > 0 ? <small className="mono">역할 코드: {roles.join(", ")}</small> : null}
+    </div>
+  );
 }
 
 /** Mounted with `key={row.featureId}` so each feature opens with its own values. */
@@ -94,18 +112,21 @@ function ConsoleFeatureForm({
       </FormField>
 
       <FormField
-        label="미리보기 역할"
-        description="쉼표로 구분한 역할 목록입니다. 비우면 어떤 역할도 미리보기 대상이 되지 않습니다."
+        label="미리보기 대상 역할"
+        description="역할 코드를 쉼표로 구분합니다. 비우면 기능 전환 목록에 정의된 이 기능의 기본 역할 제한을 유지합니다."
       >
         {(control) => (
-          <Textarea
-            {...control}
-            rows={2}
-            value={roles}
-            disabled={!editable || !row.roles}
-            placeholder="super_admin,admin"
-            onChange={(event) => setRoles(event.target.value)}
-          />
+          <>
+            <RoleSelectionSummary value={roles} />
+            <Textarea
+              {...control}
+              rows={2}
+              value={roles}
+              disabled={!editable || !row.roles}
+              placeholder="예: super_admin,admin"
+              onChange={(event) => setRoles(event.target.value)}
+            />
+          </>
         )}
       </FormField>
 
@@ -131,8 +152,8 @@ function ConsoleFeatureForm({
             disabled={!editable || !row.readonly}
             onChange={(event) => setReadOnly(event.target.value)}
             options={[
-              { value: "true", label: "true (쓰기 차단)" },
-              { value: "false", label: "false (쓰기 허용)" },
+              { value: "true", label: "쓰기 차단 (true)" },
+              { value: "false", label: "쓰기 허용 (false)" },
             ]}
           />
         )}

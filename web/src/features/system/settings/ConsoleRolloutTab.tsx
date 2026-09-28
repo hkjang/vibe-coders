@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from "react";
 
 import { migrationRegistry } from "@/config/migration-registry";
+import { migrationStatusLabels, roleLabel } from "@/config/ui-labels";
 import {
   ConsoleFeatureDialog,
   type ConsoleFeatureEdit,
@@ -11,6 +12,7 @@ import {
   buildConsoleFeatureRows,
   consoleGlobalSettings,
   isConsoleSetting,
+  normalizedBoolean,
   settingDisplayValue,
   settingEditPermission,
   type ConsoleFeatureRow,
@@ -46,8 +48,39 @@ const statusTones: Record<string, "danger" | "info" | "muted" | "success" | "war
   retired: "danger",
 };
 
-function fieldValue(setting: EffectiveSetting | undefined): string {
-  return setting?.value ?? "—";
+function statusDisplay(status: string): string {
+  return Object.prototype.hasOwnProperty.call(migrationStatusLabels, status)
+    ? migrationStatusLabels[status as keyof typeof migrationStatusLabels]
+    : "확인 불가";
+}
+
+function roleCodes(value: string | undefined): string[] {
+  if (!value) return [];
+  return value
+    .split(",")
+    .map((role) => role.trim())
+    .filter((role) => role !== "");
+}
+
+function roleDisplay(value: string | undefined): React.JSX.Element {
+  const roles = roleCodes(value);
+  if (roles.length === 0) return <span>기능별 기본 역할 제한</span>;
+  return (
+    <span className="settings-key-cell">
+      <span>{roles.map((role) => roleLabel(role)).join(", ")}</span>
+      <small className="mono">{roles.join(", ")}</small>
+    </span>
+  );
+}
+
+function readOnlyDisplay(value: string | undefined): React.JSX.Element {
+  const normalized = normalizedBoolean(value ?? "false");
+  return (
+    <span className="settings-key-cell">
+      <span>{normalized === "true" ? "쓰기 차단" : "쓰기 허용"}</span>
+      <small className="mono">{normalized}</small>
+    </span>
+  );
 }
 
 export function ConsoleRolloutTab({ hasAdminWrite }: { hasAdminWrite: boolean }): React.JSX.Element {
@@ -212,11 +245,20 @@ export function ConsoleRolloutTab({ hasAdminWrite }: { hasAdminWrite: boolean })
                       <small className="mono">{row.featureId}</small>
                     </th>
                     <td>
-                      <Badge tone={statusTones[status] ?? "muted"}>{status || "—"}</Badge>
+                      {status ? (
+                        <span className="settings-key-cell">
+                          <Badge tone={statusTones[status] ?? "muted"}>{statusDisplay(status)}</Badge>
+                          <small className="mono">{status}</small>
+                        </span>
+                      ) : (
+                        "—"
+                      )}
                     </td>
-                    <td className="mono truncate">{fieldValue(row.roles) || "—"}</td>
-                    <td className="cell-number">{fieldValue(row.rollout)}</td>
-                    <td>{fieldValue(row.readonly)}</td>
+                    <td>{roleDisplay(row.roles?.value)}</td>
+                    <td className="cell-number">
+                      {row.rollout?.value === undefined ? "—" : `${row.rollout.value}%`}
+                    </td>
+                    <td>{row.readonly ? readOnlyDisplay(row.readonly.value) : "—"}</td>
                     <td>
                       <Button
                         size="small"

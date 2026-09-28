@@ -338,11 +338,17 @@ func TestEmbeddedFallbackAssetsAreAvailable(t *testing.T) {
 	if EmbeddedFS() == nil {
 		t.Fatal("EmbeddedFS returned nil")
 	}
-	if !strings.Contains(string(disabledPage), `href="/admin"`) {
-		t.Fatal("disabled fallback does not link to /admin")
-	}
-	if !strings.Contains(string(unavailablePage), `href="/admin"`) {
-		t.Fatal("unavailable fallback does not link to /admin")
+	for name, page := range map[string][]byte{
+		"disabled":    disabledPage,
+		"unavailable": unavailablePage,
+	} {
+		body := string(page)
+		if !strings.Contains(body, `href="/admin"`) {
+			t.Fatalf("%s fallback does not link to /admin", name)
+		}
+		if !strings.Contains(body, "차세대 관리 콘솔") || !strings.Contains(body, "기존 관리자 화면 열기") {
+			t.Fatalf("%s fallback does not use the Korean console labels", name)
+		}
 	}
 }
 

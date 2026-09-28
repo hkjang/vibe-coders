@@ -232,11 +232,62 @@ describe("SystemSettingsPage — 런타임 설정", () => {
 });
 
 describe("SystemSettingsPage — 콘솔 전환", () => {
-  it("edits a feature rollout status and warns that a refresh is required", async () => {
+  it("shows Korean-first rollout values and explains that an empty role list keeps the feature defaults", async () => {
+    mockApi({ "GET /admin/settings/effective": () => effectiveSettings });
+    const user = userEvent.setup();
+    renderPage("/system/settings?tab=console");
+
+    const rolloutHeading = await screen.findByRole("heading", { name: "기능별 전환 상태" });
+    const rolloutSection = rolloutHeading.closest("section");
+    expect(rolloutSection).not.toBeNull();
+    const rollout = within(rolloutSection as HTMLElement);
+    expect(await rollout.findByText("기존 화면")).toBeVisible();
+    expect(rollout.getByText("legacy")).toBeVisible();
+    expect(rollout.getByText("최고 관리자, 관리자")).toBeVisible();
+    expect(rollout.getByText("super_admin, admin")).toBeVisible();
+    expect(rollout.getByText("0%")).toBeVisible();
+    expect(rollout.getByText("쓰기 차단")).toBeVisible();
+    expect(rollout.getByText("true")).toBeVisible();
+
+    await user.click(rollout.getByRole("button", { name: "시스템 설정 전환 설정 편집" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByLabelText("전환 상태")).toHaveDisplayValue("기존 화면 (legacy)");
+    for (const statusLabel of [
+      "숨김 (hidden)",
+      "기존 화면 (legacy)",
+      "읽기 전용 미리보기 (preview_read_only)",
+      "미리보기 (preview)",
+      "정식 (stable)",
+      "지원 종료 예정 (deprecated)",
+      "종료 (retired)",
+    ]) {
+      expect(within(dialog).getByRole("option", { name: statusLabel })).toBeInTheDocument();
+    }
+    expect(within(dialog).getByLabelText("읽기 전용 강제")).toHaveDisplayValue("쓰기 차단 (true)");
+    expect(within(dialog).getByText("현재 대상: 최고 관리자, 관리자")).toBeVisible();
+    expect(within(dialog).getByText("역할 코드: super_admin, admin")).toBeVisible();
+    expect(
+      within(dialog).getByText(
+        "역할 코드를 쉼표로 구분합니다. 비우면 기능 전환 목록에 정의된 이 기능의 기본 역할 제한을 유지합니다.",
+      ),
+    ).toBeVisible();
+
+    const roles = within(dialog).getByLabelText("미리보기 대상 역할");
+    await user.clear(roles);
+    expect(within(dialog).getByText("현재 대상: 기능별 기본 역할 제한")).toBeVisible();
+  });
+
+  it("saves the unchanged status, role, rollout, and read-only contract codes", async () => {
     const api = mockApi({
       "GET /admin/settings/effective": () => effectiveSettings,
       "PUT /admin/settings/by-key/ui.app.feature.system.settings.status": () =>
         consoleFeatureSetting("status", "preview"),
+      "PUT /admin/settings/by-key/ui.app.feature.system.settings.roles": () =>
+        consoleFeatureSetting("roles", "viewer,developer", "csv"),
+      "PUT /admin/settings/by-key/ui.app.feature.system.settings.rollout": () =>
+        consoleFeatureSetting("rollout", "35", "int"),
+      "PUT /admin/settings/by-key/ui.app.feature.system.settings.readonly": () =>
+        consoleFeatureSetting("readonly", "false", "bool"),
     });
     const user = userEvent.setup();
     renderPage("/system/settings?tab=console");
@@ -247,13 +298,30 @@ describe("SystemSettingsPage — 콘솔 전환", () => {
     await user.click(screen.getByRole("button", { name: "시스템 설정 전환 설정 편집" }));
     const dialog = await screen.findByRole("dialog");
     await user.selectOptions(within(dialog).getByLabelText("전환 상태"), "preview");
+    const roles = within(dialog).getByLabelText("미리보기 대상 역할");
+    await user.clear(roles);
+    await user.type(roles, "viewer,developer");
+    const rollout = within(dialog).getByLabelText("점진 배포 비율(%)");
+    await user.clear(rollout);
+    await user.type(rollout, "35");
+    await user.selectOptions(within(dialog).getByLabelText("읽기 전용 강제"), "false");
+    expect(within(dialog).getByText("현재 대상: 조회자, 개발자")).toBeVisible();
     await user.click(within(dialog).getByRole("button", { name: "저장" }));
 
-    await waitFor(() =>
+    await waitFor(() => {
       expect(api.bodies("PUT /admin/settings/by-key/ui.app.feature.system.settings.status")).toEqual([
         { value: "preview" },
-      ]),
-    );
+      ]);
+      expect(api.bodies("PUT /admin/settings/by-key/ui.app.feature.system.settings.roles")).toEqual([
+        { value: "viewer,developer" },
+      ]);
+      expect(api.bodies("PUT /admin/settings/by-key/ui.app.feature.system.settings.rollout")).toEqual([
+        { value: "35" },
+      ]);
+      expect(api.bodies("PUT /admin/settings/by-key/ui.app.feature.system.settings.readonly")).toEqual([
+        { value: "false" },
+      ]);
+    });
   });
 });
 

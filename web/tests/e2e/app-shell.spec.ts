@@ -601,6 +601,50 @@ test("restores focus to the Provider row trigger after Escape", async ({ page })
     .toBe(providerRef("openai-primary"));
 });
 
+test("restores Provider table columns without storing operational row data", async ({ page }) => {
+  await mockGateway(page);
+  await page.goto("gateway/providers");
+
+  const table = page.getByRole("table", { name: "공급자 연결 설정과 운영 상태" });
+  await expect(table.getByRole("columnheader", { name: "운영 상태" })).toBeVisible();
+  await expect(page.getByText("좌우로 이동해 추가 열 보기")).toBeVisible();
+
+  await page.getByRole("button", { name: "열 설정" }).click();
+  const settings = page.getByRole("dialog", { name: "표 열 설정" });
+  await expect(settings.getByRole("checkbox", { name: /공급자/ })).toBeDisabled();
+  await settings.getByRole("checkbox", { name: /운영 상태/ }).uncheck();
+  await settings.getByRole("button", { name: "설정 완료" }).click();
+  await expect(table.getByRole("columnheader", { name: "운영 상태" })).toHaveCount(0);
+
+  const stored = await page.evaluate(() => localStorage.getItem("vibe.app.table.v1.gateway.providers"));
+  expect(stored).not.toBeNull();
+  expect(stored).not.toContain("openai-primary");
+  expect(Object.keys(JSON.parse(stored ?? "{}")).sort()).toEqual([
+    "columnOrder",
+    "columnSizing",
+    "columnVisibility",
+    "version",
+  ]);
+
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "공급자", exact: true })).toBeVisible();
+  await expect(
+    page
+      .getByRole("table", { name: "공급자 연결 설정과 운영 상태" })
+      .getByRole("columnheader", { name: "운영 상태" }),
+  ).toHaveCount(0);
+
+  await page.getByRole("button", { name: "열 설정" }).click();
+  const resetDialog = page.getByRole("dialog", { name: "표 열 설정" });
+  await resetDialog.getByRole("button", { name: "기본값으로 초기화" }).click();
+  await resetDialog.getByRole("button", { name: "설정 완료" }).click();
+  await expect(
+    page
+      .getByRole("table", { name: "공급자 연결 설정과 운영 상태" })
+      .getByRole("columnheader", { name: "운영 상태" }),
+  ).toBeVisible();
+});
+
 test("never fetches routing health for Provider without routing:read", async ({ page }) => {
   let routingRequests = 0;
   const bootstrapWithoutRouting = {

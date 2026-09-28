@@ -1,6 +1,7 @@
 dist/
 coverage/
 node_modules/
+.pnpm-store/
 playwright-report/
 test-results/
 src/shared/api/generated/
