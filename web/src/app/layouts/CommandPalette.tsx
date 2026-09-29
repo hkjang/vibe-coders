@@ -3,13 +3,13 @@ import { LegacyLink } from "@/shared/components/ui/LegacyLink";
 import * as Dialog from "@radix-ui/react-dialog";
 import { useQueryClient } from "@tanstack/react-query";
 import { ExternalLink, Search, X } from "lucide-react";
-import { useCallback, useEffect, useId, useMemo, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type RefObject } from "react";
 import { useNavigate } from "react-router";
 
 import { useAuth } from "@/app/auth/AuthProvider";
 import { jumpItems, matchesQuery, type CommandItem } from "@/app/layouts/command-items";
 import { featurePath, resolveFeature } from "@/config/migration-registry";
-import { migrationStatusLabels, preferenceLabels, uiLabels } from "@/config/ui-labels";
+import { commandPaletteLabels, migrationStatusLabels, preferenceLabels, uiLabels } from "@/config/ui-labels";
 import { Badge } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
 import { canOpenLegacyAdmin } from "@/shared/permissions/legacy-admin";
@@ -18,6 +18,7 @@ import { usePreferences } from "@/shared/stores/preferences";
 interface CommandPaletteProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  returnFocusRef: RefObject<HTMLElement | null>;
   /** Opens the shortcut sheet, offered here so the palette can teach the rest. */
   onShowShortcuts?: () => void;
 }
@@ -36,6 +37,7 @@ function normalize(value: string): string {
 export function CommandPalette({
   open,
   onOpenChange,
+  returnFocusRef,
   onShowShortcuts,
 }: CommandPaletteProps): React.JSX.Element {
   const auth = useAuth();
@@ -45,6 +47,9 @@ export function CommandPalette({
   const queryClient = useQueryClient();
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
+  const composing = useRef(false);
+  const [navigating, setNavigating] = useState(false);
+  const searchRef = useRef<HTMLInputElement>(null);
   const listboxId = useId();
   const theme = usePreferences((state) => state.theme);
   const density = usePreferences((state) => state.density);
@@ -58,14 +63,21 @@ export function CommandPalette({
   const updateOpen = useCallback(
     (nextOpen: boolean): void => {
       setActiveIndex(0);
-      if (!nextOpen) setQuery("");
+      if (!nextOpen) {
+        setQuery("");
+      }
       onOpenChange(nextOpen);
     },
     [onOpenChange],
   );
 
+  useEffect(() => {
+    if (!open) composing.current = false;
+  }, [open]);
+
   const go = useCallback(
     (path: string): void => {
+      setNavigating(true);
       navigate(path);
       updateOpen(false);
     },
@@ -191,7 +203,15 @@ export function CommandPalette({
         : destinations;
     // Destinations stay on top: navigating is the common case, and a command is one
     // typed word away. A pasted id outranks both, because it states an exact intent.
-    return [...jumpItems(query, go), ...ordered, ...actions].filter((item) => matchesQuery(item, needle));
+    // ID filters are a React request-explorer capability; a Legacy-only or
+    // forbidden destination cannot safely consume the query-string jump.
+    const canJump = available.some(
+      ({ feature, effective }) =>
+        feature.featureId === "observability.requests" && effective.status !== "legacy",
+    );
+    return [...(canJump ? jumpItems(query, go) : []), ...ordered, ...actions].filter((item) =>
+      matchesQuery(item, needle),
+    );
   }, [actions, available, go, query, recentFeatures]);
 
   const selectedIndex = items.length ? Math.min(activeIndex, items.length - 1) : 0;
@@ -206,6 +226,9 @@ export function CommandPalette({
   }, [activeOptionId]);
 
   const handleSearchKeyDown = (event: React.KeyboardEvent<HTMLInputElement>): void => {
+    // IME confirmation/candidate navigation must not execute the selected command.
+    // keyCode 229 covers browsers that clear isComposing on the confirming key.
+    if (composing.current || event.nativeEvent.isComposing || event.keyCode === 229) return;
     if (!items.length) return;
     if (event.key === "ArrowDown") {
       event.preventDefault();
@@ -229,7 +252,25 @@ export function CommandPalette({
     <Dialog.Root open={open} onOpenChange={updateOpen}>
       <Dialog.Portal>
         <Dialog.Overlay className="dialog-overlay" />
-        <Dialog.Content className="command-dialog" aria-describedby="command-description">
+        <Dialog.Content
+          className="command-dialog"
+          aria-describedby="command-description"
+          onOpenAutoFocus={() => {
+            setNavigating(false);
+          }}
+          onEscapeKeyDown={(event) => {
+            if (composing.current || event.isComposing || event.keyCode === 229) event.preventDefault();
+          }}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            const trigger = returnFocusRef.current;
+            const target =
+              !navigating && trigger?.isConnected && !trigger.matches(":disabled")
+                ? trigger
+                : document.querySelector<HTMLElement>("#main-content");
+            target?.focus();
+          }}
+        >
           <div className="command-heading">
             <div>
               <Dialog.Title>명령 팔레트</Dialog.Title>
@@ -247,11 +288,12 @@ export function CommandPalette({
             <span className="sr-only">메뉴 검색</span>
             <Search aria-hidden="true" />
             <input
+              ref={searchRef}
               aria-label="메뉴 검색"
               role="combobox"
               aria-autocomplete="list"
               aria-controls={listboxId}
-              aria-expanded={open}
+              aria-expanded={open && items.length > 0}
               aria-activedescendant={activeOptionId}
               value={query}
               onChange={(event) => {
@@ -259,42 +301,67 @@ export function CommandPalette({
                 setActiveIndex(0);
               }}
               onKeyDown={handleSearchKeyDown}
+              onCompositionStart={() => {
+                composing.current = true;
+              }}
+              onCompositionEnd={() => {
+                composing.current = false;
+              }}
               placeholder="메뉴·명령 검색, 또는 요청·추적·세션 ID 붙여넣기"
               autoComplete="off"
               autoFocus
             />
             <kbd>Esc</kbd>
           </label>
-          <div id={listboxId} className="command-results" role="listbox" aria-label="검색 결과">
-            {items.length ? (
-              items.map((item, index) => (
-                <button
-                  id={`${listboxId}-${item.id.replaceAll(/[.:/]/g, "-")}`}
-                  className="command-result"
-                  key={item.id}
-                  role="option"
-                  tabIndex={-1}
-                  aria-selected={index === selectedIndex}
-                  onPointerMove={() => setActiveIndex(index)}
-                  onClick={item.run}
-                >
-                  <span>
-                    <strong>{item.title}</strong>
-                    {item.hint ? <small>{item.hint}</small> : null}
-                  </span>
-                  <Badge tone={item.kind === "action" || item.kind === "jump" ? "muted" : "info"}>
-                    {kindLabels[item.kind]}
-                  </Badge>
-                </button>
-              ))
-            ) : (
-              <p className="command-empty">검색 결과가 없습니다.</p>
-            )}
+          <p className="sr-only" role="status" aria-atomic="true">
+            {commandPaletteLabels.results(items.length)}
+          </p>
+          <div
+            id={listboxId}
+            className="command-results"
+            role="listbox"
+            aria-label="검색 결과"
+            hidden={!items.length}
+          >
+            {items.map((item, index) => (
+              <button
+                id={`${listboxId}-${item.id.replaceAll(/[.:/]/g, "-")}`}
+                className="command-result"
+                key={item.id}
+                role="option"
+                tabIndex={-1}
+                aria-selected={index === selectedIndex}
+                onPointerMove={() => setActiveIndex(index)}
+                onClick={item.run}
+              >
+                <span>
+                  <strong>{item.title}</strong>
+                  {item.hint ? <small>{item.hint}</small> : null}
+                </span>
+                <Badge tone={item.kind === "action" || item.kind === "jump" ? "muted" : "info"}>
+                  {kindLabels[item.kind]}
+                </Badge>
+              </button>
+            ))}
           </div>
+          {!items.length ? (
+            <div className="command-empty">
+              <p>{commandPaletteLabels.empty}</p>
+              <p>{commandPaletteLabels.emptyHint}</p>
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  setQuery("");
+                  setActiveIndex(0);
+                  searchRef.current?.focus();
+                }}
+              >
+                {commandPaletteLabels.clear}
+              </Button>
+            </div>
+          ) : null}
           <div className="command-footer">
-            <span>
-              권한이 있는 기능만 표시됩니다. 단축키는 <kbd>?</kbd>
-            </span>
+            <span>{commandPaletteLabels.keyboardHint}</span>
             {showLegacyAdmin ? (
               <LegacyLink href="/admin">
                 {uiLabels.legacyAdmin} <ExternalLink aria-hidden="true" />

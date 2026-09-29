@@ -59,10 +59,18 @@ jobs:
       - name: Unit, component, and accessibility tests
         # The Vitest suite includes the axe-core App Shell accessibility checks.
         run: pnpm test
-      - name: Production build
+      - name: Production build and bundle performance budgets
         env:
           VITE_UI_VERSION: ci-${{ github.sha }}
         run: pnpm build
+      - name: Upload bundle performance report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: appui-bundle-budget
+          path: web/bundle-budget-report.json
+          if-no-files-found: warn
+          retention-days: 14
       - name: React deep-link, CSP, and visual E2E
         run: pnpm test:e2e
       - name: Upload React E2E diagnostics on failure
@@ -192,7 +200,7 @@ jobs:
     name: canonical Go+npm SBOM · license drift
     runs-on: ubuntu-latest
     env:
-      SOURCE_SBOM_VERSION: v0.86.2
+      SOURCE_SBOM_VERSION: v0.86.3
       GO_VERSION: 1.26.8
       NODE_VERSION: 24.20.0
       PNPM_VERSION: 11.25.0

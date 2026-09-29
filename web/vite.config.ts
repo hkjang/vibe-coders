@@ -18,6 +18,8 @@ export default defineConfig({
   build: {
     outDir: "dist",
     assetsDir: "assets",
+    // Build-time dependency graph for the performance gate; never a runtime fetch.
+    manifest: true,
     sourcemap: false,
     reportCompressedSize: true,
   },

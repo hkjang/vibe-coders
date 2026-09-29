@@ -513,6 +513,86 @@ test("opens the command palette on a deep link without CSP or external asset err
   expect(assetRequests.filter((requestUrl) => new URL(requestUrl).origin !== appOrigin)).toEqual([]);
 });
 
+test("keeps Korean composition in search and restores keyboard focus", async ({ page }) => {
+  await mockGateway(page);
+  await page.goto("overview");
+  const trigger = page.getByRole("button", { name: "명령 팔레트 열기" });
+  await trigger.click();
+  const dialog = page.getByRole("dialog", { name: "명령 팔레트" });
+  const search = dialog.getByRole("combobox", { name: "메뉴 검색" });
+  await search.fill("게이트웨이 AI");
+  await search.dispatchEvent("compositionstart", { data: "이" });
+  for (const key of ["ArrowDown", "Enter", "Escape"]) await search.press(key);
+  await expect(dialog).toBeVisible();
+  await expect(page).toHaveURL(/\/app\/overview$/);
+  await expect(dialog.getByRole("option", { name: /게이트웨이 상태/ })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  await search.dispatchEvent("compositionend", { data: "이" });
+  await search.dispatchEvent("keydown", { key: "Enter", keyCode: 229 });
+  await expect(dialog).toBeVisible();
+  await search.press("Escape");
+  await expect(trigger).toBeFocused();
+  await trigger.press("Control+K");
+  await search.fill("공급자 AI");
+  await search.press("Enter");
+  await expect(page).toHaveURL(/\/app\/gateway\/providers$/);
+  await expect(page.locator("#main-content")).toBeFocused();
+});
+
+test("keeps an empty search recoverable and the palette within a narrow viewport", async ({
+  page,
+}, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 390 });
+  await page.addInitScript({ path: "node_modules/axe-core/axe.min.js" });
+  await mockGateway(page);
+  await page.goto("overview");
+  await expect(page.getByRole("heading", { name: "운영 개요" })).toBeVisible();
+  const trigger = page.getByRole("button", { name: "명령 팔레트 열기" });
+  await trigger.focus();
+  await page.keyboard.press("Control+K");
+  const dialog = page.getByRole("dialog", { name: "명령 팔레트" });
+  const search = dialog.getByRole("combobox", { name: "메뉴 검색" });
+  const bounds = await dialog.boundingBox();
+  expect(bounds).not.toBeNull();
+  if (!bounds) throw new Error("명령 팔레트 크기를 확인할 수 없습니다.");
+  expect(bounds.y + bounds.height).toBeLessThanOrEqual(390);
+  await search.fill("없는 메뉴 검색어");
+  await expect(dialog.getByRole("status")).toHaveText("검색 결과 0개");
+  await expect(search).toHaveAttribute("aria-expanded", "false");
+  await expect(dialog.getByRole("button", { name: "검색어 지우기" })).toBeInViewport();
+  expect(await axeViolations(page)).toEqual([]);
+  await page.screenshot({ path: testInfo.outputPath("palette-empty-mobile.png") });
+  await dialog.getByRole("button", { name: "검색어 지우기" }).click();
+  await expect(search).toBeFocused();
+  await expect(search).toHaveValue("");
+  await expect(search).toHaveAttribute("aria-expanded", "true");
+  await search.fill("단축키");
+  await search.press("Enter");
+  const help = page.getByRole("dialog", { name: "단축키" });
+  await expect(help).toBeVisible();
+  await expect.poll(() => help.evaluate((element) => element.contains(document.activeElement))).toBe(true);
+  await page.keyboard.press("Tab");
+  const helpBody = help.getByRole("region", { name: "단축키 안내 내용" });
+  await expect(helpBody).toBeFocused();
+  await helpBody.press("End");
+  await expect.poll(() => helpBody.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+  await expect
+    .poll(() =>
+      helpBody.evaluate((element) => {
+        const lastTip = element.querySelector("li:last-child");
+        return Boolean(
+          lastTip && lastTip.getBoundingClientRect().bottom <= element.getBoundingClientRect().bottom,
+        );
+      }),
+    )
+    .toBe(true);
+  expect(await axeViolations(page)).toEqual([]);
+  await page.keyboard.press("Escape");
+  await expect(trigger).toBeFocused();
+});
+
 test("opens and reloads Gateway Health at a URL-backed range", async ({ page }) => {
   const routingWindows: string[] = [];
   await mockGateway(page, {

@@ -7,3 +7,4 @@ test-results/
 src/shared/api/generated/
 pnpm-lock.yaml
 openapi/openapi.json
+bundle-budget-report.json

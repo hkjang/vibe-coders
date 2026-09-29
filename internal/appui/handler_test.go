@@ -21,6 +21,7 @@ func testFiles() fstest.MapFS {
 		"index.html":                      {Data: []byte(testIndex), ModTime: modified},
 		"providers":                       {Data: []byte("ACTUAL PROVIDERS FILE"), ModTime: modified},
 		"config.json":                     {Data: []byte(`{"version":"test"}`), ModTime: modified},
+		".vite/manifest.json":             {Data: []byte(`{"build_only":"manifest"}`), ModTime: modified},
 		"assets/index-Baw36Abc.js":        {Data: []byte("console.log('hashed')"), ModTime: modified},
 		"assets/bundle-abcdefgh.js":       {Data: []byte(strings.Repeat("const value = 'compressible';\n", 400)), ModTime: modified},
 		"assets/app.js":                   {Data: []byte("console.log('plain')"), ModTime: modified},
@@ -151,6 +152,8 @@ func TestUnsafePathsAreRejected(t *testing.T) {
 		"/app/foo%5cbar",
 		"/app//providers",
 		"/app/.gitkeep",
+		"/app/.vite/manifest.json",
+		"/app/%2evite/manifest.json",
 		"/app/%00",
 	} {
 		t.Run(target, func(t *testing.T) {

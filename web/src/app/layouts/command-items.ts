@@ -53,9 +53,10 @@ export function jumpItems(query: string, go: (path: string) => void): CommandIte
 }
 
 export function matchesQuery(item: CommandItem, needle: string): boolean {
-  if (needle === "") return true;
-  return [item.title, item.hint ?? "", ...(item.keywords ?? [])]
+  const words = needle.normalize("NFC").trim().toLocaleLowerCase("ko-KR").split(/\s+/u);
+  const text = [item.title, item.hint ?? "", ...(item.keywords ?? [])]
     .join(" ")
-    .toLocaleLowerCase("ko-KR")
-    .includes(needle);
+    .normalize("NFC")
+    .toLocaleLowerCase("ko-KR");
+  return words.every((word) => text.includes(word));
 }

@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import axe from "axe-core";
 import { MemoryRouter, Route, Routes } from "react-router";
@@ -16,6 +16,7 @@ const authRuntime = vi.hoisted(() => ({
   legacyFallback: true,
   scopes: ["admin:read", "routing:read", "observability:read", "costs:read", "security:read"],
   role: "admin",
+  backendVersion: "v0.81.0",
 }));
 
 vi.mock("@/app/auth/AuthProvider", () => ({
@@ -31,7 +32,7 @@ vi.mock("@/app/auth/AuthProvider", () => ({
       scopes: authRuntime.scopes,
       features: {},
     },
-    backendVersion: "v0.81.0",
+    backendVersion: authRuntime.backendVersion,
     uiVersion: "test",
     apiVersion: "v1",
     authenticationMode: "session",
@@ -58,6 +59,7 @@ function renderShell(
             <Route path="overview" element={<h1>Overview content</h1>} />
             <Route path="gateway/providers" element={<h1>Provider content</h1>} />
             <Route path="agents/skills" element={<h1>Skill content</h1>} />
+            <Route path="observability/requests" element={<h1>Request content</h1>} />
           </Route>
         </Routes>
       </MemoryRouter>
@@ -70,6 +72,7 @@ describe("AppShell", () => {
     authRuntime.uiEnabled = true;
     authRuntime.legacyFallback = true;
     authRuntime.role = "admin";
+    authRuntime.backendVersion = "v0.81.0";
     authRuntime.scopes = ["admin:read", "routing:read", "observability:read", "costs:read", "security:read"];
     usePreferences.setState({
       theme: "system",
@@ -134,6 +137,7 @@ describe("AppShell", () => {
   });
 
   it("offers a pasted request id as a jump, and refuses a pasted credential", async () => {
+    authRuntime.backendVersion = "v0.86.3";
     const user = userEvent.setup();
     renderShell();
     await user.keyboard("{Control>}k{/Control}");
@@ -145,6 +149,84 @@ describe("AppShell", () => {
     await user.clear(search);
     await user.type(search, `sk-ant-${"a".repeat(40)}`);
     expect(screen.queryByRole("option", { name: /ID로 이동/ })).not.toBeInTheDocument();
+  });
+
+  it.each(["forbidden", "legacy"])("does not offer ID jumps for a %s request explorer", async (mode) => {
+    authRuntime.backendVersion = mode === "legacy" ? "v0.81.0" : "v0.86.3";
+    if (mode === "forbidden") authRuntime.scopes = ["routing:read"];
+    const user = userEvent.setup();
+    renderShell();
+    await user.keyboard("{Control>}k{/Control}");
+    await user.type(await screen.findByRole("combobox", { name: "메뉴 검색" }), "req_01JABCDEF");
+    expect(screen.queryByRole("option", { name: /ID로 이동/ })).not.toBeInTheDocument();
+    expect(screen.getByText("검색 결과가 없습니다.")).toBeVisible();
+  });
+
+  it("keeps IME confirmation, candidate movement and Escape inside the composing search", async () => {
+    const user = userEvent.setup();
+    renderShell();
+    await user.click(screen.getByRole("button", { name: "명령 팔레트 열기" }));
+    const search = await screen.findByRole("combobox", { name: "메뉴 검색" });
+    await user.type(search, "AI 게이트웨이");
+    const first = screen.getByRole("option", { name: /게이트웨이 상태/ });
+    fireEvent.compositionStart(search);
+    for (const key of ["ArrowDown", "End", "Home", "Enter", "Escape"]) fireEvent.keyDown(search, { key });
+    expect(first).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("dialog", { name: "명령 팔레트" })).toBeVisible();
+    fireEvent.compositionEnd(search);
+    fireEvent.keyDown(search, { key: "Enter", isComposing: true });
+    fireEvent.keyDown(search, { key: "Enter", keyCode: 229 });
+    expect(screen.getByRole("dialog", { name: "명령 팔레트" })).toBeVisible();
+    await user.keyboard("{ArrowDown}{Enter}");
+    expect(screen.getByRole("heading", { name: "Provider content" })).toBeVisible();
+    expect(document.querySelector("#main-content")).toHaveFocus();
+  });
+
+  it("restores the trigger after Escape, including a repeated shortcut while already open", async () => {
+    const user = userEvent.setup();
+    renderShell();
+    const trigger = screen.getByRole("button", { name: "명령 팔레트 열기" });
+    await user.click(trigger);
+    await screen.findByRole("combobox", { name: "메뉴 검색" });
+    await user.keyboard("{Control>}k{/Control}{Escape}");
+    expect(trigger).toHaveFocus();
+    trigger.focus();
+    await user.keyboard("{Control>}k{/Control}{Escape}");
+    expect(trigger).toHaveFocus();
+  });
+
+  it("offers an accessible empty-state reset without reading or storing the search text", async () => {
+    const user = userEvent.setup();
+    renderShell();
+    await user.keyboard("{Control>}k{/Control}");
+    const search = await screen.findByRole("combobox", { name: "메뉴 검색" });
+    await user.type(search, "없는 메뉴 검색어");
+    expect(screen.getByRole("status")).toHaveTextContent("검색 결과 0개");
+    expect((await axe.run(document.body)).violations).toEqual([]);
+    await user.click(screen.getByRole("button", { name: "검색어 지우기" }));
+    expect(search).toHaveValue("");
+    expect(search).toHaveFocus();
+    expect(screen.getAllByRole("option").length).toBeGreaterThan(0);
+    expect(localStorage.getItem("vibe.app.preferences.v1") ?? "").not.toContain("없는 메뉴 검색어");
+  });
+
+  it("keeps focus in the shortcut dialog opened by a palette command", async () => {
+    const user = userEvent.setup();
+    renderShell();
+    await user.click(screen.getByRole("button", { name: "명령 팔레트 열기" }));
+    await user.type(await screen.findByRole("combobox", { name: "메뉴 검색" }), "단축키");
+    await user.keyboard("{Enter}");
+    const help = await screen.findByRole("dialog", { name: "단축키" });
+    await waitFor(() => expect(help.contains(document.activeElement)).toBe(true));
+    await user.keyboard("{Tab}");
+    expect(screen.getByRole("region", { name: "단축키 안내 내용" })).toHaveFocus();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog", { name: "단축키" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "명령 팔레트 열기" })).toHaveFocus();
+    await user.keyboard("?");
+    expect(await screen.findByRole("dialog", { name: "단축키" })).toBeVisible();
+    await user.keyboard("{Escape}");
+    expect(screen.getByRole("button", { name: "명령 팔레트 열기" })).toHaveFocus();
   });
 
   it("offers the screens just visited before the rest of the menu", async () => {
