@@ -36,6 +36,7 @@ import { Toolbar } from "@/shared/components/ui/Toolbar";
 import { createDataTableColumnHelper, type DataTableColumn } from "@/shared/data-table/columns";
 import { DataTable } from "@/shared/data-table/DataTable";
 import { useMutationFeedback } from "@/shared/hooks/use-mutation-feedback";
+import { useSettingsReloadNotice } from "@/features/system/settings/use-settings-reload-notice";
 import { useSearchState } from "@/shared/hooks/use-search-state";
 import { containsPotentialSecret, secretSearchMessage } from "@/shared/security/secrets";
 import { downloadText } from "@/shared/utils/csv";
@@ -104,7 +105,7 @@ export function RuntimeSettingsTab({ hasAdminWrite }: { hasAdminWrite: boolean }
   const triggerRef = useRef<HTMLElement | null>(null);
   const [selected, setSelected] = useState<EffectiveSetting | undefined>();
   const [confirm, setConfirm] = useState<SettingRecovery | undefined>();
-  const [reloadPending, setReloadPending] = useState<{ requestId?: string }>();
+  const { reloadPending, setReloadPending } = useSettingsReloadNotice();
   const [testResult, setTestResult] = useState<{ label: string; ok: boolean; detail: string } | undefined>();
   const [searchError, setSearchError] = useState<string | undefined>();
 

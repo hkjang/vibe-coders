@@ -39,6 +39,7 @@ import { Button } from "@/shared/components/ui/Button";
 import { InlineNotice } from "@/shared/components/ui/InlineNotice";
 import { SectionCard } from "@/shared/components/ui/SectionCard";
 import { useMutationFeedback } from "@/shared/hooks/use-mutation-feedback";
+import { useSettingsReloadNotice } from "@/features/system/settings/use-settings-reload-notice";
 
 const system = endpoints.domains.system;
 
@@ -101,7 +102,7 @@ export function ConsoleRolloutTab({ hasAdminWrite }: { hasAdminWrite: boolean })
   const [selectedGlobal, setSelectedGlobal] = useState<EffectiveSetting | undefined>();
   const [recovery, setRecovery] = useState<SettingRecovery | undefined>();
   const [conflict, setConflict] = useState(false);
-  const [reloadPending, setReloadPending] = useState<{ requestId?: string } | undefined>();
+  const { reloadPending, setReloadPending } = useSettingsReloadNotice();
 
   const consoleSettings = useMemo(
     () => (settingsQuery.data?.settings ?? []).filter(isConsoleSetting),
@@ -195,7 +196,7 @@ export function ConsoleRolloutTab({ hasAdminWrite }: { hasAdminWrite: boolean })
         대기나 연결 오류가 있으면 적용이 늦어질 수 있습니다.
       </InlineNotice>
 
-      {reloadPending || settingsQuery.data?.this_pod?.up_to_date === false ? (
+      {reloadPending ? (
         <InlineNotice tone="warning" title="설정은 저장됐으며 런타임 반영을 기다리고 있습니다.">
           저장된 설정의 반영을 기다리는 상태입니다. 다시 저장하지 말고 최신 설정과 서버 반영 상태를
           확인하세요. 이 조회는 현재 요청을 처리한 서버의 상태이며 모든 서버의 적용 완료를 뜻하지 않습니다.

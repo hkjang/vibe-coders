@@ -905,6 +905,58 @@ for (const surface of ["runtime", "console"] as const) {
   }
 }
 
+for (const surface of ["runtime", "console"] as const) {
+  test(`${surface} 단건 저장의 반영 지연은 같은 탭의 최신 적용 완료 조회 후 사라지고 재저장하지 않는다`, async ({
+    page,
+    api,
+  }) => {
+    const key = surface === "console" ? globalKey : runtimeKey;
+    await page.goto(`system/settings?tab=${surface}`);
+    const sheet =
+      surface === "runtime"
+        ? await openSheet(page, key, false)
+        : await (async () => {
+            await page.getByRole("button", { name: "기존 화면 이동 편집", exact: true }).click();
+            return page.getByRole("dialog", { name: key, exact: true });
+          })();
+    const input = sheet.getByLabel("새 값", { exact: true });
+    if (surface === "console") await input.selectOption("false");
+    else await input.fill("2000");
+    await sheet.getByLabel("변경 사유").fill("public same-tab persisted update");
+    api.queueOutcomes("reload_pending");
+    await sheet.getByRole("button", { name: "저장", exact: true }).click();
+    await expect(sheet).toBeHidden();
+    const pendingNotice = page.getByText("설정은 저장됐으며 런타임 반영을 기다리고 있습니다.", {
+      exact: true,
+    });
+    await expect(pendingNotice).toBeVisible();
+    await expect(page.getByText("요청 ID: req-settings-reload-pending")).toBeVisible();
+    expect(api.writes).toHaveLength(1);
+    const request = api.writes[0];
+    if (!request) throw new Error("Expected one persisted setting update");
+    expect(request.method()).toBe("PUT");
+    expect(new URL(request.url()).pathname).toBe(`/admin/settings/by-key/${key}`);
+    expect(request.postDataJSON()).toEqual({
+      value: surface === "console" ? "false" : "2000",
+      reason: "public same-tab persisted update",
+      expected_version: surface === "console" ? 6 : 3,
+    });
+    api.reloadApplied();
+    const previousReads = api.readCount();
+    await page.locator(".page-header").getByRole("button", { name: "새로고침", exact: true }).click();
+    await expect.poll(api.readCount).toBeGreaterThan(previousReads);
+    await expect(pendingNotice).toBeHidden();
+    await expect(page.getByText("요청 ID: req-settings-reload-pending")).toBeHidden();
+    await expect(
+      page.getByRole("tab", {
+        name: surface === "console" ? "콘솔 전환" : "런타임 설정",
+        exact: true,
+      }),
+    ).toHaveAttribute("aria-selected", "true");
+    expect(api.writes).toHaveLength(1);
+  });
+}
+
 test("저장된 콘솔 설정의 반영 지연은 탭 왕복 뒤에도 남고 서버 적용 확인 후에만 사라진다", async ({
   page,
   api,

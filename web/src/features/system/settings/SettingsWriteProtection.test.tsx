@@ -97,6 +97,34 @@ async function changeValue(user: ReturnType<typeof userEvent.setup>, value: stri
 }
 
 describe.each(cases)("$tab 설정 저장 계약", (fixture) => {
+  it("같은 탭에서 새 조회가 적용 완료를 확인하면 반영 대기 경고를 지운다", async () => {
+    const user = userEvent.setup();
+    let upToDate = true;
+    const endpoint = `PUT /admin/settings/by-key/${fixture.setting.key}`;
+    const { api } = setup(fixture, {
+      "GET /admin/settings/effective": () => ({
+        settings: [fixture.setting],
+        this_pod: { up_to_date: upToDate },
+      }),
+      [endpoint]: () => {
+        upToDate = false;
+        throw new AppError("persisted", { kind: "http", status: 503, code: "setting_reload_pending" });
+      },
+    });
+    const title = "설정은 저장됐으며 런타임 반영을 기다리고 있습니다.";
+    await user.click(await screen.findByRole("button", { name: fixture.openLabel }));
+    await changeValue(user, fixture.draft);
+    await user.click(screen.getByRole("button", { name: "저장" }));
+    expect(await screen.findByText(title)).toBeVisible();
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    upToDate = true;
+    const refresh = screen.getAllByRole("button", { name: "새로고침" })[0];
+    if (!refresh) throw new Error("페이지 새로고침 버튼이 없습니다.");
+    await user.click(refresh);
+    await waitFor(() => expect(screen.queryByText(title)).not.toBeInTheDocument());
+    expect(api.bodies(endpoint)).toHaveLength(1);
+  });
+
   it("첫 오버라이드 이력에 이전 값이 없으면 롤백만 잠그고 이유를 안내한다", async () => {
     const user = userEvent.setup();
     const { api } = setup(fixture, {
