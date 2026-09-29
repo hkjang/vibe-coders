@@ -402,6 +402,8 @@ describe("SystemSettingsPage — 콘솔 전환", () => {
     expect(successToast).not.toHaveBeenCalled();
 
     await user.click(within(dialog).getByRole("button", { name: "취소" }));
+    const discard = await screen.findByRole("alertdialog");
+    await user.click(within(discard).getByRole("button", { name: "변경 버리기" }));
     await user.click(screen.getByRole("button", { name: "시스템 설정 전환 설정 편집" }));
     const refreshedDialog = await screen.findByRole("dialog");
     expect(within(refreshedDialog).getByLabelText("전환 상태")).toHaveValue("stable");

@@ -8,8 +8,13 @@ import {
   type ConsoleFeatureEdit,
 } from "@/features/system/settings/ConsoleFeatureDialog";
 import { SettingDetailSheet } from "@/features/system/settings/SettingDetailSheet";
+import {
+  SettingsRecoveryDialog,
+  type SettingRecovery,
+} from "@/features/system/settings/SettingsRecoveryDialog";
 import { ConsoleUsagePanel } from "@/features/system/settings/ConsoleUsagePanel";
 import { QueryNotice, UpdatedAt } from "@/features/system/settings/SettingsParts";
+import { settingSaveOutcome, type SettingSaveResult } from "@/features/system/settings/setting-save-outcome";
 import {
   buildConsoleFeatureRows,
   consoleGlobalSettings,
@@ -29,7 +34,6 @@ import { apiClient } from "@/shared/api/client";
 import type { EffectiveSetting } from "@/shared/api/domains/system.schemas";
 import { pathWithParams } from "@/shared/api/endpoint-factory";
 import { endpoints } from "@/shared/api/endpoints";
-import { isAppError, type AppError } from "@/shared/api/error";
 import { Badge } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
 import { InlineNotice } from "@/shared/components/ui/InlineNotice";
@@ -37,11 +41,6 @@ import { SectionCard } from "@/shared/components/ui/SectionCard";
 import { useMutationFeedback } from "@/shared/hooks/use-mutation-feedback";
 
 const system = endpoints.domains.system;
-
-type FeatureSaveResult =
-  | { outcome: "saved" }
-  | { outcome: "conflict"; error: AppError }
-  | { outcome: "reload_pending"; requestId?: string };
 
 const conflictMessage =
   "다른 작업자가 전환 설정을 변경해 저장하지 않았습니다. 입력한 내용을 확인한 뒤 대화상자를 닫고 다시 열어 최신 설정과 비교하세요.";
@@ -99,7 +98,8 @@ export function ConsoleRolloutTab({ hasAdminWrite }: { hasAdminWrite: boolean })
   const settingsQuery = useEffectiveSettings();
   const triggerRef = useRef<HTMLElement | null>(null);
   const [editing, setEditing] = useState<ConsoleFeatureRow | undefined>();
-  const [globalKey, setGlobalKey] = useState<string | undefined>();
+  const [selectedGlobal, setSelectedGlobal] = useState<EffectiveSetting | undefined>();
+  const [recovery, setRecovery] = useState<SettingRecovery | undefined>();
   const [conflict, setConflict] = useState(false);
   const [reloadPending, setReloadPending] = useState<{ requestId?: string } | undefined>();
 
@@ -109,25 +109,30 @@ export function ConsoleRolloutTab({ hasAdminWrite }: { hasAdminWrite: boolean })
   );
   const globals = useMemo(() => consoleGlobalSettings(consoleSettings), [consoleSettings]);
   const featureRows = useMemo(() => buildConsoleFeatureRows(consoleSettings), [consoleSettings]);
-  const selectedGlobal = globals.find((setting) => setting.key === globalKey);
 
   const editableSetting = editing?.status ?? editing?.roles ?? editing?.rollout ?? editing?.readonly;
   const permission = editableSetting
     ? settingEditPermission(editableSetting, hasAdminWrite)
     : { editable: hasAdminWrite, reason: hasAdminWrite ? undefined : "admin:write 권한이 필요합니다." };
 
-  const writeSetting = async (setting: EffectiveSetting, value: string, reason: string): Promise<void> => {
+  const writeSetting = async (
+    setting: EffectiveSetting,
+    value: string,
+    reason: string,
+  ): Promise<SettingSaveResult> => {
     const endpoint = system.settings.update;
-    await apiClient.request(
-      { ...endpoint, path: pathWithParams(endpoint.path, { key: setting.key }) },
-      {
-        body: {
-          value,
-          ...(reason ? { reason } : {}),
-          ...(setting.version === undefined ? {} : { expected_version: setting.version }),
+    return settingSaveOutcome(() =>
+      apiClient.request(
+        { ...endpoint, path: pathWithParams(endpoint.path, { key: setting.key }) },
+        {
+          body: {
+            value,
+            ...(reason ? { reason } : {}),
+            expected_version: setting.version ?? 0,
+          },
+          routeId,
         },
-        routeId,
-      },
+      ),
     );
   };
 
@@ -136,7 +141,7 @@ export function ConsoleRolloutTab({ hasAdminWrite }: { hasAdminWrite: boolean })
       row: ConsoleFeatureRow;
       changes: ConsoleFeatureEdit;
       reason: string;
-    }): Promise<FeatureSaveResult> => {
+    }): Promise<SettingSaveResult> => {
       const entries: Array<[EffectiveSetting | undefined, string | undefined]> = [
         [input.row.status, input.changes.status],
         [input.row.roles, input.changes.roles],
@@ -148,21 +153,12 @@ export function ConsoleRolloutTab({ hasAdminWrite }: { hasAdminWrite: boolean })
           ? [{ key: setting.key, value, expected_version: setting.version ?? 0 }]
           : [],
       );
-      try {
-        await apiClient.request(system.settings.bulk, {
+      return settingSaveOutcome(() =>
+        apiClient.request(system.settings.bulk, {
           body: { settings, reason: input.reason },
           routeId,
-        });
-      } catch (error) {
-        // Both outcomes need a fresh settings snapshot, but neither should
-        // retry the write or announce a successful runtime change.
-        if (isAppError(error) && error.status === 409) return { outcome: "conflict", error };
-        if (isAppError(error) && error.status === 503 && error.code === "setting_reload_pending") {
-          return { outcome: "reload_pending", requestId: error.requestId };
-        }
-        throw error;
-      }
-      return { outcome: "saved" };
+        }),
+      );
     },
     invalidates: [systemSettingsKeys.effective],
     onSuccess: (result) => {
@@ -182,7 +178,13 @@ export function ConsoleRolloutTab({ hasAdminWrite }: { hasAdminWrite: boolean })
     mutate: async (input: { setting: EffectiveSetting; value: string; reason: string }) =>
       writeSetting(input.setting, input.value, input.reason),
     invalidates: [systemSettingsKeys.effective],
-    successMessage: "콘솔 설정을 저장했습니다. 화면을 새로고침하면 적용됩니다.",
+    onSuccess: (result) => {
+      if (result.outcome === "reload_pending") setReloadPending({ requestId: result.requestId });
+      else if (result.outcome === "saved") {
+        setReloadPending(undefined);
+        toast.success("콘솔 설정을 저장했습니다. 화면을 새로고침하면 적용됩니다.");
+      }
+    },
     errorMessage: "콘솔 설정을 저장하지 못했습니다.",
   });
 
@@ -249,7 +251,7 @@ export function ConsoleRolloutTab({ hasAdminWrite }: { hasAdminWrite: boolean })
                         aria-label={`${consoleSettingLabels[setting.key] ?? setting.key} 편집`}
                         onClick={(event) => {
                           triggerRef.current = event.currentTarget;
-                          setGlobalKey(setting.key);
+                          setSelectedGlobal({ ...setting });
                         }}
                       >
                         편집
@@ -361,14 +363,26 @@ export function ConsoleRolloutTab({ hasAdminWrite }: { hasAdminWrite: boolean })
         hasAdminWrite={hasAdminWrite}
         open={selectedGlobal !== undefined}
         onOpenChange={(next) => {
-          if (!next) setGlobalKey(undefined);
+          if (!next) setSelectedGlobal(undefined);
         }}
-        onRequestRevert={() => setGlobalKey(undefined)}
-        onRequestRollback={() => setGlobalKey(undefined)}
-        onSave={(input) => saveGlobal.mutateAsync(input)}
+        onRequestRevert={(setting) => setRecovery({ kind: "revert", setting })}
+        onRequestRollback={(setting, historyId, historyCount) =>
+          setRecovery({ kind: "rollback", setting, historyId, historyCount })
+        }
+        onSave={async (input) => {
+          const result = await saveGlobal.mutateAsync(input);
+          if (result.outcome === "conflict") throw result.error;
+        }}
         pending={saveGlobal.isPending}
         returnFocusRef={triggerRef}
         setting={selectedGlobal}
+      />
+      <SettingsRecoveryDialog
+        request={recovery}
+        onClose={() => setRecovery(undefined)}
+        hasAdminWrite={hasAdminWrite}
+        onReloadPending={(requestId) => setReloadPending({ requestId })}
+        returnFocusRef={triggerRef}
       />
     </div>
   );

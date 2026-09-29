@@ -1,7 +1,9 @@
+export type UnsavedDiscardReason = "close" | "navigation" | "security";
+
 export interface UnsavedForm {
   dirty: boolean;
   pending: boolean;
-  discard: () => void;
+  discard: (reason: UnsavedDiscardReason) => void;
 }
 
 interface NavigationAttempt {
@@ -70,7 +72,7 @@ export class UnsavedChangesCoordinator {
     if (!form || form.pending) return;
     if (!this.enabled || !form.dirty) {
       this.removeForm(id);
-      form.discard();
+      form.discard(this.enabled ? "close" : "security");
       return;
     }
     // A route decision protects every form and takes precedence over a local close.
@@ -131,12 +133,12 @@ export class UnsavedChangesCoordinator {
       const forms = [...this.forms.values()];
       this.forms.clear();
       this.publish();
-      for (const form of forms) form.discard();
+      for (const form of forms) form.discard("navigation");
       previous.proceed();
     } else {
       const form = this.forms.get(previous.owner);
       this.removeForm(previous.owner);
-      form?.discard();
+      form?.discard("close");
     }
   };
 
@@ -148,6 +150,6 @@ export class UnsavedChangesCoordinator {
     this.forms.clear();
     this.publish();
     if (previous?.kind === "navigation") previous.reset();
-    for (const form of forms) form.discard();
+    for (const form of forms) form.discard("security");
   };
 }

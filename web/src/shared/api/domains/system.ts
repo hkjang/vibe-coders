@@ -106,6 +106,10 @@ export interface SettingWriteBody {
 export interface SettingRollbackBody {
   key: string;
   reason?: string;
+  expected_version?: number;
+  expected_updated_at?: string;
+  expected_history_id?: string;
+  expected_history_count?: number;
 }
 
 export interface ChangeSetCreateBody {

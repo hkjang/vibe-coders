@@ -1,14 +1,19 @@
 import { Download, RefreshCw } from "lucide-react";
 import { useCallback, useMemo, useRef, useState } from "react";
+import { toast } from "sonner";
 
 import { QueryNotice, UpdatedAt } from "@/features/system/settings/SettingsParts";
 import { SettingDetailSheet } from "@/features/system/settings/SettingDetailSheet";
+import { settingSaveOutcome } from "@/features/system/settings/setting-save-outcome";
+import {
+  SettingsRecoveryDialog,
+  type SettingRecovery,
+} from "@/features/system/settings/SettingsRecoveryDialog";
 import {
   filterSettings,
   isConsoleSetting,
   settingCategories,
   settingDisplayValue,
-  settingEditPermission,
   settingSourceLabel,
 } from "@/features/system/settings/settings-utils";
 import {
@@ -22,7 +27,6 @@ import { pathWithParams } from "@/shared/api/endpoint-factory";
 import { endpoints } from "@/shared/api/endpoints";
 import { Badge } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
-import { ConfirmDialog } from "@/shared/components/ui/ConfirmDialog";
 import { EmptyState } from "@/shared/components/ui/EmptyState";
 import { InlineNotice } from "@/shared/components/ui/InlineNotice";
 import { Input } from "@/shared/components/ui/Input";
@@ -98,10 +102,9 @@ export function RuntimeSettingsTab({ hasAdminWrite }: { hasAdminWrite: boolean }
   const [params, updateParams] = useSearchState();
   const settingsQuery = useEffectiveSettings();
   const triggerRef = useRef<HTMLElement | null>(null);
-  const [selectedKey, setSelectedKey] = useState<string | undefined>();
-  const [confirm, setConfirm] = useState<
-    { kind: "revert" | "rollback"; setting: EffectiveSetting } | undefined
-  >();
+  const [selected, setSelected] = useState<EffectiveSetting | undefined>();
+  const [confirm, setConfirm] = useState<SettingRecovery | undefined>();
+  const [reloadPending, setReloadPending] = useState<{ requestId?: string }>();
   const [testResult, setTestResult] = useState<{ label: string; ok: boolean; detail: string } | undefined>();
   const [searchError, setSearchError] = useState<string | undefined>();
 
@@ -118,7 +121,6 @@ export function RuntimeSettingsTab({ hasAdminWrite }: { hasAdminWrite: boolean }
     () => filterSettings(allSettings, { category, query }),
     [allSettings, category, query],
   );
-  const selected = allSettings.find((setting) => setting.key === selectedKey);
 
   const overrides = allSettings.filter((setting) => setting.source === "admin").length;
   const restartRequired = allSettings.filter((setting) => setting.restart_required).length;
@@ -128,45 +130,29 @@ export function RuntimeSettingsTab({ hasAdminWrite }: { hasAdminWrite: boolean }
   const saveSetting = useMutationFeedback({
     mutate: async (input: { setting: EffectiveSetting; value: string; reason: string }) => {
       const endpoint = system.settings.update;
-      return apiClient.request(
-        { ...endpoint, path: pathWithParams(endpoint.path, { key: input.setting.key }) },
-        {
-          body: {
-            value: input.value,
-            ...(input.reason ? { reason: input.reason } : {}),
-            ...(input.setting.version === undefined ? {} : { expected_version: input.setting.version }),
+      return settingSaveOutcome(() =>
+        apiClient.request(
+          { ...endpoint, path: pathWithParams(endpoint.path, { key: input.setting.key }) },
+          {
+            body: {
+              value: input.value,
+              ...(input.reason ? { reason: input.reason } : {}),
+              expected_version: input.setting.version ?? 0,
+            },
+            routeId,
           },
-          routeId,
-        },
+        ),
       );
     },
     invalidates: [systemSettingsKeys.effective],
-    successMessage: "설정을 저장했습니다.",
+    onSuccess: (result) => {
+      if (result.outcome === "reload_pending") setReloadPending({ requestId: result.requestId });
+      else if (result.outcome === "saved") {
+        setReloadPending(undefined);
+        toast.success("설정을 저장했습니다.");
+      }
+    },
     errorMessage: "설정을 저장하지 못했습니다.",
-  });
-
-  const revertSetting = useMutationFeedback({
-    mutate: async (input: { setting: EffectiveSetting; reason: string }) => {
-      const endpoint = system.settings.revert;
-      return apiClient.request(
-        { ...endpoint, path: pathWithParams(endpoint.path, { key: input.setting.key }) },
-        { query: { reason: input.reason }, routeId },
-      );
-    },
-    invalidates: [systemSettingsKeys.effective],
-    successMessage: "설정을 환경변수 기본값으로 되돌렸습니다.",
-    errorMessage: "설정을 되돌리지 못했습니다.",
-  });
-
-  const rollbackSetting = useMutationFeedback({
-    mutate: async (input: { setting: EffectiveSetting; reason: string }) =>
-      apiClient.request(system.settings.rollback, {
-        body: { key: input.setting.key, reason: input.reason },
-        routeId,
-      }),
-    invalidates: [systemSettingsKeys.effective],
-    successMessage: "설정을 이전 값으로 롤백했습니다.",
-    errorMessage: "설정을 롤백하지 못했습니다.",
   });
 
   const runTest = useMutationFeedback({
@@ -203,13 +189,19 @@ export function RuntimeSettingsTab({ hasAdminWrite }: { hasAdminWrite: boolean }
 
   const openSetting = useCallback((setting: EffectiveSetting): void => {
     triggerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    setSelectedKey(setting.key);
+    setSelected({ ...setting });
   }, []);
-
-  const confirmPermission = confirm ? settingEditPermission(confirm.setting, hasAdminWrite) : undefined;
 
   return (
     <div className="settings-tab-stack">
+      {reloadPending ? (
+        <InlineNotice tone="warning" title="설정은 저장됐으며 런타임 반영을 기다리고 있습니다.">
+          다시 저장하지 말고 최신 설정과 서버 반영 상태를 확인하세요.
+          {reloadPending.requestId ? (
+            <span className="request-id"> 요청 ID: {reloadPending.requestId}</span>
+          ) : null}
+        </InlineNotice>
+      ) : null}
       <StatGrid label="런타임 설정 요약">
         <StatCard label="설정 항목" value={formatNumber(allSettings.length)} />
         <StatCard label="DB 오버라이드" value={formatNumber(overrides)} tone="info" />
@@ -364,52 +356,32 @@ export function RuntimeSettingsTab({ hasAdminWrite }: { hasAdminWrite: boolean }
         hasAdminWrite={hasAdminWrite}
         open={selected !== undefined}
         onOpenChange={(next) => {
-          if (!next) setSelectedKey(undefined);
+          if (!next) setSelected(undefined);
         }}
         onRequestRevert={(setting) => {
-          setSelectedKey(undefined);
+          setSelected(undefined);
           setConfirm({ kind: "revert", setting });
         }}
-        onRequestRollback={(setting) => {
-          setSelectedKey(undefined);
-          setConfirm({ kind: "rollback", setting });
+        onRequestRollback={(setting, historyId, historyCount) => {
+          setSelected(undefined);
+          setConfirm({ kind: "rollback", setting, historyId, historyCount });
         }}
-        onSave={(input) => saveSetting.mutateAsync(input)}
+        onSave={async (input) => {
+          const result = await saveSetting.mutateAsync(input);
+          if (result.outcome === "conflict") throw result.error;
+        }}
         pending={saveSetting.isPending}
         returnFocusRef={triggerRef}
         setting={selected}
       />
 
-      <ConfirmDialog
-        open={confirm !== undefined}
-        onOpenChange={(next) => {
-          if (!next) setConfirm(undefined);
-        }}
-        title={confirm?.kind === "rollback" ? "이전 값으로 롤백" : "환경변수 기본값으로 되돌리기"}
-        description={
-          confirm?.kind === "rollback"
-            ? `${confirm.setting.key} 설정을 이력의 직전 값으로 되돌립니다.`
-            : `${confirm?.setting.key ?? ""} 설정의 DB 오버라이드를 지우고 환경변수 값을 사용합니다.`
-        }
-        confirmLabel={confirm?.kind === "rollback" ? "롤백" : "되돌리기"}
-        tone="danger"
-        requireReason
+      <SettingsRecoveryDialog
+        request={confirm}
+        onClose={() => setConfirm(undefined)}
+        hasAdminWrite={hasAdminWrite}
+        onReloadPending={(requestId) => setReloadPending({ requestId })}
         returnFocusRef={triggerRef}
-        onConfirm={async (reason) => {
-          if (!confirm || confirmPermission?.editable !== true) return;
-          if (confirm.kind === "rollback") {
-            await rollbackSetting.mutateAsync({ setting: confirm.setting, reason });
-          } else {
-            await revertSetting.mutateAsync({ setting: confirm.setting, reason });
-          }
-        }}
-      >
-        {confirmPermission && !confirmPermission.editable ? (
-          <p className="form-error" role="alert">
-            {confirmPermission.reason}
-          </p>
-        ) : null}
-      </ConfirmDialog>
+      />
     </div>
   );
 }

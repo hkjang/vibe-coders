@@ -2594,6 +2594,97 @@
         ],
         "type": "object"
       },
+      "SettingHistoryEntry": {
+        "properties": {
+          "changed_at": {
+            "type": "string"
+          },
+          "changed_by": {
+            "type": "string"
+          },
+          "history_count": {
+            "description": "Whole-key append-only count from the same snapshot, before LIMIT. Not a timestamp or commit-order sequence.",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "id": {
+            "type": "string"
+          },
+          "is_secret": {
+            "type": "boolean"
+          },
+          "key": {
+            "type": "string"
+          },
+          "new_value_json": {
+            "type": "string"
+          },
+          "old_value_json": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "key",
+          "old_value_json",
+          "new_value_json",
+          "is_secret",
+          "changed_by",
+          "reason",
+          "changed_at",
+          "history_count"
+        ],
+        "type": "object"
+      },
+      "SettingHistoryResponse": {
+        "properties": {
+          "history": {
+            "items": {
+              "$ref": "#/components/schemas/SettingHistoryEntry"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "history"
+        ],
+        "type": "object"
+      },
+      "SettingRollbackRequest": {
+        "properties": {
+          "expected_history_count": {
+            "description": "Whole-key history_count from the reviewed row. Required with the other optional guards for clock-skew-safe append detection.",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "expected_history_id": {
+            "description": "ID of the latest history event reviewed for this key.",
+            "type": "string"
+          },
+          "expected_updated_at": {
+            "description": "Exact reviewed updated_at; empty string when no override exists.",
+            "type": "string"
+          },
+          "expected_version": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "key": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "key"
+        ],
+        "type": "object"
+      },
       "SettingWriteRequest": {
         "additionalProperties": false,
         "properties": {
@@ -3217,7 +3308,7 @@
   "info": {
     "description": "OpenAI-compatible AI control-plane gateway. This document covers the full HTTP surface; request/response bodies are summarized — see the admin UI for live examples.",
     "title": "AI Proxy Gateway API",
-    "version": "v0.86.4"
+    "version": "v0.86.5"
   },
   "openapi": "3.0.3",
   "paths": {
@@ -12190,10 +12281,28 @@
     },
     "/admin/settings/history": {
       "get": {
+        "description": "Timestamp-ordered history. Each row includes the entire key's append-only history_count from the same query snapshot before the result limit. This count is not commit order; review it together with the row ID for guarded rollback. Supported APIs do not remove history; pruning or restoration requires a non-reusable revision contract.",
         "operationId": "get__admin_settings_history",
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettingHistoryResponse"
+                }
+              }
+            },
             "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -12255,10 +12364,58 @@
     },
     "/admin/settings/rollback": {
       "post": {
+        "description": "Restore the previous non-secret value from the reviewed timestamp-ordered history event. Send expected_version, expected_updated_at, expected_history_id, and expected_history_count together to guard the entire snapshot, including deleted overrides (version 0 and empty timestamp). The count detects later appends even with clock skew; it does not define commit order. Omitted guards retain Legacy compatibility. Current state and history are rechecked atomically before persistence. A 409 setting_conflict means nothing was changed; a 503 setting_reload_pending means the rollback was stored but runtime reload is pending, so do not blindly retry.",
         "operationId": "post__admin_settings_rollback",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SettingRollbackRequest"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminSettingView"
+                }
+              }
+            },
             "description": "OK"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "setting_conflict: reviewed setting or history changed; no write"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "setting_reload_pending: rollback persisted; reload runtime before further changes"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
