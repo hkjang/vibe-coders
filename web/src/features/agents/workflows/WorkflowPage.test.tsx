@@ -287,4 +287,39 @@ describe("WorkflowPage", () => {
       { name: "담당자 승인", type: "approval" },
     ]);
   });
+
+  it.each(["builder", "example"] as const)(
+    "protects unsaved steps entered through the %s",
+    async (source) => {
+      const user = userEvent.setup();
+      const api = mockApi({ "GET /admin/workflows": listHandler });
+      renderPage();
+
+      await user.click(await screen.findByRole("button", { name: /새 워크플로/u }));
+      const dialog = await screen.findByRole("dialog", { name: "새 워크플로" });
+      // No registered text input has changed: the programmatic step update must mark dirty itself.
+      if (source === "builder") {
+        await user.selectOptions(within(dialog).getByLabelText("추가할 단계 종류"), "approval");
+      } else {
+        await user.click(within(dialog).getByRole("button", { name: "안전한 예시 채우기" }));
+      }
+      const stepCount = within(dialog).getAllByRole("listitem").length;
+      expect(stepCount).toBeGreaterThan(0);
+      await user.keyboard("{Escape}");
+
+      const warning = await screen.findByRole("alertdialog", { name: "저장하지 않은 변경사항이 있습니다" });
+      await user.click(within(warning).getByRole("button", { name: "계속 편집" }));
+      expect(within(dialog).getAllByRole("listitem")).toHaveLength(stepCount);
+      await user.click(within(dialog).getByRole("button", { name: "취소" }));
+      await user.click(await screen.findByRole("button", { name: "변경 버리기" }));
+      await waitFor(() =>
+        expect(screen.queryByRole("dialog", { name: "새 워크플로" })).not.toBeInTheDocument(),
+      );
+
+      await user.click(screen.getByRole("button", { name: /새 워크플로/u }));
+      const reopened = await screen.findByRole("dialog", { name: "새 워크플로" });
+      expect(within(reopened).queryAllByRole("listitem")).toHaveLength(0);
+      expect(api.bodies("POST /admin/workflows")).toHaveLength(0);
+    },
+  );
 });

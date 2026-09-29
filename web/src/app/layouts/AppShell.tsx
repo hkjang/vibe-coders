@@ -18,6 +18,7 @@ import { Button } from "@/shared/components/ui/Button";
 import { useReturnFocus } from "@/shared/hooks/use-return-focus";
 import { canOpenLegacyAdmin } from "@/shared/permissions/legacy-admin";
 import { FeatureTelemetry } from "@/shared/telemetry/FeatureTelemetry";
+import { useUnsavedChanges } from "@/shared/unsaved/context";
 import {
   usePreferences,
   type DensityPreference,
@@ -29,6 +30,7 @@ const refreshValues = new Set([0, 60, 300]);
 
 export function AppShell(): React.JSX.Element {
   const auth = useAuth();
+  const unsavedChanges = useUnsavedChanges();
   const location = useLocation();
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
@@ -228,7 +230,13 @@ export function AppShell(): React.JSX.Element {
                       {uiLabels.legacyAdmin} 열기 <ExternalLink aria-hidden="true" />
                     </LegacyLink>
                   ) : null}
-                  <Button variant="secondary" onClick={() => void auth.logout()}>
+                  <Button
+                    variant="secondary"
+                    onClick={() => {
+                      unsavedChanges?.discardForSecurity();
+                      void auth.logout();
+                    }}
+                  >
                     로그아웃
                   </Button>
                 </div>
