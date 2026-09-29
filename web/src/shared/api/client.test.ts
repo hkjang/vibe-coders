@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { ApiClient } from "@/shared/api/client";
 import { endpoints } from "@/shared/api/endpoints";
+import { tokenStore } from "@/shared/auth/token-store";
 
 function jsonResponse(body: unknown, status = 200, headers?: HeadersInit): Response {
   return new Response(JSON.stringify(body), {
@@ -11,6 +12,169 @@ function jsonResponse(body: unknown, status = 200, headers?: HeadersInit): Respo
 }
 
 describe("ApiClient", () => {
+  it.each(["network", "json"])(
+    "turns a late %s failure into a non-retryable session cancellation",
+    async (failure) => {
+      let rejectFetch!: (error: Error) => void;
+      let releaseBody!: (body: string) => void;
+      const bodyStarted = vi.fn();
+      const response = jsonResponse({ status: "ok" });
+      vi.spyOn(response, "text").mockImplementation(() => {
+        bodyStarted();
+        return new Promise((resolve) => {
+          releaseBody = resolve;
+        });
+      });
+      const fetchMock = vi.fn(() =>
+        failure === "network"
+          ? new Promise<Response>((_resolve, reject) => {
+              rejectFetch = reject;
+            })
+          : Promise.resolve(response),
+      );
+      const client = new ApiClient({ fetch: fetchMock });
+      const completion = client.request(endpoints.health).catch((error: unknown) => error);
+      if (failure === "json") await vi.waitFor(() => expect(bodyStarted).toHaveBeenCalledOnce());
+      tokenStore.clearAll();
+      if (failure === "network") rejectFetch(new Error("old connection failed"));
+      else releaseBody("malformed JSON from old session");
+      await expect(completion).resolves.toMatchObject({ kind: "aborted", retryable: false });
+    },
+  );
+
+  it("preserves auth 401 when a current-session refresh failure ends that session", async () => {
+    tokenStore.saveTokens({ access_token: "old", refresh_token: "old-refresh" });
+    const notifyLogout = vi.fn();
+    const client = new ApiClient({
+      fetch: vi.fn(async () => jsonResponse({ error: { message: "expired" } }, 401)),
+      notifyLogout,
+    });
+    await expect(client.request(endpoints.health)).rejects.toMatchObject({ kind: "auth", status: 401 });
+    expect(tokenStore.getAccessToken()).toBe("");
+    expect(notifyLogout).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a new session's shared refresh flight when an older refresh settles", async () => {
+    let releaseOld!: (response: Response) => void;
+    let releaseNew!: (response: Response) => void;
+    const oldRefresh = new Promise<Response>((resolve) => {
+      releaseOld = resolve;
+    });
+    const newRefresh = new Promise<Response>((resolve) => {
+      releaseNew = resolve;
+    });
+    tokenStore.saveTokens({ access_token: "old", refresh_token: "old-refresh" });
+    let refreshes = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === endpoints.auth.refresh.path) {
+        refreshes += 1;
+        return String(init?.body).includes("old-refresh") ? oldRefresh : newRefresh;
+      }
+      return new Headers(init?.headers).get("Authorization") === "Bearer current-rotated"
+        ? jsonResponse({ status: "ok" })
+        : jsonResponse({ error: { message: "expired" } }, 401);
+    });
+    const client = new ApiClient({ fetch: fetchMock });
+    const old = client.request(endpoints.health).catch((error: unknown) => error);
+    await vi.waitFor(() => expect(refreshes).toBe(1));
+    tokenStore.clearAll();
+    tokenStore.saveTokens({ access_token: "new", refresh_token: "new-refresh" });
+    const firstNew = client.request(endpoints.health);
+    await vi.waitFor(() => expect(refreshes).toBe(2));
+    releaseOld(jsonResponse({ error: { message: "expired" } }, 401));
+    await expect(old).resolves.toMatchObject({ kind: "aborted" });
+    const secondNew = client.request(endpoints.health);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(5));
+    expect(refreshes).toBe(2);
+    releaseNew(
+      jsonResponse({
+        access_token: "current-rotated",
+        refresh_token: "current-refresh",
+        expires_in: 900,
+        refresh_expires_in: 3600,
+        token_type: "Bearer",
+      }),
+    );
+    await expect(Promise.all([firstNew, secondNew])).resolves.toEqual([{ status: "ok" }, { status: "ok" }]);
+    expect(refreshes).toBe(2);
+    expect(tokenStore.getAccessToken()).toBe("current-rotated");
+    tokenStore.clearAll();
+  });
+
+  it.each(["success", "failure"])("does not let an old refresh %s alter a newer session", async (outcome) => {
+    let resolve!: (response: Response) => void;
+    const pending = new Promise<Response>((accept) => {
+      resolve = accept;
+    });
+    const refreshStarted = vi.fn();
+    tokenStore.saveTokens({ access_token: "old", refresh_token: "old-refresh" });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === endpoints.auth.refresh.path) {
+        refreshStarted();
+        return pending;
+      }
+      return jsonResponse({ error: { message: "expired" } }, 401);
+    });
+    const notifyLogout = vi.fn();
+    const client = new ApiClient({ fetch: fetchMock, notifyLogout });
+    const completion = client.request(endpoints.health).catch((error: unknown) => error);
+    await vi.waitFor(() => expect(refreshStarted).toHaveBeenCalledTimes(1));
+    tokenStore.clearAll();
+    tokenStore.saveTokens({ access_token: "new", refresh_token: "new-refresh" });
+    resolve(
+      outcome === "success"
+        ? jsonResponse({
+            access_token: "obsolete",
+            refresh_token: "obsolete-refresh",
+            expires_in: 900,
+            refresh_expires_in: 3600,
+            token_type: "Bearer",
+          })
+        : jsonResponse({ error: { message: "old refresh failed" } }, 401),
+    );
+    await expect(completion).resolves.toMatchObject({ kind: "aborted" });
+    expect(tokenStore.getAccessToken()).toBe("new");
+    expect(tokenStore.getRefreshToken()).toBe("new-refresh");
+    expect(notifyLogout).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    tokenStore.clearAll();
+  });
+
+  it("never retries an old 401 with a new login's access token", async () => {
+    let resolve!: (response: Response) => void;
+    const pending = new Promise<Response>((accept) => {
+      resolve = accept;
+    });
+    tokenStore.saveTokens({ access_token: "old", refresh_token: "old-refresh" });
+    const fetchMock = vi.fn(() => pending);
+    const client = new ApiClient({ fetch: fetchMock });
+    const completion = client.request(endpoints.health).catch((error: unknown) => error);
+    tokenStore.clearAll();
+    tokenStore.saveTokens({ access_token: "new", refresh_token: "new-refresh" });
+    resolve(jsonResponse({ error: { message: "expired" } }, 401));
+    await expect(completion).resolves.toMatchObject({ kind: "aborted" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(tokenStore.getAccessToken()).toBe("new");
+    tokenStore.clearAll();
+  });
+
+  it("rejects an old successful response whose body arrives after logout", async () => {
+    let release!: (body: string) => void;
+    const response = jsonResponse({ status: "ok" });
+    vi.spyOn(response, "text").mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          release = resolve;
+        }),
+    );
+    const client = new ApiClient({ fetch: vi.fn(async () => response) });
+    const completion = client.request(endpoints.health).catch((error: unknown) => error);
+    await vi.waitFor(() => expect(release).toBeDefined());
+    tokenStore.clearAll();
+    release(JSON.stringify({ status: "ok" }));
+    await expect(completion).resolves.toMatchObject({ kind: "aborted" });
+  });
+
   it("shares one refresh request across concurrent 401 responses and retries each request once", async () => {
     let accessToken = "expired-access";
     let refreshCount = 0;

@@ -61,6 +61,7 @@ const createKeySchema = z.object({
   denied_models: z.string(),
   budget_limit_krw: z.string(),
   expires_at: z.string(),
+  scopes: z.array(z.string()),
 });
 type CreateKeyForm = z.infer<typeof createKeySchema>;
 
@@ -204,8 +205,9 @@ export function ApiKeysTab({
     denied_models: "",
     budget_limit_krw: "",
     expires_at: "",
+    scopes: [],
   });
-  const [createScopes, setCreateScopes] = useState<readonly string[]>([]);
+  const createScopes = createForm.watch("scopes");
   const editForm = useZodForm<EditKeyForm, EditKeyForm>(editKeySchema, {
     name: "",
     owner: "",
@@ -293,8 +295,8 @@ export function ApiKeysTab({
                 denied_models: "",
                 budget_limit_krw: "",
                 expires_at: "",
+                scopes: [],
               });
-              setCreateScopes([]);
               setCreateOpen(true);
             }}
           >
@@ -386,14 +388,13 @@ export function ApiKeysTab({
             ...(values.owner ? { owner: values.owner } : {}),
             ...(values.team ? { team: values.team } : {}),
             ...(values.role ? { role: values.role } : {}),
-            ...(createScopes.length > 0 ? { scopes: createScopes } : {}),
+            ...(values.scopes.length > 0 ? { scopes: values.scopes } : {}),
             ...(values.allowed_ips ? { allowed_ips: splitList(values.allowed_ips) } : {}),
             ...(values.allowed_models ? { allowed_models: splitList(values.allowed_models) } : {}),
             ...(values.denied_models ? { denied_models: splitList(values.denied_models) } : {}),
             ...(Number.isFinite(budget) && budget > 0 ? { budget_limit_krw: budget } : {}),
             ...(values.expires_at ? { expires_at: values.expires_at } : {}),
           });
-          setCreateOpen(false);
         }}
       >
         <FormField label="이름" required error={createForm.formState.errors.name?.message}>
@@ -437,11 +438,16 @@ export function ApiKeysTab({
                 key={scope}
                 label={scope}
                 checked={createScopes.includes(scope)}
-                onChange={(event) =>
-                  setCreateScopes((current) =>
-                    event.target.checked ? [...current, scope] : current.filter((item) => item !== scope),
-                  )
-                }
+                onChange={(event) => {
+                  const current = createForm.getValues("scopes");
+                  createForm.setValue(
+                    "scopes",
+                    event.target.checked
+                      ? [...current, scope].sort()
+                      : current.filter((item) => item !== scope),
+                    { shouldDirty: true },
+                  );
+                }}
               />
             ))}
           </div>
@@ -469,7 +475,6 @@ export function ApiKeysTab({
               status: values.status,
             },
           });
-          setEditing(undefined);
         }}
       >
         <FormField label="이름">

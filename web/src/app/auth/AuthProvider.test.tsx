@@ -6,11 +6,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AuthProvider, useAuth } from "@/app/auth/AuthProvider";
 import { formatSsoFailure } from "@/app/auth/sso-errors";
-import { apiClient } from "@/shared/api/client";
+import { ApiClient, apiClient } from "@/shared/api/client";
 import { endpoints, type ApiEndpointBase } from "@/shared/api/endpoints";
 import { AppError } from "@/shared/api/error";
 import type { UIBootstrap } from "@/shared/api/schemas";
-import { tokenStore } from "@/shared/auth/token-store";
+import { subscribeToLogout, tokenStore } from "@/shared/auth/token-store";
 import { authNavigation } from "@/shared/auth/logout-navigation";
 import { silentSsoNavigation } from "@/shared/auth/silent-sso";
 import { mockApi } from "@/test/api";
@@ -66,6 +66,17 @@ function TestProviders({ children }: PropsWithChildren): React.JSX.Element {
 function LogoutHarness(): React.JSX.Element {
   const auth = useAuth();
   return <button onClick={() => void auth.logout()}>{auth.mode === "loading" ? "loading" : "logout"}</button>;
+}
+
+function SessionBoundaryHarness(): React.JSX.Element {
+  const auth = useAuth();
+  return (
+    <>
+      <output>{auth.mode}</output>
+      <button onClick={() => void auth.logout()}>end session</button>
+      <button onClick={() => void auth.login("new@example.test", "password")}>new login</button>
+    </>
+  );
 }
 
 function RuntimeConfigHarness(): React.JSX.Element {
@@ -155,6 +166,131 @@ afterEach(() => {
 });
 
 describe("AuthProvider Keycloak logout", () => {
+  it("preserves old revoke credentials and SSO navigation through the real epoch-aware API client", async () => {
+    let resolve!: (response: Response) => void;
+    const pending = new Promise<Response>((accept) => {
+      resolve = accept;
+    });
+    const json = (value: unknown) =>
+      new Response(JSON.stringify(value), { headers: { "Content-Type": "application/json" } });
+    tokenStore.saveTokens({ access_token: "old-access", refresh_token: "old-refresh" });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === endpoints.uiBootstrap.path) return json(bootstrap);
+      expect(String(input)).toBe(endpoints.auth.keycloakLogout.path);
+      expect(tokenStore.getAccessToken()).toBe("");
+      expect(new Headers(init?.headers).get("Authorization")).toBe("Bearer old-access");
+      expect(JSON.parse(String(init?.body))).toEqual({
+        refresh_token: "old-refresh",
+        return_to: "/app/login",
+      });
+      return pending;
+    });
+    const client = new ApiClient({ fetch: fetchMock });
+    vi.spyOn(apiClient, "request").mockImplementation(client.request.bind(client));
+    const navigate = vi.spyOn(authNavigation, "toEndSession").mockImplementation(() => undefined);
+    render(
+      <TestProviders>
+        <AuthProvider>
+          <LogoutHarness />
+          <AuthStateHarness />
+        </AuthProvider>
+      </TestProviders>,
+    );
+    await screen.findByText("authenticated");
+    await userEvent.setup().click(screen.getByRole("button", { name: "logout" }));
+    expect(screen.getByText("anonymous")).toBeVisible();
+    await act(async () =>
+      resolve(json({ status: "logged_out", end_session_url: "https://idp.example.test/logout" })),
+    );
+    expect(navigate).toHaveBeenCalledWith("https://idp.example.test/logout");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(["success", "failure"])(
+    "does not let a late remote logout %s clear or redirect a new login",
+    async (outcome) => {
+      let resolve!: (value: { status: string; end_session_url: string }) => void;
+      let reject!: (error: Error) => void;
+      const pending = new Promise<{ status: string; end_session_url: string }>((accept, refuse) => {
+        resolve = accept;
+        reject = refuse;
+      });
+      tokenStore.saveTokens({ access_token: "old-access", refresh_token: "old-refresh" });
+      const queryClient = new QueryClient();
+      const request = vi.spyOn(apiClient, "request").mockImplementation((async (
+        endpoint: ApiEndpointBase,
+      ) => {
+        if (endpoint.path === endpoints.uiBootstrap.path) return bootstrap;
+        if (endpoint.path === endpoints.auth.keycloakLogout.path) return pending;
+        if (endpoint.path === endpoints.auth.login.path)
+          return { access_token: "new-access", refresh_token: "new-refresh" };
+        throw new Error(`unexpected ${endpoint.path}`);
+      }) as typeof apiClient.request);
+      const navigate = vi.spyOn(authNavigation, "toEndSession").mockImplementation(() => undefined);
+      render(
+        <QueryClientProvider client={queryClient}>
+          <AuthProvider>
+            <SessionBoundaryHarness />
+          </AuthProvider>
+        </QueryClientProvider>,
+      );
+      await screen.findByText("authenticated");
+      const user = userEvent.setup();
+      await user.click(screen.getByRole("button", { name: "end session" }));
+      expect(screen.getByText("anonymous")).toBeVisible();
+      const call = request.mock.calls.find(
+        ([endpoint]) => endpoint.path === endpoints.auth.keycloakLogout.path,
+      );
+      expect(call?.[1]).toMatchObject({
+        headers: { Authorization: "Bearer old-access" },
+        body: { refresh_token: "old-refresh" },
+      });
+      await user.click(screen.getByRole("button", { name: "new login" }));
+      await screen.findByText("authenticated");
+      queryClient.setQueryData(["new-user"], "new-data");
+      await act(async () => {
+        if (outcome === "success")
+          resolve({ status: "logged_out", end_session_url: "https://idp.example.test/logout" });
+        else reject(new Error("remote unavailable"));
+      });
+      expect(tokenStore.getAccessToken()).toBe("new-access");
+      expect(tokenStore.getRefreshToken()).toBe("new-refresh");
+      expect(queryClient.getQueryData(["new-user"])).toBe("new-data");
+      expect(screen.getByText("authenticated")).toBeVisible();
+      expect(navigate).not.toHaveBeenCalled();
+    },
+  );
+
+  it("ends local authentication and clears cached data before remote logout settles", async () => {
+    const pending = deferredLogout();
+    const queryClient = new QueryClient();
+    tokenStore.saveTokens({ access_token: "old-access", refresh_token: "old-refresh" });
+    mockApi({
+      "GET /admin/ui-bootstrap": () => bootstrap,
+      "POST /auth/keycloak/logout": () => pending.promise,
+    });
+    const published = vi.fn();
+    const unsubscribe = subscribeToLogout(published);
+    render(
+      <QueryClientProvider client={queryClient}>
+        <AuthProvider>
+          <LogoutHarness />
+          <AuthStateHarness />
+        </AuthProvider>
+      </QueryClientProvider>,
+    );
+    await screen.findByText("authenticated");
+    queryClient.setQueryData(["private"], { secret: "old-session-data" });
+    await userEvent.setup().click(screen.getByRole("button", { name: "logout" }));
+    expect(tokenStore.getAccessToken()).toBe("");
+    expect(tokenStore.getRefreshToken()).toBe("");
+    expect(queryClient.getQueryData(["private"])).toBeUndefined();
+    expect(screen.getByText("anonymous")).toBeVisible();
+    expect(published).toHaveBeenCalledTimes(1);
+    unsubscribe();
+    await act(async () => pending.resolve());
+  });
+
   it("reloads anonymous Keycloak-only bootstrap after stale tokens are rejected", async () => {
     tokenStore.saveTokens({ access_token: "stale-access", refresh_token: "stale-refresh" });
     let bootstrapCalls = 0;
@@ -783,14 +919,16 @@ describe("AuthProvider telemetry opt-in", () => {
   );
 
   it.each(["success", "failure"])(
-    "keeps bootstrap blocked while a newer logout is pending after an older logout %s",
+    "deduplicates pending logout and blocks bootstrap until its %s",
     async (outcome) => {
       const older = deferredLogout();
-      const newer = deferredLogout();
       let logoutCalls = 0;
       const api = mockApi({
         "GET /admin/ui-bootstrap": () => enabledBootstrap,
-        "POST /auth/logout": () => (++logoutCalls === 1 ? older.promise : newer.promise),
+        "POST /auth/logout": () => {
+          logoutCalls += 1;
+          return older.promise;
+        },
       });
       tokenStore.saveTokens({ access_token: "access", refresh_token: "refresh" });
       Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
@@ -799,24 +937,19 @@ describe("AuthProvider telemetry opt-in", () => {
       await waitFor(() => expect(screen.getByTestId("telemetry-enabled")).toHaveTextContent("true"));
       await user.click(screen.getByRole("button", { name: "telemetry logout" }));
       await user.click(screen.getByRole("button", { name: "telemetry logout" }));
-      expect(logoutCalls).toBe(2);
+      expect(logoutCalls).toBe(1);
+
+      await act(async () => document.dispatchEvent(new Event("visibilitychange")));
+      await user.click(screen.getByRole("button", { name: "telemetry retry" }));
+      expect(api.calls.map((call) => call.key)).toEqual(["GET /admin/ui-bootstrap", "POST /auth/logout"]);
+      expect(screen.getByTestId("telemetry-enabled")).toHaveTextContent("false");
+      expect(screen.getByTestId("telemetry-auth-mode")).toHaveTextContent("anonymous");
+      expect(tokenStore.getRefreshToken()).toBe("");
+
       await act(async () => {
         if (outcome === "success") older.resolve();
         else older.reject(new AppError("logout unavailable", { kind: "http", status: 503 }));
       });
-
-      await act(async () => document.dispatchEvent(new Event("visibilitychange")));
-      await user.click(screen.getByRole("button", { name: "telemetry retry" }));
-      expect(api.calls.map((call) => call.key)).toEqual([
-        "GET /admin/ui-bootstrap",
-        "POST /auth/logout",
-        "POST /auth/logout",
-      ]);
-      expect(screen.getByTestId("telemetry-enabled")).toHaveTextContent("false");
-      expect(screen.getByTestId("telemetry-auth-mode")).toHaveTextContent("authenticated");
-      expect(tokenStore.getRefreshToken()).toBe("refresh");
-
-      await act(async () => newer.resolve());
       expect(screen.getByTestId("telemetry-enabled")).toHaveTextContent("false");
       expect(screen.getByTestId("telemetry-auth-mode")).toHaveTextContent("anonymous");
       expect(tokenStore.getRefreshToken()).toBe("");

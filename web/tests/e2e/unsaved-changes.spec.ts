@@ -86,11 +86,14 @@ async function installGateway(context: BrowserContext) {
   const unexpected: string[] = [];
   let loginCount = 0;
   let logoutCount = 0;
+  let logoutResponseCount = 0;
   let saveCount = 0;
   const savePayloads: unknown[] = [];
   let saveStatus = 200;
   let saveGate: Promise<void> | undefined;
   let releaseSave: (() => void) | undefined;
+  let logoutGate: Promise<void> | undefined;
+  let releaseLogout: (() => void) | undefined;
 
   await context.route("**/*", async (route) => {
     const request = route.request();
@@ -133,7 +136,10 @@ async function installGateway(context: BrowserContext) {
         expect(request.postDataJSON()).toEqual({ refresh_token: sessions.get(authorization) });
         logoutCount += 1;
         sessions.delete(authorization);
-        return json({ ok: true });
+        if (logoutGate) await logoutGate;
+        await json({ ok: true });
+        logoutResponseCount += 1;
+        return;
       }
       if (call === "GET /admin/providers") return json({ providers: [] });
       if (call === "GET /admin/providers/slo")
@@ -187,6 +193,7 @@ async function installGateway(context: BrowserContext) {
     unexpected,
     loginCount: () => loginCount,
     logoutCount: () => logoutCount,
+    logoutResponseCount: () => logoutResponseCount,
     saveCount: () => saveCount,
     savePayloads: () => savePayloads,
     failSaves: () => {
@@ -198,6 +205,12 @@ async function installGateway(context: BrowserContext) {
       });
     },
     releaseSaves: () => releaseSave?.(),
+    holdLogouts: () => {
+      logoutGate = new Promise<void>((resolve) => {
+        releaseLogout = resolve;
+      });
+    },
+    releaseLogouts: () => releaseLogout?.(),
   };
 }
 
@@ -209,6 +222,7 @@ const test = base.extend<{ gateway: Gateway }>({
       await run(gateway);
     } finally {
       gateway.releaseSaves();
+      gateway.releaseLogouts();
       expect(gateway.unexpected).toEqual([]);
     }
   },
@@ -393,6 +407,7 @@ test("실제 뒤로가기를 취소해 편집을 유지하고 재시도 후 폐�
   await guard(page).getByRole("button", { name: "변경 버리기" }).click();
   await expect(page).toHaveURL(/\/gateway\/health$/u);
   await expect(form).toBeHidden();
+  await expect(page.locator("#main-content")).toBeFocused();
   expect(gateway.saveCount()).toBe(0);
 });
 
@@ -438,6 +453,7 @@ test("다른 탭의 실제 로그아웃은 미저장 확인도 폐기하며 재�
   const form = await openForm(page);
   await closeForm(page, form, "Escape");
   await expect(guard(page)).toBeVisible();
+  gateway.holdLogouts();
   await other.getByLabel("사용자 메뉴").click();
   await other.getByRole("button", { name: "로그아웃", exact: true }).click();
   await expect.poll(gateway.logoutCount).toBe(1);
@@ -445,6 +461,12 @@ test("다른 탭의 실제 로그아웃은 미저장 확인도 폐기하며 재�
   await expect(other.getByRole("heading", { name: "관리자 로그인" })).toBeVisible();
   await expect(guard(page)).toBeHidden();
   await expect(form).toBeHidden();
+  await expect(page.getByRole("button", { name: "공급자 추가", exact: true })).toBeHidden();
+  await expect(other.getByRole("button", { name: "공급자 추가", exact: true })).toBeHidden();
+  expect(gateway.saveCount()).toBe(0);
+  expect(gateway.logoutResponseCount()).toBe(0);
+  gateway.releaseLogouts();
+  await expect.poll(gateway.logoutResponseCount).toBe(1);
   await signIn(page);
   const reopened = await openForm(page, false);
   await expect(reopened.getByLabel(/^이름/u)).toHaveValue("");
@@ -514,6 +536,7 @@ test("로그아웃 전 저장의 늦은 응답은 재로그인 후 새 편집창
   await guard(page).getByRole("button", { name: "계속 편집" }).click();
   await expect(fresh.getByLabel(/^이름/u)).toHaveValue("fresh-session-fixture");
   await expect(fresh.getByLabel(/^기본 URL/u)).toHaveValue("");
+  await expect(page.getByText("공급자 설정을 저장했습니다.", { exact: true })).toBeHidden();
   expect(gateway.saveCount()).toBe(1);
   expect(gateway.logoutCount()).toBe(1);
 });

@@ -56,6 +56,7 @@ const doctorClients = [
 const keyFormSchema = z.object({
   name: z.string().min(1, "키 이름을 입력하세요."),
   expires_at: z.string(),
+  scopes: z.array(z.string()),
 });
 type KeyForm = z.infer<typeof keyFormSchema>;
 
@@ -74,7 +75,6 @@ export function MeKeysTab(): React.JSX.Element {
   const [packRequested, setPackRequested] = useState(false);
   const pack = useMeOnboardingPackQuery(packClient, packRequested);
   const [createOpen, setCreateOpen] = useState(false);
-  const [createScopes, setCreateScopes] = useState<readonly string[]>([]);
   const [issuedSecret, setIssuedSecret] = useState("");
   const [secretTitle, setSecretTitle] = useState("발급된 비밀값");
   const [scopeEditing, setScopeEditing] = useState<ApiKeyPublic | undefined>();
@@ -87,7 +87,8 @@ export function MeKeysTab(): React.JSX.Element {
   const rowTrigger = useRef<HTMLElement>(null);
   const othersTrigger = useRef<HTMLButtonElement>(null);
 
-  const form = useZodForm<KeyForm, KeyForm>(keyFormSchema, { name: "", expires_at: "" });
+  const form = useZodForm<KeyForm, KeyForm>(keyFormSchema, { name: "", expires_at: "", scopes: [] });
+  const createScopes = form.watch("scopes");
 
   const createKey = useMutationFeedback({
     mutate: (body: CreateMeKeyBody) => apiClient.request(access.me.createKey, { body, routeId }),
@@ -187,8 +188,7 @@ export function MeKeysTab(): React.JSX.Element {
                 ref={createTrigger}
                 variant="primary"
                 onClick={() => {
-                  form.reset({ name: "", expires_at: "" });
-                  setCreateScopes([]);
+                  form.reset({ name: "", expires_at: "", scopes: [] });
                   setCreateOpen(true);
                 }}
               >
@@ -443,10 +443,9 @@ export function MeKeysTab(): React.JSX.Element {
         onSubmit={async (values) => {
           await createKey.mutateAsync({
             name: values.name,
-            ...(createScopes.length > 0 ? { scopes: createScopes } : {}),
+            ...(values.scopes.length > 0 ? { scopes: values.scopes } : {}),
             ...(values.expires_at ? { expires_at: values.expires_at } : {}),
           });
-          setCreateOpen(false);
         }}
       >
         <FormField label="키 이름" required error={form.formState.errors.name?.message}>
@@ -466,11 +465,16 @@ export function MeKeysTab(): React.JSX.Element {
                   key={scope}
                   label={scope}
                   checked={createScopes.includes(scope)}
-                  onChange={(event) =>
-                    setCreateScopes((current) =>
-                      event.target.checked ? [...current, scope] : current.filter((item) => item !== scope),
-                    )
-                  }
+                  onChange={(event) => {
+                    const current = form.getValues("scopes");
+                    form.setValue(
+                      "scopes",
+                      event.target.checked
+                        ? [...current, scope].sort()
+                        : current.filter((item) => item !== scope),
+                      { shouldDirty: true },
+                    );
+                  }}
                 />
               ))}
             </div>

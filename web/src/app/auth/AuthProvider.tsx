@@ -114,6 +114,7 @@ export function AuthProvider({ children }: PropsWithChildren): React.JSX.Element
   const runtimeRefreshFlight = useRef<Promise<void> | undefined>(undefined);
   const authEpoch = useRef(0);
   const signingOut = useRef(false);
+  const logoutFlight = useRef<{ sessionEpoch: number; promise: Promise<void> } | undefined>(undefined);
 
   const applyBootstrap = useCallback((data: UIBootstrap): void => {
     setBackendVersion(data.backend_version);
@@ -342,9 +343,9 @@ export function AuthProvider({ children }: PropsWithChildren): React.JSX.Element
         runtimeRefreshFlight.current = undefined;
         setTelemetryEnabled(false);
         markSignedOut();
-        tokenStore.clearAll();
         queryClient.clear();
         setUser(undefined);
+        setExpiresAt(undefined);
         setMode(authenticationMode === "open" ? "open" : "anonymous");
       }),
     [authenticationMode, queryClient],
@@ -367,6 +368,11 @@ export function AuthProvider({ children }: PropsWithChildren): React.JSX.Element
       const epoch = ++authEpoch.current;
       signingOut.current = false;
       setTelemetryEnabled(false);
+      tokenStore.clearAll();
+      queryClient.clear();
+      setUser(undefined);
+      setExpiresAt(undefined);
+      setMode("anonymous");
       const tokens = await apiClient.request(endpoints.auth.login, {
         body: { email, password },
         retryUnauthorized: false,
@@ -380,42 +386,60 @@ export function AuthProvider({ children }: PropsWithChildren): React.JSX.Element
     [bootstrap, queryClient],
   );
 
-  const logout = useCallback(async (): Promise<void> => {
-    const epoch = ++authEpoch.current;
-    signingOut.current = true;
+  const logout = useCallback((): Promise<void> => {
+    if (logoutFlight.current?.sessionEpoch === tokenStore.getSessionEpoch()) {
+      return logoutFlight.current.promise;
+    }
+    // Keep only this revocation request's credentials, not the live browser session.
+    const refreshToken = tokenStore.getRefreshToken();
+    const accessToken = tokenStore.getAccessToken() || tokenStore.getLegacyToken();
+    authEpoch.current += 1;
     runtimeRefreshFlight.current = undefined;
     setTelemetryEnabled(false);
-    const refreshToken = tokenStore.getRefreshToken();
-    let endSessionUrl: string | undefined;
-    try {
-      if (sso.keycloak_enabled) {
-        const response = await apiClient.request(endpoints.auth.keycloakLogout, {
-          body: { refresh_token: refreshToken, return_to: "/app/login" },
-          retryUnauthorized: false,
-          routeId: "auth.keycloak.logout",
-        });
-        endSessionUrl = safeEndSessionUrl(response.end_session_url);
-      } else {
-        await apiClient.request(endpoints.auth.logout, {
-          body: { refresh_token: refreshToken },
-          retryUnauthorized: false,
-          routeId: "auth.logout",
-        });
-      }
-    } catch {
-      // Local logout must complete even if the gateway is unavailable.
-    }
-    // Only the current auth operation may release a pending logout's refresh guard.
-    if (epoch !== authEpoch.current) return;
-    signingOut.current = false;
-    // Before the mode flips to anonymous, or the silent-SSO effect would sign back in.
+    // Security boundary is synchronous; network latency must not retain authority
+    // in this tab, cached data, or another tab. Silent SSO must stay signed out.
     markSignedOut();
-    tokenStore.clearAll();
     queryClient.clear();
     setUser(undefined);
+    setExpiresAt(undefined);
     setMode(authenticationMode === "open" ? "open" : "anonymous");
     publishLogout();
-    if (endSessionUrl) authNavigation.toEndSession(endSessionUrl);
+    // Same-tab logout listeners ran synchronously above. Protect against runtime
+    // bootstrap until this flight ends, but allow a deliberate new login to win.
+    const epoch = authEpoch.current;
+    const sessionEpoch = tokenStore.getSessionEpoch();
+    signingOut.current = true;
+    const headers = accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined;
+    const promise = (async (): Promise<void> => {
+      let endSessionUrl: string | undefined;
+      try {
+        if (sso.keycloak_enabled) {
+          const response = await apiClient.request(endpoints.auth.keycloakLogout, {
+            body: { refresh_token: refreshToken, return_to: "/app/login" },
+            headers,
+            retryUnauthorized: false,
+            routeId: "auth.keycloak.logout",
+          });
+          endSessionUrl = safeEndSessionUrl(response.end_session_url);
+        } else {
+          await apiClient.request(endpoints.auth.logout, {
+            body: { refresh_token: refreshToken },
+            headers,
+            retryUnauthorized: false,
+            routeId: "auth.logout",
+          });
+        }
+      } catch {
+        // Local logout already completed even if revocation is unavailable.
+      }
+      if (epoch !== authEpoch.current || sessionEpoch !== tokenStore.getSessionEpoch()) return;
+      signingOut.current = false;
+      if (endSessionUrl) authNavigation.toEndSession(endSessionUrl);
+    })().finally(() => {
+      if (logoutFlight.current?.promise === promise) logoutFlight.current = undefined;
+    });
+    logoutFlight.current = { sessionEpoch, promise };
+    return promise;
   }, [authenticationMode, queryClient, sso.keycloak_enabled]);
 
   const setLegacyToken = useCallback(
@@ -424,6 +448,10 @@ export function AuthProvider({ children }: PropsWithChildren): React.JSX.Element
       signingOut.current = false;
       runtimeRefreshFlight.current = undefined;
       setTelemetryEnabled(false);
+      queryClient.clear();
+      setUser(undefined);
+      setExpiresAt(undefined);
+      setMode("anonymous");
       tokenStore.setLegacyToken(token);
       try {
         const data = await apiClient.request(endpoints.uiBootstrap, {
@@ -442,7 +470,7 @@ export function AuthProvider({ children }: PropsWithChildren): React.JSX.Element
         throw error;
       }
     },
-    [applyBootstrap],
+    [applyBootstrap, queryClient],
   );
 
   const value = useMemo<AuthContextValue>(

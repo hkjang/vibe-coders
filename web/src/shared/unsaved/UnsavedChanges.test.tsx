@@ -423,7 +423,10 @@ describe("FormDialog unsaved changes", () => {
   });
 });
 
-function renderDataRouter(onSave?: (values: Values) => unknown | Promise<unknown>) {
+function renderDataRouter(
+  onSave?: (values: Values) => unknown | Promise<unknown>,
+  nextLoader?: () => Promise<void>,
+) {
   const router = createMemoryRouter(
     [
       {
@@ -445,8 +448,20 @@ function renderDataRouter(onSave?: (values: Values) => unknown | Promise<unknown
             ),
           },
           { path: "/previous", element: <h1>이전 화면</h1> },
-          { path: "/next", element: <h1>다음 화면</h1> },
-          { path: "/login", element: <h1>로그인</h1> },
+          {
+            path: "/next",
+            element: <h1>다음 화면</h1>,
+            ...(nextLoader ? { loader: nextLoader } : {}),
+          },
+          {
+            path: "/login",
+            element: (
+              <>
+                <h1>로그인</h1>
+                <input aria-label="로그인 이메일" autoFocus />
+              </>
+            ),
+          },
         ],
       },
     ],
@@ -480,6 +495,7 @@ describe("one data-router blocker", () => {
       expect(router.state.blockers.size).toBe(1);
       await user.click(screen.getByRole("button", { name: "계속 편집" }));
       expect(screen.getByRole("textbox", { name: "이름" })).toHaveValue("새 초안");
+      await waitFor(() => expect(screen.getByRole("textbox", { name: "이름" })).toHaveFocus());
       await act(async () => {
         await navigate();
       });
@@ -499,9 +515,53 @@ describe("one data-router blocker", () => {
       );
       expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      await waitFor(() => expect(document.getElementById("main-content")).toHaveFocus());
       expect(unload().defaultPrevented).toBe(false);
     },
   );
+
+  it("waits for the destination loader before focusing main after a confirmed discard", async () => {
+    const user = userEvent.setup();
+    const loading = deferredSave();
+    const { router } = renderDataRouter(undefined, () => loading.promise);
+    await openDirtyForm(user);
+    await act(async () => {
+      await router.navigate("/next");
+    });
+    const main = document.getElementById("main-content");
+    if (!main) throw new Error("Expected main landmark");
+    const focusMain = vi.spyOn(main, "focus");
+    await user.click(screen.getByRole("button", { name: "변경 버리기" }));
+    expect(router.state.navigation.state).toBe("loading");
+    expect(router.state.location.pathname).toBe("/edit");
+    expect(focusMain).not.toHaveBeenCalled();
+    await act(async () => loading.resolve());
+    expect(await screen.findByRole("heading", { name: "다음 화면" })).toBeVisible();
+    await waitFor(() => expect(main).toHaveFocus());
+    expect(focusMain).toHaveBeenCalledTimes(1);
+  });
+
+  it("cancels an approved navigation's pending focus when security redirects to login", async () => {
+    const user = userEvent.setup();
+    const loading = deferredSave();
+    const { router } = renderDataRouter(undefined, () => loading.promise);
+    await openDirtyForm(user);
+    await act(async () => {
+      await router.navigate("/next");
+    });
+    await user.click(screen.getByRole("button", { name: "변경 버리기" }));
+    expect(router.state.navigation.state).toBe("loading");
+    await act(async () => {
+      window.dispatchEvent(new Event("vibe:logout"));
+      await router.navigate("/login", { replace: true });
+    });
+    const loginInput = await screen.findByRole("textbox", { name: "로그인 이메일" });
+    await waitFor(() => expect(loginInput).toHaveFocus());
+    await act(async () => loading.resolve());
+    expect(router.state.location.pathname).toBe("/login");
+    expect(loginInput).toHaveFocus();
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+  });
 
   it("blocks route disposal while a mutation is pending and cancels its stale target after success", async () => {
     const user = userEvent.setup();
