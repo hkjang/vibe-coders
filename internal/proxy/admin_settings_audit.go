@@ -17,9 +17,11 @@ func committedSettingAuditRequest(r *http.Request) (*http.Request, context.Cance
 }
 
 // auditCommittedSetting records an already committed write using the existing
-// best-effort audit path. This is not an atomic database audit transaction.
+// best-effort audit path. Only the insert is detached and bounded; post-change
+// Red Team work keeps the original request's cancellation/deadline policy.
+// This is not an atomic database audit transaction.
 func (s *Server) auditCommittedSetting(r *http.Request, action, before, after string) {
 	auditRequest, cancel := committedSettingAuditRequest(r)
 	defer cancel()
-	s.auditAdmin(auditRequest, action, before, after)
+	s.auditAdminWithInsertContext(auditRequest.Context(), r, action, before, after, "")
 }
