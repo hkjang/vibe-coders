@@ -90,7 +90,7 @@ export function WorkflowFormDialog({
           </p>
           <WorkflowStepsEditor
             value={steps}
-            onChange={(json) => form.setValue("steps", json, { shouldValidate: true })}
+            onChange={(json) => form.setValue("steps", json, { shouldValidate: true, shouldDirty: true })}
           />
           {errors.steps?.message ? (
             <p className="field-error" role="alert">
@@ -106,7 +106,9 @@ export function WorkflowFormDialog({
         <Button
           size="small"
           variant="ghost"
-          onClick={() => form.setValue("steps", workflowStepsExample, { shouldValidate: true })}
+          onClick={() =>
+            form.setValue("steps", workflowStepsExample, { shouldValidate: true, shouldDirty: true })
+          }
         >
           안전한 예시 채우기
         </Button>

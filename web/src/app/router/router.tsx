@@ -8,6 +8,7 @@ import { AppShell } from "@/app/layouts/AppShell";
 import { CompatibilityRedirect } from "@/app/router/CompatibilityRedirect";
 import { DefaultEntryRedirect } from "@/app/router/DefaultEntryRedirect";
 import { NotFoundPage, RouteErrorPage } from "@/app/router/RouteErrorPage";
+import { UnsavedChangesBoundary } from "@/app/router/UnsavedChangesBoundary";
 import { featurePath, migrationRegistry, type MigrationFeature } from "@/config/migration-registry";
 import { featureModule } from "@/features/registry";
 
@@ -42,28 +43,33 @@ export function createAppRouter(): ReturnType<typeof createBrowserRouter> {
   return createBrowserRouter(
     [
       {
-        element: <RouteQueryGuard />,
+        element: <UnsavedChangesBoundary />,
         children: [
           {
-            path: "login",
-            lazy: async () => {
-              const { LoginPage } = await import("@/app/auth/LoginPage");
-              return { Component: LoginPage };
-            },
-            errorElement: <RouteErrorPage />,
-          },
-          {
-            element: <ProtectedRoute />,
-            errorElement: <RouteErrorPage />,
+            element: <RouteQueryGuard />,
             children: [
               {
-                element: <AppShell />,
+                path: "login",
+                lazy: async () => {
+                  const { LoginPage } = await import("@/app/auth/LoginPage");
+                  return { Component: LoginPage };
+                },
+                errorElement: <RouteErrorPage />,
+              },
+              {
+                element: <ProtectedRoute />,
+                errorElement: <RouteErrorPage />,
                 children: [
-                  { index: true, element: <DefaultEntryRedirect /> },
-                  { path: "providers", element: <CompatibilityRedirect to="/gateway/providers" /> },
-                  { path: "models", element: <CompatibilityRedirect to="/gateway/models" /> },
-                  ...featureRoutes,
-                  { path: "*", element: <NotFoundPage /> },
+                  {
+                    element: <AppShell />,
+                    children: [
+                      { index: true, element: <DefaultEntryRedirect /> },
+                      { path: "providers", element: <CompatibilityRedirect to="/gateway/providers" /> },
+                      { path: "models", element: <CompatibilityRedirect to="/gateway/models" /> },
+                      ...featureRoutes,
+                      { path: "*", element: <NotFoundPage /> },
+                    ],
+                  },
                 ],
               },
             ],

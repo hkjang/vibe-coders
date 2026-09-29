@@ -240,4 +240,32 @@ describe("AppPage", () => {
     await screen.findByRole("table", { name: "AI 업무 앱 목록" });
     expect((await axe.run(container)).violations).toEqual([]);
   });
+
+  it("protects unsaved components inserted by the example action", async () => {
+    const user = userEvent.setup();
+    const api = mockApi({ "GET /admin/apps": listHandler });
+    renderPage();
+
+    await user.click(await screen.findByRole("button", { name: /새 업무 앱/u }));
+    const dialog = await screen.findByRole("dialog", { name: "새 AI 업무 앱" });
+    await user.click(within(dialog).getByRole("button", { name: "예시 채우기" }));
+    const input = within(dialog).getByLabelText(/구성 요소 \(JSON 배열\)/u) as HTMLTextAreaElement;
+    const example = input.value;
+    expect(JSON.parse(example)).toHaveLength(2);
+    await user.keyboard("{Escape}");
+
+    const warning = await screen.findByRole("alertdialog", { name: "저장하지 않은 변경사항이 있습니다" });
+    await user.click(within(warning).getByRole("button", { name: "계속 편집" }));
+    expect(input).toHaveValue(example);
+    await user.click(within(dialog).getByRole("button", { name: "취소" }));
+    await user.click(await screen.findByRole("button", { name: "변경 버리기" }));
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "새 AI 업무 앱" })).not.toBeInTheDocument(),
+    );
+
+    await user.click(screen.getByRole("button", { name: /새 업무 앱/u }));
+    const reopened = await screen.findByRole("dialog", { name: "새 AI 업무 앱" });
+    expect(within(reopened).getByLabelText(/구성 요소 \(JSON 배열\)/u)).toHaveValue("[]");
+    expect(api.bodies("POST /admin/apps")).toHaveLength(0);
+  });
 });

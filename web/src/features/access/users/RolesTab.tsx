@@ -35,6 +35,7 @@ const roleSchema = z.object({
     .regex(/^[a-z0-9_]+$/u, "영문 소문자, 숫자, 밑줄만 사용할 수 있습니다."),
   description: z.string(),
   default_home: z.string(),
+  scopes: z.array(z.string()),
 });
 type RoleForm = z.infer<typeof roleSchema>;
 
@@ -131,12 +132,17 @@ export function RolesTab({ canWrite, writeDeniedReason }: RolesTabProps): React.
   const roles = useRolesQuery(true);
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingRole, setEditingRole] = useState("");
-  const [scopeDraft, setScopeDraft] = useState<readonly string[]>([]);
   const [removingRole, setRemovingRole] = useState<RoleRow | undefined>();
   const createTrigger = useRef<HTMLButtonElement>(null);
   const { returnFocusRef: rowTrigger, remember: rememberRowTrigger } = useReturnFocus();
 
-  const form = useZodForm<RoleForm, RoleForm>(roleSchema, { role: "", description: "", default_home: "" });
+  const form = useZodForm<RoleForm, RoleForm>(roleSchema, {
+    role: "",
+    description: "",
+    default_home: "",
+    scopes: [],
+  });
+  const scopes = form.watch("scopes");
   const saveRole = useMutationFeedback({
     mutate: (body: SaveRoleBody) => apiClient.request(access.roles.save, { body, routeId }),
     invalidates: [accessKeys.roles],
@@ -188,8 +194,7 @@ export function RolesTab({ canWrite, writeDeniedReason }: RolesTabProps): React.
             disabled={!canWrite}
             title={canWrite ? undefined : writeDeniedReason}
             onClick={() => {
-              form.reset({ role: "", description: "", default_home: "" });
-              setScopeDraft([]);
+              form.reset({ role: "", description: "", default_home: "", scopes: [] });
               setEditingRole("");
               setEditorOpen(true);
             }}
@@ -208,8 +213,10 @@ export function RolesTab({ canWrite, writeDeniedReason }: RolesTabProps): React.
                 role: row.role,
                 description: row.description,
                 default_home: row.default_home,
+                // Scope order is not meaningful. Canonicalize the baseline so
+                // toggling off and back on is clean, retaining unknown scopes.
+                scopes: [...row.scopes].sort(),
               });
-              setScopeDraft(row.scopes);
               setEditingRole(row.role);
               setEditorOpen(true);
             },
@@ -241,11 +248,9 @@ export function RolesTab({ canWrite, writeDeniedReason }: RolesTabProps): React.
           await saveRole.mutateAsync({
             role: values.role,
             ...(values.description ? { description: values.description } : {}),
-            scopes: scopeDraft,
+            scopes: values.scopes,
             ...(values.default_home ? { default_home: values.default_home } : {}),
           });
-          setEditorOpen(false);
-          setEditingRole("");
         }}
       >
         <FormField label="역할 이름" required error={form.formState.errors.role?.message}>
@@ -264,12 +269,17 @@ export function RolesTab({ canWrite, writeDeniedReason }: RolesTabProps): React.
               <Checkbox
                 key={scope}
                 label={scope}
-                checked={scopeDraft.includes(scope)}
-                onChange={(event) =>
-                  setScopeDraft((current) =>
-                    event.target.checked ? [...current, scope] : current.filter((item) => item !== scope),
-                  )
-                }
+                checked={scopes.includes(scope)}
+                onChange={(event) => {
+                  const current = form.getValues("scopes");
+                  form.setValue(
+                    "scopes",
+                    event.target.checked
+                      ? [...current, scope].sort()
+                      : current.filter((item) => item !== scope),
+                    { shouldDirty: true },
+                  );
+                }}
               />
             ))}
           </div>

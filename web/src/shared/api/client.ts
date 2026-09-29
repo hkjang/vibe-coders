@@ -59,6 +59,7 @@ export interface ApiClientDependencies {
   saveTokens: typeof tokenStore.saveTokens;
   clearTokens: () => void;
   notifyLogout: () => void;
+  getSessionEpoch: () => number;
 }
 
 function defaultDependencies(): ApiClientDependencies {
@@ -67,9 +68,10 @@ function defaultDependencies(): ApiClientDependencies {
     getAccessToken: tokenStore.getAccessToken,
     getRefreshToken: tokenStore.getRefreshToken,
     getLegacyToken: tokenStore.getLegacyToken,
-    saveTokens: tokenStore.saveTokens,
+    saveTokens: tokenStore.refreshTokens,
     clearTokens: tokenStore.clearTokens,
     notifyLogout: publishLogout,
+    getSessionEpoch: tokenStore.getSessionEpoch,
   };
 }
 
@@ -108,7 +110,7 @@ async function readResponseBody(response: Response): Promise<unknown> {
 
 export class ApiClient {
   private readonly dependencies: ApiClientDependencies;
-  private refreshFlight: Promise<void> | undefined;
+  private refreshFlight: { epoch: number; promise: Promise<void> } | undefined;
 
   constructor(dependencies: Partial<ApiClientDependencies> = {}) {
     this.dependencies = { ...defaultDependencies(), ...dependencies };
@@ -123,8 +125,9 @@ export class ApiClient {
       throw new AppError("외부 API URL은 허용되지 않습니다.", { kind: "contract" });
     }
 
+    const epoch = this.dependencies.getSessionEpoch();
     const accessTokenAtRequestStart = this.dependencies.getAccessToken();
-    let response = await this.perform(endpoint, options);
+    let response = await this.inSession(epoch, () => this.perform(endpoint, options));
     if (
       response.status === 401 &&
       options.retryUnauthorized !== false &&
@@ -132,14 +135,19 @@ export class ApiClient {
     ) {
       const currentAccessToken = this.dependencies.getAccessToken();
       if (currentAccessToken && currentAccessToken !== accessTokenAtRequestStart) {
-        response = await this.perform(endpoint, { ...options, retryUnauthorized: false });
+        response = await this.inSession(epoch, () =>
+          this.perform(endpoint, { ...options, retryUnauthorized: false }),
+        );
       } else if (this.dependencies.getRefreshToken()) {
-        await this.refreshOnce();
-        response = await this.perform(endpoint, { ...options, retryUnauthorized: false });
+        await this.refreshOnce(epoch);
+        this.assertSession(epoch);
+        response = await this.inSession(epoch, () =>
+          this.perform(endpoint, { ...options, retryUnauthorized: false }),
+        );
       }
     }
 
-    const body = await readResponseBody(response);
+    const body = await this.inSession(epoch, () => readResponseBody(response));
     if (!response.ok) throw this.endpointError(endpoint, response, body);
 
     const parsed = endpoint.schema.safeParse(body);
@@ -154,16 +162,37 @@ export class ApiClient {
     return parsed.data as ApiEndpointOutput<Endpoint>;
   }
 
-  private async refreshOnce(): Promise<void> {
-    if (!this.refreshFlight) {
-      this.refreshFlight = this.refresh().finally(() => {
-        this.refreshFlight = undefined;
-      });
+  private assertSession(epoch: number): void {
+    if (epoch !== this.dependencies.getSessionEpoch()) {
+      throw new AppError("인증 세션이 변경되어 이전 요청을 취소했습니다.", { kind: "aborted" });
     }
-    return this.refreshFlight;
   }
 
-  private async refresh(): Promise<void> {
+  private async inSession<Value>(epoch: number, read: () => Promise<Value>): Promise<Value> {
+    this.assertSession(epoch);
+    try {
+      const value = await read();
+      this.assertSession(epoch);
+      return value;
+    } catch (error) {
+      // Network/timeout/JSON errors can also arrive after the owning session ends.
+      this.assertSession(epoch);
+      throw error;
+    }
+  }
+
+  private async refreshOnce(epoch: number): Promise<void> {
+    this.assertSession(epoch);
+    if (!this.refreshFlight || this.refreshFlight.epoch !== epoch) {
+      const promise = this.refresh(epoch).finally(() => {
+        if (this.refreshFlight?.promise === promise) this.refreshFlight = undefined;
+      });
+      this.refreshFlight = { epoch, promise };
+    }
+    return this.refreshFlight.promise;
+  }
+
+  private async refresh(epoch: number): Promise<void> {
     const refreshToken = this.dependencies.getRefreshToken();
     if (!refreshToken) throw new AppError("로그인 세션이 만료되었습니다.", { kind: "auth", status: 401 });
 
@@ -180,6 +209,7 @@ export class ApiClient {
         undefined,
       );
       const body = await readResponseBody(response);
+      this.assertSession(epoch);
       if (!response.ok) throw this.toAppError(response, body);
       const parsed = endpoints.auth.refresh.schema.safeParse(body);
       if (!parsed.success) {
@@ -192,6 +222,7 @@ export class ApiClient {
       }
       this.dependencies.saveTokens(parsed.data);
     } catch (error) {
+      this.assertSession(epoch);
       if (error instanceof AppError && error.kind === "aborted") throw error;
       this.dependencies.clearTokens();
       this.dependencies.notifyLogout();

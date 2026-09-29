@@ -108,7 +108,9 @@ export function AppFormDialog({
         <Button
           size="small"
           variant="ghost"
-          onClick={() => form.setValue("components", appComponentsExample, { shouldValidate: true })}
+          onClick={() =>
+            form.setValue("components", appComponentsExample, { shouldValidate: true, shouldDirty: true })
+          }
         >
           예시 채우기
         </Button>

@@ -433,6 +433,18 @@ async function mockGateway(page: Page, options: MockGatewayOptions = {}): Promis
       case "/admin/routing/health":
         options.onRoutingRequest?.(request);
         return json(routingHealth);
+      case "/admin/routing/balancer":
+        expect(request.method()).toBe("GET");
+        expect(["1h", "24h", "7d", "30d"]).toContain(url.searchParams.get("window"));
+        return json({
+          mode: "session_hash",
+          multi_instance_safe: true,
+          sticky_sessions: true,
+          sticky_ttl: "30m0s",
+          active_sessions: 4,
+          balance_index: 0.8,
+          pools: [],
+        });
       case "/admin/providers":
         return json(providers);
       case "/admin/providers/slo":
@@ -608,6 +620,7 @@ test("opens and reloads Gateway Health at a URL-backed range", async ({ page }) 
     page.getByRole("table", { name: "선택 기간의 공급자 상태 점수 순위" }).getByText("openai-primary"),
   ).toBeVisible();
   await expect(page.getByText("96점", { exact: true })).toBeVisible();
+  await expect(page.getByText("session_hash", { exact: true })).toBeVisible();
   await expect(page.locator("#main-content").getByText("읽기 전용", { exact: true })).toBeVisible();
   await expect(page.getByRole("link", { name: /기존 상태 화면 열기/ })).toHaveAttribute(
     "href",
