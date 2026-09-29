@@ -20,7 +20,7 @@ func newAppUITelemetryTestServer(t *testing.T) *Server {
 	t.Setenv("UI_APP_ENABLED", "false")
 	t.Setenv("UI_APP_TELEMETRY_ENABLED", "false")
 	t.Setenv("UI_APP_LEGACY_FALLBACK", "true")
-	s := &Server{db: openTestStore(t), cfg: testConfig("http://upstream.invalid", ""), appUITelemetryGate: &appUITelemetryLimiter{}}
+	s := &Server{db: openTestStore(t), cfg: testConfig("http://upstream.invalid", ""), appUITelemetryGate: &appUITelemetryLimiter{}, appUITelemetryCallerQuota: &appUITelemetryCallerQuota{}}
 	s.cfg.Auth.JWTSecret = "telemetry-test-jwt-signing-key"
 	for _, key := range []string{appUIEnabledKey, appUITelemetryEnabledKey} {
 		setAppUITelemetryTestSetting(t, s, key, "true")

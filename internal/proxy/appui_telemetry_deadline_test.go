@@ -76,3 +76,160 @@ func TestAppUITelemetrySlowBodiesReleaseIntakeSlots(t *testing.T) {
 		t.Fatalf("normal intake did not recover: status=%d body=%s", w.Code, w.Body.String())
 	}
 }
+
+func TestAppUITelemetryCallerQuotaDroppedSlowBodiesRemainBounded(t *testing.T) {
+	s := newAppUITelemetryTestServer(t)
+	s.cfg.Auth.Enabled = true
+	now := time.Now()
+	token := issueLLMScopedTestToken(t, s.db, s, "spent-private-user", "viewer", "", scopesForRole("viewer"), now)
+	otherToken := issueLLMScopedTestToken(t, s.db, s, "other-private-user", "viewer", "", scopesForRole("viewer"), now)
+	spendAppUITelemetryQuota(t, s.appUITelemetryCallerQuota, "spent-private-user", appUITelemetryCallerDailyLimit, now)
+	server := httptest.NewServer(s.Routes())
+	defer server.Close()
+	var connections []net.Conn
+	defer func() {
+		for _, conn := range connections {
+			_ = conn.Close()
+		}
+	}()
+	started := time.Now()
+	for range 4 {
+		conn, err := net.DialTimeout("tcp", strings.TrimPrefix(server.URL, "http://"), time.Second)
+		if err != nil {
+			t.Fatal(err)
+		}
+		connections = append(connections, conn)
+		if err := conn.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+			t.Fatal(err)
+		}
+		// A quota drop returns before decoding. net/http must not drain this
+		// incomplete body indefinitely after the handler sends its empty 204.
+		if _, err := fmt.Fprintf(conn, "POST /admin/ui-telemetry/events HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer %s\r\nContent-Type: application/json\r\nContent-Length: 200\r\n\r\n{\"feature_id\":\"", token); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, conn := range connections {
+		response, err := http.ReadResponse(bufio.NewReader(conn), nil)
+		if err != nil {
+			t.Fatalf("quota-dropped slow-body response not bounded: %v", err)
+		}
+		_ = response.Body.Close()
+		if response.StatusCode != http.StatusNoContent {
+			t.Fatalf("quota drop returned %d", response.StatusCode)
+		}
+	}
+	if elapsed := time.Since(started); elapsed > 4*time.Second {
+		t.Fatalf("quota-dropped bodies exceeded their read budget: %s", elapsed)
+	}
+	if telemetryStoredCount(t, s) != 0 {
+		t.Fatal("quota-dropped slow request wrote telemetry")
+	}
+	w := appUITelemetryRequest(t, s, http.MethodPost, "/admin/ui-telemetry/events", otherToken, appUITelemetryPayload("overview", "visit"))
+	if w.Code != http.StatusNoContent || telemetryStoredCount(t, s) != 1 {
+		t.Fatalf("other caller did not recover: status=%d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestAppUITelemetryEarlyResponsesBoundSlowBodies(t *testing.T) {
+	for _, kind := range []string{"default-opt-out", "app-disabled", "telemetry-disabled", "gate-full", "missing-auth", "invalid-auth", "wrong-method", "settings-error"} {
+		t.Run(kind, func(t *testing.T) {
+			s := newAppUITelemetryTestServer(t)
+			method, token, status := http.MethodPost, "", http.StatusNoContent
+			switch kind {
+			case "default-opt-out":
+				if err := s.db.DeleteAdminSetting(t.Context(), appUITelemetryEnabledKey, "test", "test"); err != nil {
+					t.Fatal(err)
+				}
+			case "app-disabled":
+				setAppUITelemetryTestSetting(t, s, appUIEnabledKey, "false")
+			case "telemetry-disabled":
+				setAppUITelemetryTestSetting(t, s, appUITelemetryEnabledKey, "false")
+			case "gate-full":
+				s.appUITelemetryGate.inFlight = 4
+			case "missing-auth", "invalid-auth":
+				s.cfg.Auth.Enabled = true
+				status = http.StatusUnauthorized
+				if kind == "invalid-auth" {
+					token = "invalid-private-token"
+				}
+			case "wrong-method":
+				method, status = http.MethodPut, http.StatusMethodNotAllowed
+			case "settings-error":
+				if err := s.db.Close(); err != nil {
+					t.Fatal(err)
+				}
+			}
+			server := httptest.NewUnstartedServer(s.Routes())
+			server.Config.ReadTimeout = 2 * time.Minute // production gateway setting
+			server.Start()
+			defer server.Close()
+			var connections []net.Conn
+			defer func() {
+				for _, conn := range connections {
+					_ = conn.Close()
+				}
+			}()
+			started := time.Now()
+			for range 4 {
+				conn, err := net.DialTimeout("tcp", strings.TrimPrefix(server.URL, "http://"), time.Second)
+				if err != nil {
+					t.Fatal(err)
+				}
+				connections = append(connections, conn)
+				if err := conn.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := fmt.Fprintf(conn, "%s /admin/ui-telemetry/events HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer %s\r\nContent-Type: application/json\r\nContent-Length: 200\r\n\r\n{\"feature_id\":\"", method, token); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for _, conn := range connections {
+				response, err := http.ReadResponse(bufio.NewReader(conn), nil)
+				if err != nil {
+					t.Fatalf("early response exceeded the telemetry read budget: %v", err)
+				}
+				if _, err := io.Copy(io.Discard, response.Body); err != nil {
+					t.Fatalf("early response body was not bounded: %v", err)
+				}
+				_ = response.Body.Close()
+				if response.StatusCode != status || response.Header.Get("Cache-Control") != "no-store" {
+					t.Fatalf("early response status=%d want=%d headers=%v", response.StatusCode, status, response.Header)
+				}
+			}
+			if elapsed := time.Since(started); elapsed > 4*time.Second {
+				t.Fatalf("early slow-body responses exceeded their read budget: %s", elapsed)
+			}
+			if kind != "settings-error" && telemetryStoredCount(t, s) != 0 {
+				t.Fatal("early response must not persist telemetry")
+			}
+			if s.appUITelemetryCallerQuota.counts != nil {
+				t.Fatal("early response must not initialize the authenticated caller quota")
+			}
+			if kind != "gate-full" {
+				deadline := time.Now().Add(time.Second)
+				for {
+					s.appUITelemetryGate.mu.Lock()
+					inFlight := s.appUITelemetryGate.inFlight
+					s.appUITelemetryGate.mu.Unlock()
+					if inFlight == 0 {
+						break
+					}
+					if time.Now().After(deadline) {
+						t.Fatalf("early responses retained %d intake slots", inFlight)
+					}
+					time.Sleep(5 * time.Millisecond)
+				}
+			}
+			// The drain timeout must not damage unrelated gateway availability.
+			client := &http.Client{Timeout: time.Second}
+			response, err := client.Get(server.URL + "/health")
+			if err != nil {
+				t.Fatalf("gateway did not recover after early slow-body responses: %v", err)
+			}
+			_ = response.Body.Close()
+			if response.StatusCode != http.StatusOK {
+				t.Fatalf("gateway health returned %d", response.StatusCode)
+			}
+		})
+	}
+}

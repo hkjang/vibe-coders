@@ -99,7 +99,8 @@ type Server struct {
 	adminModels     *adminModelCatalogCache
 	trustedProxies  []netip.Prefix
 
-	appUITelemetryGate *appUITelemetryLimiter // defaults to the process-wide bounded intake gate
+	appUITelemetryGate        *appUITelemetryLimiter     // defaults to the process-wide bounded intake gate
+	appUITelemetryCallerQuota *appUITelemetryCallerQuota // defaults to the process-wide ephemeral caller quota
 }
 
 type atomicKillState struct {
