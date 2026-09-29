@@ -101,6 +101,57 @@ it("503 응답 전 background true와 응답 뒤 조회 실패를 수렴 근거�
   expect(result.current.reloadPending?.requestId).toBe("pending-response");
 });
 
+it("응답 전 시작한 조회가 뒤늦게 true를 캐시해도 검증 조회 실패 시 대기를 유지하고 후속 성공으로 해제한다", async () => {
+  const writeGate = deferred<unknown>();
+  const backgroundGate = deferred<ReturnType<typeof applied>>();
+  const finalReadGate = deferred<ReturnType<typeof applied>>();
+  const write = vi.fn(() => writeGate.promise);
+  const read = vi
+    .fn<() => Promise<ReturnType<typeof applied>>>()
+    .mockImplementationOnce(() => backgroundGate.promise)
+    .mockRejectedValueOnce(new Error("validation read failed"))
+    .mockImplementationOnce(() => finalReadGate.promise);
+  const { result, client } = setup(write, read);
+  let background!: Promise<void>;
+  let completion!: ReturnType<typeof result.current.save.mutateAsync>;
+  act(() => {
+    background = client.refetchQueries({ queryKey: key });
+    completion = result.current.save.mutateAsync();
+  });
+  await waitFor(() => expect(write).toHaveBeenCalledOnce());
+  expect(read).toHaveBeenCalledOnce();
+  await act(async () => {
+    writeGate.reject(persisted());
+    // The response handler records generation 1 before this older request
+    // completes. The real mutation then invalidates and awaits its own read.
+    await Promise.resolve();
+    backgroundGate.resolve(applied(true));
+    await background;
+    expect(await completion).toMatchObject({ outcome: "reload_pending", observedUpdates: 1 });
+  });
+  expect(read).toHaveBeenCalledTimes(2);
+  expect(client.getQueryState(key)).toMatchObject({
+    data: applied(true),
+    dataUpdateCount: 2,
+    status: "error",
+    fetchStatus: "idle",
+  });
+  expect(result.current.reloadPending?.requestId).toBe("pending-response");
+
+  let finalRead!: Promise<void>;
+  act(() => {
+    finalRead = client.refetchQueries({ queryKey: key });
+  });
+  expect(client.getQueryState(key)?.fetchStatus).toBe("fetching");
+  expect(result.current.reloadPending?.requestId).toBe("pending-response");
+  await act(async () => {
+    finalReadGate.resolve(applied(true));
+    await finalRead;
+  });
+  expect(result.current.reloadPending).toBeUndefined();
+  expect(write).toHaveBeenCalledOnce();
+});
+
 it.each([false, undefined])("새 조회의 up_to_date=%s이면 반영 대기를 유지한다", async (value) => {
   const { result } = setup(
     async () => {

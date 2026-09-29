@@ -21,7 +21,14 @@ export function useSettingsReloadNotice() {
   const [local, setLocal] = useState<SettingReloadPendingNotice & { sessionEpoch: number }>();
   const staleSession = local !== undefined && local.sessionEpoch !== sessionEpoch;
   const converged = Boolean(
-    local && state?.data?.this_pod?.up_to_date === true && state.dataUpdateCount > local.observedUpdates,
+    local &&
+    // Writes await invalidation before publishing their notice. A failed or
+    // unfinished validation can retain an older true value and a newer count;
+    // neither is confirmation until the current read succeeds and settles.
+    state?.status === "success" &&
+    state.fetchStatus === "idle" &&
+    state.data?.this_pod?.up_to_date === true &&
+    state.dataUpdateCount > local.observedUpdates,
   );
   // Reconcile this component's state before committing the render. Clearing the
   // matching local record makes this branch false on the immediate next render.
