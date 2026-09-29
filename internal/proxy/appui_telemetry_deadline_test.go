@@ -76,3 +76,56 @@ func TestAppUITelemetrySlowBodiesReleaseIntakeSlots(t *testing.T) {
 		t.Fatalf("normal intake did not recover: status=%d body=%s", w.Code, w.Body.String())
 	}
 }
+
+func TestAppUITelemetryCallerQuotaDroppedSlowBodiesRemainBounded(t *testing.T) {
+	s := newAppUITelemetryTestServer(t)
+	s.cfg.Auth.Enabled = true
+	now := time.Now()
+	token := issueLLMScopedTestToken(t, s.db, s, "spent-private-user", "viewer", "", scopesForRole("viewer"), now)
+	otherToken := issueLLMScopedTestToken(t, s.db, s, "other-private-user", "viewer", "", scopesForRole("viewer"), now)
+	spendAppUITelemetryQuota(t, s.appUITelemetryCallerQuota, "spent-private-user", appUITelemetryCallerDailyLimit, now)
+	server := httptest.NewServer(s.Routes())
+	defer server.Close()
+	var connections []net.Conn
+	defer func() {
+		for _, conn := range connections {
+			_ = conn.Close()
+		}
+	}()
+	started := time.Now()
+	for range 4 {
+		conn, err := net.DialTimeout("tcp", strings.TrimPrefix(server.URL, "http://"), time.Second)
+		if err != nil {
+			t.Fatal(err)
+		}
+		connections = append(connections, conn)
+		if err := conn.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+			t.Fatal(err)
+		}
+		// A quota drop returns before decoding. net/http must not drain this
+		// incomplete body indefinitely after the handler sends its empty 204.
+		if _, err := fmt.Fprintf(conn, "POST /admin/ui-telemetry/events HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer %s\r\nContent-Type: application/json\r\nContent-Length: 200\r\n\r\n{\"feature_id\":\"", token); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, conn := range connections {
+		response, err := http.ReadResponse(bufio.NewReader(conn), nil)
+		if err != nil {
+			t.Fatalf("quota-dropped slow-body response not bounded: %v", err)
+		}
+		_ = response.Body.Close()
+		if response.StatusCode != http.StatusNoContent {
+			t.Fatalf("quota drop returned %d", response.StatusCode)
+		}
+	}
+	if elapsed := time.Since(started); elapsed > 4*time.Second {
+		t.Fatalf("quota-dropped bodies exceeded their read budget: %s", elapsed)
+	}
+	if telemetryStoredCount(t, s) != 0 {
+		t.Fatal("quota-dropped slow request wrote telemetry")
+	}
+	w := appUITelemetryRequest(t, s, http.MethodPost, "/admin/ui-telemetry/events", otherToken, appUITelemetryPayload("overview", "visit"))
+	if w.Code != http.StatusNoContent || telemetryStoredCount(t, s) != 1 {
+		t.Fatalf("other caller did not recover: status=%d body=%s", w.Code, w.Body.String())
+	}
+}

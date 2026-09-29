@@ -130,6 +130,16 @@ func (s *Server) handleAppUITelemetryEvent(w http.ResponseWriter, r *http.Reques
 			}
 		}()
 	}
+	callerQuota := s.appUITelemetryCallerQuota
+	if callerQuota == nil {
+		callerQuota = &processAppUITelemetryCallerQuota
+	}
+	if !callerQuota.acquire(user.ID, time.Now()) {
+		// Best-effort analytics never queue or retry when a caller exhausts its
+		// process-local daily budget or the bounded caller map is full.
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, appUITelemetryBodyLimit))
 	event, decoded := decodeAppUITelemetryEvent(decoder)
 	bodyConsumed = decoded
@@ -151,8 +161,9 @@ func (s *Server) handleAppUITelemetryEvent(w http.ResponseWriter, r *http.Reques
 		writeOpenAIError(w, http.StatusForbidden, "feature access denied", "invalid_request_error", "ui_telemetry_forbidden")
 		return
 	}
-	// Identity is used for existing RBAC/rollout checks only. The store receives
-	// no identity or browser metadata; it hashes the ephemeral random visit ID.
+	// Identity is used only for existing RBAC/rollout and the ephemeral intake
+	// quota. The store receives no identity or browser metadata; it hashes the
+	// ephemeral random visit ID.
 	if _, err := s.db.RecordAppUITelemetry(ctx, event.FeatureID, event.VisitID, event.Event == "legacy_fallback", time.Now().UTC()); err != nil {
 		writeOpenAIError(w, http.StatusServiceUnavailable, "UI telemetry temporarily unavailable", "server_error", "ui_telemetry_unavailable")
 		return
