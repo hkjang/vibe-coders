@@ -4,7 +4,7 @@ import { toast } from "sonner";
 
 import { QueryNotice, UpdatedAt } from "@/features/system/settings/SettingsParts";
 import { SettingDetailSheet } from "@/features/system/settings/SettingDetailSheet";
-import { settingSaveOutcome } from "@/features/system/settings/setting-save-outcome";
+import { useSettingSaveOutcome } from "@/features/system/settings/setting-save-outcome";
 import {
   SettingsRecoveryDialog,
   type SettingRecovery,
@@ -106,6 +106,7 @@ export function RuntimeSettingsTab({ hasAdminWrite }: { hasAdminWrite: boolean }
   const [selected, setSelected] = useState<EffectiveSetting | undefined>();
   const [confirm, setConfirm] = useState<SettingRecovery | undefined>();
   const { reloadPending, setReloadPending } = useSettingsReloadNotice();
+  const settingSaveOutcome = useSettingSaveOutcome();
   const [testResult, setTestResult] = useState<{ label: string; ok: boolean; detail: string } | undefined>();
   const [searchError, setSearchError] = useState<string | undefined>();
 
@@ -147,7 +148,7 @@ export function RuntimeSettingsTab({ hasAdminWrite }: { hasAdminWrite: boolean }
     },
     invalidates: [systemSettingsKeys.effective],
     onSuccess: (result) => {
-      if (result.outcome === "reload_pending") setReloadPending({ requestId: result.requestId });
+      if (result.outcome === "reload_pending") setReloadPending(result);
       else if (result.outcome === "saved") {
         setReloadPending(undefined);
         toast.success("설정을 저장했습니다.");
@@ -380,7 +381,7 @@ export function RuntimeSettingsTab({ hasAdminWrite }: { hasAdminWrite: boolean }
         request={confirm}
         onClose={() => setConfirm(undefined)}
         hasAdminWrite={hasAdminWrite}
-        onReloadPending={(requestId) => setReloadPending({ requestId })}
+        onReloadPending={setReloadPending}
         onSaved={() => setReloadPending(undefined)}
         returnFocusRef={triggerRef}
       />

@@ -2,7 +2,10 @@ import { useState, type RefObject } from "react";
 import { toast } from "sonner";
 
 import { settingEditPermission } from "@/features/system/settings/settings-utils";
-import { settingSaveOutcome } from "@/features/system/settings/setting-save-outcome";
+import {
+  useSettingSaveOutcome,
+  type SettingReloadPendingNotice,
+} from "@/features/system/settings/setting-save-outcome";
 import { routeId, systemSettingsKeys } from "@/features/system/settings/use-system-settings";
 import { apiClient } from "@/shared/api/client";
 import type { EffectiveSetting } from "@/shared/api/domains/system.schemas";
@@ -27,7 +30,7 @@ export type SettingRecovery = { setting: EffectiveSetting } & (
 interface Props {
   hasAdminWrite: boolean;
   onClose: () => void;
-  onReloadPending: (requestId?: string) => void;
+  onReloadPending: (notice: SettingReloadPendingNotice) => void;
   onSaved: () => void;
   request: SettingRecovery | undefined;
   returnFocusRef: RefObject<HTMLElement | null>;
@@ -56,6 +59,7 @@ function RecoveryEditor({
         Number.isSafeInteger(snapshot.historyCount) &&
         snapshot.historyCount > 0);
   const guard = useDraftGuard({ dirty: reason !== "", onDiscard: onClose });
+  const settingSaveOutcome = useSettingSaveOutcome();
   const save = useMutationFeedback({
     mutate: async (note: string) => {
       if (!allowed) throw new Error("이 설정을 복구할 권한이 없습니다.");
@@ -86,7 +90,7 @@ function RecoveryEditor({
     },
     invalidates: [systemSettingsKeys.effective, systemSettingsKeys.history(setting.key)],
     onSuccess: (result) => {
-      if (result.outcome === "reload_pending") onReloadPending(result.requestId);
+      if (result.outcome === "reload_pending") onReloadPending(result);
       else if (result.outcome === "saved") {
         onSaved();
         toast.success(

@@ -14,7 +14,7 @@ const guardTitle = "저장하지 않은 변경사항이 있습니다";
 const syntheticSecret = "public-synthetic-replacement";
 const openedAt = "2026-09-29T01:00:00Z";
 const historyId = (key: string) => `public-history-${key}`;
-type WriteOutcome = "saved" | "reload_pending" | "failed";
+type WriteOutcome = "saved" | "reload_pending" | "reload_pending_applied" | "failed";
 
 const bootstrap: UiBootstrapResponse = {
   backend_version: "v0.86.5",
@@ -267,7 +267,7 @@ async function installSettings(page: Page) {
           changed_at: recoveredAt,
         });
       upToDate = outcome !== "reload_pending";
-      if (outcome === "reload_pending")
+      if (outcome === "reload_pending" || outcome === "reload_pending_applied")
         return json(
           { error: { message: "fixture persisted, runtime reload pending", code: "setting_reload_pending" } },
           503,
@@ -345,7 +345,7 @@ async function installSettings(page: Page) {
           : row;
       });
       upToDate = outcome !== "reload_pending";
-      if (outcome === "reload_pending")
+      if (outcome === "reload_pending" || outcome === "reload_pending_applied")
         return json(
           { error: { message: "fixture persisted, runtime reload pending", code: "setting_reload_pending" } },
           503,
@@ -953,6 +953,49 @@ for (const surface of ["runtime", "console"] as const) {
         exact: true,
       }),
     ).toHaveAttribute("aria-selected", "true");
+    expect(api.writes).toHaveLength(1);
+  });
+}
+
+for (const surface of ["runtime", "console"] as const) {
+  test(`${surface} 저장된 503 직후 자동 조회가 이미 적용 완료이면 수동 새로고침 없이 경고를 해제한다`, async ({
+    page,
+    api,
+  }) => {
+    const key = surface === "console" ? globalKey : runtimeKey;
+    await page.goto(`system/settings?tab=${surface}`);
+    let sheet: Locator;
+    if (surface === "runtime") sheet = await openSheet(page, key, false);
+    else {
+      await page.getByRole("button", { name: "기존 화면 이동 편집", exact: true }).click();
+      sheet = page.getByRole("dialog", { name: key, exact: true });
+    }
+    const input = sheet.getByLabel("새 값", { exact: true });
+    if (surface === "console") await input.selectOption("false");
+    else await input.fill("2000");
+    await sheet.getByLabel("변경 사유").fill("public fast reload convergence");
+    const beforeSaveReads = api.readCount();
+    // The write reports persisted/reload-pending, but another reload has
+    // converged by its automatic invalidation GET. No user refresh is involved.
+    api.queueOutcomes("reload_pending_applied");
+    await sheet.getByRole("button", { name: "저장", exact: true }).click();
+    await expect(sheet).toBeHidden();
+    await expect.poll(api.readCount).toBeGreaterThan(beforeSaveReads);
+    const request = api.writes[0];
+    if (!request) throw new Error("Expected one persisted setting update");
+    expect(request.method()).toBe("PUT");
+    expect(new URL(request.url()).pathname).toBe(`/admin/settings/by-key/${key}`);
+    expect(request.postDataJSON()).toEqual({
+      value: surface === "console" ? "false" : "2000",
+      reason: "public fast reload convergence",
+      expected_version: surface === "console" ? 6 : 3,
+    });
+    await expect(
+      page.getByText("설정은 저장됐으며 런타임 반영을 기다리고 있습니다.", {
+        exact: true,
+      }),
+    ).toBeHidden();
+    await expect(page.getByText("요청 ID: req-settings-reload-pending")).toBeHidden();
     expect(api.writes).toHaveLength(1);
   });
 }

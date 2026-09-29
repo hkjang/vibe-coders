@@ -14,7 +14,10 @@ import {
 } from "@/features/system/settings/SettingsRecoveryDialog";
 import { ConsoleUsagePanel } from "@/features/system/settings/ConsoleUsagePanel";
 import { QueryNotice, UpdatedAt } from "@/features/system/settings/SettingsParts";
-import { settingSaveOutcome, type SettingSaveResult } from "@/features/system/settings/setting-save-outcome";
+import {
+  useSettingSaveOutcome,
+  type SettingSaveResult,
+} from "@/features/system/settings/setting-save-outcome";
 import {
   buildConsoleFeatureRows,
   consoleGlobalSettings,
@@ -103,6 +106,7 @@ export function ConsoleRolloutTab({ hasAdminWrite }: { hasAdminWrite: boolean })
   const [recovery, setRecovery] = useState<SettingRecovery | undefined>();
   const [conflict, setConflict] = useState(false);
   const { reloadPending, setReloadPending } = useSettingsReloadNotice();
+  const settingSaveOutcome = useSettingSaveOutcome();
 
   const consoleSettings = useMemo(
     () => (settingsQuery.data?.settings ?? []).filter(isConsoleSetting),
@@ -166,7 +170,7 @@ export function ConsoleRolloutTab({ hasAdminWrite }: { hasAdminWrite: boolean })
       if (result.outcome === "conflict") {
         setConflict(true);
       } else if (result.outcome === "reload_pending") {
-        setReloadPending({ requestId: result.requestId });
+        setReloadPending(result);
       } else {
         setReloadPending(undefined);
         toast.success("콘솔 전환 설정을 저장했습니다. 화면을 새로고침하면 적용됩니다.");
@@ -180,7 +184,7 @@ export function ConsoleRolloutTab({ hasAdminWrite }: { hasAdminWrite: boolean })
       writeSetting(input.setting, input.value, input.reason),
     invalidates: [systemSettingsKeys.effective],
     onSuccess: (result) => {
-      if (result.outcome === "reload_pending") setReloadPending({ requestId: result.requestId });
+      if (result.outcome === "reload_pending") setReloadPending(result);
       else if (result.outcome === "saved") {
         setReloadPending(undefined);
         toast.success("콘솔 설정을 저장했습니다. 화면을 새로고침하면 적용됩니다.");
@@ -383,7 +387,7 @@ export function ConsoleRolloutTab({ hasAdminWrite }: { hasAdminWrite: boolean })
         request={recovery}
         onClose={() => setRecovery(undefined)}
         hasAdminWrite={hasAdminWrite}
-        onReloadPending={(requestId) => setReloadPending({ requestId })}
+        onReloadPending={setReloadPending}
         onSaved={() => setReloadPending(undefined)}
         returnFocusRef={triggerRef}
       />

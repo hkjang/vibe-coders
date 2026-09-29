@@ -417,6 +417,7 @@ describe("SystemSettingsPage — 콘솔 전환", () => {
     const api = mockApi({
       "GET /admin/settings/effective": () => ({
         ...effectiveSettings,
+        this_pod: { ...effectiveSettings.this_pod, up_to_date: !stored },
         settings: effectiveSettings.settings.map((setting) =>
           stored && setting.key === "ui.app.feature.system.settings.status"
             ? { ...setting, value: "preview", version: 1 }
