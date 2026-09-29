@@ -28,6 +28,7 @@ interface Props {
   hasAdminWrite: boolean;
   onClose: () => void;
   onReloadPending: (requestId?: string) => void;
+  onSaved: () => void;
   request: SettingRecovery | undefined;
   returnFocusRef: RefObject<HTMLElement | null>;
 }
@@ -36,6 +37,7 @@ function RecoveryEditor({
   hasAdminWrite,
   onClose,
   onReloadPending,
+  onSaved,
   request,
   returnFocusRef,
 }: Props & { request: SettingRecovery }): React.JSX.Element {
@@ -85,12 +87,14 @@ function RecoveryEditor({
     invalidates: [systemSettingsKeys.effective, systemSettingsKeys.history(setting.key)],
     onSuccess: (result) => {
       if (result.outcome === "reload_pending") onReloadPending(result.requestId);
-      else if (result.outcome === "saved")
+      else if (result.outcome === "saved") {
+        onSaved();
         toast.success(
           kind === "rollback"
             ? "설정을 이전 값으로 롤백했습니다."
             : "설정을 환경변수 기본값으로 되돌렸습니다.",
         );
+      }
     },
   });
 

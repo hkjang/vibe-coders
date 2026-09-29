@@ -97,6 +97,73 @@ async function changeValue(user: ReturnType<typeof userEvent.setup>, value: stri
 }
 
 describe.each(cases)("$tab 설정 저장 계약", (fixture) => {
+  it("첫 오버라이드 이력에 이전 값이 없으면 롤백만 잠그고 이유를 안내한다", async () => {
+    const user = userEvent.setup();
+    const { api } = setup(fixture, {
+      "GET /admin/settings/history": () => ({
+        history: history(fixture.setting).history.map((entry) => ({ ...entry, old_value_json: "" })),
+      }),
+    });
+    await user.click(await screen.findByRole("button", { name: fixture.openLabel }));
+    expect(await screen.findByText("이 변경 이력에 이전 값이 없어 롤백할 수 없습니다.")).toBeVisible();
+    expect(screen.getByRole("button", { name: "이전 값으로 롤백" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "기본값(환경변수)으로 되돌리기" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "저장" })).toBeEnabled();
+    await user.click(screen.getByRole("button", { name: "이전 값으로 롤백" }));
+    expect(api.calls.every((call) => call.key.startsWith("GET "))).toBe(true);
+  });
+
+  it.each([
+    ["revert", "saved"],
+    ["rollback", "saved"],
+    ["revert", "conflict"],
+    ["rollback", "conflict"],
+    ["revert", "failure"],
+    ["rollback", "failure"],
+  ] as const)("%s 결과 %s에 따라 기존 반영 대기 경고를 정확히 유지하거나 지운다", async (kind, outcome) => {
+    const user = userEvent.setup();
+    const saveEndpoint = `PUT /admin/settings/by-key/${fixture.setting.key}`;
+    const recoveryEndpoint =
+      kind === "revert"
+        ? `DELETE /admin/settings/by-key/${fixture.setting.key}`
+        : "POST /admin/settings/rollback";
+    const pendingTitle = "설정은 저장됐으며 런타임 반영을 기다리고 있습니다.";
+    const { api } = setup(fixture, {
+      [saveEndpoint]: () => {
+        throw new AppError("persisted", { kind: "http", status: 503, code: "setting_reload_pending" });
+      },
+      [recoveryEndpoint]: () => {
+        if (outcome !== "saved") throw apiFailure("recovery failed", outcome === "conflict" ? 409 : 500);
+        return fixture.setting;
+      },
+    });
+    await user.click(await screen.findByRole("button", { name: fixture.openLabel }));
+    await changeValue(user, fixture.draft);
+    await user.click(screen.getByRole("button", { name: "저장" }));
+    expect(await screen.findByText(pendingTitle)).toBeVisible();
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    await user.click(screen.getByRole("button", { name: fixture.openLabel }));
+    const action = screen.getByRole("button", {
+      name: kind === "revert" ? "기본값(환경변수)으로 되돌리기" : "이전 값으로 롤백",
+    });
+    await waitFor(() => expect(action).toBeEnabled());
+    await user.click(action);
+    await user.type(screen.getByRole("textbox", { name: "변경 사유" }), "후속 복구 검토");
+    await user.click(screen.getByRole("button", { name: kind === "revert" ? "되돌리기" : "롤백" }));
+    if (outcome === "saved") {
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      expect(screen.queryByText(pendingTitle)).not.toBeInTheDocument();
+      expect(toast.success).toHaveBeenCalledOnce();
+    } else {
+      expect(await screen.findByRole("alert")).toBeVisible();
+      expect(screen.getByText(pendingTitle)).toBeVisible();
+      expect(screen.getByRole("textbox", { name: "변경 사유" })).toHaveValue("후속 복구 검토");
+      expect(toast.success).not.toHaveBeenCalled();
+    }
+    expect(api.bodies(saveEndpoint)).toHaveLength(1);
+    expect(api.calls.filter((call) => call.key === recoveryEndpoint)).toHaveLength(1);
+  });
+
   it("실시간 조회가 바뀌어도 열린 CAS 버전으로 보내고 409 초안을 유지한다", async () => {
     const user = userEvent.setup();
     const endpoint = `PUT /admin/settings/by-key/${fixture.setting.key}`;
@@ -229,6 +296,22 @@ describe.each(cases)("$tab 설정 저장 계약", (fixture) => {
 });
 
 describe("복구 이력 snapshot", () => {
+  it("JSON 빈 문자열은 복구 가능한 이전 값으로 구분한다", async () => {
+    const fixture = cases[0];
+    const user = userEvent.setup();
+    setup(fixture, {
+      "GET /admin/settings/history": () => ({
+        history: history(fixture.setting).history.map((entry) => ({
+          ...entry,
+          old_value_json: JSON.stringify(""),
+        })),
+      }),
+    });
+    await user.click(await screen.findByRole("button", { name: fixture.openLabel }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "이전 값으로 롤백" })).toBeEnabled());
+    expect(screen.queryByText("이 변경 이력에 이전 값이 없어 롤백할 수 없습니다.")).not.toBeInTheDocument();
+  });
+
   it.each([[undefined], [0], [-1], [1.5], [Number.NaN], [Number.MAX_SAFE_INTEGER + 1], [2, 3], [1, 1]])(
     "검증할 수 없는 이력 개수 %j는 롤백만 잠근다",
     async (...counts) => {

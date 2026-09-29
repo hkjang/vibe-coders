@@ -382,6 +382,7 @@ export function ConsoleRolloutTab({ hasAdminWrite }: { hasAdminWrite: boolean })
         onClose={() => setRecovery(undefined)}
         hasAdminWrite={hasAdminWrite}
         onReloadPending={(requestId) => setReloadPending({ requestId })}
+        onSaved={() => setReloadPending(undefined)}
         returnFocusRef={triggerRef}
       />
     </div>

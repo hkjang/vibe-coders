@@ -79,7 +79,8 @@ function SettingEditor({
     historyRows.every((row) => row.history_count === count)
       ? count
       : undefined;
-  const rollbackHistoryId = historyCount === undefined ? undefined : latestHistory?.id;
+  const hasPreviousValue = Boolean(latestHistory?.old_value_json?.trim());
+  const rollbackHistoryId = historyCount === undefined || !hasPreviousValue ? undefined : latestHistory?.id;
   const historyChanged = Boolean(
     latestHistory &&
     (setting.source === "admin"
@@ -307,6 +308,8 @@ function SettingEditor({
             변경 이력 검증 정보를 확인할 수 없어 롤백할 수 없습니다. 패널을 닫고 다시 열어 최신 상태를
             확인하세요.
           </p>
+        ) : !setting.is_secret && latestHistory && !hasPreviousValue ? (
+          <p className="settings-permission-note">이 변경 이력에 이전 값이 없어 롤백할 수 없습니다.</p>
         ) : !setting.is_secret && !rollbackHistoryId ? (
           <p className="settings-permission-note">
             롤백할 변경 이력을 불러온 뒤 이전 값으로 복구할 수 있습니다.

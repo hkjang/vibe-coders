@@ -1324,13 +1324,14 @@ func (s *Server) handleAdminSettingByKey(w http.ResponseWriter, r *http.Request)
 			if errors.Is(err, store.ErrAdminSettingConflict) {
 				writeOpenAIError(w, http.StatusConflict, "setting changed concurrently; reload and review the latest value", "conflict_error", "setting_conflict")
 			} else if errors.Is(err, errSettingReloadPending) {
+				s.auditAdmin(r, "setting.update", key, auditJSON(map[string]any{"key": key, "secret": d.Secret, "reason": payload.Reason, "reload_pending": true}))
 				writeOpenAIError(w, http.StatusServiceUnavailable, "setting was stored but runtime reload is pending", "server_error", "setting_reload_pending")
 			} else {
 				writeOpenAIError(w, http.StatusBadRequest, err.Error(), "invalid_request_error", "setting_invalid")
 			}
 			return
 		}
-		s.auditAdmin(r, "setting.update", key, auditJSON(map[string]any{"key": key, "secret": d.Secret}))
+		s.auditAdmin(r, "setting.update", key, auditJSON(map[string]any{"key": key, "secret": d.Secret, "reason": payload.Reason}))
 		stored, _ := s.loadStoredSettings(r)
 		writeJSON(w, http.StatusOK, s.settingView(stored, d))
 	case http.MethodDelete:
@@ -1343,11 +1344,12 @@ func (s *Server) handleAdminSettingByKey(w http.ResponseWriter, r *http.Request)
 			}
 			expectedVersion = &parsed
 		}
+		reason := strings.TrimSpace(r.URL.Query().Get("reason"))
 		var err error
 		if expectedVersion == nil {
-			err = s.db.DeleteAdminSetting(r.Context(), key, adminID(r), strings.TrimSpace(r.URL.Query().Get("reason")))
+			err = s.db.DeleteAdminSetting(r.Context(), key, adminID(r), reason)
 		} else {
-			err = s.db.DeleteAdminSetting(r.Context(), key, adminID(r), strings.TrimSpace(r.URL.Query().Get("reason")), *expectedVersion)
+			err = s.db.DeleteAdminSetting(r.Context(), key, adminID(r), reason, *expectedVersion)
 		}
 		if err != nil {
 			if errors.Is(err, store.ErrAdminSettingConflict) {
@@ -1358,10 +1360,11 @@ func (s *Server) handleAdminSettingByKey(w http.ResponseWriter, r *http.Request)
 			return
 		}
 		if err := s.reloadRuntimeConfig(r.Context()); err != nil {
+			s.auditAdmin(r, "setting.revert", key, auditJSON(map[string]any{"key": key, "secret": d.Secret, "reason": reason, "reload_pending": true}))
 			writeOpenAIError(w, http.StatusServiceUnavailable, "setting was reverted but runtime reload is pending", "server_error", "setting_reload_pending")
 			return
 		}
-		s.auditAdmin(r, "setting.revert", key, "")
+		s.auditAdmin(r, "setting.revert", key, auditJSON(map[string]any{"key": key, "secret": d.Secret, "reason": reason}))
 		stored, _ := s.loadStoredSettings(r)
 		writeJSON(w, http.StatusOK, s.settingView(stored, d))
 	default:
@@ -1606,10 +1609,11 @@ func (s *Server) applySettingsBatch(w http.ResponseWriter, r *http.Request, item
 		return
 	}
 	if err := s.reloadRuntimeConfig(r.Context()); err != nil {
+		s.auditAdmin(r, "setting.bulk", "", auditJSON(map[string]any{"count": len(out), "import": rejectSecret, "reason": reason, "reload_pending": true}))
 		writeOpenAIError(w, http.StatusServiceUnavailable, "settings were stored atomically but runtime reload is pending", "server_error", "setting_reload_pending")
 		return
 	}
-	s.auditAdmin(r, "setting.bulk", "", auditJSON(map[string]any{"count": len(out), "import": rejectSecret}))
+	s.auditAdmin(r, "setting.bulk", "", auditJSON(map[string]any{"count": len(out), "import": rejectSecret, "reason": reason}))
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "applied": len(out)})
 }
 

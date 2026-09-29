@@ -380,6 +380,7 @@ export function RuntimeSettingsTab({ hasAdminWrite }: { hasAdminWrite: boolean }
         onClose={() => setConfirm(undefined)}
         hasAdminWrite={hasAdminWrite}
         onReloadPending={(requestId) => setReloadPending({ requestId })}
+        onSaved={() => setReloadPending(undefined)}
         returnFocusRef={triggerRef}
       />
     </div>

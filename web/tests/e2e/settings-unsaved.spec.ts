@@ -14,6 +14,7 @@ const guardTitle = "저장하지 않은 변경사항이 있습니다";
 const syntheticSecret = "public-synthetic-replacement";
 const openedAt = "2026-09-29T01:00:00Z";
 const historyId = (key: string) => `public-history-${key}`;
+type WriteOutcome = "saved" | "reload_pending" | "failed";
 
 const bootstrap: UiBootstrapResponse = {
   backend_version: "v0.86.5",
@@ -132,15 +133,16 @@ async function installSettings(page: Page) {
   let gate: Promise<void> | undefined;
   let release: (() => void) | undefined;
   let fail = false;
+  const outcomes: WriteOutcome[] = [];
   await page.route("**/*", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
     const call = `${request.method()} ${url.pathname}`;
-    const json = (body: unknown, status = 200) =>
+    const json = (body: unknown, status = 200, requestId = "req-settings-fixture") =>
       route.fulfill({
         status,
         contentType: "application/json",
-        headers: { "X-Request-ID": "req-settings-fixture" },
+        headers: { "X-Request-ID": requestId },
         body: JSON.stringify(body),
       });
     if (call === "GET /admin/ui-bootstrap")
@@ -213,7 +215,7 @@ async function installSettings(page: Page) {
             expected_history_id: undefined,
             expected_history_count: undefined,
           };
-      expect(body.key).toBe(globalKey);
+      expect([globalKey, runtimeKey]).toContain(body.key);
       expect(body.reason.trim()).not.toBe("");
       expect(Number.isSafeInteger(body.expected_version)).toBe(true);
       if (rollback) {
@@ -231,30 +233,44 @@ async function installSettings(page: Page) {
             histories.get(body.key)?.history_count !== body.expected_history_count))
       )
         return json({ error: { message: "fixture CAS conflict", code: "setting_conflict" } }, 409);
+      const outcome = outcomes.shift() ?? "saved";
+      if (outcome === "failed")
+        return json({ error: { message: "fixture recovery unavailable", code: "fixture_unavailable" } }, 503);
       // Explicit fixture history/env value: recovery does not save the discarded input.
       const recoveredAt = "2026-09-29T03:00:00Z";
+      const previous = histories.get(body.key);
+      const recoveredValue = rollback
+        ? (JSON.parse(previous?.old_value_json ?? '""') as string)
+        : body.key === globalKey
+          ? "false"
+          : "500";
       settings = settings.map((row) =>
         row.key === body.key
           ? {
               ...row,
-              value: "false",
+              value: recoveredValue,
               source: rollback ? "admin" : "env",
               version: rollback ? (row.version ?? 0) + 1 : undefined,
               updated_at: rollback ? recoveredAt : undefined,
             }
           : row,
       );
-      const previous = histories.get(body.key);
       if (previous)
         histories.set(body.key, {
           ...previous,
           id: `${previous.id}-recovered`,
           history_count: previous.history_count + 1,
           old_value_json: JSON.stringify(current?.value ?? ""),
-          new_value_json: rollback ? JSON.stringify("false") : "",
+          new_value_json: rollback ? JSON.stringify(recoveredValue) : "",
           reason: body.reason,
           changed_at: recoveredAt,
         });
+      if (outcome === "reload_pending")
+        return json(
+          { error: { message: "fixture persisted, runtime reload pending", code: "setting_reload_pending" } },
+          503,
+          "req-settings-reload-pending",
+        );
       return json(settings.find((row) => row.key === body.key));
     }
     if (
@@ -300,16 +316,38 @@ async function installSettings(page: Page) {
           { error: { message: "fixture CAS conflict", type: "conflict", code: "setting_conflict" } },
           409,
         );
+      const outcome = outcomes.shift() ?? "saved";
+      if (outcome === "failed")
+        return json({ error: { message: "fixture save unavailable", code: "fixture_unavailable" } }, 503);
+      const savedAt = "2026-09-29T02:30:00Z";
       settings = settings.map((row) => {
         const change = changes.find((item) => item.key === row.key);
+        const previous = histories.get(row.key);
+        if (change && previous)
+          histories.set(row.key, {
+            ...previous,
+            id: `${previous.id}-saved`,
+            history_count: previous.history_count + 1,
+            old_value_json: row.source === "admin" ? JSON.stringify(row.value) : "",
+            new_value_json: JSON.stringify(change.value),
+            reason: body.reason ?? "",
+            changed_at: savedAt,
+          });
         return change
           ? {
               ...row,
               value: row.is_secret ? "public-server-sentinel" : change.value,
               version: (row.version ?? 0) + 1,
+              updated_at: savedAt,
             }
           : row;
       });
+      if (outcome === "reload_pending")
+        return json(
+          { error: { message: "fixture persisted, runtime reload pending", code: "setting_reload_pending" } },
+          503,
+          "req-settings-reload-pending",
+        );
       return json(
         body.settings
           ? { ok: true, applied: changes.length }
@@ -337,6 +375,14 @@ async function installSettings(page: Page) {
     release: () => release?.(),
     fail: () => {
       fail = true;
+    },
+    queueOutcomes: (...next: WriteOutcome[]) => {
+      outcomes.push(...next);
+    },
+    firstOverride: (key: string) => {
+      const previous = histories.get(key);
+      if (previous) histories.set(key, { ...previous, old_value_json: "", history_count: 1 });
+      settings = settings.map((row) => (row.key === key ? { ...row, version: 1 } : row));
     },
     advance: (key: string, value: string, version: number) => {
       const changedAt = "2026-09-29T02:00:00Z";
@@ -738,6 +784,120 @@ test("읽기 전용 운영자는 설정과 복구 액션을 실행할 수 없다
   await expect(guard(page)).toBeHidden();
   expect(api.writes).toHaveLength(0);
 });
+
+test("최초 오버라이드의 빈 이전 이력은 롤백을 막고 기본값 복구는 허용한다", async ({ page, api }) => {
+  api.firstOverride(runtimeKey);
+  const sheet = await openSheet(page);
+  await expect(sheet.getByText("이 변경 이력에 이전 값이 없어 롤백할 수 없습니다.")).toBeVisible();
+  await expect(sheet.getByRole("button", { name: "이전 값으로 롤백", exact: true })).toBeDisabled();
+  await expect(sheet.getByRole("button", { name: "저장", exact: true })).toBeEnabled();
+  await sheet.getByRole("button", { name: "기본값(환경변수)으로 되돌리기", exact: true }).click();
+  const recovery = page.getByRole("dialog", { name: "환경변수 기본값으로 되돌리기", exact: true });
+  await expect(recovery).toBeVisible();
+  await recovery.getByRole("button", { name: "취소", exact: true }).click();
+  await expect(recovery).toBeHidden();
+  expect(api.writes).toHaveLength(0);
+});
+
+for (const surface of ["runtime", "console"] as const) {
+  for (const kind of ["revert", "rollback"] as const) {
+    test(`${surface} 반영 지연 안내는 후속 ${kind} 실패 동안 유지되고 성공 후 사라진다`, async ({
+      page,
+      api,
+    }) => {
+      const key = surface === "console" ? globalKey : runtimeKey;
+      const open = async () => {
+        if (surface === "runtime") return openSheet(page, key, false);
+        await page.getByRole("button", { name: "기존 화면 이동 편집", exact: true }).click();
+        const sheet = page.getByRole("dialog", { name: key, exact: true });
+        await expect(sheet).toBeVisible();
+        return sheet;
+      };
+      const recoveryDialog = (action: "revert" | "rollback") =>
+        page.getByRole("dialog", {
+          name: action === "rollback" ? "이전 값으로 롤백" : "환경변수 기본값으로 되돌리기",
+          exact: true,
+        });
+      await page.goto(`system/settings?tab=${surface}`);
+      const first = await open();
+      api.queueOutcomes("reload_pending");
+      if (kind === "rollback") {
+        // DELETE persisted despite 503: the next opening must review an env
+        // snapshot plus its deletion history, not repeat the deleted override.
+        await first.getByRole("button", { name: "기본값(환경변수)으로 되돌리기", exact: true }).click();
+        const initialRecovery = recoveryDialog("revert");
+        await initialRecovery.getByLabel(/^변경 사유/u).fill("public persisted delete");
+        await initialRecovery.getByRole("button", { name: "되돌리기", exact: true }).click();
+        await expect(initialRecovery).toBeHidden();
+        expect(api.writes[0]?.method()).toBe("DELETE");
+      } else {
+        const input = first.getByLabel("새 값", { exact: true });
+        if (surface === "console") await input.selectOption("false");
+        else await input.fill("2000");
+        await first.getByLabel("변경 사유").fill("public persisted update");
+        await first.getByRole("button", { name: "저장", exact: true }).click();
+        await expect(first).toBeHidden();
+        expect(api.writes[0]?.method()).toBe("PUT");
+      }
+      const pendingNotice = page.getByText("설정은 저장됐으며 런타임 반영을 기다리고 있습니다.", {
+        exact: true,
+      });
+      await expect(pendingNotice).toBeVisible();
+      await expect(page.getByText("요청 ID: req-settings-reload-pending")).toBeVisible();
+      expect(api.writes).toHaveLength(1);
+      const next = await open();
+      await expect(next.getByLabel("새 값", { exact: true })).toHaveValue(
+        surface === "console" ? "false" : kind === "rollback" ? "500" : "2000",
+      );
+      await next
+        .getByRole("button", {
+          name: kind === "rollback" ? "이전 값으로 롤백" : "기본값(환경변수)으로 되돌리기",
+          exact: true,
+        })
+        .click();
+      const recovery = recoveryDialog(kind);
+      const reason = `public subsequent ${kind}`;
+      await recovery.getByLabel(/^변경 사유/u).fill(reason);
+      api.queueOutcomes("failed", "saved");
+      const confirm = recovery.getByRole("button", {
+        name: kind === "rollback" ? "롤백" : "되돌리기",
+        exact: true,
+      });
+      await confirm.click();
+      await expect(recovery.getByRole("alert")).toContainText("req-settings-fixture");
+      await expect(recovery.getByLabel(/^변경 사유/u)).toHaveValue(reason);
+      await expect(confirm).toBeEnabled();
+      await expect(pendingNotice).toBeVisible();
+      await expect(page.getByText("요청 ID: req-settings-reload-pending")).toBeVisible();
+      expect(api.writes).toHaveLength(2);
+      if (kind === "rollback") {
+        expect(api.writes[1]?.postDataJSON()).toEqual({
+          key,
+          reason,
+          expected_version: 0,
+          expected_updated_at: "",
+          expected_history_id: `${historyId(key)}-recovered`,
+          expected_history_count: 2,
+        });
+      } else {
+        const request = api.writes[1];
+        if (!request) throw new Error("Expected a revert request");
+        expect(request.method()).toBe("DELETE");
+        expect(Object.fromEntries(new URL(request.url()).searchParams)).toEqual({
+          reason,
+          expected_version: surface === "console" ? "7" : "4",
+        });
+      }
+      await confirm.click();
+      await expect(recovery).toBeHidden();
+      await expect(pendingNotice).toBeHidden();
+      await expect(page.getByText("요청 ID: req-settings-reload-pending")).toBeHidden();
+      expect(api.writes).toHaveLength(3);
+      expect(api.writes[2]?.url()).toBe(api.writes[1]?.url());
+      expect(api.writes[2]?.postData()).toBe(api.writes[1]?.postData());
+    });
+  }
+}
 
 test("390px 다크 설정 폐기 확인은 axe 위반과 가로 넘침 없이 키보드로 돌아온다", async ({
   page,
