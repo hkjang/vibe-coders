@@ -94,4 +94,40 @@ describe("설정 반영 대기 조회 세대", () => {
     act(() => tokenStore.clearAll());
     expect(result.current.reloadPending).toBeUndefined();
   });
+
+  it("true 캐시의 세대가 높아도 현재 검증 조회가 끝나기 전에는 경고를 해제하지 않는다", async () => {
+    const { client, result } = setup();
+    await act(async () => {
+      await client.fetchQuery({ queryKey: key, queryFn: async () => applied(true) });
+    });
+    let reject!: (error: Error) => void;
+    let validation!: Promise<unknown>;
+    act(() => {
+      validation = client
+        .fetchQuery({
+          queryKey: key,
+          queryFn: () =>
+            new Promise<ReturnType<typeof applied>>((_, refuse) => {
+              reject = refuse;
+            }),
+        })
+        .catch(() => undefined);
+      result.current.setReloadPending({ requestId: "await-validation", observedUpdates: 1 });
+    });
+    expect(client.getQueryState(key)).toMatchObject({
+      status: "success",
+      fetchStatus: "fetching",
+      dataUpdateCount: 2,
+    });
+    expect(result.current.reloadPending?.requestId).toBe("await-validation");
+    await act(async () => {
+      reject(new Error("offline"));
+      await validation;
+    });
+    expect(result.current.reloadPending?.requestId).toBe("await-validation");
+    await act(async () => {
+      await client.fetchQuery({ queryKey: key, queryFn: async () => applied(true) });
+    });
+    expect(result.current.reloadPending).toBeUndefined();
+  });
 });

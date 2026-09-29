@@ -255,20 +255,23 @@ export type HealthResponse = {
     status: 'ok';
 };
 
+/**
+ * Full replacement of the non-secret configuration, not a partial update. Only client_secret, role_map, and expected_version have omission semantics.
+ */
 export type KeycloakConfigRequest = {
-    allow_local_login?: boolean;
-    auto_login?: boolean;
-    client_id?: string;
-    default_role?: string;
-    enabled?: boolean;
+    allow_local_login: boolean;
+    auto_login: boolean;
+    client_id: string;
+    default_role: string;
+    enabled: boolean;
     /**
      * Version reviewed with the draft; 0 when no stored override exists. Omit or null for legacy requests without a client version precondition.
      */
     expected_version?: number | null;
-    group_claim?: string;
-    issuer_url?: string;
-    redirect_uri?: string;
-    role_claim?: string;
+    group_claim: string;
+    issuer_url: string;
+    redirect_uri: string;
+    role_claim: string;
     /**
      * Omit or null to retain the stored mapping; an empty object restores built-in defaults.
      */
@@ -276,9 +279,9 @@ export type KeycloakConfigRequest = {
         [key: string]: string;
     } | null;
     /**
-     * Omit, null, or an empty list to use default scopes; this does not retain a previous custom list.
+     * Send null or an empty list to use default scopes; this does not retain a previous custom list.
      */
-    scopes?: Array<string> | null;
+    scopes: Array<string> | null;
 };
 
 export type KeycloakConfigResponse = {
@@ -929,24 +932,27 @@ export type UserSummary = {
     tokens: number;
 };
 
+/**
+ * Full replacement of the non-secret configuration, not a partial update. Only client_secret, role_map, and expected_version have omission semantics.
+ */
 export type KeycloakConfigRequestWritable = {
-    allow_local_login?: boolean;
-    auto_login?: boolean;
-    client_id?: string;
+    allow_local_login: boolean;
+    auto_login: boolean;
+    client_id: string;
     /**
      * Omit or null to retain the stored secret; empty string explicitly clears it.
      */
     client_secret?: string | null;
-    default_role?: string;
-    enabled?: boolean;
+    default_role: string;
+    enabled: boolean;
     /**
      * Version reviewed with the draft; 0 when no stored override exists. Omit or null for legacy requests without a client version precondition.
      */
     expected_version?: number | null;
-    group_claim?: string;
-    issuer_url?: string;
-    redirect_uri?: string;
-    role_claim?: string;
+    group_claim: string;
+    issuer_url: string;
+    redirect_uri: string;
+    role_claim: string;
     /**
      * Omit or null to retain the stored mapping; an empty object restores built-in defaults.
      */
@@ -954,9 +960,9 @@ export type KeycloakConfigRequestWritable = {
         [key: string]: string;
     } | null;
     /**
-     * Omit, null, or an empty list to use default scopes; this does not retain a previous custom list.
+     * Send null or an empty list to use default scopes; this does not retain a previous custom list.
      */
-    scopes?: Array<string> | null;
+    scopes: Array<string> | null;
 };
 
 export type MattermostConfigRequestWritable = {

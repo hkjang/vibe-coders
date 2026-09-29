@@ -384,6 +384,26 @@ func assertOpenAPIContract(t *testing.T, spec map[string]any) {
 			}
 		}
 	}
+	ssoRequest := schemas["KeycloakConfigRequest"].(map[string]any)
+	replacementFields := map[string]bool{
+		"enabled": true, "issuer_url": true, "client_id": true, "redirect_uri": true,
+		"scopes": true, "default_role": true, "role_claim": true, "group_claim": true,
+		"allow_local_login": true, "auto_login": true,
+	}
+	requiredFields, _ := ssoRequest["required"].([]any)
+	if len(requiredFields) != len(replacementFields) {
+		t.Errorf("SSO replacement must require all %d replacement fields: %v", len(replacementFields), requiredFields)
+	}
+	for _, field := range requiredFields {
+		name, _ := field.(string)
+		if !replacementFields[name] {
+			t.Errorf("unexpected or duplicate required SSO field %q; omission-preserving fields must remain optional", name)
+		}
+		delete(replacementFields, name)
+	}
+	for field := range replacementFields {
+		t.Errorf("SSO replacement field %q must be required to prevent accidental configuration reset", field)
+	}
 	ssoResponse := schemas["KeycloakConfigResponse"].(map[string]any)["properties"].(map[string]any)
 	if _, exists := ssoResponse["client_secret"]; exists {
 		t.Error("SSO read contract must not expose client_secret")

@@ -24,7 +24,7 @@ func settingsEditorOpenAPISchemas() map[string]any {
 	}
 	request := keycloak()
 	request["scopes"].(map[string]any)["nullable"] = true
-	request["scopes"].(map[string]any)["description"] = "Omit, null, or an empty list to use default scopes; this does not retain a previous custom list."
+	request["scopes"].(map[string]any)["description"] = "Send null or an empty list to use default scopes; this does not retain a previous custom list."
 	request["role_map"].(map[string]any)["nullable"] = true
 	request["role_map"].(map[string]any)["description"] = "Omit or null to retain the stored mapping; an empty object restores built-in defaults."
 	request["client_secret"] = map[string]any{"type": "string", "nullable": true, "writeOnly": true, "description": "Omit or null to retain the stored secret; empty string explicitly clears it."}
@@ -39,7 +39,11 @@ func settingsEditorOpenAPISchemas() map[string]any {
 	response["updated_at"], response["updated_by"], response["note"] = str(), str(), str()
 	response["version"] = map[string]any{"type": "integer", "minimum": 0}
 	return map[string]any{
-		"KeycloakConfigRequest": map[string]any{"type": "object", "properties": request},
+		"KeycloakConfigRequest": map[string]any{
+			"type": "object", "description": "Full replacement of the non-secret configuration, not a partial update. Only client_secret, role_map, and expected_version have omission semantics.",
+			"required":   []string{"enabled", "issuer_url", "client_id", "redirect_uri", "scopes", "default_role", "role_claim", "group_claim", "allow_local_login", "auto_login"},
+			"properties": request,
+		},
 		"KeycloakConfigResponse": map[string]any{
 			"type": "object", "required": []string{"enabled", "issuer_url", "client_id", "client_secret_set", "redirect_uri", "scopes", "default_role", "role_claim", "group_claim", "allow_local_login", "auto_login", "role_map", "role_map_default", "role_map_custom", "source", "db_backed", "updated_at", "updated_by", "version", "note"},
 			"properties": response,

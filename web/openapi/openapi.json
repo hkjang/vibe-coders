@@ -1053,6 +1053,7 @@
         "type": "object"
       },
       "KeycloakConfigRequest": {
+        "description": "Full replacement of the non-secret configuration, not a partial update. Only client_secret, role_map, and expected_version have omission semantics.",
         "properties": {
           "allow_local_login": {
             "type": "boolean"
@@ -1102,7 +1103,7 @@
             "type": "object"
           },
           "scopes": {
-            "description": "Omit, null, or an empty list to use default scopes; this does not retain a previous custom list.",
+            "description": "Send null or an empty list to use default scopes; this does not retain a previous custom list.",
             "items": {
               "type": "string"
             },
@@ -1110,6 +1111,18 @@
             "type": "array"
           }
         },
+        "required": [
+          "enabled",
+          "issuer_url",
+          "client_id",
+          "redirect_uri",
+          "scopes",
+          "default_role",
+          "role_claim",
+          "group_claim",
+          "allow_local_login",
+          "auto_login"
+        ],
         "type": "object"
       },
       "KeycloakConfigResponse": {
