@@ -17,7 +17,7 @@ const historyId = (key: string) => `public-history-${key}`;
 type WriteOutcome = "saved" | "reload_pending" | "reload_pending_applied" | "failed";
 
 const bootstrap: UiBootstrapResponse = {
-  backend_version: "v0.86.5",
+  backend_version: "v0.86.6",
   ui_version: "settings-unsaved-fixture",
   api_version: "v1",
   ui: {
@@ -62,7 +62,7 @@ const bootstrap: UiBootstrapResponse = {
       enabled_roles: ["admin"],
       rollout_percent: 100,
       fallback_enabled: true,
-      minimum_api_version: "v0.86.5",
+      minimum_api_version: "v0.86.6",
       available: true,
     },
   ],

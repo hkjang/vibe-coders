@@ -953,23 +953,33 @@ func (s *Server) handleKeycloakConfig(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
 		return
 	}
-	kc := s.keycloakConfig()
 	rec, dbBacked, err := s.storedKeycloakConfig(r.Context())
 	if err != nil {
 		writeOpenAIError(w, http.StatusServiceUnavailable, "failed to load stored SSO config", "server_error", "sso_config_unavailable")
 		return
 	}
 	source := "env"
+	kc := s.cfg.Keycloak
+	secretSet := kc.ClientSecret != ""
 	updatedAt, updatedBy := "", ""
 	if dbBacked {
+		kc = keycloakStoredFields(rec)
+		secretSet = rec.ClientSecretEnc != ""
 		source = "db"
 		updatedAt, updatedBy = rec.UpdatedAt, rec.UpdatedBy
+	}
+	if !s.cfg.Auth.Enabled {
+		kc.Enabled = false
+	}
+	roleMap := kc.RoleMap
+	if len(roleMap) == 0 {
+		roleMap = keycloakRoleMap
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"enabled":           kc.Enabled,
 		"issuer_url":        kc.IssuerURL,
 		"client_id":         kc.ClientID,
-		"client_secret_set": kc.ClientSecret != "",
+		"client_secret_set": secretSet,
 		"redirect_uri":      kc.RedirectURI,
 		"scopes":            kc.Scopes,
 		"default_role":      kc.DefaultRole,
@@ -977,7 +987,7 @@ func (s *Server) handleKeycloakConfig(w http.ResponseWriter, r *http.Request) {
 		"group_claim":       kc.GroupClaim,
 		"allow_local_login": kc.AllowLocalLogin,
 		"auto_login":        kc.AutoLogin,
-		"role_map":          s.effectiveKeycloakRoleMap(),
+		"role_map":          roleMap,
 		"role_map_default":  keycloakRoleMap,
 		"role_map_custom":   len(kc.RoleMap) > 0,
 		"source":            source, // "db" = admin override (secret AES-GCM at rest), "env" = SSO_KEYCLOAK_*
@@ -1117,12 +1127,24 @@ func (s *Server) handleKeycloakConfigSave(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if err := s.reloadKeycloakConfig(r.Context()); err != nil {
+		s.auditCommittedKeycloakConfig(r, rec, true)
 		writeOpenAIError(w, http.StatusInternalServerError, "SSO config was saved but could not be activated", "server_error", "sso_reload_failed")
 		return
 	}
-	// Never log the secret/code; record only the actor + enabled state.
-	s.auditAuthEvent(r.Context(), "sso_config_updated", rec.UpdatedBy, "", "", "keycloak enabled="+boolStr(rec.Enabled)+" issuer="+rec.IssuerURL)
+	s.auditCommittedKeycloakConfig(r, rec, false)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) auditCommittedKeycloakConfig(r *http.Request, rec store.SSOProviderConfig, reloadPending bool) {
+	// Keep the existing actor/event policy without retaining issuer URL details or
+	// credentials. This best-effort post-commit audit survives a client disconnect.
+	auditRequest, cancel := committedSettingAuditRequest(r)
+	defer cancel()
+	detail := "keycloak enabled=" + boolStr(rec.Enabled)
+	if reloadPending {
+		detail += " reload_pending=true"
+	}
+	s.auditAuthEvent(auditRequest.Context(), "sso_config_updated", rec.UpdatedBy, "", "", detail)
 }
 
 // handleKeycloakTest diagnoses the Keycloak connection: discovery reachability, endpoints,

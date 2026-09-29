@@ -174,6 +174,8 @@ jobs:
         # Both packages migrate isolated schemas in the same database. Serialize
         # package setup so concurrent index migrations cannot wait on each other.
         run: go test -p 1 -race ./internal/store ./internal/proxy -run '^TestAdminSettings?Rollback' -count=1 -timeout=5m
+      - name: Verify PostgreSQL SSO snapshots and atomic notification settings
+        run: go test -p 1 -race ./internal/store ./internal/proxy -run 'TestRuntimeFlagBatch|TestMattermost|TestKeycloak(Admin|Persisted|Config)' -count=1 -timeout=7m
 
   sdk-typecheck:
     name: TypeScript SDK typecheck
@@ -204,7 +206,7 @@ jobs:
     name: canonical Go+npm SBOM · license drift
     runs-on: ubuntu-latest
     env:
-      SOURCE_SBOM_VERSION: v0.86.5
+      SOURCE_SBOM_VERSION: v0.86.6
       GO_VERSION: 1.26.8
       NODE_VERSION: 24.20.0
       PNPM_VERSION: 11.25.0

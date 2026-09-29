@@ -353,6 +353,46 @@ func assertOpenAPIContract(t *testing.T, spec map[string]any) {
 	assertJSONRequestSchema(t, paths, "/auth/sso/exchange", "post", "SSOExchangeRequest")
 	assertJSONOperationSchema(t, paths, "/auth/keycloak/logout", "post", "200", "KeycloakLogoutResponse")
 	assertJSONRequestSchema(t, paths, "/auth/keycloak/logout", "post", "KeycloakLogoutRequest")
+	assertJSONOperationSchema(t, paths, "/admin/sso/keycloak/config", "get", "200", "KeycloakConfigResponse")
+	for _, method := range []string{"put", "post"} {
+		assertJSONRequestSchema(t, paths, "/admin/sso/keycloak/config", method, "KeycloakConfigRequest")
+		assertJSONOperationSchema(t, paths, "/admin/sso/keycloak/config", method, "409", "AppError")
+		assertJSONOperationSchema(t, paths, "/admin/sso/keycloak/config", method, "500", "AppError")
+	}
+	for _, method := range []string{"get", "post"} {
+		assertJSONOperationSchema(t, paths, "/admin/notifications/mattermost", method, "200", "MattermostConfigResponse")
+	}
+	assertJSONRequestSchema(t, paths, "/admin/notifications/mattermost", "post", "MattermostConfigRequest")
+	assertJSONOperationSchema(t, paths, "/admin/notifications/mattermost/test", "post", "200", "MattermostTestResponse")
+	assertJSONOperationSchema(t, paths, "/admin/notifications/mattermost/test", "post", "502", "AppError")
+	assertJSONOperationSchema(t, paths, "/admin/notifications/mattermost", "post", "500", "AppError")
+	for schemaName, secretField := range map[string]string{"KeycloakConfigRequest": "client_secret", "MattermostConfigRequest": "webhook_url"} {
+		schema := schemas[schemaName].(map[string]any)
+		properties := schema["properties"].(map[string]any)
+		if properties[secretField].(map[string]any)["writeOnly"] != true {
+			t.Errorf("%s.%s must be write-only", schemaName, secretField)
+		}
+	}
+	for schemaName, fields := range map[string][]string{
+		"KeycloakConfigRequest":   {"client_secret", "expected_version", "role_map", "scopes"},
+		"MattermostConfigRequest": {"enabled", "channel", "webhook_url", "events"},
+	} {
+		properties := schemas[schemaName].(map[string]any)["properties"].(map[string]any)
+		for _, field := range fields {
+			if properties[field].(map[string]any)["nullable"] != true {
+				t.Errorf("%s.%s must describe supported null inputs", schemaName, field)
+			}
+		}
+	}
+	ssoResponse := schemas["KeycloakConfigResponse"].(map[string]any)["properties"].(map[string]any)
+	if _, exists := ssoResponse["client_secret"]; exists {
+		t.Error("SSO read contract must not expose client_secret")
+	}
+	notificationResponse := schemas["MattermostConfigResponse"].(map[string]any)["properties"].(map[string]any)
+	mask := notificationResponse["webhook_url"].(map[string]any)["enum"].([]any)
+	if len(mask) != 2 || mask[0] != "" || mask[1] != "********" {
+		t.Errorf("webhook read contract must allow masks only: %v", mask)
+	}
 	assertJSONRequestSchema(t, paths, "/admin/settings/by-key/{key}", "put", "SettingWriteRequest")
 	assertJSONRequestSchema(t, paths, "/admin/settings/rollback", "post", "SettingRollbackRequest")
 	assertJSONOperationSchema(t, paths, "/admin/settings/history", "get", "200", "SettingHistoryResponse")

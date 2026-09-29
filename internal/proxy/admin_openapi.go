@@ -658,8 +658,29 @@ func enrichOpenAPIOperation(route, method string, op map[string]any) {
 	case "post /auth/keycloak/logout":
 		op["requestBody"] = requestBody("KeycloakLogoutRequest")
 		responses["200"] = successResponse("KeycloakLogoutResponse")
+	case "get /admin/sso/keycloak/config":
+		op["description"] = "Editable values and version come from one stored configuration snapshot (or environment defaults when absent), not the pod's potentially stale login runtime. Secrets are never returned. This does not confirm activation across pods."
+		responses["200"] = successResponse("KeycloakConfigResponse")
 	case "put /admin/sso/keycloak/config", "post /admin/sso/keycloak/config":
+		op["requestBody"] = requestBody("KeycloakConfigRequest")
 		responses["204"] = map[string]any{"description": "Configuration saved"}
+		responses["409"] = map[string]any{"description": "sso_config_conflict or auth_required_for_sso: configuration not saved", "content": jsonContent(schemaRef("AppError"))}
+		responses["500"] = map[string]any{"description": "Inspect error.code: sso_reload_failed means already persisted but runtime activation pending; do not retry blindly. Other failures do not imply persistence.", "content": jsonContent(schemaRef("AppError"))}
+	case "get /admin/notifications/mattermost":
+		responses["200"] = successResponse("MattermostConfigResponse")
+		responses["503"] = map[string]any{"description": "mattermost_config_unavailable: no configuration snapshot returned", "content": jsonContent(schemaRef("AppError"))}
+	case "post /admin/notifications/mattermost":
+		op["description"] = "Atomically updates only supplied fields. Omitted webhook_url preserves it; empty string clears it. An explicit empty events array disables all categories. Returns a masked snapshot, never the webhook token. No optimistic concurrency version is provided."
+		op["requestBody"] = requestBody("MattermostConfigRequest")
+		responses["200"] = successResponse("MattermostConfigResponse")
+		responses["400"] = map[string]any{"description": "Invalid request or invalid_webhook_url; no fields changed", "content": jsonContent(schemaRef("AppError"))}
+		responses["500"] = map[string]any{"description": "mattermost_config_save_failed: atomic storage failed", "content": jsonContent(schemaRef("AppError"))}
+	case "post /admin/notifications/mattermost/test":
+		op["description"] = "Sends using the saved configuration, not an unsaved browser draft. Errors never echo the webhook URL."
+		responses["200"] = successResponse("MattermostTestResponse")
+		responses["400"] = map[string]any{"description": "Webhook missing or malformed", "content": jsonContent(schemaRef("AppError"))}
+		responses["502"] = map[string]any{"description": "webhook_failed: transport failed or the receiver rejected the test message; response body and URL are not echoed", "content": jsonContent(schemaRef("AppError"))}
+		responses["503"] = map[string]any{"description": "mattermost_config_unavailable: saved configuration could not be loaded", "content": jsonContent(schemaRef("AppError"))}
 	case "get /admin/tracking/violations", "delete /admin/tracking/violations":
 		responses["200"] = successResponse("TrackingStatusResponse")
 	case "get /admin/mcp/oauth":
@@ -930,6 +951,9 @@ func appUIOpenAPISchemas() map[string]any {
 		"UIBootstrapResponse": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"backend_version", "ui_version", "api_version", "ui", "authentication", "roles", "permissions", "capabilities", "allowed_features", "migration_registry", "system_status", "legacy_route_map"}, "properties": map[string]any{"backend_version": map[string]any{"type": "string"}, "ui_version": map[string]any{"type": "string"}, "api_version": map[string]any{"type": "string"}, "ui": schemaRef("UIRuntimeConfig"), "authentication": schemaRef("UIAuthentication"), "user": map[string]any{"allOf": []any{schemaRef("AuthUser")}, "nullable": true}, "roles": stringArray, "permissions": stringArray, "capabilities": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"raw_prompt_view"}, "properties": map[string]any{"raw_prompt_view": map[string]any{"type": "boolean"}}}, "allowed_features": stringArray, "migration_registry": map[string]any{"type": "array", "items": schemaRef("MigrationFeature")}, "system_status": schemaRef("UISystemStatus"), "legacy_route_map": map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}}}},
 	}
 	for name, schema := range operationalHealthOpenAPISchemas() {
+		schemas[name] = schema
+	}
+	for name, schema := range settingsEditorOpenAPISchemas() {
 		schemas[name] = schema
 	}
 	for name, schema := range modelCatalogOpenAPISchemas() {

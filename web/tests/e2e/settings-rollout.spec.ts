@@ -12,8 +12,8 @@ const editorName = "시스템 설정 전환 설정";
 const editButtonName = `${editorName} 편집`;
 
 const bootstrap: UiBootstrapResponse = {
-  backend_version: "v0.86.5",
-  ui_version: "e2e-v0.86.5",
+  backend_version: "v0.86.6",
+  ui_version: "e2e-v0.86.6",
   api_version: "v1",
   ui: {
     enabled: true,
@@ -57,7 +57,7 @@ const bootstrap: UiBootstrapResponse = {
       enabled_roles: ["admin"],
       rollout_percent: 100,
       fallback_enabled: true,
-      minimum_api_version: "v0.86.5",
+      minimum_api_version: "v0.86.6",
       available: true,
     },
   ],

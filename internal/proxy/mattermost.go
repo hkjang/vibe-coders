@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -16,6 +18,8 @@ const mattermostSnapshotTTL = 15 * time.Second
 
 // mattermostEventCategories are the notification types operators can toggle.
 var mattermostEventCategories = []string{"cost", "secret", "approval", "provider"}
+
+var mattermostFlagKeys = []string{"mattermost_enabled", "mattermost_webhook_url", "mattermost_channel", "mattermost_events"}
 
 // mattermostSnapshot caches the Mattermost notification config so event hooks on
 // the hot path can short-circuit cheaply when notifications are disabled.
@@ -31,27 +35,64 @@ func (s *Server) mattermostConfig(ctx context.Context) *mattermostSnapshot {
 	if c := s.mmCache.Load(); c != nil && time.Since(c.fetchedAt) < mattermostSnapshotTTL {
 		return c
 	}
+	flags, err := s.db.GetRuntimeFlagSnapshot(ctx, mattermostFlagKeys)
+	if err != nil {
+		// Notification delivery fails closed; do not cache a partial read.
+		return &mattermostSnapshot{events: map[string]bool{}}
+	}
+	snap := mattermostSnapshotFromFlags(flags)
+	s.mmCache.Store(snap)
+	return snap
+}
+
+func mattermostSnapshotFromFlags(flags map[string]store.RuntimeFlag) *mattermostSnapshot {
 	snap := &mattermostSnapshot{events: map[string]bool{}, fetchedAt: time.Now()}
-	if f, found, err := s.db.GetFlag(ctx, "mattermost_enabled"); err == nil && found {
+	if f, found := flags["mattermost_enabled"]; found {
 		snap.enabled = f.Value == "true" || f.Value == "1"
 	}
-	if f, found, err := s.db.GetFlag(ctx, "mattermost_webhook_url"); err == nil && found {
+	if f, found := flags["mattermost_webhook_url"]; found {
 		snap.webhookURL = f.Value
 	}
-	if f, found, err := s.db.GetFlag(ctx, "mattermost_channel"); err == nil && found {
+	if f, found := flags["mattermost_channel"]; found {
 		snap.channel = f.Value
 	}
-	if f, found, err := s.db.GetFlag(ctx, "mattermost_events"); err == nil && found && strings.TrimSpace(f.Value) != "" {
+	if f, found := flags["mattermost_events"]; found {
 		for _, e := range strings.Split(f.Value, ",") {
-			snap.events[strings.TrimSpace(e)] = true
+			e = strings.TrimSpace(e)
+			if containsString(mattermostEventCategories, e) {
+				snap.events[e] = true
+			}
 		}
 	} else {
-		for _, e := range mattermostEventCategories { // default: all categories on
+		for _, e := range mattermostEventCategories { // Missing flag only: all categories on.
 			snap.events[e] = true
 		}
 	}
-	s.mmCache.Store(snap)
 	return snap
+}
+
+func mattermostConfigView(cfg *mattermostSnapshot) map[string]any {
+	events := []string{}
+	for _, event := range mattermostEventCategories {
+		if cfg.events[event] {
+			events = append(events, event)
+		}
+	}
+	maskedURL, urlSet := settingMaskedValue(cfg.webhookURL, true)
+	return map[string]any{"enabled": cfg.enabled, "webhook_url": maskedURL, "webhook_url_set": urlSet,
+		"channel": cfg.channel, "events": events, "available_events": mattermostEventCategories}
+}
+
+func mattermostWebhookURL(raw string) (*url.URL, error) {
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Hostname() == "" || parsed.Opaque != "" {
+		return nil, errors.New("webhook must be an absolute HTTP(S) URL")
+	}
+	parsed.Scheme = strings.ToLower(parsed.Scheme)
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return nil, errors.New("webhook must be an absolute HTTP(S) URL")
+	}
+	return parsed, nil
 }
 
 func (s *Server) invalidateMattermostCache() { s.mmCache.Store(nil) }
@@ -73,14 +114,19 @@ func (s *Server) notifyMattermost(ctx context.Context, category, text string) {
 	go func(url string, body []byte) {
 		reqCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, url, bytes.NewReader(body))
+		target, err := mattermostWebhookURL(url)
+		if err != nil {
+			return
+		}
+		req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, target.String(), bytes.NewReader(body))
 		if err != nil {
 			return
 		}
 		req.Header.Set("Content-Type", "application/json")
 		resp, err := s.client.Do(req)
 		if err != nil {
-			slog.Warn("mattermost notify failed", "error", err)
+			// net/http errors embed the complete webhook URL, including its token.
+			slog.Warn("mattermost notify failed")
 			return
 		}
 		_ = resp.Body.Close()
@@ -96,23 +142,12 @@ func (s *Server) handleMattermostConfig(w http.ResponseWriter, r *http.Request) 
 	}
 	switch r.Method {
 	case http.MethodGet:
-		cfg := s.mattermostConfig(r.Context())
-		events := []string{}
-		for _, e := range mattermostEventCategories {
-			if cfg.events[e] {
-				events = append(events, e)
-			}
+		flags, err := s.db.GetRuntimeFlagSnapshot(r.Context(), mattermostFlagKeys)
+		if err != nil {
+			writeOpenAIError(w, http.StatusServiceUnavailable, "notification configuration could not be loaded", "server_error", "mattermost_config_unavailable")
+			return
 		}
-		// The webhook URL carries the token that authorises posting into the
-		// channel, and every admin:read role can read this endpoint. Report
-		// whether one is configured the way the settings API masks secrets,
-		// rather than handing the token back to the caller.
-		maskedURL, urlSet := settingMaskedValue(cfg.webhookURL, true)
-		writeJSON(w, http.StatusOK, map[string]any{
-			"enabled": cfg.enabled, "webhook_url": maskedURL, "webhook_url_set": urlSet,
-			"channel": cfg.channel,
-			"events":  events, "available_events": mattermostEventCategories,
-		})
+		writeJSON(w, http.StatusOK, mattermostConfigView(mattermostSnapshotFromFlags(flags)))
 	case http.MethodPost:
 		var p struct {
 			Enabled    *bool    `json:"enabled"`
@@ -124,14 +159,22 @@ func (s *Server) handleMattermostConfig(w http.ResponseWriter, r *http.Request) 
 			writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "invalid_body")
 			return
 		}
+		updates := []store.RuntimeFlag{}
 		set := func(key, val string) {
-			_ = s.db.SetFlag(r.Context(), store.RuntimeFlag{Key: key, Value: val, UpdatedAt: time.Now().UTC(), UpdatedBy: adminID(r)})
+			updates = append(updates, store.RuntimeFlag{Key: key, Value: val, UpdatedBy: adminID(r)})
 		}
 		if p.Enabled != nil {
 			set("mattermost_enabled", boolStr(*p.Enabled))
 		}
 		if p.WebhookURL != nil {
-			set("mattermost_webhook_url", strings.TrimSpace(*p.WebhookURL))
+			value := strings.TrimSpace(*p.WebhookURL)
+			if value != "" {
+				if _, err := mattermostWebhookURL(value); err != nil {
+					writeOpenAIError(w, http.StatusBadRequest, "webhook must be an absolute HTTP(S) URL", "invalid_request_error", "invalid_webhook_url")
+					return
+				}
+			}
+			set("mattermost_webhook_url", value)
 		}
 		if p.Channel != nil {
 			set("mattermost_channel", strings.TrimSpace(*p.Channel))
@@ -146,10 +189,15 @@ func (s *Server) handleMattermostConfig(w http.ResponseWriter, r *http.Request) 
 			}
 			set("mattermost_events", strings.Join(valid, ","))
 		}
+		flags, err := s.db.SaveRuntimeFlagBatch(r.Context(), updates, mattermostFlagKeys)
+		if err != nil {
+			writeOpenAIError(w, http.StatusInternalServerError, "notification configuration could not be saved", "server_error", "mattermost_config_save_failed")
+			return
+		}
 		s.invalidateMattermostCache()
-		s.auditAdmin(r, "mattermost.config", "", auditJSON(p))
-		cfg := s.mattermostConfig(r.Context())
-		writeJSON(w, http.StatusOK, map[string]any{"enabled": cfg.enabled, "webhook_url": cfg.webhookURL, "channel": cfg.channel})
+		view := mattermostConfigView(mattermostSnapshotFromFlags(flags))
+		s.auditCommittedSetting(r, "mattermost.config", "", auditJSON(map[string]any{"enabled": view["enabled"], "webhook_url_set": view["webhook_url_set"], "webhook_changed": p.WebhookURL != nil, "events": view["events"]}))
+		writeJSON(w, http.StatusOK, view)
 	default:
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
 	}
@@ -166,20 +214,38 @@ func (s *Server) handleMattermostTest(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
 		return
 	}
-	cfg := s.mattermostConfig(r.Context())
+	flags, err := s.db.GetRuntimeFlagSnapshot(r.Context(), mattermostFlagKeys)
+	if err != nil {
+		writeOpenAIError(w, http.StatusServiceUnavailable, "notification configuration could not be loaded", "server_error", "mattermost_config_unavailable")
+		return
+	}
+	cfg := mattermostSnapshotFromFlags(flags)
 	if cfg.webhookURL == "" {
 		writeOpenAIError(w, http.StatusBadRequest, "no webhook configured", "invalid_request_error", "no_webhook")
 		return
 	}
 	// Bypass the category gate for the test by posting directly.
 	body, _ := json.Marshal(map[string]any{"text": "[AI 코딩 프록시] Mattermost 연동 테스트 메시지입니다. ✅"})
-	req, _ := http.NewRequestWithContext(r.Context(), http.MethodPost, cfg.webhookURL, bytes.NewReader(body))
+	target, err := mattermostWebhookURL(cfg.webhookURL)
+	if err != nil {
+		writeOpenAIError(w, http.StatusBadRequest, "configured webhook URL is invalid", "invalid_request_error", "invalid_webhook_url")
+		return
+	}
+	req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, target.String(), bytes.NewReader(body))
+	if err != nil {
+		writeOpenAIError(w, http.StatusBadRequest, "configured webhook URL is invalid", "invalid_request_error", "invalid_webhook_url")
+		return
+	}
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := s.client.Do(req)
 	if err != nil {
-		writeOpenAIError(w, http.StatusBadGateway, "webhook post failed: "+err.Error(), "server_error", "webhook_failed")
+		writeOpenAIError(w, http.StatusBadGateway, "webhook delivery failed", "server_error", "webhook_failed")
 		return
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		writeOpenAIError(w, http.StatusBadGateway, "webhook delivery failed", "server_error", "webhook_failed")
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"status": "sent", "webhook_status": resp.StatusCode})
 }

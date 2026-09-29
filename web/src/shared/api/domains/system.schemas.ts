@@ -305,6 +305,7 @@ export const fallbackReplaySchema = looseObject({
 export const notificationConfigSchema = looseObject({
   enabled: z.boolean().optional(),
   webhook_url: z.string().optional(),
+  webhook_url_set: z.boolean().optional(),
   channel: z.string().optional(),
   events: z.array(z.string()).nullish(),
   available_events: z.array(z.string()).nullish(),

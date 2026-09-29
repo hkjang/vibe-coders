@@ -1052,6 +1052,168 @@
         ],
         "type": "object"
       },
+      "KeycloakConfigRequest": {
+        "properties": {
+          "allow_local_login": {
+            "type": "boolean"
+          },
+          "auto_login": {
+            "type": "boolean"
+          },
+          "client_id": {
+            "type": "string"
+          },
+          "client_secret": {
+            "description": "Omit or null to retain the stored secret; empty string explicitly clears it.",
+            "nullable": true,
+            "type": "string",
+            "writeOnly": true
+          },
+          "default_role": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "expected_version": {
+            "description": "Version reviewed with the draft; 0 when no stored override exists. Omit or null for legacy requests without a client version precondition.",
+            "minimum": 0,
+            "nullable": true,
+            "type": "integer"
+          },
+          "group_claim": {
+            "type": "string"
+          },
+          "issuer_url": {
+            "type": "string"
+          },
+          "redirect_uri": {
+            "type": "string"
+          },
+          "role_claim": {
+            "type": "string"
+          },
+          "role_map": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Omit or null to retain the stored mapping; an empty object restores built-in defaults.",
+            "nullable": true,
+            "type": "object"
+          },
+          "scopes": {
+            "description": "Omit, null, or an empty list to use default scopes; this does not retain a previous custom list.",
+            "items": {
+              "type": "string"
+            },
+            "nullable": true,
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "KeycloakConfigResponse": {
+        "properties": {
+          "allow_local_login": {
+            "type": "boolean"
+          },
+          "auto_login": {
+            "type": "boolean"
+          },
+          "client_id": {
+            "type": "string"
+          },
+          "client_secret_set": {
+            "type": "boolean"
+          },
+          "db_backed": {
+            "type": "boolean"
+          },
+          "default_role": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "group_claim": {
+            "type": "string"
+          },
+          "issuer_url": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          },
+          "redirect_uri": {
+            "type": "string"
+          },
+          "role_claim": {
+            "type": "string"
+          },
+          "role_map": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "role_map_custom": {
+            "type": "boolean"
+          },
+          "role_map_default": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "source": {
+            "enum": [
+              "db",
+              "env"
+            ],
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "updated_by": {
+            "type": "string"
+          },
+          "version": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "enabled",
+          "issuer_url",
+          "client_id",
+          "client_secret_set",
+          "redirect_uri",
+          "scopes",
+          "default_role",
+          "role_claim",
+          "group_claim",
+          "allow_local_login",
+          "auto_login",
+          "role_map",
+          "role_map_default",
+          "role_map_custom",
+          "source",
+          "db_backed",
+          "updated_at",
+          "updated_by",
+          "version",
+          "note"
+        ],
+        "type": "object"
+      },
       "KeycloakLogoutRequest": {
         "additionalProperties": false,
         "properties": {
@@ -1196,6 +1358,93 @@
           "metadata_url",
           "audience",
           "scopes"
+        ],
+        "type": "object"
+      },
+      "MattermostConfigRequest": {
+        "properties": {
+          "channel": {
+            "nullable": true,
+            "type": "string"
+          },
+          "enabled": {
+            "nullable": true,
+            "type": "boolean"
+          },
+          "events": {
+            "description": "Omit or null to retain the stored selection; an empty list disables every event category.",
+            "items": {
+              "type": "string"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "webhook_url": {
+            "description": "Input-only webhook URL. Omit or null to keep; empty string clears it.",
+            "nullable": true,
+            "type": "string",
+            "writeOnly": true
+          }
+        },
+        "type": "object"
+      },
+      "MattermostConfigResponse": {
+        "properties": {
+          "available_events": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "channel": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "events": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "webhook_url": {
+            "description": "Presence mask only, never the stored URL.",
+            "enum": [
+              "",
+              "********"
+            ],
+            "type": "string"
+          },
+          "webhook_url_set": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled",
+          "webhook_url",
+          "webhook_url_set",
+          "channel",
+          "events",
+          "available_events"
+        ],
+        "type": "object"
+      },
+      "MattermostTestResponse": {
+        "properties": {
+          "status": {
+            "enum": [
+              "sent"
+            ],
+            "type": "string"
+          },
+          "webhook_status": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "status",
+          "webhook_status"
         ],
         "type": "object"
       },
@@ -3308,7 +3557,7 @@
   "info": {
     "description": "OpenAI-compatible AI control-plane gateway. This document covers the full HTTP surface; request/response bodies are summarized — see the admin UI for live examples.",
     "title": "AI Proxy Gateway API",
-    "version": "v0.86.5"
+    "version": "v0.86.6"
   },
   "openapi": "3.0.3",
   "paths": {
@@ -7891,7 +8140,34 @@
         "operationId": "get__admin_notifications_mattermost",
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MattermostConfigResponse"
+                }
+              }
+            },
             "description": "OK"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "mattermost_config_unavailable: no configuration snapshot returned"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -7905,10 +8181,58 @@
         ]
       },
       "post": {
+        "description": "Atomically updates only supplied fields. Omitted webhook_url preserves it; empty string clears it. An explicit empty events array disables all categories. Returns a masked snapshot, never the webhook token. No optimistic concurrency version is provided.",
         "operationId": "post__admin_notifications_mattermost",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MattermostConfigRequest"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MattermostConfigResponse"
+                }
+              }
+            },
             "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Invalid request or invalid_webhook_url; no fields changed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "mattermost_config_save_failed: atomic storage failed"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -7924,10 +8248,58 @@
     },
     "/admin/notifications/mattermost/test": {
       "post": {
+        "description": "Sends using the saved configuration, not an unsaved browser draft. Errors never echo the webhook URL.",
         "operationId": "post__admin_notifications_mattermost_test",
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MattermostTestResponse"
+                }
+              }
+            },
             "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Webhook missing or malformed"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "webhook_failed: transport failed or the receiver rejected the test message; response body and URL are not echoed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "mattermost_config_unavailable: saved configuration could not be loaded"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -12920,10 +13292,28 @@
     },
     "/admin/sso/keycloak/config": {
       "get": {
+        "description": "Editable values and version come from one stored configuration snapshot (or environment defaults when absent), not the pod's potentially stale login runtime. Secrets are never returned. This does not confirm activation across pods.",
         "operationId": "get__admin_sso_keycloak_config",
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KeycloakConfigResponse"
+                }
+              }
+            },
             "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
           }
         },
         "security": [
@@ -12938,9 +13328,39 @@
       },
       "post": {
         "operationId": "post__admin_sso_keycloak_config",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KeycloakConfigRequest"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "204": {
             "description": "Configuration saved"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "sso_config_conflict or auth_required_for_sso: configuration not saved"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Inspect error.code: sso_reload_failed means already persisted but runtime activation pending; do not retry blindly. Other failures do not imply persistence."
           },
           "default": {
             "content": {
@@ -12965,9 +13385,39 @@
       },
       "put": {
         "operationId": "put__admin_sso_keycloak_config",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KeycloakConfigRequest"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "204": {
             "description": "Configuration saved"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "sso_config_conflict or auth_required_for_sso: configuration not saved"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Inspect error.code: sso_reload_failed means already persisted but runtime activation pending; do not retry blindly. Other failures do not imply persistence."
           },
           "default": {
             "content": {

@@ -56,17 +56,17 @@ describe("migration registry", () => {
       },
     ]);
     if (!feature) throw new Error("settings feature is missing");
-    expect(feature.minimumApiVersion).toBe("v0.86.5");
-    expect(resolveFeature(feature, gatewayAdmin, "v0.86.4")).toMatchObject({
+    expect(feature.minimumApiVersion).toBe("v0.86.6");
+    expect(resolveFeature(feature, gatewayAdmin, "v0.86.5")).toMatchObject({
       status: "legacy",
       readOnly: true,
       reason: "api_version",
     });
-    expect(resolveFeature(feature, gatewayAdmin, "v0.86.5")).toMatchObject({
+    expect(resolveFeature(feature, gatewayAdmin, "v0.86.6")).toMatchObject({
       status: "preview",
       readOnly: false,
     });
-    expect(resolveFeature(fallback, gatewayAdmin, "v0.86.4")).toMatchObject({
+    expect(resolveFeature(fallback, gatewayAdmin, "v0.86.5")).toMatchObject({
       status: "legacy",
       reason: "api_version",
     });

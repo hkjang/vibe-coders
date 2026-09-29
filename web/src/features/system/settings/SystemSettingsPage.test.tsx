@@ -567,7 +567,7 @@ describe("SystemSettingsPage — 데이터·알림 운영", () => {
     renderPage("/system/settings?tab=operations");
 
     expect(await screen.findByText("/data/fallback.ndjson")).toBeVisible();
-    expect(screen.getByText("Webhook 설정됨")).toBeVisible();
+    expect(screen.getByText("웹훅 설정됨")).toBeVisible();
     expect(screen.queryByDisplayValue(notifications.webhook_url)).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "지금 정리 실행" }));
@@ -815,6 +815,7 @@ describe("SystemSettingsPage — SSO", () => {
         roles: [
           { role: "admin", description: "관리자", is_system: true },
           { role: "viewer", description: "조회자", is_system: true },
+          { role: "custom_operator", description: "사용자 지정", is_system: false },
         ],
       }),
       "PUT /admin/sso/keycloak/config": () => undefined,
@@ -823,7 +824,13 @@ describe("SystemSettingsPage — SSO", () => {
     renderPage("/system/settings?tab=sso");
 
     expect(await screen.findByText("설정됨 (표시하지 않음)")).toBeVisible();
-    expect(screen.getByLabelText("Client Secret")).toHaveValue("");
+    expect(screen.getByLabelText("클라이언트 비밀키")).toHaveValue("");
+    expect(
+      within(screen.getByLabelText("기본 역할")).getByRole("option", { name: "조회자 (viewer)" }),
+    ).toHaveValue("viewer");
+    expect(
+      within(screen.getByLabelText("기본 역할")).getByRole("option", { name: "custom_operator" }),
+    ).toHaveValue("custom_operator");
 
     await user.click(screen.getByRole("button", { name: "SSO 설정 저장" }));
     const dialog = await screen.findByRole("dialog");
