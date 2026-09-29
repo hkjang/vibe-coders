@@ -4,6 +4,14 @@ import type { EffectiveSetting } from "@/shared/api/domains/system.schemas";
 export const consoleSettingPrefix = "ui.app.";
 export const consoleFeaturePrefix = "ui.app.feature.";
 
+export const consoleSettingLabels: Readonly<Record<string, string>> = {
+  "ui.app.enabled": "신규 콘솔 사용",
+  "ui.app.default_entry": "기본 진입 화면",
+  "ui.app.legacy_fallback": "기존 화면 이동",
+  "ui.app.feedback_enabled": "화면 피드백",
+  "ui.app.telemetry_enabled": "콘솔 사용 관측",
+};
+
 export type ConsoleFeatureField = "status" | "roles" | "rollout" | "readonly";
 
 export interface ConsoleFeatureKey {

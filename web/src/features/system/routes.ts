@@ -11,6 +11,6 @@ export const systemFeatureModules = defineFeatureModules([
     featureId: "system.settings",
     load: () =>
       import("@/features/system/settings/SystemSettingsPage").then((module) => module.SystemSettingsPage),
-    queryKeys: ["category", "limit", "q", "tab"],
+    queryKeys: ["category", "limit", "q", "tab", "telemetry_days"],
   },
 ]);

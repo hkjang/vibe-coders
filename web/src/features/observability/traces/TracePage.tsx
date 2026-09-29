@@ -1,3 +1,5 @@
+import { LegacyLink } from "@/shared/components/ui/LegacyLink";
+
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { ExternalLink, ListTree, RefreshCw, Search } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef } from "react";
@@ -247,9 +249,9 @@ export function TracePage(): React.JSX.Element {
             <Search aria-hidden="true" /> 요청 탐색기
           </Link>
           {showLegacyAdmin && legacyPath ? (
-            <a className="button button-secondary button-default" href={legacyPath}>
+            <LegacyLink className="button button-secondary button-default" href={legacyPath}>
               <ExternalLink aria-hidden="true" /> 기존 화면 보기
-            </a>
+            </LegacyLink>
           ) : null}
           <Button variant="primary" disabled={result.isFetching} onClick={() => void result.refetch()}>
             <RefreshCw aria-hidden="true" /> {result.isFetching ? "갱신 중" : "새로고침"}

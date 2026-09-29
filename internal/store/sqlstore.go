@@ -1311,6 +1311,23 @@ func migrationStatements() []string {
 			changed_at TEXT NOT NULL
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_admin_setting_history_key ON admin_setting_history(key, changed_at)`,
+		// Opt-in console adoption counts. A visit's random ID is stored only as a
+		// digest; this table must never gain caller, request, or navigation metadata.
+		`CREATE TABLE IF NOT EXISTS app_ui_telemetry_visits (
+			visit_hash TEXT PRIMARY KEY CHECK (length(visit_hash) = 64),
+			feature_id TEXT NOT NULL CHECK (length(feature_id) BETWEEN 1 AND 64),
+			first_seen_epoch BIGINT NOT NULL CHECK (first_seen_epoch > 0),
+			legacy_open INTEGER NOT NULL DEFAULT 0 CHECK (legacy_open IN (0, 1))
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_app_ui_telemetry_first_seen ON app_ui_telemetry_visits(first_seen_epoch)`,
+		// Writers lock this one row before touching visits, including expiry. The
+		// count reserves capacity without a full-table count inside that lock.
+		`CREATE TABLE IF NOT EXISTS app_ui_telemetry_capacity (
+			singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+			live_visits INTEGER NOT NULL DEFAULT 0 CHECK (live_visits BETWEEN 0 AND 100000)
+		)`,
+		`INSERT INTO app_ui_telemetry_capacity (singleton, live_visits)
+			VALUES (1, 0) ON CONFLICT(singleton) DO NOTHING`,
 		// Skills — reusable AI task manuals with metadata, lifecycle status, and policy hints.
 		`CREATE TABLE IF NOT EXISTS skills (
 			name TEXT PRIMARY KEY,

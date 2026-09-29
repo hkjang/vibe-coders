@@ -1,3 +1,5 @@
+import { LegacyLink } from "@/shared/components/ui/LegacyLink";
+
 import { useQuery } from "@tanstack/react-query";
 import {
   Activity,
@@ -183,9 +185,9 @@ export function SystemHealthPage(): React.JSX.Element {
           <Badge tone="info">{uiLabels.readOnly}</Badge>
           <Badge tone={overallTone}>{overallStatus}</Badge>
           {showLegacyAdmin ? (
-            <a className="button button-secondary button-default" href="/admin#/ops-home">
+            <LegacyLink className="button button-secondary button-default" href="/admin#/ops-home">
               기존 화면에서 열기
-            </a>
+            </LegacyLink>
           ) : null}
           <Button onClick={refreshAll} disabled={refreshing}>
             <RefreshCw aria-hidden="true" /> 새로고침

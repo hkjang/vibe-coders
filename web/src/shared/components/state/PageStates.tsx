@@ -1,3 +1,5 @@
+import { LegacyLink } from "@/shared/components/ui/LegacyLink";
+
 import { AlertTriangle, Construction, LockKeyhole, Power, RefreshCw } from "lucide-react";
 
 import { Button } from "@/shared/components/ui/Button";
@@ -62,9 +64,9 @@ export function ErrorState({
           </Button>
         ) : null}
         {showLegacy ? (
-          <a className="button button-secondary button-default" href={legacyHref}>
+          <LegacyLink className="button button-secondary button-default" href={legacyHref}>
             기존 관리자 화면 열기
-          </a>
+          </LegacyLink>
         ) : null}
       </div>
     </section>
@@ -77,9 +79,9 @@ export function AppDisabled(): React.JSX.Element {
       <Power aria-hidden="true" />
       <h1>신규 콘솔이 비활성화되어 있습니다.</h1>
       <p>운영자가 `/app`을 활성화할 때까지 안정 운영 화면을 이용하세요.</p>
-      <a className="button button-primary button-default" href="/admin">
+      <LegacyLink className="button button-primary button-default" href="/admin">
         기존 관리자 화면 열기
-      </a>
+      </LegacyLink>
     </section>
   );
 }

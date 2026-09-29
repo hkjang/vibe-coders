@@ -16,7 +16,7 @@
 
 ## 2. 설치
 
-릴리즈 자산(GitHub Release `v0.86.1`)으로 처음부터 끝까지. 빌드 호스트에서 이미지를 만드는 절차와 오프라인망 적재 배경은 [OPERATIONS.md 2.5](OPERATIONS.md#25-오프라인망-적재)에 있습니다.
+릴리즈 자산(GitHub Release `v0.86.2`)으로 처음부터 끝까지. 빌드 호스트에서 이미지를 만드는 절차와 오프라인망 적재 배경은 [OPERATIONS.md 2.5](OPERATIONS.md#25-오프라인망-적재)에 있습니다.
 
 | 항목 | 값 |
 | --- | --- |
@@ -27,12 +27,12 @@
 
 ```bash
 # 1) 자산 검증과 적재
-sha256sum -c ai-coding-proxy-gateway-v0.86.1.tar.gz.sha256
-gunzip -c ai-coding-proxy-gateway-v0.86.1.tar.gz | docker load
+sha256sum -c ai-coding-proxy-gateway-v0.86.2.tar.gz.sha256
+gunzip -c ai-coding-proxy-gateway-v0.86.2.tar.gz | docker load
 
 # 2) 비밀값 파일 (mode 0600). ADMIN_TOKEN·GATEWAY_SECRET 을 무작위로 만들고 UPSTREAM_API_KEY 자리를 비워 둡니다.
 sudo mkdir -p /opt/proxy-gateway
-sudo bash init-deployment-env-v0.86.1.sh /opt/proxy-gateway/gateway.env
+sudo bash init-deployment-env-v0.86.2.sh /opt/proxy-gateway/gateway.env
 sudo sed -i 's|^UPSTREAM_API_KEY=.*|UPSTREAM_API_KEY=<업스트림 키>|' /opt/proxy-gateway/gateway.env
 #    최초 관리자 계정과 새 콘솔을 켭니다 (값은 가짜 예시입니다)
 sudo tee -a /opt/proxy-gateway/gateway.env >/dev/null <<'EOF'
@@ -44,7 +44,7 @@ UI_APP_ENABLED=true
 EOF
 
 # 3) 기동
-export GATEWAY_VERSION=v0.86.1
+export GATEWAY_VERSION=v0.86.2
 docker compose --env-file /opt/proxy-gateway/gateway.env up -d
 curl -fsS http://127.0.0.1:8080/ready
 
@@ -284,6 +284,26 @@ DB 저장은 끝났으므로 다시 저장하지 말고 최신 설정·서버 �
 정상 저장 후에도 현재 브라우저에는 새로고침이 필요합니다. `/app` 활성화나 정식 전환은 운영 검증을
 거쳐 결정하며, 기존 `/admin` 화면은 계속 사용할 수 있습니다.
 
+### 3.8 신규 콘솔 사용 관측
+
+`v0.86.2`부터 **시스템 설정 → 콘솔 전환**에서 최근 7일·30일의 관측된 방문과 기존 화면 이동
+비율을 확인합니다. 전체 설정의 **콘솔 사용 관측**(`ui.app.telemetry_enabled`)은 기본 꺼짐입니다.
+켜기 전에 조직의 수집 정책을 확인하세요. 사용자·팀·IP·검색어·프롬프트는 집계에 저장하지 않으며,
+방문별 임시 식별값의 해시·기능·최초 수신 시각·기존 화면 링크 열기 여부만 저장합니다.
+
+최근 30일, 최대 10만 방문만 집계하고 만료 기록은 수집 시·서버 시작 시·매시간 정리합니다.
+수집을 꺼도 정리는 유지되지만 DB 오류가 있으면 삭제가 다음 주기로 지연될 수 있습니다.
+수집을 끄기 전에 이미 수락한 진행 중 요청은 끝날 수 있습니다. 전송 실패·상한 초과·로그인과
+최상위 오류 화면은 누락되므로 전체 채택률이나 순사용자 수로 해석하지 마세요. 비율은 실제
+기존 화면 도착이 아니라 링크를 연 방문을 기준으로 합니다. 기존 **방문 추적**(`tracking.*`)과는
+독립적이며 외부 수집기나 스니펫을 추가하지 않습니다. 정식 기능 승격에는 별도 운영 검증이 필요합니다.
+
+한 사용자의 과도한 전송을 줄이기 위해 서버 프로세스별 UTC 일자당 600개 이벤트 한도를 둡니다.
+방문과 기존 화면 열기가 모두 이 한도에 포함되며, 초과분은 재시도 없이 버립니다. 원본 사용자 ID는
+한도 저장소에도 남기지 않고 무작위 키로 만든 일시적인 HMAC만 메모리에 유지합니다. 이 정보는
+집계 DB나 로그에 기록하지 않습니다. 같은 관리자 토큰을 공유하면 한도도 공유하며, 파드가 여러
+개이면 프로세스별로 적용되고 재시작 시 초기화됩니다.
+
 ## 4. 계정과 권한
 
 두 가지 인증이 공존합니다. **관리자 토큰**(`ADMIN_TOKEN`)은 기존 `/admin` 콘솔과 `/admin/*` API 용이고, **세션 로그인**(`AUTH_ENABLED=true`)은 새 콘솔 `/app` 용입니다. 역할별 권한은 `internal/proxy/auth.go` 의 `roleScopes` 가 정본입니다.
@@ -310,7 +330,7 @@ SSO 로 들어온 계정의 역할은 클레임 매핑(`SSO_KEYCLOAK_ROLE_CLAIM`
 - **상태 점검**: `GET /health`(프로세스), `GET /ready`(DB 포함), `GET /metrics`(Prometheus). 콘솔 **시스템 → 시스템 상태**가 같은 신호를 사람 눈으로 보여 줍니다.
 - **콘솔 홈**: **개요 → 통합 현황**에서 게이트웨이 상태·보존 비용·P95 지연·라우팅·운영 위험을 봅니다. 상단 **자동 갱신**을 켜면 주기적으로 다시 읽습니다.
 - **로그 위치**: 컨테이너 stdout(`docker compose logs -f gateway`), 폴백 로그 `/data/fallback.ndjson`(DB 기록 실패분; 콘솔 **시스템 설정 → Fallback 로그 재처리**로 되살립니다).
-- **백업·복구**: `/data` 볼륨이 전부입니다. `backup-volume-v0.86.1.sh` 로 tar 백업, 복구는 볼륨을 유지한 채 컨테이너만 교체합니다 — [OPERATIONS.md 6](OPERATIONS.md#6-백업--복구).
+- **백업·복구**: `/data` 볼륨이 전부입니다. `backup-volume-v0.86.2.sh` 로 tar 백업, 복구는 볼륨을 유지한 채 컨테이너만 교체합니다 — [OPERATIONS.md 6](OPERATIONS.md#6-백업--복구).
 - **업그레이드**: 새 tar.gz 를 `docker load` → `GATEWAY_VERSION` 만 올려 `docker compose up -d`. 마이그레이션은 기동 시 자동입니다. **되돌리기**: 업그레이드 전 백업을 복구하고 `GATEWAY_VERSION` 을 이전 값으로 되돌려 `up -d`. 새 버전이 추가한 컬럼은 이전 바이너리가 무시합니다.
 - **보존**: `RETENTION_*` 일수를 넘긴 요청·프롬프트·응답은 `RETENTION_INTERVAL` 마다 지워집니다. 콘솔 **시스템 설정 → 데이터 보존**에서 무엇이 함께 삭제되는지 볼 수 있습니다(9.3 절).
 

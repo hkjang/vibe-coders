@@ -775,6 +775,31 @@ export type UiSystemStatus = {
     status: 'healthy' | 'degraded';
 };
 
+export type UiTelemetryEventRequest = {
+    event: 'visit' | 'legacy_fallback';
+    feature_id: 'overview' | 'me.home' | 'team.home' | 'gateway.health' | 'gateway.providers' | 'gateway.models' | 'gateway.chat' | 'routing.rules' | 'observability.requests' | 'observability.traces' | 'observability.sessions' | 'observability.xview' | 'observability.llm' | 'observability.probes' | 'prompts.lab' | 'prompts.library' | 'access.users' | 'governance.policies' | 'governance.remediation' | 'governance.reports' | 'governance.assets' | 'mcp.overview' | 'mcp.gateway' | 'agents.registry' | 'agents.workflows' | 'agents.apps' | 'agents.skills' | 'text2sql.overview' | 'data.warehouse' | 'data.products' | 'finops.overview' | 'security.overview' | 'security.redteam' | 'security.sandbox' | 'system.health' | 'system.settings';
+    /**
+     * 128-bit cryptographically random per-feature visit nonce. Never derive from identity or persist in browser storage. Server retains only its SHA-256 hash.
+     */
+    visit_id: string;
+};
+
+export type UiTelemetryFeatureCount = {
+    feature_id: 'overview' | 'me.home' | 'team.home' | 'gateway.health' | 'gateway.providers' | 'gateway.models' | 'gateway.chat' | 'routing.rules' | 'observability.requests' | 'observability.traces' | 'observability.sessions' | 'observability.xview' | 'observability.llm' | 'observability.probes' | 'prompts.lab' | 'prompts.library' | 'access.users' | 'governance.policies' | 'governance.remediation' | 'governance.reports' | 'governance.assets' | 'mcp.overview' | 'mcp.gateway' | 'agents.registry' | 'agents.workflows' | 'agents.apps' | 'agents.skills' | 'text2sql.overview' | 'data.warehouse' | 'data.products' | 'finops.overview' | 'security.overview' | 'security.redteam' | 'security.sandbox' | 'system.health' | 'system.settings';
+    legacy_opens: number;
+    visits: number;
+};
+
+export type UiTelemetrySummaryResponse = {
+    days: 7 | 30;
+    enabled: boolean;
+    features: Array<UiTelemetryFeatureCount>;
+    from: string;
+    retention_days: 30;
+    to: string;
+    visit_limit: 100000;
+};
+
 export type UserSummary = {
     api_key_id: string;
     average_latency_ms: number;
@@ -8269,6 +8294,66 @@ export type GetAdminUiBootstrapResponses = {
 };
 
 export type GetAdminUiBootstrapResponse = GetAdminUiBootstrapResponses[keyof GetAdminUiBootstrapResponses];
+
+export type PostAdminUiTelemetryEventsData = {
+    body: UiTelemetryEventRequest;
+    path?: never;
+    query?: never;
+    url: '/admin/ui-telemetry/events';
+};
+
+export type PostAdminUiTelemetryEventsErrors = {
+    /**
+     * Feature or Legacy fallback not allowed
+     */
+    403: AppError;
+    /**
+     * Temporarily unavailable; do not retry
+     */
+    503: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostAdminUiTelemetryEventsError = PostAdminUiTelemetryEventsErrors[keyof PostAdminUiTelemetryEventsErrors];
+
+export type PostAdminUiTelemetryEventsResponses = {
+    /**
+     * Recorded idempotently or intentionally dropped; do not retry
+     */
+    204: void;
+};
+
+export type PostAdminUiTelemetryEventsResponse = PostAdminUiTelemetryEventsResponses[keyof PostAdminUiTelemetryEventsResponses];
+
+export type GetAdminUiTelemetrySummaryData = {
+    body?: never;
+    path?: never;
+    query?: {
+        days?: 7 | 30;
+    };
+    url: '/admin/ui-telemetry/summary';
+};
+
+export type GetAdminUiTelemetrySummaryErrors = {
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminUiTelemetrySummaryError = GetAdminUiTelemetrySummaryErrors[keyof GetAdminUiTelemetrySummaryErrors];
+
+export type GetAdminUiTelemetrySummaryResponses = {
+    /**
+     * OK
+     */
+    200: UiTelemetrySummaryResponse;
+};
+
+export type GetAdminUiTelemetrySummaryResponse = GetAdminUiTelemetrySummaryResponses[keyof GetAdminUiTelemetrySummaryResponses];
 
 export type GetAdminUsersData = {
     body?: never;

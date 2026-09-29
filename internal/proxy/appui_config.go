@@ -283,8 +283,13 @@ func (s *Server) reloadAppUIRuntime(stored map[string]store.AdminSetting) {
 }
 
 func effectiveAppUIFeatures(stored map[string]store.AdminSetting, s *Server, userID, role string, scopes []string, authenticated bool) []appUIFeature {
+	return effectiveAppUIFeaturesWithFallback(stored, s, userID, role, scopes, authenticated, s.appUIConf().LegacyFallback)
+}
+
+// A privacy-sensitive intake must use the current shared DB decision rather than
+// the pod's eventually convergent runtime snapshot.
+func effectiveAppUIFeaturesWithFallback(stored map[string]store.AdminSetting, s *Server, userID, role string, scopes []string, authenticated, legacyFallback bool) []appUIFeature {
 	out := make([]appUIFeature, 0, len(appUIFeatures))
-	legacyFallback := s.appUIConf().LegacyFallback
 	for _, base := range appUIFeatures {
 		feature := base
 		feature.EnabledRoles = append([]string{}, base.EnabledRoles...)

@@ -1,3 +1,5 @@
+import { LegacyLink } from "@/shared/components/ui/LegacyLink";
+
 import { AlertTriangle, ExternalLink, RefreshCw } from "lucide-react";
 import type { RefObject } from "react";
 
@@ -192,9 +194,9 @@ export function ProviderDetailDialog({
   sloState,
 }: ProviderDetailDialogProps): React.JSX.Element {
   const footer = showLegacyAdmin ? (
-    <a className="button button-secondary button-default" href="/admin#/settings">
+    <LegacyLink className="button button-secondary button-default" href="/admin#/settings">
       기존 설정 화면 열기 <ExternalLink aria-hidden="true" />
-    </a>
+    </LegacyLink>
   ) : undefined;
 
   return (

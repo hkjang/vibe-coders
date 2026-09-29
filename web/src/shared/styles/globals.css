@@ -108,7 +108,8 @@ h2 {
 .button:hover {
   text-decoration: none;
 }
-.button:disabled {
+.button:disabled,
+.button[aria-disabled="true"] {
   cursor: not-allowed;
   opacity: 0.55;
 }

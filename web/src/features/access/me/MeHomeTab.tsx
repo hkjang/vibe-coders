@@ -1,3 +1,5 @@
+import { LegacyLink } from "@/shared/components/ui/LegacyLink";
+
 import { useRef, useState } from "react";
 
 import { formatSignedRatio, severityTone } from "@/features/access/access-format";
@@ -112,12 +114,12 @@ export function MeHomeTab(): React.JSX.Element {
                   </span>
                   <span className="access-inline-actions">
                     {legacyHref(action.button_href) ? (
-                      <a
+                      <LegacyLink
                         className="button button-secondary button-small"
                         href={legacyHref(action.button_href)}
                       >
                         {action.button_label || "열기"}
-                      </a>
+                      </LegacyLink>
                     ) : null}
                     <Button
                       size="small"
