@@ -1320,17 +1320,18 @@ func (s *Server) handleAdminSettingByKey(w http.ResponseWriter, r *http.Request)
 			writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "invalid_body")
 			return
 		}
-		if err := s.applySettingWriteExpected(r, d, payload.Value, payload.Reason, payload.ExpectedVersion); err != nil {
+		if err := s.applySettingWriteExpected(r, d, payload.Value, payload.Reason, payload.ExpectedVersion, nil); err != nil {
 			if errors.Is(err, store.ErrAdminSettingConflict) {
 				writeOpenAIError(w, http.StatusConflict, "setting changed concurrently; reload and review the latest value", "conflict_error", "setting_conflict")
 			} else if errors.Is(err, errSettingReloadPending) {
+				s.auditCommittedSetting(r, "setting.update", key, auditJSON(map[string]any{"key": key, "secret": d.Secret, "reason": payload.Reason, "reload_pending": true}))
 				writeOpenAIError(w, http.StatusServiceUnavailable, "setting was stored but runtime reload is pending", "server_error", "setting_reload_pending")
 			} else {
 				writeOpenAIError(w, http.StatusBadRequest, err.Error(), "invalid_request_error", "setting_invalid")
 			}
 			return
 		}
-		s.auditAdmin(r, "setting.update", key, auditJSON(map[string]any{"key": key, "secret": d.Secret}))
+		s.auditCommittedSetting(r, "setting.update", key, auditJSON(map[string]any{"key": key, "secret": d.Secret, "reason": payload.Reason}))
 		stored, _ := s.loadStoredSettings(r)
 		writeJSON(w, http.StatusOK, s.settingView(stored, d))
 	case http.MethodDelete:
@@ -1343,11 +1344,12 @@ func (s *Server) handleAdminSettingByKey(w http.ResponseWriter, r *http.Request)
 			}
 			expectedVersion = &parsed
 		}
+		reason := strings.TrimSpace(r.URL.Query().Get("reason"))
 		var err error
 		if expectedVersion == nil {
-			err = s.db.DeleteAdminSetting(r.Context(), key, adminID(r), strings.TrimSpace(r.URL.Query().Get("reason")))
+			err = s.db.DeleteAdminSetting(r.Context(), key, adminID(r), reason)
 		} else {
-			err = s.db.DeleteAdminSetting(r.Context(), key, adminID(r), strings.TrimSpace(r.URL.Query().Get("reason")), *expectedVersion)
+			err = s.db.DeleteAdminSetting(r.Context(), key, adminID(r), reason, *expectedVersion)
 		}
 		if err != nil {
 			if errors.Is(err, store.ErrAdminSettingConflict) {
@@ -1358,10 +1360,11 @@ func (s *Server) handleAdminSettingByKey(w http.ResponseWriter, r *http.Request)
 			return
 		}
 		if err := s.reloadRuntimeConfig(r.Context()); err != nil {
+			s.auditCommittedSetting(r, "setting.revert", key, auditJSON(map[string]any{"key": key, "secret": d.Secret, "reason": reason, "reload_pending": true}))
 			writeOpenAIError(w, http.StatusServiceUnavailable, "setting was reverted but runtime reload is pending", "server_error", "setting_reload_pending")
 			return
 		}
-		s.auditAdmin(r, "setting.revert", key, "")
+		s.auditCommittedSetting(r, "setting.revert", key, auditJSON(map[string]any{"key": key, "secret": d.Secret, "reason": reason}))
 		stored, _ := s.loadStoredSettings(r)
 		writeJSON(w, http.StatusOK, s.settingView(stored, d))
 	default:
@@ -1371,11 +1374,17 @@ func (s *Server) handleAdminSettingByKey(w http.ResponseWriter, r *http.Request)
 
 // applySettingWrite persists one setting value and reloads the runtime snapshot.
 func (s *Server) applySettingWrite(r *http.Request, d settingDef, value, reason string) error {
-	return s.applySettingWriteExpected(r, d, value, reason, nil)
+	return s.applySettingWriteExpected(r, d, value, reason, nil, nil)
 }
 
-func (s *Server) applySettingWriteExpected(r *http.Request, d settingDef, value, reason string, expectedVersion *int) error {
-	if err := s.persistSettingValueExpected(r, d, value, reason, expectedVersion); err != nil {
+type settingSnapshotGuard struct {
+	updatedAt    string
+	historyID    string
+	historyCount int64
+}
+
+func (s *Server) applySettingWriteExpected(r *http.Request, d settingDef, value, reason string, expectedVersion *int, snapshot *settingSnapshotGuard) error {
+	if err := s.persistSettingValueExpected(r, d, value, reason, expectedVersion, snapshot); err != nil {
 		return err
 	}
 	if err := s.reloadRuntimeConfig(r.Context()); err != nil {
@@ -1387,10 +1396,10 @@ func (s *Server) applySettingWriteExpected(r *http.Request, d settingDef, value,
 // persistSettingValue validates, encrypts (if secret), and writes a setting WITHOUT
 // reloading the runtime snapshot (callers reload once after a batch).
 func (s *Server) persistSettingValue(r *http.Request, d settingDef, value, reason string) error {
-	return s.persistSettingValueExpected(r, d, value, reason, nil)
+	return s.persistSettingValueExpected(r, d, value, reason, nil, nil)
 }
 
-func (s *Server) persistSettingValueExpected(r *http.Request, d settingDef, value, reason string, expectedVersion *int) error {
+func (s *Server) persistSettingValueExpected(r *http.Request, d settingDef, value, reason string, expectedVersion *int, snapshot *settingSnapshotGuard) error {
 	record, err := s.prepareSettingValue(d, value)
 	if err != nil {
 		return err
@@ -1401,6 +1410,11 @@ func (s *Server) persistSettingValueExpected(r *http.Request, d settingDef, valu
 	}
 	if err := setSettingExpectedVersion(&record, current, found, expectedVersion); err != nil {
 		return err
+	}
+	if snapshot != nil {
+		record.ExpectedUpdatedAt = &snapshot.updatedAt
+		record.ExpectedHistoryID = &snapshot.historyID
+		record.ExpectedHistoryCount = &snapshot.historyCount
 	}
 	return s.db.UpsertAdminSetting(r.Context(), record, adminID(r), reason)
 }
@@ -1595,10 +1609,11 @@ func (s *Server) applySettingsBatch(w http.ResponseWriter, r *http.Request, item
 		return
 	}
 	if err := s.reloadRuntimeConfig(r.Context()); err != nil {
+		s.auditCommittedSetting(r, "setting.bulk", "", auditJSON(map[string]any{"count": len(out), "import": rejectSecret, "reason": reason, "reload_pending": true}))
 		writeOpenAIError(w, http.StatusServiceUnavailable, "settings were stored atomically but runtime reload is pending", "server_error", "setting_reload_pending")
 		return
 	}
-	s.auditAdmin(r, "setting.bulk", "", auditJSON(map[string]any{"count": len(out), "import": rejectSecret}))
+	s.auditCommittedSetting(r, "setting.bulk", "", auditJSON(map[string]any{"count": len(out), "import": rejectSecret, "reason": reason}))
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "applied": len(out)})
 }
 
@@ -1852,7 +1867,7 @@ func (s *Server) handleAdminSettingsHistory(w http.ResponseWriter, r *http.Reque
 }
 
 // handleAdminSettingsRollback reverts a (non-secret) key to its previous value from history.
-// POST /admin/settings/rollback {key, reason}
+// POST /admin/settings/rollback {key, reason, expected_version?, expected_updated_at?, expected_history_id?, expected_history_count?}
 func (s *Server) handleAdminSettingsRollback(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", http.MethodPost)
@@ -1863,7 +1878,14 @@ func (s *Server) handleAdminSettingsRollback(w http.ResponseWriter, r *http.Requ
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
 	}
-	var payload struct{ Key, Reason string }
+	var payload struct {
+		Key                  string  `json:"key"`
+		Reason               string  `json:"reason"`
+		ExpectedVersion      *int    `json:"expected_version,omitempty"`
+		ExpectedUpdatedAt    *string `json:"expected_updated_at,omitempty"`
+		ExpectedHistoryID    *string `json:"expected_history_id,omitempty"`
+		ExpectedHistoryCount *int64  `json:"expected_history_count,omitempty"`
+	}
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 		writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "invalid_body")
 		return
@@ -1886,24 +1908,68 @@ func (s *Server) handleAdminSettingsRollback(w http.ResponseWriter, r *http.Requ
 		writeOpenAIError(w, http.StatusBadRequest, "secret values cannot be rolled back (history stores no value); set or revert instead", "invalid_request_error", "secret_rollback_unsupported")
 		return
 	}
+	if payload.ExpectedVersion != nil && *payload.ExpectedVersion < 0 {
+		writeOpenAIError(w, http.StatusBadRequest, "expected_version must be a non-negative integer", "invalid_request_error", "bad_expected_version")
+		return
+	}
+	if payload.ExpectedHistoryCount != nil && (*payload.ExpectedHistoryCount < 0 || *payload.ExpectedHistoryCount > 9007199254740991) {
+		writeOpenAIError(w, http.StatusBadRequest, "expected_history_count must be a non-negative safe integer", "invalid_request_error", "bad_expected_history_count")
+		return
+	}
+	// Pin current state BEFORE history selection; reading the version afterwards
+	// could authorize an older history target against a newer concurrent value.
+	current, found, err := s.db.GetAdminSetting(r.Context(), key)
+	if err != nil {
+		writeOpenAIError(w, http.StatusInternalServerError, "setting snapshot could not be loaded", "server_error", "rollback_failed")
+		return
+	}
+	version, updatedAt := 0, ""
+	if found {
+		version, updatedAt = current.Version, current.UpdatedAt
+	}
+	if (payload.ExpectedVersion != nil && *payload.ExpectedVersion != version) ||
+		(payload.ExpectedUpdatedAt != nil && *payload.ExpectedUpdatedAt != updatedAt) {
+		writeOpenAIError(w, http.StatusConflict, "setting changed concurrently; reload and review the latest value", "conflict_error", "setting_conflict")
+		return
+	}
 	hist, err := s.db.ListAdminSettingHistory(r.Context(), key, 5)
 	if err != nil {
-		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "rollback_failed")
+		writeOpenAIError(w, http.StatusInternalServerError, "setting history could not be loaded", "server_error", "rollback_failed")
+		return
+	}
+	if (payload.ExpectedHistoryID != nil && (len(hist) == 0 || *payload.ExpectedHistoryID != hist[0].ID)) ||
+		(payload.ExpectedHistoryCount != nil && (len(hist) == 0 || *payload.ExpectedHistoryCount != hist[0].HistoryCount)) {
+		writeOpenAIError(w, http.StatusConflict, "setting history changed concurrently; reload and review the latest value", "conflict_error", "setting_conflict")
 		return
 	}
 	if len(hist) == 0 || strings.TrimSpace(hist[0].OldValueJSON) == "" {
 		writeOpenAIError(w, http.StatusBadRequest, "no previous value to roll back to", "invalid_request_error", "no_history")
 		return
 	}
+	// Existing rows and the latest history must describe the same committed write.
+	// For an absent row the latest event must be its deletion, not an intervening insert.
+	if (found && (hist[0].ChangedAt != current.UpdatedAt || hist[0].NewValueJSON != current.ValueJSON)) ||
+		(!found && hist[0].NewValueJSON != "") {
+		writeOpenAIError(w, http.StatusConflict, "setting changed concurrently; reload and review the latest value", "conflict_error", "setting_conflict")
+		return
+	}
 	var prev string
 	if json.Unmarshal([]byte(hist[0].OldValueJSON), &prev) != nil {
 		prev = hist[0].OldValueJSON
 	}
-	if err := s.applySettingWrite(r, d, prev, "rollback: "+strings.TrimSpace(payload.Reason)); err != nil {
-		writeOpenAIError(w, http.StatusBadRequest, err.Error(), "invalid_request_error", "rollback_failed")
+	guard := &settingSnapshotGuard{updatedAt: updatedAt, historyID: hist[0].ID, historyCount: hist[0].HistoryCount}
+	if err := s.applySettingWriteExpected(r, d, prev, "rollback: "+strings.TrimSpace(payload.Reason), &version, guard); err != nil {
+		if errors.Is(err, store.ErrAdminSettingConflict) {
+			writeOpenAIError(w, http.StatusConflict, "setting changed concurrently; reload and review the latest value", "conflict_error", "setting_conflict")
+		} else if errors.Is(err, errSettingReloadPending) {
+			s.auditCommittedSetting(r, "setting.rollback", key, auditJSON(map[string]any{"key": key, "reload_pending": true}))
+			writeOpenAIError(w, http.StatusServiceUnavailable, "setting was stored but runtime reload is pending", "server_error", "setting_reload_pending")
+		} else {
+			writeOpenAIError(w, http.StatusBadRequest, "setting rollback could not be completed", "invalid_request_error", "rollback_failed")
+		}
 		return
 	}
-	s.auditAdmin(r, "setting.rollback", key, auditJSON(map[string]any{"key": key}))
+	s.auditCommittedSetting(r, "setting.rollback", key, auditJSON(map[string]any{"key": key}))
 	stored, _ := s.loadStoredSettings(r)
 	writeJSON(w, http.StatusOK, s.settingView(stored, d))
 }

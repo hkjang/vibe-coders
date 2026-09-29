@@ -12,8 +12,8 @@ const editorName = "시스템 설정 전환 설정";
 const editButtonName = `${editorName} 편집`;
 
 const bootstrap: UiBootstrapResponse = {
-  backend_version: "v0.86.2",
-  ui_version: "e2e-v0.86.2",
+  backend_version: "v0.86.5",
+  ui_version: "e2e-v0.86.5",
   api_version: "v1",
   ui: {
     enabled: true,
@@ -57,7 +57,7 @@ const bootstrap: UiBootstrapResponse = {
       enabled_roles: ["admin"],
       rollout_percent: 100,
       fallback_enabled: true,
-      minimum_api_version: "v0.84.0",
+      minimum_api_version: "v0.86.5",
       available: true,
     },
   ],
@@ -401,6 +401,9 @@ test("충돌 시 초안을 유지하고 저장을 막으며 다시 연 편집기
   });
 
   await page.keyboard.press("Escape");
+  const discard = page.getByRole("alertdialog", { name: "저장하지 않은 변경사항이 있습니다" });
+  await expect(discard).toBeVisible();
+  await discard.getByRole("button", { name: "변경 버리기" }).click();
   const trigger = page.getByRole("button", { name: editButtonName });
   await expect(trigger).toBeFocused();
   await trigger.press("Enter");

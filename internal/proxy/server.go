@@ -34,7 +34,7 @@ import (
 
 // AppVersion is the gateway build version, surfaced in /auth/me and both admin UIs.
 // Release builds override it with -X vibe-coders/internal/proxy.AppVersion=<tag>.
-var AppVersion = "v0.86.4"
+var AppVersion = "v0.86.5"
 
 type Server struct {
 	cfg      config.Config
@@ -2089,7 +2089,14 @@ func (s *Server) auditAdmin(r *http.Request, action string, before string, after
 // memory for post-change target selection. The persisted audit remains the bounded
 // before/after payload supplied by the caller.
 func (s *Server) auditAdminWithProviderTarget(r *http.Request, action string, before string, after string, provider string) {
-	if err := s.db.InsertAdminAudit(r.Context(), store.AdminAuditLog{
+	s.auditAdminWithInsertContext(r.Context(), r, action, before, after, provider)
+}
+
+// auditAdminWithInsertContext isolates only the best-effort audit insert's
+// cancellation budget. Post-change work must retain the original request's
+// lifetime, values, and cancellation policy, not inherit an audit-only timeout.
+func (s *Server) auditAdminWithInsertContext(auditCtx context.Context, r *http.Request, action, before, after, provider string) {
+	if err := s.db.InsertAdminAudit(auditCtx, store.AdminAuditLog{
 		ID:          newID("audit"),
 		AdminID:     adminID(r),
 		Action:      action,

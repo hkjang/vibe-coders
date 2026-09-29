@@ -41,6 +41,7 @@ export function useSettingHistory(key: string, enabled: boolean) {
     queryFn: ({ signal }) =>
       apiClient.request(system.settings.history, { query: { key, limit: 20 }, signal, routeId }),
     enabled: enabled && key !== "",
+    refetchOnMount: "always",
   });
 }
 

@@ -51,7 +51,7 @@ const tabItems: ReadonlyArray<TabItem<TabId>> = [
 const delegatedPanels: ReadonlyArray<{ title: string; where: string; href: string; internal: boolean }> = [
   { title: "프록시 API 키", where: "사용자·접근 화면", href: "/app/access/users", internal: true },
   {
-    title: "업스트림 공급자 · Provider SLO",
+    title: "업스트림 공급자 · 공급자 서비스 목표(SLO)",
     where: "AI 공급자 화면",
     href: "/app/gateway/providers",
     internal: true,
@@ -64,7 +64,7 @@ const delegatedPanels: ReadonlyArray<{ title: string; where: string; href: strin
     internal: true,
   },
   { title: "AI 코딩 작업 템플릿", where: "프롬프트 자산 화면", href: "/app/prompts/library", internal: true },
-  { title: "Knowledge Cache", where: "기존 관리자 화면", href: "/admin#/settings", internal: false },
+  { title: "지식 캐시", where: "기존 관리자 화면", href: "/admin#/settings", internal: false },
 ];
 
 export function SystemSettingsPage(): React.JSX.Element {

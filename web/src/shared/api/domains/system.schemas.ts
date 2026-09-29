@@ -75,6 +75,7 @@ export const settingHistorySchema = looseObject({
     changed_by: z.string().optional(),
     reason: z.string().optional(),
     changed_at: z.string().optional(),
+    history_count: z.number().int().positive().safe().optional(),
   }).default([]),
 });
 

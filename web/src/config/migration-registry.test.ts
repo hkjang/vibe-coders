@@ -35,6 +35,43 @@ const legacyOnlyAdmin: AuthUser = {
 };
 
 describe("migration registry", () => {
+  it("requires the settings rollback CAS contract even when an older server advertises availability", () => {
+    const fallback = migrationRegistry.find((feature) => feature.featureId === "system.settings");
+    if (!fallback) throw new Error("settings registry entry is missing");
+    const [feature] = registryFromBootstrap([
+      {
+        feature_id: fallback.featureId,
+        title: fallback.title,
+        app_path: fallback.appPath,
+        legacy_path: fallback.legacyPath,
+        status: fallback.status,
+        risk_level: fallback.riskLevel,
+        required_permission: fallback.requiredPermission,
+        read_only: false,
+        enabled_roles: [],
+        rollout_percent: 100,
+        fallback_enabled: true,
+        minimum_api_version: "v0.84.0",
+        available: true,
+      },
+    ]);
+    if (!feature) throw new Error("settings feature is missing");
+    expect(feature.minimumApiVersion).toBe("v0.86.5");
+    expect(resolveFeature(feature, gatewayAdmin, "v0.86.4")).toMatchObject({
+      status: "legacy",
+      readOnly: true,
+      reason: "api_version",
+    });
+    expect(resolveFeature(feature, gatewayAdmin, "v0.86.5")).toMatchObject({
+      status: "preview",
+      readOnly: false,
+    });
+    expect(resolveFeature(fallback, gatewayAdmin, "v0.86.4")).toMatchObject({
+      status: "legacy",
+      reason: "api_version",
+    });
+  });
+
   const serverContract = [
     ["overview", "/app/overview"],
     ["me.home", "/app/me"],

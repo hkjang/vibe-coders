@@ -676,6 +676,15 @@ func enrichOpenAPIOperation(route, method string, op map[string]any) {
 	case "put /admin/settings/by-key/{key}":
 		op["requestBody"] = requestBody("SettingWriteRequest")
 		responses["200"] = successResponse("AdminSettingView")
+	case "get /admin/settings/history":
+		op["description"] = "Timestamp-ordered history. Each row includes the entire key's append-only history_count from the same query snapshot before the result limit. This count is not commit order; review it together with the row ID for guarded rollback. Supported APIs do not remove history; pruning or restoration requires a non-reusable revision contract."
+		responses["200"] = successResponse("SettingHistoryResponse")
+	case "post /admin/settings/rollback":
+		op["description"] = "Restore the previous non-secret value from the reviewed timestamp-ordered history event. Send expected_version, expected_updated_at, expected_history_id, and expected_history_count together to guard the entire snapshot, including deleted overrides (version 0 and empty timestamp). The count detects later appends even with clock skew; it does not define commit order. Omitted guards retain Legacy compatibility. Current state and history are rechecked atomically before persistence. A 409 setting_conflict means nothing was changed; a 503 setting_reload_pending means the rollback was stored but runtime reload is pending, so do not blindly retry."
+		op["requestBody"] = requestBody("SettingRollbackRequest")
+		responses["200"] = successResponse("AdminSettingView")
+		responses["409"] = map[string]any{"description": "setting_conflict: reviewed setting or history changed; no write", "content": jsonContent(schemaRef("AppError"))}
+		responses["503"] = map[string]any{"description": "setting_reload_pending: rollback persisted; reload runtime before further changes", "content": jsonContent(schemaRef("AppError"))}
 	case "delete /admin/settings/by-key/{key}":
 		op["parameters"] = []any{
 			map[string]any{"name": "expected_version", "in": "query", "required": false, "schema": map[string]any{"type": "integer", "minimum": 0}},
@@ -879,6 +888,23 @@ func appUIOpenAPISchemas() map[string]any {
 		"TrackingAllowRequest": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"origin"}, "properties": map[string]any{"origin": map[string]any{"type": "string", "description": "An http(s) origin such as https://cdn.example"}}},
 		"SettingWriteRequest": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"value"}, "properties": map[string]any{
 			"value": map[string]any{"type": "string"}, "reason": map[string]any{"type": "string"}, "expected_version": map[string]any{"type": "integer", "minimum": 0},
+		}},
+		"SettingRollbackRequest": map[string]any{"type": "object", "required": []string{"key"}, "properties": map[string]any{
+			"key": map[string]any{"type": "string"}, "reason": map[string]any{"type": "string"},
+			"expected_version":       map[string]any{"type": "integer", "minimum": 0},
+			"expected_updated_at":    map[string]any{"type": "string", "description": "Exact reviewed updated_at; empty string when no override exists."},
+			"expected_history_id":    map[string]any{"type": "string", "description": "ID of the latest history event reviewed for this key."},
+			"expected_history_count": map[string]any{"type": "integer", "minimum": 0, "maximum": int64(9007199254740991), "description": "Whole-key history_count from the reviewed row. Required with the other optional guards for clock-skew-safe append detection."},
+		}},
+		"SettingHistoryResponse": map[string]any{"type": "object", "required": []string{"history"}, "properties": map[string]any{
+			"history": map[string]any{"type": "array", "items": schemaRef("SettingHistoryEntry")},
+		}},
+		"SettingHistoryEntry": map[string]any{"type": "object", "required": []string{"id", "key", "old_value_json", "new_value_json", "is_secret", "changed_by", "reason", "changed_at", "history_count"}, "properties": map[string]any{
+			"id": map[string]any{"type": "string"}, "key": map[string]any{"type": "string"},
+			"old_value_json": map[string]any{"type": "string"}, "new_value_json": map[string]any{"type": "string"},
+			"is_secret": map[string]any{"type": "boolean"}, "changed_by": map[string]any{"type": "string"},
+			"reason": map[string]any{"type": "string"}, "changed_at": map[string]any{"type": "string"},
+			"history_count": map[string]any{"type": "integer", "minimum": 1, "description": "Whole-key append-only count from the same snapshot, before LIMIT. Not a timestamp or commit-order sequence."},
 		}},
 		"SettingBatchItem": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"key", "value"}, "properties": map[string]any{
 			"key": map[string]any{"type": "string"}, "value": map[string]any{"type": "string"}, "expected_version": map[string]any{"type": "integer", "minimum": 0},

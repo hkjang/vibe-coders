@@ -13,6 +13,7 @@ describe("UnsavedChangesCoordinator", () => {
     coordinator.setForm(second, { dirty: true, pending: false, discard: closeSecond });
     coordinator.requestClose(first);
     expect(closeFirst).toHaveBeenCalledTimes(1);
+    expect(closeFirst).toHaveBeenCalledWith("close");
     expect(coordinator.getSnapshot().confirmation).toBeUndefined();
     coordinator.requestClose(second);
     coordinator.keepEditing();
@@ -21,6 +22,7 @@ describe("UnsavedChangesCoordinator", () => {
     coordinator.requestClose(second);
     coordinator.discardConfirmed();
     expect(closeSecond).toHaveBeenCalledTimes(1);
+    expect(closeSecond).toHaveBeenCalledWith("close");
     expect(coordinator.shouldBlock()).toBe(false);
   });
 
@@ -74,6 +76,7 @@ describe("UnsavedChangesCoordinator", () => {
     coordinator.requestNavigation(attempt);
     coordinator.discardConfirmed();
     expect(discard).toHaveBeenCalledTimes(3);
+    expect(discard).toHaveBeenCalledWith("navigation");
     expect(attempt.proceed).toHaveBeenCalledTimes(1);
   });
 
@@ -85,6 +88,7 @@ describe("UnsavedChangesCoordinator", () => {
     coordinator.requestNavigation(attempt);
     coordinator.setEnabled(false);
     expect(discard).toHaveBeenCalledTimes(1);
+    expect(discard).toHaveBeenCalledWith("security");
     expect(attempt.reset).toHaveBeenCalledTimes(1);
     expect(attempt.proceed).not.toHaveBeenCalled();
     expect(coordinator.getSnapshot()).toEqual({ protected: false, pending: false, confirmation: undefined });

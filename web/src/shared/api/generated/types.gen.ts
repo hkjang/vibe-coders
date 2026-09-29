@@ -666,6 +666,43 @@ export type SettingBatchItem = {
     value: string;
 };
 
+export type SettingHistoryEntry = {
+    changed_at: string;
+    changed_by: string;
+    /**
+     * Whole-key append-only count from the same snapshot, before LIMIT. Not a timestamp or commit-order sequence.
+     */
+    history_count: number;
+    id: string;
+    is_secret: boolean;
+    key: string;
+    new_value_json: string;
+    old_value_json: string;
+    reason: string;
+};
+
+export type SettingHistoryResponse = {
+    history: Array<SettingHistoryEntry>;
+};
+
+export type SettingRollbackRequest = {
+    /**
+     * Whole-key history_count from the reviewed row. Required with the other optional guards for clock-skew-safe append detection.
+     */
+    expected_history_count?: number;
+    /**
+     * ID of the latest history event reviewed for this key.
+     */
+    expected_history_id?: string;
+    /**
+     * Exact reviewed updated_at; empty string when no override exists.
+     */
+    expected_updated_at?: string;
+    expected_version?: number;
+    key: string;
+    reason?: string;
+};
+
 export type SettingWriteRequest = {
     expected_version?: number;
     reason?: string;
@@ -6776,12 +6813,23 @@ export type GetAdminSettingsHistoryData = {
     url: '/admin/settings/history';
 };
 
+export type GetAdminSettingsHistoryErrors = {
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type GetAdminSettingsHistoryError = GetAdminSettingsHistoryErrors[keyof GetAdminSettingsHistoryErrors];
+
 export type GetAdminSettingsHistoryResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: SettingHistoryResponse;
 };
+
+export type GetAdminSettingsHistoryResponse = GetAdminSettingsHistoryResponses[keyof GetAdminSettingsHistoryResponses];
 
 export type PostAdminSettingsImportData = {
     body: SettingsBatchRequest;
@@ -6809,18 +6857,37 @@ export type PostAdminSettingsImportResponses = {
 export type PostAdminSettingsImportResponse = PostAdminSettingsImportResponses[keyof PostAdminSettingsImportResponses];
 
 export type PostAdminSettingsRollbackData = {
-    body?: never;
+    body: SettingRollbackRequest;
     path?: never;
     query?: never;
     url: '/admin/settings/rollback';
 };
 
+export type PostAdminSettingsRollbackErrors = {
+    /**
+     * setting_conflict: reviewed setting or history changed; no write
+     */
+    409: AppError;
+    /**
+     * setting_reload_pending: rollback persisted; reload runtime before further changes
+     */
+    503: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PostAdminSettingsRollbackError = PostAdminSettingsRollbackErrors[keyof PostAdminSettingsRollbackErrors];
+
 export type PostAdminSettingsRollbackResponses = {
     /**
      * OK
      */
-    200: unknown;
+    200: AdminSettingView;
 };
+
+export type PostAdminSettingsRollbackResponse = PostAdminSettingsRollbackResponses[keyof PostAdminSettingsRollbackResponses];
 
 export type PostAdminSettingsTestClickhouseData = {
     body?: never;

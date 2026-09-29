@@ -354,6 +354,33 @@ func assertOpenAPIContract(t *testing.T, spec map[string]any) {
 	assertJSONOperationSchema(t, paths, "/auth/keycloak/logout", "post", "200", "KeycloakLogoutResponse")
 	assertJSONRequestSchema(t, paths, "/auth/keycloak/logout", "post", "KeycloakLogoutRequest")
 	assertJSONRequestSchema(t, paths, "/admin/settings/by-key/{key}", "put", "SettingWriteRequest")
+	assertJSONRequestSchema(t, paths, "/admin/settings/rollback", "post", "SettingRollbackRequest")
+	assertJSONOperationSchema(t, paths, "/admin/settings/history", "get", "200", "SettingHistoryResponse")
+	assertJSONOperationSchema(t, paths, "/admin/settings/rollback", "post", "200", "AdminSettingView")
+	assertJSONOperationSchema(t, paths, "/admin/settings/rollback", "post", "409", "AppError")
+	assertJSONOperationSchema(t, paths, "/admin/settings/rollback", "post", "503", "AppError")
+	rollback, _ := schemas["SettingRollbackRequest"].(map[string]any)
+	rollbackProperties, _ := rollback["properties"].(map[string]any)
+	versionGuard, _ := rollbackProperties["expected_version"].(map[string]any)
+	if versionGuard["minimum"] != float64(0) {
+		t.Errorf("rollback expected_version must be non-negative: %v", versionGuard)
+	}
+	countGuard, _ := rollbackProperties["expected_history_count"].(map[string]any)
+	if countGuard["type"] != "integer" || countGuard["minimum"] != float64(0) || countGuard["maximum"] != float64(9007199254740991) {
+		t.Errorf("rollback expected_history_count must be a non-negative safe integer: %v", countGuard)
+	}
+	historyEntry, _ := schemas["SettingHistoryEntry"].(map[string]any)
+	historyProperties, _ := historyEntry["properties"].(map[string]any)
+	historyCount, _ := historyProperties["history_count"].(map[string]any)
+	if historyCount["type"] != "integer" || historyCount["minimum"] != float64(1) {
+		t.Errorf("history_count must be a positive whole-key count: %v", historyCount)
+	}
+	for _, field := range []string{"expected_updated_at", "expected_history_id"} {
+		guard, _ := rollbackProperties[field].(map[string]any)
+		if guard["type"] != "string" {
+			t.Errorf("rollback %s must be a string: %v", field, guard)
+		}
+	}
 	assertJSONRequestSchema(t, paths, "/admin/settings/bulk", "put", "SettingsBatchRequest")
 	assertOpenAPIParameter(t, paths, "/admin/settings/by-key/{key}", "delete", "path", "key")
 	assertOpenAPIParameter(t, paths, "/admin/settings/by-key/{key}", "delete", "query", "expected_version")

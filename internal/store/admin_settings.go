@@ -27,16 +27,19 @@ func newStoreID(prefix string) string {
 // JSON-encoded value (or, for secrets, the encrypted ciphertext). value_type tells the
 // caller how to decode it (string/int/bool/float/duration/csv).
 type AdminSetting struct {
-	Key             string `json:"key"`
-	Category        string `json:"category"`
-	ValueJSON       string `json:"value_json"`
-	ValueType       string `json:"value_type"`
-	IsSecret        bool   `json:"is_secret"`
-	Source          string `json:"source"`
-	Version         int    `json:"version"`
-	ExpectedVersion *int   `json:"-"`
-	UpdatedBy       string `json:"updated_by"`
-	UpdatedAt       string `json:"updated_at"`
+	Key                  string  `json:"key"`
+	Category             string  `json:"category"`
+	ValueJSON            string  `json:"value_json"`
+	ValueType            string  `json:"value_type"`
+	IsSecret             bool    `json:"is_secret"`
+	Source               string  `json:"source"`
+	Version              int     `json:"version"`
+	ExpectedVersion      *int    `json:"-"`
+	ExpectedUpdatedAt    *string `json:"-"`
+	ExpectedHistoryID    *string `json:"-"`
+	ExpectedHistoryCount *int64  `json:"-"`
+	UpdatedBy            string  `json:"updated_by"`
+	UpdatedAt            string  `json:"updated_at"`
 }
 
 // AdminSettingHistory is one change record for a setting.
@@ -49,6 +52,7 @@ type AdminSettingHistory struct {
 	ChangedBy    string `json:"changed_by"`
 	Reason       string `json:"reason"`
 	ChangedAt    string `json:"changed_at"`
+	HistoryCount int64  `json:"history_count"`
 }
 
 // AdminSettingsChangeToken returns a token for all DB-backed settings consumed by the runtime
@@ -198,6 +202,17 @@ func (s *SQLStore) UpsertAdminSettings(ctx context.Context, settings []AdminSett
 		return err
 	}
 	defer tx.Rollback()
+	// A guarded rollback must stabilize absent keys as well as existing rows.
+	// Acquire before ANY reads: normal INSERT/UPDATE/DELETE writers participate
+	// through their database write locks without a separate lock table/protocol.
+	for _, setting := range settings {
+		if setting.ExpectedHistoryID != nil || setting.ExpectedHistoryCount != nil {
+			if err := s.lockAdminSettingsRollbackTx(ctx, tx); err != nil {
+				return err
+			}
+			break
+		}
+	}
 	seen := make(map[string]struct{}, len(settings))
 	for _, setting := range settings {
 		if setting.Key == "" {
@@ -214,12 +229,23 @@ func (s *SQLStore) UpsertAdminSettings(ctx context.Context, settings []AdminSett
 	return tx.Commit()
 }
 
+func (s *SQLStore) lockAdminSettingsRollbackTx(ctx context.Context, tx *sql.Tx) error {
+	if s.dialect == "postgres" {
+		// Blocks settings writers, not ordinary SELECTs; held only until commit.
+		_, err := tx.ExecContext(ctx, `LOCK TABLE admin_settings IN SHARE ROW EXCLUSIVE MODE`)
+		return err
+	}
+	// Begin a SQLite write transaction without changing any row or history.
+	_, err := tx.ExecContext(ctx, `UPDATE admin_settings SET version = version WHERE 0`)
+	return err
+}
+
 func (s *SQLStore) upsertAdminSettingTx(ctx context.Context, tx *sql.Tx, a AdminSetting, changedBy, reason, now string) error {
-	var oldValue string
+	var oldValue, oldUpdatedAt string
 	var oldVersion int
-	row := tx.QueryRowContext(ctx, s.bind(`SELECT value_json, version FROM admin_settings WHERE key = ?`), a.Key)
+	row := tx.QueryRowContext(ctx, s.bind(`SELECT value_json, version, updated_at FROM admin_settings WHERE key = ?`), a.Key)
 	found := true
-	switch err := row.Scan(&oldValue, &oldVersion); {
+	switch err := row.Scan(&oldValue, &oldVersion, &oldUpdatedAt); {
 	case errors.Is(err, sql.ErrNoRows):
 		found = false
 		oldVersion = 0
@@ -233,6 +259,32 @@ func (s *SQLStore) upsertAdminSettingTx(ctx context.Context, tx *sql.Tx, a Admin
 	if (a.ExpectedVersion != nil || a.Version > 0) && expectedVersion != oldVersion {
 		return fmt.Errorf("%w: %s expected version %d, current version %d", ErrAdminSettingConflict, a.Key, expectedVersion, oldVersion)
 	}
+	if a.ExpectedUpdatedAt != nil && *a.ExpectedUpdatedAt != oldUpdatedAt {
+		return fmt.Errorf("%w: %s snapshot changed", ErrAdminSettingConflict, a.Key)
+	}
+	if a.ExpectedHistoryID != nil {
+		var latestID string
+		err := tx.QueryRowContext(ctx, s.bind(`SELECT id FROM admin_setting_history WHERE key = ? ORDER BY changed_at DESC, id DESC LIMIT 1`), a.Key).Scan(&latestID)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		if latestID != *a.ExpectedHistoryID {
+			return fmt.Errorf("%w: %s history changed", ErrAdminSettingConflict, a.Key)
+		}
+	}
+	if a.ExpectedHistoryCount != nil {
+		// Supported settings writers append history; none removes or replaces it.
+		// Count detects append ABA even when a pod's clock sorts its new rows
+		// behind the reviewed ID. History pruning/restoration must introduce a
+		// non-reusable revision before changing this append-only contract.
+		var count int64
+		if err := tx.QueryRowContext(ctx, s.bind(`SELECT COUNT(*) FROM admin_setting_history WHERE key = ?`), a.Key).Scan(&count); err != nil {
+			return err
+		}
+		if count != *a.ExpectedHistoryCount {
+			return fmt.Errorf("%w: %s history changed", ErrAdminSettingConflict, a.Key)
+		}
+	}
 	a.Version = oldVersion + 1
 	if a.Source == "" {
 		a.Source = "admin"
@@ -244,11 +296,18 @@ func (s *SQLStore) upsertAdminSettingTx(ctx context.Context, tx *sql.Tx, a Admin
 	var result sql.Result
 	var err error
 	if found {
-		result, err = tx.ExecContext(ctx, s.bind(`UPDATE admin_settings SET
+		query := `UPDATE admin_settings SET
 			category = ?, value_json = ?, value_type = ?, is_secret = ?, source = ?,
-			version = ?, updated_by = ?, updated_at = ? WHERE key = ? AND version = ?`),
+			version = ?, updated_by = ?, updated_at = ? WHERE key = ? AND version = ?`
+		args := []any{
 			a.Category, a.ValueJSON, a.ValueType, isSecret, a.Source,
-			a.Version, changedBy, now, a.Key, oldVersion)
+			a.Version, changedBy, now, a.Key, oldVersion,
+		}
+		if a.ExpectedUpdatedAt != nil {
+			query += ` AND updated_at = ?`
+			args = append(args, *a.ExpectedUpdatedAt)
+		}
+		result, err = tx.ExecContext(ctx, s.bind(query), args...)
 	} else {
 		result, err = tx.ExecContext(ctx, s.bind(`INSERT INTO admin_settings
 			(key, category, value_json, value_type, is_secret, source, version, updated_by, updated_at)
@@ -339,8 +398,10 @@ func (s *SQLStore) ListAdminSettingHistory(ctx context.Context, key string, limi
 		args = append(args, key)
 	}
 	args = append(args, limit)
-	rows, err := s.db.QueryContext(ctx, s.bind(`SELECT id, key, COALESCE(old_value_json, ''), COALESCE(new_value_json, ''), is_secret, COALESCE(changed_by, ''), COALESCE(reason, ''), changed_at
-		FROM admin_setting_history `+where+` ORDER BY changed_at DESC LIMIT ?`), args...)
+	// The window count is evaluated before LIMIT in the same read snapshot as
+	// the reviewed rows. It is a per-key append generation, not commit order.
+	rows, err := s.db.QueryContext(ctx, s.bind(`SELECT id, key, COALESCE(old_value_json, ''), COALESCE(new_value_json, ''), is_secret, COALESCE(changed_by, ''), COALESCE(reason, ''), changed_at, COUNT(*) OVER (PARTITION BY key)
+		FROM admin_setting_history `+where+` ORDER BY changed_at DESC, id DESC LIMIT ?`), args...)
 	if err != nil {
 		return nil, err
 	}
@@ -349,7 +410,7 @@ func (s *SQLStore) ListAdminSettingHistory(ctx context.Context, key string, limi
 	for rows.Next() {
 		var h AdminSettingHistory
 		var isSecret int
-		if err := rows.Scan(&h.ID, &h.Key, &h.OldValueJSON, &h.NewValueJSON, &isSecret, &h.ChangedBy, &h.Reason, &h.ChangedAt); err != nil {
+		if err := rows.Scan(&h.ID, &h.Key, &h.OldValueJSON, &h.NewValueJSON, &isSecret, &h.ChangedBy, &h.Reason, &h.ChangedAt, &h.HistoryCount); err != nil {
 			return nil, err
 		}
 		h.IsSecret = isSecret == 1

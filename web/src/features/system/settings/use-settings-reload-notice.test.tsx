@@ -1,0 +1,248 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { act, renderHook } from "@testing-library/react";
+import type { PropsWithChildren } from "react";
+import { describe, expect, it, vi } from "vitest";
+
+import { useSettingsReloadNotice } from "./use-settings-reload-notice";
+import { systemSettingsKeys } from "./use-system-settings";
+import { tokenStore } from "@/shared/auth/token-store";
+
+const key = systemSettingsKeys.effective;
+const applied = (upToDate: boolean | undefined) => ({ settings: [], this_pod: { up_to_date: upToDate } });
+
+function setup(upToDate: boolean | undefined = true) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  client.setQueryData(key, applied(upToDate));
+  const wrapper = ({ children }: PropsWithChildren) => (
+    <QueryClientProvider client={client}>{children}</QueryClientProvider>
+  );
+  const mount = () => renderHook(() => useSettingsReloadNotice(), { wrapper });
+  return { client, mount, ...mount() };
+}
+
+describe("설정 반영 대기 조회 세대", () => {
+  it("기존 적용 완료 캐시로 새 실패를 지우지 않고 같은 시각의 새 성공 조회로 해제한다", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(1000);
+    const { client, result } = setup();
+    act(() => result.current.setReloadPending({ requestId: "pending-one", observedUpdates: 1 }));
+    expect(result.current.reloadPending?.requestId).toBe("pending-one");
+    await act(async () => {
+      await client.fetchQuery({ queryKey: key, queryFn: async () => applied(true) });
+    });
+    expect(result.current.reloadPending).toBeUndefined();
+  });
+
+  it("조회 실패와 적용 여부 누락으로 대기 상태를 해제하지 않는다", async () => {
+    const { client, result } = setup();
+    act(() => result.current.setReloadPending({ requestId: "pending-one", observedUpdates: 1 }));
+    await act(async () => {
+      await client
+        .fetchQuery({
+          queryKey: key,
+          queryFn: async () => {
+            throw new Error("offline");
+          },
+        })
+        .catch(() => undefined);
+    });
+    expect(result.current.reloadPending?.requestId).toBe("pending-one");
+    await act(async () => {
+      await client.fetchQuery({ queryKey: key, queryFn: async () => applied(undefined) });
+    });
+    expect(result.current.reloadPending?.requestId).toBe("pending-one");
+  });
+
+  it("완료된 과거 요청 식별자를 이후 서버 반영 지연에 다시 붙이지 않는다", async () => {
+    const { client, result } = setup(false);
+    act(() => result.current.setReloadPending({ requestId: "completed-request", observedUpdates: 1 }));
+    await act(async () => {
+      await client.fetchQuery({ queryKey: key, queryFn: async () => applied(true) });
+    });
+    expect(result.current.reloadPending).toBeUndefined();
+    await act(async () => {
+      await client.fetchQuery({ queryKey: key, queryFn: async () => applied(false) });
+    });
+    expect(result.current.reloadPending).toEqual({});
+  });
+
+  it("새로 연 탭은 요청 이력 없이 서버 반영 대기를 표시한다", () => {
+    const { result } = setup(false);
+    expect(result.current.reloadPending).toEqual({});
+  });
+
+  it("정상 복구 결과는 조회 메타데이터가 없는 경우에도 로컬 실패를 지운다", () => {
+    const { result } = setup(undefined);
+    act(() => result.current.setReloadPending({ requestId: "old", observedUpdates: 1 }));
+    expect(result.current.reloadPending).toBeDefined();
+    act(() => result.current.setReloadPending(undefined));
+    expect(result.current.reloadPending).toBeUndefined();
+  });
+
+  it("응답 뒤의 빠른 조회가 callback 전에 끝나도 응답 세대와 비교해 해제한다", async () => {
+    const { client, result } = setup();
+    const observedUpdates = client.getQueryState(key)?.dataUpdateCount ?? 0;
+    await act(async () => {
+      await client.fetchQuery({ queryKey: key, queryFn: async () => applied(true) });
+      result.current.setReloadPending({ requestId: "fast", observedUpdates });
+    });
+    expect(result.current.reloadPending).toBeUndefined();
+  });
+
+  it("같은 인스턴스여도 인증 세대가 바뀌면 이전 요청 안내를 폐기한다", () => {
+    const { result } = setup();
+    act(() => result.current.setReloadPending({ requestId: "old-session", observedUpdates: 1 }));
+    expect(result.current.reloadPending?.requestId).toBe("old-session");
+    act(() => tokenStore.clearAll());
+    expect(result.current.reloadPending).toBeUndefined();
+  });
+
+  it("true 캐시의 세대가 높아도 현재 검증 조회가 끝나기 전에는 경고를 해제하지 않는다", async () => {
+    const { client, result } = setup();
+    await act(async () => {
+      await client.fetchQuery({ queryKey: key, queryFn: async () => applied(true) });
+    });
+    let reject!: (error: Error) => void;
+    let validation!: Promise<unknown>;
+    act(() => {
+      validation = client
+        .fetchQuery({
+          queryKey: key,
+          queryFn: () =>
+            new Promise<ReturnType<typeof applied>>((_, refuse) => {
+              reject = refuse;
+            }),
+        })
+        .catch(() => undefined);
+      result.current.setReloadPending({ requestId: "await-validation", observedUpdates: 1 });
+    });
+    expect(client.getQueryState(key)).toMatchObject({
+      status: "success",
+      fetchStatus: "fetching",
+      dataUpdateCount: 2,
+    });
+    expect(result.current.reloadPending?.requestId).toBe("await-validation");
+    await act(async () => {
+      reject(new Error("offline"));
+      await validation;
+    });
+    expect(result.current.reloadPending?.requestId).toBe("await-validation");
+    await act(async () => {
+      await client.fetchQuery({ queryKey: key, queryFn: async () => applied(true) });
+    });
+    expect(result.current.reloadPending).toBeUndefined();
+  });
+
+  it("실패한 검증의 retained true는 탭이나 경로를 다시 열어도 저장 완료 안내를 지우지 않는다", async () => {
+    const first = setup();
+    act(() =>
+      first.result.current.setReloadPending({ requestId: "persisted-before-leave", observedUpdates: 1 }),
+    );
+    await act(async () => {
+      await first.client.fetchQuery({ queryKey: key, queryFn: async () => applied(true) });
+      // Publish a new write outcome after this cached success, then fail its validation.
+      first.result.current.setReloadPending({ requestId: "persisted-before-leave", observedUpdates: 2 });
+      await first.client
+        .fetchQuery({
+          queryKey: key,
+          queryFn: async () => {
+            throw new Error("offline");
+          },
+        })
+        .catch(() => undefined);
+    });
+    first.unmount();
+    const second = first.mount();
+    expect(second.result.current.reloadPending?.requestId).toBe("persisted-before-leave");
+    await act(async () => {
+      await first.client.fetchQuery({ queryKey: key, queryFn: async () => applied(true) });
+    });
+    expect(second.result.current.reloadPending).toBeUndefined();
+    second.unmount();
+    expect(first.mount().result.current.reloadPending).toBeUndefined();
+  });
+
+  it("설정 조회가 GC되어 세대 카운터가 초기화되어도 새 조회 성공으로 안내를 해제한다", async () => {
+    const first = setup();
+    await act(async () => {
+      await first.client.fetchQuery({ queryKey: key, queryFn: async () => applied(true) });
+    });
+    act(() => first.result.current.setReloadPending({ requestId: "survives-query-gc", observedUpdates: 2 }));
+    first.unmount();
+    first.client.removeQueries({ queryKey: key, exact: true });
+    const second = first.mount();
+    expect(second.result.current.reloadPending?.requestId).toBe("survives-query-gc");
+    await act(async () => {
+      await first.client
+        .fetchQuery({
+          queryKey: key,
+          queryFn: async () => {
+            throw new Error("offline");
+          },
+        })
+        .catch(() => undefined);
+    });
+    expect(second.result.current.reloadPending?.requestId).toBe("survives-query-gc");
+    await act(async () => {
+      await first.client.fetchQuery({ queryKey: key, queryFn: async () => applied(true) });
+    });
+    expect(first.client.getQueryState(key)?.dataUpdateCount).toBe(1);
+    expect(second.result.current.reloadPending).toBeUndefined();
+  });
+
+  it("두 탭의 구독자는 한 세션 안내를 공유하고 명시적 복구 성공은 모두 해제한다", () => {
+    const first = setup();
+    const second = first.mount();
+    act(() => first.result.current.setReloadPending({ requestId: "shared", observedUpdates: 1 }));
+    expect(second.result.current.reloadPending?.requestId).toBe("shared");
+    act(() => second.result.current.setReloadPending(undefined));
+    expect(first.result.current.reloadPending).toBeUndefined();
+  });
+
+  it("모든 화면을 떠나 로그아웃한 뒤 다시 열어도 이전 세션 안내를 복원하지 않는다", () => {
+    const first = setup();
+    act(() => first.result.current.setReloadPending({ requestId: "old-session", observedUpdates: 1 }));
+    first.unmount();
+    tokenStore.clearAll();
+    const second = first.mount();
+    expect(second.result.current.reloadPending).toBeUndefined();
+    expect(
+      JSON.stringify(
+        first.client
+          .getQueryCache()
+          .getAll()
+          .map((query) => query.state.data),
+      ),
+    ).not.toContain("old-session");
+  });
+
+  it("이전 세션 callback은 캐시 초기화와 재진입 뒤 새 안내를 생성하거나 지우지 않는다", () => {
+    const first = setup();
+    const staleSet = first.result.current.setReloadPending;
+    act(() => staleSet({ requestId: "old", observedUpdates: 1 }));
+    first.unmount();
+    tokenStore.clearAll();
+    first.client.clear();
+    const second = first.mount();
+    act(() => second.result.current.setReloadPending({ requestId: "new", observedUpdates: 0 }));
+    act(() => {
+      staleSet({ requestId: "old-late", observedUpdates: 0 });
+      staleSet(undefined);
+    });
+    expect(second.result.current.reloadPending?.requestId).toBe("new");
+    const metadata = first.client
+      .getQueryCache()
+      .getAll()
+      .find((query) => query.queryKey.includes("reload-pending-notice"))?.state.data as Record<
+      string,
+      unknown
+    >;
+    expect(Object.keys(metadata).sort()).toEqual([
+      "observedUpdates",
+      "queryGeneration",
+      "requestId",
+      "sessionEpoch",
+    ]);
+    expect(window.sessionStorage.length).toBe(0);
+    expect(window.localStorage.length).toBe(0);
+  });
+});
