@@ -148,7 +148,7 @@ describe("ChatTestPage", () => {
     mockApi({ "GET /admin/chat-test/targets": () => targetsFixture });
     renderChat();
 
-    expect(await screen.findByRole("heading", { name: "Chat 테스트", level: 1 })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "채팅 테스트", level: 1 })).toBeInTheDocument();
     const targetSelect = await screen.findByLabelText("테스트 대상");
     expect(within(targetSelect).getByRole("option", { name: /Intelligent Router/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Chat 호출/ })).toBeEnabled();

@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 
 import { QueryNotice } from "@/features/mcp/mcp-ui";
-import { decisionLabel, decisionTone } from "@/features/mcp/mcp-utils";
+import { decisionLabel, decisionTone, riskLabel } from "@/features/mcp/mcp-utils";
 import { apiClient } from "@/shared/api/client";
 import { endpoints } from "@/shared/api/endpoints";
 import type { McpRoute } from "@/shared/api/domains/mcp.schemas";
@@ -82,7 +82,7 @@ export function McpOverviewTab({ canWrite }: { canWrite: boolean }): React.JSX.E
   const explain = useMutationFeedback({
     mutate: (body: { method: string; name: string; uri: string }) =>
       apiClient.request(endpoints.domains.mcp.routeExplain, { body, routeId }),
-    errorMessage: "라우트 설명을 확인하지 못했습니다.",
+    errorMessage: "적용 경로를 확인하지 못했습니다.",
   });
   const test = useMutationFeedback({
     mutate: (body: { method: string; name: string; uri: string }) =>
@@ -159,7 +159,7 @@ export function McpOverviewTab({ canWrite }: { canWrite: boolean }): React.JSX.E
       </StatGrid>
 
       <SectionCard
-        title="Route Explain · Test 콘솔"
+        title="경로 확인·호출 테스트"
         description="노출 이름으로 어떤 업스트림과 정책이 적용되는지 확인하고, 실제 호출로 연결을 점검합니다."
       >
         <form
@@ -197,7 +197,7 @@ export function McpOverviewTab({ canWrite }: { canWrite: boolean }): React.JSX.E
             />
           </label>
           <Button type="submit" variant="primary" disabled={explain.isPending}>
-            {explain.isPending ? "확인 중" : "라우트 설명"}
+            {explain.isPending ? "확인 중" : "적용 경로 확인"}
           </Button>
           <Button
             type="button"
@@ -217,7 +217,7 @@ export function McpOverviewTab({ canWrite }: { canWrite: boolean }): React.JSX.E
               { label: "대상 메서드", value: explain.data.route?.target_method ?? "—", mono: true },
               { label: "대상 이름", value: explain.data.route?.target_name ?? "—", mono: true },
               { label: "서버 정책", value: decisionLabel(explain.data.policy?.server_policy ?? "") },
-              { label: "도구 위험도", value: explain.data.policy?.tool_risk_level ?? "—" },
+              { label: "도구 위험도", value: riskLabel(explain.data.policy?.tool_risk_level ?? "") },
               {
                 label: "최종 판단",
                 value: (
@@ -249,7 +249,7 @@ export function McpOverviewTab({ canWrite }: { canWrite: boolean }): React.JSX.E
       </SectionCard>
 
       <SectionCard
-        title="Route Map"
+        title="제공 기능 목록"
         description="게이트웨이가 외부 에이전트에 노출하는 도구·프롬프트·리소스 목록입니다."
         actions={
           routes.data?.fetched_at ? (
@@ -261,7 +261,7 @@ export function McpOverviewTab({ canWrite }: { canWrite: boolean }): React.JSX.E
           <QueryNotice
             error={routes.error}
             hasData={false}
-            label="Route Map"
+            label="제공 기능 목록"
             onRetry={() => void routes.refetch()}
           />
         ) : null}

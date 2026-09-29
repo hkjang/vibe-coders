@@ -48,7 +48,7 @@ export function setupSteps(stats: AdminStats | undefined, status: OpsStatus | un
       why: "요청이 하나라도 들어오면 이 화면의 지표와 추적이 채워집니다.",
       done: (stats?.total_requests ?? 0) > 0,
       to: "/gateway/chat",
-      action: "Chat 테스트 열기",
+      action: "채팅 테스트 열기",
     },
   ];
 }

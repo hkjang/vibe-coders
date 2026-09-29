@@ -6,7 +6,7 @@ import { z } from "zod";
 import { useAuth } from "@/app/auth/AuthProvider";
 import "@/features/mcp/mcp.css";
 import { QueryNotice } from "@/features/mcp/mcp-ui";
-import { riskTone } from "@/features/mcp/mcp-utils";
+import { riskLabel, riskTone } from "@/features/mcp/mcp-utils";
 import { apiClient } from "@/shared/api/client";
 import type { McpContractBody } from "@/shared/api/domains/mcp";
 import type { McpContract } from "@/shared/api/domains/mcp.schemas";
@@ -37,9 +37,9 @@ const routeId = "mcp.gateway";
 const writeScope = "mcp:admin";
 
 const riskOptions = [
-  { value: "low", label: "low" },
-  { value: "medium", label: "medium" },
-  { value: "high", label: "high" },
+  { value: "low", label: riskLabel("low") },
+  { value: "medium", label: riskLabel("medium") },
+  { value: "high", label: riskLabel("high") },
 ];
 
 const contractFormSchema = z.object({
@@ -117,7 +117,9 @@ const publishedColumns = [
   publishedColumn.accessor((row) => row.risk_level, {
     id: "risk",
     header: "위험도",
-    cell: (info) => <Badge tone={riskTone(info.getValue<string>())}>{info.getValue<string>()}</Badge>,
+    cell: (info) => (
+      <Badge tone={riskTone(info.getValue<string>())}>{riskLabel(info.getValue<string>())}</Badge>
+    ),
   }),
   publishedColumn.accessor((row) => row.cost_policy, { id: "cost", header: "비용 정책" }),
   publishedColumn.accessor((row) => `${formatNumber(row.timeout_ms)}ms`, {
@@ -241,7 +243,9 @@ export function GatewayMcpPage(): React.JSX.Element {
     registryColumn.accessor((row) => row.risk_level, {
       id: "risk",
       header: "위험도",
-      cell: (info2) => <Badge tone={riskTone(info2.getValue<string>())}>{info2.getValue<string>()}</Badge>,
+      cell: (info2) => (
+        <Badge tone={riskTone(info2.getValue<string>())}>{riskLabel(info2.getValue<string>())}</Badge>
+      ),
     }),
     registryColumn.accessor((row) => row.owner || "—", { id: "owner", header: "담당" }),
     registryColumn.accessor((row) => (row.enabled ? "사용" : "중지"), { id: "enabled", header: "상태" }),
@@ -294,7 +298,7 @@ export function GatewayMcpPage(): React.JSX.Element {
   return (
     <div className="page-stack">
       <PageHeader
-        title="Gateway MCP"
+        title="게이트웨이 MCP"
         description="게이트웨이가 스스로 제공하는 MCP 서버의 연결 정보와 도구 계약을 관리합니다."
         legacyHref="/admin#/gateway-mcp"
         actions={
@@ -317,7 +321,7 @@ export function GatewayMcpPage(): React.JSX.Element {
         <QueryNotice
           error={info.error}
           hasData={Boolean(info.data)}
-          label="Gateway MCP 정보"
+          label="게이트웨이 MCP 정보"
           onRetry={() => void info.refetch()}
         />
       ) : null}
@@ -341,7 +345,7 @@ export function GatewayMcpPage(): React.JSX.Element {
 
       <SectionCard title="제공 도구" description="게이트웨이가 MCP로 노출하는 도구 목록입니다.">
         <DataTable
-          caption="Gateway MCP 도구"
+          caption="게이트웨이 MCP 도구"
           columns={toolColumns}
           data={info.data?.tools ?? []}
           loading={info.isPending}
@@ -352,7 +356,7 @@ export function GatewayMcpPage(): React.JSX.Element {
 
       <SectionCard title="게시된 도구 계약" description="도구별 위험도, 비용 정책과 타임아웃 계약입니다.">
         <DataTable
-          caption="Gateway MCP 게시 계약"
+          caption="게이트웨이 MCP 게시 계약"
           columns={publishedColumns}
           data={info.data?.contracts ?? []}
           loading={info.isPending}

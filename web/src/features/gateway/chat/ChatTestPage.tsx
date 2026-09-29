@@ -30,7 +30,7 @@ export function ChatTestPage(): React.JSX.Element {
   return (
     <div className="page-stack">
       <PageHeader
-        title="Chat 테스트"
+        title="채팅 테스트"
         status="preview"
         description="게이트웨이를 통해 모델을 직접 호출하고, 여러 모델의 응답을 비교합니다."
         legacyHref="/admin#/chat-test"
@@ -42,7 +42,7 @@ export function ChatTestPage(): React.JSX.Element {
       </InlineNotice>
 
       <Tabs
-        ariaLabel="Chat 테스트 화면"
+        ariaLabel="채팅 테스트 화면"
         items={tabs}
         onChange={setTab}
         panelIdPrefix="gateway-chat"

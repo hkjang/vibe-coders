@@ -9,6 +9,12 @@ import {
   type GovernanceColumn,
 } from "@/features/governance/policies/governance-parts";
 import { compactJson } from "@/features/governance/policies/governance-utils";
+import {
+  actionLabels,
+  conditionLabels,
+  policyDecisionLabel,
+  policyDecisionOptions,
+} from "@/features/governance/policies/policy-labels";
 import { apiClient } from "@/shared/api/client";
 import type { Policy, PolicyRegressionRun } from "@/shared/api/domains/governance";
 import { endpoints } from "@/shared/api/endpoints";
@@ -51,17 +57,6 @@ const actionKeys = [
   "deny_providers",
   "allow_providers",
 ] as const;
-
-const actionLabels: Record<(typeof actionKeys)[number], string> = {
-  block: "block (차단)",
-  require_approval: "require_approval (승인 요구)",
-  secret_mask: "secret_action=mask",
-  secret_block: "secret_action=block",
-  deny_models: "deny_models",
-  allow_models: "allow_models",
-  deny_providers: "deny_providers",
-  allow_providers: "allow_providers",
-};
 
 const policyFormSchema = z.object({
   name: z.string().trim().min(1, "정책 이름을 입력하세요."),
@@ -274,10 +269,10 @@ export function PolicyEngineSection({ canWrite }: { canWrite: boolean }): React.
           <ul>
             {(row.rules ?? []).slice(0, 3).map((rule, index) => (
               <li key={rule.id ?? index}>
-                <strong>{rule.name || rule.id || "rule"}</strong>
+                <strong>{rule.name || rule.id || "규칙"}</strong>
                 <br />
                 <span className="mono">
-                  if {compactJson(rule.conditions)} → {compactJson(rule.actions)}
+                  조건 {compactJson(rule.conditions)} → {compactJson(rule.actions)}
                 </span>
               </li>
             ))}
@@ -294,7 +289,7 @@ export function PolicyEngineSection({ canWrite }: { canWrite: boolean }): React.
       header: "적용 비율",
       cell: (row) =>
         Number(row.rollout_percent ?? 100) < 100 ? (
-          <Badge tone="warning">canary {formatNumber(row.rollout_percent)}%</Badge>
+          <Badge tone="warning">점진 적용 {formatNumber(row.rollout_percent)}%</Badge>
         ) : (
           "100%"
         ),
@@ -325,11 +320,11 @@ export function PolicyEngineSection({ canWrite }: { canWrite: boolean }): React.
     { id: "provider", header: "공급자", cell: (row) => row.provider || "—" },
     {
       id: "risk",
-      header: "risk",
+      header: "위험 점수",
       cell: (row) => <span className="cell-number">{formatNumber(row.risk_score)}</span>,
     },
-    { id: "secret", header: "secret", cell: (row) => (row.contains_secret ? "포함" : "—") },
-    { id: "expect", header: "기대 결과", cell: (row) => <Badge>{row.expect ?? "—"}</Badge> },
+    { id: "secret", header: "비밀정보", cell: (row) => (row.contains_secret ? "포함" : "—") },
+    { id: "expect", header: "기대 결과", cell: (row) => <Badge>{policyDecisionLabel(row.expect)}</Badge> },
     {
       id: "actions",
       header: "동작",
@@ -433,7 +428,10 @@ export function PolicyEngineSection({ canWrite }: { canWrite: boolean }): React.
             {(runResult.results ?? [])
               .filter((result) => result.pass === false)
               .slice(0, 5)
-              .map((result) => `${result.name ?? result.id}: 기대 ${result.expect} · 실제 ${result.actual}`)
+              .map(
+                (result) =>
+                  `${result.name ?? result.id}: 기대 ${policyDecisionLabel(result.expect)} · 실제 ${policyDecisionLabel(result.actual)}`,
+              )
               .join(" / ") || "모든 시나리오가 기대한 판단과 일치합니다."}
           </InlineNotice>
         ) : null}
@@ -472,7 +470,7 @@ export function PolicyEngineSection({ canWrite }: { canWrite: boolean }): React.
         </FormField>
         <FormField
           label="적용 비율(%)"
-          description="canary 단계 적용 비율입니다. 100이면 전체 적용."
+          description="점진 적용 비율입니다. 100이면 전체 요청에 적용합니다."
           error={policyForm.formState.errors.rollout?.message}
         >
           {(control) => (
@@ -484,7 +482,7 @@ export function PolicyEngineSection({ canWrite }: { canWrite: boolean }): React.
             <Select {...control} {...policyForm.register("conditionKey")}>
               {conditionKeys.map((key) => (
                 <option key={key} value={key}>
-                  {key}
+                  {conditionLabels[key]}
                 </option>
               ))}
             </Select>
@@ -510,7 +508,7 @@ export function PolicyEngineSection({ canWrite }: { canWrite: boolean }): React.
         </FormField>
         <FormField
           label="동작 대상"
-          description="모델·공급자 목록을 쉼표로 구분합니다. (allow/deny 동작에만 사용)"
+          description="모델·공급자 목록을 쉼표로 구분합니다. 모델·공급자 허용 또는 차단 동작에만 사용합니다."
           error={policyForm.formState.errors.actionValue?.message}
         >
           {(control) => <Input {...control} {...policyForm.register("actionValue")} />}
@@ -538,7 +536,7 @@ export function PolicyEngineSection({ canWrite }: { canWrite: boolean }): React.
         <FormField label="공급자" error={regressionForm.formState.errors.provider?.message}>
           {(control) => <Input {...control} {...regressionForm.register("provider")} />}
         </FormField>
-        <FormField label="risk 점수" error={regressionForm.formState.errors.risk?.message}>
+        <FormField label="위험 점수" error={regressionForm.formState.errors.risk?.message}>
           {(control) => (
             <Input {...control} type="number" min={0} max={100} {...regressionForm.register("risk")} />
           )}
@@ -546,11 +544,7 @@ export function PolicyEngineSection({ canWrite }: { canWrite: boolean }): React.
         <Checkbox label="민감정보 포함 상황" {...regressionForm.register("containsSecret")} />
         <FormField label="기대 결과" error={regressionForm.formState.errors.expect?.message}>
           {(control) => (
-            <Select {...control} {...regressionForm.register("expect")}>
-              <option value="allow">allow</option>
-              <option value="block">block</option>
-              <option value="require_approval">require_approval</option>
-            </Select>
+            <Select {...control} {...regressionForm.register("expect")} options={policyDecisionOptions} />
           )}
         </FormField>
       </FormDialog>

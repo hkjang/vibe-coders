@@ -49,6 +49,8 @@ import type {
   PostAdminSettingsTestText2SqlTwinData,
   PostAdminSsoKeycloakTestData,
   PostAdminSystemErrorsClearData,
+  PutAdminSettingsBulkData,
+  PutAdminSettingsBulkResponse,
   PutAdminSettingsByKeyKeyData,
   PutAdminSettingsByKeyKeyResponse,
   PutAdminSsoKeycloakConfigData,
@@ -89,6 +91,7 @@ import {
   settingHistorySchema,
   settingRevertQuerySchema,
   settingViewSchema,
+  settingsBatchSchema,
   systemAcknowledgementSchema,
   systemErrorListSchema,
   systemErrorQuerySchema,
@@ -171,6 +174,11 @@ export const systemEndpoints = {
       WithBody<PutAdminSettingsByKeyKeyData, SettingWriteBody>,
       PutAdminSettingsByKeyKeyResponse
     >()("PUT", "/admin/settings/by-key/{key}", settingViewSchema),
+    bulk: operation<PutAdminSettingsBulkData, PutAdminSettingsBulkResponse>()(
+      "PUT",
+      "/admin/settings/bulk",
+      settingsBatchSchema,
+    ),
     revert: operation<DeleteAdminSettingsByKeyKeyData, DeleteAdminSettingsByKeyKeyResponse>()(
       "DELETE",
       "/admin/settings/by-key/{key}",

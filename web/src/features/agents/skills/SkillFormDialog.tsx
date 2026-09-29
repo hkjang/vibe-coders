@@ -40,14 +40,14 @@ export function SkillFormDialog({
 
   return (
     <FormDialog
-      description="Skill 정의와 실행 정책을 편집합니다. 프로덕션 승격에는 모델·도구·팀 허용 목록과 일일 한도가 모두 필요합니다."
+      description="스킬 정의와 실행 정책을 편집합니다. 프로덕션 승격에는 모델·도구·팀 허용 목록과 일일 한도가 모두 필요합니다."
       form={form}
       onOpenChange={onOpenChange}
       onSubmit={onSubmit}
       open={open}
       returnFocusRef={returnFocusRef}
-      submitLabel={skill ? "수정 저장" : "Skill 만들기"}
-      title={skill ? `Skill 수정 · ${skill.name}` : "새 Skill"}
+      submitLabel={skill ? "수정 저장" : "스킬 만들기"}
+      title={skill ? `스킬 수정 · ${skill.name}` : "스킬 추가"}
     >
       <FormField label="이름" required error={errors.name?.message}>
         {(control) => <Input {...control} readOnly={skill !== undefined} {...form.register("name")} />}

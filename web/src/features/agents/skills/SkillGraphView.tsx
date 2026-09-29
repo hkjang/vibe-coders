@@ -12,7 +12,7 @@ const nodeHeight = 20;
 const svgWidth = 560;
 
 const typeLabels: Record<string, string> = {
-  skill: "Skill",
+  skill: "스킬",
   model: "모델",
   tool: "도구",
   team: "팀",
@@ -34,8 +34,8 @@ export function SkillGraphView({ edges, nodes, skills }: SkillGraphViewProps): R
   if (nodes.length === 0) {
     return (
       <EmptyState
-        title="프로덕션 Skill 의존성이 없습니다."
-        description="Skill을 프로덕션으로 승격하면 모델·도구·팀 의존성이 여기에 나타납니다."
+        title="프로덕션 스킬 의존성이 없습니다."
+        description="스킬을 프로덕션으로 승격하면 모델·도구·팀 의존성이 여기에 나타납니다."
       />
     );
   }
@@ -59,7 +59,7 @@ export function SkillGraphView({ edges, nodes, skills }: SkillGraphViewProps): R
           height={height}
           viewBox={`0 0 ${svgWidth} ${height}`}
           role="img"
-          aria-label={`Skill 의존성 그래프: Skill ${skillNodes.length}개와 의존 대상 ${otherNodes.length}개, 연결 ${edges.length}개`}
+          aria-label={`스킬 의존성 그래프: 스킬 ${skillNodes.length}개와 의존 대상 ${otherNodes.length}개, 연결 ${edges.length}개`}
         >
           {edges.map((edge, index) => {
             const from = positions.get(edge.from ?? "");
@@ -106,7 +106,7 @@ export function SkillGraphView({ edges, nodes, skills }: SkillGraphViewProps): R
         </p>
       </div>
 
-      <ul className="agents-tree" aria-label="Skill 의존성 상세">
+      <ul className="agents-tree" aria-label="스킬 의존성 상세">
         {skills.map((skill) => (
           <li key={skill.name ?? ""}>
             <h4>

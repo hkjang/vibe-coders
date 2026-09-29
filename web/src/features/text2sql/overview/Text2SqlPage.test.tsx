@@ -278,10 +278,20 @@ describe("Text2SqlPage", () => {
     const user = userEvent.setup();
     renderPage("/text2sql?tab=access");
 
+    const permissions = await screen.findByRole("table", { name: "Text2SQL 권한 매트릭스" });
+    expect(await within(permissions).findByText("팀", { exact: true })).toBeVisible();
+    expect(within(permissions).getByText("차단", { exact: true })).toBeVisible();
     await user.click(await screen.findByRole("button", { name: "권한 규칙 추가" }));
     const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByRole("option", { name: "팀" })).toHaveValue("team");
+    expect(within(dialog).getByRole("option", { name: "API 키" })).toHaveValue("api_key");
+    expect(within(dialog).getByRole("option", { name: "사용자" })).toHaveValue("user");
+    expect(within(dialog).getByRole("option", { name: "차단" })).toHaveValue("deny");
+    expect(within(dialog).getByRole("option", { name: "허용" })).toHaveValue("allow");
     await user.type(within(dialog).getByLabelText(/주체 ID/u), "platform");
-    await user.type(within(dialog).getByLabelText(/^schema/u), "analytics");
+    await user.type(within(dialog).getByLabelText("스키마"), "analytics");
+    expect(within(dialog).getByLabelText("테이블")).toBeVisible();
+    expect(within(dialog).getByLabelText("열")).toBeVisible();
     await user.click(within(dialog).getByRole("button", { name: "추가" }));
 
     await waitFor(() => {

@@ -323,7 +323,58 @@ describe("PoliciesPage", () => {
     expect(await screen.findByText("aws_access_key")).toBeInTheDocument();
     expect(await screen.findByText("고비용 모델 사용")).toBeInTheDocument();
     expect(await screen.findAllByText("오류율 경보")).toHaveLength(2);
-    expect(screen.getByText("canary 50%")).toBeInTheDocument();
+    expect(screen.getByText("점진 적용 50%")).toBeInTheDocument();
+    const cases = screen.getByRole("table", { name: "정책 회귀 시나리오" });
+    expect(within(cases).getByRole("columnheader", { name: "위험 점수" })).toBeVisible();
+    expect(within(cases).getByRole("columnheader", { name: "비밀정보" })).toBeVisible();
+    expect(within(cases).getByText("차단")).toBeVisible();
+  });
+
+  it("한글 정책 조건과 동작을 골라도 서버의 규칙 코드를 그대로 전송한다", async () => {
+    const api = mockAllEndpoints();
+    const user = userEvent.setup();
+    render();
+
+    await user.click(await screen.findByRole("button", { name: "정책 추가" }));
+    const dialog = await screen.findByRole("dialog", { name: "AI 정책 추가" });
+    await user.type(within(dialog).getByLabelText(/^정책 이름/u), "공급자 제한");
+    const condition = within(dialog).getByRole("combobox", { name: "조건" });
+    const action = within(dialog).getByRole("combobox", { name: "동작" });
+    expect(within(condition).getByRole("option", { name: "비밀정보 포함" })).toHaveValue("contains_secret");
+    expect(within(action).getByRole("option", { name: "비밀정보 가리기" })).toHaveValue("secret_mask");
+    await user.selectOptions(condition, within(condition).getByRole("option", { name: "팀" }));
+    await user.type(within(dialog).getByLabelText("조건값"), "platform");
+    await user.selectOptions(action, within(action).getByRole("option", { name: "공급자 허용" }));
+    await user.type(within(dialog).getByLabelText("동작 대상"), "provider-a,provider-b");
+    await user.click(within(dialog).getByRole("button", { name: "정책 저장" }));
+
+    await waitFor(() => expect(api.bodies("POST /admin/policies")).toHaveLength(1));
+    expect(api.bodies("POST /admin/policies")[0]).toMatchObject({
+      name: "공급자 제한",
+      rules: [
+        { conditions: { team: "platform" }, actions: { allow_providers: ["provider-a", "provider-b"] } },
+      ],
+    });
+  });
+
+  it("한글 기대 결과를 선택한 회귀 시나리오에 기존 판단 코드를 저장한다", async () => {
+    const api = mockAllEndpoints();
+    const user = userEvent.setup();
+    render();
+
+    await user.click(await screen.findByRole("button", { name: "시나리오 추가" }));
+    const dialog = await screen.findByRole("dialog", { name: "회귀 시나리오 추가" });
+    await user.type(within(dialog).getByLabelText(/^시나리오 이름/u), "승인 필요 확인");
+    const result = within(dialog).getByRole("combobox", { name: "기대 결과" });
+    await user.selectOptions(result, within(result).getByRole("option", { name: "승인 필요" }));
+    await user.click(within(dialog).getByRole("button", { name: "시나리오 저장" }));
+
+    await waitFor(() => expect(api.bodies("POST /admin/policies/regression/cases")).toHaveLength(1));
+    expect(api.bodies("POST /admin/policies/regression/cases")[0]).toMatchObject({
+      name: "승인 필요 확인",
+      expect: "require_approval",
+      risk_score: 0,
+    });
   });
 
   it("정책이 없으면 빈 상태를 안내한다", async () => {

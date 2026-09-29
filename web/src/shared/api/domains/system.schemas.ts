@@ -59,6 +59,12 @@ export const effectiveSettingsSchema = looseObject({
   this_pod: podReloadStatusSchema.optional(),
 });
 
+/** PUT /admin/settings/bulk — a documented, atomic settings response. */
+export const settingsBatchSchema = z.strictObject({
+  ok: z.boolean(),
+  applied: z.number().int().nonnegative(),
+});
+
 export const settingHistorySchema = looseObject({
   history: looseList({
     id: z.string(),

@@ -18,7 +18,7 @@
     "openapi:generate": "node scripts/openapi-contract.mjs generate",
     "openapi:snapshot": "node scripts/openapi-contract.mjs snapshot",
     "openapi:check": "node scripts/openapi-contract.mjs check",
-    "test": "vitest run && node --test scripts/openapi-contract.test.mjs scripts/run-tool.test.mjs",
+    "test": "vitest run && node --test scripts/openapi-contract.test.mjs scripts/run-tool.test.mjs ../scripts/merge-source-sbom.test.mjs",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "check": "corepack pnpm openapi:check && corepack pnpm lint && corepack pnpm format:check && corepack pnpm typecheck && corepack pnpm test && corepack pnpm build"

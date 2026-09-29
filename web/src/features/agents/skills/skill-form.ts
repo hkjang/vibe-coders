@@ -47,7 +47,7 @@ export const skillFormSchema = z
     name: z
       .string()
       .trim()
-      .min(1, "Skill 이름을 입력하세요.")
+      .min(1, "스킬 이름을 입력하세요.")
       .regex(/^[a-z0-9][a-z0-9-]*$/u, "소문자, 숫자, 하이픈만 사용할 수 있습니다."),
     description: z.string(),
     version: z.string(),

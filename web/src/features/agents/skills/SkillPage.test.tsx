@@ -68,7 +68,7 @@ describe("SkillPage", () => {
     mockApi(baseHandlers);
     renderPage();
 
-    const table = await screen.findByRole("table", { name: "Skill 카탈로그" });
+    const table = await screen.findByRole("table", { name: "스킬 카탈로그" });
     expect(within(table).getByText("code-review")).toBeVisible();
     expect(within(table).getByText("스테이징")).toBeVisible();
     expect(within(table).getByText("gpt-4o")).toBeVisible();
@@ -78,7 +78,7 @@ describe("SkillPage", () => {
     mockApi({ ...baseHandlers, "GET /admin/skills": () => ({ skills: [] }) });
     renderPage();
 
-    expect(await screen.findByText("등록된 Skill이 없습니다.")).toBeVisible();
+    expect(await screen.findByText("등록된 스킬이 없습니다.")).toBeVisible();
   });
 
   it("shows the request id when the catalog fails", async () => {
@@ -98,9 +98,9 @@ describe("SkillPage", () => {
     mockApi(baseHandlers);
     renderPage();
 
-    await screen.findByRole("table", { name: "Skill 카탈로그" });
-    expect(screen.getByRole("button", { name: /새 Skill/u })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "추천 Skill 시드" })).toBeDisabled();
+    await screen.findByRole("table", { name: "스킬 카탈로그" });
+    expect(screen.getByRole("button", { name: "스킬 추가" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "추천 스킬 추가" })).toBeDisabled();
   });
 
   it("runs the security scan only when the operator asks for it", async () => {
@@ -125,11 +125,11 @@ describe("SkillPage", () => {
     });
     renderPage();
 
-    await screen.findByRole("table", { name: "Skill 카탈로그" });
+    await screen.findByRole("table", { name: "스킬 카탈로그" });
     expect(api.calls.some((call) => call.key === "GET /admin/skills/scan")).toBe(false);
 
     await user.click(screen.getByRole("button", { name: "보안 스캔" }));
-    const table = await screen.findByRole("table", { name: "Skill 보안 스캔 결과" });
+    const table = await screen.findByRole("table", { name: "스킬 보안 스캔 결과" });
     expect(within(table).getByText("policy_hygiene: 허용 도구가 넓습니다")).toBeVisible();
   });
 
@@ -240,8 +240,8 @@ describe("SkillPage", () => {
     });
     renderPage("/agents/skills?tab=graph");
 
-    expect(await screen.findByRole("img", { name: /Skill 의존성 그래프/u })).toBeVisible();
-    const detail = await screen.findByRole("list", { name: "Skill 의존성 상세" });
+    expect(await screen.findByRole("img", { name: /스킬 의존성 그래프/u })).toBeVisible();
+    const detail = await screen.findByRole("list", { name: "스킬 의존성 상세" });
     expect(within(detail).getByText("모델 제한 (model:gpt-4o)")).toBeVisible();
   });
 
@@ -305,7 +305,7 @@ describe("SkillPage", () => {
     mockApi(baseHandlers);
     const { container } = renderPage();
 
-    await screen.findByRole("table", { name: "Skill 카탈로그" });
+    await screen.findByRole("table", { name: "스킬 카탈로그" });
     expect((await axe.run(container)).violations).toEqual([]);
   });
 });

@@ -57,6 +57,7 @@ function renderShell(
           <Route element={<AppShell />}>
             <Route path="overview" element={<h1>Overview content</h1>} />
             <Route path="gateway/providers" element={<h1>Provider content</h1>} />
+            <Route path="agents/skills" element={<h1>Skill content</h1>} />
           </Route>
         </Routes>
       </MemoryRouter>
@@ -80,6 +81,25 @@ describe("AppShell", () => {
       recentFeatures: [],
     });
     vi.spyOn(apiClient, "request").mockResolvedValue({ status: "ok" });
+  });
+
+  it("shows Korean feature names while preserving paths and English search keywords", async () => {
+    const user = userEvent.setup();
+    renderShell();
+
+    for (const [name, path] of [
+      ["채팅 테스트", "/gateway/chat"],
+      ["게이트웨이 MCP", "/mcp-gateway"],
+      ["스킬", "/agents/skills"],
+      ["레드팀 자동화", "/redteam"],
+    ]) {
+      expect(screen.getByRole("link", { name: new RegExp(`^${name}`) })).toHaveAttribute("href", path);
+    }
+
+    await user.keyboard("{Control>}k{/Control}");
+    await user.type(await screen.findByRole("combobox", { name: "메뉴 검색" }), "skill");
+    await user.click(screen.getByRole("option", { name: /스킬/ }));
+    expect(screen.getByRole("heading", { name: "Skill content" })).toBeVisible();
   });
 
   it("uses the complete combobox/listbox keyboard model to navigate by command", async () => {

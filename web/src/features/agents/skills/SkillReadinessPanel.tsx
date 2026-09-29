@@ -41,8 +41,8 @@ export function SkillReadinessPanel({
     return (
       <SectionCard title="승격 준비도" headingLevel={3}>
         <EmptyState
-          title="Skill을 선택하세요."
-          description="후보를 채택했거나 이미 존재하는 Skill을 고르면 승격 게이트 점검 결과를 확인할 수 있습니다."
+          title="스킬을 선택하세요."
+          description="후보를 채택했거나 이미 존재하는 스킬을 고르면 승격 게이트 점검 결과를 확인할 수 있습니다."
         />
       </SectionCard>
     );
@@ -163,8 +163,8 @@ export function SkillReadinessPanel({
         </ul>
       ) : null}
 
-      <InlineNotice tone="info" title="Chat 테스트는 별도 화면에서">
-        승격 마법사의 Chat 테스트 단계는 Chat 테스트 화면(`/admin#/chat-test`)에서 진행하고, 결과를 적합성
+      <InlineNotice tone="info" title="채팅 테스트는 별도 화면에서">
+        승격 마법사의 채팅 테스트 단계는 채팅 테스트 화면(`/admin#/chat-test`)에서 진행하고, 결과를 적합성
         근거로 남긴 뒤 이 화면에서 승격하세요.
       </InlineNotice>
     </SectionCard>

@@ -55,9 +55,9 @@ export function SkillToolbox({
       }),
     onSuccess: (bundle) => {
       downloadText("skills-bundle.json", JSON.stringify(bundle, null, 2), "application/json;charset=utf-8");
-      toast.success("Skill 번들을 내려받았습니다.");
+      toast.success("스킬 번들을 내려받았습니다.");
     },
-    onError: (error) => toast.error(safeAppErrorMessage(error, "Skill 번들을 내보내지 못했습니다.")),
+    onError: (error) => toast.error(safeAppErrorMessage(error, "스킬 번들을 내보내지 못했습니다.")),
   });
 
   const recommend = useMutation({
@@ -79,8 +79,8 @@ export function SkillToolbox({
       }),
     invalidates: [skillsKey],
     successMessage: (result) =>
-      `추천 Skill ${formatNumber(result.seeded?.length ?? 0)}건을 초안으로 만들었습니다.`,
-    errorMessage: "추천 Skill을 시드하지 못했습니다.",
+      `추천 스킬 ${formatNumber(result.seeded?.length ?? 0)}건을 초안으로 만들었습니다.`,
+    errorMessage: "추천 스킬을 추가하지 못했습니다.",
   });
 
   const importBundle = useMutationFeedback({
@@ -90,8 +90,8 @@ export function SkillToolbox({
         routeId: "agents.skills",
       }),
     invalidates: [skillsKey],
-    successMessage: "Skill 번들을 가져왔습니다.",
-    errorMessage: "Skill 번들을 가져오지 못했습니다.",
+    successMessage: "스킬 번들을 가져왔습니다.",
+    errorMessage: "스킬 번들을 가져오지 못했습니다.",
     onSuccess: (result) => setImportResult(result),
   });
 
@@ -118,14 +118,14 @@ export function SkillToolbox({
 
   return (
     <>
-      <div className="agents-detail-actions" role="group" aria-label="Skill 일괄 작업">
+      <div className="agents-detail-actions" role="group" aria-label="스킬 일괄 작업">
         <Button
           ref={seedButtonRef}
           disabled={!canWrite || seed.isPending}
           title={canWrite ? undefined : writeDisabledReason}
           onClick={() => setSeedOpen(true)}
         >
-          추천 Skill 시드
+          추천 스킬 추가
         </Button>
         <Button disabled={scan.isPending} onClick={() => scan.mutate()}>
           {scan.isPending ? "스캔 중" : "보안 스캔"}
@@ -135,7 +135,7 @@ export function SkillToolbox({
           disabled={recommend.isPending}
           onClick={() => recommend.mutate(false)}
         >
-          {recommend.isPending ? "분석 중" : "Skill 추천"}
+          {recommend.isPending ? "분석 중" : "스킬 추천"}
         </Button>
         <Button disabled={exportBundle.isPending} onClick={() => exportBundle.mutate()}>
           {exportBundle.isPending ? "내보내는 중" : "내보내기"}
@@ -172,18 +172,18 @@ export function SkillToolbox({
         <SectionCard
           title="보안 스캔 결과"
           headingLevel={3}
-          description="high 심각도 발견이 있으면 프로덕션 승격이 차단됩니다."
+          description="높은 심각도의 문제가 발견되면 프로덕션 승격이 차단됩니다."
         >
-          <div className="data-table-scroll" tabIndex={0} aria-label="Skill 보안 스캔 표 영역">
+          <div className="data-table-scroll" tabIndex={0} aria-label="스킬 보안 스캔 표 영역">
             <table className="data-table">
-              <caption className="sr-only">Skill 보안 스캔 결과</caption>
+              <caption className="sr-only">스킬 보안 스캔 결과</caption>
               <thead>
                 <tr>
-                  <th scope="col">Skill</th>
+                  <th scope="col">스킬</th>
                   <th scope="col">상태</th>
                   <th scope="col">최고 심각도</th>
-                  <th scope="col">high</th>
-                  <th scope="col">medium</th>
+                  <th scope="col">높음</th>
+                  <th scope="col">보통</th>
                   <th scope="col">발견 사항</th>
                 </tr>
               </thead>
@@ -211,13 +211,13 @@ export function SkillToolbox({
       ) : null}
 
       {recommend.isError ? (
-        <InlineNotice tone="danger" title="Skill 추천에 실패했습니다.">
-          {safeAppErrorMessage(recommend.error, "Skill 추천을 실행하지 못했습니다.")}
+        <InlineNotice tone="danger" title="스킬 추천에 실패했습니다.">
+          {safeAppErrorMessage(recommend.error, "스킬 추천을 실행하지 못했습니다.")}
         </InlineNotice>
       ) : null}
       {recommend.data ? (
         <SectionCard
-          title="Skill 추천"
+          title="스킬 추천"
           headingLevel={3}
           description={recommend.data.note ?? undefined}
           actions={
@@ -235,11 +235,11 @@ export function SkillToolbox({
           }
         >
           {(recommend.data.recommendations ?? []).length === 0 ? (
-            <p>추천할 새 Skill이 없습니다.</p>
+            <p>추천할 새 스킬이 없습니다.</p>
           ) : (
-            <div className="data-table-scroll" tabIndex={0} aria-label="Skill 추천 표 영역">
+            <div className="data-table-scroll" tabIndex={0} aria-label="스킬 추천 표 영역">
               <table className="data-table">
-                <caption className="sr-only">반복 질문에서 도출한 Skill 추천</caption>
+                <caption className="sr-only">반복 질문에서 도출한 스킬 추천</caption>
                 <thead>
                   <tr>
                     <th scope="col">이름</th>
@@ -284,8 +284,8 @@ export function SkillToolbox({
       ) : null}
 
       <ConfirmDialog
-        title="추천 Skill 시드"
-        description="내장 추천 Skill 3종을 초안(draft) 상태로 만듭니다. 이미 있으면 덮어쓰지 않고 갱신합니다."
+        title="추천 스킬 추가"
+        description="내장 추천 스킬 3종을 초안(draft) 상태로 만듭니다. 이미 있으면 덮어쓰지 않고 갱신합니다."
         confirmLabel="시드 실행"
         open={seedOpen}
         onOpenChange={setSeedOpen}
@@ -297,7 +297,7 @@ export function SkillToolbox({
 
       <ConfirmDialog
         title="추천을 초안으로 적용"
-        description="추천된 Skill을 초안(draft) 상태로 만듭니다. 프로덕션 승격은 별도 게이트를 통과해야 합니다."
+        description="추천된 스킬을 초안(draft) 상태로 만듭니다. 프로덕션 승격은 별도 게이트를 통과해야 합니다."
         confirmLabel="초안 생성"
         open={applyOpen}
         onOpenChange={setApplyOpen}

@@ -323,7 +323,7 @@ describe("OverviewPage", () => {
     expect(within(steps).getByText("AI 공급자 연결")).toBeVisible();
     expect(within(steps).getAllByText("완료").length).toBeGreaterThan(0);
     // Each unfinished step offers the screen that finishes it.
-    expect(within(steps).getByRole("link", { name: "Chat 테스트 열기" })).toHaveAttribute(
+    expect(within(steps).getByRole("link", { name: "채팅 테스트 열기" })).toHaveAttribute(
       "href",
       "/gateway/chat",
     );

@@ -4,7 +4,7 @@ import { z } from "zod";
 
 import { QueryNotice } from "@/features/mcp/mcp-ui";
 import { useReturnFocus } from "@/shared/hooks/use-return-focus";
-import { riskTone } from "@/features/mcp/mcp-utils";
+import { decisionLabel, riskLabel, riskTone } from "@/features/mcp/mcp-utils";
 import { apiClient } from "@/shared/api/client";
 import type { McpToolQuery, McpToolRiskBody } from "@/shared/api/domains/mcp";
 import type { McpToolRisk, McpToolStat } from "@/shared/api/domains/mcp.schemas";
@@ -31,16 +31,16 @@ const routeId = "mcp.overview";
 
 const riskOptions = [
   { value: "", label: "전체 위험도" },
-  { value: "low", label: "low" },
-  { value: "medium", label: "medium" },
-  { value: "high", label: "high" },
-  { value: "critical", label: "critical" },
+  { value: "low", label: riskLabel("low") },
+  { value: "medium", label: riskLabel("medium") },
+  { value: "high", label: riskLabel("high") },
+  { value: "critical", label: riskLabel("critical") },
 ];
 const actionOptions = [
   { value: "", label: "전체 조치" },
-  { value: "allow", label: "allow (허용)" },
-  { value: "require_approval", label: "require_approval (승인)" },
-  { value: "block", label: "block (차단)" },
+  { value: "allow", label: decisionLabel("allow") },
+  { value: "require_approval", label: decisionLabel("require_approval") },
+  { value: "block", label: decisionLabel("block") },
 ];
 const configuredOptions = [
   { value: "", label: "전체" },
@@ -49,15 +49,15 @@ const configuredOptions = [
 ];
 
 const riskLevelChoices = [
-  { value: "low", label: "low (낮음)" },
-  { value: "medium", label: "medium (보통)" },
-  { value: "high", label: "high (높음)" },
-  { value: "critical", label: "critical (매우 높음)" },
+  { value: "low", label: riskLabel("low") },
+  { value: "medium", label: riskLabel("medium") },
+  { value: "high", label: riskLabel("high") },
+  { value: "critical", label: riskLabel("critical") },
 ];
 const actionChoices = [
-  { value: "allow", label: "allow (허용)" },
-  { value: "require_approval", label: "require_approval (승인 후 허용)" },
-  { value: "block", label: "block (차단)" },
+  { value: "allow", label: decisionLabel("allow") },
+  { value: "require_approval", label: decisionLabel("require_approval") },
+  { value: "block", label: decisionLabel("block") },
 ];
 
 /** The server may answer with a level/action the form does not offer; fall back. */
@@ -104,14 +104,16 @@ function toolColumns(
     toolColumn.accessor((row) => row.risk_level, {
       id: "risk",
       header: "위험도",
-      cell: (info) => <Badge tone={riskTone(info.getValue<string>())}>{info.getValue<string>()}</Badge>,
+      cell: (info) => (
+        <Badge tone={riskTone(info.getValue<string>())}>{riskLabel(info.getValue<string>())}</Badge>
+      ),
     }),
     toolColumn.accessor((row) => row.action, {
       id: "action",
       header: "조치",
       cell: (info) => (
         <Badge tone={info.getValue<string>() === "block" ? "danger" : "muted"}>
-          {info.getValue<string>()}
+          {decisionLabel(info.getValue<string>())}
         </Badge>
       ),
     }),
@@ -234,7 +236,11 @@ const trustColumns = [
       return <Badge tone={grade === "A" ? "success" : grade === "D" ? "danger" : "warning"}>{grade}</Badge>;
     },
   }),
-  trustColumn.accessor((row) => row.risk_level, { id: "risk", header: "위험도" }),
+  trustColumn.accessor((row) => row.risk_level, {
+    id: "risk",
+    header: "위험도",
+    cell: (info) => riskLabel(info.getValue<string>()),
+  }),
   trustColumn.accessor((row) => formatNumber(row.calls), { id: "calls", header: "호출" }),
   trustColumn.accessor((row) => `${formatNumber(row.error_rate_pct, 1)}%`, {
     id: "rate",
@@ -559,7 +565,11 @@ export function McpToolsTab({ canWrite }: { canWrite: boolean }): React.JSX.Elem
         <FormField
           label="조치"
           required
-          description={editing?.recommended_action ? `권장 조치: ${editing.recommended_action}` : undefined}
+          description={
+            editing?.recommended_action
+              ? `권장 조치: ${decisionLabel(editing.recommended_action)}`
+              : undefined
+          }
           error={riskForm.formState.errors.action?.message}
         >
           {(control) => <Select {...control} {...riskForm.register("action")} options={actionChoices} />}

@@ -108,7 +108,10 @@ function collect(document, ecosystem, prefix) {
   const byPurl = new Map();
   for (const pkg of document.packages ?? []) {
     const purl = packagePurl(pkg, prefix);
-    if (!purl || purl.includes("/vibe-coders@") || pkg.name === "vibe-coders-app") continue;
+    // Syft may omit the main module version when Go cannot find VCS metadata.
+    if (!purl || /^pkg:golang\/vibe-coders(?:@|[?#]|$)/.test(purl) || pkg.name === "vibe-coders-app") {
+      continue;
+    }
     if (!byPurl.has(purl)) byPurl.set(purl, normalizePackage(pkg, ecosystem, purl));
   }
   return [...byPurl.values()].sort((left, right) =>

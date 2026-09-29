@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState } from "react";
+import { toast } from "sonner";
 
 import { migrationRegistry } from "@/config/migration-registry";
 import { migrationStatusLabels, roleLabel } from "@/config/ui-labels";
@@ -26,6 +27,7 @@ import { apiClient } from "@/shared/api/client";
 import type { EffectiveSetting } from "@/shared/api/domains/system.schemas";
 import { pathWithParams } from "@/shared/api/endpoint-factory";
 import { endpoints } from "@/shared/api/endpoints";
+import { isAppError, type AppError } from "@/shared/api/error";
 import { Badge } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
 import { InlineNotice } from "@/shared/components/ui/InlineNotice";
@@ -33,6 +35,14 @@ import { SectionCard } from "@/shared/components/ui/SectionCard";
 import { useMutationFeedback } from "@/shared/hooks/use-mutation-feedback";
 
 const system = endpoints.domains.system;
+
+type FeatureSaveResult =
+  | { outcome: "saved" }
+  | { outcome: "conflict"; error: AppError }
+  | { outcome: "reload_pending"; requestId?: string };
+
+const conflictMessage =
+  "다른 작업자가 전환 설정을 변경해 저장하지 않았습니다. 입력한 내용을 확인한 뒤 대화상자를 닫고 다시 열어 최신 설정과 비교하세요.";
 
 const featureTitles = new Map(
   migrationRegistry.map((feature) => [feature.featureId as string, feature.title as string]),
@@ -88,6 +98,8 @@ export function ConsoleRolloutTab({ hasAdminWrite }: { hasAdminWrite: boolean })
   const triggerRef = useRef<HTMLElement | null>(null);
   const [editing, setEditing] = useState<ConsoleFeatureRow | undefined>();
   const [globalKey, setGlobalKey] = useState<string | undefined>();
+  const [conflict, setConflict] = useState(false);
+  const [reloadPending, setReloadPending] = useState<{ requestId?: string } | undefined>();
 
   const consoleSettings = useMemo(
     () => (settingsQuery.data?.settings ?? []).filter(isConsoleSetting),
@@ -118,23 +130,49 @@ export function ConsoleRolloutTab({ hasAdminWrite }: { hasAdminWrite: boolean })
   };
 
   const saveFeature = useMutationFeedback({
-    mutate: async (input: { row: ConsoleFeatureRow; changes: ConsoleFeatureEdit; reason: string }) => {
-      // Each key is its own setting; writing them one at a time keeps a partial
-      // failure visible instead of silently dropping the remaining fields.
+    mutate: async (input: {
+      row: ConsoleFeatureRow;
+      changes: ConsoleFeatureEdit;
+      reason: string;
+    }): Promise<FeatureSaveResult> => {
       const entries: Array<[EffectiveSetting | undefined, string | undefined]> = [
         [input.row.status, input.changes.status],
         [input.row.roles, input.changes.roles],
         [input.row.rollout, input.changes.rollout],
         [input.row.readonly, input.changes.readonly],
       ];
-      for (const [setting, value] of entries) {
-        if (!setting || value === undefined) continue;
-        await writeSetting(setting, value, input.reason);
+      const settings = entries.flatMap(([setting, value]) =>
+        setting && value !== undefined && value !== setting.value
+          ? [{ key: setting.key, value, expected_version: setting.version ?? 0 }]
+          : [],
+      );
+      try {
+        await apiClient.request(system.settings.bulk, {
+          body: { settings, reason: input.reason },
+          routeId,
+        });
+      } catch (error) {
+        // Both outcomes need a fresh settings snapshot, but neither should
+        // retry the write or announce a successful runtime change.
+        if (isAppError(error) && error.status === 409) return { outcome: "conflict", error };
+        if (isAppError(error) && error.status === 503 && error.code === "setting_reload_pending") {
+          return { outcome: "reload_pending", requestId: error.requestId };
+        }
+        throw error;
       }
-      return input.row.featureId;
+      return { outcome: "saved" };
     },
     invalidates: [systemSettingsKeys.effective],
-    successMessage: "콘솔 전환 설정을 저장했습니다. 화면을 새로고침하면 적용됩니다.",
+    onSuccess: (result) => {
+      if (result.outcome === "conflict") {
+        setConflict(true);
+      } else if (result.outcome === "reload_pending") {
+        setReloadPending({ requestId: result.requestId });
+      } else {
+        setReloadPending(undefined);
+        toast.success("콘솔 전환 설정을 저장했습니다. 화면을 새로고침하면 적용됩니다.");
+      }
+    },
     errorMessage: "콘솔 전환 설정을 저장하지 못했습니다.",
   });
 
@@ -152,6 +190,15 @@ export function ConsoleRolloutTab({ hasAdminWrite }: { hasAdminWrite: boolean })
         `/app` 전환 상태는 콘솔이 시작할 때 한 번 읽습니다. 값을 저장한 뒤 브라우저를 새로고침해야 새 상태가
         적용되며, 다른 사용자에게는 각자의 다음 새로고침부터 반영됩니다.
       </InlineNotice>
+
+      {reloadPending ? (
+        <InlineNotice tone="warning" title="설정은 저장됐으며 런타임 반영을 기다리고 있습니다.">
+          변경한 설정은 모두 저장됐습니다. 다시 저장하지 말고 최신 설정과 서버 반영 상태를 확인하세요.
+          {reloadPending.requestId ? (
+            <span className="request-id"> 요청 ID: {reloadPending.requestId}</span>
+          ) : null}
+        </InlineNotice>
+      ) : null}
 
       {settingsQuery.isError ? (
         <QueryNotice
@@ -266,6 +313,7 @@ export function ConsoleRolloutTab({ hasAdminWrite }: { hasAdminWrite: boolean })
                         aria-label={`${featureTitles.get(row.featureId) ?? row.featureId} 전환 설정 편집`}
                         onClick={(event) => {
                           triggerRef.current = event.currentTarget;
+                          setConflict(false);
                           setEditing(row);
                         }}
                       >
@@ -287,8 +335,13 @@ export function ConsoleRolloutTab({ hasAdminWrite }: { hasAdminWrite: boolean })
         onOpenChange={(next) => {
           if (!next) setEditing(undefined);
         }}
-        disabledReason={permission.editable ? undefined : permission.reason}
-        onSubmit={(input) => saveFeature.mutateAsync(input)}
+        disabledReason={conflict ? conflictMessage : permission.editable ? undefined : permission.reason}
+        onSubmit={async (input) => {
+          const result = await saveFeature.mutateAsync(input);
+          // Keep the draft visible after a conflict, with saving disabled until
+          // the operator reopens the editor against the refreshed settings.
+          if (result.outcome === "conflict") throw result.error;
+        }}
         pending={saveFeature.isPending}
         returnFocusRef={triggerRef}
         row={editing}

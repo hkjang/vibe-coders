@@ -1,5 +1,25 @@
 import type { BadgeProps } from "@/shared/components/ui/Badge";
 
+export const permissionSubjectOptions = [
+  { value: "team", label: "팀" },
+  { value: "api_key", label: "API 키" },
+  { value: "user", label: "사용자" },
+  { value: "*", label: "전체(*)" },
+] as const;
+
+export const permissionActionOptions = [
+  { value: "deny", label: "차단" },
+  { value: "allow", label: "허용" },
+] as const;
+
+export function permissionSubjectLabel(value: string): string {
+  return permissionSubjectOptions.find((option) => option.value === value)?.label ?? (value || "—");
+}
+
+export function permissionActionLabel(value: string): string {
+  return permissionActionOptions.find((option) => option.value === value)?.label ?? (value || "—");
+}
+
 /** Column sensitivity values understood by the registry (server: validText2SQLSensitivity). */
 export const sensitivityOptions = [
   { value: "normal", label: "일반" },
