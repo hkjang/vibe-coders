@@ -84,6 +84,24 @@ func (s *Server) appUITelemetryFlag(stored map[string]store.AdminSetting, key st
 }
 
 func (s *Server) handleAppUITelemetryEvent(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+	defer cancel()
+	r = r.WithContext(ctx)
+	// Install before every response, including method, gate, opt-out, settings,
+	// and auth failures: net/http may drain an unread body while committing even
+	// an empty response. Context cancellation alone cannot interrupt those reads.
+	// Standard server ResponseWriters support this; recorders may not. Restore
+	// only after EOF, never while a partial body could be drained after return.
+	controller := http.NewResponseController(w)
+	bodyConsumed := false
+	if deadline, ok := ctx.Deadline(); ok {
+		_ = controller.SetReadDeadline(deadline)
+		defer func() {
+			if bodyConsumed {
+				_ = controller.SetReadDeadline(time.Time{})
+			}
+		}()
+	}
 	w.Header().Set("Cache-Control", "no-store")
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", "POST")
@@ -100,9 +118,6 @@ func (s *Server) handleAppUITelemetryEvent(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	defer gate.release()
-	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
-	defer cancel()
-	r = r.WithContext(ctx)
 	stored, err := s.loadStoredSettings(r)
 	if err != nil || !s.appUITelemetryFlag(stored, appUIEnabledKey) || !s.appUITelemetryFlag(stored, appUITelemetryEnabledKey) {
 		// Fail closed before parsing or authenticating an opted-out request. No
@@ -114,21 +129,6 @@ func (s *Server) handleAppUITelemetryEvent(w http.ResponseWriter, r *http.Reques
 	if !valid || !authenticated || user == nil {
 		writeOpenAIError(w, http.StatusUnauthorized, "authentication required", "invalid_request_error", "invalid_access_token")
 		return
-	}
-	// Context cancellation alone does not interrupt net/http request-body reads.
-	// Bound slow bodies as well as DB/auth work, so four slow clients cannot hold
-	// the entire intake gate. Standard server ResponseWriters support this; test
-	// recorders may return ErrNotSupported. Restore the deadline only after EOF:
-	// clearing it for a partial body lets net/http's post-handler drain block again.
-	controller := http.NewResponseController(w)
-	bodyConsumed := false
-	if deadline, ok := ctx.Deadline(); ok {
-		_ = controller.SetReadDeadline(deadline)
-		defer func() {
-			if bodyConsumed {
-				_ = controller.SetReadDeadline(time.Time{})
-			}
-		}()
 	}
 	callerQuota := s.appUITelemetryCallerQuota
 	if callerQuota == nil {
