@@ -129,6 +129,7 @@ async function installSettings(page: Page) {
   const writes: Request[] = [];
   const unexpected: string[] = [];
   let reads = 0;
+  let upToDate = true;
   let canWrite = true;
   let gate: Promise<void> | undefined;
   let release: (() => void) | undefined;
@@ -169,7 +170,7 @@ async function installSettings(page: Page) {
       });
     if (call === "GET /admin/settings/effective") {
       reads += 1;
-      return json({ settings });
+      return json({ settings, this_pod: { up_to_date: upToDate } });
     }
     if (call === "GET /admin/settings/history") {
       const key = url.searchParams.get("key") ?? "";
@@ -265,6 +266,7 @@ async function installSettings(page: Page) {
           reason: body.reason,
           changed_at: recoveredAt,
         });
+      upToDate = outcome !== "reload_pending";
       if (outcome === "reload_pending")
         return json(
           { error: { message: "fixture persisted, runtime reload pending", code: "setting_reload_pending" } },
@@ -342,6 +344,7 @@ async function installSettings(page: Page) {
             }
           : row;
       });
+      upToDate = outcome !== "reload_pending";
       if (outcome === "reload_pending")
         return json(
           { error: { message: "fixture persisted, runtime reload pending", code: "setting_reload_pending" } },
@@ -367,6 +370,9 @@ async function installSettings(page: Page) {
       canWrite = false;
     },
     readCount: () => reads,
+    reloadApplied: () => {
+      upToDate = true;
+    },
     hold: () => {
       gate = new Promise<void>((resolve) => {
         release = resolve;
@@ -898,6 +904,44 @@ for (const surface of ["runtime", "console"] as const) {
     });
   }
 }
+
+test("저장된 콘솔 설정의 반영 지연은 탭 왕복 뒤에도 남고 서버 적용 확인 후에만 사라진다", async ({
+  page,
+  api,
+}) => {
+  const dialog = await openConsole(page);
+  api.queueOutcomes("reload_pending");
+  await dialog.getByLabel("전환 상태", { exact: true }).selectOption("preview");
+  await dialog.getByLabel("변경 사유").fill("public persisted console rollout");
+  await dialog.getByRole("button", { name: "저장", exact: true }).click();
+  await expect(dialog).toBeHidden();
+  const pendingNotice = page.getByText("설정은 저장됐으며 런타임 반영을 기다리고 있습니다.", {
+    exact: true,
+  });
+  await expect(pendingNotice).toBeVisible();
+  expect(api.writes).toHaveLength(1);
+  expect(api.writes[0]?.postDataJSON()).toEqual({
+    settings: [{ key: `${featureKey}.status`, value: "preview", expected_version: 3 }],
+    reason: "public persisted console rollout",
+  });
+  await page.getByRole("tab", { name: "런타임 설정", exact: true }).click();
+  // The default tab intentionally removes its query parameter.
+  await expect(page.getByRole("tab", { name: "런타임 설정", exact: true })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  await page.getByRole("tab", { name: "콘솔 전환", exact: true }).click();
+  await expect(page).toHaveURL(/tab=console/u);
+  await expect(pendingNotice).toBeVisible();
+  await expect(guard(page)).toBeHidden();
+  expect(api.writes).toHaveLength(1);
+  api.reloadApplied();
+  const previousReads = api.readCount();
+  await page.getByRole("button", { name: "새로고침", exact: true }).click();
+  await expect.poll(api.readCount).toBeGreaterThan(previousReads);
+  await expect(pendingNotice).toBeHidden();
+  expect(api.writes).toHaveLength(1);
+});
 
 test("390px 다크 설정 폐기 확인은 axe 위반과 가로 넘침 없이 키보드로 돌아온다", async ({
   page,

@@ -295,6 +295,36 @@ describe.each(cases)("$tab 설정 저장 계약", (fixture) => {
   );
 });
 
+it("콘솔 반영 대기 안내를 탭 재진입 후에도 서버 상태로 표시하고 적용 완료 조회 시 해제한다", async () => {
+  const user = userEvent.setup();
+  const fixture = cases[1];
+  let upToDate = true;
+  const endpoint = `PUT /admin/settings/by-key/${fixture.setting.key}`;
+  const { api } = setup(fixture, {
+    "GET /admin/settings/effective": () => ({
+      settings: [fixture.setting],
+      this_pod: { up_to_date: upToDate },
+    }),
+    [endpoint]: () => {
+      upToDate = false;
+      throw new AppError("persisted", { kind: "http", status: 503, code: "setting_reload_pending" });
+    },
+  });
+  const title = "설정은 저장됐으며 런타임 반영을 기다리고 있습니다.";
+  await user.click(await screen.findByRole("button", { name: fixture.openLabel }));
+  await changeValue(user, fixture.draft);
+  await user.click(screen.getByRole("button", { name: "저장" }));
+  expect(await screen.findByText(title)).toBeVisible();
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  await user.click(screen.getByRole("tab", { name: "런타임 설정" }));
+  await user.click(screen.getByRole("tab", { name: "콘솔 전환" }));
+  expect(await screen.findByText(title)).toBeVisible();
+  upToDate = true;
+  await user.click(screen.getByRole("button", { name: "새로고침" }));
+  await waitFor(() => expect(screen.queryByText(title)).not.toBeInTheDocument());
+  expect(api.bodies(endpoint)).toHaveLength(1);
+});
+
 describe("복구 이력 snapshot", () => {
   it("JSON 빈 문자열은 복구 가능한 이전 값으로 구분한다", async () => {
     const fixture = cases[0];
