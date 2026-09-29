@@ -33,4 +33,5 @@ web/dist/
 web/coverage/
 web/test-results/
 web/playwright-report/
+web/bundle-budget-report.json
 internal/appui/dist/*

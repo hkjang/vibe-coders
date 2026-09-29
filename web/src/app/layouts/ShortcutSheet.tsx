@@ -1,11 +1,13 @@
 import * as Dialog from "@radix-ui/react-dialog";
 import { X } from "lucide-react";
+import type { RefObject } from "react";
 
 import { Button } from "@/shared/components/ui/Button";
 
 interface ShortcutSheetProps {
   onOpenChange: (open: boolean) => void;
   open: boolean;
+  returnFocusRef: RefObject<HTMLElement | null>;
 }
 
 /**
@@ -26,12 +28,24 @@ const paletteTips: readonly string[] = [
   "검색창을 비우면 최근에 연 화면이 먼저 보입니다.",
 ];
 
-export function ShortcutSheet({ onOpenChange, open }: ShortcutSheetProps): React.JSX.Element {
+export function ShortcutSheet({ onOpenChange, open, returnFocusRef }: ShortcutSheetProps): React.JSX.Element {
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
         <Dialog.Overlay className="dialog-overlay" />
-        <Dialog.Content className="command-dialog" aria-describedby="shortcut-description">
+        <Dialog.Content
+          className="command-dialog"
+          aria-describedby="shortcut-description"
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            const trigger = returnFocusRef.current;
+            const target =
+              trigger?.isConnected && !trigger.matches(":disabled")
+                ? trigger
+                : document.querySelector<HTMLElement>("#main-content");
+            target?.focus();
+          }}
+        >
           <div className="command-heading">
             <div>
               <Dialog.Title>단축키</Dialog.Title>
@@ -45,32 +59,34 @@ export function ShortcutSheet({ onOpenChange, open }: ShortcutSheetProps): React
               </Button>
             </Dialog.Close>
           </div>
-          <table className="shortcut-table">
-            <caption className="sr-only">콘솔 단축키 목록</caption>
-            <thead>
-              <tr>
-                <th scope="col">키</th>
-                <th scope="col">동작</th>
-              </tr>
-            </thead>
-            <tbody>
-              {shortcuts.map((shortcut) => (
-                <tr key={shortcut.what}>
-                  <td>
-                    {shortcut.keys.map((key) => (
-                      <kbd key={key}>{key}</kbd>
-                    ))}
-                  </td>
-                  <td>{shortcut.what}</td>
+          <div className="shortcut-body" role="region" aria-label="단축키 안내 내용" tabIndex={0}>
+            <table className="shortcut-table">
+              <caption className="sr-only">콘솔 단축키 목록</caption>
+              <thead>
+                <tr>
+                  <th scope="col">키</th>
+                  <th scope="col">동작</th>
                 </tr>
+              </thead>
+              <tbody>
+                {shortcuts.map((shortcut) => (
+                  <tr key={shortcut.what}>
+                    <td>
+                      {shortcut.keys.map((key) => (
+                        <kbd key={key}>{key}</kbd>
+                      ))}
+                    </td>
+                    <td>{shortcut.what}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <ul className="shortcut-tips">
+              {paletteTips.map((tip) => (
+                <li key={tip}>{tip}</li>
               ))}
-            </tbody>
-          </table>
-          <ul className="shortcut-tips">
-            {paletteTips.map((tip) => (
-              <li key={tip}>{tip}</li>
-            ))}
-          </ul>
+            </ul>
+          </div>
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>

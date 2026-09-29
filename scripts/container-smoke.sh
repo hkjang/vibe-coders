@@ -128,6 +128,7 @@ grep -Fq '<div id="root"></div>' <<<"$APP_HTML" || fail "GET /app/ is not the Re
 expect_status 200 GET /app/providers
 expect_status 200 GET /app/routing/decisions/123
 expect_status 404 GET /app/assets/not-found.js
+expect_status 404 GET /app/.vite/manifest.json
 expect_status 405 POST /app/providers
 
 ASSET_PATH="$(grep -oE '/app/assets/[^"[:space:]]+\.(js|css)' <<<"$APP_HTML" | sed -n '1p' || true)"

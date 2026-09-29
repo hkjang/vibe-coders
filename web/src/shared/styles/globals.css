@@ -1005,12 +1005,14 @@ kbd {
   background: var(--color-overlay);
 }
 .command-dialog {
+  display: flex;
+  flex-direction: column;
   position: fixed;
-  top: min(16vh, 8rem);
+  top: min(16dvh, 8rem);
   left: 50%;
   z-index: calc(var(--z-modal) + 1);
   width: min(42rem, calc(100vw - 2rem));
-  max-height: min(42rem, calc(100vh - 4rem));
+  max-height: min(42rem, calc(100dvh - min(16dvh, 8rem) - var(--space-4)));
   transform: translateX(-50%);
   overflow: hidden;
   border: 1px solid var(--color-border);
@@ -1023,6 +1025,11 @@ kbd {
   align-items: start;
   justify-content: space-between;
   padding: var(--space-4);
+}
+.command-heading,
+.command-search,
+.command-footer {
+  flex-shrink: 0;
 }
 .command-heading h2,
 .command-heading p {
@@ -1049,6 +1056,7 @@ kbd {
   background: transparent;
 }
 .command-results {
+  min-height: 0;
   max-height: 23rem;
   overflow: auto;
   padding: var(--space-2) var(--space-4);
@@ -1075,6 +1083,7 @@ kbd {
 }
 .command-result small,
 .command-empty {
+  overflow: auto;
   color: var(--color-muted);
 }
 .command-empty {
@@ -1082,6 +1091,10 @@ kbd {
   text-align: center;
 }
 /* Shortcut sheet: the same surface as the palette, so the two read as one feature. */
+.shortcut-body {
+  min-height: 0;
+  overflow: auto;
+}
 .shortcut-table {
   width: 100%;
   border-collapse: collapse;

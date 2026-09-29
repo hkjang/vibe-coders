@@ -8,6 +8,14 @@ export const uiLabels = {
   console: "관리 콘솔",
 } as const;
 
+export const commandPaletteLabels = {
+  empty: "검색 결과가 없습니다.",
+  emptyHint: "다른 메뉴 이름이나 명령으로 검색해 보세요. 접근 가능한 기능만 표시됩니다.",
+  clear: "검색어 지우기",
+  keyboardHint: "↑↓ 선택 · Enter 실행 · Esc 닫기",
+  results: (count: number): string => `검색 결과 ${count}개`,
+} as const;
+
 export const migrationStatusLabels = {
   hidden: "숨김",
   legacy: "기존 화면",

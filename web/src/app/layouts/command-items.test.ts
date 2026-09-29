@@ -61,4 +61,11 @@ describe("matchesQuery", () => {
     expect(matchesQuery(item, "어둡게")).toBe(true);
     expect(matchesQuery(item, "라우팅")).toBe(false);
   });
+
+  it("matches unordered words across fields and composed/decomposed Korean", () => {
+    expect(matchesQuery(item, " DARK   테마 ")).toBe(true);
+    expect(matchesQuery(item, "테마".normalize("NFD"))).toBe(true);
+    expect(matchesQuery({ ...item, title: "테마 전환".normalize("NFD") }, "테마")).toBe(true);
+    expect(matchesQuery(item, "테마 라우팅")).toBe(false);
+  });
 });

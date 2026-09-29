@@ -29,6 +29,7 @@ web/dist/
 web/coverage/
 web/test-results/
 web/playwright-report/
+web/bundle-budget-report.json
 
 # The Go package keeps only a marker so clean Go builds can embed an empty dist.
 # Production assets are always staged from web/dist by the Docker build.

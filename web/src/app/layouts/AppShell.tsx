@@ -15,6 +15,7 @@ import { apiClient } from "@/shared/api/client";
 import { endpoints } from "@/shared/api/endpoints";
 import { Badge } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
+import { useReturnFocus } from "@/shared/hooks/use-return-focus";
 import { canOpenLegacyAdmin } from "@/shared/permissions/legacy-admin";
 import { FeatureTelemetry } from "@/shared/telemetry/FeatureTelemetry";
 import {
@@ -32,6 +33,16 @@ export function AppShell(): React.JSX.Element {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const mobileMenuTriggerRef = useRef<HTMLButtonElement>(null);
+  const {
+    returnFocusRef: paletteReturnFocusRef,
+    remember: rememberPalette,
+    rememberActive: rememberPaletteActive,
+  } = useReturnFocus();
+  const {
+    returnFocusRef: shortcutReturnFocusRef,
+    remember: rememberShortcut,
+    rememberActive: rememberShortcutActive,
+  } = useReturnFocus();
   const theme = usePreferences((state) => state.theme);
   const density = usePreferences((state) => state.density);
   const refreshInterval = usePreferences((state) => state.refreshInterval);
@@ -69,8 +80,10 @@ export function AppShell(): React.JSX.Element {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.isComposing || event.keyCode === 229) return;
       if ((event.metaKey || event.ctrlKey) && event.key.toLocaleLowerCase() === "k") {
         event.preventDefault();
+        if (!paletteOpen) rememberPaletteActive();
         setPaletteOpen(true);
         return;
       }
@@ -83,11 +96,12 @@ export function AppShell(): React.JSX.Element {
         if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
       }
       event.preventDefault();
+      if (!shortcutsOpen) rememberShortcutActive();
       setShortcutsOpen(true);
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, []);
+  }, [paletteOpen, shortcutsOpen, rememberPaletteActive, rememberShortcutActive]);
 
   // The palette offers recently opened screens; this is where "recent" is recorded.
   const rememberFeature = usePreferences((state) => state.rememberFeature);
@@ -132,7 +146,10 @@ export function AppShell(): React.JSX.Element {
 
             <button
               className="header-search"
-              onClick={() => setPaletteOpen(true)}
+              onClick={(event) => {
+                rememberPalette(event);
+                setPaletteOpen(true);
+              }}
               aria-label="명령 팔레트 열기"
             >
               <Search aria-hidden="true" />
@@ -225,9 +242,17 @@ export function AppShell(): React.JSX.Element {
         <CommandPalette
           open={paletteOpen}
           onOpenChange={setPaletteOpen}
-          onShowShortcuts={() => setShortcutsOpen(true)}
+          returnFocusRef={paletteReturnFocusRef}
+          onShowShortcuts={() => {
+            rememberShortcut(paletteReturnFocusRef.current);
+            setShortcutsOpen(true);
+          }}
         />
-        <ShortcutSheet open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
+        <ShortcutSheet
+          open={shortcutsOpen}
+          onOpenChange={setShortcutsOpen}
+          returnFocusRef={shortcutReturnFocusRef}
+        />
       </div>
     </FeatureTelemetry>
   );
