@@ -3,9 +3,11 @@ package store
 import (
 	"context"
 	"errors"
-	"strings"
 	"testing"
 	"time"
+
+	"modernc.org/sqlite"
+	sqlite3 "modernc.org/sqlite/lib"
 )
 
 func rollbackRecord(t *testing.T, db *SQLStore, key, value string) AdminSetting {
@@ -145,8 +147,23 @@ func TestAdminSettingRollbackHistoryCountPrecedesLimitAndPartitionsKeys(t *testi
 }
 
 func TestAdminSettingRollbackLockBlocksWritersNotReaders(t *testing.T) {
-	for _, action := range []string{"update", "delete-recreate", "insert-absent"} {
-		t.Run(action, func(t *testing.T) {
+	for _, test := range []struct {
+		action      string
+		delayResult bool
+	}{
+		{action: "update"},
+		{action: "delete-recreate"},
+		{action: "insert-absent"},
+		{action: "update", delayResult: true},
+		{action: "delete-recreate", delayResult: true},
+		{action: "insert-absent", delayResult: true},
+	} {
+		name := test.action
+		if test.delayResult {
+			name += "/delayed-result"
+		}
+		t.Run(name, func(t *testing.T) {
+			action := test.action
 			db := openStoreForTest(t)
 			defer db.Close()
 			db.db.SetMaxOpenConns(5)
@@ -161,6 +178,28 @@ func TestAdminSettingRollbackLockBlocksWritersNotReaders(t *testing.T) {
 				}
 			}
 			stale := rollbackRecord(t, db, key, "old rollback")
+			before, beforeFound, err := db.GetAdminSetting(ctx, key)
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertUnchanged := func(ctx context.Context) {
+				t.Helper()
+				current, found, err := db.GetAdminSetting(ctx, key)
+				if err != nil {
+					t.Fatalf("ordinary SELECT blocked: %v", err)
+				}
+				if found != beforeFound || current != before {
+					t.Fatal("writer changed setting while rollback lock was held")
+				}
+				history, err := db.ListAdminSettingHistory(ctx, key, 1)
+				if err != nil || len(history) != 1 || history[0].ID != *stale.ExpectedHistoryID || history[0].HistoryCount != *stale.ExpectedHistoryCount {
+					t.Fatalf("writer changed history while rollback lock was held: history=%v error=%v", history, err)
+				}
+			}
+			isBusy := func(err error) bool {
+				var sqliteErr *sqlite.Error
+				return db.dialect == "sqlite" && errors.As(err, &sqliteErr) && sqliteErr.Code()&0xff == sqlite3.SQLITE_BUSY
+			}
 			tx, err := db.db.BeginTx(ctx, nil)
 			if err != nil {
 				t.Fatal(err)
@@ -171,6 +210,15 @@ func TestAdminSettingRollbackLockBlocksWritersNotReaders(t *testing.T) {
 			}
 			started := make(chan struct{})
 			done := make(chan error, 1)
+			completed := make(chan struct{})
+			releaseResult := make(chan struct{})
+			defer func() {
+				select {
+				case <-releaseResult:
+				default:
+					close(releaseResult)
+				}
+			}()
 			write := func() error {
 				if action == "delete-recreate" {
 					if err := db.DeleteAdminSetting(ctx, key, "writer", ""); err != nil {
@@ -183,38 +231,79 @@ func TestAdminSettingRollbackLockBlocksWritersNotReaders(t *testing.T) {
 				}
 				return db.UpsertAdminSetting(ctx, settingRecord(key, "new", version), "writer", "")
 			}
-			go func() { close(started); done <- write() }()
+			go func() {
+				close(started)
+				err := write()
+				close(completed)
+				if test.delayResult {
+					<-releaseResult
+				}
+				done <- err
+			}()
 			<-started
-			busy := false
+			var writeErr error
+			resultReceived := false
 			select {
-			case err := <-done:
+			case writeErr = <-done:
 				// SQLite read-to-write upgrades can fail immediately instead of
 				// waiting behind another writer. Either outcome must prevent a write.
-				if db.dialect != "sqlite" || err == nil || !strings.Contains(err.Error(), "SQLITE_BUSY") {
-					t.Fatalf("writer escaped rollback lock: %v", err)
+				if !isBusy(writeErr) {
+					t.Fatalf("writer escaped rollback lock: %v", writeErr)
 				}
-				busy = true
+				resultReceived = true
 			case <-time.After(50 * time.Millisecond):
 			}
 			readCtx, cancel := context.WithTimeout(ctx, time.Second)
-			_, _, err = db.GetAdminSetting(readCtx, key)
+			defer cancel()
+			assertUnchanged(readCtx)
 			cancel()
-			if err != nil {
-				t.Fatalf("ordinary SELECT blocked: %v", err)
+			if db.dialect == "sqlite" && test.delayResult {
+				// Force the SQLite read-to-write upgrade to finish while the lock
+				// is held, but deliver its result only after release. This models
+				// a descheduled writer without relying on a fast CI runner.
+				select {
+				case <-completed:
+				case <-time.After(5 * time.Second):
+					t.Fatal("SQLite write attempt did not finish under rollback lock")
+				}
+				assertUnchanged(ctx)
+			}
+			if db.dialect == "postgres" && test.delayResult {
+				// The delivery gate must not hide a PostgreSQL writer that has
+				// already finished while its table lock should still be blocking.
+				select {
+				case <-completed:
+					t.Fatal("PostgreSQL writer completed before rollback lock release")
+				default:
+				}
 			}
 			if err := tx.Rollback(); err != nil {
 				t.Fatal(err)
 			}
-			if busy {
-				done <- write()
-			}
-			select {
-			case err := <-done:
-				if err != nil {
-					t.Fatal(err)
+			close(releaseResult)
+			if !resultReceived {
+				select {
+				case writeErr = <-done:
+				case <-time.After(5 * time.Second):
+					t.Fatal("writer did not resume")
 				}
-			case <-time.After(2 * time.Second):
-				t.Fatal("writer did not resume")
+			}
+			if isBusy(writeErr) {
+				// A SQLite failure may be delivered after the observation window
+				// (or even after unlock). Its timing does not make it a different
+				// outcome. Verify the failed transaction changed nothing, then
+				// explicitly start one NEW transaction now that the lock is gone.
+				// This is test orchestration, not a production automatic retry.
+				assertUnchanged(ctx)
+				if err := write(); err != nil {
+					t.Fatalf("new writer after rollback lock release failed: %v", err)
+				}
+			} else if writeErr != nil {
+				t.Fatal(writeErr)
+			}
+			current, found, err := db.GetAdminSetting(ctx, key)
+			if err != nil || !found || current.ValueJSON != `"new"` {
+				t.Fatalf("writer did not persist after release: setting=%+v found=%v error=%v", current, found, err)
 			}
 			if err := db.UpsertAdminSetting(ctx, stale, "rollback", "stale"); !errors.Is(err, ErrAdminSettingConflict) {
 				t.Fatalf("changed snapshot accepted: %v", err)

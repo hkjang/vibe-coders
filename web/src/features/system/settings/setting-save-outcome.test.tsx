@@ -39,24 +39,22 @@ function setup(write: () => Promise<unknown>, read: () => Promise<ReturnType<typ
   const wrapper = ({ children }: PropsWithChildren) => (
     <QueryClientProvider client={client}>{children}</QueryClientProvider>
   );
-  const hook = renderHook(
-    () => {
-      useQuery({ queryKey: key, queryFn: read, staleTime: Infinity });
-      const outcome = useSettingSaveOutcome();
-      const notice = useSettingsReloadNotice();
-      const save = useMutationFeedback({
-        mutate: () => outcome(write),
-        invalidates: [key],
-        onSuccess: (result) => {
-          onSuccess(result);
-          if (result.outcome === "reload_pending") notice.setReloadPending(result);
-        },
-      });
-      return { ...notice, save };
-    },
-    { wrapper },
-  );
-  return { ...hook, client, onSuccess };
+  const useScenario = () => {
+    useQuery({ queryKey: key, queryFn: read, staleTime: Infinity });
+    const outcome = useSettingSaveOutcome();
+    const notice = useSettingsReloadNotice();
+    const save = useMutationFeedback({
+      mutate: () => outcome(write),
+      invalidates: [key],
+      onSuccess: (result) => {
+        onSuccess(result);
+        if (result.outcome === "reload_pending") notice.setReloadPending(result);
+      },
+    });
+    return { ...notice, save };
+  };
+  const mount = () => renderHook(useScenario, { wrapper });
+  return { ...mount(), client, onSuccess, mount };
 }
 
 it("자동 조회가 먼저 끝나도 503 응답의 query 세대를 결과에 보존한다", async () => {
@@ -163,6 +161,38 @@ it.each([false, undefined])("새 조회의 up_to_date=%s이면 반영 대기를 
     await result.current.save.mutateAsync();
   });
   expect(result.current.reloadPending?.requestId).toBe("pending-response");
+});
+
+it("실제 저장 뒤 검증 실패의 안내는 경로 재진입 중 재조회 대기/실패에도 남고 성공해야 해제된다", async () => {
+  const readGate = deferred<ReturnType<typeof applied>>();
+  const read = vi
+    .fn<() => Promise<ReturnType<typeof applied>>>()
+    .mockRejectedValueOnce(new Error("initial validation failed"))
+    .mockImplementationOnce(() => readGate.promise)
+    .mockResolvedValueOnce(applied(true));
+  const write = vi.fn(async () => {
+    throw persisted();
+  });
+  const first = setup(write, read);
+  await act(async () => {
+    await first.result.current.save.mutateAsync();
+  });
+  expect(first.client.getQueryState(key)).toMatchObject({ status: "error", data: applied(true) });
+  expect(first.result.current.reloadPending?.requestId).toBe("pending-response");
+  first.unmount();
+  const second = first.mount();
+  await waitFor(() => expect(read).toHaveBeenCalledTimes(2));
+  expect(second.result.current.reloadPending?.requestId).toBe("pending-response");
+  await act(async () => {
+    readGate.reject(new Error("remount read failed"));
+  });
+  await waitFor(() => expect(first.client.getQueryState(key)?.fetchStatus).toBe("idle"));
+  expect(second.result.current.reloadPending?.requestId).toBe("pending-response");
+  await act(async () => {
+    await first.client.refetchQueries({ queryKey: key });
+  });
+  expect(second.result.current.reloadPending).toBeUndefined();
+  expect(write).toHaveBeenCalledOnce();
 });
 
 it.each(["write", "refetch"] as const)(
