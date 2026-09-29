@@ -43,6 +43,7 @@ export interface AuthContextValue {
   uiEnabled: boolean;
   defaultEntry: string;
   legacyFallback: boolean;
+  telemetryEnabled: boolean;
   credentialPrefixes: readonly string[];
   capabilities: UICapabilities;
   features: readonly MigrationFeature[];
@@ -99,6 +100,7 @@ export function AuthProvider({ children }: PropsWithChildren): React.JSX.Element
   const [uiEnabled, setUiEnabled] = useState(true);
   const [defaultEntry, setDefaultEntry] = useState("/app/overview");
   const [legacyFallback, setLegacyFallback] = useState(true);
+  const [telemetryEnabled, setTelemetryEnabled] = useState(false);
   const [credentialPrefixes, setCredentialPrefixes] = useState<readonly string[]>([
     ...defaultCredentialPrefixes,
   ]);
@@ -110,6 +112,8 @@ export function AuthProvider({ children }: PropsWithChildren): React.JSX.Element
   // back in the fragment). A silent attempt must not start from that landing.
   const ssoCallbackLanding = useRef(false);
   const runtimeRefreshFlight = useRef<Promise<void> | undefined>(undefined);
+  const authEpoch = useRef(0);
+  const signingOut = useRef(false);
 
   const applyBootstrap = useCallback((data: UIBootstrap): void => {
     setBackendVersion(data.backend_version);
@@ -118,6 +122,11 @@ export function AuthProvider({ children }: PropsWithChildren): React.JSX.Element
     setUiEnabled(data.ui.enabled);
     setDefaultEntry(data.ui.default_entry);
     setLegacyFallback(data.ui.legacy_fallback);
+    setTelemetryEnabled(
+      data.ui.enabled &&
+        data.ui.telemetry_enabled &&
+        (data.authentication.authenticated || data.authentication.mode === "open"),
+    );
     setCredentialPrefixes(
       data.authentication.credential_prefixes?.length
         ? [...data.authentication.credential_prefixes]
@@ -145,14 +154,21 @@ export function AuthProvider({ children }: PropsWithChildren): React.JSX.Element
     }
   }, []);
 
-  const fallbackBootstrap = useCallback(async (): Promise<void> => {
+  const fallbackBootstrap = useCallback(async (epoch: number): Promise<void> => {
+    if (epoch !== authEpoch.current) return;
+    setTelemetryEnabled(false);
     const ssoRequest = apiClient
       .request(endpoints.auth.ssoStatus, { retryUnauthorized: false })
-      .then(setSso)
-      .catch(() => setSso(defaultSso));
+      .then((status) => {
+        if (epoch === authEpoch.current) setSso(status);
+      })
+      .catch(() => {
+        if (epoch === authEpoch.current) setSso(defaultSso);
+      });
     const me = await apiClient.request(endpoints.auth.me, {
       routeId: "auth.bootstrap.fallback",
     });
+    if (epoch !== authEpoch.current) return;
     if (!me.credential_prefixes?.length) {
       throw new Error("credential prefix configuration unavailable");
     }
@@ -177,6 +193,10 @@ export function AuthProvider({ children }: PropsWithChildren): React.JSX.Element
   }, []);
 
   const bootstrap = useCallback(async (): Promise<void> => {
+    if (signingOut.current) return;
+    const epoch = ++authEpoch.current;
+    runtimeRefreshFlight.current = undefined;
+    setTelemetryEnabled(false);
     setMode("loading");
     setError(undefined);
 
@@ -184,8 +204,9 @@ export function AuthProvider({ children }: PropsWithChildren): React.JSX.Element
       const data = await apiClient.request(endpoints.uiBootstrap, {
         routeId: "auth.bootstrap",
       });
-      applyBootstrap(data);
+      if (epoch === authEpoch.current) applyBootstrap(data);
     } catch (bootstrapError) {
+      if (epoch !== authEpoch.current) return;
       if (isAppError(bootstrapError) && bootstrapError.status === 401) {
         tokenStore.clearAll();
         queryClient.clear();
@@ -196,15 +217,19 @@ export function AuthProvider({ children }: PropsWithChildren): React.JSX.Element
             retryUnauthorized: false,
             routeId: "auth.bootstrap.anonymous",
           });
+          if (epoch !== authEpoch.current) return;
           applyBootstrap(anonymousBootstrap);
         } catch {
+          if (epoch !== authEpoch.current) return;
           try {
             const status = await apiClient.request(endpoints.auth.ssoStatus, {
               retryUnauthorized: false,
               routeId: "auth.bootstrap.sso-status",
             });
+            if (epoch !== authEpoch.current) return;
             setSso(status);
           } catch {
+            if (epoch !== authEpoch.current) return;
             setSso(defaultSso);
           }
           setMode("anonymous");
@@ -213,8 +238,9 @@ export function AuthProvider({ children }: PropsWithChildren): React.JSX.Element
         return;
       }
       try {
-        await fallbackBootstrap();
+        await fallbackBootstrap(epoch);
       } catch (fallbackError) {
+        if (epoch !== authEpoch.current) return;
         if (isAppError(fallbackError) && fallbackError.status === 401) {
           tokenStore.clearTokens();
           setUser(undefined);
@@ -228,13 +254,20 @@ export function AuthProvider({ children }: PropsWithChildren): React.JSX.Element
   }, [applyBootstrap, fallbackBootstrap, queryClient]);
 
   const refreshRuntimeConfig = useCallback((): Promise<void> => {
+    if (signingOut.current) return Promise.resolve();
     if (runtimeRefreshFlight.current) return runtimeRefreshFlight.current;
+    const epoch = authEpoch.current;
     const request = apiClient
       .request(endpoints.uiBootstrap, {
         routeId: "auth.bootstrap.visibility",
       })
-      .then(applyBootstrap)
+      .then((data) => {
+        if (epoch === authEpoch.current) applyBootstrap(data);
+      })
       .catch((refreshError: unknown) => {
+        if (epoch !== authEpoch.current) return;
+        // Opt-in observation fails closed, unlike last-known-good navigation.
+        setTelemetryEnabled(false);
         if (isAppError(refreshError) && refreshError.status === 401) {
           tokenStore.clearAll();
           queryClient.clear();
@@ -253,6 +286,7 @@ export function AuthProvider({ children }: PropsWithChildren): React.JSX.Element
 
   const completeSsoBootstrap = useCallback(
     async (fragment: SsoFragment): Promise<void> => {
+      const epoch = authEpoch.current;
       let ssoErrorCode = fragment.error;
       if (fragment.code) {
         tokenStore.clearTokens();
@@ -262,8 +296,10 @@ export function AuthProvider({ children }: PropsWithChildren): React.JSX.Element
             retryUnauthorized: false,
             routeId: "auth.sso.exchange",
           });
+          if (epoch !== authEpoch.current) return;
           tokenStore.saveTokens(tokens);
         } catch (exchangeError) {
+          if (epoch !== authEpoch.current) return;
           ssoErrorCode = normalizeSsoFailureCode(
             isAppError(exchangeError) ? exchangeError.code : undefined,
             "sso_exchange_failed",
@@ -271,7 +307,7 @@ export function AuthProvider({ children }: PropsWithChildren): React.JSX.Element
         }
       }
       await bootstrap();
-      if (ssoErrorCode) setError(formatSsoFailure(ssoErrorCode));
+      if (ssoErrorCode && authEpoch.current === epoch + 1) setError(formatSsoFailure(ssoErrorCode));
     },
     [bootstrap],
   );
@@ -301,6 +337,10 @@ export function AuthProvider({ children }: PropsWithChildren): React.JSX.Element
   useEffect(
     () =>
       subscribeToLogout(() => {
+        authEpoch.current += 1;
+        signingOut.current = false;
+        runtimeRefreshFlight.current = undefined;
+        setTelemetryEnabled(false);
         markSignedOut();
         tokenStore.clearAll();
         queryClient.clear();
@@ -324,11 +364,15 @@ export function AuthProvider({ children }: PropsWithChildren): React.JSX.Element
 
   const login = useCallback(
     async (email: string, password: string): Promise<void> => {
+      const epoch = ++authEpoch.current;
+      signingOut.current = false;
+      setTelemetryEnabled(false);
       const tokens = await apiClient.request(endpoints.auth.login, {
         body: { email, password },
         retryUnauthorized: false,
         routeId: "auth.login",
       });
+      if (epoch !== authEpoch.current) return;
       tokenStore.saveTokens(tokens);
       queryClient.clear();
       await bootstrap();
@@ -337,6 +381,10 @@ export function AuthProvider({ children }: PropsWithChildren): React.JSX.Element
   );
 
   const logout = useCallback(async (): Promise<void> => {
+    const epoch = ++authEpoch.current;
+    signingOut.current = true;
+    runtimeRefreshFlight.current = undefined;
+    setTelemetryEnabled(false);
     const refreshToken = tokenStore.getRefreshToken();
     let endSessionUrl: string | undefined;
     try {
@@ -357,6 +405,9 @@ export function AuthProvider({ children }: PropsWithChildren): React.JSX.Element
     } catch {
       // Local logout must complete even if the gateway is unavailable.
     }
+    // Only the current auth operation may release a pending logout's refresh guard.
+    if (epoch !== authEpoch.current) return;
+    signingOut.current = false;
     // Before the mode flips to anonymous, or the silent-SSO effect would sign back in.
     markSignedOut();
     tokenStore.clearAll();
@@ -369,6 +420,10 @@ export function AuthProvider({ children }: PropsWithChildren): React.JSX.Element
 
   const setLegacyToken = useCallback(
     async (token: string): Promise<void> => {
+      const epoch = ++authEpoch.current;
+      signingOut.current = false;
+      runtimeRefreshFlight.current = undefined;
+      setTelemetryEnabled(false);
       tokenStore.setLegacyToken(token);
       try {
         const data = await apiClient.request(endpoints.uiBootstrap, {
@@ -378,9 +433,12 @@ export function AuthProvider({ children }: PropsWithChildren): React.JSX.Element
         if (data.authentication.mode !== "legacy_token" || !data.authentication.authenticated) {
           throw new AppError("기존 관리자 토큰이 올바르지 않습니다.", { kind: "auth", status: 401 });
         }
-        applyBootstrap(data);
+        if (epoch === authEpoch.current) applyBootstrap(data);
       } catch (error) {
-        tokenStore.clearAll();
+        if (epoch === authEpoch.current) {
+          setTelemetryEnabled(false);
+          tokenStore.clearAll();
+        }
         throw error;
       }
     },
@@ -400,6 +458,7 @@ export function AuthProvider({ children }: PropsWithChildren): React.JSX.Element
       uiEnabled,
       defaultEntry,
       legacyFallback,
+      telemetryEnabled,
       credentialPrefixes,
       capabilities,
       features,
@@ -421,6 +480,7 @@ export function AuthProvider({ children }: PropsWithChildren): React.JSX.Element
       expiresAt,
       features,
       legacyFallback,
+      telemetryEnabled,
       login,
       logout,
       mode,

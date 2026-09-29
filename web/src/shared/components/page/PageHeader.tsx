@@ -1,3 +1,5 @@
+import { LegacyLink } from "@/shared/components/ui/LegacyLink";
+
 import { ExternalLink } from "lucide-react";
 import type { ReactNode } from "react";
 
@@ -44,9 +46,9 @@ export function PageHeader({
       <div className="page-actions">
         {readOnly ? <Badge tone="info">{uiLabels.readOnly}</Badge> : null}
         {showLegacy ? (
-          <a className="button button-secondary button-default" href={legacyHref}>
+          <LegacyLink className="button button-secondary button-default" href={legacyHref}>
             기존 화면에서 열기 <ExternalLink aria-hidden="true" />
-          </a>
+          </LegacyLink>
         ) : null}
         {actions}
       </div>

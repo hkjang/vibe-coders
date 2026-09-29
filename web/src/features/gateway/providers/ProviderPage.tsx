@@ -1,3 +1,5 @@
+import { LegacyLink } from "@/shared/components/ui/LegacyLink";
+
 import { ExternalLink, LockKeyhole, Plus, RefreshCw, Search } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useSearchParams } from "react-router";
@@ -298,9 +300,9 @@ export function ProviderPage(): React.JSX.Element {
         <div className="page-actions">
           {canWrite ? null : <Badge tone="info">{uiLabels.readOnly}</Badge>}
           {showLegacyAdmin ? (
-            <a className="button button-secondary button-default" href="/admin#/settings">
+            <LegacyLink className="button button-secondary button-default" href="/admin#/settings">
               기존 화면에서 열기 <ExternalLink aria-hidden="true" />
-            </a>
+            </LegacyLink>
           ) : null}
           <Button
             ref={createButtonRef}

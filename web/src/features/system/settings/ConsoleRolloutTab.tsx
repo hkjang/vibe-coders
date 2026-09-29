@@ -8,10 +8,12 @@ import {
   type ConsoleFeatureEdit,
 } from "@/features/system/settings/ConsoleFeatureDialog";
 import { SettingDetailSheet } from "@/features/system/settings/SettingDetailSheet";
+import { ConsoleUsagePanel } from "@/features/system/settings/ConsoleUsagePanel";
 import { QueryNotice, UpdatedAt } from "@/features/system/settings/SettingsParts";
 import {
   buildConsoleFeatureRows,
   consoleGlobalSettings,
+  consoleSettingLabels,
   isConsoleSetting,
   normalizedBoolean,
   settingDisplayValue,
@@ -187,8 +189,8 @@ export function ConsoleRolloutTab({ hasAdminWrite }: { hasAdminWrite: boolean })
   return (
     <div className="settings-tab-stack">
       <InlineNotice tone="warning" title="변경 후 새로고침이 필요합니다.">
-        `/app` 전환 상태는 콘솔이 시작할 때 한 번 읽습니다. 값을 저장한 뒤 브라우저를 새로고침해야 새 상태가
-        적용되며, 다른 사용자에게는 각자의 다음 새로고침부터 반영됩니다.
+        저장 후 새로고침하면 전환 상태를 다시 확인합니다. 활성 탭은 주기적으로 설정을 확인하지만, 서버 반영
+        대기나 연결 오류가 있으면 적용이 늦어질 수 있습니다.
       </InlineNotice>
 
       {reloadPending ? (
@@ -209,123 +211,130 @@ export function ConsoleRolloutTab({ hasAdminWrite }: { hasAdminWrite: boolean })
         />
       ) : null}
 
+      <ConsoleUsagePanel />
+
       <SectionCard
         title="콘솔 전체 설정"
-        headingLevel={3}
+        headingLevel={2}
         description="신규 콘솔의 활성화 여부와 기본 진입 화면을 결정합니다."
       >
         {settingsQuery.isPending ? (
           <p role="status">콘솔 전환 설정을 불러오는 중입니다.</p>
         ) : (
-          <table className="data-table">
-            <caption className="sr-only">콘솔 전체 설정</caption>
-            <thead>
-              <tr>
-                <th scope="col">설정 키</th>
-                <th scope="col">현재 값</th>
-                <th scope="col">적용 출처</th>
-                <th scope="col">작업</th>
-              </tr>
-            </thead>
-            <tbody>
-              {globals.map((setting) => (
-                <tr key={setting.key}>
-                  <th scope="row">
-                    <span className="mono">{setting.key}</span>
-                    <small>{setting.description}</small>
-                  </th>
-                  <td className="mono">{settingDisplayValue(setting)}</td>
-                  <td>{setting.source === "admin" ? "DB 오버라이드" : "환경변수"}</td>
-                  <td>
-                    <Button
-                      size="small"
-                      variant="ghost"
-                      aria-label={`${setting.key} 편집`}
-                      onClick={(event) => {
-                        triggerRef.current = event.currentTarget;
-                        setGlobalKey(setting.key);
-                      }}
-                    >
-                      편집
-                    </Button>
-                  </td>
+          <div className="data-table-scroll" role="region" aria-label="콘솔 전체 설정 표" tabIndex={0}>
+            <table className="data-table">
+              <caption className="sr-only">콘솔 전체 설정</caption>
+              <thead>
+                <tr>
+                  <th scope="col">설정 키</th>
+                  <th scope="col">현재 값</th>
+                  <th scope="col">적용 출처</th>
+                  <th scope="col">작업</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </SectionCard>
-
-      <SectionCard
-        title="기능별 전환 상태"
-        headingLevel={3}
-        description="화면마다 기존 화면 유지·미리보기·정식 전환과 대상 역할, 배포 비율을 조정합니다."
-      >
-        <table className="data-table">
-          <caption className="sr-only">기능별 콘솔 전환 상태</caption>
-          <thead>
-            <tr>
-              <th scope="col">기능</th>
-              <th scope="col">상태</th>
-              <th scope="col">미리보기 역할</th>
-              <th scope="col">배포 비율</th>
-              <th scope="col">읽기 전용</th>
-              <th scope="col">작업</th>
-            </tr>
-          </thead>
-          <tbody>
-            {featureRows.length === 0 ? (
-              <tr>
-                <td colSpan={6} className="data-table-state">
-                  {settingsQuery.isPending
-                    ? "콘솔 전환 설정을 불러오는 중입니다."
-                    : "전환 설정을 제공하는 기능이 없습니다."}
-                </td>
-              </tr>
-            ) : (
-              featureRows.map((row) => {
-                const status = row.status?.value ?? "";
-                return (
-                  <tr key={row.featureId}>
+              </thead>
+              <tbody>
+                {globals.map((setting) => (
+                  <tr key={setting.key}>
                     <th scope="row">
-                      <span>{featureTitles.get(row.featureId) ?? row.featureId}</span>
-                      <small className="mono">{row.featureId}</small>
+                      <span>{consoleSettingLabels[setting.key] ?? setting.key}</span>
+                      <small className="mono">{setting.key}</small>
+                      <small>{setting.description}</small>
                     </th>
-                    <td>
-                      {status ? (
-                        <span className="settings-key-cell">
-                          <Badge tone={statusTones[status] ?? "muted"}>{statusDisplay(status)}</Badge>
-                          <small className="mono">{status}</small>
-                        </span>
-                      ) : (
-                        "—"
-                      )}
-                    </td>
-                    <td>{roleDisplay(row.roles?.value)}</td>
-                    <td className="cell-number">
-                      {row.rollout?.value === undefined ? "—" : `${row.rollout.value}%`}
-                    </td>
-                    <td>{row.readonly ? readOnlyDisplay(row.readonly.value) : "—"}</td>
+                    <td className="mono">{settingDisplayValue(setting)}</td>
+                    <td>{setting.source === "admin" ? "DB 오버라이드" : "환경변수"}</td>
                     <td>
                       <Button
                         size="small"
                         variant="ghost"
-                        aria-label={`${featureTitles.get(row.featureId) ?? row.featureId} 전환 설정 편집`}
+                        aria-label={`${consoleSettingLabels[setting.key] ?? setting.key} 편집`}
                         onClick={(event) => {
                           triggerRef.current = event.currentTarget;
-                          setConflict(false);
-                          setEditing(row);
+                          setGlobalKey(setting.key);
                         }}
                       >
                         편집
                       </Button>
                     </td>
                   </tr>
-                );
-              })
-            )}
-          </tbody>
-        </table>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </SectionCard>
+
+      <SectionCard
+        title="기능별 전환 상태"
+        headingLevel={2}
+        description="화면마다 기존 화면 유지·미리보기·정식 전환과 대상 역할, 배포 비율을 조정합니다."
+      >
+        <div className="data-table-scroll" role="region" aria-label="기능별 전환 상태 표" tabIndex={0}>
+          <table className="data-table">
+            <caption className="sr-only">기능별 콘솔 전환 상태</caption>
+            <thead>
+              <tr>
+                <th scope="col">기능</th>
+                <th scope="col">상태</th>
+                <th scope="col">미리보기 역할</th>
+                <th scope="col">배포 비율</th>
+                <th scope="col">읽기 전용</th>
+                <th scope="col">작업</th>
+              </tr>
+            </thead>
+            <tbody>
+              {featureRows.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="data-table-state">
+                    {settingsQuery.isPending
+                      ? "콘솔 전환 설정을 불러오는 중입니다."
+                      : "전환 설정을 제공하는 기능이 없습니다."}
+                  </td>
+                </tr>
+              ) : (
+                featureRows.map((row) => {
+                  const status = row.status?.value ?? "";
+                  return (
+                    <tr key={row.featureId}>
+                      <th scope="row">
+                        <span>{featureTitles.get(row.featureId) ?? row.featureId}</span>
+                        <small className="mono">{row.featureId}</small>
+                      </th>
+                      <td>
+                        {status ? (
+                          <span className="settings-key-cell">
+                            <Badge tone={statusTones[status] ?? "muted"}>{statusDisplay(status)}</Badge>
+                            <small className="mono">{status}</small>
+                          </span>
+                        ) : (
+                          "—"
+                        )}
+                      </td>
+                      <td>{roleDisplay(row.roles?.value)}</td>
+                      <td className="cell-number">
+                        {row.rollout?.value === undefined ? "—" : `${row.rollout.value}%`}
+                      </td>
+                      <td>{row.readonly ? readOnlyDisplay(row.readonly.value) : "—"}</td>
+                      <td>
+                        <Button
+                          size="small"
+                          variant="ghost"
+                          aria-label={`${featureTitles.get(row.featureId) ?? row.featureId} 전환 설정 편집`}
+                          onClick={(event) => {
+                            triggerRef.current = event.currentTarget;
+                            setConflict(false);
+                            setEditing(row);
+                          }}
+                        >
+                          편집
+                        </Button>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
       </SectionCard>
 
       <UpdatedAt at={settingsQuery.dataUpdatedAt} />

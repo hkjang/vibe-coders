@@ -77,6 +77,8 @@ var apiEndpoints = []apiEndpoint{
 	// ---- admin UI ----
 	{"/admin", []string{"get"}, "admin", "Admin dashboard (HTML)", false},
 	{"/admin/ui-bootstrap", []string{"get"}, "admin", "Next Admin UI bootstrap, permissions, migration registry, and health", true},
+	{"/admin/ui-telemetry/events", []string{"post"}, "admin", "Record an opt-in, privacy-minimized console visit or Legacy fallback", true},
+	{"/admin/ui-telemetry/summary", []string{"get"}, "admin", "Read aggregate observed console visits and Legacy fallbacks", false},
 
 	// ---- admin: core analytics ----
 	{"/admin/stats", []string{"get"}, "admin", "Summary stats", false},
@@ -687,6 +689,18 @@ func enrichOpenAPIOperation(route, method string, op map[string]any) {
 		responses["200"] = successResponse("NavigationResponse")
 	case "get /admin/ui-bootstrap":
 		responses["200"] = successResponse("UIBootstrapResponse")
+	case "post /admin/ui-telemetry/events":
+		op["security"] = []any{map[string]any{}, map[string]any{"bearerAuth": []any{}}}
+		op["description"] = "Requires current UI and telemetry opt-in plus the feature's existing read permission and rollout eligibility. Read-only users can report accessible features. Shared DB opt-in is read at admission: requests admitted before opt-out may complete, while subsequent requests observe opt-out without waiting for pod reload. Pending work has a two-second cancellation budget, not a hard database-cleanup or response-time guarantee. Request-body reads have a matching deadline. Maximum body 1024 bytes; only exact schema fields are accepted. The server stores a hash of a random per-visit identifier, never user identity, IP, user-agent, URL, prompt, or result. No client timestamps are accepted. Disabled, overloaded, and capacity-limited events are silently dropped without retry (204). Retention is 30 days, capped at 100000 visits. This is sampled observational evidence, not total adoption or a unique-user count."
+		op["requestBody"] = requestBody("UITelemetryEventRequest")
+		delete(responses, "200")
+		responses["204"] = map[string]any{"description": "Recorded idempotently or intentionally dropped; do not retry"}
+		responses["403"] = map[string]any{"description": "Feature or Legacy fallback not allowed", "content": map[string]any{"application/json": map[string]any{"schema": schemaRef("AppError")}}}
+		responses["503"] = map[string]any{"description": "Temporarily unavailable; do not retry", "content": map[string]any{"application/json": map[string]any{"schema": schemaRef("AppError")}}}
+	case "get /admin/ui-telemetry/summary":
+		op["description"] = "Requires admin read access. Returns only registered features currently accessible to the caller, including zero counts. Historical aggregates remain visible while collection is disabled. Legacy opens are deduplicated per visit and never exceed visits; a Legacy event received first creates that visit. No user or visit identifiers are returned. Counts are observational and may be incomplete due to opt-out, delivery loss, rate limits or capacity."
+		op["parameters"] = []any{map[string]any{"name": "days", "in": "query", "required": false, "schema": map[string]any{"type": "integer", "enum": []int{7, 30}, "default": 7}}}
+		responses["200"] = successResponse("UITelemetrySummaryResponse")
 	case "get /v1/models":
 		op["parameters"] = []any{map[string]any{
 			"name": "provider", "in": "query", "required": false,
@@ -896,6 +910,9 @@ func appUIOpenAPISchemas() map[string]any {
 		schemas[name] = schema
 	}
 	for name, schema := range requestExplorerOpenAPISchemas() {
+		schemas[name] = schema
+	}
+	for name, schema := range appUITelemetryOpenAPISchemas() {
 		schemas[name] = schema
 	}
 	return schemas

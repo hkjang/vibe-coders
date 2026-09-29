@@ -6,8 +6,22 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SystemSettingsPage } from "@/features/system/settings/SystemSettingsPage";
 import { AppError } from "@/shared/api/error";
-import { apiFailure, mockApi } from "@/test/api";
+import { apiFailure, mockApi as createMockApi } from "@/test/api";
 import { renderScreen } from "@/test/render";
+
+const mockApi = (handlers: Parameters<typeof createMockApi>[0]) =>
+  createMockApi({
+    "GET /admin/ui-telemetry/summary": () => ({
+      enabled: false,
+      days: 7,
+      from: "2026-09-22T00:00:00Z",
+      to: "2026-09-29T00:00:00Z",
+      retention_days: 30,
+      visit_limit: 100_000,
+      features: [],
+    }),
+    ...handlers,
+  });
 
 const authState = vi.hoisted(() => ({ scopes: ["admin:read", "admin:write"] as readonly string[] }));
 

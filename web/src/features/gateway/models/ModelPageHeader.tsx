@@ -1,3 +1,5 @@
+import { LegacyLink } from "@/shared/components/ui/LegacyLink";
+
 import { ExternalLink, RefreshCw } from "lucide-react";
 
 import { formatInteger } from "@/features/health/health-utils";
@@ -40,9 +42,9 @@ export function ModelPageHeader({
         <div className="page-actions">
           <Badge tone="info">{uiLabels.readOnly}</Badge>
           {showLegacyAdmin ? (
-            <a className="button button-secondary button-default" href="/admin#/model-contracts">
+            <LegacyLink className="button button-secondary button-default" href="/admin#/model-contracts">
               기존 화면에서 열기 <ExternalLink aria-hidden="true" />
-            </a>
+            </LegacyLink>
           ) : null}
           <Button variant="primary" onClick={onRefresh} disabled={refreshing}>
             <RefreshCw aria-hidden="true" /> {refreshing ? "갱신 중" : "새로고침"}

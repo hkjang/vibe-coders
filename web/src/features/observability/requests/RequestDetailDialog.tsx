@@ -1,3 +1,5 @@
+import { LegacyLink } from "@/shared/components/ui/LegacyLink";
+
 import type { RefObject } from "react";
 import { Link } from "react-router";
 
@@ -53,9 +55,9 @@ export function RequestDetailDialog({
             </Link>
           ) : null}
           {legacyHref ? (
-            <a className="button button-secondary button-default" href={legacyHref}>
+            <LegacyLink className="button button-secondary button-default" href={legacyHref}>
               기존 요청 화면 열기
-            </a>
+            </LegacyLink>
           ) : null}
           <Button variant="primary" onClick={() => onOpenChange(false)}>
             닫기

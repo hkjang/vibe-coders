@@ -1,3 +1,5 @@
+import { LegacyLink } from "@/shared/components/ui/LegacyLink";
+
 import { AlertTriangle, ExternalLink, RefreshCw } from "lucide-react";
 import type { ReactNode, RefObject } from "react";
 
@@ -225,9 +227,9 @@ export function ModelDetailDialog({
       failure.code === "models_response_limit_exceeded",
   );
   const footer = showLegacyAdmin ? (
-    <a className="button button-secondary button-default" href="/admin#/model-contracts">
+    <LegacyLink className="button button-secondary button-default" href="/admin#/model-contracts">
       기존 모델 계약 열기 <ExternalLink aria-hidden="true" />
-    </a>
+    </LegacyLink>
   ) : undefined;
   const status = row ? modelStatusPresentation[row.status] : undefined;
 

@@ -13,6 +13,7 @@ import type { UIBootstrap } from "@/shared/api/schemas";
 import { tokenStore } from "@/shared/auth/token-store";
 import { authNavigation } from "@/shared/auth/logout-navigation";
 import { silentSsoNavigation } from "@/shared/auth/silent-sso";
+import { mockApi } from "@/test/api";
 
 const bootstrap: UIBootstrap = {
   backend_version: "v0.80.0",
@@ -91,6 +92,60 @@ function AuthErrorHarness(): React.JSX.Element {
 function CredentialPrefixHarness(): React.JSX.Element {
   const auth = useAuth();
   return <span>{auth.credentialPrefixes.join("|")}</span>;
+}
+
+function TelemetryAuthHarness(): React.JSX.Element {
+  const auth = useAuth();
+  return (
+    <div>
+      <output data-testid="telemetry-enabled">{String(auth.telemetryEnabled)}</output>
+      <output data-testid="telemetry-auth-mode">{auth.mode}</output>
+      <output data-testid="telemetry-ui-enabled">{String(auth.uiEnabled)}</output>
+      <button onClick={() => void auth.retry()}>telemetry retry</button>
+      <button onClick={() => void auth.logout()}>telemetry logout</button>
+      <button onClick={() => void auth.setLegacyToken("replacement-token").catch(() => undefined)}>
+        replace telemetry token
+      </button>
+    </div>
+  );
+}
+
+function renderTelemetryAuth() {
+  return render(
+    <TestProviders>
+      <AuthProvider>
+        <TelemetryAuthHarness />
+      </AuthProvider>
+    </TestProviders>,
+  );
+}
+
+function deferredBootstrap() {
+  let resolve: (value: UIBootstrap) => void = () => {
+    throw new Error("Bootstrap resolver was not initialized");
+  };
+  let reject: (reason: unknown) => void = () => {
+    throw new Error("Bootstrap rejecter was not initialized");
+  };
+  const promise = new Promise<UIBootstrap>((accept, refuse) => {
+    resolve = accept;
+    reject = refuse;
+  });
+  return { promise, resolve, reject };
+}
+
+function deferredLogout() {
+  let resolve: () => void = () => {
+    throw new Error("Logout resolver was not initialized");
+  };
+  let reject: (reason: unknown) => void = () => {
+    throw new Error("Logout rejecter was not initialized");
+  };
+  const promise = new Promise<void>((accept, refuse) => {
+    resolve = accept;
+    reject = refuse;
+  });
+  return { promise, resolve, reject };
 }
 
 afterEach(() => {
@@ -512,5 +567,347 @@ describe("AuthProvider silent SSO", () => {
 
     await waitFor(() => expect(screen.getByText("anonymous")).toBeVisible());
     expect(navigate).not.toHaveBeenCalled();
+  });
+});
+
+describe("AuthProvider telemetry opt-in", () => {
+  const enabledBootstrap: UIBootstrap = {
+    ...bootstrap,
+    ui: { ...bootstrap.ui, telemetry_enabled: true },
+    authentication: { ...bootstrap.authentication, keycloak_enabled: false },
+  };
+
+  it("defaults to disabled until an enabled authenticated bootstrap has resolved", async () => {
+    const pending = deferredBootstrap();
+    mockApi({ "GET /admin/ui-bootstrap": () => pending.promise });
+    renderTelemetryAuth();
+    expect(screen.getByTestId("telemetry-enabled")).toHaveTextContent("false");
+    expect(screen.getByTestId("telemetry-auth-mode")).toHaveTextContent("loading");
+
+    await act(async () => pending.resolve(enabledBootstrap));
+    expect(screen.getByTestId("telemetry-enabled")).toHaveTextContent("true");
+    expect(screen.getByTestId("telemetry-auth-mode")).toHaveTextContent("authenticated");
+  });
+
+  it.each(["combined", "fallback"])(
+    "does not restore telemetry when a delayed initial %s bootstrap resolves after cross-tab logout",
+    async (source) => {
+      const pending = deferredBootstrap();
+      const api = mockApi({
+        "GET /admin/ui-bootstrap": () => {
+          if (source === "combined") return pending.promise;
+          throw new AppError("bootstrap unavailable", { kind: "http", status: 503 });
+        },
+        "GET /auth/sso-status": () => fallbackSsoStatus,
+        "GET /auth/me": () =>
+          pending.promise.then(() => ({
+            auth_enabled: true,
+            credential_prefixes: ["corp_"],
+            user: bootstrap.user,
+            version: "v0.86.1",
+          })),
+      });
+      renderTelemetryAuth();
+      if (source === "fallback") {
+        await waitFor(() => expect(api.calls.some((call) => call.key === "GET /auth/me")).toBe(true));
+      }
+      act(() =>
+        window.dispatchEvent(
+          new StorageEvent("storage", { key: "vibe.app.auth.logout-event", newValue: "1" }),
+        ),
+      );
+      expect(screen.getByTestId("telemetry-auth-mode")).toHaveTextContent("anonymous");
+      await act(async () => pending.resolve(enabledBootstrap));
+      expect(screen.getByTestId("telemetry-enabled")).toHaveTextContent("false");
+      expect(screen.getByTestId("telemetry-auth-mode")).toHaveTextContent("anonymous");
+    },
+  );
+
+  it.each([
+    { name: "default disabled flag", data: bootstrap, mode: "authenticated", enabled: false },
+    {
+      name: "disabled console",
+      data: { ...enabledBootstrap, ui: { ...enabledBootstrap.ui, enabled: false } },
+      mode: "authenticated",
+      enabled: false,
+    },
+    {
+      name: "unverified session",
+      data: {
+        ...enabledBootstrap,
+        authentication: { ...enabledBootstrap.authentication, authenticated: false },
+        user: null,
+      },
+      mode: "anonymous",
+      enabled: false,
+    },
+    {
+      name: "unverified legacy token",
+      data: {
+        ...enabledBootstrap,
+        authentication: {
+          ...enabledBootstrap.authentication,
+          authenticated: false,
+          mode: "legacy_token" as const,
+        },
+        user: null,
+      },
+      mode: "anonymous",
+      enabled: false,
+    },
+    {
+      name: "verified legacy token",
+      data: {
+        ...enabledBootstrap,
+        authentication: { ...enabledBootstrap.authentication, mode: "legacy_token" as const },
+      },
+      mode: "legacy",
+      enabled: true,
+    },
+    {
+      name: "server-confirmed open mode",
+      data: {
+        ...enabledBootstrap,
+        authentication: {
+          ...enabledBootstrap.authentication,
+          enabled: false,
+          authenticated: false,
+          mode: "open" as const,
+        },
+      },
+      mode: "open",
+      enabled: true,
+    },
+  ])("resolves telemetry from $name", async ({ data, mode, enabled }) => {
+    mockApi({ "GET /admin/ui-bootstrap": () => data });
+    renderTelemetryAuth();
+    await waitFor(() => expect(screen.getByTestId("telemetry-auth-mode")).toHaveTextContent(mode));
+    expect(screen.getByTestId("telemetry-enabled")).toHaveTextContent(String(enabled));
+  });
+
+  it("clears an old opt-in during retry and leaves it off after authenticated fallback succeeds", async () => {
+    const pending = deferredBootstrap();
+    let bootstrapCalls = 0;
+    mockApi({
+      "GET /admin/ui-bootstrap": () => (++bootstrapCalls === 1 ? enabledBootstrap : pending.promise),
+      "GET /auth/sso-status": () => fallbackSsoStatus,
+      "GET /auth/me": () => ({
+        auth_enabled: true,
+        credential_prefixes: ["corp_"],
+        user: bootstrap.user,
+        version: "v0.86.1",
+      }),
+    });
+    const user = userEvent.setup();
+    renderTelemetryAuth();
+    await waitFor(() => expect(screen.getByTestId("telemetry-enabled")).toHaveTextContent("true"));
+    await user.click(screen.getByRole("button", { name: "telemetry retry" }));
+    expect(screen.getByTestId("telemetry-enabled")).toHaveTextContent("false");
+    expect(screen.getByTestId("telemetry-auth-mode")).toHaveTextContent("loading");
+    await act(async () => pending.reject(new AppError("invalid bootstrap", { kind: "contract" })));
+    await waitFor(() => expect(screen.getByTestId("telemetry-auth-mode")).toHaveTextContent("authenticated"));
+    expect(screen.getByTestId("telemetry-enabled")).toHaveTextContent("false");
+  });
+
+  it.each([401, 503, "contract"] as const)(
+    "fails closed on background bootstrap %s without discarding unrelated UI flags",
+    async (failure) => {
+      let bootstrapCalls = 0;
+      const api = mockApi({
+        "GET /admin/ui-bootstrap": () => {
+          if (++bootstrapCalls === 1) return enabledBootstrap;
+          throw new AppError("refresh failed", {
+            kind: failure === "contract" ? "contract" : failure === 401 ? "auth" : "http",
+            ...(failure === "contract" ? {} : { status: failure }),
+          });
+        },
+      });
+      Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+      renderTelemetryAuth();
+      await waitFor(() => expect(screen.getByTestId("telemetry-enabled")).toHaveTextContent("true"));
+      act(() => document.dispatchEvent(new Event("visibilitychange")));
+      await waitFor(() => expect(screen.getByTestId("telemetry-enabled")).toHaveTextContent("false"));
+      expect(screen.getByTestId("telemetry-ui-enabled")).toHaveTextContent("true");
+      expect(screen.getByTestId("telemetry-auth-mode")).toHaveTextContent(
+        failure === 401 ? "anonymous" : "authenticated",
+      );
+      expect(api.calls.map((call) => call.key)).toEqual([
+        "GET /admin/ui-bootstrap",
+        "GET /admin/ui-bootstrap",
+      ]);
+    },
+  );
+
+  it("applies the current server opt-out on a successful background bootstrap", async () => {
+    let current = enabledBootstrap;
+    mockApi({ "GET /admin/ui-bootstrap": () => current });
+    Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+    renderTelemetryAuth();
+    await waitFor(() => expect(screen.getByTestId("telemetry-enabled")).toHaveTextContent("true"));
+    current = { ...enabledBootstrap, ui: { ...enabledBootstrap.ui, telemetry_enabled: false } };
+    act(() => document.dispatchEvent(new Event("visibilitychange")));
+    await waitFor(() => expect(screen.getByTestId("telemetry-enabled")).toHaveTextContent("false"));
+    expect(screen.getByTestId("telemetry-auth-mode")).toHaveTextContent("authenticated");
+  });
+
+  it.each(["local", "cross-tab"])(
+    "does not restore telemetry from a stale background response after %s logout",
+    async (logout) => {
+      const pending = deferredBootstrap();
+      let bootstrapCalls = 0;
+      mockApi({
+        "GET /admin/ui-bootstrap": () => (++bootstrapCalls === 1 ? enabledBootstrap : pending.promise),
+        "POST /auth/logout": () => ({}),
+      });
+      Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+      const user = userEvent.setup();
+      renderTelemetryAuth();
+      await waitFor(() => expect(screen.getByTestId("telemetry-enabled")).toHaveTextContent("true"));
+      act(() => document.dispatchEvent(new Event("visibilitychange")));
+      expect(bootstrapCalls).toBe(2);
+      if (logout === "local") {
+        await user.click(screen.getByRole("button", { name: "telemetry logout" }));
+      } else {
+        act(() =>
+          window.dispatchEvent(
+            new StorageEvent("storage", { key: "vibe.app.auth.logout-event", newValue: "1" }),
+          ),
+        );
+      }
+      await waitFor(() => expect(screen.getByTestId("telemetry-auth-mode")).toHaveTextContent("anonymous"));
+      expect(screen.getByTestId("telemetry-enabled")).toHaveTextContent("false");
+      await act(async () => pending.resolve(enabledBootstrap));
+      expect(screen.getByTestId("telemetry-enabled")).toHaveTextContent("false");
+      expect(screen.getByTestId("telemetry-auth-mode")).toHaveTextContent("anonymous");
+    },
+  );
+
+  it.each(["success", "failure"])(
+    "keeps bootstrap blocked while a newer logout is pending after an older logout %s",
+    async (outcome) => {
+      const older = deferredLogout();
+      const newer = deferredLogout();
+      let logoutCalls = 0;
+      const api = mockApi({
+        "GET /admin/ui-bootstrap": () => enabledBootstrap,
+        "POST /auth/logout": () => (++logoutCalls === 1 ? older.promise : newer.promise),
+      });
+      tokenStore.saveTokens({ access_token: "access", refresh_token: "refresh" });
+      Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+      const user = userEvent.setup();
+      renderTelemetryAuth();
+      await waitFor(() => expect(screen.getByTestId("telemetry-enabled")).toHaveTextContent("true"));
+      await user.click(screen.getByRole("button", { name: "telemetry logout" }));
+      await user.click(screen.getByRole("button", { name: "telemetry logout" }));
+      expect(logoutCalls).toBe(2);
+      await act(async () => {
+        if (outcome === "success") older.resolve();
+        else older.reject(new AppError("logout unavailable", { kind: "http", status: 503 }));
+      });
+
+      await act(async () => document.dispatchEvent(new Event("visibilitychange")));
+      await user.click(screen.getByRole("button", { name: "telemetry retry" }));
+      expect(api.calls.map((call) => call.key)).toEqual([
+        "GET /admin/ui-bootstrap",
+        "POST /auth/logout",
+        "POST /auth/logout",
+      ]);
+      expect(screen.getByTestId("telemetry-enabled")).toHaveTextContent("false");
+      expect(screen.getByTestId("telemetry-auth-mode")).toHaveTextContent("authenticated");
+      expect(tokenStore.getRefreshToken()).toBe("refresh");
+
+      await act(async () => newer.resolve());
+      expect(screen.getByTestId("telemetry-enabled")).toHaveTextContent("false");
+      expect(screen.getByTestId("telemetry-auth-mode")).toHaveTextContent("anonymous");
+      expect(tokenStore.getRefreshToken()).toBe("");
+    },
+  );
+
+  it.each(["success", "failure"])(
+    "releases the pending logout guard on cross-tab logout before the old request's %s",
+    async (outcome) => {
+      const pending = deferredLogout();
+      let current = enabledBootstrap;
+      let bootstrapCalls = 0;
+      mockApi({
+        "GET /admin/ui-bootstrap": () => {
+          bootstrapCalls += 1;
+          return current;
+        },
+        "POST /auth/logout": () => pending.promise,
+      });
+      Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+      const user = userEvent.setup();
+      renderTelemetryAuth();
+      await waitFor(() => expect(screen.getByTestId("telemetry-enabled")).toHaveTextContent("true"));
+      await user.click(screen.getByRole("button", { name: "telemetry logout" }));
+      current = {
+        ...enabledBootstrap,
+        authentication: { ...enabledBootstrap.authentication, authenticated: false },
+        user: null,
+      };
+      act(() =>
+        window.dispatchEvent(
+          new StorageEvent("storage", { key: "vibe.app.auth.logout-event", newValue: "1" }),
+        ),
+      );
+      expect(screen.getByTestId("telemetry-enabled")).toHaveTextContent("false");
+      expect(screen.getByTestId("telemetry-auth-mode")).toHaveTextContent("anonymous");
+      await act(async () => document.dispatchEvent(new Event("visibilitychange")));
+      expect(bootstrapCalls).toBe(2);
+
+      await act(async () => {
+        if (outcome === "success") pending.resolve();
+        else pending.reject(new AppError("logout unavailable", { kind: "http", status: 503 }));
+      });
+      await user.click(screen.getByRole("button", { name: "telemetry retry" }));
+      expect(bootstrapCalls).toBe(3);
+      expect(screen.getByTestId("telemetry-enabled")).toHaveTextContent("false");
+      expect(screen.getByTestId("telemetry-auth-mode")).toHaveTextContent("anonymous");
+    },
+  );
+
+  it("disables observation immediately during legacy token replacement and keeps it off on rejection", async () => {
+    const pending = deferredBootstrap();
+    let bootstrapCalls = 0;
+    mockApi({
+      "GET /admin/ui-bootstrap": () => (++bootstrapCalls === 1 ? enabledBootstrap : pending.promise),
+    });
+    const user = userEvent.setup();
+    renderTelemetryAuth();
+    await waitFor(() => expect(screen.getByTestId("telemetry-enabled")).toHaveTextContent("true"));
+    await user.click(screen.getByRole("button", { name: "replace telemetry token" }));
+    expect(screen.getByTestId("telemetry-enabled")).toHaveTextContent("false");
+    await act(async () => pending.reject(new AppError("invalid token", { kind: "auth", status: 401 })));
+    expect(screen.getByTestId("telemetry-enabled")).toHaveTextContent("false");
+    expect(tokenStore.getLegacyToken()).toBe("");
+  });
+
+  it("does not let an old background 401 disable the newly verified legacy session", async () => {
+    const pending = deferredBootstrap();
+    let bootstrapCalls = 0;
+    mockApi({
+      "GET /admin/ui-bootstrap": () => {
+        bootstrapCalls += 1;
+        if (bootstrapCalls === 1) return enabledBootstrap;
+        if (bootstrapCalls === 2) return pending.promise;
+        return {
+          ...enabledBootstrap,
+          authentication: { ...enabledBootstrap.authentication, mode: "legacy_token" },
+        };
+      },
+    });
+    Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+    const user = userEvent.setup();
+    renderTelemetryAuth();
+    await waitFor(() => expect(screen.getByTestId("telemetry-enabled")).toHaveTextContent("true"));
+    act(() => document.dispatchEvent(new Event("visibilitychange")));
+    await user.click(screen.getByRole("button", { name: "replace telemetry token" }));
+    await waitFor(() => expect(screen.getByTestId("telemetry-auth-mode")).toHaveTextContent("legacy"));
+    expect(screen.getByTestId("telemetry-enabled")).toHaveTextContent("true");
+    await act(async () => pending.reject(new AppError("old credentials", { kind: "auth", status: 401 })));
+    expect(screen.getByTestId("telemetry-enabled")).toHaveTextContent("true");
+    expect(screen.getByTestId("telemetry-auth-mode")).toHaveTextContent("legacy");
+    expect(tokenStore.getLegacyToken()).toBe("replacement-token");
   });
 });

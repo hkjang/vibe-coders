@@ -16,6 +16,7 @@ import { PageHeader } from "@/shared/components/page/PageHeader";
 import { Badge } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
 import { InlineNotice } from "@/shared/components/ui/InlineNotice";
+import { LegacyLink } from "@/shared/components/ui/LegacyLink";
 import { SectionCard } from "@/shared/components/ui/SectionCard";
 import { TabPanel, Tabs, type TabItem } from "@/shared/components/ui/Tabs";
 import { useTabParam } from "@/shared/hooks/use-tab-param";
@@ -128,10 +129,14 @@ export function SystemSettingsPage(): React.JSX.Element {
           {delegatedPanels.map((panel) => (
             <li key={panel.title}>
               <span>{panel.title}</span>
-              {panel.internal || showLegacy ? (
+              {panel.internal ? (
                 <a href={panel.href}>
                   {panel.where} 열기 <ExternalLink aria-hidden="true" />
                 </a>
+              ) : showLegacy ? (
+                <LegacyLink href={panel.href}>
+                  {panel.where} 열기 <ExternalLink aria-hidden="true" />
+                </LegacyLink>
               ) : (
                 <span className="settings-permission-note">{panel.where}에서 관리합니다.</span>
               )}

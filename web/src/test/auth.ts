@@ -22,6 +22,7 @@ export interface TestAuthOptions {
   role?: string;
   scopes?: readonly string[];
   legacyFallback?: boolean;
+  telemetryEnabled?: boolean;
   backendVersion?: string;
   rawPromptView?: boolean;
   user?: Partial<AuthUser>;
@@ -59,6 +60,7 @@ export function testAuth(options: TestAuthOptions = {}): AuthContextValue {
     uiEnabled: true,
     defaultEntry: "/app/overview",
     legacyFallback: options.legacyFallback ?? true,
+    telemetryEnabled: options.telemetryEnabled ?? false,
     credentialPrefixes: ["vc_sk_", "vc_sa_"],
     capabilities: { raw_prompt_view: options.rawPromptView ?? true },
     features: migrationRegistry,

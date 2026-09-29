@@ -34,7 +34,7 @@ import (
 
 // AppVersion is the gateway build version, surfaced in /auth/me and both admin UIs.
 // Release builds override it with -X vibe-coders/internal/proxy.AppVersion=<tag>.
-var AppVersion = "v0.86.1"
+var AppVersion = "v0.86.2"
 
 type Server struct {
 	cfg      config.Config
@@ -98,6 +98,8 @@ type Server struct {
 	cspViolations   *tracking.Recorder              // origins the browser refused while tracking is on
 	adminModels     *adminModelCatalogCache
 	trustedProxies  []netip.Prefix
+
+	appUITelemetryGate *appUITelemetryLimiter // defaults to the process-wide bounded intake gate
 }
 
 type atomicKillState struct {
@@ -163,6 +165,7 @@ func NewServer(cfg config.Config, db *store.SQLStore, logger *store.AsyncLogger,
 	server.applyClickHouseSinkWorker()
 	server.startBreakerSync()
 	server.startQuotaReservationSweeper()
+	go server.appUITelemetryRetentionLoop(db.LifecycleContext(), time.Hour)
 
 	// Async per-request fact ingest queue + batch worker (ships ai_request_fact rows off
 	// the hot path). The queue is always allocated; the worker no-ops until configured.
@@ -290,6 +293,8 @@ func (s *Server) Routes() http.Handler {
 	})
 	mux.HandleFunc("/admin/sso/keycloak/test", s.handleKeycloakTest)
 	mux.HandleFunc("/admin/ui-bootstrap", s.handleAdminUIBootstrap)
+	mux.HandleFunc("/admin/ui-telemetry/events", s.handleAppUITelemetryEvent)
+	mux.HandleFunc("/admin/ui-telemetry/summary", s.handleAppUITelemetrySummary)
 	mux.HandleFunc("/admin", s.handleAdminUI)
 	mux.HandleFunc("/admin/", s.handleAdminUI)
 	mux.HandleFunc("/admin/stats", s.handleStats)

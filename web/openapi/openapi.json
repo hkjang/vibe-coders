@@ -2974,6 +2974,186 @@
         ],
         "type": "object"
       },
+      "UITelemetryEventRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "event": {
+            "enum": [
+              "visit",
+              "legacy_fallback"
+            ],
+            "type": "string"
+          },
+          "feature_id": {
+            "enum": [
+              "overview",
+              "me.home",
+              "team.home",
+              "gateway.health",
+              "gateway.providers",
+              "gateway.models",
+              "gateway.chat",
+              "routing.rules",
+              "observability.requests",
+              "observability.traces",
+              "observability.sessions",
+              "observability.xview",
+              "observability.llm",
+              "observability.probes",
+              "prompts.lab",
+              "prompts.library",
+              "access.users",
+              "governance.policies",
+              "governance.remediation",
+              "governance.reports",
+              "governance.assets",
+              "mcp.overview",
+              "mcp.gateway",
+              "agents.registry",
+              "agents.workflows",
+              "agents.apps",
+              "agents.skills",
+              "text2sql.overview",
+              "data.warehouse",
+              "data.products",
+              "finops.overview",
+              "security.overview",
+              "security.redteam",
+              "security.sandbox",
+              "system.health",
+              "system.settings"
+            ],
+            "type": "string"
+          },
+          "visit_id": {
+            "description": "128-bit cryptographically random per-feature visit nonce. Never derive from identity or persist in browser storage. Server retains only its SHA-256 hash.",
+            "maxLength": 32,
+            "minLength": 32,
+            "pattern": "^[0-9a-f]{32}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "feature_id",
+          "visit_id",
+          "event"
+        ],
+        "type": "object"
+      },
+      "UITelemetryFeatureCount": {
+        "additionalProperties": false,
+        "properties": {
+          "feature_id": {
+            "enum": [
+              "overview",
+              "me.home",
+              "team.home",
+              "gateway.health",
+              "gateway.providers",
+              "gateway.models",
+              "gateway.chat",
+              "routing.rules",
+              "observability.requests",
+              "observability.traces",
+              "observability.sessions",
+              "observability.xview",
+              "observability.llm",
+              "observability.probes",
+              "prompts.lab",
+              "prompts.library",
+              "access.users",
+              "governance.policies",
+              "governance.remediation",
+              "governance.reports",
+              "governance.assets",
+              "mcp.overview",
+              "mcp.gateway",
+              "agents.registry",
+              "agents.workflows",
+              "agents.apps",
+              "agents.skills",
+              "text2sql.overview",
+              "data.warehouse",
+              "data.products",
+              "finops.overview",
+              "security.overview",
+              "security.redteam",
+              "security.sandbox",
+              "system.health",
+              "system.settings"
+            ],
+            "type": "string"
+          },
+          "legacy_opens": {
+            "maximum": 100000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "visits": {
+            "maximum": 100000,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "feature_id",
+          "visits",
+          "legacy_opens"
+        ],
+        "type": "object"
+      },
+      "UITelemetrySummaryResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "days": {
+            "enum": [
+              7,
+              30
+            ],
+            "type": "integer"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "features": {
+            "items": {
+              "$ref": "#/components/schemas/UITelemetryFeatureCount"
+            },
+            "maxItems": 36,
+            "type": "array"
+          },
+          "from": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "retention_days": {
+            "enum": [
+              30
+            ],
+            "type": "integer"
+          },
+          "to": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "visit_limit": {
+            "enum": [
+              100000
+            ],
+            "type": "integer"
+          }
+        },
+        "required": [
+          "enabled",
+          "days",
+          "from",
+          "to",
+          "retention_days",
+          "visit_limit",
+          "features"
+        ],
+        "type": "object"
+      },
       "UserSummary": {
         "additionalProperties": false,
         "properties": {
@@ -3037,7 +3217,7 @@
   "info": {
     "description": "OpenAI-compatible AI control-plane gateway. This document covers the full HTTP surface; request/response bodies are summarized — see the admin UI for live examples.",
     "title": "AI Proxy Gateway API",
-    "version": "v0.86.1"
+    "version": "v0.86.2"
   },
   "openapi": "3.0.3",
   "paths": {
@@ -14121,6 +14301,119 @@
           }
         },
         "summary": "Next Admin UI bootstrap, permissions, migration registry, and health",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/ui-telemetry/events": {
+      "post": {
+        "description": "Requires current UI and telemetry opt-in plus the feature's existing read permission and rollout eligibility. Read-only users can report accessible features. Shared DB opt-in is read at admission: requests admitted before opt-out may complete, while subsequent requests observe opt-out without waiting for pod reload. Pending work has a two-second cancellation budget, not a hard database-cleanup or response-time guarantee. Request-body reads have a matching deadline. Maximum body 1024 bytes; only exact schema fields are accepted. The server stores a hash of a random per-visit identifier, never user identity, IP, user-agent, URL, prompt, or result. No client timestamps are accepted. Disabled, overloaded, and capacity-limited events are silently dropped without retry (204). Retention is 30 days, capped at 100000 visits. This is sampled observational evidence, not total adoption or a unique-user count.",
+        "operationId": "post__admin_ui_telemetry_events",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UITelemetryEventRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Recorded idempotently or intentionally dropped; do not retry"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Feature or Legacy fallback not allowed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Temporarily unavailable; do not retry"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {},
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Record an opt-in, privacy-minimized console visit or Legacy fallback",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/ui-telemetry/summary": {
+      "get": {
+        "description": "Requires admin read access. Returns only registered features currently accessible to the caller, including zero counts. Historical aggregates remain visible while collection is disabled. Legacy opens are deduplicated per visit and never exceed visits; a Legacy event received first creates that visit. No user or visit identifiers are returned. Counts are observational and may be incomplete due to opt-out, delivery loss, rate limits or capacity.",
+        "operationId": "get__admin_ui_telemetry_summary",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "days",
+            "required": false,
+            "schema": {
+              "default": 7,
+              "enum": [
+                7,
+                30
+              ],
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UITelemetrySummaryResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Read aggregate observed console visits and Legacy fallbacks",
         "tags": [
           "admin"
         ]

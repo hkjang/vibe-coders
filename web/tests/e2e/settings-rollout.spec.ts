@@ -1,15 +1,19 @@
 import { expect, test, type Locator, type Page, type Request } from "@playwright/test";
 
 import type { EffectiveSetting } from "../../src/shared/api/domains/system.schemas";
-import type { SettingsBatchRequest, UiBootstrapResponse } from "../../src/shared/api/generated";
+import type {
+  SettingsBatchRequest,
+  UiBootstrapResponse,
+  UiTelemetryFeatureCount,
+} from "../../src/shared/api/generated";
 
 const featureKey = "ui.app.feature.system.settings";
 const editorName = "시스템 설정 전환 설정";
 const editButtonName = `${editorName} 편집`;
 
 const bootstrap: UiBootstrapResponse = {
-  backend_version: "v0.86.1",
-  ui_version: "e2e-v0.86.1",
+  backend_version: "v0.86.2",
+  ui_version: "e2e-v0.86.2",
   api_version: "v1",
   ui: {
     enabled: true,
@@ -77,7 +81,11 @@ function setting(field: string, value: string, type: string, version?: number): 
   };
 }
 
-async function mockSettingsGateway(page: Page, outcome: "saved" | "conflict" | "reload_pending") {
+async function mockSettingsGateway(
+  page: Page,
+  outcome: "saved" | "conflict" | "reload_pending",
+  telemetryOptions: { enabled?: boolean; status?: number; features?: UiTelemetryFeatureCount[] } = {},
+) {
   let settings: EffectiveSetting[] = [
     setting("status", "legacy", "string", 3),
     setting("roles", "super_admin,admin", "csv"),
@@ -85,6 +93,8 @@ async function mockSettingsGateway(page: Page, outcome: "saved" | "conflict" | "
     setting("readonly", "true", "bool", 2),
   ];
   const writes: Request[] = [];
+  const telemetry: Request[] = [];
+  const summaryReads: Request[] = [];
   const unexpected: string[] = [];
   let reads = 0;
 
@@ -101,7 +111,27 @@ async function mockSettingsGateway(page: Page, outcome: "saved" | "conflict" | "
       });
 
     if (url.pathname.startsWith("/admin/") && request.method() !== "GET") writes.push(request);
-    if (call === "GET /admin/ui-bootstrap") return json(bootstrap);
+    if (call === "GET /admin/ui-bootstrap")
+      return json({
+        ...bootstrap,
+        ui: { ...bootstrap.ui, telemetry_enabled: telemetryOptions.enabled ?? false },
+      });
+    if (call === "POST /admin/ui-telemetry/events") {
+      telemetry.push(request);
+      return route.fulfill({ status: telemetryOptions.status ?? 204 });
+    }
+    if (call === "GET /admin/ui-telemetry/summary") {
+      summaryReads.push(request);
+      return json({
+        enabled: telemetryOptions.enabled ?? false,
+        days: Number(url.searchParams.get("days") ?? 7),
+        from: "2026-09-22T00:00:00Z",
+        to: "2026-09-29T00:00:00Z",
+        retention_days: 30,
+        visit_limit: 100_000,
+        features: telemetryOptions.features ?? [],
+      });
+    }
     if (call === "GET /health") return json({ status: "ok" });
     if (call === "GET /ready") return json({ status: "ready" });
     if (call === "GET /admin/settings/effective") {
@@ -139,14 +169,129 @@ async function mockSettingsGateway(page: Page, outcome: "saved" | "conflict" | "
       unexpected.push(call);
       return json({ error: { message: `Unexpected admin call: ${call}` } }, 501);
     }
+    if (url.pathname === "/admin")
+      return route.fulfill({
+        contentType: "text/html",
+        body: '<!doctype html><html lang="ko"><meta charset="utf-8"><title>기존 화면</title><h1>기존 관리자 화면</h1></html>',
+      });
     if (request.resourceType() === "document" && url.pathname.startsWith("/app/")) {
       const response = await route.fetch();
       return route.fulfill({ response });
     }
     await route.continue();
   });
-  return { writes, unexpected, readCount: () => reads };
+  return { writes, telemetry, summaryReads, unexpected, readCount: () => reads };
 }
+
+test("선택적 사용 관측은 필터를 보내지 않고 한 방문과 키보드 기존 화면 열기를 연결한다", async ({ page }) => {
+  const api = await mockSettingsGateway(page, "saved", { enabled: true });
+  await page.goto("system/settings?tab=console&q=private-filter");
+  await expect(page.getByRole("heading", { name: "신규 콘솔 사용 관측" })).toBeVisible();
+  await expect.poll(() => api.telemetry.length).toBe(1);
+  const visit = api.telemetry[0];
+  if (!visit) throw new Error("Expected one observed visit");
+  expect(visit.postDataJSON()).toEqual({
+    feature_id: "system.settings",
+    event: "visit",
+    visit_id: expect.stringMatching(/^[a-f0-9]{32}$/),
+  });
+  expect(visit.headers()["referer"]).toBeUndefined();
+  expect(new URL(visit.url()).search).toBe("");
+  await page.getByLabel("조회 기간", { exact: true }).selectOption("30");
+  await expect(page).toHaveURL(/telemetry_days=30/);
+  await expect(page.getByText(/수집 켜짐/)).toBeVisible();
+  expect(api.summaryReads.length).toBeGreaterThan(0);
+  for (const read of api.summaryReads) expect(read.headers()["referer"]).toBeUndefined();
+  expect(api.telemetry).toHaveLength(1);
+  const legacy = page.getByRole("link", { name: "기존 화면에서 열기", exact: true });
+  await legacy.focus();
+  await legacy.press("Enter");
+  await expect(page).toHaveURL(/\/admin#\/settings$/);
+  await expect.poll(() => api.telemetry.length).toBe(2);
+  const legacyEvent = api.telemetry[1];
+  if (!legacyEvent) throw new Error("Expected one observed Legacy opening");
+  expect(legacyEvent.postDataJSON()).toEqual({ ...visit.postDataJSON(), event: "legacy_fallback" });
+  expect(legacyEvent.headers()["referer"]).toBeUndefined();
+  expect(api.unexpected).toEqual([]);
+});
+
+test("사용 관측의 401은 재로그인이나 기존 화면 이동을 막지 않는다", async ({ page }) => {
+  const api = await mockSettingsGateway(page, "saved", { enabled: true, status: 401 });
+  await page.goto("system/settings?tab=console");
+  await expect(page.getByRole("heading", { name: "시스템 설정", exact: true })).toBeVisible();
+  await expect.poll(() => api.telemetry.length).toBe(1);
+  await page.getByRole("link", { name: "기존 화면에서 열기", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "기존 관리자 화면" })).toBeVisible();
+  await expect.poll(() => api.telemetry.length).toBe(2);
+  expect(api.unexpected).toEqual([]);
+});
+
+test("기본 꺼짐에서는 사용 관측을 전송하지 않고 조회 기간을 새로고침 후 복원한다", async ({ page }) => {
+  const api = await mockSettingsGateway(page, "saved");
+  await page.goto("system/settings?tab=console&telemetry_days=30");
+  await expect(page.getByLabel("조회 기간", { exact: true })).toHaveValue("30");
+  await expect(page.getByText(/수집 꺼짐/)).toBeVisible();
+  await page.reload();
+  await expect(page.getByLabel("조회 기간", { exact: true })).toHaveValue("30");
+  await expect(page.getByText(/수집 꺼짐/)).toBeVisible();
+  expect(api.telemetry).toEqual([]);
+  expect(api.unexpected).toEqual([]);
+});
+
+test("좁은 화면에서도 한글 사용 관측과 조회 작업을 읽고 조작한다", async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const api = await mockSettingsGateway(page, "saved", {
+    features: [{ feature_id: "system.settings", visits: 20, legacy_opens: 5 }],
+  });
+  await page.goto("system/settings?tab=console");
+  const panel = page.locator("section").filter({
+    has: page.getByRole("heading", { name: "신규 콘솔 사용 관측", exact: true }),
+  });
+  const table = panel.getByRole("table");
+  await expect(table.getByRole("rowheader", { name: "시스템 설정" })).toBeVisible();
+  await expect(table.getByRole("cell", { name: "25%", exact: true })).toBeVisible();
+  const refresh = panel.getByRole("button", { name: "관측 결과 새로고침" });
+  await refresh.focus();
+  await refresh.press("Enter");
+  await expect.poll(() => api.summaryReads.length).toBe(2);
+  await expect(refresh).toBeFocused();
+  await panel.getByLabel("조회 기간", { exact: true }).selectOption("30");
+  await expect(page).toHaveURL(/telemetry_days=30/);
+  const usageScroll = panel.getByRole("region", { name: "기능별 사용 관측" });
+  await usageScroll.focus();
+  await usageScroll.press("ArrowRight");
+  await expect.poll(() => usageScroll.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0);
+  const settingsScroll = page.getByRole("region", { name: "기능별 전환 상태 표", exact: true });
+  await settingsScroll.focus();
+  await page.keyboard.press("Tab");
+  const edit = settingsScroll.getByRole("button", { name: editButtonName });
+  await expect(edit).toBeFocused();
+  await expect.poll(() => settingsScroll.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0);
+  await edit.press("Enter");
+  await expect(page.getByRole("dialog", { name: editorName, exact: true })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(edit).toBeFocused();
+  await testInfo.attach("mobile-layout", {
+    contentType: "application/json",
+    body: JSON.stringify(
+      await page.evaluate(() => ({
+        width: window.innerWidth,
+        documentWidth: document.documentElement.scrollWidth,
+        overflow: Array.from(document.querySelectorAll("*"))
+          .filter((element) => element.getBoundingClientRect().right > window.innerWidth)
+          .map((element) => ({
+            tag: element.tagName,
+            class: element.className,
+            width: element.getBoundingClientRect().width,
+          })),
+      })),
+    ),
+  });
+  await panel.screenshot({ path: testInfo.outputPath("console-usage-mobile.png") });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  expect(api.telemetry).toEqual([]);
+  expect(api.unexpected).toEqual([]);
+});
 
 async function openEditor(page: Page): Promise<Locator> {
   await page.goto("system/settings?tab=console");

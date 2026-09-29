@@ -1,3 +1,5 @@
+import { LegacyLink } from "@/shared/components/ui/LegacyLink";
+
 import * as Dialog from "@radix-ui/react-dialog";
 import { useQueryClient } from "@tanstack/react-query";
 import { ExternalLink, Search, X } from "lucide-react";
@@ -294,9 +296,9 @@ export function CommandPalette({
               권한이 있는 기능만 표시됩니다. 단축키는 <kbd>?</kbd>
             </span>
             {showLegacyAdmin ? (
-              <a href="/admin">
+              <LegacyLink href="/admin">
                 {uiLabels.legacyAdmin} <ExternalLink aria-hidden="true" />
-              </a>
+              </LegacyLink>
             ) : null}
           </div>
         </Dialog.Content>

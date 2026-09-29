@@ -1,3 +1,5 @@
+import { LegacyLink } from "@/shared/components/ui/LegacyLink";
+
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { ExternalLink, Filter, RefreshCw, Search } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -304,9 +306,9 @@ export function RequestPage(): React.JSX.Element {
             <RefreshCw aria-hidden="true" /> {result.isFetching ? "갱신 중" : "새로고침"}
           </Button>
           {showLegacyAdmin && legacyPath ? (
-            <a className="button button-secondary button-default" href={legacyPath}>
+            <LegacyLink className="button button-secondary button-default" href={legacyPath}>
               <ExternalLink aria-hidden="true" /> 기존 화면 보기
-            </a>
+            </LegacyLink>
           ) : null}
         </div>
       </header>

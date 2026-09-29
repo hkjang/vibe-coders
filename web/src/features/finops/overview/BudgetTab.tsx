@@ -1,3 +1,5 @@
+import { LegacyLink } from "@/shared/components/ui/LegacyLink";
+
 import { useQuery } from "@tanstack/react-query";
 import { ExternalLink } from "lucide-react";
 import { Link } from "react-router";
@@ -55,9 +57,9 @@ export function BudgetTab(): React.JSX.Element {
       <LegacyHint>
         예산 등록·수정·삭제는 <Link to="/access/users">사용자·팀</Link> 화면에서 합니다. 이 탭은 소진 예측과
         비용 이상 신호만 보여 줍니다.{" "}
-        <a href="/admin#/users/quotas">
+        <LegacyLink href="/admin#/users/quotas">
           기존 화면에서 열기 <ExternalLink aria-hidden="true" />
-        </a>
+        </LegacyLink>
       </LegacyHint>
 
       {anomalies.isError ? (
