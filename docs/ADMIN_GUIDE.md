@@ -16,7 +16,7 @@
 
 ## 2. 설치
 
-릴리즈 자산(GitHub Release `v0.86.26`)으로 처음부터 끝까지. 빌드 호스트에서 이미지를 만드는 절차와 오프라인망 적재 배경은 [OPERATIONS.md 2.5](OPERATIONS.md#25-오프라인망-적재)에 있습니다.
+릴리즈 자산(GitHub Release `v0.86.27`)으로 처음부터 끝까지. 빌드 호스트에서 이미지를 만드는 절차와 오프라인망 적재 배경은 [OPERATIONS.md 2.5](OPERATIONS.md#25-오프라인망-적재)에 있습니다.
 
 | 항목 | 값 |
 | --- | --- |
@@ -27,12 +27,12 @@
 
 ```bash
 # 1) 자산 검증과 적재
-sha256sum -c ai-coding-proxy-gateway-v0.86.26.tar.gz.sha256
-gunzip -c ai-coding-proxy-gateway-v0.86.26.tar.gz | docker load
+sha256sum -c ai-coding-proxy-gateway-v0.86.27.tar.gz.sha256
+gunzip -c ai-coding-proxy-gateway-v0.86.27.tar.gz | docker load
 
 # 2) 비밀값 파일 (mode 0600). ADMIN_TOKEN·GATEWAY_SECRET 을 무작위로 만들고 UPSTREAM_API_KEY 자리를 비워 둡니다.
 sudo mkdir -p /opt/proxy-gateway
-sudo bash init-deployment-env-v0.86.26.sh /opt/proxy-gateway/gateway.env
+sudo bash init-deployment-env-v0.86.27.sh /opt/proxy-gateway/gateway.env
 sudo sed -i 's|^UPSTREAM_API_KEY=.*|UPSTREAM_API_KEY=<업스트림 키>|' /opt/proxy-gateway/gateway.env
 #    최초 관리자 계정과 새 콘솔을 켭니다 (값은 가짜 예시입니다)
 sudo tee -a /opt/proxy-gateway/gateway.env >/dev/null <<'EOF'
@@ -44,7 +44,7 @@ UI_APP_ENABLED=true
 EOF
 
 # 3) 기동
-export GATEWAY_VERSION=v0.86.26
+export GATEWAY_VERSION=v0.86.27
 docker compose --env-file /opt/proxy-gateway/gateway.env up -d
 curl -fsS http://127.0.0.1:8080/ready
 
@@ -1615,6 +1615,28 @@ curl -X POST http://<host>:8080/admin/routing-rules \
 확인한 뒤 직접 재실행하세요. 예상 계획은 실제 호출 권한·성공·장애 전환 이력을 보장하지 않으며,
 서버 설정·캐시·호출 시점 상태에 따라 실제 선택이 달라질 수 있습니다. 서버·프록시 전체의 정보
 비저장이나 요청 취소를 보장하지 않습니다. 인접한 비용 예측과 규칙 변경 작업은 별도 기능입니다.
+
+#### 비용 예측의 계산 기준과 한계
+
+같은 미리보기 화면의 **비용 예측**은 모델·입력 토큰·최대 출력 토큰을 기준으로 계산합니다.
+계산 당시 입력과 현재 입력을 따로 표시하며, 입력 변경은 자동 전송하지 않습니다.
+**입력이 달라졌습니다** 안내가 나오면 원하는 값인지 확인하고 직접 다시 계산하세요.
+토큰 수는 0 이상의 안전한 정수만 받습니다. 빈 입력 토큰은 0으로 계산하며 메시지에서 추정하지
+않습니다. 충분한 사용 이력이 있으면 과거 출력 평균을 우선하므로 최대 출력 토큰으로 제한되지
+않습니다. 이력이 충분하지 않으면 양수인 최대 출력 토큰, 아니면 기본값 600을 사용합니다.
+
+계산 근거는 **과거 사용량 기준**, **입력한 출력 토큰 기준**, **기본 출력 토큰 기준**으로 표시합니다.
+가격 정보 미확인은 무료라는 뜻이 아니며 비용을 **확인할 수 없음**으로 안내합니다. 가격이
+있어도 다른 모델의 대체 가격을 사용할 수 있습니다. 사용 이력이 없는 지연 시간 0은 실제
+측정값으로 표시하지 않습니다. 예상값은 실제 청구 금액·호출 허가·비용 보호 승인 결과가 아닙니다.
+
+화면 접근에는 기존 `routing:read`, 계산 POST에는 기존 `admin:write` 권한이 필요하며
+기능의 읽기 전용 상태 자체는 계산을 막지 않습니다. 비용 보호 설정 GET의 `admin:read`는
+별도입니다. 설정 조회 실패를 계산 권한이나 차단 결과로 해석하지 마세요. 전송 직전의 현재
+권한·세션·화면을 확인하고 중복 전송과 이전 응답을 격리합니다. 완료 시점에 현재 계산 권한을
+확인할 수 없는 결과는 표시하지 않으며, 폐기된 결과는 권한 복구 후 직접 다시 계산해야 합니다.
+응답이 도착하기 전에 권한이 복구됐다면 현재 권한에 따라 표시할 수 있습니다. 오류는 요청 ID로 확인하세요.
+이 개선은 서버의 인증·업무 규칙을 바꾸거나 서버 작업 취소를 보장하지 않습니다.
 
 ### 9.2.2 라우팅 학습 추천 (Routing Learning Engine)
 
