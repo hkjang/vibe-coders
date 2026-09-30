@@ -676,7 +676,8 @@ export const meRecommendationFeedbackSchema = looseObject({
 export const meKeysSchema = looseObject({
   api_keys: orDefault(z.array(apiKeyPublicSchema), []),
   role: text,
-  grantable_scopes: stringList,
+  // Unlike an explicitly empty grant list, missing/null is not confirmed authority.
+  grantable_scopes: z.array(z.string()).nullish(),
 });
 
 export const meKeyCreatedSchema = looseObject({

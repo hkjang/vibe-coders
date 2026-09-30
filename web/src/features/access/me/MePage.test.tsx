@@ -225,7 +225,7 @@ describe("MePage", () => {
     expect(await screen.findByText("vc_sk_plaintext_once")).toBeVisible();
   });
 
-  it("edits a key's scopes, sending an empty array to inherit the role", async () => {
+  it("edits a key's scopes, sending an explicit empty array without role inheritance", async () => {
     const user = userEvent.setup();
     const api = mockApi({
       ...handlers(),
@@ -235,10 +235,10 @@ describe("MePage", () => {
     });
     renderScreen(<MePage />, { path: "/me/*", route: "/me?tab=keys" });
 
-    await user.click(await screen.findByRole("button", { name: "스코프 수정" }));
+    await user.click(await screen.findByRole("button", { name: "권한 수정" }));
     const dialog = await screen.findByRole("dialog");
-    await user.click(within(dialog).getByLabelText("chat:completion"));
-    await user.click(within(dialog).getByRole("button", { name: "저장" }));
+    await user.click(within(dialog).getByRole("checkbox", { name: /chat:completion/u }));
+    await user.click(within(dialog).getByRole("button", { name: "권한 저장" }));
 
     await waitFor(() => {
       expect(api.bodies("PATCH /me/keys/key_mine")).toEqual([{ scopes: [] }]);
