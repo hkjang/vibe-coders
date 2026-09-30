@@ -234,6 +234,8 @@ jobs:
         run: go test -race ./internal/proxy -run '^TestProviderApp|^TestProviderProjectionOpenAPI' -count=1 -timeout=5m
       - name: Verify PostgreSQL admin and personal API key scope contracts
         run: go test -race ./internal/proxy -run '^Test(APIKey|MeKey)ScopeContract' -count=1 -timeout=5m
+      - name: Verify PostgreSQL additive app permission contracts
+        run: go test -race ./internal/proxy -run '^TestAppPermissionContract' -count=1 -timeout=5m
 
   sdk-typecheck:
     name: TypeScript SDK typecheck
