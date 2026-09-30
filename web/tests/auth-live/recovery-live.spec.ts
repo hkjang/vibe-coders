@@ -154,7 +154,7 @@ test("AUTH-LIVE-011 실제 청크 실패의 키보드 복구와 기존 관리자
   await page.keyboard.press("Enter");
   expect((await (await recoveredRead).finished()) === null).toBe(true);
   await expect(page.getByRole("heading", { name: "공급자", exact: true })).toBeVisible();
-  await expect(page.getByRole("cell", { name: "test", exact: true })).toBeVisible();
+  await expect(page.getByRole("table").getByRole("link", { name: "test", exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "화면 오류", exact: true })).toBeHidden();
 
   // A separate fresh document has its own empty sessionStorage and module map.
