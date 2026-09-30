@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useSearchParams } from "react-router";
 
 import { useAuth } from "@/app/auth/AuthProvider";
+import { useProviderWriteAccess } from "./use-provider-write-access";
 import "@/features/gateway/gateway.css";
 import { ProviderDetailDialog } from "@/features/gateway/providers/ProviderDetailDialog";
 import { useProviderAdministration } from "@/features/gateway/providers/use-provider-administration";
@@ -56,7 +57,7 @@ export function ProviderPage(): React.JSX.Element {
   const selectedRef = isProviderRef(requestedProvider) ? requestedProvider : "";
   const currentPage = positivePage(requestedPage);
   const canReadRouting = auth.user?.scopes.includes("routing:read") ?? false;
-  const canWrite = auth.user?.scopes.includes("admin:write") ?? false;
+  const canWrite = useProviderWriteAccess().allowed;
   const showLegacyAdmin = canOpenLegacyAdmin(auth);
   const { providers, routing, slo } = useProviderCatalogQueries(range, canReadRouting);
   const searchInputRef = useRef<HTMLInputElement>(null);

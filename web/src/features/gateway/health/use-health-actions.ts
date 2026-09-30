@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { apiClient } from "@/shared/api/client";
 import { endpoints } from "@/shared/api/endpoints";
 import { useMutationFeedback } from "@/shared/hooks/use-mutation-feedback";
+import { useHealthWriteAccess } from "./use-health-write-access";
 
 const routeId = "gateway.health";
 const gateway = endpoints.domains.gateway;
@@ -23,9 +24,12 @@ export function useBalancerState(enabled: boolean, window: string) {
  * circuit breaker and releasing sticky sessions. An empty provider means "all".
  */
 export function useHealthActions() {
+  const access = useHealthWriteAccess();
   const resetBreaker = useMutationFeedback({
-    mutate: (provider: string) =>
-      apiClient.request(gateway.routing.breakerReset, { body: { provider }, routeId }),
+    mutate: (provider: string) => {
+      access.assertCurrent();
+      return apiClient.request(gateway.routing.breakerReset, { body: { provider }, routeId });
+    },
     invalidates: [routingHealthKey],
     successMessage: (_result, provider) =>
       provider === "" ? "모든 회로 차단기를 해제했습니다." : "회로 차단기를 해제했습니다.",
@@ -33,12 +37,14 @@ export function useHealthActions() {
   });
 
   const releaseSessions = useMutationFeedback({
-    mutate: (provider: string) =>
-      apiClient.request(gateway.routing.releaseSessions, { body: { provider }, routeId }),
+    mutate: (provider: string) => {
+      access.assertCurrent();
+      return apiClient.request(gateway.routing.releaseSessions, { body: { provider }, routeId });
+    },
     invalidates: [balancerKey, routingHealthKey],
     successMessage: "세션 고정을 해제했습니다.",
     errorMessage: "세션 고정을 해제하지 못했습니다.",
   });
 
-  return { releaseSessions, resetBreaker } as const;
+  return { access, releaseSessions, resetBreaker } as const;
 }

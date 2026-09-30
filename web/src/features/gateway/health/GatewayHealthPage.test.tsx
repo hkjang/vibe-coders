@@ -11,6 +11,7 @@ import { endpoints } from "@/shared/api/endpoints";
 import { AppError } from "@/shared/api/error";
 import type { RoutingHealth } from "@/shared/api/schemas";
 import { usePreferences } from "@/shared/stores/preferences";
+import { FeatureAccessHarness } from "@/test/feature-access";
 
 const authRuntime = vi.hoisted(() => ({
   legacyFallback: true,
@@ -107,7 +108,9 @@ function renderPage(
             path="/gateway/health"
             element={
               <>
-                <GatewayHealthPage />
+                <FeatureAccessHarness featureId="gateway.health">
+                  <GatewayHealthPage />
+                </FeatureAccessHarness>
                 <LocationProbe />
               </>
             }
@@ -242,7 +245,8 @@ describe("GatewayHealthPage", () => {
 
     await screen.findByRole("table", { name: "선택 기간의 공급자 상태 점수 순위" });
     expect(screen.queryByRole("link", { name: /기존 상태 화면 열기/ })).not.toBeInTheDocument();
-    expect(screen.getByText("읽기 전용")).toBeInTheDocument();
+    expect(screen.queryByText("읽기 전용")).not.toBeInTheDocument();
+    expect(screen.queryByText("조작 권한 없음")).not.toBeInTheDocument();
 
     request.mockClear();
     await user.click(screen.getByRole("button", { name: "새로고침" }));

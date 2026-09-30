@@ -16,11 +16,21 @@ import type { Provider } from "@/shared/api/schemas";
 import { publishLogout, tokenStore } from "@/shared/auth/token-store";
 import { UnsavedChangesProvider } from "@/shared/unsaved/UnsavedChangesProvider";
 import { apiFailure, mockApi } from "@/test/api";
+import { FeatureAccessHarness } from "@/test/feature-access";
+
+vi.mock("@/app/auth/AuthProvider", async () => {
+  const { testAuth } = await import("@/test/auth");
+  return { useAuth: () => testAuth({ scopes: ["admin:read", "admin:write"] }) };
+});
 
 function render(ui: ReactNode) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
   return renderComponent(ui, {
-    wrapper: ({ children }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>,
+    wrapper: ({ children }) => (
+      <QueryClientProvider client={client}>
+        <FeatureAccessHarness featureId="gateway.providers">{children}</FeatureAccessHarness>
+      </QueryClientProvider>
+    ),
   });
 }
 

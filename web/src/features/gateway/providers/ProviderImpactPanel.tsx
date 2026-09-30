@@ -14,10 +14,13 @@ export const providerImpactAcknowledgement = "조회 범위와 확인하지 못�
 export function ProviderImpactPanel({
   review,
   pending,
+  readOnly = false,
   credentialPrefixes,
 }: {
   review: ProviderImpactReview;
   pending: boolean;
+  /** Lock acknowledgement only; current-configuration reads remain available. */
+  readOnly?: boolean;
   credentialPrefixes?: readonly string[];
 }): React.JSX.Element {
   const titleId = useId();
@@ -101,9 +104,11 @@ export function ProviderImpactPanel({
       <Checkbox
         label={providerImpactAcknowledgement}
         description="이 확인은 변경의 안전성이나 대체 호출의 성공을 보장하지 않습니다. 다시 조회하면 확인을 새로 해야 합니다."
-        disabled={!review.canAcknowledge}
+        disabled={readOnly || !review.canAcknowledge}
         checked={review.acknowledged}
-        onChange={(event) => review.setAcknowledged(event.target.checked)}
+        onChange={(event) => {
+          if (!readOnly) review.setAcknowledged(event.target.checked);
+        }}
       />
     </section>
   );

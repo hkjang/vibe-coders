@@ -3,6 +3,7 @@ import type { ProviderSLOWriteBody, ProviderWriteBody } from "@/shared/api/domai
 import { withPathParams } from "@/shared/api/endpoint-factory";
 import { endpoints } from "@/shared/api/endpoints";
 import { useMutationFeedback } from "@/shared/hooks/use-mutation-feedback";
+import { useProviderWriteAccess } from "./use-provider-write-access";
 
 const routeId = "gateway.providers";
 const providerKey = ["admin", "providers"];
@@ -16,35 +17,46 @@ const gateway = endpoints.domains.gateway;
  * accept an opaque provider reference, resolved by the existing server handlers.
  */
 export function useProviderAdmin() {
+  const access = useProviderWriteAccess();
   const save = useMutationFeedback({
-    mutate: (body: ProviderWriteBody) => apiClient.request(gateway.providers.save, { body, routeId }),
+    mutate: (body: ProviderWriteBody) => {
+      access.assertCurrent();
+      return apiClient.request(gateway.providers.save, { body, routeId });
+    },
     invalidates: [providerKey, routingKey],
     successMessage: "공급자 설정을 저장했습니다.",
     errorMessage: "공급자 설정을 저장하지 못했습니다.",
   });
 
   const remove = useMutationFeedback({
-    mutate: (name: string) =>
-      apiClient.request(withPathParams(gateway.providers.remove, { name }), { routeId }),
+    mutate: (name: string) => {
+      access.assertCurrent();
+      return apiClient.request(withPathParams(gateway.providers.remove, { name }), { routeId });
+    },
     invalidates: [providerKey, sloKey, routingKey],
     successMessage: "공급자를 삭제했습니다.",
     errorMessage: "공급자를 삭제하지 못했습니다.",
   });
 
   const saveSlo = useMutationFeedback({
-    mutate: (body: ProviderSLOWriteBody) => apiClient.request(gateway.providers.saveSlo, { body, routeId }),
+    mutate: (body: ProviderSLOWriteBody) => {
+      access.assertCurrent();
+      return apiClient.request(gateway.providers.saveSlo, { body, routeId });
+    },
     invalidates: [sloKey],
-    successMessage: "공급자 SLO를 저장했습니다.",
-    errorMessage: "공급자 SLO를 저장하지 못했습니다.",
+    successMessage: "공급자 서비스 목표를 저장했습니다.",
+    errorMessage: "공급자 서비스 목표를 저장하지 못했습니다.",
   });
 
   const removeSlo = useMutationFeedback({
-    mutate: (provider: string) =>
-      apiClient.request(gateway.providers.removeSlo, { query: { provider }, routeId }),
+    mutate: (provider: string) => {
+      access.assertCurrent();
+      return apiClient.request(gateway.providers.removeSlo, { query: { provider }, routeId });
+    },
     invalidates: [sloKey],
-    successMessage: "공급자 SLO를 삭제했습니다.",
-    errorMessage: "공급자 SLO를 삭제하지 못했습니다.",
+    successMessage: "공급자 서비스 목표를 삭제했습니다.",
+    errorMessage: "공급자 서비스 목표를 삭제하지 못했습니다.",
   });
 
-  return { remove, removeSlo, save, saveSlo } as const;
+  return { access, remove, removeSlo, save, saveSlo } as const;
 }

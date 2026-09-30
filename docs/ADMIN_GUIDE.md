@@ -16,7 +16,7 @@
 
 ## 2. 설치
 
-릴리즈 자산(GitHub Release `v0.86.18`)으로 처음부터 끝까지. 빌드 호스트에서 이미지를 만드는 절차와 오프라인망 적재 배경은 [OPERATIONS.md 2.5](OPERATIONS.md#25-오프라인망-적재)에 있습니다.
+릴리즈 자산(GitHub Release `v0.86.19`)으로 처음부터 끝까지. 빌드 호스트에서 이미지를 만드는 절차와 오프라인망 적재 배경은 [OPERATIONS.md 2.5](OPERATIONS.md#25-오프라인망-적재)에 있습니다.
 
 | 항목 | 값 |
 | --- | --- |
@@ -27,12 +27,12 @@
 
 ```bash
 # 1) 자산 검증과 적재
-sha256sum -c ai-coding-proxy-gateway-v0.86.18.tar.gz.sha256
-gunzip -c ai-coding-proxy-gateway-v0.86.18.tar.gz | docker load
+sha256sum -c ai-coding-proxy-gateway-v0.86.19.tar.gz.sha256
+gunzip -c ai-coding-proxy-gateway-v0.86.19.tar.gz | docker load
 
 # 2) 비밀값 파일 (mode 0600). ADMIN_TOKEN·GATEWAY_SECRET 을 무작위로 만들고 UPSTREAM_API_KEY 자리를 비워 둡니다.
 sudo mkdir -p /opt/proxy-gateway
-sudo bash init-deployment-env-v0.86.18.sh /opt/proxy-gateway/gateway.env
+sudo bash init-deployment-env-v0.86.19.sh /opt/proxy-gateway/gateway.env
 sudo sed -i 's|^UPSTREAM_API_KEY=.*|UPSTREAM_API_KEY=<업스트림 키>|' /opt/proxy-gateway/gateway.env
 #    최초 관리자 계정과 새 콘솔을 켭니다 (값은 가짜 예시입니다)
 sudo tee -a /opt/proxy-gateway/gateway.env >/dev/null <<'EOF'
@@ -44,7 +44,7 @@ UI_APP_ENABLED=true
 EOF
 
 # 3) 기동
-export GATEWAY_VERSION=v0.86.18
+export GATEWAY_VERSION=v0.86.19
 docker compose --env-file /opt/proxy-gateway/gateway.env up -d
 curl -fsS http://127.0.0.1:8080/ready
 
@@ -466,6 +466,17 @@ ID의 실제 존재 여부는 이 화면에서 확인하지 않습니다. 목록
 브라우저가 확인한 설정을 기준으로 하므로 모든 탭·서버의 즉시 강제를 뜻하지 않습니다. 다른 기능의 전환
 설정만으로 편집 금지를 가정하지 말고 서버 역할·scope에 따른 실제 권한도 확인하세요. 적용 범위와 잔여
 작업은 [인수 검증표](APP_UI_ACCEPTANCE.md#확인된-공통-전환-제한-누락)에 따로 관리합니다.
+
+`v0.86.19`에서는 **공급자·게이트웨이 상태**에도 같은 제한을 적용합니다. 공급자 추가·수정·사용/중지·
+삭제·서비스 수준 목표 변경과 회로 차단기·세션 고정 해제를 잠급니다. **서비스 목표** 버튼에서
+**공급자 서비스 수준 목표**를 편집합니다. 현재 설정과 영향 조회·재조회는
+기존 권한 안에서 유지합니다. 편집 또는 최종 검토 중 전환되어도 입력과 검토 대상을 다른 값으로
+바꾸지 않으며 취소·초안 폐기는 가능합니다. 상태 화면의 개별 공급자 작업을 전체 작업으로 바꾸지
+않습니다. 이 제한이 아직 모델 계약·채팅 테스트 등 모든 화면에 적용된 것은 아닙니다.
+
+참조 영향을 다시 조회하면 새 결과에 대한 동의가 필요합니다. 저장 실패 뒤 자동 재조회가 이루어진
+경우도 같습니다. 긴 검토 화면에서는 읽기 전용 전환 시 현재 스크롤 위치를 유지하므로 상단의 잠금
+안내를 확인하세요. 하단 버튼을 잠그지만 이미 보낸 작업을 취소하거나 자동으로 재전송하지 않습니다.
 
 ## 4. 계정과 권한
 

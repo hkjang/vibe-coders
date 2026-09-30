@@ -12,6 +12,7 @@ import { endpoints } from "@/shared/api/endpoints";
 import { AppError } from "@/shared/api/error";
 import type { Provider, ProviderList, ProviderSLOResponse, RoutingHealth } from "@/shared/api/schemas";
 import { usePreferences } from "@/shared/stores/preferences";
+import { FeatureAccessHarness } from "@/test/feature-access";
 
 const authRuntime = vi.hoisted(() => ({
   legacyFallback: true,
@@ -228,7 +229,9 @@ function renderPage(
             path="/gateway/providers"
             element={
               <>
-                <ProviderPage />
+                <FeatureAccessHarness featureId="gateway.providers">
+                  <ProviderPage />
+                </FeatureAccessHarness>
                 <LocationProbe />
               </>
             }
@@ -252,7 +255,9 @@ function renderGuardedPage(
               path="/gateway/providers"
               element={
                 <>
-                  <ProviderPage />
+                  <FeatureAccessHarness featureId="gateway.providers">
+                    <ProviderPage />
+                  </FeatureAccessHarness>
                   <LocationProbe />
                 </>
               }

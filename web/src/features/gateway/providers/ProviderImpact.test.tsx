@@ -16,6 +16,12 @@ import {
 import { apiClient } from "@/shared/api/client";
 import type { ProviderImpact } from "@/shared/api/domains/provider-impact";
 import { apiFailure, mockApi } from "@/test/api";
+import { FeatureAccessHarness } from "@/test/feature-access";
+
+vi.mock("@/app/auth/AuthProvider", async () => {
+  const { testAuth } = await import("@/test/auth");
+  return { useAuth: () => testAuth({ scopes: ["admin:read", "admin:write"] }) };
+});
 
 const providerRef = `prv_${"a".repeat(43)}`;
 const providerName = "public-impact-provider";
@@ -82,7 +88,11 @@ function renderImpact(ui: ReactNode) {
   return {
     client,
     ...render(ui, {
-      wrapper: ({ children }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>,
+      wrapper: ({ children }) => (
+        <QueryClientProvider client={client}>
+          <FeatureAccessHarness featureId="gateway.providers">{children}</FeatureAccessHarness>
+        </QueryClientProvider>
+      ),
     }),
   };
 }
