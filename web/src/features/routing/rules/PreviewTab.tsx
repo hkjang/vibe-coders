@@ -5,7 +5,7 @@ import { useAuth } from "@/app/auth/AuthProvider";
 import { predictScopeMessage, routingCostGuardQueryKey } from "@/features/routing/rules/routing-shared";
 import { QueryFailureNotice } from "@/features/routing/rules/routing-ui";
 import { apiClient } from "@/shared/api/client";
-import type { RoutingCostEstimate, RoutingPreview } from "@/shared/api/domains/routing";
+import type { RoutingCostEstimate } from "@/shared/api/domains/routing";
 import type { CostGuard } from "@/shared/api/domains/cost-guard";
 import { endpoints } from "@/shared/api/endpoints";
 import { isAppError } from "@/shared/api/error";
@@ -13,14 +13,12 @@ import { FormField } from "@/shared/components/form/FormField";
 import { CostGuardContractNotice } from "@/shared/components/form/CostGuardContractNotice";
 import { Badge } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
-import { EmptyState } from "@/shared/components/ui/EmptyState";
 import { InlineNotice } from "@/shared/components/ui/InlineNotice";
 import { Input } from "@/shared/components/ui/Input";
 import { KeyValueList } from "@/shared/components/ui/KeyValueList";
 import { SectionCard } from "@/shared/components/ui/SectionCard";
-import { Textarea } from "@/shared/components/ui/Textarea";
 import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
-import { containsPotentialSecret, secretSearchMessage } from "@/shared/security/secrets";
+import { RoutingPreviewCard } from "./RoutingPreviewCard";
 import { formatKRW, formatNumber } from "@/shared/utils/format";
 import {
   confirmedCostGuard,
@@ -36,12 +34,6 @@ interface RequestState {
 export function PreviewTab({ canPredict }: { canPredict: boolean }): React.JSX.Element {
   const auth = useAuth();
   const queryClient = useQueryClient();
-  const [model, setModel] = useState("");
-  const [apiKeyId, setApiKeyId] = useState("");
-  const [sample, setSample] = useState("");
-  const [preview, setPreview] = useState<RoutingPreview>();
-  const [previewState, setPreviewState] = useState<RequestState>({ pending: false });
-
   const [predictModel, setPredictModel] = useState("");
   const [inputTokens, setInputTokens] = useState("1000");
   const [maxTokens, setMaxTokens] = useState("600");
@@ -63,30 +55,6 @@ export function PreviewTab({ canPredict }: { canPredict: boolean }): React.JSX.E
   const confirmedGuard = supportsCostGuardContract(auth.backendVersion)
     ? confirmedCostGuard(costGuardState)
     : undefined;
-
-  const runPreview = async (): Promise<void> => {
-    if (model.trim() === "") return;
-    setPreviewState({ pending: true });
-    try {
-      const body: Record<string, unknown> = {
-        model: model.trim(),
-        messages: [{ role: "user", content: sample }],
-      };
-      if (apiKeyId.trim() !== "") body.api_key_id = apiKeyId.trim();
-      const result = await apiClient.request(endpoints.domains.routing.preview, { body });
-      setPreview(result);
-      setPreviewState({ pending: false });
-    } catch (cause) {
-      setPreview(undefined);
-      setPreviewState({
-        pending: false,
-        error: {
-          message: safeAppErrorMessage(cause, "라우팅 미리보기를 실행하지 못했습니다."),
-          requestId: isAppError(cause) ? cause.requestId : undefined,
-        },
-      });
-    }
-  };
 
   const runPredict = async (): Promise<void> => {
     if (predictModel.trim() === "") return;
@@ -113,103 +81,9 @@ export function PreviewTab({ canPredict }: { canPredict: boolean }): React.JSX.E
     }
   };
 
-  const apiKeySuspicious = containsPotentialSecret(apiKeyId);
-
   return (
     <div className="routing-panel-stack">
-      <SectionCard
-        title="라우팅 미리보기"
-        description="실제 호출 없이 이 요청이 어떤 모델·공급자로 나갈지 계산합니다."
-        actions={
-          <Button
-            variant="primary"
-            disabled={previewState.pending || model.trim() === ""}
-            onClick={() => void runPreview()}
-          >
-            {previewState.pending ? "확인 중" : "미리보기 실행"}
-          </Button>
-        }
-      >
-        <div className="routing-form">
-          <FormField label="요청 모델" required>
-            {(control) => (
-              <Input
-                {...control}
-                value={model}
-                placeholder="gpt-4.1"
-                onChange={(event) => setModel(event.target.value)}
-              />
-            )}
-          </FormField>
-          <FormField
-            label="정책 API 키 ID"
-            description="비우면 키 정책 없이 계산합니다. 키 원문이 아니라 키 ID를 입력하세요."
-            error={apiKeySuspicious ? secretSearchMessage : undefined}
-          >
-            {(control) => (
-              <Input {...control} value={apiKeyId} onChange={(event) => setApiKeyId(event.target.value)} />
-            )}
-          </FormField>
-        </div>
-        <FormField
-          label="샘플 요청 내용"
-          description="복잡도·위험 점수를 계산할 때만 쓰이며 저장되지 않습니다."
-        >
-          {(control) => (
-            <Textarea
-              {...control}
-              rows={3}
-              value={sample}
-              onChange={(event) => setSample(event.target.value)}
-            />
-          )}
-        </FormField>
-
-        {previewState.error ? (
-          <InlineNotice tone="danger" title="미리보기를 실행하지 못했습니다.">
-            {previewState.error.message}
-            {previewState.error.requestId ? ` 요청 ID: ${previewState.error.requestId}` : ""}
-          </InlineNotice>
-        ) : null}
-
-        {preview ? (
-          <>
-            <KeyValueList
-              items={[
-                { label: "요청 모델", value: preview.requested_model, mono: true },
-                { label: "선택 모델", value: preview.selected_model, mono: true },
-                { label: "선택 공급자", value: preview.selected_provider },
-                { label: "정책 API 키", value: preview.policy_api_key_id, mono: true },
-                {
-                  label: "복잡도",
-                  value: `${formatNumber(preview.complexity?.score)} (${preview.complexity?.tier ?? "—"})`,
-                },
-                {
-                  label: "위험",
-                  value: `${formatNumber(preview.risk?.score)} (${preview.risk?.tier ?? "—"})`,
-                },
-                { label: "상태 점수", value: formatNumber(preview.health_score) },
-                { label: "라우팅 사유", value: preview.route_reason },
-                { label: "결정 사유", value: preview.decision_reason },
-                {
-                  label: "폴백 계획",
-                  value: preview.fallback_plan.length > 0 ? preview.fallback_plan.join(" → ") : "—",
-                },
-              ]}
-            />
-            {preview.would_rewrite ? (
-              <InlineNotice tone="warning" title="모델이 다시 쓰입니다.">
-                이 요청은 {preview.requested_model} 대신 {preview.selected_model} 으로 나갑니다.
-              </InlineNotice>
-            ) : null}
-          </>
-        ) : (
-          <EmptyState
-            title="아직 미리보기를 실행하지 않았습니다."
-            description="모델 이름을 넣고 실행하면 라우팅 결과와 폴백 계획을 보여 줍니다."
-          />
-        )}
-      </SectionCard>
+      <RoutingPreviewCard />
 
       <SectionCard
         title="비용 예측 가드"
