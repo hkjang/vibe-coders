@@ -20,6 +20,8 @@ interface FormDialogProps<Input extends FieldValues, Output> {
   submitLabel?: string;
   /** External prerequisites may block submission without locking draft edits. */
   submitDisabled?: boolean;
+  /** Optional plain-text keyboard scroll target, outside pending-disabled inputs. */
+  scrollHint?: string;
   title: string;
 }
 
@@ -51,6 +53,7 @@ function GuardedFormDialog<Input extends FieldValues, Output>({
   returnFocusRef,
   submitLabel = "저장",
   submitDisabled = false,
+  scrollHint,
   title,
 }: FormDialogProps<Input, Output>): React.JSX.Element {
   const coordinator = useUnsavedChanges();
@@ -149,6 +152,11 @@ function GuardedFormDialog<Input extends FieldValues, Output>({
         <fieldset className="form-grid form-dialog-fields" disabled={pending} aria-label="입력 항목">
           {children}
         </fieldset>
+        {scrollHint !== undefined ? (
+          <p className="field-description" tabIndex={0}>
+            {scrollHint}
+          </p>
+        ) : null}
         {error ? (
           <p className="form-error" role="alert">
             {error.message}
