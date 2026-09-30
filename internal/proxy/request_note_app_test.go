@@ -14,12 +14,16 @@ import (
 func TestRequestNoteAppVariantHeaders(t *testing.T) {
 	server := &Server{cfg: testConfig("http://127.0.0.1:1", "synthetic")}
 	for _, app := range []string{"", "app"} {
-		for _, method := range []string{http.MethodGet, http.MethodPut, http.MethodPost, http.MethodDelete} {
+		for _, method := range []string{http.MethodGet, http.MethodPut, http.MethodPost, http.MethodPatch, http.MethodDelete} {
 			request := httptest.NewRequest(method, "/admin/requests//note", nil)
 			request.Header.Set("X-Vibe-UI", app)
 			recorder := httptest.NewRecorder()
 			server.handleRequestNote(recorder, request)
-			if recorder.Code != http.StatusBadRequest || recorder.Header().Get("Cache-Control") != "no-store" || !strings.Contains(recorder.Header().Get("Vary"), "X-Vibe-UI") {
+			status := http.StatusBadRequest
+			if method == http.MethodPatch && app == "" {
+				status = http.StatusMethodNotAllowed
+			}
+			if recorder.Code != status || recorder.Header().Get("Cache-Control") != "no-store" || !strings.Contains(recorder.Header().Get("Vary"), "X-Vibe-UI") {
 				t.Fatal("header-dependent note response must not be shared or cached, including errors")
 			}
 		}
@@ -40,7 +44,7 @@ func TestRequestNoteAppWriteDecode(t *testing.T) {
 		{`{"preserve_fields":["tags"],"note":" new "}`, requestNoteWrite{PreserveTags: true, Note: " new "}},
 		{`{"preserve_fields":[],"note":"","tags":[]}`, requestNoteWrite{Tags: []string{}}},
 	} {
-		got, err := decodeRequestNoteWrite(strings.NewReader(tc.body), true)
+		got, err := decodeRequestNoteWrite(strings.NewReader(tc.body), true, false)
 		if err != nil || !reflect.DeepEqual(got, tc.want) {
 			t.Fatalf("app payload decode mismatch: %s", tc.body)
 		}
@@ -54,7 +58,7 @@ func TestRequestNoteAppWriteDecode(t *testing.T) {
 		`{"preserve_fields":["note"],"Note":null}`, `{"preserve_fields":["tags"],"Tags":null}`,
 		`{"note":1}`, `{"tags":"tag"}`, `[]`, `{"preserve_fields":`,
 	} {
-		if _, err := decodeRequestNoteWrite(strings.NewReader(body), true); err == nil {
+		if _, err := decodeRequestNoteWrite(strings.NewReader(body), true, false); err == nil {
 			t.Fatalf("invalid app payload accepted: %s", body)
 		}
 	}
@@ -63,16 +67,36 @@ func TestRequestNoteAppWriteDecode(t *testing.T) {
 func TestRequestNoteAppWriteDoesNotChangeLegacyDecode(t *testing.T) {
 	for _, extension := range []string{`null`, `"note"`, `["note","note"]`, `["unknown"]`, `true`} {
 		body := `{"note":"replacement","tags":["tag"],"preserve_fields":` + extension + `}`
-		got, err := decodeRequestNoteWrite(strings.NewReader(body), false)
+		got, err := decodeRequestNoteWrite(strings.NewReader(body), false, false)
 		if err != nil || !reflect.DeepEqual(got, requestNoteWrite{Note: "replacement", Tags: []string{"tag"}}) {
 			t.Fatal("legacy unknown field changed full replacement semantics")
 		}
 	}
 	for _, body := range []string{`{}`, `null`, `{"note":null,"tags":null,"preserve_fields":["note","tags"]}`} {
-		got, err := decodeRequestNoteWrite(strings.NewReader(body), false)
+		got, err := decodeRequestNoteWrite(strings.NewReader(body), false, false)
 		if err != nil || !reflect.DeepEqual(got, requestNoteWrite{}) {
 			t.Fatal("legacy omission/null must remain empty replacement")
 		}
+	}
+}
+
+func TestRequestNoteAppPatchRequiresExplicitPreserveIntent(t *testing.T) {
+	for _, body := range []string{`null`, `{}`, `{"note":"new"}`, `{"preserve_fields":null}`} {
+		if _, err := decodeRequestNoteWrite(strings.NewReader(body), true, true); err == nil {
+			t.Fatal("PATCH accepted an absent or null preserve intent")
+		}
+	}
+	for _, body := range []string{`{"preserve_fields":[]}`, `{"preserve_fields":["note","tags"]}`, `{"preserve_fields":[],"note":null,"tags":null}`} {
+		if _, err := decodeRequestNoteWrite(strings.NewReader(body), true, true); err != nil {
+			t.Fatal("PATCH rejected an explicit valid field intent")
+		}
+	}
+	server := &Server{cfg: testConfig("http://127.0.0.1:1", "synthetic")}
+	request := httptest.NewRequest(http.MethodPatch, "/admin/requests/request-1/note", strings.NewReader(`{"preserve_fields":[]}`))
+	recorder := httptest.NewRecorder()
+	server.handleRequestNote(recorder, request)
+	if recorder.Code != http.StatusMethodNotAllowed || strings.Contains(recorder.Header().Get("Allow"), "PATCH") {
+		t.Fatal("non-app PATCH must fail before touching the database")
 	}
 }
 

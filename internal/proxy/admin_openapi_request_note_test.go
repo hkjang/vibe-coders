@@ -37,12 +37,24 @@ func TestRequestNoteOpenAPIContract(t *testing.T) {
 			}
 		}
 	}
+	assertJSONOperationSchema(t, paths, path, "patch", "200", "RequestNoteAppResponse")
+	assertJSONRequestSchema(t, paths, path, "patch", "RequestNotePatchRequest")
+	patchOperation := paths[path].(map[string]any)["patch"].(map[string]any)
+	for _, fragment := range []string{"explicit preserve_fields", "405", "Never automatically fall back"} {
+		if !strings.Contains(patchOperation["description"].(string), fragment) {
+			t.Fatalf("PATCH lost mixed-version safety boundary %q", fragment)
+		}
+	}
 	schemas := spec["components"].(map[string]any)["schemas"].(map[string]any)
 	app := schemas["RequestNoteAppResponse"].(map[string]any)
 	if !reflect.DeepEqual(app["required"], []any{"request_id", "tags", "note", "created_by", "updated_at", "exists", "redacted_fields"}) {
 		t.Fatal("app response lost its flat required metadata")
 	}
 	request := schemas["RequestNoteWriteRequest"].(map[string]any)
+	patchRequest := schemas["RequestNotePatchRequest"].(map[string]any)
+	if !reflect.DeepEqual(patchRequest["required"], []any{"preserve_fields"}) || patchRequest["nullable"] == true {
+		t.Fatal("PATCH must require a non-null body with explicit preserve_fields")
+	}
 	if _, required := request["required"]; required || request["nullable"] != true {
 		t.Fatal("optional fields and null-body legacy replacement must remain documented")
 	}

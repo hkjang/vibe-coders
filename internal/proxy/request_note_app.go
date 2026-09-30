@@ -19,7 +19,7 @@ type requestNoteWrite struct {
 // Legacy callers still ignore unknown fields and replace omitted/null values.
 // Only the app may explicitly preserve a field, without resubmitting a masked
 // display value. A simultaneous replacement (even null) is ambiguous and fails.
-func decodeRequestNoteWrite(reader io.Reader, app bool) (requestNoteWrite, error) {
+func decodeRequestNoteWrite(reader io.Reader, app, requirePreserve bool) (requestNoteWrite, error) {
 	var value requestNoteWrite
 	if !app {
 		err := json.NewDecoder(reader).Decode(&value)
@@ -44,6 +44,9 @@ func decodeRequestNoteWrite(reader io.Reader, app bool) (requestNoteWrite, error
 		}
 	}
 	if len(raw.PreserveFields) == 0 {
+		if requirePreserve {
+			return value, errors.New("preserve_fields is required")
+		}
 		return value, nil
 	}
 	var fields []string

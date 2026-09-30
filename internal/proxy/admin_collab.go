@@ -17,12 +17,17 @@ import (
 
 func (s *Server) handleRequestNote(w http.ResponseWriter, r *http.Request) {
 	setVibeUIVariantHeaders(w)
+	app := r.Header.Get("X-Vibe-UI") == "app"
 	if !s.authorizeAdmin(r) {
 		writeOpenAIError(w, http.StatusUnauthorized, "invalid admin token", "invalid_request_error", "invalid_api_key")
 		return
 	}
-	if r.Method != http.MethodGet && r.Method != http.MethodPost && r.Method != http.MethodPut && r.Method != http.MethodDelete {
-		w.Header().Set("Allow", "GET, POST, PUT, DELETE")
+	if r.Method != http.MethodGet && r.Method != http.MethodPost && r.Method != http.MethodPut && r.Method != http.MethodDelete && !(app && r.Method == http.MethodPatch) {
+		allow := "GET, POST, PUT, DELETE"
+		if app {
+			allow += ", PATCH"
+		}
+		w.Header().Set("Allow", allow)
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
 		return
 	}
@@ -45,7 +50,6 @@ func (s *Server) handleRequestNote(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusForbidden, "request is outside your team scope", "permission_error", "cross_team_access_denied")
 		return
 	}
-	app := r.Header.Get("X-Vibe-UI") == "app"
 	showRaw := s.canViewRawPrompts(r)
 	projectionArgs := s.externalCredentialProjectionArgs(detail.Request.Provider, detail.Request.FallbackFrom)
 	switch r.Method {
@@ -62,8 +66,8 @@ func (s *Server) handleRequestNote(w http.ResponseWriter, r *http.Request) {
 		}
 		maskRequestNoteForExternal(&note, showRaw, projectionArgs...)
 		writeJSON(w, http.StatusOK, note)
-	case http.MethodPut, http.MethodPost:
-		payload, err := decodeRequestNoteWrite(r.Body, app)
+	case http.MethodPut, http.MethodPost, http.MethodPatch:
+		payload, err := decodeRequestNoteWrite(r.Body, app, r.Method == http.MethodPatch)
 		if err != nil {
 			writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "invalid_body")
 			return
