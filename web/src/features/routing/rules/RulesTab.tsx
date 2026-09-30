@@ -1,4 +1,3 @@
-import { useQuery } from "@tanstack/react-query";
 import { Plus } from "lucide-react";
 import { useRef, useState } from "react";
 import { z } from "zod";
@@ -16,24 +15,22 @@ import { endpoints } from "@/shared/api/endpoints";
 import { FormDialog } from "@/shared/components/form/FormDialog";
 import { FormField } from "@/shared/components/form/FormField";
 import { useZodForm } from "@/shared/components/form/use-zod-form";
-import { Badge } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
 import { ConfirmDialog } from "@/shared/components/ui/ConfirmDialog";
 import { Input } from "@/shared/components/ui/Input";
 import { SectionCard } from "@/shared/components/ui/SectionCard";
 import { Textarea } from "@/shared/components/ui/Textarea";
-import { createDataTableColumnHelper, type DataTableColumn } from "@/shared/data-table/columns";
 import { DataTable } from "@/shared/data-table/DataTable";
 import { useMutationFeedback } from "@/shared/hooks/use-mutation-feedback";
 import { useSearchState, pageFromParam } from "@/shared/hooks/use-search-state";
-import { formatDateTime } from "@/shared/utils/format";
+import { RoutingToggleDialog } from "./RoutingToggleDialog";
+import { useRoutingToggleAccess } from "./routing-toggle-access";
+import { useRoutingToggleData } from "./routing-toggle-data";
+import { useRoutingToggleSelection } from "./routing-toggle-selection";
+import { useRuleColumns } from "./routing-rule-columns";
+import { useRoutingToggleFocus } from "./routing-toggle-focus";
 
 const pageSize = 10;
-
-/** How a rule is named in confirmations and accessible action labels. */
-function ruleLabel(rule: RoutingRule): string {
-  return `${rule.match_pattern || "*"} → ${rule.target_model}`;
-}
 
 const ruleFormSchema = z.object({
   match_pattern: z.string().trim().max(200),
@@ -48,120 +45,24 @@ const ruleFormSchema = z.object({
 type RuleFormInput = z.input<typeof ruleFormSchema>;
 type RuleFormValues = z.output<typeof ruleFormSchema>;
 
-interface RuleRowActions {
-  onDelete: (rule: RoutingRule, trigger: HTMLButtonElement) => void;
-  onEdit: (rule: RoutingRule, trigger: HTMLButtonElement) => void;
-  onToggle: (rule: RoutingRule, trigger: HTMLButtonElement) => void;
-}
-
-function ruleColumns(
-  canWrite: boolean,
-  actions: RuleRowActions,
-): ReadonlyArray<DataTableColumn<RoutingRule>> {
-  const column = createDataTableColumnHelper<RoutingRule>();
-  return column.columns([
-    column.accessor((row) => row.priority, {
-      id: "priority",
-      header: "우선순위",
-      cell: ({ getValue }) => <span className="cell-number">{getValue()}</span>,
-    }),
-    column.accessor((row) => row.match_pattern, {
-      id: "match_pattern",
-      header: "모델 패턴",
-      cell: ({ getValue }) => <span className="mono">{getValue() || "*"}</span>,
-    }),
-    column.accessor((row) => `${row.min_complexity}–${row.max_complexity}`, {
-      id: "complexity",
-      header: "복잡도 범위",
-      cell: ({ getValue }) => <span className="cell-number">{getValue()}</span>,
-    }),
-    column.accessor((row) => row.target_model, {
-      id: "target_model",
-      header: "대상 모델",
-      cell: ({ getValue }) => <span className="mono">{getValue()}</span>,
-    }),
-    column.accessor((row) => row.target_provider, {
-      id: "target_provider",
-      header: "대상 공급자",
-      cell: ({ getValue }) => getValue() || "자동 선택",
-    }),
-    column.accessor((row) => row.enabled, {
-      id: "enabled",
-      header: "상태",
-      cell: ({ getValue }) =>
-        getValue() ? <Badge tone="success">사용 중</Badge> : <Badge tone="muted">중지됨</Badge>,
-    }),
-    column.accessor((row) => row.note, {
-      id: "note",
-      header: "메모",
-      cell: ({ getValue }) => (
-        <span className="truncate" title={getValue()}>
-          {getValue() || "—"}
-        </span>
-      ),
-    }),
-    column.accessor((row) => row.created_at, {
-      id: "created_at",
-      header: "생성",
-      cell: ({ getValue }) => formatDateTime(getValue()),
-    }),
-    column.display({
-      id: "actions",
-      header: "작업",
-      cell: ({ row }) => (
-        <div className="routing-tab-actions">
-          <Button
-            size="small"
-            variant="ghost"
-            aria-label={`${ruleLabel(row.original)} 규칙 ${row.original.enabled ? "중지" : "사용"}`}
-            disabled={!canWrite}
-            title={canWrite ? undefined : writeScopeMessage}
-            onClick={(event) => actions.onToggle(row.original, event.currentTarget)}
-          >
-            {row.original.enabled ? "중지" : "사용"}
-          </Button>
-          <Button
-            size="small"
-            variant="ghost"
-            aria-label={`${ruleLabel(row.original)} 규칙 수정`}
-            disabled={!canWrite}
-            title={canWrite ? undefined : writeScopeMessage}
-            onClick={(event) => actions.onEdit(row.original, event.currentTarget)}
-          >
-            수정
-          </Button>
-          <Button
-            size="small"
-            variant="ghost"
-            aria-label={`${ruleLabel(row.original)} 규칙 삭제`}
-            disabled={!canWrite}
-            title={canWrite ? undefined : writeScopeMessage}
-            onClick={(event) => actions.onDelete(row.original, event.currentTarget)}
-          >
-            삭제
-          </Button>
-        </div>
-      ),
-    }),
-  ]);
-}
-
 export function RulesTab({ canWrite }: { canWrite: boolean }): React.JSX.Element {
   const [searchParams, updateSearch] = useSearchState();
   const [createOpen, setCreateOpen] = useState(false);
   const [editing, setEditing] = useState<RoutingRule>();
   const [pendingDelete, setPendingDelete] = useState<RoutingRule>();
-  const [pendingToggle, setPendingToggle] = useState<RoutingRule>();
   const createTrigger = useRef<HTMLButtonElement>(null);
   const [deleteTrigger, setDeleteTrigger] = useState<HTMLElement | null>(null);
-  const [toggleTrigger, setToggleTrigger] = useState<HTMLElement | null>(null);
   const [editTrigger, setEditTrigger] = useState<HTMLElement | null>(null);
 
-  const rules = useQuery({
-    queryKey: routingRulesQueryKey,
-    queryFn: ({ signal }) =>
-      apiClient.request(endpoints.domains.routing.rules.list, { signal, routeId: "routing.rules" }),
-  });
+  const toggleAccess = useRoutingToggleAccess(canWrite);
+  const toggleData = useRoutingToggleData(toggleAccess);
+  const toggleSelection = useRoutingToggleSelection(toggleAccess, toggleData);
+  const {
+    panel: togglePanelRef,
+    register: registerToggle,
+    returnFocusRef: toggleReturnFocusRef,
+  } = useRoutingToggleFocus(toggleSelection.target?.rule.id);
+  const rules = toggleData.query;
 
   const form = useZodForm<RuleFormInput, RuleFormValues>(ruleFormSchema, {
     match_pattern: "*",
@@ -195,17 +96,6 @@ export function RulesTab({ canWrite }: { canWrite: boolean }): React.JSX.Element
     errorMessage: "라우팅 규칙을 수정하지 못했습니다.",
   });
 
-  const toggleRule = useMutationFeedback<{ id: string; enabled: boolean }, unknown>({
-    mutate: ({ enabled, id }) =>
-      apiClient.request(withPathParams(endpoints.domains.routing.rules.update, { id }), {
-        body: { enabled },
-      }),
-    invalidates: [routingRulesQueryKey],
-    successMessage: (_result, variables) =>
-      variables.enabled ? "규칙을 다시 사용합니다." : "규칙 사용을 중지했습니다.",
-    errorMessage: "규칙 상태를 바꾸지 못했습니다.",
-  });
-
   const rows = [...(rules.data?.rules ?? [])].sort(
     (left, right) => left.priority - right.priority || left.target_model.localeCompare(right.target_model),
   );
@@ -214,14 +104,14 @@ export function RulesTab({ canWrite }: { canWrite: boolean }): React.JSX.Element
   const pageRows = rows.slice((page - 1) * pageSize, page * pageSize);
 
   return (
-    <div className="routing-panel-stack">
+    <div className="routing-panel-stack" ref={togglePanelRef} tabIndex={-1}>
       {canWrite ? null : <ScopeNotice>{writeScopeMessage}</ScopeNotice>}
       {rules.isError ? (
         <QueryFailureNotice
           error={rules.error}
           hasData={Boolean(rules.data)}
           label="라우팅 규칙"
-          onRetry={() => void rules.refetch()}
+          onRetry={() => void toggleData.refresh().catch(() => undefined)}
         />
       ) : null}
 
@@ -244,41 +134,48 @@ export function RulesTab({ canWrite }: { canWrite: boolean }): React.JSX.Element
       >
         <DataTable
           caption="복잡도 기반 라우팅 규칙 목록"
-          columns={ruleColumns(canWrite, {
-            onDelete: (rule, trigger) => {
-              setDeleteTrigger(trigger);
-              setPendingDelete(rule);
+          columns={useRuleColumns(
+            canWrite,
+            {
+              onDelete: (rule, trigger) => {
+                setDeleteTrigger(trigger);
+                setPendingDelete(rule);
+              },
+              onEdit: (rule, trigger) => {
+                setEditTrigger(trigger);
+                form.reset({
+                  match_pattern: rule.match_pattern,
+                  target_model: rule.target_model,
+                  target_provider: rule.target_provider,
+                  min_complexity: rule.min_complexity,
+                  max_complexity: rule.max_complexity,
+                  priority: rule.priority,
+                  note: rule.note,
+                });
+                setEditing(rule);
+              },
+              onToggle: toggleSelection.open,
+              onToggleRef: registerToggle,
             },
-            onEdit: (rule, trigger) => {
-              setEditTrigger(trigger);
-              form.reset({
-                match_pattern: rule.match_pattern,
-                target_model: rule.target_model,
-                target_provider: rule.target_provider,
-                min_complexity: rule.min_complexity,
-                max_complexity: rule.max_complexity,
-                priority: rule.priority,
-                note: rule.note,
-              });
-              setEditing(rule);
+            {
+              allowed: toggleAccess.write.allowed && toggleData.confirmed,
+              reason:
+                toggleAccess.write.reason ??
+                (!toggleData.confirmed ? "최신 규칙 목록을 다시 조회하세요." : undefined),
             },
-            onToggle: (rule, trigger) => {
-              setToggleTrigger(trigger);
-              setPendingToggle(rule);
-            },
-          })}
+          )}
           data={pageRows}
           emptyMessage="등록된 라우팅 규칙이 없습니다. 규칙을 추가하면 복잡도에 따라 모델을 자동으로 바꿉니다."
           error={rules.isError && !rules.data ? "라우팅 규칙을 불러오지 못했습니다." : undefined}
           getRowId={(row) => row.id}
           loading={rules.isPending}
           onPageChange={(index) => updateSearch({ page: index === 0 ? undefined : index + 1 })}
-          onRetry={() => void rules.refetch()}
+          onRetry={() => void toggleData.refresh().catch(() => undefined)}
           pageCount={pageCount}
           pageIndex={page - 1}
         />
         <p className="routing-meta">
-          중지한 규칙은 라우팅에서 건너뛰며, 다시 사용으로 바꾸면 우선순위대로 즉시 적용됩니다.
+          사용 상태는 설정을 다시 읽은 서버에 반영되며, 실제 선택은 라우팅 활성 여부·조건·우선순위에 따릅니다.
         </p>
       </SectionCard>
 
@@ -364,32 +261,19 @@ export function RulesTab({ canWrite }: { canWrite: boolean }): React.JSX.Element
         </FormField>
       </FormDialog>
 
-      <ConfirmDialog
-        confirmLabel={pendingToggle?.enabled ? "중지" : "사용"}
-        description={
-          pendingToggle
-            ? `${ruleLabel(pendingToggle)} 규칙을 ${pendingToggle.enabled ? "중지" : "다시 사용"}합니다.`
-            : "라우팅 규칙 상태를 바꿉니다."
-        }
-        onConfirm={async () => {
-          if (pendingToggle) {
-            await toggleRule.mutateAsync({ id: pendingToggle.id, enabled: !pendingToggle.enabled });
-          }
-        }}
-        onOpenChange={(open) => {
-          if (!open) setPendingToggle(undefined);
-        }}
-        open={pendingToggle !== undefined}
-        returnFocusRef={{ current: toggleTrigger }}
-        title={pendingToggle?.enabled ? "라우팅 규칙 중지" : "라우팅 규칙 사용"}
-        tone={pendingToggle?.enabled ? "danger" : "primary"}
-      >
-        <p>
-          {pendingToggle?.enabled
-            ? "중지하면 이 규칙에 걸리던 요청은 다음 우선순위 규칙 또는 기본 라우팅을 따릅니다."
-            : "다시 사용하면 조건이 맞는 요청이 이 규칙의 대상 모델로 바로 이동합니다."}
-        </p>
-      </ConfirmDialog>
+      {toggleSelection.target ? (
+        <RoutingToggleDialog
+          key={`${toggleAccess.securityKey}:${toggleSelection.target.sequence}`}
+          rule={toggleSelection.target.rule}
+          intendedEnabled={toggleSelection.target.intendedEnabled}
+          access={toggleAccess}
+          data={toggleData}
+          onClose={() => {
+            if (toggleSelection.target) toggleSelection.close(toggleSelection.target.sequence);
+          }}
+          returnFocusRef={toggleReturnFocusRef}
+        />
+      ) : null}
 
       <ConfirmDialog
         confirmLabel="삭제"
