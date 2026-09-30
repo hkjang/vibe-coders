@@ -17,6 +17,7 @@ import { InlineNotice } from "@/shared/components/ui/InlineNotice";
 import { Input } from "@/shared/components/ui/Input";
 import { Select } from "@/shared/components/ui/Select";
 import { Textarea } from "@/shared/components/ui/Textarea";
+import "./chat-run-action-dialog.css";
 
 export function ChatRunActionDialog({
   snapshot,
@@ -48,6 +49,7 @@ export function ChatRunActionDialog({
       onSubmit={submit}
       submitLabel={labels.submit}
       submitDisabled={!access.write.allowed}
+      scrollHint="내용이 길면 이 안내에 초점을 둔 뒤 위·아래 방향키로 살펴볼 수 있습니다."
     >
       {!access.write.allowed ? (
         <InlineNotice tone="warning" title="지금은 저장할 수 없습니다.">
@@ -55,7 +57,7 @@ export function ChatRunActionDialog({
         </InlineNotice>
       ) : null}
       <fieldset
-        className="form-grid form-dialog-fields"
+        className="form-grid form-dialog-fields chat-run-action-draft"
         disabled={!access.write.allowed}
         aria-label="실행 작업 입력"
       >

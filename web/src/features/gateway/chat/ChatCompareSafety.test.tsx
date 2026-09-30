@@ -155,6 +155,54 @@ async function openGolden(view: Awaited<ReturnType<typeof setup>>) {
 }
 
 describe("비교 실행의 고정 결과와 전송 승인 재현", () => {
+  it.each([
+    ["rule", "규칙 기반"],
+    ["model", "심사 모델"],
+    ["future-method", "future-method"],
+    ["constructor", "constructor"],
+  ])("평가 방식 %s는 알려진 값만 한글로 표시하고 전송 코드는 유지한다", async (method, label) => {
+    const view = await setup({
+      [judgeEndpoint]: () => ({
+        run_id: "public-run-a",
+        method,
+        best_model: "public-model",
+        judgements: [],
+      }),
+    });
+    await runComparison(view);
+    if (method === "model") {
+      await view.user.selectOptions(screen.getByLabelText("자동 평가 방식"), "model");
+      await view.user.type(screen.getByLabelText(/^심사 모델/u), "public-judge");
+    }
+    await view.user.click(screen.getByRole("button", { name: "자동 평가 실행" }));
+    expect(await screen.findByText(`방식 ${label} · 최고 점수 모델 public-model`)).toBeVisible();
+    expect(view.api.bodies(judgeEndpoint)).toEqual([
+      expect.objectContaining({ method: method === "model" ? "model" : "rule" }),
+    ]);
+  });
+
+  it("코드 위험도는 기존 한글 명칭을 사용하고 미지정·새 코드·객체 속성명은 안전하게 표시한다", async () => {
+    const levels = ["high", "medium", "low", "none", "future-risk", "constructor", null];
+    const labels = ["높음", "보통", "낮음", "없음", "future-risk", "constructor", "-"];
+    const view = await setup({
+      "GET /admin/chat-test/multi-run/runs/public-run-a/code-verify": () => ({
+        run_id: "public-run-a",
+        leaderboard: levels.map((risk, index) => ({
+          model: `public-risk-${index}`,
+          risk,
+          block_count: 1,
+          high: 0,
+          medium: 0,
+        })),
+      }),
+    });
+    await runComparison(view);
+    await view.user.click(screen.getByRole("button", { name: "코드 위험 비교" }));
+    for (const label of labels) {
+      expect(await screen.findByText(`위험도 ${label} · 코드 블록 1 · 높음 0 · 보통 0`)).toBeVisible();
+    }
+  });
+
   it("C 실행 대기 중 연 A의 골든 초안은 C 완료 뒤에도 대상·모델·질문·dirty 입력을 유지한다", async () => {
     let resolveC: (value: unknown) => void = () => undefined;
     const heldC = new Promise((resolve) => {

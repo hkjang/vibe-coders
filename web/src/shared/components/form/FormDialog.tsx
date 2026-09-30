@@ -20,6 +20,8 @@ interface FormDialogProps<Input extends FieldValues, Output> {
   submitLabel?: string;
   /** External prerequisites may block submission without locking draft edits. */
   submitDisabled?: boolean;
+  /** Optional plain-text keyboard scroll target, outside pending-disabled inputs. */
+  scrollHint?: string;
   title: string;
 }
 
@@ -51,6 +53,7 @@ function GuardedFormDialog<Input extends FieldValues, Output>({
   returnFocusRef,
   submitLabel = "저장",
   submitDisabled = false,
+  scrollHint,
   title,
 }: FormDialogProps<Input, Output>): React.JSX.Element {
   const coordinator = useUnsavedChanges();
@@ -61,6 +64,8 @@ function GuardedFormDialog<Input extends FieldValues, Output>({
   const submissionAllowed = useRef(!submitDisabled);
   const epoch = useRef(0);
   const mounted = useRef(false);
+  const scrollHintRef = useRef<HTMLParagraphElement>(null);
+  const pendingFocus = useRef<{ origin: HTMLElement; epoch: number } | undefined>(undefined);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<{ message: string; requestId?: string } | undefined>();
   const dirty = form.formState.isDirty;
@@ -91,13 +96,41 @@ function GuardedFormDialog<Input extends FieldValues, Output>({
       coordinator.removeForm(guardId);
     };
   }, [coordinator, guardId]);
+  useLayoutEffect(() => {
+    const captured = pendingFocus.current;
+    pendingFocus.current = undefined;
+    const hint = scrollHintRef.current;
+    if (!scrollHint || !pending || !open || !mounted.current || !captured || !hint?.isConnected) return;
+    const { origin } = captured;
+    const dialog = hint.closest('[role="dialog"]');
+    if (
+      captured.epoch !== epoch.current ||
+      !origin.isConnected ||
+      !origin.matches(":disabled") ||
+      !dialog ||
+      origin.closest('[role="dialog"]') !== dialog ||
+      dialog.getAttribute("aria-hidden") === "true"
+    )
+      return;
+    // Disabling the focused control can leave BODY active, where Radix cannot
+    // return focus to its now-disabled last target. Do not steal valid focus.
+    if (document.activeElement === origin || document.activeElement === document.body) hint.focus();
+  }, [open, pending, scrollHint]);
 
   const submit = async (event: React.FormEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault();
     if (!submissionAllowed.current || submitting.current || !coordinator.startSubmission(guardId)) return;
     submitting.current = true;
-    setPending(true);
     const submissionEpoch = epoch.current;
+    const origin = document.activeElement;
+    pendingFocus.current =
+      scrollHint &&
+      origin instanceof HTMLElement &&
+      (event.currentTarget.contains(origin) ||
+        (origin instanceof HTMLButtonElement && origin.form === event.currentTarget))
+        ? { origin, epoch: submissionEpoch }
+        : undefined;
+    setPending(true);
     const isCurrent = (): boolean => mounted.current && epoch.current === submissionEpoch;
     try {
       await form.handleSubmit(async (values) => {
@@ -149,6 +182,11 @@ function GuardedFormDialog<Input extends FieldValues, Output>({
         <fieldset className="form-grid form-dialog-fields" disabled={pending} aria-label="입력 항목">
           {children}
         </fieldset>
+        {scrollHint !== undefined ? (
+          <p ref={scrollHintRef} className="field-description" tabIndex={0}>
+            {scrollHint}
+          </p>
+        ) : null}
         {error ? (
           <p className="form-error" role="alert">
             {error.message}

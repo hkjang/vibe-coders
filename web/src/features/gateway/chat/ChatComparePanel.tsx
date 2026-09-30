@@ -6,6 +6,7 @@ import {
   judgeVerdictLabels,
   maxCompareModels,
   parseCompareModels,
+  riskLabels,
   safeModelLabel,
 } from "@/features/gateway/chat/chat-console";
 import { ChatRunActions } from "@/features/gateway/chat/ChatRunActions";
@@ -30,6 +31,11 @@ interface ChatComparePanelProps {
 }
 
 const defaultModels = "vibe/auto\n";
+const judgeMethodLabels: Readonly<Record<string, string>> = { rule: "규칙 기반", model: "심사 모델" };
+
+function resultLabel(labels: Readonly<Record<string, string>>, value: string | null | undefined): string {
+  return value != null && Object.hasOwn(labels, value) ? (labels[value] ?? value) : (value ?? "-");
+}
 
 export function ChatComparePanel({ canWrite, writeDeniedReason }: ChatComparePanelProps): React.JSX.Element {
   const access = useCompareAccess(canWrite, writeDeniedReason);
@@ -277,7 +283,7 @@ function ComparisonSession({
           </div>
           {judge ? (
             <InlineNotice tone="info" title="자동 평가 완료">
-              {`방식 ${judge.method ?? judgeMethod} · 최고 점수 모델 ${safeModelLabel(judge.best_model)}`}
+              {`방식 ${resultLabel(judgeMethodLabels, judge.method ?? judgeMethod)} · 최고 점수 모델 ${safeModelLabel(judge.best_model)}`}
             </InlineNotice>
           ) : null}
           {codeRisk && access.readAllowed ? (
@@ -286,7 +292,7 @@ function ComparisonSession({
                 <li key={`${row.model ?? "model"}-${index}`}>
                   <strong>{safeModelLabel(row.model)}</strong>
                   <span>
-                    {`위험도 ${row.risk ?? "-"} · 코드 블록 ${formatNumber(row.block_count ?? 0)} · 높음 ${formatNumber(row.high ?? 0)} · 보통 ${formatNumber(row.medium ?? 0)}`}
+                    {`위험도 ${resultLabel(riskLabels, row.risk)} · 코드 블록 ${formatNumber(row.block_count ?? 0)} · 높음 ${formatNumber(row.high ?? 0)} · 보통 ${formatNumber(row.medium ?? 0)}`}
                   </span>
                 </li>
               ))}
