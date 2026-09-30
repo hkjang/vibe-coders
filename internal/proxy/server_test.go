@@ -439,18 +439,7 @@ func openTestStore(t *testing.T) *store.SQLStore {
 	if dsn := os.Getenv("TEST_POSTGRES_DSN"); dsn != "" {
 		return openPostgresTestStore(t, dsn)
 	}
-	db, err := store.Open(context.Background(), config.DatabaseConfig{
-		Driver: "sqlite",
-		DSN:    filepath.Join(t.TempDir(), "gateway.db"),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := db.Migrate(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	return db
+	return openSQLiteTestStore(t, filepath.Join(t.TempDir(), "gateway.db"))
 }
 
 func openPostgresTestStore(t *testing.T, dsn string) *store.SQLStore {
