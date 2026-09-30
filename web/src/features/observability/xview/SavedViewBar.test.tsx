@@ -59,7 +59,7 @@ describe("SavedViewBar feature access", () => {
     for (const name of [/새로 저장/u, "덮어쓰기", "삭제"])
       expect(screen.getByRole("button", { name })).toBeDisabled();
     await user.selectOptions(screen.getByRole("combobox", { name: "저장된 뷰" }), "view-1");
-      expect(onApply).toHaveBeenCalledWith("models=fixture-model", "view-1");
+    expect(onApply).toHaveBeenCalledWith("models=fixture-model", "view-1");
     expect(screen.getByRole("button", { name: "링크 복사" })).toBeEnabled();
     expect(api.calls.filter((call) => !call.key.startsWith("GET "))).toEqual([]);
   });
