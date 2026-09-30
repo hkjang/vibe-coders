@@ -91,6 +91,15 @@ function routingHealth(providerName: string): RoutingHealth {
 }
 
 describe("provider catalog", () => {
+  it.each([
+    ["corp?value=", "https://provider.example/v1/corp?value="],
+    ["CORP.example/v1?value=", "https://CORP.example/v1?value="],
+    ["corp?value=", "https://provider.example/v1/corp?%76alue="],
+    ["provider.example/v1/corp?value=", "https://provider.example/v1/corp?value="],
+  ])("masks configured credentials spanning URL boundaries (%s)", (prefix, start) => {
+    expect(displayProviderBaseURL(`${start}${"B".repeat(32)}`, [prefix])).toBe(invalidProviderURLDisplay);
+  });
+
   it.each(["corp+_", "+svc_"])("scans raw query pairs before form decoding for %s", (prefix) => {
     const secret = `${prefix}${"B".repeat(32)}`;
     const url = `https://provider.example/v1?region=korea&value=${secret}&value=${encodeURIComponent(secret)}&${secret}=public&value=ordinary+words`;
