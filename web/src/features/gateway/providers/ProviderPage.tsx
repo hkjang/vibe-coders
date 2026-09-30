@@ -1,50 +1,40 @@
 import { LegacyLink } from "@/shared/components/ui/LegacyLink";
-
 import { ExternalLink, LockKeyhole, Plus, RefreshCw, Search } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useSearchParams } from "react-router";
 
 import { useAuth } from "@/app/auth/AuthProvider";
 import "@/features/gateway/gateway.css";
-import { ProviderFormDialog, ProviderSloDialog } from "@/features/gateway/providers/ProviderAdminDialogs";
 import { ProviderDetailDialog } from "@/features/gateway/providers/ProviderDetailDialog";
-import { useProviderAdmin } from "@/features/gateway/providers/use-provider-admin";
+import { useProviderAdministration } from "@/features/gateway/providers/use-provider-administration";
 import {
   buildProviderRows,
   filterProviderRows,
   isProviderStatusFilter,
+  isSafeProviderCatalogName,
+  providerStatusLabels as statusLabels,
+  providerPageNumber as positivePage,
   type ProviderCatalogRow,
-  type ProviderStatusFilter,
 } from "@/features/gateway/providers/provider-catalog";
-import { ProviderTable, QueryFailureNotice } from "@/features/gateway/providers/ProviderTableParts";
+import {
+  ProviderTable,
+  ProviderSummary,
+  ProviderQueryNotices,
+} from "@/features/gateway/providers/ProviderTableParts";
 import { useProviderCatalogQueries } from "@/features/gateway/providers/use-provider-catalog";
 import { useProviderDialogFocus } from "@/features/gateway/providers/use-provider-dialog-focus";
-import { formatInteger, isHealthRange, type HealthRange } from "@/features/health/health-utils";
+import { isHealthRange, type HealthRange } from "@/features/health/health-utils";
 import { TimeRangePicker } from "@/features/health/health-ui";
 import { Badge } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
-import { ConfirmDialog } from "@/shared/components/ui/ConfirmDialog";
-import { healthStatusLabels, uiLabels } from "@/config/ui-labels";
+import { uiLabels } from "@/config/ui-labels";
 import { canOpenLegacyAdmin } from "@/shared/permissions/legacy-admin";
-import { isProviderRef, isSafeLegacyProviderName } from "@/shared/api/provider-ref";
+import { isProviderRef } from "@/shared/api/provider-ref";
 import { rejectedSensitiveQuery } from "@/shared/security/app-route-query";
 import { containsPotentialSecret, secretSearchMessage } from "@/shared/security/secrets";
 
 const pageSize = 10;
 const defaultRange: HealthRange = "24h";
-const statusLabels: Record<ProviderStatusFilter, string> = {
-  all: "전체 상태",
-  enabled: "활성",
-  disabled: "비활성",
-  healthy: healthStatusLabels.healthy,
-  degraded: healthStatusLabels.degraded,
-  unknown: healthStatusLabels.unknown,
-};
-
-function positivePage(value: string | null): number {
-  const parsed = Number(value);
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : 1;
-}
 
 export function ProviderPage(): React.JSX.Element {
   const auth = useAuth();
@@ -56,9 +46,13 @@ export function ProviderPage(): React.JSX.Element {
   const requestedQuery = searchParams.get("q") ?? "";
   const range = isHealthRange(requestedRange) ? requestedRange : defaultRange;
   const status = isProviderStatusFilter(requestedStatus) ? requestedStatus : "all";
-  const unsafeStoredQuery = containsPotentialSecret(requestedQuery);
+  const unsafeStoredQuery = containsPotentialSecret(requestedQuery, auth.credentialPrefixes);
   const query = unsafeStoredQuery ? "" : requestedQuery;
   const requestedProvider = searchParams.get("provider")?.trim() ?? "";
+  const invalidRequestedProvider =
+    requestedProvider !== "" &&
+    !isProviderRef(requestedProvider) &&
+    !isSafeProviderCatalogName(requestedProvider, auth.credentialPrefixes);
   const selectedRef = isProviderRef(requestedProvider) ? requestedProvider : "";
   const currentPage = positivePage(requestedPage);
   const canReadRouting = auth.user?.scopes.includes("routing:read") ?? false;
@@ -84,14 +78,14 @@ export function ProviderPage(): React.JSX.Element {
   const updateSearch = useCallback(
     (updates: Readonly<Record<string, string | undefined>>, replace = true, state?: unknown): void => {
       const next = new URLSearchParams(searchParams);
-      if (containsPotentialSecret(next.get("q") ?? "")) next.delete("q");
+      if (containsPotentialSecret(next.get("q") ?? "", auth.credentialPrefixes)) next.delete("q");
       for (const [key, value] of Object.entries(updates)) {
         if (value === undefined || value === "") next.delete(key);
         else next.set(key, value);
       }
       setSearchParams(next, { replace, state });
     },
-    [searchParams, setSearchParams],
+    [searchParams, setSearchParams, auth.credentialPrefixes],
   );
 
   useEffect(() => {
@@ -99,27 +93,24 @@ export function ProviderPage(): React.JSX.Element {
     if (requestedRange !== null && !isHealthRange(requestedRange)) updates.range = defaultRange;
     if (requestedStatus !== null && !isProviderStatusFilter(requestedStatus)) updates.status = undefined;
     if (unsafeStoredQuery) updates.q = undefined;
-    if (
-      requestedProvider !== "" &&
-      !isProviderRef(requestedProvider) &&
-      !isSafeLegacyProviderName(requestedProvider)
-    ) {
-      updates.provider = undefined;
-    }
+    if (invalidRequestedProvider) updates.provider = undefined;
     if (requestedPage !== null && positivePage(requestedPage) === 1 && requestedPage !== "1") {
       updates.page = undefined;
     }
     if (Object.keys(updates).length > 0) {
       updateSearch(updates, true, {
         ...(unsafeStoredQuery ? { providerSearchRejected: true } : {}),
-        ...(requestedProvider !== "" &&
-        !isProviderRef(requestedProvider) &&
-        !isSafeLegacyProviderName(requestedProvider)
-          ? { providerDetailRejected: true }
-          : {}),
+        ...(invalidRequestedProvider ? { providerDetailRejected: true } : {}),
       });
     }
-  }, [requestedPage, requestedProvider, requestedRange, requestedStatus, unsafeStoredQuery, updateSearch]);
+  }, [
+    requestedPage,
+    invalidRequestedProvider,
+    requestedRange,
+    requestedStatus,
+    unsafeStoredQuery,
+    updateSearch,
+  ]);
 
   useEffect(() => {
     if (visibleSearchError) searchInputRef.current?.focus();
@@ -137,6 +128,7 @@ export function ProviderPage(): React.JSX.Element {
         slo.data?.evaluations,
         canReadRouting ? routing.data : undefined,
         healthPending,
+        auth.credentialPrefixes,
       ).sort(
         (left, right) =>
           left.provider.priority - right.provider.priority ||
@@ -149,9 +141,13 @@ export function ProviderPage(): React.JSX.Element {
       routing.data,
       slo.data?.evaluations,
       slo.data?.slos,
+      auth.credentialPrefixes,
     ],
   );
-  const filteredRows = useMemo(() => filterProviderRows(allRows, query, status), [allRows, query, status]);
+  const filteredRows = useMemo(
+    () => filterProviderRows(allRows, query, status, auth.credentialPrefixes),
+    [allRows, query, status, auth.credentialPrefixes],
+  );
   const pageCount = Math.max(1, Math.ceil(filteredRows.length / pageSize));
   const page = Math.min(currentPage, pageCount);
   const pageRows = filteredRows.slice((page - 1) * pageSize, page * pageSize);
@@ -166,7 +162,7 @@ export function ProviderPage(): React.JSX.Element {
   useEffect(() => {
     if (requestedProvider === "" || isProviderRef(requestedProvider)) return;
     if (!providers.data) return;
-    const legacyMatches = isSafeLegacyProviderName(requestedProvider)
+    const legacyMatches = isSafeProviderCatalogName(requestedProvider, auth.credentialPrefixes)
       ? allRows.filter((row) => !row.nameRedacted && row.provider.name === requestedProvider)
       : [];
     updateSearch(
@@ -174,7 +170,7 @@ export function ProviderPage(): React.JSX.Element {
       true,
       legacyMatches.length === 1 ? undefined : { providerDetailRejected: true },
     );
-  }, [allRows, providers.data, requestedProvider, updateSearch]);
+  }, [allRows, providers.data, requestedProvider, updateSearch, auth.credentialPrefixes]);
 
   const { closeProvider, rememberRowTrigger, rememberTrigger, returnFocusRef } = useProviderDialogFocus(
     selectedRef,
@@ -190,104 +186,24 @@ export function ProviderPage(): React.JSX.Element {
   const detailSearch = useCallback(
     (provider: string): string => {
       const next = new URLSearchParams(searchParams);
-      if (containsPotentialSecret(next.get("q") ?? "")) next.delete("q");
+      if (containsPotentialSecret(next.get("q") ?? "", auth.credentialPrefixes)) next.delete("q");
       next.set("provider", provider);
       return `?${next.toString()}`;
     },
-    [searchParams],
+    [searchParams, auth.credentialPrefixes],
   );
   const refreshAll = (): void => {
     void Promise.all([providers.refetch(), slo.refetch(), ...(canReadRouting ? [routing.refetch()] : [])]);
   };
 
-  const admin = useProviderAdmin();
-  const createButtonRef = useRef<HTMLButtonElement>(null);
-  const adminReturnFocusRef = useRef<HTMLElement | null>(null);
-  const [editing, setEditing] = useState<{ row?: ProviderCatalogRow } | undefined>();
-  const [sloEditing, setSloEditing] = useState<ProviderCatalogRow | undefined>();
-  const [removing, setRemoving] = useState<ProviderCatalogRow | undefined>();
-  const writeDeniedReason = canWrite ? undefined : "공급자 변경은 admin:write 권한이 필요합니다.";
-  // Deleting a provider and editing its SLO key on an identifier the server resolves,
-  // so the opaque reference works for a provider whose name is redacted. Saving the
-  // provider itself is an upsert on the name, which a redacted row cannot supply.
-  const redactedSaveReason = "공급자 이름이 비공개 처리되어 연결 설정은 기존 화면에서 변경합니다.";
-
-  const rememberAdminTrigger = (event: React.MouseEvent<HTMLButtonElement>): void => {
-    adminReturnFocusRef.current = event.currentTarget;
-  };
-  const renderRowActions = useCallback(
-    (row: ProviderCatalogRow): React.JSX.Element => {
-      const blocked = writeDeniedReason;
-      const saveBlocked = blocked ?? (row.nameRedacted ? redactedSaveReason : undefined);
-      return (
-        <>
-          <Button
-            size="small"
-            variant="ghost"
-            disabled={saveBlocked !== undefined}
-            title={saveBlocked}
-            onClick={(event) => {
-              rememberAdminTrigger(event);
-              setEditing({ row });
-            }}
-          >
-            수정
-          </Button>
-          <Button
-            size="small"
-            variant="ghost"
-            disabled={saveBlocked !== undefined || admin.save.isPending}
-            title={saveBlocked}
-            onClick={(event) => {
-              rememberAdminTrigger(event);
-              void admin.save.mutateAsync({
-                name: row.provider.name,
-                base_url: row.provider.base_url,
-                timeout_ms: row.provider.timeout_ms,
-                model_patterns: row.provider.model_patterns,
-                failover_group: row.provider.failover_group,
-                priority: row.provider.priority,
-                enabled: !row.provider.enabled,
-              });
-            }}
-          >
-            {row.provider.enabled ? "중지" : "사용"}
-          </Button>
-          <Button
-            size="small"
-            variant="ghost"
-            disabled={blocked !== undefined}
-            title={blocked}
-            onClick={(event) => {
-              rememberAdminTrigger(event);
-              setSloEditing(row);
-            }}
-          >
-            SLO
-          </Button>
-          <Button
-            size="small"
-            variant="ghost"
-            disabled={blocked !== undefined}
-            title={blocked}
-            onClick={(event) => {
-              rememberAdminTrigger(event);
-              setRemoving(row);
-            }}
-          >
-            삭제
-          </Button>
-        </>
-      );
-    },
-    [admin.save, redactedSaveReason, writeDeniedReason],
-  );
-
-  const enabledCount = allRows.filter((row) => row.provider.enabled).length;
-  const degradedCount = allRows.filter((row) => row.health === "degraded").length;
-  const unknownCount = allRows.filter((row) => row.health === "unknown").length;
+  const {
+    createButtonRef,
+    openCreate,
+    renderRowActions,
+    dialogs: adminDialogs,
+    writeDeniedReason,
+  } = useProviderAdministration(canWrite, auth.credentialPrefixes);
   const providerSummaryUnavailable = providers.isPending || (providers.isError && !providers.data);
-  const healthSummaryUnavailable = providerSummaryUnavailable || healthPending;
 
   return (
     <div className="page-stack">
@@ -309,10 +225,7 @@ export function ProviderPage(): React.JSX.Element {
             variant="primary"
             disabled={!canWrite}
             title={writeDeniedReason}
-            onClick={() => {
-              adminReturnFocusRef.current = createButtonRef.current;
-              setEditing({});
-            }}
+            onClick={openCreate}
           >
             <Plus aria-hidden="true" /> 공급자 추가
           </Button>
@@ -322,31 +235,11 @@ export function ProviderPage(): React.JSX.Element {
         </div>
       </header>
 
-      <section className="provider-summary" aria-label="공급자 요약">
-        <article>
-          <span>전체 공급자</span>
-          <strong>{providerSummaryUnavailable ? "—" : formatInteger(allRows.length)}</strong>
-        </article>
-        <article>
-          <span>활성</span>
-          <strong>{providerSummaryUnavailable ? "—" : formatInteger(enabledCount)}</strong>
-        </article>
-        <article>
-          <span>{healthStatusLabels.degraded}</span>
-          <strong>{healthSummaryUnavailable ? "—" : formatInteger(degradedCount)}</strong>
-        </article>
-        <article>
-          <span>상태 미확인</span>
-          <strong>{healthSummaryUnavailable ? "—" : formatInteger(unknownCount)}</strong>
-        </article>
-      </section>
-
-      {healthPending ? (
-        <p className="provider-enrichment-note" role="status">
-          선택 기간의 공급자 운영 상태를 확인하는 중입니다. 목록에는 확인 중으로 표시합니다.
-        </p>
-      ) : null}
-
+      <ProviderSummary
+        rows={allRows}
+        unavailable={providerSummaryUnavailable}
+        healthPending={healthPending}
+      />
       <div className="provider-toolbar">
         <form
           className="provider-search"
@@ -355,7 +248,7 @@ export function ProviderPage(): React.JSX.Element {
             event.preventDefault();
             const submittedQuery = new FormData(event.currentTarget).get("q");
             const nextQuery = typeof submittedQuery === "string" ? submittedQuery.trim() : "";
-            if (containsPotentialSecret(nextQuery)) {
+            if (containsPotentialSecret(nextQuery, auth.credentialPrefixes)) {
               setSearchError(secretSearchMessage);
               searchInputRef.current?.focus();
               return;
@@ -437,32 +330,14 @@ export function ProviderPage(): React.JSX.Element {
         </div>
       ) : null}
 
-      {providers.isError ? (
-        <QueryFailureNotice
-          error={providers.error}
-          hasPreviousData={Boolean(providers.data)}
-          label="공급자 목록"
-          onRetry={() => void providers.refetch()}
-        />
-      ) : null}
-      {slo.isError ? (
-        <QueryFailureNotice
-          error={slo.error}
-          hasPreviousData={Boolean(slo.data)}
-          label="공급자 SLO"
-          onRetry={() => void slo.refetch()}
-        />
-      ) : null}
-      {canReadRouting && routing.isError ? (
-        <QueryFailureNotice
-          error={routing.error}
-          hasPreviousData={Boolean(routing.data)}
-          label="공급자 라우팅 상태"
-          onRetry={() => void routing.refetch()}
-        />
-      ) : null}
-
+      <ProviderQueryNotices
+        providers={providers}
+        slo={slo}
+        routing={routing}
+        canReadRouting={canReadRouting}
+      />
       <ProviderTable
+        credentialPrefixes={auth.credentialPrefixes}
         allRowCount={allRows.length}
         detailSearch={detailSearch}
         filteredRowCount={filteredRows.length}
@@ -481,6 +356,7 @@ export function ProviderPage(): React.JSX.Element {
       />
 
       <ProviderDetailDialog
+        credentialPrefixes={auth.credentialPrefixes}
         canReadRouting={canReadRouting}
         onOpenChange={(open) => {
           if (!open) {
@@ -514,45 +390,7 @@ export function ProviderPage(): React.JSX.Element {
           onRetry: () => void routing.refetch(),
         }}
       />
-
-      <ProviderFormDialog
-        open={editing !== undefined}
-        onOpenChange={(open) => {
-          if (!open) setEditing(undefined);
-        }}
-        returnFocusRef={adminReturnFocusRef}
-        row={editing?.row}
-        onSubmit={(body) => admin.save.mutateAsync(body)}
-      />
-
-      <ProviderSloDialog
-        open={sloEditing !== undefined}
-        onOpenChange={(open) => {
-          if (!open) setSloEditing(undefined);
-        }}
-        returnFocusRef={adminReturnFocusRef}
-        row={sloEditing}
-        onSubmit={(body) => admin.saveSlo.mutateAsync(body)}
-      />
-
-      <ConfirmDialog
-        open={removing !== undefined}
-        onOpenChange={(open) => {
-          if (!open) setRemoving(undefined);
-        }}
-        returnFocusRef={adminReturnFocusRef}
-        tone="danger"
-        title="공급자 삭제"
-        description={`${removing?.displayName ?? ""} 공급자 연결을 삭제합니다. 이 공급자로 향하던 라우팅은 즉시 대체 경로를 찾습니다.`}
-        confirmLabel="삭제"
-        onConfirm={async () => {
-          if (!removing) return;
-          // The reference resolves server-side, so a provider whose name is
-          // redacted can still be removed from here.
-          await admin.remove.mutateAsync(removing.nameRedacted ? removing.identity : removing.provider.name);
-          setRemoving(undefined);
-        }}
-      />
+      {adminDialogs}
     </div>
   );
 }

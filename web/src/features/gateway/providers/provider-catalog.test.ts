@@ -6,6 +6,7 @@ import {
   filterProviderRows,
   invalidProviderURLDisplay,
   providerSearchContainsSensitiveValue,
+  providerPageNumber,
 } from "@/features/gateway/providers/provider-catalog";
 import type { Provider, ProviderSLO, ProviderSLOEvaluation, RoutingHealth } from "@/shared/api/schemas";
 
@@ -90,6 +91,116 @@ function routingHealth(providerName: string): RoutingHealth {
 }
 
 describe("provider catalog", () => {
+  it.each([
+    ["corp?value=", "https://provider.example/v1/corp?value="],
+    ["CORP.example/v1?value=", "https://CORP.example/v1?value="],
+    ["corp?value=", "https://provider.example/v1/corp?%76alue="],
+    ["provider.example/v1/corp?value=", "https://provider.example/v1/corp?value="],
+  ])("masks configured credentials spanning URL boundaries (%s)", (prefix, start) => {
+    expect(displayProviderBaseURL(`${start}${"B".repeat(32)}`, [prefix])).toBe(invalidProviderURLDisplay);
+  });
+
+  it.each(["corp+_", "+svc_"])("scans raw query pairs before form decoding for %s", (prefix) => {
+    const secret = `${prefix}${"B".repeat(32)}`;
+    const url = `https://provider.example/v1?region=korea&value=${secret}&value=${encodeURIComponent(secret)}&${secret}=public&value=ordinary+words`;
+    expect(displayProviderBaseURL(url, [prefix])).toBe(
+      "https://provider.example/v1?region=korea&value=***&value=***&value=ordinary+words",
+    );
+  });
+
+  it("does not serialize a configured credential split across query pairs", () => {
+    const secret = `corp&_${"B".repeat(32)}`;
+    expect(displayProviderBaseURL(`https://provider.example/v1?value=${secret}`, ["corp&_"])).toBe(
+      invalidProviderURLDisplay,
+    );
+  });
+
+  it("keeps paging normalization unchanged", () => {
+    expect([null, "", "0", "-1", "2.5", "text", "2"].map(providerPageNumber)).toEqual([1, 1, 1, 1, 1, 1, 2]);
+  });
+
+  it.each(["corp_", "%41_"])(
+    "uses %s prefixes for safe identity and filtered display without changing editable metadata",
+    (prefix) => {
+      const credential = `${prefix}${"B".repeat(32)}`;
+      const original = {
+        ...provider("safe"),
+        base_url: `https://provider.example/v1?value=${encodeURIComponent(credential)}`,
+        model_patterns: credential,
+        failover_group: credential,
+      };
+      const rows = buildProviderRows(
+        [original, { ...original, provider_ref: providerRef("private"), name: credential }],
+        [],
+        [],
+        undefined,
+        false,
+        [prefix],
+      );
+      expect(rows[1]?.nameRedacted).toBe(true);
+      expect(rows[1]?.displayName).not.toContain(credential);
+      expect(rows[0]?.provider).toEqual(original);
+      expect(filterProviderRows(rows, "BBBB", "all", [prefix])).toEqual([]);
+      expect(providerSearchContainsSensitiveValue(credential, [prefix])).toBe(true);
+    },
+  );
+  it("redacts encoded percent-prefix URL values without decoding the configured prefix away", () => {
+    const credential = `%41_${"B".repeat(32)}`;
+    const url = `https://provider.example/v1?value=${encodeURIComponent(credential)}&region=korea`;
+    expect(displayProviderBaseURL(url, ["%41_"])).toBe("https://provider.example/v1?value=***&region=korea");
+  });
+
+  it.each([
+    ["uppercase", "CORP_", "CORP_"],
+    ["encoded uppercase", "CORP_", "%43%4F%52%50%5F"],
+    ["unicode", "회사_", "회사_"],
+    ["encoded unicode", "회사_", "%ED%9A%8C%EC%82%AC%5F"],
+  ])("redacts %s credential hostnames before URL canonicalization", (_name, prefix, encodedPrefix) => {
+    const value = `https://${encodedPrefix}${"A".repeat(32)}.example/v1?api-version=2026-01-01`;
+    expect(displayProviderBaseURL(value, [prefix])).toBe(invalidProviderURLDisplay);
+    expect(displayProviderBaseURL(value, [prefix])).not.toContain(new URL(value).hostname);
+  });
+
+  it("retains safe canonical host context while removing userinfo and fragments", () => {
+    const value = "https://CORP_ABCDEFGHIJKLMNOPQRSTUVWXYZ012345:private@회사.example/v1?region=korea#hidden";
+    const displayed = displayProviderBaseURL(value, ["CORP_", "회사_"]);
+    expect(displayed).toBe(`${new URL(value).origin}/v1?region=korea`);
+    expect(displayed).not.toContain("ABCDEFGHIJKLMNOPQRSTUVWXYZ012345");
+    expect(displayed).not.toContain("private");
+    expect(displayed).not.toContain("hidden");
+    expect(displayProviderBaseURL("https://CORP_short.example/v1", ["CORP_"])).toBe(
+      "https://corp_short.example/v1",
+    );
+  });
+
+  it.each([
+    "corp_ABCDEFGHIJKLMNOPQRSTUVWXYZ012345",
+    "%63%6f%72%70%5fABCDEFGHIJKLMNOPQRSTUVWXYZ012345",
+    "%2563%256f%2572%2570%255fABCDEFGHIJKLMNOPQRSTUVWXYZ012345",
+  ])("runtime credential prefixes redact URL components without changing safe context (%s)", (secret) => {
+    const prefixes = ["corp_"];
+    expect(displayProviderBaseURL(`https://provider.example/v1/${secret}`, prefixes)).toBe(
+      invalidProviderURLDisplay,
+    );
+    const displayed = displayProviderBaseURL(
+      `https://provider.example/v1?api-version=2026-01-01&value=${secret}&${secret}=public&region=korea`,
+      prefixes,
+    );
+    expect(displayed).toBe("https://provider.example/v1?api-version=2026-01-01&value=***&region=korea");
+    expect(displayed).not.toContain("ABCDEFGHIJKLMNOPQRSTUVWXYZ012345");
+  });
+
+  it("runtime credential prefixes preserve ordinary names and do not alter default-prefix checks", () => {
+    expect(displayProviderBaseURL("https://provider.example/corp_short?value=corp_report", ["corp_"])).toBe(
+      "https://provider.example/corp_short?value=corp_report",
+    );
+    expect(
+      displayProviderBaseURL("https://provider.example/v1?value=vc_sk_ABCDEFGHIJKLMNOPQRSTUVWXYZ012345", [
+        "corp_",
+      ]),
+    ).toBe("https://provider.example/v1?value=***");
+  });
+
   it("uses available SLO evidence without treating disabled or unevaluated providers as healthy", () => {
     const rows = buildProviderRows(
       [provider("healthy"), provider("degraded"), provider("unknown"), provider("disabled", false)],
@@ -219,5 +330,58 @@ describe("provider catalog", () => {
     }
     expect(providerSearchContainsSensitiveValue("api-version=2026-01-01")).toBe(false);
     expect(providerSearchContainsSensitiveValue("provider.example")).toBe(false);
+  });
+
+  it.each([
+    "sk-proj-abcdefgh",
+    "%73%6b%2dproj%2dabcdefgh",
+    "%2573%256b%252dproj%252dabcdefgh",
+    "Bearer%20private-authorization-value",
+    "Basic%20dXNlcjpwYXNzd29yZA%3D%3D",
+    "https%3A%2F%2Fuser%3Aprivate-password%40nested.example%2Fv1",
+    "%252Ftoken%253Dprivate-assignment-value",
+  ])("masks a credential-bearing ordinary query value (%s) while keeping safe URL context", (value) => {
+    const displayed = displayProviderBaseURL(
+      `https://provider.example/v1?api-version=2026-01-01&value=${value}&region=korea`,
+    );
+    const parsed = new URL(displayed);
+    expect(parsed.origin + parsed.pathname).toBe("https://provider.example/v1");
+    expect(parsed.searchParams.get("api-version")).toBe("2026-01-01");
+    expect(parsed.searchParams.get("region")).toBe("korea");
+    expect(parsed.searchParams.get("value")).toBe("***");
+    expect(displayed).not.toContain(value);
+  });
+
+  it.each([
+    "sk-proj-abcdefgh",
+    "%73%6b%2dproj%2dabcdefgh",
+    "%2573%256b%252dproj%252dabcdefgh",
+    "token=private-path-value",
+    "%2574oken%253Dprivate-path-value",
+    "%252Ftoken%253Dprivate-path-value",
+    "Bearer%20private-path-value",
+  ])("does not display credentials in decoded path components (%s)", (path) => {
+    expect(displayProviderBaseURL(`https://provider.example/v1/${path}?api-version=2026-01-01`)).toBe(
+      invalidProviderURLDisplay,
+    );
+  });
+
+  it("removes credential-bearing query names and masks multiply encoded sensitive names", () => {
+    const displayed = displayProviderBaseURL(
+      "https://provider.example/v1?sk-proj-abcdefgh=value&%2574oken=private-value&region=korea",
+    );
+    expect(displayed).not.toContain("abcdefgh");
+    expect(displayed).not.toContain("private-value");
+    expect(new URL(displayed).searchParams.get("region")).toBe("korea");
+  });
+
+  it("preserves ordinary encoded deployment paths and repeated nonsecret parameters", () => {
+    const displayed = displayProviderBaseURL(
+      "https://provider.example/docs/tokenization/%ED%95%9C%EA%B8%80?api-version=2026-01-01&region=korea&region=japan",
+    );
+    const parsed = new URL(displayed);
+    expect(decodeURIComponent(parsed.pathname)).toBe("/docs/tokenization/한글");
+    expect(parsed.searchParams.getAll("region")).toEqual(["korea", "japan"]);
+    expect(parsed.searchParams.get("api-version")).toBe("2026-01-01");
   });
 });

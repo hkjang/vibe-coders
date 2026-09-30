@@ -4,6 +4,7 @@ import { Link } from "react-router";
 
 import {
   displayProviderBaseURL,
+  displayProviderText,
   type ProviderCatalogRow,
   type ProviderHealthState,
 } from "@/features/gateway/providers/provider-catalog";
@@ -16,6 +17,87 @@ import { createDataTableColumnHelper, type DataTableColumn } from "@/shared/data
 import { DataTable } from "@/shared/data-table/DataTable";
 import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
 import { healthStatusLabels } from "@/config/ui-labels";
+import type { useProviderCatalogQueries } from "@/features/gateway/providers/use-provider-catalog";
+import { defaultCredentialPrefixes } from "@/shared/security/secrets";
+
+export function ProviderSummary({
+  rows,
+  unavailable: providerSummaryUnavailable,
+  healthPending,
+}: {
+  rows: readonly ProviderCatalogRow[];
+  unavailable: boolean;
+  healthPending: boolean;
+}): React.JSX.Element {
+  const enabledCount = rows.filter((row) => row.provider.enabled).length;
+  const degradedCount = rows.filter((row) => row.health === "degraded").length;
+  const unknownCount = rows.filter((row) => row.health === "unknown").length;
+  const healthSummaryUnavailable = providerSummaryUnavailable || healthPending;
+  return (
+    <>
+      <section className="provider-summary" aria-label="공급자 요약">
+        <article>
+          <span>전체 공급자</span>
+          <strong>{providerSummaryUnavailable ? "—" : formatInteger(rows.length)}</strong>
+        </article>
+        <article>
+          <span>활성</span>
+          <strong>{providerSummaryUnavailable ? "—" : formatInteger(enabledCount)}</strong>
+        </article>
+        <article>
+          <span>{healthStatusLabels.degraded}</span>
+          <strong>{healthSummaryUnavailable ? "—" : formatInteger(degradedCount)}</strong>
+        </article>
+        <article>
+          <span>상태 미확인</span>
+          <strong>{healthSummaryUnavailable ? "—" : formatInteger(unknownCount)}</strong>
+        </article>
+      </section>
+
+      {healthPending ? (
+        <p className="provider-enrichment-note" role="status">
+          선택 기간의 공급자 운영 상태를 확인하는 중입니다. 목록에는 확인 중으로 표시합니다.
+        </p>
+      ) : null}
+    </>
+  );
+}
+
+export function ProviderQueryNotices({
+  providers,
+  slo,
+  routing,
+  canReadRouting,
+}: ReturnType<typeof useProviderCatalogQueries> & { canReadRouting: boolean }): React.JSX.Element {
+  return (
+    <>
+      {providers.isError ? (
+        <QueryFailureNotice
+          error={providers.error}
+          hasPreviousData={Boolean(providers.data)}
+          label="공급자 목록"
+          onRetry={() => void providers.refetch()}
+        />
+      ) : null}
+      {slo.isError ? (
+        <QueryFailureNotice
+          error={slo.error}
+          hasPreviousData={Boolean(slo.data)}
+          label="공급자 SLO"
+          onRetry={() => void slo.refetch()}
+        />
+      ) : null}
+      {canReadRouting && routing.isError ? (
+        <QueryFailureNotice
+          error={routing.error}
+          hasPreviousData={Boolean(routing.data)}
+          label="공급자 라우팅 상태"
+          onRetry={() => void routing.refetch()}
+        />
+      ) : null}
+    </>
+  );
+}
 
 const healthPresentation: Record<ProviderHealthState, { label: string; tone: BadgeProps["tone"] }> = {
   checking: { label: healthStatusLabels.checking, tone: "info" },
@@ -67,6 +149,7 @@ function ProviderHealthBadge({ health }: { health: ProviderHealthState }): React
 function createProviderColumns(
   detailSearch: (provider: string) => string,
   rememberTrigger: (trigger: HTMLElement, provider: string) => void,
+  credentialPrefixes: readonly string[],
   renderActions?: (row: ProviderCatalogRow) => ReactNode,
 ): ReadonlyArray<DataTableColumn<ProviderCatalogRow>> {
   const column = createDataTableColumnHelper<ProviderCatalogRow>();
@@ -83,7 +166,7 @@ function createProviderColumns(
           >
             {row.original.displayName}
           </Link>
-          <span>{displayProviderBaseURL(row.original.provider.base_url)}</span>
+          <span>{displayProviderBaseURL(row.original.provider.base_url, credentialPrefixes)}</span>
         </div>
       ),
     }),
@@ -108,12 +191,12 @@ function createProviderColumns(
         return value === undefined || row.original.health === "unknown" ? "-" : formatMilliseconds(value);
       },
     }),
-    column.accessor((row) => row.provider.model_patterns, {
+    column.accessor((row) => displayProviderText(row.provider.model_patterns, credentialPrefixes), {
       id: "patterns",
       header: "모델 패턴",
       cell: ({ getValue }) => <code className="provider-patterns">{getValue() || "모든 모델"}</code>,
     }),
-    column.accessor((row) => row.provider.failover_group, {
+    column.accessor((row) => displayProviderText(row.provider.failover_group, credentialPrefixes), {
       id: "failover",
       header: "장애 전환 / 우선순위",
       cell: ({ getValue, row }) => `${getValue() || "-"} / ${formatInteger(row.original.provider.priority)}`,
@@ -141,6 +224,7 @@ function createProviderColumns(
 }
 
 interface ProviderTableProps {
+  credentialPrefixes?: readonly string[];
   allRowCount: number;
   detailSearch: (provider: string) => string;
   filteredRowCount: number;
@@ -158,6 +242,7 @@ interface ProviderTableProps {
 }
 
 export function ProviderTable({
+  credentialPrefixes = defaultCredentialPrefixes,
   allRowCount,
   detailSearch,
   filteredRowCount,
@@ -173,8 +258,8 @@ export function ProviderTable({
   updatedAt,
 }: ProviderTableProps): React.JSX.Element {
   const columns = useMemo(
-    () => createProviderColumns(detailSearch, rememberTrigger, renderActions),
-    [detailSearch, rememberTrigger, renderActions],
+    () => createProviderColumns(detailSearch, rememberTrigger, credentialPrefixes, renderActions),
+    [detailSearch, rememberTrigger, credentialPrefixes, renderActions],
   );
   return (
     <section className="provider-list-section" aria-labelledby="provider-list-title">

@@ -1,6 +1,12 @@
 import type { Provider, ProviderSLO, ProviderSLOEvaluation, RoutingHealth } from "@/shared/api/schemas";
+import { healthStatusLabels } from "@/config/ui-labels";
 import { isSafeLegacyProviderName, providerDisplayLabels } from "@/shared/api/provider-ref";
-import { containsPotentialSecret, isSensitiveCredentialKey } from "@/shared/security/secrets";
+import {
+  containsConfiguredCredential,
+  containsPotentialSecret,
+  defaultCredentialPrefixes,
+  isSensitiveCredentialKey,
+} from "@/shared/security/secrets";
 
 export const providerStatusFilters = [
   "all",
@@ -12,7 +18,20 @@ export const providerStatusFilters = [
 ] as const;
 
 export type ProviderStatusFilter = (typeof providerStatusFilters)[number];
+export const providerStatusLabels: Record<ProviderStatusFilter, string> = {
+  all: "전체 상태",
+  enabled: "활성",
+  disabled: "비활성",
+  healthy: healthStatusLabels.healthy,
+  degraded: healthStatusLabels.degraded,
+  unknown: healthStatusLabels.unknown,
+};
 export type ProviderHealthState = "checking" | "healthy" | "degraded" | "unknown";
+
+export function providerPageNumber(value: string | null): number {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : 1;
+}
 
 export interface ProviderCatalogRow {
   displayName: string;
@@ -49,20 +68,106 @@ function parseProviderURL(value: string): URL | undefined {
   }
 }
 
-export function displayProviderBaseURL(value: string): string {
+function providerURLComponentHasSecret(value: string, credentialPrefixes: readonly string[]): boolean {
+  let candidate = value;
+  // The shared detector already bounds size and decoding. Also inspect decoded
+  // path segments: /token=value (including an encoded slash) is a credential
+  // assignment even though a slash is not an assignment separator in search text.
+  for (let pass = 0; pass <= 8; pass += 1) {
+    if (
+      containsPotentialSecret(candidate, credentialPrefixes) ||
+      candidate.split("/").some((part) => containsPotentialSecret(part, credentialPrefixes))
+    ) {
+      return true;
+    }
+    if (!/%[\da-f]{2}/i.test(candidate)) return false;
+    if (pass === 8) return true;
+    try {
+      candidate = decodeURIComponent(candidate);
+    } catch {
+      return true;
+    }
+  }
+  return true;
+}
+
+export function displayProviderBaseURL(
+  value: string,
+  credentialPrefixes: readonly string[] = defaultCredentialPrefixes,
+): string {
+  // A configured prefix may contain URL delimiters and span components. Inspect
+  // that original representation before parsing can split it or fold host case.
+  const structuralPrefixes = credentialPrefixes.filter((prefix) => /[/:?&#=@]/u.test(prefix));
+  if (structuralPrefixes.length && containsConfiguredCredential(value, structuralPrefixes))
+    return invalidProviderURLDisplay;
+  // WHATWG URL lowercases ASCII hosts and converts Unicode hosts to punycode.
+  // Inspect the original host first, while case-sensitive configured prefixes
+  // still exist. Userinfo is deliberately excluded: it is removed below without
+  // discarding the otherwise safe URL context. The shared component check also
+  // bounds and decodes percent-encoded prefixes before inspecting them.
+  const authority = value.trim().match(/^https?:\/*([^/?#]*)/iu)?.[1];
+  if (authority === undefined) return invalidProviderURLDisplay;
+  const originalHost = authority.slice(authority.lastIndexOf("@") + 1);
+  if (providerURLComponentHasSecret(originalHost, credentialPrefixes)) return invalidProviderURLDisplay;
   const url = parseProviderURL(value);
   if (!url) return invalidProviderURLDisplay;
   url.username = "";
   url.password = "";
   url.hash = "";
-  for (const key of [...url.searchParams.keys()]) {
-    if (isSensitiveCredentialKey(key)) url.searchParams.set(key, "***");
+  if (
+    providerURLComponentHasSecret(url.origin, credentialPrefixes) ||
+    providerURLComponentHasSecret(url.pathname, credentialPrefixes)
+  ) {
+    return invalidProviderURLDisplay;
   }
-  return url.toString();
+  const publicQuery = new URLSearchParams();
+  for (const pair of url.search.slice(1).split("&")) {
+    const entry = new URLSearchParams(pair).entries().next().value;
+    if (!entry) continue;
+    const [key, queryValue] = entry;
+    const separator = pair.indexOf("=");
+    const rawKey = separator < 0 ? pair : pair.slice(0, separator);
+    const rawValue = separator < 0 ? "" : pair.slice(separator + 1);
+    // A key itself can contain a token; do not retain that name in the display.
+    // Inspect raw fields too: form decoding changes a literal '+' to a space.
+    if (
+      providerURLComponentHasSecret(rawKey, credentialPrefixes) ||
+      providerURLComponentHasSecret(key, credentialPrefixes)
+    )
+      continue;
+    const privateValue =
+      isSensitiveCredentialKey(key) ||
+      containsPotentialSecret(`${key}=hidden`, credentialPrefixes) ||
+      providerURLComponentHasSecret(rawValue, credentialPrefixes) ||
+      providerURLComponentHasSecret(queryValue, credentialPrefixes);
+    publicQuery.append(key, privateValue ? "***" : queryValue);
+  }
+  url.search = publicQuery.toString();
+  // A configured prefix can itself contain query delimiters. Never reassemble
+  // credential fragments that could not be attributed to one parsed field.
+  const displayed = url.toString();
+  return containsConfiguredCredential(displayed, credentialPrefixes) ? invalidProviderURLDisplay : displayed;
 }
 
-export function providerSearchContainsSensitiveValue(value: string): boolean {
-  return containsPotentialSecret(value);
+export function providerSearchContainsSensitiveValue(
+  value: string,
+  credentialPrefixes: readonly string[] = defaultCredentialPrefixes,
+): boolean {
+  return containsPotentialSecret(value, credentialPrefixes);
+}
+
+export function displayProviderText(
+  value: string,
+  credentialPrefixes: readonly string[] = defaultCredentialPrefixes,
+): string {
+  return containsPotentialSecret(value, credentialPrefixes) ? "민감한 값은 표시하지 않습니다." : value;
+}
+
+export function isSafeProviderCatalogName(
+  value: string,
+  credentialPrefixes: readonly string[] = defaultCredentialPrefixes,
+): boolean {
+  return isSafeLegacyProviderName(value) && !containsPotentialSecret(value, credentialPrefixes);
 }
 
 export function buildProviderRows(
@@ -71,17 +176,23 @@ export function buildProviderRows(
   evaluations: readonly ProviderSLOEvaluation[] = [],
   routing?: RoutingHealth,
   healthPending = false,
+  credentialPrefixes: readonly string[] = defaultCredentialPrefixes,
 ): ProviderCatalogRow[] {
   const sloByProvider = new Map(slos.map((item) => [item.provider_ref, item]));
   const evaluationByProvider = new Map(evaluations.map((item) => [item.provider_ref, item]));
   const routingByProvider = new Map(routing?.providers.map((item) => [item.provider_ref, item]) ?? []);
   const degradedProviders = new Set(routing?.degraded.map((item) => item.provider_ref) ?? []);
   const displayLabels = providerDisplayLabels(
-    providers.map((provider) => ({ name: provider.name, providerRef: provider.provider_ref })),
+    providers.map((provider) => ({
+      name: isSafeProviderCatalogName(provider.name, credentialPrefixes)
+        ? provider.name
+        : "[provider-name-omitted]",
+      providerRef: provider.provider_ref,
+    })),
   );
 
   return providers.map((provider) => {
-    const nameRedacted = !isSafeLegacyProviderName(provider.name);
+    const nameRedacted = !isSafeProviderCatalogName(provider.name, credentialPrefixes);
     const displayName = displayLabels.get(provider.provider_ref) ?? "공급자 확인 불가";
     const evaluation = evaluationByProvider.get(provider.provider_ref);
     const providerSlo = sloByProvider.get(provider.provider_ref);
@@ -111,6 +222,7 @@ export function filterProviderRows(
   rows: readonly ProviderCatalogRow[],
   query: string,
   status: ProviderStatusFilter,
+  credentialPrefixes: readonly string[] = defaultCredentialPrefixes,
 ): ProviderCatalogRow[] {
   const normalizedQuery = query.trim().toLocaleLowerCase();
   return rows.filter((row) => {
@@ -118,9 +230,9 @@ export function filterProviderRows(
       normalizedQuery === "" ||
       [
         row.displayName,
-        displayProviderBaseURL(row.provider.base_url),
-        row.provider.model_patterns,
-        row.provider.failover_group,
+        displayProviderBaseURL(row.provider.base_url, credentialPrefixes),
+        displayProviderText(row.provider.model_patterns, credentialPrefixes),
+        displayProviderText(row.provider.failover_group, credentialPrefixes),
       ].some((value) => value.toLocaleLowerCase().includes(normalizedQuery));
     if (!matchesQuery) return false;
     if (status === "all") return true;

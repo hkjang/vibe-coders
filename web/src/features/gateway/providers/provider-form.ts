@@ -1,0 +1,93 @@
+import { z } from "zod";
+
+import type { ProviderCatalogRow } from "@/features/gateway/providers/provider-catalog";
+import type { ProviderWriteBody } from "@/shared/api/domains/gateway";
+
+export const numberText = (label: string, max: number) =>
+  z
+    .string()
+    .trim()
+    .refine((value) => value === "" || (Number.isFinite(Number(value)) && Number(value) >= 0), {
+      message: `${label}은(는) 0 이상의 숫자여야 합니다.`,
+    })
+    .refine((value) => value === "" || Number(value) <= max, {
+      message: `${label}이(가) 허용 범위를 넘었습니다.`,
+    });
+
+const integerText = (label: string, max: number) =>
+  numberText(label, max).refine((value) => value === "" || Number.isInteger(Number(value)), {
+    message: `${label}은(는) 정수여야 합니다.`,
+  });
+
+// Exact public representation accepted by the Go handler only for an existing
+// unsafe legacy URL. It must not be accepted for a new or normally visible URL.
+export const redactedProviderURL = "[invalid or redacted provider URL]";
+const providerURLSchema = (allowPreservedURL = false) =>
+  z
+    .string()
+    .trim()
+    .min(1, "기본 URL을 입력하세요.")
+    .refine(
+      (value) => /^https?:\/\//u.test(value) || (allowPreservedURL && value === redactedProviderURL),
+      "http 또는 https로 시작하는 URL이어야 합니다.",
+    );
+
+export const providerFormSchema = z.object({
+  name: z
+    .string()
+    .trim()
+    .min(1, "공급자 이름을 입력하세요.")
+    .max(200)
+    .refine((value) => !/[,\s]/u.test(value), "공급자 이름에는 공백과 쉼표를 넣을 수 없습니다."),
+  base_url: providerURLSchema(),
+  api_key: z.string().default(""),
+  timeout_ms: integerText("제한 시간", 600_000),
+  model_patterns: z.string().trim().max(2000).default(""),
+  failover_group: z.string().trim().max(200).default(""),
+  priority: integerText("우선순위", 100_000),
+  enabled: z.boolean().default(true),
+});
+
+export function providerEditSchema(row: ProviderCatalogRow) {
+  const before = row.provider;
+  return providerFormSchema.extend({
+    // Existing rows have already been accepted by the server. The read-only
+    // identity must remain exact; creation-only limits must not break toggles.
+    name: z.string().refine((value) => value === before.name, "기존 공급자 이름은 변경할 수 없습니다."),
+    base_url: providerURLSchema(before.base_url === redactedProviderURL),
+    timeout_ms: z.literal(String(before.timeout_ms)).or(providerFormSchema.shape.timeout_ms),
+    priority: z.literal(String(before.priority)).or(providerFormSchema.shape.priority),
+    model_patterns: z.literal(before.model_patterns).or(providerFormSchema.shape.model_patterns),
+    failover_group: z.literal(before.failover_group).or(providerFormSchema.shape.failover_group),
+  });
+}
+
+export type ProviderFormInput = z.input<typeof providerFormSchema>;
+export type ProviderFormOutput = z.output<typeof providerFormSchema>;
+
+export function providerWriteBody(values: ProviderFormOutput): ProviderWriteBody {
+  return {
+    name: values.name,
+    base_url: values.base_url,
+    // Blank preserves the stored secret. Review renders only keep/replace, never this value.
+    api_key: values.api_key.trim() === "" ? undefined : values.api_key,
+    timeout_ms: values.timeout_ms === "" ? undefined : Number(values.timeout_ms),
+    model_patterns: values.model_patterns,
+    failover_group: values.failover_group,
+    priority: values.priority === "" ? undefined : Number(values.priority),
+    enabled: values.enabled,
+  };
+}
+
+export function providerFormValues(row?: ProviderCatalogRow): ProviderFormInput {
+  return {
+    name: row?.provider.name ?? "",
+    base_url: row?.provider.base_url ?? "",
+    api_key: "",
+    timeout_ms: row ? String(row.provider.timeout_ms) : "",
+    model_patterns: row?.provider.model_patterns ?? "",
+    failover_group: row?.provider.failover_group ?? "",
+    priority: row ? String(row.provider.priority) : "",
+    enabled: row?.provider.enabled ?? true,
+  };
+}

@@ -5,6 +5,7 @@ import type { RefObject } from "react";
 
 import {
   displayProviderBaseURL,
+  displayProviderText,
   type ProviderCatalogRow,
 } from "@/features/gateway/providers/provider-catalog";
 import { formatInteger, formatMilliseconds, formatPercent } from "@/features/health/health-utils";
@@ -14,6 +15,7 @@ import { Button } from "@/shared/components/ui/Button";
 import { Dialog } from "@/shared/components/ui/Dialog";
 import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
 import { healthStatusLabels } from "@/config/ui-labels";
+import { defaultCredentialPrefixes } from "@/shared/security/secrets";
 
 export interface ProviderDetailSourceState {
   error?: unknown;
@@ -24,6 +26,7 @@ export interface ProviderDetailSourceState {
 }
 
 interface ProviderDetailDialogProps {
+  credentialPrefixes?: readonly string[];
   canReadRouting: boolean;
   onOpenChange: (open: boolean) => void;
   open: boolean;
@@ -102,7 +105,13 @@ function DetailQueryState({
   return null;
 }
 
-function SLODetails({ row }: { row: ProviderCatalogRow }): React.JSX.Element {
+function SLODetails({
+  row,
+  credentialPrefixes,
+}: {
+  row: ProviderCatalogRow;
+  credentialPrefixes: readonly string[];
+}): React.JSX.Element {
   const { evaluation, slo } = row;
   if (!slo) return <p className="provider-detail-empty">이 공급자에는 SLO가 설정되지 않았습니다.</p>;
   const metrics = evaluation?.metrics;
@@ -151,7 +160,9 @@ function SLODetails({ row }: { row: ProviderCatalogRow }): React.JSX.Element {
       <p className="provider-detail-caption">
         선택 기간 요청 {formatInteger(evaluation?.requests ?? 0)}건 · SLO 갱신 {formatDate(slo.updated_at)}
       </p>
-      {slo.note ? <p className="provider-detail-note">{slo.note}</p> : null}
+      {slo.note ? (
+        <p className="provider-detail-note">{displayProviderText(slo.note, credentialPrefixes)}</p>
+      ) : null}
     </div>
   );
 }
@@ -183,6 +194,7 @@ function RoutingDetails({ row }: { row: ProviderCatalogRow }): React.JSX.Element
 }
 
 export function ProviderDetailDialog({
+  credentialPrefixes = defaultCredentialPrefixes,
   canReadRouting,
   onOpenChange,
   open,
@@ -264,7 +276,7 @@ export function ProviderDetailDialog({
               <div className="provider-detail-wide">
                 <dt>기본 URL</dt>
                 <dd>
-                  <code>{displayProviderBaseURL(row.provider.base_url)}</code>
+                  <code>{displayProviderBaseURL(row.provider.base_url, credentialPrefixes)}</code>
                 </dd>
               </div>
               <div>
@@ -277,7 +289,7 @@ export function ProviderDetailDialog({
               </div>
               <div>
                 <dt>장애 전환 그룹</dt>
-                <dd>{row.provider.failover_group || "설정 없음"}</dd>
+                <dd>{displayProviderText(row.provider.failover_group, credentialPrefixes) || "설정 없음"}</dd>
               </div>
               <div>
                 <dt>등록 시각</dt>
@@ -286,7 +298,9 @@ export function ProviderDetailDialog({
               <div className="provider-detail-wide">
                 <dt>모델 패턴</dt>
                 <dd>
-                  <code>{row.provider.model_patterns || "모든 모델"}</code>
+                  <code>
+                    {displayProviderText(row.provider.model_patterns, credentialPrefixes) || "모든 모델"}
+                  </code>
                 </dd>
               </div>
             </dl>
@@ -297,7 +311,9 @@ export function ProviderDetailDialog({
               공급자 SLO
             </h3>
             <DetailQueryState label="공급자 SLO" state={sloState} />
-            {!sloState.pending && (!sloState.error || sloState.hasData) ? <SLODetails row={row} /> : null}
+            {!sloState.pending && (!sloState.error || sloState.hasData) ? (
+              <SLODetails row={row} credentialPrefixes={credentialPrefixes} />
+            ) : null}
           </section>
 
           <section className="provider-detail-section" aria-labelledby="provider-routing-title">

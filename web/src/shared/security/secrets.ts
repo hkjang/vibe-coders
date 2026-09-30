@@ -51,26 +51,29 @@ const vendorCredentialPatterns = [
 interface DecodedCandidate {
   exceededLimit: boolean;
   value: string;
+  candidates: readonly string[];
 }
 
 function decoded(value: string): DecodedCandidate {
-  if (value.length > maxSecretCandidateLength) return { exceededLimit: true, value: "" };
+  if (value.length > maxSecretCandidateLength) return { exceededLimit: true, value: "", candidates: [] };
   let current = value;
+  const candidates = [value];
   for (let attempt = 0; attempt < maxDecodePasses; attempt += 1) {
-    if (!/%[\da-f]{2}/i.test(current)) return { exceededLimit: false, value: current };
+    if (!/%[\da-f]{2}/i.test(current)) return { exceededLimit: false, value: current, candidates };
     try {
       const next = decodeURIComponent(current);
-      if (next === current) return { exceededLimit: false, value: current };
+      if (next === current) return { exceededLimit: false, value: current, candidates };
       current = next;
     } catch {
       try {
         current = decodeURIComponent(current.replace(/%(?![\da-f]{2})/gi, "%25"));
       } catch {
-        return { exceededLimit: /%[\da-f]{2}/i.test(current), value: current };
+        return { exceededLimit: /%[\da-f]{2}/i.test(current), value: current, candidates };
       }
     }
+    candidates.push(current);
   }
-  return { exceededLimit: /%[\da-f]{2}/i.test(current), value: current };
+  return { exceededLimit: /%[\da-f]{2}/i.test(current), value: current, candidates };
 }
 
 export function isSensitiveCredentialKey(key: string): boolean {
@@ -111,22 +114,31 @@ function containsBasicCredential(value: string): boolean {
   return false;
 }
 
-export function containsConfiguredCredential(value: string, credentialPrefixes: readonly string[]): boolean {
-  const decodedCandidate = decoded(value.trim());
-  if (decodedCandidate.exceededLimit) return true;
-  const candidate = decodedCandidate.value;
+function candidatesContainConfiguredCredential(
+  candidates: readonly string[],
+  credentialPrefixes: readonly string[],
+): boolean {
+  // Prefixes are literal configuration values, not URL-encoded strings. Inspect
+  // each bounded decoding layer so a prefix such as "%41_" is not lost as "A_".
   for (const prefix of new Set(credentialPrefixes)) {
     if (prefix === "") continue;
     if (prefix.length > maxSecretCandidateLength) return true;
-    let searchFrom = 0;
-    while (searchFrom <= candidate.length) {
-      const start = candidate.indexOf(prefix, searchFrom);
-      if (start < 0) break;
-      if (hasGeneratedCredentialSuffix(candidate.slice(start + prefix.length))) return true;
-      searchFrom = start + 1;
+    for (const candidate of candidates) {
+      let searchFrom = 0;
+      while (searchFrom <= candidate.length) {
+        const start = candidate.indexOf(prefix, searchFrom);
+        if (start < 0) break;
+        if (hasGeneratedCredentialSuffix(candidate.slice(start + prefix.length))) return true;
+        searchFrom = start + 1;
+      }
     }
   }
   return false;
+}
+
+export function containsConfiguredCredential(value: string, credentialPrefixes: readonly string[]): boolean {
+  const result = decoded(value.trim());
+  return result.exceededLimit || candidatesContainConfiguredCredential(result.candidates, credentialPrefixes);
 }
 
 export function containsPotentialSecret(
@@ -138,7 +150,7 @@ export function containsPotentialSecret(
   const candidate = decodedCandidate.value;
   if (candidate === "") return false;
 
-  if (containsConfiguredCredential(candidate, credentialPrefixes)) return true;
+  if (candidatesContainConfiguredCredential(decodedCandidate.candidates, credentialPrefixes)) return true;
   if (containsBasicCredential(candidate)) return true;
   if (vendorCredentialPatterns.some((pattern) => pattern.test(candidate))) return true;
 
