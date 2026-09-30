@@ -2,12 +2,29 @@ package proxy
 
 import (
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"reflect"
 	"strings"
 	"testing"
 
 	"vibe-coders/internal/store"
 )
+
+func TestRequestNoteAppVariantHeaders(t *testing.T) {
+	server := &Server{cfg: testConfig("http://127.0.0.1:1", "synthetic")}
+	for _, app := range []string{"", "app"} {
+		for _, method := range []string{http.MethodGet, http.MethodPut, http.MethodPost, http.MethodDelete} {
+			request := httptest.NewRequest(method, "/admin/requests//note", nil)
+			request.Header.Set("X-Vibe-UI", app)
+			recorder := httptest.NewRecorder()
+			server.handleRequestNote(recorder, request)
+			if recorder.Code != http.StatusBadRequest || recorder.Header().Get("Cache-Control") != "no-store" || !strings.Contains(recorder.Header().Get("Vary"), "X-Vibe-UI") {
+				t.Fatal("header-dependent note response must not be shared or cached, including errors")
+			}
+		}
+	}
+}
 
 func TestRequestNoteAppWriteDecode(t *testing.T) {
 	for _, tc := range []struct {
