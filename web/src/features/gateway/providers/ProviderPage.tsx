@@ -1,14 +1,12 @@
 import { LegacyLink } from "@/shared/components/ui/LegacyLink";
-
 import { ExternalLink, LockKeyhole, Plus, RefreshCw, Search } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useSearchParams } from "react-router";
 
 import { useAuth } from "@/app/auth/AuthProvider";
 import "@/features/gateway/gateway.css";
-import { ProviderFormDialog, ProviderSloDialog } from "@/features/gateway/providers/ProviderAdminDialogs";
 import { ProviderDetailDialog } from "@/features/gateway/providers/ProviderDetailDialog";
-import { useProviderAdmin } from "@/features/gateway/providers/use-provider-admin";
+import { useProviderAdministration } from "@/features/gateway/providers/use-provider-administration";
 import {
   buildProviderRows,
   filterProviderRows,
@@ -16,14 +14,17 @@ import {
   type ProviderCatalogRow,
   type ProviderStatusFilter,
 } from "@/features/gateway/providers/provider-catalog";
-import { ProviderTable, QueryFailureNotice } from "@/features/gateway/providers/ProviderTableParts";
+import {
+  ProviderTable,
+  ProviderSummary,
+  ProviderQueryNotices,
+} from "@/features/gateway/providers/ProviderTableParts";
 import { useProviderCatalogQueries } from "@/features/gateway/providers/use-provider-catalog";
 import { useProviderDialogFocus } from "@/features/gateway/providers/use-provider-dialog-focus";
-import { formatInteger, isHealthRange, type HealthRange } from "@/features/health/health-utils";
+import { isHealthRange, type HealthRange } from "@/features/health/health-utils";
 import { TimeRangePicker } from "@/features/health/health-ui";
 import { Badge } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
-import { ConfirmDialog } from "@/shared/components/ui/ConfirmDialog";
 import { healthStatusLabels, uiLabels } from "@/config/ui-labels";
 import { canOpenLegacyAdmin } from "@/shared/permissions/legacy-admin";
 import { isProviderRef, isSafeLegacyProviderName } from "@/shared/api/provider-ref";
@@ -200,94 +201,14 @@ export function ProviderPage(): React.JSX.Element {
     void Promise.all([providers.refetch(), slo.refetch(), ...(canReadRouting ? [routing.refetch()] : [])]);
   };
 
-  const admin = useProviderAdmin();
-  const createButtonRef = useRef<HTMLButtonElement>(null);
-  const adminReturnFocusRef = useRef<HTMLElement | null>(null);
-  const [editing, setEditing] = useState<{ row?: ProviderCatalogRow } | undefined>();
-  const [sloEditing, setSloEditing] = useState<ProviderCatalogRow | undefined>();
-  const [removing, setRemoving] = useState<ProviderCatalogRow | undefined>();
-  const writeDeniedReason = canWrite ? undefined : "공급자 변경은 admin:write 권한이 필요합니다.";
-  // Deleting a provider and editing its SLO key on an identifier the server resolves,
-  // so the opaque reference works for a provider whose name is redacted. Saving the
-  // provider itself is an upsert on the name, which a redacted row cannot supply.
-  const redactedSaveReason = "공급자 이름이 비공개 처리되어 연결 설정은 기존 화면에서 변경합니다.";
-
-  const rememberAdminTrigger = (event: React.MouseEvent<HTMLButtonElement>): void => {
-    adminReturnFocusRef.current = event.currentTarget;
-  };
-  const renderRowActions = useCallback(
-    (row: ProviderCatalogRow): React.JSX.Element => {
-      const blocked = writeDeniedReason;
-      const saveBlocked = blocked ?? (row.nameRedacted ? redactedSaveReason : undefined);
-      return (
-        <>
-          <Button
-            size="small"
-            variant="ghost"
-            disabled={saveBlocked !== undefined}
-            title={saveBlocked}
-            onClick={(event) => {
-              rememberAdminTrigger(event);
-              setEditing({ row });
-            }}
-          >
-            수정
-          </Button>
-          <Button
-            size="small"
-            variant="ghost"
-            disabled={saveBlocked !== undefined || admin.save.isPending}
-            title={saveBlocked}
-            onClick={(event) => {
-              rememberAdminTrigger(event);
-              void admin.save.mutateAsync({
-                name: row.provider.name,
-                base_url: row.provider.base_url,
-                timeout_ms: row.provider.timeout_ms,
-                model_patterns: row.provider.model_patterns,
-                failover_group: row.provider.failover_group,
-                priority: row.provider.priority,
-                enabled: !row.provider.enabled,
-              });
-            }}
-          >
-            {row.provider.enabled ? "중지" : "사용"}
-          </Button>
-          <Button
-            size="small"
-            variant="ghost"
-            disabled={blocked !== undefined}
-            title={blocked}
-            onClick={(event) => {
-              rememberAdminTrigger(event);
-              setSloEditing(row);
-            }}
-          >
-            SLO
-          </Button>
-          <Button
-            size="small"
-            variant="ghost"
-            disabled={blocked !== undefined}
-            title={blocked}
-            onClick={(event) => {
-              rememberAdminTrigger(event);
-              setRemoving(row);
-            }}
-          >
-            삭제
-          </Button>
-        </>
-      );
-    },
-    [admin.save, redactedSaveReason, writeDeniedReason],
-  );
-
-  const enabledCount = allRows.filter((row) => row.provider.enabled).length;
-  const degradedCount = allRows.filter((row) => row.health === "degraded").length;
-  const unknownCount = allRows.filter((row) => row.health === "unknown").length;
+  const {
+    createButtonRef,
+    openCreate,
+    renderRowActions,
+    dialogs: adminDialogs,
+    writeDeniedReason,
+  } = useProviderAdministration(canWrite);
   const providerSummaryUnavailable = providers.isPending || (providers.isError && !providers.data);
-  const healthSummaryUnavailable = providerSummaryUnavailable || healthPending;
 
   return (
     <div className="page-stack">
@@ -309,10 +230,7 @@ export function ProviderPage(): React.JSX.Element {
             variant="primary"
             disabled={!canWrite}
             title={writeDeniedReason}
-            onClick={() => {
-              adminReturnFocusRef.current = createButtonRef.current;
-              setEditing({});
-            }}
+            onClick={openCreate}
           >
             <Plus aria-hidden="true" /> 공급자 추가
           </Button>
@@ -322,31 +240,11 @@ export function ProviderPage(): React.JSX.Element {
         </div>
       </header>
 
-      <section className="provider-summary" aria-label="공급자 요약">
-        <article>
-          <span>전체 공급자</span>
-          <strong>{providerSummaryUnavailable ? "—" : formatInteger(allRows.length)}</strong>
-        </article>
-        <article>
-          <span>활성</span>
-          <strong>{providerSummaryUnavailable ? "—" : formatInteger(enabledCount)}</strong>
-        </article>
-        <article>
-          <span>{healthStatusLabels.degraded}</span>
-          <strong>{healthSummaryUnavailable ? "—" : formatInteger(degradedCount)}</strong>
-        </article>
-        <article>
-          <span>상태 미확인</span>
-          <strong>{healthSummaryUnavailable ? "—" : formatInteger(unknownCount)}</strong>
-        </article>
-      </section>
-
-      {healthPending ? (
-        <p className="provider-enrichment-note" role="status">
-          선택 기간의 공급자 운영 상태를 확인하는 중입니다. 목록에는 확인 중으로 표시합니다.
-        </p>
-      ) : null}
-
+      <ProviderSummary
+        rows={allRows}
+        unavailable={providerSummaryUnavailable}
+        healthPending={healthPending}
+      />
       <div className="provider-toolbar">
         <form
           className="provider-search"
@@ -437,31 +335,12 @@ export function ProviderPage(): React.JSX.Element {
         </div>
       ) : null}
 
-      {providers.isError ? (
-        <QueryFailureNotice
-          error={providers.error}
-          hasPreviousData={Boolean(providers.data)}
-          label="공급자 목록"
-          onRetry={() => void providers.refetch()}
-        />
-      ) : null}
-      {slo.isError ? (
-        <QueryFailureNotice
-          error={slo.error}
-          hasPreviousData={Boolean(slo.data)}
-          label="공급자 SLO"
-          onRetry={() => void slo.refetch()}
-        />
-      ) : null}
-      {canReadRouting && routing.isError ? (
-        <QueryFailureNotice
-          error={routing.error}
-          hasPreviousData={Boolean(routing.data)}
-          label="공급자 라우팅 상태"
-          onRetry={() => void routing.refetch()}
-        />
-      ) : null}
-
+      <ProviderQueryNotices
+        providers={providers}
+        slo={slo}
+        routing={routing}
+        canReadRouting={canReadRouting}
+      />
       <ProviderTable
         allRowCount={allRows.length}
         detailSearch={detailSearch}
@@ -514,45 +393,7 @@ export function ProviderPage(): React.JSX.Element {
           onRetry: () => void routing.refetch(),
         }}
       />
-
-      <ProviderFormDialog
-        open={editing !== undefined}
-        onOpenChange={(open) => {
-          if (!open) setEditing(undefined);
-        }}
-        returnFocusRef={adminReturnFocusRef}
-        row={editing?.row}
-        onSubmit={(body) => admin.save.mutateAsync(body)}
-      />
-
-      <ProviderSloDialog
-        open={sloEditing !== undefined}
-        onOpenChange={(open) => {
-          if (!open) setSloEditing(undefined);
-        }}
-        returnFocusRef={adminReturnFocusRef}
-        row={sloEditing}
-        onSubmit={(body) => admin.saveSlo.mutateAsync(body)}
-      />
-
-      <ConfirmDialog
-        open={removing !== undefined}
-        onOpenChange={(open) => {
-          if (!open) setRemoving(undefined);
-        }}
-        returnFocusRef={adminReturnFocusRef}
-        tone="danger"
-        title="공급자 삭제"
-        description={`${removing?.displayName ?? ""} 공급자 연결을 삭제합니다. 이 공급자로 향하던 라우팅은 즉시 대체 경로를 찾습니다.`}
-        confirmLabel="삭제"
-        onConfirm={async () => {
-          if (!removing) return;
-          // The reference resolves server-side, so a provider whose name is
-          // redacted can still be removed from here.
-          await admin.remove.mutateAsync(removing.nameRedacted ? removing.identity : removing.provider.name);
-          setRemoving(undefined);
-        }}
-      />
+      {adminDialogs}
     </div>
   );
 }

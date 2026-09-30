@@ -88,6 +88,40 @@ beforeEach(() => {
 });
 
 describe("ProviderPage administration", () => {
+  it("requires the exact deletion target before sending any request", async () => {
+    const user = userEvent.setup();
+    const api = mockApi({ ...handlers(), "DELETE /admin/providers/openai": () => ({ deleted: "openai" }) });
+    renderProviders();
+    const row = (await screen.findByRole("link", { name: "openai" })).closest("tr");
+    await user.click(within(row as HTMLElement).getByRole("button", { name: "삭제" }));
+    const dialog = await screen.findByRole("dialog");
+    const target = within(dialog).getByLabelText("삭제 대상 재입력");
+    await user.type(target, "OpenAI");
+    expect(within(dialog).getByRole("button", { name: "삭제" })).toBeDisabled();
+    expect(api.calls.filter((call) => call.key.startsWith("DELETE "))).toHaveLength(0);
+    await user.clear(target);
+    await user.type(target, "openai");
+    await user.click(within(dialog).getByRole("button", { name: "삭제" }));
+    await waitFor(() => expect(api.calls.filter((call) => call.key.startsWith("DELETE "))).toHaveLength(1));
+  });
+
+  it("reviews an edit before saving the reviewed payload", async () => {
+    const user = userEvent.setup();
+    const api = mockApi({ ...handlers(), "POST /admin/providers": () => ({ provider: { name: "openai" } }) });
+    renderProviders();
+    const row = (await screen.findByRole("link", { name: "openai" })).closest("tr");
+    await user.click(within(row as HTMLElement).getByRole("button", { name: "수정" }));
+    const dialog = await screen.findByRole("dialog");
+    await user.clear(within(dialog).getByLabelText("우선순위"));
+    await user.type(within(dialog).getByLabelText("우선순위"), "25");
+    await user.click(within(dialog).getByRole("button", { name: "변경 내용 검토" }));
+    expect(api.bodies("POST /admin/providers")).toHaveLength(0);
+    expect(within(dialog).getByRole("table", { name: "공급자 변경 전후 비교" })).toHaveTextContent("25");
+    await user.click(within(dialog).getByRole("button", { name: "검토한 내용 저장" }));
+    await waitFor(() => expect(api.bodies("POST /admin/providers")).toHaveLength(1));
+    expect(api.bodies("POST /admin/providers")[0]).toMatchObject({ name: "openai", priority: 25 });
+  });
+
   it("creates a provider and never echoes the API key back", async () => {
     const user = userEvent.setup();
     const api = mockApi({ ...handlers(), "POST /admin/providers": () => ({ provider: { name: "azure" } }) });
@@ -121,6 +155,11 @@ describe("ProviderPage administration", () => {
 
     const row = (await screen.findByRole("link", { name: "openai" })).closest("tr");
     await user.click(within(row as HTMLElement).getByRole("button", { name: "중지" }));
+    expect(api.bodies("POST /admin/providers")).toHaveLength(0);
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByRole("checkbox", { name: /^활성/ })).not.toBeChecked();
+    await user.click(within(dialog).getByRole("button", { name: "변경 내용 검토" }));
+    await user.click(within(dialog).getByRole("button", { name: "검토한 내용 저장" }));
 
     await waitFor(() => {
       expect(api.bodies("POST /admin/providers")[0]).toMatchObject({ name: "openai", enabled: false });
@@ -137,6 +176,7 @@ describe("ProviderPage administration", () => {
     await user.click(within(row as HTMLElement).getByRole("button", { name: "삭제" }));
 
     const dialog = await screen.findByRole("dialog");
+    await user.type(within(dialog).getByLabelText("삭제 대상 재입력"), "openai");
     await user.click(within(dialog).getByRole("button", { name: "삭제" }));
 
     await waitFor(() => {
@@ -183,9 +223,36 @@ describe("ProviderPage administration", () => {
     const edit = within(hiddenRow as HTMLElement).getByRole("button", { name: "수정" });
     expect(edit).toBeDisabled();
     expect(edit).toHaveAttribute("title", expect.stringContaining("비공개"));
+    expect(within(hiddenRow as HTMLElement).getByRole("button", { name: "중지" })).toBeDisabled();
     // Deleting and editing the SLO resolve the opaque reference server-side.
     expect(within(hiddenRow as HTMLElement).getByRole("button", { name: "삭제" })).toBeEnabled();
     expect(within(hiddenRow as HTMLElement).getByRole("button", { name: "SLO" })).toBeEnabled();
+  });
+
+  it("switching deletion targets resets confirmation and keeps opaque identity exact", async () => {
+    const user = userEvent.setup();
+    const api = mockApi({ ...handlers(), "DELETE /admin/providers/{name}": () => ({ deleted: "public" }) });
+    renderProviders();
+    const first = (await screen.findByRole("link", { name: "openai" })).closest("tr");
+    await user.click(within(first as HTMLElement).getByRole("button", { name: "삭제" }));
+    await user.type(screen.getByLabelText("삭제 대상 재입력"), "openai");
+    await user.click(screen.getByRole("button", { name: "취소" }));
+    const second = screen.getByText(/공급자 이름 비공개/).closest("tr");
+    await user.click(within(second as HTMLElement).getByRole("button", { name: "삭제" }));
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByLabelText("삭제 대상 재입력")).toHaveValue("");
+    expect(within(dialog).getByText(providerRef("hidden"))).toBeInTheDocument();
+    await user.type(within(dialog).getByLabelText("삭제 대상 재입력"), "openai");
+    expect(within(dialog).getByRole("button", { name: "삭제" })).toBeDisabled();
+    expect(api.calls.filter((call) => call.key.startsWith("DELETE "))).toHaveLength(0);
+    await user.clear(within(dialog).getByLabelText("삭제 대상 재입력"));
+    await user.type(within(dialog).getByLabelText("삭제 대상 재입력"), providerRef("hidden"));
+    await user.click(within(dialog).getByRole("button", { name: "삭제" }));
+    await waitFor(() =>
+      expect(api.calls.filter((call) => call.key.startsWith("DELETE ")).map((call) => call.key)).toEqual([
+        `DELETE /admin/providers/${providerRef("hidden")}`,
+      ]),
+    );
   });
 
   it("deletes a redacted provider by its opaque reference", async () => {
@@ -198,6 +265,7 @@ describe("ProviderPage administration", () => {
 
     const hiddenRow = (await screen.findByText(/공급자 이름 비공개/)).closest("tr");
     await user.click(within(hiddenRow as HTMLElement).getByRole("button", { name: "삭제" }));
+    await user.type(await screen.findByLabelText("삭제 대상 재입력"), providerRef("hidden"));
     await user.click(await screen.findByRole("button", { name: "삭제", hidden: false }));
 
     await waitFor(() =>

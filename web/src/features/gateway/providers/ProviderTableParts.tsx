@@ -16,6 +16,86 @@ import { createDataTableColumnHelper, type DataTableColumn } from "@/shared/data
 import { DataTable } from "@/shared/data-table/DataTable";
 import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
 import { healthStatusLabels } from "@/config/ui-labels";
+import type { useProviderCatalogQueries } from "@/features/gateway/providers/use-provider-catalog";
+
+export function ProviderSummary({
+  rows,
+  unavailable: providerSummaryUnavailable,
+  healthPending,
+}: {
+  rows: readonly ProviderCatalogRow[];
+  unavailable: boolean;
+  healthPending: boolean;
+}): React.JSX.Element {
+  const enabledCount = rows.filter((row) => row.provider.enabled).length;
+  const degradedCount = rows.filter((row) => row.health === "degraded").length;
+  const unknownCount = rows.filter((row) => row.health === "unknown").length;
+  const healthSummaryUnavailable = providerSummaryUnavailable || healthPending;
+  return (
+    <>
+      <section className="provider-summary" aria-label="공급자 요약">
+        <article>
+          <span>전체 공급자</span>
+          <strong>{providerSummaryUnavailable ? "—" : formatInteger(rows.length)}</strong>
+        </article>
+        <article>
+          <span>활성</span>
+          <strong>{providerSummaryUnavailable ? "—" : formatInteger(enabledCount)}</strong>
+        </article>
+        <article>
+          <span>{healthStatusLabels.degraded}</span>
+          <strong>{healthSummaryUnavailable ? "—" : formatInteger(degradedCount)}</strong>
+        </article>
+        <article>
+          <span>상태 미확인</span>
+          <strong>{healthSummaryUnavailable ? "—" : formatInteger(unknownCount)}</strong>
+        </article>
+      </section>
+
+      {healthPending ? (
+        <p className="provider-enrichment-note" role="status">
+          선택 기간의 공급자 운영 상태를 확인하는 중입니다. 목록에는 확인 중으로 표시합니다.
+        </p>
+      ) : null}
+    </>
+  );
+}
+
+export function ProviderQueryNotices({
+  providers,
+  slo,
+  routing,
+  canReadRouting,
+}: ReturnType<typeof useProviderCatalogQueries> & { canReadRouting: boolean }): React.JSX.Element {
+  return (
+    <>
+      {providers.isError ? (
+        <QueryFailureNotice
+          error={providers.error}
+          hasPreviousData={Boolean(providers.data)}
+          label="공급자 목록"
+          onRetry={() => void providers.refetch()}
+        />
+      ) : null}
+      {slo.isError ? (
+        <QueryFailureNotice
+          error={slo.error}
+          hasPreviousData={Boolean(slo.data)}
+          label="공급자 SLO"
+          onRetry={() => void slo.refetch()}
+        />
+      ) : null}
+      {canReadRouting && routing.isError ? (
+        <QueryFailureNotice
+          error={routing.error}
+          hasPreviousData={Boolean(routing.data)}
+          label="공급자 라우팅 상태"
+          onRetry={() => void routing.refetch()}
+        />
+      ) : null}
+    </>
+  );
+}
 
 const healthPresentation: Record<ProviderHealthState, { label: string; tone: BadgeProps["tone"] }> = {
   checking: { label: healthStatusLabels.checking, tone: "info" },
