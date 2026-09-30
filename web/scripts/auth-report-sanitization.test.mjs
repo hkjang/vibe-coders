@@ -34,6 +34,7 @@ const allowedScenarios = [
   "AUTH-LIVE-008",
   "AUTH-LIVE-009",
   "AUTH-LIVE-010",
+  "AUTH-LIVE-011",
 ];
 
 // Run the actual TS reporter through Node's native type stripping, not a copied
@@ -171,7 +172,7 @@ test("auth reporter emits only safe ID, status, duration and numeric source line
 test("auth reporter rejects non-allowlisted title IDs and ignores helper or unrelated source locations", async () => {
   const fixtures = [
     "AUTH-LIVE-000",
-    "AUTH-LIVE-011",
+    "AUTH-LIVE-012",
     "AUTH-LIVE-999",
     "AUTH-LIVE-01",
     "AUTH-LIVE-001suffix",
@@ -214,9 +215,10 @@ test("auth reporter does not serialize a global error when no scenario has finis
   assert.deepEqual(await report([], "failed"), { status: "failed", tests: [] });
 });
 
-test("auth reporter allows only the ten fixed scenarios and numeric lines from both exact spec basenames", async () => {
+test("auth reporter allows only the eleven fixed scenarios and numeric lines from three exact spec basenames", async () => {
   const fixtures = allowedScenarios.map((id, index) => {
-    const filename = index < 5 ? "auth-live.spec.ts" : "access-live.spec.ts";
+    const filename =
+      index < 5 ? "auth-live.spec.ts" : index < 10 ? "access-live.spec.ts" : "recovery-live.spec.ts";
     const file = index % 2 === 0 ? `/private/${sensitive}/${filename}` : `C:\\private\\${filename}`;
     const fixture = row(id, "passed", [{ title: sensitive, location: { file, line: index + 1, column: 1 } }]);
     fixture.result.error.stack = `Error: ${sensitive}\n    at test (${file}:${index + 21}:2)`;
@@ -247,6 +249,13 @@ test("auth reporter rejects prefixed, suffixed, malformed and unrelated source f
     `auth-live.spec.ts#key_hash=${markers[5]}`,
     `access-live.spec.ts-${markers[9]}`,
     "helpers.ts",
+    "not-recovery-live.spec.ts",
+    "recovery-live.spec.ts.bak",
+    "recovery-live.spec.tsx",
+    "recovery-live.spec.ts/",
+    "recovery-live.spec.ts\\",
+    `recovery-live.spec.ts?credential=${markers[0]}`,
+    `recovery-live.spec.ts#password=${markers[1]}`,
   ];
   const fixtures = filenames.map((filename) => {
     const file = `/fixture/${filename}`;
@@ -370,35 +379,39 @@ async function artifactFiles(directory) {
   return files;
 }
 
-test(
-  "live auth browser failure keeps DOM canaries out of retained reports and private failure artifacts",
-  {
-    skip:
-      process.env.VIBE_AUTH_BROWSER_ARTIFACT_TEST !== "1"
-        ? "Set VIBE_AUTH_BROWSER_ARTIFACT_TEST=1 in the fixed Playwright browser image"
-        : false,
-  },
-  async () => {
-    const temporaryDirectory = await mkdtemp(join(tmpdir(), "vibe-auth-browser-artifacts-"));
-    const fixtureDirectory = join(temporaryDirectory, "fixture");
-    const reportDirectory = join(temporaryDirectory, "published");
-    const scratchDirectory = join(temporaryDirectory, "scratch");
-    const configUrl = new URL("../playwright.auth.config.ts", import.meta.url);
-    const canary = `SYNTHETIC_AUTH_ARTIFACT_CANARY_${randomUUID()}`;
-    try {
-      for (const directory of [fixtureDirectory, reportDirectory, scratchDirectory])
-        await mkdir(directory, { mode: 0o700 });
-      const environment = {
-        ...process.env,
-        APP_BASE_URL: "http://127.0.0.1:1",
-        TMPDIR: scratchDirectory,
-        TMP: scratchDirectory,
-        TEMP: scratchDirectory,
-        // Prove the real config itself enables suppression; do not supply it here.
-        PLAYWRIGHT_NO_COPY_PROMPT: "",
-        VIBE_AUTH_ARTIFACT_CANARY: canary,
-      };
-      const configProbe = `
+for (const [filename, scenario] of [
+  ["access-live.spec.ts", "AUTH-LIVE-006"],
+  ["recovery-live.spec.ts", "AUTH-LIVE-011"],
+])
+  test(
+    `live auth browser failure (${scenario}) keeps DOM canaries out of retained reports and private failure artifacts`,
+    {
+      skip:
+        process.env.VIBE_AUTH_BROWSER_ARTIFACT_TEST !== "1"
+          ? "Set VIBE_AUTH_BROWSER_ARTIFACT_TEST=1 in the fixed Playwright browser image"
+          : false,
+    },
+    async () => {
+      const temporaryDirectory = await mkdtemp(join(tmpdir(), "vibe-auth-browser-artifacts-"));
+      const fixtureDirectory = join(temporaryDirectory, "fixture");
+      const reportDirectory = join(temporaryDirectory, "published");
+      const scratchDirectory = join(temporaryDirectory, "scratch");
+      const configUrl = new URL("../playwright.auth.config.ts", import.meta.url);
+      const canary = `SYNTHETIC_AUTH_ARTIFACT_CANARY_${randomUUID()}`;
+      try {
+        for (const directory of [fixtureDirectory, reportDirectory, scratchDirectory])
+          await mkdir(directory, { mode: 0o700 });
+        const environment = {
+          ...process.env,
+          APP_BASE_URL: "http://127.0.0.1:1",
+          TMPDIR: scratchDirectory,
+          TMP: scratchDirectory,
+          TEMP: scratchDirectory,
+          // Prove the real config itself enables suppression; do not supply it here.
+          PLAYWRIGHT_NO_COPY_PROMPT: "",
+          VIBE_AUTH_ARTIFACT_CANARY: canary,
+        };
+        const configProbe = `
         try {
           await import(process.argv[1]);
           process.exitCode = 2;
@@ -407,39 +420,39 @@ test(
             error.message === "The live authentication suite requires harness-owned private scratch." ? 0 : 3;
         }
       `;
-      for (const scratch of [undefined, "relative-private-scratch"]) {
-        const probeEnvironment = { ...environment };
-        if (scratch === undefined) delete probeEnvironment.TMPDIR;
-        else probeEnvironment.TMPDIR = scratch;
-        const probe = spawnSync(
-          process.execPath,
-          ["--input-type=module", "-e", configProbe, configUrl.href],
-          {
-            cwd: reportDirectory,
-            env: probeEnvironment,
-            encoding: "utf8",
-            timeout: 10_000,
-            maxBuffer: 1_000_000,
-          },
-        );
+        for (const scratch of [undefined, "relative-private-scratch"]) {
+          const probeEnvironment = { ...environment };
+          if (scratch === undefined) delete probeEnvironment.TMPDIR;
+          else probeEnvironment.TMPDIR = scratch;
+          const probe = spawnSync(
+            process.execPath,
+            ["--input-type=module", "-e", configProbe, configUrl.href],
+            {
+              cwd: reportDirectory,
+              env: probeEnvironment,
+              encoding: "utf8",
+              timeout: 10_000,
+              maxBuffer: 1_000_000,
+            },
+          );
+          assert.equal(
+            probe.error === undefined && probe.status === 0,
+            true,
+            "Unsafe scratch must fail closed",
+          );
+          assert.equal(probe.stdout === "" && probe.stderr === "", true, "Config probes must remain silent");
+        }
         assert.equal(
-          probe.error === undefined && probe.status === 0,
+          (await readdir(reportDirectory)).length === 0,
           true,
-          "Unsafe scratch must fail closed",
+          "Config rejection must write no report",
         );
-        assert.equal(probe.stdout === "" && probe.stderr === "", true, "Config probes must remain silent");
-      }
-      assert.equal(
-        (await readdir(reportDirectory)).length === 0,
-        true,
-        "Config rejection must write no report",
-      );
 
-      const configPath = join(fixtureDirectory, "playwright.artifact.config.ts");
-      const testPath = join(fixtureDirectory, "access-live.spec.ts");
-      const source = `import { test as base, expect } from ${JSON.stringify(import.meta.resolve("@playwright/test"))};
+        const configPath = join(fixtureDirectory, "playwright.artifact.config.ts");
+        const testPath = join(fixtureDirectory, filename);
+        const source = `import { test as base, expect } from ${JSON.stringify(import.meta.resolve("@playwright/test"))};
 
-base("AUTH-LIVE-006 synthetic failure artifact boundary", async ({ page }) => {
+base("${scenario} synthetic failure artifact boundary", async ({ page }) => {
   const canary = process.env.VIBE_AUTH_ARTIFACT_CANARY ?? "";
   expect(canary.length > 0).toBe(true);
   await page.setContent(\`<main><h1>Synthetic issuance</h1><code>\${canary}</code><label>API key<input value="\${canary}"></label></main>\`);
@@ -450,14 +463,14 @@ base("AUTH-LIVE-006 synthetic failure artifact boundary", async ({ page }) => {
   expect(false, "intentional synthetic artifact boundary failure").toBe(true);
 });
 `;
-      const failureLine = source.split("\n").findIndex((line) => line.includes("expect(false,")) + 1;
-      await writeFile(join(fixtureDirectory, "package.json"), '{"type":"module"}\n', { mode: 0o600 });
-      await writeFile(testPath, source, { mode: 0o600 });
-      // Keep all production artifact, browser and isolation settings. Retention
-      // is deliberately stronger so cleanup cannot hide a generated snapshot.
-      await writeFile(
-        configPath,
-        `import liveConfig from ${JSON.stringify(configUrl.href)};
+        const failureLine = source.split("\n").findIndex((line) => line.includes("expect(false,")) + 1;
+        await writeFile(join(fixtureDirectory, "package.json"), '{"type":"module"}\n', { mode: 0o600 });
+        await writeFile(testPath, source, { mode: 0o600 });
+        // Keep all production artifact, browser and isolation settings. Retention
+        // is deliberately stronger so cleanup cannot hide a generated snapshot.
+        await writeFile(
+          configPath,
+          `import liveConfig from ${JSON.stringify(configUrl.href)};
 export default {
   ...liveConfig,
   testDir: ${JSON.stringify(fixtureDirectory)},
@@ -465,89 +478,93 @@ export default {
   preserveOutput: "always",
 };
 `,
-        { mode: 0o600 },
-      );
-      const child = spawnSync(
-        process.execPath,
-        [fileURLToPath(import.meta.resolve("@playwright/test/cli")), "test", "--config", configPath],
-        {
-          cwd: reportDirectory,
-          env: environment,
-          encoding: "utf8",
-          timeout: 60_000,
-          maxBuffer: 1_000_000,
-        },
-      );
-      // Never print raw Playwright output, even to diagnose a failing regression.
-      assert.equal(
-        child.error === undefined && child.status === 1,
-        true,
-        "The synthetic test must fail normally",
-      );
-      assert.equal(
-        (await readdir(reportDirectory)).join("\n") === "test-results",
-        true,
-        "The externally retained directory must contain only the safe report directory",
-      );
-      const summaryDirectory = join(reportDirectory, "test-results");
-      assert.equal(
-        (await readdir(summaryDirectory)).join("\n") === "auth-live-summary.json",
-        true,
-        "Only the safe summary may be written outside private scratch",
-      );
-      const raw = await readFile(join(summaryDirectory, "auth-live-summary.json"), "utf8");
-      assert.equal(raw.includes(canary), false, "The safe report must omit the generated DOM canary");
-      const summary = JSON.parse(raw);
-      assert.equal(summary.status === "failed" && summary.tests?.length === 1, true);
-      const result = summary.tests[0];
-      assert.equal(result.scenario === "AUTH-LIVE-006" && result.status === "failed", true);
-      // A browser launch/configuration failure must not satisfy this regression.
-      assert.equal(
-        result.failureSourceLine === failureLine,
-        true,
-        "The deliberate browser assertion must run",
-      );
-      // Playwright adds a terminal reporter when every configured reporter has
-      // printsToStdio=false. The Go harness discards those streams; this test
-      // captures them without forwarding or retaining any raw runner output.
-      assert.equal(
-        !child.stdout.includes(canary) && !child.stderr.includes(canary),
-        true,
-        "Captured runner output must omit the generated DOM canary",
-      );
-      assert.equal(
-        Object.keys(result).every((key) =>
-          ["scenario", "status", "durationMs", "lastSourceLine", "failureSourceLine"].includes(key),
-        ),
-        true,
-        "The real runner must retain only safe summary fields",
-      );
-
-      const files = await artifactFiles(join(scratchDirectory, "auth-live-private"));
-      assert.equal(
-        files.some((path) => path.endsWith("/error-context.md")),
-        true,
-        "Retain the actual failure context to prove snapshot suppression independently of cleanup",
-      );
-      for (const path of files) {
-        assert.equal(
-          /\.(?:png|jpe?g|webm|mp4|zip|har)$/iu.test(path),
-          false,
-          "Media and traces must remain disabled",
+          { mode: 0o600 },
         );
-        const body = await readFile(path);
-        assert.equal(body.includes(Buffer.from(canary)), false, "Private artifacts must omit the DOM canary");
-        if (path.endsWith("/error-context.md"))
+        const child = spawnSync(
+          process.execPath,
+          [fileURLToPath(import.meta.resolve("@playwright/test/cli")), "test", "--config", configPath],
+          {
+            cwd: reportDirectory,
+            env: environment,
+            encoding: "utf8",
+            timeout: 60_000,
+            maxBuffer: 1_000_000,
+          },
+        );
+        // Never print raw Playwright output, even to diagnose a failing regression.
+        assert.equal(
+          child.error === undefined && child.status === 1,
+          true,
+          "The synthetic test must fail normally",
+        );
+        assert.equal(
+          (await readdir(reportDirectory)).join("\n") === "test-results",
+          true,
+          "The externally retained directory must contain only the safe report directory",
+        );
+        const summaryDirectory = join(reportDirectory, "test-results");
+        assert.equal(
+          (await readdir(summaryDirectory)).join("\n") === "auth-live-summary.json",
+          true,
+          "Only the safe summary may be written outside private scratch",
+        );
+        const raw = await readFile(join(summaryDirectory, "auth-live-summary.json"), "utf8");
+        assert.equal(raw.includes(canary), false, "The safe report must omit the generated DOM canary");
+        const summary = JSON.parse(raw);
+        assert.equal(summary.status === "failed" && summary.tests?.length === 1, true);
+        const result = summary.tests[0];
+        assert.equal(result.scenario === scenario && result.status === "failed", true);
+        // A browser launch/configuration failure must not satisfy this regression.
+        assert.equal(
+          result.failureSourceLine === failureLine,
+          true,
+          "The deliberate browser assertion must run",
+        );
+        // Playwright adds a terminal reporter when every configured reporter has
+        // printsToStdio=false. The Go harness discards those streams; this test
+        // captures them without forwarding or retaining any raw runner output.
+        assert.equal(
+          !child.stdout.includes(canary) && !child.stderr.includes(canary),
+          true,
+          "Captured runner output must omit the generated DOM canary",
+        );
+        assert.equal(
+          Object.keys(result).every((key) =>
+            ["scenario", "status", "durationMs", "lastSourceLine", "failureSourceLine"].includes(key),
+          ),
+          true,
+          "The real runner must retain only safe summary fields",
+        );
+
+        const files = await artifactFiles(join(scratchDirectory, "auth-live-private"));
+        assert.equal(
+          files.some((path) => path.endsWith("/error-context.md")),
+          true,
+          "Retain the actual failure context to prove snapshot suppression independently of cleanup",
+        );
+        for (const path of files) {
           assert.equal(
-            body.includes(Buffer.from("# Page snapshot")),
+            /\.(?:png|jpe?g|webm|mp4|zip|har)$/iu.test(path),
             false,
-            "Failure DOM snapshots must be disabled",
+            "Media and traces must remain disabled",
           );
+          const body = await readFile(path);
+          assert.equal(
+            body.includes(Buffer.from(canary)),
+            false,
+            "Private artifacts must omit the DOM canary",
+          );
+          if (path.endsWith("/error-context.md"))
+            assert.equal(
+              body.includes(Buffer.from("# Page snapshot")),
+              false,
+              "Failure DOM snapshots must be disabled",
+            );
+        }
+      } finally {
+        // This exact directory was created by this test; never remove shared
+        // checkout, report-mount or browser-cache directories.
+        await rm(temporaryDirectory, { recursive: true, force: true });
       }
-    } finally {
-      // This exact directory was created by this test; never remove shared
-      // checkout, report-mount or browser-cache directories.
-      await rm(temporaryDirectory, { recursive: true, force: true });
-    }
-  },
-);
+    },
+  );

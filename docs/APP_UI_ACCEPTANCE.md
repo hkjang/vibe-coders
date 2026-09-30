@@ -1,7 +1,7 @@
 # 신규 콘솔 인수 검증표
 
 이 문서는 사용자 요구사항의 최종 인수 기준과 필수 브라우저 시나리오를 실제 구현·검사 근거에 연결한다.
-기준선은 `v0.86.23` 개발 헤드이며, 새 기능은 관련 검사를 통과한 뒤 표를 갱신한다.
+기준선은 `v0.86.24` 개발 헤드이며, 새 기능은 관련 검사를 통과한 뒤 표를 갱신한다.
 기능 등록 36개, API 선언 격차 0, 전체 테스트 통과만으로 기능 동등성이나 Stable 승격을 선언하지 않는다.
 
 ## 근거 해석
@@ -25,7 +25,7 @@
 | ACCEPT-001 | 기존 `/admin` 보존 | 회귀 근거 있음: `internal/proxy`의 관리자 정적·행위 검사와 컨테이너 smoke. 실제 운영 업무 동등성은 지속 확인 |
 | ACCEPT-002 | React `/app` 제공 | 회귀 근거 있음: `web` 빌드, `internal/appui/handler_test.go`, 컨테이너 smoke |
 | ACCEPT-003 | 하위 주소 직접 접근·새로고침 | 회귀 근거 있음: Go SPA 라우트·누락 에셋 검사와 공급자 브라우저 deep link |
-| ACCEPT-004 | `/app` 장애 격리 | 부분 검증: 별도 경로·CSP·오류 경계 및 서버 회귀. 실제 React 오류 뒤 같은 Go 인스턴스의 `/admin`·업무 API 연속 접근 보강 필요 |
+| ACCEPT-004 | `/app` 장애 격리 | 부분 실제 서버 검증: `AUTH-LIVE-011`의 정확한 공급자 청크 실패 뒤 같은 Go의 실제 관리 조회·로컬 모델 호출, 재시도 복구와 기존 관리자 자체 로그인·목록 표시. 진입 스크립트·전체 인증 제공자 오류·모든 업무 API/MCP 장애 조합은 잔여 |
 | ACCEPT-005 | 공통 인증·권한 | 부분 검증: 실제 Go·SQLite·로컬 OIDC 브라우저에서 로그인·SSO·토큰 만료·단일 갱신·관리자/읽기 전용 관리자 차이·서버 쓰기 거부 확인. 운영 Keycloak·HTTPS 교차 사이트·모든 권한 조합은 잔여 |
 | ACCEPT-006 | 업무 로직 중복 구현 금지 | 회귀 근거 있음: 공통 API 계층·OpenAPI 계약·API surface audit. 새 화면별 코드 검토를 계속 적용 |
 | ACCEPT-007 | 미이전 작업의 기존 화면 연결 | 부분 검증: Registry·권한 필터·Legacy 링크 회귀. 작업별 동일 리소스·필터 매핑은 추가 점검 필요 |
@@ -62,9 +62,9 @@
 | E2E-010 | 정책 시뮬레이션 | 간접 | `PoliciesPage.test.tsx`; 실제 브라우저 시나리오 필요 |
 | E2E-011 | API Key 최초 발급 | 실제 서버 흐름 | `AUTH-LIVE-006`: 실제 발급 201·기본 권한·비밀 일회 표시·저장소 비저장·닫기/새로고침/재로그인 후 비노출·공개 GET. `009`: 발급 후 늦은 실제 응답을 다른 계정에서 격리. 회전·소유권의 모든 조합은 별도 |
 | E2E-012 | 미저장 변경 경고 | 부분 UI 흐름 | `unsaved-changes.spec.ts`의 공통 폼, `settings-unsaved.spec.ts`의 콘솔 전환·개별 설정, `settings-inline-unsaved.spec.ts`의 SSO·알림, `provider-review.spec.ts`의 공급자 검토·뒤로가기, `key-scope-drafts.spec.ts`의 관리자 API 키와 `me-key-scope-drafts.spec.ts`의 개인 키 권한, `app-permission-drafts.spec.ts`의 앱 추가 접근 권한, `cost-guard-drafts.spec.ts`의 확인된 비용 설정, `request-note-drafts.spec.ts`의 원본 유지·상위 상세창, `model-governance-safety.spec.ts`의 모델 계약·지원 종료 초안 보호. 닫기·이동·저장 잠금·세션 격리·좁은 다크 화면을 확인하며 다른 자체 편집창은 잔여 |
-| E2E-013 | 오류 후 재시도 | UI 흐름 | `app-shell.spec.ts` |
-| E2E-014 | 기존 화면 이동 | UI 흐름 | `app-shell.spec.ts`; 가로챈 기존 화면 도착으로 실제 `/admin` 건전성을 입증하지 않음 |
-| E2E-015 | React 오류 후 기존 화면 정상 | 간접 | 오류 경계·Go route 격리 검사; 실제 Go 인스턴스와 브라우저 연속 흐름 필요 |
+| E2E-013 | 오류 후 재시도 | 부분 실제 서버 흐름 | `AUTH-LIVE-011`: 정확한 공급자 청크 실패의 오류 제목 초점·키보드 재시도·실제 GET·목록 복구. 기존 `app-shell.spec.ts`의 합성 API 오류 검사와 구분 |
+| E2E-014 | 기존 화면 이동 | 부분 실제 서버 흐름 | `AUTH-LIVE-011`: 허용된 오류 화면 링크→실제 `/admin` 자체 로그인→설정 탭 공급자 GET·목록 표시. 작업별 동일 리소스/필터 매핑은 잔여 |
+| E2E-015 | React 오류 후 기존 화면 정상 | 부분 실제 서버 흐름 | `AUTH-LIVE-011`: 같은 Go의 청크 오류와 관리·업무 API 연속성 및 기존 관리자 로그인/조회. 모든 화면·초기 스크립트·인증 제공자 오류나 MCP 가용성을 뜻하지 않음 |
 | E2E-016 | 다크 모드 | UI 흐름 | `app-shell.spec.ts` 현황 화면 기준 이미지와 `unsaved-changes.spec.ts` 좁은 화면의 확인창·대비 검사. 모든 편집창·도메인의 완전한 시각 검증은 아님 |
 | E2E-017 | 키보드 탐색 | UI 흐름 | App Shell·명령 팔레트·좁은 화면·표 키보드 검사; WCAG 2.2 AA 전체 적합성 선언은 아님 |
 | E2E-018 | Kill Switch 조회·보호 | 간접 / 잔여 작업 | `SecurityOverviewPage.test.tsx`와 서버 감사; 중요 환경 대상 문자열 재입력 등 보강 필요 |

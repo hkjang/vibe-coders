@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { useRouteError } from "react-router";
 
 import { useAuth } from "@/app/auth/AuthProvider";
@@ -8,10 +9,15 @@ import { canOpenLegacyAdmin } from "@/shared/permissions/legacy-admin";
 export function RouteErrorPage(): React.JSX.Element {
   const auth = useAuth();
   const error = useRouteError();
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    headingRef.current?.focus();
+  }, [error]);
   return (
     <ErrorState
       title="화면 오류"
       message={routeErrorMessage(error)}
+      headingRef={headingRef}
       onRetry={() => window.location.reload()}
       showLegacy={canOpenLegacyAdmin(auth)}
     />
