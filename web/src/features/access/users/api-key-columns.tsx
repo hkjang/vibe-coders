@@ -43,7 +43,12 @@ export function apiKeyColumns(
     column.accessor((row) => row.scopes.join(" "), {
       id: "scopes",
       header: "권한",
-      cell: ({ row }) => <ScopeBadges scopes={row.original.scopes} />,
+      cell: ({ row }) =>
+        row.original.scopes.length === 0 ? (
+          <span className="access-note">선택된 권한 없음</span>
+        ) : (
+          <ScopeBadges scopes={row.original.scopes} />
+        ),
     }),
     column.accessor((row) => row.allowed_ips.join(" "), {
       id: "allowed_ips",

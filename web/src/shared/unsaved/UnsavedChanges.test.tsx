@@ -22,10 +22,12 @@ function FormHarness({
   onSave = () => undefined,
   title = "테스트 편집",
   initialOpen = false,
+  submitDisabled = false,
 }: {
   onSave?: (values: Values) => unknown | Promise<unknown>;
   title?: string;
   initialOpen?: boolean;
+  submitDisabled?: boolean;
 }): React.JSX.Element {
   const [open, setOpen] = useState(initialOpen);
   const trigger = useRef<HTMLButtonElement>(null);
@@ -50,6 +52,7 @@ function FormHarness({
         open={open}
         onOpenChange={setOpen}
         onSubmit={onSave}
+        submitDisabled={submitDisabled}
         returnFocusRef={trigger}
       >
         <label>
@@ -112,6 +115,26 @@ function unload(): Event {
 }
 
 describe("FormDialog unsaved changes", () => {
+  it("blocks button, Enter and form submission for unmet prerequisites without locking or clearing edits", async () => {
+    const user = userEvent.setup();
+    const onSave = vi.fn();
+    const view = render(<FormHarness onSave={onSave} submitDisabled />);
+    const input = await openDirtyForm(user);
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByRole("button", { name: "저장" })).toBeDisabled();
+    expect(within(dialog).getByRole("button", { name: "취소" })).toBeEnabled();
+    expect(input).toBeEnabled();
+    await user.keyboard("{Enter}");
+    const form = dialog.querySelector("form");
+    if (!form) throw new Error("missing form");
+    fireEvent.submit(form);
+    expect(onSave).not.toHaveBeenCalled();
+    view.rerender(<FormHarness onSave={onSave} />);
+    expect(input).toHaveValue("새 초안");
+    await user.click(within(dialog).getByRole("button", { name: "저장" }));
+    await waitFor(() => expect(onSave).toHaveBeenCalledOnce());
+  });
+
   it("works under the existing declarative MemoryRouter and closes pristine forms without a warning", async () => {
     const user = userEvent.setup();
     render(

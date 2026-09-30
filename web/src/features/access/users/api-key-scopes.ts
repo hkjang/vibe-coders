@@ -26,7 +26,7 @@ export function apiKeyScopeChoices(existing: readonly string[]) {
     return {
       value,
       label: known?.label ?? "기타 권한",
-      description: `${known?.description ?? "이 화면에 설명이 없는 기존 권한입니다. 해제하지 않으면 그대로 유지합니다."} (${value || "빈 권한 식별자"})`,
+      description: `${known?.description ?? "이 화면에 설명이 없는 기존 권한입니다. 선택을 유지하면 이 값을 함께 전송하며, 허용 여부는 서버가 검증합니다."} (${value || "빈 권한 식별자"})`,
     };
   });
 }

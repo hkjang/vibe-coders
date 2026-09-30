@@ -1,5 +1,5 @@
 import type { UseFormReturn } from "react-hook-form";
-import { allApiKeyScopes as allScopes } from "@/features/access/users/api-key-scopes";
+import { apiKeyScopeChoices } from "@/features/access/users/api-key-scopes";
 import type { CreateKeyForm } from "@/features/access/users/api-key-form";
 import { FormField } from "@/shared/components/form/FormField";
 import { Checkbox } from "@/shared/components/ui/Checkbox";
@@ -44,13 +44,14 @@ export function ApiKeyCreateFields({
         {(control) => <Input {...control} type="datetime-local" {...createForm.register("expires_at")} />}
       </FormField>
       <fieldset>
-        <legend>스코프</legend>
-        <p className="access-note">선택하지 않으면 역할의 스코프를 그대로 상속합니다.</p>
+        <legend>허용 권한</legend>
+        <p className="access-note">선택하지 않으면 발급 시 역할의 기본 권한을 적용합니다.</p>
         <div className="access-scope-grid">
-          {allScopes.map((scope) => (
+          {apiKeyScopeChoices([]).map(({ value: scope, label, description }) => (
             <Checkbox
               key={scope}
-              label={scope}
+              label={label}
+              description={description}
               checked={createScopes.includes(scope)}
               onChange={(event) => {
                 const current = createForm.getValues("scopes");

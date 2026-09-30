@@ -91,12 +91,12 @@ describe.each(forms)("$name 스코프 폼", (fixture) => {
     renderScreen(fixture.render());
     await user.click(await screen.findByRole("button", { name: fixture.trigger }));
     const dialog = await screen.findByRole("dialog", { name: fixture.name });
-    await user.click(within(dialog).getByRole("checkbox", { name: "chat:completion" }));
+    await user.click(within(dialog).getByRole("checkbox", { name: /chat:completion/u }));
     await user.keyboard("{Escape}");
     const guard = await screen.findByRole("alertdialog");
     await user.click(within(guard).getByRole("button", { name: "계속 편집" }));
-    expect(within(dialog).getByRole("checkbox", { name: "chat:completion" })).toBeChecked();
-    await user.click(within(dialog).getByRole("checkbox", { name: "chat:completion" }));
+    expect(within(dialog).getByRole("checkbox", { name: /chat:completion/u })).toBeChecked();
+    await user.click(within(dialog).getByRole("checkbox", { name: /chat:completion/u }));
     await user.click(within(dialog).getByRole("button", { name: "취소" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
@@ -104,7 +104,7 @@ describe.each(forms)("$name 스코프 폼", (fixture) => {
 
     await user.click(screen.getByRole("button", { name: fixture.trigger }));
     const reopened = await screen.findByRole("dialog", { name: fixture.name });
-    await user.click(within(reopened).getByRole("checkbox", { name: "models:read" }));
+    await user.click(within(reopened).getByRole("checkbox", { name: /models:read/u }));
     await user.click(within(reopened).getByRole("button", { name: "취소" }));
     await user.click(
       within(await screen.findByRole("alertdialog")).getByRole("button", { name: "변경 버리기" }),
@@ -112,7 +112,7 @@ describe.each(forms)("$name 스코프 폼", (fixture) => {
     await user.click(screen.getByRole("button", { name: fixture.trigger }));
     expect(
       within(await screen.findByRole("dialog", { name: fixture.name })).getByRole("checkbox", {
-        name: "models:read",
+        name: /models:read/u,
       }),
     ).not.toBeChecked();
   });
@@ -124,8 +124,8 @@ describe.each(forms)("$name 스코프 폼", (fixture) => {
     await user.click(await screen.findByRole("button", { name: fixture.trigger }));
     const dialog = await screen.findByRole("dialog", { name: fixture.name });
     await user.type(within(dialog).getByRole("textbox", { name: fixture.nameField }), "scope_test");
-    await user.click(within(dialog).getByRole("checkbox", { name: "chat:completion" }));
-    await user.click(within(dialog).getByRole("checkbox", { name: "chat:completion" }));
+    await user.click(within(dialog).getByRole("checkbox", { name: /chat:completion/u }));
+    await user.click(within(dialog).getByRole("checkbox", { name: /chat:completion/u }));
     await user.click(within(dialog).getByRole("button", { name: fixture.submit }));
     await waitFor(() => expect(api.bodies(fixture.endpoint)).toEqual([fixture.emptyBody]));
     await waitFor(() => expect(screen.queryByRole("dialog", { name: fixture.name })).not.toBeInTheDocument());
@@ -144,13 +144,13 @@ describe.each(forms)("$name 스코프 폼", (fixture) => {
     await user.click(await screen.findByRole("button", { name: fixture.trigger }));
     const dialog = await screen.findByRole("dialog", { name: fixture.name });
     await user.type(within(dialog).getByRole("textbox", { name: fixture.nameField }), "scope_test");
-    await user.click(within(dialog).getByRole("checkbox", { name: "models:read" }));
-    await user.click(within(dialog).getByRole("checkbox", { name: "chat:completion" }));
+    await user.click(within(dialog).getByRole("checkbox", { name: /models:read/u }));
+    await user.click(within(dialog).getByRole("checkbox", { name: /chat:completion/u }));
     await user.click(within(dialog).getByRole("button", { name: fixture.submit }));
     const snapshot = { ...fixture.body, scopes: ["chat:completion", "models:read"] };
     await waitFor(() => expect(api.bodies(fixture.endpoint)).toEqual([snapshot]));
     expect(within(dialog).getByRole("textbox", { name: fixture.nameField })).toBeDisabled();
-    const checkbox = within(dialog).getByRole("checkbox", { name: "chat:completion" });
+    const checkbox = within(dialog).getByRole("checkbox", { name: /chat:completion/u });
     expect(checkbox).toBeDisabled();
     expect(within(dialog).getByRole("button", { name: "취소" })).toBeDisabled();
     await user.click(checkbox);
@@ -183,7 +183,7 @@ describe.each(forms)("$name 스코프 폼", (fixture) => {
     await user.click(await screen.findByRole("button", { name: fixture.trigger }));
     const dialog = await screen.findByRole("dialog", { name: fixture.name });
     await user.type(within(dialog).getByRole("textbox", { name: fixture.nameField }), "scope_test");
-    await user.click(within(dialog).getByRole("checkbox", { name: "chat:completion" }));
+    await user.click(within(dialog).getByRole("checkbox", { name: /chat:completion/u }));
     await user.click(within(dialog).getByRole("button", { name: fixture.submit }));
     await waitFor(() =>
       expect(api.bodies(fixture.endpoint)).toEqual([{ ...fixture.body, scopes: ["chat:completion"] }]),
@@ -196,7 +196,7 @@ describe.each(forms)("$name 스코프 폼", (fixture) => {
     await user.click(screen.getByRole("button", { name: fixture.trigger }));
     const reopened = await screen.findByRole("dialog", { name: fixture.name });
     const name = within(reopened).getByRole("textbox", { name: fixture.nameField });
-    const scope = within(reopened).getByRole("checkbox", { name: "models:read" });
+    const scope = within(reopened).getByRole("checkbox", { name: /models:read/u });
     expect(name).toHaveValue("");
     expect(name).toBeDisabled();
     expect(scope).toBeDisabled();
@@ -226,12 +226,12 @@ describe("역할 스코프 편집", () => {
     renderScreen(<RolesTab canWrite writeDeniedReason="" />);
     await user.click(await screen.findByRole("button", { name: "수정" }));
     let dialog = await screen.findByRole("dialog", { name: "역할 수정" });
-    await user.click(within(dialog).getByRole("checkbox", { name: "chat:completion" }));
+    await user.click(within(dialog).getByRole("checkbox", { name: /chat:completion/u }));
     await user.keyboard("{Escape}");
     await user.click(
       within(await screen.findByRole("alertdialog")).getByRole("button", { name: "계속 편집" }),
     );
-    await user.click(within(dialog).getByRole("checkbox", { name: "chat:completion" }));
+    await user.click(within(dialog).getByRole("checkbox", { name: /chat:completion/u }));
     await user.click(within(dialog).getByRole("button", { name: "취소" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
@@ -239,7 +239,7 @@ describe("역할 스코프 편집", () => {
 
     await user.click(screen.getByRole("button", { name: "수정" }));
     dialog = await screen.findByRole("dialog", { name: "역할 수정" });
-    await user.click(within(dialog).getByRole("checkbox", { name: "models:read" }));
+    await user.click(within(dialog).getByRole("checkbox", { name: /models:read/u }));
     await user.click(within(dialog).getByRole("button", { name: "저장" }));
     await waitFor(() =>
       expect(api.bodies("POST /admin/roles")).toEqual([

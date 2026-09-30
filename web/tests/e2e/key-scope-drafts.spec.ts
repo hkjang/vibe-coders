@@ -4,7 +4,24 @@ import type { UiBootstrapResponse } from "../../src/shared/api/generated";
 
 const targetUrl = "/app/access/users?tab=keys";
 const guardTitle = "저장하지 않은 변경사항이 있습니다";
+// A forward-compatibility fixture: preservation means forwarding the value,
+// not promising that the current server accepts arbitrary scope identifiers.
 const unknownScope = "fixture:extension:retained-permission-with-a-long-synthetic-identifier";
+const knownScopes = [
+  "chat:completion",
+  "embeddings:create",
+  "models:read",
+  "admin:read",
+  "admin:write",
+  "routing:read",
+  "routing:write",
+  "observability:read",
+  "costs:read",
+  "security:read",
+  "mcp:use",
+  "mcp:admin",
+  "team:read",
+];
 const user = {
   id: "scope-drafts-e2e-admin",
   email: "scope-drafts@example.invalid",
@@ -40,7 +57,7 @@ function publicKey(id: string, name: string, scopes: string[]): PublicKey {
 
 const alpha = publicKey("public-scope-key-alpha", "scope-draft-alpha", ["models:read", unknownScope]);
 const beta = publicKey("public-scope-key-beta", "scope-draft-beta", ["models:read"]);
-const inherited = publicKey("public-scope-key-inherited", "scope-draft-inherited", []);
+const emptyScopes = publicKey("public-scope-key-empty", "scope-draft-empty", []);
 
 function bootstrap(authenticated: boolean): UiBootstrapResponse {
   return {
@@ -111,8 +128,13 @@ async function installGateway(context: BrowserContext) {
   const sessions = new Map<string, string>();
   const unexpected: string[] = [];
   const saves: { id: string; body: { scopes: string[] } }[] = [];
-  let keys = structuredClone([alpha, beta, inherited]);
+  let keys = structuredClone([alpha, beta, emptyScopes]);
   let reads = 0;
+  let catalogScopes = [...knownScopes, unknownScope];
+  let catalogReads = 0;
+  let catalogStatus = 200;
+  let catalogGate: Promise<void> | undefined;
+  let releaseCatalog: (() => void) | undefined;
   let loginCount = 0;
   let logoutCount = 0;
   let logoutResponseCount = 0;
@@ -128,11 +150,11 @@ async function installGateway(context: BrowserContext) {
     const call = `${request.method()} ${path}`;
     const authorization = request.headers().authorization ?? "";
     const authenticated = sessions.has(authorization);
-    const json = (body: unknown, status = 200) =>
+    const json = (body: unknown, status = 200, requestId = "req-key-scope-draft") =>
       route.fulfill({
         status,
         contentType: "application/json",
-        headers: { "X-Request-ID": "req-key-scope-draft" },
+        headers: { "X-Request-ID": requestId },
         body: JSON.stringify(body),
       });
 
@@ -172,6 +194,19 @@ async function installGateway(context: BrowserContext) {
         reads += 1;
         return json({ api_keys: keys });
       }
+      if (call === "GET /admin/roles") {
+        catalogReads += 1;
+        const status = catalogStatus;
+        const snapshot = [...catalogScopes];
+        if (catalogGate) await catalogGate;
+        return status === 200
+          ? json({ roles: [], all_scopes: snapshot }, status, "req-key-scope-catalog")
+          : json(
+              { error: { message: "fixture scope catalog failed", code: "scope_catalog_failed" } },
+              status,
+              "req-key-scope-catalog",
+            );
+      }
       if (call === "GET /admin/users") return json({ users: [], auth_users: [], team_names: {} });
       if (call === "GET /admin/benchmark/users") return json({ users: [] });
       if (call === "GET /admin/providers") return json({ providers: [] });
@@ -204,6 +239,22 @@ async function installGateway(context: BrowserContext) {
     unexpected,
     saves,
     reads: () => reads,
+    catalogReads: () => catalogReads,
+    replaceCatalog: (next: readonly string[]) => {
+      catalogScopes = [...next];
+    },
+    failCatalog: () => {
+      catalogStatus = 503;
+    },
+    succeedCatalog: () => {
+      catalogStatus = 200;
+    },
+    holdCatalogs: () => {
+      catalogGate = new Promise<void>((resolve) => {
+        releaseCatalog = resolve;
+      });
+    },
+    releaseCatalogs: () => releaseCatalog?.(),
     logoutCount: () => logoutCount,
     logoutResponseCount: () => logoutResponseCount,
     replaceKeys: (next: PublicKey[]) => {
@@ -237,6 +288,7 @@ const test = base.extend<{ gateway: Gateway }>({
     try {
       await run(gateway);
     } finally {
+      gateway.releaseCatalogs();
       gateway.releaseSaves();
       gateway.releaseLogouts();
       expect(gateway.unexpected).toEqual([]);
@@ -281,6 +333,7 @@ async function closeForm(page: Page, form: Locator, method: CloseMethod) {
 }
 
 async function clickTwice(button: Locator) {
+  await expect(button).toBeEnabled();
   // Keep both clicks in one task to exercise the synchronous submission guard.
   await button.evaluate((element) => {
     (element as HTMLButtonElement).click();
@@ -350,7 +403,114 @@ for (const method of ["Escape", "취소", "외부 클릭", "닫기 버튼"] as c
   });
 }
 
-test("변경하지 않거나 원복한 권한은 경고 없이 닫히며 전체 해제와 기존 빈 배열은 역할 상속으로 저장된다", async ({
+test("서버 권한 목록을 읽는 동안 제출을 차단하고 응답 후에도 편집 중인 초안을 유지한다", async ({
+  page,
+  gateway,
+}) => {
+  gateway.holdCatalogs();
+  await login(page);
+  const form = await openForm(page);
+  await expect.poll(gateway.catalogReads).toBeGreaterThan(0);
+  await expect(form.getByText("허용 권한 목록을 불러오는 중입니다.", { exact: true })).toBeVisible();
+  await expect(form).toContainText("서버 허용 권한을 확인하기 전에는 저장할 수 없습니다.");
+  await scope(form, "chat:completion").check();
+  const save = form.getByRole("button", { name: "권한 저장", exact: true });
+  await expect(save).toBeDisabled();
+  await form.locator("form").evaluate((element) => (element as HTMLFormElement).requestSubmit());
+  await expect(save).toBeDisabled();
+  expect(gateway.saves).toEqual([]);
+  await closeForm(page, form, "Escape");
+  await guard(page).getByRole("button", { name: "계속 편집" }).click();
+  for (const id of ["chat:completion", unknownScope, "models:read"])
+    await expect(scope(form, id)).toBeChecked();
+  gateway.releaseCatalogs();
+  await expect(save).toBeEnabled();
+  expect(gateway.saves).toEqual([]);
+  for (const id of ["chat:completion", unknownScope, "models:read"])
+    await expect(scope(form, id)).toBeChecked();
+  await save.click();
+  await expect(form).toBeHidden();
+  expect(gateway.saves).toEqual([
+    { id: alpha.id, body: { scopes: ["chat:completion", unknownScope, "models:read"] } },
+  ]);
+});
+
+test("서버 권한 목록 조회 실패는 요청 ID와 재시도를 제공하며 저장을 막고 초안을 유지한다", async ({
+  page,
+  gateway,
+}) => {
+  gateway.failCatalog();
+  await login(page);
+  const form = await openForm(page);
+  await scope(form, "chat:completion").check();
+  await expect(form.getByRole("alert")).toContainText("req-key-scope-catalog");
+  const save = form.getByRole("button", { name: "권한 저장", exact: true });
+  await expect(save).toBeDisabled();
+  await form.locator("form").evaluate((element) => (element as HTMLFormElement).requestSubmit());
+  expect(gateway.saves).toEqual([]);
+  await closeForm(page, form, "Escape");
+  await guard(page).getByRole("button", { name: "계속 편집" }).click();
+  await expect(scope(form, "chat:completion")).toBeChecked();
+  await expect(scope(form, unknownScope)).toBeChecked();
+  const reads = gateway.catalogReads();
+  gateway.succeedCatalog();
+  await form.getByRole("button", { name: "다시 시도", exact: true }).click();
+  await expect.poll(gateway.catalogReads).toBeGreaterThan(reads);
+  await expect(save).toBeEnabled();
+  await expect(form.getByText(/req-key-scope-catalog/u)).toBeHidden();
+  for (const id of ["chat:completion", unknownScope, "models:read"])
+    await expect(scope(form, id)).toBeChecked();
+  expect(gateway.saves).toEqual([]);
+  await save.click();
+  await expect(form).toBeHidden();
+  expect(gateway.saves).toEqual([
+    { id: alpha.id, body: { scopes: ["chat:completion", unknownScope, "models:read"] } },
+  ]);
+});
+
+test("서버가 지원하지 않는 기존 권한은 자동 제거하지 않고 사용자가 명시적으로 해제해야 저장한다", async ({
+  page,
+  gateway,
+}) => {
+  gateway.replaceCatalog(knownScopes);
+  await login(page);
+  const form = await openForm(page);
+  await expect.poll(gateway.catalogReads).toBeGreaterThan(0);
+  await expect(
+    form.getByText("서버가 지원하지 않는 권한이 선택되어 있습니다.", { exact: true }),
+  ).toBeVisible();
+  await expect(form).toContainText(
+    "아래 권한을 임의로 제거하지 않았습니다. 확인 후 직접 해제해야 저장할 수 있습니다.",
+  );
+  await expect(scope(form, unknownScope)).toBeChecked();
+  await expect(scope(form, unknownScope)).toBeEnabled();
+  await scope(form, "chat:completion").check();
+  const save = form.getByRole("button", { name: "권한 저장", exact: true });
+  await expect(save).toBeDisabled();
+  await form.locator("form").evaluate((element) => (element as HTMLFormElement).requestSubmit());
+  expect(gateway.saves).toEqual([]);
+  await closeForm(page, form, "Escape");
+  await guard(page).getByRole("button", { name: "계속 편집" }).click();
+  await expect(scope(form, unknownScope)).toBeChecked();
+  await expect(scope(form, "chat:completion")).toBeChecked();
+  await expect(save).toBeDisabled();
+  await scope(form, unknownScope).uncheck();
+  await expect(save).toBeEnabled();
+  await scope(form, unknownScope).check();
+  await expect(save).toBeDisabled();
+  expect(gateway.saves).toEqual([]);
+  await scope(form, unknownScope).uncheck();
+  await save.click();
+  await expect(form).toBeHidden();
+  expect(gateway.saves).toEqual([{ id: alpha.id, body: { scopes: ["chat:completion", "models:read"] } }]);
+  await expect(scopeTrigger(page)).toBeFocused();
+  const reopened = await openForm(page);
+  await expect(scope(reopened, unknownScope)).toHaveCount(0);
+  await expect(scope(reopened, "chat:completion")).toBeChecked();
+  await expect(scope(reopened, "models:read")).toBeChecked();
+});
+
+test("변경하지 않거나 원복한 권한은 경고 없이 닫히며 전체 해제는 자동 상속이 아닌 빈 권한으로 전송된다", async ({
   page,
   gateway,
 }) => {
@@ -367,11 +527,18 @@ test("변경하지 않거나 원복한 권한은 경고 없이 닫히며 전체 
   await expect(guard(page)).toBeHidden();
   expect(gateway.saves).toEqual([]);
 
-  for (const key of [beta, inherited]) {
+  await expect(page.getByRole("row", { name: new RegExp(emptyScopes.name) })).toContainText(
+    "선택된 권한 없음",
+  );
+  await expect(page.getByRole("row", { name: new RegExp(emptyScopes.name) })).not.toContainText("상속");
+  for (const key of [beta, emptyScopes]) {
     const form = await openForm(page, key.name);
-    await expect(form).toContainText(/역할.*상속/u);
+    await expect(form).toContainText("역할 권한을 자동 상속하지 않습니다");
+    await expect(form).toContainText("필요한 권한이 없는 호출이 거부됩니다");
+    await expect(form).toContainText("키 사용을 중단하려면 별도의 ‘중지’ 작업");
     if (key === beta) await scope(form, "models:read").uncheck();
     await expect(form.locator('input[type="checkbox"]:checked')).toHaveCount(0);
+    await expect(form).toContainText("현재 선택: 선택된 권한 없음");
     await form.getByRole("button", { name: "권한 저장", exact: true }).click();
     await expect(form).toBeHidden();
     await expect(guard(page)).toBeHidden();
@@ -383,7 +550,7 @@ test("변경하지 않거나 원복한 권한은 경고 없이 닫히며 전체 
   }
   expect(gateway.saves).toEqual([
     { id: beta.id, body: { scopes: [] } },
-    { id: inherited.id, body: { scopes: [] } },
+    { id: emptyScopes.id, body: { scopes: [] } },
   ]);
 });
 
@@ -396,11 +563,19 @@ test("목록이 갱신되고 행 순서가 바뀌어도 열린 키의 권한 스
   await page.getByLabel("자동 새로고침 간격").selectOption("60");
   const form = await openForm(page);
   await scope(form, "chat:completion").check();
+  await expect(form.getByRole("button", { name: "권한 저장", exact: true })).toBeEnabled();
   const reads = gateway.reads();
+  const catalogReads = gateway.catalogReads();
   const newerAlpha = { ...alpha, name: "scope-refetched-alpha", scopes: ["embeddings:create"] };
-  gateway.replaceKeys([beta, inherited, newerAlpha]);
+  gateway.replaceKeys([beta, emptyScopes, newerAlpha]);
+  gateway.replaceCatalog([
+    ...knownScopes.filter((id) => id !== "admin:write"),
+    unknownScope,
+    "fixture:catalog:new-permission",
+  ]);
   await page.clock.fastForward(60_100);
   await expect.poll(gateway.reads).toBeGreaterThan(reads);
+  await expect.poll(gateway.catalogReads).toBeGreaterThan(catalogReads);
   await expect(form).toContainText(alpha.name);
   await expect(form).not.toContainText(newerAlpha.name);
   for (const id of ["models:read", unknownScope, "chat:completion"])
