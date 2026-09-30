@@ -18,20 +18,21 @@ vi.mock("@/app/auth/AuthProvider", async () => {
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 beforeEach(() => tokenStore.clearAll());
 
-const changedIDs = ["\uFEFFalice", "alice\uFEFF", " alice "];
-const exactIDs = ["alice", "팀 / 사용자+ID?&#", "al\uFEFFice", "\u200Balice"];
+const changedIDs = ["\uFEFFalice", "alice\uFEFF", " alice ", "\u0085alice", "alice\u0085"];
+const exactIDs = ["alice", "팀 / 사용자+ID?&#", "al\uFEFFice", "al\u0085ice", "\u200Balice"];
 
 describe("기존 앱 권한의 정확한 회수 대상", () => {
   it("부여 입력의 trim과 달리 기존 ID를 정규화해 회수 대상으로 사용하지 않는다", () => {
     for (const subject_id of changedIDs) {
-      expect(appPermissionSchema.parse({ subject_type: "user", subject_id }).subject_id).toBe("alice");
+      const grantID = subject_id.includes("\u0085") ? subject_id : "alice";
+      expect(appPermissionSchema.parse({ subject_type: "user", subject_id }).subject_id).toBe(grantID);
       expect(appPermissionTarget({ ...row, subject_id })).toBeUndefined();
     }
     for (const subject_id of exactIDs)
       expect(appPermissionTarget({ ...row, subject_id })).toEqual({ subject_type: "user", subject_id });
   });
 
-  it("alice와 FEFFalice·공백 패딩 행이 함께 있어도 비정규 행의 회수를 차단한다", async () => {
+  it("alice와 FEFF·NEL·공백 패딩 행이 함께 있어도 비정규 행의 회수를 차단한다", async () => {
     const user = userEvent.setup();
     const { api } = setup({
       load: () => ({
