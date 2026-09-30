@@ -61,7 +61,7 @@
 | E2E-009 | 라우팅 미리보기 | 간접 | `RoutingPage.test.tsx`; 초안 영향 검토와 현재 설정 미리보기를 구분 |
 | E2E-010 | 정책 시뮬레이션 | 간접 | `PoliciesPage.test.tsx`; 실제 브라우저 시나리오 필요 |
 | E2E-011 | API Key 최초 발급 | 실제 서버 흐름 | `AUTH-LIVE-006`: 실제 발급 201·기본 권한·비밀 일회 표시·저장소 비저장·닫기/새로고침/재로그인 후 비노출·공개 GET. `009`: 발급 후 늦은 실제 응답을 다른 계정에서 격리. 회전·소유권의 모든 조합은 별도 |
-| E2E-012 | 미저장 변경 경고 | 부분 UI 흐름 | `unsaved-changes.spec.ts`의 공통 폼, `settings-unsaved.spec.ts`의 콘솔 전환·개별 설정, `settings-inline-unsaved.spec.ts`의 SSO·알림, `provider-review.spec.ts`의 공급자 검토·뒤로가기, `key-scope-drafts.spec.ts`의 관리자 API 키와 `me-key-scope-drafts.spec.ts`의 개인 키 권한, `app-permission-drafts.spec.ts`의 앱 추가 접근 권한 보호. 닫기·이동·저장 잠금·세션 격리·좁은 다크 화면을 확인하며 다른 자체 편집창은 잔여 |
+| E2E-012 | 미저장 변경 경고 | 부분 UI 흐름 | `unsaved-changes.spec.ts`의 공통 폼, `settings-unsaved.spec.ts`의 콘솔 전환·개별 설정, `settings-inline-unsaved.spec.ts`의 SSO·알림, `provider-review.spec.ts`의 공급자 검토·뒤로가기, `key-scope-drafts.spec.ts`의 관리자 API 키와 `me-key-scope-drafts.spec.ts`의 개인 키 권한, `app-permission-drafts.spec.ts`의 앱 추가 접근 권한, `cost-guard-drafts.spec.ts`의 확인된 비용 설정 편집 보호. 닫기·이동·저장 잠금·세션 격리·좁은 다크 화면을 확인하며 다른 자체 편집창은 잔여 |
 | E2E-013 | 오류 후 재시도 | UI 흐름 | `app-shell.spec.ts` |
 | E2E-014 | 기존 화면 이동 | UI 흐름 | `app-shell.spec.ts`; 가로챈 기존 화면 도착으로 실제 `/admin` 건전성을 입증하지 않음 |
 | E2E-015 | React 오류 후 기존 화면 정상 | 간접 | 오류 경계·Go route 격리 검사; 실제 Go 인스턴스와 브라우저 연속 흐름 필요 |
