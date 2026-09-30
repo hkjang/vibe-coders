@@ -684,6 +684,8 @@ func enrichOpenAPIOperation(route, method string, op map[string]any) {
 		responses["503"] = map[string]any{"description": "mattermost_config_unavailable: saved configuration could not be loaded", "content": jsonContent(schemaRef("AppError"))}
 	case "get /admin/cost", "post /admin/cost":
 		enrichCostGuardOpenAPIOperation(method, op, responses)
+	case "get /admin/requests/{id}/note", "post /admin/requests/{id}/note", "put /admin/requests/{id}/note", "delete /admin/requests/{id}/note":
+		enrichRequestNoteOpenAPIOperation(method, op, responses)
 	case "get /admin/tracking/violations", "delete /admin/tracking/violations":
 		responses["200"] = successResponse("TrackingStatusResponse")
 	case "get /admin/mcp/oauth":
@@ -971,6 +973,9 @@ func appUIOpenAPISchemas() map[string]any {
 		schemas[name] = schema
 	}
 	for name, schema := range costGuardOpenAPISchemas() {
+		schemas[name] = schema
+	}
+	for name, schema := range requestNoteOpenAPISchemas() {
 		schemas[name] = schema
 	}
 	for name, schema := range modelCatalogOpenAPISchemas() {

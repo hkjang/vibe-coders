@@ -44,22 +44,26 @@ func (s *Server) handleRequestNote(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusForbidden, "request is outside your team scope", "permission_error", "cross_team_access_denied")
 		return
 	}
+	app := r.Header.Get("X-Vibe-UI") == "app"
+	showRaw := s.canViewRawPrompts(r)
+	projectionArgs := s.externalCredentialProjectionArgs(detail.Request.Provider, detail.Request.FallbackFrom)
 	switch r.Method {
 	case http.MethodGet:
-		note, _, err := s.db.GetRequestNote(r.Context(), id)
+		note, found, err := s.db.GetRequestNote(r.Context(), id)
 		if err != nil {
 			slog.Error("request note query failed", "request_id", id, "error", err)
 			writeOpenAIError(w, http.StatusInternalServerError, "request note could not be loaded", "server_error", "note_failed")
 			return
 		}
-		maskRequestNoteForExternal(&note, s.canViewRawPrompts(r), s.externalCredentialProjectionArgs(detail.Request.Provider, detail.Request.FallbackFrom)...)
+		if app {
+			writeJSON(w, http.StatusOK, projectRequestNoteForApp(note, found, showRaw, projectionArgs...))
+			return
+		}
+		maskRequestNoteForExternal(&note, showRaw, projectionArgs...)
 		writeJSON(w, http.StatusOK, note)
 	case http.MethodPut, http.MethodPost:
-		var payload struct {
-			Tags []string `json:"tags"`
-			Note string   `json:"note"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		payload, err := decodeRequestNoteWrite(r.Body, app)
+		if err != nil {
 			writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "invalid_body")
 			return
 		}
@@ -69,15 +73,25 @@ func (s *Server) handleRequestNote(w http.ResponseWriter, r *http.Request) {
 			Note:      strings.TrimSpace(payload.Note),
 			CreatedBy: adminID(r),
 		}
-		if err := s.db.UpsertRequestNote(r.Context(), note); err != nil {
+		if app {
+			note, err = s.db.SaveRequestNote(r.Context(), note, payload.PreserveNote, payload.PreserveTags)
+		} else {
+			err = s.db.UpsertRequestNote(r.Context(), note)
+		}
+		if err != nil {
 			slog.Error("request note save failed", "request_id", id, "error", err)
 			writeOpenAIError(w, http.StatusInternalServerError, "request note could not be saved", "server_error", "note_save_failed")
 			return
 		}
 		// Tags are operator-controlled and may accidentally contain a secret. Keep the
 		// audit record useful without persisting their raw values a second time.
+		if app {
+			s.auditCommittedSetting(r, "request_note.upsert", "", auditJSON(map[string]any{"id": id, "tag_count": len(note.Tags)}))
+			writeJSON(w, http.StatusOK, projectRequestNoteForApp(note, true, showRaw, projectionArgs...))
+			return
+		}
 		s.auditAdmin(r, "request_note.upsert", "", auditJSON(map[string]any{"id": id, "tag_count": len(note.Tags)}))
-		maskRequestNoteForExternal(&note, s.canViewRawPrompts(r), s.externalCredentialProjectionArgs(detail.Request.Provider, detail.Request.FallbackFrom)...)
+		maskRequestNoteForExternal(&note, showRaw, projectionArgs...)
 		writeJSON(w, http.StatusOK, note)
 	case http.MethodDelete:
 		if err := s.db.DeleteRequestNote(r.Context(), id); err != nil {
@@ -85,7 +99,11 @@ func (s *Server) handleRequestNote(w http.ResponseWriter, r *http.Request) {
 			writeOpenAIError(w, http.StatusInternalServerError, "request note could not be deleted", "server_error", "note_delete_failed")
 			return
 		}
-		s.auditAdmin(r, "request_note.delete", auditJSON(map[string]string{"id": id}), "")
+		if app {
+			s.auditCommittedSetting(r, "request_note.delete", auditJSON(map[string]string{"id": id}), "")
+		} else {
+			s.auditAdmin(r, "request_note.delete", auditJSON(map[string]string{"id": id}), "")
+		}
 		writeJSON(w, http.StatusOK, map[string]string{"id": id, "status": "deleted"})
 	}
 }
