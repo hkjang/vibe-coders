@@ -2,7 +2,9 @@ import { useQuery } from "@tanstack/react-query";
 import { useRef, useState, type RefObject } from "react";
 
 import { appComponentKindLabels } from "@/features/agents/apps/app-form";
+import { AppPermissionDialog } from "@/features/agents/apps/AppPermissionDialog";
 import { AppPermissionPanel } from "@/features/agents/apps/AppPermissionPanel";
+import { useAppPermissionDraft } from "@/features/agents/apps/use-app-permission-draft";
 import { withPathParams } from "@/features/agents/endpoint-path";
 import { apiClient } from "@/shared/api/client";
 import type { AppRunPlan, AppValidation, WorkApp } from "@/shared/api/domains/agents.schemas";
@@ -15,6 +17,8 @@ import { KeyValueList } from "@/shared/components/ui/KeyValueList";
 import { SectionCard } from "@/shared/components/ui/SectionCard";
 import { Sheet } from "@/shared/components/ui/Sheet";
 import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
+import { useUnsavedChanges } from "@/shared/unsaved/context";
+import { UnsavedChangesProvider } from "@/shared/unsaved/UnsavedChangesProvider";
 import { formatDateTime, formatNumber } from "@/shared/utils/format";
 
 interface AppDetailSheetProps {
@@ -38,8 +42,19 @@ interface AppDetailSheetProps {
   writeDisabledReason: string;
 }
 
-export function AppDetailSheet({
-  app,
+export function AppDetailSheet(props: AppDetailSheetProps): React.JSX.Element {
+  const coordinator = useUnsavedChanges();
+  return coordinator ? (
+    <AppDetailSheetContent {...props} />
+  ) : (
+    <UnsavedChangesProvider>
+      <AppDetailSheetContent {...props} />
+    </UnsavedChangesProvider>
+  );
+}
+
+function AppDetailSheetContent({
+  app: selectedApp,
   canWrite,
   onDelete,
   onDeprecate,
@@ -58,6 +73,10 @@ export function AppDetailSheet({
   validationPending,
   writeDisabledReason,
 }: AppDetailSheetProps): React.JSX.Element {
+  const permissionEditor = useAppPermissionDraft(canWrite);
+  // A refetch or an external selection change cannot retarget an open draft.
+  const app = permissionEditor.target?.app ?? selectedApp;
+  const permissionOpen = Boolean(permissionEditor.target);
   const [showVersions, setShowVersions] = useState(false);
   const [showPermissions, setShowPermissions] = useState(false);
   const permissionsButtonRef = useRef<HTMLButtonElement>(null);
@@ -77,13 +96,15 @@ export function AppDetailSheet({
     <Sheet
       description="AI 업무 앱의 구성 요소를 확인하고 검증·실행·발행·권한을 관리합니다."
       onOpenChange={(next) => {
-        if (!next) {
-          setShowVersions(false);
-          setShowPermissions(false);
-        }
-        onOpenChange(next);
+        if (next) onOpenChange(true);
+        else
+          permissionEditor.requestLeave(() => {
+            setShowVersions(false);
+            setShowPermissions(false);
+            onOpenChange(false);
+          });
       }}
-      open={open}
+      open={open || Boolean(permissionEditor.target)}
       returnFocusRef={returnFocusRef}
       size="wide"
       title={app ? `${app.icon ?? ""} ${app.title ?? app.id}`.trim() : "AI 업무 앱"}
@@ -113,43 +134,57 @@ export function AppDetailSheet({
           />
 
           <div className="agents-detail-actions">
-            <Button variant="primary" onClick={onValidate} disabled={validationPending}>
+            <Button variant="primary" onClick={onValidate} disabled={validationPending || permissionOpen}>
               {validationPending ? "검증 중" : "검증"}
             </Button>
-            <Button onClick={onRun} disabled={runPending}>
+            <Button onClick={onRun} disabled={runPending || permissionOpen}>
               {runPending ? "실행 계획 생성 중" : "실행(플랜)"}
             </Button>
             <Button
               onClick={onPublish}
-              disabled={!canWrite}
+              disabled={!canWrite || permissionOpen}
               title={canWrite ? undefined : writeDisabledReason}
             >
               발행
             </Button>
             <Button
               onClick={onDeprecate}
-              disabled={!canWrite}
+              disabled={!canWrite || permissionOpen}
               title={canWrite ? undefined : writeDisabledReason}
             >
               지원 중단
             </Button>
-            <Button onClick={() => setShowVersions((current) => !current)} aria-expanded={showVersions}>
+            <Button
+              onClick={() => setShowVersions((current) => !current)}
+              aria-expanded={showVersions}
+              disabled={permissionOpen}
+            >
               버전 이력
             </Button>
             <Button
               ref={permissionsButtonRef}
-              onClick={() => setShowPermissions((current) => !current)}
+              onClick={() =>
+                permissionEditor.requestLeave(() => {
+                  permissionEditor.returnFocusRef.current = permissionsButtonRef.current;
+                  setShowPermissions((current) => !current);
+                })
+              }
+              disabled={permissionEditor.pending}
               aria-expanded={showPermissions}
             >
               권한 관리
             </Button>
-            <Button onClick={onEdit} disabled={!canWrite} title={canWrite ? undefined : writeDisabledReason}>
+            <Button
+              onClick={onEdit}
+              disabled={!canWrite || permissionOpen}
+              title={canWrite ? undefined : writeDisabledReason}
+            >
               수정
             </Button>
             <Button
               variant="danger"
               onClick={onDelete}
-              disabled={!canWrite}
+              disabled={!canWrite || permissionOpen}
               title={canWrite ? undefined : writeDisabledReason}
             >
               삭제
@@ -319,7 +354,17 @@ export function AppDetailSheet({
 
           {showPermissions ? (
             <AppPermissionPanel
-              appId={app.id}
+              app={app}
+              canWrite={canWrite}
+              editor={permissionEditor}
+              writeDisabledReason={writeDisabledReason}
+            />
+          ) : null}
+          {permissionEditor.target ? (
+            <AppPermissionDialog
+              key={permissionEditor.target.instance}
+              target={permissionEditor.target}
+              editor={permissionEditor}
               canWrite={canWrite}
               writeDisabledReason={writeDisabledReason}
             />

@@ -1,147 +1,98 @@
 import { useQuery } from "@tanstack/react-query";
-import { useId, useState } from "react";
 
+import { appPermissionDescription, appPermissionKey, appPermissionTarget } from "./app-permission-form";
+import type { AppPermissionEditor } from "./use-app-permission-draft";
 import { withPathParams } from "@/features/agents/endpoint-path";
 import { apiClient } from "@/shared/api/client";
+import type { WorkApp } from "@/shared/api/domains/agents.schemas";
 import { endpoints } from "@/shared/api/endpoints";
+import { isAppError } from "@/shared/api/error";
 import { Button } from "@/shared/components/ui/Button";
 import { EmptyState } from "@/shared/components/ui/EmptyState";
 import { InlineNotice } from "@/shared/components/ui/InlineNotice";
-import { Input } from "@/shared/components/ui/Input";
 import { SectionCard } from "@/shared/components/ui/SectionCard";
-import { Select } from "@/shared/components/ui/Select";
 import { safeAppErrorMessage } from "@/shared/errors/operational-messages";
-import { useMutationFeedback } from "@/shared/hooks/use-mutation-feedback";
 import { formatDateTime } from "@/shared/utils/format";
 
 interface AppPermissionPanelProps {
-  appId: string;
+  app: WorkApp;
   canWrite: boolean;
+  editor: AppPermissionEditor;
   writeDisabledReason: string;
 }
 
-const subjectTypes = [
-  { value: "user", label: "사용자" },
-  { value: "team", label: "팀" },
-];
-
-/** Explicit per-app grants (`ai_app_permissions`) shown alongside the team/role gate. */
+/** Additional grants supplement (and never narrow) the app's existing team/role access. */
 export function AppPermissionPanel({
-  appId,
+  app,
   canWrite,
+  editor,
   writeDisabledReason,
 }: AppPermissionPanelProps): React.JSX.Element {
-  const fieldId = useId();
-  const [subjectType, setSubjectType] = useState("user");
-  const [subjectId, setSubjectId] = useState("");
-  const permissionsKey = ["agents", "apps", appId, "permissions"] as const;
-
   const permissions = useQuery({
-    queryKey: permissionsKey,
+    queryKey: appPermissionKey(app.id),
     queryFn: ({ signal }) =>
-      apiClient.request(withPathParams(endpoints.domains.agents.apps.permissions, { id: appId }), {
+      apiClient.request(withPathParams(endpoints.domains.agents.apps.permissions, { id: app.id }), {
         signal,
         routeId: "agents.apps",
       }),
   });
-
-  const grant = useMutationFeedback({
-    mutate: (variables: { subject_type: string; subject_id: string }) =>
-      apiClient.request(withPathParams(endpoints.domains.agents.apps.grantPermission, { id: appId }), {
-        body: variables,
-        routeId: "agents.apps",
-      }),
-    invalidates: [permissionsKey],
-    successMessage: "권한을 추가했습니다.",
-    errorMessage: "권한을 추가하지 못했습니다.",
-    onSuccess: () => setSubjectId(""),
-  });
-
-  const revoke = useMutationFeedback({
-    mutate: (variables: { subject_type: string; subject_id: string }) =>
-      apiClient.request(withPathParams(endpoints.domains.agents.apps.revokePermission, { id: appId }), {
-        query: variables,
-        routeId: "agents.apps",
-      }),
-    invalidates: [permissionsKey],
-    successMessage: "권한을 회수했습니다.",
-    errorMessage: "권한을 회수하지 못했습니다.",
-  });
-
   const rows = permissions.data?.permissions ?? [];
+  const locked = Boolean(editor.target);
 
   return (
-    <SectionCard
-      title="명시 권한"
-      headingLevel={3}
-      description="팀/역할 조건을 통과하지 못하는 사용자에게도 이 앱을 직접 열어 줍니다."
-    >
-      <form
-        className="toolbar"
-        onSubmit={(event) => {
-          event.preventDefault();
-          if (subjectId.trim() === "") return;
-          grant.mutate({ subject_type: subjectType, subject_id: subjectId.trim() });
-        }}
-      >
-        <div className="toolbar-start">
-          <label className="agents-toolbar-field" htmlFor={`${fieldId}-type`}>
-            <span>대상 종류</span>
-            <Select
-              id={`${fieldId}-type`}
-              options={subjectTypes}
-              value={subjectType}
-              onChange={(event) => setSubjectType(event.target.value)}
-            />
-          </label>
-          <label className="agents-toolbar-field" htmlFor={`${fieldId}-subject`}>
-            <span>대상 ID</span>
-            <Input
-              id={`${fieldId}-subject`}
-              value={subjectId}
-              onChange={(event) => setSubjectId(event.target.value)}
-              placeholder="사용자 ID 또는 팀 ID"
-            />
-          </label>
-        </div>
-        <div className="toolbar-end">
-          <Button
-            type="submit"
-            variant="primary"
-            size="small"
-            disabled={!canWrite || grant.isPending || subjectId.trim() === ""}
-            title={canWrite ? undefined : writeDisabledReason}
-          >
-            권한 추가
-          </Button>
-        </div>
-      </form>
-
+    <SectionCard title="추가 앱 접근 권한" headingLevel={3} description={appPermissionDescription}>
+      <div className="toolbar">
+        <Button
+          ref={(node) => editor.rememberTrigger(node, app.id)}
+          variant="primary"
+          size="small"
+          disabled={!canWrite || locked}
+          title={canWrite ? undefined : writeDisabledReason}
+          onClick={(event) => {
+            if (canWrite) editor.open(app, event.currentTarget);
+          }}
+        >
+          접근 권한 추가
+        </Button>
+        <Button
+          size="small"
+          disabled={permissions.isFetching || editor.pending}
+          onClick={() => void permissions.refetch()}
+        >
+          권한 목록 새로고침
+        </Button>
+      </div>
       {permissions.isError ? (
         <InlineNotice
           tone="danger"
           title="권한 목록을 불러오지 못했습니다."
           actions={
-            <Button size="small" onClick={() => void permissions.refetch()}>
+            <Button
+              size="small"
+              disabled={permissions.isFetching || editor.pending}
+              onClick={() => void permissions.refetch()}
+            >
               다시 시도
             </Button>
           }
         >
           {safeAppErrorMessage(permissions.error, "권한 목록을 불러오지 못했습니다.")}
+          {isAppError(permissions.error) && permissions.error.requestId ? (
+            <span className="request-id"> 요청 ID: {permissions.error.requestId}</span>
+          ) : null}
+          <p>목록을 다시 확인하세요. 추가 권한이 없는 상태로 판단하지 않습니다.</p>
         </InlineNotice>
-      ) : null}
-
-      {permissions.isPending ? (
+      ) : permissions.isPending ? (
         <p role="status">권한 목록을 불러오는 중입니다.</p>
       ) : rows.length === 0 ? (
         <EmptyState
-          title="명시 권한이 없습니다."
-          description="특정 사용자나 팀에게만 열어 주려면 위에서 권한을 추가하세요."
+          title="추가 접근 권한이 없습니다."
+          description="기존 팀·역할 조건에 따른 접근은 유지됩니다. 다른 사용자나 팀에게도 허용하려면 권한을 추가하세요."
         />
       ) : (
-        <div className="data-table-scroll" tabIndex={0} aria-label="앱 명시 권한 표 영역">
+        <div className="data-table-scroll" tabIndex={0} aria-label="앱 추가 접근 권한 표 영역">
           <table className="data-table">
-            <caption className="sr-only">AI 업무 앱 명시 권한 목록</caption>
+            <caption className="sr-only">앱 추가 접근 권한 목록</caption>
             <thead>
               <tr>
                 <th scope="col">대상 종류</th>
@@ -154,31 +105,46 @@ export function AppPermissionPanel({
               </tr>
             </thead>
             <tbody>
-              {rows.map((permission) => (
-                <tr key={permission.id ?? `${permission.subject_type}-${permission.subject_id}`}>
-                  <td>{permission.subject_type === "team" ? "팀" : "사용자"}</td>
-                  <td className="mono">{permission.subject_id ?? "—"}</td>
-                  <td>{permission.granted_by ?? "—"}</td>
-                  <td>{formatDateTime(permission.created_at)}</td>
-                  <td>
-                    <Button
-                      size="small"
-                      variant="danger"
-                      disabled={!canWrite || revoke.isPending}
-                      title={canWrite ? undefined : writeDisabledReason}
-                      aria-label={`${permission.subject_id ?? ""} 권한 회수`}
-                      onClick={() =>
-                        revoke.mutate({
-                          subject_type: permission.subject_type ?? "user",
-                          subject_id: permission.subject_id ?? "",
-                        })
-                      }
-                    >
-                      회수
-                    </Button>
-                  </td>
-                </tr>
-              ))}
+              {rows.map((permission, index) => {
+                const subject = appPermissionTarget(permission);
+                return (
+                  <tr key={permission.id ?? `${permission.subject_type}-${permission.subject_id}-${index}`}>
+                    <td>
+                      {permission.subject_type === "team"
+                        ? "팀"
+                        : permission.subject_type === "user"
+                          ? "사용자"
+                          : `알 수 없는 종류 (${permission.subject_type || "없음"})`}
+                    </td>
+                    <td className="mono">{permission.subject_id || "—"}</td>
+                    <td>{permission.granted_by || "—"}</td>
+                    <td>{formatDateTime(permission.created_at)}</td>
+                    <td>
+                      <Button
+                        ref={(node) => {
+                          if (subject) editor.rememberTrigger(node, app.id, subject);
+                        }}
+                        size="small"
+                        variant="danger"
+                        disabled={!canWrite || locked || !subject}
+                        title={
+                          !canWrite
+                            ? writeDisabledReason
+                            : !subject
+                              ? "대상 종류와 ID를 확인할 수 없어 회수할 수 없습니다."
+                              : undefined
+                        }
+                        aria-label={`${permission.subject_id || "알 수 없는 대상"} 권한 회수`}
+                        onClick={(event) => {
+                          if (canWrite && subject) editor.open(app, event.currentTarget, subject);
+                        }}
+                      >
+                        회수
+                      </Button>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
