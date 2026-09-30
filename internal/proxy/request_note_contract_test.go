@@ -289,6 +289,45 @@ func (f *requestNoteContractFixture) auditCount(t *testing.T) int {
 	return len(events)
 }
 
+func (f *requestNoteContractFixture) request(t *testing.T, method, path, token, body string, wantStatus int) []byte {
+	t.Helper()
+	req, err := http.NewRequestWithContext(t.Context(), method, f.gateway.URL+path, strings.NewReader(body))
+	if err != nil {
+		t.Fatal("app note request creation failed")
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Vibe-UI", "app")
+	response, err := f.gateway.Client().Do(req)
+	if err != nil {
+		t.Fatal("app note request failed")
+	}
+	defer response.Body.Close()
+	// The existing parent dispatcher rejects unauthorized callers before the
+	// note handler. That shared 401 has no app/legacy response variant.
+	if response.StatusCode != http.StatusUnauthorized {
+		assertRequestNoteVariantHeaders(t, response.Header)
+	}
+	if response.StatusCode != wantStatus {
+		t.Fatalf("%s note returned %d, want %d", method, response.StatusCode, wantStatus)
+	}
+	data, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatal("app note response failed")
+	}
+	return data
+}
+
+func assertRequestNoteVariantHeaders(t *testing.T, header http.Header) {
+	t.Helper()
+	vary := strings.Split(strings.Join(header.Values("Vary"), ","), ",")
+	if header.Get("Cache-Control") != "no-store" || !slices.ContainsFunc(vary, func(value string) bool {
+		return strings.EqualFold(strings.TrimSpace(value), "X-Vibe-UI")
+	}) {
+		t.Fatal("note projection metadata must vary by app header and never be cached")
+	}
+}
+
 func (f *requestNoteContractFixture) legacy(t *testing.T, method, body string) {
 	t.Helper()
 	req, err := http.NewRequestWithContext(t.Context(), method, f.gateway.URL+f.path, strings.NewReader(body))
@@ -302,6 +341,7 @@ func (f *requestNoteContractFixture) legacy(t *testing.T, method, body string) {
 		t.Fatal("legacy note request failed")
 	}
 	defer response.Body.Close()
+	assertRequestNoteVariantHeaders(t, response.Header)
 	if response.StatusCode != http.StatusOK {
 		t.Fatal("legacy note replacement unexpectedly failed")
 	}
