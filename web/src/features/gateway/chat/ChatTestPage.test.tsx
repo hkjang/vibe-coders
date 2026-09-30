@@ -468,7 +468,9 @@ describe("ChatTestPage", () => {
     const dialog = await screen.findByRole("dialog");
     await user.type(within(dialog).getByLabelText(/^모델/), "claude-4");
     await user.type(within(dialog).getByLabelText("적합한 작업"), "sql");
-    await user.click(within(dialog).getByRole("button", { name: "저장" }));
+    await user.click(within(dialog).getByRole("button", { name: "변경 내용 검토" }));
+    await user.click(within(dialog).getByRole("checkbox", { name: "대상과 변경 내용을 확인했습니다." }));
+    await user.click(within(dialog).getByRole("button", { name: "검토한 태그 저장" }));
 
     await waitFor(() => {
       expect(api.bodies("POST /admin/model-tags")[0]).toMatchObject({

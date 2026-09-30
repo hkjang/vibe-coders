@@ -246,6 +246,8 @@ jobs:
         run: go test -race ./internal/proxy -run '^TestModelGovernanceContract' -count=1 -timeout=5m
       - name: Verify PostgreSQL comparison success and postprocessing contracts
         run: go test -race ./internal/proxy -run '^Test(MultiModelRunContract|StoredMultiModel)' -count=1 -timeout=5m
+      - name: Verify PostgreSQL model tag upsert and exact identifier contracts
+        run: go test -race ./internal/proxy -run '^TestModelTagContract' -count=1 -timeout=5m
 
   sdk-typecheck:
     name: TypeScript SDK typecheck
@@ -276,7 +278,7 @@ jobs:
     name: canonical Go+npm SBOM · license drift
     runs-on: ubuntu-latest
     env:
-      SOURCE_SBOM_VERSION: v0.86.22
+      SOURCE_SBOM_VERSION: v0.86.23
       GO_VERSION: 1.26.8
       NODE_VERSION: 24.20.0
       PNPM_VERSION: 11.25.0
