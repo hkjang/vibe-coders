@@ -15,6 +15,7 @@ import { useDraftGuard } from "@/shared/unsaved/use-draft-guard";
 
 interface Props {
   row: ProviderCatalogRow;
+  credentialPrefixes?: readonly string[];
   onOpenChange: (open: boolean) => void;
   onDelete: (identifier: string) => Promise<unknown>;
   returnFocusRef: RefObject<HTMLElement | null>;
@@ -30,6 +31,7 @@ export function ProviderDeleteDialog(props: Props): React.JSX.Element {
 
 function ProviderDeleteConfirmation({
   row: initialRow,
+  credentialPrefixes,
   onOpenChange,
   onDelete,
   returnFocusRef,
@@ -90,7 +92,11 @@ function ProviderDeleteConfirmation({
         <p>
           삭제 대상: <code className="provider-delete-target">{target}</code>
         </p>
-        <ProviderImpactPanel review={impact} pending={guard.pending} />
+        <ProviderImpactPanel
+          review={impact}
+          pending={guard.pending}
+          credentialPrefixes={credentialPrefixes}
+        />
         <FormField
           label="삭제 대상 재입력"
           description={

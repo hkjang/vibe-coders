@@ -14,9 +14,11 @@ export const providerImpactAcknowledgement = "조회 범위와 확인하지 못�
 export function ProviderImpactPanel({
   review,
   pending,
+  credentialPrefixes,
 }: {
   review: ProviderImpactReview;
   pending: boolean;
+  credentialPrefixes?: readonly string[];
 }): React.JSX.Element {
   const titleId = useId();
   const { query } = review;
@@ -92,6 +94,7 @@ export function ProviderImpactPanel({
             {...category}
             section={data?.[key]}
             pending={pending || query.isFetching}
+            credentialPrefixes={credentialPrefixes}
           />
         ))}
       </div>

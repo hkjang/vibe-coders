@@ -135,6 +135,7 @@ export function useProviderAdministration(canWrite: boolean, credentialPrefixes:
         <ProviderDeleteDialog
           key={removing.identity}
           row={removing}
+          credentialPrefixes={credentialPrefixes}
           onOpenChange={(open) => {
             if (!open) setRemoving(undefined);
           }}

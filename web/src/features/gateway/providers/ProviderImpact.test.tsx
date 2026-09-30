@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from "vitest";
 import { ProviderDeleteDialog } from "@/features/gateway/providers/ProviderDeleteDialog";
 import { ProviderEditDialog } from "@/features/gateway/providers/ProviderEditDialog";
 import { providerImpactAcknowledgement } from "@/features/gateway/providers/ProviderImpactPanel";
+import { useProviderAdministration } from "@/features/gateway/providers/use-provider-administration";
 import { buildProviderRows } from "@/features/gateway/providers/provider-catalog";
 import {
   impactSection,
@@ -40,9 +41,11 @@ const row = fixtureRow();
 function Harness({
   mode = "delete",
   action = async () => undefined,
+  credentialPrefixes,
 }: {
   mode?: "delete" | "edit";
   action?: (...args: unknown[]) => Promise<unknown>;
+  credentialPrefixes?: readonly string[];
 }) {
   const [open, setOpen] = useState(true);
   const trigger = useRef<HTMLButtonElement>(null);
@@ -53,9 +56,21 @@ function Harness({
       </button>
       {open ? (
         mode === "delete" ? (
-          <ProviderDeleteDialog row={row} onDelete={action} onOpenChange={setOpen} returnFocusRef={trigger} />
+          <ProviderDeleteDialog
+            row={row}
+            credentialPrefixes={credentialPrefixes}
+            onDelete={action}
+            onOpenChange={setOpen}
+            returnFocusRef={trigger}
+          />
         ) : (
-          <ProviderEditDialog row={row} onSubmit={action} onOpenChange={setOpen} returnFocusRef={trigger} />
+          <ProviderEditDialog
+            row={row}
+            credentialPrefixes={credentialPrefixes}
+            onSubmit={action}
+            onOpenChange={setOpen}
+            returnFocusRef={trigger}
+          />
         )
       ) : null}
     </>
@@ -70,6 +85,16 @@ function renderImpact(ui: ReactNode) {
       wrapper: ({ children }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>,
     }),
   };
+}
+
+function AdministrationHarness() {
+  const administration = useProviderAdministration(true, ["corp_"]);
+  return (
+    <>
+      {administration.renderRowActions(row)}
+      {administration.dialogs}
+    </>
+  );
 }
 
 function deferred<T>() {
@@ -102,6 +127,59 @@ function deleteForm() {
 }
 
 describe("공급자 현재 설정 영향 조회", () => {
+  it.each([
+    ["edit", "dialog"],
+    ["delete", "dialog"],
+    ["edit", "administration"],
+    ["delete", "administration"],
+  ] as const)("%s %s 확인창은 인증 설정의 접두사가 포함된 참조 이름과 모델을 숨긴다", async (mode, entry) => {
+    const user = userEvent.setup();
+    const label = `corp_${"L".repeat(40)}`;
+    const model = `corp_${"M".repeat(40)}`;
+    const reference = `impact_${"c".repeat(43)}`;
+    mockApi({
+      "GET /admin/provider-impact": () =>
+        providerImpactFixture(providerRef, {
+          routing_rules: impactSection({
+            scanned_count: 2,
+            matched_count: 2,
+            items: [
+              { reference, label, model, enabled: true },
+              {
+                reference: `impact_${"d".repeat(43)}`,
+                label: "공개 라우팅 규칙",
+                model: "public-model",
+                enabled: true,
+              },
+            ],
+          }),
+        }),
+    });
+    const view = renderImpact(
+      entry === "administration" ? (
+        <AdministrationHarness />
+      ) : (
+        <Harness mode={mode} credentialPrefixes={["corp_"]} />
+      ),
+    );
+    if (entry === "administration") {
+      await user.click(screen.getByRole("button", { name: mode === "edit" ? "수정" : "삭제" }));
+    }
+    if (mode === "edit") {
+      await user.clear(screen.getByLabelText("우선순위"));
+      await user.type(screen.getByLabelText("우선순위"), "30");
+      await user.click(screen.getByRole("button", { name: "변경 내용 검토" }));
+    }
+    const section = await screen.findByRole("region", { name: "라우팅 규칙" });
+    await within(section).findByText(reference);
+    expect(view.baseElement.innerHTML).not.toContain(label);
+    expect(view.baseElement.innerHTML).not.toContain(model);
+    expect(within(section).getByText("비공개 항목")).toBeInTheDocument();
+    expect(within(section).getByText("· 모델: 비공개")).toBeInTheDocument();
+    expect(within(section).getByText("공개 라우팅 규칙")).toBeInTheDocument();
+    expect(within(section).getByText("· 모델: public-model")).toBeInTheDocument();
+  });
+
   it("조회 중에는 정확한 삭제 이름을 입력해도 제출하지 않으며 결과별 동의를 요구한다", async () => {
     const user = userEvent.setup();
     const request = deferred<ProviderImpact>();

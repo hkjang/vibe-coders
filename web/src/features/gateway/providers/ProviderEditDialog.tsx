@@ -152,7 +152,11 @@ function ProviderEditor({
               변경 내용 검토
             </h3>
             <ProviderChangeReview row={row} body={review} credentialPrefixes={credentialPrefixes} />
-            <ProviderImpactPanel review={impact} pending={guard.pending} />
+            <ProviderImpactPanel
+              review={impact}
+              pending={guard.pending}
+              credentialPrefixes={credentialPrefixes}
+            />
           </section>
         ) : (
           <fieldset className="form-grid form-dialog-fields" disabled={guard.pending} aria-label="입력 항목">

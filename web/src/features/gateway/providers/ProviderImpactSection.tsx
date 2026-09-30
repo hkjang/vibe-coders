@@ -15,11 +15,13 @@ export function ProviderImpactSection({
   description,
   section,
   pending,
+  credentialPrefixes,
 }: {
   title: string;
   description: string;
   section?: ImpactSection;
   pending: boolean;
+  credentialPrefixes?: readonly string[];
 }): React.JSX.Element {
   const titleId = useId();
   const [position, setPosition] = useState({ section, page: 0 });
@@ -44,10 +46,15 @@ export function ProviderImpactSection({
           <ul className="provider-impact-items">
             {items.slice(page * pageSize, (page + 1) * pageSize).map((item) => (
               <li key={item.reference}>
-                <span>{containsPotentialSecret(item.label) ? "비공개 항목" : item.label}</span>
+                <span>
+                  {containsPotentialSecret(item.label, credentialPrefixes) ? "비공개 항목" : item.label}
+                </span>
                 <span className="field-description"> · {item.enabled ? "활성" : "비활성"}</span>
                 {item.model ? (
-                  <span> · 모델: {containsPotentialSecret(item.model) ? "비공개" : item.model}</span>
+                  <span>
+                    {" "}
+                    · 모델: {containsPotentialSecret(item.model, credentialPrefixes) ? "비공개" : item.model}
+                  </span>
                 ) : null}
                 <code>{item.reference}</code>
               </li>
