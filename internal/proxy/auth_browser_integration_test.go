@@ -35,6 +35,7 @@ const browserAuthAccessTTL = 8 * time.Second
 type browserAuthHarness struct {
 	gateway          *httptest.Server
 	idp              *browserOIDCFixture
+	upstream         *browserAccessUpstream
 	db               *store.SQLStore
 	adminPassword    string
 	readonlyPassword string
@@ -66,6 +67,7 @@ func newBrowserAuthHarness(t *testing.T) *browserAuthHarness {
 	})
 	callback := "http://" + gateway.Listener.Addr().String() + "/auth/keycloak/callback"
 	idp := newBrowserOIDCFixture(t, callback)
+	upstream := newBrowserAccessUpstream(t)
 	scratch := t.TempDir()
 	childScratch := filepath.Join(scratch, "browser-tmp")
 	if err := os.Mkdir(childScratch, 0o700); err != nil {
@@ -79,7 +81,7 @@ func newBrowserAuthHarness(t *testing.T) *browserAuthHarness {
 	if err := db.Migrate(t.Context()); err != nil {
 		t.Fatal("isolated authentication schema could not be prepared")
 	}
-	h := &browserAuthHarness{gateway: gateway, idp: idp, db: db, adminPassword: browserFixtureSecret(t), readonlyPassword: browserFixtureSecret(t), childScratch: childScratch}
+	h := &browserAuthHarness{gateway: gateway, idp: idp, upstream: upstream, db: db, adminPassword: browserFixtureSecret(t), readonlyPassword: browserFixtureSecret(t), childScratch: childScratch}
 	if err := db.UpsertAuthTeam(t.Context(), store.AuthTeam{ID: "browser-team", Name: "browser-team"}); err != nil {
 		t.Fatal("synthetic authentication team could not be created")
 	}
@@ -114,6 +116,8 @@ func newBrowserAuthHarness(t *testing.T) *browserAuthHarness {
 		logger.Stop(ctx)
 	})
 	cfg := browserFixtureConfig(idp)
+	cfg.Upstream.BaseURL = upstream.server.URL
+	cfg.Upstream.APIKey = browserFixtureSecret(t)
 	cfg.Auth.JWTSecret = browserFixtureSecret(t)
 	cfg.Secret.GatewaySecret = browserFixtureSecret(t)
 	server, err := NewServer(cfg, db, logger, nil)
@@ -195,6 +199,9 @@ func TestAuthBrowserIntegration(t *testing.T) {
 		}
 		t.Fatal("real authentication browser runner could not be started")
 	}
+	if h.upstream.calls.Load() < 2 || h.upstream.deniedModelCalls.Load() != 0 {
+		t.Fatal("live key authorization did not reach the local model as expected, or a denied call reached it")
+	}
 }
 
 func browserAuthWebDirectory(t *testing.T) string {
@@ -235,6 +242,7 @@ func (h *browserAuthHarness) childEnvironment() []string {
 		// Chromium user-data-dir and other tool scratch stay inside t.TempDir,
 		// including when a hard timeout prevents Playwright's normal cleanup.
 		"TMPDIR="+h.childScratch, "TMP="+h.childScratch, "TEMP="+h.childScratch,
+		"PLAYWRIGHT_NO_COPY_PROMPT=1",
 		"CI=1", "COREPACK_ENABLE_DOWNLOAD_PROMPT=0", "COREPACK_ENABLE_NETWORK=0", "APP_BASE_URL="+h.gateway.URL,
 		"VIBE_AUTH_IDP_ORIGIN="+h.idp.server.URL,
 		"VIBE_AUTH_ADMIN_EMAIL=admin-browser@example.invalid", "VIBE_AUTH_ADMIN_PASSWORD="+h.adminPassword,
@@ -376,6 +384,7 @@ func TestAuthBrowserFixtureChildEnvironmentIsIsolated(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "must-not-inherit")
 	t.Setenv("NODE_OPTIONS", "--not-an-approved-option")
 	t.Setenv("HTTPS_PROXY", "http://must-not-inherit.invalid")
+	t.Setenv("PLAYWRIGHT_NO_COPY_PROMPT", "0")
 	h := &browserAuthHarness{
 		gateway:       &httptest.Server{URL: "http://127.0.0.1:32123"},
 		idp:           &browserOIDCFixture{server: &httptest.Server{URL: "http://127.0.0.1:32124"}, email: "synthetic@example.invalid", password: "fixture-only"},
@@ -393,6 +402,7 @@ func TestAuthBrowserFixtureChildEnvironmentIsIsolated(t *testing.T) {
 	}
 	if env["APP_BASE_URL"] != h.gateway.URL || env["VIBE_AUTH_IDP_ORIGIN"] != h.idp.server.URL ||
 		env["VIBE_AUTH_ACCESS_TTL_SECONDS"] != "8" || env["COREPACK_ENABLE_NETWORK"] != "0" ||
+		env["PLAYWRIGHT_NO_COPY_PROMPT"] != "1" ||
 		env["VIBE_AUTH_ADMIN_PASSWORD"] != h.adminPassword {
 		t.Fatal("child environment did not preserve the approved synthetic fixture contract")
 	}
