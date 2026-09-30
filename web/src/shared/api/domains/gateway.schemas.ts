@@ -283,78 +283,20 @@ export const multiRunLeaderboardSchema = looseObject({
 
 /* ── model governance ──────────────────────────────────────────────────────── */
 
-export const modelContractSchema = looseObject({
-  id: z.string(),
-  name: z.string(),
-  task_type: z.string().nullish(),
-  min_quality_score: numberish.nullish(),
-  min_golden_pass_rate: numberish.nullish(),
-  min_success_rate: numberish.nullish(),
-  max_latency_ms: numberish.nullish(),
-  max_avg_cost_krw: numberish.nullish(),
-  enabled: z.boolean().nullish(),
-  created_by: z.string().nullish(),
-  updated_at: z.string().nullish(),
-});
-
-export const modelContractListSchema = looseObject({
-  contracts: z
-    .array(modelContractSchema)
-    .nullish()
-    .transform((value) => value ?? []),
-});
-
-export const modelContractRunSchema = looseObject({
-  model: z.string().nullish(),
-  window: z.string().nullish(),
-  replaceable: z.boolean().nullish(),
-  note: z.string().nullish(),
-  have_metrics: z
-    .looseObject({
-      quality: z.boolean().nullish(),
-      latency: z.boolean().nullish(),
-      cost: z.boolean().nullish(),
-    })
-    .nullish(),
-  results: looseList({
-    contract_id: z.string().nullish(),
-    contract_name: z.string().nullish(),
-    task_type: z.string().nullish(),
-    verdict: z.string().nullish(),
-    replaceable: z.boolean().nullish(),
-    checks: looseList({
-      dimension: z.string().nullish(),
-      threshold: z.unknown().nullish(),
-      actual: z.unknown().nullish(),
-      status: z.string().nullish(),
-    }).nullish(),
-  })
-    .nullish()
-    .transform((value) => value ?? []),
-  failing_samples: looseList({
-    fingerprint: z.string().nullish(),
-    reason: z.string().nullish(),
-  }).nullish(),
-});
-
-export const modelDeprecationSchema = looseObject({
-  id: z.string(),
-  model_glob: z.string(),
-  replacement: z.string().nullish(),
-  sunset_date: z.string().nullish(),
-  message: z.string().nullish(),
-  created_at: z.string().nullish(),
-  updated_at: z.string().nullish(),
-});
-
-export const modelDeprecationListSchema = looseObject({
-  deprecations: z
-    .array(modelDeprecationSchema)
-    .nullish()
-    .transform((value) => value ?? []),
-});
-
-export const modelDeprecationSaveSchema = looseObject({ deprecation: modelDeprecationSchema.nullish() });
+export {
+  modelContractSchema,
+  modelContractListSchema,
+  modelContractRunSchema,
+  modelContractSaveSchema,
+  modelContractDeleteSchema,
+  modelDeprecationSchema,
+  modelDeprecationListSchema,
+  modelDeprecationSaveSchema,
+  modelDeprecationDeleteSchema,
+  type ModelContract,
+  type ModelContractRun,
+  type ModelDeprecation,
+} from "@/shared/api/domains/model-governance.schemas";
 
 export const modelUsageTagWriteSchema = looseObject({
   model: z.string().nullish(),
@@ -578,9 +520,6 @@ export type MultiRunGolden = z.output<typeof multiRunGoldenSchema>;
 export type MultiRunDiff = z.output<typeof multiRunDiffSchema>;
 export type PromptTestCaseRun = z.output<typeof promptTestCaseRunSchema>;
 export type MultiRunLeaderboard = z.output<typeof multiRunLeaderboardSchema>;
-export type ModelContract = z.output<typeof modelContractSchema>;
-export type ModelContractRun = z.output<typeof modelContractRunSchema>;
-export type ModelDeprecation = z.output<typeof modelDeprecationSchema>;
 export type Balancer = z.output<typeof balancerSchema>;
 export type PromptExperiment = z.output<typeof promptExperimentSchema>;
 export type PromptContract = z.output<typeof promptContractSchema>;

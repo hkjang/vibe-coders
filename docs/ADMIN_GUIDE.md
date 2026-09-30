@@ -16,7 +16,7 @@
 
 ## 2. 설치
 
-릴리즈 자산(GitHub Release `v0.86.19`)으로 처음부터 끝까지. 빌드 호스트에서 이미지를 만드는 절차와 오프라인망 적재 배경은 [OPERATIONS.md 2.5](OPERATIONS.md#25-오프라인망-적재)에 있습니다.
+릴리즈 자산(GitHub Release `v0.86.20`)으로 처음부터 끝까지. 빌드 호스트에서 이미지를 만드는 절차와 오프라인망 적재 배경은 [OPERATIONS.md 2.5](OPERATIONS.md#25-오프라인망-적재)에 있습니다.
 
 | 항목 | 값 |
 | --- | --- |
@@ -27,12 +27,12 @@
 
 ```bash
 # 1) 자산 검증과 적재
-sha256sum -c ai-coding-proxy-gateway-v0.86.19.tar.gz.sha256
-gunzip -c ai-coding-proxy-gateway-v0.86.19.tar.gz | docker load
+sha256sum -c ai-coding-proxy-gateway-v0.86.20.tar.gz.sha256
+gunzip -c ai-coding-proxy-gateway-v0.86.20.tar.gz | docker load
 
 # 2) 비밀값 파일 (mode 0600). ADMIN_TOKEN·GATEWAY_SECRET 을 무작위로 만들고 UPSTREAM_API_KEY 자리를 비워 둡니다.
 sudo mkdir -p /opt/proxy-gateway
-sudo bash init-deployment-env-v0.86.19.sh /opt/proxy-gateway/gateway.env
+sudo bash init-deployment-env-v0.86.20.sh /opt/proxy-gateway/gateway.env
 sudo sed -i 's|^UPSTREAM_API_KEY=.*|UPSTREAM_API_KEY=<업스트림 키>|' /opt/proxy-gateway/gateway.env
 #    최초 관리자 계정과 새 콘솔을 켭니다 (값은 가짜 예시입니다)
 sudo tee -a /opt/proxy-gateway/gateway.env >/dev/null <<'EOF'
@@ -44,7 +44,7 @@ UI_APP_ENABLED=true
 EOF
 
 # 3) 기동
-export GATEWAY_VERSION=v0.86.19
+export GATEWAY_VERSION=v0.86.20
 docker compose --env-file /opt/proxy-gateway/gateway.env up -d
 curl -fsS http://127.0.0.1:8080/ready
 
@@ -472,11 +472,30 @@ ID의 실제 존재 여부는 이 화면에서 확인하지 않습니다. 목록
 **공급자 서비스 수준 목표**를 편집합니다. 현재 설정과 영향 조회·재조회는
 기존 권한 안에서 유지합니다. 편집 또는 최종 검토 중 전환되어도 입력과 검토 대상을 다른 값으로
 바꾸지 않으며 취소·초안 폐기는 가능합니다. 상태 화면의 개별 공급자 작업을 전체 작업으로 바꾸지
-않습니다. 이 제한이 아직 모델 계약·채팅 테스트 등 모든 화면에 적용된 것은 아닙니다.
+않습니다. `v0.86.19` 기준으로 이 제한이 모델 계약·채팅 테스트 등 모든 화면에 적용된 것은 아닙니다.
 
 참조 영향을 다시 조회하면 새 결과에 대한 동의가 필요합니다. 저장 실패 뒤 자동 재조회가 이루어진
 경우도 같습니다. 긴 검토 화면에서는 읽기 전용 전환 시 현재 스크롤 위치를 유지하므로 상단의 잠금
 안내를 확인하세요. 하단 버튼을 잠그지만 이미 보낸 작업을 취소하거나 자동으로 재전송하지 않습니다.
+
+`v0.86.20`의 **모델 → 모델 계약** 개선은 기존 계약의 ID를 유지해 수정합니다. **수정 → 변경 내용
+검토 → 검토한 계약 저장**에서 열 때의 값과 저장할 값을 비교하세요. 0 또는 빈 숫자 입력은 해당
+기준을 검사하지 않음을 뜻합니다. 열린 초안은 재조회로 교체하지 않으며 이 비교는 다른 관리자의
+동시 변경을 막는 기능이 아닙니다. 목록 확인에 실패하거나 읽기 전용으로 바뀌면 변경을 잠그고
+입력을 보존합니다. 목록 재조회와 취소·변경 버리기는 가능하고, 제한이 풀려도 자동 저장하지 않습니다.
+
+**지원 종료 → 정책 추가**는 등록과 갱신을 겸합니다. 서버가 앞뒤 공백을 제거하고 대소문자를
+구분하지 않아 만든 표준 ID가 같으면 해당 정책 전체를 갱신합니다. 선택 항목을 비우면 기존 값도
+비워지므로 다시 확인하세요. 같은 패턴이라도 별도 ID로 가져온 행은 이 등록으로 수정되지 않으며
+표준 ID의 정책이 따로 생길 수 있습니다. 다른 패턴 등록은 기존 정책의 이름 변경이 아닙니다.
+종료일은 UTC이며 비우면 경고만 합니다. 종료일 도달 후 대체 모델이 없으면 차단합니다.
+삭제나 변경은 다른 인스턴스의 캐시 갱신까지 반영 시차가 있을 수 있습니다.
+
+**계약 검증 실행**은 저장된 관측 지표를 비교할 뿐 모델을 호출하거나 설정·실행 이력을 저장하지
+않습니다. 읽기 전용에서도 기존 `admin:write` 권한이 있으면 사용할 수 있습니다. 지표 부족은
+안전하다는 뜻이 아니며, 검증 결과만으로 실제 호출 성공이나 모델 교체를 보장하지 않습니다.
+이번 보호 범위는 모델 계약·지원 종료의 기존 변경 기능이며 채팅 테스트 전체 전환이나 운영 정식
+승격을 뜻하지 않습니다. 검증 진행 상태는 [전환 로드맵](APP_UI_ROADMAP.md)을 확인하세요.
 
 ## 4. 계정과 권한
 

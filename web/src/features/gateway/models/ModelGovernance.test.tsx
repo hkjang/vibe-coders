@@ -7,6 +7,7 @@ import { ModelPage } from "@/features/gateway/models/ModelPage";
 import { usePreferences } from "@/shared/stores/preferences";
 import { apiFailure, mockApi } from "@/test/api";
 import { renderScreen } from "@/test/render";
+import { FeatureAccessHarness } from "@/test/feature-access";
 
 const authRuntime = vi.hoisted(() => ({ scopes: ["admin:read", "admin:write"] }));
 
@@ -65,8 +66,13 @@ function catalogueHandlers() {
   };
 }
 
-function renderModels() {
-  return renderScreen(<ModelPage />, { path: "/gateway/models", route: "/gateway/models" });
+function renderModels(readOnly = false) {
+  return renderScreen(
+    <FeatureAccessHarness featureId="gateway.models" readOnly={readOnly}>
+      <ModelPage />
+    </FeatureAccessHarness>,
+    { path: "/gateway/models", route: "/gateway/models" },
+  );
 }
 
 beforeEach(() => {
@@ -75,6 +81,31 @@ beforeEach(() => {
 });
 
 describe("ModelPage governance", () => {
+  it.each([false, true])(
+    "카탈로그 안내는 계약탭 전체의 readonly=%s 권한을 대신하지 않는다",
+    async (readOnly) => {
+      const user = userEvent.setup();
+      const api = mockApi({ ...catalogueHandlers(), "GET /admin/models/contracts": () => contracts });
+      const view = renderModels(readOnly);
+      await user.click(await screen.findByRole("tab", { name: "모델 계약" }));
+      await screen.findByText("코드 리뷰 최소 품질");
+      const header = view.container.querySelector(".page-header");
+      if (!(header instanceof HTMLElement)) throw new Error("missing model page header");
+      expect(within(header).getByText("미리보기", { exact: true })).toBeVisible();
+      expect(within(header).getByText("카탈로그 조회 전용", { exact: true })).toBeVisible();
+      expect(within(header).queryByText("읽기 전용", { exact: true })).not.toBeInTheDocument();
+      expect(within(header).queryByText("읽기 전용 미리보기", { exact: true })).not.toBeInTheDocument();
+      const add = screen.getByRole("button", { name: "계약 추가" });
+      if (readOnly) expect(add).toBeDisabled();
+      else {
+        expect(add).toBeEnabled();
+        await user.click(add);
+        expect(await screen.findByRole("dialog", { name: "모델 계약 추가" })).toBeVisible();
+      }
+      expect(api.calls.filter((call) => !call.key.startsWith("GET "))).toEqual([]);
+    },
+  );
+
   it("shows the model contracts tab", async () => {
     const user = userEvent.setup();
     mockApi({ ...catalogueHandlers(), "GET /admin/models/contracts": () => contracts });
@@ -132,12 +163,46 @@ describe("ModelPage governance", () => {
     });
   });
 
+  it("수정한 계약은 원래 ID를 보내 새 계약을 만들지 않는다", async () => {
+    const user = userEvent.setup();
+    const api = mockApi({
+      ...catalogueHandlers(),
+      "GET /admin/models/contracts": () => contracts,
+      "POST /admin/models/contracts": () => ({ id: "mcon_1", ok: true }),
+    });
+    renderModels();
+    await user.click(await screen.findByRole("tab", { name: "모델 계약" }));
+    const row = (await screen.findByText("코드 리뷰 최소 품질")).closest("tr");
+    if (!row) throw new Error("missing contract row");
+    await user.click(within(row).getByRole("button", { name: "수정" }));
+    const dialog = await screen.findByRole("dialog");
+    await user.clear(within(dialog).getByLabelText(/^이름/u));
+    await user.type(within(dialog).getByLabelText(/^이름/u), "변경한 최소 품질");
+    await user.click(within(dialog).getByRole("button", { name: /^(저장|변경 내용 검토)$/u }));
+    await waitFor(() =>
+      expect(
+        api.bodies("POST /admin/models/contracts").length > 0 ||
+          within(dialog).queryByRole("table", { name: "모델 계약 변경 전후 비교" }) !== null,
+      ).toBe(true),
+    );
+    if (within(dialog).queryByRole("table", { name: "모델 계약 변경 전후 비교" })) {
+      await user.click(within(dialog).getByRole("button", { name: "검토한 계약 저장" }));
+    }
+    await waitFor(() => expect(api.bodies("POST /admin/models/contracts")).toHaveLength(1));
+    expect(api.bodies("POST /admin/models/contracts")[0]).toMatchObject({
+      id: "mcon_1",
+      name: "변경한 최소 품질",
+    });
+  });
+
   it("creates a deprecation policy", async () => {
     const user = userEvent.setup();
     const api = mockApi({
       ...catalogueHandlers(),
       "GET /admin/model-deprecations": () => deprecations,
-      "POST /admin/model-deprecations": () => ({ deprecation: { id: "moddep_2", model_glob: "old-*" } }),
+      "POST /admin/model-deprecations": () => ({
+        deprecation: { ...deprecations.deprecations[0], id: "moddep_2", model_glob: "old-*" },
+      }),
     });
     renderModels();
 

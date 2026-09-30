@@ -2,8 +2,10 @@ import { z } from "zod";
 
 import type {
   DeleteAdminModelDeprecationsIdData,
+  DeleteAdminModelDeprecationsIdResponse,
   DeleteAdminModelTagsIdData,
   DeleteAdminModelsContractsData,
+  DeleteAdminModelsContractsResponse,
   DeleteAdminPromptLabExperimentsIdData,
   DeleteAdminPromptLabTestCasesIdData,
   DeleteAdminProvidersNameData,
@@ -16,7 +18,9 @@ import type {
   GetAdminChatTestTargetsData,
   GetAdminCodeVerifyStatsData,
   GetAdminModelDeprecationsData,
+  GetAdminModelDeprecationsResponse,
   GetAdminModelsContractsData,
+  GetAdminModelsContractsResponse,
   GetAdminPromptLabContractsData,
   GetAdminPromptLabExperimentsData,
   GetAdminPromptLabExperimentsIdData,
@@ -34,9 +38,12 @@ import type {
   PostAdminChatTestStreamData,
   PostAdminCodeVerifyData,
   PostAdminModelDeprecationsData,
+  PostAdminModelDeprecationsResponse,
   PostAdminModelTagsData,
   PostAdminModelsContractsData,
+  PostAdminModelsContractsResponse,
   PostAdminModelsContractsRunData,
+  PostAdminModelsContractsRunResponse,
   PostAdminPromptLabContractsData,
   PostAdminPromptLabExperimentsData,
   PostAdminPromptLabRubricsData,
@@ -58,7 +65,10 @@ import {
   codeVerifyStatsSchema,
   gatewayAcknowledgementSchema,
   modelContractListSchema,
+  modelContractDeleteSchema,
   modelContractRunSchema,
+  modelContractSaveSchema,
+  modelDeprecationDeleteSchema,
   modelDeprecationListSchema,
   modelDeprecationSaveSchema,
   modelUsageTagWriteSchema,
@@ -90,9 +100,9 @@ import {
   routingPreviewSchema,
 } from "@/shared/api/domains/gateway.schemas";
 
-// Request bodies below mirror the Go handlers' decode structs: the legacy admin API
-// is documented without request schemas, so the generated `Data` types carry
-// `body?: never` and each operation states the body it actually sends.
+// Bodies for still-untyped legacy operations mirror the Go decode structs below.
+// Model governance instead uses the explicit generated OpenAPI body/response
+// contracts, retaining their existing optional/null replacement semantics.
 
 export interface ChatTestRunBody {
   readonly target_id?: string;
@@ -177,24 +187,8 @@ export interface ProviderSLOWriteBody {
   readonly note?: string;
 }
 
-export interface ModelContractWriteBody {
-  readonly id?: string;
-  readonly name: string;
-  readonly task_type?: string;
-  readonly min_quality_score?: number;
-  readonly min_golden_pass_rate?: number;
-  readonly min_success_rate?: number;
-  readonly max_latency_ms?: number;
-  readonly max_avg_cost_krw?: number;
-  readonly enabled?: boolean;
-}
-
-export interface ModelDeprecationWriteBody {
-  readonly model_glob: string;
-  readonly replacement?: string;
-  readonly sunset_date?: string;
-  readonly message?: string;
-}
+export type ModelContractWriteBody = Readonly<PostAdminModelsContractsData["body"]>;
+export type ModelDeprecationWriteBody = Readonly<PostAdminModelDeprecationsData["body"]>;
 
 export interface ModelUsageTagWriteBody {
   readonly model: string;
@@ -362,46 +356,42 @@ export const gatewayEndpoints = {
   },
   models: {
     contracts: {
-      list: operation<WithQuery<GetAdminModelsContractsData, { enabled?: "1" }>, unknown>()(
-        "GET",
-        "/admin/models/contracts",
-        modelContractListSchema,
-        contractListQuerySchema,
-      ),
-      save: operation<WithBody<PostAdminModelsContractsData, ModelContractWriteBody>, unknown>()(
+      list: operation<
+        WithQuery<GetAdminModelsContractsData, { enabled?: "1" }>,
+        GetAdminModelsContractsResponse
+      >()("GET", "/admin/models/contracts", modelContractListSchema, contractListQuerySchema),
+      save: operation<PostAdminModelsContractsData, PostAdminModelsContractsResponse>()(
         "POST",
         "/admin/models/contracts",
-        gatewayAcknowledgementSchema,
+        modelContractSaveSchema,
       ),
-      remove: operation<WithQuery<DeleteAdminModelsContractsData, { id: string }>, unknown>()(
+      remove: operation<DeleteAdminModelsContractsData, DeleteAdminModelsContractsResponse>()(
         "DELETE",
         "/admin/models/contracts",
-        gatewayAcknowledgementSchema,
+        modelContractDeleteSchema,
         contractIdQuerySchema,
       ),
-      run: operation<
-        WithBody<
-          PostAdminModelsContractsRunData,
-          { readonly model: string; readonly contract_id?: string; readonly window?: string }
-        >,
-        unknown
-      >()("POST", "/admin/models/contracts/run", modelContractRunSchema),
+      run: operation<PostAdminModelsContractsRunData, PostAdminModelsContractsRunResponse>()(
+        "POST",
+        "/admin/models/contracts/run",
+        modelContractRunSchema,
+      ),
     },
     deprecations: {
-      list: operation<GetAdminModelDeprecationsData, unknown>()(
+      list: operation<GetAdminModelDeprecationsData, GetAdminModelDeprecationsResponse>()(
         "GET",
         "/admin/model-deprecations",
         modelDeprecationListSchema,
       ),
-      save: operation<WithBody<PostAdminModelDeprecationsData, ModelDeprecationWriteBody>, unknown>()(
+      save: operation<PostAdminModelDeprecationsData, PostAdminModelDeprecationsResponse>()(
         "POST",
         "/admin/model-deprecations",
         modelDeprecationSaveSchema,
       ),
-      remove: operation<DeleteAdminModelDeprecationsIdData, unknown>()(
+      remove: operation<DeleteAdminModelDeprecationsIdData, DeleteAdminModelDeprecationsIdResponse>()(
         "DELETE",
         "/admin/model-deprecations/{id}",
-        gatewayAcknowledgementSchema,
+        modelDeprecationDeleteSchema,
       ),
     },
     tags: {

@@ -68,8 +68,6 @@ export function ModelPage(): React.JSX.Element {
   const selectedSource = isModelSource(requestedSource) ? requestedSource : undefined;
   const currentPage = positivePage(requestedPage);
   const showLegacyAdmin = canOpenLegacyAdmin(auth);
-  const canWrite = auth.user?.scopes.includes("admin:write") ?? false;
-  const writeDeniedReason = "모델 계약과 지원 종료 정책 변경은 admin:write 권한이 필요합니다.";
   // `/gateway/models` has a fixed URL query allowlist, so the section selection
   // stays in component state rather than in `?tab=`.
   const [tab, setTab] = useState<ModelTabId>("catalog");
@@ -252,12 +250,8 @@ export function ModelPage(): React.JSX.Element {
       />
 
       <TabPanel id={tab} panelIdPrefix="gateway-models">
-        {tab === "contracts" ? (
-          <ModelContractsPanel canWrite={canWrite} writeDeniedReason={writeDeniedReason} />
-        ) : null}
-        {tab === "deprecations" ? (
-          <ModelDeprecationsPanel canWrite={canWrite} writeDeniedReason={writeDeniedReason} />
-        ) : null}
+        {tab === "contracts" ? <ModelContractsPanel /> : null}
+        {tab === "deprecations" ? <ModelDeprecationsPanel /> : null}
         {tab !== "catalog" ? null : (
           <div className="page-stack">
             <ModelToolbar

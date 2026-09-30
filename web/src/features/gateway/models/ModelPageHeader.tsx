@@ -5,7 +5,7 @@ import { ExternalLink, RefreshCw } from "lucide-react";
 import { formatInteger } from "@/features/health/health-utils";
 import { Badge } from "@/shared/components/ui/Badge";
 import { Button } from "@/shared/components/ui/Button";
-import { uiLabels } from "@/config/ui-labels";
+import { migrationStatusLabels } from "@/config/ui-labels";
 
 interface ModelPageHeaderProps {
   attentionCount: number;
@@ -35,12 +35,12 @@ export function ModelPageHeader({
     <>
       <header className="page-header">
         <div>
-          <div className="eyebrow">{uiLabels.previewReadOnly}</div>
+          <div className="eyebrow">{migrationStatusLabels.preview}</div>
           <h1>모델</h1>
           <p>공급자별 모델 재고와 모델 ID 기준 품질, 가격, 사용 지침을 함께 조회합니다.</p>
         </div>
         <div className="page-actions">
-          <Badge tone="info">{uiLabels.readOnly}</Badge>
+          <Badge tone="info">카탈로그 조회 전용</Badge>
           {showLegacyAdmin ? (
             <LegacyLink className="button button-secondary button-default" href="/admin#/model-contracts">
               기존 화면에서 열기 <ExternalLink aria-hidden="true" />
