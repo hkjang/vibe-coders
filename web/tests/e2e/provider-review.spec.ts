@@ -41,6 +41,7 @@ function bootstrap(authenticated: boolean): UiBootstrapResponse {
       keycloak_enabled: false,
       allow_local_login: true,
       sso_login_url: "/auth/keycloak/login",
+      credential_prefixes: ["corp_"],
     },
     ...(authenticated ? { user } : {}),
     capabilities: { raw_prompt_view: false },
@@ -197,7 +198,10 @@ async function installGateway(context: BrowserContext) {
         const body = request.postDataJSON() as Record<string, unknown>;
         saves.push(body);
         await gates.get("save");
-        const baseUrl = new URL(String(body.base_url));
+        const preservesRedactedURL =
+          body.base_url === "[invalid or redacted provider URL]" &&
+          providers.some((provider) => provider.name === body.name && provider.base_url === body.base_url);
+        const baseUrl = new URL(preservesRedactedURL ? originalUrl : String(body.base_url));
         // Mirror only the invalid userinfo/fragment case exercised here, not the
         // full Go URL policy. Such input must never become a successful fixture save.
         if (baseUrl.username || baseUrl.password || baseUrl.hash)
@@ -246,6 +250,11 @@ async function installGateway(context: BrowserContext) {
     unexpected,
     saves,
     deletions,
+    setPublicURL: (url: string) => {
+      providers = providers.map((provider) =>
+        provider.name === publicName ? { ...provider, base_url: url } : provider,
+      );
+    },
     hold: (key: "save" | "delete") => {
       gates.set(key, new Promise<void>((resolve) => releases.set(key, resolve)));
     },
@@ -303,6 +312,46 @@ async function review(dialog: Locator) {
   await expect(dialog.getByRole("table", { name: "공급자 변경 전후 비교" })).toBeVisible();
   await expect(dialog.getByRole("heading", { name: "변경 내용 검토", exact: true })).toBeFocused();
 }
+
+test("사용자 지정 비밀키 접두사를 로그인 설정에서 받아 비교 화면 전체에 적용한다", async ({
+  page,
+  gateway,
+}) => {
+  await login(page);
+  const dialog = await openEditor(page);
+  const credential = `corp_${"a".repeat(32)}`;
+  await dialog.getByLabel(/^기본 URL/u).fill(`https://revised.example.invalid/v1?value=${credential}`);
+  await dialog.getByLabel("모델 패턴", { exact: true }).fill(credential);
+  await dialog.getByLabel("장애 전환 그룹", { exact: true }).fill(credential);
+  await review(dialog);
+  const comparison = dialog.getByRole("table", { name: "공급자 변경 전후 비교" });
+  await expect(comparison).not.toContainText(credential);
+  await expect(comparison).toContainText("?value=***");
+  await expect(comparison).toContainText("민감한 값은 비교에 표시하지 않습니다.");
+  expect(await comparison.evaluate((element) => element.outerHTML)).not.toContain(credential);
+  expect(gateway.saves).toEqual([]);
+});
+
+test("서버가 숨긴 기존 주소를 그대로 유지하면서 중지와 사용을 검토할 수 있다", async ({ page, gateway }) => {
+  const hiddenURL = "[invalid or redacted provider URL]";
+  gateway.setPublicURL(hiddenURL);
+  await login(page);
+  for (const [action, enabled] of [
+    ["중지", false],
+    ["사용", true],
+  ] as const) {
+    await publicRow(page).getByRole("button", { name: action, exact: true }).click();
+    const dialog = editor(page);
+    await expect(dialog.getByLabel(/^기본 URL/u)).toHaveValue(hiddenURL);
+    await expect(dialog).toContainText("서버가 기존 주소를 숨겼습니다");
+    await review(dialog);
+    await expect(dialog.getByRole("table")).toContainText("기존 비공개 주소 유지");
+    await dialog.getByRole("button", { name: "검토한 내용 저장", exact: true }).click();
+    await expect(dialog).toBeHidden();
+    expect(gateway.saves.at(-1)).toEqual(expectedSave({ base_url: hiddenURL, enabled }));
+  }
+  expect(gateway.saves).toHaveLength(2);
+});
 
 function expectedSave(changes: Record<string, unknown> = {}) {
   return {

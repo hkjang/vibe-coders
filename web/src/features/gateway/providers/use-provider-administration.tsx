@@ -6,7 +6,7 @@ import type { ProviderCatalogRow } from "@/features/gateway/providers/provider-c
 import { useProviderAdmin } from "@/features/gateway/providers/use-provider-admin";
 import { Button } from "@/shared/components/ui/Button";
 
-export function useProviderAdministration(canWrite: boolean) {
+export function useProviderAdministration(canWrite: boolean, credentialPrefixes: readonly string[]) {
   const admin = useProviderAdmin();
   const savePending = admin.save.isPending;
   const createButtonRef = useRef<HTMLButtonElement>(null);
@@ -110,6 +110,7 @@ export function useProviderAdministration(canWrite: boolean) {
   const dialogs = (
     <>
       <ProviderFormDialog
+        credentialPrefixes={credentialPrefixes}
         open={editing !== undefined}
         onOpenChange={(open) => {
           if (!open) setEditing(undefined);
