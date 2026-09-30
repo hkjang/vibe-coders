@@ -12,6 +12,7 @@ import {
   signIn,
   signOut,
   test,
+  waitForActualAccessExpiry,
 } from "./live-fixture";
 
 // Responses come from actual Go Routes; delayed responses are forwarded unchanged.
@@ -106,10 +107,10 @@ test("AUTH-LIVE-003 실제 토큰 만료·동시 401·단일 갱신과 이전 �
   await expect(page.getByRole("button", { name: "새로고침", exact: true })).toBeEnabled();
   const oldRefresh = await page.evaluate(() => sessionStorage.getItem("vibe.app.auth.refresh") ?? "");
   expect(Boolean(oldRefresh)).toBe(true);
+  const oldAccess = await page.evaluate(() => sessionStorage.getItem("vibe.app.auth.access") ?? "");
+  expect(Boolean(oldAccess)).toBe(true);
   const ttl = Number(required("VIBE_AUTH_ACCESS_TTL_SECONDS"));
-  expect(ttl > 0 && ttl <= 15).toBe(true);
-  // Go validates the real server clock; browser clock mocking cannot expire JWTs.
-  await new Promise((resolve) => setTimeout(resolve, (ttl + 1) * 1_000));
+  expect(ttl).toBe(8);
   let refreshes = 0;
   let refreshAttempts = 0;
   let unauthorized = 0;
@@ -123,6 +124,13 @@ test("AUTH-LIVE-003 실제 토큰 만료·동시 401·단일 갱신과 이전 �
   };
   page.on("request", collectRequest);
   page.on("response", collect);
+  // A fixed monotonic sleep does not establish Go's wall-clock expiry.
+  // Probe real HTTP rejection without using the API client's refresh path.
+  await waitForActualAccessExpiry(page, oldAccess, ttl);
+  expect(
+    await page.evaluate((previous) => sessionStorage.getItem("vibe.app.auth.access") === previous, oldAccess),
+  ).toBe(true);
+  expect(refreshAttempts).toBe(0);
   await page.getByRole("button", { name: "새로고침", exact: true }).click();
   await expect.poll(() => refreshes).toBe(1);
   await expect(page.getByRole("button", { name: "새로고침", exact: true })).toBeEnabled();
@@ -190,6 +198,8 @@ test("AUTH-LIVE-004 다른 탭 로그아웃·새 계정과 늦은 실제 응답 
 
 test("AUTH-LIVE-005 실제 갱신 거부 뒤 로그인 복귀와 재로그인", async ({ page }) => {
   await login(page);
+  const oldAccess = await page.evaluate(() => sessionStorage.getItem("vibe.app.auth.access") ?? "");
+  expect(Boolean(oldAccess)).toBe(true);
   // Revoke through the existing server API without invoking the UI logout or
   // changing browser credentials. The client must discover the failed refresh.
   const revoked = await page.evaluate(async () => {
@@ -206,13 +216,17 @@ test("AUTH-LIVE-005 실제 갱신 거부 뒤 로그인 복귀와 재로그인", 
   expect(revoked).toBe(200);
   expect(await sessionIsEmpty(page)).toBe(false);
   const ttl = Number(required("VIBE_AUTH_ACCESS_TTL_SECONDS"));
-  expect(ttl > 0 && ttl <= 15).toBe(true);
-  await new Promise((resolve) => setTimeout(resolve, (ttl + 1) * 1_000));
+  expect(ttl).toBe(8);
   let refreshAttempts = 0;
   const collectRequest = (request: Request): void => {
     if (new URL(request.url()).pathname === "/auth/refresh") refreshAttempts += 1;
   };
   page.on("request", collectRequest);
+  await waitForActualAccessExpiry(page, oldAccess, ttl);
+  expect(
+    await page.evaluate((previous) => sessionStorage.getItem("vibe.app.auth.access") === previous, oldAccess),
+  ).toBe(true);
+  expect(refreshAttempts).toBe(0);
   const failedRefresh = page.waitForResponse(
     (response) => new URL(response.url()).pathname === "/auth/refresh",
   );
