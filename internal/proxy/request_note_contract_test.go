@@ -31,7 +31,7 @@ func TestRequestNoteContractPreservesUnseenFields(t *testing.T) {
 			if field == "tags" {
 				body = `{"preserve_fields":["tags"],"note":"  수정한 평문  "}`
 			}
-			f.request(t, http.MethodPut, f.path, f.writer, body, http.StatusOK)
+			f.request(t, http.MethodPatch, f.path, f.writer, body, http.StatusOK)
 			after, found := f.stored(t)
 			if !found || (field == "note" && (after.Note != before.Note || !slices.Equal(after.Tags, []string{"한글", "두 단어"}))) ||
 				(field == "tags" && (!slices.Equal(after.Tags, before.Tags) || after.Note != "수정한 평문")) {
@@ -82,7 +82,9 @@ func TestRequestNoteContractRejectsAmbiguousPreserveWithoutWrites(t *testing.T) 
 		`{"preserve_fields":["note"],"note":null}`, `{"preserve_fields":["note"],"note":""}`,
 		`{"preserve_fields":["tags"],"tags":null}`, `{"preserve_fields":["tags"],"tags":[]}`,
 	} {
-		f.request(t, http.MethodPut, f.path, f.writer, body, http.StatusBadRequest)
+		for _, method := range []string{http.MethodPut, http.MethodPatch} {
+			f.request(t, method, f.path, f.writer, body, http.StatusBadRequest)
+		}
 		stored, _ := f.stored(t)
 		if !reflect.DeepEqual(before, stored) || f.auditCount(t) != beforeAudit {
 			t.Fatal("invalid preserve intent must not write either field, metadata or audit")
@@ -118,7 +120,7 @@ func TestRequestNoteContractWritePermissionAndSafeAudit(t *testing.T) {
 	before, _ := f.stored(t)
 	beforeAudit := f.auditCount(t)
 	for _, token := range []string{reader, ""} {
-		for _, method := range []string{http.MethodPut, http.MethodPost, http.MethodDelete} {
+		for _, method := range []string{http.MethodPut, http.MethodPost, http.MethodPatch, http.MethodDelete} {
 			f.request(t, method, f.path, token, `{"preserve_fields":[],"note":"changed"}`, http.StatusUnauthorized)
 		}
 	}
@@ -126,7 +128,7 @@ func TestRequestNoteContractWritePermissionAndSafeAudit(t *testing.T) {
 	if !reflect.DeepEqual(before, stored) || f.auditCount(t) != beforeAudit {
 		t.Fatal("write rejection must preserve the row, metadata and audit")
 	}
-	f.request(t, http.MethodPut, f.path, f.writer, `{"preserve_fields":["note","tags"]}`, http.StatusOK)
+	f.request(t, http.MethodPatch, f.path, f.writer, `{"preserve_fields":["note","tags"]}`, http.StatusOK)
 	events, err := f.db.ListAdminAudit(t.Context(), 100)
 	if err != nil || !slices.ContainsFunc(events, func(event store.AdminAuditPublic) bool {
 		var after struct {
@@ -146,7 +148,7 @@ func TestRequestNoteContractPreserveUsesCurrentDatabaseValue(t *testing.T) {
 	f.seed(t, []string{"first@synthetic.example"}, "old@synthetic.example")
 	f.read(t, f.writer) // The browser's masked baseline is now stale.
 	f.seed(t, []string{"second@synthetic.example"}, "newer@synthetic.example")
-	f.request(t, http.MethodPut, f.path, f.writer,
+	f.request(t, http.MethodPatch, f.path, f.writer,
 		`{"preserve_fields":["note"],"tags":["replacement"]}`, http.StatusOK)
 	stored, found := f.stored(t)
 	if !found || stored.Note != "newer@synthetic.example" || !slices.Equal(stored.Tags, []string{"replacement"}) {
@@ -178,7 +180,7 @@ func TestRequestNoteContractTeamScopeAppliesToReadsAndPreservedWrites(t *testing
 	beforeAudit := f.auditCount(t)
 	for index, teamID := range []string{"other-team-id", "", " note-team-id ", "missing-team"} {
 		token := issueLLMScopedTestToken(t, f.db, f.server, "rejected-note-team-"+string(rune('a'+index)), "team_admin", teamID, []string{"admin:read", "admin:write"}, time.Now().UTC())
-		for _, method := range []string{http.MethodGet, http.MethodPut, http.MethodPost, http.MethodDelete} {
+		for _, method := range []string{http.MethodGet, http.MethodPut, http.MethodPost, http.MethodPatch, http.MethodDelete} {
 			f.request(t, method, f.path, token, `{"preserve_fields":["note","tags"]}`, http.StatusForbidden)
 		}
 	}
@@ -188,7 +190,7 @@ func TestRequestNoteContractTeamScopeAppliesToReadsAndPreservedWrites(t *testing
 	}
 	allowed := issueLLMScopedTestToken(t, f.db, f.server, "allowed-note-team", "team_admin", "note-team-id", []string{"admin:read", "admin:write"}, time.Now().UTC())
 	f.read(t, allowed)
-	f.request(t, http.MethodPut, f.path, allowed, `{"preserve_fields":["tags"],"note":"team replacement"}`, http.StatusOK)
+	f.request(t, http.MethodPatch, f.path, allowed, `{"preserve_fields":["tags"],"note":"team replacement"}`, http.StatusOK)
 	after, _ = f.stored(t)
 	if after.Note != "team replacement" || !slices.Equal(after.Tags, before.Tags) {
 		t.Fatal("canonical team ID must retain access to a key using that team's legacy display name")
@@ -201,12 +203,51 @@ func TestRequestNoteContractOrphanNoteDoesNotBypassRequestLookup(t *testing.T) {
 	f.seed(t, []string{"retained"}, "retained note")
 	before, _ := f.stored(t)
 	beforeAudit := f.auditCount(t)
-	for _, method := range []string{http.MethodGet, http.MethodPut, http.MethodPost, http.MethodDelete} {
+	for _, method := range []string{http.MethodGet, http.MethodPut, http.MethodPost, http.MethodPatch, http.MethodDelete} {
 		f.request(t, method, f.path, f.adminToken, `{"preserve_fields":[],"note":"replacement"}`, http.StatusNotFound)
 	}
 	after, _ := f.stored(t)
 	if !reflect.DeepEqual(before, after) || f.auditCount(t) != beforeAudit {
 		t.Fatal("an orphan note must not bypass the existing request lookup contract")
+	}
+}
+
+func TestRequestNoteContractPatchRequiresExplicitAppIntent(t *testing.T) {
+	f := newRequestNoteContractFixture(t)
+	f.seed(t, []string{"original"}, "original")
+	before, _ := f.stored(t)
+	beforeAudit := f.auditCount(t)
+	for _, body := range []string{`{}`, `null`, `{"note":"replacement"}`, `{"tags":[]}`} {
+		f.request(t, http.MethodPatch, f.path, f.writer, body, http.StatusBadRequest)
+	}
+	for _, marker := range []string{"", "App", "legacy"} {
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodPatch, f.gateway.URL+f.path,
+			strings.NewReader(`{"preserve_fields":[],"note":"replacement","tags":[]}`))
+		if err != nil {
+			t.Fatal("request creation failed")
+		}
+		req.Header.Set("Authorization", "Bearer "+f.writer)
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Vibe-UI", marker)
+		response, err := f.gateway.Client().Do(req)
+		if err != nil {
+			t.Fatal("request failed")
+		}
+		_, _ = io.Copy(io.Discard, response.Body)
+		response.Body.Close()
+		assertRequestNoteVariantHeaders(t, response.Header)
+		if response.StatusCode != http.StatusMethodNotAllowed {
+			t.Fatal("new PATCH method must require explicit app contract selection")
+		}
+	}
+	after, _ := f.stored(t)
+	if !reflect.DeepEqual(before, after) || f.auditCount(t) != beforeAudit {
+		t.Fatal("ambiguous PATCH contract must not change fields, metadata or audit")
+	}
+	f.request(t, http.MethodPatch, f.path, f.writer, `{"preserve_fields":[],"note":"","tags":[]}`, http.StatusOK)
+	after, found := f.stored(t)
+	if !found || after.Note != "" || len(after.Tags) != 0 {
+		t.Fatal("explicit PATCH replacement must still allow clearing both fields")
 	}
 }
 

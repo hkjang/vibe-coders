@@ -803,6 +803,21 @@ export type RequestNoteLegacyResponse = {
 };
 
 /**
+ * App-only explicit intent. preserve_fields is required and non-null, including [] when replacing/clearing both fields. Preserved fields must not also occur as values, even null. No PUT/POST fallback is safe on an older server.
+ */
+export type RequestNotePatchRequest = {
+    /**
+     * Replacement text with surrounding Go whitespace trimmed. Omitted/null means empty unless explicitly preserved; must be absent when preserved.
+     */
+    note?: string | null;
+    preserve_fields: Array<'note' | 'tags'>;
+    /**
+     * Complete replacement with existing leading-# removal, whitespace trimming, comma replacement and exact deduplication. Omitted/null means empty unless explicitly preserved; must be absent when preserved.
+     */
+    tags?: Array<string> | null;
+};
+
+/**
  * X-Vibe-UI: app selects RequestNoteAppResponse; other clients receive RequestNoteLegacyResponse.
  */
 export type RequestNoteResponse = RequestNoteAppResponse | RequestNoteLegacyResponse;
@@ -6339,7 +6354,7 @@ export type DeleteAdminRequestsIdNoteErrors = {
      */
     400: AppError;
     /**
-     * invalid_api_key: GET requires admin read scope; POST, PUT and DELETE require admin write scope. Raw-view permission is separate.
+     * invalid_api_key: GET requires admin read scope; POST, PUT, PATCH and DELETE require admin write scope. Raw-view permission is separate.
      */
     401: AppError;
     /**
@@ -6351,7 +6366,7 @@ export type DeleteAdminRequestsIdNoteErrors = {
      */
     404: AppError;
     /**
-     * method_not_allowed: only GET, POST, PUT and DELETE are supported
+     * method_not_allowed: GET, POST, PUT and DELETE remain supported; PATCH additionally requires X-Vibe-UI: app. Older servers reject PATCH without writing; never fall back to PUT or POST.
      */
     405: AppError;
     /**
@@ -6396,7 +6411,7 @@ export type GetAdminRequestsIdNoteErrors = {
      */
     400: AppError;
     /**
-     * invalid_api_key: GET requires admin read scope; POST, PUT and DELETE require admin write scope. Raw-view permission is separate.
+     * invalid_api_key: GET requires admin read scope; POST, PUT, PATCH and DELETE require admin write scope. Raw-view permission is separate.
      */
     401: AppError;
     /**
@@ -6408,7 +6423,7 @@ export type GetAdminRequestsIdNoteErrors = {
      */
     404: AppError;
     /**
-     * method_not_allowed: only GET, POST, PUT and DELETE are supported
+     * method_not_allowed: GET, POST, PUT and DELETE remain supported; PATCH additionally requires X-Vibe-UI: app. Older servers reject PATCH without writing; never fall back to PUT or POST.
      */
     405: AppError;
     /**
@@ -6432,6 +6447,63 @@ export type GetAdminRequestsIdNoteResponses = {
 
 export type GetAdminRequestsIdNoteResponse = GetAdminRequestsIdNoteResponses[keyof GetAdminRequestsIdNoteResponses];
 
+export type PatchAdminRequestsIdNoteData = {
+    body: RequestNotePatchRequest;
+    headers: {
+        /**
+         * Exactly app selects the app response metadata and preserve_fields write extension. Other values retain the legacy contract. This is not an authorization credential.
+         */
+        'X-Vibe-UI': 'app';
+    };
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/admin/requests/{id}/note';
+};
+
+export type PatchAdminRequestsIdNoteErrors = {
+    /**
+     * invalid_request_id or invalid_body: invalid path or payload; no write
+     */
+    400: AppError;
+    /**
+     * invalid_api_key: GET requires admin read scope; POST, PUT, PATCH and DELETE require admin write scope. Raw-view permission is separate.
+     */
+    401: AppError;
+    /**
+     * cross_team_access_denied: request is outside the caller's team scope
+     */
+    403: AppError;
+    /**
+     * request_not_found: the underlying request does not exist, even if an operator note remains
+     */
+    404: AppError;
+    /**
+     * method_not_allowed: GET, POST, PUT and DELETE remain supported; PATCH additionally requires X-Vibe-UI: app. Older servers reject PATCH without writing; never fall back to PUT or POST.
+     */
+    405: AppError;
+    /**
+     * request_lookup_failed or note_save_failed: lookup or storage failed; no success snapshot returned
+     */
+    500: AppError;
+    /**
+     * Error
+     */
+    default: AppError;
+};
+
+export type PatchAdminRequestsIdNoteError = PatchAdminRequestsIdNoteErrors[keyof PatchAdminRequestsIdNoteErrors];
+
+export type PatchAdminRequestsIdNoteResponses = {
+    /**
+     * OK
+     */
+    200: RequestNoteAppResponse;
+};
+
+export type PatchAdminRequestsIdNoteResponse = PatchAdminRequestsIdNoteResponses[keyof PatchAdminRequestsIdNoteResponses];
+
 export type PostAdminRequestsIdNoteData = {
     body: RequestNoteWriteRequest;
     headers?: {
@@ -6453,7 +6525,7 @@ export type PostAdminRequestsIdNoteErrors = {
      */
     400: AppError;
     /**
-     * invalid_api_key: GET requires admin read scope; POST, PUT and DELETE require admin write scope. Raw-view permission is separate.
+     * invalid_api_key: GET requires admin read scope; POST, PUT, PATCH and DELETE require admin write scope. Raw-view permission is separate.
      */
     401: AppError;
     /**
@@ -6465,7 +6537,7 @@ export type PostAdminRequestsIdNoteErrors = {
      */
     404: AppError;
     /**
-     * method_not_allowed: only GET, POST, PUT and DELETE are supported
+     * method_not_allowed: GET, POST, PUT and DELETE remain supported; PATCH additionally requires X-Vibe-UI: app. Older servers reject PATCH without writing; never fall back to PUT or POST.
      */
     405: AppError;
     /**
@@ -6510,7 +6582,7 @@ export type PutAdminRequestsIdNoteErrors = {
      */
     400: AppError;
     /**
-     * invalid_api_key: GET requires admin read scope; POST, PUT and DELETE require admin write scope. Raw-view permission is separate.
+     * invalid_api_key: GET requires admin read scope; POST, PUT, PATCH and DELETE require admin write scope. Raw-view permission is separate.
      */
     401: AppError;
     /**
@@ -6522,7 +6594,7 @@ export type PutAdminRequestsIdNoteErrors = {
      */
     404: AppError;
     /**
-     * method_not_allowed: only GET, POST, PUT and DELETE are supported
+     * method_not_allowed: GET, POST, PUT and DELETE remain supported; PATCH additionally requires X-Vibe-UI: app. Older servers reject PATCH without writing; never fall back to PUT or POST.
      */
     405: AppError;
     /**
