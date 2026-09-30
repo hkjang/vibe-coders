@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"sort"
@@ -380,8 +381,17 @@ func (s *Server) handleCostGuard(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.Method {
 	case http.MethodGet:
-		snap := s.costSnapshotCached(r.Context())
-		writeJSON(w, http.StatusOK, map[string]any{"enabled": snap.guardEnabled, "threshold_krw": snap.guardThreshold})
+		flags, err := s.db.GetRuntimeFlagSnapshot(r.Context(), costGuardFlagKeys)
+		if err != nil {
+			writeCostGuardConfigUnavailable(w)
+			return
+		}
+		config, err := costGuardConfigFromFlags(flags)
+		if err != nil {
+			writeCostGuardConfigUnavailable(w)
+			return
+		}
+		writeJSON(w, http.StatusOK, config)
 	case http.MethodPost:
 		var p struct {
 			Enabled      *bool    `json:"enabled"`
@@ -391,29 +401,42 @@ func (s *Server) handleCostGuard(w http.ResponseWriter, r *http.Request) {
 			writeOpenAIError(w, http.StatusBadRequest, "invalid JSON body", "invalid_request_error", "invalid_body")
 			return
 		}
+		if p.ThresholdKRW != nil && !validCostGuardThreshold(*p.ThresholdKRW) {
+			writeOpenAIError(w, http.StatusBadRequest, "threshold_krw must be >= 0", "invalid_request_error", "invalid_threshold")
+			return
+		}
+		updates := make([]store.RuntimeFlag, 0, 2)
+		now, actor := time.Now().UTC(), adminID(r)
 		if p.Enabled != nil {
-			if err := s.db.SetFlag(r.Context(), store.RuntimeFlag{Key: "cost_guard_enabled", Value: boolStr(*p.Enabled), UpdatedAt: time.Now().UTC(), UpdatedBy: adminID(r)}); err != nil {
-				writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "cost_guard_save_failed")
-				return
-			}
+			updates = append(updates, store.RuntimeFlag{Key: "cost_guard_enabled", Value: boolStr(*p.Enabled), UpdatedAt: now, UpdatedBy: actor})
 		}
 		if p.ThresholdKRW != nil {
-			if *p.ThresholdKRW < 0 {
-				writeOpenAIError(w, http.StatusBadRequest, "threshold_krw must be >= 0", "invalid_request_error", "invalid_threshold")
-				return
+			updates = append(updates, store.RuntimeFlag{Key: "cost_guard_threshold_krw", Value: strconv.FormatFloat(*p.ThresholdKRW, 'f', -1, 64), UpdatedAt: now, UpdatedBy: actor})
+		}
+		var committed costGuardConfig
+		_, err := s.db.SaveRuntimeFlagBatchValidated(r.Context(), updates, costGuardFlagKeys, func(flags map[string]store.RuntimeFlag) error {
+			var err error
+			committed, err = costGuardConfigFromFlags(flags)
+			return err
+		})
+		if err != nil {
+			if errors.Is(err, errInvalidCostGuardConfig) {
+				writeCostGuardConfigUnavailable(w)
+			} else {
+				writeOpenAIError(w, http.StatusInternalServerError, "cost guard configuration could not be saved", "server_error", "cost_guard_save_failed")
 			}
-			if err := s.db.SetFlag(r.Context(), store.RuntimeFlag{Key: "cost_guard_threshold_krw", Value: strconv.FormatFloat(*p.ThresholdKRW, 'f', -1, 64), UpdatedAt: time.Now().UTC(), UpdatedBy: adminID(r)}); err != nil {
-				writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "cost_guard_save_failed")
-				return
-			}
+			return
 		}
 		s.invalidateCostCache()
-		s.auditAdmin(r, "cost_guard.set", "", auditJSON(p))
-		snap := s.costSnapshotCached(r.Context())
-		writeJSON(w, http.StatusOK, map[string]any{"enabled": snap.guardEnabled, "threshold_krw": snap.guardThreshold})
+		s.auditCommittedSetting(r, "cost_guard.set", "", auditJSON(p))
+		writeJSON(w, http.StatusOK, committed)
 	default:
 		writeOpenAIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error", "method_not_allowed")
 	}
+}
+
+func writeCostGuardConfigUnavailable(w http.ResponseWriter) {
+	writeOpenAIError(w, http.StatusServiceUnavailable, "cost guard configuration is unavailable", "server_error", "cost_guard_config_unavailable")
 }
 
 // handleCostAllocation attributes cost/requests/tokens/errors to a dimension

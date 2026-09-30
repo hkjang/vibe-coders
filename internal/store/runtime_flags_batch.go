@@ -22,6 +22,14 @@ func (s *SQLStore) GetRuntimeFlagSnapshot(ctx context.Context, keys []string) (m
 // snapshot read within that transaction. A read/write/commit failure returns no
 // success snapshot. Omitted keys are never rewritten from a cached configuration.
 func (s *SQLStore) SaveRuntimeFlagBatch(ctx context.Context, updates []RuntimeFlag, snapshotKeys []string) (map[string]RuntimeFlag, error) {
+	return s.SaveRuntimeFlagBatchValidated(ctx, updates, snapshotKeys, nil)
+}
+
+// SaveRuntimeFlagBatchValidated validates the prospective snapshot inside the
+// transaction, after applying updates but before committing them. Validation
+// failure rolls back every update and returns no success snapshot. The validator
+// must not mutate the snapshot or perform external side effects.
+func (s *SQLStore) SaveRuntimeFlagBatchValidated(ctx context.Context, updates []RuntimeFlag, snapshotKeys []string, validate func(map[string]RuntimeFlag) error) (map[string]RuntimeFlag, error) {
 	allowed := make(map[string]bool, len(snapshotKeys))
 	for _, key := range snapshotKeys {
 		allowed[key] = true
@@ -55,6 +63,11 @@ func (s *SQLStore) SaveRuntimeFlagBatch(ctx context.Context, updates []RuntimeFl
 	snapshot, err := s.runtimeFlagSnapshot(ctx, tx, snapshotKeys)
 	if err != nil {
 		return nil, err
+	}
+	if validate != nil {
+		if err := validate(snapshot); err != nil {
+			return nil, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
